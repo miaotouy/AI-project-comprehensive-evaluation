@@ -1,0 +1,251 @@
+# Agent 角色配置横向调查与对比
+
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、SillyTavern、VCPChat、VCPToolBox
+>
+> 对比更新日期：2026-08-06
+>
+> 依据：同目录十三份单项目调查笔记及其中记录的代码快照
+>
+> 对比方法：统一比较角色实体、存储粒度、会话绑定、提示词装配、模型参数、工具授权、知识与记忆、导入格式和历史快照；只采用单项目笔记中已有的源码结论
+>
+> 对比范围：Agent、Assistant、Persona、Mask、Character Card、自定义模型及与角色最接近的全局提示词配置；不重复展开工具执行安全、Provider 渠道管理和消息渲染
+>
+> 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 单项目笔记
+
+| 项目 | 笔记 | 行数 | 分支 | 代码快照 |
+| --- | --- | ---: | --- | --- |
+| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 362 | `main` | `eba9d84b234672321312e92ab48bb474cfb0aca4` |
+| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 317 | `master` | `346b85db9d79207ea7b51694cce5276203612af4` |
+| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 185 | `main` | `7450ab2dde5eacab4a8721f8680006ba8b99438d` |
+| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 175 | `main` | `b7673c23860db5dd6da7f42dec5fc21f6b13de1a` |
+| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 103 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
+| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 111 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
+| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 208 | `canary` | `4edba1b75a97b91c28ad48cd1cc90528defa17ad` |
+| Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 57 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
+| NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 156 | `main` | `706a18b95b714ab29b2a4842d3b9ff4f887935d5` |
+| Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 172 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
+| SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 187 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
+| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 130 | `main` | `3f14e938e700a5487ca13c4a6d8a6caad8e70ac9` |
+| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 228 | `main` | `eca06251f5687a52fbcd353cb8b04f42157882d0` |
+
+## 比较口径
+
+本文比较的是“哪一层拥有配置，以及运行时怎样消费配置”，不按字段数量给项目排名。十三个项目中，“角色”至少有六种不同含义：可执行 Agent、助手配置、人格模板、角色卡、自定义模型和全局 system prompt。只有先确定载体，模型绑定、工具权限和历史快照才有可比性。
+
+矩阵使用以下表述：
+
+| 表述 | 含义 |
+| --- | --- |
+| 有 / 无 | 单项目笔记已用类型或执行路径确认存在或不存在 |
+| 未提供 | 已读角色数据模型中没有该字段，但能力可能位于全局、会话或其他模块 |
+| 未调查 | 单项目笔记没有覆盖该主题，不能据此判断项目是否支持 |
+| 未确认 | 已找到相关字段或入口，但静态证据不足以确认最终运行时语义 |
+
+“角色支持工具”只表示角色配置能够收窄、绑定或触发工具来源，不表示工具一定可执行，也不表示有审批或沙箱。工具发现、审批和执行边界以 [Agent工具横向对比.md](../Agent工具/Agent工具横向对比.md) 为准。
+
+## 结论摘要
+
+十三个项目没有一个共同的“Agent 角色”抽象，主要差异在配置所有权和会话继承方式。
+
+1. **配置聚合型 Agent：AIO Hub、Cherry Studio、LobeHub、DeepChat。** 角色同时拥有提示词、模型或模型引用、生成参数和外部能力。AIO Hub 还把消息树、资产、世界书、会话变量和工具审批放进同一实例；LobeHub 把长期记忆、图编排和插件模式纳入 Agent；DeepChat 把项目目录、权限、MCP、Skills、subagent slot 和 memory policy 放进 descriptor；Cherry Studio 的范围相对收敛，以模型、单段 prompt、MCP 和知识库关联为主。
+2. **模板与会话分层：Chatbox、AstrBot。** Chatbox 的 Copilot 只拥有人格元数据，模型、Skills、Agent Mode 和 RAG 位于 Session；创建会话时 prompt 被写入历史，形成静态快照。AstrBot Persona 拥有提示词与工具/Skills 白名单，但模型不属于 Persona；运行时按会话规则、对话绑定和全局默认逐轮解析。
+3. **会话副本型：Jan、NextChat。** Jan 把 Assistant 的 name/model/instructions/tools 复制进 thread；NextChat 把完整 Mask 复制进 session，fork 时再深拷贝。两者都使历史会话脱离模板的后续修改，但 NextChat 还保留全局模型配置同步开关。
+4. **模型即角色：Open WebUI。** Workspace Model 同时是上游模型别名、system prompt、参数包、知识和工具绑定、访问控制对象。请求按 model id 重新读数据库，角色生命周期直接复用模型目录和权限体系。
+5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在十三个项目中拥有最明确的社区角色卡格式和最细的提示词语义分区，但角色卡本身不承担模型和工具权限。
+6. **文件/服务编排型：VCPChat、VCPToolBox。** VCPChat 每个 Agent 一个目录，模型和基础参数随 Agent 保存，工具策略留给 VCP 服务端。VCPToolBox 同时存在提示词文件和 AgentAssistant 配置两层，前者参与变量替换，后者承担具名多 Agent 通信和任务派发。
+7. **无角色实体：Manifold Desktop。** 只有全局 system prompt、温度、Provider/模型和文本提示词库；会话不保存发送时配置。因此它应作为“全局配置基线”比较，不能记成一个功能较少的 Agent 实现。
+
+最关键的横向差异不是“能否填写 system prompt”，而是**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。
+
+## 架构分型
+
+| 分型 | 项目 | 角色载体 | 主要所有权边界 |
+| --- | --- | --- | --- |
+| 配置聚合 | AIO Hub | `ChatAgent` / `AgentPreset` | Agent 拥有消息树、模型引用、参数、工具、知识和资产 |
+| 配置聚合 | Cherry Studio | `Assistant` | Assistant 拥有模型、prompt、参数、MCP/知识库引用 |
+| 配置聚合 | LobeHub | `LobeAgentConfig` | Agent 拥有人格、模型、chatConfig、插件、知识、文件和记忆策略 |
+| 配置聚合 | DeepChat | Agent descriptor + session policy | descriptor 拥有运行时配置，session 保存 agent id 和覆盖项 |
+| 人格模板 | AstrBot | `Persona` | Persona 拥有指令、开场对话和能力白名单，Provider/模型在外层 |
+| 人格模板 | Chatbox | `CopilotDetail` | Copilot 只拥有人格；模型和工具能力归 Session |
+| 线程快照 | Jan | `Assistant` + `ThreadAssistantInfo` | Assistant 是模板，thread 内嵌使用时快照 |
+| 会话副本 | NextChat | `Mask` + `ChatSession.mask` | Mask 是模板，新会话复制完整配置 |
+| 模型预设 | Open WebUI | Workspace `Model` | 自定义模型同时承担 persona、参数、能力和权限 |
+| 角色卡 | SillyTavern | Character Card | 卡片拥有可移植角色内容，运行参数归应用 Preset |
+| Agent 目录 | VCPChat | `{agentId}/config.json` | Agent 拥有 prompt、模型、参数和 topic 列表，工具归服务端 |
+| 服务端双层 | VCPToolBox | `Agent/*.txt` + AgentAssistant | 文本层负责变量注入，插件层负责多 Agent 身份和委托 |
+| 全局设置 | Manifold Desktop | `AppSettings.systemPrompt` | 没有角色或会话级配置对象 |
+
+## 实体、存储与会话绑定
+
+| 项目 | 稳定实体与标识 | 持久化粒度 | 会话如何选择角色 | 历史快照语义 |
+| --- | --- | --- | --- | --- |
+| AIO Hub | `ChatAgent.id`；预设与实例分离 | 每 Agent 一个 `agent.json` + 索引 + 资产目录 | 当前聊天使用所选 `ChatAgent`；实例保存 `profileId/modelId` | Agent 配置独立持久化；会话是否保存角色版本快照未调查 |
+| AstrBot | `Persona.persona_id`，显示名即 ID | SQLite `personas` 行 + v3 运行时缓存 | 会话规则强制值 > 对话 `persona_id` > Provider 默认 > webchat 特例 | 每轮重新解析 Persona；`begin_dialogs` 每轮重注入且 `_no_save`；切换后旧历史行为未实测 |
+| Chatbox | `CopilotDetail.id` | 本地 Copilot 集合；Session 单独保存消息与设置 | Session 保存 `copilotId`，创建时把 prompt 写成首条 system 消息 | **静态快照**：修改 Copilot 不更新既有 Session 的 system 消息 |
+| Cherry Studio | `Assistant.id` UUID | SQLite `assistant` 行 + MCP/知识库中间表 | 普通会话与 Assistant 的具体绑定字段未在角色笔记中展开 | 未调查；Agent Session 另有独立消息后端 |
+| DeepChat | descriptor id；内置 `deepchat` 受保护 | Agent row 内 JSON config；session row 单独存策略 | session 保存 `agent_id`、project、kind、parent 和 orchestration policy | 以 agent id + 会话覆盖运行；是否冻结 descriptor 版本未确认 |
+| Jan | `Assistant.id`；默认 `jan` | 每 Assistant 一个目录和 `assistant.json` | 创建 thread 时写入 `ThreadAssistantInfo` | **嵌入快照**：name/model/instructions/tools 被复制进 thread |
+| LobeHub | Agent id + `LobeAgentConfig` | 后端数据库，前端 store 缓存编辑态 | 会话/话题绑定细节未在角色笔记中展开 | 未调查 |
+| Manifold Desktop | 无角色实体 | `%LOCALAPPDATA%\Manifold\settings.json` 全局单值 | 所有会话读取同一全局 system prompt | **无快照**：会话文件不保存 prompt 或 temperature |
+| NextChat | `Mask.id` | Zustand 持久化用户 Mask；内置 Mask 来自 `/masks.json` | `newSession(mask)` 把完整 Mask 复制到 session | **完整副本**：模板修改不回写；fork 再深拷贝；全局同步开启时模型配置可继续被覆盖 |
+| Open WebUI | Workspace Model `id` | DB `Model` 行：`params/meta` JSON + access grants | 前端按 model id 请求，服务端路由按 id 重新读 DB | **运行时引用**：DB 是 persona 权威来源；是否给消息历史保存角色版本快照未调查 |
+| SillyTavern | Character Card 名称/文件 | `characters/` 下 PNG、JSON、CharX 或 BYAF | 应用选择角色卡；User Persona 另属全局/单会话层 | 角色卡调查未覆盖聊天文件是否保存卡片快照 |
+| VCPChat | Agent 目录名 `agentId` | 每 Agent 目录：配置、规则、头像；每 topic 一个 `history.json` | 先选 Agent，再选其 topic | topic 历史与当前 Agent 配置分存；没有已确认的发送时配置快照 |
+| VCPToolBox | 文件别名或 AgentAssistant `baseName/chineseName` | `.txt` + `agent_map.json`；插件 `config.json` | 变量引用、AgentAssistant 通信或 TaskAssistant 派发 | AgentAssistant 只确认轮数和 TTL；配置是否随上下文快照未调查 |
+
+这里可以明确区分四种继承模型：
+
+```text
+运行时引用：AstrBot / Open WebUI
+  会话保存 ID，下一轮重新解析当前配置
+
+创建时快照：Chatbox / Jan
+  创建会话或线程时复制关键角色内容
+
+完整会话副本：NextChat
+  复制整个 Mask，之后可独立修改和 fork
+
+全局当前值：Manifold Desktop
+  所有会话共享当前设置，历史不保存当时配置
+```
+
+AIO Hub、Cherry Studio、LobeHub、DeepChat、SillyTavern、VCPChat 和 VCPToolBox 的单项目笔记不足以把它们完整归入上述四类，因此矩阵保留“未调查/未确认”，不从存储结构反推运行行为。
+
+## 提示词、模型与参数
+
+| 项目 | 人格内容形态 | 已确认的装配或优先级 | 模型与生成参数所有者 |
+| --- | --- | --- | --- |
+| AIO Hub | 有序消息树，支持 system/user/assistant、锚点、深度、分组和模型匹配 | 按默认顺序或 `depth/advanced_depth/anchor` 注入，`chat_history` 与 `user_profile` 是显式锚点 | Agent 实例保存 `profileId/modelId` 和参数；Profile 只保存模型定义与凭据 |
+| AstrBot | `system_prompt` + 偶数条 `begin_dialogs` | Persona 追加为 `# Persona Instructions`；Skills、工具提示、环境提示和 router prompt 后续继续追加；begin dialogs 位于历史前 | Persona 不绑定模型；Provider/模型在外层配置 |
+| Chatbox | 单段 Copilot `prompt` | 创建 Session 时成为首条 system 消息 | Provider、modelId、temperature 等属于 Session，不属于 Copilot |
+| Cherry Studio | 单段 `prompt`，支持变量 | Assistant prompt 先写入；存在 `tool_search` 时再追加 deferred-tools 提示 | Assistant 保存 `modelId` 与 `AssistantSettings` |
+| DeepChat | descriptor `systemPrompt` | 最终 prompt 拼装顺序未在角色笔记中展开 | Agent config 保存多种模型 preset 与生成参数 |
+| Jan | 单段 `instructions`，支持 `{{current_date}}` | 从 thread 快照渲染 system prompt；只有非 `model-only` Assistant 才采用其参数 | Assistant/thread 快照保存模型；web/core 参数形状仍有未确认差异 |
+| LobeHub | `systemRole` + `fewShots` + opening + input template | 输入模板和少样本位置已确认，完整最终顺序未调查 | Agent 保存 `provider/model/params` 与大量 chatConfig |
+| Manifold Desktop | 全局单段 `systemPrompt` | OpenAI 放消息首部，Anthropic 放顶层 `system`，Gemini 放 `systemInstruction` | 全局 `activeProviderId/model/temperature` |
+| NextChat | 有序 `context: ChatMessage[]` | system prompt -> 长期记忆摘要 -> Mask context -> 最近历史 -> 本轮用户消息 | Mask/session 副本保存 `modelConfig`；可继续同步全局配置 |
+| Open WebUI | `params.system`，支持 chat/user/metadata/旧式变量 | 参数为全局默认 < 模型 params < 请求 params；模型 system 在出站时前置到已有 system 内容 | Workspace Model 保存基础模型引用和任意参数；请求仍可覆盖 |
+| SillyTavern | description/personality/scenario/system/示例/post-history 分字段 | 非空 `system_prompt` 覆盖全局；`post_history_instructions` 放历史末尾；其他字段位置可由 Advanced Formatting 调整 | 角色卡不存模型参数；模型与生成参数归 Preset/连接设置 |
+| VCPChat | 单段 `systemPrompt` + `{{AgentName}}` | Agent system prompt 后应用全局 Tavern `system_suffix`；另有 user suffix 和 context depth 注入 | Agent 保存裸 model id、temperature、上下文和输出上限 |
+| VCPToolBox | `.txt` 变量模板或 AgentAssistant `systemPrompt` | 多阶段替换 Var/Tar/Sar/VCP/TagMemo/agent/TVStxt；AgentAssistant `globalSystemPrompt` 追加到所有 Agent | AgentAssistant 每个 Agent 保存 modelId、temperature、maxOutputTokens；文本文件层不拥有模型 |
+
+提示词“优先级”在不同项目中有三种动作，不能统一写成覆盖关系：
+
+| 动作 | 项目示例 | 语义 |
+| --- | --- | --- |
+| 替换 | SillyTavern 非空 `system_prompt` | 角色卡 system 取代应用 Preset system |
+| 前置/追加 | Open WebUI、AstrBot、Cherry Studio、VCPChat | 多段 prompt 共存，位置决定约束先后 |
+| 消息级插入 | AIO Hub、NextChat、SillyTavern depth/world info | 内容以 system/user/assistant 消息或历史深度进入上下文 |
+
+因此，只比较一个 `systemPrompt` 字段是否存在会遗漏 AIO Hub 的锚点消息、SillyTavern 的历史末尾指令和 NextChat 的多角色 context，也会误把 Open WebUI 的参数覆盖顺序当成 system prompt 替换顺序。
+
+## 工具、知识与记忆
+
+| 项目 | 角色级工具/能力控制 | 角色级知识 | 记忆与状态 |
+| --- | --- | --- | --- |
+| AIO Hub | 工具/方法开关、审批、迭代、超时、并发、协议和设置都归 Agent | 世界书 + 细粒度 RAG 绑定与注入策略 | 会话变量、非破坏性摘要压缩、虚拟时间；会话变量不等于长期记忆 |
+| AstrBot | `tools`/`skills` 三态：全部、禁用全部、白名单；workspace Skills 有单独合并语义 | KB 结果走用户消息侧注入，不属于 Persona 字段 | Persona 无长期记忆字段；begin dialogs 不入库，system 受截断保护 |
+| Chatbox | Skills、Agent Mode、MCP、工作目录和 full access 都在 Session/全局层，不在 Copilot | Session 附件 RAG；知识库模型为全局设置 | Session 可自动压缩；Copilot 无记忆字段 |
+| Cherry Studio | Assistant 绑定有序 MCP server 列表和模式；Agent Session 另走 Claude Code 工具路径 | Assistant 绑定有序知识库列表 | 角色笔记未找到 Assistant 长期记忆字段 |
+| DeepChat | Agent 保存权限模式、禁用工具、Skills、MCP 和 subagent slots | 未作为独立角色字段总结 | Agent 保存 memory 检索/抽取/预算、自动压缩和 persona evolution 开关 |
+| Jan | `AssistantTool` 当前只定义 retrieval，默认关闭 | `file_ids` + retrieval 工具定义；web 持久化链路未确认 | 未提供独立长期记忆字段 |
+| LobeHub | 插件有 pinned/auto/disabled，另有 agent/chat/custom 工具模式和异构 Agent | 每 Agent 绑定知识库与文件 | `memory.enabled/effort/toolPermission` 明确区分只读与读写，另有压缩和自迭代 |
+| Manifold Desktop | 无角色级工具配置 | 无角色级知识配置 | 无角色级记忆；历史不保存 prompt/temperature |
+| NextChat | `Mask.plugin` 绑定 OpenAPI 插件 id，但无角色级权限、审批或参数范围 | 未提供 Mask 知识库字段 | 请求可注入长期记忆摘要，但单项目笔记未把记忆所有权归入 Mask |
+| Open WebUI | Model meta 绑定 tools、skills、filters、builtin tools、terminal 和能力开关，并叠加 access grants | `meta.knowledge` 引用集合/文件 | memory 是可选内置 feature；角色笔记未确认 per-model 长期记忆命名空间 |
+| SillyTavern | 角色卡核心不承载工具授权；extensions 可扩展，工具安全另见工具笔记 | 内嵌 Character Book + 外部 World Info | User Persona 独立；角色卡本身无通用长期记忆字段 |
+| VCPChat | Agent config 无工具开关，工具由 VCP 服务端和全局连接决定 | 未提供角色级知识库字段 | 每 topic 独立历史；无已确认的长期记忆配置 |
+| VCPToolBox | 工具可见性来自 VCP 占位符、TVStxt、任务 `injectTools` 和全局插件状态，不是硬权限边界 | TagMemo/日记本变量可召回知识 | AgentAssistant 有历史轮数/TTL；AgentDream 有独立记忆整理和审批流程 |
+
+能力绑定可分成三种强度：
+
+1. **显式策略对象**：AIO Hub、AstrBot、DeepChat、LobeHub、Cherry Studio。角色配置直接保存白名单、模式或服务器引用，运行时仍需结合全局注册状态和执行策略。
+2. **会话或外层挂载**：Chatbox、Jan、NextChat、Open WebUI。人格模板本身未必拥有工具，但会话、模型预设或 thread 快照会携带能力信息。
+3. **内容约定或服务端决定**：SillyTavern、VCPChat、VCPToolBox。提示词/扩展/服务端暴露面决定模型看到什么，角色文件不等于独立权限域。
+
+## 导入、导出与兼容性
+
+| 项目 | 已确认格式或入口 | 可移植范围与边界 |
+| --- | --- | --- |
+| AIO Hub | JSON/YAML；ZIP、文件夹、单文件、带数据 PNG；可导入 SillyTavern JSON/PNG | 可携带资产、世界书和多数 Agent 配置；本地 id/profileId 等实例字段剥离，目标端仍需重绑模型 |
+| AstrBot | Dashboard JSON 导入；v3 config persona 自动迁移到 v4 DB | 冲突名称自动加后缀；旧 mood dialogs 拼入 system prompt；未见通用角色卡格式 |
+| Chatbox | 应用备份 ZIP/JSON、远端 Copilot 市场 | 主要携带单段 prompt 和元数据；模型、few-shot、工具不在 Copilot 中 |
+| Cherry Studio | Resource Catalog / assistant transfer；v1 -> v2 migrator | 工具配置不随模板跨机器迁移；少样本和世界书没有 v2 原生对应 |
+| DeepChat | 未调查独立 Agent 导入/导出 | descriptor 迁移和 UI 兼容分支未覆盖 |
+| Jan | 每 Assistant 一个 JSON，内建 v1/v2/v3 迁移 | core/web 类型不一致，parameters/tools 的完整往返仍未确认 |
+| LobeHub | 市场导入；完整 AgentConfig JSON 导出 | 可携带 Agent 配置；外部插件、知识库和模型资源仍依赖目标环境 |
+| Manifold Desktop | 提示词库每条 JSON；角色导入不存在 | 只能复用文本，不能表达会话角色、模型包或能力绑定 |
+| NextChat | 单个或数组 Mask JSON；URL `?mask=<id>` | 导入只检查 name，无 schema 版本、字段白名单或冲突策略；URL 只分享已有 id |
+| Open WebUI | Workspace Models import/export/sync API | 逐条校验 knowledge 文件权限和写权限；模型、参数、meta 与 grants 是平台内对象 |
+| SillyTavern | PNG、JSON、CharX、BYAF；V1 自动映射 V2，支持 V3 | 角色内容和内嵌资产/世界书可移植；模型参数和应用 Preset 不在角色卡中 |
+| VCPChat | 无批量导入；UI 手工创建 | 可手工粘贴 system prompt；客户端 Agent 与服务端 AgentAssistant 需人工对应 |
+| VCPToolBox | 放置 `.txt` 并登记 `agent_map.json`；Admin Panel 管 AgentAssistant | 文本容易导入，但 AIO 消息树、SillyTavern depth 等结构需展平，VCP 变量依赖服务端运行时 |
+
+SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享角色资产”，但两者的能力边界不同：SillyTavern 刻意把模型 Preset 留在卡外，AIO Hub 导出则可以携带 Agent 参数、资产和世界书，同时剥离本机渠道引用。Open WebUI、Cherry Studio、LobeHub 的导入更接近平台内模板或数据库对象迁移，外部资源引用不能只靠一份 JSON 保证生效。
+
+从跨项目映射看，最稳定的最小公分母只有**名称、单段 system prompt、头像/图标（若目标支持）和描述**。以下内容通常会丢失或需要人工适配：
+
+- AIO Hub 的消息树锚点、分组、模型匹配与会话变量；
+- SillyTavern 的 `post_history_instructions`、depth prompt、World Info 触发语义和扩展字段；
+- LobeHub/DeepChat 的 memory、subagent、工作目录和编排策略；
+- Open WebUI 的 access grants、基础模型链和平台内知识引用；
+- VCPToolBox 的变量、TagMemo 与插件占位符；
+- Chatbox、Jan、NextChat 已经写入历史会话的角色快照。
+
+## 运行时可见性与变更影响
+
+| 项目 | 用户能确认什么 | 修改角色后的已确认影响 |
+| --- | --- | --- |
+| AIO Hub | 当前 Agent、模型、参数、消息树、工具和知识配置均有编辑入口 | 侧边栏修改直接持久化当前 Agent；既有会话是否冻结旧版本未调查 |
+| AstrBot | Persona 选择器、会话规则、能力三态和 trace 记录 | 下一轮按优先级重解析；被删除引用可静默回落，第三方 runner 不注入 Persona |
+| Chatbox | Session 显示自身模型设置并保留 copilotId | 修改 Copilot 不更新既有 Session system 消息 |
+| Cherry Studio | Assistant 编辑器展示 prompt、模型、参数和关联资源 | 普通会话的动态更新语义未调查；Agent Session 是另一持久化路径 |
+| DeepChat | Agent descriptor 与 session policy 都有明确状态字段 | session 仍引用 agent id；配置版本冻结语义未确认 |
+| Jan | 设置页和 Assistant switcher；thread 内有 AssistantInfo | 既有 thread 使用嵌入快照，不自动跟随模板 |
+| LobeHub | Agent 设置页覆盖人格、模型、插件、知识和 chatConfig | 既有话题是否实时读取 Agent 当前值未调查 |
+| Manifold Desktop | 只能看到当前全局设置 | 修改后所有后续请求读取新全局值，历史无法恢复旧值 |
+| NextChat | 当前 session 持有可编辑 Mask 和同步开关 | 模板改动不回写；当前会话改模型后关闭全局同步 |
+| Open WebUI | 模型选择器和 Workspace Model 编辑页；只读调用者看不到 params | 下一次请求按 model id 重新读 DB；请求参数仍可覆盖模型参数 |
+| SillyTavern | 角色卡与 Advanced Formatting 可见 | 角色切换/编辑对既有 chat 的快照语义未在本次调查中确认 |
+| VCPChat | 当前 Agent/topic、模型参数和历史文件边界明确 | topic 继续读取当前 Agent config；没有发送时配置快照证据 |
+| VCPToolBox | Admin Panel 可热重载 AgentAssistant，文件层也热重载 | 新请求使用更新后的缓存；既有上下文是否冻结配置未调查 |
+
+## 适用边界
+
+按实现边界观察，不做总排名，可以得到几组清晰取向：
+
+- **需要一个角色同时拥有模型、参数、工具和知识**：AIO Hub、Cherry Studio、LobeHub、DeepChat、Open WebUI 都能表达，但聚合根不同。Open WebUI 的根是“模型”，其余项目的根是 Agent/Assistant descriptor。
+- **需要人格与运行环境解耦**：Chatbox 和 AstrBot 更明确。Chatbox 把模型/工具放到 Session，AstrBot 把 Provider 放在 Persona 外，同时用 Persona 白名单收窄能力。
+- **需要会话可复现性**：Jan、Chatbox、NextChat 已确认存在不同程度的快照。Manifold Desktop 已确认不保存快照；其他项目需要补充运行验证后才能比较。
+- **需要角色内容交换**：SillyTavern 的社区规范最明确，AIO Hub 的包覆盖资产和运行配置更广。两者之间仍需处理模型参数、消息位置和权限语义的差异。
+- **需要服务端多 Agent 编排**：DeepChat、LobeHub、VCPToolBox 和 AstrBot 都有相关入口，但 subagent slot、异构 Agent、AgentAssistant 委托和 Persona router 是不同机制，不能只用“支持多 Agent”合并评价。
+- **只需要所有聊天共用一条指令**：Manifold Desktop 的全局模型足够直接，但它不提供角色选择、会话级复现和能力隔离。
+
+## 已确认边界与证据缺口
+
+1. 单项目笔记的调查深度不完全一致。AIO Hub、AstrBot 对提示词装配和存储覆盖较深；Cherry Studio、LobeHub 重点在配置模型；DeepChat、Jan、NextChat、Open WebUI 更聚焦近期新增的持久化或运行链路。矩阵未用字段缺失填补这些深度差异。
+2. “历史快照语义”只有 Chatbox、Jan、NextChat 和 Manifold Desktop 有直接证据；AstrBot/Open WebUI 可确认下一轮会重新解析当前对象，但没有完整覆盖导出聊天、审计记录和历史重放。
+3. Cherry Studio、LobeHub、AIO Hub、DeepChat、SillyTavern、VCPChat、VCPToolBox 的既有会话在角色修改后的精确行为仍需专项调查或运行验证。
+4. 工具字段只比较角色配置的挂载点。审批、沙箱、执行位置、模型可见定义和失效方向不在本文重复下结论。
+5. 知识库“已绑定”不等于内容一定进入请求。实际效果还受召回阈值、权限、索引状态、模型能力、注入模式和全局服务状态影响。
+6. 导入兼容性区分“能解析”“能保留字段”和“运行时生效”。手工粘贴 system prompt 只能算文本迁移，不能算角色格式兼容。
+7. Jan 的 core/web Assistant 类型不一致是已确认事实；tools、parameters 与文件存储的完整往返仍未运行验证，因此横向表没有把任一侧字段当成完整稳定契约。
+8. AstrBot Persona 只对内置 Agent runner 注入；Dify、Coze、Dashscope、DeerFlow 等第三方 runner 只读取自定义错误文案。对 AstrBot 的能力结论不能外推到所有 runner。
+
+## 后续维护口径
+
+新增项目或更新单项目笔记时，横向表至少复核以下九项：
+
+1. 角色是独立实体、模板、模型别名、会话副本还是全局设置；
+2. 稳定 ID、版本字段、存储位置和删除/迁移语义；
+3. 会话保存引用、部分快照、完整副本还是不保存角色状态；
+4. 全局 prompt、角色 prompt、会话 prompt、历史末尾指令和临时输入的实际装配顺序；
+5. Provider、模型和生成参数属于角色、会话还是全局配置；
+6. 工具、Skills、MCP、知识库、文件、记忆和 subagent 是绑定、白名单、提示词约定还是全局能力；
+7. 导入时未知字段、资源引用、敏感配置和目标端缺失能力如何处理；
+8. 用户能否看到当前角色、实际模型、能力范围和局部覆盖；
+9. 修改或删除角色后，既有会话、历史重放和导出记录使用什么版本。
+
+只有单项目笔记提供了直接证据，横向表才把“未调查/未确认”改为肯定结论。

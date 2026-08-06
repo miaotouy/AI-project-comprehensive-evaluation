@@ -1,0 +1,38 @@
+# Pi 仓库分布调查笔记
+
+> 调查对象：`../../pi`
+>
+> 调查更新日期：2026-08-06
+>
+> 代码快照：`6b461b75b39b5a19b378dc42fbfbd1655bc446a6`（分支：`main`）
+>
+> 调查方式：Git 跟踪文件机械统计，并复核 npm workspace、包清单、构建与测试入口
+>
+> 调查范围：模块、语言、文档、测试和平台代码组织；未运行构建与测试
+>
+> 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 结论摘要
+
+Pi 是按可发布能力拆包的 TypeScript monorepo，而不是 GUI 客户端仓库。coding-agent、统一模型 API、TUI 与 agent runtime 四个包构成主体；server/client/protocol/session backend 提供可组合边界。测试文件/源码文件比为 42.1%，主要包都有独立测试区。
+
+## 统计与模块分布
+
+| 指标 | 数量 |
+| --- | ---: |
+| Git 跟踪文件 | 1,329 |
+| 可识别源码 | 1,140 文件 / 259,601 行 |
+| 文档 | 96 文件 / 32,213 行 |
+| 测试 | 480 文件 / 109,791 源码行 |
+
+`packages/coding-agent` 为 634 文件/127,082 行，`packages/ai` 319/57,941，`packages/tui` 91/32,293，`packages/agent` 80/20,110。TypeScript 248,172 行（95.6%）。文档与测试也按同样包边界分布：coding-agent 64/249 文件、AI 2/134、TUI 4/38、agent 4/23。
+
+## 跨平台组织与边界
+
+平台形态是 Node/Bun 可运行的 CLI/TUI、库和服务协议，没有本仓原生桌面或移动 GUI。根 workspace 和顺序构建脚本明确依赖层（`package.json:5-18`）；coding-agent 的 sandbox/container 文档包含 Linux 隔离方案，但那是可选执行边界，不表示产品只支持 Linux。
+
+## 关键源码索引
+
+- `package.json:5-34`：workspace、构建与全仓测试
+- `README.md:17-42`：包职责
+- `packages/coding-agent/`、`packages/ai/`、`packages/agent/`、`packages/tui/`：主体包

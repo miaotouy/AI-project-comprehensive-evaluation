@@ -1,0 +1,180 @@
+# Cherry Studio Agent / 角色配置调查笔记
+
+> 调查对象：`E:\works\git\cherry-studio`
+>
+> 调查更新日期：2026-08-05
+>
+> 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
+>
+> 调查方式：只读核对 Assistant 类型定义、数据库 Schema、AssistantSettings、默认预设、系统提示词装配逻辑和 AgentSession 入口；未修改被调查仓库源码
+>
+> 调查范围：Assistant/角色能配置什么、模型偏好、工具能力边界及内置默认
+>
+> 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 1. 结论摘要
+
+Cherry Studio 的角色系统核心对象是 **`Assistant`**（助手），一个助手对应一套"模型 + 提示词 + 推理参数 + 工具源"的稳定配置。与 Chatbox 不同，模型参数（temperature、topP、maxTokens 等）**写在 Assistant 内部**（`settings` 字段），而不是 Session 级别，因此同一个助手在不同对话中使用相同的参数基准。
+
+助手通过 `mcpServerIds` 和 `knowledgeBaseIds` 关联外部工具和知识库；通过 `modelId`（`"providerId::modelId"` 格式）绑定默认模型；通过 `groupId` 加入分组。这四个维度合起来决定了助手的能力边界。
+
+除普通助手会话外，Cherry Studio 还支持 **Agent Session**（`AgentSessionRuntimeService`），基于 Claude Code SDK 进入工具调用循环，走独立的 `AgentSessionMessageBackend` 持久化路径。
+
+## 2. 配置入口与数据格式
+
+### 2.1 数据库 Schema
+
+助手配置存储在 SQLite 数据库 `assistant` 表（`src/main/data/db/schemas/assistant.ts`）：
+
+```sql
+assistant(
+  id          UUID PRIMARY KEY,
+  name        TEXT NOT NULL,
+  prompt      TEXT NOT NULL DEFAULT '',   -- 系统提示词
+  emoji       TEXT NOT NULL,              -- UI 图标（Emoji）
+  description TEXT NOT NULL DEFAULT '',
+  modelId     TEXT REFERENCES user_model(id) ON DELETE SET NULL,
+  groupId     TEXT REFERENCES group(id)   ON DELETE SET NULL,
+  settings    TEXT (JSON),                -- AssistantSettings JSON blob
+  orderKey    TEXT,                       -- 排序键
+  createdAt, updatedAt, deletedAt         -- 软删除
+)
+```
+
+关联表通过独立中间表维护：
+- `assistant_mcp_server`（有序列表）→ MCP 服务器
+- `assistant_knowledge_base`（有序列表）→ 知识库
+
+### 2.2 默认助手预设
+
+首次启动时，`DefaultAssistantSeeder` 自动写入一个空提示词的助手（`Cherry 助手` / `Cherry Assistant`），绑定 `CHERRYAI_DEFAULT_UNIQUE_MODEL_ID`。这是唯一的内置实例，不是多个预设角色的集合。
+
+### 2.3 资源目录（Catalog）
+
+`useAssistantCatalogPresets` 钩子和 `resourceCatalog/` 相关代码从远端或本地目录加载助手模板，供用户一键导入；这属于市场化模板体系，不是直接打包在源码中的固定预设。
+
+## 3. 人格与对话行为
+
+### 3.1 Assistant 字段
+
+```typescript
+interface Assistant {
+  id: string                  // UUID v4
+  name: string                // 显示名称（min 1 字符）
+  prompt: string              // 系统提示词；空字符串 = 不注入 system 消息
+  emoji: string               // Emoji 图标
+  description: string         // 长描述
+  settings: AssistantSettings // 见下节
+  modelId: string | null      // "providerId::modelId" 格式；null = 尚未选择
+  groupId: string | null      // 分组 ID
+  orderKey: string            // 只读排序键，通过 order 接口修改
+  mcpServerIds: string[]      // 有序 MCP 服务器 ID 列表
+  knowledgeBaseIds: string[]  // 有序知识库 ID 列表
+  createdAt: string           // ISO datetime
+  updatedAt: string           // ISO datetime
+  modelName: string | null    // 运行时只读：从 modelId 解析的显示名称
+}
+```
+
+### 3.2 系统提示词装配
+
+`assembleSystemPrompt` 函数（`src/main/ai/runtime/aiSdk/params/assembleSystemPrompt.ts`）：
+
+1. 若 `assistant.prompt` 非空，调用 `replacePromptVariables(assistant.prompt, model.name)` 替换变量后写入；
+2. 若工具集中包含 `tool_search` 工具，追加推迟工具的命名空间目录提示词（`deferredToolsSystemPrompt`）；
+3. 多段用 `\n\n` 连接，全空返回 `undefined`。
+
+目前 `prompt` 是纯文本，支持变量替换但没有类似 AIO Hub 的多节点消息树；没有 few-shot 示例对话的原生存储字段。
+
+## 4. 模型与输出偏好
+
+### 4.1 AssistantSettings 字段
+
+```typescript
+interface AssistantSettings {
+  // ——推理参数——
+  temperature: number           // 默认 1.0
+  enableTemperature: boolean    // false = 使用模型默认值，字段仍存储但不发送
+  topP: number                  // 默认 1
+  enableTopP: boolean           // false = 使用模型默认值
+  maxTokens: number             // 默认 4096
+  enableMaxTokens: boolean      // false = 使用模型默认值
+  streamOutput: boolean         // 默认 true
+  reasoning_effort: 'default' | 'low' | 'medium' | 'high' | ... // 推理强度
+
+  // ——工具使用——
+  mcpMode: 'disabled' | 'auto' | 'manual'
+  maxToolCalls: number          // 默认 20
+  enableMaxToolCalls: boolean   // 默认 true
+
+  // ——上下文来源——
+  enableWebSearch: boolean      // 默认 false
+  enableGenerateImage: boolean  // 默认 false；需要 Settings 里配置画图模型
+
+  // ——自定义参数——
+  customParameters: Array<
+    | { name: string; type: 'string';  value: string  }
+    | { name: string; type: 'number';  value: number  }
+    | { name: string; type: 'boolean'; value: boolean }
+    | { name: string; type: 'json';    value: unknown }
+  >
+}
+```
+
+`enable*` 标志的语义：`false` 时字段值保留在数据库，但构建 API 请求时不传入，让模型使用自己的默认值；`true` 时才将存储值发送给 API。这个模式消除了"禁用时字段需要变为 null"的问题。
+
+`customParameters` 支持任意键值对，适合传递 provider 专有参数（如 `top_k`、`repetition_penalty`）；四种类型（string/number/boolean/json）均有对应的 UI 组件（文本框/数字 spinner/开关/JSON 编辑器）。
+
+### 4.2 MCP 工具模式
+
+`mcpMode` 控制 MCP 服务器如何参与请求：
+- `disabled`：本次请求不使用任何 MCP 工具；
+- `auto`：使用助手 `mcpServerIds` 列表中的服务器；
+- `manual`：用户手动选择 MCP 服务器。
+
+`mcpServerIds` 存储的是有序列表，决定工具集的优先级。
+
+## 5. 工具与外部能力
+
+### 5.1 知识库
+
+`knowledgeBaseIds` 关联的知识库在对话时参与 RAG 召回。每个知识库有独立的向量索引；调用方式和召回策略由全局设置决定，不在 Assistant 层单独配置。
+
+### 5.2 Web 搜索
+
+`enableWebSearch: true` 注入 `web_search` 工具到工具集；实际执行由 `extension.webSearch` 全局设置决定使用哪个搜索 provider（build-in / bing / tavily / bocha / querit）。
+
+### 5.3 图像生成
+
+`enableGenerateImage: true` 注入 `generate_image` 工具；依赖 Settings 中的 "画图模型" 配置（`defaultEmbeddingModel` 同层级的专用画图模型设置）。
+
+### 5.4 Claude Code Agent Session
+
+`src/main/ai/agentSession/AgentSessionRuntimeService.ts` 实现了独立的 Agent 会话路径，基于 Claude Code SDK 运行 Agent 循环（`runAgentTask`），使用独立的持久化后端（`AgentSessionMessageBackend`）。这条路径不依赖 `AssistantSettings.mcpMode`，而是走 Claude Code 自己的工具注册表。启用入口在助手编辑器的"代码解释器"或 Agent 模式开关；工具权限和审批策略参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
+
+## 6. 内置角色方向
+
+Cherry Studio 只有一个内置助手实例（空提示词的 "Cherry 助手"），不预置多个角色人格。角色的个性化完全靠用户的 `prompt` 字段，以及从资源目录市场导入的模板。
+
+Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段（`type`、`group`、`messages` 少样本对话、`enableUrlContext`、`knowledgeRecognition`、`regularPhrases` 等），v2 迁移时做了精简，主要能力保留在 `AssistantSettings` 中或移到了独立关联表。
+
+## 7. 导入与兼容性
+
+- **资源目录**：通过 `resourceCatalog/` 和 `assistantTransfer.ts`，支持从市场导入助手模板；工具配置不跨随助手迁移，需在目标机器重新绑定。
+- **v1 → v2 迁移**：`AssistantMigrator.ts` 把旧版字段映射到新 Schema；部分字段（`contextCount`、`toolUseMode`）被废弃或合并到 `AssistantSettings`。
+- **SillyTavern/AIO Hub 迁移**：没有官方路径；将源角色的系统提示词导入 `prompt` 字段即可，少样本对话和世界书没有原生对应字段。
+
+## 8. 主要源码依据
+
+- `cherry-studio/src/shared/data/types/assistant.ts`：`AssistantSchema`、`AssistantSettingsSchema`、`DEFAULT_ASSISTANT_SETTINGS`。
+- `cherry-studio/src/main/data/db/schemas/assistant.ts`：数据库表定义及 `AssistantSettings` 存储策略。
+- `cherry-studio/src/main/data/db/seeding/seeders/defaultAssistantSeeder.ts`：默认助手种子逻辑。
+- `cherry-studio/src/shared/data/presets/defaultAssistant.ts`：默认助手预设数据。
+- `cherry-studio/src/main/ai/runtime/aiSdk/params/assembleSystemPrompt.ts`：提示词装配逻辑。
+- `cherry-studio/src/main/ai/runtime/aiSdk/params/buildAgentParams.ts`：API 参数构建总控。
+- `cherry-studio/src/main/ai/agentSession/AgentSessionRuntimeService.ts`：Agent Session 运行时。
+- `cherry-studio/src/renderer/types/assistant.ts`：渲染层类型（含 `LegacyAssistant` 废弃类型）。
+
+## 9. 调查边界
+
+本篇关注"助手配置模型"，未展开 MCP 执行位置、审批链路、工具注册表和 Claude Code Agent 的权限细节；这些内容参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。

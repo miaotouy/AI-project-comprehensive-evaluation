@@ -1,0 +1,42 @@
+# Chatbox 仓库分布调查笔记
+
+> 调查对象：`../../chatbox`
+>
+> 调查更新日期：2026-08-06
+>
+> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+>
+> 调查方式：Git 跟踪文件机械统计，并复核 pnpm、Electron、Web、Capacitor 构建入口与主要目录
+>
+> 调查范围：模块、语言、文档、测试和跨平台代码组织；未运行构建与测试
+>
+> 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 结论摘要
+
+Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、preload、renderer、Web 和 Capacitor 移动端共享 `src`。`src/renderer` 占 140,571 行，是主实现区；`src/shared` 和 `src/main` 分别承担跨端逻辑与桌面能力，边界比按产品平台复制整套代码更集中。
+
+## 统计与模块分布
+
+| 指标 | 数量 |
+| --- | ---: |
+| Git 跟踪文件 | 1,337 |
+| 可识别源码 | 1,091 文件 / 202,021 行 |
+| 文档 | 57 文件 / 13,034 行 |
+| 测试 | 243 文件 / 42,543 源码行 |
+
+`src/renderer` 为 822 文件/140,571 行，`src/shared` 为 192/30,726，`src/main` 为 112/22,233；专门的 `test/integration` 只有 11 个源码文件，但大量单元测试与实现就地放在三个 `src` 区域。
+
+## 语言、文档与测试
+
+TypeScript 195,653 行（96.8%），其余主要是 JavaScript 5,225 行（2.6%）。文档集中在 `docs`（32 文件，其中 `docs/technical` 16）并辅以 `tasks` 和测试用例说明。测试分布为 renderer 141 文件、shared 50、main 34、integration 11，三个运行层都有对应测试。
+
+## 跨平台组织与边界
+
+Electron 构建覆盖 Windows、macOS、Linux，另有独立 Web 构建和通过 Capacitor 同步的 iOS/Android 构建（`package.json:18-29,60-64`）。多端共享 renderer/shared，桌面专属能力留在 main/preload，移动差异由构建变量和平台适配层处理。本次只静态确认构建入口。
+
+## 关键源码索引
+
+- `package.json:14-64`：Electron、Web 和移动构建矩阵
+- `pnpm-workspace.yaml:1-3`：workspace 范围
+- `src/main/`、`src/preload/`、`src/renderer/`、`src/shared/`：运行层边界
