@@ -35,8 +35,6 @@ SillyTavern 使用命令式前端流水线渲染消息：全局 `chat` 数组提
 - `CHARACTER_MESSAGE_RENDERED` / `USER_MESSAGE_RENDERED` 等事件构成扩展层的主要接入面。
 - 历史仅做截断式分页，不做消息 DOM 虚拟化。
 
-DOMPurify 会移除消息脚本，但消息 `<style>` 会在净化后被重新解码成主页面中的真实样式标签，且服务端明确关闭 CSP。代码尝试把选择器限定到 `.mes_text` 并默认阻止外链媒体，因此主要风险落在这条自定义 CSS 安全边界上。
-
 ## 总体架构
 
 ```text
@@ -251,34 +249,21 @@ raw message
 
 ## HTML 净化与 CSS
 
-### DOMPurify
+净化发生在 `messageFormatting()` 管线的末尾：Showdown 生成 HTML 之后，标准正文和 reasoning 最终都会调用 DOMPurify。
 
-所有标准正文和 reasoning 最终都会调用 DOMPurify。配置额外带有 `MESSAGE_SANITIZE`，供全局 hook 判断是否处于消息清洗场景。
-
-消息 hook 主要完成三件事：
-
-1. 链接统一为 `target="_blank"` 和 `rel="noopener"`。
-2. 普通 HTML class 改名为 `custom-*`，避免直接命中主界面 class；Font Awesome、`note-*` 和 `monospace` 例外。
-3. 默认阻止 HTML 中跨源的 `img`、`audio`、`video`、`source`、`track`、`embed` 和 `object` 资源。
+消息 hook 会统一改写链接与 class：链接加上 `target="_blank"` 和 `rel="noopener"`；普通 HTML class 改名为 `custom-*`，避免直接命中主界面 class（Font Awesome、`note-*` 和 `monospace` 例外）；默认还会阻止消息 HTML 内跨源的 `img`、`audio`、`video`、`source`、`track`、`embed` 和 `object` 资源。
 
 内置 welcome、welcome prompt 和 assistant note 可设置 `uses_system_ui`。它只允许 `BUTTON` / `DIV` 上的 `menu_button` class 保持原名，以便可信的内置模板接入主 UI；普通模型消息不会得到这个例外。
 
 ### `<style>` 的特殊路径
 
-为了保留消息自定义样式，代码在 DOMPurify 前把 `<style>` 内容 URL 编码进 `<custom-style>`。净化完成后，再使用 `@adobe/css-tools` 解析 CSS 并恢复真实 `<style>`。
+为了保留消息自定义样式，代码在 DOMPurify 前把 `<style>` 内容 URL 编码进 `<custom-style>`。净化完成后，再使用 `@adobe/css-tools` 解析 CSS 并恢复真实 `<style>`：恢复阶段会删除 CSS `@import`、给选择器加 `.mes_text ` 前缀、把 CSS 中的 `.foo` 同步改成 `.custom-foo`，并在外部媒体未获许可时删除 value 中包含 `://` 的 declaration。
 
-恢复阶段会：
-
-- 删除 CSS `@import`。
-- 给选择器加 `.mes_text ` 前缀。
-- 把 CSS 中的 `.foo` 同步改成 `.custom-foo`，与 HTML class hook 对齐。
-- 外部媒体未获许可时，删除 value 中包含 `://` 的 declaration。
-
-这比直接放行 `<style>` 更稳健，但它仍不是浏览器安全隔离：样式标签位于主文档，且 CSS 规则由自定义重写器约束，而不是 Shadow DOM 或 sandbox iframe。
+样式标签最终位于主文档，作用域依靠这套选择器和 class 改写约束，不使用 Shadow DOM 或 sandbox iframe。
 
 ### CSP 状态
 
-`src/server-main.js` 使用 Helmet，但明确设置 `contentSecurityPolicy: false`。因此 CSP 不为消息 HTML/CSS 提供第二道限制。消息脚本的主要保护依赖 DOMPurify；CSS 的主要保护依赖上述 selector 和 URL 改写逻辑。
+`src/server-main.js` 使用 Helmet，但明确设置 `contentSecurityPolicy: false`，CSP 不为消息 HTML/CSS 提供第二道限制。
 
 ## Reasoning
 
@@ -308,7 +293,7 @@ reasoning 与正文使用相同的 Markdown、regex 和 DOMPurify 管线，但 r
 - 图片和媒体加载采用 `Promise.race` 与短超时，不阻塞整条消息渲染。
 - 根据 `SCROLL_BEHAVIOR` 调整或保持聊天滚动位置。
 
-外链媒体开关的 DOMPurify hook 约束的是消息 HTML 内资源；结构化 `extra.media[].url` 则直接赋给模板元素的 `src`，属于另一条信任路径。
+外链媒体开关的 DOMPurify hook 约束的是消息 HTML 内资源；结构化 `extra.media[].url` 则直接赋给模板元素的 `src`，不走这条 hook。
 
 ## 代码块
 
@@ -394,73 +379,6 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 - 流式渲染反复处理并替换累计全文，不维护稳定块或增量 AST。
 - `appendMediaToMessage()` 自身包含异步 DOM 更新，但 API 不可 await，代码中已有对应 TODO。
 
-## 安全边界与风险
-
-### 1. 消息 CSS 仍运行在主文档
-
-风险级别：中高。
-
-模型或角色卡输出的 `<style>` 会在 DOMPurify 后恢复成真实 style 标签。parser 会作用域化 selector、改写 class、移除 `@import`，并在默认禁止外媒时过滤包含 `://` 的值，但仍应把它看作防御性重写，不是隔离。
-
-需要重点回归：
-
-- `url(//host/path)`、转义 URL、data URL 和其他非 `://` 资源形式。
-- `@font-face`、复杂嵌套 at-rule、伪类嵌套和 CSS parser error recovery。
-- 可影响布局、遮挡或交互的 fixed/absolute、超大尺寸、pointer-events 等声明。
-- selector 重写在 `:has()`、`:is()`、`:not()` 等复杂组合下是否始终限制在当前正文。
-
-更强的安全边界是 Shadow DOM 或无 `allow-same-origin` 的 sandbox iframe；若保留主文档样式能力，则应建立针对 CSS escape 和跨消息影响的专门测试集。
-
-### 2. CSP 被关闭
-
-风险级别：中。
-
-Helmet 未启用 CSP，意味着 DOMPurify 或后续扩展一旦出现旁路，浏览器层没有 CSP 兜底。由于 SillyTavern 需要广泛的扩展和自定义内容能力，直接启用严格 CSP 会有兼容成本，但至少可以评估 nonce/hash、`object-src 'none'`、`base-uri 'none'` 等可逐步采用的策略。
-
-### 3. 结构化媒体绕过正文外链策略
-
-风险级别：中低，取决于 `extra.media` 的来源可信度。
-
-消息 HTML 内的外链媒体默认受 hook 限制，但 `appendMediaToMessage()` 直接把 `extra.media[].url` 写入 `src`。若扩展、导入聊天或第三方响应可以注入该字段，就可能在未显式允许外链媒体时发起网络请求。应明确这是产品有意允许的附件信任边界，还是需要复用 `isExternalMediaAllowed()`。
-
-### 4. 完整与局部重渲染的空覆盖不一致
-
-风险级别：低。
-
-`display_text || mes` 与 `display_text ?? mes` 对空字符串解释不同，可能导致刷新前后正文出现差异。建议统一“空字符串是否为有效覆盖”的契约并增加回归测试。
-
-### 5. 核心渲染缺少直接测试
-
-本次在 `tests` 中未找到针对 `messageFormatting()`、CSS encode/decode、DOMPurify 消息 hook、`updateMessageElement()` 或流式/最终一致性的直接测试。当前最复杂且安全敏感的逻辑主要依赖运行时人工验证。
-
-优先测试项应包括：
-
-- Markdown + 原始 HTML + 恶意属性的净化快照。
-- class 重写与 CSS selector 重写的一致性。
-- CSS URL 和 at-rule 绕过样例。
-- 外链媒体全局/角色覆盖设置。
-- 不完整代码围栏和 emphasis 的流式过程。
-- `display_text: ''`、reasoning、swipe 和局部更新一致性。
-- 长消息下的每帧耗时及 DOM 状态保留。
-
-## 适合复用的设计
-
-在其他聊天应用中可复用以下做法：
-
-- 全部正文路径共用一个格式化函数，避免历史、非流式和流式语义分叉。
-- reasoning 与媒体采用结构化字段和专用容器，不在普通 Markdown 中硬解析。
-- 正文 HTML class 与 CSS selector 同步改名并作用域化。
-- 代码高亮延迟到流结束，避免高频重型后处理。
-- rendered event 放在 DOM 可用之后，为扩展提供稳定时点。
-- 媒体更新保留播放状态和滚动位置。
-
-不宜直接照搬的是：
-
-- 每帧重新解析和替换累计全文。
-- 把模型 CSS 放在主文档，仅依赖自定义 selector 重写。
-- 数据、格式化、DOM 装配和生成生命周期大量集中在 `public/script.js`。
-- 依赖 DOM 属性和全局数组 index 作为消息身份；插入、删除和分支操作需要持续重编号与同步。
-
 ## 关键文件索引
 
 | 文件 | 关键职责 |
@@ -502,4 +420,4 @@ Helmet 未启用 CSP，意味着 DOMPurify 或后续扩展一旦出现旁路，�
 
 SillyTavern 以字符串消息模型、统一富文本格式化、结构化旁路内容和命令式 DOM 生命周期组织消息渲染。它兼容角色卡 HTML/CSS、正则脚本、swipe、reasoning、媒体和扩展事件，主链也相对容易追踪。
 
-其技术债集中在两个方向：一是 `public/script.js` 承担过多职责，渲染状态依赖全局数组和 DOM；二是流式累计全文重渲染与主文档 CSS 能力分别带来性能上限和安全复杂度。若要演进，优先级应是为净化/CSS 建立测试边界，其次再考虑把消息装配、正文 pipeline 和流式 renderer 拆成可独立验证的模块。
+其技术债集中在两个方向：一是 `public/script.js` 承担过多职责，渲染状态依赖全局数组和 DOM；二是流式累计全文重渲染与主文档 CSS 能力分别带来性能上限和安全复杂度。消息装配、正文 pipeline 与流式 renderer 的职责相互纠缠，净化和 CSS 边界也缺乏直接测试。

@@ -24,10 +24,10 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 三个关键设计点已经过源码确认：
 
 - **流式“先缓冲、后分段”模型**：Python 端每个 token 发射 `message.delta`（可在 `history_lock` 下写入 inflight）；TUI 端 `turnController.bufRef` 累积原文，按定时批次把 `boundedLiveRenderText(streaming)` 写入 `$turnState.streaming`（16ms 空闲 / 80ms 输入 / 96ms 滚动节流），`message.complete` 时再做 `finalTail` 去重 + 分段定稿，一次性 `appendMessage` 到 transcript。这是三种不同频率的明确区分：chunk→`message.delta`（网络+节流）、chunk/批次→`streaming` 状态对象（视图）、完成→`msg.complete`+transcript（持久化）。
-- **TUI 的 Markdown 是自研的 `markdown.tsx`**，没有使用第三方 Markdown 依赖：`Md`（重内存块解析，行级状态机）+ `StreamingMd`（增量渲染，仅重解析 in-flight tail）。Python 侧曾计划经 `tui_gateway/render.py` 委托 `agent.rich_output`（Rich/ANSI 化），**本次快照中 `agent.rich_output` 模块不存在**（grep 确认仅 `render.py` 与 `tests/tui_gateway/test_render.py` 引用），因此一切时间为 `None`，TUI 实际总是回落到 `markdown.tsx`。
-- **没有真实 HTML 清洗边界**：终端字形下、桌面 SVG/Mermaid 用 `dangerouslySetInnerHTML`（返回 `clean`/`svg`），这些是渲染 SVG 片段而不是 HTML+CSS 文档；实际上桌面侧的内容并非由 HTML 进入，而是流式 Markdown→React 节点，故“HTML 清洗”问题退化为“链接协议白名单 + 嵌入 iframe 的 preview 面”。真正的 iframe 与 `dangling` 高级概念只出现在 desktop right-rail `preview-artifact.tsx`（`dangerouslySetInnerHTML`）并公开为 `preview` URL 源预处理，具体注释可见“安全边界”一节（含未验证事项）。
+- **TUI 的 Markdown 是自研的 `markdown.tsx`**，没有使用第三方 Markdown 依赖：`Md`（重内存块解析，行级状态机）+ `StreamingMd`（增量渲染，仅重解析 in-flight tail）。Python 侧曾计划经 `tui_gateway/render.py` 委托 `agent.rich_output`（Rich/ANSI 化），**本次快照中 `agent.rich_output` 模块不存在**（grep 确认仅 `render.py` 与 `tests/tui_gateway/test_render.py` 引用），因此该渲染结果为 `None`，TUI 实际总是回落到 `markdown.tsx`。
+- **HTML 与隔离面**：TUI 以终端字形渲染文本，不生成 HTML 节点；桌面正文经流式 Markdown→React 节点渲染，`dangerouslySetInnerHTML` 仅用于 3 处 SVG 片段与 artifact 预览 iframe，链接协议做白名单处理（详见第 7 节）。
 
-主链路（键盘输入 → 可见消息）已在后文“总体渲染链路”给出。
+主链路（键盘输入 → 可见消息）已在后文“系统边界与总体调用链”给出。
 
 ## 系统边界与总体调用链
 
@@ -46,7 +46,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
                      message.interim → turnController.recordInterimMessage
                      message.complete→ turnController.recordMessageComplete → Msg[] → appendMessage
                      reasoning/thinking/moa/tool/subagent → turnController.record* / upsert*
-              └─ turnController.ts（segmentMessages + bufRef + 定时节流）→ $turnState（nanoug）
+              └─ turnController.ts（segmentMessages + bufRef + 定时节流）→ $turnState（nanostores）
         useMainApp.ts：historyItems: Msg[]（cap MAX_HISTORY=800）
               └─ StreamingAssistant（turn foot）/ MessageLine（定稿）→ Md / StreamingMd / ToolTrail / TodoPanel
 ```
@@ -60,7 +60,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 - **TUI 输入是纯字符串事件流**，网关只发 “text + 少量结构化字段”，TUI 生成 `Msg`（`ui-tui/src/types.ts:116`）：`role('assistant'|'system'|'tool'|'user')`、`text`、`thinking`、`tools[]`、`todos[]`、`panelData`，另有 `kind: 'diff'|'event'|'intro'|'panel'|'slash'|'trail'`、`isMoaReference`、`todoCollapsedByDefault` 等。角色 + 内容混合在一个对象里，由组件根据 `msg.kind`/`msg.role` 分派（见 4）。
 - **事件→Msg 的映射集中在 `ui-tui/src/app/turnController.ts`**：`flushStreamingSegment`（bufRef→`Msg`，含 `reasoning tag` 分割，见 `lib/reasoning.ts`）、`pushInlineDiffSegment`（diff-only 段），`recordMessageComplete` 生成 `{finalMessages, finalText, wasInterrupted}`。desktop 侧由 `apps/desktop/src/app/session/hooks/use-message-stream/index.ts`（含 interim 封段）。
 - 事件协议类型位于 `ui-tui/src/gatewayTypes.ts`（`GatewayTranscriptMessage` 含 `context/display_kind/display_metadata/name/role/text`）。
-- 状态模型：`ui-tui/src/app/turnStore.ts` 的 `TurnState` 承载 `streaming`（可见文本）、`streaming`、`reasoning`、`streamSegments`、`tools`、`activeTools`、`subagents`、`todos` 等——即时渲染走 turnStore，定稿走 useMain 的 `historyItems[]`。
+- 状态模型：`ui-tui/src/app/turnStore.ts` 的 `TurnState` 承载 `streaming`（可见文本）、`reasoning`、`streamSegments`、`tools`、`activeTools`、`subagents`、`todos` 等——即时渲染走 turnStore，定稿走 useMain 的 `historyItems[]`。
 
 ### 2. 流式链路：缓冲、节流与收口
 
@@ -78,7 +78,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 
 ### 3. 列表层：窗口化、高度与滚动锚定
 
-- **TUI 用自定义虚拟化**：`ui-tui/hooks/useVirtualHistory.ts` 常量 `ESTIMATE=4`、`OVERSCAN=20`（曾为 40，“YK node p99 106ms”）、`MAX_MOUNTED=120`（曾为 260，为避免 OOM GC 压力 #46699072 调整）、`COLD_START=30`、`PESSIMISTIC=1`、`QUANTUM=10`；用 `useDeferredValue` + `useSyncExternalStore`，外接 `@hermes/ink` 的 `ScrollBox`。transcript 行由 `messageId(msg):c{cols}` 键驱动（`useMain.ts:342`），**拖拽 resize 时每行重挂载**，用 `RESIZE_COALESCE_MS=32` coalescer 限流到 ≤30fps（`<-mainApp.ts:159`）。
+- **TUI 用自定义虚拟化**：`ui-tui/hooks/useVirtualHistory.ts` 常量 `ESTIMATE=4`、`OVERSCAN=20`（曾为 40，“YK node p99 106ms”）、`MAX_MOUNTED=120`（曾为 260，为避免 OOM GC 压力 #46699072 调整）、`COLD_START=30`、`PESSIMISTIC=1`、`QUANTUM=10`；用 `useDeferredValue` + `useSyncExternalStore`，外接 `@hermes/ink` 的 `ScrollBox`。transcript 行由 `messageId(msg):c{cols}` 键驱动（`useMain.ts:342`），**拖拽 resize 时每行重挂载**，用 `RESIZE_COALESCE_MS=32` coalescer 限流到 ≤30fps（`mainApp.ts:159`）。
 - **桌面列表不虚拟化**，改用**渲染成本预算 + `content-visibility:auto`**：`apps/desktop/.../assistant-ui/thread/list.tsx` `RENDER_BUDGET=300`（单位：parts=1、每512字符+1）、`FIRST_PAINT_BUDGET=20`（首次同步 commit 后 rAF 补全）、“show earlier”分页、不触 scrollTop 以免与 `use-stick-to-bottom` 打架（`list.tsx:40-78`）。
 - 行高度：TUI 由 `estimateRows`（`lib/text.ts:308`，带 fence/表格识别）预估算；desktop 用浏览器原生布局 + `contain-intrinsic-size:auto 37.5rem`（list.tsx:542），未用虚拟测量库。
 
@@ -90,30 +90,34 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 
 ### 5. Markdown/代码/富文本管线
 
-**TUI（`ui-tui/src/components/markdown.tsx`）**：
-- 顶层 `Md` 把文本按行扫描成块（行状态机而非 AST）：```` 代码 / 数学块(`$$`,`\[`) / heading(ATX+Setext) / hr / 脚注 / 定义列表 / 任务列表 / 数字/无序列表 / 引用 / GFM 表格 / `<details>` 剥离 / `<summary>`→`▶` / MEDIA 行→本地文件链接。表格有三档宽度策略（ideal/proportional/hard + vertical fallback），使用 `@hermes/ink` 的 `stringWidth`。
+#### 5.1 TUI（`ui-tui/src/components/markdown.tsx`）
+- 顶层 `Md` 把文本按行扫描成块（行状态机而非 AST）：代码块 / 数学块(`$$`,`\[`) / heading(ATX+Setext) / hr / 脚注 / 定义列表 / 任务列表 / 数字/无序列表 / 引用 / GFM 表格 / `<details>` 剥离 / `<summary>`→`▶` / MEDIA 行→本地文件链接。表格有三档宽度策略（ideal/proportional/hard + vertical fallback），使用 `@hermes/ink` 的 `stringWidth`。
 - 内联用 `INLINE_RE` 一个优先级大的交替表达式（图片→链接→autolink→删除→粗体→斜体→高亮→锚脚→上下标→裸 URL→行内公式）。
 - 数学：`lib/mathUnicode.ts:685 tex2Unicode`（希腊名/ℕℤℚℝ/分数/上下标）＋ `U+0001/0002 BOX_OPEN/CLOSE` 哨兵→ `<Text bold inverse>` 高亮笔效果（`markdown.tsx:17`）。
 - 高亮：`lib/syntax.ts` 手写 `highlightLine`，仅 8 语言（ts/py/sh/go/rust/sql/json/yaml + 别名）关键字/字符串/数字/注释；diff 语言专用 `+`/`-`/`@@` 背景色。
 - 链接：`lib/externalLink.ts` 归一化 URL + `urlSlugTitleLabel` + 异步抓页面标题（`useLinkTitle`/`fetchLinkTitle`，LRU 缓存），无 HTML 标签渲染（纯终端字符）。
 - **性能**：`MdCache` 主题键 WeakMap + `Map` LRU 512（跨 remount），`Md = memo`，行级 `useMemo`；`StreamingMd` 用自己的“已定稿块只 tokenize 一次、仅 in-tail 每 delta 重解析 O(tail) + 不回退不变式”。
 
-**桌面（`apps/desktop/src/components/assistant-ui/markdown-text.tsx`）**：使用 `@assistant-ui/react-markdown` 的 `StreamdownTextPrimitive`（模式=`streaming`），preprocess 用 `tailBoundedReMark` 基于 `lib/markdown-preprocess.ts`（含 `$` 货币保护），块边界由 `parseMarkdownIntoBlocksCached`（`lib/markdown-blocks.ts`，`marked` 完整 lex）驱动；数学用 `lib/katex-math.ts`（记忆化 `remark-math`+`rehype-katex`，`singleDollarTextMath:true`）；代码用 `@streamdown/code` + Shiki（异步按需加载，防 chunk 膨胀）；`detectArtifact` → `ArtifactCard`（右栏）；嵌入系统 `embeds/`（youtube/vimeo/twitter/tiktok/spotify/pinterest/maps/instagram）与 `MEDIA:` 直接 `<video>/<audio>`、图片文件可从网关下载；链接拦截 `mediaPath/previewTarget/sessionRef` 类自定义协议。
-```
-**桌面 dashboard `web/src/components/Markdown.tsx`**：极简块/内联列表解析器，仅 http(s|mailto) 链接可点击，其余 scheme 降级为文本报告（` 安全注释`），用于 sidebar 等辅助文本。
+#### 5.2 桌面（`apps/desktop/src/components/assistant-ui/markdown-text.tsx`）
+
+使用 `@assistant-ui/react-markdown` 的 `StreamdownTextPrimitive`（模式=`streaming`），preprocess 用 `tailBoundedReMark` 基于 `lib/markdown-preprocess.ts`（含 `$` 货币保护），块边界由 `parseMarkdownIntoBlocksCached`（`lib/markdown-blocks.ts`，`marked` 完整 lex）驱动；数学用 `lib/katex-math.ts`（记忆化 `remark-math`+`rehype-katex`，`singleDollarTextMath:true`）；代码用 `@streamdown/code` + Shiki（异步按需加载，防 chunk 膨胀）；`detectArtifact` → `ArtifactCard`（右栏）；嵌入系统 `embeds/`（youtube/vimeo/twitter/tiktok/spotify/pinterest/maps/instagram）与 `MEDIA:` 直接 `<video>/<audio>`、图片文件可从网关下载；链接拦截 `mediaPath/previewTarget/sessionRef` 类自定义协议。
+
+#### 5.3 桌面 dashboard（`web/src/components/Markdown.tsx`）
+
+极简块/内联列表解析器，仅 http(s|mailto) 链接可点击，其余 scheme 降级为文本报告，用于 sidebar 等辅助文本。
 
 ### 6. 结构化内容：工具、reasoning、附件与自定义节点
 
 - 工具 UI：TUI `thinking.tsx` 的 `ToolTrail` 把 `tools[]`/`turnTrail`/`activity` 按组渲染（`parseToolTrailResultLine`…），活跃工具显示 braille spinner + 耗时，verbose args 用 `boundedLiveRenderText`（≤800 字符/12 行）；`ToolCalls`/`TodoPanel`（待确认渲染细节）。`SubagentAccordion` 以树状展示 spawn tree（深度/热度色/sparkline/总览）。
 - reasoning：`lib/reasoning.ts splitReasoning`；`thinking` 折叠（`collapsed|truncated|full`），`thinkingPreview` 截取 COT max 160。
-- 附件：TUI 无富附件（`MEDIA:` 行→文件链接）；桌面支持媒体文件(重点 下载)、`llm` 会话引用、`preview` 目标（右键预览）。
+- 附件：TUI 无富附件（`MEDIA:` 行→文件链接）；桌面支持媒体文件下载、`llm` 会话引用、`preview` 目标（右键预览）。
 
-### 7. 安全边界：HTML、URL、iframe、Artifact
+### 7. HTML、Artifact 与安全隔离
 
-- **TUI**：不渲染 HTML 节点；内容直接被 `Ink` 的 `Text/Link` 消费。链接打开走 `lib/openExternalUrl.ts`（`parseSafeUrl` + 平台命令 + `force`），`<a>` 不落地为 HTML。< 代码块仅高亮。`dangerouslySetInnerHTML` 在 TUI 树中不存在（grep 未命中）。
-- **桌面**：标记出 3 处 `dangerouslySetInnerHTML`：`embeds/svg-embed.tsx:29`、`embeds/mermaid-embed.tsx:103,109`、`right-rail/preview-artifact.tsx:91`。这些均渲染“SVG 片段”，且 `preview-artifact.tsx` `clean` 变量此前由 `…clean` 处理（未展开）；iframe 出现在右侧预览（`preview-pane`）与 `UrlEmbed`。`iframe sandbox`、CSP 策略、SVG 内嵌事件清理未获完整确认（见“未验证事项”）。
-- 链接协议：desktop `MarkdownLink` 对非 http(s)\\`https: ` /`mailto:` 的 href 直接输出 `rel="noopener noreferrer"` 的 xx 或普通文本；`normalizeExternalUrl` 归一化。`web` 版仅 `<a rel=noreferrer target=_blank>`。
-- 引用 `MEDIA`、`sessionRef` 等均为自定义指向的处理,不形成外部 entity。
+- **TUI**：内容以终端字形渲染，由 `Ink` 的 `Text/Link` 消费文本，不生成 HTML 节点（`dangerouslySetInnerHTML` 在 TUI 树中 grep 未命中），代码块仅做文本高亮。链接打开走 `lib/openExternalUrl.ts`（`parseSafeUrl` 协议白名单 + 平台命令 + `force` 确认）。
+- **桌面**：正文经流式 Markdown→React 节点渲染，`dangerouslySetInnerHTML` 只用于 3 处 SVG 片段输出：`embeds/svg-embed.tsx:29`、`embeds/mermaid-embed.tsx:103,109`、`right-rail/preview-artifact.tsx:91`；iframe 用于右侧 `preview-pane` 与 `UrlEmbed` 的预览面。
+- **链接协议**：desktop `MarkdownLink` 对非 http(s)/mailto 的 href 输出 `rel="noopener noreferrer"` 的可点击链接或普通文本，`normalizeExternalUrl` 归一化 URL；`web` 版仅输出 `<a rel="noreferrer" target="_blank">`。`MEDIA`、`sessionRef`、`preview` 等自定义协议由渲染器定向解析，不落到外部链接。
+- iframe sandbox 与 CSP 配置未完整确认，归入“未验证事项”。
 
 ### 8. 交互状态反馈
 
@@ -126,7 +130,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 |---|---|---|
 | TUI Markdown | 每块一次 tokenize + 无回滚 + 缓存（`MdCache` LRU）；虚拟列表 + 高度估算 | `streamingMarkdown`/`markdown.tsx` |
 | TUI transcript | 虚拟列表（`MAX`/`OVERSCAN`/`QUANTUM`） + `useDeferredValue`；拖拽 coalescing | `useVirtual.c.ts` |
-| TUI npm | 流式状态对象 `boundedLiveRenderText`（16K/240行） | `lib/text.ts` |
+| TUI 流式 | 流式状态对象 `boundedLiveRenderText`（16K/240行） | `lib/text.ts` |
 | 桌面 Markdown | `katex` 记忆化 + 代码延迟、`marked` 块缓存、内容 `visible:auto` | `markdown-text.tsx:471` 等 |
 | 桌面列表 | 渲染预算（parts+512字）+ 首屏小预算 + `content-visibility` | `thread/list.tsx` |
 
@@ -142,32 +146,13 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 
 本节归纳反复出现的设计意图、以及从代码可确认的明确“不做”：
 
-- **Rich 不回退到 `markdown.tsx` 之间的回退**只在 `agent.rich_output` 存在时选择；本快照模块缺失 → 恒为 `None`。这意味 Python 的 ANSI `rendered` 不会注入，`message.delta` 净文本累积（注释提到 `display.final_response_markdown: render` 曾篡改 `rendered` 增量导致丢失，v2 改为始终累积 `text`，见 `turnController.ts:677-682` 处的 #167991）。
-- **`message.complete` 常去重内部逻辑**：只在 `finalTail` 中剔除与最终文字重叠的 segment；`response_previewed` 时连已封 interims 也去重（`dedupeStart=interimBoundaryIndex ?? 0`）。Diff 段同理（`finalHasOwnFence`）。这是为了避免“同一 patch 两页”的已知 bug。
-- **系统消息不当地"user 气泡"**：`display_kind` 的 `hidden/model_switch/auto_continue` 在 `toTranscriptMessages` 被转成 `kind:event` 或跳过；`pending_reaction_notes` 只进 model input 不进持久化文本（`methods_prompt.py`）。
+- **Rich/ANSI 渲染回退**只在 `agent.rich_output` 存在时选择；本快照模块缺失 → 恒为 `None`。这意味着 Python 的 ANSI `rendered` 不会注入，`message.delta` 净文本累积（注释提到 `display.final_response_markdown: render` 曾篡改 `rendered` 增量导致丢失，v2 改为始终累积 `text`，见 `turnController.ts:677-682` 处的 #167991）。
+- **`message.complete` 段去重逻辑**：只在 `finalTail` 中剔除与最终文字重叠的 segment；`response_previewed` 时连已封 interims 也去重（`dedupeStart=interimBoundaryIndex ?? 0`）。Diff 段同理（`finalHasOwnFence`）。这是为了避免“同一 patch 两页”的已知 bug。
+- **系统消息不以 user 气泡呈现**：`display_kind` 的 `hidden/model_switch/auto_continue` 在 `toTranscriptMessages` 被转成 `kind:event` 或跳过；`pending_reaction_notes` 只进 model input 不进持久化文本（`methods_prompt.py`）。
 - **TUI 不渲染 Web 组件语义**：`<details>` 直接丢弃内容（`markdown.tsx:1102` 起 `</details>` 跳过），`<summary>` 变成 `▶ ` 行——这是终端渲染器与 DOM 的边界。
-- **桌面主对话 ≠ dashboard 富渲染**：dashboard 无自己的 transcript 渲染器，`web Markdown.tsx` 仅辅助，这削减了可比较的“应对比”面积。
-- **性能兜底**：`VERBOSE_TRAIL_MAX=800/12`、`MAX_HISTORY=800`、16600字直播上限、记忆注解引用（`#34089` OOM 事件）等表明"防爆防炸"是刻意约束，不是省略。
+- **桌面主对话 ≠ dashboard 富渲染**：dashboard 无自己的 transcript 渲染器，`web Markdown.tsx` 仅辅助。
+- **性能兜底**：`VERBOSE_TRAIL_MAX=800/12`、`MAX_HISTORY=800`、16000 字直播上限（`lib/text.ts:137`）、记忆注解引用（`#34089` OOM 事件）等表明"防爆防炸"是刻意约束，不是省略。
 - **未发现**：TUI 无 iframe、无 `dangerouslySetInnerHTML`、桌面 `embed` 预览未完全溯源；`web/Markdown.tsx` 仅允许 http(s|mailto)。
-
-## 横向比较字段（本记录对照）
-
-> 下表为各文档渲染面的对照，供同类别笔记横向对比。其中“网关(Telegram等)”因不在范围内标记为“未调查”。
-
-| 维度 | TUI（`ui-tui`，主渲染面） | 桌面（`apps/desktop`） | dashboard（`web`+xterm） |
-|---|---|---|---|
-| 输入表示 | 事件流→`Msg`（role+kind+text+todos+tools） | 事件→assistant-ui `Message` parts（TextMessagePart 等） | 原始 PTY 字节（xterm 渲染，非结构数据） |
-| 流式更新单位 | chunk 累积→电池 16/80/96ms `streaming`；完成时整段 | streaming chunk —— Streamdown 增量块 | 终端字符帧 |
-| 列表策略 | 虚拟化（ESTIMATE 4/MAX 120/OVESCAN 20/COLDBEGIN 30） | 渲染预算 + `content-visuality` + 分页“show earlier” | 终端视图 |
-| Markdown 引擎 | 自研 `markdown.tsx` + `StreamingMd` | `@assistant-ui/react-streamdown` + `marked`块分析 + `Shiki` + KaTeX | 超简 `Markdown.tsx`（dashboard 尔用） |
-| HTML 清洗 | 不需要（无 HTML 输入），文字即渲染 | 仅 SVG 三处 `dangerouslySetInnerHTML`；无 HTML 全量清洗（未确认） | 仅格式输出，无 HTML 输出 |
-| Artifact 隔离 | 无（纯文本） | `ArtifactCard`（detectArtifact；reasoning 禁 artifact） | 无 |
-| 工具 UI | `ToolTrail`/`Thinking` 树状面板 + `TodoPanel` | `tool-group` + run-ticker | xterm 内 TUI 的 |
-| 扩展注册方式 | 组件/domain 硬连；无渲染插件注册表 | `embeds/` 注册表 + Streamdown `components` 覆盖 | 无 |
-| 性能策略 | 虚拟列表 + 深 `bounded` + LRU 缓存 + 防重解析 | 渲染预算 + 记忆化 Katex + 异步 Shiki + `content-visible` | xterm WebGL |
-
-- 输入表示：`消息`三者各一（TUI event→Msg；桌面 event→parts；dashboard:PTY 字节）。
-- 未调查/不确定：桌面 iframe/CSP/清理、移动端（iOS TUI）、经典 CLI Rich 细节。
 
 ## 未验证事项
 
@@ -180,7 +165,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 ## 关键源码索引
 
 - Python 网关：
-  - `tui_gateway/server.py`: `_stream` 流式回调(9614)`、`message.complete` 载荷组装(9834-9850)`、`_emit`(1539)`、`_append_inflight_delta`(7100)、`_emit_terminal_turn_error`(7593→7626)、`_agent_cbs`(5612，reason.C/`thinking_callback`/interim)、子代理镜像(5550-5609)、`_pending_reaction_notes`(见 `methods_prompt.py`)。
+  - `tui_gateway/server.py`: `_stream` 流式回调(9614)、`message.complete` 载荷组装(9834-9850)、`_emit`(1539)、`_append_inflight_delta`(7100)、`_emit_terminal_turn_error`(7593→7626)、`_agent_cbs`(5612，reasoning_callback/`thinking_callback`/interim)、子代理镜像(5550-5609)、`_pending_reaction_notes`(见 `methods_prompt.py`)。
   - `tui_gateway/ws.py`: WS transport、token 合批(53-60)、`_disable_nagle`(268)。
   - `tui_gateway/event_publisher.py`(PTY broadcast, `_QUEUE_MAX` 备注见注释)。
   - `tui_gateway/render.py`(整个都是回退桥，options)。
@@ -189,11 +174,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
   - `src/components/messageLine.tsx`、`markdown.tsx`、`streamingMarkdown.tsx`、`thinking.tsx`。
   - `src/lib/text.ts`、`syntax.ts`、`mathUnicode.ts`、`externalLink.ts`、`openExternalUrl.ts`、`liveProgress.ts`、`messages.ts`、`reasoning.ts`。
   - `src/hooks/useVirtualHistory.ts`、`src/config/limits.ts`、`src/config/timing.ts`、`src/domain/roles.ts`、`src/domain/messages.ts`。
-- 桌面：`apps/desktop/src/app/session/hooks/use-message-stream/index.ts`（事件→状态）、`apps/desktop/src/components/assistant-ui/markdown-text.tsx`（Streamdown 管线）、`.../thread/list.tsx`（列表预算）、`.../embeds/*`、`apps/desktop/src/lib/{markdown-preprocess,katex-math,markdown-blocks,media}.ts`、`apps/desktop/src/lib/external-ter外链.ts`。
+- 桌面：`apps/desktop/src/app/session/hooks/use-message-stream/index.ts`（事件→状态）、`apps/desktop/src/components/assistant-ui/markdown-text.tsx`（Streamdown 管线）、`.../thread/list.tsx`（列表预算）、`.../embeds/*`、`apps/desktop/src/lib/{markdown-preprocess,katex-math,markdown-blocks,media}.ts`、`apps/desktop/src/lib/external-links.ts`（外链）。
 - Web：`web/src/pages/ChatPage.tsx`（xterm/PTY）、`web/src/components/Markdown.tsx`、`web/src/lib/api.ts`（`getSessionMessages`）。
 - 共享协议：`apps/shared/src/json-rpc-gateway.ts`、`apps/shared/src/websocket-url.ts`。
 - 测试：`ui-tui/src/__tests__/{markdown,streamingMarkdown,messageLine,messages,turnController,turnStore,reasoning,thinkingMoaReferenceVisibility,useVirtualHistoryHeights,virtualHeights,text,syntax,externalLink,mathUnicode,emoji,blockLayout,details,gatewayClient,createGatewayEventHandler}.test.ts`；`tests/tui_gateway/test_render.py`；桌面 `assistant-ui/markdown-text.*.test`、web 无主渲染测试。
-
-## 附录：本地调查规范原文（供随后编辑续写时对照）
-
-写入要求、调查深度、证据与结论规则见 `E:\works\git\项目调查笔记\AGENTS.md` 原文；必查 10 项、推荐结构、注意事项与横向比较字段见 `E:\works\git\项目调查笔记\主调查指南：消息渲染器调查指南.md`。本笔记按该指南逐一应答；凡在正文未能覆盖的条目，均已在“未验证事项”或“边界”标注。

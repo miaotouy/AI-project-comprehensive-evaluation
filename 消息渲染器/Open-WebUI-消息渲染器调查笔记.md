@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐个渲染 token」的管线，而不是 marked 官方 HTML renderer 的字符串输出；这是与多数聊天客户端（直接 innerHTML）最大的架构差异。
+Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐个渲染 token」的管线，而不是 marked 官方 HTML renderer 的字符串输出。
 
 - 渲染入口 `Messages/Message.svelte` 按 `role` 与父消息模型数分发到 `UserMessage` / `ResponseMessage` / `MultiResponseMessages`，并利用浏览器原生 `content-visibility: auto` 做离屏虚拟化；
 - Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及，并禁用单波浪线删除线；
@@ -105,14 +105,7 @@ content (流式累加)
 - `ResponseMessage.svelte`（193-196 行）：流式期间对 message 做 `structuredClone` 快照 + content/done/output 快速比较，避免组件属性抖动导致 destroy/mount；
 - `CodeBlock.svelte`（400-402 行）：`_token` 版本跟踪，只有文本真正变化才重新 `render()`。
 
-## 8. 与其他项目的横向比较点
-
-- 与 Manifold Desktop（`marked.parse` → `innerHTML` 无消毒）、Chatbox（react-markdown + sanitize）相比，Open WebUI 的「token 树 + Svelte 组件渲染」天然避免整段 HTML 注入，HTML 只在显式 html token 时经 DOMPurify 进入；
-- 与 Cherry Studio 的 DOMPurify 整体消毒方案相比，Open WebUI 把「文本 token 原样输出」与「html token 单独消毒」分开，副作用是需要 `sanitizeResponseContent` 先把正文尖括号实体化，防止模型输出被误判为 html token；
-- 流式渲染的 rAF 节流 + token 复用是 Svelte 场景的典型做法；文本 token 复用是相对完整重渲染（Manifold 流式全量重渲染）的主要差异；
-- Artifacts 沙箱（srcdoc + sandbox + CSP 注入）比大多数客户端直接渲染 HTML artifact 更完整，但 `ui.iframe_csp` 默认为空意味着沙箱依赖 sandbox 属性本身。
-
-## 9. 关键文件索引
+## 8. 关键文件索引
 
 | 职责 | 文件 |
 |---|---|

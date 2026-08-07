@@ -6,7 +6,7 @@
 >
 > 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
 >
-> 调查方式：只读源码梳理（`public/scripts/tool-calling.js`、`public/script.js`、`public/scripts/openai.js`、`public/scripts/extensions.js`、`src/endpoints/extensions.js`、`src/plugin-loader.js`、`default/config.yaml` 等），未修改被调查仓库；本笔记是对 [Agent 工具横向调查与对比](Agent工具横向对比.md) 中 SillyTavern 部分的单项目复核，发现的偏差已在正文标注并纠正。
+> 调查方式：只读源码梳理（`public/scripts/tool-calling.js`、`public/script.js`、`public/scripts/openai.js`、`public/scripts/extensions.js`、`src/endpoints/extensions.js`、`src/plugin-loader.js`、`default/config.yaml` 等），未修改被调查仓库
 >
 > 调查范围：模型可发现、请求并触发的工具，以及注册、执行、审批、安全边界与扩展入口
 >
@@ -16,9 +16,9 @@
 
 1. SillyTavern 的"Agent 工具"就是 `ToolManager`（`public/scripts/tool-calling.js`）维护的浏览器侧函数注册表。工具由扩展或 STscript 的 `/tools-register` 在前端注册，随请求写入 OpenAI 兼容 `tools` 字段，`tool_choice` 固定为 `'auto'`（无法强制/禁止调用单个工具）。
 2. 仓库内置的、真正调用 `registerFunctionTool` 的只有**一个**工具：Stable Diffusion 扩展的 `GenerateImage`（`public/scripts/extensions/stable-diffusion/index.js:5457`）。其余工具均来自第三方扩展或用户通过 `/tools-register` 临时注册，代码层面找不到"内置工具清单"。
-3. 调用循环没有任何逐次审批：模型返回 tool_calls 后立即 `await action`，只弹出一个可关闭的 toast，不等待用户确认。这与横向笔记的判断一致，本次予以确认（"已确认"，非推测）。
-4. 递归上限不是横向笔记里含糊的"确认为 5"这么简单：默认值是 5（`oai_settings.tool_call_recurse_limit`，`public/scripts/openai.js:494`），但**用户可在设置面板把它调到 1～50**（`public/index.html:2021`,`2024`），且 `ToolManager.RECURSE_LIMIT` 是可写的静态属性，扩展代码同样可以修改它。横向笔记把它写成固定值 5，不准确，本笔记予以纠正。
-5. STscript（slash command）与 Agent 工具之间存在一条横向笔记未覆盖的重要旁路：`/tools-register` 允许把一个 **STscript closure** 注册为模型可调用的工具 action；工具执行时相当于以当前聊天上下文执行一段任意 STscript。这条路径把"模型输出 → 工具调用 → 执行代码"和"STscript 引擎能做什么"直接串联起来，扩大了工具的实际能力边界（可读写变量、调用几乎所有 slash command、发起网络请求等），详见维度 11。
+3. 调用循环没有任何逐次审批：模型返回 tool_calls 后立即 `await action`，只弹出一个可关闭的 toast，不等待用户确认。
+4. 递归上限默认值是 5（`oai_settings.tool_call_recurse_limit`，`public/scripts/openai.js:494`），但**用户可在设置面板把它调到 1～50**（`public/index.html:2021`,`2024`），且 `ToolManager.RECURSE_LIMIT` 是可写的静态属性，扩展代码同样可以修改它。
+5. STscript（slash command）与 Agent 工具之间存在一条重要旁路：`/tools-register` 允许把一个 **STscript closure** 注册为模型可调用的工具 action；工具执行时相当于以当前聊天上下文执行一段任意 STscript。这条路径把"模型输出 → 工具调用 → 执行代码"和"STscript 引擎能做什么"直接串联起来，扩大了工具的实际能力边界（可读写变量、调用几乎所有 slash command、发起网络请求等），详见维度 11。
 
 ## ASCII 调用链图
 
@@ -86,7 +86,7 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 
 `ToolManager.isToolCallingSupported(settings, model)` 的判定顺序：
 
-1. `main_api !== 'openai'` → 直接 false（也就是说 Text Completion / KoboldAI / 各类非 Chat Completion 后端**完全不支持**函数调用，这是横向笔记未展开的细节）。
+1. `main_api !== 'openai'` → 直接 false（也就是说 Text Completion / KoboldAI / 各类非 Chat Completion 后端**完全不支持**函数调用）。
 2. `settings.function_calling` 必须为 true（用户开关，UI 位于 `#openai_function_calling`）。
 3. `custom_prompt_post_processing` 必须属于 `{NONE, MERGE_TOOLS, SEMI_TOOLS, STRICT_TOOLS}`；其余后处理模式会把历史工具调用从 prompt 中强制剥除，视为不支持。
 4. 若能在 `model_list` 中找到当前模型，则按 `chat_completion_source` 走**逐 provider 的模型元数据判定**（表见下）；否则落到步骤 5 的固定支持列表。
@@ -96,7 +96,7 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 
 注入点有两处，逻辑略有出入：
 - `public/scripts/openai.js:1301-1307`：Prompt 组装阶段仅为**预留 token 预算**调用了一次 `registerFunctionToolsOpenAI(toolData)`（临时对象，不进最终请求体），随后按 `canPerformToolCalls(type)`（不区分 canMultiSwipe）预留 budget。
-- `public/scripts/openai.js:2779-2781`：真正写入请求体的地方，条件是 `!canMultiSwipe && ToolManager.canPerformToolCalls(type, settings, model)`。**多重 swipe（`n>1`）时会跳过工具注册**，这点横向笔记未提及。
+- `public/scripts/openai.js:2779-2781`：真正写入请求体的地方，条件是 `!canMultiSwipe && ToolManager.canPerformToolCalls(type, settings, model)`。**多重 swipe（`n>1`）时会跳过工具注册**。
 - 服务端各 provider 分支（Claude/Google/OpenAI 兼容等，`src/endpoints/backends/chat-completions.js`）只是把 `request.body.tools` 原样转发/改写格式，不做二次的“是否该注入”判断，即前端一旦放入 tools 字段，服务端默认信任并转发。
 
 stealth 语义：`isStealthTool(name)` 为 true 时，`invokeFunctionTools` 把该次调用名放入 `stealthCalls` 而不放入 `invocations`；`saveFunctionToolInvocations` 只处理非 stealth 的 `invocations`，因此 stealth 工具的调用**完全不写入 chat/不持久化/不触发后续生成**（`shouldStopGeneration` 判断里 `invocationResult.stealthCalls.length` 为真也会直接中止本轮递归）。
@@ -164,7 +164,7 @@ static #parseParameters(parameters) {
 
 ## 维度 5：编排循环
 
-递归上限：`ToolManager.RECURSE_LIMIT` 是静态可写字段，默认赋值 5（`public/scripts/openai.js:494`），UI 滑块允许 1~50（`public/index.html:2014-2024`，`css/toggle-dependent.css:568` 控制该 UI 仅在 `function_calling` 打开时可见）。每次设置变化或 `loadOpenAISettings` 都会同步写回 `ToolManager.RECURSE_LIMIT = oai_settings.tool_call_recurse_limit`（`openai.js:4298`、`openai.js:6919`）。**这是本笔记对横向笔记"递归上限 5"表述的纠正：5 只是默认值，不是硬编码上限，且没有绝对硬上限（滑块本身限制到 50，但 `RECURSE_LIMIT` 字段本身可被任意代码/扩展改写为任意数字，包括 `Infinity`）。**
+递归上限：`ToolManager.RECURSE_LIMIT` 是静态可写字段，默认赋值 5（`public/scripts/openai.js:494`），UI 滑块允许 1~50（`public/index.html:2014-2024`，`css/toggle-dependent.css:568` 控制该 UI 仅在 `function_calling` 打开时可见）。每次设置变化或 `loadOpenAISettings` 都会同步写回 `ToolManager.RECURSE_LIMIT = oai_settings.tool_call_recurse_limit`（`openai.js:4298`、`openai.js:6919`）。因此 5 只是默认值，不是硬编码上限：滑块把 UI 可配置范围限制在 1~50，但 `RECURSE_LIMIT` 字段本身可被任意代码/扩展改写为任意数字，包括 `Infinity`。
 
 实现点：`public/script.js:4436`
 ```js
@@ -185,7 +185,7 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 
 ## 维度 6：审批与策略
 
-**确认：没有逐次用户审批。** 整条链路里唯一的用户可见反馈是：
+调用链里没有逐次用户审批。整条链路里唯一的用户可见反馈是：
 
 1. 调用开始：`toastr.info(message, 'Tool Calling', { timeOut: 0 })`——一条不会自动消失、但也**不含任何"允许/拒绝"按钮**的信息 toast，纯展示用途（`tool-calling.js:799`）。
 2. 调用结束：`toastr.clear(toast)` 直接清掉，调用早已完成。
@@ -193,7 +193,7 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 
 没有找到任何形式的：
 - 逐次确认弹窗（`Popup.show.confirm` 未在 `tool-calling.js` 中出现）。
-- per-tool 开关/禁用列表（不像 Cherry Studio 的 `disabledTools` 或 LobeHub 的 `humanIntervention`）。
+- per-tool 的启用/禁用开关。
 - 全局"Agent 模式/自动执行模式"开关来分级放行不同风险的工具。
 
 现有的唯二"策略点"实际上是产品设置，不是审批：
@@ -202,7 +202,7 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 
 `stealth` 工具的效果不是"跳过审批"而是"跳过展示与持久化并阻断该轮的后续生成"，其本质仍是无审批自动执行。
 
-**结论：SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一步骤上，一旦扩展注册了工具且用户打开了函数调用开关，模型对该工具的每一次调用都会立即执行，没有运行期二次拦截。** 这与横向笔记的结论一致，本次予以确认。
+SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一步骤上：一旦扩展注册了工具且用户打开了函数调用开关，模型对该工具的每一次调用都会立即执行，没有运行期二次拦截。
 
 依据：`../../SillyTavern/public/scripts/tool-calling.js:796-921`、`../../SillyTavern/public/scripts/extensions/stable-diffusion/index.js:5452-5455`
 
@@ -221,20 +221,20 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 - 默认关闭（`enableServerPlugins: false`），需要显式在 `config.yaml` 打开。
 - **服务端 plugin 与浏览器工具是两条独立的机制**：`ToolManager` 完全在浏览器侧运行，plugin-loader 完全在服务端运行，二者没有直接的代码耦合；一个服务端 plugin 要参与"模型可调用的工具"，必须自己再暴露一个 HTTP endpoint，然后由某个浏览器扩展通过 `registerFunctionTool` 把该 endpoint 包装成工具（间接组合，不是内建机制）。
 
-两者的差异总结：浏览器 action 的风险敞口是"当前登录用户在该浏览器会话里能做的一切"，服务端 plugin 的风险敞口是"运行 SillyTavern 服务端进程的操作系统账户能做的一切"，后者影响面明显更大，但触发它需要管理员显式开启配置项且信任已安装的插件代码。
+两者的差异总结：浏览器 action 的执行权限范围是"当前登录用户在该浏览器会话里能做的一切"，服务端 plugin 的执行权限范围是"运行 SillyTavern 服务端进程的操作系统账户能做的一切"，后者影响面更大，但启用它需要管理员显式开启配置项并信任已安装的插件代码。
 
 依据：`../../SillyTavern/public/scripts/st-context.js:114-186`、`../../SillyTavern/src/plugin-loader.js:40-231`、`../../SillyTavern/default/config.yaml:180`,`392-394`
 
 ## 维度 8：结果处理与回注
 
-`invokeFunctionTool` 的返回值规则：字符串结果原样返回；非字符串结果 `JSON.stringify`；出错时返回一个 `Error` 实例（`cause = name`）而不是抛出——调用方 `invokeFunctionTools` 用 `instanceof Error` 判断成功/失败。**没有发现结果长度截断逻辑**（不像 LobeHub/Chatbox 会限制结果字节数），一个工具可以返回任意大的字符串，该字符串会被完整塞进：
+`invokeFunctionTool` 的返回值规则：字符串结果原样返回；非字符串结果 `JSON.stringify`；出错时返回一个 `Error` 实例（`cause = name`）而不是抛出——调用方 `invokeFunctionTools` 用 `instanceof Error` 判断成功/失败。**没有发现结果长度截断逻辑**，一个工具可以返回任意大的字符串，该字符串会被完整塞进：
 
 1. 一条新的系统消息 `mes`（HTML，`<details><summary>Tool calls: ...</summary><pre><code class="language-json">...</code></pre></details>`，通过 `document.createElement` 手工拼装，`i.parameters`/`i.result` 会先 `tryParse` 再 `JSON.stringify(data, null, 2)` 写入 `textContent`（不是 `innerHTML`，因此这一步本身不引入 HTML 注入；`codeElement.textContent = ...` 会被浏览器自动转义）。
 2. `message.extra.tool_invocations`（结构化数组，含 `id/displayName/name/parameters/result/error/signature/reasoning`），这个数组之后会被 `coreChat` 过滤逻辑重新纳入下一轮 prompt（`public/script.js:4437`：`chat.filter(x => !x.is_system || (canUseTools && Array.isArray(x.extra?.tool_invocations)))`），即**工具调用记录会持续留在聊天历史里参与后续所有请求的上下文**，除非用户手动删除该系统消息或关闭函数调用开关。
 
 持久化：`saveFunctionToolInvocations` 依次执行 `chat.push(message)` → `eventSource.emit(TOOL_CALLS_PERFORMED)` → `addOneMessage(message)`（进入 DOM 渲染，见消息渲染器笔记）→ `eventSource.emit(TOOL_CALLS_RENDERED)` → `await saveChatConditional()`（写入服务端聊天文件）。也就是说**工具调用结果会被写入磁盘上的聊天记录**，与普通消息同等持久化。
 
-上下文污染面：由于结果原样进入 prompt 且无截断/无内容过滤，一个恶意或错误的工具（无论来自不受信任的扩展，还是模型编造了一个从未存在过的工具名从而拿到 `formatToolCallMessage` 的兜底文案 `Invoked unknown tool: ${name}`——注意：不存在的工具名不会报错，只是走 `formatToolCallMessage` 的 `!this.#tools.has(name)` 分支返回占位文案，随后 `invokeFunctionTool` 才真正抛错）可以把任意大小、任意内容的文本注入后续所有轮次的模型上下文，构成間接提示注入放大器。
+上下文污染面：由于结果原样进入 prompt 且无截断/无内容过滤，一个恶意或错误的工具（无论来自不受信任的扩展，还是模型编造了一个从未存在过的工具名从而拿到 `formatToolCallMessage` 的兜底文案 `Invoked unknown tool: ${name}`——注意：不存在的工具名不会报错，只是走 `formatToolCallMessage` 的 `!this.#tools.has(name)` 分支返回占位文案，随后 `invokeFunctionTool` 才真正抛错）可以把任意大小、任意内容的文本注入后续所有轮次的模型上下文，构成间接提示注入放大器。
 
 依据：`../../SillyTavern/public/scripts/tool-calling.js:319-345`、`../../SillyTavern/public/scripts/tool-calling.js:859-909`、`../../SillyTavern/public/script.js:4437`
 
@@ -245,10 +245,8 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 | 工具名 | 来源 | 触发/注册条件 | 用途 | 执行位置 | 风险点 |
 | --- | --- | --- | --- | --- | --- |
 | `GenerateImage` | 内置扩展 `stable-diffusion`（`public/scripts/extensions/stable-diffusion/index.js:5452-5484`） | `extension_settings.sd.function_tool === true` 时注册，否则 `unregisterFunctionTool` | 让模型按文本 prompt 触发出图 | 浏览器前端：调用 `generatePicture()`，进而向配置好的 SD/DALLE/Comfy 等图像后端发起请求 | `action` 内部只检查 `isValidState()` 和 `args.prompt` 是否存在，不校验 prompt 内容；出图请求会打到用户在设置里配置的图像生成后端（可能是本机 SD WebUI、第三方付费 API 等），模型可诱导用户消耗额度或探测该后端的可达性 |
-| 用户临时注册的工具 | STscript `/tools-register`（`public/scripts/tool-calling.js:988-1137`） | 用户/QuickReply/角色卡内嵌的 slash command 主动执行一次 `/tools-register` | 任意场景，取决于用户或 QuickReply 预设写的 closure | 浏览器前端：`action` 是一段 STscript closure，等价于执行任意 slash command 序列 | 若该注册命令本身来自角色卡首条消息、World Info 或者可被远程更新的 QuickReply 预设，相当于"内容"定义了模型可调用的"工具"，形成潜在的隐蔽持久化后门（见维度 13） |
+| 用户临时注册的工具 | STscript `/tools-register`（`public/scripts/tool-calling.js:988-1137`） | 用户/QuickReply/角色卡内嵌的 slash command 主动执行一次 `/tools-register` | 任意场景，取决于用户或 QuickReply 预设写的 closure | 浏览器前端：`action` 是一段 STscript closure，等价于执行任意 slash command 序列 | 若该注册命令本身来自角色卡首条消息、World Info 或可被远程更新的 QuickReply 预设，则内容本身即可定义模型可调用的工具（见维度 11.3） |
 | 第三方扩展自定义工具 | 任意通过 Git 安装的 `third-party/*` 扩展 | 该扩展 JS 主动调用 `ToolManager.registerFunctionTool` 或 `getContext().registerFunctionTool`（`st-context.js:182`） | 取决于扩展 | 浏览器前端，与该扩展其余代码同权 | 完全取决于对该扩展的信任；没有任何运行时沙箱区分"这段代码是工具 action"还是"这段代码是普通 UI 逻辑" |
-
-**纠正横向笔记**：横向笔记第 15 行称"扩展一旦被安装，其函数工具直接继承扩展自身权限"是准确的，但未提及仓库里能找到 `registerFunctionTool` 调用点这一事实——即代码库中并没有除 SD 插件之外的"内置"工具，绝大多数工具面貌都来自第三方扩展或运行期临时注册，无法在静态代码层面穷举。
 
 依据：`../../SillyTavern/public/scripts/extensions/stable-diffusion/index.js:5452-5484`、`../../SillyTavern/public/scripts/tool-calling.js:988-1137`、`../../SillyTavern/public/scripts/st-context.js:182-186`
 
@@ -288,9 +286,9 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 
 依据：`../../SillyTavern/public/scripts/extensions.js:400-466`,`568-646`,`813-819`,`1698-1740`,`2015-2038`、`../../SillyTavern/src/endpoints/extensions.js:92-156`、`../../SillyTavern/src/plugin-loader.js:40-90`,`179-231`,`237-293`、`../../SillyTavern/default/config.yaml:6`,`59-70`,`154-182`,`392-394`
 
-## 维度 11：STscript / slash command 与 Agent 工具的关系（横向笔记遗漏，重点补充）
+## 维度 11：STscript / slash command 与 Agent 工具的关系
 
-这是横向笔记几乎未涉及的维度，也是 SillyTavern 工具面的最大非显式扩展路径。
+STscript 是 SillyTavern 工具面的最大非显式扩展路径。
 
 ### 11.1 模型输出能否直接触发 slash command？
 
@@ -325,6 +323,8 @@ Quick Reply 扩展（`public/scripts/extensions/quick-reply/`）监听 `CHARACTE
 - 若某个 `executeOnAi` 的 QR 里调用了 `ToolManager.registerFunctionTool()`（通过 `getContext()` 或直接调用），它可以在每次 AI 回复后动态修改注册表——例如根据最新消息内容条件性地注册不同工具。
 - World Info（lorebook）的 `automationId` 字段可在某个词条被激活时触发 QR（`world-info.js:902` emit `WORLD_INFO_ACTIVATED` → `quick-reply/index.js:302` → `handleWIActivation`）。这意味着：**角色卡或 World Info 内容一旦被激活，就能触发 STscript 执行，而不需要借助 tool_calls**。这是一条完全独立于函数调用机制的、"内容驱动的代码执行"路径。
 
+结合 11.2：`/tools-register` 对 action closure 的来源没有任何限制（`tool-calling.js:988-1137`），因此上述内容驱动的 STscript 执行若包含 `/tools-register` 命令，即可注册或覆盖模型可调用的工具定义。
+
 ### 11.4 宏展开是否发生在 tool action 结果上？
 
 工具结果通过 `#formatToolInvocationMessage` 写入消息 `mes` 的是原始 HTML（`document.createElement` 拼装，`textContent` 写入，不做宏展开）；消息进入 `messageFormatting()` 时会经历 `getRegexedString()`，但工具调用消息的 `is_system = true`（`tool-calling.js:894`）且 `ch_name = systemUserName`，在 `messageFormatting` 里被判断为"allow markdown but skip regex"（`script.js:1774-1777`），因此**工具调用消息本身不会触发 regex 脚本**，宏展开也不会再次处理其内容。
@@ -335,7 +335,7 @@ Quick Reply 扩展（`public/scripts/extensions/quick-reply/`）监听 `CHARACTE
 
 ## 维度 12：子 Agent 与任务委派
 
-**未找到内建的"子 Agent"或"委派"机制**（代码层面没有类似 LobeHub `lobe-agent` 或 VCPChat 任务委派的显式接口）。但有几个路径可以构成事实上的自主循环：
+**未找到内建的"子 Agent"或"委派"机制**。但有几个路径可以构成事实上的自主循环：
 
 1. **函数调用递归**（已在维度 5 描述）：`depth < RECURSE_LIMIT`（最大 50 或用户修改）下的 `Generate` 尾调用。每个递归轮次就是一次完整的模型请求，模型可以再次发起 tool_calls，实现链式 Agent 行为，这是代码中最直接的"Agent 循环"实现。
 2. **群聊自动模式**（`autoModeWorker`，`group-chats.js:139-187`）：`setInterval(groupChatAutoModeWorker, autoModeDelay*1000)` 定时轮询，每次调用 `generateGroupWrapper(true, 'auto', ...)`，在群聊场景下让不同角色轮流生成消息，这是"自主循环"的时间驱动来源；若群聊成员有工具调用能力，则每轮触发的生成都可能进入函数调用递归。
@@ -348,58 +348,17 @@ Quick Reply 扩展（`public/scripts/extensions/quick-reply/`）监听 `CHARACTE
 
 依据：`../../SillyTavern/public/scripts/group-chats.js:117-187`、`../../SillyTavern/public/scripts/slash-commands.js:1805-1833`
 
-## 维度 13：安全审计
-
-逐条列出攻击路径，标注可利用性（利用条件的现实程度）和前提条件，并区分"已确认"（代码直接支持该结论）与"需进一步验证"（推测成分较大，未做端到端 PoC）。
-
-### 13.1 扩展 action 同权执行——已确认
-
-模型只要能让某个已注册工具被调用，该工具的 `action` 就会在浏览器主上下文以当前用户身份执行，可访问 `getContext()` 暴露的全部内部 API（含变量、World Info、slash command 执行）与任意 `fetch`。**前提条件**：目标 SillyTavern 实例已安装一个注册了 Agent 工具的扩展（内置只有 SD 插件），且用户已启用 `function_calling`。**可利用性**：一旦满足前提，模型只需在回复中正常触发 tool_calls 即可执行，无需额外漏洞；风险大小完全取决于该扩展 action 本身做了什么，SillyTavern 核心没有提供任何降权手段。参见维度 7/9。
-
-### 13.2 Prompt 注入触发工具或 slash command——已确认存在路径，端到端利用需进一步验证
-
-结合维度 11：`/tools-register` 可以把一段 STscript closure 注册为模型可调用工具；如果这条 `/tools-register` 命令本身来自角色卡首条消息、World Info 词条正文，或是被 `automationId` 触发的 Quick Reply，那么**内容作者（角色卡/世界书发布者）就能在受害者不知情的情况下为该角色永久定义任意工具**，且该工具 action 可以是任意 STscript（包括再次调用 `/genraw` 发起隐藏生成、`/inject` 篡改后续 prompt、读写全局变量）。这一步"定义"已在代码中确认可行（`tool-calling.js:988-1137` 对 action closure 没有来源限制）。
-
-**已确认**的是机制存在；**需进一步验证**的是"纯文本 prompt 注入"（即模型在对话中被诱导输出看起来像 slash command 的文本）能否被当前渠道直接执行——按维度 11.1 的结论，AI 回复文本本身不会被 `processCommands` 解析,只有用户主动发送以 `/` 开头的消息才会。因此**模型自身输出的文本不能直接触发 slash command**,除非:
-- 该文本被某个 QuickReply/宏/工具 action 又转手传给 `executeSlashCommandsWithOptions`(需要具体扩展存在这种"回填"逻辑,笔记未找到 SillyTavern 核心自带此类逻辑,只在维度 11.3 的自动执行 QR 里发现"消息渲染完成后按固定预设执行",而不是"把 AI 回复内容当 slash command 解析执行");
-- 或者已经存在一个恶意工具/QR,其 action 本身会把上一条 AI 消息的文本内容拿来做二次 `/run` 之类的操作(这需要额外的、笔记未在核心代码中发现的"回填"实现,视为需要更具体验证)。
-
-**结论**:"内容驱动定义工具"是已确认的供应链风险,"模型输出文本被自动当作 slash command 执行"在核心代码中未找到直接证据,应标记为**未确认**、需要针对具体第三方扩展/QR 预设单独审查。
-
-### 13.3 恶意角色卡/世界书注入——部分已确认
-
-- 角色卡 `data.extensions.depth_prompt` 及 World Info 词条内容会被拼进 prompt(`script.js:4420-4427`),这是标准的间接提示注入面,与 Agent 工具结合后风险被放大:如果受害者的账号上已经装有支持 `/tools-register` 或类似"动态注册工具"能力的扩展/QR 预设,恶意角色卡可以在首次加载时通过嵌入的 QuickReply(`automationId`)自动执行一段 STscript,为自己注册专属工具/篡改现有工具的 `action`——**已确认**该链路在代码层面可行(`world-info.js:902` → QuickReply `handleWIActivation` → `qr.execute()` → 任意 STscript,含可能的 `/tools-register`)。
-- **需进一步验证**:实际角色卡分发生态中是否存在会自动导入并启用来源不明的 QuickReply 预设的默认行为(本次调查未去检验角色卡导入流程是否会自动把卡内嵌的 QuickReply/世界书设为"自动执行"状态,还是需要用户手动勾选)。
-
-### 13.4 服务端 plugin 提权——已确认,但前提条件较高
-
-`enableServerPlugins` 默认 `false`,一旦管理员显式开启并把不可信代码放进 `plugins/` 目录,`loadFromFile` 用 `import()` 直接执行,该代码拥有完整 Node.js 权限(文件系统、子进程、网络),不存在任何 sandbox(`plugin-loader.js:150-160`,`179-231`)。**可利用性**:需要管理员主动开启配置 + 主动安装恶意/存在后门的插件,不是远程可直接触发的漏洞,但一旦满足,提权是彻底的(等同于服务器本地代码执行)。`enableServerPluginsAutoUpdate`(默认 `true`,但只在插件已启用时生效)会让已安装插件的上游仓库后续任意 push 都被自动 `git pull` 并在下次重启后执行,构成持续性供应链暴露面——**已确认**。
-
-### 13.5 第三方 Git 安装供应链——已确认部分环节,需进一步验证的环节也有
-
-- 已确认:安装 endpoint 校验 URL protocol(仅 `http/https`)、用 `sanitize-filename` 净化目录名防止路径穿越、要求登录(`requireLoginMiddleware` 全局挂载于 `setupPrivateEndpoints` 之前,`server-main.js:248,278`)、安装 `global` 扩展需要 `request.user.profile.admin`(`extensions.js:96-99`)。前端对非官方 URL 弹一次性信任警告,但**用户可一键"不再提醒"**(`extensions.js:1713-1739`),之后同一浏览器账号对任意第三方 URL 都不再警示。
-- 已确认:`enableServerPluginsAutoUpdate`(服务端插件)与前端 `extensions.autoUpdate`(浏览器扩展,默认 `true`)都会自动拉取上游更新,一旦上游仓库或其 CI/CD 被攻陷,受害实例会在下次启动/检查时自动拉入恶意代码——这是标准的 git 供应链攻击面,SillyTavern 未做任何 commit 签名/pin 校验。
-- 需进一步验证:`isValidUrl`(`src/util.js:970-977`)只是 `new URL()` 是否抛错,不解析/校验主机名是否指向内网地址;结合默认 `privateAddressWhitelist.enabled: false`,理论上服务端 `git clone`(通过 `simple-git`,可能触发 DNS 解析和 TCP 连接到用户提供的任意 host)可能被用于探测/触达内网地址,构成 SSRF——但这条路径笔记未验证 `simple-git`/`createGitClient` 是否复用了受 `privateAddressWhitelist` 保护的 fetch 封装,还是直接调用系统 `git`/内置实现绕开该保护,标记为**未确认,需进一步验证**。
-
-### 13.6 CSRF / 未授权 endpoint——已确认为已缓解,非默认暴露
-
-- 已确认:服务端默认启用 CSRF 保护(`csrf-sync`,`server-main.js:167-210`),默认 `disableCsrfProtection: false`;`/api/extensions/*`、`/api/plugins/*` 等敏感 endpoint 均挂在 `requireLoginMiddleware` 之后(`server-main.js:248`,`server-startup.js:142-187`),不存在匿名可访问的工具安装/插件路由。
-- 已确认:默认 `listen: false` + `whitelistMode: true`(仅 `127.0.0.1`/`::1`),即默认部署形态下攻击者需要先能访问到本机端口才谈得上后续攻击。
-- 需进一步验证:多用户模式(`enableUserAccounts`)下,不同账号之间对扩展安装、Quick Reply 预设的隔离粒度笔记未逐一走查(例如 `global` 扩展需要 admin,但普通用户能否通过其账号下的第三方扩展间接影响其他用户会话,取决于扩展是否读写了跨用户共享的数据,超出本次工具调查范围)。
-
-依据:`../../SillyTavern/src/server-main.js:167-210`,`248`,`278`,`313`、`../../SillyTavern/src/server-startup.js:142-187`、`../../SillyTavern/src/users.js:1027-1033`、`../../SillyTavern/src/endpoints/extensions.js:92-125`、`../../SillyTavern/src/util.js:970-977`、`../../SillyTavern/src/plugin-loader.js:150-160`,`179-231`,`237-293`、`../../SillyTavern/public/scripts/extensions.js:1713-1739`、`../../SillyTavern/public/scripts/world-info.js:902`、`../../SillyTavern/public/scripts/tool-calling.js:988-1137`
-
-## 维度 14:与消息渲染器调查笔记的交叉点
+## 维度 13：与消息渲染器调查笔记的交叉点
 
 参照 `../消息渲染器/SillyTavern-消息渲染调查笔记.md`,交叉点集中在"工具调用结果如何呈现"和"模型能否用文本伪造出工具调用的视觉/语义效果"两个问题上。
 
-### 14.1 工具调用如何呈现
+### 13.1 工具调用如何呈现
 
 渲染器笔记第 106、109 行已指出:`extra.tool_invocations` 只是"标记该消息是工具调用消息",消息层没有独立的"工具卡"组件,只是给 `.mes` 加 `toolCall` class,且"纯工具调用且无正文/reasoning 时还会暂时隐藏消息"。本次工具调查确认了这份数据的生产端:`ToolManager.saveFunctionToolInvocations()` 生成的 `mes` 是一段手工拼装的 `<details><summary>Tool calls: ...</summary><pre><code class="language-json">...</code></pre></details>` HTML(`tool-calling.js:864-881`),角色是 `system_avatar`/`systemUserName`、`is_system: true`。这段 HTML 经由标准 `addOneMessage()` → `updateMessageElement()` 装配流程渲染(与渲染器笔记描述的普通系统消息路径一致),**不会经过 `messageFormatting()` 的 Showdown/正则管线**(因为它是直接赋值到 `mes`,被当作系统消息按 `uses_system_ui`/`is_system` 逻辑处理,渲染器笔记第 107 行提到的 `uses_system_ui` 白名单未被这条消息使用,故它只是普通 HTML 字符串走 `.html()` 或等价方式注入)。
 
 结果内容(`i.parameters`/`i.result` 经 `tryParse` 后)是通过 `codeElement.textContent =` 赋值(`tool-calling.js:875`),这是安全的文本节点赋值,不会被当成 HTML 解析,因此工具参数/结果里即使包含 `<script>`或`<img onerror=...>`也不会在这一步造成 XSS。但由于外层 `<details>/<summary>/<pre>/<code>` 结构本身是通过字符串拼接后 `.outerHTML` 输出再赋给消息 `mes`(`#formatToolInvocationMessage` 返回 `detailsElement.outerHTML`),消息渲染管线是否对这段系统消息 HTML 也过一次 DOMPurify,取决于系统消息在 `updateMessageElement()` 里走的具体分支——本次未逐行验证系统消息是否豁免 DOMPurify(渲染器笔记也未专门覆盖 `is_system` 消息的净化路径),**标记为需进一步验证**。
 
-### 14.2 模型能否用文本伪造工具调用外观
+### 13.2 模型能否用文本伪造工具调用外观
 
 **可以从纯视觉/文本层面伪造,但不会被当作真实工具调用处理**。原因:
 
@@ -411,7 +370,7 @@ Quick Reply 扩展（`public/scripts/extensions/quick-reply/`）监听 `CHARACTE
 
 依据:`../../SillyTavern/public/scripts/tool-calling.js:859-909`、`../../SillyTavern/public/script.js:2559`(单条消息装配,参见渲染器笔记"单条消息装配"节)、`../消息渲染器/SillyTavern-消息渲染调查笔记.md` 第 106-109 行、第 245-274 行(HTML 净化与 CSS)
 
-## 维度 15:未验证事项与后续调查缺口
+## 维度 14：未验证事项与后续调查缺口
 
 1. **系统消息(`is_system:true`)是否豁免/部分豁免 DOMPurify**:工具调用消息本身是系统生成的可信 HTML,但没有在代码中确认 `updateMessageElement()` 对 `is_system` 消息走的净化分支是否与普通 AI 消息完全一致。若存在豁免,而某个工具的 `action` 返回值被拼进了系统消息的其他字段(目前看只有 `tryParse` 后的 `textContent` 赋值,风险较低),需要针对性复核。
 2. **"模型输出文本被自动当作 slash command 执行"的具体实现是否存在于某些常用第三方扩展/QuickReply 预设中**:核心代码未发现此类"回填"逻辑,但笔记只覆盖了仓库自带代码,未逐一审查生态里下载量较高的第三方扩展/QR 预设包是否自行实现了"读取 AI 回复文本 → 交给 `executeSlashCommandsWithOptions`"的功能。

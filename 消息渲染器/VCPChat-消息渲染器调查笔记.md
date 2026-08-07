@@ -26,11 +26,11 @@ VCPChat 在 Electron renderer 进程内依次解释消息协议、更新流式 D
 
 各层的交接规则决定了这套实现的行为：原始消息文本是最终数据源；预处理后的 Markdown 是协议解释结果；Marked 输出是尚未增强的中间 HTML；最终 DOM 还包含大量无法从 HTML 字符串直接恢复的运行时状态。
 
-其中三项设计直接影响正确性与安全边界：
+VCPChat 有三个值得关注的设计点：
 
-- 工具结果在外层 Marked 完成之前始终保持为 HTML 注释占位符，避免任意返回内容破坏宿主消息结构。
-- 流式渲染不反复重画整条消息，而是把稳定前缀固化成块，只对不稳定尾部使用 morphdom。
-- 助手 HTML 可以在主聊天文档中展示内容、应用 scoped CSS 并执行脚本；渲染器因此承担内容运行时的职责，其安全边界取决于整个 Electron 页面与 preload API。
+- **有序占位转换隔离多层协议**：工具结果在外层 Marked 完成之前始终保持为 HTML 注释占位符；`contentPipeline.js` 的保护映射把 VCP 私有语法、LaTeX 和代码围栏拆成互不干扰的词法岛，避免任意返回内容破坏宿主消息结构。
+- **稳定区/尾区 + morphdom**：稳定前缀完整处理一次后永久固化，只对不稳定尾部使用 morphdom 增量更新；长回复中已生成的 Mermaid、动画和工具块不会反复初始化。
+- **富消息运行时**：助手 HTML 可在主聊天文档中展示内容、应用 scoped CSS 并执行脚本；这是 VCPChat 支持 Three.js、Anime.js 等交互能力的架构基础，详见"HTML 渲染方式"一节。
 
 ## 1. 系统位置与边界
 
@@ -315,7 +315,7 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
   -> “返回内容”等字段独立执行收紧后的 Markdown
 ```
 
-独立 Markdown 会先封装完整 HTML 文档，并转义代码围栏外的危险原始 HTML。它并不是与 assistant 正文完全相同的 HTML 运行时；工具返回被视为不应获得同等主页面能力的数据载荷。
+独立 Markdown 会先封装完整 HTML 文档，并转义代码围栏外的原始 HTML。它并不是与 assistant 正文完全相同的 HTML 运行时；工具返回被视为不应获得同等主页面能力的数据载荷。
 
 返回内容的 JavaScript 字符串长度超过 50,000 时只展示前 80 行，完整值保存在内存映射中，展开时再读取。这里的阈值按 `value.length` 判断，并非严格的 UTF-8 字节数；截断只发生在工具字段展示层，不修改历史中的原始消息。
 
@@ -440,53 +440,27 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 因此流式 DOM 不是数据源，甚至也不是最终 HTML 的增量延续。它是对当前原文的临时投影，最终事件会用完整消息重新解释一次全部协议。
 
-## 7. HTML、CSS 与脚本运行时
+## 7. HTML 渲染方式
 
-### 7.1 三种不同的 HTML 路径
-
-源码中“HTML 支持”至少有三种语义，不应混为一谈：
+HTML 在 VCPChat 中有三种承载形式，渲染方式不同：
 
 | 来源 | 运行位置 | 特征 |
 |---|---|---|
 | assistant 正文中的原始 HTML | 主聊天文档 `.md-content` | 可与 Markdown 混排，可提取样式和脚本 |
 | fenced HTML 代码块的预览 | 动态 iframe `srcdoc` | 用户点击预览，具有 iframe 生命周期和消息通信 |
-| 工具结果中的 HTML | 收紧后的工具结果 Markdown | 代码围栏外的原始危险 HTML 被封装或转义 |
+| 工具结果中的 HTML | 收紧后的工具结果 Markdown | 代码围栏外的原始 HTML 被封装或转义 |
 
-第一种是“消息即页面片段”，第二种是“代码工件预览”，第三种是“外部数据展示”。三者的信任能力明显不同。
+第一种是"消息即页面片段"，第二种是"代码工件预览"，第三种是"外部数据展示"。
 
-### 7.2 CSS scope
+### CSS scope
 
-assistant 文本含结构化 HTML、`<style>` 或 `style=` 时，消息获得唯一 scope ID。`<style>` 内容被提取并写入 `document.head`；`contentProcessor.scopeCss()` 将 selector 改写到消息根下。
+assistant 文本含结构化 HTML、`<style>` 或 `style=` 时，消息获得唯一 scope ID。`<style>` 内容被提取并写入 `document.head`；`contentProcessor.scopeCss()` 将 selector 改写到消息根下。样式因此仍处于同一 document 的 cascade 中，作用域依靠自定义字符串解析改写；scoped style 节点在消息删除、更新或清空聊天时单独移除。渲染缓存遇到此类内容会旁路，因为 scope ID 和 `head` 副作用不能复用。
 
-它解决的是样式串扰，不是浏览器级隔离：
+### 脚本执行
 
-- CSS 仍处在同一 document 和 cascade 中。
-- selector 改写由自定义字符串解析完成，不是完整 CSS parser。
-- 复杂 at-rule、嵌套语法和异常 CSS 的处理能力取决于该解析器。
-- scoped style 节点必须在消息删除、更新或清空聊天时单独移除。
+`animation.processAnimationsInContent()` 会收集消息中的 `<script>`：外部 `src` 通过动态 script 元素加载；内联脚本被重新执行；常见 Three.js、Anime.js CDN URL 会改写到本地 vendor 文件；`requestAnimationFrame`、`setTimeout`、`setInterval` 被包装成可登记、可暂停的版本；`document.write/open/close` 被拦截；Anime.js 实例、Three.js renderer 和动画句柄登记到所属消息，用于资源回收。
 
-渲染缓存遇到此类内容会旁路，也是因为 scope ID 和 `head` 副作用不能安全复用。
-
-### 7.3 脚本执行
-
-`animation.processAnimationsInContent()` 会收集消息中的 `<script>`：
-
-- 外部 `src` 通过动态 script 元素加载。
-- 内联脚本被重新执行。
-- 常见 Three.js、Anime.js CDN URL 会改写到本地 vendor 文件。
-- `requestAnimationFrame`、`setTimeout`、`setInterval` 会被包装成可登记、可暂停的版本。
-- `document.write/open/close` 被拦截，降低脚本直接覆盖整个聊天页的概率。
-- Anime.js 实例、Three.js renderer 和动画句柄被登记到所属消息。
-
-这些是兼容性与生命周期包装，不构成安全沙箱。脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM、页面全局对象和 preload 暴露到页面的 API。
-
-### 7.4 Electron 边界
-
-主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，所以消息脚本不能直接 `require()` Node 模块。但这并不等于消息内容无页面权限：它仍能读取和修改聊天 DOM、注册全局监听器、发起页面允许的网络请求，并尝试调用 preload 暴露的能力。
-
-因此安全分析必须跨过渲染器文件，继续查看 chat preload 暴露面和主进程 IPC 参数校验。消息渲染器能确定“脚本可进入主页面”，但不能单独确定这些脚本最终能触达多少本地能力。
-
-另有一个与富内容运行时无关的直接拼接点：`renderer.js` 的流错误 UI 把 `error` 拼进已有 `innerHTML`。这说明输入边界并非只存在于 Marked 主路径；系统错误、通知和旁路 UI 也可能形成独立 HTML sink。
+主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，消息脚本不能直接 `require()` Node 模块；脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM 和页面全局对象。
 
 ## 8. 历史渲染、性能与生命周期
 
@@ -546,11 +520,11 @@ VCPChat 没有为 VCP 语法建立统一 AST，而是在 Marked 前通过有序�
 
 它同时保护运行时状态：已经生成的 Mermaid、按钮、媒体和动画岛可以离开 morphdom 的变化区域，不必依赖越来越复杂的 diff preserve 规则。
 
-### 9.4 富消息能力依赖主页面信任
+### 9.4 富消息能力与运行时治理
 
-原始 HTML、CSS、脚本、Canvas 和 Three.js 让模型输出具备交互能力。消息因而接近在宿主页面执行的小应用，需要按可执行内容确定信任边界。
+原始 HTML、CSS、脚本、Canvas 和 Three.js 让模型输出具备交互能力。消息因而接近在宿主页面执行的小应用，需要对应的运行时治理。
 
-CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与回收；它们没有改变代码运行的信任级别。安全分析需要明确区分运行时治理与权限隔离。
+CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与资源回收，不改变代码运行的宿主上下文。
 
 ## 10. 测试与可验证性现状
 

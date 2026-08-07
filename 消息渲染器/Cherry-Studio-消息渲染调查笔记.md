@@ -32,7 +32,7 @@ Cherry Studio 通过一套分层的消息 UI 运行时完成消息渲染，Markd
 - 普通 Markdown 有白名单净化、安全 URL 处理和专门的回归测试。
 - Home 和 Agent 共用一套消息 UI，由 adapter 注入不同能力。
 
-当前渲染链中优先级最高的安全问题是 HTML artifact 预览。模型输出的 HTML 在 iframe 中启用了 `allow-scripts allow-same-origin allow-forms`；主窗口同时使用 `webSecurity: false`，并向页面暴露完整的 `window.api`。在这组配置下，artifact 脚本可能访问父窗口的 preload API。
+HTML artifact 经受限 sandbox iframe 独立预览，与正文 Markdown 的净化管线分离，处理方式见 Markdown 渲染一节。
 
 ## 总体架构
 
@@ -397,6 +397,38 @@ MessageList
 
 代码块能识别不完整 fence，流式高亮状态会传给 `CodeBlockView`。在 fancy mode 下，HTML fenced code 先显示为 `HtmlArtifactsCard`，不会直接注入正文 DOM。
 
+### HTML 净化
+
+净化管线位于 `packages/ui/src/components/composites/markdown/internal.tsx`：
+
+```text
+raw HTML parse
+  -> rehype sanitize（扩展白名单）
+  -> SVG scaling / ID prefix
+  -> Streamdown harden
+  -> heading ID prefix
+  -> React components
+```
+
+`sanitize.ts:194` 的 schema：
+
+- 禁止 `iframe` 和 `script`；
+- `style` 放入 strip 列表；
+- 不允许 inline event handler；
+- href/xlink 只扩展允许的 HTTP/HTTPS；
+- data URL 只对图片 src 放行；
+- SVG 只允许列举的元素和属性；
+- 保留 citation 与 composer token 所需的少量 data attribute；
+- 对 ID 加 `user-content-` 前缀。
+
+`ChatMarkdown` 会检测 `<style>` 并注册 `MarkdownShadowDomRenderer`，但当前 schema 在 React component mapping 之前 strip 掉 `style`，因此这条 Shadow DOM 路径在现有管线下不可达（注释与实现不一致）。
+
+MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki 生成的高亮 HTML；原始输入先经 Shiki tokenizer 生成待注入的 HTML。
+
+### HTML artifact 预览
+
+Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:9` 默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`，iframe 使用 `srcDoc`，未注入限制网络连接的 CSP。Main window 在 `windowRegistry.ts:88` 配置 `webSecurity: false`、`sandbox: false`、`webviewTag: true`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+
 ### 平滑文本播放
 
 `src/renderer/hooks/useSmoothStream.ts`
@@ -435,85 +467,6 @@ MessageList
 工具投影用 WeakMap 以 part object identity 缓存；流式过程中 settled tool part 可复用旧投影。
 
 AskUserQuestion/approval 流程横跨消息区与输入区：awaiting approval 的 inline tool 可能不显示，approve/deny UI 由 composer override 提供。
-
-## 安全边界
-
-### 普通 Markdown 防护
-
-管线位于 `packages/ui/src/components/composites/markdown/internal.tsx`：
-
-```text
-raw HTML parse
-  -> rehype sanitize（扩展白名单）
-  -> SVG scaling / ID prefix
-  -> Streamdown harden
-  -> heading ID prefix
-  -> React components
-```
-
-`utils/sanitize.ts:194` 的 schema：
-
-- 禁止 `iframe` 和 `script`。
-- 将 `style` 放入 strip 列表。
-- 不允许 inline event handler。
-- href/xlink 只扩展允许 HTTP/HTTPS。
-- data URL 只对图片 src 放行。
-- SVG 只允许列举的元素和属性。
-- 保留 citation 与 composer token 所需的少量 data attribute。
-- 对 ID 加 `user-content-` 前缀，降低 DOM clobbering 风险。
-
-现有测试覆盖 style 网络外带、SVG inline style、`javascript:`、onclick、SVG fragment reference 和 clobber prefix。
-
-### `<style>` 处理路径与净化策略不一致
-
-`ChatMarkdown` 会检测 `<style>`，并为它注册 `MarkdownShadowDomRenderer`，但当前 sanitize schema 会在 React component mapping 之前 strip 掉 `style`。因此这条 Shadow DOM 路径按现有管线应不可达，注释与实际安全策略不一致。
-
-后续处理有两种方案：
-
-- 若模型 style 一律不支持，删除死路径和误导性注释。
-- 若未来要支持，还必须限制 URL、`@import`、字体加载和资源访问；Shadow DOM 本身不足以构成安全边界。
-
-### Shiki `dangerouslySetInnerHTML`
-
-MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki 生成的高亮 HTML。原始输入会先经过 Shiki tokenizer，由它生成待注入的 HTML。这里的安全性依赖 Shiki 对输入内容的正确转义。
-
-仍建议添加显式回归测试，验证 `<img onerror>`、`</code><script>` 等内容在 Shiki 输出中始终被转义，防止未来替换 highlighter 时破坏这个隐含约束。
-
-### P0：HTML artifact 可访问父窗口能力
-
-关键链路：
-
-1. Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`。
-2. 用户点击 preview 后打开 `HtmlArtifactsPopup`。
-3. `HtmlPreviewFrame.tsx:9` 默认 sandbox 为：
-
-   ```text
-   allow-scripts allow-same-origin allow-forms
-   ```
-
-4. iframe 使用 `srcDoc`，未注入限制网络连接的 CSP。
-5. Main window 在 `windowRegistry.ts:88` 配置 `webSecurity: false`、`sandbox: false`、`webviewTag: true`。
-6. preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`。
-7. `window.api` 包含文件读取、文件写入、打开路径等高权限操作。
-
-浏览器安全模型中，sandbox 同时允许 scripts 与 same-origin，会让同源脚本访问父窗口。这里的 HTML 来自模型输出，不能视为可信代码。`contextIsolation: true` 和 `nodeIntegration: false` 不能阻止页面调用显式暴露的 preload API。
-
-可能后果包括：
-
-- 读取本地文件后通过网络外带。
-- 调用写文件、打开路径或其他 preload 能力。
-- 操作父页面 DOM 或伪造应用 UI。
-- 在 `webSecurity: false` 下扩大跨源访问面。
-
-优先修复方向：
-
-1. artifact 默认使用独立 `BrowserView/WebContentsView` 或专用 sandboxed BrowserWindow，且不加载 full preload。
-2. 若继续用 iframe，至少移除 `allow-same-origin`，同时审计 `webSecurity: false` 下的实际隔离效果；更稳妥是模型 artifact 默认不允许 script。
-3. 添加严格 CSP：默认禁网，仅按明确用户动作放行资源。
-4. screenshot/导出改用隔离进程生成截图，不应为此启用 same-origin。
-5. 把“静态文件预览”的 restricted sandbox/CSP 复用为默认策略，再为可信本地 artifact 单独设计授权模式。
-
-代码注释已经指出：在 `webSecurity: false` 下，仅去掉 `allow-same-origin` 仍无法形成可靠边界。因此，普通 artifact 的默认配置需要重新审视。
 
 ## 性能设计总结
 
@@ -562,13 +515,7 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 基于以上情况，本笔记只确认了相关自动化测试的存在，未验证当前快照能否通过这些测试。
 
-建议补强的测试：
-
-- HTML artifact 尝试访问 `parent.api` 的安全集成测试。
-- artifact 网络请求/CSP 测试。
-- Shiki 输出注入 payload 的转义回归测试。
-- 长会话 + 多 execution + 高频工具输出的 renderer benchmark。
-- 未知 part 的可观察 fallback。
+现有证据表明，以下链路仍未看到可在 CI 中无人值守判定结果的直接自动测试：HTML artifact 尝试访问 `parent.api` 的集成路径、artifact 网络请求/CSP、Shiki 输出转义、长会话 + 多 execution + 高频工具输出的 renderer benchmark，以及未知 part 的可观察 fallback。
 
 ## 可维护性观察
 
@@ -629,44 +576,6 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 - settled part identity 仍保持稳定。
 - 用户主动滚离底部后不会被自动滚动抢回。
 
-## 与 VCPChat 的对照
-
-| 维度 | Cherry Studio | VCPChat |
-|---|---|---|
-| 消息协议 | AI SDK 结构化 `UIMessage.parts` | 文本中的 VCP 私有标记与 HTML 协议 |
-| UI 技术 | React component tree | 手工 DOM + post-processing |
-| 流式组装 | execution reader + overlay | 语义块增量 DOM |
-| 收尾 | DB refresh 后 overlay 交接 | 完整消息重新 full render 并替换临时 DOM |
-| 长列表 | Virtua 虚拟化 | DOM 保留，主要暂停不可见动态资源 |
-| Markdown | Streamdown static/streaming | Marked + 后处理 |
-| 普通 HTML | sanitize 白名单 | 基本不净化 |
-| 脚本 | 普通 Markdown 禁止 | 消息脚本可在主 renderer 执行 |
-| 富交互 | 结构化工具组件、隔离 artifact preview | HTML/CSS/script/Three.js 直接运行时 |
-| 主要风险 | HTML artifact iframe 可能触达 preload API | 所有可执行消息 HTML/脚本均接近主页面权限 |
-| 测试 | 大量 Vitest/组件/安全测试 | 未发现专用 renderer 自动化测试 |
-
-Cherry Studio 的总体架构和普通 Markdown 安全性更可控。HTML artifact 仍引入了与 VCPChat 类似的风险：用户打开预览后，模型内容可能获得应用页面的脚本能力。
-
-## 建议优先级
-
-### P0
-
-1. 隔离 HTML artifact：无 full preload、无 parent DOM、默认禁网。
-2. 为该边界添加可执行安全测试，验证无法读取 `parent.api`。
-
-### P1
-
-3. 审计主窗口 `webSecurity: false`、`webviewTag: true` 和完整 preload API 的必要性与 sender validation。
-4. 为 Shiki HTML 注入添加攻击字符串回归测试。
-5. 明确并清理不可达的 Markdown `<style>` Shadow DOM 路径。
-
-### P2
-
-6. 将 `MessagePartsRenderer` 中的协议投影、工具投影缓存和 JSX 分派进一步拆开。
-7. 统一使用经 Zod 验证的 `readCherryMeta()`。
-8. 增加 renderer benchmark，量化长会话、多模型和高频 tool stream 的性能预算。
-9. 为未知 part 提供开发态诊断和可选的安全文本 fallback。
-
 ## 结论
 
-Cherry Studio 使用结构化 parts、分层 overlay、虚拟列表和专门测试组织消息渲染。当前首要问题是 HTML artifact 预览绕开了普通 Markdown 的安全边界，可能让模型生成的脚本进入主应用权限域。
+Cherry Studio 使用结构化 parts、分层 overlay、虚拟列表和专门测试组织消息渲染，普通 Markdown 经白名单净化，HTML artifact 以受限 sandbox iframe 独立预览。

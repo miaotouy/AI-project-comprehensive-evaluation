@@ -79,7 +79,7 @@ deepchat_assistant_blocks
 
 Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既可以在消息内容中显示，也可以通过 artifact store 打开独立预览。
 
-## 5. 安全与隔离边界
+## 5. Artifact 隔离
 
 `HTMLArtifact.vue:4-11` 使用 `srcdoc` 和 `sandbox="allow-scripts allow-same-origin"`；桌面/viewport 预览还会注入 viewport meta 与基础样式（`:83-109`）。`ReactArtifact.vue:1-9` 只使用 `sandbox="allow-scripts"`，内容先经 `formatTemplate` 包装（`:30-38`）。
 

@@ -22,7 +22,7 @@ LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准
 4. **执行位置**在 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts`）分派：builtin 走 `BuiltinToolsExecutor`；MCP 按 `mcpParams.type` 分三路——`cloud` 走 market/discover gateway，`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）。**所有路径执行前**都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash。
 5. **结果回注**统一走 `truncateToolResult`（默认 25,000 字符，`lobe-agent-documents` 例外），截断附带明确的 "[Content truncated...]" 提示文本,防止模型误判内容完整。
 
-对 [Agent 工具横向调查与对比](Agent工具横向对比.md) 中早期结论的修正见各节末尾「纠正」标记；总体结论方向正确，但若干细节（如 `alwaysOnToolIds` 只在 agent mode 生效、`humanIntervention` 判定并非简单的"合并"而是九阶段管道、`disabled` 拦截点是 connector 权限表而非笼统的"connector policy"）需要补充精确到代码行的证据。
+以下各节对工具目录、注入、审批、执行边界给出精确到代码行的证据，其中几处细节需要单独强调：`alwaysOnToolIds` 只在 agent mode 生效（维度 2.1）；`checkInterventionNeeded` 是固定顺序的多阶段判定管道，不是简单的"合并"（维度 6.2）；`disabled` 工具的拦截点位于统一执行入口的 connector 权限表（维度 7.3）。
 
 ## ASCII 调用链图
 
@@ -124,8 +124,6 @@ const isCustomMode = toolMode === 'custom';
 - **custom 模式**（`customModeRules`，`index.ts:251`）：`Object.fromEntries((agentConfig.plugins ?? []).map((id) => [id, true]))`，即工具集合严格等于该 agent 声明的插件列表，不叠加 `alwaysOnToolIds`/`defaultToolIds`/activator。用于聚焦型内建子代理（如 verify agent）。
 - **agent 模式**（`agentModeRules`，`index.ts:253-300`）：用户插件 + `alwaysOnToolIds`（`lobe-agent`/`lobe-activator`/`lobe-skills`/`lobe-skill-store`，`packages/builtin-tools/src/index.ts:75-80`，只在 agent mode 生效——`packages/builtin-tools/src/index.ts:67-69` 的注释明确写"chat mode drops alwaysOnToolIds entirely"）+ 一批**系统级条件覆盖**：`cloud-sandbox` 需要 `runtimeMode==='cloud'`；`local-system`/`browser` 需要 `runtimeMode==='local' && hasDeviceProxy && deviceContext.deviceOnline && deviceContext.autoActivated`；`remote-device` 需要 `deviceCapable && hasDeviceProxy && !deviceLocked`。
 
-**纠正横向笔记**：横向笔记笼统写"Agent 模式的 lobe-agent、activator、skills 与 skill-store 是常开能力"，未指出这条规则**仅在 agent mode 生效**，chat mode 完全不含 `alwaysOnToolIds`（`packages/builtin-tools/src/index.ts:67-69` 注释与 `AgentToolsEngine/index.ts:233-245` 的 `chatModeRules` 均印证：chat 模式的 4 个工具之外没有任何常开项）。
-
 ### 2.2 用户启用状态
 
 用户在 agent 配置里选择的插件（`agentConfig.plugins`）在 agent 模式下被展开为 `rules` 表的 `true` 项（`index.ts:255`），custom 模式下就是唯一来源（`index.ts:251`）。用户对单个 connector 工具的启用/禁用（区别于"插件是否安装"）走另一张表 `connectorTools`，在**执行时**而非**注入时**被检查（见维度 7 的 `getConnectorToolPermission`）——也就是说一个被 connector 禁用的工具，schema 仍会出现在模型的 `tools` 列表里，只是调用时会被硬拒绝，而不是在注入阶段被过滤掉。
@@ -147,15 +145,13 @@ const isModelSupportToolUse = (m: string, p: string) => {
 
 最终工具数组由 `ToolResolver.resolve()`（`packages/context-engine/src/engine/tools/ToolResolver.ts:29-120`）在每个 step 合并：operation 级快照 `operationToolSet.tools` + 累积的 step 级激活 `accumulatedActivations`（例如 activator 动态激活的工具、设备工具、`@mention` 工具）+ 当前 step 的新激活，再按 `allowedToolNames` 做二次过滤（用于把已激活但本轮又被收紧的工具排除）。`stepDelta.deactivatedToolIds.includes('*')` 是 `forceFinish`（超过 `maxSteps`）时的强制清空开关（`ToolResolver.ts:84-93`），确保强制收尾的最后一轮 LLM 调用不带任何工具。
 
-**纠正横向笔记**：横向笔记未提到 `allowExplicitActivation` 的确切拒绝路径和 `forceFinish` 时 `deactivatedToolIds: ['*']` 的工具清空机制；也未指出"工具被 connector 禁用"与"工具是否被注入模型 tools 列表"是两个独立阶段（注入阶段不查 connector 权限，只在执行阶段查）。
-
 **依据**：[AgentToolsEngine](../../lobehub/apps/server/src/modules/Mecha/AgentToolsEngine/index.ts)、[builtin-tools 常量](../../lobehub/packages/builtin-tools/src/index.ts)、[executionTarget.resolveToolMode](../../lobehub/src/helpers/executionTarget.ts)、[ToolsEngine](../../lobehub/packages/context-engine/src/engine/tools/ToolsEngine.ts)、[ToolResolver](../../lobehub/packages/context-engine/src/engine/tools/ToolResolver.ts)、[execAgent 的 functionCall checker](../../lobehub/apps/server/src/services/aiAgent/index.ts)。
 
 ## 3. 模型调用表示与解析
 
 ### 3.1 identifier/apiName 的编解码
 
-LobeHub 完全走**原生 tool call** 路径（OpenAI/Anthropic/Gemini 等 provider 的结构化 `tool_calls`/`function_call` 字段），没有观察到文本协议解析器（不同于 AIO Hub **当前的 VCP 实现**及 VCPToolBox 的 VCP 文本块）。
+LobeHub 完全走**原生 tool call** 路径（OpenAI/Anthropic/Gemini 等 provider 的结构化 `tool_calls`/`function_call` 字段），没有观察到文本协议解析器。
 
 编码：`ToolNameResolver.generate(identifier, apiName, type)`（`packages/context-engine/src/engine/tools/ToolNameResolver.ts:92-122`）拼接为 `identifier____apiName[____type]`（`type` 省略 `builtin`/`default`）。若含非 `[\w-]` 字符（如中文/点号），整段替换为 `MD5HASH_<12位md5>`（`normalizeComponent`，`ToolNameResolver.ts:79-83`）。若拼接后总长 ≥ `TOOL_NAME_MAX_LENGTH`（默认 64，OpenAI 限制，可用环境变量调整或设 0 关闭，`ToolNameResolver.ts:17-51`），先 hash apiName，仍超长再 hash identifier。
 
@@ -196,7 +192,9 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 ### 4.3 URL/路径类参数的处理面
 
 - **本地文件路径**（`lobe-local-system`）：`pathScopeAudit` dynamic resolver（`packages/builtin-tool-local-system/src/interventionAudit.ts:72-106`）从 `path`/`file_path`/`directory`/`oldPath`/`newPath`/`pattern`（若以 `/` 开头）等字段提取路径候选，判断是否越出 `metadata.workingDirectory`（`isPathWithinWorkingDirectory`，`interventionAudit.ts:19-32`），越界则要求人工介入（`policy: 'required'`），否则免审批（`default: 'never'`，manifest 声明见 `packages/builtin-tool-local-system/src/manifest.ts:13-19` 等多处 `humanIntervention: { dynamic: { type: 'pathScopeAudit' } }`）。但这只是**审批触发条件**，不是硬性访问控制——`readFile`/`writeFile`/`editFile`/`moveFiles`/`searchFiles`/`grepContent`/`globFiles` 均走同一 resolver。`runCommand`（shell 命令）不做路径提取，直接 `humanIntervention: 'required'`（`manifest.ts:229`），意味着 shell 命令内嵌的任意路径不经过 `pathScopeAudit`，只靠通用的 `required` 审批 + 全局安全黑名单（维度 6）兜底。
-- **URL 类参数**：`lobe-web-browsing`/MCP HTTP endpoint 的 URL 处理面未发现显式 SSRF 防护代码（如禁止访问 `127.0.0.1`/内网 CIDR、DNS rebinding 防护）；已委托后台子调查代理进一步核实自定义插件 OpenAPI 调用与 MCP HTTP transport 是否有网关层过滤，结论见维度 10/12。
+- **URL 类参数的网络访问范围**：
+  - `lobe-web-browsing` 默认爬虫 `naive` 通过 `ssrfSafeFetch`（`packages/ssrf-safe-fetch/index.ts:64-128`）发起请求，底层用 `request-filtering-agent` 的 `RequestFilteringHttpAgent`/`RequestFilteringHttpsAgent` 挂到 `fetch` 的 `agent`，默认 `allowPrivateIPAddress: false`（受环境变量 `SSRF_ALLOW_PRIVATE_IP_ADDRESS` 控制，`index.ts:72-83`），私有/内网地址请求会被拒绝并抛 `SSRF blocked` 错误；其余 crawler 实现（`jina`/`browserless`/`search1api`/`tavily`/`exa`/`firecrawl`）只转发到固定的第三方服务域名，不直接对用户提供的 URL 发起请求。
+  - 服务端 MCP HTTP client（`src/libs/mcp/client.ts:206-208`）与桌面 `MCPClient`（`apps/desktop/src/main/libs/mcp/client.ts:53-56`）用官方 `StreamableHTTPClientTransport` 直连用户配置的 MCP server URL，未包 `ssrfSafeFetch` 或等价的私网地址过滤；该第三方 SDK 自身是否有内建私网过滤未审查源码（列入未验证事项）。
 
 **依据**：[interventionAudit.ts](../../lobehub/packages/builtin-tool-local-system/src/interventionAudit.ts)、[local-system manifest](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[errorClassification](../../lobehub/apps/server/src/services/toolExecution/errorClassification.ts)、[ToolsEngine utils](../../lobehub/packages/context-engine/src/engine/tools/utils.ts)。
 
@@ -228,9 +226,7 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 
 ### 5.6 headless 场景下无法等待人工的返回形态
 
-`userInterventionConfig.approvalMode === 'headless'` 时（后台任务/API 无 UI 场景，`apps/server/src/services/aiAgent/index.ts:1174` 默认就是 `{ approvalMode: 'headless' }`），`GeneralChatAgent`（`llm_result` phase）不会发 `request_human_approve`，而是发 `resolve_blocked_tools`（`GeneralChatAgent.ts:551-558`）。这个指令由 `resolveBlockedTools` 执行器（`packages/agent-runtime/src/executors/resolveTools.ts:78-173`）处理：把每个待批准工具直接标记为失败结果 `{ content: 'Blocked by security/privacy.', error: 'blocked_by_security_privacy', success: false }`，`pluginIntervention: { status: 'rejected', rejectedReason: 'blocked_by_security_privacy' }`，然后照常进入 `tools_batch_result` 让模型看到"这个工具被拒绝"并有机会重新规划——而不是让整个 operation 挂起等待一个不存在的人工响应。
-
-**纠正横向笔记**：横向笔记只写"headless 模式返回受阻状态，让 Agent 能重规划"，笼统正确，但未指出 headless 下真正会被拒绝的只是"需要人工介入"的那部分工具（`toolsNeedingIntervention`），且 headless 模式对 `dynamicPolicy`/全局审计中标记为可覆盖（非 `always`）的规则是**自动放行**而非拒绝（`GeneralChatAgent.ts:200-204, 211-215, 229-234`）——headless 不是"全部工具都拒绝"，而是"能自动放行的照常放行，必须人工的转为拒绝结果"。
+`userInterventionConfig.approvalMode === 'headless'` 时（后台任务/API 无 UI 场景，`apps/server/src/services/aiAgent/index.ts:1174` 默认就是 `{ approvalMode: 'headless' }`），`GeneralChatAgent`（`llm_result` phase）不会发 `request_human_approve`，而是发 `resolve_blocked_tools`（`GeneralChatAgent.ts:551-558`）。这个指令由 `resolveBlockedTools` 执行器（`packages/agent-runtime/src/executors/resolveTools.ts:78-173`）处理：把每个待批准工具直接标记为失败结果 `{ content: 'Blocked by security/privacy.', error: 'blocked_by_security_privacy', success: false }`，`pluginIntervention: { status: 'rejected', rejectedReason: 'blocked_by_security_privacy' }`，然后照常进入 `tools_batch_result` 让模型看到"这个工具被拒绝"并有机会重新规划——而不是让整个 operation 挂起等待一个不存在的人工响应。headless 下真正会被拒绝的只是"需要人工介入"的那部分工具（`toolsNeedingIntervention`），对 `dynamicPolicy`/全局审计中标记为可覆盖（非 `always`）的规则是**自动放行**而非拒绝（`GeneralChatAgent.ts:200-204, 211-215, 229-234`）——headless 不是"全部工具都拒绝"，而是"能自动放行的照常放行，必须人工的转为拒绝结果"。
 
 **依据**：[AgentRuntime.step](../../lobehub/packages/agent-runtime/src/core/runtime.ts)、[GeneralChatAgent.toLLMCall/forceFinish](../../lobehub/packages/agent-runtime/src/agents/GeneralChatAgent.ts)、[ToolResolver 的 deactivatedToolIds](../../lobehub/packages/context-engine/src/engine/tools/ToolResolver.ts)、[AgentRuntimeService 默认 maxSteps](../../lobehub/apps/server/src/services/agentRuntime/AgentRuntimeService.ts)、[resolveToolTimeout](../../lobehub/apps/server/src/modules/AgentRuntime/resolveToolTimeout.ts)、[call_tool/call_tools_batch 执行器](../../lobehub/packages/agent-runtime/src/executors/tool.ts)、[resolve_blocked_tools/resolve_aborted_tools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[callLlm 重试与中断检测](../../lobehub/packages/agent-runtime/src/executors/callLlm.ts)、[errorClassification 与 normalizeExecutionError](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[execAgent headless 默认值](../../lobehub/apps/server/src/services/aiAgent/index.ts)。
 
@@ -266,11 +262,11 @@ api 级配置存在则**完全覆盖** manifest 级（不是合并/叠加，是�
 | 9a. `allow-list` 匹配 | `GeneralChatAgent.ts:252-260` | 检查 `"identifier/apiName"` 是否在 `userInterventionConfig.allowList` |
 | 9b. `manual` 默认 | `GeneralChatAgent.ts:262-273` | 调用 `InterventionChecker.shouldIntervene`，用工具自身 config + 该次调用共用的 `securityBlacklist` |
 
-**纠正横向笔记**：横向笔记把这个过程简写为"合并 API 级和 manifest 级 humanIntervention、全局安全审计、动态规则"，容易让人以为是"取最严"的简单合并。实际是**顺序判定的管道**，且顺序本身带有语义——例如"未知 manifest 强制审批"只对 manual/allow-list 生效，`auto-run`/`headless` 用户被视为主动接受风险而不受此约束（`GeneralChatAgent.ts:244` 注释原文："auto-run users accept the risk"）。
+这九阶段是**顺序判定的管道**，阶段顺序本身带有语义：例如"未知 manifest 强制审批"（阶段 8）只对 manual/allow-list 生效，`auto-run`/`headless` 用户被视为主动接受风险而不受此约束（`GeneralChatAgent.ts:244` 注释原文："auto-run users accept the risk"）。
 
 ### 6.3 四种审批模式的行为矩阵
 
-见文末独立表格「审批行为矩阵」。核心差异：
+核心差异：
 
 - `manual`（默认）：仅工具自身 `humanIntervention` 配置决定，命中 `'never'` 放行，其余（`'required'`/`'always'`/规则未匹配的默认 `'required'`）都要求介入
 - `allow-list`：忽略工具自身配置（除 `always`/全局审计仍然生效），只看 `"identifier/apiName"` 是否在用户白名单
@@ -323,7 +319,7 @@ running --[request_human_approve]--> waiting_for_human
 
 `pluginIntervention.status` 枚举：`'pending'|'approved'|'rejected'|'aborted'|'none'`（`packages/types/src/message/common/tools.ts:7-9`）。这个字段持久化在 `messagePlugins.intervention` 数据库列（`packages/types/src/message/db/item.ts:49`），意味着即使进程重启/serverless 冷启动，`waiting_for_human` 状态可以从数据库恢复——`GeneralChatAgent.getCurrentTurnPendingToolMessages`（`GeneralChatAgent.ts:341-359`）专门处理"重新水化后 pending 行还留着"的场景，且明确把扫描范围限制在**当前轮**（最近一条带 `tool_calls` 的 assistant 消息之后），防止历史遗留的 pending 行（用户从未点击过 approve/reject 就离开）劫持后续所有轮次。
 
-**纠正横向笔记**：横向笔记写"`humanApprove` executor 把 operation 置为 waiting_for_human、创建持久化 pending tool message"，这部分是对的，但没有提到 approve/reject 分别对应两个不同的 `nextContext.phase`（`human_approved_tool` vs `user_input`），也没有提到 reject 有 `rejectAndContinue`（继续等其他 pending 工具）和 `rejectAndHalt`（整个操作进入不可恢复的 `interrupted`）两种子路径——这两种路径的选择由前端调用时传的 `rejectAndContinue` 布尔值决定（`HumanInterventionHandler.ts:47,154-158`），横向笔记未区分。
+approve 与 reject 走两个不同的 `nextContext.phase`（`human_approved_tool` vs `user_input`）；reject 有 `rejectAndContinue`（继续等其他 pending 工具）和 `rejectAndHalt`（整个操作进入不可恢复的 `interrupted`）两种子路径，由前端调用时传的 `rejectAndContinue` 布尔值决定（`HumanInterventionHandler.ts:47,154-158`）。
 
 **依据**：[GeneralChatAgent.checkInterventionNeeded](../../lobehub/packages/agent-runtime/src/agents/GeneralChatAgent.ts)、[InterventionChecker](../../lobehub/packages/agent-runtime/src/core/InterventionChecker.ts)、[globalAudit](../../lobehub/packages/agent-runtime/src/audit/globalAudit.ts)、[defaultSecurityBlacklist](../../lobehub/packages/agent-runtime/src/audit/defaultSecurityBlacklist.ts)、[intervention 类型](../../lobehub/packages/types/src/tool/intervention.ts)、[humanApprove executor](../../lobehub/packages/agent-runtime/src/executors/humanApprove.ts)、[HumanInterventionHandler](../../lobehub/apps/server/src/services/agentRuntime/HumanInterventionHandler.ts)、[ToolIntervention 类型](../../lobehub/packages/types/src/message/common/tools.ts)、[SecurityBlacklistWarning UI](../../lobehub/src/features/Conversation/Messages/AssistantGroup/Tool/Detail/Intervention/SecurityBlacklistWarning.tsx)、[dynamicInterventionAudits 注册表](../../lobehub/packages/builtin-tools/src/dynamicInterventionAudits.ts)。
 
@@ -343,6 +339,11 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 
 服务端工具引擎判断 `local-system`/`browser` 是否注入模型的条件里包含 `deviceContext.deviceOnline && deviceContext.autoActivated`（`apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:268-273, 276-280`）；而具体某次调用会不会真的转发到某台设备，由 `resolveExecutionPlan`（`src/helpers/executionTarget.ts:378-469`）在 run 开始时**一次性**决定，产出 `ExecutionPlan.kind`：`'device'`（已路由到 `deviceId`）/`'device-unrouted'`（设备能力上但没有可路由设备，原因见 `ExecutionPlanUnroutedReason`）/`'sandbox'`/`'none'`。`auto` 模式只有恰好一台设备在线时才自动路由，多台在线则保持 unrouted 等模型通过 `remote-device` 工具主动选择（`executionTarget.ts:455-464`）。
 
+设备池范围与 bot 场景的访问方防线：
+
+- `RemoteDeviceExecutionRuntime.queryDeviceList` 只枚举当前 `userId` 的个人设备池 ∪ 当前 workspace 的共享设备池（`apps/server/src/services/toolExecution/serverRuntimes/remoteDevice.ts:26-58`），不能跨用户/跨工作区枚举或激活他人设备——`activateDevice` 以及后续 `local-system`/`browser` 调用被限定在同一账户/工作区成员范围内。
+- `resolveDeviceAccessPolicy`（`apps/server/src/services/aiAgent/deviceAccessPolicy.ts:78-108`）在 bot 场景只允许 `isOwner`/`bot-personal-platform` 使用设备工具，外部发送者（`bot-external-sender`）被拒绝；若某平台 webhook 未能解析出 `senderExternalUserId`，会落到 `bot-owner-not-configured` 分支同样拒绝，属 fail-closed 设计（各平台 webhook 的该字段解析本次未逐一验证）。
+
 ### 7.3 connector 逐工具权限二次检查（`disabled` 的强制点）
 
 `getConnectorToolPermission`（`src/libs/mcp/connectorPermissionCheck.ts:23-44`）查 `ConnectorModel.resolveByIdentifiers([identifier], agentId)` 找到 connector 行，再查 `ConnectorToolModel.queryByConnector` 按 `toolName` 找权限值。`ToolExecutionService.executeTool` 在**分派到任何执行分支之前**（`index.ts:89-104`，"Check before any execution so that disabled tools are blocked universally"）先做这个检查：`permission === ConnectorToolPermission.disabled` → 立即返回 `buildBlockedToolResponse(apiName)`（`connectorPermissionCheck.ts:47-60`），内容是提示用户"该工具已被禁用，可在 Settings > Connectors 重新开启"，**success: true**（不是错误，是一个正常的、内容为拒绝说明的工具结果，模型会读到但不会触发错误重试逻辑）。这一道检查覆盖 **所有** 执行路径——注释明确写"covers ALL paths + qstash: Lobehub market skills, Composio, MCP connectors, and execAgent/qstash alike"（`index.ts:83-88`），查询失败（DB 异常）时 `getConnectorToolPermission` 捕获异常返回 `null`（`connectorPermissionCheck.ts:41-43`，"never block execution due to DB error"）——即数据库故障时**默认放行**而不是默认拒绝，这是一个显式的可用性优先设计取舍。
@@ -351,9 +352,7 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 
 已委托后台子调查代理核实 `apps/desktop/src/main/libs/mcp/client.ts` 的 stdio/Streamable HTTP transport 细节和是否有沙箱隔离,结论见维度 10。
 
-**纠正横向笔记**：横向笔记写"connector permission + runtime"是高风险路径的边界，方向正确，但没有点出 `getConnectorToolPermission` 数据库查询失败时的 fail-open 行为，也没有点出这道检查发生在**所有类型**（mcp/builtin/composio/qstash）统一入口处、而不是分散在各执行路径里各自检查。
-
-**依据**：[ToolExecutionService](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[connectorPermissionCheck](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[executionTarget.resolveExecutionPlan](../../lobehub/src/helpers/executionTarget.ts)、[AgentToolsEngine 设备门](../../lobehub/apps/server/src/modules/Mecha/AgentToolsEngine/index.ts)、[builtin executors 字段](../../lobehub/packages/types/src/tool/builtin.ts)、[local-system manifest 的 client executor](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)。
+**依据**：[ToolExecutionService](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[connectorPermissionCheck](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[executionTarget.resolveExecutionPlan](../../lobehub/src/helpers/executionTarget.ts)、[AgentToolsEngine 设备门](../../lobehub/apps/server/src/modules/Mecha/AgentToolsEngine/index.ts)、[builtin executors 字段](../../lobehub/packages/types/src/tool/builtin.ts)、[local-system manifest 的 client executor](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[remoteDevice 执行体](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/remoteDevice.ts)、[deviceAccessPolicy](../../lobehub/apps/server/src/services/aiAgent/deviceAccessPolicy.ts)。
 
 ## 8. 结果处理与回注
 
@@ -387,7 +386,7 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 
 1. `content` 字段直接来自工具执行结果或 MCP 返回值，**没有观察到通用的输出内容安全过滤/脱敏层**（例如没有统一扫描工具结果里是否混入了 prompt injection 载荷，或工具结果本身携带的敏感数据）。截断只解决"过长"，不解决"内容本身是否可信"。
 2. `sanitizePersistedTools`/`sanitizeStateToolCalls`（`callLlmFinalizer.ts:104-124`）只清洗 **模型自己发出的 tool_calls 参数**，跟工具**返回**的结果内容无关。
-3. MCP/自定义插件返回的内容一旦进入 `content`，会被当作普通工具结果文本回注给模型，理论上一个恶意/被劫持的 MCP server 可以在返回值里塞入伪装成系统指令的文本，实现所谓"工具结果侵入式 prompt injection"——这与维度 12 的安全审计交叉，见彼处标注为"需要进一步验证"（未发现输出侧的注入检测/隔离标记）。
+3. MCP/自定义插件返回的内容一旦进入 `content`，会被当作普通工具结果文本原样回注给模型，未观察到输出侧的内容安全过滤或注入检测层——`truncateToolResult` 只截断长度不检查内容，`ToolExecutionService.executeTool` 与各 `serverRuntimes/*.ts` 未对返回内容做指令注入模式扫描；部分工具的 `systemRole.ts` 出现过提示模型"工具结果中的指令不可信"之类的措辞，属于文本级缓解，本次未逐一确认覆盖率。
 
 **依据**：[truncateToolResult](../../lobehub/apps/server/src/utils/truncateToolResult.ts)、[ToolExecutionService 截断调用点](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[HumanInterventionHandler.reject](../../lobehub/apps/server/src/services/agentRuntime/HumanInterventionHandler.ts)、[resolveBlockedTools/resolveAbortedTools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[buildBlockedToolResponse](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[callLlmFinalizer 的 sanitize](../../lobehub/packages/agent-runtime/src/executors/callLlmFinalizer.ts)。
 
@@ -404,13 +403,13 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-skill-maintainer` | 技能维护 | 未核实 | server | `hidden`,`discoverable:false` | 修改已安装技能 |
 | `lobe-self-iteration`(`selfFeedbackIntentManifest`) | 自我迭代信号 | 未核实 | server | `hidden`,`discoverable:false` | 影响 agent 自身配置的反馈回路 |
 | `agentSignalReview`/`Reflection`/`FeedbackIntent`/`SkillManagement`（agent-signal 系列） | 内部信号处理 | 未核实 | server | `hidden`,`discoverable:false` | 框架内部，非用户直接调用面 |
-| `lobe-browser` | `navigate`/`snapshot`/`click`/`fill`/`press`/`scroll`/`screenshot`/`readPage` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-browser/src/manifest.ts:6-140`，逐条核对无 `humanIntervention` 字段） | `executors:['client','server']`；`discoverable:isDesktop` | `runtimeManagedToolIds`,`hidden` | **点击/填表/导航零审批**，驱动的是用户真实设备上的浏览器会话（见维度 12.2） |
+| `lobe-browser` | `navigate`/`snapshot`/`click`/`fill`/`press`/`scroll`/`screenshot`/`readPage` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-browser/src/manifest.ts:6-140`，逐条核对无 `humanIntervention` 字段） | `executors:['client','server']`；`discoverable:isDesktop` | `runtimeManagedToolIds`,`hidden` | **点击/填表/导航零审批**，驱动的是用户真实设备上的浏览器会话 |
 | `lobe-local-system` | `readFile`/`writeFile`/`editFile`/`moveFiles`/`searchFiles`/`grepContent`/`globFiles`/`runCommand`/`getCommandOutput`/`killCommand` | 文件类 api 走 `pathScopeAudit` dynamic（越界才 `required`）；`runCommand` 直接 `'required'`（`packages/builtin-tool-local-system/src/manifest.ts` 各处） | `executors:['client','server']`；`discoverable:isDesktop` | `runtimeManagedToolIds`,`hidden` | 本机文件系统 + shell，`pathScopeAudit` 只是审批触发条件不是访问控制 |
 | `lobe-memory` | 用户记忆读写 | 未核实（`chatConfig.memory.toolPermission` 有 `read-only`/`read-write` 区分，见 `packages/types/src/agent/chatConfig.ts:19`） | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 跨会话持久化的用户隐私数据 |
-| `lobe-web-browsing` | `search`/`crawlSinglePage`/`crawlMultiPages` | 未声明 → `'never'`（`packages/builtin-tool-web-browsing/src/manifest.ts:8-69`） | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 爬虫 URL 参数**未发现 SSRF 防护**（见维度 12.1），零审批 |
+| `lobe-web-browsing` | `search`/`crawlSinglePage`/`crawlMultiPages` | 未声明 → `'never'`（`packages/builtin-tool-web-browsing/src/manifest.ts:8-69`） | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 默认爬虫经 `ssrfSafeFetch` 请求、默认禁私网（维度 4.3）；`search`/`crawl*` 零审批 |
 | `lobe-cloud-sandbox` | `executeCode`/`listFiles`/`readFile`/`searchFiles`/`moveFiles`/`writeFile`/`editFile`/`runCommand`/`getCommandOutput`/`killCommand`/`grepContent`/`globFiles`/`exportFile` | 写入/执行类（`executeCode`/`moveFiles`/`writeFile`/`editFile`/`runCommand`）`'required'`；只读类（`listFiles`/`readFile`/`searchFiles`/`grepContent`/`globFiles`/`getCommandOutput`/`killCommand`/`exportFile`）未声明→`'never'`（`packages/builtin-tool-cloud-sandbox/src/manifest.ts`） | server（云沙箱） | `defaultToolIds`,`runtimeManagedToolIds`,`hidden` | 隔离在云沙箱容器内执行任意代码/命令，出网范围未核实 |
 | `lobe-agent-documents` | 文档归档读取 | 未核实 | server | 非 hidden | 结果**永不截断**（`ARCHIVE_BYPASS_IDENTIFIERS`），是归档内容读取面 |
-| `lobe-creds` | `connectComposioService`/`initiateOAuthConnect`/`injectCredsToSandbox`/`saveCreds` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-creds/src/manifest.ts:10-102`） | server（经 `MarketService.market.creds`） | 非 hidden | 保存/注入凭据、发起第三方 OAuth 授权，零审批（见维度 12.3） |
+| `lobe-creds` | `connectComposioService`/`initiateOAuthConnect`/`injectCredsToSandbox`/`saveCreds` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-creds/src/manifest.ts:10-102`） | server（经 `MarketService.market.creds`） | 非 hidden | 保存/注入凭据、发起第三方 OAuth 授权，零审批（维度 10.5） |
 | `lobe-knowledge-base` | 知识库检索 | 未核实 | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 读取用户知识库内容 |
 | `lobe-image-generation` | 图像生成 | 未核实 | server | `chatModeAllowedToolIds`,`hidden` | 消耗生成额度，无越权访问面 |
 | `lobe-page-agent` | 页面级子代理 | 未核实 | server | `hidden`,`discoverable:false` | 内部编辑器场景 |
@@ -418,17 +417,17 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-group-management` | `speak`/`broadcast`/`executeAgentTask`/`executeAgentTasks`/`vote` | `executeAgentTask`/`executeAgentTasks` = `'required'`（`packages/builtin-tool-group-management/src/manifest.ts:91,135`）；`speak`/`broadcast`/`vote` 未声明→`'never'` | server | `groupSupervisorToolIds`,非 hidden | 群组编排调度，`broadcast` 零审批且并发无上限（维度 11） |
 | `lobe-agent-management` | Agent 管理（含 `callAgent`，30 分钟默认超时见 `agentManagement.ts:85`） | 未核实 | server | 非 hidden,`hidden`（依代码为 `hidden:true`） | 触发其他 Agent 执行 |
 | `lobe-calculator` | 计算 | 未核实 | server | 非 hidden | 低风险 |
-| `lobe-message` | `sendMessage`/`sendDirectMessage`/`createBot`/`updateBot`/`deleteBot`/`uninstallMessenger`/... | **全部 api 均未声明 humanIntervention → 默认 `'never'`**（`packages/builtin-tool-message/src/manifest.ts` 全文无 `humanIntervention` 字段） | server（`serverRuntimes/message/`） | `isBotConversation` 时注入,非 hidden | **零审批**下可 `updateBot`（改写 `allowFrom`/`dmPolicy`）、`uninstallMessenger`（断开工作区级 bot），见维度 12.2 |
+| `lobe-message` | `sendMessage`/`sendDirectMessage`/`createBot`/`updateBot`/`deleteBot`/`uninstallMessenger`/... | **全部 api 均未声明 humanIntervention → 默认 `'never'`**（`packages/builtin-tool-message/src/manifest.ts` 全文无 `humanIntervention` 字段） | server（`serverRuntimes/message/`） | `isBotConversation` 时注入,非 hidden | **零审批**下可 `updateBot`（改写 `allowFrom`/`dmPolicy`）、`uninstallMessenger`（断开工作区级 bot） |
 | `lobe-remote-device` | `listOnlineDevices`/`activateDevice` | **manifest 级显式 `'never'`**（`packages/builtin-tool-remote-device/src/manifest.ts:33`） | server | `runtimeManagedToolIds`,`hidden` | 激活设备后打开 `local-system`/`browser` 的入口，本身零审批 |
 | `lobe-topic-reference` | 话题引用 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-web-onboarding` | 引导流程 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-user-interaction` | `askUserQuestion` 等 | `always`（复用于 `lobe-agent.askUserQuestion`，`packages/builtin-tool-lobe-agent/src/manifest.ts:189`） | server | `discoverable:false`,`hidden` | 交互式提问，本身低风险 |
-| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`），调度后端位置未核实（维度 14） |
+| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`），调度后端位置未核实（维度 13） |
 | `lobe-brief` | 摘要生成 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-agent`(`LobeAgentManifest`) | `analyzeVisualMedia`/`createPlan`/`updatePlan`/`createTodos`/`updateTodos`/`clearTodos`/`askUserQuestion`/`callSubAgent` | `createPlan`/`createTodos`/`clearTodos`=`'required'`；`askUserQuestion`=`'always'`；`updatePlan`/`updateTodos`/`analyzeVisualMedia`/`callSubAgent`=未声明→`'never'`（`packages/builtin-tool-lobe-agent/src/manifest.ts` 各处） | server | `defaultToolIds`,`alwaysOnToolIds`,`runtimeManagedToolIds`,`hidden` | `callSubAgent` **零审批**即可派生新的独立 Agent 执行（维度 11） |
 | `lobe-delivery-checker` | 交付检查 | 未核实 | server | 非 hidden | 低风险 |
 
-**未核实项说明**：表中标注"未核实"的条目，是本次调查在时间/篇幅约束下没有逐一打开对应 `packages/builtin-tool-*/src/manifest.ts` 核对每个 api 的 `humanIntervention` 字段；已给出的 `'never'`/`'required'`/`'always'` 判定均逐条读取了源码文件并给出行号，可直接复核。`lobe-skills`/`lobe-skill-store`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation` 等因体量较大列入后续调查缺口（见维度 14）。
+**未核实项说明**：表中标注"未核实"的条目，是本次调查在时间/篇幅约束下没有逐一打开对应 `packages/builtin-tool-*/src/manifest.ts` 核对每个 api 的 `humanIntervention` 字段；已给出的 `'never'`/`'required'`/`'always'` 判定均逐条读取了源码文件并给出行号，可直接复核。`lobe-skills`/`lobe-skill-store`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation` 等因体量较大列入后续调查缺口（见维度 13）。
 
 **依据**：[builtin registry](../../lobehub/packages/builtin-tools/src/index.ts)、[browser manifest](../../lobehub/packages/builtin-tool-browser/src/manifest.ts)、[local-system manifest](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[web-browsing manifest](../../lobehub/packages/builtin-tool-web-browsing/src/manifest.ts)、[cloud-sandbox manifest](../../lobehub/packages/builtin-tool-cloud-sandbox/src/manifest.ts)、[creds manifest](../../lobehub/packages/builtin-tool-creds/src/manifest.ts)、[message manifest](../../lobehub/packages/builtin-tool-message/src/manifest.ts)、[remote-device manifest](../../lobehub/packages/builtin-tool-remote-device/src/manifest.ts)、[group-management manifest](../../lobehub/packages/builtin-tool-group-management/src/manifest.ts)、[lobe-agent manifest](../../lobehub/packages/builtin-tool-lobe-agent/src/manifest.ts)、[task manifest](../../lobehub/packages/builtin-tool-task/src/manifest.ts)、[agentManagement 服务端超时](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/agentManagement.ts)、[truncateToolResult 的归档白名单](../../lobehub/apps/server/src/utils/truncateToolResult.ts)。
 
@@ -507,70 +506,19 @@ connector 凭据表（`packages/database/src/schemas/connector.ts:59-74, 159-234
 
 ### 11.8 `lobe-task` 调度模型
 
-`runTasks` manifest 描述"Each task is started sequentially in array order; failures on individual tasks do not abort the batch"（`packages/builtin-tool-task/src/manifest.ts:298-299`）——即批量任务触发是**顺序**（非并发）启动，与 `execSubAgents`/群组 `broadcast` 的并发模型不同。`setTaskSchedule` 支持 cron（`schedulePattern`+`scheduleTimezone`）和 heartbeat（`heartbeatInterval` 秒）两种自动化模式（`packages/builtin-tool-task/src/manifest.ts:316-320` 一带），但触发这些调度的**后端调度器**（cron worker / heartbeat 轮询进程位置）本次未定位到具体代码，列入维度 14 未验证事项。
+`runTasks` manifest 描述"Each task is started sequentially in array order; failures on individual tasks do not abort the batch"（`packages/builtin-tool-task/src/manifest.ts:298-299`）——即批量任务触发是**顺序**（非并发）启动，与 `execSubAgents`/群组 `broadcast` 的并发模型不同。`setTaskSchedule` 支持 cron（`schedulePattern`+`scheduleTimezone`）和 heartbeat（`heartbeatInterval` 秒）两种自动化模式（`packages/builtin-tool-task/src/manifest.ts:316-320` 一带），但触发这些调度的**后端调度器**（cron worker / heartbeat 轮询进程位置）本次未定位到具体代码，列入维度 13 未验证事项。
 
 **依据**：[lobeAgent.callSubAgent](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts)、[agentManagement.callAgent 默认超时](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/agentManagement.ts)、[resolveLobeAgentManifest](../../lobehub/packages/builtin-tool-lobe-agent/src/resolveManifest.ts)、[lobe-agent manifest](../../lobehub/packages/builtin-tool-lobe-agent/src/manifest.ts)、[execSubAgent/execSubAgents](../../lobehub/packages/agent-runtime/src/executors/subAgent.ts)、[SubAgentCallbacks/RunSubAgentParams 类型](../../lobehub/packages/types/src/tool/builtin.ts)、[call_tool 的 deferred 处理](../../lobehub/packages/agent-runtime/src/executors/tool.ts)、[群组编排 broadcast 执行器](../../lobehub/src/store/chat/agents/GroupOrchestration/createGroupOrchestrationExecutors.ts)、[callLlm 中断检测](../../lobehub/packages/agent-runtime/src/executors/callLlm.ts)、[task manifest](../../lobehub/packages/builtin-tool-task/src/manifest.ts)。
 
-## 12. 安全审计
-
-逐条给出「已确认」/「需进一步验证」、可利用性与前提条件。
-
-### 12.1 SSRF：web-crawler 有防护，MCP HTTP transport 没有（已确认，精确到两条不同路径）
-
-**已确认（安全）**：`lobe-web-browsing.crawlSinglePage`/`crawlMultiPages` 的默认爬虫实现 `naive`（`packages/web-crawler/src/crawImpl/naive.ts:1,44-51`）通过 `ssrfSafeFetch`（`packages/ssrf-safe-fetch/index.ts:64-128`）发起请求，底层用 `request-filtering-agent` 的 `RequestFilteringHttpAgent`/`RequestFilteringHttpsAgent` 挂到 `fetch` 的 `agent`，默认 `allowPrivateIPAddress: false`（受环境变量 `SSRF_ALLOW_PRIVATE_IP_ADDRESS` 控制，`index.ts:72-83`），私有/内网 IP 请求会被拒绝并抛 `SSRF blocked` 错误。其余 4 个 crawler 实现（`jina`/`browserless`/`search1api`/`tavily`/`exa`/`firecrawl`）都是转发到**固定的第三方服务域名**（`api.search1api.com`/`api.tavily.com`/`api.exa.ai`/`getJinaReaderBaseUrl()`/`BROWSERLESS_URL`），不直接对用户提供的 URL 发起请求，SSRF 风险转移到这些第三方服务自己的实现上，不在 LobeHub 代码内。
-
-**已确认（有风险的路径）**：服务端 MCP HTTP client（`src/libs/mcp/client.ts:206-208`）用官方 `StreamableHTTPClientTransport(new URL(params.url), ...)` **直连用户配置的 MCP server URL，没有 `ssrfSafeFetch` 或任何等价的私网地址过滤**——桌面端 `MCPClient`（`apps/desktop/src/main/libs/mcp/client.ts:53-56`）同样直连。
-
-- **可利用性**：中等偏高。**前提条件**：攻击者需要能够**配置一个 MCP HTTP connector**（即控制 `mcpServerUrl`/`mcpConnectionType='http'` 这个输入）。这通常要求已通过身份认证的用户主动添加恶意/被劫持的 MCP server 配置，或者一个允许其他人代配置 connector 的多租户/工作区场景（工作区共享 connector）。一旦达成，MCP server URL 可以指向服务器自身的内网地址（如云环境的 metadata 服务 `169.254.169.254`、内部管理端口），SDK 会照常发起 HTTP 请求并把响应内容作为工具结果返回给模型/用户，构成经典的 SSRF 数据外泄。
-- **影响范围**：仅影响服务端进程能访达的网络（云部署时是该云环境的内网），不影响用户本机（本机 MCP HTTP 是桌面进程自己发起的请求，风险主体是桌面机器本身，等同于用户手动 `curl` 一个内网地址）。
-- **未验证**：`StreamableHTTPClientTransport` 本身（`@modelcontextprotocol/sdk`）是否有内建的私网过滤——本次调查未审查该第三方 SDK 源码，只确认 LobeHub 侧没有额外包一层 `ssrfSafeFetch`。
-
-### 12.2 审批模式默认值为 `never` 的高风险工具（已确认）
-
-以下 builtin 工具的**全部或大部分 api** 未声明 `humanIntervention`，落到框架默认 `'never'`（`packages/types/src/tool/builtin.ts:250-252`），即在 `manual`（默认审批模式）下也**不会触发任何审批**：
-
-- `lobe-browser`：`navigate`/`click`/`fill`/`press`/`scroll` 全部零审批（`packages/builtin-tool-browser/src/manifest.ts`），可操纵用户设备上的真实浏览器会话完成任意点击/填表/提交，**风险前提**：需要 `runtimeManagedToolIds` 规则允许注入（即 `runtimeMode==='local'` 且已绑定在线设备，见维度 2.1），达成后模型可以自主完成登录表单填写、支付确认点击等操作而用户无从阻止单步操作，只能在整体信任该 Agent 的前提下依赖 `screenshot`/`snapshot` 事后观察。
-- `lobe-web-browsing`：`search`/`crawlSinglePage`/`crawlMultiPages` 全部零审批。风险相对低（结果只读，SSRF 已在 12.1 单独分析）。
-- `lobe-creds`：`connectComposioService`/`initiateOAuthConnect`/`injectCredsToSandbox`/`saveCreds` **全部零审批**（`packages/builtin-tool-creds/src/manifest.ts`）。**可利用性**：模型可以在无人工确认的情况下发起第三方 OAuth 授权流程（真正的账户授权仍要求用户在浏览器完成同意页，LobeHub 侧无法绕开这一步），也可以把已保存的凭据注入沙箱环境变量（`injectCredsToSandbox`）——**前提条件**：攻击链通常是"先通过 prompt injection 或恶意工具结果诱导模型调用 `injectCredsToSandbox`，再用同一个沙箱会话里的 `executeCode`/`runCommand` 把注入的环境变量外泄"，需要 12.4 节的 prompt injection 前提同时成立。
-- `lobe-message`：`updateBot`（可改写 `dmPolicy`/`allowFrom` 放宽访问控制）、`uninstallMessenger`（断开整个工作区的 bot 连接）等管理类 api 均零审批（`packages/builtin-tool-message/src/manifest.ts` 全文无 `humanIntervention` 字段）。**可利用性**：中等。**前提条件**：需要 `isBotConversation` 或用户主动启用该插件；一旦模型被诱导调用 `updateBot` 把 `allowFrom` 清空或把 `dmPolicy` 改为 `open`，相当于**扩大了自己所控制 Bot 的可访问范围**，是一种自我提权/横向扩散风险，而不需要额外的越权访问。
-- `lobe-remote-device`：`listOnlineDevices`/`activateDevice` manifest 级显式 `humanIntervention: 'never'`（`packages/builtin-tool-remote-device/src/manifest.ts:33`）。**已确认的缓解因素**：`RemoteDeviceExecutionRuntime.queryDeviceList` 只枚举**当前 `userId` 个人池 ∪ 当前 workspace 共享池**的设备（`apps/server/src/services/toolExecution/serverRuntimes/remoteDevice.ts:26-58`），不能跨用户/跨工作区枚举或激活他人设备——"cloud 请求转发到用户本机"的后果被限定在**同一账户/同一工作区成员**范围内，不是任意用户的设备都可被越权访问。风险收窄为"该账户下的模型可以自主换用不同设备执行后续 local-system/browser 操作"，仍应视为高信任操作但不是跨租户漏洞。
-- `lobe-agent.callSubAgent`：零审批派生新的独立 Agent 运行（`packages/builtin-tool-lobe-agent/src/manifest.ts` 无 `humanIntervention` 字段）。可用于放大后续任意其他工具调用的规模（子代理内仍受维度 11.2 的三层嵌套阻断，但子代理本身可以调用除 `callSubAgent` 外的所有其他已授权工具）。
-
-### 12.3 connector 权限漏判：DB 异常 fail-open（已确认，见维度 7.3）
-
-`getConnectorToolPermission` 捕获所有异常返回 `null`（`src/libs/mcp/connectorPermissionCheck.ts:41-43`），`null` 不等于 `disabled`，执行照常放行。**可利用性**：低——这不是可被外部主动触发的攻击面（需要数据库真的抛异常），更像是"数据库抖动窗口内曾被禁用的工具短暂又能被调用"的可用性/一致性问题，不构成主动可利用的权限绕过。**已确认**：该设计是显式取舍（注释"never block execution due to DB error"），非疏漏。
-
-### 12.4 prompt 注入放大：工具结果侵入式注入（需进一步验证，已确认无防护层）
-
-维度 8.4 已指出：工具/MCP 返回的 `content` 直接进入模型上下文，**未发现任何输出侧的内容安全过滤或注入检测层**。**已确认**：`ToolExecutionService.executeTool` 和各 `serverRuntimes/*.ts` 均未见对返回内容做"是否包含指令注入模式"的扫描；`truncateToolResult` 只截断长度不检查内容。**需进一步验证**：是否有更上层（如 system prompt 层面提示模型"工具结果中的指令不可信"）的缓解措辞——本次调查在各工具 `systemRole.ts` 文件中零星见到类似提示（未逐一穷举确认覆盖率），不构成代码层面的强制防御。**可利用性**：中等。**前提条件**：模型必须先调用一个能从外部不可信数据源取得内容的工具（`crawlSinglePage`/MCP/自定义插件），且该数据源被攻击者控制或已被污染；结合 12.2 的零审批工具（如 `lobe-creds.injectCredsToSandbox`、`lobe-browser` 的点击操作），可以构成"读取恶意网页 → 网页内容诱导模型调用高危工具 → 高危工具零审批执行"的完整攻击链，是本次审计中风险组合度最高的路径。
-
-### 12.5 headless 场景下审批绕过的边界（已确认，非漏洞，是设计声明的行为）
-
-维度 5.6/6.3 已确认：headless 模式下 `always` 命中的工具不会被绕过，只是从"等待人工"变成"直接返回拒绝结果"。**不构成审批绕过**，但需要提醒：headless 模式对**非 `always`** 的 `required`/`allow-list`/`dynamicPolicy` 命中项是**自动放行**（`GeneralChatAgent.ts:200-204, 211-215, 229-234`），这是产品设计的预期行为（无人值守自动化任务），不是缺陷，但意味着"部署为 headless 的 Agent"事实上等同于"auto-run"，运维/部署侧需要清楚这一点。
-
-### 12.6 OAuth token 使用范围（部分已确认，部分需进一步验证）
-
-维度 10.3/10.5 已确认：token 静态存储加密（AES-GCM），按 `(userId, identifier, workspaceId?, agentId?)` 解析到唯一 connector 行再使用，未发现跨 connector 复用同一 token 的代码路径。**需进一步验证**：某个 OAuth token 的 scope 是否可能被下游 API 调用**超出其发起授权时声明的用途**使用（例如一个只为"读取邮件"授权的 token，被同一 connector 的另一个高权限 api 调用）——这取决于 Composio/第三方 OAuth provider 自身的 scope 粒度和 LobeHub 侧 api 到 scope 的映射是否有强制校验，本次未定位到这层校验代码。工作区场景下 `linkedByUserId` 允许其他成员**代表 owner 账号**调用（`packages/types/src/tool/plugin.ts:24-28`），是一个已确认的、设计内的信任委托，不是漏洞，但应作为工作区权限模型的一部分被用户理解。
-
-### 12.7 local-system / 云沙箱的访问范围（部分已确认）
-
-`lobe-local-system` 的 `pathScopeAudit` 只是**审批触发条件**不是硬性访问控制（维度 4.3 已确认）：越出 `workingDirectory` 只是升级为需要审批，`manual` 模式下用户点了"批准"依然会执行到工作目录外的任意路径；`auto-run`/`headless` 模式下这层审批直接被绕过（因为它是 `required` 而非 `always`）。**可利用性**：中等偏高，**前提条件**：`approvalMode` 为 `auto-run` 或 `headless`，或者用户在 `manual` 模式下不加辨别地批准。`lobe-cloud-sandbox` 的访问范围（是否能访问公网、是否有独立网络隔离）**未在本次调查中定位到具体沙箱运行时实现代码**，标记为需进一步验证。
-
-### 12.8 device gateway 把云端请求转发到用户本机的后果（已确认边界，风险为"预期内的高信任操作"）
-
-已在 12.2 分析：`activateDevice`/后续 `local-system`/`browser` 调用被限定在同一用户/工作区的设备池内，不存在跨租户越权。但仍需注意：`resolveDeviceAccessPolicy`（维度 7 引用的 `apps/server/src/services/aiAgent/deviceAccessPolicy.ts:78-108`）显示，对于 bot 场景，只有 `isOwner`/`bot-personal-platform` 才能使用设备工具，外部发送者（`bot-external-sender`）被拒绝——这是专门为"群聊里外部用户 @机器人试图操纵 bot 主人电脑"设计的防线，**已确认**该防线存在且逻辑自洽，但本次未验证其在所有 7 个平台（discord/telegram/slack/feishu/lark/qq/wechat）的 webhook 解析中是否都能正确提取 `senderExternalUserId`（若某平台解析出错导致该字段为 `undefined`，会落到 `bot-owner-not-configured` 分支同样拒绝，是 fail-closed 设计，风险较低）。
-
-**依据**：[ssrf-safe-fetch](../../lobehub/packages/ssrf-safe-fetch/index.ts)、[naive crawler](../../lobehub/packages/web-crawler/src/crawImpl/naive.ts)、[jina/browserless/search1api/tavily/exa crawler](../../lobehub/packages/web-crawler/src/crawImpl/)、[服务端 MCP HTTP client](../../lobehub/src/libs/mcp/client.ts)、[桌面 MCP HTTP client](../../lobehub/apps/desktop/src/main/libs/mcp/client.ts)、[browser manifest](../../lobehub/packages/builtin-tool-browser/src/manifest.ts)、[creds manifest](../../lobehub/packages/builtin-tool-creds/src/manifest.ts)、[message manifest](../../lobehub/packages/builtin-tool-message/src/manifest.ts)、[remote-device manifest 与执行体](../../lobehub/packages/builtin-tool-remote-device/src/manifest.ts)、[connectorPermissionCheck](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[deviceAccessPolicy](../../lobehub/apps/server/src/services/aiAgent/deviceAccessPolicy.ts)、[pathScopeAudit](../../lobehub/packages/builtin-tool-local-system/src/interventionAudit.ts)。
-
-## 13. 与消息渲染器笔记的交叉点
+## 12. 与消息渲染器笔记的交叉点
 
 参考 `LobeHub-消息渲染调查笔记.md` 第 13 节「工具渲染注册表」和第 9 节「AssistantGroup」。两条笔记在"工具调用如何呈现"上的交叉点：
 
-### 13.1 工具调用与审批的呈现路径
+### 12.1 工具调用与审批的呈现路径
 
 工具卡片的展示驱动数据完全来自**数据库/store 里的结构化字段**（`tool.intervention.status`、`tool.result`、`tool.apiName`/`identifier`），不是从模型输出的自然语言/Markdown 文本解析出来的（`src/features/Conversation/Messages/AssistantGroup/Tool/index.tsx:39-49` 直接从 `useConversationStore(dataSelectors.getToolInBlock(...))` 读取结构化 tool 对象）。审批卡片 `Intervention/index.tsx` 同样只读 `intervention`/`result`/`args`（结构化），审批按钮（`ApprovalActions.tsx:150-187`）点击后调用 store action `approveToolCall`/`rejectAndContinueToolCall`，这些 action 直连服务端的 `HumanInterventionHandler`，不经过任何"从消息文本里提取用户意图"的环节。
 
-### 13.2 是否可被模型输出伪造/混淆
+### 12.2 是否可被模型输出伪造/混淆
 
 消息渲染器笔记第 11 节提到 Markdown 有自定义标签插件系统（`Tool`/`Task`/`Skill`/`Mention` 等），其中 `<tool name="..." label="..." />` 标签（`src/features/Conversation/Markdown/plugins/Tool/index.ts`）只是渲染成一个 `ActionMention` 展示 pill（`Render.tsx:19-24`），**不会**触发真实的工具调用或审批流程——这是纯装饰性标签,用户/模型在文本里写 `<tool>` 标签只是展示一个提及样式的徽章。
 
@@ -582,15 +530,14 @@ connector 凭据表（`packages/database/src/schemas/connector.ts:59-74, 159-234
 
 **依据**：[Tool 卡片渲染](../../lobehub/src/features/Conversation/Messages/AssistantGroup/Tool/index.tsx)、[Intervention 卡片](../../lobehub/src/features/Conversation/Messages/AssistantGroup/Tool/Detail/Intervention/index.tsx)、[ApprovalActions](../../lobehub/src/features/Conversation/Messages/AssistantGroup/Tool/Detail/Intervention/ApprovalActions.tsx)、[Tool markdown 标签](../../lobehub/src/features/Conversation/Markdown/plugins/Tool/index.ts)、[Tool markdown Render](../../lobehub/src/features/Conversation/Markdown/plugins/Tool/Render.tsx)、[humanApprove 执行器](../../lobehub/packages/agent-runtime/src/executors/humanApprove.ts)、[消息渲染调查笔记](../消息渲染器/LobeHub-消息渲染调查笔记.md)。
 
-## 14. 未验证事项与后续调查缺口
+## 13. 未验证事项与后续调查缺口
 
 1. **`callSubAgent` 每调用超时的实际看门狗触发点**：manifest 声称"默认 30 分钟"，但服务端 `callSubAgent` 执行体（`apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts:169-178`）没有显式的 `|| 1_800_000` 兜底代码，真正的 30 分钟硬编码只在姊妹工具 `lobe-agent-management.callAgent`（`agentManagement.ts:85`）确认存在。`lobe-agent.callSubAgent` 未传 `timeout` 时最终使用哪个值、由谁在何处实现超时踢除（是否是 `ctx.subAgent.run` 内部某个 setTimeout，还是父 operation 的轮询检查），未定位到具体代码。
 2. **`context.skipResultTruncation:true` 时结果实际在哪一层被截断**：确认 `ServerToolTransport.ts:220` 对 client-tool dispatch 路径设置 `skipResultTruncation:true`（跳过 `ToolExecutionService` 内的通用截断），但该路径的结果是否在别处（如流式 chunk 层、消息持久化层）另有独立的长度限制，未核实。
 3. **`lobe-task` 的 cron/heartbeat 调度后端位置**：`setTaskSchedule` 支持 `schedulePattern`（cron）和 `heartbeatInterval`（秒），但触发这些调度的后台 worker/轮询进程的具体代码位置本次未定位。
 4. **`inheritMessages` 参数在服务端 `callSubAgent` 路径是否真的被消费**：`lobeAgent.ts:174-178` 的 `ctx.subAgent.run()` 调用未转发这个字段（见维度 11.3），需要跟踪 `ServerSubAgentTransport`/其上游 `execSubAgent` 回调的完整实现才能确认。
-5. **`StreamableHTTPClientTransport`（`@modelcontextprotocol/sdk`）自身是否有内建 SSRF 过滤**：未审查该第三方依赖源码，只确认 LobeHub 没有额外包一层防护（见维度 12.1）。
+5. **`StreamableHTTPClientTransport`（`@modelcontextprotocol/sdk`）自身是否有内建 SSRF 过滤**：未审查该第三方依赖源码，只确认 LobeHub 没有额外包一层防护（见维度 4.3）。
 6. **`lobe-cloud-sandbox` 的网络隔离范围**：沙箱容器是否可以访问公网、是否有独立的出网白名单，未定位到具体沙箱运行时实现代码。
 7. **文档与代码不一致（已确认的具体一处）**：`packages/types/src/agent/chatConfig.ts:194-199` 的 `toolResultMaxLength` 字段 JSDoc 写"`@default 6000`"，但同文件 `AgentChatConfigSchema` 的 zod 定义（`chatConfig.ts:298`）实际是 `z.number().default(25000)`——与 `truncateToolResult` 的 `DEFAULT_TOOL_RESULT_MAX_LENGTH = 25_000`（`apps/server/src/utils/truncateToolResult.ts:10`）一致，说明 **JSDoc 注释过期，实际生效值是 25000 不是 6000**。
 8. **本笔记维度 9 表格中标注"未核实"的工具**（`lobe-skills`/`lobe-skill-store`/`lobe-skill-maintainer`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation`/`lobe-page-agent`/`lobe-agent-builder`/`lobe-group-agent-builder`/`lobe-agent-management`/`lobe-calculator`/`lobe-topic-reference`/`lobe-web-onboarding`/`lobe-brief`/`lobe-delivery-checker`/agent-signal 系列/`lobe-self-iteration`）：其 `humanIntervention` 逐条取值未在本次调查中逐一打开源码核对，仅确认了它们在 registry 中的存在和大致用途。
 9. **connector 权限表 `ConnectorToolPermission` 除 `disabled` 外的其他取值**（如是否存在 `enabled`/`ask` 等中间态）及其与 `humanIntervention` 的叠加关系，未完整核实枚举全集。
-10. **MCP HTTP client 侧的凭据泄露面**：`StreamableHTTPClientTransport` 的 `headers` 里携带 `Authorization: Bearer <token>`，若 MCP server URL 因 SSRF 被导向攻击者控制的地址，该 token 会随请求头一并发出——这是 12.1 SSRF 发现与 token 使用范围的组合风险，具体可利用性取决于 token 的权限范围，未做端到端验证。

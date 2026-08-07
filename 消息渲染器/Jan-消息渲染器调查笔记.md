@@ -14,17 +14,15 @@
 
 ## 结论摘要
 
-Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文不是单一字符串，而是 `text / reasoning / file / tool-*` 部件数组（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE = {TEXT, FILE, REASONING}`，`isToolPart = type.startsWith('tool-')`）。
+Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文不是单一字符串，而是 `text / reasoning / file / tool-*` 部件数组（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE = {TEXT, FILE, REASONING}`，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
 
 Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json:97`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, harden]`**。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
 
-安全模型值得注意的事实：
+Jan 值得关注的三个设计点：
 
-- `LINK_SAFETY = { enabled: false }`（`RenderMarkdown.tsx:65`，作为 props 传给 Streamdown，`RenderMarkdown.tsx:360`）——streamdown 的链接安全被显式关闭；
-- sanitize 依赖 fork 内部 `harden`；`rehype-raw` 在 package.json 中有依赖但渲染管线未使用，src 目录无 `rehypeRaw` 调用；仓库源码未发现 DOMPurify；
-- HTML 工件（HtmlArtifact，151 行）默认 iframe + 严格 CSP + 不透明 sandbox，props 可放宽（`allowNetwork`/`allowScripts`）；SVG 分支强制 `allowScripts=false`；
-- 链接被改写为 `#cite-`/`#webcite-` 锚点并注入引用标记；grounding 校验（句子级余弦相似度）在流结束后触发；
-- 两处 memo 都针对流式做了优化：`MessageItem` 末条流式消息恒重渲染（L661-680）；`RenderMarkdown` 的 memo 比较器显式忽略 `isAnimating`/`messageId`/`className`（避免每 token 全量重渲），`grounding` 则**在** `MessageItem.tsx:472` 的依赖数组中正确出现（流结束后触发校验）。
+- **结构化 parts 消除了从 Markdown 反向解析私有标记的需要**：reasoning、工具调用和文件附件都是独立 part，渲染层按类型分派，不依赖正文 hack。
+- **HTML 工件默认严格沙箱**：`HtmlArtifact` iframe 默认使用不透明源 + 严格 CSP + sandbox；放宽路径由设置控制（非流式 + 设置开启时可用）。
+- **流式渲染有明确的性能优化链路**：`useDeferredValue` 合并 token、流式代码块推迟 Shiki 高亮、memo 比较器显式忽略无关字段，避免每 token 全量重渲。
 
 ## 1. 部件模型与分派
 
@@ -60,11 +58,11 @@ Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/st
 
 ### 1.3 输入区（ChatInput.tsx，2648 行）
 
-聊天输入由 `ChatInput.tsx` 承担：text/markdown 输入、文件上传、多模态图片、停止/继续流式等。本快照**未发现语音输入**相关代码（搜索 `speech`/`voice`/`webkitSpeechRecognition` 无命中；见 §5 未验证）。
+聊天输入由 `ChatInput.tsx` 承担：text/markdown 输入、文件上传、多模态图片、停止/继续流式等。本快照**未发现语音输入**相关代码（搜索 `speech`/`voice`/`webkitSpeechRecognition` 无命中；见 §3 未验证）。
 
 ## 2. RenderMarkdown
 
-`web-app/src/containers/RenderMarkdown.tsx`（380 行）。
+`web-app/src/containers/RenderMarkdown.tsx`（380 行）。正文不维护自定义 AST，直接经 remark/rehype 管线转为 React 节点（streamdown fork），没有 AST diff 环节；更新粒度是组件级 memo 与 Streamdown 流式模式解析。
 
 ### 2.1 插件配置
 
@@ -82,7 +80,7 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 
 ### 2.2 流式优化
 
-- `useDeferredValue` 合并 token（L220-231）；
+- 流式输入走 AI SDK `useChat`（throttle 50ms），`useDeferredValue` 合并 token（L220-231）；
 - 流式中代码块不跑 Shiki（`StreamingCode`，L72-95）：活动代码块在流式期间渲染纯文本，避免每 token 全量高亮（webkitgtk 慢）；流结束由 Shiki `CodeBlock` 接管；
 - LaTeX 规范化占位符管道（L97-201）：PUA 占位符保护代码/数学 → 逐行 `maskInlineMath` → 货币 `\$` 转义 → ZWSP 修复强调 flanking（`fixEmphasisFlanking`，L103-108）→ `\[..\]`/`\(..\)` → `$$..$$`。ZWSP 只加在代码/数学被遮蔽之后，避免 KaTeX 报 “Unrecognized Unicode character 8203”。
 
@@ -93,43 +91,14 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 - HTML 工件分段：仅非流式 + 设置开启；svg 分支强制 `allowScripts={false}`（L258-296）；
 - 代码块 `code-block.tsx`：shiki `codeToHtml`，light/dark 双高亮。
 
-## 3. 安全模型
+### 2.4 HTML 消毒、工件与链接渲染
 
-### 3.1 sanitize 边界
+- 正文 HTML 消毒由 streamdown fork 的 `defaultRehypePlugins.harden` 承担（L62）；仓库源码中未发现 DOMPurify 使用；
+- `LINK_SAFETY = { enabled: false }`（L65、L360）——链接安全检查被显式关闭；
+- `web-app/src/containers/HtmlArtifact.tsx`（151 行）：iframe 承载，默认严格 CSP + sandbox 不透明源；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；
+- 链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源。`lib/citation-parser.ts` 与 `lib/grounding.ts`（句子切分 + 余弦相似度）负责从工具输出提取引用并做真值校验。
 
-- 依赖 streamdown fork 的 `defaultRehypePlugins.harden` 承担 HTML 消毒（L62）；
-- 仓库源码中未发现 DOMPurify 使用；
-- `web-app/package.json` 有 `rehype-raw` 依赖（L90），但 src 目录无 `rehypeRaw` 调用——渲染管线实际只用 `[rehypeKatex, harden]`；
-- `LINK_SAFETY = { enabled: false }`（L65、L360）——链接安全检查被显式关闭。
-
-harden 的具体允许标签/属性清单在 `node_modules/@janhq/streamdown` 内部，本仓库未安装 node_modules，无法直接确认；`rehype-raw` 未使用可能是历史遗留，若将来启用而 harden 未覆盖则存在 HTML 注入面。这两点属于推测，需要 lockfile 版本或 streamdown 仓库进一步确认。
-
-### 3.2 HTML 工件（HtmlArtifact，151 行）
-
-`web-app/src/containers/HtmlArtifact.tsx`：iframe 承载，默认严格 CSP + sandbox 不透明源；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；SVG 分支强制 `allowScripts={false}`。与 AIO Hub 的 HtmlInteractiveViewer（`allow-scripts allow-same-origin` 高能力 iframe）相比，Jan 默认沙箱更接近隔离侧，但它的放宽路径由设置控制。
-
-### 3.3 链接与引用渲染
-
-链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源。`lib/citation-parser.ts` 与 `lib/grounding.ts`（句子切分 + 余弦相似度）负责从工具输出提取引用并做真值校验。
-
-## 4. 与“全量字符串渲染”类实现的差异
-
-| 维度 | Jan |
-|---|---|
-| 消息数据 | 结构化 parts（text/reasoning/file/tool-*），不是单一字符串 |
-| 正文中间表示 | 无自定义 AST；直接经 remark/rehype 管线 → React 节点（streamdown fork） |
-| 流式输入 | AI SDK useChat，throttle 50ms；useDeferredValue 合并 token |
-| 增量粒度 | 无 AST diff；组件级 memo + Streamdown 流式模式解析 |
-| 流式代码块 | 流式中纯文本，结束才 Shiki 高亮 |
-| 数学 | remarkMath + rehypeKatex，前置 PUA 占位符与 ZWSP 修复管线 |
-| 推理表示 | reasoning part（持久化时 `<think>` 包裹）→ ChainOfThoughtGroup |
-| 工具表示 | tool-* part → ToolCallCard/ChainOfThoughtGroup |
-| 富内容 | HTML 工件 iframe（默认严格 sandbox）、Mermaid、KaTeX、Shiki |
-| HTML 消毒 | streamdown harden（替换 rehype-raw+sanitize）；链接安全显式关闭；未见 DOMPurify |
-| 引用/grounding | 链接改锚点、引用聚合、句子级余弦校验 |
-| 桌面/移动 | 单 React web-app，无独立移动渲染器（对比 AIO 双引擎） |
-
-## 5. 边界与未验证事项
+## 3. 边界与未验证事项
 
 - streamdown 内部 harden 的标签/属性白名单无法从本仓库源码确认（推测项）；
 - `LINK_SAFETY={enabled:false}` 的影响范围（streamdown 按协议白名单过滤链接的逻辑）未确认；
@@ -139,7 +108,7 @@ harden 的具体允许标签/属性清单在 `node_modules/@janhq/streamdown` �
 - `MermaidError`（30 行）在流式错误时直接展示，错误内容/样式未运行确认；
 - 未运行项目测试或构建；记录来自静态源码，UI 行为（动画、无障碍、平台差异）需运行验证。
 
-## 6. 关键源码索引
+## 4. 关键源码索引
 
 - 渲染主组件：`web-app/src/containers/RenderMarkdown.tsx`（380 行）
 - 消息部件分派：`web-app/src/containers/MessageItem.tsx`（683 行）

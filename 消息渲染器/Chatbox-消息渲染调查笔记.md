@@ -49,10 +49,11 @@ model.chatStream()
 
 已确认的当前问题：
 
-1. **“自动预览 Artifact”设置已经失效。** `autoPreviewArtifacts`、`previewArtifact`、`needArtifact` 和 `MessageArtifact` import 仍留在 `Message.tsx`，但 JSX 不再渲染 `MessageArtifact`。该功能在 `102fa1bd` 中移除内联 Artifact 后没有同步清理设置和死代码。用户仍可从 HTML 代码块按钮手动预览。
-2. **流式正文没有 UI 级节流。** 每个可见 text delta 都更新 React Query cache，并重新解析当前累计 Markdown；长回复或高频小 chunk 会使 CPU 成本随正文增长。
-3. **Markdown 自动化测试偏窄。** 当前 `Markdown.test.tsx` 主要覆盖图片查看器，缺少 URL 安全、原始 HTML、GFM、LaTeX、代码块、Mermaid fallback 和流式不完整语法的组合测试。
-4. **HTML 导出的会话名和 thread 名未转义。** `format-chat.tsx` 直接把 `sessionName`、`thread.name` 插入导出的 HTML；恶意或意外包含 HTML 的标题会在导出文件中成为可执行标记。
+1. **流式正文没有 UI 级节流。** 每个可见 text delta 都更新 React Query cache，并重新解析当前累计 Markdown；长回复或高频小 chunk 会使 CPU 成本随正文增长。
+2. **“自动预览 Artifact”设置已经失效。** `autoPreviewArtifacts`、`previewArtifact`、`needArtifact` 和 `MessageArtifact` import 仍留在 `Message.tsx`，但 JSX 不再渲染 `MessageArtifact`。该功能在 `102fa1bd` 中移除内联 Artifact 后没有同步清理设置和死代码。用户仍可从 HTML 代码块按钮手动预览。
+3. **Markdown 自动化测试偏窄。** 当前 `Markdown.test.tsx` 主要覆盖图片查看器，缺少 GFM、LaTeX、代码块、Mermaid fallback 和流式不完整语法的组合测试。
+
+另有一项边界事实：**HTML 导出的会话名和 thread 名未转义。** `format-chat.tsx` 直接把 `sessionName`、`thread.name` 插入导出的 HTML；标题包含 HTML 时会原样进入导出文件。
 
 ## 页面入口与状态来源
 
@@ -329,7 +330,7 @@ image part 使用 `PictureGallery`：
 - user 图片使用紧凑高度。
 - 图片可携带 OCR 文本，点击后进入 content viewer。
 
-Markdown 图片由 `MarkdownImage` 包装进同一个图片查看器，但远程 URL 会直接作为 `<img src>` 加载。消息中的远程图片因此会向第三方服务器发起请求，构成一项隐私边界；当前没有图片代理或“点击后加载”策略。
+Markdown 图片由 `MarkdownImage` 包装进同一个图片查看器，但远程 URL 会直接作为 `<img src>` 加载。消息中的远程图片因此会向第三方服务器发起请求；当前没有图片代理或“点击后加载”策略。
 
 文件和链接位于正文外的 `MessageAttachmentGrid`。超过 4 个时折叠；session RAG 附件在 pending/indexing 状态下每 3 秒轮询一次。
 
@@ -416,7 +417,7 @@ Shiki 输出通过 `dangerouslySetInnerHTML` 注入，但来源是 Shiki tokeniz
 
 未闭合的流式 Mermaid fence 不会尝试增量渲染，只显示 loading；生成结束后动态 import Mermaid 并生成 SVG。
 
-Mermaid SVG 被直接注入主页面 DOM。代码依赖 Mermaid 内部 DOMPurify/default strict security level，并没有再执行应用侧 sanitize。该边界需要谨慎维护：普通 `<img src="data:image/svg+xml">` 与 inline SVG 的脚本/事件属性执行模型不同，源码注释中“现代浏览器不会执行 SVG script”不足以单独作为安全证明。
+Mermaid SVG 通过 `dangerouslySetInnerHTML` 注入主页面 DOM。代码依赖 Mermaid 内部 DOMPurify/default strict security level，并没有再执行应用侧 sanitize。
 
 普通 SVG fence 走 `SVGPreview`：先编码为 data URL，再通过 `<img>` 和 gallery 显示，没有把模型 SVG 直接拼进主 DOM。
 
@@ -430,9 +431,7 @@ Markdown 没有启用 `rehype-raw`，因此模型输出的原始 HTML 不会作�
 target="_blank" rel="noreferrer"
 ```
 
-桌面端新窗口请求由 `setWindowOpenHandler` 拦截并交给系统浏览器。
-
-这里仍应把 URL scheme 测试补齐，因为主窗口配置了 `webSecurity: false`，且 preload 暴露通用 `electronAPI.invoke`。当前 Markdown 路径没有发现直接 XSS，但一旦 inline SVG、依赖升级或自定义 renderer 引入 XSS，其影响会远高于普通网页。
+桌面端新窗口请求由 `setWindowOpenHandler` 拦截并交给系统浏览器。主窗口配置了 `webSecurity: false`，没有启用 CSP。
 
 ## Artifact HTML 预览
 
@@ -441,7 +440,7 @@ target="_blank" rel="noreferrer"
 - `src/renderer/components/Artifact.tsx`
 - `src/renderer/modals/ArtifactPreview.tsx`
 
-HTML fence 的手动预览不是在消息 DOM 内执行，而是打开 `artifact-preview` modal。原始 HTML 通过 `postMessage` 发送给：
+HTML fence 的手动预览不是在消息 DOM 内执行，而是打开 `artifact-preview` modal。原始 HTML 通过 `postMessage(..., '*')` 发送给：
 
 ```text
 https://artifact-preview.chatboxai.app/preview
@@ -507,7 +506,7 @@ Git 历史显示 `102fa1bd` 在重做代码块时删除了：
 <h2>${i + 1}. ${thread.name}</h2>
 ```
 
-会话名可能由模型自动生成，thread 名也可编辑，因此导出 HTML 应在这些位置统一 `escapeHtml()`。导出页面还从 CDN 加载 Tailwind 和 KaTeX CSS；离线打开时样式依赖网络。
+导出页面还从 CDN 加载 Tailwind 和 KaTeX CSS；离线打开时样式依赖网络。
 
 ## 性能观察
 
@@ -531,28 +530,6 @@ Git 历史显示 `102fa1bd` 在重做代码块时删除了：
 4. 流式 fenced code 会持续产生不同的 Shiki cache key，最多保留最近 50 份累计代码。
 5. `needArtifact` 对每条 assistant message 执行全文扫描但结果未使用。
 6. Virtuoso 上下 2000 px overscan 对包含 Mermaid、图片和工具详情的消息可能挂载较重。
-
-如果后续针对超长回复优化，优先级应是：先按 frame 合并 session cache UI 更新，再避免在流式前沿之外重算列表派生数据，最后考虑对当前 Markdown block 做更细的稳定层/流式尾部分离。
-
-## 安全边界
-
-当前实现的正向措施：
-
-- ReactMarkdown 不启用 raw HTML。
-- URL 经过 `sanitizeUrl`。
-- link 使用 `noreferrer` 并交给系统浏览器。
-- 通用工具 args/result 作为文本渲染。
-- 普通 SVG 通过 image data URL 展示。
-- 模型 HTML 在无 `allow-same-origin` 的 sandbox iframe 中执行。
-- Shiki fallback 使用 React text node。
-
-需要持续关注：
-
-1. Mermaid SVG 直接 `dangerouslySetInnerHTML`，依赖第三方 sanitizer 默认行为。
-2. 主 BrowserWindow 使用 `webSecurity: false`，没有启用 CSP，并暴露通用 IPC invoke；任何 renderer XSS 的后果都很重。
-3. Markdown remote image 自动请求第三方 URL，存在隐私泄露面。
-4. HTML export 标题未 escape。
-5. Artifact 使用 `postMessage(..., '*')`。当前只向固定 iframe 发送模型 HTML，未接收敏感返回值，但仍建议把 target origin 固定为预览 origin。
 
 ## 测试现状
 
@@ -609,11 +586,3 @@ Git 历史显示 `102fa1bd` 在重做代码块时删除了：
 ## 可复用的设计判断
 
 Chatbox 将结构化 part 放在 Markdown 之前：Markdown 只处理 text，工具、思考、图片、错误和审批保持可交互的类型化 UI。与在最终字符串里嵌入特殊标签相比，这种边界更便于维护、持久化和迁移。
-
-继续演进这套 renderer 时，应保持以下约束：
-
-1. 新消息能力优先新增结构化 part 或专用 tool renderer，不把控制协议塞进 Markdown。
-2. 模型 HTML 永远不要进入主 renderer DOM，继续放在不同 origin 的 sandbox iframe。
-3. 流式性能优化应发生在 cache 提交频率和稳定历史层，而不是牺牲 part 结构。
-4. `Message` 已经职责过重；新增 part 类型时应建立 renderer registry 或独立 part component，避免继续扩大单个条件树。
-5. 设置项必须有行为测试，避免再次出现 `autoPreviewArtifacts` 这种 UI、state 和实际渲染脱节。

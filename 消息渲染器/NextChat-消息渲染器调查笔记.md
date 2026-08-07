@@ -20,7 +20,9 @@ NextChat 的消息渲染器是一个以 `react-markdown` 为核心、由 Chat �
 2. Markdown 使用 `react-markdown + remark-gfm + remark-math + remark-breaks + rehype-katex + rehype-highlight`。在解析前会把 `\[...\]`/`\(...\)` 转成 KaTeX 可识别形式，并尝试把裸 HTML 文档包进 `html` 代码块。
 3. `<pre>` 被替换为 `PreCode`：Mermaid 代码单独交给 Mermaid 渲染成 SVG；HTML/DOCTYPE/SVG/XML 代码在 Artifact 开启时进入 sandbox iframe；普通代码支持复制和超过 400px 后折叠。
 4. SSE 流式文本通过 `requestAnimationFrame` 缓慢吐给 UI；`reasoning_content` 或 `<think>` 块被转成 Markdown 引用行 `> `，没有独立的 reasoning 数据结构。
-5. Artifact 通过 `srcDoc` 和 `sandbox="allow-forms allow-modals allow-scripts"` 预览，分享内容写入 Cloudflare KV。实现上存在 `postMessage('*')` 无 origin 校验和 `props.code.replace(...)` 忽略返回值等边界问题。
+5. Artifact 通过 `srcDoc` 和 `sandbox="allow-forms allow-modals allow-scripts"`（无 `allow-same-origin`）预览，分享内容写入 Cloudflare KV。
+
+Artifact 预览使用 opaque-origin 沙箱隔离；iframe 高度经 `postMessage` 回传给父窗口。
 
 ## ASCII 调用链图
 
@@ -162,36 +164,30 @@ OpenAI adapter 读取 `delta.reasoning_content`（`app/client/platforms/openai.t
 sandbox="allow-forms allow-modals allow-scripts"
 ```
 
-没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。组件通过注入的 `ResizeObserver` 脚本向父窗口发送高度和 title（`app/components/artifacts.tsx:81-87`），父窗口在 `message` listener 中按 frame id 更新高度（`app/components/artifacts.tsx:50-62`）。
+没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。组件通过注入的 `ResizeObserver` 脚本以 `parent.postMessage(..., '*')` 向父窗口发送高度和 title（`app/components/artifacts.tsx:81-87`），父窗口在 `message` listener 中只按 frame id 匹配、未校验 `e.origin`/`e.source`，随机 frame id 用于降低误收概率（`app/components/artifacts.tsx:50-62`）。该 iframe 路径没有独立 CSP 或请求 allowlist。
 
 ### 5.2 分享和 Cloudflare KV
 
 `ArtifactsShareButton` POST 原始 HTML 到 `ApiPath.Artifacts`，返回 id 后组成 `#/artifacts/<id>` 分享链接（`app/components/artifacts.tsx:109-203`）。`app/api/artifacts/route.ts:5-73` 在 Edge runtime：
 
-1. POST 读取 body，计算 MD5 作为 KV key；
+1. POST 读取 body，计算 MD5 作为 KV key，相同内容复用同一 id；
 2. 根据 `CLOUDFLARE_KV_TTL` 设置 expiration；
 3. 写入 Cloudflare KV；
 4. GET 按 id 读取并原样返回。
 
 Artifact 页面再把 KV 内容交给相同的 `HTMLPreview`（`app/components/artifacts.tsx:205-265`）。
 
-## 6. 已发现的瑕疵与安全边界
+## 6. 边界与未验证事项
 
-1. **`postMessage` 未校验 origin**：iframe 使用 `parent.postMessage(..., '*')`，接收端只比较 `id`，没有检查 `e.origin` 或 `e.source`（`app/components/artifacts.tsx:50-56`、`81-87`）。随机 frame id 降低误收概率，但不能替代来源校验。
-2. **`replace` 返回值未接收**：`app/components/artifacts.tsx:83-85` 调用了 `props.code.replace(...)` 却没有赋值；随后仍然返回 `script + props.code`。当前脚本因为被整体前置仍可工作，但该分支表达的“在 DOCTYPE 后插入脚本”并未实现。
-3. **外部链接安全属性不统一**：Markdown 链接 target 可能是 `_blank`，组件没有统一补 `rel="noopener noreferrer"`。
-4. **Artifact 能力是双开关**：全局关闭或 Mask 关闭时，HTML 代码只按代码块显示；没有在消息级别记录用户为何不能预览。
-5. **渲染错误降级有限**：Mermaid 失败直接返回空；Markdown/iframe 的错误隔离依赖 React/UI 外层，本文未运行异常内容验证。
-
-## 7. 风险、边界和未验证事项
-
-- iframe sandbox 阻止了同源访问，但 `allow-scripts` 仍允许生成页面运行脚本并发起页面级网络请求；源码没有独立 CSP 或请求 allowlist。
-- Cloudflare KV 分享 key 是 HTML body 的 MD5，重复内容会复用 id；是否配置 TTL、是否限制 body 大小取决于部署环境。
+- `app/components/artifacts.tsx:83-85` 调用了 `props.code.replace(...)` 却没有接收返回值，随后仍返回 `script + props.code`；当前脚本因整体前置仍可工作，“在 DOCTYPE 后插入脚本”的分支未实现。
+- Artifact 是全局配置与 Mask 双开关：全局关闭或 Mask 关闭时，HTML 代码只按代码块显示，没有在消息级别记录用户为何不能预览。
+- Mermaid 失败直接返回空内容；Markdown/iframe 的错误隔离依赖 React/UI 外层。
+- 流式推理被编码为 Markdown 引用文本，复制、导出和后续上下文都会把 `> ` 前缀当作普通 Markdown 内容。
 - `react-markdown` 使用高亮和 KaTeX 但没有服务端预渲染，长代码、复杂 Mermaid 和大量图片会占用浏览器主线程。
-- 流式推理被编码为引用文本，复制、导出和后续上下文都会把 `> ` 前缀当作普通 Markdown 内容。
-- 本次未启动浏览器验证 Mermaid SVG、Artifact iframe 高度、移动端分页和恶意 HTML；结论来自源码静态检查。
 
-## 8. 关键源码索引
+未验证：本次未启动浏览器验证 Mermaid SVG、Artifact iframe 高度、移动端分页和恶意 HTML；结论来自源码静态检查。
+
+## 7. 关键源码索引
 
 - Markdown 主组件和 Mermaid：`app/components/markdown.tsx:1-72`
 - 代码块/Artifact 探测：`app/components/markdown.tsx:74-174`
