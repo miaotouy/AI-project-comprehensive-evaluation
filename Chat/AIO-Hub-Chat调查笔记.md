@@ -125,7 +125,7 @@
 
 ### 4.1 独立于节点数据的流缓冲区
 
-`useStreamingMessageSources.ts` 维护一个模块级 `Map<nodeId, ReplayableMessageStreamSource>`（第91行），**完全独立于 `session.nodes[id].content`**。`ReplayableMessageStreamSource`（第20-89行）本质是一个可重放的发布订阅缓冲：`append(chunk)` 把 chunk 追加到内部 `buffer` 并同步通知所有订阅者；新订阅者 `subscribe(callback)` 时如果 buffer 已有内容，会用 `queueMicrotask` 补发一次全量内容，保证组件重新挂载（如虚拟列表回收后再渲染）时能立刻拿到已经流出的内容而不需要等下一个 chunk。`getOrCreateStreamingMessageSource(nodeId, initialContent)`（第102-114行）是渲染层唯一入口，`MessageContent.vue` 中通过 `streamingSource` computed（第276-282行）只在 `isGenerating.value` 为真时才创建/获取这个流源，交给底层的富文本渲染器订阅。
+`useStreamingMessageSources.ts` 维护一个模块级 `Map<nodeId, ReplayableMessageStreamSource>`（第91行），**完全独立于 `session.nodes[id].content`**。`ReplayableMessageStreamSource`（第20-89行）本质是一个可重放的发布订阅缓冲：`append(chunk)` 把 chunk 追加到内部 `buffer` 并同步通知所有订阅者；新订阅者 `subscribe(callback)` 时如果 buffer 已有内容，会用 `queueMicrotask` 补发一次全量内容，保证组件因视图切换、keep-alive 激活等原因重新挂载时，能立刻拿到已经流出的内容而不需要等下一个 chunk。`getOrCreateStreamingMessageSource(nodeId, initialContent)`（第102-114行）是渲染层唯一入口，`MessageContent.vue` 中通过 `streamingSource` computed（第276-282行）只在 `isGenerating.value` 为真时才创建/获取这个流源，交给底层的富文本渲染器订阅。
 
 ### 4.2 节点 `content` 字段的降频写入
 
@@ -149,9 +149,20 @@ reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffe
 - `SessionsSidebar.vue`（第139-149行）：`useVirtualizer({ count: () => displaySessions.value.length, getScrollElement: () => parentRef.value, estimateSize: () => 71, overscan: 10 })`，固定预估行高 71px，overscan 10 项；`virtualItems`/`totalSize` 用 computed 包一层，模板里用 `translateY` 定位每一行。
 - `AgentsSidebar.vue`（同款用法，`agents-list` 容器 + `measureElement` 动态测量真实高度，第893-946行），因为智能体卡片高度可能因为描述文字长度不同而不固定，这里用了 `virtualizer.measureElement` 做真实测量而不是纯靠 `estimateSize`。
 
-两处虚拟化都只覆盖侧栏列表（会话列表、Agent 列表），**聊天消息列表本身（`MessageList.vue`）没有使用 TanStack Virtual**，而是用 CSS `content-visibility: auto` + `contain-intrinsic-size` 做浏览器原生的懒渲染优化（`MessageList.vue` 第148-214行 `applyMessageVisibilityOptimization`，以及 scoped style 里 924-936 行），并显式给最后一条消息设置 `content-visibility: visible`防止底部锚定计算错误导致滚动回弹。**长会话的消息列表滚动性能依赖浏览器 CSS 特性而非虚拟滚动库**，如果某条消息内容极长（比如大段代码块），`contain-intrinsic-size: auto 500px` 的预估高度和真实高度差距过大时会有滚动跳动风险（这也是 `docs/Plan/tree-graph-performance-investigation.md` 存在的原因之一，虽然那篇文档针对的是树图视图而非线性列表，笔记未展开阅读该文档的具体内容，此处对树图性能问题未核实）。
+在本次调查的代码快照中，两处 TanStack 虚拟化只覆盖侧栏列表（会话列表、Agent 列表）。**当前聊天消息列表（`MessageList.vue`）已不再使用 TanStack Virtual**，而是完整挂载当前活动路径上的消息 DOM，再用 CSS `content-visibility: auto` + `contain-intrinsic-size` 做浏览器原生的屏外渲染裁剪（`MessageList.vue` 第148-214行 `applyMessageVisibilityOptimization`，以及 scoped style 里 924-936 行）。最后一条消息被显式设为 `content-visibility: visible`，防止底部锚定计算错误导致滚动回弹。长会话的消息列表性能目前依赖浏览器 CSS 特性而非虚拟滚动库；如果某条消息内容极长（比如大段代码块），`contain-intrinsic-size: auto 500px` 的预估高度与真实高度差距过大，仍可能造成滚动位置变化。
 
-### 5.2 全文搜索：全量遍历与正则预过滤
+### 5.2 消息列表曾使用虚拟滚动，后改回完整 DOM
+
+Git 历史表明，消息列表并非一直采用当前方案：
+
+- `30b0ce71b486f1274274a763539f87d108573c14`（2025-11-02，`feat: LLM聊天实现虚拟滚动和导航器`）首次在 `MessageList.vue` 接入 `@tanstack/vue-virtual`。初版用 `useVirtualizer`、`estimateSize: 200`、`overscan: 5` 计算 `virtualItems` 和 `totalSize`，只挂载可见消息，并用绝对定位加 `translateY(virtualItem.start)` 放置条目。
+- 此后实现持续处理动态高度和滚动定位问题：例如 `6efa00864f534624b5cbd7cea140258e746c17eb` 优化高度测量，`515c215de9d6f66923b1ea969bed8e8e16da011f`、`bff4d7de896ff444bc857ca63e0369edbb766a5c` 优化初始及渐进加载，`d9f56e9a6795c6a40ffffa772553c21f7f72d73b`、`9cce774fe97cae2daa7fb1774ffcce91c55b2b72`、`f5e66344b21910c2d7d0631951488564f8aeb8fc` 分别修复高度计算、触底和自动滚动不稳定。
+- `5c68447275237769d9be723849a93b1818d0b45f`（2026-04-29，`refactor(llm-chat): 移除虚拟滚动，改用原生 DOM 提升聊天列表性能`）移除了消息列表的 `useVirtualizer`、`virtualItems`、`totalSize`、动态测量、渐进 overscan 和初始化保护期。提交说明将撤回原因归结为聊天消息高度动态、倒序加载闪烁、估算不准和初始化复杂；在该项目“几百条消息”的目标规模下，作者实测改用完整 DOM + `content-visibility` 后，会话切换由 3–5 秒降至 500ms 内。该性能数字来自提交说明，笔记未独立复测。
+- 撤回后，滚动和导航都改为基于真实 DOM：用 `scrollTop = scrollHeight` 触底，用 `querySelector(All)`、`getBoundingClientRect()` 和 `data-message-id` 定位消息。后续 `1d971ff5476578e713bd7b68a5c86404dce43e99`、`25ef4a7f5cd3edc9683e5ecbefd95470655b603e` 又处理了生产构建中 `content-visibility` 被优化器移除的问题，形成当前的“完整 DOM + 浏览器渲染裁剪”方案。
+
+因此需要区分：**旧方案是真正的列表虚拟化**，屏外消息组件不挂载；**当前方案有时被项目注释称为“CSS 原生虚拟渲染”**，但所有活动路径消息仍在 DOM 中，只是浏览器可以跳过屏外元素的布局/绘制工作。二者的 DOM 保留、动态高度测量和滚动定位机制并不相同。
+
+### 5.3 全文搜索：全量遍历与正则预过滤
 
 `useLlmSearch.ts` 前端封装了对 Tauri 命令 `search_llm_data_stream` 的调用（Channel 流式返回，300ms 防抖，支持"精确/全部/任一"三种匹配模式，`matchMode` 对应 exact/and/or）。真正的搜索逻辑在 Rust 端 `src-tauri/src/commands/llmchat_search.rs`：
 
@@ -161,9 +172,9 @@ reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffe
 
 结论：这是一个**基于文件系统全量扫描 + 正则匹配的检索**（类似简化版 grep），不是倒排索引/全文索引方案。会话数量或单会话消息量很大时，每次搜索的成本随总数据量线性增长（虽有并发和取消机制缓解体感延迟，但计算量本身不会减少）。
 
-### 5.3 命中定位
+### 5.4 命中定位
 
-后端只返回匹配的会话/Agent 级别的上下文片段（`MatchDetail.context` + 字符级 `match_offsets`，用于前端高亮，`extract_context_with_regex()` 第314-396行按 `graphemes` 计数保证多字节字符下标正确），并不返回具体是哪个 `nodeId` 命中。前端 `ChatSearchPanel.vue`（会话内消息搜索面板，与上面跨会话搜索是两套完全不同的实现）则是纯前端线性扫描：`searchResults` computed（第52-121行）直接从后往前遍历 `props.messages`（当前活动路径的消息数组），对每条消息的 `content + reasoningContent` 做 `toLowerCase().includes()` 判断，最多收集 50 条结果后 `break`。也就是说，"侧栏跨会话搜索"命中后只能定位到会话本身，**无法直接跳到会话内的具体消息**；"会话内消息搜索"（Ctrl+F 打开 `ChatSearchPanel`）则是纯内存线性扫描当前已加载的活动路径，选中结果后调用 `messageListRef.value?.scrollToMessageId(messageId)`（`ChatArea.vue:212-214`）用 `querySelector('[data-message-id="..."]')` 找 DOM 节点滚动过去——这依赖节点已经在 DOM 里渲染出来，如果被 `content-visibility: auto` 懒渲染剔除或者不在当前分支路径上，是找不到的（后者是必然的：`ChatSearchPanel` 只搜索 `props.messages`，即线性路径上的消息，不会搜到被分支切换隐藏的其它分支内容）。
+后端只返回匹配的会话/Agent 级别的上下文片段（`MatchDetail.context` + 字符级 `match_offsets`，用于前端高亮，`extract_context_with_regex()` 第314-396行按 `graphemes` 计数保证多字节字符下标正确），并不返回具体是哪个 `nodeId` 命中。前端 `ChatSearchPanel.vue`（会话内消息搜索面板，与上面跨会话搜索是两套完全不同的实现）则是纯前端线性扫描：`searchResults` computed（第52-121行）直接从后往前遍历 `props.messages`（当前活动路径的消息数组），对每条消息的 `content + reasoningContent` 做 `toLowerCase().includes()` 判断，最多收集 50 条结果后 `break`。也就是说，"侧栏跨会话搜索"命中后只能定位到会话本身，**无法直接跳到会话内的具体消息**；"会话内消息搜索"（Ctrl+F 打开 `ChatSearchPanel`）则是纯内存线性扫描当前已加载的活动路径，选中结果后调用 `messageListRef.value?.scrollToMessageId(messageId)`（`ChatArea.vue:212-214`）用 `querySelector('[data-message-id="..."]')` 找 DOM 节点滚动过去。`content-visibility: auto` 只跳过屏外内容的渲染工作，不会从 DOM 中删除节点，因此不会妨碍该查询；真正的限制是搜索范围只有当前活动路径，不在当前分支路径上的节点既不会被搜索，也没有对应的消息 DOM。
 
 ---
 
@@ -254,7 +265,7 @@ reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffe
 
 ### 9.5 UI 层的已知边界
 
-- 消息列表没有接入 TanStack Virtual（只有会话/Agent 侧栏虚拟化），长会话主要依赖 `content-visibility` 和活动路径裁剪；
+- 当前消息列表已不再接入 TanStack Virtual（历史上曾于 2025-11-02 至 2026-04-29 使用），长会话目前主要依赖完整 DOM、`content-visibility` 和活动路径裁剪；
 - 线性视图与树图共用同一份节点数据；树图的交互路径已做静态代码核实，大规模节点树的布局性能未做运行时压测；
 - 分离窗口依赖跨窗口同步总线，若窗口关闭/断连，流缓冲仍在主进程内存中，用户看到的最后一段内容是否能在重连后完整回放取决于订阅时机。
 
