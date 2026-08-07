@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-07
 >
-> 代码快照：`eca06251f5687a52fbcd353cb8b04f42157882d0`（分支：`main`）
+> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
 >
 > 调查方式：只读源码调查
 >
@@ -12,7 +12,7 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-说明：调查时工作区干净，分支落后 origin/main 3 个提交。
+说明：调查时 `VCPToolBox` 工作区干净；本补充以该快照的实际代码为准。
 
 ---
 
@@ -48,6 +48,74 @@ VCPToolBox 不提供最终用户聊天主界面，调查中发现以下两点值
    这进一步说明管理面板在架构上就是和聊天请求处理链路分离的旁路系统，而不是聊天体验的一部分。
 
 结论：AdminPanel-Vue 是运维/配置后台，OpenWebUISub 是第三方聊天前端的增强层，VCPToolBox 本身不产出面向最终用户的聊天主界面。
+
+这不等于 VCPToolBox 不构建消息。它是一个**无会话归属的请求级消息编排器**：调用方提交一份 `messages`，服务端在内存中复制、重排、展开、注入和裁剪，形成发给模型的请求；会话 ID、历史数组和最终展示状态仍由外部前端负责。
+
+## 消息构建调查
+
+### 1. 入口归一化：三种协议收敛到同一条主链
+
+标准入口是 `POST /v1/chat/completions`；`/v1/chatvcp/completions` 只额外强制显示 VCP 调用信息（`server.js:1216-1242`）。协议桥接层先把其他格式转换为 OpenAI 风格的 `{ role, content }` 数组，再在本机 HTTP 转发到标准入口（`routes/protocolBridge.js:789-857`）：
+
+- Responses API：从 `input` 提取 `message` 项；`developer` 归一化为 `system`，文本部分拼接为字符串（`routes/protocolBridge.js:299-332`）。
+- Anthropic Messages：把顶层 `system` 放在数组首位，再提取 `body.messages`（`routes/protocolBridge.js:359-379`）。
+- Gemini GenerateContent：`systemInstruction` 变成 `system`，`contents[].role=model` 变成 `assistant`（`routes/protocolBridge.js:386-412`）。
+
+桥接会把原生 `tools`、`tool_choice` 和 `parallel_tool_calls` 作为受保护的顶层字段加回转发 body，不放进 `messages` 或 RAG 文本（`routes/protocolBridge.js:54-56`, `158-173`, `820-821`）。但 VCP 自己的工具循环仍依赖模型正文中的 `<<<[TOOL_REQUEST]>>>` 纯文本标记，不能把这两套工具协议视为同一条执行链。
+
+### 2. 初始请求：从客户端历史到首次上游 body
+
+`ChatCompletionHandler.handle()` 对入站 body 原地处理，随后把最终消息写回 `originalBody.messages`（`modules/chatCompletionHandler.js:712-729`, `809-829`, `1123-1148`）。可复现的顺序如下：
+
+1. 读取 `requestId/messageId`，移除仅供 VCPChat 使用的 `vcpchatExtensions`。
+2. 若带 `contextTokenLimit`，先从 body 删除该字段并调用 `contextManager.pruneMessages()`。它按**文本字符数**估算长度，不计算图片等非文本 part；保留全部 `system`、以 `[系统提示:]` 开头的 user，以及最后两条消息，然后从前向后删除其他消息直到达到限制（`modules/contextManager.js:10-25`, `34-95`）。这不是摘要压缩，也不保证严格 token 上限。
+3. 消费连续顶层 system 中的 `[[VCPToolUse=Forbidden]]`，移除占位符并在本次请求禁用 VCP 工具解析（`modules/chatCompletionHandler.js:182-209`, `854-857`）。同时扫描 `{{TransBase64}}` / `{{TransBase64+}}`，决定后续多模态处理；模型命中纯文本 tag 时可自动强制翻译（`modules/chatCompletionHandler.js:859-970`）。
+4. 优先执行 `VCPTavern`。触发器 `{{VCPTavern::Preset...}}` 只从 system 查找，触发器本身及其他消息中的同名残留会被删除；预设按 embed → relative → depth 注入，relative/depth 可插入新的消息对象，并可解析会话时间变量（`Plugin/VCPTavern/VCPTavern.js:235-310`, `419-579`）。
+5. 若请求模型是语义路由模型，使用 Tavern 注入后的消息选出真实后端模型，再应用模型重定向和思维开关（`modules/chatCompletionHandler.js:911-947`）。
+6. 逐条深拷贝消息并执行变量解析。只有 `system`，或以 `[系统提示:]` / `[系统邀请指令:]` 开头的 user，才有权限展开 Agent/Toolbox；整个请求只展开一个 Agent，同名 Toolbox 只展开一次。随后处理时间、环境、SAR、日记/知识库、动态工具、插件描述等其他占位符（`modules/messageProcessor.js:146-255`, `601-823`）。
+7. 按配置调用多模态预处理器（`MultiModalProcessor` 优先，否则 `ImageProcessor`），再遍历 `PluginManager.messagePreprocessors` 执行其他插件。预处理器注册顺序由 `preprocessor_order.json` 中的已知顺序优先，未列出的插件按名称排序追加；当前保存顺序以 `VCPTavern → ImageProcessor → RAGDiaryPlugin → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2` 为主（`Plugin.js:802-880`, `preprocessor_order.json`）。因此插件可能修改原消息内容、插入消息，或仅挂载数组元数据。
+8. 后置执行 Detector/SuperDetector；最后按开关运行 Role Divider。Role Divider 默认跳过第一个消息，识别 `ROLE_DIVIDE_*` 标签为新的 system/user/assistant 消息，并保护 `TOOL_REQUEST`、DailyNote 标记块不被拆开（`modules/chatCompletionHandler.js:1098-1121`, `modules/roleDivider.js:69-121`, `383-399`）。
+9. 以处理后的 body 建立首次上游请求，并写入内存 `finalContextStore`。这个快照是**首次 fetch 前**的请求，不包含后续 VCP 工具递归回合；最多保留 5 组（`modules/chatCompletionHandler.js:1139-1150`, `modules/finalContextStore.js:21-23`, `288-300`）。
+
+### 3. RAG、时间线与折叠在消息中的实际形态
+
+这些能力不是独立的“会话消息表”，而是预处理器对本次数组的改写：
+
+- `RAGDiaryPlugin` 只处理 system 或虚拟 system user 中的日记本/知识库占位符；查询向量来自最近真实 user 与最近 assistant 的加权内容，命中的召回结果替换占位符，必要时还会收集附件（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1134-1219`, `1222-1240`, `1367-1403`）。
+- `VCPTimeLine` 找到首个可信 system/系统前缀 user 中的时间线占位符，只接受一次声明，把时间线文本替换到该占位符，其余同名占位符清空（`Plugin/VCPTimeLine/VCPTimeLine.js:372-415`）。
+- `ContextFoldingV2` 需要 system 中的激活占位符；它基于 assistant 历史块的深度、向量相似度和 FoldingStore，把低相关且已有摘要的 assistant 内容原地替换为摘要，未完成摘要则异步触发，开关本身从最终 system 文本删除（`Plugin/ContextFoldingV2/ContextFoldingV2.js:158-215`, `228-300`）。
+- OneRing 会把触发器改成系统通知、按配置追加上下文/时间标记，并在数组上挂载 `__oneRingMeta`；后续产生新数组的阶段显式复制这份元数据（`Plugin/OneRing/OneRing.js:929-950`, `modules/chatCompletionHandler.js:259-279`）。
+
+### 4. VCP 工具循环：模型上下文与前端显示分叉
+
+首次上游返回后，流式和非流式 handler 都维护一份 `currentMessagesForLoop`，而不是修改客户端的原始会话。每一轮的核心结构是：
+
+```text
+处理后的历史
+  -> assistant: 模型本轮正文（含 TOOL_REQUEST 标记）
+  -> 执行 Archery/普通工具
+  -> user: <!-- VCP_TOOL_PAYLOAD --> + 工具结果
+  -> 再次 POST /v1/chat/completions
+```
+
+- `ToolCallParser` 先剥离 reasoning block，再解析纯文本工具标记；普通调用与 `archery` 调用分离（`modules/vcpLoop/toolCallParser.js:22-93`, `303-310`）。
+- assistant 工具调用正文会追加到循环上下文；普通工具的 `result.content` 汇总后序列化为字符串 user payload，含图片时改用多模态数组并可再次经过图片翻译（`modules/handlers/streamHandler.js:429-441`, `579-688`; `modules/handlers/nonStreamHandler.js:421-434`, `444-518`）。
+- Archery 成功结果默认不回送模型；只有 Archery 出错且没有普通调用时，错误内容才形成 `VCP_TOOL_PAYLOAD` 触发递归（`modules/handlers/streamHandler.js:492-560`; `modules/handlers/nonStreamHandler.js:351-416`）。
+- `RAGMemoRefresh` 开启时，追加工具 payload 前会刷新历史中的 `VCP_RAG_BLOCK`，查询使用最近真实 user，而不是工具 payload（`modules/chatCompletionHandler.js:531-624`; 两个 handler 的 `RAG 刷新`段）。
+- 循环最多由 `MaxVCPLoopStream/NonStream` 控制，默认回退 5；达到上限时流式返回 `finish_reason=length`，非流式也把最终 choice 标为 `length`（`modules/handlers/streamHandler.js:68-70`, `741-752`; `modules/handlers/nonStreamHandler.js:302-304`, `565-589`）。
+
+### 5. 推理字段、VCP 信息与日志不是同一份消息
+
+- 循环和 OneRing 只读取模型 `message.content`；stream handler 将 reasoning 字段另存于日志 message，不混入 `collectedContentThisTurn`，避免推理链进入工具解析与记忆（`modules/handlers/streamHandler.js:154-169`, `408-417`；非流式同样取 `message.content`，`modules/handlers/nonStreamHandler.js:269-300`）。
+- 当模型匹配 reasoning 转正文配置时，发给客户端的 SSE/JSON 才会把 reasoning 包成 `<think>` 或 `<thinking>`；内部循环仍使用原始正文（`modules/reasoningContentAdapter.js:41-49`, `128-137`; `modules/handlers/streamHandler.js:172-217`; `modules/handlers/nonStreamHandler.js:272-285`, `565-577`）。
+- `vcpInfoHandler.streamVcpInfo()` 产生的工具结果汇总、成功/失败摘要只写入客户端输出（流式 SSE 或非流式 `conversationHistoryForClient`）；模型下一轮读取的是独立的 `VCP_TOOL_PAYLOAD`。`SHOW_VCP_OUTPUT` 关闭时，`mark_history` 仍可强制显示单个调用（`modules/handlers/streamHandler.js:594-663`; `modules/handlers/nonStreamHandler.js:447-494`）。
+- `CHAT_LOG_ENABLED` 打开时，`DebugLog/chat/YYYY-MM-DD/` 才异步写入初始请求、每轮 request/toolCalls/response；默认关闭，不构成会话持久化（`server.js:478-499`）。
+
+### 6. 消息构建边界
+
+已确认：VCPToolBox 在单次 HTTP 请求内拥有完整的“请求历史 → 最终上游 messages → 工具递归 messages”编排能力；它不拥有会话列表、消息编辑/删除/分支或跨请求恢复。`finalContextStore` 是调试快照，不是历史数据库；ChatLog 是可选审计文件，不是前端会话存储。外部 VCPChat、OpenWebUI 或其他客户端必须自行保存并在下一次请求中重新提交历史。
+
+尚未验证：未运行真实上游模型，故没有对每个插件组合下的最终消息数组做运行时快照；`messagePreprocessors` 的未列入 `preprocessor_order.json` 插件顺序只能根据源码确认“按名称排序追加”，不能据此推断每个安装环境的完整实际列表。
 
 ## 与聊天相关的界面能力
 

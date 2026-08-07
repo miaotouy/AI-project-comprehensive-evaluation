@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\Manifold-Desktop`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-07
 >
 > 代码快照：`3d7448fb2e6053056da6d6c126e08f90b94cda4f`（分支：`main`）
 >
 > 调查方式：只读核对 Chat 前端、会话存储和 C++ 消息桥；未修改目标仓库
 >
-> 调查范围：会话状态、持久化、流式更新、搜索和导入导出
+> 调查范围：会话状态、消息构建与发送、持久化、流式更新、搜索和导入导出
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -38,6 +38,15 @@ input-bar
 ## 会话与发送
 
 `openChatTab()` 为界面标签生成递增 id；如果传入已有 `sessionId`，`chat-tab.js` 发送 `LOAD_SESSION`，收到 `SESSION_DATA` 后把消息装入组件局部数组并渲染（`frontend/app.js:138-147`、`chat-tab.js:101-114`）。
+
+## 消息构建流程
+
+1. **输入与 UI 消息对象**：`frontend/components/input-bar.js:169-184` 读取输入文本并回调；`frontend/app.js:86-114` 调用 `addUserMessage`，将用户消息加入当前 tab 的 `messages[]`。`chat-tab.js:119-129` 构造 `{ role: 'user', content: text }`。
+2. **历史筛选**：`frontend/components/chat-tab.js:119-129` 返回当前 tab 的整个 `messages[]`；没有发现按 token、分支或角色再筛选历史的逻辑。assistant 流式文本只更新 DOM 和 `streamingText`（`:27-59`），不回写 `messages[]`，因此第二轮消息不含上一轮 assistant。
+3. **system prompt、附件与工具**：`frontend/services/provider-api.js:4-13` 的请求对象包含 `provider`、`model`、`messages`、`systemPrompt`、`temperature`、`tools`；本次未找到附件、记忆或知识库在 Chat 主链上的额外注入点。
+4. **截断与压缩**：发送前未找到上下文截断、摘要压缩或 token 预算处理；请求直接携带当前数组。
+5. **最终请求与 Provider**：前端通过 `CHAT_SEND` 发送上述 payload；`MainWindow.xaml.cpp:757-841` 处理桥消息并进入 Provider 流式调用，返回 `CHAT_CHUNK`/`CHAT_DONE`。具体 JSON 到 HTTP Provider 的字段映射未在本次笔记中进一步展开。
+6. **边界**：上述消息缺失和全局广播行为来自静态调用点；未做多标签、取消和网络阻塞场景的动态验证。
 
 发送时，用户消息通过 `addUserMessage()` 进入局部 `messages[]`，随后前端把整个数组、Provider、模型、system prompt 和 temperature 发给后端（`app.js:86-123`）。主进程只有一个 `m_chatThread`；新请求会先停止旧线程（`MainWindow.xaml.cpp:792-795`）。取消依赖 `stop_token`，只能在流回调再次运行时生效，不能主动中断已经阻塞的 `WinHttpReadData`。
 

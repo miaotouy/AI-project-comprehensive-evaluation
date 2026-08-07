@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-07
 >
 > 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
-> 调查范围：Chat session 生命周期、SQLite transcript、流式 assistant blocks、IPC/renderer 状态和消息窗口化
+> 调查范围：Chat session 生命周期、SQLite transcript、流式 assistant blocks、IPC/renderer 状态、消息窗口化和模型请求的上下文构建
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -105,7 +105,16 @@ message store 的核心状态包括 `messageCache`、`streamingBlocks`、当前 
 - 消息窗口高度是估算与观测的组合，复杂 artifact/图片导致的异步高度变化未通过浏览器实测。
 - 未运行测试、构建或桌面端交互；结论来自 main/renderer 静态源码。
 
-## 7. 关键源码索引
+## 7. 消息构建流程
+
+1. **输入与 UI 消息对象**：`SessionTurn.sendMessage`（`src/main/session/turn.ts:102-145`）接收字符串或 `SendMessageInput`，先经 `normalizeSendMessageInput`，再调用当前 session runtime 的 `send`。附件仍属于 normalized input；无法接受附件时返回 `needs_user_action`（`:145-146`）。
+2. **历史筛选**：`runtime/contextBuilder.ts:1501-1512` 从 transcript 取得候选记录，过滤为 context history，并从 summary cursor 开始构建 history turns。`buildCacheAwareResumeContextWithMetadata`（`:1614-1639`）在重试/恢复时按 `orderSeq` 取到目标 assistant 为止的记录，并保留其所属 user turn；该函数本身没有按父子关系回溯分支。
+3. **system prompt、记忆、附件与工具**：`promptAssemblyService.ts:59-73` 通过 `buildSystemPromptWithSkills` 组合基础 system prompt、技能和工具定义；压缩后的恢复 prompt 还在 `:89-104` 注入 checkpoint、memory 和 directives。`deepChatLoopRunner.ts:375-398` 解析 active skills 与工具目录，生成本轮 tool catalog。
+4. **截断与压缩**：`contextBuilder.ts:1513-1589` 计算固定 prompt/新 user 消息和历史 token，超预算时先移除 memory，再移除 directives，最后按完整 tail turns 选择历史；固定内容仍超物理预算则抛出 overflow。运行时还通过 `deepChatLoopRunner.ts:479-548` 做 provider 预检、严格重试和 context-pressure recovery。
+5. **最终请求与 Provider**：`contextBuilder` 返回 `leadingMessages + selected history + new user message`；`deepChatLoopRunner.ts:447-469` 将其交给 `processStream`，`:489-528` 以 `requestMessages`、model、temperature、maxTokens、tools 进入 provider attempt 管线。assistant 流式 block 再写回 transcript，形成下一轮候选历史。
+6. **边界**：源码确认了 DeepChat agent 的消息选择、预算和降级顺序；ACP runtime 的具体外部协议 payload 未在本次专题中展开。
+
+## 8. 关键源码索引
 
 - turn 操作：`src/main/session/turn.ts:36-405`
 - pending input DTO：`src/shared/types/agent-interface.d.ts:258-275`

@@ -2,13 +2,13 @@
 
 > 对比对象：AIO Hub、Chatbox、Cherry Studio、LobeHub、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-06
+> 对比更新日期：2026-08-07
 >
 > 依据：本目录七份单项目调查笔记（均带文件路径+行号证据）；本文档只做跨项目综合，不重复调查代码，具体证据请点进对应项目笔记核实
 >
-> 对比方法：基于本目录七份单项目调查笔记，按会话单位、消息存储、分支、搜索、流式持久化和中断等维度逐项对照；不重复调查代码
+> 对比方法：基于本目录七份单项目调查笔记，按会话单位、消息构建、消息存储、分支、搜索、流式持久化和中断等维度逐项对照；不重复调查代码
 >
-> 对比范围：会话单位、消息存储、分支、搜索、流式持久化、中断和跨项目差异
+> 对比范围：会话单位、消息构建、消息存储、分支、搜索、流式持久化、中断和跨项目差异
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-七个项目里，"分支"、"搜索"、"流式持久化"、"中断"这几个看起来同名的功能，底层实现方式互不相同，很多差异只有读完各自源码才能看出来。VCPToolBox 不提供最终用户聊天 UI，不参与下面的功能对比，只在最后单独说明。
+七个项目里，"消息构建"、"分支"、"搜索"、"流式持久化"、"中断"这几个看起来同名的功能，底层实现方式互不相同，很多差异只有读完各自源码才能看出来。VCPToolBox 不提供最终用户聊天 UI，不参与下面的功能对比，只在最后单独说明。
 
 ## SDK 使用与聊天主链
 
@@ -32,11 +32,25 @@
 | VCPChat | 自定义 VCP IPC/文本协议，单次 `fetch` 到网关 | Topic `history.json` 保存原始消息和上下文，VCP 标记在客户端解释 |
 | VCPToolBox | 不适用：没有最终用户聊天主链 | 它处理入站协议和模型编排，不保存最终用户会话 |
 
+## 消息构建：同一份历史并不等于同一份模型输入
+
+| 项目 | 进入构建器的历史 | 注入、裁剪与最终模型输入 |
+| --- | --- | --- |
+| AIO Hub | 当前活动叶子到根的路径，已被压缩节点遮罩的原消息不进入上下文 | 管道依次处理会话加载、异步结果、正则、转写、世界书、预设、知识库、变量、Token 限制、格式化和附件解析；最终 Payload 不等于原始节点数组 |
+| Chatbox | 目标 assistant 之前的当前 Session/Thread 消息 | `buildContext` 处理压缩点、附件与最大上下文消息数；知识库、网页浏览和 Agent Mode 注册为工具，随后注入 system instructions 并转换为模型消息 |
+| Cherry Studio | `getPathToNode(anchor)` 的路径；最近 `data-clear` 之前的消息被舍弃 | 先按上下文窗口生成或复用持久化压缩摘要，再由 AI SDK 将 UI parts 转为模型消息；多模型时同一用户消息可派生多份独立请求 |
+| LobeHub | 当前 `ConversationContext` 的 display messages，发送前排除仅本地消息 | 输入区把文件、技能、工具和选择区编码为 metadata 或运行上下文；最终预算与 provider payload 由 client agent/Gateway runtime 决定，本次未逐 provider 展开 |
+| SillyTavern | `chat[]` 过滤掉普通 system 消息后得到 `coreChat` | 先应用正则和附件内容，再经过 interceptor、World Info 和 API 分支格式化，产出 text-completion prompt 或 OpenAI messages；不同后端没有统一 payload |
+| VCPChat | 群聊已核实为内存 `groupHistory` 的当前快照；单聊最终请求组装未在本次笔记逐步展开 | 群聊按成员串行构建各自上下文，下一位成员会看到上一位刚落盘的回复；单聊和群聊不应据此视为同一构建链 |
+| VCPToolBox | 调用方提交的线性 `messages`；Responses、Anthropic、Gemini 请求先桥接成该格式 | 请求级管线依次做字符预算裁剪、Tavern 注入、模型路由、变量/Agent/Toolbox 展开、多模态与 RAG/Timeline/OneRing/折叠预处理、Detector 和角色拆分；工具循环再追加 assistant 正文与 user `VCP_TOOL_PAYLOAD`。它不拥有跨请求会话，但会实质重写最终模型输入 |
+
+**结论**：横向比较“是否有上下文”没有意义。AIO Hub、Chatbox、Cherry Studio 和 SillyTavern 在应用侧显式重写历史或注入内容；LobeHub 把一部分决定下沉到运行时；VCPChat 目前仅群聊路径具备足够证据；VCPToolBox 则不保存会话，却在网关侧重写调用方提交的整份消息。比较具体行为时必须同时标注构建位置、历史归属和未覆盖边界。
+
 ## 会话单位与存储模型
 
 | 项目 | 会话主体 | 存储粒度 | 持久化方式 |
 | --- | --- | --- | --- |
-| AIO Hub | Agent 下的 Session（`ChatSessionDetail`） | 索引/详情分文件：`sessions-index.json` + `sessions/{id}.json` | 撤销/重做栈显式从不落盘（`saveSession` 写盘前 `delete history`） |
+| AIO Hub | Session（`ChatSessionDetail`；Agent 是显示及消息元数据关联，并非 Session 的父级） | 索引/详情分文件：`sessions-index.json` + `sessions/{id}.json` | 撤销/重做栈显式从不落盘（`saveSession` 写盘前 `delete history`） |
 | Chatbox | Session（`SessionMetaRecord` + 完整对象） | IndexedDB：meta 表分页游标 + 完整 session 对象表 | 流式内容 UI 缓存与落盘分离（见下节），故意不做 DB version 升级 |
 | Cherry Studio | Topic（真实 adjacency-list 树） | SQLite，`message.parentId` 自引用外键 + DB CHECK 约束 | `activeNodeId` 指针 + `getPathRowsToNodeTx` 反向 walk 渲染当前分支 |
 | LobeHub | Agent/topic/thread（多维 `messageMapKey`） | 服务端 + 本地双份缓存，双层 Store 各自独立解析 | 见下节"双层 parse"问题 |
@@ -119,9 +133,11 @@ VCPChat 的**群聊**中断(`Groupmodules/groupchat.js`)有真正的本地 `Abor
 - **SillyTavern**：完整性校验机制(`chat_metadata.integrity`)本身就是为了兜底多标签页并发写覆盖问题存在的,说明这类冲突是预期会发生的;`swipe()` 失败时的自动恢复+失败后强制整页重载,说明作者预期 swipe 状态有可能被扩展搞坏。
 - **VCPChat**：单聊中断能力不完整(见上节);群聊历史写盘在多次调用之间没有文件锁,理论上存在并发覆盖丢消息的风险(未构造并发场景验证,但代码层面确实没有防护);未读自动判定条件比表面描述的窄得多(要求"整个历史仅有一条非系统消息且是 assistant",多轮对话后永远不会触发)。
 
-## VCPToolBox：不参与上述对比
+## VCPToolBox：不参与会话/UI 对比，但参与消息构建
 
-VCPToolBox 不提供最终用户聊天主界面这个方向性结论维持不变,但补充两点:AdminPanel-Vue 是独立进程(监听 `PORT+1`),与聊天主链物理解耦,不是同一 UI 的另一部分;OpenWebUISub 是运行在第三方聊天页面里的浏览器脚本,靠 `MutationObserver` 扫描 AI 回复文本里的协议标记字符串渲染成卡片,不发起额外网络请求——工具调用结果之所以能被这些脚本"美化",根源是 VCP 协议本身用纯文本标记(而非原生 Function Calling)把工具结果写回聊天 SSE 流,这是后端 `vcpInfoHandler.js` 的行为,与聊天 UI 无关。
+VCPToolBox 不提供最终用户聊天主界面这个方向性结论维持不变，但“没有聊天 UI”不等于“不构建消息”。它把调用方提交的历史归一化为 OpenAI `messages`，在首次请求前完成裁剪、注入和预处理；模型输出 VCP 工具标记后，又将 assistant 正文和工具结果 user payload 追加到内存上下文并递归请求。`FinalContextViewer` 只捕获首次上游 fetch 前的最近 5 份内存快照，不包含后续工具递归消息，也不是会话数据库。
+
+AdminPanel-Vue 是独立进程（监听 `PORT+1`），与聊天主链物理解耦；OpenWebUISub 是运行在第三方聊天页面里的浏览器脚本，靠 `MutationObserver` 扫描 AI 回复文本里的协议标记字符串渲染成卡片。给模型的工具结果使用 `<!-- VCP_TOOL_PAYLOAD -->` user 消息，给前端的可见结果由 `vcpInfoHandler.js` 另行写入 SSE/最终 JSON，两者不能混为同一份消息。完整证据链见 `VCPToolBox-Chat调查笔记.md` 的“消息构建调查”。
 
 ## 选择提示(基于本次核实的具体机制,而非泛泛印象)
 

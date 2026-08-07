@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：未确认
+> 调查更新日期：2026-08-07
 >
-> 代码快照：`7450ab2dde5eacab4a8721f8680006ba8b99438d`（分支：`main`）
+> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/renderer/routes/index.tsx`、`src/renderer/routes/session/$sessionId.tsx`、`src/renderer/components/session/*`、`src/renderer/stores/session/*`、`src/renderer/stores/chatStore.ts`、`src/renderer/stores/uiStore.ts`、`src/renderer/storage/SessionMetaStorage.ts`、`src/shared/session/message-forks.ts`、`src/shared/types.ts` 等），未凭空推断；不确定处标注"未核实"。
 >
-> 调查范围：聊天会话、消息状态、存储、流式更新与交互机制
+> 调查范围：聊天会话、消息构建、消息状态、存储、流式更新与交互机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -327,6 +327,7 @@ Chatbox 有一套独立于消息列表渲染的搜索 UI，并非只有 DOM 文�
 - `src/renderer/stores/session/tools-builder.ts`（知识库/网页浏览/agent 工具统一注册）
 - `src/renderer/stores/session/generation.ts`
 - `src/renderer/stores/sessionHelpers.ts`（`getCurrentThreadHistoryHash`、`getAllMessageList`、`constructUserMessage`）
+
 - `src/renderer/storage/SessionMetaStorage.ts`（IndexedDB 分页/索引/游标实现）
 - `src/shared/session/message-forks.ts`（fork 纯变换函数）
 - `src/shared/types.ts`（`Session`/`Message`/`SessionThread`/`MessageForkEntry` 等 schema）
@@ -334,25 +335,34 @@ Chatbox 有一套独立于消息列表渲染的搜索 UI，并非只有 DOM 文�
 - `docs/new-session-mechanism.md`（与实际代码对照，发现其中"三步状态转移"描述过于简化，未提及三种容器并存及 `newSessionState.webBrowsing` 死字段问题）
 - `docs/ui-inventory.md`（用于定位组件文件路径与文案，交叉验证 SummaryMessage/ForkMarkerMessage/CompactionStatus 等组件的存在）
 
-## 10. UI 交互与呈现补充
+## 10. 消息构建流程
 
-### 10.1 会话页的布局与滚动策略
+1. **输入与 UI 消息对象**：`InputBox.tsx:779` 的 `handleSubmit` 接收编辑器文本和附件，`InputBox.tsx:837-843` 调用 `sessionHelpers.constructUserMessage`。该函数在 `sessionHelpers.ts:700-770` 创建用户消息；图片进入 `contentParts`（`:722-725`），文件进入 `files`（`:728-758`），链接进入 `links`（`:760-770`）。
+2. **历史筛选**：`session/messages.ts:177` 的 `submitNewUserMessage` 先写入用户消息，随后 `:224-246` 插入 assistant 占位并由 `:308` 进入生成。`orchestrateGeneration` 通过 `session/utils.ts:105` 选择当前 session 或 thread 的消息；`agent-harness.ts:199-230` 只取目标消息之前的历史，再交给上下文构建。
+3. **system prompt、记忆、附件与工具**：`session/tools-builder.ts` 将 Agent、知识库和网页浏览按模型能力注册为工具（详见原第 7 节）；这些开关通常作为工具定义和工具执行能力进入请求，不是统一拼成用户文本。附件则保留在用户消息的 parts/files 字段中。
+4. **截断与压缩**：本次源码确认的上下文入口会按模型上下文预算筛选历史；生成中的消息列表还有独立的流式缓存与持久化路径（`session/messages.ts`）。具体 provider 侧 token 截断策略未在本次入口范围内完全核实。
+5. **最终请求与 Provider**：生成 harness 将选定历史、当前用户消息、system prompt 和工具集交给 provider 调用；流式 assistant 通过 `session/messages.ts:216-246,308` 更新占位消息和 streaming cache，再持久化。具体各 provider payload 字段由 API 适配层生成，本笔记未逐一展开。
+6. **边界**：源码直接确认的是 renderer 消息对象、历史选择和工具注册链；provider 最终 HTTP JSON 的字段顺序及各模型差异属于未核实事项。
+
+## 11. UI 交互与呈现补充
+
+### 11.1 会话页的布局与滚动策略
 
 `routes/session/$sessionId.tsx` 的页面顺序固定为 `Header → MessageList → InputBox`，线程历史通过 `ThreadHistoryDrawer` 作为侧滑层挂载。进入会话后延迟调用 `scrollToBottom('auto')`；发送新消息前先把 `MessageList` 标记为新消息并瞬间滚到底部，生成期间由 smooth-follow 控制器跟随输出，用户手动向上滚动后会暂停跟随。`MessageList` 使用 `react-virtuoso`，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不会把阅读位置丢掉。
 
-### 10.2 消息卡片、分组与导航
+### 11.2 消息卡片、分组与导航
 
 `MessageList.tsx` 将最新一轮 user+assistant 合成一个渲染 item，其余消息逐条渲染；消息顶部可插入 ThreadLabel，Fork 在分叉点下显示 `ForkNav`，摘要和跨会话来源分别由 `SummaryMessage`、`ForkMarkerMessage` 专用组件呈现。桌面端还有 `MessageMinimapRail`、上一条/下一条用户消息导航和“回到底部”按钮，移动端会隐藏 minimap 以节省空间。`Message` 组件的编辑、复制、重试、删除、分支切换等动作通过 `sessionActions` 写回 store，而不是直接修改 DOM。
 
-### 10.3 输入区与生成中交互
+### 11.3 输入区与生成中交互
 
 `InputBox.tsx` 将模型选择、Copilot、知识库、网页浏览、Agent 模式和工具入口收敛到 composer 工具栏；附件和知识库以消息 parts/会话句柄进入发送流水线（第 7 节）。`onSubmit` 先更新 UI 滚动状态，再调用 `submitNewUserMessage`；若当前存在 `generating` 消息，停止按钮调用其 `cancel()` 并把该消息以 `generating:false` 乐观写回。新建页的输入状态在首次发送时迁移到真实 Session，因此“首页输入框”和真实会话输入框呈现相同，但生命周期不同。
 
-### 10.4 侧栏和响应式交互
+### 11.4 侧栏和响应式交互
 
 `SessionList.tsx` 用 Virtuoso 分页加载，置顶/普通两组通过 `SessionMetaRecord.starred` 分开；拖拽由 dnd-kit 提供鼠标、触摸和键盘传感器。小屏幕默认禁用拖拽，用户需先进入“调整顺序”模式再长按移动，避免滚动手势误触。`SessionItem` 的右键/长按菜单承接置顶、改名、归档、恢复和删除；归档当前会话会先跳回首页。页面和输入组件均有 `isSmallScreen` 分支，保证窄屏下工具栏和线程抽屉不与消息区重叠。
 
-### 10.5 呈现层边界
+### 11.5 呈现层边界
 
 - 消息虚拟化只解决挂载/滚动，不改变 `getAllMessageList` 的线程、fork 展平结果；
 - 消息内容搜索通过 `SearchDialog` 读取 Session 数据模型完成，结果可定位到具体消息；它不依赖 Virtuoso 当前挂载的 DOM，但跨会话仍是分页全量扫描而非持久化索引（第 7.5 节）；

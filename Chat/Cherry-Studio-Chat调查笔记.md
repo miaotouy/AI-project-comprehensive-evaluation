@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-07
 >
-> 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
+> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
 >
 > 调查方式：逐文件通读源码 + 交叉核对文档
 >
-> 调查范围：聊天会话、消息状态、存储、流式更新与交互机制
+> 调查范围：聊天会话、消息构建、消息状态、存储、流式更新与交互机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -19,6 +19,15 @@
 Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架，但不是共用一个组件树，而是共用**类型契约**：`MessageListProvider`（`src/renderer/components/chat/messages/MessageListProvider.tsx`）定义了 `MessageListState/Actions/Meta` 的 shape，Home 用 `useHomeMessageListProviderValue`（`src/renderer/pages/home/messages/homeMessageListAdapter.tsx`）实现，Agent 用 `useAgentMessageListProviderValue`（`src/renderer/pages/agents/messages/agentMessageListAdapter.tsx`）实现。`MessageList.tsx`、`MessageGroup`、`MessageFrame` 等渲染组件只读这两个 context，完全不知道自己在哪个入口下。这是标准的"适配器模式"，细节见下文"Home/Agent 适配器"一节。
 
 会话单位是 Topic（`src/shared/data/types/topic.ts`），存储在 SQLite，由 `TopicService`（`src/main/data/services/TopicService.ts`）管理 CRUD。消息不是简单的线性数组，而是**adjacency-list 树**（`message.parentId` 自引用外键），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护，`docs/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与代码基本一致，但文档中"Flow canvas 是 forward reference，代码在其他分支"的说法已经**过时**（见"发现的问题"）。
+
+## 消息构建流程
+
+1. **输入与 UI part**：`composerQueuedPayload.ts:31` 的 `buildComposerQueuedPayload` 汇总草稿和队列输入；文本 part 来自 `composerDraft.ts:366,385`，附件 part 来自 `buildFileParts.ts:53`。知识库范围和清理上下文分别以 `uiParts.ts:333-361` 的 data parts 表达，而不是依赖不可见字符串约定。
+2. **发送入口与历史**：`ChatContent.tsx` 将 `onSend` 接到 `useChatRuntimeState` 的 `sendMessage`，再由 `useConversationTurnController.ts:59` 通过 IPC `ai.stream.open` 发送 `buildStreamRequest(...)` 的结果。持久化历史由 `MessageService.getPathToNode`（`MessageService.ts:1639`）按锚点取根到节点的活动路径。
+3. **注入顺序**：`PersistentChatContextProvider.prepareDispatch` 在创建用户消息和 assistant 占位后调用 `resolveCompactedHistory`（`:367-387`）。该函数先取锚点路径（`:671`），再丢弃最近 `data-clear` 标记及其之前的记录（`:672-673`），随后应用压缩视图。模型转换阶段的 `toModelMessages`（`messageRules.ts:75-83`）会重放持久化工具输出、剔除模型不支持的媒体、转换 UI parts、合并相邻同角色消息并补齐空 assistant；知识库范围和工具配置仍由请求/metadata 传递。
+4. **截断与压缩**：当前源码把压缩作为独立的持久化上下文阶段处理，`PersistentChatContextProvider` 先按分支和清理标记确定历史，再按上下文窗口决定是否生成或沿用摘要；本次未把每个 provider 的 token budget 算法逐一展开。
+5. **最终请求与 Provider**：renderer 通过 `ai.stream.open` 把构建后的 turn 请求交给 main；AI SDK Agent 在 `src/main/ai/runtime/aiSdk/Agent.ts:238` 将 `initialMessages` 转成 model messages，随后由对应 runtime/provider 发起流式调用。具体 HTTP payload 由 AI SDK 和 provider runtime 负责。
+6. **边界**：上述为源码确认；流式中断、压缩触发阈值及不同 Agent runtime 的完整差异未运行验证。
 
 ## 会话与历史
 

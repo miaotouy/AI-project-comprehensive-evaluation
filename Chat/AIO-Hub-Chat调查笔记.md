@@ -339,7 +339,7 @@ reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffe
 
 依据 `FlowTreeGraph.vue`、`useGraphD3Simulation.ts`、`useGraphSubtreeDrag.ts`、`useGraphConnectionPreview.ts`、`useGraphNodeActions.ts`、`GraphNodeMenubar.vue`：视图缩放范围 0.2–4，支持 fit view、定位当前激活节点、背景网格/小地图/控制器/HUD 开关、工具栏折叠、撤销/重做、操作历史、视图设置和开发者 debug overlay。布局有三种：动态树状 `tree`、物理引力 `physics`、静态树状 `static`；循环布局和重置布局均是可见按钮，历史仅运行时有效。
 
-节点双击查看详情，右键可设为当前分支、启用/禁用、剪掉分支；节点菜单可续写、上下文分析、导出、重算 Token、重新解析工具、复制、创建分支、重生成、指定模型重生成、截图、删除。拖拽节点默认移动单点，按 graphViewShortcuts 配置的 Shift/Alt/Ctrl 可拖整棵子树；从节点连线到另一节点可移动节点，使用 graftSubtree 修饰键则嫁接整棵子树，系统拒绝自连、根节点、后代循环、预设节点和同父节点。压缩节点标题可展开/收起，收起只改变可见拓扑投影，不删除消息。节点以 active-leaf、disabled、compression、connection-valid/invalid 等状态区分，debug 层额外显示 id、深度、速度、尺寸和固定坐标；static 模式不进入拖拽物理布局，physics 模式松手后可能回弹。
+节点双击会将其设为活动节点；节点上的“详情”按钮才会打开详情弹层。右键可设为当前分支、启用/禁用、剪掉分支；节点菜单可续写、上下文分析、导出、重算 Token、重新解析工具、复制、创建分支、重生成、指定模型重生成、截图、删除。拖拽节点默认移动单点，按 graphViewShortcuts 配置的 Shift/Alt/Ctrl 可拖整棵子树；从节点连线到另一节点可移动节点，使用 graftSubtree 修饰键则嫁接整棵子树，系统拒绝自连、根节点、后代循环、预设节点和同父节点。压缩节点标题可展开/收起，收起只改变可见拓扑投影，不删除消息。节点以 active-leaf、disabled、compression、connection-valid/invalid 等状态区分，debug 层额外显示 id、深度、速度、尺寸和固定坐标；static 模式不进入拖拽物理布局，physics 模式松手后可能回弹。
 
 ### 11.4 可见性设置与语义状态
 

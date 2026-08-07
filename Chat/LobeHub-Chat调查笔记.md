@@ -2,17 +2,26 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-07
 >
-> 代码快照：`4edba1b75a97b91c28ad48cd1cc90528defa17ad`（分支：`canary`）
+> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
 >
 > 调查方式：只读源码（Read + Grep + Glob，逐文件通读，未凭猜测下结论）
 >
-> 调查范围：聊天会话、消息状态、存储、流式更新与交互机制
+> 调查范围：聊天会话、消息构建、消息状态、存储、流式更新与交互机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 说明：本笔记依据下面列出的具体文件/行号内容，逐条给出可验证的调查结论。
+
+## 消息构建流程
+
+1. **输入与 UI 消息对象**：`src/features/Conversation/store/slices/message/action/sendMessage.ts:22-57` 读取 composer 参数、当前 context 和 `displayMessages`，过滤 `isLocalOnlyMessage` 后转交全局 `ChatStore.sendMessage`。`src/store/chat/slices/agentRun/actions/entries/conversationLifecycle.ts:274-280` 从 editorData 提取 skills、tools、mentions 和文件引用，context selections 则由发送参数继续传入。
+2. **历史筛选与当前分支**：同一文件 `:566-585` 优先使用调用方传入的 messages，否则按 context key 读取 display messages；`parentId` 由输入值或最后一条 display message 的真实 id 确定。该发送层以当前 display messages 为输入，不主动把其它显示分支拼入请求；持久化分支的具体解析留在消息服务和运行时层。
+3. **system prompt、记忆、附件与工具**：同一文件 `:431-465` 构造运行上下文、文件 id 列表、图片/视频预览和 user message metadata；`:467-476` 预加载被选中的 skill/tool 内容。`operationContext` 可承载 group、thread、page document 等运行上下文，供 client agent 或 Gateway 继续注入 system prompt、工具和页面资源。
+4. **截断与压缩**：发送层支持 `/compact`，同一文件 `:342-351` 将其转为独立 compression operation；客户端压缩还通过 `ClientCompressionTransport` 处理待摘要消息。常规请求的最终 token 截断由 Agent runtime/Gateway 负责，本次未将每个模型 runtime 的预算算法展开。
+5. **最终请求与 Provider**：发送先在同一文件 `:593-673` 生成 user/assistant 临时消息和 operation，再按 runtime 类型分流到 client agent 或 Gateway；Gateway 侧在 `src/app/(backend)/webapi/chat/[provider]/route.ts:24` 初始化 `ModelRuntime`，并在 `:38-42` 调用 `modelRuntime.chat(data, ...)`。客户端 agent 则以当前 messages、parent id、metadata 和 context 启动本地 runtime。
+6. **边界**：源码直接确认了本地消息筛选、分支锚点、附件 metadata、工具/技能预加载和 runtime 分流；Provider 最终 HTTP 字段由 `ModelRuntime`/各 provider adapter 生成，未逐一核对。
 
 ## 1. 定位：Context 如何构成、Key 如何生成
 

@@ -2,17 +2,26 @@
 
 > 调查对象：`E:\works\git\SillyTavern`
 >
-> 调查更新日期：未确认
+> 调查更新日期：2026-08-07
 >
 > 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
 >
 > 调查方式：只读源码，逐文件通读 + 针对性 grep 定位后再展开读取上下文
 >
-> 调查范围：聊天会话、消息状态、存储、流式更新与交互机制
+> 调查范围：聊天会话、消息构建、消息状态、存储、流式更新与交互机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 实际读代码后发现，聊天的状态机、swipe、消息渲染主体都在 `script.js` 里：`chats.js` 只是消息级工具函数（隐藏/附件/媒体）的集合，`streaming-display.js` 是一个跟主聊天渲染完全脱钩的悬浮通知组件。下面会具体说明。
+
+## 消息构建流程
+
+1. **输入与 UI 消息对象**：`public/script.js:1705` 的 `sendTextareaMessage()` 进入 `Generate()`（`:4231`）。`sendMessageAsUser()`（`:5815`）创建用户 `ChatMessage`，基础字段在 `:5818-5827`，token count 在 `:5830`，bias 在 `:5838-5841`，附件在 `:5843`，随后写入内存 `chat`（`:5848-5861`）。assistant 回复由 `saveReply()`（`:6583`）创建，正文和 metadata 在 `:6684-6701`，swipes 在 `:6740-6767`。
+2. **历史筛选**：`Generate()` 约 `:4437` 先把 `is_system` 消息排除，只有启用工具且带 `extra.tool_invocations` 的 system 消息保留。之后每条消息按角色、名称、continue 状态和 prompt 格式转换（`:4442-4505`、`:4711-4775`），并分别进入 text completion 或 `setOpenAIMessages` 的 messages 结构。
+3. **system prompt、记忆、附件与工具**：system/character/world-info/injection 等内容在 `Generate()` 组装到 prompt 或 OpenAI messages；工具 system 消息通过上述 `tool_invocations` 例外进入。附件先保存在消息的 `extra`/chat metadata，再由对应生成分支决定如何表达；不同 API 模式并不共享完全相同的 payload。
+4. **截断与压缩**：构建完成后，SillyTavern 先运行 generation interceptors（`:4505`），再执行 World Info 注入（`:4565`、`:4686`），最后按当前 API 的 prompt/message formatter 生成 `finalPrompt` 或 `oaiMessages`。本次确认了筛选和注入顺序，但未完整核对每种后端的 token budget 截断算法。
+5. **最终请求与 Provider**：`Generate()` 在 `:5190-5244` 根据 API 类型生成 `generate_data`，`:5268-5334` 发送流式请求或 OpenAI 请求，`:5390` 处理非流式请求；请求入口按 Kobold、TextGen、Novel、OpenAI 等分支选择不同 payload builder。
+6. **边界**：源码直接确认内存 chat、system 过滤、prompt/message 双格式和 provider 分支；各扩展 regex 的 `promptOnly` 作用域及每个后端的完整截断细节仍需专项核对。
 
 ## 定位
 
