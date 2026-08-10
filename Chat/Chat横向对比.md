@@ -29,7 +29,7 @@
 | Chatbox | 调用层使用 Vercel AI SDK；会话层使用自定义 `contentParts` | SDK 归一化 Provider 流，历史、分支和持久化仍是应用自己的 Session 模型 |
 | Cherry Studio | Vercel AI SDK `UIMessage` / `readUIMessageStream`；Agent 会话另走 Claude Code SDK | `UIMessage.parts` 是普通聊天的结构化消息契约，Agent Session 有独立持久化路径 |
 | DeepChat | main process 内的自研 Session/Agent runtime 与 typed IPC | transcript、assistant blocks、pending input 和 Provider 流由主进程统一管理，renderer 只维护投影与缓存 |
-| Hermes Agent | Python `AIAgent` + JSON-RPC/WebSocket 桌面协议 | 后端 SQLite 是真相源；桌面按 lineage/runtime 两类 ID 合并流式事件与持久化历史 |
+| Hermes Agent | Python `AIAgent` + JSON-RPC/WebSocket 桌面协议 | 后端 SQLite 是真相源；桌面按 stored session id 与 lineage root 匹配会话，压缩轮转后 root 标识保持稳定 |
 | Jan | Vercel AI SDK `useChat` + 自研 `CustomChatTransport` | UI message、ThreadMessage 和文件/SQLite 持久化模型之间显式转换，transport 掌管上下文和 Provider 参数 |
 | LobeHub | 自研 ModelRuntime、消息 Store 与 `conversation-flow` | Provider 调用与 DB 消息分层；展示路径由 flow 从消息记录重建 |
 | Manifold Desktop | WebView2 `postMessage` + C++ Provider 流式桥 | 前端 `messages[]` 与 C++ 会话文件 API 未接通，assistant 流只更新 DOM，未形成完整会话模型 |
@@ -52,7 +52,7 @@
 | Chatbox | 只在 Provider/流式调用层借力，产品数据模型仍由应用拥有 | 以较低成本统一多 Provider 的流事件，同时保留 `Session`、`Thread`、`Fork` 和 `contentParts` 这些产品语义；替换 Provider 不必改写会话存储 | SDK 的输出要映射到自定义消息模型，形成“SDK 契约 + 应用契约”两层边界；工具调用、压缩和分支越复杂，适配代码越多 |
 | Cherry Studio | 普通聊天和 Agent 采用不同 SDK，按交互复杂度拆分协议 | 普通聊天可直接使用 `UIMessage.parts` 的结构化流；Claude Code SDK 可以单独承载 Agent 的工具、审批和执行生命周期，不必把 Agent 事件硬塞进普通消息 | 两条主链和两套持久化语义需要明确转换边界；跨模式复制、搜索、恢复和 UI 展示容易出现不一致 |
 | DeepChat | 让主进程拥有 session、transcript、Agent 和 Provider runtime | pending input、工具交互、流式 block、搜索和持久化能共享一个有序 transcript；renderer 可专注窗口化展示 | main/renderer 间的 revision、cursor 和 IPC 事件顺序成为额外一致性边界，崩溃恢复与乱序行为仍需运行验证 |
-| Hermes Agent | 让跨界面的 Python Agent 后端作为权威状态源 | CLI/TUI/桌面复用同一会话与工具能力，lineage id 可跨压缩轮转稳定引用会话 | session、lineage、runtime 三类身份需要持续翻译；前端“停止显示”与后端真实中断处在不同层 |
+| Hermes Agent | 让跨界面的 Python Agent 后端作为权威状态源 | CLI/TUI/桌面复用同一会话与工具能力，lineage root 可跨压缩轮转稳定引用会话 | 会话句柄（sid）与持久 session id 两类身份需要翻译，压缩轮转后按 lineage root 重锚；前端本地定稿与后端中断检查处在不同层 |
 | Jan | 用 AI SDK 承接流式 UI，用自研 transport 保留本地模型和上下文控制 | 桌面/移动端共享前端逻辑，仍能注入本地 Provider 参数、附件清洗、压缩和树形版本 | UI 消息、持久化消息和 Provider 请求存在多次转换；桌面 JSONL 每次整文件重写，未完成回合不恢复 |
 | LobeHub | 将 Provider SDK 留在适配层，自建 ModelRuntime、Store 和 flow | 可以把模型调用、权限、工具执行、消息持久化和展示投影按自己的运行时编排；适合把 Agent 过程记录为可观察流程 | 需要长期维护 Provider 适配和运行时抽象；全局 Store 与会话 Store 各自 `parse` 的重复计算，带来同步与引用稳定性成本 |
 | Manifold Desktop | 保持前端与 C++ Provider 桥尽量薄 | 请求链短，前端标签页可直接驱动 Provider 流 | 会话存储 API 没有接入正常聊天主链，导致回复不回写上下文、多标签共享广播和重命名覆盖等基础一致性缺口 |
@@ -106,7 +106,7 @@
 | Chatbox | Session（`SessionMetaRecord` + 完整对象） | IndexedDB：meta 表分页游标 + 完整 session 对象表 | 流式内容 UI 缓存与落盘分离（见下节），故意不做 DB version 升级 |
 | Cherry Studio | Topic（真实 adjacency-list 树） | SQLite，`message.parentId` 自引用外键 + DB CHECK 约束 | `activeNodeId` 指针 + `getPathRowsToNodeTx` 反向 walk 渲染当前分支 |
 | DeepChat | Session；subagent session 仍是可读 transcript | SQLite：message 行与 assistant block 分表，以 `(session_id, order_seq)` 建索引 | 流式中间态更新 block/pending，完成或错误时同步正文、状态、搜索文档和 Tape facts |
-| Hermes Agent | Session + 跨压缩轮转稳定的 lineage root | profile 级 `state.db`；运行期另写 JSONL 日志 | 后端批量事务落库并用 persisted marker 去重；renderer 只是带版本仲裁的缓存 |
+| Hermes Agent | Session + 跨压缩轮转稳定的 lineage root | profile 级 `state.db` 是唯一规范存储（旧每会话 JSONL 日志已移除） | 后端批量事务落库并用 persisted marker 去重；renderer 只是带版本仲裁的缓存 |
 | Jan | Thread | 桌面每 thread 一个目录：`thread.json` + `messages.jsonl`；移动端 SQLite | 桌面每次整文件重写但有 per-thread 锁；`resume:false`，不恢复未完成回合 |
 | LobeHub | Agent/topic/thread（多维 `messageMapKey`） | 服务端 + 本地双份缓存，双层 Store 各自独立解析 | 见下节"双层 parse"问题 |
 | Manifold Desktop | Chat tab / 设计上的 session 文件 | `%LOCALAPPDATA%\Manifold\sessions\<id>.json` API | 正常聊天主链未调用保存，关闭标签即丢失；重命名按整 JSON 覆盖还可能清空消息 |
@@ -118,7 +118,7 @@
 | OpenCode | Session → Message（user/assistant）→ Part（12 种）三层 | SQLite：`session`/`message`/`part` 三表，part 独立存表、读取时批量组装（`core/src/session/sql.ts:22-98`） | 增量落库：prompt 时写 user 消息，流式中每 part 状态迁移即时落库，`text-end` 才完整写文本 part；事件发布与投影分离（`Session.updateMessage/updatePart` 只发事件，projector 写库） |
 | Pi | Session（JSONL 文件 = 会话树） | 每会话一个 `.jsonl`，条目带 `id/parentId` 形成树，`leafId` 指针标记当前位置 | 追加型：`message_end` 落盘；第一条 assistant 消息到达时创建文件并整写，之后逐条 append；版本迁移 v1→v3 时重写 |
 
-**存储实现可分为三组**：Cherry Studio、DeepChat、Hermes Agent、Open WebUI、AstrBot 使用数据库行或事务；Chatbox、NextChat 使用 IndexedDB；AIO Hub、Jan 桌面端、SillyTavern、VCPChat 仍有整文件/整对象写入路径，Manifold Desktop 的存储 API 尚未接入正常聊天。介质本身不保证一致性：Open WebUI 需要对齐两份数据，Hermes Agent 需要仲裁三类会话 ID，Jan 虽有文件锁仍按 O(消息数) 重写。
+**存储实现可分为三组**：Cherry Studio、DeepChat、Hermes Agent、Open WebUI、AstrBot 使用数据库行或事务；Chatbox、NextChat 使用 IndexedDB；AIO Hub、Jan 桌面端、SillyTavern、VCPChat 仍有整文件/整对象写入路径，Manifold Desktop 的存储 API 尚未接入正常聊天。介质本身不保证一致性：Open WebUI 需要对齐两份数据，Hermes Agent 需要翻译会话句柄与持久 session id 两套身份，Jan 虽有文件锁仍按 O(消息数) 重写。
 
 ## "分支"不是一回事：消息树、版本、复制和轮转链
 
@@ -150,7 +150,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 - **VCPChat**：`streamManager.finalizeStreamedMessage` 统一收尾，1 秒防抖存盘；群聊消息因 `saveHistoryForContext` 对 `isGroupMessage` 直接 return，不走这条路径，由 `groupchat.js` 单独写盘。是否落盘由消息类型决定，而不是由节流参数决定。
 - **AstrBot**：LLM 阶段以 `AsyncGenerator` 挂起流水线，让 Respond 阶段先发送结果，再回到生成器执行历史保存等收尾；顺序性来自 UMO 锁与 follow-up 队列，不是浏览器 UI 缓存。
 - **DeepChat**：assistant 先以 `pending` 行和 block 占位；流式中间态替换 block 并经 IPC 增量投影到 renderer，完成/错误后再同步正文、状态、搜索文档和 Tape facts。稳定 render key 让同一消息从流态过渡到落盘态时复用显示对象。
-- **Hermes Agent**：后端把 delta 经 WebSocket 推给桌面，renderer 以约 33ms 队列合并；终态 `message.complete` 再触发版本仲裁和会话刷新，后端按一轮批量事务写 SQLite/JSONL。
+- **Hermes Agent**：后端把 delta 经 WebSocket 推给桌面，renderer 以约 33ms 队列合并；终态 `message.complete` 再触发版本仲裁和会话刷新，后端按一轮批量事务写 SQLite。
 - **Jan**：AI SDK `experimental_throttle: 50` 只节流 UI，`useMessages` 另做乐观写与异步持久化；`resume:false` 明确不恢复未完成流。
 - **NextChat**：assistant 占位从一开始就在 Zustand session 内，SSE `onUpdate` 原地改 content，`onFinish` 清掉 `streaming`。状态存储和 UI 共用同一对象，没有独立 transcript 层。
 - **Open WebUI**：Provider 流先在后端按 chunk 数量聚合，再通过 Socket.IO 发约定事件；`update_db=True` 的 emitter 可按事件类型追加或覆盖消息行，前端按 `delta/output/done` 更新 history 投影。
@@ -190,7 +190,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | 最新一轮 user/assistant 分组，ThreadLabel、ForkNav、Summary/ForkMarker 专用块，桌面 minimap | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
 | Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | Virtua 分组列表；DB 历史与 live execution overlay 分层，工具/任务/reasoning 为显式组件 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | 测量高度 + spacer + anchor + 二分窗口化，流式行保持可见 | steer、queue、question/permission 是独立输入通道；subagent session 只读 | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
-| Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | 本地原子缓存合并历史与 delta，工具事件作为 child messages | prompt RPC、硬中断和纯前端停止显示具有不同语义 | lineage/runtime id 的翻译直接影响固定、恢复和流式状态 |
+| Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | 本地原子缓存合并历史与 delta，工具事件是 parts 中的 tool-call part | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 活动 parent 路径 + `< n/m >` 版本导航，失败 assistant 可隐藏 | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
 | LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | Virtua flat list + keepMounted；AssistantGroup 折叠工具流程，ChatMiniMap 快速跳转 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |
 | Manifold Desktop | WebView2 标签页聊天界面 | assistant chunk 直接改 DOM，每 chunk 强制滚到底部 | 新请求先停止全局旧线程；取消只能在下一次流回调检查 stop token | 多标签共享无会话 id 的广播，正常聊天状态与文件存储未接通 |
@@ -204,7 +204,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 ### 跨项目结论
 
 1. **“消息渲染”至少有四层含义**：AIO 当前把消息树编译成活动路径并完整挂载 DOM，再用 `content-visibility` 裁剪屏外渲染；它在 2025-11-02 至 2026-04-29 曾使用 TanStack Virtual，后因聊天场景的动态高度和滚动稳定性问题撤回。Chatbox/Cherry/Lobe/Jan 也把消息模型先编译成活动路径或 flat list；DeepChat 做测量驱动的窗口化，NextChat 只做固定页窗；SillyTavern/VCPChat/Manifold 主要增量或整段修改 DOM；VCPToolBox 只改第三方 DOM，不拥有消息列表。
-2. **停止生成的视觉状态与执行状态可能不同**：VCPChat 单聊只通知远端，Hermes Agent 可以只在前端把流标为完成，Manifold 的 stop token 不能打断阻塞读取；Open WebUI 将停止建模为可跨实例路由的任务取消。评估停止能力时，需要继续追到请求或任务控制层。
+2. **停止生成的视觉状态与执行状态可能不同**：VCPChat 单聊只通知远端，Hermes Agent 前端先本地定稿再请求后端中断、两者存在中间窗口，Manifold 的 stop token 不能打断阻塞读取；Open WebUI 将停止建模为可跨实例路由的任务取消。评估停止能力时，需要继续追到请求或任务控制层。
 3. **输入区承载了大量 Agent 交互**：DeepChat 的 steer/queue/permission、Jan 的排队与附件、Open WebUI 的工具确认和终端事件，与 AIO/Chatbox/Cherry/Lobe/VCPChat 的附件、知识库、mention、审批共同组成了输入协议。
 4. **窗口化与搜索存在结构性冲突**：Chatbox/Cherry/LobeHub/DeepChat 通过虚拟或窗口列表控制长会话成本，但 Cherry 的 DOM 搜索以及任何依赖已挂载节点的扩展会漏掉窗口外消息；NextChat 的固定页窗也需要显式移动窗口。AIO 曾经也有这一类窗口化方案，但在消息高度动态、倒序加载和滚动定位稳定性上付出的复杂度过高，后来改为完整 DOM + `content-visibility`，以保留真实 DOM 定位能力并把成本转给浏览器的屏外渲染裁剪。SillyTavern/VCPChat 没有这个漏搜原因，却把成本转移到整段 DOM。
 5. **UI 调查应记录“呈现投影”**：AIO 的 linear/force-graph、VCPChat 的 bubble/panel/immersive、Open WebUI 的 side-by-side/MoA、Chatbox 和 Jan 的分支版本导航，都说明同一份会话数据可以有多种用户可见投影；仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
@@ -215,7 +215,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | --- | --- | --- |
 | AstrBot | `stop_event` 可截断事件传播；`agent_stop_requested` 只请求 Agent 停止 | 软停仍允许历史保存等后续阶段执行，语义刻意分离 |
 | DeepChat | Session runtime 管理 working turn、steer/queue 与错误结算 | IPC 顺序、网络中断和快速切 session 尚未动态验证 |
-| Hermes Agent | 后端轮询 `interrupt_requested`；桌面另有 hard interrupt | `interruptResponse` 只是前端把已有内容标为完成并清 busy，不等于后端请求已停 |
+| Hermes Agent | 后端轮询 `interrupt_requested`；桌面 `cancelRun` 先本地定稿再调 `session.interrupt` RPC | 前端清 busy 与后端中断检查不在同一层，本地定稿到后端响应之间存在中间窗口 |
 | Jan | AI SDK/transport 控制当前生成，流式态禁止编辑删除 | `resume:false`，中断后的未完成回合不恢复；具体底层网络 abort 未在笔记中等深展开 |
 | Manifold Desktop | C++ `stop_token`，新请求先停止旧 `m_chatThread` | 只能在下一次 stream callback 生效，不能主动打断已阻塞的 `WinHttpReadData` |
 | NextChat | `ChatControllerPool.stop` 调当前 controller | controller 的 Provider 级取消效果取决于 adapter；笔记未逐 Provider 验证 |
@@ -224,7 +224,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | Pi | `AgentSession.abort()` 中止 agent 运行、工具与重试退避 | 中断后 assistant 消息以 `stopReason: "aborted"` 持久化；切换/退出会话前先 abort 落盘再替换 runtime |
 | OpenCode | `POST /session/:id/abort` → `SessionRunState.cancel` → 中断 Runner fiber（run-state.ts:77-86） | `Effect.onInterrupt` 走 `halt(AbortError)`，`cleanup` 把未完成 tool part 标 `"Tool execution aborted"` + `interrupted:true`；重试为进程内 `Effect.retry`（5xx/429，指数退避 2s 起），前端无独立手动重试端点 |
 
-VCPChat 仍是“同一产品两条路径不对称”证据最完整的案例。新增笔记还显示：Hermes Agent 的前端完成化、Manifold Desktop 的回调式 stop token、Open WebUI 的跨实例任务取消分别处在不同层级。其余项目缺少同等深度证据，只能标为未验证，不能从按钮存在推断请求已被中止。
+VCPChat 仍是“同一产品两条路径不对称”证据最完整的案例。新增笔记还显示：Hermes Agent 的前端本地定稿、Manifold Desktop 的回调式 stop token、Open WebUI 的跨实例任务取消分别处在不同层级。其余项目缺少同等深度证据，只能标为未验证，不能从按钮存在推断请求已被中止。
 
 ## 各项目自己承认或暴露出的技术债(有具体代码证据支撑的)
 
@@ -234,7 +234,7 @@ VCPChat 仍是“同一产品两条路径不对称”证据最完整的案例。
 - **LobeHub**：`doctor/diagnose.ts` 用于检测和修复读取器无法完整渲染的消息树；`reconcileAssistantToolLinks` 用于修复乐观更新在 step 边界丢失工具引用的问题。这两项都来自现有修复代码，不是理论推测。
 - **AstrBot**：事件队列没有全局并发上限；会话切换/新建的 SharedPreferences 有 60 秒防抖，进程崩溃可能丢失这段时间内的选择状态；follow-up 与流式并行的完整时序未实测。
 - **DeepChat**：SQLite 加密配置、事务隔离、崩溃恢复和 IPC revision/cursor 在网络中断、快速切换会话时的行为未运行验证；搜索文档、Tape 和 transcript 的完整迁移链也未全部追踪。
-- **Hermes Agent**：session id、lineage root 和 runtime id 的边界是持续 bug 来源；桌面侧“停止显示”和后端 `interrupt_requested` 不是同一动作，CLI/gateway 以外的运行行为未实测。
+- **Hermes Agent**：会话句柄（sid）与持久 session id 的翻译、压缩轮转后的身份重锚是持续 bug 来源；桌面侧本地定稿与后端 `interrupt_requested` 检查不是同一动作，CLI/gateway 以外的运行行为未实测。
 - **Jan**：桌面 `messages.jsonl` 每次整文件重写，长会话每轮 I/O 随消息数增长；`resume:false` 不恢复未完成回合；编辑消息会丢失媒体 content，分支树迁移完整性未验证。
 - **Manifold Desktop**：正常聊天没有调用 `SAVE_SESSION`，assistant 不回写 `messages[]`；`CHAT_CHUNK`/`CHAT_DONE` 无会话标识导致多标签广播串扰，重命名整文件覆盖会清空既有消息。
 - **NextChat**：默认把聊天全文、Mask、API key 和配置留在浏览器存储且无通用加密；摘要没有质量校验；WebDAV 合并时间戳实现可疑但未执行多设备复现。
@@ -257,7 +257,7 @@ AdminPanel-Vue 是独立进程（监听 `PORT+1`），与聊天主链物理解�
 | 数据库级消息树与事务约束 | Cherry Studio | SQLite 有外键和 CHECK 约束；三层数据管道增加调试复杂度 |
 | 跨 IM 平台事件流水线、群聊唤醒与 follow-up | AstrBot | 核心单位是 UMO 和异步事件，WebChat 只是一种入口 |
 | 主进程权威 transcript、Agent 输入队列与工具交互 | DeepChat | main/renderer 之间仍有 IPC revision、cursor 和事件顺序边界 |
-| CLI/TUI/桌面共用 Agent 后端、跨压缩 lineage | Hermes Agent | session、lineage、runtime id 必须严格区分 |
+| CLI/TUI/桌面共用 Agent 后端、跨压缩 lineage | Hermes Agent | 会话句柄（sid）与持久 session id 必须区分，压缩轮转后按 lineage root 重锚 |
 | 本地模型、AI SDK 流式 UI 与消息版本树 | Jan | 桌面端每轮整写 JSONL，未完成回合不恢复 |
 | 应用层树与分支记忆 | AIO Hub | 搜索无索引，崩溃后生成状态不自愈 |
 | 简单会话记录、归档优先于删除 | Chatbox | 恢复归档不会重排，拖拽排序仅限同分组 |
