@@ -1,22 +1,22 @@
 # Chat 横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-07
+> 对比更新日期：2026-08-10
 >
-> 依据：本目录十四份单项目调查笔记（均带文件路径+行号证据）；本文档只做跨项目综合，不重复调查代码，具体证据请进入对应项目笔记核实
+> 依据：本目录十六份单项目调查笔记（均带文件路径+行号证据）；本文档只做跨项目综合，不重复调查代码，具体证据请进入对应项目笔记核实
 >
-> 对比方法：基于本目录十四份单项目调查笔记，按会话单位、消息构建、消息存储、分支、搜索、流式持久化和中断等共同维度逐项对照；未被单项目笔记共同覆盖的 UI 专项单独标注范围
+> 对比方法：基于本目录十六份单项目调查笔记，按会话单位、消息构建、消息存储、分支、搜索、流式持久化和中断等共同维度逐项对照；未被单项目笔记共同覆盖的 UI 专项单独标注范围
 >
 > 对比范围：会话单位、消息构建、消息存储、分支、搜索、流式持久化、中断和跨项目差异
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-说明：本文档以十四份笔记里已核实的具体机制为原料，做跨项目横向对照。2026-08-07 新纳入 AstrBot、DeepChat、Hermes Agent、Jan、Manifold Desktop、NextChat、Open WebUI；旧版 UI 深挖附录仍只覆盖原先六个有专项证据的聊天界面。
+说明：本文档以十六份笔记里已核实的具体机制为原料，做跨项目横向对照。2026-08-07 新纳入 AstrBot、DeepChat、Hermes Agent、Jan、Manifold Desktop、NextChat、Open WebUI；2026-08-10 新纳入 Pi（终端编码 Agent，CLI/TUI/print 三种模式共享同一 AgentSession）与 OpenCode（服务端会话运行时 + SQLite 持久化 + SSE 事件投影）。旧版 UI 深挖附录仍只覆盖原先六个有专项证据的聊天界面。
 
 ## 结论摘要
 
-十四个项目里，“消息构建”“分支”“搜索”“流式持久化”“中断”虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI），以及主链尚未接通持久化的薄客户端（Manifold Desktop）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+十六个项目里，“消息构建”“分支”“搜索”“流式持久化”“中断”虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 ## SDK 使用与聊天主链
 
@@ -35,6 +35,8 @@
 | Manifold Desktop | WebView2 `postMessage` + C++ Provider 流式桥 | 前端 `messages[]` 与 C++ 会话文件 API 未接通，assistant 流只更新 DOM，未形成完整会话模型 |
 | NextChat | Zustand 会话状态 + 自研 Provider adapter/SSE 回调 | 单一 `ChatSession[]` 同时承载消息、Mask、摘要、工具状态和流式占位，没有服务端 conversation runtime |
 | Open WebUI | FastAPI 中间件/Provider 适配 + Socket.IO 事件协议 | 服务端同时维护 history JSON 与消息行，约 25 类事件统一承载内容、状态、任务和工具交互 |
+| OpenCode | 服务端 `SessionPrompt`/`SessionProcessor` + Vercel AI SDK `streamText`；SSE 事件协议 | SQLite 是权威源，`message.updated`/`message.part.updated`/`message.part.delta` 事件经 SSE 广播，App 以 16ms 批量 flush 投影到 Solid store，TUI 同协议订阅 |
+| Pi | 自研 `AgentSession` + `agent-loop`，Provider 调用走 `packages/ai` 统一流接口 | JSONL 会话树由应用定义；流式事件（text/thinking/toolcall delta）统一转成 `message_update`，UI 全量重建 |
 | SillyTavern | Provider 专属请求分支和浏览器/后端 `fetch` | `chat[]` 与 JSONL 格式不依赖统一消息 SDK，兼容语义由本地字段与扩展维持 |
 | VCPChat | 自定义 VCP IPC/文本协议，单次 `fetch` 到网关 | Topic `history.json` 保存原始消息和上下文，VCP 标记在客户端解释 |
 | VCPToolBox | 不适用：没有最终用户聊天主链 | 它处理入站协议和模型编排，不保存最终用户会话 |
@@ -59,6 +61,8 @@
 | SillyTavern | 优先保证 Provider 和社区扩展的开放兼容，不设统一消息 SDK | 可以容纳 text-completion、OpenAI messages 及大量非标准字段，扩展可直接介入请求、正则、World Info 和存储格式 | 请求分支、字段语义和生命周期由本地约定拼接，类型保证弱；新增 Provider 往往意味着新增分支，长期容易产生行为差异和回归面 |
 | VCPChat | 把客户端定位为 VCP 协议的呈现与交互端，把编排能力放到网关 | 客户端可以保持较薄，Topic 历史保存原始消息，网关和客户端可相对独立演进；VCP 标记可作为扩展协议承载工具/群聊能力 | 协议契约主要靠约定和客户端解释，标准 SDK 的互操作性、类型校验和错误归因较弱；网关行为不透明时，客户端难以单独诊断完整请求链 |
 | VCPToolBox | 明确做“无会话的模型编排网关”，不拥有最终用户聊天模型 | 可以在一次请求内统一桥接多家 API、预算裁剪、Tavern/RAG/工具展开和递归工具循环；调用方继续拥有会话和 UI | 不负责跨请求历史、分支或恢复；调试重点从“聊天记录是否正确”转为“请求重写前后是否一致”，需要额外的快照、追踪和协议文档 |
+| OpenCode | 把会话、消息、工具状态和事件流全部放在服务端运行时，Web/TUI/CLI 只是同协议的客户端 | SQLite 权威 + 事件广播，多前端共享同一会话语义；发送、中断、重试、压缩都在服务端闭环 | 前端必须消费 SSE 事件投影，协议版本（v1/V2 协商）影响客户端复杂度；本地纯离线场景仍依赖本地 server 进程 |
+| Pi | 把消息协议、工具循环和会话持久化全部放在本地 Agent 运行时，交互模式只是 I/O 层 | CLI/TUI/print 共享同一 AgentSession；事件驱动 + 单 agent 循环语义统一 | 需要自维护流式事件、压缩、重试与终端渲染；多会话并行生成不在设计内 |
 
 ### 横向看，SDK 选型实际在决定什么
 
@@ -88,6 +92,8 @@
 | SillyTavern | `chat[]` 过滤掉普通 system 消息后得到 `coreChat` | 先应用正则和附件内容，再经过 interceptor、World Info 和 API 分支格式化，产出 text-completion prompt 或 OpenAI messages；不同后端没有统一 payload |
 | VCPChat | 群聊已核实为内存 `groupHistory` 的当前快照；单聊最终请求组装未在本次笔记逐步展开 | 群聊按成员串行构建各自上下文，下一位成员会看到上一位刚落盘的回复；单聊和群聊不应据此视为同一构建链 |
 | VCPToolBox | 调用方提交的线性 `messages`；Responses、Anthropic、Gemini 请求先桥接成该格式 | 请求级管线依次做字符预算裁剪、Tavern 注入、模型路由、变量/Agent/Toolbox 展开、多模态与 RAG/Timeline/OneRing/折叠预处理、Detector 和角色拆分；工具循环再追加 assistant 正文与 user `VCP_TOOL_PAYLOAD`。它不拥有跨请求会话，但会实质重写最终模型输入 |
+| Pi | 当前叶子到根的条目路径；compaction/branch_summary 条目被投影为摘要消息 | `buildSessionContext` 按路径组装，system prompt（SYSTEM.md/AGENTS 链/skills）由 `buildSystemPrompt` 拼装；工具结果以 toolResult 消息进入下一轮；token 超预算时压缩（摘要消息 + 保留条目）|
+| OpenCode | 从 SQLite 重读的全量历史（`MessageV2.toModelMessagesEffect`，message-v2.ts:131-415） | system 拼装：agent.prompt ?? provider 风格 → env/AGENTS.md 指令/MCP 指令/skills → user.system（`llm/request.ts:56-66`）；media 从 tool result 抽离为独立 user 消息；溢出按 `model.limit.input - 20k` 检测，compaction 重排为 [compaction-user, summary-assistant, tail, continue-user] |
 
 **结论**：只比较“是否有上下文”不足以区分实现。客户端应用、主进程 runtime、Agent 后端、Web 服务和无会话网关都可能负责最终输入的一部分。Manifold Desktop 的历史数组没有回写 assistant 流，因此第二轮请求仍缺少上一轮回复。比较具体行为时，应同时标注构建位置、历史真相源、压缩顺序、工具注入层和未覆盖边界。
 
@@ -109,12 +115,14 @@
 | SillyTavern | 聊天文件（`chat[]` 内存数组） | 单个 JSONL 文件，首行是 header，之后每行一条消息 | 一次性整份读入内存/DOM，无分页，保存时整份覆写 + UUID 完整性校验防并发覆盖 |
 | VCPChat | Agent/群组 下的 Topic | 每个 Topic 一个 `history.json`（裸数组，无 schema 版本号） | 整份覆盖写，无原子写保护（无临时文件+rename） |
 | VCPToolBox | 不适用 | 不提供最终用户会话存储 | — |
+| OpenCode | Session → Message（user/assistant）→ Part（12 种）三层 | SQLite：`session`/`message`/`part` 三表，part 独立存表、读取时批量组装（`core/src/session/sql.ts:22-98`） | 增量落库：prompt 时写 user 消息，流式中每 part 状态迁移即时落库，`text-end` 才完整写文本 part；事件发布与投影分离（`Session.updateMessage/updatePart` 只发事件，projector 写库） |
+| Pi | Session（JSONL 文件 = 会话树） | 每会话一个 `.jsonl`，条目带 `id/parentId` 形成树，`leafId` 指针标记当前位置 | 追加型：`message_end` 落盘；第一条 assistant 消息到达时创建文件并整写，之后逐条 append；版本迁移 v1→v3 时重写 |
 
 **存储实现可分为三组**：Cherry Studio、DeepChat、Hermes Agent、Open WebUI、AstrBot 使用数据库行或事务；Chatbox、NextChat 使用 IndexedDB；AIO Hub、Jan 桌面端、SillyTavern、VCPChat 仍有整文件/整对象写入路径，Manifold Desktop 的存储 API 尚未接入正常聊天。介质本身不保证一致性：Open WebUI 需要对齐两份数据，Hermes Agent 需要仲裁三类会话 ID，Jan 虽有文件锁仍按 O(消息数) 重写。
 
 ## "分支"不是一回事：消息树、版本、复制和轮转链
 
-这里需要先区分数据结构和操作语义。十四个项目里的“分支”至少包括消息树切换、消息版本、会话复制、文件截断另存、压缩轮转链和多模型并列，不能统一称作“消息树切换”：
+这里需要先区分数据结构和操作语义。十五个项目里的“分支”至少包括消息树切换、消息版本、会话复制、文件截断另存、压缩轮转链和多模型并列，不能统一称作“消息树切换”：
 
 1. **真树 + 指针跳转（Cherry Studio）**：持久层是 DB 树（`parentId` 外键 + CHECK 约束保证虚拟根不变式）；切分支时更新 `topic.active_node_id`，渲染再反向 walk 拼出路径。前端另有独立的 `TopicMessageFlowLiveState`（三态 ref 状态机：正常/草稿分支中/草稿取消但指定锚点），处理尚未落库的分支，显示生命周期与持久化树分开。
 2. **树 + 兄弟记忆（AIO Hub）**：`parentId`/`childrenIds`/`lastSelectedChildId` 构成应用层树，`BranchNavigator` 用循环索引在兄弟间切换，并用 `lastSelectedChildId` 记住上次选择。重试、切换模型重试和续写分别创建 assistant 兄弟节点、带 prefix 的同内容兄弟节点、以及空子节点；它没有 Cherry Studio 那样的草稿态覆盖层。
@@ -125,6 +133,8 @@
 7. **有序 transcript 上的 fork（DeepChat）**：`SessionTurn` 支持 fork/retry/edit，但上下文恢复主要按 `orderSeq` 截取完整 turn，并非每次都沿 `parentId` 回溯。它更接近“从 transcript 某点复制出新 session/turn”，不能直接等同于 Cherry Studio 的 DB 邻接树。
 8. **会话复制与 lineage（Hermes Agent、NextChat）**：Hermes `session.branch` 复制历史并建立 parent/lineage 关系，压缩轮转也会生成新 session id；NextChat 的 `forkSession()` 则深拷贝整个 Session、重发所有消息 id。二者都是会话级派生，但 Hermes 需要保持跨轮转 lineage，NextChat 只是本地独立副本。
 9. **服务端回溯重建（Open WebUI）**：消息本身由 `parentId`/`childrenIds` 构成树；`POST /{id}/fork` 用 `build_fork_history` 从目标节点沿父链重建一个新 Chat。多模型的 `modelIdx` 并列列序与 fork 是另一套正交关系。
+10. **指针分支（Pi）**：`branch()` 只移动会话的 `leafId` 指针，下次追加即成为新分支；`createBranchedSession` 把“根到指定叶子”的路径抽成新 JSONL 文件并重链 label；`branchWithSummary` 追加 `branch_summary` 摘要条目参与上下文。历史不修改、无草稿态覆盖层，语义接近 Cherry Studio 的指针跳转但实现是 JSONL 追加树。
+11. **删除式回退 + 复制式 fork（OpenCode）**：`revert` 记录回退点（含 git snapshot）并回滚文件，再次 prompt 前**删除目标之后的所有消息**——改的是原消息树而非新建节点；真正的分支是 `POST /session/:id/fork`（session.ts:693-734），新建会话并复制截至某消息的全部消息/parts（parentID 重映射）。多模型/多候选不产生消息级兄弟节点，也没有草稿态覆盖层。
 
 AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不是消息分支；Manifold Desktop 未形成可持久化的正常会话主链，本次也没有可比较的分支机制。
 
@@ -145,6 +155,8 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 - **NextChat**：assistant 占位从一开始就在 Zustand session 内，SSE `onUpdate` 原地改 content，`onFinish` 清掉 `streaming`。状态存储和 UI 共用同一对象，没有独立 transcript 层。
 - **Open WebUI**：Provider 流先在后端按 chunk 数量聚合，再通过 Socket.IO 发约定事件；`update_db=True` 的 emitter 可按事件类型追加或覆盖消息行，前端按 `delta/output/done` 更新 history 投影。
 - **Manifold Desktop**：chunk 只更新 DOM 与 `streamingText`，连前端 `messages[]` 都不回写。这不是“渲染与持久化解耦”，而是完成态尚未回到会话状态的断链。
+- **Pi**：流式状态与持久化同源——`message_update` 携带完整 partial 消息驱动 TUI 重建，`message_end` 才落盘；无独立的流式缓冲层。TUI 以 `requestRender` 帧节流合并刷新；abort/error 以 stopReason 持久化，下次恢复可见。
+- **OpenCode**：分三层频率——reasoning/text 的 delta 经 `updatePartDelta` 发 `message.part.delta` 增量事件（processor.ts:499-510），`text-end` 才完整落库（:512-532），tool part 状态迁移即时落库；App 端 `part_text_accum_delta` 累积增量、`message.part.updated` 完整替换（server-session.ts:1095-1231），SSE 16ms 批量 flush + delta 拼接。即 UI 更新频率 > 事件频率 > 落库频率，三层明确分离。
 
 ## 搜索：索引、命中粒度和跳转能力仍是三件事
 
@@ -162,6 +174,8 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 - **Manifold Desktop**：逐个读取 session JSON，对整份 dump 做不区分大小写子串匹配，无索引和结果上限；而正常聊天未保存，搜索 API 也可能搜不到刚聊过的内容。
 - **Open WebUI**：后端 `/search` 支持文本和 `tag:` 查询，结果粒度是 Chat；消息行虽独立存储，本次笔记未确认用户可见的“命中具体消息并跳转”链路。
 - **NextChat / AstrBot**：本次单项目笔记没有把聊天内容搜索作为完整链路展开；不能据会话列表或管理页入口推断存在消息级检索。
+- **Pi**：会话列表按 cwd 扫描 JSONL（并发上限 10），搜索是选择器内的 `id+名称+全部消息文本+cwd` token/正则匹配（`session-selector-search.ts`），结果是会话级命中；无消息级持久化索引。
+- **OpenCode**：仅会话标题 `LIKE` 搜索（session.ts:993-995，`session.list({search})`），结果定位到会话；**消息内容全文搜索本次未找到实现**。消息分页用游标（`MessageV2.page`，base64url {id,time}），App timeline 向上加载。
 
 结论：Chatbox 已确认能从 Session 数据命中并定位具体消息；LobeHub、Hermes Agent、DeepChat 具有数据库或搜索文档基础，但用户可见定位链路的证据不齐；Jan、Open WebUI、AIO Hub、Manifold Desktop 主要返回会话级结果；Cherry Studio 与 VCPChat 分别受虚拟 DOM 和多模态内容形态限制。现有笔记仍未确认任何项目完整满足“持久化消息索引 + 跨分支/跨会话命中 + 直接定位具体消息”三个条件。
 
@@ -185,6 +199,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | SillyTavern | Agent/群组/Topic 侧栏 + 中央消息 DOM + 通知/设置面板 | 整段 DOM 重绘与追加，swipe picker、checkpoint/branch、正则和大量扩展挂钩 | 发送按钮复用为中止；群聊邀请/多模式调度改变消息流 | 扩展性和可定制性最高，但长聊天没有虚拟化，重绘与旧 DOM 引用风险更明显 |
 | VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | 同一历史支持气泡/统一面板/刊物三种 CSS 投影；工具、思考链、日记是可折叠 bubble block | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称 |
 | VCPToolBox | 不提供聊天主界面；AdminPanel 是运维 SPA，OpenWebUISub 是第三方页面增强脚本 | 只在 OpenWebUI DOM 中把纯文本协议标记替换成工具卡片 | 不承接会话输入/停止/导航 | 不能与其它聊天应用按 UI 直接排名，属于后端协议与外部前端适配层 |
+| OpenCode | 会话列表 + 虚拟化 timeline（Web）；TUI 全屏会话页 | 消息 part 驱动：text/tool/reasoning/compaction 组件 + 工具 15 个注册渲染器；context 组折叠连续 read/glob/grep/list；thinking 行与重试倒计时卡 | Web 发送/中断/排队/followup dock；TUI 发送、双击 Esc 中断、shell 模式、`@` agent 提及 | 渲染核心独立成 `packages/session-ui` 包被 Web 复用；Web 与 TUI 是两套独立渲染栈，共享服务端事件协议 |
 
 ### 跨项目结论
 
@@ -206,6 +221,8 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | NextChat | `ChatControllerPool.stop` 调当前 controller | controller 的 Provider 级取消效果取决于 adapter；笔记未逐 Provider 验证 |
 | Open WebUI | 前端按 chat/task 停止；本地 `task.cancel()`，Redis 模式广播 stop | Redis 只负责把取消命令路由到实际持有任务的实例，任务本身不迁移 |
 | VCPChat | 群聊有本地 `AbortController`；单聊只通知远端 `/v1/interrupt` | 单聊本地读取循环不受控且无客户端超时；未被引用的 `vcpClient.js` 才包含本地 abort 与 300 秒超时 |
+| Pi | `AgentSession.abort()` 中止 agent 运行、工具与重试退避 | 中断后 assistant 消息以 `stopReason: "aborted"` 持久化；切换/退出会话前先 abort 落盘再替换 runtime |
+| OpenCode | `POST /session/:id/abort` → `SessionRunState.cancel` → 中断 Runner fiber（run-state.ts:77-86） | `Effect.onInterrupt` 走 `halt(AbortError)`，`cleanup` 把未完成 tool part 标 `"Tool execution aborted"` + `interrupted:true`；重试为进程内 `Effect.retry`（5xx/429，指数退避 2s 起），前端无独立手动重试端点 |
 
 VCPChat 仍是“同一产品两条路径不对称”证据最完整的案例。新增笔记还显示：Hermes Agent 的前端完成化、Manifold Desktop 的回调式 stop token、Open WebUI 的跨实例任务取消分别处在不同层级。其余项目缺少同等深度证据，只能标为未验证，不能从按钮存在推断请求已被中止。
 
@@ -224,6 +241,8 @@ VCPChat 仍是“同一产品两条路径不对称”证据最完整的案例。
 - **Open WebUI**：history JSON 与 `chat_message` 双写依赖 reconcile；多模型、工具、Socket.IO 事件和后台标题/标签/追问任务共享同一大状态机；跨实例取消依赖 Redis pubsub，未迁移任务队列。
 - **SillyTavern**：`chat_metadata.integrity` 用于检测多标签页并发写覆盖；`swipe()` 失败时会自动恢复，恢复失败后强制整页重载。两处机制都表明实现需要处理外部扩展或并发写造成的状态损坏。
 - **VCPChat**：单聊中断能力不完整（见上节）；群聊历史写盘没有文件锁，存在并发覆盖丢消息的可能，尚未构造场景验证；未读自动判定要求整个历史仅有一条非系统 assistant 消息，因此多轮对话不会触发。
+- **Pi**：流式 `message_update` 每 delta 全量重建组件，聊天列表无虚拟化，长会话渲染成本线性增长；JSONL 追加型文件随会话持续增长，恢复时全量读入；上下文 token 估算为启发式，与 Provider 计费可能不一致。
+- **OpenCode**：无消息内容全文索引（仅标题搜索）；`message.part.delta` 的累计通道 `part_text_accum_delta` 与 `produce` 就地追加在断线重连/事件乱序下的正确性未实测；V1/V2 双轨会话体系并存（Legacy 主路径 + 事件溯源 V2 部分实现），客户端需按协议协商切换。
 
 ## VCPToolBox：不参与会话/UI 对比，但参与消息构建
 
@@ -247,6 +266,8 @@ AdminPanel-Vue 是独立进程（监听 `PORT+1`），与聊天主链物理解�
 | 服务端权限、分享、多模型与跨实例任务控制 | Open WebUI | history/消息表双写，Socket.IO 事件状态组合较多 |
 | 文件级分支、检查点与社区扩展 | SillyTavern | 长聊天不虚拟化；正则按展示、prompt、存储位置分层，渲染结果可能随聊天长度变化 |
 | 多角色群聊与长期 Topic 关系 | VCPChat | 单聊没有本地 abort，可靠中止依赖远端 |
+| 终端本地编码 Agent、追加型树会话与工具循环 | Pi | 单会话单循环；消息编辑以分支表达；无消息级搜索索引；系统提示不随会话保存 |
+| 服务端 Agent 会话运行时、事件广播与多前端共用 | OpenCode | SQLite 权威 + SSE 投影；删除式 revert 与复制式 fork；无消息级全文搜索；Web/TUI 两套渲染栈 |
 
 Manifold Desktop 当前更适合作为“聊天主链尚未接通持久化时会出现哪些断层”的对照样本，不宜仅凭已存在的 SessionManager API 判断会话能力已经完成。
 

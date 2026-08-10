@@ -1,10 +1,10 @@
-# 七个项目的 LLM 渠道管理横向对比
+# 九个项目的 LLM 渠道管理横向对比
 
-> 对比对象：AIO Hub、Chatbox、Cherry Studio、LobeHub、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、Chatbox、Cherry Studio、LobeHub、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-06
+> 对比更新日期：2026-08-10
 >
-> 依据：同目录七份源码调查笔记及其中记录的代码快照
+> 依据：同目录九份源码调查笔记及其中记录的代码快照
 >
 > 对比方法：统一比较渠道数据模型、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-七个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Chatbox、Cherry Studio 和 LobeHub 把 Provider 与模型作为客户端或应用服务的一级对象；SillyTavern 以当前活动设置和 Connection Profile 组织连接；VCPChat 只管理一条 VCP 网关连接；VCPToolBox 位于网关侧，但核心 LLM 出口仍是一组全局 `API_URL + API_Key`。因此，“支持多少 Provider”不能直接用来判断渠道管理能力。
+九个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Chatbox、Cherry Studio 和 LobeHub 把 Provider 与模型作为客户端或应用服务的一级对象；SillyTavern 以当前活动设置和 Connection Profile 组织连接；VCPChat 只管理一条 VCP 网关连接；VCPToolBox 位于网关侧，但核心 LLM 出口仍是一组全局 `API_URL + API_Key`。Pi 的形态完全不同：它是 CLI 编码 Agent，Provider 是 `packages/ai` 里的代码注册项（39 个内置），用户不能创建多实例渠道，靠 `models.json` 覆盖、pi.dev 远端目录与扩展注册做组合。OpenCode 则是服务端 Agent 运行时：Provider 是「models.dev 目录 + config 覆盖 + auth.json 凭据」的运行时组装体，用户通过自定义 provider id 表达多端点。因此，“支持多少 Provider”不能直接用来判断渠道管理能力。
 
 横向核验后的主要结论如下：
 
@@ -25,32 +25,36 @@
 - **SillyTavern 侧重快速切换完整使用环境。** Connection Profile 把 API、URL、模型、Preset、模板、Proxy 和 Secret 引用一起保存，适合角色与生成配置联动切换；它不是带健康状态的 Provider 池，多 Key 需要人工选择。
 - **VCPChat 是单网关客户端。** 它把上游 Provider 选择留给 VCP 服务端，客户端只保存一组 URL/Key 和各 Agent 的裸模型 ID。这个边界降低了客户端配置复杂度，也形成单连接故障点。
 - **VCPToolBox 是协议与模型编排层，不是多 Provider 渠道池。** 它统一多种入站协议，支持模型别名、语义选模、特定请求的模型 fallback 和普通请求重试；所有核心请求仍走同一个 OpenAI-compatible 上游和同一枚 Key。
-- **没有一个项目在通用请求路径上实现了完整的跨 Provider 高可用闭环。** 七者都缺少“持续采集健康数据 -> 维护渠道状态 -> 按策略选路 -> 失败后换渠道 -> 恢复探测”的完整链条。AIO Hub 的闭环止于 Key 级跨请求选择；VCPToolBox 的 fallback 止于单上游下的模型级切换。
+- **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key、无跨 Provider failover。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
+- **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK `streamText`（BUNDLED_PROVIDERS 表 + npm 动态安装），另有 opt-in 的 native 协议（`packages/llm/src/protocols/`）。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 Effect.retry / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 自动 prompt caching，`setCacheKey` 可关。
+- **没有一个项目在通用请求路径上实现了完整的跨 Provider 高可用闭环。** 九者都缺少“持续采集健康数据 -> 维护渠道状态 -> 按策略选路 -> 失败后换渠道 -> 恢复探测”的完整链条。AIO Hub 的闭环止于 Key 级跨请求选择；VCPToolBox 的 fallback 止于单上游下的模型级切换；Pi 的重试闭环止于同一 Provider/模型内；OpenCode 的重试闭环同样止于同渠道同模型（context overflow 自动压缩重试是模型内行为）。
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 是本次样本中唯一确认对 Provider 凭据做数据库静态加密的项目。Cherry Studio 和 SillyTavern 缩小了前端可见范围，但磁盘仍为明文；AIO Hub、Chatbox、VCPChat 和 VCPToolBox 的核心配置也以明文保存。备份是否包含 Key 必须单独核对，不能由“设置已备份”或“导出已脱敏”推断。
-- **不适合给七者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、角色扮演前端、单网关客户端和 AI 中间层面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变了 Provider、URL、Key 或模型。
+- **不适合给九者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变了 Provider、URL、Key 或模型。
 
 ## 一览矩阵
 
-| 维度 | AIO Hub | Chatbox | Cherry Studio | LobeHub | SillyTavern | VCPChat | VCPToolBox |
-|---|---|---|---|---|---|---|---|
-| 核心连接对象 | `LlmProfile` | Provider 注册项 + 设置 | `user_provider` 实例 | `ai_providers` | 活动设置 + Connection Profile | 全局 VCP URL/Key | 全局上游 URL/Key |
-| 同服务多实例 | 有 | 自定义 Provider 有 | 有，可复制预设 | 自定义 Provider 有条件 | Profile 快照可表达 | 无 | 无 |
-| 运行时模型身份 | `profileId + modelId` | `provider + modelId` | 含 `providerId` 的模型标识 | `providerId + modelId` | Provider 专属字段/Profile model | 裸 `model` ID | 上游或虚拟模型 ID |
-| 多协议出站 Adapter | 有 | 有 | 有 | 有 | 有 | 无，固定 VCP/OpenAI-compatible | 无，出站固定 OpenAI-compatible |
-| 调用 SDK / 协议封装 | 自研 `@aiohub/llm-core` Adapter + `fetchWithTimeout` | Vercel AI SDK Provider Adapter | `@cherrystudio/ai-core` + Vercel AI SDK；Claude Code Agent 另走其 SDK | `ModelRuntime` 按 `sdkType` 选择协议实现/Provider SDK | Provider 分支自行组装请求，单次 `fetch` | 直接 `fetch` VCP 的 OpenAI-compatible 入口 | `fetchWithRetry` 调用单一 OpenAI-compatible 上游 |
-| 多 Endpoint | 按能力细分端点 | Host + Path | Endpoint Type 级 Base URL | 依 Runtime | Provider/source 分支 | 固定 Chat/VCP 端点 | 固定 `/v1/*` 端点 |
-| 多 Key | 有，结构化数组 | 无 | 有，结构化数组 | 有，逗号字符串 | 有，Secret 数组 | 无 | 无 |
-| Key 自动选择 | 轮询 | 无 | 跨请求轮询 | 随机或轮询 | 无，人工 active/固定 ID | 无 | 无 |
-| Key 健康状态 | 有 | 无 | 无 | 无 | 无 | 无 | 无 |
-| 普通请求重试 | 当前渠道层不负责 | 429/5xx，最多 5 次 | 默认关闭 | Agent Runtime 默认 5 次 retry | 无 | 无 | 默认最多 3 次总尝试 |
-| 当前请求主动换 Key | 无 | 不适用 | 无 | 无稳定保证 | 无 | 不适用 | 不适用 |
-| 通用跨 Provider failover | 无 | 无 | 无 | 开源普通路径无 | 无 | 无 | 本地无 |
-| 特殊模型 fallback | 无 | 无 | 无 | Router 框架可扩展 | 可把策略交给 OpenRouter | 无 | 语义虚拟模型有 |
-| 凭据静态加密 | 无 | 无 | 无 | 有，AES-GCM | 无 | 无 | 无 |
-| 健康数据参与调度 | Key 状态局部参与 | 无 | 无 | 无 | 无 | 无 | 无 |
+| 维度 | AIO Hub | Chatbox | Cherry Studio | LobeHub | OpenCode | Pi | SillyTavern | VCPChat | VCPToolBox |
+|---|---|---|---|---|---|---|---|---|---|
+| 核心连接对象 | `LlmProfile` | Provider 注册项 + 设置 | `user_provider` 实例 | `ai_providers` | 运行时组装记录（models.dev + config + auth） | Provider 代码注册项 + 覆盖层 | 活动设置 + Connection Profile | 全局 VCP URL/Key | 全局上游 URL/Key |
+| 同服务多实例 | 有 | 自定义 Provider 有 | 有，可复制预设 | 自定义 Provider 有条件 | 自定义 provider id（options 无数组形态） | 无（Radius 网关按配置生成 id 是唯一例外） | Profile 快照可表达 | 无 | 无 |
+| 运行时模型身份 | `profileId + modelId` | `provider + modelId` | 含 `providerId` 的模型标识 | `providerId + modelId` | `provider/model[/variant]`（别名经 config `models.<alias>.id`） | `provider + modelId` | Provider 专属字段/Profile model | 裸 `model` ID | 上游或虚拟模型 ID |
+| 多协议出站 Adapter | 有 | 有 | 有 | 有 | 有（AI SDK 包表 + native 协议） | 有（10 个 API 模块） | 有 | 无，固定 VCP/OpenAI-compatible | 无，出站固定 OpenAI-compatible |
+| 调用 SDK / 协议封装 | 自研 `@aiohub/llm-core` Adapter + `fetchWithTimeout` | Vercel AI SDK Provider Adapter | `@cherrystudio/ai-core` + Vercel AI SDK；Claude Code Agent 另走其 SDK | `ModelRuntime` 按 `sdkType` 选择协议实现/Provider SDK | Vercel AI SDK `streamText`（主路径）+ `@opencode-ai/llm` native（opt-in） | 自研 `packages/ai` 统一流接口 + 官方 SDK（openai/anthropic/gemini 等） | Provider 分支自行组装请求，单次 `fetch` | 直接 `fetch` VCP 的 OpenAI-compatible 入口 | `fetchWithRetry` 调用单一 OpenAI-compatible 上游 |
+| 多 Endpoint | 按能力细分端点 | Host + Path | Endpoint Type 级 Base URL | 依 Runtime | 模型级 baseURL/headers（config `options`/`models.<id>.provider`） | 模型级 baseUrl；Radius 网关可按配置生成新 Provider | Provider/source 分支 | 固定 Chat/VCP 端点 | 固定 `/v1/*` 端点 |
+| 多 Key | 有，结构化数组 | 无 | 有，结构化数组 | 有，逗号字符串 | 无（每 provider 单 key，auth.json 或 env） | 无 | 有，Secret 数组 | 无 | 无 |
+| Key 自动选择 | 轮询 | 无 | 跨请求轮询 | 随机或轮询 | 无 | 无 | 无，人工 active/固定 ID | 无 | 无 |
+| Key 健康状态 | 有 | 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 |
+| 普通请求重试 | 当前渠道层不负责 | 429/5xx，最多 5 次 | 默认关闭 | Agent Runtime 默认 5 次 retry | 会话级 `Effect.retry`（5xx/429/超时，2s 起指数退避）+ SDK `maxRetries` + native 2 次 | SDK 层 + 消息层两级，默认最多 3 次，同渠道 | 无 | 无 | 默认最多 3 次总尝试 |
+| 当前请求主动换 Key | 无 | 不适用 | 无 | 无稳定保证 | 无 | 无 | 无 | 不适用 | 不适用 |
+| 通用跨 Provider failover | 无 | 无 | 无 | 开源普通路径无 | 无 | 无 | 无 | 无 | 本地无 |
+| 特殊模型 fallback | 无 | 无 | 无 | Router 框架可扩展 | 无跨模型 fallback；context overflow 自动压缩后重试（V2 runner） | 无（未知模型 id 可构造自定义模型请求） | 可把策略交给 OpenRouter | 无 | 语义虚拟模型有 |
+| 凭据静态加密 | 无 | 无 | 无 | 有，AES-GCM | 无（auth.json 0600 明文） | 无 | 无 | 无 | 无 |
+| 健康数据参与调度 | Key 状态局部参与 | 无 | 无 | 无 | 无 | 无 | 无 | 无 | 无 |
 
-矩阵中的“重试次数”沿用各项目自己的配置语义。Chatbox 的“最多尝试 5 次”、LobeHub 的“默认 5 次 retry，最多 6 次 attempt”和 VCPToolBox 的“`ApiRetries` 默认 3，表示总尝试数”并不是同一计数方式。
+矩阵中的“重试次数”沿用各项目自己的配置语义。Chatbox 的“最多尝试 5 次”、LobeHub 的“默认 5 次 retry，最多 6 次 attempt”和 VCPToolBox 的“`ApiRetries` 默认 3，表示总尝试数”并不是同一计数方式。Pi 的“默认最多 3 次”指消息层 `settings.retry.maxRetries`，SDK 层另有独立的 `settings.retry.provider.maxRetries`，两层独立生效。OpenCode 的“会话级重试”重跑整个 `llm.stream` effect，与 SDK/native 层的同请求重发是不同粒度。
+
+矩阵中的“重试次数”沿用各项目自己的配置语义。Chatbox 的“最多尝试 5 次”、LobeHub 的“默认 5 次 retry，最多 6 次 attempt”和 VCPToolBox 的“`ApiRetries` 默认 3，表示总尝试数”并不是同一计数方式。Pi 的“默认最多 3 次”指消息层 `settings.retry.maxRetries`，SDK 层另有独立的 `settings.retry.provider.maxRetries`，两层独立生效。
 
 ## 比较口径
 
@@ -105,6 +109,14 @@ VCPToolBox 位于客户端和上游之间，负责入站协议转换、插件/RA
 
 如果 `API_URL` 指向 NewAPI、One API 等聚合服务，多 Provider 池、倍率、渠道熔断可能发生在聚合服务内部。VCPToolBox 本地看不到这些实体和状态，因此横向比较时只能把它记为“依赖外部渠道管理”，不能把外部网关的能力归入本项目。
 
+### 6. 代码注册 + 组合覆盖型：Pi
+
+Pi 的 Provider 是 `packages/ai` 里的 TypeScript 对象：39 个内置 Provider 在 `builtinProviders()` 中构造，用户没有“新建渠道”的 UI 或数据表。渠道变化全部表达为覆盖：`models.json` 改 baseUrl/apiKey/模型、`modelOverrides` 改单模型字段、扩展 `registerProvider` 注册新 Provider、Radius 网关按配置生成新 id。凭据每 Provider 一粒，运行时 API key 是内存覆盖，OAuth 令牌自动刷新。模型目录是“构建期生成 + pi.dev 远端叠加 + 用户定义 + 扩展”四层合并，这使静态代码看不到完整模型清单。它面向单机 CLI 工作流，渠道管理能力止于“可配置、可覆盖、可重试”，没有实例管理、多 Key 或健康调度。
+
+### 7. 运行时组装型：OpenCode
+
+OpenCode 的 Provider 不是持久化实体也不是纯代码注册项，而是每次启动在进程内按固定顺序组装出的只读记录：models.dev 目录（`packages/core/src/models-dev.ts`）→ 插件 provider hook → config `provider` 字段覆盖 → 环境变量探测 → auth.json 凭据 → 插件 auth loader → 内置 `custom(dep)` 适配器（`src/provider/provider.ts:1343-1668`）。模型目录是「磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络」三级数据源，TTL 5 分钟、每小时刷新，仓库内没有硬编码模型清单。请求主路径是 Vercel AI SDK `streamText`（BUNDLED_PROVIDERS 表 + 未收录包名 npm 动态安装），另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`，仅 openai/opencode/anthropic 且非 OAuth）。多端点通过注册多个自定义 provider id 表达（config `options` 无数组形态）。它面向服务端 Agent 工作流：session 解析 `provider/model[/variant]`，无 `@`/`#`/`:latest` 语法；重试与故障转移全部在同渠道内完成。
+
 ## 渠道身份与配置复用
 
 稳定身份决定了模型收藏、历史记录、统计和故障切换能否准确指向原连接。
@@ -118,6 +130,8 @@ VCPToolBox 位于客户端和上游之间，负责入站协议转换、插件/RA
 | SillyTavern | Profile UUID，内部仍引用活动设置字段 | 保存多份 Profile | 快照字段可能随功能增长产生兼容负担 |
 | VCPChat | 无渠道实体 | 直接替换全局网关 | 裸模型 ID 缺少网关命名空间 |
 | VCPToolBox | 无上游渠道实体 | 直接替换全局上游 | 无法并存或选择多条上游连接 |
+| Pi | Provider id（代码注册项） | `models.json`/扩展覆盖；Radius 网关按配置生成新 id | 同服务多账号只能并入单凭据或依赖 Radius 多实例 |
+| OpenCode | Provider id（branded string，内置 11 个 + 自定义） | 注册多个自定义 provider id；同 id 单凭据 | `options` 无数组形态，多端点需新 id；模型别名经 config `models.<alias>.id` |
 
 Cherry Studio 的 `providerId` 与 `presetProviderId` 分离值得借鉴。前者保证用户实例稳定，后者保留继承关系；用户可拥有两条继承同一预设、但凭据和端点独立的渠道。AIO Hub 的 Profile 也能直接表达多实例，结构更集中。LobeHub 和 Chatbox 可以用自定义 ID 达到类似结果，但内置实例和自定义实例需要按各自规则管理。
 
@@ -143,7 +157,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 
 ## 模型目录与元数据
 
-模型目录在七个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
+模型目录在八个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
 
 | 项目 | 主要来源 | 模型归属 | 元数据对运行时的作用 |
 |---|---|---|---|
@@ -151,6 +165,8 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 | Chatbox | Provider API、后端 manifest、本地保存、models.dev | Provider | 能力富化和模型实例化 |
 | Cherry Studio | Registry + 上游目录 + 用户覆盖 | Provider | Endpoint、能力和参数多层合并 |
 | LobeHub | 内置 Model Bank、环境与用户数据 | Provider | 能力和参数影响 Runtime |
+| Pi | 构建期生成目录（gitignore）+ pi.dev 远端叠加 + `models.json` 定义/覆盖 + 扩展注册 | Provider | 能力、价格、contextWindow 参与请求构造与成本计算 |
+| OpenCode | models.opencode.ai/api.json（5 分钟 TTL 缓存 + 构建期快照 fallback + 网络三级数据源）；config `models` 覆盖 | Provider | 能力、上下文限制、价格参与请求构造与 usage/cost 落库；`OPENCODE_MODELS_URL`/`OPENCODE_DISABLE_MODELS_FETCH` 可控制 |
 | SillyTavern | Provider `/models` 或专用 API | 当前 source/Profile 字段 | 异构字段控制上下文、多模态、推理和工具 UI |
 | VCPChat | 同网关 `/v1/models` | 无本地 Provider 命名空间 | 主要用于选择、收藏和展示 |
 | VCPToolBox | 上游 `/v1/models` + 别名 + 虚拟模型 | 单上游 | 公开名改写和语义路由 |
@@ -173,6 +189,8 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | Chatbox | 单 Key/OAuth | 固定 | 继续使用同一凭据重试 | 不适用 |
 | Cherry Studio | 带 ID、标签、启停的数组 | 跨请求 round-robin | 不记录健康 | 无 |
 | LobeHub | 逗号分隔字符串 | server 随机/轮询，client 随机 | 不记录健康 | 无主动保证 |
+| Pi | 每 Provider 单凭据（存储/运行时/环境变量） | 固定 | 同凭据重试；OAuth 到期自动刷新 | 不适用 |
+| OpenCode | 每 provider 单凭据（auth.json 或 env 探测） | 固定 | 同凭据重试；OAuth 到期自动刷新（插件实现） | 不适用 |
 | SillyTavern | 带 UUID、标签、active 的 Secret 数组 | active 或 Profile 固定 ID | 用户手工 rotate | 无 |
 | VCPChat | 单值 | 固定 | 无 | 不适用 |
 | VCPToolBox | 单值 | 固定 | 无 | 不适用 |
@@ -193,6 +211,8 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 | Chatbox | 最多 5 次 attempt | 429/5xx，指数退避；网络错误默认不重试 | Provider、端点、Key、模型不变 |
 | Cherry Studio | 默认 `maxRetries: 0` | 调用方可显式覆盖 | 不重新选择 Provider/Key |
 | LobeHub | Agent Runtime 默认 5 次 retry | 可重试错误，指数退避 1s 起、上限 30s | Provider/模型固定；Key 行为依 Runtime 生命周期 |
+| Pi | 消息层默认最多 3 次（`settings.retry`）；SDK 层 `maxRetries` 独立 | 错误文本分类（429/5xx/网络/流中断可重试，quota/billing 不可），指数退避 `baseDelayMs * 2^n`（默认 2s 起）；SDK 层读 `x-should-retry`/`retry-after`，上限 60s | Provider/模型/Key 不变 |
+| OpenCode | 会话级 `Effect.retry`（`retryable` 判定 5xx/429/超时/网络错误，context overflow 不重试）+ SDK `maxRetries: retries ?? 0` + native 层 `MAX_RETRIES=2`（指数退避带 jitter） | 指数退避 2s 起，尊重 `retry-after` 头；429 区分 `RateLimitReason`/`QuotaExceededReason`；`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action | Provider/模型/Key 不变；会话级重试重跑整个 stream effect，可能重复计费（静态推断） |
 | SillyTavern | 普通 Chat 单次请求 | 无统一策略 | 不改变 |
 | VCPChat | 主链单次 `fetch` | Flowlock 是新续写轮次 | 不改变 |
 | VCPToolBox | 默认 3 次总尝试 | 500、503、429、特定 401、网络和连接/首包超时；线性退避 | 普通模型不变；语义模型可换候选 |
@@ -208,8 +228,7 @@ VCPToolBox 对可重试错误的分类比单纯 5xx 更细，也把取消信号�
 VCPToolBox 的语义虚拟模型先按对话内容与 route description 的相似度选出候选，遇到特定错误后沿模型链重试。Embedding 也有独立候选链。这些模型全部发往同一个 `API_URL` 并使用同一枚 `API_Key`。除非聚合上游恰好把不同模型映射到不同 Provider，本地并没有跨渠道切换证据。
 
 SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给上游；实际选择发生在 OpenRouter。LobeHub 的 `RouterRuntime` 支持 option fallback，当前开源 `lobehub` Router 配置没有真实路由项。这两类能力都应注明执行主体和配置前提。
-
-### 七者都没有通用跨 Provider 闭环
+### 八者都没有通用跨 Provider 闭环
 
 一个完整的跨 Provider 故障转移至少需要：
 
@@ -220,11 +239,11 @@ SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给
 5. 记录每次 attempt 的渠道、错误、延迟和最终结果；
 6. 处理流式响应已经开始后的不可重放边界。
 
-AIO Hub 已覆盖第 2、4 项的一部分，但作用对象是同一 Profile 内的 Key。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。其余项目主要停留在固定目标重试或人工切换。
+AIO Hub 已覆盖第 2、4 项的一部分，但作用对象是同一 Profile 内的 Key。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。Pi 覆盖第 2、3 项的一部分（错误分类 + 同渠道重放），没有候选池与健康状态。OpenCode 覆盖第 2、3 项的一部分（错误归一化 + 同渠道重放，V2 runner 的 context overflow 自动压缩再试属模型内行为），同样没有候选池与健康状态。其余项目主要停留在固定目标重试或人工切换。
 
 ## 路由依据：显式绑定仍是主流
 
-七个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。这个策略可预测，也便于解释账单和错误。
+八个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。这个策略可预测，也便于解释账单和错误。
 
 | 路由依据 | 已确认项目 | 实际作用 |
 |---|---|---|
@@ -232,9 +251,9 @@ AIO Hub 已覆盖第 2、4 项的一部分，但作用对象是同一 Profile �
 | Key 随机/轮询 | AIO Hub、Cherry Studio、LobeHub | 同一渠道内分摊凭据 |
 | 错误健康状态 | AIO Hub | 影响后续 Key 选择 |
 | 语义相似度 | VCPToolBox | 选择虚拟模型的真实候选 |
-| 上游 Provider order | SillyTavern/OpenRouter | 把路由偏好交给 OpenRouter |
+| 上游 Provider order | SillyTavern/OpenRouter、Pi/OpenRouter 与 Vercel Gateway | 把路由偏好交给聚合服务 |
 | Router option 顺序 | LobeHub 框架 | 可扩展；开源品牌路由为空 |
-| 成本、延迟、配额 | 无通用实现 | 现有数据未接入调度 |
+| 成本、延迟、配额 | 无通用实现 | 现有数据未接入调度（Pi 本地计算成本仅供展示） |
 
 语义选模回答“这段对话更适合哪个模型”，成本路由回答“满足能力要求的候选中哪一个更便宜”，健康路由回答“当前哪些候选可用”。三者的输入和目标不同。VCPToolBox 的余弦相似度实现只覆盖第一类，不能据此推断质量、价格或延迟最优。
 
@@ -248,6 +267,8 @@ AIO Hub 已覆盖第 2、4 项的一部分，但作用对象是同一 Profile �
 | Chatbox | Electron Store `config.json` | 明文 | 桌面设置持有 Key/OAuth/AWS 凭据 |
 | Cherry Studio | SQLite JSON 字段 | 明文 | Renderer 读取普通 Provider 时不含秘密 |
 | LobeHub | PostgreSQL `keyVaults` | AES-GCM | `fetchOnClient` 路径会下发解密后的运行时配置 |
+| Pi | `~/.pi/agent/auth.json`（0600 + 文件锁）；`models.json` 可内嵌 key/环境变量/命令 | 明文 | 本地 CLI 进程内使用；`list()` 只暴露 providerId+type |
+| OpenCode | `~/.local/share/opencode/auth.json`（0o600 明文）+ SQLite `credential` 表（明文 JSON）+ `account` 表（access/refresh 明文） | 明文 | 运行时错误路径系统脱敏（native executor `<redacted>`）；未发现 UI 展示 key 的打码；`opencode export` 脱敏会话内容 |
 | SillyTavern | `secrets.json` | 明文 | 浏览器默认只拿掩码、标签和 ID |
 | VCPChat | `settings.json` | 明文 | 主进程使用全局 VCP Key |
 | VCPToolBox | 主/插件 `config.env` | 明文 | 已认证管理 API 可返回完整主配置原文 |
@@ -264,6 +285,8 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | Chatbox | 自动配置备份复制完整 `config.json`；主动聊天导出默认剔除凭据 | 自动备份与用户导出边界不同 |
 | Cherry Studio | 当前 legacy 备份不复制 `cherrystudio.sqlite` | v2 Provider 与凭据也未进入这条备份链 |
 | LobeHub | 全量导出含 Provider 密文 | 跨主密钥恢复需要额外流程 |
+| Pi | 无备份/导出机制；`auth.json` 即全部凭据，0600 权限 | `models.json` 内嵌 key 明文参与配置分发；`--print-credentials` 是显式导出入口 |
+| OpenCode | 无凭据备份/导出机制；`opencode export` 只导出会话 | auth.json/credential 表/account 表均为明文；`OPENCODE_AUTH_CONTENT` 可整体注入 auth.json |
 | SillyTavern | 设置快照不含独立 Secret；ZIP 默认排除 Secret | 恢复 Profile 后可能缺少对应 Secret ID |
 | VCPChat | 每日设置备份和一键 ZIP 包含明文 Key | 原子写入只保证完整性，不保证保密性 |
 | VCPToolBox | 默认归档所有 `.env` 和 JSON | 未加密 ZIP 扩大核心及插件 Secret 副本范围 |
@@ -280,6 +303,8 @@ VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置�
 | Chatbox | Provider/模型连接能力 | 常规错误与重试 | 无持久健康调度 |
 | Cherry Studio | 单 Provider、批量模型、多 Key 检查并显示延迟 | HTTP Trace、取消控制 | 无 |
 | LobeHub | Web/CLI 单模型最小请求 | 结构化 retry 事件 | 无 |
+| Pi | `checkAuth` 只验凭据完整性，不发真实请求；无连接测试入口 | 用量/成本本地计算（footer/`/session` 展示）、retry 事件可见 | 无 |
+| OpenCode | 登录流程无专门 validation 请求（仅插件 prompt `validate` 回调与 GitLab `discoverModels` 真实调 API） | usage/cost 落 session 表（tiers 定价）、OTel trace/日志（`OTEL_EXPORTER_OTLP_ENDPOINT`）、重试状态广播 `{type:"retry"}` UI 倒计时 | 无 |
 | SillyTavern | `/models`、Provider 专用探测、Test Message | 当前 UI 状态 | 无 |
 | VCPChat | `/models` 刷新 | 缺少结构化延迟/错误统计 | 无 |
 | VCPToolBox | 模型目录、真实 Chat、语义 route preview | 日志 + 可选 NewAPI Monitor | 无 |
@@ -320,9 +345,17 @@ Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注�
 
 公开模型名、真实模型名和语义虚拟模型分层后，普通 OpenAI-compatible 客户端不必理解额外路由协议。语义候选链去重组合首选、互备、默认和显式 fallback，管理面板还能预览路由。模型级编排与 Provider 级渠道管理应继续保持术语区分。
 
+### Pi：分层重试与组合式覆盖
+
+错误分类正则、SDK 层与消息层两级重试、OAuth 加锁刷新和 `models.json` 覆盖层，构成一套轻量但边界清楚的单机渠道管理。其可复用点在于“组合式覆盖”：内置目录、pi.dev 远端叠加、用户定义与扩展注册各管一层，互不破坏基线。代价也明确：没有渠道实例、多 Key 或健康调度，跨 Provider 高可用完全不在设计内。
+
+### OpenCode：目录、SDK 与凭据的分层组装 + 三层重试
+
+models.dev 目录、config 覆盖、env 探测与 auth.json 凭据按固定顺序组装，任一层缺省都不阻断整条链（构建期快照兜底目录、`OPENCODE_AUTH_CONTENT` 兜底凭据）。可复用点在于把“目录与凭据分离”：模型目录是公共数据源（缓存+快照），凭据独立存 auth.json，config 只声明 env 探测名。会话级、SDK 级与 native 级三层重试各自独立配置（`retries` 参数、`maxRetries`、`MAX_RETRIES`），错误归一化集中识别 context overflow/quota/rate limit。代价明确：无多 Key、无健康状态、无跨渠道 failover；native 协议仅覆盖 openai/anthropic/opencode 三家且要求非 OAuth。
+
 ## 组合式参考架构
 
-七个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
+八个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
 
 1. **渠道实体采用 Cherry Studio/AIO Hub 的稳定实例 ID。** Provider 预设与用户实例分离，模型身份始终包含渠道 ID。
 2. **协议选择采用 Cherry Studio 的 Endpoint Type + Adapter Family 或 LobeHub 的显式 SDK Type。** 不从 URL 猜协议，也不把多 Endpoint 宣称为容灾。
@@ -347,6 +380,8 @@ Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注�
 | “VCPChat 的 Flowlock 提供网络重试” | Flowlock 在失败后触发新的续写轮次，不是同一 HTTP 请求重放 |
 | “VCPToolBox 支持多 Provider failover” | 它可在语义模型请求中换模型，但仍使用同一上游 URL/Key |
 | “健康检查成功就会避开坏渠道” | 除 AIO Hub 的 Key 局部状态外，检测结果普遍只供 UI/人工判断 |
+| “OpenCode 支持多 Provider 自动 failover” | 会话级重试、SDK `maxRetries` 与 native 重试都不改变 Provider/模型/Key；context overflow 自动压缩重试是模型内行为 |
+| “OpenCode 的 `@`/`#`/`:latest` 模型语法” | 本快照仅 `provider/model[/variant]` 语义，无 `@` 全局、`#` 本地或 `:latest` 后缀代码 |
 | “配置原子写入等于 Secret 安全” | 原子写入保护完整性；静态加密和备份控制保护保密性 |
 | “模型定价已存在，所以可以按成本路由” | 本次样本中的定价和用量数据未进入通用调度 |
 
@@ -361,20 +396,24 @@ Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注�
 | 角色、Preset、模板与连接整体切换 | SillyTavern | 依赖快照式配置，自动可靠性能力少 |
 | 客户端统一接入已有网关 | VCPChat | 单 URL/Key 是故障点，模型缺少 Provider 命名空间 |
 | 多入站协议、语义选模和插件编排 | VCPToolBox | 本地仍是单一 OpenAI-compatible 上游 |
+| 终端编码 Agent、多 Provider 直连与模型覆盖 | Pi | 无渠道实例与多 Key；凭据明文；依赖外部容器化做隔离 |
+| 服务端 Agent 运行时、多前端共用与自动模型目录 | OpenCode | 单 provider 单凭据；无多 Key 与跨渠道 failover；凭据明文；模型目录依赖远端拉取（可禁用） |
 
 这张表描述的是实现接近度，不是产品推荐。最终选择还取决于部署位置、是否允许凭据进入客户端、是否已有聚合网关、生成请求能否安全重放，以及运维方是否真正维护健康状态。
 
 ## 横向结论
 
-七个项目展示了三条清晰路线：
+八个项目展示了四条清晰路线：
 
 1. AIO Hub、Chatbox、Cherry Studio 和 LobeHub 在应用内建立 Provider/模型目录，差别集中在实例模型、多 Key、重试和凭据保护；
 2. SillyTavern 用活动设置和 Profile 服务于完整创作环境切换，渠道自动化让位于兼容性和用户控制；
-3. VCPChat 与 VCPToolBox 把复杂度推向统一网关，前者保持客户端轻量，后者增加协议和模型编排，但本地都没有多上游渠道池。
+3. VCPChat 与 VCPToolBox 把复杂度推向统一网关，前者保持客户端轻量，后者增加协议和模型编排，但本地都没有多上游渠道池；
+4. Pi 把 Provider 做成代码注册项 + 组合覆盖，服务于单机 CLI 工作流，渠道管理能力止于可配置、可覆盖、可重试。
+5. OpenCode 把 Provider 做成运行时组装体（目录 + config + 凭据），服务于服务端 Agent 工作流，渠道能力止于可配置、可重试、可观测，多前端共享同一渠道层。
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 
-在本次代码快照中，AIO Hub 对 Key 健康状态推进最远，Cherry Studio 的 Provider/Endpoint 数据模型最完整，LobeHub 的静态加密和重试框架最成熟，VCPToolBox 的模型编排最有特色。它们各自覆盖了渠道治理的一部分；跨 Provider 高可用、健康调度闭环、成本/延迟路由和一致的凭据备份恢复，仍是七个项目共同缺失或只提供扩展接口的部分。
+在本次代码快照中，AIO Hub 对 Key 健康状态推进最远，Cherry Studio 的 Provider/Endpoint 数据模型最完整，LobeHub 的静态加密和重试框架最成熟，VCPToolBox 的模型编排最有特色，OpenCode 的目录-凭据分离与三层重试最规整。它们各自覆盖了渠道治理的一部分；跨 Provider 高可用、健康调度闭环、成本/延迟路由和一致的凭据备份恢复，仍是九个项目共同缺失或只提供扩展接口的部分。
 
 ## 依据与范围
 
@@ -382,6 +421,8 @@ Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注�
 - [Chatbox LLM 渠道管理调查笔记](Chatbox-LLM渠道管理调查笔记.md)
 - [Cherry Studio LLM 渠道管理调查笔记](Cherry-Studio-LLM渠道管理调查笔记.md)
 - [LobeHub LLM 渠道管理调查笔记](LobeHub-LLM渠道管理调查笔记.md)
+- [OpenCode LLM 渠道管理调查笔记](OpenCode-LLM渠道管理调查笔记.md)
+- [Pi LLM 渠道管理调查笔记](Pi-LLM渠道管理调查笔记.md)
 - [SillyTavern LLM 渠道管理调查笔记](SillyTavern-LLM渠道管理调查笔记.md)
 - [VCPChat LLM 渠道管理调查笔记](VCPChat-LLM渠道管理调查笔记.md)
 - [VCPToolBox LLM 渠道管理调查笔记](VCPToolBox-LLM渠道管理调查笔记.md)
