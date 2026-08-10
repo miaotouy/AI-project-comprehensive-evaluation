@@ -118,6 +118,18 @@
 | OpenCode | Session → Message（user/assistant）→ Part（12 种）三层 | SQLite：`session`/`message`/`part` 三表，part 独立存表、读取时批量组装（`core/src/session/sql.ts:22-98`） | 增量落库：prompt 时写 user 消息，流式中每 part 状态迁移即时落库，`text-end` 才完整写文本 part；事件发布与投影分离（`Session.updateMessage/updatePart` 只发事件，projector 写库） |
 | Pi | Session（JSONL 文件 = 会话树） | 每会话一个 `.jsonl`，条目带 `id/parentId` 形成树，`leafId` 指针标记当前位置 | 追加型：`message_end` 落盘；第一条 assistant 消息到达时创建文件并整写，之后逐条 append；版本迁移 v1→v3 时重写 |
 
+**术语层级：同一个词在不同项目里指不同位置的容器**
+
+"会话主体"一列只是各项目对会话主链的命名，同一术语在不同项目里可能指不同层级，直接按名字对比会错位：
+
+- **Session 在多数项目里是顶层会话**（AIO Hub、Chatbox、DeepChat、Hermes Agent、NextChat 的 `ChatSession`、Pi、OpenCode），**唯独在 AstrBot 里是账号级容器**：session 由 UMO 标识，其下可切换多个 conversation，conversation 才是"具体对话"。
+- **Topic 在 Cherry Studio 是顶层**（消息树本体），**在 VCPChat 是 Agent/AgentGroup 下的二级单位**；LobeHub 则是 Agent → Topic 两级，thread 再作为消息级子维度参与 `messageMapKey`（带 `threadId` 的消息不进主干树，见 LobeHub 笔记第 1 节）。
+- **Thread 在 Jan 是顶层会话**（每 thread 一个目录），**在 Chatbox 是 Session 内的历史区间**（其上还能叠加 Fork 分支），**在 LobeHub 是消息级话题线**——同一词横跨三个层级。
+- **Chat 在 Open WebUI 是顶层会话**（history JSON + 消息表双写）；OpenCode 的 Session 内部严格三层（session → message → part）；SillyTavern 不用这类词，会话就是"聊天文件（chat[]）"；Manifold Desktop 的 Chat tab 尚未接通会话持久化。
+- 会话内还能再派生**子会话**：Open WebUI 的内部子代理占独立会话行、DeepChat 的 subagent session 是独立可读 transcript、Hermes Agent 的子代理是真实子会话——这与 AstrBot/VCPChat 那种"父级角色容器 + 下级对话"是两种不同的层级结构。
+
+命名取向粗略分两类：**用户语义词**（Topic、Conversation、Chat——Cherry Studio、VCPChat、Open WebUI、AstrBot 的二级单位）偏"一段话题/对话"；**实现语义词**（Session、Thread——AIO Hub、Jan、DeepChat、Pi、OpenCode、Chatbox）偏"一条会话记录"。比较时基准应是"该词在自己项目里处于哪一层、内部还能不能再挂子容器或分支"，而不是名称本身。
+
 **存储实现可分为三组**：Cherry Studio、DeepChat、Hermes Agent、Open WebUI、AstrBot 使用数据库行或事务；Chatbox、NextChat 使用 IndexedDB；AIO Hub、Jan 桌面端、SillyTavern、VCPChat 仍有整文件/整对象写入路径，Manifold Desktop 的存储 API 尚未接入正常聊天。介质本身不保证一致性：Open WebUI 需要对齐两份数据，Hermes Agent 需要翻译会话句柄与持久 session id 两套身份，Jan 虽有文件锁仍按 O(消息数) 重写。
 
 ## "分支"不是一回事：消息树、版本、复制和轮转链
@@ -188,14 +200,14 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 | AIO Hub | 三栏工作台：Agent/参数、ChatArea、Session；支持 ChatArea/输入框分离成悬浮窗 | 活动路径线性列表 + 可切换 Vue Flow 树图；rich-text-renderer 拆出 reasoning、附件、压缩节点 | CodeMirror/textarea、拖入/粘贴附件、工具审批条；发送按钮可 abort | 当前消息列表是完整 DOM + `content-visibility`，依赖活动路径；历史上曾用 TanStack Virtual，后因动态高度、倒序加载闪烁和滚动定位问题于 2026-04-29 撤回 |
 | AstrBot | WebChat 与会话管理页服务于多 IM 平台后台 | ChatPage 展示选定 conversation，另有 Trace 页面展示流水线阶段 | 输入可触发命令建议与 Live Mode；真实入站还来自 QQ/Telegram 等平台 | Web UI 只是多平台事件系统的一个入口，不能代表群聊唤醒和平台回复的全部行为 |
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | 最新一轮 user/assistant 分组，ThreadLabel、ForkNav、Summary/ForkMarker 专用块，桌面 minimap | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
-| Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | Virtua 分组列表；DB 历史与 live execution overlay 分层，工具/任务/reasoning 为显式组件 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
+| Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | Virtua 分组列表；DB 历史与 live execution overlay 分层，工具/任务/reasoning 为显式组件；右侧分支面板 `TopicBranchPanel` 用 React Flow 画布渲染消息树辅助选分支 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | 测量高度 + spacer + anchor + 二分窗口化，流式行保持可见 | steer、queue、question/permission 是独立输入通道；subagent session 只读 | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
 | Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | 本地原子缓存合并历史与 delta，工具事件是 parts 中的 tool-call part | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 活动 parent 路径 + `< n/m >` 版本导航，失败 assistant 可隐藏 | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
 | LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | Virtua flat list + keepMounted；AssistantGroup 折叠工具流程，ChatMiniMap 快速跳转 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |
 | Manifold Desktop | WebView2 标签页聊天界面 | assistant chunk 直接改 DOM，每 chunk 强制滚到底部 | 新请求先停止全局旧线程；取消只能在下一次流回调检查 stop token | 多标签共享无会话 id 的广播，正常聊天状态与文件存储未接通 |
 | NextChat | 单页 Chat + 会话列表 | 轻量窗口分页：默认末尾 15 条，单次最多 45 条；工具状态挂在 assistant 下 | stop/retry/delete/pin/copy/TTS；图片和音频直接作为消息内容 | 不是虚拟列表；完整历史仍驻留 session 数组，窗口只限制渲染切片 |
-| Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 单模型、side-by-side 多列、MoA 合并和结构化输出都有专用投影 | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
+| Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 单模型、side-by-side 多列、MoA 合并和结构化输出都有专用投影；右侧面板另有 Overview 消息树图（SvelteFlow 只读画布，点击节点切换到该分支） | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
 | SillyTavern | Agent/群组/Topic 侧栏 + 中央消息 DOM + 通知/设置面板 | 整段 DOM 重绘与追加，swipe picker、checkpoint/branch、正则和大量扩展挂钩 | 发送按钮复用为中止；群聊邀请/多模式调度改变消息流 | 扩展性和可定制性最高，但长聊天没有虚拟化，重绘与旧 DOM 引用风险更明显 |
 | VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | 同一历史支持气泡/统一面板/刊物三种 CSS 投影；工具、思考链、日记是可折叠 bubble block | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称 |
 | VCPToolBox | 不提供聊天主界面；AdminPanel 是运维 SPA，OpenWebUISub 是第三方页面增强脚本 | 只在 OpenWebUI DOM 中把纯文本协议标记替换成工具卡片 | 不承接会话输入/停止/导航 | 不能与其它聊天应用按 UI 直接排名，属于后端协议与外部前端适配层 |
@@ -207,7 +219,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 2. **停止生成的视觉状态与执行状态可能不同**：VCPChat 单聊只通知远端，Hermes Agent 前端先本地定稿再请求后端中断、两者存在中间窗口，Manifold 的 stop token 不能打断阻塞读取；Open WebUI 将停止建模为可跨实例路由的任务取消。评估停止能力时，需要继续追到请求或任务控制层。
 3. **输入区承载了大量 Agent 交互**：DeepChat 的 steer/queue/permission、Jan 的排队与附件、Open WebUI 的工具确认和终端事件，与 AIO/Chatbox/Cherry/Lobe/VCPChat 的附件、知识库、mention、审批共同组成了输入协议。
 4. **窗口化与搜索存在结构性冲突**：Chatbox/Cherry/LobeHub/DeepChat 通过虚拟或窗口列表控制长会话成本，但 Cherry 的 DOM 搜索以及任何依赖已挂载节点的扩展会漏掉窗口外消息；NextChat 的固定页窗也需要显式移动窗口。AIO 曾经也有这一类窗口化方案，但在消息高度动态、倒序加载和滚动定位稳定性上付出的复杂度过高，后来改为完整 DOM + `content-visibility`，以保留真实 DOM 定位能力并把成本转给浏览器的屏外渲染裁剪。SillyTavern/VCPChat 没有这个漏搜原因，却把成本转移到整段 DOM。
-5. **UI 调查应记录“呈现投影”**：AIO 的 linear/force-graph、VCPChat 的 bubble/panel/immersive、Open WebUI 的 side-by-side/MoA、Chatbox 和 Jan 的分支版本导航，都说明同一份会话数据可以有多种用户可见投影；仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
+5. **UI 调查应记录“呈现投影”**：AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图（React Flow，选分支辅助面板）、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图（SvelteFlow，点击节点切分支）、VCPChat 的 bubble/panel/immersive、Chatbox 和 Jan 的分支版本导航，都说明同一份会话数据可以有多种用户可见投影；仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
 ## 中断/取消生成：按钮停止、任务取消和请求中止不是同一层
 

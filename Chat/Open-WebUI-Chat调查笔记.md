@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\open-webui`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-10
 >
 > 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
 >
@@ -23,7 +23,8 @@ Open WebUI v0.11.0 的 Chat 体系以「会话 JSON + 消息表」双写为特�
 - 流式推送统一走 Socket.IO `events` 事件（发射到 `user:{user_id}` 房间），前端按 `data.type` 分发约 25 种消息类型；REST 只负责发起与终止任务；
 - 标题、标签、追问、记忆抽取由 `background_tasks_handler` 在后端生成结束后串行执行；
 - 系统事件通过 `events.py` 的 `EventDefinitions` 定义并触发 Webhook/通知；本版本没有 "SystemLog" 概念；
-- 前端状态机整体内聚在 `src/lib/components/chat/Chat.svelte`（约 4205 行），包含发送、停止、重新生成、继续生成、MoA 合并与队列排队。
+- 前端状态机整体内聚在 `src/lib/components/chat/Chat.svelte`（约 4205 行），包含发送、停止、重新生成、继续生成、MoA 合并与队列排队；
+- 右侧面板另有 Overview 消息树图：把 `history.messages` 的 parentId 树渲染成只读 SvelteFlow 节点图（`@xyflow/svelte`），点击节点经 `showMessage` 切换到该消息所在分支（沿 childrenIds 走到叶子并更新 `history.currentId`），与主消息区共用同一棵 history 树（详见 5.3 节）。
 
 ## 1. 聊天数据模型
 
@@ -181,6 +182,16 @@ Open WebUI v0.11.0 的 Chat 体系以「会话 JSON + 消息表」双写为特�
 - `Messages/Message.svelte`（入口分发）、`ResponseMessage.svelte`（主渲染：流式内容/Markdown/引用/代码执行/评分）、`UserMessage.svelte`、`MultiResponseMessages.svelte`（并排多列）、`StructuredOutputRenderer.svelte`（OR 输出）；
 - `ShareChatModal.svelte` / `TagChatModal.svelte`：分享与标签。
 
+### 5.3 会话消息树图（Overview）
+
+聊天右侧面板 `ChatControls.svelte` 有 `controls / files / overview` 三个 tab，`showOverviewTab = hasMessages`（81 行）——只要会话有消息就提供 overview 入口（370 行挂载）。该视图把整个消息树渲染成一张**只读节点图**，实现分三层：
+
+- **图数据构建**（`Overview/View.svelte`，190 行）：直接从 `history.messages` 遍历（76-119 行），每条消息一个节点，按 `parentId` 生成 `smoothstep` 边，`level = parent.level + 1` 分层，同层节点用 `layerWidths` 计数均匀排布；垂直/水平两种布局方向可切换（`Flow.svelte:59-63` 的 ControlButton）。
+- **画布**（`Overview/Flow.svelte`）：`@xyflow/svelte`（SvelteFlow），`minZoom: 0.001`、`fitView`、`nodesConnectable/nodesDraggable: false`（28-46 行）——不允许拖拽节点或连线；`Background` + `Controls` 提供缩放平移，另有 pin（固定视口）按钮。节点卡（`Node.svelte`，94 行）显示用户/模型头像、名称、两行内容摘要（全文放 Tooltip），assistant 卡上还能直接收藏消息。
+- **交互**：`history.currentId` 变化时 `fitView` 自动定位当前消息（`View.svelte:50-62`）；点击节点经 `nodeclick` dispatch 到 `ChatControls.svelte:372-375`，调用 `Chat.svelte` 的 `showMessage(message, true)`——它沿 `childrenIds` 一路走到叶子、更新 `history.currentId` 并把主消息区滚动到该消息，即**点击树图节点 = 切换到该消息所在分支**；活动路径上的边 `animated` 高亮（`View.svelte:119`）。
+
+该视图是消息树的分支导航辅助，与发送链路（5.1 节）共享同一棵 `history` 树，不创建新消息或独立视图状态。
+
 ## 6. 会话生命周期事件流
 
 | 阶段 | 触发点 | 事件/动作 |
@@ -220,3 +231,4 @@ Open WebUI v0.11.0 的 Chat 体系以「会话 JSON + 消息表」双写为特�
 - 分叉构建：[`utils/chat_fork.py`](../../open-webui/backend/open_webui/utils/chat_fork.py)
 - 前端会话状态机：[`src/lib/components/chat/Chat.svelte`](../../open-webui/src/lib/components/chat/Chat.svelte)
 - 前端 store：[`src/lib/stores/index.ts`](../../open-webui/src/lib/stores/index.ts)
+- Overview 消息树图：[`src/lib/components/chat/Overview/`](../../open-webui/src/lib/components/chat/Overview/)、入口 `ChatControls.svelte`

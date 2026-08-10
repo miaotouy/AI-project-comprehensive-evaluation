@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-10
 >
 > 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
 >
@@ -57,7 +57,7 @@ user 提出的问题——"到底是真树还是线性链表/锚点跳转"——
 **"branch draft anchor / 发送锚点 / live branch 状态"是渲染层为"还没落库的东西"搭的临时状态，跟持久化树是两套数据。**
 - `Chat.tsx:82-83` 定义两个 ref：`branchDraftAnchorIdRef`（正在草稿分支的锚点消息 id）、`branchSendAnchorOverrideIdRef`（草稿被取消后，下一条发送锚定到哪个节点的覆盖值）。`getBranchDraftAnchorId()`（`Chat.tsx:216-219`）取值优先级：`branchDraftAnchorIdRef.current ?? branchSendAnchorOverrideIdRef.current`——一个三态机：都为空=正常发送，draft 有值=正在从某历史节点开草稿分支，override 有值=草稿被取消但要求下一条消息挂到指定节点而非当前 activeNode。这是一个容易踩坑的隐式状态机（见"发现的问题"）。
 - `handleStartBranchDraft`（`Chat.tsx:243-276`）在用户点"从这条消息发起新分支"时：先 PUT `/topics/:id/active-node` 把 DB 指针挪过去，再在内存里构造一个 `draft-branch:<anchorId>` 的假节点（`isInputDraft: true`），塞进 `TopicMessageFlowLiveState` 广播出去，好让分支面板（`TopicBranchPanel`）立刻显示"这里有个待输入的新分支"，而不必等一次真实消息落库。
-- `TopicMessageFlowLiveState`（`src/renderer/components/chat/flow/topicMessageFlowLiveTree.ts:23-27`）是纯前端结构：`{topicId, activeNodeId, nodes: TopicMessageFlowLiveNode[]}`，`buildTopicMessageFlowLiveState`（`:76-117`）把当前流式中/尚未持久化的 `CherryUIMessage[]` 转换成这些临时节点。`mergeTopicMessageFlowLiveTree`（`:145-221`）再把这份临时状态叠加到从 `/topics/:id/tree` 拉回来的持久化 `TreeResponse` 上，供分支流程图（`TopicMessageFlowCanvas`）渲染——**分支图看到的从来不是纯 DB 树，而是 DB 树 + 一层运行时 overlay 的合并结果**。
+- `TopicMessageFlowLiveState`（`src/renderer/components/chat/flow/topicMessageFlowLiveTree.ts:23-27`）是纯前端结构：`{topicId, activeNodeId, nodes: TopicMessageFlowLiveNode[]}`，`buildTopicMessageFlowLiveState`（`:76-117`）把当前流式中/尚未持久化的 `CherryUIMessage[]` 转换成这些临时节点。`mergeTopicMessageFlowLiveTree`（`:145-221`）再把这份临时状态叠加到从 `/topics/:id/tree` 拉回来的持久化 `TreeResponse` 上，供分支流程图（`TopicMessageFlowCanvas`）渲染——**分支图看到的从来不是纯 DB 树，而是 DB 树 + 一层运行时 overlay 的合并结果**（分支面板本身的图布局、节点卡和点击/右键交互见"交互面"一节的"分支面板"小节）。
 
 **跟文档的印证结果**：`message-tree.md` 描述的树形约束和 `MessageService.ts`/`TopicService.ts` 的实际代码一致，唯一不一致的地方是文档里"Flow canvas *(forward reference — 渲染器 flow-canvas 代码在 feat/chat-page 集成分支上，不在这个 PR 分支)*"这句话——而我们看到的当前快照里，`TopicMessageFlowCanvas.tsx`、`topicMessageFlowGraph.ts`、`topicMessageFlowLiveTree.ts` 等文件**已经存在且在正常工作**，说明这条 forward-reference 说明是历史遗留、没有跟着代码合并更新，属于文档漂移（stale doc note）。
 
@@ -75,6 +75,16 @@ user 提出的问题——"到底是真树还是线性链表/锚点跳转"——
 3. `useStableMessagePartsLayers`（`src/renderer/pages/home/hooks/useStablePartsByMessageId.ts:93-161`）把两者合并成两张表：`historyPartsByMessageId`（DB parts + 翻译 overlay，不含流式增量）与 `partsByMessageId`（在此基础上叠加 execution overlay）。文件顶部注释（`:1-39`）专门解释了为什么用 `useRef` 手搓这层缓存而不是走 `cacheService`/`Zustand`——仓库明确不引入全局状态库，这是"数据分层"的架构决定，不是偷懒。
 
 **渲染时怎么用这两层**：`MessageList.tsx:170-186` 计算 `firstLiveGroupIndex`——`groupedMessages` 里第一个包含"活跃流式消息 id"的组的下标（没有则回退到"最新一组 assistant 消息"，再没有就是列表末尾）。`renderItem`（`:594-615`）里 `index < firstLiveGroupIndex` 的组渲染成 `MessageHistoryLayer`（一个专门 `memo` 过、比较条件写死只关心几个字段的"已封存历史边界"，注释自称 "sealed history boundary"，`:107-124`），其 `partsByMessageId` 强制用 `streamingLayers.historyPartsByMessageId`；`index >= firstLiveGroupIndex` 的组渲染成 `MessageLiveLayer`（其实就是同一个 `MessageGroupLayer`，但用完整的 `partsByMessageId`，即含 overlay）。也就是说**"历史"和"live"不是两个数据源二选一渲染，而是同一批 `groupedMessages` 按位置切成两段，用不同的 parts 表和不同的 memo 策略渲染**。
+
+### 分支面板（TopicBranchPanel）：消息树的图形视图
+
+右侧分支面板（`src/renderer/pages/home/components/TopicBranchPanel.tsx`，292 行）把整个 Topic 的消息树渲染成一张 React Flow 图，是"在树上选分支/开分支"的图形入口，与消息列表的 `< i/N >` 兄弟导航并存：
+
+- **数据流**（`TopicBranchPanel.tsx`）：面板打开时 `useQuery('/topics/:topicId/tree', { query: { depth: -1 } })` 拉全量树（64-68 行）→ `mergeTopicMessageFlowLiveTree` 叠加 live 态（76-79 行，见上文的 live overlay）→ `buildTopicMessageFlowGraph` + `layoutTopicMessageFlowGraph` 生成 React Flow 的 nodes/edges（80 行）；头部显示 `branchCount`/`nodeCount` 统计（253-259 行）。
+- **图构建**（`components/chat/flow/topicMessageFlowGraph.ts`）：`buildTopicMessageFlowGraph`（14-61 行）把 `TreeResponse.nodes` 与 `siblingsGroups`（多模型兄弟组拍平成同 parent 节点）去重合并；`collectActivePath`（173-188 行）从 `activeNodeId` 沿 `parentId` 回溯活动路径；边按 `isActivePath / isSiblingBranch / isInactiveBranch` 打标。**布局**（`topicMessageFlowLayout.ts`）用 `@dagrejs/dagre` 做 `rankdir: 'TB'` 分层（60-75 行），节点固定 220×112（14-17 行）、nodesep 56/ranksep 96（23-29 行），兄弟顺序用 OrderConstraint 按（深度, 创建时间, id）强制排序（232-253 行）；`isInputDraft` 草稿节点不参与 dagre，直接排在父节点最右侧兄弟之后（39-40、86-88、123-160 行）。边样式按状态着色：活动路径 `--success` 加粗 + `animated`，非活动分支淡色虚线，兄弟边普通虚线（`toReactFlowEdge`，162-191 行）。
+- **画布**（`TopicMessageFlowCanvas.tsx`）：`@xyflow/react`，`nodesConnectable/Draggable: false`、`onlyRenderVisibleElements`（只挂载可视区域节点，图形级裁剪）、minZoom 0.08/maxZoom 1.4、`zoomOnDoubleClick: false`（228-253 行）；`MiniMap`（右下，节点按角色着色，255-263 行）+ `Controls`（左下）+ 图例（254 行）；空树渲染空状态（209-220 行）。初始视口把根节点定位在画布顶部（`getRootFocusViewport`，zoom 0.85），`focusKey` 变化（面板 dock/popout 位置切换）时重新测量容器并复位视口（154-207 行）。
+- **节点卡**（`TopicMessageFlowNode.tsx`）：role 徽标（user=success 系、assistant=info 系，25-32 行）、模型短名（`getModelShortLabel` 取最后一段，41-48 行）、两行 `preview` 摘要、状态圆点（pending/success/error/paused，34-39 行）、时间（MM/DD HH:mm）；`isActive` 节点 ring 高亮、非活动分支 `opacity-55`（223-235 行）；Handle 仅装饰（`opacity-0, isConnectable: false`）。悬停 300ms 后 Popover 打开完整预览卡（`TopicMessageFlowNodePreviewCard`，74-164 行）：按需 `GET /messages/:id` 拉全量消息，复用主消息区的 `MessageContent` 真实渲染（150-158 行）；`isInputDraft`/上下文边界节点不触发（234-236、285 行）。
+- **点击与右键**（`TopicBranchPanel.tsx`）：`handleNodeSelect`（86-128 行）分三种情况——有活动草稿锚点且点的是锚点：取消草稿并定位；点击活动路径上的节点：仅 `onLocateMessage` 定位不切分支；否则 `GET /topics/:id/path?nodeId=` 求该分支叶子后 `PUT /topics/:id/active-node` 切换并 refetch（"点到中间节点 = 切到该分支最新叶子"，与 `< i/N >` 的 `setActiveBranch` 同语义）。右键菜单（`CommandContextMenu`，271-285 行 + `getNodeContextMenuItems`，181-238 行）只有两项："从这条消息发起新分支"（仅 assistant 且有 assistant 后代、非当前 active 节点；禁用原因区分"就是当前活动节点"/"没有后续消息"）和"复制分支到新 Topic"（`POST /topics/:id/duplicate`）。
 
 ### 消息搜索：只搜正文 DOM 的具体实现
 
@@ -133,6 +143,8 @@ user 提出的问题——"到底是真树还是线性链表/锚点跳转"——
 - `src/renderer/components/chat/messages/utils/{messageGroupKey,stableGroupedMessages}.ts`
 - `src/renderer/components/chat/messages/messageListProviderBuilder.ts`
 - `src/renderer/components/chat/flow/{topicMessageFlowGraph,topicMessageFlowLiveTree}.ts`
+- `src/renderer/components/chat/flow/{TopicMessageFlowCanvas,TopicMessageFlowNode,TopicMessageFlowLegend}.tsx`
+- `src/renderer/components/chat/flow/topicMessageFlowLayout.ts`
 - `src/renderer/components/ContentSearch.tsx`
 - `src/renderer/hooks/{useTopicMessages,useExecutionOverlay,SiblingsContext,useConversationTurnController}.ts`
 - `src/renderer/hooks/chat/ChatWriteContext.ts`
