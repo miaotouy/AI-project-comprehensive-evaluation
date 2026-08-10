@@ -1,10 +1,10 @@
 # Agent 工具横向调查与对比
 
-> 对比对象：AIO Hub、Chatbox、Cherry Studio、Hermes、LobeHub、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
 > 对比更新日期：2026-08-10
 >
-> 依据：同目录十份单项目调查笔记及其记录的代码快照
+> 依据：同目录十六份单项目调查笔记及其记录的代码快照
 >
 > 对比方法：只读源码、类型定义、注册表、执行器、调用入口和单项目调查笔记，逐项核对实现
 >
@@ -17,10 +17,16 @@
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | --- | --- | --- |
 | AIO Hub | [AIO-Hub-Agent工具调查笔记.md](AIO-Hub-Agent工具调查笔记.md) | 355 | `main` | `eba9d84b234672321312e92ab48bb474cfb0aca4` |
+| AstrBot | [AstrBot-Agent工具调查笔记.md](AstrBot-Agent工具调查笔记.md) | 357 | `master` | `346b85db9d79207ea7b51694cce5276203612af4` |
 | Chatbox | [Chatbox-Agent工具调查笔记.md](Chatbox-Agent工具调查笔记.md) | 536 | `main` | `7450ab2dde5eacab4a8721f8680006ba8b99438d` |
 | Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 366 | `main` | `b7673c23860db5dd6da7f42dec5fc21f6b13de1a` |
-| Hermes | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 226 | `main` | `01a1037d1e6d7b6eb96a786ef282c3aea4818194` |
+| DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 118 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
+| Hermes Agent | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 226 | `main` | `01a1037d1e6d7b6eb96a786ef282c3aea4818194` |
+| Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 167 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
 | LobeHub | [LobeHub-Agent工具调查笔记.md](LobeHub-Agent工具调查笔记.md) | 590 | `canary` | `4edba1b75a97b91c28ad48cd1cc90528defa17ad` |
+| Manifold Desktop | [Manifold-Desktop-Agent工具调查笔记.md](Manifold-Desktop-Agent工具调查笔记.md) | 68 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
+| NextChat | [NextChat-Agent工具调查笔记.md](NextChat-Agent工具调查笔记.md) | 161 | `main` | `706a18b95b714ab29b2a4842d3b9ff4f887935d5` |
+| Open WebUI | [Open-WebUI-Agent工具调查笔记.md](Open-WebUI-Agent工具调查笔记.md) | 178 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
 | OpenCode | [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md) | 225 | `dev` | `b8bd88901a4870ef3a5752840f4e23e11d54e24e` |
 | Pi | [Pi-Agent工具调查笔记.md](Pi-Agent工具调查笔记.md) | 122 | `main` | `6b461b75b39b5a19b378dc42fbfbd1655bc446a6` |
 | SillyTavern | [SillyTavern-Agent工具调查笔记.md](SillyTavern-Agent工具调查笔记.md) | 418 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
@@ -47,15 +53,18 @@
 
 ## 结论摘要
 
-九个项目的差异集中在策略层覆盖率、失效方向、执行位置和可绕过路径；Hermes 是其中唯一的纯 Python 后端聚合核心，执行端与策略层分离、存在一条沙箱 RPC 工具旁路，形态与其他项目不同。Pi 是第九个样本，形态与其余项目都不同：它是本地编码 Agent，工具循环内置在 `packages/agent`，无 MCP、无逐次审批、无输出侧过滤，安全边界主要落在“项目信任门 + 扩展钩子 + 用户自己维护的执行环境”。OpenCode 是第十个样本：它把工具循环完全交给 Vercel AI SDK 原生 `tool_calls`，自身保留注册、过滤、审批与截断，是唯一“执行在 SDK 内部、审批在 Effect 层”的项目。可按以下七条观察：
+十六个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”，不能与其余十五个已有执行回环的项目视为同等工具运行时。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十条观察：
 
 1. **策略层完整但默认放行面大：LobeHub。** `humanIntervention` 状态机是七个项目里设计最完整的（四种模式、API 级覆盖 manifest 级、`always` 不可被 auto-run 绕过），但绝大多数内建工具根本不声明该字段，而未声明即默认 `never`（自动执行）。`lobe-creds` 的凭证保存与注入沙箱、`lobe-browser` 八个 API、`lobe-message` 约 30 个 API（含 `deleteBot`）、`lobe-agent-management` 的 `callAgent`/`installPlugin` 均零声明。
-2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio。** 两者都实现了逐次审批与总开关，Chatbox 更是九个项目里唯一让总开关有不可绕过类别的实现（`AppActionApprovalPausedError` 与 `agentFullAccess` 在代码层脱钩）。盲点分别在：Chatbox 的 Windows 无 OS 级沙箱、白名单基于 bash 语义；Cherry Studio 的 `acceptEdits` 白名单只看命令首词、路径检查不解析 Bash 命令文本。
+2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio、DeepChat。** 三者都有逐次审批或权限 broker。Chatbox 让计费与应用状态变更类操作不受 `agentFullAccess` 放行；DeepChat 将审批绑定到会话、server identity、配置代数、binding hash、execution id 与参数 hash，并设 pending 上限和超时；Cherry Studio 则在 renderer、主进程和 Claude SDK hook 之间串联审批。各自边界分别是 Windows 无 OS 隔离、`acceptEdits` 首词白名单，以及 DeepChat 各工具实际 preflight 与 MCP transport 尚未运行核验。
 3. **当前以 VCP 联动，但三者的架构角色不同：AIO Hub、VCPChat、VCPToolBox。** 三者都参与 VCP 文本协议链路，协议两端的解析语义、审批超时方向和鉴权粒度并不一致。AIO 还需要单独评价：它把模型通信表示抽成了 `ToolCallingProtocol`，工具元数据、审批和执行语义没有写死为 VCP；目前只实现并注册了 VCP，不能据此把其工具系统的设计范围归结为"VCP 客户端"。
 4. **无逐次审批，信任边界在安装与内容导入：SillyTavern。** 扩展 action 与宿主同权；`/tools-register` 还允许角色卡、World Info 或 Quick Reply 提供工具定义，因此导入内容也可能改变工具面。
 5. **执行端与策略端分离、内置 execute_code 沙箱 RPC 旁路的 Python 后端：Hermes。** 工具集中 registry/`_AGENT_LOOP_TOOLS` 双入口，`resolve_pre_tool_block` 为各分发点唯一审批门（fail-closed），但 `_should_skip_container_guards` 只豁免容器且 `has_host_access=False` 的环境；`execute_code` 沙箱子进程经 `_rpc_server_loop` 回调 `model_tools.handle_function_call`，在父进程线程执行已允许的子工具，给定 allow-list 与 `_last_resolved_tool_names` 一致时，工具侧不重复走编排层审批。结果持久化有 200K/1500 字符双预算，无内容过滤。
 6. **无审批层、无 MCP、本地执行的编码 Agent：Pi。** 工具循环集中在 `agent-loop.ts`，`beforeToolCall` 钩子是唯一拦截点（默认放行）；内置 read/bash/edit/write/grep/find/ls 七工具由 `AgentTool.execute` 在本地进程内执行（bash 走 `spawn` 子进程、进程树终止），项目信任门约束 `.pi` 资源加载而非工具执行。本次未找到 MCP 实现、工具级 token 预算、迭代上限与结果输出侧过滤；`!` 前缀 bash 直通是用户手动旁路，不经过模型工具协议。
 7. **执行在 AI SDK 内部、审批与截断在 Effect 层的编码 Agent：OpenCode。** 工具循环全部交给 Vercel AI SDK `streamText` 原生 `tool_calls`（`llm.ts:280-353`），opencode 侧只消费 `fullStream` 事件并持久化 `ToolPart` 状态机；注册过滤按模型/provider/client/flag 组合（GPT-5 系用 `apply_patch`、websearch 仅 opencode provider 或 exa/parallel flag），参数校验统一在 `Tool.wrap` 转 `InvalidArgumentsError` 回注。审批为 allow/ask/deny 三档，`ask` 阻塞在无超时的 Deferred 上（与 AIO Hub 同类挂起语义）；shell 为普通子进程、无沙箱（2 分钟默认超时 + 外部目录检查兜底）；结果统一 2000 行/50KB 截断落盘。TaskTool 是唯一“旁路”形态，但创建子会话时权限收窄（继承父 deny + 强制 todowrite/task deny）且有 `subagent_depth` 限制，与 LobeHub 的 headless 子 agent 方向相反。
+8. **目录与循环治理较完整的服务端/主进程运行时：AstrBot、Open WebUI。** AstrBot 把内置、插件、MCP 和 Handoff 归一到 `FunctionTool`，串行执行，具备 30 步默认上限、超时、重复调用守卫和大结果落盘；Open WebUI 汇合 54 个条件内置工具、数据库工具、MCP/OpenAPI、代码解释器与子代理，在服务端循环中限制最大迭代并对结果做引用/图片处理。两者的权限重点都是“谁能使用工具/连接”，不是每次调用的统一人工确认。
+9. **AI SDK 工具回环 + 桌面 MCP：Jan。** Web 搜索、RAG 和 MCP 经 `streamText` 汇合，工具集按模型能力与最后一条用户消息裁剪并冻结路由结果；审批有 thread/server/global/allow-all 四级，MCP 执行落在 Rust/Tauri。它没有独立 Agent 规划器，浏览器 MCP 工具被 UI 开关列表过滤但是否仍可调用尚未运行确认。
+10. **普通聊天上的轻量回环与未闭合骨架：NextChat、Manifold Desktop。** NextChat 的 OpenAPI 工具使用原生 `tool_calls` 并行执行后递归请求，MCP 则使用 fenced JSON 文本协议；两条链都没有审批、沙箱或步数上限。Manifold Desktop 已能发现 MCP、注入三家 Provider 并展示调用，但 `MCPClient::CallTool()` 无运行时调用点，尚不存在结果回注与下一轮生成。
 
 ## 四个必答问题
 
@@ -64,10 +73,16 @@
 | 项目 | 模型看到什么 | 谁真正执行 | 默认是否需人工 | 已确认的最高风险单点 |
 | --- | --- | --- | --- | --- |
 | AIO Hub | registry 中 `agentCallable` 方法 + 动态上下文 | Tauri 渲染进程 / Rust 命令 / 远端 VCP 节点 | 可配置，工具级与方法级 | 入向分布式调用无人工审批门；`internal_request_file` 另跳过暴露名单校验 |
+| AstrBot | 按请求裁剪的 `ToolSet`（内置、插件、MCP、Handoff） | Python 主进程、MCP server、后台/子 Agent | 非内置工具默认 `member` 即不限制；敏感内置工具自行检查 | 权限默认值偏宽，且内置工具不经过统一 `_PermissionGuardedTool` |
 | Chatbox | 按会话组装的 AI SDK ToolSet | 主进程 / MCP 子进程 / 沙箱 / 宿主 shell | 高风险命令与越界写入需批准 | Windows 上 `code_execution` 无 OS 隔离，裸执行 |
 | Cherry Studio | MCP server tools + Claude Code 声明式注册表 | Electron 主进程 / MCP 子进程 / SDK 原生二进制 | `default` 模式下 Bash 与写入需批准 | `acceptEdits` 白名单只看首词，`mkdir x; curl…\|sh` 可绕过 |
-| Hermes | `tools/` 导入注册 + 插件/MCP/Skill 汇入同一 registry，全量注入 | Python 主进程；execute_code 沙箱子进程 | 危险命令需批准（fail-closed），yolo 可跳过 | `execute_code` 沙箱 RPC 旁路直接调 `handle_function_call`，绕过编排层审批链（只受 allow-list 限制） |
+| DeepChat | 带 fingerprint 的 session tool profile（MCP + Agent 工具） | Electron 主进程内 ToolService；MCP server | `default` 经 broker/命令风险审批；可切 `auto_approve`/`full_access` | `full_access` 可放行模型来源调用；各 MCP transport 隔离未运行确认 |
+| Hermes Agent | `tools/` 导入注册 + 插件/MCP/Skill 汇入同一 registry，全量注入 | Python 主进程；execute_code 沙箱子进程 | 危险命令需批准（fail-closed），yolo 可跳过 | `execute_code` 沙箱 RPC 旁路直接调 `handle_function_call`，绕过编排层审批链（只受 allow-list 限制） |
+| Jan | Web 搜索、RAG 与按路由筛选的 MCP 工具 | AI SDK 循环；MCP 在 Rust/Tauri 侧 | thread/server/global/allow-all 四级；未批准时等待 UI | `Jan Browser MCP` 被工具开关 UI 隐藏，实际模型可达性尚未运行确认 |
 | LobeHub | agent mode 的 builtin + connector + MCP | server runtime / cloud gateway / 用户设备 / 本地 MCP | **多数内建工具零声明即自动执行** | MCP HTTP client 无 SSRF 过滤，token 随请求头外泄 |
+| Manifold Desktop | 全部已连接 MCP 工具 | 当前只展示调用；`CallTool()` 无运行时调用点 | 不适用：执行回环未接通 | 文档声称有多轮执行，但当前实现止于展示 tool call |
+| NextChat | 当前 Mask 的 OpenAPI 插件 + 全局 MCP prompt 目录 | 浏览器 HTTP；桌面 stdio MCP 子进程 | 无逐次审批 | MCP 子进程继承完整 `process.env`，且递归工具请求无步数上限 |
+| Open WebUI | 条件内置、DB 工具、MCP/OpenAPI 与子代理 | 服务端 Python、前端 direct/pyodide、Jupyter、外部 server | AccessGrants/能力开关；无统一逐次人工审批 | MCP 客户端默认 `verify=False`；direct/代码解释器跨多个执行域 |
 | OpenCode | ToolRegistry（内置/自定义/插件）+ SessionTools 并入 MCP 工具 | node 主进程；shell 为普通子进程；MCP stdio 子进程 | 权限 `ask` 需人工批准，`*:allow` 时自动执行 | `ask` 审批无超时兜底，UI 不响应则永久挂起；shell 无沙箱 |
 | Pi | 会话级工具集（内置 7 工具 + 扩展注册），每轮注入 | 本地进程内执行（bash 为 spawn 子进程） | 无逐次审批，`beforeToolCall` 钩子默认放行 | 无 MCP；执行端不二次鉴权，扩展钩子缺失时任何工具直接执行；`!` bash 直通用户权限 |
 | SillyTavern | 扩展注册并适配到 provider 的 function tools | 浏览器前端 extension action | 未发现逐次审批 | 扩展 action 与宿主同权，安装即授权 |
@@ -84,17 +99,41 @@ AIO Hub 的工具系统分成三层：`ToolRegistry`/`AgentExtension` 提供能�
 
 Chatbox 通过 `buildToolsForSession()` 按 Agent 模式、模型能力、附件、知识库、MCP 和平台动态组装 AI SDK `ToolSet`。stdio MCP 是宿主上的真实子进程，`user_exec` 是真实系统 shell；高风险命令和越界写入可暂停等待批准，应用状态变更与计费类 action 即使开启 `agentFullAccess` 也不能绕过。macOS/Linux 使用 `@anthropic-ai/sandbox-runtime`，Windows 明确没有 OS 级隔离。Skills 是指令与流程文本，不是独立权限沙箱。
 
+### AstrBot
+
+AstrBot 把内置、插件、MCP 与 Handoff 子 Agent 统一成 `FunctionTool`/`ToolSet`。请求构建阶段会按知识库、Web 搜索、persona 与 skills-like 模式裁剪 schema；runner 串行执行同轮调用，默认最多 30 步，并提供超时、用户中断、重复调用提示与 27.5k token 结果落盘。非内置工具经 `_PermissionGuardedTool`，但默认 `member` 不限制；内置工具绕过该统一包装，依靠自身的管理员检查。
+
 ### Cherry Studio
 
 Cherry Studio 同时存在通用 `McpRuntimeService` 与 Claude Code Agent 注册表两条工具路径。注册表用 `user`、`internal`、`disabled` 三态控制曝光，并叠加 `disabledTools`、自动批准规则、`canUseTool` 和 hook。审批由 renderer 展示、Electron 主进程持久化并恢复执行；但 Claude Code 的 Bash/Read/Write 最终由 SDK 原生二进制执行，Cherry Studio 处于拦截者而非执行器位置。`acceptEdits` 的首词白名单和不解析 Bash 路径的检查是已确认盲点。
 
-### Hermes
+### DeepChat
+
+DeepChat 用 `DeepChatToolResolver` 为会话生成带 fingerprint 的工具 profile，再由 `ToolService` 合并 MCP 与 Agent 工具；同名时保留 MCP 版本。原生 tool call 和 `<function_call>` legacy 文本协议最终都进入 `DeepChatLoopEngine`，默认最多 128 次工具调用。审批记录绑定会话、server、配置代数、binding、execution id 与参数 hash，另有命令风险分级和 workspace 路径检查。
+
+### Hermes Agent
 
 Hermes 是纯 Python 后端聚合核心，工具面由 `tools/` 目录模块导入注册、`plugins/` 目录插件、MCP 客户端动态发现、`skills/`+`optional-skills/` 指令文本四类来源汇入同一 `tools/registry.py` 注册表，经 `get_tool_definitions()` 全量注入每次 API 调用（tools 数组不参与 prompt caching，故工具集刻意保持小而窄）。执行与编排沿 `run_agent.py` → `model_tools.py` → `registry.dispatch` 三层组织，全部在 Python 主进程；`execute_code` 的代码在沙箱子进程，工具调用经 `_rpc_server_loop` 回调父进程线程的 `handle_function_call`。审批是 CLI 交互（fail-closed），`resolve_pre_tool_block` 是各分发点唯一审批门；`HERMES_YOLO_MODE` 或会话 yolo 可跳过审批。agent-level 工具（`todo`/`memory`/`session_search`/`delegate_task`）由 `_AGENT_LOOP_TOOLS` 特判拦截，不进注册表分发。
+
+### Jan
+
+Jan 的工具面由 Web 搜索、RAG 与 MCP 三类组成，只有模型声明 tools capability 时才加载。智能路由按最后一条用户消息筛选 MCP 工具，并用签名冻结结果以保持提示缓存稳定；schema 在送入 AI SDK 前会为 Rust/GBNF 做规整。工具循环由 `streamText` 驱动，MCP 实际执行在 Rust/Tauri 侧，审批有 thread、server、global 与 allow-all 四层持久化范围。
 
 ### LobeHub
 
 LobeHub 将工具可见性、执行位置和人工审批拆成独立链路。builtin、connector 和 MCP 工具可在 server、cloud gateway、用户设备或桌面本地运行；`humanIntervention` 支持多种模式，API 级规则覆盖 manifest 级规则，`always` 不会被 auto-run 绕过。机制完整不等于默认严格：多数内建工具未声明该字段，未声明即 `never` 自动执行，子 Agent 的 `headless` 路径还会跳过人工审批。
+
+### Manifold Desktop
+
+Manifold Desktop 目前只有 MCP 工具发现、schema 注入和 tool call 展示。`MCPClient::CallTool()`、`ToolResult` 与 `maxToolCallRounds` 虽已存在，但主聊天链没有调用执行器，也没有把结果追加后重新请求模型；插件 `RegisterTool` 同样只是接口骨架。因此它应标记为“执行闭环未实现”，不能因为 Provider 能解析 tool call 就计作完整 Agent 工具运行时。
+
+### NextChat
+
+NextChat 在普通聊天上并列两条链：OpenAPI operation 转成原生 `tool_calls`，浏览器用 `Promise.all` 请求外部 endpoint 并递归续写；MCP 工具描述进入 system prompt，模型输出 `json:mcp:<clientId>` fenced block 后由桌面 stdio client 执行。两条链协议、回注 role 与选择范围都不同，且没有统一审批、沙箱或 Agent 步数上限。
+
+### Open WebUI
+
+Open WebUI 在服务端 `middleware.py` 汇合条件内置工具、数据库 Python 工具、MCP/OpenAPI server、代码解释器和子代理。内置 54 个函数按模型 meta、全局配置、模型能力与用户权限四重筛选；循环受 `max_tool_call_iterations` 限制，结果支持引用提取、base64 图片拆分和 HTML embed。执行域覆盖服务端、前端 direct/pyodide、Jupyter 与外部服务器，权限以 AccessGrants 和连接授权为主。
 
 ### Pi
 
@@ -123,17 +162,23 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | 项目 | 发现机制 | 注入形态 | 按会话/模式收窄 |
 | --- | --- | --- | --- |
 | AIO Hub | 统一 registry 运行期反射 `getMetadata()`，来源可为内建、factory、插件代理或 VCP proxy；筛 `agentCallable === true` | 由 `ToolCallingProtocol` 生成；当前是 system prompt 中的 VCP 定义，`{{tools}}` 与 `{{tool_context}}` 分离 | 单 Agent 的 toggle |
+| AstrBot | `ToolSet` 汇合内置装饰器、插件、MCP 与 Handoff；同状态后注册覆盖、active 优先 | OpenAI/Anthropic/Gemini 三类原生 schema；skills-like 可首轮只发轻量定义 | 按知识库、Web 搜索、persona、启停状态与请求分支重建 |
 | Chatbox | `buildToolsForSession()` 单一构造点 | 原生 tools 字段 | agentMode、模型能力、附件、知识库、MCP、平台 |
 | Cherry Studio | MCP runtime 同步 + 声明式注册表的 `exposure` 三态 | 原生 tools / SDK `query()` 参数 | `scope.mcpToolIds`、环境依赖条件 |
-| Hermes | `tools/` 模块导入时 `registry.register()`；插件/MCP/Skill/toolset 四来源汇入同一 registry | 全量 tools 数组随每次 API 调用注入（tools 不进 prompt cache，故工具集保持小而窄） | `enabled_tools`/`enabled_toolsets` 白黑名单、check_fn 30s TTL 探针缓存、`dynamic_schema_overrides` |
+| DeepChat | session tool profile 合并 MCP 与 AgentToolManager，MCP 同名优先 | 原生 tools；不支持时用 `<function_call>` legacy 文本协议 | Agent policy、projectDir、Skill、MCP server、disabled tools、subagent capability |
+| Hermes Agent | `tools/` 模块导入时 `registry.register()`；插件/MCP/Skill/toolset 四来源汇入同一 registry | 全量 tools 数组随每次 API 调用注入（tools 不进 prompt cache，故工具集保持小而窄） | `enabled_tools`/`enabled_toolsets` 白黑名单、check_fn 30s TTL 探针缓存、`dynamic_schema_overrides` |
+| Jan | Web 搜索、RAG、MCP；智能路由按用户消息选相关工具并冻结签名 | 原生 tools 字段（AI SDK `streamText`） | 模型 capability、文档/RAG 状态、禁用复合 key、智能路由结果 |
 | LobeHub | builtin registry + connector + manifest | 原生 tools 字段 | agent/chat mode 白名单、设备在线状态、用户启用 |
+| Manifold Desktop | 已连接 MCP server 的 `tools/list` 全量聚合；同名后连接覆盖 | 原生 Provider tools schema | 常规聊天全量；Compare 路径不注入；无执行回环 |
+| NextChat | 当前 Mask 选择的 OpenAPI operation；全局已连接 MCP server | OpenAPI 走原生 tools；MCP 描述拼入 system prompt | OpenAPI 按 `Mask.plugin`；MCP 按全局开关和活跃 server |
+| Open WebUI | 54 个条件内置 + DB Python 工具 + MCP/OpenAPI server | 原生 tools/function-call items；direct 工具转前端事件 | 模型 meta、全局配置、模型能力、用户权限、AccessGrants 与连接过滤 |
 | OpenCode | ToolRegistry 六路来源：内置（16+1）、自定义 `{tool,tools}/*.js\|ts`、插件 `tool` hook、MCP、MCP 资源工具、Skill | 原生 tools 字段（AI SDK `streamText`） | 按模型家族（apply_patch/edit/write）、provider（websearch）、client（question）与实验 flag（lsp/plan/execute）；权限全量禁用集合；prompt `user.tools` 显式禁用 |
 | Pi | 内置工具工厂 + 扩展 `registerTool` 注册表；无 MCP | 原生 tools 字段（每轮注入当前工具集） | 会话级激活集（`setActiveToolsByName`），system prompt 只列带 snippet 的工具 |
 | SillyTavern | 扩展调 `registerFunctionTool` | 原生 tools 字段，`tool_choice: "auto"` | `function_calling` 开关、provider/模型支持、`shouldRegister` |
 | VCPChat | 消费上游目录；自带节点向服务端 `register_tools` | 上游注入 | 客户端不负责收窄 |
 | VCPToolBox | 插件 manifest 扫描 | 描述文本进 system prompt，占位符体系 | 插件启用/禁用 |
 
-值得注意的两处实现差异：AIO Hub 把工具定义与动态上下文分成两个占位符，让前者能进 prompt cache、后者每轮刷新，是九个项目里唯一显式为 cache 命中做的设计；Hermes 反向取舍——tools 数组完全不进 prompt cache，仅 system prompt 前缀被缓存，因此为保住缓存有效性而刻意收窄工具集。Cherry Studio 的 `exposure` 三态（`user`/`internal`/`disabled`）决定工具是给用户看、仅内部调用，还是硬禁用；部分工具（`Task`、agent-teams 的 `SendMessage`/`TeamCreate`）并非 SDK 原生联合类型成员，而是按环境变量条件注入。
+工具集稳定性有三种不同做法：AIO Hub 将稳定定义与逐轮动态上下文拆开；Jan 对智能路由结果签名并冻结；Hermes Agent 则不缓存 tools 数组，为维持 system prompt cache 而主动缩小全量工具集。Cherry Studio 的 `exposure` 三态（`user`/`internal`/`disabled`）决定工具是给用户看、仅内部调用，还是硬禁用；Manifold Desktop 虽能注入目录，却不应被误计为可执行工具集。
 
 ### SDK 使用与控制边界
 
@@ -142,10 +187,16 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | 项目 | SDK / 协议位置 | 对工具边界的含义 |
 | --- | --- | --- |
 | AIO Hub | 自研 `ToolRegistry`、`ToolCallingProtocol` 与 VCP 文本协议 | 工具发现、文本解析和执行前核验均由应用掌握 |
+| AstrBot | 自研 `ToolSet`/runner，Provider adapter 导出三类原生 schema | 目录、协议转换、串行执行和结果回填均由 Python 应用掌握 |
 | Chatbox | Vercel AI SDK v6 `ToolSet`，MCP 使用 `@ai-sdk/mcp` | SDK 吸收 Provider tool-call 差异；审批和具体执行仍由应用工具实现承担 |
 | Cherry Studio | 普通聊天使用 AI SDK `ToolRegistry`；Claude Code Agent 使用 `@anthropic-ai/claude-agent-sdk` | 前一条路径由应用执行 MCP；后一路径的 Bash/Read/Write 由 SDK 原生二进制执行，应用只能拦截 |
-| Hermes | 自研 `tools/registry.py` 注册表 + 自研 transport adapter（OpenAI 兼容 tools / Anthropic / Bedrock / Codex / Codex Responses） | 发现、审批、执行与 RPC 回调全部由 Python 主进程掌握，无第三方 agent SDK；execute_code 沙箱自身提供 `_rpc_server_loop` 工具旁路 |
+| DeepChat | AI SDK Provider runtime + 自研 `DeepChatLoopEngine`/ToolService | SDK 处理原生流，应用统一 legacy 解析、权限、执行与多轮边界 |
+| Hermes Agent | 自研 `tools/registry.py` 注册表 + 自研 transport adapter（OpenAI 兼容 tools / Anthropic / Bedrock / Codex / Codex Responses） | 发现、审批、执行与 RPC 回调全部由 Python 主进程掌握，无第三方 agent SDK；execute_code 沙箱自身提供 `_rpc_server_loop` 工具旁路 |
+| Jan | Vercel AI SDK `streamText` + Tauri MCP bridge | SDK 驱动工具循环；MCP 调用越过 JS/Rust 边界到本地进程 |
 | LobeHub | 自研 Agent Runtime/builtin registry；MCP client 使用官方 `@modelcontextprotocol/sdk` | 内建工具的策略和执行归 LobeHub；stdio MCP 的进程生命周期由官方 client 启动但无额外沙箱 |
+| Manifold Desktop | 自研 C++ Provider adapter + MCP client | SDK/协议只完成 schema 与 tool-call 解析；应用未接执行和续轮 |
+| NextChat | 自研 SSE 工具回环 +官方 MCP SDK stdio client | OpenAPI 由应用执行；MCP 是独立文本协议链，不共享原生工具回环 |
+| Open WebUI | 自研 FastAPI middleware 循环 + MCP Python client | 服务端掌握目录、循环、结果处理与再请求；direct/pyodide 工具委托浏览器 |
 | OpenCode | Vercel AI SDK v6 `streamText` 原生 tool_calls（`llm.ts:318`）；SDK 内部完成工具执行与结果回注 | **工具循环（选择、执行、重试、并行度）全部由 SDK 承担**，opencode 只消费 `fullStream` 事件并做参数校验、审批、截断与持久化；执行发生在 node 主进程内 |
 | Pi | 自研 `agent-loop` 编排 + 各 Provider API 原生 tool_calls 适配 | 发现、校验、执行全部由应用掌握；无第三方 agent SDK 参与工具执行 |
 | SillyTavern | 自研 extension action 与多 Provider function-call 适配 | 工具执行在浏览器扩展/服务端 plugin，核心没有 SDK 层的统一审批边界 |
@@ -157,10 +208,16 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | 项目 | 表示 | 解析边界 |
 | --- | --- | --- |
 | AIO Hub | 可替换的 `ToolCallingProtocol`；当前唯一实现为 VCP 文本块 | 当前 VCP 解析器用复合正则**跳过** Markdown code fence 与 inline code；执行器在协议外二次核验 `agentCallable` |
+| AstrBot | Provider 原生 tool call（三类 schema） | runner 查找工具；handler 参数按 schema properties 白名单过滤，未知工具/异常转结果文本 |
 | Chatbox | 原生 tool call | provider 差异由 AI SDK 吸收；`toolCallId` 去重 |
 | Cherry Studio | 原生 tool call + SDK 消息流 | `mcp__*` 命名与 wire id 映射 |
-| Hermes | 原生 tool call（OpenAI 兼容）；Anthropic/Bedrock/Codex adapter 归一 | `_repair_tool_call` 名称近似修复、JSON 解析重试 ≤3 注入 recovery 结果、`coerce_tool_args` 类型洗边缘；`_AGENT_LOOP_TOOLS` 四个 agent 级工具由编排层特判 |
+| DeepChat | 原生 tool call；不支持时 `<function_call>` 文本块 | legacy parser 支持多种 JSON 外形并用 `jsonrepair` 修复，最终归一到同一循环 |
+| Hermes Agent | 原生 tool call（OpenAI 兼容）；Anthropic/Bedrock/Codex adapter 归一 | `_repair_tool_call` 名称近似修复、JSON 解析重试 ≤3 注入 recovery 结果、`coerce_tool_args` 类型洗边缘；`_AGENT_LOOP_TOOLS` 四个 agent 级工具由编排层特判 |
+| Jan | 原生 tool call（AI SDK） | schema 先规整；仅对 Windows 路径反斜杠导致的 JSON 转义错误做 repair |
 | LobeHub | 原生 tool call | `identifier`/`apiName` 编解码 |
+| Manifold Desktop | 原生 tool call | Gemini/OpenAI/Anthropic 各自解析，最终只渲染，不执行 |
+| NextChat | OpenAPI 原生 tool call；MCP fenced JSON 文本块 | 原生 arguments 直接 `JSON.parse`；MCP 用正则提取完整 code fence 后解析 |
+| Open WebUI | 原生 tool call / Responses function-call item | `JSON.parse` 失败回退 `ast.literal_eval`；按 spec properties 过滤参数键 |
 | OpenCode | 原生 tool call（AI SDK） | `experimental_repairToolCall` 修正工具名大小写，无法修复时改写参数重定向到 `invalid` 工具（llm.ts:296-312）；参数校验失败由 AI SDK 把错误作为结果回注 |
 | Pi | 原生 tool call（Provider 适配） | `prepareToolCall` 查找 + TypeBox 校验 + `prepareArguments` shim；未知工具/校验失败转 isError 结果 |
 | SillyTavern | 原生 function call，五家格式归一化 | 归一化后按模型返回顺序串行 `await` |
@@ -175,10 +232,16 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | 项目 | 步数/迭代上限 | 并发 | 工具超时 | 取消语义 |
 | --- | --- | --- | --- | --- |
 | AIO Hub | 可配置最大迭代 | 同轮可配串/并行 | 可配置 | 审批 Promise **无超时兜底**，不处理则永久挂起 |
+| AstrBot | `max_agent_step` 默认 30，触顶移除工具强制收尾 | 同轮串行；后台任务独立运行 | `tool_call_timeout`；后台 3600s | abort 信号与执行结果竞争，用户停止可中断 |
 | Chatbox | `maxSteps` 恒为 `MAX_SAFE_INTEGER`，实际限制是应用层 25 次调用阈值 | — | `user_exec` 120s | — |
 | Cherry Studio | — | — | MCP 默认 60s，可 per-server | `AbortController` |
-| Hermes | `max_iterations` + `iteration_budget` 双上限；预算耗尽强制压缩/退出 | `DaemonThreadPoolExecutor`，`_MAX_TOOL_WORKERS=8`；`_plan_tool_batch_segments` 分"平行安全段+顺序障碍" | 批超时默认 420s（`HERMES_CONCURRENT_TOOL_TIMEOUT_S`） | `ConcurrentToolAuthorizationGate` 开始序门（120s）；超时 `_abandon_batch()` 放行排队 worker；中断逐线程 `_set_interrupt`，中断后不写结果防重复上报 |
+| DeepChat | 工具调用总数固定 128；`maxProviderRounds` 可另限 logical round | 按工具 `TOOL_EXECUTION` 合同决定串/并行，写入固定串行 | 审批有超时；工具 transport 超时未统一确认 | 会话清理取消 pending；异常由 `settleTurn` 收口 |
+| Hermes Agent | `max_iterations` + `iteration_budget` 双上限；预算耗尽强制压缩/退出 | `DaemonThreadPoolExecutor`，`_MAX_TOOL_WORKERS=8`；`_plan_tool_batch_segments` 分"平行安全段+顺序障碍" | 批超时默认 420s（`HERMES_CONCURRENT_TOOL_TIMEOUT_S`） | `ConcurrentToolAuthorizationGate` 开始序门（120s）；超时 `_abandon_batch()` 放行排队 worker；中断逐线程 `_set_interrupt`，中断后不写结果防重复上报 |
+| Jan | 由 AI SDK/onFinish 循环驱动，未在笔记中确认独立步数上限 | 由 AI SDK 决定 | MCP 可配置 `toolCallTimeoutSeconds` | Tauri MCP 支持 cancellation token 与 cancelToolCall |
 | LobeHub | 按 agent 配置；超限设 `forceFinish` 而非硬停（群组编排则直接置 `done`） | `call_tools_batch` 无上限 `Promise.all`；`execSubAgents` 硬编码 15；群组 broadcast 无上限 | 默认 120s，钳制到 [1s, 800s] | client 用 `AbortController` 父子级联；**server 只在步骤边界轮询 `interrupted`，无法中断进行中的 LLM 调用** |
+| Manifold Desktop | 字段已定义但执行循环未接通 | 不适用 | MCP 请求 30s | 当前只有 Provider 流取消，无工具任务可取消 |
+| NextChat | 无工具步数上限；递归直到模型不再调用 | OpenAPI 同轮 `Promise.all` | 请求级 60s，无单工具独立超时 | 请求 Abort；MCP 文本链无统一工具取消状态机 |
+| Open WebUI | `max_tool_call_iterations`；代码解释器检测另最多 5 次 | 普通工具逐项；`delegate_task` 特殊并发且有信号量上限 | 取决于工具/server；无统一值 | 事件/请求链可终止，外部工具的实际取消未共同确认 |
 | OpenCode | `agent.steps`（默认 Infinity），最后一轮注入 `MAX_STEPS_PROMPT` 强制收尾（prompt.ts:1178-1181） | 单会话串行（`SessionRunState.ensureRunning`）；单 step 内工具并行由 AI SDK 默认行为 | shell 默认 2 分钟，参数可覆盖；LLM 流级 AbortController | 中断后 `cleanup` 把未完成 tool part 标 `"Tool execution aborted"`；doom-loop 连续 3 次相同入参触发审批 |
 | Pi | 未发现迭代上限（终止依赖 stopReason、`shouldStopAfterTurn` 与队列排空） | 默认并行 `Promise.all`，`executionMode: "sequential"` 或配置串行时顺序执行 | bash 工具按参数可选超时，其余无 | AbortSignal 贯穿工具执行；中止立即生效 |
 | SillyTavern | 递归上限 5 | 串行 `await` | — | — |
@@ -191,29 +254,41 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | 项目 | 默认方向 | 粒度 | 总开关 | 失效时方向 |
 | --- | --- | --- | --- | --- |
 | AIO Hub | 可配置 | 工具级 + 方法级（方法级优先） | 有 | 审批无超时 → **永久挂起** |
+| AstrBot | 非内置工具默认 `member`，即普通成员可用 | 工具级 `member/admin`；内置工具自行检查 | 可通过 tool permissions/启停控制 | 权限读取异常方向未单独运行确认 |
 | Chatbox | 高风险需批准 | 命令/路径 | `agentFullAccess`，**有不可绕过类别** | — |
 | Cherry Studio | `default` 模式需批准 | 工具名、server id、wildcard | `bypassPermissions` / `acceptEdits` | MCP-source 强制 prompt **优先于** `bypassPermissions` |
-| Hermes | 危险命令需批准（CLI 交互，fail-closed） | 命令级（`check_dangerous_command` 危险 pattern）+ 工具级（插件 approve 路由 `rule_key`+reason 哈希） | `HERMES_YOLO_MODE` 冻结 / 会话 yolo | 无交互用户、非网关、无 callback、超时 → **全部拒绝（fail-closed）** |
+| DeepChat | `default` 经 broker；命令按风险分级 | 会话/server/binding/execution/参数 hash；命令 signature | `auto_approve` / `full_access` | pending 有上限与超时，会话清理时取消 |
+| Hermes Agent | 危险命令需批准（CLI 交互，fail-closed） | 命令级（`check_dangerous_command` 危险 pattern）+ 工具级（插件 approve 路由 `rule_key`+reason 哈希） | `HERMES_YOLO_MODE` 冻结 / 会话 yolo | 无交互用户、非网关、无 callback、超时 → **全部拒绝（fail-closed）** |
+| Jan | 未批准 MCP 工具等待 UI；RAG 可在线程内自动批准 | thread、server、global tool、allow-all | `allowAllMCPPermissions` | UI/水合异常方向未运行确认 |
 | LobeHub | **未声明即 `never`（自动执行）** | API 级覆盖 manifest 级 | auto-run 模式，`always` 不可绕过 | connector 权限 DB 异常 → **fail-open**（已核实 scoped 到同用户/workspace，风险有缓解） |
+| Manifold Desktop | 不适用：没有执行回环 | 无 | 无 | tool call 只展示后结束 |
+| NextChat | 自动执行 | 无统一粒度 | 无 | 解析/未知工具异常可能直接中断当前链 |
+| Open WebUI | 以资源访问授权和能力开关为主，无统一逐次确认 | 用户/模型/工具/连接级 AccessGrants | 管理配置与模型绑定 | 未授权连接不注入；各 direct 工具失败方向不同 |
 | OpenCode | 权限规则三档 allow/ask/deny；内置 agent 默认 `*:allow` + 关键项 ask（agent.ts:119-136） | 工具名 + pattern（`{pattern: action}`），后写优先 | agent 级 permission + 会话级 permission 合并 | `ask` 无超时 → **永久挂起**（与 AIO Hub 同向）；`continue_loop_on_deny` 决定拒绝后是否继续 |
 | Pi | 默认自动执行（无审批层） | 无策略粒度；`beforeToolCall` 钩子可整体 block | 无 | 钩子缺失或异常时直接放行 |
 | SillyTavern | 无逐次审批 | — | — | — |
 | VCPChat | 命中规则自动允许 | 字符串 contains/exact/regex，无风险分级 | — | 规则可配成 `.*` → 全部自动通过 |
 | VCPToolBox | 命中规则才审批 | 工具名 + 参数匹配 | — | 超时/无连接 → **拒绝（fail-closed）** |
 
-同一个策略层在不同项目里的**失效方向相反**：VCPToolBox 审批超时拒绝执行（安全），Hermes 无交互用户、超时、无 callback 也全部拒绝（同为 fail-closed，yolo 是显式降级而非失效），AIO Hub 审批无超时导致挂起（可用性受损但不越权），LobeHub 权限查询失败时放行（越权）。评估任一项目时，“有审批”不是结论，“审批失效时往哪边倒”才是。
+同一个策略层在不同项目里的失效方向相反：VCPToolBox 与 Hermes Agent 超时/无交互时拒绝，DeepChat 的 pending 有上限与超时并在会话清理时取消，AIO Hub 与 OpenCode 无超时会永久挂起，LobeHub 的 connector 权限查询失败则放行。评估“有审批”时必须同时记录其绑定粒度和失效方向。
 
-Chatbox 的 `AppActionApprovalPausedError` 值得单独点出：它是九个项目里唯一一处"权限总开关有代码层硬边界"的实现——计费与应用状态变更类操作与 `agentFullAccess` 完全脱钩，用户即使开了完全放行也绕不过。其余项目的总开关一旦打开即全面放行。
+Chatbox 的 `AppActionApprovalPausedError` 值得单独点出：计费与应用状态变更类操作与 `agentFullAccess` 脱钩，用户即使开启完全放行也绕不过。DeepChat 走另一条路线：不设置不可绕过类别，而是让每条批准记录绑定完整执行身份和参数 hash；二者解决的是不同问题。
 
 ### 执行位置与隔离
 
 | 项目 | 执行域 | 隔离手段 | 平台差异 |
 | --- | --- | --- | --- |
 | AIO Hub | Tauri 渲染进程、Rust 命令、远端 VCP 节点 | 路径沙箱**仅前端字符串判断**，Rust 侧与 Tauri capability 无限制（`fs:allow-*` 均为 `{"path":"**"}`） | 未见分支 |
+| AstrBot | Python 主进程、MCP server、后台/子 Agent | 权限 wrapper、工具自身检查、超时与结果预算；无统一 OS 沙箱 | computer tools 按运行环境分档 |
 | Chatbox | 主进程、MCP 子进程、SRT 沙箱、宿主 shell | macOS/Linux 用 `@anthropic-ai/sandbox-runtime` | **Windows 无 OS 级沙箱**，代码注释自述 "no OS isolation" |
 | Cherry Studio | Electron 主进程、MCP 子进程、SDK 原生二进制 | `disallowedTools` + `canUseTool` + `PreToolUse` hook 三层；**不持有执行本身** | — |
-| Hermes | Python 主进程（全部工具）；execute_code 的代码在沙箱子进程（本机=临时目录+子进程，容器/远程=环境容器） | Docker/Modal/Daytona/Singularity/Vercel Sandbox 容器资源上限；本机 `local` backend 无沙箱强制；terminal 子调用剥离 `background/pty/notify_on_complete/watch_patterns` | 容器且 `has_host_access=False` 时跳过危险命令审批，本地无此豁免 |
+| DeepChat | Electron 主进程 ToolService、MCP server/子进程 | broker + 命令风险 + workspace containment；具体 MCP transport 隔离未运行确认 | ACP-backed subagent 不使用 DeepChat 工具目录 |
+| Hermes Agent | Python 主进程（全部工具）；execute_code 的代码在沙箱子进程（本机=临时目录+子进程，容器/远程=环境容器） | Docker/Modal/Daytona/Singularity/Vercel Sandbox 容器资源上限；本机 `local` backend 无沙箱强制；terminal 子调用剥离 `background/pty/notify_on_complete/watch_patterns` | 容器且 `has_host_access=False` 时跳过危险命令审批，本地无此豁免 |
+| Jan | Web/Tauri 前端、Rust MCP 进程桥、Web 搜索插件 | 四级审批、禁用列表、OS keyring；MCP 进程隔离未确认 | Tauri 桌面路径与浏览器 fallback 不同 |
 | LobeHub | server runtime、cloud gateway、用户设备、本地 MCP | 云沙箱隔离；`local-system` 走 pathScopeAudit + 通用黑名单 | 桌面端 `executors: ['client']` 就地执行 |
+| Manifold Desktop | 当前无工具执行；stdio/SSE transport 已实现 | stdio 将以宿主用户启动，无沙箱/审批，但主链尚未调用 | Windows `CreateProcessW`；参数以空格拼接 |
+| NextChat | 浏览器 HTTP、桌面 MCP stdio 子进程 | 无框架级沙箱或审批；MCP 继承完整环境变量 | MCP 只在支持桌面进程能力的路径可用 |
+| Open WebUI | Python 服务端、浏览器 direct/pyodide、Jupyter、远端 MCP/OpenAPI | AccessGrants、能力开关、Jupyter blocked modules；MCP 默认不校 TLS | 部署者决定服务端/Jupyter/浏览器的实际隔离 |
 | OpenCode | node 主进程（全部工具）；shell 为普通子进程；MCP stdio 子进程；code-mode 沙箱解释器（实验 flag） | **shell 无沙箱**，权限审批 + `external_directory` 工作区外检查 + 2 分钟超时兜底；MCP 退出时递归杀进程树 | Windows 走 PowerShell `-NoProfile -NonInteractive`；无平台级隔离差异 |
 | Pi | 本地进程内执行；bash 为 `spawn` 子进程（进程树终止、可选超时） | 无框架级沙箱；默认以启动用户权限运行，隔离靠外部容器化 | `detached`/进程树终止在非 Windows 与 Windows 有平台分支 |
 | SillyTavern | 浏览器前端、服务端 plugin | 无工具级隔离 | — |
@@ -229,16 +304,22 @@ AIO Hub 的路径沙箱需要特别标注：`security.ts` 的字符串 `startsWi
 | 项目 | 截断 | 标记 | 输出侧过滤 |
 | --- | --- | --- | --- |
 | AIO Hub | 有迭代与超时限制 | — | 无 |
+| AstrBot | 27.5k token 后落盘，保留约 7k token 预览 | overflow notice + 文件路径；图片另落盘 | 无 |
 | Chatbox | stdout/stderr 各 1 MB | — | 无 |
 | Cherry Studio | 有 | — | 无 |
-| Hermes | per-tool 上限（默认 100K）+ per-turn 聚合预算（200K）+ preview 1.5K，三层持久化落盘回填 | `<persisted-output>` 标记 + 文件引用 | 无 |
+| DeepChat | 单项目笔记未确认统一截断值 | result envelope 含 toolCallId/content/source | 未确认 |
+| Hermes Agent | per-tool 上限（默认 100K）+ per-turn 聚合预算（200K）+ preview 1.5K，三层持久化落盘回填 | `<persisted-output>` 标记 + 文件引用 | 无 |
+| Jan | 工具卡 UI 600 字符折叠不等于模型侧截断；模型侧统一上限未确认 | `tool-<name>` part、elapsed/progress/citation | 未确认 |
 | LobeHub | 默认 25000 字符，可按 agent 覆盖 | 追加明确的截断字符数提示，全文归档到 VFS 并告知取回路径 | 无 |
+| Manifold Desktop | 不适用：无结果回注 | 只显示 tool call | 不适用 |
+| NextChat | 未确认统一结果截断 | OpenAPI 用 `role: tool`；MCP 用 `isMcpResponse` 用户消息 | 无 |
+| Open WebUI | 依工具实现；未确认统一字符上限 | function_call_output、引用 source、图片 input_image、HTML embed | 无统一过滤层 |
 | OpenCode | 默认 2000 行 / 50KB（config `tool_output` 可覆盖），超限落盘 `tool-output/` 7 天保留 | `metadata.truncated` + `outputPath`，提示用 Task/Grep/Read 接力 | 无 |
 | Pi | bash/read 等按字节/行数截断并落全量文件（`truncate.ts`、`fullOutputPath`） | 截断提示随结果文本回注 | 无 |
 | SillyTavern | — | — | 无 |
 | VCPToolBox | 有 | — | 无 |
 
-**十个项目全都没有工具结果的输出侧内容过滤或隔离标记。** 截断只解决"过长"，不解决"内容是否可信"。任一项目里"模型读到外部内容 → 该内容伪装成指令 → 诱导调用高危工具"这条链都成立，差别只在末端工具是否需要审批。Hermes 的三层持久化（落盘 preview + 文件引用）只控制上下文膨胀，与其余项目同面无输出侧过滤。LobeHub 的实现是唯一在结果回注上做了反幻觉设计的：截断提示会写明省略了多少字符、原文多长，归档提示明确告诉模型去哪取回、并显式警告不要改用 `cloud-sandbox` 或 `local-system` 文件工具去找，归档失败也诚实告知未持久化。OpenCode 的截断提示同样分档（有 `task` 权限时建议委派 explore agent，否则建议 Grep/Read），但同样没有输出侧过滤层。
+十五个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、LobeHub、OpenCode 和 Pi 都有落盘/预览方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
 
 ## 基础审计框架
 
@@ -373,10 +454,16 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 | 项目 | 扩展入口 | 信任边界落在哪 |
 | --- | --- | --- |
 | AIO Hub | 能力轴：ToolRegistry/Factory、AgentExtension、JS/Sidecar/Native 插件、skills、VCP proxy；协议轴：ToolCallingProtocol | 能力统一汇入 registry，以 `agentCallable` 与审批配置收口；协议层当前硬编码注册 VCP，新增协议仍需改源码 |
+| AstrBot | 内置装饰器、插件 handler、MCP、Handoff、computer tools | 四路统一成 FunctionTool；非内置权限默认 member，内置自行检查 |
 | Chatbox | MCP（stdio/HTTP/SSE）、Skills | 用户配置的 MCP server 是宿主子进程；skill 安装只校验路径与格式，不审查正文 |
 | Cherry Studio | 用户配置 MCP、in-memory MCP、Skills 市场 | 注册表的 `exposure` 与禁用/自动批准策略，而非"外部 MCP 连上即获权限" |
-| Hermes | `plugins/` 目录、MCP server 配置、`skills/`+`optional-skills/`（`hermes skills install`）、`toolsets.py` 平台装配 | 插件可注册/覆盖工具（`override=True` 需信任门）、钩子；MCP 动态 nuke-and-repave 且带 include/exclude 过滤；技能是指令文本非权限沙箱；子代理默认 auto-deny |
+| DeepChat | AgentToolManager、MCP、Skills、subagent capability、ACP backend | session profile/binding hash 收口；ACP 会话由外部 backend 自负工具边界 |
+| Hermes Agent | `plugins/` 目录、MCP server 配置、`skills/`+`optional-skills/`（`hermes skills install`）、`toolsets.py` 平台装配 | 插件可注册/覆盖工具（`override=True` 需信任门）、钩子；MCP 动态 nuke-and-repave 且带 include/exclude 过滤；技能是指令文本非权限沙箱；子代理默认 auto-deny |
+| Jan | MCP server、RAG extension、Web 搜索 provider | MCP 经 Rust/Tauri 执行并受四级批准；路由冻结在缓存稳定性与即时变化之间取舍 |
 | LobeHub | connector/MCP（stdio/HTTP/cloud）、market/discover gateway、Composio | connector 逐工具权限；OAuth/bearer 经 AES-GCM 加密存储；stdio 无进程沙箱；Composio 在工作区场景可代表 owner 账号调用 |
+| Manifold Desktop | MCP stdio/SSE、PluginContext `RegisterTool` 骨架 | MCP 只到展示；插件 Initialize 未调用，二者都未形成可执行扩展闭环 |
+| NextChat | OpenAPI 插件、MCP stdio | 插件与 MCP 分属原生/文本两条链；配置即高信任边界，无统一审批 |
+| Open WebUI | DB Python 工具、MCP/OpenAPI server、Function/Filter、远程 Pipeline、子代理 | AccessGrants、连接授权与 Valves；Python 插件/远端 server 具有各自执行权限 |
 | OpenCode | 自定义 `{tool,tools}/*.js\|ts`、插件 `tool` hook（含 `tool.definition`/`tool.execute.before/after` 事件）、MCP（stdio/StreamableHTTP/SSE + OAuth）、Skill（SKILL.md + `skill` 工具）、code-mode 子工具 | 权限规则按工具名 + pattern 分级（allow/ask/deny），MCP 工具调用前全名审批；Skill 与 MCP 工具按同一 permission 过滤；子 agent（TaskTool）权限收窄 + 深度限制，非旁路 |
 | Pi | 扩展 `registerTool`、`registerCommand`、MarkdownTransformer、自定义消息/条目渲染器；skills 为文本资源 | 扩展代码与宿主同权（本地进程）；项目信任门约束 `.pi` 资源加载；无 MCP、无内容侧工具定义入口 |
 | SillyTavern | 浏览器扩展、服务端 plugin、**`/tools-register` 的 STscript closure** | 安装信任，且被内容路径削弱：第三方 Git 仅允许 HTTP(S)、首装有警告（可永久关闭）、目录名净化；plugin 走本地 ES module `import()`；但工具定义还能由角色卡/世界书/QR 提供，不经过任何安装动作 |
@@ -394,4 +481,4 @@ LobeHub 侧已确认不可伪造——审批卡片渲染依赖只能由服务端
 反例是 VCPChat：审批请求来自 WebSocket 消息且无消息级鉴权，能在该连接上注入消息即能伪造审批 UI；`DESKTOP_PUSH` 更是让模型的普通输出直接变成可执行内容。这两者说明"审批 UI 的可信度"取决于驱动它的数据来源是否权威，而非 UI 本身的实现。
 
 各项目渲染笔记：
-[AIO Hub](../消息渲染器/AIO-Hub-消息渲染器调查笔记.md)、[Chatbox](../消息渲染器/Chatbox-消息渲染调查笔记.md)、[Cherry Studio](../消息渲染器/Cherry-Studio-消息渲染调查笔记.md)、[LobeHub](../消息渲染器/LobeHub-消息渲染调查笔记.md)、[SillyTavern](../消息渲染器/SillyTavern-消息渲染调查笔记.md)、[VCPChat](../消息渲染器/VCPChat-消息渲染器调查笔记.md)
+[AIO Hub](../消息渲染器/AIO-Hub-消息渲染器调查笔记.md)、[AstrBot](../消息渲染器/AstrBot-消息渲染器调查笔记.md)、[Chatbox](../消息渲染器/Chatbox-消息渲染调查笔记.md)、[Cherry Studio](../消息渲染器/Cherry-Studio-消息渲染调查笔记.md)、[DeepChat](../消息渲染器/DeepChat-消息渲染器调查笔记.md)、[Hermes Agent](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)、[Jan](../消息渲染器/Jan-消息渲染器调查笔记.md)、[LobeHub](../消息渲染器/LobeHub-消息渲染调查笔记.md)、[Manifold Desktop](../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md)、[NextChat](../消息渲染器/NextChat-消息渲染器调查笔记.md)、[Open WebUI](../消息渲染器/Open-WebUI-消息渲染器调查笔记.md)、[OpenCode](../消息渲染器/OpenCode-消息渲染调查笔记.md)、[Pi](../消息渲染器/Pi-消息渲染器调查笔记.md)、[SillyTavern](../消息渲染器/SillyTavern-消息渲染调查笔记.md)、[VCPChat](../消息渲染器/VCPChat-消息渲染器调查笔记.md)
