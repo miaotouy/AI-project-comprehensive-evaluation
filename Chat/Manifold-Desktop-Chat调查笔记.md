@@ -80,7 +80,7 @@ input-bar
 - 错误行的 Retry 按钮只删除错误提示，不会重发请求（`chat-tab.js:87-98`）。
 - 应用提供 chat、compare、terminal 多标签，但常规 Chat 只有一条全局生成线程。
 
-Markdown 渲染和 HTML 边界分别见消息渲染、信息污染源调查笔记。
+Markdown 渲染和 HTML 边界见消息渲染调查笔记。
 
 ## 关键文件
 

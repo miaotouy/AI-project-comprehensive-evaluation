@@ -51,7 +51,7 @@ Provider::StreamChat
 
 assistant Markdown 没有 sanitizer。marked 会保留原始 HTML，返回值直接写入 `innerHTML`（`message-renderer.js:15-17, 102`、`chat-tab.js:42`）。事件处理属性等活动 HTML 因而可能在 WebView 页面上下文执行；通过 `innerHTML` 插入的 `<script>` 元素通常不会自行执行，不能把所有原始 HTML 等同为相同行为。
 
-页面没有 CSP，WebView2 显式启用脚本和 WebMessage（`frontend/index.html`、`MainWindow.xaml.cpp:248-255`）。Markdown 链接也没有统一点击拦截或导航白名单。完整桥接影响见信息污染源调查笔记。
+页面没有 CSP，WebView2 显式启用脚本和 WebMessage（`frontend/index.html`、`MainWindow.xaml.cpp:248-255`）。Markdown 链接也没有统一点击拦截或导航白名单。
 
 ## 关键文件
 

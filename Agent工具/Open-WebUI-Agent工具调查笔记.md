@@ -90,7 +90,7 @@ process_chat_payload (2248)
 ```
 
 - 工具结果中的 base64 图片拆成 `input_image` 供 LLM 消费、前端展示则剥离（5106-5115、5202-5211 行），图片另附一条 user 消息（5264-5276 行）；
-- `process_tool_result`（871 行）支持 `(HTMLResponse, result_context)` 元组：HTML 部分经 `tool_result_embeds` 直达前端 iframe 渲染（详见信息污染源笔记）；
+- `process_tool_result`（871 行）支持 `(HTMLResponse, result_context)` 元组：HTML 部分经 `tool_result_embeds` 直达前端 iframe 渲染；
 - 代码解释器自动检测循环（5325-5395 行）：`open_webui:code_interpreter` 输出项触发，`DETECT_CODE_INTERPRETER` 最多 5 次重试；引擎分发：pyodide → `event_caller({'type': 'execute:python'})`；jupyter → `execute_code_jupyter(url, code, token/password)`；`CODE_INTERPRETER_BLOCKED_MODULES` 注入受限 `__import__` 包装代码（5350-5368 行）；
 - Responses API 有状态模式（5230-5237 行）与普通模式（5239-5277 行）的拼接路径不同。
 
