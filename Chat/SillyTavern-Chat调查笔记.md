@@ -12,6 +12,15 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
+> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
+>
+> - 会话与消息管理：[`../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md`](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)（内存数组模型、JSONL 持久化、checkpoint/branch/swipe 数据语义）
+> - 对话请求与上下文：[`../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md`](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)（Generate 主链、slash command 拦截、正则分层、宏与 Quick Reply 介入点）
+> - Chat UI：[`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)（消息操作、swipe 工作流、生成反馈、快捷键、键盘可达性）
+> - 消息渲染：[`../消息渲染器/SillyTavern-消息渲染调查笔记.md`](../消息渲染器/SillyTavern-消息渲染调查笔记.md)（已有独立笔记）
+>
+> 本文件第 13 节的通用界面盘点（弹窗系统、Toastr、主题、响应式断点、动画、图片预览、扩展面板）暂保留于此，待可选界面专题承接。
+
 实际读代码后发现，聊天的状态机、swipe、消息渲染主体都在 `script.js` 里：`chats.js` 只是消息级工具函数（隐藏/附件/媒体）的集合，`streaming-display.js` 是一个跟主聊天渲染完全脱钩的悬浮通知组件。下面会具体说明。
 
 ## 消息构建流程

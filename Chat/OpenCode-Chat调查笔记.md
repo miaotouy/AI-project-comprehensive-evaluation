@@ -12,6 +12,15 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
+> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
+>
+> - 会话与消息管理：[`../会话与消息管理/OpenCode-会话与消息管理调查笔记.md`](../会话与消息管理/OpenCode-会话与消息管理调查笔记.md)（数据模型、生命周期与持久化、消息操作与分支语义、列表检索、V1/V2 双轨）
+> - 对话请求与上下文：[`../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md`](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md)（发送主链、上下文拼装与压缩、流式与中断、并发后台、能力注入）
+> - Chat UI：[`../Chat UI/OpenCode-ChatUI调查笔记.md`](<../Chat UI/OpenCode-ChatUI调查笔记.md>)（TUI/Web 双表面工作台、Composer、生成反馈与停止、审批与消息操作工作流、多窗口连续性）
+> - 消息渲染：[`../消息渲染器/OpenCode-消息渲染调查笔记.md`](../消息渲染器/OpenCode-消息渲染调查笔记.md)（已有独立笔记）
+>
+> 本文件第 10 节扩展调查中的多窗口同步与桌面端窗口差异已迁入 Chat UI/会话与消息管理笔记；Slack bot（转发型客户端）与主题相关内容迁移期内保留于此。
+
 ## 结论摘要
 
 OpenCode 的 Chat 体系以「SQLite 持久化 + 事件发布 + 客户端投影」为核心。服务端把每次增量落库并发布 `message.updated` / `message.part.updated` / `message.part.delta` 事件（`src/session/session.ts:631-645`），经 SSE 推送，Web App 用 16ms 批量 flush 与 delta 拼接后投影到 Solid store（`app/src/context/server-sdk.tsx`、`server-session.ts`）。消息模型为 Session → Message（role: user/assistant）→ Part（12 种类型）三层，part 独立存表、读取时组装（`core/src/session/sql.ts`、`src/session/message-v2.ts`）。模型请求主链路为 `SessionPrompt.prompt → loop → processor → LLM.stream`（AI SDK `streamText`），每轮从数据库重读历史。

@@ -12,6 +12,15 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
+> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
+>
+> - 会话与消息管理：[`../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md`](../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md)（数据模型、事实源与存储、生命周期、分支语义、索引与检索、外部对象绑定、恢复与保留语义）
+> - 对话请求与上下文：[`../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md`](../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md)（提交入口、上下文管道、压缩、流式节流、重试续写、队列、注入点）
+> - Chat UI：[`../Chat UI/AIO-Hub-ChatUI调查笔记.md`](<../Chat UI/AIO-Hub-ChatUI调查笔记.md>)（工作台、Composer、生成反馈、消息操作、树图视图、键盘关键路径、桌面集成交点）
+> - 消息渲染：[`../消息渲染器/AIO-Hub-消息渲染器调查笔记.md`](../消息渲染器/AIO-Hub-消息渲染器调查笔记.md)（已有独立笔记，内容渲染类内容一律链接过去）
+>
+> 本文件第 12 节中的通用界面盘点（弹窗库、Toast 通知、主题、动画、响应式断点、灯箱、头像、设置面板等）暂保留于此，待可选界面专题承接。
+
 说明：调查目录为独立 Git 仓库，调查时工作树干净。源码阅读覆盖 `src/tools/llm-chat/` 下的核心 store（`llmChatStore.ts` 及 `stores/session/*`）、composable（`composables/chat/*`、`composables/session/*`）、关键组件（`LlmChat.vue`、`ChatArea.vue`、`MessageList.vue`、`SessionsSidebar.vue`），以及 Rust 端搜索命令 `src-tauri/src/commands/llmchat_search.rs`。
 
 ---

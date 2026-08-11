@@ -12,6 +12,13 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
+> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
+>
+> - 会话与消息管理：[`../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md`](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)（数据模型、生命周期与持久化、列表检索、一致性）
+> - 对话请求与上下文：[`../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md`](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)（提交入口、上下文拼装与压缩、流式事件链、中断与回写）
+> - Chat UI：[`../Chat UI/Hermes-Agent-ChatUI调查笔记.md`](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)（工作台、Composer、生成反馈、消息操作、UI 状态所有权）
+> - 消息渲染：[`../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md`](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)（已有独立笔记，内容渲染类段落不再重复）
+
 ## 结论摘要
 
 Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agent 核心的个人 AI 助手。桌面端不运行 agent，而是自 spawn 一个无头 `hermes serve` 后端进程，renderer 通过 WebSocket 发起 `prompt.submit` 等 JSON-RPC 调用，后端在独立线程运行 `AIAgent.run_conversation`，把增量文本以 `message.delta`、终态以 `message.complete` 事件推回 UI。
