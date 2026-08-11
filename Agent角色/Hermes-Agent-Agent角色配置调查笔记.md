@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\hermes-agent`（Hermes Agent）
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`01a1037d1e6d7b6eb96a786ef282c3aea4818194`（分支：`main`）
 >
@@ -149,6 +149,14 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 - **TUI/桌面**：`config.set`/`config.get` 读写 `personality`（`tui_gateway/methods_config.py:194`、`server.py:11135-11169`）；`session.info` 返回 personality（`server.py:5002-5072`）；`/personality` picker（commands.py 的 picker 命令）；`_probe_config_health` 警告“`display.personality` 已设置但 `agent.personalities` 为空/null，人格 overlay 将被跳过”（server.py:4931-4944）。
 - **Web/桌面**：`web/src/lib/api.ts:723-727` 提供 `/profiles/<name>/soul`；desktop 用 `personalityNamesFromConfig` 计算可用人格（`apps/desktop/src/lib/chat-runtime.ts:241`）；`apps/desktop/src/types/hermes.ts:331,622` 有 `personality?` 字段。
 - **历史快照语义**：会话把**构建好的 system prompt** 存进 `system_prompts` 去重表（`hermes_state.py:1976-1992`），session 行保存当时 `model/model_config`。**人格当前值（ephemeral）不进轨迹**（`batch_runner.py` 语义说明）。所以“历史回放时的角色”只能反映当时的 system cached 部分，不含会话后新设置的人格字符串。
+
+### 8.1 重试、缓存键与 stale 判定
+
+- **session 记录 schema**：`hermes_state_common.py:207-263` 的 `CREATE TABLE sessions` 角色相关列——`system_prompt`（全文）+ `system_prompt_hash`（FK → `system_prompts(hash,prompt)`，:202-205）、`model`、`model_config`（TEXT 快照）、`parent_session_id`、`cwd/git_branch/git_repo_root/profile_name` 及 token/成本/标题等计费列。即完整 system prompt 文本入库存档，人格"当前值"（ephemeral）不入库。
+- **缓存键**：内存键是 `agent._cached_system_prompt` 字符串本身；DB 去重键 = 全文 sha256（`hermes_state.py:90-91` `_system_prompt_hash`，:1976-1984 `_store_system_prompt` INSERT OR IGNORE），孤儿行由 `_delete_unreferenced_system_prompts` 回收。
+- **CLI retry_last**（cli.py:8398-8428）：截断内存 history 后重发同一 user 消息，**agent 实例不变** → 直接复用 `_cached_system_prompt`（agent_init.py:1553），不重建。Gateway `_handle_retry_command`（gateway/slash_commands.py:2562-2601）重写 transcript 后走正常消息处理；每轮新建 AIAgent 时 `_restore_or_build_system_prompt`（conversation_loop.py:475-541）从 DB 读出当时存储的 prompt，`_stored_prompt_matches_runtime`（:613-667）通过则原样复用（含 `reconstruct_static_prefix` 恢复缓存断点布局），不重新构建。
+- **修改人格文本不判 stale**：`_stored_prompt_matches_runtime` 只比对 prompt 尾部 `Model:`/`Provider:` 行（:613-667）——改人格文本不会使存储 prompt 判为 stale；CLI `/personality` 走 `self.agent = None` 强制重建（cli_commands_mixin.py:1338），TUI 只改 `ephemeral_system_prompt`（tui_gateway/server.py:5857-5891）不碰缓存；重建后由 conversation_loop.py:603 的 `update_system_prompt` 刷新库中全文与 hash。
+- **提示词组与编辑器密度**：四层之外无"组"级抽象——`agent.personalities` 是扁平 dict，消费点均按名整体单选（cli.py:4490、cli_commands_mixin.py:1329-1357、gateway/slash_commands.py:2492-2560、tui_gateway/server.py:5811-5843），无多选组合、单选组互斥、组级总开关或逐条开关；`agent/system_prompt.py:152-587` 只按固定顺序拼 stable/context/volatile 三块。人格无专用编辑器（CLI/TUI 是列表选择器，桌面端只是设置页下拉 `display.personality`），无拖拽/批量；导入导出仅 profile 级（见第 7 节）。
 
 ## 9. 设计取舍与已确认边界
 

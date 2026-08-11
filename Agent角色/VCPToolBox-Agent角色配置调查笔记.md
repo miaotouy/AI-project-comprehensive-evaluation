@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`eca06251f5687a52fbcd353cb8b04f42157882d0`（分支：`main`）
 >
@@ -142,6 +142,12 @@ Agent/
 ### 3.4 热重载
 
 通过 Admin Panel 向 `/admin_api/agent-assistant` 发送 POST 请求保存配置，插件立即调用 `reloadConfig()` 更新内存中的 `AGENTS` 映射，无需重启服务器。
+
+### 3.5 发送时配置引用与历史快照语义
+
+- **发送不重读 config.json**：`processToolCall` 直接取内存 `AGENTS[agent_name]` 映射（`Plugin/AgentAssistant/AgentAssistant.js:681`，未命中报错 :682-689）；`loadAgentsFromLocalConfig` 只在 initialize（:58）与 `reloadConfig`（:1210）时读取。Admin Panel 保存后调 `reloadConfig()`（`routes/admin/agentAssistant.js:29-63`），因此"下次消息用最新配置"，但属于内存缓存语义而非每次请求重读；热重载用 `delete` 清空 `AGENTS`（:187），已启动的委托持旧对象引用继续运行，相当于按引用的"快照"。
+- **会话历史无配置快照**：`updateAgentSessionHistory`（:222-236）只 push `{role, content}` 裸消息对（调用点 :872），无模型/参数元数据；每次请求用当前内存 `agentConfig` 现拼 `payloadForVCP = { model: agentConfig.id, messages, max_tokens: agentConfig.maxOutputTokens, temperature: agentConfig.temperature, stream: false }`（:845-851）。
+- **无 regenerate API、无开场白**：AgentAssistant 无重新生成端点（全仓 grep 仅 SkillBridge 模板文件有无关命中）；OneRing 的 `updateMessageById`（`Plugin/OneRing/OneRingDB.js:108-110`）做 retry/编辑场景的内容原地替换（改旧行），不是新建兄弟分支。AgentAssistant 配置 schema 与 `Agent/*.txt` 均无开场白/初始消息字段（服务端无会话创建钩子，聊天历史由外部前端持有），也无提示词块分组/组级开关——最接近的是 VCPTavern 的 `preset.rules` 单条规则级 `enabled` 开关（`Plugin/VCPTavern/VCPTavern.js:423-425`），但无组级抽象，预设整体经 `{{VCPTavern::预设名::SessionID}}` 占位符整包切换（:252-273）。
 
 ## 4. TaskAssistant 任务派发系统
 

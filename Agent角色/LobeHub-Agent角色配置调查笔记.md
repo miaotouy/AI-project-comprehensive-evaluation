@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`4edba1b75a97b91c28ad48cd1cc90528defa17ad`（分支：`canary`）
 >
@@ -54,6 +54,10 @@ MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包
 | `fewShots` | 少样本示例对话（`FewShots` 类型，来自 `@/types/llm`） |
 | `openingMessage` | 用户进入对话时 Agent 显示的开场白文本 |
 | `openingQuestions` | 开场推荐问题列表，UI 作为快捷提问显示 |
+
+**fewShots 的消费缺口（本快照确认）**：在本快照 `4edba1b7` 上，`fewShots` 的全部引用只有类型定义（`packages/types/src/agent/item.ts:40、116、150`）、DB schema 列（`packages/database/src/schemas/agent.ts:63`）、市场导入映射（`packages/database/src/models/session.ts:221、260` 的 examples→fewShots）与数据库复制/群组代码；`src/` 与 `packages/agent-runtime/` 均**零命中**——没有 UI 编辑入口，运行时发送链路也只传 `systemRole`（`src/services/chat/index.ts:314`），未找到 fewShots 注入请求上下文的代码路径。因此横向比较时应把 fewShots 视为"字段存在、消费未确认"。
+
+`openingMessage`/`openingQuestions` 只存于 agents 表（`packages/database/src/schemas/agent.ts:73`），topics/messages 表无开场白列；展示是运行时实时渲染（空话题才显示，`src/features/Conversation/ChatList/index.tsx:199` 附近），从不写入消息历史，也不存在 AIO Hub 式"开场白固化"状态机。
 
 ### 3.3 输入模板
 
@@ -197,7 +201,15 @@ LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过
 - **SillyTavern 迁移**：没有官方路径；`systemRole` 对应角色卡的 system_prompt，`fewShots` 对应示例对话，知识库可替代世界书；
 - **AIO Hub 预设导入**：类型差异较大，主要在消息树/注入策略，需手工适配。
 
-## 8. 主要源码依据
+## 8. 会话绑定、请求时解析与重新生成
+
+- **发送时实时读 Agent 配置**：`src/store/chat/slices/agentRun/actions/entries/conversationLifecycle.ts` 在 :289、:1194、:1800、:1699 用 `agentSelectors.getAgentConfigById(agentId)` 取配置，:1734 经 `agentService.getAgentConfigById(agentId)` 从 DB 加载；`src/services/chat/index.ts:314` 发送时取 `agentConfig.systemRole` 构造请求。会话/话题不保存 Agent 配置副本。
+- **消息与话题的模型快照**：messages 表有 `model`/`provider` 列（`packages/database/src/schemas/message.ts:116-117`），topics 表同样（`schemas/topic.ts:73-74`），assistant 消息创建时写入（conversationLifecycle.ts:1382-1383）。无完整请求参数/上下文配方快照。
+- **regenerate 是删除-重生成**：`src/features/Conversation/store/slices/generation/action.ts:734` 的 `delAndRegenerateMessage` 先 `deleteMessage`（:757）再 `regenerateUserMessage`（:764），注释明确 "Delete first, then regenerate…switches to a new branch"——即覆盖语义，旧回复被删除，与 AIO Hub 的兄弟分支保留不同。
+- **开场白不落库**：见 §3.2；修改 Agent 的 openingMessage 后，尚无消息的既有 topic 实时显示新文本，首次发送后因消息非空而消失，无固化。
+- **提示词块分组不存在**：`LobeAgentConfig` 的 systemRole 是单字符串、fewShots 是平铺 `LLMMessage[]`，均无 groupId/enabled/单选多选（`packages/types/src/agent/item.ts`）；`ChatGroup`（`packages/types/src/agentGroup/index.ts`）是 Agent 级分组（组级 systemPrompt/openingMessage + 成员 Agent 的 enabled 开关），不是提示词块分组；`chatConfig.topicGroupMode`/`sessionGroupId` 是话题/会话列表分组，同样无关。
+
+## 9. 主要源码依据
 
 - `lobehub/packages/types/src/agent/item.ts`：`LobeAgentConfig` 主类型。
 - `lobehub/packages/types/src/agent/chatConfig.ts`：`LobeAgentChatConfig`（超过 40 个可选字段）。
@@ -208,6 +220,6 @@ LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过
 - `lobehub/src/services/agent.ts`：Agent CRUD 和市场导入 API 调用层（使用 `LobeAgentConfig`）。
 - `lobehub/src/components/ChatGroupWizard/templates.ts`：群组模板（包含成员 Agent 结构示例）。
 
-## 9. 调查边界
+## 10. 调查边界
 
 本篇关注"Agent 配置模型"，未详细展开 `humanIntervention` 工具审批策略、`headless` 子 Agent 绑路径、MCP 工具执行位置和 builtin 工具零审批问题；这些在 [LobeHub-Agent工具调查笔记.md](../Agent工具/LobeHub-Agent工具调查笔记.md) 中有详细记录。`params` 字段具体子字段以 `model-bank` 包文档为准。

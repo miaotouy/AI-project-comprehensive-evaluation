@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
 >
-> 调查方式：只读核对 Agent 类型定义、编辑器配置目录、默认模板、内置预设、预设说明和 Agent/工具/Skill 架构文档；未修改被调查仓库源码
+> 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、导入导出、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
 >
 > 调查范围：Agent/角色能配置什么、实际拥有什么能力、内置角色偏好的方向，以及预设如何导入和运行
 >
@@ -24,6 +24,10 @@ AIO Hub 的 Agent 不是单独的一段 system prompt，而是一个可保存、
 因此，AIO Hub 的“角色”可以同时是普通助手、固定人格、专家工作流、世界模拟器或带工具的 Agent。角色气质主要由预设消息和示例对话决定；工具、知识库和虚拟时间等字段则决定它在运行时能做什么。
 
 从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 `ChatAgent`，模型选择、采样参数、上下文限制/压缩和预设消息会随 Agent 配置持久化，而不是只在当前聊天窗口临时生效。
+
+在本次十六个项目的统一调查范围内，AIO Hub 是**一体化 Agent 预设配置能力最强、编辑入口最完整**的项目。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层；AIO 则把消息配方、模型与参数、知识、工具、变量、资产和显示规则集中在同一个 Agent 对象及其编辑器中。
+
+它的会话继承也不是单一的“快照”或“全局覆盖”：开场白在会话真正开始后固化，旧消息和旧回复保持不变；后续发送、续写与重新生成则读取 Agent 当前配置，并以新分支保存结果。这一混合语义明显偏向调试效率，允许用户在同一段历史上修改配置后立即重试比较。
 
 需要区分两种对象：
 
@@ -112,7 +116,38 @@ LLM Chat 的右侧栏（`LeftSidebar.vue`，组件类名为 `right-sidebar`）�
 
 `greetings` 独立于 `presetMessages`，每条开场白包含 `id`、可选 `name`、`content`、`role`（`user` 或 `assistant`）和附件。`defaultGreetingId` 选择默认开场白，`displayPresetCount` 控制聊天界面展示多少条预设消息。
 
-`presetGroups` 可以把若干消息做成复选组（`checkbox`）或单选组（`radio`），并通过组级 `enabled` 开关决定是否参与上下文。适合把“说话风格”“当前场景”“可选身份”等提示块做成可切换模块。
+开场白采用“开始前同步、开始后固化”的两阶段语义：
+
+1. 创建会话时，`insertLiveGreetings()` 把所有可用开场白实例化为根节点下的兄弟分支，展开宏、深拷贝附件，并写入 `isGreeting: true`、`greetingId`、`greetingLive: true` 和 Agent/模型元数据；默认开场白只决定当前选中的分支。
+2. 用户尚未发送第一条消息时，切回会话会调用 `refreshLiveGreetingsIfNeeded()`；若 Agent 的开场白、附件、名称、头像或模型引用变化，live greeting 会被重建。此时切换 Agent 也可以整体替换这些候选开场白。
+3. 用户第一次从会话继续发送消息时，`solidifyGreetings()` 在创建消息对之前把所有根级开场白的 `greetingLive` 置为 `false`。从此这些节点成为会话历史的一部分，不再跟随 Agent 后续修改；未固化的 live greeting 则不计入会话有效消息数。
+
+因此，“开场白会在会话中固化”与“Agent 配置会影响既有会话”并不冲突：固化的是已经作为对话起点出现的具体消息内容，后续请求使用的预设、模型参数、工具与知识配置仍可读取 Agent 当前值。
+
+`presetGroups` 可以把若干消息做成复选组（`checkbox`）或单选组（`radio`），并通过组级 `enabled` 开关决定是否参与上下文。适合把“说话风格”“当前场景”“可选身份”“输出协议”等提示块做成可切换模块。
+
+组不是仅用于视觉整理的文件夹，而是会改变有效提示词集合：
+
+- **多选组**：组内每条消息保留独立开关，可启用任意组合；
+- **单选组**：切换一条消息时，同组其他消息会被关闭，组内同时最多一条生效；
+- **组级开关**：关闭组时，编辑器将当前启用成员统一设为禁用，并在消息 `metadata.lastEnabledState` 中记录原状态；重新打开组时只恢复之前启用的成员；
+- **紧凑入口**：聊天侧边栏使用 `AgentPresetEditor` 的 compact 模式，直接显示每组的单选/多选类型、已启用数/总数和组开关，不必进入完整 Agent 管理页；
+- **成员管理**：消息可在卡片上加入、移动或脱离组；删除组时可以选择“仅解散组”或“连同组内消息彻底删除”。
+
+实现上，`injection-assembler` 最终仍只按每条消息的 `isEnabled` 过滤，并不直接读取 `presetGroups.enabled`。正常 UI 路径会由 `applyPresetGroupEnabledState()` 把组状态投影到消息状态，因此组开关会真实影响送模上下文；但手工编辑或外部导入若构造出“组已禁用、成员仍启用”的不一致配置，运行时以成员 `isEnabled` 为准，本次未找到请求前的再次归一化。
+
+### 3.4 预设编辑器的配置与交互密度
+
+AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把高阶字段组织成了可操作流程：
+
+- 消息列表支持拖拽排序、分页、逐条启停、复制、复制到下方、粘贴覆盖和批量管理；
+- 单条消息可设置显示名称、`system/user/assistant` 角色、所属消息组、模型/渠道匹配和四种注入策略；
+- 内容编辑使用 Monaco，并提供编辑、宏处理后纯文本预览和 Markdown/富文本渲染预览三种模式；
+- 工具栏可插入宏、会话变量和知识库占位符，也能为消息选择 Agent 私有资产附件；
+- 预设消息本身可独立复制或导入导出为 JSON/YAML；v2 格式同时保存 `groups` 与 `messages`，不必导出整个 Agent；
+- 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，而不是把来源字段直接摊到主编辑器中。
+
+这解释了 AIO 与 SillyTavern 的体验差异：酒馆的 Prompt Manager 也支持拖拽、逐条开关、角色、相对/深度注入、注入顺序和 generation trigger，表达力并不弱；但它还同时暴露 `marker`、`system_prompt`、`forbid_overrides`、extension source 等内部语义，并与角色卡和采样 Preset 分离。AIO 的字段同样很多，但大部分被包装成消息、组、匹配规则和注入策略四类直接可见对象，用户更容易理解“当前到底启用了哪套上下文”。
 
 ## 4. 模型与输出偏好
 
@@ -296,7 +331,7 @@ AIO Hub 的架构文档把三层分得很清楚：
 
 典型偏好不是由一个 `personality` 字段表达，而是分散在 system prompt、few-shot、温度、开场白、世界书/知识库和输出指南中。
 
-## 9. 导入、导出与兼容性
+## 9. 持久化、导入导出与会话绑定
 
 ### 9.1 本地持久化链路
 
@@ -324,6 +359,18 @@ Agent 导出结构 `AIO_Agent_Export` 会剥离本地实例字段（`id`、`prof
 - ZIP、文件夹、单文件或带数据的 PNG 包。
 
 配置向导还说明了 SillyTavern 角色卡的兼容路径：可导入 JSON/PNG 角色卡、嵌入式 Character Book、Context Preset 和 Regex Scripts，并映射为 AIO Hub 的预设消息、世界书和正则配置。导入后的模型选择仍需在 AIO Hub 实例侧解决，不应假定来源角色卡携带的模型 ID 在本地存在。
+
+### 9.3 既有会话实时读取 Agent 当前配置
+
+AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元数据，但不保存一份完整的 Agent 配置副本。发送新消息、重新生成和续写时，执行链都会再次调用 `agentStore.getAgentConfig(effectiveAgentId, { parameterOverrides })`，再与当前 `ChatAgent` 合并成当次 `executionAgent`。因此修改 Agent 的预设消息、消息组、模型参数、工具、知识、世界书等配置后，既有会话的下一次请求会使用新配置。
+
+重新生成也不是覆盖旧回复：`createRegenerateBranch()` 复用同一用户节点和到该节点为止的历史路径，创建新的助手兄弟分支；`useSingleNodeExecutor` 同时把当次实际请求参数写入新节点的 `metadata.requestParameters`。这使用户可以在完全相同的会话历史上修改 Agent 后立即重试，对比新旧回复，而不必新建会话或搬运聊天记录。
+
+据作者说明，这种实时引用是有意的产品设计，主要服务于 Agent 调试与迭代，不应简单归类为“配置修改静默污染旧会话”。更准确的边界是：
+
+- **历史消息固化**：已经产生的用户/助手消息、已开始对话的开场白以及生成节点的 Agent/模型/请求参数元数据保留；
+- **未来执行实时**：下一次发送、续写或重新生成读取当前 Agent 配置，并可在相同历史节点上形成新分支；
+- **完整配置版本未固化**：消息虽保存部分执行快照，但本次未找到完整 Agent revision 或完整上下文配方快照，因此仅凭会话文件未必能复原过去某次生成时的全部 Agent 配置。
 
 ## 10. 实际使用时的判断
 
@@ -353,6 +400,19 @@ Agent 导出结构 `AIO_Agent_Export` 会剥离本地实例字段（`id`、`prof
 - `aio-hub/src/tools/agent-manager/components/parameters/ModelParametersEditor.vue`：基础/高级参数、上下文管理、压缩、后处理、图片压缩和模型能力过滤。
 - `aio-hub/src/tools/llm-chat/types/llm.ts`：`LlmParameters`、`ContextCompressionConfig`、默认压缩配置及默认提示词剥离逻辑。
 - `aio-hub/src/tools/llm-chat/types/message.ts`：消息节点、注入策略、模型匹配和预设附件引用。
+- `aio-hub/src/tools/agent-manager/components/assets/AgentPresetEditor.vue`：完整/紧凑预设编辑器、拖拽、批量管理、独立导入导出和侧边栏消息组开关。
+- `aio-hub/src/tools/agent-manager/components/assets/PresetGroupPanel.vue`：消息组创建、单选/多选、组级启停、成员管理和删除语义。
+- `aio-hub/src/tools/agent-manager/components/assets/presetGroupState.ts`：组开关向成员 `isEnabled` 的状态投影与恢复。
+- `aio-hub/src/tools/agent-manager/components/assets/usePresetImportExport.ts`：预设消息 v1/v2 JSON/YAML 格式及 SillyTavern Prompt Preset 导入。
+- `aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue`：角色、组、模型匹配、注入策略、宏/变量/知识库/附件和三态预览。
+- `aio-hub/src/tools/llm-chat/core/context-processors/injection-assembler.ts`：按消息 `isEnabled`、模型匹配和注入策略构建最终上下文。
+- `aio-hub/src/tools/llm-chat/services/greetingService.ts`：开场白实例化、live 同步、Agent 切换和首次发送后的固化状态机。
+- `aio-hub/src/tools/llm-chat/composables/session/useSessionManager.ts`：创建会话时插入全部开场白分支。
+- `aio-hub/src/tools/llm-chat/stores/session/sessionLifecycleManager.ts`：切换会话时刷新尚未固化的开场白。
+- `aio-hub/src/tools/llm-chat/composables/chat/useChatHandler.ts`：发送、重新生成和续写时读取当前 Agent 配置；首次发送前固化开场白。
+- `aio-hub/src/tools/llm-chat/composables/chat/useChatExecutor.ts`：将当前 Agent 与参数片段合并为当次 `executionAgent`。
+- `aio-hub/src/tools/llm-chat/composables/chat/useSingleNodeExecutor.ts`：记录当次实际请求参数快照。
+- `aio-hub/src/tools/llm-chat/composables/session/useNodeManager.ts`：重新生成复用同一用户节点并创建助手兄弟分支。
 - `aio-hub/src/tools/agent-manager/config/defaultAgentTemplate.ts`：新建 Agent 默认身份和模型参数。
 - `aio-hub/src/tools/agent-manager/stores/agentStore.ts`：Agent 更新与持久化调用链。
 - `aio-hub/src/tools/agent-manager/composables/storage/useAgentStorage.ts`：`agent.json`、索引文件和 AppData 路径。

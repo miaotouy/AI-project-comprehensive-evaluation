@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\Manifold-Desktop`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`3d7448fb2e6053056da6d6c126e08f90b94cda4f`（分支：`main`）
 >
@@ -34,6 +34,12 @@ Manifold Desktop 没有 Agent、Persona 或角色模板对象。与角色最接�
 - Gemini：写入 `systemInstruction`。
 
 Compare 页也使用同一条全局 system prompt（`MainWindow.xaml.cpp:1068-1083`）。会话文件不保存发送时使用的 system prompt 或 temperature，因此重新打开历史会话无法恢复当时的配置。
+
+## 会话持久化的实际范围
+
+进一步的导入检查确认聊天消息本身也不落盘：前端 `frontend/services/session-store.js`（其 `addMessage`/`updateModelMessage` 会通过 `SAVE_SESSION` 写会话 JSON）是**无引用的死模块**——全前端没有任何 `import ... session-store`，`addMessage/updateModelMessage` 从未被调用。实际聊天消息只存在于 `frontend/components/chat-tab.js:22` 的内存数组（`getMessages()` :127-129）；唯一的 `SAVE_SESSION` 调用来自重命名会话时只写 `{title}`（`side-panel.js:98`）。会话 JSON 结构定义为 `{id, title, model, messages, createdAt, updatedAt}`（`session-store.js:18-32`），后端也只读 `title/model/createdAt/updatedAt`（`Manifold.Core/SessionManager.cpp:76-82`），且 `model` 只在创建会话时写默认值、发送时不更新（`app.js:86-123`）。
+
+因此"重新打开历史会话无法恢复当时配置"在 Manifold Desktop 上比其它项目更彻底：发送时实时从全局 settings 取 `systemPrompt/temperature`（`app.js:116-122`）不回写会话，消息数组仅存活于当前窗口。另外本快照没有 regenerate 功能：唯一的 "Retry" 按钮只移除错误元素、不重发（`chat-tab.js:92-95`），流式回答原地累积到单个元素。提示词库也没有开场白概念和分组/组级开关。
 
 ## 提示词库
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/` 的 system-prompt、resource-loader、settings-manager）
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`6b461b75b39b5a19b378dc42fbfbd1655bc446a6`（分支：`main`）
 >
@@ -87,7 +87,8 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 
 - **UI**：`/settings` 选择器可改默认 Provider/模型/思考等级等；无角色编辑 UI。`/model`、`/scoped-models` 命令（slash-commands.ts:21-22）；无 `/skills` 内置命令（skills 经 `/skill:name` 调用）。
 - **运行时可见性**：footer 显示当前模型/状态（`components/footer.ts`）；`/session` 显示统计；`agent.state.systemPrompt` 可通过扩展读取（`extensions/types.ts:706`），HTML 导出可见全文。**当前生效提示词无内置查看命令**——本次未找到类似 `/system-prompt` 的展示入口。
-- **历史快照**：assistant 消息持久化 provider/model/usage（`packages/ai/src/types.ts:412-427`），会话条目记模型切换；system prompt 本体不随会话条目保存。
+- **历史快照**：assistant 消息持久化 provider/model/usage（`packages/ai/src/types.ts:412-427`，`AssistantMessage` 带 `api/provider/model/responseModel/usage/stopReason`，无采样参数），会话条目记模型切换；`model_change` 条目只记 provider+modelId（`session-manager.ts:63-67`）；system prompt 本体不随会话条目保存。
+- **重试/重新生成**：无用户级 retry/regenerate 命令（`core/slash-commands.ts:19-41` 的 BUILTIN_SLASH_COMMANDS 无此项；grep `resend|replay|regenerate` 无命中）；全部 retry 是瞬时错误的自动重试（`agent-session.ts:2683-2747` `_scheduleRetry`/`_prepareRetryableError`），同上下文重发同轮请求，无兄弟分支、无参数快照。人工"重新生成"的最近似路径是 `/fork`/`/clone`（slash-commands.ts:31-32）从旧 user 消息重开分支，但那是新建会话分支而非同节点重试。
 
 ## 9. 设计取舍与已确认边界
 

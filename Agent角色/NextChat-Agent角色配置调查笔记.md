@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\NextChat`（重点 `app/store/mask.ts`、`app/masks/`、`app/components/mask.tsx`、`app/components/new-chat.tsx`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`706a18b95b714ab29b2a4842d3b9ff4f887935d5`（分支：`main`）
 >
@@ -131,6 +131,13 @@ syncGlobalConfig = true
   -> syncGlobalConfig = false
   -> 当前会话继续使用 Mask 副本中的 modelConfig
 ```
+
+### 5.1 开场白、消息元数据与重新生成
+
+- **开场白是固定欢迎语、与 Mask 无关**：`BOT_HELLO`（`app/store/chat.ts:99-102`，i18n 文案如"有什么可以帮你的吗"）在 chat 页 useMemo 中当 `context.length === 0 && messages[0]?.content !== BOT_HELLO.content` 时推入本地数组（`app/components/chat.tsx:1337-1346`），**不写入 session.messages**，用户发首条消息后不再显示；无每 Mask 自定义 greeting 字段，`newSession`（chat.ts:307-328）不插入任何开场消息，修改 Mask 后既有会话也不更新开场白。
+- **消息元数据极薄**：userMessage 无 model 字段；仅 botMessage 创建时快照 `model: modelConfig.model`（`chat.ts:436-440`），无 temperature 等参数快照（`ChatMessage` 字段仅 date/streaming/isError/id/model/tools/audio_url/isMcpResponse，chat.ts:57-66）。
+- **regenerate 是"删除旧配对 + 新建"**：`onResend` 先 `deleteMessage(userMessage.id)` 与 `deleteMessage(botMessage?.id)`，再以当时文本/图片重新调 `chatStore.onUserInput`（`app/components/chat.tsx:1217-1269`）——新 user/bot 消息拿新 id，并用重发时刻的 `session.mask.modelConfig`。
+- **context 编辑器无逐条启停**：`ContextPromptItem` 只有 role 下拉、文本输入、删除按钮、拖拽柄（`app/components/mask.tsx:260-322`），连逐条 enabled 开关都没有；`useMaskGroup`（`app/components/new-chat.tsx:35-75`）只是 NewChat 页 Mask 卡片墙的视觉分组，与 context 语义无关。
 
 ## 6. 导入、导出和分享
 

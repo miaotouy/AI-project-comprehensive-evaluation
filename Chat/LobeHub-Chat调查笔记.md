@@ -192,7 +192,7 @@ virtua 渲染的数据和第 3 节 flow 编译结果是**同一份** `displayMes
 5. **`reconcileAssistantToolLinks`（两处独立调用：`internals.ts:61`、`query.ts:177`）**专门用来修复"assistant.tools[] 弄丢了某条工具引用，但对应的 tool 消息行还在"的情况——注释直接写"an optimistic updateMessage{tools} on the wrong/old assistant during a step boundary can drop the link"，说明流式生成的 step 边界上，`tools[]` 数组和独立的 tool 消息行两份数据保持同步本身就是一个容易出错、需要专门补救的地方。
 6. **工具审批/拒绝逻辑三层拆分 + 按运行时类型二分**：局部 store 的 `tool/action.ts` 只是转发；真正逻辑在全局 `conversationControl.ts`；而这套逻辑内部又按 `#shouldUseGatewayResume`（66-78 行）整体二分成"Gateway 恢复"和"本地 client runtime 继续"两条完全独立的实现路径（approve/reject/submit/skip 每个方法都各写一遍），需要人工保证两条路径行为等价，是后续行为漂移风险最大的地方。`INPUT_LOADING_OPERATION_TYPES` 的注释（`operation/types.ts:465-470`）也自己承认了一个已知限制：审批类"过渡态" op 在 Gateway 分支下没有转发 `parentOperationId`，导致这个窗口期按 Stop 不会真正中断请求（"loading briefly flickers, generation proceeds"）。
 
-## 8. 补充：架构设计中值得注意的几个点
+## 8. 架构设计中值得注意的几个点
 
 以下几点是本次调查中确认的、值得单独强调的架构事实（对应细节已在前几节展开，此处做一次归纳）：
 

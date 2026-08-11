@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`7450ab2dde5eacab4a8721f8680006ba8b99438d`（分支：`main`）
 >
@@ -65,6 +65,16 @@ interface CopilotDetail {
 Session 的 `copilotId?: string` 字段持有关联 ID。用户用某个 Copilot 创建新对话时，系统会把 Copilot 的 `prompt` 写为 Session 的首条 system 消息，并将 `copilotId` 持久化。此后切换到该 Session 时，`usedCount` 等统计字段随之更新。
 
 一个 Copilot 可以关联任意数量的 Session；每个 Session 可以有不同的模型参数。如果用户修改了 Copilot 的 `prompt`，**不会自动同步**到已创建的历史对话——历史对话里的 system 消息是当时写入的静态内容。
+
+### 3.4 发送时的设置来源与消息快照
+
+发送/续写/重新生成时，模型与温度从 **session 自身 settings** 读取，不读全局或 Copilot：`mergeDefaultSessionSettings`（`src/renderer/stores/chatStore.ts:561-573`，注释明确"session settings is copied from global settings when session is created"）在创建会话时把 `lastUsedChatModel` 与 `newSession.settings` 固化进 session（chatStore.ts:311-316）；聊天内换模型写 `session.settings`（`src/renderer/routes/session/$sessionId.tsx:127-141` 的 `onSelectModel`）。Skills 启用列表读全局（`tools-builder.ts:338-339`），Agent Mode 优先 `session.settings.agentMode`（`agent-mode.ts:20-26`），知识库选择在内存 `uiStore.sessionKnowledgeBaseMap`。
+
+每条消息只快照 provider 与模型显示名：`initializeTargetMessage`（`src/renderer/stores/session/utils.ts:134-153`）写 `aiProvider: settings.provider` 与 `model: getModelDisplayName(...)`（字段见 `src/shared/types/session.ts:305-306`）；无 temperature/skills/agentMode 快照。
+
+### 3.5 重新生成语义
+
+重新生成**不替换原消息**：`regenerateInNewFork`（`src/renderer/stores/session/generation.ts:74-102`）→ `createNewFork` + `runGenerateMore`（`insertMessageAfter` 在 fork 分支新插一条 assistant 消息生成）；仅首条/找不到位置时回退在原消息上生成（generation.ts:90-97）。例外：工具暂停后的继续/重试以 `appendToMessage: true` 写回原消息（orchestration.ts:908、1058、1161、1192）。本快照未找到开场白字段（"greeting" 仅出现在新手指引流程 `useGuideSession.ts:148-315`）和提示词块分组/组级开关。
 
 ## 4. 模型与输出偏好
 

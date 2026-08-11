@@ -2,7 +2,7 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
 >
@@ -137,6 +137,12 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）：`system = [agent.info
 - **权限展示**：无「当前 agent 权限面板」；权限请求弹窗显示 subagent 类型（tui/src/routes/session/permission.tsx:287）。CLI `opencode agent list` 打印权限 JSON（cli/cmd/agent.ts:247-250）、`opencode debug agent <name>` 展示工具启用状态（cli/cmd/debug/agent.handler.ts:33-88）。
 - **历史快照**：消息带 agent/model 快照字段（见第 2 节），历史消息渲染仍显示当时的 agent 与模型。
 - **桌面端（Electron）**：agent 选择与管理完全复用 app 层——agent 下拉在 `app/src/pages/session/composer/session-composer-controls.ts:40`、`@agent` 提及在 prompt-input-v2.tsx:277-280；desktop 包内无角色/agent 代码（仅组合 app 源码，desktop/src/renderer/index.tsx:1-17）。
+
+### 8.1 请求参数快照范围与重发/撤销语义
+
+- **快照范围**：session 表（`packages/core/src/session/sql.ts:22-66`）保存 `agent`(text)、`model`(JSON `{id, providerID, variant?}` :52-56)、`permission`(JSON :50)、`revert`(JSON :49)、`metadata`(JSON :42) 及 cost/tokens/summary/share_url/time_compacting/time_archived 等；**无 temperature 等生成参数快照**。消息侧：V1 User 消息带 `agent/model{variant}/tools/system/format`（`packages/schema/src/v1/session.ts:332-354`），Assistant 消息带 `agent/mode/modelID/providerID/variant/cost/tokens/finish`（:453-485）；part 的 `partBase` 仅 `id/sessionID/messageID`（:81-85），TextPart/ToolPart 的可选 `metadata`（:114、:321）不承载请求参数——即只有 agent/model/variant 级部分快照，无完整请求参数。
+- **重试/重新生成 = 撤销 + 重发（替换式）**：undo 命令（`app/src/pages/session/use-session-commands.tsx:331-357`；TUI `tui/src/routes/session/dialog-message.tsx:26-55`）调用 `session.revert.stage` → `SessionRevert.revert`（`src/session/revert.ts:38-88`）只设 revert 标记 + 快照恢复；下一轮发送时 `revert.cleanup`（`src/session/prompt.ts:459、1056`；revert.ts:100-134）**物理删除** revert 点之后的 message/part。重发时按 session 行 agent 名 `agents.get(name)` 重建 agent（prompt.ts:461、636-641），即重新解析当前配置。因此 OpenCode 没有 AIO Hub 式"同历史兄弟分支生成对比"，分支手段只有 `session.fork`（另建会话）；provider 级自动重试（`RetryPart{attempt,error}`，v1/session.ts:220-231；`SessionRetry.policy` `src/session/processor.ts:660-666`）是同一请求重发，不重解析配置。V2 `resume`（`packages/core/src/session.ts:152-169、426-428`）是 drain/队列恢复执行，不是 regenerate。
+- **无 agent 编辑 UI 与提示词分组**：app 仅有 agent 选择器（`context/local-agent.ts`），无编辑器页面；agent prompt 是单段 markdown，`disable: true` 是唯一启停字段（v1/config/agent.ts:24，构建时跳过 agent.ts:268-271）；无导入导出（见第 7 节），无开场白（见第 6 节）。
 
 ## 9. 内置 Agent 定义（V1，agent.ts:141-265）
 

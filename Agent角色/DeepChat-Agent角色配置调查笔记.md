@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/shared/types/agent-interface.d.ts`、`src/main/agent/`、`src/main/session/data/tables/newSessions.ts`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
 >
@@ -101,6 +101,23 @@ orchestration_policy (explicit | proactive)
 ```
 
 创建 session 时这些字段与 Agent 选择一并写入（`:137-196`）。这表示角色配置不是每次请求临时读取的名称，而是通过 session agent id、项目路径和会话级覆盖共同生效。`DeepChatToolResolver` 会再次读取 session row，按当前 parent/child 关系计算 tool policy。
+
+### 7.1 创建时快照与工具/记忆实时重读的混合模型
+
+会话创建时保存哪些角色配置、发送时还重读哪些，精确边界如下：
+
+- **systemPrompt 与生成参数在会话创建时快照**：`SessionAssignmentPolicy.resolveCreateAssignment`（`src/main/session/assignmentPolicy.ts:47-90`）合并 `mergeDefaultGenerationSettings`（:240-248）后，把 `generationSettings`（systemPrompt、temperature、topP、contextLength、maxTokens、timeout、thinkingBudget、reasoningEffort 等）连同 provider/model/permissionMode/disabledAgentTools 写入 `deepchat_sessions`（`data/tables/deepchatSessions.ts:329-388`）与 `new_sessions`（`newSessions.ts:137-196`）。`SessionSettingsCoordinator.getEffectiveGenerationSettings`（`sessionSettingsCoordinator.ts:368-428`）优先 instance 缓存、其次 session 持久行，`configuredPrompt` 全部来自 `generationSettings.systemPrompt`（turnCoordinator.ts:255/820/1380、deepChatLoopRunner.ts:464、compactionRuntimeCoordinator.ts:215）。
+- **发送时不重读 descriptor 的 systemPrompt/生成参数**：修改 Agent 配置不影响既有会话，除非显式 `setAgentContext`（sessionSettingsCoordinator.ts:202-269，即会话换 Agent）或 `updateGenerationSettings`。
+- **工具与记忆策略按 agent_id 实时重读**：`DeepChatToolResolver.resolveAgentToolPolicy`（`src/main/agent/deepchat/runtime/toolResolver.ts:213-313`）每次经 `resolveDeepChatAgentConfig(agentId)`（:237-238）取 `enabledMcpServerIds`/subagent slots（`disabledAgentTools` 来自 session 行）；记忆开关 `MemoryRuntimeContext.isEnabled/isPersonaEvolutionEnabled`（`src/main/memory/context.ts:179-186`）每请求调 `policy.resolveAgentConfig(agentId)`。
+- **会话级覆盖**：`SessionGenerationSettingsPatch`（`src/shared/contracts/common.ts:153-169`，路由 `sessions.routes.ts:103`）覆盖 systemPrompt 与全部生成参数，另加 permissionMode、activeSkills、disabledAgentTools。
+- **descriptor 无版本字段**：`DeepChatAgentDescriptor`（`src/main/agent/shared/agentDescriptors.ts:15-19`）无 version/revision；`revision` 只在 session 行自增（`newSessions.ts:363`），不冻结 descriptor 配置。
+
+因此 DeepChat 属于"创建时快照 + 工具实时"的混合继承模型：提示词与采样参数随会话创建冻结，能力策略跟随 Agent 当前配置，与 AIO Hub 的全量实时引用、Jan/NextChat 的完整副本都不同。
+
+### 7.2 消息执行元数据与重新生成语义
+
+- 每条消息保存执行元数据：`MessageMetadata`（`agent-interface.d.ts:375-404`）含 model/provider/token 统计/runId 等；运行时 `process.ts:787-788` 写 `state.metadata.provider/model`，经 `transcript.updateAssistantMetadata`（`session/data/transcript.ts:276-278`）持久化到 `deepchat_messages.metadata`（`deepchatMessages.ts:42-53`），usage 统计也从该字段回读（transcript.ts:1121-1135）。但不包含温度等完整请求参数快照。
+- 重新生成是**破坏性替换**而非分支：`SessionTranscriptMutations.prepareRetryMessage/commitRetryMessage`（`src/main/session/transcriptMutations.ts:39-64`）在 retry 时 `deleteFromOrderSeq` 删除源用户消息起的全部消息再重发（路由 `sessionsRetryMessageRoute`，`renderer/api/SessionClient.ts:214-219`）。活动运行时消息表 `deepchat_messages` 无 parent_id/is_variant；`is_variant` 仅存在于旧 `messages.ts:26`，用于 legacy 导入。
 
 ## 8. Subagent slot 与 authority
 

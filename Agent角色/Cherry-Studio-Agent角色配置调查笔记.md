@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-05
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
 >
@@ -85,6 +85,16 @@ interface Assistant {
 3. 多段用 `\n\n` 连接，全空返回 `undefined`。
 
 目前 `prompt` 是纯文本，支持变量替换但没有类似 AIO Hub 的多节点消息树；没有 few-shot 示例对话的原生存储字段。
+
+### 3.3 会话绑定与历史快照语义
+
+会话（topic）只保存 `assistantId` 引用（`src/main/data/db/schemas/topic.ts:20`，另有 `activeNodeId`），不保存 Assistant 配置副本。发送时每次请求按 id 重读当前 Assistant：`modelResolution.ts:32-45` 的 `resolveAssistantModelId` → `assistantDataService.getById`；`AiService.ts:868` 的 `getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`，`buildAgentParams` 用其当前 prompt/settings/tools 建参（`assembleSystemPrompt.ts:29-30` 直接读 `assistant.prompt`）。因此修改助手后，既有会话的下一次请求即使用新配置，属于"运行时引用"语义。
+
+消息侧有部分快照：每条 assistant 消息保存 `modelId` 与 `messageSnapshot`（作者 id/name/emoji + 内嵌模型快照，`src/main/data/db/schemas/message.ts:39-41`；`MessageSnapshotSchema` 在 `src/shared/data/types/message.ts:396-402`），由 `PersistentChatContextProvider.ts:39-55` 的 `buildAssistantMessageSnapshot` 在占位消息创建时写入（:246）。快照不含 temperature 等采样参数；未找到完整 Assistant 配置的 revision 快照。
+
+重新生成不是覆盖：`src/renderer/pages/home/hooks/useChatWriteActions.ts:214` 的 `regenerateWithCapabilities` 带 `parentAnchorId` 调 `ai.stream.open(trigger: 'regenerate-message')`；主进程 `PersistentChatContextProvider.ts:196-213` 的 isRegenerate 分支经 `modelResolution.ts:53-64` 的 `resolvePersistentSiblingsGroupId` 继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。
+
+本快照未找到开场白字段（`ConversationGreeting.tsx` 只是空会话占位组件，不落库）和提示词块分组/组级开关（`assistant.prompt` 是单文本；`prompt` 表是独立"用户提示词片段"，非分组机制）。
 
 ## 4. 模型与输出偏好
 

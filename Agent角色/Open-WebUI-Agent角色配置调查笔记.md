@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\open-webui`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
 >
@@ -162,7 +162,15 @@ Models.get_model_by_id(model_id)（1074）
 | 导入/导出 | 有 | 逐条校验 knowledge 与写权限 |
 | 自定义头像 | 有 | 外链转发限制 + data-URI 白名单 |
 
-## 8. 关键源码索引
+## 8. 会话级快照与重新生成
+
+chat 表（`backend/open_webui/models/chats.py:70-102`）的 `chat` JSON 列保存 `{id, title, models, history, params, files}`（model id 存于 `chatContent.models`，无独立列），另有 `meta/variables/tasks/summary/current_message_id` 列；前端加载后据此恢复（`src/lib/components/chat/Chat.svelte:1992-2026`），后端合并保存（`routers/chats.py:1358-1366`）。chat_message 表（`models/chat_messages.py:128-172`）中 assistant 消息有 `model_id` 列（:145），`content/output/files/sources/embeds/meta/usage` 等 JSON 列，但**无 params 快照列**，`meta` 只存内部标记（timer/delegation/status）。
+
+- **chat 级 params 是用户侧覆盖**：Chat Controls 写入的 `chat.params`（Chat.svelte:3130-3134 把 `{...$settings.params, ...chat.params, stop}` 放请求体）随 chat JSON 保存并随请求发送，与模型 params 并存（模型侧出站前置拼接）；chat 表不保存模型 system prompt 快照，模型 system 的权威来源仍是 DB（`routers/openai.py:1210-1232`）。
+- **regenerate 是纯前端实现**：后端无 regenerate API（仅权限开关 `regenerate_response`，config.py:1967）；`Chat.svelte:3380` 的 `regenerateResponse` 复用父 user message id 调 `sendMessage`，生成**新 uuid 的 assistant 消息**追加到 `parent.childrenIds`（Chat.svelte:2809-2844），即新建兄弟分支、不替换原消息；多模型对话用 `message.model/modelIdx` 恢复列（:3402-3408）。
+- **开场白与提示词分组不存在**：Workspace Model 无 greeting/opening 字段（后端 .py 全量 grep 无模型侧命中），空聊天的 Suggestions/Placeholder 是静态引导 UI；`params.system` 是单一 textarea（ModelEditor.svelte:78、427），无多段/逐段启停；模型整体导入/导出存在（routers/models.py:315-502），无段级导入导出。
+
+## 9. 关键源码索引
 
 - 数据模型：[`models/models.py`](../../open-webui/backend/open_webui/models/models.py)（61-181 行）
 - 存储层：[`models/models.py`](../../open-webui/backend/open_webui/models/models.py)（184-654 行）

@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\jan`（重点 `core/src/types/assistant/assistantEntity.ts`、`extensions/assistant-extension/src/index.ts`、`core/src/types/thread/threadEntity.ts`、`web-app/src/lib/instructionTemplate.ts`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
 >
@@ -111,6 +111,12 @@ web 侧 `hooks/useAssistant.ts`（209 行）也有默认助手（id `'jan'`、`c
 - 指令模板 `lib/instructionTemplate.ts`（23 行）：仅替换 `{{current_date}}`（UTC 长月份，`formatDate`）。
 
 模型切换（SamplerPopover）与助手切换（AssistantSwitcher）的联动由 `lastUsedModel`/`lastUsedAssistant` localStorage 维护。
+
+### 4.1 消息元数据与重新生成语义
+
+- **消息不保存模型/参数元数据**：onFinish 持久化的 metadata 只是流式元数据（finishReason/usage）加 `parentId`/`stopped`（`$threadId.tsx:351-411`）；`ThreadMessage.assistant_id?`（`core/src/types/message/messageEntity.ts:18`）在 web-app 无任何赋值点，无 model/parameters 字段。
+- **重新生成保留旧回复为 sibling**：`handleRegenerate`（`$threadId.tsx:1315-1346`）调 `ensureBranched()`，新回复在 onFinish 以 parentId 挂为新分支；版本切换靠 `activeRootId` + `computeActivePath`（:849-855、:1225-1246），测试断言 "regenerate … keeps the prior version (no delete)"（`__tests__/$threadId.test.tsx:543`）。这与 AIO Hub 的"同历史兄弟分支"类似，但 thread 的 instructions/parameters 来自内嵌快照，重新生成不重读 Assistant 当前配置。
+- **无开场白与提示词分组**：Assistant 无 greeting 字段，创建 thread 不注入开场消息（`useThreads.ts:315-361`、`threads/default.ts:78-119`）；`instructions` 是单段字符串，仅整段替换 `{{current_date}}`（`lib/instructionTemplate.ts`），无块级拆分或组级开关（`predefinedParams.ts:554` 的 groupIds 是采样参数 UI 分组，非提示词块）。
 
 ## 5. 设置 UI
 

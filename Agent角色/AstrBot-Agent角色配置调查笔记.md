@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-11
 >
 > 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
 >
@@ -217,6 +217,13 @@ subagent router_prompt
 
 - `persona_pool` 配置项已定义但**从未使用**（astrbot-config.md:339-341）；
 - `/persona` 指令（docs/zh/use/command.md:148-167）不在内置指令集中（内置仅 help/sid/name/reset/stop/new/stats/provider/dashboard_update/set/unset），依赖外部命令插件。
+
+### 5.1 会话创建、消息快照与重新生成
+
+- **会话创建不写入任何初始消息**：`new_session`（`astrbot/dashboard/services/chat_service.py:1345-1354`）只建 `PlatformSession` 行；`ConversationV2` 在首条消息时惰性创建且 `content=None`（`astrbot/core/conversation_mgr.py:207-210`）。begin_dialogs 每轮以 `req.contexts[:0]` 注入（astr_main_agent.py:535-536），`_no_save: True`（persona_mgr.py:389-398），`_save_to_history` 显式跳过 `_no_save` 消息（`internal.py:470-471`）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
+- **修改 begin_dialogs 后既有会话下一轮自动生效**：`personas_v3` 缓存每次 CRUD 重建（persona_mgr.py:135、169、201、274、350），每轮 `_ensure_persona_and_skills` 重新解析注入。
+- **消息对象层不保存角色/模型快照**：`PlatformMessageHistory`（po.py:239-269）字段仅 platform_id/user_id/sender/content/llm_checkpoint_id，无 persona_id、无模型名；bot 消息 content 为 `{type, message, agent_stats, refs}`（`build_bot_history_content`，chat_service.py:97-113），`AgentStats`（`astrbot/core/agent/response.py:31-38`）只含 token/耗时。当次实际模型的记录分层存放：trace 日志（`sel_persona` 含 persona_id+工具集 :657-664、`astr_agent_prepare` 含 `chat_provider{id,model}` internal.py:282-291）与 DB `provider_stat` 表（`insert_provider_stat` 持久化 provider_id/provider_model/status/stats，internal.py:578-586）；`selected_model` 只经请求 extra 进 `req.model`（astr_main_agent.py:1411-1412），不留存。
+- **重新生成走完整主链路**：`chat.py:222-244` regenerate → `prepare_regenerate_message_payload`（chat_service.py:1702-1806，回滚历史 `history[:start]+history[end+1:]` :1780、删旧 bot 展示记录、换新 checkpoint）→ `_send_chat` → `build_chat_stream`（chat.py:94）→ 同一 Agent 构建链 → 重新解析 Persona 当前值。行为上每轮解析与 AIO Hub 的实时引用一致，但消息本身没有任何执行参数快照可查。
 
 ## 6. 自定义错误回复（persona_error_reply.py，86 行）
 
