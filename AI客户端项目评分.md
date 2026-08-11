@@ -1,10 +1,10 @@
-# AI 客户端项目评分
+﻿# AI 客户端项目评分
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
 > 对比更新日期：2026-08-10
 >
-> 依据：本目录下 Agent 工具、Agent 角色、Chat、LLM 渠道管理、仓库分布和消息渲染器单项目调查笔记及横向对比
+> 依据：本目录下 Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布和消息渲染器单项目调查笔记及横向对比
 >
 > 对比方法：把既有调查项转换为统一的 0-5 分量表，分别计算分项分、场景加权分、证据覆盖率和风险标签；所有分数必须能够回链到调查笔记中的源码依据或明确的未验证记录
 >
@@ -194,32 +194,35 @@
 
 分数差距小于 `2` 时不解释为稳定名次。首轮结果最值得保留的不是“谁第一”，而是三个明显分组：完整运行时与强工程闭环、能力完整但存在关键边界缺口、定位特殊或主链尚未闭合。
 
-## 九、首轮评分依据
+## 九、评分依据
 
-以下摘要说明各项目主要拉分项和限分项。链接缩写为 Chat（C）、消息渲染（R）、渠道（P）、Agent 角色（A）、Agent 工具（T）和仓库分布（E）。
+以下摘要说明各项目主要拉分项和限分项。链接缩写为会话管理（C）、请求与上下文（X）、消息渲染（R）、渠道（P）、Agent 角色（A）、Agent 工具（T）和仓库分布（E）。
 
-- **AIO Hub**：stable/pending AST、Key 健康状态、富 Agent 配置和资产兼容拉高渲染、渠道、角色与生态分；文件边界只靠前端字符串判断、分布式入向调用和凭据明文限制工具与安全分。[C](Chat/AIO-Hub-Chat调查笔记.md) [R](消息渲染器/AIO-Hub-消息渲染器调查笔记.md) [P](LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) [A](Agent角色/AIO-Hub-Agent角色配置调查笔记.md) [T](Agent工具/AIO-Hub-Agent工具调查笔记.md) [E](仓库分布/AIO-Hub-仓库分布调查笔记.md)
-- **AstrBot**：九阶段 IM 流水线、统一消息组件、多能力 Provider 实例和四路工具注册形成完整机器人框架；桌面场景不适用，平台转换分叉、默认成员权限和 Dashboard 返回完整 Key 构成主要限制。[C](Chat/AstrBot-Chat调查笔记.md) [R](消息渲染器/AstrBot-消息渲染器调查笔记.md) [P](LLM渠道管理/AstrBot-LLM渠道管理调查笔记.md) [A](Agent角色/AstrBot-Agent角色配置调查笔记.md) [T](Agent工具/AstrBot-Agent工具调查笔记.md) [E](仓库分布/AstrBot-仓库分布调查笔记.md)
-- **Chatbox**：typed parts、虚拟列表、Provider 注册表、会话快照和不可绕过的高风险审批类别使主路径均衡；Windows 无 OS 隔离、工具名静默冲突、Copilot 能力边界较窄和完整配置备份含凭据限制上限。[C](Chat/Chatbox-Chat调查笔记.md) [R](消息渲染器/Chatbox-消息渲染调查笔记.md) [P](LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md) [A](Agent角色/Chatbox-Agent角色配置调查笔记.md) [T](Agent工具/Chatbox-Agent工具调查笔记.md) [E](仓库分布/Chatbox-仓库分布调查笔记.md)
-- **Cherry Studio**：SQLite 消息树、流式 overlay、结构化 parts、Provider/Endpoint/Adapter 分层和大规模测试资产形成完整客户端底座；普通聊天与 Agent 双链、主进程工具执行、`acceptEdits` 首词匹配和缺少跨 Provider 高可用是主要限分项。[C](Chat/Cherry-Studio-Chat调查笔记.md) [R](消息渲染器/Cherry-Studio-消息渲染调查笔记.md) [P](LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) [A](Agent角色/Cherry-Studio-Agent角色配置调查笔记.md) [T](Agent工具/Cherry-Studio-Agent工具调查笔记.md) [E](仓库分布/Cherry-Studio-仓库分布调查笔记.md)
-- **DeepChat**：主进程权威 transcript、结构化 blocks、窗口化渲染、Provider 与能力元数据分层、Agent descriptor 和参数哈希绑定审批形成较完整闭环；Agent revision、凭据静态保护及部分崩溃和乱序行为仍缺确认。[C](Chat/DeepChat-Chat调查笔记.md) [R](消息渲染器/DeepChat-消息渲染器调查笔记.md) [P](LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) [A](Agent角色/DeepChat-Agent角色配置调查笔记.md) [T](Agent工具/DeepChat-Agent工具调查笔记.md) [E](仓库分布/DeepChat-仓库分布调查笔记.md)
-- **Hermes Agent**：后端 SQLite 唯一事实源、跨界面事件协议、多层渠道 fallback、fail-closed 审批、工具预算和大规模测试使综合分最高；人格不是独立版本实体，host 工具仍在主进程执行，`execute_code` RPC 子工具旁路不重复走编排层审批。[C](Chat/Hermes-Agent-Chat调查笔记.md) [R](消息渲染器/Hermes-Agent-消息渲染器调查笔记.md) [P](LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md) [A](Agent角色/Hermes-Agent-Agent角色配置调查笔记.md) [T](Agent工具/Hermes-Agent-Agent工具调查笔记.md) [E](仓库分布/Hermes-Agent-仓库分布调查笔记.md)
-- **Jan**：AI SDK parts、严格 Artifact 沙箱、线程 Assistant 快照、OS keyring 与失败换 Key 使客户端主链较稳；桌面消息整文件重写、不恢复未完成回合、工具执行缺少强隔离和角色类型往返未完全确认限制得分。[C](Chat/Jan-Chat调查笔记.md) [R](消息渲染器/Jan-消息渲染器调查笔记.md) [P](LLM渠道管理/Jan-LLM渠道管理调查笔记.md) [A](Agent角色/Jan-Agent角色配置调查笔记.md) [T](Agent工具/Jan-Agent工具调查笔记.md) [E](仓库分布/Jan-仓库分布调查笔记.md)
-- **LobeHub**：conversation-flow、工具渲染注册表、Provider 加密、丰富 Agent 配置和大型 monorepo 测试构成明显强项；多数内建工具未声明审批即自动执行、connector 权限异常方向、MCP 执行隔离和服务端中断只在步骤边界检查拉低安全与工具分。[C](Chat/LobeHub-Chat调查笔记.md) [R](消息渲染器/LobeHub-消息渲染调查笔记.md) [P](LLM渠道管理/LobeHub-LLM渠道管理调查笔记.md) [A](Agent角色/LobeHub-Agent角色配置调查笔记.md) [T](Agent工具/LobeHub-Agent工具调查笔记.md) [E](仓库分布/LobeHub-仓库分布调查笔记.md)
-- **Manifold Desktop**：实现边界简单，Provider 注册和 WebView2 流式桥已存在；正常聊天不持久化、assistant 不回写上下文、Markdown 无 sanitizer、MCP 只展示不执行、取消不能主动中止阻塞读取且没有测试树，主链尚未闭合。[C](Chat/Manifold-Desktop-Chat调查笔记.md) [R](消息渲染器/Manifold-Desktop-消息渲染调查笔记.md) [P](LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md) [A](Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md) [T](Agent工具/Manifold-Desktop-Agent工具调查笔记.md) [E](仓库分布/Manifold-Desktop-仓库分布调查笔记.md)
-- **NextChat**：客户端会话 store、Mask 完整副本、Provider adapters 和 opaque-origin Artifact 足以支撑轻量聊天；工具没有统一审批、沙箱或步数上限，MCP 子进程继承完整环境，用户 Key 明文持久化且服务端日志可打印 Key，工程与安全上限较低。[C](Chat/NextChat-Chat调查笔记.md) [R](消息渲染器/NextChat-消息渲染器调查笔记.md) [P](LLM渠道管理/NextChat-LLM渠道管理调查笔记.md) [A](Agent角色/NextChat-Agent角色配置调查笔记.md) [T](Agent工具/NextChat-Agent工具调查笔记.md) [E](仓库分布/NextChat-仓库分布调查笔记.md)
-- **OpenCode**：SQLite 权威会话、SSE 事件投影、Worker Markdown、虚拟列表、配置化 Agent、AI SDK 工具循环和包级测试使 Agent 与二次开发得分突出；shell 无沙箱、审批无超时、凭据明文和消息全文搜索缺失限制安全与渠道分。[C](Chat/OpenCode-Chat调查笔记.md) [R](消息渲染器/OpenCode-消息渲染调查笔记.md) [P](LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) [A](Agent角色/OpenCode-Agent角色配置调查笔记.md) [T](Agent工具/OpenCode-Agent工具调查笔记.md) [E](仓库分布/OpenCode-仓库分布调查笔记.md)
-- **Open WebUI**：服务端协同聊天、多模型分支、token 级 Svelte 渲染、连接行渠道、Workspace Model 和多来源工具形成完整 Web 平台；history JSON 与消息行双写、普通 LLM 请求无重试、仓内测试极少及外部内容注入边界限制工程与安全分。[C](Chat/Open-WebUI-Chat调查笔记.md) [R](消息渲染器/Open-WebUI-消息渲染器调查笔记.md) [P](LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md) [A](Agent角色/Open-WebUI-Agent角色配置调查笔记.md) [T](Agent工具/Open-WebUI-Agent工具调查笔记.md) [E](仓库分布/Open-WebUI-仓库分布调查笔记.md)
-- **Pi**：JSONL 追加型会话树、终端安全渲染、多 Provider 包、项目文件提示词、统一 agent-loop 和高测试密度适合本地编码工作流；没有 MCP、逐次审批、迭代上限、角色实体和提示词快照，bash 在宿主进程权限下执行。[C](Chat/Pi-Chat调查笔记.md) [R](消息渲染器/Pi-消息渲染器调查笔记.md) [P](LLM渠道管理/Pi-LLM渠道管理调查笔记.md) [A](Agent角色/Pi-Agent角色配置调查笔记.md) [T](Agent工具/Pi-Agent工具调查笔记.md) [E](仓库分布/Pi-仓库分布调查笔记.md)
-- **SillyTavern**：角色卡、World Info、swipe、Connection Profile、HTML/CSS 兼容和扩展事件构成样本中最强的角色内容生态；累计全文重渲染、整文件会话、核心测试较少、工具无逐次审批以及导入内容可注册 STscript 工具明显压低工具、安全和工程分。[C](Chat/SillyTavern-Chat调查笔记.md) [R](消息渲染器/SillyTavern-消息渲染调查笔记.md) [P](LLM渠道管理/SillyTavern-LLM渠道管理调查笔记.md) [A](Agent角色/SillyTavern-Agent角色配置调查笔记.md) [T](Agent工具/SillyTavern-Agent工具调查笔记.md) [E](仓库分布/SillyTavern-仓库分布调查笔记.md)
-- **VCPChat**：稳定区/尾区渲染、可执行富消息、Topic/群聊和 VCP 生态把渲染与扩展能力推到很高；单网关、宿主脚本执行、宽本机工具、明文凭据备份、单聊无本地 abort 和极少自动测试使安全、渠道与工程分较低。[C](Chat/VCPChat-Chat调查笔记.md) [R](消息渲染器/VCPChat-消息渲染器调查笔记.md) [P](LLM渠道管理/VCPChat-LLM渠道管理调查笔记.md) [A](Agent角色/VCPChat-Agent角色配置调查笔记.md) [T](Agent工具/VCPChat-Agent工具调查笔记.md) [E](仓库分布/VCPChat-仓库分布调查笔记.md)
-- **VCPToolBox**：VCP 协议、语义虚拟模型、AgentAssistant、插件和分布式执行形成有特色的编排生态；它没有最终用户 Chat/渲染主链，核心仍是单上游单 Key，审批身份共用全局 Key，插件安全强度不一致且测试资产较少。[C](Chat/VCPToolBox-Chat调查笔记.md) [P](LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md) [A](Agent角色/VCPToolBox-Agent角色配置调查笔记.md) [T](Agent工具/VCPToolBox-Agent工具调查笔记.md) [E](仓库分布/VCPToolBox-仓库分布调查笔记.md)
+- **AIO Hub**：stable/pending AST、Key 健康状态、富 Agent 配置和资产兼容拉高渲染、渠道、角色与生态分；文件边界只靠前端字符串判断、分布式入向调用和凭据明文限制工具与安全分。[C](会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md) [X](对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md) [R](消息渲染器/AIO-Hub-消息渲染器调查笔记.md) [P](LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) [A](Agent角色/AIO-Hub-Agent角色配置调查笔记.md) [T](Agent工具/AIO-Hub-Agent工具调查笔记.md) [E](仓库分布/AIO-Hub-仓库分布调查笔记.md)
+- **AstrBot**：九阶段 IM 流水线、统一消息组件、多能力 Provider 实例和四路工具注册形成完整机器人框架；桌面场景不适用，平台转换分叉、默认成员权限和 Dashboard 返回完整 Key 构成主要限制。[C](会话与消息管理/AstrBot-会话与消息管理调查笔记.md) [X](对话请求与上下文/AstrBot-对话请求与上下文调查笔记.md) [R](消息渲染器/AstrBot-消息渲染器调查笔记.md) [P](LLM渠道管理/AstrBot-LLM渠道管理调查笔记.md) [A](Agent角色/AstrBot-Agent角色配置调查笔记.md) [T](Agent工具/AstrBot-Agent工具调查笔记.md) [E](仓库分布/AstrBot-仓库分布调查笔记.md)
+- **Chatbox**：typed parts、虚拟列表、Provider 注册表、会话快照和不可绕过的高风险审批类别使主路径均衡；Windows 无 OS 隔离、工具名静默冲突、Copilot 能力边界较窄和完整配置备份含凭据限制上限。[C](会话与消息管理/Chatbox-会话与消息管理调查笔记.md) [X](对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md) [R](消息渲染器/Chatbox-消息渲染调查笔记.md) [P](LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md) [A](Agent角色/Chatbox-Agent角色配置调查笔记.md) [T](Agent工具/Chatbox-Agent工具调查笔记.md) [E](仓库分布/Chatbox-仓库分布调查笔记.md)
+- **Cherry Studio**：SQLite 消息树、流式 overlay、结构化 parts、Provider/Endpoint/Adapter 分层和大规模测试资产形成完整客户端底座；普通聊天与 Agent 双链、主进程工具执行、`acceptEdits` 首词匹配和缺少跨 Provider 高可用是主要限分项。[C](会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md) [X](对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) [R](消息渲染器/Cherry-Studio-消息渲染调查笔记.md) [P](LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) [A](Agent角色/Cherry-Studio-Agent角色配置调查笔记.md) [T](Agent工具/Cherry-Studio-Agent工具调查笔记.md) [E](仓库分布/Cherry-Studio-仓库分布调查笔记.md)
+- **DeepChat**：主进程权威 transcript、结构化 blocks、窗口化渲染、Provider 与能力元数据分层、Agent descriptor 和参数哈希绑定审批形成较完整闭环；Agent revision、凭据静态保护及部分崩溃和乱序行为仍缺确认。[C](会话与消息管理/DeepChat-会话与消息管理调查笔记.md) [X](对话请求与上下文/DeepChat-对话请求与上下文调查笔记.md) [R](消息渲染器/DeepChat-消息渲染器调查笔记.md) [P](LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) [A](Agent角色/DeepChat-Agent角色配置调查笔记.md) [T](Agent工具/DeepChat-Agent工具调查笔记.md) [E](仓库分布/DeepChat-仓库分布调查笔记.md)
+- **Hermes Agent**：后端 SQLite 唯一事实源、跨界面事件协议、多层渠道 fallback、fail-closed 审批、工具预算和大规模测试使综合分最高；人格不是独立版本实体，host 工具仍在主进程执行，`execute_code` RPC 子工具旁路不重复走编排层审批。[C](会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md) [X](对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md) [R](消息渲染器/Hermes-Agent-消息渲染器调查笔记.md) [P](LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md) [A](Agent角色/Hermes-Agent-Agent角色配置调查笔记.md) [T](Agent工具/Hermes-Agent-Agent工具调查笔记.md) [E](仓库分布/Hermes-Agent-仓库分布调查笔记.md)
+- **Jan**：AI SDK parts、严格 Artifact 沙箱、线程 Assistant 快照、OS keyring 与失败换 Key 使客户端主链较稳；桌面消息整文件重写、不恢复未完成回合、工具执行缺少强隔离和角色类型往返未完全确认限制得分。[C](会话与消息管理/Jan-会话与消息管理调查笔记.md) [X](对话请求与上下文/Jan-对话请求与上下文调查笔记.md) [R](消息渲染器/Jan-消息渲染器调查笔记.md) [P](LLM渠道管理/Jan-LLM渠道管理调查笔记.md) [A](Agent角色/Jan-Agent角色配置调查笔记.md) [T](Agent工具/Jan-Agent工具调查笔记.md) [E](仓库分布/Jan-仓库分布调查笔记.md)
+- **LobeHub**：conversation-flow、工具渲染注册表、Provider 加密、丰富 Agent 配置和大型 monorepo 测试构成明显强项；多数内建工具未声明审批即自动执行、connector 权限异常方向、MCP 执行隔离和服务端中断只在步骤边界检查拉低安全与工具分。[C](会话与消息管理/LobeHub-会话与消息管理调查笔记.md) [X](对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md) [R](消息渲染器/LobeHub-消息渲染调查笔记.md) [P](LLM渠道管理/LobeHub-LLM渠道管理调查笔记.md) [A](Agent角色/LobeHub-Agent角色配置调查笔记.md) [T](Agent工具/LobeHub-Agent工具调查笔记.md) [E](仓库分布/LobeHub-仓库分布调查笔记.md)
+- **Manifold Desktop**：实现边界简单，Provider 注册和 WebView2 流式桥已存在；正常聊天不持久化、assistant 不回写上下文、Markdown 无 sanitizer、MCP 只展示不执行、取消不能主动中止阻塞读取且没有测试树，主链尚未闭合。[C](会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md) [X](对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md) [R](消息渲染器/Manifold-Desktop-消息渲染调查笔记.md) [P](LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md) [A](Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md) [T](Agent工具/Manifold-Desktop-Agent工具调查笔记.md) [E](仓库分布/Manifold-Desktop-仓库分布调查笔记.md)
+- **NextChat**：客户端会话 store、Mask 完整副本、Provider adapters 和 opaque-origin Artifact 足以支撑轻量聊天；工具没有统一审批、沙箱或步数上限，MCP 子进程继承完整环境，用户 Key 明文持久化且服务端日志可打印 Key，工程与安全上限较低。[C](会话与消息管理/NextChat-会话与消息管理调查笔记.md) [X](对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) [R](消息渲染器/NextChat-消息渲染器调查笔记.md) [P](LLM渠道管理/NextChat-LLM渠道管理调查笔记.md) [A](Agent角色/NextChat-Agent角色配置调查笔记.md) [T](Agent工具/NextChat-Agent工具调查笔记.md) [E](仓库分布/NextChat-仓库分布调查笔记.md)
+- **OpenCode**：SQLite 权威会话、SSE 事件投影、Worker Markdown、虚拟列表、配置化 Agent、AI SDK 工具循环和包级测试使 Agent 与二次开发得分突出；shell 无沙箱、审批无超时、凭据明文和消息全文搜索缺失限制安全与渠道分。[C](会话与消息管理/OpenCode-会话与消息管理调查笔记.md) [X](对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) [R](消息渲染器/OpenCode-消息渲染调查笔记.md) [P](LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) [A](Agent角色/OpenCode-Agent角色配置调查笔记.md) [T](Agent工具/OpenCode-Agent工具调查笔记.md) [E](仓库分布/OpenCode-仓库分布调查笔记.md)
+- **Open WebUI**：服务端协同聊天、多模型分支、token 级 Svelte 渲染、连接行渠道、Workspace Model 和多来源工具形成完整 Web 平台；history JSON 与消息行双写、普通 LLM 请求无重试、仓内测试极少及外部内容注入边界限制工程与安全分。[C](会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) [X](对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md) [R](消息渲染器/Open-WebUI-消息渲染器调查笔记.md) [P](LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md) [A](Agent角色/Open-WebUI-Agent角色配置调查笔记.md) [T](Agent工具/Open-WebUI-Agent工具调查笔记.md) [E](仓库分布/Open-WebUI-仓库分布调查笔记.md)
+- **Pi**：JSONL 追加型会话树、终端安全渲染、多 Provider 包、项目文件提示词、统一 agent-loop 和高测试密度适合本地编码工作流；没有 MCP、逐次审批、迭代上限、角色实体和提示词快照，bash 在宿主进程权限下执行。[C](会话与消息管理/Pi-会话与消息管理调查笔记.md) [X](对话请求与上下文/Pi-对话请求与上下文调查笔记.md) [R](消息渲染器/Pi-消息渲染器调查笔记.md) [P](LLM渠道管理/Pi-LLM渠道管理调查笔记.md) [A](Agent角色/Pi-Agent角色配置调查笔记.md) [T](Agent工具/Pi-Agent工具调查笔记.md) [E](仓库分布/Pi-仓库分布调查笔记.md)
+- **SillyTavern**：角色卡、World Info、swipe、Connection Profile、HTML/CSS 兼容和扩展事件构成样本中最强的角色内容生态；累计全文重渲染、整文件会话、核心测试较少、工具无逐次审批以及导入内容可注册 STscript 工具明显压低工具、安全和工程分。[C](会话与消息管理/SillyTavern-会话与消息管理调查笔记.md) [X](对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md) [R](消息渲染器/SillyTavern-消息渲染调查笔记.md) [P](LLM渠道管理/SillyTavern-LLM渠道管理调查笔记.md) [A](Agent角色/SillyTavern-Agent角色配置调查笔记.md) [T](Agent工具/SillyTavern-Agent工具调查笔记.md) [E](仓库分布/SillyTavern-仓库分布调查笔记.md)
+- **VCPChat**：稳定区/尾区渲染、可执行富消息、Topic/群聊和 VCP 生态把渲染与扩展能力推到很高；单网关、宿主脚本执行、宽本机工具、明文凭据备份、单聊无本地 abort 和极少自动测试使安全、渠道与工程分较低。[C](会话与消息管理/VCPChat-会话与消息管理调查笔记.md) [X](对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) [R](消息渲染器/VCPChat-消息渲染器调查笔记.md) [P](LLM渠道管理/VCPChat-LLM渠道管理调查笔记.md) [A](Agent角色/VCPChat-Agent角色配置调查笔记.md) [T](Agent工具/VCPChat-Agent工具调查笔记.md) [E](仓库分布/VCPChat-仓库分布调查笔记.md)
+- **VCPToolBox**：VCP 协议、语义虚拟模型、AgentAssistant、插件和分布式执行形成有特色的编排生态；它没有最终用户 Chat/渲染主链，核心仍是单上游单 Key，审批身份共用全局 Key，插件安全强度不一致且测试资产较少。[C](会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md) [X](对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md) [P](LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md) [A](Agent角色/VCPToolBox-Agent角色配置调查笔记.md) [T](Agent工具/VCPToolBox-Agent工具调查笔记.md) [E](仓库分布/VCPToolBox-仓库分布调查笔记.md)
 
 ## 十、依据索引
 
 - [Agent 工具横向对比](Agent工具/Agent工具横向对比.md)
 - [Agent 角色横向对比](Agent角色/Agent角色横向对比.md)
-- [Chat 横向对比](Chat/Chat横向对比.md)
+- [会话与消息管理横向对比](会话与消息管理/会话与消息管理横向对比.md)
+- [对话请求与上下文横向对比](对话请求与上下文/对话请求与上下文横向对比.md)
+- [Chat UI 横向对比](<Chat UI/ChatUI横向对比.md>)
+- [Chat 横向对比（概览与跨类目导航）](Chat/Chat横向对比.md)
 - [LLM 渠道管理横向对比](LLM渠道管理/LLM渠道管理横向对比.md)
 - [仓库分布横向对比](仓库分布/仓库分布横向对比.md)
 - [消息渲染器横向对比](消息渲染器/消息渲染器横向对比.md)
