@@ -27,7 +27,7 @@ Jan 的“渠道”由两层构成：
 - 能力表在 `providerCaps.ts`：内置 provider 锁定 base_url → provider ID 可作引擎可靠的代理；自定义 provider 落入 `CUSTOM_PERMISSIVE`（全部采样参数 maybe）；模型级拒绝（OpenAI o 系拒 temperature/top_p/penalties，grok-3-mini 拒 temp 等）；
 - API key：主 key + fallback 链（`api-key-fallbacks` 设置项），401/403/429 轮换重试；连接测试对 `/models` 发 GET 并同时发 `x-api-key` 与 `Authorization: Bearer` 双头；远程 key 的 secrets 只在 OS keyring（`register_provider_config`），绝不明文写 settings.json；
 - llama-server 鉴权 key = `BASE64(HMAC-SHA256(apiSecret='JustAskNow', msg=modelId))`，知道端口+公开 secret 即可本地伪造——防局域网误连、不防本地恶意进程；
-- `SecurityConfigDialog.tsx`（auth/设备/日志三 tab）是**孤儿死代码**：8 个 `security_*` Tauri 命令在 src-tauri 中不存在，组件无任何挂载点（【代码确认】）——需要与“真实认证”区分：真实认证在 `proxy.rs`（`config.proxy_api_key` + Bearer/X-Api-Key 双头校验）。
+- `SecurityConfigDialog.tsx`（auth/设备/日志三 tab）是**孤儿死代码**：9 个 `security_*` Tauri 命令在 src-tauri 中不存在，组件无任何挂载点（【代码确认】）——需要与“真实认证”区分：真实认证在 `proxy.rs`（`config.proxy_api_key` + Bearer/X-Api-Key 双头校验）。
 
 ## 1. Provider 定义与配置模型
 
@@ -283,7 +283,7 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 ## 10. 边界与未验证事项
 
 1. **SecurityConfigDialog 是孤儿死代码**：【代码确认】src-tauri 全库 grep 无 `security_*` 命令，组件无挂载点（SettingsMenu 的 privacy 页只实现 analytics 开关）。与之对比的“真实认证”在 proxy.rs 的 `proxy_api_key` 双头校验。
-2. **llama-server 鉴权强度**：【代码确认】`api_key = BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))`（`src-tauri/utils/src/crypto.rs:22-30`）；`RouterInfo{port, api_key, pid}` 对 webview 可见。防局域网误连、不防本地恶意进程。
+2. **llama-server 鉴权强度**：【代码确认】`api_key = BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))`——密钥常量 `'JustAskNow'` 在 `extensions/llamacpp-extension/src/index.ts:429`，派生函数 `generate_api_key` 在 `src-tauri/utils/src/crypto.rs:22-30`；`RouterInfo{port, api_key, pid}` 对 webview 可见。防局域网误连、不防本地恶意进程。
 3. **参数链路分离**：绕过 `createCustomFetch` 的直连请求不带采样参数；`streamText` 层不感知推理参数。【代码确认】
 4. **采样参数自动重试**基于错误文本正则启发式，命中误报时静默丢参重试一次。【代码确认 + 推测影响】
 5. **`ProviderApiType` TS 类型仅 `'openai'|'anthropic'`**（`web-app/src/types/modelProviders.d.ts:62`），而 Rust 端承认 openai-responses/google 等更宽取值——TS 窄于可写 wire 值。【代码确认】
@@ -299,13 +299,13 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 | 能力表 | `web-app/src/lib/providerCaps.ts` |
 | 参数注入 fetch | `web-app/src/lib/model-factory.ts:366-535` |
 | API key 链/测试 | `web-app/src/lib/provider-api-keys.ts`、`$providerName.tsx:261-497` |
-| provider 设置 UI | `web-app/src/routes/settings/providers/index.tsx`、`$providerName.tsx` |
+| provider 设置 UI | `web-app/src/routes/settings/providers/index.tsx`、`web-app/src/routes/settings/providers/$providerName.tsx` |
 | 添加 provider | `web-app/src/containers/dialogs/AddProviderDialog.tsx` |
 | 远程目录 | `web-app/src/lib/remoteModelCatalog.ts` |
 | 本地 API server | `web-app/src/routes/settings/local-api-server.tsx`、`hooks/useLocalApiServer.ts` |
 | 下载 | `extensions/download-extension/src/index.ts`、`src-tauri/src/core/downloads/commands.rs` |
 | llamacpp 模型配置 | `extensions/llamacpp-extension/src/index.ts:2414-2560`、`2386-2404` |
-| 鉴权 key 派生 | `src-tauri/utils/src/crypto.rs:22-30` |
+| 鉴权 key 派生 | 常量 `extensions/llamacpp-extension/src/index.ts:429`；函数 `src-tauri/utils/src/crypto.rs:22-30` |
 | Rust 代理 | `src-tauri/src/core/server/proxy.rs:832-1286`、`1509-1541`、`2600-2640` |
 | 服务端编排 | `src-tauri/src/core/server/proxy.rs:1136-1282` |
 | schema 规整 | `src-tauri/src/core/server/proxy.rs:56-179` |

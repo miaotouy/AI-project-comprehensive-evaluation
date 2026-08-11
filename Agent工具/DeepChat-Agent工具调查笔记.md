@@ -8,7 +8,7 @@
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
-> 调查范围：Agent 工具目录、MCP/内置工具合并、工具执行循环、权限边界与 legacy function-call 兼容路径
+> 调查范围：Agent 工具目录、MCP/内置工具合并、工具执行循环、参数解析与校验、结果回注、权限边界与 legacy function-call 兼容路径
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -99,7 +99,19 @@ AI SDK runtime 在 `src/main/provider/aiSdk/runtime.ts:1178-1224` 将 ChatMessag
 
 legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整或未闭合的 `<function_call>`，尝试多种 JSON 外形，并在失败后用 `jsonrepair`；解析成功后转换为统一的 function tool call。流结束时若检测到 legacy tool use，会发出 `stop: tool_use`（`streamAdapter.ts:216-234`），由上层继续工具循环。
 
-## 6. 边界与未验证事项
+## 6. 参数解析、校验与错误处理
+
+- **参数文本解析**：`ToolService.callTool` 对 Agent 工具先走 `parseAgentToolArguments`（`src/main/tool/index.ts:542-560`）：`JSON.parse` 失败后用 `jsonrepair` 修复，再失败则记录警告并返回空参数对象（:548-558）——即"解析失败降级为空参数"而不是抛错，由后续 schema 校验兜底。legacy `<function_call>` 文本的解析失败路径见 §5（`toolProtocol.ts`）。
+- **schema 校验**：Agent 工具的执行入口在各 handler 前用 zod `schema.safeParse(args)` 校验（`src/main/tool/agentTools/agentToolManager.ts:577` question 工具、`:903` process 工具、`:1008` 文件工具、`:2341`/`:2394` 其他工具、`:2445` skill_run）；MCP 工具的 `inputSchema` 校验发生在 MCP service 侧，本笔记未展开。校验失败的工具以 `tool_call_error`/错误响应回注（见 §7），不进入执行端。
+- **权限/执行失败反馈**：审批未通过时 `ToolService.callTool` 返回 `createPermissionRequiredResponse`（`tool/index.ts:355-361`），以 `action_type: tool_call_permission` 交互块进入 UI（见消息渲染器笔记 §1）；执行异常由 `createAgentToolErrorResult` 包装为可恢复错误（`tool/index.ts:413-428`，`recoverable: true`）。
+
+## 7. 结果回注与 UI 状态
+
+- **回注模型**：工具调用与结果随 transcript 的 assistant block 持久化后，在下一轮上下文构建时转回模型消息——`contextBuilder.ts:958-1038` 把 `tool_call` 块映射为 assistant 消息的 `tool_calls` 字段（:985-1023），并把 `block.tool_call.response` 转成 `role: 'tool'` 消息（:1031-1038，含 `tool_call_id`）；MCP App 的 `modelContext` 也经此通道回注（contextBuilder.ts:45）。失败/错误响应同样以 tool 角色文本进入上下文。
+- **UI 状态**：工具调用的展示状态机（calling/response/end/error 图标、参数/响应折叠、diff、图像预览、审批状态环、自动展开规则）由 `MessageBlockToolCall.vue` 承担（`src/renderer/src/components/message/MessageBlockToolCall.vue:300-378`、`:496-617`），与消息渲染器笔记 §1 的块分发为同一链路，本笔记只记录交接点。
+- 正在进行的工具调用在 renderer 的 `streamingBlocks` 中随流式事件更新，结算后由持久化块接管显示（Chat 笔记 §3）。
+
+## 8. 边界与未验证事项
 
 - 工具目录缓存依赖 runtime instance 和 registry revision；本次未运行动态修改 MCP、Skill 或 Agent 配置时的并发竞态。
 - `full_access`、命令白名单和文件 containment 是源码可见的权限边界；不同工具具体调用是否触发额外审批，取决于其 `preCheckToolPermission` 实现。
@@ -107,7 +119,7 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 - 原生工具和 legacy 工具最终都进入同一 LoopEngine，但各 Provider 的 capability snapshot、参数兼容和流式 finish reason 未逐一实测。
 - 未运行项目测试、构建或外部工具；以上内容来自静态源码证据。
 
-## 7. 关键源码索引
+## 9. 关键源码索引
 
 - 循环引擎与 128 次上限：`src/main/agent/deepchat/loop/deepChatLoopEngine.ts:3-131`
 - session tool profile：`src/main/agent/deepchat/runtime/toolResolver.ts:64-193`
@@ -115,6 +127,9 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 - Agent 工具定义与文件访问：`src/main/tool/agentTools/agentToolManager.ts:399-570`、`:704-850`、`:1494-1509`
 - 权限 broker：`src/main/tool/permission/toolPermissionBroker.ts:130-183`、`:252-335`
 - 命令风险和会话审批：`src/main/tool/permission/commandPermissionService.ts:26-188`
+- 参数解析与 schema 校验：`src/main/tool/index.ts:542-560`、`src/main/tool/agentTools/agentToolManager.ts:577/903/1008/2341/2445`
+- 工具结果回注：`src/main/agent/deepchat/runtime/contextBuilder.ts:958-1038`
+- 工具调用 UI 状态（交接点）：`src/renderer/src/components/message/MessageBlockToolCall.vue:300-378`、`:496-617`
 - MCP server/config 类型：`src/shared/types/mcp.ts:45-123`
 - 原生/legacy AI SDK 工具协议：`src/main/provider/aiSdk/runtime.ts:1178-1224`、`src/main/provider/aiSdk/toolProtocol.ts:38-150`、`src/main/provider/aiSdk/streamAdapter.ts:57-124`
 

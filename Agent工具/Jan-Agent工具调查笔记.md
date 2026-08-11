@@ -68,7 +68,7 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 
 ## 3. 加载与注入
 
-### 2.1 refreshTools
+### 3.1 refreshTools
 
 `custom-chat-transport.ts` `refreshTools`（L815-977）：
 
@@ -81,7 +81,7 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 
 `use-chat.ts`（L111-117）：MCP/RAG 工具名变化时自动 `refreshTools()`，保证 MCP server 启停后工具集及时更新。
 
-### 2.2 schema 规整
+### 3.2 schema 规整
 
 `normalizeToolInputSchemaValue`（custom-chat-transport.ts:213-290，注释称与 Rust 对齐）：
 
@@ -92,7 +92,7 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 
 ## 4. 权限与审批
 
-### 3.1 四级审批
+### 4.1 四级审批
 
 `web-app/src/hooks/useToolApproval.ts`（92 行，zustand + persist）：
 
@@ -103,21 +103,21 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 
 `isToolApproved`（L62-73）优先级：全局工具 > 全局 server > thread 级。持久化在 localStorage 键 `tool-approval`，`skipHydration: true`。
 
-### 3.2 请求与执行时机
+### 4.2 请求与执行时机
 
 - `useToolApprovalRequests.ts`：待审批请求按 `toolCallId` 收集；
 - `MessageItem` 在 `awaitingApproval` 时挂起（L142-149、L519-526），审批结果由 SDK `addToolOutput` 送回；
 - 文档嵌入后自动 `approveToolForThread`（`$threadId.tsx` L1024-1029）；
 - 工具执行留在 onFinish 循环，使工具结果落在已完成的 assistant 消息上（`$threadId.tsx` L172-173、L659-663）。
 
-### 3.3 设置 UI
+### 4.3 设置 UI
 
 - `routes/settings/mcp-servers.tsx`：`toolCallTimeoutSeconds`、智能路由开关、路由模型选择；
 - `routes/settings/web-search.tsx`：provider 与 key。
 
 ## 5. 工具渲染与执行链路
 
-### 4.1 执行链
+### 5.1 执行链
 
 ```text
 useChat.sendMessage
@@ -132,7 +132,7 @@ useChat.sendMessage
 
 `TauriMCPService`（`web-app/src/services/mcp/tauri.ts`）：`getTools()`/`getToolsForServers`/`callTool`/`callToolWithCancellation`（带 cancellationToken）/`cancelToolCall`/`activateMCPServer`/`deactivateMCPServer`；`getMCPConfig` 解析 MCP 配置 JSON（含 legacy 顶层 server 兼容，L46-63）。
 
-### 4.2 渲染
+### 5.2 渲染
 
 - `ToolCallCard` → `components/ai-elements/tool.tsx`（`ToolHeader/Input/Output`，600 字符折叠阈值）；
 - `tool-runtime.tsx`：`ToolElapsed` 计时、`ToolProgressRow`；

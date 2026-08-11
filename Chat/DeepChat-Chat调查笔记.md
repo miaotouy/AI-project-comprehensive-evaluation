@@ -8,7 +8,7 @@
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
-> 调查范围：Chat session 生命周期、SQLite transcript、流式 assistant blocks、IPC/renderer 状态、消息窗口化和模型请求的上下文构建
+> 调查范围：Chat session 生命周期、SQLite transcript、流式 assistant blocks、IPC/renderer 状态、消息窗口化和模型请求的上下文构建、会话内/跨会话搜索
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -91,21 +91,31 @@ message store 的核心状态包括 `messageCache`、`streamingBlocks`、当前 
 
 该窗口化策略同时服务历史分页和流式追加：streaming 行保持可见，远离 viewport 的 settled 消息仅保留估算高度，不等同于一次性把全部历史消息挂载到 DOM。
 
-## 5. Chat 交互边界
+## 5. 搜索、索引与定位
+
+DeepChat 有两层搜索：会话内查找（Cmd/Ctrl+F）与跨会话全文搜索（FTS5）。
+
+- **会话内查找**：`useChatSearch`（`src/renderer/src/features/chat-page/composables/useChatSearch.ts`）在已加载的 display messages 上做匹配，配合 `src/renderer/src/lib/chatSearch` 的高亮应用、命中计数与定位；导航复用共享滚动控制器（`requestChatScroll('search-navigation', ...)`），不与流式自动跟随冲突。该路径只搜索当前窗口已加载的消息，不触发数据库查询。
+- **跨会话全文搜索**：transcript 的完成/错误路径把消息内容写入 `deepchat_search_documents` 表（`src/main/session/data/tables/deepchatSearchDocuments.ts:47-56`，`document_kind: 'session'|'message'`，:9；写入点为 transcript 生命周期，见 §2"同步更新搜索文档"）。SQLite FTS5 虚拟表 `deepchat_search_documents_fts`（:280-287，content=外部内容表）带 `ai/ad/au` 三个触发器保持同步（:309-335）；查询用 `searchFts`（:210-241，bm25 排序、按 token 做短语 AND 匹配），FTS5 不可用或未兼容时回退 `searchLike`（:243-265，`LIKE '%term%'` 标题+内容扫描）。
+- **搜索服务入口**：内存 MCP 服务器 `conversationSearchServer`（`src/main/mcp/inMemoryServers/conversationSearchServer.ts`）暴露 `search_conversations`、`search_messages`、`get_conversation_history`、`get_conversation_stats`（:465-494），即跨会话搜索同时服务于模型工具与设置页。
+- **结果持久化**：`deepchat_message_search_results` 表（`src/main/session/data/tables/deepchatMessageSearchResults.ts:21-40`，含 `message_id/search_id/rank/content/dedupe_key`）保存一次搜索的命中快照；本次未追踪其完整生命周期（写入触发点与清理策略未展开）。
+- **边界**：搜索命中直接定位到消息（message_id），可滚动到目标行；会话列表侧未见独立的会话名搜索路由，跨会话入口以 `search_conversations` 工具为主。
+
+## 6. Chat 交互边界
 
 - `steer`、`queue`、工具 question/permission response 均作为 session turn 的独立输入通道；其交互 UI 不会把 pending input 直接拼进已完成消息。
 - 失败 assistant 消息保留 `error` 状态和错误 block，用户可通过 retry/fork 等操作再次产生新 turn。
 - subagent session 在 ChatPage 中只读，但仍能显示消息、plan、工具状态和最终 child result。
 - transcript 同时服务展示、搜索、Tape 和 usage/trace 等二级数据；本次未追踪所有附件、搜索结果和 legacy import 表的完整迁移链。
 
-## 6. 边界与未验证事项
+## 7. 边界与未验证事项
 
 - SQLite 使用 `better-sqlite3-multiple-ciphers`，但本次未验证实际数据库加密配置、事务隔离和崩溃恢复。
 - 流式 block 的 IPC 顺序依赖 renderer revision/cursor；未运行网络中断、快速切换 session 或重复事件场景。
 - 消息窗口高度是估算与观测的组合，复杂 artifact/图片导致的异步高度变化未通过浏览器实测。
 - 未运行测试、构建或桌面端交互；结论来自 main/renderer 静态源码。
 
-## 7. 消息构建流程
+## 8. 消息构建流程
 
 1. **输入与 UI 消息对象**：`SessionTurn.sendMessage`（`src/main/session/turn.ts:102-145`）接收字符串或 `SendMessageInput`，先经 `normalizeSendMessageInput`，再调用当前 session runtime 的 `send`。附件仍属于 normalized input；无法接受附件时返回 `needs_user_action`（`:145-146`）。
 2. **历史筛选**：`runtime/contextBuilder.ts:1501-1512` 从 transcript 取得候选记录，过滤为 context history，并从 summary cursor 开始构建 history turns。`buildCacheAwareResumeContextWithMetadata`（`:1614-1639`）在重试/恢复时按 `orderSeq` 取到目标 assistant 为止的记录，并保留其所属 user turn；该函数本身没有按父子关系回溯分支。
@@ -114,7 +124,7 @@ message store 的核心状态包括 `messageCache`、`streamingBlocks`、当前 
 5. **最终请求与 Provider**：`contextBuilder` 返回 `leadingMessages + selected history + new user message`；`deepChatLoopRunner.ts:447-469` 将其交给 `processStream`，`:489-528` 以 `requestMessages`、model、temperature、maxTokens、tools 进入 provider attempt 管线。assistant 流式 block 再写回 transcript，形成下一轮候选历史。
 6. **边界**：源码确认了 DeepChat agent 的消息选择、预算和降级顺序；ACP runtime 的具体外部协议 payload 未在本次专题中展开。
 
-## 8. 关键源码索引
+## 9. 关键源码索引
 
 - turn 操作：`src/main/session/turn.ts:36-405`
 - pending input DTO：`src/shared/types/agent-interface.d.ts:258-275`
@@ -122,6 +132,8 @@ message store 的核心状态包括 `messageCache`、`streamingBlocks`、当前 
 - assistant block 表：`src/main/session/data/tables/deepchatAssistantBlocks.ts:76-115`、`:223-264`
 - transcript 生命周期：`src/main/session/data/transcript.ts:166-381`
 - session 字段：`src/main/session/data/tables/newSessions.ts:13-30`
+- 会话内查找：`src/renderer/src/features/chat-page/composables/useChatSearch.ts`、`src/renderer/src/lib/chatSearch`
+- 跨会话 FTS 搜索：`src/main/session/data/tables/deepchatSearchDocuments.ts:47-56`、`:210-265`、`:309-335`、`src/main/mcp/inMemoryServers/conversationSearchServer.ts:465-494`
 - ChatPage 组合：`src/renderer/src/features/chat-page/ChatPage.vue:86-232`、`:431-435`
 - display message 稳定缓存：`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:341-425`
 - 消息窗口和滚动恢复：`src/renderer/src/features/chat-page/ChatPage.vue:512-584`、`:728-826`

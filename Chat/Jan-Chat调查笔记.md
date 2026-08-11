@@ -95,7 +95,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 `commands.rs`（406 行）：
 
 - `create_thread`（L67-89）：**前端传入 id 被服务端 `Uuid::new_v4()` 覆盖**（L79-80），写入 `threads/{uuid}/thread.json`；
-- `create_message`（L142-214）：加 per-thread 锁，与 modify 的 upsert 去重——存在则直接返回（L192-202），否则 append+flush（L204-214）；
+- `create_message`（L159-218）：加 per-thread 锁，与 modify 的 upsert 去重——存在则直接返回（L192-202），否则 append+flush（L204-214）；
 - `modify_message`（L224-268）：锁内替换，找不到则 upsert 追加，整文件重写；
 - `delete_message`（L275-298）：retain 后整文件重写；
 - assistant 三命令 `get_thread_assistant`（L306）/`create_thread_assistant`（L337）/`modify_thread_assistant`（L369）读写 thread.json——**web 层无任何调用，属遗留 API**（实际写盘路径是整线程覆写）。
@@ -125,7 +125,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 `web-app/src/hooks/use-chat.ts`（149 行）：
 
 - `transportRef` 持 `CustomChatTransport`，跨渲染复用；已有 session transport 优先（L49-62）；
-- `useChatSDK`：`experimental_throttle: 50`、`resume: false`（L100-101）；
+- `useChatSDK`：`experimental_throttle` 由调用方传入（use-chat.ts:100-101 透传 `options.experimental_throttle`，字面值 `50` 在 `$threadId.tsx:292`）、`resume: false`（use-chat.ts:101）；
 - MCP/RAG 工具名变化时 `refreshTools()`（L111-117）；
 - 暴露 `setContinueFromContent` 与 `updateRagToolsAvailability`。
 - 会话 store（`chat-session-store.ts`）按 sessionId 保存 Chat 实例 + transport。
@@ -176,7 +176,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 - `metadata.stopped`：`onFinish` 在 `isAbort || finishReason==='length'` 时写 true（L341-354）；Continue 按钮仅 `isLastMessage && isStopped` 显示（MessageItem L599-608）。
 - 错误元数据：`metadata.error` + `error_code`；`$threadId.tsx` 错误挂载 effect（L1588-1632）：错误找最后一条 assistant（无则最后用户消息）；context overflow 走全局 banner（`stampContextErrorOnThread`+`setContextLimitError`）；否则 `message-errors.setError` 并写 `metadata.error`；L1636-1651 兜底持久化。
 
-## 6. Thread 管理（列表/搜索/重命名/导航）
+## 7. Thread 管理（列表/搜索/重命名/导航）
 
 `web-app/src/hooks/useThreads.ts`（489 行）与 `useThreadManagement.ts`（116 行）、`SearchDialog.tsx`（376 行）：
 
@@ -186,7 +186,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 - 删除对话框 `DeleteThreadDialog`/`DeleteAllThreadsDialog`（`NavChats` 仅显示 >=1 时挂 `<DeleteAllThreadsDialog>`）。
 - 重命名 `RenameThreadDialog`。
 
-## 编辑/删除/分支/续写全景（`$threadId.tsx`）
+## 8. 编辑、删除、分支与续写全景（`$threadId.tsx`）
 
 | 操作 | 路由/状态 | 主要组件 |
 |---|---|---|
@@ -200,7 +200,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 
 `makeSibling`（`message-branching.ts` L236-256）：新 id/created_at/`Metadata` 继承父节点、清 `error`、`content` 替换为纯文本；`planContinuation`（L217-230）原地续写分支；`repairDetachedAssistants`（L170-204）修复 #8432 pre-落地 `parentId:null` 幽灵根。
 
-## 8. 缺陷 / 边界 / 设计取舍
+## 9. 缺陷 / 边界 / 设计取舍
 
 以下按【代码确认】／【推测】区分证据强度：
 
@@ -214,7 +214,7 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 8. **编辑除改写文本外会丢弃图片/媒体 content**（`makeSibling` 只保留文本）——设计上原版本仍保留可回退，但用户编辑直观上“图片不见了”。【代码确认】
 9. **错误位置**与 banner 互斥：全局 banner 隐藏最后一条失败 assistant 消息，而 error 又写 metadata.error——两者可能同时存在，UI 呈现交由 banner 端配置【代码确认】，行为未实测。
 
-## 9. 横向比较坐标
+## 10. 横向比较坐标
 
 | 维度 | Jan |
 |---|---|
@@ -226,9 +226,9 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 | 分支/编辑 | parentId 树 + makeSibling 新版本 + continue 原地续写 |
 | 队列 | 流式/提交时入队，ready 自动发出，error 清空 |
 | 刷新/恢复 | resume:false；初始消息 sessionStorage 恢复 |
-| 消息列表 | 全量渲染，`content-visibility` 优化，无窗口化（同 AIO-Hub，未做 windowing） |
+| 消息列表 | 全量渲染，无窗口化/虚拟化（`@tanstack/react-virtual` 仅用于 Hub 模型列表，`web-app/src/routes/hub/index.tsx:282`）；本轮未找到 `content-visibility` 样式声明（同 AIO-Hub，未做 windowing） |
 
-## 10. 关键源码索引
+## 11. 关键源码索引
 
 - 前端中枢：`web-app/src/routes/threads/$threadId.tsx`
 - 输入框/发送/队列：`web-app/src/containers/ChatInput.tsx`、`web-app/src/hooks/usePrompt.ts`、`message-queue-store.ts`
@@ -237,6 +237,6 @@ THREADS_DIR = "threads"; THREADS_FILE = "thread.json"; MESSAGES_FILE = "messages
 - 消息转换：`web-app/src/lib/messages.ts`、`completion.ts`
 - 附件处理：`web-app/src/lib/attachmentProcessing.ts`、`web-app/src/hooks/useChatAttachments.ts`
 - 编辑：`web-app/src/containers/dialogs/EditMessageDialog.tsx`
-- 状态存根：`web-app/src/stores/chat-session-store.ts`、`message-errors.ts`、`message-branching.ts`
+- 状态存根：`web-app/src/stores/chat-session-store.ts`、`web-app/src/stores/message-errors.ts`、`web-app/src/lib/message-branching.ts`
 - Rust 持久化：`src-tauri/src/core/threads/commands.rs`、`helpers.rs`、`db.rs`、`constants.rs`
 - 前端 List/Store：`web-app/src/hooks/useThreads.ts`、`useMessages.ts`、`useThreadManagement.ts`

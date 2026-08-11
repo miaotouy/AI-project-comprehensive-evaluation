@@ -24,6 +24,24 @@ Jan 的“角色”即 `Assistant` 实体：**每个助手一个目录一个 JSO
 4. system prompt 由 `renderInstructions(threadAssistant.instructions)` 生成，`{{current_date}}` 用 UTC 长月份替换；线程有助手且非 `model-only` 时才采用其推理参数。
 5. 默认助手带一个 `type:'retrieval'` 且 `enabled:false` 的工具定义（top_k=2、chunk_size=1024、chunk_overlap=64、retrieval_template）——RAG 工具能力挂靠在助手工具声明上。
 
+## 总体生效链路
+
+从角色选择到请求的完整链路（静态确认）：
+
+```text
+AssistantSwitcher / AssistantsMenu 选择助手
+  -> updateCurrentThreadAssistant（web-app/src/hooks/useThreads.ts:362-379）
+      写入线程快照 assistants: [{...assistant, model: 线程当前模型}]
+  -> $threadId.tsx:205-208 读取 thread.assistants[0]
+      systemMessage = renderInstructions(threadAssistant.instructions)
+  -> CustomChatTransport.sendMessages 拼接 system + 上下文
+      （web-app/src/lib/custom-chat-transport.ts:1229-1240，见 Chat 笔记 §3.2）
+```
+
+- 快照语义：切换助手改写的是线程内嵌快照而非全局 assistant 对象；`SamplerPopover.tsx:106` 在线程内编辑参数时同样走 `updateCurrentThreadAssistant`。
+- 无助手（`model-only`）时 `instructions` 为空、systemMessage 为 undefined，请求不带助手指令（threads/default.ts:86-91）。
+- 生效边界：指令与推理参数走线程快照；助手的 `model:'*'` 与模型能力（tools/vision）的运行时解析关系未逐项核对（见 §6 未验证）。
+
 ## 1. 数据模型
 
 `core/src/types/assistant/assistantEntity.ts`：
@@ -46,6 +64,10 @@ AssistantTool { type, enabled, useTimeWeightedRetriever?, settings }
 
 web 侧 `web-app/src/types/threads.d.ts:57` 的 `Assistant`（`avatar/id/name/created_at/description/instructions/parameters`）与 core 的 `Assistant`（含 `model/tools/file_ids`，无 `parameters`）形状不同；assistant-extension 的 v2 迁移却写入 `parameters` 字段（L184-187）。web 侧未见 tools 持久化路径。这是源码层面的事实性不一致，横向比较时需要注意 core/web 两侧对“助手能干什么”的表述并不一致。
 
+### 1.2 工具、知识库与记忆（交接 Agent 工具笔记）
+
+助手侧能声明的能力只有 `retrieval` 工具（`AssistantTool`）与 `file_ids`；文档嵌入线程后前端自动 `approveToolForThread`（`$threadId.tsx:1028`）。MCP/Web 搜索/RAG 工具的实际加载、注入、审批与执行链路属 Agent 工具类目，见 `../Agent工具/Jan-Agent工具调查笔记.md`，本笔记只记录助手声明这一交接点；记忆与子 Agent 机制本次未在助手层找到（见 §6）。
+
 ## 2. 持久化与迁移
 
 `extensions/assistant-extension/src/index.ts`（355 行）：
@@ -57,6 +79,8 @@ web 侧 `web-app/src/types/threads.d.ts:57` 的 `Assistant`（`avatar/id/name/cr
 - v3：剥掉身份前缀（L212-241）：对 `V2_IDENTITY_LINE + defaultAssistant.instructions` 开头的助手重置为默认指令（L220-231）。
 
 数据目录：`src-tauri/src/core/app/constants.rs` `JAN_DATA_DIRS_CONVERSATIONS = ["threads", "assistants"]`。
+
+**导入导出与分享**：本次未找到角色导入导出机制——检索范围：`routes/settings/assistant.tsx`、`AddEditAssistant.tsx`、`AssistantsMenu.tsx` 与 `assistant-extension` 全部源码，未见文件导入、JSON 分享或导出入口；跨设备迁移只能依赖复制数据目录（`file://assistants/<id>/assistant.json`）。兼容性仅体现在 v1-v3 版本迁移（见上）。
 
 ## 3. 默认助手
 
@@ -100,6 +124,7 @@ web 侧 `hooks/useAssistant.ts`（209 行）也有默认助手（id `'jan'`、`c
 - `{{current_date}}` 只有这一个模板变量（事实）；没有用户变量/场景变量系统。
 - 默认助手的 `model:'*'` 与模型能力（tools/vision）的运行时解析关系未逐项核对。
 - web 侧未见 tools 的持久化：助手工具配置在 UI 编辑后是否写入 `assistant.json` 未验证。
+- 角色无导入导出机制（检索范围见 §2），跨设备迁移只能复制数据目录——迁移的运行时行为未验证。
 - 未运行项目测试或构建；记录来自静态源码。
 
 ## 7. 关键源码索引
@@ -111,6 +136,7 @@ web 侧 `hooks/useAssistant.ts`（209 行）也有默认助手（id `'jan'`、`c
 - system prompt：`web-app/src/routes/threads/$threadId.tsx:205-208`
 - 推理参数来源：`web-app/src/lib/custom-chat-transport.ts:773-784`
 - 指令模板：`web-app/src/lib/instructionTemplate.ts`
+- 助手切换与线程绑定：`web-app/src/containers/AssistantSwitcher.tsx:68`、`web-app/src/hooks/useThreads.ts:362-379`
 - web 侧助手 store：`web-app/src/hooks/useAssistant.ts`（store 结构 L6-20、默认助手 L30-56、初始状态 L104-111、setAssistants L192-208）、`web-app/src/providers/DataProvider.tsx:240-253`
 - 设置 UI：`web-app/src/routes/settings/assistant.tsx`、`web-app/src/containers/dialogs/AddEditAssistant.tsx`
 - 助手切换：`web-app/src/containers/AssistantsMenu.tsx`、`AssistantSwitcher.tsx`

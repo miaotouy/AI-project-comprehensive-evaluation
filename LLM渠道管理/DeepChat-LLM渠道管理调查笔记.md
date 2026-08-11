@@ -8,7 +8,7 @@
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
-> 调查范围：Provider 数据模型、默认渠道、模型能力配置、AI SDK 路由、请求运行时、模型状态和限流
+> 调查范围：Provider 数据模型、默认渠道、模型能力配置、AI SDK 路由、请求运行时、模型状态和限流、凭据存储与脱敏、实例解析、连接检测与可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -82,15 +82,35 @@ Provider + model config + capability snapshot
 
 `ProviderInstanceManager` 与 `ModelManager` 维护 Provider runtime 实例和模型启停状态；本次未发现根据失败率、成本或延迟在多个 Provider 之间自动选择的路由器。
 
-## 7. 边界与未验证事项
+## 7. 凭据、Header 与代理边界
 
-- API key、OAuth token 和 baseUrl 属于 Provider 配置对象；本次未运行凭据存储、导入导出和数据库加密流程。
+- **静态存储**：Provider 的 `apiKey` 与 `baseUrl` 作为 `providers` 表的普通列明文落库（`src/main/provider/data/settingsTable.ts:189` 的 `api_key` 列，:168-199 的 INSERT/UPDATE），同时整份 `provider_json` 也写入该表（:182）；数据库本身使用 `better-sqlite3-multiple-ciphers`（见 `package.json` dependencies），但源码未显示对单条 apiKey 的加密处理。API key、OAuth token 和 baseUrl 属于 Provider 配置对象；本次未运行数据库加密、导入导出和备份流程（沿用 §10 未验证）。
+- **OAuth 凭据例外**：OpenAI Codex 与 xAI Grok 的 OAuth token 走专用 `credentialStore`，使用 Electron `safeStorage` 加密封装（`src/main/provider/auth/openaiCodex/credentialStore.ts:22-43`、`src/main/provider/auth/xaiGrok/credentialStore.ts`，`isEncryptionAvailable()` 不可用时回退 file 存储）。
+- **Header 组装**：请求头在 AI SDK runtime 统一构造——`buildPromptRuntime` 经 `createAiSdkProviderContext` 带入 `defaultHeaders`（`src/main/provider/aiSdk/runtime.ts:1187-1194`），`ProviderSettings` 构造阶段为部分 Provider 补齐 `defaultHeaders`（`src/main/provider/baseProvider.ts:54-67`）；HTTP(S) 代理依赖 `https-proxy-agent`（`package.json`），具体注入点在 providerFactory 的 fetch 适配层，本次未逐渠道核对。
+- **脱敏与日志**：`src/main/lib/redact.ts:4-40` 定义敏感 Header/Body key 列表（`authorization`、`api-key`、`token`、`secret`、`password` 等），用于请求 trace payload 的脱敏；trace 是否落盘由调用方控制（见 §9）。凭据是否进入导出/备份文件本次未验证。
+
+## 8. 运行时选择、绑定与路由
+
+- **实例解析**：`ProviderInstanceManager`（`src/main/provider/managers/providerInstanceManager.ts:31-100`）持有 Provider id → `BaseLLMProvider` 实例的映射，`getProviderInstance(providerId)`（:100）按需创建并缓存；Provider 配置变更时重建实例（:130-207 的变更监听）。
+- **渠道身份**：运行时的"选择"发生在会话/Agent 层——session 记录 `providerId + modelId`（见 Chat 笔记 `new_sessions` 字段），请求时由 `ProviderRuntime.check`（`src/main/provider/index.ts:774-821`）或 AI SDK runtime 按 providerId 取实例；同一 `apiType` 的多个 Provider 各自持有独立 endpoint/key，不存在按 apiType 合并渠道的行为。
+- **路由边界**：本次未发现基于失败率、成本、延迟或权重的跨 Provider 自动路由；模型 fallback 若存在则由会话层（`deepChatLoopRunner` 的 provider attempt 管线，见 Chat 笔记 §8.5）驱动，不属于渠道层职责。
+
+## 9. 连接检测、日志与可观测性
+
+- **连接测试**：`ProviderService.testConnection`（`src/main/provider/providerService.ts:52-61`）带 5 秒超时（`PROVIDER_QUERY_TIMEOUT_MS = 5_000`，:18），通过 `providerExecutionPort.testConnection` 转发到真实执行端口（`src/main/provider/routes.ts:94-95`）。实际执行在 `ProviderRuntime.check`（`src/main/provider/index.ts:774-821`）：提供 modelId 时用真实 completions 调用（发送 `'hi'` 测试消息，:784-787，60 秒兜底）验证，未提供时走 Provider 自己的 `check()`（:809，如 `acpProvider.ts:286`）。因此设置页的连接测试复用真实运行链路，不是独立 mock 路径。
+- **请求 trace**：`requestTrace.ts` 的 `resolveRequestTraceContext`（`src/main/provider/requestTrace.ts:18-26`）从 `ModelConfig.requestTraceContext` 读取 enabled/persist 回调；runtime 在 `buildPromptRuntime` 中记录 endpoint、headers、body 摘要（`src/main/provider/aiSdk/runtime.ts:1329/1442/1495/1551`），经 `redact.ts` 脱敏后交给 persist，是否落盘由注入方（会话 runtime）决定——笔记 §4 所述"具体是否落盘由调用方控制"即指此。
+- **错误归一化**：连接测试把 Provider 异常统一折叠为 `{ isOk, errorMsg }`（`provider/index.ts:800-813`）；聊天链路错误以 `error` 事件和错误块进入 transcript（见 Chat 笔记 §2），Provider 层未见独立的跨渠道错误归一化表，不同 AI SDK 的错误文本由上层 `formatAssistantErrorSummary` 处理（`contextBuilder.ts:820-854`）。
+
+## 10. 边界与未验证事项
+
+- API key、OAuth token 和 baseUrl 属于 Provider 配置对象；本次未运行凭据存储、导入导出和数据库加密流程。OAuth safeStorage 加密封装为源码确认，普通 Provider apiKey 的明文落库为源码确认（`settingsTable.ts:189`）。
 - Provider DB 是外部聚合 JSON 加本地默认值的双来源；未验证离线、隐私模式或版本升级时的最终合并结果。
 - `apiType` 的 runtime strategy 覆盖多个渠道，但各渠道对 reasoning、tool、媒体和 embedding 的实际兼容性未逐一实测。
 - 限流按 Provider 维护内存队列；未验证应用重启、Provider 删除、多个 session 竞争和跨进程并发。
+- 连接测试的 5 秒/60 秒超时与真实聊天请求的超时策略不同（`runtime.ts:1286-1291` 由 caller signal 与模型 timeout 合并），未实测慢渠道在两种路径下的行为差异。
 - 未运行项目测试、构建或真实 API 请求；结论来自静态源码。
 
-## 8. 关键源码索引
+## 11. 关键源码索引
 
 - Provider/ModelConfig 类型：`src/shared/types/provider.ts:74-106`、`:370-413`
 - 默认渠道：`src/main/provider/defaults.ts:3-25`、`:209-344`、`:569-570`、`:978-1011`
@@ -98,7 +118,10 @@ Provider + model config + capability snapshot
 - ProviderSettings 初始化/迁移：`src/main/provider/settings.ts:322-412`
 - 有效模型配置与导入导出：`src/main/provider/settings.ts:1261-1399`
 - Provider 基类模型目录：`src/main/provider/baseProvider.ts:31-320`
+- Provider 实例管理与路由边界：`src/main/provider/managers/providerInstanceManager.ts:31-207`、`src/main/provider/index.ts:774-821`
 - AI SDK runtime：`src/main/provider/aiSdk/runtime.ts:1178-1350`、`:1357-1766`
 - 原生/legacy stream：`src/main/provider/aiSdk/streamAdapter.ts:57-124`、`src/main/provider/aiSdk/toolProtocol.ts:38-150`
 - Provider QPS 队列：`src/main/provider/managers/rateLimitManager.ts:24-190`、`:284-385`
+- 凭据存储与脱敏：`src/main/provider/data/settingsTable.ts:156-200`、`src/main/provider/auth/openaiCodex/credentialStore.ts`、`src/main/lib/redact.ts`
+- 连接检测与 trace：`src/main/provider/providerService.ts:18-61`、`src/main/provider/requestTrace.ts:18-26`
 

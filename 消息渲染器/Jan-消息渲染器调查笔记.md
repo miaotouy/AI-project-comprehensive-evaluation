@@ -1,6 +1,6 @@
 # Jan 消息渲染器调查笔记
 
-> 调查对象：`E:\works\git\jan`（重点 `web-app/src/containers/RenderMarkdown.tsx`、`web-app/src/containers/MessageItem.tsx`、`web-app/src/lib/messages.ts`、`web-app/src/containers/HtmlArtifact.tsx`、`web-app/src/containers/ChatInput.tsx`）
+> 调查对象：`E:\works\git\jan`（重点 `web-app/src/containers/RenderMarkdown.tsx`、`web-app/src/containers/MessageItem.tsx`、`web-app/src/lib/messages.ts`、`web-app/src/components/HtmlArtifact.tsx`、`web-app/src/containers/ChatInput.tsx`）
 >
 > 调查更新日期：2026-08-06
 >
@@ -58,7 +58,15 @@ Jan 值得关注的三个设计点：
 
 ### 1.3 输入区（ChatInput.tsx，2648 行）
 
-聊天输入由 `ChatInput.tsx` 承担：text/markdown 输入、文件上传、多模态图片、停止/继续流式等。本快照**未发现语音输入**相关代码（搜索 `speech`/`voice`/`webkitSpeechRecognition` 无命中；见 §3 未验证）。
+聊天输入由 `ChatInput.tsx` 承担：text/markdown 输入、文件上传、多模态图片、停止/继续流式等。本快照**未发现语音输入**相关代码（搜索 `speech`/`voice`/`webkitSpeechRecognition` 无命中；见 §4 未验证）。
+
+### 1.4 消息列表、窗口化与滚动
+
+列表容器 `web-app/src/components/ai-elements/conversation.tsx`（97 行）：`Conversation` 包装 `use-stick-to-bottom` 的 `StickToBottom`（L10-18，initial/resize 均 smooth，`role="log"`），`ConversationContent` 是消息列容器（L24-29），`ConversationScrollButton` 在非底部时显示回底按钮（L70-96）；`$threadId.tsx:1694-1847` 挂载使用。
+
+- **无窗口化/虚拟化**：消息列表全量渲染；`@tanstack/react-virtual`（`web-app/package.json` 依赖）仅用于 Hub 模型列表（`web-app/src/routes/hub/index.tsx:282` `useVirtualizer`），消息列表未使用；
+- 本轮未在 web-app 找到 `content-visibility` 样式声明（grep 无命中），长列表性能依赖 MessageItem 的 memo 比较器与流式节流（§1.2、§2.2），无窗口化策略；
+- 滚动锚定由 StickToBottom 的 `isAtBottom`/`scrollToBottom` 提供；分支/版本切换时的滚动定位行为未运行验证。
 
 ## 2. RenderMarkdown
 
@@ -95,10 +103,16 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 
 - 正文 HTML 消毒由 streamdown fork 的 `defaultRehypePlugins.harden` 承担（L62）；仓库源码中未发现 DOMPurify 使用；
 - `LINK_SAFETY = { enabled: false }`（L65、L360）——链接安全检查被显式关闭；
-- `web-app/src/containers/HtmlArtifact.tsx`（151 行）：iframe 承载，默认严格 CSP + sandbox 不透明源；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；
+- `web-app/src/components/HtmlArtifact.tsx`（151 行）：iframe 承载，默认严格 CSP + sandbox 不透明源；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；
 - 链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源。`lib/citation-parser.ts` 与 `lib/grounding.ts`（句子切分 + 余弦相似度）负责从工具输出提取引用并做真值校验。
 
-## 3. 边界与未验证事项
+## 3. 扩展方式与新增节点机制
+
+- **部件层无注册表**：消息部件按 `part.type` 在 `MessageItem.renderedParts`（L413-475）中顺序分派——`text` → renderTextPart（RenderMarkdown）、`file` → renderFilePart、`reasoning`/`tool-*` → ChainOfThoughtGroup（`isCotPart`，L416-417）；新增类型需同时改转换层（`messages.ts` 的 ThreadMessage ↔ UIMessage 转换，§1.1）与分派分支，无插件注册表；
+- **Markdown 层扩展点**：`RenderMarkdown` 的 `mergedComponents`（L233-252）覆写 `a`（`#cite-`/`#webcite-` 锚点 → CitationLink/WebCitationChip）与 `table` → MarkdownTable，并与调用方传入的 `components` prop 合并；代码/数学/Mermaid 走 Streamdown 插件常量（§2.1），注释明确不覆写 `code` 组件以保留 html/svg 拆段（L254-257）；
+- **扩展边界（静态确认）**：本快照未发现 schema 驱动或注册表式的动态渲染组件机制；新增节点类型是硬编码分派。
+
+## 4. 边界与未验证事项
 
 - streamdown 内部 harden 的标签/属性白名单无法从本仓库源码确认（推测项）；
 - `LINK_SAFETY={enabled:false}` 的影响范围（streamdown 按协议白名单过滤链接的逻辑）未确认；
@@ -106,9 +120,10 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 - `editMessage` 后重新渲染、分支切换时的引用/grounding 状态一致性未验证；
 - “无语音输入”结论基于源码搜索（`speech`/`voice`/`webkitSpeechRecognition` 无命中），未运行验证；
 - `MermaidError`（30 行）在流式错误时直接展示，错误内容/样式未运行确认；
+- 长会话下列表全量渲染的实际性能（无窗口化）未运行验证；
 - 未运行项目测试或构建；记录来自静态源码，UI 行为（动画、无障碍、平台差异）需运行验证。
 
-## 4. 关键源码索引
+## 5. 关键源码索引
 
 - 渲染主组件：`web-app/src/containers/RenderMarkdown.tsx`（380 行）
 - 消息部件分派：`web-app/src/containers/MessageItem.tsx`（683 行）
@@ -116,9 +131,9 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 - 部件类型：`web-app/src/containers/message/types.ts`（36 行）
 - 消息转换：`web-app/src/lib/messages.ts`
 - 引用解析 / grounding：`web-app/src/lib/citation-parser.ts`、`web-app/src/lib/grounding.ts`
-- HTML 工件：`web-app/src/containers/HtmlArtifact.tsx`（151 行）
+- HTML 工件：`web-app/src/components/HtmlArtifact.tsx`（151 行）
 - 代码块：`web-app/src/components/ai-elements/code-block.tsx`
 - 工具卡片：`web-app/src/components/ai-elements/tool.tsx`、`tool-runtime.tsx`；`RagToolWidget.tsx`、`WebToolWidget.tsx`
 - 渲染子组件：`ChainOfThoughtGroup`（296 行）、`ToolCallCard.tsx`（120 行）、`Citations`（224 行）、`CitationLink`（90 行）、`WebSourcesRow`（63 行）、`MarkdownTable`（156 行）、`MermaidError`（30 行）
 - 样式钩子：`index.css:261`（`[data-streamdown="code-block-header"]`）
-- 列表容器：`web-app/src/containers/conversation.tsx`
+- 列表容器：`web-app/src/components/ai-elements/conversation.tsx`（97 行，use-stick-to-bottom）
