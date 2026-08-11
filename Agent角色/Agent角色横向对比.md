@@ -20,8 +20,8 @@
 | AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 317 | `master` | `346b85db9d79207ea7b51694cce5276203612af4` |
 | Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 185 | `main` | `7450ab2dde5eacab4a8721f8680006ba8b99438d` |
 | Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 175 | `main` | `b7673c23860db5dd6da7f42dec5fc21f6b13de1a` |
-| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 103 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
-| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 111 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
+| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 140 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
+| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 142 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
 | LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 208 | `canary` | `4edba1b75a97b91c28ad48cd1cc90528defa17ad` |
 | Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 57 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
 | NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 156 | `main` | `706a18b95b714ab29b2a4842d3b9ff4f887935d5` |
@@ -137,7 +137,7 @@ AIO Hub、Cherry Studio、LobeHub、DeepChat、SillyTavern、VCPChat 和 VCPTool
 | AstrBot | `system_prompt` + 偶数条 `begin_dialogs` | Persona 追加为 `# Persona Instructions`；Skills、工具提示、环境提示和 router prompt 后续继续追加；begin dialogs 位于历史前 | Persona 不绑定模型；Provider/模型在外层配置 |
 | Chatbox | 单段 Copilot `prompt` | 创建 Session 时成为首条 system 消息 | Provider、modelId、temperature 等属于 Session，不属于 Copilot |
 | Cherry Studio | 单段 `prompt`，支持变量 | Assistant prompt 先写入；存在 `tool_search` 时再追加 deferred-tools 提示 | Assistant 保存 `modelId` 与 `AssistantSettings` |
-| DeepChat | descriptor `systemPrompt` | 最终 prompt 拼装顺序未在角色笔记中展开 | Agent config 保存多种模型 preset 与生成参数 |
+| DeepChat | descriptor `systemPrompt` | `PromptAssemblyService.build` → `buildSystemPromptWithSkills` 九段拼接（basePrompt 最前，`systemPromptBuilder.ts:260-268`）；ACP 子会话直返原文 | Agent config 保存多种模型 preset 与生成参数 |
 | Jan | 单段 `instructions`，支持 `{{current_date}}` | 从 thread 快照渲染 system prompt；只有非 `model-only` Assistant 才采用其参数 | Assistant/thread 快照保存模型；web/core 参数形状仍有未确认差异 |
 | LobeHub | `systemRole` + `fewShots` + opening + input template | 输入模板和少样本位置已确认，完整最终顺序未调查 | Agent 保存 `provider/model/params` 与大量 chatConfig |
 | Manifold Desktop | 全局单段 `systemPrompt` | OpenAI 放消息首部，Anthropic 放顶层 `system`，Gemini 放 `systemInstruction` | 全局 `activeProviderId/model/temperature` |
@@ -196,7 +196,7 @@ AIO Hub、Cherry Studio、LobeHub、DeepChat、SillyTavern、VCPChat 和 VCPTool
 | Chatbox | 应用备份 ZIP/JSON、远端 Copilot 市场 | 主要携带单段 prompt 和元数据；模型、few-shot、工具不在 Copilot 中 |
 | Cherry Studio | Resource Catalog / assistant transfer；v1 -> v2 migrator | 工具配置不随模板跨机器迁移；少样本和世界书没有 v2 原生对应 |
 | DeepChat | 未调查独立 Agent 导入/导出 | descriptor 迁移和 UI 兼容分支未覆盖 |
-| Jan | 每 Assistant 一个 JSON，内建 v1/v2/v3 迁移 | core/web 类型不一致，parameters/tools 的完整往返仍未确认 |
+| Jan | 每 Assistant 一个 JSON，内建 v1/v2/v3 schema 迁移；无独立导入导出接口（跨设备迁移只能复制数据目录） | core/web 类型不一致，parameters/tools 的完整往返仍未确认 |
 | LobeHub | 市场导入；完整 AgentConfig JSON 导出 | 可携带 Agent 配置；外部插件、知识库和模型资源仍依赖目标环境 |
 | Manifold Desktop | 提示词库每条 JSON；角色导入不存在 | 只能复用文本，不能表达会话角色、模型包或能力绑定 |
 | NextChat | 单个或数组 Mask JSON；URL `?mask=<id>` | 导入只检查 name，无 schema 版本、字段白名单或冲突策略；URL 只分享已有 id |

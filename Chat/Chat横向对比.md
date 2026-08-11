@@ -180,7 +180,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 - **Chatbox**：有独立的 `SearchDialog`，支持“当前会话”和“全部会话”两种范围；`sessionHelpers.searchSessions` 分页读取 IndexedDB 中的完整 Session，扫描当前消息与历史 Thread，返回命中的具体消息，点击结果后调用 `scrollToMessage` 定位。实现采用数据层分页全量扫描，没有使用 DOM 搜索或持久化倒排索引（`SearchDialog.tsx:50-65,168-203`、`sessionHelpers.ts:877-929`）。
 - **LobeHub**：侧栏的 `TopicSearchBar`/`AllTopicsDrawer` 已有全量 Topic 搜索；服务端 `TopicModel.queryByKeyword` 用 BM25 同时匹配 Topic 标题和消息内容，但返回的是 Topic 列表，不直接定位到具体消息。另有 `message.searchMessages` 后端查询端点，但本次未找到聊天 UI 对该端点的调用，因此不能把它等同于用户可见的消息定位搜索。
 - **SillyTavern**：本次仍未找到聊天内容检索 UI；现有 `search` 相关代码集中在端点/扩展和 slash command 语义，不应据此断言完全不存在其它未覆盖入口。
-- **DeepChat**：完成/错误结算会同步更新搜索文档，transcript 因而具备消息级检索材料；本次笔记没有继续核对 Chat UI 的搜索入口和命中后定位行为。
+- **DeepChat**：两层搜索均已确认。会话内 Cmd/Ctrl+F 走 `useChatSearch`（`composables/useChatSearch.ts`）在已加载 display messages 上匹配并定位，不触发数据库查询；跨会话全文搜索把完成/错误消息写入 `deepchat_search_documents`（`deepchatSearchDocuments.ts:47-56`），SQLite FTS5 虚拟表带三个触发器同步（`:280-335`），查询用 bm25（`searchFts`）或 `LIKE` 回退（`searchLike`），命中直接定位到消息（message_id）并可滚动到目标行；搜索同时经 MCP 服务 `conversationSearchServer`（`conversationSearchServer.ts:465-494`）暴露给模型工具与设置页。
 - **Hermes Agent**：SQLite `state.db` 带会话搜索 mixin/FTS，会话列表与搜索在 SQL 中完成，前端只取必要字段；笔记确认了后端索引路径，但未把桌面命中跳转逐项展开。
 - **Jan**：`useThreads` 用 Fzf 懒建索引，SearchDialog 展示并导航 Thread；这是会话列表搜索，不是消息正文命中后定位。
 - **Manifold Desktop**：逐个读取 session JSON，对整份 dump 做不区分大小写子串匹配，无索引和结果上限；而正常聊天未保存，搜索 API 也可能搜不到刚聊过的内容。
@@ -189,7 +189,7 @@ AstrBot 的多个 conversation 是同一 UMO 下可切换的独立对话，不�
 - **Pi**：会话列表按 cwd 扫描 JSONL（并发上限 10），搜索是选择器内的 `id+名称+全部消息文本+cwd` token/正则匹配（`session-selector-search.ts`），结果是会话级命中；无消息级持久化索引。
 - **OpenCode**：仅会话标题 `LIKE` 搜索（session.ts:993-995，`session.list({search})`），结果定位到会话；**消息内容全文搜索本次未找到实现**。消息分页用游标（`MessageV2.page`，base64url {id,time}），App timeline 向上加载。
 
-结论：Chatbox 已确认能从 Session 数据命中并定位具体消息；LobeHub、Hermes Agent、DeepChat 具有数据库或搜索文档基础，但用户可见定位链路的证据不齐；Jan、Open WebUI、AIO Hub、Manifold Desktop 主要返回会话级结果；Cherry Studio 与 VCPChat 分别受虚拟 DOM 和多模态内容形态限制。现有笔记仍未确认任何项目完整满足“持久化消息索引 + 跨分支/跨会话命中 + 直接定位具体消息”三个条件。
+结论：Chatbox 与 DeepChat 已确认能从数据层命中并定位具体消息（Chatbox 走 IndexedDB Session 扫描，DeepChat 走 FTS5 全文索引 + 命中 message_id 定位）；LobeHub、Hermes Agent 具有数据库或搜索文档基础，但用户可见定位链路的证据不齐；Jan、Open WebUI、AIO Hub、Manifold Desktop 主要返回会话级结果；Cherry Studio 与 VCPChat 分别受虚拟 DOM 和多模态内容形态限制。现有笔记仍未确认任何项目完整满足“持久化消息索引 + 跨分支/跨会话命中 + 直接定位具体消息”三个条件（DeepChat 的 FTS5 覆盖消息级命中与定位，但索引的写入触发点和清理策略本次未完整追踪）。
 
 ## UI 交互与呈现：同样的数据结构，用户看到的是不同工作流
 

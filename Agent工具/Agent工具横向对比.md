@@ -20,9 +20,9 @@
 | AstrBot | [AstrBot-Agent工具调查笔记.md](AstrBot-Agent工具调查笔记.md) | 357 | `master` | `346b85db9d79207ea7b51694cce5276203612af4` |
 | Chatbox | [Chatbox-Agent工具调查笔记.md](Chatbox-Agent工具调查笔记.md) | 536 | `main` | `7450ab2dde5eacab4a8721f8680006ba8b99438d` |
 | Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 366 | `main` | `b7673c23860db5dd6da7f42dec5fc21f6b13de1a` |
-| DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 118 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
+| DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 135 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
 | Hermes Agent | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 226 | `main` | `01a1037d1e6d7b6eb96a786ef282c3aea4818194` |
-| Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 167 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
+| Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 169 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
 | LobeHub | [LobeHub-Agent工具调查笔记.md](LobeHub-Agent工具调查笔记.md) | 590 | `canary` | `4edba1b75a97b91c28ad48cd1cc90528defa17ad` |
 | Manifold Desktop | [Manifold-Desktop-Agent工具调查笔记.md](Manifold-Desktop-Agent工具调查笔记.md) | 68 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
 | NextChat | [NextChat-Agent工具调查笔记.md](NextChat-Agent工具调查笔记.md) | 161 | `main` | `706a18b95b714ab29b2a4842d3b9ff4f887935d5` |
@@ -307,7 +307,7 @@ AIO Hub 的路径沙箱需要特别标注：`security.ts` 的字符串 `startsWi
 | AstrBot | 27.5k token 后落盘，保留约 7k token 预览 | overflow notice + 文件路径；图片另落盘 | 无 |
 | Chatbox | stdout/stderr 各 1 MB | — | 无 |
 | Cherry Studio | 有 | — | 无 |
-| DeepChat | 单项目笔记未确认统一截断值 | result envelope 含 toolCallId/content/source | 未确认 |
+| DeepChat | 单项目笔记未确认统一截断值 | `tool_calls` 字段 + `role: 'tool'` 回注（含 `tool_call_id`），经 contextBuilder 进入下一轮 | 未确认 |
 | Hermes Agent | per-tool 上限（默认 100K）+ per-turn 聚合预算（200K）+ preview 1.5K，三层持久化落盘回填 | `<persisted-output>` 标记 + 文件引用 | 无 |
 | Jan | 工具卡 UI 600 字符折叠不等于模型侧截断；模型侧统一上限未确认 | `tool-<name>` part、elapsed/progress/citation | 未确认 |
 | LobeHub | 默认 25000 字符，可按 agent 覆盖 | 追加明确的截断字符数提示，全文归档到 VFS 并告知取回路径 | 无 |

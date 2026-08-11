@@ -44,7 +44,7 @@
 | AstrBot | `provider_sources` + 能力 `provider` 实例 | provider instance + model | Key 数组 / 429、无效时换 | transport 5 次 + adapter 最多 10 次 | 仅图片能力、空输出/错误的配置 fallback | `cmd_config.json` 明文；Dashboard 可返回完整 Key |
 | Chatbox | Provider 注册项 + 设置 | `provider + modelId` | 单 Key / 不适用 | 429/5xx 最多 5 次 | 无 | Electron Store 明文 |
 | Cherry Studio | `user_provider` 实例 | 含 `providerId` 的模型标识 | 结构化数组 / 不换 | 默认关闭 | 无 | SQLite JSON 明文，renderer 边界收窄 |
-| DeepChat | `LLM_PROVIDER` + `ModelConfig` + runtime registry | `provider.id + modelId` | 单 Provider 凭据 / 未确认 | runtime/adapter 依定义；无统一跨渠道重试 | 无 | 存储与加密流程未验证 |
+| DeepChat | `LLM_PROVIDER` + `ModelConfig` + runtime registry | `provider.id + modelId` | 单 Provider 凭据 / 无多 Key | runtime/adapter 依定义；无统一跨渠道重试 | 无 | apiKey 明文存 SQLite；OAuth 走 OS safeStorage |
 | Hermes Agent | ProviderProfile + endpoint config + credential pool | provider + endpoint + model | credential pool / 401、429 等换 | 应用层默认 3 次 | **有，显式 fallback 链** | `.env`/`auth.json` 分层明文，日志/UI/备份脱敏 |
 | Jan | 远程 Provider + 本地 llama.cpp/MLX router | provider + model | 主 Key + fallbacks / 401、403、429 换 | Key 链内重发 | 无 | OS keyring |
 | LobeHub | `ai_providers` | `providerId + modelId` | 逗号 Key / 无稳定保证 | Agent Runtime 默认 5 次 retry | 普通 Provider 无；Router 可扩展 | PostgreSQL AES-GCM |
@@ -226,7 +226,7 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | AstrBot | source `key` 数组 | 随机选一 | 429/无效剔除当前 Key，耗尽后报错 | **有** |
 | Chatbox | 单 Key/OAuth | 固定 | 继续使用同一凭据重试 | 不适用 |
 | Cherry Studio | 带 ID、标签、启停的数组 | 跨请求 round-robin | 不记录健康 | 无 |
-| DeepChat | Provider `apiKey/oauthToken` | 固定 | 未确认多 Key 结构 | 不适用 |
+| DeepChat | Provider `apiKey/oauthToken` | 固定 | 单 Provider 凭据，无多 Key 结构 | 不适用 |
 | Hermes Agent | auth.json `credential_pool`，含状态/冷却 | selector 选可用项 | 401/429/供应商错误标记耗尽并轮换，冷却后恢复 | **有** |
 | Jan | 主 Key + `api-key-fallbacks` 有序链 | 首 Key | 401/403/429 换下一枚 | **有** |
 | LobeHub | 逗号分隔字符串 | server 随机/轮询，client 随机 | 不记录健康 | 无主动保证 |
@@ -320,7 +320,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 | AstrBot | `data/cmd_config.json` | 明文 | 有权限 Dashboard API 可返回完整 Key |
 | Chatbox | Electron Store `config.json` | 明文 | 桌面设置持有 Key/OAuth/AWS 凭据 |
 | Cherry Studio | SQLite JSON 字段 | 明文 | Renderer 读取普通 Provider 时不含秘密 |
-| DeepChat | SQLite-backed Provider store | 未确认是否加密 | Provider 对象含 apiKey/oauthToken；前端边界未运行确认 |
+| DeepChat | SQLite-backed Provider store | apiKey 明文存 `providers.api_key` 列；OAuth 走 OS safeStorage credentialStore | Provider 对象含 apiKey/oauthToken；Header 统一注入、脱敏在 redact.ts |
 | Hermes Agent | `.env` + `auth.json` + 可选 config 内嵌 | 文件本身明文；输出/日志/UI/子进程环境脱敏 | runtime resolver 读取，设置页返回脱敏值 |
 | Jan | OS keyring；设置只保留引用/非秘密配置 | OS 凭据库 | 前端注册/注销 Provider，Key 正文不写 settings.json |
 | LobeHub | PostgreSQL `keyVaults` | AES-GCM | `fetchOnClient` 路径会下发解密后的运行时配置 |
@@ -493,7 +493,7 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 | 本地/远程统一 router 与 OS keyring Key 链 | Jan | 同 Provider 换 Key，不跨 Provider；本地 API 鉴权不防本机恶意进程 |
 | IM Agent 的多能力 Provider 实例 | AstrBot | Key 明文，普通网络错误不触发跨 Provider fallback |
 | 多用户 Web 连接行和统一模型目录 | Open WebUI | OpenAI 连接固定路由，无请求重试或健康故障转移 |
-| 主进程多协议、能力快照与 QPS 队列 | DeepChat | 无跨 Provider failover；凭据静态保护未确认 |
+| 主进程多协议、能力快照与 QPS 队列 | DeepChat | 无跨 Provider failover；apiKey 明文落盘、OAuth 走 OS keyring |
 | 简洁稳定的多模型桌面客户端 | Chatbox | 内置 Provider 单实例，无多 Key 和跨渠道切换 |
 | 角色、Preset、模板与连接整体切换 | SillyTavern | 依赖快照式配置，自动可靠性能力少 |
 | 客户端统一接入已有网关 | VCPChat | 单 URL/Key 是故障点，模型缺少 Provider 命名空间 |
