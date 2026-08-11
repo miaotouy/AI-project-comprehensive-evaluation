@@ -1,4 +1,4 @@
-# Manifold Desktop Chat 调查笔记
+# Manifold Desktop Chat 概览
 
 > 调查对象：`E:\works\git\Manifold-Desktop`
 >
@@ -12,96 +12,59 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
+> 迁移状态（2026-08-11）：本文件已压缩为概览。内容已按新类目边界迁移：
 >
 > - 会话与消息管理：[`../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md`](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)（数据模型、持久化缺口、搜索导入导出与路径校验）
 > - 对话请求与上下文：[`../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md`](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)（消息构建、Provider 交接、流式广播、取消与并发）
 > - Chat UI：[`../Chat UI/Manifold-Desktop-ChatUI调查笔记.md`](<../Chat UI/Manifold-Desktop-ChatUI调查笔记.md>)（标签工作台、会话侧栏、搜索浮层、流式反馈与错误重试工作流）
 > - 消息渲染：[`../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md`](../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md)（已有独立笔记）
 >
-> 本文件正文在迁移期内保留（结论、会话与发送、消息构建流程、持久化缺口、搜索与导入导出、交互边界、关键文件、验证边界）。
+> 2026-08-11 本文件已压缩为概览
 
-## 结论
+## 结论摘要
 
-Manifold Desktop 的 Chat 是一套较薄的“标签页内存状态 + WebView2 消息桥 + C++ 文件存储”实现：
+Manifold Desktop 的 Chat 是一套较薄的“标签页内存状态 + WebView2 消息桥 + C++ 文件存储”实现，聊天主链尚未完全接通，存在四个直接影响基本会话行为的问题：新对话不持久化（关闭标签即丢失）；assistant 流式回复只进 DOM 不回写 `messages[]`（第二轮请求缺少上一轮 assistant 上下文）；`CHAT_CHUNK`/`CHAT_DONE` 无会话标识（所有打开的标签监听同一广播）；侧栏重命名按整份 JSON 覆盖会话文件，会清空已有消息。
+
+## 产品表面与系统边界
+
+- 桌面 GUI（chat/compare/terminal 多标签），前端为 WebView2；模型推理经 C++ `Provider::StreamChat`（WinHTTP）调外部 Provider。
+- 会话文件 `%LOCALAPPDATA%\Manifold\sessions\<id>.json` 由 `SessionManager` 管理，但正常聊天流程没有接入保存/加载（`session-store.js` 是未接入的前端仓库）。
+
+## 端到端聊天主链
 
 ```text
-input-bar
-  -> chat-tab 本地 messages[]
-  -> CHAT_SEND
-  -> MainWindow::HandleChatSend
-  -> Provider::StreamChat
+input-bar -> chat-tab 本地 messages[]（含上轮 user）
+  -> CHAT_SEND（整个数组 + provider/model/systemPrompt/temperature）
+  -> MainWindow::HandleChatSend（MainWindow.xaml.cpp:757-841）
+  -> Provider::StreamChat（WinHTTP 流式）
   -> CHAT_CHUNK / CHAT_DONE 广播
-  -> chat-tab 更新 DOM
+  -> chat-tab 更新 DOM（streamingText 只进 DOM，不回写 messages[]）
 ```
 
-存储层提供会话文件的增删改查，但正常聊天流程没有接入保存。当前代码因此存在四个直接影响基本会话行为的问题：
+## 核心对象与状态权威
 
-1. 新对话不会持久化；关闭标签后内容丢失。
-2. assistant 流式回复只进入 DOM，不写回 `messages[]`；第二次发送缺少上一轮 assistant 上下文。
-3. `CHAT_CHUNK` 和 `CHAT_DONE` 没有会话标识，所有打开的聊天标签都监听同一广播。
-4. 侧栏重命名只发送 `{title}`，C++ 后端按整份 JSON 覆盖原文件，会清除已有消息。
+- `chat-tab.js` 组件局部 `messages[]` 与 `streamingText` 是可见视图权威；后端 `SessionManager`/`SessionPath(id)` 是文件层权威。
+- 主进程只有一个 `m_chatThread`：新请求先停止旧线程（全局 stop，`MainWindow.xaml.cpp:792-795`）；取消依赖 `stop_token`，不能主动中断已阻塞的 `WinHttpReadData`。
 
-这些源码连接缺口说明正常会话主链尚未接通。
+## 专项导航
 
-## 会话与发送
+- 会话与消息管理：[`../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md`](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)
+- 对话请求与上下文：[`../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md`](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)
+- Chat UI：[`<../Chat UI/Manifold-Desktop-ChatUI调查笔记.md>`](<../Chat UI/Manifold-Desktop-ChatUI调查笔记.md>)
+- 消息渲染：[`../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md`](../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md)
+- 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)；跨层综合结论见 [`../Chat/Chat横向对比.md`](../Chat/Chat横向对比.md)
 
-`openChatTab()` 为界面标签生成递增 id；如果传入已有 `sessionId`，`chat-tab.js` 发送 `LOAD_SESSION`，收到 `SESSION_DATA` 后把消息装入组件局部数组并渲染（`frontend/app.js:138-147`、`chat-tab.js:101-114`）。
+## 关键能力与已确认边界
 
-## 消息构建流程
+- 支持：会话文件增删改查与全文搜索（逐文件整份 JSON 子串、无索引无上限）、JSON 导入导出与 Markdown 导出、多标签（chat/compare/terminal）。
+- 已确认缺口：无上下文截断/压缩/token 预算；无附件/记忆注入点；错误行 Retry 按钮不重发请求；流式每 chunk 无条件滚底；`SessionPath` 对导入/桥消息 id 无路径成分校验；`updateModelMessage` 期望 `role==="model"` 与其他路径的 `assistant` 不一致。
 
-1. **输入与 UI 消息对象**：`frontend/components/input-bar.js:169-184` 读取输入文本并回调；`frontend/app.js:86-114` 调用 `addUserMessage`，将用户消息加入当前 tab 的 `messages[]`。`chat-tab.js:119-129` 构造 `{ role: 'user', content: text }`。
-2. **历史筛选**：`frontend/components/chat-tab.js:119-129` 返回当前 tab 的整个 `messages[]`；没有发现按 token、分支或角色再筛选历史的逻辑。assistant 流式文本只更新 DOM 和 `streamingText`（`:27-59`），不回写 `messages[]`，因此第二轮消息不含上一轮 assistant。
-3. **system prompt、附件与工具**：`frontend/services/provider-api.js:4-13` 的请求对象包含 `provider`、`model`、`messages`、`systemPrompt`、`temperature`、`tools`；本次未找到附件、记忆或知识库在 Chat 主链上的额外注入点。
-4. **截断与压缩**：发送前未找到上下文截断、摘要压缩或 token 预算处理；请求直接携带当前数组。
-5. **最终请求与 Provider**：前端通过 `CHAT_SEND` 发送上述 payload；`MainWindow.xaml.cpp:757-841` 处理桥消息并进入 Provider 流式调用，返回 `CHAT_CHUNK`/`CHAT_DONE`。具体 JSON 到 HTTP Provider 的字段映射未在本次笔记中进一步展开。
-6. **边界**：上述消息缺失和全局广播行为来自静态调用点；未做多标签、取消和网络阻塞场景的动态验证。
+## 未验证事项
 
-发送时，用户消息通过 `addUserMessage()` 进入局部 `messages[]`，随后前端把整个数组、Provider、模型、system prompt 和 temperature 发给后端（`app.js:86-123`）。主进程只有一个 `m_chatThread`；新请求会先停止旧线程（`MainWindow.xaml.cpp:792-795`）。取消依赖 `stop_token`，只能在流回调再次运行时生效，不能主动中断已经阻塞的 `WinHttpReadData`。
+- 多标签串流、取消延迟、路径穿越与导入恶意会话均未做动态验证；上述缺口来自静态调用点搜索。
 
-每个聊天标签都注册全局 `CHAT_CHUNK`、`CHAT_DONE` 和 `CHAT_ERROR` listener（`chat-tab.js:27-98`）。事件没有 session/tab id，因此一个请求可能更新多个已打开标签；该可见行为尚未运行验证。
+## 关键源码索引
 
-## 持久化缺口
-
-`SessionManager` 把每个会话存为 `%LOCALAPPDATA%\Manifold\sessions\<id>.json`，支持整文件保存、加载、删除、列表和全文搜索（`SessionManager.cpp:23-131`）。前端 `session-store.js` 也实现了 `createSession()`、`addMessage()`、`updateModelMessage()` 和 `save()`。
-
-但全仓库调用点显示：正常 Chat 流程没有调用这些写入函数，`chat-tab.js` 也不发送 `SAVE_SESSION`。assistant chunk 只更新 `streamingText` 和 DOM（`chat-tab.js:27-59`）。因此：
-
-- 新会话不会生成会话文件；
-- assistant 回复不会进入后续请求上下文；
-- `updateModelMessage()` 期望的 `role === "model"` 与其他路径使用的 `assistant` 也不一致。
-
-侧栏重命名发送 `SAVE_SESSION {id, data:{title}}`（`side-panel.js:83-105`），`HandleSaveSession()` 将 `data` 原样交给整文件覆盖的 `SaveSession()`（`MainWindow.xaml.cpp:528-534`）。对已存在的会话执行重命名会把文件替换为只有标题的 JSON。
-
-## 搜索与导入导出
-
-- 搜索：后端逐个读取会话文件，对整份 JSON dump 做不区分大小写的子串搜索；无索引和结果上限（`SessionManager.cpp:97-131`）。前端搜索浮层有 300ms 防抖和键盘导航（`search-overlay.js:24-58`）。
-- JSON 导入：文件内容解析后直接按其中的 `id` 保存，没有 schema 或 id 路径校验（`MainWindow.xaml.cpp:648-677`）。
-- JSON 导出：选择路径后写出格式化 JSON（`MainWindow.xaml.cpp:619-646`）。
-- Markdown 导出：按消息角色拼接标题和正文，不修改内容（`MainWindow.xaml.cpp:679-722`）。
-
-`SessionPath(id)` 直接计算 `sessionsDir / (id + ".json")`（`SessionManager.cpp:23-26`）；来自导入文件或桥消息的 id 未经过路径成分校验。
-
-## 交互边界
-
-- 流式每个 chunk 都无条件滚到底部，用户无法稳定停留在历史位置（`chat-tab.js:58`）。
-- 流式指示器会在首个文本 chunk 重新赋值 `innerHTML` 时被移除。
-- 错误行的 Retry 按钮只删除错误提示，不会重发请求（`chat-tab.js:87-98`）。
-- 应用提供 chat、compare、terminal 多标签，但常规 Chat 只有一条全局生成线程。
-
-Markdown 渲染和 HTML 边界见消息渲染调查笔记。
-
-## 关键文件
-
-| 职责 | 文件 |
-| --- | --- |
-| 标签和发送编排 | `frontend/app.js` |
-| Chat 局部状态与流式 UI | `frontend/components/chat-tab.js` |
-| 未接入的会话前端仓库 | `frontend/services/session-store.js` |
-| 会话侧栏 | `frontend/components/side-panel.js` |
-| 会话文件存储 | `Manifold.Core/SessionManager.cpp` |
-| 会话与发送 handler | `MainWindow.xaml.cpp:508-850` |
-
-## 验证边界
-
-本笔记基于静态源码和调用点搜索。多标签串流、取消延迟、路径穿越及导入恶意会话的运行结果未做动态验证。
+- 标签与发送编排：`frontend/app.js`；`frontend/components/chat-tab.js`（流式与局部状态）
+- 未接入的会话前端仓库：`frontend/services/session-store.js`；侧栏：`frontend/components/side-panel.js`
+- 文件存储：`Manifold.Core/SessionManager.cpp`；桥 handler：`MainWindow.xaml.cpp:508-850`
