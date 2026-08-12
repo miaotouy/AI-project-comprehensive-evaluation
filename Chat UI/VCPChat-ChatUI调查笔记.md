@@ -4,13 +4,21 @@
 >
 > 调查更新日期：2026-08-11
 >
-> 代码快照：`3f14e938e700a5487ca13c4a6d8a6caad8e70ac9`（分支：`main`）
+> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移现有段落与证据，未重新调查代码；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）保留于原 Chat 笔记，待可选界面专题承接
+> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，本刷新核对 main.html/renderer.js/trayManager 等变更；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）保留于原 Chat 笔记，待可选界面专题承接
 >
 > 调查范围：工作台结构、Topic 导航与现场恢复、Composer 与快捷输入、发送前配置、发送/停止反馈、消息操作、键盘与无障碍、桌面集成交点；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 本次刷新要点（3f14e93 → b6ffa22）
+
+- **main.html 功能变更极小**：除行尾规范化外，仅两处实际变更——CSP `media-src` 增加 `blob:`；新增引入 `VCPDistributedServer/frontend-plugin-loader.js`（defer），开启 renderer 型前端插件（VChatDynamicWallpaper 动态壁纸、VChatAutoTTS 自动朗读）注入主窗口的机制（插件明细见 Agent 工具笔记）。
+- **托盘新增 Loom 入口**：`modules/trayManager.js:33` 增加 `vchat-app-loom-manager`（`open-loom-manager`），点击打开 VCP Loom Manager 窗口；桌面 Dock 的 `Desktopmodules/builtinWidgets/vchatApps.js` 同步新增"VCP Loom"应用项并支持动态同步 LoomAPP 到 Dock（`:543-604` 的 `syncLoomApps`）。
+- **模型参数折叠段支持"未设置"**：temperature/contextTokenLimit/maxOutputTokens/top_p/top_k 留空时显示"未设置"并存 `null`（`modules/settingsManager.js:1886-1890`），发送侧行为见 Agent 角色笔记刷新要点。
+- **Loom 页面文本可分享进输入框**：`renderer.js:500-517` 订阅 `onLoomShareTextToInput`，把 LoomAPP 选中文本插入 `#messageInput`。
+- 其余 Chat UI 结论（三栏布局、渐进渲染、拖放排序、现场恢复、按钮态、消息右键、无障碍现状）经核对未变——`topicListManager.js`、`uiManager.js`、`emoticonManager.js`、`event-listeners.js`、`ui-helpers.js`、`notificationRenderer.js`、`Voicechatmodules/voicechat.js` 均未改动。
 
 ## 结论摘要
 
@@ -47,7 +55,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 **侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 的 `computed.minWidth` / `computed.maxWidth` 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，`:93`, `:98`），最大宽度 fallback 600px（`:57`）。拖拽过程中通过 `requestAnimationFrame` 节流更新，拖拽时禁用元素 `transition` 以避免卡顿（`:88`）。
 
-**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1560`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 触发 `leftSidebar.classList.add('compact-topics-open')`，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（`:451`）；点击话题项后自动关闭抽屉（`:439-441`）。
+**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1577`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 触发 `leftSidebar.classList.add('compact-topics-open')`，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（`:451`）；点击话题项后自动关闭抽屉（`:439-441`）。
 
 ### 1.3 三种聊天呈现模式是同一消息数据的 CSS/渲染投影
 
@@ -92,7 +100,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 - **按钮态与中断触发**：`renderer.js` 里 `updateSendButtonState()`（`:190-198`）根据 `getInterruptibleMessageForCurrentChat()`（`:150-188`）是否返回非空来切换按钮的 `dataset.mode` 为 `'interrupt'` 或 `'send'`，并替换按钮内部 SVG（方块图标代表"中止"）。判定逻辑：先在当前内存 `currentChatHistory` 里从后往前找一条 `role==='assistant'`，若其 `isThinking===true` 或其 DOM 节点带 `.streaming` class，就认为"当前有活跃回复"（`:151-162`）；如果历史里没找到，再兜底查 `window.streamManager.getActiveStreamingMessageId()` 加当前上下文校验（`:164-187`）——这层兜底是为了覆盖"消息还没写进 `currentChatHistory` 但 streamManager 已经在流式处理"的时间窗口。
 - 点击后走 `handleSendButtonAction()`（`:249-258`）→ 若有活跃消息则 `interruptActiveResponseFromSendButton()`（`:200-247`），否则走正常发送。**单聊与群聊共用发送按钮外观，但中断实现不同（本地 abort vs 仅远端信号），UI 上看不出本地 abort 是否真正生效**——执行层的不对称见对话请求与上下文笔记 7.1。
-- 流式反馈：`.message-item.streaming` 的流光边框等属于消息渲染器笔记；中断后"中止已发送"toast 与"流式响应中断"提示分别见对话请求与上下文笔记 7.1 与 `renderer.js:588-591`。
+- 流式反馈：`.message-item.streaming` 的流光边框等属于消息渲染器笔记；中断后"中止已发送"toast 与"流式响应中断"提示分别见对话请求与上下文笔记 7.1 与 `renderer.js:605-609`。
 
 ## 6. 消息操作、分支与版本导航
 
@@ -111,8 +119,9 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 - **布局状态**：`sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive`、`sidebarAvatarOnly` 由 `renderer.js` 启动时恢复（1.1）。
 - **最后打开状态**：`lastOpenItemId/lastOpenItemType/lastOpenTopicId` 存 `settings.json`，`lastActiveTopic_*` 存 localStorage（2.4）。
 - **桌面集成交点**（完整托盘/窗口逻辑盘点保留在源文件 13.8）：
-  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。
+  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。当前 HEAD 托盘另增 Loom 菜单项（`trayManager.js:30-33`，`loomOpenManager`）。
   - 语音聊天是独立子窗口（第 7 节），与主窗口并行存在。
+  - VCP Loom Manager 是独立管理窗口（`Loommodules/manager.html`），LoomAPP 运行时用 WebContentsView 承载（`modules/loom/VCPLoomManager.js`）。
   - 应用**不发送系统桌面通知**（未发现 `new Notification(...)` 或 Electron `Notification` 类调用），所有 AI 消息通知通过右侧内置通知侧栏和浮动 Toast 呈现——通知机制的完整盘点保留在源文件 13.2。
 - 消息输入中的草稿、busy 状态、滚动位置等临时 UI 状态按什么粒度保存**未在原调查中核实**。
 
@@ -165,11 +174,12 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 - 草稿保存粒度、多窗口聊天状态同步未核实。
 - 高级回复菜单的具体选项未逐项核实。
 - 无障碍部分只覆盖聊天关键路径；源文件 13.11 的全量清单未在本笔记重复。
+- renderer 型前端插件（动态壁纸/自动 TTS）的开关界面、与主窗口 DOM 的交互及其启用状态管理（PluginManagerModules 界面）未运行验证。
 
 ## 12. 关键源码索引
 
 - `main.html`（三栏布局、presentation 选择器、输入区）
-- `renderer.js`（`updateSendButtonState` `:190-198`、`getInterruptibleMessageForCurrentChat` `:150-188`、`handleSendButtonAction` `:249-258`、`applyChatPresentationMode`、布局状态恢复 `:1560`）
+- `renderer.js`（`updateSendButtonState` `:190-198`、`getInterruptibleMessageForCurrentChat` `:150-188`、`handleSendButtonAction` `:249-258`、`applyChatPresentationMode`、布局状态恢复 `:1577`）
 - `modules/uiManager.js`（侧栏拖拽宽度 `:48-130`、compact 抽屉 `:382-386`）
 - `modules/topicListManager.js`（渐进渲染 `:16-18`, `:288-377`、拖放排序 `:510-568`、搜索 `:379-484`）
 - `modules/chatManager.js`（现场恢复 `:275-292`, `:525-526`、附件组装 `:992-1002`）

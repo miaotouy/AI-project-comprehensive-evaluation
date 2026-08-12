@@ -4,11 +4,11 @@
 >
 > 调查更新日期：2026-08-11
 >
-> 代码快照：`eca06251f5687a52fbcd353cb8b04f42157882d0`（分支：`main`）
+> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
 >
-> 调查方式：只读核对 Agent/ 目录、agentManager.js、AGENT_AND_TASK_SYSTEM_GUIDE.md、AgentDream.md、docs/ 文档；未修改被调查仓库源码
+> 调查方式：快照刷新——核对旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 diff 与关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
 >
-> 调查范围：VCPToolBox 的 Agent 角色系统——文件格式、变量体系、AgentAssistant 配置与运行时能力
+> 调查范围：VCPToolBox 的 Agent 角色系统——文件格式、变量体系、AgentAssistant 配置与运行时能力，及 TaskAssistant/AgentDream 的当前状态核对
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -16,10 +16,12 @@
 
 VCPToolBox 是**服务器端的 VCP 中间层**，不是用户直接对话的客户端。它的"Agent"概念有两层：
 
-1. **提示词文件层（Agent/ 目录）**：每个 `.txt` 文件是一段包含 VCP 变量占位符的系统提示词，用于在请求管线中替换变量后注入给模型。文件通过 `agent_map.json` 映射别名，使用 `{{agent:AlterName}}` 在其他提示词中嵌套引用。
+1. **提示词文件层（Agent/ 目录）**：每个 `.txt` 文件是一段包含 VCP 变量占位符的系统提示词，用于在请求管线中替换变量后注入给模型。文件通过 `agent_map.json` 映射别名（**当前仓库只携带 `agent_map.json.example`，真实映射文件需用户创建**，见 2.1），使用 `{{agent:AlterName}}` 在其他提示词中嵌套引用。
 2. **AgentAssistant 插件层**：`Plugin/AgentAssistant/` 插件为每个命名 Agent 定义身份、模型、温度、提示词等，实现具名身份的多 Agent 通信与任务派发。
 
 这两层可以独立使用：提示词文件层服务于变量注入管线；AgentAssistant 层服务于多 Agent 场景（AI 调用 AI、任务调度）。
+
+快照刷新（`eca06251` → `c4c4d00b`）核对结论：Agent 文件层、AgentAssistant 配置模型、TaskAssistant 任务模型和 AgentDream 架构基本未变；变化集中在——(a) AgentAssistant 增加按模型剥离推理标签的清理（配合新 `ReasoningToContent` 总线能力）；(b) VCPTimeLine 新增模型驱动的正文精简端点；(c) OpenHerPersona 增加按 Agent 删除状态与陈旧观察任务失效；(d) TVStxt 记忆操作指南内容更新。AgentDream 仍处于**默认禁用**（`.block`）状态，其审批执行链确认由管理面板路由 `routes/admin/dream.js` 承担（插件内部 `approveDreamOperation` 仅为未实现占位）。
 
 ## 2. 提示词文件层（Agent/ 目录）
 
@@ -39,7 +41,7 @@ Agent/
   ThemeMaidCoco.txt # 场景装饰/界面风格 Agent
 ```
 
-`.gitignore` 明确排除 `Agent/` 目录内的用户自定义文件，表明内置示例是样板，实际使用时用户应覆盖或新增。
+`.gitignore` 明确排除 `Agent/` 目录内的用户自定义文件，表明内置示例是样板，实际使用时用户应覆盖或新增。**快照核对**：当前仓库根目录只有 `agent_map.json.example`，没有 `agent_map.json`；`AgentManager.loadMap()` 在映射文件缺失时只加载空映射（`modules/agentManager.js:55`），`isAgent()` 对任何别名返回 `false`，`{{agent:xxx}}` 占位符保持原样不展开（`agentManager.js:322-324`）。即：**默认快照下 Agent 文件层未激活，需要用户创建 `agent_map.json` 才会生效**。AgentManager 同时支持递归扫描 `Agent/` 目录（含 `.md` 文件与符号链接，`scanAgentFiles()`），该扫描结果服务于管理面板的 Agent 文件浏览，不参与占位符展开判定。
 
 ### 2.2 变量体系
 
@@ -52,7 +54,7 @@ Agent/
 | `{{Sar Xxx}}` | 会话/历史相关 | 来自对话上下文 |
 | `{{VCP…}}` | 静态插件占位符 | 触发对应插件注入（如 `{{VCPMemoToolBox}}`、`{{VCPSearchToolBox}}`） |
 | `[[日记本名::Group::Time::…]]` | TagMemo 知识库 | 带参数语法，召回相关记忆条目 |
-| `{{agent:AlterName}}` | `agent_map.json` | 嵌套引用另一个 Agent 文件内容 |
+| `{{agent:AlterName}}` | `agent_map.json` | 嵌套引用另一个 Agent 文件内容（映射文件默认不随仓库提供，需用户创建） |
 | `《《文件名::…》》` / `<<文件名>>` | TVStxt/ 目录 | 引入 TVStxt 文本块 |
 
 **TVStxt/ 目录**（`TVStxt/`）存放可被变量引用的文本块，例如工具权限说明（`dreamtool.txt`）、渲染规则（`DIVRendering.txt`）、日记写作指南（`Dailynote.txt`）等，由 `config.env` 中 `VarXxx=filename.txt` 声明，运行时按需加载。
@@ -145,9 +147,10 @@ Agent/
 
 ### 3.5 发送时配置引用与历史快照语义
 
-- **发送不重读 config.json**：`processToolCall` 直接取内存 `AGENTS[agent_name]` 映射（`Plugin/AgentAssistant/AgentAssistant.js:681`，未命中报错 :682-689）；`loadAgentsFromLocalConfig` 只在 initialize（:58）与 `reloadConfig`（:1210）时读取。Admin Panel 保存后调 `reloadConfig()`（`routes/admin/agentAssistant.js:29-63`），因此"下次消息用最新配置"，但属于内存缓存语义而非每次请求重读；热重载用 `delete` 清空 `AGENTS`（:187），已启动的委托持旧对象引用继续运行，相当于按引用的"快照"。
-- **会话历史无配置快照**：`updateAgentSessionHistory`（:222-236）只 push `{role, content}` 裸消息对（调用点 :872），无模型/参数元数据；每次请求用当前内存 `agentConfig` 现拼 `payloadForVCP = { model: agentConfig.id, messages, max_tokens: agentConfig.maxOutputTokens, temperature: agentConfig.temperature, stream: false }`（:845-851）。
+- **发送不重读 config.json**：`processToolCall` 直接取内存 `AGENTS[agent_name]` 映射（`Plugin/AgentAssistant/AgentAssistant.js:706-711`）；`loadAgentsFromLocalConfig` 只在 initialize（:69）与 `reloadConfig`（:1237）时读取。Admin Panel 保存后调 `reloadConfig()`（`routes/admin/agentAssistant.js:29-63`），因此"下次消息用最新配置"，但属于内存缓存语义而非每次请求重读；热重载用 `delete` 清空 `AGENTS`（:187），已启动的委托持旧对象引用继续运行，相当于按引用的"快照"。
+- **会话历史无配置快照**：`updateAgentSessionHistory`（:233-249）只 push `{role, content}` 裸消息对（调用点 :898），无模型/参数元数据；每次请求用当前内存 `agentConfig` 现拼 `payloadForVCP = { model: agentConfig.id, messages, max_tokens: agentConfig.maxOutputTokens, temperature: agentConfig.temperature, stream: false }`（:870-876）。
 - **无 regenerate API、无开场白**：AgentAssistant 无重新生成端点（全仓 grep 仅 SkillBridge 模板文件有无关命中）；OneRing 的 `updateMessageById`（`Plugin/OneRing/OneRingDB.js:108-110`）做 retry/编辑场景的内容原地替换（改旧行），不是新建兄弟分支。AgentAssistant 配置 schema 与 `Agent/*.txt` 均无开场白/初始消息字段（服务端无会话创建钩子，聊天历史由外部前端持有），也无提示词块分组/组级开关——最接近的是 VCPTavern 的 `preset.rules` 单条规则级 `enabled` 开关（`Plugin/VCPTavern/VCPTavern.js:423-425`），但无组级抽象，预设整体经 `{{VCPTavern::预设名::SessionID}}` 占位符整包切换（:252-273）。
+- **快照刷新（推理标签清理）**：`removeVCPThinkingChain(text, modelName)` 现在先剥离 VCP 思维链标记，再按实际响应模型名判断是否启用 `ReasoningToContent`，启用时一并剥离主总线写入正文的 `<think>`/`<thinking>` 标签块（含未闭合块），避免推理链污染 AA 会话历史与委托报告（`AgentAssistant.js:312-349`，调用点 :893、:1049）。
 
 ## 4. TaskAssistant 任务派发系统
 
@@ -185,16 +188,24 @@ Agent/
 
 任务类型：`forum_patrol`（论坛巡航，自动加载帖子列表）和 `custom_prompt`（通用提示词）。调度模式：`interval`、`cron`、`once`、`manual`。
 
+**快照刷新核对（`Plugin/VCPTaskAssistant/vcp-task-assistant.js`）**：
+
+- 持久化：任务与历史存于 `task-center-data.json`（插件目录内，`DATA_FILE`，:10），`globalEnabled` 默认 `false`（:30），历史上限默认 200（`MAX_HISTORY`，:12）；`broadcastStatusUpdate()` 目前只是日志输出（:49-51），前端靠管理 API 轮询 `getStatus`。
+- 调度实现：`node-schedule`；`interval` 模式最小间隔被强制为 10 分钟（`MIN_INTERVAL_MINUTES`，:11、:563）；`once` 执行后自动禁用任务（:550-556）；`interval`/`cron` 异常不影响下一轮调度（:573-578）。
+- 派发链：`executeTask` → `wakeUpAgent` → 进程内直接调用 `agentAssistant.processToolCall({agent_name, prompt, maid, temporary_contact, task_delegation})`（:229-257），即任务中心直接 require AgentAssistant 模块，不再走 HTTP loopback；`injectTools` 已禁用（:230 注释说明 Agent 自身已有完整工具集）。
+- 状态与结果：每次执行更新 `task.runtime`（`lastRunAt`/`nextRunTime`/`lastError`/结果统计），并把执行记录 append 进 `history`（:275-279）；结果归属到任务对象与历史记录，不落回会话。
+- 取消语义：`clearTaskTimer`/`deleteTask` 只能停止/删除**未来调度**，无法取消正在执行的派发（`executeTask` 没有 AbortController）；被派发 Agent 的委托循环上限仍由 AgentAssistant 的 `delegationMaxRounds` 控制。
+
 ## 5. AgentDream（梦系统）
 
 `Plugin/AgentDream/` 为 Agent 提供独立的"梦境"空间，在非对话时段进行记忆回顾和整理：
 
-1. **触发**：定时或手动，独立于正常对话上下文；
-2. **记忆采集**：从个人/公共知识库随机抽取种子，通过 TagMemo 语义检索关联碎片；
-3. **叙事生成**：AI 以意识流方式生成梦境内容；
-4. **记忆操作**：`DiaryMerge`（合并）、`DiaryDelete`（删除）、`DreamInsight`（创造感悟）；
-5. **审批门控**：所有操作仅生成 JSON 索引，需管理员在 Admin Panel 审批后才执行；
-6. **专属提示词文件**：`Agent/DreamNova.txt`（梦中的 Nova 角色身份）。
+1. **触发**：定时（`_startDreamScheduler` 每 15 分钟检查一次，时间窗默认 1-6 点、概率掷骰默认 0.6、冷却与频率默认 8 小时）或手动（`processToolCall` 的 `triggerDream` 命令），独立于正常对话上下文；入梦过程先由 `DreamWaveEngine.generateDreamWave()` 做记忆涟漪浪潮联想（种子 + 关联碎片），再组装 `dreampost.txt` 提示词调 VCP API 生成叙事，叙事与记忆树持久化为 `dream_logs/*.json`；
+2. **记忆操作**：`DiaryMerge`（合并）、`DiaryDelete`（删除）、`DreamInsight`（创造感悟），支持串语法批量；每次调用会先**读取源日记全文**放进操作记录供管理员审阅；
+3. **审批门控（快照核对）**：操作只写入 `pending_review` 状态的 JSON 日志并广播 `AGENT_DREAM_OPERATIONS`；**实际审批执行在管理 API `routes/admin/dream.js` 完成**——`_processDreamOperation()` 对 approve 执行合并/删除/感悟（写新日记走 `DailyNoteWrite` 插件、删除源日记并同步 `vectorDBManager.removeDocument()`），reject 只改状态；提供列表、详情、单条审批与批量审批端点。**注意**：AgentDream 插件内部导出的 `approveDreamOperation`/`rejectDreamOperation` 只是 `not_implemented` 占位（`AgentDream.js:995-1001`），真正的执行权在管理面板路由；
+4. **默认启用状态（快照核对）**：当前 HEAD 中 AgentDream 仍为 `plugin-manifest.json.block`（**默认禁用**），配置字段（`DREAM_AGENT_LIST` 等）见 `config.env.example`；
+5. **预算与取消（快照核对）**：**未找到**任何"预算"（token/次数上限）或"取消进行中梦境"的机制——调度器只在单次梦境进行中跳过下一轮触发（`_checkAndTriggerDreams` 的 in-progress 检查），梦上下文按 `contextTTLHours`（默认 4 小时）与 6 轮上限（12 条消息）裁剪；
+6. **专属提示词文件**：`Agent/DreamNova.txt`（梦中的 Nova 角色身份，13 行小文件，未变）。
 
 ## 6. 配置方式对比
 
@@ -225,14 +236,22 @@ VCPToolBox Agent 提示词不像 AIO Hub 那样有显式的工具开关字段—
 
 *此处未包含VCPTavern内置插件的调研，简单来说VCPTavern主要实现了部分酒馆风格的深入注入能力*
 
+## 8.1 快照刷新的其他变化（角色相关插件）
+
+- **TVStxt 内容更新**：`Dailynote.txt` 新增"感悟串联"写作规范（原子事件并联、感悟串联、Tag 拾取重排）与 `DailyNoteSearcher` 文本检索/BM25 用法；`MemoToolBox.txt` 把 LightMemo 更新为"浪潮 V10 语义"，新增时间范围过滤语法（`[2025-04-11~2025-05-12]`）、音乐检索语法（`[音乐检索]…`）、多索引支持与 RFF 重排触发说明。这些是注入给模型的操作指南，不是新插件。
+- **VCPTimeLine**：新增 `POST /vcp-timeline/agents/:agentName/files/:month/compact` 端点，用模型把当月 Timeline 正文精简（保留首行日期作者行与末尾 Tag 行，剥离代码围栏，返回后由前端确认再保存）——"精简"是模型生成的建议文本，不直接覆盖文件（`Plugin/VCPTimeLine/VCPTimeLine.js:558-595,794-802`）。
+- **OpenHerPersona**：新增 `delete`/`delete_agent` 命令删除某 Agent 的情绪轴状态、锚点与审计记录（拒绝删除默认桶），并用 generation 计数使删除期间的排队观察任务失效，防止旧任务把误识别数据写回（`Plugin/OpenHerPersona/OpenHerPersona.js:2165-2205`）；Agent 身份识别改为只信任 system 消息中的 OneRing 标记，不再从请求配置对象递归匹配 `name`/`agent` 字段（:1976-1994）。
+
 ## 9. 主要源码依据
 
-- `VCPToolBox/modules/agentManager.js`：`AgentManager` 类，别名映射加载、提示词缓存与热重载。
+- `VCPToolBox/modules/agentManager.js`：`AgentManager` 类，别名映射加载、提示词缓存与热重载；映射文件缺失时占位符不展开。
 - `VCPToolBox/docs/AGENT_AND_TASK_SYSTEM_GUIDE.md`：AgentAssistant `config.json` 完整结构与 TaskAssistant 任务对象 schema。
 - `VCPToolBox/AgentDream.md`：梦系统架构、文件说明与生命周期。
 - `VCPToolBox/AGENTS.md`：项目结构快速定位，`AgentManager` 符号映射。
 - `VCPToolBox/Agent/*.txt`：各内置 Agent 实际提示词（Nova、Aemeath、Metis、Weiming、MemoMaster、Hornet、DreamNova、ThemeMaidCoco）。
 - `VCPToolBox/TVStxt/`：可被变量引用的工具说明/规则文本块。
+- `VCPToolBox/routes/admin/dream.js`：AgentDream 梦操作的实际审批执行链。
+- `VCPToolBox/Plugin/VCPTaskAssistant/vcp-task-assistant.js`：任务派发中心的调度、派发与持久化实现。
 
 ## 10. 调查边界
 

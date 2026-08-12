@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-11
 >
-> 代码快照：`eca06251f5687a52fbcd353cb8b04f42157882d0`（分支：`main`）
+> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
 >
-> 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
+> 调查方式：快照刷新——核对旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 diff（`server.js`、`config.env.example`、新增 `modules/reasoningContentAdapter.js`），并复核渠道核心文件是否变化；未修改被调查仓库
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
+> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性，及 README 容灾声明的核对
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -47,6 +47,12 @@ config.env
 - `backup_vcp.py` 默认归档所有 `.env` 和 `.json`，会把核心/插件 Key 一起放入未加密 ZIP；
 - 可选 NewAPI Monitor 能显示请求、token、quota、RPM/TPM，但数据来自外部 NewAPI 管理 API，不参与 VCP 路由；
 - **安全边界风险**：白名单图像/Embedding 路由在通用 Bearer 鉴权之前挂载，命中请求会直接使用上游 `API_Key` 转发，绕过 VCP 对外 `Key` 校验。
+
+快照刷新（`eca06251` → `c4c4d00b`）核对结论：
+
+- 渠道核心文件（`semanticModelRouter.js`、`chatCompletionHandler.js`、`protocolBridge.js`、`specialModelRouter.js`、`EmbeddingUtils.js`、`modelRedirectHandler.js`）在旧快照后**没有实质变更**，本篇主体结论全部仍然成立；
+- 新增 `ReasoningToContentEnabled`/`ReasoningToContentModel`/`ReasoningToContentTag` 三个环境变量与 `modules/reasoningContentAdapter.js`：对模型名白名单（默认示例 `kimi,claude`）内的响应，把 `reasoning_content`/`thinking` 等推理字段改写为 `<think>` 标签正文发给客户端，转换只发生在展示副本、不进 VCP 工具循环/OneRing/日记（详见 4.4）；
+- **README 容灾声明核对**：README 称模型路由"语义级自动选模与容灾……跨模型上下文无缝持久化"。实现侧：容灾=语义虚拟模型的候选链 fallback（仍经单一 `API_URL`+`API_Key`，模型级而非 Provider 级）；"跨模型上下文无缝持久化"在当前代码中没有独立的跨模型上下文存储，上下文由客户端随请求携带（`contextTokenLimit` 是客户端扩展参数），同一会话切换模型时历史不丢是"客户端持有历史"的结果，不是服务端持久化。README 的"容灾"表述应理解为模型 fallback 链，不能按多 Provider 容灾理解（与旧快照结论一致）。
 
 ## 总体调用链
 
@@ -299,6 +305,24 @@ Authorization: Bearer API_Key
 
 [`routes/specialModelRouter.js`](../../VCPToolBox/routes/specialModelRouter.js) 对图像和 Embedding 白名单模型绕过完整 Chat/RAG/VCP 工具管线，直接转发到同一上游。它使用 keep-alive Agent，但没有复用主链的 `fetchWithRetry()`、连接超时或 Semantic Router。
 
+### 4.4 快照刷新新增：推理字段的展示层转换（ReasoningToContent）
+
+新增 `modules/reasoningContentAdapter.js` 与三个环境变量（`config.env.example`）：
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `ReasoningToContentEnabled` | `false` | 总开关 |
+| `ReasoningToContentModel` | `kimi,claude`（示例） | 逗号分隔模型名片段，对真实后端模型名做 include 子串匹配（大小写不敏感） |
+| `ReasoningToContentTag` | `think` | 转换后的标签名，`thinking` 或回退 `think` |
+
+`shouldConvertReasoningForModel()`（`reasoningContentAdapter.js:41-49`）按"启用 && 模型名匹配白名单片段"判定。`streamHandler`/`nonStreamHandler` 在**转发给客户端的副本**上把 `reasoning_content`/`reasoning`/`reasoning_chunk`/`thinking`/`thoughts` 等字段提取为 `<think>` 标签正文（流式按块拼接、规范闭合、finish 时补闭合标签），并删除原始推理字段；内部 `collectedContentThisTurn`/VCP 循环仍只用原始 `content`（`streamHandler.js:172-218` 定义、`:332`/`:375` 使用；`nonStreamHandler.js:272-306`）。语义要点：
+
+- 这是**客户端展示协议**的转换，不是渠道或 Adapter 变化：出站仍只发 OpenAI-compatible body，不新增任何上游字段；
+- 转换结果不进工具解析、OneRing、日记与 AgentAssistant 历史（AgentAssistant 反而会按模型名把 `<think>` 块从对话文本中剥掉，见 Agent 角色笔记 3.5）；
+- 默认关闭；配置了模型名单才生效，留空名单时不转换任何模型。
+
+该能力解决"上游返回独立 reasoning 字段、但客户端只按 content 渲染"的兼容问题，属于与渠道笔记第 4.1 节"入站多协议"并列的**出站协议形态兼容层**。
+
 ## 5. 语义选模与模型故障转移
 
 ### 5.1 路由依据是内容相似度
@@ -512,6 +536,7 @@ VCP 当前不会持久化：
 | 自定义 Base URL | 有 | `API_URL` |
 | 自定义上游 Header | 无 | 固定 Bearer + Accept/User-Agent |
 | 入站多协议 | 有 | Chat、Responses、Anthropic、Gemini |
+| 推理字段展示层转换 | 有（默认关闭） | ReasoningToContent，按模型白名单转 `<think>` 标签 |
 | 出站多 Provider Adapter | 无 | 统一 OpenAI-compatible Chat |
 | 远程模型目录 | 有 | 单次代理 `/v1/models` |
 | 模型公开别名 | 有但当前未启用 | `ModelRedirect.json` 不存在 |
@@ -577,6 +602,7 @@ VCP 当前不会持久化：
 - 模型别名实现：[`modelRedirectHandler.js`](../../VCPToolBox/modelRedirectHandler.js)
 - 模型别名示例：[`ModelRedirect.json.example`](../../VCPToolBox/ModelRedirect.json.example)
 - 入站协议桥：[`routes/protocolBridge.js`](../../VCPToolBox/routes/protocolBridge.js)
+- 推理字段展示层转换：[`modules/reasoningContentAdapter.js`](../../VCPToolBox/modules/reasoningContentAdapter.js)
 - 图像/Embedding 白名单旁路：[`routes/specialModelRouter.js`](../../VCPToolBox/routes/specialModelRouter.js)
 - Embedding 备用模型链：[`EmbeddingUtils.js`](../../VCPToolBox/EmbeddingUtils.js)
 - 主配置模板：[`config.env.example`](../../VCPToolBox/config.env.example)

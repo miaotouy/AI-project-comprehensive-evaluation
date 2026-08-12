@@ -2,15 +2,25 @@
 
 > 调查对象：`E:\works\git\VCPChat`
 >
-> 调查更新日期：2026-07-29
+> 调查更新日期：2026-08-11
 >
-> 代码快照：`3f14e938e700a5487ca13c4a6d8a6caad8e70ac9`（分支：`main`）
+> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
 >
-> 调查方式：只读源码梳理，未修改目标仓库
+> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；只读源码梳理，未修改目标仓库
 >
 > 调查范围：主聊天、群聊与语音聊天共用的消息渲染链；论坛、备忘录和独立文本查看器仅用于确认边界
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 本次刷新要点（3f14e93 → b6ffa22）
+
+- **思维链成为独立隔离渲染域**：完整流水线新增第 1 步 `protect-thought-chains`（`modules/renderer/contentPipeline.js:419`），把 VCP 元思考链与 `<think>/<thinking>` 整体替换为占位符，穿过 Marked 后由 `transformSpecialBlocks` 内专用渲染器恢复（`modules/messageRenderer.js:875` 起，`renderThoughtChainMarkdown`）——思维链内部只解释 Markdown、普通代码围栏与 LaTeX，代码围栏外的原始 HTML 被转义，工具/Mermaid/Flowlock/桌面推送等外层协议不再介入。
+- **`<think>`/`<thinking>` 标签配对修正**：`CONVENTIONAL_THOUGHT_REGEX` 改用反向引用（`modules/messageRenderer.js:322`），开始/结束标签必须一致，并兼容单行格式。
+- **流式未闭合块封印**：`parseStreamTailMarkdown` 新增未闭合思维链（`findUnclosedStreamThoughtChain`，`modules/messageRenderer.js:1857`）与未闭合工具请求（`findUnclosedStreamToolRequest`，`:1932`）检测，按源码中更早出现者封印为 `<pre class="vcp-stream-thought-chain-sealed"/vcp-stream-tool-request-sealed">`（`modules/messageRenderer.js:1971-2016`）。
+- **切回后台流式会话可恢复稳定区**：`streamManager.js` 新增 `restoreStableBlocksForRecreatedDom`（`:563-609`），切换 Agent/Topic 后切回仍在流式的会话时，从每个 block 缓存的 raw HTML 恢复稳定区 DOM，再继续追加新稳定范围（`renderStreamFrame`，`:1361` 起）。
+- **消息音频播放器**：`renderPostProcessedHtml` 调用新增的 `enhanceAudioPlayers`（定义 `modules/messageRenderer.js:2768`，调用 `:3124`），把 `<audio controls>` 替换为自绘控件（播放/暂停、进度、音量、静音、下载，带 aria-label）。
+- **Python 附件安全打开**：`.py` 附件点击不再走系统文件关联，改经 `openPythonAttachmentInTextEditor` IPC 用记事本打开（不会执行），并 `stopPropagation` 阻止全局链接委托（`modules/messageRenderer.js:3119-3158` 附近；`modules/ipc/fileDialogHandlers.js:249-286`）。
+- 其余核心架构（有序占位转换、LaTeX 双层词法岛、稳定区/尾区 + morphdom、富消息运行时、可见性优化）经核对**未变**；`contentProcessor.js`、`animation.js`、`visibilityOptimizer.js` 均未改动。行号整体平移（`messageRenderer.js` 约 3,748 → 4,100+ 行；`streamManager.js` 约 2,384 → 2,452 行；`contentPipeline.js` 完整流水线从 15 步变为 16 步）。
 
 ## 结论摘要
 
@@ -87,7 +97,7 @@ messageRenderer.js
                视口外暂停、延迟重型激活与资源登记
 ```
 
-`messageRenderer.js` 仍是事实上的中心：当前约 3,748 行，既包含协议识别，也包含消息外观、缓存、附件、历史批处理和生命周期协调。其子模块已经形成分层，但还不是一个完全解耦的 renderer core。
+`messageRenderer.js` 仍是事实上的中心：当前约 4,100 行（实测 4,163），既包含协议识别，也包含消息外观、缓存、附件、历史批处理和生命周期协调。其子模块已经形成分层，但还不是一个完全解耦的 renderer core。
 
 ## 2. 消息数据与上下文
 
@@ -197,25 +207,26 @@ renderMessage(message)
 
 ### 4.3 Markdown 前处理的顺序协议
 
-`contentPipeline.js` 把完整渲染固定为以下顺序：
+`contentPipeline.js` 把完整渲染固定为以下顺序（当前 HEAD 为 16 步，较旧快照新增第 1 步 `protect-thought-chains`）：
 
 | 顺序 | step | 目的 |
 |---:|---|---|
-| 1 | `strip-persona-backfill-tail` | assistant 消息移除 Persona 回填注释；使用 JSON 括号配平而不是贪婪删到末尾 |
-| 2 | `normalize-emoticon-urls` | 修复表情包 URL |
-| 3 | `protect-tool-results` | 将工具结果整体替换为 HTML 注释占位符 |
-| 4 | `protect-tool-requests` | 保护工具请求，并只在请求内部解释“始/末”字段标记 |
-| 5 | `transform-mermaid-placeholders` | 把特殊 Mermaid 表达改为后续可识别形式 |
-| 6 | `protect-code-blocks` | 暂存代码围栏，避免结构修正污染代码 |
-| 7 | `transform-flowlock-blocks` | 仅对 assistant、且在工具与代码内容被保护时识别 Flowlock |
-| 8 | 三类 de-indent | 修复被缩进误判的代码、HTML 和工具请求结构 |
-| 9 | `transform-desktop-push` | 完整块或半截块转成状态占位卡 |
-| 10 | `restore-tool-requests` | 恢复请求，准备变成工具调用 UI |
-| 11 | `transform-special-blocks` | 处理工具请求、思考链、DailyNote、按钮、角色分隔符等 |
-| 12 | `ensure-html-fenced` | 识别完整 HTML 文档的代码展示边界 |
-| 13 | `apply-common-content-processors` | 通用文本结构修正 |
-| 14 | `normalize-adjacent-bold-boundaries` | 修复中文/引号无空格相邻时的 CommonMark 粗体边界 |
-| 15 | `restore-code-blocks` | 最后恢复代码围栏 |
+| 1 | `protect-thought-chains` | **新增**：隔离完整思维链（VCP 元思考链 + `<think>/<thinking>`），占位符穿过 Marked；围栏感知逐行扫描避免代码块内示例误识别（`contentPipeline.js:197-296`） |
+| 2 | `strip-persona-backfill-tail` | assistant 消息移除 Persona 回填注释；使用 JSON 括号配平而不是贪婪删到末尾 |
+| 3 | `normalize-emoticon-urls` | 修复表情包 URL |
+| 4 | `protect-tool-results` | 将工具结果整体替换为 HTML 注释占位符 |
+| 5 | `protect-tool-requests` | 保护工具请求，并只在请求内部解释“始/末”字段标记 |
+| 6 | `transform-mermaid-placeholders` | 把特殊 Mermaid 表达改为后续可识别形式 |
+| 7 | `protect-code-blocks` | 暂存代码围栏，避免结构修正污染代码 |
+| 8 | `transform-flowlock-blocks` | 仅对 assistant、且在工具与代码内容被保护时识别 Flowlock |
+| 9 | 三类 de-indent | 修复被缩进误判的代码、HTML 和工具请求结构 |
+| 10 | `transform-desktop-push` | 完整块或半截块转成状态占位卡 |
+| 11 | `restore-tool-requests` | 恢复请求，准备变成工具调用 UI（思维链仍保持占位） |
+| 12 | `transform-special-blocks` | 处理工具请求、思考链（专用隔离渲染）、DailyNote、按钮、角色分隔符等 |
+| 13 | `ensure-html-fenced` | 识别完整 HTML 文档的代码展示边界 |
+| 14 | `apply-common-content-processors` | 通用文本结构修正 |
+| 15 | `normalize-adjacent-bold-boundaries` | 修复中文/引号无空格相邻时的 CommonMark 粗体边界 |
+| 16 | `restore-code-blocks` | 最后恢复代码围栏 |
 
 该流水线的输出不只有文本，还带 `state.toolResultMap` 等中间状态。工具结果特意不在此处恢复，而要穿过 Marked 后再生成独立 HTML。
 
@@ -234,7 +245,16 @@ renderMessage(message)
 
 Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的目标不是隐藏内容，而是防止 Markdown 把反斜杠、下划线等 TeX 语法改写。
 
-### 4.5 Marked 与 HTML 缓存
+### 4.5 思维链是独立隔离渲染域（新增）
+
+当前 HEAD 把思维链从"特殊块转换"提升为第一优先级词法岛：
+
+- 完整流水线第 1 步 `protect-thought-chains`（`contentPipeline.js:195-292`、`:419`）用围栏感知的逐行扫描器识别 VCP 元思考链（`[--- VCP元思考链...---]`…`[--- 元思考链结束 ---]`）与独占行的 `<think>/<thinking>`…`</think>/</thinking>`，整体替换为 `<!--VCP_THOUGHT_CHAIN_n-->` 占位符；Markdown 代码块中用于讲解协议的示例不会被误识别。
+- 占位符穿过 Marked 与其余外层转换，直到 `transformSpecialBlocks`（`messageRenderer.js:875`）完成工具、日记、角色分隔等全部外层协议后，才由 `renderThoughtChainMarkdown` 恢复并独立渲染：只解释 Markdown、普通代码围栏与 LaTeX；代码围栏外的原始 HTML 被封装/转义（`escapeRawHtmlOutsideCodeFences`），工具结果、Mermaid、Flowlock、桌面推送、日记等协议不再二次进入流水线。这相当于给思维链内容一个"低权限子域"。
+- `CONVENTIONAL_THOUGHT_REGEX`（`messageRenderer.js:322`）改用反向引用使开始/结束标签必须一致（`<think>` 与 `</thinking>` 不再配对），并兼容单行 `<think>...</think>` 格式。
+- 流式侧同步配套：`parseStreamTailMarkdown` 用 `findUnclosedStreamThoughtChain`（`messageRenderer.js:1857`）与 `findUnclosedStreamToolRequest`（`:1932`）检测未闭合块，按源码中更早出现者封印为 `<pre class="vcp-stream-thought-chain-sealed">` 或 `<pre class="vcp-stream-tool-request-sealed">`（`:1971-2016`），思维链内部出现 TOOL_REQUEST 文本时不会被误当作外层工具调用，反之亦然。
+
+### 4.6 Marked 与 HTML 缓存
 
 主窗口的 Marked 设置启用 GFM、表格和换行，并允许原始 HTML 通过。源码传入了 `sanitize: false`；在当前 Marked 版本中，更准确的事实是：渲染链没有安装 HTML sanitizer，原始 HTML 会进入输出。
 
@@ -260,7 +280,7 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
 
 缓存的是“Markdown 到 raw HTML”的纯度较高部分，不缓存附件、KaTeX DOM、Mermaid SVG、脚本执行或事件监听器。
 
-### 4.6 DOM 后处理
+### 4.7 DOM 后处理
 
 `renderPostProcessedHtml()` 是完整 DOM 的统一提交点。替换正文时按以下阶段运行：
 
@@ -284,14 +304,15 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
 | `<<<[TOOL_REQUEST]>>>...` | full-render 特殊块转换 | 工具调用 `<pre>`/结构化块 |
 | `[[VCP调用结果信息汇总:...]]` | Marked 前保护、Marked 后恢复 | 独立工具结果卡片 |
 | `<<<DailyNoteStart>>>...` | 特殊块转换 | 日记或日记更新结构 |
-| VCP 元思考链 | 特殊块转换 | 可折叠/样式化思考区域 |
-| `<think>` / `<thinking>` | 特殊块转换 | 常规思考区域 |
+| VCP 元思考链 | 思维链隔离域（当前 HEAD 第一优先级保护） | 独立隔离渲染：只解释 Markdown/代码围栏/LaTeX，HTML 被转义 |
+| `<think>` / `<thinking>` | 思维链隔离域（当前 HEAD 标签配对校验） | 常规思考区域；开始/结束标签必须一致 |
 | Flowlock 控制块 | 工具与代码保护之后 | 状态说明/控制块 UI；最终控制逻辑另由 Flowlock manager 消费 |
 | `DESKTOP_PUSH` | 完整与流式均有专门处理 | 聊天气泡中的推送状态卡 + 桌面画布 IPC |
 | Mermaid fence | Markdown 前占位、DOM 后渲染 | Mermaid SVG 与缩放工具栏 |
 | `[[点击按钮:...]]` | 特殊块转换 | 可点击 AI 操作按钮 |
 | `{{VCPChatCanvas}}` | 特殊块转换 | 画布占位节点 |
 | 原始 HTML / `<style>` / `<script>` | assistant HTML 准备与 DOM 后处理 | 主消息 DOM、scoped CSS、脚本运行时 |
+| `<audio controls>` 消息/附件音频 | DOM 后处理 `enhanceAudioPlayers`（当前 HEAD 新增） | 自绘播放器（播放/暂停/进度/音量/静音/下载，带 aria-label），同一时间只播一个 |
 
 ### 5.2 工具请求
 
@@ -331,13 +352,18 @@ Desktop Push 同时是一种显示语法和流式副作用协议。
 
 完整 Markdown 路径只把块转成“已推送到桌面画布”的状态卡。流式路径则在 chunk 级维护 `desktopPushStates`：识别开始标签、缓冲内容、二次验证内容前缀、创建 widget、定期 append，并在结束标记或长时间无新 token 时 finalize。
 
-聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。
+聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。当前 HEAD 语义未变，实现位移：流式拦截器改名 `processDesktopPushToken`（`streamManager.js:1906` 起，拦截入口见 :1898 注释），前缀白名单现为 `<!doctype`/`<div`/`<section`/`<article`/`<main`/`<header`/`<nav`/`<aside`/`<canvas`/`<svg`/`<style`/`target:`/`<!--`（`streamManager.js:21`），节流 100ms、150 秒空闲超时不变。
+
+### 5.6 附件打开的安全分支与音频播放器（新增）
+
+- **Python 附件不执行**：`renderAttachments` 识别 `.py` 附件（`messageRenderer.js:3014-3026`），点击时 `e.stopPropagation()` 阻断聊天区全局链接委托，改调 `electronAPI.openPythonAttachmentInTextEditor`（`modules/ipc/fileDialogHandlers.js:249-286`）用文本查看器打开；失败时 toast 报错。这是对旧行为"按系统文件关联二次打开可能直接触发 Python 执行"的收紧。
+- **音频播放器**：`renderPostProcessedHtml` 末尾调用 `enhanceAudioPlayers`（`messageRenderer.js:3065-3195`），把 `<audio controls>` 替换为 `.vcp-audio-player` 自绘控件（标题、进度、音量、静音、下载按钮），`aria-label` 标注，播放新音频时暂停其他音频；附件音频与 Markdown 内音频一并覆盖。
 
 ## 6. 流式渲染引擎
 
 ### 6.1 状态并不只有一个字符串
 
-`streamManager.js` 当前约 2,384 行。每条流消息至少涉及以下状态表：
+`streamManager.js` 当前约 2,450 行（实测 2,452）。每条流消息至少涉及以下状态表：
 
 | 状态 | 含义 |
 |---|---|
@@ -550,35 +576,37 @@ CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与资�
 
 ## 11. 关键文件索引
 
+> 行号为当前 HEAD（b6ffa22）实测近似值，旧快照行号已按本次刷新平移。
+
 | 文件 | 关键位置 | 调查价值 |
 |---|---:|---|
 | `renderer.js` | 约 436 | 初始化 `messageRenderer` 及 ref 注入 |
-| `renderer.js` | 约 523-744 | VCP 流事件分派、当前视图判定、错误旁路 |
-| `renderer.js` | 约 2371 | Marked 实例配置 |
+| `renderer.js` | 约 540-762 | VCP 流事件分派、当前视图判定、错误旁路 |
+| `renderer.js` | 约 2388-2407 | Marked 实例配置 |
 | `modules/messageRenderer.js` | 约 65 | LaTeX 保护与单美元判断 |
-| `modules/messageRenderer.js` | 约 308 | VCP 语法正则与工具请求扫描 |
-| `modules/messageRenderer.js` | 约 1345 | assistant CSS/HTML scope |
-| `modules/messageRenderer.js` | 约 1605 | full-render 与 stream-fast 入口 |
-| `modules/messageRenderer.js` | 约 1735 | Markdown 转换与 HTML 缓存 |
-| `modules/messageRenderer.js` | 约 1894 | 工具结果字段化渲染 |
-| `modules/messageRenderer.js` | 约 2672 | 统一 DOM 后处理提交点 |
-| `modules/messageRenderer.js` | 约 2743 | 单条消息总编排 |
-| `modules/messageRenderer.js` | 约 3408 | 历史渐进批处理 |
-| `modules/renderer/contentPipeline.js` | 约 308 | 完整流水线的顺序协议 |
-| `modules/renderer/contentPipeline.js` | 约 370 | 流式轻量流水线 |
+| `modules/messageRenderer.js` | 约 308-322 | VCP 语法正则与工具请求扫描 |
+| `modules/messageRenderer.js` | 约 1397 | assistant CSS/HTML scope |
+| `modules/messageRenderer.js` | 约 1627 | full-render 与 stream-fast 入口 |
+| `modules/messageRenderer.js` | 约 1775 | Markdown 转换与 HTML 缓存 |
+| `modules/messageRenderer.js` | 约 2043 | 工具结果字段化渲染 |
+| `modules/messageRenderer.js` | 约 3083 | 统一 DOM 后处理提交点 |
+| `modules/messageRenderer.js` | 约 3158 | 单条消息总编排 |
+| `modules/messageRenderer.js` | 约 3823 | 历史渐进批处理 |
+| `modules/renderer/contentPipeline.js` | 约 408 | 完整流水线的顺序协议 |
+| `modules/renderer/contentPipeline.js` | 约 479 | 流式轻量流水线 |
 | `modules/renderer/streamManager.js` | 约 184 | 初始化、预缓冲与延迟最终化状态 |
-| `modules/renderer/streamManager.js` | 约 920 | 稳定前缀扫描 |
-| `modules/renderer/streamManager.js` | 约 1303 | stable/tail DOM 与 morphdom 更新 |
-| `modules/renderer/streamManager.js` | 约 1556 | 流消息初始化与后台历史选择 |
-| `modules/renderer/streamManager.js` | 约 1737 | 全局 30 FPS 渲染循环 |
-| `modules/renderer/streamManager.js` | 约 2029 | chunk 归一化与排队 |
-| `modules/renderer/streamManager.js` | 约 2122 | 最终文本选择、完整重渲染和清理 |
+| `modules/renderer/streamManager.js` | 约 978 | 稳定前缀扫描 |
+| `modules/renderer/streamManager.js` | 约 1361 | stable/tail DOM 与 morphdom 更新 |
+| `modules/renderer/streamManager.js` | 约 1624 | 流消息初始化与后台历史选择 |
+| `modules/renderer/streamManager.js` | 约 1805 | 全局 30 FPS 渲染循环 |
+| `modules/renderer/streamManager.js` | 约 2097 | chunk 归一化与排队 |
+| `modules/renderer/streamManager.js` | 约 2190 | 最终文本选择、完整重渲染和清理 |
 | `modules/renderer/contentProcessor.js` | 约 591 | `<pre>`、代码复制和 HTML preview |
 | `modules/renderer/contentProcessor.js` | 约 1094 | KaTeX、Highlight.js 和按钮等后处理 |
-| `modules/renderer/contentProcessor.js` | 约 1147 | CSS selector scope |
-| `modules/renderer/animation.js` | 约 170 | 消息脚本加载与执行 |
-| `modules/renderer/visibilityOptimizer.js` | 约 41 | IntersectionObserver 与全局动画拦截 |
-| `modules/renderer/visibilityOptimizer.js` | 约 799 | 消息动态资源清理 |
+| `modules/renderer/contentProcessor.js` | 约 1183 | CSS selector scope |
+| `modules/renderer/animation.js` | 约 391 | 消息脚本加载与执行 |
+| `modules/renderer/visibilityOptimizer.js` | 约 51 | IntersectionObserver 与全局动画拦截 |
+| `modules/renderer/visibilityOptimizer.js` | 约 843 | 消息动态资源清理 |
 
 ## 结论
 

@@ -1,0 +1,157 @@
+# LobeHub 独特功能调查笔记
+
+> 调查对象：`E:\works\git\lobehub`
+>
+> 调查更新日期：2026-08-11
+>
+> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+>
+> 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；未修改仓库源码
+>
+> 调查范围：README 宣布的 Operator/Create/Collaborate/Evolve 四组能力——Agent 运营、IM 网关、Agent Builder、Agent Groups、Pages、Schedule、Project、Workspace、Personal Memory；重点走通运营、日程、项目与个人记忆主链；插件、知识库、文档 Portal 等已有类目覆盖面只做回链不重写
+>
+> 文档定位：实现学习与跨项目横向比较，不作为整改方案
+
+## 结论摘要
+
+LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work”，并把九个能力打包进四组（Operator / Create / Collaborate / Evolve）。这九项在本快照上均可定位到源码，但成熟度差异大：
+
+| 候选 | 证据状态 | 一句话结论 |
+|---|---|---|
+| Schedule（任务调度与自动化） | `主链确认`（静态证据） | 完整主链：创建任务 → run/调度 tick → TaskRunnerService → headless execAgent → 主题会话 + Brief 汇报 → PostgreSQL 持久化；QStash cron 与本地 setTimeout 双实现 |
+| Personal Memory | `主链确认`（静态证据） | 完整主链：对话 topic → Upstash Workflow（hourly / 用户触发）→ CEPA+Identity 五层提取 → 1024 维向量入库 → 记忆工具 9 API 读写 → 记忆管理页面编辑 |
+| Agent 运营（Brief 汇报 + Work 产物 + 用量统计） | `主链确认`（Brief/Work 部分）/ `入口确认`（统计部分） | “hires, schedules, reports”中的 reports 落在 Briefs（decision/result/insight/error）+ HomeInbox 双栏 + Work 版本化产物对象；统计页为独立入口 |
+| Agent Builder | `主链确认`（静态证据） | 内置 agent-builder 角色 + `lobe-agent-builder` 工具（读模型/搜工具/装插件/改配置），冲突工具被剥离；对话式配置 Agent 的完整闭环 |
+| IM 网关（Messenger / Agent Bot） | `入口确认` | Slack/Discord/Telegram/WeChat 平台注册、OAuth 安装、webhook 入口、cron 保活；webhook → execAgent 的消息往返未逐平台验证 |
+| Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
+| Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
+| Agent Groups | `入口确认`/`归并已有类目` | 群组对象与模板已被 Agent 角色笔记覆盖；群聊会话表面在会话类目边界内，本次只确认路由与成员编辑面 |
+| Project | `入口确认` | 无独立 project 表；“按项目组织”实际是按工作目录（workingDirectory）对 topic 分组，异构 Agent（Claude Code/Codex）默认启用 |
+
+README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。
+
+## 系统边界
+
+- 本笔记只读当前快照 `5952f4c3`；SPA 路由集中在 `src/spa/router/desktopRouter.shared.tsx`，业务在 `src/features/`。
+- 后端为 `apps/server`（Hono + TRPC + Drizzle/PostgreSQL），异步长流程走 Upstash Workflows/QStash（`apps/server/src/workflows-hono/`），本地/桌面环境回退到进程内调度。
+- 与既有笔记的分工：Agent 配置对象（[Agent角色笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)）、工具注入/审批/执行（[Agent工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)）、文档/Portal（[生成式输出与运行时笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)）。
+
+## 介绍声明与候选盘点
+
+根 README（README.md:117-183）按四组声明：
+
+- **Operator**：“Hires, schedules, and reports on your entire AI team” + IM Gateway（README.md:117-124）；
+- **Create**：Agent Builder（“describe what you need once, and the agent setup starts right away”）、10,000+ Skills（README.md:136-143）；
+- **Collaborate**：Agent Groups、Pages（shared context 多 Agent 协作写作）、Schedule（定时运行）、Project（按项目组织）、Workspace（团队共享空间）（README.md:155-163）；
+- **Evolve**：Personal Memory（Continual Learning + White-Box Memory，结构化可编辑）（README.md:176-183）。
+
+路由注册表（`src/spa/router/desktopRouter.shared.tsx`）与声明一一对应：`agent/`（含 `task`、`tasks`、`statistics`、`permission`）、`group/`、`memory/`（identities/contexts/preferences/experiences/activities）、`page/:id`、`tasks`/`task/:taskId`（跨 Agent 任务工作区）、`/:workspaceSlug/*`（工作区镜像）、`community/`（Agent 市场与社区）、`image`/`video`（创作面，本次不展开）。设置面另有 `settings/messenger` 与 `agent/channel`（IM 渠道）。
+
+## 已确认的独特能力
+
+### 能力一：Schedule——任务调度与自动化（`主链确认`，静态证据）
+
+**用户目标**：让 Agent 在用户离线时按 cron 或心跳间隔反复执行同一任务，并把每次运行的结果汇报回用户，普通 Chat 无法提供“任务对象 + 自动触发 + 汇报”的闭环。
+
+**入口与触发者**（三类触发均确认）：
+
+1. 用户手动：`task.run` TRPC mutation（`apps/server/src/services/taskRunner/index.ts:68` `TaskRunnerService.runTask`，注释标明 manual “run now” 路径）；
+2. 定时调度：QStash 中央调度器 `/api/workflows/task/schedule-dispatch`（`apps/server/src/workflows-hono/task/handlers/scheduleDispatch.ts:39`）→ 按 `isExecutionTime`（cron 表达式 + 时区 + 去重）筛选到期任务 → fan-out 到 `/schedule-execute` → `runScheduleTick`（`apps/server/src/services/taskRunner/scheduleTick.ts:38`）；
+3. 心跳：`/heartbeat-tick`（QStash 自续期）与本地 `LocalTaskScheduler`（`apps/server/src/services/taskScheduler/impls/local.ts:17`，setTimeout 实现，注释明确用于本地开发/Electron）。
+
+**事实对象**：`tasks` 表（`packages/database/src/schemas/task.ts:25`）——`automationMode: 'heartbeat'|'schedule'`、`schedulePattern/scheduleTimezone`、`heartbeatInterval/Timeout/lastHeartbeatAt`、`status`（backlog/running/paused/completed/failed/canceled + scheduled）、`parentTaskId` 自引用树、`taskDependencies`（blocks/relates + 条件依赖占位）、`taskDocuments`（任务文档）、`taskTopics`（每次运行一个 topic，含 `trigger: manual|schedule|heartbeat`、`handoff`、评审字段）、`taskComments`、`briefs`。任务无父级继承，context/config 各自独立（schema 注释）。
+
+**完整主链**：创建任务（`CreateTaskModal`，含 `scheduler/CronConfig.ts` + `SchedulerForm.tsx` 前端表单）→ `runTask`：先解析 assignee（无则回退 inbox agent）、冲突检查（已有 running topic 则 CONFLICT）、心跳超时清理、`buildTaskPrompt` 组装任务指令 + 工作区文档上下文 → `AiAgentService.execAgent`（`index.ts:191`，`approvalMode: 'headless'`，挂载 `@lobechat/builtin-skills` 的 task skill 与可选 Brief 工具）→ Agent 在主题会话中执行，通过 `lh task` CLI（`runCommand` 工具）自行查看/编辑任务、建子任务、写文档、汇报评论（`packages/builtin-skills/src/task/SKILL.md`，其中明确“自动化任务永不 complete”，否则永久解除循环）→ 完成回调 `taskLifecycle.onTopicComplete`（webhook `/api/workflows/task/on-topic-complete`）→ 新建 taskTopic 行、`updateHeartbeat`。
+
+**用户结果**：任务列表（Kanban：`AgentTaskList/KanbanBoard.tsx`）、任务详情页（`AgentTaskDetail/`：指令编辑、子任务树、评论、文档、话题抽屉、人工验收 `TaskAcceptance.tsx` + `TaskVerifyConfig.tsx` + `VerifyCriterionModal`）、`taskTopics.handoff`（LLM 摘要的交接信息）。自动触发结果经 Brief 系统回流（见能力三）。
+
+**持续性**：全部状态在 PostgreSQL；调度 tick 以 DB 为权威（`scheduleTick.ts:35` 注释“DB is the authority: re-checks task state”），用户暂停/取消/改模式后到期消息被跳过；`maxExecutions` 配额只统计自动化 tick（`countByTask(..., triggers:['schedule'])`）；watchdog（`workflows-hono/task/handlers/watchdog.ts`）扫描 running 超时任务；失败回退：自动化任务回 `scheduled`（保住下次 tick），非自动化回 `paused`（`taskRunner/index.ts:267-271`）。
+
+**主动性与取消**：用户可 pause/cancel；人工等待语义由“未解决 urgent brief”实现——`briefModel.hasUnresolvedUrgentByTask` 命中则跳过本次 tick（`scheduleTick.ts:76`、`heartbeatTick.ts:76`），即“Agent 需要人时自动停摆”。
+
+**人机关系**：headless 审批（工具审批笔记已覆盖该模式语义）；用户通过评论、验收标准、评论反馈介入；依赖链完成后 `cascadeOnCompletion` 自动启动下游任务（`taskRunner/index.ts:303`）。
+
+**外部依赖**：QStash 为生产调度后端（Vercel cron 触发入口 `gatewayCron` 之外），本地回退 `LocalTaskScheduler`；`isExecutionTime` 的 cron 求值在 `@lobechat/utils/cronEval`。
+
+**独特性判断**：任务对象（树、依赖、配额、验收）与 Agent 运行（topic、heartbeat、汇报）绑成一个生命周期，且由 Agent 通过 `lh task` 工具自我管理——不是单纯“定时发消息”，也不是外部 cron 薄壳。与 VCPToolBox TaskAssistant（interval/cron/manual）、Hermes cron（会话级定时消息）的差异：LobeHub 以任务为持久化事实对象，Agent 是执行者与自我维护者。
+
+### 能力二：Personal Memory——白盒个人记忆（`主链确认`，静态证据）
+
+**用户目标**：把分散会话中关于用户的事实（身份、偏好、经历、活动、情境）持续结构化沉淀，Agent 在对话中可检索、可写、可改、可删，且用户能逐条查看编辑（README “White-Box Memory”）。
+
+**入口与触发者**：
+
+- 自动：QStash 每小时 cron `/call-cron-hourly-analysis`（`apps/server/src/workflows-hono/memory-user-memory/index.ts:18`）→ `hourly` workflow 全量扫描用户 topic；
+- 用户触发：记忆页面“分析”动作（`src/routes/(main)/memory/(home)/index.tsx:50` `ActionBar showAnalysis`）+ `asyncTasks` 进度实体；
+- 对话中：Agent 经 `lobe-user-memory` 工具主动读写（见下）。
+
+**事实对象**：`user_memories` 主表 + 五个层表（`packages/database/src/schemas/userMemories/index.ts`）——`userMemoriesContexts`（情境，带 scoreImpact/scoreUrgency/关联对象与主体）、`userMemoriesExperiences`（情况/行动/推理/关键学习，scoreConfidence）、`userMemoriesPreferences`（conclusionDirectives 指令 + scorePriority + 适用场景）、`userMemoriesActivities`（narrative/feedback/时间地点 + status）、`userMemoriesIdentities`（关系/角色/episodicDate）。每表带 1024 维向量列与 HNSW 索引（`vector_cosine_ops`），记忆带 `sourceIds`（支撑消息 id）、tags、accessedCount。
+
+**完整主链**：话题完成/定时 → `processTopic` workflow（`workflows/processTopic.ts:32`）→ `MemoryExtractionExecutor.extractTopic`（`services/memory/userMemory/extract.ts`，由 `@lobechat/memory-user-memory` 包执行 CEPA 层——Context/Experience/Preference/Activity——与 Identity 层两阶段提取，层可选）→ LLM 提取 + 向量嵌入 → 写入五层表。消费侧：`lobe-user-memory` 工具（`packages/builtin-tool-memory/src/manifest.ts:91`）提供 9 个 API——searchUserMemory（多查询 + 层/标签/关系/时间意图过滤，含日历式 timeIntent）、queryTaxonomyOptions、五个 add*、updateIdentityMemory（mergeStrategy 合并策略）、removeIdentityMemory（必须给 reason）；工具注入受 `globalMemoryEnabled` 门控（`apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:292,330` 与测试 `__tests__/index.test.ts:716`）。用户面：`/memory` 六条路由（identities/contexts/preferences/experiences/activities + home，home 含 Persona 与 RoleTagCloud），逐层列表/网格/时间线视图与编辑（`src/routes/(main)/memory/features/`），记忆卡片在对话中以特殊渲染投影（`packages/builtin-tool-memory/src/client/`）。
+
+**持续性**：PostgreSQL + 向量索引；hourly workflow 游标续扫（`MemoryExtractionWorkflowCursor`）、取消传播（`AsyncTaskModel.isUserMemoryExtractionCancellationRequested` 协作式级联取消）、失败回调不重试风暴（`WorkflowNonRetryableError`，`processTopic.ts:268`）；并行度受限（per-user key parallelism 5、全局 flowControl parallelism 25，`processTopic.ts:284-328` 注释）。
+
+**主动性与取消**：hourly 扫描可全局关闭（runGuard）；用户主动任务可取消且进度落 `asyncTasks`；层选择（`payload.layers`）控制提取范围；`settings/memory` 与 `chatConfig.memory.*`（enabled/effort/toolPermission read-only|read-write，见 Agent 角色笔记）控制运行时行为。
+
+**独特性判断**：五层记忆 + 结构化 taxonomy + 向量检索 + 可编辑白盒 + 来源追踪的组合在本样本中无对应实现；Open WebUI 的 Persistent Memory 是全局文本记忆，VCP 系记忆偏日志/语义动力学，均无“身份/偏好/经历/活动/情境五层 + 版本化合并策略 + 用户逐条编辑”的对象模型。记忆工具同时是 Agent 可写面（read-write 权限模型）。
+
+### 能力三：Agent 运营——Brief 汇报与 Work 产物（`主链确认`：Brief/Work；`入口确认`：统计）
+
+**用户目标**：用户离线时 Agent 团队自行干活，回来时获得“需要你决策/修复”与“完成报告”两级汇报，并看到统一的工作产物清单——README “reports on your entire AI team” 的实现面。
+
+**Brief 主链**：任务运行完成 → `TaskLifecycleService.onTopicComplete`（`apps/server/src/services/taskLifecycle/index.ts:108`）→ 默认 auto 模式 `synthesizeTopicBrief`（`index.ts:697`；`synthesize.ts` 说明“verdict 提前判定”，legacy agent 模式为逃生舱）程序化合成 `briefs` 行（`packages/database/src/schemas/task.ts:281`：type decision/result/insight/error、priority urgent/normal/info、artifacts 程序化收集、actions、resolvedAction/readAt 状态）→ 用户界面：`HomeInbox`（`src/features/HomeInbox/index.tsx`）分“Needs you”（阻塞 Agent 的 decision/fix，error 沉底）与“News”（insight/result 报告）两栏，brief 按用户且按工作区隔离；`DailyBrief` 卡片带任务引用与跳转（`InboxBriefCard.tsx:65` 导航到任务详情）；“未解决 urgent brief”反过来挂起后续自动化 tick（见能力一）。brief 可 resolve/标记已读（`useBriefStore`）。
+
+**Work 主链**：`works` + `work_versions` 表（`packages/database/src/schemas/work.ts:26,144`）——每个版本绑定 toolCallId/messageId/agentId/topicId/threadId/rootOperationId（来源谱系），currentVersionId 指向最新版本；类型覆盖 document/task/external（github/linear 品牌图标与 URL 白名单，`src/features/Work/descriptors.tsx:34-73`）/filePreview；列表/摘要卡 + `WorkGallery`（`src/routes/(main)/resource/(home)/index.tsx:25` `?works=...` 入口）。Work 是“Agent 交付物”的统一事实对象，与工具注册的 `work?: PluginApiWorkConfig`（Agent 工具笔记 §1.3）衔接。
+
+**统计入口**：`agent/statistics`（`AgentUsage`：7d/30d/90d 用量与成本、模型拆分、趋势图，`src/features/AgentUsage/hooks.ts:21`）+ `agent/permission`（工作区 Agent 的访问级 edit/use/view、模型策略 member/fixed、执行目标策略，`src/features/AgentPermission/PermissionForm.tsx`）。统计主链（数据聚合源）本次未深入。
+
+**独特性判断**：Brief 是“Agent 需要人”与“Agent 干完活”的异步汇报信道，与任务调度构成完整离线运营闭环；Work 把文档/任务/外部服务产物统一为带版本与来源谱系的对象。二者合起来支撑 README “You stay in charge — without staying online”。
+
+### 能力四：Agent Builder——对话式 Agent 配置（`主链确认`，静态证据）
+
+**用户目标**：不打开几十个表单字段，用自然语言描述需求让一个专门 Agent 帮你把目标 Agent 配好（README “describe what you need once”）。
+
+**主链**：右侧面板 `AgentBuilder`（`src/features/AgentBuilder/index.tsx:14`）→ 初始化内置角色 `AGENT_BUILDER`（`packages/builtin-agents/src/agents/agent-builder/index.ts:43`，slug `agent-builder`，`persist` 落库）→ 对话中挂载 `lobe-agent-builder` 工具并剥离四组冲突工具（`lobe-agent-management`/`lobe-group-management`/`lobe-group-agent-builder`/`lobe-agent`，注释说明避免“改到 builder 自己”）→ 工具 API（`packages/builtin-tool-agent-builder/src/manifest.ts:6`）：读（getAvailableModels、searchMarketTools）+ 写（installPlugin——注释明确“ALWAYS REQUIRES user approval even in auto-run mode”、updateAgentConfig、updatePrompt、InstallPlugin 等）→ 配置变更实时作用于左侧目标 Agent（`AgentBuilderProvider` 绑定 editingAgentId）。另有群组版本 `group-agent-builder`。
+
+**独特性判断**：把“配置 Agent”本身做成一个 Agent 任务，且通过工具审批门把危险写操作（装插件）锁死在人审；与通用表单式配置（Cherry Studio 等）形成产品差异。运行时执行面（工具审批、配置对象）回链 Agent 工具/角色笔记。
+
+## 已归并到现有类目的能力
+
+- **Agent Groups（群组对象）**：群组类型（`packages/types/src/agentGroup/index.ts`）、ChatGroupWizard 六类模板、成员 Agent 结构已在 [Agent 角色笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md) §6 覆盖；本快照新增群组路由 `group/:gid`（`desktopRouter.shared.tsx:206-243`）与成员编辑面（`group/profile/features/AgentBuilder` 可对成员跑 Builder、`Sidebar/Members`、`AddGroupMemberModal`、`SortMembersModal`），群聊会话本体在会话与消息类目边界内。群组作为“多 Agent 并行协作”入口已确认，但群体编排运行链不在本次范围。状态：`入口确认`/`归并已有类目`。
+- **Pages（文档协作写作）**：文档对象（documents 行、历史、编辑锁、发布到 workspace）已在 [生成式输出与运行时笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md) 覆盖；本笔记确认产品表面：`page/:id` 路由（`desktopRouter.shared.tsx:764-792`）、`PageEditor`（`useDocumentLock`/`usePageLockedByOther` 锁语义、`PageAgentProvider` 的 copilot 对话、`PageMetaBar`）。Pages 的“多 Agent 同页协作”运行链（协作者如何进入同一文档会话）未验证。状态：`入口确认`。
+- **Agent 市场 / Community（hires 面）**：`community/` 路由族（agent/group_agent/model/provider/skill/mcp/user/org 详情与列表）、市场导入链在 Agent 角色笔记 §7 有记录；本次只做运营盘点的组成部分，不单独成卡。
+- **插件、知识库、搜索、设备工具**：全部回链 [Agent 工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)，不再重复。
+
+## 声明不符、外部依赖与暂缓项
+
+- **Project（按项目组织）**：README 宣传的 “Project” 在数据库无独立表（`packages/database/src/schemas/` 全量检索 `'projects'` 零命中）。实际实现是 **基于工作目录的 topic 分组**：`groupTopicsByProject`（`packages/utils/src/client/topic.ts:161`）按 `topic.metadata.workingDirectoryConfig/workingDirectory` 分组，项目名取路径末段；“无项目”组固定最后（`selectors.ts:203-209`）。异构 Agent（claude-code/codex）默认 `byProject`（`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts:7-18`）。另外任务 `identifier` 支持 `'PROJ-42'` 样式命名（`task.ts:33` 注释）、记忆 context 的 type 枚举含 `'project'`。结论：README 的 “Project” 是轻量组织概念，不是项目实体——`入口确认`，按工作目录分组的主链（工作目录从何写入 topic metadata）未完整验证。
+- **IM 网关**：平台注册（slack/telegram/discord/wechat/line/imessage 渠道路由与 webhook 处理器）、OAuth 安装（`agent-hono/handlers/messengerInstall.ts`、`messengerOAuthCallback.ts`）、`/api/agent/webhooks/:platform`（`platformWebhook.ts`）、cron 保活与外部 `MESSAGE_GATEWAY`（`gatewayCron.ts:189-197`）、验证路由 `verify-im` 均确认存在；但“用户在 IM 发消息 → 绑定 Agent 会话 → 回复回 IM”的单平台完整往返与消息持久化语义未逐一走通（bot 场景的工具设备访问策略在 Agent 工具笔记 §7.2 已有记录）。状态：`入口确认`。
+- **Workspace**：`workspaces` 表（slug/name/primaryOwnerId，`packages/database/src/schemas/workspace.ts:19`）、`/:workspaceSlug/*` 路由镜像（`desktopRouter.shared.tsx:880-1108`）、工作区设置页（members/notification/statistics/plans/billing/budget/credits/usage/service-model/credential/apikey/oauth-apps/audit-log/labels/storage/devices）、社区工作区详情页、共享设备池（Agent 工具笔记 §7.2）确认。Workspace 是“团队级 Agent 治理与共享”的容器，成员/权限/预算主链（邀请、角色、配额执行点）未逐个验证。状态：`入口确认`。
+- **Agent 运营的 hires 面**：Agent 市场/社区、ConnectAgent 的“雇用”链路未单独走通；统计页数据聚合（usage 记录的写入与汇总）未验证。状态：`入口确认`。
+- **image/video 创作工作台**（`(create)/image`、`(create)/video` 路由族）为 README 之外的独立创作面，本次不展开（未验证事项）。
+
+## 对特色贡献统计的影响
+
+- 建议新增主贡献候选：**任务调度与自动化（Schedule）**、**白盒个人记忆（Personal Memory）**（均可按静态主链确认计入，标签：`主动 Agent`、`记忆演化`）；**Agent 运营汇报（Brief + Work）** 作为组合贡献计入（标签：`主动 Agent`、`活对象`）。
+- 辅助贡献候选：Agent Builder（`人类工具面` 反向——人通过 Agent 配置 Agent）、IM 网关（`多表面连续性`）、Workspace（`协同工作区`）。
+- 与待查清单“Agent 社会/群体”聚类的交点：Agent Groups 会话面仍缺运行链，暂不进入统计。
+
+## 未验证事项
+
+- 任务自动化在生产环境（QStash）的运行表现、`/schedule-dispatch` 与 Vercel cron 的实际接线（本地代码只见入口与 fan-out 逻辑）。
+- IM 平台消息往返（webhook → Agent 会话 → 回推）的单平台完整链路与 bot 会话持久化语义。
+- Personal Memory hourly 扫描的调度 cadence 与资源消耗、提取质量（LLM 提取器未运行）。
+- Workspace 成员/配额/账单执行点（邀请流程、budget 扣减、审计日志写入）。
+- 统计页数据源（usage 记录写入与聚合 SQL）。
+- `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）。
+- image/video 创作工作台与 Work 对象的衔接。
+
+## 关键源码索引
+
+- 路由全貌：`src/spa/router/desktopRouter.shared.tsx`（agent/group/memory/page/tasks/workspaceSlug 各段）。
+- 任务调度：`packages/database/src/schemas/task.ts`、`apps/server/src/services/taskRunner/index.ts`、`scheduleTick.ts`、`heartbeatTick.ts`、`apps/server/src/services/taskScheduler/impls/local.ts`、`apps/server/src/workflows-hono/task/handlers/scheduleDispatch.ts`、`packages/builtin-skills/src/task/SKILL.md`。
+- 个人记忆：`packages/database/src/schemas/userMemories/index.ts`、`apps/server/src/services/memory/userMemory/extract.ts`、`apps/server/src/workflows-hono/memory-user-memory/workflows/processTopic.ts`、`packages/builtin-tool-memory/src/manifest.ts`、`src/routes/(main)/memory/(home)/index.tsx`。
+- 运营汇报：`apps/server/src/services/taskLifecycle/index.ts`（onTopicComplete/synthesizeTopicBrief）、`packages/database/src/schemas/task.ts`（briefs）、`src/features/HomeInbox/index.tsx`、`packages/database/src/schemas/work.ts`、`src/features/Work/descriptors.tsx`、`src/features/AgentUsage/hooks.ts`。
+- Agent Builder：`packages/builtin-agents/src/agents/agent-builder/index.ts`、`packages/builtin-tool-agent-builder/src/manifest.ts`、`src/features/AgentBuilder/index.tsx`。
+- IM 网关：`src/features/Messenger/index.tsx`、`apps/server/src/agent-hono/handlers/{platformWebhook,messengerInstall,messengerOAuthCallback,gatewayCron}.ts`。
+- 项目分组：`packages/utils/src/client/topic.ts:161`、`src/store/chat/slices/topic/selectors.ts:203`、`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts`。
