@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/AIO-Hub-Chat调查笔记.md`](../Chat/AIO-Hub-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/AIO-Hub-Chat调查笔记.md`](../Chat/AIO-Hub-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据；按提交范围核对会话持久化（原子写/回收站/损坏隔离）、加载期生成状态修复与索引恢复的代码变化，受影响结论在 HEAD 处源码重新确认，失效行号已更新
 >
 > 调查范围：会话/消息/分支的数据模型、事实源与持久化、生命周期、消息操作与分支语义、索引与检索（数据侧）、外部对象绑定、恢复与保留语义；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -67,17 +67,24 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 ### 2.1 索引与详情分文件存储
 
-存储采用"索引与详情分文件"策略（`composables/storage/useChatStorageSeparated.ts`）：`sessions-index.json` 存放所有 `ChatSessionIndex`（+`favoriteFolders`），每个会话的完整 `ChatSessionDetail` 单独存成 `sessions/{sessionId}.json`。
+存储仍采用"索引与详情分文件"策略：`sessions-index.json` 存放所有 `ChatSessionIndex`（+`favoriteFolders`），每个会话的完整 `ChatSessionDetail` 单独存成 `sessions/{sessionId}.json`。写入路径已重构为"协调器 + 原生原子写"——
+
+- `useChatStorageSeparated.ts` 现在只是兼容门面（注释自述 "Compatibility facade"），所有写盘经 `SessionPersistenceCoordinator`（`services/sessionPersistenceCoordinator.ts`）合并：按会话/索引分槽、同一会话不允许并发写、写前同步捕获快照、失败按指数退避重试、最多 4 个并发会话写；
+- 实际落盘由 Rust 命令 `llm_chat_atomic_write`（`src-tauri/src/commands/llm_chat_persistence.rs`）完成：临时文件写盘 + fsync + 原子替换，带 revision 校验（`_persistence.revision` 与 tombstone 比对，旧写 staleRejected）、进程级文件锁、`.bak` 有效备份轮换；命令只接受逻辑上的 llm-chat 标识符而非任意文件路径；
+- 每个会话文件与索引文件都写入 `_persistence: { schema: 1, revision, committedAt }` 元数据（`services/sessionPersistenceRepository.ts` 的 `createPersistenceMeta`），旧文件按 revision 0 兼容；
+- 损坏会话文件被隔离到 `sessions-corrupt/` 并登记 `corruption-manifest.json`（version 1），索引损坏时保留 `.corrupt` 样本并回退 `.bak` 或最高 revision 的临时文件（`IndexLoadResult` 区分 ready/recovered/missing/corrupt/unsupported/io-error，`types/persistence.ts:69-75`）；
+- 分离窗口（`/detached-component/`）禁止直写持久化，必须经主窗口代理。
 
 ### 2.2 撤销/重做栈不持久化
 
-`saveSession`（第190-242行）在写盘前会 `delete history/historyIndex`，并删除 `isFavorite`/`favoriteFolderId`（这两个字段只活在索引里）——**撤销/重做栈从不持久化到磁盘**，应用重启后历史栈清空（`sessionLifecycleManager.ts` 的 `loadSessions()` 第532-543行、`switchSession()` 第580-589行都会在 detail 缺少有效 history 时调用 `managers.history.clearHistory(sessionId)` 重新初始化）。这是一个明确的设计取舍：撤销/重做只在单次会话运行期间有效，不是跨会话持久功能。
+`toStoredSession()`（`useChatStorageSeparated.ts:89-105`）在写盘前仍会剥离 `history`/`historyIndex` 与 `isFavorite`/`favoriteFolderId`，并补上 `_persistence` 元数据——**撤销/重做栈从不持久化到磁盘**，应用重启后历史栈清空（`sessionLifecycleManager.ts` 的 `loadSessions()`、`switchSession()` 都会在 detail 缺少有效 history 时调用 `managers.history.clearHistory(sessionId)` 重新初始化）。这是一个明确的设计取舍：撤销/重做只在单次会话运行期间有效，不是跨会话持久功能。
 
-### 2.3 索引自愈
+### 2.3 索引恢复与自愈
 
-`repairIndex()`（`useChatStorageSeparated.ts:666-707`）：遍历索引里所有会话项，重新加载对应会话文件、用 `createIndexItem()` 重算 `messageCount` 和 `displayAgentId`，与索引里存的值不一致就更新并计数。`sessionLifecycleManager.loadSessions()`（第547-566行）用 `setTimeout(..., 3000)` 延迟 3 秒后台调用，属于"启动后台静默自愈"，不阻塞首屏加载；同时提供手动触发入口 `refreshSessionsIndex()`（第392-428行），会同步等待 `repairIndex()` 完成并重建整个 `sessionIndexMap`。
+旧的"启动 3 秒后 `repairIndex()` 后台自愈"已被两套新机制取代（`sessionLifecycleManager.ts`）：
 
-## 3. 创建、切换、归档、删除与恢复
+- **索引损坏时的后台恢复**：`loadSessions()` 发现索引状态为 `corrupt` 时调用 `startBackgroundIndexRecovery()`——带 AbortController（可取消）、并发 4、逐批回填 `sessionIndexMap`，并暴露 `sessionRecovery` 状态（`ready/recovering/corrupt` + 扫描/失败计数）给 LlmChat 工作台渲染恢复横幅（取消、打开损坏目录、导出诊断、删除隔离文件等入口在 `LlmChat.vue:318-376`）；
+- **正常启动的增量核对**：`reconcileIndexIncrementally()` 只拿目录文件名与索引比对补新项（并发 4），不再解析每个会话文件，避免阻塞首屏；手动 `refreshSessionsIndex()` 仍走完整 repairIndex（带进度与失败计数，返回 `repairedCount/failedCount/cancelled`）。
 
 ### 3.1 创建会话
 
@@ -93,9 +100,10 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 ### 3.2 删除 / 批量删除 / 清理空会话
 
-- 单个删除 `deleteSession()`（`sessionLifecycleManager.ts:183-210`）：删除会话文件，清理运行时状态（abort controller、generatingNodes 等，见第 6 节）与输入草稿，`switchSession` 到邻近会话（`useSessionManager.deleteSession()` 中，若删的是当前会话则取数组中相邻索引 `Math.min(index, length-1)`，`useSessionManager.ts:206-215`）。
+- 单个删除 `deleteSession()`（`sessionLifecycleManager.ts:183-210`）：删除不再直接 `remove` 文件，而是调用 Rust `llm_chat_delete_session` 把会话文件移入 `sessions-trash/`（文件名带随机 UUID 后缀，避免与新建会话冲突），返回 `moved_to_trash`；同时清理运行时状态（abort controller、generatingNodes、挂起的工具审批等，见第 6 节）与输入草稿，`switchSession` 到邻近会话（`useSessionManager.deleteSession()` 中，若删的是当前会话则取数组中相邻索引 `Math.min(index, length-1)`，`useSessionManager.ts:206-215`）。
 - 批量删除 `batchDeleteSessions()`（`sessionLifecycleManager.ts:212-259`）：剩余会话按 `updatedAt` 倒序排列取第一个作为新当前会话；逐个删除文件、清理运行时和草稿。
 - 清理空会话 `clearEmptySessions()`（`sessionLifecycleManager.ts:316-390`）：筛选 `messageCount === 0` 的会话；若当前会话在被清理列表中，优先按调用方传入的 `preferredOrderIds`（即 UI 上当前展示顺序）向前/向后找一个未被清理的邻居会话，找不到再退化为按 `updatedAt` 倒序取第一个剩余会话。这个实现比"随便切一个"更细致，是为了避免清空后 UI 焦点跳到一个语义上不相关的会话。
+- 清空全部会话 `clearAllSessions()`：先经 `deleteSessionFiles` 把索引与磁盘上已知的所有会话文件 tombstone/移入回收站，再发布空索引——先关写路径，避免迟到的流式写盘"复活"已删文件（`sessionLifecycleManager.ts` 注释原话）。
 
 本次调查范围（源 Chat 笔记）未见"归档"机制；会话状态字段只有收藏（`isFavorite`/`favoriteFolderId`），没有 `archivedAt` 类字段。
 
@@ -106,8 +114,8 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 ### 3.4 恢复与保留语义
 
 - 撤销/重做只在单次会话运行期间有效（2.2）。
-- 应用重启后残留生成中节点不会被重置，可能一直显示"正在生成"（第 9 节缺陷 1）。
-- 索引的 `messageCount`/`displayAgentId` 数值漂移会在启动 3 秒后后台自愈（2.3）。
+- 应用重启后残留生成中节点会在加载时自动修复：有内容 → `complete`，无内容 → `error`（带"生成意外中断"错误），并回写磁盘（`repairInterruptedGeneratingNodes`，`sessionLifecycleManager.ts:63-90`；修复细节见第 9 节缺陷 1）。
+- 索引损坏时先尝试 `.bak`/临时文件回退，失败则进入可取消的后台恢复并展示恢复横幅（2.3）；索引的 `messageCount`/`displayAgentId` 数值漂移在正常启动时不再全量修复，只有手动 `refreshSessionsIndex` 才完整重算。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -156,7 +164,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 `useLlmSearch.ts` 前端封装了对 Tauri 命令 `search_llm_data_stream` 的调用（Channel 流式返回、300ms 防抖、支持"精确/全部/任一"三种匹配模式，`matchMode` 对应 exact/and/or）。真正的搜索逻辑在 Rust 端 `src-tauri/src/commands/llmchat_search.rs`：
 
-- **没有任何持久化的搜索索引**。每次搜索都是 `WalkDir` 遍历 `llm-chat/agents/` 和 `llm-chat/sessions/` 目录下的全部文件（第398-412、526-542行：agents 目录 `max_depth(2)` 找 `agent.json`，sessions 目录 `max_depth(1)` 找 `*.json`），对每个文件异步 `fs::read_to_string` 读全文；
+- **没有任何持久化的搜索索引**。每次搜索都是 `WalkDir` 遍历 `llm-chat/sessions/` 与 `agent-manager/agents/` 目录下的全部文件（第398-412、526-542行：sessions 目录 `max_depth(1)` 找 `*.json`；Agent 搜索目录已随资产路径统一从 `llm-chat/agents/` 迁移到 `agent-manager/agents/`，`agent_search_result_path` 返回 `agent-manager/agents/{id}/agent.json`，非流式 `search_llm_data` 命令已删除，只剩流式版本），对每个文件异步 `fs::read_to_string` 读全文；
 - 用一个正则（`SearchMatcher::is_match`，第276-282行）先对**整个文件原始文本**做一次快速预过滤（"如果全文都不包含关键词，直接跳过昂贵的 JSON 解析"，第419-422行注释原话），命中了才 `serde_json::from_str` 做部分反序列化（`PartialAgent`/`PartialSession` 只解析需要的字段，减少解析开销）；
 - 并发度固定 `buffer_unordered(50)`（第520、619、929、1064行），流式版本额外做了取消令牌（`CancellationToken`）、结果数量上限的原子计数（`reserve_result_slot`，第80-94行，用 CAS 循环而不是锁）、以及按时间/数量批量推送结果（100ms 或 10 条一批，第1071-1074行）。
 
@@ -190,7 +198,13 @@ SillyTavern 兼容：`sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V
 
 ### 7.3 schema 版本与数据库迁移
 
-本次调查范围（源 Chat 笔记）未找到会话/消息存储的 schema 版本号或迁移代码；导入导出往返与备份恢复未做运行验证（见第 10 节）。
+会话存储现已引入版本与损坏治理机制，不再是"无版本号"：
+
+- 索引文件含 `version`（当前 `"1.1.2"`）与 `_persistence: { schema: 1, revision, committedAt }`（`types/persistence.ts`）；`loadIndex()` 对无法识别的版本返回 `unsupported` 状态；
+- 损坏会话文件隔离到 `sessions-corrupt/` + `corruption-manifest.json`（version 1，`sessionPersistenceRepository.ts:234-286`），Rust 侧按 revision/tombstone 拒绝旧写；
+- 持久化类型层（`types/persistence.ts`、`sessionPersistenceRepository.ts`、`sessionPersistenceCoordinator.ts`）配套单测覆盖原子写、恢复与损坏路径。
+
+仍没有传统意义的数据库迁移脚本（JSON 文件格式，非 SQLite）。导入导出往返与备份恢复未做运行验证（见第 10 节）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
@@ -218,7 +232,7 @@ SillyTavern 兼容：`sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V
 
 以下结论按"已确认缺陷、设计取舍、静态推断"区分证据强度：
 
-1. **应用崩溃/强退后，"生成中"节点可能永久卡死，且没有加载时的自愈**（已确认缺陷）。`llmChatStore.ts` 里有一段"自动修复僵死节点"的逻辑（第115-198行）：`watch(() => generatingNodes.value.size, (newSize, oldSize) => {...修复 status:"generating" 但已脱离 generatingNodes 控制的节点...})`。触发条件是 `generatingNodes.value.size` **减少**，而应用重启后 `generatingNodes` 是全新的空 Set（`size` 从 0 开始），只有先经历"增加"才可能后续"减少"触发这个 watch。`sessionLifecycleManager.loadSessions()`（第503-567行）里没有任何针对残留 generating 状态节点的检查或重置，该节点会一直显示"正在生成"，直到用户在同一会话里又触发一次新的生成任务（因为那样才会让 `generatingNodes.size` 先增后减，触发修复 watch）。
+1. **崩溃残留 generating 节点：已修复**。旧结论（源调查）：`llmChatStore.ts` 里"自动修复僵死节点"的 watch（第115-198行）只在 `generatingNodes.value.size` 减少时触发，而应用重启后 `generatingNodes` 是全新的空 Set，加载路径又没有针对残留 generating 状态节点的检查或重置，节点会一直显示"正在生成"。提交 `5b5c55207`/`06427a464` 之后，加载路径新增 `repairInterruptedGeneratingNodes()`（`sessionLifecycleManager.ts:63-90`）：对每个 `status === "generating"` 的节点，有内容（非空字符串）标记为 `complete`、无内容标记为 `error` 并写入 `metadata.error: "生成意外中断"`，同时更新 `updatedAt` 并回写磁盘与索引；`loadSessions()` 与按需加载 `loadSessionDetail` 两条路径都会调用（`persistInterruptedGenerationRepair`）。僵死修复 watch 本身仍保留，且把 `waiting` 状态一并纳入检测范围（`llmChatStore.ts:139-150`）。修复行为为静态代码确认，未做崩溃-重启的运行复现。
 2. **跨会话全文搜索没有索引**（推断，未实测）：纯目录扫描 + 正则预过滤（5.1），数据量增长后搜索延迟线性增长，虽有并发扫描（50 并发）和流式返回缓解体感，但没有做任何持久化索引或增量更新机制。
 3. **撤销/重做栈不持久化**（设计取舍，非缺陷）：应用重启或切换会话重新加载详情后历史栈清空（2.2），"撤销"只在当前运行时会话内有效。
 4. **两套搜索能力不对等**（已确认）：跨会话搜索（Rust 后端）能搜到所有会话但只能定位到会话级别；会话内搜索（`ChatSearchPanel.vue`）只能搜当前活动路径上、已经在 `props.messages` 数组里的消息，搜不到被分支切换隐藏的其它分支内容，也无法从跨会话搜索结果直接跳转到会话内的具体消息位置——中间缺一环。
@@ -229,7 +243,7 @@ SillyTavern 兼容：`sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V
 ## 10. 未验证事项
 
 - 大数据量下跨会话搜索的实际延迟未做压测（5.1 的线性增长结论是推断）。
-- 崩溃恢复（残留 generating 节点的实际观感）、导入导出往返、多窗口/多进程并发写入需要运行验证。
+- 崩溃-重启的加载期修复（`repairInterruptedGeneratingNodes`）、回收站删除、原子写的真实崩溃行为未做运行复现；导入导出往返、多窗口/多进程并发写入需要运行验证。
 - 会话列表数据侧的排序字段与增量更新机制未单独核实（5.3）。
 - 多设备并发生成/合并场景无同步机制，ID 碰撞风险仅理论推断。
 - 消息编辑的数据层变更（`MessageMenubar` 的"编辑"入口）本次未展开，编辑如何修改节点对象未核实。

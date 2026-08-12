@@ -2,31 +2,31 @@
 
 > 调查对象：`E:\works\git\hermes-agent`
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`01a1037d1e6d7b6eb96a786ef282c3aea4818194`（分支：`main`）
+> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
 >
 > 调查方式：只读源码定位目录构建、工具执行链、审批与回注路径；结合仓库 AGENTS.md 与工具 docstring 核验设计意图
 >
-> 调查范围：覆盖本地仓库 `hermes-agent` 的 Agent 工具全链路（核心工具、插件、MCP、导出工具集、execute_code 沙箱 RPC），主题为工具输入输出两侧全校验与调试点；首次调查，正文为静态代码阅读结论
+> 调查范围：覆盖本地仓库 `hermes-agent` 的 Agent 工具全链路（核心工具、插件、MCP、导出工具集、execute_code 沙箱 RPC），主题为工具输入输出两侧全校验与调试点；正文为静态代码阅读结论
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Hermes 是一个聚合多种工具来源的 Agent 核心，其工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、`skills/`+`optional-skills/` 的指令文本工具，以及 `toolsets.py` 的按平台工具集装配。
+Hermes 是一个聚合多种工具来源的 Agent 核心，其工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、`skills/`+`optional-skills/` 的指令文本工具、**Agent Plugins 便携包**（v1 目录包兼容层，`hermes_cli/agent_plugins.py`，把便携包的技能/MCP 组件翻译进 Hermes 运行时，`ca78c6d7` 系列），以及 `toolsets.py` 的按平台工具集装配。
 
 整个工具链沿 `run_agent.py` → `model_tools.py` → `tools/registry.py` 三层组织，工具的定义、发现、审批、执行和回注均发生在 Python 主进程内。
 
 核心执行链路为：
 
 ```text
-AIAgent.run_conversation(conversation_loop.py:1233)
+AIAgent.run_conversation(conversation_loop.py:1422)
   → API 请求组装（chat_completion_helpers.build_api_kwargs）
   → 模型返回 assistant.tool_calls
-  → 工具名/JSON 校验（conversation_loop.py: 5960-6320）
-  → agent._execute_tool_calls（run_agent.py: 7589，单/并发/分段三路）
-  → agent._invoke_tool（run_agent.py: 7665 → agent_runtime_helpers.invoke_tool: 2803）
+  → 工具名/JSON 校验（conversation_loop.py: 6370-6439）
+  → agent._execute_tool_calls（run_agent.py: 7729，单/并发/分段三路）
+  → agent._invoke_tool（run_agent.py: 7805 → agent_runtime_helpers.invoke_tool: 2813）
   → tool_request middleware → pre_tool_call 审批门 → registry.dispatch
   → 结果回注（tool 消息）→ 继续循环
 ```
@@ -45,23 +45,23 @@ AIAgent.run_conversation(conversation_loop.py:1233)
 
 ### 总体调用链
 
-顶层入口 `agent/conversation_loop.py: run_conversation`（1233）接受 `stream_callback`、`persist_user_message`、`moa_config` 等参数。循环局部状态（1353 起）包括 `max_compression_attempts=3`、`_pending_verification_response`、`_pending_verification_response_previewed`（#65919）。循环条件为 `api_call_count < max_iterations and iteration_budget.remaining > 0`，外加 `_budget_grace_call` 一次宽限。
+顶层入口 `agent/conversation_loop.py: run_conversation`（:1422）接受 `stream_callback`、`persist_user_message`、`moa_config` 等参数。循环局部状态包括 `max_compression_attempts=3`、`_pending_verification_response`、`_pending_verification_response_previewed`（#65919，verify-on-stop 的待核验回复；verify 子系统并入既有验证栈，`47a35d63` 系列：`agent/verify/`（recipes/environment/runner）+ `verification_evidence.py`）。循环条件为 `api_call_count < max_iterations and iteration_budget.remaining > 0`，外加 `_budget_grace_call` 一次宽限。
 
-- **API 请求组装**：`run_agent._build_api_kwargs`（6990）→ `agent.chat_completion_helpers.build_api_kwargs`，把 `agent.tools` attach 到 `tools=`。
+- **API 请求组装**：`run_agent._build_api_kwargs`（:7129）→ `agent.chat_completion_helpers.build_api_kwargs`，把 `agent.tools` attach 到 `tools=`。
 - **返回校验**：对每个 `assistant_message.tool_calls`：id 去重（`_uniquify_tool_call_ids`）；name 不在 `agent.valid_tool_names` 时 `_repair_tool_call` 近似修复；JSON 解析失败进入 `_invalid_json_retries < 3` 重试，超限则注入 recovery 工具结果并追加 `recovery_assistant` 消息保持角色交替。
-- **执行**：`agent._execute_tool_calls`（run_agent.py: 7589）按 model 返回的 tool_calls 数量分级：≤1 直接 sequential；多工具先 `_plan_tool_batch_segments` 分成“平行安全段 + 顺序障碍”，可并发段走 `execute_tool_calls_concurrent`。
+- **执行**：`agent._execute_tool_calls`（run_agent.py: 7729）按 model 返回的 tool_calls 数量分级：≤1 直接 sequential；多工具先 `_plan_tool_batch_segments` 分成“平行安全段 + 顺序障碍”，可并发段走 `execute_tool_calls_concurrent`（tool_executor.py:758）。
 - **回注**：`tool_dispatch_helpers.make_tool_result_message` 生成 `role=tool` 消息；`maybe_persist_tool_result` 决定是否落盘；之后回到压缩检查。
-- **终止**：`max_iterations` 上限；`iteration_budget` 耗尽触发强制压缩/退出；`/stop` 或新消息在并发等待循环中被轮询落地。
+- **终止**：`max_iterations` 上限；`iteration_budget` 耗尽触发强制压缩/退出；`/stop` 或新消息在并发等待循环中被轮询落地。全局紧急停止 `hermes pause`/`resume`（`agent/estop.py`，`5db1b72b`）置全局停止位，跨会话生效。
 
 ## 2. 工具定义、来源与注册
 
 ### 注册表（`tools/registry.py`）
 
-- `ToolEntry` 存 `name/toolset/schema/handler/check_fn/requires_env/is_async/description/emoji/max_result_size_chars/dynamic_schema_overrides`（line 160-189）。schema 是 `{"type": "function", "function": {...}}` 的 Python dict，不含执行对象。
-- `register()`（521）在**模块 import 时**被各工具调用（仓库 AGENTS.md 明确“类型/注册/装配三处”）。跨 toolset 同名的二次注册默认 rejected（除非 `override=True`）；插件覆盖内建需要 `plugins.entries.<id>.allow_tool_override: true`.
-- `deregister()`（605）校验“插件只能删自己拥有的工具”，MCP 工具（`mcp-*`）豁免——MCP 更新工具列表时 nuke-and-repave 合法。
-- `get_definitions(names)`（676）**静态快照**：同时过滤 `check_fn` 缓存（30s TTL）、动态 schema override、别名。`get_max_result_size`（796）返回 per-tool 上限，缺省则 `DEFAULT_RESULT_SIZE_CHARS`。
-- `dispatch(name, args)`（760）是唯一真正执行 handler 的入口，统一 `_run_async` 桥接与 `_normalize_handler_result` 结果契约。
+- `ToolEntry` 存 `name/toolset/schema/handler/check_fn/requires_env/is_async/description/emoji/max_result_size_chars/dynamic_schema_overrides`（registry.py 160-189）。schema 是 `{"type": "function", "function": {...}}` 的 Python dict，不含执行对象。
+- `register()`（:562）在**模块 import 时**被各工具调用（仓库 AGENTS.md 明确“类型/注册/装配三处”）。跨 toolset 同名的二次注册默认 rejected（除非 `override=True`）；插件覆盖内建需要 `plugins.entries.<id>.allow_tool_override: true`.
+- `deregister()`（:646）校验“插件只能删自己拥有的工具”，MCP 工具（`mcp-*`）豁免——MCP 更新工具列表时 nuke-and-repave 合法。
+- `get_definitions(names)`（:717）**静态快照**：同时过滤 `check_fn` 缓存（30s TTL）、动态 schema override、别名。`get_max_result_size`（:840）返回 per-tool 上限，缺省则 `DEFAULT_RESULT_SIZE_CHARS`。
+- `dispatch(name, args)`（:801）是唯一真正执行 handler 的入口，统一 `_run_async` 桥接与 `_normalize_handler_result` 结果契约。
 
 函数级组件（model_tools.py）：
 
@@ -127,11 +127,14 @@ def get_tool_definitions(
 
 ### 审批（tools/approval.py）
 
-- `prompt_dangerous_approval`（2561）：CLI 交互，`once/session/always/deny/timeout` 五选一，`allow_permanent` 控制是否显示 `[a]lways` 选项；`approval_callback` 由 CLI 注册（`terminal_tool.set_approval_callback`）。
-- `check_dangerous_command`（3248）：终端执行前总入口；先查容器/host 跳过条件（`_should_skip_container_guards`，仅 `has_host_access=False` 生效）；yolo 模式跳过；allowlist 直接放行；危险 pattern 命中则进 `_run_approval_gate`。
-- `request_tool_approval`（3318）：插件 `action: approve` 的路由；`rule_key` 粒度、`[a]lways` 允许清单基于 `tool+reason` 哈希隔离。
+- `prompt_dangerous_approval`（:2709）：CLI 交互，`once/session/always/deny/timeout` 五选一，`allow_permanent` 控制是否显示 `[a]lways` 选项；`approval_callback` 由 CLI 注册（`terminal_tool.set_approval_callback`，terminal_tool.py:287）。
+- `check_dangerous_command`（:3416）：终端执行前总入口；先查容器/host 跳过条件（`_should_skip_container_guards`，仅 `has_host_access=False` 生效）；yolo 模式跳过（`HERMES_YOLO_MODE` 在 import 时冻结，`approval.py:36`）；allowlist 直接放行；危险 pattern 命中则进 `_run_approval_gate`。
+- `request_tool_approval`（:3486）：插件 `action: approve` 的路由；`rule_key` 粒度、`[a]lways` 允许清单基于 `tool+reason` 哈希隔离。
 - fail-closed：无交互用户、非网关、无 callback、超时，全部 deny（`fail_closed_when_no_human=True`）。cron 走 `approvals.cron_mode` 配置。
 - 免审批路径：`HERMES_YOLO_MODE` 冻结（启动参数）；gateway /yolo 会话级开关；tirith 扫描告警时禁止 `always` 宽授（`allow_permanent=False`）。
+- **`hermes approvals test`**（`hermes_cli/approvals_test.py`，`563f0a6f`）：对给定命令/工具做**干跑审批判定**（不弹交互、不执行），用于验证策略与模式覆盖。
+- **自仓库 git 保护**（`tools/self_repo_guard.py`，`206531a1` 系列）：检测并硬阻断针对**当前运行源码 checkout** 的 git 变更（worktree 移除/移动源码根、`git bisect` 视为工作树变更、运行中根目录防护 `886092bc`/`f0a3ef8b`），`terminal_tool` 集成（`ecbe6ef0`）；安全 git 命令不再 spawn alias 查询子进程（`cd869f26`）。
+- **终端执行边界硬化**：本地后台执行器在 systemd 下隔离进独立 cgroup/scope（`099eb737`/`7cfa90d9`/`21de22a4` 系列，PTY 隔离、单元名 kill、`--quiet`、全限定 `.scope`），worker 内存与数量有界（`b0346ba4`/`5f930832`），SSH 远端保持登录 home cwd（`9c69d988`）；`terminal` 工具错误结果字段脱敏（`530d3782`）。
 
 ### 执行边界
 
@@ -164,19 +167,21 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 ### 插件
 
-- `hermes_cli/plugins.py`: `discover_plugins()` 在 import `model_tools` 时副作用触发；`PluginManager` 从 `~/.hermes/plugins/`、`./.hermes/plugins/`、pip 入口发现。
-- `ctx.register_tool`（413）同时把工具注册进全局 registry，并跟踪 `_plugin_tool_names`；`override=True` 需要信任门。
+- `hermes_cli/plugins.py`: `discover_plugins()`（:2284）在 import `model_tools` 时副作用触发；`PluginManager` 从 `~/.hermes/plugins/`、`./.hermes/plugins/`、pip 入口发现。
+- `ctx.register_tool`（:439）同时把工具注册进全局 registry，并跟踪 `_plugin_tool_names`；`override=True` 需要信任门。
 - hooks：`pre_tool_call`/`post_tool_call`/`pre_llm_call`/`post_llm_call`/`on_session_start/end`；`invoke_hook` / `has_hook`。
-- `resolve_pre_tool_block`（2252）是**每个工具分发点的单一安全入口**：对 `approve` action 调 `request_tool_approval`，任何错误 fail-closed；`block` 直接返回消息；其他 `proceed`。并发/顺序/分段路径都统一调用它，避免复制粘贴的安全错误。
+- `resolve_pre_tool_block`（:2608）是**每个工具分发点的单一安全入口**：对 `approve` action 调 `request_tool_approval`，任何错误 fail-closed；`block` 直接返回消息；其他 `proceed`。并发/顺序/分段路径都统一调用它，避免复制粘贴的安全错误。
 - `plugins/platforms/` 适配网关 20+ 平台；`plugins/memory/` 与模型 Provider 插件是独立 discovery 机制（`_discover_providers` 懒扫描）。
+- **Agent Plugins 便携包**（`hermes_cli/agent_plugins.py` + `hermes_cli/plugins_cmd.py`）：验证 Agent Plugins v1 目录包（本地校验、不拉 schema、不 import 插件 Python），把其支持的组件（技能、MCP 条目）翻译为 Hermes 运行时记录；便携 MCP 的 streamable-http 条目映射进原生 MCP runtime（`471baea5`）；桌面 Settings → Plugins 可见并打开插件目录（`c86da839`/`44790bc9`）。
 
 ### MCP（`tools/mcp_tool.py`）
 
 - `register_mcp_servers(servers)` 把 config `mcp_servers` 的每个 server 注册为 toolset `mcp-<name>`；动态 `notifications/tools/list_changed` 触发 nuke-and-repave。
 - include/exclude 过滤（fnmatch glob，include 优先），`_should_register` 检查后 `check_fn=_make_check_fn(name)`。
-- 每工具 schema 通过 `_convert_mcp_schema`；不安全描述经 `_scan_mcp_description`（threat pattern）过滤。
-- 传输 stdio/HTTP/SSE；`timeout/connect_timeout/keepalive_interval/idle_timeout_seconds/max_lifetime_seconds` 生命周期回收受支持。
+- 每工具 schema 通过 `_convert_mcp_schema`（const-only 的 anyOf/oneOf 联合折叠为属性枚举，`37cc9999`）；不安全描述经 `_scan_mcp_description`（threat pattern）过滤。
+- 传输 stdio/HTTP/SSE；`timeout/connect_timeout/keepalive_interval/idle_timeout_seconds/max_lifetime_seconds` 生命周期回收受支持。Agent Plugins 便携包的 **streamable-http 映射**进入原生 MCP 运行时（`471baea5`）。
 - 每 server 可声明 `supports_parallel_tool_calls`。
+- **trust-tier 门控**（`c8369e37`，`mcp_tool.py:3909-3926` 注释）：`mcp_servers.<name>.trust: full|untrusted`——untrusted server 上仅有 `annotations.readOnlyHint=True` 的**写能力工具**被拒绝（hint 是 server 自报，untrusted 时只能缩小不能扩大权限）；默认无 trust 键 = full（gate off）。另：启动时 401 的 server 可在重新登录后恢复（`f99d2912`）、每 server 独立 MCP identity header（`9fad45fc`）。
 
 ### 技能
 
@@ -186,8 +191,9 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 ### 子代理（`tools/delegate_tool.py`）
 
 - `_subagent_auto_deny` 是默认；`delegation.subagent_auto_approve: true` 时改用 `_subagent_auto_approve`；threadlocal callback 通过 `_set_subagent_approval_cb` 注入。
-- `_run_single_child`（1971）：保存/恢复 `model_tools._last_resolved_tool_names`（避免子代理污染父进程 global）；凭据池租借/移除；heartbeat 线程让父代理在 gateway 中不判死。
+- `_run_single_child`（:2076）：保存/恢复 `model_tools._last_resolved_tool_names`（避免子代理污染父进程 global）；凭据池租借/移除；heartbeat 线程让父代理在 gateway 中不判死。
 - 会话隔离：子代理 `session_key`/terminal独立；`inherit_mcp_toolsets` 子代理可选继承父 MCP 工具。
+- `delegate_task` 支持**可选结构化输出 schema**（`tools/delegation_output_schema.py`，`d6ee58b5`；批次任务先校验质量再派发 `94bc3194`，per-delegation 成本随结果返回 `d7635e43`）；**steering 生命周期绑定会话代际**（`9d4ef04e`/`a94ebf5f`：steer 只作用当前代、子代理存活期内不丢未送达 steer `60e1f751`）；`_build_child_agent`（:1305）。
 
 ## 9. 设计取舍与已确认边界
 
@@ -209,18 +215,19 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 ## 关键源码索引
 
-- `run_agent.py`：`_execute_tool_calls`（7589）、`_invoke_tool`（7666）、`_supports_reasoning_extra_body`（6994）、`_build_api_kwargs`（6990）。
-- `agent/agent_runtime_helpers.py`：`invoke_tool`（2803），统一工具入口转发。
+- `run_agent.py`：`_execute_tool_calls`（:7729）、`_invoke_tool`（:7805）、`_supports_reasoning_extra_body`（:7134）、`_build_api_kwargs`（:7129）。
+- `agent/agent_runtime_helpers.py`：`invoke_tool`（:2813），统一工具入口转发。
 - `model_tools.py`：`get_tool_definitions`（305）；`handle_function_call`（1123）；`_AGENT_LOOP_TOOLS`（680）；`coerce_tool_args`/`_normalize_json_strings_for_schema`（859）。
-- `tools/registry.py`：`register`（521）、`get_definitions`（676）、`get_max_result_size`（796）、`dispatch`（760）、`deregister`（605）、`register_toolset_alias`（446）。
+- `tools/registry.py`：`register`（562）、`get_definitions`（717）、`get_max_result_size`（840）、`dispatch`（801）、`deregister`（646）。
 - `tools/budget_config.py`：三层持久化预算。
 - `tools/tool_result_storage.py`：`maybe_persist_tool_result`/`enforce_turn_budget`。
-- `tools/approval.py`：`prompt_dangerous_approval`（2561）、`check_dangerous_command`（3248）、`request_tool_approval`（3318）、dangerous patterns（~792-827）。
-- `hermes_cli/plugins.py`：`register_tool`（413）、`discover_plugins`（2062）、`resolve_pre_tool_block`（2252）。
+- `tools/approval.py`：`prompt_dangerous_approval`（2709）、`check_dangerous_command`（3416）、`request_tool_approval`（3486）、`HERMES_YOLO_MODE` 冻结（36）；`hermes_cli/approvals_test.py`（干跑审批判定）。
+- `tools/self_repo_guard.py`：自仓库 git 变更硬阻断。
+- `hermes_cli/plugins.py`：`register_tool`（439）、`discover_plugins`（2284）、`resolve_pre_tool_block`（2608）；`hermes_cli/agent_plugins.py`（便携包兼容层）。
 - `hermes_cli/middleware.py`：`apply_tool_request_middleware`/`run_tool_execution_middleware`。
-- `agent/tool_executor.py`：`execute_tool_calls_concurrent`（686）、`_run_agent_tool_execution_middleware`（410）、`_begin_tool_execution`（593）。
-- `agent/conversation_loop.py`：校验与恢复（5960-6320）、持久化（6320-6351）。
-- `tools/delegate_tool.py`：`_run_single_child`（1971）、auto-approve/deny。
-- `tools/mcp_tool.py`：`register_mcp_servers`（6221）、include/exclude 过滤（5839+）、`_make_check_fn`。
-- `tools/code_execution_tool.py`：`_rpc_server_loop`（649）、`execute_code` 注册（2076）。
-- `tools/terminal_tool.py`：`set_approval_callback`（280）、注册（3411）。
+- `agent/tool_executor.py`：`execute_tool_calls_concurrent`（758）、`_run_agent_tool_execution_middleware`（482）、`_begin_tool_execution`（665）。
+- `agent/conversation_loop.py`：校验与恢复（6370-6439）。
+- `tools/delegate_tool.py`：`_run_single_child`（2076）、`_build_child_agent`（1305）、`tools/delegation_output_schema.py`（结构化输出）。
+- `tools/mcp_tool.py`：`register_mcp_servers`、trust-tier 门控（3909-3926）、`_make_check_fn`。
+- `tools/code_execution_tool.py`：`_rpc_server_loop`（653）。
+- `tools/terminal_tool.py`：`set_approval_callback`（287）；systemd 隔离见 `tools/process_registry.py`。

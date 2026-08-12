@@ -2,7 +2,7 @@
 
 > 来源：`../Chat/LobeHub-Chat调查笔记.md` 第 13 节；2026-08-11 该文件压缩为 Chat 概览时，原第 13 节中未迁移的通用界面盘点内容整体搬出至此
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 迁移规则：以下为原文件第 13 节原文（保留原小节编号、段落与行号证据，未改写）；原段落中对旧文件其它章节的交叉引用（如“第 11、12 节”）保留原样，仅作历史定位
 >
@@ -41,6 +41,7 @@ LobeHub 的弹窗实际上有两条并行实现路径，而不是统一走 antd 
 - **Topic 列表为空**：`src/features/AgentSidebar/Topic/List/index.tsx:7,40,45`——若 topics 尚未加载完成（`isUndefinedTopics`）显示 `SkeletonList`（`src/features/NavPanel/components/SkeletonList.tsx:51-61`，每行是"方形头像占位 + 单行文字占位"的重复,行数固定为 3）；若确定为空则显示 `EmptyNavItem`。这两者复用的是 `NavPanel` 下的通用组件，和上面 Conversation 的 `SkeletonList` 是两个不同文件、不同实现,同名但不共享代码。
 - **Agent 市场/发现页加载中**：`src/routes/(main)/community/components/ListLoading.tsx`（14-50 行）用 `Grid` 铺出卡片骨架（头像+标题+段落+标签+底部条各自 `Skeleton.Xxx` 占位）；同文件的 `DetailsLoading`（52-99 行）专门给详情页用，读 `useResponsive().mobile` 在移动端把左右分栏改成 `column-reverse` 纵向堆叠。
 - **通用空状态**：`AssistantEmpty.tsx`（`routes/(main)/community/features/AssistantEmpty.tsx:14-30`）用 `@lobehub/ui` 的 `<Empty icon={Bot} type={search ? 'default' : 'page'}/>`，区分"搜索无结果"（只显示 description,无 title,`type='default'`）和"列表本身为空"（显示 title + description,`type='page'`）两种文案态,这个区分模式在 `ModelEmpty`/`ProviderEmpty`/`SkillEmpty`/`McpEmpty` 等同目录文件里重复出现,是发现页的统一约定，但与 Conversation 侧的骨架屏实现完全独立,没有共享基类。
+- 骨架屏组件经 `3aee848b9`（#18192）重写为"上下文骨架屏"：`src/features/NavPanel/components/SkeletonList.tsx` 删除重写、Conversation 的 `SkeletonList.tsx` 改写、新增 `AgentSidebar/Topic/List/TopicListSkeleton.tsx`，"品牌化 loading"被移除。"多套并行、无统一组件"的结构结论不变，上述文件与行号描述的是重写前的实现细节。
 
 ## 13.4 主题/深色模式：next-themes 管操作系统层面的明暗，`@lobehub/ui` ThemeProvider 管 token
 
@@ -86,7 +87,7 @@ LobeHub 的弹窗实际上有两条并行实现路径，而不是统一走 antd 
 
 ## 13.12 国际化切换：三处入口共用同一个 `switchLocale`,与主题切换入口分布模式一致
 
-`src/features/User/UserPanel/LangButton.tsx`（13-121 行）是用户面板里的语言切换入口,用 `DropdownMenuCheckboxItem` 列出"自动跟随系统"+ 所有 `localeOptions`,每项显示语言本地名+英文名两行（如"简体中文"配"Chinese, Simplified",27-34/47-54 行）,选中态是 checkbox 勾选而非单选圆点。设置页的 `Common.tsx:84-98` 用普通 `<Select>` 下拉框做同样的事,是第二个入口。两者都调用同一个 `useGlobalStore` 的 `switchLocale` action,语言状态是全局 store 里的单一来源,不是每个入口各自维护。**语言切换与聊天体验的关联**：`AppTheme.tsx:120-139` 显示语言变化会触发 `getUILocaleAndResources(language)` 异步重新加载 UI 文案资源包,加载完成前 `uiLocale`/`uiResources` 维持旧值（避免文案闪烁成 key 名）,这个重载是全局的,包括正在进行中的对话——但由于文案是从消息数据里读的角色/时间戳等而非对话内容本身,切换语言不会影响已发送消息的实际语言,只影响界面文案（按钮、菜单、系统提示语）。
+`src/features/User/UserPanel/LangButton.tsx`（13-121 行）是用户面板里的语言切换入口,用 `DropdownMenuCheckboxItem` 列出"自动跟随系统"+ 所有 `localeOptions`,每项显示语言本地名+英文名两行（如"简体中文"配"Chinese, Simplified",27-34/47-54 行）,选中态是 checkbox 勾选而非单选圆点。设置页的 `Common.tsx:84-98` 用普通 `<Select>` 下拉框做同样的事,是第二个入口。两者都调用同一个 `useGlobalStore` 的 `switchLocale` action,语言状态是全局 store 里的单一来源,不是每个入口各自维护。**语言切换与聊天体验的关联**：`AppTheme.tsx:120-139` 显示语言变化会触发 `getUILocaleAndResources(language)` 异步重新加载 UI 文案资源包,加载完成前 `uiLocale`/`uiResources` 维持旧值（避免文案闪烁成 key 名）,这个重载是全局的,包括正在进行中的对话——但由于文案是从消息数据里读的角色/时间戳等而非对话内容本身,切换语言不会影响已发送消息的实际语言,只影响界面文案（按钮、菜单、系统提示语）。语言选择器悬停会预加载 locale 包（`f4aeeca53`，#18135），各语言 locale 文案经批量更新，切换机制不变。
 
 ## 13.13 未核实事项汇总（本节新增)
 

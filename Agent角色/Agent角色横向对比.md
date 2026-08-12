@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox、Hermes Agent
 >
-> 对比更新日期：2026-08-11
+> 对比更新日期：2026-08-12
 >
 > 依据：同目录十六份单项目调查笔记及其中记录的代码快照
 >
@@ -16,22 +16,22 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | ---: | --- | --- |
-| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 427 | `main` | `eba9d84b234672321312e92ab48bb474cfb0aca4` |
-| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 329 | `master` | `346b85db9d79207ea7b51694cce5276203612af4` |
-| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 200 | `main` | `7450ab2dde5eacab4a8721f8680006ba8b99438d` |
-| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 190 | `main` | `b7673c23860db5dd6da7f42dec5fc21f6b13de1a` |
-| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 157 | `dev` | `dc4177c2ac80905ebac985554a9f957aaca31ab8` |
+| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 427 | `main` | `023bc63ac10201bf0f663bf49d642fd55c29a3d0` |
+| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 329 | `master` | `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` |
+| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 200 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
+| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 190 | `main` | `cd82f996fb6c3a523b6d40de31314f2b86f56281` |
+| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 157 | `dev` | `e142b2a2eb06f903dd014326e19f87947ab92f03` |
 | Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 148 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
-| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 225 | `canary` | `4edba1b75a97b91c28ad48cd1cc90528defa17ad` |
+| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 225 | `canary` | `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` |
 | Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 68 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
-| NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 168 | `main` | `706a18b95b714ab29b2a4842d3b9ff4f887935d5` |
+| NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 168 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
 | Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 185 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
-| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 191 | `dev` | `b8bd88901a4870ef3a5752840f4e23e11d54e24e` |
-| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 113 | `main` | `6b461b75b39b5a19b378dc42fbfbd1655bc446a6` |
+| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 191 | `dev` | `1f94d8a3c86b67f4f49a0e341de74e9188381b3a` |
+| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 113 | `main` | `534bcbffb7e1e7551d9ee3572dfeb278e203e493` |
 | SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 206 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
-| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 150 | `main` | `3f14e938e700a5487ca13c4a6d8a6caad8e70ac9` |
-| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 239 | `main` | `eca06251f5687a52fbcd353cb8b04f42157882d0` |
-| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 203 | `main` | `01a1037d1e6d7b6eb96a786ef282c3aea4818194` |
+| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 150 | `main` | `fb66a52dd038a6fd147ee91cd1a39fe17555867e` |
+| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 239 | `main` | `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` |
+| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 203 | `main` | `76d832d3857551a029c4b39c23945eb47c16fe5b` |
 
 ## 比较口径
 
@@ -59,7 +59,7 @@
 5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前十六个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。
 6. **文件/服务编排型：VCPChat、VCPToolBox。** VCPChat 每个 Agent 一个目录，模型和基础参数随 Agent 保存，工具策略留给 VCP 服务端。VCPToolBox 同时存在提示词文件和 AgentAssistant 配置两层，前者参与变量替换，后者承担具名多 Agent 通信和任务派发。
 7. **无角色实体：Manifold Desktop。** 只有全局 system prompt、温度、Provider/模型和文本提示词库；会话不保存发送时配置。因此它应作为“全局配置基线”比较，不能记成一个功能较少的 Agent 实现。
-8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件（SOUL.md）、命名人格模板（personalities）、全局/会话 system 提示词（agent.system_prompt）与运行时注入（ephemeral）四级叠加成 system prompt；任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
+8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件（SOUL.md）、命名人格模板（personalities）、用户手动 system 提示词（agent.system_prompt）与运行时注入（ephemeral）叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay），启动/建 agent 时优先把命名人格渲染成文本、否则回退到 `agent.system_prompt`，env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 仍最优先，**人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示，v33→v34 迁移一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
 9. **无角色实体、文件约定型：Pi。** 角色能力由 `SYSTEM.md`（整篇替换默认提示词）、`APPEND_SYSTEM.md`（追加）、`AGENTS.md/CLAUDE.md` 祖先链（`<project_context>` 块）与 skills 文件组合，全部按会话 cwd 在启动时解析；模型/思考等级是会话级状态，默认值来自全局+项目设置。没有任何角色对象、角色 UI 或角色导入导出，system prompt 本体不随会话条目保存。
 10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为 `opencode.json` 的 `agent` 字段与 `{agent,agents}/**/*.md`（带 frontmatter，mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、model/variant/temperature/top_p、permission 规则与 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
 
@@ -84,7 +84,7 @@
 | Agent 目录 | VCPChat | `{agentId}/config.json` | Agent 拥有 prompt、模型、参数和 topic 列表，工具归服务端 |
 | 服务端双层 | VCPToolBox | `Agent/*.txt` + AgentAssistant | 文本层负责变量注入，插件层负责多 Agent 身份和委托 |
 | 全局设置 | Manifold Desktop | `AppSettings.systemPrompt` | 没有角色或会话级配置对象 |
-| 全局提示词 + Profile 容器 | Hermes Agent | `SOUL.md` + `agent.personalities` + `agent.system_prompt`（ephemeral） | 角色本身只是提示词层；模型、工具、记忆和参数归全局/渠道/Profile 配置 |
+| 全局提示词 + Profile 容器 | Hermes Agent | `SOUL.md` + `agent.personalities`（`display.personality` 选中名称即权威）+ `agent.system_prompt`（用户手动提示词） | 角色本身只是提示词层；模型、工具、记忆和参数归全局/渠道/Profile 配置 |
 | 文件约定 | Pi | `SYSTEM.md` + `APPEND_SYSTEM.md` + `AGENTS.md` 链 + skills | 提示词是 cwd 解析的文本资源；模型/参数归会话与设置 |
 | 配置对象 + 内置模板 | OpenCode | `Agent.Info`（配置构建的内存对象）+ `{agent,agents}/**/*.md` | Agent 拥有 prompt、model/variant/参数、permission 与 steps；会话只存名字引用 |
 
@@ -105,7 +105,7 @@
 | SillyTavern | Character Card 名称/文件 | `characters/` 下 PNG、JSON、CharX 或 BYAF | 应用选择角色卡；User Persona 另属全局/单会话层 | **创建时快照 + tainted 固化**：开场白（first_mes/alternate_greetings 转 swipes）随 JSONL 落盘；未 tainted 聊天在改卡后可整体重建开场白，首次生成后 `tainted` 置位固化；每次生成重读角色卡当前值；消息/每个 swipe 快照 `extra.api/model`，无温度/预设快照；swipe 追加保留旧回复，regenerate 删除末条助手消息重建 |
 | VCPChat | Agent 目录名 `agentId` | 每 Agent 目录：配置、规则、头像；每 topic 一个 `history.json` | 先选 Agent，再选其 topic；发送用 `currentSelectedItem.config` 内存缓存引用（设置保存/话题加载时刷新） | topic 历史与 Agent 配置分存；消息只含 role/name/content/timestamp/id/attachments，无模型/参数元数据；重新生成时重读最新配置并截断原消息及其后全部消息重建（覆盖语义）；分支是 topic 级 |
 | VCPToolBox | 文件别名或 AgentAssistant `baseName/chineseName` | `.txt` + `agent_map.json`；插件 `config.json` | 变量引用、AgentAssistant 通信或 TaskAssistant 派发 | **无快照**：会话历史只存 `{role, content}` 裸消息对；每次请求从内存 `AGENTS` 映射现拼 payload（model/max_tokens/temperature）；config.json 仅 initialize/reloadConfig 时读取，Admin Panel 保存后热重载；无 regenerate API，OneRing 提供内容原地替换 |
-| Hermes Agent | 无角色实体；`personalities` 名称、SOUL.md 文件名 | `config.yaml`（agent.personalities / agent.system_prompt / display.personality）+ `$HERMES_HOME/SOUL.md` + Profile 目录 | `/personality` 写全局 `agent.system_prompt`；TUI 会话保存 `personality` 键；Profile 独立选择 | 会话保存构建后的 system prompt（sha256 全文去重）与 model/model_config；人格当前文本不入轨迹，属"全局当前值 + 提示词快照"；retry_last 复用内存缓存不重建；存储 prompt 与运行时比对只检查尾部 Model/Provider 行，修改人格文本不判 stale |
+| Hermes Agent | 无角色实体；`personalities` 名称、SOUL.md 文件名 | `config.yaml`（agent.personalities / agent.system_prompt / display.personality）+ `$HERMES_HOME/SOUL.md` + Profile 目录 | `/personality` 写 `display.personality` 名称（不写 `agent.system_prompt`）；TUI 会话可存 `personality` 覆盖键；Profile 独立选择 | 会话保存构建后的 system prompt（sha256 全文去重）与 model/model_config；人格当前文本不入轨迹，属"全局当前值 + 提示词快照"；retry_last 复用内存缓存不重建；存储 prompt 与运行时比对只检查尾部 Model/Provider 行，修改人格文本不判 stale |
 | Pi | 无角色实体；文件即配置 | `SYSTEM.md`/`APPEND_SYSTEM.md`（全局 `~/.pi/agent/` 或项目 `.pi/`）+ `AGENTS.md` 链 + skills 文件 | 资源按会话 cwd 解析；无角色选择入口，`/reload` 重载文件 | 无快照：system prompt 不随会话条目保存（仅 HTML 导出含快照）；AssistantMessage 随消息记录 provider/model/usage/stopReason（无采样参数）；无用户级 retry/regenerate 命令，瞬时错误自动重试 |
 | OpenCode | `Agent.Info.name`（配置构建）；无独立版本字段 | 配置对象（`opencode.json` 的 `agent`/`mode` 字段 + `{agent,agents}/**/*.md` + `{mode,modes}/*.md`）；无 agent 表 | 输入框/对话框/`--agent`/`@` 提及选择；session 表保存 agent 名（`core/src/session/sql.ts:51`），发送时 `setAgentModel` 同步 | **引用 + 消息快照**：session 与消息各存 agent/model 字段（含 variant/tools，无温度等参数）；undo/revert 是物理删除 revert 点之后的消息再重发（非分支对比），重发时重建 agent 重新解析当前配置；分支手段只有 `session.fork`；part 不携带请求参数元数据 |
 
@@ -150,7 +150,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | SillyTavern | description/personality/scenario/system/示例/post-history 分字段 | 非空 `system_prompt` 覆盖全局；`post_history_instructions` 放历史末尾；其他字段位置可由 Advanced Formatting 调整 | 角色卡不存模型参数；模型与生成参数归 Preset/连接设置 |
 | VCPChat | 单段 `systemPrompt` + `{{AgentName}}` | Agent system prompt 后应用全局 Tavern `system_suffix`；另有 user suffix 和 context depth 注入 | Agent 保存裸 model id、temperature、上下文和输出上限 |
 | VCPToolBox | `.txt` 变量模板或 AgentAssistant `systemPrompt` | 多阶段替换 Var/Tar/Sar/VCP/TagMemo/agent/TVStxt；AgentAssistant `globalSystemPrompt` 追加到所有 Agent | AgentAssistant 每个 Agent 保存 modelId、temperature、maxOutputTokens；文本文件层不拥有模型 |
-| Hermes Agent | SOUL.md 文本 + `personalities` 单段提示（string 或 dict） | SOUL/默认身份 → 稳定指引 → 项目上下文（.hermes.md>AGENTS.md>CLAUDE.md>.cursorrules）→ 技能/记忆/USER.md/时间行 → 调用时附加 ephemeral；一次构建缓存、压缩时重建 | 人格不绑定模型；模型归全局 `model:`/session `/model`/ChannelOverride/Profile；温度与 max_tokens 由 Provider 适配层解析 |
+| Hermes Agent | SOUL.md 文本 + `personalities` 单段提示（string 或 dict） | SOUL/默认身份 → 稳定指引 → 项目上下文（.hermes.md>AGENTS.md>CLAUDE.md>.cursorrules）→ 技能/记忆/USER.md/时间行 → 调用时附加 ephemeral（ephemeral 文本由 `resolve_ephemeral_system_prompt_from_config` 解析，`display.personality` 命名人格优先于 `agent.system_prompt`，env 最优先）；一次构建缓存、压缩时重建 | 人格不绑定模型；模型归全局 `model:`/session `/model`/ChannelOverride/Profile；温度与 max_tokens 由 Provider 适配层解析 |
 | Pi | SYSTEM.md（整篇替换）+ APPEND_SYSTEM.md（追加）| 自定义时：SYSTEM → APPEND → `<project_context>`（AGENTS/CLAUDE 链）→ skills 索引 → cwd；默认模板时：开场+工具列表+guidelines+文档指引 → APPEND → context → skills → cwd；`before_agent_start` 扩展可当轮整篇覆盖 | 模型/思考等级是会话级状态（`model_change` 条目），默认值在全局+项目设置；无角色级生成参数 |
 | OpenCode | agent `prompt`（markdown 正文原样）或空 | 两段拼装：`agent.prompt ?? provider 风格提示` → env/AGENTS.md 指令/MCP 指令/skills → user.system（`llm/request.ts:56-66`、`session/prompt.ts:1257-1271`）；AGENTS.md 按全局→项目祖先链加载（`session/instruction.ts:110-153`） | Agent 可绑 `model`/`variant`/`temperature`/`top_p`/`options`；生效 `input.model ?? agent.model ?? session.model ?? provider.defaultModel()`（prompt.ts:646、614-633）；切换 agent 默认继承上一模型 |
 
@@ -240,7 +240,7 @@ SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享�
 | SillyTavern | 角色卡与 Prompt Manager 可见 | 未 tainted 的聊天在改卡后可整体重建开场白；首次生成后 tainted 固化；每次生成重读角色卡当前值 |
 | VCPChat | 当前 Agent/topic、模型参数和历史文件边界明确 | 发送用内存缓存引用（设置保存/话题加载时刷新）；重新生成时重读最新配置并以截断重建落盘 |
 | VCPToolBox | Admin Panel 可热重载 AgentAssistant，文件层也热重载 | 新请求使用内存 `AGENTS` 映射的当前配置；历史只存 `{role, content}` 无快照可查 |
-| Hermes Agent | `/personality` 列出可用与当前值、`/status` 显示模型/Provider；TUI 会话 personality；web 编辑 SOUL.md | 修改人格写全局 `agent.system_prompt`：CLI 强制重建 agent（下一轮生效），TUI 就地改 `ephemeral_system_prompt` 不重置历史；轨迹不含人格文本，历史重放反映缓存 system prompt；retry_last 复用内存缓存不重建，存储 prompt 与运行时比对只检查尾部 Model/Provider 行 |
+| Hermes Agent | `/personality` 列出可用与当前值、`/status` 显示模型/Provider（含 `active_personality_name`）；TUI 会话 personality；web 编辑 SOUL.md | 修改人格写 `display.personality` 名称（不写 `agent.system_prompt`）：CLI 强制重建 agent（下一轮生效），TUI 就地改 `ephemeral_system_prompt` 不重置历史；轨迹不含人格文本，历史重放反映缓存 system prompt；retry_last 复用内存缓存不重建，存储 prompt 与运行时比对只检查尾部 Model/Provider 行 |
 | Pi | footer 显示当前模型/状态；`/session` 显示统计；无查看当前 system prompt 的内置命令 | 修改文件后 `/reload` 重建基础 prompt；`before_agent_start` 的当轮覆盖在轮末复位；历史只含消息与模型条目，无法从会话文件还原当时的提示词；无用户级重试命令（瞬时错误自动重试） |
 | OpenCode | App/TUI 输入框 agent 下拉与 `@` 补全、按 agent 着色；消息元信息显示 agent·model·时长；CLI `opencode agent list`/`debug agent` 展示权限与工具状态 | 修改配置后新会话用新配置；既有会话消息显示当时快照，继续生成使用当前配置解析的 agent 与权限；undo 物理删除 revert 点之后的消息再重发并重建 agent；无“当前权限面板”UI |
 

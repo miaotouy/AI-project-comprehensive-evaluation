@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -26,15 +26,15 @@ Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一�
 
 凭据管理比多数纯客户端项目完整：一条 Provider 可保存多个带 ID、标签和启停状态的 API Key，并在请求之间 round-robin；OAuth、AWS、GCP、Azure 等认证也统一进入 `authConfig`。Renderer 读取普通 Provider 时看不到 Key 或 Token，真实凭据只在 Main/Data API 内部使用。
 
-但高可用能力仍然有限：
+但高可用能力仍然有限（用户可配置的重试/fallback 默认关闭）：
 
 - 多 Key 只是跨请求轮询，没有失败计数、Key 健康状态、429 熔断或自动恢复；
-- 普通聊天默认 `maxRetries: 0`，除非调用方显式覆盖；
-- 单次失败不会换下一个 Key、Provider 或模型重放；
-- 没有跨 Provider failover、渠道权重、优先级、成本或延迟路由；
+- 普通聊天默认 `maxRetries: 0`，除非调用方显式覆盖（AI SDK 层）；
+- （`12498d68ec`）新增 **model-retry**：`AiService` 用 `createRetryableWrap`（ai-retry）包普通聊天模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置 fallback 模型（`buildFallbackModels` 按能力约束解析）；但偏好 `chat.retry.enabled` **默认 false**（`preferenceSchemas.ts:617`），且请求级 `maxRetries: 0` 会显式关闭包装（`AiService.ts:565-590`）——即"默认不重试"不变，"没有跨 Provider failover"改为"**默认没有**，用户可在设置里开启同模型重试 + 模型 fallback"；
+- 没有渠道权重、优先级、成本或延迟路由；
 - 设置页的批量健康检查会测试每个模型与每个 Key 并显示延迟，但结果不参与运行时调度。
 
-Provider Key、OAuth Token 和云 IAM 凭据以 SQLite JSON 文本字段落在 `<Electron userData>/cherrystudio.sqlite`，当前没有 SQLCipher、字段加密或系统 Keychain。当前仍接线的备份实现被源码明确标记为 v1 legacy：它只复制 IndexedDB、Local Storage 和可选的 `Data` 目录，没有复制 `cherrystudio.sqlite`。因此当前 v2 Provider 配置与凭据不会进入这套真实备份；`src/main/data/db/restore/` 中的 SQLite snapshot/promotion 是新恢复基础设施，不等于已经有可用的 v2 备份入口。
+Provider Key、OAuth Token 和云 IAM 凭据以 SQLite JSON 文本字段落在 `<Electron userData>/cherrystudio.sqlite`，当前没有 SQLCipher、字段加密或系统 Keychain。**备份覆盖已接通 SQLite**（见 §3.4）：v7 直接备份的 full/slim 两种布局都包含 `cherrystudio.sqlite`，恢复时经 checkpoint + 崩溃安全 promotion 门落回数据库——"v2 Provider 配置与凭据不进真实备份"的旧结论已不成立。
 
 ## 总体调用链
 
@@ -183,20 +183,18 @@ API Key 独立保存在 `apiKeys[]`；OAuth access/refresh token、AWS access ke
 
 `user_provider.api_keys` 与 `auth_config` 都是 JSON 文本列，因此 Key、Token 和 IAM 凭据可从数据库直接恢复。Renderer 脱敏只保护进程边界，不保护磁盘副本、恶意本机进程或被复制的数据库文件。
 
-### 3.4 当前备份没有覆盖 SQLite
+### 3.4 备份已覆盖 SQLite
 
-当前 IPC 仍实例化 `LegacyBackupManager`。其 direct backup 只打包：
+`LegacyBackupManager`（类名 `BackupManager`，文件头仍标注 `@deprecated LEGACY v1 CODE — retained as the active compatibility backup engine while v2 backup is unfinished`，`LegacyBackupManager.ts:1-15`）是当前真实接线的备份引擎，（`220dff874f` 及后续）其 direct backup 升级为 **v7 full/slim 双布局**（`LegacyBackupManager.ts:192-230,292-406`）：
 
 ```text
-IndexedDB/
-Local Storage/
-Data/（可选）
-metadata.json
+full 布局：Data/ + IndexedDB/ + Local Storage/ + cache.json + metadata.json
+slim 布局：Data/cherrystudio.sqlite + cache.json（可选）
 ```
 
-源码顶部同时明确写着“v2 can no longer perform real backups”。它没有复制 `cherrystudio.sqlite`，所以 SQLite 中的 Provider、模型、聊天等 v2 业务数据均不在该备份中，不能据此宣称“备份会扩散 Provider 密钥”。实际风险恰好相反：现有备份无法恢复这些渠道配置。
+也就是说 **`cherrystudio.sqlite`（含 Provider、模型、聊天等全部 v2 业务数据与凭据）现在会进入真实备份**——不再只是 IndexedDB/Local Storage/Data 三件套。恢复侧把归档里的 SQLite 先复制到 work 库，再经 `src/main/data/db/restore/` 的 checkpoint + 崩溃安全 promotion 门原子替换（`LegacyBackupManager.ts:972-973,1063`），失败时保留旧库。另有配套行为：备份前对 AI stream/agent/channel 写方做 quiesce（`BACKUP_ACTIVE_WRITERS_ERROR_CODE`，`e5a0c47a59`）、跳过 LevelDB `LOCK` 等被占用文件（`691970aba0`/`848993332d`）、自动备份间隔跨重启保持（`6f9ab1befc`）。
 
-`DbService.createSnapshot()` 和 `src/main/data/db/restore/` 已提供 `VACUUM INTO work.sqlite`、恢复暂存和重启时原子替换能力，但当前可见的用户备份入口尚未接入这条新管线。
+仍未改变的事实：凭据在备份文件里仍是明文 JSON 文本（备份与数据库一样无静态加密）；"备份会扩散 Provider 密钥"的风险现在真实存在，但这是产品设计使然，与 §3.3 的磁盘明文结论同源。
 
 ## 4. 多 Key 轮询
 
@@ -314,6 +312,8 @@ Registry 合并时，Provider override 可修改 capability、模态、context�
 
 这套方案的主要代价是元数据错误会同时影响 UI 与 wire protocol，影响面大于普通展示目录。项目通过 schema、catalog invariant、source-sync 和禁止手改生成 JSON 的 CI 约束降低风险；但 live upstream 参与生成，重新生成可能顺带吸收与本次改动无关的价格或能力漂移，仍需审阅生成差异。
 
+Registry 数据与路由继续演进（机制未变，仅条目/覆盖变化）：新增 Radeon Cloud Provider（`7b0d7a8908` 等）、New API 的 embedding endpoint type（`11604e09cc`）、DeepSeek V4 Flash Responses 端点（`2a4e6a6882`）、Claude Opus 5/Sonnet 5 及 1M-context 变体（`bd2b5eefc6`）、Ollama Gemma 4 thinking（`03d266e029`）、OpenCode Go 按所服务协议路由（`bf66103a2a`）、DeepSeek/OpenRouter/Dashscope 内置联网搜索与可区分的解析后模型名（`da3b5f1921`）、Ollama 原生 thinking 能力探测（`d97277ee75`）、Doubao Responses 注解归一化（`584f154cc6`）、new-api 单主机多路由版本（`a502b21c3e`）、CLI 配置经统一网关支持 detailed models（`84a33e88bc`）等。
+
 ## 6. 模型选择与多模型调用
 
 Assistant 保存一个 `modelId: UniqueModelId`；无 Assistant 的 Topic 使用 `chat.default_model_id`。运行时按稳定二元标识精确查找 Provider 和模型。
@@ -353,7 +353,13 @@ Assistant 保存一个 `modelId: UniqueModelId`；无 Assistant 的 Topic 使用
 maxRetries: maxRetries ?? 0
 ```
 
-即默认不重试。调用方可以通过 `requestOptions.maxRetries` 覆盖，但 SDK 重试仍绑定已经解析完成的同一 Provider、Endpoint、Key 和模型；它不会重新执行渠道决策。
+即 SDK 层默认不重试（`buildAgentParams.ts:583`）。调用方可以通过 `requestOptions.maxRetries` 覆盖，但 SDK 重试仍绑定已经解析完成的同一 Provider、Endpoint、Key 和模型；它不会重新执行渠道决策。
+
+**用户可配置重试/fallback（`12498d68ec`，model-retry）**：`AiService` 在聊天生成时用 `createRetryableWrap`（ai-retry，`src/main/ai/runtime/aiSdk/retry/createRetryableWrap.ts`）包住模型——同一模型对瞬态 API 错误（429/503/529 等）按策略重试，并可按 `buildFallbackModels`（`retry/buildFallbackModels.ts`）解析的 fallback 模型列表接管失败调用（解析时按能力过滤：function-calling、视觉、PDF、原生文件支持等不匹配的 fallback 会被跳过）。策略来自偏好：`chat.retry.enabled`（默认 false）、`chat.retry.max_attempts`（默认 3，范围 1-10）、`chat.retry.backoff_enabled`、`chat.retry.fallback_model_ids`（`retryPolicy.ts:14-25`，`preferenceSchemas.ts:194-200,616-619`）。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧 `maxRetries` 被置 0，避免双重重试（`AiService.ts:565-601`）。重试/切换过程以瞬时 `data-retry` part 实时呈现在消息里（持久化前剥离，见消息渲染器笔记）。因此：
+
+- "普通聊天默认不重试"（SDK 层）仍成立；
+- "没有跨 Provider、跨模型自动 failover"改为：**默认没有**，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；
+- 重试与 fallback 不改变 Key 轮询、渠道权重、成本/延迟路由等缺失项。
 
 Claude Code Agent Runtime 会接收其 SDK 的 `api_retry` 事件并向 UI 报告 attempt、delay 和错误类别。这属于外部 Agent Runtime 的重试机制，不能外推为普通聊天默认重试。
 
@@ -390,16 +396,16 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 
 - 没有 Key 错误计数、熔断、自动恢复或配额感知；
 - 多 Key 轮询不等于当前请求内换 Key；
-- 普通聊天默认不重试；
-- SDK 重试不等于重新选择 Provider；
-- 没有跨 Provider、跨模型自动 failover；
+- SDK 层普通聊天默认不重试（`maxRetries ?? 0`）；用户可配置的 model-retry 默认关闭；
+- SDK 重试不等于重新选择 Provider；model-retry 的 fallback 是模型级、按能力过滤，不按 Key/渠道池调度；
+- 默认没有跨 Provider、跨模型自动 failover（需用户开启 `chat.retry.*`）；
 - 没有渠道权重、优先级、成本或延迟路由；
 - 多 Endpoint 是协议路由，不是容灾路由；
 - 模型目录 fallback 不等于推理请求 fallback；
 - `@模型` 是并行显式调用，不是错误后的候补链；
 - 健康检查结果不进入运行时调度；
 - SQLite 凭据没有静态加密；
-- 当前 legacy 备份没有覆盖 SQLite Provider 数据。
+- 备份/恢复已覆盖 SQLite，但备份文件与数据库同样明文保存凭据。
 
 ## 11. 关键源码索引
 
@@ -432,5 +438,5 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 1. 本次没有启动 Electron 应用，也没有向真实 Provider 发起付费或流式请求；连接检查、代理、OAuth 回调和多模型 UI 结论来自源码。
 2. 没有枚举并实测 Registry 中每个 Provider 的全部协议组合；专用 Builder 仍可能有服务商级特殊限制。
 3. 没有检查操作系统对 Electron `userData` 目录施加的账户级 ACL；“明文”结论只指应用没有额外静态加密。
-4. SQLite 新备份/恢复设计仍处于未完成接线状态；本笔记只描述当前可调用入口，不把 `v2-refactor-temp` 或恢复底层设施当成已上线备份能力。
+4. 备份/恢复管线已接线（v7 full/slim 布局 + checkpoint/promotion 恢复门，见 §3.4），但恢复的端到端行为（quiesce 失败、损坏归档、promotion 失败回退）未运行验证；本笔记只描述静态确认的调用路径。
 5. CherryIN、AiHubMix 等服务端可能在客户端不可见的位置做模型或上游容灾；本仓库客户端只把它们视为一个 Provider 实例，不能据此推断服务端内部没有 failover。

@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -16,7 +16,7 @@
 
 AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM 输出与插件结果先归一化为 `MessageChain`（`BaseMessageComponent` 列表），再交给各平台适配器自行转换为平台消息格式；**没有统一的转换函数**，每个适配器自实现出站/入站。组件体系源自 MIT 许可的 Lxns-Network/Naku 项目（components.py:1-22 许可证头）。
 
-关键事实（快照 346b85d）：
+关键事实（快照 a9bb8a6）：
 
 - **组件体系**：`ComponentType` 枚举 22 种（components.py:46-70），`BaseMessageComponent`（pydantic v1/v3 条件导入，:35-38）提供 `toDict()` 同步（:98-106）与 `to_dict()` 异步双轨序列化；`__repr_args__` 截断 base64/超长字段防日志污染（:79-96）。
 - **业务语义元协议**：`MessageChain.type` 字段（message_event_result.py:33-34）承载 `tool_call`/`reasoning`/`audio_chunk` 等业务语义，仅 WebChat 出站序列化与前端消费，其他平台忽略。
@@ -167,13 +167,14 @@ type: str | None = None             # 业务语义元协议（:33-34）
 ## 6. 平台入站适配
 
 - **aiocqhttp**（aiocqhttp_platform_adapter.py:198-409）：要求 OneBot array 格式，按段类型 groupby 路由（:243）；text/file/reply 递归解析（reply 调 `get_msg` 拉引用链）、at 调 `get_group_member_info` 补昵称（:344-397）、markdown 降级 Plain（:400-404）、未知段记 warning；
+- **Telegram**（tg_adapter.py:591-650）：动图/视频贴纸（.tgs/.webm 非位图）改用静态缩略图转 `Image`（:597-612）；`video_note`（无文件名、不能带 caption）转 `Video` 组件（:640-649）。
 - 入站统一消费 `ComponentTypes` 注册表（:251）。
 
 ## 7. 工具调用的链构建
 
-`ToolLoopAgentRunner._handle_function_tools`（tool_loop_agent_runner.py:1031-1072）：每个工具调用产生 `MessageChain(type="tool_call")` + 单个 `Json({id, name, args, ts})`（:1060-1074）；结果链 `type="tool_call_result"`（:1275-1290）。
+`ToolLoopAgentRunner._handle_function_tools`（tool_loop_agent_runner.py:1089-1355）：每个工具调用产生 `MessageChain(type="tool_call")` + 单个 `Json({id, name, args, ts})`（:1118-1132）；结果链 `type="tool_call_result"`（:1333-1348）。
 
-消费方：`astr_agent_run_util._extract_chain_json_data`（:40）取链中第一个 Json；前端 `useMessages.ts`（chainType==="tool_call" → upsertToolCall）；工具执行中缓存的图片经 `from_cached_image` 以独立链 yield（:1178-1180、:1204-1206）。
+消费方：`astr_agent_run_util._extract_chain_json_data`（:40）取链中第一个 Json；前端 `useMessages.ts`（chainType==="tool_call" → upsertToolCall）；工具执行中缓存的图片经 `from_cached_image` 以独立链 yield（:1236-1238、:1262-1264）。
 
 ## 8. WebChat 渲染管线
 
@@ -262,7 +263,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 | `astrbot/core/platform/sources/webchat/webchat_event.py` | _send :29-163；send_streaming :196-263 |
 | `astrbot/core/platform/sources/webchat/message_parts_helper.py` | parts 互转 :61-466 |
 | `astrbot/core/platform/sources/webchat/webchat_queue_mgr.py` | 队列上限 :7-207 |
-| `astrbot/core/agent/runners/tool_loop_agent_runner.py` | 工具链 :1031-1072、:1275-1290 |
+| `astrbot/core/agent/runners/tool_loop_agent_runner.py` | 工具链 :1118-1132、:1333-1348 |
 | `astrbot/core/astr_agent_run_util.py` | _extract_chain_json_data :40 |
 | `dashboard/src/composables/useMessages.ts` | 分派 :990-1160；blocks :1317-1359 |
 | `dashboard/src/components/chat/MessageList.vue`、`markdownRenderConfig.ts`、`message_list_comps/*` | 渲染、320 上限、ToolCallCard |

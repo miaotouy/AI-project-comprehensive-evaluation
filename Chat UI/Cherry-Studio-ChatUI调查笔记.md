@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
-> 调查方式：从 `../Chat/Cherry-Studio-Chat调查笔记.md`（2026-08-10 调查）迁移现有段落与证据，未重新调查代码；通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱、右键菜单双模式）保留于原 Chat 笔记，待可选界面专题承接
+> 调查方式：从 `../Chat/Cherry-Studio-Chat调查笔记.md`（2026-08-10 调查）迁移现有段落与证据；通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱、右键菜单双模式）保留于原 Chat 笔记，待可选界面专题承接
 >
 > 调查范围：工作台结构、会话导航、Composer 与草稿、发送前配置、生成反馈、消息操作、分支树图导航、键盘与无障碍、桌面集成；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
@@ -44,8 +44,8 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 1.2 侧栏折叠与窗口宽度：无断点驱动，手动命令 + 页面级最小宽度
 
-- 侧栏展开/折叠是**手动命令**（`app.sidebar.toggle`，`HomePage.tsx:413`），未发现 `ResizeObserver`/`matchMedia`/CSS `@container` 驱动的自动折叠逻辑——不随窗口变窄自动收起。
-- 主窗口最小可缩放宽度随页面动态调整：进入 Home 页面时 `useEffect` 立即调用 IPC 把最小尺寸从默认 `MIN_WINDOW_WIDTH=960px`（`src/shared/utils/window.ts:1`）临时放宽到 `SECOND_MIN_WINDOW_WIDTH=520px`（`HomePage.tsx:665-670`），离开时还原——Home 聊天页允许拖得比其他页面更窄。
+- 侧栏展开/折叠是**手动命令**（`app.sidebar.toggle`，`HomePage.tsx:408`），未发现 `ResizeObserver`/`matchMedia`/CSS `@container` 驱动的自动折叠逻辑——不随窗口变窄自动收起。
+- 主窗口最小可缩放宽度随页面动态调整：进入聊天工作台时 `AppShell` 立即调用 IPC 把最小尺寸从默认 `MIN_WINDOW_WIDTH=960px`（`src/shared/utils/window.ts:1`）临时放宽到 `SECOND_MIN_WINDOW_WIDTH=520px`（该逻辑从 `HomePage.tsx:665-670` 迁到 `AppShell.tsx:140`，`window.main.set_minimum_size`），离开时还原——聊天页允许拖得比其他页面更窄。
 - 阅读宽度限制是独立机制：`NarrowLayout.tsx` 把消息内容限制在 `800px`（`chat.narrow_mode` 偏好，默认 `true`，`preferenceSchemas.ts:184,587`），是用户可关闭的排版偏好。
 - （断点/窗口管理的完整盘点保留于源笔记 13.9，此处只记录与聊天主链的交点。）
 
@@ -53,8 +53,8 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 2.1 Topic 列表与生成运行指示
 
-- Topic 列表空状态（`TopicListBody` 的 `emptyFallback`，`Topics.tsx:1584-1588`）与加载骨架的呈现盘点保留于源笔记 13.3。
-- **运行指示器与聊天主链的交点**：Topic 列表行右侧的 `TopicStreamIndicator`（`Topics.tsx:1788-1828`）用 `Loader2` 旋转图标表示运行中、`CircleAlert` 表示出错、绿色小圆点表示"已完成但未读"（read-receipt 语义，悬停或选中时淡出让位给 pin/delete 按钮）；红/绿视觉区分是专门的设计变更历史（代码注释直接写了这段历史，`Topics.tsx:1816-1824`）——用户靠它在侧栏判断"哪个会话仍在跑"。
+- Topic 列表空状态（`TopicListBody` 的 `emptyFallback`，`Topics.tsx:1662` 附近）与加载骨架的呈现盘点保留于源笔记 13.3。
+- **运行指示器与聊天主链的交点**：Topic 列表行右侧的运行指示统一为跨面板组件 `ConversationRowStatus`（`src/renderer/components/chat/resourceList/base/ConversationRowStatus.tsx:20-51`）：状态由 `Topics.tsx:1727-1735` 从 topic 流状态派生——等待审批显示为 warning 徽标（badge）、`pending` 用 `Loader2` 旋转图标、`error` 用 `CircleAlert`、"已完成但未读"（`!isActive && isTopicStreamFulfilled`）用绿色小圆点；指示器是绝对定位 overlay，悬停/聚焦时淡出让位给 pin/delete 操作（`CONVERSATION_ROW_STREAM_INDICATOR_CLASS`）。`ConversationRowStatus` 带 `aria-label` + `role="img"`。
 
 ### 2.2 Topic 拖拽排序：仅助手分组可拖
 
@@ -86,7 +86,12 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 3.3 草稿与编辑恢复状态机
 
-`ChatComposerInner` 在一个组件内混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，用一堆 ref 协调（`inputHistoryToolsRef`、`skipDraftCacheWriteForHistoryPreviewRef`、`editingOriginalFilePartsByTokenIdRef`、`savedDraftBeforeEditingRef` 等）——功能齐全但可读性门槛高（取舍见第 10 节）。草稿按会话、窗口还是全局保存本次未核实。
+`ChatComposerInner` 在一个组件内混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，用一堆 ref 协调（`inputHistoryToolsRef`、`skipDraftCacheWriteForHistoryPreviewRef`、`editingOriginalFilePartsByTokenIdRef`、`savedDraftBeforeEditingRef` 等）——功能齐全但可读性门槛高（取舍见第 10 节）。
+
+以下两个行为已确认：
+
+- **未发送草稿跨导航保留**（`292fb2064e`）：草稿按会话/对话粒度缓存（`chatDraftCache.ts`/`agentDraftCache.ts`），切换 Topic/标签页后再回来草稿仍在。
+- **编辑用户消息可直接保存、不重发**（`b9f38187d5`）：编辑历史用户消息后提供"仅保存"路径（`editMessage` 写回 parts），不必触发重新生成。
 
 ## 4. Agent、模型、工具与发送前配置
 
@@ -113,7 +118,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 6.1 消息操作清单与可用性（源笔记 12.1）
 
-`messageMenuBarActions.tsx` 注册复制（纯文本/富文本）、编辑、重新生成、删除、翻译中止、新建分支、多选、保存到文件/知识库、复制图片、导出图片/Markdown（含 reasoning）、Word、Notion、语雀、Obsidian、Joplin、思源及点赞。助手的"指定模型重新生成"打开模型选择器；删除按设置确认并检查可删除状态。
+`messageMenuBarActions.tsx` 注册复制（纯文本/富文本）、编辑、重新生成、删除、翻译中止、新建分支、多选、保存到文件/知识库、复制图片、导出图片/Markdown（含 reasoning）、Word、Notion、语雀、Obsidian、Joplin、思源及点赞。助手的"指定模型重新生成"打开模型选择器；删除按设置确认并检查可删除状态。删除可用性语义（`8b78177a61`）：首轮消息可删；多模型回复组删除只删组内兄弟回复（隐藏的重新生成版本一并移除），组内任一回复仍在生成时删除按钮禁用并带解释性 tooltip（`messageDeleteAvailability.ts`）。
 
 **可用性判定机制**：几乎所有 action 的 `availability` 都在判断 `!!actions.xxx`——能力是否出现完全由适配器注入的字段决定（6.2），不是 if/else 页面模式分支。
 
@@ -128,11 +133,11 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 右侧分支面板（`src/renderer/pages/home/components/TopicBranchPanel.tsx`，292 行）把整个 Topic 的消息树渲染成一张 React Flow 图，是"在树上选分支/开分支"的图形入口，与消息列表的 `< i/N >` 兄弟导航并存：
 
 - **数据流**：面板打开时 `useQuery('/topics/:topicId/tree', { query: { depth: -1 } })` 拉全量树（64-68 行）→ `mergeTopicMessageFlowLiveTree` 叠加 live 态（76-79 行）→ `buildTopicMessageFlowGraph` + `layoutTopicMessageFlowGraph` 生成 React Flow 的 nodes/edges（80 行）；头部显示 `branchCount`/`nodeCount` 统计（253-259 行）。"DB 树 + live overlay 合并"的数据侧见会话与消息管理笔记 2。
-- **图构建**（`components/chat/flow/topicMessageFlowGraph.ts`）：`buildTopicMessageFlowGraph`（14-61 行）把 `TreeResponse.nodes` 与 `siblingsGroups` 去重合并；`collectActivePath`（173-188 行）从 `activeNodeId` 沿 `parentId` 回溯活动路径；边按 `isActivePath / isSiblingBranch / isInactiveBranch` 打标。**布局**（`topicMessageFlowLayout.ts`）用 `@dagrejs/dagre` 做 `rankdir: 'TB'` 分层（60-75 行），节点固定 220×112（14-17 行）、nodesep 56/ranksep 96（23-29 行），兄弟顺序用 OrderConstraint 按（深度, 创建时间, id）强制排序（232-253 行）；`isInputDraft` 草稿节点不参与 dagre，直接排在父节点最右侧兄弟之后（39-40、86-88、123-160 行）。边样式按状态着色：活动路径 `--success` 加粗 + `animated`，非活动分支淡色虚线，兄弟边普通虚线（`toReactFlowEdge`，162-191 行）。
+- **图构建**（`components/chat/flow/topicMessageFlowGraph.ts`）：`buildTopicMessageFlowGraph`（14-61 行）把 `TreeResponse.nodes` 与 `siblingsGroups` 去重合并；`collectActivePath`（173-188 行）从 `activeNodeId` 沿 `parentId` 回溯活动路径；边按 `isActivePath / isSiblingBranch / isInactiveBranch` 打标。**布局**（`topicMessageFlowLayout.ts`）用 `@dagrejs/dagre` 做 `rankdir: 'TB'` 分层（60-75 行），节点固定 220×112（14-17 行）、nodesep 56/ranksep 96（23-29 行），兄弟顺序用 OrderConstraint 按（深度, 创建时间, id）强制排序（232-253 行）；边样式按状态着色：活动路径 `--success` 加粗 + `animated`，非活动分支淡色虚线，兄弟边普通虚线（`toReactFlowEdge`，162-191 行）。`isInputDraft` 草稿假节点机制已被移除（`ad0ce9cd04`）——空分支叶子是持久化树节点（`data.isAwaitingInput`），正常参与 dagre 布局，节点卡用 warning 配色 + "等待输入"状态标签标识（`TopicMessageFlowNode.tsx:64-67,227-232`）。
 - **画布**（`TopicMessageFlowCanvas.tsx`）：`@xyflow/react`，`nodesConnectable/Draggable: false`、`onlyRenderVisibleElements`（只挂载可视区域节点）、minZoom 0.08/maxZoom 1.4、`zoomOnDoubleClick: false`（228-253 行）；`MiniMap`（右下，节点按角色着色，255-263 行）+ `Controls`（左下）+ 图例（254 行）；空树渲染空状态（209-220 行）。初始视口把根节点定位在画布顶部（`getRootFocusViewport`，zoom 0.85），`focusKey` 变化（面板 dock/popout 位置切换）时重新测量容器并复位视口（154-207 行）。
-- **节点卡**（`TopicMessageFlowNode.tsx`）：role 徽标（user=success 系、assistant=info 系，25-32 行）、模型短名（`getModelShortLabel` 取最后一段，41-48 行）、两行 `preview` 摘要、状态圆点（pending/success/error/paused，34-39 行）、时间（MM/DD HH:mm）；`isActive` 节点 ring 高亮、非活动分支 `opacity-55`（223-235 行）；Handle 仅装饰。悬停 300ms 后 Popover 打开完整预览卡（`TopicMessageFlowNodePreviewCard`，74-164 行）：按需 `GET /messages/:id` 拉全量消息，复用主消息区的 `MessageContent` 真实渲染（150-158 行）；`isInputDraft`/上下文边界节点不触发（234-236、285 行）。
-- **点击与右键**（`TopicBranchPanel.tsx`）：`handleNodeSelect`（86-128 行）分三种情况——有活动草稿锚点且点的是锚点：取消草稿并定位；点击活动路径上的节点：仅 `onLocateMessage` 定位不切分支；否则 `GET /topics/:id/path?nodeId=` 求该分支叶子后 `PUT /topics/:id/active-node` 切换并 refetch（"点到中间节点 = 切到该分支最新叶子"，与 `< i/N >` 的 `setActiveBranch` 同语义，数据侧见会话与消息管理笔记 4.2）。右键菜单（`CommandContextMenu`，271-285 行 + `getNodeContextMenuItems`，181-238 行）只有两项："从这条消息发起新分支"（仅 assistant 且有 assistant 后代、非当前 active 节点；禁用原因区分"就是当前活动节点"/"没有后续消息"）和"复制分支到新 Topic"（`POST /topics/:id/duplicate`）。
-- **分支草稿工作流**：点"从这条消息发起新分支"（`handleStartBranchDraft`）时先 PUT active-node 再广播 `draft-branch:<anchorId>` 假节点，分支面板立刻显示"这里有个待输入的新分支"（数据侧临时性见会话与消息管理笔记 4.4）。
+- **节点卡**（`TopicMessageFlowNode.tsx`）：role 徽标（user=success 系、assistant=info 系，25-32 行）、模型短名（`getModelShortLabel` 取最后一段，41-48 行）、两行 `preview` 摘要、状态圆点（pending/success/error/paused，34-39 行）、时间（MM/DD HH:mm）；`isActive` 节点 ring 高亮、非活动分支 `opacity-55`（223-235 行）；Handle 仅装饰。悬停 300ms 后 Popover 打开完整预览卡（`TopicMessageFlowNodePreviewCard`，74-164 行）：按需 `GET /messages/:id` 拉全量消息，复用主消息区的 `MessageContent` 真实渲染（150-158 行）；awaiting-input/上下文边界节点不触发（234-236、285 行）。
+- **点击与右键**（`TopicBranchPanel.tsx`）：`handleNodeSelect`（86-128 行）分三种情况——有活动草稿锚点且点的是锚点：取消草稿并定位；点击活动路径上的节点：仅 `onLocateMessage` 定位不切分支；否则 `GET /topics/:id/path?nodeId=` 求该分支叶子后 `PUT /topics/:id/active-node` 切换并 refetch（"点到中间节点 = 切到该分支最新叶子"，与 `< i/N >` 的 `setActiveBranch` 同语义，数据侧见会话与消息管理笔记 4.2）。右键菜单（`CommandContextMenu`，271-285 行 + `getNodeContextMenuItems`，181-238 行）有三项："从这条消息发起新分支"（仅 assistant 且有 assistant 后代、非当前 active 节点；禁用原因区分"就是当前活动节点"/"没有后续消息"）、"复制分支到新 Topic"（`POST /topics/:id/duplicate`），以及 awaiting-input 叶子的"删除该分支"（`DELETE /messages/:id?awaitingInputOnly=true`，服务端守卫见会话与消息管理笔记 4.3）。
+- **分支草稿工作流**：点"从这条消息发起新分支"（`handleStartBranchDraft`）经 `useTopicBranchActions.reserveBranch`（`src/renderer/pages/home/hooks/useTopicBranchActions.ts`）先 `POST /messages/:id/branches` 持久化空 user 叶子，流式进行中 `activate=false` 不挪动 active 指针，分支面板立即显示"等待输入"节点；不再广播 `draft-branch:<anchorId>` 假节点（数据侧语义见会话与消息管理笔记 4.3）。
 - **重命名入口**：`Chat.tsx:143-162`（`topic.rename` 命令处理器）弹出 `PromptPopup` 取新名字（数据侧见会话与消息管理笔记 3.2；弹窗库完整盘点保留于源笔记 13.1，此处只记录聊天主链交点）。
 
 ## 7. 多会话、多模型、群聊与后台生成
@@ -143,10 +148,10 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ## 8. Chat UI 状态所有权与同步（含桌面集成）
 
-### 8.1 UI 状态所有权：ref 三态机 + 前端广播 + 桌面集成
+### 8.1 UI 状态所有权：持久化预留 + 前端广播 + 桌面集成
 
-- **branch draft 的三态 ref 状态机**：`Chat.tsx` 里 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 两个 ref 组合出"正常发送 / 草稿分支中 / 草稿取消但指定下一条锚点"三态，靠 `getBranchDraftAnchorId()` 的 `??` 顺序表达优先级，没有类型层面的状态枚举兜底；代码里已在四五处手动清空这两个 ref（`handleCancelBranchDraft`、`handleStartBranchDraft`、topic 切换的 effect 清理函数），后续维护者新增第四种状态很容易漏掉某个清空点（数据侧语义见会话与消息管理笔记 4.3，脆弱性取舍见第 10 节）。
-- **live branch 前端状态广播**：`TopicMessageFlowLiveState` 是纯前端结构，把草稿假节点与流式中消息广播给分支面板（数据侧见会话与消息管理笔记 2）；"草稿/面板/流式"这些 UI 状态的事实源分散在组件 ref、hook 与 SWR 缓存里，仓库不引入全局状态库（`useStablePartsByMessageId.ts:1-39` 注释）。
+- **分支草稿已是持久化行**：`Chat.tsx` 旧的 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 三态 ref 状态机已被删除（`ad0ce9cd04`，`Chat.tsx` 相应约 84 行代码移除），"从历史节点开新分支"改为 `useTopicBranchActions.reserveBranch` 持久化空 user 叶子 + `fill-reserved` 填充（6.3；数据侧语义见会话与消息管理笔记 4.3）——原先"隐式三态机容易漏清空"的脆弱点随机制移除而消失。
+- **live branch 前端状态广播**：`TopicMessageFlowLiveState` 仍是纯前端结构，现在只广播流式中消息（草稿假节点已删除）；"草稿/面板/流式"这些 UI 状态的事实源分散在组件 ref、hook 与 SWR 缓存里，仓库不引入全局状态库（`src/renderer/components/chat/messages/stream/useStableMessagePartsLayers.ts:1-39` 注释，原 `useStablePartsByMessageId.ts` 已迁移至此）。
 - **多窗口同步**（分离窗口、悬浮窗 QuickAssistant 与主窗口之间的会话/草稿/生成状态同步）：本次未调查。
 
 ### 8.2 桌面端集成（源笔记 13.11）：托盘、通知、快捷键
@@ -154,7 +159,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **托盘**：`TrayService.ts` 在 mac 上根据 `nativeTheme.shouldUseDarkColors` 切换亮/暗两套托盘图标（`:29`）；点击托盘图标的行为受偏好 `feature.quick_assistant.click_tray_to_show` 控制——开则唤起 QuickAssistant 悬浮窗，关则唤起主窗口（`:61-71`）。托盘本身**不显示未读消息数/流式状态角标**（未检索到 `setBadgeCount`/`flashFrame`/`setOverlayIcon` 调用）。
 - **系统通知**：`NotificationService`（主进程，`src/main/services/NotificationService.ts`）用 Electron 原生 `Notification` API，点击通知会 `showMainWindow()` 并广播 `notification.clicked`（`:14-17`）；渲染层 `notificationService.send()`（`src/renderer/services/notification/NotificationService.ts:10-24`）先查三个偏好开关（`assistant`/`backup`/`knowledge`）再决定是否真的调 IPC 发送。
 - **一个值得记录的空路径**：偏好 `app.notification.assistant.enabled` 和对应设置项（"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用 `source: 'backup'` 和 `source: 'update'`。即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩（`NotificationService.ts:17-20` 有另一条已知 TODO，但 `assistant` 这条连 TODO 都没提到，属于本次调查新发现）。
-- **全局快捷键**：`ShortcutService.ts` 按窗口聚焦状态分层注册——窗口聚焦时注册全部快捷键，失焦时只注册标了 `global` 的那部分（`registerShortcuts(window, onlyPersistent)`，`:130-137,158-204`），避免非全局快捷键在应用不在前台时抢占系统按键；快捷键冲突（被其他应用占用）会记录冲突集合并通过 IPC 广播给渲染层展示提示（`:281-303`）。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这个静态配置页（`ShortcutSettings.tsx`）。
+- **全局快捷键**：`ShortcutService.ts`（`f9dd175d5f`）从"按窗口聚焦分层注册"改为**本地/全局分轨**——`global` 标记的快捷键仍走 `globalShortcut`，其余本地快捷键不再注册到系统，而是挂在窗口 `webContents.before-input-event`（含 `did-attach-webview` 挂上的 guest webview 输入）上按命令解析拦截，应用失焦时本地快捷键自然不生效，无需按焦点切换注册集；快捷键冲突（被其他应用占用）仍记录冲突集合并经 IPC 广播给渲染层展示提示（`:281-303` 附近）。另新增标签页导航快捷键（`324f26f728`，如标签切换类命令）。**仍未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这个静态配置页（`ShortcutSettings.tsx`）。
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 
@@ -180,7 +185,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 ## 10. 设计取舍与已确认边界
 
 - **`ChatComposer.tsx` 单文件复杂度偏高**：`ChatComposerInner` 一个组件本体加上闭包状态就有 1400+ 行，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等好几套独立状态机在同一个函数体内用一堆 ref 协调（3.3）。功能齐全，但可读性/可维护性门槛显著高于单一职责组件，牵一发动全身的回归风险不低。
-- **branch draft 的三态 ref 状态机隐式且脆弱**（8.1）：没有类型层面的状态枚举兜底，代码里已在四五处手动清空这两个 ref。
+- **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"（无类型枚举兜底、多处手动清空 ref）被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
 - **适配器模式的代价与收益**：能力注入（6.2）让"Home 可写、Agent 只读"不需要 if/else 分支，代价是追踪某个按钮为何出现需要跨两个 adapter 文件；`messageListProviderBuilder.ts` 的"只塞存在的字段"（`pickMessageLeafState` 等纯函数）保证 `actions.xxx &&` 判断语义清晰（该文件细节见消息渲染器笔记）。
 - **搜索的 DOM 局限**（2.3）：虚拟化 + DOM 搜索组合下的固有限制，数据侧影响见会话与消息管理笔记 5。
 - **桌面集成缺口**（8.2）：通知空挂钩、托盘无角标、无快捷键速查浮层；Session 列表无拖拽排序（2.2）。
@@ -190,7 +195,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 - 视觉效果、焦点顺序、键盘可用性、响应式行为、系统通知需要运行验证（本笔记结论主要来自静态代码）。
 - 停止/暂停按钮状态与真实任务状态的对应关系、切走 Topic 后任务收口（见对话请求与上下文笔记 7、8）。
-- 切换 Topic 保留哪些局部状态（草稿、滚动位置）、草稿保存粒度、分支面板键盘操作未核实。
+- 草稿粒度已核实为"按会话缓存、跨导航保留"（3.3）；切换 Topic 保留的滚动位置、分支面板键盘操作仍未核实。
 - 移动端布局、QuickAssistant 悬浮窗与主窗口的状态同步未调查。
 
 ## 12. 关键源码索引

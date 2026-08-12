@@ -2,11 +2,11 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
-> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据，未重新调查代码；界面行为均为静态确认，视觉效果需运行验证
+> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据；界面行为均为静态确认，视觉效果需运行验证
 >
 > 调查范围：TUI 与 Web App 双表面的工作台结构、会话导航与现场恢复、Composer 与草稿、生成反馈与停止、消息操作与审批工作流、多会话后台生成、跨窗口连续性；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
@@ -41,18 +41,19 @@ OpenCode 同时有 **TUI**（`packages/tui`）与 **Web App**（`packages/app`�
 - **TUI**：消息路由 `routes/session/index.tsx`，承担发送、消息渲染入口、subagent footer、permission 对话框、fork 对话框；事件经 `context/sdk.tsx:82-117` 订阅。
 - **Web App**：会话页（pages/session.tsx）组织 timeline 与 Composer；`SessionComposerRegion`（session-composer-region.tsx）挂载 permission/question/todo/followup/revert dock。
 - **多窗口**：SSE 事件全量广播，多个窗口各自订阅同一事件流，无专门同步层（静态推断）。
-- **桌面端（Electron）**：renderer 以源码方式复用 `@opencode-ai/app`（desktop/src/renderer/index.tsx:1-17），sidecar 进程内运行同一 opencode server（main/server.ts:57-184，Basic auth）；差异仅在窗口级：每窗口 MemoryRouter 与 last-active URL 恢复（index.tsx:85-111）、草稿 SQLite 持久化（main/ipc.ts:143-150 draft-*）、首启引导（onboarding）。
+- **桌面端（Electron）**：renderer 以源码方式复用 `@opencode-ai/app`（desktop/src/renderer/index.tsx:1-17），sidecar 进程内运行同一 opencode server（main/server.ts:57-184，Basic auth）；差异仅在窗口级：每窗口 MemoryRouter 与 last-active URL 恢复（index.tsx:85-111）、草稿 SQLite 持久化（main/ipc.ts:143-150 draft-*）、首启引导（onboarding）；macOS 关窗不退出进程，`activate` 时重建窗口（main/index.ts:411-419）。
 
 ## 2. 会话列表、搜索与现场恢复
 
 - **侧栏列表**：`directory-sync.ts:124-134` 用 `session.list({directory, limit, order:"desc"})`，`fetch(count=10)` 递增分页（数据语义见会话与消息管理笔记 5）。
+- **首页入口**：打开目录时若为未初始化 Git 目录自动 `project.initGit` 后注册为项目（home-controller.ts:93-110），项目行支持右键菜单（home-projects-view.tsx:478-481）；首页最近会话按 `time_updated` 降序 + id 决胜排序（`layout/helpers.ts:12-18` 的 `compareSessionTime`，移除旧「1 分钟内按 id」特例）。
 - **命令面板**：跨目录 `session.list({parentID:null, search, limit:50})`（command-palette.ts:149）。
 - **现场恢复**：会话与消息全量落库（SQLite），再次进入经 SSE 订阅恢复；断线 250ms 重连（server-sdk.tsx:307-308）。桌面端额外恢复 last-active URL。
 
 ## 3. Composer、草稿、附件与快捷输入
 
 - **Web**：`createPromptSubmit.handleSubmit`（submit.ts:318-639）；排队发送（`shouldQueue`，submit.ts:482-487）与 followup dock（composer/session-followup-dock.tsx）；附件经 `blobDataUrl(blob, mime)` 转 data URL（submit.ts:101、:117）。
-- **TUI**：发送 `component/prompt/index.tsx:1093-1110`；shell 模式 :1060-1068；自定义命令 :1070-1090。
+- **TUI**：发送 `component/prompt/index.tsx:1093-1110`；shell 模式 :1060-1068；自定义命令 :1070-1090。光标样式可配置：`tui.json` 的 `cursor {style, blinking}`（style 为 block/underline/line/default，`config/index.tsx:33-40`、:79-88），应用于 Composer 输入与各对话框输入框（prompt/index.tsx:254 等）。
 - **草稿**：桌面端草稿按窗口持久化到 SQLite（main/ipc.ts:143-150 draft-*）；Web/TUI 端草稿粒度本次未在源笔记中覆盖。
 
 ## 4. Agent、模型、工具与发送前配置
@@ -72,6 +73,7 @@ OpenCode 同时有 **TUI**（`packages/tui`）与 **Web App**（`packages/app`�
 - **分支**：fork 对话框（TUI routes/session/index.tsx；数据语义见会话与消息管理笔记 4）。
 - **审批**：`SessionPermissionDock`（app/src/pages/session/composer/session-permission-dock.tsx:8-74）reject/allowAlways/allowOnce 三按钮 → `sdk().api.permission.reply`；TUI 侧 `routes/session/permission.tsx`（含 diff 预览 :47-88）。按钮与组件装配见消息渲染器笔记 8。
 - **提问**：`SessionQuestionDock`（Mark/Option 单选多选 + 自定义答案）；TUI `question.tsx`。
+- **TUI 复制**：在 tmux 会话中同时写入 OSC52 直写序列与 tmux passthrough，兼容 `set-clipboard on` 配置下的 ssh 复制（`tui/src/clipboard.ts:26-30`）。
 - **todo**：App 侧 `session-todo-dock.tsx` 与 todoState 状态机（session-composer-state.ts:13-22）；todo 数据写入经 `todowrite` 工具回注（执行语义见对话请求与上下文笔记 9，TodoTable 持久化见会话与消息管理笔记 2）。
 
 ## 7. 多会话、多模型、群聊与后台生成

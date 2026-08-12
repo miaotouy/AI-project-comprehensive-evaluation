@@ -2,9 +2,9 @@
 
 > 调查对象：`../../deepchat`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
 > 调查方式：静态代码调查；grep/glob 关键词检索（artifact、canvas、sandbox、iframe、mcp-app、exec、runtime、notebook、diff、patch 等），通读消息块累积器、回显通道、Artifact 解析/渲染组件、MCP App 沙箱主链与 Agent 工具管理器；未安装依赖，未运行构建、单元测试或应用
 >
@@ -98,7 +98,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 - 同一 Artifact 可同时出现在消息卡片与工作区列表（列表来自对所有 assistant 消息的实时解析，`WorkspacePanel.vue:273-301`），两处共享 `artifactStore`，内容为同一内存对象，无编辑所以不存在不同步问题。
 - 视图模式：preview/code 双标签（`useWorkspaceViewerModel.ts:78-107`）；`application/vnd.ant.code` 类型强制 code 视图（`:118-124`）。
-- 文件投影（工作区）：`workspaceReadFilePreviewRoute` 提供 markdown/html/pdf/svg/image/text/binary 等预览，HTML/SVG/PDF 经 `workspace-preview://` 协议 iframe 呈现（`protocols.ts:250-299` + `workspacePreviewProtocol.ts`），与 Artifact 预览共用 WorkspacePreviewPane。
+- 文件投影（工作区）：`workspaceReadFilePreviewRoute` 提供 markdown/html/pdf/svg/image/text/binary 等预览，HTML/SVG/PDF 经 `workspace-preview://` 协议 iframe 呈现（`protocols.ts:250-299` + `workspacePreviewProtocol.ts`），与 Artifact 预览共用 WorkspacePreviewPane。工作区管理入口移入侧栏（#2138：`WindowSideBar.vue` 新增 workspace 注册/归档管理，project store 增加 `defaultChatWorkspacePath` 与环境归档同步，`WorkspaceFileNode.vue` 组件被移除），`WorkspacePanel` 本身的预览/查看链路不变（仅按钮换用 dc-ui 组件）。
 - 桌面挂件/窗口投影：本次未找到（无 artifact 桌面挂件；浮动窗口仅用于浏览器/CUA 预览，`src/renderer/src/floating`、`src/main/desktop/floatingButton`）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -110,6 +110,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - **React Artifact**：`ReactTemplate.ts:1-46` 把模型内容包进带 `deepcdn://` 引用的 HTML 模板（react/react-dom/babel/lucide/prop-types/Recharts/tailwind），`ReactArtifact.vue` 以 `sandbox="allow-scripts"`（无 allow-same-origin）的 iframe srcdoc 加载；`deepcdn://` 由主进程协议处理器只读本地 `resources/cdn` 目录（`protocols.ts:154-205`，含路径越界检查 `resolvePathInsideRoot`）。依赖为内置本地副本，无外网 CDN。
 - **Code Artifact**：Monaco（stream-monaco）只读展示 + 复制；`CodeArtifact.vue:70-74` 未传 readOnly，可编辑与否取决于 stream-monaco 默认值（node_modules 未安装，无法核实）；**无论可不可编辑都没有写回路径**。
 - **图像生成**：`agentImageGenerationTool.ts` 走供应商图像模型，结果转为独立 image 块（`imageGenerationBlocks.ts:42-58` 把 imagePreviews 提升为 `type:'image'` 块）。
+- **图像持久化（#2094）**：生成的图片经 `src/main/platform/imageCache.ts` 落盘并以 `imgcache://` 引用出现在消息文本；MCP 工具调用时 `ToolManager` 把参数中的 `imgcache://` 引用解析回 data URL（上限 8 个引用、展开后参数 ≤32 MiB，`src/main/mcp/toolManager.ts:1206-1256`）；renderer 侧已提升为独立 image 块的图不再在 Markdown 中重复显示（`hiddenImageSources` → `MarkdownRenderer` 的 `postTransformNodes`，消息渲染器笔记 §3）。
 - **MCP App**：见 §7。
 - 工作区文件 HTML 预览 iframe：`WorkspacePreviewPane.vue:189-195` 同样 `sandbox="allow-scripts allow-same-origin"`，经 `workspace-preview://` 协议由主进程流式供档（协议响应带 `X-Content-Type-Options: nosniff`，`protocols.ts:271-277`）。
 - 视频/音频/Canvas/WebGL/notebook：本次未找到（grep `notebook|Notebook` 主进程无命中，renderer 仅图标名；canvas 仅用于 CUA/浏览器 PiP 帧缓冲与图片压缩，非生成式画布；accumulator 只处理 text/reasoning/plan/tool_call/image_data/usage/stop/error 事件）。
@@ -155,11 +156,14 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 ### 7.2 Agent 代码执行（本机进程）
 
-- **exec 工具**：`agentBashHandler.ts` 经 `spawn(shell)` 在**主进程本机**执行（`runDetachedShellProcess`/`runManagedShellProcess`），默认超时 120s、kill 宽限 5s（`:31-33`），目录限定 `allowedDirectories`（工作区根 + skill 根 + 会话目录 + temp + 用户批准路径，`agentToolManager.ts:1323-1377`），cwd 越界拒绝（`agentBashHandler.ts:233-250`）。
-- **权限**：`CommandPermissionService` 分级（low/medium/high/critical）审批，未批准抛 `CommandPermissionRequiredError` 转为 UI 审批请求（`agentBashHandler.ts:121-138`）；文件读写走 `FilePermissionService`（read/write/all，`agentToolManager.ts:885-889`）。
-- **后台会话**：`backgroundExecSessionManager` 支持 background/yield 与 `process` 工具（list/poll/log/write/kill/clear/remove，`agentToolManager.ts:891-986`），输出超 10k 字符落会话目录 log 文件（`agentBashHandler.ts:33, 487-511`）。
-- **命令改写**：RTK（`rtkRuntimeService`）对命令做受限改写，失败自动回退原文（`agentBashHandler.ts:604-637`）。
+- **exec 工具**：`agentBashHandler.ts` 经 `spawn(shell)` 在**主进程本机**执行（`runDetachedShellProcess`/`runManagedShellProcess`），默认超时 120s、kill 宽限 5s（`:33-36`），目录限定 `allowedDirectories`（工作区根 + skill 根 + 会话目录 + temp + 用户批准路径，`agentToolManager.ts:1137-1147`），cwd 越界拒绝（`agentBashHandler.ts:293-310`）。
+- **命令 shell 可配置（#2109）**：执行 shell 从 `getUserShell()` 改为 `ResolvedCommandShell`（`src/shared/commandShell.ts`：posix / cmd / windows-powershell / git-bash 四种 profile，含 dialect 与 pathStyle），`spawn(shell, [...args, shellCommand])` 按 dialect 拼命令（`agentBashHandler.ts:409-416`）；RTK 改写只在 posix dialect 启用（`:713-724`）；后台 `backgroundExecSessionManager` 同样携带 commandShell。命令审批请求携带 `shellProfile`（Agent 工具笔记 §3）。
+- **权限**：`CommandPermissionService` 分级（low/medium/high/critical）审批，白名单与破坏性/网络模式按 shell dialect 分别匹配，未批准抛 `CommandPermissionRequiredError` 转为 UI 审批请求（`agentBashHandler.ts:143-186`）；命令类审批通过后返回 `oneShotGrantId` 一次性授权（可撤销）。文件读写走 `FilePermissionService`（read/write/all，`agentToolManager.ts:885-889`）。
+- **输出预览与落盘**：执行结果按 `outputPreviewChars`（默认 12,000 字符）截取内联预览，超过 `offloadThresholdChars`（默认 10,000）的完整输出落会话目录 log 文件（`agentBashHandler.ts:348-355`、`:409-413`）；`Agent` 配置的 `commandOutputInlineChars`/`toolOutputInlineChars` 可调节内联上限（Agent 角色笔记 §1）。
+- **后台会话**：`backgroundExecSessionManager` 支持 background/yield 与 `process` 工具（list/poll/log/write/kill/clear/remove，`agentToolManager.ts:891-986`），输出超限落会话目录 log 文件（`agentBashHandler.ts:33, 487-511`）。
+- **命令改写**：RTK（`rtkRuntimeService`）对 posix 命令做受限改写，失败自动回退原文（`agentBashHandler.ts:709-730`）。
 - **执行结果反馈**：工具输出作为 `tool_call.response` 存入块并展示（§5），错误/权限拒绝分别以 `tool_call_error` 与 `action_type=tool_call_permission` 表达。
+- **二进制读取放宽（#2110）**：`binaryReadGuard.ts:27-36` 的 `shouldRejectAgentBinaryRead` 只拒绝 zip/audio/video 等固定二进制 MIME，`application/octet-stream` 不再做文件内容探测即可读取（文本型 octet-stream 文件允许）。
 
 ### 7.3 Artifact 渲染器能力
 
@@ -215,6 +219,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - HTML Artifact `allow-same-origin` 的实际隔离强度、`deepcdn://` 在打包环境（asar.unpacked）的资源定位未运行验证。
 - 压缩（compaction）对 `<antArtifact>` 标签的保留策略未验证。
 - 深链净化规则（`deeplink/index.ts:666-693`）只覆盖深链入口，消息编辑等其他入口的净化未核实。
+- Windows 命令 shell（#2109）在各 dialect 下的实际执行差异、输出 offload 阈值行为、`imgcache://` 引用在 MCP 工具参数中的端到端解析均未运行验证。
 
 ## 12. 关键源码索引
 
@@ -224,7 +229,9 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - 渲染投影：`src/renderer/src/components/artifacts/ArtifactPreview.vue`、`ArtifactBlock.vue`、`src/renderer/src/components/sidepanel/WorkspacePanel.vue:273-301`、`WorkspaceViewer.vue`、`src/renderer/src/components/sidepanel/composables/useWorkspaceViewerModel.ts:44-59`
 - Artifact 运行环境：`HTMLArtifact.vue:4-11`、`ReactArtifact.vue` + `ReactTemplate.ts:1-46`、`src/main/app/protocols.ts:154-205`（deepcdn）、`CodeArtifact.vue:70-74`、`WorkspaceCodePane.vue:37-39`
 - MCP App：`src/main/mcp/apps/sandboxProtocol.ts:57-177`（代理页）、`:25-43`（CSP）、`src/main/mcp/apps/appHost.ts:218-286`（prepareView）、`src/main/mcp/apps/sandboxRegistry.ts:11-15`（限额/TTL）、`src/main/mcp/resultProjection.ts:137-156`（app 描述符）、`src/renderer/src/components/mcp/McpAppView.vue:229-351`（桥）
-- 执行与权限：`src/main/tool/agentTools/agentBashHandler.ts:99-213`、`src/main/tool/agentTools/agentToolManager.ts:704-842`（工具定义）、`:1323-1377`（目录白名单）、`src/main/tool/permission/commandPermissionService.ts`、`agentImageGenerationTool.ts`
+- 执行与权限：`src/main/tool/agentTools/agentBashHandler.ts:124-186`（executeCommand）、`:293-310`（cwd）、`:409-416`（spawn）、`src/main/tool/agentTools/agentToolManager.ts:797-970`（工具定义）、`:1137-1147`（目录白名单）、`src/main/tool/permission/commandPermissionService.ts`、`agentImageGenerationTool.ts`
+- 命令 shell：`src/shared/commandShell.ts`、`src/main/agent/shared/process/commandShellPath.ts`
+- 图像持久化：`src/main/platform/imageCache.ts`、`src/main/mcp/toolManager.ts:1206-1256`
 - 持久化：`src/main/session/data/tables/deepchatAssistantBlocks.ts:80-166`、`deepchatAssistantBlocks.ts:223-271`（App 模型上下文回流）
 - 回流：`src/main/agent/deepchat/runtime/contextBuilder.ts:928-938`
 - 工具调用展示：`src/renderer/src/components/message/MessageBlockToolCall.vue:543-576`（diff）、`:482-492`（自动展开）

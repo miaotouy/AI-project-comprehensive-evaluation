@@ -4,11 +4,11 @@
 >
 > 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr）；未运行 Tauri 应用，未修改被调查仓库
 >
-> 调查范围：待查清单第二批候选（上下文分析器、宏与正则管道、快捷动作、Agent 私有资产、自由窗口、媒体工作站、资产管理器、多运行时插件、Skill 沙箱、请求检查器、VCP 监控）的入口、状态、执行与持久化主链；2026-08-12 复核补充：全量扫描剩余约 37 个未走主链的工具模块，新增八张能力卡；与现有十类笔记去重
+> 调查范围：待查清单第二批候选（上下文分析器、宏与正则管道、快捷动作、Agent 私有资产、自由窗口、媒体工作站、资产管理器、多运行时插件、Skill 沙箱、请求检查器、VCP 监控）的入口、状态、执行与持久化主链；全量扫描剩余约 37 个未走主链的工具模块，新增八张能力卡；与现有十类笔记去重
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -25,17 +25,17 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 7. **Agent 私有资产**：`agent-asset://` 协议 + `{{assets}}` 宏 + 渲染器解析链（`主链确认`）。
 8. **Skill 沙箱**：Rust 路径锁定 + 超时 + 多运行时探测，渐进式披露（`主链确认`，执行细节已由 Agent 工具笔记承接）。
 9. **VCP 监控与双向桥接（vcp-connector）**：observer 消息监控 + 分布式节点 + 工具桥（`入口确认`；节点与桥接已由 Agent 工具笔记承接）。
-10. **Recall 思绪集**：从旧 knowledge 拆分出的"上下文即时召回"领域，四检索引擎 + 双 Agent 工具实例，定位为世界书的 RAG 进阶优化版（`主链确认`，2026-08-12 复核新增）。
-11. **正则预设堆叠工作台（regex-applier）**：预设 CRUD + 多预设按顺序叠加应用 + 一键处理，补齐正则工具类"预设复用与堆叠预设"缺口（`主链确认`，复核新增）。
-12. **Git 工作台与 AI 提交信息（git-committer）**：LLM 流式生成 commit message + 多仓库并发全景操作（`主链确认`，复核新增）。
-13. **全局 Token 基础设施（token-calculator）**：Tokenizer 资产注册表 + 多模态计费，被 llm-chat 九处以上消费，聊天 token 预算的底层支撑（`主链确认`，复核新增，按机制贡献标注）。
-14. **网页蒸馏室（web-distillery）**：三层蒸馏 + Rust 反检测代理 + API 嗅探 + 站点配方 + Cookie 身份（`主链确认`，复核新增）。
-15. **窗口自动化流程语言（window-automator）**：子流程函数调用 + 变量作用域 + 条件跳转 + OCR 联动，接近小型 RPA 语言（`主链确认`，复核新增）。
-16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏 + aHash 去重 + 编辑距离字幕合并 + 一键注入全局 Chat（`主链确认`，复核新增）。
-17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`，复核新增）。
-18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`，复核新增）。
+10. **Recall 思绪集**：从旧 knowledge 拆分出的"上下文即时召回"领域，检索管线化（预设法 + 候选模块）+ 双 Agent 工具实例 + 严格占位符协议，定位为世界书的 RAG 进阶优化版（`主链确认`；原"四检索引擎"表述已过时，见能力十）。
+11. **正则预设堆叠工作台（regex-applier）**：预设 CRUD + 多预设按顺序叠加应用 + 一键处理，补齐正则工具类"预设复用与堆叠预设"缺口（`主链确认`）。
+12. **Git 工作台与 AI 提交信息（git-committer）**：LLM 流式生成 commit message + 多仓库并发全景操作（`主链确认`）。
+13. **全局 Token 基础设施（token-calculator）**：Tokenizer 资产注册表 + 多模态计费，被 llm-chat 九处以上消费，聊天 token 预算的底层支撑（`主链确认`，按机制贡献标注）。
+14. **网页蒸馏室（web-distillery）**：三层蒸馏 + Rust 反检测代理 + API 嗅探 + 站点配方 + Cookie 身份（`主链确认`）。
+15. **窗口自动化流程语言（window-automator）**：子流程函数调用 + 变量作用域 + 条件跳转 + OCR 联动，接近小型 RPA 语言（`主链确认`）。
+16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏 + aHash 去重 + 编辑距离字幕合并 + 一键注入全局 Chat（`主链确认`）。
+17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
+18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
 
-辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、st-worldbook-manager、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
+辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、st-worldbook-manager、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`，提交 `045c52bd0`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
 
 归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。
 
@@ -43,7 +43,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ## 介绍声明与候选盘点
 
-根 README（299 行）将产品定位为"一站式 AI 创作与开发工作站 + 专业级上下文工程引擎"，功能面非常宽。`docs/architecture/tools-architecture-overview.md`（2026-06-30 生成，39 个模块）与当前 `src/tools/` 实际 46 个 registry 文件基本一致，是本轮候选盘点的可靠索引。46 个工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas` 等；其余工具构成"工具枢纽"产品面。
+根 README（299 行）将产品定位为"一站式 AI 创作与开发工作站 + 专业级上下文工程引擎"，功能面非常宽。`docs/architecture/tools-architecture-overview.md`（2026-06-30 生成，39 个模块）与当前 `src/tools/` 实际 47 个 registry 文件（原 46 个基础上新增 `retrieval` 工具注册）基本一致，是本轮候选盘点的可靠索引。47 个工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas` 等；其余工具构成"工具枢纽"产品面。
 
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|
@@ -59,9 +59,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 请求检查器 | `主链确认` | llm-inspector 双层监控，内部钩子注入 fetchWithTimeout |
 | VCP 监控 | `入口确认` | vcp-connector observer 六类事件监控面板；节点/桥接已由 Agent 工具笔记承接 |
 
-| 候选（2026-08-12 复核新增） | 证据状态 | 结论 |
+| 候选（全量扫描新增） | 证据状态 | 结论 |
 |---|---|---|
-| Recall 思绪集（知识库拆分） | `主链确认` | 四引擎检索 + recall-basic/recall-admin 双 Agent 实例 + 占位符即时召回；knowledge 空壳留作传统文档 RAG |
+| Recall 思绪集（知识库拆分） | `主链确认` | 检索管线预设（algorithmic/comprehensive）+ 候选模块 + recall-basic/recall-admin 双 Agent 实例 + `【recall::...】` 严格占位符协议；knowledge 已重构为主动工具（见能力十） |
 | 正则预设堆叠（regex-applier） | `主链确认` | 预设 CRUD/导入导出 + 多预设顺序叠加 + 一键处理；Agent 方法未暴露（getMetadata TODO） |
 | Git 工作台（git-committer） | `主链确认` | AI 生成 commit message 流式链 + 多仓库并发全景 |
 | Token 计算器（token-calculator） | `主链确认` | Tokenizer 资产注册表 + 多模态计费；llm-chat 9+ 处消费，机制贡献 |
@@ -155,11 +155,11 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`MacroDefinition`（name/type/phase/handler/example），注册在 `MacroRegistry`（reactive Map）。
 
-**完整主链**：`MacroProcessor.process`（`macro-engine/MacroProcessor.ts:84`）按三阶段执行——`PRE_PROCESS`（如变量初始化）→ `SUBSTITUTE`（主体替换）→ `POST_PROCESS`（如时间格式化输出），每阶段 `getMacrosByPhase` 批量处理，未注册宏记 warning。内建宏实测 72 个：datetime 25、core 19、variables 8、functions 7、system 6、tools 3、knowledge 2、assets/cssVariables 各 1（`macro-engine/macros/*.ts` 逐文件统计）。全局/局部变量支持 `setvar/getvar/incvar/decvar` 与 `setglobalvar/getglobalvar` 族（会话变量快照语义在对话请求与上下文笔记 9.4）。
+**完整主链**：`MacroProcessor.process`（`macro-engine/MacroProcessor.ts:84`）按三阶段执行——`PRE_PROCESS`（如变量初始化）→ `SUBSTITUTE`（主体替换）→ `POST_PROCESS`（如时间格式化输出），每阶段 `getMacrosByPhase` 批量处理，未注册宏记 warning。内建宏实测 74 个：datetime 26、core 19、variables 8、functions 7、system 6、tools 3、recall 2（`{{recall}}`/`{{recall_list}}`）、knowledge 1（`{{knowledge_list}}`，旧 `{{kb}}` 宏已移除）、assets/cssVariables 各 1（`macro-engine/macros/*.ts` 逐文件统计，提交 `64d0ffccd`/`9a1768a50` 等）。全局/局部变量支持 `setvar/getvar/incvar/decvar` 与 `setglobalvar/getglobalvar` 族（会话变量快照语义在对话请求与上下文笔记 9.4）。
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
-**独特性判断**：README"60+"宣称实测为 72 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
+**独特性判断**：README"60+"宣称实测为 74 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
 
 **证据强度**：逐文件正则统计宏名（72 个）+ 管道代码为静态事实；未运行宏展开验证。
 
@@ -213,23 +213,23 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：ARCHITECTURE + Agent 工具笔记为静态事实；六类事件的真实渲染与断线重连未运行验证。
 
-### 能力十：Recall 思绪集（世界书的 RAG 进阶版）— `主链确认`（2026-08-12 复核新增）
+### 能力十：Recall 思绪集（世界书的 RAG 进阶版）— `主链确认`
 
-**用户目标**：把旧 knowledge 拆分出的"语义条目召回"做成上下文即时召回层——比世界书（手动/关键词规则）更强的语义即时检索，同时把传统文档库 RAG 位置留给 knowledge 空壳。项目定位：recall 被专门用于上下文即时召回，定位更类似世界书的 RAG 进阶优化版；原 knowledge 留作应对传统 rag 类型的库检索。
+**用户目标**：把旧 knowledge 拆分出的"语义条目召回"做成上下文即时召回层——比世界书（手动/关键词规则）更强的语义即时检索；传统文档库 RAG 的位置由重构后的 Knowledge 主动工具承担（不再是空壳）。
 
-**入口与触发者**：工具页 `/recall`（`Recall.vue`，工作区/统计/监控/实验室/设置）；上下文管道 `knowledge-processor`（priority 450）解析 `【kb::...】`/`【knowledge::...】` 占位符与 Agent binding 后构造 `RecallRetrievalRequest` 调用 `resolvePlaceholderRetrieval`；Agent 侧 `recall.registry.ts` 导出两个实例——`recall-basic`（searchEntries/upsertEntry/updateEntryContent）与 `recall-admin`（listRecallCollections/listEntriesMetadata/batchUpdateMetadata/deleteEntry，均 `agentCallable: true`）。
+**入口与触发者**：工具页 `/recall`（工作区/统计/监控/实验室/设置）；上下文管道 `recall-processor`（priority 450；原 `knowledge-processor` 已删除）解析 `【recall::...】` 占位符（严格参数协议，`recall-placeholder.ts` 校验 value 编码、数值范围与未知/重复参数；旧 `【kb::...】` 占位符只告警不执行）与 Agent `recallConfig.bindings` 后构造 `RecallRetrievalRequest` 调用 `resolvePlaceholderRetrieval`；Agent 侧 `recall.registry.ts` 导出两个实例——`recall-basic`（searchEntries/upsertEntry/updateEntryContent，searchEntries 新增 `presetId` 参数）与 `recall-admin`（listRecallCollections/listEntriesMetadata/batchUpdateMetadata/deleteEntry，均 `agentCallable: true`）。
 
-**事实对象**：`RecallCollection`（思绪集）、`RecallEntry`（key + Markdown content + 带权标签 + priority + 内容哈希 + 资产引用）、`RecallResult`（分数/匹配类型/高亮）、`RecallSearchFilters`。
+**事实对象**：`RecallCollection`（思绪集）、`RecallEntry`（key + Markdown content + 带权标签 + priority + 内容哈希 + 资产引用）、`RecallResult`（分数/匹配类型/高亮）、`RecallSearchFilters`；检索预设 `presetId: "algorithmic" | "comprehensive"`（`types/pipeline.ts`）。
 
-**完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts:36`）→ `shouldActivate` 门控（static 模式按 entryId 全量/指定加载；向量模式走 `searchWithCache`：primaryQuery=userText、secondaryQuery=aiText、limit/minScore/engineId）→ 后置过滤（占位符指定 recallName）→ `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧 `recall_search` 按 `engineId` 选引擎：`keyword`（Jieba 分词倒排 + 非线性缩放）、`vector`（余弦 + Tag-First 标签池召回 + 长度归一化）、`lens`（历史向量投射 + 标签亲和力 + 空间反转的扩散式检索）、`blender`（字面/语义/标签引力融合 + 残差挖掘 + 动态权重）；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/引擎/模型七要素。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量文件 → 标签向量经 `recall_sync_tag_vectors` 更新，HNSW 可按需重建。
+**完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`）→ 按绑定/占位符参数（when/gate-tags/entries/limit/min-score）→ 检索管线执行 → 后置过滤 → `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧旧 `recall/search/` 四引擎模块（keyword/vector/lens/blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` + `retrieval_modules.rs`）：管线按预设（`Algorithmic`/`Comprehensive`）编排候选模块（内容向量/标签向量/Lens 关联等），产出带 `source_module_id`/ArtifactKey 的可追踪检索工件；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/预设/模型等要素（提交 `d2d82c605`、`92d78971d`、`c46cc2fed`、`5403999b1`、`ad958b0fd` 等）。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量 → 标签向量同步更新，HNSW 可按需重建。
 
-**持续性**：Stage 2 前真实存储仍为旧 `appData/knowledge/`（workspace.json + bases/{id}/meta.json + entries/{id}.json + vectors/{modelHash}/ + tag_pool/），Stage 2 幂等迁移到 `appData/recall/recall.db` + `recall-vectors.db`；备份事件 `recall-backup-progress`。`knowledge-base/` 与 `knowledge.rs` 是文档资料域空壳（不导入 Recall 类型、不注册 Rust command），未来 document/chunk/BM25/出处回源在该边界内独立实现（`ARCHITECTURE.md:18-20`）。
+**持续性**：存储已切换为 **SQLite 真源**——`SqliteRecallRepository`（`src-tauri/src/recall/storage/sqlite.rs`）落盘 `recall.db`/向量文件，旧 `appData/knowledge/` 数据经幂等迁移（`migration_baseline.rs`、旧备份格式转换）；备份事件 `recall-backup-progress`。`knowledge-base/` 与 `knowledge.rs` **不再是空壳**：Knowledge 重构为主动工具（`knowledge-base.registry.ts` 的 `knowledgeRegistry` 提供 `listLibraries`/`search`（strategy: auto/keyword/semantic/hybrid、topK 1–50、filters、includeAdjacent、maxChars）等 `agentCallable` 方法，含资料库访问授权收敛与聊天显式资料引用（`KnowledgeReferenceControl` chips）、研究任务编排与 FTS/标签管理，提交 `dc8161aac`/`ae7c82d90`/`01c5e6ba3` 等）。
 
-**独特性判断**：与 `worldbook-processor`（priority 300，基于 st-worldbook-manager 的手动/关键词匹配）同为"上下文即时注入"族，但 recall 提供语义向量召回 + 四引擎可换 + 双 Agent 实例，是知识注入层的 RAG 进阶面；四引擎中的 lens/blender 扩散式融合检索在样本中属少见实现。
+**独特性判断**：与 `worldbook-processor`（priority 300，基于 st-worldbook-manager 的手动/关键词匹配）同为"上下文即时注入"族，但 recall 提供语义向量召回 + 可插拔检索管线（预设/模块）+ 双 Agent 实例，是知识注入层的 RAG 进阶面；检索管线的模块化工件追踪（ArtifactKey/source_module_id）在样本中较完整。
 
-**证据强度**：ARCHITECTURE.md 全文 + `placeholderRetrieval.ts` + `knowledge-processor.ts` + `recall.registry.ts` 静态事实；未运行验证向量召回质量与迁移。
+**证据强度**：ARCHITECTURE.md 全文 + `recall-processor.ts` + `recall.registry.ts` + `retrieval_pipeline.rs` 静态事实；未运行验证向量召回质量、SQLite 迁移与 E2E 真实向量测试（`recall-e2e` preset 已建测试框架）。
 
-### 能力十一：正则预设堆叠工作台（regex-applier）— `主链确认`（复核新增）
+### 能力十一：正则预设堆叠工作台（regex-applier）— `主链确认`
 
 **用户目标**：补齐正则工具类"预设复用和堆叠预设"最后一截——把多条正则规则保存为可命名、可复制、可导入导出的预设，并在工作台按顺序叠加多个预设一次性应用（文本或批量文件），普通正则工具只有单条规则或固定规则集，无法组合复用。
 
@@ -245,7 +245,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：`core/presets.ts`、`stores/store.ts`、`core/engine.ts`（processText 多预设循环）、`RegexApplier.vue`（selectedPresetIds/拖拽/一键）静态事实；UI 行为未运行验证。
 
-### 能力十二：Git 工作台与 AI 提交信息（git-committer）— `主链确认`（复核新增）
+### 能力十二：Git 工作台与 AI 提交信息（git-committer）— `主链确认`
 
 **用户目标**：把"仓库状态浏览 + 暂存/取消 + diff 审查 + 提交/推送"做成多仓库并发全景工作台，并让 LLM 根据实际 diff 流式生成 commit message——名字平淡，核心是 AI 提交助手。
 
@@ -259,9 +259,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **独特性判断**：git-analyzer（git2-rs 原生分析 + `getFormattedAnalysis` Agent 报告，formatters 统一 Agent 与 UI 输出）与其互补；"AI 生成提交信息 + 多仓库并发操作台"组合在样本桌面 AI 客户端中少见，AGENTS.md 也要求 AI 生成的提交遵循 Conventional Commits + 结构化中文描述，工具与仓库规范一致。
 
-**证据强度**：`useGitCommitterRunner.ts` 全文 + registry 静态事实；未运行验证 LLM 输出质量与多仓库并发。
+**证据强度**：`useGitCommitterRunner.ts` 全文 + registry 静态事实；未运行验证 LLM 输出质量与多仓库并发。仓库管理已重构，新增全景看板筛选（`PanoramaDashboard.vue` 按状态/标签等过滤仓库卡片，提交 `bef8660a8`），主链结论不受影响。
 
-### 能力十三：全局 Token 基础设施（token-calculator）— `主链确认`（复核新增，机制贡献）
+### 能力十三：全局 Token 基础设施（token-calculator）— `主链确认`（机制贡献）
 
 **用户目标**：聊天上下文预算的底层支撑——按模型精确计 token（含多模态计费），被 llm-chat 的 token-limiter、上下文压缩、输入预览、响应处理九处以上消费；独立工具页只是它的调试面。
 
@@ -275,9 +275,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **独特性判断**：多数项目只有简单估算或单 tokenizer；这里做成"Tokenizer 资产注册表 + 校准 + 多模态计费 + Worker 隔离"的全局基础设施，直接影响聊天上下文预算决策。按调查指南，工程机制单独标注，不与用户可见能力混计。
 
-**证据强度**：registry + `tokenizerRegistryStore.ts`（含"即使没有任何 UI 进入工具页，只要有其他模块消费也启动"注释，`:475`）+ 9+ 消费点静态事实；真实计费精度未运行验证。
+**证据强度**：registry + `tokenizerRegistryStore.ts`（含"即使没有任何 UI 进入工具页，只要有其他模块消费也启动"注释，`:475`）+ 9+ 消费点静态事实；真实计费精度未运行验证。内置 Tokenizer 已资产化（`data/builtin-tokenizer-assets-manifest.ts` + `builtin-tokenizer-index.ts`），移除动态 JS loader，Worker 计算与注册表持久化链路重构（提交 `2b2252541`），内置分词资产随包分发、不再依赖运行时拉取脚本。
 
-### 能力十四：网页蒸馏室（web-distillery）— `主链确认`（复核新增）
+### 能力十四：网页蒸馏室（web-distillery）— `主链确认`
 
 **用户目标**：把任意网页"蒸馏"成干净内容（Agent 与人工两个场景），突破 Tauri WebView 同源限制并绕过常见反爬检测——名字是蒸馏室，实际是带反检测代理的网页读取手。
 
@@ -295,7 +295,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：ARCHITECTURE.md 全文 + `core/*` + Rust `proxy.rs` 静态事实；未运行验证真实反爬站点与 SPA 渲染。
 
-### 能力十五：窗口自动化流程语言（window-automator）— `主链确认`（复核新增）
+### 能力十五：窗口自动化流程语言（window-automator）— `主链确认`
 
 **用户目标**：可视化编排"点击/输入/取色/截图/OCR 判断"的桌面自动化流程，并支持子流程函数调用、变量作用域与条件跳转——实际是一个迷你自动化语言。
 
@@ -309,7 +309,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：`types.ts`/`useFlowExecutor.ts`/`stepExecutors.ts`/`flowTransforms.ts`/store + 测试静态事实；未运行验证真实窗口操作。
 
-### 能力十六：实时字幕 OCR（realtime-subtitle-ocr）— `主链确认`（复核新增）
+### 能力十六：实时字幕 OCR（realtime-subtitle-ocr）— `主链确认`
 
 **用户目标**：把屏幕某区域（如视频字幕区）高频采样识别成带时间轴的字幕，可实时编辑、导出 SRT、一键发送到全局 Chat——"屏幕监控 → OCR → 聊天管道"完整链路。
 
@@ -325,7 +325,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：ARCHITECTURE.md 全文 + `useScreenMonitor.ts` 静态事实；未运行验证实际采样延迟与识别质量。
 
-### 能力十七：长文本分片翻译（translator）— `主链确认`（复核新增）
+### 能力十七：长文本分片翻译（translator）— `主链确认`
 
 **用户目标**：把超长文本（上限 100 万字符）拆片并发翻译，并让后续分片继承上一分片术语/人称/语气/风格，解决长文翻译的上下文一致性；渠道预设对比选优。
 
@@ -341,7 +341,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：`useLongTextTranslator.ts` 全文 + store 静态事实；未运行验证长文一致性。
 
-### 能力十八：内容查重器（content-deduplicator）— `主链确认`（辅助，复核新增）
+### 能力十八：内容查重器（content-deduplicator）— `主链确认`（辅助）
 
 **用户目标**：扫描目录找出重复/近似重复文件，按可配置规范化规则识别仅空白/标点/大小写差异的"规范化副本"，回收站删除。
 
@@ -353,7 +353,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：`content_deduplicator.rs` 头部 + 探索代理交叉验证；未运行。
 
-### 能力十九：弹幕播放器与外部播放器覆盖层（danmaku-player）— `主链确认`（复核新增）
+### 能力十九：弹幕播放器与外部播放器覆盖层（danmaku-player）— `主链确认`
 
 **用户目标**：两条使用路径——内置播放器加载本地视频 + ASS/B 站 JSON/XML 弹幕 + 外挂字幕在同一窗口渲染；外部播放器覆盖层把透明弹幕窗口同步到 MPC-BE/MPC-HC/PotPlayer/mpv/VLC 客户区正上方，在第三方播放器上叠显弹幕。名字平淡，实为跨播放器弹幕基础设施。
 
@@ -393,7 +393,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 上下文压缩 | 同上附录 A |
 | 会话变量/快照 | 同上 9.4 + 会话与消息管理笔记 1.3 |
 | 世界书、转写注入 | 同上 9.2/9.6（世界书注入本体为 worldbook-processor 规则匹配，与 recall 语义召回不同层） |
-| 知识库占位符注入点 | 同上 9.6 + 上下文编译边界研究（`knowledge-processor` 调用 Recall 的 `resolvePlaceholderRetrieval`；注入点归上下文类目，Recall 领域本体由本笔记能力十承接） |
+| 知识库占位符注入点 | 同上 9.6 + 上下文编译边界研究（`knowledge-processor` 已删除，由 `recall-processor` 解析 `【recall::...】` 占位符调用 `resolvePlaceholderRetrieval`；注入点归上下文类目，Recall 领域本体由本笔记能力十承接） |
 | 工具调用基础设施（含插件注册为 ToolRegistry、VCP 协议、异步任务） | [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md) |
 | Skill 工具执行细节（路径锁定/超时） | 同上第 4/7/9 节 |
 | VCP 分布式节点与工具桥 | 同上第 7/9 节 |
@@ -430,7 +430,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - 全部能力均未运行验证：Tauri 分离窗口的视觉/拖拽行为、媒体生成真实 API 调用与内嵌元数据、llm-inspector 代理转发与 SSE 解析、快捷动作自动发送时序、宏展开的运行时输出、Skill 脚本多运行时探测（Windows 下 bash/sh 断层见 Agent 工具笔记）、Recall 向量召回质量与数据迁移、regex-applier 多预设堆叠的真实 UI 行为、git-committer AI 提交信息输出质量、token-calculator 计费精度、web-distillery 真实反爬站点与 SPA 渲染、window-automator 真实窗口操作、realtime-subtitle-ocr 采样延迟、translator 长文一致性、danmaku-player 真实播放器窗口跟随与 PotPlayer 实验状态读取、JASSUB 渲染效果。
 - 资产管理器 10 万+ 资产索引性能上限未实测；`rebuild_hash_index` 未运行。
 - VCP 监控六类事件的真实渲染、断线重连、双 WebSocket 状态机未运行验证。
-- 宏数量统计基于静态正则（`name: "..."` 匹配），可能存在个别未注册或条件注册的宏未计入；72 个是当前快照的注册面统计。
+- 宏数量统计基于静态正则（`name: "..."` 匹配），可能存在个别未注册或条件注册的宏未计入；74 个是当前快照的注册面统计（knowledge 1 + recall 2）。
 - content-deduplicator 的 `fuzzy` 模糊匹配与 `minSimilarity` 已确认未实现（dead code），但自定义忽略模式是否残留 UI 入口未逐 UI 验证。
 - regex-applier 的 Agent 方法（`getFormattedTextResult`/`getFormattedFileResult`）已实现但 `getMetadata` 未暴露，属接口可用、注册未通的半成品面。
 
@@ -440,13 +440,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - `src/composables/useAssetManager.ts`（全局单例）、`src-tauri/src/commands/asset_manager.rs:870`（import_asset_from_bytes 去重链）
 - `src/tools/llm-inspector/ARCHITECTURE.md`、`core/hookRegistry.ts`、`src/llm-apis/common.ts:697`（fetchWithTimeout 埋点）
 - `src/tools/llm-chat/stores/messageInputStore.ts:328`（handleQuickAction）、`services/quickActionImportService.ts`、`composables/storage/useQuickActionStorage.ts:40`
-- `src/tools/llm-chat/macro-engine/MacroProcessor.ts:84`（三阶段）、`MacroRegistry.ts`、`macros/*.ts`（72 宏）
-- `src/tools/llm-chat/core/context-processors/regex-processor.ts:100`（三层合并 + 角色/深度过滤）、`worldbook-processor.ts`（priority 300）、`knowledge-processor.ts:53,159`（占位符 → RecallRetrievalRequest）
+- `src/tools/llm-chat/macro-engine/MacroProcessor.ts:84`（三阶段）、`MacroRegistry.ts`、`macros/*.ts`（74 宏）
+- `src/tools/llm-chat/core/context-processors/regex-processor.ts:100`（三层合并 + 角色/深度过滤）、`worldbook-processor.ts`（priority 300）、`recall-processor.ts`（priority 450，占位符 → RecallRetrievalRequest；替换原 knowledge-processor）
 - `src/composables/useDetachable.ts`、`useDetachedManager.ts`、`src/views/DetachedWindowContainer.vue`、`docs/guide/detached-window-system.md`
 - `src/tools/agent-manager/utils/agentAssetUtils.ts`、`components/assets/AgentAssetsManager.vue`、`src/tools/llm-chat/macro-engine/macros/assets.ts`
 - `src/tools/skill-manager/ARCHITECTURE.md`、`services/SkillManagerProxy.ts`、`src-tauri/src/commands/skill_manager.rs`
 - `src/tools/vcp-connector/ARCHITECTURE.md`、`stores/vcpConnectorStore.ts`
-- `src/tools/recall/ARCHITECTURE.md`、`logic/placeholderRetrieval.ts:36`（占位符即时召回）、`services/api.ts`（searchWithCache/resolvePlaceholderRetrieval）、`recall.registry.ts`（recall-basic/recall-admin 双实例）、`src-tauri/src/recall/`（四引擎 search/）
+- `src/tools/recall/ARCHITECTURE.md`、`logic/placeholderRetrieval.ts:36`（占位符即时召回）、`services/api.ts`（searchWithCache/resolvePlaceholderRetrieval）、`recall.registry.ts`（recall-basic/recall-admin 双实例）、`src-tauri/src/recall/`（retrieval_pipeline.rs/retrieval_modules.rs 检索管线，替换旧四引擎 search/）、`src-tauri/src/recall/storage/sqlite.rs`（SqliteRecallRepository）
 - `src/tools/regex-applier/core/presets.ts`、`stores/store.ts`（预设 CRUD/导入去重）、`core/engine.ts:209,279`（processText/processFiles 多预设循环）、`RegexApplier.vue`（selectedPresetIds/拖拽排序/一键处理）、`regex-applier.registry.ts:268`（Agent 面 TODO）
 - `src/tools/git-committer/composables/useGitCommitterRunner.ts:385`（generateCommitMessage 流式链）、`src/tools/git-analyzer/`（git2-rs + getFormattedAnalysis）
 - `src/tools/token-calculator/token-calculator.registry.ts:341`（tokenCalculatorService）、`stores/tokenizerRegistryStore.ts:475`（无 UI 也启动）、`core/tokenCalculatorEngine.ts`（多模态计费）

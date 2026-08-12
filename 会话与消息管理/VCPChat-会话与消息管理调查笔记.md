@@ -2,21 +2,15 @@
 
 > 调查对象：`E:\works\git\VCPChat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，本刷新核对 chatHandlers.js 行号与新增 VCP-CDS 子系统
+> 调查方式：原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移；基于当前 HEAD 的静态源码核对 chatHandlers.js 行号，并补充新增的 VCP-CDS 子系统
 >
 > 调查范围：会话与话题（Topic）的数据模型、消息字段、持久化格式、生命周期（创建/切换/选择）、列表索引与检索、未读计数、并发写入与一致性；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
-
-## 本次刷新要点（3f14e93 → b6ffa22）
-
-- **`history.json` 仍是消息事实源，新增 VCP-CDS 影子镜像**：当前 HEAD 引入 Rust 聊天数据服务（VCP-CDS，默认开启 `ChatDataServiceEnabled: true`），以旁路方式摄取 `history.json` 建立 SQLite 完整镜像 + Tantivy 全文搜索派生索引（`modules/services/chatDataService/*`、`rust_chat_data_service/src/*`），供 DeepMemo 记忆检索与 VCPMobileSync 中央同步消费；主聊天读写链不变（详见新增第 8 节）。主进程暴露 `chat-data-service-status`/`chat-data-service-reconcile` IPC（`main.js:1050-1065`）。
-- **行号平移**：`chatHandlers.js` 头部新增 `buildRequestContext`/`omitUnsetOptionalModelParams` 等函数，整体 +44 行——`search-topics-by-content` 现 `:408-451`、`saveTopicOrder` 现 `:345`、`saveGroupTopicOrder` 现 `:378`、未读计数后端 `shouldActivateCount` 现 `:1326`、`get-unread-topic-counts` 现 `:1366`、`set-topic-unread` 现 `:1470`、默认话题 id `topic_` 现 `:555`、`topics[]` 兼容归一化现 `:538-543`。
-- 其余数据语义结论（裸数组覆盖写、未读判定狭窄、搜索盲点、群聊无锁、默认话题 id 不一致）经核对**全部维持**；`topicListManager.js`、`chatManager.js`、`Groupmodules/groupchat.js`、`Flowlockmodules/flowlock.js` 均未改动。
 
 ## 结论摘要
 
@@ -26,7 +20,7 @@ VCPChat 以 **Agent 或 AgentGroup（群组）为一级会话主体、Topic（�
 - 打开 Topic 的优先级为 **Flowlock 锁定 Topic > localStorage 记忆 Topic > 最新创建的 Topic（数组首位）**（3.1）。
 - 默认话题存在两条创建路径，产生的 id 格式不一致（`"default"` vs `"topic_<timestamp>"`），是历史遗留的不一致点（3.3）。
 - `history.json` 是**裸数组 + 整份覆盖写**，没有 schema 版本、增量写入或原子写保护（2.2）。
-- 未读自动判定只在"整个话题历史恰好只有一条 assistant 消息"时触发，多轮对话不会自动标未读（5.3）。
+- 自动未读只在"话题历史尚无用户消息"时按 assistant 消息数计数，用户参与后归零；持久化标记带 `unreadSource` 来源区分，手动标记保留、Agent/TopicSponsor 旧标记在用户参与后清除（5.3）。
 - 话题内容搜索只匹配字符串型 `content`，多模态数组内容匹配不到（5.2）。
 - 群聊历史写盘在多次调用之间**没有文件锁或版本号校验**，理论上存在互相覆盖写丢消息的风险（6.1）。
 
@@ -38,7 +32,7 @@ Agent/群组配置（topics[] 数组，仅元数据）
   -> 消息事实源：UserData/<agentId|groupId>/topics/<topicId>/history.json（裸 JSON 数组）
   -> 读取：chatManager.js loadChatHistory / 各 IPC handler 逐文件读
   -> 写入：chatHandlers.js、groupchat.js 各阶段 fs.writeJson 整份覆盖；渲染进程另有 1 秒防抖
-  -> 索引：topic 列表（前端过滤 + searchTopicsByContent 内容检索）、未读计数（自动 + 手动字段）
+  -> 索引：topic 列表（前端过滤 + searchTopicsByContent 内容检索 + "未读话题"置顶）、未读计数（自动计数 + unreadSource 持久化标记）
   -> 现场恢复：settings.json 的 lastOpenItemId/lastOpenTopicId + localStorage lastActiveTopic_*
 ```
 
@@ -122,31 +116,33 @@ Agent 侧存在**两条**创建默认话题的路径——`modules/ipc/agentHand
 
 ### 5.1 话题列表数据来源与排序落地
 
-`loadTopicList()`（`modules/topicListManager.js:379-484`）读取 `#topicSearchInput` 的值作为 `searchTerm`（`:413-414`）。
+`loadTopicList()`（`modules/topicListManager.js:498-616`）读取 `#topicSearchInput` 的值经 `parseTopicSearchQuery` 解析为普通搜索词或"未读话题"置顶约定词（`:533` 起）。
 
-拖放排序结束时 `onEnd` 拿到新顺序的 `topicId` 数组后调用 `saveTopicOrder`（agent）或 `saveGroupTopicOrder`（group）（`modules/topicListManager.js:544-552`），对应 IPC 在 `modules/ipc/chatHandlers.js:345-377`（agent，用 `agentConfigManager.updateAgentConfig` 重排 `topics` 数组）和同文件 `:378-407`（group，直接读写 `config.json`）。排序失败会 toast 报错并 `loadTopicList()` 回滚展示（`modules/topicListManager.js:556-565`）。拖拽交互本身（SortableJS 初始化、与划词监听的冲突处理）见 Chat UI 笔记。
+拖放排序结束时 `onEnd`（`topicListManager.js:660` 起）拿到新顺序的 `topicId` 数组后调用 `saveTopicOrder`（agent，`:674`）或 `saveGroupTopicOrder`（group，`:676`），对应 IPC 在 `modules/ipc/chatHandlers.js:345-377`（agent，用 `agentConfigManager.updateAgentConfig` 重排 `topics` 数组）和同文件 `:378-407`（group，直接读写 `config.json`）。排序失败会 toast 报错并 `loadTopicList()` 回滚展示（`topicListManager.js:680-693`）。拖拽交互本身（SortableJS 初始化、与划词监听的冲突处理）见 Chat UI 笔记。
 
 ### 5.2 搜索：前端过滤 + 后端内容检索的并集
 
 搜索是**前端过滤 + 后端内容检索的并集**：
 
-- 前端过滤：对 `topic.name`（经 `normalizeTopicTitle` 归一化）和格式化后的创建时间字符串做 `includes` 匹配（`modules/topicListManager.js:446-457`）；
-- 后端内容检索：调 `electronAPI.searchTopicsByContent(itemId, itemType, searchTerm)`（`:461`），实现在 `modules/ipc/chatHandlers.js:408-451`，会遍历该 item 所有 topic 的 `history.json`，对每条消息 `message.content` 做 `toLowerCase().includes()`（`:435`）。**注意**：这里只处理 `typeof message.content === 'string'` 的情况（`:435`），如果消息 content 是多模态数组（`[{type:'text',text:...}]`），这条内容检索会直接跳过、匹配不到——这是一个实际的搜索盲点。当前 HEAD 的 VCP-CDS（Tantivy 全文索引，见 6.4 节）**没有**接入该搜索路径。
-- 两路结果取并集（`modules/topicListManager.js:471-474`）。
+- 前端过滤：对 `topic.name`（经 `normalizeTopicTitle` 归一化）和格式化后的创建时间字符串做 `includes` 匹配（`modules/topicListManager.js:560-575`）；
+- 后端内容检索：调 `electronAPI.searchTopicsByContent(itemId, itemType, searchTerm)`（`:577`），实现在 `modules/ipc/chatHandlers.js:408-451`，会遍历该 item 所有 topic 的 `history.json`，对每条消息 `message.content` 做 `toLowerCase().includes()`（`:435`）。**注意**：这里只处理 `typeof message.content === 'string'` 的情况（`:435`），如果消息 content 是多模态数组（`[{type:'text',text:...}]`），这条内容检索会直接跳过、匹配不到——这是一个实际的搜索盲点。当前 HEAD 的 VCP-CDS（Tantivy 全文索引，见 6.4 节）**没有**接入该搜索路径。
+- 两路结果取并集（`modules/topicListManager.js:592-595`）。
 
 搜索入口、结果列表与"搜索状态下不启用拖拽排序"的界面行为见 Chat UI 笔记。
 
-### 5.3 未读标记：手动 vs 自动
+### 5.3 未读标记：自动计数 + 带来源的持久化标记
 
-两套机制并存，且逻辑在前端和后端各自重复实现了一份（`topicListManager.js:53-70` 与 `chatHandlers.js:1326-1343` 几乎逐行相同）：
+两套机制并存，逻辑在前端和后端各自重复实现了一份（`topicListManager.js:47-106` 与 `chatHandlers.js:1325-1368` 逐行相同）：
 
-- **自动判定**（"最后一条为 AI 回复"）：`shouldActivateCount(history)` —— 过滤掉 `role==='system'` 后，若非系统消息**恰好只有 1 条**且该条 `role==='assistant'`，则判定需要计数，返回未读数 1（`topicListManager.js:53-70`）。也就是说，这套自动逻辑只覆盖"用户发了消息、AI 回了、用户还没回"的**单轮**场景；一旦历史累积到 2 轮以上，这个自动计数条件就永远不会为真了（`nonSystemMessages.length === 1` 是硬编号 1，不是"最后一条是 assistant"这种更通用的判断）。这是设计上比较狭窄的一点：所谓"最后一条为 AI 回复"的自动未读提示，实际代码条件是"整个 topic 历史里恰好只有一条非系统消息，且它是 assistant"，多轮对话完全不会触发自动未读。
-- **手动标记**：右键菜单"标记为未读/已读"调用 `electronAPI.setTopicUnread(itemId, topicId, !isUnread)`（`topicListManager.js:713-716`），写入 `topic.unread` 字段（`chatHandlers.js:1470-1515`）。
-- 汇总函数 `calculateTopicUnreadCount(topic, history)`（`topicListManager.js:93-106`）：优先看自动判定结果（>0 就返回数字），否则看 `topic.unread===true` 就返回 `-1`（约定 `-1` 表示"只显示小红点、不显示数字"），否则返回 0（不显示）。UI 侧据此给 `.message-count` 加 `has-unread`（数字）或 `unread-marker-only`（小点）class（`:179-191`）。
+- **自动计数**（"Agent 主动发起、尚无用户参与的话题"）：`countUnreadMessages(history)` 过滤掉 `role==='system'` 与 `isThinking===true` 的消息后，**只要历史中出现任何 `role==='user'` 消息就返回 0**；否则返回全部 assistant 消息条数（`topicListManager.js:91-102`、`chatHandlers.js:1325-1340`）。即自动未读现在覆盖"Agent 在无人回应的新话题里连续说了多条"的整个阶段，用户一旦发言即归零；旧的"非系统消息恰好只有 1 条且为 assistant"硬编号条件（`shouldActivateCount`）已被删除。注意历史消息的 `isThinking` 在落盘前被置 false（6.3），故历史里通常只有流式瞬时占位才带 `isThinking:true`。
+- **持久化标记与来源**：右键菜单"标记为未读/已读"调用 `electronAPI.setTopicUnread(itemId, topicId, !isUnread)`（`topicListManager.js:841-855`），写入 `topic.unread` 字段；标记未读时同时写 `topic.unreadSource = 'manual'`，清除时删除该字段（`chatHandlers.js:1501-1526`）。Agent/TopicSponsor 等插件侧写入的旧标记没有 `unreadSource`，被视为"过期自动标记"：只要历史已有用户参与就失效。
+- 汇总函数 `calculateTopicUnreadCount(topic, history)`（`topicListManager.js:206-211`）：自动计数 >0 返回数字；否则 `topic.unread===true` 且（`unreadSource==='manual'` 或无用户参与）时返回 `-1`（小点）；否则 0。UI 侧据此给 `.message-count` 加 `has-unread`（数字）/`unread-marker-only`（小点）class，并维护 `.topic-unread-indicator`（"未读 N"/"未读"文本）与 `has-unread-topic` class（`ensureTopicUnreadIndicator/removeTopicUnreadIndicator`，`topicListManager.js:178-198`）。
+- **失效标记主动清理**：前端在列表渲染（`clearStalePersistentUnreadMarker`，`topicListManager.js:63-88`，`loadTopicMessageCount` `:292`）与用户发送消息（`chatManager.js:1037-1055` 调 `setTopicUnread(false)`）两条路径上清除"非 manual 且已有用户参与"的持久化未读标记。
+- **"未读话题"置顶**：搜索框完整输入"未读话题"或"unread topic"时（`parseTopicSearchQuery`，`topicListManager.js:128-142`），跳过文本搜索，由 `prioritizeUnreadTopics` 读取每个话题历史并重排：自动未读数 >0 或持久化标记有效的话题移到顶部，组内保持用户自定义顺序（`:143-175`，`loadTopicList` 内应用点 `:599`）；搜索框占位提示与 `aria-label` 同步更新（`main.html:213-216`、`topicListManager.js:513`）。
 
 ### 5.4 延迟计数：IntersectionObserver 摊平 IO
 
-每个话题列表项创建时先把 `message-count` 文本设为占位符 `'...'`（`topicListManager.js:233-235`），并 `ensureTopicCountObserver().observe(li)`（`:250-251`）。Observer 用 `rootMargin: '240px 0px', threshold: 0.01`（`:140-144`），条目滚入视口附近时才触发 `loadTopicMessageCount(li)`（`:149-205`），该函数据 `li.dataset` 读取 `itemId/itemType/topicId`，异步拉取该话题完整 `history.json` 算未读数和总消息数，**触发一次后立即 `unobserve`**（`:137`）且用 `dataset.countLoaded` 防止重复加载。这个设计的意义是：列表可能有大量话题，如果一次性给每个话题都发一次 IPC 读取历史文件会造成打开列表时的 IO 风暴，用 IntersectionObserver 把这个成本摊到"用户实际滚动到看见"的时刻。列表本身的渐进渲染策略（初始 40 条、触底批量追加 30 条、requestAnimationFrame 分帧）见 Chat UI 笔记。
+每个话题列表项创建时先把 `message-count` 文本设为占位符 `'...'`（`topicListManager.js:351`），并 `ensureTopicCountObserver().observe(li)`（`:370`）。Observer 用 `rootMargin: '240px 0px', threshold: 0.01`（`:252-253`），条目滚入视口附近时才触发 `loadTopicMessageCount(li)`（`:259-310`），该函数据 `li.dataset` 读取 `itemId/itemType/topicId`，异步拉取该话题完整 `history.json` 算未读数（并顺带清理失效持久化标记，`:292`）和总消息数，**触发一次后立即 `unobserve`**（`:247`）且用 `dataset.countLoaded` 防止重复加载。这个设计的意义是：列表可能有大量话题，如果一次性给每个话题都发一次 IPC 读取历史文件会造成打开列表时的 IO 风暴，用 IntersectionObserver 把这个成本摊到"用户实际滚动到看见"的时刻。列表本身的渐进渲染策略（初始 40 条、触底批量追加 30 条、requestAnimationFrame 分帧）见 Chat UI 笔记。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
@@ -167,7 +163,7 @@ Agent 侧存在**两条**创建默认话题的路径——`modules/ipc/agentHand
 
 assistant 消息 `isThinking` 在流式过程中临时为 true，落盘前被 `streamManager.finalizeStreamedMessage` 置为 `false`（`modules/renderer/streamManager.js:2279`），`finishReason` 同时写回（`:2278`）；群聊中断场景把已累积内容连同 `interrupted:true` 标记落盘（`Groupmodules/groupchat.js:1030-1039`）。最终化的执行语义（文本选择、防抖落盘）属于对话请求与上下文笔记 6 节。
 
-### 6.4 VCP-CDS 影子镜像：事实源不变、索引分层（新增）
+### 6.4 VCP-CDS 影子镜像：事实源不变、索引分层
 
 当前 HEAD 新增 `modules/services/chatDataService/*`（生命周期 `lifecycle.js`、客户端 `client.js`、外观 `index.js`）与 Rust 实现 `rust_chat_data_service/src/*`（`ingest.rs`/`storage.rs`/`search.rs`/`sync.rs`/`watcher.rs`），随主进程后台启动（`main.js:679-698`，`ChatDataServiceEnabled` 默认 `true`）。关键边界（据 `rust_chat_data_service/README.md` 与代码）：
 
@@ -193,7 +189,7 @@ assistant 消息 `isThinking` 在流式过程中临时为 true，落盘前被 `s
 ## 9. 设计取舍与已确认边界
 
 - **两级会话模型**（Agent/群组 → Topic）天然适合"多角色 + 长期关系"场景，但配套了 Flowlock、群聊多策略调度等重型运行时机制，比通用聊天客户端复杂得多（调度执行语义见对话请求与上下文笔记 8 节）。
-- **未读自动判定比描述的更窄**：只在"整个历史仅有一条 assistant 消息"时触发，多轮对话不会自动标未读，日常使用中这个自动判定几乎只在"刚开一个新话题、AI 回了第一句"这一瞬间生效（5.3）。
+- **未读自动判定以"用户是否参与"为边界**：历史无用户消息时按 assistant 消息数计数，用户一发言即归零；持久化标记带 `unreadSource` 来源区分（手动标记保留、Agent/TopicSponsor 旧标记在用户参与后由前端主动清除），旧版"恰有一条 assistant 消息才触发"的窄条件已删除（5.3）。
 - **话题内容搜索有盲点**：`searchTopicsByContent` 只匹配字符串型 `content`，多模态数组内容匹配不到（5.2）。
 - **`history.json` 整份覆盖写，无原子写**（临时文件+rename）保护，进程崩溃时点存在截断风险（未实际验证过是否发生过，仅代码层面推断）（2.2）。
 - **群聊历史写盘缺乏并发保护**：多次 `handleGroupChatMessage`/`handleInviteAgentToSpeak` 调用之间没有锁，理论上存在互相覆盖写丢消息的风险（6.1）。
@@ -212,8 +208,8 @@ assistant 消息 `isThinking` 在流式过程中临时为 true，落盘前被 `s
 ## 11. 关键源码索引
 
 - `modules/chatManager.js`：`selectItem` `:352-481`，`selectTopic` `:483-537`，`_saveLastOpenState` `:275-292`，附件组装 `:992-1002`
-- `modules/topicListManager.js`：`shouldActivateCount/calculateTopicUnreadCount` `:53-106`，`ensureTopicCountObserver/loadTopicMessageCount` `:129-205`，`loadTopicList` `:379-484`，排序 `:544-552`
-- `modules/ipc/chatHandlers.js`：`search-topics-by-content` `:408-451`，`saveTopicOrder`/`saveGroupTopicOrder` `:345-407`，`topics[]` 兼容归一化 `:538-543`，未读计数后端实现 `:1326-1365`，`setTopicUnread` `:1470-1515`，默认话题 id `:555`
+- `modules/topicListManager.js`：`hasUserParticipation/countUnreadMessages/hasValidPersistentUnreadMarker` `:47-106`，"未读话题"置顶 `:128-175`，`ensureTopicCountObserver/loadTopicMessageCount` `:239-310`，`loadTopicList` `:498-616`，排序 `:635-694`，右键标记已读/未读 `:841-855`
+- `modules/ipc/chatHandlers.js`：`search-topics-by-content` `:408-451`，`saveTopicOrder`/`saveGroupTopicOrder` `:345-407`，`topics[]` 兼容归一化 `:538-543`，未读计数后端实现 `:1325-1368`，`setTopicUnread`（含 `unreadSource`）`:1474-1527`，默认话题 id `:555`
 - `modules/ipc/agentHandlers.js`：`create-agent` 写 `topics: [{id:"default",...}]` `:430`
 - `Groupmodules/groupchat.js`：群聊历史路径与写盘 `:159`, `:500`, `:539`, `:950-952`, `:965-967`, `:1030-1039`, `:1062-1064`, `:1770`, `:1825`
 - `modules/renderer/streamManager.js`：`isThinking/finishReason` 写回 `:2277-2279`，`saveHistoryForContext`（群聊不落盘）`:377-396`

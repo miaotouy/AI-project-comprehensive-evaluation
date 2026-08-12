@@ -2,25 +2,19 @@
 
 > 调查对象：`E:\works\git\VCPChat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，本刷新核对 chatHandlers.js/vcpClient.js 变更与行号
+> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，并核对 chatHandlers.js/vcpClient.js 变更与行号
 >
 > 调查范围：一次生成任务的提交与中断入口、群聊调度与发言顺序、流式消费与超时、半截流最终化与回写、话题自动总结请求；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-## 本次刷新要点（3f14e93 → b6ffa22）
-
-- **核心结论全部维持**：单聊中断不完整（无本地 abort、无客户端超时）、`vcpClient.js` 死代码、总结超时不对称、群聊 60 秒超时与本地 abort——`chatHandlers.js` 重新核对无任何 `AbortController`；`vcpClient.js` 虽同步了 56 行修改（现 589 行），grep 全仓库仍无任何 `require` 引用。
-- **行号平移**：`chatHandlers.js` 整体 +44 行——`send-to-vcp` 现 `:855-1270`（`processStream` `:1181`）、`interrupt-vcp-request` 现 `:1272-1317`；`renderer.js` 因 Loom 分享文本监听 +17 行——`onVCPStreamEvent` 现 `:540-764`；`finalizeStreamedMessage` 现 `streamManager.js:2190-2400`。
-- **请求携带上下文标识**：发送请求体的 `vcpchatExtensions` 新增 `requestContext`（requestId/agentId/agentName/topicId/ownerType/isGroupMessage，`modules/ipc/chatHandlers.js:53-82`、`:1071`）；未设置的采样参数（temperature/contextTokenLimit/max_tokens/top_p/top_k）从请求体省略（`:95-118`、`:1064`）。
-
 ## 结论摘要
 
-VCPChat 的单聊请求直连 VCP 服务器（`fetch(vcpServerUrl)`），群聊由主进程 `groupchat.js` 编排多 Agent 串行发言。本次迁移保留的最突出结论：
+VCPChat 的单聊请求直连 VCP 服务器（`fetch(vcpServerUrl)`），群聊由主进程 `groupchat.js` 编排多 Agent 串行发言。最突出的结论：
 
 - **单聊中断是不完整的**：`interrupt-vcp-request` handler 没有本地 `AbortController`，只向远端发一个 `/v1/interrupt` 信号；真正在跑的 `send-to-vcp` 流式读取没有任何客户端超时。同一功能在群聊侧（`groupchat.js`）却是本地 abort + 60 秒超时的完整实现（第 7 节）。
 - 仓库里留着一份实现正确但**从未被 require 的 `modules/vcpClient.js`**（完整 `AbortController` 管理 + 300 秒超时），疑似一次未完成的重构（7.2）。
@@ -149,7 +143,7 @@ renderer.js 发送/中断事件
 
 ## 12. 关键源码索引
 
-- `renderer.js`：`interruptActiveResponseFromSendButton` `:200-247`，`handleSendButtonAction` `:249-258`，`onVCPStreamEvent` 分发 `:540-764`，错误消息"流式响应中断"提示 `:605-609`（经核对当前 HEAD 仍成立，`renderer.js` 因 Loom 分享文本监听 +17 行，该段现 `:540-762`）
+- `renderer.js`：`interruptActiveResponseFromSendButton` `:200-247`，`handleSendButtonAction` `:249-258`，`onVCPStreamEvent` 分发 `:540-764`，错误消息"流式响应中断"提示 `:605-609`
 - `modules/chatManager.js`：`handleSendMessage` `:949-1450`，`attemptTopicSummarizationIfNeeded` `:896-947`
 - `modules/ipc/chatHandlers.js`：`send-to-vcp`（无本地 abort/超时）`:855-1270`，`interrupt-vcp-request`（仅远端信号）`:1272-1317`，`buildRequestContext`/`omitUnsetOptionalModelParams` `:53-118`
 - `modules/vcpClient.js`：完整但未被使用的 `sendToVCP`/`interruptRequest` 实现（死代码），`:1-589`

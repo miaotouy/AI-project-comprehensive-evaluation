@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：只读源码（provider 抽象层、实体、管理器、主要适配器、配置层、fallback 编排、Dashboard 后端）与仓库文档交叉梳理；未修改目标仓库
 >
@@ -25,7 +25,7 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 - **路由**：`get_using_provider`（manager.py:218-281）优先级为"umo 会话偏好 → 全局默认 → 实例列表第一个"；会话偏好存 SharedPreferences（`provider_perf_<type>`，umo scope）。
 - **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环：429 换 key / 超长弹历史 / 非 VLM 删图 / 工具不支持去 tools / 图片审核删图）。
 - **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
-- **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:484-569）；普通 5xx/网络错误不走 fallback，由重试层处理。
+- **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
 - **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
 - **未实现机制**：无渠道池/权重/负载均衡（`provider_pool` 与 `persona_pool` 只声明在默认配置，全仓 grep 无消费者）；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
 
@@ -149,7 +149,7 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 - `terminate_provider`（manager.py:809-845）：从三列表移除、清 off `curr_*`、调用 `terminate()`（若有）、`del inst_map[id]`；
 - `reload`（:760-804）：锁内 terminate + load + **清理配置中已被删除的实例**（按 `config_ids` 对 `inst_map` 反查 terminate，实现三列表与 config 的同步），并重选 `curr_*`；
-- `delete_provider(provider_id, provider_source_id)`（:847-867）：按 id 或按 `provider_source_id` 级联删除目标 provider 集合，然后 `config.save_config()`；
+- `delete_provider(provider_id, provider_source_id)`（:847-869）：按 id 或按 `provider_source_id` 级联删除目标 provider 集合，`config.save_config()` 后同步内存 `providers_config`（:868），删除后 API 列表查询不再读到旧实例（#9568）；
 - `update_provider`（:869-891）：查 id 重复冲突才报错，替换 config，save_config，reload；
 - `create_provider`（:893-909）：append config → save → load → 同步内存 `providers_config`；
 - `terminate`（:911-925）：**先 cancel MCP init 后台任务**，再逐个 terminate，最后 `disable_mcp_server`。
@@ -234,7 +234,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 - 会话偏好：`set_provider`（manager.py:146-172）写 `provider_perf_chat_completion`（umo scope），`session_put` → `sp.session_put`（SQLite preferences）。管理员可 `/provider` 切换（builtin_stars/builtin_commands/commands/provider.py:231-246）。
 - 事件级 model 覆盖：`req.model = event.get_extra("selected_model")`（astr_main_agent.py:1411-1412）→ `ProviderRequest.model` → 各适配器 `model or self.get_model()`。
 - WebChat/API 请求可直接 `event.get_extra("selected_provider")`（`_select_provider`，astr_main_agent.py:229-258）。
-- 会话组批量：`session_management_service.py:511-549`。
+- 会话组批量：`batch_update_service`（session_management_service.py:438-494，`sp.session_get`/`session_put` 逐会话读写）。
 
 ### 5.3 专用模型绑定
 
@@ -259,22 +259,22 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 
 **Key 轮换边界**：`key` 数组在适配器构造时解析进 `self.api_keys`；429/无效时移除；**多 key 只是错误驱动的本地轮换 handleState，不跨实例/渠道共享**。Anthropic 只取 `key[0]`，不改 key（:105-111）。
 
-**fallback 语义**：参见 5.3，只覆盖图片模态退化 + 空输出/err 回复；`_iter_llm_responses_with_fallback`（tool_loop_agent_runner.py:484-569）候选 `[provider, *fallback_providers]`，主 provider 空输出（`EMPTY_OUTPUT_RETRY_ATTEMPTS=3` 指数退避）轮到下一个，普通错误抛给上层重试。
+**fallback 语义**：参见 5.3，只覆盖图片模态退化 + 空输出/err 回复；`_iter_llm_responses_with_fallback`（tool_loop_agent_runner.py:533-634）候选 `[provider, *fallback_providers]`，主 provider 空输出（`EMPTY_OUTPUT_RETRY_ATTEMPTS=3` 指数退避）轮到下一个，普通错误抛给上层重试。
 
 ## 7. 配置持久化、热更新与密 param 处理
 
 ### 7.1 读写链路
 
 - 启动：`astrbot/core/__init__.py:33` `AstrBotConfig()`；缺项 `check_config_integrity` 递归补默认（astrbot_config.py:173-230）；`save_config`（: 232-323）原子写（临时文件 + fsync + os.replace + revision 去重提交）。
-- 新配置端：`AstrBotConfigManager`（astrbot_config_mgr.py:31-275）`confs["default"]` + 多会话 `abconf_<uuid>.json`，`get_conf(umo)` 经 `UmopConfigRouter`。
+- 新配置端：`AstrBotConfigManager`（astrbot_config_mgr.py:31-309）`confs["default"]` + 多会话 `abconf_<uuid>.json`，`get_conf(umo)` 经 `UmopConfigRouter`；档案映射 `abconf_mapping` 存 SharedPreferences global 键（:54-66），启动时 `initialize()` 异步加载（:49-52，core_lifecycle.py:188），`create_conf`/`delete_conf`/`update_conf_info` 已全部异步化并加 `_abconf_lock` 串行（:191-301，#9582/#9584）。
 - 热更新：Dashboard REST（`astrbot/dashboard/api/providers.py` + `config_service.py`）→ ProviderManager 的 create/update/delete。
-- `get_provider_schema`（config_service.py:1335-1367）合并 `CONFIG_METADATA_2` 模板 + `provider_cls_map[type].default_config_tmpl` → WebUI 动态表单。
+- `get_provider_schema`（config_service.py:1361-1393）合并 `CONFIG_METADATA_2` 模板 + `provider_cls_map[type].default_config_tmpl` → WebUI 动态表单。
 
 ### 7.2 敏感信息处理（关键事实 + 设计边界）
 
 - `key` 以数组存 `cmd_config.json` **明文**，无加密；`save_config` 不脱敏。
 - `_resolve_env_key_list` 只在 `load_provider` 且类型为 chat_completion 时执行；key 为空字符串则发空 key，导致请求必然 401——具体处不报错，直到请求时暴露。
-- Dashboard `list_providers`（config_service.py:1602-1640）把完整 key **返回给前端**（只有日志截断前 12 字符，如 openai_source.py:1086）。
+- Dashboard `list_providers`（config_service.py:1628-1666）把完整 key **返回给前端**（只有日志截断前 12 字符，如 openai_source.py:1086）。
 - 配置变更日志对 token/secret 字段掩码（config_service.py:333-338），且仅沙箱/computer 环境生效——**普通本地部署不脱敏**。
 
 ## 8. WebUI（Dashboard）渠道配置面

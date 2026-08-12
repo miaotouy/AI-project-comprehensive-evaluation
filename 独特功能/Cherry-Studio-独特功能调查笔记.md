@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：只读源码梳理；结合根 README 功能声明与路由/组件盘点；未修改 cherry-studio 仓库
 >
@@ -56,7 +56,7 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
      （mini_app.transient_descriptor.<appId>，所有窗口可读，不进 DB）
 ```
 
-**持续性**：预设/自定义/启停/排序落 SQLite（`user_mini_app` 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移有 `MiniAppMigrator.ts`。
+**持续性**：预设/自定义/启停/排序落 SQLite（`user_mini_app` 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移有 `MiniAppMigrator.ts`。行为细节：webview `dom-ready` 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab（`94d34dd0be`、`1cab3af8e6`）。
 
 **安全与资源边界**：webview 由 Electron 管理；小程序数量有缓存偏好（"小程序缓存数量"）；自定义应用 URL 由用户自担风险（本次未发现 URL 协议白名单校验，未验证）。
 

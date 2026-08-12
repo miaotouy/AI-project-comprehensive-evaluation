@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
-> 调查方式：从 [`../Chat/LobeHub-Chat调查笔记.md`](../Chat/LobeHub-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码；通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱、拖放、i18n）保留于原 Chat 笔记，待可选界面专题承接
+> 调查方式：从 [`../Chat/LobeHub-Chat调查笔记.md`](../Chat/LobeHub-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据；通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱、拖放、i18n）保留于原 Chat 笔记，待可选界面专题承接
 >
 > 调查范围：会话导航与现场恢复、Composer 与草稿、发送前配置、生成反馈与停止、消息操作、阅读辅助、UI 状态所有权、键盘与无障碍、桌面通知集成；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
@@ -16,8 +16,8 @@
 
 LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexical 工作台式输入区组成：
 
-- Topic 列表：单击/双击 250ms 区分导航与开新 tab、拖拽引用到输入框、右键菜单、悬浮元数据卡、未读点、失败/运行图标与运行耗时；按 Flat/时间/状态/项目多种模式组织。
-- 输入区是一个可扩展工作台：草稿自动恢复、输入历史（按 agent/user scope）、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention（Fuse 模糊检索）与 `/` slash action（编辑器插件实现，不是发送前字符串替换）。
+- Topic 列表：单击/双击 250ms 区分导航与开新 tab、拖拽引用到输入框、右键菜单、悬浮元数据卡、未读点、失败/运行图标与运行耗时；按 Flat/时间/状态/项目多种模式组织。Topic 与 Thread 支持并排打开（`632ad3d93`），桌面端另有 split tab 视图（`280ec0d59`），Topic 行交互经 `5fd00cc5c` 细化。
+- 输入区是一个可扩展工作台：草稿自动恢复、输入历史（按 agent/user scope）、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention（Fuse 模糊检索）、`/` slash action（编辑器插件实现，不是发送前字符串替换）、`/goal` 目标标记 chip（`f777343c8`），并新增 Web 语音消息（`a58d18130`：`ChatInput/VoiceMessage/` + `sendVoiceMessage`，录音经 MediaRecorder 上传后走常规发送链并 `preserveComposer`）。发送前配置区新增 Token 用量明细（`TokenTag`/`TokenDetails`/`useTokenBreakdown`，ChatInput 底部）与推理强度预设（`ActionBar/Effort/` + `ReasoningConfigLoader`，`03929d283`）。
 - 发送/停止按钮是同一个交互位，状态由 operation store 驱动；只读/无权限时提前置灰并给出 tooltip 原因。
 - 工具审批卡片有全局键盘快捷键（1/2/↑/↓/Enter）；无障碍覆盖是“点状”而非体系化的，消息操作栏图标按钮等存在明确缺口。
 - 桌面端（Electron）完成/审批通知与聊天状态直接联动并深链回具体 Topic；Web/PWA 没有系统级通知。
@@ -27,10 +27,10 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ```text
 进入 Topic（路由参数 -> ConversationContext）
-  -> Topic 侧栏：切换 / 双击开 tab / 拖拽引用 / 未读点 / 运行态反馈（会话导航）
-  -> Lexical 编辑器：草稿恢复 / 历史 / mention / slash / 文件粘贴（发送前配置：Agent、模型、执行设备、审批模式）
+  -> Topic 侧栏：切换 / 双击开 tab / 拖拽引用 / 未读点 / 运行态反馈 / Topic·Thread 并排（会话导航）
+  -> Lexical 编辑器：草稿恢复 / 历史 / mention / slash / /goal chip / 文件粘贴 / 语音消息（发送前配置：Agent、模型、执行设备、审批模式、Token 明细、推理强度）
   -> 发送按钮（生成中变停止）-> 流式输出（keepMounted、ChatMiniMap、滚动快照）
-  -> 消息操作：编辑/复制/重试/删除/分支/审批/翻译/TTS
+  -> 消息操作：编辑/复制/重试/删除/分支/审批/翻译/TTS（错误卡重试见 PendingRetryTurn）
   -> 离开 / 再次进入：滚动快照与草稿恢复现场
 ```
 
@@ -46,7 +46,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ### 2.1 输入编辑器是一个可扩展工作台
 
-`features/ChatInput/InputEditor/index.tsx` 基于 Lexical 编辑器，输入内容支持草稿自动恢复、输入历史（按 agent/user scope）、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention 和 `/` slash action。mention 结果按 Agent、话题、文件等分类并用 Fuse 做模糊检索；slash 菜单和 action tag 都是编辑器插件，不是发送前再做字符串替换。离开页面前若编辑器非空会注册 `beforeunload` 提示，避免草稿静默丢失。
+`features/ChatInput/InputEditor/index.tsx` 基于 Lexical 编辑器，输入内容支持草稿自动恢复、输入历史（按 agent/user scope）、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention 和 `/` slash action。mention 结果按 Agent、话题、文件等分类并用 Fuse 做模糊检索；slash 菜单和 action tag 都是编辑器插件，不是发送前再做字符串替换。离开页面前若编辑器非空会注册 `beforeunload` 提示，避免草稿静默丢失。草稿保存曾因发送流程改动出现“未发送草稿被清空”缺陷，`c0a4f1bf1` 修复（`draftStorage.ts`/`useChatInputDraft.ts` 配套调整）；`/goal` 目标标记存为结构化 chip（`InputEditor/ActionTag/goalTag.ts`，`f777343c8`）。语音消息入口 `ChatInput/VoiceMessage/`（`VoiceMessageControl`，`a58d18130`）录制后经 `sendVoiceMessage`（`Conversation/ChatInput/sendVoiceMessage.ts`）走普通发送链，属输入区新增通道。
 
 ### 2.2 输入快捷操作
 
@@ -54,7 +54,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ## 3. Agent、模型、工具与发送前配置
 
-ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目录/仓库、分支或 Worktree、审批模式和上下文窗口。模型按钮切换当前 topic 模型；多模型选择器可悬停移除单个模型或恢复 Agent 默认模型。无创建权限或 view-only 时发送按钮置灰并显示原因。
+ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目录/仓库、分支或 Worktree、审批模式和上下文窗口。模型按钮切换当前 topic 模型；多模型选择器可悬停移除单个模型或恢复 Agent 默认模型。无创建权限或 view-only 时发送按钮置灰并显示原因。推理强度预设（`ChatInput/ActionBar/Effort/Controls.tsx` + `ReasoningConfigLoader.tsx`，`03929d283`）来自用户级模型实例配置（`ai_models.config.chatConfig`），不是 Agent 级；Token 用量/预算明细条（`ChatInput/ActionBar/Token/`，`useTokenBreakdown` 拆分 chatsToken/historySummaryToken/systemRoleToken/toolsToken/maxTokens）常驻发送区上方（`32925b89f` 下调默认成本告警阈值）。
 
 ## 4. 发送、生成反馈与停止
 
@@ -66,7 +66,7 @@ ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目�
 
 ## 5. 消息操作、分支与版本导航
 
-助手消息默认编辑、复制；有工具时默认“删除并重新生成”。菜单还提供评论、创建分支、折叠流程、TTS、翻译、分享、选择/多选、重新生成、删除；用户消息默认重新生成、编辑、复制，并有同类菜单。错误消息显示重试与删除。工具/任务块另有审批、拒绝、取消和删除孤立工具消息，编辑文件卡可展开并查看/隐藏 diff。
+助手消息默认编辑、复制；有工具时默认“删除并重新生成”。菜单还提供评论、创建分支、折叠流程、TTS、翻译、分享、选择/多选、重新生成、删除；用户消息默认重新生成、编辑、复制，并有同类菜单。错误消息显示重试与删除。工具/任务块另有审批、拒绝、取消和删除孤立工具消息，编辑文件卡可展开并查看/隐藏 diff。错误卡重试改为独立待重试回合组件 `PendingRetryTurn`（`Messages/components/PendingRetryTurn.tsx` + `usePendingRetryTurn.ts`，`a2dbb5947`），重试按钮从错误卡内部移出为可操作入口，重试动作可达且对 operation 状态生效。
 
 消息操作栏承接编辑、重试、分支、转发、翻译和 TTS 等动作（`Messages/components/MessageActionBar` 等组件如何装配进消息壳属于消息渲染器笔记）；分支指示器画在子消息上、激活索引存在父消息 metadata 里，数据语义见会话与消息管理笔记 3.3。
 
@@ -92,7 +92,7 @@ ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目�
 - `Conversation/ChatList/components/RefreshError.tsx:37,40` 消息列表刷新失败提示用 `role="status"` + `aria-live="polite"`,能被屏幕阅读器主动播报;
 - `ChatInput/ControlBar/GitStatus.tsx:383-403` Git 同步按钮用 `aria-busy`/`aria-disabled` 反映异步状态;
 - `ChatInput/SendArea/SendButton.tsx:45-46` 发送按钮禁用时用 Tooltip 暴露原因（第 4 节）;
-- `Messages/User/components/AudioPlayer/index.tsx:145` 播放/暂停按钮 `aria-label` 随状态切换文案（“播放”/“暂停”）。
+- `Messages/User/components/AudioPlayer/index.tsx:145` 播放/暂停按钮 `aria-label` 随状态切换文案（“播放”/“暂停”）——该组件已随 `8effa2c96` 迁至 `src/features/AudioPlayer/index.tsx`（独立 feature，播放/暂停 `aria-label` 现位于 :328，另有 seek/download/voiceMessage 相关 `aria-label`）。
 
 **明确的缺口**（如实指出,不夸大也不回避）：
 - Topic 列表行（`AgentSidebar/Topic/List/Item/index.tsx`）、消息操作栏里的单个 icon 按钮（复制/编辑/重试等,`Messages/components/MessageActionBar/index.tsx`）本次 grep 均**未找到** `aria-label`——这些是 `ActionIcon`,视觉上靠 `title`/tooltip 提示,但本次没有确认 `@lobehub/ui` 的 `ActionIcon` 组件内部是否自动把 `title` 映射成 `aria-label`（这是三方包内部实现,未下钻）,如果没有，纯图标按钮对屏幕阅读器就是无文字描述的;
@@ -105,7 +105,7 @@ ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目�
 ### 8.2 快捷键面板/帮助
 
 - **发现型提示**（用的时候顺手看一眼）：`src/features/CommandMenu/components/CommandFooter.tsx`（1-29 行）在 Cmd/Ctrl+K 命令面板底部常驻显示“↵ 打开 / ↑↓ 选择”两个键位提示,只覆盖命令面板内部的操作,不是全局快捷键列表。
-- **完整列表**（专门去看的设置页）：`src/routes/(main)/settings/hotkey/index.tsx`（1-27 行）组织三个分组——`Desktop`（仅桌面端显示,`isDesktop` 判断,第 19 行）/`Essential`/`Conversation`（`features/Conversation.tsx:63-90`,当前只有 Conversation 分组一个 `HotkeyGroupEnum.Conversation`）。每一项用 `@lobehub/ui` 的 `<HotkeyInput>`（`Conversation.tsx:46-61`）渲染,支持用户**自定义改键**、清除绑定、冲突检测（`hotkeyConflicts`,第 39-44 行遍历其它已绑定项做重复检测并高亮）——这不只是一个只读的快捷键说明面板,而是一个可编辑的快捷键管理器,修改后走 `useSaveState` 自动保存（第 87 行 `onValuesChange` 触发 `save`）。
+- **完整列表**（专门去看的设置页）：`src/routes/(main)/settings/hotkey/index.tsx`（1-27 行）组织三个分组——`Desktop`（仅桌面端显示,`isDesktop` 判断,第 19 行）/`Essential`/`Conversation`（`features/Conversation.tsx:63-90`,当前只有 Conversation 分组一个 `HotkeyGroupEnum.Conversation`）。每一项用 `@lobehub/ui` 的 `<HotkeyInput>`（`Conversation.tsx:46-61`）渲染,支持用户**自定义改键**、清除绑定、冲突检测（`hotkeyConflicts`,第 39-44 行遍历其它已绑定项做重复检测并高亮）——这不只是一个只读的快捷键说明面板,而是一个可编辑的快捷键管理器,修改后走 `useSaveState` 自动保存（第 87 行 `onValuesChange` 触发 `save`）。设置页已整体迁入 `src/features/Settings/`（快捷键面板现为 `src/features/Settings/hotkey/index.tsx`，`src/routes/(main)/settings/` 路由树只留 `_layout` 与 `provider` 薄壳），并新增 `src/hooks/useHotkeys/chatScope.ts`（聊天作用域热键，含 `packages/const/src/hotkeys.ts` 与 `packages/types/src/hotkey.ts` 的键位定义调整）。
 - 命令面板本身的完整键位表（Cmd+K 打开、Esc 返回/关闭、Backspace 返回、Tab 进 AI 模式、↑↓ 选择、Enter 确认）本次靠 `useCommandMenu.ts:82-92` 的 Esc/滚动锁定 `useEffect` 和 `README.md` 里记录的键位表交叉确认,`README.md` 是仓库内自带的开发文档而非用户可见 UI,用户能直接看到的仅有 `CommandFooter` 那两条提示 + 完整可编辑列表在设置页。
 
 ## 9. 桌面通知与跨平台连续性
@@ -131,6 +131,7 @@ ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目�
 - `InputEditor` 目录下文件拖入时是否有拖拽悬停的视觉反馈样式——未找到专门代码,但也未完整读完整个目录,不排除遗漏。
 - 视觉效果、键盘焦点顺序、响应式行为与系统通知需要运行验证（本笔记结论主要来自静态代码）。
 - 移动端/桌面端的布局差异与断点实现属于原 Chat 笔记的通用盘点范围，未在本笔记展开。
+- 语音消息（`a58d18130`）的录音/上传/回放全链未运行验证（MediaRecorder 兼容性、`sendVoiceMessage` 与发送链的合并行为仅静态确认）。
 
 ## 12. 关键源码索引
 
@@ -138,6 +139,8 @@ ModeSelector 切换 Chat/Agent；Agent 模式下出现执行设备、工作目�
 - `src/features/Conversation/ConversationProvider.tsx`（86-130，UI 状态隔离）
 - `src/features/Conversation/store/slices/virtuaList/action.ts`（1-138，滚动 API 注册）
 - `src/features/ChatInput/InputEditor/index.tsx`（Lexical 编辑器）
+- `src/features/ChatInput/VoiceMessage/index.tsx`、`src/features/Conversation/ChatInput/sendVoiceMessage.ts`（语音消息）
+- `src/features/ChatInput/ActionBar/Token/`、`src/features/ChatInput/ActionBar/Effort/`（Token 明细/推理预设）
 - `src/features/ChatInput/SendArea/SendButton.tsx`（发送/停止）
 - `src/features/Conversation/ChatMiniMap/index.tsx`（阅读辅助）
 - `src/features/Conversation/ChatList/index.tsx`（76-243，滚动快照与列表接线）

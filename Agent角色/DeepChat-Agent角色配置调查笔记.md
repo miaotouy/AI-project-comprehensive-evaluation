@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/shared/types/agent-interface.d.ts`、`src/main/agent/`、`src/main/session/data/tables/newSessions.ts`）
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -33,6 +33,7 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 | 扩展 | `enabledSkillNames`、`enabledMcpServerIds` | 允许进入工具目录的 Skills 与 MCP servers |
 | 编排 | `subagentEnabled`、`subagents` | 是否允许 subagent 及其 slot 定义 |
 | 记忆/压缩 | `autoCompaction*`、`memory*` | 自动压缩阈值、保留轮数、embedding/retrieval/extraction 与注入预算 |
+| 输出限制 | `readFileAutoTruncateChars`、`toolOutputInlineChars`、`commandOutputInlineChars` | 文件读取截断与工具/命令输出内联字符上限（#2103，归一化 1,000–200,000，`src/shared/lib/agentOutputLimits.ts`，执行语义见 Agent 工具笔记 §3） |
 | persona | `personaEvolutionEnabled` | 受保护的实验性 persona 演化开关 |
 
 模型 preset 还可以覆盖 temperature、context length、max tokens、thinking budget、reasoning effort 和 verbosity（`:567-580`）。`SessionAgentContextUpdate` 将有效 agent/model/project/permission 写入会话运行状态（`:181-188`）。
@@ -84,8 +85,8 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 
 ## 6. 配置 UI 与运行时可见性
 
-- **配置入口**：`src/renderer/settings/` 是独立的 renderer 设置入口（`App.vue`），其中 `DeepChatAgentsSettings.vue` 编辑 DeepChat Agent 的 `systemPrompt`、`permissionMode`、`subagentEnabled`/`subagents`、`disabledAgentTools`、`memoryEnabled`、`defaultModelPreset` 等字段（:421-446、:800-837 的表单字段清单）；Memory 相关（含 `personaEvolutionEnabled`）在 `MemoryConfigInlinePanel.vue:283-285`。ACP Agent 的 profile 管理在 `AcpSettings.vue`/`AcpProfileManagerDialog.vue`。
-- **运行时可见性**：用户可确认当前角色与实际模型。侧栏 `WindowSideBar.vue` 列出 `agentStore.enabledAgents` 并支持切换（:34、:1417 `setSelectedAgent`）；聊天状态栏 `ChatStatusBar.vue` 读取 `agentStore` 显示当前 agent/模型（:1259-1301），并在会话配置变更时读取 `agentConfig.systemPrompt` 用于展示（:2065）。
+- **配置入口**：`src/renderer/settings/` 是独立的 renderer 设置入口（`App.vue`），其中 `DeepChatAgentsSettings.vue` 编辑 DeepChat Agent 的 `systemPrompt`、`permissionMode`、`subagentEnabled`/`subagents`、`disabledAgentTools`、`memoryEnabled`、`defaultModelPreset` 等字段（:421-446、:800-837 的表单字段清单）；输出限制三个字段在 `outputLimits` 折叠面板（`:566-683`，与 `agentOutputLimits.ts` 默认值联动）；Memory 相关（含 `personaEvolutionEnabled`）在 `MemoryConfigInlinePanel.vue:283-285`。ACP Agent 的 profile 管理在 `AcpSettings.vue`/`AcpProfileManagerDialog.vue`。
+- **运行时可见性**：用户可确认当前角色与实际模型。侧栏 `WindowSideBar.vue` 列出 `agentStore.enabledAgents` 并支持切换（:34、:1679 `setSelectedAgent`，侧栏随工作区管理重构整体移位）；聊天状态栏 `ChatStatusBar.vue` 读取 `agentStore` 显示当前 agent/模型（:1241-1356），并在会话配置变更时读取 `agentConfig.systemPrompt` 用于展示（:2120）。
 - 配置写入走 main process 的 agent routes（`src/main/agent/routes.ts:33` 起），经 `DeepChatAgentRepository` 持久化（见 §2）；会话运行时的 `SessionAgentContextUpdate`（`agent-interface.d.ts:181-188`）把有效 agent/model/project/permission 写入运行状态，用户无需重开会话即可在状态栏看到生效值。
 
 ## 7. Session 绑定与角色生效
@@ -149,7 +150,7 @@ orchestration_policy (explicit | proactive)
 - Agent 设置默认值与配置解析：`src/main/agent/settings.ts:125-140`、`:458-489`
 - 提示词拼装顺序：`src/main/agent/deepchat/runtime/promptAssemblyService.ts:59-106`、`src/main/agent/deepchat/resources/systemPromptBuilder.ts:89-274`
 - Agent 配置 UI：`src/renderer/settings/components/DeepChatAgentsSettings.vue`、`MemoryConfigInlinePanel.vue`
-- 运行时 agent/模型可见性：`src/renderer/src/components/chat/ChatStatusBar.vue:1259-1301`、`src/renderer/src/components/WindowSideBar.vue:34`、`:1417`
+- 运行时 agent/模型可见性：`src/renderer/src/components/chat/ChatStatusBar.vue:1241-1356`、`src/renderer/src/components/WindowSideBar.vue:34`、`:1679`
 - DeepChat/ACP backend 分派：`src/main/agent/manager/agentManager.ts:54-118`
 - subagent slot 和 capability：`src/shared/lib/deepchatSubagents.ts:10-31`、`:47-203`
 - session agent/project/subagent 字段：`src/main/session/data/tables/newSessions.ts:13-30`、`:51-196`

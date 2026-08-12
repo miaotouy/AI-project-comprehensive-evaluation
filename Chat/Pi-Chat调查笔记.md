@@ -2,9 +2,9 @@
 
 > 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`6b461b75b39b5a19b378dc42fbfbd1655bc446a6`（分支：`main`）
+> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
 >
 > 调查方式：只读源码梳理 AgentSession、SessionManager、agent-loop 与交互模式的事件流；未运行交互会话
 >
@@ -32,7 +32,7 @@ Pi 是命令行编码 Agent，对话能力由 `packages/coding-agent` 的 `Agent
 
 ## 产品表面与系统边界
 
-- **产品表面**：终端 TUI（底部多行 editor、`/` 命令与 fuzzy autocomplete、Ctrl+P 模型循环、状态行指示 Working/Retry/Compaction、可选 OSC 9;4 进度条）；另有 print/json 非交互模式与 RPC 服务模式（RPC 仅从调用关系推断）。
+- **产品表面**：终端 TUI（底部多行 editor、`/` 命令与 fuzzy autocomplete、Ctrl+P 模型循环、状态行指示 Working/Retry/Compaction、可选 OSC 9;4 进度条）；fullscreen 视图支持 transcript 搜索（Ctrl+Shift+F）、半页/单行滚动、鼠标多击选词/选行与 Windows 右键粘贴；另有 print/json 非交互模式与 RPC 服务模式（RPC 仅从调用关系推断）。
 - **系统边界**：模型推理由外部 provider 经 `packages/ai` 完成；会话事实源是磁盘 JSONL；单会话单 agent 循环，运行中可投递 steer/followUp，无多会话并行 UI；`bash` 执行内建于工具循环。
 
 ## 端到端聊天主链
@@ -53,7 +53,7 @@ TUI 输入（interactive-mode.ts）
 ## 核心对象与状态权威
 
 - **SessionEntry 树**（`session-manager.ts:144-153`）：`message/thinking_level_change/model_change/compaction/branch_summary/custom/custom_message/label/session_info`；`custom` 不参与 LLM 上下文，`custom_message` 参与并控制 TUI 显示。
-- **AgentMessage/AssistantMessage**（`packages/ai/src/types.ts:412-445`）：含 `content` 块数组、usage、stopReason、errorMessage；工具结果以独立 `ToolResultMessage` 成消息。
+- **AgentMessage/AssistantMessage**（`packages/ai/src/types.ts:415-430`）：含 `content` 块数组、usage、stopReason、errorMessage；工具结果以独立 `ToolResultMessage` 成消息。
 - **权威源**：磁盘 JSONL（`SessionManager` 追加写）；`leafId` 是分支位置权威指针；模型/thinking level 与会话级工具启用集（默认 `[read, bash, edit, write]`）绑定在会话状态；UI 状态行只是投影。
 
 ## 专项导航
@@ -66,8 +66,8 @@ TUI 输入（interactive-mode.ts）
 
 ## 关键能力与已确认边界
 
-- 支持：分支（`branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`）、`/tree` 树导航与 label 书签、compaction 自动压缩（`contextTokens > contextWindow - reserveTokens`，默认 reserve 16384/keepRecent 20000）与溢出“压缩+自动重试”、自动重试（sleep 退避）、steer/followUp 运行中投递、会话删除（trash 优先）、HTML/JSONL 导出与 gist 分享、列表并发扫描（上限 10）与 fuzzy/re: 搜索。
-- 已确认边界：历史是追加型，无消息就地编辑（修改以分支表达）；续写无独立入口；消息级搜索未接入（`ScanningSessionSearch` 在 harness SDK，未接 TUI/AgentSession 路径）；压缩是“重写上下文而非删历史”，旧条目保留可回溯；`custom`/`bashExecution(excludeFromContext)`/`custom_message(display=false)` 各自独立控制“是否进 LLM 上下文”与“是否可见”。
+- 支持：分支（`branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`）、`/tree` 树导航与 label 书签、compaction 自动压缩（`contextTokens > contextWindow - reserveTokens`，默认 reserve 16384/keepRecent 20000）与溢出“压缩+自动重试”、自动重试（sleep 退避）、steer/followUp 运行中投递、会话删除（trash 优先）、HTML/JSONL 导出与 gist 分享、列表并发扫描（上限 10）与 fuzzy/re: 搜索、fullscreen transcript 搜索与半页/单行滚动（Chat UI 笔记 §1/§4）。
+- 已确认边界：历史是追加型，无消息就地编辑（修改以分支表达）；续写无独立入口；消息级搜索未接入 TUI/AgentSession 路径（`createScanningSessionSearch` 在 harness SDK，见会话与消息管理笔记 §5）；压缩是“重写上下文而非删历史”，旧条目保留可回溯；`custom`/`bashExecution(excludeFromContext)`/`custom_message(display=false)` 各自独立控制“是否进 LLM 上下文”与“是否可见”。
 
 ## 未验证事项
 
@@ -81,4 +81,4 @@ TUI 输入（interactive-mode.ts）
 - `packages/coding-agent/src/core/session-manager.ts:844-854`：会话树；`:1015-1042` 落盘时机；`:461-470` 上下文构建；`:1638-1713` 列表
 - `packages/agent/src/agent-loop.ts:155-275`：工具循环；`:281-372` 流式转事件
 - `packages/coding-agent/src/core/compaction/compaction.ts:235-237`：压缩阈值；`core/system-prompt.ts:28-162`：system prompt 拼装
-- `packages/coding-agent/src/modes/interactive/interactive-mode.ts:3090-3234`：流式 UI 更新；`core/settings-manager.ts:12-34`：压缩/重试设置
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts:3068-3374`：流式 UI 更新；`core/settings-manager.ts:12-34`：压缩/重试设置

@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-10
+> 对比更新日期：2026-08-12
 >
 > 依据：同目录十六份源码调查笔记及其中记录的代码快照
 >
@@ -26,7 +26,7 @@
 - **VCPChat 是单网关客户端。** 它把上游 Provider 选择留给 VCP 服务端，客户端只保存一组 URL/Key 和各 Agent 的裸模型 ID。这个边界降低了客户端配置复杂度，也形成单连接故障点。
 - **VCPToolBox 是协议与模型编排层，不是多 Provider 渠道池。** 它统一多种入站协议，支持模型别名、语义选模、特定请求的模型 fallback 和普通请求重试；所有核心请求仍走同一个 OpenAI-compatible 上游和同一枚 Key。
 - **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key、无跨 Provider failover。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
-- **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK `streamText`（BUNDLED_PROVIDERS 表 + npm 动态安装），另有 opt-in 的 native 协议（`packages/llm/src/protocols/`）。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 Effect.retry / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 自动 prompt caching，`setCacheKey` 可关。
+- **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK `streamText`（BUNDLED_PROVIDERS 表 + npm 动态安装），另有 opt-in 的 native 协议（`packages/llm/src/protocols/`）。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 自动 prompt caching，`setCacheKey` 可关。
 - **AstrBot、DeepChat 与 Open WebUI 都是服务端/主进程渠道层，但治理重点不同。** AstrBot 允许同一来源生成多个能力实例，错误驱动换 Key，并在图片能力或空输出时走显式 fallback；DeepChat 将 Provider、ModelConfig、runtime registry 与 QPS 队列分开；Open WebUI 以 URL 配置行表示连接，OpenAI 模型固定到首见连接，Ollama 同名模型可随机选后端。
 - **Hermes Agent 是样本中唯一确认实现显式跨渠道 fallback 链的项目。** 它把应用重试、同 Provider credential pool、模型 fallback、跨 Provider/端点 fallback 与恢复主通道分成四层。该链需用户配置，不是健康感知的动态路由器；切换后会重发同一任务，存在重复生成与计费可能。
 - **Jan 的多 Key 与凭据边界较完整。** 主 Key 加 fallback Key 链保存在 OS keyring，401/403/429 会在当前请求换 Key；远程 Provider 与 llama.cpp/MLX 本地引擎都经本地 router 暴露为 OpenAI-compatible 路径。它不做跨 Provider failover。
@@ -51,7 +51,7 @@
 | Manifold Desktop | ProviderRegistry + 单 Key | providerId + model | 单 Key / 不适用 | 无 | 无 | Windows Credential Manager |
 | NextChat | Provider 枚举 + adapter + access store/代理 | `model@provider` | 服务端逗号 Key随机选 / 失败不换 | 无统一 retry | 无 | 客户端 store 明文；服务端 env |
 | Open WebUI | OpenAI/Ollama URL 配置行 | model id + urlIdx/prefix | 每连接单 Key / 不换 | 无 | OpenAI 无；Ollama 同名模型随机分摊但失败不换 | DB persistent config，静态加密未确认 |
-| OpenCode | models.dev + config + auth 运行时记录 | `provider/model[/variant]` | 单 Key / 不换 | Effect + SDK + native 三层 | 无 | auth/SQLite 明文（0600 文件） |
+| OpenCode | models.dev + config + auth 运行时记录 | `provider/model[/variant]` | 单 Key / 不换 | Effect（上限 5 次）+ SDK + native 三层 | 无 | auth/SQLite 明文（0600 文件） |
 | Pi | Provider 代码注册项 + 覆盖层 | `provider + modelId` | 单 Key / 不换 | SDK + 消息层，默认最多 3 次 | 无 | auth.json 0600 明文 |
 | SillyTavern | 活动设置 + Connection Profile | source/Profile model | Secret 数组 / 人工切换 | 无统一 retry | 无 | `secrets.json` 明文，前端只见掩码/ID |
 | VCPChat | 全局 VCP URL/Key | 裸 model id | 单 Key / 不适用 | 无 | 无 | `settings.json` 明文 |
@@ -196,7 +196,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 | Chatbox | Provider API、后端 manifest、本地保存、models.dev | Provider | 能力富化和模型实例化 |
 | Cherry Studio | Registry + 上游目录 + 用户覆盖 | Provider | Endpoint、能力和参数多层合并 |
 | DeepChat | 默认目录 + Provider DB 聚合 JSON + 用户 customModels/config | Provider | 有效能力快照决定 route、tool、媒体和 endpoint |
-| Hermes Agent | 静态表 + OpenRouter/Nous 远端缓存 + 用户输入 | Provider/endpoint | profile 与 metadata 决定 transport、上下文和辅助模型 |
+| Hermes Agent | 静态表 + OpenRouter/Nous 远端缓存（`provider_models_cache.json`）+ 用户输入 + custom 端点 `/v1/models` 探活磁盘缓存（`custom:<base_url>` 键 + blake2b 凭据指纹 TTL，models.py:4737） | Provider/endpoint | profile 与 metadata 决定 transport、上下文和辅助模型 |
 | Jan | Provider `/models`、远端目录、本地 GGUF/MLX 下载库 | Provider/本地引擎 | capability 与参数表决定 wire 字段和 router 目标 |
 | LobeHub | 内置 Model Bank、环境与用户数据 | Provider | 能力和参数影响 Runtime |
 | Manifold Desktop | 内置硬编码 + compatible `/v1/models` | Provider | 主要用于下拉选择；模型请求认证有已知缺口 |
@@ -263,7 +263,7 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 | NextChat | 单次聊天请求 | 超时/Abort，无通用 retry | 不改变；服务端随机 Key只在请求前选择 |
 | Open WebUI | 单次请求 | 默认 300s timeout，失败分类事件 | 不改变；Ollama 随机选择只发生请求前 |
 | Pi | 消息层默认最多 3 次（`settings.retry`）；SDK 层 `maxRetries` 独立 | 错误文本分类（429/5xx/网络/流中断可重试，quota/billing 不可），指数退避 `baseDelayMs * 2^n`（默认 2s 起）；SDK 层读 `x-should-retry`/`retry-after`，上限 60s | Provider/模型/Key 不变 |
-| OpenCode | 会话级 `Effect.retry`（`retryable` 判定 5xx/429/超时/网络错误，context overflow 不重试）+ SDK `maxRetries: retries ?? 0` + native 层 `MAX_RETRIES=2`（指数退避带 jitter） | 指数退避 2s 起，尊重 `retry-after` 头；429 区分 `RateLimitReason`/`QuotaExceededReason`；`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action | Provider/模型/Key 不变；会话级重试重跑整个 stream effect，可能重复计费（静态推断） |
+| OpenCode | 会话级 `Effect.retry`（`retryable` 判定 5xx/429/超时/网络错误，context overflow 不重试；上限 5 次，`attempt > 5` 停止）+ SDK `maxRetries: retries ?? 0` + native 层 `MAX_RETRIES=2`（指数退避带 jitter） | 指数退避 2s 起，尊重 `retry-after` 头；429 区分 `RateLimitReason`/`QuotaExceededReason`；`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action | Provider/模型/Key 不变；会话级重试重跑整个 stream effect，可能重复计费（静态推断） |
 | SillyTavern | 普通 Chat 单次请求 | 无统一策略 | 不改变 |
 | VCPChat | 主链单次 `fetch` | Flowlock 是新续写轮次 | 不改变 |
 | VCPToolBox | 默认 3 次总尝试 | 500、503、429、特定 401、网络和连接/首包超时；线性退避 | 普通模型不变；语义模型可换候选 |
@@ -344,7 +344,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | AIO Hub | 单项目笔记未确认完整备份链 | 不据此推断包含或排除 Key |
 | AstrBot | 单项目笔记未确认备份/导出链 | `cmd_config.json` 本身含明文 Key |
 | Chatbox | 自动配置备份复制完整 `config.json`；主动聊天导出默认剔除凭据 | 自动备份与用户导出边界不同 |
-| Cherry Studio | 当前 legacy 备份不复制 `cherrystudio.sqlite` | v2 Provider 与凭据也未进入这条备份链 |
+| Cherry Studio | legacy 备份引擎已升级为 **v7 full/slim 双布局，包含 `cherrystudio.sqlite`**（`220dff874f` 起） | 备份会落盘明文 Provider 凭据（SQLite 无静态加密）；v2 backup 仍在开发中 |
 | DeepChat | 模型 config 支持导入/导出；凭据备份未确认 | 不能由 config 导出推断包含 Provider Key |
 | Hermes Agent | 备份导出对 `.env`、`auth.json`、`state.db` 做脱敏 | 连接恢复是否完整取决于重新提供 Secret |
 | Jan | 单项目笔记未确认全量备份；Key 在 OS keyring | settings 迁移会重新注册 keyring，但不等于可移机导出 |
@@ -358,7 +358,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | VCPChat | 每日设置备份和一键 ZIP 包含明文 Key | 原子写入只保证完整性，不保证保密性 |
 | VCPToolBox | 默认归档所有 `.env` 和 JSON | 未加密 ZIP 扩大核心及插件 Secret 副本范围 |
 
-Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 当前 legacy 备份没有覆盖新 SQLite，并不等于已安全备份或已安全排除，而是 Provider 配置尚未进入这条实际备份链。
+Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 的 legacy 备份引擎（类名仍标 `@deprecated LEGACY v1 CODE`）已升级为 v7 full/slim 双布局并接入 SQLite 备份（`220dff874f`），v2 Provider 与凭据因此随备份落盘——旧"备份不复制 `cherrystudio.sqlite`、Provider 配置未进入备份链"的结论已被推翻；由于 Provider 凭据是 SQLite 明文，备份文件本身的保密性成为新的边界。
 
 VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置写入完整性。VCPToolBox 的管理 API 直接覆盖主配置，且保存后部分核心值需要重启才生效。这些属于可靠写入和运行配置切换问题，应与 Secret 加密分开评价。
 

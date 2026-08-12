@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-07-28
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -17,8 +17,8 @@
 Cherry Studio 通过一套分层的消息 UI 运行时完成消息渲染，Markdown 只负责其中的正文呈现：
 
 1. 主进程经 IPC 发送 AI SDK `UIMessageChunk`。
-2. renderer 按 topic、execution 和 anchor 拆分流，并用 AI SDK `readUIMessageStream` 组装 `UIMessage.parts`。
-3. 当前流式快照以 overlay 形式覆盖数据库历史，持久化数据保持不变。
+2. renderer 按 topic、execution 和 anchor 拆分流，并用 AI SDK `readUIMessageStream` 组装 `UIMessage.parts`；overlay 逻辑从 hook 抽成窗口级服务 `ExecutionStreamOverlayService`，组件卸载不再拆掉 reader。
+3. 当前流式快照以 overlay 形式覆盖数据库历史，持久化数据保持不变；分支草稿（awaiting-input 空叶子）以持久化行保存，不再属于渲染层临时态。
 4. 页面 adapter 将 Home、Agent 等业务能力注入统一的 `MessageListProvider`。
 5. `MessageList` 虚拟化消息组，将历史层与高频更新的 live tail 隔离。
 6. `MessagePartsRenderer` 把 parts 投影为正文、思考、工具、附件、图片、视频、错误、翻译和压缩记录。
@@ -40,9 +40,9 @@ HTML artifact 经受限 sandbox iframe 独立预览，与正文 Markdown 的净�
 Main AI runtime / Persistence
   -> ai.stream.chunk / done / error IPC
   -> TopicStreamSubscription（topic -> execution + anchor 分支）
-  -> readUIMessageStream（AI SDK parts 组装）
-  -> useExecutionOverlay（每帧提交最新消息快照）
-  -> useStableMessagePartsLayers（history + live overlay 结构共享）
+  -> ExecutionStreamOverlayService（窗口级服务：reader、快照、rAF 批处理，按 topicId 引用计数）
+  -> useExecutionOverlay（React 绑定，useSyncExternalStore）
+  -> useMessageStreamingLayers / useStableMessagePartsLayers（history + live overlay 结构共享）
   -> Home / Agent MessageList adapter
   -> MessageListProvider
   -> MessageList（分组、虚拟列表、历史层 / live 层）
@@ -144,18 +144,21 @@ Agent 同样渲染统一的 `MessageList`。差异由 adapter 提供，包括：
 
 ### Cherry 自定义 data part
 
-定义于 `src/shared/data/types/uiParts.ts`：
+定义于 `src/shared/data/types/uiParts.ts`（`CherryDataPartTypes`，`uiParts.ts:139-151`）：
 
 - `data-error`
 - `data-translation`
 - `data-video`
 - `data-compact`
 - `data-compaction-anchor`
+- `data-conversation-reset`（CLI 会话无法续接、另起新会话的标记）
 - `data-agent-task-event`
 - `data-knowledge-scope`
+- `data-clear`（上下文清理边界标记）
 - `data-code`
+- `data-retry`（模型重试/fallback 状态；**瞬时 part**——流式期间实时显示，`PersistenceListener` 在持久化前剥离，永不落库，`uiParts.ts:112-129`）
 
-其中 `data-agent-task-event`、`data-knowledge-scope` 等是隐藏状态，不直接进入聊天正文。
+其中 `data-agent-task-event`、`data-knowledge-scope`、`data-clear` 等是隐藏状态，不直接进入聊天正文。
 
 ### part metadata
 
@@ -197,33 +200,33 @@ anchor 用于区分同一 execution 中的不同 turn。同一模型 execution �
 
 ### 一次性 execution reader
 
-核心：`src/renderer/hooks/useExecutionOverlay.ts:149`
+核心：`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`（窗口级服务；reader/快照/rAF 批处理均在此，从 `useExecutionOverlay` 抽出；`useExecutionOverlay.ts` 只是 React 绑定，`useExecutionOverlay.ts:1-94`）。
 
-每个 execution 都会新建 `readUIMessageStream` reader。有跨 turn 状态的 `Chat` 对象不会被复用，从而在结构上避免“上一轮完成答案 + 新流”串接。
+overlay 生命周期按 transport `topicId` 引用计数：reader 只从挂载中的 consumer 启动（`syncExecutions`），组件卸载只释放引用、不拆 reader——路由/标签页切换期间 Main 继续生成，重挂载时同步恢复 live overlay；`refCount===0` 时自然结束的 execution 立即丢弃 overlay（落库行接管），LRU（`MAX_ENTRIES=32`）兜底泄漏条目并先取消 reader，避免截断流被报成成功完成；`settledKeys` 墓碑防止重挂载用陈旧集合重启已结束的 execution。
 
-继续工具审批时，reader 会用数据库当前 anchor message 作为 seed，以便新到的 tool output 合并到既有 tool input；seed 的 parts 会 `structuredClone`，避免 AI SDK 的原地修改污染 SWR/数据库历史引用。
+每个 execution 仍是一个一次性 `readUIMessageStream` reader，跨 turn 无状态。继续工具审批时，reader 用数据库当前 anchor message 作为 seed，以便新到的 tool output 合并到既有 tool input；seed 来自 consumer 当前提供的 DB 行（`getSeedMessages`），每次 reader 启动重新派生，不跨 turn 携带。
 
 ### 按帧提交 overlay
 
-`useExecutionOverlay` 通过以下机制合并 chunk 引发的 React state 更新：
+`ExecutionStreamOverlayService` 通过以下机制合并 chunk 引发的 React state 更新：
 
-- 最新 snapshot 先放入 `pendingSnapshotsRef`。
-- 通过 `requestAnimationFrame` 合并同一帧内的更新。
+- 最新 snapshot 先放入 `pendingSnapshots`（`{epoch, readerVersion, snapshot}`）。
+- 通过 `requestAnimationFrame`（`frameId`）合并同一帧内的更新。
 - terminal frame 会同步 flush，保证最终画面先可见，再执行持久化交接。
 - epoch 与 readerVersion 防止 topic 切换、旧 reader 和待处理帧写回过期状态。
 
-AI SDK 每处理一个 chunk 都会克隆整条消息。`shareSettledPartReferences()`（第 127 行）会恢复已完成 part 的旧引用，使 React 更新集中在流式前沿，避免反复处理整个累计 transcript。
+AI SDK 每处理一个 chunk 都会克隆整条消息。`shareSettledPartReferences()` 会恢复已完成 part 的旧引用，使 React 更新集中在流式前沿，避免反复处理整个累计 transcript。
 
 ### history 与 overlay 的交接
 
-`src/renderer/pages/home/hooks/useStablePartsByMessageId.ts:93`
+`src/renderer/components/chat/messages/stream/useStableMessagePartsLayers.ts`（配合 `useMessageStreamingLayers.ts` 产出 `streamingLayers`）
 
 `useStableMessagePartsLayers()` 生成两层 map：
 
 - `historyPartsByMessageId`：数据库历史加翻译 overlay，不接收高频 execution 快照。
 - `partsByMessageId`：live execution parts 覆盖 history，用于当前可变尾部。
 
-两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。
+两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。`MessageList.tsx:238-247` 的 `firstLiveGroupIndex` 与 `liveMessageIds`（`streamingLayers.liveMessageIds`）把同一批消息切成历史段/live 段。
 
 ## 列表与消息骨架
 
@@ -346,8 +349,10 @@ MessageList
 | `data-translation` | `TranslationBlock` |
 | `data-video` | `MessageVideo` |
 | `data-compact` | `CompactBlock` |
-| `data-compaction-anchor` | 时间线锚点 |
-| source/step/hidden data | 不直接渲染 |
+| `data-compaction-anchor` | 时间线锚点；`status:'skipped'` 的折叠不渲染标记（`CompactionAnchorBlock.tsx:26-29`） |
+| `data-retry` | `RetryStatusBlock`（仅流式期间可见的瞬时状态，`MessagePartsRenderer.tsx:623-628`；`settled` 状态渲染为空） |
+| `data-conversation-reset` | `ConversationResetBlock`（`MessagePartsRenderer.tsx:544`） |
+| `data-clear` / source/step/hidden data | 不直接渲染 |
 
 未知 part 会记录 warning 并返回 `null`，因此不会导致整个渲染流程失败。不过，如果协议新增了 part 而 UI 尚未更新，对应内容会直接消失。建议为带有可显示 payload 的未知 part 提供开发态 fallback。
 
@@ -386,7 +391,7 @@ MessageList
 
 ### React component overrides
 
-`useChatMarkdownComponents.tsx` 映射：
+`useChatMarkdownComponents.tsx` 已拆分：当前映射集中在 `ChatMarkdownRenderers.tsx` + `ChatMarkdownRenderContext.tsx`（`src/renderer/components/chat/messages/markdown/`），citation 相关（`CitationSup.tsx`/`CitationTooltip.tsx`）负责行内引用展示：
 
 - `a` -> citation tooltip 或普通 link hover card。
 - `code` -> inline code、file path、CodeBlockView 或 HTML artifact。
@@ -427,7 +432,7 @@ MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki �
 
 ### HTML artifact 预览
 
-Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:9` 默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`，iframe 使用 `srcDoc`，未注入限制网络连接的 CSP。Main window 在 `windowRegistry.ts:88` 配置 `webSecurity: false`、`sandbox: false`、`webviewTag: true`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:10` 组件默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（`HTML_PREVIEW_IFRAME_SANDBOX`），iframe 使用 `srcDoc`；聊天内 artifact 的实际调用点会按用途覆盖——`HtmlArtifactView` 的 `AdaptiveHtmlPreview`（fragment/未同意交互的 document）显式传 `sandbox="allow-same-origin"` + 严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`HtmlArtifactView.tsx:465-471`），同意交互后的 document 走沙箱 webview（安全细节与运行分级见生成式输出与运行时笔记）。Main window 在 `windowRegistry.ts:88` 配置 `webSecurity: false`、`sandbox: false`、`webviewTag: true`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
 
 ### 平滑文本播放
 
@@ -473,7 +478,7 @@ AskUserQuestion/approval 流程横跨消息区与输入区：awaiting approval �
 Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路：
 
 1. IPC/快照按 animation frame 合并。
-2. 每个 execution 一次性 reader，避免跨 turn 污染。
+2. 每个 execution 一次性 reader，避免跨 turn 污染；reader 生命周期按 transport topicId 引用计数，组件卸载不拆 reader（路由/标签页切换期间 Main 继续生成，重挂载同步恢复）。
 3. settled parts 恢复旧引用。
 4. history/live parts maps 结构共享。
 5. Provider 按订阅频率拆 context。
@@ -489,11 +494,11 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 ## 测试现状
 
-静态盘点：
+静态盘点（HEAD）：
 
-- `components/chat/messages`：216 个文件，其中 69 个测试文件。
-- 消息组件 TSX 文件：154 个。
-- `services/aiTransport`：7 个文件，其中 3 个测试文件。
+- `components/chat/messages`：250 个文件，其中 84 个测试文件。
+- 消息组件 TSX 文件：`MessageList`、`MessageFrame`、`MessagePartsRenderer`、`MainTextBlock`、`ThinkingBlock`、`ToolBlockGroup` 等。
+- `services/aiTransport`：10 个文件，其中 4 个测试文件（含 `ExecutionStreamOverlayService.test.ts`）。
 - `packages/ui` Markdown：21 个文件，其中 6 个测试文件。
 
 已看到的测试覆盖包括：

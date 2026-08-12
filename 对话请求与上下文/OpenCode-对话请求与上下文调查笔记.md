@@ -2,11 +2,11 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
-> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据；按提交范围 b8bd889..HEAD 核对重试上限/抖动、压缩序列化与孤儿工具判定改动
 >
 > 调查范围：提交入口与状态机、上下文拼装、预算与压缩、Provider 交接、流式事件链、最终化与回写、停止重试、并发后台、外部能力注入；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -16,12 +16,12 @@
 
 OpenCode 的一次生成任务由 `api.session.prompt` 进入 `SessionPrompt.prompt`，经 loop → processor → `LLM.stream`（AI SDK `streamText`）执行，每轮从数据库重读历史。LLM 事件流经 `LLMAISDK.toLLMEvents` 转统一事件，`SessionProcessor.handleEvent` 逐个 `updateMessage`/`updatePart` 发布事件，经 SSE 推送客户端。
 
-关键事实（快照 b8bd889）：
+关键事实（快照 1f94d8a）：
 
-- **上下文压缩是"重写历史"**：compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排，旧 tool 输出被清空并标记 compacted。
+- **上下文压缩是"重写历史"**：compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排，旧 tool 输出被清空并标记 compacted；快照 1f94d8a 起压缩请求的对话历史改为**文本序列化**（`[User]/[Assistant]/[Assistant tool call]/[Tool result]` 前缀，结果截断、compacted 标 `[Old tool result content cleared]`），拼进 summary 请求（compaction.ts:52-83、:387、:427-438），不再经 `toModelMessagesEffect` 的 stripMedia 媒体剥离。
 - **中断语义**：pending/running 的 tool part 标记为 `"Tool execution aborted"`，重放时以错误回注（processor.ts:577-593、message-v2.ts:349-360）。
 - **流式落盘频率分三层**：delta 走 `updatePartDelta` 发增量事件、完整 part 在 end 事件时落库、tool part 状态迁移即时落库（processor.ts:499-532）。
-- **自动重试**：`SessionRetry.policy` 判定 5xx/429/超时/网络错误，context overflow 不重试；无独立重试端点。
+- **自动重试**：`SessionRetry.policy` 判定 5xx/429/超时/网络错误，context overflow 不重试；上限 5 次、指数退避带 0.25 随机抖动（retry.ts:28-31、76-81、:192）；无独立重试端点。
 - **V1/V2 双轨**：V1 走 `POST /session/:id/prompt_async`；V2 走生成客户端 `POST /api/session/{id}/prompt`。
 
 ## 系统边界与生成任务主链
@@ -64,8 +64,8 @@ messages 组装（prompt.ts:1257-1286）：
 ## 3. 预算、截断、摘要与压缩
 
 - **溢出检测**：`isOverflow`（src/session/overflow.ts:22-34，`tokens.total >= usable`）；`usable = model.limit.input - reserved`（默认保留 20k，:10-20）。
-- **compaction 流程**：step-finish 检查溢出置 `needsCompaction`（processor.ts:477-482）→ `result === "compact"` → `compaction.create` 插入带 `compaction` part 的 user 消息（prompt.ts:1320-1328）→ `compaction.process`（compaction.ts:289-511）：`select` 按 `tail_turns`（默认 2）与 `preserve_recent_tokens` 预算挑尾部（:32、80-85）、`splitTurn` 可半轮截断（:105-128）、`prune` 清空旧 tool 输出并标 `time.compacted`（:243-287，`PRUNE_MINIMUM=20k`/`PRUNE_PROTECT=40k`）。
-- **重排**：`filterCompacted` 把 [compaction-user, summary-assistant, tail, continue-user] 重排供模型（message-v2.ts:521-572）；上下文长度用 `Token.estimate` 估算（compaction.ts:180-186）。压缩改写历史而非删历史（保留语义见会话与消息管理笔记 9）。
+- **compaction 流程**：step-finish 检查溢出置 `needsCompaction`（processor.ts:477-482）→ `result === "compact"` → `compaction.create` 插入带 `compaction` part 的 user 消息（prompt.ts:1320-1328）→ `compaction.process`（compaction.ts:289-511）：`select` 按 `tail_turns`（默认 2）与 `preserve_recent_tokens` 预算挑尾部（:32、80-85）、`splitTurn` 可半轮截断（:105-128）、`prune` 清空旧 tool 输出并标 `time.compacted`（:243-287，`PRUNE_MINIMUM=20k`/`PRUNE_PROTECT=40k`）。压缩请求本身不再逐消息转 AI SDK 消息，而是用 `serialize` 把选中历史拼成纯文本随 `nextPrompt` 一起发出（compaction.ts:52-83、:385-438）。
+- **重排**：`filterCompacted` 把 [compaction-user, summary-assistant, tail, continue-user] 重排供模型（message-v2.ts:521-572）；其中 `latest` 判定按 `time.created` 排序、id 仅作决胜（:582-604，导入消息 id 不保证单调）；上下文长度用 `Token.estimate` 估算（compaction.ts:180-186）。压缩改写历史而非删历史（保留语义见会话与消息管理笔记 9）。
 
 ## 4. SDK、Provider、模型与协议交接
 
@@ -87,7 +87,7 @@ messages 组装（prompt.ts:1257-1286）：
 ## 7. 停止、重试、续写与重新生成
 
 - **停止**：App `abort()`（submit.ts:259-278）→ `POST /session/:id/abort`（groups/session.ts:253-264）→ `SessionRunState.cancel`（run-state.ts:77-86）→ `Effect.onInterrupt` 置 aborted 走 `halt(AbortError)`（processor.ts:648-655）；随后 `cleanup` 置终态（第 6 节）。界面入口（TUI 双击 Esc / Web 中断按钮）见 Chat UI 笔记。
-- **重试**：`SessionRetry.policy`（src/session/retry.ts:175-198）：`retryable` 判定 5xx/429/超时/网络错误（:77-147），context overflow 不重试；`delay` 尊重 retry-after 头、指数退避 2s 起（:26-29、44-75）；接入 processor 的 `Effect.retry`（processor.ts:660-674），每次尝试发布 `retry` 状态。
+- **重试**：`SessionRetry.policy`（src/session/retry.ts:175-198）：`retryable` 判定 5xx/429/超时/网络错误（:77-147），context overflow 不重试；`delay` 尊重 retry-after 头、指数退避 2s 起并加 0.25 随机抖动（:28-31、46-81），`attempt > 5` 停止（:192）；接入 processor 的 `Effect.retry`（processor.ts:660-674），每次尝试发布 `retry` 状态。
 - **重试与重新生成的区别**：无独立重试端点；前端对失败消息的重试本质是再次发送（续写语义见会话与消息管理笔记 4）。
 
 ## 8. 队列、多会话并发与后台生成

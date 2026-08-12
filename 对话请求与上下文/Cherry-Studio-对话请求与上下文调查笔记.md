@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
-> 调查方式：从 `../Chat/Cherry-Studio-Chat调查笔记.md`（2026-08-10 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 `../Chat/Cherry-Studio-Chat调查笔记.md`（2026-08-10 调查）迁移现有段落与证据；在 `0001d730ae..cd82f996fb`（177 提交）区间内核对预留分支提交、模型重试/fallback、工具名规范化与流式缓冲变更
 >
 > 调查范围：一次生成任务的提交入口、上下文拼装、预算压缩、Provider 交接、最终化、停止重试、队列并发与外部能力注入；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -15,8 +15,9 @@
 ## 结论摘要
 
 - **主链**：`ChatContent` 的 `onSend` → `useChatRuntimeState` 的 `sendMessage` → `useConversationTurnController.ts:59` 通过 IPC `ai.stream.open` 发送 `buildStreamRequest(...)` 的结果 → 主进程 `AiStreamManager`（`src/main/ai/streamManager/AiStreamManager.ts`）→ AI SDK Agent（`src/main/ai/runtime/aiSdk/Agent.ts:238`）→ 对应 runtime/provider 发起流式调用。
-- **上下文拼装集中在 `PersistentChatContextProvider.prepareDispatch`**：先取锚点路径（`MessageService.getPathToNode`），再丢弃最近 `data-clear` 标记及其之前的记录，随后应用压缩视图；模型转换阶段的 `toModelMessages`（`messageRules.ts:75-83`）会重放持久化工具输出、剔除模型不支持的媒体、转换 UI parts、合并相邻同角色消息并补齐空 assistant。
-- **多模型"同时回复"字面意义上是真并行**：`resolveModels` 解析出 N 个模型 → `createUserMessageWithPlaceholders`（一个事务）建 1 条用户消息 + N 条 assistant 占位消息（同一 `siblingsGroupId`）→ `AiStreamManager.send()` 对每个 `SendModelSpec` 并行启动独立的 `runExecutionLoop`。
+- **上下文拼装集中在 `PersistentChatContextProvider.prepareDispatch`**：先取锚点路径（`MessageService.getPathToNode`），再丢弃最近 `data-clear` 标记及其之前的记录，随后应用压缩视图；模型转换阶段的 `toModelMessages`（`messageRules.ts:75-130`）会重放持久化工具输出、把 legacy v1 MCP 工具名规范化为 wire 合法名、按 `toolResultCaps` 门控工具结果内的媒体、剔除模型不支持的媒体、转换 UI parts、合并相邻同角色消息并补齐空 assistant。
+- **多模型"同时回复"字面意义上是真并行**：`resolveModels` 解析出 N 个模型 → `createUserMessageWithPlaceholders`（一个事务）建 1 条用户消息 + N 条 assistant 占位消息（同一 `siblingsGroupId`）→ `AiStreamManager.send()` 对每个 `SendModelSpec` 并行启动独立的 `runExecutionLoop`。`createUserMessageWithPlaceholders` 新增 `mode: 'fill-reserved'`（填充持久化的空分支叶子，见会话与消息管理笔记 4.3）。
+- **重试/回退可配置**（`12498d68ec`）：`AiService` 对普通聊天包一层 `createRetryableWrap`（ai-retry），同一模型的瞬态错误（429/503/529 等）重试 + 用户配置的 fallback 模型（`buildFallbackModels`，按能力约束过滤）；偏好 `chat.retry.enabled` 默认关闭，且请求级 `maxRetries: 0` 会显式关闭该包装（`AiService.ts:565-590`）。
 - **四类输入的组织方式不统一**：文件/知识库=消息 parts，联网=assistant 设置布尔开关（`capabilityBody`），推理=独立的 `reasoningEffort` 请求字段，工具=渲染期决定显示、主进程模型能力判定实际携带。
 - 压缩/截断按"先分支和清理标记确定历史，再按上下文窗口决定生成或沿用摘要"处理；每个 provider 的 token budget 算法未逐一展开。
 
@@ -40,7 +41,7 @@ ChatContent.onSend
 ## 1. 提交入口、任务对象与状态机
 
 - **提交入口**：`ChatContent.tsx` 将 `onSend` 接到 `useChatRuntimeState` 的 `sendMessage`，再由 `useConversationTurnController.ts:59` 通过 IPC `ai.stream.open` 发送 `buildStreamRequest(...)` 的结果；`buildStreamRequest` 组装 `ChatTurnInput`（含 `reasoningEffort` 等选项，`useChatRuntimeState.ts:268-275`）。
-- **占位消息初始化**：主进程侧 `messageService.createUserMessageWithPlaceholders`（一个事务）建 1 条用户消息 + N 条 assistant 占位消息（每个模型一条，都带同一个 `siblingsGroupId`），随后为每个模型构建独立的 `AiStreamRequest` 并各自 `startAiChildTurnSpan` 开一个 trace span（`PersistentChatContextProvider.ts:59-77`）。
+- **占位消息初始化**：主进程侧 `messageService.createUserMessageWithPlaceholders`（一个事务）建 1 条用户消息 + N 条 assistant 占位消息（每个模型一条，都带同一个 `siblingsGroupId`），随后为每个模型构建独立的 `AiStreamRequest` 并各自 `startAiChildTurnSpan` 开一个 trace span（`PersistentChatContextProvider.ts:59-77`）；提交 `ad0ce9cd04` 新增 `mode: 'fill-reserved'`：`req.trigger === 'submit-message'` 且 `req.parentAnchorId` 指向一个 awaiting-input 空叶子时，在同一事务里填充该行并建占位（`PersistentChatContextProvider.ts:234-247,307-323`）；流式进行中提交 reserved-branch 会在主进程侧被直接拒绝（"Cannot submit a reserved branch while a stream is live"），这是渲染层排队的竞态兜底。
 - **任务状态机**：`AiStreamManager` 是一个近 1300 行的中心化状态机类，同时管 chat/prompt/agent-session 三种流、steer 队列、tool approval、多模型并行执行、grace-period 驱逐；状态字段 `ActiveStream.status` 有 6 种取值，转换路径分散在多个方法里（`onChunk/onExecutionDone/onExecutionPaused/onExecutionError/resolveTerminalStatus/computeTopicStatus`）。代码注释本身也承认这类正确性隐患（例如显式解释为什么不能用 `SET NULL`、为什么需要 `dispatchLock` 序列化并发 dispatch），说明维护者也清楚这里状态复杂、容易出竞态，属于"必要复杂度"而非明显可简化，但对新人理解成本确实高（取舍见第 10 节）。
 
 ## 2. 历史选择与上下文拼装顺序
@@ -48,11 +49,11 @@ ChatContent.onSend
 - **历史取法**：持久化历史由 `MessageService.getPathToNode`（`MessageService.ts:1639`）按锚点取根到节点的活动路径（数据语义见会话与消息管理笔记 4.2）。
 - **注入顺序**：`PersistentChatContextProvider.prepareDispatch`（`:143-331`）在创建用户消息和 assistant 占位后调用 `resolveCompactedHistory`（`:367-387`）：该函数先取锚点路径（`:671`），再丢弃最近 `data-clear` 标记及其之前的记录（`:672-673`），随后应用压缩视图。
 - **输入 parts 拼装**（renderer 侧）：`buildComposerQueuedPayload`（`composerQueuedPayload.ts:31`）汇总草稿和队列输入；文本 part 来自 `composerDraft.ts:366,385`，附件 part 来自 `buildFileParts.ts:53`；知识库范围和清理上下文分别以 `uiParts.ts:333-361` 的 data parts 表达，而不是依赖不可见字符串约定。
-- **模型转换阶段**：`toModelMessages`（`messageRules.ts:75-83`）重放持久化工具输出、剔除模型不支持的媒体、转换 UI parts、合并相邻同角色消息并补齐空 assistant；知识库范围和工具配置仍由请求/metadata 传递。
+- **模型转换阶段**：`toModelMessages`（`messageRules.ts:75-130`）重放持久化工具输出、把非法 `dynamic-tool` 名规范化为 wire 合法名（`sanitizeDynamicToolNames`，SHA-1 摘要后缀，`messageRules.ts:68-100`，对应 `0119f3c265`/`40914ab5cd` 的工具名治理）、按 `toolResultCaps` 门控工具结果内的媒体（`gateToolResultMedia`）、剔除模型不支持的媒体、转换 UI parts、合并相邻同角色消息并补齐空 assistant；知识库范围和工具配置仍由请求/metadata 传递。
 
 ## 3. 预算、截断、摘要与压缩
 
-- 当前源码把压缩作为**独立的持久化上下文阶段**处理：`PersistentChatContextProvider` 先按分支和清理标记确定历史，再按上下文窗口决定是否生成或沿用摘要。
+- 当前源码把压缩作为**独立的持久化上下文阶段**处理：`PersistentChatContextProvider` 先按分支和清理标记确定历史，再按上下文窗口决定是否生成或沿用摘要。压缩折叠的收口语义：空摘要/失败的折叠以 `status: 'skipped'` 结算且不留时间线锚点（`PersistentChatContextProvider.ts:801-826`），避免"未压缩的历史"被渲染成"已压缩"标记。
 - 本次未把每个 provider 的 token budget 算法逐一展开；压缩触发阈值未运行验证（见第 11 节）。
 
 ## 4. SDK、Provider、模型与协议交接
@@ -63,6 +64,7 @@ ChatContent.onSend
 ## 5. 流式事件、缓冲、节流与顺序
 
 - **主进程写入侧**：N 个 `runExecutionLoop` 各自流式写各自的占位消息，通过各自的 `PersistenceListener`/`MessageServiceBackend`（`PersistentChatContextProvider.ts:263-289`）。流式期间中间增量落盘的频率本次未核实——**未发现执行侧有逐 chunk 节流落盘的证据**，最终态落盘语义见第 6 节。
+- **重连回放缓冲**（`bfdf63dd6a`）：每个 execution 的 ring buffer 在入队时把连续 delta 合并进尾部、超长 delta 先切分（`maxDeltaBytes=16KB`），避免 delta 洪泛把自身 part 的开头 chunk 挤出导致重放不可解析；环形淘汰在有挂起审批时暂停（审批的 tool-input chunk 是重连后仍须可操作的状态）。
 - **渲染侧交接点**：IPC `ai.stream.chunk/done/error` → `TopicStreamSubscription`（按 `topic -> execution + anchor` 分流）→ `readUIMessageStream` 组装 parts → `useExecutionOverlay` 按 `requestAnimationFrame` 合并帧提交 overlay（anchor 用于区分同一 execution 中的不同 turn；steer/continue 时 execution 可能切换 assistant row）。这些细节属消息渲染器笔记（"流式消息链路"一节），本类目只记录交接契约。
 - **平滑播放**（jitter buffer）在渲染侧（`useSmoothStream`），见消息渲染器笔记。
 - **顺序保证**：terminal frame 会同步 flush，保证最终画面先可见再执行持久化交接（见下节）。
@@ -78,7 +80,7 @@ ChatContent.onSend
 
 - **停止**：停止入口在 UI（ComposerSurface 的暂停/停止工具按钮，见 Chat UI 笔记 5）；**实际中断层（网络 abort 还是仅任务状态停止）本次未沿调用链核实**——"点击了停止"不能证明底层网络、Agent 或服务端任务已取消（第 11 节）。
 - **重试/重新生成/翻译**：经 `ChatWriteActions`（`regenerateMessage/translateMessage/setActiveBranch` 等，入口见 Chat UI 笔记 6.1、6.2）发出，由 `ChatWriteContext` 注入真实实现；它们**如何选择起始上下文**由锚点路径机制决定（第 2 节，数据语义见会话与消息管理笔记 4.2、4.3）。
-- **工具审批暂停**：`AiStreamManager` 管理 tool approval（等待审批时流暂停）；继续审批后 reader 会用数据库当前 anchor message 作为 seed，使新到的 tool output 合并到既有 tool input（渲染侧细节见消息渲染器笔记；审批界面工作流见 Chat UI 与 Agent 工具类目）。
+- **工具审批暂停**：`AiStreamManager` 管理 tool approval（等待审批时流暂停，审批空闲上限 2 小时，超时由 `approvalIdleTimeoutMs` 兜底）；同一回复的多工具审批可逐个连续推进（`1f99a7d3c0`；响应一个请求不会隐藏仍在等待的其余审批 UI）。继续审批后 reader 会用数据库当前 anchor message 作为 seed，使新到的 tool output 合并到既有 tool input（渲染侧细节见消息渲染器笔记；审批界面工作流见 Chat UI 与 Agent 工具类目）。
 - **编辑后发送**：编辑消息时保存旧草稿、取消时还原的界面状态机见 Chat UI 笔记 3.3；发送锚定（挂到哪个 parent）语义见会话与消息管理笔记 4.3。
 
 ## 8. 队列、多会话并发与后台生成

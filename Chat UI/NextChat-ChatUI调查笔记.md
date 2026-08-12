@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\NextChat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`706a18b95b714ab29b2a4842d3b9ff4f887935d5`（分支：`main`）
+> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
 >
 > 调查方式：从 [`../Chat/NextChat-Chat调查笔记.md`](../Chat/NextChat-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
 >

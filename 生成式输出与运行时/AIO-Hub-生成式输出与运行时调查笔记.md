@@ -2,11 +2,11 @@
 
 > 调查对象：`../../aio-hub`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试（仓库未安装 node_modules，`bunx vitest` 拉取依赖超时）
+> 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试
 >
 > 调查范围：模型输出从"消息文本/工具结果"到"可展示、可运行、可编辑、可持久化、可回流对象"的完整链路；覆盖聊天消息物化、HTML 代码块沙箱、web-canvas 工作区、媒体生成资产入库、工具调用结果节点、执行位置与 CSP、持久化与回流；普通 Markdown 渲染细节、Chat 发送/中止/分支语义、工具注册与审批调度本身（仅记录交接点）排除在外；移动端只做概览
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保持为"消息树节点上的纯文本字符串"，在展示时由 `RichTextRenderer` 动态解释为 Markdown/Mermaid/KaTeX/HTML 沙箱等；工作区层则提供 `web-canvas`——一个以磁盘文件为事实源、Git 为版本追踪的 Agent 协作工作区。模型可查询、读取、修改和提交文件，但 2026-08-11 复查发现审批事务、跨窗口错误同步和每画布状态隔离存在结构性断点，因此不能再把它表述为已经验证的完整"运行 -> 报错 -> 修复"闭环。
+AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保持为"消息树节点上的纯文本字符串"，在展示时由 `RichTextRenderer` 动态解释为 Markdown/Mermaid/KaTeX/HTML 沙箱等；工作区层则提供 `web-canvas`——一个以磁盘文件为事实源、Git 为版本追踪的 Agent 协作工作区。模型可查询、读取、修改和提交文件，但审批事务、跨窗口错误同步和每画布状态隔离存在结构性断点，因此不能再把它表述为已经验证的完整"运行 -> 报错 -> 修复"闭环。
 
 - **聊天输出对象模型**：消息节点（`ChatMessageNode`）有稳定 ID、来源、角色、状态与丰富元数据，但内容只是一段 `content: string`，不存在独立的 Artifact 对象；HTML 代码块在展示时进入 iframe 沙箱（`HtmlInteractiveViewer`）成为可运行预览，属"展示时物化"，无独立生命周期。
 - **web-canvas**：`{appDataDir}/canvases/projects/{id}/` 下的物理项目 + `.canvas.json` 元数据 + 独立 Git 仓库；Monaco 编辑直接写盘（500ms 防抖），预览 iframe 用 `asset://` 加载入口文件并注入日志/错误捕获脚本。预览只在独立画布窗口中创建；审批钩子不是事务快照，而是先写工作树、拒绝时按 HEAD 回退。
@@ -37,9 +37,9 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 **能力等级认定**：综合 **G4（可编辑工作区）**。web-canvas 有稳定项目 ID、物理文件和 Git，具备若干 G5 原料，但运行实例不持久、错误状态未跨窗口回到 Agent、审批修改也没有独立 revision/快照，所以当前快照的 **G5 证据不足**。聊天内 HTML 代码块沙箱为局部 **G3**，其余聊天输出停留在 G0–G1。
 
-### 复查补正（2026-08-11）
+### 已确认断点与缺口
 
-本节记录首次调查遗漏、且会改变横向判断的实现事实；均为静态源码确认，未启动 Tauri 应用：
+本节列出已确认的结构性断点与缺口；均为静态源码确认，未启动 Tauri 应用：
 
 1. **运行时错误闭环在窗口边界断开。** `useCanvasPreview` 只被 `components/window/CanvasWindow.vue` 使用，预览运行在独立 WebView；错误写入该窗口自己的 `useCanvasStore()`。`useCanvasSync` 只同步 `activeCanvasId` 与文件变更通知，不同步 `runtimeErrors`，所以主窗口 `CanvasAgentService.getExtraPromptContext()` 通常看不到预览窗口捕获的错误。此前“错误自动回流模型”的结论只是模块内意图，不是贯通链路。
 2. **审批预览不是可逆事务。** 通用执行器先调用 `onToolCallPreview`，批准后仍会调用真实工具方法（`tool-calling/core/executor.ts:233-287,363-398`）。`apply_canvas_diff` 因而先修改一次、批准后再匹配同一 search 块，第二次通常失败；`write_canvas_file` 会重复写入。拒绝时按当前 Git 状态对已有文件执行 `checkout` 到 HEAD、对未跟踪文件直接删除（`CanvasAgentService.ts:306-330`），会一并丢掉审批前已经存在但尚未提交的用户修改，而不是恢复“本次预览前”的内容。批准路径也没有清理 `previewRequests`。
@@ -98,7 +98,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 2.2 画布更新
 
 - Agent 侧：Search/Replace diff 引擎 `applySearchReplaceDiff`（`web-canvas/utils/diff.ts:71`），匹配策略 exact -> trimEnd -> trim -> fuzzy（Bigram Dice，阈值 0.85），支持行号剥离、`start_line` 消歧、缩进修复、重匹配警告；应用结果写盘并刷新 Git 状态（`canvasStore.ts:354-398`）。
-- 用户侧：Monaco 编辑内容 500ms 防抖整体写盘（`CanvasEditorPanel.vue:128-139`）；回调执行时读取当前 `activeTab`，快速切换文件存在把旧内容写入新文件的竞态，且未见卸载时 flush/cancel。
+- 用户侧：Monaco 以纯 ESM 方式加载（`src/utils/monaco.ts`），编辑内容 500ms 防抖整体写盘（`CanvasEditorPanel.vue:128-139`）；回调执行时读取当前 `activeTab`，快速切换文件存在把旧内容写入新文件的竞态，且未见卸载时 flush/cancel。
 - 应用内部写入会触发 `emitFileChanged` -> 预览刷新（300ms 防抖，`useCanvasPreview.ts:47`）+ 分离窗口通知；外部编辑器写入不会触发该事件。
 
 ## 3. 投影表面与多视图关系
@@ -134,7 +134,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ## 6. 编辑、diff、版本与协作
 
 - **聊天消息编辑**：全文覆盖式编辑（`useBranchManager.editMessage`，`useBranchManager.ts:108-156`），仅限 user/assistant 角色；"保存到分支"复制内容到兄弟节点形成分支（:162-209）。无选区编辑、无结构化 patch、无撤销栈持久化（`useChatStorageSeparated.ts:199-204` 明确移除 history 字段）。版本表达依赖消息树分支语义，属于 Chat 类目，此处只记交接点。
-- **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖；未发现 CRDT、基于 revision 的冲突检测或外部文件 watcher，写盘以"最后写入者"为准。Monaco 防抖回调还存在跨 tab 写错文件的静态竞态（见复查补正第 4 点）。
+- **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖；未发现 CRDT、基于 revision 的冲突检测或外部文件 watcher，写盘以"最后写入者"为准。Monaco 防抖回调还存在跨 tab 写错文件的静态竞态（见“已确认断点与缺口”第 4 点）。
 - **版本**：Git 提交/回退/丢弃（`canvasStore.commitChanges` :402、`discardChanges` :457）；`GitInternalService` 提供 init/add/commit/log/checkout/statusMatrix（`GitInternalService.ts:149-234`）。**本次未找到**画布 UI 中的提交历史查看器或 diff 视图组件（`gitLog` 仅存在于服务层，未被组件调用）；Agent 的 `commit_changes`/`discard_changes` 是版本操作入口。
 - **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布侧 `onToolCallPreview` 会在审批前直接写工作树；通用执行器批准后还会再次调用真实方法，使 `apply_canvas_diff` 通常发生第二次匹配失败。拒绝不是恢复审批前快照，而是新文件删除、已有文件 `git checkout` 到 HEAD，可能清除审批前未提交修改（`executor.ts:233-287,363-398`；`CanvasAgentService.ts:270-331`）。
 

@@ -2,11 +2,11 @@
 
 > 调查对象：`../../VCPChat`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：Git 跟踪文件机械统计，并复核 Electron 打包、Rust 服务、附属工具与主要目录
+> 调查方式：Git 跟踪文件机械统计（口径：`git ls-files` 枚举 + 按扩展名/目录分类 + `Get-Content` 计行，仅计文本文件），并复核 Electron 打包、Rust 服务、附属工具与主要目录
 >
 > 调查范围：模块、语言、文档、测试和跨平台代码组织；未运行构建与测试
 >
@@ -14,22 +14,27 @@
 
 ## 结论摘要
 
-VCPChat 是 Electron 主应用、众多按功能命名的前端目录、多个 Rust 本地服务以及 VCP 附属服务/工具合仓的复合仓库。一级目录很多但未形成统一 workspace；模块边界主要靠目录与进程协议维持。跟踪的 `vendor` 是最大单一区域，必须与自有代码分开看。
+VCPChat 是 Electron 主应用、众多按功能命名的前端目录、多个 Rust 本地服务以及 VCP 附属服务/工具合仓的复合仓库。一级目录很多但未形成统一 workspace；模块边界主要靠目录与进程协议维持。跟踪的 `vendor` 是最大单一区域，必须与自有代码分开看。b6ffa22 → fb66a52（101 个提交）新增两个大型自有区域：**`ScriptoriumModules/`**（共笔文坊文档工作台，25 个跟踪文件，其中 JS 约 19,100 行 + CSS 4,644 行 + 一个 65,411 行的字体诊断 JSON 数据文件）与 **`modules/loom/webcore/`**（VCP Agent WebCore，8 个 JS 文件约 5,075 行），并新增 `modules/ipc/docxHandlers.js`（1,091 行）、`modules/services/scriptorium{AgentControl,Import,PptxImport}Service.js`（共约 1,640 行）与 `tests/` 下 15 个新测试文件。
 
 ## 统计与模块分布
 
-| 指标 | 数量 |
-| --- | ---: |
-| Git 跟踪文件 | 834 |
-| 可识别源码 | 484 文件 / 308,286 行 |
-| 文档 | 61 文件 / 12,242 行 |
-| 测试 | 5 文件 / 1,250 源码行 |
+> 旧表数字出自不可复现的第三方统计工具口径，本次按"git ls-files + 扩展名分类 + 文本行数"统一重算；两口径的**跟踪文件数可直接对比**（834 → 894，+60）。
 
-`vendor` 为 19 个源码文件/59,339 行；自有主要区域包括 `VCPDistributedServer/Plugin`（145/27,194）、`modules` 的 IPC/renderer（合计约 55,660 行）、`VCPHumanToolBox/WorkflowEditormodules`（22/17,845）和 `rust_audio_engine/src`（36/15,775）。
+| 指标 | 数量（HEAD） | 对比 b6ffa22 |
+| --- | ---: | ---: |
+| Git 跟踪文件 | 894 | 834（+60） |
+| 可识别源码（文本，排除 vendor/测试/文档） | 598 文件 / 334,822 行 | 556 / 235,548（+99,274 行） |
+| 文档（*.md，不含 vendor/测试内） | 48 文件 / 9,919 行 | 45 / 9,033 |
+| 测试（tests/ + SovitsTest/ 文本） | 24 文件 / 6,543 行 | 9 / 2,248 |
+| vendor（文本） | 22 文件 / 42,870 行 | 22 / 42,870（未变） |
+
+自有主要区域（文本行数，HEAD）：`ScriptoriumModules`（JS+CSS+HTML 约 24,900 行，另含 65,411 行 JSON 诊断数据）、`VCPDistributedServer/Plugin`（147 个跟踪文件，插件目录 26 → 30 个）、`modules` 的 IPC/renderer/services 与 Loom（`modules/loom/` 10 文件约 6,700 行）、`rust_audio_engine/src` 与 `rust_chat_data_service/src`（Rust 合计 23,409 行）。
 
 ## 语言、文档与测试
 
-JavaScript 210,011 行（68.1%）、CSS 50,916 行（16.5%）、Rust 25,647 行（8.3%）、HTML 12,653 行（4.1%）。文档分散在根目录、功能目录和 Distributed Server 插件中。统一规则只识别到 `tests` 4 文件和 `SovitsTest` 1 文件，未形成覆盖各功能目录的测试树。
+语言分布（全部跟踪文本文件，HEAD）：JavaScript 329 文件 / 203,943 行、CSS 89 / 47,069、Rust 59 / 23,409、JSON 41 / 79,340（其中 `ScriptoriumModules/font-name-diagnostics.json` 一个文件即 65,411 行）、HTML 33 / 13,127、Python 21 / 8,156、Markdown 50 / 10,136。剔除 vendor/测试/文档后自有源码约 326,161 行：JS 49.6%、JSON 24.3%（主要同上）、CSS 12.8%、Rust 7.2%、HTML 4.0%、Python 2.2%。
+
+测试树显著扩大：`tests/` 顶层现 7 个文件（frontend-plugins、loom-controller、loom-electron-adapter、loom-manager-runtime、deepmemo-central-adapter、mobile-sync-central-adapter 六个 node:test + test-export-inline.cjs），另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（约 3,620 行，目录名自述"重构中禁用"）；`SovitsTest` 5 个文件。统一规则仍只覆盖这几个目录，未形成覆盖各功能目录的测试树。
 
 ## 跨平台组织与边界
 

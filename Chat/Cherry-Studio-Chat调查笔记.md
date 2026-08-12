@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：逐文件通读源码 + 交叉核对文档
 >
@@ -44,8 +44,8 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 - **Topic**：`src/shared/data/types/topic.ts`，SQLite 行；新建事务内同时创建虚拟根消息（CHECK 约束 `(role='root') = (parentId IS NULL)` 强制）。`TopicService.setActiveNodeTx`（`:373-409`）把 `active_node_id` 指向目标分支 leaf，是分支选择的唯一权威指针。
 - **Message**：`MessageService` 维护 adjacency-list 树；`siblingsGroupId` 标记多模型/多分支兄弟组，`rootId`（`parentId === rootId`）判定"第一轮"；虚拟根不可删、清空保留根。
-- **运行状态**：`AiStreamManager` 的 `ActiveExecution/ActiveStream`（status 6 种取值）是主进程侧权威；渲染层的 branch draft 锚点 ref（`Chat.tsx:82-83`）与 live overlay 只是未落库的临时态。
-- **UI 数据分层**：`useTopicMessages`（SWR 缓存历史）+ `useExecutionOverlay`（流式增量）+ 分支图 `mergeTopicMessageFlowLiveTree`（DB 树 + 运行时 overlay 合并）三套数据互不混入持久层。
+- **运行状态**：`AiStreamManager` 的 `ActiveExecution/ActiveStream`（status 6 种取值）是主进程侧权威；渲染层 live overlay 由窗口级 `ExecutionStreamOverlayService` 持有（组件卸载不拆 reader），分支草稿持久化为空 user 叶子（`reserveBranch`，见专项笔记），不再有 `Chat.tsx` 的锚点 ref 临时态。
+- **UI 数据分层**：`useTopicMessages`（SWR 缓存历史）+ `executionStreamOverlayService`（流式增量，`useExecutionOverlay` 只是 React 绑定）+ 分支图 `mergeTopicMessageFlowLiveTree`（DB 树 + 运行时 overlay 合并；awaiting-input 叶子本身已是 DB 节点）三套数据互不混入持久层。
 
 ## 专项导航
 
@@ -61,7 +61,8 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
 - **消息搜索为 DOM 搜索**：`ContentSearch.tsx` 用 TreeWalker 遍历真实渲染文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容天然搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
-- **已确认缺口**：删除 Topic 不清理磁盘附件文件（`TopicService.ts:316` TODO）；"助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩，本次调查新发现）；`message-tree.md` 的 Flow canvas "forward reference" 说明已过时（代码已存在并工作）。
+- **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩，本次调查新发现）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已被文档更新修复（旧文档与代码不符的问题已解决）。
+- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 的附件回收改由 FileManager 引用计数 + 策略化 GC 兜底（原 `TopicService.ts:316` TODO 注释已移除）。
 
 ## 未验证事项
 
@@ -75,8 +76,8 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - 入口与状态：`src/renderer/pages/home/{Chat,ChatContent,useChatRuntimeState}.tsx`、`src/renderer/pages/home/hooks/useChatWriteActions.ts`、`src/renderer/hooks/useConversationTurnController.ts`
 - 适配器：`src/renderer/pages/home/messages/homeMessageListAdapter.tsx`、`src/renderer/pages/agents/messages/agentMessageListAdapter.tsx`、`src/renderer/components/chat/messages/messageListProviderBuilder.ts`
 - Composer：`src/renderer/components/composer/variants/{ChatComposer.tsx,chat/ChatConversationControls.tsx,chat/useChatMentionedModels.ts}`
-- 消息列表：`src/renderer/components/chat/messages/{MessageList,MessageListProvider,MessageVirtualList}.tsx`、`src/renderer/hooks/{useTopicMessages,useExecutionOverlay}.ts`
-- 分支图：`src/renderer/pages/home/components/TopicBranchPanel.tsx`、`src/renderer/components/chat/flow/{topicMessageFlowGraph,topicMessageFlowLiveTree,topicMessageFlowLayout}.ts`、`TopicMessageFlowCanvas.tsx`
+- 消息列表：`src/renderer/components/chat/messages/{MessageList,MessageListProvider,MessageVirtualList}.tsx`、`src/renderer/hooks/useTopicMessages.ts`、`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`
+- 分支图：`src/renderer/pages/home/components/TopicBranchPanel.tsx`、`src/renderer/pages/home/hooks/useTopicBranchActions.ts`、`src/renderer/components/chat/flow/{topicMessageFlowGraph,topicMessageFlowLiveTree,topicMessageFlowLayout}.ts`、`TopicMessageFlowCanvas.tsx`
 - 搜索与渲染：`src/renderer/components/ContentSearch.tsx`、`src/renderer/pages/home/hooks/useStablePartsByMessageId.ts`
 - 主进程：`src/main/data/services/{TopicService,MessageService}.ts`、`src/main/services/TopicNamingService.ts`、`src/main/ai/streamManager/{AiStreamManager.ts,context/{dispatch,PersistentChatContextProvider,modelResolution}.ts}`、`src/main/ai/runtime/aiSdk/Agent.ts`
 - 文档：`docs/references/chat/message-tree.md`

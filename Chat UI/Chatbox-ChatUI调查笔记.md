@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：从 [`../Chat/Chatbox-Chat调查笔记.md`](../Chat/Chatbox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码；通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱）保留于原 Chat 笔记，待可选界面专题承接
 >
@@ -19,7 +19,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 - 页面顺序固定为 `Header → MessageList → InputBox`；侧栏桌面端是常驻挤压布局，移动端是左侧滑出的临时抽屉（没有底部 Tab Bar）。
 - 首页是一个"假会话"（id 固定为 `'new'`），发送前的临时状态被分散存放在三种不同的容器里；首次发送时迁移到真实 Session。
 - 消息区用 `react-virtuoso` 虚拟化，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不丢阅读位置。
-- Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的"◀ 1/2 ▶"内容替换导航；两者与侧栏分组无关。
+- Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换），替代回复不再以独立导航条平铺；两者与侧栏分组无关。
 - 发送/停止按钮没有 `aria-label`，是本次调查发现的最直接的无障碍缺口。
 - 桌面端全局快捷键只有"显示/隐藏窗口"，托盘不显示聊天状态，系统通知 API 未接入。
 
@@ -48,6 +48,8 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 移动端导航方式不是底部 Tab Bar，是从左侧滑出的 `SwipeableDrawer`（`Sidebar.tsx:138-158`）。`variant={isSmallScreen ? 'temporary' : 'persistent'}`——小屏幕下侧栏是"临时"的覆盖层（打开时盖住内容，点遮罩或滑动关闭），桌面端是"常驻"的挤压布局（内容区 `padding-left` 让出侧栏宽度）。`ModalProps.keepMounted: true` 保证移动端切换时 DOM 不销毁；`disableEnforceFocus: true`（避免侧栏打开时其他弹窗里的 input 无法点击）。`SwipeableDrawer` 支持从屏幕边缘滑动手势打开/关闭，阿拉伯语（RTL）时锚点切到右侧（`anchor={language === 'ar' ? 'right' : 'left'}`，`:139`）。全项目没有找到底部 Tab Bar 组件——移动端的一级导航（新建对话/图片创作/搜索/归档/关于/设置）全部收在这一个可滑出的侧栏抽屉里。
 
 小屏判定 `useIsSmallScreen()`（`hooks/useScreenChange.ts:14-18`）是 `useMediaQuery(theme.breakpoints.down('sm'))`，即 **< 640px 判定为小屏**；`uiStore.ts:10-16` 的 `isSmallScreenViewport()` 用原始 `matchMedia('(max-width: 599.95px)')` 做初始化时的同步判断（用于 `showSidebar` 的初始值）——600px 和 640px 两个数字并不完全一致，理论上存在 600px~640px 区间首屏渲染和后续渲染判断不一致的窄缝，未核实是否有实际可观察的视觉跳变。
+
+**会话项活动指示**（`81571269`）：侧栏会话项带"生成中"（`IconLoader2` 转圈）与"回复完成未读"圆点两种指示。状态来自两个纯内存 zustand store：`stores/session/generation-runtime.ts`（按会话计数进行中的生成）与 `stores/sessionActivityStore.ts`（完成回复但未查看的会话集合，查看会话即清除），`SessionItem.tsx:63` 经 `useSessionActivity()` 消费。**不写入 `SessionMetaRecord`、不持久化**——重启后消失，会话列表的数据模型仍是"只认 meta 记录"。
 
 ## 2. 会话列表、搜索与现场恢复
 
@@ -126,13 +128,15 @@ const [session, setSession] = useState<Session>({
 
 ### 3.3 附件拖入：没有视觉反馈
 
-`InputBox.tsx:1268-1281` 用 `react-dropzone` 的 `useDropzone` 实现拖拽上传，`getRootProps()` 直接铺在整个输入区容器上（`InputBox.tsx:1340`）。**但只解构了 `getRootProps`/`getInputProps`，没有解构 `isDragActive`/`isDragAccept`/`isDragReject`**——grep 全文确认这三个状态字段在 `InputBox.tsx` 里完全没有被使用。也就是说，用户把文件拖到输入区上方悬停时，**没有任何高亮遮罩、虚线边框或文案提示**"松手可上传"，唯一的反馈是松手瞬间文件立刻被处理（成功则出现在附件预览区，被拒绝的文件类型才通过 `toastActions.add` 弹一条"不支持的文件类型"提示，`InputBox.tsx:1274`）。这是一个具体的、可复现的交互缺口：拖拽全程用户得不到"目标区域已识别"的即时反馈。
+`InputBox.tsx:1318` 用 `react-dropzone` 的 `useDropzone` 实现拖拽上传，`getRootProps()` 直接铺在整个输入区容器上。**但只解构了 `getRootProps`/`getInputProps`，没有解构 `isDragActive`/`isDragAccept`/`isDragReject`**——grep 全文确认这三个状态字段在 `InputBox.tsx` 里完全没有被使用。也就是说，用户把文件拖到输入区上方悬停时，**没有任何高亮遮罩、虚线边框或文案提示**"松手可上传"，唯一的反馈是松手瞬间文件立刻被处理（成功则出现在附件预览区，被拒绝的文件类型才通过 `toastActions.add` 弹一条"不支持的文件类型"提示）。这是一个具体的、可复现的交互缺口：拖拽全程用户得不到"目标区域已识别"的即时反馈。
 
 对比之下，会话列表拖拽排序（dnd-kit）有完整的视觉反馈体系（`DragOverlay`、把手图标、编辑模式提示条），输入区文件拖拽在这方面明显更简陋。
 
 ## 4. Agent、模型、工具与发送前配置
 
 输入工具栏提供附件、网页搜索、推理级别、Agent Mode、知识库/技能、新建或回滚 Thread、会话设置、Token/上下文窗口和模型选择。`ModelSelectorV2` 可直接切换 provider/model；Agent Mode 可在 Chat/Agent 间切换，并按模型能力显示执行设备、工作目录、审批模式和 Git/Worktree 控件。生成时发送按钮变为停止。
+
+Agent 面板/按钮的界面变化（`d7133df7`、`31fe3c3b`、`6053a5fd`、`fa9e70ca`、`2c04f2dc`）：工作目录选择器新增"最近使用的工作目录"（`AgentModePanel.tsx`）；Agent 按钮按上下文显示能力提示气泡（capability tips）；小屏下 Agent 模式用 `AgentModeStatusIcon` 状态图标（`AgentModeStatusIcon.tsx`）；Work Mode 菜单关闭增加 300ms 延迟；Web Search / 知识库等能力与 Work Mode 能力控件在 `agentModeState.ts` 中改为用 `capabilitiesDisabled` 独立门控（Web Search、知识库不再受该门控影响）。技能补全弹窗的 `skillCommand` 列表改为不遮挡输入框（`4b0e4b4b`，InputBox 内联重排）。
 
 网页浏览开关的默认值规则：如果该会话没有显式设置过，ChatboxAI provider 默认开、其他 provider 默认关（`InputBox.tsx:241-248`）；这些开关最终以工具注册的方式进入请求（执行语义见对话请求与上下文笔记 9）。
 
@@ -142,21 +146,23 @@ const [session, setSession] = useState<Session>({
 - **生成中占位**：`Message.tsx:946-955` 在 `msg.generating && contentParts.length === 0` 时渲染一个自定义 `Loading` 组件（`components/icons/Loading.tsx`），是手写的纯 SVG 动画——四个圆点用 SVG `<animate>` 标签分别做 `cy`/`opacity`/`r` 三个属性的关键帧动画，`dur="1.25s"`，四个点依次 `begin` 延迟 `0s/0.2s/0.4s/0.6s`，形成"依次跳动"的等待指示器。
 - **工具调用等待中**：`MessageLoading.tsx` 提供 `MessageStatuses`/`PreparingToolCallStatus`（`Message.tsx:97` 引入），用于区分"纯文本生成中"和"准备/等待工具调用"两种状态展示。
 - **会话列表加载**：只有"翻页加载中"的转圈图标（`SessionListLoadingFooter`），没有找到"会话列表完全为空"时的专门空状态组件——grep 未发现 `SessionList.tsx` 或其父组件里有对 `sessions.length === 0` 的特殊分支处理；新用户首次打开时列表为空，视觉上就是一片空白侧栏，没有引导文案或插图。
-- **网络请求失败**：走消息级的 `MessageErrTips.tsx`，会根据 HTTP 状态码查一张 `httpStatusCodeI18nKeys` 映射表（`MessageErrTips.tsx:49-58`，覆盖 401/403/408/429/500/502/503/504）给出可读文案，还专门检测了错误内容是不是网关返回的原始 HTML 页面（`isHtmlContent`，`:40-43`）以避免把一整页 HTML 源码糊给用户看。
+- **网络请求失败**：走消息级的 `MessageErrTips.tsx`，会根据 HTTP 状态码查一张 `httpStatusCodeI18nKeys` 映射表（`MessageErrTips.tsx:49-58`，覆盖 401/403/408/429/500/502/503/504）给出可读文案，还专门检测了错误内容是不是网关返回的原始 HTML 页面（`isHtmlContent`，`:40-43`）以避免把一整页 HTML 源码糊给用户看；`a2e394f8` 起 Chatbox AI 的 OCR 配额耗尽与普通错误区分展示（`QuotaExhaustedCard.tsx`）。
+- **审批卡片滚出视野时**：`d0f52dde` 新增 `PendingApprovalPill`（`components/chat/PendingApprovalPill.tsx`）——当审批卡在消息列表里滚出可视区时，输入框上方浮现浮动审批胶囊（内容来自 `stores/approvalAttentionStore.ts` 的待处理 pauseReason 摘要），点击滚回审批卡所在消息，避免"审批在视野外用户不知情"。
 
 ## 6. 消息操作、分支与版本导航
 
 ### 6.1 消息操作栏
 
-`Message.tsx` 的操作栏按角色显示：助手"再次回复/重试"，用户"在下方继续回复"；两者可编辑、复制、引用、删除、打开更多菜单。助手生成中可停止，图片会话可"在下方生成更多图片"，移动端助手可举报；可恢复工具错误会让用户选择重试整条消息或从最后工具步骤重试。开发环境的更多菜单可查看原始 JSON。`Message` 组件的编辑、复制、重试、删除、分支切换等动作通过 `sessionActions` 写回 store，而不是直接修改 DOM。
+`Message.tsx` 的操作栏按角色显示：助手"再次回复/重试"，用户"在下方继续回复"；两者可编辑、复制、引用、删除、打开更多菜单。助手生成中可停止，图片会话可"在下方生成更多图片"，移动端助手可举报；可恢复工具错误会让用户选择重试整条消息或从最后工具步骤重试。**`5ec9eb70` 起回复仍在生成时也可以编辑/删除消息**：操作可用性与并发停止按钮可见性由 `components/chat/message-action-state.ts` 计算（生成中的最新回复不显示停止按钮，改由输入框停止；ForkGroup 内的替代回复例外）。开发环境的更多菜单可查看原始 JSON。`Message` 组件的编辑、复制、重试、删除、分支切换等动作通过 `sessionActions` 写回 store，而不是直接修改 DOM。
 
 ### 6.2 Thread、Fork 的界面呈现
 
 `MessageList.tsx` 将最新一轮 user+assistant 合成一个渲染 item，其余消息逐条渲染；消息顶部可插入 ThreadLabel，Fork 在分叉点下显示 `ForkNav`，摘要和跨会话来源分别由 `SummaryMessage`、`ForkMarkerMessage` 专用组件呈现（这些组件的内容渲染归消息渲染器，这里记录导航工作流）：
 
 - **Thread 边界**：`renderMessageBlock`（`MessageList.tsx:428-472`）在渲染每条消息前检查 `currentThreadHash[msg.id]`，命中就在该消息上方插入一个 `ThreadLabel`（`MessageList.tsx:679-755`）——thread 边界是消息列表里的一个内联锚点标签（"# threadName"，可点开菜单编辑名字/在抽屉里定位/继续这个 thread/移到独立会话/删除），和侧栏完全无关。`ThreadHistoryDrawer.tsx` 提供的是当前会话内所有 thread 的一个侧滑抽屉列表，作用域也仅限"这一个 Session"。
-- **Fork 导航**：`ForkNav`（`MessageList.tsx:613-673`）：分叉点消息下方一个"◀ 1/2 ▶"控件，点左右箭头切换分支内容，是**同一条消息位置上的内容替换**，不产生新的侧栏条目，也不是 thread。
-- **桌面端还有** `MessageMinimapRail`、上一条/下一条用户消息导航和"回到底部"按钮，移动端会隐藏 minimap 以节省空间。
+- **Fork 切换**：旧 `ForkNav` 组件（分叉点下方"◀ 1/2 ▶"内容替换导航）已在 `ad248276` 中被移除，分支切换并入 `ForkGroup`：折叠组头部显示 `N / M` 位置指示（`ForkGroup.tsx:204`），切换走 `switchFork`/`switchForkTo`（`stores/session/forks.ts` 的 patch 纯函数，数据语义见会话与消息管理笔记 1.3）。
+- **替代回复折叠分支组**：`ad248276` 起，分叉点下方渲染 `ForkGroup`（`MessageList.tsx:439-451`）：把多条替代回复收进"N 个回复"折叠组（新→旧排列，活动分支在最后），可展开逐条查看、复制、删除分支或从组内继续生成/停止（与主列表的 `generatingReplyCount` 计数联动）。
+- **桌面端还有** `MessageMinimapRail`、上一条/下一条用户消息导航和"回到底部"按钮，移动端会隐藏 minimap 以节省空间；minimap 锚点只用消息短预览文本并保持引用稳定（渲染细节见消息渲染器笔记）。
 
 ### 6.3 右键/上下文菜单：桌面端根本没有右键菜单
 
@@ -196,7 +202,7 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ### 9.1 无障碍
 
-- **发送/停止按钮完全没有 `aria-label`**：`InputBox.tsx:1404-1451` 的发送/停止 `ActionIcon`（`onClick={generating ? onStopGenerating : handleSubmit}`）只用图标区分状态（`IconPlayerStopFilled`/`IconArrowUp`），**没有 `aria-label`、没有 `Tooltip` 包裹、没有 `title` 属性**——屏幕阅读器用户点到这个按钮时得不到任何文字描述，这是本次调查里发现的最直接的无障碍缺口证据。
+- **发送/停止按钮完全没有 `aria-label`**：`InputBox.tsx:1505-1507` 的发送/停止 `ActionIcon`（`onClick={generating ? onStopGenerating : handleSubmit}`）只用图标区分状态（`IconPlayerStopFilled`/`IconArrowUp`），**没有 `aria-label`、没有 `Tooltip` 包裹、没有 `title` 属性**（`99c3bc1f`/`4b0e4b4b` 重排输入区后仍如此）——屏幕阅读器用户点到这个按钮时得不到任何文字描述，这是本次调查里发现的最直接的无障碍缺口证据。
 - **模型选择器有 `Tooltip`，但触发元素本身没有 `aria-label`**：`InputBox.tsx:1834-1867` 的 `ModelSelectorV2` 触发按钮（`UnstyledButton`）没有 `aria-label`，视觉上靠内部 `<Text>` 文案传达当前模型名，对屏幕阅读器不算严重问题（有文本内容可读），但下拉箭头图标 `IconChevronRight` 同样没有 `aria-hidden`。`ModelSelectorV2` 内部的行项组件（`ModelRow.tsx:69,101,109,115,132`）反而做得更完整：视觉能力图标（Vision/Reasoning）、收藏按钮都有 `aria-label`。
 - **`trapFocus={false}` 的四个弹窗**（`MessageEdit`、`SessionSettings`、`CopilotDetailModal`、`CopilotSettingsModal`）打开时键盘 Tab 键可以聚焦到弹窗背后的页面元素——这是 git log 可查证的、有意为之的修复（`2930c21d`，为解决 iOS Safari 里 Modal 内文本框无法长按选中文字的问题），但客观上牺牲了这四个弹窗的键盘可达性边界，是一个真实存在、有代码证据、且项目方明知取舍的无障碍缺口。
 - **做得相对完整的反例**：`MessageMinimapRail.tsx:250-263` 的消息跳转导航用真实的 `<button type="button">` 元素、`aria-label={jumpLabel}`（"Jump to message N"）、`focus-visible:ring-1` 可见焦点环，装饰性的圆点用 `aria-hidden="true"`（`:265`）正确隔离；`ModelRow.tsx`、`SessionItem.tsx:276,297`、`SessionList.tsx:264`（拖拽把手）、`ForkMarkerMessage.tsx:45` 等处的图标按钮也都补了 `aria-label`。也就是说项目里**存在无障碍意识**，但覆盖不均——发送/停止这个全应用最高频的交互点恰恰是缺失的。
@@ -211,7 +217,8 @@ const handleContextMenu = (event: MouseEvent) => {
 - **"new" 临时状态分散**在三种容器里，且 `newSessionState.webBrowsing` 是死字段（3.1）。
 - **拖拽排序被限制在同一置顶分组内**（`areSessionsInSamePinGroup`），不能靠拖拽把未置顶会话直接拖进置顶区（2.2）。
 - **`localStorage.removeItem('new-chat')`**（`routes/index.tsx:336`）在本次阅读范围内找不到对应的写入点——未核实其用途，可能是遗留代码。
-- **桌面端无右键菜单、无系统通知、无托盘状态徽标**：桌面集成与聊天状态联动最少（8）。
+- **桌面端无右键菜单、无系统通知、无托盘状态徽标**：桌面集成与聊天状态联动最少（8）；侧栏会话项的"生成中/未读完成"指示仅存在于应用内，不走系统通知（1.2）。
+- **生成中消息可编辑/删除**、ForkGroup 替代回复折叠组、审批浮动胶囊（PendingApprovalPill）属新增交互（6.1/6.2/5）。
 - **类目边界**：本笔记只记录用户工作流与界面状态；Thread/Fork 的数据模型在会话与消息管理笔记 1，流式节流与工具注入在对话请求与上下文笔记 5/9，消息壳与 Markdown 渲染在消息渲染器笔记。原 Chat 笔记中的通用界面盘点（弹窗库、Toast 系统、主题、断点、动画、灯箱、openAboutDialog 死状态）保留在 `../Chat/Chatbox-Chat调查笔记.md`，待可选界面专题承接。
 
 ### 10.1 弹窗与通知交点（通用组件只记录与聊天主链的交点）

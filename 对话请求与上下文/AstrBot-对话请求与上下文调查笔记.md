@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
 >
@@ -20,7 +20,7 @@ AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消
 - **洋葱模型调度**（scheduler.py:35-78）：阶段 `process()` 返回普通协程 → 基线继续；返回 `AsyncGenerator` → 挂起，递归执行后续阶段，后续阶段完成后回到 yield 点执行后置逻辑（LLM 请求阶段用此模式：先让 Respond 发送，再回来做收尾）；`event.stop_event()` 在任意点截断传播。
 - **EventBus 每事件一任务**（event_bus.py:39-63）：`asyncio.create_task` + `_pending_tasks` 强引用防 GC，完成回调暴露未捕获异常。
 - **并发控制**：`SessionLockManager`（session_lock.py:8-55）按事件循环隔离、UMO 粒度的 `asyncio.Lock` + 引用计数自动清理，包裹整个 LLM 请求（internal.py:220）。
-- **follow-up 严格序**（process_stage/follow_up.py，234 行）：Agent 运行期间同发送者的新消息捕获为 `FollowUpTicket`，在捕获时分配单调序号，`asyncio.Condition` 只放行队首；序号状态按 UMO 维护、无残留时自动释放。
+- **follow-up 严格序**（process_stage/follow_up.py，248 行）：Agent 运行期间同发送者的新消息捕获为 `FollowUpTicket`，在捕获时分配单调序号，`asyncio.Condition` 只放行队首；序号状态按 UMO 维护、无残留时自动释放。
 - **上下文压缩两层**（context/manager.py:45-121）：先轮次截断（enforce_max_turns≠-1），再 token 压缩（82% 阈值触发，`TruncateByTurnsCompressor` 或 `LLMSummaryCompressor`，压缩后仍超限折半兜底）。
 
 ## 系统边界与生成任务主链
@@ -147,21 +147,22 @@ for stage in stages:
 - 内层 `_PerLoopSessionLockManager`：`defaultdict(asyncio.Lock)` + 引用计数（:11-30），计数归零自动 pop（:28-30），无泄漏；
 - 单例 `session_lock_manager`（:55）。
 
-### 4.2 follow-up 严格序（process_stage/follow_up.py:1-234）
+### 4.2 follow-up 严格序（process_stage/follow_up.py:1-248）
 
-- 全局表：`_ACTIVE_AGENT_RUNNERS`（UMO → runner，:11）、`_FOLLOW_UP_ORDER_STATE`（UMO → 状态机，:12-19）；
-- **捕获条件**（`try_capture_follow_up` :162-204）：同 UMO、同发送者、runner 未 stop；
-- **捕获时即分配序号**（`_allocate_follow_up_order` :81-90）——按到达顺序而非唤醒顺序；
-- 状态：`pending → active → finished/consumed`（:16-17）；
-- **队首放行**（`_activate_and_wait_follow_up_turn` :112-130）：`asyncio.Condition` 等待 `next_turn == seq`——后续消息阻塞等前序；
-- 完成推进（:63-78 `_advance_follow_up_turn_locked`、:133-148 `_finish_follow_up_turn`）；状态空 + 无 active runner → 释放 UMO 状态（:108-109、:147-148）；
+- 全局表：`_ACTIVE_AGENT_RUNNERS`（UMO → runner，:12）、`_FOLLOW_UP_ORDER_STATE`（UMO → 状态机，:13-19）；
+- **捕获条件**（`try_capture_follow_up` :176-218）：同 UMO、同发送者、runner 未 stop；
+- **捕获时即分配序号**（`_allocate_follow_up_order` :95-104）——按到达顺序而非唤醒顺序；
+- 状态：`pending → active → finished/consumed`（:16-19）；
+- **队首放行**（`_activate_and_wait_follow_up_turn` :126-144）：`asyncio.Condition` 等待 `next_turn == seq`——后续消息阻塞等前序；
+- 完成推进（:77-92 `_advance_follow_up_turn_locked`、:147-162 `_finish_follow_up_turn`）；状态空 + 无 active runner → 释放 UMO 状态（:121-123）；
+- `register_active_runner`/`unregister_active_runner` 在登记/注销 runner 时同步挂载/卸载 agent_stop 回调（follow_up.py:39-58），使停止请求能直达 runner；
 - runner 侧消费：`FollowUpTicket`（tool_loop_agent_runner.py:95-125）——当前轮次结束后按序注入（`_merge_follow_up_notice` 附带 SYSTEM NOTICE 提示优先处理用户插话）。
 
-### 4.3 ActiveEventRegistry（active_event_registry.py:10-67）
+### 4.3 ActiveEventRegistry（active_event_registry.py:11-94）
 
-- UMO → 活跃事件集合（:16-17）；
-- `stop_all`（:28-47）：stop 事件传播（/reset 等场景终止同会话旧事件）；
-- `request_agent_stop_all`（:49-64）：只置 `agent_stop_requested`，**不中断事件传播**——历史保存等后续流程仍可执行；
+- UMO → 活跃事件集合（:17-29）；agent_stop 回调表 `_agent_stop_callbacks`（:18-19、:31-50）；
+- `stop_all`（:52-71）：stop 事件传播（/reset 等场景终止同会话旧事件）；
+- `request_agent_stop_all`（:73-91）：置 `agent_stop_requested`，**不中断事件传播**——历史保存等后续流程仍可执行；同时调用注册的回调（`runner.request_stop`）立即取消 agent 运行（#9602），进行中的 LLM 请求/上下文压缩由 runner 侧 `_await_or_stop`（tool_loop_agent_runner.py:461-501）竞速 abort 信号取消；
 - pipeline `execute` 注册/注销（scheduler.py:87、:98）。
 
 ## 5. 上下文构建与压缩
@@ -203,7 +204,7 @@ _run_compression:
 - **follow-up 严格序**：捕获时分配序号 + Condition 队首放行，避免并发唤醒顺序漂移（注释 "avoid wake-order drift" :156）；
 - **stage 顺序硬编码**：STAGES_ORDER 即约束，新增阶段必须显式加入；
 - **配置粒度多租户**：`pipeline_scheduler_mapping` 按 conf_id 隔离；
-- **agent 停止两态**：`stop_event`（硬断）vs `agent_stop_requested`（软停，保历史）——语义分离。
+- **agent 停止两态**：`stop_event`（硬断）vs `agent_stop_requested`（软停，保历史）——语义分离；软停经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，但事件传播与历史保存仍继续（#9602）。
 
 ### 6.2 取舍（平衡决策）
 
@@ -215,7 +216,7 @@ _run_compression:
 ### 6.3 静态推断的潜在问题（源码推断，未实测）
 
 1. **长会话低频访问**：`max_context_length=-1` 默认不按轮次限制，依赖 82% token 阈值触发压缩，低频会话可能长期携带大上下文（每次请求全量发送）；
-2. **follow-up 与流式并行**：`enable_streaming` 时 runner 仍在流式输出，follow-up 注入时机的完整行为（tool_loop_agent_runner.py:119-125 区段）未实测；
+2. **follow-up 与流式并行**：`enable_streaming` 时 runner 仍在流式输出，follow-up 注入时机的完整行为（tool_loop_agent_runner.py:713-717 区段）未实测；
 3. **洋葱递归深度**：每个 AsyncGenerator 阶段都递归展开，含 agent 的 Process 阶段 + 8 层后续阶段嵌套，深链异常栈排查成本高；
 4. **EventBus 队列无限**：无背压/丢弃策略，突发流量下内存增长。
 
@@ -234,7 +235,7 @@ _run_compression:
 - 事件：`astrbot/core/event_bus.py`（:23-83）
 - 流水线：`astrbot/core/pipeline/stage_order.py`（:3-13）、`scheduler.py`（:17-98）、`stage.py`（register_stage）
 - 各阶段：`waking_check/stage.py`（:17-248）、`whitelist_check/stage.py`、`session_status_check/stage.py`、`rate_limit_check/stage.py`（stall :74-82）、`content_safety_check/stage.py`、`preprocess_stage/stage.py`、`process_stage/stage.py`、`result_decorate/stage.py`（:21-439）、`respond/stage.py`
-- Agent 子阶段：`process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`third_party.py`、`follow_up.py`（:1-234）
+- Agent 子阶段：`process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`third_party.py`、`follow_up.py`（:1-248）
 - 并发：`astrbot/core/utils/session_lock.py`（:8-55）、`utils/active_event_registry.py`（:10-67）
 - 上下文：`astrbot/core/agent/context/manager.py`（:10-121）、`truncator.py`、`token_counter.py`、`compressor.py`、`config.py`
 - 群上下文：`astrbot/builtin_stars/astrbot/group_chat_context.py`（:31-302）

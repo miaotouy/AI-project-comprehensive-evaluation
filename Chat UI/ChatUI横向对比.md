@@ -2,9 +2,9 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-11
+> 对比更新日期：2026-08-12
 >
-> 依据：本类目 16 篇单项目调查笔记（从 `../Chat/Chat横向对比.md` 迁移，原调查日期 2026-08-07 至 2026-08-10）
+> 依据：本类目 16 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -29,7 +29,7 @@
 | AstrBot | WebChat 与会话管理页服务于多 IM 平台后台 | 输入可触发命令建议与 Live Mode；真实入站还来自 QQ/Telegram 等平台 | Web UI 只是多平台事件系统的一个入口，不能代表群聊唤醒和平台回复的全部行为 |
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
 | Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
-| DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读 | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
+| DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读；Composer 显示 DeepSeek 原生 web 搜索开关（`supportsSearch/searchExecution` 能力字段，仅官方 deepseek-v4-flash 生效） | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
 | Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
 | LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |
@@ -37,7 +37,7 @@
 | NextChat | 单页 Chat + 会话列表 | stop/retry/delete/pin/copy/TTS；图片和音频直接作为消息内容 | 不是虚拟列表；完整历史仍驻留 session 数组，窗口只限制渲染切片 |
 | Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
 | SillyTavern | Agent/群组/Topic 侧栏 + 中央消息 DOM + 通知/设置面板 | 发送按钮复用为中止；群聊邀请/多模式调度改变消息流 | 扩展性和可定制性最高，但长聊天没有虚拟化，重绘与旧 DOM 引用风险更明显 |
-| VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称 |
+| VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称；话题条目带"未读 N/未读"文字指示器（自动计数或持久化标记，用户参与即清除），搜索框完整输入"未读话题"可置顶未读话题 |
 | VCPToolBox | 不提供聊天主界面；AdminPanel 是运维 SPA，OpenWebUISub 是第三方页面增强脚本 | 不承接会话输入/停止/导航 | 不能与其它聊天应用按 UI 直接排名，属于后端协议与外部前端适配层 |
 | OpenCode | 会话列表 + 虚拟化 timeline（Web）；TUI 全屏会话页 | Web 发送/中断/排队/followup dock；TUI 发送、双击 Esc 中断、shell 模式、`@` agent 提及 | 渲染核心独立成 `packages/session-ui` 包被 Web 复用；Web 与 TUI 是两套独立渲染栈，共享服务端事件协议 |
 | Pi | 终端 TUI 全屏会话 + 命令面板、选择器、状态行 | 键盘工作流：发送、中断、shell 模式、bash 执行交互；无鼠标工作流 | 以用户任务抽象，不套用桌面布局标题；流式反馈在状态行与消息区 |
@@ -54,12 +54,12 @@
 - **LobeHub**：侧栏 `TopicSearchBar`/`AllTopicsDrawer` 提供全量 Topic 搜索入口（后端 BM25 返回 Topic 列表，不直接定位到消息）。
 - **Jan**：SearchDialog 展示并导航 Thread（Fzf 懒建索引的会话列表搜索）。
 - **AIO Hub**：会话内搜索是前端线性扫描，仅覆盖当前活动路径，无法命中隐藏分支；跨会话搜索只能定位到会话，两套搜索没有衔接。
-- **Pi**：搜索在选择器内对 `id+名称+全部消息文本+cwd` 做 token/正则匹配，结果是会话级命中。
-- **Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode**：本次笔记未确认用户可见的"命中具体消息并跳转"链路（Open WebUI 后端 `/search` 结果粒度是 Chat；OpenCode 仅会话标题搜索）。
+- **Pi**：搜索在选择器内对 `id+名称+全部消息文本+cwd` 做 token/正则匹配，结果是会话级命中；harness SDK 另存 `createScanningSessionSearch`（异步迭代器分页扫描，未接入 TUI/AgentSession，数据侧见会话与消息管理横向对比）。
+- **Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode**：本次笔记未确认用户可见的"命中具体消息并跳转"链路（Open WebUI 后端 `/search` 结果粒度是 Chat；OpenCode 仅会话标题搜索；VCPChat 的"未读话题"/"unread topic"是置顶约定词，非内容搜索）。
 
 ## 消息操作、分支导航与呈现投影
 
-- **分支/版本导航入口**：Chatbox 的 ForkNav"◀ 1/2 ▶"与 ThreadLabel 内联锚点；Jan 的 `< n/m >` 版本导航与 activeRootId 切换；Cherry Studio 的 `TopicBranchPanel`（React Flow 画布选分支辅助面板）；AIO Hub 的 Vue Flow 树图与 `BranchNavigator`；Open WebUI 的 Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；SillyTavern 的 checkpoint 旗标（Shift+点击新建）与 branch 跳转；Pi 的 label/分支切换选择器。
+- **分支/版本导航入口**：Chatbox 的 ForkGroup 折叠分支组（`N / M` 位置指示，替代已移除的 ForkNav"◀ 1/2 ▶"，替代回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；Jan 的 `< n/m >` 版本导航与 activeRootId 切换；Cherry Studio 的 `TopicBranchPanel`（React Flow 画布选分支辅助面板）；AIO Hub 的 Vue Flow 树图与 `BranchNavigator`；Open WebUI 的 Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；SillyTavern 的 checkpoint 旗标（Shift+点击新建）与 branch 跳转；Pi 的 label/分支切换选择器。
 - **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
 - **呈现投影**：同一份会话数据可以有多种用户可见投影——AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图、VCPChat 的 bubble/panel/immersive 三种 CSS 投影、Chatbox 和 Jan 的分支版本导航。仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 

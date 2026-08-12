@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`7450ab2dde5eacab4a8721f8680006ba8b99438d`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：只读核对 Copilot 类型定义、Session 类型、Settings Schema、初始数据、Skills 类型及 Agent Mode 实现；未修改被调查仓库源码
 >
@@ -74,7 +74,11 @@ Session 的 `copilotId?: string` 字段持有关联 ID。用户用某个 Copilot
 
 ### 3.5 重新生成语义
 
-重新生成**不替换原消息**：`regenerateInNewFork`（`src/renderer/stores/session/generation.ts:74-102`）→ `createNewFork` + `runGenerateMore`（`insertMessageAfter` 在 fork 分支新插一条 assistant 消息生成）；仅首条/找不到位置时回退在原消息上生成（generation.ts:90-97）。例外：工具暂停后的继续/重试以 `appendToMessage: true` 写回原消息（orchestration.ts:908、1058、1161、1192）。本快照未找到开场白字段（"greeting" 仅出现在新手指引流程 `useGuideSession.ts:148-315`）和提示词块分组/组级开关。
+重新生成**不替换原消息**：`regenerateInNewFork`（`src/renderer/stores/session/generation.ts:104-138`）→ `createNewFork`（`forks.ts:27`，fork 变换由 `shared/session/message-forks.ts` 的纯函数 patch 实现） + `runGenerateMore`（`insertMessageAfter` 在 fork 分支新插一条 assistant 消息生成）；仅首条/找不到位置时回退在原消息上生成。例外：工具暂停后的继续/重试以 `appendToMessage: true` 写回原消息（`orchestration.ts:1205`、`1355`、`1468`、`1499` 的 `continuePausedToolCall`/`stopPausedToolCall` 恢复路径）。本快照未找到开场白字段（"greeting" 仅出现在新手指引流程 `useGuideSession.ts:148-315`）和提示词块分组/组级开关。
+
+### 3.6 会话级 Agent 行为设置
+
+`SessionSettingsSchema` 另有 `pauseOnToolCallLimit?: boolean`（`shared/types/settings.ts:211`）：按会话覆盖全局的"工具调用 25 次确认点"（全局 `Settings.pauseOnToolCallLimit` 默认 true，`shared/types/settings.ts:558`）。该字段与 Copilot 无关，属于会话级 Agent 行为设置（生效语义见对话请求与上下文笔记 9.5、Agent 工具笔记 5.2）。
 
 ## 4. 模型与输出偏好
 

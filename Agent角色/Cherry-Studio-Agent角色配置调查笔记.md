@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b7673c23860db5dd6da7f42dec5fc21f6b13de1a`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：只读核对 Assistant 类型定义、数据库 Schema、AssistantSettings、默认预设、系统提示词装配逻辑和 AgentSession 入口；未修改被调查仓库源码
 >
@@ -82,17 +82,18 @@ interface Assistant {
 
 1. 若 `assistant.prompt` 非空，调用 `replacePromptVariables(assistant.prompt, model.name)` 替换变量后写入；
 2. 若工具集中包含 `tool_search` 工具，追加推迟工具的命名空间目录提示词（`deferredToolsSystemPrompt`）；
-3. 多段用 `\n\n` 连接，全空返回 `undefined`。
+3. 所选首方查询工具带 citation-id 契约时（`hasCitableTools`）追加 `CITATIONS_SYSTEM_PROMPT` 引用格式说明段（`assembleSystemPrompt.ts:19-25,41-49`）；
+4. 多段用 `\n\n` 连接，全空返回 `undefined`。
 
 目前 `prompt` 是纯文本，支持变量替换但没有类似 AIO Hub 的多节点消息树；没有 few-shot 示例对话的原生存储字段。
 
 ### 3.3 会话绑定与历史快照语义
 
-会话（topic）只保存 `assistantId` 引用（`src/main/data/db/schemas/topic.ts:20`，另有 `activeNodeId`），不保存 Assistant 配置副本。发送时每次请求按 id 重读当前 Assistant：`modelResolution.ts:32-45` 的 `resolveAssistantModelId` → `assistantDataService.getById`；`AiService.ts:868` 的 `getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`，`buildAgentParams` 用其当前 prompt/settings/tools 建参（`assembleSystemPrompt.ts:29-30` 直接读 `assistant.prompt`）。因此修改助手后，既有会话的下一次请求即使用新配置，属于"运行时引用"语义。
+会话（topic）只保存 `assistantId` 引用（`src/main/data/db/schemas/topic.ts:20`，另有 `activeNodeId`），不保存 Assistant 配置副本。发送时每次请求按 id 重读当前 Assistant：`modelResolution.ts:32-45` 的 `resolveAssistantModelId` → `assistantDataService.getById`；`AiService.ts` 的 `getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`，`buildAgentParams` 用其当前 prompt/settings/tools 建参（`assembleSystemPrompt.ts` 直接读 `assistant.prompt`）。因此修改助手后，既有会话的下一次请求即使用新配置，属于"运行时引用"语义。例外是自动命名：`TopicNamingService.generateSummaryTitle` 生成标题的请求刻意**不携带 `assistantId`**，避免把助手的工具配置（MCP/联网/知识库）挂到标题生成请求上。
 
 消息侧有部分快照：每条 assistant 消息保存 `modelId` 与 `messageSnapshot`（作者 id/name/emoji + 内嵌模型快照，`src/main/data/db/schemas/message.ts:39-41`；`MessageSnapshotSchema` 在 `src/shared/data/types/message.ts:396-402`），由 `PersistentChatContextProvider.ts:39-55` 的 `buildAssistantMessageSnapshot` 在占位消息创建时写入（:246）。快照不含 temperature 等采样参数；未找到完整 Assistant 配置的 revision 快照。
 
-重新生成不是覆盖：`src/renderer/pages/home/hooks/useChatWriteActions.ts:214` 的 `regenerateWithCapabilities` 带 `parentAnchorId` 调 `ai.stream.open(trigger: 'regenerate-message')`；主进程 `PersistentChatContextProvider.ts:196-213` 的 isRegenerate 分支经 `modelResolution.ts:53-64` 的 `resolvePersistentSiblingsGroupId` 继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。
+重新生成不是覆盖：`src/renderer/pages/home/hooks/useChatWriteActions.ts:304` 的 `regenerateWithCapabilities` 带 `parentAnchorId` 调 `ai.stream.open(trigger: 'regenerate-message')`；主进程 `PersistentChatContextProvider` 的 isRegenerate 分支经 `modelResolution.ts:53-64` 的 `resolvePersistentSiblingsGroupId` 继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。另外，"从历史节点开新分支"采用持久化空 user 叶子（`reserveBranch`/`fill-reserved`），该语义属会话与消息管理类目。
 
 本快照未找到开场白字段（`ConversationGreeting.tsx` 只是空会话占位组件，不落库）和提示词块分组/组级开关（`assistant.prompt` 是单文本；`prompt` 表是独立"用户提示词片段"，非分组机制）。
 
@@ -114,7 +115,7 @@ interface AssistantSettings {
 
   // ——工具使用——
   mcpMode: 'disabled' | 'auto' | 'manual'
-  maxToolCalls: number          // 默认 20
+  maxToolCalls: number          // 默认 100（合法范围 1-1000，`assistant.ts:31-35,108`）
   enableMaxToolCalls: boolean   // 默认 true
 
   // ——上下文来源——
@@ -165,6 +166,8 @@ interface AssistantSettings {
 ## 6. 内置角色方向
 
 Cherry Studio 只有一个内置助手实例（空提示词的 "Cherry 助手"），不预置多个角色人格。角色的个性化完全靠用户的 `prompt` 字段，以及从资源目录市场导入的模板。
+
+需要区分：**内置 cherry-assistant Agent**（`resources/builtin-agents/cherry-assistant/`，含 `SOUL.md`/`agent.json`/`product-manifest.json`）走的是 Claude Code Agent 路径的内置 Agent 体系，与 `DefaultAssistantSeeder` 生成的普通 Assistant 实例是两套对象：前者是 Agent（有 SOUL/工具白名单），后者是空提示词助手——"只有一个内置助手、不预置多角色人格"的结论只适用于 Assistant 体系。
 
 Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段（`type`、`group`、`messages` 少样本对话、`enableUrlContext`、`knowledgeRecognition`、`regularPhrases` 等），v2 迁移时做了精简，主要能力保留在 `AssistantSettings` 中或移到了独立关联表。
 

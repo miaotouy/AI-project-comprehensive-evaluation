@@ -4,9 +4,9 @@
 >
 > 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：汇总现有十类单项目笔记，对十六项候选逐一走读源码主链（入口 → 状态/对象 → 执行 → 用户结果 → 持久化），核对模块注册（`main.html`、`main.js`、IPC handlers、`VCPDistributedServer` 插件目录）与近期 Git 历史；2026-08-12 补充音频引擎专项（`rust_audio_engine` 源码 + `audio_engine` 部署产物 + `Musicmodules` + `musicHandlers.js` + MusicController 工具链）与旁路模块补查（划词小助手、主题、论坛、骰子、笔记、翻译、语音、TTS 族、RAG Observer、任务台、VchatManager、日志）；未运行应用、未发起真实模型请求，全部结论为静态分析
+> 调查方式：汇总现有十类单项目笔记，对十六项候选逐一走读源码主链（入口 → 状态/对象 → 执行 → 用户结果 → 持久化），核对模块注册（`main.html`、`main.js`、IPC handlers、`VCPDistributedServer` 插件目录）与近期 Git 历史；补充音频引擎专项（`rust_audio_engine` 源码 + `audio_engine` 部署产物 + `Musicmodules` + `musicHandlers.js` + MusicController 工具链）与旁路模块补查（划词小助手、主题、论坛、骰子、笔记、翻译、语音、TTS 族、RAG Observer、任务台、VchatManager、日志）；再核对 b6ffa22 → fb66a52 的 Loom v2/WebCore 升级与新增 Scriptorium 文坊子系统；未运行应用、未发起真实模型请求，全部结论为静态分析
 >
 > 调查范围：待查清单中 VCPChat 的全部候选能力 + 音频引擎/音乐播放器专项 + 上轮排除与遗漏的旁路产品面补查；去重边界以现有类目笔记为准（群聊发言模式、Canvas、日记渲染、桌面挂件渲染等已有笔记覆盖的部分只补交点）
 >
@@ -27,13 +27,15 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 7. **ComfyGen 专用配置面板**：HumanToolBox 内嵌 ComfyUI 配置抽屉，管理连接、工作流模板（导入/转换/校验）、模型与 LoRA 参数，写回后端插件配置。
 8. **Agent 正则系统**：`stripRegexes` 规则模型带作用域（渲染/上下文）、角色、min/max 深度，GUI 编辑并兼容导入 SillyTavern 正则脚本。
 9. **跨聊天消息转发与转发附言**：右键转发 → 目标选择（Agent/群组）→ 带来源标识与可选评论构造新消息 → 走标准发送链，附件一并携带。
-10. **前端插件机制与 LoomAPP 运行时**：`manifest.frontend` 声明插件样式/脚本，主进程扫描后注入主窗口；现有 VChatDynamicWallpaper、VChatAutoTTS 两个渲染器插件；Loom 是 Agent 可创建、管理、注入代码的隔离 WebApp 运行时。
+10. **前端插件机制与 LoomAPP 运行时**：`manifest.frontend` 声明插件样式/脚本，主进程扫描后注入主窗口；现有 VChatDynamicWallpaper、VChatAutoTTS 两个渲染器插件；Loom 是 Agent 可创建、管理、注入代码的隔离 WebApp 运行时。b6ffa22 后 Loom 升为 **v1.4.0 + VCP Agent WebCore**：新增页面快照（Grounded Markdown）/页面图片/Web Core 动作执行/串行指令与设备管理（WebHID/USB/Serial/Bluetooth），Loom 从"网页容器"进化为"Agent 可感知、可操作的网页运行时"。
 11. **VCPMobileSync 跨端双向增量同步**：三阶段协议（Reconcile → Double-Hash Merkle Diff → NDJSON 流式），冲突按最新时间戳胜出，墓碑拦截防回流；中央索引模式由 `vcp_chat_data_service`（VCP-CDS）承接。
 12. **Agent 自主管理 Topic（TopicSponsor）**：分布式插件直接读写 `AppData/Agents|UserData` 创建话题、回复话题、检查所有权/未读，与 FlowLock 的 `CreateFlowlockTopic` 交接构成闭环。
 
+b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium 共笔文坊（VCP Scriptorium）**——本地富文档/演示创作空间（VDOCX/VPPTX 工程、DOCX/PPTX/MD/HTML/RTF/TXT 导入、HTML/PDF 导出），人类直接编辑渲染版式，Agent 经 `ScriptoriumCollaborator` direct 插件以"可审阅 PR"（文脉刻点 + 审批回执 + 修订冲突保护）协作编辑源码。详见能力卡 15。
+
 声明不符或依赖外部仓库的项：README 声称的"群文件/共享工作区/协同编辑"在本仓库未找到对应实现；"ST 预设、角色卡、世界书"在 VCPChat 前端无导入与管理入口（后端 VCPToolBox 才有）；"跨模态智能转译/全 URL 超栈追踪"的主服务器逻辑在 VCPToolBox，本仓库只确认节点侧 `internal_request_file` 拉取链；"跨端记忆"的中心记忆库同样位于后端。
 
-本轮补充调查（2026-08-12）新增两条 `主链确认` 能力：**VCP Hi-Fi 音频引擎与音乐播放器**（自研 Rust 解码/DSP/WASAPI 引擎 + Agent 点歌工具 + 桌面音乐挂件 + WebDAV 曲库）与**划词小助手（Rust 桌面感知引擎）**。另补查 11 个旁路模块：双语混合朗读、3D 物理骰子、Agent 论坛客户端、RAG Observer 信息流监听、语音聊天（Puppeteer 方案）、笔记系统达到 `主链确认`；任务台、VchatManager、日志中心为 `入口确认`；主题系统为 `骨架/声明不符`（README 声称的"Agent 主题生成器"未接线）。本轮同时核出 8 项 README 声明与代码不符（DSD 硬解码、AI 歌词创作、音乐实时听音、TTS"600% 剪枝"、主题生成器、骰子多主题/物理施法、划词小助手右键呼出/文件夹工作区、Obsidian 云同步），详见"声明不符"节。
+新增两条 `主链确认` 能力：**VCP Hi-Fi 音频引擎与音乐播放器**（自研 Rust 解码/DSP/WASAPI 引擎 + Agent 点歌工具 + 桌面音乐挂件 + WebDAV 曲库）与**划词小助手（Rust 桌面感知引擎）**。另补查 11 个旁路模块：双语混合朗读、3D 物理骰子、Agent 论坛客户端、RAG Observer 信息流监听、语音聊天（Puppeteer 方案）、笔记系统达到 `主链确认`；任务台、VchatManager、日志中心为 `入口确认`；主题系统为 `骨架/声明不符`（README 声称的"Agent 主题生成器"未接线）。同时核出 8 项 README 声明与代码不符（DSD 硬解码、AI 歌词创作、音乐实时听音、TTS"600% 剪枝"、主题生成器、骰子多主题/物理施法、划词小助手右键呼出/文件夹工作区、Obsidian 云同步），详见"声明不符"节。
 
 ## 介绍声明与候选盘点
 
@@ -56,7 +58,8 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 | Agent 正则系统 | `主链确认` | Agent 设置正则编辑器 + `stripRegexes` | 主贡献（上下文 DSL 族） |
 | 跨聊天消息转发与气泡评论 | `主链确认` | 消息右键 → 转发模态 | 辅助贡献（Chat 工作流） |
 | 分布式多模态文件追踪与能力转译 | `入口确认`（节点侧）；追踪与转译在外部 | `internal_request_file` | 暂缓计入 |
-| 动态壁纸、自动 TTS、Loom 等前端插件 | `主链确认`（机制与 Loom）；`入口确认`（两个渲染器插件本体） | `frontend-plugin-loader.js` + manifest.frontend | Loom 独立主贡献；插件机制辅助 |
+| 动态壁纸、自动 TTS、Loom 等前端插件 | `主链确认`（机制与 Loom）；`入口确认`（两个渲染器插件本体） | `frontend-plugin-loader.js` + manifest.frontend；Loom v1.4.0 + `modules/loom/webcore/*` | Loom 独立主贡献；插件机制辅助 |
+| Scriptorium 共笔文坊 | `主链确认` | `ScriptoriumModules/` + `docxHandlers.js` + ScriptoriumCollaborator 插件 | 主贡献（创作工作站族，能力卡 15） |
 
 ## 已确认的独特能力
 
@@ -94,16 +97,16 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 
 ### 能力卡 3：VCPDesktop 流式推送与持久挂件
 
-既有 `Agent工具` 与 `生成式输出与运行时` 笔记已确认 `<<<[DESKTOP_PUSH]>>>` 流式拦截（`modules/renderer/streamManager.js:1906` `processDesktopPushToken`）、挂件收藏目录 `AppData/DesktopWidgets/<id>/`（`modules/ipc/desktopHandlers.js:999-1095`）与模型侧远程控制（`desktopRemoteHandlers.js`）。本轮补充：
+既有 `Agent工具` 与 `生成式输出与运行时` 笔记已确认 `<<<[DESKTOP_PUSH]>>>` 流式拦截（`modules/renderer/streamManager.js:1906` `processDesktopPushToken`）、挂件收藏目录 `AppData/DesktopWidgets/<id>/`（`modules/ipc/desktopHandlers.js:999-1095`）与模型侧远程控制（`desktopRemoteHandlers.js`）。本卡补充运行恢复、资源治理与近期提交范围三个面：
 
 - **运行恢复**：收藏 = 截图 + HTML 落盘（`Desktopmodules/favorites/favoritesManager.js:21-73`）；恢复 = `desktopLoadWidget` 读文件 → `widget.create` 重建 → 延迟执行内联脚本（`:108-139`），运行状态不持久，重启后脚本重新执行。收藏列表经 `desktop-list-widgets` 从目录扫描（`desktopHandlers.js:1228-1271`），并自动维护 `CATALOG.md` 索引（`:212-295`）。
 - **资源治理**：挂件沙箱跟踪自身 `_intervals/_timeouts/_windowListeners/_docListeners` 以便销毁清理（`Desktopmodules/core/widgetManager.js:460-538`）；`performanceManager` 按周期打点 JS 执行时长与帧数，估算每挂件 CPU%/FPS（`core/performanceManager.js:41-143`）；`visibilityFreezer` 冻结不可见区域的壁纸 iframe/视频动画（`core/visibilityFreezer.js:237`）；另有 zIndex 管理与删除 fallback。
-- **当前 HEAD 变化**：近期提交中 `Desktopmodules` 仅两次变更（`0f8aa6d` Loom 工程落地、`3f14e93` fix），未发现挂件主链的结构性改动；新增变化集中在 `VCPDistributedServer`（动态壁纸/自动 TTS 插件 `649e9af`、LoomController `3e3c6b9`、VCP-CDS 数据库重构 `d00c10b`），见能力卡 10 与 11。
+- **近期提交范围**：`Desktopmodules` 仅两次变更（`0f8aa6d` Loom 工程落地、`3f14e93` fix），挂件主链无结构性改动；变化集中在 `VCPDistributedServer`（动态壁纸/自动 TTS 插件 `649e9af`、LoomController `3e3c6b9`、VCP-CDS 数据库重构 `d00c10b`），见能力卡 10 与 11。
 - **证据强度**：恢复与资源治理为源码事实；真实桌面渲染、动画冻结效果与性能数据未运行验证。
 
 ### 能力卡 4：FlowLock 主动连续工作
 
-既有 `Agent工具` 笔记已确认状态机、心跳、重试与完整请求重建。本轮补充（协议文档 `Flowlockmodules/README.md` 与代码一致）：
+既有 `Agent工具` 笔记已确认状态机、心跳、重试与完整请求重建。本卡补充（协议文档 `Flowlockmodules/README.md` 与代码一致）：
 
 - **用户可见状态**：Agent 侧栏头像活动状态环、当前标题发光/悦动、心跳脉冲动画（`Flowlockmodules/flowlock.css`）；消息内渲染 Start/Stop/Complete/Fail/NextHeartbeat/NextPrompt 状态气泡（`flowlock-protocol.js:326-330`，`data-vcp-block-type="flowlock"`）。
 - **用户操作**：右键聊天标题 = 启动（不立即续写）/停止；中键 = 启动并立即续写/停止；`Ctrl+G`（macOS `Command+G`）同中键（`flowlock-integration.js:272-367`）。
@@ -166,9 +169,9 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 ### 能力卡 10：前端插件机制与 LoomAPP 运行时
 
 - **插件注册与注入**：插件 manifest 的 `frontend: {style, script}` 字段声明渲染器插件（`VChatDynamicWallpaper`、`VChatAutoTTS` 的 `plugin-manifest.json` 均为 `pluginType: renderer`）；主进程 `listEnabledFrontendPlugins`（`modules/ipc/desktopHandlers.js:96-120`）扫描 `VCPDistributedServer/Plugin/*`，路径经 `resolveFrontendPluginResource` 白名单校验后返回相对 URL；`frontend-plugin-loader.js` 在 `DOMContentLoaded` 后把样式/脚本注入主窗口并派发 `vcp-frontend-plugins-loaded`。
-- **两个现存插件（入口确认）**：VChatDynamicWallpaper（文件夹视频壁纸 + 紧凑播放控制）、VChatAutoTTS（自动朗读与代码块朗读开关），均为近期提交 `649e9af` 新增，插件本体行为未运行验证。
-- **LoomAPP 运行时（主链确认）**：`modules/loom/VCPLoomManager.js`（1194 行）用 `WebContentsView` 托管"LoomAPP"（manifest 含 id/startUrl/窗口/视口/UA/注入 css+js，`inject.css`/`inject.js` 有 2MB 上限，`SAFE_APP_ID` 校验，`:15-25/:118-`）；用户面 `Loommodules/manager.html`（应用抽屉、导入/导出 `:166-168`）；Agent 侧 `LoomController` 插件提供 ListApps/CreateApp/OpenApp/CloseApp/GetAppSources/GetRuntimeSource/GetRenderedText/EditAppSources 共 9 个命令（`VCPDistributedServer/Plugin/LoomController/README.md:106-120`，EditAppSources 支持运行时热更新）。测试：`tests/loom-controller.test.js`。
-- **证据强度**：注册、注入、Loom 命令分发均为源码事实；LoomAPP 实际运行与隔离边界未运行验证。
+- **两个现存插件（入口确认）**：VChatDynamicWallpaper（文件夹视频壁纸 + 紧凑播放控制）、VChatAutoTTS（自动朗读与代码块朗读开关），均为 `649e9af` 引入，插件本体行为未运行验证。
+- **LoomAPP 运行时（主链确认）**：`modules/loom/VCPLoomManager.js`（现 2,076 行）用 `WebContentsView` 托管"LoomAPP"（manifest 含 id/startUrl/窗口/视口/UA/注入 css+js，`inject.css`/`inject.js` 有 2MB 上限，`SAFE_APP_ID` 校验）；用户面 `Loommodules/manager.html`（应用抽屉、导入/导出）+ `Loommodules/device-menu.html`（WebHID/WebUSB/WebSerial/WebBluetooth 设备授权选择，`loom:device-candidates` 事件）；Agent 侧 `LoomController` 1.4.0 插件提供 13+ 命令（`plugin-manifest.json`）：原 ListApps/CreateApp/OpenApp/CloseApp/GetAppSources/GetRuntimeSource/GetRenderedText/EditAppSources 之外，新增 **GetPageInfo**（Web Agent 页面快照 + Grounded Markdown，含 action handle/documentGeneration/snapshotId/pageGraph）、**GetPageImage**（按图片 ID 返回 `data:image/...` 多模态回执）、**ExecuteAction**（Web Core 标准动作目录）与**串行指令协议**（`command1/command2/...` 编号步骤 + wait，任一步失败停止但保留成功步骤回执，`partial_failure`）。底层新接入 **VCP Agent WebCore**（`modules/loom/webcore/*`，8 个文件约 5,075 行：chrome/electron 双 adapter + web-agent-protocol + page/runtime core），由 LoomControllerService（306 → 656 行）路由到 `VCPLoomManager.getWebAgentPageInfo/executeWebAgentAction`。测试：`tests/loom-controller.test.js`、`tests/loom-electron-adapter.test.js`、`tests/loom-manager-runtime.test.js`（新增）。
+- **证据强度**：注册、注入、Loom 命令分发与 WebCore 适配层均为源码事实；LoomAPP 实际运行、WebCore 页面感知与隔离边界未运行验证。
 
 ### 能力卡 11：VCPMobileSync 跨端双向增量同步
 
@@ -221,9 +224,20 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 - **独特性判断**：聊天客户端内置 Rust 系统级文本感知 sidecar（三平台 capture + Windows UIA 选区监听），同类客户端未发现同等方案；归入"人类工具面/桌面感知"聚类。
 - **证据强度**：Rust 捕获链、事件桥接、悬浮条与对话窗口为源码事实；真实划选触发、UIA 选区读取与三平台行为未运行验证。
 
+### 能力卡 15：Scriptorium 共笔文坊（人机协作文档工作台，b6ffa22 → fb66a52 范围）
+
+- **用户目标**：在同一工作台内完成"人类直接编辑渲染后的文档版式 + Agent 可审阅地修改文档源码"的富文档/演示创作，文档用 VCP 自有的 VDOC 工程模型（VDOCX 连续流文稿 / VPPTX 逐页演示，ZIP 容器 + `document.json` + SHA-256 内容寻址资源）而不是原位编辑 OOXML（`ScriptoriumModules/README.md`）。这是聊天客户端中罕见的"文档即协作对象"产品面。
+- **入口与触发者**：托盘应用栏"文坊"（`trayManager.js:26` 的 `vchat-app-scriptorium` → `open-scriptorium-window`，`desktopHandlers.js:779-781` 映射到 `WINDOW_APP_IDS.DOCX='docx-editor'`）；主进程 `docxHandlers.initialize`（`main.js:1083-1092`）注册文档打开/保存/导入/导出 IPC（`modules/ipc/docxHandlers.js`，1,091 行，`.vdocx/.vpptx` 工程 + HTML/MD/TXT/RTF/DOCX/PPTX 导入 + HTML/PDF 导出）；窗口用 `preloads/docx.js`（`PRELOAD_ROLES.DOCX`）。Agent 侧：`ScriptoriumCollaborator` direct 插件（`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`，Service 818 行 + manifest，版本 2.1.0）经 `ScriptoriumAgentControlService`（`modules/services/scriptoriumAgentControlService.js`，428 行）操作当前窗口文档。
+- **事实对象**：`AppData/ScriptoriumDocument/VDOCX|VPPTX/` 下的 `.vdocx/.vpptx` 工程（`scriptoriumAgentControlService.js:133` 的 `documentRoot`；源码 HTML 是唯一真相：VDOCX 单份完整 source，VPPTX 每页一份 source + 共享 deckCss）；**文脉（版本上下文）是工程数据**——人类刻点与 Agent PR 以 pending/applied/rejected/conflict/failed 状态进入同一条文脉，含操作元数据、changeSet、工程内嵌版本快照与审批回执（可回溯、回溯前自动保存、不删后续文脉）。
+- **完整主链（Agent 协作）**：Agent 调 `ScriptoriumCollaborator` 的 GetDocumentInfo/GetRenderedText/GetOutline/GetSection/GetSource/SearchSource/GetViewportSource/GetVisualContext 感知 → `SubmitSourcePr` 提交带唯一 source 的 PR（`AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`）→ 人类在文坊界面审阅/回执（pending/applied/rejected/conflict）→ 应用的修订进入文脉；`CreateDocument` 可直接创建并落盘完整 VDOCX/VPPTX 工程。导入链：`scriptoriumImportService.js`（776 行，DOCX 语义导入）+ `scriptoriumPptxImportService.js`（439 行，PPTX 静态版式导入）。
+- **运行时**：工程源码是可编程内容——VDOCX/VPPTX 的 source 含文档级 `<style>`、正文 HTML 与内联交互 `<script>`（`vdoc-hybrid-compiler.js` 910 行编译，`scriptorium-programmable-content.js` 412 行，隔离 iframe 预览）；KaTeX 数学渲染、SVG 图形、对象环绕/锚点、80 步撤销历史。
+- **持续性与导出**：工程落盘 `AppData/ScriptoriumDocument/`；导出连续流/分页 HTML 与 PDF（资源转 `data:` 内联，Anime.js/Three.js 依赖嵌入单文件）。测试：`tests/重构中禁用脚本/` 下 12 个 scriptorium 测试/冒烟脚本（hybrid-compiler/importers/container/async/collaborator/cdn-localization/export-resources/vpptx/electron-smoke 等，约 3,620 行）+ `tests/test-export-inline.cjs`（210 行）；子目录名"重构中禁用脚本"表明测试当前被搁置，未纳入运行。
+- **外部依赖**：无（纯本地）；原生 Office 文件仅作为导入源，不保证像素级还原（README 声明）。
+- **证据强度**：工程模型、PR 协议、导入导出与运行链均为源码事实；窗口内编辑体验、PDF 导出与实际审批流未运行验证。
+
 ## 补查的旁路产品面与提案建议
 
-2026-08-12 对上轮排除（音频引擎、主题系统、论坛、骰子）与未覆盖区域（笔记、翻译、语音、TTS、RAG、任务、VchatManager、日志、划词小助手）的扫描结果。除能力卡 13/14 外，其余模块按证据强度分级：
+本表记录上轮排除（音频引擎、主题系统、论坛、骰子）与未覆盖区域（笔记、翻译、语音、TTS、RAG、任务、VchatManager、日志、划词小助手）的补查结果。除能力卡 13/14 外，其余模块按证据强度分级：
 
 | 模块 | 状态 | 关键证据 | 提案建议 |
 |---|---|---|---|
@@ -242,10 +256,10 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 
 ## 已归并到现有类目的能力
 
-- **Agent 群聊三种发言模式（候选 10）**：`Groupmodules/modes/{sequentialMode,natureRandomMode,inviteOnlyMode}.js` 的策略注册表与完整判定逻辑已由[对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 8.1 节主链确认（sequential 全员轮发、naturerandom 的 @提及/tag 权重/保底发言者、invite_only 按钮驱动）。本轮补充的群组长期状态交点：群聊消息由 `groupchat.js` 作为历史单一真源落盘（`:531/:539`），assistant 消息快照 `agentId/model/modelSource`（`:950`）；群聊上下文同样应用 VCPChatTarven 注入与正则。
-- **Canvas 协作（候选 11 的已实现部分）**：Canvas 窗口与聊天主窗口的文件级同步（chokidar watcher → 行级 diff → 接受/拒绝）、内存版本快照等已由[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) 深入覆盖（G3 为主、G4 部分）。本轮补充：Canvas 是"单用户双窗口"同步（`canvasHandlers.js:93-105` 只向 canvas 窗口与主窗口广播），没有网络级多人协同协议；"与群文件区实时同步"未找到代码。
+- **Agent 群聊三种发言模式（候选 10）**：`Groupmodules/modes/{sequentialMode,natureRandomMode,inviteOnlyMode}.js` 的策略注册表与完整判定逻辑已由[对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 8.1 节主链确认（sequential 全员轮发、naturerandom 的 @提及/tag 权重/保底发言者、invite_only 按钮驱动）。补充的群组长期状态交点：群聊消息由 `groupchat.js` 作为历史单一真源落盘（`:531/:539`），assistant 消息快照 `agentId/model/modelSource`（`:950`）；群聊上下文同样应用 VCPChatTarven 注入与正则。
+- **Canvas 协作（候选 11 的已实现部分）**：Canvas 窗口与聊天主窗口的文件级同步（chokidar watcher → 行级 diff → 接受/拒绝）、内存版本快照等已由[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) 深入覆盖（G3 为主、G4 部分）。补查结论：Canvas 是"单用户双窗口"同步（`canvasHandlers.js:93-105` 只向 canvas 窗口与主窗口广播），没有网络级多人协同协议；"与群文件区实时同步"未找到代码。
 - **VCP 日记渲染与认知可见性（候选 7）**：`<<<DailyNoteStart>>>…<<<DailyNoteEnd>>>` 协议块的渲染（创建卡/更新替换预览）已由[消息渲染器调查笔记](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 覆盖（`messageRenderer.js:311/:941-1005`，text-viewer 同步实现）；日记"模型回流"（DailyNote 工具结果通知渲染，`modules/notificationRenderer.js:150-216`）与对象管理（Memo 窗口）在本笔记能力卡 2 承接，不重复计数。
-- **跨聊天消息转发入口（候选 14 的入口部分）**：右键转发入口已由 [Chat UI 调查笔记](../Chat%20UI/VCPChat-ChatUI调查笔记.md) 第 6 节记录，本轮补齐完整内容链（见能力卡 9）。
+- **跨聊天消息转发入口（候选 14 的入口部分）**：右键转发入口已由 [Chat UI 调查笔记](../Chat%20UI/VCPChat-ChatUI调查笔记.md) 第 6 节记录，本卡补齐完整内容链（见能力卡 9）。
 - **VCPDesktop 渲染与流式**：桌面推送的渲染器侧（消息内占位卡）、流式拦截、挂件源码编辑（Canvas 上下文打开）已由运行时笔记覆盖，能力卡 3 只补持久化/恢复/资源治理。
 
 ## 声明不符、外部依赖与暂缓项
@@ -278,9 +292,10 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
   7. Agent 正则系统——上下文 DSL 聚类；
   8. VCPMobileSync——多表面连续性聚类；
   9. LoomAPP 运行时——活对象/创作运行时聚类，与普通前端插件机制分开计数。
-- **本轮新增主贡献候选**：
+- **新增主贡献候选**：
   10. VCP Hi-Fi 音频引擎与音乐播放器——本机媒体/创作工作站聚类（能力卡 13；与 ComfyGen、Loom 并列为一个媒体能力族合计，还是单列，取决于横向统计口径，建议与 VCPToolBox 媒体插件族不重复计"生成"）；计入前提：以 `主链确认` 静态证据计，注明引擎为编译产物未验证；
   11. 划词小助手（Rust 桌面感知引擎）——人类工具面/桌面感知聚类（能力卡 14）。
+- **b6ffa22 → fb66a52 范围新增**：12. Scriptorium 共笔文坊——创作工作站/文档协作聚类（能力卡 15；Loom v1.4.0 升级计入既有 Loom 项，不重复计数）。
 - **辅助贡献**：跨聊天消息转发与附言（Chat 工作流）；前端插件注册/注入机制（工程机制，单独标注）；双语混合朗读引擎（语音聚类）；3D 物理骰子与 RAG Observer 信息流监听（视统计口径可选）。
 - **不计入**：群文件/共享工作区、ST 预设/角色卡/世界书（前端）、跨模态转译闭环、"跨端记忆"本体、主题生成器、DSD 硬解码、AI 歌词创作、音乐实时听音、TTS"600% 剪枝"（均为声明不符）。
 - **机制贡献（单独标注，不与产品特性混分）**：正则与 Tavern 规则的安全屏蔽、Flowlock generation 防复活、VCPMobileSync 的原子写/墓碑/稳定哈希、挂件资源治理（定时器/监听器清理、性能打点、可见性冻结）、HumanToolBox 的 IPC 白名单与路径校验、音频引擎的路径穿越/SSRF 防护与无锁音频线程（assert_no_alloc 审计）、语音聊天的 Puppeteer 桥接方案。
@@ -296,7 +311,7 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 7. TopicSponsor 普通话题的前端即时刷新机制未核实。
 8. VCP-CDS（Rust）的中央索引模式仅确认了适配层与测试存在，未核实其查询/Change Feed 的完整行为。
 9. 两个渲染器前端插件（动态壁纸、自动 TTS）仅确认注册与加载机制，插件本体 UI 行为未验证；VChatAutoTTS 的双语自动朗读触发链为源码事实，合成效果未验证。
-10. 现有 `tests/` 目录只含 4 个测试文件（frontend-plugins、loom-controller、deepmemo-central-adapter、mobile-sync-central-adapter），Flowlock 等核心模块无自动化测试覆盖；音频引擎未见测试目录。
+10. `tests/` 顶层现有 7 个文件（frontend-plugins、loom-controller、loom-electron-adapter、loom-manager-runtime、deepmemo-central-adapter、mobile-sync-central-adapter 六个测试 + test-export-inline.cjs），另有 `tests/重构中禁用脚本/` 子目录 12 个 scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"，未纳入运行）；Flowlock 等核心模块无自动化测试覆盖；音频引擎未见测试目录。
 
 ## 关键源码索引
 
@@ -307,7 +322,8 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 - `Flowlockmodules/flowlock.js`（Session 状态机与认领）、`flowlock-integration.js`（用户操作绑定）、`flowlock-protocol.js`（状态气泡）；`Flowlockmodules/README.md`（协议与生命周期权威文档）。
 - `VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js`：Agent 自主话题命令族。
 - `VCPHumanToolBox/`：`renderer_modules/config.js`（工具定义）、`renderer_modules/tool-manager.js`（插件导入与参数解析）、`WorkflowEditormodules/WorkflowEditor_ExecutionEngine.js`（工作流执行）、`ComfyUImodules/ComfyUI_UIManager.js`（ComfyGen 面板）；`VCPHumanToolBox/README.md` §8（与代码矛盾的陈旧说明）。
-- `VCPDistributedServer/frontend-plugin-loader.js` + `modules/ipc/desktopHandlers.js:96-120`：前端插件注册与注入；`modules/loom/VCPLoomManager.js` + `VCPDistributedServer/Plugin/LoomController/`：LoomAPP 运行时与命令。
+- `VCPDistributedServer/frontend-plugin-loader.js` + `modules/ipc/desktopHandlers.js:96-120`：前端插件注册与注入；`modules/loom/VCPLoomManager.js`（2,076 行）+ `modules/loom/webcore/*` + `VCPDistributedServer/Plugin/LoomController/`（1.4.0）：LoomAPP 运行时、WebCore 页面感知与动作命令。
+- Scriptorium：`ScriptoriumModules/`（scriptorium.js/scriptorium.html/vdoc-hybrid-compiler.js/vdoc-core.js 等，README.md 为权威说明）、`modules/ipc/docxHandlers.js`、`modules/services/scriptorium{AgentControl,Import,PptxImport}Service.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`、`preloads/docx.js`、`main.js:1083-1092`（初始化）；`tests/重构中禁用脚本/`（12 个测试/冒烟脚本）。
 - `VCPDistributedServer/Plugin/VCPMobileSync/`（manifest/diff/message/central）与 `rust_chat_data_service/README.md`：跨端同步与中央索引。
 - `VCPDistributedServer/VCPDistributedServer.js:605-644`：节点侧 `internal_request_file` 文件拉取；`:656-687`：MusicController 工具注入调用；`:689-694`：SuperDice 注入调用。
 - `modules/renderer/messageContextMenu.js:211-220` + `renderer.js:2426-2564` + `modules/chatManager.js:1607-1651`：转发与附言主链。

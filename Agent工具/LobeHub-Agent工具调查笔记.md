@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\lobehub`（monorepo，重点 `apps/server`、`apps/desktop`、`packages/agent-runtime`、`packages/builtin-tools`、`packages/context-engine`、`packages/types`）
 >
-> 调查更新日期：2026-07-30
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`4edba1b75a97b91c28ad48cd1cc90528defa17ad`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
-> 调查方式：只读源码梳理（Read/Grep/Glob + 后台子调查代理核实内建工具清单、扩展机制、子代理编排三个子领域），未修改 LobeHub 仓库任何文件
+> 调查方式：只读源码梳理（Read/Grep/Glob + 后台子调查代理核实内建工具清单、扩展机制、子代理编排三个子领域）；未修改 LobeHub 仓库任何文件
 >
 > 调查范围：只统计模型能够发现、请求并触发执行的工具（builtin / plugin / MCP / connector），不把消息渲染器、纯 UI 功能或模型供应商自身能力计入
 >
@@ -16,10 +16,10 @@
 
 LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准执行”严格拆成三条独立的判定链，且都可在服务端/前端复用同一套代码（`@lobechat/context-engine`、`@lobechat/agent-runtime`、`@lobechat/builtin-tools`）。
 
-1. **工具目录**是 `packages/builtin-tools/src/index.ts` 里一个约 30 项的静态注册表，每项声明 `identifier`/`manifest`/`hidden`/`discoverable`/`resolveManifest`；manifest 类型 `builtin|default|markdown|mcp|standalone` 决定 schema 来源（builtin 硬编码、default/mcp 走 `ToolManifest.api`、standalone/markdown 走 `ui.url` 的 iframe/module）。
-2. **注入到模型的可见集合**由 `ToolsEngine.generateTools()`（`packages/context-engine/src/engine/tools/ToolsEngine.ts`）统一裁剪，裁剪规则由 `createEnableChecker`（`enableCheckerFactory.ts`）执行——先看 `isExplicitActivation` 是否允许绕过，再看平台过滤器，最后看声明式 `rules` 表；服务端调用点在 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts`，agent mode 与 chat mode 用完全不同的 `rules` 对象和 `defaultToolIds`，chat mode 强制关闭 `allowExplicitActivation`。
+1. **工具目录**是 `packages/builtin-tools/src/index.ts:166-399` 里一个 35 项的静态注册表（条目见维度 9），每项声明 `identifier`/`manifest`/`hidden`/`discoverable`/`resolveManifest`；manifest 类型 `builtin|default|markdown|mcp|standalone` 决定 schema 来源（builtin 硬编码、default/mcp 走 `ToolManifest.api`、standalone/markdown 走 `ui.url` 的 iframe/module）。注册表还定义常量：`groupSupervisorToolIds`（群组编排工具集，`index.ts:139`）、`manualModeExcludeToolIds`/`activationModeControlledToolIds`（手动 skill 激活模式下的默认排除与激活模式控件专属工具，`index.ts:87-97`）。
+2. **注入到模型的可见集合**由 `ToolsEngine.generateTools()`（`packages/context-engine/src/engine/tools/ToolsEngine.ts`）统一裁剪，裁剪规则由 `createEnableChecker`（`enableCheckerFactory.ts`）执行——先看 `isExplicitActivation` 是否允许绕过，再看平台过滤器，最后看声明式 `rules` 表；服务端调用点在 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts`（本快照 `chatModeRules` 在 :289、`customModeRules` :300、`agentModeRules` :302，`allowExplicitActivation` :392），agent mode 与 chat mode 用完全不同的 `rules` 对象和 `defaultToolIds`，chat mode 强制关闭 `allowExplicitActivation`。chat mode 的图像生成必须 **pinned 才注入**（`bb406736f`——注释“Image generation is opt-in via a pinned plugin — no automatic injection”，规则表里 `imageGenerationEnabled` 由显式 pin 决定）；agent mode 对 bot 会话自动注入 `lobe-message`、群组 supervisor 编排工具集（`groupSupervisorToolIds`）并应用 remote-device 锁定期规则（`index.ts:332-347`）。
 3. **审批**是一个八阶段判定（`GeneralChatAgent.checkInterventionNeeded`）：安全黑名单 `always` 优先且不可绕过 → dynamic resolver → headless 特殊放行 → 黑名单 `required` → 静态 `always` → headless 兜底放行 → `auto-run` 放行 → 未知 manifest 强制拦截 → `allow-list` 白名单匹配 → `manual` 用工具自身配置。批准后进入 `waiting_for_human` 状态机，pending tool message 持久化在数据库（`messagePlugins.intervention.status='pending'`），前端通过 `tools_calling` chunk + `human_approve_required`/`tool_pending` 事件渲染审批卡片。
-4. **执行位置**在 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts`）分派：builtin 走 `BuiltinToolsExecutor`；MCP 按 `mcpParams.type` 分三路——`cloud` 走 market/discover gateway，`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）。**所有路径执行前**都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash。
+4. **执行位置**在 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:82-179`）分派：builtin 走 `BuiltinToolsExecutor`；MCP 按 `mcpParams.type` 分三路——`cloud` 走 market/discover gateway，`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）。**所有路径执行前**都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash。local-system 工具的客户端执行经 `20afc09c7` 收敛为共享运行时入口 `packages/tool-runtime/src/LocalSystemExecutionRuntime.ts`（+cwd 注入，`pathScope` 迁入 `tool-runtime/src/pathScope.ts`）；桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`：`createSandboxEnv`/`SrtSandboxRuntime`/`installDeviceSandbox` + `src/helpers/localSandbox.ts`，`e9b6d00ab`/`9b4f944cb`/`95dfa1d38`），`executionTarget.ts` 用 `isLocalSandboxEnabled` 判定——本地命令可在沙箱围栏内执行，也可“裸 spawn”执行（沙箱能力探测/安装/工作目录的细节见维度 13 与生成式输出笔记）。
 5. **结果回注**统一走 `truncateToolResult`（默认 25,000 字符，`lobe-agent-documents` 例外），截断附带明确的 "[Content truncated...]" 提示文本,防止模型误判内容完整。
 
 以下各节对工具目录、注入、审批、执行边界给出精确到代码行的证据，其中几处细节需要单独强调：`alwaysOnToolIds` 只在 agent mode 生效（维度 2.1）；`checkInterventionNeeded` 是固定顺序的多阶段判定管道，不是简单的"合并"（维度 6.2）；`disabled` 工具的拦截点位于统一执行入口的 connector 权限表（维度 7.3）。
@@ -118,11 +118,11 @@ const isCustomMode = toolMode === 'custom';
 
 `resolveToolMode`（`src/helpers/executionTarget.ts:28-31`）：显式 `chatConfig.toolMode` 优先；否则 `enableAgentMode === false` → `'chat'`，其余为 `'agent'`。
 
-三种模式对应完全不同的 `rules` 对象和 `defaultToolIds`（`index.ts:233-345`）：
+三种模式对应完全不同的 `rules` 对象和 `defaultToolIds`（本快照 `index.ts:289-349`）：
 
-- **chat 模式**（`chatModeRules`，`index.ts:238-245`）：只有 4 个可能开启的 key——`image-generation`（模型无原生 imageOutput 时的兜底）、`knowledge-base`（`hasEnabledKnowledgeBases`）、`memory`（`globalMemoryEnabled`）、`web-browsing`（`isSearchEnabled`）。`defaultToolIds` 传入 `chatModeAllowedToolIds`（同样 4 项，`packages/builtin-tools/src/index.ts:110-115`）。`enableChecker` 的 `allowExplicitActivation: toolMode === 'agent'` 在 chat 模式下为 `false`（`index.ts:343`），即使 activator 想动态激活其他工具也会被 `createEnableChecker` 第 1 步之外的规则表拒绝。
-- **custom 模式**（`customModeRules`，`index.ts:251`）：`Object.fromEntries((agentConfig.plugins ?? []).map((id) => [id, true]))`，即工具集合严格等于该 agent 声明的插件列表，不叠加 `alwaysOnToolIds`/`defaultToolIds`/activator。用于聚焦型内建子代理（如 verify agent）。
-- **agent 模式**（`agentModeRules`，`index.ts:253-300`）：用户插件 + `alwaysOnToolIds`（`lobe-agent`/`lobe-activator`/`lobe-skills`/`lobe-skill-store`，`packages/builtin-tools/src/index.ts:75-80`，只在 agent mode 生效——`packages/builtin-tools/src/index.ts:67-69` 的注释明确写"chat mode drops alwaysOnToolIds entirely"）+ 一批**系统级条件覆盖**：`cloud-sandbox` 需要 `runtimeMode==='cloud'`；`local-system`/`browser` 需要 `runtimeMode==='local' && hasDeviceProxy && deviceContext.deviceOnline && deviceContext.autoActivated`；`remote-device` 需要 `deviceCapable && hasDeviceProxy && !deviceLocked`。
+- **chat 模式**（`chatModeRules`，`index.ts:289-294`）：只有 4 个可能开启的 key——`image-generation`（**必须 pinned 才注入**，`bb406736f`，注释“Image generation is opt-in via a pinned plugin — no automatic injection”）、`knowledge-base`（`hasEnabledKnowledgeBases`）、`memory`（`globalMemoryEnabled`）、`web-browsing`（`isSearchEnabled`）。`defaultToolIds` 传入 `chatModeAllowedToolIds`（同样 4 项，`packages/builtin-tools/src/index.ts:113-118`）。`enableChecker` 的 `allowExplicitActivation: toolMode === 'agent'` 在 chat 模式下为 `false`（`index.ts:392`），即使 activator 想动态激活其他工具也会被 `createEnableChecker` 第 1 步之外的规则表拒绝。
+- **custom 模式**（`customModeRules`，`index.ts:300`）：`Object.fromEntries((agentConfig.plugins ?? []).map((id) => [id, true]))`，即工具集合严格等于该 agent 声明的插件列表，不叠加 `alwaysOnToolIds`/`defaultToolIds`/activator。用于聚焦型内建子代理（如 verify agent）。
+- **agent 模式**（`agentModeRules`，`index.ts:302-349`）：用户插件 + `alwaysOnToolIds`（`lobe-agent`/`lobe-activator`/`lobe-skills`/`lobe-skill-store`，`packages/builtin-tools/src/index.ts:76-81`，只在 agent mode 生效——`packages/builtin-tools/src/index.ts:67-69` 的注释明确写"chat mode drops alwaysOnToolIds entirely"）+ 一批**系统级条件覆盖**：`cloud-sandbox` 需要 `runtimeMode==='cloud'`；`local-system`/`browser` 需要 `runtimeMode==='local' && hasDeviceProxy && deviceContext.deviceOnline && deviceContext.autoActivated`；`remote-device` 需要 `deviceCapable && hasDeviceProxy && !deviceLocked`。bot 会话自动注入 `lobe-message`（`isBotConversation`），群组 supervisor 编排工具取 `groupSupervisorToolIds`（与 `packages/builtin-tools/src/index.ts:139` 单一事实源对齐）；`buildAllowedBuiltinTools`/`excludeIdentifiers` 做物理剔除（`canUseDevice=false` 时从 manifest 层删掉设备工具，`index.ts:351-`）。
 
 ### 2.2 用户启用状态
 
@@ -411,7 +411,8 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-agent-documents` | 文档归档读取 | 未核实 | server | 非 hidden | 结果**永不截断**（`ARCHIVE_BYPASS_IDENTIFIERS`），是归档内容读取面 |
 | `lobe-creds` | `connectComposioService`/`initiateOAuthConnect`/`injectCredsToSandbox`/`saveCreds` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-creds/src/manifest.ts:10-102`） | server（经 `MarketService.market.creds`） | 非 hidden | 保存/注入凭据、发起第三方 OAuth 授权，零审批（维度 10.5） |
 | `lobe-knowledge-base` | 知识库检索 | 未核实 | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 读取用户知识库内容 |
-| `lobe-image-generation` | 图像生成 | 未核实 | server | `chatModeAllowedToolIds`,`hidden` | 消耗生成额度，无越权访问面 |
+| `lobe-image-generation` | 图像生成 | 未核实 | server | `chatModeAllowedToolIds`,`hidden` | chat mode 下必须 pinned 才注入（`bb406736f`），不做模型无原生 imageOutput 时的自动兜底 |
+| `lobe-goal` | `createGoal`（创建并立即启动带可编辑验收计划的目标任务，**只允许 /goal 前缀触发**） | **`'always'`**（`packages/builtin-tool-goal/src/manifest.ts:13`） | server | 非 hidden（注册表项） | 创建/启动目标循环任务；`humanIntervention: 'always'` 保证创建必须人工确认，且仅在 `/goal` 命令注入（`conversationLifecycle.ts:323-328`），模型不能自行触发 |
 | `lobe-page-agent` | 页面级子代理 | 未核实 | server | `hidden`,`discoverable:false` | 内部编辑器场景 |
 | `lobe-agent-builder`/`lobe-group-agent-builder` | Agent/Group 成员 CRUD | 未核实 | server（`agentBuilder.ts`）；group-agent-builder **无 server runtime**（`packages/builtin-tools/src/index.ts:129-134` 注释明确） | `hidden`,`discoverable:false` | 创建/修改 Agent 配置本身 |
 | `lobe-group-management` | `speak`/`broadcast`/`executeAgentTask`/`executeAgentTasks`/`vote` | `executeAgentTask`/`executeAgentTasks` = `'required'`（`packages/builtin-tool-group-management/src/manifest.ts:91,135`）；`speak`/`broadcast`/`vote` 未声明→`'never'` | server | `groupSupervisorToolIds`,非 hidden | 群组编排调度，`broadcast` 零审批且并发无上限（维度 11） |
@@ -422,7 +423,7 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-topic-reference` | 话题引用 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-web-onboarding` | 引导流程 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-user-interaction` | `askUserQuestion` 等 | `always`（复用于 `lobe-agent.askUserQuestion`，`packages/builtin-tool-lobe-agent/src/manifest.ts:189`） | server | `discoverable:false`,`hidden` | 交互式提问，本身低风险 |
-| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`），调度后端位置未核实（维度 13） |
+| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server（另有独立 server runtime `serverRuntimes/task.ts`（+107 行）与 client executor `builtin-tool-task/src/client/executor/index.ts`（+118 行），任务工具带客户端执行面） | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`）；任务回调投递串行化（`51e24a0e9`）、creator 回调持久化（`975e21cf8`） |
 | `lobe-brief` | 摘要生成 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-agent`(`LobeAgentManifest`) | `analyzeVisualMedia`/`createPlan`/`updatePlan`/`createTodos`/`updateTodos`/`clearTodos`/`askUserQuestion`/`callSubAgent` | `createPlan`/`createTodos`/`clearTodos`=`'required'`；`askUserQuestion`=`'always'`；`updatePlan`/`updateTodos`/`analyzeVisualMedia`/`callSubAgent`=未声明→`'never'`（`packages/builtin-tool-lobe-agent/src/manifest.ts` 各处） | server | `defaultToolIds`,`alwaysOnToolIds`,`runtimeManagedToolIds`,`hidden` | `callSubAgent` **零审批**即可派生新的独立 Agent 执行（维度 11） |
 | `lobe-delivery-checker` | 交付检查 | 未核实 | server | 非 hidden | 低风险 |
@@ -541,3 +542,5 @@ connector 凭据表（`packages/database/src/schemas/connector.ts:59-74, 159-234
 7. **文档与代码不一致（已确认的具体一处）**：`packages/types/src/agent/chatConfig.ts:194-199` 的 `toolResultMaxLength` 字段 JSDoc 写"`@default 6000`"，但同文件 `AgentChatConfigSchema` 的 zod 定义（`chatConfig.ts:298`）实际是 `z.number().default(25000)`——与 `truncateToolResult` 的 `DEFAULT_TOOL_RESULT_MAX_LENGTH = 25_000`（`apps/server/src/utils/truncateToolResult.ts:10`）一致，说明 **JSDoc 注释过期，实际生效值是 25000 不是 6000**。
 8. **本笔记维度 9 表格中标注"未核实"的工具**（`lobe-skills`/`lobe-skill-store`/`lobe-skill-maintainer`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation`/`lobe-page-agent`/`lobe-agent-builder`/`lobe-group-agent-builder`/`lobe-agent-management`/`lobe-calculator`/`lobe-topic-reference`/`lobe-web-onboarding`/`lobe-brief`/`lobe-delivery-checker`/agent-signal 系列/`lobe-self-iteration`）：其 `humanIntervention` 逐条取值未在本次调查中逐一打开源码核对，仅确认了它们在 registry 中的存在和大致用途。
 9. **connector 权限表 `ConnectorToolPermission` 除 `disabled` 外的其他取值**（如是否存在 `enabled`/`ask` 等中间态）及其与 `humanIntervention` 的叠加关系，未完整核实枚举全集。
+10. **Local Sandbox 的围栏强度**：`packages/device-sandbox` 的 SRT 沙箱运行时（进程/网络隔离、writable roots 策略、`srtWinStaging` 的 Windows 安装）未逐项验证；`resolveClientLocalSandbox` 与网关侧 `ToolExecutionContext.localSandbox` 的一致性（`src/helpers/localSandbox.ts:29-35` 注释明确要求两边一致，否则会出现“选了 Local Sandbox 却跑未围栏命令”）未运行验证。
+11. **`callSubAgent` 默认超时**：`apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts:177-185` 是 `timeout` 直接透传给 `ctx.subAgent.run()`，未见 `|| 1_800_000` 式显式兜底，与 manifest“默认 30 分钟”的出入维持未核实状态。

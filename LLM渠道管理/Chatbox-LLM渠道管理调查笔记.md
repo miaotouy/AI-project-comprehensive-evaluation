@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`7450ab2dde5eacab4a8721f8680006ba8b99438d`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -75,6 +75,11 @@ SessionSettings { provider, modelId }
 
 注册表统一了 Provider 默认值、运行时工厂和 UI 信息。相较按多个 switch 分散维护，设置页和请求入口能够使用同一个 definition；契约测试还检查内置 ID 唯一性、models.dev 映射与策展模型覆盖。
 
+**提交范围内的内置定义变化**（均为模型目录/推理参数层面，Provider 数量不变）：
+
+- Claude：策展模型列表顶部新增 `claude-opus-5`（`definitions/claude.ts:12-13`，`cee99c2f`），并移除被取代的 AI SDK patch 依赖。
+- DeepSeek：`deepseek-v4` 家族识别为支持官方 thinking effort 的模型（`deepseek.ts` 的 `isDeepSeekReasoningEffortModel`/`normalizeDeepSeekReasoningEffort`，取值白名单 low/high/max/xhigh），`ebed6251` 起 effort 在请求边界清洗后跨 ChatboxAI 与原生 API 风格生效；同时新增"reasoning-only 回答恢复"归一化（见第 7 节）。
+
 ### 1.2 一个内置 ID 只有一份配置
 
 全局设置的结构是：
@@ -138,6 +143,8 @@ OAuth token 对特定官方端点签发，因此 OAuth 启用时会忽略用户�
 运行时 `getModel()` 若找不到内置 definition，会在 `customProviders[]` 查找 ID，再由 `createCustomProviderModel()` 按 `type` 创建对应模型类。
 
 自定义 Provider 可以拥有自己的 Host、Path、Key、模型和图标。它解决的是“同协议多渠道实例”，不是一个实例内部的 Key 池或上游列表。
+
+**提交范围变化（`5c7e3882`）**：Host 解析对 URL scheme 做大小写归一（`llm_utils.ts` 的 `normalizeOpenAIApiHostAndPath` 把 `HTTP://`/`HTTPS://` 前缀统一为小写后再补默认值，兼容移动端键盘首字母大写输入，局域网自定义端点可用）；自定义 Claude/Gemini 模型类新增 `useProxy` 透传（`custom-claude.ts`/`custom-gemini.ts` 用 `createFetchWithProxy` 包装请求），使自定义 Provider 的代理开关在这两个协议下同样生效（`custom-provider-proxy.test.ts` 覆盖）。
 
 ### 3.1 导入
 
@@ -287,6 +294,8 @@ modelId?: string
 
 Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAuth 请求链只在 desktop 启用。
 
+**提交范围变化（`15028964`）**：OpenAI 走 OAuth 认证时，图像生成模型目录不再注入 OpenAI 组的 image 模型（`image-model-catalog.ts` 的 `isOpenAIImageGenerationAuthSupported`），避免 OAuth 会话误用 DALL-E 计费路径。
+
 ### 6.3 明文落盘和备份扩散
 
 桌面 `settingsStore` 经 IPC 写入 Electron Store 的：
@@ -314,6 +323,11 @@ Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAut
 代码把这些状态视为“上游在模型运行前拒绝或崩溃”，因而认为再次调用不会重复计费。AI SDK 自带的通用 `maxRetries` 被强制设为 0，避免与外层叠加。
 
 网络错误不自动重试，因为连接断开并不能证明服务端没有处理计费 POST。图片生成等明确计费操作也禁用网络级自动重试。
+
+**提交范围变化（`3718abac`、`3af9564a`）**：
+
+- 流中途错误（`MidStreamApiError`）被明确排除在重试之外：`gemini-stream-error.ts` 解析 Gemini/ChatboxAI 流里的错误帧（如 `503 The server was restarted`），若错误前已有内容流出则抛 `MidStreamApiError`，`isRetryableStatusError()`（`abstract-ai-sdk.ts:67-89`）对这类错误恒返回 false——部分内容已渲染/可能已计费，静默重跑会产生重复回复；错误在首个内容之前到达则保持普通 `ApiError`（仍可重试）。
+- DeepSeek 完成响应归一化：`completed-response-normalizer.ts` 注册 `normalizeDeepSeekCompletedResponse`（`deepseek.ts`），当 DeepSeek 服务端把完整答案误标为 reasoning 且 `finish_reason: stop` 时，把该 reasoning part 转回普通 text 恢复显示；按模型 ID 而非 provider 判定，OpenRouter/自定义 OpenAI 兼容端点同样生效。
 
 这套容错只重试同一个模型实例：
 

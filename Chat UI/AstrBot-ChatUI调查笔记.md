@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
-> 调查方式：从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：2026-08-06 从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md) 迁移现有段落与证据
 >
 > 调查范围：项目自带的 WebChat 与管理界面；QQ、Telegram 等外部 IM 客户端的界面不归项目所有，不在本笔记范围
 >
@@ -43,6 +43,8 @@ AstrBot 的聊天主链是"事件总线 + 流水线"（执行语义在对话请�
 - 对话管理：切换/删除/标题编辑对话（`ConversationPage.vue`），对应 `switch_conversation`/删除/`new_conversation`（数据语义见会话与消息管理笔记 1.1）。
 - 会话规则：按 UMO 配置 persona/provider/系统提示（`SessionManagementPage.vue`），对应 waking_check 的会话级过滤与配置。
 - 追踪：`TracePage.vue` 展示 `event.trace` 各阶段记录（含 sel_persona/astr_agent_prepare），是流水线的可视化（执行语义见对话请求与上下文笔记）。
+- 附件拖放：拖拽上传热区从输入框（ChatInput）扩大到整个聊天区域，`Chat.vue:328-343,682-686` 与 `StandaloneChat.vue:3-10,284` 挂 `dragEvents` 显示整区遮罩，`useDragUpload.ts` 统一管理遮罩显隐与 drop 事件（drop 后走现有 `handleFilesSelected` 上传链路，de4cbbc）。
+- 会话列表一致性：新建会话并关联项目后强制刷新会话列表（`Chat.vue:1361-1365`），避免新会话短暂出现在"对话"列表；`useSessions.ts` 移除 `selectSession` 内的列表刷新（#9587）。
 
 ## 3. 设计取舍与已确认边界
 

@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/AIO-Hub-Chat调查笔记.md`](../Chat/AIO-Hub-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码；通用界面盘点（弹窗库、Toast 通知、主题、动画、响应式断点、灯箱、头像等）保留于原 Chat 笔记第 12 节，待可选界面专题承接
+> 调查方式：从 [`../Chat/AIO-Hub-Chat调查笔记.md`](../Chat/AIO-Hub-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，并增量核对消息状态徽标、审批条倒计时、资料引用 chips、批量管理搜索与会话恢复横幅等界面变化
 >
 > 调查范围：工作台结构、会话导航与搜索工作流、Composer 与草稿、发送前配置、生成反馈、消息操作与分支导航、树图视图、多会话与分离窗口、键盘关键路径、桌面集成交点；会话数据语义、请求执行与内容渲染分别进入会话与消息管理、对话请求与上下文、消息渲染器类目
 >
@@ -42,6 +42,9 @@
 
 `LlmChat.vue` 装配左侧 `LeftSidebar`（Agent 列表/参数面板）、中央 `ChatArea` 和右侧 `SessionsSidebar`；组件关系和弹窗层在仓库文档 `docs/architecture/llm-chat-ui-structure.md` 已明确列出。`ChatArea.vue` 同时挂载消息区、输入区、搜索面板、上下文分析器以及工具审批条。
 
+- **会话索引恢复横幅**：`store.sessionRecovery.status !== "ready"` 时工作台顶部渲染 `session-recovery-banner`（`LlmChat.vue:454-511`），`recovering` 显示"正在后台恢复会话索引"与扫描/失败计数，`corrupt` 显示"会话索引需要恢复"；横幅提供取消恢复、打开损坏会话目录（`revealItemInDir`）、导出损坏诊断 JSON、删除已隔离文件（`ElMessageBox` 二次确认）等入口（`LlmChat.vue:318-376`）。
+- **分离窗口不再自行加载会话**：`/detached-component/` 分离窗口初始化不再调用 `store.loadSessions()`，会话状态由 `useLlmChatStateConsumer` 经 WindowSyncBus 提供，且分离窗口不得触发任何 llm-chat 持久化路径（`LlmChat.vue:180-195`）。
+
 ### 1.2 可分离窗口
 
 标题栏拖拽调用 `useDetachable`，输入框也能独立成悬浮窗口；`detachedComponents` 变化后，主 ChatArea 会隐藏重复输入框，并通过 `useWindowSyncBus` 同步主窗口与分离窗口的生成状态。这里的"分离"是 UI 视图拆分，不会创建新的 Session 或消息副本（同步机制与断连边界见 8.2）。
@@ -63,7 +66,7 @@
 
 ### 2.1 会话侧栏：虚拟化与筛选
 
-`SessionsSidebar.vue` 接入 `@tanstack/vue-virtual`（`package.json` 依赖 `@tanstack/vue-virtual: ^3.13.12`，第139-149行）：`useVirtualizer({ count: () => displaySessions.value.length, getScrollElement: () => parentRef.value, estimateSize: () => 71, overscan: 10 })`，固定预估行高 71px、overscan 10 项，`virtualItems`/`totalSize` 用 computed 包一层，模板里用 `translateY` 定位每一行。搜索支持精确/AND/OR 三种匹配模式（数据扫描语义在会话管理 5），并可按 Agent、时间、收藏和生成状态筛选；菜单动作包括新建、重命名、AI 自动命名、收藏夹移动、导出、打开数据目录和批量清理（空会话批量清理的数据语义在会话管理 3.2）。列表项的生成状态来自节点集合而不是 Session 布尔值，因此多个会话可以同时显示生成中。
+`SessionsSidebar.vue` 接入 `@tanstack/vue-virtual`（`package.json` 依赖 `@tanstack/vue-virtual: ^3.13.12`，第139-149行）：`useVirtualizer({ count: () => displaySessions.value.length, getScrollElement: () => parentRef.value, estimateSize: () => 71, overscan: 10 })`，固定预估行高 71px、overscan 10 项，`virtualItems`/`totalSize` 用 computed 包一层，模板里用 `translateY` 定位每一行。搜索支持精确/AND/OR 三种匹配模式（数据扫描语义在会话管理 5），并可按 Agent、时间、收藏和生成状态筛选；菜单动作包括新建、重命名、AI 自动命名、收藏夹移动、导出、打开数据目录和批量清理（空会话批量清理的数据语义在会话管理 3.2）。列表项的生成状态来自节点集合而不是 Session 布尔值，因此多个会话可以同时显示生成中。批量管理弹窗（`BatchManagerDialog.vue`）提供**会话内容搜索与高亮**：复用 `useLlmSearch`（`scope: "session"`、300ms 防抖、加载/失败状态），命中片段用 `<mark class="search-highlight">` 高亮（输入 ≥2 字符进入搜索模式）。
 
 ### 2.2 Agent 侧栏虚拟化
 
@@ -83,6 +86,8 @@
 ### 3.1 输入编辑器与发送约定
 
 `MessageInput.vue` 支持 CodeMirror/textarea 两种编辑器、Enter/Shift+Enter（或 Ctrl/Cmd+Enter）发送约定、输入区高度拖拽/双击复位、附件预览、文件拖入和剪贴板粘贴。附件先进入 `useChatInputManager` 的临时列表，处理完成后才随用户消息提交；转写占位符由 `useTranscriptionManager` 按当前模型能力决定是否插入。生成中会禁用流式模式切换，发送按钮转为中止。工具栏可切换流式输出、宏、附件、迷你会话、临时模型、更多工具、工具调用设置、工具栏设置、输入框展开/收起（`MessageInput.vue`）。
+
+Composer 提供**显式 Knowledge 资料引用**入口——工具栏插入 `KnowledgeReferenceControl.vue`（选择器），输入区上方渲染 `KnowledgeReferenceChips.vue`（每个引用库一个 chip，含名称/ID/可用性 tooltip、不可用红色边框、可单独移除，`aria-label="已引用的 Knowledge 资料库"`）；随消息提交的 `knowledgeReference` 会先在 `useChatHandler.sendMessage` 里执行一次资料检索/研究工具事件（生成 tool 节点）再进入正常生成链（执行侧见对话请求与上下文笔记；数据结构 `ChatMessageNode.knowledgeReference`）。
 
 ### 3.2 快捷操作（宏）
 
@@ -122,11 +127,11 @@
 
 ### 5.2 排队反馈
 
-会话生成中再发消息时，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`），当前生成结束后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队期间的可见 UI 提示（如队列徽标/文案）在源调查中未记录，未核实。
+会话生成中再发消息时，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`、`status: "queued"`），当前生成结束后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队/等待状态的界面呈现：`utils/messageStatus.ts` 把节点状态映射为展示状态（queued→"排队"、waiting→"等待"、generating→"生成中"、error→"错误"、空响应诊断→"异常回复"），`MessageHeader.vue` 在 `settings.uiPreferences.showMessageStatus`（默认 true）开启时于消息头渲染对应徽标（图标 + 文案 + tooltip 详情，生成中带旋转动画；截图模式隐藏）。旧数据 `pending` 状态兼容识别为 queued。
 
 ### 5.3 工具审批条
 
-工具调用暂停时，`ToolCallingApprovalBar.vue` 在输入区上方提供允许/拒绝/继续等动作。"全部允许/全部拒绝"按钮特意不按 `sessionId` 精确匹配，而是基于 UI 当前渲染出来的可见请求 ID 列表——因为 VCP 广播来的审批请求 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套（`ToolCallingApprovalBar.vue:126-151` 注释里专门解释了这个原因；审批状态语义在对话请求与上下文 9.5）。
+工具调用暂停时，`ToolCallingApprovalBar.vue` 在输入区上方提供允许/拒绝/继续等动作。"全部允许/全部拒绝"按钮特意不按 `sessionId` 精确匹配，而是基于 UI 当前渲染出来的可见请求 ID 列表——因为 VCP 广播来的审批请求 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套（`ToolCallingApprovalBar.vue:126-151` 注释里专门解释了这个原因；审批状态语义在对话请求与上下文 9.5）。审批条带倒计时提示（`formatApprovalWait`，每秒刷新）——`expiresAt === null` 显示"等待人工审批 · 不会自动超时"，否则显示"剩余 N 秒 · 超时将自动拒绝"；超时自动拒绝来自 `toolCallingStore` 的可配置审批超时（`uiPreferences.toolApprovalTimeoutEnabled`/`Seconds`，默认关闭）。
 
 ## 6. 消息操作、分支与版本导航
 
@@ -209,9 +214,8 @@
 
 - 视觉效果、焦点顺序、键盘可用性、响应式行为、系统通知需要运行验证（静态代码只能确认入口、状态与事件绑定）。
 - 树图大规模节点布局性能未压测。
-- 排队期间的可见 UI 提示未核实（5.2）。
 - 分离窗口断连后流缓冲重放的实际观感未验证（8.2）。
-- 首次启动 onboarding 缺失、会话列表键盘切换缺失、树图无键盘路径等结论来自全项目静态搜索，未经运行时可用性测试（详细清单在源文件 12.7/12.11）。
+- 首次启动 onboarding 缺失、会话列表键盘切换缺失、树图无键盘路径等结论来自全项目静态搜索，未经运行时可用性测试（详细清单在源文件 12.7/12.11；应用已引入 GuidedFlow 引导流程系统与升级引导，原"onboarding 缺失"结论已过时，详见通用界面盘点笔记 §12.11）。
 
 ## 12. 关键源码索引
 
@@ -220,6 +224,9 @@
 - `src/tools/llm-chat/components/message/MessageMenubar.vue`（消息操作入口，167-186行删除确认，409-420行翻译快捷键）
 - `src/tools/llm-chat/components/message/ViewModeSwitcher.vue`、`message/MessageList.vue`（入口层面，渲染机制在渲染器笔记）
 - `src/tools/llm-chat/components/message-input/MessageInput.vue`、`MessageInputToolbar.vue`、`ToolCallingApprovalBar.vue`
+- `src/tools/llm-chat/components/message-input/KnowledgeReferenceControl.vue`、`KnowledgeReferenceChips.vue`（显式资料引用）
+- `src/tools/llm-chat/utils/messageStatus.ts`、`components/message/MessageHeader.vue`（生命周期状态徽标）
+- `src/tools/llm-chat/components/sidebar/BatchManagerDialog.vue`（会话内容搜索与高亮）
 - `src/tools/llm-chat/components/sidebar/SessionsSidebar.vue`（139-149行虚拟化、491-499行空状态）、`AgentsSidebar.vue`（893-946行）
 - `src/tools/llm-chat/components/search/ChatSearchPanel.vue`（52-121行线性扫描）
 - `src/tools/llm-chat/components/conversation-tree-graph/`（`FlowTreeGraph.vue`、`useGraphD3Simulation.ts`、`useGraphSubtreeDrag.ts`、`useGraphConnectionPreview.ts`、`useGraphNodeActions.ts`、`GraphNodeMenubar.vue`）

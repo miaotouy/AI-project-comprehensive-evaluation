@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -220,10 +220,10 @@ subagent router_prompt
 
 ### 5.1 会话创建、消息快照与重新生成
 
-- **会话创建不写入任何初始消息**：`new_session`（`astrbot/dashboard/services/chat_service.py:1345-1354`）只建 `PlatformSession` 行；`ConversationV2` 在首条消息时惰性创建且 `content=None`（`astrbot/core/conversation_mgr.py:207-210`）。begin_dialogs 每轮以 `req.contexts[:0]` 注入（astr_main_agent.py:535-536），`_no_save: True`（persona_mgr.py:389-398），`_save_to_history` 显式跳过 `_no_save` 消息（`internal.py:470-471`）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
+- **会话创建不写入任何初始消息**：`new_session`（`astrbot/dashboard/services/chat_service.py:1364-1373`）只建 `PlatformSession` 行；`ConversationV2` 在首条消息时惰性创建且 `content=None`（`astrbot/core/conversation_mgr.py:207-210`）。begin_dialogs 每轮以 `req.contexts[:0]` 注入（astr_main_agent.py:535-536），`_no_save: True`（persona_mgr.py:389-398），`_save_to_history` 显式跳过 `_no_save` 消息（`internal.py:470-471`）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
 - **修改 begin_dialogs 后既有会话下一轮自动生效**：`personas_v3` 缓存每次 CRUD 重建（persona_mgr.py:135、169、201、274、350），每轮 `_ensure_persona_and_skills` 重新解析注入。
 - **消息对象层不保存角色/模型快照**：`PlatformMessageHistory`（po.py:239-269）字段仅 platform_id/user_id/sender/content/llm_checkpoint_id，无 persona_id、无模型名；bot 消息 content 为 `{type, message, agent_stats, refs}`（`build_bot_history_content`，chat_service.py:97-113），`AgentStats`（`astrbot/core/agent/response.py:31-38`）只含 token/耗时。当次实际模型的记录分层存放：trace 日志（`sel_persona` 含 persona_id+工具集 :657-664、`astr_agent_prepare` 含 `chat_provider{id,model}` internal.py:282-291）与 DB `provider_stat` 表（`insert_provider_stat` 持久化 provider_id/provider_model/status/stats，internal.py:578-586）；`selected_model` 只经请求 extra 进 `req.model`（astr_main_agent.py:1411-1412），不留存。
-- **重新生成走完整主链路**：`chat.py:222-244` regenerate → `prepare_regenerate_message_payload`（chat_service.py:1702-1806，回滚历史 `history[:start]+history[end+1:]` :1780、删旧 bot 展示记录、换新 checkpoint）→ `_send_chat` → `build_chat_stream`（chat.py:94）→ 同一 Agent 构建链 → 重新解析 Persona 当前值。行为上每轮解析与 AIO Hub 的实时引用一致，但消息本身没有任何执行参数快照可查。
+- **重新生成走完整主链路**：`chat.py:222-244` regenerate → `prepare_regenerate_message_payload`（chat_service.py:1721-1825，回滚历史 `history[:start]+history[end+1:]` :1799、删旧 bot 展示记录、换新 checkpoint）→ `_send_chat` → `build_chat_stream`（chat.py:94）→ 同一 Agent 构建链 → 重新解析 Persona 当前值。行为上每轮解析与 AIO Hub 的实时引用一致，但消息本身没有任何执行参数快照可查。
 
 ## 6. 自定义错误回复（persona_error_reply.py，86 行）
 
@@ -261,7 +261,7 @@ subagent router_prompt
 | 人格列表/卡片 | `views/persona/PersonaManager.vue` | 卡片式浏览（PersonaCard），system_prompt 截断显示 160 字符（PersonaCard.vue:15）；导入 JSON（:778-806，冲突自动加 `_imported_N` 后缀 :784-797）；删除确认 |
 | 表单 | `components/shared/PersonaForm.vue` | persona_id（编辑时禁用，:37）、system_prompt（:43-50）、custom_error_message（:52-61）、能力编辑器 `PersonaCapabilitiesEditor`（tools/skills，:72-79）、预设对话展开面板（user/assistant 交替 label，:107-120）；校验规则见下 |
 | 文件夹 | `views/persona/FolderTree.vue`、`MoveToFolderDialog.vue`、`FolderCard.vue` | 递归文件夹 + 拖拽/移动 |
-| 能力编辑器 | `components/shared/PersonaCapabilitiesEditor.vue`、`PersonaCapabilityList.vue` | 三态选择（全部/禁用/名单） |
+| 能力编辑器 | `components/shared/PersonaCapabilitiesEditor.vue`、`PersonaCapabilityList.vue` | 三态选择（全部/禁用/名单）；未激活插件的 skill 被过滤出可选项与选中计数（PersonaCapabilitiesEditor.vue:75-77、185-207，消费 skills 列表的 `plugin_active` 字段，skills_service.py:263-274） |
 | 预览 | `components/shared/PersonaQuickPreview.vue` | 快速预览效果 |
 | 选择器 | `components/shared/PersonaSelector.vue` | 对话内切换 persona（写 conversation.persona_id） |
 | 会话规则 | `SessionManagementPage.vue:505-524` | 规则绑定 persona_id（session_service_config） |

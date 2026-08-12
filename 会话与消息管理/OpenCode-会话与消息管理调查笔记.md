@@ -2,11 +2,11 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
-> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/OpenCode-Chat调查笔记.md`](../Chat/OpenCode-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据；按提交范围 b8bd889..HEAD 核对压缩序列化、时间序排序键与 revert/fork 定位改动
 >
 > 调查范围：会话/消息/part 数据模型、生命周期与 SQLite 持久化、消息操作与分支数据语义、列表分页与检索、V1/V2 双轨、外部对象绑定；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -16,11 +16,11 @@
 
 OpenCode 以「SQLite 持久化 + 事件发布 + 客户端投影」为会话数据核心：消息模型是 Session → Message（role: user/assistant）→ Part（12 种类型）三层，part 独立存表、读取时组装。`updateMessage`/`updatePart` 只发布事件，DB 写入由事件投影器完成——写入与广播强耦合，事件顺序即持久化顺序。
 
-关键事实（快照 b8bd889）：
+关键事实（快照 1f94d8a）：
 
 - **ID 体系**：Session `ses_` + 降序（新会话排序在前）、Message `msg_`、Part `prt_`，时间戳×0x1000+计数器编码 + 14 字节随机 base62（`packages/schema/src/identifier.ts:6-29`）。
 - **流式落盘分三层**：reasoning/text 的 delta 走 `updatePartDelta` 发增量事件、完整 part 在 end 事件时落库、tool part 状态迁移即时落库（processor.ts:499-532）。
-- **上下文压缩是"重写历史"**：compaction 重排消息并清空旧 tool 输出（compaction.ts）。
+- **上下文压缩是"重写历史"**：compaction 重排消息并清空旧 tool 输出（compaction.ts）；快照 1f94d8a 起压缩请求把对话历史**文本序列化**为 `[User]/[Assistant]/[Assistant tool call]/[Tool result]` 前缀文本（结果按 `TOOL_OUTPUT_MAX_CHARS` 截断、compacted 输出标 `[Old tool result content cleared]`），拼进 summary 请求（compaction.ts:52-83、:387、:427-438），不再经 `toModelMessagesEffect` 的 stripMedia 媒体剥离。
 - **无消息内容全文搜索**：仅会话标题 LIKE 搜索。
 - **附件为 data URL 内联**：本快照未发现独立 attachments 目录。
 - **V1/V2 双轨**：V1（Legacy）为生产主路径；V2 为事件溯源新架构（`session_input`/`event` 表），客户端按协议协商切换。
@@ -49,7 +49,7 @@ POST /session（创建）-> createNext 生成 ses_ id + 默认标题
 - **`snapshot` 语义是 git 快照**：step-start/step-finish part 与 session.revert 上的 `snapshot` 字段为 git 提交哈希（v1/session.ts:233-257、src/snapshot/index.ts:39-42、349-406）。
 - **分支**：无消息树；分支通过 `fork` 新建会话复制消息实现（见第 4 节）。
 - **V2 消息**：事件溯源模型 `SessionMessage`（schema/src/session-message.ts:200-212，type: user/assistant/synthetic/system/shell/agent-switched/model-switched/compaction），存 `session_message` 表（sql.ts:119-138），由 projector 从事件投影（core/src/session/projector.ts:350-395）。
-- **`MessageV2` 是转换层而非新模型**：提供分页（page，:425-467）、历史转 AI SDK 消息（toModelMessagesEffect，:131-415）、过滤压缩（filterCompacted，:521-572）、错误归一化（fromError，:603-731）。
+- **`MessageV2` 是转换层而非新模型**：提供分页（page，:425-467）、历史转 AI SDK 消息（toModelMessagesEffect，:131-415）、过滤压缩（filterCompacted，:521-572；其中 `latest` 判定按 `time.created` 排序、id 仅作决胜，:582-604——导入消息的 id 不保证单调）、错误归一化（fromError，:603-731）。
 
 ## 2. 事实源、索引与持久化
 
@@ -74,8 +74,8 @@ POST /session（创建）-> createNext 生成 ses_ id + 默认标题
 - **编辑**：无整体 edit message 端点；`PATCH /session/:id/message/:messageID/part/:partID` 更新单个 part（groups/session.ts:433-444、handlers/session.ts:397-411）。
 - **删除**：`DELETE .../message/:messageID`（:409-421，需 `assertNotBusy`）与 `DELETE .../part/:partID`（:422-432）→ 发 `message.removed`/`message.part.removed` 事件（session.ts:855-877），投影器删行并回滚 usage（projector.ts:276-311）。OpenAPI 描述明确 "without reverting file changes"（groups/session.ts:419）。
 - **重试**：无独立重试端点；进程内自动重试（见对话请求与上下文笔记 7）。
-- **回复/回退**：`POST /session/:id/revert`（groups/session.ts:369-382）→ `SessionRevert.revert`（revert.ts:38-88）：定位目标消息/part，记录 revert 状态（含 git snapshot），`snap.revert(patches)` 回滚文件；再次 prompt 前 `revert.cleanup`（:100-134）删除目标之后的消息——无 partID 时连目标消息本身一起删（`msg.info.id >= messageID`），有 partID 时保留目标消息、仅删其 partID 起的 parts（:107-132）。改的是原消息树（删除），不是新建分支节点。
-- **分支**：`POST /session/:id/fork`（session.ts:693-734）：新建会话并复制截至某消息的全部消息/parts（parentID 重映射 :712-718）。
+- **回复/回退**：`POST /session/:id/revert`（groups/session.ts:369-382）→ `SessionRevert.revert`（revert.ts:38-88）：定位目标消息/part，记录 revert 状态（含 git snapshot），`snap.revert(patches)` 回滚文件；再次 prompt 前 `revert.cleanup`（:100-134）删除目标之后的消息——无 partID 时连目标消息本身一起删，有 partID 时保留目标消息、仅删其 partID 起的 parts。快照 1f94d8a 起目标与范围改用 `findIndex`+`slice` 定位（revert.ts:74-75、:106-114），不再用 id 大小比较（导入消息 id 可能非单调）。改的是原消息树（删除），不是新建分支节点。
+- **分支**：`POST /session/:id/fork`（session.ts:693-734）：新建会话并复制截至某消息的全部消息/parts（复制边界由 `findIndex` 定位，:706，parentID 重映射 :712-718）。
 - **续写**：同 session 继续 prompt 追加即可；V2 有 `delivery: "steer"`（打断当前轮）与 `"queue"`（排队，core/src/session/input.ts:245-287）。
 
 ## 5. 列表、分页、搜索与定位
@@ -91,7 +91,7 @@ POST /session（创建）-> createNext 生成 ses_ id + 默认标题
 - **事件即写入**：写入与广播强耦合，事件顺序即持久化顺序——简化一致性问题，代价是投影器顺序消费（第 9 节）。
 - **多窗口**：SSE 事件全量广播，多个窗口各自订阅同一事件流，无专门同步层（静态推断）；窗口级的会话/草稿恢复差异见 Chat UI 笔记。
 - **流式临时状态**：`part_text_accum_delta` 在前端累积，结束事件完整替换（渲染器笔记）；断线重连与事件乱序下的文本合并正确性未实测。
-- **乐观更新**：store 按 id 二分插入/替换并删除 accum（server-session.ts:1095-1152），细节见消息渲染器笔记。
+- **乐观更新**：store 按**时间序键**（`messageKey = time.created + id`，app/src/utils/session-message.ts:19-26）二分插入/替换并删除 accum（server-session.ts:1051、:1094-1189；global-sync/event-reducer.ts:279-299；TUI 同步端同改，tui/src/context/sync.tsx:54-58、:328），`message.removed` 用 `findIndex` 按 id 定位；细节见消息渲染器笔记。
 
 ## 7. 迁移、导入导出与保留策略
 

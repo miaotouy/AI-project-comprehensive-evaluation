@@ -2,23 +2,15 @@
 
 > 调查对象：`E:\works\git\VCPChat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，本刷新核对 main.html/renderer.js/trayManager 等变更；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）保留于原 Chat 笔记，待可选界面专题承接
+> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，核对范围覆盖 main.html、renderer.js、trayManager 等变更；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）保留于原 Chat 笔记，待可选界面专题承接
 >
 > 调查范围：工作台结构、Topic 导航与现场恢复、Composer 与快捷输入、发送前配置、发送/停止反馈、消息操作、键盘与无障碍、桌面集成交点；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
-
-## 本次刷新要点（3f14e93 → b6ffa22）
-
-- **main.html 功能变更极小**：除行尾规范化外，仅两处实际变更——CSP `media-src` 增加 `blob:`；新增引入 `VCPDistributedServer/frontend-plugin-loader.js`（defer），开启 renderer 型前端插件（VChatDynamicWallpaper 动态壁纸、VChatAutoTTS 自动朗读）注入主窗口的机制（插件明细见 Agent 工具笔记）。
-- **托盘新增 Loom 入口**：`modules/trayManager.js:33` 增加 `vchat-app-loom-manager`（`open-loom-manager`），点击打开 VCP Loom Manager 窗口；桌面 Dock 的 `Desktopmodules/builtinWidgets/vchatApps.js` 同步新增"VCP Loom"应用项并支持动态同步 LoomAPP 到 Dock（`:543-604` 的 `syncLoomApps`）。
-- **模型参数折叠段支持"未设置"**：temperature/contextTokenLimit/maxOutputTokens/top_p/top_k 留空时显示"未设置"并存 `null`（`modules/settingsManager.js:1886-1890`），发送侧行为见 Agent 角色笔记刷新要点。
-- **Loom 页面文本可分享进输入框**：`renderer.js:500-517` 订阅 `onLoomShareTextToInput`，把 LoomAPP 选中文本插入 `#messageInput`。
-- 其余 Chat UI 结论（三栏布局、渐进渲染、拖放排序、现场恢复、按钮态、消息右键、无障碍现状）经核对未变——`topicListManager.js`、`uiManager.js`、`emoticonManager.js`、`event-listeners.js`、`ui-helpers.js`、`notificationRenderer.js`、`Voicechatmodules/voicechat.js` 均未改动。
 
 ## 结论摘要
 
@@ -49,7 +41,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 ### 1.1 主界面布局不是单一聊天页
 
-`main.html` 将窗口拆成左侧 sidebar、中央 chat、右侧 notifications sidebar。左侧用"助手 / 话题 / 设置"三个 tab，助手 tab 负责 Agent/Group 选择，话题 tab 负责 Topic 搜索与列表，设置 tab 打开全局配置；窄侧栏另有 compact navigation。`renderer.js` 在启动时把这些 DOM 节点注入各模块，并根据 `sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive` 和 `sidebarAvatarOnly` 恢复布局状态。窗口侧栏可拖拽调整宽度，通知栏可独立开关，因而"会话选择"和"消息阅读"是并列的工作区而非路由跳转。
+`main.html` 将窗口拆成左侧 sidebar、中央 chat、右侧 notifications sidebar。左侧用"助手 / 话题 / 设置"三个 tab，助手 tab 负责 Agent/Group 选择，话题 tab 负责 Topic 搜索与列表，设置 tab 打开全局配置；窄侧栏另有 compact navigation。`renderer.js` 在启动时把这些 DOM 节点注入各模块，并根据 `sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive` 和 `sidebarAvatarOnly` 恢复布局状态。窗口侧栏可拖拽调整宽度，通知栏可独立开关，因而"会话选择"和"消息阅读"是并列的工作区而非路由跳转。`main.html` 的 CSP `media-src` 允许 `blob:`，并引入 `VCPDistributedServer/frontend-plugin-loader.js`（defer）为 renderer 型前端插件（VChatDynamicWallpaper 动态壁纸、VChatAutoTTS 自动朗读）提供注入主窗口的机制（插件明细见 Agent 工具笔记）。
 
 ### 1.2 侧栏宽度与 Compact 导航
 
@@ -65,15 +57,15 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 ### 2.1 话题列表渐进呈现
 
-`topicListManager.js` 初始只渲染 40 条 Topic（`TOPIC_INITIAL_RENDER_COUNT`），滚动距离底部 320px 后按 30 条批量追加（`TOPIC_PROGRESSIVE_BATCH_SIZE`），并用 `requestAnimationFrame` 分帧（`modules/topicListManager.js:16-18`, `:288-377`）；每一行先显示消息数占位符 `...`，由 `IntersectionObserver` 在进入视口前 240px 才读取 history 计算总数/未读标记（计数逻辑的数据侧见会话与消息管理笔记 5.4）。行点击切换 Topic，右键打开重命名、删除、标记已读等菜单，搜索模式下禁用拖放排序。这个列表策略与消息区的"整段 DOM 重绘"相互独立：Topic 多时减少首次 IO，消息流中仍直接更新当前气泡。
+`topicListManager.js` 初始只渲染 40 条 Topic（`TOPIC_INITIAL_RENDER_COUNT`），滚动距离底部 320px 后按 30 条批量追加（`TOPIC_PROGRESSIVE_BATCH_SIZE`），并用 `requestAnimationFrame` 分帧（`modules/topicListManager.js:16-17`, `:407-497`）；每一行先显示消息数占位符 `...`，由 `IntersectionObserver` 在进入视口前 240px 才读取 history 计算总数/未读标记（计数逻辑的数据侧见会话与消息管理笔记 5.3/5.4）。行点击切换 Topic，右键打开重命名、删除、标记已读等菜单，搜索模式下禁用拖放排序。这个列表策略与消息区的"整段 DOM 重绘"相互独立：Topic 多时减少首次 IO，消息流中仍直接更新当前气泡。
 
 ### 2.2 拖放排序
 
-用 SortableJS，初始化在 `initializeTopicSortable(itemId, itemType)`（`modules/topicListManager.js:510-568`）。`onStart` 时如果全局"划词监听"（selection listener）处于开启状态会临时关闭，`onEnd` 时恢复（`:526-542`，避免拖拽过程与全局划词快捷键冲突）。`onEnd` 拿到新顺序的 `topicId` 数组后调用 `saveTopicOrder`（agent）或 `saveGroupTopicOrder`（group）（`:544-552`），排序落地到配置文件的语义见会话与消息管理笔记 5.1。排序失败会 toast 报错并 `loadTopicList()` 回滚展示（`:556-565`）。搜索状态下不启用拖拽排序（`renderTopicListProgressively` 里 `!searchTerm` 才 `initializeTopicSortable`，`:315`）。
+用 SortableJS，初始化在 `initializeTopicSortable(itemId, itemType)`（`modules/topicListManager.js:635-694`）。`onStart` 时如果全局"划词监听"（selection listener）处于开启状态会临时关闭，`onEnd` 时恢复（`:653-671`，避免拖拽过程与全局划词快捷键冲突）。`onEnd` 拿到新顺序的 `topicId` 数组后调用 `saveTopicOrder`（agent）或 `saveGroupTopicOrder`（group）（`:674-676`），排序落地到配置文件的语义见会话与消息管理笔记 5.1。排序失败会 toast 报错并 `loadTopicList()` 回滚展示（`:680-693`）。搜索状态下不启用拖拽排序（`renderTopicListProgressively` 里 `!searchTerm` 才 `initializeTopicSortable`，`:407` 起）。
 
 ### 2.3 搜索入口
 
-`loadTopicList()`（`modules/topicListManager.js:379-484`）读取 `#topicSearchInput` 的值作为 `searchTerm`（`:413-414`）；搜索是前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）。
+`loadTopicList()`（`modules/topicListManager.js:498-616`）读取 `#topicSearchInput` 的值经 `parseTopicSearchQuery` 解析（`:533` 起）：普通关键词走前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）；完整输入"未读话题"/"unread topic"时跳过文本搜索，改由 `prioritizeUnreadTopics` 把未读话题置顶（`:599`）。搜索框提示与 `aria-label` 已更新为"搜索话题或未读话题"（`main.html:213-216`）。话题条目另带"未读 N"/"未读"文字指示器（`.topic-unread-indicator`、`has-unread-topic` class，`ensureTopicUnreadIndicator`，`topicListManager.js:178-198`、`:330-365`）；发送消息会清除持久化未读（`chatManager.handleSendMessage` 调 `setTopicUnread(false)`，`modules/chatManager.js:1037-1055`；未读语义细节见会话与消息管理笔记 5.3）。
 
 ### 2.4 现场恢复
 
@@ -85,6 +77,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 - **附件**：点击、删除、预览、自动伸缩都在输入区完成；附件数据对象（`type/src/name/size/_fileManagerData` 等）随用户消息落盘（`modules/chatManager.js:992-1002`）。
 - **换行**：`#messageInput` 明示 Shift+Enter 换行（`modules/event-listeners.js:443-444`）。
+- **Loom 文本分享**：`renderer.js:500-517` 订阅 `onLoomShareTextToInput`，把 LoomAPP 选中的文本插入 `#messageInput`。
 - **表情包选择器**（`modules/emoticonManager.js`）：从服务端 API `getEmoticonLibrary()` 加载表情库，只筛选当前用户对应的分类（`"通用表情包"` + `"${userName}表情包"` 两个分类，`:53-59`）。UI 是平铺图片网格，没有搜索框、分类切换或分页（`:85-99`），面板固定尺寸 270×240px，出现在按钮上方（`:158-165`）；点击面板外部关闭（100ms 延迟绑定，避免立即触发，`:107`）。点击表情包将 `<img src="..." width="80">` HTML 标签插入 `textarea.value`（`:131-135`），不是转义后的 Markdown 语法。表情库为空时显示"没有找到可用的表情包"占位文字（`:89-90`）。
 - **群聊**：输入区另有邀请 Agent 发言按钮（触发 `handleInviteAgentToSpeak`，执行语义见对话请求与上下文笔记 8 节）。
 - 发送按钮右键打开高级回复菜单；草稿（输入框未发送内容）按什么粒度保存**未在原调查中核实**。
@@ -92,7 +85,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 ## 4. Agent、模型、工具与发送前配置
 
 - 左侧 Agent 列表支持搜索、点击切换、创建、编辑和删除；群组可创建并邀请 Agent 发言。
-- 当前 Agent 设置中的**模型按钮可替换模型**，模型参数、上下文上限、流式输出和 TTS 在**折叠设置段落**中修改。
+- 当前 Agent 设置中的**模型按钮可替换模型**，模型参数、上下文上限、流式输出和 TTS 在**折叠设置段落**中修改；模型参数（temperature/contextTokenLimit/maxOutputTokens/top_p/top_k）留空时显示"未设置"并存 `null`（`modules/settingsManager.js:1886-1890`，发送侧行为见 Agent 角色笔记）。
 - 标题栏提供当前 Agent 设置、通知/监控、主题、语音聊天和气泡/统一/刊物 presentation mode 切换器。
 - 发送按钮右键的高级回复菜单属发送前配置的一部分，具体选项未在原调查中逐项列出。
 
@@ -119,7 +112,7 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 - **布局状态**：`sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive`、`sidebarAvatarOnly` 由 `renderer.js` 启动时恢复（1.1）。
 - **最后打开状态**：`lastOpenItemId/lastOpenItemType/lastOpenTopicId` 存 `settings.json`，`lastActiveTopic_*` 存 localStorage（2.4）。
 - **桌面集成交点**（完整托盘/窗口逻辑盘点保留在源文件 13.8）：
-  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。当前 HEAD 托盘另增 Loom 菜单项（`trayManager.js:30-33`，`loomOpenManager`）。
+  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。当前 HEAD 托盘另增 Loom 菜单项（`trayManager.js:34`，`open-loom-manager`）与 Scriptorium"文坊"应用项（`trayManager.js:26`，`open-scriptorium-window`）。
   - 语音聊天是独立子窗口（第 7 节），与主窗口并行存在。
   - VCP Loom Manager 是独立管理窗口（`Loommodules/manager.html`），LoomAPP 运行时用 WebContentsView 承载（`modules/loom/VCPLoomManager.js`）。
   - 应用**不发送系统桌面通知**（未发现 `new Notification(...)` 或 Electron `Notification` 类调用），所有 AI 消息通知通过右侧内置通知侧栏和浮动 Toast 呈现——通知机制的完整盘点保留在源文件 13.2。
@@ -181,7 +174,7 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 - `main.html`（三栏布局、presentation 选择器、输入区）
 - `renderer.js`（`updateSendButtonState` `:190-198`、`getInterruptibleMessageForCurrentChat` `:150-188`、`handleSendButtonAction` `:249-258`、`applyChatPresentationMode`、布局状态恢复 `:1577`）
 - `modules/uiManager.js`（侧栏拖拽宽度 `:48-130`、compact 抽屉 `:382-386`）
-- `modules/topicListManager.js`（渐进渲染 `:16-18`, `:288-377`、拖放排序 `:510-568`、搜索 `:379-484`）
+- `modules/topicListManager.js`（渐进渲染 `:16-17`, `:407-497`、"未读话题"置顶 `:128-175`、拖放排序 `:635-694`、搜索 `:498-616`）
 - `modules/chatManager.js`（现场恢复 `:275-292`, `:525-526`、附件组装 `:992-1002`）
 - `modules/renderer/messageContextMenu.js`（消息右键菜单）
 - `modules/emoticonManager.js`（表情包选择器）

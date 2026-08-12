@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\deepchat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
-> 调查方式：从 [`../Chat/DeepChat-Chat调查笔记.md`](../Chat/DeepChat-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/DeepChat-Chat调查笔记.md`](../Chat/DeepChat-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据；按提交范围 `dc4177c2..e142b2a` 核对 turn 新增的 queue resume/retry 操作
 >
 > 调查范围：一次生成任务的提交入口（sendMessage/steer/queue/retry/delete/edit/fork/compaction/tool interaction）、上下文构建、预算截断与压缩、Provider 交接与流式回写；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -45,11 +45,12 @@ ChatPage（preload bridge）
 - `sendMessage`：普通发送并等待当前 session gate；
 - `steerActiveTurn`：把输入交给正在运行的 turn；
 - `queuePendingInput`、更新/移动/steer/delete pending item：维护输入队列；
+- `resumePendingQueue`、`retryPendingQueueInput`（#2137，`turn.ts:213-244`）：暂停/被释放的队列输入恢复执行——`retry_required` 项经 `retryPendingQueueInput` 重新进入 pending 并启动，`isPendingQueueResumeAvailable` 供 UI 判断恢复可用性（数据模型见会话与消息管理笔记 §1.3）；
 - `retryMessage`、`deleteMessage`、`editUserMessage`、fork：修改已有 transcript（数据语义见会话与消息管理笔记 §4）；
 - `getCompactionState`、manual compaction：只对支持的 DeepChat session 生效；
 - `respondToToolInteraction`：向 question/permission 等工具交互写回答案。
 
-`sendMessage`（`src/main/session/turn.ts:102-145`）接收字符串或 `SendMessageInput`，先经 `normalizeSendMessageInput`，再调用当前 session runtime 的 `send`。附件仍属于 normalized input；无法接受附件时返回 `needs_user_action`（`:145-146`）。占位与结算的状态机见 §6；pending input 的队列数据模型（state：`pending|claimed|blocked|consumed`，`agent-interface.d.ts:258-275`）见会话与消息管理笔记 §1.3。
+`sendMessage`（`src/main/session/turn.ts:102-145`）接收字符串或 `SendMessageInput`，先经 `normalizeSendMessageInput`，再调用当前 session runtime 的 `send`。附件仍属于 normalized input；无法接受附件时返回 `needs_user_action`（`:145-146`）。占位与结算的状态机见 §6；pending input 的队列数据模型（state：`pending|claimed|blocked|retry_required|consumed`，`agent-interface.d.ts:259-281`）见会话与消息管理笔记 §1.3。
 
 ## 2. 历史选择与上下文拼装顺序
 
@@ -93,7 +94,8 @@ createUserMessage(...)
 ## 8. 队列、多会话并发与后台生成
 
 - 并发粒度是单 session gate：`sendMessage` 等待当前 session gate；运行中通过 `steerActiveTurn` 打断、`queuePendingInput` 排队。
-- 队列记录（`src/shared/types/agent-interface.d.ts:258-275`）保存 payload、关联 message ids、assistant id、阻塞原因和时间戳，state 为 `pending|claimed|blocked|consumed`；其数据模型见会话与消息管理笔记 §1.3。
+- 队列记录（`src/shared/types/agent-interface.d.ts:259-281`）保存 payload、关联 message ids、assistant id、阻塞原因和时间戳，state 为 `pending|claimed|blocked|retry_required|consumed`；其数据模型与重启恢复语义见会话与消息管理笔记 §1.3。
+- **队列释放与重试（#2137，源码确认）**：claimed 队列输入若因异常被释放且未物化为用户消息，进入 `retry_required`（而不是静默回到队列或丢弃）；`retryPendingQueueInput` 把该项重新置 pending 并启动新一轮 turn，`resumePendingQueue` 恢复整个暂停的队列（运行 gate 内执行，只对 DeepChat session 可用）。
 - 工具 question/permission response 通过 `respondToToolInteraction` 写回答案，是独立于 sendMessage 的输入通道。
 - 多会话并行生成与后台任务本次未调查。
 
@@ -106,7 +108,8 @@ createUserMessage(...)
 ## 10. 退出恢复、日志与已确认边界
 
 - 已确认：provider 预检、严格重试、context-pressure recovery（`deepChatLoopRunner.ts:479-548`）、overflow 抛出与 manual compaction 限制（§3）。
-- 边界：ACP runtime 的具体外部协议 payload 未展开；应用退出、切换 session 时的任务收口与日志关联本次未调查（源笔记未见对应证据）。
+- 边界：ACP runtime 的具体外部协议 payload 未展开；应用退出、切换 session 时的任务收口本次未调查。新增结构化主进程 JSONL 日志（`src/main/logging/`，#2141，替代 `electron-log`），事件面覆盖 run/turn 生命周期（`mainLogEvents.ts` 的 `run_*`/`turn_*` 事件，含 runId/sessionId 关联字段），任务与日志的关联面已具备基础设施，但本次未运行验证其落盘内容与恢复时的回填。
+- 队列恢复：应用重启后 `recoverInputsAfterRestart` 收口 claimed/steer 输入（数据侧见会话与消息管理笔记 §1.3），UI 侧 resume 动作见 Chat UI 笔记 §3。
 
 ## 11. 未验证事项
 
@@ -117,10 +120,11 @@ createUserMessage(...)
 
 ## 12. 关键源码索引
 
-- turn 操作：`src/main/session/turn.ts:36-405`（sendMessage :102-145）
-- pending input DTO：`src/shared/types/agent-interface.d.ts:258-275`
+- turn 操作：`src/main/session/turn.ts:36-405`（sendMessage :102-145，queue resume/retry :213-244）
+- pending input DTO：`src/shared/types/agent-interface.d.ts:259-281`
 - 历史筛选与上下文构建：`src/main/agent/deepchat/runtime/contextBuilder.ts:1501-1589`、`:1614-1639`
 - system prompt 组装：`src/main/agent/deepchat/runtime/promptAssemblyService.ts:59-73`、`:89-104`
 - 工具目录与 provider 管线：`src/main/agent/deepchat/runtime/deepChatLoopRunner.ts:375-398`、`:447-548`
 - transcript 生命周期：`src/main/session/data/transcript.ts:166-381`
 - 节流源：`src/main/agent/deepchat/runtime/echo.ts:7-8`
+- 结构化日志：`src/main/logging/mainLogEvents.ts`（run/turn 事件）

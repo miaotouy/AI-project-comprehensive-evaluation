@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-11
+> 对比更新日期：2026-08-12
 >
 > 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比；本文档只保留跨层综合结论
 >
@@ -65,7 +65,7 @@ VCPToolBox 不提供最终用户聊天主界面，但仍负责消息构建。它
 | 主进程权威 transcript、Agent 输入队列与工具交互 | DeepChat | main/renderer 之间仍有 IPC revision、cursor 和事件顺序边界 |
 | CLI/TUI/桌面共用 Agent 后端、跨压缩 lineage | Hermes Agent | 会话句柄（sid）与持久 session id 必须区分，压缩轮转后按 lineage root 重锚 |
 | 本地模型、AI SDK 流式 UI 与消息版本树 | Jan | 桌面端每轮整写 JSONL，未完成回合不恢复 |
-| 应用层树与分支记忆 | AIO Hub | 搜索无索引，崩溃后生成状态不自愈 |
+| 应用层树与分支记忆 | AIO Hub | 搜索无索引；崩溃后残留"生成中"节点已由加载路径自动修复（`repairInterruptedGeneratingNodes`），修复行为未做运行复现 |
 | 简单会话记录、归档优先于删除 | Chatbox | 恢复归档不会重排，拖拽排序仅限同分组 |
 | Agent 工具过程的可观察流程 | LobeHub | 双层 store 各自 parse；审批逻辑位于全局 store |
 | 纯客户端部署，集中保存 Mask、摘要和工具状态 | NextChat | IndexedDB/localStorage 是主存储，本地数据与同步边界需单独评估 |

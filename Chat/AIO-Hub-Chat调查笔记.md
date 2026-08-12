@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）。
 >
@@ -36,10 +36,10 @@
 
 ```text
 MessageInput 提交 → useChatHandler.sendMessage（会话生成中则进 queuedSessionIds 排队，isQueued 占位节点）
-→ 上下文压缩检查（useContextCompressor，可选）→ contextPipelineStore 11 处理器上下文管道（会话加载/世界书/知识库/变量/Token 限制/格式化/附件 Base64 等）
+→ 上下文压缩检查（useContextCompressor，可选）→ contextPipelineStore 11 处理器上下文管道（会话加载/世界书/Recall 检索/变量/Token 限制/格式化/附件 Base64 等）
 → useChatExecutor → useSingleNodeExecutor 请求 LLM（重试策略、prefix 续写）
 → 流式返回：ReplayableMessageStreamSource 驱动 UI 渲染（即时），节点 content 走 setTimeout 节流写回并落盘
-→ 工具调用循环 useToolCallOrchestrator（toolCallingStore 审批 await 卡住）
+→ 工具调用循环 useToolCallOrchestrator（toolCallingStore 审批 await 卡住，默认无限等待、可配置超时自动拒绝）
 → finalizeNode 强制 flush 全部缓冲 → persistSession → useWindowSyncBus 跨窗口同步
 ```
 
@@ -47,7 +47,7 @@ MessageInput 提交 → useChatHandler.sendMessage（会话生成中则进 queue
 
 - **`ChatSessionIndex` / `ChatSessionDetail`**（`types/session.ts:22-110`）：轻量索引（含 `displayAgentId`、`messageCount`）与重量详情（`nodes` 字典 + `rootNodeId` + `activeLeafId` + 撤销栈）分离；`activeLeafId` 是"当前显示路径"的事实源。
 - **`ChatMessageNode` 消息树**（`types/message.ts:110-416`）：`parentId`/`childrenIds`/`lastSelectedChildId`，`getActivePath` 沿 `parentId` 回溯得到当前路径；`lastSelectedChildId` 实现分支位置记忆。
-- **生成状态**：`sessionRuntimeManager` 的 `generatingNodes`/`abortControllers` 是全局响应式集合（非会话布尔值），天然支持多会话并发生成。
+- **生成状态**：`sessionRuntimeManager` 的 `generatingNodes`/`abortControllers` 是全局响应式集合（非会话布尔值），天然支持多会话并发生成；消息 `status` 字段已扩展为 `generating/waiting/queued/complete/error`，排队与等待有独立展示状态。
 - **流式渲染状态**：`ReplayableMessageStreamSource`（模块级 Map）独立于节点 `content`——渲染（RAF 节流）与持久化（默认 2s setTimeout 节流）两套路径解耦，崩溃可能丢失最后几秒流式内容。
 
 ## 专项导航
@@ -62,11 +62,11 @@ MessageInput 提交 → useChatHandler.sendMessage（会话生成中则进 queue
 ## 关键能力与已确认边界
 
 1. **分支语义完整**：创建分支=同 `parentId` 新兄弟节点；重试=给同一用户消息新增 assistant 兄弟；续写=`isContinuation` 前缀节点（`prefix: true` 续请求，finalize 时补回前缀）；硬删除递归收集后代，压缩节点删除走"归还子节点"特殊路径。
-2. **上下文压缩是"非破坏性遮罩"**：摘要节点 + `session-loader` 两遍回溯跳过原消息；原消息一直留存于会话 JSON。但仓库文档宣称的滚动增量摘要未接入执行路径——`executeCompression()` 排除已有压缩节点且不传 `previousSummary`，多次压缩累积独立摘要（文档与实现不一致，已确认）。
+2. **上下文压缩是"非破坏性遮罩"**：摘要节点 + `session-loader` 两遍回溯跳过原消息；原消息一直留存于会话 JSON。连续压缩已接入执行路径：`executeCompression()` 会把待压缩范围之前最近的已启用摘要节点内容作为 `previous_summary` 传给续写模板，新摘要创建后旧摘要一并隐藏（文档与实现已一致）。
 3. **流式渲染与持久化解耦**：渲染走流源（订阅重放），content 落盘默认 2s 节流，reasoning 每帧写入；生成中节点先占位（generatingNodes 先行）再发请求。
-4. **撤销/重做不持久化**（重启清空）；崩溃残留 `status:"generating"` 节点无加载自愈（僵死修复 watch 只响应 `generatingNodes` size 减少），可能永久显示"正在生成"。
+4. **撤销/重做不持久化**（重启清空）；崩溃残留 `status:"generating"` 节点在加载时会按"是否有内容"自动修复为 `complete` 或 `error`（`repairInterruptedGeneratingNodes`），不再依赖僵死修复 watch。
 5. **搜索无索引**：跨会话=Rust 目录扫描 + 正则预过滤（仅定位会话，不定位消息）；会话内=当前活动路径内存线性扫描（最多 50 条，搜索不到分支外消息）。
-6. **生成排队**：生成中提交消息进 `queuedSessionIds`，`queueReplyMode` 决定合并回复或链式追加；工具调用审批用 Promise resolver 让执行链 await 卡住，支持 VCP 外部协议请求。
+6. **生成排队**：生成中提交消息进 `queuedSessionIds`，`queueReplyMode` 决定合并回复或链式追加；排队/等待节点有可见状态徽标（MessageHeader）。工具调用审批用 Promise resolver 让执行链 await 卡住，默认无限等待、可配置超时自动拒绝，支持 VCP 外部协议请求。
 
 ## 未验证事项
 

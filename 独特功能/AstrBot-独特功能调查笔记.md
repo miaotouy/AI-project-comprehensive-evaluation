@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；结合 Agent 工具、Chat 等既有笔记做去重；未修改 AstrBot 仓库
 >
@@ -36,7 +36,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **入口与触发者**：触发者是模型工具调用。配置键 `provider_settings.computer_use_runtime`（`local`/`sandbox`/`none`，默认 `none`）与 `provider_settings.sandbox.booter`（默认 `shipyard_neo`，可选 `cua`/`shipyard`/`boxlite`/`bay`，`core/config/default.py:173-191`）。
 
-**事实对象**：会话级 booter 实例——`session_booter: dict[str, ComputerBooter]`（`astrbot/core/computer/computer_client.py:21`），按会话 ID 复用；`get_booter`（:539）按配置选择 booter 并做会话级资源复用。
+**事实对象**：会话级 booter 实例——`session_booter: dict[str, ComputerBooter]`（`astrbot/core/computer/computer_client.py:21`），按会话 ID 复用；`get_booter`（:551）按配置选择 booter 并做会话级资源复用。
 
 **完整主链**（静态走通）：
 
@@ -52,7 +52,9 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
   -> 文件进出：astrbot_upload_file / astrbot_download_file（fs.py:805/871，
      本地 <-> 沙箱互传）
   -> 技能同步：_apply_skills_to_sandbox / _scan_sandbox_skills / sync_skills_to_active_sandboxes
-     （computer_client.py:444-656，SKILL.md 同步进沙箱并扫描回读）
+     （computer_client.py:456-669，SKILL.md 同步进沙箱并扫描回读；
+     收集侧只同步已激活插件的 skill，未激活插件 skill 被跳过，
+     _collect_sync_skill_dirs computer_client.py:101-134）
   -> 生命周期：CUA idle timeout 自动回收（computer_client.py:35-87）、
      shipyard TTL / max_sessions（config sandbox 段）
   -> 权限：computer_use_require_admin（默认 True）
@@ -84,6 +86,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
   配置 proactive_capability.add_cron_tools=True
     -> astr_main_agent._proactive_cron_job_tools（:1224）注入 future_task 工具
     -> cron_tools.py:52-：create/edit/delete/list（cron 或一次性 run_at）
+    -> 时区未显式指定时继承会话配置的 timezone（cron_service.py:66-73，#9579）
     -> 执行经 CronMessageEvent 构造主动事件进入 pipeline
 
 路径 C 后台任务唤醒：
@@ -146,7 +149,7 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 
 ## 关键源码索引
 
-- 沙箱客户端与会话实例：`astrbot/core/computer/computer_client.py:21`、`:539-656`
+- 沙箱客户端与会话实例：`astrbot/core/computer/computer_client.py:21`、`:551-669`
 - booter 族：`astrbot/core/computer/booters/{base,local,cua,shipyard,shipyard_neo,boxlite,bay_manager}.py`
 - 沙箱工具：`astrbot/core/tools/computer_tools/{shell,python,fs,cua}.py`、`shipyard_neo/{browser,neo_skills}.py`
 - 运行时工具组装：`astrbot/core/astr_agent_tool_exec.py:189-245`

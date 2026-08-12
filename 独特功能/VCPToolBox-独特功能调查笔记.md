@@ -4,9 +4,9 @@
 >
 > 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
-> 调查方式：只读源码梳理，并与同日刷新的 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；2026-08-12 增加插件目录全量盘点复核（89 个插件目录逐一核对 manifest 与入口文件），修正 3 处细节并补充 8 项新能力卡；全部为静态证据，未运行验证
+> 调查方式：只读源码梳理，并与 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；另做插件目录全量盘点（89 个插件目录逐一核对 manifest 与入口文件），修正 3 处细节并补充 8 项新能力卡；在 `c4c4d00`→`1ae9b63c` 范围核对 ChromeBridge 2.4（能力六正文图片语义、Popup 人工 Managed、agent 不再隐式控制托管运行时）、插件清单状态（89 目录/69 启用/20 禁用不变）与 Plugin.js 行号；全部为静态证据，未运行验证
 >
 > 调查范围：待查清单中 VCPToolBox 的 16 项候选能力；普通 Chat 底座与已被现有通用类目完整覆盖的能力只做归并引用
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文引擎、分布式桥），本身不提供对话 UI。去除普通 Chat 与通用 Agent 底座后，本轮确认 **18 项达到 `主链确认` 的独特能力族**（其中 8 项来自 2026-08-12 插件目录盘点复核补充）、1 项 `入口确认`、若干归并项：
+VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文引擎、分布式桥），本身不提供对话 UI。去除普通 Chat 与通用 Agent 底座后，本轮确认 **18 项达到 `主链确认` 的独特能力族**（其中 8 项来自插件目录盘点补充）、1 项 `入口确认`、若干归并项：
 
 | 能力族 | 状态 | 标签 | 备注 |
 |---|---|---|---|
@@ -23,19 +23,19 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | AgentDream 非对话记忆整理 | `主链确认` | 记忆演化/主动 Agent | 默认禁用；审批执行链在管理路由；无预算、无进行中取消 |
 | TVS 占位符上下文语言 + PlaceholderExplorer 调试面 | `主链确认` | 上下文语言 | Agent/Toolbox 守卫、递归解析、死链检查、编辑回滚 |
 | 六类插件协议与异步任务回注 | `主链确认` | 创作工作站/主动 Agent（支撑） | 长任务先返回、回调后回注；`/plugin-callback` 仍无鉴权 |
-| 浏览器托管运行时（managed Chrome + 协议 v3） | `主链确认` | 人类工具面/活对象 | 生命周期、观察/控制/验证/脱敏/指标全链；运行时默认关闭 |
+| 浏览器托管运行时（managed Chrome + 协议 v3） | `主链确认` | 人类工具面/活对象 | 生命周期、观察/控制/验证/脱敏/指标全链；2.4 新增正文图片语义与 Popup 人工 Managed 选择；运行时默认关闭 |
 | 跨节点文件透明获取与取消传播 | `主链确认` | 分布式多模态 | 来源绑定、缓存、循环保护、断线清理、cancel_tool |
 | TaskAssistant 定时/手动任务派发 | `主链确认` | 主动 Agent | interval/cron/once/manual、历史与结果归属、无进行中取消 |
 | VCPForum 文件事实源社区 | `主链确认` | Agent 社会 | 帖子=Markdown 文件；Agent 可发帖/回复；无用户治理机制 |
 | 多媒体生成与媒体插件族 | `主链确认` | 创作工作站 | MediaRenderer 渲染/动画/程序音乐 + 图像/视频生成族；统一 VCP 块协议 |
-| LightMemo 轻量记忆检索与生产构型 A/B 对照 | `主链确认` | 记忆演化 | 复用 RAGDiaryPlugin 索引/Rust 引擎；KNN/TagMemo V9/RiverMemo V3 三轨同域 A/B 重合率对照（盘点补充） |
-| VCPEverything 本地全盘文件检索 | `主链确认` | — | Everything HTTP 服务桥，毫秒级全盘搜索（盘点补充） |
-| SkillBridge 技能目录索引 | `主链确认` | 自进化 Skill | 启动扫描 SKILL/ 生成 vcp_fold 折叠技能索引 `{{VCPSkillBridge}}`；Ink 模式读取工作流约定（盘点补充） |
-| MagiAgent 多观点会议 | `主链确认` | Agent 社会 | 三贤人独立 LLM 辩论、异步查询、`{{VCP_ASYNC_RESULT}}` 回注（盘点补充） |
-| VCPClawMail 邮箱轮询与投递 | `主链确认` | 主动 Agent | 常驻轮询 + WS 即达、`{{VCPClawMailInbox}}` 注入、子邮箱→Agent 自动投递（盘点补充） |
-| UserAuth 管理员认证码 | `主链确认` | 支撑机制（安全） | 每小时 6 位码经 code.bin 注入 `DECRYPTED_AUTH_CODE`，requireAdmin 工具消费（盘点补充） |
-| DigitalOracle 金融数据聚合 | `主链确认` | — | 15 个 Provider 宏观/利率/加密/预测市场/期权；全局宏面板并发聚合（盘点补充） |
-| DeepWikiVCP 仓库文档 MCP 客户端 | `主链确认` | — | 全仓库唯一 MCP-over-HTTP 客户端；结构/内容/问答/Deep Research/多仓库（盘点补充） |
+| LightMemo 轻量记忆检索与生产构型 A/B 对照 | `主链确认` | 记忆演化 | 复用 RAGDiaryPlugin 索引/Rust 引擎；KNN/TagMemo V9/RiverMemo V3 三轨同域 A/B 重合率对照 |
+| VCPEverything 本地全盘文件检索 | `主链确认` | — | Everything HTTP 服务桥，毫秒级全盘搜索 |
+| SkillBridge 技能目录索引 | `主链确认` | 自进化 Skill | 启动扫描 SKILL/ 生成 vcp_fold 折叠技能索引 `{{VCPSkillBridge}}`；Ink 模式读取工作流约定 |
+| MagiAgent 多观点会议 | `主链确认` | Agent 社会 | 三贤人独立 LLM 辩论、异步查询、`{{VCP_ASYNC_RESULT}}` 回注 |
+| VCPClawMail 邮箱轮询与投递 | `主链确认` | 主动 Agent | 常驻轮询 + WS 即达、`{{VCPClawMailInbox}}` 注入、子邮箱→Agent 自动投递 |
+| UserAuth 管理员认证码 | `主链确认` | 支撑机制（安全） | 每小时 6 位码经 code.bin 注入 `DECRYPTED_AUTH_CODE`，requireAdmin 工具消费 |
+| DigitalOracle 金融数据聚合 | `主链确认` | — | 15 个 Provider 宏观/利率/加密/预测市场/期权；全局宏面板并发聚合 |
+| DeepWikiVCP 仓库文档 MCP 客户端 | `主链确认` | — | 全仓库唯一 MCP-over-HTTP 客户端；结构/内容/问答/Deep Research/多仓库 |
 | 人类直接调用工具 API（/v1/human/tool） | `入口确认` | 人类工具面 | 有鉴权与全审批链，VCPToolBox 内无独立产品 UI |
 | OneRing / 时间线 / ContextFolding | `归并已有类目` | — | 上下文编排，归并入“对话请求与上下文”笔记 |
 | 语义虚拟模型路由 | `归并已有类目` | — | 归并入“LLM 渠道管理”笔记；README“容灾”=模型级 fallback |
@@ -49,7 +49,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 候选来源为 README（工具系统 / 记忆与认知 / 模型路由 / 变量系统 / 分布式与容灾五段旗舰声明）、`docs/FEATURE_MATRIX.md`、`docs/TECHNICAL_LITE.md`、`docs/vcp白皮书V3.md` 与插件目录盘点，共 16 项，与待查清单 VCPToolBox 段一致。逐项调查结果见下两节；其中“系统监控/管理面板”类声明（PM2 进程、资源监控、日志查看）经确认属于普通后台管理，未形成独立能力卡。
 
-2026-08-12 插件目录全量盘点复核：`Plugin/` 下 89 个插件目录均持有 `plugin-manifest.json`（69 启用）或 `plugin-manifest.json.block`（20 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），已补入下节能力卡；其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
+插件目录全量盘点：`Plugin/` 下 89 个插件目录均持有 `plugin-manifest.json`（69 启用）或 `plugin-manifest.json.block`（20 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），已补入下节能力卡；其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
 
 ## 已确认的独特能力
 
@@ -57,7 +57,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **用户目标**：让 AI 的长期记忆按"语义相关性"而非关键词召回，并在多轮对话中维持可解释的排序；解决普通 RAG"标签连线直连"式联想在复杂关系下失真的问题。
 
-**入口与触发者**：模型/用户在系统提示词里写 `[[日记本名::Group::Time::…]]`、`《《日记本…》》`、`{{日记本…}}` 等占位符；`RAGDiaryPlugin` 以 `messagePreprocessor` 身份在请求管线中扫描 system 消息（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1492-1508`，注册于 `Plugin.js:877`）。
+**入口与触发者**：模型/用户在系统提示词里写 `[[日记本名::Group::Time::…]]`、`《《日记本…》》`、`{{日记本…}}` 等占位符；`RAGDiaryPlugin` 以 `messagePreprocessor` 身份在请求管线中扫描 system 消息（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1492-1508`，注册于 `Plugin.js:903`）。
 
 **事实对象**：`dailynote/` 下的 Markdown 日记文件（`DailyNote`/`DailyNoteManager` 插件写入，路径安全校验在 `routes/dailyNotesRoutes.js`），向量与标签索引落 SQLite + `rust-vexus-lite` 原生引擎。
 
@@ -139,9 +139,9 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **事实对象**：占位符家族——`{{VarXxx}}`/`{{TarXxx}}`（env 变量，可指向 `TVStxt/*.txt` 递归解析）、`{{SarPromptN}}`/`{{SarPromptAll}}`（模型级 SAR 注入）、`{{agent:X}}`/`{{X}}`（Agent 文件嵌套）、`{{toolbox:X}}`（Toolbox 折叠文档）、`{{VCP…}}`（插件静态占位符）、`{{Date}}`/`{{Time}}`/`{{Today}}` 等内建变量、`[[VCPStaticFold::…]]` 折叠模式。
 
-**语法边界与递归（快照补查）**：Agent 与 Toolbox 展开有**循环依赖检测**（`processingStack`，环检测后注入错误文本而非死循环，`messageProcessor.js:186-191,224-230`）；Agent 占位符受 **AgentGuard**（同一上下文只允许展开一个 Agent，`context.expandedAgentName`，:166-206）与 **ToolboxGuard**（每种 toolbox 只展开一次，:209-248）约束；Agent/Toolbox 展开只对特权角色生效（普通 user/assistant 消息中的 `{{agent:X}}` 不展开，:150-153）；TVStxt 文件递归解析深度无显式上限（依赖环检测兜底）。
+**语法边界与递归**：Agent 与 Toolbox 展开有**循环依赖检测**（`processingStack`，环检测后注入错误文本而非死循环，`messageProcessor.js:186-191,224-230`）；Agent 占位符受 **AgentGuard**（同一上下文只允许展开一个 Agent，`context.expandedAgentName`，:166-206）与 **ToolboxGuard**（每种 toolbox 只展开一次，:209-248）约束；Agent/Toolbox 展开只对特权角色生效（普通 user/assistant 消息中的 `{{agent:X}}` 不展开，:150-153）；TVStxt 文件递归解析深度无显式上限（依赖环检测兜底）。
 
-**调试表面（快照新增）**：`Plugin/PlaceholderExplorer`（static，每 30 分钟 cron 全量扫描，输出 `{{VCPPlaceholderMap}}` 摘要）+ `PlaceholderExplorerCommand`（synchronous）提供 `Scan`/`Locate`/`Edit`/`Preview`/`CheckDeadLinks`；`Locate` 返回定义路径+行号+引用链；`Edit` 走"读全文→临时文件→校验→备份→原子替换"（备份目录限制在插件目录内），并明确标注"改 config.env 不热重载需重启"；`Preview` 直接复用 `resolveAllVariables`，不绕过特权角色判定；`CheckDeadLinks` 报告死链/孤儿/缺失映射文件。管理面板配套 `PlaceholderExplorerManager.vue` + `routes/admin/placeholderExplorer.js`。
+**调试表面**：`Plugin/PlaceholderExplorer`（static，每 30 分钟 cron 全量扫描，输出 `{{VCPPlaceholderMap}}` 摘要）+ `PlaceholderExplorerCommand`（synchronous）提供 `Scan`/`Locate`/`Edit`/`Preview`/`CheckDeadLinks`；`Locate` 返回定义路径+行号+引用链；`Edit` 走"读全文→临时文件→校验→备份→原子替换"（备份目录限制在插件目录内），并明确标注"改 config.env 不热重载需重启"；`Preview` 直接复用 `resolveAllVariables`，不绕过特权角色判定；`CheckDeadLinks` 报告死链/孤儿/缺失映射文件。管理面板配套 `PlaceholderExplorerManager.vue` + `routes/admin/placeholderExplorer.js`。
 
 **用户编辑体验**：`routes/admin/tvs.js` 提供 TVStxt 文件的 CRUD（`/admin_api/tvsvars`）；`TvsFilesEditor` 管理页；文件 watcher（`modules/tvsManager.js`）在 TVStxt 变更时清缓存实现热加载。
 
@@ -157,11 +157,11 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：模型输出 `<<<[TOOL_REQUEST]>>>` 块；`asynchronous` 类型插件（如 `AgnesVideoGen`、`VideoGenerator`）spawn 子进程后等待首个 JSON 即返回。
 
-**完整主链**：`ToolExecutor.execute()` → `PluginManager.processToolCall`（`Plugin.js:1138`）→ 按六类型分发（static/synchronous/asynchronous/service/messagePreprocessor/hybridservice，`Plugin.js` 生命周期总控）→ 异步插件后续结果经 `POST /plugin-callback/:pluginName/:taskId`（`server.js:1471`）写 `VCPAsyncResults/${pluginName}-${taskId}.json` → `messageProcessor.js:827-867` 的 `{{VCP_ASYNC_RESULT::Plugin::id}}` 占位符在后续请求中读取并注入；`webSocketPush.enabled` 时同时广播给前端。分布式插件经 `plugin_callback_forward` 回传（`WebSocketServer.js:95-144`）。
+**完整主链**：`ToolExecutor.execute()` → `PluginManager.processToolCall`（`Plugin.js:1164`）→ 按六类型分发（static/synchronous/asynchronous/service/messagePreprocessor/hybridservice，`Plugin.js` 生命周期总控）→ 异步插件后续结果经 `POST /plugin-callback/:pluginName/:taskId`（`server.js:1471`）写 `VCPAsyncResults/${pluginName}-${taskId}.json` → `messageProcessor.js:827-867` 的 `{{VCP_ASYNC_RESULT::Plugin::id}}` 占位符在后续请求中读取并注入；`webSocketPush.enabled` 时同时广播给前端。分布式插件经 `plugin_callback_forward` 回传（`WebSocketServer.js:95-144`）。
 
 **持续性**：`VCPAsyncResults/` 文件持久化，重启后占位符仍可读取旧结果；无结果过期清理（未验证）。
 
-**安全边界（快照补查）**：`/plugin-callback` 仍是**无鉴权**端点（`server.js:870-872` 豁免 Bearer），`taskId` 无签名校验——获知 `pluginName+taskId` 即可覆盖任务结果进而注入下一轮上下文；`plugin_callback_forward` 仍不校验来源节点与任务归属（快照新增的 `tool_result` 归属绑定**不覆盖**此消息类型）。这一边界是设计事实，评估时不能把"回调注入"当作可信通道。
+**安全边界**：`/plugin-callback` 仍是**无鉴权**端点（`server.js:870-872` 豁免 Bearer），`taskId` 无签名校验——获知 `pluginName+taskId` 即可覆盖任务结果进而注入下一轮上下文；`plugin_callback_forward` 仍不校验来源节点与任务归属（`tool_result` 归属绑定**不覆盖**此消息类型）。这一边界是设计事实，评估时不能把"回调注入"当作可信通道。
 
 **独特性判断**：六类生命周期本身已由 Agent 工具笔记覆盖；本卡记录的是"长任务-回调-回注"产品契约及其无鉴权边界。按指南归并口径，执行细节归并 Agent 工具类目，本卡作为产品能力与安全备注留存。
 
@@ -173,21 +173,21 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：模型调用 `ChromeBridge` 的 `open_chrome`/`open_url`/`click`/`type`/`scroll`/`query_html`/`execute_script`/CDP 系列命令；托管浏览器由 `modules/browserRuntimeManager.js` 按需启动（`ensureManagedBrowser`，:467，受 `VCP_BROWSER_RUNTIME_ENABLED` 控制，默认 false）。
 
-**事实对象**：managed Chrome 进程 + 独立 Profile（Cookie/Storage/站点状态）+ `VCPChrome` 扩展（MV3）。
+**事实对象**：managed Chrome 进程 + 独立 Profile（Cookie/Storage/站点状态）+ `VCPChrome` 扩展（MV3；2.4 起扩展主链逻辑重构入 `VCPChrome/webcore/` 运行时内核，`content_script.js` 由约 3,000 行减至约 400 行，仅保留调用 webcore 的薄壳）。
 
-**完整主链（快照刷新后 v3）**：`open_chrome` → browserRuntimeManager 探测 Chrome、staging 扩展（校验 staging 后 manifest 与源 manifest 的 sha256 一致，防旧副本：`browserRuntimeManager.js:282-290`）、写扩展配置（含 managed token）→ 启动 Chrome → 扩展 `clientHello`（声明 clientKind/capabilities/protocolVersion/stage 哈希）握手 → ChromeBridge 更新连接池（managed token 有效才给 high 权限，`ChromeBridge.js:151-175`）→ 页面观察：扩展产出"Grounded Markdown Agent 视图"（正文+操作胶囊+语义归属+视口叙事，稳定内容 Hash 防重复上报、快照 diff、敏感 DOM 默认脱敏）→ 命令执行：`click` 读回 checked/aria 状态验证、`type` 读回 value 验证（失败返回 `ACTION_VERIFICATION_FAILED`）、`scroll` 读回位置（边界返回 `SCROLL_BOUNDARY_REACHED`）→ 结果回注 AI → 空闲 5 分钟（`VCP_BROWSER_IDLE_TIMEOUT_MS` 默认 300000）自动关闭或 `close_chrome` 显式关闭；`browser_status` 暴露运行实例 ID、上一 PID、关闭原因、feature flags 与指标。`UrlFetch` 的 managed backend（`URLFETCH_USE_MANAGED_CHROME`）已接线，默认关闭，高风险域名优先策略可配。
+**完整主链（v3/2.4）**：`open_chrome` → browserRuntimeManager 探测 Chrome、staging 扩展（校验 staging 后 manifest 与源 manifest 的 sha256 一致，防旧副本：`browserRuntimeManager.js:282-290`）、写扩展配置（含 managed token）→ 启动 Chrome → 扩展 `clientHello`（声明 clientKind/capabilities/protocolVersion/stage 哈希）握手 → ChromeBridge 更新连接池（managed token 有效**或用户在扩展 Popup 中人工明确选择 Managed** 才给 high 权限：`isTrustedManagedClient`，`ChromeBridge.js:147-165`；`agent` 身份仍为 high 权限，但不再满足托管运行时就绪/控制条件——`waitForManagedClient`/`controlsManagedRuntime` 只接受可信 managed 客户端，`ChromeBridge.js:495-510,571-585`）→ 页面观察：扩展产出"Grounded Markdown Agent 视图"（正文+操作胶囊+语义归属+视口叙事，稳定内容 Hash 防重复上报、快照 diff、敏感 DOM 默认脱敏；2.4 起正文图片与视频画面以 `[图片 IMG*｜描述｜尺寸｜id=严格图片ID]` 语义标注，广告/Logo/头像/图标/侧栏图片被过滤，模型可调 `get_page_image` 按 `IMG*` 短 ID 或 `vcp-img-*` 严格 ID 截取单图并返回 OpenAI `image_url` Data URL，`Plugin/ChromeBridge/plugin-manifest.json:18,84-86`）→ 命令执行：`click` 读回 checked/aria 状态验证、`type` 读回 value 验证（失败返回 `ACTION_VERIFICATION_FAILED`）、`scroll` 读回位置（边界返回 `SCROLL_BOUNDARY_REACHED`）→ 结果回注 AI → 空闲 5 分钟（`VCP_BROWSER_IDLE_TIMEOUT_MS` 默认 300000）自动关闭或 `close_chrome` 显式关闭；`browser_status` 暴露运行实例 ID、上一 PID、关闭原因、feature flags 与指标。`UrlFetch` 的 managed backend（`URLFETCH_USE_MANAGED_CHROME`）已接线，默认关闭，高风险域名优先策略可配。
 
 **持续性**：Profile 持久化（登录态跨启动保留）；进程与 Profile 生命周期解耦。
 
-**主动性与取消**：AI 可主动 `close_chrome`/`close_managed_tabs`/`keep_chrome_alive`；进程异常退出有监听与状态清理；VCP 退出时关闭子进程（shutdown hooks）。
+**主动性与取消**：AI 可主动 `close_chrome`/`close_managed_tabs`/`keep_chrome_alive`；`open_chrome` 支持 `interactiveSetup:true` 人工设置模式（有头窗口、24 小时空闲上限、启动后不等待握手即返回，`ChromeBridge.js:818-878`），`scripts/open_managed_browser_setup.js` 已改为经 `/v1/human/tool` 提交该请求，不再由脚本直启浏览器进程；进程异常退出有监听与状态清理；VCP 退出时关闭子进程（shutdown hooks）。
 
-**人机与多 Agent 关系**：用户浏览器（user）默认 restricted 权限，managed 才 high；`close_chrome` 不能关用户 Chrome；权限判断依据扩展声明+token，IP 仅辅助（`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md` 权限模型）；"按 maid/valet 分 Agent Profile"是文档中的二期设计，**当前未实现**（仍是 global 单 Profile）。
+**人机与多 Agent 关系**：用户浏览器（user）默认 restricted 权限，managed 才 high；`close_chrome` 不能关用户 Chrome；权限判断依据扩展声明 + managed token 或 Popup 人工选择，IP 仅辅助（`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md` 权限模型）；"按 maid/valet 分 Agent Profile"是文档中的二期设计，**当前未实现**（仍是 global 单 Profile）。
 
 **安全与资源边界**：敏感 DOM 脱敏默认开（可被用户 Popup 关闭）；CDP cookie/响应体读取仅 managed；云元数据地址（169.254.169.254）在 UrlFetch 层被阻断；标签页上限 `VCP_BROWSER_MAX_TABS`。
 
 **独特性判断**：把"浏览器生命周期管理 + 权限分层 + 可验证动作 + 持久 Profile"做成一整套 AI 可操作工具面，且与 VCP 审批/工具协议同管线，非普通网页抓取可比。
 
-**证据强度**：源码事实 + `tests/chromeBridge/smoke-check.js`（页面动作冒烟）；真实 Chrome 行为未运行验证。
+**证据强度**：源码事实 + `tests/chromeBridge/` 测试（`smoke-check.js` 页面动作冒烟；`c4c4d00`→`1ae9b63c` 范围的 `runtime-core`/`page-runtime-handle`/`page-runtime-image`/`contenteditable-reply-editor` 四个运行时测试文件，均未在本机运行）；真实 Chrome 行为未运行验证。
 
 ### 能力七：跨节点文件透明获取与取消传播
 
@@ -195,7 +195,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：任何工具参数的 `file://` URL（插件调用前预处理，`Plugin.js` `resolveArgsFileUrls` 递归处理字符串/嵌套对象与内嵌 URL）。
 
-**完整主链**：`FileFetcherServer.resolveFileUrl()`（`FileFetcherServer.js:154`）→ 本地存在直接返回原 URL；否则查 `.file_cache`（sha256(fileUrl)+扩展名）；未命中 `fetchFile()`（:43）→ 按请求来源 IP `findServerByIp(requestIp)` 绑定文件来源节点 → `executeDistributedTool(serverId, 'internal_request_file', {fileUrl})`（60s 超时）→ 节点返回 Base64 → 写缓存、返回缓存 file:// URL。保护机制：5 秒内同一文件重复请求判定为潜在循环并中断（`recentRequests`，:11-50）、失败缓存 30 秒（:8-9）、拉取失败回退原始 URL 交由插件自行处理（:201-205）。快照刷新：`tool_result` 绑定目标节点、断线立即 reject pending、超时对声明 `cancelTool` 的节点发送 `cancel_tool`（`WebSocketServer.js:851-985`），`internal_request_file` 同样受这些语义约束。
+**完整主链**：`FileFetcherServer.resolveFileUrl()`（`FileFetcherServer.js:154`）→ 本地存在直接返回原 URL；否则查 `.file_cache`（sha256(fileUrl)+扩展名）；未命中 `fetchFile()`（:43）→ 按请求来源 IP `findServerByIp(requestIp)` 绑定文件来源节点 → `executeDistributedTool(serverId, 'internal_request_file', {fileUrl})`（60s 超时）→ 节点返回 Base64 → 写缓存、返回缓存 file:// URL。保护机制：5 秒内同一文件重复请求判定为潜在循环并中断（`recentRequests`，:11-50）、失败缓存 30 秒（:8-9）、拉取失败回退原始 URL 交由插件自行处理（:201-205）。`tool_result` 绑定目标节点、断线立即 reject pending、超时对声明 `cancelTool` 的节点发送 `cancel_tool`（`WebSocketServer.js:851-985`），`internal_request_file` 同样受这些语义约束。
 
 **持续性**：`.file_cache` 磁盘缓存持久化；无缓存过期清理（未验证）。
 
@@ -247,7 +247,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：模型按各插件 manifest 说明输出 `<<<[TOOL_REQUEST]>>>` 块调用；媒体插件族包括图像生成（`FluxGen`/`GPTImageGen`/`GeminiImageGen`/`QwenImageGen`/`DoubaoGen`/`DMXDoubaoGen`/`NanoBananaGen2`/`ZImageTurboGen`/`AgnesGen`）、视频（`AgnesVideoGen`/`VideoGenerator` 为 asynchronous）、渲染与合成（`MediaRenderer`，hybridservice）。
 
-**完整主链（以 MediaRenderer 为代表，快照新增）**：
+**完整主链（以 MediaRenderer 为代表）**：
 - `RenderImage`/`RenderAnimation`：模型提供 HTML/SVG 源码 → 插件在 Node 侧提取 `data:`/`file://`/HTTP(S) 资源逐跳校验（单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步），云元数据地址（169.254.169.254）始终阻断，`AllowPrivateNetworkAssets` 默认 true 允许内网但可关 → 改写为 Data URI 后交给托管 Chrome 渲染（静态图）或按确定性逻辑时间逐帧截图 + FFmpeg 编码（GIF/MP4/WebM，`window.__MEDIA_RENDERER__.setFrameRenderer(timeMs,…)` 协议）；Anime.js/Three.js 只接受 jsDelivr/unpkg/cdnjs 白名单并替换为本地内置脚本，其他远程脚本禁止执行；
 - `GenerateAudio`：模型写 `function synthesize(api)` 合成代码（内置 oscillator/envelope/addNote/噪声 API，seed 确定），在独立 Node 子进程执行生成 PCM16 WAV——**强制 requireAdmin 6 位验证码**（`MediaRenderer.js:451-463 validateAdminForAudio`；验证码来源闭环见能力十七 UserAuth），总采样数上限 3000 万；
 - 产物托管到图片服务/文件服务（`ImageFileServer`），URL 回注模型；
@@ -269,7 +269,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实；多 Agent 长会话的并发/冲突行为未运行验证。
 
-### 能力十二：LightMemo 轻量记忆检索与生产构型 A/B 对照（盘点补充）
+### 能力十二：LightMemo 轻量记忆检索与生产构型 A/B 对照
 
 **用户目标**：在不重走 RAGDiaryPlugin 完整管线的前提下做"轻量回忆"——同一查询在三套生产记忆构型（KNN / TagMemo V9 / RiverMemo Topology V3）上并行检索并输出重合率对照，把"不同记忆引擎排序差异"变成模型可见的测量指标。
 
@@ -283,7 +283,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **主动性与取消**：无主动运行、无预算、无取消（请求内同步执行）。
 
-**人机与多 Agent 关系**：AI 工具；maid 署名用于定位日记本与署名过滤；依赖经 `Plugin.js:942-971` 从 RAGDiaryPlugin 注入（vectorDBManager/getSingleEmbedding/AIMemo/TDB），自身实现 BM25（`BM25Ranker` :8-72，jieba 分词 + stopWords）与路由编排层——与能力一**同栈复用而非独立实现**（`RAGDiaryPlugin.js:2719` 注释亦称"原子级复刻 LightMemo 流程"）。
+**人机与多 Agent 关系**：AI 工具；maid 署名用于定位日记本与署名过滤；依赖经 `Plugin.js:968-997` 从 RAGDiaryPlugin 注入（vectorDBManager/getSingleEmbedding/AIMemo/TDB），自身实现 BM25（`BM25Ranker` :8-72，jieba 分词 + stopWords）与路由编排层——与能力一**同栈复用而非独立实现**（`RAGDiaryPlugin.js:2719` 注释亦称"原子级复刻 LightMemo 流程"）。
 
 **安全与资源边界**：excludedFolders 全局屏蔽；SQL 参数化；可见性门控下沉 Rust（allowedFileIds）；Rerank 并发上限 3、单请求 25 文档、Token 批次 30000。
 
@@ -291,7 +291,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（主链与依赖注入闭环均确认）；三轨数值行为与 `_rerankDocuments` HTTP 细节未运行/未逐行验证。
 
-### 能力十三：VCPEverything 本地全盘文件检索（盘点补充）
+### 能力十三：VCPEverything 本地全盘文件检索
 
 **用户目标**：AI 无需知道文件所在目录即可在 Windows 全盘毫秒级检索文件路径，弥补 FileOperator（受限目录）与 CodeSearcher（代码搜索）之外的全盘检索盲区。
 
@@ -313,11 +313,11 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（146 行全文读完）；Everything 服务端启停与鉴权配置未运行验证。
 
-### 能力十四：SkillBridge 技能目录索引（盘点补充）
+### 能力十四：SkillBridge 技能目录索引
 
 **用户目标**：把 SKILL/ 技能库变成系统提示词里的可折叠目录，AI 按需用"文件管理插件的 Ink 模式"读取技能正文——技能发现与按需装载。
 
-**入口与触发者**：static 插件，manifest **无 refreshIntervalCron → 仅启动时执行一次**（`Plugin.js initializeStaticPlugins` :454-514，无 cron 则不注册定时任务）；输出 `{{VCPSkillBridge}}` 占位符。
+**入口与触发者**：static 插件，manifest **无 refreshIntervalCron → 仅启动时执行一次**（`Plugin.js initializeStaticPlugins` :480-540，无 cron 则不注册定时任务）；输出 `{{VCPSkillBridge}}` 占位符。
 
 **事实对象**：`Plugin/SkillBridge/SKILL/` 下 11 个技能目录（android-native-dev、frontend-dev、fullstack-dev、gif-sticker-maker、html-ppt-skill、ios-application-dev、minimax-docx/minimax-pdf/minimax-xlsx、pptx-generator、shader-dev），每目录 SKILL.md frontmatter description；输出 `skill-index.txt`。
 
@@ -337,7 +337,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（224 行全文 + SKILL/ 目录清单）；vcp_fold 在 system prompt 端的实际展开行为与 FileOperator "Ink 模式"具体命令名未核对。
 
-### 能力十五：MagiAgent 多观点会议（盘点补充）
+### 能力十五：MagiAgent 多观点会议
 
 **用户目标**：三个固定人格的独立 LLM（MELCHIOR 理性 / BALTHASAR 感性 / CASPER 权衡）就一个议题多轮辩论并输出统一纪要——把"单一模型回答"变成可观察的多视角审议，支持同步等待或异步查询。
 
@@ -361,7 +361,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（397 行全文 + config.env）；`/MagiAgent/:id` 回调端点鉴权与 magi/*.gif 资源存在性未核对。
 
-### 能力十六：VCPClawMail 邮箱轮询与投递（盘点补充）
+### 能力十六：VCPClawMail 邮箱轮询与投递
 
 **用户目标**：把外部邮箱变成 AI 的持续输入面——常驻轮询收件箱、占位符注入最近邮件摘要、AI 可列/读/发/回/附件处理；子邮箱来信自动投递给绑定 Agent。
 
@@ -385,7 +385,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（入口/轮询/注入/投递全链）；listEmails/readMail/sendMail 主体（L496-1522）与 `getDataDir()` 实际路径未逐行验证，真实邮箱行为未运行验证。
 
-### 能力十七：UserAuth 管理员认证码（盘点补充，支撑机制）
+### 能力十七：UserAuth 管理员认证码（支撑机制）
 
 **用户目标**：每小时轮换 6 位管理员认证码，经 `{{USER_AUTH_CODE}}` 注入授权 Agent 的 system prompt，作为 `tool_password` 解锁 requireAdmin 工具——把"管理员确认"变成随会话流转的时限凭证。
 
@@ -393,7 +393,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **事实对象**：`Plugin/UserAuth/code.bin`（base64 编码的括号序列）。
 
-**完整主链**：`generateRealAuthCode`（`auth.js:5-8`）→ `encodeToBrackets`（:11-51，6 位数字对应 6 类括号、右括号概率=当前月份/12、Fisher-Yates 洗牌）→ 落盘 code.bin（混淆而非加密，防简单读取 :60-62）→ stdout 明文 → **消费链**：`Plugin.js:140-151 _getDecryptedAuthCode` 解码（`modules/captchaDecoder.js:36-42`）→ `executePlugin`（Plugin.js:1477-1486）对 requiresAdmin 插件注入 `DECRYPTED_AUTH_CODE`，取不到码**拒绝执行** → 消费者比对：`LinuxShellExecutor.js:275-283`、`PowerShellExecutor.js:177-204`、`MediaRenderer.js:451-463 validateAdminForAudio`（6 位正则）。另有读取点 `chatCompletionHandler.js:363-374`（用途未核实）与面板端点 `routes/admin/system.js:255`。
+**完整主链**：`generateRealAuthCode`（`auth.js:5-8`）→ `encodeToBrackets`（:11-51，6 位数字对应 6 类括号、右括号概率=当前月份/12、Fisher-Yates 洗牌）→ 落盘 code.bin（混淆而非加密，防简单读取 :60-62）→ stdout 明文 → **消费链**：`Plugin.js:140-151 _getDecryptedAuthCode` 解码（`modules/captchaDecoder.js:36-42`）→ `executePlugin`（Plugin.js:1503-1512）对 requiresAdmin 插件注入 `DECRYPTED_AUTH_CODE`，取不到码**拒绝执行** → 消费者比对：`LinuxShellExecutor.js:275-283`、`PowerShellExecutor.js:177-204`、`MediaRenderer.js:451-463 validateAdminForAudio`（6 位正则）。另有读取点 `chatCompletionHandler.js:363-374`（用途未核实）与面板端点 `routes/admin/system.js:255`。
 
 **持续性**：code.bin 每小时覆盖。
 
@@ -407,7 +407,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（auth.js 全文 + 消费端闭环证据链）；chatCompletionHandler 读取点用途未核实。
 
-### 能力十八：DigitalOracle 金融数据聚合（盘点补充）
+### 能力十八：DigitalOracle 金融数据聚合
 
 **用户目标**：AI 选择金融信源一键拉取全球宏观/利率/商品/股票/加密/预测市场/期权数据，输出结构化 Markdown 信息面。
 
@@ -429,7 +429,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（registry/分发/面板已读）；render 细节与上游库网络实现未验证。
 
-### 能力十九：DeepWikiVCP 仓库文档 MCP 客户端（盘点补充）
+### 能力十九：DeepWikiVCP 仓库文档 MCP 客户端
 
 **用户目标**：让 AI 获取任意 GitHub 公开仓库的 DeepWiki 文档（目录结构/全文/问答/Deep Research/多仓库）——把"读仓库"扩展到"读 AI 生成的仓库文档"。
 
@@ -478,7 +478,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 以下为建议（供主会话与特色贡献统计核对）：
 
-1. **新增 18 个可计能力族**（均 `主链确认`、静态证据）：原 10 项（记忆语义动力学 TagMemo+RiverMemo、元思考递归推理链、AgentDream 非对话记忆整理、TVS 上下文语言（含 PlaceholderExplorer 调试面）、浏览器托管运行时、跨节点文件透明获取、TaskAssistant 任务派发、VCPForum 文件社区、多媒体创作插件族、异步任务回注产品契约）+ 插件盘点补充 8 项（LightMemo 多构型对照、VCPEverything 全盘检索、SkillBridge 技能索引、MagiAgent 会议、VCPClawMail 邮箱投递、UserAuth 认证码、DigitalOracle 金融聚合、DeepWikiVCP MCP 客户端）。
+1. **18 个可计能力族**（均 `主链确认`、静态证据）：原 10 项（记忆语义动力学 TagMemo+RiverMemo、元思考递归推理链、AgentDream 非对话记忆整理、TVS 上下文语言（含 PlaceholderExplorer 调试面）、浏览器托管运行时、跨节点文件透明获取、TaskAssistant 任务派发、VCPForum 文件社区、多媒体创作插件族、异步任务回注产品契约）+ 插件盘点补充 8 项（LightMemo 多构型对照、VCPEverything 全盘检索、SkillBridge 技能索引、MagiAgent 会议、VCPClawMail 邮箱投递、UserAuth 认证码、DigitalOracle 金融聚合、DeepWikiVCP MCP 客户端）。
 2. **合并建议**：TVS 上下文语言与“上下文 DSL 与提示词工程”聚类下的其他项目候选做统一比较对象；记忆语义动力学与元思考建议合并计一个“记忆演化”主贡献（同一用户目标：长期认知维护），或拆为两个主贡献（召回排序 vs 思考链）——取决于统计粒度口径；LightMemo（多构型对照测量面）并入该主贡献；MagiAgent 归“Agent 社会”聚类；SkillBridge 与“自进化 Skill”聚类候选（待与 Hermes Agent 等样本比较后定）。
 3. **支撑机制单独标注**：六类插件协议、Rust/Rayon 原生内核、管理 API、文件缓存等作为工程机制，不单独计入产品特性贡献；UserAuth 认证码（requireAdmin 的鉴权来源）按安全支撑机制同样标注，不单独计主贡献。
 4. **入口确认项**（人类工具 API）暂不计入；待 VCPChat 侧自动 GUI 调查完成后由主会话决定是否跨项目合并为“人类工具面”贡献。
@@ -501,20 +501,20 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 - 元思考：`Plugin/RAGDiaryPlugin/MetaThinkingManager.js`、`meta_thinking_chains.json`、`META_THINKING_GUIDE.md`、`RAGDiaryPlugin.js:1495-1607`
 - AgentDream：`Plugin/AgentDream/AgentDream.js`（triggerDream:198、scheduler:755、approve stub:995-1001）、`routes/admin/dream.js`
 - TVS 语言：`modules/messageProcessor.js`（resolveAllVariables:146、AgentGuard:166-206、ToolboxGuard:209-248、replaceOtherVariables:601）、`modules/tvsManager.js`、`modules/agentManager.js`、`Plugin/PlaceholderExplorer/`、`routes/admin/tvs.js`、`routes/admin/placeholderExplorer.js`
-- 异步回注：`Plugin.js`（processToolCall:1138）、`server.js:1471`（plugin-callback）、`modules/messageProcessor.js:827-867`、`WebSocketServer.js:95-144`
-- 浏览器运行时：`modules/browserRuntimeManager.js`、`Plugin/ChromeBridge/ChromeBridge.js`、`Plugin/ChromeBridge/VCPChrome/`、`config.env.example`（VCP_CHROME_*）、`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md`、`tests/chromeBridge/smoke-check.js`
+- 异步回注：`Plugin.js`（processToolCall:1164）、`server.js:1471`（plugin-callback）、`modules/messageProcessor.js:827-867`、`WebSocketServer.js:95-144`
+- 浏览器运行时：`modules/browserRuntimeManager.js`、`Plugin/ChromeBridge/ChromeBridge.js`、`Plugin/ChromeBridge/VCPChrome/`（含 webcore/ 运行时内核）、`config.env.example`（VCP_CHROME_*）、`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md`、`tests/chromeBridge/`
 - 跨节点文件：`FileFetcherServer.js`、`WebSocketServer.js:851-985`
 - 任务派发：`Plugin/VCPTaskAssistant/vcp-task-assistant.js`、`routes/admin/taskAssistant.js`
 - 论坛：`Plugin/VCPForum/VCPForum.js`、`routes/forumApi.js`、`Plugin/VCPForumLister/`
 - 媒体族：`Plugin/MediaRenderer/`（manifest、MediaRenderer.js:19-29 资源上限常量、:451-463 requireAdmin、:500-505 云元数据阻断、:517-520 AllowPrivateNetworkAssets）、`Plugin/AgnesVideoGen/`、`Plugin/VideoGenerator/`
 - 人类工具 API：`server.js:1250-1298`
 - 协议桥与语义路由（归并引用）：`routes/protocolBridge.js`、`modules/semanticModelRouter.js`
-- 记忆轻量对照：`Plugin/LightMemo/LightMemo.js`（handleSearch:218、handleTagMemoAB:928、_handleRiverMemoSearch:724、_handleColdKnowledgeSearch:1324）、`Plugin.js:942-971`（依赖注入）
+- 记忆轻量对照：`Plugin/LightMemo/LightMemo.js`（handleSearch:218、handleTagMemoAB:928、_handleRiverMemoSearch:724、_handleColdKnowledgeSearch:1324）、`Plugin.js:968-997`（依赖注入）
 - 本地检索：`Plugin/VCPEverything/local-search-controller.js`
 - 技能索引：`Plugin/SkillBridge/SkillBridge.js`、`Plugin/SkillBridge/SKILL/`
 - 会议：`Plugin/MagiAgent/MagiAgent.js`
 - 邮箱：`Plugin/VCPClawMail/VCPClawMail.js`（pollOnce:1523、autoDispatchSubMailToAgent:1752、buildAutoAgentPrompt:1682）
-- 认证码：`Plugin/UserAuth/auth.js`、`modules/captchaDecoder.js`、`Plugin.js:140-151,1477-1486`（注入点）
+- 认证码：`Plugin/UserAuth/auth.js`、`modules/captchaDecoder.js`、`Plugin.js:140-151,1503-1512`（注入点）
 - 金融：`Plugin/DigitalOracle/digital_oracle_vcp.py`（registry:176、dashboard:638）
 - MCP：`Plugin/DeepWikiVCP/DeepWikiVCP.js`（mcpCall:125）
 

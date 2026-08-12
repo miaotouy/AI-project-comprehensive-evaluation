@@ -2,9 +2,9 @@
 
 > 调查对象：`../../cherry-studio`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：静态代码阅读（grep/glob 检索 + 关键实现文件通读），辅以仓库内单元测试作为行为佐证；未构建、未运行应用
 >
@@ -52,7 +52,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 1. 触发方式、输出协议与对象模型
 
 - **触发**：无独立协议。HTML artifact 由模型自由文本（```html 围栏或裸 HTML 节点）触发，靠内容探测识别：`classifyHtmlArtifactSource` 在 `src/renderer/components/chat/messages/markdown/plugins/remarkHtmlArtifact.ts:35` 用正则判定 `document`（`<!doctype` / `<html>`）或 `fragment`（`<div` 式闭合开标签）；半截流（`<!doc`、`<di`）返回 `undefined`，渲染器选择"先不渲染、等几个字符再定型"（`remarkHtmlArtifact.ts:29-41`、`CodeBlock.tsx:105`）。误触发防护：`remarkHtmlArtifact` 只把顶层裸 HTML 区域重写为 code 节点，行内 HTML 留在 Markdown 树里（`remarkHtmlArtifact.ts:184-212`）；`transformMarkdownOutsideHtmlArtifacts` 用占位符保护 artifact 源文本不被预处理污染（`remarkHtmlArtifact.ts:150-177`）。
-- **输出协议与对象模型**：消息正文就是 AI SDK `UIMessage.parts`（`src/shared/data/types/message.ts:136`），自定义 part 类型只有 error/translation/video/compact/agent-task-event 等（`src/shared/data/types/uiParts.ts:119-130`），**没有 artifact part 类型**——HTML artifact 以 text part 承载。`artifactId` 为 `${blockId}:${codeBlockId}`，`codeBlockId` 由 Markdown 节点行列偏移派生（`src/renderer/utils/markdown.ts:162`），是每次渲染重算的派生身份，仅用于在列表项重挂载时保住已打开的弹窗会话（`src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 注释），无持久对象 ID。Agent 侧 `report_artifacts` 是 zod 校验的结构化工具输入（`src/shared/ai/builtinTools.ts:531-549`），以 tool part 持久化，是最接近"输出声明"的协议；声明只含 path/description/summary，不含对象 ID 或版本。
+- **输出协议与对象模型**：消息正文就是 AI SDK `UIMessage.parts`（`src/shared/data/types/message.ts:136`），自定义 part 类型只有 error/translation/video/compact/agent-task-event 等（`src/shared/data/types/uiParts.ts:139-151`），**没有 artifact part 类型**——HTML artifact 以 text part 承载。`artifactId` 为 `${blockId}:${codeBlockId}`，`codeBlockId` 由 Markdown 节点行列偏移派生（`src/renderer/utils/markdown.ts:162`），是每次渲染重算的派生身份，仅用于在列表项重挂载时保住已打开的弹窗会话（`src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 注释），无持久对象 ID。Agent 侧 `report_artifacts` 是 zod 校验的结构化工具输入（`src/shared/ai/builtinTools.ts:489-552`，`REPORT_ARTIFACTS_TOOL_NAME`），以 tool part 持久化，是最接近"输出声明"的协议；声明只含 path/description/summary，不含对象 ID 或版本。另注：`ba25bea27f` 起所有内建工具去掉了 `strict: true`，`report_artifacts` schema 相应改为非 strict 形态。
 - **事实源**：chat 消息行（SQLite `data` JSON）是消息文本的事实源；agent 文件的事实源是磁盘，消息只存声明与执行记录。
 
 ## 2. 增量生成、更新与最终化
@@ -80,7 +80,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 4. 表现类型、依赖与运行环境
 
 - **HTML artifact 分级运行**：
-  - fragment / 未同意交互的 document：`AdaptiveHtmlPreview`——iframe `sandbox="allow-same-origin"`（仅用于父级读 `contentDocument` 测量高度）+ 严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`default-src 'none'`，仅 data/blob/file 静态资源），无脚本（`src/renderer/components/CodeBlockView/HtmlPreviewFrame.tsx:21-28, 465-471`）。
+  - fragment / 未同意交互的 document：`AdaptiveHtmlPreview`——iframe `sandbox="allow-same-origin"`（仅用于父级读 `contentDocument` 测量高度/截图）+ 严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`default-src 'none'`，仅 data/blob/file 静态资源），无脚本（`HtmlArtifactView.tsx:465-471`；常量在 `HtmlPreviewFrame.tsx:10-28`）。
   - 同意后的 document：`InteractiveHtmlPreview`——Electron `<webview>` 加载 `data:text/html;charset=utf-8,` 编码后的完整文档（注入高度/滚轮桥接脚本，`HtmlArtifactView.tsx:115-194, 530-535`）。主进程在 `will-attach-webview` 强制 `sandbox=true、contextIsolation=true、nodeIntegration=false、删 preload、webSecurity=true`，只接受 data: URL 前缀，拒绝 window.open，导航只允许 data: 前缀（`src/main/services/MainWindowService.ts:292-323`）。分区会话 `html-artifact-preview` 全部权限请求拒绝、禁下载、`onBeforeRequest` 用 `isAllowedHtmlArtifactRequest` 拦截（`MainWindowService.ts:268-290`）。
   - 文件预览 HTML：`FilePreview` 的 `type='file'` 用空 sandbox（禁脚本）+ 严格 CSP；`type='artifact'`（仅 agent 工作区）用 `allow-scripts allow-same-origin allow-forms`（`src/renderer/components/FilePreview/plugins/html/HtmlFilePreview.tsx:24-32`，`FilePreview/README.md` 明确"不要把任意本地文件标为 artifact"）。
 - **同意判定**：`htmlArtifactRequiresUserConsent` 用 htmlparser2 静态扫描 script/iframe/object/embed、on* 属性、javascript:/外部 URL、meta refresh、CSS url()（含 CSS 转义解码）（`src/renderer/utils/htmlArtifact.ts:49-106`），解析失败 fail-closed。
@@ -91,8 +91,8 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 5. 用户交互、事件与错误反馈
 
 - 交互面：预览缩放（50%-200%）、预览/源码切换、分屏、全屏、PNG 截图（文件/剪贴板，需 `allow-same-origin` 读 contentDocument，`HtmlArtifactsPopup.tsx:148-176`）、下载、外部打开、同意交互预览。
-- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本 console-message 桥上报 height/wheel（`HtmlArtifactView.tsx:196-206, 542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`）。
-- 错误反馈：渲染错误经 logger+toast；文件预览有 loading/too_large/read_error/empty 分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）。
+- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本 console-message 桥上报 height/wheel（`HtmlArtifactView.tsx:196-206, 542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；`ScrollOwnershipContext` 现位于 `messages/list/`，`e6ebebe9cd` 从 `messages/blocks/` 迁入并同时隔离嵌套滚动区）。
+- 错误反馈：渲染错误经 logger+toast；文件预览有 loading/too_large/read_error/empty 分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）；agent 文件编辑显式关闭时若保存失败可直接丢弃草稿，不再被失败保存阻塞（`5ac7d9a58b`）。
 - 交互状态恢复：弹窗会话可在列表项重挂载间存活（artifactId 派生身份），但**未发现**跨会话/跨重载的 artifact 视图状态持久化（缩放、弹窗开合均为运行时状态）。
 
 ## 6. 编辑、diff、版本与协作
@@ -115,7 +115,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 8. 持久化、恢复、分享与导出
 
 - chat artifact：源文本存于消息 `data.parts`（SQLite）；编辑后 `editMessage` 写回；重开会话从 DB 重读并重新渲染。分享/导出：下载 `.html`（`window.api.file.save`）、临时文件外部打开、PNG 截图、剪贴板；消息图片导出时 `data-html-artifact` 被显式排除（`src/renderer/utils/image.ts:192-193`）。
-- agent 文件：磁盘即持久化，跨会话存活；系统工作区位于托管根目录按日期+sessionId 生成（`AgentWorkspaceService.buildSystemWorkspacePath`，`src/main/data/services/AgentWorkspaceService.ts:47-56`），用户工作区为任意绝对路径（DB 实体，`agentWorkspace` 表）。文件树展开态/选中态为渲染器状态，随 workspace 切换重置（`ArtifactPane.tsx:849-872`）。
+- agent 文件：磁盘即持久化，跨会话存活；系统工作区位于托管根目录按日期+sessionId 生成（`AgentWorkspaceService.buildSystemWorkspacePath`，`src/main/data/services/AgentWorkspaceService.ts:47-56` 附近），用户工作区为任意绝对路径（DB 实体，`agentWorkspace` 表）。文件树展开态/选中态为渲染器状态，随 workspace 切换重置（`ArtifactPane.tsx:849-872`）。另有**删除影响预览**（`9b448194fa`）：`AgentWorkspaceService.getReferences(id)` 统计并预览引用该工作区的 sessions/channels/tasks（`AgentWorkspaceService.ts:115-141`），删除确认对话框列出这些引用（`WorkspaceDeleteConfirmDialog.tsx` 新增）。
 - 无 artifact 对象的复制/分享/删除协议（文件本身可复制删除）。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -126,7 +126,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 ## 10. 生命周期、资源治理与性能
 
-- 文件树：主进程 `DirectoryTreeBuilder` + chokidar watcher，初始扫描后再应用 watcher 事件（背压处理），共享 watcher 去重（`src/main/services/file/tree/builder.ts:19-20, 225-227`、`DirectoryTreeManager.ts`）；缺失根目录可 `watchMissingRoot` 等待出现（`builder.ts:212-218`）。渲染端镜像按事件增删改（`useDirectoryTree.ts:46-84`）。
+- 文件树：主进程 `DirectoryTreeBuilder` + chokidar watcher，初始扫描后再应用 watcher 事件（背压处理），共享 watcher 去重（`src/main/services/file/tree/builder.ts:19-20, 225-227`、`DirectoryTreeManager.ts`）；缺失根目录可 `watchMissingRoot` 等待出现（`builder.ts:212-218`）。渲染端镜像按事件增删改（`useDirectoryTree.ts`）。tree IPC 采用 `file.tree.create/activate/dispose` 三阶段握手（`f39b17d04c` 关闭"快照到流"交付间隙——consumer 创建后先挂起、mutation 在主进程排队，`activate` 成功才放行，被拒绝则重取快照，最多 3 次），渲染侧 `useArtifactFileTreeModel` 相应改为 `ipcApi.request('file.tree.*')`，并给懒加载 watcher 加 10 秒 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`）吸收 `<Activity>` 标签切换（`45b4d902d5`）。
 - webview：分区会话随应用生命周期注册/释放（`setupHtmlArtifactPreviewSession` 的 `registerDisposable`）；`did-attach-webview` 拦截导航；未发现按可见性冻结/卸载 artifact 预览的机制（iframe 一直挂载，仅流式节拍降低重建频率）。
 - Pyodide：单例 worker，终止时拒绝所有挂起请求；超时清理；模块状态跨次执行保留（可 reset）。
 - 限额：HTML 文件预览上限 2MB（`HtmlFilePreview.tsx:21-22`）；文件编辑上限 2MB（`useFileEditSession.ts:21`）；artifact 预览高度上限为视口 72%（`HtmlArtifactView.tsx:54`）；长会话（agent）有 compaction/上下文用量管理，属 Agent 类目不展开。

@@ -2,7 +2,9 @@
 
 > 来源：`../Chat/VCPChat-Chat调查笔记.md` 第 13 节（原文完整搬运）
 >
-> 代码快照：`3f14e938e700a5487ca13c4a6d8a6caad8e70ac9`（分支：`main`）
+> 调查更新日期：2026-08-12
+>
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
 > 摘出日期：2026-08-11
 
@@ -42,6 +44,8 @@ VCPChat **没有使用任何第三方 Modal 库**，全部自定义实现，有�
 
 CSS 变量约定：`:root` 块定义暗色主题变量，`body.light-theme` 块覆盖亮色变量；每个主题文件同时包含两个块，通过 `themeHandlers.handleGetThemes` 可枚举所有主题及其变量名（`:50-91`）。主题选择器是一个独立的 850×700 无框子窗口（`Themesmodules/themes.html`，`frame: false`，`:169`）。
 
+默认 `styles/themes.css` 已更换为"纸墨与机器芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink，提交 `ac27171`"上架全新 vchat 默认主题（对齐官网配色）"），新增 `--chat-wallpaper-dark/light` 壁纸变量与 `assets/wallpaper/vcp_industrial_core_dark.jpg`、`vcp_editorial_ink_light.jpg` 两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机器芯.css`）。切换机制（整窗口重载覆写）未变。
+
 ### 13.4 图片/附件预览——独立窗口而非灯箱
 
 VCPChat 的图片预览**不是内嵌灯箱**，而是打开一个独立 Electron 子窗口（`modules/image-viewer.html`）。触发点：`modules/messageRenderer.js:2613` 调用 `electronAPI.openImageViewer({ src, title, theme })`。
@@ -52,6 +56,7 @@ VCPChat 的图片预览**不是内嵌灯箱**，而是打开一个独立 Electro
 - **绘图工具**：选择、画笔、橡皮、取色器、直线、矩形、圆形、箭头，支持颜色和画笔大小；操作历史最多 50 步撤销/重做（`:47`）。
 - **OCR**：按需懒加载本地 `vendor/tesseract.min.js`（`:608-635`），识别简体中文+英文，结果可复制。
 - **导出**：复制到剪贴板（原图+绘图叠合）、下载 PNG。
+- **GIF 支持**：GIF 图片以动画形式展示；未编辑（`historyStep<=0`）的 GIF 可**复制原动画**——Chromium Async Clipboard 不接受 `image/gif`，改经 `image-viewer:copy-gif` IPC 把原始字节写入 Electron 原生剪贴板（`modules/ipc/windowHandlers.js:155-181`，校验 GIF87a/89a 魔数、100MB 上限，macOS 用 `public.gif`、其余平台 `image/gif`）；下载时保 `.gif` 扩展名（`getGifDownloadName`），PNG 默认名"image.png"时改为带时间戳的 `image_YYYYMMDD_HHMMSS.png`（`getPngDownloadName`，`image-viewer.js:165-188`）。原始字节经 `fetch(resolvedImageSrc)` 获取并缓存（`getOriginalImageBlob`，`image-viewer.js:114-186`），mime 类型以源数据识别为准。
 - 右键点击切换工具栏可见性（`:409-413`）。
 - 键盘快捷键（仅在查看器窗口内有效）：Esc（切换工具/关闭）；Ctrl+Z/Y（撤销重做）；V/B/E/I/L/R/C/A（切换工具，`image-viewer.js:732-742`）。
 
@@ -68,8 +73,8 @@ UI：**平铺图片网格**，没有搜索框，没有分类切换，没有分�
 ### 13.6 键盘快捷键清单
 
 **全局快捷键**（Electron `globalShortcut`，应用窗口无焦点时也有效）：
-- `Super+Alt+Z`：打开便签（note-mini）窗口（`main.js:1066`）
-- `Ctrl+Shift+I`：打开开发者工具（`main.js:1059`）
+- `Super+Alt+Z`：打开便签（note-mini）窗口（`main.js:1164`）
+- `Ctrl+Shift+I`：打开开发者工具（`main.js:1160`；经 `toggleDevToolsForWindow` 转发——若焦点窗口是 Loom 运行窗口则交 `loomManager.toggleDevToolsForWindow` 处理，否则走普通 `webContents.toggleDevTools()`）
 - `CommandOrControl+Shift+P`：划词助手浮窗（动态注册/注销，`modules/ipc/assistantHandlers.js:724`）
 
 **应用内快捷键**（`modules/event-listeners.js:1461-1523`，仅在主窗口有焦点时有效）：
@@ -100,7 +105,7 @@ UI：**平铺图片网格**，没有搜索框，没有分类切换，没有分�
 
 ### 13.8 桌面集成（Electron）
 
-**系统托盘**（`main.js:422-528`）：图标为 `assets/icon.png`，tooltip "VCP AI 聊天客户端"。右键菜单包含：显示/隐藏主窗口、显示/隐藏信息流监听器、打开 VCP 桌面、退出。左键点击切换主窗口显隐（若主窗口已销毁则改为切换 RAG 观测窗口）。macOS 特殊处理：左键切换显隐，右键弹出菜单，不设置 `setContextMenu` 以避免左键也弹菜单（`:510-527`）；macOS 图标调整为 16×16 模板图像适配深浅色菜单栏（`:431-434`）。关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。
+**系统托盘**（`main.js:454-555`）：图标为 `assets/icon.png`，tooltip "VCP AI 聊天客户端"。右键菜单包含：显示/隐藏主窗口、显示/隐藏信息流监听器、打开 VCP 桌面、退出。左键点击切换主窗口显隐（若主窗口已销毁则改为切换 RAG 观测窗口）。macOS 特殊处理：左键切换显隐，右键弹出菜单，不设置 `setContextMenu` 以避免左键也弹菜单（`:541-552`）；macOS 图标 resize 为 16×16 并 `setTemplateImage(true)` 适配深浅色菜单栏（`:457-465`）。关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`main.js:376-397`）。
 
 **全局快捷键**：见 13.6 节。
 
@@ -112,7 +117,7 @@ UI：**平铺图片网格**，没有搜索框，没有分类切换，没有分�
 
 **侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 的 `computed.minWidth` / `computed.maxWidth` 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，`:93`, `:98`），最大宽度 fallback 600px（`:57`）。拖拽过程中通过 `requestAnimationFrame` 节流更新，拖拽时禁用元素 `transition` 以避免卡顿（`:88`）。
 
-**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1560`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 触发 `leftSidebar.classList.add('compact-topics-open')`，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（`:451`）；点击话题项后自动关闭抽屉（`:439-441`）。
+**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1577`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 触发 `leftSidebar.classList.add('compact-topics-open')`，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（`:451`）；点击话题项后自动关闭抽屉（`:439-441`）。
 
 ### 13.10 全局设置面板分区
 

@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/shared/types/provider.ts`、`src/main/provider/`、`src/main/provider/aiSdk/`、`src/main/provider/managers/`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
-> 调查方式：只读源码梳理；未修改 DeepChat 仓库
+> 调查方式：只读源码梳理默认渠道、DeepSeek Responses 搜索适配器与独立语音生成；未修改 DeepChat 仓库
 >
 > 调查范围：Provider 数据模型、默认渠道、模型能力配置、AI SDK 路由、请求运行时、模型状态和限流、凭据存储与脱敏、实例解析、连接检测与可观测性
 >
@@ -38,7 +38,7 @@ rateLimit / rateLimitConfig
 
 ## 2. 默认渠道与注册表
 
-`src/main/provider/defaults.ts:3-25` 起定义默认 Provider，后续条目覆盖大量 OpenAI-compatible 渠道，并明确列出 OpenAI Responses、OpenAI Codex、ACP、Gemini、Vertex AI、Anthropic、GitHub Copilot、Azure OpenAI、AWS Bedrock 等（`:209-239`、`:284-344`、`:569-570`、`:978-1011`）。默认 Provider 会在 `ProviderSettings` 构造阶段与已存在配置合并（`src/main/provider/settings.ts:379-411`）。
+`src/main/provider/defaults.ts:3-25` 起定义默认 Provider，后续条目覆盖大量 OpenAI-compatible 渠道，并明确列出 OpenAI Responses、OpenAI Codex、ACP、Gemini、Vertex AI、Anthropic、GitHub Copilot、Azure OpenAI、AWS Bedrock 等（`:209-239`、`:284-344`、`:569-570`、`:978-1011`）。新增 **AMD GPU Cloud**（`amd-developer`，apiType `openai-completions`，baseUrl `https://developer.amd.com.cn/radeon/api/v1`，默认关闭，`:49-63`；registry 条目在 `providerRegistry.ts:133-139`，复用 `OPENAI_BASE` preset + api-key credential）。默认 Provider 会在 `ProviderSettings` 构造阶段与已存在配置合并（`src/main/provider/settings.ts:379-411`）。
 
 `providerRegistry.ts:50-67` 的 `AiSdkProviderDefinition` 将渠道映射到：runtime kind、behavior preset、模型来源、连通性检查、credential strategy、route strategy、embedding strategy 和默认 headers。解析优先匹配 provider id，再匹配 apiType（`:684-690`）。同一个 OpenAI-compatible apiType 可以因此复用统一 runtime，同时保留 Provider 自己的 endpoint/key。
 
@@ -55,11 +55,11 @@ rateLimit / rateLimitConfig
 
 ## 4. 请求运行时
 
-聊天请求在 `src/main/provider/aiSdk/runtime.ts:1178-1224` 组装：
+聊天请求在 `src/main/provider/aiSdk/runtime.ts:1178-1245` 组装：
 
 ```text
 Provider + model config + capability snapshot
-  -> mapMessagesToModelMessages
+  -> mapMessagesToModelMessages（含 providerAdapter.prepareMessages / mapReplay）
   -> resolve native tool support
   -> mcpToolsToAISDKTools（支持原生时）
   -> provider options / system message split
@@ -68,13 +68,18 @@ Provider + model config + capability snapshot
 
 请求 signal 由 caller signal 和模型 timeout 合并（`:1286-1291`）；runtime 还统一处理 reasoning、图片/视频生成和 TTS（`:716-803`、`:1357-1519`），embedding 路径在 `:1587-1766`。`requestTrace` 记录 provider id、model id、endpoint、headers/body 摘要和 logical round，具体是否落盘由调用方控制。
 
+**另有两条 provider 级路径（源码确认）**：
+
+- **DeepSeek 原生 web 搜索（#2093）**：`src/main/provider/deepseekResponsesAdapter.ts`（新增 547 行）只对 `providerId === 'deepseek'` + `modelId === 'deepseek-v4-flash'` + 官方 `https://api.deepseek.com` endpoint 生效（`isOfficialDeepSeekEndpoint`）。`runAiSdkCoreStream` 增加 `options.search`：搜索时注入 `deepseek_provider_web_search` 工具并开启 `include.rawChunks`，`streamAdapter.ts:254-291` 把 raw/source 流部件投影为 `providerSearch`/`providerUrlSource` 事件（http/https 白名单、去重、来源上限 100）；搜索调用以 `provider_replay` 信封存于消息（1 MiB 上限），由 `clientMessageProjection.ts` 在向 renderer 投影时剥离，下一轮经 `mapReplay` 重建。provider 能力字段新增 `supportsSearch/searchExecution`（`model-capabilities.ts`、`streamAdapter` 侧），Composer 据此显示搜索开关（见 Chat UI 笔记 §3）。
+- **独立语音生成（`generateSpeechStandalone`）**：`src/main/provider/index.ts:767-851` 用 TTS 模型走 `coreStream` 收集 `audio/*` 的 `image_data` 事件，是 CLI 媒体能力（`cli/audioTranscriptionService` 之外的 TTS 输出侧）的基础。
+
 原生 tool stream 与 `<function_call>` legacy 兼容由 `streamAdapter.ts:57-124`、`toolProtocol.ts:38-150` 负责；这使渠道差异集中在 capability snapshot 和 provider definition，而上层 Agent loop 仍消费统一 core stream event。
 
 ## 5. 模型目录和能力快照
 
 `BaseLLMProvider`（`src/main/provider/baseProvider.ts:31-320`）封装 Provider 初始化、模型列表获取、缓存和 custom model CRUD。ProviderSettings 的 capability route 会把 Provider DB/model facts、endpoint type、ownedBy 和 API type 交给 ModelConfigHelper；最终 `functionCall`、vision、reasoning 等是“有效配置”，不是只由模型名称推测。
 
-本次确认的渠道身份是 `provider.id + modelId` 组合：同名模型可在不同 Provider 下有不同 apiKey、baseUrl、capability 和 route config。ACP 通过独立 Agent backend 解析，不能用普通 Provider 的模型能力字段替代。
+确认的渠道身份是 `provider.id + modelId` 组合：同名模型可在不同 Provider 下有不同 apiKey、baseUrl、capability 和 route config。ACP 通过独立 Agent backend 解析，不能用普通 Provider 的模型能力字段替代。
 
 ## 6. 限流、队列与状态
 
@@ -97,7 +102,7 @@ Provider + model config + capability snapshot
 
 ## 9. 连接检测、日志与可观测性
 
-- **连接测试**：`ProviderService.testConnection`（`src/main/provider/providerService.ts:52-61`）带 5 秒超时（`PROVIDER_QUERY_TIMEOUT_MS = 5_000`，:18），通过 `providerExecutionPort.testConnection` 转发到真实执行端口（`src/main/provider/routes.ts:94-95`）。实际执行在 `ProviderRuntime.check`（`src/main/provider/index.ts:774-821`）：提供 modelId 时用真实 completions 调用（发送 `'hi'` 测试消息，:784-787，60 秒兜底）验证，未提供时走 Provider 自己的 `check()`（:809，如 `acpProvider.ts:286`）。因此设置页的连接测试复用真实运行链路，不是独立 mock 路径。
+- **连接测试**：`ProviderService.testConnection`（`src/main/provider/providerService.ts:52-61`）带 5 秒超时（`PROVIDER_QUERY_TIMEOUT_MS = 5_000`，:18），通过 `providerExecutionPort.testConnection` 转发到真实执行端口（`src/main/provider/routes.ts:94-95`）。实际执行在 `ProviderRuntime.check`（`src/main/provider/index.ts:863-930`）：提供 modelId 时用真实 completions 调用（发送 `'hi'` 测试消息，:870-880，60 秒兜底）验证，未提供时走 Provider 自己的 `check()`（:895，如 `acpProvider.ts:286`）。因此设置页的连接测试复用真实运行链路，不是独立 mock 路径。
 - **请求 trace**：`requestTrace.ts` 的 `resolveRequestTraceContext`（`src/main/provider/requestTrace.ts:18-26`）从 `ModelConfig.requestTraceContext` 读取 enabled/persist 回调；runtime 在 `buildPromptRuntime` 中记录 endpoint、headers、body 摘要（`src/main/provider/aiSdk/runtime.ts:1329/1442/1495/1551`），经 `redact.ts` 脱敏后交给 persist，是否落盘由注入方（会话 runtime）决定——笔记 §4 所述"具体是否落盘由调用方控制"即指此。
 - **错误归一化**：连接测试把 Provider 异常统一折叠为 `{ isOk, errorMsg }`（`provider/index.ts:800-813`）；聊天链路错误以 `error` 事件和错误块进入 transcript（见 Chat 笔记 §2），Provider 层未见独立的跨渠道错误归一化表，不同 AI SDK 的错误文本由上层 `formatAssistantErrorSummary` 处理（`contextBuilder.ts:820-854`）。
 
@@ -113,13 +118,15 @@ Provider + model config + capability snapshot
 ## 11. 关键源码索引
 
 - Provider/ModelConfig 类型：`src/shared/types/provider.ts:74-106`、`:370-413`
-- 默认渠道：`src/main/provider/defaults.ts:3-25`、`:209-344`、`:569-570`、`:978-1011`
-- AI SDK Provider registry：`src/main/provider/providerRegistry.ts:50-80`、`:684-690`
+- 默认渠道：`src/main/provider/defaults.ts:3-25`、`:209-344`、`:569-570`、`:978-1011`、`amd-developer:49-63`
+- AI SDK Provider registry：`src/main/provider/providerRegistry.ts:50-80`、`:133-139`、`:684-690`
 - ProviderSettings 初始化/迁移：`src/main/provider/settings.ts:322-412`
 - 有效模型配置与导入导出：`src/main/provider/settings.ts:1261-1399`
 - Provider 基类模型目录：`src/main/provider/baseProvider.ts:31-320`
-- Provider 实例管理与路由边界：`src/main/provider/managers/providerInstanceManager.ts:31-207`、`src/main/provider/index.ts:774-821`
+- Provider 实例管理与路由边界：`src/main/provider/managers/providerInstanceManager.ts:31-207`、`src/main/provider/index.ts:863-930`
 - AI SDK runtime：`src/main/provider/aiSdk/runtime.ts:1178-1350`、`:1357-1766`
+- DeepSeek 原生搜索：`src/main/provider/deepseekResponsesAdapter.ts`、`src/main/provider/aiSdk/streamAdapter.ts:254-291`
+- 独立语音生成：`src/main/provider/index.ts:767-851`
 - 原生/legacy stream：`src/main/provider/aiSdk/streamAdapter.ts:57-124`、`src/main/provider/aiSdk/toolProtocol.ts:38-150`
 - Provider QPS 队列：`src/main/provider/managers/rateLimitManager.ts:24-190`、`:284-385`
 - 凭据存储与脱敏：`src/main/provider/data/settingsTable.ts:156-200`、`src/main/provider/auth/openaiCodex/credentialStore.ts`、`src/main/lib/redact.ts`

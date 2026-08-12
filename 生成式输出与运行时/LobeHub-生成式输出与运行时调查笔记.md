@@ -2,9 +2,9 @@
 
 > 调查对象：`../../lobehub`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 调查方式：静态源码阅读 + 关键词检索（artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/exec/preview/file/tool/mcp/dalle/code execution 等）+ 读取既有单测与文档；未启动应用运行验证
 >
@@ -44,7 +44,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 ## 4. 表现类型、依赖与运行环境
 
 - 类型分派：`application/lobe.artifacts.react` → Sandpack（浏览器内打包，iframe 预览，依赖 `@codesandbox/sandpack-react` + `packages/artifact-template` 生成 Vite+React+Tailwind 项目）；`image/svg+xml` → 消毒后内联渲染（`SVG.tsx`）；mermaid → Mermaid；text/markdown → Markdown；其余默认按 HTML 进 iframe（`src/features/Portal/Artifacts/Body/Renderer/index.tsx:11-35`，iframe 由 `@lobehub/ui` HtmlPreview 提供，`src/components/HtmlPreview/InlinePreview.tsx`）。
-- 代码/项目级运行：Cloud Sandbox 提供 `executeCode`（Python/JS/TS）、`runCommand`（含后台命令、120s 超时）、文件操作等 13 个 API（`packages/builtin-tool-cloud-sandbox/src/manifest.ts:8-318`），执行位置为远端沙箱，服务端经 `MarketSandboxProvider`/`OnlyboxesSandboxProvider` 桥接（`apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`），系统提示声明基于 AWS Bedrock AgentCore 且与用户本机隔离（`systemRole.ts:3`）。桌面端另有 local-system 工具在本机执行（本次未深挖）。
+- 代码/项目级运行：Cloud Sandbox 提供 `executeCode`（Python/JS/TS）、`runCommand`（含后台命令、120s 超时）、文件操作等 13 个 API（`packages/builtin-tool-cloud-sandbox/src/manifest.ts:8-318`），执行位置为远端沙箱，服务端经 `MarketSandboxProvider`/`OnlyboxesSandboxProvider` 桥接（`apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`），系统提示声明基于 AWS Bedrock AgentCore 且与用户本机隔离（`systemRole.ts:3`）。桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`——`createSandboxEnv`/`createSandboxLaunchPlan`/`SrtSandboxRuntime`/`installDeviceSandbox`/`probeSandboxCapability`，`e9b6d00ab`；`9b4f944cb` 给本地沙箱工作目录、`95dfa1d38` 改为探测应用自带沙箱助手），`src/helpers/localSandbox.ts` 在客户端判定是否围栏执行（`isLocalSandboxEnabled`/`resolveClientLocalSandbox`，含 `localSandboxNetwork` 成员/管理者双重判定），本地 system 工具因此多了“沙箱围栏”这一执行形态（与 device gateway 转发、裸 spawn 并存）；沙箱围栏强度（进程/网络隔离、writable roots）未运行验证。
 - 依赖提供：HTML 仅允许 cdnjs 外部脚本；React 预装 lucide-react/recharts/shadcn 并禁用外部图片（`content.ts:48-67`）；沙箱预装 Python 数据栈/Node/Chromium 等（`systemRole.ts:27-80`）。
 
 ## 5. 用户交互、事件与错误反馈
@@ -76,7 +76,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 ## 9. 模型回流、对象感知与持续维护
 
 - Artifact 迭代：模型依靠会话历史看到上一版内容并按指令复用 `identifier` 整段重发，无对象查询接口；对象身份（消息 id + identifier）只存在于客户端 Portal 栈。
-- 文档：完整闭环。模型可 `listDocuments/readDocument`（XML 带节点 ID + markdown 双格式）、`modifyNodes/replaceText/createDocument/renameDocument/copyDocument/removeDocument`、调整注入策略 `updateLoadRule`（`packages/builtin-tool-agent-documents/src/manifest.ts:8-283`）；agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`，`packages/agent-templates/src/types.ts:4-45`）。文档写入前自动快照历史（`agentDocuments/index.ts:735-781`），`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
+- 文档：完整闭环。模型可 `listDocuments/readDocument`（XML 带节点 ID + markdown 双格式）、`modifyNodes/replaceText/createDocument/renameDocument/copyDocument/removeDocument`、调整注入策略 `updateLoadRule`（`packages/builtin-tool-agent-documents/src/manifest.ts:8-283`）；agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`，`packages/agent-templates/src/types.ts:4-45`）。注入链路在 context-engine 侧实现：`AgentDocumentInjector/shared.ts` 按 `loadPosition`/`loadRules` 工作，`SystemReplaceInjector` 让动态激活文档只携带一次（`5b348e814`）、用绝对日期索引（`cc064ee9b`），`ActivationResultTrim` 处理器避免激活结果重复进 LLM 载荷（`packages/context-engine/src/processors/ActivationResultTrim.ts`）。文档写入前自动快照历史（`agentDocuments/index.ts:735-781`），`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
 - 会话文件：上传文件自动同步进沙箱会话目录（`systemRole.ts:21-24`），沙箱每 topic 独立会话、过期重建（`systemRole.ts:222-227`）。
 
 ## 10. 生命周期、资源治理与性能
@@ -89,7 +89,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 - 测试：`selectors.test.ts`（artifact 正则/闭合/identifier 转义，`src/store/chat/slices/portal/selectors.test.ts:191-936`）、`markdown.test.ts`（半截流归一化，`src/features/Conversation/utils/markdown.ts` 配套测试）、`const/plugin.test.ts`、`document/diff/json.test.ts`、`document` 服务测试（含锁/历史/llm_call 快照，`apps/server/src/services/document/__tests__/`）、`pageAgent` 服务端注册测试、`cloudSandbox` 运行时与 provider 测试（`apps/server/src/services/sandbox/__tests__/`）等。以上均为单测，本文结论未经运行验证。
 - 已确认边界：Artifact 无独立对象存储、无 diff 更新、无模型对象寻址；HTML 预览禁用复制/下载；"部署到工作区"为空桩；Notebook 工具已标记废弃（`packages/builtin-tool-notebook/src/manifest.ts:7` 标注 deprecated，不再注入 LLM 工具），Notebook Portal 仍作为 topic 文档列表存在。
-- 未验证/未覆盖：桌面本地文件编辑全链路与设备网关授权细节、图片生成任务的文件落库、diff 节点在 `@lobehub/editor` 内的生成时机、编辑锁与实时推送的实际运行行为、移动端表现。声称"没有 X"均限于本次检索范围（src/packages/apps 的 `*.ts/tsx`，关键词见元数据）。
+- 未验证/未覆盖：桌面本地文件编辑全链路与设备网关授权细节（桌面 Local Sandbox 见第 4 节，围栏强度/安装链未运行验证）、图片生成任务的文件落库、diff 节点在 `@lobehub/editor` 内的生成时机、编辑锁与实时推送的实际运行行为、移动端表现。声称"没有 X"均限于本次检索范围（src/packages/apps 的 `*.ts/tsx`，关键词见元数据）。
 
 ## 12. 关键源码索引
 
@@ -104,7 +104,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 - `apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`：沙箱 provider 桥
 - `apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:184-417`：模型结构化改文档（无头编辑器 + 锁 + 历史）
 - `packages/builtin-tool-page-agent/src/client/executor/index.ts:143-189`：服务端快照回推活编辑器
-- `apps/server/src/services/agentDocuments/index.ts:574-611,744-829`：文档上下文注入与模型 CRUD
+- `apps/server/src/services/agentDocuments/index.ts:574-611,744-829`：文档上下文注入与模型 CRUD（注入决策细节见 `packages/context-engine/src/providers/AgentDocumentInjector/`，含 `SystemReplaceInjector` 与 `ActivationResultTrim` 处理器）
 - `apps/server/src/services/document/index.ts:623-755`、`services/document/history.ts:109-168`：保存、历史快照与对比（jsondiffpatch 工具 `diff/json.ts` 未接入生产路径，见第 2 节）
 - `src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`：diff 节点接受/拒绝
 - `packages/database/src/schemas/message.ts:95-140`：消息表（Artifact 事实源）

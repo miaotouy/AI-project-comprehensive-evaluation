@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
-> 调查方式：从 [`../Chat/LobeHub-Chat调查笔记.md`](../Chat/LobeHub-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/LobeHub-Chat调查笔记.md`](../Chat/LobeHub-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据；按 5952f4c3..HEAD 提交范围核对受影响结论并修正行号引用，未重新全量调查代码
 >
 > 调查范围：会话定位与消息分桶 key、双层 Store 事实源与同步、消息数据形状与树、消息 CRUD 与分支数据语义、Topic 与消息检索；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -53,7 +53,7 @@ LobeHub 的会话不是“session_id + topic_id”二元定位，而是多维坐
   - 否则落到 `main`（`sub_agent` scope 会被强制映射回 `main`，第 108-116 行的注释：“same conversation, just different display”）。
 - `generateKey`（第 122-146 行）按 `${scope}_${scopeId}[_{topicId}][_{subTopicId}][_new]` 拼字符串。
 
-这套 key 同时被两层 store 使用（见第 2 节），是它们互相定位到“同一份数据”的唯一纽带——没有其它地方做一致性校验。`src/store/chat/slices/message/actions/query.ts:242-265` 里甚至专门为此写了一段防御代码：写回 SWR/IndexedDB 缓存前要重算一个 `representableBucketKey`，因为服务端 `message:list` key 只认 agentId/groupId/threadId/topicId，**不认** `documentId`/`subAgentId` 这些本地专属维度；如果两个 key 不一致就直接跳过写缓存（第 265 行 `if (messagesKey !== representableBucketKey) return;`）——这说明本地分桶方案比服务端缓存 key 更细，两者天然不完全对齐，是需要长期小心维护的耦合点，不是“设计完美”。
+这套 key 同时被两层 store 使用（见第 2 节），是它们互相定位到“同一份数据”的唯一纽带——没有其它地方做一致性校验。`src/store/chat/slices/message/actions/query.ts` 里专门为此写了一段防御代码：该逻辑现封装为 `#writeThroughMessageCache`（`query.ts:302-330`），写回 SWR/IndexedDB 缓存前重算 `representableBucketKey`（318-325 行），因为服务端 `message:list` key 只认 agentId/groupId/threadId/topicId，**不认** `documentId`/`subAgentId` 这些本地专属维度；两个 key 不一致就直接跳过写缓存（325 行 `if (messagesKey !== representableBucketKey) return;`），并新增跳过条件：会话流式运行中（`isAgentRuntimeRunningByContext`，避免逐 token 打缓存）、`useFetchMessages`/`prefetchMessages` 的写路径本身不重复写（290-300 行注释）。这说明本地分桶方案比服务端缓存 key 更细，两者天然不完全对齐，是需要长期小心维护的耦合点。
 
 ### 1.2 消息数据形状与树
 
@@ -83,9 +83,9 @@ dbMessagesMap: Record<string, UIChatMessage[]>;   // 原始消息，按 messageM
 messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消息（含 assistantGroup 等虚拟消息）
 ```
 
-写入路径有两处，都会各自跑一次 `parse`：
-- `message/actions/query.ts` 的 `replaceMessages`（第 105-209 行）：第 197 行 `const { flatList } = parse(reconciled);`，写入 `messagesMap`；同时（第 156-170 行）支持 `preserveWorks` 参数，把旧消息里的 `works` 字段“移植”到新消息上（这是仅在这一处存在的合并逻辑）。
-- `message/actions/internals.ts` 的 `internal_dispatchMessage`（第 36-75 行）：第 68 行 `const { flatList } = parse(reconciled);`，用于乐观更新（工具审批、编辑内容等）后的即时重算。
+写入路径有两处，都会各自跑一次 `parse`（行号随重构偏移，语义不变）：
+- `message/actions/query.ts` 的 `replaceMessages`（第 124-209 行）：第 257 行 `const { flatList } = parse(reconciled);`，写入 `messagesMap`；同时（第 186-209 行）支持 `preserveWorks` 参数，把旧消息里的 `works` 字段“移植”到新消息上（这是仅在这一处存在的合并逻辑）。
+- `message/actions/internals.ts` 的 `internal_dispatchMessage`（第 42-75 行）：第 72 行 `const { flatList } = parse(reconciled);`，用于乐观更新（工具审批、编辑内容等）后的即时重算。
 
 `ConversationArea.tsx`（`src/routes/(main)/agent/features/Conversation/ConversationArea.tsx:66-73`）只从这个全局 store 读 `dbMessagesMap[chatKey]` 这一份**原始**数据，作为 `messages` prop 喂给下面的会话级 Provider。
 
@@ -102,7 +102,7 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 
 ### 2.3 两层之间的同步与引用稳定性
 
-两层 store 之间通过 `onMessagesChange` 回调单向同步：局部 store 每次 `parse` 完之后调用 `get().onMessagesChange?.(messages, get().context)`（`data/action.ts:158`/`181`），这个回调在 `ConversationArea.tsx:127-129` 里被接成 `replaceMessages(messages, { context: ctx })`，写回**全局** ChatStore——全局 store 那边再跑一次自己的 `parse`。反方向（全局 → 局部）靠 `StoreUpdater.tsx`（`src/features/Conversation/StoreUpdater.tsx:79-99`，`useLayoutEffect` 监听 `messages` prop 变化并调用局部 `replaceMessages`）。
+两层 store 之间通过 `onMessagesChange` 回调单向同步：局部 store 每次 `parse` 完之后调用 `get().onMessagesChange?.(messages, get().context)`（`data/action.ts:188` 与 `:209` 附近，并新增 `skipOnMessagesChange` 选项避免“消息来自全局”时再回写一次缓存），这个回调在 `ConversationArea.tsx:141` 里被接成 `replaceMessages(messages, { context: ctx })`，写回**全局** ChatStore——全局 store 那边再跑一次自己的 `parse`。反方向（全局 → 局部）靠 `StoreUpdater.tsx`（`src/features/Conversation/StoreUpdater.tsx:79-99`，`useLayoutEffect` 监听 `messages` prop 变化并调用局部 `replaceMessages`）。
 
 **这意味着同一批 `UIChatMessage[]` 在一次“发消息/工具审批/编辑”操作里，`parse()` 这个相对重的三阶段算法（算法细节见消息渲染器笔记）可能被调用两次以上**（局部 store 乐观更新一次，全局 store 落库后再一次，全局 store 再回灌局部 store 又一次）。为了不让每次 `parse` 重建全部对象引用打穿 `memo`/`isEqual`，两边分别调用了同一个补丁函数 `stabilizeReferences`（`store/slices/data/stabilizeReferences.ts:1-15`，本质是 `@tanstack/react-query` 的 `replaceEqualDeep`），注释直言：“`parse()` ... rebuilds the entire displayMessages tree on every dispatch ... That defeats memo ... Walking old vs new and pinning unchanged subtrees back to their previous reference”。也就是说，**parse 本身不保证引用稳定性，稳定性是每个调用点手工“缝”上去的**，且这个补丁在全局 store 那边（`internals.ts`/`query.ts`）看不到被调用——只在局部 `ConversationStore` 里用了。全局 `messagesMap` 每次都是全新对象树。
 
@@ -118,8 +118,8 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 ### 3.1 创建 / 删除 / 工具参数更新（局部 ConversationStore）
 
 `src/features/Conversation/store/slices/message/action/crud.ts`：
-- `createMessage`（203-241 行）：先 `createTempMessage` 乐观插入一条 `tmp_xxx` 消息（`internal_dispatchMessage` type `createMessage`），再调 `messageService.createMessage`，成功后用服务端返回的 `result.messages` 整批 `replaceMessages` 覆盖（失败则把临时消息标错误）。
-- `deleteMessage`（293-331 行）：如果目标是 `assistantGroup`/`supervisor`，要把 `children[]` 里每个 block 的 id，以及每个 block 里 `tools[].result.id`（工具结果消息）都一并收集进删除列表（302-315 行），保证删掉一个“组”时连带清理所有底层 db 行；单条删走 `messageService.removeMessage`（走父子链重接），批量删走 `removeMessages`。
+- `createMessage`（204-241 行）：先 `createTempMessage` 乐观插入一条 `tmp_xxx` 消息（`internal_dispatchMessage` type `createMessage`），再调 `messageService.createMessage`，成功后用服务端返回的 `result.messages` 整批 `replaceMessages` 覆盖（失败则把临时消息标错误）。提交 `4230dcddd`（#17889）让**客户端铸造 topic 与 message id**——`packages/utils/src/entityId.ts` 提供客户端 id 生成（`packages/types/src/entityId.ts`），发送链与 `execAgent` 服务端按客户端 id 落库（`apps/server/src/services/aiAgent/index.ts` 相应接受 `clientMessageId`），乐观消息 id 与最终落库 id 的一致性由客户端预生成保证，不再依赖服务端回填后整批替换；`createTempMessage` 的临时形态仍在（`crud.ts:248-254`）。
+- `deleteMessage`（298-331 行）：如果目标是 `assistantGroup`/`supervisor`，要把 `children[]` 里每个 block 的 id，以及每个 block 里 `tools[].result.id`（工具结果消息）都一并收集进删除列表（307-315 行），保证删掉一个“组”时连带清理所有底层 db 行；单条删走 `messageService.removeMessage`（走父子链重接），批量删走 `removeMessages`。
 - `updatePluginArguments`（537-630 行）：更新工具参数时同时乐观更新“工具消息本身”和“父 assistant 消息 tools[] 里的那一条”，并把这次更新的 Promise 记录进 `pendingArgsUpdates`（609-613 行）供后续 `waitForPendingArgsUpdate` 使用——目的是保证“审批/拒绝工具”前，任何正在进行的参数编辑必须先落地，避免竞态。
 
 ### 3.2 编辑 / 多选状态（纯局部 UI 状态）
@@ -136,17 +136,17 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 
 ## 4. 列表、索引与检索
 
-- **Topic 搜索（服务端 BM25）**：`apps/server/src/routers/lambda/topic.ts:854-858` 调用 `TopicModel.queryByKeyword`，`packages/database/src/models/topic.ts:743-765` 并行用 BM25 匹配 Topic 标题和消息内容，再合并返回 Topic 列表。因此用户可以通过 Topic 搜索找到包含关键词的会话，但结果不会直接标出或滚动到命中的具体消息（搜索入口与结果呈现工作流见 Chat UI 笔记）。
-- **消息内容搜索端点**：`apps/server/src/routers/lambda/message.ts:526-530` 的 `message.searchMessages` 后端端点（`MessageModel.queryByKeyword`，`packages/database/src/models/message.ts:1872-1883`），本次未找到聊天 UI 对它的调用，不能把它误写成已有的前端消息定位功能。
+- **Topic 搜索（服务端 BM25）**：`apps/server/src/routers/lambda/topic.ts:861` 调用 `TopicModel.queryByKeyword`，`packages/database/src/models/topic.ts:1966` 并行用 BM25 匹配 Topic 标题和消息内容，再合并返回 Topic 列表。因此用户可以通过 Topic 搜索找到包含关键词的会话，但结果不会直接标出或滚动到命中的具体消息（搜索入口与结果呈现工作流见 Chat UI 笔记）。topic 模型新增 `excludeStatuses`/`excludeTriggers` 过滤参数（`conversationLifecycle.ts` 的 `topicDataMap` 配合 topic 列表查询使用，`topic.ts` 模型 +174 行），列表查询可按状态/触发源排除（如排除已完成的自动化任务话题）。
+- **消息内容搜索端点**：`apps/server/src/routers/lambda/message.ts:526` 的 `message.searchMessages` 后端端点（`MessageModel.queryByKeyword`，`packages/database/src/models/message.ts:1966`），本次未找到聊天 UI 对它的调用，不能把它误写成已有的前端消息定位功能。
 - **列表分页**：消息/会话列表的客户端分页实现原调查未覆盖，本笔记不虚构；可见列表的数据分页接口属于消息渲染器笔记的记录范围。
 - **索引自愈**：conversation-flow 专门有一个 `doctor/diagnose.ts` 模块，用途是“detect and repair message trees the reader cannot fully render”，其实现方式是**真的跑一遍 `parse()`，然后 diff 出 parse 无法渲染的消息**（`diagnose.ts:86-91` 的文档注释）。存在专门的“树医生”模块，说明孤儿工具消息、断裂的 parentId 链、悬空的 signal 回调等异常树形是生产环境中会实际出现的情况，而不是纯理论边界情况。
 
 ## 5. 缓存、一致性、多窗口与并发写入
 
 1. **`parse()` 双跑**（第 2 节已展开）：全局 ChatStore 与局部 ConversationStore 各自独立调用 `conversation-flow.parse()`，各维护一份 `displayMessages`/`flatList`，仅靠 `onMessagesChange` 回调单向同步 + `StoreUpdater` 的 `useLayoutEffect` 反向同步。没有看到任何断言/测试保证两份数据在任意时刻完全一致；全局侧的 `replaceMessages`（`query.ts`）支持 `preserveWorks` 合并逻辑，局部侧的同名方法没有——这是两份实现出现语义分叉的一个具体证据点，而不是纯理论风险。
-2. **引用稳定性靠手工补丁而非算法本身保证**：`stabilizeReferences`/`replaceEqualDeep` 在局部 store 的三个 parse 调用点都手动包了一层（`data/action.ts:120,142,167,251`），但全局 ChatStore 的两个 parse 调用点（`query.ts:197`、`internals.ts:68`）**没有**做同样处理——意味着全局 `messagesMap` 上的 React 组件如果直接订阅（本次没有找到直接订阅全局 messagesMap 渲染 UI 的路径，UI 主要读局部 store），风险可控；但这也说明“parse 结果引用不稳定”是团队公认要专门绕过的已知缺陷，而不是设计选择。
+2. **引用稳定性靠手工补丁而非算法本身保证**：`stabilizeReferences`/`replaceEqualDeep` 在局部 store 的 parse 调用点都手动包了一层（`data/action.ts:169-209,316`），但全局 ChatStore 的两个 parse 调用点（`query.ts:257`、`internals.ts:72`）**没有**做同样处理——意味着全局 `messagesMap` 上的 React 组件如果直接订阅（本次没有找到直接订阅全局 messagesMap 渲染 UI 的路径，UI 主要读局部 store），风险可控；但这也说明“parse 结果引用不稳定”是团队公认要专门绕过的已知缺陷，而不是设计选择。
 3. **messageMapKey 与服务端缓存 key 并非同构**：`query.ts:242-265` 里的 `representableBucketKey` 防御逻辑，字面上承认“page/`group_agent` 等 scope 的本地 key 无法被服务端 `message:list` 缓存 key 表达”，所以这些场景下乐观更新完全不写缓存，只能靠下一次真实网络请求纠正——这是一个已知但被绕过而非修复的不一致。
-4. **`reconcileAssistantToolLinks`（两处独立调用：`internals.ts:61`、`query.ts:177`）**专门用来修复“assistant.tools[] 弄丢了某条工具引用，但对应的 tool 消息行还在”的情况——注释直接写“an optimistic updateMessage{tools} on the wrong/old assistant during a step boundary can drop the link”，说明流式生成的 step 边界上，`tools[]` 数组和独立的 tool 消息行两份数据保持同步本身就是一个容易出错、需要专门补救的地方。
+4. **`reconcileAssistantToolLinks`（两处独立调用：`internals.ts:65`、`query.ts:227-228`）**专门用来修复“assistant.tools[] 弄丢了某条工具引用，但对应的 tool 消息行还在”的情况——注释直接写“an optimistic updateMessage{tools} on the wrong/old assistant during a step boundary can drop the link”，说明流式生成的 step 边界上，`tools[]` 数组和独立的 tool 消息行两份数据保持同步本身就是一个容易出错、需要专门补救的地方。
 5. **多窗口/多端并发写入**：原调查未覆盖多窗口与并发写入合并语义，未验证（不虚构）。
 
 ## 6. 设计取舍与已确认边界
@@ -168,7 +168,7 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 - `src/store/chat/utils/messageMapKey.ts`（全文件，7-181）
 - `src/features/Conversation/useAgentContext.ts`（16-44）
 - `src/store/chat/slices/message/initialState.ts`（5-38）
-- `src/store/chat/slices/message/actions/query.ts`（48-309，尤其 105-209, 242-269）
+- `src/store/chat/slices/message/actions/query.ts`（48-372，尤其 302-330 的 `#writeThroughMessageCache`/`representableBucketKey`）
 - `src/store/chat/slices/message/actions/internals.ts`（36-91）
 - `src/store/chat/slices/message/selectors/displayMessage.ts`（29-309）
 - `src/routes/(main)/agent/features/Conversation/ConversationArea.tsx`（66-73, 119-130）
@@ -177,7 +177,7 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 - `src/features/Conversation/store/action.ts`（63-88）
 - `src/features/Conversation/store/slices/data/action.ts`（91-276）
 - `src/features/Conversation/store/slices/data/stabilizeReferences.ts`（1-15）
-- `src/features/Conversation/store/slices/message/action/crud.ts`（167-638）
+- `src/features/Conversation/store/slices/message/action/crud.ts`（204-331 等，客户端铸造 id 见 `packages/utils/src/entityId.ts`）
 - `src/features/Conversation/store/slices/messageState/action.ts`（53-141）
 - `src/features/Conversation/store/slices/tool/action.ts`（13-142）
 - `packages/conversation-flow/src/indexing.ts`（1-119）
@@ -186,9 +186,9 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
 - `packages/conversation-flow/src/transformation/MessageCollector.ts`（1-674）
 - `packages/conversation-flow/src/doctor/diagnose.ts`（1-121+，读取部分）
 - `packages/conversation-flow/src/types/shared.ts`（1-64）
-- `apps/server/src/routers/lambda/topic.ts`（854-858）
-- `packages/database/src/models/topic.ts`（743-765）
-- `apps/server/src/routers/lambda/message.ts`（526-530）
-- `packages/database/src/models/message.ts`（1872-1883）
+- `apps/server/src/routers/lambda/topic.ts`（861）
+- `packages/database/src/models/topic.ts`（1966）
+- `apps/server/src/routers/lambda/message.ts`（526）
+- `packages/database/src/models/message.ts`（1966）
 
 

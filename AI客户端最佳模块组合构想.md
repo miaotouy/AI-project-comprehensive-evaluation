@@ -2,9 +2,9 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`Open WebUI`、`OpenCode`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-11
+> 对比更新日期：2026-08-12
 >
-> 依据：本目录下 Agent 工具、Agent 角色、Chat、LLM 渠道管理、仓库分布、消息渲染器、生成式输出与运行时调查笔记及横向对比
+> 依据：各单项目调查笔记（Agent 工具、Agent 角色、Chat、LLM 渠道管理、仓库分布、消息渲染器、生成式输出与运行时类目）及横向对比
 >
 > 对比方法：先从十六个项目中提炼尚无人完整实现的能力空白，再反推产品形态；组合方案属于设计推导，不表示任一项目已经完整实现
 >
@@ -43,7 +43,7 @@
 
 ### 2. 对象跨轮次持续
 
-**当前空白**：VCPChat 的桌面挂件最接近 G5（独立 ID、文件持久化、模型 create/replace/query），但 widgetFS 桥接方法是宽能力模型，缺少版本和权限档位。OpenCode 的文件工作区闭环最干净，但没有用户可见的对象列表和状态面板。LobeHub 的文档是最强的结构化 G4，但 ArtifactDeploymentActions 是空桩。没有任何项目实现：模型可以列举当前活动对象、读取其运行状态、定向 patch 同一对象。
+**当前空白**：VCPChat 的桌面挂件最接近 G5（独立 ID、文件持久化、模型 create/replace/query），但 widgetFS 桥接方法是宽能力模型，缺少版本和权限档位。OpenCode 的文件工作区闭环最干净，但没有用户可见的对象列表和状态面板。LobeHub 的文档是最强的结构化 G4，但 ArtifactDeploymentActions 是空桩。VCPChat 新增的 Scriptorium 文坊是样本中第一个“按对象身份继续修改”的通道（Agent 以可审阅 PR 提交到既有 VDOC 工程，文脉带版本与审批语义），但合并仍是整份 source 替换 + 人工裁决，没有定向 patch、运行状态读取（只有 GetVisualContext/GetViewportSource 层面的感知）或能力档位。没有任何项目实现：模型可以列举当前活动对象、读取其运行状态、定向 patch 同一对象。
 
 **组合逻辑**：
 
@@ -57,7 +57,7 @@
 
 ### 3. 语义路由与渠道自愈
 
-**当前空白**：调查的十六个项目均记录了成本、延迟和配额数据，但无一项目让这些数据真正参与选路。Hermes 是唯一实现跨 Provider failover 的项目，但路由决策基于失败触发，不是任务语义。VCPToolBox 的语义虚拟模型（自然语言 description 做向量余弦相似度选模）是唯一的语义选路原型，但没有健康感知和成本约束。AIO 的 Key 状态机持久化是最完整的 Key 层健康管理，但不影响模型选择。
+**当前空白**：调查的十六个项目均记录了成本、延迟和配额数据，但无一项目让这些数据真正参与选路。Hermes 是唯一实现跨 Provider failover 的项目，但路由决策基于失败触发，不是任务语义。VCPToolBox 的语义虚拟模型（自然语言 description 做向量余弦相似度选模）是唯一的语义选路原型，但没有健康感知和成本约束。AIO 的 Key 状态机持久化是最完整的 Key 层健康管理，但不影响模型选择（AIO 已落地渠道内的模型执行路由 `resolveModelExecution`——模型→协议/端点选择；仍不跨渠道改选，成本/延迟数据依旧不参与选路）。
 
 **组合逻辑**：
 
@@ -71,7 +71,7 @@
 
 ### 4. 角色即可移植生态
 
-**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF + Character Book），但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 分离。AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载。没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
+**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF + Character Book），但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 分离。AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载（人格选择收敛为 `display.personality` 权威名称 + 单一所有者渲染模块，仍是命名模板而非版本化实体）。没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
 
 **组合逻辑**：
 
@@ -94,7 +94,7 @@
 
 ### 5. 后台认知与记忆演化
 
-**当前空白**：VCPToolBox 的 AgentDream 梦系统是唯一让 Agent 在非对话时段自主整理记忆的实现（从知识库抽种子 → 语义关联碎片 → 生成叙事 → 管理员审批后执行）。Hermes 的 compaction-as-fork（压缩生成新 session_id + lineage_root_id，稳定跨轮转）是唯一保留谱系的压缩实现。但两者均不能在后台任务中感知对象运行状态，也没有预算约束和显式取消语义。
+**当前空白**：VCPToolBox 的 AgentDream 梦系统是唯一让 Agent 在非对话时段自主整理记忆的实现（从知识库抽种子 → 语义关联碎片 → 生成叙事 → 管理员审批后执行）。Hermes 的 compaction-as-fork（压缩生成新 session_id + lineage_root_id，稳定跨轮转）是唯一保留谱系的压缩实现（Hermes 新增 gpt-5.6 直连 OpenAI 路由的 native 服务端压缩，本地 compaction-as-fork 保持为回退，谱系语义不变）。但两者均不能在后台任务中感知对象运行状态，也没有预算约束和显式取消语义。
 
 **组合逻辑**：
 

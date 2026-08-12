@@ -2,9 +2,9 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理，追踪工具注册、注入、执行与回注全链路；未运行构建与工具调用
 >
@@ -16,7 +16,7 @@
 
 OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核心：所有工具统一为 `Tool.Def`（`packages/opencode/src/tool/tool.ts:55-65`），经 `ToolRegistry`（`src/tool/registry.ts`）与 `SessionTools`（`src/session/tools.ts`）包装后交给 AI SDK 的 `streamText`，工具执行与结果回注由 AI SDK 完成，opencode 侧只消费 `fullStream` 事件。工具来源有五类：内置、自定义目录 `{tool,tools}/*.js|ts`、插件 `tool` hook、MCP 工具与 MCP 资源工具；Skill 是通过 `skill` 工具按名加载的文本资源，不是工具注册来源。审批采用 allow/ask/deny 三档规则求值（`src/permission/index.ts`），执行发生在 node 进程内（shell 为普通子进程、无沙箱），结果统一截断落盘（`src/tool/truncate.ts`）。
 
-关键事实（快照 b8bd889）：
+关键事实（快照 1f94d8a）：
 
 - **内置工具 16+1 个**，按模型、provider、client 与实验 flag 过滤（registry.ts:226-244、286-335）。
 - **参数校验在 `Tool.wrap` 统一完成**：Effect Schema `decodeUnknownEffect` 失败转 `InvalidArgumentsError`，其 message 即模型可见的「重写输入」反馈（tool.ts:99-149）。
@@ -165,7 +165,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 - **ToolPart 状态机**（schema/src/v1/session.ts:259-325）：`pending`（input/raw）→ `running`（+title/metadata/time.start）→ `completed`（+output/metadata/time.end）或 `error`（+error/metadata）。
 - **持久化**：processor `ensureToolCall` 创建 pending（processor.ts:216-253）→ `tool-call` 置 running（:331-351）→ `tool-result/tool-error` 置 completed/error（:383-419）；每次更新经 `session.updatePart` 落库并发布 `message.part.updated`。
 - **重放回注**：`MessageV2.toModelMessagesEffect`（message-v2.ts:290-360）把 ToolPart 转 AI SDK `tool-<name>` part（`toolCallId/input/output/errorText/state`），未完成 part 转 `output-error`。
-- **截断**：`truncate.output`（src/tool/truncate.ts:85-141），默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）；超限写全量到 `<xdgData>/opencode/tool-output/tool_<id>`（truncation-dir.ts），返回截断预览 + 提示；提示分档：agent 有 `task` 权限时建议用 Task 工具委派，否则建议 Grep/Read（:129-131）。保留 7 天，每小时清理（:13、143-148）。
+- **截断**：`truncate.output`（src/tool/truncate.ts:85-141），默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）；超限写全量到 `<xdgData>/opencode/tool-output/tool_<id>`（truncation-dir.ts），返回截断预览 + 提示；提示分档：agent 有 `task` 权限时建议用 Task 工具委派，否则建议 Grep/Read（:129-131）。保留 7 天，每小时清理按**文件 mtime** 判定是否过期（:12、:53-63、:143-145），不再解析文件名中的时间戳（d468201）。
 - **附件**：工具可返回 `attachments`（tool.ts:48-53），tools.ts:112-120 补 id 后随 tool result 持久化；processor 对超大图片附件剔除并计数（processor.ts:390-411）；重放经 `toModelOutput`（message-v2.ts:161-193）转媒体 part 或独立 user 消息。
 - **UI 状态**：`message.part.updated` 驱动前端 part 渲染（详见消息渲染器笔记）；pending/running 显示 shimmer 与进度。
 

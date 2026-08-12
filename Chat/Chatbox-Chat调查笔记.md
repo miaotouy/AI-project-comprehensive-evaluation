@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/renderer/routes/index.tsx`、`src/renderer/routes/session/$sessionId.tsx`、`src/renderer/components/session/*`、`src/renderer/stores/session/*`、`src/renderer/stores/chatStore.ts`、`src/renderer/stores/uiStore.ts`、`src/renderer/storage/SessionMetaStorage.ts`、`src/shared/session/message-forks.ts`、`src/shared/types.ts` 等），未凭空推断；不确定处标注"未核实"。
 >
@@ -28,7 +28,7 @@ Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模�
 
 ## 产品表面与系统边界
 
-Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊天工作台固定为 `Header → MessageList → InputBox` 三段式：消息列表是 react-virtuoso 虚拟列表（缓存每会话滚动快照），移动端一级导航是左侧滑出的 `SwipeableDrawer`（没有底部 Tab Bar），桌面端侧栏常驻挤压布局。数据完全 local-first：完整 Session 对象与消息存于通用 storage（IndexedDB），侧栏元信息存于独立的 IndexedDB meta store（游标分页、置顶优先），react-query 缓存是 UI 侧视图，两者靠每会话 `UpdateQueue` 串行合并保持最终一致。
+Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊天工作台固定为 `Header → MessageList → InputBox` 三段式：消息列表是 react-virtuoso 虚拟列表（缓存每会话滚动快照），移动端一级导航是左侧滑出的 `SwipeableDrawer`（没有底部 Tab Bar），桌面端侧栏常驻挤压布局。侧栏会话项带"生成中/回复完成未读"指示（状态存于内存 zustand store `sessionActivityStore`/`generation-runtime`，不落盘、不进入 `SessionMetaRecord`）。数据完全 local-first：完整 Session 对象与消息存于通用 storage（IndexedDB），侧栏元信息存于独立的 IndexedDB meta store（游标分页、置顶优先），react-query 缓存是 UI 侧视图，两者靠每会话 `UpdateQueue` 串行合并保持最终一致。
 
 外部系统边界：模型请求由 `packages/model-calls` 的 API 适配层组装并发出，provider 侧 token 截断与最终 HTTP payload 字段不在本次概览范围；Agent 角色/工具、知识库等能力分属 Agent 专项与渠道管理类目；消息渲染（Markdown、结构化 part、虚拟列表）由独立的消息渲染器笔记承接。
 
@@ -70,16 +70,16 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 
 ## 关键能力与已确认边界
 
-1. **分支（fork）**：重新生成/在新分支重试产生消息级平行分支（`messageForksHash`），`ForkNav` 在同一消息位置切换内容，不产生新侧栏条目；fork 与 thread 可叠加共存，`cleanupEmptyForkBranches` 在 root 层和 thread 层各有一套相似但不完全相同的清理逻辑。
+1. **分支（fork）**：重新生成/在新分支重试产生消息级平行分支（`messageForksHash`），`ForkNav` 在同一消息位置切换内容，替代回复可折叠进 `ForkGroup` 分支组；fork 与 thread 可叠加共存，`cleanupEmptyForkBranches` 在 root/thread 两分支共享同一实现（`chatStore.ts:881`）。
 2. **搜索**：`SearchDialog` 提供"当前会话/全部会话"两个入口，按消息模型扫描（覆盖 thread 历史与文本/reasoning/tool-call 状态），点击结果切换会话并 `scrollToMessage` 定位；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30，最多 50 条命中）。
-3. **停止**：生成中消息的停止按钮调用其 `cancel()` 并以 `generating:false` 乐观写回；流结束/出错/暂停各补一次无条件落盘，保证最终态一定持久化。
-4. **压缩**：自动压缩在消息上打 `isSummary` 标记，由 `SummaryMessage` 专用组件渲染，提供"删除摘要、恢复原文参与上下文计算"的操作；触发实现位于 `context-management` 包（未核实细节）。
+3. **停止**：生成中消息的停止按钮调用其 `cancel()` 并以 `generating:false` 乐观写回；流结束/出错/暂停各补一次无条件落盘；停止时仍在运行的 tool-call 会被收口为 `error` 态并落盘，不再悬挂 `call` 状态。
+4. **压缩**：自动压缩在消息上打 `isSummary` 标记，由 `SummaryMessage` 专用组件渲染，提供"删除摘要、恢复原文参与上下文计算"的操作；压缩以 `CompactionPoint`（boundary+summary 消息对）落盘，在 fork 分支切换与复制会话时做完整性重映射（`shared/context/compaction-points.ts`）。
 5. **排序与归档边界**：拖拽排序仅在同一置顶分组内生效（`areSessionsInSamePinGroup` 只看 `starred`）；恢复归档会话不重置 `sortOrder`，会回到归档前位置；归档只置 `hidden`+`archivedAt`，不删除数据。
-6. **并发落盘**：每会话一个 `UpdateQueue` 串行合并写入避免并发覆盖；批量归档刻意逐个走 `updateSession` 不做性能优化（代码注释明确承认）；`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25` 表明 chat 与 agent 在实现上无清晰边界。
+6. **并发落盘**：每会话一个 `UpdateQueue` 串行合并写入避免并发覆盖；批量归档刻意逐个走 `updateSession` 不做性能优化（代码注释明确承认）；`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25` 表明 chat 与 agent 在实现上无清晰边界（该确认点可按会话或全局关闭，`pauseOnToolCallLimit`）。
 
 ## 未验证事项
 
-- `context-management` 包内摘要产生的具体触发逻辑未读取（仅确认调用点）。
+- `context-management` 包的摘要触发阈值细节未完全展开（已核实 `compaction-boundary`/`compaction-commit`/`compaction-points` 主结构，见会话与消息管理笔记 1.4）。
 - `localStorage.removeItem('new-chat')`（`routes/index.tsx:336`）未找到对应写入点，用途不明。
 - provider 侧 token 截断策略与最终 HTTP JSON payload 字段未逐一核实。
 - IndexedDB meta store 注释提到的"捕获 VersionError 后重试"兜底未见实现。

@@ -2,9 +2,9 @@
 
 > 调查对象：`../../VCPToolBox`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
 > 调查方式：静态代码审查。用 grep/glob 检索 artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/preview/markdown/chat/stream 等关键词，通读 server.js、modules/chatCompletionHandler.js、modules/handlers/streamHandler.js 与 nonStreamHandler.js、modules/vcpLoop/toolCallParser.js 与 toolExecutor.js、vcpInfoHandler.js、Plugin.js、modules/toolCallRecordStore.js、modules/finalContextStore.js、Plugin/OneRing/OneRingDB.js、Plugin/RAGDiaryPlugin、Plugin/VCPForum/VCPForum.js、Plugin/GPTImageGen/GPTImageGen.js、Plugin/MediaRenderer、Plugin/AICodeWorker、routes/forumApi.js、routes/protocolBridge.js；对照 docs/Markdown_Output_Guideline.md、docs/FRONTEND_COMPONENTS.md、docs/PLUGIN_ECOSYSTEM.md 等文档与源码交叉核对
 >
@@ -87,7 +87,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 - **HTML/SVG/JS 执行**：`Plugin/MediaRenderer` —— AI 编写的 HTML/SVG 在服务端托管 Chrome 的独立浏览器上下文渲染为 PNG/JPG/WebP/GIF/MP4/WebM；AI 编写的 JS 音乐合成代码在独立 Node 子进程运行输出 WAV。安全约束：HTML 的 JS 默认关闭（动画/内置库模式才开启）、资源由 Node 预取改写为 Data URI、页面运行时网络请求被阻断、云元数据地址禁止、执行超时与进程树回收、`GenerateAudio` 需要 6 位管理员验证码（`Plugin/MediaRenderer/README.md:321-342`）。`modules/browserRuntimeManager.js:516` 管理 Chrome 进程生命周期。
 - **语言解释器/CLI**：AICodeWorker 调度本机 opencode CLI（analyze/patch/write 三模式，jobId 异步任务，`Plugin/AICodeWorker/README.md:112-149`）；PowerShellExecutor（`requiresAdmin:true`，`Plugin/PowerShellExecutor/plugin-manifest.json`）、LinuxShellExecutor、SSHManagerService 提供系统命令执行。
 - **完整项目/IDE 工作区**：本次未找到（CodeSearcher 是编译好的搜索二进制，非项目工作区）。
-- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:315`、`Plugin.js:1551`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
+- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:335`、`Plugin.js:1577`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -108,7 +108,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **执行位置**：本地主进程（direct/hybridservice 插件 in-process require，`Plugin.js:1081`）、stdio 子进程（spawn，`shell:true`，`Plugin.js:315`、`Plugin.js:1551`）、托管 Chrome（`modules/browserRuntimeManager.js`）、远端节点（WebSocket 分布式，`WebSocketServer.js`，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
+- **执行位置**：本地主进程（direct/hybridservice 插件 in-process require，`Plugin.js:1107`）、stdio 子进程（spawn，`shell:true`，`Plugin.js:335`、`Plugin.js:1577`）、托管 Chrome（`modules/browserRuntimeManager.js`）、远端节点（WebSocket 分布式，`WebSocketServer.js`，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
 - **能力授予**：按插件权限边界而非统一能力桥：`requiresAdmin` 插件需验证码（PowerShellExecutor、MediaRenderer GenerateAudio）；AICodeWorker 靠 `ALLOWED_PROJECT_ROOTS` 白名单 + `MAX_CONCURRENT_JOBS` 硬闸门（`Plugin/AICodeWorker/README.md:72-83`）；图床路径受 `/pw=<key>/` 保护（`server.js:859-868` 白名单放行）。网络能力在普通插件内不受限（插件自行 axios/fetch，如 `Plugin/VSearch`），MediaRenderer 渲染环境例外地阻断网络。
 - **宿主动作**：shell 执行、文件读写、定时任务（`timely_contact` → `VCPTimedContacts/` 任务文件，`toolExecutor.js:333-341`、`server.js:997-1046`）、WebSocket 广播均有对应实现；工具审批（Human-in-the-loop）由 `modules/toolApprovalManager.js` 按配置规则执行。
 
@@ -132,12 +132,12 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 - **请求生命周期**：`activeRequests` Map 登记请求、30 分钟超时自动清理（`server.js:142`、`server.js:353-365`）；关闭时优雅排空（DRAINING 状态拒绝新请求、中断活动请求，`server.js:144-350`）。
 - **流资源**：5 秒 SSE 心跳、90 秒 chunk 空闲判定、`[DONE]` 收尾（`streamHandler.js:241-282`）；上游 body 在中止/完成时 destroy（`streamHandler.js:289`）。
-- **进程资源**：插件子进程带超时与 Windows 进程树回收（`Plugin.js:266-315`）；MediaRenderer 每步独立浏览器上下文、页面即用即关、逐帧临时目录清理（`Plugin/MediaRenderer/README.md:326-334`）；AICodeWorker 强制 `MAX_CONCURRENT_JOBS=1`（`Plugin/AICodeWorker/README.md:81-83`）。
+- **进程资源**：插件子进程带超时与跨平台进程树回收（Windows `taskkill /T /F`、Unix 进程组 SIGKILL，`Plugin.js:270-310`，非 Windows 平台 spawn 带 `detached`）；MediaRenderer 每步独立浏览器上下文、页面即用即关、逐帧临时目录清理（`Plugin/MediaRenderer/README.md:326-334`）；AICodeWorker 强制 `MAX_CONCURRENT_JOBS=1`（`Plugin/AICodeWorker/README.md:81-83`）。
 - **缓存/限额**：可选响应重放缓存（`chatCompletionHandler.js:56-124`，默认关）；工具调用记录保留期清理；OneRing 条数修剪；finalContext 内存滑窗 5 组。多对象/多画布限额概念本次未找到（无对象概念）。
 
 ## 11. 测试、已确认边界与未验证事项
 
-**测试覆盖**（`tests/`，node:test，共 7 个文件）：动态工具注册表、OpenHerPersona 预处理器、占位符探索、结果去重、图床路径安全、分布式取消。根 `package.json` 的 `npm test` 是占位脚本（`package.json:6`）。未发现针对流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析的自动化测试。
+**测试覆盖**（`tests/`，node:test，共 11 个测试脚本，另含 2 个 HTML 样本）：动态工具注册表、OpenHerPersona 预处理器、占位符探索、结果去重、图床路径安全、分布式取消，以及 ChromeBridge 运行时核心/页面句柄/页面图片/内容可编辑回复四组测试（`tests/chromeBridge/{runtime-core,page-runtime-handle,page-runtime-image,contenteditable-reply-editor}-test.js`）。根 `package.json` 的 `npm test` 是占位脚本（`package.json:6`）。未发现针对流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析的自动化测试。
 
 **本次明确未验证/未覆盖**：
 
@@ -153,7 +153,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 - `modules/handlers/streamHandler.js:143` 流式直通与累积；`modules/handlers/streamHandler.js:441` 工具循环；`modules/handlers/nonStreamHandler.js:380` 非流式循环
 - `modules/vcpLoop/toolCallParser.js:74` `parse()`；`modules/vcpLoop/toolExecutor.js:192` `execute()`
 - `vcpInfoHandler.js:117` `streamVcpInfo`；`WebSocketServer.js:583` `broadcast`
-- `Plugin.js:315`/`Plugin.js:1551` stdio 插件 spawn；`Plugin.js:1081` direct 插件
+- `Plugin.js:335`/`Plugin.js:1577` stdio 插件 spawn；`Plugin.js:1107` direct 插件
 - `modules/toolCallRecordStore.js`、`modules/finalContextStore.js:288`、`Plugin/OneRing/OneRingDB.js:23`
 - `Plugin/VCPForum/VCPForum.js:247`、`routes/forumApi.js`、`Plugin/GPTImageGen/GPTImageGen.js:1070`、`Plugin/MediaRenderer/README.md:321`、`Plugin/AICodeWorker/README.md:53`、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135`
 - `docs/Markdown_Output_Guideline.md`、`docs/FRONTEND_COMPONENTS.md:443`、`OpenWebUISub/`、`SillyTavernSub/`

@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-07-29
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`7450ab2dde5eacab4a8721f8680006ba8b99438d`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -21,7 +21,7 @@ Chatbox 以 `Message.contentParts` 组织消息渲染，Markdown renderer 只处
 3. 流式期间每个可见 chunk 更新 React Query session cache；每 2 秒或遇到 tool call 时落盘，结束时最终落盘。
 4. session 路由把当前 session 交给 `MessageList`。
 5. `MessageList` 合并历史 thread 和当前 thread，用 `react-virtuoso` 虚拟化，并把最后一轮 user/assistant 组合成一个列表项。
-6. 普通消息进入 `Message`，再按 part 类型分派给 Markdown、思考时间线、工具 UI、图片、提示卡等专用组件。
+6. 普通消息进入 `Message`，再按 part 类型分派给 Markdown、思考时间线、工具 UI、图片、提示卡等专用组件；有替代回复的消息在下方挂 `ForkGroup` 折叠分支组（`MessageList.tsx:439-451`）。
 7. 文本 part 才进入 `Markdown`；Markdown 内再分派普通文本、代码、LaTeX、Mermaid、SVG 和图片。
 
 总体链路：
@@ -33,7 +33,7 @@ model.chatStream()
   -> React Query session cache / periodic storage persist
   -> /session/$sessionId
   -> MessageList (Virtuoso)
-  -> ForkMarkerMessage | SummaryMessage | Message
+  -> ForkMarkerMessage | SummaryMessage | Message (+ ForkGroup 替代回复折叠组)
   -> message timeline layout
   -> Markdown | ReasoningContentUI | StepTimelineUI | ToolCallPartUI
      | PictureGallery | MessageErrTips | MessageStatuses
@@ -50,10 +50,10 @@ model.chatStream()
 已确认的当前问题：
 
 1. **流式正文没有 UI 级节流。** 每个可见 text delta 都更新 React Query cache，并重新解析当前累计 Markdown；长回复或高频小 chunk 会使 CPU 成本随正文增长。
-2. **“自动预览 Artifact”设置已经失效。** `autoPreviewArtifacts`、`previewArtifact`、`needArtifact` 和 `MessageArtifact` import 仍留在 `Message.tsx`，但 JSX 不再渲染 `MessageArtifact`。该功能在 `102fa1bd` 中移除内联 Artifact 后没有同步清理设置和死代码。用户仍可从 HTML 代码块按钮手动预览。
-3. **Markdown 自动化测试偏窄。** 当前 `Markdown.test.tsx` 主要覆盖图片查看器，缺少 GFM、LaTeX、代码块、Mermaid fallback 和流式不完整语法的组合测试。
+2. **“自动预览 Artifact”设置已完全无消费方。** `Message.tsx` 中已无 `autoPreviewArtifacts`/`previewArtifact`/`needArtifact` 状态与 `MessageArtifact` import，但设置项仍保留在 schema（`shared/types/settings.ts:547`）与设置页开关（`routes/settings/chat.tsx:455`，默认 false）里，全仓库没有任何读取该设置的消费方——设置项本身已无消费方。用户仍可从 HTML 代码块按钮手动预览。
+3. **Markdown 自动化测试偏窄。** 已有 sandbox 文件链接与 Mermaid 真实渲染（`Mermaid.real.test.tsx`）用例，但 GFM、LaTeX、代码块、Mermaid fallback 与流式不完整语法的组合测试仍缺。
 
-另有一项边界事实：**HTML 导出的会话名和 thread 名未转义。** `format-chat.tsx` 直接把 `sessionName`、`thread.name` 插入导出的 HTML；标题包含 HTML 时会原样进入导出文件。
+另有一项边界事实：**HTML 导出的会话名和 thread 名未转义。** `format-chat.tsx` 直接把 `sessionName`、`thread.name` 插入导出的 HTML；标题包含 HTML 时会原样进入导出文件（`format-chat.tsx:39,112,125`）。
 
 ## 页面入口与状态来源
 
@@ -199,6 +199,8 @@ tool-call 或距上次落盘 >= 2 秒
 
 tool call 会立即落盘，因为它可能长时间等待工具执行或用户审批。正常结束、停止、错误和 paused 状态都会做最终持久化，并清除 `generating` 与 cancel handler。
 
+流式收口：停止生成时仍在运行（`state: 'call'`）的 tool-call part 会被收口为 `error` 态并记录 duration（`stream-chunk-processor.ts` 的 finalize 逻辑，`orchestration.ts:774-801` 用 abort 与 chunk 读取做 race，停止后可立即 finalize 消息而无需等待流排空）；大结果转存 blob 时保留 part 的 provider metadata 等原字段（`stream-chunk-processor.ts`）。
+
 流式消息直接替换 session query cache 中的对应消息，没有使用独立 overlay。路径较短，但整个 `MessageList` 会收到新的 session，并在每个可见 chunk 上重算当前消息列表和最后一轮分组。
 
 ## 列表层
@@ -232,11 +234,11 @@ tool call 会立即落盘，因为它可能长时间等待工具执行或用户�
 [last user, next assistant]
 ```
 
-该 group 可以在新消息阶段设置 `minHeight = viewport height`，使最新问题从视口上方开始、回答在同一列表项内增长。其余消息一条对应一个 Virtuoso item。
+该 group 可以在新消息阶段设置 `minHeight = viewport height × 0.85`（`MessageList.tsx:505-506`），使最新问题从视口上方开始、回答在同一列表项内增长。其余消息一条对应一个 Virtuoso item。分组与滚动定位的 item 索引计算已从 `MessageList` 提取为独立的 `buildMessageRenderItems()`（`components/chat/message-render-items.ts:49-77`），`scrollToMessage` 等消费方必须经它定位 item，避免流式期间滚到错误位置。
 
 ### 特殊消息分流
 
-每条 item 进入 `renderMessageBlock()` 后先分流：
+每条 item 进入 `renderMessageBlock()`（`MessageList.tsx:396-456`）后先分流：
 
 ```text
 isForkMarker -> ForkMarkerMessage
@@ -246,17 +248,24 @@ otherwise    -> Message
 
 每条消息外还有独立 `ErrorBoundary`，单条消息渲染失败不会击穿整个会话页面。
 
+### 替代回复折叠分支组（ForkGroup）
+
+当 `messageForksHash[msg.id]` 有多于一条分支时，分叉点消息下方渲染 `ForkGroup`（`MessageList.tsx:439-451`，`components/chat/ForkGroup.tsx`）——把"重新生成/继续回复"产生的替代回复收进一个可折叠的分支组，组内按最新优先排列、活动分支（当前主列表正在渲染的那条）显示在最后，组内也可独立停止/切换回复。该组只出现在消息位置内，不产生新侧栏条目（数据语义见会话与消息管理笔记 1.3）。
+
 ### 滚动与导航
 
 列表自己实现了：
 
-- session 滚动快照恢复。
-- 最多 100 个 session 的 LRU-like scroll cache。
+- session 滚动快照恢复（最多 100 个 session 的 LRU-like scroll cache，`MessageList.tsx:61-70`）。
 - 顶部、底部、上一条 user、下一条 user 导航。
 - 桌面消息 minimap。
 - 流式输出跟随。
 
-`createSmoothFollowOutputController()` 不使用 Virtuoso 自带 `followOutput`。它在用户位于底部时监听总高度变化，并按 animation frame 合并滚动请求；用户主动向上滚动后暂停跟随。移动端使用 `auto`，桌面通常使用 `smooth`，同时尊重 reduced motion。
+`createSmoothFollowOutputController()` 不使用 Virtuoso 自带 `followOutput`。它在用户位于底部时监听总高度变化，并按 animation frame 合并滚动请求；用户主动向上滚动后暂停跟随（`pausedByUser`），滚回底部容差（`AT_BOTTOM_TOLERANCE`）内时自动恢复（`smooth-follow-output.ts:28-73`）；布局收缩把暂停中的视口推到"底部"不会误恢复。移动端使用 `auto`，桌面通常使用 `smooth`，同时尊重 reduced motion。
+
+### Minimap 锚点
+
+`MessageList` 只为 minimap 生成**短预览锚点**：`getMessagePreviewText()`（`message-navigation-utils.ts:22`）把每条 user 消息折叠成最多 `MINIMAP_PREVIEW_MAX_LENGTH` 字符的文本前缀（图片占位 `[image]`），并对预览相同的连续流式更新复用上一份锚点数组（`areMinimapAnchorsEqual`，稳定 identity，避免长回复流式期间 minimap 全量重算）；小屏完全跳过锚点计算。`MessageMinimapRail` 自身对大量锚点只渲染视口窗口加 overscan（`MessageMinimapRail.tsx:30-37` 的 `getMinimapRenderRange`）。
 
 ## 单条消息骨架
 
@@ -274,6 +283,8 @@ otherwise    -> Message
 - 文件、链接、图片和 OCR。
 - token、word、model、耗时、时间戳元信息。
 - 复制、编辑、重试、续写、引用、删除、举报。
+
+回复仍在生成时也可以编辑/删除消息：操作可用性由 `message-action-state.ts` 计算（`getMessageActionVisibilityClass`/`shouldShowConcurrentReplyStop`），并发生成多条回复时仅 ForkGroup 内的替代回复显示停止按钮，主列表生成中的最新回复从输入框停止（`MessageList.tsx:431-433` 传 `generatingReplyCount`/`generationLocked`）。删除生成中的消息经 `removeMessage` 做 fork 分支与压缩点清理（见会话与消息管理笔记）。
 
 `backgroundTask` 是最高优先级短路：这类消息只渲染为居中的后台任务通知，不进入普通消息骨架。
 
@@ -315,11 +326,11 @@ Reasoning 内容本身用普通文本展示，不再递归走 Markdown；详情�
 
 - `web_search` -> 搜索查询、结果卡和错误状态。
 - `parse_link` -> 链接解析 UI。
-- `create_download` -> 文件/图片/HTML artifact 下载和预览。
-- `user_exec` -> 命令、结果与拒绝状态。
+- `create_download` -> 文件/图片/HTML artifact 下载和预览（`DownloadArtifactsUI`，`ToolCallPartUI.tsx:925`；下载卡内的沙箱文件链接经 `SandboxFileLink` 渲染，可对模型幻觉出来的 sandbox 路径做重映射救援，见生成式输出笔记）。
+- `user_exec` -> 命令、结果与拒绝状态（命令卡可展开读取结构化输出，取消的命令显示 "Stopped" 而非失败）。
 - 其他工具 -> 通用 pill + args/result/error details。
 
-paused tool call 进入 `StepTimelineUI`，可显示继续、停止、批准或拒绝操作。工具 payload 只作为文本放进 Mantine `Code`，不会当 HTML 执行；通用 preview 有 8000 字符上限，错误 preview 有 1200 字符上限。超过 30000 字符的完整 tool result 在流处理阶段转存 blob，只在消息里保留 1500 字符预览。
+paused tool call 进入 `StepTimelineUI`，可显示继续、停止、批准或拒绝操作；`tool_call_limit` 暂停的继续按钮为拆分按钮（继续 / 继续并本会话不再暂停确认），`pauseOnToolCallLimit` 可会话级或全局关闭。工具 payload 只作为文本放进 Mantine `Code`，不会当 HTML 执行；通用 preview 有 8000 字符上限，错误 preview 有 1200 字符上限。超过 30000 字符的完整 tool result 在流处理阶段转存 blob，只在消息里保留 1500 字符预览。
 
 ### 图片和附件
 
@@ -415,7 +426,7 @@ Shiki 输出通过 `dangerouslySetInnerHTML` 注入，但来源是 Shiki tokeniz
 
 ### Mermaid 与 SVG
 
-未闭合的流式 Mermaid fence 不会尝试增量渲染，只显示 loading；生成结束后动态 import Mermaid 并生成 SVG。
+未闭合的流式 Mermaid fence 不会尝试增量渲染，只显示 loading；生成结束后动态 import Mermaid 并生成 SVG。Mermaid 初始化带 `suppressErrorRendering: true`，渲染失败只在本组件内转成错误文案（`Mermaid.tsx:40-57`），并打一条 `MERMAID_RENDER_FAILED` 诊断埋点（`jk-events.ts`），不会让整条消息或页面崩溃。
 
 Mermaid SVG 通过 `dangerouslySetInnerHTML` 注入主页面 DOM。代码依赖 Mermaid 内部 DOMPurify/default strict security level，并没有再执行应用侧 sanitize。
 
@@ -525,32 +536,36 @@ Git 历史显示 `102fa1bd` 在重做代码块时删除了：
 ### 主要成本
 
 1. 每个可见 text delta 都调用 `updateStreamingCache()`，没有 requestAnimationFrame、固定频率或字符批次合并。
-2. session 引用变化会使 `MessageList` 重新执行 `getAllMessageList()`、last summary 搜索、last user 搜索、renderItems 构造和 minimap 文本提取。
+2. session 引用变化会使 `MessageList` 重新执行消息拼接、last summary 搜索、last user 搜索、renderItems 构造和 minimap 锚点计算（锚点侧已优化为短预览 + 稳定 identity，见"Minimap 锚点"）。
 3. 当前累计 text part 每次变化都会重新执行 LaTeX 预处理、ReactMarkdown parse 和 HAST transform。
 4. 流式 fenced code 会持续产生不同的 Shiki cache key，最多保留最近 50 份累计代码。
-5. `needArtifact` 对每条 assistant message 执行全文扫描但结果未使用。
+5. `needArtifact` 对每条 assistant message 执行全文扫描但结果未使用；该状态已移除（见"已确认的当前问题"第 2 条）。
 6. Virtuoso 上下 2000 px overscan 对包含 Mermaid、图片和工具详情的消息可能挂载较重。
 
 ## 测试现状
 
 与消息渲染直接相关的现有自动化包括：
 
-- `Markdown.test.tsx`：Markdown 图片、linked image、viewer grouping。
+- `Markdown.test.tsx`：Markdown 图片、linked image、viewer grouping、sandbox 文件链接卡片。
 - `Markdown.ssr.test.tsx`：SSR/export 中的图片。
 - `StreamingTextFade.test.tsx`：流式 suffix、Markdown HAST 包装、blocked subtree。
-- `Mermaid.test.tsx`：Mermaid 状态。
+- `Mermaid.test.tsx` / `Mermaid.real.test.tsx`：Mermaid 状态机与真实渲染（含失败路径）。
 - `message-timeline.test.ts`：part 分组和兼容顺序。
-- `smooth-follow-output.test.ts`：滚动跟随控制器。
+- `smooth-follow-output.test.ts`：滚动跟随控制器（用户中断/容差恢复用例）。
+- `Message.test.tsx`：part 分派、操作栏可见性与 token 显示。
+- `MessageList.test.tsx`：最后一轮 group、ForkGroup 装配、minimap 锚点 identity 与流式组合。
+- `ForkGroup.test.tsx`：替代回复折叠分支组。
+- `message-render-items.test.ts`：Virtuoso item 分组与索引定位。
+- `message-navigation-utils.test.ts`：minimap 短预览提取与锚点比较。
+- `ToolCallPartUI.command.test.tsx` / `ToolCallPartUI.image-recovery.test.tsx`：命令时间线与图片任务恢复。
 - `stream-chunk-processor.test.ts`：流式 chunk 到 part 的大量状态转换。
 - ToolCall、Reasoning、MessageList、Summary、Error 等 Storybook real-component stories。
 
 明显缺口：
 
-- 没有 `Message.tsx` 的集成级 part 分派测试。
-- 没有 `MessageList` 最后一轮 group 与流式更新组合测试。
 - 没有 Markdown URL scheme / raw HTML / XSS 回归测试。
 - 没有 GFM + LaTeX + streaming + incomplete fence 的组合测试。
-- 没有 `autoPreviewArtifacts` 设置行为测试，因此死设置没有被发现。
+- 没有 `autoPreviewArtifacts` 设置行为测试（该设置已无消费方，见上文）。
 - 没有 HTML export 标题转义测试。
 
 本次未运行测试。仓库没有 `node_modules`，本机 Corepack 在解析 pnpm 签名时失败；调查结论来自当前代码和 Git 历史的只读核对。
@@ -567,6 +582,9 @@ Git 历史显示 `102fa1bd` 在重做代码块时删除了：
 | 消息 schema | `src/shared/types/session.ts` |
 | 旧消息迁移 / 文本提取 | `src/shared/utils/message.ts` |
 | 消息列表 | `src/renderer/components/chat/MessageList.tsx` |
+| 消息列表 item 分组 | `src/renderer/components/chat/message-render-items.ts` |
+| 替代回复折叠分支组 | `src/renderer/components/chat/ForkGroup.tsx` |
+| minimap 锚点与导航 | `src/renderer/components/chat/MessageMinimapRail.tsx`、`message-navigation-utils.ts` |
 | 单条消息 | `src/renderer/components/chat/Message.tsx` |
 | timeline 分组 | `src/renderer/components/chat/message-timeline.ts` |
 | Markdown | `src/renderer/components/Markdown.tsx` |

@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\NextChat`（重点 `app/constant.ts`、`app/client/`、`app/store/access.ts`、`app/config/server.ts`、`app/api/`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`706a18b95b714ab29b2a4842d3b9ff4f887935d5`（分支：`main`）
+> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 NextChat 仓库
 >

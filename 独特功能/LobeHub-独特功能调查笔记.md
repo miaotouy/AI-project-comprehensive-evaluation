@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；未修改仓库源码
 >
@@ -26,13 +26,13 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
 | Agent Groups | `入口确认`/`归并已有类目` | 群组对象与模板已被 Agent 角色笔记覆盖；群聊会话表面在会话类目边界内，本次只确认路由与成员编辑面 |
-| Project | `入口确认` | 无独立 project 表；“按项目组织”实际是按工作目录（workingDirectory）对 topic 分组，异构 Agent（Claude Code/Codex）默认启用 |
+| Project | `主链确认`（静态证据） | 上快照无独立 project 表、仅按工作目录分组；本快照已落地 `projects` 实体（表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent），与按工作目录的话题分组并存 |
 
-README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。
+README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。**Goals（目标任务闭环）** 已具备可走通的静态主链（见能力五），Project 从“轻量组织概念”升级为独立实体。
 
 ## 系统边界
 
-- 本笔记只读当前快照 `5952f4c3`；SPA 路由集中在 `src/spa/router/desktopRouter.shared.tsx`，业务在 `src/features/`。
+- 本笔记当前读 HEAD `3b57a07e`；SPA 路由集中在 `src/spa/router/desktopRouter.shared.tsx`，业务在 `src/features/`。
 - 后端为 `apps/server`（Hono + TRPC + Drizzle/PostgreSQL），异步长流程走 Upstash Workflows/QStash（`apps/server/src/workflows-hono/`），本地/桌面环境回退到进程内调度。
 - 与既有笔记的分工：Agent 配置对象（[Agent角色笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)）、工具注入/审批/执行（[Agent工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)）、文档/Portal（[生成式输出与运行时笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)）。
 
@@ -75,6 +75,12 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 **独特性判断**：任务对象（树、依赖、配额、验收）与 Agent 运行（topic、heartbeat、汇报）绑成一个生命周期，且由 Agent 通过 `lh task` 工具自我管理——不是单纯“定时发消息”，也不是外部 cron 薄壳。与 VCPToolBox TaskAssistant（interval/cron/manual）、Hermes cron（会话级定时消息）的差异：LobeHub 以任务为持久化事实对象，Agent 是执行者与自我维护者。
 
+**任务调度主链的补充面**（`5952f4c3..HEAD`）：调度主链结论不变，以下为补充实现：
+
+- Home 新增“scheduled-tasks 块”，任务模式以任务为形状呈现（`919195508`）；任务详情与列表状态同步修复（`8c62e226e`），cron 默认开启（`5af4f096d`）。
+- “移除任务交付验收”操作（`78f132768`）；creator 任务回调为持久化投递（`975e21cf8`，`workflows/task/handlers/onCreatorComplete.ts`），回调投递串行化防重放（`51e24a0e9`）。
+- 任务回调卡并入 goal 进度显示（`c0c56d6b0`）；scheduled-run 的乐观写回不被 watch 覆盖（`4afc5d4b0`）；任务校验 UI 重构（`TaskVerifyConfig`、RunVerifyTag 等）。
+
 ### 能力二：Personal Memory——白盒个人记忆（`主链确认`，静态证据）
 
 **用户目标**：把分散会话中关于用户的事实（身份、偏好、经历、活动、情境）持续结构化沉淀，Agent 在对话中可检索、可写、可改、可删，且用户能逐条查看编辑（README “White-Box Memory”）。
@@ -101,7 +107,7 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 **Brief 主链**：任务运行完成 → `TaskLifecycleService.onTopicComplete`（`apps/server/src/services/taskLifecycle/index.ts:108`）→ 默认 auto 模式 `synthesizeTopicBrief`（`index.ts:697`；`synthesize.ts` 说明“verdict 提前判定”，legacy agent 模式为逃生舱）程序化合成 `briefs` 行（`packages/database/src/schemas/task.ts:281`：type decision/result/insight/error、priority urgent/normal/info、artifacts 程序化收集、actions、resolvedAction/readAt 状态）→ 用户界面：`HomeInbox`（`src/features/HomeInbox/index.tsx`）分“Needs you”（阻塞 Agent 的 decision/fix，error 沉底）与“News”（insight/result 报告）两栏，brief 按用户且按工作区隔离；`DailyBrief` 卡片带任务引用与跳转（`InboxBriefCard.tsx:65` 导航到任务详情）；“未解决 urgent brief”反过来挂起后续自动化 tick（见能力一）。brief 可 resolve/标记已读（`useBriefStore`）。
 
-**Work 主链**：`works` + `work_versions` 表（`packages/database/src/schemas/work.ts:26,144`）——每个版本绑定 toolCallId/messageId/agentId/topicId/threadId/rootOperationId（来源谱系），currentVersionId 指向最新版本；类型覆盖 document/task/external（github/linear 品牌图标与 URL 白名单，`src/features/Work/descriptors.tsx:34-73`）/filePreview；列表/摘要卡 + `WorkGallery`（`src/routes/(main)/resource/(home)/index.tsx:25` `?works=...` 入口）。Work 是“Agent 交付物”的统一事实对象，与工具注册的 `work?: PluginApiWorkConfig`（Agent 工具笔记 §1.3）衔接。
+**Work 主链**：`works` + `work_versions` 表（`packages/database/src/schemas/work.ts:26,144`）——每个版本绑定 toolCallId/messageId/agentId/topicId/threadId/rootOperationId（来源谱系），currentVersionId 指向最新版本；类型覆盖 document/task/external（github/linear 品牌图标与 URL 白名单，`src/features/Work/descriptors.tsx:34-73`）/filePreview；列表/摘要卡 + `WorkGallery`。WorkGallery 为独立 feature（`098beec2b` 产品画廊重设计）——`src/features/WorkGallery/`（`index.tsx`/`WorkPreviewCard.tsx`/`WorkPreview.tsx`/`useOpenWork.ts`），入口经 `/resource/works` 路径段 + `?works=<key>` 过滤（`src/features/ResourceHome/index.tsx:44-64`，`parseWorkGalleryKey`），点击经 `useOpenWork` 在 Portal 中预览。Work 是“Agent 交付物”的统一事实对象，与工具注册的 `work?: PluginApiWorkConfig`（Agent 工具笔记 §1.3）衔接。
 
 **统计入口**：`agent/statistics`（`AgentUsage`：7d/30d/90d 用量与成本、模型拆分、趋势图，`src/features/AgentUsage/hooks.ts:21`）+ `agent/permission`（工作区 Agent 的访问级 edit/use/view、模型策略 member/fixed、执行目标策略，`src/features/AgentPermission/PermissionForm.tsx`）。统计主链（数据聚合源）本次未深入。
 
@@ -115,6 +121,20 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 **独特性判断**：把“配置 Agent”本身做成一个 Agent 任务，且通过工具审批门把危险写操作（装插件）锁死在人审；与通用表单式配置（Cherry Studio 等）形成产品差异。运行时执行面（工具审批、配置对象）回链 Agent 工具/角色笔记。
 
+### 能力五：Goals——带验收计划与有界自动修复的目标闭环（`主链确认`，静态证据）
+
+**用户目标**：用户用 `/goal` 声明一个目标，Agent 把它拆成带验收标准、预算上限和轮次上限的任务循环，跑完后提交验收；普通 Chat 的“一次性回复”没有“目标 → 验收 → 有界修复”的闭环。该能力由 `e8349e8ce`（/goal loop）、`86f6b2684`（与任务创建拆分）、`dc976694d`（统一创建流程）、`10dbe1a16`（goal 视图与验收进度）逐级落地。
+
+**入口与触发者**：Composer 的 `/goal` 命令——`goalTag.ts` 把目标标记存为结构化 chip（`f777343c8`）；发送时 `conversationLifecycle.ts:323-328` 检测 goal 提示并注入 `lobe-goal` 工具。
+
+**事实对象**：goal 复用任务对象（无独立 goal 表）：`createGoal` 创建底层 task + 持久化验收标准（`TaskVerifyConfig`），`goalLoop.ts` 管理轮次（`DEFAULT_GOAL_MAX_ROUNDS`，`goalBudget.ts` 预算，可选 USD 上限），`goalPhase: done|paused|review|running` 状态经 `syncGoalToolState` 回写到 `createGoal` 工具卡（`goalLoop.ts:118-139`）。
+
+**完整主链**：`/goal` chip → `lobe-goal.createGoal`（`packages/builtin-tool-goal/src/manifest.ts`，`humanIntervention: 'always'`，创建必须人工确认）→ 创建任务话题并启动 goal 循环 → 有界自动修复/验证（`apps/server/src/services/verify/`：`goalLoop.ts`、`settle.ts`、`sweep.ts`）→ 实时结果卡 `GoalWorkCard`（消息内）→ goal 视图（`agent/goals`、`agent/goal/[goalId]` 路由，`AgentGoals` feature：创建/详情/验收/HowItWorks）→ 完成/拒绝由用户验收。
+
+**持续性与资源边界**：全部状态在 PostgreSQL（task + verify 相关表）；轮次与花费双上限防止失控循环；`goalPhase` 驱动 UI 状态（done/paused/review/running）。
+
+**独特性判断**：把“目标”建模为可验收、可自动修复、有预算上限的任务循环，且模型通过专门工具创建（非自由文本承诺）——与任务调度的关系是“目标是一次性任务的高级包装”，与 Brief 系统的关系是“验收结论进 brief 汇报”。在本样本中无对应实现。注意：README 未单独宣传 goals，本卡是 README 之外的实现面候选。
+
 ## 已归并到现有类目的能力
 
 - **Agent Groups（群组对象）**：群组类型（`packages/types/src/agentGroup/index.ts`）、ChatGroupWizard 六类模板、成员 Agent 结构已在 [Agent 角色笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md) §6 覆盖；本快照新增群组路由 `group/:gid`（`desktopRouter.shared.tsx:206-243`）与成员编辑面（`group/profile/features/AgentBuilder` 可对成员跑 Builder、`Sidebar/Members`、`AddGroupMemberModal`、`SortMembersModal`），群聊会话本体在会话与消息类目边界内。群组作为“多 Agent 并行协作”入口已确认，但群体编排运行链不在本次范围。状态：`入口确认`/`归并已有类目`。
@@ -124,16 +144,16 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 ## 声明不符、外部依赖与暂缓项
 
-- **Project（按项目组织）**：README 宣传的 “Project” 在数据库无独立表（`packages/database/src/schemas/` 全量检索 `'projects'` 零命中）。实际实现是 **基于工作目录的 topic 分组**：`groupTopicsByProject`（`packages/utils/src/client/topic.ts:161`）按 `topic.metadata.workingDirectoryConfig/workingDirectory` 分组，项目名取路径末段；“无项目”组固定最后（`selectors.ts:203-209`）。异构 Agent（claude-code/codex）默认 `byProject`（`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts:7-18`）。另外任务 `identifier` 支持 `'PROJ-42'` 样式命名（`task.ts:33` 注释）、记忆 context 的 type 枚举含 `'project'`。结论：README 的 “Project” 是轻量组织概念，不是项目实体——`入口确认`，按工作目录分组的主链（工作目录从何写入 topic metadata）未完整验证。
+- **Project（按项目组织）**：上快照的结论（数据库无 project 表、仅按工作目录分组）已过时。本快照（HEAD）新增完整 Project 实体：`projects` 表（`packages/database/src/schemas/project.ts:28`，含 `projects`/`projectAgents`/`projectChatGroups`/`projectKnowledgeBases`/`projectCompletionReviews` 五张表，migration 0134-0139）、tRPC 路由（`apps/server/src/routers/lambda/project.ts`：create/update/delete/status/acceptCompletion/addAgent/addKnowledgeBase 等，`withScopedPermission('agent:update')` 写保护）、CLI 命令（`apps/cli/src/commands/project.ts`：`project list/view/create/edit/delete/status`，描述为“Manage goal-oriented projects”）与内置 `project-coordinator` Agent（`packages/builtin-agents/src/agents/project-coordinator/index.ts`，按项目名生成协调者 systemRole）。与此同时，话题侧的“按项目组织”仍以工作目录为键：`groupTopicsByProject`（`packages/utils/src/client/topic.ts:161-196`，`project:` 前缀 + `no-project` 沉底）与 `AgentTopicManager/utils.ts` 均按 `getTopicWorkingDirectorySourcePath` 分组，两个“项目”语义并存（实体项目 vs 工作目录分组），其关联链（topic 如何归属到 projects 表）本次未走通。状态：`主链确认`（静态证据，实体项目侧）；分组侧维持原结论。
 - **IM 网关**：平台注册（slack/telegram/discord/wechat/line/imessage 渠道路由与 webhook 处理器）、OAuth 安装（`agent-hono/handlers/messengerInstall.ts`、`messengerOAuthCallback.ts`）、`/api/agent/webhooks/:platform`（`platformWebhook.ts`）、cron 保活与外部 `MESSAGE_GATEWAY`（`gatewayCron.ts:189-197`）、验证路由 `verify-im` 均确认存在；但“用户在 IM 发消息 → 绑定 Agent 会话 → 回复回 IM”的单平台完整往返与消息持久化语义未逐一走通（bot 场景的工具设备访问策略在 Agent 工具笔记 §7.2 已有记录）。状态：`入口确认`。
-- **Workspace**：`workspaces` 表（slug/name/primaryOwnerId，`packages/database/src/schemas/workspace.ts:19`）、`/:workspaceSlug/*` 路由镜像（`desktopRouter.shared.tsx:880-1108`）、工作区设置页（members/notification/statistics/plans/billing/budget/credits/usage/service-model/credential/apikey/oauth-apps/audit-log/labels/storage/devices）、社区工作区详情页、共享设备池（Agent 工具笔记 §7.2）确认。Workspace 是“团队级 Agent 治理与共享”的容器，成员/权限/预算主链（邀请、角色、配额执行点）未逐个验证。状态：`入口确认`。
+- **Workspace**：`workspaces` 表（slug/name/primaryOwnerId，`packages/database/src/schemas/workspace.ts:19`）、`/:workspaceSlug/*` 路由镜像（`desktopRouter.shared.tsx:880-1108`）、工作区设置页（members/notification/statistics/plans/billing/budget/credits/usage/service-model/credential/apikey/oauth-apps/audit-log/labels/storage/devices）、社区工作区详情页、共享设备池（Agent 工具笔记 §7.2）确认。API Key 支持能力范围（`capability_scopes` 列，`ee7b69d17`；工作区 API Key 按成员权限收敛作用域，`a9bf96d95`）、工作区成员可对共享内建 Agent 选择个人模型（`68a318992`）、群组权限页（`src/routes/(main)/group/permission/index.tsx`）。Workspace 是“团队级 Agent 治理与共享”的容器，成员/权限/预算主链（邀请、角色、配额执行点）未逐个验证。状态：`入口确认`。
 - **Agent 运营的 hires 面**：Agent 市场/社区、ConnectAgent 的“雇用”链路未单独走通；统计页数据聚合（usage 记录的写入与汇总）未验证。状态：`入口确认`。
 - **image/video 创作工作台**（`(create)/image`、`(create)/video` 路由族）为 README 之外的独立创作面，本次不展开（未验证事项）。
 
 ## 对特色贡献统计的影响
 
-- 建议新增主贡献候选：**任务调度与自动化（Schedule）**、**白盒个人记忆（Personal Memory）**（均可按静态主链确认计入，标签：`主动 Agent`、`记忆演化`）；**Agent 运营汇报（Brief + Work）** 作为组合贡献计入（标签：`主动 Agent`、`活对象`）。
-- 辅助贡献候选：Agent Builder（`人类工具面` 反向——人通过 Agent 配置 Agent）、IM 网关（`多表面连续性`）、Workspace（`协同工作区`）。
+- 建议新增主贡献候选：**任务调度与自动化（Schedule）**、**白盒个人记忆（Personal Memory）**（均可按静态主链确认计入，标签：`主动 Agent`、`记忆演化`）；**Agent 运营汇报（Brief + Work）** 作为组合贡献计入（标签：`主动 Agent`、`活对象`）；**Goals（目标闭环）** 作为独立主贡献候选（标签：`主动 Agent`、`活对象`）。
+- 辅助贡献候选：Agent Builder（`人类工具面` 反向——人通过 Agent 配置 Agent）、IM 网关（`多表面连续性`）、Workspace（`协同工作区`）、Project（实体化后从暂缓项升级为辅助候选，`协同工作区`）。
 - 与待查清单“Agent 社会/群体”聚类的交点：Agent Groups 会话面仍缺运行链，暂不进入统计。
 
 ## 未验证事项
@@ -143,7 +163,8 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - Personal Memory hourly 扫描的调度 cadence 与资源消耗、提取质量（LLM 提取器未运行）。
 - Workspace 成员/配额/账单执行点（邀请流程、budget 扣减、审计日志写入）。
 - 统计页数据源（usage 记录写入与聚合 SQL）。
-- `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）。
+- `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）；以及实体 `projects` 表与工作目录分组两套“项目”语义的关联链（见 Project 条目）。
+- Goal 循环在真实任务上的运行表现（轮次/预算触达后的 settle 行为、`sweep` 的巡检接线）——静态主链已确认但未运行验证。
 - image/video 创作工作台与 Work 对象的衔接。
 
 ## 关键源码索引
@@ -155,3 +176,5 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - Agent Builder：`packages/builtin-agents/src/agents/agent-builder/index.ts`、`packages/builtin-tool-agent-builder/src/manifest.ts`、`src/features/AgentBuilder/index.tsx`。
 - IM 网关：`src/features/Messenger/index.tsx`、`apps/server/src/agent-hono/handlers/{platformWebhook,messengerInstall,messengerOAuthCallback,gatewayCron}.ts`。
 - 项目分组：`packages/utils/src/client/topic.ts:161`、`src/store/chat/slices/topic/selectors.ts:203`、`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts`。
+- Project 实体：`packages/database/src/schemas/project.ts`、`apps/server/src/routers/lambda/project.ts`、`apps/cli/src/commands/project.ts`、`packages/builtin-agents/src/agents/project-coordinator/index.ts`。
+- Goals：`packages/builtin-tool-goal/src/manifest.ts`、`apps/server/src/services/verify/goalLoop.ts`、`src/features/AgentGoals/`、`src/features/ChatInput/InputEditor/ActionTag/goalTag.ts`。

@@ -2,7 +2,7 @@
 
 > 来源文件：`../Chat/AIO-Hub-Chat调查笔记.md` 第 12 节及第 13.2 节、13.3 节界面层部分（2026-08-11 源文件已压缩为概览，本节已完整摘出）
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 摘出日期：2026-08-11
 >
@@ -30,7 +30,7 @@
 - **业务级即时反馈**：`E:\works\git\aio-hub\src\utils\customMessage.ts` 是对 `ElMessage` 的薄包装，唯一的改动是强制加 `offset: 54`（"标题栏 32px + 默认间距 16px + 缓冲 6px"，代码注释原话，`customMessage.ts:23-27`），用于解决无边框窗口下 Toast 被自绘标题栏遮挡的问题。`llm-chat` 内所有业务成功/失败提示（Token 重算、导出成功/失败、翻译等）一律走 `customMessage.success/error/warning/info`，未见直接调用原生 `ElMessage`。
 - **错误提示的分级与去重**：`E:\works\git\aio-hub\src\utils\errorHandler.ts:308-371` 是真正决定"报错要不要弹出来、弹多久"的地方：INFO/WARNING 走 `customMessage`，`duration` 按级别区分（ERROR 5000ms，其余 3000ms，`errorHandler.ts:348`），且都设置了 `grouping: true`（"相同消息合并"，避免同一个错误短时间内刷屏）；CRITICAL 级别不走 Toast，改用 `ElNotification.error`，`duration: 0` 即**不自动关闭**，需要用户手动点掉（`errorHandler.ts:362-368`）。这是一个三级反馈体系：INFO/WARNING/ERROR 走短暂 Toast，CRITICAL 走常驻通知。
 - **堆叠行为**：`ElMessage`/`ElNotification` 本身是 Element Plus 原生行为，多条消息会纵向堆叠、自动错位，`customMessage.ts` 未覆盖这部分逻辑（只加了 offset），可以认为堆叠方式与 Element Plus 默认一致——**此处未在运行时截图验证堆叠像素细节，仅是代码层面确认走的是 Element Plus 默认堆叠机制**。
-- **独立的通知中心**：与即时 Toast 平行存在一套持久化通知系统——`E:\works\git\aio-hub\src\components\notification\NotificationCenter.vue`，用 `el-drawer`（右侧滑出，`direction="rtl"`，宽 360px）实现，顶部有未读数 `el-badge`、搜索框（标题/内容/来源过滤）、列表区、底部"清空所有消息"按钮（`ElMessageBox.confirm` 二次确认，`NotificationCenter.vue:91-103`）；点击通知项可 `markRead` 并可选跳转到 `metadata.path`（`router.push`）。通知详情走**内嵌的 `BaseDialog`**（`NotificationCenter.vue:233-275`，非 drawer），内容用 `RichTextRenderer` 渲染（支持 Markdown）。**这套通知中心是全局的（挂在 `GlobalProviders.vue`），不是 llm-chat 专属**，但 llm-chat 内没有直接搜到主动调用 `useNotificationStore` 推送通知的代码（搜索 `useNotificationStore`/`notificationStore` 在 `src/tools/llm-chat` 下无匹配）——即"生成完成"这类事件目前没有证据表明会被推送进通知中心，只是走 Toast 或前端状态更新。
+- **独立的通知中心**：与即时 Toast 平行存在一套持久化通知系统——`E:\works\git\aio-hub\src\components\notification\NotificationCenter.vue`，用 `el-drawer`（右侧滑出，`direction="rtl"`，宽 360px）实现，顶部有未读数 `el-badge`、搜索框（标题/内容/来源过滤）、列表区、底部"清空所有消息"按钮（`ElMessageBox.confirm` 二次确认，`NotificationCenter.vue:91-103`）；点击通知项可 `markRead` 并可选跳转到 `metadata.path`（`router.push`）。通知详情走**内嵌的 `BaseDialog`**（`NotificationCenter.vue:233-275`，非 drawer），内容用 `RichTextRenderer` 渲染（支持 Markdown）。**这套通知中心是全局的（挂在 `GlobalProviders.vue`），不是 llm-chat 专属**，但 llm-chat 内没有直接搜到主动调用 `useNotificationStore` 推送通知的代码（搜索 `useNotificationStore`/`notificationStore` 在 `src/tools/llm-chat` 下无匹配）——即"生成完成"这类事件目前没有证据表明会被推送进通知中心，只是走 Toast 或前端状态更新。通知列表带分页（`PAGE_SIZE = 20`，滚动距底 80px 自动加载更多，搜索/筛选重置页码，首屏内容不足以产生滚动条时自动补页，`NotificationCenter.vue`）；通知面板可打开版本说明（`openReleaseNotes`）与恢复待处理的升级引导（`resumePendingUpgrade`，来自 `src/flows/upgrade`）。
 
 ### 12.3 加载态、骨架屏与空状态
 
@@ -93,7 +93,9 @@
 
 ### 12.11 设置面板
 
-`ChatSettingsDialog.vue` 是基于 `BaseDialog` 的全局聊天设置弹窗，设置 `close-on-backdrop-click="false"` 以防误触关闭。顶部 `el-autocomplete` 支持模糊搜索设置项，并通过 `querySearch`、`handleSearchSelect` 和 `highlightedItemId` 定位及高亮；下方卡片式 `el-tabs` 是滚动锚点，所有分区实际位于同一个可滚动容器；主体由 `el-form` 和 `SettingListRenderer` 渐进渲染，`activeGroupCollapses` 记录设置组的展开状态，底部提供"恢复默认"。项目中没有独立的首次启动 onboarding 流程：`onboarding`、`首次使用`、`firstLaunch`、`first-run`、`新手引导`、`guide-tour` 和 `driver.js` 均无匹配。
+`ChatSettingsDialog.vue` 是基于 `BaseDialog` 的全局聊天设置弹窗，设置 `close-on-backdrop-click="false"` 以防误触关闭。顶部 `el-autocomplete` 支持模糊搜索设置项，并通过 `querySearch`、`handleSearchSelect` 和 `highlightedItemId` 定位及高亮；下方卡片式 `el-tabs` 是滚动锚点，所有分区实际位于同一个可滚动容器；主体由 `el-form` 和 `SettingListRenderer` 渐进渲染，`activeGroupCollapses` 记录设置组的展开状态，底部提供"恢复默认"。
+
+**首次启动与升级引导**：由通用引导流程系统（`src/components/common/GuidedFlow/`：`GuidedFlowHost.vue` 挂载于 `App.vue:81`，`guidedFlowStore` 承载流程运行时/步骤/跳过/重试）与升级引导（`src/flows/upgrade/`：`APP_UPGRADE_FLOW_ID` 注册、版本说明面板、恢复待处理升级）承担，配套"首次启动基线门禁 + 生命周期迁移 + E2E 覆盖"（提交 `eed23cd8e`/`a9f02cd4f`/`9434d4473`/`74675f45f` 等）。`onboarding`、`首次使用`、`firstLaunch` 等旧关键词无命中，引导功能以 GuidedFlow/flow 命名存在；其视觉呈现与各步骤的实际引导体验未运行验证。
 
 ### 12.12 桌面集成
 
@@ -136,4 +138,4 @@
 
 ## 附：界面层未找到能力（原文 13.3 节末段）
 
-界面层未找到以下能力：首次启动 onboarding；系统级桌面通知及生成完成联动；树图右键菜单的方向键操作和 Esc 关闭；会话列表键盘切换；头像裁剪；消息列表逐条 loading 骨架屏；侧栏折叠/展开过渡动画。以上结论来自相关关键词的全项目静态搜索，未经运行时可用性测试。
+界面层未找到以下能力：系统级桌面通知及生成完成联动；树图右键菜单的方向键操作和 Esc 关闭；会话列表键盘切换；头像裁剪；消息列表逐条 loading 骨架屏；侧栏折叠/展开过渡动画。以上结论来自相关关键词的全项目静态搜索，未经运行时可用性测试。首次启动引导由 GuidedFlow 引导流程系统与升级/迁移引导承担（见 12.11），不属于缺失清单。

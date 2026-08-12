@@ -2,9 +2,9 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理会话数据模型、发送链路、事件流与持久化；未运行构建与真实对话
 >
@@ -64,7 +64,7 @@ App submit（components/prompt-input/submit.ts） -> api.session.prompt
 
 ## 关键能力与已确认边界
 
-- 支持：流式三层落库频率（delta 事件 / end 时完整写 part / tool 状态即时落库）、上下文压缩（compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排并标记旧 tool 输出 `time.compacted`）、revert 回退（删除目标之后消息）、fork 复制新会话、多会话并发（不同 session 并行、同 session 串行）、后台任务与 detach 子 agent、中断（pending/running tool part 标 "Tool execution aborted"）、自动重试（5xx/429/超时，context overflow 不重试）。
+- 支持：流式三层落库频率（delta 事件 / end 时完整写 part / tool 状态即时落库）、上下文压缩（compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排并标记旧 tool 输出 `time.compacted`；压缩请求的对话历史以文本序列化拼接，`compaction.ts:52-83`、:387、:427-438）、revert 回退（删除目标之后消息，以 `findIndex`+`slice` 定位，`revert.ts:74-75`、:106-114）、fork 复制新会话、多会话并发（不同 session 并行、同 session 串行）、后台任务与 detach 子 agent、中断（pending/running tool part 标 "Tool execution aborted"）、自动重试（5xx/429/超时，context overflow 不重试，上限 5 次、指数退避带 0.25 抖动，`retry.ts:28-31`、:192）。
 - 已确认边界：无消息内容全文搜索（仅会话标题 LIKE，session.ts:993-995）；附件为 `data:` URL 内联（无独立附件目录）；无整体 edit message 端点（只能 PATCH 单个 part）；前端对失败消息的重试本质是再次发送；`SessionStatusEvent.Info` 只有 idle/retry/busy 三态；V2 post-crash continuation recovery 明确标注为未来工作。
 
 ## 未验证事项

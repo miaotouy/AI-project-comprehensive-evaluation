@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-07-29
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`4edba1b75a97b91c28ad48cd1cc90528defa17ad`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改 LobeHub 仓库
 >
@@ -175,6 +175,8 @@ displayMessageIds: string[]
 - `Suspense`：工具 Detail、Debug、编辑状态等可以懒加载。
 - `MessageSelectionWrapper`：多选和文本选择操作。
 - `ChatItem`：头像、标题、气泡、操作栏和错误附加内容。
+- 消息壳另有两类内容块：`PendingRetryTurn`（`Messages/components/PendingRetryTurn.tsx`，错误卡重试入口）与 `GoalWorkCard`（`Messages/GoalWorkCard/`，把任务 callback 卡与 goal 进度合并展示；goal 状态来自 operation 派生，见 `deriveOperationGoals.ts`）。
+- 助手消息里 Agent 名称旁不显示 role 标签。
 
 ## 7. User 消息：Markdown 和 Lexical 二选一
 
@@ -203,7 +205,7 @@ displayMessageIds: string[]
 
 这条路径不是 Markdown 解析，而是直接从 Lexical 的 serialized editor state 恢复节点树。
 
-另外，用户消息可以同时挂载 page selection、图片、视频、音频和文件列表。
+另外，用户消息可以同时挂载 page selection、图片、视频、音频和文件列表。音频播放器位于独立 feature `src/features/AudioPlayer/`，`Messages/User/components/` 下保留 `AudioFileListViewer.tsx` 做附件列表。
 
 ## 8. Assistant 消息：正文、推理、搜索和附件并列
 
@@ -235,6 +237,8 @@ Reasoning 单独由 `Thinking` 组件展示，默认是可折叠、可自动滚�
 
 `src/features/Conversation/Messages/components/Reasoning.tsx`
 
+仅签名的空 reasoning 卡不显示。
+
 ## 9. AssistantGroup：把工作过程折叠起来
 
 入口：
@@ -252,6 +256,8 @@ Reasoning 单独由 `Thinking` 组件展示，默认是可折叠、可自动滚�
 
 已完成的 workflow 默认折叠为一个“已处理”区域；生成中则显示工作状态、耗时、工具数量和审批状态。多工具 workflow 进入 `WorkflowCollapse`，单工具 workflow 可能以内联形式显示。
 
+工作流折叠在可见输出结束处收口：`ContentBlock.tsx` 跳过空 content block 占位，`Group.tsx` 折叠到可见输出末端，与正文输出同时进行的工作流展示不会拖到工具回合全部结束。
+
 `ContentBlock` 再对一个 block 做叶子分派：
 
 ```text
@@ -263,6 +269,8 @@ Reasoning
 ```
 
 这个分组层是 Lobe 和普通 Chat UI 最大的区别：它需要表达“模型说了什么”和“模型为了得到答案做了什么”之间的关系。
+
+以上细节均为静态代码核对（`src/features/Conversation/Messages/`、`packages/conversation-flow/src/parse.ts`）；视觉效果与动画行为未运行验证。
 
 ## 10. Markdown 的两条路径
 
@@ -375,7 +383,7 @@ identifier + apiName
 ### 已经做的优化
 
 - `virtua` 虚拟列表，避免所有消息同时参与布局。
-- `memo` + `fast-deep-equal`，阻止无关消息重渲染。
+- `memo` + `fast-deep-equal`，阻止无关消息重渲染；该策略是组件级手工斟酌的，不是统一约定（仓库曾移除大量“无效 memo 边界”，涉及 101 个文件、约 500 行）。
 - `stabilizeReferences`，给 parse 后未变化的节点恢复旧引用。
 - 工具按 tool-call ID 单独订阅，兄弟工具不会因参数变化全部刷新。
 - 流式消息和文本选区消息 `keepMounted`。

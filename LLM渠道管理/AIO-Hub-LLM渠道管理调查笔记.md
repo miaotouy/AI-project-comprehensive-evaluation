@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库
 >
@@ -27,7 +27,8 @@ AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有�
 
 它没有“同模型的多渠道池”、渠道权重、优先级、成本路由或跨渠道自动故障转移。多 Key 也不是请求级重试器：某次调用失败后只会更新 Key 健康状态并把错误抛给上层，下一次请求才可能选择另一个 Key。
 
-当前快照还存在一处明确的不一致：设置和 `ProviderType` 都包含 `azure`，但运行时 `adapters` 映射没有 `azure`。Azure 渠道可以被创建，却会在通用请求入口报“不支持的提供商类型: azure”。
+- **Azure 不一致已修复**：旧快照"设置和 `ProviderType` 都包含 `azure` 但运行时 `adapters` 映射没有 `azure`"的问题已消除——`src/llm-apis/adapters/azure/index.ts` 提供 `azureOpenAiAdapter`（Wire 格式复用 OpenAI Chat Completions/Embeddings，`prepareAzureOpenAiProfile` 只转换 Azure 特有配置），`adapters` 映射改用 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 在编译期约束"每个 Provider 类型都有适配器"（`src/llm-apis/adapters/index.ts`）。
+- **模型执行路由已落地**：`useLlmRequest` 的请求分发改为经 `packages/llm-core` 的 `resolveModelExecution()`（`model-execution-routing.ts`）——按"模型路由绑定 → 端点类型唯一识别 → Provider 默认映射"的顺序把一次操作（chat/embedding/image/audio/video/music/rerank）解析到协议 Adapter 与兼容 Profile 类型（可覆盖 `customEndpoints`），模型列表发现到的 `supportedEndpointTypes` 会持久化到模型 `routing` 字段。这是**渠道内的模型→协议/端点路由**，不是跨渠道故障转移。
 
 ## 总体结构
 
@@ -74,6 +75,7 @@ Agent / 临时模型 / 辅助任务
 | `customHeaders` | 用户自定义请求头，支持预设值和高级兼容配置 |
 | `customEndpoints` | 按 API 能力覆盖相对路径或完整 URL |
 | `options` | Azure、Vertex 等 Provider 特有字段 |
+| `toolHandling` | 渠道工具处理声明（`callConsumer`：`aio`/`upstream`；`upstreamProtocol`：`provider-native`/`vcp-text`/`transparent`/`none`；`aioDistributedExposure`），供聊天工具编排判断"本机消费还是 VCP 上游消费"（消费方见 Agent 工具笔记 §12） |
 | `networkStrategy` | `auto`、`proxy` 或 `native` |
 | `relaxIdCerts` / `http1Only` | Rust 网络层兼容选项 |
 
@@ -92,7 +94,7 @@ Agent / 临时模型 / 辅助任务
 
 `src/llm-apis/adapters/index.ts` 再把类型映射到实际 Adapter。OpenAI-Compatible Adapter 还被复用于 Groq、OpenRouter、Ollama、SiliconFlow 等渠道；DeepSeek、Gemini、Anthropic、Cohere、Vertex 和媒体协议有专用实现。
 
-类型层、设置层和适配器注册层不是同一个声明源，因此会产生漂移。当前 `azure` 就是可见配置存在、运行时映射缺失的实例。Adapter 表内还保留 `mistral`、`perplexity`、`together`、`lmstudio`、`vllm`、`volcengine`、`dashscope`、`zhipu`、`moonshot` 等兼容别名，但它们不在 `ProviderType` 的设置枚举中，主要依赖预设或兼容路径，而不是完整的一等配置类型。
+类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；`adapters` 映射已用 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 约束，`azure` 漂移已修复（见结论摘要）。`azure` 适配器复用 OpenAI Chat Completions/Embeddings Wire，仅转换 Azure 特有配置（`src/llm-apis/adapters/azure/utils.ts`）。Ollama 渠道的默认端点改为 OpenAI 兼容路径（`chatCompletions: /v1/chat/completions`、`completions: /v1/completions`、`embeddings: /v1/embeddings`），模型列表仍走原生 `/api/tags`，并声明 `tools`/`toolChoice` 参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。Adapter 表内还保留 `mistral`、`perplexity`、`together`、`lmstudio`、`vllm`、`volcengine`、`dashscope`、`zhipu`、`moonshot` 等兼容别名，但它们不在 `ProviderType` 的设置枚举中，主要依赖预设或兼容路径，而不是完整的一等配置类型。
 
 ### 1.3 网络与安全默认值
 
@@ -130,6 +132,8 @@ Agent / 临时模型 / 辅助任务
 
 这种导入面向“迁移已有客户端配置”，不是运行时动态发现或远程配置中心。
 
+除上述解析式导入外，还有**原生渠道导入导出**——`src/utils/llm-profile-transfer.ts` 定义 `LlmProfileBundle` 序列化格式，导出对话框（`LlmProfileExportDialog.vue`）支持搜索、多选、单渠道/批量导出，敏感信息自动检测与脱敏（导出时可选择是否包含凭据），导入时无损保留网络策略、自定义端点等完整配置（提交 `17ed5f04b`）；JSON 解析器新增 New API“复制连接信息”格式（`_type: "newapi_channel_conn"` → OpenAI-Compatible 渠道候选，无效 URL 校验且密钥不进入警告日志，提交 `8ddbbedfa`）。
+
 ### 2.3 明文配置文件
 
 `useLlmProfiles` 使用 `createConfigManager` 将全部 Profile 保存到应用配置目录下的：
@@ -165,6 +169,12 @@ llm-service/key-states.json
 
 远端结果被转换成 `LlmModelInfo`，保留模型 ID、名称、Provider、上下文长度、输出上限、输入/输出模态、支持参数和价格。OpenRouter 还会请求/保留更完整的输出模态信息。
 
+与旧快照相比，这里有两处行为变化（提交 `c64f99c61`、`20e7f7722`）：
+
+- **能力合并不再“只由远端推导”**：`toDesktopModelInfo()` 先并入当前激活的模型元数据规则能力（`getActiveModelProperties`），再用 API 显式返回的能力覆盖——API 未返回某项能力时不再写入 `false`（修复模型列表缺省能力时误标非视觉模型），`vision`/`thinking` 只在 `inputModalities`/`supportedParameters` 明确给出时才写入；
+- **路由信息随模型持久化**：远端返回 `supportedEndpointTypes` 时写入 `model.routing = { supportedEndpointTypes, discoveredAt }`，供 `resolveModelExecution()` 的“端点类型唯一识别”分支使用（见第 4 节）。
+- 模型身份与 Embedding 空间分离（`packages/llm-core/src/model-identity/`，`materializeModelIdentity`/`suggestModelIdentityFromProvider`）为模型目录引入 canonical ID 概念，当前主要被 knowledge-base 的向量化空间消费，桌面渠道目录以 `LlmModelInfo` 快照为主。
+
 ### 3.2 模型能力是运行时路由依据
 
 `LlmModelInfo.capabilities` 不只是 UI 标签。`useLlmRequest` 会据此选择：
@@ -190,7 +200,7 @@ llm-service/key-states.json
 | 参数和费用 | `defaultParameters`、`pricing`、`customParameters` |
 | 专用行为 | `defaultPostProcessingRules`、`mediaGenParams` |
 
-远端 `/models` 结果经 [`src/llm-apis/model-fetcher.ts`](../../aio-hub/src/llm-apis/model-fetcher.ts) 转换时，会直接写入上下文、最大输出、输入/输出模态、支持参数和价格；能力对象只由远端信息推导 `vision` 与 `thinking`。工具调用、文档、媒体生成等更细能力仍主要依赖预设规则或人工编辑。
+远端 `/models` 结果经 [`src/llm-apis/model-fetcher.ts`](../../aio-hub/src/llm-apis/model-fetcher.ts) 转换时，会直接写入上下文、最大输出、输入/输出模态、支持参数和价格；能力对象合并时先附当前激活规则能力，再用 API 显式返回的 `vision`/`thinking` 覆盖（API 未返回时不写 `false`）。工具调用、文档、媒体生成等更细能力仍主要依赖预设规则或人工编辑。
 
 另一套是 [`src/types/model-metadata.ts`](../../aio-hub/src/types/model-metadata.ts) 定义的 `ModelMetadataRule`。规则属性是开放对象，内置支持图标、Tokenizer、分组、能力、上下文、价格、描述、推荐用途、版本、发布日期、特性和媒体生成参数。它不是另一张模型目录，而是对任意 Provider/模型 ID 应用的声明式补丁层。
 
@@ -255,11 +265,12 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 4. 克隆 Profile，并把 `apiKeys` 缩成当前选中的单 Key，避免 Adapter 自行再选。
 5. 按模型能力过滤不支持的生成参数，再叠加模型 `customParameters`。
 6. 注入 Profile 的网络/TLS/HTTP 选项。
-7. 用 `adapters[profile.type]` 选择协议实现。
-8. 按模型能力选择 Chat、Embedding、Rerank 或媒体方法。
-9. 成功/失败后更新 Key 健康状态，并把响应或异常交还调用方。
+7. 按操作类型（chat/embedding/video/image/music/audio，`preferChat`/`_forceChatMode` 强制走 chat）经 `resolveModelExecution()` 解析**执行路由**——模型 `routing.bindings[operation]` 显式绑定优先，其次端点类型唯一识别（`supportedEndpointTypes`），最后回退 Provider 默认映射；解析结果可能改写 Profile 类型（如按协议族映射到 `openai-compatible`）与端点，`effectiveAdapterId`/`routeSource`/`channelType` 写入 Inspector 上下文。
+8. 用 `adapters[effectiveProfile.type]` 选择协议实现。
+9. 按模型能力选择 Chat、Embedding、Rerank 或媒体方法。
+10. 成功/失败后按错误分类更新 Key 健康状态（见第 5 节），并把响应或异常交还调用方。
 
-路由是确定性的，没有读取 Profile 顺序、权重、延迟、剩余额度或价格来改选渠道。
+路由是确定性的，没有读取 Profile 顺序、权重、延迟、剩余额度或价格来改选渠道——模型执行路由只做**渠道内的协议/端点选择**，不跨渠道改选。
 
 ## 5. 多 Key 轮询与熔断
 
@@ -269,30 +280,29 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 - `isBroken`、连续错误次数和最近错误；
 - 最近使用、失败和熔断时间；
 - Profile 上次选择的 Key 下标；
-- 全局自动禁用开关与自动恢复时间。
+- **按 Profile 隔离的开关与恢复设置**（`profileSettings`）——`enableAutoDisable`（默认 `false`）与 `autoRecoveryTime`（默认 60 秒）从旧版全局字段迁到每个 Profile 独立配置；存储版本升至 `1.1.0`，旧全局设置无法无歧义映射到具体渠道，迁移时丢弃并让各渠道按新默认值重新显式启用（`normalizeKeyStatesStorage`，提交 `5cb13afed`/`3ac5e99bf`）。
 
 ### 5.1 选择策略
 
 `pickKey()` 先过滤手动禁用和已熔断 Key，再从上次下标之后做 round-robin。默认自动恢复时间为 60 秒；到期的熔断 Key 会被恢复并重新参与选择。
 
-如果所有 Key 都不可用，函数不会终止请求，而是回退 `apiKeys[0]`，让上游真实调用再次失败。这能保留错误反馈，但意味着“全部熔断”不是硬隔离，也可能持续请求已知坏 Key。
+**“全部不可用回退 `apiKeys[0]`”已移除**——`availableKeys.length === 0` 时区分两种原因并抛 `ApiKeyUnavailableError`（`all-disabled` 全部被用户禁用 / `all-enabled-circuit-broken` 全部熔断，后者附最早可恢复时间 `retryAt`），不再把请求打到已知坏 Key 上（提交 `54b528984`）。
 
 ### 5.2 失败判定
 
-普通业务请求的 `reportFailure()` 规则是：
+普通业务请求的错误处理已接入分类策略：`useLlmRequest` 的 catch 分支调用 `getKeyHealthActionForError`（`src/llm-apis/key-health-policy.ts`，复用 llm-core 的 `classifyProbeError`）把错误分为五类动作：
 
-- 429 / 包含 rate limit 的错误立即熔断；
-- 其他错误累计 3 次熔断；
-- 成功一次就清零并恢复；
-- 错误消息最多保存 2,000 字符。
+- `authentication-failure` → `reportFailure(..., { forceBroken: true })`（认证失败强制标坏）；
+- `rate-limit-failure` → 429/限流立即熔断（沿用旧的即时熔断规则）；
+- `transient-failure` → 按连续错误累计（`treatRateLimitAsImmediateBreak: false`）；
+- `record-only` → 只记录，不计数不自动禁用（`allowAutoDisable: false`、`countTowardThreshold: false`）；
+- `success`/`ignore` → 无操作。
 
-该通用路径没有先区分认证失败、模型不存在、请求体错误、Provider 5xx 和网络错误；只要不是取消/超时的特殊分支，很多错误都会累计到 Key。由模型名、参数或端点造成的 400 也可能把本来有效的 Key 熔断。
-
-设置页的新探测服务有更细的分类策略：认证失败可强制标坏，网络/超时/Provider 错误视为暂态，授权和限流只记录，模型不可用/参数错误不影响 Key。不过这套 `key-health-policy.ts` 只服务设置页探测，没有完全替换普通请求的粗粒度规则。
+旧的“429 立即熔断、其他错误累计 3 次熔断、成功清零”计数规则仍保留在 `reportFailure` 内部，但自动熔断现在多一个前提：**同渠道还有其他可用 Key**（`hasAlternativeKey`）且该 Profile 开启了自动禁用——最后一个可用 Key 不会因连续失败被自动熔断。设置页探测与普通请求共用同一份 `key-health-policy.ts`（旧结论“只服务设置页探测”已过时）。
 
 ### 5.3 没有请求内换 Key 重试
 
-`sendRequest()` 只调用一次 `pickKey()` 和一次 Adapter。失败后执行 `reportFailure()`，随即 `throw error`。它不会在同一请求中：
+`sendRequest()` 只调用一次 `pickKey()` 和一次 Adapter。失败后执行分类化的 `reportFailure()`，随即 `throw error`。它不会在同一请求中：
 
 - 换下一个 Key 重放；
 - 判断流是否已经输出部分内容；
@@ -315,6 +325,8 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 共享 Core 使用 canonical request/response 和 `ProviderAdapter`，负责请求体、URL、Header、流式 Decoder 与 Provider 语义；它不读取 Vue Store，也不持有 Key 状态。桌面和移动端各自负责把 Profile 变成 Core DTO，并注入平台 Transport。
 
 这个边界让协议兼容可以跨端复用，同时把系统代理、无效证书、本地文件流上传等平台行为留在 Rust/桌面 Transport。
+
+Provider 层的原生工具调用编解码已修补（提交 `27e899483`）——统一 `LlmMessage` 契约支持 `tool` 角色、`toolCallId`、`metadata` 与工具名；OpenAI Chat/Responses 补齐 assistant `tool_calls` 与 tool 结果续轮编码，Gemini 保留函数调用 ID（流式聚合不再覆盖真实 ID），Cohere 支持 assistant 工具调用与并行 tool 结果编码；Ollama 切换 OpenAI 兼容端点并声明 `tools`/`toolChoice` 能力。OpenAI Responses 新增推理摘要解析并保持流式边界（`edf251a9c`）。LLM Inspector 增加基于最终请求体的原生工具声明/解码诊断（`src/llm-apis/tool-diagnostics.ts`）。这些修补为后续原生工具编排（区别于 VCP 文本协议）打基础，但模型通信层的工具协议仍以 VCP 为准（见 Agent 工具笔记第 3 节）。
 
 ## 7. 自定义端点与 Header
 
@@ -351,7 +363,7 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 - 最多 8 并发的批量模型探测（默认 3）；
 - 错误分类：认证、授权、限流、模型不可用、参数、网络、超时、Provider 等。
 
-LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请求、响应头、流式块和错误上下文。它改善单渠道诊断，但结果不会进入自动渠道评分或动态路由。
+LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请求、响应头、流式块和错误上下文。请求分发时会把 `channelType`/`effectiveAdapterId`/`executionOperation`/`routeSource` 写入 Inspector 上下文，工具意图（`toolDiagnostics`：adapterId、requestToolCount、hasNativeTools）在能力过滤后记录、响应返回后以最终请求体解码结果覆写（`useLlmRequest.ts`、`tool-diagnostics.ts`）。它改善单渠道诊断，但结果不会进入自动渠道评分或动态路由。
 
 共享 Core 和应用 Adapter 均有协议 fixture、流式分帧、模型列表、Probe 与 Transport 单测。设置页也有导入和探测组件测试。
 
@@ -360,11 +372,12 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 ### 已实现
 
 - Profile 级渠道增删改查、启停和排序；
-- 丰富的官方/兼容 Provider 预设；
-- 多格式配置导入与重复提示；
-- 多 Key 轮询、手动启停、错误状态、熔断和恢复；
-- 模型手工维护、远端发现和能力元数据；
-- 多协议、多能力 Adapter；
+- 丰富的官方/兼容 Provider 预设（含 Azure，运行时适配器已补齐）；
+- 多格式配置导入、重复提示与 New API"复制连接信息"、原生 `LlmProfileBundle` 导入导出（可脱敏）；
+- 多 Key 轮询、手动启停、错误状态、按 Profile 隔离的熔断/恢复和分类化健康策略；
+- 模型手工维护、远端发现（含能力合并与路由信息持久化）和能力元数据；
+- 多协议、多能力 Adapter（含原生工具调用编解码与 Responses 推理摘要）；
+- 模型执行路由：按操作类型把模型解析到协议 Adapter/端点（渠道内路由）；
 - 自定义 Header、细粒度端点和 Provider options；
 - Agent/辅助任务/临时请求的显式渠道模型选择；
 - Rust 代理、网络兼容选项和请求 Inspector；
@@ -373,14 +386,13 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 ### 未实现或不应误判
 
 - 没有跨 Profile 的同模型聚合或别名层；
-- 没有渠道权重、优先级、配额、成本或延迟路由；
+- 没有渠道权重、优先级、配额、成本或延迟路由（模型执行路由是渠道内的协议/端点选择，不跨渠道改选）；
 - 没有当前请求内 Key 重试；
 - 没有跨渠道 failover；
-- 没有按错误类别控制普通请求的精细熔断；
 - 没有加密或系统凭据库；
 - `auto` 网络策略不是自动择优；
 - 模型列表请求固定走代理；
-- 设置页可见 Provider 与运行时 Adapter 并非单一注册源，当前 Azure 已发生漂移。
+- 设置页可见 Provider 与运行时 Adapter 的单一注册源约束已通过 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 建立，旧"Azure 漂移"问题已关闭。
 
 ## 11. 关键源码索引
 
@@ -403,6 +415,6 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 
 1. 本次未启动 Tauri 桌面端，没有实测官方 Provider、自建网关和代理模式下的 TLS/HTTP 行为。
 2. 未检查真实用户配置目录的文件 ACL；“明文落盘”基于序列化与写入实现，不等于配置文件一定对其他系统账户可读。
-3. 未实测 Azure 设置流程；“运行时不支持”来自当前 `ProviderType`、设置声明、Adapter 表和通用请求分派的静态交叉核对。
+3. 未实测 Azure 渠道的真实调用（运行时适配器已补齐，`prepareAzureOpenAiProfile` 转换与端到端行为仍属静态确认）。
 4. 移动端共用 Provider Core，但有独立 Profile Store、KeyManager 和 Transport；本笔记以桌面端渠道管理为主，没有逐屏比较移动端 UI 能力。
 5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；它们不等于 LLM Chat 的 Key/渠道故障转移，本次未逐项展开。

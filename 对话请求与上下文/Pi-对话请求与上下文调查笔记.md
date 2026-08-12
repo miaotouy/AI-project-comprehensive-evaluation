@@ -2,11 +2,11 @@
 
 > 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`6b461b75b39b5a19b378dc42fbfbd1655bc446a6`（分支：`main`）
+> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/Pi-Chat调查笔记.md`](../Chat/Pi-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/Pi-Chat调查笔记.md`](../Chat/Pi-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据；按提交范围核对 prompt/sendUserMessage 展开开关、Agent.reset 守卫与事件行号
 >
 > 调查范围：发送主链路（prompt 输入处理）、上下文投影与 system prompt 组装、token 估算与自动压缩、agentLoop 工具循环、流式事件链、abort/重试/steer/followUp；会话持久化与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -40,7 +40,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 1. 提交入口、任务对象与状态机
 
-**输入处理顺序**（`prompt()`，`agent-session.ts:1116-1273`）：扩展 `/command` 立即执行 → `input` 扩展钩子（可 handled/transform）→ `_expandSkillCommand` 展开 `/skill:name` 为 `<skill>` 块 → `expandPromptTemplate` 展开文件模板 → 若正在流式则入 steer/followUp 队列 → 校验模型与认证 → `_checkCompaction` 预压缩 → 组装 user 消息 + 挂起的 nextTurn 自定义消息 → `before_agent_start` 扩展事件（可改 systemPrompt、注入 custom 消息）→ `_runAgentPrompt`。
+**输入处理顺序**（`prompt()`，`agent-session.ts:1116-1273`）：扩展 `/command` 立即执行 → `input` 扩展钩子（可 handled/transform）→ `_expandSkillCommand` 展开 `/skill:name` 为 `<skill>` 块 → `expandPromptTemplate` 展开文件模板 → 若正在流式则入 steer/followUp 队列 → 校验模型与认证 → `_checkCompaction` 预压缩 → 组装 user 消息 + 挂起的 nextTurn 自定义消息 → `before_agent_start` 扩展事件（可改 systemPrompt、注入 custom 消息）→ `_runAgentPrompt`。以上展开受 `PromptOptions.expandPromptTemplates`（默认 true，:1117）控制；扩展 API 的 `sendUserMessage` 新增同名选项（默认 false，与 `deliverAs` 并列，`agent-session.ts:1481-1506`、`extensions/types.ts:1307-1312`，#7857），扩展可按需复用命令/skill/模板展开。
 
 任务对象：没有独立的"任务记录"；运行状态在 `Agent`/`AgentSession` 内，事件（`message_start/update/end`、`agent_start/end`、`queue_update`）是唯一对外通道。
 
@@ -65,9 +65,9 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- `streamAssistantResponse`（`agent-loop.ts:281-372`）把 `AssistantMessageEventStream` 的 `start/text_*/thinking_*/toolcall_*` 逐事件转成 `message_start/message_update`，结束统一发 `message_end`。
-- UI 在 `message_update` 时整体重建 assistant 组件内容（`interactive-mode.ts:3114-3146`），TUI 渲染由 `requestRender` 节流（`packages/tui/src/tui.ts:765-817`，`MIN_RENDER_INTERVAL_MS` 内合并帧）——组件重建与节流的 DOM 侧见消息渲染器笔记 §2。
-- **工具增量**：`tool_execution_start/update/end` 事件驱动 `ToolExecutionComponent` 的流式输出（`interactive-mode.ts:3193-3234`）；assistant 消息里的 `toolCall` 块在 `message_update` 时同步建组件并逐步更新参数（`interactive-mode.ts:3119-3144`）。
+- `streamAssistantResponse`（`agent-loop.ts:281-372`）把 `AssistantMessageEventStream` 的 `start/text_*/thinking_*/toolcall_*` 逐事件转成 `message_start/message_update`，结束统一发 `message_end`（`toolcall_end` 现携带完整 `ToolCall` 并覆盖 partial 累积结果，`proxy.ts:338-345`）。
+- UI 在 `message_update` 时整体重建 assistant 组件内容（`interactive-mode.ts:3148-3181`），TUI 渲染由 `requestRender` 节流（`packages/tui/src/tui.ts:765-817`，`MIN_RENDER_INTERVAL_MS` 内合并帧）——组件重建与节流的 DOM 侧见消息渲染器笔记 §2。
+- **工具增量**：`tool_execution_start/update/end` 事件驱动 `ToolExecutionComponent` 的流式输出（`interactive-mode.ts:3227-3268`）；assistant 消息里的 `toolCall` 块在 `message_update` 时同步建组件并逐步更新参数（`interactive-mode.ts:3153-3177`）。
 
 ## 6. 完成、异常、半截流与最终回写
 
@@ -78,7 +78,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 ## 7. 停止、重试、续写与重新生成
 
 - **重试**：`_prepareRetry`（`agent-session.ts:2686-2737`）用同一 `settings.retry` 预算，对最后一个 assistant 错误消息 sleep 后退避并 `agent.continue()`；`_willRetryAfterAgentEnd` 判定（`agent-session.ts:683-696`）；溢出类错误不重试走压缩（§3）。
-- **自动重试中止**：自动重试期间 Esc 中止重试（`interactive-mode.ts:3308-3318`，入口见 Chat UI 笔记 §4）。
+- **自动重试中止**：自动重试期间 Esc 中止重试（`interactive-mode.ts:3342-3353`，入口见 Chat UI 笔记 §4）。
 - **续写**：未找到"继续生成到当前消息末尾"的独立入口；续写通过分支/新消息实现（分支数据语义见会话与消息管理笔记 §4）。
 - **steer/followUp**：运行中投递 steer（当前工具回合结束后、下一次 LLM 调用前注入）与 followUp（agent 结束后处理）两种队列（§8）。
 
@@ -98,7 +98,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 ## 10. 退出恢复、日志与已确认边界
 
 - **退出保留**：`dispose()` 先 abort 再清理；切换会话前 `teardownCurrent` 保证进行中响应（含工具结果）先持久化到原会话（`agent-session-runtime.ts:167-178`）。
-- 已确认边界：输入处理顺序、压缩阈值与重试预算为源码确认；RPC 模式（`modes/rpc/`）与 server/client 包的会话通道仅从调用关系推断，未展开。
+- 已确认边界：输入处理顺序、压缩阈值与重试预算为源码确认；RPC 模式（`modes/rpc/`）与 server/client 包的会话通道仅从调用关系推断，未展开。`Agent.reset()` 现在拒绝在活动运行中调用（抛错而非静默清空，`packages/agent/src/agent.ts:333-338`，#7717）。
 - 可观测性：`/session` 统计 token/成本（数据侧见会话与消息管理笔记 §5）；日志/trace 关联到具体任务的机制未调查。
 
 ## 11. 未验证事项

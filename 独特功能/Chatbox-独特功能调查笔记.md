@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：产品表面盘点（路由、设置菜单、feature flag、依赖）+ 只读源码核对 README 未列出的能力；未修改 chatbox 仓库
 >
@@ -90,6 +90,11 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 
 **持续性**：ImageGeneration 记录（prompt/model/status/图片键）与图片 blob 均持久化；历史可恢复、可再次生成。
 
+**图像模型目录规则与记录来源**：
+
+- 图像模型目录规则：OpenAI 走 OAuth 认证时（`isUsingOAuth`）不注入 OpenAI 组的 image 模型（`image-model-catalog.ts` 的 `isOpenAIImageGenerationAuthSupported`，`15028964`），避免 OAuth 会话无法走 DALL-E 计费路径。
+- 记录含 `source` 字段：chatbox_cli 触发的图片生成记录记住 `{ sessionId, toolCallId }` 来源（`shared/types/image-generation.ts`），任务完成后经 `image-task-follow-up.ts` 把完成/失败结果以后台任务通知回填进原聊天会话，并支持从聊天内"恢复"该记录（`ecec96bd`，`SQLiteImageGenerationStorage`/`imageGenerationActions`）。这条链横跨 Agent 工具笔记 §11 的后台任务回填与消息渲染器笔记的工具卡。
+
 **独特性判断**：独立的图像工作台 + 记录持久化 + 参考图 DAG，是"创作工作站"标签的完整实现之一（与 AIO Hub 媒体工作站的比较待横向调查）；在纯聊天客户端中罕见。README 只提 DALL-E-3 一句，实际产品面更完整。
 
 **证据强度**：静态源码 + 组件/action 测试；未运行真实生成（计费操作）。
@@ -135,7 +140,8 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 - team-sharing 部署（Docker/Caddy）未运行，代理注入与客户端免 Key 请求的端到端行为未验证。
 - 图像生成的真实模型调用（DALL-E 等）与参考图 DAG 的实际构图行为未实测。
 - Copilots 远端 API 的可用性与分页未验证。
-- 新用户引导（/guide/）与 Chatbox AI 账号面的细节未调查（非本批范围）。
+- 新用户引导（/guide/）与 Chatbox AI 账号面的细节未调查（非本批范围）；新用户引导的剧本场景已重写（`af40ab34` 用简历助手场景替换 Q&A 演练场景，`8c2a8a7b` 向 system prompt 注入稳定场景标记），本笔记仍不展开。
+- 图像生成记录 source 字段（chatbox_cli 来源）与聊天内恢复的完整运行时行为未实测。
 
 ## 关键源码索引
 

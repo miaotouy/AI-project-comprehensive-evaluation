@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\deepchat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
-> 调查方式：从 [`../Chat/DeepChat-Chat调查笔记.md`](../Chat/DeepChat-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/DeepChat-Chat调查笔记.md`](../Chat/DeepChat-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据；按提交范围 `dc4177c2..e142b2a` 核对 pending input 数据模型（retry_required/重启恢复）与 turn 的新操作
 >
 > 调查范围：会话与消息的持久化模型（SQLite transcript 与 assistant blocks）、renderer 缓存与 IPC 增量、消息窗口数据分页接口、会话内/跨会话搜索；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -49,7 +49,12 @@ assistant block 表（`src/main/session/data/tables/deepchatAssistantBlocks.ts:7
 
 ### 1.3 pending input 是独立状态对象
 
-队列记录定义在 `src/shared/types/agent-interface.d.ts:258-275`，其 state 为 `pending`、`claimed`、`blocked`、`consumed`，同时保存 payload、关联 message ids、assistant id、阻塞原因和时间戳。这样，正在生成的 turn 与尚未发送的输入不是同一条消息状态（队列的投递与执行语义见对话请求与上下文笔记 §8）。
+队列记录定义在 `src/shared/types/agent-interface.d.ts:259-281`，其 state 为 `pending`、`claimed`、`blocked`、`retry_required`、`consumed`，同时保存 payload、关联 message ids、assistant id、阻塞原因和时间戳。这样，正在生成的 turn 与尚未发送的输入不是同一条消息状态（队列的投递与执行语义见对话请求与上下文笔记 §8）。
+
+**本次新增（提交范围 `dc4177c2..e142b2a`，源码确认）**：
+
+- **`retry_required` 状态**（#2137）：持久化形态是 `state='blocked'` + `retry_required_at` 列非空（`deepchatPendingInputs.ts` 新增列与 schema v67 迁移，`:65-88` 的 `normalizeRetryRequiredRows` 把旧 `retry_required` 行规范化为该形态）；`SessionPendingInputStore` 在读取时经 `getRowState` 还原为 `retry_required`（`pendingInputStore.ts:561-582`）。该状态表示 queue 项曾被 claimed 但未物化为用户消息，由 `releaseClaimedQueueInputForRetry` 进入、`retryReleasedQueueInput` 回到 `pending`（`:349-383`）。
+- **重启恢复**（831b820/e41c08e）：`SessionPendingInputs.recoverInputsAfterRestart`（`pendingInputs.ts:392-468`）返回 `{ affectedSessionIds, heldQueueInputIds }`——claimed 且有物化 user 消息的 queue 项置 consumed，否则释放回队列并登记 held；steer 输入中未读的 pending 用户消息标记为 error（`failPendingSteerMessages`，`transcript.ts:358-385`）；另有 `getPendingAssistantMessages`（`transcript.ts:448-452`）供恢复分类使用。
 
 ### 1.4 分支与版本
 
@@ -78,11 +83,11 @@ createUserMessage(...)
 
 ## 3. 创建、切换、归档、删除与恢复
 
-本次迁移范围内未覆盖会话的创建/删除/归档的持久化实现（源笔记未调查该部分）；已知会话以 `newSessions` 表保存（`src/main/session/data/tables/newSessions.ts:13-30`），字段细节未展开。renderer session store 的 active session、working/error 状态与 project/agent 关联属于 Chat UI 笔记 §5（UI 状态所有权）。
+迁移范围内未覆盖会话的创建/删除/归档的持久化实现（源笔记未调查该部分）；已知会话以 `newSessions` 表保存（`src/main/session/data/tables/newSessions.ts:13-30`），字段细节未展开。renderer session store 的 active session、working/error 状态与 project/agent 关联属于 Chat UI 笔记 §5（UI 状态所有权）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-`SessionTurn`（`src/main/session/turn.ts:36-405`）提供 `retryMessage`、`deleteMessage`、`editUserMessage`、fork 等修改已有 transcript 的操作，以及 `getCompactionState`、manual compaction（只对支持的 DeepChat session 生效）和 `respondToToolInteraction`。这些操作在持久化层的数据语义（retry 是否复制消息、delete 是否物理删除、fork 的父子关系）本次未展开。失败 assistant 消息保留 `error` 状态和错误 block，用户可通过 retry/fork 等操作再次产生新 turn；重试/恢复时如何选择起始上下文见对话请求与上下文笔记 §7。
+`SessionTurn`（`src/main/session/turn.ts:36-405`）提供 `retryMessage`、`deleteMessage`、`editUserMessage`、fork 等修改已有 transcript 的操作，以及 `getCompactionState`、manual compaction（只对支持的 DeepChat session 生效）和 `respondToToolInteraction`。本次新增 `isPendingQueueResumeAvailable`/`resumePendingQueue`/`retryPendingQueueInput`（`turn.ts:213-244`，只对 DeepChat session 生效），路由 `sessionsResumePendingQueueRoute`/`sessionsRetryPendingQueueInputRoute`（`src/main/session/routes.ts:265-287`）；`sessionsListPendingInputsRoute` 现在返回 `{ items, resumeAvailable }`（`:247-266`）。这些操作在持久化层的数据语义（retry 是否复制消息、delete 是否物理删除、fork 的父子关系）本次未展开。失败 assistant 消息保留 `error` 状态和错误 block，用户可通过 retry/fork 等操作再次产生新 turn；重试/恢复时如何选择起始上下文见对话请求与上下文笔记 §7。
 
 ## 5. 列表、分页、搜索与定位
 
@@ -147,9 +152,11 @@ message store 的核心状态包括 `messageCache`、`streamingBlocks`、当前 
 - message 表与状态：`src/main/session/data/tables/deepchatMessages.ts:8-54`、`:157-231`
 - assistant block 表：`src/main/session/data/tables/deepchatAssistantBlocks.ts:76-115`、`:223-264`
 - transcript 生命周期：`src/main/session/data/transcript.ts:166-381`
-- pending input DTO：`src/shared/types/agent-interface.d.ts:258-275`
+- pending input DTO：`src/shared/types/agent-interface.d.ts:259-281`
+- pending input 表与迁移：`src/main/session/data/tables/deepchatPendingInputs.ts`（`retry_required_at`、schema v67）
+- pending input store 与恢复：`src/main/session/data/pendingInputStore.ts:349-383`、`src/main/session/data/pendingInputs.ts:392-468`
 - 会话字段：`src/main/session/data/tables/newSessions.ts:13-30`
-- turn 操作：`src/main/session/turn.ts:36-405`
+- turn 操作：`src/main/session/turn.ts:36-405`、`:213-244`（resume/retry queue）
 - 会话内查找：`src/renderer/src/features/chat-page/composables/useChatSearch.ts`、`src/renderer/src/lib/chatSearch`
 - 跨会话 FTS 搜索：`src/main/session/data/tables/deepchatSearchDocuments.ts:47-56`、`:210-265`、`:309-335`、`src/main/mcp/inMemoryServers/conversationSearchServer.ts:465-494`
 - display message 稳定缓存：`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:341-425`

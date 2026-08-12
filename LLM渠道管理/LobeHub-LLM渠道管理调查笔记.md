@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`4edba1b75a97b91c28ad48cd1cc90528defa17ad`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -91,7 +91,7 @@ Agent、Topic 和 Message 都分别保存 `provider` 与 `model`。新 Topic 会
 
 ### 1.3 内置目录、环境变量与用户差量
 
-[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照的固定列表有 83 个，商业构建还可条件加入品牌 Provider `lobehub`，合计 84 个。
+[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照（HEAD）的固定列表有 84 张卡（`index.ts` 84 个 import），其中品牌 `lobehub` 由 `ENABLE_BUSINESS_FEATURES` 条件加入（`index.ts:145-146`），即开源默认 83、商业构建 84——与上快照（4edba1b7）口径一致，成员无增减。
 
 有效配置来自三层：
 
@@ -123,13 +123,7 @@ Header 和端点规则主要由各 Provider Runtime 或 OpenAI-compatible factor
 
 ### 2.2 自定义 Provider 的协议选择
 
-自定义 Provider 创建时需要独立 ID、名称和 Base URL，可选 API Key，并通过 `sdkType` 选择适配器。当前允许的类型包括：
-
-```text
-anthropic, openai, ollama, azure, azureai, bedrock,
-cloudflare, google, huggingface, replicate, router,
-volcengine, qwen, comfyui
-```
+自定义 Provider 创建时需要独立 ID、名称和 Base URL，可选 API Key，并通过 `sdkType` 选择适配器。类型层 `AiProviderSDKEnum` 仍保留 14 种（`anthropic, azure, azureai, bedrock, cloudflare, comfyui, google, huggingface, ollama, openai, qwen, replicate, router, volcengine`，`packages/model-bank/src/types/aiProvider.ts`），但**自定义 Provider 创建界面已收敛为 9 个选项**（`src/features/Settings/provider/features/customProviderSdkOptions.ts:3-13`：openai/azure/anthropic/google/cloudflare/qwen/volcengine/ollama/router）——`azureai`/`bedrock`/`huggingface`/`replicate`/`comfyui` 在类型与 API 层仍可写，只是不再出现在 UI 选项中。
 
 运行时不是根据 URL 猜协议，而是按 Provider 元数据中的 SDK Type 选择 Model Runtime。相同 OpenAI 兼容协议可以对应多个不同 Provider ID，各自保存 Base URL、Key、模型目录和开关。
 
@@ -218,11 +212,11 @@ Provider 设置页的模型列表则用 `mergeArrayById(defaultModels, aiModels)
 
 - Model Select 可按 vision、functionCall、reasoning 等 `abilities` 过滤；
 - capability 决定上传、工具、搜索、思考、结构化输出和多模态控件；
-- `settings.extendParams` 决定展示哪一种 reasoning effort、thinking budget、image aspect ratio、verbosity 等扩展参数；
+- `settings.extendParams` 决定展示哪一种 reasoning effort、thinking budget、image aspect ratio、verbosity 等扩展参数；推理强度参数新增了**用户级模型实例配置层**（提交 `03929d283`）：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，`packages/model-bank/src/types/aiModel.ts:323-349`）按 `userId + providerId + modelId` 保存该模型实例的 reasoning-effort 族默认值（`AiModelModel.updateModelReasoningConfig`），运行时经 `modelExtendParams` 映射进请求参数；与 Agent 级 `chatConfig` 的模型专属字段（gpt5ReasoningEffort 等）并存，两层的合并/覆盖优先级本次未走通（见未验证事项）。
 - `disabledParams` 会隐藏并从出站请求删除模型拒绝的 temperature/top-p 等字段；
 - `searchImpl` 区分 tool、params、internal 三种联网实现；
 - `contextWindowTokens` 用于上下文预算与模型详情，`maxOutput` 约束生成；
-- pricing 驱动模型详情和 Message Usage 费用展示，品牌 Provider 还可在展示前替换为 credits 定价。
+- pricing 驱动模型详情和 Message Usage 费用展示，品牌 Provider 还可在展示前替换为 credits 定价；Model Bank 定价的音频输入费用估计（`Pricing` 的 audio 维度，提交 `cd474dfcc`）也会进入成本展示与 Message Usage 费用计算。
 
 这些字段不会触发跨 Provider 调度。即使两个渠道中同一个模型的评分或价格不同，普通聊天仍使用 Topic/Agent 中显式保存的 Provider。
 
@@ -322,7 +316,7 @@ Model Runtime 根据内置 Provider ID或自定义 Provider 的 `sdkType` 选择
 
 Client 和 Server Agent Runtime 都使用这套策略。Provider 和模型在 `call_llm` 准备阶段已固定，重试不会跨 Provider 或跨模型。
 
-品牌 Provider `lobehub` 被列入 `noRetryProviders`，Client 和 Server Transport 都不会在 Agent Runtime 再自行重放该逻辑渠道。结合 RouterRuntime 的 fallback 扩展面，可推断其意图是让品牌渠道自身处理一次请求内的路由；但真实策略未在开源 Router 配置中，不能继续推断具体 SLA 或算法。
+品牌 Provider `lobehub` 被列入 `noRetryProviders`，Client（`src/store/chat/agents/transports/ClientLLMTransport.ts`）和 Server Transport 都不会在 Agent Runtime 再自行重放该逻辑渠道；`resolveLLMMaxRetries`/`shouldRetryLLM` 保持默认 `maxRetries = 5`（`runtimeRetry.ts:1,30-33`）。结合 RouterRuntime 的 fallback 扩展面，可推断其意图是让品牌渠道自身处理一次请求内的路由；但真实策略未在开源 Router 配置中，不能继续推断具体 SLA 或算法。
 
 还需注意：旧的或零散调用所用 `fetchSSE()` 本身没有这套业务级重试循环，不能把 Agent Runtime 的 5 次重试描述成所有 ModelRuntime 调用的统一保证。
 
@@ -373,6 +367,8 @@ CLI 通过已认证的 tRPC 调用服务器，Key 在服务端入库前加密。
 
 导入器对 `aiProviders` 使用保留 ID、冲突时 skip 的策略，对 `aiModels` 保留 `providerId + modelId` 关系。它没有对 Provider 密文做解密再加密，因此不是跨主密钥迁移工具。
 
+工作区 API Key 与 Provider 凭据是两套独立机制：`api_keys` 表新增 `capability_scopes` 列（提交 `0c7e2c713`/`ee7b69d17`/`a9bf96d95`/`b0fbd5f18`），工作区 API Key 按成员权限收敛作用域，受限 Key 仍可访问 `/users/me`；本节的静态加密结论不涉及这类 Key。
+
 ## 8. 连接测试与可观测性
 
 ### 8.1 Web 与 CLI 有两条检测入口
@@ -399,7 +395,8 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - Runtime 和 Transport 记录请求错误；
 - 连接检测带 trace 名称，可进入已有 tracing 链路；
 - RouterRuntime 可通过 `onRouteAttempt` 记录 option、channel ID、API type、耗时、成功和错误；
-- RouterRuntime 还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata。
+- RouterRuntime 还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata；
+- `packages/model-runtime/src/core/providerDiagnostics.ts`（`ProviderResponseDiagnostics`，`appendRawProviderEvent`/`captureRawProviderResponse`）在 provider 边界捕获原始响应事件（有界记录、超限丢弃计数，避免污染 Redis 序列化），是 provider 层新增的诊断捕获点；`signatureScope.ts` 处理签名级（reasoning 等）的状态作用域。
 
 但这些信号默认没有形成普通 Provider 的健康调度闭环。观测到失败不等于后续请求会降低该渠道权重或熔断。
 

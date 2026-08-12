@@ -2,9 +2,9 @@
 
 > 调查对象：`../../hermes-agent`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`01a1037d1e6d7b6eb96a786ef282c3aea4818194`（分支：`main`）
+> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、MEDIA 等关键词；重点阅读 `tools/code_execution_tool.py`、`tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/desktop_ui.py`、`apps/desktop/src/store/artifacts.ts`、`apps/desktop/src/store/preview.ts`、`apps/desktop/src/app/chat/right-rail/preview-*.tsx`、`tui_gateway/server.py`、`gateway/platforms/base.py` 等；未运行应用与测试
 >
@@ -37,7 +37,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 **输出协议（三层，均非类型化）**：
 
-- `MEDIA:<absolute-path>`：唯一由"模型/工具 → 平台"单向消费的协议。工具端生产（`tools/tts_tool.py:3131`、`tools/mcp_tool.py:785,873`、`tools/flux3_video_tool.py:506`、`tools/browser_tool.py:2092`）；平台提示词教会模型在回复中输出（`agent/prompt_builder.py:706-720`，如 WhatsApp/Telegram 平台提示"include MEDIA:/absolute/path/to/file in your response"）；消息平台拦截为原生附件（`gateway/run.py:1443-1539` 对 `text_to_speech`/`image_generate`/`bfl_flux3_get_result` 白名单工具做当前回合自动追加，`gateway/platforms/base.py` 有递送安全根校验）；桌面渲染器把 `MEDIA:` 行改写成 `[Audio: name](#media:…)` 链接再渲染为播放器（`apps/desktop/src/lib/chat-messages.ts:136-150`、`apps/desktop/src/lib/media.ts:57-59`）。转义/误触发：非白名单工具结果中的 `MEDIA:` 示例串不会被递送（`run.py:1430-1441` 注释）。
+- `MEDIA:<absolute-path>`：唯一由"模型/工具 → 平台"单向消费的协议。工具端生产（`tools/tts_tool.py:3455/3663`、`tools/mcp_tool.py:915/967`、`tools/video_generation_tool.py`、`tools/browser_tool.py`）；平台提示词教会模型在回复中输出（`agent/prompt_builder.py:793-830`，如 WhatsApp/Telegram 平台提示"include MEDIA:/absolute/path/to/file in your response"）；消息平台拦截为原生附件（`gateway/run.py:1550-1693`：扩展锚定的 `MEDIA:` matcher——裸 prose 中的示例串（无可递送扩展名）永不递送，`image_generate` 等工具的本地文件路径字段被提取为递送目标，`gateway/platforms/base.py:1180-1240` 有递送安全根校验：`~/.hermes/cache/*` 白名单 + 10 分钟新鲜度 + 系统路径/凭据子路径硬拒）；桌面渲染器把 `MEDIA:` 行改写成 `[Audio: name](#media:…)` 链接再渲染为播放器（`apps/desktop/src/lib/chat-messages.ts:136-150`、`apps/desktop/src/lib/media.ts:57-59`）。**媒体保真强化**：queued resend 保留受保护的 `MEDIA:` tokens 与后续跟进媒体（`1648ab3a`/`808c8570`/`a52dd17d`/`0b17b691`，失败首回合跳过附件上传但保持投递），容器→宿主媒体路径翻译扩到 home/cache/in-process 网关（`238351a6`/`a7dd8854`/`fe54ab4f`），terminal-backend 的读取统一经共享媒体解析器（`f2e936da`/`9eb3ac50`），draft 终态发送不再带 `expect_edits`（`0f227271`）；图片生成后处理新增 **sub-2MP 默认 upscale**（FAL Clarity Upscaler 链，`66ea4e68`/`137960c9`，`tools/image_generation_tool.py:11-153` 按模型 `upscale` 旗标门控）。
 - `#media:`/`#preview/` Markdown href：桌面渲染器在 Markdown 链接层消费，`MarkdownLink` 组件分发（`markdown-text.tsx:252-269`）。注意 `previewMarkdownHref()`（`preview-targets.ts:27`）在本快照中没有生产侧调用者——`[Preview: x](#preview/y)` 协议的写入端缺失，仅解析端存活（`assistant-message.tsx:84-94` 从收尾文本提取主要预览目标）。
 - 无结构化 tool part 承载 artifact。工具结果就是 JSON 字符串，桌面端用字段名正则（`KEY_HINT_RE`）从工具结果与转写中挖出文件路径/URL 填入"Artifacts"画廊页（`app/artifacts/artifact-utils.ts:20-26,202-244`）。
 
@@ -96,7 +96,8 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - **`terminal` 环境**：local/docker/ssh/modal/daytona/singularity/vercel（`tools/environments/`）。
 - **桌面预览运行时**：webview/iframe 均为沙箱，无网络桥（HTML artifact 内脚本不能请求外部资源也不会被宿主响应）。
 - **桌面宿主桥**（`window.hermesDesktop`）：类型化窄桥——文件读写（`readDesktopFileDataUrl` 等，`lib/desktop-fs.ts`）、git、`hermes-media://` 流媒体协议、`saveImageBuffer`/`openPreviewInBrowser`/`normalizePreviewTarget`（`lib/local-preview.ts:147-179`、`lib/media.ts:122-127`）。
-- **网关媒体递送权限**：缓存根目录白名单（`~/.hermes/cache/{images,audio,videos,documents,screenshots}` 等）+ 10 分钟新鲜度信任 + `/etc`、`/root` 等系统路径与 `$HOME` 下凭据目录硬拒（`gateway/platforms/base.py:1160-1221`）；`/api/files/download` 带查询 token 鉴权（`hermes_cli/web_server.py:2416`）。
+- **read_window_below**（`tools/read_window_tool.py`，`406501fd`）：桌面能力桥工具——询问宿主"Hermes 窗口正下方是哪个 OS 窗口"（Windows 侧经 Electron 主进程的 get-windows 原生绑定枚举，`f22ae729`/`f463a7e8`/`2cd9e177`），经 `window.read.request/respond` 阻塞桥回传序列化窗口元数据（`server.py:5870-5879` `read_window_below_callback`，30s 超时）；桌面对应答失败给出原因（`04afc8d4`）。与 `read_preview`/`read_terminal` 同属"模型查询桌面环境"的能力桥族。
+- **网关媒体递送权限**：缓存根目录白名单（`~/.hermes/cache/{images,audio,videos,documents,screenshots}` 等）+ 10 分钟新鲜度信任 + `/etc`、`/root` 等系统路径与 `$HOME` 下凭据目录硬拒（`gateway/platforms/base.py:1180-1240`）；`/api/files/download` 带查询 token 鉴权。
 
 ## 8. 持久化、恢复、分享与导出
 
@@ -107,7 +108,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 ## 9. 模型回流、对象感知与持续维护
 
-- 可查询：`read_preview`（当前预览标签页正文，`tools/read_preview_tool.py`，返回 `{kind,url,title,text,…}`，file 标签只回身份、"artifact tab points back at the conversation"）、`read_terminal`、`read_file`（任何已写文件）、`session_search`（`tools/session_search_tool.py`，跨会话检索转写）、`open_preview`/`focus_pane`（投影面控制）。
+- 可查询：`read_preview`（当前预览标签页正文，`tools/read_preview_tool.py`，返回 `{kind,url,title,text,…}`，file 标签只回身份、"artifact tab points back at the conversation"）、`read_terminal`、`read_file`（任何已写文件）、`session_search`（`tools/session_search_tool.py`，跨会话检索转写）、`open_preview`/`focus_pane`（投影面控制）、**`read_window_below`**（桌面下方 OS 窗口元数据，见 §7）、**`vision_analyze` 区域缩放**（`tools/vision_tools.py:681` `_crop_image_region`，`e166159f`：`region=[x1,y1,x2,y2]` 在原图像素坐标上裁剪放大细节再分析，源自 Qwen 的 zoom-image 方案）。
 - 不可查询：artifact 注册表对模型完全不可见——没有列出 artifact、读取版本源码、选择版本的模型侧通道。模型对"自己生成的 HTML"的唯一读回途径是 `read_preview`（若该 artifact 恰好开在预览面板里）或磁盘文件（若曾落盘）。
 - 持续维护：同一会话内模型重新生成 → 同 slug 追加版本 → 已开标签页自动跟进（这是"持续维护"的最强形式，但**无需模型感知**——注册表由渲染器自动维护，模型并不知道自己在产生"版本"）；跨会话无对象身份延续（slug 不含会话外身份，重开会话即新注册表）。
 
@@ -145,11 +146,11 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - `apps/desktop/src/app/chat/right-rail/preview-file.tsx`：文件渲染/diff/就地编辑与冲突
 - `apps/desktop/src/lib/preview-targets.ts`、`lib/media.ts`、`lib/chat-messages.ts`：`#preview/`、`#media:`、`MEDIA:` 三协议消费端
 - `apps/desktop/src/app/artifacts/artifact-utils.ts`：跨会话画廊挖掘
-- `tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/focus_pane_tool.py`、`tools/desktop_ui.py`：桌面能力桥工具
+- `tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/focus_pane_tool.py`、`tools/desktop_ui.py`、`tools/read_window_tool.py`：桌面能力桥工具
 - `tools/code_execution_tool.py`：模型侧 Python 沙箱（UDS/TCP RPC、白名单、审批）
 - `tools/patch_parser.py`：v4a 结构化文件编辑
 - `tools/tool_result_storage.py`：大结果落盘回读
-- `agent/prompt_builder.py:706-720`：`MEDIA:` 协议的平台提示词
-- `gateway/run.py:1443-1539`、`gateway/platforms/base.py:1160-1233`：媒体递送与权限
-- `tui_gateway/server.py:5280-5367`：编辑快照与 inline diff 事件；`5987-6110`：预览重启临时 agent
-- `hermes_state.py:1890`、`tui_gateway/methods_session.py`：会话持久化与恢复
+- `agent/prompt_builder.py:793-830`：`MEDIA:` 协议的平台提示词
+- `gateway/run.py:1550-1693`、`gateway/platforms/base.py:1180-1240`：媒体递送与权限
+- `tui_gateway/server.py`：编辑快照与 inline diff 事件、预览重启临时 agent、`window.read.request` 桥（5870-5879）
+- `hermes_state.py`、`tui_gateway/methods_session.py`：会话持久化与恢复

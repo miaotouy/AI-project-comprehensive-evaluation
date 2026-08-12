@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -34,7 +34,7 @@ DeepChat Chat 是 main process 驱动、renderer 订阅的持久化会话系统�
 ## 产品表面与系统边界
 
 - 产品表面：Electron 桌面 GUI。聊天能力（会话、队列、上下文、流式、持久化、搜索）由 main process 提供，renderer 是投影层。
-- 边界：subagent session 在 ChatPage 中只读（`ChatPage.vue:431-435`），仍可显示消息、plan、工具状态和最终 child result；ACP runtime 的具体外部协议 payload 未在本次专题展开。
+- 边界：subagent session 在 ChatPage 中只读（`ChatPage.vue:428` `isReadOnlySession`，session kind 为 subagent），仍可显示消息、plan、工具状态和最终 child result；ACP runtime 的具体外部协议 payload 未在本次专题展开。
 - 通用主题、弹窗库、动画等非聊天主链基础设施不在本文件范围（本文件无独立通用界面盘点章节）。
 
 ## 端到端聊天主链
@@ -63,7 +63,7 @@ ChatPage
 - `deepchat_messages`（`deepchatMessages.ts:8-54`）：`id/session_id/order_seq/role/content/status/metadata` 等，状态仅 `pending|sent|error`，按 `(session_id, order_seq)` 建索引。
 - `deepchat_assistant_blocks`（`deepchatAssistantBlocks.ts:76-115`）：`message_id + block_index` 保存结构化 block，`replaceForMessage` 一次替换保持顺序。
 - renderer 投影：message store 的 `messageCache`/`streamingBlocks`/`streamRevision` 与游标分页（`stores/ui/message.ts`）；`useDisplayMessages`（`useDisplayMessages.ts:341-425`）按持久化 id 重建显示列表，用 `assistantRenderKeyByMessageId` 关联 pending 与最终落盘的同一消息。
-- 队列记录（`src/shared/types/agent-interface.d.ts:258-275`）：state 为 `pending|claimed|blocked|consumed`，保存 payload、关联 message ids、assistant id、阻塞原因与时间戳。
+- 队列记录（`src/shared/types/agent-interface.d.ts:259-281`）：state 为 `pending|claimed|blocked|retry_required|consumed`，保存 payload、关联 message ids、assistant id、阻塞原因与时间戳。
 
 ## 专项导航
 
@@ -75,7 +75,9 @@ ChatPage
 
 ## 关键能力与已确认边界
 
-- **pending input 独立通道**：steer、queue、工具 question/permission response 是 session turn 的独立输入通道（`turn.ts:36-405`），交互 UI 不把 pending input 拼进已完成消息；失败 assistant 消息保留 `error` 状态与错误 block，可 retry/fork。
+- **pending input 独立通道**：steer、queue、工具 question/permission response 是 session turn 的独立输入通道（`turn.ts:36-405`），交互 UI 不把 pending input 拼进已完成消息；失败 assistant 消息保留 `error` 状态与错误 block，可 retry/fork。另有两项 queue 语义（源码确认）：
+  - `retry_required` 状态（#2137）：队列记录被释放后若未真正发送，进入 `retry_required`（持久化形态为 `blocked` + `retry_required_at` 列，`deepchatPendingInputs.ts` schema v67）；`SessionTurn` 新增 `resumePendingQueue`/`retryPendingQueueInput` 操作（`turn.ts:213-244`），路由 `sessionsResumePendingQueueRoute`/`sessionsRetryPendingQueueInputRoute`。
+  - 重启恢复（831b820/e41c08e）：`recoverInputsAfterRestart` 返回受影响会话与保留的 queue 输入集合；claimed 但未物化用户消息的 queue 项释放回队列，未读 steer 消息标记失败（`pendingInputs.ts:392-468`）。
 - **消息窗口化**：`MessageList`/`MessageListRow` 只接收当前窗口的 `MessageListItem`（`MessageList.vue:1-65`）；`useMessageWindow` 以估算高度、ResizeObserver 实测、顶部/底部 spacer 与逻辑 anchor 保存滚动位置，`useMessageVirtualization` 在超阈值时二分查找 viewport 附近索引；同时服务历史分页与流式追加，远离 viewport 的 settled 消息仅保留估算高度（`ChatPage.vue:512-584`、`:728-826`）。
 - **双层搜索**：会话内 `useChatSearch` 只匹配已加载的 display messages，不触发数据库查询；跨会话 FTS5（`deepchat_search_documents` 外部内容表 + 三个同步触发器，`deepchatSearchDocuments.ts:309-335`）经 `searchFts` bm25 查询、不可用时回退 `searchLike`；内存 MCP `conversationSearchServer`（:465-494）同时服务模型工具与设置页。
 - **边界**：transcript 同时服务展示、搜索、Tape 和 usage/trace 等二级数据；附件、搜索结果快照与 legacy import 表的完整迁移链本次未追踪。
@@ -89,7 +91,7 @@ ChatPage
 
 ## 关键源码索引
 
-- turn 操作面：`src/main/session/turn.ts:36-405`；pending input DTO：`src/shared/types/agent-interface.d.ts:258-275`
+- turn 操作面：`src/main/session/turn.ts:36-405`；pending input DTO：`src/shared/types/agent-interface.d.ts:259-281`
 - transcript 生命周期：`src/main/session/data/transcript.ts:166-381`
 - 表定义：`src/main/session/data/tables/deepchatMessages.ts:8-54`、`deepchatAssistantBlocks.ts:76-115`、`newSessions.ts:13-30`
 - 会话内查找：`src/renderer/src/features/chat-page/composables/useChatSearch.ts`、`src/renderer/src/lib/chatSearch`

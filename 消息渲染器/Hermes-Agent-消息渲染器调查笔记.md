@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\hermes-agent`
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`01a1037d1e6d7b6eb96a786ef282c3aea4818194`（分支：`main`）
+> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
 >
 > 调查方式：静态代码调查（未运行、未构建）。重点读取 `tui_gateway/`（Python 网关与事件发射）、`ui-tui/`（Ink/React TUI 渲染链）与 `apps/desktop/src/components/assistant-ui/`（Electron 桌面渲染链），辅以 `web/src`、`apps/shared`、相关测试文件的全局搜索与局部阅读。
 >
@@ -65,7 +65,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 ### 2. 流式链路：缓冲、节流与收口
 
 **Python → TUI：**
-- `tui_gateway/server.py`：核心 `_stream(delta)`（行 9614）在 `session["history_lock"]` 下 `_append_inflight_delta` 后发射 `message.delta {text}`（可选 `rendered` 若流式渲染器存在）；`message.complete`（行 9870）发射 `{"text": raw, "usage": _get_usage(agent), "status": status}`，另可携带 `reasoning`、`warning`、`response_previewed`、`billing`+`failure_reason`、`rendered`（见 9820–9850）。
+- `tui_gateway/server.py`：核心 `_stream(delta)`（行 9968）在 `session["history_lock"]` 下 `_append_inflight_delta` 后发射 `message.delta {text}`（可选 `rendered` 若流式渲染器存在）；`message.complete`（行 10232 发射）携带 `{"text": raw, "usage": _get_usage(agent), "status": status}`，另可携带 `reasoning`、`warning`、`response_previewed`、`billing`+`failure_reason`（结构化计费墙描述，10206-10209）、`rendered`（10196-10212）。收口行为还包括：`interrupted` 状态下以 "Operation interrupted: waiting for model response" 开头的取消元数据文本会被清空，避免被当作代理回复渲染（10180-10188）；无可见文本且带真实错误时用 `Error: <detail>` 兜底成可见文本（10176-10179）；`status="error"` 时额外携带 `error`+`recoverable` 字段（10226-10230）。
 - 事件类型白名单 `tui_gateway/ws.py:53` 把 `message.delta / reasoning.delta / thinking.delta` 判为高频帧，做 **token 合批**（`_TOKEN_COALESCE_S=0.033`，约 30fps），任何非流式帧都会先冲刷缓冲确保顺序；WS transport 还 `TCP_NODELAY`（`_disable_nagle`）。
 - `event_publisher.py`：桌面侧向 dashboard 回连的 PTY 广播使用队列 `_QUEUE_MAX=256`、daemon 线程、失败静默随丢，永不阻塞 agent 循环（注释明确）。
 
@@ -79,12 +79,13 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 ### 3. 列表层：窗口化、高度与滚动锚定
 
 - **TUI 用自定义虚拟化**：`ui-tui/hooks/useVirtualHistory.ts` 常量 `ESTIMATE=4`、`OVERSCAN=20`（曾为 40，“YK node p99 106ms”）、`MAX_MOUNTED=120`（曾为 260，为避免 OOM GC 压力 #46699072 调整）、`COLD_START=30`、`PESSIMISTIC=1`、`QUANTUM=10`；用 `useDeferredValue` + `useSyncExternalStore`，外接 `@hermes/ink` 的 `ScrollBox`。transcript 行由 `messageId(msg):c{cols}` 键驱动（`useMain.ts:342`），**拖拽 resize 时每行重挂载**，用 `RESIZE_COALESCE_MS=32` coalescer 限流到 ≤30fps（`mainApp.ts:159`）。
-- **桌面列表不虚拟化**，改用**渲染成本预算 + `content-visibility:auto`**：`apps/desktop/.../assistant-ui/thread/list.tsx` `RENDER_BUDGET=300`（单位：parts=1、每512字符+1）、`FIRST_PAINT_BUDGET=20`（首次同步 commit 后 rAF 补全）、“show earlier”分页、不触 scrollTop 以免与 `use-stick-to-bottom` 打架（`list.tsx:40-78`）。
+- **桌面列表不虚拟化**，改用**渲染成本预算 + `content-visibility:auto`**：`apps/desktop/.../assistant-ui/thread/list.tsx` `RENDER_BUDGET=600`（pane 分屏时按 `$mountedTranscriptPanes` 分摊，单窗格下限为 1/4 预算）、`FIRST_PAINT_BUDGET=20`（首次同步 commit 后 rAF 分步补全，`BACKFILL_STEP` 每帧一步）、`MIN_VISIBLE_GROUPS`（真实分页时至少保留若干组）、“show earlier”分页、不触 scrollTop 以免与 `use-stick-to-bottom` 打架（`list.tsx:40-78` 附近）。
+- **桌面渲染成本按 store/paint 双轨计价**：`apps/desktop/src/lib/render-weight.ts` 拆成 `messageStoreWeight`（保护堆内存，消息归一化成本，parts+每 512 字符+1）与 `messagePaintWeight`（保护绘制，按折叠后实际渲染形态计价：折叠工具行/思考行 = 1 单位，图片/澄清/委派卡片 = 6 单位，`todo` 提升出 transcript），分类依据 `apps/desktop/src/lib/tool-render-class.ts`（`isFileEditTool`/`isCardTool`/`isSilentTool`，edit_file/patch/write_file 视为交付物卡、clarify/delegate_task/image_generate 自绘卡、react_to_message/todo 静默）。修复方向是“重而短”与“长而轻”的会话统一由同一规则约束。
 - 行高度：TUI 由 `estimateRows`（`lib/text.ts:308`，带 fence/表格识别）预估算；desktop 用浏览器原生布局 + `contain-intrinsic-size:auto 37.5rem`（list.tsx:542），未用虚拟测量库。
 
 ### 4. 消息壳层与角色分派
 
-- 消息组件：`ui-tui/src/components/messageLine.tsx`（`MessageLine = memo`）按 role 分派 `Md`/`StreamingMd`/`ToolTrail`（含 `TodoPanel`）；系统消息（`display_kind=hidden/model_switch/auto_continue`）在 `ui-tui/src/domain/messages.ts` 处理。`ui-tui/src/domain/roles.ts` 的 `ROLE` 表定义助手/系统/工具/用户的 body、glyph、prefix 与主题色。
+- 消息组件：`ui-tui/src/components/messageLine.tsx`（`MessageLine = memo`）按 role 分派 `Md`/`StreamingMd`/`ToolTrail`（含 `TodoPanel`）；系统消息（`display_kind` 取 `hidden/model_switch/auto_continue/personality_switch`）在 `ui-tui/src/domain/messages.ts` 处理——`personality_switch` 生成 `{kind:'event', role:'system', text:'personality changed'}` 事件行（`domain/messages.ts:64-70`）；桌面侧 `apps/desktop/src/lib/chat-messages.ts:997` 也把它归为 system 角色并显示 "personality changed" 时间线文案。`ui-tui/src/domain/roles.ts` 的 `ROLE` 表定义助手/系统/工具/用户的 body、glyph、prefix 与主题色。
 - 会话/状态壳：`ui-tui/src/components/appLayout.tsx`（含 TranscriptScrollbar、StreamingAssistant 拿 `prevMsg=historyItems[last]`、Activity/Tool activity 区），`streamingAssistant.tsx` 用 `turnStore` 选择器（`streamSegments`/`streaming`/`tools`）渲染回合内的“附随面板”。桌面为 `app/chat/session-view.tsx` + `assistant-ui/thread/*`（`assistant-message`、`user-message`、`system-message`、`messenger-parts`）。
 - **操作栏 / 状态反馈**：TUI 在`statusBar` / `activity` / `notice`；desktop 有 `tool-group`、`run-ticker`、message reactions。
 
@@ -100,7 +101,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 
 #### 5.2 桌面（`apps/desktop/src/components/assistant-ui/markdown-text.tsx`）
 
-使用 `@assistant-ui/react-markdown` 的 `StreamdownTextPrimitive`（模式=`streaming`），preprocess 用 `tailBoundedReMark` 基于 `lib/markdown-preprocess.ts`（含 `$` 货币保护），块边界由 `parseMarkdownIntoBlocksCached`（`lib/markdown-blocks.ts`，`marked` 完整 lex）驱动；数学用 `lib/katex-math.ts`（记忆化 `remark-math`+`rehype-katex`，`singleDollarTextMath:true`）；代码用 `@streamdown/code` + Shiki（异步按需加载，防 chunk 膨胀）；`detectArtifact` → `ArtifactCard`（右栏）；嵌入系统 `embeds/`（youtube/vimeo/twitter/tiktok/spotify/pinterest/maps/instagram）与 `MEDIA:` 直接 `<video>/<audio>`、图片文件可从网关下载；链接拦截 `mediaPath/previewTarget/sessionRef` 类自定义协议。
+使用 `@assistant-ui/react-markdown` 的 `StreamdownTextPrimitive`（模式=`streaming`），preprocess 用 `tailBoundedReMark` 基于 `lib/markdown-preprocess.ts`（含 `$` 货币保护），块边界由 `parseMarkdownIntoBlocksCached`（`lib/markdown-blocks.ts`，`marked` 完整 lex）驱动；数学用 `lib/katex-math.ts`（记忆化 `remark-math`+`rehype-katex`，`singleDollarTextMath:true`）；代码用 `@streamdown/code` + Shiki（异步按需加载，防 chunk 膨胀）；`detectArtifact` → `ArtifactCard`（右栏）；嵌入系统 `embeds/`（youtube/vimeo/twitter/tiktok/spotify/pinterest/maps/instagram）与 `MEDIA:` 直接 `<video>/<audio>`、图片文件可从网关下载；链接拦截 `mediaPath/previewTarget/sessionRef` 类自定义协议。推理摘要块修复：gpt-5.x 等“按完成 part 推送 delta”的模型在 chat 线上会把相邻摘要块粘成 `**One****Two**`，渲染器在 `ReasoningTextPart` 处用 `separateGluedReasoningBlocks`（`lib/reasoning-blocks.ts:29`，`message-parts.tsx:253`）幂等插入换行拆块（后端已随 delta 插断行，此修复覆盖历史持久文本与仍粘合的 provider）。
 
 #### 5.3 桌面 dashboard（`web/src/components/Markdown.tsx`）
 
@@ -111,6 +112,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 - 工具 UI：TUI `thinking.tsx` 的 `ToolTrail` 把 `tools[]`/`turnTrail`/`activity` 按组渲染（`parseToolTrailResultLine`…），活跃工具显示 braille spinner + 耗时，verbose args 用 `boundedLiveRenderText`（≤800 字符/12 行）；`ToolCalls`/`TodoPanel`（待确认渲染细节）。`SubagentAccordion` 以树状展示 spawn tree（深度/热度色/sparkline/总览）。
 - reasoning：`lib/reasoning.ts splitReasoning`；`thinking` 折叠（`collapsed|truncated|full`），`thinkingPreview` 截取 COT max 160。
 - 附件：TUI 无富附件（`MEDIA:` 行→文件链接）；桌面支持媒体文件下载、`llm` 会话引用、`preview` 目标（右键预览）。
+- 桌面工具行数据装配：`apps/desktop/src/lib/chat-messages.ts` 的 `storedToolMessagePart` 在会话恢复/重渲染时优先从 `toolMessage.args` 解析完整参数重建命令，`context`（80 字显示预览）作为标题侧占位——避免工具行只显示截断预览（`:860-874`）。
 
 ### 7. HTML、Artifact 与安全隔离
 
@@ -132,7 +134,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 | TUI transcript | 虚拟列表（`MAX`/`OVERSCAN`/`QUANTUM`） + `useDeferredValue`；拖拽 coalescing | `useVirtual.c.ts` |
 | TUI 流式 | 流式状态对象 `boundedLiveRenderText`（16K/240行） | `lib/text.ts` |
 | 桌面 Markdown | `katex` 记忆化 + 代码延迟、`marked` 块缓存、内容 `visible:auto` | `markdown-text.tsx:471` 等 |
-| 桌面列表 | 渲染预算（parts+512字）+ 首屏小预算 + `content-visibility` | `thread/list.tsx` |
+| 桌面列表 | 渲染预算（store/paint 双轨定价，`RENDER_BUDGET=600` 按窗格分摊）+ 首屏小预算分步回填 + `content-visibility` | `thread/list.tsx`、`lib/render-weight.ts`、`lib/tool-render-class.ts` |
 
 测试覆盖见下节索引 `tests/` 与 `ui-tui/src/__tests__`（`markdown/streamingMarkdown/text/virtualHeights/reasoning/messageLine/messages/turn` 等）与 `apps/desktop` 的 `markdown-text.*` 测试。
 
@@ -165,7 +167,7 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 ## 关键源码索引
 
 - Python 网关：
-  - `tui_gateway/server.py`: `_stream` 流式回调(9614)、`message.complete` 载荷组装(9834-9850)、`_emit`(1539)、`_append_inflight_delta`(7100)、`_emit_terminal_turn_error`(7593→7626)、`_agent_cbs`(5612，reasoning_callback/`thinking_callback`/interim)、子代理镜像(5550-5609)、`_pending_reaction_notes`(见 `methods_prompt.py`)。
+  - `tui_gateway/server.py`: `_stream` 流式回调(9968)、`message.complete` 载荷组装(10196-10212，发射 10232)、`_emit`(1573)、`_append_inflight_delta`(7303)、`_emit_terminal_turn_error`(7796)、`_agent_cbs`(5794，reasoning_callback/`thinking_callback`/interim/reaction/`read_window_below_callback`)、子代理镜像 `_mirror_subagent_to_child`(5733)、`_pending_reaction_notes`(见 `methods_prompt.py`)。
   - `tui_gateway/ws.py`: WS transport、token 合批(53-60)、`_disable_nagle`(268)。
   - `tui_gateway/event_publisher.py`(PTY broadcast, `_QUEUE_MAX` 备注见注释)。
   - `tui_gateway/render.py`(整个都是回退桥，options)。

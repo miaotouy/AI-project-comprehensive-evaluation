@@ -2,9 +2,11 @@
 
 > 来源：`Chat/Cherry-Studio-Chat调查笔记.md` 第 13 节「UI 交互再深挖：弹窗、状态反馈与无障碍」，原文完整搬运
 >
-> 代码快照：`0001d730aeaf26b8d68baeeb54f258851e7a2aec`（分支：`main`）
+> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 摘出日期：2026-08-11
+>
+> 更新日期：2026-08-12
 >
 > 用途：通用界面基础设施盘点（弹窗库、Toast、主题、动画、灯箱、右键双模式等），按类目边界不属于 Chat UI 主文（Chat UI 只记录与聊天主链的交点）；本目录是可选界面专题建立前的临时承接位置，专题建立后整体迁入。
 
@@ -34,8 +36,8 @@ Cherry Studio 早已从 antd Modal 迁移出来，`package.json` 里已经**没�
 ### 13.3 Loading / 骨架屏 / 空状态：三种场景三种呈现，工具执行没有独立骨架
 
 - **消息加载中**（Topic 切换/首次进入）：`MessageListInitialLoading`（`src/renderer/components/chat/messages/layout/MessageListLoading.tsx:6-52`）用 `@cherrystudio/ui` 的 `Skeleton` 拼出三条假消息（一条用户气泡 + 两条助手气泡骨架），`aria-busy="true"` 标注容器，`aria-hidden="true"` 标注骨架本体（纯装饰，不读给屏幕阅读器）。**特意延迟 160ms**（`MESSAGE_LIST_INITIAL_LOADING_DELAY_MS`）才显示骨架——如果消息在 160ms 内就加载完，骨架根本不会闪一下,这是刻意的防闪烁设计。
-- **Topic 列表为空**：`TopicListBody` 的 `emptyFallback`（`Topics.tsx:1584-1588`）就是一段居中纯文本 `t('chat.topics.empty.title')`，没有插图/图标，比消息骨架简陋得多。列表加载中另有一行文字提示"`common.loading`"（`Topics.tsx:1391-1395`），出现在已有部分数据但还在刷新时。
-- **工具调用执行中**：没有独立的"骨架屏"，走的是行内状态指示——Topic 列表行右侧的 `TopicStreamIndicator`（`Topics.tsx:1788-1828`）用 `Loader2` 旋转图标表示 `isPending`（运行中）、`CircleAlert` 表示出错、一个绿色小圆点表示"已完成但未读"（read-receipt 语义，鼠标悬停或该行被选中时会淡出，让 pin/delete 按钮顶替上来）。这个指示器专门做了"红色错误 vs 绿色完成"的视觉区分，避免早期版本"脉动琥珀色点"被误读成警告的问题（代码注释直接写了这段设计变更历史，`Topics.tsx:1816-1824`）。消息内部工具调用块（`ToolBlockGroup`/`PlaceholderShimmerText`）用的是 13.7 提到的 `animation-shimmer` 文字光泽扫过效果，而不是块状骨架。
+- **Topic 列表为空**：`TopicListBody` 的 `emptyFallback`（`Topics.tsx:1662` 附近）就是一段居中纯文本 `t('chat.topics.empty.title')`，没有插图/图标，比消息骨架简陋得多。列表加载中另有一行文字提示"`common.loading`"（`Topics.tsx:1391-1395` 附近），出现在已有部分数据但还在刷新时。
+- **工具调用执行中**：没有独立的"骨架屏"，走的是行内状态指示——Topic 列表行右侧的运行指示统一为跨面板组件 `ConversationRowStatus`（`src/renderer/components/chat/resourceList/base/ConversationRowStatus.tsx:20-51`）：状态由 `Topics.tsx:1727-1735` 派生，`pending` 用 `Loader2` 旋转图标、`error` 用 `CircleAlert`、绿色小圆点表示"已完成但未读"（read-receipt 语义，`!isActive` 才显示，悬停/聚焦时淡出让位给 pin/delete 按钮）、等待审批显示为 warning 徽标；指示器带 `aria-label` + `role="img"`。红/绿视觉区分（避免早期版本"脉动琥珀色点"被误读成警告）的设计历史注释仍在代码中。消息内部工具调用块（`ToolBlockGroup`/`PlaceholderShimmerText`）用的是 13.7 提到的 `animation-shimmer` 文字光泽扫过效果，而不是块状骨架。
 
 ### 13.4 右键/上下文菜单：双模式，可在设置里切换 Cherry 自绘 vs 系统原生
 
@@ -74,13 +76,13 @@ Cherry Studio 早已从 antd Modal 迁移出来，`package.json` 里已经**没�
 
 ### 13.8 图片/附件预览与代码块交互反馈
 
-- **图片有完整灯箱**：`ImageViewer.tsx` 包 `@cherrystudio/ui` 的 `ImagePreviewDialog`（`packages/ui/src/components/composites/image-preview/image-preview-dialog.tsx`），支持缩放/旋转/水平垂直翻转/上一张下一张（多图导航靠 `activeIndex`,`ImageViewer.tsx:107-155`），工具栏和右键菜单共享同一份 action 列表（复制图片、复制图片地址、下载,`ImageViewer.tsx:201-232`），右键菜单走的还是 13.4 提到的统一 `CommandContextMenu`（`:296-298`）。所有操作都有 toast 反馈（成功/失败,`:157-199`）。
-- **代码块复制/运行的交互反馈**：复制按钮点击后图标临时切换成对勾（`useCopyTool.tsx:18-31,51`,`useTemporaryValue` hook 控制"临时态"多久后自动复原,复制图片按钮同理有独立的 `copiedImage` 临时态）,并弹 toast（`CodeBlockView.tsx:154-164`）。“运行”仅对 Python 代码块生效（`isExecutable = codeExecutionEnabled && language === 'python'`,`CodeBlockView.tsx:114-116`），执行走**浏览器内嵌 Pyodide**（`pyodideService.runScript`,`:189-203`）而不是发到主进程开子进程,超时由偏好 `chat.code.execution.timeout_minutes` 控制,执行结果（文本/图片）展示在代码块下方的 `StatusBar`（`StatusBar.tsx`,一个纵向滚动的 `bg-muted` 面板）。工具栏本身是可弹出子菜单的 `CodeToolButton`（`CodeToolButton.tsx`,支持 `Enter`/`Space` 键盘触发,`:14-22`,有 `aria-label={tool.tooltip}`）。
+- **图片有完整灯箱**：`ImageViewer.tsx` 包 `@cherrystudio/ui` 的 `ImagePreviewDialog`（`packages/ui/src/components/composites/image-preview/image-preview-dialog.tsx`），支持缩放/旋转/水平垂直翻转/上一张下一张（多图导航靠 `activeIndex`,`ImageViewer.tsx:107-155`），工具栏和右键菜单共享同一份 action 列表（复制图片、复制图片地址、下载,`ImageViewer.tsx:201-232`），右键菜单走的还是 13.4 提到的统一 `CommandContextMenu`（`:296-298`）。所有操作都有 toast 反馈（成功/失败,`:157-199`）。另提供"保存为图片"动作，保存时把旋转/翻转**烘焙**进输出的 PNG（`transformImageToPng`，`d1ffaa82ce`；全屏观看交互 `e22a976586`）。
+- **代码块复制/运行的交互反馈**：复制按钮点击后图标临时切换成对勾（`useCopyTool.tsx:18-31,51`,`useTemporaryValue` hook 控制"临时态"多久后自动复原,复制图片按钮同理有独立的 `copiedImage` 临时态）,并弹 toast（`CodeBlockView.tsx:154-164`）。“运行”仅对 Python 代码块生效（`isExecutable = codeExecutionEnabled && language === 'python'`,`CodeBlockView.tsx:114-116`），执行走**浏览器内嵌 Pyodide**（`pyodideService.runScript`,`:189-203`）而不是发到主进程开子进程,超时由偏好 `chat.code.execution.timeout_minutes` 控制,执行结果（文本/图片）展示在代码块下方的 `StatusBar`（`StatusBar.tsx`,一个纵向滚动的 `bg-muted` 面板）。工具栏本身是可弹出子菜单的 `CodeToolButton`（`CodeToolButton.tsx`,支持 `Enter`/`Space` 键盘触发,`:14-22`,有 `aria-label={tool.tooltip}`）。代码查看器 wrapped 模式下超长不可断行内容（base64/URL/minified JSON）强制换行而非截断溢出（`CodeViewer.tsx:638-642` 的 `min-w-0` + `whitespace-pre-wrap!`，`205f042800`）。
 
 ### 13.9 响应式/窗口尺寸适配：没有断点驱动的侧栏折叠,但主窗口最小宽度会跟着页面切换
 
-- 检索侧栏容器和 `ResourceEntityRail` 未发现 `ResizeObserver`/`matchMedia`/CSS `@container` 驱动的自动折叠逻辑——侧栏展开/折叠是**手动命令**（`app.sidebar.toggle`,`HomePage.tsx:413`）,不是随窗口变窄自动收起。
-- 但主窗口的**最小可缩放宽度会随页面动态调整**：进入 Home 页面时,`useEffect` 立即调用 IPC 把主窗口最小尺寸从默认 `MIN_WINDOW_WIDTH=960px`（`src/shared/utils/window.ts:1`,写在 `windowRegistry.ts:63` 的窗口创建配置里）临时放宽到 `SECOND_MIN_WINDOW_WIDTH=520px`（`HomePage.tsx:665-670`），离开页面时 `window.main.reset_minimum_size` 还原。也就是说 Home 聊天页允许把窗口拖得比其他页面更窄。
+- 检索侧栏容器和 `ResourceEntityRail` 未发现 `ResizeObserver`/`matchMedia`/CSS `@container` 驱动的自动折叠逻辑——侧栏展开/折叠是**手动命令**（`app.sidebar.toggle`,`HomePage.tsx:408`）,不是随窗口变窄自动收起。
+- 但主窗口的**最小可缩放宽度会随页面动态调整**：进入聊天工作台时 `AppShell` 调用 IPC 把主窗口最小尺寸从默认 `MIN_WINDOW_WIDTH=960px`（`src/shared/utils/window.ts:1`,写在 `windowRegistry.ts:63` 的窗口创建配置里）临时放宽到 `SECOND_MIN_WINDOW_WIDTH=520px`（`AppShell.tsx:140` 的 `window.main.set_minimum_size`），离开页面时还原。也就是说聊天页允许把窗口拖得比其他页面更窄。
 - **阅读宽度限制**是另一套独立机制,跟窗口尺寸无关：`NarrowLayout.tsx` 把消息内容限制在 `800px`（`chat.narrow_mode` 偏好开关,默认 `true`,`preferenceSchemas.ts:184,587`）,是用户可关闭的排版偏好,不是响应式断点。
 
 ### 13.10 拖放细节：Topic 按助手分组排序有完整拖拽,按时间分组则不可拖拽;附件拖入有绿色虚线高亮
@@ -94,7 +96,7 @@ Cherry Studio 早已从 antd Modal 迁移出来，`package.json` 里已经**没�
 - **托盘**：`TrayService.ts` 在 mac 上会根据 `nativeTheme.shouldUseDarkColors` 切换亮/暗两套托盘图标（`:29`），点击托盘图标的行为受偏好 `feature.quick_assistant.click_tray_to_show` 控制——开则唤起 QuickAssistant 悬浮窗,关则唤起主窗口（`:61-71`）,这是托盘点击与"快速助手"功能的联动,但托盘本身不显示未读消息数/流式状态角标（未检索到 `setBadgeCount`/`flashFrame`/`setOverlayIcon` 调用）。
 - **系统通知**：`NotificationService`（主进程,`src/main/services/NotificationService.ts`）用 Electron 原生 `Notification` API,点击通知会 `showMainWindow()` 并广播 `notification.clicked`（`:14-17`）。渲染层 `notificationService.send()`（`src/renderer/services/notification/NotificationService.ts:10-24`）会先查三个偏好开关（`assistant`/`backup`/`knowledge`）再决定是否真的调 IPC 发送。
 - **一个值得记录的空路径**：偏好 `app.notification.assistant.enabled` 和对应的设置项开关（`NotificationSettings.tsx:36-48`，"助手回复完成通知"）确实存在,但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用的是 `source: 'backup'` 和 `source: 'update'`。也就是说"助手完成回复时弹系统通知"这个开关目前接不到任何触发点,是个用户能看到、能勾选、但不会生效的空挂钩(不同于代码里自己写 TODO 承认的 `update` 缺口，见 `NotificationService.ts:17-20` 的另一条已知 TODO——这里是 `assistant` 这条连 TODO 都没提到，属于本次调查新发现)。
-- **全局快捷键**：`ShortcutService.ts` 按窗口聚焦状态分层注册——窗口聚焦时注册全部快捷键,失焦时只注册标了 `global` 的那部分（`registerShortcuts(window, onlyPersistent)`,`:130-137,158-204`），避免非全局快捷键在应用不在前台时抢占系统按键;快捷键冲突（被其他应用占用）会记录冲突集合并通过 IPC 广播给渲染层展示提示（`:281-303`）。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这一个静态配置页（`ShortcutSettings.tsx`），不存在按一个快捷键呼出速查列表的入口。
+- **全局快捷键**：`ShortcutService.ts` 按**本地/全局分轨**注册——`global` 标记的快捷键仍走 `globalShortcut`（含失焦时的注册集），其余本地快捷键不再注册到系统，而是挂在窗口 `webContents.before-input-event`（含 `did-attach-webview` 挂上的 guest webview 输入）上按命令解析拦截（`ShortcutService.ts:123-196`），应用失焦时本地快捷键自然不生效；快捷键冲突（被其他应用占用）仍记录冲突集合并通过 IPC 广播给渲染层展示提示（`:281-303` 附近）。另有标签页导航快捷键（`324f26f728`）。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这一个静态配置页（`ShortcutSettings.tsx`），不存在按一个快捷键呼出速查列表的入口。
 
 ### 13.12 未找到实现的方向（如实说明）
 

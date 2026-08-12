@@ -2,9 +2,9 @@
 
 > 调查对象：`../../chatbox`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：Git 跟踪文件机械统计，并复核 pnpm、Electron、Web、Capacitor 构建入口与主要目录
 >
@@ -14,22 +14,24 @@
 
 ## 结论摘要
 
-Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、preload、renderer、Web 和 Capacitor 移动端共享 `src`。`src/renderer` 占 140,571 行，是主实现区；`src/shared` 和 `src/main` 分别承担跨端逻辑与桌面能力，边界比按产品平台复制整套代码更集中。
+Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、preload、renderer、Web 和 Capacitor 移动端共享 `src`。`src/renderer` 占 150,097 行，是主实现区；`src/shared` 和 `src/main` 分别承担跨端逻辑与桌面能力，边界比按产品平台复制整套代码更集中。
 
 ## 统计与模块分布
 
 | 指标 | 数量 |
 | --- | ---: |
-| Git 跟踪文件 | 1,337 |
-| 可识别源码 | 1,091 文件 / 202,021 行 |
-| 文档 | 57 文件 / 13,034 行 |
-| 测试 | 243 文件 / 42,543 源码行 |
+| Git 跟踪文件 | 1,414 |
+| 可识别源码 | 1,168 文件 / 215,215 行 |
+| 文档 | 58 文件 / 13,148 行 |
+| 测试 | 282 文件 / 49,839 源码行 |
 
-`src/renderer` 为 822 文件/140,571 行，`src/shared` 为 192/30,726，`src/main` 为 112/22,233；专门的 `test/integration` 只有 11 个源码文件，但大量单元测试与实现就地放在三个 `src` 区域。
+`src/renderer` 为 880 文件/150,097 行，`src/shared` 为 210/34,046，`src/main` 为 113/22,533；专门的 `test/integration` 只有 11 个源码文件（3,470 行），但大量单元测试与实现就地放在三个 `src` 区域。
 
 ## 语言、文档与测试
 
-TypeScript 195,653 行（96.8%），其余主要是 JavaScript 5,225 行（2.6%）。文档集中在 `docs`（32 文件，其中 `docs/technical` 16）并辅以 `tasks` 和测试用例说明。测试分布为 renderer 141 文件、shared 50、main 34、integration 11，三个运行层都有对应测试。
+TypeScript 208,676 行（96.9%），其余主要是 JavaScript 5,258 行（2.4%）。文档集中在 `docs`（33 文件，其中 `docs/technical` 17）并辅以 `tasks` 和测试用例说明。测试分布为 renderer 171 文件、shared 59、main 34、integration 11，三个运行层都有对应测试。
+
+相对 `f90fc31a` 快照新增约 77 个跟踪文件、约 13,200 源码行，其中测试文件从 243 增至 282、测试源码行从 42,543 增至 49,839（新增 ForkGroup/MessageList/Message/Minimap/sandbox/MCP 等大量组件与主进程测试，见对应专项笔记）。
 
 ## 跨平台组织与边界
 

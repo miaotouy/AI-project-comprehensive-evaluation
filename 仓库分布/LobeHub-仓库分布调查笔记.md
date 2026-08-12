@@ -2,11 +2,11 @@
 
 > 调查对象：`../../lobehub`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
-> 调查方式：Git 跟踪文件机械统计，并复核 pnpm workspace、应用/包清单、部署与桌面构建入口
+> 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1`），并复核 pnpm workspace、应用/包清单、部署与桌面构建入口
 >
 > 调查范围：模块、语言、文档、测试和跨平台代码组织；未运行构建、部署与测试
 >
@@ -20,23 +20,23 @@ LobeHub 是本组跟踪文件最多的 TypeScript monorepo，主 Web 应用、�
 
 | 指标 | 数量 |
 | --- | ---: |
-| Git 跟踪文件 | 14,047 |
-| 可识别源码 | 11,620 文件 / 1,893,137 行 |
-| 文档 | 792 文件 / 160,615 行 |
-| 测试 | 2,876 文件 / 772,106 源码行 |
+| Git 跟踪文件 | 14,527 |
+| 可识别源码 | 12,077 文件 / 1,982,207 行 |
+| 文档 | 796 文件 / 162,035 行 |
+| 测试 | 3,032 文件 / 806,041 源码行 |
 
-主要区域为 `apps/server`（1,453 文件/375,932 行）、`src/features`（2,399/284,652）、`packages/database`（652/161,644）、`src/store`（820/159,888）、`packages/model-runtime`（442/130,233）、`src/routes`（1,298/120,160）和 `apps/desktop`（412/65,555）。
+主要区域为 `apps/server`（1,493 文件/388,241 行）、`src/features`（3,012/353,088）、`packages/database`（686/172,169）、`src/store`（836/166,097）、`packages/model-runtime`（442/131,267）、`apps/desktop`（415/66,685）和 `src/routes`（875/76,080，从 1,298/120,160 显著收缩）。features 与 routes 此消彼长来自结构迁移：`8de42d5c3` 把六个路由域移入 `src/features`，设置页各分区（provider/memory/hotkey/oauth-apps 等）也整体从 `src/routes/(main)/settings/` 归并到 `src/features/Settings/`。新增可观察区域：`packages/model-bank`（191/49,800）、`apps/cli`（182/44,988）、`packages/context-engine`（175/37,772）、`packages/heterogeneous-agents`（114/31,164）、`src/services`（173/28,462）。
 
 ## 语言、文档与测试
 
-TypeScript 1,870,741 行（98.8%）。文档主要位于 `docs/usage`（221 文件）、`docs/self-hosting`（150）、`.agents/skills`（172）；`changelog` 仅 2 个文件却有 47,939 行，是按行数观察文档时的异常集中点。测试分布在 server（592 文件）、database（184）、model-runtime（191）、store（233）、features（416）与 desktop（100），跨越主要区域。
+TypeScript 1,958,825 行（98.8%）。文档主要位于 `docs/usage`（221 文件）、`docs/self-hosting`（150）、`.agents/skills`（173）；`changelog` 仍只有 2 个文件却占 47,939 行，是按行数观察文档时的异常集中点；新增 `docs/development`（42 文件，含 agent-goals-design 等设计文档）。测试分布：server（612 文件）、database（193）、store（240）、features（524）、model-runtime（191）与 desktop（102）；`apps/cli` 测试也增长到 76 文件。
 
 ## 跨平台组织与边界
 
-Web/自托管服务是主形态，另有 Docker 部署、独立 server、CLI 和 Electron desktop workspace（`pnpm-workspace.yaml:2-7`）。桌面通过 `apps/desktop` 的独立主进程包与 Web 前端桥接，不是把全部服务端代码复制进桌面目录；本次未复核各桌面发行目标的运行结果。
+Web/自托管服务是主形态，另有 Docker 部署、独立 server、CLI 和 Electron desktop workspace（`pnpm-workspace.yaml`）。后端 Hono 路由已从 `apps/server/src/hono/` 更名为 `router-hono/` 并合并（`e32e2efe2`）。本范围内新增了多个独立包，边界进一步包化：`packages/openapi`（由 hono-openapi 生成 openapi.yml，`3ea7afd5d`）、`packages/sdk`（从 OpenAPI spec 生成的 `@lobehub/sdk`，`e86908812`）、`packages/connector-data`（twitter/notion/github 等 connector 数据源）、`packages/device-sandbox`（桌面本地沙箱执行环境，`e9b6d00ab`）、`packages/builtin-tool-goal`（goal 工具）。桌面通过 `apps/desktop` 的独立主进程包与 Web 前端桥接；本次未验证各桌面发行目标的运行结果。
 
 ## 关键源码索引
 
-- `pnpm-workspace.yaml:2-7`：应用与包的 workspace 边界
-- `package.json:63-73`：桌面构建入口
+- `pnpm-workspace.yaml`：应用与包的 workspace 边界
+- `package.json`：桌面构建入口
 - `apps/`、`packages/`、`src/features/`、`src/store/`：主要模块树

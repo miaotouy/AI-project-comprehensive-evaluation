@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、导入导出、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
 >
@@ -58,7 +58,7 @@ AIO Hub 的 Agent 不是单独的一段 system prompt，而是一个可保存、
 - 环境增强
 - 输出与显示
 
-这份编辑器目录是判断“用户界面明确支持哪些设置”的主要依据；类型文件则包含导入、兼容或高级功能可能用到的字段。
+编辑器已把"知识库"区拆为 **Recall 与 Knowledge 两个独立标签页**（`RecallSection.vue`/`KnowledgeLibrarySection.vue`，提交 `342d42dd3`）——Recall 承担上下文即时召回绑定（`recallConfig.bindings`），Knowledge 承担资料库访问授权（`knowledgeAccess`）与资料引用；旧 `KnowledgeSection.vue`（723 行）已删除，`KnowledgeBaseItem`/`PlaceholderEditor` 相应改名为 `RecallBindingItem`/`RecallPlaceholderEditor`（占位符编辑器改为按集合 ID 配置）。这份编辑器目录是判断"用户界面明确支持哪些设置"的主要依据；类型文件则包含导入、兼容或高级功能可能用到的字段。
 
 ### 2.3 聊天侧边栏也是 Agent 配置入口
 
@@ -143,7 +143,7 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 - 消息列表支持拖拽排序、分页、逐条启停、复制、复制到下方、粘贴覆盖和批量管理；
 - 单条消息可设置显示名称、`system/user/assistant` 角色、所属消息组、模型/渠道匹配和四种注入策略；
 - 内容编辑使用 Monaco，并提供编辑、宏处理后纯文本预览和 Markdown/富文本渲染预览三种模式；
-- 工具栏可插入宏、会话变量和知识库占位符，也能为消息选择 Agent 私有资产附件；
+- 工具栏可插入宏、会话变量和 Recall/知识库占位符（占位符编辑器为 `RecallPlaceholderEditor`，按集合 ID 配置），也能为消息选择 Agent 私有资产附件；
 - 预设消息本身可独立复制或导入导出为 JSON/YAML；v2 格式同时保存 `groups` 与 `messages`，不必导出整个 Agent；
 - 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，而不是把来源字段直接摊到主编辑器中。
 
@@ -178,6 +178,8 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 - `richTextStyleOptions`：Markdown/富文本渲染样式；
 - `regexConfig`：对请求或渲染消息做正则清理、替换和宏处理；
 - `defaultToolCallCollapsed`：工具调用消息默认是否折叠。
+
+Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/Plan/agent-model-parameter-rules-draft.md`，提交 `e2e3a825f`），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案，尚未见注册到运行时参数过滤的实现。另外聊天侧栏与 Agent 编辑器对工具策略（`toolCallConfig`）的修改会强制二次确认（提交 `f5e834e3c`），防止误改自动批准配置。
 
 ### 4.3 模型参数编辑器的实际分组与语义
 
@@ -239,18 +241,16 @@ Agent 可以关联 `worldbookIds`，并配置：
 
 世界书适合角色背景、地点、人物和世界规则等按关键词动态注入的 lore。
 
-### 5.2 知识库（RAG）
+### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
-`knowledgeBaseConfig` 由总开关、绑定列表、分组和自动注入位置组成。每个绑定可独立配置：
+旧 `knowledgeBaseConfig`/`knowledgeSettings` 字段已从 `AgentBaseConfig` 移除，拆为三个字段（`agent-manager/types/agent.ts:464-470`）：
 
-- `enabled`；
-- 激活模式 `always`、`gate`、`turn`、`static`；
-- `modeParams`；
-- 召回数量 `limit`；
-- 最低相关分数 `minScore`；
-- UI 分组。
+- `recallConfig`：思绪（Recall）绑定——总开关 `enabled`、绑定列表 `bindings`（每条含 `recallId`/`recallName`、激活模式 `always`/`gate`/`turn`/`static`、`whenParams`、召回数量 `limit`、最低相关分数 `minScore`、检索画像 `profile`（`semantic`/`associative`）、预设 `presetId`（`algorithmic`/`comprehensive`））与自动注入位置（`autoInjectIfMacroMissing` + `autoInjectPosition`）；
+- `recallSettings`：默认预设、默认画像、`maxRecallChars` 上限、`defaultLimit`/`defaultMinScore`、结果模板、空结果文本、gate 扫描深度与缓存开关；
+- `knowledgeAccess`：Knowledge 资料库的**访问权限**（授权库 ID 等）——类型注释明确"授权不会触发自动检索或目录注入"，与 Recall 的自动召回是两条独立链路；
+- `recallMigrationIssues`：旧配置版本化迁移留下的可恢复诊断（`RecallMigrationIssue`）。
 
-`knowledgeSettings` 进一步控制默认检索引擎（`vector` / `keyword` / `blender` 等）、召回上限、总字符上限、最低分数、结果模板、空结果文本、gate 扫描深度和缓存。知识库可以通过 `{{kb}}` 或带参数的 KB 占位符显式触发；缺少宏时也可按配置自动注入到上下文开头或最后一条用户消息之前。
+占位符协议同步迁移：知识库通过 `{{recall}}` 宏或 `【recall::...】` 占位符显式触发（严格参数协议，见对话请求与上下文笔记 9.6）；旧 `{{kb}}`/`【kb::...】` 占位符在管道中被识别为"已废弃"并告警、不再执行检索。`{{kb}}` 宏已从宏注册表移除，新增 `{{recall}}`/`{{recall_list}}`（宏总数 72 → 74，见独特功能笔记能力五）。
 
 ## 6. 工具调用与可执行能力
 
@@ -341,7 +341,7 @@ AIO Hub 的架构文档把三层分得很清楚：
 2. `persistAgent` 调用 `useAgentStorage`，将完整配置序列化为 `agent-manager/agents/{agentId}/agent.json`；
 3. 同时更新 `agent-manager/agents-index.json`，索引只保留列表展示所需的元数据（名称、图标、Profile/模型 ID、标签、时间等）。
 
-实际根目录由 `getAppConfigDir()` 决定（Tauri 的 AppData 目录，支持便携模式），所以笔记中的 `agent-manager/...` 是相对于应用配置目录的路径。Agent 资产也放在对应 Agent 目录，配置中的 `icon` 等字段可以用相对文件名或 `appdata://agent-manager/agents/...` 引用。
+实际根目录由 `getAppConfigDir()` 决定（Tauri 的 AppData 目录，支持便携模式），所以笔记中的 `agent-manager/...` 是相对于应用配置目录的路径。Agent 资产也放在对应 Agent 目录，配置中的 `icon` 等字段可以用相对文件名或 `appdata://agent-manager/agents/...` 引用。资产存储路径已从旧 `llm-chat/agents/` 统一迁移到 `agent-manager/agents/`——`useAgentStorage` 通过版本化数据迁移（`cross-module-v2`，`runVersionedDataMigration`）补充复制旧目录、校验目录子集与 `.migration_in_progress` 标记，迁移完成后经通知中心发送成功通知（提交 `f852e6b2d`/`d12533a49`/`1537e29f9`）；跨会话搜索的 Agent 目录也随之改为 `agent-manager/agents/`（会话与消息管理笔记 5.1）。
 
 这解释了为什么侧边栏看起来像“设置”，但内容仍属于角色配置：侧边栏只是编辑入口，持久化边界由 `ChatAgent` 文件决定。导出 Agent 时，`parameters`（包括模型参数、上下文限制、压缩和图片压缩）会随配置导出；本地实例字段 `id`、`profileId`、创建/使用时间的处理仍遵循导出格式定义。
 

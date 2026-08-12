@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\deepchat`（重点 `src/shared/chat.d.ts`、`src/renderer/src/components/message/`、`src/renderer/src/components/markdown/`、`src/renderer/src/components/artifacts/`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`dc4177c2ac80905ebac985554a9f957aaca31ab8`（分支：`dev`）
+> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
-> 调查范围：assistant block 分发、流式 Markdown、reasoning/tool activity、Artifact 类型映射与 HTML/SVG/Mermaid 隔离、消息窗口化交接、block 类型扩展机制、性能缓存与测试覆盖
+> 调查范围：assistant block 分发、流式 Markdown、reasoning/tool activity、Artifact 类型映射与 HTML/SVG/Mermaid 隔离、消息窗口化交接、block 类型扩展机制、性能缓存与测试覆盖、provider 搜索块渲染、权限结果徽标与 DcCopyButton 重构
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -40,9 +40,14 @@ deepchat_assistant_blocks
 
 `AssistantMessageBlock`（`src/shared/chat.d.ts:114-175`）以 `type`、`content`、`status`、`timestamp` 为基础，附加 artifact descriptor、tool_call 参数/响应/图片预览、image data、reasoning time。`AssistantMessageExtra` 还记录工具来源、permission request、question、plan、subagent progress 和 `max_tool_calls`/`max_tokens` 跳过原因（`:189-231`）。
 
-`MessageItemAssistant.vue:42-119` 的分发顺序为：activity-group、mcp-app、content、reasoning/artifact-thinking、tool_call、question action、一般 action、audio/video、image、error（`:41-119`；注意 audio（`:101-106`）与 video（`:107-112`）排在 image（`:113-118`）之前）。activity group 内部在 `MessageBlockActivityGroup.vue:38-49` 再分派 Think 与 ToolCall，并显示推理/工具数量和耗时。
+`MessageItemAssistant.vue:40-132` 的分发顺序为：activity-group、mcp-app、content、reasoning/artifact-thinking、provider search、tool_call、question action、一般 action、audio/video、image、error。activity group 内部在 `MessageBlockActivityGroup.vue:38-55` 再分派 Think 与 ToolCall，并显示推理/工具数量和耗时。
 
-`MessageBlockThink` 将 reasoning time 转成耗时标签并持久化折叠状态；`MessageBlockToolCall`（`:300-378`、`:496-617`）根据 block status 选择 calling/response/end/error 图标，显示 server identity、参数/响应、图片预览、diff 和 MCP App result。`exec`、`process`、subagent 等工具在运行中可自动展开，属于显示规则而非数据类型变化。
+`MessageBlockThink` 将 reasoning time 转成耗时标签并持久化折叠状态；`MessageBlockToolCall`（`:317-323` 状态映射、`:537-560` 图标）根据 block status 选择 calling/response/end/error 图标，显示 server identity、参数/响应、图片预览、diff 和 MCP App result。`exec`、`process`、subagent 等工具在运行中可自动展开，属于显示规则而非数据类型变化。
+
+另有两条分发规则（源码确认）：
+
+- **provider search 块**：`MessageItemAssistant.vue:80-84` 与 `MessageBlockActivityGroup.vue:53-58` 对 `isProviderSearchBlock` 命中的 search 块渲染 `MessageBlockSearch.vue`（`messageActivityGroups.ts:52-57` 只认 `actionType: search|open_page|find_in_page`）。该块显示动作链接、来源页面列表与状态图标，来源由 DeepSeek 原生 web 搜索的 `providerSearch`/`providerUrlSource` 流事件产生（见 §2）。
+- **权限结果徽标**：`MessageBlockToolCall.vue:45-60` 在工具卡上显示 `granted/denied` 徽标（#2132）。`displayMessage.ts:242-278` 的 `buildResolvedPermissionStatusByToolCallId` 把 `action_type: tool_call_permission` 且已结算（granted/denied）的 action 块按 `tool_call.id` 映射到同列表存在的工具卡；映射成功时独立 action 卡被过滤（`MessageItemAssistant.vue:478-486` `currentVisibleContent`），只保留无工具卡兜底。
 
 ## 2. Content 与 Artifact 标签解析
 
@@ -54,9 +59,11 @@ deepchat_assistant_blocks
 
 解析结果区分 text/thinking/artifact/tool_call，并携带 loading、tool status、artifact type/language。流式状态下，未闭合的 tool/artifact 部分会保留到下一次 content 更新；`MessageBlockContent.vue:52-126` 依据 snapshot 同步或完成 artifact store。
 
+**search 块的流式来源**：AI SDK stream adapter（`src/main/provider/aiSdk/streamAdapter.ts:254-291`）把 DeepSeek Responses 的 `raw`/`source` 流部件投影为 `providerSearch`/`providerUrlSource` 事件（只收 http/https 来源、上限 100 个、去重），经 block 化后以 `type: 'search'` 块落盘并交给 §1 的 `MessageBlockSearch` 渲染；`isProviderSearchBlock` 按 `extra.actionType` 区分 search/open_page/find_in_page。该链路是 provider 原生搜索（DeepSeek `deepseek-v4-flash`）的专用路径，与 `useArtifacts` 的标签解析无关。
+
 ## 3. Markdown 流式渲染
 
-`MarkdownRenderer.vue:125-190` 配置流式与静态两套批处理参数：
+`MarkdownRenderer.vue:228-241` 配置流式与静态两套批处理参数：
 
 - 流式使用较小的 initial/render batch、短 delay 和 parse coalesce，并启用 smooth streaming/typewriter；
 - 静态内容采用较大 batch，并允许 `node-virtual: auto`、最大 live nodes 与 viewport priority；
@@ -64,9 +71,11 @@ deepchat_assistant_blocks
 
 组件调用 markstream-vue 的 NodeRenderer（`:1-80`），代码 renderer 使用 `monaco` 兼容名称，把代码块交给 stream-monaco；渲染完成的 artifact 点击事件通过 `artifactStore.showArtifact` 打开（`:222-235`）。链接引用节点还会按 session 搜索结果和 link context 处理（`:238-245`）。
 
+`hiddenImageSources` 解析后变换：`MessageBlockContent.vue:20` 把 `imgcache://` 图片源列表传给 MarkdownRenderer，`:139-212` 的 `postTransformNodes` 在解析树中删除这些 image 节点（图像持久化后，已提升为独立 image 块的图不再重复出现在 Markdown 文本里）。
+
 ## 4. Artifact 类型映射
 
-`ArtifactBlock.vue:24-65` 的类型映射为：
+`ArtifactBlock.vue:44-75` 的类型映射为：
 
 | artifact type | 组件 | 主要输出 |
 |---|---|---|
@@ -96,7 +105,7 @@ Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既
 新增 block 类型需要同时修改三层，未发现插件式注册表：
 
 1. **持久化类型**：`src/shared/chat.d.ts:114-175` 的 `AssistantMessageBlock.type` 联合；
-2. **IPC 契约**：`src/shared/contracts/common.ts:521-532` 的 `AssistantMessageBlockSchema` `type: z.enum([...])`（content/search/reasoning_content/plan/error/tool_call/action/image），跨进程校验在此层；
+2. **IPC 契约**：`src/shared/contracts/common.ts:516-525` 的 `AssistantMessageBlockSchema` `type: z.enum([...])`（content/search/reasoning_content/plan/error/tool_call/action/image），跨进程校验在此层；block `status` 枚举另含 `granted/denied`（`:527`），是权限结果的持久化形态（§1 徽标的数据来源）；
 3. **展示层**：`src/renderer/src/features/chat-page/model/displayMessage.ts:125-137` 的 `DisplayAssistantMessageBlock.type`（比持久化层多 `video/audio/artifact-thinking`，由转换逻辑从持久化形态派生）+ `isRenderableAssistantBlock`（:242-249，过滤 plan 与内部 tool call）+ `MessageItemAssistant.vue` 的分发链（§1）。
 
 已确认边界：`plan` 与内部工具调用块不渲染（displayMessage.ts:242-249）；`action` 类型的三种动作（tool_call_permission/question_request/rate_limit，`chat.d.ts:163-166`）分别路由到审批/提问/限流提示组件。新增类型若只存在于展示层（如 video/audio），不需要改 IPC schema，但需要改持久化转换与分发组件。
@@ -105,6 +114,7 @@ Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既
 
 - **缓存策略**：`useArtifacts.ts` 有 last-parse memo（`:157-159`，流式重复解析同字符串直接返回缓存）；`MessageBlockContent` 对内容快照做比较后再同步 artifactStore（`MessageBlockContent.vue:95-143`）；Markdown 侧区分流式/静态两套 batch 参数与节点虚拟化（§3）。
 - **渲染频率**：renderer 端接收主进程 120ms 节流发出的全块快照（`chat.stream.updated`）、DB 600ms 节流落盘，均由生成侧 `echo.ts` 控制（`src/main/agent/deepchat/runtime/echo.ts:7-8`，详细链路见生成式输出与运行时笔记 §2 与 Chat 笔记 §3），本笔记不再展开。
+- **复制按钮**：`MessageBlockToolCall` 的参数/响应复制使用 `@dc-ui` 的 `DcCopyButton`（`MessageBlockToolCall.vue:160-202`）；`MessageItemAssistant` 的整条消息复制由 `copyText` computed 提供，供 `MessageToolbar` 使用（`MessageItemAssistant.vue:428-450`）。
 - **测试覆盖（静态确认，未运行）**：`test/renderer/components/message/` 下 12 个组件测试（`MessageItemAssistant.test.ts`、`MessageBlockToolCall.test.ts`、`MessageBlockContent.test.ts`、`MessageBlockThink.test.ts`、`MessageBlockActivityGroup.test.ts`、`MessageBlockMedia.test.ts` 等）；Artifact 侧有 `HTMLArtifact/MarkdownArtifact/MermaidArtifact/ReactArtifact/SvgArtifact/MarkdownRenderer.test.ts` 与 `useArtifacts/useArtifactContext/useArtifactExport/useArtifactViewMode.test.ts`、`stores/sidepanelAndArtifact.test.ts`。未发现长会话/大数据量的虚拟化性能基准测试。
 - 视觉表现、键盘可用性与长会话滚动性能均未运行验证（见 §9）。
 
@@ -120,16 +130,18 @@ Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既
 ## 10. 关键源码索引
 
 - assistant block 类型与 metadata：`src/shared/chat.d.ts:114-231`
-- assistant 分发与 activity group：`src/renderer/src/components/message/MessageItemAssistant.vue:42-119`、`src/renderer/src/components/message/MessageBlockActivityGroup.vue:38-49`
-- tool call 展示：`src/renderer/src/components/message/MessageBlockToolCall.vue:300-378`、`:496-617`
+- assistant 分发与 activity group：`src/renderer/src/components/message/MessageItemAssistant.vue:40-132`、`src/renderer/src/components/message/MessageBlockActivityGroup.vue:38-55`
+- 权限结果徽标：`src/renderer/src/features/chat-page/model/displayMessage.ts:242-278`、`MessageBlockToolCall.vue:45-60`
+- search 块：`src/renderer/src/components/message/MessageBlockSearch.vue`、`messageActivityGroups.ts:52-57`
+- tool call 展示：`src/renderer/src/components/message/MessageBlockToolCall.vue:317-323`、`:537-560`
 - thinking/artifact/tool 标签解析：`src/renderer/src/composables/useArtifacts.ts:52-150`、`:220-490`
 - content block 与 artifact store：`src/renderer/src/components/message/MessageBlockContent.vue:1-126`
-- Markstream 流式/虚拟化参数：`src/renderer/src/components/markdown/MarkdownRenderer.vue:125-190`
-- artifact 类型映射：`src/renderer/src/components/artifacts/ArtifactBlock.vue:24-65`
+- Markstream 流式/虚拟化参数：`src/renderer/src/components/markdown/MarkdownRenderer.vue:228-241`
+- artifact 类型映射：`src/renderer/src/components/artifacts/ArtifactBlock.vue:44-75`
 - HTML/React iframe：`src/renderer/src/components/artifacts/HTMLArtifact.vue:4-109`、`src/renderer/src/components/artifacts/ReactArtifact.vue:1-38`
 - SVG sanitizer 调用：`src/renderer/src/components/artifacts/SvgArtifact.vue:63-107`
 - Mermaid 清洗和 strict 模式：`src/renderer/src/components/artifacts/MermaidArtifact.vue:74-136`
-- block 类型三层定义：`src/shared/chat.d.ts:114-175`、`src/shared/contracts/common.ts:521-532`、`src/renderer/src/features/chat-page/model/displayMessage.ts:125-193`
+- block 类型三层定义：`src/shared/chat.d.ts:114-175`、`src/shared/contracts/common.ts:516-525`、`src/renderer/src/features/chat-page/model/displayMessage.ts:125-193`
 - 消息窗口化与滚动（交接 Chat 笔记 §4）：`src/renderer/src/components/chat/MessageList.vue:1-65`、`useMessageWindow.ts`、`useMessageVirtualization.ts`
 - 渲染相关测试：`test/renderer/components/message/`、`test/renderer/components/HTMLArtifact.test.ts` 等
 

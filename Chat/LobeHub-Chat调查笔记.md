@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-07
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`5952f4c3f29ed3bb08dda6fd5fd64d6fffd4d3ae`（分支：`canary`）
+> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
 > 调查方式：只读源码（Read + Grep + Glob，逐文件通读，未凭猜测下结论）
 >
@@ -42,10 +42,10 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 ## 端到端聊天主链
 
 ```text
-用户输入（Composer：Lexical 编辑器，草稿/mention/slash/附件）
-  -> 会话级 ConversationStore.sendMessage（读 composer 参数与 displayMessages，过滤 isLocalOnlyMessage）
-  -> 全局 ChatStore.sendMessage（conversationLifecycle.ts 提取 skills/tools/mentions/文件引用，构造运行上下文）
-  -> 生成 user/assistant 临时消息 + operation（sendMessage.ts:593-673）
+用户输入（Composer：Lexical 编辑器，草稿/mention/slash/附件/语音消息）
+  -> 会话级 ConversationStore.sendMessage（读 composer 参数与 displayMessages，过滤 isLocalOnlyMessage；现为 106 行薄包装）
+  -> 全局 ChatStore.sendMessage（conversationLifecycle.ts:265 起：提取 skills/tools/mentions/文件引用、Command Bus 处理 /compact 等命令、构造 operationContext）
+  -> 生成 user/assistant 临时消息 + operation（发送层以 ChatStore 为主，临时消息与 operation 在 conversationLifecycle.ts 内创建）
   -> 分流：client agent（executeClientAgent）| Gateway（webapi/chat/[provider]/route.ts -> ModelRuntime.chat）
   -> 流式事件经 operation 状态机（生成/审批/暂停/停止）驱动 UI 与回写
   -> 落库：messageService + SWR/IndexedDB 缓存；局部 store parse 后经 onMessagesChange 回灌全局
@@ -53,13 +53,15 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
   -> 完成：runAgent.ts 停止 loading + 桌面通知 + markTopicUnread
 ```
 
+发送入口以全局 ChatStore 为主：`conversationLifecycle.ts`（2154 行）承载发送主逻辑，`sendMessage`（265 起）与 `operationContext` 构造（510 起）在这里创建"临时消息 + operation"；局部 `sendMessage.ts`（`src/features/Conversation/store/slices/message/action/sendMessage.ts:1-106`）只剩前置 hook/abort 检查与转发。`/compact` 由 Command Bus（`processCommands`，410-433）处理；`/goal` 命令向选定工具注入 `lobe-goal`（323-328 行）；单 Agent 直接 @mention 成为执行路由（353-370 行）；运行时选择统一走 `selectRuntimeType`（398-408 行）。发送入口还支持 Web 语音消息（`a58d18130`，`ChatInput/VoiceMessage/` + `sendVoiceMessage`）。
+
 ## 核心对象与状态权威
 
 - `ConversationContext`/`messageMapKey`（`messageMapKey.ts`）：定位坐标与分桶 key，按优先级归一化 scope 后拼字符串。
 - `UIChatMessage`：扁平消息行（id/parentId/threadId/groupId/role/tools/agentId 等）；权威源在服务端，前端缓存与两处展示副本均为派生。
-- 全局 ChatStore：`dbMessagesMap`（原始）/`messagesMap`（parse 后）、`operations/operationsByContext/operationsByMessage`（生成任务，刻意全局以支持多 Agent/Topic 并行）。
+- 全局 ChatStore：`dbMessagesMap`（原始）/`messagesMap`（parse 后）、`operations/operationsByContext/operationsByMessage`（生成任务，刻意全局以支持多 Agent/Topic 并行；`operation/types.ts` 中 `INPUT_LOADING_OPERATION_TYPES` 位于 472 行、`QUEUE_BLOCKING_OPERATION_TYPES` 位于 505 行）。
 - 会话级 ConversationStore：`dbMessages`/`displayMessages` + generation/editing/selection/scroll/virtua/`pendingArgsUpdates`（按 contextKey 隔离的 UI 态，切换即重建）。
-- 服务端：message/topic 表、`message:list` 缓存 key、BM25 检索、Gateway agent 状态。
+- 服务端：message/topic 表、`message:list` 缓存 key（`query.ts` 的 `representableBucketKey` 防御位于 318-325 行，归属 `#writeThroughMessageCache`）、BM25 检索、Gateway agent 状态。
 
 ## 专项导航
 

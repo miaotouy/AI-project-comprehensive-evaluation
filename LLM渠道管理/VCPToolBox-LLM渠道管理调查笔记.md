@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
-> 调查方式：快照刷新——核对旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 diff（`server.js`、`config.env.example`、新增 `modules/reasoningContentAdapter.js`），并复核渠道核心文件是否变化；未修改被调查仓库
+> 调查方式：静态核对当前 HEAD 相对旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 的 diff（`server.js`、`config.env.example`、新增 `modules/reasoningContentAdapter.js`）及渠道核心文件；未修改被调查仓库
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性，及 README 容灾声明的核对
+> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性，及 README 容灾声明
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -47,12 +47,6 @@ config.env
 - `backup_vcp.py` 默认归档所有 `.env` 和 `.json`，会把核心/插件 Key 一起放入未加密 ZIP；
 - 可选 NewAPI Monitor 能显示请求、token、quota、RPM/TPM，但数据来自外部 NewAPI 管理 API，不参与 VCP 路由；
 - **安全边界风险**：白名单图像/Embedding 路由在通用 Bearer 鉴权之前挂载，命中请求会直接使用上游 `API_Key` 转发，绕过 VCP 对外 `Key` 校验。
-
-快照刷新（`eca06251` → `c4c4d00b`）核对结论：
-
-- 渠道核心文件（`semanticModelRouter.js`、`chatCompletionHandler.js`、`protocolBridge.js`、`specialModelRouter.js`、`EmbeddingUtils.js`、`modelRedirectHandler.js`）在旧快照后**没有实质变更**，本篇主体结论全部仍然成立；
-- 新增 `ReasoningToContentEnabled`/`ReasoningToContentModel`/`ReasoningToContentTag` 三个环境变量与 `modules/reasoningContentAdapter.js`：对模型名白名单（默认示例 `kimi,claude`）内的响应，把 `reasoning_content`/`thinking` 等推理字段改写为 `<think>` 标签正文发给客户端，转换只发生在展示副本、不进 VCP 工具循环/OneRing/日记（详见 4.4）；
-- **README 容灾声明核对**：README 称模型路由"语义级自动选模与容灾……跨模型上下文无缝持久化"。实现侧：容灾=语义虚拟模型的候选链 fallback（仍经单一 `API_URL`+`API_Key`，模型级而非 Provider 级）；"跨模型上下文无缝持久化"在当前代码中没有独立的跨模型上下文存储，上下文由客户端随请求携带（`contextTokenLimit` 是客户端扩展参数），同一会话切换模型时历史不丢是"客户端持有历史"的结果，不是服务端持久化。README 的"容灾"表述应理解为模型 fallback 链，不能按多 Provider 容灾理解（与旧快照结论一致）。
 
 ## 总体调用链
 
@@ -305,7 +299,7 @@ Authorization: Bearer API_Key
 
 [`routes/specialModelRouter.js`](../../VCPToolBox/routes/specialModelRouter.js) 对图像和 Embedding 白名单模型绕过完整 Chat/RAG/VCP 工具管线，直接转发到同一上游。它使用 keep-alive Agent，但没有复用主链的 `fetchWithRetry()`、连接超时或 Semantic Router。
 
-### 4.4 快照刷新新增：推理字段的展示层转换（ReasoningToContent）
+### 4.4 推理字段的展示层转换（ReasoningToContent）
 
 新增 `modules/reasoningContentAdapter.js` 与三个环境变量（`config.env.example`）：
 
@@ -366,6 +360,8 @@ Authorization: Bearer API_Key
 候选项只是字符串模型 ID。Chat handler 在每次可重试尝试前改写 `body.model`，但 URL、Key 和 Header 不变。
 
 如果 NewAPI 把候选模型名映射到不同供应商，最终可能间接跨渠道；但 VCPToolBox 本地看不到 Provider、渠道 Key、权重和健康状态。因此，VCP 实现的是经单一聚合上游执行的跨模型 failover，本地没有跨 Provider 渠道容灾。
+
+README 称模型路由"语义级自动选模与容灾……跨模型上下文无缝持久化"。实现侧，容灾指语义虚拟模型的候选链 fallback（仍经单一 `API_URL`+`API_Key`，模型级而非 Provider 级）；"跨模型上下文无缝持久化"在当前代码中没有独立的跨模型上下文存储，上下文由客户端随请求携带（`contextTokenLimit` 是客户端扩展参数），同一会话切换模型时历史不丢是"客户端持有历史"的结果，不是服务端持久化。README 的"容灾"表述应理解为模型 fallback 链，不能按多 Provider 容灾理解。
 
 ### 5.4 不按成本或延迟选模
 

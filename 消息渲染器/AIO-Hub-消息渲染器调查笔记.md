@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-07-29
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`eba9d84b234672321312e92ab48bb474cfb0aca4`（分支：`main`）
+> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：只读源码梳理，并核对目标仓库内的架构文档、用户指南和性能调查；未修改目标仓库
 >
@@ -88,11 +88,12 @@ LLM adapter / response callbacks
 
 - `reasoningContent` 与推理时间；
 - `translation`；
-- `toolCall` / `toolCalls` / `toolCallsRequested`；
+- `toolCall` / `toolCalls` / `toolCallsRequested`（状态枚举含 `"cancelled"`，并带 `resultMetadata` 字段）；
 - `partialImagePreviews`；
 - `usage`、模型/Profile/Agent/User Profile 快照；
 - 错误和空响应诊断；
-- 压缩节点信息。
+- 压缩节点信息；
+- 消息级 `status` 扩展为 `generating/waiting/queued/complete/error`（`types/common.ts`），`MessageHeader` 经 `utils/messageStatus.ts` 映射为"生成中/等待/排队/错误/异常回复"徽标（`showMessageStatus` 设置控制）；用户消息另有 `knowledgeReference` 字段（显式 Knowledge 资料引用，见 Chat UI 3.1）。
 
 AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正文里的 `<think>`、VCP 标记等仍由渲染器解析；provider 原生 reasoning、工具节点和附件则有独立结构。
 
@@ -153,7 +154,7 @@ AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正�
 
 provider 的 reasoning delta 不进入正文 StreamSource，而是按 rAF 合并到 `metadata.reasoningContent`。`MessageContent` 再用顶层 `LlmThinkNode` 包住另一个 `RichTextRenderer`。
 
-模型直接在正文输出的 `<think>` / `<thinking>` 则由 V2 parser 识别为 AST 内 `llm_think`。因此系统同时支持"协议级 reasoning"和"文本标签 reasoning"。
+模型直接在正文输出的 `<think>` / `<thinking>` 则由 V2 parser 识别为 AST 内 `llm_think`。因此系统同时支持"协议级 reasoning"和"文本标签 reasoning"。思考标签的闭合判定使用模糊匹配——`parser/utils/text-utils.ts` 的 `isFuzzyMatchCloseTag` 对分隔符（`-`/`_` 等）、同义词/词根（think/thinking/thought 等）和有限编辑距离做归一化匹配，`StreamProcessor`/`StreamProcessorV2` 与 `parseHtml.ts` 共用同一判定；模糊闭合导致 `isThinking` 由 true 变 false 时即使内容指纹未变化也会触发节点替换，确保计时与流式状态及时停止。
 
 ## 3. RichTextRenderer 入口
 
@@ -186,6 +187,8 @@ CRLF 归一化
 ```
 
 AST 模式不再全局替换资产 URL，而由 Image/Video/Audio/GenericHtml/HTML Preview 节点按需解析，避免本地 URL 被 Markdown parser 二次编码。
+
+`MessageContent.vue` 把聊天设置到渲染器 props 的映射收敛到 `utils/richTextRendererSettings.ts`（`buildRichTextRendererSettings` 统一装配，含渲染器版本、HTML/脚本开关、节流、平滑、护栏、进入动画与截图模式豁免等），修复了设置项传参链路断裂的问题；`RichTextRenderer` 的"版本/规则变更重解析"watch 改用统一预处理后的 `processedContent`（避免配置切换丢失正则、换行归一化或裸 HTML 包裹结果），并把 `defaultToolCallCollapsed`、`safetyGuardEnabled` 纳入 watch 依赖。
 
 ## 4. 四个版本的真实状态
 
@@ -244,7 +247,7 @@ Tokenizer 对 `code`、`pre`、`script`、`style` 等采用 raw mode，避免内
 
 Patch 入队后由 rAF 检查 `throttleMs`，默认聊天配置为 80ms。flush 前合并连续的同节点 `text-append`，应用时沿 nodeMap 路径做不可变更新，未变化分支保留引用。
 
-源码注释仍称"rAF + setTimeout 混合"，但实际调度只启动 rAF；`timeoutHandle` 是未使用的历史字段。
+`useMarkdownAst` 的配置项（`throttleMs`/`throttleEnabled`/`verboseLogging`/`safetyGuardEnabled`）是 getter（`MaybeRefOrGetter`，`RichTextRenderer.vue` 传入 `() => props.xxx`），设置变更无需重建处理器即可生效；调度只走 rAF，源码中遗留的 `timeoutHandle` 历史字段已删除。
 
 ## 6. 节点渲染层
 
@@ -266,6 +269,8 @@ Patch 入队后由 rAF 检查 `throttleMs`，默认聊天配置为 80ms。flush 
 | 未知类型 | 可见 warning fallback |
 
 代码块固定使用 CodeMirror，并通过 IntersectionObserver 延迟实例化；Mermaid 也是动态 import。图片列表从 AST 节流提取，用于图片查看器上下张导航。
+
+节点行为细节：`CodeBlockNode` 把全局 `defaultRenderHtml` 开关纳入自动预览 watch 依赖（设置变更可作用于已挂载的代码块），`defaultExpanded` 是 computed + watch，跟随设置变化；`VcpToolNode` 的默认折叠值同样是响应式（`defaultCollapsed` computed），设置变更实时生效。
 
 ## 7. HTML 渲染方式
 
@@ -320,9 +325,13 @@ V2 当前常量为：
 - `mobile/src/tools/rich-text-renderer/RichTextRenderer.vue`
 - `mobile/src/tools/llm-chat/components/MessageContent.vue`
 
-移动端使用 `marked.lexer()` 得到 token，再由同一个 Vue 组件递归渲染。支持标题、段落、列表、表格、代码、链接、图片和基础 HTML；代码只是 `<pre><code>`，没有 CodeMirror、AST Patch、VCP 节点、Mermaid/KaTeX、样式系统、正则管线或 stream source。
+移动端仍以 `marked.lexer()` 得到 token、由同一个 Vue 组件递归渲染，**没有**桌面的 AST/Patch、稳定区/待定区、Worker 分词、正则管线和样式系统，但它已不再只是"基础 HTML"：
 
-`isStreaming` prop 当前只参与类型/调用，没有改变解析或渲染策略。每次 `message.content` 变化都会重新 lexer 整段内容。
+- 新增专用节点组件：`ThinkBlock`（思考块，`<think|guguthink>` 正则提取）、`AlertBlock`（GitHub 提示块）、`KatexRenderer`（KaTeX 数学公式）、`MermaidDiagram`（安全 Mermaid，流式期间延迟渲染）、`VcpBlock`（VCP 协议输出）、`RichTextMediaNode`（受管媒体预览）、`CodeBlock`（优化代码块交互）；
+- 流式渲染增加 80ms 节流（`STREAM_RENDER_THROTTLE_MS`）：中间 chunk 合并渲染，最终内容立即渲染；`isStreaming` 不再只是类型占位，而是参与节流策略；
+- 安全边界收紧：关闭不安全的原始 HTML 渲染（`v-html` 不再直接输出 html token）、限制 Markdown 链接协议、普通 Markdown 图片来源受限，受管媒体走统一资产预览协议。
+
+移动端与桌面端仍是两套独立实现（无共享 AST/处理器代码）。
 
 ## 10. 交互式测试页
 
@@ -360,6 +369,8 @@ V2 当前常量为：
 对比报告中的"文本匹配"基于 Markdown/HTML 字符串清理和规范化后的字符长度差，不是结构化语义 diff；截图、逃逸检测和复杂交互需要人工判断。预设是输入语料库，没有声明期望 AST/DOM 快照或 pass/fail oracle。
 
 测试角色 UI 还提供 User Profile 选择，但 `RichTextRendererTester.vue` 当前只在 `profileType === "agent"` 时构造 `currentAgent`，所选 User Profile 没有进入 renderer 的 props 或 provide context。
+
+测试页已解耦对 `llm-chat` registry 的依赖——Agent/User Profile 数据直接从 `agent-manager` 与 `user-profile-manager` 的领域 Store 加载（挂载时按需 `loadAgents()`/`loadProfiles()`），`TesterConfigSidebar` 改为接收父组件传入的 `agents`/`userProfiles` 列表；资产解析复用 `agent-manager/utils/agentAssetUtils`。测试台在仓库 `rich-text-renderer/ARCHITECTURE.md` 中的说明已同步。
 
 ### 10.2 移动端测试页
 
@@ -427,6 +438,8 @@ AIO Hub 让渲染器直接理解业务协议：VCP、思考标签、资产 URL�
 | CSS 软隔离 | `src/tools/rich-text-renderer/utils/cssUtils.ts` |
 | 默认设置 | `src/tools/llm-chat/config/defaultSettings.ts` |
 | 设置 UI | `src/tools/llm-chat/components/settings/settingsConfig.ts` |
+| 设置链路 | `src/tools/llm-chat/utils/richTextRendererSettings.ts` |
+| 思考标签匹配 | `src/tools/rich-text-renderer/parser/utils/text-utils.ts`（`isFuzzyMatchCloseTag`） |
 | Tauri 安全配置 | `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json` |
 | 移动端渲染器 | `mobile/src/tools/rich-text-renderer/RichTextRenderer.vue` |
 | 移动端人工测试页 | `mobile/src/tools/rich-text-renderer/views/TesterView.vue` |

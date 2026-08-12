@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：从 [`../Chat/Chatbox-Chat调查笔记.md`](../Chat/Chatbox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
 >
@@ -19,7 +19,7 @@ Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地�
 - 会话列表（sidebar）只认识 `SessionMetaRecord`（id/name/starred/hidden/archivedAt/sortOrder 等元信息），完全不知道 thread、fork、summary 这些"消息级"结构的存在（见第 1 节证据）。
 - 首页是一个"假会话"（id 固定为字符串 `'new'`），真正的 `Session` 记录直到用户发出第一条消息才被创建（第 3 节）。
 - 消息事实源是**双写**：完整 Session 对象写通用 `storage`，meta 记录写 IndexedDB `session-meta`，两者都要保持同步。
-- thread（同会话内历史区间）、fork（同一消息位置的平行分支）、summary（消息级压缩标记）、starred（置顶分组）是**四套独立的数据结构**，唯一的交叉点是"move thread to conversations"会把 thread 转成新的顶层会话（第 1 节）。
+- thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复可折叠为 ForkGroup 分支组）、summary（消息级压缩标记 + compactionPoints 配对契约）、starred（置顶分组）是**四套独立的数据结构**，唯一的交叉点是"move thread to conversations"会把 thread 转成新的顶层会话（第 1 节）。
 - 归档 = `hidden: true` + `archivedAt` 时间戳，不删除任何数据；恢复归档不会重置 `sortOrder`。
 - 消息搜索没有持久化倒排索引，按分页读取完整 Session 后逐条扫描。
 
@@ -61,11 +61,19 @@ Thread 边界在数据侧的呈现：`sessionHelpers.getCurrentThreadHistoryHash
 
 产生方式是"重新生成/在新分支里重试"（`stores/session/generation.ts` 的 `regenerateInNewFork`/`generateMoreInNewFork`），执行语义见对话请求与上下文笔记。
 
-`chatStore.ts` 里 `insertMessage`/`updateMessage`/`removeMessage`（`:613-779`）都要同时处理"消息可能在 `session.messages` 里，也可能在某个 `session.threads[i].messages` 里"两种情况——即 fork 和 thread 是可以叠加共存的两套独立坐标系，`cleanupEmptyForkBranches`（`chatStore.ts:786-872`）对 root 层和 thread 层分别写了两段相似但不完全相同的清理逻辑，是潜在的"改一处忘改另一处"风险点。
+提交范围内的数据语义变化（`ad248276`、`13bd78eb`、`810b5b04`）：
 
-### 1.4 Summary：消息级压缩标记
+- fork 变换改为**纯函数 patch 模型**：`message-forks.ts` 只导出 `buildCreateForkPatch`/`buildCreateInactiveForkPatch`/`buildSwitchForkPatch`/`buildSwitchForkToPatch`/`buildDeleteForkPatch`/`buildExpandForkPatch` 等"算出一个 `Partial<Session>`"的函数，`forks.ts`（renderer store）负责应用 patch 并写回；新增 `createInactiveFork`（保存替代回复但不切换）、`expandFork`、`deleteFork`、`switchForkTo`（按位置切换）等动作，供 UI 的 ForkGroup 折叠分支组使用。
+- 分支上下文重建改为**自底向上**：`buildCreateInactiveForkPatch`/`buildCreateForkPatch` 从分叉点向上逐段拼接消息上下文，避免旧实现"从分叉点向下递归"在大 fork 上呈指数级搜索（`13bd78eb`）。
+- 压缩点（`compactionPoints`）在 fork 分支/复制会话时按完整 id 映射重映射，保证边界/摘要消息跨分支仍配对（`810b5b04`，见 1.4）。
 
-`Message.isSummary: boolean`（`shared/types.ts:331`），由自动压缩机制在某条消息上打标记，UI 用专门的 `SummaryMessage` 组件渲染，提供"删除摘要，恢复原始消息参与上下文计算"的操作。摘要产生的具体触发代码在 `context-management` 包内——**未核实**（原调查只读到了调用点 `stores/session/messages.ts:198-205` 的 `runCompactionWithUIState`）。
+`chatStore.ts` 里 `insertMessage`/`updateMessage`/`removeMessage`（`:613-779`）都要同时处理"消息可能在 `session.messages` 里，也可能在某个 `session.threads[i].messages` 里"两种情况——即 fork 和 thread 是可以叠加共存的两套独立坐标系。`removeMessage`（`chatStore.ts:785-835`）现在还会在全部分支列表里查找并删除目标消息（`removeMessageFromSavedForks`），并同步清理该消息引用的压缩点；`cleanupEmptyForkBranches`（`chatStore.ts:881-967`）合并为**同一个函数**内的两个分支：root 消息层命中时改写消息数组并自动切换分支，thread 层命中时只更新 hash——原先"root 层和 thread 层分别写了两段相似代码"的双写风险点已收敛为单函数内两条路径。
+
+### 1.4 Summary：消息级压缩标记与压缩点
+
+`Message.isSummary: boolean`（`shared/types.ts:331`），由自动压缩机制在某条消息上打标记，UI 用专门的 `SummaryMessage` 组件渲染，提供"删除摘要，恢复原始消息参与上下文计算"的操作。
+
+提交范围（`810b5b04`）补全了压缩的数据语义：压缩不只打 `isSummary` 标记，还在 Session/thread 上持久化 `compactionPoints: CompactionPoint[]`（`{ summaryMessageId, boundaryMessageId, createdAt }` 配对契约，boundary 是摘要覆盖范围的边界消息）。共享层 `shared/context/compaction-points.ts` 的 `findLatestApplicableCompactionPoint` 要求 boundary 与 summary 两条消息都存在于当前消息路径上才生效（fork 分支切换可能拆散最新契约，此时跳过并回退到更早仍完整的压缩点）；renderer 侧 `packages/context-management/compaction-boundary.ts`（`findLastCompactionBoundaryMessage`，boundary 必须通过上下文合格性过滤且不能是 summary 自身）与 `compaction-commit.ts` 负责执行压缩。复制会话/挪 thread 成独立会话时，`remapCompactionPoints`（`shared/types.ts:305-345`）按完整 id 映射重映射压缩点，映射不上的点被丢弃（`crud.ts:60-119`）。
 
 ### 1.5 ForkMarker：唯一真正打通"消息级"与"会话级"的地方
 
@@ -153,17 +161,19 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 ## 5. 列表、分页、搜索与定位
 
 - **会话列表**：react-query 无限查询 + IndexedDB 游标分页（2.2）。`SessionList.tsx:124-128` 用 Virtuoso 的 `endReached` 触发 `fetchNextPage()`，`hasNextPage` 时挂 `SessionListLoadingFooter`。
+- **会话项活动指示（不持久化）**：侧栏的"生成中/回复完成未读"指示来自内存 zustand store（`sessionActivityStore.ts` + `generation-runtime.ts`，`81571269`），以会话 id 为 key 的临时集合，**不写 `SessionMetaRecord`、不落盘**，重启即清空——`SessionMetaSchema` 仍是侧栏唯一的持久化认知（界面呈现见 Chat UI 笔记 1.2）。
 - **消息搜索**：Chatbox 有一套独立于消息列表渲染的搜索实现，并非只有 DOM 文本搜索：`stores/sessionHelpers.ts:871-875,880-929` 对当前消息和历史 Thread 的 `contentParts` 做文本匹配，全部会话按 IndexedDB 元数据分页（每页 30 个）读取完整 Session，最多返回 50 条命中消息。这套实现**没有持久化倒排索引**，跨会话搜索仍是按页读取并逐条扫描；它不受 Virtuoso 虚拟窗口的 DOM 挂载范围限制。消息匹配覆盖当前线程和历史 Thread，也会读取文本、reasoning、info、tool-call 状态及文件名（`shared/services/native-session-search.ts:8-25,55-75`）。搜索入口与结果定位的工作流在 Chat UI 笔记。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
 - **两条写路径**：`updateStreamingCache(sessionId, message)`（`stores/session/messages.ts:132-137`）只改 react-query 缓存，**不碰 storage**，注释写明"性能优先，不检查 session 存在性"；`persistStreamingMessage(...)`（`:143-155`）走每会话一个的 `UpdateQueue`（`stores/updateQueue.ts`，基于 `queueMicrotask` 的串行合并队列，避免并发 update 互相覆盖），**真正写 storage**。节流策略（2 秒定时 + tool-call 特例）属于对话请求与上下文笔记。
-- **缓存合并保护**：`updateSession`（元数据更新路径，`chatStore.ts:394-410`）调用时传了 `{ preserveCachedGeneratingMessages: true }`（见 `_setSessionCache`，`chatStore.ts:287-300`），实际合并逻辑在 `mergeCachedGeneratingMessages`（`chatStore-cache.ts:26-52`）：当磁盘上读回来的 session（可能是较旧的快照）要写回缓存时，如果某条消息在缓存里 `generating: true`，就保留缓存里那条（更新的）内容，不用磁盘上更旧的内容覆盖。这是为了防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容。
+- **缓存合并保护**：`updateSession`（元数据更新路径，`chatStore.ts:394-410`）调用时传了 `{ preserveCachedGeneratingMessages: true }`（见 `_setSessionCache`，`chatStore.ts:287-300`），实际合并逻辑在 `mergeCachedGeneratingMessages`（`chatStore-cache.ts:26-52`）：当磁盘上读回来的 session（可能是较旧的快照）要写回缓存时，如果某条消息在缓存里 `generating: true`，就保留缓存里那条（更新的）内容，不用磁盘上更旧的内容覆盖。这是为了防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容。`5ec9eb70` 起删除生成中的消息同样走 `preserveCachedGeneratingMessages` 全量写路径（`removeMessage`，`chatStore.ts:785-835`），注释明确"合并只映射仍然存在的消息，不会复活已删除消息"。
 - **删除时的状态清理**：`cleanupDeletedSessionRuntimeState` 统一清理 query 缓存、UI map、节流缓存、滚动位置与挂起队列（3.2 删除第 5 步）。
 
 ## 7. 迁移、导入导出与保留策略
 
 - IndexedDB schema 只做加法式变更、不做 version 升级，以兼容降级客户端（2.4）。
+- `365ef248` 起备份导入不再依赖 `crypto.randomUUID`（部分浏览器/WebView 环境缺失该 API 时用回退 id 生成），导入在移动/Web 端更稳。
 - 导入导出、备份恢复、崩溃恢复与多窗口竞争在本类目范围内未做运行验证（见未验证事项）。
 
 ## 8. Agent、模型、知识库与附件绑定
@@ -177,16 +187,17 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 
 - **批量归档故意不做性能优化**：代码注释直接承认"逐个走 `updateSession`，不针对超大批量归档做性能优化"（`chatStore.ts:500-501`）——是被记录在案、而非被忽略的工程取舍。
 - **恢复归档会话不重置 `sortOrder`**：恢复后出现在归档前位置而非列表顶部，可能与用户预期不符。
-- **Fork 清理双写风险**：`cleanupEmptyForkBranches` 在 root 消息层和 thread 层分别写了一套相似但不完全相同的代码。
+- **Fork 清理双路径收敛**：`cleanupEmptyForkBranches` 已合并为单一函数内的 root/thread 两条路径（`chatStore.ts:881-967`），较旧快照的"两段相似代码"风险点仍在但范围已收敛；root 层会改写消息数组并自动切换分支、thread 层只更新 hash，两者行为仍不完全对称。
 - **IndexedDB 无 version 升级**：兼容降级客户端的代价是 schema 只能加法演进（2.4）。
 - **类目边界**：本笔记只回答数据语义；停止生成的半截消息最终如何落盘、重试如何选择上下文属于对话请求与上下文；列表虚拟化、滚动锚定与消息壳装配属于消息渲染器（`../消息渲染器/Chatbox-消息渲染调查笔记.md`）。
 
 ## 10. 未验证事项
 
 - `localStorage.removeItem('new-chat')` 的对应写入点未找到，可能是遗留逻辑（3.1 第 6 步）。
-- `context-management` 包内的摘要产生与压缩触发细节未读取（1.4）。
+- `context-management` 包内的压缩**触发阈值**（何时自动压缩、按什么预算）未逐行展开（1.4 已核实压缩点的结构、边界选择与落盘语义，`compaction-commit.ts` 的具体执行细节未完全读取）。
 - provider 侧 token 截断策略、导入导出、崩溃恢复、多窗口并发写入需要运行验证。
 - IndexedDB "捕获 VersionError 后重试"的兜底实现未在已读代码中找到（2.4）。
+- 侧栏"生成中/未读完成"指示为内存态，跨重启/多窗口的同步行为未验证（5）。
 
 ## 11. 关键源码索引
 

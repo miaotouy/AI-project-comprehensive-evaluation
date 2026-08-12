@@ -2,11 +2,11 @@
 
 > 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`6b461b75b39b5a19b378dc42fbfbd1655bc446a6`（分支：`main`）
+> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/Pi-Chat调查笔记.md`](../Chat/Pi-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/Pi-Chat调查笔记.md`](../Chat/Pi-Chat调查笔记.md)（2026-08-10 调查）迁移现有段落与证据；按提交范围核对 harness 侧 JSONL/搜索变更（search 迁移、原子写、按 cwd 限定 id、名称清除），coding-agent 的 SessionManager 未变
 >
 > 调查范围：会话/消息数据模型、JSONL 文件持久化与版本迁移、生命周期与分支指针、列表扫描与搜索、会话级绑定；发送执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -42,7 +42,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 - **会话单位**：`SessionManager` 构造时生成 `uuidv7` 会话 id（`session-manager.ts:208-210`）；文件名为 `<ISO时间戳(冒号与句点替换为连字符)>_<id>.jsonl`（`session-manager.ts:952-953`，`timestamp.replace(/[:.]/g, "-")`）。文件首行是 `SessionHeader { type, version(当前3), id, timestamp, cwd, parentSession? }`（`session-manager.ts:32-39`）。
 - **条目类型**：`SessionEntry` 联合 `message/thinking_level_change/model_change/compaction/branch_summary/custom/custom_message/label/session_info`（`session-manager.ts:144-153`）。其中 `custom` 是扩展状态存储（不参与 LLM 上下文），`custom_message` 参与上下文并控制 TUI 显示（`session-manager.ts:94-141`）。
-- **消息结构**：`AgentMessage` 由 `packages/agent/src/types.ts` 定义；assistant 消息复用 `AssistantMessage`（`packages/ai/src/types.ts:412-427`），含 `content` 块数组、`usage`、`stopReason`、`errorMessage`、`deferred` 句柄。工具结果以 `ToolResultMessage`（role=toolResult，`types.ts:429-445`）独立成消息。
+- **消息结构**：`AgentMessage` 由 `packages/agent/src/types.ts` 定义；assistant 消息复用 `AssistantMessage`（`packages/ai/src/types.ts:415-430`），含 `content` 块数组、`usage`、`stopReason`、`errorMessage`、`deferred` 句柄。工具结果以 `ToolResultMessage`（role=toolResult，`types.ts:437-454`）独立成消息。
 - **版本迁移**：v1→v2 生成 id/parentId 树，v2→v3 把 `hookMessage` 角色改名为 `custom`（`session-manager.ts:230-291`）；读文件时若版本落后则迁移并重写文件（`session-manager.ts:917-919`）。
 
 ## 2. 事实源、索引与持久化
@@ -71,7 +71,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 - **会话列表**：`SessionManager.list/listAll` 全量扫描 + 并发上限 10（§2）；无分页游标。
 - **搜索**：`session-selector-search.ts` 支持 token 模式（fuzzy/短语混合，`"node cve"` 引号）与 `re:` 正则模式，搜索文本是 `id + name + 全部消息文本 + cwd`（`session-selector-search.ts:26-57`）；`/resume` 会话选择器内嵌搜索框（入口见 Chat UI 笔记 §2）。
-- **消息级搜索**：本次未找到（消息全文不建索引，列表页一次性扫描；另存 harness SDK 的 `ScanningSessionSearch`（packages/agent/src/harness/session/search.ts）可逐条目全文扫描 JSONL，未接入 TUI/AgentSession 路径）。
+- **消息级搜索**：本次未找到（消息全文不建索引，列表页一次性扫描；另存 harness SDK 的 `createScanningSessionSearch`，位于 `packages/agent/src/search/`（scanning.ts + index.ts，2026-08 从 `harness/session/search.ts` 迁出）——可对可读存储逐条目分页扫描，接口为异步迭代器 `search(text, options): AsyncIterable<Hit>`（`entryTypes`/`limit`/`signal`，`search/index.ts:13-31`），未接入 TUI/AgentSession 路径）。
 - **定位/统计**：`/session` 显示统计（用户/助手/工具消息数、token、成本）；`/tree` 树形导航带 label 书签（`getTree`，`session-manager.ts:1310-1348`）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
@@ -86,6 +86,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 - **导出**：`/export` 支持 HTML（`core/export-html/`，marked+highlight.js 静态页面）与 JSONL；HTML 导出的渲染细节见消息渲染器笔记 §7。
 - **导入**：`/import` 复制 JSONL 到会话目录后恢复（`agent-session-runtime.ts:361-396`）；`/share` 以 GitHub secret gist 分享。
 - 保留策略：压缩后旧条目仍在文件中但不再进上下文（执行侧见对话请求与上下文笔记 §3）；无自动清理/轮转策略的证据。
+- **harness 侧（packages/agent）JSONL 增强**（coding-agent 的 `SessionManager` 未变）：会话列表改为只读各文件首行 header 提取元数据（`listJsonlSessionMetadata`，`harness/session/jsonl/repo.ts:65-87`）；会话 id 的重复检查限定在目标 cwd 目录内（`sessionIdExists(id, cwd)`，`repo.ts:226-234`，#6282221）；同进程同 cwd+id 的并发 create/fork 直接拒绝（`claimCreateDestination`，`repo.ts:174-191`，#9d090bc）；fork 改为"整文件临时文件 + 原子 rename 发布"（`publishFileAtomically`/`fork`，`harness/session/jsonl/storage.ts:33-57, 110-118`，torn-tail 截断同样走原子发布 :84-94，#a838c06）；会话名称可显式清除（`setName(undefined)`，`state.ts:19, 22-24`，#7bdb16c）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
@@ -103,7 +104,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 ## 10. 未验证事项
 
-- 多实例并发写同一会话文件、文件损坏与恢复未验证。
+- 多实例并发写同一会话文件、文件损坏与恢复未验证（agent 侧 JSONL 已有 torn-tail 原子截断与同进程 create/fork 冲突拒绝，但均未运行验证）。
 - 长会话列表扫描（一次性全量读取）的性能未运行基准（`buildSessionInfo` 并发上限 10）。
 - 版本迁移的边界情况（中断迁移、损坏文件）未验证。
 - 未运行交互会话；结论来自静态源码（与源笔记一致）。
@@ -116,4 +117,4 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 - `packages/coding-agent/src/modes/interactive/session-selector.ts:645`（deleteSessionFile）
 - `packages/coding-agent/src/modes/interactive/session-selector-search.ts:26-57`（搜索）
 - `packages/coding-agent/src/core/keybindings.ts:147-154`、`:267-268`（删除快捷键）
-- `packages/agent/src/harness/session/search.ts`（ScanningSessionSearch，未接入）
+- `packages/agent/src/search/scanning.ts`、`search/index.ts`（createScanningSessionSearch，未接入 TUI/AgentSession）

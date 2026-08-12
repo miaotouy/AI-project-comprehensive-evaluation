@@ -4,7 +4,7 @@
 >
 > 对比更新日期：2026-08-12
 >
-> 依据：本目录下通用类目调查笔记及横向对比、十六项目独特功能调查笔记、独特功能待查清单，并参考《AI 客户端完整体验栈与模块组合构想》
+> 依据：各单项目调查笔记（含通用类目、十六项目独特功能调查笔记、独特功能待查清单）及横向对比，并参考《AI 客户端完整体验栈与模块组合构想》
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -14,16 +14,17 @@
 
 ## 结论摘要
 
-最新十六项目专项笔记共归并出 **88 个产品功能族**，另整理 **15 个机制贡献族**。本轮吸收 AIO Hub、VCPChat、VCPToolBox 三份补充盘点：新增 13 个产品族和精确 Token、共享 OCR 两个机制族；同时加入“产品辨识度闸门”，避免仅因实现完整、界面标准或恰好是样本中唯一实现就自动获得主贡献。
+最新十六项目专项笔记共归并出 **91 个产品功能族**，另整理 **17 个机制贡献族**。吸收 AIO Hub、VCPChat、VCPToolBox 三份补充盘点后，新增 13 个产品族和精确 Token、共享 OCR 两个机制族，并加入“产品辨识度闸门”，避免仅因实现完整、界面标准或恰好是样本中唯一实现就自动获得主贡献。AIO Hub 的 Recall 由“四检索引擎”重构为检索管线（SQLite 真源、宏 74 个），LobeHub 的 Project 升级为主链确认实体且 Goals 目标闭环新增主链确认，VCPChat 新增 Scriptorium 共笔文坊，DeepChat 新增 CLI 本地控制平面主链。
 
 > 覆盖说明：全部计分项均已达到静态源码意义上的 `主链确认`，但大量能力尚未运行验证。`入口确认`、外部依赖和声明不符项不计分；默认关闭的已确认能力仍可计入，但在理由中保留边界。
 
-- **AIO Hub** 的覆盖面最宽。本轮新增 Recall 思绪集、网页蒸馏室、窗口自动化语言、实时字幕 OCR 和跨播放器弹幕五项主贡献；Git 提交台与长文翻译虽已闭环，但产品形态更接近成熟专用工具，只计辅助贡献。
+- **AIO Hub** 的覆盖面最宽。新增 Recall 思绪集、网页蒸馏室、窗口自动化语言、实时字幕 OCR 和跨播放器弹幕五项主贡献；Git 提交台与长文翻译虽已闭环，但产品形态更接近成熟专用工具，只计辅助贡献。Recall 由“四检索引擎”重构为检索管线（预设法 + 候选模块、`【recall::…】` 严格占位符、SQLite 真源），Knowledge 由空壳重构为主动资料库工具，宏 72 → 74（`{{kb}}` 移除）。
 - **Hermes Agent、OpenCode、Open WebUI** 分别在持续 Agent 后端、编码会话服务、多人模型工作区三个方向形成宽覆盖；Open WebUI 新增 Channels、Notes、Memory、Calendar、Automations 和 Arena/ELO 六条完整产品链。
-- **VCPChat** 新增 Agent 可控 Hi-Fi 播放器、系统级划词助手和双语自动语音链三项主贡献，并以论坛客户端、RAG Observer 和 3D 物理骰子补充既有 VCP 运行时，产品身份从“特色聊天前端”进一步转向 AI 原生桌面环境。
+- **VCPChat** 新增 Agent 可控 Hi-Fi 播放器、系统级划词助手和双语自动语音链三项主贡献，并以论坛客户端、RAG Observer 和 3D 物理骰子补充既有 VCP 运行时，产品身份从“特色聊天前端”进一步转向 AI 原生桌面环境。再新增 **Scriptorium 共笔文坊** 主贡献（VDOC/VPPTX 工程 + 文脉 PR 审批），Loom 升 v1.4.0 + VCP Agent WebCore 计入既有 Loom 项不重复计数。
 - **VCPToolBox** 新增多观点 Agent 会议主贡献，Skill 目录索引作为既有 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
-- **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别补入 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent，旧统计明显低估了这些产品面。
-- **NextChat** 仍只有 fork 与隔离 Artifact 两项辅助贡献；**Manifold Desktop** 经专项复核后仍为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
+- **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别补入 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主/辅助贡献，DeepChat 的 CLI 本地控制平面并入“外部表面驾驶本地会话”主贡献族。
+- **Hermes Agent** 新增会话心跳（`/heartbeat`）与目标质量门（`/goal`）主链确认，作为“主动 Agent”族新主贡献候选（待与至少三个项目聚类后建立局部比较，暂不计分）。
+- **NextChat** 只有 fork 与隔离 Artifact 两项辅助贡献；**Manifold Desktop** 为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
 
 这里的“贡献”表示：组合新产品时，现有调查会优先从哪个项目提取该能力的产品契约或实现原型。它不是代码贡献、原创权或成熟度结论。
 
@@ -57,14 +58,14 @@
 | 排序 | 项目 | 主贡献 | 辅助贡献 | 覆盖功能族 | 产品特色点 | 主要特色身份 |
 |---:|---|---:|---:|---:|---:|---|
 | 1 | AIO Hub | 13 | 12 | 25 | 38 | 上下文召回、网页蒸馏、桌面 RPA、媒体/资产与跨播放器工具枢纽 |
-| 2 | VCPChat | 12 | 4 | 16 | 28 | 消息即应用、主动 Agent、桌面感知、Hi-Fi 媒体、记忆工作台与跨端同步 |
+| 2 | VCPChat | 13 | 4 | 17 | 30 | 消息即应用、主动 Agent、桌面感知、Hi-Fi 媒体、文档共笔、记忆工作台与跨端同步 |
 | 3 | Open WebUI | 10 | 5 | 15 | 25 | 多用户模型工作区、协作频道与文档、记忆、日历自动化和模型评估 |
 | 4 | VCPToolBox | 11 | 1 | 12 | 23 | 记忆演化、上下文语言、托管浏览器、Agent 社会和异步插件编排 |
 | 5 | Hermes Agent | 8 | 6 | 14 | 22 | 谱系化会话、后台任务、闭环学习、自进化 Skill 和跨界面 Agent 后端 |
 | 6 | DeepChat | 5 | 10 | 15 | 20 | 可操控 Agent turn、IM 遥控、Tape & Trace、Skill 迁移和强审批绑定 |
 | 7 | SillyTavern | 7 | 4 | 11 | 18 | 角色卡、World Info、提示词工程工作台、swipe、快捷动作和内容脚本 |
 | 8 | OpenCode | 6 | 3 | 9 | 15 | 文件/Git 事实源、多表面会话、CodeMode、会话档案与 ACP 服务端 |
-| 9 | LobeHub | 5 | 5 | 10 | 15 | Agent 调度与运营、白盒记忆、conversation-flow 和协作文档对象 |
+| 9 | LobeHub | 6 | 6 | 12 | 18 | Agent 调度与运营、白盒记忆、conversation-flow、目标闭环与协作文档对象 |
 | 10 | Cherry Studio | 4 | 5 | 9 | 13 | 数据库消息树、Agent workspace、小程序、联邦搜索和持久翻译 |
 | 11 | Pi | 4 | 3 | 7 | 11 | 追加型分支会话、终端组件树、项目文件 Agent 和研究数据生产 |
 | 12 | AstrBot | 4 | 2 | 6 | 10 | 跨 IM 事件流水线、Agent Sandbox、主动 Agent、组件投影和语音管道 |
@@ -97,7 +98,7 @@
 | F66 | 记忆语义动力学与元思考演化 | VCPToolBox | - | TagMemo/RiverMemo 排序与递归思考链共同维护长期认知状态 |
 | F73 | 神经云图与日记记忆工作台 | VCPChat | - | 将记忆网络、搜索、日记和可视化组织为独立用户工作台 |
 | F82 | Agent 私有资产协议与作用域管理 | AIO Hub | - | `agent-asset://` 把资产绑定 Agent，并贯通管理、宏注入和渲染 |
-| F83 | 多引擎即时 Recall 思绪集 | AIO Hub | - | 思绪集、四类检索引擎、Agent 管理工具与上下文占位符共同形成世界书之外的语义召回产品面 |
+| F83 | 多引擎即时 Recall 思绪集 | AIO Hub | - | 思绪集、检索管线（预设法 + 候选模块）、双 Agent 实例与严格占位符协议共同形成世界书之外的语义召回产品面；Knowledge 同步重构为主动资料库工具 |
 
 ### 会话演化、连续性与研究轨迹
 
@@ -107,13 +108,13 @@
 | F11 | 单条回复候选、swipe 与版本导航 | SillyTavern | AIO Hub、Chatbox、Jan | 多个候选保留在同一语义位置供用户切换 |
 | F12 | 多模型并行回复与并排比较 | Open WebUI | Cherry Studio、LobeHub | 同一请求生成多列或兄弟结果并提供专门投影 |
 | F13 | 会话 fork、checkpoint 与 lineage | Hermes Agent、Pi | SillyTavern、DeepChat、NextChat、Open WebUI、OpenCode | 从历史点派生新会话并保留来源关系 |
-| F14 | 压缩后仍可追溯原会话谱系 | Hermes Agent | Pi | compaction 产生新节点但不抹掉原 transcript 的寻址关系 |
+| F14 | 压缩后仍可追溯原会话谱系 | Hermes Agent | Pi | compaction 产生新节点但不抹掉原 transcript 的寻址关系；新增 gpt-5.6 直连 OpenAI 路由的 native 服务端压缩，本地 compaction-as-fork 保持为回退 |
 | F15 | 跨会话消息全文检索并直达具体消息 | DeepChat | Chatbox | 搜索结果落到 message id，而非只打开会话 |
 | F16 | 生成中的 steer、queue 与 pending input | DeepChat | Jan | Agent turn 未结束时仍可改变后续执行 |
 | F17 | 跨 IM 平台事件流水线、群聊唤醒与 follow-up | AstrBot | - | 核心产品单位是平台事件和 UMO，而非桌面聊天窗口 |
-| F27 | 多表面共享同一 Agent 后端与会话连续性 | Hermes Agent、OpenCode | Jan | 多前端消费同一事实源；OpenCode 另支持重放与所有权接管 |
+| F27 | 多表面共享同一 Agent 后端与会话连续性 | Hermes Agent、OpenCode | Jan | 多前端消费同一事实源；OpenCode 另支持重放与所有权接管；Hermes 桌面新增 HUD 浮动聊天窗（完整 renderer + 跨窗口草稿同步） |
 | F44 | 可保存、观察和迁移的研究轨迹/会话档案 | OpenCode、DeepChat | Pi、Hermes Agent | 覆盖 Tape & Trace、导出脱敏、导入分享、数据生产与轨迹压缩 |
-| F59 | IM 渠道远程控制本地 Agent 会话 | DeepChat | - | 远端命令与本地会话绑定、执行和结果投递形成闭环 |
+| F59 | IM 渠道远程控制本地 Agent 会话 | DeepChat | - | 远端命令与本地会话绑定、执行和结果投递形成闭环；CLI 本地控制平面（token 鉴权 + 审批 broker + detached runs）以同一“多表面连续性”标签并入本族，不重复计数 |
 | F75 | 跨设备双向增量同步 | VCPChat | - | VCPMobileSync 用稳定身份、增量状态和删除传播同步产品数据 |
 | F77 | 跨聊天消息转发与气泡附言 | - | VCPChat | 转发保持来源并允许附言，已闭环但独特性不足以单列首要参考 |
 
@@ -141,7 +142,7 @@
 | F68 | 人类与模型共同参与的实时 Channels | Open WebUI | - | 频道、线程、反应、置顶和模型 @ 参与形成协作空间 |
 | F69 | 与隐藏会话及工具互通的协作 Notes | Open WebUI | - | Note CRUD、Yjs 协作和模型读写工具构成独立文档工作区 |
 | F81 | 人类工具箱、自动 GUI 与节点工作流编辑器 | VCPChat | - | manifest 转表单、专用面板和节点执行引擎形成可操作工具面 |
-| F76 | LoomAPP 数据驱动创作运行时 | VCPChat | - | 前端插件可承载独立交互与数据可视化创作应用 |
+| F76 | LoomAPP 数据驱动创作运行时 | VCPChat | - | 前端插件可承载独立交互与数据可视化创作应用；Loom 升 v1.4.0 + VCP Agent WebCore，新增页面快照（Grounded Markdown）/页面图片/标准动作执行与串行指令协议 |
 | F88 | 百万字符长文本分片翻译与上下文继承 | - | AIO Hub | 递归分片、并发限流、相邻片段上下文和精确 Token 预算闭环，但不单独定义客户端身份 |
 | F89 | 内置弹幕播放与第三方播放器透明覆盖运行时 | AIO Hub | - | 多格式解析、虚拟时钟、HWND 跟随、DPI/Z-Order 同步和高保真字幕降级链形成独立桌面产品面 |
 | F90 | Agent 可控的本机 Hi-Fi 播放子系统 | VCPChat | - | 自研 DSP/WASAPI 引擎、WebDAV 曲库、桌面挂件、歌词与对话点歌贯通 |
@@ -149,6 +150,8 @@
 | F92 | 双语切片、双模型分流与自动朗读语音链 | VCPChat | - | 混合语言文本按片段分流到两个 TTS 模型，并由前端插件自动朗读和缓存 |
 | F93 | 桌面 RAG 信息流监听与工具审批浮层 | - | VCPChat | 独立透明窗口持续展示后端信息流并可批准或拒绝工具，但依赖外部 VCP 后端 |
 | F94 | Agent 可调用的 3D 物理骰子 | - | VCPChat | ammo.wasm 物理投掷和结果回传形成闭环，产品面较窄且无持久对象 |
+| F97 | 项目实体与项目协调 Agent | - | LobeHub | 独立 `projects` 实体（表 + tRPC CRUD + CLI 命令）+ 按项目名生成协调者内置 Agent，与按工作目录的话题分组并存；辅助贡献（主链确认） |
+| F98 | 人机共笔文档工作台（VDOC 工程 + 文脉 PR 审批） | VCPChat | - | VDOCX/VPPTX 工程、人类直编渲染版式、Agent 以可审阅 PR（pending/applied/rejected/conflict）协作编辑源码，文脉带版本快照与审批回执（主链确认） |
 
 ### Agent 工具、运行时与外部互操作
 
@@ -168,7 +171,7 @@
 | F60 | Skill 跨工具格式转换与同步 | DeepChat | - | 11+ 工具适配器把 Skill 在不同编码 Agent 生态间迁移 |
 | F61 | 多搜索源与浏览工具组合的深度研究链 | - | DeepChat | web 搜索、深度研究和浏览工具已闭环，但普通搜索不单独加分 |
 | F62 | DeepLink 外部启动与配置协议 | - | DeepChat | `deepchat://` 可启动会话、安装 MCP 或配置 Provider |
-| F74 | 托管浏览器观察、控制与验证运行时 | VCPToolBox | - | managed Chrome 具生命周期、协议、脱敏、验证和指标闭环；默认关闭 |
+| F74 | 托管浏览器观察、控制与验证运行时 | VCPToolBox | - | managed Chrome 具生命周期、协议、脱敏、验证和指标闭环；默认关闭。2.4 新增正文图片 IMG* 语义与 `get_page_image`、Popup 人工 Managed 选择，agent 不再隐式控制托管运行时 |
 | F78 | 跨节点文件透明获取与取消传播 | VCPToolBox | - | 来源绑定、缓存、循环保护、断线清理和 cancel_tool 形成分布式文件面 |
 | F79 | 文件事实源的 Agent 论坛与异步协作 | VCPToolBox | VCPChat | 后端以 Markdown 帖子形成可持久协作空间，VCPChat 提供隔离渲染的论坛客户端 |
 | F80 | 长任务异步回调与结果回注会话 | VCPToolBox | - | 插件先返回任务句柄，完成后把结果重新注入原会话 |
@@ -177,6 +180,7 @@
 | F86 | 具子流程、变量作用域、条件跳转和 OCR 的桌面 RPA 语言 | AIO Hub | - | 窗口操作从录制回放提升为可持久、可组合的小型流程语言 |
 | F87 | 屏幕区域持续 OCR、字幕合并与聊天回注 | AIO Hub | - | 高频截屏、帧去重、字幕时间轴、SRT 导出和跨窗口回注形成连续工作流 |
 | F95 | 多观点 Agent 会议与主持综合 | VCPToolBox | - | 多角色并行作答、主持人综合和结构化会议信息构成区别于普通子 Agent 委托的审议形态 |
+| F96 | 带验收计划与有界自动修复的目标闭环（/goal） | LobeHub | - | 目标复用任务对象，验收标准持久化、轮次与花费双上限、`lobe-goal` 创建必须人工确认，goalPhase 驱动 UI（主链确认） |
 
 ### 渠道、模型调度与评估
 
@@ -198,7 +202,7 @@
 |---|---|---|---|---|
 | M01 | 保留富节点状态的稳定前缀流式更新 | AIO Hub | VCPChat、LobeHub | 避免累计全文重画，保留焦点、动画和已完成节点状态 |
 | M02 | 具作用域、可复用或可恢复的工具审批策略 | DeepChat | Chatbox、Jan、Cherry Studio、Hermes Agent、LobeHub | 审批绑定会话、参数、命令、server 或持久策略 |
-| M03 | Agent 循环步数、超时、重复守卫和大结果落盘 | AstrBot | Hermes Agent、OpenCode | 限制失控循环并把长结果转成可寻址对象 |
+| M03 | Agent 循环步数、超时、重复守卫和大结果落盘 | AstrBot | Hermes Agent、OpenCode、Cherry Studio | 限制失控循环并把长结果转成可寻址对象；Cherry Studio 普通聊天工具轮次上限默认 100 |
 | M04 | 多来源统一工具注册、过滤与校验 | OpenCode | AIO Hub、AstrBot、Hermes Agent、Open WebUI、Jan | 内置、Plugin、MCP、Skill 共用发现和执行边界 |
 | M05 | 跨进程、远端节点和多协议插件执行 | VCPToolBox | VCPChat、AIO Hub | 工具运行位置离开当前客户端，并由协议和节点编排 |
 | M06 | 请求、Key、模型与 Provider 分层故障转移 | Hermes Agent | - | 失败后逐层改变目标，形成完整静态 fallback 链 |
@@ -211,8 +215,10 @@
 | M13 | Rust/Rayon 原生记忆内核与可解释排序 | VCPToolBox | - | 把大规模语义计算下沉，同时保留排序结果和解释面 |
 | M14 | Tokenizer 资产注册、多模态计费与全局预算服务 | AIO Hub | - | 为上下文截断、压缩、预览、检查和长文翻译提供统一的精确预算依据 |
 | M15 | 多引擎共享 OCR 平台与跨工具复用 | AIO Hub | VCPChat | OCR 引擎、Profile 与执行入口被字幕、转写、窗口自动化或桌面感知工作流共同消费 |
+| M16 | 备份/恢复覆盖主数据库并做写方排空 | Cherry Studio | - | 备份 v7 full/slim 双布局均含 `cherrystudio.sqlite`，恢复经 checkpoint + 崩溃安全 promotion 门原子替换，备份前对写方 quiesce（已接通） |
+| M17 | JSONL 原子发布与 torn-tail 修复 | Pi | - | 整文件临时文件 + 原子 rename 发布，fork 与 torn-tail 截断共用同一原子路径，同 cwd+id 并发 create/fork 拒绝 |
 
-本轮明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约；VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
+明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约；VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
 
 ## 如何解读结果
 

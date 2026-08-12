@@ -2,9 +2,9 @@
 
 > 调查对象：`../../NextChat`（重点 `app/components/home.tsx`、`app/components/exporter.tsx`、`app/client/api.ts`、`app/components/search-chat.tsx`、`next.config.mjs`）
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`706a18b95b714ab29b2a4842d3b9ff4f887935d5`（分支：`main`）
+> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
 >
 > 调查方式：局部补查。按代码路由反向盘点（`home.tsx` 全部路由面 + `app/api/` 全部路由 + 侧栏入口），对每个候选追源码主链并与现有十类笔记交叉核对；抽查 `exporter.tsx`/`api.ts`/`search-chat.tsx`/`next.config.mjs`；未启动应用与第三方服务
 >
@@ -33,15 +33,15 @@ README 的 Features 章节（README.md:80-93）以部署、PWA、Markdown、prom
 | `/mcp-market` | MCP 市场与连接 | 归并已有类目 | Agent 工具笔记 §3、Chat UI 笔记 §1 |
 | `/artifacts/:id` | Artifact 预览与 KV 分享 | 归并已有类目 | 生成式输出笔记（整篇）、消息渲染器笔记 §5 |
 | `/sd`、`/sd/new` | SD 图像生成面板 | 归并已有类目 | 生成式输出笔记 §3/§4/§8 |
-| `/search-chat` | 会话全文搜索页 | 归并已有类目（普通检索） | 本次补查，见下 |
-| 导出面板分享按钮 | 会话分享（ShareGPT） | 入口确认 + 外部依赖（暂缓） | 本次补查，见下 |
+| `/search-chat` | 会话全文搜索页 | 归并已有类目（普通检索） | 见下 |
+| 导出面板分享按钮 | 会话分享（ShareGPT） | 入口确认 + 外部依赖（暂缓） | 见下 |
 
 ## 已归并到现有类目的能力
 
 - **Mask**：`app/store/mask.ts` 的角色模型、内置 Mask 构建加载、会话复制语义、导入导出与 `#/new-chat?mask=<id>` 分享链接均由 Agent 角色笔记覆盖（§1-§6、§8），含“同步开关/可变副本”等边界结论。
 - **Artifact**：HTML 探测、沙箱 iframe、Cloudflare KV 分享与独立路由由生成式输出笔记整篇覆盖。
 - **OpenAPI/MCP**：OpenAPI operation → function schema 的转换与执行、MCP stdio 子进程与 `json:mcp:` 文本协议由 Agent 工具笔记覆盖。
-- **会话全文搜索页**（本次补查确认）：侧栏入口（`app/components/sidebar.tsx:39`）→ `SearchChatPage`（`app/components/search-chat.tsx:18-68`）对 `chatStore.sessions` 全量消息做 `toLowerCase` + `indexOf` 子串扫描，命中片段取上下文 ±35 字符拼接，按命中内容长度排序，点击跳转会话。无索引、无正则、无消息级持久化。属于普通会话检索（现有会话与消息管理笔记 §5 未覆盖此页面，此处补齐归并结论），不进入独特功能统计。
+- **会话全文搜索页**：侧栏入口（`app/components/sidebar.tsx:39`）→ `SearchChatPage`（`app/components/search-chat.tsx:18-68`）对 `chatStore.sessions` 全量消息做 `toLowerCase` + `indexOf` 子串扫描，命中片段取上下文 ±35 字符拼接，按命中内容长度排序，点击跳转会话。无索引、无正则、无消息级持久化。属于普通会话检索（现有会话与消息管理笔记 §5 未覆盖此页面，此处补齐归并结论），不进入独特功能统计。
 
 ## 声明不符、外部依赖与暂缓项
 

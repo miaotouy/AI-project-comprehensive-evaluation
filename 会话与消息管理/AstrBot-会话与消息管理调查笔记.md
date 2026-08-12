@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
-> 调查方式：从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：2026-08-06 从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md) 迁移现有段落与证据；按提交范围增量核对 WebChat 会话持久化（chat_service / migra_webchat_session）
 >
 > 调查范围：两级会话概念、会话标识、对话持久化与 ConversationManager、群历史持久化；事件调度、流水线与并发执行进入对话请求与上下文，界面进入 Chat UI
 >
@@ -74,6 +74,7 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 |---|---|---|
 | 会话 ID 构造 | QQ 群 = group_id、私聊 = 用户 ID；webchat = `webchat!用户名!会话ID` | aiocqhttp_platform_adapter.py:222-226、webchat_adapter.py |
 | 群历史持久化 | `PlatformMessageHistory` 表（po.py:239-269），`group_message_history_enable` 开启后存储平台无关表示，上限 `group_message_history_max_cnt: 700`，暴露 `get_group_message_history` 工具 | platform_message_history_mgr.py:32-106 |
+| webchat 会话行 | `PlatformSession`（webchat）由 ChatService 在首次发送消息时惰性补齐（chat_service.py:1118-1135，#9607）；WebChat 会话迁移脚本移除一次性标记、可重复执行（migra_webchat_session.py），配合会话列表恢复缺失会话 | chat_service.py:1118-1135、migra_webchat_session.py |
 | 群隔离 | 默认群内共享同一对话；`unique_session` 开启后按发送者构建独立会话 | waking_check/stage.py:81-85 |
 
 群上下文的**内存环形缓冲注入**（1000 条原始消息 → `<system_reminder>` 块）与图像 caption 属于请求侧的上下文构建，见对话请求与上下文笔记。

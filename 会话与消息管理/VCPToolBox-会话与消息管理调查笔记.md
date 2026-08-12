@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/VCPToolBox-Chat调查笔记.md`](../Chat/VCPToolBox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/VCPToolBox-Chat调查笔记.md`](../Chat/VCPToolBox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据；按 `c4c4d00`→`1ae9b63c` 提交范围核对 `finalContextStore.js`、`chatCompletionHandler.js` 与 `server.js` 聊天端点（均无改动），仅更新代码快照
 >
 > 调查范围：会话与消息是否拥有事实源；结论是 VCPToolBox 不拥有跨请求会话状态，本文只记录边界与排除证据
 >

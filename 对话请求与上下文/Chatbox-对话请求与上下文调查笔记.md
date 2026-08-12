@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\chatbox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`f90fc31afd634494bdf8f074eca3e38fcf8da740`（分支：`main`）
+> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
 >
 > 调查方式：从 [`../Chat/Chatbox-Chat调查笔记.md`](../Chat/Chatbox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
 >
@@ -40,9 +40,9 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 
 ## 1. 提交入口、任务对象与状态机
 
-- `InputBox.tsx:779` 的 `handleSubmit` 接收编辑器文本和附件，`InputBox.tsx:837-843` 调用 `sessionHelpers.constructUserMessage`（`sessionHelpers.ts:700-770`）：图片进入 `contentParts`（`:722-725`），文件进入 `files`（`:728-758`），链接进入 `links`（`:760-770`）。
-- `stores/session/messages.ts:177` 的 `submitNewUserMessage` 先写入用户消息，随后 `:224-246` 插入 assistant 占位并由 `:308` 进入生成。
-- 生成期间存在 `generating: true` 的占位消息；停止时调用其 `cancel()` 并把该消息以 `generating: false` 乐观写回（界面入口见 Chat UI 笔记）。
+- `InputBox.tsx:837` 的 `handleSubmit` 接收编辑器文本和附件，`InputBox.tsx:887` 调用 `sessionHelpers.constructUserMessage`（`sessionHelpers.ts:872-`）：图片进入 `contentParts`，文件进入 `files`，链接进入 `links`。
+- `stores/session/messages.ts:177` 的 `submitNewUserMessage` 先写入用户消息，随后插入 assistant 占位并由 `:201` 处先走 `runCompactionWithUIState`（压缩检查，见第 3 节）再进入生成。
+- 生成期间存在 `generating: true` 的占位消息；停止时调用其 `cancel()` 并把该消息以 `generating: false` 乐观写回（界面入口见 Chat UI 笔记）。新增独立模块 `stores/session/generation-cancellation.ts`（`stopGeneratingMessages`/`cancelRunningToolCallBatch`/`finishAbortedGeneration`，`5cbe2e0b`/`ce3649e1`）：停止时仍在运行的工具调用批被统一收口为 error 态、Work Mode 计时器被取消，且生成锁由 `generation-lock.ts`（`withSessionGenerationLock`）串行化，避免停止与续跑并发改写消息。
 - 首页"假会话"首次发送时会先走 `createPersistedChatSession` 创建真实 Session 再提交（数据语义见会话与消息管理笔记 3.1）。
 
 ## 2. 历史选择与上下文拼装顺序
@@ -55,7 +55,7 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 ## 3. 预算、截断、摘要与压缩
 
 - 本次源码确认的上下文入口会按模型上下文预算筛选历史；生成中的消息列表还有独立的流式缓存与持久化路径（`session/messages.ts`）。
-- 摘要/压缩触发点：`stores/session/messages.ts:198-205` 调用 `runCompactionWithUIState`；具体触发代码在 `context-management` 包内——**未核实**（本次未读取该包源码）。摘要产生后以 `Message.isSummary` 标记，数据语义见会话与消息管理笔记 1.4。
+- 摘要/压缩触发点：`stores/session/messages.ts:201` 的 `submitNewUserMessage` 在发送前调用 `runCompactionWithUIState`。`810b5b04` 补全了压缩的边界与落盘语义：boundary 选择在 `packages/context-management/compaction-boundary.ts`（必须通过上下文合格性过滤且不能是 summary 自身），提交在 `compaction-commit.ts`，压缩契约 `compactionPoints` 随 fork/复制重映射（数据语义见会话与消息管理笔记 1.4）；自动触发阈值（按什么 token/消息预算）仍未逐行展开。
 - 具体 provider 侧 token 截断策略未在本次入口范围内完全核实。
 
 ## 4. SDK、Provider、模型与协议交接
@@ -74,7 +74,7 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 
 ### 5.2 节流策略：2 秒定时 + 特例立即持久化
 
-节流判断函数 `shouldPersistStreamingChunk`（`stores/session/orchestration.ts:437-446`）：
+节流判断函数 `shouldPersistStreamingChunk`（`stores/session/orchestration.ts:455-463`）：
 
 ```ts
 export function shouldPersistStreamingChunk(chunkType, elapsedMs, persistInterval) {
@@ -84,10 +84,14 @@ export function shouldPersistStreamingChunk(chunkType, elapsedMs, persistInterva
 }
 ```
 
-`persistInterval` 硬编码 `2000`（`orchestration.ts:471`）。主循环（`orchestration.ts:632-675`）里：
+`persistInterval` 硬编码 `2000`（`orchestration.ts:566`）。主循环（`orchestration.ts:788-852`）里：
 
 ```ts
-const shouldPersist = shouldPersistStreamingChunk(chunk.type, Date.now() - lastPersistTimestamp, persistInterval)
+const shouldPersist = shouldPersistStreamingChunk(
+  chunk.type,
+  Date.now() - lastPersistTimestamp,
+  persistInterval
+)
 if (shouldPersist) {
   void persistStreamingMessage(sessionId, targetMsg)   // 落盘（异步、不等待）
 } else {
@@ -95,13 +99,15 @@ if (shouldPersist) {
 }
 ```
 
-也就是：**每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存**（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（`:688, 718, 739, 751, 758`），确保最终态一定落盘。
+也就是：**每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存**（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（`:543,575,605,617,673,706,907,942,963,973`），确保最终态一定落盘。
 
 `tool-call` 被特殊处理的原因写在注释里：tool-call 可能长时间阻塞在等用户批准（`user_exec_approval`/`file_mutation_approval`/`app_action_approval`），如果不立刻持久化，用户刷新/关闭应用会丢失这个待批准状态。
 
+**停止路径的流排空处理**（`5cbe2e0b`）：主循环把 chunk 读取与 abort 信号做 `Promise.race`（`orchestration.ts:774-801`），abort 后立即收口消息（不再等待仍在执行的工具 step 返回），生成锁保持到流真正排空（`finally` 中的 drain），避免"停止后又冒出半个 chunk"。停止时未完成 tool-call 由 `generation-cancellation.ts` 收口为 error 态（见第 1 节）。
+
 ### 5.3 一处疑似死代码：`throttleWriteSessionAtom.ts`
 
-`stores/atoms/throttleWriteSessionAtom.ts` 里实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`）——看起来是同一个"节流落盘"想法的另一份实现。全仓库 grep `createSessionAtom` 的结果（含原调查的单独复核）：
+`stores/atoms/throttleWriteSessionAtom.ts` 里实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`）——看起来是同一个"节流落盘"想法的另一份实现。全仓库 grep `createSessionAtom` 的结果：
 
 ```
 src/renderer/stores/atoms/throttleWriteSessionAtom.ts:8
@@ -137,7 +143,7 @@ src/renderer/stores/atoms/throttleWriteSessionAtom.ts:86
 
 ### 9.2 知识库：客户端只存 id/name 句柄，真正生效靠"工具"
 
-前端状态只是 `Pick<KnowledgeBase, 'id'|'name'>`，没有把知识库内容拉到前端。真正生效的地方是生成阶段的 `buildToolsForSession`（`stores/session/tools-builder.ts:241-249`）：
+前端状态只是 `Pick<KnowledgeBase, 'id'|'name'>`，没有把知识库内容拉到前端。真正生效的地方是生成阶段的 `buildToolsForSession`（`stores/session/tools-builder.ts:246-249`）：
 
 ```ts
 const kbSupported = includeAgentTools && knowledgeBase && model.isSupportToolUse('knowledge-base')
@@ -159,7 +165,9 @@ Agent 模式（`agent-mode.ts`）、知识库、网页浏览三个开关最终�
 
 ### 9.5 工具审批的暂停语义
 
-`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25`（`orchestration.ts:61`）：一次生成里，工具调用达到 25 次才会暂停要求用户确认，且暂停会冻结同一 step 里**整批**并行工具调用而不是单个——这条限制是在"普通 chat 模式"的 `orchestrateGeneration` 里实现的，但明显是 Agent 能力的一部分，说明 chat 与 agent 在实现上没有清晰边界，是本项目里"聊天"和"Agent"两个概念在代码层面交织最深的地方之一。审批的界面工作流见 Chat UI 笔记；工具执行循环内部语义属于 Agent 工具类目。
+`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25`（`shared/utils/tool-call-limit-pause.ts:7`）：一次生成里，工具调用达到 25 次才会暂停要求用户确认，且暂停会冻结同一 step 里**整批**并行工具调用而不是单个——这条限制是在"普通 chat 模式"的 `orchestrateGeneration` 里实现的，但明显是 Agent 能力的一部分，说明 chat 与 agent 在实现上没有清晰边界，是本项目里"聊天"和"Agent"两个概念在代码层面交织最深的地方之一。
+
+`pauseOnToolCallLimit` 设置可**按会话覆盖或全局关闭**该确认点（`shouldPauseOnToolCallLimit`，`tool-call-limit-pause.ts:14-18`；会话字段 `SessionSettings.pauseOnToolCallLimit`，全局 `Settings.pauseOnToolCallLimit` 默认 true；`1db662a9`、`22ec7806`），关闭时 `orchestration.ts:750-752` 不再用 `withToolCallLimitPause` 包装工具；继续按钮拆分为"继续/继续并本次不再暂停确认"（UI 见消息渲染器笔记工具卡）。暂停类审批（user_exec/file_mutation/app_action）不受该开关影响。审批的界面工作流见 Chat UI 笔记；工具执行循环内部语义属于 Agent 工具类目。
 
 ## 10. 退出恢复、日志与已确认边界
 
@@ -169,9 +177,10 @@ Agent 模式（`agent-mode.ts`）、知识库、网页浏览三个开关最终�
 ## 11. 未验证事项
 
 - provider 侧 token 截断策略与最终 payload 字段。
-- `context-management` 包内的摘要/压缩触发细节。
+- `context-management` 包的摘要/压缩自动触发阈值细节（已核实边界选择与提交结构，见第 3 节）。
 - 停止的网络级取消效果、退出恢复与多会话并发行为需要运行验证。
 - 工具循环内部的执行细节属于 Agent 工具类目，本笔记只记录注入点与审批暂停点。
+- 附件侧（`96e2c5c8` 拒绝空解析内容、`58a6de7e` 预处理失败上浮为消息错误）的完整失败恢复工作流未运行验证。
 
 ## 12. 关键源码索引
 

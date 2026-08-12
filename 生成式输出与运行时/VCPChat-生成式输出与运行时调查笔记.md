@@ -2,19 +2,21 @@
 
 > 调查对象：`../../VCPChat`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：静态代码走读。grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、exec、preview、tool、message、markdown、highlight 等关键词；通读消息渲染管线（messageRenderer / contentPipeline / streamManager / contentProcessor）、阅读窗口（text-viewer）、Canvas 协同编辑器、桌面挂件与收藏链路、聊天历史持久化链路。未运行应用、未发起真实模型请求。
+> 调查方式：静态代码走读。grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、exec、preview、tool、message、markdown、highlight 等关键词；通读消息渲染管线（messageRenderer / contentPipeline / streamManager / contentProcessor）、阅读窗口（text-viewer）、Canvas 协同编辑器、桌面挂件与收藏链路、聊天历史持久化链路，以及 Scriptorium 文坊子系统（ScriptoriumModules + docxHandlers + ScriptoriumCollaborator 插件）。未运行应用、未发起真实模型请求。
 >
-> 调查范围：生成式输出与运行时类目全部必查问题；覆盖消息内嵌运行组件、独立阅读窗口、桌面画布挂件、Canvas 文件工作区、持久化与回流。排除：聊天上下文装配与发送细节（Chat 类目）、工具注册与执行调度（Agent 工具类目）、消息渲染器通用 Markdown/高亮/KaTeX 细节（仅在获得运行生命周期处记录交点）、音频引擎与 TTS、VCPHumanToolBox 工作流编辑器与 ComfyUI（独立人工工具，非模型生成对象）、Loom 应用运行器（第三方应用托管，非模型输出）。
+> 调查范围：生成式输出与运行时类目全部必查问题；覆盖消息内嵌运行组件、独立阅读窗口、桌面画布挂件、Canvas 文件工作区、Scriptorium 文档工程、持久化与回流。排除：聊天上下文装配与发送细节（Chat 类目）、工具注册与执行调度（Agent 工具类目）、消息渲染器通用 Markdown/高亮/KaTeX 细节（仅在获得运行生命周期处记录交点）、音频引擎与 TTS、VCPHumanToolBox 工作流编辑器与 ComfyUI（独立人工工具，非模型生成对象）、Loom 应用运行器（第三方应用托管，非模型输出）。
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
 VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出全部是消息正文内的原始文本流，通过私有标记协议（`<<<[TOOL_REQUEST]>>>`、`[[VCP调用结果信息汇总:]]`、`<<<[DESKTOP_PUSH]>>>`、`[--- VCP元思考链 ---]`、`<<<DailyNoteStart>>>` 等）表达结构化块，由渲染器转为宿主渲染的声明式卡片（工具结果卡、思维链卡、日记卡、桌面推送占位卡）。事实源是 `AppData/UserData/<agent>/topics/<topic>/history.json` 中的原始 Markdown 文本，DOM 每次重新解析派生，无独立对象 ID/状态/版本层。
+
+**例外：Scriptorium 共笔文坊**是仓库里第一套"独立对象模型"的模型协作面——VDOCX/VPPTX 工程（`AppData/ScriptoriumDocument/`）自带文档模型、资源清单与**文脉版本历史**（人类刻点 + Agent PR 以 pending/applied/rejected/conflict/failed 状态进入同一文脉，含 changeSet 与审批回执），Agent 经 `ScriptoriumCollaborator` 插件以"源码 PR + 人工审批"方式修改对象（详见 6.2）。它仍走"唯一完整 source"的文本真相模型（源码即真相，不序列化渲染树），但补上了聊天侧没有的版本/冲突/身份语义。
 
 运行能力是项目特色：气泡内 HTML 预览（iframe srcdoc，未设置 sandbox 属性）、独立阅读窗口可执行模型内联脚本（CDN 替换为本地 vendor）、Python 双模式执行（Pyodide WASM 沙箱 / 本机 `python -u` 进程）、桌面画布常驻挂件（Shadow DOM + 脚本 IIFE 沙箱 + 能力桥：widgetFS、musicAPI、`__vcpProxyFetch`/`__vcpProxyPost`）。桌面挂件是唯一具备"独立 ID + 文件持久化 + 可重载 + 模型可远程创建/替换/查询"的完整对象链。Canvas 协同窗口提供"AI 写文件 → chokidar 检测 → 行级 diff → 接受/拒绝"的编辑协作面，但版本仅为内存内容快照。
 
@@ -52,7 +54,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 **协议处理**：半截流——`streamManager.js:978` `findExplicitStablePrefix` 在流式时只把已闭合的围栏/工具块/段落边界标记为稳定，未闭合块保持尾部待渲染；未闭合推送块 150 秒超时自动 finalize（`streamManager.js:2041-2051`）。转义——反引号包裹的标记不生效（`streamManager.js:1929-1936`，`messageRenderer.js:328` `isBacktickWrappedMarker`）；工具参数内用「始ESCAPE」「末ESCAPE」承载字面量结束标记（`messageRenderer.js:332-360`）。误触发防护——推送内容需匹配合法前缀白名单否则丢弃（`streamManager.js:2004-2076`）；工具气泡内的 `pre` 块禁止转成 HTML 预览（`contentProcessor.js:608-613,650-655`）。
 
-**对象模型**：不存在统一输出对象模型。可辨识的对象身份只有三类：(a) 消息——`id + role + content(原始文本) + timestamp`，`history.json` 是事实源，DOM 是派生投影；(b) 桌面挂件——运行时 `widgetId` + 收藏后 `savedId`（目录名），`meta.json` 记录 `id/name/createdAt/updatedAt`（`desktopHandlers.js:1015-1031`），无版本字段；(c) Canvas 文件——文件路径即身份。工具结果卡、思维链卡等无独立 ID，`data-vcp-block-type` 仅用于 DOM 标记与流式保留。推断：无"能力声明/状态机"机制；对象身份与后续回合的绑定（指南必查 10）没有实现，模型每次重新生成新挂件/新文件。
+**对象模型**：不存在统一输出对象模型。可辨识的对象身份只有四类：(a) 消息——`id + role + content(原始文本) + timestamp`，`history.json` 是事实源，DOM 是派生投影；(b) 桌面挂件——运行时 `widgetId` + 收藏后 `savedId`（目录名），`meta.json` 记录 `id/name/createdAt/updatedAt`（`desktopHandlers.js:1015-1031`），无版本字段；(c) Canvas 文件——文件路径即身份；(d) **Scriptorium 文档工程**——`.vdocx/.vpptx` 工程（`AppData/ScriptoriumDocument/`）以 `document.json` + 唯一完整 HTML source + 资源清单为对象，文脉刻点/PR 提供版本与审批语义（6.2）。工具结果卡、思维链卡等无独立 ID，`data-vcp-block-type` 仅用于 DOM 标记与流式保留。推断：无"能力声明/状态机"机制；消息侧对象身份与后续回合的绑定（指南必查 10）没有实现，模型每次重新生成新挂件/新文件；Scriptorium 是唯一带"按对象身份继续修改"通道的面（PR 提交到既有工程）。
 
 ## 2. 增量生成、更新与最终化
 
@@ -70,6 +72,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 - **独立阅读窗口（sidecar 窗口）**：`ipcMain 'display-text-content-in-viewer'`（`fileDialogHandlers.js:381-411`，base64 参数传内容），可从消息右键菜单打开（`messageContextMenu.js:316-318`）；包含编辑全文、分享到笔记、截图导出（`text-viewer.js:1425-1445,2045-2155`）。
 - **桌面画布（spatial canvas）**：`<<<[DESKTOP_PUSH]>>>` 实时创建挂件（`desktopHandlers.js:948-954` 转发 `desktop-push-to-canvas`，`Desktopmodules/api/ipcBridge.js:277-278` 接收）；挂件与聊天消息并存但内容不回流到消息 DOM（流式时推送块内容被拦截，消息内只留占位卡，`streamManager.js:2146-2154`）。
 - **Canvas 协同窗口（文件工作区）**：`AppData/Canvas/` 目录，AI 工具写文件、用户在 CodeMirror 中编辑。
+- **Scriptorium 文坊窗口（文档工程）**：`WINDOW_APP_IDS.DOCX='docx-editor'`（`modules/services/windowAppIds.js:17`），`main.js:1083-1092` 初始化 `docxHandlers`，经 `open-scriptorium-window`（`desktopHandlers.js:779-781`）或托盘"文坊"（`trayManager.js:26`）打开；工程/导出/PR 审批均在 `ScriptoriumModules/scriptorium.html` 内完成（6.2）。
 - **本地文件系统**：widget 收藏目录、Canvas 目录、笔记 `AppData/Notemodules/*.md`（`notesHandlers.js:548`）。
 - **图片查看窗口**：阅读窗口截图 → `openImageViewer`（`text-viewer.js:2109-2151`）。
 
@@ -101,7 +104,8 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 ## 6. 编辑、diff、版本与协作
 
 - **消息编辑**：全文文本编辑（textarea），保存写回内存历史并经防抖落盘（`middleClickHandler.js:468-595` + `messageRenderer` 编辑模式）。无选区编辑、无 diff。
-- **Canvas 协同**：这是最强的"人机同对象编辑"链路。AI 经 FileOperator 工具写 `AppData/Canvas/`（`VCPDistributedServer/Plugin/FileOperator/FileOperator.js:1239` `createCanvas`，`:1497`），chokidar 监听外部变更（`canvasHandlers.js:87-109`），渲染器显示变更条并打开 CodeMirror MergeView 行级 diff（`Canvasmodules/canvas.js:247-308`），接受=覆盖编辑器内容（触发自动保存 `:102-113`），拒绝=用户内容写回文件。编辑历史是**内存内内容快照列表**（`canvas.js:777-791` `filesHistory`，可点击回滚 `:824-844`），不落盘、无版本号、无冲突/分支语义。
+- **Canvas 协同**：这是"人机同对象编辑"链路。AI 经 FileOperator 工具写 `AppData/Canvas/`（`VCPDistributedServer/Plugin/FileOperator/FileOperator.js:1239` `createCanvas`，`:1497`），chokidar 监听外部变更（`canvasHandlers.js:87-109`），渲染器显示变更条并打开 CodeMirror MergeView 行级 diff（`Canvasmodules/canvas.js:247-308`），接受=覆盖编辑器内容（触发自动保存 `:102-113`），拒绝=用户内容写回文件。编辑历史是**内存内内容快照列表**（`canvas.js:777-791` `filesHistory`，可点击回滚 `:824-844`），不落盘、无版本号、无冲突/分支语义。
+- **Scriptorium 文坊（人机同对象编辑的第二条链）**：文档工程 `AppData/ScriptoriumDocument/VDOCX|VPPTX/`（`modules/services/scriptoriumAgentControlService.js:133`），人类在 `ScriptoriumModules/scriptorium.html` 直接编辑渲染版式或源码；Agent 经 `ScriptoriumCollaborator` direct 插件（`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js`）读取（GetRenderedText/GetSource/GetVisualContext 等）并提交 `SubmitSourcePr`（带唯一完整 source 的修订，主进程 `docxHandlers` 侧 `AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`）→ 人类审阅/回执（pending/applied/rejected/conflict/failed）→ 应用的修订进入**文脉**（带 changeSet、工程内嵌版本快照与审批元数据，可回溯且不删后续文脉）。对比 Canvas：Scriptorium 有落盘的版本对象（文脉）与冲突状态（conflict），但仍无 CRDT/合并算法，"最后写入者赢"之外的冲突交给人工裁决；PR 是"整份 source 替换"粒度，与 Canvas 的行级 diff 不同。源码是唯一真相（不序列化渲染树，`ScriptoriumModules/README.md` 明确说明），可编程页面的瞬态 DOM 不写入工程。
 - **桌面挂件源码编辑**：挂件可在 Canvas 窗口以 `desktop-widget` 上下文打开（`desktopHandlers.js:956-996`），保存后通知桌面刷新（`canvasHandlers.js:70-85` `notifyDesktopWidgetSourceSaved`）。
 - **协作冲突处理**：仅"最后写入者赢"+ 人工 diff 接受/拒绝；无 CRDT、无结构化 patch、无撤销栈（编辑器自带 CodeMirror 撤销仅限当前会话，推断）。
 
@@ -141,10 +145,10 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 ## 11. 测试、已确认边界与未验证事项
 
-**测试体系**：`tests/` 下 4 个文件（`frontend-plugins.test.js`、`loom-controller.test.js`、`deepmemo-central-adapter.test.js`、`mobile-sync-central-adapter.test.js`），node:test + jsdom 驱动（`frontend-plugins.test.js:1-13`）。**未找到**：针对渲染管线（contentPipeline/streamManager）、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试（grep `*.test.js` 全仓仅此 4 文件，不含 vendor/node_modules）。流式最终一致性、资源回收、能力边界均无自动化覆盖。
+**测试体系**：`tests/` 顶层 7 个文件（`frontend-plugins.test.js`、`loom-controller.test.js`、`loom-electron-adapter.test.js`、`loom-manager-runtime.test.js`、`deepmemo-central-adapter.test.js`、`mobile-sync-central-adapter.test.js`，node:test + jsdom 驱动（`frontend-plugins.test.js:1-13`），以及 `test-export-inline.cjs`）；另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"）。**未找到**：针对聊天渲染管线（contentPipeline/streamManager）、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试。流式最终一致性、资源回收、能力边界均无自动化覆盖。
 
 **已确认边界**（本次调查结论）：
-- 不存在统一 Artifact/输出对象模型、无对象注册表、无模型侧跨回合对象绑定。
+- 不存在统一 Artifact/输出对象模型、无对象注册表、无模型侧跨回合对象绑定——**唯一例外是 Scriptorium 文档工程**（VDOCX/VPPTX + 文脉 PR，6.2），聊天消息/桌面挂件/Canvas 文件均无版本语义。
 - 气泡内 HTML 预览 iframe 未设 sandbox 属性（`contentProcessor.js:729-736`）；阅读窗口内联脚本在窗口主 DOM 执行（`text-viewer.js:991-1037`）——均为静态代码确认的架构事实，其安全影响未评估。
 - 本机 Python 执行（`main.js:1185-1221`）无沙箱/超时/资源限制。
 - 桌面挂件脚本沙箱对 CDN 脚本透传（`widgetManager.js:676-684`），沙箱 IIFE 内注入宿主桥（widgetFS/musicAPI/vcpProxy）。
@@ -166,6 +170,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 - `Desktopmodules/api/vcpProxy.js:60/94`：挂件能力桥（admin fetch / 模型调用）
 - `Desktopmodules/favorites/favoritesManager.js:21/108`：挂件收藏与恢复
 - `modules/ipc/canvasHandlers.js:87/299/399` + `Canvasmodules/canvas.js:247/290/777`：Canvas 协同、diff、内存历史
+- `ScriptoriumModules/`（scriptorium.html/scriptorium.js/vdoc-hybrid-compiler.js/vdoc-core.js，README.md 为权威说明）+ `modules/ipc/docxHandlers.js` + `modules/services/scriptorium{AgentControl,Import,PptxImport}Service.js` + `VCPDistributedServer/Plugin/ScriptoriumCollaborator/`：文档工程、导入导出、Agent PR 协作（6.2）
 - `VCPDistributedServer/Plugin/FileOperator/FileOperator.js:1239`：AI 创建 Canvas 文件
 - `main.js:1185`：本机 Python 执行 IPC
 - `modules/renderer/visibilityOptimizer.js:41`：消息资源暂停/恢复
@@ -174,5 +179,5 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 ## 能力等级评估
 
 - **等级判定：G3（可执行 Artifact）为主，G4（可编辑工作区）部分成立**。
-- 主要依据：HTML/JS 进入专用 iframe/窗口运行（气泡预览、阅读窗口、three.js 模板）、Python 双执行环境（WASM 沙箱 + 本机进程）、桌面挂件是带独立 ID、文件持久化、可重载、可远程替换的活对象；Canvas 提供 AI-用户同对象文件编辑 + 行级 diff + 接受/拒绝（G4 特征），但无结构化版本/冲突/分支语义，消息编辑为全文覆盖。
+- 主要依据：HTML/JS 进入专用 iframe/窗口运行（气泡预览、阅读窗口、three.js 模板）、Python 双执行环境（WASM 沙箱 + 本机进程）、桌面挂件是带独立 ID、文件持久化、可重载、可远程替换的活对象；Canvas 提供 AI-用户同对象文件编辑 + 行级 diff + 接受/拒绝（G4 特征），但无结构化版本/冲突/分支语义，消息编辑为全文覆盖。Scriptorium 文坊进一步强化 G4 侧：对象带落盘版本（文脉）与冲突状态、Agent 以 PR 提交修订并人工审批，但合并仍是"整份 source 替换 + 人工裁决"。
 - 横向轴：协议开放度=自由文本 + 私有标记（低）；更新粒度=整段流式 + 整文件覆盖（低）；投影表面=inline + sidecar 窗口 + 桌面画布 + 本地文件（广）；执行强度=浏览器脚本 + WASM + 本机语言进程（强）；持续性=消息会话内 + 挂件/文件跨会话（中高）；闭环程度=可交互、可编辑、模型可查询桌面状态并定向替换，但无对象身份级持续维护（中）；能力范围=挂件窄桥（widgetFS/musicAPI/vcpProxy）+ 桌面远程通道 + 本机 python 全权（宽窄并存）；可移植性=仅宿主可用（挂件为宿主私有格式，无标准导出）。

@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\AstrBot`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`346b85db9d79207ea7b51694cce5276203612af4`（分支：`master`）
+> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -49,7 +49,7 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 - **两级会话**：会话（session）= 聊天窗口，以 `unified_msg_origin` 标识；对话（conversation）= 会话内子对话，可新建/切换/删除。
 - **持久化**：对话历史存 SQLite `conversations` 表（`ConversationV2.content` = OpenAI 格式 JSON 列表）；当前对话 ID 经 SharedPreferences `sel_conv_id`（scope=umo）持久化；内存缓存 60s 防抖。
 - **AstrMessageEvent**：事件载体，`stop_event()` 可任意点截断传播；`role` 在唤醒阶段被标记（admin 等）。
-- **并发状态**：`SessionLockManager`（按事件循环隔离、UMO 粒度 `asyncio.Lock` + 引用计数自动清理）；follow-up 序号状态机（捕获时分配单调序号）；`ActiveEventRegistry`（stop_all 硬断 vs `agent_stop_requested` 软停）。
+- **并发状态**：`SessionLockManager`（按事件循环隔离、UMO 粒度 `asyncio.Lock` + 引用计数自动清理）；follow-up 序号状态机（捕获时分配单调序号）；`ActiveEventRegistry`（stop_all 硬断 vs `agent_stop_requested` 软停；软停同时经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，事件传播与历史保存仍继续，见 #9602）。
 
 ## 专项导航
 
@@ -78,6 +78,6 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 - `astrbot/core/conversation_mgr.py`（对话管理，:19-443）、`astrbot/core/db/po.py`（ConversationV2 / PlatformMessageHistory）
 - `astrbot/core/event_bus.py`（事件总线）、`astrbot/core/pipeline/scheduler.py` + `stage_order.py`（洋葱调度）
-- `astrbot/core/pipeline/process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`follow_up.py`（:1-234）
+- `astrbot/core/pipeline/process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`follow_up.py`（:1-248）
 - `astrbot/core/utils/session_lock.py`（UMO 锁）、`astrbot/core/agent/context/manager.py`（上下文压缩）
 - `astrbot/builtin_stars/astrbot/group_chat_context.py`（群上下文）、`dashboard/src/views/ChatPage.vue`（WebChat）

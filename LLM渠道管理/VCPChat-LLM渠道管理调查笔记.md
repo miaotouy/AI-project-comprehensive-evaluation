@@ -2,23 +2,15 @@
 
 > 调查对象：`E:\works\git\VCPChat`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b6ffa22f15bd0fd2499f4513a992f6bdff1de731`（分支：`main`）
+> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；只读源码梳理；未修改目标仓库；调查时无未提交修改
+> 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
 > 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
-
-## 本次刷新要点（3f14e93 → b6ffa22）
-
-- **请求体会省略未设置的采样参数**：`send-to-vcp` 发送前调用新增的 `omitUnsetOptionalModelParams`（`modules/ipc/chatHandlers.js:95-118`、`:1064`），`temperature`/`contextTokenLimit`/`max_tokens`/`top_p`/`top_k` 为 `null`/`undefined`/`''`/非有限数时从请求体删除（设置页留空即存 `null`，见 Agent 角色笔记刷新要点）。
-- **`vcpchatExtensions` 新增 `requestContext`**：除 `messageTimestampBindings` 外，现在携带 `requestId/agentId/agentName/topicId/ownerType/isGroupMessage`（`buildRequestContext`，`modules/ipc/chatHandlers.js:53-82`），两段都为空时整个扩展字段缺省。
-- **`vcpClient.js` 仍是死代码**：该模块同步应用了上述两处修改（+56 行，现 589 行），但重新 grep 全仓库确认仍无任何 `require`/`import` 引用，未接线结论不变。
-- 单网关模型、无重试/超时/熔断、明文凭据、备份携带 Key 等**核心结论全部维持**（`chatHandlers.js` 主链、`settingsManager.js` URL 规范化、`backup.py`、`modelUsageTracker.js`、`topicSummarizer.js` 均未改动或仅行号平移；`chatHandlers.js` 整体 +44 行，`send-to-vcp` 现 `:855`、`interrupt-vcp-request` 现 `:1272`）。
-- `appSettingsManager.js` 默认设置新增 `ChatDataServiceEnabled/ChatDataServiceShadowMode/ChatDataServiceNotifyEnabled/ChatDataServiceTantivyEnabled/MobileSyncUseCentralIndex/DeepMemoUseCentralSearch/DeepMemoLegacyFallback` 等非 LLM 字段（`modules/utils/appSettingsManager.js:132-141`）。
 
 ## 结论摘要
 
@@ -179,7 +171,7 @@ Authorization: Bearer <vcpApiKey>
 }
 ```
 
-当前 HEAD 变化：`modelConfig` 先经 `omitUnsetOptionalModelParams()`（`modules/ipc/chatHandlers.js:95-118`）清理，采样参数未设置（`null`/空）时不再出现在请求体；`vcpchatExtensions` 现在可能只含 `requestContext`（消息时间戳绑定为空时省略该段），`requestContext` 携带本轮请求与 Agent/Topic 上下文标识（`buildRequestContext`，`:53-82`）。实际字段由 `modelConfig` 展开，工具、上下文清理和 `vcpchatExtensions` 可能继续增补内容。协议入口兼容 OpenAI Chat Completions，但不是纯粹只发 OpenAI 标准字段。
+`modelConfig` 先经 `omitUnsetOptionalModelParams()`（`modules/ipc/chatHandlers.js:95-118`）清理，采样参数未设置（`null`/空）时不再出现在请求体；`vcpchatExtensions` 可能只含 `requestContext`（消息时间戳绑定为空时省略该段），`requestContext` 携带本轮请求与 Agent/Topic 上下文标识（`buildRequestContext`，`:53-82`）。实际字段由 `modelConfig` 展开，工具、上下文清理和 `vcpchatExtensions` 可能继续增补内容。协议入口兼容 OpenAI Chat Completions，但不是纯粹只发 OpenAI 标准字段。
 
 ## 3. 模型目录与模型选择
 
@@ -275,9 +267,9 @@ enableVcpToolInjection = true  -> /v1/chatvcp/completions
 
 ### 4.3 `vcpClient.js` 是未接线实现
 
-[`modules/vcpClient.js`](../../VCPChat/modules/vcpClient.js) 另有一个统一请求模块，包含 `AbortController` 和 300 秒定时中断，流式清理也更完整。当前 HEAD 下它同步应用了 `requestContext` 与参数省略两处修改（现 589 行），但重新 grep 全仓库确认对 `vcpClient` 的命中仍只有该文件自身，没有 `require()` 或 `import` 把它接入当前主流程。
+[`modules/vcpClient.js`](../../VCPChat/modules/vcpClient.js) 另有一个统一请求模块，包含 `AbortController` 和 300 秒定时中断，流式清理也更完整。它同步应用了 `requestContext` 与参数省略两处修改（589 行），但重新 grep 全仓库确认对 `vcpClient` 的命中仍只有该文件自身，没有 `require()` 或 `import` 把它接入当前主流程。
 
-实际生产路径是 `main.js` 注册的 [`modules/ipc/chatHandlers.js`](../../VCPChat/modules/ipc/chatHandlers.js) 中 `send-to-vcp` handler（现 `:855-1270`）。该 handler 的 `fetch` 没有传 `signal`，所以不能把未接线模块的 300 秒超时算作当前客户端能力。
+实际生产路径是 `main.js` 注册的 [`modules/ipc/chatHandlers.js`](../../VCPChat/modules/ipc/chatHandlers.js) 中 `send-to-vcp` handler（`:855-1270`）。该 handler 的 `fetch` 没有传 `signal`，所以不能把未接线模块的 300 秒超时算作当前客户端能力。
 
 ## 5. 多 Key、轮询、重试与熔断
 
@@ -359,7 +351,7 @@ VCPChat 没有本地调度器。模型选择来自 Agent 静态配置、用户�
 3. 把旧设置复制为 `settings.json.backup`；
 4. 将临时文件移动覆盖正式文件。
 
-损坏时也会尝试从 `.backup` 恢复。这能降低崩溃或半写入导致的配置损坏，但临时文件、正式文件和备份都包含同样的明文 Secret。
+损坏时也会尝试从 `.backup` 恢复。这能降低崩溃或半写入导致的配置损坏，但临时文件、正式文件和备份都包含同样的明文 Secret。`appSettingsManager.js` 的默认设置还包含 `ChatDataServiceEnabled`/`ChatDataServiceShadowMode`/`ChatDataServiceNotifyEnabled`/`ChatDataServiceTantivyEnabled`/`MobileSyncUseCentralIndex`/`DeepMemoUseCentralSearch`/`DeepMemoLegacyFallback` 等与 LLM 渠道无关的字段（`modules/utils/appSettingsManager.js:132-141`）。
 
 ### 7.3 每日备份保留的是最近 7 份，不是严格 7 天
 
@@ -426,7 +418,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 | 失败自动换 Key | 无 | 无客户端重选 |
 | Key 熔断/恢复 | 无 | 无健康状态 |
 | 普通请求自动重试 | 无 | 单次 `fetch` |
-| 未设置采样参数自动省略 | 有（新增） | `omitUnsetOptionalModelParams`，null/空值不进请求体 |
+| 未设置采样参数自动省略 | 有 | `omitUnsetOptionalModelParams`，null/空值不进请求体 |
 | Flowlock 工作流重试 | 局部有 | 最多 3 次新续写轮次 |
 | 客户端请求超时 | 当前主链无 | 300 秒实现位于未接线模块 |
 | 跨 URL/Provider failover | 无 | 服务端能力不归因给客户端 |

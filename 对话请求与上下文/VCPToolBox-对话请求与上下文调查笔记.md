@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/VCPToolBox-Chat调查笔记.md`](../Chat/VCPToolBox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：从 [`../Chat/VCPToolBox-Chat调查笔记.md`](../Chat/VCPToolBox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码；`c4c4d00`→`1ae9b63c` 提交范围内 `chatCompletionHandler.js`、`contextManager.js`、`routes/protocolBridge.js`、`modules/messageProcessor.js` 均无改动，仅更新代码快照
 >
 > 调查范围：一次请求内"客户端历史 → 最终上游 messages → 工具递归 messages"的完整编排：入口归一化、上下文裁剪、预处理器、VCP 工具循环、推理字段分叉；会话事实源不归 VCPToolBox 所有（见会话与消息管理笔记）
 >

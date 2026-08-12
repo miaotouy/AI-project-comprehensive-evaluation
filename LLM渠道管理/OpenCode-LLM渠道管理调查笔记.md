@@ -2,9 +2,9 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 Provider 组装、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
 >
@@ -16,13 +16,13 @@
 
 OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的运行时实例」的合成体：运行时按固定顺序组装 models.dev 目录、插件 hook、config `provider` 字段、环境变量、auth.json 凭据（`src/provider/provider.ts:1343-1668`），通过 AI SDK `streamText` 发起请求（`src/session/llm.ts:280-353`）。模型目录来自 `https://models.opencode.ai/api.json` 的拉取与缓存（`core/src/models-dev.ts`），无硬编码内置清单。协议适配以 AI SDK 包（BUNDLED_PROVIDERS 表 + npm 动态安装）为主路径，另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`）。
 
-关键事实（快照 b8bd889）：
+关键事实（快照 1f94d8a）：
 
 - **Provider ID 11 个**：opencode/anthropic/openai/google/google-vertex/github-copilot/amazon-bedrock/azure/openrouter/mistral/gitlab（静态工厂 `schema/src/provider.ts:11-21`）。
 - **同 provider 多 Endpoint 不支持**：config `provider` 为单对象，`options` 无数组形态；多端点需注册多个自定义 provider id。
 - **凭据存 `~/.local/share/opencode/auth.json`（0o600 明文）**，不写 opencode.json；另 SQLite `credential` 表明文 JSON（core/src/credential/sql.ts:5-14）。**无加密、无系统 keyring、无 UI 打码**。
 - **模型目录三级数据源**：磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络，TTL 5 分钟、每小时刷新、文件锁防并发（models-dev.ts:160-249）。
-- **无多 Key 轮询、无跨 provider failover**；重试为会话级 `Effect.retry`（processor.ts:660-674）+ SDK 级 `maxRetries` + native 级指数退避三处。
+- **无多 Key 轮询、无跨 provider failover**；重试为会话级 `Effect.retry`（processor.ts:660-674，上限 5 次、指数退避带 0.25 抖动，retry.ts:28-31、76-81、192）+ SDK 级 `maxRetries` + native 级指数退避三处。
 - **无登录后连接测试请求**：登录流程直接写凭据结束（cli/cmd/providers.ts:480-485）。
 - **错误归一化**：`parseAPICallError`/`parseStreamError`（provider/error.ts:102-186）识别 context_length_exceeded/insufficient_quota 等，映射为 `ContextOverflowError`/`APIError`（message-v2.ts:603-719）。
 - **浏览器不直连 provider**：OAuth 授权由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186）。
@@ -74,7 +74,8 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 - **BUNDLED_PROVIDERS 表**（provider.ts:107-134）：覆盖 `@ai-sdk/amazon-bedrock/anthopic/azure/google/google-vertex/openai/openai-compatible/xai/mistral/groq/deepinfra/cerebras/cohere/gateway/togetherai/perplexity/vercel/alibaba`、`@openrouter/ai-sdk-provider`、`gitlab-ai-provider`、`@ai-sdk/github-copilot`（映射到 core/github-copilot/copilot-provider）、`venice-ai-sdk-provider`。
 - **npm 动态安装**：表外包名 `Npm.add(model.api.npm)`（provider.ts:1781-1788；core/src/npm.ts:115-137，装到 `cache/packages/<sanitized>`，Arborist reify），动态 import 后找 `create*` 导出（:1793-1799）；`file://` URL 直接 import。
 - **baseURL/Header**：baseURL 优先级 `options.baseURL > model.api.url`，支持 `${VAR}` 插值（:1698-1719）；header 合并 `options.headers + model.headers`（:1721-1725）；会话级 header `x-session-affinity`、`X-Session-Id`、`User-Agent: opencode/<ver>`（llm/request.ts:187-204）。
-- **请求参数**：`ProviderTransform.options/providerOptions/message/temperature/topP/topK/maxOutputTokens/schema`（src/provider/transform.ts:1151-1506、464-566），按 SDK 生成 `providerOptions`（sdkKey 映射表，:42-96）。
+- **请求参数**：`ProviderTransform.options/providerOptions/message/temperature/topP/topK/maxOutputTokens/schema`（src/provider/transform.ts:1151-1506、464-566），按 SDK 生成 `providerOptions`（sdkKey 映射表，:42-96）。`topP` 按模型族特判默认值（transform.ts:548-559：minimax-m2/kimi-k2.5 等 0.95；deepseek-v4-flash 仅 deepseek/opencode 渠道给 0.95，5d95348）。
+- **Copilot 模型能力**：image/pdf 输入能力由远端 `capabilities` 探测（plugin/github-copilot/models.ts:88-94、:133），`pdf` 不再硬编码 false（561afb4）。
 - **native 协议（opt-in）**：`packages/llm/src/protocols/`：openai-chat/openai-responses/anthropic-messages/gemini/bedrock-converse/openai-compatible-chat，Route 化四要素 protocol/endpoint/auth/framing（llm/route/*）；切换门在 `session/llm/native-runtime.ts:46-72`（仅 openai/opencode/anthropic 且对应 npm 包、非 OAuth）。
 - **兼容 provider**：ollama/lmstudio/deepseek 等统一走 `@ai-sdk/openai-compatible`（provider.ts:1444）；deepseek `reasoning_content` 特判（:1485-1487、transform.ts:320-352）。特殊适配：Azure deployment 选择（provider.ts:154-160、240-293）、Bedrock 区域前缀（:367-455）、Vertex GoogleAuth fetch（:529-543）、Cloudflare AI Gateway（:767-842）、SAP AI Core（:570-593）、GitLab（:604-728）。
 
@@ -82,14 +83,14 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 
 - **解析**：`Provider.parseModel("provider/model")`（provider.ts:1997-2003）；variant 语法 `provider/model/variant`（acp/config-option.ts:123-130）。**未发现 `@` 全局模型、`#` 本地模型、`:latest` 后缀语义**（源码确认，全仓搜索无匹配）；"latest"仅作排序权重（provider.ts:1992）。
 - **resolve 流程**：`getModel`（provider 存在性 + 模型存在性校验，:1811-1833）→ `getLanguage`（构造/缓存 SDK 与 LanguageModel，:1835-1864）。
-- **会话默认模型**：`currentModel`：session 表 model 字段 → 最近 user 消息携带的 model → `provider.defaultModel()`（prompt.ts:614-633）；`defaultModel`：`cfg.model` → state/model.json 最近使用 → 第一个已配置 provider 的排序首个模型（provider.ts:1947-1980）。
+- **会话默认模型**：`currentModel`：session 表 model 字段 → 最近 user 消息携带的 model → `provider.defaultModel()`（prompt.ts:614-633）；`defaultModel`：`cfg.model` → state/model.json 最近使用 → 第一个已配置 provider 的排序首个模型（provider.ts:1947-1980）。App 端解析改用 server `/config/providers` 响应新增的 `defaultModel {providerID, modelID}` 字段（global-sync/utils.ts:139-142），`cfg.model` 字符串仅作回退（app/src/hooks/provider-catalog.ts:28-38，941e71d）。
 - **不存在模型**：抛 `ModelNotFoundError`（:1099-1113），携带 fuzzysort 建议（:1303-1330）；provider 不存在按 providerID 建议（:1814-1821）。**无静默兜底到其他 provider**。
 
 ## 7. 多 Key、限流、重试与故障转移
 
 - **多 Key 轮询/负载均衡：不支持**（源码确认，无 keys 数组、无轮询代码）。
 - **限流识别**：AI SDK 路径错误匹配 `429|500|502|503|504|524`、`rate limit`（session/retry.ts:31-38），`retry-after`/`retry-after-ms` 头解析为延迟（:44-75）；native 路径结构化解析 OpenAI `x-ratelimit-*` 与 Anthropic `anthropic-ratelimit-*`（llm/route/executor.ts:112-148），429 区分 `RateLimitReason`/`QuotaExceededReason`（:242-251）。
-- **重试三层**：会话级 `Effect.retry(SessionRetry.policy)`（processor.ts:660-674，`retryable` 判定 5xx 强制可重试、context overflow 不重试、`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action，retry.ts:77-147；指数退避 2s 起）；SDK 级 `maxRetries: input.retries ?? 0`（llm.ts:323）；native 级 `MAX_RETRIES=2` 指数退避带 jitter（executor.ts:35-38、345-364）。
+- **重试三层**：会话级 `Effect.retry(SessionRetry.policy)`（processor.ts:660-674，`retryable` 判定 5xx 强制可重试、context overflow 不重试、`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action，retry.ts:77-147；指数退避 2s 起、带 0.25 随机抖动，attempt 超过 5 停止，retry.ts:28-31、76-81、192）；SDK 级 `maxRetries: input.retries ?? 0`（llm.ts:323）；native 级 `MAX_RETRIES=2` 指数退避带 jitter（executor.ts:35-38、345-364）。
 - **跨 provider failover：不存在**（源码确认）；`closest`（provider.ts:1866-1876）与重试无关。
 - **错误归一化**：`parseAPICallError`/`parseStreamError`（provider/error.ts:102-186）识别 `context_length_exceeded/insufficient_quota/usage_not_included/invalid_prompt/server_is_overloaded` 等 code；context overflow 文本特征 30+ 正则（llm/provider-error.ts:4-38）；映射 `ContextOverflowError`/`APIError`（message-v2.ts:603-719，ECONNRESET、ZlibError、header/stream timeout 归一为可重试 APIError）。
 

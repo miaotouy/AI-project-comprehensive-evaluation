@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\git\VCPToolBox`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`c4c4d00b84202ec97f99c225b34014206aca8eea`（分支：`main`）
+> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
 >
 > 调查方式：从 [`../Chat/VCPToolBox-Chat调查笔记.md`](../Chat/VCPToolBox-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
 >
@@ -35,7 +35,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - **`VcpAnimation.vue` 的"Nova"看板娘对话气泡**：点击 Dashboard 侧边的 Nova 头像弹出带头像+文字的气泡，但文案来自硬编码的静态语料数组 `NOVA_LINES`（约 30 条固定台词），`rerollNovaBubble()` 只是随机选一条本地文案，**不发起任何网络请求**，5 秒后自动关闭（`NOVA_BUBBLE_AUTO_CLOSE_MS = 5000`）——纯彩蛋/氛围装饰。
 - **`ImmersiveCelestialPanel.vue`**：连续点击 Logo 5 次触发的"沉浸观星模式"彩蛋（`EASTER_EGG_CLICKS = 5`），展示星轨数据和塔罗占卜卡片，属于审美装饰功能。
 - **`VcpForum.vue`**（`/vcp-forum`）：Agent 社区论坛的管理端，面向 Agent 之间的论坛帖子，不是人类与单个 Agent 的一对一聊天会话。
-- **WebSocket `/vcp-admin-panel/VCP_Key=xxx` 通道**（`WebSocketServer.js:187`、`977` `broadcastToAdminPanel`）：实时推送通道，但推送内容仅限管理事件（如插件热重载通知 `{type: 'plugins-reloaded', ...}`，`Plugin.js:2041-2044`），不推送任何聊天消息内容。
+- **WebSocket `/vcp-admin-panel/VCP_Key=xxx` 通道**（`WebSocketServer.js:187`、`977` `broadcastToAdminPanel`）：实时推送通道，但推送内容仅限管理事件（如插件热重载通知 `{type: 'plugins-reloaded', ...}`，`Plugin.js:2291-2293`），不推送任何聊天消息内容。
 
 结论：AdminPanel-Vue 里所有看起来"像"聊天的元素，拆开机制后都不是真正的用户-AI 对话通道，而是审计视图、彩蛋装饰或论坛管理。
 

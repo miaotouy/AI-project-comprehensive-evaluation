@@ -2,9 +2,9 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`b8bd88901a4870ef3a5752840f4e23e11d54e24e`（分支：`dev`）
+> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 part 数据模型、SSE 到 store 的更新链、渲染组件、markdown 管线与性能策略；未运行构建与浏览器验证
 >
@@ -16,7 +16,7 @@
 
 OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`**（Web 端），由 `packages/app` 导入。渲染器接收的不是事件流而是最终 part 数组（`sync().data.part[msgId]`，`app/src/pages/session/timeline/message-timeline.tsx:313`），流式增量通过 `part_text_accum_delta` 通道与 part 文本合并（`session-ui/src/components/message-part-text.ts:1-3`）。markdown 管线为「marked 切块 → Web Worker 解析+shiki 高亮 → 主线程 DOMPurify → morphdom/增量 token span 写 DOM」（解析器在 `packages/ui/src/context/marked-parser.tsx`，管线实现 `markdown.tsx`、`markdown.worker.ts` 等在 `packages/session-ui/src/components/`）。列表层用 `@tanstack/solid-virtual` 虚拟化 + 行复用（`message-timeline.tsx:414-454`、`row-reconciliation.ts`）。TUI 使用 opentui 内置 markdown 组件与 tree-sitter 代码高亮（`tui/src/routes/session/index.tsx:1619-1694`）。
 
-关键事实（快照 b8bd889）：
+关键事实（快照 1f94d8a）：
 
 - **Part 12 种类型**与组件注册表 `PART_MAPPING`（`session-ui/src/components/message-part.tsx:250`）；工具组件经 `ToolRegistry.register` 注册 14 个（:1776-2621），未注册走 `GenericTool`。
 - **流式期间是「先更新 state，Solid 再渲染」，但 markdown 正文是命令式 DOM 补丁**：非 code 块 morphdom 增量替换、code 块按 token 增量追加/裁剪（markdown.tsx:589-706）。
@@ -52,7 +52,7 @@ OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`
 - **事件产生**：reasoning-start/delta/end（processor.ts:280-313）、text-delta（:499-508）、tool-input-start/delta/end、tool-call（:315-351）；`updatePartDelta` 发 `message.part.delta`（session.ts:879-887），`updatePart` 发 `message.part.updated`（session.ts:637-645）。
 - **SSE 传输**：`handlers/event.ts:25-87`（Queue.unbounded + 目录过滤 + heartbeat）；`server-sdk.tsx:260-317` 读取循环，v1/v2 协议按 `server-compat.ts:86-92` 切换，v2 事件经 `adaptServerEvent` 映射（:28-57）。
 - **合并与批量**：`enqueueServerEvent` 同 key 覆盖（:68-77）；`coalesceServerEvents` 拼接连续 `message.part.delta`（:79-139）；`flush()` 每 `FLUSH_FRAME_MS=16` 派发（:227-245）；断线 250ms 重连（:307-308）。
-- **Store 投影**（`app/src/context/server-session.ts`）：`message.part.updated` 按 id 二分插入/替换并删 accum（:1095-1152）；`message.part.delta` 写入 `part_text_accum_delta`（deltaBases 记录 base）并 `produce` 就地追加（:1215-1231）；`message.updated`（:1031-1063）；v2 事件经 `server-session-v2-reducer.ts` 的 `createV2SessionReducer` 投影回 v1 形态（reduce 在 :17 起，调用点 server-session.ts:940）。
+- **Store 投影**（`app/src/context/server-session.ts`）：`message.updated`（:1030-1062）与乐观合并按**时间序键** `messageKey = time.created + id` 二分（`utils/session-message.ts:19-26` 的 `messageKey`/`compareMessages`，调用点 :1051、:1342）；`message.removed` 用 `findIndex` 按 id 定位（:1083-1089）；`message.part.updated` 按 part id 二分插入/替换并删 accum（:1094-1189）；`message.part.delta` 写入 `part_text_accum_delta`（deltaBases 记录 base）并 `produce` 就地追加（:1190-1217）；v2 事件经 `server-session-v2-reducer.ts` 的 `createV2SessionReducer` 投影回 v1 形态（reduce 在 :17 起，调用点 server-session.ts:940）。global-sync 投影器同用 `messageKey`（`event-reducer.ts:279` 按 `messageKey` 二分、:299 `findIndex` 删消息）；TUI 端一致（`tui/src/context/sync.tsx:54-58` 的 `compareMessage`/`messageKey`、:328）。
 - **DOM 更新**：Solid store 变化触发重渲染；markdown 正文例外——`Markdown` 组件对非 code 块用 morphdom 命令式替换（跳过 copy 按钮节点，markdown.tsx:589-633）、对 code 块用 worker 返回的 stable/unstable token 数组增量 span 追加/裁剪（:635-706，`renderedCodeTokens` WeakMap :55）。
 - **节流**：`PacedMarkdown`/`createPacedValue`（message-part.tsx:252-334）：增量 ≤512 字符立即显示，否则按 `TEXT_RENDER_PACE_MS=24` 分步、`TEXT_RENDER_SNAP` 标点处截断。
 - **完成收口**：`AssistantMessage.time.completed` 出现即 `streaming=false`（message-part.tsx:1704-1706）；会话级 `session.execution.succeeded/failed/interrupted` → `session_status = {type:"idle"}`（server-session.ts:964-970）；`session.retry.scheduled` → `{type:"retry", attempt, next}`（:971-977）。
@@ -60,7 +60,7 @@ OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`
 ## 3. 消息列表、窗口化与滚动
 
 - **虚拟化**：`createVirtualizer`（@tanstack/solid-virtual，message-timeline.tsx:414-454）：`estimateSize=60`、`overscan:50`、`anchorTo:"end"`、`followOnAppend:true`、自定义 `rangeExtractor`（:445-453）。
-- **行模型**：`TimelineRow` 9 种标签（timeline-row.ts:8-41）：TurnGap/CommentStrip/UserMessage/TurnDivider/AssistantPart/Thinking/DiffSummary/Error/Retry；`constructMessageRows`（rows.ts:100-231）含 interrupted 拆分（:128-144）。
+- **行模型**：`TimelineRow` 9 种标签（timeline-row.ts:8-41）：TurnGap/CommentStrip/UserMessage/TurnDivider/AssistantPart/Thinking/DiffSummary/Error/Retry；`constructMessageRows`（rows.ts:100-231）含 interrupted 拆分（:128-144）；投影的 user 消息按 `compareMessages` 插入有序位置（rows.ts:75-82）。revert 边界定位用 `findIndex`+`slice`（message-timeline.tsx:288-292）。
 - **行复用**：`reuseTimelineRows`（row-reconciliation.ts:6-29）按 key 复用旧行，稳定 context 组 key（:31-56）。
 - **高度测量**：`VirtualTimelineRow`（message-timeline.tsx:1279-1343）绝对定位 + `virtualizer.measureElement`；`resizeItem` 覆写在尺寸突变（>视口高）时钉住视口行（:466-493）；`timelineCache` 保存测量快照与 toolOpen，上限 16（:91、540-550）。
 - **自动滚动**：`createAutoScroll`（packages/ui/src/hooks/create-auto-scroll.tsx:13-237）：距底 <10px 视为贴底（:134-137）、1.5s 窗口内不算用户滚动（:41-64）、ResizeObserver 同帧回贴（:172-187）、working 结束 300ms settling（:189-205）；页面层 `updateScrollState`（app/src/pages/session.tsx:1520-1529）。
@@ -155,7 +155,7 @@ OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`
 - `packages/app/src/pages/session/timeline/message-timeline.tsx`：虚拟列表与行渲染
 - `packages/app/src/pages/session/timeline/rows.ts`、`row-reconciliation.ts`、`projection.ts`：行模型
 - `packages/ui/src/context/marked-parser.tsx`、`markdown.tsx`、`markdown.worker.ts`、`markdown-cache.tsx`、`marked-theme.tsx`：markdown 管线
-- `packages/app/src/context/server-sdk.tsx`、`server-session.ts`、`server-session-v2-reducer.ts`：SSE 到 store
+- `packages/app/src/context/server-sdk.tsx`、`server-session.ts`、`server-session-v2-reducer.ts`：SSE 到 store；`packages/app/src/utils/session-message.ts`（:19-26）：`messageKey`/`compareMessages` 时间序排序键
 - `packages/ui/src/hooks/create-auto-scroll.tsx`：自动滚动
 - `packages/tui/src/routes/session/index.tsx`：TUI 消息渲染
 - `packages/opencode/src/session/processor.ts`：part 事件产生（:278-537）

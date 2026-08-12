@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\hermes-agent`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
-> 代码快照：`01a1037d1e6d7b6eb96a786ef282c3aea4818194`（分支：`main`）
+> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
 >
 > 调查方式：只读盘点根 README 功能表、AGENTS.md 架构说明与源码（`agent/`、`tools/`、`plugins/memory/`、仓库根工具脚本）；未修改仓库源码
 >
-> 调查范围：闭环学习（记忆/技能后台复习）、Skill 自动创建与维护（skill_manage + curator）、持久记忆与用户建模（内置 MEMORY.md/USER.md + MemoryProvider 外部插件）、研究轨迹（轨迹保存/压缩/批量生成）、Tool Gateway；cron、委派、网关、TUI 与终端后端按待查清单标注已有覆盖并回链，不重写
+> 调查范围：闭环学习（记忆/技能后台复习）、Skill 自动创建与维护（skill_manage + curator）、持久记忆与用户建模（内置 MEMORY.md/USER.md + MemoryProvider 外部插件）、研究轨迹（轨迹保存/压缩/批量生成）、Tool Gateway；cron、委派、网关、TUI 与终端后端按待查清单标注已有覆盖并回链，不重写；/heartbeat、/goal 质量门、/refine、verify-on-stop、estop 按候选盘点处理
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -44,19 +44,20 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **用户目标**：让 Agent 不需要用户开口就自我沉淀——把对话中暴露的用户偏好写进记忆、把可复用流程固化为技能，且不打断主对话、不破坏提示缓存。README "nudges itself to persist knowledge" 的实现。
 
-**入口与触发者**：三个独立计数触发器（均为 Agent 侧自触发，用户不参与）：
+**入口与触发者**：三个独立计数触发器 + 一个按需入口（均为 Agent 侧自触发或用户显式命令）：
 
-1. 记忆复习：`agent._user_turn_count` 每轮 +1，`_turns_since_memory >= _memory_nudge_interval`（默认 10，`agent/agent_init.py:1669,1684`，`memory.nudge_interval` 可配）→ `should_review_memory = True`（`agent/turn_context.py:592-599`）；
-2. 技能复习：`_iters_since_skill >= _skill_nudge_interval`（默认 10，`agent_init.py:1769-1772`，`skills.creation_nudge_interval`）且 `skill_manage` 在工具集内（`agent/turn_finalizer.py:699-704`）；
-3. 会话历史水化：恢复会话时按历史 user 消息数回填 `_turns_since_memory`，避免"重启后计数器归零永不触发"（`turn_context.py:544-551`，issue #22357）。
+1. 记忆复习：`agent._user_turn_count` 每轮 +1，`_turns_since_memory >= _memory_nudge_interval`（默认 10，`agent/agent_init.py:1698-1713`，`memory.nudge_interval` 可配）→ `should_review_memory = True`（`agent/turn_context.py:421/685`）；
+2. 技能复习：`_iters_since_skill >= _skill_nudge_interval`（默认 10，`agent_init.py:1798-1801`，`skills.creation_nudge_interval`）且 `skill_manage` 在工具集内（`agent/turn_finalizer.py:734-760`）；
+3. 会话历史水化：恢复会话时按历史 user 消息数回填 `_turns_since_memory`，避免"重启后计数器归零永不触发"（`turn_context.py:592-644`，issue #22357）；
+4. **`/refine` 按需触发**（`8f271272`，`hermes_cli/cli_commands_mixin.py:2545` `_handle_refine_command`）：用户显式运行同一记忆/技能复习 fork，可带 `[instructions]` 聚焦提示（`background_review.py:1106` 附近 docstring）。
 
-**状态/对象**：计数器为 agent 实例字段；复习结果写入两个持久化面——记忆（`memory` 工具 → MEMORY.md 或外部 provider）与技能库（`skill_manage` → `~/.hermes/skills/<name>/SKILL.md`）。
+**状态/对象**：计数器为 agent 实例字段；复习结果写入两个持久化面——记忆（`memory` 工具 → MEMORY.md 或外部 provider）与技能库（`skill_manage` → `~/.hermes/skills/<name>/SKILL.md`）。`AIAgent` 提供 `skip_background_review` 构造参数（`eaeba647`），cron 会话默认关闭后台复习（防污染用户画像/技能库，与 `skip_memory=True` 同一硬化思路）。
 
-**完整主链**：回合响应交付后（`turn_finalizer.py:716-722`，"runs AFTER the response is delivered so it never competes with the user's task"）→ `_spawn_background_review`（daemon 线程）→ `spawn_background_review_thread`（`agent/background_review.py:1030`）→ fork 一个 `AIAgent` 复习体：
+**完整主链**：回合响应交付后（`turn_finalizer.py:760` 附近，"runs AFTER the response is delivered so it never competes with the user's task"）→ `_spawn_background_review`（daemon 线程）→ `spawn_background_review_thread`（`agent/background_review.py:1093`）→ fork 一个 `AIAgent` 复习体：
 
-- fork 继承父运行时（provider/model/base_url/凭据/已缓存 system prompt），命中同一提示缓存；`auxiliary.background_review.{provider,model}` 可路由到更便宜的模型，路由后改用压缩摘要重放（`_digest_history`，`background_review.py:123-164`，"same model -> full replay; different model -> digest"）；
-- 工具白名单：`review_whitelist` 只含 memory 与技能管理工具，越权调用被 `set_thread_tool_whitelist` 拒绝（`background_review.py:896-906`，注释 "Background review denied non-whitelisted tool"）；
-- 复习提示词：`_MEMORY_REVIEW_PROMPT`（"用户透露了什么关于自己的事值得记？"）与 `_SKILL_REVIEW_PROMPT`（"要 ACTIVE——大多数会话至少产生一次技能更新"；用户纠正风格/工作流是一级技能信号）（`background_review.py:171-200`）。
+- fork 继承父运行时（provider/model/base_url/凭据/已缓存 system prompt），命中同一提示缓存；`auxiliary.background_review.{provider,model}` 可路由到更便宜的模型，路由后改用压缩摘要重放（`_digest_history`，`background_review.py:123`，"same model -> full replay; different model -> digest"）；
+- 工具白名单：`review_whitelist` 只含 memory 与技能管理工具，越权调用被 `set_thread_tool_whitelist` 拒绝（`background_review.py:935-953`，注释 "Background review denied non-whitelisted tool"）；
+- 复习提示词：`_MEMORY_REVIEW_PROMPT`（"用户透露了什么关于自己的事值得记？"）与 `_SKILL_REVIEW_PROMPT`（"要 ACTIVE——大多数会话至少产生一次技能更新"；用户纠正风格/工作流是一级技能信号）（`background_review.py:171-182`）。live turn 开始前会取消 in-flight 后台复习（`71435fa0`），避免复习与主对话竞争。
 
 **用户结果**：复习体通过 memory 工具写记忆（或说 "Nothing to save."）、通过 skill_manage 创建/修补技能；记忆写可能进入审批门（见能力三）；`summarize_background_review_actions` 生成动作摘要供 UI 回调（`background_review.py:410`）。
 
@@ -98,7 +99,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **人机关系**：记忆写审批门——`_apply_write_gate`（`tools/memory_tool.py:911`）命中时记忆写入转为 staged + pending_id，`/memory approve` 后由 `apply_memory_pending` 落盘（`memory_tool.py:1130`），即"模型想写记忆"可以被人审拦截；`tools/write_approval.py` 提供后台复习写的前景审批机制（测试 `test_background_review_toolset_restriction.py` 等验证）。
 
-**用户建模**：Honcho provider（`plugins/memory/honcho/README.md`："AI-native cross-session user modeling with multi-pass dialectic reasoning, session summaries, bidirectional peer tools, and persistent conclusions"）——外部云服务（OAuth/device code/API key），`hermes memory setup honcho` 配置；其 `build_system_prompt()` 追加 volatile 段（Agent 角色笔记 §3.3 已确认拼接点）。
+**用户建模**：Honcho provider（`plugins/memory/honcho/README.md`："AI-native cross-session user modeling with multi-pass dialectic reasoning, session summaries, bidirectional peer tools, and persistent conclusions"）——外部云服务（OAuth/device code/API key），`hermes memory setup honcho` 配置；其 `build_system_prompt()` 追加 volatile 段（Agent 角色笔记 §3.3 已确认拼接点）。Honcho 接入做了健壮性修复：认证过的 SDK 调用统一走 401 恢复助手（`864035b2`）、**会话中途 oauth 401 可恢复记忆并只提示一次**（`6ea01262`）、OAuth grant 失效时跳过记忆调用（`ecfc427b`）、session 初始化失败也暴露认证提示（`086dcb8b`）、裸 "401" 数字不再误判为认证错误（`b1414baa`）——会话中途刷新 token 不再中断记忆链路。
 
 **持续性**：内置为文件；外部 provider 持久化在各自服务端；`on_session_end`/`on_pre_compress` 钩子提供会话末/压缩前提取；cron 会话 `skip_memory=True`（AGENTS.md cron 硬化不变量，防污染用户画像）。
 
@@ -136,26 +137,38 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 - **七终端后端中的 serverless 持久**（"environment hibernates when idle"）：Modal/Daytona 的休眠-唤醒语义依赖外部服务，本仓库只验证到环境适配器层。状态：`入口确认`/外部依赖。
 - **agentskills.io 兼容**：README 声明，本次未核验协议细节（未验证事项）。
 
+## 补充盘点的候选
+
+- **会话心跳（`/heartbeat`，`主链确认`，静态证据）**：`hermes_cli/heartbeat.py`（`6518aa18`）——用户拥有的**会话级重复重入指令**（`/heartbeat every 10m <prompt>`），到期且会话空闲时作为普通 user turn 注入（与 /goal continuation 同一机制，不动 system prompt、不换 toolset，提示缓存与角色交替不受影响）；busy 时 tick 合并（空闲后只补一次，不堆积）；状态持久化在 SessionDB `state_meta` 的 `heartbeat:<session_id>`，`/resume` 可拾取；与 cron 明确分工（cron=隔离会话的调度任务，heartbeat=持续重入当前会话）。标签：`主动 Agent`。
+- **目标质量门（`/goal` + quality gates，`主链确认`，静态证据）**：`hermes_cli/goals.py`（`6e041d52`）——/goal 循环在每次"可能完成"时用 judge 复查（`server.py:10234` 起注释描述 Ralph-style loop），并可配置**确定性命令质量门**（必须通过后才允许 /goal 完成）；续接提示只是普通 user 消息、真实用户消息抢占（`goals.py:6-20` 不变量）。标签：`主动 Agent`（与 heartbeat 同族，可合并计数）。
+- **按需复习（`/refine`）**：并入能力一（见上），不单独计数。
+- **verify-on-stop**：`agent/verify/`（recipes/environment/runner，`47a35d63` 系列）——回合终止前对候选回复跑 run-recipe 检测与验证（`_pending_verification_response`），已并入 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §5。状态：`归并已有类目`。
+- **全局紧急停止（`hermes pause`/`resume`，`入口确认`）**：`agent/estop.py`（`5db1b72b`）——跨会话全局停止位（`hermes_cli/subcommands/pause.py`），属安全/可靠性机制，不进入用户可见产品特性统计。
+- **技能生态扩充**：新增十余个 bundled/optional 技能（competitor-news-monitor、social-media-content-calendar、weekly-review-planning、product-price-monitor、meeting-action-items、google-workspace-daily-brief、github-issue-to-pr、email-inbox-triage、document-to-action-items、clean-room office 文档技能等）并整体收紧 HARDLINE 标准（`55982159`/`1c943389`），均为能力二生态的实例扩充，不改变机制结论。
+
 ## 对特色贡献统计的影响
 
-- 建议新增主贡献候选：**闭环学习（后台记忆/技能复习）**、**Skill 生命周期（创建-改进-curator 维护）**（标签：`自进化 Skill`、`记忆演化`）；**研究轨迹工具链**（标签：`研究轨迹`）可作为独立贡献。
+- 建议新增主贡献候选：**闭环学习（后台记忆/技能复习 + /refine 按需）**、**Skill 生命周期（创建-改进-curator 维护）**（标签：`自进化 Skill`、`记忆演化`）；**研究轨迹工具链**（标签：`研究轨迹`）可作为独立贡献；**会话心跳 + 目标质量门**（标签：`主动 Agent`）可作为新主贡献候选（待与至少三个项目聚类后建立局部比较）。
 - 辅助贡献：持久记忆与用户建模（与记忆演化聚类中 VCP/LobeHub/Open WebUI 形成自然聚类，比较维度：对象形态文件 vs 结构化、触发方式计数 vs 定时 vs 梦境、写入是否需人审）。
 - 记忆写审批门与"模型写记忆被拦截"在横向对比中可作为人机关系维度证据。
+- `/refine` 并入闭环学习计数、verify/estop 不进入特性统计（见新增候选小节）。
 
 ## 未验证事项
 
 - 复习 fork 在真实长会话中的成本与频率（默认 10 轮/10 迭代触发一次，未运行验证）。
 - `auxiliary.background_review` 路由到不同模型时的摘要重放质量。
 - curator LLM 整合 pass（`consolidate` 默认关闭）的实际行为。
-- Honcho 等外部 provider 的建模质量与数据驻留。
+- Honcho 等外部 provider 的建模质量与数据驻留；会话中途 401 恢复在真实 OAuth 到期场景的端到端行为未实测。
 - trajectory_compressor 的 tokenizer 依赖（Kimi-K2-Thinking）在无网环境的可用性。
 - 终端后端"serverless 休眠唤醒"跨会话恢复语义（外部服务行为）。
+- /heartbeat 与 /goal 的运行时行为（空闲判定、tick 合并、真实消息抢占）为静态推断，未运行验证。
 
 ## 关键源码索引
 
-- 闭环学习：`agent/turn_context.py:592-599`（记忆 nudge 触发）、`agent/turn_finalizer.py:699-724`（技能 nudge + 后台复习调度）、`agent/background_review.py`（复习 fork、白名单 896-906、提示词 171-200、digest 123-164）、`agent/agent_init.py:1669-1772`（间隔默认值与配置读取）。
-- Skill 生命周期：`tools/skill_manager_tool.py:1641-1676`（schema 语义）、`tools/skill_usage.py`（.usage.json）、`agent/curator.py`（惰性调度、不变量 15-20、状态文件 85-98）、`tools/skills_hub.py`。
-- 记忆与用户建模：`agent/memory_manager.py`（MemoryManager 364、写门相关 1019-1128）、`agent/memory_provider.py:81`（ABC）、`tools/memory_tool.py:911,1130`（写审批门与 pending 应用）、`plugins/memory/honcho/README.md`。
+- 闭环学习：`agent/turn_context.py:421/592-644/685`（记忆 nudge 触发）、`agent/turn_finalizer.py:734-760`（技能 nudge + 后台复习调度）、`agent/background_review.py`（复习 fork `spawn_background_review_thread` :1093、白名单 :935-953、提示词 :171-182、digest :123、`/refine` :1106 附近）、`agent/agent_init.py:1698-1801`（间隔默认值与配置读取）、`hermes_cli/cli_commands_mixin.py:2545`（`/refine`）。
+- Skill 生命周期：`tools/skill_manager_tool.py`（schema 语义 :1641-1676 附近；`is_background_review` 来源标记经 `tools/skill_provenance.py`）、`tools/skill_usage.py`（.usage.json）、`agent/curator.py`（惰性调度、不变量 15-20、状态文件 85-98）、`tools/skills_hub.py`。
+- 记忆与用户建模：`agent/memory_manager.py`（MemoryManager 364、写门相关 1019-1128）、`agent/memory_provider.py:81`（ABC）、`tools/memory_tool.py:919,1138`（写审批门与 pending 应用）、`plugins/memory/honcho/`（401 恢复 `864035b2`/`6ea01262` 系列）。
+- 主动 Agent（新增候选）：`hermes_cli/heartbeat.py`（会话心跳）、`hermes_cli/goals.py`（/goal 质量门）、`agent/estop.py`（紧急停止）。
 - 研究轨迹：`agent/trajectory.py:30`（save_trajectory）、`agent/agent_runtime_helpers.py:115`（convert_to_trajectory_format）、`trajectory_compressor.py`、`batch_runner.py`、`mini_swe_runner.py`、`datagen-config-examples/`。
 - Tool Gateway：`tools/managed_tool_gateway.py:174-211`（resolve/is_ready）、`tools/web_tools.py:236-246`、`tools/tool_backend_helpers.py`。
 - 跨会话检索：`tools/session_search_tool.py:848`（session_search 主函数，FTS5+谱系去重）。
