@@ -56,13 +56,13 @@
 
 | 排序 | 项目 | 主贡献 | 辅助贡献 | 覆盖功能族 | 产品特色点 | 主要特色身份 |
 |---:|---|---:|---:|---:|---:|---|
-| 1 | AIO Hub | 14 | 10 | 24 | 38 | 上下文召回、网页蒸馏、桌面 RPA、媒体/资产与跨播放器工具枢纽 |
+| 1 | AIO Hub | 13 | 12 | 25 | 38 | 上下文召回、网页蒸馏、桌面 RPA、媒体/资产与跨播放器工具枢纽 |
 | 2 | VCPChat | 12 | 4 | 16 | 28 | 消息即应用、主动 Agent、桌面感知、Hi-Fi 媒体、记忆工作台与跨端同步 |
 | 3 | Open WebUI | 10 | 5 | 15 | 25 | 多用户模型工作区、协作频道与文档、记忆、日历自动化和模型评估 |
 | 4 | VCPToolBox | 11 | 1 | 12 | 23 | 记忆演化、上下文语言、托管浏览器、Agent 社会和异步插件编排 |
 | 5 | Hermes Agent | 8 | 6 | 14 | 22 | 谱系化会话、后台任务、闭环学习、自进化 Skill 和跨界面 Agent 后端 |
 | 6 | DeepChat | 5 | 10 | 15 | 20 | 可操控 Agent turn、IM 遥控、Tape & Trace、Skill 迁移和强审批绑定 |
-| 7 | SillyTavern | 6 | 4 | 10 | 16 | 角色卡、World Info、提示词工程工作台、swipe 和内容脚本 |
+| 7 | SillyTavern | 7 | 4 | 11 | 18 | 角色卡、World Info、提示词工程工作台、swipe、快捷动作和内容脚本 |
 | 8 | OpenCode | 6 | 3 | 9 | 15 | 文件/Git 事实源、多表面会话、CodeMode、会话档案与 ACP 服务端 |
 | 9 | LobeHub | 5 | 5 | 10 | 15 | Agent 调度与运营、白盒记忆、conversation-flow 和协作文档对象 |
 | 10 | Cherry Studio | 4 | 5 | 9 | 13 | 数据库消息树、Agent workspace、小程序、联邦搜索和持久翻译 |
@@ -136,11 +136,11 @@
 | F52 | 可分离窗口与跨窗口状态同步 | AIO Hub | - | 工具/组件可脱离主窗并保持逻辑状态同步 |
 | F56 | 内嵌 Web 应用门户与小程序运行池 | Cherry Studio | - | 预设和自定义 Web 应用有 launchpad、侧栏与 keep-alive 生命周期 |
 | F57 | 跨 Topic、Session 与消息内容的联邦全局搜索 | Cherry Studio | - | 应用级命令汇聚实体搜索与 FTS5 内容搜索，并支持分页定位 |
-| F58 | 消息级流式翻译与译文持久化 | - | Cherry Studio | 译文作为 part 保存并可重译覆盖，独特性中等 |
+| F58 | 消息级流式翻译与译文持久化 | - | Cherry Studio、AIO Hub | Cherry 以 `data-translation` part 持久并可重译覆盖；AIO Hub 以 `metadata.translation` 持久并支持原文/译文/双语显示切换，独特性中等 |
 | F67 | Agent 运营汇报与版本化 Work 产物 | LobeHub | - | 任务结果沉淀为 Brief 分类、Inbox 汇报和独立 Work 对象 |
 | F68 | 人类与模型共同参与的实时 Channels | Open WebUI | - | 频道、线程、反应、置顶和模型 @ 参与形成协作空间 |
 | F69 | 与隐藏会话及工具互通的协作 Notes | Open WebUI | - | Note CRUD、Yjs 协作和模型读写工具构成独立文档工作区 |
-| F73A | 人类工具箱、自动 GUI 与节点工作流编辑器 | VCPChat | - | manifest 转表单、专用面板和节点执行引擎形成可操作工具面 |
+| F81 | 人类工具箱、自动 GUI 与节点工作流编辑器 | VCPChat | - | manifest 转表单、专用面板和节点执行引擎形成可操作工具面 |
 | F76 | LoomAPP 数据驱动创作运行时 | VCPChat | - | 前端插件可承载独立交互与数据可视化创作应用 |
 | F88 | 百万字符长文本分片翻译与上下文继承 | - | AIO Hub | 递归分片、并发限流、相邻片段上下文和精确 Token 预算闭环，但不单独定义客户端身份 |
 | F89 | 内置弹幕播放与第三方播放器透明覆盖运行时 | AIO Hub | - | 多格式解析、虚拟时钟、HWND 跟随、DPI/Z-Order 同步和高保真字幕降级链形成独立桌面产品面 |
@@ -161,7 +161,7 @@
 | F45 | ACP Agent 服务端互操作 | - | OpenCode | 外部 ACP 宿主可创建、恢复、提示、取消和分叉 OpenCode 会话 |
 | F46 | 本地 MCP 编排服务端 | - | Jan | `/v1/orchestrations` 把 MCP 工具循环作为 HTTP Agent 服务暴露 |
 | F50 | LLM 请求检查器与双层观测面 | AIO Hub | - | 内部钩子和网络层共同展示真实请求、流式响应与耗时 |
-| F51 | 可持久化快捷动作与模板按钮 | AIO Hub | - | 用户把宏化操作保存为输入区动作并直接进入执行链 |
+| F51 | 可持久化快捷动作与模板按钮 | SillyTavern | AIO Hub | 酒馆 Quick Reply 以持久按钮组、事件自动执行和右键菜单定义生态契约；AIO Hub 快捷操作以宏引擎、行级后处理和自动发送补充相邻形态，并兼容 Quick Reply 导入 |
 | F53 | 隔离的 Agent/Skill 执行沙箱 | AIO Hub、AstrBot | - | 覆盖路径锁定、多运行时探测或会话级计算机实例与文件进出 |
 | F54 | 主动回复与连续工作 Agent | VCPChat、AstrBot | - | FlowLock/TopicSponsor 与概率唤醒分别形成非单轮被动聊天模式 |
 | F55 | 跨平台语音收发与 TTS/STT 管道 | - | AstrBot | 14 个服务统一进入平台无关消息处理链，独特性中等 |
