@@ -2,97 +2,98 @@
 
 > 调查对象：`E:\works\git\Manifold-Desktop`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-12
 >
 > 代码快照：`3d7448fb2e6053056da6d6c126e08f90b94cda4f`（分支：`main`）
 >
-> 调查方式：从 [`../Chat/Manifold-Desktop-Chat调查笔记.md`](../Chat/Manifold-Desktop-Chat调查笔记.md)（2026-08-07 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：直接阅读源码并对照当前 HEAD 逐项核对符号与行号：C++ 存储层（`Manifold.Core/SessionManager.cpp`、`MainWindow.xaml.cpp` 桥 handler）与前端组件（`chat-tab.js`、`side-panel.js`、`home-tab.js`、`search-overlay.js`、`session-store.js`），并对桥消息名与函数调用点做全仓库搜索
 >
-> 调查范围：会话与消息的数据模型、文件存储、生命周期、搜索、导入导出与绑定；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
+> 调查范围：会话与消息的数据模型、事实源与持久化、生命周期、搜索、导入导出、外部对象绑定与保留语义；请求执行链、Provider 调用与取消进入对话请求与上下文类目，界面工作流进入 Chat UI 类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Manifold Desktop 的会话数据层由两部分组成：内存中的"聊天标签 + 组件局部 `messages[]`"，以及磁盘上的 `<id>.json` 会话文件（`SessionManager`）。存储层提供会话文件的增删改查与全文搜索，但正常聊天流程没有接入保存——四个直接影响基本会话行为的问题中，三个落在本类目：
+Manifold Desktop 的会话数据层由两套互不接通的实现组成：内存中的"聊天标签 + 组件局部 `messages[]`"，以及磁盘上的 `%LOCALAPPDATA%\Manifold\sessions\<id>.json` 会话文件（`SessionManager`）。存储层提供完整的增删改查与全文搜索，但正常聊天流程没有接入保存——本类目确认的缺口：
 
-1. 新对话不会持久化；关闭标签后内容丢失。
-2. assistant 流式回复只进入 DOM，不写回 `messages[]`；第二次发送缺少上一轮 assistant 上下文。
-3. 侧栏重命名只发送 `{title}`，C++ 后端按整份 JSON 覆盖原文件，会清除已有消息。
-
-这些源码连接缺口说明正常会话主链尚未接通。
+1. 新对话不持久化：打开标签不创建任何磁盘对象，关闭标签后内容丢失。
+2. assistant 流式回复只进入 DOM 与 `streamingText`，不回写 `messages[]`；第二次发送的上下文只有用户消息。
+3. 侧栏重命名发送 `{title}` 单字段，后端按整份 JSON 覆盖原文件，会清除已有消息。
+4. 前端 `session-store.js` 是未接入的独立模块（全仓库无 import），其写路径与正常聊天主链无关。
 
 ## 系统边界与数据主链
 
 ```text
-openChatTab（生成标签 id）
-  -> chat-tab 组件局部 messages[]（内存事实源）
-  -> （预期）SAVE_SESSION / SessionManager.SaveSession 写 <id>.json
-  -> （预期）LOAD_SESSION / SESSION_DATA 读回并渲染
-  -> 搜索：SessionManager 逐个读文件子串匹配
+openChatTab（app.js:138-147，标签 id 'chat-N'）
+  -> chat-tab 组件局部 messages[]（内存事实源，addUserMessage chat-tab.js:119-126）
+  -> 磁盘写入：仅 SAVE_SESSION 被调用时（重命名 side-panel.js:98、导入 MainWindow.xaml.cpp:668）
+  -> 打开既有会话：LOAD_SESSION -> SESSION_DATA -> 装入 messages[] 渲染（chat-tab.js:101-114）
+  -> 会话列表：LIST_SESSIONS -> SESSIONS_LOADED（侧栏 side-panel.js:12,18、Home home-tab.js:28）
+  -> 搜索：SEARCH_SESSIONS -> SessionManager 逐文件子串扫描（SessionManager.cpp:97-131）
 ```
 
-边界：`CHAT_SEND` 之后的 Provider 调用、流式广播与取消属于对话请求与上下文；标签页切换、侧栏与搜索浮层的界面工作流属于 Chat UI；消息 Markdown 渲染属于消息渲染器（`../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md`）。
+边界：`CHAT_SEND` 之后 Provider 调用、流式广播与取消属于对话请求与上下文；标签页、侧栏与搜索浮层的界面工作流属于 Chat UI；消息 Markdown 渲染属于消息渲染器（`../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md`）。
 
 ## 1. 会话、消息与分支数据模型
 
-- **会话单位**：界面"聊天标签"。`openChatTab()` 为标签生成递增 id；如果传入已有 `sessionId`，`chat-tab.js` 发送 `LOAD_SESSION`，收到 `SESSION_DATA` 后把消息装入组件局部数组并渲染（`frontend/app.js:138-147`、`chat-tab.js:101-114`）。持久化单位是 `sessions/<id>.json`（`SessionManager.cpp:23-26`）。
-- **消息模型**：`chat-tab.js:119-129` 构造 `{ role: 'user', content: text }` 加入当前 tab 的 `messages[]`，是普通线性数组。assistant 流式文本只更新 DOM 和 `streamingText`（`:27-59`），不回写 `messages[]`。
-- **分支/thread**：本次未找到消息树、分支或 thread 结构。
+- **会话单位**：存在两种互不相同的"会话"。界面"聊天标签"由 `openChatTab()` 生成递增 id（`frontend/app.js:139`），标签 id（`chat-N`）不是持久化身份；只有从侧栏/Home/搜索打开时，标签才持有磁盘会话的 `sessionId` 并发送 `LOAD_SESSION`（`chat-tab.js:101-114`）。磁盘会话是 `sessions/<id>.json` 文件，id 即文件名 stem（`SessionManager.cpp:24-27`）。新对话标签不产生磁盘对象，也没有生成磁盘 id 的路径（`session-store.js` 的 `generateId()` 无调用点）。
+- **消息模型**：`chat-tab.js:119-126` 构造 `{ role: 'user', content: text }` 加入组件局部 `messages[]`，是普通线性数组。assistant 流式文本只更新 `streamingText` 与 DOM（`chat-tab.js:27-59`），不回写数组。C++ 侧 `ChatMessage` 另有 `parts`、`toolCall`、`toolResult` 字段（`Manifold.Core/Providers/ProviderTypes.h:110-116`），但前端只发送 `role`/`content`，本仓库没有产生这些字段的路径。
+- **分支/thread**：未找到消息树、分支、thread 或 checkpoints。检查范围：`chat-tab.js`、`SessionManager.cpp/h`、`MainWindow.xaml.cpp` 会话 handler 与前端全部桥消息名。
 
 ## 2. 事实源、索引与持久化
 
-`SessionManager` 把每个会话存为 `%LOCALAPPDATA%\Manifold\sessions\<id>.json`，支持整文件保存、加载、删除、列表和全文搜索（`SessionManager.cpp:23-131`）。前端 `session-store.js` 也实现了 `createSession()`、`addMessage()`、`updateModelMessage()` 和 `save()`。
-
-但全仓库调用点显示：正常 Chat 流程没有调用这些写入函数，`chat-tab.js` 也不发送 `SAVE_SESSION`。因此：
-
-- 新会话不会生成会话文件；
-- assistant 回复不会进入后续请求上下文；
-- `updateModelMessage()` 期望的 `role === "model"` 与其他路径使用的 `assistant` 也不一致。
-
-即内存 `messages[]` 是实际事实源，磁盘文件是未被主链接通的另一套实现。侧栏重命名发送 `SAVE_SESSION {id, data:{title}}`（`side-panel.js:83-105`），`HandleSaveSession()` 将 `data` 原样交给整文件覆盖的 `SaveSession()`（`MainWindow.xaml.cpp:528-534`）——对已存在的会话执行重命名会把文件替换为只有标题的 JSON。
+- `SessionManager` 提供整文件保存、加载、删除、列表与全文搜索：`SaveSession` 写 `dump(2)`（`SessionManager.cpp:29-36`）、`LoadSession`（`:38-51`）、`DeleteSession`（`:53-59`）、`ListSessions`（`:61-95`）、`SearchSessions`（`:97-131`）。
+- 磁盘文件的写入口只有三处，均与正常聊天无关：侧栏重命名（`side-panel.js:98`）、Home 页导入（`MainWindow.xaml.cpp:668`）、以及未被任何模块 import 的 `session-store.js`（其 `save()` 在 `:58-62`）。
+- 因此内存 `messages[]` 是实际事实源；磁盘是另一套未被主链接通的实现。会话文件 schema（`session-store.js:20-27` 的定义）含 `id/title/model/messages[]/createdAt/updatedAt`，无版本号；`ListSessions` 只读 `title/model/createdAt/updatedAt`（`SessionManager.cpp:77-81`），未知字段静默忽略。
+- 角色命名不一致：`updateModelMessage()` 期望 `role === "model"`（`session-store.js:52`），而聊天主链使用 `assistant`（`chat-tab.js:122`，`MainWindow.xaml.cpp:780` 直传 role；渲染器按 `assistant` 分支处理，`message-renderer.js:15-17`）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **创建**：标签打开即"会话"，无持久化层面的创建动作；由于正常流程不落盘，新对话关闭标签后内容丢失。
+- **创建**：标签打开即"会话"，无持久化层面的创建动作；新对话关闭标签后内容丢失。
 - **切换**：标签切换保留组件局部 `messages[]`（UI 工作流见 Chat UI 笔记）。
-- **归档、置顶、恢复**：本次未找到对应实现或调用点。
+- **删除**：侧栏 × 按钮经 `showConfirm` 确认后发送 `DELETE_SESSION`（`side-panel.js:117-127`），后端删除文件（`MainWindow.xaml.cpp:536-541`）。
+- **归档、置顶、清空、恢复**：未找到归档/置顶/清空空会话实现；恢复路径只有"重新打开磁盘会话"（LOAD_SESSION），内存标签无恢复。
+- 应用退出只保存窗口几何到 `window-state.json`（`MainWindow.xaml.cpp:343-400`），与会话内容无关。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-本次未找到消息级编辑、删除、回退或分支的数据操作；assistant 内容不进入 `messages[]`，使"续写/回退"在数据层天然缺失。错误行的 Retry 按钮只删除错误提示、不重发请求（`chat-tab.js:87-98`），界面工作流见 Chat UI 笔记。
+未找到消息级编辑、删除、回退或分支的数据操作（检查范围：`chat-tab.js`、`message-renderer.js`、`MainWindow.xaml.cpp` 会话与聊天 handler）。assistant 内容不进入 `messages[]`，使"续写/回退"在数据层天然缺失。错误行的 Retry 按钮只删除错误提示、不重发请求（`chat-tab.js:93-95`），其界面工作流见 Chat UI 笔记。
 
 ## 5. 列表、分页、搜索与定位
 
-- 后端逐个读取会话文件，对整份 JSON dump 做不区分大小写的子串搜索；无索引和结果上限（`SessionManager.cpp:97-131`）。
-- 未发现分页、排序或命中定位接口；前端搜索浮层有 300ms 防抖和键盘导航（`search-overlay.js:24-58`），入口与定位工作流见 Chat UI 笔记。
+- `ListSessions` 按 `updatedAt` 降序排序（`SessionManager.cpp:88-92`）；无分页参数，侧栏全量渲染（`side-panel.js:64-67`），Home 页截取前 12 条（`home-tab.js:100`）。
+- `SearchSessions` 对每个文件的整份 JSON dump 做不区分大小写子串搜索，无索引、无结果上限；命中片段截取匹配点前后共约 140 字符（`SessionManager.cpp:102-128`）。
+- 未发现命中定位或会话内全文搜索接口；前端搜索浮层有 300ms 防抖与键盘导航（`search-overlay.js:24-58`），入口与定位工作流见 Chat UI 笔记。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-本快照没有持久化写路径，因此没有落盘节流或多端合并问题。内存侧的一致性风险是：`CHAT_CHUNK`/`CHAT_DONE` 广播没有会话标识，一个请求可能污染多个已打开标签的局部状态（事件链细节见对话请求与上下文笔记）。
+- 本快照正常聊天没有持久化写路径，因此不存在落盘节流、多窗口或跨端合并问题；文件写操作（重命名/导入）在 UI 线程串行处理，无锁与并发竞争点。
+- 内存侧一致性风险：`CHAT_CHUNK`/`CHAT_DONE`/`CHAT_ERROR` 广播不含会话标识（事件链细节见对话请求与上下文笔记），一个请求可能污染多个已打开标签的局部消息区。
+- 多窗口不存在：本快照为单 WebView2 窗口（`MainWindow.xaml.cpp:197-236` 只创建一份 WebView），未发现第二窗口或分离窗口机制。
 
 ## 7. 迁移、导入导出与保留策略
 
-- JSON 导入：文件内容解析后直接按其中的 `id` 保存，没有 schema 或 id 路径校验（`MainWindow.xaml.cpp:648-677`）。
-- JSON 导出：选择路径后写出格式化 JSON（`MainWindow.xaml.cpp:619-646`）。
-- Markdown 导出：按消息角色拼接标题和正文，不修改内容（`MainWindow.xaml.cpp:679-722`）。
-- `SessionPath(id)` 直接计算 `sessionsDir / (id + ".json")`（`SessionManager.cpp:23-26`）；来自导入文件或桥消息的 id 未经过路径成分校验。
-- 未发现 schema 版本号或迁移机制。
+- **JSON 导入**：文件内容解析后按其中的 `id` 字段（缺省 `imported-<时间戳>`）直接保存（`MainWindow.xaml.cpp:648-677`）；无 schema 或 id 路径成分校验，`SessionPath(id)` 直接计算 `sessionsDir / (id + ".json")`（`SessionManager.cpp:24-27`），来自导入文件或桥消息的 id 未经过校验（路径穿越风险为静态推断，未运行验证）。导入入口在 Home 页（`home-tab.js:88`）。
+- **JSON 导出**：后端 handler 存在（`MainWindow.xaml.cpp:619-646`），但全仓库搜索未找到前端调用点（grep `EXPORT_SESSION` 仅命中 C++ 分发表 `:428` 与 handler），即无 UI 入口。
+- **Markdown 导出**：按消息角色拼接标题和正文，不修改内容（`MainWindow.xaml.cpp:679-722`）；入口为侧栏会话项悬停显示的 MD 按钮（`side-panel.js:129-137`）。
+- **保留策略**：未发现 schema 版本号、迁移代码、备份恢复或过期回收（检查范围：`SessionManager.cpp/h`、导入导出 handler、`SettingsManager` 中与本类目无关的设置 schema 除外）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-请求对象包含 `provider`、`model`、`systemPrompt`、`temperature`、`tools` 字段（`frontend/services/provider-api.js:4-13`），但本次未发现这些绑定在会话级如何保存——没有会话文件写入主链，绑定随内存请求对象存在。附件、记忆或知识库在 Chat 主链上的注入点本次未找到。
+- 请求对象携带 `provider`、`model`、`systemPrompt`、`temperature`、`tools` 字段（`frontend/services/provider-api.js:4-13`），但本类目未发现这些绑定在会话级如何保存：没有会话文件写入主链，绑定随内存请求对象存在。会话文件 schema 里的 `model` 字段（`session-store.js:22`）只在未接入模块中使用。
+- 附件、记忆或知识库在 Chat 主链上没有注入点；后端有附件文件对话框与 `FILE_ATTACHED` 广播（`MainWindow.xaml.cpp:559-617`），但前端无监听方（grep 无结果），属于未接线的半截实现。
+- 工具绑定：MCP 工具在请求构造时全局注入（`MainWindow.xaml.cpp:786-789`），不落在会话或消息级（执行语义见对话请求与上下文笔记）。
 
 ## 9. 设计取舍与已确认边界
 
-- **双前端仓库未接通**：`session-store.js` 与 `SessionManager.cpp` 各自实现了会话写路径，但正常 Chat 主链都不调用。
-- **角色命名不一致**：`updateModelMessage()` 期望 `role === "model"`，其他路径使用 `assistant`。
-- **重命名破坏数据**：侧栏重命名以整文件覆盖方式保存只有标题的 JSON。
-- 本类目只回答数据语义；执行层问题（全局广播、单线程）见对话请求与上下文笔记。
+- **双实现未接通**：`session-store.js`（前端仓库）与 `SessionManager.cpp`（C++ 存储）各自实现了会话写路径，正常聊天主链均不调用。
+- **重命名破坏数据**：侧栏重命名以整份 JSON 覆盖保存只有标题的对象（`side-panel.js:98` → `MainWindow.xaml.cpp:528-534`），对已有文件是破坏性操作。
+- **无持久化即无恢复**：崩溃、退出后只能依赖磁盘上被导入/重命名碰巧写出的文件。
+- 本类目只回答数据语义；执行层问题（全局广播、单线程、参数丢失）见对话请求与上下文笔记。
 
 ## 10. 未验证事项
 
-- 多标签串流、取消延迟、路径穿越及导入恶意会话的运行结果未做动态验证（本笔记基于静态源码和调用点搜索）。
+- 多标签串流、路径穿越与导入恶意会话的运行结果未做动态验证（本笔记基于静态源码和调用点搜索）。
 - 重命名覆盖行为未运行复现。
 
 ## 11. 关键源码索引
@@ -101,6 +102,6 @@ openChatTab（生成标签 id）
 | --- | --- |
 | Chat 局部状态与流式 UI | `frontend/components/chat-tab.js` |
 | 未接入的会话前端仓库 | `frontend/services/session-store.js` |
-| 会话侧栏（重命名） | `frontend/components/side-panel.js` |
+| 会话侧栏（重命名/删除/导出） | `frontend/components/side-panel.js` |
 | 会话文件存储 | `Manifold.Core/SessionManager.cpp` |
-| 会话与发送 handler | `MainWindow.xaml.cpp:508-850` |
+| 会话与导入导出 handler | `MainWindow.xaml.cpp:508-722` |

@@ -12,15 +12,6 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-> 迁移状态（2026-08-11）：本文件是迁移期保留的旧版长文，内容已按新类目边界迁移：
->
-> - 会话与消息管理：[`../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md`](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)（内存数组模型、JSONL 持久化、checkpoint/branch/swipe 数据语义）
-> - 对话请求与上下文：[`../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md`](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)（Generate 主链、slash command 拦截、正则分层、宏与 Quick Reply 介入点）
-> - Chat UI：[`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)（消息操作、swipe 工作流、生成反馈、快捷键、键盘可达性）
-> - 消息渲染：[`../消息渲染器/SillyTavern-消息渲染调查笔记.md`](../消息渲染器/SillyTavern-消息渲染调查笔记.md)（已有独立笔记）
->
-> 2026-08-11 本文件已压缩为概览。原第 13 节通用界面盘点（弹窗、Toastr、加载/空状态、右键菜单、主题、无障碍、响应式断点、动画、图片预览、拖放、扩展面板）已原样搬运至 [`../通用界面盘点待迁移/SillyTavern.md`](../通用界面盘点待迁移/SillyTavern.md)，待可选界面专题承接。
-
 ## 结论摘要
 
 SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + Node 服务端 `src/`），聊天核心状态全部驻留前端内存：`chat` 是 `ChatMessage[]` 可变数组（`public/script.js:410`），连同 `chat_metadata`（`:453`）定期整份序列化到 JSONL 文件，无增量日志或数据库表。聊天状态机、swipe、checkpoint/branch、流式渲染主体都在 `public/script.js`（`chats.js` 只是消息级工具函数，`streaming-display.js` 是与主聊天渲染脱钩的悬浮组件）。详细结论已迁移至专项，本概览只保留端到端地图与入口。

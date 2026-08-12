@@ -12,14 +12,6 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-> 迁移状态（2026-08-11）：本文件已压缩为概览。内容已按新类目边界迁移：
->
-> - 会话与消息管理：[`../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md`](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)（Topic/Message 数据模型、事实源与持久化、生命周期、分支语义、分页索引与搜索）
-> - 对话请求与上下文：[`../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md`](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md)（提交入口、上下文拼装、预算压缩、Provider 交接、最终化、停止重试、队列并发、注入点）
-> - Chat UI：[`../Chat UI/Cherry-Studio-ChatUI调查笔记.md`](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)（工作台、会话导航、Composer、发送前配置、生成反馈、消息操作、分支树图导航、无障碍、桌面集成）
-> - 消息渲染：[`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`](../消息渲染器/Cherry-Studio-消息渲染调查笔记.md)（已有独立笔记；内容渲染类内容直接链接过去，未复制）
-> - 通用界面盘点：已原文搬移至 [`../通用界面盘点待迁移/Cherry-Studio.md`](../通用界面盘点待迁移/Cherry-Studio.md)（弹窗库、Toast、主题、动画、灯箱、右键双模式等）
-
 ## 结论摘要
 
 Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。会话单位是 Topic（SQLite），消息是 adjacency-list 树（`message.parentId` 自引用外键），"切换分支"是 `active_node_id` 指针重定向而非重排树。一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复是 N 个独立 execution 真并行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
@@ -54,6 +46,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - Chat UI：[`<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>`](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)
 - 消息渲染：[`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`](../消息渲染器/Cherry-Studio-消息渲染调查笔记.md)
 - 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)；跨层综合结论见 [`../Chat/Chat横向对比.md`](../Chat/Chat横向对比.md)
+- 通用界面盘点（弹窗库、Toast、主题、动画、灯箱、右键双模式等）：[`../通用界面盘点待迁移/Cherry-Studio.md`](../通用界面盘点待迁移/Cherry-Studio.md)
 
 ## 关键能力与已确认边界
 

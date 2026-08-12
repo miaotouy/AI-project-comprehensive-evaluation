@@ -6,9 +6,9 @@
 >
 > 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
-> 调查方式：从 [`../Chat/AstrBot-Chat调查笔记.md`](../Chat/AstrBot-Chat调查笔记.md)（2026-08-06 调查）迁移现有段落与证据，未重新调查代码
+> 调查方式：直接阅读源码（事件总线、流水线调度、各阶段实现、并发工具、上下文管理、Agent 构建与 runner、WebChat 流式链路），行号按当前 HEAD 逐一核对
 >
-> 调查范围：事件总线与任务模型、流水线调度与各阶段、并发控制与 follow-up、上下文构建与压缩、群聊上下文注入、唤醒与装饰；会话持久化与界面分别进入会话与消息管理、Chat UI 类目
+> 调查范围：事件总线与任务模型、流水线调度与各阶段、并发控制与 follow-up、上下文构建与压缩、群聊上下文注入、唤醒与装饰、停止/重试/续写语义；会话持久化语义与界面分别进入会话与消息管理、Chat UI 类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -17,226 +17,159 @@
 AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制不靠阶段限流，而靠 UMO 粒度的 `session_lock` 串行化 LLM 请求 + 严格有序的 follow-up 队列。
 
 - **流水线 9 阶段**（stage_order.py:3-13）：WakingCheck → WhitelistCheck → SessionStatusCheck → RateLimit → ContentSafety → PreProcess → Process → ResultDecorate → Respond。
-- **洋葱模型调度**（scheduler.py:35-78）：阶段 `process()` 返回普通协程 → 基线继续；返回 `AsyncGenerator` → 挂起，递归执行后续阶段，后续阶段完成后回到 yield 点执行后置逻辑（LLM 请求阶段用此模式：先让 Respond 发送，再回来做收尾）；`event.stop_event()` 在任意点截断传播。
-- **EventBus 每事件一任务**（event_bus.py:39-63）：`asyncio.create_task` + `_pending_tasks` 强引用防 GC，完成回调暴露未捕获异常。
+- **洋葱模型调度**（scheduler.py:36-80）：阶段 `process()` 返回普通协程 → 基线继续；返回 `AsyncGenerator` → 挂起，递归执行后续阶段，后续阶段完成后回到 yield 点执行后置逻辑（LLM 请求阶段用此模式：先让 Respond 发送，再回来做收尾）；`event.stop_event()` 在任意点截断传播。
+- **EventBus 每事件一任务**（event_bus.py:39-54）：`asyncio.create_task` + `_pending_tasks` 强引用防 GC（:37、:53），完成回调暴露未捕获异常（:56-63）。
 - **并发控制**：`SessionLockManager`（session_lock.py:8-55）按事件循环隔离、UMO 粒度的 `asyncio.Lock` + 引用计数自动清理，包裹整个 LLM 请求（internal.py:220）。
-- **follow-up 严格序**（process_stage/follow_up.py，248 行）：Agent 运行期间同发送者的新消息捕获为 `FollowUpTicket`，在捕获时分配单调序号，`asyncio.Condition` 只放行队首；序号状态按 UMO 维护、无残留时自动释放。
+- **follow-up 严格序**（process_stage/follow_up.py:1-248）：Agent 运行期间同发送者的新消息捕获为 `FollowUpTicket`，在捕获时分配单调序号，`asyncio.Condition` 只放行队首；序号状态按 UMO 维护、无残留时自动释放。
 - **上下文压缩两层**（context/manager.py:45-121）：先轮次截断（enforce_max_turns≠-1），再 token 压缩（82% 阈值触发，`TruncateByTurnsCompressor` 或 `LLMSummaryCompressor`，压缩后仍超限折半兜底）。
 
 ## 系统边界与生成任务主链
 
 ```text
 平台适配器收到消息 → 构造 AstrMessageEvent（platform:message_type:session_id）
-  → event_queue.put()（EventBus.dispatch 无限循环消费，event_bus.py:39-54）
+  → event_queue.put() → EventBus.dispatch 无限循环消费（event_bus.py:39-54）
   → 按 conf 映射取 PipelineScheduler → asyncio.create_task(scheduler.execute(event))
-  → PipelineScheduler.execute（scheduler.py:80-97）
+  → PipelineScheduler.execute（scheduler.py:82-100）
       active_event_registry.register(event)
-      → _process_stages(event, from_stage=0)（洋葱模型，:35-78）
+      → _process_stages(event, from_stage=0)（洋葱模型，:36-80）
           WakingCheckStage（唤醒判定 + 插件 handler 匹配 + unique_session 改写 session_id）
           WhitelistCheckStage / SessionStatusCheckStage / RateLimitStage / ContentSafetyCheckStage
           PreProcessStage
-          ProcessStage → InternalAgentSubStage（session_lock 包裹 → build_main_agent → agent 循环）
-                         或插件 handler / 第三方 runner
-          ResultDecorateStage（@/回复前缀、T2I、TTS、分段回复、forward、content safety 复查）
+          ProcessStage → AgentRequestSubStage → InternalAgentSubStage
+                          （session_lock 包裹 → build_main_agent → agent 循环）
+                          或插件 handler / 第三方 runner
+          ResultDecorateStage（@/回复前缀、T2I、TTS、分段回复、转发、安全复查）
           RespondStage（发送）
-      finally: event.cleanup_temporary_local_files(); active_event_registry.unregister
+      finally: event.cleanup_temporary_local_files(); active_event_registry.unregister（:98-100）
 ```
 
-边界：会话/对话的持久化语义在会话与消息管理；项目自带 WebChat 与管理界面在 Chat UI；工具执行循环内部属于 Agent 工具类目。
+边界：会话/对话的持久化语义在会话与消息管理；项目自带 WebChat 与管理界面在 Chat UI；工具执行循环内部（工具发现、执行、审批）属于 Agent 工具类目，本笔记只记录注入点与交接契约。
 
-## 1. 事件总线与任务模型（event_bus.py，83 行）
+## 1. 提交入口、任务对象与状态机
 
-- 构造：`event_queue: asyncio.Queue` + `pipeline_scheduler_mapping: dict[conf_id, PipelineScheduler]`（:26-35）——**按配置实例分调度器**，多租户配置各自独立 pipeline；
-- `dispatch()` 无限循环（:39-54）：取事件 → `get_conf_info` 解析配置名（:42-44）→ 无调度器则忽略（:46-51）→ `create_task`；
-- **task 强引用**（:36-37、:53）：`_pending_tasks` 防止 pending task 被 GC；完成回调 `_on_task_done` 移除引用并暴露异常（:56-63）；
-- 消息日志（:65-83）：`[配置名] [平台ID(平台名)] 发送者名/发送者ID: 消息概要`，extra `category=user_chat`。
+- **入口**：`EventBus.dispatch()` 无限循环（event_bus.py:39-54）——从 `event_queue` 取事件 → `astrbot_config_mgr.get_conf_info(umo)` 解析配置（:42-44）→ 无对应 `PipelineScheduler` 则记录错误并忽略（:46-51）→ `create_task(scheduler.execute(event))`。构造时注入队列与 `pipeline_scheduler_mapping: dict[conf_id, PipelineScheduler]`（:26-37）——**按配置实例分调度器**，多租户配置各自独立 pipeline。
+- **任务模型**：没有显式任务 ID/任务表；"任务"就是 per-event 的 asyncio.Task + 事件对象本身。WebChat 侧有 `message_id`（UUID）与 `ChatRunState.run_id`（chat_service.py:1137-1166），IM 平台以平台消息 ID 为身份。
+- **活跃事件注册表**：`ActiveEventRegistry`（active_event_registry.py:11-94）维护 UMO → 活跃事件集合（:18、:21-29），供 stop/reset 场景定位同会话事件；pipeline 进出时注册/注销（scheduler.py:89、:100）。
+- **运行状态**：无集中状态机；运行中状态分散在 runner（`AgentRunner`）、`activeConnections`（前端）与 `ChatRunState.status`（webchat 侧 running/completed/stopped/failed，chat_service.py:1042-1049）。
+- **消息日志**：`_print_event`（event_bus.py:65-83）以 `[配置名] [平台ID(平台名)] 发送者名/发送者ID: 消息概要` 记录，extra `category=user_chat`。
 
-## 2. 流水线调度（scheduler.py，98 行）
+## 2. 历史选择与上下文拼装顺序
 
-### 2.1 阶段顺序（stage_order.py:3-13）
+上下文在 `build_main_agent`（astr_main_agent.py:1375+）中拼装，最终载体是 `ProviderRequest`（req.contexts + req.extra_user_content_parts）：
 
-| # | 阶段 | 职责 |
-|---|---|---|
-| 0 | `WakingCheckStage` | 唤醒判定（见 §3.1） |
-| 1 | `WhitelistCheckStage` | 群/私聊白名单 |
-| 2 | `SessionStatusCheckStage` | 会话是否被禁用 |
-| 3 | `RateLimitStage` | 频控 |
-| 4 | `ContentSafetyCheckStage` | 入站内容安全 |
-| 5 | `PreProcessStage` | 事件预处理 |
-| 6 | `ProcessStage` | 插件/LLM 请求（agent 子阶段） |
-| 7 | `ResultDecorateStage` | 结果装饰（见 §3.5） |
-| 8 | `RespondStage` | 发送 |
+1. **历史**：`Conversation.content` JSON → `req.contexts`（astr_main_agent.py:1404-1405、:1536-1538），对话不存在则惰性新建（`_get_session_conv` :261-275）。
+2. **prompt 前缀**：`prompt_prefix` 先套用户输入（`_apply_prompt_prefix`，:1002 调用）。
+3. **persona**：`_ensure_persona_and_skills`（:1010 调用，定义 :499+）按会话规则/对话 persona 解析（解析顺序见会话与消息管理笔记 §8），注入 system prompt 与 begin_dialogs，并把 persona 的工具/技能装配进 `req.func_tool`。
+4. **媒体附件**：图片（压缩后路径入 `req.image_urls` + 文本占位 part）、录音、文件、视频逐组件转文件并附文本说明（:1420-1447）；回复引用消息内的媒体同样处理（:1448-1534，含 fallback 图片提取与 `max_quoted_fallback_images` 上限 :1500-1526）。
+5. **引用消息正文**：`_process_quote_message`（:1023-1033）。
+6. **系统提醒块**：群名（`group_name_display`）、当前时间（`datetime_system_prompt`）等拼成 `<system_reminder>...</system_reminder>` 注入 `extra_user_content_parts`（:960-988）。
+7. **群聊上下文**：`on_req_llm` hook 把环形缓冲中该条消息之前的原始消息拼成 `<system_reminder>...BEGIN CONTEXT...END CONTEXT...` 块追加（group_chat_context.py:160-195，详见 §9）。
+8. **知识库/联网**：`_apply_kb`（:278+，`kb_agentic_mode` 开启时走工具化检索）、web search 由工具在 agent 循环中触发。
 
-### 2.2 洋葱模型（scheduler.py:35-78）
+顺序上 system prompt 在前、历史在 contexts、动态上下文全部追加到 `extra_user_content_parts` 末尾（对多模态 provider 由 runner 层合并进最终消息体，tool_loop_agent_runner.py:500-514 的 `_iter_llm_responses` 载荷）。
 
-```text
-for stage in stages:
-    coroutine = stage.process(event)
-    if isinstance(coroutine, AsyncGenerator):
-        async for _ in coroutine:          # yield 点 = 前置完成、后置待执行
-            if event.is_stopped(): break
-            await self._process_stages(event, i + 1)   # 递归执行后续阶段
-            if event.is_stopped(): break
-    else:
-        await coroutine                     # 普通协程 = 基线，不递归
-        if event.is_stopped(): break
-```
+## 3. 预算、截断、摘要与压缩
 
-- 递归深度 = 后续阶段数（最多 8 层）；
-- `event.stop_event()` 在任何点截断：`execute()` 的 finally 保证临时文件清理与注册表注销（:96-98）；
-- webchat/wecom_ai_bot 事件最后 `send(None)` 刷新 UI（:92-93）。
-
-### 2.3 阶段注册
-
-`register_stage` 装饰器 + `registered_stages` 列表；`PipelineScheduler.__init__` 按 `STAGES_ORDER.index(cls.__name__)` 排序（:21-24），未在 STAGES_ORDER 中的阶段会抛 ValueError——顺序表是硬约束。
-
-## 3. 各阶段细节
-
-### 3.1 WakingCheckStage（waking_check/stage.py:35-248）
-
-初始化配置（:46-75）：`no_permission_reply`、`friend_message_needs_wake_prefix`（默认 False）、`ignore_bot_self_message`（默认 False）、`ignore_at_all`（默认 False）、`disable_builtin_commands`、`unique_session`（默认 False）。
-
-处理顺序（:77-248）：
-
-1. **unique_session 改写**（:81-85）：群聊时按平台构建器换 session_id（`UNIQUE_SESSION_ID_BUILDERS` :17-26，覆盖 aiocqhttp/slack/dingtalk/qq_official/qq_official_webhook/lark/misskey/matrix 8 平台；webchat 不在内）；
-2. **忽略机器人自身消息**（:87-93）：`get_self_id() == get_sender_id()` → stop；
-3. **管理员身份标记**（:95-104）：遍历 `admins_id`，命中即 `event.role = "admin"`（API key 传 `_api_key_allow_admin_role` 可禁用）；
-4. **前缀唤醒**（:106-124）：`wake_prefix`（默认 `/`）开头；群聊首段是 At 但非 @机器人/@全体则放弃；命中后剥离前缀（`message_str[len(wake_prefix):]`，:123）；
-5. **At/AtAll/Reply 唤醒**（:125-143）：At 机器人、At 全体（受 ignore_at_all）、回复引用 bot 的消息（`Reply.sender_id == self_id`）；
-6. **私聊默认唤醒**（:144-152）：非 `friend_message_needs_wake_prefix` 或 webchat；
-7. **插件 handler filter 匹配**（:154-245）：遍历 `EventType.AdapterMessageEvent` handlers（受 `plugins_name` 过滤 :158-165），**filter 需 AND 全过**（:185-204）；`PermissionTypeFilter` 单独处理权限失败（:187-190、:205-221，`raise_error` 与 `no_permission_reply` 决定是否回复）；命中即 `is_wake=True`（:223-224）；`CommandGroupFilter` handler 不入 activated_handlers（:226-230）；
-8. `SessionPluginManager.filter_handlers_by_session` 会话级二次过滤（:238-242）；
-9. 仍非唤醒 → `event.stop_event()`（:247-248）。
-
-### 3.2 RateLimitStage
-
-- 对同一 UMO 计数，超过限制默认 **stall**（阻塞流水线直到限流窗口结束）而非丢弃（rate_limit_check/stage.py:74-82）。
-
-### 3.3 ContentSafetyCheckStage
-
-- 入站文本/图片审核；`content_safety.also_use_in_response` 开启时 `ResultDecorateStage` 会复用本阶段检查回复内容（result_decorate/stage.py:91-99）。
-
-### 3.4 ProcessStage 与 agent 子阶段
-
-- `InternalAgentSubStage.process`（internal.py:162+）：
-  - 空消息且无 provider_request/media/reply → 跳过 LLM 请求（:174-191）；
-  - `try_capture_follow_up`（:194-210）——同会话 Agent 运行中则进 follow-up 通道（见 §4.2）；
-  - `send_typing`（:212-216）、`OnWaitingLLMRequestEvent` hook（:217-218）；
-  - **`async with session_lock_manager.acquire_lock(event.unified_msg_origin)`**（:220）包裹整个 LLM 流程；
-  - `build_main_agent(apply_reset=False)`（:231-236）+ provider api_base 黑名单检查（`decoded_blocked`，:253-262）；
-  - `OnLLMRequestEvent` hook 可拦截止步（:269-272）；
-  - `register_active_runner` 登记 runner 供 follow-up 捕获（:278）；
-  - trace.record("astr_agent_prepare")（:282-291）；Live Mode 走 `run_live_agent`（:293-299）；
-- `third_party.py`：Dify/Coze/Dashscope/DeerFlow 等第三方 runner 路径（不入 persona，只解析错误文案）。
-
-### 3.5 ResultDecorateStage（result_decorate/stage.py:21-439）
-
-初始化配置（:23-102）：`reply_prefix`、`reply_with_mention`、`reply_with_quote`、`t2i_word_threshold`（默认 150，下限 50，:32-37）、`t2i_strategy`（local/remote）、`forward_threshold`、TTS `trigger_probability`（:46-56）、**分段回复** `segmented_reply`（词数阈值/正则/分隔词，:58-88）、内容安全复查（:91-99）、`display_reasoning_text`（:101-102）。
-
-装饰项：思考内容展示（reasoning）、TTS 转语音、T2I 转图片、转发（超阈值）、@/Reply 前缀、分段发送（`_split_text_by_words` :104-110）。
-
-### 3.6 RespondStage
-
-- 最终发送；`OnDecoratingResultEvent` 可在发送前再拦截（result_decorate/stage.py:159-189 附近）。
-
-## 4. 并发控制
-
-### 4.1 SessionLockManager（session_lock.py:8-55）
-
-- **两级结构**：外层 `SessionLockManager` 按事件循环（`WeakKeyDictionary[event_loop, manager]`）隔离（:33-52）——避免跨 loop 的 asyncio.Lock 误用；
-- 内层 `_PerLoopSessionLockManager`：`defaultdict(asyncio.Lock)` + 引用计数（:11-30），计数归零自动 pop（:28-30），无泄漏；
-- 单例 `session_lock_manager`（:55）。
-
-### 4.2 follow-up 严格序（process_stage/follow_up.py:1-248）
-
-- 全局表：`_ACTIVE_AGENT_RUNNERS`（UMO → runner，:12）、`_FOLLOW_UP_ORDER_STATE`（UMO → 状态机，:13-19）；
-- **捕获条件**（`try_capture_follow_up` :176-218）：同 UMO、同发送者、runner 未 stop；
-- **捕获时即分配序号**（`_allocate_follow_up_order` :95-104）——按到达顺序而非唤醒顺序；
-- 状态：`pending → active → finished/consumed`（:16-19）；
-- **队首放行**（`_activate_and_wait_follow_up_turn` :126-144）：`asyncio.Condition` 等待 `next_turn == seq`——后续消息阻塞等前序；
-- 完成推进（:77-92 `_advance_follow_up_turn_locked`、:147-162 `_finish_follow_up_turn`）；状态空 + 无 active runner → 释放 UMO 状态（:121-123）；
-- `register_active_runner`/`unregister_active_runner` 在登记/注销 runner 时同步挂载/卸载 agent_stop 回调（follow_up.py:39-58），使停止请求能直达 runner；
-- runner 侧消费：`FollowUpTicket`（tool_loop_agent_runner.py:95-125）——当前轮次结束后按序注入（`_merge_follow_up_notice` 附带 SYSTEM NOTICE 提示优先处理用户插话）。
-
-### 4.3 ActiveEventRegistry（active_event_registry.py:11-94）
-
-- UMO → 活跃事件集合（:17-29）；agent_stop 回调表 `_agent_stop_callbacks`（:18-19、:31-50）；
-- `stop_all`（:52-71）：stop 事件传播（/reset 等场景终止同会话旧事件）；
-- `request_agent_stop_all`（:73-91）：置 `agent_stop_requested`，**不中断事件传播**——历史保存等后续流程仍可执行；同时调用注册的回调（`runner.request_stop`）立即取消 agent 运行（#9602），进行中的 LLM 请求/上下文压缩由 runner 侧 `_await_or_stop`（tool_loop_agent_runner.py:461-501）竞速 abort 信号取消；
-- pipeline `execute` 注册/注销（scheduler.py:87、:98）。
-
-## 5. 上下文构建与压缩
-
-### 5.1 历史加载与注入
-
-- `Conversation.content` JSON → `req.contexts`（astr_main_agent.py:1404-1405、:1538）→ `bind_checkpoint_messages` 还原（agent/message.py:327-342）；
-- 附加注入：persona（`_ensure_persona_and_skills`）、知识库结果/系统提醒（`extra_user_content_parts`，用户消息侧）。
-
-### 5.2 ContextManager（context/manager.py:10-121）
+`ContextManager`（context/manager.py:45-121）：
 
 ```text
 process(messages, trusted_token_usage):
-  1. enforce_max_turns != -1 → truncate_by_turns（轮次截断，保留最新 N 轮）
+  1. enforce_max_turns != -1 → truncate_by_turns（轮次截断，保留最新 N 轮，:60-65）
   2. max_context_tokens > 0：
        total = count_tokens(messages, trusted_token_usage)
-       should_compress(result, total, max) → _run_compression
-_run_compression:
+       should_compress 命中（usage_rate > 0.82）→ _run_compression（:67-77）
+_run_compression（:83-121）:
   compressor(messages)          # LLMSummaryCompressor 或 TruncateByTurnsCompressor
-  double check：仍超限 → truncate_by_halving（折半兜底）
+  double check：仍超限 → truncate_by_halving（折半兜底，:112-119）
 ```
 
-- 压缩器选择（:31-43）：`custom_compressor` → `llm_compress_provider` 存在则 `LLMSummaryCompressor`（keep_recent_ratio 默认 0.15）→ 否则 `TruncateByTurnsCompressor`；
-- 异常兜底：任何压缩错误返回原消息（:79-81）；
-- token 估算：`EstimateTokenCounter`（token_counter.py:38）优先 `trusted_token_usage`；图片 765 / 音频 500 定额；
-- 默认配置：`max_context_length: -1`（不轮次限制）、`context_limit_reached_strategy: "llm_compress"`（config/default.py:127、:139）；
-- 截断器细节（truncator.py）：system 消息保护（:15-29）、保证 system 后跟 user（:31-49）、tool_call/tool 配对修复（:51-98，Gemini 严格模式）。
+- **压缩器选择**（manager.py:31-43）：`custom_compressor` → `llm_compress_provider` 存在则 `LLMSummaryCompressor`（keep_recent_ratio 默认 0.15）→ 否则 `TruncateByTurnsCompressor`。
+- **阈值**：82%（compressor.py:66、:131——`compression_threshold: float = 0.82`，触发判断 :77-93、:158-174）。
+- **摘要压缩细节**（compressor.py:115-310）：按轮切分（round_utils）、按 keep_recent_ratio 预算保留最近整轮（:176-204，比例钳制 0-0.3 :144）、最新用户消息所在轮始终保留（:228-238）、总结失败返回原消息（:275-286）、结果 = system 消息 + summary pair + 最近轮（:288-309）。
+- **截断器**（truncator.py）：system 消息保护（:15-29）、保证 system 后跟 user（:31-49）、tool_call/tool 配对修复（:51-98，注释说明 Gemini 严格模式 :56-58）、按轮截断（:100-144）、丢最旧 N 轮（:146-173）、折半（:175-202）。
+- **token 估算**（token_counter.py:38-78）：优先 `trusted_token_usage`（:49-50）；图片 765 / 音频 500 定额（:34-35）；中文字符 0.6、其他 0.3 估算（:75-78）。
+- **异常兜底**：任何压缩错误返回原消息（manager.py:79-81）。
+- **默认配置**：`context_limit_reached_strategy: "llm_compress"`（config/default.py:127）、`max_context_length: -1`（默认不限制，:139）、`llm_compress_keep_recent_ratio: 0.15`（:137）。注意 `internal.py:94-96` 读取该策略时的兜底默认值是 `"truncate_by_turns"`（配置键始终存在，实际生效以配置为准）。
 
-### 5.3 群聊上下文注入
+## 4. SDK、Provider、模型与协议交接
 
-`GroupChatContext`（builtin_stars/astrbot/group_chat_context.py:41-302）：每 UMO 内存环形 deque 最多 1000 条原始消息（`DEFAULT_GROUP_MESSAGE_MAX_CNT` :38、可配 `group_message_max_cnt` :71-77），注入格式 `[昵称/时间]: 内容` 包在 `<system_reminder>...BEGIN CONTEXT...END CONTEXT...`（:31-37），受 `provider_ltm_settings.group_icl_enable` 控制（:140-239）；图像 caption：`get_image_caption`（:88-108）用独立 provider（可指定 `image_caption_provider_id`）为群消息图片生成描述并入上下文；主动回复 `active_reply`（:64-69、110-128）：概率触发（`possibility_reply` 随机 < `possibility_reply` 概率）、群聊限定、`is_at_or_wake_command` 不触发、白名单过滤。
+- **交接点**：`build_main_agent`（astr_main_agent.py:1375-1416）——先 `_select_provider`（:1388；无 provider 则置 LLM 错误消息并返回 None :1389-1396），再构造 `ProviderRequest` 并填充 `req.contexts`（:1404-1405）。模型显式选择经 `event.get_extra("selected_model")` 写入 `req.model`（:1411-1412，WebChat 前端可传），否则由 provider 实例的默认模型决定。
+- **Provider 解析**：按 UMO 路由到会话/配置绑定的 provider（`Context.get_using_provider`，`umop_config_router` 负责 UMO → 配置 profile 路由）；fallback 链 `_get_fallback_chat_providers`（:1306-1338，`fallback_chat_models` 列表去重）；图像模态不支持的 fallback 切换 `_select_image_chat_provider`（:1341-1372）。
+- **协议 Adapter 接管**：`InternalAgentSubStage` 只持有 `ProviderRequest` 与 `Provider` 实例，具体协议（OpenAI 兼容/Google/Anthropic 等）由 `astrbot/core/provider` 下的 provider 实现与 `func_tool` 序列化接管；runner 把 `req.contexts`/`extra_user_content_parts`/`func_tool`/`abort_signal` 组成 `text_chat` 载荷（tool_loop_agent_runner.py:500-514）。
+- **第三方 runner**：`agent_runner_type` 非 local 时 `AgentRequestSubStage` 改用 `ThirdPartyAgentSubStage`（agent_request.py:29-34），Dify/Coze/Dashscope/DeerFlow 路径在 process_stage/method/agent_sub_stages/third_party.py（本次未逐行核对，见未验证事项）。
+- **会话级开关**：`AgentRequestSubStage.process` 先检查 provider enable（agent_request.py:37-41）与 `SessionServiceManager.should_process_llm_request`（:43-47，会话规则可关闭 LLM 能力）。
 
-## 6. 设计取舍与已确认边界
+## 5. 流式事件、缓冲、节流与顺序
 
-### 6.1 已确认的设计（代码事实）
+- **生成器链**：`run_agent` 生成器逐段产出（文本/tool_call/tool_call_result/reasoning/媒体），`InternalAgentSubStage.process` 把生成器放进 `MessageEventResult.set_async_stream`（internal.py:346-359）；RespondStage 检测 `STREAMING_RESULT` 调 `event.send_streaming`（respond/stage.py:211-225）。
+- **IM 平台**：由各适配器实现 `send_streaming`（平台侧节流/合并，不在流水线内）。
+- **WebChat**：`WebChatMessageEvent._send` 把每个组件（Plain/Image/Record/File/Json）转成带 `message_id` 的事件写入 per-request back_queue（webchat_event.py:29-163）；`_consume_chat_run`（chat_service.py:897-1088）单消费协程：accumulator 按 plain/tool_call/reasoning 归并 → 按批持久化 → 以 revision 广播给 SSE/WS 订阅者（:774-793）；`send(None)` 在 pipeline 结束发 `end` 事件（webchat_event.py:165-180，scheduler.py:94-95 触发）。
+- **顺序保证**：back_queue 是 asyncio.Queue，单消费协程天然有序；订阅者超限被丢弃（慢流断开重连，chat_service.py:787-792）。前端 `processStreamPayload` 按类型合并到 botRecord（useMessages.ts:990-1160）。
+- **无全局缓冲层**：流水线内不做跨事件缓冲/节流，顺序性靠队列与锁（§8）。
 
-- **每消息一任务、无全局并发调度**：吞吐靠 asyncio 并发，顺序性靠 UMO 锁与 follow-up 队列，跨会话天然并行；
-- **洋葱模型统一收尾**：LLM 流式输出在 Process 阶段挂起，Respond 先发，收尾（历史保存等）后执行——单条事件单流水线无跨阶段状态泄漏；
-- **follow-up 严格序**：捕获时分配序号 + Condition 队首放行，避免并发唤醒顺序漂移（注释 "avoid wake-order drift" :156）；
-- **stage 顺序硬编码**：STAGES_ORDER 即约束，新增阶段必须显式加入；
-- **配置粒度多租户**：`pipeline_scheduler_mapping` 按 conf_id 隔离；
-- **agent 停止两态**：`stop_event`（硬断）vs `agent_stop_requested`（软停，保历史）——语义分离；软停经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，但事件传播与历史保存仍继续（#9602）。
+## 6. 完成、异常、半截流与最终回写
 
-### 6.2 取舍（平衡决策）
+- **收口位置**：`InternalAgentSubStage.process` 的 yield 之后（internal.py:329-417）：Live Mode 保存（:331-342）、流式结束时补发 `STREAMING_FINISH` 结果（:360-378）、非流式循环（:379-389）；随后 `trace.record("astr_agent_complete")`（:393-397）、异步写 ProviderStat（:399-406）、**历史保存**（:409-417）。
+- **历史保存 `_save_to_history`**（internal.py:452-539）：跳过首条 system（:466-469）与 `_no_save` 消息（:470-472）；`user_aborted` 时保留半截输出并补 assistant 记录（:477-504、:521-527 注释掉的 abort 标注）；LLM 空回复且无工具结果不保存（:506-512）；`token_usage` 取最后一次 LLM 响应 usage（:529-539）；带 checkpoint 时追加 `CheckpointMessageSegment`（:474-486、:514-519）。
+- **异常路径**：process 顶层 except 发错误回复（persona 自定义错误消息优先，internal.py:430-438）；`_record_internal_agent_stats` 异步写 ProviderStat（:548-588，status=aborted/error/completed）。
+- **响应防重复**：RespondStage 对 `send_message_to_user` 已发过的同文本跳过（respond/stage.py:182-204），并对 `_streaming_finished` 事件防二次发送（:176-181）。
+- **洋葱收尾**：历史保存发生在 Respond 发送之后（yield 返回点），即"先发送、后落盘"；`finally` 中 `unregister_active_runner`（internal.py:426-428）、`stop_typing` 与 follow-up 状态收尾（:439-450）。
 
-- **阶段无并发上限 + UMO 锁**：同会话串行化，但全局无背压（事件队列无限 Queue）；
-- **RateLimit stall 阻塞**：限流窗口内整条流水线挂起（消息排队），不丢弃但堆积；
-- **内存群上下文 + 可选持久化**：1000 条环形缓冲实时性优先，持久化走独立表并暴露工具；
-- **unique_session 默认关**：群聊默认共享对话（成本低），按人隔离需显式开启。
+## 7. 停止、重试、续写与重新生成
 
-### 6.3 静态推断的潜在问题（源码推断，未实测）
+- **两级停止**：
+  - `stop_event`（硬断）：`ActiveEventRegistry.stop_all`（active_event_registry.py:52-71）置事件停止并截断流水线传播（/reset 场景用，conversation.py:182、:238）；
+  - `agent_stop_requested`（软停）：`request_agent_stop_all`（:73-91）**不中断事件传播**——历史保存等后续流程仍可执行，同时调用注册的 agent_stop 回调立即取消 runner（follow_up.py:39-58 挂载 `runner.request_stop`）。
+- **runner 侧中断**：`_await_or_stop`（tool_loop_agent_runner.py:461-498）把进行中的 LLM 请求/上下文压缩与 abort 信号竞速，abort 先到则取消操作并返回 None；工具执行中断走 `_ToolExecutionInterrupted`（:102-103）。
+- **入口**：`/stop` 命令（conversation.py:196-220）按 runner 类型走 stop_all（第三方）或 request_agent_stop_all（本地）；WebChat 停止按钮 → `/chat/sessions/{id}/stop` → `request_agent_stop_all`（chat_service.py:1204-1213）。
+- **重试/续写/重新生成**：这些是 WebChat 前端 + ChatService 的机制（数据语义见会话与消息管理笔记 §4）：编辑用户消息后自动续写（continueEditedMessage）、bot 消息重生成（regenerate → 新 checkpoint 重走生成）；IM 平台无对应 UI，仅 `/reset` 清历史后重发。Provider fallback 是请求内自动重试（`request_max_retries`，tool_loop_agent_runner.py 载荷 :510），与用户手动重试不同。
+- **follow-up 消费**：runner 在当前轮次结束后把积压的 follow-up 文本以 `[SYSTEM NOTICE]` 提示合并进下一轮内容（tool_loop_agent_runner.py:702-721，使用点 :1103），提示模型优先处理用户插话。
 
-1. **长会话低频访问**：`max_context_length=-1` 默认不按轮次限制，依赖 82% token 阈值触发压缩，低频会话可能长期携带大上下文（每次请求全量发送）；
-2. **follow-up 与流式并行**：`enable_streaming` 时 runner 仍在流式输出，follow-up 注入时机的完整行为（tool_loop_agent_runner.py:713-717 区段）未实测；
-3. **洋葱递归深度**：每个 AsyncGenerator 阶段都递归展开，含 agent 的 Process 阶段 + 8 层后续阶段嵌套，深链异常栈排查成本高；
-4. **EventBus 队列无限**：无背压/丢弃策略，突发流量下内存增长。
+## 8. 队列、多会话并发与后台生成
 
-（崩溃丢最近对话属于会话持久化侧，记录在会话与消息管理笔记。）
+- **SessionLockManager**（session_lock.py:8-55）：外层按事件循环隔离（`WeakKeyDictionary[event_loop, manager]` :38-40、:42-46，避免跨 loop 误用 asyncio.Lock）；内层 `_PerLoopSessionLockManager` 用 `defaultdict(asyncio.Lock)` + 引用计数，计数归零自动 pop（:26-30）；单例 :55。锁包住 `build_main_agent` + 整个 agent 运行（internal.py:220-425）——**同 UMO 串行化 LLM 请求，跨会话天然并行**。
+- **follow-up 严格序**（follow_up.py）：捕获条件 = 同 UMO + 同发送者 + runner 未 stop（:176-218）；**捕获时即分配单调序号**（`_allocate_follow_up_order` :95-104，按到达顺序而非唤醒顺序）；状态 pending → active → finished/consumed（:16-19、:126-144 队首放行、:107-123 消耗、:147-162 完成）；无残留状态且无活跃 runner 时释放 UMO 状态（:121-123、:161-162）；monitor 任务在 ticket 解决时立即推进序号避免唤醒顺序漂移（:165-173，注释 "avoid wake-order drift" :170）。
+- **EventBus 无背压**：`event_queue` 是无限 asyncio.Queue（未限制 maxsize），突发流量下内存增长；每事件一任务，无全局并发上限。
+- **限流**：`RateLimitStage`（rate_limit_check/stage.py:57-89）Fixed Window 计数（按 event.session_id），超限默认 **stall**（`asyncio.sleep` 到下个窗口，:74-82），`discard` 策略才丢弃（:83-89）。
+- **后台生成**：cron 任务与 background 工具任务复用 `persist_agent_history` 回写（utils/history_saver.py:9-31；调用点 astr_agent_tool_exec.py:51、cron/manager.py:21），不经过 RespondStage；WebChat 的"后台生成"实际是同一会话多 run 并行（chat_service.py:518-519 的 chat_runs 表），前端以 active_runs 恢复。
 
-## 7. 未验证事项
+## 9. Agent、工具、知识库与附件注入点
 
-1. 未启动实例实测各阶段在真实平台上的时序行为；
-2. follow-up 与流式响应并存时的详细交互未逐行核对；
-3. `result_decorate` 的 T2I/转发/语音合成完整逻辑未逐行核对（本次仅覆盖初始化与分段回复）；
-4. `third_party.py`（Dify/Coze 等）细节未逐行核对；
-5. `whitelist_check`、`session_status_check`、`preprocess_stage` 三个阶段本次未深入逐行阅读。
+- **Agent 构建**：`build_main_agent`（internal.py:231-236 调用，apply_reset=False）产出 `MainAgentBuildResult`（agent_runner/provider_request/provider/reset_coro）；Live Mode 走 `run_live_agent`（internal.py:293-329，action_type="live" 时启用 TTS 处理）。
+- **工具目录**：persona 的 tools/skills 决定装配（`_ensure_persona_and_skills`）；会话插件过滤在构建时生效（`_plugin_tool_fix`，astr_main_agent.py:1042-1068，MCP 工具与无归属工具保留）；`OnLLMRequestEvent` hook 可拦截止步（internal.py:269-272）；api_base 黑名单拦截（internal.py:253-262，名单 :544-545）。
+- **知识库**：`_apply_kb`（astr_main_agent.py:278+）——非 agentic 模式在构建时检索注入，`kb_agentic_mode` 开启时转工具调用；会话级知识库配置在删除会话时级联清理（见会话与消息管理笔记 §8）。
+- **群聊上下文注入**（group_chat_context.py:41-239 + builtin_stars/astrbot/main.py）：
+  - 记录：`on_message` handler（main.py:196-227）按 `group_icl_enable`（:216-219）把群消息格式化 `[昵称/时间]: 内容` 写入每 UMO 内存环形 deque（`DEFAULT_GROUP_MESSAGE_MAX_CNT = 1000` :38，可配 `group_message_max_cnt` :71-77），命令消息（handlers_parsed_params 非空）不记录（:223）；
+  - 注入：`decorate_llm_req`（on_llm_request hook，main.py:325-334）→ `on_req_llm`（group_chat_context.py:160-195）把该条消息之前的历史拼成 `<system_reminder>...--- BEGIN CONTEXT---...--- END CONTEXT ---...</system_reminder>` 追加到 `req.extra_user_content_parts`（:192-195）；
+  - 图像 caption：`get_image_caption`（:88-108）用独立 provider（可指定 `image_caption_provider_id`）生成描述入上下文（:204-219）；
+  - 主动回复：`need_active_reply`（:110-128）——概率触发（`possibility_reply` 随机 < 概率）、群聊限定、`is_at_or_wake_command` 不触发、白名单过滤；触发后直接 `request_llm` 复用当前对话（main.py:229-268）；
+  - 清理：`/reset`、`/new` 置 `_clean_group_context_session`，`after_message_sent` 中 `remove_session`（main.py:336-344）。
+- **外部能力注入点小结**：persona/知识库/引用解析在 `build_main_agent` 构建期；群上下文/系统提醒/图片描述在 `on_llm_request` hook 期（req 拼装完成前）；web search、文件操作、cron、联网等其余能力全部以工具形式在 agent 循环内由模型调用（Agent 工具类目）。
 
-## 8. 关键源码索引
+## 10. 退出恢复、日志与已确认边界
 
-- 事件：`astrbot/core/event_bus.py`（:23-83）
-- 流水线：`astrbot/core/pipeline/stage_order.py`（:3-13）、`scheduler.py`（:17-98）、`stage.py`（register_stage）
-- 各阶段：`waking_check/stage.py`（:17-248）、`whitelist_check/stage.py`、`session_status_check/stage.py`、`rate_limit_check/stage.py`（stall :74-82）、`content_safety_check/stage.py`、`preprocess_stage/stage.py`、`process_stage/stage.py`、`result_decorate/stage.py`（:21-439）、`respond/stage.py`
-- Agent 子阶段：`process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`third_party.py`、`follow_up.py`（:1-248）
-- 并发：`astrbot/core/utils/session_lock.py`（:8-55）、`utils/active_event_registry.py`（:10-67）
-- 上下文：`astrbot/core/agent/context/manager.py`（:10-121）、`truncator.py`、`token_counter.py`、`compressor.py`、`config.py`
-- 群上下文：`astrbot/builtin_stars/astrbot/group_chat_context.py`（:31-302）
-- 配置：`astrbot/core/config/default.py`（wake_prefix、max_context_length :127、context_limit_reached_strategy :139、group_message_history_max_cnt）
+- **退出/重启**：pipeline task 生命周期内无持久化 checkpoint；服务重启丢弃全部内存运行态（群环形缓冲、ChatRunState、follow-up 序号状态）。WebChat 运行中 run 可在前端刷新后经 `/chat/runs/{id}/stream` 快照恢复（数据语义见会话与消息管理笔记 §3），IM 平台无恢复入口。
+- **可观测性**：`event.trace` 记录 `sel_persona`（astr_main_agent.py:658-659）、`astr_agent_prepare`（internal.py:282-291）、`astr_agent_complete`（:393-397）等阶段，Dashboard TracePage 以 SSE 展示；消息日志 category=user_chat（event_bus.py:75-83）；ProviderStat 表按 UMO/conversation 关联用量（internal.py:548-588，/stats 命令与 StatsPage 消费）。
+- **已确认边界**：阶段顺序硬编码于 `STAGES_ORDER`（未注册阶段抛 ValueError，scheduler.py:23-25）；RateLimit 超限默认阻塞而非丢弃；EventBus 无限队列无背压；`third_party.py`（Dify/Coze 等）路径不构建 persona 且错误文案单独解析（本次未逐行核对）。
+
+## 11. 未验证事项
+
+1. 未启动实例实测各阶段在真实平台上的时序行为（洋葱递归、流式、停止竞态均为静态确认）。
+2. follow-up 与流式响应并存时的完整交互未逐行核对（消费点在 tool_loop_agent_runner.py:1103，边界场景未实测）。
+3. `result_decorate` 的 T2I/转发/语音合成完整逻辑未逐行核对（本次仅覆盖初始化、内容安全复查与分段回复入口，result_decorate/stage.py:104-220 之后未深入）。
+4. `third_party.py`（Dify/Coze 等第三方 runner）细节未逐行核对。
+5. `whitelist_check`、`session_status_check`、`preprocess_stage` 三个前置阶段本次仅确认存在与职责（stage_order.py:5-9），未逐行阅读。
+6. 长会话低频访问携带大上下文（`max_context_length=-1` 默认下依赖 82% token 阈值触发压缩）为静态推断，未实测。
+7. Provider fallback 与模态切换在真实多 provider 配置下的行为未运行验证。
+
+## 12. 关键源码索引
+
+- 事件：`astrbot/core/event_bus.py`（:26-83）
+- 流水线：`astrbot/core/pipeline/stage_order.py`、`scheduler.py`、`stage.py`（register_stage/registered_stages）
+- 各阶段：`waking_check/stage.py`、`whitelist_check/stage.py`、`session_status_check/stage.py`、`rate_limit_check/stage.py`、`content_safety_check/stage.py`、`preprocess_stage/stage.py`、`process_stage/stage.py`、`result_decorate/stage.py`、`respond/stage.py`
+- Agent 子阶段：`process_stage/method/agent_request.py`、`agent_sub_stages/internal.py`、`agent_sub_stages/third_party.py`、`process_stage/follow_up.py`
+- 并发：`astrbot/core/utils/session_lock.py`、`utils/active_event_registry.py`
+- 上下文：`astrbot/core/agent/context/manager.py`、`truncator.py`、`token_counter.py`、`compressor.py`、`config.py`
+- Agent 构建：`astrbot/core/astr_main_agent.py`（_get_session_conv :261-275、build_main_agent :1375+）、`agent/runners/tool_loop_agent_runner.py`
+- 群上下文：`astrbot/builtin_stars/astrbot/group_chat_context.py`、`builtin_stars/astrbot/main.py`
+- 配置：`astrbot/core/config/default.py`（context_limit_reached_strategy :127、max_context_length :139、provider_ltm_settings :224-230）

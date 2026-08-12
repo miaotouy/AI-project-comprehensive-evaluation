@@ -82,7 +82,7 @@ renderer.js 发送/中断事件
 - 若消息还处于 `'pending'`（尚未完成初始化）就收到 finalize 事件，会先缓存到 `pendingFinalizationEvents`，等 `startStreamingMessage` 完成初始化后重放（`:2192-2195`, `:1790-1802` 附近）——防止 finalize 事件抢在初始化之前到达导致丢消息。
 - 文本选择逻辑（`:2249-2269` 附近）：优先用本地累积的 `accumulatedStreamText`，但如果 `finalPayload.fullResponse`（主进程侧提供的兜底文本）更长，或包含 `[!WARNING]` 标记（说明是错误恢复场景），就采用 `payloadFullResponse` 代替——这是为了兼容"流式中途出错，主进程把已收到的部分文本通过 error 事件的 `fullResponse` 字段回传"的场景（对应 `renderer.js:605-609` 给错误消息追加"流式响应中断"提示）。
 - 找到历史数组里对应消息、写回 `content/finishReason/isThinking=false`（`:2286-2295` 附近），如果是当前视图会同步刷新 DOM 和 `currentChatHistoryRef`（`:2286-2362` 附近）。
-- 存盘走 `debouncedSaveHistory`（**1 秒防抖**，`streamManager.js:348-375`），但**群聊消息永远不在这里存盘**——`saveHistoryForContext` 一进来就 `if (context.isGroupMessage) return;`（`:379-383`），注释解释是"群聊由主进程 `groupchat.js` 作为历史单一真源，避免渲染进程重复保存造成竞态"。也就是说群聊的落盘完全依赖 `groupchat.js` 里各个 `fs.writeJson(groupHistoryPath, ...)` 调用（`AbortError` 分支、正常结束分支等各自都会写一次），streamManager 只负责 UI。
+- 存盘走 `debouncedSaveHistory`（**1 秒防抖**，`streamManager.js:348-375`），但**群聊消息永远不在这里存盘**——`saveHistoryForContext` 一进来就 `if (context.isGroupMessage) return;`（`:379-383`），注释解释是"群聊由主进程 `groupchat.js` 作为历史单一真源，避免渲染进程重复保存造成竞态"（群聊落盘点与数据语义见会话与消息管理笔记 6.1）。
 - 群聊侧 `AbortError` 分支（`Groupmodules/groupchat.js:1030-1039`）会把已累积的 `accumulatedResponse` 连同 `interrupted:true` 标记写入 `groupHistory` 并发 `'end'` 事件——**中断即真正停止本地流读取，并把已生成部分落盘**，这条路径设计是自洽的。
 
 ## 7. 停止、重试、续写与重新生成

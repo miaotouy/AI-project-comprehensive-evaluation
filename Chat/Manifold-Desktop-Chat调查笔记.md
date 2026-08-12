@@ -12,15 +12,6 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-> 迁移状态（2026-08-11）：本文件已压缩为概览。内容已按新类目边界迁移：
->
-> - 会话与消息管理：[`../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md`](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)（数据模型、持久化缺口、搜索导入导出与路径校验）
-> - 对话请求与上下文：[`../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md`](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)（消息构建、Provider 交接、流式广播、取消与并发）
-> - Chat UI：[`../Chat UI/Manifold-Desktop-ChatUI调查笔记.md`](<../Chat UI/Manifold-Desktop-ChatUI调查笔记.md>)（标签工作台、会话侧栏、搜索浮层、流式反馈与错误重试工作流）
-> - 消息渲染：[`../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md`](../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md)（已有独立笔记）
->
-> 2026-08-11 本文件已压缩为概览
-
 ## 结论摘要
 
 Manifold Desktop 的 Chat 是一套较薄的“标签页内存状态 + WebView2 消息桥 + C++ 文件存储”实现，聊天主链尚未完全接通，存在四个直接影响基本会话行为的问题：新对话不持久化（关闭标签即丢失）；assistant 流式回复只进 DOM 不回写 `messages[]`（第二轮请求缺少上一轮 assistant 上下文）；`CHAT_CHUNK`/`CHAT_DONE` 无会话标识（所有打开的标签监听同一广播）；侧栏重命名按整份 JSON 覆盖会话文件，会清空已有消息。

@@ -6,20 +6,22 @@
 >
 > 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
-> 调查方式：从 `../Chat/Cherry-Studio-Chat调查笔记.md`（2026-08-10 调查）迁移现有段落与证据；在 `0001d730ae..cd82f996fb`（177 提交）区间内核对删除语义、空分支节点持久化、overlay 服务化与 message-tree.md 文档更新
+> 调查方式：直接阅读源码（主进程 SQLite 数据层 `TopicService`/`MessageService`、schema 与 FTS 触发器、`docs/references/chat/message-tree.md` 文档、渲染层 DataApi 分页与搜索实现），并核对行号与符号至当前 HEAD
 >
-> 调查范围：Topic/Session/Message 数据模型、事实源与持久化、生命周期、分支语义、分页索引与搜索；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
+> 调查范围：Topic/Session/Message 数据模型、事实源与持久化、生命周期、分支语义、分页索引与搜索、恢复与保留语义；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
 - **会话单位是 Topic**（`src/shared/data/types/topic.ts`），存储在 SQLite，由 `TopicService`（`src/main/data/services/TopicService.ts`）管理 CRUD。
-- **消息不是线性数组，而是 adjacency-list 树**（`message.parentId` 自引用外键），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护，`docs/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与代码基本一致，但文档中"Flow canvas 是 forward reference，代码在其他分支"的说法已经**过时**（见第 9 节）。
-- 新建 Topic 的同一写事务里就会创建一条虚拟根消息，不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
-- **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根。
-- 分支草稿改为**持久化空叶子**（`ad0ce9cd04`）：`POST /messages/:id/branches` 落一条空的 successful user 行（`reserveBranch`），等待输入状态由结构派生，不再依赖渲染层假节点；只有流式增量仍是不落库的纯前端 overlay。
-- **消息搜索没有持久化全文索引**，搜的是真实渲染出来的 DOM 文本节点，虚拟化窗口外的消息搜不到。
+- **消息不是线性数组，而是 adjacency-list 树**（`message.parentId` 自引用外键，`ON DELETE CASCADE`），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护；`docs/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与当前代码一致（虚拟根、awaiting-input 分支、删除语义、consumer contract 均与实现对应）。
+- 新建 Topic 的同一写事务里就会创建一条虚拟根消息（`createRootMessageTx`），不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
+- **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
+- 分支草稿是**持久化空叶子**：`POST /messages/:id/branches` 落一条空的 successful user 行（`reserveBranch`），等待输入状态由结构派生（`isBlankUserTurn`），不依赖渲染层假节点；只有流式增量仍是不落库的纯前端 overlay。
+- **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch`，`a012837e5c` 起支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。旧结论"消息搜索没有持久化全文索引"已过时，需要按这两条路分别描述。
+- **崩溃恢复有明确机制**：主进程启动时把上次崩溃遗留的 `pending` assistant 行统一翻为 `error`（boot reconcile），避免 UI 永久停留在"思考中"。
+- 删除 Topic 不主动清理磁盘附件文件，但内部附件经 `chat_message_file_ref` 引用计数，FileManager 有策略化条目回收（`delete_when_unreferenced` 宽限期扫描 + 孤儿条目扫描），不是无主泄漏。
 
 ## 系统边界与数据主链
 
@@ -37,136 +39,144 @@
 
 ### 1.1 Topic：会话单位
 
-会话单位是 Topic（`src/shared/data/types/topic.ts`），存储在 SQLite，由 `TopicService` 管理 CRUD。topic 行携带的关键字段在代码中可见：`name`、`isNameManuallyEdited`（自动命名开关，见 3.2）、`activeNodeId`（活动分支指针，见 4.2——`setActiveNodeTx` 就是一次 `UPDATE topic SET active_node_id = ?`）。"空 Topic 判定"不是 topic 表上的字段，而是运行时按消息条数判定（见 3.4）。
+会话单位是 Topic（`src/shared/data/types/topic.ts:23-42`，`TopicSchema`）。topic 行携带 `id`、`name`、`isNameManuallyEdited`（自动命名开关，见 3.2）、`assistantId`（"上次使用的助手"引用，助手删除时 `SET NULL`）、`activeNodeId`（活动分支指针，见 4.2）、`traceId`（容器级 OTel trace）、`orderKey`（全局 fractional-indexing 排序键）、时间戳。表结构见 `src/main/data/db/schemas/topic.ts:11-36`。
 
-**"是否为第一轮对话"的唯一权威判据是 `rootId`**：`message.parentId === rootId`（`message-tree.md:96-99`），文档显式警告不要用"parent 不在已加载列表里"或 v1 遗留的 `askId` 字段去猜，那两种都不可靠。
+- 置顶不在 topic 表上：v2 迁移时 `isPinned`/`pinnedOrder` 已被移除，置顶存于多态 `pin` 表（`entityType='topic'`），由 `PinService`（`src/main/data/services/PinService.ts:51`，`listByEntityType` `:59`，`UNIQUE(entityType, entityId)` `:89`）维护；列表按"置顶段 + 普通段"两段分页（见 5 节）。
+- "空 Topic 判定"不是字段，而是运行时按消息条数判定（见 3.4）。
+
+**"是否为第一轮对话"的唯一权威判据是 `rootId`**：`getBranchMessages`/`getTree` 在每页响应里返回虚拟根 id，`message.parentId === rootId` 即第一轮（`MessageService.ts:655-663`；`message-tree.md:116-122` 显式警告不要用"parent 不在已加载列表里"或 v1 遗留的 `askId` 去猜）。
 
 ### 1.2 消息树：adjacency-list 树，由数据库约束强制
 
-- 每条消息一行，`parentId` 自引用外键（`ON DELETE CASCADE`），`siblingsGroupId` 标记同一 parent 下的多模型/多分支兄弟组（`message-tree.md:16-22`）。
-- 每个 topic 恰好一条内容为空的虚拟根（`role='root', parentId=NULL`），由数据库 CHECK 约束 `message_root_parent_check` 强制 `(role='root') = (parentId IS NULL)`（`message-tree.md:51-52`），**不是靠应用层约定**。
-- 虚拟根永不出现在 `getBranchMessages`/`getTree` 的返回列表里（`message-tree.md` "Consumer contract" 一节，及 `MessageService.ts:474` `return { nodes: [], ... }`）。
-- 约束在 `MessageService.ts` 里的具体落地：`delete()`（当前约 `:1650-1720`，`8b78177a61` 调整过删除语义）对虚拟根删除请求直接抛 `INVALID_OPERATION`；非 cascade 删除把子节点 reparent 到祖父节点上再删本节点。行为变化：**首轮消息现在可以正常删除**（splice 到虚拟根），**多模型回复组删除**（集合端点）只删除同组兄弟 assistant 并把各组直接子节点 reparent 到共享用户消息下，组内任一回复仍在生成时删除按钮被禁用；`clearTopicMessages` 清空一个 topic 的所有内容消息但保留虚拟根。
-- **持久化形状**：数据库直接存储 `UIMessage.parts`（AI SDK 结构），传输、持久化和渲染共享同一种结构；part 的类型清单、`providerMetadata.cherry` 扩展与访问器见消息渲染器笔记（`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`"消息数据模型"一节）。
+- 每条消息一行，`parentId` 自引用外键（`ON DELETE CASCADE`，`src/main/data/db/schemas/message.ts:59`）；`siblingsGroupId`（非零）标记同一 parent 下的多模型/多分支兄弟组（`message-tree.md:14-15,22`）。
+- 每个 topic 恰好一条内容为空的虚拟根（`role='root'`，`parentId=NULL`，`data={parts:[]}`）：唯一索引 `message_topic_root_uniq` 强制"每 topic 至多一条 live 根"（`message.ts:70-72`），CHECK 约束 `message_root_parent_check` 强制 `(role='root') = (parentId IS NULL)`（`message.ts:83`），role/status 各有 CHECK（`message.ts:78-79`）。这是存储层不变量，不是应用层约定。
+- 虚拟根永不出现在 `getBranchMessages`/`getTree`/`getPathRowsToNodeTx` 的返回里（`getTree` 空结果 `MessageService.ts:419-421,522-524`；`getPathRowsToNodeTx` 末尾把根从链上去掉 `:1925-1929`）。
+- **持久化形状**：数据库直接存储 AI SDK 的 `UIMessage.parts`（`data` JSON 列，`message.ts:30`），传输、持久化和渲染共享同一种结构；part 类型清单、`providerMetadata.cherry` 扩展与访问器见消息渲染器笔记"消息数据模型"一节。
+- 附加字段：`searchableText`（FTS 用，触发器填充，见 2 节）、`ftsRowid`（FTS 稳定外键，`message.ts:49-53`）、`messageSnapshot`（模型快照，`message.ts:41`）、`stats`（`message.ts:43`）、`compactionSummary`（持久化压缩标记，`message.ts:44-47`）。
+- 树相关服务方法：`getTree`（`MessageService.ts:348-622`，CTE 求活动路径 + 深度限制子树 + 活动路径补全；`messageToTreeNode` `:286-310` 由"空 successful user 叶子且无子节点"派生 `isAwaitingInput` `:300-303`）、`getBranchMessages`（`:641-768`，before-cursor 分页，见 5 节）、`getPathToNode`（`:1874-1878`）、`getPathRowsToNodeTx`（`:1885-1930`）、`getPathThrough`（`:2019-2052`，求经过某节点的分支的最新叶子，供分支导航）。
+- 约束在 `MessageService` 里的具体落地：`delete()`（`:1650-1748`）对虚拟根直接抛 `INVALID_OPERATION`（`:1675-1677`）；非 cascade 删除把子节点 reparent 到祖父节点上再删本节点（`:1709-1724`，`reparentChildrenTx` `:1763-1810` 会对被移动的兄弟组重新分配组号，避免与目标父节点下既有组碰撞）；首轮消息可正常删除（子节点挂回虚拟根）；`deleteReplyGroup`（`:1538-1625`）只删同组 assistant 兄弟并把各组直接子节点 reparent 到共享用户消息下，组内任一回复 `pending` 时拒绝删除（`:1586-1588`）；`clearTopicMessages`（`:1822-1843`）清空一个 topic 的所有内容消息但保留虚拟根并清 `activeNodeId`。
 
 ## 2. 事实源、索引与持久化
 
-- **权威源是 SQLite**：主进程 `TopicService`/`MessageService` 负责全部 CRUD；renderer 读侧经 DataApi 分页接口，SWR 缓存是缓存投影，不是权威源。
-- **活动路径事实源在 topic 行**：`activeNodeId` 由 `setActiveNodeTx`（`TopicService.ts:373-409`）写入，唯一校验是目标消息属于该 topic、且不是虚拟根（`:394-399`）。
-- **流式增量 overlay 不落库**：overlay 逻辑已从 `useExecutionOverlay` 抽成窗口级服务 `ExecutionStreamOverlayService`（`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`，按 transport `topicId` 引用计数，reader/快照/rAF 批处理都在服务内）；`useExecutionOverlay.ts` 只是 React 绑定（`acquire/release/syncExecutions + useSyncExternalStore`），组件卸载不再拆掉 reader——路由/标签页切换期间 Main 继续生成，重挂载同步恢复 live overlay。reader 种子（seed）仍来自当前 DB 行的深拷贝（`structuredClone` 避免写脏 SWR 缓存），继续审批时合并既有 tool input 的语义不变。
-- **分支草稿/发送锚点已是持久化行**：提交 `ad0ce9cd04` 把"从历史节点开新分支"从渲染层假节点改为 `MessageService.reserveBranch(anchorId, activate)`（`MessageService.ts:1099-1134`）：在 anchor（必须是 assistant 消息）下插一条 `role='user'`、`data.parts=[]`、`status='success'` 的空叶子，重复调用同一 anchor 每次都新建行（有意的分支点）；`activate=false` 用于流式期间不挪动 active 指针。等待输入状态由结构派生（`isBlankUserTurn`，`uiParts.ts:363-372`），不落任何 draft 标记。删除/填充都有服务端守卫：`DELETE /messages/:id?awaitingInputOnly=true` 复核目标仍是空叶子（`MessageService.ts:1679-1684`），`createUserMessageWithPlaceholders` 的 `mode: 'fill-reserved'` 在同一事务里填充该行并建 assistant 占位（`MessageService.ts:1152-1153`）。主进程 `PersistentChatContextProvider` 在流式进行时拒绝 reserved-branch 提交（`PersistentChatContextProvider.ts:234-247`），作为渲染层排队的竞态兜底。渲染侧入口是 `useTopicBranchActions`（`src/renderer/pages/home/hooks/useTopicBranchActions.ts`，`POST /messages/:id/branches` + `DELETE /messages/:id?awaitingInputOnly=true`）；`Chat.tsx` 旧的 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 三态 ref 已删除。
-- **分支图/列表的合并方向**：`buildTopicMessageFlowLiveState`/`mergeTopicMessageFlowLiveTree` 仍存在，但只叠加"流式中尚未持久化的消息"临时节点；awaiting-input 叶子本身是 DB 节点，直接进 `/topics/:id/tree` 结果（`TreeNode.isAwaitingInput`，`message.ts:565-570`）——分支图 = 持久化树（含空分支叶子）+ 流式 overlay，不再是"假草稿节点"。
+- **权威源是 SQLite**：主进程 `TopicService`/`MessageService` 负责全部 CRUD；renderer 读侧经 DataApi 分页接口，SWR 缓存是缓存投影，不是权威源（`useTopicMessages.ts` 的 projection 用 WeakMap 保持同一行消息的投影身份稳定，`:243-247,305-320`）。
+- **活动路径事实源在 topic 行**：`activeNodeId` 由 `setActiveNodeTx`（`TopicService.ts:371-407`）写入，唯一校验是目标消息属于该 topic、且不是虚拟根（`:372-398`，`:392-397` 显式拒绝 root）。
+- **流式增量 overlay 不落库**：overlay 逻辑在窗口级服务 `ExecutionStreamOverlayService`（`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`，按 transport `topicId` 引用计数：`acquire` `:221`、`release` `:230`、`syncExecutions` `:249`、rAF 批量提交 `:609`）；`useExecutionOverlay.ts` 只是 React 绑定（`acquire/release/syncExecutions` + `useSyncExternalStore`，`:54-78`），组件卸载不拆 reader——路由/标签页切换期间 Main 继续生成，重挂载同步恢复 live overlay。reader 种子（seed）来自当前 DB 行的深拷贝（`structuredClone`，`ExecutionStreamOverlayService.ts:143`，避免写脏 SWR 缓存）。
+- **分支草稿/发送锚点已是持久化行**：`MessageService.reserveBranch(anchorId, activate)`（`MessageService.ts:1099-1134`）：anchor 必须是 assistant 消息（`:1110-1112`），在其下插一条 `role='user'`、`data.parts=[]`、`status='success'` 的空叶子，重复调用同一 anchor 每次都新建行（有意的分支点）；`activate=false` 用于流式期间不挪动 active 指针（`:1127-1129`）。等待输入状态由结构派生（`isBlankUserTurn`，`src/shared/data/types/uiParts.ts:367-373`），不落任何 draft 标记。删除/填充都有服务端守卫：`DELETE /messages/:id?awaitingInputOnly=true` 复核目标仍是空叶子（`MessageService.ts:1679-1684`，判定实现 `isAwaitingInputLeaf` `:1311-1320`）；`createUserMessageWithPlaceholders` 的 `mode: 'fill-reserved'` 在同一事务里填充该行并建 assistant 占位（`:1218-1251`，填充前再校验 `:1233-1238`）。主进程 `PersistentChatContextProvider` 在流式进行时拒绝 reserved-branch 提交（`PersistentChatContextProvider.ts:247-253`，`"Cannot submit a reserved branch while a stream is live on this topic"` `:252`），是渲染层排队的竞态兜底。渲染侧入口是 `useTopicBranchActions`（`src/renderer/pages/home/hooks/useTopicBranchActions.ts`：`reserveBranch` `:18-31` 发 `POST /messages/:id/branches`、`deleteReservedBranch` `:33-40` 发 `DELETE /messages/:id?awaitingInputOnly=true`）；`Chat.tsx` 旧的 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 三态 ref 已删除。
+- **分支图/列表的合并方向**：`buildTopicMessageFlowLiveState`/`mergeTopicMessageFlowLiveTree`（`src/renderer/components/chat/flow/topicMessageFlowLiveTree.ts`）只叠加"流式中尚未持久化的消息"临时节点；awaiting-input 叶子本身是 DB 节点，直接进 `/topics/:id/tree` 结果（`TreeNode.isAwaitingInput`，`MessageService.ts:300-303`）——分支图 = 持久化树（含空分支叶子）+ 流式 overlay，不再有"假草稿节点"。
+- **FTS 全文索引（跨会话内容搜索）**：`message.searchableText` 由 SQLite 触发器从 `data.parts` 抽取（text / data-code / data-translation / data-compact / data-error 内容，`message.ts:112-146`），`message_fts` 是 external-content FTS5 表（trigram 分词，键在 `ftsRowid`，`message.ts:148-158`），`message_ai`/`message_ad`/`message_au` 三个触发器在 INSERT/DELETE/UPDATE OF data 时同步（`message.ts:170-194`）。查询入口 `MessageService.search`（`:825-889`，JOIN `message_fts`，`searchable_text != ''` 过滤，cursor 分页）。agent 会话消息有同构的 `agent_session_message_fts`。FTS 与行同步的保持策略（fts_rowid 随重建表不变）有专门测试（`src/main/data/db/__tests__/ftsRebuild.test.ts:65-126`）。全局搜索服务 `ContentSearchService`（`src/main/data/services/ContentSearchService.ts:133`）把 `/search/contents` 分派给 `messageService.search`（`:63-64`）与 `agentSessionMessageService.search`（`:80-81`）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
 ### 3.1 新建：同一事务里建虚拟根
 
-`TopicService.create()`（`TopicService.ts:179-205`）在一个写事务里做两件事：`insertWithOrderKey` 插入 topic 行，然后立即调用 `messageService.createRootMessageTx(tx, topicRow.id)` 创建该 topic 的虚拟根消息。`duplicate()`（`TopicService.ts:207-269`）走同一套逻辑：新 topic 先建虚拟根，再用 `copyPathRowsTx` 把源 topic 某条路径的消息拷贝过来并重新挂到新根下。
+`TopicService.create()`（`TopicService.ts:179-205`）在一个写事务里做两件事：`insertWithOrderKey` 插入 topic 行（置顶/新建默认排首位），然后立即调用 `messageService.createRootMessageTx(tx, topicRow.id)`（`:198`）创建该 topic 的虚拟根。`duplicate()`（`TopicService.ts:207-269`）走同一套逻辑：新 topic 先建虚拟根（`:241`），再用 `copyPathRowsTx`（`MessageService.ts:1943-2006`）把源 topic 某条路径的消息拷过来、头消息 reparent 到新根下，最后把 `activeNodeId` 指向拷贝出的叶子（`TopicService.ts:251-256`）；`chat_message_file_ref` 引用随拷贝一并复制（`TopicService.ts:63-95,249`），但 pin、tag、trace 链接不复制（`:247-248` 注释）。虚拟根的写者还包括 `TemporaryChatService`（临时聊天转正，`TemporaryChatService.ts:222`）和 v1→v2 迁移器（`ChatMigrator`，`message-tree.md:79-89`）。
 
 ### 3.2 重命名与自动命名（"单向棋"设计）
 
-- **重命名**：交互入口在 `Chat.tsx:143-162`（`topic.rename` 命令处理器），弹出 `PromptPopup` 取新名字，成功后 `patchTopic(topic.id, { name, isNameManuallyEdited: true })`。`isNameManuallyEdited: true` 是关键——它会关闭自动命名。`TopicService.update()`（`TopicService.ts:272-309`）对应逻辑：`name` 有值时默认把 `isNameManuallyEdited` 设为 `true`（除非显式传 `false`），只传 `isNameManuallyEdited` 时则是"仅调整元数据"的旁路（供迁移/修复用）。
-- **自动命名**：由 `TopicNamingService`（`src/main/services/TopicNamingService.ts`）负责，分两阶段：①`maybeRenameFromFirstUserMessage`——第一条用户消息落库后立刻用消息原文截断出一个临时标题；②`maybeRenameFromConversationSummary`——首轮回复完成后用 AI 生成摘要标题替换掉临时标题。两阶段都受 `canAutoRenameTopicName` 把关：topic 名字为空字符串（v2 新建默认值）或者仍等于之前生成的临时标题，才允许继续自动改名；一旦用户手动改过名字（`isNameManuallyEdited`）就永久停止自动命名——不会有"自动改名覆盖用户改名"的情况。提交 `b68fafcaf7` 起摘要生成请求不再携带 `assistantId`——避免把助手的工具配置（MCP/联网/知识库）挂到标题生成请求上。
+- **重命名**：交互入口在 `Chat.tsx:112-131`（`topic.rename` 命令处理器，弹出 `PromptPopup` 取新名字），成功后 `patchTopic(topic.id, { name, isNameManuallyEdited: true })`（`:127`）。`TopicService.update()`（`TopicService.ts:272-309`）对应逻辑：`name` 有值时默认把 `isNameManuallyEdited` 设为 `true`（除非显式传 `false`，`:285-288`）；只传 `isNameManuallyEdited` 时是"仅调整元数据"的旁路（`:289-291`，供迁移/修复用）。
+- **自动命名**：由 `TopicNamingService`（`src/main/services/TopicNamingService.ts`）负责，分两阶段：①`maybeRenameFromFirstUserMessage`（`:144-166`）——第一条用户消息落库后立刻用消息原文截断出临时标题；②`maybeRenameFromConversationSummary`（`:168-175`，实现 `doMaybeRenameFromConversationSummary` `:181+`）——首轮回复完成后用 AI 生成摘要标题替换临时标题。两阶段都受 `canAutoRenameTopicName`（`:134`）与 `isNameManuallyEdited` 把关（`:150,190,196`）：topic 名为空或仍等于上次生成的临时标题才允许继续自动改名；用户一旦手动改名就永久停止自动命名——不存在"自动改名覆盖用户改名"。提交 `b68fafcaf7` 起摘要生成请求不再携带 `assistantId`（测试断言 `generateText` 调用无 `assistantId` 属性，`TopicNamingService.test.ts:137`），避免把助手的工具配置挂到标题生成请求上。
 
 ### 3.3 删除：先消息后关联最后删行；附件回收交给 FileManager GC
 
-`TopicService.delete`/`deleteByIds` → `deleteManyByIdsTx`（`TopicService.ts:334-359`）。删除顺序：先 `messageService.purgeByTopicIdsTx` 清消息，再清 tag、pin 关联，最后删 topic 行本身。
+`TopicService.delete`（`:316-321`）/`deleteByIds`（`:323-330`）→ `deleteManyByIdsTx`（`:332-357`）。删除顺序：先 `messageService.purgeByTopicIdsTx` 清消息（`MessageService.ts:333-338`），再清 tag、pin 关联（`:352-353`），最后删 topic 行本身（`:354`）。删除是硬删除（`tx.delete`）；`deletedAt` 列在各查询中仍被过滤，供未来软删除路径使用（`TopicService.ts:312-315` 注释明确要求未来软删除必须同时清 pin）。
 
-旧的"Clean up associated files from disk"TODO 注释已随 file-manager 治理（`9775f78ed5`）移除：内部附件现在经 `chat_message_file_ref` 引用计数，`FileManager` 的策略化条目 GC（`cleanup_policy`/扫描回收，`src/main/services/file/internal/orphanSweep.ts`，`FileManager.ts`/`orphanSweep.ts` 继续改动）只在引用归零后清理文件条目。也就是说"删除 Topic 不主动删磁盘文件"仍是事实（删除动作本身不做文件清理），但不再是无主泄漏——孤儿文件会进入 GC 的回收范围（静态推断，回收时机与策略参数未运行验证）。
+"删除 Topic 不主动删磁盘文件"仍是事实（删除动作本身不做文件清理），但内部附件经 `chat_message_file_ref` 引用计数（`MessageService.replaceChatMessageFileRefsTx` `:251-281` 每次写 parts 时重建引用，`extractChatMessageFileRefs` `:217-235` 收集 file part 与 tool_output 持久化 blob 的引用），FileManager 的策略化条目回收兜底：`delete_when_unreferenced` 条目有宽限期扫描回收（`src/main/services/file/internal/entryCleanup.ts:2-3,75,102`），手动条目有孤儿扫描（`src/main/services/file/internal/orphanSweep.ts:75-76`，`findManualUnreferenced`）。回收时机与策略参数未运行验证（静态推断）。
 
 ### 3.4 空 Topic 判定：运行时按消息条数
 
-不是 topic 表上的字段，而是 `ChatContent.tsx:212`：`const isEmptyConversation = !isHistoryLoading && runtime.messages.length === 0`，为真时叠加 `ConversationGreeting` 欢迎层（`ChatContent.tsx:213-219`）。因为虚拟根永不出现在 `getBranchMessages`/`getTree` 的返回列表里，"空 Topic"= 除虚拟根外没有任何内容消息，跟 topic 行本身是否存在虚拟根无关（虚拟根总是存在）。
+不是 topic 表上的字段，而是 `ChatContent.tsx:208`：`const isEmptyConversation = !isHistoryLoading && runtime.messages.length === 0`，为真时叠加 `ConversationGreeting` 欢迎层（`ChatContent.tsx:211-215`）。因为虚拟根永不出现在 `getBranchMessages`/`getTree` 的返回列表里，"空 Topic"= 除虚拟根外没有任何内容消息，跟 topic 行本身是否存在虚拟根无关（虚拟根总是存在）。
 
 ### 3.5 切换与恢复
 
-切换 Topic 的数据侧只是换 `activeNodeId` + 重新分页拉取（读侧投影见第 5 节）；切换时保留哪些局部 UI 状态（草稿、滚动位置、面板开关）属于 Chat UI 类目。异常退出、崩溃后的数据恢复语义本次未调查（见第 10 节）。
+切换 Topic 的数据侧只是换 `activeNodeId` + 重新分页拉取（读侧投影见 5 节）；切换时保留哪些局部 UI 状态（草稿、滚动位置、面板开关）属于 Chat UI 类目。崩溃恢复：`AiStreamManager` 启动时执行 boot reconcile——把上次进程崩溃遗留的 `pending` assistant 行统一翻为 `error`（`AiStreamManager.ts:497-506`，配套 `MessageService.findPendingAssistantMessageIds` `:794-804`、`markMessagesError` `:811-815`），避免 UI 永久显示"思考中"的冻结气泡；reconcile 完成前新流会等待（`AiStreamManager.ts:310-313`）。多窗口并发写入、数据库迁移的运行行为本次未验证（见第 10 节）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
 ### 4.1 持久层是真的树
 
-证据（`src/main/data/db/schemas/message.ts` 由 `message-tree.md` 摘要，及 `MessageService.ts` 大量校验代码印证）：自引用外键 + `siblingsGroupId` 兄弟组 + CHECK 约束的虚拟根（见 1.2）；删除时的 `INVALID_OPERATION` 拦截与 reparent 语义（见 1.2）。**树是真实的，不是线性链表/锚点跳转的伪装。**
+证据：自引用外键（`message.ts:59`）+ `siblingsGroupId` 兄弟组 + CHECK 约束的虚拟根（见 1.2）；删除时的 `INVALID_OPERATION` 拦截与 reparent 语义（见 1.2）；`createSibling`（`MessageService.ts:926-974`，编辑后重发）在源未分组时分配新 `siblingsGroupId`（`Date.now()` 系）、加入已有组时继承组号（`:942-946`），并立即把 active 指针移到新行（`:963`）。**树是真实的，不是线性链表/锚点跳转的伪装。**
 
 ### 4.2 "切分支"是 activeNodeId 指针重定向，不是移动/复制消息
 
-- `TopicService.setActiveNodeTx`（`TopicService.ts:373-409`）就是一次 `UPDATE topic SET active_node_id = ?`，唯一的校验是目标消息属于该 topic、且不是虚拟根（`:394-399`）。
-- 渲染时走 `getPathRowsToNodeTx`：从 `activeNodeId` 往上走到虚拟根为止，虚拟根本身被排除在结果外（`message-tree.md:100-101`）。所以前端看到的"当前分支的完整对话"= 从 `activeNodeId` 反向 walk 到根的路径，**每次切分支都要重新 walk 一次**，不是维护什么链表指针跳转结构。
-- **兄弟分支导航 `< i/N >`**：`useTopicMessages.ts:43-147` 里 `bucketAssistantSiblingsByModel`/`buildSiblingsMap` 按 `siblingsGroupId`（用户消息）或 `(siblingsGroupId, modelId)`（assistant 消息，多模型多轮混合场景下按模型分桶）把兄弟组装出来；真正切换分支执行的是 `ChatWriteActions.setActiveBranch(throughNodeId)`（`ChatWriteContext.ts:59-67`，实现在 `useChatWriteActions.ts:364-393`）：先 GET `/topics/:id/path?nodeId=throughNodeId` 找到该分支当前的 leaf id，再 `setActiveNodeTrigger` 把 `activeNodeId` 指到那个 leaf——本质仍是"找到目标分支最新的叶子，把指针指过去"，而不是切换到 `throughNodeId` 本身（这样切到某个中间节点也能看到它后续的完整追问链）。
+- `TopicService.setActiveNodeTx`（`TopicService.ts:371-407`）就是一次 `UPDATE topic SET active_node_id = ?`（`:400-406`），唯一的校验是目标消息属于该 topic、且不是虚拟根（`:372-398`）。
+- 渲染时走 `getPathRowsToNodeTx`（`MessageService.ts:1885-1930`）：从目标节点往上走到虚拟根为止，虚拟根本身被排除在结果外（`:1925-1929`）。所以前端看到的"当前分支的完整对话"= 从 `activeNodeId` 反向 walk 到根的路径，**每次切分支都要重新 walk 一次**，不是维护链表指针跳转结构。
+- **兄弟分支导航与分支面板切换**：`ChatWriteActions.setActiveBranch(throughNodeId)`（`src/renderer/hooks/chat/ChatWriteContext.ts:66-75` 接口注释；实现 `useChatWriteActions.ts:450-479`）：先 GET `/topics/:topicId/path?nodeId=throughNodeId` 拿到该分支的最新叶子（`MessageService.getPathThrough`，`:2019-2052`，取 `created_at` 最大且无存活子节点的后代），再 `setActiveNodeTrigger` 把 `activeNodeId` 指到那个叶子——本质仍是"找到目标分支最新的叶子，把指针指过去"，这样切到中间节点也能看到它后续的完整追问链。读侧 `useTopicMessages` 按 `siblingsGroupId`（用户消息）或 `(siblingsGroupId, modelId)`（assistant 消息，多模型多轮混合场景按模型分桶）组装兄弟组（`useTopicMessages.ts:51-60,104-122,136-155`）。
 
 ### 4.3 发送锚点：持久化预留行（reservation）
 
-"从历史节点开新分支"不再靠渲染层临时锚点，而是先持久化一个空 user 叶子（`reserveBranch`），下一次提交用 `fill-reserved` 模式填充同一行（语义见第 2 节）：
+"从历史节点开新分支"先持久化一个空 user 叶子（`reserveBranch`），下一次提交用 `fill-reserved` 模式填充同一行（语义见第 2 节）：
 
-- 分支预留行在流式进行中创建时带 `activate=false`，不挪动正在跑的 active 路径；用户选中该预留行并在 topic 仍 live 时发送，排队负载携带预留行 id，等待 topic 空闲后才提交，主进程侧在 `PersistentChatContextProvider` 拒绝流式期间的 reserved-branch 提交作为竞态兜底（`PersistentChatContextProvider.ts:234-247`）。
+- 分支预留行在流式进行中创建时带 `activate=false`，不挪动正在跑的 active 路径（`useTopicBranchActions.ts:20`）；用户选中该预留行并在 topic 仍 live 时发送，排队负载携带预留行 id（`useChatRuntimeState.ts:206-227` 的 `composerChatTarget.mode==='reserved-branch'`），等待 topic 空闲后才提交；主进程侧 `PersistentChatContextProvider` 拒绝流式期间的 reserved-branch 提交作为竞态兜底（`PersistentChatContextProvider.ts:247-253`）。
 - 空叶子的删除带 `awaitingInputOnly=true` 守卫：已填充的行拒绝删除（`MessageService.ts:1679-1684`），避免"删掉一条刚被填充的消息"。
 
 与旧实现（三态 ref 状态机）相比，数据语义从"临时态"变成"持久化结构"，跨重载/重挂载保持不变。
 
 ### 4.4 编辑、删除、重试、翻译的数据变更入口
 
-数据侧入口是 `ChatWriteContext` 的写操作（Home 适配器经 `requireChatWrite('xxx')` 取实现，见 Chat UI 笔记 6.2），最终落在 `MessageService`/`TopicService`（删除的 reparent、虚拟根拦截语义见 1.2）。**执行链**（重试如何选择起始上下文、重新生成从哪个节点重建请求）见对话请求与上下文笔记第 2、7 节。
+数据侧入口是 `ChatWriteContext` 的写操作（Home 适配器经 `requireChatWrite('xxx')` 取实现，见 Chat UI 笔记 6.2），最终落在 `MessageService`/`TopicService`：`editMessage` → `PATCH /messages/:id`（`MessageService.update` `:1328-1395`，含防环校验 `:1332-1337` 与虚拟根不可 reparent 守卫 `:1355-1365`）；删除的 reparent、虚拟根拦截语义见 1.2；`forkAndResend`（编辑用户消息后重发）走 `createSibling` + `regenerate-message`（`useChatWriteActions.ts:346-396`）。**执行链**（重试如何选择起始上下文、重新生成从哪个节点重建请求）见对话请求与上下文笔记第 2、7 节。
 
 ### 4.5 版本切换与复制
 
-"复制分支到新 Topic"（分支面板右键菜单）走 `POST /topics/:id/duplicate`，数据语义即 3.1 的 `duplicate()`：新 topic 建虚拟根 + `copyPathRowsTx` 拷贝路径消息。版本切换本身不产生新对象，只有指针移动（4.2）。
+"复制分支到新 Topic"（分支面板右键菜单）走 `POST /topics/:id/duplicate`，数据语义即 3.1 的 `duplicate()`：新 topic 建虚拟根 + `copyPathRowsTx` 拷贝路径消息（被拷贝的 `pending` 行转为 `error`，因为拷贝后没有流属主，`MessageService.ts:1987-1988`）。版本切换本身不产生新对象，只有指针移动（4.2）。
 
 ## 5. 列表、分页、搜索与定位
 
-- **消息分页**：`useTopicMessages.ts:178-271` 从 DataApi 分页拉取 `/topics/:topicId/messages`（`includeSiblings: true`），映射成 `uiMessages`——数据库历史由 SWR 缓存驱动，`activeNodeId`/`rootId` 取自最新一页的顶层 metadata（`:213-214`）。
+- **消息分页**：`useTopicMessages.ts:184-298` 从 DataApi 用 `useInfiniteQuery` 拉取 `/topics/:topicId/messages`（`includeSiblings: true`，`:194-206`）；分支接口是 newest-page-first 的 before-cursor 分页（`MessageService.getBranchMessages` `:641-768`，`DEFAULT_LIMIT=20` `:102`），渲染层翻转页序得到 root→activeNode 的单调时间序列（`useTopicMessages.ts:211`）；页大小按 `chat.message.navigation_mode` 偏好分 50/页（`PAGE_SIZE` `:30`）与 150/页（锚点轨模式 `ANCHOR_RAIL_PAGE_SIZE` `:35`，偏好默认 `'anchor'`，`preferenceSchemas.ts:609`）。`activeNodeId` 取自最新一页响应的顶层 metadata（`useTopicMessages.ts:223`）；`rootId`（第一轮判据）由服务端在每页响应中携带（`MessageService.ts:663`）。
 - **全量树接口**：`/topics/:id/tree`（`depth=-1`），供分支图使用（见 Chat UI 笔记 6.3）。
-- **搜索：没有持久化全文索引**。`ContentSearch`（`src/renderer/components/ContentSearch.tsx`）用 `document.createTreeWalker` 遍历**真实渲染出来的文本节点**（`findRangesInTarget`，`ContentSearch.tsx:57-135`），不是消息数据模型里的字符串——折叠/未渲染的内容搜不到，虚拟化列表窗口外的消息也搜不到（因为还没挂载到 DOM）。这是"虚拟化 + DOM 搜索"组合下的固有限制，不是 bug（影响见第 9 节）。搜索入口、过滤规则、高亮与跳转工作流见 Chat UI 笔记 2.3。
-- **Topic 列表**的分页/加载/空状态呈现属于 Chat UI 与源笔记的通用界面盘点（见 Chat UI 笔记 2.1）。
+- **会话内搜索：数据 + DOM 混合，不读 FTS**。`MessageListSearch`（`src/renderer/components/chat/messages/list/MessageListSearch.tsx`）先在**已加载的消息数据**上做粗匹配（`messageSearch.ts` 的 `computeMessageSearchMatches` `:120-162`：把每个消息的 text part 投影成纯文本，`markdownToPlainText` 降级渲染，`pending` assistant 排除 `:84`，多模型回复组以整组粒度出一个匹配 `:133-148`），再对**已挂载 DOM** 用 TreeWalker 精确求 Range（`src/renderer/utils/contentSearch.ts` 的 `findRangesInScope` `:40-88`，`findTextMatches` 用 `Intl.Segmenter` 做整词 `:11,27-33`；`messageSearchDom.ts` 的节点过滤 `:10-18` 排除按钮/引用/代码块工具栏等）。`a012837e5c`（"fix(message-search): support virtualized conversations"）使虚拟化窗口外的消息可经粗匹配被找到，导航到未挂载行时 `locateMessage` 把行滚入视口（`MessageListSearch.tsx:337-339`）；高亮用 CSS Custom Highlight API（`MessageListSearch.tsx:189-199,242-244`，样式 `src/renderer/assets/styles/index.css:227-228`）。流式期间匹配数据被锁存，流结束才重算（`MessageListSearch.tsx:97-102`）。
+- **跨会话全局搜索：FTS**。入口 `app.search` 命令打开 `GlobalSearchPopup`（`src/renderer/components/layout/AppShell.tsx:80-99`），`/search/contents` 由主进程 `ContentSearchService` 分派到 `MessageService.search`（FTS，见 2 节）与 agent 会话搜索；`/search/entities` 覆盖 topic/assistant/agent/session/knowledge 名称检索（`EntitySearchService.ts:40-84`）。会话内搜索与全局搜索是两套独立实现，前者无持久化索引。
+- **Topic 列表**：`/topics` 无限分页，页大小 200（`Topics.test.tsx:594,1068` 断言 `useInfiniteQuery('/topics', { limit: 200 })`）；排序为置顶段（`pin.orderKey`）优先、普通段按 `orderKey`/创建顺序（`TopicService.listByCursor` `:427-512`），时间分组视图的"最近"排序由渲染层在已加载列表上做（`TopicService.ts:419-425` 注释）。名称搜索走 `TopicService.search`（`:514-547`，LIKE 转义）。列表的分页/加载/空状态呈现属于 Chat UI 类目。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **SWR 缓存是读投影**：`useTopicMessages` 由 SWR 缓存驱动；execution overlay 的 seed 用 `structuredClone` 深拷贝，避免 AI SDK 的原地修改污染 SWR/数据库历史引用（2 节）。
-- **两层 parts 缓存的结构共享**：`useStableMessagePartsLayers` 用 `useRef` 手搓，未变化时复用 part 数组和 map 容器引用；仓库不引入全局状态库（`useStablePartsByMessageId.ts:1-39` 注释）。渲染侧合并细节见消息渲染器笔记。
-- **并发写入**：`AiStreamManager` 用 `dispatchLock` 序列化并发 dispatch（代码注释专门解释了为什么需要它）；多模型场景 N 个 `runExecutionLoop` 并行、各自经自己的 `PersistenceListener`/`MessageServiceBackend` 写各自的占位消息（`PersistentChatContextProvider.ts:263-289`）——执行侧语义见对话请求与上下文笔记第 5、8 节。
+- **SWR 缓存是读投影**：`useTopicMessages` 由 SWR infinite 缓存驱动；execution overlay 的 seed 用 `structuredClone` 深拷贝，避免 AI SDK 的原地修改污染 SWR/数据库历史引用（2 节）。`useDataChange` 订阅数据变更信号，命中已加载消息才触发重验证（`useTopicMessages.ts:257-266`）。
+- **两层 parts 缓存的结构共享**：`useStableMessagePartsLayers`（`src/renderer/components/chat/messages/stream/useStableMessagePartsLayers.ts`）用 `useRef` 手搓，未变化时复用 part 数组和 map 容器引用；文件头部注释说明仓库不引入全局状态库（`:1-41`）。渲染侧合并细节见消息渲染器笔记。
+- **并发写入**：`AiStreamManager` 用每 topic 的 `dispatchLock` 序列化 `prepareDispatch → send` 整个窗口（`AiStreamManager.ts:242,309-335`，`withDispatchLock` `:346-348`），注释专门解释为什么需要它（防止并发 open 与 approval-continue 同时看到"无 live 流"而孤儿化占位行）；多模型场景 N 个 `runExecutionLoop` 并行、各自经自己的 `PersistenceListener`/`MessageServiceBackend` 写各自的占位消息（`PersistentChatContextProvider.ts:362-389`）——执行侧语义见对话请求与上下文笔记第 5、8 节。
+- **备份恢复写安静期**：`AiStreamManager.pause()`/`drainInFlight()`（`:371-385,402-442`）在备份恢复期间门禁新 turn 准入并等待在途持久化落盘，`dispatch` 在 quiesce 期间返回 `blocked`（`:321-326`）。这是"多端并发写入"之外的数据一致性机制。
 - **多窗口/多端并发写入**：本次未调查（见第 10 节）。
 
 ## 7. 迁移、导入导出与保留策略
 
-- 数据库 schema 版本与迁移代码：本次未调查。
-- 导入导出、备份恢复：本次未调查。
-- **保留策略的已知缺口**：删除 Topic 不清理磁盘上的图片/附件文件（3.3 的 TODO），长期使用可能造成孤儿附件堆积。
+- **schema 迁移**：存在 v2 迁移体系（`src/main/data/migration/v2/migrators/`），`ChatMigrator` 为每个迁移的 topic 内联创建虚拟根并重挂 v1 物理根（`message-tree.md:84-85,98`），`AgentsMigrator` 维护 agent 会话消息及其 `searchableText`/FTS（`AgentsMigrator.ts:1194-1203,1625`）。FTS 虚拟表与触发器由迁移后脚本重建（`MESSAGE_FTS_STATEMENTS` 幂等，`message.ts:106-111` 注释）。迁移细节与 schema 版本号机制本次未展开。
+- **导入导出、备份恢复**：备份（BackupService/AutoBackupService）与恢复的写入安静期机制见 6 节；导入导出 UI 与格式细节本次未调查。
+- **保留策略的已知边界**：删除 Topic 不清理磁盘上的图片/附件文件（3.3），但文件条目有引用计数 + 策略化扫描回收兜底，不再是纯遗留缺口；回收时机与宽限参数未运行验证。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- **附件**：以 file part 内嵌在消息 parts 里（`buildFileParts.ts:53` 生成，发送侧见对话请求与上下文笔记第 9 节），随消息一起持久化。
-- **知识库范围**：以 `uiParts.ts:333-361` 的 data part（`data-knowledge-scope`）表达，是消息 parts 的一部分，而非独立关联表；类型清单见消息渲染器笔记。
-- **多模型**：`siblingsGroupId` 与 `modelId` 是消息级绑定字段（读侧按 `(siblingsGroupId, modelId)` 分桶，见 4.2）；"这次用哪些模型"本身是请求参数，不持久化在 topic 行（发送前配置见 Chat UI 笔记第 4 节）。
-- **Agent 会话**：Agent 侧同样以 session topic 为数据单元，消息数据模型与 Home 同源（同一 `MessageListProvider` 契约）；两边的差异在能力注入层而非数据层（Home/Agent 适配器见 Chat UI 笔记 6.2）。Agent 工作区文件等外部对象的持久化本次未展开。
+- **附件**：以 file part 内嵌在消息 parts 里（渲染侧 `src/renderer/utils/file/buildFileParts.ts` 生成，发送侧见对话请求与上下文笔记第 9 节），随消息一起持久化；其 `fileEntryId` 同时落到 `chat_message_file_ref` 引用表（`MessageService.ts:217-235`）。
+- **知识库范围**：以 `data-knowledge-scope` part 表达（`uiParts.ts:348`，`withKnowledgeScopePart` `:376-388`、`getKnowledgeBaseIdsFromParts` `:391-400`），是消息 parts 的一部分，而非独立关联表；"清理上下文"边界是 `data-clear` part（`createClearContextPart`/`hasClearContextPart` `:354-364`），消息渲染时携带 `isContextBoundary`（`MessageService.ts:299`）。
+- **多模型**：`siblingsGroupId` 与 `modelId` 是消息级绑定字段（读侧按 `(siblingsGroupId, modelId)` 分桶，见 4.2）；"这次用哪些模型"本身是请求参数，不持久化在 topic 行（发送前配置见 Chat UI 笔记第 4 节）；assistant 头像/身份以 `messageSnapshot` 快照在回复行上（`PersistentChatContextProvider.ts:101-114` 构建，删除助手后 header 仍可渲染）。
+- **Agent 会话**：Agent 侧以 session 为数据单元，会话消息是独立的扁平表（`agent_session_message`，`message-tree.md:8-9` 明确其不适用树模型），不在本笔记覆盖范围内；Home 侧 Topic 与 Agent 侧 session 的差异在能力注入层而非消息壳（Home/Agent 适配器见 Chat UI 笔记 6.2）。
 
 ## 9. 设计取舍与已确认边界
 
 - **三层数据复杂度是有意为之的取舍**：真树结构 + `activeNodeId` 指针 + live overlay 三层，配合 Home/Agent 双适配器，让"保留过程、支持分支比较、多模型并行"这些能力得以实现；代价是要理解至少四层数据（DB 树、SWR 缓存、execution overlay、live branch 前端态）才能追踪一条消息从输入到渲染的完整生命周期，调试门槛明显高于单层 session 客户端。
-- **文档漂移已修复**：`message-tree.md` 的 Flow canvas "forward reference" 说明已随文档更新删除，并新增 "Persisted awaiting-input branches" 一节描述空分支叶子语义。
-- **分支草稿从临时态变成持久化态**（`ad0ce9cd04`）：等待输入分支现在是 DB 行（empty successful user leaf），`isAwaitingInput` 由结构派生、无 draft 标记；代价是出现"空叶子必须保持不可见/不可当普通消息处理"的派生规则（列表隐藏、删除/填充带守卫）。
-- **删除语义收敛为"splice 保留可达历史"**（`8b78177a61`）：首轮消息可删、多模型组删除只删兄弟回复并 reparent 子节点；组删除在回复生成中被禁用。
-- **删除 Topic 的磁盘文件回收交给 FileManager GC**：删除动作本身不做文件清理，但文件条目有引用计数 + 策略化扫描回收（3.3），不再是代码自己承认的纯遗留缺口。
-- **消息搜索的 DOM 局限被架构放大**：虚拟化列表意味着窗口外的消息节点根本没挂载到 DOM，`ContentSearch` 的 `TreeWalker` 搜索天然搜不到（5 节）。
+- **虚拟根是存储层不变量而非约定**：CHECK 约束 + 部分唯一索引把"每 topic 一根、根 ⇔ null parent、内容必有 parent"固化在 schema（1.2），服务层的大量校验只是友好错误入口（`MessageService.ts:935-940,1349-1364,1675-1677`）。
+- **分支草稿从临时态变成持久化态**：等待输入分支现在是 DB 行（empty successful user leaf），`isAwaitingInput` 由结构派生、无 draft 标记；代价是出现"空叶子必须保持不可见/不可当普通消息处理"的派生规则（列表隐藏、删除/填充带守卫）。
+- **删除语义收敛为"splice 保留可达历史"**：首轮消息可删（子节点挂回虚拟根）、多模型组删除只删兄弟回复并 reparent 子节点、组删除在回复生成中被禁用；`SET NULL` 方案被明确否掉（会在级联删除中途制造第二个 null-parent 行，`message-tree.md:109-112`）。
+- **删除 Topic 的磁盘文件回收交给 FileManager GC**：删除动作本身不做文件清理，但文件条目有引用计数 + 策略化扫描回收（3.3）。
+- **搜索双轨的边界**：会话内搜索是"已加载数据 + 已挂载 DOM"（流式行被排除、未加载页搜不到，这是分页 + 数据匹配的固有限制）；全局搜索才是持久化 FTS（trigram），命中定位到消息级别，不提供 DOM 级高亮。
+- **崩溃恢复有专门路径**：boot reconcile 把遗留 `pending` 翻成 `error`（3.5），加上 `clearActiveNode` 与事务原子性，异常退出后的数据语义是"已提交的写都保留、未提交的回滚、半截回复标为 error"（运行验证见第 10 节）。
 - **类目边界**：本笔记只回答数据语义。停止生成时半截消息最终如何落盘、重试如何选择上下文见对话请求与上下文；分支树图、兄弟导航与搜索工作流见 Chat UI；part 渲染、虚拟列表与消息壳装配见消息渲染器。
 
 ## 10. 未验证事项
 
-- 崩溃恢复、多窗口竞争、数据库迁移与大数量级搜索未做运行验证（静态代码只能确认事务、索引和写入入口，不能代替运行验证）。
+- 崩溃恢复、多窗口竞争、数据库迁移与大数量级 FTS 搜索未做运行验证（静态代码只能确认事务、索引和写入入口，不能代替运行验证）。
 - `AiStreamManager` 状态机（`ActiveStream.status` 六种取值）的竞态风险未运行验证，执行侧详见对话请求与上下文笔记。
+- FileManager 附件回收的触发时机与宽限参数（`entryCleanup.ts` 的 `ENTRY_CLEANUP_GRACE_MS`）未运行验证。
 - 流式期间中间增量落盘的频率未核实（最终态落盘语义见对话请求与上下文笔记第 6 节）。
+- schema 版本号演进、迁移执行时机与失败恢复未展开调查。
 
 ## 11. 关键源码索引
 
 - `src/shared/data/types/topic.ts`（Topic 模型）
-- `src/main/data/services/TopicService.ts`（CRUD、`setActiveNodeTx`、`deleteManyByIdsTx`）
-- `src/main/data/services/MessageService.ts`（树维护、`getPathToNode`、`delete`/`clearTopicMessages`）
+- `src/main/data/db/schemas/message.ts`（消息表、CHECK/索引、FTS 触发器语句）
+- `src/main/data/services/TopicService.ts`（CRUD、`setActiveNodeTx`、`listByCursor`、`deleteManyByIdsTx`）
+- `src/main/data/services/MessageService.ts`（树维护、`getTree`/`getBranchMessages`/`getPathRowsToNodeTx`、`reserveBranch`、`createUserMessageWithPlaceholders`、`delete`/`clearTopicMessages`、FTS `search`）
 - `src/main/services/TopicNamingService.ts`（自动命名两阶段）
 - `docs/references/chat/message-tree.md`（树的权威文档）
 - `src/renderer/hooks/useTopicMessages.ts`（分页拉取与兄弟分桶）
-- `src/renderer/hooks/useExecutionOverlay.ts`（live overlay 与 seed）
-- `src/renderer/pages/home/hooks/useStablePartsByMessageId.ts`（两层 parts 缓存）
-- `src/renderer/pages/home/Chat.tsx`（发送锚点、重命名命令）
+- `src/renderer/hooks/useExecutionOverlay.ts`、`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`（live overlay）
+- `src/renderer/components/chat/messages/list/MessageListSearch.tsx`、`messageSearch.ts`、`src/renderer/utils/contentSearch.ts`（会话内搜索）
 - `src/renderer/pages/home/hooks/useTopicBranchActions.ts`（分支预留/删除守卫入口）
-- `src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`（流式 overlay 服务化实现）
-- `src/renderer/pages/home/ChatContent.tsx`（空会话判定）
-- `src/renderer/components/ContentSearch.tsx`（DOM 搜索实现；工作流见 Chat UI）
-- `src/renderer/components/chat/flow/topicMessageFlowLiveTree.ts`（live overlay 合并）
+- `src/main/services/file/internal/entryCleanup.ts`、`orphanSweep.ts`（附件 GC）

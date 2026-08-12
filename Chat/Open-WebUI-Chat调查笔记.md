@@ -12,15 +12,6 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-> 迁移状态（2026-08-11）：本文件已压缩为概览，详细内容已按新类目边界迁移：
->
-> - 会话与消息管理：[`../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md`](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)（数据模型、CRUD、索引检索、双写一致性）
-> - 对话请求与上下文：[`../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md`](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)（生成主链、fan-out、Socket.IO 流、任务调度）
-> - Chat UI：[`../Chat UI/Open-WebUI-ChatUI调查笔记.md`](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)（发送链界面、Overview 消息树图）
-> - 消息渲染：[`../消息渲染器/Open-WebUI-消息渲染器调查笔记.md`](../消息渲染器/Open-WebUI-消息渲染器调查笔记.md)（已有独立笔记）
->
-> 2026-08-11 本文件已压缩为概览
-
 ## 结论摘要
 
 Open WebUI v0.11.0 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。聊天消息 CRUD 全部集中在 `routers/chats.py`（无独立 messages 路由）；生成主链 `POST /api/chat/completions` 经 `process_chat_payload` 到上游后，多模型并行以 `asyncio.Task` fan-out（Redis 记账、跨实例取消），流式推送统一走 Socket.IO `events` 事件（`user:{user_id}` 房间），前端 `Chat.svelte` 按 `data.type` 分发约 25 种消息类型。前端状态机整体内聚于 `Chat.svelte`（约 4205 行）。
