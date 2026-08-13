@@ -107,6 +107,17 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **证据强度**：源码事实；文档与实现有一处出入——`docs/FEATURE_MATRIX.md` 声称主题配置位于 `thinktheme/*.json`，仓库中**未找到**该目录，实际主题仅来自 `meta_thinking_chains.json` 的非 default 链条目（当前只有 default，故 Auto 模式无可切换主题，只能回退默认链）。
 
+#### 外部资产证据：公开第三方思维簇模组
+
+公开仓库 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)（2026-06-29 更新，许可证文件声明 CC BY-NC-SA 4.0）把这条 RAG/元思考链包装成可迁移内容资产，而不是只在 VCPToolBox 源码中维护一套内部文件：
+
+- 仓库按 `内心会议簇`、智力簇、精神簇、体格簇、身手簇组织目录，README 明确采用 **1+4+24** 结构，即一个启动簇、四个属性域和 24 个原子思维模块；
+- 每个原子模块是可独立索引的 Markdown 思维文件，另附 `semantic_groups.edit.json`，与 RAGDiaryPlugin 的日记文件和语义组配置分别对应；
+- 安装说明要求把思维簇放入 VCPToolBox 的 `dailynote/`，把语义组放入 `Plugin/RAGDiaryPlugin/`；K 值被定义为各簇的召回/表达预算，允许按“逻辑天才型”“感性诗人型”等方案组合 Agent 的认知构型；
+- 这不是 VCPToolBox 自带代码，也没有改变当前快照只有 `default` 元思考链、`thinktheme/*.json` 未实现的事实。它提供的是**外部生态证据**：思维簇协议已经足够稳定，第三方可以围绕它制作、分发和二次编排 Agent 认知资产。
+
+因此，横向统计将该仓库作为 F102 的生态证据，不新增项目行、不把第三方内容创作计作 VCPToolBox 的代码贡献，也不把 24 个模块逐项拆成 24 个产品功能族。
+
 ### 能力三：AgentDream 非对话记忆整理（梦系统）
 
 **用户目标**：让 AI 在非对话时段回顾记忆、生成意识流叙事，并产出需要人工审批的记忆整理操作（合并/删除/感悟），把"记忆维护"从用户手动操作变成 Agent 主动工作流。
@@ -479,7 +490,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 以下为建议（供主会话与特色贡献统计核对）：
 
 1. **18 个可计能力族**（均 `主链确认`、静态证据）：原 10 项（记忆语义动力学 TagMemo+RiverMemo、元思考递归推理链、AgentDream 非对话记忆整理、TVS 上下文语言（含 PlaceholderExplorer 调试面）、浏览器托管运行时、跨节点文件透明获取、TaskAssistant 任务派发、VCPForum 文件社区、多媒体创作插件族、异步任务回注产品契约）+ 插件盘点补充 8 项（LightMemo 多构型对照、VCPEverything 全盘检索、SkillBridge 技能索引、MagiAgent 会议、VCPClawMail 邮箱投递、UserAuth 认证码、DigitalOracle 金融聚合、DeepWikiVCP MCP 客户端）。
-2. **合并建议**：TVS 上下文语言与“上下文 DSL 与提示词工程”聚类下的其他项目候选做统一比较对象；记忆语义动力学与元思考建议合并计一个“记忆演化”主贡献（同一用户目标：长期认知维护），或拆为两个主贡献（召回排序 vs 思考链）——取决于统计粒度口径；LightMemo（多构型对照测量面）并入该主贡献；MagiAgent 归“Agent 社会”聚类；SkillBridge 与“自进化 Skill”聚类候选（待与 Hermes Agent 等样本比较后定）。
+2. **归并结论**：TVS 上下文语言与“上下文 DSL 与提示词工程”聚类下的其他项目候选做统一比较对象；记忆语义动力学与元思考应拆为两个主贡献，前者改变生成前自动召回与排序契约，后者提供持久链配置、逐簇递归检索和阶段间查询演化。LightMemo 的多构型对照只形成调优与验证机制，不再并入产品主贡献；MagiAgent 归“Agent 社会”聚类；SkillBridge 与“自进化 Skill”聚类候选（待与 Hermes Agent 等样本比较后定）。
 3. **支撑机制单独标注**：六类插件协议、Rust/Rayon 原生内核、管理 API、文件缓存等作为工程机制，不单独计入产品特性贡献；UserAuth 认证码（requireAdmin 的鉴权来源）按安全支撑机制同样标注，不单独计主贡献。
 4. **入口确认项**（人类工具 API）暂不计入；待 VCPChat 侧自动 GUI 调查完成后由主会话决定是否跨项目合并为“人类工具面”贡献。
 5. **默认关闭/默认禁用**的机制（AgentDream、托管浏览器、ReasoningToContent、privacyProtection）按“主链确认但默认未启用”标注，避免与开箱即用能力同权计数。
@@ -517,7 +528,5 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 - 认证码：`Plugin/UserAuth/auth.js`、`modules/captchaDecoder.js`、`Plugin.js:140-151,1503-1512`（注入点）
 - 金融：`Plugin/DigitalOracle/digital_oracle_vcp.py`（registry:176、dashboard:638）
 - MCP：`Plugin/DeepWikiVCP/DeepWikiVCP.js`（mcpCall:125）
-
-
 
 

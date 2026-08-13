@@ -95,6 +95,15 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 - **独特性判断**：日记文件本身是后端生态的持久对象，但"联想云图 + 工作台 + 批量编辑"的组合只在 VCP 系出现；与 VCPToolBox 的 TagMemo/RiverMemo 是同一记忆体系的消费/管理两端。
 - **证据强度**：源码事实（入口、API 链、图渲染、批量操作全部走通）；后端算法、云图实际渲染与 Agent 代笔结果未运行验证。
 
+### 能力卡 2A：DeepMemo 2.0 中央会话回忆适配器（主动历史 RAG）
+
+- **用户目标**：让 Agent 通过工具主动查找其他 Topic 中的历史对话，并把命中的上下文窗口带回当前会话；它检索的是聊天历史，不是 Memo 工作台管理的日记文件。
+- **入口与触发者**：模型调用 `DeepMemo` 工具后，由 `DeepMemoService.processToolCall()`（`VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js:42-126`）接收参数；VCP 主服务器把聊天请求中的白名单 `requestContext` 复制为内部 `_vcpContext`。模型工具参数不能覆盖其中的 `agentId`、`topicId` 或 owner 信息（`Plugin/DeepMemo/README.md` 调用链与上下文上传说明）。
+- **事实对象**：VCP-CDS 中央聊天数据服务维护的会话/Topic 历史索引。DeepMemo 2.0 不再扫描 Agent 目录、`history.json`，也不再创建独立 Tantivy/FlexSearch 索引；插件是常驻薄适配器，只消费 `ChatDataServiceClient.searchMemories()`。
+- **完整主链**：规范化 `keyword`、窗口大小和结果上限 → 以可信 Agent/Topic 上下文构造中央搜索请求（`DeepMemoService.js:135-205`）→ 默认排除当前 Topic，按前后窗口扩展命中 → 选择性调用外部 Rerank（候选批次有文档数、字符数和超时界限）→ 按字符预算筛选 → 清理 HTML/CSS 后格式化回注当前工具结果；中央服务失败时按配置决定是否使用旧版回退程序。
+- **持续性与边界**：索引和聊天历史由 VCP-CDS 持有；适配器自身不持久化记忆，不提供自动生成前注入、递归思考链或人工记忆维护。真实 CDS 搜索、精排效果和跨 Topic 结果未运行验证。
+- **横向归类**：这是闭环的主动会话历史 RAG，但产品契约仍接近常规“搜索历史对话”工具；在特色统计中作为 VCP RAG 能力地图的边界样本记录，不另立主/辅助贡献。它与 VCPToolBox F66/F102 的区别在于：DeepMemo 由 Agent 主动调用并返回历史窗口，F66 在生成前自动注入私人语义召回，F102 则把检索组织成可持久、逐阶段演化的思考程序。
+
 ### 能力卡 3：VCPDesktop 流式推送与持久挂件
 
 既有 `Agent工具` 与 `生成式输出与运行时` 笔记已确认 `<<<[DESKTOP_PUSH]>>>` 流式拦截（`modules/renderer/streamManager.js:1906` `processDesktopPushToken`）、挂件收藏目录 `AppData/DesktopWidgets/<id>/`（`modules/ipc/desktopHandlers.js:999-1095`）与模型侧远程控制（`desktopRemoteHandlers.js`）。本卡补充运行恢复、资源治理与近期提交范围三个面：
@@ -318,6 +327,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 - `Tavernmodules/tavern-manager.js`：高级回复浮窗与规则管理模态；`modules/tavernRulesEngine.js`：三类注入纯逻辑引擎；`modules/ipc/tavernHandlers.js`：`VCPChatTarven.json` 持久化与 IPC。
 - `modules/chatManager.js:188-233/1085-1130`：单聊 Tavern 注入与上下文正则应用点；`Groupmodules/groupchat.js:510-539/605-608/736/1189/1308`：群聊注入路径与历史真源。
 - `Memomodules/memo.js`（apiFetch/工作台/批量操作）、`memo-graph.js`（联想与力导向图）、`memo-workbench.js`（引用工作台与 DailyNote 发布）。
+- DeepMemo 2.0：`VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js:42-126`（工具入口、可信上下文、中央搜索、可选精排与预算筛选）、`:135-205`（参数规范化与 VCP-CDS 请求构造）；`Plugin/DeepMemo/README.md`（central 适配边界与上下文上传协议）；`tests/deepmemo-central-adapter.test.js`（适配层测试）。
 - `Desktopmodules/favorites/favoritesManager.js`、`core/widgetManager.js`、`core/performanceManager.js`、`core/visibilityFreezer.js`；`modules/ipc/desktopHandlers.js:40/212/948/999/1228`。
 - `Flowlockmodules/flowlock.js`（Session 状态机与认领）、`flowlock-integration.js`（用户操作绑定）、`flowlock-protocol.js`（状态气泡）；`Flowlockmodules/README.md`（协议与生命周期权威文档）。
 - `VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js`：Agent 自主话题命令族。
