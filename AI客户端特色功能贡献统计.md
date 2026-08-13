@@ -18,7 +18,7 @@
 
 > 覆盖说明：全部计分项均已达到静态源码意义上的 `主链确认`，但大量能力尚未运行验证。`入口确认`、外部依赖和声明不符项不计分；默认关闭的已确认能力仍可计入，但在理由中保留边界。
 
-- **AIO Hub** 的覆盖面最宽。网页蒸馏室、窗口自动化语言、实时字幕 OCR、跨播放器弹幕和对话分享稿工作台构成主贡献；Git 提交台、长文翻译与 Recall 思绪集计辅助贡献。Recall 参考 VCP 的记忆召回路线后形成独立产品面，采用预设法与候选模块组成的检索管线，以 SQLite 为真源并使用 `【recall::…】` 严格占位符协议；它的工程产品化完整，但不再与 VCP 的上位记忆演化能力拆成两个主贡献族。Knowledge 是主动资料库工具，宏共 74 个。
+- **AIO Hub** 的覆盖面最宽。网页蒸馏室、窗口自动化语言、实时字幕 OCR、跨播放器弹幕和对话分享稿工作台构成主贡献；Git 提交台、长文翻译与 Recall 思绪集计辅助贡献。它还在 F18 以 HTML/SVG/JS/Canvas iframe 小应用和 Action Button 计可执行消息的辅助贡献，在 F02/F03 以角色卡导入、独立世界书编辑器及真实条件注入运行时计 ST 兼容辅助贡献。Recall 参考 VCP 的记忆召回路线后形成独立产品面，采用预设法与候选模块组成的检索管线，以 SQLite 为真源并使用 `【recall::…】` 严格占位符协议；它的工程产品化完整，但不再与 VCP 的上位记忆演化能力拆成两个主贡献族。Knowledge 是主动资料库工具，宏共 74 个。
 - **Hermes Agent、OpenCode、Open WebUI** 分别在持续 Agent 后端、编码会话服务、多人模型工作区三个方向形成宽覆盖。Open WebUI 的 Channels、Notes、Memory、Calendar、Automations 和 Arena/ELO 均形成完整产品链。
 - **VCPChat** 以 Agent 可控 Hi-Fi 播放器、系统级划词助手、双语自动语音链和 Scriptorium 共笔文坊（VDOC/VPPTX 工程 + 文脉 PR 审批）构成主贡献，论坛客户端、RAG Observer 和 3D 物理骰子则扩展 VCP 运行时。Loom v1.4.0 与 VCP Agent WebCore 属于 LoomAPP 数据驱动创作运行时，不重复计数。
 - **VCPToolBox** 的 RAG/记忆系统不能只按一个“高级召回”功能计量。复核后拆为两个主贡献族：TagMemo/RiverMemo 负责生成前自动召回、私人语义传播、拓扑重排与解释；VCP 元思考负责用持久链配置逐簇递归检索，并让前一阶段结果改变后一阶段查询。公开的 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 进一步证明这条链已经形成可迁移的内容资产契约：外部作者可以把“内心会议簇 + 四属性域 + 24 个原子模块”连同语义组配置打包，按 K 值组合成不同认知构型并直接部署到 VCP 的日记/RAG 目录；它是 F102 的生态证据，不作为新增项目或重复主贡献。LightMemo 的 KNN/TagMemo/RiverMemo 同候选域对照属于调优与验证机制，另入机制表；一致性预览/修复作为自动召回族的维护子链，Rust/Rayon 内核和 RAG Observer 分别归原生计算机制与辅助观察表面，不重复抬分。AIO Recall 作为后续独立产品化形态，仍在自动召回族计辅助贡献。多观点 Agent 会议同样是主贡献，Skill 目录索引作为 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
@@ -105,8 +105,8 @@
 | ID | 产品功能族 | 主贡献 | 辅助贡献 | 计入理由 |
 |---|---|---|---|---|
 | F01 | 一体化 Agent 配方编辑：消息树、锚点、消息组、变量、资产和工具策略 | AIO Hub | LobeHub、SillyTavern | 把角色、上下文和工具配置收进同一编辑流程 |
-| F02 | 可移植角色卡与社区资产兼容 | SillyTavern | AIO Hub | 支持 PNG/CharX/BYAF 等角色内容生态和跨格式汇入 |
-| F03 | World Info / lore 条件触发与分层注入 | SillyTavern | AIO Hub | 面向长期角色世界的内容规则系统，不是普通 RAG |
+| F02 | 可移植角色卡与社区资产兼容 | SillyTavern | AIO Hub | SillyTavern 定义 PNG/CharX/BYAF 等角色内容生态；AIO 可导入 ST V2/V3 JSON/PNG、Context Preset、正则、快捷动作和嵌入式世界书并映射到自己的 Agent 对象。AIO 是跨格式汇入与可继续编辑的辅助形态，尚未复现酒馆全部扩展/事件协议 |
+| F03 | World Info / lore 条件触发与分层注入 | SillyTavern | AIO Hub | SillyTavern 定义完整 World Info 生态；AIO 有独立世界书管理/编辑/导入导出，并在真实请求中执行关键词/正则、selective、概率、扫描深度、过滤、递归、sticky/cooldown/delay、包含组和位置注入。部分字段只保留/编辑或降级映射，因此计可运行子集的辅助贡献，而非“仅兼容导入” |
 | F04 | 可迁移且相互隔离的完整 Agent/Profile 运行环境 | Hermes Agent | AIO Hub、SillyTavern | Profile/包覆盖配置、技能、记忆或资产，而非单段 prompt |
 | F05 | Persona、模型、知识、工具与访问控制合一的 Workspace Model | Open WebUI | LobeHub | 模型目录项同时成为多人工作区中的角色与权限对象 |
 | F06 | 项目目录驱动的 Agent、提示词与 Skill 配置 | OpenCode、Pi | DeepChat | 配置随 cwd/项目文件加载，面向项目而非普通聊天预设 |
@@ -144,7 +144,7 @@
 
 | ID | 产品功能族 | 主贡献 | 辅助贡献 | 计入理由 |
 |---|---|---|---|---|
-| F18 | 可执行消息小应用与消息运行时 SDK | VCPChat | AIO Hub | 模型输出可成为有交互和行为的应用，而非富文本预览 |
+| F18 | 可执行消息小应用与消息运行时 SDK | VCPChat | AIO Hub | VCPChat 提供主消息 DOM 脚本与较完整宿主运行时治理；AIO 的 HTML/SVG 代码块可在 iframe 中执行 JavaScript、表单和 Canvas 小应用，Action Button 还能发送消息、插入文本或复制内容。AIO 已具备 iframe 型“消息即应用”，但宿主 SDK 与生命周期深度不足以并列主贡献 |
 | F19 | 可持久、可查询、可替换的桌面挂件活对象 | VCPChat | - | 挂件有独立 ID、文件和能力桥，跨越单条消息生命周期 |
 | F21 | 声明式 conversation-flow 与工具过程投影 | LobeHub | DeepChat、Cherry Studio | Agent 中间过程被编译成可操作流程 |
 | F22 | 严格隔离的 HTML/SVG Artifact 预览 | Jan | NextChat、Chatbox、DeepChat、Open WebUI | 生成页面在独立运行域投影，不获得宿主同源权限 |

@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox、Hermes Agent
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-13
 >
 > 依据：同目录十六份单项目调查笔记及其中记录的代码快照
 >
@@ -16,7 +16,7 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | ---: | --- | --- |
-| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 427 | `main` | `023bc63ac10201bf0f663bf49d642fd55c29a3d0` |
+| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 447 | `main` | `023bc63ac10201bf0f663bf49d642fd55c29a3d0` |
 | AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 329 | `master` | `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` |
 | Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 200 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
 | Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 190 | `main` | `cd82f996fb6c3a523b6d40de31314f2b86f56281` |
@@ -56,7 +56,7 @@
 2. **模板与会话分层：Chatbox、AstrBot。** Chatbox 的 Copilot 只拥有人格元数据，模型、Skills、Agent Mode 和 RAG 位于 Session；创建会话时 prompt 被写入历史，形成静态快照。AstrBot Persona 拥有提示词与工具/Skills 白名单，但模型不属于 Persona；运行时按会话规则、对话绑定和全局默认逐轮解析。
 3. **会话副本型：Jan、NextChat。** Jan 把 Assistant 的 name/model/instructions/tools 复制进 thread；NextChat 把完整 Mask 复制进 session，fork 时再深拷贝。两者都使历史会话脱离模板的后续修改，但 NextChat 还保留全局模型配置同步开关。
 4. **模型即角色：Open WebUI。** Workspace Model 同时是上游模型别名、system prompt、参数包、知识和工具绑定、访问控制对象。请求按 model id 重新读数据库，角色生命周期直接复用模型目录和权限体系。
-5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前十六个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。
+5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前十六个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。AIO Hub 对这套生态的支持不止角色卡导入：它有独立世界书编辑器、持久化与导入导出服务，受支持字段会进入真实上下文管道；两者的差距主要落在社区资产、扩展协议与完整语义覆盖。
 6. **文件/服务编排型：VCPChat、VCPToolBox。** VCPChat 每个 Agent 一个目录，模型和基础参数随 Agent 保存，工具策略留给 VCP 服务端。VCPToolBox 同时存在提示词文件和 AgentAssistant 配置两层，前者参与变量替换，后者承担具名多 Agent 通信和任务派发。
 7. **无角色实体：Manifold Desktop。** 只有全局 system prompt、温度、Provider/模型和文本提示词库；会话不保存发送时配置。因此它应作为“全局配置基线”比较，不能记成一个功能较少的 Agent 实现。
 8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件（SOUL.md）、命名人格模板（personalities）、用户手动 system 提示词（agent.system_prompt）与运行时注入（ephemeral）叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay），启动/建 agent 时优先把命名人格渲染成文本、否则回退到 `agent.system_prompt`，env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 仍最优先，**人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示，v33→v34 迁移一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
@@ -65,7 +65,9 @@
 
 最关键的横向差异不是“能否填写 system prompt”，而是**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。Hermes Agent 介于后两者之间：人格配置是全局当前值，但会话会记录构建好的 system prompt（hash 去重）与模型快照，而运行时注入的人格文本不随轨迹保存。
 
-若单独比较**预设可配置范围与日常编辑体验**，结论会与“社区生态成熟度”不同：AIO Hub 是当前样本中最强的一体化候选。它把消息角色、顺序、锚点/深度、模型匹配、消息组、宏、变量、知识库占位符、资产附件、模型参数和工具策略放在同一个 Agent 编辑流程里；其中消息组可设多选或单选，并有组级总开关和侧边栏快速切换。SillyTavern 的优势仍是角色卡标准、社区资产和 World Info 生态，但 Prompt Manager 中的 marker、system prompt、override、relative/in-chat injection、order、trigger 等字段与角色卡和采样 Preset 分层存在，能力多不等于配置关系更容易理解。
+若单独比较**预设可配置范围与日常编辑体验**，结论会与“社区生态成熟度”不同：AIO Hub 是当前样本中最强的一体化候选。它把消息角色、顺序、锚点/深度、模型匹配、消息组、宏、变量、知识库占位符、资产附件、模型参数和工具策略放在同一个 Agent 编辑流程里；其中消息组可设多选或单选，并有组级总开关和侧边栏快速切换。它还自带世界书编辑器与运行时，支持关键词/正则、selective、概率、扫描深度、递归、过滤、包含组与 depth 注入等可执行子集。SillyTavern 的优势仍是角色卡标准、社区资产、传统角色扮演工作流、扩展事件和 World Info 全语义覆盖；这不能简化为“AIO 的角色能力远弱于酒馆”，也不能反过来用 AIO 的配置聚合优势否定酒馆生态。
+
+跨项目比较酒馆兼容时，应拆成四层：格式能否导入、字段能否保留/编辑、字段是否在目标运行时生效、原生态协议是否完整复现。AIO 前三层已有相当覆盖，第四层并不完整：部分锚点降级映射，`sticky/cooldown/delay` 有运行时而缺编辑控件，另一些扩展字段只能保存或编辑但未找到消费链。用一个“支持/不支持”标签会同时掩盖它已有的能力和真实边界。
 
 ## 架构分型
 
@@ -168,7 +170,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 
 | 项目 | 角色级工具/能力控制 | 角色级知识 | 记忆与状态 |
 | --- | --- | --- | --- |
-| AIO Hub | 工具/方法开关、审批、迭代、超时、并发、协议和设置都归 Agent | 世界书 + 细粒度 RAG 绑定与注入策略 | 会话变量、非破坏性摘要压缩、虚拟时间；会话变量不等于长期记忆 |
+| AIO Hub | 工具/方法开关、审批、迭代、超时、并发、协议和设置都归 Agent | 独立世界书编辑/导入导出 + ST 兼容条件激活与递归注入子集 + 细粒度 RAG 绑定与注入策略 | 会话变量、非破坏性摘要压缩、虚拟时间；会话变量不等于长期记忆 |
 | AstrBot | `tools`/`skills` 三态：全部、禁用全部、白名单；workspace Skills 有单独合并语义 | KB 结果走用户消息侧注入，不属于 Persona 字段 | Persona 无长期记忆字段；begin dialogs 不入库，system 受截断保护 |
 | Chatbox | Skills、Agent Mode、MCP、工作目录和 full access 都在 Session/全局层，不在 Copilot | Session 附件 RAG；知识库模型为全局设置 | Session 可自动压缩；Copilot 无记忆字段 |
 | Cherry Studio | Assistant 绑定有序 MCP server 列表和模式；Agent Session 另走 Claude Code 工具路径 | Assistant 绑定有序知识库列表 | 角色笔记未找到 Assistant 长期记忆字段 |

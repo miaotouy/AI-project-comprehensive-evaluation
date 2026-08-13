@@ -2,7 +2,7 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`Open WebUI`、`OpenCode`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-13
 >
 > 依据：各单项目调查笔记（Agent 工具、Agent 角色、Chat、LLM 渠道管理、仓库分布、消息渲染器、生成式输出与运行时类目）及横向对比
 >
@@ -71,7 +71,7 @@
 
 ### 4. 角色即可移植生态
 
-**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF + Character Book），但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 分离。AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载（人格选择收敛为 `display.personality` 权威名称 + 单一所有者渲染模块，仍是命名模板而非版本化实体）。没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
+**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF + Character Book）、传统角色扮演工作流和完整 World Info/扩展协议，但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 分离。AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。AIO 对 ST 世界书的支持已覆盖独立编辑、导入导出和实际条件注入运行时，不只是格式转换；部分扩展字段仅保留/编辑或降级映射，因此仍是可执行子集。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载（人格选择收敛为 `display.personality` 权威名称 + 单一所有者渲染模块，仍是命名模板而非版本化实体）。没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
 
 **组合逻辑**：
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-13
 >
 > 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
@@ -32,6 +32,8 @@ AIO Hub 的"消息渲染器"实际由两层组成：
 
 这套实现的核心价值不只是"支持很多 Markdown 扩展"，它把 LLM 消息当作一种需要持续增量解释的结构化文档来处理：**流式正文与低频持久化分离**，末尾不稳定内容进入 pending 区，稳定内容保留 AST 节点身份，再把节点按类型交给专用 Vue 组件。代价是解析和状态层较复杂，HTML 执行环境、超长会话常驻成本、桌面与移动端能力差异都需要单独评估。
 
+从产品能力判断，AIO Hub **已经有“消息即应用”的一种实现**：模型可在消息中输出 HTML/SVG 代码块，预览 iframe 能执行 JavaScript、表单和 Canvas 小应用；`action_button` 节点还可触发发送消息、插入文本或复制内容。它与 VCPChat 的实现深度不同：AIO 以 iframe 隔离单条消息内的小应用，并通过预定义动作与宿主聊天交互；VCPChat 还提供主消息 DOM 中的 HTML/CSS/JS 执行和定时器、动画库、Three.js 等宿主运行时生命周期治理。因而准确结论是“AIO 有 iframe 型可执行消息，宿主运行时契约弱于 VCPChat”，不是“缺少消息即应用”。
+
 当前实现没有"插件注册自定义消息渲染器"的运行时接口。设置项只是从固定 `RendererVersion` 枚举中选版本；文档中的插件渲染器仍是未来能力。
 
 ## 产品与生态背景
@@ -44,7 +46,7 @@ AIO Hub 的"消息渲染器"实际由两层组成：
 - `src/tools/agent-manager/services/vcpChatAgentImportService.ts` 和 `VcpChatAgentImportDialog.vue` 可以扫描 VCPChat 目录，将 Agent 配置、模型参数、正则和头像转换为 AIO 导入包。
 - README 另外明确列出 ST 正则脚本、快捷动作、世界书编辑器、PNG 角色卡和 VCP 连接器兼容。
 
-这些导入功能将外部格式转换为 AIO 自己的 Agent 数据、上下文管道、typed AST 和专用 Vue 节点，HTML 小应用则放入 iframe。
+这些导入功能将外部格式转换为 AIO 自己的 Agent 数据、上下文管道、typed AST 和专用 Vue 节点，HTML 小应用则放入 iframe。ST 世界书也不是导入后只作为静态资产保存：AIO 有独立编辑器、持久化和导出服务，受支持的关键词、条件、递归、分组和注入字段会由 `worldbook-processor` 进入真实请求；其兼容边界详见 Agent 角色与对话请求笔记。
 
 ## 总体调用链
 
@@ -284,6 +286,8 @@ V2 根据 HTML 在 AST 中的形态采用不同处理：
 Pure Markdown-it 分支创建 markdown-it 时设置 `html: true`，输出直接进入 `v-html`，没有 DOMPurify。移动端同样对 html token 直接 `v-html="token.text"`。
 
 代码块的 HTML/SVG 预览通过 `HtmlInteractiveViewer.vue` 实现，使用 `sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"` 的 iframe 加载 `srcdoc`。日志、错误、鼠标活动和高度通过 `postMessage` 回传；内容稳定性检查和 1 秒节流用于减少流式阶段反复重载 iframe。宿主主窗口 CSP 为 `null`，Tauri v2 capabilities 允许任意 HTTP(S)/WS(S) fetch 和较宽的文件读写 scope。
+
+这条链已经可以承载独立的 HTML/JS 应用，而非只把 HTML 渲染成静态预览。仓库内 `html-game-snake.ts` 直接提供 Canvas 游戏样例；桌面测试台还覆盖脚本交互和 Canvas 游戏。`ActionButtonNode.vue` 则是另一条较受控的“消息行为”路径，通过 llm-chat registry 执行发送、插入或复制等动作。两者共同构成 F18 所指的 AIO 辅助贡献。
 
 从设计分类看，AIO 选择的是“高能力 iframe + CSP 开关 + Tauri 宿主权限”的组合。与采用 opaque-origin sandbox、独立低权限 WebView，或完全禁止模型脚本的项目相比，它提供更强的交互展示能力，也引入更大的信任面。
 

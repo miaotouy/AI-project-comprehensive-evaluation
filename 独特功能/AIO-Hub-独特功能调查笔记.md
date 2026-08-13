@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-13
 >
 > 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr）；未运行 Tauri 应用，未修改被调查仓库
+> 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
 >
 > 调查范围：待查清单第二批候选（上下文分析器、宏与正则管道、快捷动作、Agent 私有资产、自由窗口、媒体工作站、资产管理器、多运行时插件、Skill 沙箱、请求检查器、VCP 监控）的入口、状态、执行与持久化主链；全量扫描剩余约 37 个未走主链的工具模块，新增八张能力卡；与现有十类笔记去重
 >
@@ -35,7 +35,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
 18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
 
-辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、st-worldbook-manager、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`，提交 `045c52bd0`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
+辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`，提交 `045c52bd0`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
 
 归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。
 
@@ -377,13 +377,14 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ### 第二梯队与确认无隐藏特性的工具
 
-- **入口确认（第二梯队，未走完整主链）**：`embedding-playground`（A/B 对比/1:N 排行/多模型竞技场 + 百分位阈值校准 + RAG 检索模拟，无 Agent 暴露）；`st-worldbook-manager`（ST V2/V3 导入、snake_case/camelCase 双向转换、PNG 角色卡内嵌世界书提取、冷启动自动迁移）；`media-info-reader`（EXIF/WebUI/PNG 三层 + AioBundle 解析，`readImageMetadata` agentCallable）；`user-profile-manager`（richTextStyleOptions/regexConfig/worldbookIds/quickActionSetIds 跨工具配置中枢，被 llm-chat 消费）；`text-diff`（Monaco diff + 拖文件自动分左右 + `generatePatch` agentCallable 生成 unified diff）；`api-tester`（REST/GraphQL/LLM 预设 + `{{variable}}` 模板变量 + SSE 渲染 + 请求档案恢复）；`config-converter`（6 格式 N×N 互转 + 有损转换警告 + 批量模式）；`data-filter`（深层路径/多键 OR/自定义 JS 条件，Agent `applyFilter` 输出 Markdown 报表）；`dir-search`（Rust 并行流式搜索 + GBK 回退 + 单项替换 preserveCase + 文件整理，Agent 搜索替换）；`directory-janitor`（Agent 可远程触发的扫描+回收站清理，删除能力下放给 Agent）；`git-analyzer`（git2-rs 原生 + 流式加载 + Agent `getFormattedAnalysis` 20 参数报告）；`color-picker`（三算法并行 + Dexie 历史 + EyeDropper 回退，图片走资产库）。
+- **入口确认（第二梯队，未走完整主链）**：`embedding-playground`（A/B 对比/1:N 排行/多模型竞技场 + 百分位阈值校准 + RAG 检索模拟，无 Agent 暴露）；`media-info-reader`（EXIF/WebUI/PNG 三层 + AioBundle 解析，`readImageMetadata` agentCallable）；`user-profile-manager`（richTextStyleOptions/regexConfig/worldbookIds/quickActionSetIds 跨工具配置中枢，被 llm-chat 消费）；`text-diff`（Monaco diff + 拖文件自动分左右 + `generatePatch` agentCallable 生成 unified diff）；`api-tester`（REST/GraphQL/LLM 预设 + `{{variable}}` 模板变量 + SSE 渲染 + 请求档案恢复）；`config-converter`（6 格式 N×N 互转 + 有损转换警告 + 批量模式）；`data-filter`（深层路径/多键 OR/自定义 JS 条件，Agent `applyFilter` 输出 Markdown 报表）；`dir-search`（Rust 并行流式搜索 + GBK 回退 + 单项替换 preserveCase + 文件整理，Agent 搜索替换）；`directory-janitor`（Agent 可远程触发的扫描+回收站清理，删除能力下放给 Agent）；`git-analyzer`（git2-rs 原生 + 流式加载 + Agent `getFormattedAnalysis` 20 参数报告）；`color-picker`（三算法并行 + Dexie 历史 + EyeDropper 回退，图片走资产库）。
 - **确认无隐藏特性（全量扫描结论）**：`code-formatter`（纯 Prettier 静态/动态混合插件加载，不调 LLM）；`json-formatter`（无 AI 修复，sortKeys 为半成品设置）；`component-tester`（内部开发调试工具）；`symlink-mover`（双模式 + 历史日志，无跨工具面）；`system-pulse`（技术扎实的推送式仪表盘但仅页面挂载启停、无后台常驻/Agent/被引用）；`service-monitor`（只读 API 文档浏览器，无实时监听）；`wallpaper-detector`（跨平台探测但仅手动刷新）；`regex-applier` 的 Agent 面（methods 为 TODO）。
 
 ### 归并说明：上下文分析器与正则管道
 
 - **上下文分析器**：对话请求与上下文笔记 9.8 已确认（复用真实管道预览、五视图界面在 Chat UI 6.3），标 `归并已有类目`，不重复计数。
 - **正则处理管道**：管道内 `regex-processor`（`core/context-processors/regex-processor.ts:100`，priority 200）按角色与深度过滤规则，Global/Agent/User 三层配置合并（`resolveRawRules`），发送前清洗（如隐藏思维链）；渲染前转换（"自定义标签渲染"）在消息渲染器笔记的格式阶段。该能力是"上下文 DSL"聚类成员，与宏系统同族，但注入点与数据模型（`ChatRegexRule`）已由上下文类目完整解释，本次仅补三层合并细节，标 `归并已有类目` + 宏系统独立计数。
+- **ST 世界书管理器与运行时**：`st-worldbook-manager` 已确认本地持久化、详情编辑、JSON/`.lorebook` 与角色卡 PNG/AIO Bundle 导入、ST/AIO 导出、Agent/User Profile 绑定和跨窗口同步；`worldbook-processor` 会在真实请求中执行关键词/正则、selective、概率、扫描深度、过滤、递归、包含组、加权选择与位置注入。标 `归并已有类目（主链确认）`，由 Agent 角色笔记和上下文笔记承接，特色统计的 F03 已给 AIO 辅助贡献，故本篇不新增分数。兼容度要按“格式、编辑、运行、生态协议”四层判断：部分 ST 字段只有保存/编辑而没有消费链，部分锚点降级映射，`sticky/cooldown/delay` 则是运行时已支持而编辑器缺控件。
 
 ## 已归并到现有类目的能力
 
@@ -392,7 +393,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 上下文分析器 | [`../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md`](../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md) 9.8 |
 | 上下文压缩 | 同上附录 A |
 | 会话变量/快照 | 同上 9.4 + 会话与消息管理笔记 1.3 |
-| 世界书、转写注入 | 同上 9.2/9.6（世界书注入本体为 worldbook-processor 规则匹配，与 recall 语义召回不同层） |
+| 世界书管理/编辑/导入导出与运行时注入 | 同上 9.2/9.6 + [`../Agent角色/AIO-Hub-Agent角色配置调查笔记.md`](../Agent角色/AIO-Hub-Agent角色配置调查笔记.md) 5.1（`st-worldbook-manager` 与 `worldbook-processor` 主链确认；ST 兼容为可执行子集，与 recall 语义召回不同层） |
 | 知识库占位符注入点 | 同上 9.6 + 上下文编译边界研究（`knowledge-processor` 已删除，由 `recall-processor` 解析 `【recall::...】` 占位符调用 `resolvePlaceholderRetrieval`；注入点归上下文类目，Recall 领域本体由本笔记能力十承接） |
 | 工具调用基础设施（含插件注册为 ToolRegistry、VCP 协议、异步任务） | [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md) |
 | Skill 工具执行细节（路径锁定/超时） | 同上第 4/7/9 节 |
@@ -423,7 +424,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - 辅助贡献：VCP 监控面板（`入口确认`）、多运行时插件（`入口确认`）、内容查重器（`主链确认`但属工程机制辅助，建议单列）。
 - 机制贡献单独标注（不参与产品总分）：token-calculator（全局 Token 基础设施）、smart-ocr 平台层（OCR 引擎复用面）、ffmpeg-tools 跨工具回流链、资产管理器 Rust 索引、llm-inspector 流式节流。
 - 同一工作流合并计数：宏系统与正则管道同属"上下文 DSL"聚类，但管道正则已归并上下文类目，仅宏系统独立计数；快捷动作依赖宏引擎但不并入宏系统；正则预设堆叠工作台（regex-applier）与上下文管道 regex-processor 用户目标不同（用户工具 vs 请求清洗），独立计数；recall 与 worldbook 注入同属"上下文即时注入"族但事实对象与引擎不同（语义条目+向量引擎 vs 世界书文档+规则匹配），按能力族独立计数。
-- 第二梯队（`入口确认`，embedding-playground、st-worldbook-manager、media-info-reader、user-profile-manager、text-diff、api-tester、config-converter、data-filter、dir-search、directory-janitor、git-analyzer、color-picker）不进统计，待补主链。
+- 第二梯队（`入口确认`，embedding-playground、media-info-reader、user-profile-manager、text-diff、api-tester、config-converter、data-filter、dir-search、directory-janitor、git-analyzer、color-picker）不进统计，待补主链。`st-worldbook-manager` 已移出本列表并归并 F03，现有辅助贡献不变。
 
 ## 未验证事项
 
@@ -433,6 +434,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - 宏数量统计基于静态正则（`name: "..."` 匹配），可能存在个别未注册或条件注册的宏未计入；74 个是当前快照的注册面统计（knowledge 1 + recall 2）。
 - content-deduplicator 的 `fuzzy` 模糊匹配与 `minSimilarity` 已确认未实现（dead code），但自定义忽略模式是否残留 UI 入口未逐 UI 验证。
 - regex-applier 的 Agent 方法（`getFormattedTextResult`/`getFormattedFileResult`）已实现但 `getMetadata` 未暴露，属接口可用、注册未通的半成品面。
+- ST 世界书尚未用真实 V2/V3 样本完成导入、编辑、运行、导出和再导入的往返测试；`keys`/`secondary_keys` 与 `key`/`keysecondary`、`character_filter` 的归一化差异保留为兼容风险。
 
 ## 关键源码索引
 

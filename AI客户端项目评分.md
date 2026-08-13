@@ -2,7 +2,7 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-13
 >
 > 依据：各单项目调查笔记（Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布、消息渲染器等类目）及横向对比
 >
@@ -198,7 +198,7 @@
 
 以下摘要说明各项目主要拉分项和限分项。链接缩写为会话管理（C）、请求与上下文（X）、消息渲染（R）、渠道（P）、Agent 角色（A）、Agent 工具（T）和仓库分布（E）。
 
-- **AIO Hub**：stable/pending AST、Key 健康状态、富 Agent 配置和资产兼容拉高渲染、渠道、角色与生态分；文件沙箱已由 Rust 真实路径解析 + `isPathWithinRoot` 边界判断加固，审批支持可配置超时且执行端只认显式批准（fail-closed），`internal_request_file` 外部传输收紧为沙箱/审批区 + 速率窗口 + 审计，会话持久化补齐原子写、revision 校验、损坏隔离与崩溃恢复，Key 不再回退已知坏 Key；凭据明文落盘仍是主要安全限制。[C](会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md) [X](对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md) [R](消息渲染器/AIO-Hub-消息渲染器调查笔记.md) [P](LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) [A](Agent角色/AIO-Hub-Agent角色配置调查笔记.md) [T](Agent工具/AIO-Hub-Agent工具调查笔记.md) [E](仓库分布/AIO-Hub-仓库分布调查笔记.md)
+- **AIO Hub**：stable/pending AST、iframe 型 HTML/SVG/JS/Canvas 可执行消息与 Action Button、Key 健康状态、富 Agent 配置，以及带独立编辑和实际条件注入运行时的 ST 世界书兼容子集共同拉高渲染、渠道、角色与生态分；这不等于拥有 VCPChat 的完整宿主消息 SDK，也不等于复刻 SillyTavern 的全部扩展协议。文件沙箱已由 Rust 真实路径解析 + `isPathWithinRoot` 边界判断加固，审批支持可配置超时且执行端只认显式批准（fail-closed），`internal_request_file` 外部传输收紧为沙箱/审批区 + 速率窗口 + 审计，会话持久化补齐原子写、revision 校验、损坏隔离与崩溃恢复，Key 不再回退已知坏 Key；凭据明文落盘仍是主要安全限制。[C](会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md) [X](对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md) [R](消息渲染器/AIO-Hub-消息渲染器调查笔记.md) [P](LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) [A](Agent角色/AIO-Hub-Agent角色配置调查笔记.md) [T](Agent工具/AIO-Hub-Agent工具调查笔记.md) [E](仓库分布/AIO-Hub-仓库分布调查笔记.md)
 - **AstrBot**：九阶段 IM 流水线、统一消息组件、多能力 Provider 实例和四路工具注册形成完整机器人框架；桌面场景不适用，平台转换分叉、默认成员权限和 Dashboard 返回完整 Key 构成主要限制。[C](会话与消息管理/AstrBot-会话与消息管理调查笔记.md) [X](对话请求与上下文/AstrBot-对话请求与上下文调查笔记.md) [R](消息渲染器/AstrBot-消息渲染器调查笔记.md) [P](LLM渠道管理/AstrBot-LLM渠道管理调查笔记.md) [A](Agent角色/AstrBot-Agent角色配置调查笔记.md) [T](Agent工具/AstrBot-Agent工具调查笔记.md) [E](仓库分布/AstrBot-仓库分布调查笔记.md)
 - **Chatbox**：typed parts、虚拟列表、Provider 注册表、会话快照和不可绕过的高风险审批类别使主路径均衡；工具取消可精确定位进程树（`killProcessTree`/按 `toolCallId` 取消）、暂停恢复保留已完成工具上下文、25 步确认点可按会话或全局关闭、MCP 日志剔除疑似密钥；Windows 无 OS 隔离、工具名静默冲突、Copilot 能力边界较窄和完整配置备份含凭据仍是限制上限。[C](会话与消息管理/Chatbox-会话与消息管理调查笔记.md) [X](对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md) [R](消息渲染器/Chatbox-消息渲染调查笔记.md) [P](LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md) [A](Agent角色/Chatbox-Agent角色配置调查笔记.md) [T](Agent工具/Chatbox-Agent工具调查笔记.md) [E](仓库分布/Chatbox-仓库分布调查笔记.md)
 - **Cherry Studio**：SQLite 消息树、流式 overlay、结构化 parts、Provider/Endpoint/Adapter 分层和大规模测试资产形成完整客户端底座；工具轮次上限默认 100、MCP 在途调用可随流中止、同轮审批可连续推进、分支草稿持久化为空叶子、备份 v7 已覆盖 SQLite（凭据随备份扩散，命中 `SECRET_EXPOSURE` 触发条件）；普通聊天与 Agent 双链、主进程工具执行、`acceptEdits` 首词匹配仍是限分项，跨 Provider 高可用仅以默认关闭的可配置重试/fallback 部分缓解。[C](会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md) [X](对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) [R](消息渲染器/Cherry-Studio-消息渲染调查笔记.md) [P](LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) [A](Agent角色/Cherry-Studio-Agent角色配置调查笔记.md) [T](Agent工具/Cherry-Studio-Agent工具调查笔记.md) [E](仓库分布/Cherry-Studio-仓库分布调查笔记.md)

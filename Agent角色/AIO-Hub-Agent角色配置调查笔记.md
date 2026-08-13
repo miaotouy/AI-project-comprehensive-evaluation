@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-13
 >
 > 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、导入导出、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
+> 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、SillyTavern 角色卡及世界书的导入、编辑、导出与运行时处理器、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
 >
 > 调查范围：Agent/角色能配置什么、实际拥有什么能力、内置角色偏好的方向，以及预设如何导入和运行
 >
@@ -26,6 +26,8 @@ AIO Hub 的 Agent 不是单独的一段 system prompt，而是一个可保存、
 从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 `ChatAgent`，模型选择、采样参数、上下文限制/压缩和预设消息会随 Agent 配置持久化，而不是只在当前聊天窗口临时生效。
 
 在本次十六个项目的统一调查范围内，AIO Hub 是**一体化 Agent 预设配置能力最强、编辑入口最完整**的项目。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层；AIO 则把消息配方、模型与参数、知识、工具、变量、资产和显示规则集中在同一个 Agent 对象及其编辑器中。
+
+这里也不能把 AIO 概括为“只导入酒馆角色卡”。当前快照有独立的世界书管理器、条目编辑器、导入导出服务和进入真实请求管道的 `worldbook-processor`。它实现的是一套可编辑、可绑定 Agent/User Profile、可条件激活并注入上下文的 **SillyTavern 兼容子集**。SillyTavern 仍领先于社区资产规模、扩展/事件协议和 World Info 全语义覆盖；这是生态与兼容完整度的差距，不等于 AIO 缺少角色创作或世界书运行能力。
 
 它的会话继承也不是单一的“快照”或“全局覆盖”：开场白在会话真正开始后固化，旧消息和旧回复保持不变；后续发送、续写与重新生成则读取 Agent 当前配置，并以新分支保存结果。这一混合语义明显偏向调试效率，允许用户在同一段历史上修改配置后立即重试比较。
 
@@ -241,6 +243,19 @@ Agent 可以关联 `worldbookIds`，并配置：
 
 世界书适合角色背景、地点、人物和世界规则等按关键词动态注入的 lore。
 
+这条链不止保存 `worldbookIds` 引用。`st-worldbook-manager` 提供本地持久化、列表和详情编辑、JSON/`.lorebook` 导入导出，并可从 SillyTavern PNG 角色卡或 AIO Bundle 提取世界书；世界书还能绑定 Agent 与 User Profile，通过跨窗口事件同步修改。聊天请求中的 `worldbook-processor` 会合并全局、用户档案与 Agent 绑定，再完成扫描、激活、递归和位置注入。因此它应判断为“有独立编辑器和运行时的兼容实现”，不是导入后只保留数据。
+
+为避免把“字段存在”“UI 可编辑”和“在 AIO 中生效”混为一谈，当前静态证据可分为四层：
+
+| 兼容状态 | 已确认范围 |
+| --- | --- |
+| 可编辑且运行时生效 | 主/次关键词、正则关键词、selective 逻辑、constant、概率、扫描深度、大小写与全词匹配、角色名/名称/标签过滤、递归激活、`preventRecursion`、延迟递归层级、包含组与加权选择、group override，以及严格 `depth` 注入 |
+| 运行时生效，但当前编辑器未提供完整控件 | `sticky`、`cooldown`、`delay`；类型与处理器已消费，详情编辑器未找到对应操作项 |
+| 可保存或部分可编辑，但未确认被运行时消费 | `automationId`、trigger filtering、`excludeRecursion`、`ignoreBudget`、`useGroupScoring`、vectorized 状态；`Outlet` 可编辑/导出并保留在共享数据中，但未找到按 `outletName` 继续消费的注入链 |
+| 降级映射或兼容边界 | Before/After Char、AN、EM 等锚点会映射到 AIO 的消息结构，不能视为酒馆原位置语义的逐项复刻；酒馆扩展事件、脚本协议和全部 World Info 字段也没有形成等价运行时 |
+
+还有几个 UI/类型差异需要保留：`characterFilter.tags` 在类型和运行时存在，当前编辑器只绑定 `names`；`useProbability` 会被运行时检查，但 UI 主要暴露概率值。导入归一化当前读取 `key`/`keysecondary`，导出则使用常见 ST 的 `keys`/`secondary_keys`，`character_filter` 的 snake_case 归一化也未见完整覆盖。它们需要用真实 V2/V3 样本做往返验证，目前只能记为兼容风险，不能据此断言所有导入都会失败。
+
 ### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
 旧 `knowledgeBaseConfig`/`knowledgeSettings` 字段已从 `AgentBaseConfig` 移除，拆为三个字段（`agent-manager/types/agent.ts:464-470`）：
@@ -358,7 +373,7 @@ Agent 导出结构 `AIO_Agent_Export` 会剥离本地实例字段（`id`、`prof
 - 关联世界书，选择独立文件或内嵌内容；
 - ZIP、文件夹、单文件或带数据的 PNG 包。
 
-配置向导还说明了 SillyTavern 角色卡的兼容路径：可导入 JSON/PNG 角色卡、嵌入式 Character Book、Context Preset 和 Regex Scripts，并映射为 AIO Hub 的预设消息、世界书和正则配置。导入后的模型选择仍需在 AIO Hub 实例侧解决，不应假定来源角色卡携带的模型 ID 在本地存在。
+配置向导还说明了 SillyTavern 角色卡的兼容路径：可导入 JSON/PNG 角色卡、嵌入式 Character Book、Context Preset 和 Regex Scripts，并映射为 AIO Hub 的预设消息、世界书和正则配置。世界书并非导入后静态存档，独立管理器可继续编辑和导出，受支持字段会由 `worldbook-processor` 在后续请求中激活和注入。导入后的模型选择仍需在 AIO Hub 实例侧解决，不应假定来源角色卡携带的模型 ID 在本地存在；未被 AIO 运行时消费的扩展字段即使得到保留，也不会自动获得酒馆中的行为。
 
 ### 9.3 既有会话实时读取 Agent 当前配置
 
@@ -414,6 +429,11 @@ AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元
 - `aio-hub/src/tools/llm-chat/composables/chat/useSingleNodeExecutor.ts`：记录当次实际请求参数快照。
 - `aio-hub/src/tools/llm-chat/composables/session/useNodeManager.ts`：重新生成复用同一用户节点并创建助手兄弟分支。
 - `aio-hub/src/tools/agent-manager/config/defaultAgentTemplate.ts`：新建 Agent 默认身份和模型参数。
+- `aio-hub/src/tools/st-worldbook-manager/types/worldbook.ts`：世界书、条目、位置、过滤、递归与兼容字段类型。
+- `aio-hub/src/tools/st-worldbook-manager/components/WorldbookDetail.vue`：世界书详情与条目编辑面；可据此区分类型支持和 UI 控件覆盖。
+- `aio-hub/src/tools/st-worldbook-manager/services/worldbookImportService.ts`：JSON、`.lorebook`、PNG 角色卡与 AIO Bundle 导入、字段归一化。
+- `aio-hub/src/tools/st-worldbook-manager/services/worldbookExportService.ts`：AIO/ST 格式导出与字段映射。
+- `aio-hub/src/tools/llm-chat/core/context-processors/worldbook-processor.ts`：世界书合并、扫描、条件激活、递归、组选择与上下文注入主链。
 - `aio-hub/src/tools/agent-manager/stores/agentStore.ts`：Agent 更新与持久化调用链。
 - `aio-hub/src/tools/agent-manager/composables/storage/useAgentStorage.ts`：`agent.json`、索引文件和 AppData 路径。
 - `aio-hub/src/tools/agent-manager/components/agent-editor/agentEditConfig.ts`：编辑器实际配置分组。
@@ -424,4 +444,4 @@ AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元
 
 ## 12. 调查边界
 
-本篇关注“配置模型与角色能力”，没有把具体工具 registry 的每一个方法当作 Agent 配置字段逐项展开；工具的本地执行位置、文件权限和分布式 VCP 风险应以 [AIO-Hub-Agent工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md) 为准。内置预设也没有为每个 Agent 配置完整的工具清单，因此不能从角色名称推断它一定拥有某项工具能力。
+本篇关注“配置模型与角色能力”，没有把具体工具 registry 的每一个方法当作 Agent 配置字段逐项展开；工具的本地执行位置、文件权限和分布式 VCP 风险应以 [AIO-Hub-Agent工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md) 为准。内置预设也没有为每个 Agent 配置完整的工具清单，因此不能从角色名称推断它一定拥有某项工具能力。SillyTavern 兼容结论来自静态类型、编辑器和处理器核对，尚未使用一组真实 V2/V3 角色卡与世界书完成导入、编辑、运行、导出、再导入的往返测试。

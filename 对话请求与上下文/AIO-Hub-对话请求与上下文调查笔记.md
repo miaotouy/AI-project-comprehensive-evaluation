@@ -2,11 +2,11 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-13
 >
 > 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
-> 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
+> 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令），并补充核对 ST 世界书类型、编辑/导入导出链与请求期处理器
 >
 > 调查范围：生成任务的提交入口、上下文拼装管道、预算与压缩、流式消费与节流落盘、完成与回写、停止/重试/续写执行链、队列与并发、外部能力注入点；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -128,10 +128,10 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
 
 | 功能 | 当前快照中确认的实现（注入点） |
 | --- | --- |
-| 世界书 | `worldbook-processor`（priority 300）合并全局、用户档案和 Agent 绑定的世界书，按扫描深度、关键词和递归条件匹配，再按 depth/anchor 位置注入。 |
+| 世界书 | `worldbook-processor`（priority 300）合并全局、用户档案和 Agent 绑定的世界书，执行主/次关键词与正则匹配、selective/constant/概率、扫描深度、角色/名称/标签过滤、递归与延迟递归、sticky/cooldown/delay、包含组和加权选择，再按严格 depth 或降级 anchor 位置注入。这是 `st-worldbook-manager` 编辑/导入数据的真实运行主链，不是只保存兼容字段。部分 ST 扩展字段仍只有表示/编辑能力，未找到运行时消费。 |
 | Recall 思绪检索 | `recall-processor`（priority 450）解析 `【recall::...】` 严格占位符协议（`recall-placeholder.ts` 校验编码/参数/数值范围），执行检索并替换；Agent 配置 `autoInjectIfMacroMissing` 时按未引用绑定自动注入占位符到 `context_head` 或 `before_last_user`（`recall-processor.ts:151,180`）。原 `knowledge-processor` 已删除，旧 `【kb::...】`/`【knowledge::...】` 占位符只记录"已废弃"警告、不再执行检索。 |
 | Skill 集成 | `skill-manager` 的 `SkillManagerProxy` 以 `skill:system` 注册到工具调用系统，提供动态激活及 `skill_read_file`/`skill_list_dir`/`skill_run_script`；复用 9.5 的审批/工具循环，不是独立消息协议。 |
-| SillyTavern 兼容 | `sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V3 角色卡 JSON/PNG、提示词 `prompt_order` 和部分正则/宏；快捷操作导入还兼容 SillyTavern Quick Reply 格式（导入数据语义在会话管理 7.2）。 |
+| SillyTavern 兼容 | `sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V3 角色卡 JSON/PNG、提示词 `prompt_order` 和部分正则/宏；快捷操作导入还兼容 SillyTavern Quick Reply。独立 `st-worldbook-manager` 提供世界书编辑、持久化、JSON/`.lorebook` 与角色卡 PNG/AIO Bundle 导入、导出和 Agent/User Profile 绑定，受支持字段由上行 `worldbook-processor` 实际执行。兼容是可运行子集，不是完整复刻酒馆扩展/事件协议。 |
 
 ### 9.7 独立生成请求：消息翻译
 
