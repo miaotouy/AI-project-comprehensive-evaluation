@@ -6,21 +6,28 @@
 >
 > 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对（Grep + Read 全文阅读），逐条标注文件+行号；查无实据的方向直接写"未找到"
+> 调查方式：基于当前 HEAD 的静态源码核对（Grep + Read 全文阅读），逐条标注文件+行号；查无实据的方向直接写"未找到"。补充调查沿用同一方法，聚焦加载态/空状态、错误边界、主题首帧与状态所有权四块缺口；本次主题体系核对（主题选择器能力边界、主题文件结构、壁纸/字号/主题导入导出）沿用同一方法，检索范围在对应条目内注明
 >
-> 调查范围：弹窗（通用 Modal/确认对话框/头像裁剪器）、Toast 两套机制、主题整窗口重载、图片查看器子窗口、表情包选择器、快捷键清单、动画、托盘与语音窗口、侧栏与 Compact 导航、全局设置分区、无障碍盘点；聊天主链交点（发送/停止、消息操作、现场恢复等）由 [`../Chat UI/VCPChat-ChatUI调查笔记.md`](<../Chat UI/VCPChat-ChatUI调查笔记.md>) 承接
+> 调查范围：弹窗（通用 Modal/确认对话框/头像裁剪器）、Toast 两套机制、主题整窗口重载、图片查看器子窗口、表情包选择器、快捷键清单、动画、托盘与语音窗口、侧栏与 Compact 导航、全局设置分区、无障碍盘点；补充：Loading/骨架屏/空状态盘点（全仓 CSS 检索 + `modules/` 加载逻辑核对）、错误边界（渲染层全局错误挂载、主进程 crash/加载失败监听）、主题首帧应用链路、状态所有权清单；本次补充：主题体系核对（主题选择器窗口内容与能力边界、17 个主题文件结构与元数据、壁纸机制边界、字号/密度、主题导入导出、双主题模式 IPC 通道）；聊天主链交点（发送/停止、消息操作、现场恢复等）由 [`../Chat UI/VCPChat-ChatUI调查笔记.md`](<../Chat UI/VCPChat-ChatUI调查笔记.md>) 承接
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-VCPChat 的界面基础设施全部自定义，不依赖任何第三方 UI 库：弹窗是 `uiHelperFunctions.openModal` 的 `<template>` 懒加载 Modal + `showConfirmDialog` Promise 确认对话框 + Canvas 头像裁剪器三套；通知是浮动 Toast 与持久侧栏列表两套并行机制（无系统 `Notification` API）；主题切换是**整份覆写 `themes.css` 文件后整窗口 `reload()`**，不是 CSS 变量热替换；图片预览是独立 Electron 子窗口（带缩放、绘图、OCR），不是内嵌灯箱；Compact 导航由设置字段显式控制，不是宽度断点自动触发。无障碍处于初步阶段：核心控件有基础 ARIA，主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，无焦点陷阱。
+VCPChat 的界面基础设施全部自定义，不依赖任何第三方 UI 库：弹窗是 `uiHelperFunctions.openModal` 的 `<template>` 懒加载 Modal + `showConfirmDialog` Promise 确认对话框 + Canvas 头像裁剪器三套；通知是浮动 Toast 与持久侧栏列表两套并行机制（无系统 `Notification` API）；主题切换是**整份覆写 `themes.css` 文件后整窗口 `reload()`**，不是 CSS 变量热替换；图片预览是独立 Electron 子窗口（带缩放、绘图、OCR），不是内嵌灯箱；Compact 导航由设置字段显式控制，不是宽度断点自动触发。无障碍处于初步阶段：核心控件有基础 ARIA，主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，无焦点陷阱。主题能力边界（本次核对）：主题选择器只做"选择+应用"，无自定义主题编辑器与导入/导出；主窗口壁纸随主题文件固定、无壁纸管理 UI（Desktop 窗口另有一套独立壁纸系统）；无字号/密度设置。
 
 ## 系统边界与总体装配
 
 - **界面栈**：Electron 主进程 + 渲染进程原生 JS（无前端框架）；多子窗口：主题选择器（独立 850×700 无框子窗口）、图片查看器、语音聊天、便签（note-mini）等。
 - **弹窗机制**：`modules/ui-helpers.js` 的 `uiHelperFunctions`（openModal/closeModal/showConfirmDialog/showToastNotification）；Modal 元素用 `<template>` 懒加载，打开时从同名 `<template id="...Template">` 克隆到 `#modal-container`，再派发 `modal-ready` 自定义事件（`:339`）通知各模块绑定事件监听器。
 - **状态所有权**：主题模式在 `settings.json` 的 `currentThemeMode`；侧栏状态（折叠、宽度）由渲染进程设置持久化；消息与话题历史见会话与消息管理笔记。
+
+**状态所有权清单**（补充调查核对）：
+
+- **主题**（`settings.json.currentThemeMode`）：权威值在主进程——`themeHandlers.js:22-39` 经 `set-theme-mode` IPC 写入并设 `nativeTheme.themeSource`，`handleGetCurrentTheme` 读 `nativeTheme.shouldUseDarkColors`（`:46-48`）；渲染层启动时自行读设置后经同一 IPC 触发统一广播回环，不直接改 CSS（见第 4 节首帧链路）。
+- **侧栏状态**（`settings.json.sidebarWidth`/`notificationsSidebarWidth`/`sidebarAvatarOnly`）：渲染进程持有并持久化——宽度在拖拽结束时写内存设置再 `electronAPI.saveSettings` 落盘（`uiManager.js:143-154`），avatarOnly 开关同样走设置保存（`event-listeners.js:1303-1337`）；主进程只负责文件读写，不消费该字段。
+- **Toast/通知**：主进程只转发 VCP 日志事件（`renderer.js:523-537` 的 `onVCPLogMessage`），展示状态由渲染层 `modules/notificationRenderer.js` 单例持有（浮动 Toast 与侧栏双通道，`renderVCPLogNotification` `:67`、`isToast` 分支 `:248`），无持久化、无跨窗口同步；应用内部反馈走独立的 `uiHelperFunctions.showToastNotification`（`ui-helpers.js:367-415`），不进入 VCP 通知通道。
+- **弹窗**：命令式 UI 由 `uiHelperFunctions`（openModal/closeModal/showConfirmDialog，`ui-helpers.js:323-360, 889-977`）持有与销毁，无全局 store；Modal 的 DOM 生命周期（从 `<template>` 克隆到 `#modal-container`、关闭移除）由该模块管理。
 
 ## 1. 界面栈、公共组件与状态所有权
 
@@ -50,13 +57,52 @@ VCPChat 的界面基础设施全部自定义，不依赖任何第三方 UI 库�
 
 `uiHelperFunctions.showToastNotification`（`modules/ui-helpers.js:367-415`）是面向应用内部的简化版 Toast，支持 `type`（`info/success/error/warning`）和自定义 `duration`（默认 3000ms），写法与上面相同。
 
+**加载态（Loading）**（补充调查）：
+
+- **应用启动**：批处理启动原生启动屏 `NativeSplash.exe`（`main.js:660` 注释说明由批处理拉起），显示 `splash.html` 的"正在初始化, 请稍候..."文字 + 伪进度条（`@keyframes pseudo-load` 按 10%/30%/70%/100% 假进度推进，`splash.html:92-98, 102-110`）；主窗口 `did-finish-load` 时生成 `.vcp_ready` 信号文件供启动屏退场（`main.js:438-446`）。
+- **Agent/群组列表加载中**：`itemListManager.js:923` 插入 `<li><div class="loading-spinner-small"></div>加载列表中...</li>`。
+- **话题列表加载中**：`topicListManager.js:540` 插入 `<div class="loading-spinner-small"></div>正在加载 X 的话题...`；群组话题分支是纯文本 `<p>正在加载群组 X 的话题...</p>`（`Groupmodules/grouprenderer.js:983`）。
+- **聊天记录加载中**：以 `isThinking: true` 的 system 消息渲染"加载聊天记录中..."（`chatManager.js:606`），内容加 `.thinking-indicator`/`.thinking-indicator-dots` 三点位文本动画（`messageRenderer.js:3263-3265`，`vcp-loading-dots` 1.4s，`styles/messageRenderer.css:111-120`）；加载完成/失败/中途切换时 `removeMessageById('loading_history')`（`chatManager.js:608-637`）。
+- **聊天搜索**：纯文本"正在努力搜索中..."（`searchManager.js:236`）。
+- **图片查看器**：无加载动画——`<img>` 默认 `display:none`（`image-viewer.html:496`），`onload` 后才显示图片并启用工具栏（`image-viewer.js:454-458`）；加载失败切错误占位并隐藏工具栏（`:578-584`）。
+- **检查范围与结论**：全仓 `*.css` 检索 `loading|spinner|skeleton|骨架|加载中` + `modules/` 下加载逻辑逐一核对。**本次未找到**骨架屏（skeleton）组件；唯一的旋转指示类 `.loading-spinner-small` 在全仓所有 `*.css`（含主题文件）中**无样式定义**，即话题/列表加载期只有文字提示、无可见动画。
+
+**空状态**（补充调查）：
+
+- **Agent/群组列表为空**：`<li>没有找到Agent或群组。请创建一个。</li>`（`itemListManager.js:888`）。
+- **话题列表**：未选择项目 → "请先在'助手与群组'列表选择一个项目以查看其相关话题。"（`topicListManager.js:527`）；无话题 → "X 还没有任何话题…点击上方的'新建…'按钮创建一个。"（`:603`）；配置加载失败 → 内联错误文本（`:556`）。
+- **聊天区**：无选中项目 → `welcome-bubble`"欢迎，请从左侧选择 AI 助手或群组，或创建新的对话。"（`chatManager.js:340`）；有项目无话题 → "请选择或创建一个话题以开始聊天。"（`:599`）；历史加载失败 → system 消息（`:643`）。
+- **聊天搜索**：输入不足 2 字符提示（`searchManager.js:227`）、无结果"未找到匹配的结果。"（`:384`）、错误占位（`:373`）。
+- **通知侧栏**：`#notificationsList` 为空时无专门占位（`main.html:724` 是空 `<ul>`，`notificationRenderer` 无空态文案）。表情包空态"没有找到可用的表情包"见第 2 节。
+
+**错误边界**（补充调查）：
+
+- **渲染进程**：在 `renderer.js`、`modules/`、`preload.js` 检索 `window.onerror`、`addEventListener('error')`、`unhandledrejection`——**本次未找到**任何全局错误挂载；`DOMContentLoaded` 初始化的大 try/catch 只 `console.error`（`renderer.js:1155-1157`）。用户可见的错误呈现分散在各业务路径：聊天区 system 消息（`chatManager.js:643`）、列表内联错误占位（`topicListManager.js:556`、`searchManager.js:373`）、`showToastNotification(..., 'error')`（如 `renderer.js:1519, 1822, 2510`），无统一错误收集或上报。
+- **主进程**：`main.js:409-411` 监听 `webContents 'did-fail-load'`、`:413-415` 监听 `render-process-gone`，**都只 `console.error`，无恢复动作或用户提示**；未发现 `uncaughtException`、`unresponsive`、旧版 `webContents.on('crashed')` 监听（检索 `main.js` 与 `modules/ipc/` 无匹配）。`dialog.showErrorBox` 只用于具体功能失败（骰子服务 `modules/ipc/diceHandlers.js:46`、音乐引擎 `musicHandlers.js:71`、图片复制 `fileDialogHandlers.js:296-336`），不是崩溃级兜底。
+
 ## 4. 主题、视觉 token 与持久化
 
 主题切换**不是 CSS 变量热替换，而是整窗口重载**：`handleApplyTheme`（`modules/ipc/themeHandlers.js:93-108`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后调用 `mainWindow.reload()`（`:101`）和 `themesWindow.reload()`（`:103`），窗口完整重新加载。
 
 - 深色/浅色通过 Electron `nativeTheme.themeSource` 控制（`:22-38`），可设 `'light'`/`'dark'`/`'system'`，值存入 `settings.json` 的 `currentThemeMode`。系统主题跟随通过监听 `nativeTheme.on('updated')`（`:41-44, :207`），变更时向所有窗口广播 `theme-updated` IPC，渲染进程收到后切换 `body.light-theme` class。
 - CSS 变量约定：`:root` 块定义暗色主题变量，`body.light-theme` 块覆盖亮色变量；每个主题文件同时包含两个块，`themeHandlers.handleGetThemes` 可枚举所有主题及其变量名（`:50-91`）。主题选择器是独立 850×700 无框子窗口（`Themesmodules/themes.html`，`frame: false`，`:169`）。
-- 默认 `styles/themes.css` 已更换为"纸墨与机器芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink，提交 `ac27171`"上架全新 vchat 默认主题（对齐官网配色）"），新增 `--chat-wallpaper-dark/light` 壁纸变量与两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机器芯.css`）。切换机制（整窗口重载覆写）未变。
+- 默认 `styles/themes.css` 已更换为"纸墨与机芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink，提交 `ac27171`"上架全新 vchat 默认主题（对齐官网配色）"），新增 `--chat-wallpaper-dark/light` 壁纸变量与两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机芯.css`）。切换机制（整窗口重载覆写）未变。
+
+**首帧主题应用与防闪烁**（补充调查）：
+
+- `main.html` 的 `<body>`（`:31`）无预置 class，页面首个样式帧使用 `styles/themes.css` 的 `:root` 块（暗色默认变量）。**主题模式由渲染进程自行读取 settings.json 后经 IPC 下发主进程**，不是主进程启动时推送：`renderer.js:966` 先 `loadAndApplyGlobalSettings()` 加载设置，再 `uiManager.init`（`:971`）→ `initializeTheme()`（`uiManager.js:577`）→ 读渲染层持有的 `globalSettingsRef.currentThemeMode`（`:203-209`）→ `electronAPI.setTheme(mode)`（IPC `set-theme-mode`）→ 主进程设 `nativeTheme.themeSource` 并写回 settings.json（`themeHandlers.js:22-39`）→ `nativeTheme 'updated'` 触发广播 `theme-updated`（`:41-44, :207, :219-229`）→ 渲染层 `applyTheme()` 加/去 `body.light-theme`（`uiManager.js:165-184`）。
+- 因此 `body.light-theme` 的施加要等"读设置 → IPC → nativeTheme 回环"这一异步往返完成；**light 模式用户首帧先以暗色 `:root` 渲染一帧再切换**（基于调用链的静态推断，是否肉眼可见取决于往返耗时）。`main.js:420` 注释自述："默认 system，由渲染进程启动时发送已保存偏好"。设置缺失时降级：`get-current-theme` IPC 查主进程（`uiManager.js:213-221`），最终兜底 'light'（`:219, :167-169`）。
+- 与整窗口重载的关系：主题文件切换（`handleApplyTheme`）`reload()` 后上述启动链路整体重跑一遍，首帧主题行为与冷启动一致，无内联主题脚本兜底。
+
+**主题选择器窗口与能力边界**（本次主题体系核对）：
+
+- **主题选择器内容**（`Themesmodules/themes.html` + `themes.js` + `themes-module.css`）：入口有主窗口标题栏"主题商店"按钮（`main.html:37-45`）、托盘菜单（`modules/trayManager.js:33`）与 Desktop 窗口（`Desktopmodules/builtinWidgets/vchatApps.js:314`）三处。窗口由主题卡片网格 + 实时预览区 + "应用并刷新"按钮组成：卡片是**双栏预览**——左半用解析出的暗色变量（`--secondary-bg` 底色 + 暗色壁纸）、右半用亮色变量（`--primary-bg` + 亮色壁纸），`themes.js:74-119`；下方实时预览区同构模拟侧栏/内容区（`:136-219`）。**无主题编辑器**：不能编辑颜色、不能新建自定义主题；`#saveThemeBtn`（`:222-226`）实际只是调用 `applyTheme` IPC 应用选中主题——变量名 `saveThemeBtn`（"保存主题"）与按钮文案"应用并刷新"存在落差，注意勿误读为保存自定义主题。
+- **无主题导入/导出**：检索全仓 `*.js/*.html` 的 `customTheme/importTheme/exportTheme/saveTheme` 与主题 JSON 文件均未找到（`saveTheme` 仅上述按钮标识符一处）；主题就是 `styles/themes/` 下的 CSS 文件，切换机制即覆写 `themes.css`，无打包、分享、导出主题文件的能力。**本次未找到**自定义主题能力。
+- **主题文件结构与元数据**：17 个文件均为纯 CSS 变量文件，实测 17/17 同时含 `:root`（暗色）与 `body.light-theme`（亮色）两个变量块；变量分六组：壁纸、基础色（bg/边框/输入框）、文字色、气泡色、UI 元素与语义色（按钮/危险/成功/通知/工具）、滚动条与 shimmer。**无独立预览图文件**——选择器卡片与预览区的颜色全部取自 `handleGetThemes` 解析出的变量（`themeHandlers.js:50-91`），壁纸取自 `--chat-wallpaper-*`。主题名元数据为 `* Theme Name: ` 注释（`:59`），但 17 个文件中仅 3 个（themesEva/夜樱猫语/星渊雪境）声明，其余回退为文件名去掉 `themes` 前缀。
+- **壁纸机制边界**：主窗口**无壁纸管理 UI**——`--chat-wallpaper-dark/light` 随主题文件固定（`themes.css:75-80`、`styles/base.css:29`），壁纸图片打包在 `assets/wallpaper/`（26 个文件），用户不能换图；主题选择器的壁纸预览经 `get-wallpaper-thumbnail` IPC（`themeHandlers.js:111-157`）用 sharp（懒加载）生成 400px JPEG 缩略图，缓存于 `WallpaperThumbnailCache` 目录。**另有独立于主题壁纸的 Desktop 窗口壁纸系统**（VCPdesktop，`Desktopmodules/ui/globalSettings.js:21-31, 186+`）：支持图片/视频(mp4)/HTML 动态壁纸，含启用开关、透明度、模糊、亮度、视频静音/倍速参数，本地选图（`desktop-select-wallpaper`/`desktop-read-wallpaper-thumbnail`/`vchat-wallpaper-select-directory` IPC）与远程下发（`modules/ipc/desktopRemoteHandlers.js:342` 的 `desktop-remote-set-wallpaper`，接受 URL/`file://`/内联 HTML 三种源）两条路径——与聊天窗口主题壁纸是两套机制。
+- **主题模式双 IPC 通道**：除 `set-theme-mode`（`themeHandlers.js:22-39`，light/dark/system）外，`modules/ipc/settingsHandlers.js:278-297` 另注册 `set-theme`（仅 light/dark，成功后手动 `broadcastThemeUpdate`）；两条通道都会写 `settings.json` 的 `currentThemeMode` 与 `themeLastUpdated: Date.now()`（`themeHandlers.js:31`、`settingsHandlers.js:287`），后者为本次核对新确认的持久化字段。
+- **主题文件可不只是变量**：默认主题"纸墨与机芯"的 `themes.css` 还携带材质与行为规则（`:147-357`）：磨砂面板 `backdrop-filter`、气泡描边/阴影、流式脉冲动画 `vcpOperationalPulse`/`editorialProofPulse`、滚动条、`:focus-visible` 焦点环、`prefers-reduced-motion` 兜底，并声明 `color-scheme: dark/light`——整窗口重载覆写同样会切换这些规则；其余 16 个文件以变量为主、偶带少量增强规则（如 themesEva 的磨砂气泡）。即"主题文件"由"变量 + 可选材质/行为规则"组成，非纯 token 文件。
+- **字号/密度**：全局设置只有字体族预设（正文/代码/日记/工具四类 + 自定义 `font-family`，`main.html:998-1099`，含场景预览网格 `#fontScenarioPreviewGrid`），**无字号与界面密度设置**（检索"字号/字体大小/fontSize/density"未找到用户入口）；基础字号固定 `styles/base.css:19`（15px）。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -161,6 +207,7 @@ VCPChat 的界面基础设施全部自定义，不依赖任何第三方 UI 库�
 - **无焦点陷阱**：通用 Modal 与确认对话框均无 focus trap，Tab 可穿透到背景。
 - **表情包插入原始 `<img>` HTML**：不是转义后的 Markdown 语法。
 - **Compact 导航由设置驱动**而非断点自动触发；侧栏宽度从 CSS computed 值动态读取而非代码硬编码。
+- **主题仅能整包更换**：无主题编辑器与导入/导出，自定义主题需手工编写或替换 `styles/themes/` 下的 CSS 文件；主窗口壁纸与主题绑定、无独立壁纸管理（Desktop 窗口壁纸系统独立于主题壁纸，支持视频/HTML 动态壁纸与远程下发）。
 
 ## 9. 未验证事项
 
@@ -169,7 +216,11 @@ VCPChat 的界面基础设施全部自定义，不依赖任何第三方 UI 库�
 - 主题整窗口重载的白屏表现、Presentation mode 切换的 CSS transition 是否实际存在未逐一确认。
 - OCR（Tesseract.js 懒加载）在复杂图片上的识别效果未实测。
 - macOS 托盘与语音窗口的实机行为未验证（代码路径已读，平台行为需运行验证）。
+- 首帧主题：light 模式启动时先以暗色 `:root` 渲染一帧再切亮色（基于调用链静态推断），实际闪烁表现未运行验证。
+- `.loading-spinner-small` 无任何 CSS 定义，话题/Agent 列表加载期实际只有文字、无旋转动画——该视觉表现未运行确认，也不排除有动态注入样式覆盖。
+- 渲染进程崩溃（`render-process-gone`）与主窗口加载失败（`did-fail-load`）只打日志、无恢复 UI，崩溃后的实际行为（白屏、能否重启）未实测。
+- 主题选择器卡片/预览区的双栏配色与壁纸缩略图（sharp 生成、`WallpaperThumbnailCache` 缓存命中）的实际渲染表现未运行验证；Desktop 窗口壁纸系统（视频/HTML 动态壁纸、远程下发 `desktop-remote-set-wallpaper`）的实机表现未验证。
 
 ## 10. 关键源码索引
 
-`modules/ui-helpers.js`（323-360 openModal、367-415 showToastNotification、460-626 头像裁剪器、889-977 showConfirmDialog）、`modules/notificationRenderer.js`、`modules/ipc/themeHandlers.js`、`styles/themes.css`、`styles/animations.css`、`modules/image-viewer.html` / `modules/ipc/windowHandlers.js`（155-181 copy-gif）、`modules/emoticonManager.js`、`modules/event-listeners.js`（1461-1523 应用内快捷键）、`main.js`（454-555 托盘、1160-1164 全局快捷键）、`modules/uiManager.js`（48-130 侧栏宽度、382-451 compact 抽屉）、`modules/global-settings-manager.js`（38-106 设置分区）、`modules/settingsManager.js`（604-660 鼠标快捷操作）、`renderer.js`（1577 sidebarAvatarOnly）、`main.html`（47-53、239、374、394 无障碍标注）。
+`modules/ui-helpers.js`（323-360 openModal、367-415 showToastNotification、460-626 头像裁剪器、889-977 showConfirmDialog）、`modules/notificationRenderer.js`、`modules/ipc/themeHandlers.js`（22-39 set-theme-mode、50-91 getThemes、93-108 applyTheme、111-157 壁纸缩略图）、`modules/ipc/settingsHandlers.js`（278-297 set-theme 通道）、`Themesmodules/themes.html` / `themes.js`（双栏预览卡片与"应用并刷新"、无编辑器）、`styles/themes.css`（变量 + 材质/行为规则）、`styles/base.css`（19 基础字号、29 壁纸）、`styles/animations.css`、`modules/image-viewer.html` / `modules/ipc/windowHandlers.js`（155-181 copy-gif）、`modules/emoticonManager.js`、`modules/event-listeners.js`（1461-1523 应用内快捷键）、`main.js`（409-415 加载失败与渲染进程崩溃日志、454-555 托盘、1160-1164 全局快捷键、419-420 主题默认 system、438-446 启动就绪信号）、`modules/uiManager.js`（48-130 侧栏宽度、143-154 宽度持久化、165-184 applyTheme、190-223 主题初始化、382-451 compact 抽屉）、`modules/global-settings-manager.js`（38-106 设置分区）、`modules/settingsManager.js`（604-660 鼠标快捷操作）、`renderer.js`（966/971 启动顺序、1155-1157 初始化错误、1577 sidebarAvatarOnly）、`main.html`（37-45 主题商店入口、47-53/239/374/394 无障碍标注、998-1099 字体预设）、`Desktopmodules/ui/globalSettings.js`（21-31 默认壁纸、186+ 壁纸管理 UI）、`modules/ipc/desktopRemoteHandlers.js`（342 远程壁纸下发）、`modules/chatManager.js`（340/599 空态、606 加载中 system 消息、643 加载失败提示）、`modules/messageRenderer.js`（3263-3265 thinking 指示）/ `styles/messageRenderer.css`（111-120 vcp-loading-dots）、`modules/itemListManager.js`（888 空态、923 列表加载）、`modules/topicListManager.js`（527/540/556/603 话题列表三态）、`modules/searchManager.js`（227/236/373/384 搜索三态）、`splash.html`（启动屏伪进度条）。

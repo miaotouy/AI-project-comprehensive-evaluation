@@ -6,15 +6,15 @@
 >
 > 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
 >
-> 调查方式：基于当前 HEAD 的静态源码核对（Grep + Read 全文阅读），逐条标注文件行号；查无实据的方向直接写"未找到"
+> 调查方式：基于当前 HEAD 的静态源码核对（Grep + Read 全文阅读），逐条标注文件行号；查无实据的方向直接写"未找到"；本次补充调查新增错误边界（`window.onerror`/`unhandledrejection`/`addEventListener('error')`、`process.on` 进程级钩子、渲染兜底 UI，grep 排除 `lib/` 与 `*.min.js` 第三方打包）与首帧主题链路（`getSettings` → `loadPowerUserSettings` → `applyPowerUserSettings`）两轮搜索、主题体系核对（2026-08-13：背景图库子系统全文阅读、`--SmartTheme` 变量全集、字体/背景/强调色/明暗变体/主题市场关键词 grep）
 >
-> 调查范围：弹窗 Popup 系统、Toastr 全量盘点、加载/空状态、右键菜单、主题、无障碍、响应式断点、动画参数、图片预览、拖放、扩展面板结构；聊天主链细节（loader toast 与生成反馈的交点、拖放反馈、弹窗返回定位等）由 [`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>) 记录
+> 调查范围：弹窗 Popup 系统、Toastr 全量盘点、加载/空状态、右键菜单、主题（含本次补充：首帧主题应用链与防闪烁、背景图库子系统、字体 token 链、明暗变体与主题市场核对）、无障碍、响应式断点、动画参数、图片预览、拖放、扩展面板结构、应用级错误边界（本次补充）；聊天主链细节（loader toast 与生成反馈的交点、拖放反馈、弹窗返回定位等）由 [`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>) 记录
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子：弹窗系统基于浏览器原生 `<dialog>` 元素与自研 `Popup` 类（非 jQuery UI Dialog），点击遮罩不会关闭弹窗是与其他现代弹窗库不同的行为选择；通知统一走 toastr 库但调用点分散在 86 个文件 988 处，没有统一封装层；主题是服务端 JSON 存储 + CSS 变量运行时改写，且全仓库无 `prefers-color-scheme`（不跟随系统深色模式）；无障碍现状是"键盘可用性有专门框架保障，屏幕阅读器语义几乎缺失"。此外发现了一个此前笔记未记录的设计完整的 Action Loader 子系统（阻塞遮罩单例 + 可堆叠带停止按钮的 toast）。
+SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子：弹窗系统基于浏览器原生 `<dialog>` 元素与自研 `Popup` 类（非 jQuery UI Dialog），点击遮罩不会关闭弹窗是与其他现代弹窗库不同的行为选择；通知统一走 toastr 库但调用点分散在 86 个文件 988 处，没有统一封装层；主题是服务端 JSON 存储 + CSS 变量运行时改写，且全仓库无 `prefers-color-scheme`（不跟随系统深色模式）；无障碍现状是"键盘可用性有专门框架保障，屏幕阅读器语义几乎缺失"。此外发现了一个此前笔记未记录的设计完整的 Action Loader 子系统（阻塞遮罩单例 + 可堆叠带停止按钮的 toast）。补充调查确认：应用级错误边界（全局 `onerror`/`unhandledrejection` 钩子与渲染兜底 UI）本次未找到，启动失败只有 `reloadLoop()` 最多 5 次重载的重试；首帧主题直接应用服务端持久化的 `power_user` 颜色值（启动不调用 `applyTheme()`），闪烁防护依赖 `style.css` 的 `:root` 静态 `--SmartTheme*` 默认值，无内联主题脚本。本次主题体系核对（2026-08-13）发现一个此前完全未记录的大型子系统——背景图库（`backgrounds.js` 1865 行 + `backgrounds.css` + 服务端 `backgrounds.js`/`image-metadata.js` 端点，全局/聊天双来源、聊天级锁定、文件夹分组、4 种 fitting、动画背景、`autobg` AI 自动选背景、`bgcol` 背景图配色生成主题）；同时确认 `--SmartTheme` 变量集含亮度派生勾选色等 15+ 个 token、字号经 `--fontScale`→`--mainFontSize` 派生链联动全站；字体族硬编码、无独立强调色、无主题市场入口、无 light/dark 双变体均已核实缺失（检查范围见第 4 节）。
 
 ## 系统边界与总体装配
 
@@ -56,16 +56,60 @@ SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子�
 
 "生成中"三点动画（`@keyframes ellipsis`，`css/animations.css:85-101`）在 grep 全仓库后未找到挂到聊天区"角色正在输入"的代码——当前主聊天流的生成反馈是 Action Loader toast + `body[data-generating="true"]` 驱动的 CSS（`style.css:4569`），不是气泡内三点动画。
 
+**应用级错误边界（必查问题 3，本次补充调查）**：
+
+- **无全局 JS 错误钩子**：在 `public/script.js` 与 `public/scripts/`（排除 `lib/`、`extensions/*/lib/` 与 `*.min.js` 第三方打包）搜索 `window.onerror` / `unhandledrejection` / `addEventListener('error'|'unhandledrejection')`，应用代码无匹配；唯一命中 `script.js:1543, 1551` 是 `scrollOnMediaLoad()`（`script.js:1532-1566`）给聊天内 `<img>`/`<video>`/`<audio>` 挂的加载失败计数——图片/媒体加载失败也算"加载完"继续滚到底部，属单点行为，不是全局错误边界。
+- **启动失败恢复而非渲染兜底**：`getSettings()` 请求失败时 `reloadLoop()`（`script.js:7862-7866`）：toastr.error 提示 + `sessionStorage` 计数最多 5 次 `location.reload()`（`script.js:7842-7850`），5 次后不再重载（超限后表现未运行验证）。
+- **preloader 无错误状态**：`#preloader`（`index.html:52`，`css/loader.css:1-17`）是纯 CSS 动画占位层，本次未找到失败态文案、重试入口或"加载失败→显示错误页"的分支；`index.html` 全文也无 `<noscript>` 兜底。
+- **服务端进程级处理与界面无交集**：`process.on('uncaughtException')`（`src/server-main.js:332-335`）只做 `console.error` 后调 `exitProcess()` 优雅退出（`server-main.js:317-327`：统计落盘、插件清理、diskCache 释放后 `process.exit()`），没有重启或界面可感知的错误页；`src/` 搜索 `process.on` 仅命中 SIGINT/SIGTERM/uncaughtException/exit 四处，**无 `unhandledRejection` 处理**（本次未找到，非项目级绝对结论）。
+- 结论：类似前端框架 ErrorBoundary 的"渲染错误兜底 UI"本次未找到；错误反馈的承载方式是 toastr（见本节约 988 处统计），业务异常由各调用点自行 try/catch + toast 提示（如生成主链 `finishGenerating().then(onSuccess, onError)`，`script.js:5394`，主链细节归 Chat UI 笔记）。
+
 ## 4. 主题、视觉 token 与持久化
 
 主题不是简单深浅二元切换，而是可配置的 CSS 变量集合：
 
-- `power_user.theme`（默认 `'Default (Dark) 1.7.1'`，`power-user.js:177`）标识选中主题；颜色值是 `--SmartThemeXxxColor` 系列变量（`power-user.js:159-168`，`main_text_color`/`italics_text_color`/`blur_tint_color`/`chat_tint_color` 等十来个），初始值从 `getComputedStyle(document.documentElement)` 读出。
+- `power_user.theme`（默认 `'Default (Dark) 1.7.1'`，`power-user.js:177`）标识选中主题；颜色值是 `--SmartThemeXxxColor` 系列变量（`power-user.js:159-168`，`main_text_color`/`italics_text_color`/`blur_tint_color`/`chat_tint_color` 等十来个，全集与派生 token 见下文），初始值从 `getComputedStyle(document.documentElement)` 读出。
 - `applyTheme(name)`（`power-user.js:1227-约1430+`）遍历 `themeProperties` 数组，把每个字段映射到颜色选择器 DOM 与 `applyThemeColor`/`applyBlurStrength`/`applyCustomCSS` 等应用函数——切换主题本质是批量 `document.documentElement.style.setProperty('--SmartThemeXxx', 值)`（`applyThemeColor`，`power-user.js:1104-1143`），纯 CSS 变量运行时改写，不是切换 CSS 文件。
 - **自定义 CSS**：`power_user.custom_css`（`power-user.js:170`）由 `applyCustomCSS()`（`power-user.js:1147-1157`）注入 `<style>` 的 `innerHTML`，用户可为任意选择器写任意规则并持久化。
 - **主题导入安全提示**：`importTheme(file)`（`power-user.js:2443-2476`）解析上传的主题 JSON，若 `custom_css` 含 `@import` 字符串先弹 `themeImportWarning` 警告弹窗确认才继续（`power-user.js:2459-2465`）——防"看起来像主题文件、实际从外部 URL 拉资源"。
 - **存储位置**：通过 `/api/themes/save`、`/api/themes/delete`（`power-user.js:2499, 2404`）存到服务端（`src/server-startup.js:121, 148` 挂载 `themesRouter`），和聊天记录一样"服务端持久化、多设备共享"，不是 localStorage。
 - **系统偏好跟随**：`public/` 范围内全仓库搜索 `prefers-color-scheme` **无匹配**（唯一命中是第三方库 `lib/pdf.min.mjs`）——**不自动跟随 OS 深浅色**，主题完全手动选择，已核实（全文 grep 无匹配，非推断）。
+- **首帧主题与防闪烁（必查问题 4，本次补充核对）**：启动主链是 `script.js:750 getSettings(initLoaderHandle)` → `loadPowerUserSettings()`（`power-user.js:1554`，把 `settings.power_user` 合并进全局对象，主题列表来自 `/api/settings/get` 响应的 `data.themes` 字段，`power-user.js:1604-1606`，无独立 GET 路由，`src/endpoints/themes.js` 只有 `save`/`delete` 两个 POST）→ `applyPowerUserSettings()`（`script.js:7911`，内部批量 `applyThemeColor()`/`applyBlurStrength()`/`applyCustomCSS()` 等，`power-user.js:1475-1495`）。**启动阶段不调用 `applyTheme(name)`**——该函数只在 4 个交互/命令点触发：删除主题后（`power-user.js:2423`）、背景图生成主题后（`:2945`）、ST Script `setTheme`（`:2975`）、设置页下拉切换（`:3511`），主题切换总是先写 `power_user.*` 并 `saveSettingsDebounced()` 持久化，下次启动直接应用持久化值。首帧兜底：`style.css:70-82` 的 `:root` 静态 `--SmartTheme*` 默认值（注释 "Default Theme, will be changed by ToolCool Color Picker"）在 JS 改写前生效，`power_user` 的颜色默认值也是从 `getComputedStyle` 读这套 CSS 变量（`power-user.js:159-168`）——静态 CSS 本身就是 "Default (Dark)" 观感；`index.html:14-19` 内联 `<style>` 仅一条 `body { background-color: rgb(36, 36, 37); }`（另有 `meta name="theme-color" content="#333"`，`index.html:13`），**无内联主题应用脚本**，所以"主题闪烁"窗口只存在于默认主题到用户主题之间的颜色改写瞬间，无"先亮后黑"的换肤式首帧。
+
+**主题文件格式与字段全集（本次补充核对）**：
+
+- **主题即 JSON 文件列表，无数据库**：内置主题在 `default/content/themes/`（当前快照 5 个：`Dark V 1.0.json`、`Dark Lite.json`、`Celestial Macaron.json`、`Cappuccino.json`、`Azure.json`），用户目录同理；`/api/settings/get` 用 `readAndParseFromDirectory(request.user.directories.themes)` 直接扫目录读全部 JSON（`src/endpoints/settings.js:259, 279`），保存/删除就是 `themes.js` 的 `save`/`delete` 两个 POST 原子写/删文件（`write-file-atomic`）。
+- **字段全集 38 个非 name 键**（`getThemeObject`，`power-user.js:2535-2578`）：10 个颜色（`main_text_color`/`italics_text_color`/`underline_text_color`/`quote_text_color`/`blur_tint_color`/`chat_tint_color`/`user_mes_blur_tint_color`/`bot_mes_blur_tint_color`/`shadow_color`/`border_color`）+ `blur_strength`/`shadow_width`/`font_scale`/`chat_width` 4 个数值 + `custom_css` + 23 个行为/显示开关（`fast_ui_mode`/`waifuMode`/`avatar_style`/`chat_display`/`toastr_position`/`noShadows`/`timer_enabled`/`timestamps_enabled`/`timestamp_model_icon`/`mesIDDisplay_enabled`/`hideChatAvatars_enabled`/`message_token_count_enabled`/`expand_message_actions`/`enableZenSliders`/`enableLabMode`/`hotswap_enabled`/`bogus_folders`/`zoomed_avatar_magnification`/`reduced_motion`/`compact_input_area`/`show_swipe_num_all_messages`/`click_to_edit`/`media_display`——主题文件不只存颜色，还把整套 UI 偏好当"预设"打包；内置 `Dark V 1.0.json` 只存了其中 36 个，缺 `click_to_edit`/`media_display`/`show_swipe_num_all_messages` 三个较新的键）。导入时 `getNewTheme`（`power-user.js:2585-2593`）**只把白名单内已知键合并进当前设置快照，未知键一律丢弃**——比 `@import` 检查更深一层的净化（坏字段不会污染设置）。
+- **主题 UI 是五个操作按钮 + 下拉**（`index.html:4916-4936`）：导入（`importTheme`，含 `@import` 警告与重名拒绝）、导出（`exportTheme`）、删除（`deleteTheme`，删除后自动回落到列表第一个主题并应用，`power-user.js:2415-2424`）、**更新当前主题文件**（`updateTheme`→`saveTheme(power_user.theme)` 覆盖保存，`power-user.js:2384-2387`）、**另存为新主题**（`saveTheme()` 无参时弹 INPUT 弹窗取名字，`power-user.js:2484-2493`）。
+
+**字号、字体族与阴影 token（本次补充核对）**：
+
+- 字号是全站派生链不是单点：`power_user.font_scale`（0.5-1.5 滑块，`index.html:5048-5049`）→ `applyFontScale` 写 `--fontScale`（`power-user.js:1172-1185`，滑块拖动时只在 `mouseup touchend` 才应用，避免实时重排）→ `--mainFontSize: calc(var(--fontScale) * 15px)`（`style.css:95-96`）→ 全站几十处 `calc(var(--mainFontSize) * …)` 派生字号（`tags.css`/`welcome.css`/`st-tailwind.css` 等十多个 CSS 文件）。
+- **字体族硬编码、无自定义字体设置**：`--mainFontFamily: "Noto Sans", sans-serif` 与 `--monoFontFamily`（`style.css:97-98`）写死在 CSS，grep `customFont`/`font_family` 于 `public/scripts/` 无匹配——用户只能缩放字号，不能换字体。
+- 阴影基变量：`--blurStrength`（默认 10）与 `--shadowWidth`（默认 2）在 `style.css:101-104`，由 `applyBlurStrength`/`applyShadowWidth` 改写（`power-user.js:1160-1170`）；全局通配规则 `* { text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor); }`（`style.css:140`）把"文本阴影"做成全站统一 token。
+
+**`--SmartTheme` 变量全集与派生 token（本次补充核对）**：
+
+- 静态默认定义在 `public/style.css:70-89`（注意是 `public/style.css` 根文件，不是 `public/css/` 子目录）：除笔记前述十来个颜色外，还有 `--SmartThemeCheckboxBgColorR/G/B` 与**亮度派生的勾选色** `--SmartThemeCheckboxTickColorValue`/`--SmartThemeCheckboxTickColor`（按主文本色亮度公式自动算黑白勾选色，`style.css:83-89`）——主题切换时 `applyThemeColor('main')` 把主文本色的 RGBA 分量解析写入（`power-user.js:1105-1111`）；`--SmartThemeFastUIBGColor` 在 CSS 与 JS 中都是注释掉的死代码（`style.css:75`、`power-user.js:1122-1124`）。
+- `applyThemeColor('blurTint')` 还同步改写 `meta[name=theme-color]`（`power-user.js:1126-1128`）——浏览器标签页主题色跟随 UI 背景色（静态默认 `#333` 只在 JS 未跑时生效）。
+
+**背景图库子系统（本次补充核对，此前笔记完全未记录）**：背景图是独立于主题色的一层视觉机制，实现规模与弹窗系统同级：
+
+- **承载**：`#bg1` 是 `z-index: -1` 的全屏背景图层（`css/backgrounds.css:2-11`），`background_settings`（`backgrounds.js:108-114`：`name`/`url`/`fitting`/`animation`/`sortOrder`/`thumbnailColumns`）持久化在 `settings.background`（服务端 settings，非 power_user），选中背景 `setBackground` 改 `#bg1` 的 `background-image` 并 `saveSettingsDebounced`（`backgrounds.js:1439-1447`）。
+- **双来源 tab**：`BG_SOURCES.GLOBAL`（服务器 `backgrounds/` 目录）与 `BG_SOURCES.CHAT`（当前聊天的自定义背景列表，存 `chat_metadata.chat_backgrounds`）各自渲染缩略图网格（`backgrounds.js:661-706`）；**聊天级锁定**：`chat_metadata.custom_background` 锁定后全局背景变更不再生效（`backgrounds.js:1440-1443`），提供 `lockbg`/`unlockbg` 斜杠命令（`:1813-1830`）。
+- **4 种 fitting**：`cover`/`contain`/`stretch`/`center` 是 `#bg1` 的 class 切换（`backgrounds.js:1632-1638`，CSS 在 `backgrounds.css:19-41`），默认 `classic`（无任何 fitting class，走 `backgrounds.css:2-11` 的基础 `background-size: cover`）。
+- **缩略图工程**：`--bg-thumb-columns` 列数（2-8 可调，`backgrounds.js:200-209`）、IntersectionObserver 懒加载（`:1357-1396`）、localforage 缩略图缓存（`:42, 431-465`）、服务端图片元数据（`/api/image-metadata/all` 的 `dominantColor`/`aspectRatio` 做加载占位，`:740-759`）。
+- **动画背景**：mp4/webp/gif/apng 视为动画背景（`:55`），开关 `background_settings.animation` 决定用静态缩略图还是动图（`:1430-1434`）。
+- **文件夹分组**：`/api/image-metadata/folders/*`（create/update/delete/set-thumbnails）管理背景文件夹，支持批量选中分配/移除、封面图（`backgrounds.js:764-1355`）。
+- **`autobg` AI 自动选背景**：把背景名列表喂给模型，用 Fuse 模糊匹配选中（`backgrounds.js:622-655`）。
+- **`bgcol` 背景图配色生成主题**：斜杠命令（`power-user.js:2890-2949`，注册于 `:4194-4216`）取当前背景图 → `util/ThemeGenerator.js`（322 行，全文已读）用 Oklch 色空间提取主色（chroma² 加权平均 + 循环色相平均，150px 降采样，`extractDominantColor`）→ `generateThemePalette` 生成 12 字段调色板（互补/类似/三色色相关系 + 逐点迭代保证对面板背景 WCAG 对比度 ≥3.5:1，`ThemeGenerator.js:225-300`）→ 存为 `bgcol - <背景名>` 新主题并应用。
+- 服务端点：`/api/backgrounds/all|folders|delete|rename|upload`（`src/endpoints/backgrounds.js`）与 `/api/image-metadata/*`（`src/endpoints/image-metadata.js`）。
+
+**本次未找到（检查范围：`public/index.html` 全文 + `public/scripts/` 全部源码 + `public/css/` + 主题 JSON 字段全集）**：
+
+- **主题市场/官方主题库下载入口**：grep `More Themes`/`themeLibrary`/`download.*themes` 等模式无匹配；设置页 UI Theme 区块只有导入/导出/删除/更新/另存五个操作；`index.html:2800, 2852` 的 "Download" 是第三方扩展与资产下载面板（`extensions.js`），不含主题；主题文件只能经 `importTheme` 导入 JSON 或经 content-manager 的 THEME 类型文件通道（`src/endpoints/content-manager.js:340-341`）手工搬运，**无应用内"下载更多主题"**。
+- **同一主题 light/dark 双变体**：grep `theme_dark`/`theme_light`/`ThemeDark`/`ThemeLight` 于 `public/scripts/`（含 `util/`）与 `public/css/` 无匹配；主题 JSON 无明暗字段——每个主题是单一外观，"明暗"靠选择不同主题实现。
+- **独立强调色/主色设置**：颜色选择器仅 10 个固定字段（`index.html:4984-5025`），无 accent 色字段；`--ac-color-*`（`css/macros.css:534-599`）只是 autocomplete 样式的回退变量，CSS 中无内置定义——第三方可注入，内置主题不涉及。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -118,7 +162,7 @@ SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子�
 
 `public/css/animations.css`（154 行已读）定义可复用 `@keyframes`：`fade-in`/`fade-out`（纯透明度）、`pop-in`/`pop-out`（透明度+垂直缩放，`pop-in` 在 0%-33% 就把 `scaleY` 拉到 1、后 67% 只调透明度）、`flash`（强调高亮）、`pulse`（`filter: brightness` 呼吸）、`ellipsis`（三点省略号，未找到消费点）、`infinite-spinning`（`.PastChat_cross:hover` 删除叉号旋转，纯装饰）、`slide`（依赖 `--slide-mes-x-start/end` 变量，消息删除动画位移方向可由 JS 指定起止点）。
 
-全局动画时长由 `ANIMATION_DURATION_DEFAULT = 125`（`script.js:595`）驱动的 `--animation-duration` CSS 变量控制（`setAnimationDuration()`，`script.js:824-828`），用户可在设置里改；抽屉展开/收起在已有其它抽屉打开时先等 `animation_duration` 毫秒再切换（`doNavbarIconClick()`，`script.js:10908-10910`）。这与第 12 节记录的 `stream-fadein.js`（流式消息逐词淡入，`morphdom` + `Intl.Segmenter`）是两个层面：一个管面板级开合，一个管文本级淡入。
+全局动画时长由 `ANIMATION_DURATION_DEFAULT = 125`（`script.js:595`）驱动的 `--animation-duration` CSS 变量控制（`setAnimationDuration()`，`script.js:824-828`），用户可在设置里改；抽屉展开/收起在已有其它抽屉打开时先等 `animation_duration` 毫秒再切换（`doNavbarIconClick()`，`script.js:10908-10910`）。这与 `public/scripts/util/stream-fadein.js`（流式消息逐词淡入，`morphdom` + `Intl.Segmenter`）是两个层面：一个管面板级开合，一个管文本级淡入。
 
 ## 8. 设计取舍与已确认边界
 
@@ -126,6 +170,10 @@ SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子�
 - **双击 Esc 强制关闭阻塞弹窗**：踩坑后留下的防御代码，作者注释自承原因不明。
 - **toastr 无统一封装**：988 处调用分散在 86 个文件，作为全局工具库随处调用；差异化时长只是零星个例。
 - **主题不跟随系统深浅色**：`public/` 无 `prefers-color-scheme` 匹配（已核实），主题手动选择、服务端存储。
+- **主题单一外观、无明暗双变体**：同一主题没有 light/dark 两套（已核实，见第 4 节"本次未找到"）。
+- **无应用内主题市场**：主题只能导入 JSON 文件或经内容管理通道搬运，没有官方库下载入口（已核实）。
+- **字体族不可自定义**：字号可缩放（`--fontScale` 派生链），字体族写死在 CSS（已核实）。
+- **背景图是独立于主题色的视觉层**：背景库子系统（锁定、文件夹、动画、fitting）与主题颜色分离管理，`bgcol` 是两者唯一的程序化桥接。
 - **"生成中"反馈不是三点动画**：走 Action Loader toast + `data-generating` 全局状态位，气泡无"正在输入"动画。
 - **移动端 swipe 是点按钮不是划手势**：与功能名字暗示不符，已核实缺失。
 - **主角色列表空状态缺失**：CSS `:empty` 空状态模式未覆盖主角色列表。
@@ -139,7 +187,10 @@ SillyTavern 的界面基础设施是"原生 Web 技术 + 自研机制"的路子�
 - 各消费点 `drop_target`/`dragover` 的 CSS 细节未逐一比对。
 - `getSortableDelay()` 与移动端 750ms 延迟的实际触屏拖拽体验未实测。
 - 扩展启停整页刷新的运行表现、PWA iOS 安全区适配均未运行验证。
+- 错误边界结论基于源码搜索（搜索模式与排除范围见第 3 节），未运行注入异常实测；`reloadLoop()` 达到 5 次上限后的页面表现（静默停留 preloader）未运行验证；服务端 `uncaughtException` 触发的 `exitProcess()` 清理链路未运行验证。
+- 首帧主题表现未运行验证：静态链路显示首帧即应用持久化颜色值，但"`/api/settings/get` 返回前窗口停留在静态默认主题"的可见时长与闪变观感未实测。
+- 主题体系核对新增（2026-08-13）：`bgcol`/`autobg` 的生成结果观感（对比度迭代保证、AI 选背景）是静态逻辑，未运行验证；背景库缩略图懒加载、主色占位、动画背景开关与文件夹操作的实际运行表现未实测；`getNewTheme` 白名单丢弃未知键的行为未用含坏字段的主题文件实测。
 
 ## 10. 关键源码索引
 
-`public/scripts/popup.js`、`public/scripts/action-loader.js`、`public/scripts/keyboard.js`、`public/scripts/dragdrop.js`、`public/scripts/BulkEditOverlay.js`、`public/scripts/chats.js`（880-970 行 expandMedia、1510、2392-2394）、`public/script.js`（347-365 toastr 配置、477-560 dragElement、824-828 动画时长）、`public/scripts/power-user.js`（主题应用与存储）、`public/css/mobile-styles.css`、`public/css/animations.css`、`public/css/loader.css`、`public/css/world-info.css`、`public/css/rm-groups.css`、`public/index.html`、`public/scripts/extensions.js`、`src/server-startup.js`。
+`public/scripts/popup.js`、`public/scripts/action-loader.js`、`public/scripts/keyboard.js`、`public/scripts/dragdrop.js`、`public/scripts/BulkEditOverlay.js`、`public/scripts/chats.js`（880-970 行 expandMedia、1510、2392-2394）、`public/scripts/util/stream-fadein.js`、`public/script.js`（347-365 toastr 配置、477-560 dragElement、824-828 动画时长、7842-7850 reloadLoop、7908-7911 启动装配）、`public/scripts/power-user.js`（主题应用与存储、1554 loadPowerUserSettings、1604-1606 主题列表、2382-2507 主题 UI 操作集、2535-2593 getThemeObject/getNewTheme、2890-2949 bgcol）、`public/scripts/backgrounds.js`（背景库全文）、`public/scripts/util/ThemeGenerator.js`（Oklch 配色生成）、`public/style.css`（70-104 :root token 权威源）、`public/css/mobile-styles.css`、`public/css/animations.css`、`public/css/backgrounds.css`、`public/css/loader.css`、`public/css/world-info.css`、`public/css/rm-groups.css`、`public/index.html`（4911-5152 UI Theme 区块、5651 background_fitting）、`public/scripts/extensions.js`、`src/server-startup.js`、`src/endpoints/themes.js`、`src/endpoints/backgrounds.js`、`src/endpoints/image-metadata.js`、`src/endpoints/settings.js`（259-279 themes 读取）、`src/endpoints/content-manager.js`（340-341 THEME 类型）、`default/content/themes/`、`src/server-main.js`（330-335 进程级错误处理）。
