@@ -16,7 +16,7 @@
 
 AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面能力集中在共享组件和 composable：BaseDialog 承担多数业务弹窗，命令式反馈统一绕过自绘标题栏，通知中心则保存需要长期查看的消息。
 
-主题分为明暗、主色色阶和外观效果三层，均持久化到 `settings.json`。外观层覆盖壁纸、自动取色、混合模式、毛玻璃和窗口特效，明显超过一般的明暗切换。图片查看使用 viewerjs，侧栏尺寸调整和跨窗口同步由项目自研。
+主题分为明暗、主色色阶和外观效果三层，均持久化到 `settings.json`。外观层覆盖壁纸、自动取色、混合模式、毛玻璃和窗口特效，另有独立的全局自定义 CSS 覆盖子系统，支持内置与用户预设、实时预览和编辑器注入。图片查看使用 viewerjs，侧栏尺寸调整和跨窗口同步由项目自研。
 
 错误处理依靠 Vue 全局钩子、浏览器错误事件、Rust 探针和启动兜底界面，没有通用的组件级 ErrorBoundary。首屏通过先隐藏原生窗口、Vue 挂载完成后再显示来减少闪烁；HTML 只提供静态深浅色 splash，没有挂载前主题脚本。
 
@@ -30,7 +30,7 @@ AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面�
 
 **全局挂载。** `GlobalProviders.vue` 挂载全局图片查看器/弹窗等；`App.vue:81` 挂载 `GuidedFlowHost.vue`（引导流程宿主）；`NotificationCenter.vue` 是全局通知中心（挂在 `GlobalProviders.vue`），不是 llm-chat 专属。
 
-**状态所有权。** 主题等应用设置存 `settings.json`（`src/utils/appSettings.ts`）；通知存 useNotificationStore（持久化通知中心）；拖放是全局 composable 被 `MessageInput.vue` 与 `AgentsSidebar.vue` 等复用。
+**状态所有权。** 主题与自定义 CSS 等应用设置存 `settings.json`（`src/utils/appSettings.ts`）；通知存 useNotificationStore（持久化通知中心）；拖放是全局 composable 被 `MessageInput.vue` 与 `AgentsSidebar.vue` 等复用。
 
 ## 1. 界面栈、公共组件与状态所有权
 
@@ -234,6 +234,16 @@ applyBlendMode 实现，:102-156），作用于 sidebar/card/header/input/contai
 
 `useThemeAwareIcon.ts` + DynamicIcon（`src/composables/useThemeAwareIcon.ts:66-99`）把外部 SVG 的黑白单色（fill/stroke 为 #000/#fff）替换为 currentColor、彩色保留，让任意来源图标跟随主题（架构文档 §2.2）。
 
+### 自定义 CSS 样式覆盖
+
+自定义 CSS 不属于上述三层主题计算链，而是设置系统中的独立覆盖通道。`src/config/settings.ts:50-55` 注册“CSS 样式覆盖”分区并异步加载 `CssOverrideSettings.vue`；设置页用 `RichCodeEditor` 以 CSS 模式编辑全局样式，提供启用开关、纯自定义模式、内置预设和用户预设，选中预设时先预览，再由用户明确应用（`CssOverrideSettings.vue:35-51,118-150,190-305`；预设定义在 `src/config/css-presets.ts`）。
+
+状态由 `useCssOverrides.ts` 持有，并写入应用设置的 `cssOverride` 字段。`UserCssSettings` 包含 enabled、basedOnPresetId、customContent、pureCustomContent、userPresets 与 selectedPresetId；纯自定义内容和基于预设修改的内容分字段保存，旧版 customContent 还有向 pureCustomContent 的兼容迁移（`useCssOverrides.ts:42-49,124-179`；`src/types/css-override.ts:32-40`）。编辑内容变化后 500ms 防抖保存到 appSettingsStore，同时在启用状态下无防抖调用 applyCssToPage（`useCssOverrides.ts:401-426`）。
+
+实际应用方式是向当前 document.head 创建或复用 `<style id="custom-css-override">`，再把编辑器文本原样写入 textContent；禁用或内容为空时移除该节点（`useCssOverrides.ts:369-399`）。因此它可以覆盖整个当前 WebView 的应用样式，并可引用 `--primary-color` 等主题变量，但代码侧没有选择器作用域、规则校验或 CSS 安全过滤。
+
+**装配边界。** 全 src 搜索 `useCssOverrides()` 只命中 composable 自身和 `CssOverrideSettings.vue`。`Settings.vue:508-636` 会在进入设置页时一次挂载全部设置模块，所以已保存 CSS 会在设置页挂载后加载并注入；普通启动链和 `useRootInit` 没有初始化该 composable。离开设置页时 style 节点按设计不会移除（`useCssOverrides.ts:441-449`），但应用重启后、用户尚未进入设置页前，以及其他独立 WebView 窗口中，未找到自动恢复注入的调用路径。这是当前快照的静态代码结论，实际窗口行为未运行验证。
+
 ## 5. 响应式、移动端与窗口适配
 
 **三栏布局没有响应式断点。** `LlmChat.vue` 的三栏结构没有 @media 查询或基于容器宽度的自动折叠。侧栏显示状态由用户手动控制，通过 isLeftSidebarCollapsed/isRightSidebarCollapsed 持久化；窗口变窄不会自动收起侧栏，三栏一起被压缩。
@@ -328,6 +338,8 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 **主题系统三层分工。** useTheme（明暗+系统跟随）→ themeColors（五色主色注入 Element Plus 色阶）→ useThemeAppearance（壁纸/取色/混合/窗口特效），各自独立持久化到 settings.json 的不同字段；theme-changed CustomEvent 已无监听者，跨窗口主题同步实际靠各窗口启动时读同一 settings.json 自行应用（见第 1 节）。
 
+**自定义 CSS 是独立旁路。** useCssOverrides 不参与三层主题计算，只把用户文本原样注入当前 document.head，并把配置持久化到 settings.json 的 cssOverride。它支持预设与实时编辑，但当前调用方仅在设置页；保存状态与启动时生效状态因此不是同一件事。
+
 **双通道自动取色用两套算法。** ColorThief（背景叠加色，按亮度取次暗/次亮）与 node-vibrant（主题主色，策略化优先级链），提取结果都经 OKLCH 感知修正保证对比度；两个开关独立，开启时切壁纸/切明暗都会重新提取。
 
 **窗口特效走 Tauri 原生通道。** apply_window_effect（mica/acrylic/blur/vibrancy）与 set_window_shadow 是实验性 OS 级能力，与前端 CSS 毛玻璃是两层独立机制（前端 `--ui-blur` 与窗口 windowEffect 互不依赖）。
@@ -366,6 +378,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 - 主题外观系统全部为静态核对，未运行验证：壁纸提取（ColorThief/node-vibrant）的真实取色效果、OKLCH 修正后的视觉观感、16 种混合模式的叠加表现、毛玻璃与分层透明度的实际渲染、no-global-wallpaper 分离窗口表现；initThemeAppearance 初始化失败/清理路径未实测。
 - OS 级窗口特效（mica/acrylic/blur/vibrancy）在不同平台与窗口系统（Windows 版本差异、macOS 透明）下的可用性与降级表现未运行验证。
 - iframe 主题注入（useIframeTheme）与 SVG 单色替换（useThemeAwareIcon）在真实内容（含 JS 动态改色的 SVG）上的表现未运行验证。
+- 自定义 CSS 的实时覆盖、预设预览与保存已静态确认，未运行验证大段或无效 CSS 的编辑性能与失败表现；当前快照也未验证重启后未进入设置页时、离开设置页后及独立 WebView 窗口中的实际生效范围。
 
 ## 10. 关键源码索引
 
@@ -379,3 +392,6 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 - `src/composables/useFileDrop.ts`
 - `src/composables/useTheme.ts`
 - `src/utils/themeColors.ts`（主色色阶引擎 + OKLCH）
+- `src/composables/useCssOverrides.ts`
+- `src/views/Settings/css/CssOverrideSettings.vue`
+- `src/config/css-presets.ts`
