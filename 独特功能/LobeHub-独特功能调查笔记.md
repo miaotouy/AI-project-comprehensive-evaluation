@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\lobehub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-13
 >
 > 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
 >
-> 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；未修改仓库源码
+> 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；补充复核异构 Agent runtime、设备网关和外部应用 Connector；未修改仓库源码
 >
-> 调查范围：README 宣布的 Operator/Create/Collaborate/Evolve 四组能力——Agent 运营、IM 网关、Agent Builder、Agent Groups、Pages、Schedule、Project、Workspace、Personal Memory；重点走通运营、日程、项目与个人记忆主链；插件、知识库、文档 Portal 等已有类目覆盖面只做回链不重写
+> 调查范围：README 宣布的 Operator/Create/Collaborate/Evolve 四组能力——Agent 运营、IM 网关、Agent Builder、Agent Groups、Pages、Schedule、Project、Workspace、Personal Memory，以及外部 CLI/平台 Agent 的统一托管；重点走通运营、日程、项目、个人记忆与异构 Agent 主链；插件、知识库、文档 Portal 和 Connector 执行细节只做回链不重写
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -22,13 +22,14 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Personal Memory | `主链确认`（静态证据） | 完整主链：对话 topic → Upstash Workflow（hourly / 用户触发）→ CEPA+Identity 五层提取 → 1024 维向量入库 → 记忆工具 9 API 读写 → 记忆管理页面编辑 |
 | Agent 运营（Brief 汇报 + Work 产物 + 用量统计） | `主链确认`（Brief/Work 部分）/ `入口确认`（统计部分） | “hires, schedules, reports”中的 reports 落在 Briefs（decision/result/insight/error）+ HomeInbox 双栏 + Work 版本化产物对象；统计页为独立入口 |
 | Agent Builder | `主链确认`（静态证据） | 内置 agent-builder 角色 + `lobe-agent-builder` 工具（读模型/搜工具/装插件/改配置），冲突工具被剥离；对话式配置 Agent 的完整闭环 |
+| 异构 Agent 统一托管 | `主链确认`（静态证据） | 六种本地 CLI（Amp/Claude Code/Codex/OpenCode/Pi/Qoder）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，详见[分类边界研究](外部执行体与应用协作边界研究.md) |
 | IM 网关（Messenger / Agent Bot） | `入口确认` | Slack/Discord/Telegram/WeChat 平台注册、OAuth 安装、webhook 入口、cron 保活；webhook → execAgent 的消息往返未逐平台验证 |
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
 | Agent Groups | `入口确认`/`归并已有类目` | 群组对象与模板已被 Agent 角色笔记覆盖；群聊会话表面在会话类目边界内，本次只确认路由与成员编辑面 |
 | Project | `主链确认`（静态证据） | 上快照无独立 project 表、仅按工作目录分组；本快照已落地 `projects` 实体（表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent），与按工作目录的话题分组并存 |
 
-README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。**Goals（目标任务闭环）** 已具备可走通的静态主链（见能力五），Project 从“轻量组织概念”升级为独立实体。
+README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。源码范围还确认了首页未展开的**异构 Agent 统一托管**：本地 coding CLI 和 OpenClaw/Hermes 都成为一等执行对象。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。**Goals（目标任务闭环）** 已具备可走通的静态主链（见能力五），Project 从“轻量组织概念”升级为独立实体。
 
 ## 系统边界
 
@@ -142,6 +143,8 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - **Agent 市场 / Community（hires 面）**：`community/` 路由族（agent/group_agent/model/provider/skill/mcp/user/org 详情与列表）、市场导入链在 Agent 角色笔记 §7 有记录；本次只做运营盘点的组成部分，不单独成卡。
 - **插件、知识库、搜索、设备工具**：全部回链 [Agent 工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)，不再重复。
 
+异构 Agent 的完整分类边界、与 Connector/Messenger/浏览器控制表面的关系及横向样本，见[外部执行体与应用协作分类边界研究](外部执行体与应用协作边界研究.md)。本笔记只在摘要保留状态，不重复主链细节。
+
 ## 声明不符、外部依赖与暂缓项
 
 - **Project（按项目组织）**：上快照的结论（数据库无 project 表、仅按工作目录分组）已过时。本快照（HEAD）新增完整 Project 实体：`projects` 表（`packages/database/src/schemas/project.ts:28`，含 `projects`/`projectAgents`/`projectChatGroups`/`projectKnowledgeBases`/`projectCompletionReviews` 五张表，migration 0134-0139）、tRPC 路由（`apps/server/src/routers/lambda/project.ts`：create/update/delete/status/acceptCompletion/addAgent/addKnowledgeBase 等，`withScopedPermission('agent:update')` 写保护）、CLI 命令（`apps/cli/src/commands/project.ts`：`project list/view/create/edit/delete/status`，描述为“Manage goal-oriented projects”）与内置 `project-coordinator` Agent（`packages/builtin-agents/src/agents/project-coordinator/index.ts`，按项目名生成协调者 systemRole）。与此同时，话题侧的“按项目组织”仍以工作目录为键：`groupTopicsByProject`（`packages/utils/src/client/topic.ts:161-196`，`project:` 前缀 + `no-project` 沉底）与 `AgentTopicManager/utils.ts` 均按 `getTopicWorkingDirectorySourcePath` 分组，两个“项目”语义并存（实体项目 vs 工作目录分组），其关联链（topic 如何归属到 projects 表）本次未走通。状态：`主链确认`（静态证据，实体项目侧）；分组侧维持原结论。
@@ -166,6 +169,7 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）；以及实体 `projects` 表与工作目录分组两套“项目”语义的关联链（见 Project 条目）。
 - Goal 循环在真实任务上的运行表现（轮次/预算触达后的 settle 行为、`sweep` 的巡检接线）——静态主链已确认但未运行验证。
 - image/video 创作工作台与 Work 对象的衔接。
+- 六种本地 CLI 与 OpenClaw/Hermes 的运行兼容性、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为。
 
 ## 关键源码索引
 
@@ -178,3 +182,4 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - 项目分组：`packages/utils/src/client/topic.ts:161`、`src/store/chat/slices/topic/selectors.ts:203`、`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts`。
 - Project 实体：`packages/database/src/schemas/project.ts`、`apps/server/src/routers/lambda/project.ts`、`apps/cli/src/commands/project.ts`、`packages/builtin-agents/src/agents/project-coordinator/index.ts`。
 - Goals：`packages/builtin-tool-goal/src/manifest.ts`、`apps/server/src/services/verify/goalLoop.ts`、`src/features/AgentGoals/`、`src/features/ChatInput/InputEditor/ActionTag/goalTag.ts`。
+- 异构 Agent：`packages/types/src/agent/heterogeneousAgent.ts`、`packages/heterogeneous-agents/src/`、`apps/desktop/src/main/modules/heterogeneousAgent/`、`src/store/chat/slices/agentRun/actions/transports/hetero/heterogeneousAgentExecutor.ts`、`apps/desktop/src/main/controllers/GatewayConnectionCtr.ts`。
