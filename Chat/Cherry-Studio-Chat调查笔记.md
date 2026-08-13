@@ -46,7 +46,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - Chat UI：[`<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>`](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)
 - 消息渲染：[`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`](../消息渲染器/Cherry-Studio-消息渲染调查笔记.md)
 - 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)；跨层综合结论见 [`../Chat/Chat横向对比.md`](../Chat/Chat横向对比.md)
-- 通用界面盘点（弹窗库、Toast、主题、动画、灯箱、右键双模式等）：[`../通用界面盘点待迁移/Cherry-Studio.md`](../通用界面盘点待迁移/Cherry-Studio.md)
+- 应用界面基础设施（弹窗库、Toast、主题、动画、灯箱、右键双模式等）：[`../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md`](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 
 ## 关键能力与已确认边界
 

@@ -8,7 +8,7 @@
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
-> 对比范围：跨层综合结论、选择提示与通用界面盘点；会话数据在[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)，执行语义在[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)，用户工作流在[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)
+> 对比范围：跨层综合结论、选择提示；会话数据在[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)，执行语义在[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)，用户工作流在[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)，通用界面基础设施在[应用界面基础设施横向对比](../应用界面基础设施/应用界面基础设施横向对比.md)
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -71,86 +71,10 @@ Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会�
 
 以上内容只描述已核实的产品与源码机制，不构成性能、安全或 Agent 能力排名。分支、流式和搜索的详细证据见对应类目的单项目笔记与横向对比；工具调用权限与 Agent 配置见 `项目调查笔记/Agent工具`；消息渲染层的公共问题见 `项目调查笔记/消息渲染器`。
 
-## 通用界面盘点（待可选界面专题承接）
-
-> 本节是通用界面基础设施的跨项目盘点，不属于 Chat UI 主文；待"可选界面专题"建立后迁移。覆盖范围：弹窗底层、通知/Toast、主题切换、图片预览、动画方案，以及各项目的特殊实现差异。VCPToolBox 不提供聊天主界面，不参与本节对比。
-
-### 弹窗/对话框：六种互不相同的底层技术栈
-
-| 项目 | 弹窗底层 | Esc/遮罩关闭 | 焦点管理 |
-| --- | --- | --- | --- |
-| AIO Hub | 自研 `BaseDialog.vue`（非 Element Plus），自增 z-index，300ms 入退场动画 | 支持（由 `showCloseButton`/`closeOnBackdropClick` prop 控制） | 基本缺失；唯一例外：`RenameDialog` 输入框有 `autofocus` |
-| Chatbox | 三套并存：Mantine `Modal`（主力）+ `vaul`（移动端底部弹起）+ Radix `Dialog`（预留）；`@ebay/nice-modal-react` 统一管命令式调用 | 逐弹窗配置：登录/许可证类三项全禁；`trapFocus={false}` 在四个弹窗里有意关闭（iOS Safari 文本选中 workaround） | `trapFocus={false}` 的四个弹窗键盘 Tab 可穿透到背景——有代码提交记录的已知取舍 |
-| Cherry Studio | 自建 `@cherrystudio/ui` 包裹 Radix `Dialog`；`services/popup` 用 `useSyncExternalStore` 做 store | 支持；两阶段关闭，延迟 200ms 播放退场动画 | Radix `DialogContent` 默认交给 `FocusScope` 管理焦点；业务侧可用 `focusOnClose` 指定关闭后的焦点落点 |
-| LobeHub | `@lobehub/ui` 的命令式 `createModal`/`confirmModal`（主流）+ `ImperativeModal` 兼容层（迁移期遗留） | 高危操作（如清空工作区）把 `maskClosable` 设为 `false` 并要求勾选确认框；其余遮罩点击可关闭 | 业务调用方未发现统一的显式配置；`@lobehub/ui/base-ui` 内部是否有 focus trap 未下钻，结论应保留为未核实 |
-| SillyTavern | 原生 `<dialog>` + 自研 `Popup` 类（非 jQuery UI Dialog）；阻塞性弹窗需**双击 Esc** 强制关闭（注释自曝为"踩坑后留下的防御代码"） | **点遮罩不会关闭**（与大多数现代弹窗库相反） | 无 |
-| VCPChat | 全部自定义 DOM；通用 Modal 用 `<template>` 懒加载 + `modal-ready` 事件通知 | 确认对话框支持 Esc/Enter/遮罩点击；无 focus trap，Tab 可穿透背景 | 无 focus trap |
-
-**跨项目结论**：SillyTavern 的遮罩点击不会关闭弹窗；Chatbox 有可追溯的提交记录说明关闭 focus trap 的原因。焦点管理覆盖不一：Cherry 的 Radix 基础层提供 `FocusScope`，其余项目在自动聚焦、关闭后的焦点落点和业务控件语义上各有缺口；LobeHub 的 `@lobehub/ui` 包内部实现尚未核实。
-
-### 通知/Toast：每个项目各自为战
-
-| 项目 | 实现 | 位置 | 特殊行为 |
-| --- | --- | --- | --- |
-| AIO Hub | 三层：`customMessage`（ElMessage 包装，offset 54px 避开无边框标题栏）→ `errorHandler` 四级分发（CRITICAL 走常驻 `ElNotification`，duration:0）→ 独立 `NotificationCenter`（持久化） | 顶部 | CRITICAL 级常驻不消失 |
-| Chatbox | 两套分工：MUI `Snackbar`（聊天主流程，右上角，3s）+ `sonner`（Settings 弹窗内部，底部居中，`z-index: 2147483647`）；错误 toast 先出原文再追加异步翻译 | 右上角 / 底部居中 | 多条 MUI toast 会互相重叠（未处理堆叠位移） |
-| Cherry Studio | 自研 store（非 antd/sonner），`role="alert"`/`role="status"` 区分严重程度，error 默认不消失 | 顶部居中 | 默认 3s，error 永不自动消失 |
-| LobeHub | antd `App.useApp()` 单例（`AntdStaticMethods`），桌面端整体下移避开 Electron 标题栏；另有独立自绘悬浮通知卡片组件 | 顶部（偏移）+ 悬浮卡片 | 两套并存：antd 管临时提示，自绘卡片管持久通知 |
-| SillyTavern | `toastr` 库（88 处调用分散在 86 个文件，无统一封装层）；`fixToastrForDialogs()` 专门处理弹窗打开时 toast 被遮罩挡住的问题；`escapeHtml:true` 防 XSS | 右上角 | 有独立的 `action-loader.js` 子系统管"阻塞遮罩单例 + 可堆叠 toast"，toast 可带停止按钮直调 `stopGeneration()`（聊天主链交点见 Chat UI 横向对比） |
-| VCPChat | 自定义，默认 7 秒消失，`tool_approval_request` 永不消失；通知侧栏打开时抑制浮动 Toast；窗口获焦时自动清理超时残留 toast；新 toast 插入顶部（prepend）而非追加尾部 | 左上角 prepend | **不发任何系统桌面 `Notification`** |
-
-**跨项目结论**：多条 toast 并存时，Chatbox 的 MUI Snackbar 会重叠，SillyTavern 的 toastr 又分散在 86 个文件中，没有统一封装。Chatbox Settings 使用的 sonner 和 VCPChat 的 prepend 方案提供了明确的堆叠位置管理。
-
-### 主题切换：热切换与整窗口重载
-
-| 项目 | 切换机制 | 跟随系统 | 持久化位置 |
-| --- | --- | --- | --- |
-| AIO Hub | CSS 变量/class 切换 | `matchMedia('(prefers-color-scheme: dark)')` 注册 `change` 监听；仅 `auto` 模式响应 | `settings.json`（非 localStorage） |
-| Chatbox | MUI 主题 + Tailwind `dark` class + Mantine `colorScheme` **三套各管一段**，`realTheme` 单一状态源统一驱动 | ✓（桌面端 `nativeTheme.on('updated')`，Web 端 `matchMedia` listener） | `localStorage['initial-theme']`（供首屏同步读取防闪烁） |
-| Cherry Studio | Electron 主进程 `nativeTheme.themeSource` 为权威，IPC 广播同步渲染层；CSS 变量遵循 Shadcn 契约（无前缀），自定义主色直写行内 style | ✓（`nativeTheme` 原生支持） | Electron 主进程 store |
-| LobeHub | `next-themes` 管 light/dark/system 解析和 `data-theme` 属性；`@lobehub/ui` 的 `ThemeProvider` 套色板 token——**两层分离，各自独立持久化** | ✓（`next-themes` 原生支持） | `next-themes` 的 localStorage（明暗）+ 用户 store + cookie 镜像（强调色/中性色） |
-| SillyTavern | CSS 变量运行时改写 + 服务端存储；导入主题时若含 `@import` 专门弹出安全警告 | **✗（全仓库无 `prefers-color-scheme`）** | 服务端（非 localStorage） |
-| VCPChat | **整份覆写 `themes.css` 文件，然后调用 `mainWindow.reload()` 整窗口重载** | Electron `nativeTheme.on('updated')` 监听并广播 `theme-updated` IPC；系统变化时不必用户手动切换 | `settings.json` 的 `currentThemeMode` + 本地 `themes.css` |
-
-**跨项目结论**：VCPChat 切换主题时会 reload 整个窗口，可能出现白屏；SillyTavern 未跟随系统深色模式。Chatbox 同时维护三套主题机制，深色背景 `#242424` 在 MUI 和 Tailwind 两处分别硬编码，修改时需要同步两处。
-
-### 图片预览：页面内灯箱与独立子窗口
-
-| 项目 | 图片预览实现 | 特殊能力 |
-| --- | --- | --- |
-| AIO Hub | `viewerjs` 库 | — |
-| Chatbox | `react-zoom-pan-pinch`（`TransformWrapper`），缩放 0.1×–8×，鼠标/触控手势 + 拖动平移 | 支持 `extraButtons` 注入（如"设为头像"） |
-| Cherry Studio | `ImageViewer.tsx` + `@cherrystudio/ui` `ImagePreviewDialog` | 缩放、旋转、翻转、多图前后导航、复制/下载 |
-| LobeHub | `ImageFileListViewer` + `@lobehub/ui` `PreviewGroup`/`Image` | 业务侧确认是灯箱预览并支持组内切换；缩放/旋转/下载等细节在 UI 包内部 |
-| SillyTavern | 复用 `Popup` 弹窗，以 CSS class toggle 实现灯箱效果；另用 `jquery.izoomify` 提供鼠标悬停放大镜 | 触屏体验存疑（未实测） |
-| VCPChat | **独立 Electron 子窗口**，8 种绘图工具、本地 Tesseract.js OCR（懒加载）、缩放范围 0.05×–32× | 唯一支持 OCR 识别图片文字 |
-
-**跨项目结论**：VCPChat 的图片预览是独立进程子窗口（代价是开销大），其它项目走页面内灯箱/弹窗；只有 VCPChat 集成了 OCR 能力。Cherry Studio 的预览能力已在业务和 UI 包两侧核实，LobeHub 的灯箱接入已核实，只有其底层 UI 包提供的具体工具按钮能力仍未下钻。
-
-### 动画方案：只有 LobeHub 引入了 framer-motion 体系
-
-- **AIO Hub**：自研 CSS transitions + Element Plus 内置动效
-- **Chatbox**：无 framer-motion；`tailwindcss-animate` + Mantine 内置过渡预设 + `vaul` 弹簧动画 + 手写 SVG `<animate>` + 手写 CSS keyframes；消息卡片首次出现**无入场动画**
-- **Cherry Studio**：无 framer-motion；`tw-animate-css` + Radix `data-state` 驱动 + 手写 CSS keyframes；折叠展开是 `hidden` 硬切换，**无高度渐变过渡**
-- **LobeHub**：`motion/react`（framer-motion 新包名）用在 `WorkflowCollapse` 折叠动效和文档编辑器侧栏滑动；消息本身进场**无动画**；且两处自定义动画对全局 `animationMode` 开关的遵守程度不一致（一处读、一处不读）
-- **SillyTavern**：自研 `stream-fadein.js`（流式输出渐显）+ jQuery UI + CSS transitions；消息完成渲染后触发 `CHARACTER_MESSAGE_RENDERED` 事件供扩展挂钩
-- **VCPChat**：CSS transitions；三种 presentation mode 切换是 body class 变换，由 CSS 控制
-
-**跨项目结论**：六个项目都没有为消息卡片首次出现设置明显的入场动画。LobeHub 引入了 framer-motion，但只用于少数组件；Cherry Studio 的折叠展开采用 `hidden` 硬切换，属于代码中明确可见的实现方式。
-
-### 各项目的特殊实现差异（汇总）
-
-- **AIO Hub**：主题持久化在 `settings.json` 而非 localStorage（与"通常在浏览器层存"的预期相反，因为是 Tauri 原生应用）。
-- **Chatbox**：文件拖入输入区**没有任何高亮遮罩或视觉反馈**；桌面端 `SessionItem` **没有右键菜单**；初始断点判定用 599.95px，后续响应式用 640px，两个数字之间存在窄缝（聊天主链交点见 Chat UI 横向对比）。
-- **Cherry Studio**："助手回复完成通知"开关可勾选，但全仓库找不到任何发送调用——**是个不生效的死开关**。
-- **LobeHub**：移动端是独立路由树 + 独立构建产物（`vite.config.ts` 按 `isMobile` 切 entry），不是同构响应式；资源管理器的文件拖拽是团队主动放弃 `dnd-kit`、自建原生 HTML5 drag/drop（注释明确写了性能理由）。
-- **SillyTavern**：swipe（候选回复切换）在移动端是**点按钮，不是划手势**，与功能名字暗示的手势操作不符；主题系统的 CSS 是服务端存储而非 localStorage，切换后需要页面刷新。
-- **VCPChat**：compact navigation 由 `sidebarAvatarOnly` 字段显式控制，**不是宽度断点自动触发**；表情包选择器是平铺图片网格，无搜索无分类，点击插入原始 `<img>` HTML 标签。
-
 ## 迁移与导航
 
 - 会话单位、存储模型、分支、索引与搜索（数据侧）：[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)
 - SDK 主链、消息构建、流式持久化、中断：[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)
 - 工作台、搜索入口、消息操作、停止反馈、键盘无障碍：[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)
 - 消息渲染实现：[消息渲染器横向对比](../消息渲染器/消息渲染器横向对比.md)
-- 通用界面盘点（弹窗/Toast/主题/图片预览/动画）：待可选界面专题承接，暂保留于本文档"通用界面盘点"一节。
+- 通用界面盘点（弹窗/Toast/主题/图片预览/动画）：[应用界面基础设施横向对比](../应用界面基础设施/应用界面基础设施横向对比.md)

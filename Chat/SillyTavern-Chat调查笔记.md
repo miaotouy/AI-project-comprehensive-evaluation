@@ -42,7 +42,7 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + No
 - Chat UI：[`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)（消息操作、swipe 工作流、生成反馈、快捷键、键盘可达性）
 - 消息渲染：[`../消息渲染器/SillyTavern-消息渲染调查笔记.md`](../消息渲染器/SillyTavern-消息渲染调查笔记.md)
 - 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`../Chat UI/ChatUI横向对比.md`](<../Chat UI/ChatUI横向对比.md>)
-- 通用界面盘点（弹窗、Toastr、主题、无障碍等，临时承接）：[`../通用界面盘点待迁移/SillyTavern.md`](../通用界面盘点待迁移/SillyTavern.md)
+- 应用界面基础设施（弹窗、Toastr、主题、无障碍等）：[`../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md`](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md)
 
 ## 关键能力与已确认边界
 
@@ -59,7 +59,7 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + No
 - `extra.files`（消息内嵌附件）与 Data Bank 附件（`extension_settings.attachments` 等）在 World Info/prompt 注入层面的关系。
 - `promptOnly` 正则脚本的具体调用点（仅从枚举值推断存在）。
 - `StreamingProcessor` 缓存 DOM 引用失效与长聊天 `refreshSwipeButtons`/`redisplayChat` 性能，仅代码层分析，未运行时实测。
-- 通用界面盘点中的无障碍、触屏体验等为静态代码结论，未做运行或读屏软件验证（见通用界面盘点文件）。
+- 应用界面基础设施笔记中的无障碍、触屏体验等为静态代码结论，未做运行或读屏软件验证（见 [`../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md`](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md)）。
 
 ## 关键源码索引
 

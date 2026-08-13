@@ -26,7 +26,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - **产品表面**：Web（Next.js）；Electron 桌面端（自绘标题栏、桌面通知、IPC 驱动本地异构 Agent）；移动端是独立打包 SPA（`(mobile)` 路由树 + 底部 TabBar），非同构响应式布局。
 - **后端**：自建服务端（tRPC lambda + `packages/database`）承担 CRUD、BM25 检索与 Gateway 执行；模型接入经 `ModelRuntime`/provider adapter（LLM 渠道管理专项），不内置推理。
 - **事实源**：权威在服务端数据库；前端经 `messageService`/SWR 读写并缓存于 IndexedDB；两层前端 store 的 `displayMessages` 只是解析展示态。
-- **不拥有的层级**：通用界面基础设施（弹窗库、Toast、主题、动画、断点、拖放、i18n、PWA 安装等）已移出，见 [`../通用界面盘点待迁移/LobeHub.md`](../通用界面盘点待迁移/LobeHub.md)。
+- **不拥有的层级**：通用界面基础设施（弹窗库、Toast、主题、动画、断点、拖放、i18n、PWA 安装等）已移出，见 [`../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md`](../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md)。
 
 ## 端到端聊天主链
 
@@ -59,7 +59,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - Chat UI：[`../Chat UI/LobeHub-ChatUI调查笔记.md`](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
 - 消息渲染器：[`../消息渲染器/LobeHub-消息渲染调查笔记.md`](../消息渲染器/LobeHub-消息渲染调查笔记.md)
 - 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`../Chat UI/ChatUI横向对比.md`](<../Chat UI/ChatUI横向对比.md>)
-- 相关专项：生成式输出与运行时、Agent 工具、Agent 角色、LLM 渠道管理笔记；通用界面盘点见 [`../通用界面盘点待迁移/LobeHub.md`](../通用界面盘点待迁移/LobeHub.md)
+- 相关专项：生成式输出与运行时、Agent 工具、Agent 角色、LLM 渠道管理笔记；应用界面基础设施盘点见 [`../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md`](../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md)
 
 ## 关键能力与已确认边界
 
@@ -77,7 +77,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - `doctor/diagnose.ts` 的修复补丁在哪个写路径自动应用，还是仅 `TopicDoctorModal` 人工触发——未读补丁应用逻辑。
 - Gateway resume 与本地 client runtime 两条审批路径是否行为等价——仅确认两套独立实现，未运行验证。
 - `ModelRuntime` 与各 provider adapter 的最终 HTTP 字段未逐一核对。
-- 通用 UI 未核实项（弹窗 focus trap、ActionIcon aria-label、断点像素值、拖拽机制、SW 推送等）随盘点搬至 [`../通用界面盘点待迁移/LobeHub.md`](../通用界面盘点待迁移/LobeHub.md)。
+- 通用 UI 未核实项（弹窗 focus trap、ActionIcon aria-label、断点像素值、拖拽机制、SW 推送等）随盘点搬至 [`../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md`](../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md)。
 
 ## 关键源码索引
 

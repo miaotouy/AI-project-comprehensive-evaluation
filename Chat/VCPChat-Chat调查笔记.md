@@ -26,7 +26,7 @@ VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（
 
 - **产品表面**：Electron GUI（主进程 + 渲染进程），主窗口三栏布局——左侧 sidebar（助手/话题/设置三个 tab）、中央 chat、右侧通知侧栏，是并列工作区而非路由页面；`bubble`/`panel`/`immersive` 三种呈现模式是同一消息数据的 CSS 投影。另有主题选择器、图片查看器、语音聊天等独立子窗口与系统托盘（应用栏含"文坊"/Scriptorium 入口，`modules/trayManager.js:26`）。
 - **外部系统**：模型推理与流式输出由外部 **VCP 服务器**承担（`settings.json` 的 `vcpServerUrl/vcpApiKey`），客户端通过 HTTP 流式读取并依赖远端 `/v1/interrupt`；表情库亦来自服务端 API。Agent 配置、话题历史、设置均本地持久化，应用**不发送系统桌面通知**（所有通知经内置通知侧栏与浮动 Toast）。当前 HEAD 另有一个本地旁路服务 VCP-CDS（Rust 子进程，`ChatDataServiceEnabled: true` 默认开启，`modules/services/chatDataService/*`、`main.js:679-698`）：旁路镜像 `history.json` 并建 Tantivy 全文索引，不改变其作为消息事实源，供 DeepMemo 检索与 VCPMobileSync 中央同步消费，不参与聊天主链（主链仍是直接 fetch VCP 服务器）。
-- **其它专项**：Agent 角色配置、Agent 工具、LLM 渠道管理、生成式输出与运行时、仓库分布各有独立笔记；通用界面盘点（弹窗/Toast/主题/动画/图片查看器/快捷键/无障碍）见 [`通用界面盘点待迁移/VCPChat.md`](通用界面盘点待迁移/VCPChat.md)。
+- **其它专项**：Agent 角色配置、Agent 工具、LLM 渠道管理、生成式输出与运行时、仓库分布各有独立笔记；通用界面盘点（弹窗/Toast/主题/动画/图片查看器/快捷键/无障碍）见 [`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)。
 
 ## 端到端聊天主链
 
@@ -58,7 +58,7 @@ textarea#messageInput（Enter 发送，Shift+Enter 换行）
 - Chat UI：[`<../Chat UI/VCPChat-ChatUI调查笔记.md>`](<../Chat UI/VCPChat-ChatUI调查笔记.md>)
 - 消息渲染器：[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md)
 - 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)
-- 通用界面盘点（弹窗、Toast、主题、动画、图片查看器、全局快捷键、无障碍等）：[`../通用界面盘点待迁移/VCPChat.md`](../通用界面盘点待迁移/VCPChat.md)
+- 通用界面盘点（弹窗、Toast、主题、动画、图片查看器、全局快捷键、无障碍等）：[`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)
 
 ## 关键能力与已确认边界
 
