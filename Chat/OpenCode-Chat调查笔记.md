@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenCode 的 Chat 体系以「服务端 SQLite 权威 + 事件发布 + 客户端投影」为核心：服务端把每次增量落库并发布 `message.updated`/`message.part.updated`/`message.part.delta` 事件（`src/session/session.ts:631-645`），经 SSE 推送，Web App 以 16ms 批量 flush 与 delta 拼接后投影到 Solid store（`app/src/context/server-sdk.tsx`、`server-session.ts`）。消息模型为 Session → Message（role: user/assistant）→ Part（12 种类型）三层，part 独立存表、读取时组装（`core/src/session/sql.ts`、`src/session/message-v2.ts`）；模型请求主链路 `SessionPrompt.prompt → loop → processor → LLM.stream`（AI SDK `streamText`），每轮从数据库重读历史。V1 为生产主路径，V2 事件溯源双轨并存。
+OpenCode 的 Chat 体系以「服务端 SQLite 权威 + 事件发布 + 客户端投影」为核心：服务端把每次增量落库，并发布消息更新、part 更新、part 增量三类事件（`message.updated`/`message.part.updated`/`message.part.delta`，`src/session/session.ts:631-645`），经 SSE 推送，Web App 以 16ms 为周期批量合并增量后投影到 Solid store（`app/src/context/server-sdk.tsx`、`server-session.ts`）。消息模型为 Session → Message → Part 三层，消息按 user/assistant 两种角色区分，Part 共 12 种类型且独立存表，读取时批量组装（`core/src/session/sql.ts`、`src/session/message-v2.ts`）；模型请求主链路为「发送入口 → 处理循环 → 处理器 → LLM 流式接口」（AI SDK `streamText`），每轮从数据库重读历史。V1 为生产主路径，V2 事件溯源双轨并存。
 
 ## 产品表面与系统边界
 
@@ -39,9 +39,9 @@ App submit（components/prompt-input/submit.ts） -> api.session.prompt
 
 ## 核心对象与状态权威
 
-- **Session/Message/Part 三层**：Session 带 `agent/model/summary_*/cost/tokens_*/revert` 等字段；Message 的 `data` 列不含 parts（part 独立存表，仅 `message_id` 带 cascade 外键），读取时 `MessageV2.hydrate` 批量组装；Part 12 种类型（text/subtask/reasoning/file/tool/step-start/step-finish/snapshot/patch/agent/retry/compaction）。ID 体系：Session `ses_`（降序，新会话在前）、Message `msg_`、Part `prt_`。
-- **权威源**：SQLite（服务端唯一事实源）；客户端 `server-session.ts` 是投影；`SessionRunState`/`Runner`（每 session 一个，Idle/Running/Shell）是运行状态权威。
-- **写入与广播强耦合**：`updateMessage/updatePart` 只发事件，DB 写入由事件投影器完成——事件顺序即持久化顺序。
+- **Session/Message/Part 三层**：Session 带模型、代理、摘要、成本、token 统计与回退标记等字段；Message 只存自身数据，parts 独立存表，经 `message_id` 外键级联删除，读取时由 `MessageV2.hydrate` 批量组装；Part 共 12 种类型，覆盖文本、推理、文件、工具、步骤起止、快照补丁、子代理、重试与压缩等形态（完整枚举见会话与消息管理专项笔记）。ID 前缀按层级区分：会话 `ses_`（降序，新会话在前）、消息 `msg_`、part `prt_`。
+- **权威源**：SQLite（服务端唯一事实源）；客户端 `server-session.ts` 是投影；每会话一个的运行器是运行状态权威，取值只有 Idle/Running/Shell 三种。
+- **写入与广播强耦合**：消息与 part 的更新入口只发布事件，数据库写入由事件投影器完成，事件顺序即持久化顺序。
 
 ## 专项导航
 
@@ -53,8 +53,8 @@ App submit（components/prompt-input/submit.ts） -> api.session.prompt
 
 ## 关键能力与已确认边界
 
-- 支持：流式三层落库频率（delta 事件 / end 时完整写 part / tool 状态即时落库）、上下文压缩（compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排并标记旧 tool 输出 `time.compacted`；压缩请求的对话历史以文本序列化拼接，`compaction.ts:52-83`、:387、:427-438）、revert 回退（删除目标之后消息，以 `findIndex`+`slice` 定位，`revert.ts:74-75`、:106-114）、fork 复制新会话、多会话并发（不同 session 并行、同 session 串行）、后台任务与 detach 子 agent、中断（pending/running tool part 标 "Tool execution aborted"）、自动重试（5xx/429/超时，context overflow 不重试，上限 5 次、指数退避带 0.25 抖动，`retry.ts:28-31`、:192）。
-- 已确认边界：无消息内容全文搜索（仅会话标题 LIKE，session.ts:993-995）；附件为 `data:` URL 内联（无独立附件目录）；无整体 edit message 端点（只能 PATCH 单个 part）；前端对失败消息的重试本质是再次发送；`SessionStatusEvent.Info` 只有 idle/retry/busy 三态；V2 post-crash continuation recovery 明确标注为未来工作。
+- 支持：流式三层落库——增量事件即时写、回合结束时完整写 part、工具状态即时落库；上下文压缩——把历史重排为「压缩请求、摘要、对话尾巴、继续请求」四段，旧工具输出打上 `time.compacted` 标记，压缩请求的对话历史以文本序列化拼接（`compaction.ts:52-83`、:387、:427-438）；回退——删除目标消息之后的全部消息（`revert.ts:74-75`、:106-114）；fork 复制新会话；多会话并发（不同会话并行、同会话串行）；后台任务与可分离的子代理；中断——把等待执行或执行中的工具 part 标记为已中止，展示文案 "Tool execution aborted"；自动重试——仅对 5xx、429 与超时重试，上下文溢出不重试，最多 5 次、指数退避带 0.25 随机抖动（`retry.ts:28-31`、:192）。
+- 已确认边界：无消息内容全文搜索，仅按会话标题做 LIKE 匹配（`session.ts:993-995`）；附件以 `data:` URL 内联存储，无独立附件目录；无整体编辑消息的端点，只能逐个 PATCH part；前端对失败消息的重试本质是再次发送；会话状态事件只有 idle/retry/busy 三态（`SessionStatusEvent.Info`）；V2 的崩溃后继续恢复机制明确标注为未来工作。
 
 ## 未验证事项
 

@@ -84,7 +84,7 @@ LLM adapter / response callbacks
 - `src/tools/llm-chat/types/message.ts`：`ChatMessageNode`
 - `src/tools/llm-chat/types/session.ts`：会话索引和详情
 
-`ChatMessageNode` 以树节点保存消息，通过 `parentId`、`childrenIds` 和会话 `activeLeafId` 表达分支。正文仍以单一 `content: string` 为主，富内容主要放在附件和 metadata 中。
+`ChatMessageNode` 以树节点保存消息，通过 `parentId`、`childrenIds` 和会话 `activeLeafId` 表达分支。正文仍以单一 `content` 字符串为主，富内容主要放在附件和 metadata 中。
 
 与渲染直接相关的 metadata 包括：
 
@@ -95,7 +95,7 @@ LLM adapter / response callbacks
 - `usage`、模型/Profile/Agent/User Profile 快照；
 - 错误和空响应诊断；
 - 压缩节点信息；
-- 消息级 `status` 扩展为 `generating/waiting/queued/complete/error`（`types/common.ts`），`MessageHeader` 经 `utils/messageStatus.ts` 映射为"生成中/等待/排队/错误/异常回复"徽标（`showMessageStatus` 设置控制）；用户消息另有 `knowledgeReference` 字段（显式 Knowledge 资料引用，见 Chat UI 3.1）。
+- 消息级 `status` 扩展为 `generating/waiting/queued/complete/error` 五态（`types/common.ts`），消息头组件经状态映射工具转为“生成中/等待/排队/错误/异常回复”徽标（`showMessageStatus` 设置控制）；用户消息另有 `knowledgeReference` 字段（显式 Knowledge 资料引用，见 Chat UI 3.1）。
 
 AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正文里的 `<think>`、VCP 标记等仍由渲染器解析；provider 原生 reasoning、工具节点和附件则有独立结构。
 
@@ -109,7 +109,7 @@ AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正�
 | `role === "tool"` | `ToolCallMessage` |
 | 其他 | `ChatMessage` |
 
-`ChatMessage.vue` 是普通消息壳，组合 `MessageHeader`、`MessageContent` 和 `MessageMenubar`。独立工具结果由列表级专用组件渲染，不进入正文 AST；VCP 协议块则能在正文内部被 V2 解析成 `vcp_tool` 节点，因此工具内容有两条渲染路径。
+普通消息壳 `ChatMessage.vue` 组合消息头、正文和菜单栏三个子组件。独立工具结果由列表级专用组件渲染，不进入正文 AST；VCP 协议块则能在正文内部被 V2 解析成 `vcp_tool` 节点，因此工具内容有两条渲染路径。
 
 ### 1.3 MessageContent 的职责
 
@@ -133,10 +133,10 @@ AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正�
 
 `src/tools/llm-chat/composables/chat/useStreamingMessageSources.ts` 为每个 `nodeId` 维护一个 `ReplayableMessageStreamSource`：
 
-- `subscribe()` 会向后加入订阅者，并通过 microtask 重放已有 buffer；
-- `append()` 同步广播新 delta；
-- `onComplete()` 通知终止；
-- 完成后默认延迟 30 秒 dispose，给组件交接和重挂载留出窗口。
+- 订阅方加入后通过 microtask 重放已有 buffer；
+- 追加新 delta 时同步广播给全部订阅方；
+- 完成时通知终止；
+- 完成后默认延迟 30 秒释放，给组件交接和重挂载留出窗口。
 
 `MessageContent.vue:276` 仅在节点确实处于 generating 且 store 仍认定 executor 活跃时提供 stream source。进入生成态会通过 key remount 一次，让原静态渲染器订阅流；结束时保持同一组件实例，避免 HTML iframe 和 AST 子树整体重建。
 
@@ -144,7 +144,7 @@ AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正�
 
 `src/tools/llm-chat/composables/chat/useChatResponseHandler.ts:242` 的正文 delta 首先进入 `appendStreamingMessageChunk()`，渲染器直接消费高频流。
 
-同一 delta 还进入 `persistBuffer` / `syncBuffer`，再按帧或定时器批量写入 `ChatMessageNode.content`，用于：
+同一 delta 还进入持久化与同步两个缓冲，再按帧或定时器批量写入消息正文字段，用于：
 
 - 会话持久化；
 - 跨窗口 `chat:streaming-delta` 同步；
@@ -154,9 +154,9 @@ AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正�
 
 ### 2.3 推理流是另一条路径
 
-provider 的 reasoning delta 不进入正文 StreamSource，而是按 rAF 合并到 `metadata.reasoningContent`。`MessageContent` 再用顶层 `LlmThinkNode` 包住另一个 `RichTextRenderer`。
+provider 的 reasoning delta 不进入正文流源，而是按 rAF 合并到 `metadata.reasoningContent`；适配层再用顶层 `LlmThinkNode` 包住另一个渲染器实例渲染。
 
-模型直接在正文输出的 `<think>` / `<thinking>` 则由 V2 parser 识别为 AST 内 `llm_think`。因此系统同时支持"协议级 reasoning"和"文本标签 reasoning"。思考标签的闭合判定使用模糊匹配——`parser/utils/text-utils.ts` 的 `isFuzzyMatchCloseTag` 对分隔符（`-`/`_` 等）、同义词/词根（think/thinking/thought 等）和有限编辑距离做归一化匹配，`StreamProcessor`/`StreamProcessorV2` 与 `parseHtml.ts` 共用同一判定；模糊闭合导致 `isThinking` 由 true 变 false 时即使内容指纹未变化也会触发节点替换，确保计时与流式状态及时停止。
+模型直接在正文输出的 `<think>` / `<thinking>` 则由 V2 parser 识别为 AST 内 `llm_think` 节点，因此系统同时支持“协议级 reasoning”和“文本标签 reasoning”两条路径。思考标签的闭合判定使用模糊匹配：`parser/utils/text-utils.ts` 的 `isFuzzyMatchCloseTag` 对分隔符（连字符、下划线等）、同义词/词根（think/thinking/thought 等）和有限编辑距离做归一化，两个流处理器与 HTML 解析共用同一判定；模糊闭合导致 `isThinking` 由 true 变 false 时即使内容指纹未变化也会触发节点替换，确保计时与流式状态及时停止。
 
 ## 3. RichTextRenderer 入口
 
@@ -172,7 +172,7 @@ provider 的 reasoning delta 不进入正文 StreamSource，而是按 rAF 合并
 - 解析：`version`、`llmThinkRules`、`regexRules`；
 - 资源：`resolveAsset`；
 - 样式：`styleOptions`；
-- 流控：`smoothingEnabled`、`throttleEnabled`、`throttleMs`；
+- 流控：平滑、节流开关与间隔（`smoothingEnabled`/`throttleEnabled`/`throttleMs`）；
 - 节点行为：HTML 自动预览、代码/工具折叠、无边框模式、进入动画；
 - HTML：外部资源开关、危险标签开关、CDN 本地化、预览冻结；
 - 护栏：`safetyGuardEnabled`。
@@ -190,7 +190,7 @@ CRLF 归一化
 
 AST 模式不再全局替换资产 URL，而由 Image/Video/Audio/GenericHtml/HTML Preview 节点按需解析，避免本地 URL 被 Markdown parser 二次编码。
 
-`MessageContent.vue` 把聊天设置到渲染器 props 的映射收敛到 `utils/richTextRendererSettings.ts`（`buildRichTextRendererSettings` 统一装配，含渲染器版本、HTML/脚本开关、节流、平滑、护栏、进入动画与截图模式豁免等），修复了设置项传参链路断裂的问题；`RichTextRenderer` 的"版本/规则变更重解析"watch 改用统一预处理后的 `processedContent`（避免配置切换丢失正则、换行归一化或裸 HTML 包裹结果），并把 `defaultToolCallCollapsed`、`safetyGuardEnabled` 纳入 watch 依赖。
+适配层把聊天设置到渲染器 props 的映射收敛到 `utils/richTextRendererSettings.ts` 的统一装配函数（含渲染器版本、HTML/脚本开关、节流、平滑、护栏、进入动画与截图模式豁免等），修复了设置项传参链路断裂的问题；渲染器的“版本/规则变更重解析”监听改用统一预处理后的 `processedContent`（避免配置切换丢失正则、换行归一化或裸 HTML 包裹结果），并把 `defaultToolCallCollapsed`、`safetyGuardEnabled` 纳入监听依赖。
 
 ## 4. 四个版本的真实状态
 
@@ -247,9 +247,9 @@ Tokenizer 对 `code`、`pre`、`script`、`style` 等采用 raw mode，避免内
 - `replace-children-range`；
 - `replace-root`。
 
-Patch 入队后由 rAF 检查 `throttleMs`，默认聊天配置为 80ms。flush 前合并连续的同节点 `text-append`，应用时沿 nodeMap 路径做不可变更新，未变化分支保留引用。
+Patch 入队后由 rAF 按 `throttleMs` 节流（聊天默认 80ms）；flush 前合并连续的同节点文本追加，应用时沿节点索引做不可变更新，未变化分支保留引用。
 
-`useMarkdownAst` 的配置项（`throttleMs`/`throttleEnabled`/`verboseLogging`/`safetyGuardEnabled`）是 getter（`MaybeRefOrGetter`，`RichTextRenderer.vue` 传入 `() => props.xxx`），设置变更无需重建处理器即可生效；调度只走 rAF，源码中遗留的 `timeoutHandle` 历史字段已删除。
+`useMarkdownAst` 的配置项（节流间隔、节流开关、详细日志、护栏开关）以 getter 形式传入（`MaybeRefOrGetter`），设置变更无需重建处理器即可生效；调度只走 rAF，源码中遗留的定时器句柄历史字段已删除。
 
 ## 6. 节点渲染层
 
@@ -272,7 +272,7 @@ Patch 入队后由 rAF 检查 `throttleMs`，默认聊天配置为 80ms。flush 
 
 代码块固定使用 CodeMirror，并通过 IntersectionObserver 延迟实例化；Mermaid 也是动态 import。图片列表从 AST 节流提取，用于图片查看器上下张导航。
 
-节点行为细节：`CodeBlockNode` 把全局 `defaultRenderHtml` 开关纳入自动预览 watch 依赖（设置变更可作用于已挂载的代码块），`defaultExpanded` 是 computed + watch，跟随设置变化；`VcpToolNode` 的默认折叠值同样是响应式（`defaultCollapsed` computed），设置变更实时生效。
+节点行为细节：`CodeBlockNode` 把全局 HTML 自动预览开关纳入监听依赖（设置变更可作用于已挂载的代码块），默认展开值也是响应式计算，跟随设置变化；`VcpToolNode` 的默认折叠值同样实时生效。
 
 ## 7. HTML 渲染方式
 
@@ -299,7 +299,7 @@ Pure Markdown-it 分支创建 markdown-it 时设置 `html: true`，输出直接�
 - `StreamController` rAF 平滑输出，VCP 协议边界会强制 flush；
 - 稳定 AST 引用复用、pending 最新值覆盖；
 - Patch 80ms 节流和 text append 合并；
-- `shallowRef` + 不可变路径更新；
+- 浅引用状态 + 不可变路径更新；
 - CodeMirror 延迟挂载、Mermaid 动态加载；
 - 旧 HTML preview 按消息深度冻结，默认只保持最近 5 条活跃；
 - 不可见消息冻结 Agent 样式/think rules，避免全列表配置更新；
@@ -320,7 +320,7 @@ V2 当前常量为：
 
 ### 列表策略
 
-`MessageList.vue` 对 `messages` 全量 `v-for`，只用 CSS `content-visibility` 跳过离屏绘制。设置中的 `virtualListOverscan` 只有默认值、类型和 UI，消息列表运行时没有读取它。因此列表实际为全量组件常驻加离屏绘制跳过，而非窗口化。
+消息列表组件对 `messages` 全量 `v-for`，只用 CSS `content-visibility` 跳过离屏绘制。设置中的 `virtualListOverscan` 只有默认值、类型和 UI，运行时没有被读取。因此列表实际为全量组件常驻加离屏绘制跳过，而非窗口化。
 
 ## 9. 桌面端与移动端使用不同引擎
 
@@ -333,7 +333,7 @@ V2 当前常量为：
 
 - 新增专用节点组件：`ThinkBlock`（思考块，`<think|guguthink>` 正则提取）、`AlertBlock`（GitHub 提示块）、`KatexRenderer`（KaTeX 数学公式）、`MermaidDiagram`（安全 Mermaid，流式期间延迟渲染）、`VcpBlock`（VCP 协议输出）、`RichTextMediaNode`（受管媒体预览）、`CodeBlock`（优化代码块交互）；
 - 流式渲染增加 80ms 节流（`STREAM_RENDER_THROTTLE_MS`）：中间 chunk 合并渲染，最终内容立即渲染；`isStreaming` 不再只是类型占位，而是参与节流策略；
-- 安全边界收紧：关闭不安全的原始 HTML 渲染（`v-html` 不再直接输出 html token）、限制 Markdown 链接协议、普通 Markdown 图片来源受限，受管媒体走统一资产预览协议。
+- 安全边界收紧：关闭不安全的原始 HTML 渲染（html token 不再直接进入 `v-html`）、限制 Markdown 链接协议、普通 Markdown 图片来源受限，受管媒体走统一资产预览协议。
 
 移动端与桌面端仍是两套独立实现（无共享 AST/处理器代码）。
 
@@ -352,14 +352,14 @@ V2 当前常量为：
 
 工具注册会被 `services/auto-register.ts` 的 `import.meta.glob("../tools/**/*.registry.ts")` 扫描，并出现在默认工具顺序中。
 
-测试页直接挂载生产 `RichTextRenderer.vue`，提供以下人工验证能力：
+测试页直接挂载生产渲染器组件，提供以下人工验证能力：
 
 - 在 V1、V2 和 Pure Markdown-it 三个已启用版本间切换；
 - 选择 Agent 并注入与聊天一致的 `currentAgent` 上下文，验证 `agent-asset://` 等资产解析；
 - 使用 26 组共享预设，覆盖基础 Markdown、长文本/长代码、V2 parser、HTML 嵌套与换行、脚本交互、Canvas 游戏、Mermaid、KaTeX/MathJax、思考节点、Action Button、复杂混排、主题变量和样式隔离等场景；
-- 立即渲染或构造真正的 `StreamSource`，经项目 token calculator 按所选 tokenizer 切分，失败时才退回字符流；
+- 立即渲染或构造真实的流源（`StreamSource`），经项目 token calculator 按所选 tokenizer 切分，失败时才退回字符流；
 - 调整首包延迟、目标 Tokens/s、单次 Token 数和发包延迟波动，并用累计时间债务补偿保持平均速度；
-- 独立切换 StreamController 平滑、AST 更新节流、节流间隔、高频日志和 safety guard；
+- 独立切换流控制器平滑、AST 更新节流、节流间隔、高频日志和 safety guard；
 - 模拟 `firstTokenTime`、`requestEndTime`、`tokensPerSecond` 等 generation metadata；
 - 以颜色显示 `data-node-status=stable/pending`，实时查看生产 renderer 暴露的 AST；
 - 强制 CodeMirror 停留在 `PreCodeNode` fallback，编辑 Markdown 样式和聊天正则；
@@ -372,9 +372,9 @@ V2 当前常量为：
 
 对比报告中的"文本匹配"基于 Markdown/HTML 字符串清理和规范化后的字符长度差，不是结构化语义 diff；截图、逃逸检测和复杂交互需要人工判断。预设是输入语料库，没有声明期望 AST/DOM 快照或 pass/fail oracle。
 
-测试角色 UI 还提供 User Profile 选择，但 `RichTextRendererTester.vue` 当前只在 `profileType === "agent"` 时构造 `currentAgent`，所选 User Profile 没有进入 renderer 的 props 或 provide context。
+测试角色 UI 还提供 User Profile 选择，但测试组件当前只在 profile 类型为 agent 时构造 `currentAgent`，所选 User Profile 没有进入渲染器的 props 或 provide context。
 
-测试页已解耦对 `llm-chat` registry 的依赖——Agent/User Profile 数据直接从 `agent-manager` 与 `user-profile-manager` 的领域 Store 加载（挂载时按需 `loadAgents()`/`loadProfiles()`），`TesterConfigSidebar` 改为接收父组件传入的 `agents`/`userProfiles` 列表；资产解析复用 `agent-manager/utils/agentAssetUtils`。测试台在仓库 `rich-text-renderer/ARCHITECTURE.md` 中的说明已同步。
+测试页已解耦对聊天包 registry 的依赖——Agent/User Profile 数据直接从 `agent-manager` 与 `user-profile-manager` 的领域 Store 按需加载（挂载时调用各自的加载动作），`TesterConfigSidebar` 改为接收父组件传入的 Agent/User Profile 列表；资产解析复用 `agent-manager/utils/agentAssetUtils`。测试台在仓库 `rich-text-renderer/ARCHITECTURE.md` 中的说明已同步。
 
 ### 10.2 移动端测试页
 
@@ -386,7 +386,7 @@ V2 当前常量为：
 - 可配置流速、首包延迟和波动范围，显示 Token、TPS、耗时和字符统计；
 - 可复制对比报告、渲染 HTML 和 AST JSON。
 
-移动端没有引入桌面的 token calculator/WASM 分词依赖，使用中文按字、英文按单词/空格切分的轻量算法。它也不创建桌面的 `StreamSource`，而是不断追加 `currentContent`，触发移动 renderer 对累计全文重新 `marked.lexer()`。调试抽屉中的 AST 同样来自页面自己的 `marked.lexer(currentContent)`。因此移动测试页验证的是移动端真实的累计 content 更新路径，不能用来验证桌面 V2 CustomParser 的 AST/Patch 行为。
+移动端没有引入桌面的 token calculator/WASM 分词依赖，使用中文按字、英文按单词/空格切分的轻量算法。它也不创建桌面的流源，而是不断追加 `currentContent`，让移动渲染器对累计全文重新 `marked.lexer()`；调试抽屉中的 AST 同样来自页面自己的分词结果。因此移动测试页验证的是移动端真实的累计 content 更新路径，不能用来验证桌面 V2 CustomParser 的 AST/Patch 行为。
 
 ### 10.3 现有自动测试
 

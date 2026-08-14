@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-README 四个招牌能力（`README.md:45-55`：Proactive Agent、Agentic Capabilities、1000+ Plugins、Agent Sandbox）中，本次确认需要独立能力卡的有两项：**Agent Sandbox**（`主链确认`）与**主动式 Agent**（`主链确认`）；**语音能力**形成完整管道（`主链确认`，辅助贡献）；**多 IM 消息投影**与**1000+ 插件生态**判定为 `归并已有类目`（现有笔记已覆盖产品主链，计数与生态规模属外部事实）。
+README 四个招牌能力（`README.md:45-55`：Proactive Agent、Agentic Capabilities、1000+ Plugins、Agent Sandbox）中，本次确认需要独立能力卡的有两项：Agent Sandbox 与主动式 Agent；语音能力形成完整管道，列为辅助贡献；多 IM 消息投影与 1000+ 插件生态归并到已有类目（现有笔记已覆盖产品主链，计数与生态规模属外部事实）。
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
@@ -26,7 +26,7 @@ README 四个招牌能力（`README.md:45-55`：Proactive Agent、Agentic Capabi
 
 ## 介绍声明与候选盘点
 
-README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execution of code, shell calls, and session-level resource reuse"（链接 `docs/use/astrbot-agent-sandbox.html`）；Web ChatUI 内置 agent sandbox 与 web search；1000+ 社区插件。文档目录 `docs/zh/use/` 下有 proactive-agent 等专门文档（`astrbot/core/config/default.py:3651` 的 hint 指向 `docs.astrbot.app/use/proactive-agent.html`）。
+README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execution of code, shell calls, and session-level resource reuse"（链接 `docs/use/astrbot-agent-sandbox.html`）；Web ChatUI 内置 agent sandbox 与 web search，并有 1000+ 社区插件。中文使用文档包含 proactive-agent 专门页面，配置文件中的提示指向 `docs.astrbot.app/use/proactive-agent.html`（`astrbot/core/config/default.py:3651`）。
 
 ## 已确认的独特能力
 
@@ -34,9 +34,9 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **用户目标**：让 Agent 在隔离环境中执行代码/shell/浏览器操作而不直接触碰宿主机，且同一会话内复用运行实例（README 明示 "session-level resource reuse"）。
 
-**入口与触发者**：触发者是模型工具调用。配置键 `provider_settings.computer_use_runtime`（`local`/`sandbox`/`none`，默认 `none`）与 `provider_settings.sandbox.booter`（默认 `shipyard_neo`，可选 `cua`/`shipyard`/`boxlite`/`bay`，`core/config/default.py:173-191`）。
+**入口与触发者**：触发者是模型工具调用。配置键 `provider_settings.computer_use_runtime` 决定本机、沙箱或关闭（默认 `none`），另一个配置键选择 booter，默认值为 `shipyard_neo`，可选值为 `cua`、`shipyard`、`boxlite`、`bay`；配置定义见 `core/config/default.py:173-191`。
 
-**事实对象**：会话级 booter 实例——`session_booter: dict[str, ComputerBooter]`（`astrbot/core/computer/computer_client.py:21`），按会话 ID 复用；`get_booter`（:551）按配置选择 booter 并做会话级资源复用。
+**事实对象**：会话级 booter 实例按会话 ID 复用；实例表的类型与选择逻辑见 `astrbot/core/computer/computer_client.py:21`、`:551`。
 
 **完整主链**（静态走通）：
 
@@ -62,7 +62,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **持续性**：会话级 booter 在会话存续期间复用；空闲回收/TTL 后下一次调用重新拉起。文件上传/下载的结果落本机临时目录。
 
-**独特性判断**：与 DeepChat 的"主进程子进程执行 + 权限审批"（本机执行面）不同，AstrBot 把"容器/桌面环境"作为一等执行域并支持会话级复用与技能双向同步；shipyard_neo 的"执行历史 → skill payload → 候选 → 发布/回滚"还带技能流水线管理。当前样本中唯一形成完整沙箱主链的 IM 机器人项目。
+**独特性判断**：DeepChat 采用主进程子进程执行与权限审批的本机执行面；AstrBot 把容器或桌面环境作为一等执行域，并支持会话级复用与技能双向同步。shipyard_neo 还提供从执行历史到技能发布或回滚的流水线管理。当前样本中唯一形成完整沙箱主链的 IM 机器人项目。
 
 **证据强度**：静态源码确认；booters 的远端容器行为（shipyard/cua 云镜像）依赖外部服务，未运行。
 
@@ -100,7 +100,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **主动性边界**：AstrBot 是"事件/计划驱动的主动"而非常驻后台大脑；主动回复只在群聊且概率触发；平台能力（主动消息支持）由各适配器元数据声明（`registry.py:121-181` 的 `_evaluate_send_message_tool` 校验平台支持与 wecom webhook）。
 
-**独特性判断**：三条主动路径组合（概率插话 + cron 工具 + 后台唤醒）是 AstrBot 对"主动 Agent"的完整产品面；与 VCPToolBox TaskAssistant（interval/cron/manual 派发）、Hermes Agent follow-up 属于同一自然聚类（`主动 Agent` 标签），但触发面（IM 概率插话）不同。
+**独特性判断**：三条主动路径组合（概率插话、cron 工具、后台唤醒）构成 AstrBot 的完整主动 Agent 产品面。它与 VCPToolBox TaskAssistant 的 interval/cron/manual 派发、Hermes Agent follow-up 属于同一自然聚类，但触发面增加了 IM 概率插话。
 
 ### 能力卡 3：语音能力（IM 语音收发管道）
 
@@ -120,25 +120,25 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
        dashscope/volcengine/sensevoice/xinference）
 ```
 
-**边界**：TTS 概率触发意味着同一条回复可能文本或语音；`provider_tts_settings` 的完整字段面未逐项核对。
+**边界**：TTS 概率触发意味着同一条回复可能是文本或语音；`provider_tts_settings` 的完整字段面未逐项核对。
 
 **独特性判断**：把 14 个语音服务统一进"消息管道装饰"阶段、与平台无关，是 AstrBot 相对纯客户端项目的独特面；独特性中等偏上，建议辅助贡献。
 
 ## 已归并到现有类目的能力
 
-- **多 IM 消息投影**：`归并已有类目`。README 平台清单（QQ/OneBot/Telegram/Wecom/WeChat 公众号/Feishu/DingTalk/Slack/Discord/LINE/Satori/KOOK/Misskey/Mattermost，`README.md:152-174`）与 UMO 归一、九阶段流水线、平台差异投递已由 Chat 概览笔记（事件总线、`unified_msg_origin`、result_decorate）与 LLM 渠道笔记（平台适配器）主链确认。本次只补充：`support_proactive_message` 平台元数据（`platform_metadata.py:22`）是"消息投影能力"与"主动能力"的交点，已在能力卡 2 记录。
-- **1000+ 插件生态**：`归并已有类目`。star 插件框架（`@tool`/`@command` 装饰器、工具注册、插件生命周期、WebUI 扩展）已由 Agent 工具笔记 §2/§10 覆盖；"1000+" 是插件市场计数（README 徽章来自 `api.soulter.top/astrbot/plugin-num`），属外部生态事实而非本仓库可执行能力。本仓库内插件安装/更新链（`core/star/updater.py`）未做新增调查。
+- **多 IM 消息投影**：归并已有类目。README 平台清单（QQ/OneBot/Telegram/Wecom/WeChat 公众号/Feishu/DingTalk/Slack/Discord/LINE/Satori/KOOK/Misskey/Mattermost，`README.md:152-174`）与 UMO 归一、九阶段流水线、平台差异投递已由 Chat 概览笔记和 LLM 渠道笔记主链确认。本次只补充：平台元数据中的 `support_proactive_message`（`platform_metadata.py:22`）是消息投影能力与主动能力的交点，已在能力卡 2 记录。
+- **1000+ 插件生态**：归并已有类目。star 插件框架的工具与命令装饰器、工具注册、插件生命周期和 WebUI 扩展已由 Agent 工具笔记 §2/§10 覆盖；"1000+" 是插件市场计数（README 徽章来自 `api.soulter.top/astrbot/plugin-num`），属外部生态事实而非本仓库可执行能力。插件安装与更新链未做新增调查。
 - **Agent 本体（工具循环、MCP、handoff 子 Agent、上下文压缩）**：Agent 工具笔记与对话请求与上下文笔记已覆盖，不重复。
 
 ## 声明不符、外部依赖与暂缓项
 
-- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token——`computer_use_runtime` 默认 `none`，即能力默认关闭，需显式启用（`声明不符` 不成立，属默认关闭配置，`暂缓` 运行验证）。
-- 主动回复默认 `enable=False`、概率 0.1；能力存在但默认不激活。
+- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token；`computer_use_runtime` 默认 `none`，即能力默认关闭，需显式启用（“声明不符”不成立，属默认关闭配置，“暂缓”运行验证）。
+- 主动回复默认关闭，概率为 0.1；能力存在但默认不激活。
 - 远端沙箱（shipyard/cua 云镜像）依赖外部服务可用性。
 
 ## 对特色贡献统计的影响
 
-建议进入主贡献：Agent Sandbox、主动式 Agent（`主动 Agent` 标签聚类）。辅助贡献：语音能力。归并不计数：多 IM 消息投影、插件生态、Agent 工具链本体。
+建议进入主贡献：Agent Sandbox、主动式 Agent（主动 Agent 标签聚类）。辅助贡献：语音能力。归并不计数：多 IM 消息投影、插件生态、Agent 工具链本体。
 
 ## 未验证事项
 

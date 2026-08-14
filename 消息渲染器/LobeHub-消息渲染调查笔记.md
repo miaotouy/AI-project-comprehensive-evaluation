@@ -43,7 +43,7 @@ Lobe 的复杂度主要来自消息语义和 Agent 工作流建模，Markdown �
 | 消息组件 | `src/features/Conversation/Messages/` | 按 role、block、tool 具体渲染 |
 | Markdown | `src/features/Conversation/Markdown/`、`@lobehub/ui` | 正文、推理和自定义标签的解析与展示 |
 
-`Messages` 目录约有 156 个非测试源文件，`Markdown` 约 52 个，`conversation-flow` 约 18 个；核心消息链合计约 2.35 万行源码。代码规模与后文的职责分布一致：渲染链覆盖的范围远超 chat bubble 本身。
+Messages 目录约有 156 个非测试源文件，Markdown 约 52 个，会话流包约 18 个；核心消息链合计约 2.35 万行源码。代码规模与后文的职责分布一致：渲染链覆盖的范围远超 chat bubble 本身。
 
 ## 2. 页面从哪里开始
 
@@ -67,7 +67,7 @@ Lobe 的复杂度主要来自消息语义和 Agent 工作流建模，Markdown �
 
 `src/features/Conversation/ConversationProvider.tsx`
 
-`ConversationProvider` 以 `messageMapKey(context)` 为 key，创建一个独立的 Conversation Store。Store 里主要有：
+ConversationProvider 以此前生成的 messageMapKey 为 key，创建一个独立的 Conversation Store。Store 里主要有：
 
 - `dbMessages`：当前会话的原始消息。
 - `displayMessages`：给 UI 展示的虚拟/扁平消息。
@@ -78,7 +78,7 @@ Store 的创建逻辑在：
 
 `src/features/Conversation/store/action.ts`
 
-外部消息进入 Store 后会调用 `parse(initialMessages).flatList`。后续消息变更也会再次 parse，并通过 `stabilizeReferences` 保留深度相等节点的旧引用：
+外部消息进入 Store 后会调用解析入口取得展示列表。后续消息变更也会再次解析，并通过引用稳定化保留深度相等节点的旧引用；相关实现见上面的 action.ts 和 stabilizeReferences.ts。
 
 `src/features/Conversation/store/slices/data/action.ts`
 
@@ -116,7 +116,7 @@ tool:     readFile(...)
 assistant: “结论是……”
 ```
 
-UI 中通常不会显示成五个互相独立的气泡，而是转换成一个 `assistantGroup`，其 `children` 是多个 `AssistantContentBlock`。
+UI 中通常不会显示成五个互相独立的气泡，而是转换成一个 assistantGroup；该分组的 children 保存多个 AssistantContentBlock。
 
 类型定义在：
 
@@ -128,7 +128,7 @@ UI 中通常不会显示成五个互相独立的气泡，而是转换成一个 `
 
 `src/features/Conversation/ChatList/index.tsx`
 
-`ChatList` 首先处理 fetch、loading、welcome、刷新失败和后台错误。消息真正显示时，它只取：
+ChatList 首先处理 fetch、loading、welcome、刷新失败和后台错误。消息真正显示时，它只取：
 
 ```ts
 displayMessageIds: string[]
@@ -138,7 +138,7 @@ displayMessageIds: string[]
 
 `src/features/Conversation/ChatList/components/VirtualizedList.tsx`
 
-这里使用 `virtua` 的 `VList`，并处理聊天特有的滚动行为：
+这里使用 virtua 的 VList，并处理聊天特有的滚动行为：
 
 - 动态高度和底部自动跟随。
 - 用户主动滚动后不抢回 viewport。
@@ -155,7 +155,7 @@ displayMessageIds: string[]
 
 `src/features/Conversation/Messages/index.tsx`
 
-`MessageItem` 从 `ConversationStore` 读取 `displayMessageById(id)`，然后按 `message.role` 分派：
+MessageItem 从会话 Store 读取指定 ID 的展示消息，然后按消息角色分派：
 
 | role | 组件 |
 |---|---|
@@ -171,11 +171,11 @@ displayMessageIds: string[]
 
 所有消息外面通常都会包：
 
-- `SafeBoundary`：单条消息或单个 block 出错时局部降级。
-- `Suspense`：工具 Detail、Debug、编辑状态等可以懒加载。
-- `MessageSelectionWrapper`：多选和文本选择操作。
-- `ChatItem`：头像、标题、气泡、操作栏和错误附加内容。
-- 消息壳另有两类内容块：`PendingRetryTurn`（`Messages/components/PendingRetryTurn.tsx`，错误卡重试入口）与 `GoalWorkCard`（`Messages/GoalWorkCard/`，把任务 callback 卡与 goal 进度合并展示；goal 状态来自 operation 派生，见 `deriveOperationGoals.ts`）。
+- SafeBoundary：单条消息或单个 block 出错时局部降级。
+- Suspense：工具 Detail、Debug、编辑状态等可以懒加载。
+- MessageSelectionWrapper：多选和文本选择操作。
+- ChatItem：头像、标题、气泡、操作栏和错误附加内容。
+- 消息壳另有两类内容块：PendingRetryTurn（对应 `Messages/components/PendingRetryTurn.tsx`，提供错误卡重试入口）与 GoalWorkCard（对应 `Messages/GoalWorkCard/`，把任务 callback 卡与 goal 进度合并展示；goal 状态来自 operation 派生，见 `deriveOperationGoals.ts`）。
 - 助手消息里 Agent 名称旁不显示 role 标签。
 
 ## 7. User 消息：Markdown 和 Lexical 二选一
@@ -188,11 +188,11 @@ displayMessageIds: string[]
 
 ### 普通 Markdown
 
-没有 `editorData` 时，先清理 speaker tag，再通过 `MarkdownMessage` 渲染。
+没有 editorData 时，先清理 speaker tag，再通过 MarkdownMessage 渲染。
 
 ### 富文本编辑器状态
 
-有 `editorData` 时，使用：
+有 editorData 时，使用：
 
 `@lobehub/editor/renderer` 的 `LexicalRenderer`
 
@@ -230,10 +230,10 @@ drawer / HTML 预览入口
 
 - `LOADING_FLAT`：显示生成中占位。
 - 工具调用正在生成且没有正文：不显示重复正文。
-- `metadata.isMultimodal`：通过 `deserializeParts` 拆成文本和图片。
+- `metadata.isMultimodal`：通过 deserializeParts 拆成文本和图片。
 - 普通文本：走 Markdown。
 
-Reasoning 单独由 `Thinking` 组件展示，默认是可折叠、可自动滚动的区域：
+Reasoning 单独由 Thinking 组件展示，默认是可折叠、可自动滚动的区域：
 
 `src/features/Conversation/Messages/components/Reasoning.tsx`
 
@@ -254,9 +254,9 @@ Reasoning 单独由 `Thinking` 组件展示，默认是可折叠、可自动滚�
 - `answer`：最终答案。
 - `workflow`：推理、状态文本和工具执行过程。
 
-已完成的 workflow 默认折叠为一个“已处理”区域；生成中则显示工作状态、耗时、工具数量和审批状态。多工具 workflow 进入 `WorkflowCollapse`，单工具 workflow 可能以内联形式显示。
+已完成的 workflow 默认折叠为一个“已处理”区域；生成中则显示工作状态、耗时、工具数量和审批状态。多工具 workflow 进入 WorkflowCollapse，单工具 workflow 可能以内联形式显示。
 
-工作流折叠在可见输出结束处收口：`ContentBlock.tsx` 跳过空 content block 占位，`Group.tsx` 折叠到可见输出末端，与正文输出同时进行的工作流展示不会拖到工具回合全部结束。
+工作流折叠在可见输出结束处收口：ContentBlock 跳过空 content block 占位，Group 折叠到可见输出末端，与正文输出同时进行的工作流展示不会拖到工具回合全部结束。
 
 `ContentBlock` 再对一个 block 做叶子分派：
 
@@ -270,7 +270,7 @@ Reasoning
 
 这个分组层是 Lobe 和普通 Chat UI 最大的区别：它需要表达“模型说了什么”和“模型为了得到答案做了什么”之间的关系。
 
-以上细节均为静态代码核对（`src/features/Conversation/Messages/`、`packages/conversation-flow/src/parse.ts`）；视觉效果与动画行为未运行验证。
+以上细节均为静态代码核对（证据集中在消息组件目录和 conversation-flow 的解析入口）；视觉效果与动画行为未运行验证。
 
 ## 10. Markdown 的两条路径
 
@@ -278,7 +278,7 @@ Reasoning
 
 `src/features/Conversation/Markdown/index.tsx`
 
-它从用户设置读取字体、Shiki theme、Mermaid theme，再调用 `@lobehub/ui` 的 `Markdown`。
+它从用户设置读取字体、Shiki theme、Mermaid theme，再调用 @lobehub/ui 的 Markdown 组件。
 
 ### 静态路径
 
@@ -294,7 +294,7 @@ remark-parse
 
 ### 流式路径
 
-生成中且用户启用 fade-in 时，Lobe UI 使用自己的 `StreamdownRender`：
+生成中且用户启用 fade-in 时，Lobe UI 使用自己的 StreamdownRender：
 
 ```text
 remend 修补不完整 Markdown
@@ -325,15 +325,15 @@ remend 修补不完整 Markdown
 
 每个插件可以提供：
 
-- `remarkPlugin`：把文本/HTML 标签转换成自定义 mdast 节点。
-- `rehypePlugin`：在 hast 阶段识别或改写节点。
-- `Component`：最终的 React 展示组件。
+- remarkPlugin：把文本/HTML 标签转换成自定义 mdast 节点。
+- rehypePlugin：在 hast 阶段识别或改写节点。
+- Component：最终的 React 展示组件。
 
-例如 `processWithArtifact()` 会先整理 artifact 和 thinking 标签，避免模型输出中的换行让 Markdown AST 把 artifact 拆成普通文本。
+例如 processWithArtifact() 会先整理 artifact 和 thinking 标签，避免模型输出中的换行让 Markdown AST 把 artifact 拆成普通文本。
 
 ## 12. 代码块、Mermaid 和 HTML artifact
 
-`@lobehub/ui` 的 Markdown component override 会把 `<pre>` 交给代码块路由器：
+@lobehub/ui 的 Markdown component override 会把 `<pre>` 交给代码块路由器：
 
 - 普通代码：Shiki 高亮。
 - 流式代码：Shiki token 流式渲染。
@@ -362,7 +362,7 @@ AssistantGroup 的工具入口：
 3. 正在执行。
 4. 已完成、拒绝、中止或报错。
 
-工具 UI 从 `@lobechat/builtin-tools` 注册表查询：
+工具 UI 从 @lobechat/builtin-tools 注册表查询：
 
 ```text
 identifier + apiName
@@ -376,15 +376,15 @@ identifier + apiName
 
 `packages/builtin-tools/src/register.ts`
 
-工具相关代码因此分散在多个 `builtin-tool-*` 包中：消息组件只负责生命周期和布局，具体工具业务由工具包提供。
+工具相关代码因此分散在多个 builtin-tool-* 包中：消息组件只负责生命周期和布局，具体工具业务由工具包提供。
 
 ## 14. 性能设计和代价
 
 ### 已经做的优化
 
-- `virtua` 虚拟列表，避免所有消息同时参与布局。
-- `memo` + `fast-deep-equal`，阻止无关消息重渲染；该策略是组件级手工斟酌的，不是统一约定（仓库曾移除大量“无效 memo 边界”，涉及 101 个文件、约 500 行）。
-- `stabilizeReferences`，给 parse 后未变化的节点恢复旧引用。
+- virtua 虚拟列表，避免所有消息同时参与布局。
+- memo + fast-deep-equal，阻止无关消息重渲染；该策略是组件级手工斟酌的，不是统一约定（仓库曾移除大量“无效 memo 边界”，涉及 101 个文件、约 500 行）。
+- stabilizeReferences，给解析后未变化的节点恢复旧引用。
 - 工具按 tool-call ID 单独订阅，兄弟工具不会因参数变化全部刷新。
 - 流式消息和文本选区消息 `keepMounted`。
 - 工具 Detail/Debug 使用 dynamic import 和 Suspense。
@@ -393,8 +393,8 @@ identifier + apiName
 
 ### 仍然存在的基础成本
 
-- 每次消息 dispatch 都会重新跑 `conversation-flow.parse()`。
-- parse 会重建完整树，再做结构共享恢复。
+- 每次消息 dispatch 都会重新跑 conversation-flow 的解析入口。
+- 解析会重建完整树，再做结构共享恢复。
 - Markdown、工具 workflow 和列表滚动分别维护自己的状态机。
 - 全局 ChatStore 与局部 ConversationStore 之间需要同步。
 - 工具注册表和大量内置工具会扩大前端依赖图。

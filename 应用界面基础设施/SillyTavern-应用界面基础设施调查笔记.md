@@ -22,62 +22,62 @@ SillyTavern 主要使用原生 Web 技术和项目自研机制。弹窗基于浏
 
 ## 系统边界与总体装配
 
-**界面栈。** 原生 HTML + 手写 JS（jQuery 辅助），无前端框架；UI 组件以 `public/index.html` 静态模板 + `public/scripts/*.js` 事件绑定为主，样式在 `public/css/`。
+**界面栈。** 原生 HTML + 手写 JS（jQuery 辅助），无前端框架；界面组件以 public/index.html 静态模板和 public/scripts/*.js 事件绑定为主，样式在 public/css/。
 
-**弹窗系统。** `public/scripts/popup.js`（966 行）是唯一弹窗实现，`#popup_template`（`<template>`）克隆 `.popup`（即 `<dialog>`）。
+**弹窗系统。** public/scripts/popup.js（966 行）是唯一弹窗实现，#popup_template 模板克隆 .popup（即 dialog 元素）。
 
-**全局状态。** 大量状态存在 power_user 设置对象（主题名、toastr 位置等）与服务端接口（主题、聊天记录）；"生成中"是 document.body.dataset.generating 全局单一状态位（`script.js:7020, 7029`），不是逐消息级别。
+**全局状态。** 大量状态存在 power_user 设置对象（主题名、toastr 位置等）与服务端接口（主题、聊天记录）；“生成中”是 document.body.dataset.generating 全局单一状态位（script.js:7020, 7029），不是逐消息级别。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**弹窗组件。** Popup 类（`popup.js:195-236`），枚举 POPUP_TYPE：TEXT/CONFIRM/INPUT/DISPLAY/CROP（`popup.js:9-20`）；callGenericPopup（`popup.js:909-917`）是常用入口，`Popup.show.input/confirm/text`（`popup.js:106-146`）是语义化封装。
+**弹窗组件。** Popup 类（popup.js:195-236）定义 POPUP_TYPE 枚举及五种类型：TEXT、CONFIRM、INPUT、DISPLAY、CROP（popup.js:9-20）；callGenericPopup（popup.js:909-917）是常用入口，Popup.show.input/confirm/text 是语义化封装（popup.js:106-146）。
 
-**浏览器兼容兜底。** 不支持 `showModal()` 时用 `dialogPolyfill.registerDialog()`（`../lib/dialog-polyfill.esm.js`）打补丁，并挂 ResizeObserver 在 polyfill 场景重新定位（`popup.js:237-248`）。
+**浏览器兼容兜底。** 不支持 showModal() 时用 dialogPolyfill.registerDialog()（../lib/dialog-polyfill.esm.js）打补丁，并挂 ResizeObserver 在 polyfill 场景重新定位（popup.js:237-248）。
 
-**toastr 是全局工具库。** 全仓库 86 个文件、988 处 `toastr.success/error/warning/info(...)` 调用（grep 统计，未逐一验证每个触发场景），几乎每个功能模块直接调用，无统一"通知服务"包装层——与 Popup 有类封装的做法不同。
-- **Action Loader 子系统**（`public/scripts/action-loader.js`，617 行）：「正在处理」反馈的标准做法，ActionLoaderHandle 同时管理阻塞遮罩（复用 Popup 的 DISPLAY 类型渲染 transparent+wide+large+allowEscapeClose:false 弹窗当遮罩，`action-loader.js:530-548`）与可堆叠 toast（`#createToast`，`action-loader.js:170-205`）。
+**toastr 是全局工具库。** 全仓库 86 个文件、988 处 toastr 四种提示方法调用（grep 统计，未逐一验证每个触发场景），几乎每个功能模块直接调用，无统一“通知服务”包装层——与 Popup 有类封装的做法不同。
+- **Action Loader 子系统**（public/scripts/action-loader.js，617 行）：“正在处理”反馈的标准做法，ActionLoaderHandle 同时管理阻塞遮罩（复用 Popup 的 DISPLAY 类型渲染透明、宽屏、大尺寸且不允许 Esc 关闭的弹窗，action-loader.js:530-548）与可堆叠 toast（创建提示的逻辑见 action-loader.js:170-205）。
 
-  消费点：聊天重命名（`script.js:10616-10621`）、首次加载初始化（`script.js:719`）、`script.js:11221` 等。
+  消费点：聊天重命名（script.js:10616-10621）、首次加载初始化（script.js:719）、script.js:11221 等。
 
 ## 2. 弹窗、浮层与菜单
 
-**弹窗系统**（`public/scripts/popup.js`，全文已读，966 行）：底层是浏览器原生 `<dialog>`，不是 jQuery UI Dialog（jQuery UI 只用于 `.sortable()` 等组件）。
+**弹窗系统**（public/scripts/popup.js，全文已读，966 行）：底层是浏览器原生 dialog 元素，不是 jQuery UI Dialog（jQuery UI 只用于 sortable 等组件）。
 
-**Esc 关闭。** 默认 allowEscapeClose: true 时拦截 cancel 事件并 complete(POPUP_RESULT.CANCELLED)（`popup.js:604-607`）。
+**Esc 关闭。** 默认允许 Esc 关闭时拦截 cancel 事件并完成取消结果（popup.js:604-607）。
 
-显式 `false`（阻塞性弹窗）时首次 Esc 被吞，但**双击 Esc 强制关闭**：500ms 内连按两次会弹出"Force-close Blocking Popup"二级确认弹窗，确认后才强制关闭（`popup.js:556-607`，注释自嘲"Don't ask me why this is needed. I don't get it. But we have to keep it."）。
+显式 false（阻塞性弹窗）时首次 Esc 被吞，但**双击 Esc 强制关闭**：500ms 内连按两次会弹出"Force-close Blocking Popup"二级确认弹窗，确认后才强制关闭（popup.js:556-607，注释自嘲"Don't ask me why this is needed. I don't get it. But we have to keep it."）。
 
-**遮罩关闭。** `showModal()` 自带 `::backdrop`，但代码里没有点击遮罩关闭的逻辑——cancelListener 只绑 cancel 事件，无 click 目标判断。**点击弹窗外部区域不会关闭弹窗**，已核实（通读全文件未发现相关代码，且历史交互经验一致）。
+**遮罩关闭。** showModal() 自带 ::backdrop，但代码里没有点击遮罩关闭的逻辑——cancelListener 只绑 cancel 事件，无 click 目标判断。**点击弹窗外部区域不会关闭弹窗**，已核实（通读全文件未发现相关代码，且历史交互经验一致）。
 
-**焦点管理。** `setAutoFocus()`（`popup.js:700-733`）打开时给默认按钮/输入框设 autofocus；关闭时 focusin 持续记录 lastFocus（`popup.js:538`），弹窗栈中还有更底层弹窗时把焦点还给它记住的 lastFocus 或重新 `setAutoFocus()`（`popup.js:836-844`）——支持多层堆叠（Popup.util.popups 数组维护堆叠顺序，`popup.js:860-862`）。
+**焦点管理。** setAutoFocus()（popup.js:700-733）打开时给默认按钮或输入框设 autofocus；关闭时持续记录最近焦点（popup.js:538），弹窗栈中还有更底层弹窗时把焦点还给它，或重新执行自动聚焦（popup.js:836-844）。Popup.util.popups 数组维护堆叠顺序（popup.js:860-862），因此支持多层堆叠。
 
-**拖拽/缩放。** Popup 本身不可拖拽缩放；可拖拽缩放的是另一套独立的 `dragElement()`（`script.js:477-约560+`，用于"Moving UI"把面板变成可拖拽浮窗，拖拽头部 `.drag-grabber`、`actionType === 'resize'` 分支，位置和尺寸持久化进 `power_user.movingUIState[elmntName]`），用在头像放大浮层（`.zoomed_avatar`）等场景——两套并行、不共享代码的"可移动 UI"实现。
+**拖拽/缩放。** Popup 本身不可拖拽缩放；另一套独立的 dragElement() 用于“Moving UI”，可把面板变成可拖拽浮窗，位置和尺寸持久化到 power_user.movingUIState（script.js:477-约560）。它用于头像放大浮层等场景，两套“可移动 UI”实现并行且不共享代码。
 
-**Enter 提交。** 弹窗内 keydown 监听 Enter（`popup.js:623-664`），守卫逻辑：焦点不在最上层弹窗内、焦点不是 `.result-control`、或焦点在多行文本框且没按 Ctrl 时不触发——避免多行输入换行误提交。
+**Enter 提交。** 弹窗内监听 keydown 的 Enter（popup.js:623-664）；当焦点不在最上层弹窗、不是 result-control，或位于多行文本框且未按 Ctrl 时不触发，避免多行输入换行误提交。
 
-**右键/上下文菜单**（全仓库搜 contextmenu，聊天消息 `.mes` 无绑定，只有两处）：
+**右键/上下文菜单**（全仓库搜 contextmenu，聊天消息 .mes 无绑定，只有两处）：
 
-- **角色卡网格长按/右键菜单**（`public/scripts/BulkEditOverlay.js`）：mousedown/touchstart 触发 `handleHold()`，`setTimeout(..., longPressDelay = 2500)`（`BulkEditOverlay.js:389`）判定长按；浏览态长按切多选，多选态长按弹 CharacterContextMenu（批量标签/删除）。
+- **角色卡网格长按/右键菜单**（public/scripts/BulkEditOverlay.js）：mousedown/touchstart 触发 handleHold()，通过延时计时判定长按（BulkEditOverlay.js:389）；浏览态长按切多选，多选态长按弹 CharacterContextMenu（批量标签/删除）。
 
   原生 contextmenu（`BulkEditOverlay.js:499,558-563`）只有 isLongPress 为真才 preventDefault + stopPropagation，普通右键放行——兼容鼠标右键和触屏长按的手势适配。
-- **Quick Reply 按钮右键**（`extensions/quick-reply/src/QuickReply.js:116-123`）：配置了右键上下文动作时拦截并弹自定义菜单。
+- **Quick Reply 按钮右键**（extensions/quick-reply/src/QuickReply.js:116-123）：配置了右键上下文动作时拦截并弹自定义菜单。
 
 ## 3. 通知、加载态与错误反馈
 
-**Toastr 全局配置**（`public/script.js:347-365`）：位置 toast-top-center，无关闭按钮，无进度条，显隐动画 250ms，普通提示 4000ms，extendedTimeOut 10000ms，escapeHtml: true（防 XSS）。位置可在设置里改（power_user.toastr_position，`power-user.js:1078`）。
+**Toastr 全局配置**（public/script.js:347-365）：位置为 toast-top-center，无关闭按钮和进度条，显隐动画 250ms，普通提示 4000ms，延长时长 10000ms，并启用 HTML 转义（防 XSS）。位置可在设置里改（power_user.toastr_position，power-user.js:1078）。
 
-`fixToastrForDialogs()`（`popup.js:934-966`）检测最上层 `dialog[open]:not([closing])`，把 `#toast-container` 移进 dialog 内部、关闭时挪回 document.body——解决原生 `<dialog>` 模态层级高于 toast 的问题，在 toastr onHidden（`script.js:360-364`）和 `Popup.show()/hide()`（`popup.js:683, 817`）里调用。
+fixToastrForDialogs()（popup.js:934-966）检测最上层打开且未关闭的 dialog，把 #toast-container 移进其中，关闭时再移回 document.body；这样解决原生 dialog 模态层级高于 toast 的问题。该处理在提示隐藏和 Popup 显隐时调用（script.js:360-364；popup.js:683, 817）。
 
-差异化处理是零星的：`tags.js:1910` 给标签导入结果设 timeOut: toastr.options.timeOut * 2，但 `error/warning/info/success` 四种共享同一 timeOut，无系统化分级。
+差异化处理是零星的：tags.js:1910 给标签导入结果设置两倍提示时长，但 error、warning、info、success 四种提示共享同一时长，无系统化分级。
 
 **加载/空状态是三层独立实现，互不复用**：
 
-1. **首屏 HTML 预加载层**（`index.html:52` `<div id="preloader">`，样式 `css/loader.css:1-17`）：纯 HTML+CSS，backdrop-filter: blur(30px) 毛玻璃盖住 JS 未跑完的空白期；首次隐藏统一 loader 后由 `yoinkPreloader()`（`action-loader.js:609-613`）移除，preloaderYoinked 标志防重复。
-2. **Action Loader 系统**（`action-loader.js`）：遮罩单例（`hasBlockingLoaders()`，`action-loader.js:63-70, 150`），每个操作有独立 toast（可同时看到多条）。
+1. **首屏 HTML 预加载层**（index.html:52 的 preloader 容器，样式见 css/loader.css:1-17）：纯 HTML+CSS，使用 30px 模糊效果盖住 JS 未跑完的空白期；首次隐藏统一 loader 后由 yoinkPreloader() 移除，标志位防重复（action-loader.js:609-613）。
+2. **Action Loader 系统**（action-loader.js）：遮罩是单例（hasBlockingLoaders()，action-loader.js:63-70, 150），每个操作有独立 toast，可同时看到多条。
 
-toast 三种模式（ActionLoaderToastMode：NONE/STATIC/STOPPABLE，`action-loader.js:23-30`），STOPPABLE 带停止按钮（fa-stop-circle，点击调 onStop 或默认 `stopGeneration()`，`action-loader.js:270-286`）——"生成中"可直接从 toast 上点停止。
+toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-loader.js:23-30），STOPPABLE 带停止按钮，点击后调用 onStop 或默认的停止生成逻辑（action-loader.js:270-286），“生成中”可直接从 toast 上点停止。
 
-这类 loading toast 用 toastr.info 渲染但 timeOut: 0, extendedTimeOut: 0, tapToDismiss: false（`action-loader.js:199-204`），不自动消失也不能手动关，只能代码结束——与普通提示 toast 是同一 toastr 库上两种不同交互模式。
+这类 loading toast 用 toastr.info 渲染，但关闭时长为零且禁止点击消失（action-loader.js:199-204），不自动消失也不能手动关，只能由代码结束；它与普通提示 toast 共用同一库，却是两种不同交互模式。
 3. **CSS 驱动的空状态占位**（零 JS）：World Info 条目列表空时 `#world_popup_entries_list:empty::before { content: 'No entries found.'; }`（`css/world-info.css:64-约70`）；
 
 群聊添加成员列表空时 content: attr(no_characters_text) 读 HTML 属性文案（`css/rm-groups.css:118-119`，`index.html:6342`）——:empty 命中后 `::before` 用 content: attr(...) 直接渲染，无需 JS。
@@ -92,11 +92,11 @@ toast 三种模式（ActionLoaderToastMode：NONE/STATIC/STOPPABLE，`action-loa
 
 唯一命中 `script.js:1543, 1551` 是 `scrollOnMediaLoad()`（`script.js:1532-1566`）给聊天内 `<img>`/`<video>`/`<audio>` 挂的加载失败计数——图片/媒体加载失败也算"加载完"继续滚到底部，属单点行为，不是全局错误边界。
 
-**启动失败恢复而非渲染兜底。** `getSettings()` 请求失败时 `reloadLoop()`（`script.js:7862-7866`）：toastr.error 提示 + sessionStorage 计数最多 5 次 `location.reload()`（`script.js:7842-7850`），5 次后不再重载（超限后表现未运行验证）。
+**启动失败恢复而非渲染兜底。** getSettings() 请求失败时进入 reloadLoop()（script.js:7862-7866）：toastr.error 提示 + sessionStorage 计数最多 5 次 location.reload()（script.js:7842-7850），5 次后不再重载（超限后表现未运行验证）。
 
 **preloader 无错误状态。** `#preloader`（`index.html:52`，`css/loader.css:1-17`）是纯 CSS 动画占位层，本次未找到失败态文案、重试入口或"加载失败→显示错误页"的分支；`index.html` 全文也无 `<noscript>` 兜底。
 
-**服务端进程级处理与界面无交集。** process.on('uncaughtException')（`src/server-main.js:332-335`）只做 console.error 后调 `exitProcess()` 优雅退出（`server-main.js:317-327`：统计落盘、插件清理、diskCache 释放后 `process.exit()`），没有重启或界面可感知的错误页；
+**服务端进程级处理与界面无交集。** process.on('uncaughtException')（src/server-main.js:332-335）只做 console.error 后调 exitProcess() 优雅退出（server-main.js:317-327：统计落盘、插件清理、diskCache 释放后 process.exit()），没有重启或界面可感知的错误页；
 
 `src/` 搜索 process.on 仅命中 SIGINT/SIGTERM/uncaughtException/exit 四处，**无 unhandledRejection 处理**（本次未找到，非项目级绝对结论）。
 - 结论：类似前端框架 ErrorBoundary 的"渲染错误兜底 UI"本次未找到；错误反馈的承载方式是 toastr（见本节约 988 处统计），业务异常由各调用点自行 try/catch + toast 提示（如生成主链 `finishGenerating().then(onSuccess, onError)`，`script.js:5394`，主链细节归 Chat UI 笔记）。
@@ -105,22 +105,22 @@ toast 三种模式（ActionLoaderToastMode：NONE/STATIC/STOPPABLE，`action-loa
 
 主题不是简单深浅二元切换，而是可配置的 CSS 变量集合：
 
-- power_user.theme（默认 'Default (Dark) 1.7.1'，`power-user.js:177`）标识选中主题；
+- power_user.theme（默认 'Default (Dark) 1.7.1'，power-user.js:177）标识选中主题；
 
-  颜色值是 `--SmartThemeXxxColor` 系列变量（`power-user.js:159-168`，main_text_color/italics_text_color/blur_tint_color/chat_tint_color 等十来个，全集与派生 token 见下文），初始值从 getComputedStyle(document.documentElement) 读出。
-- applyTheme(name)（`power-user.js:1227-约1430+`）遍历 themeProperties 数组，
+  颜色值是 --SmartThemeXxxColor 系列变量（power-user.js:159-168，main_text_color、italics_text_color、blur_tint_color、chat_tint_color 等十来个，全集与派生 token 见下文），初始值从 getComputedStyle(document.documentElement) 读出。
+- applyTheme(name)（power-user.js:1227-约1430+）遍历 themeProperties 数组，
 
-  把每个字段映射到颜色选择器 DOM 与 applyThemeColor/applyBlurStrength/applyCustomCSS 等应用函数——切换主题本质是批量 document.documentElement.style.setProperty('--SmartThemeXxx', 值)（applyThemeColor，`power-user.js:1104-1143`），纯 CSS 变量运行时改写，
+  把每个字段映射到颜色选择器 DOM 与多个应用函数——切换主题本质是批量改写 document.documentElement 的 CSS 变量（applyThemeColor，power-user.js:1104-1143），纯 CSS 变量运行时改写，
 
   不是切换 CSS 文件。
 
-**自定义 CSS。** power_user.custom_css（`power-user.js:170`）由 `applyCustomCSS()`（`power-user.js:1147-1157`）注入 `<style>` 的 innerHTML，用户可为任意选择器写任意规则并持久化。
+**自定义 CSS。** power_user.custom_css（power-user.js:170）由 applyCustomCSS()（power-user.js:1147-1157）注入 style 元素的 innerHTML，用户可为任意选择器写任意规则并持久化。
 
 **主题导入安全提示。** importTheme(file)（`power-user.js:2443-2476`）解析上传的主题 JSON，若 custom_css 含 `@import` 字符串先弹 themeImportWarning 警告弹窗确认才继续（`power-user.js:2459-2465`）——防"看起来像主题文件、实际从外部 URL 拉资源"。
 
-**存储位置。** 通过 `/api/themes/save`、`/api/themes/delete`（`power-user.js:2499, 2404`）存到服务端（`src/server-startup.js:121, 148` 挂载 themesRouter），和聊天记录一样"服务端持久化、多设备共享"，不是 localStorage。
+**存储位置。** 通过 /api/themes/save、/api/themes/delete（power-user.js:2499, 2404）存到服务端（src/server-startup.js:121, 148 挂载 themesRouter），和聊天记录一样"服务端持久化、多设备共享"，不是 localStorage。
 
-**系统偏好跟随。** `public/` 范围内全仓库搜索 prefers-color-scheme **无匹配**（唯一命中是第三方库 `lib/pdf.min.mjs`）——**不自动跟随 OS 深浅色**，主题完全手动选择，已核实（全文 grep 无匹配，非推断）。
+**系统偏好跟随。** public/ 范围内全仓库搜索 prefers-color-scheme **无匹配**（唯一命中是第三方库 lib/pdf.min.mjs）——**不自动跟随 OS 深浅色**，主题完全手动选择，已核实（全文 grep 无匹配，非推断）。
 
 **首帧主题与防闪烁。** 启动时先取得设置，把 power_user 合入全局对象，再批量应用颜色、模糊和自定义 CSS。主题列表随设置响应返回，主题端点只负责保存和删除，没有独立读取路由。（`script.js:750,7911`；`power-user.js:1475-1606`）
 
@@ -132,15 +132,15 @@ toast 三种模式（ActionLoaderToastMode：NONE/STATIC/STOPPABLE，`action-loa
 
 **主题文件格式与字段全集（本次补充核对）**：
 
-**主题即 JSON 文件列表，无数据库。** 内置主题在 `default/content/themes/`（当前快照 5 个：`Dark V 1.0.json`、`Dark Lite.json`、`Celestial Macaron.json`、`Cappuccino.json`、`Azure.json`），用户目录同理；
+**主题即 JSON 文件列表，无数据库。** 内置主题在 default/content/themes/（当前快照 5 个：Dark V 1.0.json、Dark Lite.json、Celestial Macaron.json、Cappuccino.json、Azure.json），用户目录同理；
 
 `/api/settings/get` 用 readAndParseFromDirectory(request.user.directories.themes) 直接扫目录读全部 JSON（`src/endpoints/settings.js:259, 279`），保存/删除就是 `themes.js` 的 save/delete 两个 POST 原子写/删文件（write-file-atomic）。
 - **主题字段**：除 name 外共有 38 个键，包括 10 个颜色、4 个尺寸或强度值、自定义 CSS 和 23 个行为或显示开关。主题文件因此不只是色板，也会打包消息显示、Toast 位置、动画、输入区和编辑行为等界面偏好。（`power-user.js:2535-2578`）
 
   内置 `Dark V 1.0.json` 只存了其中 36 个，缺 click_to_edit/media_display/show_swipe_num_all_messages 三个较新的键）。导入时 getNewTheme（`power-user.js:2585-2593`）**只把白名单内已知键合并进当前设置快照，未知键一律丢弃**——比 `@import` 检查更深一层的净化（坏字段不会污染设置）。
-- **主题 UI 是五个操作按钮 + 下拉**（`index.html:4916-4936`）：导入（importTheme，含 `@import` 警告与重名拒绝）、导出（exportTheme）、删除（deleteTheme，删除后自动回落到列表第一个主题并应用，
+- **主题 UI 是五个操作按钮 + 下拉**（index.html:4916-4936）：导入（importTheme，含 @import 警告与重名拒绝）、导出（exportTheme）、删除（deleteTheme，删除后自动回落到列表第一个主题并应用，
 
-  `power-user.js:2415-2424`）、**更新当前主题文件**（updateTheme→saveTheme(power_user.theme) 覆盖保存，`power-user.js:2384-2387`）、**另存为新主题**（`saveTheme()` 无参时弹 INPUT 弹窗取名字，`power-user.js:2484-2493`）。
+  power-user.js:2415-2424）、**更新当前主题文件**（updateTheme→saveTheme(power_user.theme) 覆盖保存，power-user.js:2384-2387）、**另存为新主题**（saveTheme() 无参时弹 INPUT 弹窗取名字，power-user.js:2484-2493）。
 
 **字号、字体族与阴影 token（本次补充核对）**：
 
@@ -213,13 +213,13 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 真正用触摸事件的只有三处：滑动条触摸时锁页面滚动 300ms（`script.js:11696-11711`）、角色卡长按（见第 2 节）、头像放大层关闭点击兼容 touchend（`script.js:12225`）。
 
-**触屏专用调参。** `getSortableDelay()`（`utils.js:358-364`）——桌面拖拽排序延迟 50ms，移动端 750ms，注释明确"防止滚动页面时误触发拖拽"；`.sortable({ delay, handle })` 模式遍布 world-info、tags、openai、textgen-settings 等十余个文件，但各模块各自初始化，无集中的"可排序列表"组件封装。
+**触屏专用调参。** getSortableDelay()（utils.js:358-364）——桌面拖拽排序延迟 50ms，移动端 750ms，注释明确“防止滚动页面时误触发拖拽”；sortable({ delay, handle }) 模式遍布 world-info、tags、openai、textgen-settings 等十余个文件，但各模块各自初始化，无集中的“可排序列表”组件封装。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-**图片/附件预览**（expandMedia，`chats.js:880-970` 已读）：复用第 2 节的 Popup 弹窗系统，不是独立灯箱库。
+**图片/附件预览**（expandMedia，chats.js:880-970 已读）：复用第 2 节的 Popup 弹窗系统，不是独立灯箱库。
 
-- 弹窗类型 POPUP_TYPE.DISPLAY（只有关闭 X），传 `{ large: true, transparent: true }`（`chats.js:960`）铺大、背景透明。
+- 弹窗类型 POPUP_TYPE.DISPLAY（只有关闭 X），传入 large 和 transparent 选项（chats.js:960）铺大、背景透明。
 
 **点击放大/还原是纯 class toggle。** 点击图片切换 `.zoomed` class（`chats.js:941-945`），CSS 侧 `.img_enlarged` 用 object-fit: contain + cursor: zoom-in，`.zoomed` 切 object-fit: cover 并允许滚动（`style.css:5305-5319`，
 
@@ -228,7 +228,7 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 - 点击弹窗背景关闭（`popup.dlg.addEventListener('click', () => popup.completeCancelled())`，`chats.js:964-966`）——与"Popup 不支持点遮罩关闭"不矛盾：这是调用方在内容层手动加的监听，非类内建能力。
 - 有标题媒体用 `<pre><code>` 渲染说明文字（`chats.js:947-957`），stopPropagation 防点击标题触发放大/关闭。
 
-**另一套独立查看器。** 桌面端头像放大用 jquery.izoomify（`public/lib/jquery.izoomify.js`，`script.js:12221-12223`），鼠标悬停局部放大镜，依赖 mouseover/mousemove（`jquery.izoomify.js:144-147`），仅 power_user.zoomed_avatar_magnification 开启时生效——纯触屏设备上基本不可用（未实测，标注未核实）。
+**另一套独立查看器。** 桌面端头像放大用 jquery.izoomify（public/lib/jquery.izoomify.js，script.js:12221-12223），鼠标悬停局部放大镜，依赖 mouseover/mousemove（jquery.izoomify.js:144-147），仅 power_user.zoomed_avatar_magnification 开启时生效——纯触屏设备上基本不可用（未实测，标注未核实）。
 
 消息图片弹窗、头像 izoomify、头像拖拽浮层 dragElement 是三套并行实现，无统一"图片查看器"组件。
 
@@ -243,11 +243,11 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 - 消息输入框拖入：`chats.js:2392-2394`（`#form_sheld`，直接走 handleFileAttach）。
 - 拖拽悬停视觉统一由 drop_target/dragover class 驱动（`dragdrop.js:75, 90, 102`），各消费点共享一套视觉语言。
 
-**B. 列表拖拽排序（jQuery UI `.sortable()`）**：`public/lib/jquery-ui.min.js` 的 sortable 插件，不是 SortableJS。
+**B. 列表拖拽排序（jQuery UI sortable）**：public/lib/jquery-ui.min.js 的 sortable 插件，不是 SortableJS。
 
-World Info、Quick Reply、正则规则和多组采样参数都使用相同的 Sortable 模式，并共享“移动端延迟更长”的参数。具体排序器仍由各功能分别初始化，没有形成公共封装。（`world-info.js:2576-2580`）
+World Info、Quick Reply、正则规则和多组采样参数都使用相同的 Sortable 模式，并共享“移动端延迟更长”的参数。具体排序器仍由各功能分别初始化，没有形成公共封装（world-info.js:2576-2580）。
 
-**扩展面板（Extensions panel）**：`#rm_extensions_block`（`index.html:5741`）是**一串固定 ID 的空容器 `<div>`**（`#extensions_settings` 下挂 `#assets_container`/`#typing_indicator_container`/`#expressions_container`/`#sd_container`/`#tts_container` 等二十多个，`index.html:5760-5780+`），各内置扩展初始化时把设置 UI 塞进对应容器——不是动态生成列表，是预先开好的"坑位"。
+**扩展面板（Extensions panel）**：#rm_extensions_block（index.html:5741）是一串固定 ID 的空容器 div（#extensions_settings 下挂二十多个扩展容器，index.html:5760-5780+），各内置扩展初始化时把设置 UI 塞进对应容器——不是动态生成列表，是预先开好的“坑位”。
 
 第三方扩展入口是输入框旁"魔法棒"图标（`addExtensionsButtonAndMenu()`，`extensions.js:688-723`）弹出 Popper.js 定位的下拉菜单（`#extensionsMenu`，placement: 'top-start'，`extensions.js:699-701`），点击外部白名单外区域自动收起（`extensions.js:714-722`）——魔法棒菜单是"扩展快捷动作入口"，Extensions 抽屉是"扩展详细设置面板"，两个不同概念。
 
@@ -280,7 +280,7 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 全局动画时长由 `ANIMATION_DURATION_DEFAULT = 125`（`script.js:595`）驱动的 `--animation-duration` CSS 变量控制（`setAnimationDuration()`，`script.js:824-828`），用户可在设置里改；
 
-抽屉展开/收起在已有其它抽屉打开时先等 animation_duration 毫秒再切换（`doNavbarIconClick()`，`script.js:10908-10910`）。这与 `public/scripts/util/stream-fadein.js`（流式消息逐词淡入，morphdom + Intl.Segmenter）是两个层面：一个管面板级开合，一个管文本级淡入。
+抽屉展开/收起在已有其它抽屉打开时先等 animation_duration 毫秒再切换（doNavbarIconClick()，script.js:10908-10910）。这与 public/scripts/util/stream-fadein.js（流式消息逐词淡入，morphdom + Intl.Segmenter）是两个层面：一个管面板级开合，一个管文本级淡入。
 
 ## 8. 设计取舍与已确认边界
 

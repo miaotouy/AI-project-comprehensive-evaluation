@@ -14,18 +14,18 @@
 
 ## 结论摘要
 
-SillyTavern 使用命令式前端流水线渲染消息：全局 `chat` 数组提供数据，jQuery 克隆 HTML 模板，Showdown 转换 Markdown，DOMPurify 清洗 HTML，随后由多个模块补充 reasoning、媒体、代码高亮和交互状态。
+SillyTavern 使用命令式前端流水线渲染消息：全局 chat 数组提供数据，jQuery 克隆 HTML 模板，Showdown 转换 Markdown，DOMPurify 清洗 HTML，随后由多个模块补充 reasoning、媒体、代码高亮和交互状态。
 
 主链路如下：
 
-1. 消息对象先写入全局 `chat` 数组。
-2. `addOneMessage()` 或 `redisplayChat()` 调用 `updateMessageElement()`。
-3. `updateMessageElement()` 克隆 `#message_template .mes`，填充元数据和各内容区域。
+1. 消息对象先写入全局 chat 数组。
+2. 单条新增或历史重显入口调用消息装配函数。
+3. 消息装配函数克隆消息模板，填充元数据和各内容区域。
 4. 正文由 `messageFormatting()` 依次执行宏替换、正则脚本、Markdown 修复、Showdown 和 DOMPurify。
-5. reasoning 与媒体从 `message.extra` 读取，写入正文之外的专用 DOM 容器。
+5. reasoning 与媒体从消息的 extra 字段读取，写入正文之外的专用 DOM 容器。
 6. Highlight.js、复制按钮、swipe 控件和扩展事件在正文进入 DOM 后补充行为。
 
-流式输出复用与静态消息相同的 Markdown 格式化函数。`StreamingProcessor` 默认以 30 FPS 节流，每次用当前累计全文重新调用 `messageFormatting()`，再覆盖 `.mes_text.innerHTML`。流结束时保留现有消息 DOM，并在其上完成代码高亮、reasoning、媒体、swipe、事件和持久化收尾。
+流式输出复用与静态消息相同的 Markdown 格式化函数。`StreamingProcessor` 默认以 30 FPS 节流，每次用当前累计全文重新调用正文格式化函数，再覆盖消息正文区域。流结束时保留现有消息 DOM，并在其上完成代码高亮、reasoning、媒体、swipe、事件和持久化收尾。
 
 代码中可以确认以下实现特点：
 
@@ -111,7 +111,7 @@ interface ChatMessage {
 | `tool_invocations` | 标记该消息是工具调用消息 |
 | `uses_system_ui` | 为内置系统消息保留有限的主 UI class |
 
-工具调用并没有在消息正文中渲染成独立工具卡。`tool_invocations` 主要作为上下文和递归调用记录；消息层只给对应 `.mes` 增加 `toolCall` class，纯工具调用且无正文/reasoning 时还会暂时隐藏消息。
+工具调用并没有在消息正文中渲染成独立工具卡。`tool_invocations` 主要作为上下文和递归调用记录；消息层只给对应消息节点增加 toolCall class，纯工具调用且无正文/reasoning 时还会暂时隐藏消息。
 
 ## 消息骨架
 
@@ -135,15 +135,15 @@ interface ChatMessage {
   .swipe_rightBlock
 ```
 
-这套消息骨架由命令式 DOM 操作装配。`updateMessageElement()` 克隆模板后，使用 `.attr()`、`.text()`、`.html()`、class toggle 和事件监听逐项写入。头像、名称和普通元数据使用 `.text()` 或属性 API；已经格式化并清洗过的正文、reasoning 和 bias 使用 HTML 注入。
+这套消息骨架由命令式 DOM 操作装配。`updateMessageElement()` 克隆模板后，使用属性、文本、HTML、class 切换和事件监听逐项写入。头像、名称和普通元数据使用文本或属性 API；已经格式化并清洗过的正文、reasoning 和 bias 使用 HTML 注入。
 
 ## 历史消息
 
 ### `printMessages()` 与 `redisplayChat()`
 
-`printMessages()` 根据 `power_user.chat_truncation` 只显示最后一段消息，默认值是 100。若历史更长，则在顶部添加 `#show_more_messages`。
+历史打印函数根据 `power_user.chat_truncation` 只显示最后一段消息，默认值是 100。若历史更长，则在顶部添加显示更多消息的入口。
 
-`redisplayChat()`：
+历史重显函数：
 
 - 删除指定 index 之后的现有消息 DOM。
 - 对目标 slice 中每条消息同步调用 `updateMessageElement()`。
@@ -152,18 +152,18 @@ interface ChatMessage {
 
 “加载更多”同样批量创建一段消息并 prepend/insert，同时通过新旧 `scrollHeight` 差值维持用户视口。
 
-这属于截断式分页，而不是虚拟列表：已经显示的消息仍长期保留在 DOM 中。`chat_truncation = 0` 时可退化为一次显示全部历史。
+这属于截断式分页，而不是虚拟列表：已经显示的消息仍长期保留在 DOM 中。截断设置为 0 时可退化为一次显示全部历史。
 
 ## 单条消息装配
 
 ### `addOneMessage()`
 
-调用者应先把消息写入 `chat`，再调用 `addOneMessage()`。该函数负责：
+调用者应先把消息写入 chat 数组，再调用单条消息入口。该函数负责：
 
 - 推导消息 ID，或接受 `forceId` / `insertBefore` / `insertAfter`。
 - 普通消息创建新模板；swipe 则复用原节点并执行更新。
 - append、前插或后插消息节点。
-- 维护唯一的 `.last_mes`。
+- 维护唯一的 last_mes 标记。
 - 刷新 swipe 控件、角色标签、编辑箭头和滚动位置。
 
 ### `updateMessageElement()`
@@ -178,11 +178,11 @@ interface ChatMessage {
 6. 初始化 reasoning UI 和模型图标。
 7. 标记小型系统消息、工具调用消息等状态。
 8. 装配媒体和文件。
-9. 把已清洗的正文写入 `.mes_text`。
+9. 把已清洗的正文写入正文容器。
 10. 对代码块执行 Highlight.js 并添加复制按钮。
 11. 更新 swipe 计数。
 
-`updateMessageBlock()` 是较轻量的局部重渲染入口，用于翻译、reasoning 编辑等场景。它重写正文，然后刷新 reasoning、代码按钮和媒体。
+局部消息更新函数是较轻量的重渲染入口，用于翻译、reasoning 编辑等场景。它重写正文，然后刷新 reasoning、代码按钮和媒体。
 
 ## 正文格式化流水线
 
@@ -209,7 +209,7 @@ raw message
 
 ### Showdown 配置
 
-`reloadMarkdownProcessor()` 创建全局 Showdown converter，开启：
+Markdown 处理器初始化函数创建全局 Showdown converter，开启：
 
 - emoji
 - mid-word underscore 保留
@@ -222,14 +222,14 @@ raw message
 
 同时注册两个本地扩展：
 
-- `markdownUnderscoreExt()`：处理下划线语义。
-- `markdownExclusionExt()`：处理 Markdown 排除标记。
+- 下划线扩展：处理下划线语义。
+- 排除扩展：处理 Markdown 排除标记。
 
 核心渲染链未提供 Mermaid 或 KaTeX 后处理。`\begin{align*}` 仅被改写为 `$$`；如果没有额外扩展接管，核心本身不会把数学表达式排版成公式。
 
 ### Regex 扩展参与渲染
 
-正文进入 Markdown 前会调用 `getRegexedString()`。placement 根据消息类型区分：
+正文进入 Markdown 前会调用正则替换函数。placement 根据消息类型区分：
 
 - user：`USER_INPUT`
 - assistant：`AI_OUTPUT`
@@ -240,16 +240,16 @@ raw message
 
 ### `display_text` 覆盖
 
-标准装配优先使用 `extra.display_text`，使翻译等功能能改变可见文本而不覆盖 `mes`。这里存在一个小的不一致：
+标准装配优先使用 `extra.display_text`，使翻译等功能能改变可见文本而不覆盖 mes。这里存在一个小的不一致：
 
-- `getMessageTextHTML()` 使用 `display_text || mes`。
-- `updateMessageBlock()` 使用 `display_text ?? mes`。
+- 完整装配使用 display_text || mes。
+- 局部更新使用 display_text ?? mes。
 
 因此 `display_text: ''` 在完整装配时会回退到 `mes`，在局部更新时却会显示为空。若扩展把空字符串当成合法显示覆盖值，两条路径结果不同。
 
 ## HTML 净化与 CSS
 
-净化发生在 `messageFormatting()` 管线的末尾：Showdown 生成 HTML 之后，标准正文和 reasoning 最终都会调用 DOMPurify。
+净化发生在正文格式化管线的末尾：Showdown 生成 HTML 之后，标准正文和 reasoning 最终都会调用 DOMPurify。
 
 消息 hook 会统一改写链接与 class：链接加上 `target="_blank"` 和 `rel="noopener"`；普通 HTML class 改名为 `custom-*`，避免直接命中主界面 class（Font Awesome、`note-*` 和 `monospace` 例外）；默认还会阻止消息 HTML 内跨源的 `img`、`audio`、`video`、`source`、`track`、`embed` 和 `object` 资源。
 
@@ -263,7 +263,7 @@ raw message
 
 ### CSP 状态
 
-`src/server-main.js` 使用 Helmet，但明确设置 `contentSecurityPolicy: false`，CSP 不为消息 HTML/CSS 提供第二道限制。
+服务器入口使用 Helmet，但明确设置 contentSecurityPolicy: false，CSP 不为消息 HTML/CSS 提供第二道限制。
 
 ## Reasoning
 
@@ -282,13 +282,13 @@ reasoning 与正文使用相同的 Markdown、regex 和 DOMPurify 管线，但 r
 
 ## 媒体与文件
 
-`appendMediaToMessage()` 处理结构化附件，而不是解析正文中的 Markdown 图片：
+媒体装配函数处理结构化附件，而不是解析正文中的 Markdown 图片：
 
 - 先把旧版单值 `image` / `file` / `video` 兼容成数组接口。
-- `extra.media` 支持 image、video、audio。
+- extra.media 支持 image、video、audio。
 - 媒体可按 LIST 全部显示，也可按 GALLERY 只显示当前项。
 - audio 使用独立 `AudioPlayer`。
-- `extra.files` 克隆文件模板并以 `.text()` 写入文件名和大小。
+- extra.files 克隆文件模板并以文本方式写入文件名和大小。
 - 重新装配 audio/video 时会尝试保存和恢复播放位置、暂停状态。
 - 图片和媒体加载采用 `Promise.race` 与短超时，不阻塞整条消息渲染。
 - 根据 `SCROLL_BEHAVIOR` 调整或保持聊天滚动位置。
@@ -297,7 +297,7 @@ reasoning 与正文使用相同的 Markdown、regex 和 DOMPurify 管线，但 r
 
 ## 代码块
 
-Showdown 生成 `<pre><code>` 后，`addCopyToCodeBlocks()` 对每个代码块执行：
+Showdown 生成 `<pre><code>` 后，代码块处理函数对每个代码块执行：
 
 1. `hljs.highlightElement()`。
 2. 在 code 元素内加入 Font Awesome copy icon。
@@ -309,24 +309,24 @@ Showdown 生成 `<pre><code>` 后，`addCopyToCodeBlocks()` 对每个代码块�
 
 ### 主聊天 `StreamingProcessor`
 
-首次收到流时，`onStartStreaming()` 会通过 `saveReply(..., fromStreaming: true)` 创建或更新标准消息，所以流式消息从一开始就使用普通 `.mes` 骨架。
+首次收到流时，开始流式处理会通过带有流式标记的回复保存逻辑创建或更新标准消息，所以流式消息从一开始就使用普通消息骨架。
 
 每个 generator yield 提供累计 `text`、候选 swipes、logprobs、tool calls 和 state。处理过程为：
 
 - 每个 yield 立即更新内存中的累计结果。
 - 每次发送 `STREAM_TOKEN_RECEIVED`；其参数实际上是当前累计 `text`，不一定是单个 token delta。
 - `Stopwatch(1000 / streaming_fps)` 控制昂贵 DOM 更新频率，默认 30 FPS。
-- `cleanUpMessage()` 清理停止词和不完整句子。
+- 清理逻辑清理停止词和不完整句子。
 - 未结束时临时补齐奇数个星号、双引号、三反引号或三个波浪号，降低残缺 Markdown 造成的布局跳变。
 - 更新 `chat[messageId]`，再对累计全文执行完整 `messageFormatting()`。
-- 直接覆盖 `.mes_text.innerHTML`，或使用可选 fade-in 差量动画。
+- 直接覆盖正文容器的 HTML，或使用可选 fade-in 差量动画。
 - reasoning 由 `ReasoningHandler` 同步更新到独立区域。
 
-这个实现简单且保证与非流式格式一致，但复杂度随消息增长：每个可见帧都会重新 regex、Markdown parse、DOMPurify 并替换整段正文 DOM。长回复中的表格、大量 HTML 或代码块会逐渐变贵；选择文本、正文内部临时 DOM 状态也可能在下一帧丢失。
+这个实现简单且保证与非流式格式一致，但复杂度随消息增长：每个可见帧都会重新执行正则、Markdown 解析和净化，并替换整段正文 DOM。长回复中的表格、大量 HTML 或代码块会逐渐变贵；选择文本、正文内部临时 DOM 状态也可能在下一帧丢失。
 
 ### 流式收尾
 
-`finalizeIntermediaryMessage()` 会：
+流式中间消息最终化会：
 
 - 用 `isFinal = true` 再更新一次正文。
 - 执行代码高亮和复制按钮。
@@ -340,7 +340,7 @@ Showdown 生成 `<pre><code>` 后，`addCopyToCodeBlocks()` 对每个代码块�
 
 ### 浮层 `StreamingDisplay`
 
-`public/scripts/streaming-display.js` 动态创建一个可停止、最小化、关闭的浮层，放入最上层 open dialog 或 `document.body`。reasoning 和正文同样以累计全文调用 `messageFormatting()`，但它不参与主 `chat` 消息生命周期。
+浮层脚本动态创建一个可停止、最小化、关闭的浮层，放入最上层 open dialog 或 document.body。reasoning 和正文同样以累计全文调用正文格式化函数，但它不参与主 chat 消息生命周期。
 
 ## 扩展边界
 
@@ -377,7 +377,7 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 - 没有虚拟列表；已加载消息全部常驻 DOM。
 - 历史渲染对每条消息同步执行 regex、Showdown、DOMPurify 和 reasoning 初始化。
 - 流式渲染反复处理并替换累计全文，不维护稳定块或增量 AST。
-- `appendMediaToMessage()` 自身包含异步 DOM 更新，但 API 不可 await，代码中已有对应 TODO。
+- 媒体装配函数自身包含异步 DOM 更新，但 API 不可 await，代码中已有对应 TODO。
 
 ## 关键文件索引
 

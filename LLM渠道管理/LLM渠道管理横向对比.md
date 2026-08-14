@@ -26,7 +26,7 @@
 - **VCPChat 是单网关客户端。** 它把上游 Provider 选择留给 VCP 服务端，客户端只保存一组 URL/Key 和各 Agent 的裸模型 ID。这个边界降低了客户端配置复杂度，也形成单连接故障点。
 - **VCPToolBox 是协议与模型编排层，不是多 Provider 渠道池。** 它统一多种入站协议，支持模型别名、语义选模、特定请求的模型 fallback 和普通请求重试；所有核心请求仍走同一个 OpenAI-compatible 上游和同一枚 Key。
 - **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key、无跨 Provider failover。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
-- **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK `streamText`（BUNDLED_PROVIDERS 表 + npm 动态安装），另有 opt-in 的 native 协议（`packages/llm/src/protocols/`）。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 自动 prompt caching，`setCacheKey` 可关。
+- **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK 的 `streamText`（内置 Provider 表 + npm 动态安装），另有可选的 native 协议实现。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 请求默认自动做 prompt caching，可通过 `setCacheKey` 关闭。
 - **AstrBot、DeepChat 与 Open WebUI 都是服务端/主进程渠道层，但治理重点不同。** AstrBot 允许同一来源生成多个能力实例，错误驱动换 Key，并在图片能力或空输出时走显式 fallback；DeepChat 将 Provider、ModelConfig、runtime registry 与 QPS 队列分开；Open WebUI 以 URL 配置行表示连接，OpenAI 模型固定到首见连接，Ollama 同名模型可随机选后端。
 - **Hermes Agent 是样本中唯一确认实现显式跨渠道 fallback 链的项目。** 它把应用重试、同 Provider credential pool、模型 fallback、跨 Provider/端点 fallback 与恢复主通道分成四层。该链需用户配置，不是健康感知的动态路由器；切换后会重发同一任务，存在重复生成与计费可能。
 - **Jan 的多 Key 与凭据边界较完整。** 主 Key 加 fallback Key 链保存在 OS keyring，401/403/429 会在当前请求换 Key；远程 Provider 与 llama.cpp/MLX 本地引擎都经本地 router 暴露为 OpenAI-compatible 路径。它不做跨 Provider failover。
@@ -86,7 +86,7 @@ AIO Hub 的 `LlmProfile` 是聚合根，协议类型、Base URL、Key 池、模�
 
 Cherry Studio 用三层合并减少重复：Registry 保存 Provider/模型基线，用户表保存实例及差量，运行时再应用默认值。Endpoint Type 和 Adapter Family 分开后，同一 Provider 可以拥有多个协议端点，模型还可覆盖默认端点。这个结构适合长期维护不断增加的 Provider 和认证方式，但高可用状态没有进入这套实体模型。
 
-LobeHub 把 Provider 与模型分表保存于 PostgreSQL，内置目录、环境变量和用户配置在运行时合并。`providerId + modelId` 贯穿模型选择，适合多用户和工作区作用域。它还提供 `RouterRuntime` 扩展面，但普通 Provider 调用和 Router 是两条不同路径；没有真实路由配置时，只能评价框架能力，不能归入已部署的跨渠道调度。
+LobeHub 把 Provider 与模型分表保存于 PostgreSQL，内置目录、环境变量和用户配置在运行时合并。这一模型身份贯穿模型选择，适合多用户和工作区作用域。它还提供 `RouterRuntime` 扩展面，但普通 Provider 调用和 Router 是两条不同路径；没有真实路由配置时，只能评价框架能力，不能归入已部署的跨渠道调度。
 
 ### 2. 注册表加设置型：Chatbox
 
@@ -110,19 +110,19 @@ VCPChat 只认识一组 `vcpServerUrl + vcpApiKey`。Agent 保存模型和生成
 
 VCPToolBox 位于客户端和上游之间，负责入站协议转换、插件/RAG 编排、模型别名、语义选模、重试和中断。它看起来更接近网关，但核心上游仍只有 `API_URL + API_Key`。
 
-如果 `API_URL` 指向 NewAPI、One API 等聚合服务，多 Provider 池、倍率、渠道熔断可能发生在聚合服务内部。VCPToolBox 本地看不到这些实体和状态，因此横向比较时只能把它记为“依赖外部渠道管理”，不能把外部网关的能力归入本项目。
+如果该上游地址指向 NewAPI、One API 等聚合服务，多 Provider 池、倍率、渠道熔断可能发生在聚合服务内部。VCPToolBox 本地看不到这些实体和状态，因此横向比较时只能把它记为“依赖外部渠道管理”，不能把外部网关的能力归入本项目。
 
 ### 6. 代码注册 + 组合覆盖型：Pi
 
-Pi 的 Provider 是 `packages/ai` 里的 TypeScript 对象：39 个内置 Provider 在 `builtinProviders()` 中构造，用户没有“新建渠道”的 UI 或数据表。渠道变化全部表达为覆盖：`models.json` 改 baseUrl/apiKey/模型、`modelOverrides` 改单模型字段、扩展 `registerProvider` 注册新 Provider、Radius 网关按配置生成新 id。凭据每 Provider 一粒，运行时 API key 是内存覆盖，OAuth 令牌自动刷新。模型目录是“构建期生成 + pi.dev 远端叠加 + 用户定义 + 扩展”四层合并，这使静态代码看不到完整模型清单。它面向单机 CLI 工作流，渠道管理能力止于“可配置、可覆盖、可重试”，没有实例管理、多 Key 或健康调度。
+Pi 的 Provider 是 `packages/ai` 里的 TypeScript 对象：39 个内置 Provider 在 `builtinProviders()` 中构造，用户没有“新建渠道”的 UI 或数据表。渠道变化全部表达为覆盖：`models.json` 改地址、Key 与模型，模型级覆盖改单模型字段，扩展 `registerProvider` 注册新 Provider，Radius 网关按配置生成新 id。凭据每 Provider 一粒，运行时 API key 是内存覆盖，OAuth 令牌自动刷新。模型目录是“构建期生成 + pi.dev 远端叠加 + 用户定义 + 扩展”四层合并，这使静态代码看不到完整模型清单。它面向单机 CLI 工作流，渠道管理能力止于“可配置、可覆盖、可重试”，没有实例管理、多 Key 或健康调度。
 
 ### 7. 运行时组装型：OpenCode
 
-OpenCode 的 Provider 不是持久化实体也不是纯代码注册项，而是每次启动在进程内按固定顺序组装出的只读记录：models.dev 目录（`packages/core/src/models-dev.ts`）→ 插件 provider hook → config `provider` 字段覆盖 → 环境变量探测 → auth.json 凭据 → 插件 auth loader → 内置 `custom(dep)` 适配器（`src/provider/provider.ts:1343-1668`）。模型目录是「磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络」三级数据源，TTL 5 分钟、每小时刷新，仓库内没有硬编码模型清单。请求主路径是 Vercel AI SDK `streamText`（BUNDLED_PROVIDERS 表 + 未收录包名 npm 动态安装），另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`，仅 openai/opencode/anthropic 且非 OAuth）。多端点通过注册多个自定义 provider id 表达（config `options` 无数组形态）。它面向服务端 Agent 工作流：session 解析 `provider/model[/variant]`，无 `@`/`#`/`:latest` 语法；重试与故障转移全部在同渠道内完成。
+OpenCode 的 Provider 不是持久化实体也不是纯代码注册项，而是每次启动在进程内按固定顺序组装出的只读记录：models.dev 目录（`packages/core/src/models-dev.ts`）→ 插件 hook → config 覆盖 → 环境变量探测 → auth.json 凭据 → 插件凭据加载器 → 内置 `custom(dep)` 适配器。模型目录是「磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络」三级数据源，TTL 5 分钟、每小时刷新，仓库内没有硬编码模型清单。请求主路径是 Vercel AI SDK 的流式接口（内置 Provider 表 + 未收录包名 npm 动态安装），另有可选的 native 协议实现（`packages/llm/src/protocols/`，仅 openai/opencode/anthropic 且非 OAuth）。多端点通过注册多个自定义 provider id 表达（config 的 options 项没有数组形态）。它面向服务端 Agent 工作流：session 解析 `provider/model[/variant]`，无 `@`/`#`/`:latest` 语法；重试与故障转移全部在同渠道内完成。
 
 ### 8. 来源 + 能力实例型：AstrBot
 
-AstrBot 将可复用的 `provider_sources` 与实际能力实例 `provider` 分开。同一来源可派生 Chat、STT、TTS、Embedding、Rerank 等多个实例，运行时按会话偏好、全局默认和实例列表顺序选择。它已经有错误驱动 Key 轮换和少数明确触发的 fallback，但默认配置中的 provider pool/权重没有运行时消费者。
+AstrBot 将可复用的 `provider_sources` 与具体能力实例分开。同一来源可派生 Chat、STT、TTS、Embedding、Rerank 等多个实例，运行时按会话偏好、全局默认和实例列表顺序选择。它已经有错误驱动 Key 轮换和少数明确触发的 fallback，但默认配置中的 provider pool/权重没有运行时消费者。
 
 ### 9. Provider/连接实体 + runtime registry：DeepChat、Open WebUI
 
@@ -130,7 +130,7 @@ DeepChat 的 Provider 记录、ModelConfig、能力快照和 AI SDK behavior reg
 
 ### 10. 本地 Router 聚合型：Jan
 
-Jan 把远程 Provider 与本地 llama.cpp/MLX 引擎都放到本地 router 背后，前端 AI SDK 请求按模型 ID被路由。它的 Provider 配置较轻，但参数能力表、Key 链、keyring 和本地模型生命周期较完整。失败换 Key发生在同 Provider，跨 Provider 仍需用户切换。
+Jan 把远程 Provider 与本地 llama.cpp/MLX 引擎都放到本地 router 背后，前端 AI SDK 请求按模型 ID 被路由。它的 Provider 配置较轻，但参数能力表、Key 链、keyring 和本地模型生命周期较完整。失败换 Key发生在同 Provider，跨 Provider 仍需用户切换。
 
 ### 11. Profile + 凭据池 + fallback 链：Hermes Agent
 
@@ -214,7 +214,7 @@ Cherry Studio 的 Registry 将模型本体、Provider 定义和 Provider-模型�
 
 SillyTavern 接收多家上游返回的异构模型对象，通过多套字段读取上下文、价格、视觉、推理和工具能力。这有利于兼容现有生态，也意味着字段统一和 fallback 规则会持续承担维护成本。
 
-VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映射到内部名，语义路由又把 `VCPModelAuto` 等虚拟模型加入标准目录。客户端无需理解路由协议即可选择虚拟模型。当前快照没有 `ModelRedirect.json`，别名能力存在但默认未启用；虚拟模型目录项也不应掩盖真实上游目录获取失败。
+VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映射到内部名，语义路由又把 `VCPModelAuto` 等虚拟模型加入标准目录。客户端无需理解路由协议即可选择虚拟模型。当前快照没有该文件，别名能力存在但默认未启用；虚拟模型目录项也不应掩盖真实上游目录获取失败。
 
 ## 多 Key：存储、分摊与健康
 
@@ -276,9 +276,9 @@ VCPToolBox 对可重试错误的分类比单纯 5xx 更细，也把取消信号�
 
 ### 模型 fallback 仍不等于 Provider failover
 
-VCPToolBox 的语义虚拟模型先按对话内容与 route description 的相似度选出候选，遇到特定错误后沿模型链重试。Embedding 也有独立候选链。这些模型全部发往同一个 `API_URL` 并使用同一枚 `API_Key`。除非聚合上游恰好把不同模型映射到不同 Provider，本地并没有跨渠道切换证据。
+VCPToolBox 的语义虚拟模型先按对话内容与 route description 的相似度选出候选，遇到特定错误后沿模型链重试。Embedding 也有独立候选链。这些模型全部发往同一个上游地址、使用同一枚 Key。除非聚合上游恰好把不同模型映射到不同 Provider，本地并没有跨渠道切换证据。
 
-SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给上游；实际选择发生在 OpenRouter。LobeHub 的 `RouterRuntime` 支持 option fallback，当前开源 `lobehub` Router 配置没有真实路由项。这两类能力都应注明执行主体和配置前提。
+SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给上游；实际选择发生在 OpenRouter。LobeHub 的 Router 运行时支持 option fallback，当前开源 `lobehub` Router 配置没有真实路由项。这两类能力都应注明执行主体和配置前提。
 ### 静态 fallback 链仍不等于健康调度闭环
 
 一个完整的跨 Provider 故障转移至少需要：
@@ -358,7 +358,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | VCPChat | 每日设置备份和一键 ZIP 包含明文 Key | 原子写入只保证完整性，不保证保密性 |
 | VCPToolBox | 默认归档所有 `.env` 和 JSON | 未加密 ZIP 扩大核心及插件 Secret 副本范围 |
 
-Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 的 legacy 备份引擎（类名仍标 `@deprecated LEGACY v1 CODE`）已升级为 v7 full/slim 双布局并接入 SQLite 备份（`220dff874f`），v2 Provider 与凭据因此随备份落盘——旧"备份不复制 `cherrystudio.sqlite`、Provider 配置未进入备份链"的结论已被推翻；由于 Provider 凭据是 SQLite 明文，备份文件本身的保密性成为新的边界。
+Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 的 legacy 备份引擎（类名仍标 `@deprecated LEGACY v1 CODE`）已升级为 v7 full/slim 双布局并接入 SQLite 备份（`220dff874f`），v2 Provider 与凭据因此随备份落盘——旧"备份不复制 SQLite 数据库、Provider 配置未进入备份链"的结论已被推翻；由于 Provider 凭据是 SQLite 明文，备份文件本身的保密性成为新的边界。
 
 VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置写入完整性。VCPToolBox 的管理 API 直接覆盖主配置，且保存后部分核心值需要重启才生效。这些属于可靠写入和运行配置切换问题，应与 Secret 加密分开评价。
 
@@ -405,7 +405,7 @@ VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置�
 
 ### LobeHub：把重试过程和路由框架做成可观察扩展点
 
-错误分类、指数退避、结构化事件和 RouterRuntime 的 option/停止条件/attempt 观测提供了较完整的框架边界。需要保留一条表述纪律：扩展点只有在存在真实候选配置和健康策略后，才构成可用的路由方案。
+错误分类、指数退避、结构化事件和 Router 运行时的选项、停止条件与尝试次数观测提供了较完整的框架边界。需要保留一条表述纪律：扩展点只有在存在真实候选配置和健康策略后，才构成可用的路由方案。
 
 ### SillyTavern：把连接与生成环境一起做成可切换 Profile
 
@@ -413,7 +413,7 @@ Profile 同时保存 API、URL、模型、Preset、模板、Proxy 和 Secret 引
 
 ### VCPChat：保持客户端和网关职责边界清楚
 
-Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注入使用独立端点，`requestId` 贯穿生成和中断。配置保存的 temp、校验、备份、移动流程也值得复用。备用网关和 Secret 保护仍需在单点风险与使用复杂度之间权衡。
+Agent 只保存模型参数，URL 通过标准 URL API 规范化，工具注入使用独立端点，`requestId` 贯穿生成和中断。配置保存的 temp、校验、备份、移动流程也值得复用。备用网关和 Secret 保护仍需在单点风险与使用复杂度之间权衡。
 
 ### VCPToolBox：用标准模型接口包装别名和语义路由
 
@@ -421,7 +421,7 @@ Agent 只保存模型参数，URL 通过标准 `URL` API 规范化，工具注�
 
 ### Pi：分层重试与组合式覆盖
 
-错误分类正则、SDK 层与消息层两级重试、OAuth 加锁刷新和 `models.json` 覆盖层，构成一套轻量但边界清楚的单机渠道管理。其可复用点在于“组合式覆盖”：内置目录、pi.dev 远端叠加、用户定义与扩展注册各管一层，互不破坏基线。代价也明确：没有渠道实例、多 Key 或健康调度，跨 Provider 高可用完全不在设计内。
+错误分类正则、SDK 层与消息层两级重试、OAuth 加锁刷新和配置文件覆盖层，构成一套轻量但边界清楚的单机渠道管理。其可复用点在于“组合式覆盖”：内置目录、pi.dev 远端叠加、用户定义与扩展注册各管一层，互不破坏基线。代价也明确：没有渠道实例、多 Key 或健康调度，跨 Provider 高可用完全不在设计内。
 
 ### OpenCode：目录、SDK 与凭据的分层组装 + 三层重试
 
@@ -429,7 +429,7 @@ models.dev 目录、config 覆盖、env 探测与 auth.json 凭据按固定顺�
 
 ### AstrBot：来源复用、能力实例与错误驱动 Key 轮换
 
-将 `provider_sources` 与能力实例拆开，既能复用同一端点配置，也能按 Chat/STT/TTS/Embedding/Rerank 独立选择。两层重试、错误驱动换 Key和少数显式 fallback 让运行链有清楚边界；`provider_pool`/权重仍只是未接通配置，不能视为负载均衡。
+将来源配置与能力实例拆开，既能复用同一端点配置，也能按 Chat/STT/TTS/Embedding/Rerank 独立选择。两层重试、错误驱动换 Key和少数显式 fallback 让运行链有清楚边界；`provider_pool`/权重仍只是未接通配置，不能视为负载均衡。
 
 ### DeepChat：Provider、能力快照与 QPS 队列分层
 

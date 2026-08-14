@@ -24,46 +24,46 @@ VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒�
 
 **界面栈。** Electron 主进程 + 渲染进程原生 JS（无前端框架）；多子窗口：主题选择器（独立 850×700 无框子窗口）、图片查看器、语音聊天、便签（note-mini）等。
 
-**弹窗机制。** `modules/ui-helpers.js` 的 uiHelperFunctions（openModal/closeModal/showConfirmDialog/showToastNotification）；Modal 元素用 `<template>` 懒加载，打开时从同名 `<template id="...Template">` 克隆到 `#modal-container`，再派发 modal-ready 自定义事件（:339）通知各模块绑定事件监听器。
+**弹窗机制。** `modules/ui-helpers.js` 的 uiHelperFunctions 负责打开、关闭、确认和 Toast；Modal 元素用 `<template>` 懒加载，打开时从同名模板克隆到 `#modal-container`，再派发 modal-ready 自定义事件（:339）通知各模块绑定事件监听器。
 
 **状态所有权。** 主题模式在 `settings.json` 的 currentThemeMode；侧栏状态（折叠、宽度）由渲染进程设置持久化；消息与话题历史见会话与消息管理笔记。
 
 **状态所有权清单**（补充调查核对）：
 
-- **主题**（settings.json.currentThemeMode）：权威值在主进程——`themeHandlers.js:22-39` 经 set-theme-mode IPC 写入并设 nativeTheme.themeSource，handleGetCurrentTheme 读 nativeTheme.shouldUseDarkColors（:46-48）；渲染层启动时自行读设置后经同一 IPC 触发统一广播回环，不直接改 CSS（见第 4 节首帧链路）。
-- **侧栏状态**（settings.json.sidebarWidth/notificationsSidebarWidth/sidebarAvatarOnly）：渲染进程持有并持久化——宽度在拖拽结束时写内存设置再 electronAPI.saveSettings 落盘（`uiManager.js:143-154`），avatarOnly 开关同样走设置保存（`event-listeners.js:1303-1337`）；主进程只负责文件读写，不消费该字段。
+- **主题**（settings.json.currentThemeMode）：权威值在主进程，由 `themeHandlers.js:22-39` 经 set-theme-mode IPC 写入并设置 nativeTheme.themeSource；读取当前主题时使用系统暗色判断（:46-48）。渲染层启动时自行读设置后经同一 IPC 触发统一广播回环，不直接改 CSS（见第 4 节首帧链路）。
+- **侧栏状态**（settings.json.sidebarWidth/notificationsSidebarWidth/sidebarAvatarOnly）：渲染进程持有并持久化。宽度在拖拽结束时写入内存设置再落盘，avatarOnly 开关同样走设置保存（`uiManager.js:143-154`、`event-listeners.js:1303-1337`）；主进程只负责文件读写，不消费这些字段。
 
-**Toast/通知。** 主进程只转发 VCP 日志事件（`renderer.js:523-537` 的 onVCPLogMessage），展示状态由渲染层 `modules/notificationRenderer.js` 单例持有（浮动 Toast 与侧栏双通道，renderVCPLogNotification :67、isToast 分支 :248），无持久化、无跨窗口同步；
+**Toast/通知。** 主进程只转发 VCP 日志事件（`renderer.js:523-537` 的 onVCPLogMessage），展示状态由渲染层通知单例持有（浮动 Toast 与侧栏双通道，关键分支见 `modules/notificationRenderer.js:67,248`），无持久化、无跨窗口同步；
 
-应用内部反馈走独立的 uiHelperFunctions.showToastNotification（`ui-helpers.js:367-415`），不进入 VCP 通知通道。
+应用内部反馈走独立的 Toast 入口（`ui-helpers.js:367-415`），不进入 VCP 通知通道。
 
-**弹窗。** 命令式 UI 由 uiHelperFunctions（openModal/closeModal/showConfirmDialog，`ui-helpers.js:323-360, 889-977`）持有与销毁，无全局 store；Modal 的 DOM 生命周期（从 `<template>` 克隆到 `#modal-container`、关闭移除）由该模块管理。
+**弹窗。** 命令式 UI 由 uiHelperFunctions 持有与销毁，无全局 store；Modal 的 DOM 生命周期（从 `<template>` 克隆到 `#modal-container`、关闭移除）由该模块管理，入口见 `ui-helpers.js:323-360, 889-977`。
 
 ## 1. 界面栈、公共组件与状态所有权
 
 **没有使用任何第三方 Modal 库**，全部自定义，有两套分支：
 
-- **通用 Modal**（`uiHelperFunctions.openModal/closeModal`，`modules/ui-helpers.js:323-360`）：给目标元素加/移除 active class。模型选择弹窗（modelSelectModal）、正则规则弹窗（regexRuleModal）、全局设置弹窗（globalSettingsModal）均走此路径。
+- **通用 Modal**（`uiHelperFunctions.openModal/closeModal`，`modules/ui-helpers.js:323-360`）：给目标元素加/移除 active class。模型选择、正则规则和全局设置三个弹窗均走此路径。
 
-  打开时调用 `modalElement.focus()`（:347），但**没有焦点陷阱（focus trap）**，Tab 键可以离开 Modal 到达背景元素。Esc/遮罩点击关闭需各 Modal 自行绑定（regexRuleModal 绑定了遮罩点击，:736-739；全局设置弹窗未见 Esc 监听）。
-- **确认对话框**（uiHelperFunctions.showConfirmDialog，`modules/ui-helpers.js:889-977`）：返回 `Promise<boolean>`，用于删除 Agent/群组、删除正则规则等危险操作。
+  打开时聚焦 Modal（:347），但**没有焦点陷阱（focus trap）**，Tab 键可以离开 Modal 到达背景元素。Esc/遮罩点击关闭需各弹窗自行绑定：正则规则弹窗绑定了遮罩点击（:736-739），全局设置弹窗未见 Esc 监听。
+- **确认对话框**（uiHelperFunctions.showConfirmDialog，`modules/ui-helpers.js:889-977`）：返回 `Promise<boolean>`，用于删除 Agent、群组和正则规则等危险操作。
 
-  动态创建 `.confirm-dialog-overlay` 附到 document.body，requestAnimationFrame 后加 visible class 触发 CSS 进场动画，确认按钮自动 `focus()`（:944）。支持：Esc 取消（:948）、Enter 确认（:951）、点击遮罩取消（:959-963）。`isDanger=true` 时确认按钮加 danger class（红色）。
+  动态创建 `.confirm-dialog-overlay` 附到 document.body，requestAnimationFrame 后加 visible class 触发 CSS 进场动画，确认按钮自动聚焦（:944）。支持 Esc 取消（:948）、Enter 确认（:951）和点击遮罩取消（:959-963）。`isDanger=true` 时确认按钮加 danger class（红色）。
 
   关闭时移除 visible class，200ms 后从 DOM 移除（:969-974）。
 - **头像裁剪器**（avatarCropperModal）：Canvas 实现，支持拖拽移动圆形裁剪框和滚轮缩放（半径范围 30-100px），`modules/ui-helpers.js:460-626`。裁剪完成后用 canvas.toBlob 生成 PNG 通过回调传出；事件监听器在关闭时逐一 removeEventListener 清理（:601-608）。
 
 ## 2. 弹窗、浮层与菜单
 
-见第 1 节（通用 Modal / 确认对话框 / 头像裁剪器三套）。表情包选择器（`modules/emoticonManager.js`）是从服务端 API `getEmoticonLibrary()` 加载表情库、**只筛选当前用户对应分类**（"通用表情包" + `"${userName}表情包"` 两个分类，:53-59）的浮层：平铺图片网格，无搜索、无分类切换、无分页（:85-99）；
+见第 1 节（通用 Modal、确认对话框、头像裁剪器三套）。表情包选择器（`modules/emoticonManager.js`）从服务端 API getEmoticonLibrary() 加载表情库，**只筛选当前用户对应分类**（“通用表情包” + “${userName}表情包”两个分类，:53-59），以平铺图片网格呈现，无搜索、无分类切换、无分页（:85-99）；
 
-面板固定 270×240px，出现在按钮上方（:158-165），上方空间不足则移到下方（:161-163）；点击面板外部关闭（100ms 延迟绑定避免立即触发，:107）；点击表情包把 `<img src="..." width="80">` HTML 标签插入 textarea.value（:131-135），不是转义后的 Markdown 语法；
+面板固定 270×240px，出现在按钮上方（:158-165），上方空间不足则移到下方（:161-163）；点击面板外部关闭（100ms 延迟绑定避免立即触发，:107）；点击表情包把 `<img src="..." width="80">` HTML 标签插入输入框（:131-135），不是转义后的 Markdown 语法；
 
 无加载动画，表情库为空时显示"没有找到可用的表情包"占位（:89-90）。
 
 ## 3. 通知、加载态与错误反馈
 
-全部自定义，无系统 Notification API 调用，无 Toast 第三方库（`modules/notificationRenderer.js`）。两套并行展示机制：
+全部自定义，无系统 Notification API 调用，无 Toast 第三方库（`modules/notificationRenderer.js`）。展示分为浮动 Toast 和持久侧栏两条通道：
 
 **浮动 Toast（`#floating-toast-notifications-container`）**：
 - prepend 插入，新 toast 在最上方叠加，无数量上限（会随时间自动消失）。
@@ -73,25 +73,25 @@ VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒�
 - 通知侧栏（`#notificationsSidebar`）处于 active 状态时**抑制浮动 toast**，直接写入侧栏列表（:449）。
 - 窗口获焦时清理已加 exiting 且超过 10 秒的残留 toast（:517-547）；每 30 秒定时清理超 15 秒的 toast（:552-571）。
 
-**持久侧栏列表**：`<li>` prepend 到 `#notificationsList`，点击淡出 + 右滑消失（:387-394），copy 按钮复制原始 JSON；tool_approval_request 项展示允许/拒绝按钮和可选理由文本框（:278-330）。
+**持久侧栏列表**：列表项插入通知列表顶部，点击淡出并右滑消失（:387-394），复制按钮复制原始 JSON；tool_approval_request 项展示允许/拒绝按钮和可选理由文本框（:278-330）。
 
-uiHelperFunctions.showToastNotification（`modules/ui-helpers.js:367-415`）是面向应用内部的简化版 Toast，支持 type（`info/success/error/warning`）和自定义 duration（默认 3000ms），写法与上面相同。
+uiHelperFunctions.showToastNotification（`modules/ui-helpers.js:367-415`）是面向应用内部的简化版 Toast，支持四种 type（info、success、error、warning）和自定义 duration（默认 3000ms），行为与上面的浮动通道相似。
 
 **加载态（Loading）**（补充调查）：
 
-**应用启动。** 批处理启动原生启动屏 NativeSplash.exe（`main.js:660` 注释说明由批处理拉起），显示 `splash.html` 的"正在初始化, 请稍候..."文字 + 伪进度条（@keyframes pseudo-load 按 10%/30%/70%/100% 假进度推进，`splash.html:92-98, 102-110`）；主窗口 did-finish-load 时生成 `.vcp_ready` 信号文件供启动屏退场（`main.js:438-446`）。
+**应用启动。** 批处理启动原生启动屏 NativeSplash.exe（`main.js:660` 注释说明由批处理拉起），显示 splash.html 的"正在初始化, 请稍候..."文字和伪进度条（按 10%/30%/70%/100% 假进度推进，`splash.html:92-98, 102-110`）；主窗口 did-finish-load 时生成 `.vcp_ready` 信号文件供启动屏退场（`main.js:438-446`）。
 
 **Agent/群组列表加载中。** `itemListManager.js:923` 插入 `<li><div class="loading-spinner-small"></div>加载列表中...</li>`。
 
 **话题列表加载中。** `topicListManager.js:540` 插入 `<div class="loading-spinner-small"></div>正在加载 X 的话题...`；群组话题分支是纯文本 `<p>正在加载群组 X 的话题...</p>`（`Groupmodules/grouprenderer.js:983`）。
 
-**聊天记录加载中。** 以 isThinking: true 的 system 消息渲染"加载聊天记录中..."（`chatManager.js:606`），内容加 `.thinking-indicator`/`.thinking-indicator-dots` 三点位文本动画（`messageRenderer.js:3263-3265`，vcp-loading-dots 1.4s，`styles/messageRenderer.css:111-120`）；
+**聊天记录加载中。** 以 isThinking: true 的 system 消息渲染"加载聊天记录中..."（`chatManager.js:606`），内容加两个 thinking 指示类并使用三点位文本动画（`messageRenderer.js:3263-3265`；动画定义见 `styles/messageRenderer.css:111-120`）；
 
 加载完成/失败/中途切换时 removeMessageById('loading_history')（`chatManager.js:608-637`）。
 
 **聊天搜索。** 纯文本"正在努力搜索中..."（`searchManager.js:236`）。
 
-**图片查看器。** 无加载动画——`<img>` 默认 display:none（`image-viewer.html:496`），onload 后才显示图片并启用工具栏（`image-viewer.js:454-458`）；加载失败切错误占位并隐藏工具栏（:578-584）。
+**图片查看器。** 无加载动画，图片默认隐藏，加载完成后才显示并启用工具栏（`image-viewer.html:496`、`image-viewer.js:454-458`）；加载失败时切换错误占位并隐藏工具栏（:578-584）。
 
 **检查范围与结论。** 全仓 `*.css` 检索 loading|spinner|skeleton|骨架|加载中 + `modules/` 下加载逻辑逐一核对。**本次未找到**骨架屏（skeleton）组件；唯一的旋转指示类 `.loading-spinner-small` 在全仓所有 `*.css`（含主题文件）中**无样式定义**，即话题/列表加载期只有文字提示、无可见动画。
 
@@ -121,9 +121,9 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ## 4. 主题、视觉 token 与持久化
 
-主题切换**不是 CSS 变量热替换，而是整窗口重载**：handleApplyTheme（`modules/ipc/themeHandlers.js:93-108`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后调用 `mainWindow.reload()`（:101）和 `themesWindow.reload()`（:103），窗口完整重新加载。
+主题切换**不是 CSS 变量热替换，而是整窗口重载**：handleApplyTheme（`modules/ipc/themeHandlers.js:93-108`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后重载主窗口和主题窗口（:101、:103），窗口完整重新加载。
 
-- 深色/浅色通过 Electron nativeTheme.themeSource 控制（:22-38），可设 'light'/'dark'/'system'，值存入 `settings.json` 的 currentThemeMode。系统主题跟随通过监听 nativeTheme.on('updated')（:41-44, :207），变更时向所有窗口广播 theme-updated IPC，渲染进程收到后切换 body.light-theme class。
+- 深色/浅色通过 Electron nativeTheme.themeSource 控制（:22-38），可设 'light'/'dark'/'system'，值存入 `settings.json` 的 currentThemeMode。系统主题跟随通过监听更新事件（:41-44, :207），变更时向所有窗口广播 theme-updated IPC，渲染进程收到后切换 body.light-theme class。
 - CSS 变量约定：:root 块定义暗色主题变量，body.light-theme 块覆盖亮色变量；每个主题文件同时包含两个块，themeHandlers.handleGetThemes 可枚举所有主题及其变量名（:50-91）。主题选择器是独立 850×700 无框子窗口（`Themesmodules/themes.html`，frame: false，:169）。
 - 默认 `styles/themes.css` 已更换为"纸墨与机芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink，提交 ac27171"上架全新 vchat 默认主题（对齐官网配色）"），新增 `--chat-wallpaper-dark/light` 壁纸变量与两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机芯.css`）。切换机制（整窗口重载覆写）未变。
 
@@ -139,15 +139,15 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 - **主题选择器内容**（`Themesmodules/themes.html` + `themes.js` + `themes-module.css`）：入口有主窗口标题栏"主题商店"按钮（`main.html:37-45`）、托盘菜单（`modules/trayManager.js:33`）与 Desktop 窗口（`Desktopmodules/builtinWidgets/vchatApps.js:314`）三处。
 
-  窗口由主题卡片网格 + 实时预览区 + "应用并刷新"按钮组成：卡片是**双栏预览**——左半用解析出的暗色变量（`--secondary-bg` 底色 + 暗色壁纸）、右半用亮色变量（`--primary-bg` + 亮色壁纸），`themes.js:74-119`；下方实时预览区同构模拟侧栏/内容区（:136-219）。**无主题编辑器**：不能编辑颜色、不能新建自定义主题；
+  窗口由主题卡片网格、实时预览区和"应用并刷新"按钮组成：卡片是**双栏预览**，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（关键颜色字段及实现见 `themes.js:74-119`）；下方实时预览区同构模拟侧栏/内容区（:136-219）。**无主题编辑器**：不能编辑颜色、不能新建自定义主题；
 
-  `#saveThemeBtn`（:222-226）实际只是调用 applyTheme IPC 应用选中主题——变量名 saveThemeBtn（"保存主题"）与按钮文案"应用并刷新"存在落差，注意勿误读为保存自定义主题。
+  `#saveThemeBtn`（:222-226）实际只是调用 applyTheme IPC 应用选中主题，变量名（"保存主题"）与按钮文案"应用并刷新"存在落差，不能据此理解为保存自定义主题。
 
 **无主题导入/导出。** 检索全仓 `*.js/*.html` 的 `customTheme/importTheme/exportTheme/saveTheme` 与主题 JSON 文件均未找到（saveTheme 仅上述按钮标识符一处）；主题就是 `styles/themes/` 下的 CSS 文件，切换机制即覆写 `themes.css`，无打包、分享、导出主题文件的能力。**本次未找到**自定义主题能力。
 
 **主题文件结构与元数据。** 17 个文件均为纯 CSS 变量文件，实测 17/17 同时含 :root（暗色）与 body.light-theme（亮色）两个变量块；变量分六组：壁纸、基础色（bg/边框/输入框）、文字色、气泡色、UI 元素与语义色（按钮/危险/成功/通知/工具）、滚动条与 shimmer。
 
-**无独立预览图文件**——选择器卡片与预览区的颜色全部取自 handleGetThemes 解析出的变量（`themeHandlers.js:50-91`），壁纸取自 `--chat-wallpaper-*`。主题名元数据为 * Theme Name:  注释（:59），但 17 个文件中仅 3 个（themesEva/夜樱猫语/星渊雪境）声明，其余回退为文件名去掉 themes 前缀。
+**无独立预览图文件**——选择器卡片与预览区的颜色全部取自主题解析结果（`themeHandlers.js:50-91`），壁纸取自 `--chat-wallpaper-*`。主题名元数据为 * Theme Name: 注释（:59），但 17 个文件中仅 3 个（themesEva/夜樱猫语/星渊雪境）声明，其余回退为文件名去掉 themes 前缀。
 
 **壁纸机制边界。** 主窗口**无壁纸管理 UI**——`--chat-wallpaper-dark/light` 随主题文件固定（`themes.css:75-80`、`styles/base.css:29`），壁纸图片打包在 `assets/wallpaper/`（26 个文件），用户不能换图；
 
@@ -155,7 +155,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **Desktop 窗口另有独立壁纸系统。** 它支持图片、视频和 HTML 动态壁纸，并可设置透明度、模糊、亮度、静音与播放速度。来源既可以由本地选择，也可以远程下发 URL、file 地址或内联 HTML；这套机制与聊天窗口主题壁纸相互独立。（`Desktopmodules/ui/globalSettings.js:21-31,186`）
 
-**主题模式双 IPC 通道。** 除 set-theme-mode（`themeHandlers.js:22-39`，light/dark/system）外，`modules/ipc/settingsHandlers.js:278-297` 另注册 set-theme（仅 light/dark，成功后手动 broadcastThemeUpdate）；
+**主题模式双 IPC 通道。** 除 set-theme-mode（`themeHandlers.js:22-39`，light/dark/system）外，设置处理器（`modules/ipc/settingsHandlers.js:278-297`）另注册 set-theme（仅 light/dark，成功后手动广播主题更新）；
 
 两条通道都会写 `settings.json` 的 currentThemeMode 与 `themeLastUpdated: Date.now()`（`themeHandlers.js:31`、`settingsHandlers.js:287`），后者为本次核对新确认的持久化字段。
 
@@ -179,7 +179,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **缩放。** Ctrl+滚轮，范围 0.05×–32×（支持极端缩小看长截图全貌）；Shift+滚轮步长更大（`ZOOM_FACTOR_FAST=1.5` vs `ZOOM_FACTOR_STEP=1.15`，`image-viewer.js:54-56`）。
 
-**拖拽平移。** 缩放非 1× 时鼠标左键拖拽；双击重置到 1×（:450-457）。
+**拖拽平移。** 缩放非 1× 时鼠标左键拖拽，双击重置到 1×（:450-457）。
 
 **绘图工具。** 选择、画笔、橡皮、取色器、直线、矩形、圆形、箭头，支持颜色和画笔大小；操作历史最多 50 步撤销/重做（:47）。
 
@@ -193,7 +193,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 下载时保 `.gif` 扩展名（getGifDownloadName），PNG 默认名"image.png"时改为带时间戳的 image_YYYYMMDD_HHMMSS.png（getPngDownloadName，`image-viewer.js:165-188`）。
 
-原始字节经 fetch(resolvedImageSrc) 获取并缓存（getOriginalImageBlob，`image-viewer.js:114-186`），mime 类型以源数据识别为准。
+原始字节经 fetch 获取并缓存（getOriginalImageBlob，`image-viewer.js:114-186`），mime 类型以源数据识别为准。
 - 右键点击切换工具栏可见性（:409-413）。
 - 键盘快捷键（仅查看器窗口内有效）：Esc（切换工具/关闭）；Ctrl+Z/Y（撤销重做）；V/B/E/I/L/R/C/A（切换工具，`image-viewer.js:732-742`）。
 - 图片打开时携带当前主题（theme 参数），查看器监听 onThemeUpdated 保持同步（:82-83）。大 dataURL（如阅读模式截图）通过 token 机制传递避开 URL 长度限制（:87-101）。
@@ -204,7 +204,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **全局快捷键**（Electron globalShortcut，应用窗口无焦点时也有效）：
 - Super+Alt+Z：打开便签（note-mini）窗口（`main.js:1164`）
-- Ctrl+Shift+I：打开开发者工具（`main.js:1160`；经 toggleDevToolsForWindow 转发——若焦点窗口是 Loom 运行窗口则交 loomManager.toggleDevToolsForWindow，否则普通 `webContents.toggleDevTools()`）
+- Ctrl+Shift+I：打开开发者工具（`main.js:1160`；根据焦点窗口转发到 Loom 或普通开发者工具入口）
 - CommandOrControl+Shift+P：划词助手浮窗（动态注册/注销，`modules/ipc/assistantHandlers.js:724`）
 
 **应用内快捷键**（`modules/event-listeners.js:1461-1523`，仅主窗口有焦点时有效）：
@@ -221,7 +221,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ### 动画与过渡
 
-全部在 `styles/animations.css` 中定义（`style.css` 第 10 行 `@import`）：
+全部在 `styles/animations.css` 中定义（由 `style.css` 第 10 行导入）：
 
 **流式输出进行中。** `.message-item.streaming .md-content::after` 用 vcp-border-flow（3s linear infinite）在气泡四周绘制流光边框，背景使用 mask 技巧只显示边框区域不遮挡内容（:123-150）。panel/immersive 模式下改为左侧细轨道 vcp-stream-activity-rail（1.8s ease-in-out，高度收缩脉冲）。
 
@@ -245,7 +245,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ### 全局设置面板分区
 
-`modules/global-settings-manager.js` 的 handleSaveGlobalSettings（:38-106）揭示全局设置面板字段分区：
+`modules/global-settings-manager.js:38-106` 揭示全局设置面板字段分区：
 
 **用户信息。** 用户名、头像（含裁剪）、头像边框色、名称文字色、是否跟随主题色
 
@@ -288,7 +288,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 - 消息列表 `.message-item`：无 `role="listitem"` 或 aria-label
 - 发送按钮在"中止回复"模式下动态替换 SVG，但 data-mode 切换未见对应 aria-label 更新
 
-**焦点管理**：确认对话框打开时确认按钮自动 `focus()`（:944）；通用 Modal 打开时调用 `modalElement.focus()`（:347），但无 focus trap——Tab 键可以穿透到背景。无键盘导航在 Agent/Topic 列表中的支持（列表项无 tabindex）。
+**焦点管理**：确认对话框打开时确认按钮自动聚焦，通用 Modal 打开时也会聚焦自身（相关实现见 :347、:944），但无 focus trap，Tab 键可以穿透到背景。Agent/Topic 列表没有键盘导航支持，列表项无 tabindex。
 
 总体评估：核心功能控件有基础 ARIA，但主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，键盘可达性不完整，无障碍支持处于初步阶段。
 

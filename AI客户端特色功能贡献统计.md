@@ -26,7 +26,7 @@
 - **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别覆盖 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主贡献和辅助贡献，DeepChat 的 CLI 本地控制平面归入“外部表面驾驶本地会话”主贡献族。
 - **LobeHub** 的异构外部 Agent 托管统一六种 CLI、平台任务、原生会话、事件投影与取消；业务应用连接治理把账号、凭据、作用域和逐动作权限组织成 Connector 产品面。两者均为主贡献。DeepChat 与 Cherry Studio 以 ACP 安装运行时和 Claude Agent SDK 会话构成前一功能族的辅助贡献。
 - **AIO Hub** 的对话分享稿工作台把任意消息选区、独立视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成完整交付表面；NextChat 的固定品牌模板计辅助贡献。Cherry Studio 与 DeepChat 的离屏完整列表、现场滚动截图属于成熟捕获路线，记录在类目笔记中但不因工程完整度加分。
-- **Hermes Agent** 的会话心跳（`/heartbeat`）与目标质量门（`/goal`）达到主链确认，属于“主动 Agent”族的主贡献候选；该候选需与至少三个项目聚类后再建立局部比较，暂不计分。
+- **Hermes Agent** 的会话心跳和目标质量门达到主链确认，属于“主动 Agent”族的主贡献候选；对应入口为 `/heartbeat` 与 `/goal`。该候选需与至少三个项目聚类后再建立局部比较，暂不计分。
 - **NextChat** 有 fork、隔离 Artifact 与固定模板对话分享三项辅助贡献；**Manifold Desktop** 为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
 
 这里的“贡献”表示：组合新产品时，现有调查会优先从哪个项目提取该能力的产品契约或实现原型。它不是代码贡献、原创权或项目整体成熟度判定，但明确的参考与演变关系会影响主、辅助贡献分配：同一技术路线不能因换名或重新产品化而重复记为多个主贡献，后继实现只有在显著改写产品契约时才可另立功能族。
@@ -39,7 +39,7 @@
 2. Markdown、代码高亮、公式、Mermaid、复制、编辑、删除、重新生成和普通附件预览。
 3. Provider/模型选择、单 Key、自定义 Base URL、基础参数和“支持很多 Provider”本身。
 4. 单段 system prompt、普通角色预设、基础知识库、普通联网搜索、简单 RAG、主题、语言、导入导出和备份。
-5. 只有一次 `tool_call` 展示，或只声明 MCP、Plugin、Skill、ACP 而没有发现、执行、治理或结果闭环。
+5. 只有一次工具调用展示，或只声明 MCP、Plugin、Skill、ACP 而没有发现、执行、治理或结果闭环。
 6. typed parts、SQLite、事务、类型系统、测试量等纯工程质量。
 
 工程、安全和可靠性机制若直接支撑多个特色工作流，会进入“机制贡献统计”，但不与用户可见产品功能混成总分。一个机制与产品功能同时出现不算重复计分，因为机制表没有分数。
@@ -62,17 +62,17 @@
 
 | 层次或入口 | 已确认主链 | 用户得到的能力 | 统计归属 |
 |---|---|---|---|
-| RAGDiary 自动注入 | system 消息中的日记占位符 → `RAGDiaryPlugin` 请求预处理 → 日记作用域检索 → 结果替换占位符进入最终上下文 | Agent 无须先决定调用搜索工具，相关长期记忆在生成前进入本轮认知环境 | F66 主贡献 |
-| TagMemo V9 + RiverMemo Topology V3 | 当前上下文降噪 → 标签传播 → 候选超集 → Rust/Rayon 拓扑重排 → `omega/regime/role/topologyBonus` 等解释元数据 | 召回顺序受私人日记网络、上下文与相对拓扑共同校准，并保留可观察的排序依据 | F66 的排序与解释子链，不再拆分加分 |
+| RAGDiary 自动注入 | system 消息中的日记占位符进入日记插件预处理，再经作用域检索并替换回最终上下文 | Agent 无须先决定调用搜索工具，相关长期记忆在生成前进入本轮认知环境；实现入口为 `RAGDiaryPlugin` | F66 主贡献 |
+| TagMemo V9 + RiverMemo Topology V3 | 当前上下文降噪、标签传播和候选扩展后，由 Rust/Rayon 完成拓扑重排并生成解释元数据 | 召回顺序受私人日记网络、上下文与相对拓扑共同校准，并保留可观察的排序依据；关键解释字段为 `omega/regime/role/topologyBonus` | F66 的排序与解释子链，不再拆分加分 |
 | VCP 元思考 | `[[VCP元思考:链名::修饰符:k序列]]` → 持久链配置 → 逐语义簇检索 → 阶段结果向量与原查询融合 → 驱动下一阶段 | 用户或 Agent 可以声明一个可复用的递归检索程序，而非只做一次相似度查询 | F102 主贡献；公开第三方模组证明思维簇可以作为可迁移内容资产分发 |
-| 第三方思维簇资产 | 外部仓库提供 `内心会议簇`、智力/精神/体格/身手四属性域、24 个原子模块与 `semantic_groups.edit.json` → 放入 VCPToolBox 日记目录与 RAGDiaryPlugin → 通过 K 值选择认知构型 | 思维簇从后端内部文件变成可分享、可安装、可二次编排的 Agent 人格/认知内容包 | F102 的生态证据；不单独计分，仓库采用 CC BY-NC-SA 4.0 |
+| 第三方思维簇资产 | 外部仓库提供内心会议簇、四属性域、24 个原子模块和语义组配置，放入 VCPToolBox 日记目录后由日记插件加载，并通过 K 值选择认知构型 | 思维簇从后端内部文件变成可分享、可安装、可二次编排的 Agent 人格/认知内容包；配置文件为 `semantic_groups.edit.json` | F102 的生态证据；不单独计分，仓库采用 CC BY-NC-SA 4.0 |
 | LightMemo SearchRAG | Agent 工具调用 → 日记或 TDB 冷知识作用域 → KNN/BM25、TagMemo 或 RiverMemo → 可选 Rerank/AIMemo 总结 → 工具结果回注 | Agent 可主动查记忆、限定署名/文件夹/时间，并选择检索构型 | 主链确认；主动 RAG 工具本身较常规，不另计产品分 |
 | LightMemo TagMemoAB | 同一 SQL 权限域、查询向量和候选事实域 → KNN/TagMemo/RiverMemo 三轨 → Top-K 重合率与统一排名 | 维护者能在可比条件下测量不同记忆内核的排序差异 | M18 机制贡献 |
 | 一致性与调优面 | RAG 参数热加载、标签配置 → 一致性 preview token → 明确 apply → 增量重索引；管理台提供 RiverMemo/TagMemo 控制面 | 记忆网络可以先预览再修复，并在不重启主服务的情况下调整检索参数 | F66 的维护子链；不把设置页或 CRUD 单独计分 |
 | AgentDream | 定时/手动触发 → 多层记忆种子与联想 → LLM 梦境叙事 → 合并/删除/感悟操作 → 人工审批写回 | 记忆在非对话时段被主动整理，破坏性变更经过审批 | F08 主贡献；默认禁用 |
 | VCPChat Memo 工作台 | 日记浏览/搜索 → 神经云图与关联选择 → 编辑、合并和发布 | 人类可直接查看和整理 Agent 的记忆网络 | F73 主贡献 |
 | VCPChat RAG Observer | 后端 VCP Info/WS 事件 → 独立透明窗口 → 召回阶段展示与工具批准/拒绝 | 用户持续观察 RAG 与工具信息流 | F93 辅助贡献；依赖外部 VCP 后端 |
-| VCPChat DeepMemo 2.0 | 可信 `agentId/topicId` → VCP-CDS 中央聊天历史检索 → 排除当前 Topic → 窗口扩展/可选精排 → 工具结果回注 | Agent 可主动回看其他会话中的相关对话片段，模型参数不能覆盖可信会话身份 | 主链确认；属于常规会话历史 RAG，不另计特色分 |
+| VCPChat DeepMemo 2.0 | 以可信会话身份查询 VCP-CDS 中央聊天历史，排除当前主题后扩展窗口、可选精排并回注工具结果 | Agent 可主动回看其他会话中的相关对话片段，模型参数不能覆盖可信会话身份；身份字段为 `agentId/topicId` | 主链确认；属于常规会话历史 RAG，不另计特色分 |
 
 边界说明：TDB 冷知识库的 BM25 + 稠密向量 + 图扩散、AIMemo 候选总结、附件/时间/署名过滤都增强了检索链，但仍服务于 SearchRAG 的同一主动查询目标。RiverMemo 的查询降噪、守恒传播、双尺度场、候选曲线和 Ω 泛函是同一排序契约的内部阶段。第三方思维簇仓库是外部内容资产，不是本次 16 个项目比较对象；它用于证明 VCP 的思维簇生态已经出现可公开分发形态，不把外部仓库的内容创作误记为 VCPToolBox 的新增代码或独立分值。若按模块名逐项计分，会重新造成实现复杂度与产品贡献混算。
 
@@ -119,9 +119,9 @@
 | F64 | Agent 自创建、改进和维护 Skill 的生命周期 | Hermes Agent | VCPToolBox | Hermes 覆盖 create/patch/归档、用量侧车和 curator；VCPToolBox 的 SkillBridge 提供目录扫描、元数据索引与按需展开，但不含自进化闭环 |
 | F65 | 跨会话持久记忆与用户建模 | LobeHub、Open WebUI | Hermes Agent、SillyTavern | 结构化/文件记忆可提取、检索、编辑并进入后续对话 |
 | F66 | 生成前自动召回与私人语义拓扑重排 | VCPToolBox | AIO Hub | SillyTavern 的 World Info/世界书建立了生成前条件注入范式；VCP 以日记占位符在请求前自动触发召回，再由 TagMemo/RiverMemo 完成上下文降噪、标签传播、候选拓扑读出、排序解释和作用域约束，使记忆成为每轮上下文环境而非仅供 Agent 选择的搜索工具。AIO Recall 参考 VCP 路线，以思绪集、可插拔候选模块、严格占位符、SQLite 真源和监控面形成独立产品化，计辅助贡献 |
-| F102 | 可配置的逐阶段递归检索思考链与可迁移思维簇生态 | VCPToolBox | - | `[[VCP元思考:…]]` DSL 选择持久化链与语义簇，每一阶段检索结果的平均向量会与原查询融合，生成下一阶段查询；链配置、缓存、自动选链参数和 RAG Observer 事件形成独立于单次召回的执行与观察契约。公开第三方 `VCP-Disco-Elysium-Mod` 将 1 个启动簇、4 个属性域、24 个原子模块和语义组配置打包为可直接放入 `dailynote/` 的内容资产，并用 K 值定义认知构型，说明该契约可被外部作者复用。当前 VCP 快照只有 default 链，文档所称 `thinktheme/*.json` 未实现，运行效果未验证 |
+| F102 | 可配置的逐阶段递归检索思考链与可迁移思维簇生态 | VCPToolBox | - | `[[VCP元思考:…]]` DSL 选择持久化链与语义簇，每一阶段检索结果的平均向量会与原查询融合，生成下一阶段查询；链配置、缓存、自动选链参数和 RAG Observer 事件形成独立于单次召回的执行与观察契约。公开第三方 VCP-Disco-Elysium-Mod 将 1 个启动簇、4 个属性域、24 个原子模块和语义组配置打包为可直接放入 `dailynote/` 的内容资产，并用 K 值定义认知构型，说明该契约可被外部作者复用。当前 VCP 快照只有 default 链，文档所称 `thinktheme/*.json` 未实现，运行效果未验证 |
 | F73 | 神经云图与日记记忆工作台 | VCPChat | - | 将记忆网络、搜索、日记和可视化组织为独立用户工作台 |
-| F82 | Agent 私有资产协议与作用域管理 | AIO Hub | - | `agent-asset://` 把资产绑定 Agent，并贯通管理、宏注入和渲染 |
+| F82 | Agent 私有资产协议与作用域管理 | AIO Hub | - | agent-asset 协议把资产绑定 Agent，并贯通管理、宏注入和渲染 |
 
 ### 会话演化、连续性与研究轨迹
 
@@ -173,7 +173,7 @@
 | F92 | 双语切片、双模型分流与自动朗读语音链 | VCPChat | - | 混合语言文本按片段分流到两个 TTS 模型，并由前端插件自动朗读和缓存 |
 | F93 | 桌面 RAG 信息流监听与工具审批浮层 | - | VCPChat | 独立透明窗口持续展示后端信息流并可批准或拒绝工具，但依赖外部 VCP 后端 |
 | F94 | Agent 可调用的 3D 物理骰子 | - | VCPChat | ammo.wasm 物理投掷和结果回传形成闭环，产品面较窄且无持久对象 |
-| F97 | 项目实体与项目协调 Agent | - | LobeHub | 独立 `projects` 实体（表 + tRPC CRUD + CLI 命令）+ 按项目名生成协调者内置 Agent，与按工作目录的话题分组并存；辅助贡献（主链确认） |
+| F97 | 项目实体与项目协调 Agent | - | LobeHub | 独立项目实体（数据表、tRPC 管理接口和 CLI 命令）+ 按项目名生成协调者内置 Agent，与按工作目录的话题分组并存；辅助贡献（主链确认） |
 | F98 | 人机共笔文档工作台（VDOC 工程 + 文脉 PR 审批） | VCPChat | - | VDOCX/VPPTX 工程、人类直编渲染版式、Agent 以可审阅 PR（pending/applied/rejected/conflict）协作编辑源码，文脉带版本快照与审批回执（主链确认） |
 | F101 | 可编排、可迭代的对话分享稿工作台 | AIO Hub | NextChat | AIO Hub 把消息选区、视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成独立交付表面；NextChat 以任意选消息、Mask context 和固定品牌模板补充轻量形态 |
 
@@ -194,7 +194,7 @@
 | F55 | 跨平台语音收发与 TTS/STT 管道 | - | AstrBot | 14 个服务统一进入平台无关消息处理链，独特性中等 |
 | F60 | Skill 跨工具格式转换与同步 | DeepChat | - | 11+ 工具适配器把 Skill 在不同编码 Agent 生态间迁移 |
 | F61 | 多搜索源与浏览工具组合的深度研究链 | - | DeepChat | web 搜索、深度研究和浏览工具已闭环，但普通搜索不单独加分 |
-| F62 | DeepLink 外部启动与配置协议 | - | DeepChat | `deepchat://` 可启动会话、安装 MCP 或配置 Provider |
+| F62 | DeepLink 外部启动与配置协议 | - | DeepChat | deepchat 协议可启动会话、安装 MCP 或配置 Provider |
 | F74 | 托管浏览器观察、控制与验证运行时 | VCPToolBox | - | managed Chrome 具生命周期、协议、脱敏、验证和指标闭环；默认关闭。2.4 支持正文图片 IMG* 语义、`get_page_image` 和 Popup 人工 Managed 选择，agent 不隐式控制托管运行时 |
 | F78 | 跨节点文件透明获取与取消传播 | VCPToolBox | - | 来源绑定、缓存、循环保护、断线清理和 cancel_tool 形成分布式文件面 |
 | F79 | 文件事实源的 Agent 论坛与异步协作 | VCPToolBox | VCPChat | 后端以 Markdown 帖子形成可持久协作空间，VCPChat 提供隔离渲染的论坛客户端 |
@@ -204,7 +204,7 @@
 | F86 | 具子流程、变量作用域、条件跳转和 OCR 的桌面 RPA 语言 | AIO Hub | - | 窗口操作从录制回放提升为可持久、可组合的小型流程语言 |
 | F87 | 屏幕区域持续 OCR、字幕合并与聊天回注 | AIO Hub | - | 高频截屏、帧去重、字幕时间轴、SRT 导出和跨窗口回注形成连续工作流 |
 | F95 | 多观点 Agent 会议与主持综合 | VCPToolBox | - | 多角色并行作答、主持人综合和结构化会议信息构成区别于普通子 Agent 委托的审议形态 |
-| F96 | 带验收计划与有界自动修复的目标闭环（/goal） | LobeHub | - | 目标复用任务对象，验收标准持久化、轮次与花费双上限、`lobe-goal` 创建必须人工确认，goalPhase 驱动 UI（主链确认） |
+| F96 | 带验收计划与有界自动修复的目标闭环（/goal） | LobeHub | - | 目标复用任务对象，验收标准持久化、轮次与花费双上限；创建目标必须人工确认，阶段字段驱动界面（主链确认） |
 | F99 | 异构外部 Agent runtime 的发现、托管与会话续接 | LobeHub | DeepChat、Cherry Studio | LobeHub 统一多种 CLI/平台任务的发现、原生会话、工作目录、事件投影、干预与取消；DeepChat 补 ACP runtime 安装和会话，Cherry Studio 补 Claude Agent SDK 会话与工作区 |
 | F100 | 业务应用账号连接、作用域与逐动作治理 | LobeHub | - | Connector/Composio 把外部账号、凭据、工具目录和 `auto / needs_approval / disabled` 权限组织成可持久协作对象，不是普通 MCP 或单次 API 调用 |
 

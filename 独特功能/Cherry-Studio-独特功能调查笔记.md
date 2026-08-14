@@ -16,12 +16,12 @@
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
-| Mini Program（小程序） | `主链确认` | 60+ 预设 + 自定义 webview 应用、keep-alive 池、launchpad/侧栏入口，见能力卡 1 |
-| 全局搜索 | `主链确认` | `app.search` 命令 + 联邦实体搜索 + FTS5 内容搜索（游标分页），见能力卡 2 |
-| 多模型同时对话 | `归并已有类目` | LLM 渠道笔记 §6 与 Chat UI 笔记 §7 已主链确认（`@模型` 多选 → 并行 execution → 兄弟组展示） |
-| 翻译 | `主链确认`（独特性中等） | 流式翻译 + `data-translation` part 持久化，见能力卡 3 |
-| 文档处理 | `归并已有类目` | 附件/OCR/知识库链在会话与消息管理、对话请求与上下文笔记覆盖 |
-| Agent workspace | `归并已有类目` | Chat UI 笔记 §6.2（agent 适配器的工作区文件解析、artifact 面板）与 Agent 工具笔记覆盖 |
+| Mini Program（小程序） | 主链确认 | 60+ 预设 + 自定义 webview 应用、keep-alive 池、launchpad/侧栏入口，见能力卡 1 |
+| 全局搜索 | 主链确认 | `app.search` 命令 + 联邦实体搜索 + FTS5 内容搜索（游标分页），见能力卡 2 |
+| 多模型同时对话 | 归并已有类目 | LLM 渠道笔记 §6 与 Chat UI 笔记 §7 已主链确认（@模型多选 → 并行执行 → 兄弟组展示） |
+| 翻译 | 主链确认（独特性中等） | 流式翻译 + `data-translation` part 持久化，见能力卡 3 |
+| 文档处理 | 归并已有类目 | 附件/OCR/知识库链在会话与消息管理、对话请求与上下文笔记覆盖 |
+| Agent workspace | 归并已有类目 | Chat UI 笔记 §6.2（agent 适配器的工作区文件解析、artifact 面板）与 Agent 工具笔记覆盖 |
 
 README（`README.md:80-116`）"Practical Tools Integration" 中的 Global Search、Mini Program、AI-powered Translation、Multi-model Simultaneous Conversations 全部与代码相符。本次补查重点是确认两个缺口项（Mini Program、全局搜索）的主链，均已走通（静态证据）。
 
@@ -35,9 +35,9 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
 
 **用户目标**：在客户端内以独立标签页运行第三方 Web 应用（ChatGPT、Gemini、Claude、Perplexity、NotebookLM、Coze、Dify、n8n 等），与聊天工作区并列使用——把"桌面客户端"扩展成"Web 应用聚合门户"。
 
-**入口与触发者**：侧栏小程序分区（`sidebarVariants.tsx` 的 miniAppVariant + 收藏）、Launchpad（`MiniApp.tsx` variant='launchpad'）、设置页"小程序"面板。触发者始终是用户点击。
+**入口与触发者**：侧栏小程序分区（sidebarVariants.tsx 的 miniAppVariant + 收藏）、Launchpad（`MiniApp.tsx` 的 launchpad 变体）、设置页"小程序"面板。触发者始终是用户点击。
 
-**事实对象**：`MiniApp` 行（`src/shared/data/types/miniApp.ts:32-57`）：`appId`、`presetMiniAppId`（镜像 userProvider.presetProviderId 的继承模式）、`status`（enabled/disabled/pinned）、`url`、logo、`supportedRegions`（CN/Global）、自定义应用含上传 logo 与完整数据。预设来源 `PRESETS_MINI_APPS`（`src/shared/data/presets/miniApps.ts:20-522`，60+ 项，单真源，main/renderer 共用）。
+**事实对象**：MiniApp 行（`src/shared/data/types/miniApp.ts:32-57`）：`appId`、`presetMiniAppId`（镜像 userProvider.presetProviderId 的继承模式）、`status`（enabled/disabled/pinned）、url、logo、`supportedRegions`（CN/Global）、自定义应用含上传 logo 与完整数据。预设来源 `PRESETS_MINI_APPS`（`src/shared/data/presets/miniApps.ts:20-522`，60+ 项，单真源，main/renderer 共用）。
 
 **完整主链**（静态走通）：
 
@@ -56,7 +56,7 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
      （mini_app.transient_descriptor.<appId>，所有窗口可读，不进 DB）
 ```
 
-**持续性**：预设/自定义/启停/排序落 SQLite（`user_mini_app` 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移有 `MiniAppMigrator.ts`。行为细节：webview `dom-ready` 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab（`94d34dd0be`、`1cab3af8e6`）。
+**持续性**：预设/自定义/启停/排序落 SQLite（user_mini_app 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移由 MiniAppMigrator.ts 负责。行为细节：webview dom-ready 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab（`94d34dd0be`、`1cab3af8e6`）。
 
 **安全与资源边界**：webview 由 Electron 管理；小程序数量有缓存偏好（"小程序缓存数量"）；自定义应用 URL 由用户自担风险（本次未发现 URL 协议白名单校验，未验证）。
 
@@ -68,7 +68,7 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
 
 **用户目标**：一次性搜索全部会话实体与消息内容，替代逐会话翻找。与 Chat UI 笔记 §2.3 的"会话内 DOM 搜索"是两条不同链路：后者只搜已渲染窗口，前者是数据库级全量搜索。
 
-**入口与触发者**：顶栏搜索按钮（`ShellTabBarActions.tsx:24`）+ 命令 `app.search`（`AppShell.tsx:75-80`）→ `GlobalSearchPopup`。
+**入口与触发者**：顶栏搜索按钮（`ShellTabBarActions.tsx:24`）+ `app.search` 命令（`AppShell.tsx:75-80`）→ GlobalSearchPopup。
 
 **完整主链**（静态走通）：
 
@@ -87,7 +87,7 @@ GlobalSearchPopup -> GlobalSearchPanel
   -> 最近搜索项：recordGlobalSearchRecentEntry（缓存 ui.global_search.recent_items）
 ```
 
-**持续性**：搜索本身无状态（实时查询）；recent items 走共享缓存；消息预览面板按需拉取。
+**持续性**：搜索本身无状态（实时查询）；最近搜索项走共享缓存；消息预览面板按需拉取。
 
 **独特性判断**：联邦实体搜索（含 knowledge-base）+ 双消息源内容搜索 + 游标分页的组合在样本中较完整；与 DeepChat 的 FTS5 跨会话搜索（经 conversationSearchServer 暴露给模型工具与设置页）方向不同——Cherry 是用户产品入口优先。
 
@@ -109,20 +109,20 @@ GlobalSearchPopup -> GlobalSearchPanel
   -> 渲染：data-translation part 在消息内展示，可再次翻译覆盖
 ```
 
-**边界**：翻译语言目录、模型选择（走消息原 Provider 还是独立翻译模型）未展开核对；取消即丢弃（"discard-on-cancel"）。
+**边界**：翻译语言目录、模型选择（走消息原 Provider 还是独立翻译模型）未展开核对；取消即丢弃（discard-on-cancel）。
 
 **独特性判断**：把译文作为消息 part 持久化、可重译覆盖的产品形态比"另开窗口翻译"完整，但翻译本身是常见功能，独特性中等——保留为辅助贡献。
 
 ## 已归并到现有类目的能力
 
-- **多模型同时对话**：`归并已有类目`。LLM 渠道笔记 §6（`@模型` 解析与并行语义、siblings group、steer/临时聊天只取第一个）与 Chat UI 笔记 §7 已主链确认，本笔记不重写。
+- **多模型同时对话**：归并已有类目。LLM 渠道笔记 §6（@模型解析与并行语义、siblings group、steer/临时聊天只取第一个）与 Chat UI 笔记 §7 已主链确认，本笔记不重写。
 - **文档处理**：附件（图片/Office/PDF）、OCR、长文粘贴、知识库检索链分别由会话与消息管理、对话请求与上下文、Agent 工具笔记覆盖；README 的 WebDAV 属外部服务，未在本次范围。
 - **Agent workspace**：Chat UI 笔记 §6.2 已确认 agent 消息适配器把相对路径解析到 agent workspace 目录、只读消息、artifact 文件打开与工具审批；Agent 工具笔记覆盖 Claude Code Agent 路径与 MCP 路径。
 - **消息级会话内搜索**（DOM 高亮）：Chat UI 笔记 §2.3，与全局搜索区分。
 
 ## 声明不符、外部依赖与暂缓项
 
-- README Roadmap 中的 Notes/Canvas/OCR/TTS/插件系统/ASR：属愿景清单，本次未做存在性断言（未检索到对应主链，`暂缓` 由主会话决定是否列入候查）。
+- README Roadmap 中的 Notes/Canvas/OCR/TTS/插件系统/ASR：属愿景清单，本次未做存在性断言（未检索到对应主链，暂缓由主会话决定是否列入候查）。
 - 全局搜索的知识库命中依赖知识库索引（`features/knowledge/query/search.ts`），其索引新鲜度未验证。
 - 小程序的实际 webview 加载、区域过滤可用性、keep-alive 内存占用未运行验证。
 

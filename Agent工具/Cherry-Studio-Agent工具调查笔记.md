@@ -16,17 +16,17 @@
 
 Cherry Studio 存在两条彼此独立、但共享部分基础设施（MCP 运行时、命名规则、审批 UI）的 Agent 工具路径：
 
-1. **普通聊天 MCP 路径**：`McpRuntimeService` 管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory MCP server；工具经 `syncMcpToolsToRegistry` 注册进 AI SDK `ToolRegistry`，按 `scope.mcpToolIds` 过滤，`needsApproval`/`defer` 由 `disabledAutoApproveTools` 决定。
-2. **Claude Code Agent 路径**：`src/shared/ai/claudecode/toolRegistry.ts` 是一份声明式注册表，定义每个 SDK 原生工具和 in-process MCP 工具（`cherry-tools` / `agent-memory` / `assistant` / `skills`）的 `exposure`（`user`/`internal`/`disabled`）。主进程的 `agentTools.ts` + `toolConditions.ts` + `toolRules.ts` 组合出 `disallowedTools`、`canUseTool`、以及一组 `PreToolUse` hook，注入到 `@anthropic-ai/claude-agent-sdk` 的 `query()`。
+1. **普通聊天 MCP 路径**：首次出现的 MCP 运行时服务管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory MCP server；工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 的工具注册表，按 `scope.mcpToolIds` 过滤，`needsApproval`/`defer` 由 `disabledAutoApproveTools` 决定。
+2. **Claude Code Agent 路径**：`src/shared/ai/claudecode/toolRegistry.ts` 是一份声明式注册表，定义每个 SDK 原生工具和进程内 MCP 工具（cherry-tools、agent-memory、assistant、skills）的 `exposure`：`user`、`internal` 或 `disabled`。主进程组合 `disallowedTools`、`canUseTool` 和一组 `PreToolUse` hook，注入 `@anthropic-ai/claude-agent-sdk` 的 `query()`。
 
-两条路径都最终落在 Electron **主进程**执行：MCP 子进程/HTTP client 由 `McpRuntimeService` 持有；Claude Code 的原生工具（Bash/Read/Write/...）由 SDK 自带的原生二进制执行，Cherry 只能通过 `disallowedTools`、`canUseTool`、`PreToolUse` hook 三层来限制/审批，不持有执行本身。
+两条路径都最终落在 Electron **主进程**执行：MCP 子进程和 HTTP client 由上述运行时服务持有；Claude Code 的原生工具（Bash/Read/Write/...）由 SDK 自带的原生二进制执行，Cherry 只能通过禁用列表、调用门控和 PreToolUse hook 三层限制或审批，不持有执行本身。
 
 代码中已确认的关键机制事实：
-- **审批模型（Claude Code 原生工具）**：`Bash` 等原生工具在 `default` 权限模式下每次调用都需逐次审批（`prompt`），且没有 "always allow" 持久化机制——`useToolApproval` 对非 MCP 工具不渲染 `autoApprove` 按钮（`useToolApproval.ts:136-146`）；一旦 `permissionMode` 为 `bypassPermissions`，或 `acceptEdits` 模式下命令首词命中 `mkdir/touch/mv/cp`，命令即可免审批直接执行，此时唯一过滤是 `dependencyIsolationHook`（拦截全局包安装）与 `rtkRewrite`（改写特定命令），无通用命令白名单或沙箱。
+- **审批模型（Claude Code 原生工具）**：Bash 等原生工具在 default 权限模式下每次调用都需逐次审批（`prompt`），且没有 "always allow" 持久化机制；非 MCP 工具不显示自动批准按钮（`useToolApproval.ts:136-146`）。一旦权限模式为 bypassPermissions，或 acceptEdits 模式下命令首词命中 `mkdir/touch/mv/cp`，命令即可免审批直接执行，此时唯一过滤是依赖隔离 hook（拦截全局包安装）与命令重写 hook（改写特定命令），无通用命令白名单或沙箱。
 - **审批模型（in-memory MCP）**：`filesystem` 的 `write`/`edit`/`delete` 默认在 `disabledAutoApproveTools`（`builtinMcpServers.ts:96`），用户 "always allow"（`persistAutoApprove`）后会被从该列表移除、后续调用无提示写盘；两条路径的审批桥与 IPC 方法名共享，但主进程分发逻辑不同（Claude 侧命中内存 `toolApprovalRegistry` 快路径，MCP 侧落 DB 消息 parts）。
 - **执行域**：所有工具最终落在 Electron 主进程；`browser` in-memory MCP 使用全局共享的 `persist:default` 分区（`browser/README.md:16`），任何调用该 server 的会话共享同一份 cookie/localStorage，且 `execute` 工具可在页面上下文执行任意 JS，默认无头（`showWindow:false`）。
-- **路径校验边界**：`workspacePathHook` 越权检查只覆盖 `Edit/Glob/Grep/NotebookEdit/Read/Write` 六个结构化字段，`Bash` 命令文本中的路径不经过该检查（源码注释确认刻意为之）。
-- **安全边界事实**：`assistant` MCP 只在本地 Cherry Assistant 会话注入（外部渠道会话不注入），`diagnose`（读本机日志/源码/配置）被刻意排除在自动批准之外；`ASSISTANT_AUTO_APPROVED_RUNTIME_NAMES` 的注释本身就是官方对"可读本机数据的工具与自动批准的网页抓取工具可能同会话出现"这一风险的设计依据。
+- **路径校验边界**：`workspacePathHook` 越权检查只覆盖 Edit、Glob、Grep、NotebookEdit、Read、Write 六个结构化字段，Bash 命令文本中的路径不经过该检查（源码注释确认刻意为之）。
+- **安全边界事实**：assistant MCP 只在本地 Cherry Assistant 会话注入（外部渠道会话不注入），diagnose（读本机日志/源码/配置）被刻意排除在自动批准之外；自动批准工具集合的注释本身就是官方对“可读本机数据的工具与自动批准的网页抓取工具可能同会话出现”这一风险的设计依据。
 
 ## ASCII 调用链图
 
@@ -64,26 +64,26 @@ CLAUDE_TOOL_REGISTRY (静态声明: exposure/dependsOn/mcpServer)
 
 ## 1. 两条工具路径的分界
 
-- 普通聊天：工具来源是 `mcpServerService` 中 `isActive` 的 MCP server，注册进程内共享的 `ToolRegistry`（`src/main/ai/tools/adapters/registry.ts`，未展开读取但被 `mcpTools.ts:11` 引用），按会话 `scope.mcpToolIds` 过滤后交给 AI SDK 的 provider 原生 tool-calling。曝光级别只有「MCP server 是否 active」+「工具是否在 `disabledTools`」两级，没有 `internal`/`disabled` 的静态分层概念。
+- 普通聊天：工具来源是 mcpServerService 中处于 active 状态的 MCP server，注册进程内共享的工具注册表（`src/main/ai/tools/adapters/registry.ts`，未展开读取但被 `mcpTools.ts:11` 引用），按会话范围过滤后交给 AI SDK 的 provider 原生 tool-calling。曝光级别只有“server 是否 active”和“工具是否在禁用列表”两级，没有 internal/disabled 的静态分层概念。
 - Claude Code Agent：工具来源是 `CLAUDE_TOOL_DEFS`（一份 TS 常量表）+ 该 Agent 绑定的 MCP server 列表（`agent.mcps`）。曝光级别 `user`/`internal`/`disabled` 在 `src/shared/ai/claudecode/toolRegistry.ts:27-42` 明确定义并有注释说明生效点：
-  - `user`：出现在编辑对话框，用户可开关，写回 `agent.disabledTools`；
-  - `internal`：始终启用、UI 隐藏（例如 `Task`/`AskUserQuestion`/`ToolSearch`）；
-  - `disabled`：始终加入 SDK `disallowedTools` 硬黑名单（例如原生 `WebSearch`/`WebFetch`/`REPL`/`NotebookEdit`/`TodoWrite`/`CronCreate` 等），模型完全看不到、也调用不到。
+  - user：出现在编辑对话框，用户可开关，写回 agent 的禁用工具设置；
+  - internal：始终启用、UI 隐藏（例如 Task、AskUserQuestion、ToolSearch）；
+  - disabled：始终加入 SDK 的硬黑名单（例如原生 WebSearch、WebFetch、REPL、NotebookEdit、TodoWrite、CronCreate 等），模型完全看不到、也调用不到。
 
 依据：`../../cherry-studio/src/shared/ai/claudecode/toolRegistry.ts:1-42`、`../../cherry-studio/src/main/ai/tools/adapters/claudeCode/toolConditions.ts:1-90`、`../../cherry-studio/src/main/ai/tools/adapters/aiSdk/mcp/mcpTools.ts:69-97`。
 
-`exposure` 三态是这份注册表的核心机制：`enabled` 时工具按条件注入模型调用，`internal` 时始终启用但 UI 隐藏，`disabled` 时加入 SDK 硬黑名单。`internal` 工具（如 `Task`/`Agent`/`AskUserQuestion`/`SendMessage`/`TeamCreate` 等 agent-teams 工具）本身并非 SDK `ToolInputSchemas` 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。
+exposure 三态是这份注册表的核心机制：enabled 时工具按条件注入模型调用，internal 时始终启用但 UI 隐藏，disabled 时加入 SDK 硬黑名单。internal 工具（如 Task、Agent、AskUserQuestion、SendMessage、TeamCreate 等 agent-teams 工具）本身并非 SDK ToolInputSchemas 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。
 
 ## 2. 工具定义与注册
 
 ### 2.1 SDK 原生工具
 
-`CLAUDE_TOOL_DEFS`（`toolRegistry.ts:48-370`）逐条声明 `name`（运行时原生名，即写回 `disabledTools` 的 id）、`category`、`exposure`、`description`、可选 `dependsOn`、可选 `mcpServer`。值得注意的条目：
+`CLAUDE_TOOL_DEFS`（`toolRegistry.ts:48-370`）逐条声明运行时名称（也是写回禁用工具设置的 id）、category、exposure、description，以及可选的依赖项和 MCP server。值得注意的条目：
 
-- `BashOutput` 依赖 `Bash`（`dependsOn: ['Bash']`），是渲染专用别名，真实 SDK 联合类型把它叫 `TaskOutput`。
+- `BashOutput` 依赖 Bash，是渲染专用别名，真实 SDK 联合类型把它叫 TaskOutput（精确依赖声明见 `toolRegistry.ts:48-370`）。
 - `Task`/`TaskOutput`/`TaskStop`/`TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList` 都是 `internal`，其中注释区分了「渲染专用别名」（`Task`）与真实 `Agent` 编排工具、以及一组任务调度类工具。
 - `SendMessage`/`TeamCreate`/`TeamDelete`（agent-teams）**不是 SDK `ToolInputSchemas` 联合类型的成员**，仅在设置了 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 环境变量时由 runtime 注入（`settingsBuilder.ts:830` 无条件设置该变量为 `'1'`，即所有 Claude Code Agent 会话都启用了这一实验特性）。又无条件追加了 `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`（`f3399d38e9`，`settingsBuilder.ts:834`），走 SDK 的简单系统提示模式。
-- `EnterWorktree`/`ExitWorktree` 有运行时启用条件（见 §4）。
+- EnterWorktree/ExitWorktree 有运行时启用条件（见 §4）。
 - `CronCreate`/`CronDelete`/`CronList`/`ScheduleWakeup`/`RemoteTrigger`/`Monitor`/`PushNotification` 全部 `disabled`——这些是 SDK 自带的原生调度/推送工具，Cherry 用自家 `mcp__cherry-tools__cron`/`…__notify` 取代。
 
 依据：`../../cherry-studio/src/shared/ai/claudecode/toolRegistry.ts:48-263`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:829-834`。
@@ -131,7 +131,7 @@ MCP 工具 id 拆成两套（`40914ab5cd`）：
 
 ## 4. 模型调用表示与解析
 
-普通聊天走 AI SDK 原生 `tool-call`/`tool-result` part（provider 层负责 function-calling 组装），Cherry 只在 `createMcpTool()` 里包一层 `execute`/`toModelOutput`（`mcpTools.ts:29-66`）。
+普通聊天走 AI SDK 原生 tool-call/tool-result part（provider 层负责 function-calling 组装），Cherry 只在 MCP 工具创建入口中包一层执行和模型输出转换（`mcpTools.ts:29-66`）。
 
 Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`stream_event`/`system`/`result` 等 subtype），由 `ClaudeCodeStreamAdapter`（`streamAdapter.ts`）解析 `BetaToolUseBlock`/`BetaServerToolUseBlock`/`BetaMCPToolUseBlock` 并转成 Cherry 的 `CherryUIMessageChunk`。关键点：
 - 工具名解析走 `parseFunctionCallToolName`（识别 `mcp__server__tool` 格式）来判定 MCP 来源展示信息；
@@ -142,9 +142,9 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 
 ## 5. 参数校验与规范化
 
-- MCP 通用调用入口 `McpRuntimeService.callToolByServer()` 对字符串型 `args` 尝试 `JSON.parse`，失败即 fail-fast 抛错而非把原始字符串转发给下游 server（`McpRuntimeService.ts:1082-1094`）——避免服务端收到裸字符串产生歧义错误。IPC 层的 `McpCallToolPayloadSchema`（Zod）只校验外层壳字段（`serverId`/`name`/`args`/`callId`），内层 `args` 本体被视为“协议信任”不做 schema 校验（注释在 `McpRuntimeService.ts:66-68` 明确说明这一取舍）。
+- MCP 通用调用入口对字符串型 args 尝试 JSON.parse，失败即 fail-fast 抛错而非把原始字符串转发给下游 server（`McpRuntimeService.ts:1082-1094`）——避免服务端收到裸字符串产生歧义错误。IPC 层的 `McpCallToolPayloadSchema`（Zod）只校验外层壳字段 serverId、name、args、callId，内层 args 本体被视为“协议信任”不做 schema 校验（`McpRuntimeService.ts:66-68` 明确说明这一取舍）。
 - in-memory `filesystem` MCP 的路径参数在 `validatePath()`（`filesystem/types.ts:84-96`）中做真实路径解析（`resolveRealOrNearestExistingPath` 穿透 symlink）+ `isPathWithinRoot` 双重校验，防止 `../` 穿越和 symlink 逃逸；但 `baseDir` 本身来自用户可配置的 `args[0]` 或 `WORKSPACE_ROOT` 环境变量（`resolveFilesystemBaseDir`，`filesystem/config.ts:1-8`），用户可以把它配置成任意目录（包括 `~` 或根目录），届时“越权”检查形同虚设——**这是配置层问题而非代码 bug**。
-- Claude Code 侧的 Bash 参数不做结构化校验：`command` 字段是自由文本，Cherry 只挂了两个 `PreToolUse` hook 做**语义级**拦截（`detectGlobalInstall` 正则匹配全局安装命令；`rtkRewrite` 改写特定命令），没有参数白名单或 shell-escape 校验。文件类工具（`Read`/`Write`/`Edit`/`Glob`/`Grep`/`NotebookEdit`）的路径字段由 `workspacePathHook`（`settingsBuilder.ts:923-950`）统一做“在工作区或 agent 数据目录内”校验，使用与普通聊天 filesystem server 相同风格的 realpath 解析（`isPathWithinAllowedRoots`，`settingsBuilder.ts:497-514`）。
+- Claude Code 侧的 Bash 参数不做结构化校验：command 字段是自由文本，Cherry 只挂了两个 PreToolUse hook 做**语义级**拦截（检测全局安装和重写特定命令），没有参数白名单或 shell-escape 校验。文件类工具的路径字段由 `workspacePathHook`（`settingsBuilder.ts:923-950`）统一做“在工作区或 agent 数据目录内”校验，使用与普通聊天 filesystem server 相同风格的 realpath 解析（`settingsBuilder.ts:497-514`）。
 - Agent memory MCP 对文件操作加了 `lstat` + `isSymbolicLink()` 双重防御，拒绝对 symlink 文件写入/追加（`agentMemory.ts:16-54,195-204`），是本次阅读中路径安全实现最严格的一处。
 
 依据：`../../cherry-studio/src/main/ai/mcp/McpRuntimeService.ts:66-68,1082-1098`、`../../cherry-studio/src/main/ai/mcp/servers/filesystem/types.ts:47-96`、`../../cherry-studio/src/main/ai/mcp/servers/filesystem/config.ts:1-8`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:497-514,923-950`、`../../cherry-studio/src/main/ai/mcp/servers/agentMemory.ts:16-54,195-204`。
@@ -169,22 +169,22 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 
 ### 7.1 普通聊天 MCP：`disabledTools` / `disabledAutoApproveTools`
 
-`matchesMcpSourceToolRule(value, server, tool)`（`mcpSourcePolicy.ts:22-29`）同时支持四种写法匹配同一条规则：裸工具名（`tool.name`）、工具内部 id（`tool.id`）、完整 wire id（`mcp__server__tool`）、server 级 wildcard（`mcp__server__*`）。`isMcpToolDisabledBySource` 优先级高于 `isMcpToolForcePromptBySource`（`resolveMcpSourceToolAccess`，`mcpSourcePolicy.ts:39-47`：先判 disabled 直接 `{enabled:false}`，否则才看是否需要强制 prompt）。单测 `mcpSourcePolicy.test.ts:32-42` 显式验证了这一优先级。
+MCP 来源规则匹配函数（`mcpSourcePolicy.ts:22-29`）同时支持四种写法：裸工具名、工具内部 id、完整 wire id（`mcp__server__tool`）和 server 级通配符（`mcp__server__*`）。禁用判定优先于强制提示判定（`mcpSourcePolicy.ts:39-47`：先返回 disabled，未禁用时才检查 prompt）；单测 `mcpSourcePolicy.test.ts:32-42` 显式验证了这一优先级。
 
-这套匹配语义在 **两条路径都复用**：普通聊天的 `isMcpToolForcePromptBySource` 直接驱动 AI SDK 的 `needsApproval`；Claude Code 侧的 `resolveMcpSourceToolAccess`（`agentTools.ts:63`）把结果映射成 `sourceApproval`，再在 `toolRules.ts:68-73` 的 `sourceDecision()` 中被赋予**最高优先级**——即便 `permissionMode: 'bypassPermissions'`，只要 MCP server 自身配置了 `disabledAutoApproveTools` 命中，仍然强制 `prompt`（`resolveClaudeToolAccess`，`toolRules.ts:75-95`：`sourceDecision` 检查在 `bypassPermissions` 判断之前）。
+这套匹配语义在 **两条路径都复用**：普通聊天直接据此驱动 AI SDK 的审批需求；Claude Code 侧把结果映射为来源审批，再在 `toolRules.ts:68-73` 的来源判定中赋予**最高优先级**。即便权限模式为 bypassPermissions，只要 MCP server 自身配置的 disabledAutoApproveTools 命中，仍然强制 prompt；来源判定发生在该权限模式判断之前（`toolRules.ts:75-95`）。
 
 ### 7.2 Claude Code 的 permission mode 优先级实现
 
-`resolveClaudeToolAccess()`（`toolRules.ts:75-95`）按顺序判定：
+Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 1. `sourceDecision`（MCP server 级强制 prompt）→ 最高优先级，任何 permission mode 都不能覆盖；
 2. `permissionMode === 'bypassPermissions'` → 该工具本身 `auto`（除非第 1 步已拦截）；
 3. `permissionMode === 'acceptEdits'` 且工具属于 `ACCEPT_EDITS_TOOLS`（`Edit`/`MultiEdit`/`NotebookEdit`/`Write`）→ `auto`；
 4. `DEFAULT_SAFE_TOOLS`（`Read`/`Glob`/`Grep`/`NotebookRead`/`Task`/`TodoWrite`）→ 任何模式下都 `auto`；
 5. 否则 `prompt`。
 
-`resolveClaudeToolInvocationAccess()`（`toolRules.ts:108-126`）在上述基础上额外处理 `acceptEdits` 模式下 `Bash` 命令首词命中 `ACCEPT_EDITS_BASH_COMMANDS = {mkdir, touch, mv, cp}` 时也降级为 `auto`——这是**唯一**允许 `acceptEdits` 模式免审批执行 `Bash` 的路径，命令解析仅取空格分隔的首个 token，对 `; rm -rf /` 这种拼接命令不做进一步解析（因为只看首词）。
+工具调用判定（`toolRules.ts:108-126`）在上述基础上额外处理 acceptEdits 模式下 Bash 命令首词命中 `mkdir/touch/mv/cp` 时也降级为 auto——这是**唯一**允许该模式免审批执行 Bash 的路径，命令解析仅取空格分隔的首个 token，对 `; rm -rf /` 这种拼接命令不做进一步解析（因为只看首词）。
 
-但要注意：`canUseTool` 只是 SDK 侧的**一层**门控，`disabledToolHook`/`workspacePathHook`/`interactiveToolPermissionHook` 等作为 `PreToolUse` hook 在**所有** permission mode 下都会触发（注释在 `settingsBuilder.ts:896-901` 明确说明这是因为 SDK 在 `bypassPermissions`/`acceptEdits`/默认安全工具时会跳过 `canUseTool`，所以硬约束必须搬到 hook 层才能生效）。这是本仓库审批体系里唯一贯穿所有 permission mode 的强制层。
+但要注意：canUseTool 只是 SDK 侧的**一层**门控；禁用工具、工作区路径和交互权限等 PreToolUse hook 在**所有**权限模式下都会触发（`settingsBuilder.ts:896-901` 明确说明，SDK 在 bypassPermissions、acceptEdits 和默认安全工具场景会跳过 canUseTool，因此硬约束必须放在 hook 层）。这是本仓库审批体系里唯一贯穿所有权限模式的强制层。
 
 依据：`../../cherry-studio/src/shared/ai/tools/mcpSourcePolicy.ts:22-47`、`../../cherry-studio/src/shared/ai/tools/__tests__/mcpSourcePolicy.test.ts:32-42`、`../../cherry-studio/src/shared/ai/claudecode/toolRules.ts:30-126`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:896-950`。
 

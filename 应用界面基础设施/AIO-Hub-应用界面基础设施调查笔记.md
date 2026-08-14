@@ -16,7 +16,7 @@
 
 AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面能力集中在共享组件和 composable：BaseDialog 承担多数业务弹窗，命令式反馈统一绕过自绘标题栏，通知中心则保存需要长期查看的消息。
 
-主题分为明暗、主色色阶和外观效果三层，均持久化到 `settings.json`。外观层覆盖壁纸、自动取色、混合模式、毛玻璃和窗口特效，另有独立的全局自定义 CSS 覆盖子系统，支持内置与用户预设、实时预览和编辑器注入。图片查看使用 viewerjs，侧栏尺寸调整和跨窗口同步由项目自研。
+主题分为明暗、主色色阶和外观效果三层，均持久化到设置文件。外观层覆盖壁纸、自动取色、混合模式、毛玻璃和窗口特效，另有独立的全局自定义 CSS 覆盖子系统，支持内置与用户预设、实时预览和编辑器注入。图片查看使用 viewerjs，侧栏尺寸调整和跨窗口同步由项目自研。
 
 错误处理依靠 Vue 全局钩子、浏览器错误事件、Rust 探针和启动兜底界面，没有通用的组件级 ErrorBoundary。首屏通过先隐藏原生窗口、Vue 挂载完成后再显示来减少闪烁；HTML 只提供静态深浅色 splash，没有挂载前主题脚本。
 
@@ -26,43 +26,43 @@ AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面�
 
 **界面栈。** Tauri（Rust 主进程 + WebView）+ Vue 3 + Element Plus；
 
-`src/components/common/` 放全局共享组件（`BaseDialog.vue`、`ImageViewer.vue`、`AvatarSelector.vue`、`GuidedFlow/`），`src/composables/` 放全局 composable（`useResizable.ts`、`useFileDrop.ts`、`useTheme.ts`、`useImageViewer.ts`、`useDialogZIndex.ts`）。
+全局共享组件集中在 common 目录，包含 BaseDialog、ImageViewer、AvatarSelector 和 GuidedFlow；全局 composable 集中在 composables 目录，提供尺寸调整、文件拖放、主题、图片查看和弹窗层级能力。
 
-**全局挂载。** `GlobalProviders.vue` 挂载全局图片查看器/弹窗等；`App.vue:81` 挂载 `GuidedFlowHost.vue`（引导流程宿主）；`NotificationCenter.vue` 是全局通知中心（挂在 `GlobalProviders.vue`），不是 llm-chat 专属。
+**全局挂载。** GlobalProviders 挂载全局图片查看器、弹窗和通知中心；App 在 `App.vue:81` 挂载引导流程宿主。通知中心不是 llm-chat 专属。
 
-**状态所有权。** 主题与自定义 CSS 等应用设置存 `settings.json`（`src/utils/appSettings.ts`）；通知存 useNotificationStore（持久化通知中心）；拖放是全局 composable 被 `MessageInput.vue` 与 `AgentsSidebar.vue` 等复用。
+**状态所有权。** 主题与自定义 CSS 等应用设置存于设置文件，由 appSettings 相关实现负责；通知由 useNotificationStore 持有并持久化；拖放能力是全局 composable，被消息输入和智能体侧栏等组件复用。
 
 ## 1. 界面栈、公共组件与状态所有权
 
 **弹窗基座。** `BaseDialog.vue`（`src/components/common/BaseDialog.vue`，全文 1-450 行）是全局共享组件，非 llm-chat 专属；业务弹窗（导出、批量管理、收藏夹管理、聊天设置、正则编辑器）大多包它，而不是直接用 el-dialog。
 
-**z-index 管理。** `useDialogZIndex.ts`（`src/composables/useDialogZIndex.ts`）维护模块级自增计数器（初始 1800，"避让 Element Plus 默认 1000-2000 范围"），打开 `acquireZIndex()` 递增占用，关闭 `releaseZIndex()` 仅在"释放的正好是当前最大值"时回退——简化实现，多个弹窗乱序关闭时计数器不精确回退（只涨不跌），不影响功能。
+**z-index 管理。** 弹窗层级模块维护一个从 1800 开始的自增计数器，以避让 Element Plus 的默认范围；打开时递增，关闭时只有释放值正好是当前最大值才回退。多个弹窗乱序关闭时计数器不会精确回退，只涨不跌，但不影响功能（实现见 `src/composables/useDialogZIndex.ts`）。
 
-**命令式反馈。** `src/utils/customMessage.ts` 是对 ElMessage 的薄包装，唯一改动是强制加 offset: 54（"标题栏 32px + 默认间距 16px + 缓冲 6px"，代码注释原话，`customMessage.ts:23-27`），解决无边框窗口下 Toast 被自绘标题栏遮挡；llm-chat 内所有业务提示一律走 `customMessage.success/error/warning/info`，未见直接调用原生 ElMessage。
+**命令式反馈。** `src/utils/customMessage.ts` 是对 ElMessage 的薄包装，强制增加 54 像素的顶部偏移（标题栏 32 像素、默认间距 16 像素和 6 像素缓冲，依据 `customMessage.ts:23-27`），解决无边框窗口下 Toast 被自绘标题栏遮挡；llm-chat 内所有业务提示都走该包装的成功、失败、警告和信息入口，未见直接调用原生 ElMessage。
 
-**引导流程系统。** `src/components/common/GuidedFlow/`（`GuidedFlowHost.vue` 挂载于 `App.vue:81`，guidedFlowStore 承载流程运行时/步骤/跳过/重试）与 `src/flows/upgrade/`（APP_UPGRADE_FLOW_ID 注册、版本说明面板、恢复待处理升级）承担首次启动与升级引导；
+**引导流程系统。** common 下的 GuidedFlow 与 upgrade 流程目录共同承担首次启动和升级引导：前者负责流程宿主及运行时状态，后者注册升级流程、版本说明面板和待处理升级恢复（宿主挂载于 `App.vue:81`）。
 
 onboarding、首次使用、firstLaunch 等旧关键词无命中，引导功能以 GuidedFlow/flow 命名存在；视觉呈现与各步骤实际引导体验未运行验证。
 
 ### 状态所有权与跨窗口同步
 
-**界面偏好与设置。** 应用级设置（主题、强调色、成功/警告色等）由 appSettingsStore 持有，持久化在 `settings.json`（见第 4 节）；
+**界面偏好与设置。** 应用级设置（主题、强调色、成功/警告色等）由 appSettingsStore 持有，持久化在设置文件（见第 4 节）；
 
 llm-chat 的 UI 状态（侧栏折叠/宽度、视图模式、当前智能体、各面板展开状态）由 useLlmChatUiState 模块级单例持有，经 createConfigManager 300ms 防抖持久化到 `ui-state.json`（`src/tools/llm-chat/composables/ui/useLlmChatUiState.ts:89-101`）——侧栏宽度与折叠不随聊天数据同步，属于 llm-chat 的本地持久化偏好。
 
-**窗口布局。** 窗口位置/尺寸/最大化由 Rust 侧 window_config 持有，主窗口与分离窗口关闭时同步保存到 `window-configs.json`（`src-tauri/src/events.rs:99-107` 的 save_window_config_sync，`src-tauri/src/commands/window_config.rs:77-80`）。
+**窗口布局。** 窗口位置、尺寸和最大化状态由 Rust 侧的窗口配置模块持有，主窗口与分离窗口关闭时同步保存到窗口配置文件（依据 `src-tauri/src/events.rs:99-107` 和 `src-tauri/src/commands/window_config.rs:77-80`）。
 
-**通知。** useNotificationStore（`src/stores/notification.ts`）持有通知列表与通知中心显隐；持久化走 localStorage app-notifications 键，跨窗口同步靠 storage 事件（`notification.ts:61-69`）——与设置/主题的"文件持久化"通道不同，两个通道并存。
+**通知。** useNotificationStore（`src/stores/notification.ts`）持有通知列表与通知中心显隐；数据通过 localStorage 的 app-notifications 键持久化，跨窗口同步依靠 storage 事件（`notification.ts:61-69`）。这与设置、主题使用文件持久化是两条并存通道。
 
 **浮层队列。** 无应用级浮层队列管理器；z-index 由 useDialogZIndex 模块级计数器提供（第 2 节），弹窗显隐状态在消费方组件与局部 store 内，不进入全局状态。
 
-**跨窗口同步总线 useWindowSyncBus 的职责范围。** `src/composables/useWindowSyncBus.ts` 是主窗口与分离窗口之间的运行时状态同步与操作代理总线（全局单例，`GlobalProviders.vue:61-66` 与 appInitStore 初始化），主从架构——main/detached-tool 是数据源（注册同步引擎与 action handler），detached-component 是消费者（请求初始状态，`useLlmChatSync.ts:479-484`）。
+**跨窗口同步总线 useWindowSyncBus 的职责范围。** `src/composables/useWindowSyncBus.ts` 是主窗口与分离窗口之间的运行时状态同步和操作代理总线，由全局单例初始化（`GlobalProviders.vue:61-66`）；主窗口和 detached-tool 提供数据，detached-component 负责消费并请求初始状态（`useLlmChatSync.ts:479-484`）。
 
-8 种 WindowMessageType（`src/types/window-sync.ts:33-40`）：握手、心跳、状态同步（全量 + JSON Patch 增量）、批量初始状态、操作请求/响应；
+消息协议定义了 8 种 WindowMessageType（`src/types/window-sync.ts:33-40`），覆盖握手、心跳、全量及 JSON Patch 增量同步、批量初始状态和操作请求/响应；
 
-心跳 30s 间隔/60s 超时、重连 5s 防抖（`useWindowSyncBus.ts:87,121-125`），requestAction 广播 + 10s 硬编码超时（`useWindowSyncBus.ts:606-648`）。
+心跳每 30 秒发送，60 秒超时；重连有 5 秒防抖，操作请求广播后 10 秒超时（依据 `useWindowSyncBus.ts:87,121-125` 和 `useWindowSyncBus.ts:606-648`）。
 
-llm-chat 注册 12 个状态键（智能体、会话索引/详情、收藏夹、发送中、生成节点、用户档案、聊天设置、工具调用待审等，`useLlmChatSync.ts:167-227`）与 llm-chat 命名空间 40+ action（`useLlmChatSync.ts:304-459`），另有一条流式增量通道（chat:streaming-delta，`useLlmChatSync.ts:231-257`）。
+llm-chat 注册 12 个状态键，覆盖智能体、会话、收藏夹、生成状态、用户档案、聊天设置和工具调用待审等内容，并提供 40 多个命名空间操作（依据 `useLlmChatSync.ts:167-227` 和 `useLlmChatSync.ts:304-459`）；另有一条流式增量通道 chat:streaming-delta（`useLlmChatSync.ts:231-257`）。
 
 **主题、通知、窗口布局不在总线职责内**：主题由各窗口启动时读同一 `settings.json` 自行应用（运行期修改不广播，theme-changed 事件无监听者，见第 4 节），通知走 localStorage storage 事件，窗口布局由 Rust 持有。
 
@@ -72,27 +72,27 @@ llm-chat 注册 12 个状态键（智能体、会话索引/详情、收藏夹、
 
 `BaseDialog.vue`（全局共享组件，非 llm-chat 专属）：
 
-**实现方式。** `Teleport to="body"`（可 appendToBody prop 关掉），遮罩层 base-dialog-backdrop + 内容容器 base-dialog-container 两层结构，v-show 控制显隐、v-if 控制是否渲染过（destroyOnClose 决定关闭后是否销毁 DOM，默认 `true`）。
+**实现方式。** 组件默认 Teleport 到 body，也可通过 appendToBody 关闭；界面由遮罩层和内容容器组成。显隐与是否首次渲染分别由 v-show、v-if 控制，关闭后默认销毁 DOM。
 
-**Esc 关闭。** `BaseDialog.vue:276-280` 监听全局 document.addEventListener("keydown", ...)，`event.key === "Escape"` 且 props.showCloseButton 为真（默认 `true`）时触发 `handleClose()`——Esc 与"关闭按钮"是绑定的复合开关，不是独立 Esc 开关。
+**Esc 关闭。** 对话框在 `BaseDialog.vue:276-280` 监听全局键盘事件，按键为 Escape 且 showCloseButton 开启（默认开启）时关闭。Esc 与关闭按钮共用这个开关，并非独立控制。
 
-**点击遮罩关闭。** 由 closeOnBackdropClick prop 控制（默认 `true`），`BaseDialog.vue:29` `@click="props.closeOnBackdropClick && handleClose()"`。部分弹窗显式 `false`（如 `ChatSettingsDialog.vue:24` 聊天设置弹窗），说明对"点遮罩误触关闭"的容忍度按场景区分。
+**点击遮罩关闭。** 由 closeOnBackdropClick 属性控制，默认开启；实现位置为 `BaseDialog.vue:29`。部分弹窗显式关闭该能力（如 `ChatSettingsDialog.vue:24`），说明不同场景对误触关闭的容忍度不同。
 
-**焦点管理。** `BaseDialog.vue` 没有 autofocus，也没有 nextTick 后手动 `.focus()`；弹窗打开后焦点默认停留在触发按钮，不自动进入弹窗。会话重命名弹窗 `RenameDialog.vue` 是例外：用原生 el-dialog 并在 el-input 上设 autofocus（`src/tools/llm-chat/components/sidebar/RenameDialog.vue:70`）。
+**焦点管理。** BaseDialog 没有 autofocus，也没有在 nextTick 后手动聚焦，因此打开后焦点默认停留在触发按钮。会话重命名弹窗是例外，使用原生 el-dialog 并在输入框上设置 autofocus（`src/tools/llm-chat/components/sidebar/RenameDialog.vue:70`）。
 
-**入场/退场动画。** showContentTransition 状态配合双重 requestAnimationFrame（`BaseDialog.vue:251-256`，绕开 v-if 刚插入 DOM 时过渡不生效的问题），CSS 是 opacity + transform: scale(0.95) translateY(-10px)，时长 0.3s ease（`BaseDialog.vue:327`）；
+**入场/退场动画。** 内容过渡状态配合双重 requestAnimationFrame，绕开 v-if 刚插入 DOM 时过渡不生效的问题（`BaseDialog.vue:251-256`）；CSS 使用透明度和缩放、纵向位移，时长为 0.3 秒（`BaseDialog.vue:327`）。
 
 关闭时 `handleClose()` 先播 300ms 退场动画再真正 emit update:modelValue: false（enableTransition 为 `false` 时延迟归零）。
 
-**消费方。** `ExportBranchDialog.vue`（导出，宽 1000px、高 80vh）、`BatchManagerDialog.vue`（批量管理，带 `role="table"` 和 `aria-label="批量管理会话列表"`）、`FavoriteManagerDialog.vue`（收藏夹）、`ChatSettingsDialog.vue`（聊天设置，`close-on-backdrop-click="false"` + `destroy-on-close="false"`，关闭后保留内部 tab 与滚动状态）、`ChatRegexEditor.vue`（正则编辑器）使用 BaseDialog。
+**消费方。** 导出、批量管理、收藏夹、聊天设置和正则编辑器等业务弹窗都使用 BaseDialog。批量管理表格带有 table 语义和会话列表名称；聊天设置关闭遮罩关闭与销毁，因而保留内部 tab 和滚动状态。
 
-硬删除消息和清空通知使用 Element Plus 的 ElMessageBox.confirm（`MessageMenubar.vue:167-186` 删除确认用"确定删除"/"取消"并通过 confirmButtonClass: "el-button--danger" 标记危险操作）；节点图删除用 el-popconfirm（`GraphNodeMenubar.vue:386-404`），属于气泡式确认。
+硬删除消息和清空通知使用 Element Plus 的确认弹窗，删除确认显示“确定删除”和“取消”，并标记危险操作（`MessageMenubar.vue:167-186`）；节点图删除使用气泡式确认（`GraphNodeMenubar.vue:386-404`）。
 
 ### 右键与上下文菜单
 
-- **树图节点右键菜单**（`src/tools/llm-chat/components/conversation-tree-graph/ContextMenu.vue`）：菜单跟随鼠标坐标定位——handleNodeContextMenu 直接把 `event.clientX/clientY`（`useGraphNodeActions.ts:751-753`）作为 `x/y` 传入，组件再用 `getBoundingClientRect()` 校正右侧和底部越界（`ContextMenu.vue:48-66`）。
+- **树图节点右键菜单**（`src/tools/llm-chat/components/conversation-tree-graph/ContextMenu.vue`）：菜单跟随鼠标坐标定位，入口取得客户端坐标后传入菜单，再用元素边界校正右侧和底部越界（依据 `useGraphNodeActions.ts:751-753` 和 `ContextMenu.vue:48-66`）。
 
-  `Teleport to="body"` 挂载，点击外部关闭（`ContextMenu.vue:82-90`）。MenuItem 接口只有 `label/icon/disabled/danger/action`，是扁平列表不支持子菜单；无 @keydown 或 tabindex，缺方向键操作和 Esc 关闭能力。
+  菜单 Teleport 到 body，点击外部关闭（`ContextMenu.vue:82-90`）。MenuItem 只有 label、icon、disabled、danger 和 action 字段，是不支持子菜单的扁平列表；组件没有键盘事件或 tabindex，因此缺少方向键操作和 Esc 关闭能力。
 
 **侧栏列表菜单。** Agent 列表用 Element Plus el-dropdown，`AgentListItem.vue:182-190` 设置 `trigger="contextmenu"`，通过绝对定位覆盖列表项的空 div.context-menu-trigger 作为锚点；
 
@@ -104,11 +104,11 @@ llm-chat 注册 12 个状态键（智能体、会话索引/详情、收藏夹、
 
 **业务级即时反馈。** customMessage（见系统边界）。llm-chat 内所有业务成功/失败提示（Token 重算、导出成功/失败、翻译等）一律走 `customMessage.success/error/warning/info`。
 
-**错误提示的分级与去重。** `src/utils/errorHandler.ts:308-371` 决定"报错要不要弹出来、弹多久"：INFO/WARNING 走 customMessage，duration 按级别区分（ERROR 5000ms，其余 3000ms，`errorHandler.ts:348`），都设 grouping: true（"相同消息合并"，避免同一错误刷屏）；
+**错误提示的分级与去重。** `src/utils/errorHandler.ts:308-371` 决定报错是否弹出及持续时间：INFO、WARNING 和 ERROR 走 customMessage，错误级别显示 5000 毫秒，其余显示 3000 毫秒，并合并相同消息（`errorHandler.ts:348`）。
 
-CRITICAL 不走 Toast，改用 ElNotification.error，duration: 0 **不自动关闭**，需手动点掉（`errorHandler.ts:362-368`）——三级反馈体系：INFO/WARNING/ERROR 短暂 Toast，CRITICAL 常驻通知。
+CRITICAL 不走 Toast，改用 ElNotification.error，持续时间为 0，**不自动关闭**，需手动点掉（`errorHandler.ts:362-368`）。由此形成三级反馈体系：一般级别是短暂 Toast，严重级别是常驻通知。
 
-**堆叠行为。** ElMessage/ElNotification 是 Element Plus 原生行为，多条纵向堆叠自动错位，`customMessage.ts` 只加了 offset——**未在运行时截图验证堆叠像素细节，仅代码层面确认走 Element Plus 默认堆叠机制**。
+**堆叠行为。** ElMessage 和 ElNotification 使用 Element Plus 的原生行为，多条消息会纵向堆叠错位，customMessage 只增加顶部偏移。**未在运行时截图验证堆叠像素细节，仅代码层面确认使用默认机制**。
 
 **独立的通知中心。** `src/components/notification/NotificationCenter.vue` 用 el-drawer（右侧滑出，`direction="rtl"`，宽 360px）实现，顶部有未读数 el-badge、搜索框（标题/内容/来源过滤）、列表区、底部"清空所有消息"（ElMessageBox.confirm 二次确认，`NotificationCenter.vue:91-103`）；
 
@@ -161,27 +161,27 @@ Linux 下前端 15s 未收到 frontend-ready 事件（前端在挂载后 emit，
 
 ## 4. 主题、视觉 token 与持久化
 
-**实现机制。** `src/composables/useTheme.ts` 全局单例（isDark 用 `@vueuse/core` 的 `useDark()`），三态枚举 "auto" | "light" | "dark"。
+**实现机制。** `src/composables/useTheme.ts` 提供全局单例，借助 VueUse 的 useDark 管理三态主题：auto、light 和 dark。
 
 auto 用 window.matchMedia("(prefers-color-scheme: dark)") 读取系统当前值并注册 change 监听（`useTheme.ts:75-87`）——**确认支持跟随系统**。
 
 切换主题后 window.dispatchEvent(new CustomEvent("theme-changed", ...))（`useTheme.ts:37-41`），供图标等需要感知主题的组件订阅。
 
-**存储位置。** 主题偏好经 `useAppSettingsStore().update({theme: newTheme})`（`useTheme.ts:57-58`）写入应用级设置文件 `settings.json`（`src/utils/appSettings.ts:403`），写入前 300ms 防抖（`appSettingsStore.ts:34-37`），不使用 localStorage。
+**存储位置。** 主题偏好写入应用级设置文件，不使用 localStorage；更新入口和文件实现分别见 `useTheme.ts:57-58` 与 `src/utils/appSettings.ts:403`，写入前有 300 毫秒防抖。
 
 **CSS 切换方式。** `useDark()` 默认通过给根元素加/去 `dark` class（该 hook 标准实现，项目未覆盖默认行为），配合 `src/styles/variables.css` 的 CSS 变量分深浅两套取值（如 `--el-color-primary` 在 :root 和 :root.dark——`NotificationCenter.vue:448` 就有 :root.dark :global(.notification-drawer) 的暗色专属选择器，印证根节点 `.dark` class 切换机制）。
 
 llm-chat 内弹窗、消息卡片等大量用 `var(--card-bg)`/`var(--border-color)`/`var(--text-color)` 语义化变量而非硬编码颜色，理论上无需额外适配即可跟随全局主题切换——**未逐一验证 llm-chat 每个组件在深色模式下的实际视觉效果，只是确认变量机制存在且被使用**。
 
-**首屏防闪机制。** `index.html` **没有挂载前内联主题脚本**——唯一的内联脚本（`index.html:323-401`）是 WebView 兼容性检测而非主题。
+**首屏防闪机制。** index.html **没有挂载前内联主题脚本**；其中唯一的内联脚本用于 WebView 兼容性检测而非主题（`index.html:323-401`）。
 
-防闪依靠两条：① 主窗口在 Rust 侧以 `.visible(false)` 创建（`src-tauri/src/lib.rs:362`），前端在 app.mount 完成后才 `getCurrentWindow().show()`（`src/main.ts:340-353`，注释自述"避免窗口位置或白屏闪烁"），画布/分离窗口同样先隐藏（`src-tauri/src/commands/canvas_window.rs:72`、`window_manager.rs:450`）；
+防闪依靠两条：① 主窗口在 Rust 侧先隐藏，前端挂载完成后再显示（依据 `src-tauri/src/lib.rs:362` 和 `src/main.ts:340-353`）；画布和分离窗口也采用先隐藏策略。
 
-② Vue 接管前的静态启动 splash（logo + "正在启动..."，`index.html:277-293`）用 @media (prefers-color-scheme: dark) 双套配色（`index.html:129-146`），挂载后由 `LoadingScreen.vue` 接管，按 `useDark()` 选黑白图标并加 `.is-dark` class（`LoadingScreen.vue:33-36,67`）。
+② Vue 接管前的静态启动 splash 使用媒体查询提供明暗两套配色（`index.html:129-146,277-293`）；挂载后由 LoadingScreen 接管，并按主题选择图标和样式。
 
 **主题应用时机。** `initTheme()`（`src/composables/useTheme.ts:65-72`）先 await 设置加载再 applyTheme；
 
-主窗口在 initMainApp 第 3 步 `Promise.all([initTheme(), autoRegisterServices()])`（`src/stores/appInitStore.ts:103`），分离窗口在 initDetachedApp 第 3 步（`appInitStore.ts:165`），均先于 `isReady=true`（主界面渲染）。
+主窗口和分离窗口都在初始化流程的第 3 步并行加载主题和服务，且早于 isReady 置为真（依据 `src/stores/appInitStore.ts:103,165`）。
 
 注意窗口 `show()` 不等待 initMainApp 完成，因此 LoadingScreen 阶段的主题由 `useDark()` 初始值决定：VueUse 默认读 localStorage vueuse-color-scheme 键（项目从不写入该键），未命中时回退系统偏好（依赖内部行为，未下钻 node_modules）——auto 或与系统一致时无闪变；
 
@@ -205,9 +205,9 @@ llm-chat 内弹窗、消息卡片等大量用 `var(--card-bg)`/`var(--border-col
 
 设置入口 `ThemeColorSettings.vue`（`src/views/Settings/general/ThemeColorSettings.vue`，五色取色器 + 预设色板）。
 
-**③ 主题外观系统（`src/composables/useThemeAppearance.ts`，1550 行）**：独立于颜色主题的"视觉质感"层，模块级 appearanceSettings ref（默认值 defaultAppearanceSettings，`appSettings.ts:204-267`）+ 400ms 防抖保存到 settings.json 的 appearance 子对象（`useThemeAppearance.ts:237-241`）。
+**③ 主题外观系统（`src/composables/useThemeAppearance.ts`，1550 行）**：这是独立于颜色主题的“视觉质感”层，保存 appearance 子对象时使用 400 毫秒防抖（`useThemeAppearance.ts:237-241`），默认配置定义在 `appSettings.ts:204-267`。
 
-由 initThemeAppearance(isDetached)（`useRootInit.ts:86` 调用，App.vue 初始化）驱动，_updateCssVariables（:272-588）把全部设置计算成 CSS 变量写 document.documentElement.style（`--wallpaper-url`、`--ui-blur`、`--card-bg`、`--sidebar-bg`、`--border-opacity` 等），MutationObserver 监听根元素 class 变化（主题切换）重新应用（:1253-1260），watch isDark 时按明暗重新提取壁纸颜色（:1117-1147）。
+该层由初始化入口驱动，把设置计算为 CSS 变量写入 document.documentElement.style；主题切换时通过 MutationObserver 重新应用，明暗变化时重新提取壁纸颜色（调用入口见 `useRootInit.ts:86`，实现区间为 `useThemeAppearance.ts:272-588,1117-1260`）。
 
 功能面：
 
@@ -230,7 +230,7 @@ applyBlendMode 实现，:102-156），作用于 sidebar/card/header/input/contai
 **分离窗口适配。** isDetachedWindow 时给 body 加 no-global-wallpaper class 隐藏全局壁纸、保留 `--wallpaper-url` 供组件内部使用（:299-305），`--detached-base-bg` 独立底层背景 + detachedUiBaseOpacity 0.95（:454-478）。
 - 设置入口 `ThemeAppearanceSettings.vue`（1493 行：壁纸管理/轮播控制/取色策略/质感滑块/窗口特效开关，注册于 `src/config/settings.ts:42-45` 的 theme-appearance 分区）。
 
-**配套扩展适配**：`useIframeTheme.ts`（`src/composables/useIframeTheme.ts:78-196`）从主文档 getComputedStyle 提取主题变量生成 CSS 文本注入 iframe（`#injected-theme-style`），使预览 iframe 与主应用视觉一致；
+**配套扩展适配**：useIframeTheme 从主文档读取计算后的主题变量，生成 CSS 文本注入 iframe，使预览与主应用视觉一致（`src/composables/useIframeTheme.ts:78-196`）。
 
 `useThemeAwareIcon.ts` + DynamicIcon（`src/composables/useThemeAwareIcon.ts:66-99`）把外部 SVG 的黑白单色（fill/stroke 为 #000/#fff）替换为 currentColor、彩色保留，让任意来源图标跟随主题（架构文档 §2.2）。
 

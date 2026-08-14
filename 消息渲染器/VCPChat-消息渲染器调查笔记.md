@@ -18,7 +18,7 @@ VCPChat 在 Electron renderer 进程内依次解释消息协议、更新流式 D
 
 它同时处理五类问题：
 
-1. 将 `role/content/id/context` 等消息数据装配成聊天气泡。
+1. 将消息的角色、内容、标识等字段装配成聊天气泡。
 2. 在 Markdown 解析前识别 VCP 私有语法，并用保护、转换、恢复三个阶段解决语法互相吞噬的问题。
 3. 将流式文本拆成已经稳定的前缀和仍会变化的尾部，以不同成本更新 DOM。
 4. 在 HTML 进入 DOM 后补做 KaTeX、代码高亮、Mermaid、附件、交互按钮和 HTML 预览。
@@ -48,9 +48,9 @@ VCPChat 有三个值得关注的设计点：
 | 动画 | Anime.js | 消息脚本运行时与可见性管理 |
 | 3D | Three.js | 消息脚本运行时与 WebGL 资源管理 |
 
-主窗口在 `renderer.js` 中创建独立的 `Marked` 实例，并把它与 DOM、历史引用、设置引用和 Electron API 一并注入 `initializeMessageRenderer()`。`messageRenderer.js` 再把所需能力下传给 `contentProcessor.js`、`streamManager.js`、上下文菜单和其他子模块。
+主窗口在 `renderer.js` 中创建独立的 Marked 实例，并把它与 DOM、历史引用、设置引用和 Electron API 一并注入消息渲染器的初始化入口。`messageRenderer.js` 再把所需能力下传给内容处理器、流管理器和上下文菜单等子模块。
 
-这是一种手工依赖注入：模块并不拥有聊天状态，而是通过形如 `{ get, set }` 的 ref 读取 `currentChatHistory`、`currentSelectedItem`、`currentTopicId` 和 `globalSettings`。因此同一套消息渲染器能够被主聊天和语音聊天用不同状态源初始化。
+这是一种手工依赖注入：模块并不拥有聊天状态，而是通过形如 `{ get, set }` 的 ref 读取当前会话历史、当前选中项、当前话题和全局设置。因此同一套消息渲染器能够被主聊天和语音聊天用不同状态源初始化。
 
 ### 1.2 共用与非共用表面
 
@@ -109,7 +109,7 @@ messageRenderer.js
 | `attachments` | 正文后追加的附件数据 |
 | `finishReason` | 流最终化时写回历史 |
 
-消息身份同时存在于数据层和 DOM 层：历史数组以 `id` 查找消息，流管理器也以同一 `id` 维护队列和上下文，页面则用 `.message-item[data-message-id="..."]` 定位气泡。这个 ID 是三个层面的连接点。
+消息身份同时存在于数据层和 DOM 层：历史数组与流管理器都以同一 `id` 为键，页面则用 `.message-item[data-message-id="..."]` 定位气泡。这个 ID 是三个层面的连接点。
 
 ### 2.2 流上下文
 
@@ -123,13 +123,13 @@ agentName
 avatarUrl / avatarColor
 ```
 
-`renderer.js` 用它判断消息是否属于当前可见的 Agent/群组和话题；`streamManager.js` 则把它保存在 `messageContextMap` 中，用来定位后台会话历史。因而“是否画 DOM”和“是否更新数据”是两件事：不可见会话可以不创建气泡，但仍要初始化占位消息、累积流文本并保存历史。
+入口层用它判断消息是否属于当前可见的 Agent/群组和话题；流管理器则把它保存在 `messageContextMap` 中，用来定位后台会话历史。因而“是否画 DOM”和“是否更新数据”是两件事：不可见会话可以不创建气泡，但仍要初始化占位消息、累积流文本并保存历史。
 
 ### 2.3 对话深度不是数组索引
 
 前端正则规则可以按消息深度生效。这里的深度按 user/assistant 对话轮次计算，而不是简单使用数组下标。历史批量渲染前，`buildTurnDepthMap()` 一次性生成 `messageId -> depth`；实时消息不在历史中时才临时拼入消息后计算。
 
-因此前端正则处于完整消息层：它需要 `role` 和轮次深度，且只对最终完整文本运行，不参与逐 chunk 转换。
+因此前端正则处于完整消息层：它需要角色字段和轮次深度，且只对最终完整文本运行，不参与逐块转换。
 
 ## 3. 入口与事件分派
 
@@ -163,7 +163,7 @@ renderMessage(message)
 | `full_response` | 使用 `renderFullMessage()` 更新历史及完整 DOM |
 | `remove_message` | 当前视图中移除对应消息及其资源 |
 
-事件分发层只判断当前视图是否需要 UI 行为，流管理器仍负责后台会话的数据一致性。`end` 之后 Flowlock 读取的是 `finalizeStreamedMessage()` 返回的最终内容，而不是假设事件一定携带完整 `fullResponse`。
+事件分发层只判断当前视图是否需要 UI 行为，流管理器仍负责后台会话的数据一致性。结束事件之后，Flowlock 读取的是 `finalizeStreamedMessage()` 返回的最终内容，而不是假设事件一定携带完整响应文本。
 
 ## 4. 单条完整消息的渲染过程
 
@@ -183,7 +183,7 @@ renderMessage(message)
 
 角色、群聊身份、用户气泡布局和思考状态体现在 class 与 data attribute 上。骨架本身不解析内容；正文始终进入 `.md-content`。
 
-每条 assistant 消息还会获得唯一 DOM `id`。后续 scoped CSS 以这个 ID 为根重写 selector，并在 `document.head` 中插入对应样式节点。
+每条 assistant 消息还会获得唯一 DOM ID，后续 scoped CSS 以这个 ID 为根重写 selector，并在 `document.head` 中插入对应样式节点。
 
 ### 4.2 角色相关准备
 
@@ -240,9 +240,9 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
 思维链是完整流水线中的第一优先级词法岛：
 
 - 完整流水线第 1 步 `protect-thought-chains`（`contentPipeline.js:195-292`、`:419`）用围栏感知的逐行扫描器识别 VCP 元思考链（`[--- VCP元思考链...---]`…`[--- 元思考链结束 ---]`）与独占行的 `<think>/<thinking>`…`</think>/</thinking>`，整体替换为 `<!--VCP_THOUGHT_CHAIN_n-->` 占位符；Markdown 代码块中用于讲解协议的示例不会被误识别。
-- 占位符穿过 Marked 与其余外层转换，直到 `transformSpecialBlocks`（`messageRenderer.js:875`）完成工具、日记、角色分隔等全部外层协议后，才由 `renderThoughtChainMarkdown` 恢复并独立渲染：只解释 Markdown、普通代码围栏与 LaTeX；代码围栏外的原始 HTML 被封装/转义（`escapeRawHtmlOutsideCodeFences`），工具结果、Mermaid、Flowlock、桌面推送、日记等协议不再二次进入流水线。这相当于给思维链内容一个"低权限子域"。
+- 占位符穿过 Marked 与其余外层转换，直到 `transformSpecialBlocks`（`messageRenderer.js:875`）完成工具、日记、角色分隔等全部外层协议后，才由 `renderThoughtChainMarkdown` 恢复并独立渲染：只解释 Markdown、普通代码围栏与 LaTeX；代码围栏外的原始 HTML 被封装或转义，工具结果、Mermaid、Flowlock、桌面推送、日记等协议不再二次进入流水线。这相当于给思维链内容一个"低权限子域"。
 - `CONVENTIONAL_THOUGHT_REGEX`（`messageRenderer.js:322`）改用反向引用使开始/结束标签必须一致（`<think>` 与 `</thinking>` 不再配对），并兼容单行 `<think>...</think>` 格式。
-- 流式侧同步配套：`parseStreamTailMarkdown` 用 `findUnclosedStreamThoughtChain`（`messageRenderer.js:1857`）与 `findUnclosedStreamToolRequest`（`:1932`）检测未闭合块，按源码中更早出现者封印为 `<pre class="vcp-stream-thought-chain-sealed">` 或 `<pre class="vcp-stream-tool-request-sealed">`（`:1971-2016`），思维链内部出现 TOOL_REQUEST 文本时不会被误当作外层工具调用，反之亦然。
+- 流式侧同步配套：`parseStreamTailMarkdown` 用两个未闭合检测函数判断思维链与工具请求哪个更早出现，将更早者封印为 `<pre class="vcp-stream-thought-chain-sealed">` 或 `<pre class="vcp-stream-tool-request-sealed">`（`messageRenderer.js:1857-2016`）；思维链内部出现 TOOL_REQUEST 文本时不会被误当作外层工具调用，反之亦然。
 
 ### 4.6 Marked 与 HTML 缓存
 
@@ -310,7 +310,7 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
 
 请求保护阶段会在请求内部执行 `processStartEndMarkers()`，但普通聊天正文不再全局扫描裸“始/末”。这减少了用户讲解协议本身时触发格式变化的可能。
 
-恢复后的请求在 `transformSpecialBlocks()` 中变成专用 HTML，之后 `<pre>` 还会由 `contentProcessor` 根据工具类型美化。因此工具请求跨越了字符串协议层和 DOM 装饰层。
+恢复后的请求在特殊块转换阶段变成专用 HTML，之后 `<pre>` 还会由内容处理器根据工具类型美化。因此工具请求跨越了字符串协议层和 DOM 装饰层。
 
 ### 5.3 工具结果
 
@@ -332,7 +332,7 @@ Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的�
 
 ### 5.4 Mermaid
 
-Mermaid 不是让 Marked 直接生成最终图。相关代码围栏先转换成 `.mermaid-placeholder`，源代码经编码放入 data attribute；DOM 后处理时再解码为 `.mermaid` 节点并调用 `mermaid.run()`。
+Mermaid 不是让 Marked 直接生成最终图。相关代码围栏先转换成 `.mermaid-placeholder`，源代码经编码放入 data attribute；DOM 后处理时再解码为 `.mermaid` 节点，调用 Mermaid 的渲染入口生成 SVG。
 
 成功后 SVG 被包进 viewer，附带缩小、重置、放大和适应宽度操作。失败时则保留错误说明与原始图代码。占位节点带有 preserve 属性，使 morphdom 不会在流式更新中破坏已经生成的 SVG 和交互状态。
 
@@ -342,12 +342,12 @@ Desktop Push 同时是一种显示语法和流式副作用协议。
 
 完整 Markdown 路径只把块转成“已推送到桌面画布”的状态卡。流式路径则在 chunk 级维护 `desktopPushStates`：识别开始标签、缓冲内容、二次验证内容前缀、创建 widget、定期 append，并在结束标记或长时间无新 token 时 finalize。
 
-聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。流式拦截器为 `processDesktopPushToken`（`streamManager.js:1906` 起，拦截入口见 :1898 注释），前缀白名单为 `<!doctype`/`<div`/`<section`/`<article`/`<main`/`<header`/`<nav`/`<aside`/`<canvas`/`<svg`/`<style`/`target:`/`<!--`（`streamManager.js:21`），节流 100ms、空闲 150 秒超时。
+聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。流式拦截器为 `processDesktopPushToken`（`streamManager.js:1898-1906`），前缀白名单（`streamManager.js:21`）为 `<!doctype`、`<div`、`<section`、`<article`、`<main`、`<header`、`<nav`、`<aside`、`<canvas`、`<svg`、`<style`、`target:`、`<!--`；发送节流 100ms、空闲 150 秒超时。
 
 ### 5.6 附件打开的安全分支与音频播放器
 
-- **Python 附件不执行**：`renderAttachments` 识别 `.py` 附件（`messageRenderer.js:3014-3026`），点击时 `e.stopPropagation()` 阻断聊天区全局链接委托，改调 `electronAPI.openPythonAttachmentInTextEditor`（`modules/ipc/fileDialogHandlers.js:249-286`）用文本查看器打开；失败时 toast 报错。这是对旧行为"按系统文件关联二次打开可能直接触发 Python 执行"的收紧。
-- **音频播放器**：`renderPostProcessedHtml` 末尾调用 `enhanceAudioPlayers`（`messageRenderer.js:3065-3195`），把 `<audio controls>` 替换为 `.vcp-audio-player` 自绘控件（标题、进度、音量、静音、下载按钮），`aria-label` 标注，播放新音频时暂停其他音频；附件音频与 Markdown 内音频一并覆盖。
+- **Python 附件不执行**：`renderAttachments` 识别 `.py` 附件（`messageRenderer.js:3014-3026`），点击时先阻断事件冒泡，使聊天区全局链接委托不再接管，改调 `electronAPI.openPythonAttachmentInTextEditor`（`modules/ipc/fileDialogHandlers.js:249-286`）用文本查看器打开；失败时 toast 报错。这是对旧行为"按系统文件关联二次打开可能直接触发 Python 执行"的收紧。
+- **音频播放器**：统一 DOM 后处理入口在末尾调用 `enhanceAudioPlayers`（`messageRenderer.js:3065-3195`），把原生 `<audio controls>` 替换为 `.vcp-audio-player` 自绘控件（标题、进度、音量、静音、下载按钮），以 aria-label 标注，播放新音频时暂停其他音频；附件音频与 Markdown 内音频一并覆盖。
 
 ## 6. 流式渲染引擎
 
@@ -378,9 +378,9 @@ Desktop Push 同时是一种显示语法和流式副作用协议。
 - 当前可见的普通/群组话题也使用内存历史。
 - 后台话题从持久化源重新读取历史。
 
-只有当前视图会创建或复用气泡，后台会话只更新占位消息和历史。初始化完成后状态变成 `ready`，依次回放预缓冲 chunk；如果期间已收到 `end/error`，再异步重放 pending finalization。
+只有当前视图会创建或复用气泡，后台会话只更新占位消息和历史。初始化完成后状态变成 `ready`，依次回放预缓冲的数据块；如果期间已收到结束或错误事件，再异步重放暂存的最终化任务。
 
-这个状态转换专门防止两类竞态：chunk 先于异步历史读取完成，以及结束事件先于消息从 `pending` 进入 `ready`。
+这个状态转换专门防止两类竞态：数据块先于异步历史读取完成，以及结束事件先于消息完成初始化。
 
 ### 6.3 chunk 归一化与平滑队列
 
@@ -398,7 +398,7 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 启用平滑流式时，较长 chunk 会按中文连续段、英文数字段、标点和空白拆成小语义单位，每个单位最多约 10 个字符。队列越深，每帧消费越多；消息已最终化但队列未清空时会加速追平，避免最后剩余内容一次跳出。
 
-所有活动消息共用一个 `requestAnimationFrame` 循环，并限制为约 30 FPS。即使关闭平滑播放，也不是每个网络 chunk 立刻独立改 DOM，而是标脏后由全局帧循环合并更新。
+所有活动消息共用一个 requestAnimationFrame 循环，并限制为约 30 FPS。即使关闭平滑播放，也不是每个网络 chunk 立刻独立改 DOM，而是标脏后由全局帧循环合并更新。
 
 ### 6.4 稳定前缀与可变尾部
 
@@ -424,7 +424,7 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 这种分段比“整条消息每帧 Marked + innerHTML”更重要：长回复的成本主要落在仍有歧义的最后一小段，已完成表格、图表、按钮或动画不会反复初始化。
 
-切回仍在流式的后台会话时，`streamManager.js` 的 `restoreStableBlocksForRecreatedDom`（`:563-609`）从每个 block 缓存的 raw HTML 恢复稳定区 DOM，再继续追加新的稳定范围（`renderStreamFrame`，`:1361` 起）。
+切回仍在流式的后台会话时，流管理器从 `restoreStableBlocksForRecreatedDom`（`streamManager.js:563-609`）恢复稳定区 DOM，再由帧渲染入口（同文件 `:1361` 起）继续追加新的稳定范围。
 
 ### 6.5 尾部 morphdom
 
@@ -441,7 +441,7 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 ### 6.6 未闭合代码围栏
 
-流尾若含未闭合代码 fence，不完全依赖 Marked 的容错输出。`parseStreamTailMarkdown()` 把围栏前缀正常解析，把未闭合部分生成稳定的逐行代码 DOM；完成的行带 key，可被 morphdom 复用，并按行执行轻量 Highlight.js 与扫光动画。
+流尾若含未闭合代码 fence，不完全依赖 Marked 的容错输出。尾部解析入口把围栏前缀正常解析，未闭合部分生成稳定的逐行代码 DOM；完成的行带 key，可被 morphdom 复用，并按行执行轻量 Highlight.js 与扫光动画。
 
 这解决了常见的流式代码闪烁：新增一行时不必替换整个 `<pre><code>`，已有行也不会重复高亮。最终 fence 闭合或消息结束后，完整渲染仍会重新生成权威代码块。
 
@@ -472,21 +472,21 @@ HTML 在 VCPChat 中有三种承载形式，渲染方式不同：
 
 ### CSS scope
 
-assistant 文本含结构化 HTML、`<style>` 或 `style=` 时，消息获得唯一 scope ID。`<style>` 内容被提取并写入 `document.head`；`contentProcessor.scopeCss()` 将 selector 改写到消息根下。样式因此仍处于同一 document 的 cascade 中，作用域依靠自定义字符串解析改写；scoped style 节点在消息删除、更新或清空聊天时单独移除。渲染缓存遇到此类内容会旁路，因为 scope ID 和 `head` 副作用不能复用。
+assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得唯一 scope ID。样式内容被提取并写入 `document.head`；`contentProcessor.scopeCss()` 将 selector 改写到消息根下。样式因此仍处于同一 document 的 cascade 中，作用域依靠自定义字符串解析改写；scoped style 节点在消息删除、更新或清空聊天时单独移除。渲染缓存遇到此类内容会旁路，因为 scope ID 和 head 副作用不能复用。
 
 ### 脚本执行
 
-`animation.processAnimationsInContent()` 会收集消息中的 `<script>`：外部 `src` 通过动态 script 元素加载；内联脚本被重新执行；常见 Three.js、Anime.js CDN URL 会改写到本地 vendor 文件；`requestAnimationFrame`、`setTimeout`、`setInterval` 被包装成可登记、可暂停的版本；`document.write/open/close` 被拦截；Anime.js 实例、Three.js renderer 和动画句柄登记到所属消息，用于资源回收。
+`animation.processAnimationsInContent()` 会收集消息中的 `<script>`：外部脚本通过动态 script 元素加载；内联脚本被重新执行；常见 Three.js、Anime.js CDN URL 会改写到本地 vendor 文件；动画帧与定时器回调被包装成可登记、可暂停的版本；`document.write/open/close` 被拦截；Anime.js 实例、Three.js renderer 和动画句柄登记到所属消息，用于资源回收。
 
-脚本内的 `document.querySelector/querySelectorAll/getElementById/getElementsByTagName` 被包装为"当前消息容器优先、document 回退"（`animation.js:282-360`）：同页面多条消息包含相同 `id`/`data-vdoc-island` 时，脚本默认命中自己消息内的节点而非页面第一份副本；`getElementsByTagName('script')` 例外地保留全局查询并追加 `virtualCurrentScript`，以兼容依赖 `currentScript` 的库代码。这是消息脚本 DOM 隔离的补充手段，不是新的隔离边界——脚本仍运行在聊天 renderer 的页面上下文。
+脚本内的 `document.querySelector/querySelectorAll/getElementById/getElementsByTagName` 被包装为"当前消息容器优先、document 回退"（`animation.js:282-360`）：同页面多条消息包含相同 id 或 `data-vdoc-island` 时，脚本默认命中自己消息内的节点而非页面第一份副本；对 script 标签的查询例外地保留全局行为并追加 `virtualCurrentScript`，以兼容依赖当前脚本引用的库代码。这是消息脚本 DOM 隔离的补充手段，不是新的隔离边界——脚本仍运行在聊天 renderer 的页面上下文。
 
-主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，消息脚本不能直接 `require()` Node 模块；脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM 和页面全局对象。
+主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，消息脚本不能直接 require Node 模块；脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM 和页面全局对象。
 
 ## 8. 历史渲染、性能与生命周期
 
 ### 8.1 历史不是虚拟列表
 
-`renderHistory()` 默认先渲染最新 5 条，再以每批 10 条、批间约 100 ms 的方式从近到远补旧消息。首批并行创建，使用 `DocumentFragment` 一次插入；旧批次优先在 `requestIdleCallback` 中插到列表顶部。
+`renderHistory()` 默认先渲染最新 5 条，再以每批 10 条、批间约 100 ms 的方式从近到远补旧消息。首批并行创建，用 DocumentFragment 一次插入；旧批次优先在空闲回调中插到列表顶部。
 
 这改善了首屏时间，但最终仍会把全部历史消息保留在 DOM 中。它是渐进装载，不是窗口化虚拟列表。
 

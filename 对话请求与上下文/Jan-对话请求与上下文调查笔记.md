@@ -18,9 +18,9 @@ Jan 的生成管线是"**前端直连模型服务**"模式：没有后端聊天�
 
 核心链条与关键事实（均有源码依据）：
 
-1. **流式管线**：`experimental_throttle: 50`（只节流 UI 状态，`$threadId.tsx:292`）、`resume: false`（`use-chat.ts:101`）；transport 实例按 sessionId 复用；推理参数（temperature/top_k 等）不经 AI SDK 层，而是经 `createCustomFetch` 注入 HTTP body（`model-factory.ts:366-564`）。
-2. **上下文管理在 transport 内**：`max_context_tokens>0` 时按 `auto_compact ? compactMessages（模型总结）: trimMessages`；`finishReason==='length'` 且 token ≥ 0.9×ctx_len 时冻结部分消息并提示用户手动扩容（阶梯 `<8192→8192→32768→×1.5`）。
-3. **队列**：发送时若正在流式且当前线程存在则入队，`status==='ready'` 且无挂起工具时自动发下一条，`error` 或离开线程清队列；队列消息显示在输入区顶部 `QueuedMessageChip`（界面在 Chat UI 笔记）。
+1. **流式管线**：`experimental_throttle: 50` 只节流 UI 状态，`resume: false` 不恢复未完成回合（实现分别见 `$threadId.tsx:292`、`use-chat.ts:101`）；transport 实例按 sessionId 复用。推理参数不经 AI SDK 层，而是由 `createCustomFetch` 注入 HTTP body（`model-factory.ts:366-564`）。
+2. **上下文管理在 transport 内**：启用 `max_context_tokens` 后，根据 `auto_compact` 选择摘要压缩或直接截断；完成原因是 length 且 token 达到上下文长度的 0.9 倍时冻结部分消息，并提示用户手动扩容，扩容阶梯为 8192、32768、再按 1.5 倍增长。
+3. **队列**：发送时若正在流式且当前线程存在则入队；就绪状态且无挂起工具时自动发下一条，错误或离开线程时清队列。队列消息显示在输入区顶部 `QueuedMessageChip`（界面在 Chat UI 笔记）。
 4. **错误与恢复**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；扩容流程写 model 设置 + 重启 router（llamacpp）或 stopModel（其他 provider），消费续写 prefill 并在 1s 后 regenerate。
 
 ## 系统边界与生成任务主链
@@ -43,24 +43,24 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 ## 1. 提交入口、任务对象与状态机
 
-- **发送入口**：`handleSendMessage`（`ChatInput.tsx:363-415`）：无模型时提示并拦截（L364-367）；正在流式（`isStreaming` = submitted/streaming，L1726）且在线程内时 `enqueue` 入队（L382-390）；否则组装 `onSubmit(prompt, files)`（L415）。首页（无 onSubmit）走创建线程 + sessionStorage 待发消息路径（L418-518）。
-- **发送管线**：`processAndSendMessage`（`$threadId.tsx:913-1123`）：附件合并 → 有文档时先插入预览消息 → `processAttachmentsForSend`（inline/embeddings 决策）→ 构造并持久化 userMessage（分支线程写 `parentId` 到 metadata，L1064-1079）→ `sendMessage({parts, id, metadata})`。
-- **任务状态机**：由 AI SDK Chat 承载——`ThreadMessage.status` 的 `'submitted'|'streaming'|'ready'|'error'` 是 AI SDK 运行时状态（数据字段语义见会话与消息管理笔记 §1.2）；`CHAT_STATUS`（`containers/message/types.ts:3-6`）是 UI 用常量；`useChatSessions` 按 threadId 保存 Chat 实例与 `isStreaming` 派生值（`chat-session-store.ts:41-49`）。banner 错误存在时 `effectiveStatus` 被强制为 'ready' 以终止卡住的流（`$threadId.tsx:692-693`）。
-- **自动发下一条**（`$threadId.tsx:1560-1575`）：`status==='ready'` 且 `sessionData.tools` 为空时 `dequeue` 并 `sendQueuedMessage`（纯文本绕过附件，L1127-1140）；`processingQueueRef` 防重入；`status==='error'` 清空队列（L1578-1582）；离开线程清队列（L1654-1658）。
+- **发送入口**：`handleSendMessage`（`ChatInput.tsx:363-415`）：无模型时拦截；正在流式且在线程内时入队，否则组装提交参数。首页没有提交回调时，走创建线程并通过 sessionStorage 暂存待发消息（L364-518）。
+- **发送管线**：`processAndSendMessage`（`$threadId.tsx:913-1123`）先合并和处理附件，再构造、持久化用户消息，最后调用发送入口；分支线程的父消息写入 metadata（L1064-1079）。
+- **任务状态机**：由 AI SDK Chat 承载，消息状态包括 submitted、streaming、ready、error（数据字段语义见会话与消息管理笔记 §1.2）。`CHAT_STATUS`（`containers/message/types.ts:3-6`）只是 UI 常量；会话 store 按 threadId 保存 Chat 实例并派生流式状态。出现 banner 错误时，当前状态被强制改为 ready 以终止卡住的流（`$threadId.tsx:692-693`）。
+- **自动发下一条**（`$threadId.tsx:1560-1575`）：就绪且没有挂起工具时取出队首并发送纯文本消息；处理中的引用防止重入，错误和离开线程都会清空队列（L1127-1140、L1578-1582、L1654-1658）。
 
 ## 2. 历史选择与上下文拼装顺序
 
 `CustomChatTransport.sendMessages`（`custom-chat-transport.ts:1102-1519`）执行顺序：
 
-1. **模型创建**（L1128-1215）：`extractModelSamplingDefaults`（`MODEL_SAMPLING_SETTING_KEYS`：temperature/top_k/top_p/min_p/repeat_last_n/repeat_penalty/presence_penalty/frequency_penalty，L107-116）取每模型默认；`getActiveInferenceParams`（L773-784）取线程助手 `parameters`（`model-only` 时为空）；llamacpp 解析思考预算符号等级 → 实际 token（`resolveThinkingBudgetTokens` L170-196）；**合并顺序 `{...modelSamplingDefaults, ...inferenceParams, ...reasoningParams}`**（L1176-1180，注释说明 assistant 参数是显式会话级覆盖，优先级最高）；预定义远程 provider 删除全部 `paramsSettings` 键（L1181-1183）；llamacpp 固定 `id_slot=0` 复用 KV 缓存（L1187-1189）；`createModelOrAbort`（L1054-1100）——模型加载与 abort 竞争，abort 时对 llamacpp 调 `unloadLlamaModel`（防泄漏，L1067-1080）。推理开关经 `buildLlamacppReasoningParams`（L634-655）进 `chat_template_kwargs.enable_thinking`。
+1. **模型创建**（L1128-1215）：先读取模型默认采样参数和线程助手参数，再解析 llamacpp 的思考预算；合并顺序是模型默认、线程参数、推理参数，后者优先级最高（L1176-1180）。预定义远程 provider 会删除采样参数键；llamacpp 固定 `id_slot=0` 复用 KV 缓存。模型加载与取消竞争由 `createModelOrAbort` 处理，取消时卸载 llamacpp 模型；推理开关最终进入 `chat_template_kwargs.enable_thinking`（相关实现见 L634-655、L1054-1100、L1181-1189）。
 2. **refreshTools()**（L1217）：RAG/MCP/web 工具目录构建（禁用集过滤、MCP 智能路由、`web_search`/`web_fetch`），见 §9。
-3. **splitAssistantToolWaves**（L1223）：把"工具调用后跟文本"的 assistant 回合拆成连续多条（Claude tool_use/tool_result 配对 + 前缀字节一致保 KV 缓存，L530-567）。
+3. **splitAssistantToolWaves**（L1223）：把工具调用后跟文本的 assistant 回合拆成连续多条，以保持 Claude 工具消息配对和 KV 缓存前缀一致（L530-567）。
 4. **system 拼接**（L1229-1240）：`systemMessage`（`renderInstructions(threadAssistant.instructions)`，`$threadId.tsx:205-208`）+ `buildFilesSystemInstruction`（L1594-1613，静态说明 `[ATTACHED_FILES]` 块、不随附件变化保提示缓存）+ `buildWebSearchSystemInstruction`（L1621-1634，教模型用 `web_search`/`web_fetch` 并内联 `[[cite:URL]]`）；空白 system 不发送。
 5. **上下文管理**（L1258-1297）：`maxContextTokens>0` 时 `auto_compact && this.model ? compactMessages : trimMessages`；system 计 token；预算 = maxCtx − maxOutput − system。
-6. **`hasGenuineUserQuery`**（L1302-1306）：`TOOL_RESPONSE_ONLY` 正则（L590）判定"纯工具结果回合"，无真实用户查询则提前报错（L599-608）。
-7. **消息清洗链**（L1310-1323）：`coalesceMessagesForAlternation( resolveOrphanToolCalls( encodeVideoAttachments( encodeAudioAttachments( stripUnsupportedImageParts( mapUserInlineAttachments(messages) )))))`——相邻 user 合并保交替（L568-588）、孤儿工具调用补 `output-error`（L482-509）、无 vision 模型剥离图片 part（L430-458）、音视频替换为 sentinel 文本 part（L1537-1585）、inline 文档全文注入（L1636-1674）；sentinel 由 `model-factory.ts` 的 fetch 包装在**发送侧**解码回 `input_audio`/`input_video`（`decodeAudioSentinelsInBody` L655-690、`decodeVideoSentinelsInBody` L697-732，在 `createCustomFetch` 的 buildBody 内调用 L441-442）——旧笔记把解码位置写成 model-factory L1537-1585 有误，已修正。
+6. **`hasGenuineUserQuery`**（L1302-1306）：用 `TOOL_RESPONSE_ONLY` 正则（L590）判定纯工具结果回合；没有真实用户查询则提前报错（L599-608）。
+7. **消息清洗链**（L1310-1323）：依次合并相邻用户消息、补齐孤儿工具调用、移除模型不支持的图片、编码音视频和注入 inline 文档；发送侧的 fetch 包装再把音视频标记解码回 `input_audio`/`input_video`（`model-factory.ts:655-732`）。旧笔记把解码位置写成 model-factory L1537-1585 有误，已修正。
 8. **continue 续写 prefill**：`baseMessages + assistant{reasoning,text}` 作为续写前置（L1327-1349）；`prependContinuationToUIStream`（L680-723）把 partial 注入新流首个 reasoning/text delta，UI 无缝衔接。
-9. **`streamText`**（L1369-1389）：`tools: shouldEnableTools ? this.tools : undefined`、`toolChoice:'auto'`、`maxTokens`、远程 provider 的 reasoning `providerOptions`（L1356-1361）；`experimental_repairToolCall`（L1380-1388）仅重转义 Windows 路径反斜杠（`repairToolArgs`，InvalidToolInputError 专属）。`toUIMessageStream`（L1394-1509）在 `finish-step`/`finish` 收集 tokenSpeed/usage 写入消息 metadata（L1403-1452）。
+9. **`streamText`**（L1369-1389）：启用工具时使用当前工具集，工具选择为 auto，并传入最大输出 token 及远程 provider 的 reasoning 选项（L1356-1361）。工具参数修复只处理 Windows 路径反斜杠；`toUIMessageStream` 在 finish-step 和 finish 阶段收集 tokenSpeed、usage 并写入消息 metadata（L1380-1452）。
 
 用户消息构造（`web-app/src/lib/completion.ts` `newUserThreadContent`，L20-117）：图片/音频/视频 base64 data URL 进 content parts；文档经 `injectFilesIntoPrompt` 注入**不含路径**的元数据（id/name/type/size/chunkCount/injectionMode，L37-48）；inline 文档全文进 `metadata.inline_file_contents`（L107-115）；id 默认 `ulid()`。
 
@@ -76,16 +76,16 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 ## 4. SDK、Provider、模型与协议交接
 
-- **模型工厂**：`ModelFactory.createModel`（`model-factory.ts:847-897`）按 provider 分派——llamacpp/mlx 先 `startModel` 再 `find_session_by_model` 拿端口与 api_key（L902-984）；远程 provider 用官方 SDK（anthropic/openai/mistral/xai/google）+ 自定义 fetch；OpenAI 走 Responses API（L1167）。
-- **参数注入**：`createCustomFetch`（`model-factory.ts:366-564`）在请求 body 注入合并参数并做键名规整（`max_output_tokens→max_tokens`、`dynatemp_exp→dynatemp_exponent`，L385-388）、剥离客户端侧键、llamacpp 专属 `cache_prompt=true`/`return_progress`/`timings_per_token`（L423-433）；上游采样参数拒绝时**自动剥离全部注入参数重试一次**并 toast 提示（L533-550）；错误 body 清洗（L552-562）；llamacpp 500 无 body 时触发 `reloadModel` 并合成错误（L506-523）。
+- **模型工厂**：`ModelFactory.createModel`（`model-factory.ts:847-897`）按 provider 分派。llamacpp/mlx 先启动模型，再通过会话查询取得端口与 api_key；远程 provider 使用官方 SDK 和自定义 fetch，OpenAI 走 Responses API（L902-984、L1167）。
+- **参数注入**：`createCustomFetch`（`model-factory.ts:366-564`）把合并后的参数写入请求 body，并规整键名，例如把 max_output_tokens 转为 max_tokens（L385-388）。它还会剥离客户端键和 llamacpp 专属参数；上游拒绝采样参数时，自动移除注入参数重试一次并提示用户。错误 body 会清洗，llamacpp 遇到无 body 的 500 响应则重载模型（L423-562）。
 - **abort 与取消**：MLX fetch 包装在 abort 时调 `/v1/cancel`（L1045-1064）；llamacpp 模型加载期 abort 调 `unloadLlamaModel`（§2 第 1 步）；流式期间 `options.abortSignal` 透传给 `streamText`。
 - **无后端重连**：`reconnectToStream` 是显式 no-op（L1521-1530，注释：无后端可重连）。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- `experimental_throttle: 50`（`$threadId.tsx:292`，经 `use-chat.ts:100` 透传）：只节流 UI 状态更新，不改写事件内容。
-- `resume: false`（`use-chat.ts:101`）：重启/重挂不恢复未完成回合。
-- transport 复用：`transportRef` 优先取 `useChatSessions` 中已有 session 的 transport（`use-chat.ts:49-62`）；`ensureSession` 按 sessionId 复用 Chat 实例（`chat-session-store.ts:65-119`）。
+- `experimental_throttle: 50`（`$threadId.tsx:292`，经 `use-chat.ts:100` 透传）只节流 UI 状态更新，不改写事件内容。
+- `resume: false`（`use-chat.ts:101`）表示重启或重挂时不恢复未完成回合。
+- transport 复用：优先取已有 session 的 transport，并按 sessionId 复用 Chat 实例（实现见 `use-chat.ts:49-62`、`chat-session-store.ts:65-119`）。
 - **顺序与防串扰**：`streamGeneration` 单调令牌——被替代请求（如 Reload 后的旧请求）的 `onError`/`onFinish` 不再清 loading/stream 状态（`custom-chat-transport.ts:751, 1113, 1460, 1488`）；`setCurrentStreamThreadId`（L1114）记录当前流式线程供全局 UI 使用。
 - **续写注入**：`prependContinuationToUIStream`（L680-723）在首个 reasoning-start/text-start 后插入 prefill delta（§2 第 8 步）。
 - **用量收集**：`toUIMessageStream` 的 `finish-step` 收集 tokensPerSecond/promptPerSecond，`finish` 写 `finishReason/usage/tokenSpeed` 到消息 metadata（L1403-1452）；`onFinish` 回调把 usage 传给 `onTokenUsage`（L1499-1507，TokenSpeedIndicator 数据源）。
@@ -108,14 +108,14 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 ## 8. 队列、多会话并发与后台生成
 
-- **队列存储**：`message-queue-store.ts`（71 行）per-thread 队列：`enqueue`/`dequeue`（原子读-删）/`removeMessage`/`clearQueue`/`getQueue`；入队条件 = 流式态 + 当前线程（§1）。
+- **队列存储**：`message-queue-store.ts`（71 行）维护 per-thread 队列，提供入队、原子取删、移除、清空和读取操作；入队条件是流式态且处于当前线程（§1）。
 - **消费**：`status==='ready'` 且无挂起工具时自动发下一条（纯文本绕过附件，§1）；`error` 清空队列；离开线程清队列；`removeSession` 也清对应队列（`chat-session-store.ts:181`）。
 - **并发**：llamacpp 固定 `id_slot=0`（§2）暗示同一 llama-server 上同一活跃回合复用 KV——多窗口/多会话并发打到同一 server 的行为未验证（推测项）；不同线程各有独立 Chat 会话实例，`sessionData.tools` 也按线程隔离（`chat-session-store.ts:8-12`）。
 - **后台生成**：本次未发现独立的后台任务管理器（检查范围：web-app 无后台任务 store/队列；标题生成与嵌入是发送主链内的异步步骤）——标注为未找到。
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- **工具目录**：`refreshTools`（`custom-chat-transport.ts:815-977`）在每次发送前重建——RAG 工具（有文档且功能可用时）、MCP 工具（可选智能路由 `mcpOrchestrator`，路由结果冻结在 transport 内保提示前缀稳定，L730-734）、web 工具（webSearchEnabled 时注册 `web_search`/`web_fetch`）；`use-chat.ts:111-117` 在 MCP/RAG 工具名集合变化时刷新。
+- **工具目录**：`refreshTools`（`custom-chat-transport.ts:815-977`）在每次发送前重建 RAG、MCP 和 web 工具。MCP 可选智能路由，路由结果冻结在 transport 内以保持提示前缀稳定；MCP/RAG 工具名集合变化时也会刷新（L730-734、`use-chat.ts:111-117`）。
 - **注入请求**：`tools: shouldEnableTools ? this.tools : undefined` + `toolChoice:'auto'`（§2 第 9 步）；`splitAssistantToolWaves` 保证历史中 tool_use/tool_result 配对。
 - **执行循环**：`onFinish` 内串行执行工具（`$threadId.tsx:462-587`）：RAG 工具 auto-allow，MCP/第三方走审批（`requestApproval`），web 工具内建执行；结果经 `addToolOutput` 回填，SDK `sendAutomaticallyWhen`（`followUpMessage`，L180-191）自动续发。工具执行语义属 Agent 工具类目，本笔记只记录注入点。
 - **附件**：`processAttachmentsForSend`（`attachmentProcessing.ts:78-319`）在发送前决定 inline/embeddings（项目文件强制 embeddings、auto 模式按 token 阈值、per-file 选择覆盖）；媒体直接进 content parts；文档元数据进文本、inline 全文进 metadata（§2 用户消息构造）。
@@ -123,7 +123,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 ## 10. 退出恢复、日志与已确认边界
 
-- **退出恢复**：`resume:false`——重启不恢复未完成回合；首页新聊天的待发消息经 `sessionStorage`（键 `initial-message-<threadId>`，`constants/chat.ts:15-17`，`$threadId.tsx:1145-1172`）在进入线程页时恢复发送（界面现场恢复在 Chat UI 笔记 §2）。
+- **退出恢复**：`resume:false` 表示重启不恢复未完成回合；首页新聊天的待发消息经 sessionStorage 暂存，并在进入线程页时恢复发送（键名和实现见 `constants/chat.ts:15-17`、`$threadId.tsx:1145-1172`；界面现场恢复在 Chat UI 笔记 §2）。
 - **可观测性**：`toUIMessageStream` 的 finish-step/finish 收集 tokenSpeed/usage（§5）；消息级 `metadata.usage/tokenSpeed`；任务级日志/trace 不在本次调查范围（未发现任务 id 关联日志机制）。
 - **已确认边界**：无后端聊天业务服务（前端直连，`reconnectToStream` no-op）；`resume:false`；工具错误可恢复性（`output-available/output-error/output-denied` 状态字段在消息渲染器笔记）；扩容需用户手动触发。
 - **banner 与 metadata.error 并存**：全局 banner（oom/backend/context）置顶且隐藏最后一条失败 assistant 消息，同时 `metadata.error` 也会写入——呈现交由 banner 端配置【代码确认】，两者并存的实际 UI 行为未运行验证。

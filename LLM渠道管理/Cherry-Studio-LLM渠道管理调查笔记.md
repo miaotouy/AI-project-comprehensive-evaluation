@@ -30,7 +30,7 @@ Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一�
 
 - 多 Key 只是跨请求轮询，没有失败计数、Key 健康状态、429 熔断或自动恢复；
 - 普通聊天默认 `maxRetries: 0`，除非调用方显式覆盖（AI SDK 层）；
-- （`12498d68ec`）新增 **model-retry**：`AiService` 用 `createRetryableWrap`（ai-retry）包普通聊天模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置 fallback 模型（`buildFallbackModels` 按能力约束解析）；但偏好 `chat.retry.enabled` **默认 false**（`preferenceSchemas.ts:617`），且请求级 `maxRetries: 0` 会显式关闭包装（`AiService.ts:565-590`）——即"默认不重试"不变，"没有跨 Provider failover"改为"**默认没有**，用户可在设置里开启同模型重试 + 模型 fallback"；
+- （`12498d68ec`）新增 **model-retry**：聊天调用入口用 ai-retry 的重试包装包住普通模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置按能力约束解析的 fallback 模型；但偏好 `chat.retry.enabled` **默认 false**，且请求级 `maxRetries: 0` 会显式关闭包装——即"默认不重试"不变，"没有跨 Provider failover"改为"**默认没有**，用户可在设置里开启同模型重试 + 模型 fallback"；
 - 没有渠道权重、优先级、成本或延迟路由；
 - 设置页的批量健康检查会测试每个模型与每个 Key 并显示延迟，但结果不参与运行时调度。
 
@@ -70,9 +70,9 @@ Assistant / 全局默认模型 / @模型
 
 ### 1.1 三层数据，而不是一份完整配置
 
-内置 Provider 和模型目录的真源在 `packages/provider-registry/data/`。预设 seeder 只插入数据库中不存在的 Provider，不覆盖用户已经修改的行。
+内置 Provider 和模型目录的真源在 provider-registry 包的数据目录。预设 seeder 只插入数据库中不存在的 Provider，不覆盖用户已经修改的行。
 
-`user_provider` 并不复制 Registry 的完整定义。以 Endpoint 为例，数据库只持久化用户拥有的 `baseUrl` 覆盖；`modelsApiUrls` 和 `adapterFamily` 仍由 Registry 在读取时注入。这样 Registry 升级后，用户没有覆盖的协议元数据可以跟随更新。
+用户 Provider 表并不复制 Registry 的完整定义。以 Endpoint 为例，数据库只持久化用户拥有的 `baseUrl` 覆盖；`modelsApiUrls` 和 `adapterFamily` 仍由 Registry 在读取时注入。这样 Registry 升级后，用户没有覆盖的协议元数据可以跟随更新。
 
 有效配置优先级可以概括为：
 
@@ -82,7 +82,7 @@ user_provider 用户差量
   > 应用级默认值
 ```
 
-`ProviderService.rowToRuntimeProvider()` 返回合并后的 `Provider`，业务层通常不需要判断一个字段来自数据库还是 Registry。
+`ProviderService.rowToRuntimeProvider()` 返回合并后的运行时 Provider，业务层通常不需要判断一个字段来自数据库还是 Registry。
 
 ### 1.2 一条用户行就是一条渠道
 
@@ -105,7 +105,7 @@ Provider 创建后默认 `isEnabled: false`。启用动作会把它移到同组�
 
 ### 1.3 预设可复制为多个渠道实例
 
-设置页的 Duplicate 流程创建新的 `providerId`，同时保留来源的 `presetProviderId`，并让用户重新填写名称、Base URL 和凭据。新实例继续继承同一预设的协议与模型元数据，但拥有独立的：
+设置页的复制流程会生成新的实例 ID，同时保留来源的预设 ID，并让用户重新填写名称、Base URL 和凭据。新实例继续继承同一预设的协议与模型元数据，但拥有独立的：
 
 - API Key 池；
 - Endpoint Base URL；
@@ -121,11 +121,7 @@ Provider 创建后默认 `isEnabled: false`。启用动作会把它移到同组�
 
 ### 2.1 Endpoint Type 是协议选择键
 
-Endpoint 不只是 URL。每个 Endpoint Type 的有效配置包含：
-
-- `baseUrl`；
-- 按模型类别区分的 `modelsApiUrls`；
-- `adapterFamily`。
+Endpoint 不只是 URL。每个 Endpoint Type 的有效配置包含三部分：基础 URL、按模型类别区分的模型列表 URL，以及决定协议解析方式的适配器族。
 
 文本相关类型覆盖 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages、Google GenerateContent 和 Ollama Chat；自定义 Provider 创建页还可同时配置 OpenAI 图片生成与编辑端点。
 
@@ -138,11 +134,11 @@ model.endpointTypes[0]
   -> undefined / OpenAI-Compatible 回退
 ```
 
-然后 `resolveAiSdkProviderId()` 读取该端点的 `adapterFamily`，必要时再选择 Chat 或 Responses 变体。这里是协议路由，不是错误发生后的容灾路由。
+随后解析器读取该端点的适配器族，生成 AI SDK Provider ID，必要时再选择 Chat 或 Responses 变体。这里是协议路由，不是错误发生后的容灾路由。
 
 ### 2.2 Base URL 与 Header
 
-`providerToAiSdkConfig()` 按 Endpoint Type 格式化 URL：Gemini 补 `v1beta`，Ollama 使用自己的 Host 规则，部分服务禁止自动追加版本。`routeToEndpoint()` 再拆分 Base URL 与端点路径。
+`providerToAiSdkConfig()` 按 Endpoint Type 格式化 URL：Gemini 补 `v1beta`，Ollama 使用自己的 Host 规则，部分服务禁止自动追加版本；端点解析函数再把 Base URL 与端点路径拆分。
 
 `providerSettings.extraHeaders` 会与应用默认 Header、Provider 专用 Header 合并。Azure、Bedrock、Vertex、Copilot、CherryIN、Codex、Grok CLI 等有专门的配置 builder；其余已注册协议走通用 AI SDK Provider，最终才回退 OpenAI-Compatible。
 
@@ -161,13 +157,13 @@ model.endpointTypes[0]
 - `iam-gcp`；
 - `iam-azure`。
 
-API Key 独立保存在 `apiKeys[]`；OAuth access/refresh token、AWS access key/secret、GCP credentials 则进入 `authConfig`。Codex、Grok CLI、CherryIN 等 OAuth 路径由 `OAuthRuntimeService` 刷新或在 401 后强制刷新，并在请求时注入 Token。
+API Key 独立保存在 `apiKeys` 数组中；OAuth access/refresh token、AWS access key/secret、GCP credentials 则进入同一行的认证配置。Codex、Grok CLI、CherryIN 等 OAuth 路径由 `OAuthRuntimeService` 刷新或在 401 后强制刷新，并在请求时注入 Token。
 
 外部 CLI 认证是另一类边界：Claude Code Agent Runtime 等可以依赖 SDK/CLI 自己的认证与重试事件，不应把它们当成普通 Chat Provider 的 API Key 路由能力。
 
 ### 3.2 Renderer 默认拿不到秘密
 
-`rowToRuntimeProvider()` 将 `apiKeys` 映射为不含 `key` 的运行时条目，只暴露 ID、标签和启停状态；`authConfig` 也只投影为 `authType`。需要编辑凭据时，设置页调用专用 Data API 资源；普通 Provider 列表和聊天业务不会收到完整秘密。
+合并入口将 `apiKeys` 映射为不含 `key` 的运行时条目，只暴露 ID、标签和启停状态；认证配置也只投影为 `authType`。需要编辑凭据时，设置页调用专用 Data API 资源；普通 Provider 列表和聊天业务不会收到完整秘密。
 
 这降低了 Renderer 泄露面，但不是静态加密：Main 进程仍从 SQLite 读取明文并构造请求。
 
@@ -185,7 +181,7 @@ API Key 独立保存在 `apiKeys[]`；OAuth access/refresh token、AWS access ke
 
 ### 3.4 备份已覆盖 SQLite
 
-`LegacyBackupManager`（类名 `BackupManager`，文件头仍标注 `@deprecated LEGACY v1 CODE — retained as the active compatibility backup engine while v2 backup is unfinished`，`LegacyBackupManager.ts:1-15`）是当前真实接线的备份引擎，（`220dff874f` 及后续）其 direct backup 升级为 **v7 full/slim 双布局**（`LegacyBackupManager.ts:192-230,292-406`）：
+当前真实接线的备份引擎是 `LegacyBackupManager`——类名 `BackupManager`，文件头仍标注 `@deprecated LEGACY v1 CODE — retained as the active compatibility backup engine while v2 backup is unfinished`；（`220dff874f` 及后续）其 direct backup 升级为 **v7 full/slim 双布局**（`LegacyBackupManager.ts:1-15,192-230,292-406`）：
 
 ```text
 full 布局：Data/ + IndexedDB/ + Local Storage/ + cache.json + metadata.json
@@ -208,7 +204,7 @@ slim 布局：Data/cherrystudio.sqlite + cache.json（可选）
 4. 多个 Key时按 Key ID round-robin；
 5. 上次使用的 Key ID保存在 Main `CacheService` 的 `settings.provider.<providerId>.last_used_key_id`。
 
-`providerToAiSdkConfig()` 每次构造 SDK 配置时调用一次该方法。连接检查可传 `apiKeyOverride`，从而精确测试某一个 Key 而不受轮询影响。
+SDK 配置构建入口每次构造配置时调用一次该方法。连接检查可传 `apiKeyOverride`，从而精确测试某一个 Key 而不受轮询影响。
 
 ### 4.2 没有健康状态或同请求换 Key
 
@@ -242,9 +238,9 @@ Key 条目没有错误次数、429 时间、熔断截止时间或健康分。普
 
 ### 5.2 模型属于 Provider
 
-模型 ID 使用 `UniqueModelId`，解析后得到 `providerId + modelId`。相同裸模型名可以分别存在于多个 Provider 实例中；选择模型时已经选择了渠道。
+模型 ID 使用 `UniqueModelId`，解析后得到 Provider ID 加模型 ID 的二元组合。相同裸模型名可以分别存在于多个 Provider 实例中；选择模型时已经选择了渠道。
 
-模型自己的 `endpointTypes` 可以覆盖 Provider 默认协议。例如同一多协议网关中的 Claude 模型走 Anthropic Messages，而另一模型走 OpenAI Responses。该路由在请求前确定，不读取实时健康度。
+模型可声明自己的端点类型，覆盖 Provider 默认协议。例如同一多协议网关中的 Claude 模型走 Anthropic Messages，而另一模型走 OpenAI Responses。该路由在请求前确定，不读取实时健康度。
 
 ### 5.3 Registry 把模型本体与 Provider 覆盖分开
 
@@ -303,8 +299,8 @@ Registry 合并时，Provider override 可修改 capability、模态、context�
 
 元数据消费者不止模型选择器：
 
-- `endpointTypes` 与 Provider 默认端点共同确定 OpenAI Chat、Responses、Anthropic、Gemini、Ollama 等 Adapter；
-- reasoning support 与 endpoint-specific wire contract 决定 UI 可选档位及最终序列化字段；
+- 端点类型与 Provider 默认端点共同确定 OpenAI Chat、Responses、Anthropic、Gemini、Ollama 等 Adapter；
+- reasoning 支持与端点的 wire contract 决定 UI 可选档位及最终序列化字段；
 - `parameterSupport` 控制 temperature、top-p、max output 等参数是否发送和如何限幅；
 - `maxOutputTokens` 参与助手参数裁剪，`contextWindow` 会传给 Ollama 的 `num_ctx`，也用于工具延迟暴露和 Claude 1M context 后缀；
 - capability 决定工具调用、视觉、联网、图片/音视频工作流和模型筛选；
@@ -312,11 +308,23 @@ Registry 合并时，Provider override 可修改 capability、模态、context�
 
 这套方案的主要代价是元数据错误会同时影响 UI 与 wire protocol，影响面大于普通展示目录。项目通过 schema、catalog invariant、source-sync 和禁止手改生成 JSON 的 CI 约束降低风险；但 live upstream 参与生成，重新生成可能顺带吸收与本次改动无关的价格或能力漂移，仍需审阅生成差异。
 
-Registry 数据与路由继续演进（机制未变，仅条目/覆盖变化）：新增 Radeon Cloud Provider（`7b0d7a8908` 等）、New API 的 embedding endpoint type（`11604e09cc`）、DeepSeek V4 Flash Responses 端点（`2a4e6a6882`）、Claude Opus 5/Sonnet 5 及 1M-context 变体（`bd2b5eefc6`）、Ollama Gemma 4 thinking（`03d266e029`）、OpenCode Go 按所服务协议路由（`bf66103a2a`）、DeepSeek/OpenRouter/Dashscope 内置联网搜索与可区分的解析后模型名（`da3b5f1921`）、Ollama 原生 thinking 能力探测（`d97277ee75`）、Doubao Responses 注解归一化（`584f154cc6`）、new-api 单主机多路由版本（`a502b21c3e`）、CLI 配置经统一网关支持 detailed models（`84a33e88bc`）等。
+Registry 数据与路由继续演进（机制未变，仅条目/覆盖变化）：
+
+- 新增 Radeon Cloud Provider（`7b0d7a8908` 等）；
+- New API 的 embedding endpoint type（`11604e09cc`）；
+- DeepSeek V4 Flash Responses 端点（`2a4e6a6882`）；
+- Claude Opus 5/Sonnet 5 及 1M-context 变体（`bd2b5eefc6`）；
+- Ollama Gemma 4 thinking（`03d266e029`）；
+- OpenCode Go 按所服务协议路由（`bf66103a2a`）；
+- DeepSeek/OpenRouter/Dashscope 内置联网搜索与可区分的解析后模型名（`da3b5f1921`）；
+- Ollama 原生 thinking 能力探测（`d97277ee75`）；
+- Doubao Responses 注解归一化（`584f154cc6`）；
+- new-api 单主机多路由版本（`a502b21c3e`）；
+- CLI 配置经统一网关支持 detailed models（`84a33e88bc`）。
 
 ## 6. 模型选择与多模型调用
 
-Assistant 保存一个 `modelId: UniqueModelId`；无 Assistant 的 Topic 使用 `chat.default_model_id`。运行时按稳定二元标识精确查找 Provider 和模型。
+Assistant 保存一个 `UniqueModelId` 模型 ID；无 Assistant 的 Topic 使用 `chat.default_model_id`。运行时按稳定二元标识精确查找 Provider 和模型。
 
 聊天输入框支持 `@模型` 多选。持久会话中，一次发送可以解析出多个模型，为同一用户消息创建多个 Assistant placeholder，并并行执行多个模型，再以 siblings group 展示结果。这是“同一问题并行比较多个明确选择的模型”，不是某个模型失败后尝试下一个。
 
@@ -326,7 +334,7 @@ Assistant 保存一个 `modelId: UniqueModelId`；无 Assistant 的 Topic 使用
 
 ### 7.1 单 Provider 连接检查
 
-设置页打开连接检查时，先立即保存输入框中尚未完成 debounce 的 Key，再使用第一个可检查模型和指定 `apiKeyOverride` 发起最小请求。默认超时 15 秒，成功后可自动启用有模型的 Provider。
+设置页打开连接检查时，先立即保存输入框中尚未完成 debounce 的 Key，再使用第一个可检查模型与 Key 覆盖参数发起最小请求。默认超时 15 秒，成功后可自动启用有模型的 Provider。
 
 检查中途修改 Provider、Host 或 Key 会 Abort 旧请求，并用 run ID 防止旧回调污染新状态。
 
@@ -341,7 +349,7 @@ Assistant 保存一个 `modelId: UniqueModelId`；无 Assistant 的 Topic 使用
 
 图片、视频、音频生成因为可能计费会被标记为生成成本风险，TTS/STT 当前不走这套探针。
 
-这些结果是设置页的即时诊断数据，不会写入 `apiKeys[]`，也不会改变 `getRotatedApiKey()` 的选择。因此“检测出坏 Key”与“运行时自动避开坏 Key”是两回事。
+这些结果是设置页的即时诊断数据，不会写回 Key 池，也不会改变运行时轮询的选择。因此“检测出坏 Key”与“运行时自动避开坏 Key”是两回事。
 
 开发者模式还可对 HTTP 请求启用 Trace；普通运行时另有 Topic/Turn trace 和多模型子 Span，但没有以这些指标驱动渠道选择。
 
@@ -355,7 +363,7 @@ maxRetries: maxRetries ?? 0
 
 即 SDK 层默认不重试（`buildAgentParams.ts:583`）。调用方可以通过 `requestOptions.maxRetries` 覆盖，但 SDK 重试仍绑定已经解析完成的同一 Provider、Endpoint、Key 和模型；它不会重新执行渠道决策。
 
-**用户可配置重试/fallback（`12498d68ec`，model-retry）**：`AiService` 在聊天生成时用 `createRetryableWrap`（ai-retry，`src/main/ai/runtime/aiSdk/retry/createRetryableWrap.ts`）包住模型——同一模型对瞬态 API 错误（429/503/529 等）按策略重试，并可按 `buildFallbackModels`（`retry/buildFallbackModels.ts`）解析的 fallback 模型列表接管失败调用（解析时按能力过滤：function-calling、视觉、PDF、原生文件支持等不匹配的 fallback 会被跳过）。策略来自偏好：`chat.retry.enabled`（默认 false）、`chat.retry.max_attempts`（默认 3，范围 1-10）、`chat.retry.backoff_enabled`、`chat.retry.fallback_model_ids`（`retryPolicy.ts:14-25`，`preferenceSchemas.ts:194-200,616-619`）。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧 `maxRetries` 被置 0，避免双重重试（`AiService.ts:565-601`）。重试/切换过程以瞬时 `data-retry` part 实时呈现在消息里（持久化前剥离，见消息渲染器笔记）。因此：
+**用户可配置重试/fallback（`12498d68ec`，model-retry）**：聊天生成入口用 ai-retry 的 `createRetryableWrap`（`src/main/ai/runtime/aiSdk/retry/createRetryableWrap.ts`）包住模型——同一模型对瞬态 API 错误（429/503/529 等）按策略重试，并可按 `buildFallbackModels`（`retry/buildFallbackModels.ts`）解析出的 fallback 模型列表接管失败调用（解析时按能力过滤：function-calling、视觉、PDF、原生文件支持等不匹配的 fallback 会被跳过）。策略来自偏好组 `chat.retry.*`：`chat.retry.enabled` 默认 false、`chat.retry.max_attempts` 默认 3（范围 1-10），另有退避开关与 fallback 模型 ID 列表两项（`retryPolicy.ts:14-25`，`preferenceSchemas.ts:194-200,616-619`）。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧 `maxRetries` 被置 0，避免双重重试（`AiService.ts:565-601`）。重试/切换过程以瞬时 `data-retry` part 实时呈现在消息里（持久化前剥离，见消息渲染器笔记）。因此：
 
 - "普通聊天默认不重试"（SDK 层）仍成立；
 - "没有跨 Provider、跨模型自动 failover"改为：**默认没有**，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；
@@ -365,7 +373,7 @@ Claude Code Agent Runtime 会接收其 SDK 的 `api_retry` 事件并向 UI 报�
 
 异步图片/视频任务的轮询、OAuth 401 强制刷新，以及模型列表请求的容错也都有各自用途；它们均不是跨 Provider 推理 failover。
 
-网络层使用 `customFetch` 复用 Electron Session 代理。Provider 可以设置 `timeout` 与额外 Header，但没有单 Provider 的代理池、出口健康选择或自动切换。
+网络层复用 Electron Session 代理。Provider 可以设置 `timeout` 与额外 Header，但没有单 Provider 的代理池、出口健康选择或自动切换。
 
 ## 9. 配置导入
 

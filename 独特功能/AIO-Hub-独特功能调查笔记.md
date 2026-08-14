@@ -14,18 +14,18 @@
 
 ## 结论摘要
 
-AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼。去除 Chat/上下文/AST/Agent 已有覆盖后，本仓库仍独立成立的能力族有十八项，其中十六项主贡献达到 `主链确认`（静态证据），另有 content-deduplicator 为辅助主链确认、VCP 监控为入口确认：
+AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼。去除 Chat/上下文/AST/Agent 已有覆盖后，本仓库仍独立成立的能力族有十八项，其中十六项主贡献达到主链确认（静态证据），另有 content-deduplicator 为辅助主链确认、VCP 监控为入口确认：
 
-1. **媒体工作站（media-generator）**：会话-任务双轨、全局任务池、树形分支、参数清洁与资产回流，是完整的创作工作流（`主链确认`）。
-2. **中央资产管理器（asset-manager）**：`$APPDATA/assets/` + SHA-256 去重 + Rust `assets.jsonl` 索引 + 来源追踪，是跨工具的资产事实源（`主链确认`）。
-3. **LLM 请求检查器（llm-inspector）**：Rust 外部代理 + 前端内部钩子双层监控，可透视应用内所有 LLM 调用（`主链确认`）。
-4. **快捷动作系统（Quick Actions）**：宏模板 + 行级后处理 + 自动发送 + SillyTavern Quick Reply 导入（`主链确认`）。
-5. **宏系统**：实际注册 72 个内建宏（README 宣称 60+），三阶段管道 PRE_PROCESS/SUBSTITUTE/POST_PROCESS（`主链确认`，与上下文类目交界）。
+1. **媒体工作站（media-generator）**：会话-任务双轨、全局任务池、树形分支、参数清洁与资产回流，是完整的创作工作流（主链确认）。
+2. **中央资产管理器（asset-manager）**：应用数据目录下的资产文件、SHA-256 去重、Rust 索引和来源追踪，构成跨工具的资产事实源（主链确认）。
+3. **LLM 请求检查器（llm-inspector）**：Rust 外部代理与前端内部钩子组成双层监控，可透视应用内所有 LLM 调用（主链确认）。
+4. **快捷动作系统（Quick Actions）**：宏模板、行级后处理、自动发送和 SillyTavern Quick Reply 导入（主链确认）。
+5. **宏系统**：实际注册 72 个内建宏（README 宣称 60+），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
 6. **自由窗口管理**：组件级分离窗口 + logicHook 响应式同步 + 位置记忆/可见性自愈（`主链确认`）。
-7. **Agent 私有资产**：`agent-asset://` 协议 + `{{assets}}` 宏 + 渲染器解析链（`主链确认`）。
-8. **Skill 沙箱**：Rust 路径锁定 + 超时 + 多运行时探测，渐进式披露（`主链确认`，执行细节已由 Agent 工具笔记承接）。
-9. **VCP 监控与双向桥接（vcp-connector）**：observer 消息监控 + 分布式节点 + 工具桥（`入口确认`；节点与桥接已由 Agent 工具笔记承接）。
-10. **Recall 思绪集**：从旧 knowledge 拆分出的"上下文即时召回"领域，检索管线化（预设法 + 候选模块）+ 双 Agent 工具实例 + 严格占位符协议，定位为世界书的 RAG 进阶优化版（`主链确认`；原"四检索引擎"表述已过时，见能力十）。
+7. **Agent 私有资产**：`agent-asset://` 协议、`{{assets}}` 宏和渲染器解析链（主链确认）。
+8. **Skill 沙箱**：Rust 路径锁定、超时和多运行时探测，支持渐进式披露（主链确认，执行细节已由 Agent 工具笔记承接）。
+9. **VCP 监控与双向桥接（vcp-connector）**：observer 消息监控、分布式节点和工具桥（入口确认；节点与桥接已由 Agent 工具笔记承接）。
+10. **Recall 思绪集**：从旧 knowledge 拆分出的"上下文即时召回"领域，采用检索管线、双 Agent 工具实例和严格占位符协议，定位为世界书的 RAG 进阶优化版（主链确认；原"四检索引擎"表述已过时，见能力十）。
 11. **正则预设堆叠工作台（regex-applier）**：预设 CRUD + 多预设按顺序叠加应用 + 一键处理，补齐正则工具类"预设复用与堆叠预设"缺口（`主链确认`）。
 12. **Git 工作台与 AI 提交信息（git-committer）**：LLM 流式生成 commit message + 多仓库并发全景操作（`主链确认`）。
 13. **全局 Token 基础设施（token-calculator）**：Tokenizer 资产注册表 + 多模态计费，被 llm-chat 九处以上消费，聊天 token 预算的底层支撑（`主链确认`，按机制贡献标注）。
@@ -81,19 +81,19 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：把"图片/视频/音频/3D 多模态生成"从聊天里的单次工具调用升级为可管理、可分支、可重试、可追踪的独立工作台；生成历史、任务队列、参数和资产同处一个事实源。
 
-**入口与触发者**：用户入口为主——工具首页 `/media-generator`（`media-generator.registry.ts` 的 `toolConfig`），输入框"生成"提交走 `mediaGenStore.submitTaskInSession`；另一条是 Agent 侧：registry 通过 `buildAgentMethods.ts` 为每个可用模型动态生成 `generate_<model_id>` 方法（`agentCallable: true`），模型可触发生成。
+**入口与触发者**：用户入口为主——工具首页 `/media-generator`（`media-generator.registry.ts` 的 `toolConfig`），输入框"生成"提交到媒体任务会话；另一条是 Agent 侧：registry 通过 `buildAgentMethods.ts` 为每个可用模型动态生成模型方法，并标记为可供 Agent 调用，模型可触发生成。
 
-**事实对象**：三个对象——`GenerationSession`（树形 `MediaMessage` 节点，独立于 llm-chat 会话体系）、`MediaTask`（跨会话全局任务池，`pending → processing → completed | error | cancelled`）、结果 `Asset`（回流资产管理器）。桥接字段是节点 `metadata.taskSnapshot`（重试时恢复参数）。
+**事实对象**：三个对象——`GenerationSession`（树形 `MediaMessage` 节点，独立于 llm-chat 会话体系）、`MediaTask`（跨会话全局任务池，状态为 `pending → processing → completed | error | cancelled`）和结果 `Asset`。桥接字段是节点 `metadata.taskSnapshot`，用于重试时恢复参数。
 
-**完整主链**：输入提示词 → `buildTask`（打包参数、按模型能力决定是否带上下文）→ `addTask` 进全局任务池 → `addTaskNode` 在会话树建 User/Assistant 节点 → `executeGeneration`（AbortController 可中断；参考图 Asset→Base64；`sanitizeParams` 按模型 `mediaGenParams` 规则剔除不支持参数、校验取值；`applyContextRules` 决定多轮上下文）→ `useLlmRequest.sendRequest` → 响应 `handleResponseAssets`（解码 b64/拉取 URL → `embedMetadata` 把生成参数内嵌进文件元数据 → `importAssetFromBytes` 入资产库 → 衍生数据写 `derived/media-generator/{date}/{assetId}.json`）→ 任务标 completed 并关联 `resultAssets`。
+**完整主链**：输入提示词先打包为任务，按模型能力决定是否带上下文，再加入全局任务池并在会话树建立 User/Assistant 节点。生成执行支持 AbortController 中断，参考图转为 Base64，参数清洁逻辑按模型规则剔除不支持的参数并校验取值，随后决定多轮上下文。请求返回后解码 Base64 或拉取 URL，将生成参数写入文件元数据并导入资产库，同时保存衍生数据；最后把任务标为 completed 并关联结果资产。关键入口和落库逻辑见 media-generator 模块 ARCHITECTURE 文档。
 
 **持续性**：`{appDataDir}/media-generator/` 下 `sessions-index.json` + `sessions/{id}.json` + `tasks.json` + `settings.json`；`syncIndex()` 启动自愈（补齐/移除索引项），崩溃遗留的 `generating` 节点自动标 `error`，`activeLeafId` 修复到最深叶子。
 
-**主动性与取消**：无后台主动执行；`abortTask(taskId)`/`abortAll()` 中止生成，任务完成后保留在池中供 UI 查看（可配 `autoCleanCompleted` 自动清理）。
+**主动性与取消**：无后台主动执行；取消入口可中止单个或全部生成，任务完成后保留在池中供 UI 查看，也可通过自动清理设置移除。
 
 **外部依赖与执行域**：生成请求走用户配置的 LLM Profile（远程 API）；参考图与结果资产在本机资产库；无独立后端进程，执行逻辑在前端 + 远程 API。
 
-**安全与资源边界**：`sanitizeParams` 防非法参数；无内容过滤（`prompt` 完全由 LLM 控制）；生成消耗真实 API 额度。`generateMedia` Agent 方法为占位未实现（`ARCHITECTURE.md:410`），Agent 触发生成实际依赖 `buildAgentMethods` 的动态方法族。
+**安全与资源边界**：参数清洁逻辑用于防止非法参数；无内容过滤，提示词完全由 LLM 控制；生成消耗真实 API 额度。generateMedia Agent 方法为占位未实现（`ARCHITECTURE.md:410`），Agent 触发生成实际依赖动态方法族。
 
 **独特性判断**：llm-chat 的多模态输出只是"附件/转写"；media-generator 提供会话-任务双轨、参数清洁规则、内嵌元数据和资产回流，是 `创作工作站` 标签的完整实例。
 
@@ -103,11 +103,11 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：所有工具产生的图片、文档、转写结果汇入一个按哈希去重、可分组筛选、带来源追踪的应用级资源中心，避免同一文件多次落盘。
 
-**入口与触发者**：用户入口为工具页 `/asset-manager`（`AssetManager.vue` + `useAssetManager`）；实际主入口是**工具侧写入**——llm-chat 附件、media-generator 结果、sketch-pad 导出、OCR/转写结果都调用全局单例 `assetManagerEngine.importAssetFromBytes/Path`（`useAssetManager.ts:113` 等）。
+**入口与触发者**：用户入口为工具页 `/asset-manager`（AssetManager.vue + useAssetManager）；实际主入口是**工具侧写入**——llm-chat 附件、media-generator 结果、sketch-pad 导出、OCR/转写结果都调用全局资产管理单例；入口见 `useAssetManager.ts:113` 等位置。
 
-**事实对象**：`Asset`（path、sha256、origins[]、thumbnail、derived 元数据等），索引存 `$APPDATA/assets/assets.jsonl`，文件按月分目录。
+**事实对象**：Asset 包含 path、sha256、origins[]、thumbnail 和 derived 元数据等字段；索引存放在 `$APPDATA/assets/assets.jsonl`，文件按月分目录。
 
-**完整主链**（以 media-generator 回流为例）：生成响应字节 → `import_asset_from_bytes`（`src-tauri/src/commands/asset_manager.rs:870`）→ 计算 SHA-256 → `check_duplicate_in_current_month` 查重：命中则给既有资产追加 `origin`（`asset-imported` 事件）直接返回；未命中则写文件、提取图片宽高、生成缩略图/音频封面、写 `assets.jsonl` → 前端无限滚动分页查询（`list_assets_paginated` Rust 命令）。
+**完整主链**（以 media-generator 回流为例）：生成响应字节进入 Rust 导入命令（`src-tauri/src/commands/asset_manager.rs:870`），计算 SHA-256 并在当月范围查重。命中时给既有资产追加来源并直接返回；未命中时写文件、提取图片宽高、生成缩略图或音频封面、写入中央索引，最后由前端分页查询。
 
 **持续性**：`assets.jsonl` 中央索引 + 物理文件；`rebuild_hash_index` 可重建哈希索引；重启后按索引恢复。
 
@@ -121,9 +121,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：对"发给模型的每个请求"做本地中间人级观察——既能拦截外部 LLM 客户端的流量，也能透视应用内自己发的请求，替代仅凭日志猜请求体。
 
-**入口与触发者**：工具页 `/llm-inspector`（`LlmInspector.vue`）；用户开关 `monitorInternal`/`monitorExternal`。内部钩子默认 OFF（`shouldCaptureInternal()` 总开关），是**被动观测**，不主动干预请求。
+**入口与触发者**：工具页 `/llm-inspector`（`LlmInspector.vue`）；用户开关 `monitorInternal`/`monitorExternal` 分别控制内部和外部监控。内部钩子默认关闭，是**被动观测**，不主动干预请求。
 
-**完整主链**（内部钩子路径）：`useLlmRequest.sendRequest` 在调用 adapter 前 `setContext(requestId, inspectorContext)`（工具名/会话 ID/用途）→ `fetchWithTimeout`（`src/llm-apis/common.ts:697`）三个分支埋点 `triggerRequest/triggerResponse/triggerStream` → `hookRegistry` 按 `X-Request-ID` 反查上下文 → 本地回调 + Tauri `emit` 跨窗口广播（LRU 去重）→ `inspectorRecordsStore` 记录 `CombinedRecord`（source: internal/external）→ 详情面板 3 Tab（总览/请求/响应），流式 SSE 走 `inspectorStreamStore` 100ms 节流 + 多格式智能提取（OpenAI/Anthropic/Gemini/Cohere/Ollama 五类）。外部代理路径：Rust axum 代理（默认端口 8999）拦截外部客户端 → 转发上游 → `inspector-*` 事件回流。跨窗口启用状态经 `INSPECTOR_SYNC_EVENT` 三事件协议同步（`types/hooks.ts:172`）。
+**完整主链**（内部钩子路径）：发送入口在调用 adapter 前记录请求上下文，随后由带超时的 fetch 在请求、响应和流式分支埋点；钩子注册表按 `X-Request-ID` 反查上下文，再通过本地回调和 Tauri 事件跨窗口广播，记录存入内存 store。详情面板展示总览、请求和响应三类信息，流式 SSE 另以 100ms 节流并支持 OpenAI、Anthropic、Gemini、Cohere、Ollama 五种格式。外部路径由 Rust axum 代理在默认 8999 端口拦截、转发上游并回流事件；跨窗口启用状态使用三事件协议同步，定位见 `types/hooks.ts:172`。
 
 **持续性**：记录在内存 store；配置（端口、header 覆盖规则、布局比例、Token 估算开关）持久化 `appConfigDir/llm-inspector/settings.json`（createConfigManager 500ms 防抖）。记录本身不落盘。
 
@@ -137,11 +137,11 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：输入栏的指令增强——把"模板文本 + 宏 + 行级后处理"组合成可点击按钮，一键生成内容并可自动发送；支持导入 SillyTavern Quick Reply 生态资产。
 
-**入口与触发者**：输入栏快捷操作按钮（`QuickActionSelector.vue`）→ `messageInputStore.handleQuickAction(action)`（`messageInputStore.ts:328`）。用户手动点击触发。
+**入口与触发者**：用户点击输入栏快捷操作按钮（QuickActionSelector.vue），由消息输入 store 的处理入口执行；源码定位见 `messageInputStore.ts:328`。
 
-**事实对象**：`QuickActionSet`（组）+ `QuickAction`（label/content/autoSend/hotkey/lineProcessing），索引 `quick-actions-index.json`，组文件存 `{appConfigDir}/llm-chat/quick-actions/`（`useQuickActionStorage.ts:40-57`）。
+**事实对象**：`QuickActionSet` 表示快捷动作组，`QuickAction` 条目包含 label、content、autoSend、hotkey、lineProcessing 等字段；索引为 `quick-actions-index.json`，组文件存放在 `{appConfigDir}/llm-chat/quick-actions/`，定位见 `useQuickActionStorage.ts:40-57`。
 
-**完整主链**：点击 → 取 textarea 选区（无选区取全文）作为 `{{input}}` → `createMacroContext`（用户名/角色名/会话树/Agent/用户档案）→ `MacroProcessor.process` 执行模板（silent 模式）→ `lineProcessing` 逐行加前缀/后缀或正则替换（`new RegExp(pattern, flags)`，失败降级保留原文）→ 写回编辑器（选区替换或整体覆盖）→ `autoSend` 为真则 50ms 后 `handleSend()`，否则聚焦输入框。导入链：`quickActionImportService.ts` 解析 SillyTavern `qrList` 格式转成 QuickActionSet。
+**完整主链**：点击后取文本选区，无选区则取全文，作为 `{{input}}` 注入宏上下文并执行模板；随后按行添加前后缀或执行正则替换，失败时保留原文，再将结果写回选区或整体覆盖编辑器。开启自动发送时延迟 50ms 发送，否则重新聚焦输入框。导入链由 quickActionImportService.ts 解析 SillyTavern 的 `qrList` 格式。
 
 **主动性与取消**：无后台行为；执行是同步改写输入框，可编辑后发送。
 
@@ -155,7 +155,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`MacroDefinition`（name/type/phase/handler/example），注册在 `MacroRegistry`（reactive Map）。
 
-**完整主链**：`MacroProcessor.process`（`macro-engine/MacroProcessor.ts:84`）按三阶段执行——`PRE_PROCESS`（如变量初始化）→ `SUBSTITUTE`（主体替换）→ `POST_PROCESS`（如时间格式化输出），每阶段 `getMacrosByPhase` 批量处理，未注册宏记 warning。内建宏实测 74 个：datetime 26、core 19、variables 8、functions 7、system 6、tools 3、recall 2（`{{recall}}`/`{{recall_list}}`）、knowledge 1（`{{knowledge_list}}`，旧 `{{kb}}` 宏已移除）、assets/cssVariables 各 1（`macro-engine/macros/*.ts` 逐文件统计，提交 `64d0ffccd`/`9a1768a50` 等）。全局/局部变量支持 `setvar/getvar/incvar/decvar` 与 `setglobalvar/getglobalvar` 族（会话变量快照语义在对话请求与上下文笔记 9.4）。
+**完整主链**：`MacroProcessor` 按 PRE_PROCESS、SUBSTITUTE、POST_PROCESS 三阶段执行，分别处理初始化、主体替换和格式化输出；每阶段批量处理对应宏，未注册宏记录 warning。内建宏实测 74 个，分类数量为 datetime 26、core 19、variables 8、functions 7、system 6、tools 3、recall 2、knowledge 1，另有 assets 和 cssVariables 各 1；旧 `{{kb}}` 宏已移除，统计依据是 `macro-engine/macros/*.ts` 及相关提交。全局和局部变量支持读写、增减及全局变量操作，会话变量快照语义见对话请求与上下文笔记 9.4；三阶段入口见 `macro-engine/MacroProcessor.ts:84`。
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
@@ -167,9 +167,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：把任意工具页甚至聊天输入框从主窗口拖出来成为独立无边框窗口，跨窗口共享同一状态源，位置大小自动记忆——多表面连续性的桌面实现。
 
-**入口与触发者**：工具卡片/标签页的分离菜单 → `useDetachedManager.createToolWindow`（Tauri `create_tool_window`）；组件级分离走 `useDetachable`（rdev 拖拽会话，全局快捷键/平台监听）。
+**入口与触发者**：用户从工具卡片或标签页的分离菜单创建工具窗口；组件级分离由 useDetachable 处理 rdev 拖拽会话、全局快捷键和平台监听。
 
-**完整主链**：分离请求 → 新建 Tauri 窗口（URL 带工具 ID，`/detached-window/...` 或 `/detached-component/...`）→ `DetachedWindowContainer.vue`/`DetachedComponentContainer.vue` 按 ID 加载工具组件 → 跨窗口状态经 `logicHook`（返回 `props: Ref` + `listeners`）与主窗口共享同一 store/状态（`docs/guide/detached-window-system.md`）→ 窗口位置/大小经窗口配置系统持久化；`useDetachedManager` 每 30 秒 `ensureWindowVisible` 检查防止窗口移出屏幕（`useDetachedManager.ts:194-208`，受 `autoAdjustWindowPosition` 设置控制）。聊天/媒体生成输入框的状态同步走 `useWindowSyncBus` + `useStateSyncEngine`（增量 patch 与全量两种模式，`VersionGenerator` 防旧覆盖新）。
+**完整主链**：分离请求创建带工具 ID 的 Tauri 窗口，由对应容器按 ID 加载工具组件；跨窗口状态通过 logicHook 与主窗口共享同一 store，窗口位置和大小由配置系统持久化。管理器每 30 秒检查窗口是否移出屏幕，定位见 `useDetachedManager.ts:194-208`；聊天和媒体输入框另经窗口同步总线传递增量或全量状态，并用版本号避免旧状态覆盖新状态。
 
 **持续性**：窗口布局与已分离列表持久化（`get_all_detached_windows` 启动恢复）；`window-sync-architecture.md` 记录状态同步协议。
 
@@ -217,13 +217,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：把旧 knowledge 拆分出的"语义条目召回"做成上下文即时召回层——比世界书（手动/关键词规则）更强的语义即时检索；传统文档库 RAG 的位置由重构后的 Knowledge 主动工具承担（不再是空壳）。
 
-**入口与触发者**：工具页 `/recall`（工作区/统计/监控/实验室/设置）；上下文管道 `recall-processor`（priority 450；原 `knowledge-processor` 已删除）解析 `【recall::...】` 占位符（严格参数协议，`recall-placeholder.ts` 校验 value 编码、数值范围与未知/重复参数；旧 `【kb::...】` 占位符只告警不执行）与 Agent `recallConfig.bindings` 后构造 `RecallRetrievalRequest` 调用 `resolvePlaceholderRetrieval`；Agent 侧 `recall.registry.ts` 导出两个实例——`recall-basic`（searchEntries/upsertEntry/updateEntryContent，searchEntries 新增 `presetId` 参数）与 `recall-admin`（listRecallCollections/listEntriesMetadata/batchUpdateMetadata/deleteEntry，均 `agentCallable: true`）。
+**入口与触发者**：工具页 `/recall` 提供工作区、统计、监控、实验室和设置；上下文管道以 priority 450 的 recall-processor 解析 `【recall::...】` 占位符，校验编码、数值范围以及未知或重复参数。旧 `【kb::...】` 只告警不执行。管道结合 Agent 绑定构造检索请求并调用即时召回入口；Agent 侧导出基础读写实例和管理实例，后者的方法均标记为可供 Agent 调用。
 
-**事实对象**：`RecallCollection`（思绪集）、`RecallEntry`（key + Markdown content + 带权标签 + priority + 内容哈希 + 资产引用）、`RecallResult`（分数/匹配类型/高亮）、`RecallSearchFilters`；检索预设 `presetId: "algorithmic" | "comprehensive"`（`types/pipeline.ts`）。
+**事实对象**：RecallCollection 表示思绪集，RecallEntry 保存 key、Markdown 内容、带权标签、优先级、内容哈希和资产引用，RecallResult 保存分数、匹配类型和高亮，另有检索过滤条件对象；预设字段 `presetId: "algorithmic" | "comprehensive"` 的定义见 types/pipeline.ts。
 
 **完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`）→ 按绑定/占位符参数（when/gate-tags/entries/limit/min-score）→ 检索管线执行 → 后置过滤 → `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧旧 `recall/search/` 四引擎模块（keyword/vector/lens/blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` + `retrieval_modules.rs`）：管线按预设（`Algorithmic`/`Comprehensive`）编排候选模块（内容向量/标签向量/Lens 关联等），产出带 `source_module_id`/ArtifactKey 的可追踪检索工件；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/预设/模型等要素（提交 `d2d82c605`、`92d78971d`、`c46cc2fed`、`5403999b1`、`ad958b0fd` 等）。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量 → 标签向量同步更新，HNSW 可按需重建。
 
-**持续性**：存储已切换为 **SQLite 真源**——`SqliteRecallRepository`（`src-tauri/src/recall/storage/sqlite.rs`）落盘 `recall.db`/向量文件，旧 `appData/knowledge/` 数据经幂等迁移（`migration_baseline.rs`、旧备份格式转换）；备份事件 `recall-backup-progress`。`knowledge-base/` 与 `knowledge.rs` **不再是空壳**：Knowledge 重构为主动工具（`knowledge-base.registry.ts` 的 `knowledgeRegistry` 提供 `listLibraries`/`search`（strategy: auto/keyword/semantic/hybrid、topK 1–50、filters、includeAdjacent、maxChars）等 `agentCallable` 方法，含资料库访问授权收敛与聊天显式资料引用（`KnowledgeReferenceControl` chips）、研究任务编排与 FTS/标签管理，提交 `dc8161aac`/`ae7c82d90`/`01c5e6ba3` 等）。
+**持续性**：存储已切换为 **SQLite 真源**，由 SqliteRecallRepository 落盘数据库和向量文件，旧 knowledge 数据经幂等迁移，备份过程通过 recall-backup-progress 事件报告。knowledge-base 已重构为主动工具，提供资料库列表和多策略搜索，支持 topK、过滤条件、相邻内容和字符上限，并收敛资料库访问授权、聊天显式资料引用、研究任务编排及 FTS/标签管理；关键存储定位见 `src-tauri/src/recall/storage/sqlite.rs`。
 
 **独特性判断**：与 `worldbook-processor`（priority 300，基于 st-worldbook-manager 的手动/关键词匹配）同为"上下文即时注入"族，但 recall 提供语义向量召回 + 可插拔检索管线（预设/模块）+ 双 Agent 实例，是知识注入层的 RAG 进阶面；检索管线的模块化工件追踪（ArtifactKey/source_module_id）在样本中较完整。
 
@@ -303,7 +303,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`Flow`（步骤列表，主流程 + 多个子流程）、`CallStepParams`/`GotoStepParams`/`CounterStepParams` 等步骤类型（click/input/colorCheck/goto/counter/ocr/call 等 10 类）、runtime（counters/variables/callStack）。
 
-**完整主链**：`useFlowExecutor` 执行步骤 → `call` 步骤实现子流程函数式调用（形参/实参、`{var}` 插值、`saveResultToVariable` 把返回值写回调用方局部变量、`MAX_CALL_DEPTH=10` 调用栈深度上限、局部/全局变量作用域）→ `goto`/`colorCheck`/`counter`/`ocr` 条件跳转体系（子流程内跳转，跨流程跳转禁止，`types.ts:230-231`）→ OCR 步骤经 `toolRegistryManager.getRegistry("smart-ocr").runOcr()` 动态复用 smart-ocr 引擎（`stepExecutors.ts:416-422`）→ 执行日志/高亮（主流程持续高亮调用方 call 步骤）→ 流程持久化（`useFlowPersistence.ts`，步骤类型白名单）；删除子流程时自动清理所有 call 引用（store 测试覆盖）。
+**完整主链**：流程执行器按步骤运行；call 步骤支持子流程函数式调用、形参实参、变量插值、返回值写回局部变量，并把调用栈深度限制为 10 层。goto、colorCheck、counter 和 ocr 组成条件跳转体系，只允许在子流程内跳转，跨流程跳转被禁止（`types.ts:230-231`）。OCR 步骤动态复用 smart-ocr 引擎，随后记录执行日志并高亮调用方；流程按步骤类型白名单持久化，删除子流程时自动清理相关调用引用。OCR 复用入口见 `stepExecutors.ts:416-422`。
 
 **独特性判断**：普通窗口自动化工具只有录制回放；这里提供"函数调用 + 变量作用域 + 条件跳转 + OCR 联动"的流程语言，且与 smart-ocr 平台层形成跨工具闭环，接近小型 RPA 语言。无 LLM 参与（无理解窗口/生成流程）。
 
@@ -317,7 +317,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：字幕时间轴条目（文本 + 相对时间戳）、监控配置（采样频率 500-3000ms/去重灵敏度高-中-低/OCR 引擎）、`MonitorBox` 悬浮窗几何信息。
 
-**完整主链**：`useScreenMonitor` 定时器 → `invoke("capture_screen_rect")`（Rust Windows GDI 抓取绝对坐标区域像素，`window_automator.rs`）→ Rust 内计算 aHash（8×8 缩放 + BT.601 灰度 + 64 位指纹）与前端 `lastHash` 汉明距离对比（阈值：高 2/中 4/低 8），无变化直接返回 `changed:false`（顺延当前字幕结束时间，不传 PNG）→ 有变化才 PNG 编码 → `useOcrRunner().runOcr` 复用 smart-ocr 平台（Windows Native/VLM/Tesseract.js/云端/插件引擎 + 全局 OCR Profile 共享）→ 编辑距离相似度 ≥90% 判定同一条字幕（仅更新结束时间戳，新文本更长则用新文本修正），<90% 开启新条目 → 大字编辑面板（Ctrl+Enter 提交）→ 一键发送到全局 Chat 输入框（纯文本/带时间戳两格式，走 `useSendToChat`）或导出 `.srt`。
+**完整主链**：屏幕监控定时调用 `capture_screen_rect`，由 Rust Windows GDI 抓取绝对坐标区域像素并计算 aHash；前端比较汉明距离，按高、中、低三档使用 2、4、8 的阈值，无变化则顺延当前字幕结束时间且不传 PNG，有变化才编码图像。随后复用 smart-ocr 平台识别，编辑距离相似度达到 90% 时更新原字幕，否则新建条目；文本可在编辑面板中提交，一键发送到全局 Chat 或导出 `.srt`。
 
 **持续性**：监控配置 ConfigManager 防抖持久化；字幕时间轴在会话内（清空按钮），不落盘。
 

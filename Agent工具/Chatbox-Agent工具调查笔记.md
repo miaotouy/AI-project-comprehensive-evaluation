@@ -16,13 +16,13 @@
 
 ## 结论摘要
 
-1. **工具集按会话动态组装**：`buildToolsForSession()` 是唯一的 `ToolSet` 构造点，每次调用时依据 `agentMode`、模型能力声明、附件、知识库、MCP 配置、`codeExecution` 选项等条件决定哪些工具进入模型视野。`web_search` 与 `parse_link` 是唯一独立于 agentMode 的工具。
+1. **工具集按会话动态组装**：buildToolsForSession 是唯一的 ToolSet 构造点，每次调用时依据 agentMode、模型能力声明、附件、知识库、MCP 配置、codeExecution 选项等条件决定哪些工具进入模型视野。web_search 与 parse_link 是唯一独立于 agentMode 的工具。
 
-2. **Windows 无 OS 级沙箱**：`@anthropic-ai/sandbox-runtime`（SRT）仅在 macOS/Linux 上启动；Windows 路径明确记录"no OS isolation"，直接在主进程执行代码，边界只靠路径白名单。`code_execution` 和 `user_exec` 在 Windows 上应按宿主执行能力评估，而非沙箱容器。
+2. **Windows 无 OS 级沙箱**：@anthropic-ai/sandbox-runtime（SRT）仅在 macOS/Linux 上启动；Windows 路径明确记录"no OS isolation"，直接在主进程执行代码，边界只靠路径白名单。code_execution 和 user_exec 在 Windows 上应按宿主执行能力评估，而非沙箱容器。
 
-3. **`list_files` 工具名冲突**：知识库工具集（`getToolSet`）与文件系统工具集（`buildFilesystemTools`）都注册了 `list_files`，在 `tools-builder.ts` 的合并顺序中文件系统工具集后写入，知识库版本被静默覆盖。这是一个已确认的 bug。
+3. **list_files 工具名冲突**：知识库工具集（getToolSet）与文件系统工具集（buildFilesystemTools）都注册了 list_files，在 tools-builder.ts 的合并顺序中文件系统工具集后写入，知识库版本被静默覆盖。这是一个已确认的 bug。
 
-4. **`AppActionApprovalPausedError` 不可被 `agentFullAccess` 绕过**：`full_access` 仅影响 `user_exec` 与文件变更（`write_file`/`edit_file`）的逐次确认；`chatbox_cli` 工具中的计费/状态变更操作始终走 `AppActionApprovalPausedError` 路径，与 `agentFullAccess` 设置无关。
+4. **AppActionApprovalPausedError 不可被 agentFullAccess 绕过**：full_access 仅影响 user_exec 与文件变更（write_file/edit_file）的逐次确认；chatbox_cli 工具中的计费/状态变更操作始终走该暂停路径，与 agentFullAccess 设置无关。
 
 5. **Agent 可自安装 Skill 并触发后续高权限行为**：`install_skill` 工具仅校验路径范围与 SKILL.md 格式，不校验 `SKILL.md` 正文内容；安装后自动启用；若后续 `load_skill` 返回的指令要求调用 `user_exec`，则仍需经过审批（除非 `agentFullAccess=true`），"自安装"环节本身不直接执行宿主命令；结合 `agentFullAccess=true` 时，从生成、安装、启用、加载到执行的整条链路可在无人工确认下完成。
 
@@ -80,7 +80,7 @@
 
 ### 1.1 唯一构造点
 
-`buildToolsForSession(model, options)` 是整个应用唯一装配 AI SDK `ToolSet` 的函数，返回 `{ tools, instructions }`。它按顺序合并多个来源的 `ToolSet`（普通对象 spread `{...tools, ...xxxToolSet.tools}`），没有专门的命名空间隔离或冲突检测机制——后写入的键会覆盖同名先写入的键。
+buildToolsForSession 是整个应用唯一装配 AI SDK ToolSet 的函数，返回工具和 instructions。它按顺序合并多个来源的工具集（普通对象展开），没有专门的命名空间隔离或冲突检测机制——后写入的键会覆盖同名先写入的键。
 
 ```ts
 tools = { ...tools, ...kbToolSet.tools }          // tools-builder.ts:309
@@ -91,23 +91,23 @@ tools = { ...tools, ...codeExecToolSet.tools }    // :321
 tools = { ...tools, ...filesystemToolSet.tools }  // :332
 ```
 
-### 1.2 已确认的工具名冲突：`list_files`
+### 1.2 已确认的工具名冲突：list_files
 
-- `src/renderer/packages/model-calls/toolsets/knowledge-base.ts:224` 定义 `list_files`（列出知识库文件，分页）。
-- `src/renderer/packages/model-calls/toolsets/filesystem.ts:297-339` 也定义 `list_files`（列目录）。
-- 合并顺序中知识库工具集在 `tools-builder.ts:309` 写入，文件系统工具集在 `:332` 后写入并覆盖。
+- `src/renderer/packages/model-calls/toolsets/knowledge-base.ts:224` 定义 list_files（列出知识库文件，分页）。
+- `src/renderer/packages/model-calls/toolsets/filesystem.ts:297-339` 也定义 list_files（列目录）。
+- 合并顺序中知识库工具集先写入，文件系统工具集后写入并覆盖，具体顺序见 `tools-builder.ts:309-332`。
 
-当 `knowledgeBase` 与 `agentMode=on` 同时成立时（`kbSupported` 为真），知识库的 `list_files` 会被文件系统工具集的同名版本静默覆盖，模型永远拿不到"列出知识库文件"的能力，只能拿到"列目录"。系统提示词里仍会包含知识库工具集描述中对 `list_files` 的说明（`tools-builder.ts:270` 把 `kbToolSet.description` 拼进 `instructions`），造成"提示词声称的工具"与"实际可调用的工具"不一致——这是模型侧的隐性行为缺陷，而不是安全问题。横向调查笔记未提及此点，属新发现。
+当 knowledgeBase 与 agentMode=on 同时成立时（kbSupported 为真），知识库版本会被文件系统版本静默覆盖，模型永远拿不到“列出知识库文件”的能力，只能拿到“列目录”。系统提示词仍会保留知识库工具集的说明，造成“提示词声称的工具”与“实际可调用的工具”不一致——这是模型侧的隐性行为缺陷，而不是安全问题。相关拼接逻辑见 tools-builder.ts:270-332；横向调查笔记未提及此点，属新发现。
 
-`read_file` 也有类似的双重定义（`toolsets/file.ts:97` 面向"用户上传的大文件"，`toolsets/code-execution.ts:219` 面向沙箱文件），但二者互斥出现：`needFileToolSet` 要求 `!codeExecution`（`tools-builder.ts:239`），因此不会同时注册，不构成冲突。
+read_file 也有类似的双重定义：一个面向用户上传的大文件，一个面向沙箱文件；但二者互斥出现。needFileToolSet 要求 !codeExecution，因此不会同时注册，不构成冲突，判断见 tools-builder.ts:239。
 
 ### 1.3 Schema 来源
 
-所有内建工具的 `inputSchema` 都用 AI SDK 的 `jsonSchema()` 直接手写 JSON Schema 字面量（未使用 zod 转换层），例如 `user_exec` 的 schema 只有一个 `command: string` 字段（`tools-builder.ts:500-510`）。MCP 工具的 schema 来自 `@ai-sdk/mcp` 的 `client.tools()`（`mcp/controller.ts:101`），即 MCP server 自身声明的 schema，Chatbox 不做二次校验或收紧。
+所有内建工具的 inputSchema 都用 AI SDK 的 jsonSchema 直接手写 JSON Schema 字面量（未使用 zod 转换层），例如 user_exec 的 schema 只有一个 command 字段，见 tools-builder.ts:500-510。MCP 工具的 schema 来自 @ai-sdk/mcp 的 client.tools，即 MCP server 自身声明的 schema，Chatbox 不做二次校验或收紧。
 
 ### 1.4 MCP 工具命名与冲突处理
 
-`mcpController.getAvailableTools()`（`src/renderer/packages/mcp/controller.ts:209-234`）遍历所有 `running` 状态的 server，对每个工具调用 `normalizeToolName(config.name, toolName)`：
+可用工具收集入口遍历所有 running 状态的 server，并对每个工具调用 normalizeToolName：
 
 ```ts
 const SERVER_NAME_REGEX = /^[A-Za-z0-9_-]+$/
@@ -121,9 +121,9 @@ function normalizeToolName(serverName: string, toolName: string) {
 ```
 （`mcp/controller.ts:237-245`）
 
-即工具名统一带 `mcp__<server>__<tool>` 前缀。但当 `serverName` 包含非 `[A-Za-z0-9_-]` 字符（例如中文名、emoji）时，前缀退化为 `mcp__<tool>`，**丢失 server 归属信息**——如果两个 server 都用了非法字符的名字且导出同名工具，会在 `getAvailableTools()` 的 for 循环中互相覆盖（`toolSet[normalizeToolName(...)] = {...}` 直接对象赋值，无冲突检测）。这是一个已确认但触发条件较窄（用户自定义 server 名含特殊字符）的问题。
+即工具名统一带 mcp__<server>__<tool> 前缀。但当 serverName 包含非 [A-Za-z0-9_-] 字符（例如中文名、emoji）时，前缀退化为 mcp__<tool>，**丢失 server 归属信息**。如果两个 server 都用了特殊字符名称且导出同名工具，就会在收集过程中互相覆盖，因为这里是直接对象赋值而无冲突检测。这是一个已确认但触发条件较窄的问题，源码见 `mcp/controller.ts:209-245`。
 
-MCP 工具的 `execute` 被统一包一层 try/catch（`mcp/controller.ts:217-229`）：MCP 调用失败不会抛出到 AI SDK 层，而是返回 `{isError: true, content: [...]}` 结构，注释解释是为了避免脏 Error 对象写入对话历史导致下次请求本地校验失败（`AI_InvalidPromptError`）。
+MCP 工具的 execute 被统一包一层 try/catch：调用失败不会抛出到 AI SDK 层，而是返回 `{isError: true, content: [...]}` 结构，避免脏 Error 对象写入对话历史导致下次请求本地校验失败（AI_InvalidPromptError）。实现见 `mcp/controller.ts:217-229`。
 
 **依据**：[tools-builder.ts:291-359](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[knowledge-base.ts:154-190,219-229](../../chatbox/src/renderer/packages/model-calls/toolsets/knowledge-base.ts)、[filesystem.ts:296-339](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[mcp/controller.ts:209-245](../../chatbox/src/renderer/packages/mcp/controller.ts)
 
@@ -131,7 +131,7 @@ MCP 工具的 `execute` 被统一包一层 try/catch（`mcp/controller.ts:217-22
 
 ## 2. 工具发现与注入：条件判定
 
-`buildToolsForSession()`（`tools-builder.ts:221-366`）中每类工具的启用条件：
+buildToolsForSession 中每类工具的启用条件如下（`tools-builder.ts:221-366`）：
 
 | 工具/工具集 | 启用条件 | 是否需 agentMode |
 | --- | --- | --- |
@@ -147,9 +147,9 @@ MCP 工具的 `execute` 被统一包一层 try/catch（`mcp/controller.ts:217-22
 | `install_skill` | `includeAgentTools && codeExecution` | 是 |
 | `chatbox_cli` | `includeAgentTools && enabledSkills 含 'chatbox-product-info'` | 是 |
 
-`includeAgentTools = agentMode === 'on' && model.isSupportToolUse('agent')`（`tools-builder.ts:231-232`）。注释明确指出：函数调用能力弱的模型（如 DeepSeek V3/R1）在 `isSupportToolUse('agent')` 上返回 false，从而拿不到任何 agent 专属工具（MCP、沙箱、skills、KB、code execution），但仍可用 `web_search`。
+includeAgentTools 要求 agentMode 为 on 且模型支持 agent 工具。注释明确指出：函数调用能力弱的模型（如 DeepSeek V3/R1）会因此拿不到任何 agent 专属工具（MCP、沙箱、skills、KB、code execution），但仍可用 web_search，判断见 `tools-builder.ts:231-232`。
 
-`agentMode` 本身的最终取值由 `computeEffectiveAgentMode(agentModeValue, agentModeSupported)`（`agent-harness.ts:85-88`）决定：`agentModeSupported = platform.type === 'desktop' && model.isSupportToolUse('agent')`（`orchestration.ts:500`），即**移动/Web 平台完全不进入 agent 工具路径**（`platform.type === 'desktop'` 硬性约束）。
+agentMode 的最终取值由 computeEffectiveAgentMode 决定；支持条件要求平台类型为 desktop 且模型支持 agent 工具。因此**移动/Web 平台完全不进入 agent 工具路径**，源码见 `agent-harness.ts:85-88` 与 `orchestration.ts:500`。
 
 `codeExecution` 选项本身还叠加了 Pro 校验和沙箱可用性探测：
 ```ts
@@ -170,25 +170,23 @@ if (canExecuteCode && sandboxProvider) {
 
 ### 3.1 原生 tool call，非文本协议
 
-Chatbox 完全依赖 AI SDK v6 的原生 `streamText()` 工具调用协议（`shared/models/abstract-ai-sdk.ts`），不解析文本块里的自定义工具调用标记；AIO Hub 当前的 VCP 实现与 VCPToolBox 则走文本协议路径。Provider 差异（OpenAI function calling、Gemini functionCall、Anthropic tool_use 等）由 AI SDK 的各 provider adapter 处理，Chatbox 只处理 AI SDK 归一化后的 `ModelStreamPart` 流。
+Chatbox 完全依赖 AI SDK v6 的原生 streamText 工具调用协议，不解析文本块里的自定义工具调用标记；AIO Hub 当前的 VCP 实现与 VCPToolBox 则走文本协议路径。Provider 差异由 AI SDK 的各 provider adapter 处理，Chatbox 只处理归一化后的 ModelStreamPart 流，入口见 `shared/models/abstract-ai-sdk.ts`。
 
 一个 Provider 特化点：`ensureGoogleFunctionCallSignatures: model.apiStyle === 'google'`（`agent-harness.ts:330`），为 Gemini 的函数调用签名做专门处理；以及 `providerMetadata` 中携带 Gemini 3 的 `thoughtSignature`（`stream-chunk-processor.ts:44` 注释：并行工具调用批次中，Gemini 3 只对批次首个 functionCall 签名）。
 
 ### 3.2 流式期间的 tool call 组装
 
-`processStreamChunk()`（`stream-chunk-processor.ts:92-399`）状态机维护单槎位 `preparingToolInput`，处理以下 chunk 序列：
+流处理状态机维护一个待组装的工具输入，处理以下 chunk 序列；实现见 `stream-chunk-processor.ts:92-399`：
 
 ```text
 tool-input-start → tool-input-delta(多次，累积inputText，做parsePartialJson预览) → tool-input-end → tool-call
 ```
 
-`tool-call` chunk 落地时创建 `state: 'call'` 的 part；`tool-result`/`tool-error` 原位更新已存在的 part（按 `toolCallId` 匹配 `contentParts.find(...)`）。**toolCallId 去重**体现在两处：
-1. `stream-chunk-processor.ts:263-264` 用 `toolCallId` 查找已存在 part 并原位更新，不会重复 push。
-2. 工具执行层各自有 `executionCache`（`Map<toolCallId, {command/signature, promise}>`），例如 `user_exec` 的 `buildUserExecTool`（`tools-builder.ts:489,513-519`）：若同一 `toolCallId` 被重复调用但参数不同，直接 `Promise.reject`；参数相同则复用同一个 Promise（防止 AI SDK 重试或多线程触发同一调用两次导致的重复副作用执行）。`chatbox_cli` 工具也有相同模式（`chatbox-cli.ts:34-46`）。
+tool-call chunk 落地时创建 call 状态的 part；tool-result/tool-error 原位更新已有 part。**toolCallId 去重**有两层：流处理层按调用 ID 更新而不重复追加；执行层缓存同一调用的 Promise，参数不同则拒绝，参数相同则复用，以防重试造成重复副作用。后者以 user_exec 为例，源码见 `tools-builder.ts:489,513-519`；chatbox_cli 也采用相同模式。
 
 ### 3.3 并行工具调用与 `stepIndex`
 
-`stepIndex` 字段区分"模型一次响应内并行发出的多个 tool call"（同一 `stepIndex`）与"多轮串行 step"（`finish-step` chunk 递增 `stepIndex`，`stream-chunk-processor.ts:373-378`）。`tool_call_limit` 的暂停会冻结整个批次（同 `stepIndex` 的所有 call），而审批类暂停（`user_exec_approval` 等）默认只针对触发暂停的那个调用（`orchestration.ts:333` 注释 + `:398-409` 的 `findPausedApprovalBatch`）。
+stepIndex 区分同一响应内并行发出的调用与多轮串行 step。tool_call_limit 暂停会冻结整个批次，而审批类暂停默认只针对触发暂停的调用；递增逻辑和批次查找见 `stream-chunk-processor.ts:373-378`、`orchestration.ts:333,398-409`。
 
 **依据**：[abstract-ai-sdk.ts:1-80,320-335](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[agent-harness.ts:324-331](../../chatbox/src/renderer/stores/session/agent-harness.ts)、[stream-chunk-processor.ts:92-354](../../chatbox/src/renderer/stores/session/stream-chunk-processor.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)
 
@@ -200,23 +198,23 @@ tool-input-start → tool-input-delta(多次，累积inputText，做parsePartial
 
 Chatbox 对文件路径的规范化分裂成 renderer 侧（工具参数级，宽松/尽力）和 main 侧（sandbox 写入级，严格）两层：
 
-**Renderer 侧**（`shared/utils/windows-path.ts`）：`normalizeWindowsAbsolutePath()` 用正则同时识别原生 Windows 路径（`C:\...`）、UNC 路径（`\\server\share\...`）与 WSL/Git Bash/Cygwin 的类 POSIX 别名（`/mnt/c/...`、`/c/...`、`/cygdrive/c/...`），统一折算为大写驱动器号的原生形式；内部用 `normalizeSegments()` 手动处理 `.`/`..`（遇 `..` 时 `segments.pop()`），因此 `isWindowsPathInside()` 的路径穿越判定发生在**规范化之后**（先转成绝对形式再比较前缀），可以防御 `C:\work\..\Windows\System32` 这类字面穿越。大小写通过 `.toLocaleLowerCase('en-US')` 统一处理（`windows-path.ts:62-64`），是**已确认**的大小写无关比较。
+**Renderer 侧**（shared/utils/windows-path.ts）：路径规范化同时识别原生 Windows、UNC 和 WSL/Git Bash/Cygwin 别名，并统一折算为大写驱动器号的原生形式；内部还会折叠 `.`/`..`，因此路径穿越判定发生在**规范化之后**，可以防御 `C:\work\..\Windows\System32` 这类字面穿越。大小写统一按英文小写处理，是**已确认**的大小写无关比较，见 windows-path.ts:62-64。
 
-**"phantom home" 重写**（`toolsets/sandbox-paths.ts`）：模型常因训练先验产生 `/home/user/...`、`~` 等云沙箱路径，`remapPhantomHomePath()` 会把它们映射为相对沙箱工作目录的路径，但特别保留了"若宿主真实 home 恰好是 `/home/user`"的例外（不重写，避免误伤真实路径访问）。
+**"phantom home" 重写**（toolsets/sandbox-paths.ts）：模型常因训练先验产生 `/home/user/...`、`~` 等云沙箱路径，路径重写逻辑会把它们映射为相对沙箱工作目录的路径，但特别保留宿主真实 home 恰好是 `/home/user` 的例外，避免误伤真实路径访问。
 
-**main 侧**（`main/sandbox/manager.ts`）是唯一具备**符号链接（symlink）解析**能力的层：`validateWritePathAgainstGrants()`（`manager.ts:458-492`）逐层向上找到"最近已存在的祖先目录"，对该祖先调用 `fs.promises.realpath()` 解析符号链接得到 `realAncestor`，再拼接尚不存在的路径段得到 `realTarget`，最后用解析后的真实路径判断是否仍在 `grant.canonicalRoot` 内。`grant.canonicalRoot` 在授权时也做过一次 `realpathSync.native()`（`manager.ts:319-322`），因此**授权目录本身若是符号链接，也会在授权时被解析为真实目标**，防止后续把符号链接目标偷换。`isUnsafeResolvedPath()`（`manager.ts:283-317`）同时检查候选目录的字面路径与其 canonical 路径，防止符号链接把 `/etc`、home、Windows 系统目录等敏感根伪装成"安全的用户目录"。
+**main 侧**（main/sandbox/manager.ts）是唯一具备**符号链接（symlink）解析**能力的层：写入校验逐层找到最近已存在的祖先目录，解析其符号链接，再拼接尚不存在的路径段，最后用真实路径判断是否仍在授权根目录内。授权目录本身也会在授权时解析为真实目标，防止后续偷换符号链接目标；候选目录的字面路径与 canonical 路径还会同时接受敏感根检查。相关实现见 manager.ts:283-322,458-492。
 
-renderer 侧的路径判断（`filesystem.ts` 的 `isInsideRoot`/`isInsideWorkingDirectories`）**不做 realpath 解析**，只做字符串前缀匹配 + `.`/`..` 折叠（`normalizeAbsolutePosixPath()`，`filesystem.ts:156-167`）。这意味着 renderer 层"是否需要审批"的判定可能被一个尚未创建、事后指向敏感目录的符号链接绕过；但即使 renderer 层误判为"沙箱内可直接写"，真正的写入仍要经过 main 侧 `validateSessionWritePath()`（`manager.ts:533-548`）的 realpath 复核，构成纵深防御。**已确认**：两层校验独立存在，renderer 层校验更宽松，main 层是权威边界；`validateWritePathAgainstGrants()` 覆盖 main 侧 `writeFile`/`editFile`/`copyFileToSandbox`/`copyBlobToSandbox`/`persistSandboxArtifact` 等写入函数。
+renderer 侧的路径判断**不做 realpath 解析**，只做字符串前缀匹配和路径折叠（filesystem.ts:156-167）。因此“是否需要审批”的判定可能被一个尚未创建、事后指向敏感目录的符号链接绕过；但真正写入仍要经过 main 侧的真实路径复核，构成纵深防御。**已确认**：两层校验独立存在，renderer 侧更宽松，main 侧是权威边界；该边界覆盖各类文件写入函数，入口见 manager.ts:533-548。
 
 ### 4.2 UNC / 驱动器号 / 大小写
 
-`isWindowsFilesystemRoot()`（`windows-path.ts:49-54`）识别 `C:\` 与 `\\server\share\` 两种"文件系统根"，在 `getSafeUserWriteGrants()`（`manager.ts:334-358`）中被用来拒绝把整个驱动器或整个 UNC 共享授权为可写目录。
+文件系统根判断会识别 `C:\` 与 `\\server\share\` 两种根路径，并据此拒绝把整个驱动器或整个 UNC 共享授权为可写目录，见 windows-path.ts:49-54 与 manager.ts:334-358。
 
 ### 4.3 命令参数构造：无字符串拼接注入面
 
-- `code_execution` 的代码通过 **stdin** 传给子进程（`buildSandboxStdinScript()`，`main/sandbox/exec-script.ts:67-83`），子进程以 `spawn(cmd, args, {shell: false})` 启动（`manager.ts:787-795`），因此用户/模型提供的代码内容不经过任何 shell 解析层，没有 shell 元字符注入面。macOS/Linux 上仅对**外层包装命令**（SRT 的 `wrapWithSandboxArgv`）做了 `shellQuote()`（`manager.ts:765`），这是构造 sandbox-runtime 的内部包装命令，不是用户代码本身。
-- `user_exec` 的命令字符串本身通过 shell 解释执行（Windows: PowerShell 从 stdin 读取脚本文本；macOS/Linux: `bash -lc command`，`user-exec-runner.ts:92-93,122-128`）——这是**设计如此**，因为 `user_exec` 的目的就是让模型执行任意 shell 命令，注入面由白名单/AI 策略/人工审批把关，而不是参数转义。
-- 沙箱内文件写入/编辑通过内嵌 `JSON.stringify()` 把内容/路径写进一段 Node 脚本源码后经 stdin 送入 `node`（`filesystem.ts:243-263,265-294`），同样规避 shell 转义问题，但依赖 `JSON.stringify` 的转义正确性（Node 内建实现，可信）。
+- code_execution 的代码通过 **stdin** 传给以 shell=false 启动的子进程，因此不经过 shell 解析层，没有 shell 元字符注入面。macOS/Linux 只对外层沙箱包装命令做 shellQuote 处理，不涉及用户代码，依据 exec-script.ts:67-83 与 manager.ts:754-795。
+- user_exec 的命令字符串通过 shell 解释执行：Windows 使用 PowerShell，macOS/Linux 使用 bash -lc。这是**设计如此**，因为该工具的目的就是让模型执行任意 shell 命令，注入面由白名单、AI 策略和人工审批把关，而不是参数转义。
+- 沙箱内文件写入/编辑把内容和路径编码进 Node 脚本后经 stdin 送入 node，同样规避 shell 转义问题，但依赖 JSON.stringify 的转义正确性（Node 内建实现，可信）。
 
 **依据**：[windows-path.ts:1-66](../../chatbox/src/shared/utils/windows-path.ts)、[sandbox-paths.ts:1-51](../../chatbox/src/renderer/packages/model-calls/toolsets/sandbox-paths.ts)、[filesystem.ts:99-241](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[manager.ts:280-548,750-796](../../chatbox/src/main/sandbox/manager.ts)、[exec-script.ts:47-83](../../chatbox/src/main/sandbox/exec-script.ts)、[user-exec-runner.ts:71-128](../../chatbox/src/main/skills/user-exec-runner.ts)
 
@@ -226,17 +224,17 @@ renderer 侧的路径判断（`filesystem.ts` 的 `isInsideRoot`/`isInsideWorkin
 
 ### 5.1 最大步数
 
-`stopWhen: [stepCountIs(options.maxSteps || Number.MAX_SAFE_INTEGER), stopWhenPersistentToolCallPause()]`（`abstract-ai-sdk.ts:330,764`，两处分别对应流式/非流式调用路径）。`maxSteps` 是 `ChatStreamOptions` 的可选字段（`shared/models/types.ts:56,80`），**搜索全仓库未发现任何调用点显式传入 `maxSteps`**，即实际生效值恒为 `Number.MAX_SAFE_INTEGER`——AI SDK 层面没有步数上限，真正的步数约束来自应用层的 `MAX_TOOL_CALLS_BEFORE_CONFIRMATION`（见下）。这是横向笔记未提及的细节。
+AI SDK 的停止条件使用 maxSteps 或 Number.MAX_SAFE_INTEGER；**搜索全仓库未发现任何调用点显式传入 maxSteps**，因此实际生效值恒为后者。SDK 层面没有步数上限，真正的约束来自应用层工具调用上限（流式与非流式入口见 abstract-ai-sdk.ts:330,764）。这是横向笔记未提及的细节。
 
 ### 5.2 应用层工具调用计数上限
 
-`withToolCallLimitPause(tools, MAX_TOOL_CALLS_BEFORE_CONFIRMATION)`（`orchestration.ts:302,327`，`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25`，常量移到 `shared/utils/tool-call-limit-pause.ts:7`）。实现是给每个工具的 `execute` 包一层计数器闭包：第 26 次调用（跨工具累加，非按工具单独计数）抛出 `ToolCallLimitPausedError`，触发 `pauseReason.type = 'tool_call_limit'`，暂停整批同 `stepIndex` 的调用，等待用户点击"继续"或"停止"。这不是"失败"，是**里程碑式确认点**，不影响任务正确性，纯粹防止无限循环消耗预算。
+应用层会给每个工具包一层计数器：跨工具累计到第 26 次调用时抛出 ToolCallLimitPausedError，触发 tool_call_limit 暂停，冻结同一 stepIndex 的整批调用，等待用户继续或停止。这不是“失败”，是**里程碑式确认点**，纯粹防止无限循环消耗预算；上限为 25，入口见 orchestration.ts:302,327。
 
-**`pauseOnToolCallLimit` 设置**（`1db662a9`）：全局 `Settings` 默认 true，`SessionSettings` 可覆盖；关闭时 `orchestration.ts:750-752` 不再用 `withToolCallLimitPause` 包装工具（`shouldPauseOnToolCallLimit`，`tool-call-limit-pause.ts:14-18`），即该确认点可按会话或全局关闭；`22ec7806` 把暂停卡片的继续按钮改造成"继续 / 继续并本次不再暂停确认"拆分按钮（`ToolCallPartUI.tsx`）。审批类暂停（user_exec/file_mutation/app_action）不受此开关影响。
+**pauseOnToolCallLimit 设置**（1db662a9）：全局 Settings 默认开启，SessionSettings 可覆盖；关闭时不再给工具加这层计数包装，因此确认点可按会话或全局关闭。审批类暂停（user_exec/file_mutation/app_action）不受此开关影响，相关逻辑见 orchestration.ts:750-752 与 tool-call-limit-pause.ts:14-18。
 
 ### 5.3 并发
 
-AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未额外施加并发数量限制,也未见互斥锁阻止并行工具执行本身（`code_execution` 内部的 `ensureSandbox()` 用 `initPromise` 作为**初始化**的互斥锁以防止并发初始化竞争，`toolsets/code-execution.ts:87-99`，但不限制并行执行的调用数）。`sandbox/manager.ts` 里 `session.runningChild` 只记录"当前正在运行的子进程"，若并行两个 `code_execution` 调用会互相覆盖 `runningChild` 引用，可能导致 `killRunningCommand()`（停止按钮）只能杀掉最后一个记录的子进程——**需要进一步验证**此并发场景下停止按钮的实际行为。
+AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未额外施加并发数量限制，也未见互斥锁阻止并行执行。沙箱初始化有互斥保护，但不限制并行执行的调用数。manager.ts 中的 runningChild 只记录当前子进程，若并行执行会互相覆盖，可能导致停止按钮只能杀掉最后一个记录的子进程；**需要进一步验证**此场景，初始化逻辑见 `toolsets/code-execution.ts:87-99`。
 
 ### 5.4 超时（按工具汇总）
 
@@ -252,16 +250,16 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 
 ### 5.5 取消与中断
 
-顶层 `AbortController`（`orchestration.ts:483-488` 附近）在流开始前创建，`cancel: () => controller.abort()` 挂在 `targetMsg.cancel` 上供"停止"按钮调用。`controller.signal` 贯穿传入 `model.chatStream(coreMessages, chatOptions)`（`chatOptions.signal`），AI SDK 在检测到 abort 时会中断流并让各工具的 `execute(input, {abortSignal})` 收到同一个 signal。已确认主动检查 `abortSignal` 的工具：`code_execution`（`code-execution.ts:195-197`：abort 后直接返回 `exitCode: 130` 而不发起 `provider.exec()`）、`parse_link`（转发给 `provider.parseLink(url, abortSignal)`）、`user_exec`（`tools-builder.ts:558` `throwIfAborted()`，但只在批准之后、host 执行前检查一次，**批准等待期间的 abort 依赖 `requestUserExecApproval` 内部的 signal 转发**，见第 6 节）。多数结构化文件工具（`list_files`/`write_file` 等）未见对 `abortSignal` 的显式检查，其取消依赖底层 IPC/sandbox exec 的超时或进程终止,而非提前返回。
+顶层 AbortController 在流开始前创建，停止按钮调用 abort；该 signal 会贯穿模型流并传给工具执行器。已确认主动检查取消信号的工具包括 code_execution、parse_link 和 user_exec：前者在取消后返回 exitCode 130，后两者分别转发信号或在批准后执行前检查一次。多数结构化文件工具未见显式检查，取消依赖底层 IPC 或沙箱执行的超时、进程终止，而非提前返回，入口见 `orchestration.ts:483-488`。
 
-- 运行中的命令可按 `(sessionId, toolCallId)` 精确定位并取消（`d63902e0`）。`user_exec` 主进程侧有 `activeUserExecCommands` 注册表与 `cancelUserExecCommand()`（`user-exec-runner.ts:48-62`），超时与取消都经 `killProcessTree()`（`main/process-tree.ts`）：POSIX 用进程组负 pid 发信号（spawn 时 `detached: true`），Windows 用 `taskkill /PID /T /F` 终止整棵进程树；取消结果以 `exitCode: 130 + cancelled: true` 回传（`user-exec-runner.ts:198-207`），UI 上显示 "Stopped" 而不是失败（`ToolCallPartUI.command.test.tsx`）。sandbox `execCode` 的 `killRunningCommand` 同样支持 `toolCallId` 定位（`manager.ts:874`）。
-- 停止生成时，还在 `state: 'call'` 的工具调用批被收口为 error 态并落盘（`generation-cancellation.ts` 的 `cancelRunningToolCallBatch`/`finishAbortedGeneration`），不再残留悬挂的 call part（`5cbe2e0b`）。
+- 运行中的命令可按 `(sessionId, toolCallId)` 精确定位并取消（d63902e0）。user_exec 在主进程维护独立注册表，超时与取消都会终止整棵进程树；取消结果返回 `exitCode: 130 + cancelled: true`，UI 显示 "Stopped" 而不是失败。沙箱执行同样支持按调用 ID 定位，细节见 user-exec-runner.ts:48-62,198-207 与 manager.ts:874。
+- 停止生成时，仍处于 call 状态的工具调用批会被收口为 error 并落盘，不再残留悬挂调用（5cbe2e0b）。
 
 ### 5.6 错误如何回传给模型
 
-普通工具异常：AI SDK 捕获 `execute()` 抛出的错误，转换为 `tool-error` chunk；`processStreamChunk()` 把它写成 `state: 'error'` 的 part，`result = { error: message, errorCode, input, toolName }`（`stream-chunk-processor.ts:342-349`）,随后作为工具结果的一部分回传给模型继续对话（AI SDK 标准的 tool-error-as-content 机制）。
+普通工具异常会被 AI SDK 转换为 tool-error chunk，流处理器将其写成 error 状态的 part，并把错误对象作为工具结果回传给模型继续对话。这是 AI SDK 标准的 tool-error-as-content 机制，见 `stream-chunk-processor.ts:342-349`。
 
-暂停类"错误"（4 种 PersistentToolCallPause 子类）特殊处理：`isPersistentToolCallPauseError()` 命中时，`processStreamChunk` 返回 `persistentToolCallPause` 信号而不是把它写成对模型可见的错误结果（`stream-chunk-processor.ts:335-341`）；同时 `stopWhenPersistentToolCallPause()` 作为 AI SDK 的 `StopCondition` 阻止 SDK 自动开始下一个 step（`persistent-tool-call-pause.ts:24-28`，因为从 AI SDK 视角这仍是一个 tool-error，若不加这个 stop condition，SDK 会在所有并行工具都返回错误后自动继续下一轮，绕过暂停语义）。暂停状态被写入 `MessageToolCallPart.pauseReason`并持久化,用户批准/拒绝后由 `continuePausedToolCall()`/`stopPausedToolCall()`（`orchestration.ts:939,835`）手动调用工具的 `execute()` 恢复,而不是重新走一次 `model.chatStream()`。
+暂停类“错误”会被识别为持久暂停信号，不写成模型可见的错误结果；同时停止条件会阻止 SDK 自动开始下一轮，否则暂停语义会被绕过。暂停状态写入消息 part 并持久化，用户批准或拒绝后再手动恢复工具执行，而不是重新发起模型流。具体停止条件见 `stream-chunk-processor.ts:335-341` 与 `persistent-tool-call-pause.ts:24-28`。
 
 **依据**：[abstract-ai-sdk.ts:330,764](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[types.ts:56,80](../../chatbox/src/shared/models/types.ts)、[orchestration.ts:61,289-324,483-488,610](../../chatbox/src/renderer/stores/session/orchestration.ts)、[sandbox-provider.ts:6](../../chatbox/src/shared/sandbox-provider.ts)、[code-execution.ts:87-99,195-212](../../chatbox/src/renderer/packages/model-calls/toolsets/code-execution.ts)、[manager.ts:652-666,900-935](../../chatbox/src/main/sandbox/manager.ts)、[user-exec-runner.ts:43-52](../../chatbox/src/main/skills/user-exec-runner.ts)、[ipc-handlers.ts:198-199](../../chatbox/src/main/skills/ipc-handlers.ts)、[persistent-tool-call-pause.ts](../../chatbox/src/shared/models/persistent-tool-call-pause.ts)、[stream-chunk-processor.ts:335-354](../../chatbox/src/renderer/stores/session/stream-chunk-processor.ts)
 
@@ -271,42 +269,42 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 
 ### 6.1 `user_exec` 的三级安全评估
 
-`requestUserExecApproval()`（`user-exec-approval.ts:69-85`）依次尝试：
+user_exec 的审批入口依次尝试以下三层（`user-exec-approval.ts:69-85`）：
 
-1. **只读白名单**（`isCommandAutoApprovable()`，`user-exec-whitelist.ts:209-227`）：手写的 shell 语法子集解析器。先用 `UNSAFE_PATTERNS` 正则拒绝换行、反引号、`$(...)`、`<(...)`、`sudo`/`su`/`eval`/`source`/`osascript`/`dbus-send`；再剥离安全的重定向（`>/dev/null` 等）后若仍有 `>` 则拒绝；再用简化状态机按 `|`/`&&`/`||`/`;` 切分为 segment（`splitCompoundCommand()`，考虑单双引号但不处理嵌套/转义引号）；每个 segment 独立判定，要求全部安全。命中 `SAFE_COMMANDS`（`ls`/`cat`/`grep`等纯读操作）或 `SAFE_SUBCOMMANDS`（`git status`/`docker ps`等子命令级白名单）才算安全,同时按 `DANGEROUS_FLAGS` 排除 `sed -i`、`find -delete/-exec` 等危险变体。approvalSource 记为 `'whitelist'`。
-2. **AI 二次评估**（`getAiAutoApprovalEligibility()` + `generateApprovalAssessment()`，调用配置的模型对命令做安全判断,`command-explanation.ts`）：`getAiAutoApprovalEligibility()` 是"代码强制的最大影响边界"——先用 `UNSAFE_SHELL_SYNTAX` 正则拒绝含 `` ` $ | ; & < > * ? { } `` 等元字符的命令,再拒绝 `BLOCKED_EXECUTABLES` 列表(`bash`/`python`/`node`/`curl`/`rm`/`chmod`/`sudo`/`git`/`docker`等约 45 个)。只有通过这层代码硬边界 **并且** 模型判定 `safe: true` 时才记为 `approvalSource: 'ai'`。
-3. **人工审批**：前两层都不通过则抛 `UserExecApprovalPausedError`,持久化为 `pauseReason.type = 'user_exec_approval'`,附带模型生成的 `explanation`(截断至4000字符,`MAX_PERSISTED_EXPLANATION_LENGTH`)。
+1. **只读白名单**：手写的 shell 语法子集解析器先拒绝换行、反引号、`$(...)`、`<(...)` 及高风险命令，再处理重定向和复合命令；每个片段都必须通过检查。命中 SAFE_COMMANDS 或 SAFE_SUBCOMMANDS 才算安全，同时排除 sed -i、find -delete/-exec 等危险变体，approvalSource 记为 whitelist。解析与白名单见 `user-exec-whitelist.ts:209-227`。
+2. **AI 二次评估**：代码硬边界先拒绝含 `` ` $ | ; & < > * ? { } `` 等元字符的命令，再拒绝约 45 个高风险可执行文件；只有通过这层并且模型判定 safe: true，才记为 approvalSource: ai。相关规则见 `user-exec-ai-policy.ts`。
+3. **人工审批**：前两层都不通过则进入 UserExecApprovalPausedError，持久化为 user_exec_approval 暂停，并附带模型生成的 explanation（截断至 4000 字符）。
 
 **白名单的拆分与检查机制**：`splitCompoundCommand()` 用简化状态机按 `|`、`&&`、`||`、`;` 切分 segment，引号跟踪不处理转义字符（如 `\"`），分段边界可能与实际 shell 解析不一致；`isSegmentSafe()` 只把这四种符号当作分段操作符，裸 `&` 不会触发分段，会被当作命令参数文本的一部分参与该 segment 的判定。白名单的命令名与语义按 POSIX shell 设计；`user_exec` 在 Windows 上实际执行的是 **PowerShell**（见 6.3）：PowerShell 的别名（`gci`≈`ls`、`cat`≈`Get-Content`）、管道对象语义与调用运算符 `&` 都不同于白名单假设的 POSIX 语法，`UNSAFE_PATTERNS` 中的反引号检测对应 bash 的命令替换语义，而 PowerShell 中反引号是转义字符、命令替换为 `$(...)`（已被拦截）、调用运算符为 `&`（未被列入 `UNSAFE_PATTERNS`）。
 
 ### 6.2 文件写入越界的暂停条件
 
-`write_file`/`edit_file`（`filesystem.ts:403-533`）判定是否需要审批的核心逻辑 `shouldUseSandbox()`（`filesystem.ts:232-241`）：
+write_file/edit_file 判定是否需要审批的核心逻辑是 shouldUseSandbox（`filesystem.ts:232-241,403-533`）：
 - 相对路径 → 沙箱内，直接写，无需审批。
 - 绝对路径落在 `TASK_SANDBOX_EXTRA_WRITE_PATHS`（如 `/tmp`，仅 POSIX）或用户授权的 `userWorkingDirectories` 内 → 走沙箱路径，无需审批（因为沙箱自身的 `allowWrite`/`denyWrite` 规则已经限权）。
 - 绝对路径落在沙箱工作目录内 → 直接写。
-- 其余绝对路径（真正的"主机文件系统越界写入"） → `requestFileMutationApproval()` 抛 `FileMutationApprovalPausedError`，除非 `context.fullAccess === true`。
+- 其余绝对路径（真正的“主机文件系统越界写入”） → 请求文件变更审批并暂停，除非 fullAccess 为 true。
 
 `isInsideUserWorkingDir` 命中但 `isAcceptedUserWorkingDir()`（需要 sandbox 初始化后才知道该目录是否被 main 侧接受）返回 false 时，`rejectedUserGrant = true`，即使路径在用户声明的工作目录内也会退回走审批路径（`filesystem.ts:427-431`）——这是防止 renderer 侧"声称已授权"但 main 侧因该目录不安全（见 `isUnsafeResolvedPath`）而拒绝授权时产生的权限提升。
 
 ### 6.3 `agentFullAccess` 的覆盖范围
 
-`agentFullAccess` 是会话级设置（`SessionSettings.agentFullAccess`），生效点分散在三处：
-1. `user_exec`：`agentFullAccess ? approvalSource = 'full_access' : ...`（`tools-builder.ts:542-544`），跳过白名单/AI/人工三级评估，直接执行。
-2. `write_file`/`edit_file`：`approved = alreadyApproved || context.fullAccess || (await requestFileMutationApproval(...))`（`filesystem.ts:450-457,510-519`），逻辑短路，`fullAccess=true` 时不调用 `requestFileMutationApproval()`（也就不会抛暂停错误）。
-3. 每次绕过都调用 `trackAgentModeFullAccessBypass({tool: ...})`（`analytics/agent-mode.ts`）打点，无论后续执行成功与否——这是审计埋点，不是拦截。
+agentFullAccess 是会话级设置（SessionSettings.agentFullAccess），生效点分散在三处：
+1. user_exec 跳过白名单、AI 和人工三级评估，直接执行（`tools-builder.ts:542-544`）。
+2. write_file/edit_file 在 fullAccess=true 时不请求文件变更审批，因此不会抛暂停错误（`filesystem.ts:450-457,510-519`）。
+3. 每次绕过都会记录审计埋点，无论后续执行成功与否；这不是拦截。
 
-**不可绕过的类别**：`AppActionApprovalPausedError`（`app-action-approval.ts:1-20`）。源码注释明确：*"Approval pause for Chatbox-owned state changes and potentially billable actions. Agent Full Access does not bypass this boundary."* 该错误类型在 `getToolCallPause()`（`orchestration.ts:191-202`）中被识别为独立的 `pauseReason.type = 'app_action_approval'`，与 `agentFullAccess` 检查完全脱钩——代码里没有任何分支在抛出 `AppActionApprovalPausedError` 之前检查 `fullAccess`。已确认的触发点：`chatbox_cli` 工具中的图片生成（`ImageGenerationApprovalCard` UI，`ToolCallPartUI.tsx:1071-1179`，涉及 `image.generate` action、配额/计费提示）。**结论**：`agentFullAccess` 的覆盖范围严格限定在"宿主命令执行"与"主机文件系统写入"两类，不覆盖 Chatbox 自身状态变更/计费类操作。
+**不可绕过的类别**：AppActionApprovalPausedError（`app-action-approval.ts:1-20`）。该类型被识别为独立的 app_action_approval 暂停，与 agentFullAccess 检查完全脱钩；代码没有在抛出它之前检查 fullAccess。已确认的触发点是 chatbox_cli 中的图片生成审批卡。**结论**：agentFullAccess 严格限定在宿主命令执行与主机文件系统写入，不覆盖 Chatbox 自身状态变更或计费操作，触发分支见 `orchestration.ts:191-202`。
 
 ### 6.4 pause/resume 的持久化
 
-暂停状态直接写入消息的 `contentParts` 中对应 `tool-call` part 的 `state: 'paused'` 与 `pauseReason` 字段（Zod schema 定义于 `shared/types/session.ts:178` 附近），随正常的消息持久化流程（`persistStreamingMessage()`）落盘到 storage，因此暂停可以跨应用重启保持（重新打开会话仍能看到"继续/停止"按钮）。恢复由 `continuePausedToolCall(sessionId, messageId, toolCallId)`（`orchestration.ts:1157-1212`）触发：重新构建 `tools`（`buildToolsForPausedToolCall()`），找到匹配 `toolName` 的工具，直接调用其 `execute(args, {toolCallId, approved: true, approvalDetails})`——`approved: true` 只对**这一个** `toolCallId` 成立（`createPausedToolCallExecutionContext()`，`orchestration.ts:70-81` 附近：`approved = part.toolCallId === approvedToolCallId`），同批次的其他并行调用需要各自独立通过审批，不能靠"批次内一个被批准"越权执行。
+暂停状态写入消息中对应工具调用 part 的 paused 状态与 pauseReason 字段，并随正常消息流程落盘，因此可以跨应用重启保持。恢复时重新构建工具集，找到匹配工具并直接执行；approved=true 只对**这一个** toolCallId 成立，同批次的其他并行调用仍需独立审批。持久化和恢复入口见 `orchestration.ts:70-81,939-1212`。
 
 恢复暂停的生成时会保留已完成 tool-call 的上下文（`2557f1e4`）：`sequenceMessages()`（`shared/utils/message.ts:162-259`）不把"只有已完成工具调用、没有正文文本"的 assistant 消息当空消息丢弃（`hasCompletedToolCalls`/`isEmptyForModelRequest`），引用拼接时也保留含工具调用的完整消息（引用会把消息拍平成文本、丢失工具历史，所以保留原消息并用占位 user turn 隔开）。即续跑时的历史选择能携带上次的工具调用记录，模型不会丢失要接续的上下文。
 
 ### 6.5 review 提示中的可信度
 
-`explanation` 字段（人工审批卡片中展示的"解释"）由**模型自己**生成（`command-explanation.ts` 调用配置的对话模型），本质是模型对自己请求执行的命令做自我说明。这意味着解释文本内容不构成独立的安全判定来源，只是给用户提供上下文；判定"是否需要暂停"的逐段逻辑仍是代码里的白名单/AI-eligibility 硬编码规则，不受 `explanation` 内容影响（`explanation` 生成失败时用 `explanationError: true` 标记，仍会照常进入暂停，不会因为解释失败而跳过审批或直接拒绝）。
+审批卡片中的 explanation 由**模型自己**生成，本质是模型对自己请求执行的命令做自我说明。因此它不构成独立的安全判定来源，只给用户提供上下文；是否暂停仍由代码中的白名单和 AI eligibility 规则决定，解释生成失败也不会跳过审批，详见 `command-explanation.ts`。
 
 **依据**：[user-exec-whitelist.ts全文](../../chatbox/src/renderer/packages/user-exec-whitelist.ts)、[user-exec-ai-policy.ts全文](../../chatbox/src/renderer/packages/user-exec-ai-policy.ts)、[user-exec-approval.ts全文](../../chatbox/src/renderer/packages/user-exec-approval.ts)、[app-action-approval.ts全文](../../chatbox/src/renderer/packages/app-action-approval.ts)、[filesystem.ts:220-241,403-533](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[orchestration.ts:70-216,939-1087](../../chatbox/src/renderer/stores/session/orchestration.ts)
 
@@ -318,15 +316,15 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 
 | 位置 | 承担的工具 |
 | --- | --- |
-| renderer 进程（浏览器上下文） | `web_search`、`parse_link`、知识库检索、session attachment RAG、上传文件的 `read_file`/`search_file_content`（`file.ts`）——均通过 `platform.xxx` 或 `remote.xxx` 发起网络/IPC 调用，业务逻辑在 renderer |
-| Electron main 进程 | 沙箱生命周期（`init/exec/reset`）、`user_exec` 真正的子进程 spawn、MCP stdio transport 子进程、skills 发现/安装/`execute-script`、host 文件系统 `fsRead/fsWrite/fsList/fsSearch/fsEdit`（未在本次读到的 `platform.ts` 具体实现里逐一验证，但从 IPC 调用模式可确认在 main 侧） |
+| renderer 进程（浏览器上下文） | web_search、parse_link、知识库检索、session attachment RAG、上传文件读写工具——均通过 platform 或 remote 发起网络/IPC 调用，业务逻辑在 renderer |
+| Electron main 进程 | 沙箱生命周期、user_exec 子进程、MCP stdio 子进程、skills 发现/安装/execute-script，以及 host 文件系统操作（具体 handler 未逐一验证，但从 IPC 调用模式可确认在 main 侧） |
 | MCP 子进程（stdio） | 用户配置的 MCP server 自身逻辑，与 main 进程同权限（同一 OS 用户） |
-| sandbox 运行时（`@anthropic-ai/sandbox-runtime`） | macOS/Linux 的 `code_execution`；提供 seatbelt(macOS)/bubblewrap(Linux) 级别的文件系统与网络隔离 |
-| 宿主 shell（PowerShell/Bash） | Windows 上的 `code_execution`（无沙箱包装，裸执行）；所有平台的 `user_exec`（设计上就是宿主 shell，无沙箱） |
+| sandbox 运行时（@anthropic-ai/sandbox-runtime） | macOS/Linux 的 code_execution；提供 seatbelt(macOS)/bubblewrap(Linux) 级别的文件系统与网络隔离 |
+| 宿主 shell（PowerShell/Bash） | Windows 上的 code_execution（无沙箱包装，裸执行）；所有平台的 user_exec（设计上就是宿主 shell，无沙箱） |
 
 ### 7.2 macOS/Linux 与 Windows 的精确代码分支
 
-`initSandbox()`（`manager.ts:575-640`）在 `process.platform === 'win32'` 时**完全跳过** SRT 初始化，只记录 `workingDirectory` 并标记 `state: 'initialized'`（`manager.ts:599-607`），日志明确输出 `"(native Windows, no OS isolation)"`。macOS/Linux 分支才会 `import('@anthropic-ai/sandbox-runtime')` 并调用 `globalSandboxManager.initialize(config)`（`manager.ts:612-625`）。
+Windows 分支在初始化沙箱时**完全跳过** SRT，只记录工作目录并标记 initialized，日志明确输出 "(native Windows, no OS isolation)"。macOS/Linux 才会加载 SRT 并初始化全局沙箱，相关分支见 `manager.ts:575-640`。
 
 `execCode()`（`manager.ts:652-871`）的分支：
 ```ts
@@ -339,7 +337,7 @@ if (isWindows) {
 ```
 （`manager.ts:754-771`）Windows 直接 `spawn(spawnCmd, spawnArgs, {shell: false, detached: false})`；macOS/Linux 的 `spawnCmd`/`spawnArgs` 来自 SRT 包装后的沙箱化启动 argv（如 macOS 的 `sandbox-exec` 包装命令）。
 
-`checkAvailability()`（`manager.ts:1172-1203`）三分支：`darwin` 恒为可用；`linux` 检查 `SandboxManager.checkDependencies()`（需要 `bubblewrap`/`socat`）；`win32` 恒为可用（因为不需要任何沙箱运行时依赖），注释明确写"Native Windows runs code without an OS sandbox"。
+可用性检查分三支：darwin 恒为可用，linux 检查 bubblewrap/socat，win32 也恒为可用，因为不需要沙箱运行时依赖；注释明确写明 Windows 无 OS sandbox，见 `manager.ts:1172-1203`。
 
 ### 7.3 沙箱允许写入 / 拒绝读写范围
 
@@ -347,7 +345,7 @@ if (isWindows) {
 - `allowWrite`：`[workDir, ...TASK_SANDBOX_EXTRA_WRITE_PATHS, ...临时目录(os.tmpdir()+'/tmp'及其symlink解析形式), ...用户授权目录的字面与canonical两种形式]`。
 - `denyWrite`：`TASK_SANDBOX_DENY_WRITE_PATHS`（如 `.env`、`.git` 等敏感名）+ 针对每个用户授权目录动态生成的绝对 deny 规则（`${base}/${name}` 与 `${base}/**/${name}`），因为 sandbox-runtime 对裸相对模式默认相对 main 进程 cwd 解析，不会自动覆盖用户授权目录，需要显式锚定。
 - `denyRead`：`TASK_SANDBOX_DENY_READ_PATHS = ['~/.ssh', '~/.gnupg', '~/.aws', '~/.config/gh']`（`shared/task-sandbox.ts:1`）——只覆盖常见密钥/凭据目录，属白名单式最小防护而非默认拒绝；`TASK_SANDBOX_DENY_WRITE_PATHS = ['.env', '.env.local', '.env.production']`（同文件:3）同理只挡常见环境变量文件名。
-- 网络：故意不设置 `allowedDomains`（代码注释警告 `allowedDomains: ['*']` 不是通配符而是字面匹配），效果是生成 `(allow network*)`——即**默认放行全部网络访问**，沙箱本身不做网络出口限制。这是一个需要向用户明确的边界：`code_execution` 在 macOS/Linux 上文件系统受限，但网络不受限。
+- 网络：故意不设置 allowedDomains（代码注释警告 `allowedDomains: ['*']` 不是通配符而是字面匹配），效果是生成 `(allow network*)`，即**默认放行全部网络访问**。因此 code_execution 在 macOS/Linux 上文件系统受限，但网络不受限。
 
 ### 7.4 会话隔离与跨会话访问
 

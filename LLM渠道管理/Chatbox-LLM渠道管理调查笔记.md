@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-Chatbox 使用“**Provider 注册表 + Provider ID 设置表 + 会话级模型绑定**”管理 LLM 渠道。内置 Provider 在代码中用 `defineProvider()` 声明；用户可以创建任意多个自定义 Provider，每个自定义实例有独立 UUID、协议类型、API Host、API Path、Key 和模型列表。
+Chatbox 使用“**Provider 注册表 + Provider ID 设置表 + 会话级模型绑定**”管理 LLM 渠道。内置 Provider 在代码中用 defineProvider() 声明；用户可以创建任意多个自定义渠道，每个自定义实例有独立 UUID、协议类型、API Host、API Path、Key 和模型列表。
 
-渠道的运行时键是 `provider + modelId`。内置 Provider 的设置保存在 `settings.providers[providerId]`，所以一个内置 ID 只有一个端点实例；需要第二个 OpenAI/Claude 中转时，应创建自定义 Provider，而不是给内置 Provider 增加多组凭据。
+渠道的运行时键是 provider 与 modelId 的组合。内置 Provider 的设置保存在 `settings.providers[providerId]`，所以一个内置 ID 只有一个端点实例；需要第二个 OpenAI/Claude 中转时，应创建自定义 Provider，而不是给内置 Provider 增加多组凭据。
 
 主要能力包括：
 
@@ -58,7 +58,7 @@ SessionSettings { provider, modelId }
 
 ### 1.1 单一声明入口
 
-注册表位于 `src/shared/providers/registry.ts`，内部是 `Map<string, ProviderDefinition>`。`src/shared/providers/index.ts` 通过副作用导入所有 definition，模块加载时完成注册；导入顺序同时决定设置页展示顺序。
+注册表位于 `src/shared/providers/registry.ts`，内部是 Map 保存 ProviderDefinition。Provider 入口文件通过副作用导入所有 definition，模块加载时完成注册；导入顺序同时决定设置页展示顺序。
 
 `ProviderDefinition` 集中声明：
 
@@ -77,8 +77,8 @@ SessionSettings { provider, modelId }
 
 **提交范围内的内置定义变化**（均为模型目录/推理参数层面，Provider 数量不变）：
 
-- Claude：策展模型列表顶部新增 `claude-opus-5`（`definitions/claude.ts:12-13`，`cee99c2f`），并移除被取代的 AI SDK patch 依赖。
-- DeepSeek：`deepseek-v4` 家族识别为支持官方 thinking effort 的模型（`deepseek.ts` 的 `isDeepSeekReasoningEffortModel`/`normalizeDeepSeekReasoningEffort`，取值白名单 low/high/max/xhigh），`ebed6251` 起 effort 在请求边界清洗后跨 ChatboxAI 与原生 API 风格生效；同时新增"reasoning-only 回答恢复"归一化（见第 7 节）。
+- Claude：策展模型列表顶部新增 `claude-opus-5`，并移除被取代的 AI SDK patch 依赖（`definitions/claude.ts:12-13`，提交 `cee99c2f`）。
+- DeepSeek：`deepseek-v4` 家族识别为支持官方 thinking effort 的模型，取值白名单为 low/high/max/xhigh；提交 `ebed6251` 起，effort 在请求边界清洗后跨 ChatboxAI 与原生 API 风格生效。同时新增“reasoning-only 回答恢复”归一化（见第 7 节，相关实现见 `deepseek.ts`）。
 
 ### 1.2 一个内置 ID 只有一份配置
 
@@ -112,7 +112,7 @@ custom-provider-<uuid-2>       自定义 OpenAI 协议实例
 - Azure endpoint、deployment、DALL-E deployment、API version；
 - Bedrock access key、secret key、session token 和 region。
 
-不同 Provider 的 `createModel()` 只消费自己需要的字段。例如 Azure 用 deployment 资源路径，Bedrock 用 AWS 凭据，OpenAI OAuth 会改用 Responses 模型实现，Claude OAuth 会切换为 Bearer Token 并增加 Anthropic Beta Header。
+不同 Provider 的 createModel() 只消费自己需要的字段。例如 Azure 用 deployment 资源路径，Bedrock 用 AWS 凭据，OpenAI OAuth 会改用 Responses 模型实现，Claude OAuth 会切换为 Bearer Token 并增加 Anthropic Beta Header。
 
 Provider 默认值与用户设置的关键优先级为：
 
@@ -144,7 +144,7 @@ OAuth token 对特定官方端点签发，因此 OAuth 启用时会忽略用户�
 
 自定义 Provider 可以拥有自己的 Host、Path、Key、模型和图标。它解决的是“同协议多渠道实例”，不是一个实例内部的 Key 池或上游列表。
 
-**提交范围变化（`5c7e3882`）**：Host 解析对 URL scheme 做大小写归一（`llm_utils.ts` 的 `normalizeOpenAIApiHostAndPath` 把 `HTTP://`/`HTTPS://` 前缀统一为小写后再补默认值，兼容移动端键盘首字母大写输入，局域网自定义端点可用）；自定义 Claude/Gemini 模型类新增 `useProxy` 透传（`custom-claude.ts`/`custom-gemini.ts` 用 `createFetchWithProxy` 包装请求），使自定义 Provider 的代理开关在这两个协议下同样生效（`custom-provider-proxy.test.ts` 覆盖）。
+**提交范围变化（`5c7e3882`）**：Host 解析对 URL scheme 做大小写归一，统一 `HTTP://`/`HTTPS://` 前缀后再补默认值，兼容移动端键盘首字母大写输入，局域网自定义端点可用；该逻辑位于 `llm_utils.ts` 的 normalizeOpenAIApiHostAndPath。自定义 Claude/Gemini 模型类也透传 `useProxy`，用代理请求包装器发送请求；`custom-provider-proxy.test.ts` 已覆盖这一行为。
 
 ### 3.1 导入
 
@@ -164,7 +164,7 @@ Base64 深链只是编码，不是加密。配置中如果带 Key，URL 本身�
 
 ### 4.1 四个来源
 
-`BaseConfig.getMergeOptionGroups()` 合并：
+模型设置的合并入口会合并：
 
 1. `providerSettings.models`：用户本地保存，优先级最高；
 2. Chatbox 后端 model manifest；
@@ -187,13 +187,13 @@ registry 数据获取顺序为：
 
 ### 4.3 模型类型
 
-`ProviderModelInfo` 区分 `chat`、`embedding`、`rerank` 和 `image`，并声明 vision、reasoning、tool_use、web_search 等能力。模型能力会控制 UI feature gate、上下文窗口、推理参数、工具和专用工作流。
+ProviderModelInfo 区分 chat、embedding、rerank 和 image，并声明 vision、reasoning、tool_use、web_search 等能力。模型能力会控制 UI feature gate、上下文窗口、推理参数、工具和专用工作流。
 
 ### 4.4 Registry 原始字段与运行时字段不等宽
 
 [`src/shared/model-registry/types.ts`](../../chatbox/src/shared/model-registry/types.ts) 描述的 models.dev 原始条目包含：名称、family、工具调用、推理、附件、结构化输出、开放权重、输入/输出模态、上下文、输出上限、输入/输出价格、发布日期、更新时间和状态。
 
-转换后的内部 `ModelMetadata` 只保留：
+转换后的内部 ModelMetadata 只保留：
 
 | 字段 | 生成方式 |
 |---|---|
@@ -203,13 +203,13 @@ registry 数据获取顺序为：
 | `costInput` / `costOutput` | 来自每百万 token 价格 |
 | `family` / `releaseDate` / `status` | 原样保留 |
 
-进入设置和请求链的 [`ProviderModelInfoSchema`](../../chatbox/src/shared/types/settings.ts) 更窄，只有 `modelId`、`providerId`、`type`、`apiStyle`、昵称、标签、四种能力、上下文和最大输出。它没有 family、发布日期、状态或价格字段。
+进入设置和请求链的 [`ProviderModelInfoSchema`](../../chatbox/src/shared/types/settings.ts) 更窄，只有 modelId、providerId、type、apiStyle、昵称、标签、四种能力、上下文和最大输出。它没有 family、发布日期、状态或价格字段。
 
 registry 中的 `costInput/costOutput` 虽被生成并保存在 snapshot，当前源码却没有 snapshot 以外的消费者；Chatbox 不能据此计算账单或做成本路由。`web_search` 也存在于运行时能力枚举中，但 models.dev 转换器没有从原始条目生成该标记，需要 Provider 静态定义或其他来源补充。
 
 ### 4.5 查找与富化规则
 
-[`src/shared/model-registry/enrich.ts`](../../chatbox/src/shared/model-registry/enrich.ts) 先在对应 Provider 的 registry 中做不区分大小写的精确匹配；失败后再做最长前缀匹配，并要求后续边界是 `-`、`:` 或 `.`。这可覆盖 fine-tune/版本后缀，同时避免 `gpt-4` 错配 `gpt-4o`。
+[`src/shared/model-registry/enrich.ts`](../../chatbox/src/shared/model-registry/enrich.ts) 先在对应 Provider 的 registry 中做不区分大小写的精确匹配；失败后再做最长前缀匹配，并要求后续边界是短横线、冒号或句点。这可覆盖 fine-tune/版本后缀，同时避免把 gpt-4 错配为 gpt-4o。
 
 命中后只合并六类值：
 
@@ -224,7 +224,7 @@ Provider 必须通过 [`src/shared/model-registry/provider-mapping.ts`](../../ch
 
 ### 4.6 元数据的运行时作用
 
-[`src/shared/providers/index.ts`](../../chatbox/src/shared/providers/index.ts) 在解析当前模型时再次执行 registry 富化，因此并非只在设置页刷新时使用。主要消费者包括：
+解析当前模型时，Provider 入口会再次执行 registry 富化，因此并非只在设置页刷新时使用。主要消费者包括：
 
 - `contextWindow`：限制会话上下文和 Token 预算；
 - `maxOutput`：约束最大输出设置；
@@ -247,7 +247,7 @@ Provider 必须通过 [`src/shared/model-registry/provider-mapping.ts`](../../ch
 
 ### 5.1 会话绑定
 
-每个聊天会话的 `SessionSettings` 保存：
+每个聊天会话的 SessionSettings 保存：
 
 ```ts
 provider?: string
@@ -256,7 +256,7 @@ modelId?: string
 
 新会话从全局默认复制设置；注释明确指出，修改全局默认不会影响已有会话。用户在模型选择器中切换后，组合会写回当前会话，所以历史会话能继续使用原 Provider/Model，而不是跟随全局漂移。
 
-`getModel()` 使用会话中的 Provider ID 查注册表或自定义 Provider，再按同一 ID 读取设置和模型，不会根据模型名跨 Provider 搜索。
+getModel() 使用会话中的 Provider ID 查注册表或自定义 Provider，再按同一 ID 读取设置和模型，不会根据模型名跨 Provider 搜索。
 
 ### 5.2 各用途独立默认模型
 
@@ -283,7 +283,7 @@ modelId?: string
 
 桌面端当前映射包含 OpenAI、OpenAI Responses、Claude、Qwen Portal、MiniMax、GitHub Copilot 等 OAuth Provider，使用 callback、code-paste 或 device-code 流程。
 
-`createOAuthCredentialManager()`：
+OAuth credential manager：
 
 - 在 token 到期前 2 分钟刷新；
 - 合并并发刷新为同一个 Promise；
@@ -294,7 +294,7 @@ modelId?: string
 
 Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAuth 请求链只在 desktop 启用。
 
-**提交范围变化（`15028964`）**：OpenAI 走 OAuth 认证时，图像生成模型目录不再注入 OpenAI 组的 image 模型（`image-model-catalog.ts` 的 `isOpenAIImageGenerationAuthSupported`），避免 OAuth 会话误用 DALL-E 计费路径。
+**提交范围变化（`15028964`）**：OpenAI 走 OAuth 认证时，图像生成模型目录不再注入 OpenAI 组的 image 模型，避免 OAuth 会话误用 DALL-E 计费路径；判断逻辑见 `image-model-catalog.ts`。
 
 ### 6.3 明文落盘和备份扩散
 
@@ -312,7 +312,7 @@ Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAut
 
 ## 7. 请求重试与容错
 
-`AbstractAISDKModel` 为流式和非流式聊天都包装 `ai-retry`：
+AbstractAISDKModel 为流式和非流式聊天都包装 ai-retry：
 
 - 可重试状态：429 和 500-599；
 - 最大尝试次数：5；
@@ -326,8 +326,8 @@ Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAut
 
 **提交范围变化（`3718abac`、`3af9564a`）**：
 
-- 流中途错误（`MidStreamApiError`）被明确排除在重试之外：`gemini-stream-error.ts` 解析 Gemini/ChatboxAI 流里的错误帧（如 `503 The server was restarted`），若错误前已有内容流出则抛 `MidStreamApiError`，`isRetryableStatusError()`（`abstract-ai-sdk.ts:67-89`）对这类错误恒返回 false——部分内容已渲染/可能已计费，静默重跑会产生重复回复；错误在首个内容之前到达则保持普通 `ApiError`（仍可重试）。
-- DeepSeek 完成响应归一化：`completed-response-normalizer.ts` 注册 `normalizeDeepSeekCompletedResponse`（`deepseek.ts`），当 DeepSeek 服务端把完整答案误标为 reasoning 且 `finish_reason: stop` 时，把该 reasoning part 转回普通 text 恢复显示；按模型 ID 而非 provider 判定，OpenRouter/自定义 OpenAI 兼容端点同样生效。
+- 流中途错误（`MidStreamApiError`）被明确排除在重试之外：流错误解析器处理 Gemini/ChatboxAI 的错误帧（如 `503 The server was restarted`）；若错误前已有内容流出则抛出该错误，重试判断在 `abstract-ai-sdk.ts:67-89` 对这类错误恒返回 false。部分内容已渲染或可能已计费，静默重跑会产生重复回复；错误在首个内容之前到达则保持普通 `ApiError`，仍可重试。
+- DeepSeek 完成响应归一化：当服务端把完整答案误标为 reasoning 且 `finish_reason: stop` 时，归一化逻辑把该 reasoning part 转回普通 text 恢复显示；它按模型 ID 而非 Provider 判定，OpenRouter 和自定义 OpenAI 兼容端点同样生效（实现见 `completed-response-normalizer.ts` 与 `deepseek.ts`）。
 
 这套容错只重试同一个模型实例：
 
@@ -339,7 +339,7 @@ Web 和 mobile 即使看到已保存 OAuth 配置，也会回退 `apiKey`；OAut
 
 ## 8. 网络与代理
 
-OpenAI-Compatible 公共模型类通过 `createFetchWithProxy()` 调用平台 `apiRequest`。Provider 设置的 `useProxy` 决定是否使用 Chatbox 配置的代理；桌面主进程由 `ensureProxy` 更新代理配置，Web/mobile 则由平台 adapter 解决 CORS 和请求差异。
+OpenAI-Compatible 公共模型类通过 createFetchWithProxy() 调用平台 apiRequest。Provider 设置的 useProxy 决定是否使用 Chatbox 配置的代理；桌面主进程由 ensureProxy 更新代理配置，Web/mobile 则由平台 adapter 解决 CORS 和请求差异。
 
 对于 POST，`apiRequest` 显式传 `retry: 0`，把可计费请求的重试唯一交给上层基于 HTTP 状态的 `ai-retry`。GET 模型列表可以沿用平台请求默认重试策略。
 

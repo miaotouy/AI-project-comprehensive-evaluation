@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AstrBot Dashboard 是 Vue 3、Vuetify 和 Pinia 构成的 Web 管理台。应用直接使用 Vuetify 的 Dialog、Menu、Snackbar、Overlay 和 Data Table，没有另建完整的设计系统；项目侧公共层主要是命令式确认框、Toast 队列和界面偏好 store。
+AstrBot Dashboard 是 Vue 3、Vuetify 和 Pinia 构成的 Web 管理台。应用直接使用 Vuetify 提供的对话框、菜单、提示条、浮层和数据表，没有另建完整的设计系统；项目侧公共层主要是命令式确认框、Toast 队列和界面偏好 store。
 
 Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示。主题由两套 Vuetify theme 对象提供，支持明暗和系统跟随，自定义主色与次色会直接改写 theme 对象。项目没有主题市场、壁纸、主题导入导出、自定义 CSS 或密度与圆角设置。
 
@@ -22,25 +22,25 @@ Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示�
 
 ## 系统边界与总体装配
 
-**部署形态。** Python 服务与 Dashboard 同源部署——FastAPI 提供 `/api/*` 并托管静态产物（`astrbot/dashboard/services/static_file_service.py:7-27` 列出 `/chat`、`/config` 等 INDEX_ROUTES 回退到 `index.html`）；
+**部署形态。** Python 服务与 Dashboard 同源部署——FastAPI 提供 `/api/*` 并托管静态产物（静态文件服务列出 `/chat`、`/config` 等 INDEX_ROUTES 回退到 `index.html`，见 `astrbot/dashboard/services/static_file_service.py:7-27`）；
 
 开发模式由 vite 代理到 127.0.0.1:6185（`dashboard/vite.config.ts:112-117`）。前端用 hash 路由（`src/router/index.ts:9`），服务端无需配置 history 回退。
 
-**装配链。** `index.html` → `src/main.ts`：`setupI18n()` 完成后 createApp，依次 use(pinia) use(router) use(print) use(VueApexCharts) use(vuetify) use(confirmPlugin)，`await router.isReady()` 后 mount，再执行 setupThemeSync（`main.ts:104-135`）；i18n 初始化失败也有回退挂载路径。
+**装配链。** `index.html` → `src/main.ts`：i18n 初始化完成后创建应用，依次注册 Pinia、路由、打印、图表、Vuetify 和确认框插件；路由就绪后挂载，再执行主题同步（`main.ts:104-135`）。i18n 初始化失败也有回退挂载路径。
 
-**根组件。** `App.vue` 只承载 RouterView + 三个全局件：WaitingForRestart、UpgradeRecoveryDialog、全局唯一 v-snackbar（消费 toast store，`App.vue:7-17`）。
+**根组件。** `App.vue` 只承载路由视图和三个全局件：WaitingForRestart、UpgradeRecoveryDialog、全局唯一 v-snackbar（消费 toast store，`App.vue:7-17`）。
 
 **双布局。** `FullLayout.vue`（v-app 绑定主题、顶部进度条、VerticalHeader、VerticalSidebar、v-main；chat 路由时内嵌 `Chat.vue` 并隐藏侧栏）与 `BlankLayout.vue`（v-app + RouterView，用于 `/auth/login`、`/auth/setup`、`/chatbox`）。
 
 **与外部系统交点。** 桌面 wrapper（外部 AstrBot Desktop 项目）通过 window.astrbotDesktop / window.astrbotAppUpdater bridge 注入（类型见 `src/types/desktop-bridge.d.ts`），本仓只消费不实现：`App.vue:51-58` 订阅托盘重启事件、`VerticalHeader.vue` 桌面更新对话框、`src/utils/restartAstrBot.ts` 优先走 bridge 重启后端。
 
-服务端交点：localStorage token 认证（`src/api/http.ts`）、日志 SSE（`src/stores/common.js:21-145`，断线 2s 重连）、升级恢复 API（`UpgradeRecoveryDialog.vue` 探测版本不匹配）。
+服务端交点：localStorage token 认证（`src/api/http.ts`）、日志 SSE（`src/stores/common.js:21-145`，断线 2s 重连）、升级恢复 API（升级恢复对话框探测版本不匹配）。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**界面栈。** Vue 3.3.4、Vuetify 3.7.11（`plugins/vuetify.ts` 全量注册 components/directives，vite-plugin-vuetify autoImport）、Pinia 2.1.6、vue-router 4（hash）、自研 i18n；
+**界面栈。** Vue 3.3.4、Vuetify 3.7.11（插件全量注册组件和指令，vite-plugin-vuetify 自动导入）、Pinia 2.1.6、vue-router 4（hash）、自研 i18n；插件入口见 `plugins/vuetify.ts`。
 
-辅助库按需使用：monaco（`@guolao/vue-monaco-editor` + workers 配置，`main.ts:12-50`）、markstream-vue（`VerticalHeader.vue:9-11` 顶部 `enableKatex()/enableMermaid()`）、vue3-apexcharts、vue3-print-nb、qrcode。
+辅助库按需使用：Monaco（`@guolao/vue-monaco-editor` 和 workers 配置）、markstream-vue（顶部启用数学公式和 Mermaid）、vue3-apexcharts、vue3-print-nb、qrcode；相关装配见 `main.ts:12-50` 与 `VerticalHeader.vue:9-11`。
 
 **公共组件。** `src/components/shared/` 44 个文件，大多是业务向共享组件（AstrBotConfig、BackupDialog、2FA 系列、Persona 系列等），不属于通用界面基础设施；可跨应用复用的只有 ConfirmDialog（命令式确认）、StyledMenu（菜单视觉统一）、QrCodeViewer、FileConfigItem（配置上传）、ThemeAwareMarkdownCodeBlock（按主题切换代码块渲染）。
 - **状态所有权**（见各章节详述）：
@@ -57,43 +57,43 @@ Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示�
 | 侧栏菜单定制 | localStorage astrbot_sidebar_customization | 是 | 唯一跨标签页同步项（storage 事件，`VerticalSidebar.vue:96`） |
 | 页面业务状态 | 组件内存 ref / 各自 API | 多数不持久化 | 如 ConversationPage 分页、Settings 分区 |
 
-**跨窗口同步。** 本次未找到 BroadcastChannel 或全站 storage 事件同步（src 中仅 `VerticalSidebar.vue:96` 一处 storage 监听，用于侧栏定制刷新）；多标签页打开同一 Dashboard 时主题/偏好各自从 localStorage 读取，无实时同步机制。
+**跨窗口同步。** 本次未找到 BroadcastChannel 或全站 storage 事件同步（src 中仅有一处 storage 监听，用于侧栏定制刷新，见 `VerticalSidebar.vue:96`）；多标签页打开同一 Dashboard 时主题和偏好各自从 localStorage 读取，无实时同步机制。
 
 ## 2. 弹窗、浮层与菜单
 
-**主弹窗机制是 Vuetify v-dialog 的直接使用。** grep `<v-dialog`（`src/**/*.vue`）命中 100 处以上（结果被截断），覆盖 ConfigPage、ExtensionPage（13 处）、ProviderPage、SessionManagementPage（6 处）、知识库、persona、平台、共享组件等全部管理页。
+**主弹窗机制是 Vuetify v-dialog 的直接使用。** grep `<v-dialog` 在 `src/**/*.vue` 中命中 100 处以上（结果被截断），覆盖 ConfigPage、ExtensionPage（13 处）、ProviderPage、SessionManagementPage（6 处）、知识库、persona、平台、共享组件等全部管理页。
 
 滚动锁定、Esc 关闭、遮罩点击关闭、焦点管理、persistent、fullscreen、scrollable 等行为均来自 Vuetify 3.7.11 内部实现，本次未下钻依赖源码，标注未核实；项目代码只传属性（如 persistent、max-width、@after-enter）。
 
-**命令式确认对话框（项目自建）。** `plugins/confirmPlugin.ts` 在应用初始化时把 `ConfirmDialog.vue` 单实例渲染到 document.body 挂载节点，暴露 app.config.globalProperties.$confirm 与 provide 注入，`open()` 返回 `Promise<boolean>`（`ConfirmDialog.vue:26-34`）；
+**命令式确认对话框（项目自建）。** 插件在应用初始化时把 ConfirmDialog 单实例渲染到 document.body 挂载节点，暴露全局属性 `$confirm` 与 provide 注入，open 返回 `Promise<boolean>`；实现入口见 `plugins/confirmPlugin.ts` 和 `ConfirmDialog.vue:26-34`。
 
-`utils/confirmDialog.ts` 提供 `useConfirmDialog()`（inject）与 `askForConfirmation()`（无注入时兜底 window.confirm）。
+确认工具提供组合式调用和无注入时的 window.confirm 兜底，入口见 `utils/confirmDialog.ts`。
 
-消费方 16 个文件（ConversationPage、Settings、Chat、ProjectList、BackupDialog、PersonaForm、SubAgentPage 等，grep askForConfirmation|useConfirmDialog 命中 59 行）。确认框无 `onOk/onCancel` 回调面，只有布尔结果。
+消费方分布在 16 个文件（ConversationPage、Settings、Chat、ProjectList、BackupDialog、PersonaForm、SubAgentPage 等，grep 命中 59 行）。确认框没有 onOk/onCancel 回调面，只有布尔结果。
 
 **样式约定被制度化。** `ConfirmDialog.vue:4-9` 的标题类 text-h3 pa-4 pb-0 pl-6、按钮 `variant="text"/"tonal"` 与仓库 `AGENTS.md:54` 的 WebUI 对话框规范一致，且在 WaitingForRestart、FileConfigItem、BackupDialog、SidebarCustomizer 等多处对话框重复出现——这是项目层唯一显式的弹窗一致性约束。
 
 **全屏代码编辑对话框。** `AstrBotConfig.vue:364`、`AstrBotConfigV4.vue:444`、`ConfigPage.vue:88` 用 `fullscreen + transition="dialog-bottom-transition" + scrollable` 的 v-dialog 内嵌 Monaco 编辑器（`AstrBotConfigV4.vue:457-459` 按 editor_theme 传 Monaco 明暗主题）。
 
-**菜单。** `StyledMenu.vue` 包装 v-menu，统一卡片样式（毛玻璃、`--astrbot-menu-shadow` 变量、深色主题 `.v-theme--PurpleThemeDark` 覆盖），在 VerticalHeader 功能菜单、语言/主题下拉、登录页复用；项目内另有直接使用 v-menu 的子菜单（VerticalHeader 语言/主题分组）。
+**菜单。** StyledMenu 包装 v-menu，统一毛玻璃卡片样式、菜单阴影变量和深色主题覆盖，在 VerticalHeader 功能菜单、语言/主题下拉、登录页复用；项目内另有直接使用 v-menu 的子菜单。实现见 `StyledMenu.vue`。
 
 **Overlay 浮层。** v-overlay 用途分散——图片预览 4 处、`ConfigPage.vue:183-208` 测试聊天抽屉（`location="right"` + slide-x-reverse-transition）、`AddNewPlatform.vue:818` 与 `ProviderSelector.vue:215` 的加载遮罩。无统一 Overlay Host 或 Portal 管理，均靠 Vuetify 内部 teleport 到 body。
 
 ## 3. 通知、加载态与错误反馈
 
-**Toast 链路（项目自建，薄封装）。** `stores/toast.js` 是 Pinia setup store，queue 数组 + `current = queue[0]`；`App.vue:7-17` 的 v-snackbar 用 `v-if="toastStore.current"` 只渲染队首，snackbarShow setter 在关闭时 `shift()` 出队。
+**Toast 链路（项目自建，薄封装）。** Pinia store 维护 queue 数组和队首 current；根组件的 v-snackbar 只渲染队首，关闭时移除该项（实现见 `stores/toast.js`、`App.vue:7-17`）。
 
 默认 `timeout=3000`、`location='top center'`、closable；图标按 color 映射（success/error/warning/info/primary，`App.vue:38-44`）；关闭按钮显式 `aria-label="Close notification"`（`App.vue:15`）。
 
 **单条顺序展示，无堆叠、无同 key 更新、无 loading→success 转换、无持久化**（store 源码仅 31 行）。
 
-消费入口：`utils/toast.js` 的 `useToast()`（success/error/info/warning 四个便捷方法），业务调用 65 处（grep toast.，覆盖 Settings、ConsolePage、FileConfigItem、Chat、T2ITemplateEditor 等）；
+消费入口是 `utils/toast.js` 的 useToast，提供 success、error、info、warning 四个便捷方法；业务调用 65 处，覆盖 Settings、ConsolePage、FileConfigItem、Chat、T2ITemplateEditor 等。
 
 另有页面局部 showToast 惯例（Settings.vue:844、StorageCleanupPanel.vue:82）。
 
 **路由加载反馈。** `stores/routerLoading.ts` 模拟进度（50ms 步进到 90%，afterEach 收尾到 100% 延迟 300ms 隐藏），`FullLayout.vue:100-108` 渲染顶部固定 v-progress-linear（z-index 9999）。仅导航切换触发（`router/index.ts:30-34`）。
 
-**页面加载/空状态/骨架屏。** 无公共 Loading 组件。加载以 Vuetify 内联 v-progress-circular/v-progress-linear 为主（grep 命中 89 处）；v-skeleton-loader 仅 `PersonaManager.vue:96` 一处。
+**页面加载/空状态/骨架屏。** 无公共 Loading 组件。加载以 Vuetify 内联进度组件为主（grep 命中 89 处）；骨架加载器仅出现一处，见 `PersonaManager.vue:96`。
 
 管理列表有成熟的"三态 no-data"惯例——`ConversationPage.vue:183-200` 的 v-data-table no-data 槽按 listLoadState 分支：loading（转圈）/ empty（图标 + 文案）/ error（图标 + 重试按钮）。
 
@@ -101,7 +101,7 @@ Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示�
 
 **错误边界。** 本次未找到 app.config.errorHandler、errorCaptured 或 ErrorBoundary 组件（grep 全 src 无匹配）；Vue 组件渲染错误会走默认控制台错误，无兜底 UI。
 
-HTTP 层有统一拦截：`api/http.ts:50-107` 对 401（非认证接口）清空 token 并跳 `/auth/login`、429 把 message 作为 reject 值透传；业务侧模式是 try/catch + resolveErrorMessage（`utils/errorUtils.js`）+ toast.error。
+HTTP 层有统一拦截：对 401（非认证接口）清空 token 并跳 `/auth/login`，对 429 将 message 作为拒绝值透传；业务侧采用 try/catch、错误消息解析和 toast.error（实现见 `api/http.ts:50-107` 与 `utils/errorUtils.js`）。
 
 **长任务反馈（独立对话框 + 轮询）。** 更新流程（`VerticalHeader.vue`）用 800ms 轮询 updatesApi.progress 渲染分阶段下载进度；重启等待 `WaitingForRestart.vue` 每 1s 轮询 start-time，60 次上限后提示重试超限；升级恢复 `UpgradeRecoveryDialog.vue` 每 1s 轮询、90 次上限，blocking 模式下 persistent 不可关。这类"返回原任务"反馈均为模态对话框而非可堆叠通知。
 
@@ -113,13 +113,13 @@ HTTP 层有统一拦截：`api/http.ts:50-107` 对 401（非认证接口）清�
 
 variables 还有 border-color、carousel-control-size 两项），**不是 CSS 变量 token 体系**；
 
-运行时权威是 Pinia customizer.uiTheme，经两条路径生效：`FullLayout.vue:93` 的 v-app :theme 绑定 + `main.ts:74` 的 vuetify.theme.global.name.value 对齐（供 `useTheme()` 消费者如 StyledMenu、VerticalHeader 的 isDarkTheme 判断）。
+运行时权威是 Pinia customizer 的 uiTheme，经两条路径生效：FullLayout 绑定 v-app 的 theme，main.ts 对齐 Vuetify 全局主题名称，供 useTheme 消费者判断明暗（见 `FullLayout.vue:93`、`main.ts:74`）。
 
 两处都写，避免只改其一导致组件读到的主题不一致（`main.ts:52-60` 注释说明这是唯一注册点，VerticalHeader/ThemeSwitcher 不再自行注册监听器）。
 
 **三态与持久化。** `config.ts` 定义 `ThemeMode = 'light'|'dark'|'system'`，`checkThemeMode()` 读取 localStorage themeMode 并迁移旧版 uiTheme 值；SET_THEME_MODE（`customizer.ts:43-49`）同时写 themeMode 与 uiTheme 两个 key。
 
-切换入口共四处：`VerticalHeader.vue:877-886` 主题下拉（light/dark/system 三选项）、登录页/设置向导同款下拉（`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`），以及聊天工作台内的明暗互切按钮 `Chat.vue:309`（toggleTheme 于 `Chat.vue:1747-1749` 调 SET_UI_THEME，无 system 选项），均调 SET_THEME_MODE 或 SET_UI_THEME + 同步 theme.global.name。
+切换入口共四处：VerticalHeader、登录页和设置向导提供 light/dark/system 三选项，聊天工作台提供只在明暗间切换的按钮；前者调用 SET_THEME_MODE，后者调用 SET_UI_THEME，并同步全局主题名称（定位见 `VerticalHeader.vue:877-886`、`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`、`Chat.vue:309`、`Chat.vue:1747-1749`）。
 
 **system 跟随。** `config.ts:31-38` 的 resolveUiTheme 在模块加载期用 matchMedia('(prefers-color-scheme: dark)') 计算初始值；`main.ts:61-101` setupThemeSync 注册全局唯一 matchMedia change 监听器（仅 `themeMode==='system'` 时生效），系统切换即改 store + localStorage + theme.global.name。
 
@@ -145,7 +145,7 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 **第三方组件主题接入。** markstream-vue 渲染组件无主题参数，靠 CSS 类与 Vuetify 变量；`ThemeAwareMarkdownCodeBlock.vue` 按 inject 的 isDark 切换 themeRenderKey 强制重渲染（:62）；Monaco 明暗主题由配置项 editor_theme 传入（`AstrBotConfigV4.vue:457`）。
 
-**字体切换。** customizer.fontTheme 默认 'Noto Sans SC' 只作为 v-app class（`FullLayout.vue:95`）；SET_FONT action 存在但本次未找到任何调用方（grep 仅 store 定义与 config 初始值），未确认有可用入口。
+**字体切换。** customizer 的 fontTheme 默认 'Noto Sans SC' 只作为 v-app class（`FullLayout.vue:95`）；SET_FONT action 存在但本次未找到任何调用方（grep 仅 store 定义与 config 初始值），未确认有可用入口。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -161,7 +161,7 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 登录页主题菜单固定 `location="bottom center"`（`LoginPage.vue:177-179`）。管理页主体为 v-container fluid 流式 + 各页自定 @media 列重排。
 
-**窗口适配。** `index.html:6` viewport meta 禁缩放（`user-scalable=no`）；chat 路由时 v-main 强制 `height:100vh; overflow:hidden`（`FullLayout.vue:113-116`）。Dashboard 是浏览器页面，无窗口最小尺寸/安全区逻辑；桌面 wrapper（外部项目）的窗口行为不在本仓。
+**窗口适配。** viewport meta 禁缩放（`user-scalable=no`，见 `index.html:6`）；chat 路由时 v-main 强制 `height:100vh; overflow:hidden`（`FullLayout.vue:113-116`）。Dashboard 是浏览器页面，无窗口最小尺寸/安全区逻辑；桌面 wrapper（外部项目）的窗口行为不在本仓。
 
 **本次未找到。** PWA/service worker/manifest（grep `serviceWorker|manifest.json` 无匹配）；容器查询、ResizeObserver 驱动的自动折叠（仅 `VerticalSidebar.vue` 拖拽改宽度 200-300px 是用户手动 resize）。
 
@@ -173,11 +173,11 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 注意 `MessageListDEPRECATED.vue` 仍是旧 Options API 组件，本次未确认其是否被任何路由挂载（grep MessageListDEPRECATED 仅在自身文件命中）。
 
-**二维码生成。** `QrCodeViewer.vue` 用 qrcode 库 toDataURL 渲染，`PlatformPage.vue:138` 等消费。
+**二维码生成。** QrCodeViewer 用 qrcode 库的 toDataURL 渲染，PlatformPage 等页面消费（`QrCodeViewer.vue`、`PlatformPage.vue:138`）。
 
 **上传机制（分散三处，无统一层）。** ① 聊天附件 `composables/useMediaHandling.ts`——SHA-256 去重（:18-36）、fileApi.upload 上传、blob URL staging 预览与 URL.revokeObjectURL 清理（:107-177），与 Composer 的粘图/录音入口配合，主链归 [`../Chat UI/AstrBot-ChatUI调查笔记.md`](../Chat%20UI/AstrBot-ChatUI调查笔记.md) 第 3 节；
 
-② 配置/插件文件上传 `FileConfigItem.vue`——对话框内 dropzone 行（@drop.prevent + dragover 高亮，:49-58）、隐藏 `<input type=file multiple>`（:61）、500MB 单文件上限 + 逐文件 toast 警告（:239-247）、成功后 toast 反馈（:280）；
+② 配置/插件文件上传——对话框内提供 dropzone 行、隐藏的多文件输入、500MB 单文件上限和逐文件 toast 警告，成功后反馈（实现见 `FileConfigItem.vue:49-61`、`:239-247`、`:280`）；
 
 ③ 知识库文档上传带百分比进度（`knowledge-base/components/DocumentsTab.vue:32`）。
 
@@ -205,9 +205,9 @@ copyToClipboard 还用于 API Key 复制（`Settings.vue:1028-1030`，带成功/
 
 ### 桌面集成（本仓仅消费侧）
 
-本仓是浏览器页面，桌面壳（托盘、系统通知、原生菜单、多窗口）由外部 AstrBot Desktop wrapper 实现，Dashboard 只通过 bridge 交互：window.astrbotDesktop（isDesktop/restartBackend/stopBackend/onTrayRestartBackend）与 window.astrbotAppUpdater（checkForAppUpdate/installAppUpdate），类型契约见 `src/types/desktop-bridge.d.ts`。
+本仓是浏览器页面，桌面壳（托盘、系统通知、原生菜单、多窗口）由外部 AstrBot Desktop wrapper 实现，Dashboard 只通过 bridge 交互：桌面桥负责桌面状态、重启和托盘事件，更新桥负责检查和安装应用更新，类型契约见 `src/types/desktop-bridge.d.ts`。
 
-消费点：托盘"重启后端"事件（`App.vue:51-58`）、桌面模式更新对话框（`VerticalHeader.vue:294-374`，检测到 isDesktopReleaseMode 时 handleUpdateClick 改走桌面桥）、restartAstrBot（`utils/restartAstrBot.ts:31-49`，有桥优先用桥，无桥回退 statsApi.restart + 轮询等待）。
+消费点：托盘“重启后端”事件、桌面模式更新对话框和重启工具；检测到桌面发布模式时更新改走桌面桥，无桥时回退后端重启接口并轮询等待（定位见 `App.vue:51-58`、`VerticalHeader.vue:294-374`、`utils/restartAstrBot.ts:31-49`）。
 
 Dashboard 自身未调用浏览器 Notification API（grep new Notification 无匹配）。
 

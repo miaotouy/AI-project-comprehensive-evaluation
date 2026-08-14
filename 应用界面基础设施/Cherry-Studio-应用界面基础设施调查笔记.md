@@ -16,49 +16,49 @@
 
 Cherry Studio 已将弹窗主路径迁移到内部 UI 包。该包封装 Radix Dialog，业务侧再通过模块级 popup store 和每窗口一个 PopupHost 获得命令式调用能力。Toast 也是自研单例，支持 loading 到 success 或 error 的状态衔接，并区分警告与状态消息的可访问语义。
 
-主题权威源位于 Electron 主进程，渲染进程订阅主题变化。视觉 token 在 `packages/ui` 中分层组织，从基础色板、产品语义到 Tailwind 映射均有清楚契约和校验脚本。用户可设置明暗、单一主色、字体和自定义 CSS，但没有主题市场、壁纸或主题文件导入导出。
+主题权威源位于 Electron 主进程，渲染进程订阅主题变化。视觉 token 在 UI 包中分层组织，从基础色板、产品语义到 Tailwind 映射均有清楚契约和校验脚本。用户可设置明暗、单一主色、字体和自定义 CSS，但没有主题市场、壁纸或主题文件导入导出。
 
 上下文菜单可以在项目自绘菜单和系统原生菜单之间切换。弹窗焦点等细节大多由 Radix 提供，静态调查只能确认项目侧接入和覆盖项，实际键盘与多窗口表现仍需运行验证。
 
 ## 系统边界与总体装配
 
-**界面栈。** React + Tailwind（含 tw-animate-css）；内部 UI 包 `@cherrystudio/ui`（`packages/ui`，基于 Radix 生态）；无 antd、无 framer-motion、无 react-hot-toast/sonner。
+**界面栈。** React + Tailwind（含 tw-animate-css）；内部 UI 包首次以 `@cherrystudio/ui` 标识，源码位于 packages/ui，基于 Radix 生态；无 antd、无 framer-motion、无 react-hot-toast/sonner。
 
-**弹窗装配。** `PopupHost.tsx` 每个窗口挂一个，订阅模块级 PopupService（`src/renderer/services/popup/PopupService.ts`，useSyncExternalStore 驱动，不依赖 React context）；
+**弹窗装配。** 每个窗口挂一个 PopupHost，订阅模块级 PopupService（`src/renderer/services/popup/PopupService.ts`，useSyncExternalStore 驱动，不依赖 React context）；
 
-无 host 时（启动早期）showComponent/showConfirm 直接 resolve dismissResult/`false` 并打 warn（`PopupService.ts:100-103, 124-127`），"popups are not usable on a startup path" 是代码原话。
+无 host 时（启动早期）两个弹窗入口直接 resolve 默认关闭结果并打 warn（`PopupService.ts:100-103, 124-127`），"popups are not usable on a startup path" 是代码原话。
 
-**Toast 装配。** `services/toast.ts` 包一层 i18n 标签解析，真正实现在 `@cherrystudio/ui` 的 `packages/ui/src/components/primitives/toast.tsx`——模块级 `createToastStore()`（`toast.tsx:70-162`）+ useSyncExternalStore，
+**Toast 装配。** services/toast.ts 只包一层 i18n 标签解析，真正实现在 UI 包的 toast.tsx——模块级 `createToastStore()`（`toast.tsx:70-162`）配合 useSyncExternalStore，
 
-全应用共享 defaultToastStore（`toast.tsx:290-297` 注释解释不按 provider 分叉的原因：分叉会导致命令入口和实际渲染的 viewport 落在不同 store 上，"quickAssistant black-hole bug"）。
+全应用共享 defaultToastStore（`toast.tsx:290-297` 的注释解释不按 provider 分叉的原因：分叉会导致命令入口和实际渲染 viewport 落在不同 store 上，"quickAssistant black-hole bug"）。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**状态所有权。** 弹窗状态在模块级 PopupService store（React 组件树外），Toast 在模块级 toast store；两套都是"命令入口与渲染 viewport 共享同一 store"的单例设计。
+**状态所有权。** 弹窗状态在模块级 PopupService store（React 组件树外），Toast 在模块级 toast store；两套都是“命令入口与渲染 viewport 共享同一 store”的单例设计。
 
 **主题状态。** 权威在主进程 ThemeService，渲染层订阅 IPC（见第 4 节）。
 
-**窗口装配。** 每窗口挂 `<PopupHost/>`；AppShell 进入聊天工作台时调整主窗口最小尺寸（见第 5 节）。
+**窗口装配。** 每窗口挂 PopupHost；AppShell 进入聊天工作台时调整主窗口最小尺寸（见第 5 节）。
 
 ## 2. 弹窗、浮层与菜单
 
 ### 弹窗/对话框（自建 Radix 封装 + 两套调用入口）
 
-对话框基础组件是 `@cherrystudio/ui` 基于 `@radix-ui/react-dialog` 封装的 Dialog/DialogContent（`packages/ui/src/components/primitives/dialog.tsx:10-149`）：
+对话框基础组件是 UI 包基于 `@radix-ui/react-dialog` 封装的 Dialog/DialogContent（`packages/ui/src/components/primitives/dialog.tsx:10-149`）：
 
-**Esc/遮罩关闭。** DialogOverlay 点击默认触发 Radix 的 Dialog.Close（`dialog.tsx:101-108`），可用 `closeOnOverlayClick={false}` 关掉；Esc 键关闭是 Radix Dialog.Root 默认行为，代码里没有覆盖 onEscapeKeyDown——所有 Dialog 默认支持 Esc 关闭。
+**Esc/遮罩关闭。** DialogOverlay 点击默认触发 Radix 的 Dialog.Close（`dialog.tsx:101-108`），可用 closeOnOverlayClick=false 关掉；Esc 键关闭是 Radix Dialog.Root 默认行为，代码里没有覆盖 onEscapeKeyDown，所有 Dialog 默认支持 Esc 关闭。
 
 业务层确认弹窗（`ConfirmPopupItem.tsx:121-124`）额外用 onInteractOutside 手动挡遮罩点击（`maskClosable === false` 时 `event.preventDefault()`），是 Radix 上叠加的业务开关。
 
 **焦点管理。** DialogContent 默认交给 Radix FocusScope 处理关闭后焦点归还，但专门开了转义口子 focusOnClose（ConfirmPopupProps.focusOnClose，`packages/ui/src/services/popup/types.ts:76-90`）——原因写得很直白：Radix 默认把焦点还给"打开弹窗前聚焦的元素"，但命令菜单/Popover 里触发的弹窗触发者早已卸载，Radix 会把焦点落在过期元素或 document.body 上；
 
-focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`，先 `preventDefault()` 再执行回调）里精确指定焦点落点，不用 race requestAnimationFrame。
+focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`）里先阻止默认行为，再精确指定焦点落点，不用 race requestAnimationFrame。
 
 **两套调用入口。** ①`createPopup<P,R>` 用于自定义交互弹窗（图片预览、编辑名称对话框），返回 `show()/hide()`，`show()` 是 single-flight（重复调用复用同一 promise，`types.ts:21-24`）；
 
 ②`popup.confirm/error/info/warning` 四个 "prefab" 走 showConfirm，Promise 只解出 boolean，无 `onOk/onCancel` 回调，也没有 antd 时代的 `Modal.destroyAll/update/warn/success`（`types.ts:39-59` 注释明确列出被砍掉的 API 面）。
 
-两阶段关闭：`settle()` 先 resolve promise 并把 open 置 `false`（播放退场动画），POPUP_EXIT_MS（=DIALOG_UNMOUNT_DELAY_MS=200ms，`packages/ui/src/utils/dialog.ts:5`）后才真正从 store 移除（`PopupService.ts:74-87`）。
+两阶段关闭：settle() 先 resolve promise 并把 open 置为 false（播放退场动画），等待 200ms 的退场延迟（`packages/ui/src/utils/dialog.ts:5`）后才真正从 store 移除（`PopupService.ts:74-87`）。
 
 **动画。** 开合动画不是 JS 补间，是 Radix `data-[state=open|closed]` 属性配合 Tailwind 动画类的纯 CSS 方案（见第 7 节）。
 
@@ -78,13 +78,13 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
 ### Toast（自研 store，非 antd message/react-hot-toast/sonner）
 
-**位置。** ToastViewport 固定在 `top-5 left-1/2`，屏幕顶部居中，flex-col 纵向堆叠（`toast.tsx:372-380`）。
+**位置。** ToastViewport 固定在屏幕顶部居中，消息纵向堆叠（`toast.tsx:372-380`）。
 
-**自动消失时长。** 默认 `DEFAULT_TIMEOUT = 3000ms`（`toast.tsx:51`）；success 类型的 loading→success 转换用 timeout ?? 2000（更短，`toast.tsx:223`）；error 转换默认 timeout ?? 0（不自动消失，`toast.tsx:242`）；loading 类型永不自动消失（`toast.tsx:116-118`）。
+**自动消失时长。** 默认时长为 3000ms（`toast.tsx:51`）；成功类型的 loading→success 转换默认更短，为 2000ms（`toast.tsx:223`）；错误转换默认不自动消失（`toast.tsx:242`）；loading 类型永不自动消失（`toast.tsx:116-118`）。
 
 **loading→success/error 的 promise 桥接。** `toast.loading({ promise, onError })` 跟踪一个 Symbol 令牌（loadingTokens），只有令牌匹配才允许把 loading 状态"续写"为 success/error（`toast.tsx:189-249`），防止同一 key 被后来的 loading 覆盖后旧 promise resolve 误写状态。
 
-**无障碍。** getToastA11yProps（`toast.tsx:313-319`）——warning/error 用 `role="alert"` + `aria-live="assertive"`，其余 `role="status"` + `aria-live="polite"`；关闭按钮有 `aria-label={labels.close}`（`toast.tsx:346`）。
+**无障碍。** getToastA11yProps（`toast.tsx:313-319`）按严重程度区分语义：warning/error 用 role=alert 和 aria-live=assertive，其余用 role=status 和 aria-live=polite；关闭按钮有关闭标签（`toast.tsx:346`）。
 - 用例（`Topics.tsx:340-372`）：导出图片时 `toast.loading({ key, promise, onError: () => {} })`，promise resolve/reject 后各自 toast.success/toast.error。
 
 ### Loading / 骨架屏 / 空状态（三种场景三种呈现，工具执行没有独立骨架）
@@ -129,12 +129,12 @@ child-process-gone 全仓库零命中（HTML artifact 预览 webview 只见 will
 
 ## 4. 主题、视觉 token 与持久化
 
-完整链路分四层：主进程权威状态 → 渲染层订阅与首帧防闪烁 → `packages/ui` 的 Design Token 契约 → 用户自定义（主色/字体/CSS 覆盖），另有一条自定义 CSS 旁路。
+完整链路分四层：主进程权威状态 → 渲染层订阅与首帧防闪烁 → UI 包的 Design Token 契约 → 用户自定义（主色/字体/CSS 覆盖），另有一条自定义 CSS 旁路。
 
 1. **主进程权威状态**：ThemeService（`src/main/services/ThemeService.ts:8-38`）持有偏好 ui.theme_mode（`light`/`dark`/`system`），启动时写进 Electron 的 nativeTheme.themeSource（系统原生 UI——原生右键菜单、系统对话框——也跟着变色）；
 
 监听 nativeTheme.on('updated', ...)，OS 主题变化即广播 IPC 事件 system.native_theme_updated，payload 是解析后的实际颜色（`dark`/`light`，已不含 `system`）。
-2. **渲染层订阅 + 首帧防闪烁**：`ThemeProvider.tsx` 用 useState 初始值直接读已保存偏好而不是等 effect（`ThemeProvider.tsx:34-36` 注释："入口在渲染前已经 await 过偏好预加载，等 effect 里的同步会先提交一帧 OS 主题，当保存主题和 OS 不同时会闪一下"）；
+2. **渲染层订阅 + 首帧防闪烁**：ThemeProvider 用 useState 初始值直接读已保存偏好而不是等 effect（`ThemeProvider.tsx:34-36` 注释：“入口在渲染前已经 await 过偏好预加载，等 effect 里的同步会先提交一帧 OS 主题，当保存主题和 OS 不同时会闪一下”）；
 
 `settedTheme === system` 时先用 window.matchMedia('(prefers-color-scheme: dark)') 本地即时判断（getSystemTheme，`ThemeProvider.tsx:24-25`）撑住首帧，随后等 IPC system.get_native_theme 请求回来对齐权威值（:86-94）。
 
@@ -145,7 +145,7 @@ Electron 侧配合：主窗口 showMode: 'manual'（`src/main/core/window/window
 窗口创建时 backgroundColor 直接按 nativeTheme.shouldUseDarkColors 取 `#181818`/`#FFFFFF`（`MainWindowService.ts:188-190`），内容加载前的窗口底色已与主题一致。
 
 全仓库 prefers-color-scheme 消费面只有 ThemeProvider 这一处（另有一处 `MigrationApp.tsx:410` 用于迁移窗口自身首帧判断）。
-3. **Design Token 体系（`packages/ui/src/styles`，契约分层 + 生成器）**：`packages/ui` 内含一套正式的分层 CSS 契约，`contract.css` 声明导入顺序必须单向："foundation providers → runtime inputs → official Shadcn semantics → product semantics"（`contract.css:1-13`）：
+3. **Design Token 体系（packages/ui/src/styles，契约分层 + 生成器）**：UI 包内含一套正式的分层 CSS 契约，contract.css 声明导入顺序必须单向：“foundation providers → runtime inputs → official Shadcn semantics → product semantics”（`contract.css:1-13`）：
    - **基础色板（foundation）**：`tokens/index.css` 汇总 `tokens/colors/primitive.css`（23 个色族 × 50-950 共 10 阶 + `--cs-black`/`--cs-white`/`--cs-brand-*`，全部 oklch 值，
 
      `primitive.css:6-309`）、`tokens/colors/status-legacy.css`（冻结的旧状态色板，
@@ -163,7 +163,7 @@ Electron 侧配合：主窗口 showMode: 'manual'（`src/main/core/window/window
      配套约束工具：`scripts/theme-contract.ts`、`check-theme-contract.ts`、`validate-theme-contract.ts`、`migration-registry.ts` + `scripts/migrations/shadcn-v2.json`；
 
      契约规范见 `packages/ui/docs/design-token-system.md`（v2 契约：无前缀语义是唯一公共 API、`--cs-*` 只是内部 provider、`--cs-theme-*` 是受控输入、`--app-*` 属 owner-local）、`variable-catalog.md`、`migration-plan.md`、`styles-reference.md`。
-   - **消费规则**：组件只消费无前缀公共变量（bg-background/text-foreground 等工具类），不直接引用 `--cs-*`。
+    - **消费规则**：组件只消费无前缀公共变量（bg-background/text-foreground 等工具类），不直接引用内部变量。
 4. **用户自定义主题**：外观设置提供明暗三态预览、五个预设主色、任意颜色输入，以及全局字体和代码字体选择。字体列表通过 IPC 从系统字体表取得。（`AppearanceSettings.tsx:148-162,283-341,621-660`）
 
 `useUserTheme.ts` 把这些偏好直接写 document.documentElement 行内样式：`--cs-theme-primary` + `--cs-theme-primary-foreground`（后者用 getForegroundColor 按 WCAG 相对亮度、阈值 0.179 选黑/白，`src/renderer/utils/style.ts:138-145`），以及 `--app-user-font-family`/`--app-user-code-font-family`（`useUserTheme.ts:19-26`，属于 `--app-*` owner-local 命名空间）；
@@ -192,9 +192,9 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 ## 5. 响应式、移动端与窗口适配
 
-**没有断点驱动的侧栏折叠。** 检索侧栏容器和 ResourceEntityRail 未发现 ResizeObserver/matchMedia/CSS @container 驱动的自动折叠——侧栏展开/折叠是**手动命令**（app.sidebar.toggle，`HomePage.tsx:408`），不随窗口变窄自动收起。
+**没有断点驱动的侧栏折叠。** 检索侧栏容器和 ResourceEntityRail 未发现 ResizeObserver、matchMedia 或 CSS @container 驱动的自动折叠——侧栏展开/折叠是**手动命令**（app.sidebar.toggle，`HomePage.tsx:408`），不随窗口变窄自动收起。
 
-**主窗口最小宽度随页面动态调整。** 进入聊天工作台时 AppShell 调用 IPC 把主窗口最小尺寸从默认 `MIN_WINDOW_WIDTH=960px`（`src/shared/utils/window.ts:1`，
+**主窗口最小宽度随页面动态调整。** 进入聊天工作台时 AppShell 调用 IPC 把主窗口最小尺寸从默认 960px（`src/shared/utils/window.ts:1`，
 
 写在 `windowRegistry.ts:63` 的窗口创建配置里）临时放宽到 `SECOND_MIN_WINDOW_WIDTH=520px`（`AppShell.tsx:140` 的 window.main.set_minimum_size），离开时还原——聊天页允许把窗口拖得比其他页面更窄。
 
@@ -208,7 +208,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 所有操作都有 toast 反馈（成功/失败，:157-199）。"保存为图片"动作会把旋转/翻转**烘焙**进输出的 PNG（transformImageToPng，d1ffaa82ce；全屏观看交互 e22a976586）。
 
-**代码块复制/运行的交互反馈。** 复制按钮点击后图标临时切换成对勾（`useCopyTool.tsx:18-31,51`，useTemporaryValue hook 控制"临时态"多久后自动复原；复制图片按钮同理有独立 copiedImage 临时态），并弹 toast（`CodeBlockView.tsx:154-164`）。
+**代码块复制/运行的交互反馈。** 复制按钮点击后图标临时切换成对勾（`useCopyTool.tsx:18-31,51`，useTemporaryValue hook 控制“临时态”多久后自动复原），并弹 toast（`CodeBlockView.tsx:154-164`）。复制图片按钮也有独立的临时状态。
 
 "运行"仅对 Python 代码块生效（`isExecutable = codeExecutionEnabled && language === 'python'`，`CodeBlockView.tsx:114-116`），执行走**浏览器内嵌 Pyodide**（pyodideService.runScript，:189-203）而不是主进程子进程，超时由偏好 chat.code.execution.timeout_minutes 控制，执行结果（文本/图片）展示在代码块下方 StatusBar（一个纵向滚动 bg-muted 面板）。
 

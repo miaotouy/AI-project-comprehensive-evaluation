@@ -59,15 +59,15 @@
 5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前十六个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。AIO Hub 对这套生态的支持不止角色卡导入：它有独立世界书编辑器、持久化与导入导出服务，受支持字段会进入真实上下文管道；两者的差距主要落在社区资产、扩展协议与完整语义覆盖。
 6. **文件/服务编排型：VCPChat、VCPToolBox。** VCPChat 每个 Agent 一个目录，模型和基础参数随 Agent 保存，工具策略留给 VCP 服务端。VCPToolBox 同时存在提示词文件和 AgentAssistant 配置两层，前者参与变量替换，后者承担具名多 Agent 通信和任务派发。
 7. **无角色实体：Manifold Desktop。** 只有全局 system prompt、温度、Provider/模型和文本提示词库；会话不保存发送时配置。因此它应作为“全局配置基线”比较，不能记成一个功能较少的 Agent 实现。
-8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件（SOUL.md）、命名人格模板（personalities）、用户手动 system 提示词（agent.system_prompt）与运行时注入（ephemeral）叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay），启动/建 agent 时优先把命名人格渲染成文本、否则回退到 `agent.system_prompt`，env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 仍最优先，**人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示，v33→v34 迁移一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
+8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件、命名人格模板、用户手动 system 提示词与运行时注入共同叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay）。启动或创建 agent 时优先把命名人格渲染成文本，否则回退到用户手动提示；环境变量仍最优先，**人格代码不会写回用户手动提示字段**（v33→v34 迁移会一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
 9. **无角色实体、文件约定型：Pi。** 角色能力由 `SYSTEM.md`（整篇替换默认提示词）、`APPEND_SYSTEM.md`（追加）、`AGENTS.md/CLAUDE.md` 祖先链（`<project_context>` 块）与 skills 文件组合，全部按会话 cwd 在启动时解析；模型/思考等级是会话级状态，默认值来自全局+项目设置。没有任何角色对象、角色 UI 或角色导入导出，system prompt 本体不随会话条目保存。
-10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为 `opencode.json` 的 `agent` 字段与 `{agent,agents}/**/*.md`（带 frontmatter，mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、model/variant/temperature/top_p、permission 规则与 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
+10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为配置文件的 agent 字段与带 frontmatter 的角色文件（mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、模型与生成参数、permission 规则和 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
 
 最关键的横向差异在于：**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。Hermes Agent 介于后两者之间：人格配置是全局当前值，但会话会记录构建好的 system prompt（hash 去重）与模型快照，而运行时注入的人格文本不随轨迹保存。
 
 若单独比较**预设可配置范围与日常编辑体验**，结论会与“社区生态成熟度”不同：AIO Hub 是当前样本中最强的一体化候选。它把消息角色、顺序、锚点/深度、模型匹配、消息组、宏、变量、知识库占位符、资产附件、模型参数和工具策略放在同一个 Agent 编辑流程里；其中消息组可设多选或单选，并有组级总开关和侧边栏快速切换。它还自带世界书编辑器与运行时，支持关键词/正则、selective、概率、扫描深度、递归、过滤、包含组与 depth 注入等可执行子集。SillyTavern 的优势仍是角色卡标准、社区资产、传统角色扮演工作流、扩展事件和 World Info 全语义覆盖；这不能简化为“AIO 的角色能力远弱于酒馆”，也不能反过来用 AIO 的配置聚合优势否定酒馆生态。
 
-跨项目比较酒馆兼容时，应拆成四层：格式能否导入、字段能否保留/编辑、字段是否在目标运行时生效、原生态协议是否完整复现。AIO 前三层已有相当覆盖，第四层并不完整：部分锚点降级映射，`sticky/cooldown/delay` 有运行时而缺编辑控件，另一些扩展字段只能保存或编辑但未找到消费链。用一个“支持/不支持”标签会同时掩盖它已有的能力和真实边界。
+跨项目比较酒馆兼容时，应拆成四层：格式能否导入、字段能否保留/编辑、字段是否在目标运行时生效、原生态协议是否完整复现。AIO 前三层已有相当覆盖，第四层并不完整：部分锚点降级映射，sticky、cooldown、delay 这些状态虽有运行时处理却缺少编辑控件，另一些扩展字段只能保存或编辑但未找到消费链。用一个“支持/不支持”标签会同时掩盖它已有的能力和真实边界。
 
 ## 架构分型
 
@@ -164,7 +164,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | 前置/追加 | Open WebUI、AstrBot、Cherry Studio、VCPChat、Hermes Agent | 多段 prompt 共存，位置决定约束先后 |
 | 消息级插入 | AIO Hub、NextChat、SillyTavern depth/world info | 内容以 system/user/assistant 消息或历史深度进入上下文 |
 
-因此，只比较一个 `systemPrompt` 字段是否存在会遗漏 AIO Hub 的锚点消息、SillyTavern 的历史末尾指令和 NextChat 的多角色 context，也会误把 Open WebUI 的参数覆盖顺序当成 system prompt 替换顺序。
+因此，只比较一个 system prompt 字段是否存在，会遗漏 AIO Hub 的锚点消息、SillyTavern 的历史末尾指令和 NextChat 的多角色上下文，也会误把 Open WebUI 的参数覆盖顺序当成 system prompt 替换顺序。
 
 ## 工具、知识与记忆
 
@@ -214,7 +214,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | Pi | 无角色导入导出；`/export`（HTML/JSONL）只导出会话 | 角色即文件，复制文件即“导入”；无 schema 校验、无字段映射、无冲突处理 |
 | OpenCode | 无导入导出命令；`opencode agent create`（CLI）由 LLM 生成带 frontmatter 的 markdown | 复制 markdown 文件即可携带角色；`opencode export` 只导出会话且 agent part 脱敏；V1→V2 配置迁移器自动映射字段（`core/src/v1/config/migrate.ts:35-125`） |
 
-SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享角色资产”，但两者的能力边界不同：SillyTavern 刻意把模型 Preset 留在卡外，AIO Hub 导出则可以携带 Agent 参数、资产和世界书，同时剥离本机渠道引用。Open WebUI、Cherry Studio、LobeHub 的导入更接近平台内模板或数据库对象迁移，外部资源引用不能只靠一份 JSON 保证生效。
+SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享角色资产”，但两者的能力边界不同：SillyTavern 刻意把模型预设留在卡外，AIO Hub 导出则可以携带 Agent 参数、资产和世界书，同时剥离本机渠道引用。Open WebUI、Cherry Studio、LobeHub 的导入更接近平台内模板或数据库对象迁移，外部资源引用不能只靠一份 JSON 保证生效。
 
 从跨项目映射看，最稳定的最小公分母只有**名称、单段 system prompt、头像/图标（若目标支持）和描述**。以下内容通常会丢失或需要人工适配：
 

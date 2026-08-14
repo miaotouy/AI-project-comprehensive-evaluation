@@ -22,11 +22,11 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 4. 分布式节点鉴权只有一层全局 `VCP_Key`（WebSocket 升级时校验），没有节点级别的独立密钥或证书；`register_tools` 消息可以让任意已连接的分布式节点注册新工具，但**同名工具会被跳过**（不能覆盖已存在工具），一定程度上防止了工具名冒充，但没有防止“注册一个从未存在过的、诱导性命名”的工具（如 `FileOperator2`）来钓鱼。
 5. Shell/命令类插件的安全边界差异巨大：`PowerShellExecutor` 只有关键字黑名单 + 关键字驱动的验证码要求，没有语法级校验，命令拼接后直接 `Invoke-Expression`，理论上存在关键字绕过空间（如变量拼接、编码回避黑名单字符串匹配）；`LinuxShellExecutor` 则有更复杂的八层校验（黑名单正则、AST 基线、沙箱后端 bubblewrap/firejail/docker、资源限制、审计日志），安全工程量级明显更高。这两个插件在同一份 manifest 字段（`requiresAdmin`）下，实际受约束程度并不对等。
 
-6. **推理内容双通道**：`reasoningContentAdapter.js` 让 `streamHandler`/`nonStreamHandler` 在“回注给客户端”的副本上把 `reasoning_content` 等字段按模型白名单（`ReasoningToContentModel`，默认示例 `kimi,claude`）改写为 `<think>` 标签正文，供不支持推理字段的前端显示；内部 VCP 循环、OneRing 入库与日记持久化仍只使用原始 `content`，两通道互不污染（`modules/handlers/streamHandler.js:172-218,332,375`）。
-7. **工具解析的思考块剥离**：`ToolCallParser.stripReasoningBlocks()` 支持 `<think>`/`<thinking>` 大小写、空白、属性变体与同类嵌套；未闭合的开始标签会保守丢弃其后全部内容，未配对的结束标签只移除标签本身（`modules/vcpLoop/toolCallParser.js:22-70`）。
+6. **推理内容双通道**：reasoningContentAdapter.js 让流式和非流式处理器在“回注给客户端”的副本上，把 `reasoning_content` 等字段按模型白名单（`ReasoningToContentModel`，默认示例 `kimi,claude`）改写为 `<think>` 标签正文，供不支持推理字段的前端显示；内部 VCP 循环、OneRing 入库与日记持久化仍只使用原始 `content`，两通道互不污染（`modules/handlers/streamHandler.js:172-218,332,375`）。
+7. **工具解析的思考块剥离**：ToolCallParser 的思考块剥离逻辑支持 `<think>`/`<thinking>` 的大小写、空白、属性变体与同类嵌套；未闭合的开始标签会保守丢弃其后全部内容，未配对的结束标签只移除标签本身（`modules/vcpLoop/toolCallParser.js:22-70`）。
 8. **工具结果隐私脱敏**：`toolApprovalConfig.json` 的 `privacyProtection.enabled` 开启后，工具结果在回注 AI 前按敏感键名模式、`sk-`/`ghp_` 等高置信 token 模式和环境变量赋值行做掩码（默认关闭，`modules/toolResultPrivacyGuard.js`）。
-9. **分布式取消与结果归属绑定**：`executeDistributedTool()` 的 pending 项绑定目标 `serverId`，`tool_result` 只接受目标节点返回；节点声明 `capabilities.cancelTool=true` 时，超时会 best-effort 发送 `cancel_tool` 帧；目标节点断线会立即 reject 其全部 pending（`WebSocketServer.js:876-1002`）。
-10. **插件热重载精细化**：manifest 变更分“元数据刷新”与“完整重载”两级——direct 常驻插件只合并展示字段、运行时变更提示需重启；static 插件按签名增量刷新并清理失效占位符与 cron；`loadPlugins()` 串行化并增加重载前 manifest 预校验（`Plugin.js:734-786,1067-1206,2326-2412`）。
+9. **分布式取消与结果归属绑定**：分布式执行的 pending 项绑定目标 `serverId`，`tool_result` 只接受目标节点返回；节点声明 `capabilities.cancelTool=true` 时，超时会 best-effort 发送 `cancel_tool` 帧；目标节点断线会立即 reject 其全部 pending（`WebSocketServer.js:876-1002`）。
+10. **插件热重载精细化**：manifest 变更分“元数据刷新”与“完整重载”两级——direct 常驻插件只合并展示字段、运行时变更提示需重启；static 插件按签名增量刷新并清理失效占位符与 cron；加载插件的流程串行化并增加重载前 manifest 预校验（`Plugin.js:734-786,1067-1206,2326-2412`）。
 11. **浏览器协议 v3 与托管运行时**：ChromeBridge 使用协议 v3（Grounded Markdown Agent 视图、稳定内容 Hash、快照去重、动作验证、默认敏感 DOM 脱敏、指标），`modules/browserRuntimeManager.js` 提供扩展 staging 清单 hash 完整性校验、运行时实例 ID 与上次关闭原因；`UrlFetch` 的 managed Chrome backend 已接线但默认关闭。
 12. **插件面**：当前启用 69 个、禁用（`.block`）20 个（清单见第 11 节），含 `BrowserSearch`（复用托管 Chrome 持久化 Profile 的免 API 搜索）、`MediaRenderer`（HTML/SVG 渲染、FFmpeg 动画、程序音乐合成，`requiresAdmin`）、`PlaceholderExplorer` + `PlaceholderExplorerCommand`（占位符索引/编辑/预览）。
 
@@ -58,7 +58,7 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
   -> 回注下一轮 LLM 上下文 / plugin-callback 异步补写占位符
 ```
 
-同轮多个工具调用：`ToolExecutor.executeAll()` 用 `Promise.all` 并发执行所有工具（第 396-400 行），任一失败不会中断其他调用（`execute()` 内部 catch 后返回 `_createErrorResult`，永不 reject 出 `executeAll`）。
+同轮多个工具调用由执行器用 `Promise.all` 并发处理（第 396-400 行）；单个调用失败时，内部会捕获异常并返回错误结果，不会中断其他调用（依据 `toolExecutor.js:370-400`）。
 
 依据：[toolCallParser.js](../../VCPToolBox/modules/vcpLoop/toolCallParser.js)、[toolExecutor.js](../../VCPToolBox/modules/vcpLoop/toolExecutor.js)、[Plugin.js](../../VCPToolBox/Plugin.js)、[nonStreamHandler.js](../../VCPToolBox/modules/handlers/nonStreamHandler.js)、[streamHandler.js](../../VCPToolBox/modules/handlers/streamHandler.js)。
 
@@ -66,21 +66,21 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 
 ### 1.1 块级标记
 
-`ToolCallParser.MARKERS` 定义精确标记 `<<<[TOOL_REQUEST]>>>` / `<<<[END_TOOL_REQUEST]>>>`（`modules/vcpLoop/toolCallParser.js:5-8`）。是否容忍变体标记完全取决于 `toolMarkerFuzzyMatcher` 的 `enabled` 状态，该状态由 `toolApprovalConfig.json` 的 `fuzzyToolMatching` 字段驱动（`modules/toolApprovalManager.js:55-64`），默认 `false`。
+解析器的 MARKERS 常量定义精确标记 `<<<[TOOL_REQUEST]>>>` / `<<<[END_TOOL_REQUEST]>>>`（`modules/vcpLoop/toolCallParser.js:5-8`）。是否容忍变体取决于模糊匹配器的 enabled 状态，该状态由 `toolApprovalConfig.json` 的 `fuzzyToolMatching` 字段驱动（`modules/toolApprovalManager.js:55-64`），默认 `false`。
 
-- 关闭模糊匹配时：`findBlockStartMarker`/`findBlockEndMarker` 走 `content.indexOf(canonicalMarker, cursor)`，要求逐字符精确匹配（`toolMarkerFuzzyMatcher.js:37-46`）。
+- 关闭模糊匹配时：查找块起止标记的逻辑调用 `content.indexOf(canonicalMarker, cursor)`，要求逐字符精确匹配（`toolMarkerFuzzyMatcher.js:37-46`）。
 - 开启模糊匹配时：块标记用正则 `<{2,4}\[LABEL\]>{2,4}`（忽略大小写）匹配 2-4 个尖括号包裹的 `[TOOL_REQUEST]`/`[END_TOOL_REQUEST]`（`toolMarkerFuzzyMatcher.js:48-51`），字段标记额外接受 `{始}`、`「始}`、`{始」` 等半角/全角括号混用形式，以及任意非换行字符组成的“始……末”对（`toolMarkerFuzzyMatcher.js:82-108`）。这是专门为容忍模型输出格式漂移设计的降级匹配，但同时扩大了被精心构造的用户输入误触发的面（例如用户在普通对话中写 `{始}xxx{末}` 也可能被解析为字段）。
 
 ### 1.2 字段扫描（`「始」value「末」`）
 
-`_scanFields()` 是逐字符状态机（`toolCallParser.js:198-277`）：先跳过空白/逗号，用 `/^[\w_]+/` 匹配 key，要求紧跟 `:`，再匹配起始标记，扫描到匹配的结束标记为止。关键细节：
+字段扫描是逐字符状态机（`toolCallParser.js:198-277`）：先跳过空白/逗号，用 `/^[\w_]+/` 匹配 key，要求紧跟 `:`，再匹配起始标记，扫描到匹配的结束标记为止。关键细节：
 
 - **参数值中含分隔符**：值内容被视为 `startMarker` 与 `endMarker` 之间的任意字符（不做嵌套计数），所以如果值本身包含 `「末」` 会被错误截断在第一个出现处；反过来说，值中出现 `「始」` 不会被特殊处理（因为扫描的是 end marker 而不是 nested start），因此嵌套 `「始」...「始」...「末」...「末」` 不被支持，第一个 `「末」` 就会结束字段。
 - **转义机制**：`ESCAPE_MARKERS`（`「始ESCAPE」`/`「末ESCAPE」`）允许在值内容中放入本会被误判为控制符的文本，`_restoreEscapedLiterals()` 在提取后把转义映射还原为字面量（`toolCallParser.js:10-15,279-287`）。这解决了“参数中确实需要写出 `「始」`/`「末」` 字面文本”的问题，但要求模型正确使用 ESCAPE 变体，模型若直接输出裸 `「始」` 仍会被当作新字段起始。
-- **同轮多块**：`parse()` 用 `while (searchOffset < contentWithoutThink.length)` 循环调用 `extractNextToolBlock`，支持同一响应中出现多个 `<<<[TOOL_REQUEST]>>>...<<<[END_TOOL_REQUEST]>>>` 块，逐个解析并加入 `toolCalls` 数组（`toolCallParser.js:81-96`）。
-- **`<think>` 剥离**：解析前调用 `stripReasoningBlocks()`（`toolCallParser.js:22-70`）移除思考块。支持 `<think>`/`<thinking>` 两种标签、大小写/标签内空白/属性变体、同类与混合标签嵌套计数；**未闭合的开始标签会保守丢弃其后全部内容**（防止潜藏的工具调用被执行），**未配对的结束标签只移除标签本身、不吞掉其后正文**。但标签形态必须可被正则识别（如模型输出非标准变体标签则仍按普通文本处理）。
+- **同轮多块**：解析流程循环查找下一个工具块，支持同一响应中出现多个 `<<<[TOOL_REQUEST]>>>...<<<[END_TOOL_REQUEST]>>>` 块，逐个解析并加入调用数组（`toolCallParser.js:81-96`）。
+- **`<think>` 剥离**：解析前移除思考块（`toolCallParser.js:22-70`）。支持 `<think>`/`<thinking>` 两种标签、大小写/标签内空白/属性变体、同类与混合标签嵌套计数；**未闭合的开始标签会保守丢弃其后全部内容**（防止潜藏的工具调用被执行），**未配对的结束标签只移除标签本身、不吞掉其后正文**。但标签形态必须可被正则识别（如模型输出非标准变体标签则仍按普通文本处理）。
 - **code fence**：解析器本身**不识别** Markdown 代码块围栏，即模型如果在 ```` ``` ```` 代码块里写出示例性的 `<<<[TOOL_REQUEST]>>>` 文本，仍会被当作真实调用解析执行。VCPToolBox 是 VCP 协议的服务端解析与执行方，VCPChat 则是同一协议的客户端展示方：前端在展示时会保护 code fence 内容不被当协议解释，但服务端解析层没有等价保护。这是**已确认**的边界情况。
-- **畸形块处理**：若找不到匹配的结束标记（`_findBlockEnd` 返回 `null`），`extractNextToolBlock` 返回 `null`，整体 `parse()` 直接 `break` 停止扫描——意味着一个畸形的未闭合块会导致其后所有本应能解析的块也被丢弃（不会跳过继续扫描）。
+- **畸形块处理**：若找不到匹配的结束标记，工具块提取返回空值，整体解析直接停止扫描——意味着一个畸形的未闭合块会导致其后所有本应能解析的块也被丢弃（不会跳过继续扫描）。
 - **流式截断**：解析发生在完整拼接后的 `currentAIContentForLoop` 上（`nonStreamHandler.js`/`streamHandler.js` 的循环变量），而不是逐 chunk 解析，因此半截的流式片段不会被误触发；但也意味着若流被提前中断（`abortController` 触发），未闭合的工具块永远不会被执行，这是预期行为而非 bug。
 - **大小写/空白容忍**：模糊模式下标记匹配用 `i` 修饰符忽略大小写；`_skipWhitespace`/`_skipWhitespaceAndCommas` 用 `\s`/`[\s,]` 跳过任意空白与逗号分隔符，容忍字段间多余空格、换行和逗号缺失（`toolCallParser.js:289-301`）。
 
@@ -90,25 +90,25 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 
 ### 2.1 占位符体系
 
-`PluginManager.buildVCPDescription()`（`Plugin.js:1027-1062`）遍历所有已加载插件，把每个插件 `capabilities.invocationCommands[].description` 拼接为一段说明文本，存入 `individualPluginDescriptions` Map，键为 `VCP<PluginName>`（如 `VCPFileOperator`）。这些说明文本通过 `{{VCP<PluginName>}}` 占位符注入到 system prompt——具体替换逻辑在 `modules/messageProcessor.js:783-806`，对 system prompt 文本做 `replaceAll('{{VCPxxx}}', description)`。这意味着**模型看到的工具描述就是插件作者在 `plugin-manifest.json` 里写的原始中文自然语言文本**，包括调用格式示例，没有结构化 JSON Schema 或 function-calling 格式的转换层。
+插件管理器的描述构建逻辑（`Plugin.js:1027-1062`）遍历所有已加载插件，把每个插件的调用说明拼接为文本并存入 Map，键为 `VCP<PluginName>`（如 `VCPFileOperator`）。这些说明通过 `{{VCP<PluginName>}}` 占位符注入 system prompt，替换逻辑见 `modules/messageProcessor.js:783-806`。因此**模型看到的工具描述就是插件作者在 manifest 中写的原始中文自然语言文本**，包括调用格式示例，没有结构化 JSON Schema 或 function-calling 格式的转换层。
 
 ### 2.2 `static` 插件的上下文注入与刷新周期
 
-`static` 类型插件（如 `WeatherReporter`、`ScheduleBriefing`、`UserAuth`、`EmojiListGenerator`）通过 `staticPlaceholderValues` Map 提供占位符值。生命周期（`Plugin.js:402-438`）：
+static 类型插件（如 `WeatherReporter`、`ScheduleBriefing`、`UserAuth`、`EmojiListGenerator`）通过 staticPlaceholderValues Map 提供占位符值。生命周期见 `Plugin.js:402-438`：
 
 1. 启动时先把占位符设为 "正在加载中" 的占位文本；
 2. 立即触发一次后台更新（fire-and-forget，不阻塞启动）；
 3. 若 manifest 声明 `refreshIntervalCron`，用 `node-schedule` 按 cron 表达式周期性重新执行插件 stdio 进程并更新值；
 4. 插件本轮无输出或超时不算错误，保留旧值（stale-while-revalidate 语义），除非从未成功过一次才置为 "unavailable"。
 
-`{{VCP<PluginName>}}`（工具描述）与 `{{VCPxxx}}`（static 数据占位符）是两套不同的占位符命名空间，前者来自 `invocationCommands`，后者来自 `systemPromptPlaceholders`，替换逻辑分别在 `messageProcessor.js` 的不同代码段（约 748-806 行）处理。
+`{{VCP<PluginName>}}`（工具描述）与 `{{VCPxxx}}`（static 数据占位符）是两套不同的占位符命名空间，前者来自调用说明，后者来自 systemPromptPlaceholders，替换逻辑分别在消息处理器的不同代码段（约 748-806 行）处理。
 
 依据：[Plugin.js:791-826,402-438](../../VCPToolBox/Plugin.js)、[messageProcessor.js:616-806](../../VCPToolBox/modules/messageProcessor.js)。
 
 ## 3. 调用链细节：并发、失败处理、迭代上限
 
-- **迭代上限**：`streamHandler.js:70` 与 `nonStreamHandler.js:303` 都定义 `maxRecursion = maxVCPLoopStream/NonStream || 5`，即工具调用触发的 LLM 重新推理循环最多 5 轮（可通过环境变量 `MaxVCPLoopStream`/`MaxVCPLoopNonStream` 配置，`server.js:1202`）。这是"每轮响应中工具调用触发下一轮 LLM 请求"的上限，不是"单轮内工具调用数量"的上限——单轮内 `ToolCallParser.parse()` 可以解析出任意数量的工具块，全部通过 `Promise.all` 并发执行。
-- **同轮并发语义**：`ToolExecutor.executeAll()`（`toolExecutor.js:396-400`）用 `Promise.all` 并发所有工具调用；由于 `execute()` 内部把所有异常都 catch 并转成 `_createErrorResult` 返回值而不是 reject（`toolExecutor.js:370-390`），`Promise.all` 永远不会因为单个工具失败而整体 reject，各工具结果互相独立回注。
+- **迭代上限**：流式与非流式处理器都把工具调用触发的 LLM 重新推理循环限制为最多 5 轮（可通过环境变量 `MaxVCPLoopStream`/`MaxVCPLoopNonStream` 配置，`server.js:1202`）。这是"每轮响应中工具调用触发下一轮 LLM 请求"的上限，不是"单轮内工具调用数量"的上限；单轮内可以解析出任意数量的工具块，全部并发执行（`streamHandler.js:70`、`nonStreamHandler.js:303`）。
+- **同轮并发语义**：工具执行器用 `Promise.all` 并发所有工具调用；由于单次执行会把异常捕获并转成错误结果而不是 reject，整体并发流程不会因单个工具失败而 reject，各工具结果互相独立回注（`toolExecutor.js:370-400`）。
 - **超时**：stdio 插件默认超时 `synchronous` 60 秒、`asynchronous` 1800 秒（30 分钟），均可被 manifest 的 `communication.timeout` 覆盖（`Plugin.js:1598`）。分布式工具默认超时也是 60 秒，取自目标插件 manifest 的 `communication.timeout`（`WebSocketServer.js:913`）。
 - **重试**：**未发现**任何自动重试机制——工具调用失败后直接把错误文本回注给模型，由模型自己决定是否重新发起调用。这是明确设计（回注错误让 AI 自愈），不是缺陷。
 - **进程终止**：stdio 插件超时后调用 `_killProcessTree`（`Plugin.js:270-310`）强杀整个进程树：Windows 用 `taskkill /T /F /PID`（taskkill 失败时回退 `process.kill`），Linux/macOS 对以 `detached`（非 Windows）启动的进程组发 `process.kill(-pid, 'SIGKILL')`（进程组不存在时回退杀单进程，`Plugin.js:292-302`），防止子进程残留（`PowerShellExecutor.js` 内部也有等价的 `forceKillProcessTree`）。
@@ -117,7 +117,7 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 
 ## 4. 参数校验
 
-**未发现**任何形式的 JSON Schema 或类型系统校验。`ToolCallParser._scanFields()` 把所有字段值都解析为**字符串**（`fields.push({ key, value: restoredValue })`，`toolCallParser.js:198-277`，push 在 `:267`），插件收到的 `args` 对象里所有值都是字符串，类型转换（转数字、转布尔）完全由各插件自己在内部做（例如 `PowerShellExecutor.js` 用 `args.executionType` 直接做字符串比较,`LinuxShellExecutor` 内部自行 `parseInt`）。
+**未发现**任何形式的 JSON Schema 或类型系统校验。字段扫描逻辑把所有字段值都解析为**字符串**（`toolCallParser.js:198-277`，具体写入在 `:267`），插件收到的 args 对象里所有值都是字符串，类型转换（转数字、转布尔）完全由各插件自己在内部做，例如 PowerShell 执行器直接比较执行类型，Linux 执行器自行调用 parseInt。
 
 manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；`capabilities.invocationCommands[].description` 是纯自然语言文本，模型是否提供了正确参数、参数是否缺失，只能在插件运行时暴露（插件自己 `throw new Error('缺少必需参数...')`）。这意味着：
 
@@ -131,7 +131,7 @@ manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；
 
 ### 5.1 `toolApprovalConfig.json` 规则语法
 
-配置结构（`modules/toolApprovalManager.js:10-19,25-53`）：
+配置结构见 `modules/toolApprovalManager.js:10-19,25-53`：
 
 ```json
 {
@@ -144,38 +144,38 @@ manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；
 }
 ```
 
-规则语义（`getApprovalDecision()`,`toolApprovalManager.js:144-225`）：
+规则语义见审批判定逻辑（`toolApprovalManager.js:144-225`）：
 
-- `enabled=false`：整个审批系统关闭，所有调用直接执行，`getApprovalDecision` 直接返回 `requiresApproval:false`（第 152-154 行）。
+- `enabled=false`：整个审批系统关闭，所有调用直接执行，审批判定直接返回 `requiresApproval:false`（第 152-154 行）。
 - `approveAll=true`：忽略 `approvalList`，所有工具调用一律需要审批（第 156-164 行）。
-- `approvalList` 每一项是一条规则字符串，`parseApprovalRule()` 解析后缀 `::SilentReject` 决定拒绝时是否通知 AI（`notifyAiOnReject`）（第 117-142 行）。
+- `approvalList` 每一项是一条规则字符串，规则解析逻辑根据后缀 `::SilentReject` 决定拒绝时是否通知 AI（`notifyAiOnReject`）（第 117-142 行）。
 - **匹配语义**是精确字符串相等，不支持通配符（`*`）：规则可以是 `ToolName`（工具级，命中所有该工具的调用）或 `ToolName:command文本`（命令级，仅当 `extractCommands()` 从参数中提取出的 `command`/`command1`/`command2`... 值与规则冒号后半部分**完全相等**时命中）（第 194-205 行）。**命中优先级**：命令级（specificity=2）优先于工具级（specificity=1）；同优先级下，`notifyAiOnReject:false`（静默拒绝）的规则优先于会通知 AI 的规则（第 174-192 行）。
 - **默认行为（无命中）**：`requiresApproval:false`，即未在名单里的工具调用默认放行，不需要审批——这是**白名单式豁免、黑名单式管控**的语义：`approvalList` 里列出的才需要审批，不在列表里的默认自动执行。这与直觉上"审批清单=需要人工批准的工具清单"一致，但需要强调：**不是 allow-list（只放行清单内工具）**，而是 deny-by-default-approve（清单外全部自动放行）。
 
 ### 5.2 状态机与广播
 
-`PluginManager.processToolCall()` 中（`Plugin.js:1205-1279`）：
+插件管理器处理工具调用时（`Plugin.js:1205-1279`）：
 
-1. 调 `toolApprovalManager.getApprovalDecision()` 判定是否需要审批；
-2. 若需要，生成 `requestId`（`approve-${Date.now()}-${random}`，**不是密码学安全的随机数**，仅用 `Math.random().toString(36)` 取 7 位——`Plugin.js:1207`），创建一个 Promise 并存入 `this.pendingApprovals` Map（`Plugin.js:1214-1229`）；
+1. 调用审批判定逻辑判断是否需要审批；
+2. 若需要，生成 requestId（`approve-${Date.now()}-${random}`，**不是密码学安全的随机数**，仅用 `Math.random().toString(36)` 取 7 位——`Plugin.js:1207`），创建一个 Promise 并存入待审批 Map（`Plugin.js:1214-1229`）；
 3. 通过 `webSocketServer.broadcast({type:'tool_approval_request', data:{...}}, 'VCPLog')` 把请求**广播给所有已连接的 `VCPLog` 类型客户端**（`Plugin.js:1231-1252`）；
-4. `setTimeout` 按 `timeoutMinutes`（默认 5 分钟）设置超时，超时后从 `pendingApprovals` 删除并 `reject`（`Plugin.js:1215-1221`）——**超时后的默认动作是拒绝执行（fail-closed），不是自动放行**，本项目在"超时"这一单一维度上是 fail-closed 的。
-5. 若 `webSocketServer` 未初始化（理论上不会发生，因为它在 `initialize()` 中先于插件加载完成注入），会直接从 `pendingApprovals` 删除并 throw，同样是拒绝执行而非放行（`Plugin.js:1247-1252`）。
+4. 定时器按 `timeoutMinutes`（默认 5 分钟）设置超时，超时后从待审批 Map 删除并 reject（`Plugin.js:1215-1221`）——**超时后的默认动作是拒绝执行（fail-closed），不是自动放行**，本项目在"超时"这一单一维度上是 fail-closed 的。
+5. 若 WebSocket 服务未初始化（理论上不会发生，因为它在 initialize 阶段先于插件加载完成注入），会直接从待审批 Map 删除并抛错，同样是拒绝执行而非放行（`Plugin.js:1247-1252`）。
 
 ### 5.3 审批响应的身份绑定
 
-`WebSocketServer.js:484-494` 收到 `tool_approval_response` 消息时，**只要消息来自任意已认证的 WebSocket 连接**（不限定 `clientType==='VCPLog'`，代码里判断的是 `parsedMessage.type === 'tool_approval_response'`，位于 `else if` 链的通用分支，未按 `ws.clientType` 过滤），就会调用 `pluginManager.handleApprovalResponse(requestId, approved, reason)`。`handleApprovalResponse()`（`Plugin.js:1786-1826`）只用 `requestId` 从 `pendingApprovals` 中查找待处理项，**没有校验发起批准的客户端身份与发起该审批请求的上下文是否匹配**，也没有校验发送者是否具备"审批权限"这一独立角色。
+WebSocket 服务收到 `tool_approval_response` 消息时，**只要消息来自任意已认证的 WebSocket 连接**（不限定 `clientType==='VCPLog'`，通用分支也未按客户端类型过滤），就会处理审批响应（`WebSocketServer.js:484-494`）。响应处理只用 requestId 查找待处理项，**没有校验批准客户端身份与审批上下文是否匹配**，也没有校验发送者是否具备"审批权限"这一独立角色（`Plugin.js:1786-1826`）。
 
 结合 WebSocket 鉴权只有一个全局共享的 `VCP_Key`（第 9 节详述），**任何持有 `VCP_Key` 的客户端（包括本应只用于日志展示的 `VCPLog` 只读消费者、`ChromeControl`、`AdminPanel` 等）收到广播的 `requestId` 后都可以主动发送 `tool_approval_response` 批准或拒绝一个审批请求**。`requestId` 本身通过广播发给所有 `VCPLog` 客户端，因此只要客户端连接了 `VCPLog` 通道就能看到 `requestId` 并回发批准。这是**已确认**的机制：审批的最终决定权不限定在"应批准的人"，任何持 Key 的已连接客户端都可以对广播的审批请求作出批准或拒绝响应。
 
 ### 5.4 静默拒绝与用户备注
 
-`notifyAiOnReject=false` 的规则被拒绝时，`approval.resolve({silentRejected:true})`，`PluginManager.processToolCall` 检测到 `silentRejected===true` 时返回 `undefined`（`Plugin.js:1254-1274`），意味着这次调用对 AI 完全不可见（AI 既不知道被拒绝也不知道调用发生过），只有人工审批者留下的 `reason` 备注会被记录到日志。这是一个隐蔽性设计，用于防止 AI 反复尝试同一被拒绝的敏感操作。
+`notifyAiOnReject=false` 的规则被拒绝时，审批结果会标记为静默拒绝；工具处理流程检测到该标记后返回空值（`Plugin.js:1254-1274`），意味着这次调用对 AI 完全不可见，只有人工审批者留下的 reason 备注会被记录到日志。这是一个隐蔽性设计，用于防止 AI 反复尝试同一被拒绝的敏感操作。
 
 ### 5.5 关机清理与结果隐私脱敏
 
 - **关机清理**：`shutdownAllPlugins()` 会先清除插件文件 watcher，并对 `pendingApprovals` 中所有待审批项执行 reject（`Plugin.js:671-706`），避免待审批 Promise 悬挂到重启。
-- **结果隐私脱敏**：`PluginManager.processToolCall` 的成功与错误结果在回注 AI 前统一经过 `_sanitizeToolResultForAi()`（`Plugin.js:113-123,1433,1459`），调用 `modules/toolResultPrivacyGuard.js`。开启 `toolApprovalConfig.json` 的 `privacyProtection.enabled`（默认 `false`）后：按敏感键名模式（`api_key`/`token`/`password`/`credential` 等）掩码键值、按 `sk-`/`sk-proj-`/`xoxb`/`ghp_`/`AKIA` 等模式掩码高置信 token、按 `KEY=value` 行模式掩码环境变量赋值；`data:...;base64` URI 整体保留。掩码保留前后 4 个字符，`minSecretLength=8` 以下不掩码。
+- **结果隐私脱敏**：工具成功与错误结果在回注 AI 前统一经过结果脱敏处理（`Plugin.js:113-123,1433,1459`），具体实现见 `modules/toolResultPrivacyGuard.js`。开启配置中的 `privacyProtection.enabled`（默认 `false`）后：按敏感键名模式（`api_key`/`token`/`password`/`credential` 等）掩码键值、按 `sk-`/`sk-proj-`/`xoxb`/`ghp_`/`AKIA` 等模式掩码高置信 token、按 `KEY=value` 行模式掩码环境变量赋值；`data:...;base64` URI 整体保留。掩码保留前后 4 个字符，`minSecretLength=8` 以下不掩码。
 
 依据：[toolApprovalManager.js:10-225](../../VCPToolBox/modules/toolApprovalManager.js)、[Plugin.js:671-706,113-123,1205-1230,1786-1826](../../VCPToolBox/Plugin.js)、[WebSocketServer.js:484-494](../../VCPToolBox/WebSocketServer.js)、[toolResultPrivacyGuard.js](../../VCPToolBox/modules/toolResultPrivacyGuard.js)。
 
@@ -183,15 +183,15 @@ manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；
 
 ### 6.1 manifest 加载与生命周期
 
-`PluginManager.loadPlugins()`（`Plugin.js:757` 起）扫描 `Plugin/` 下每个子目录的 `plugin-manifest.json`；缺少 `name`/`pluginType`/`entryPoint` 任一字段的 manifest 会被静默跳过（`Plugin.js:838`）。禁用插件的方式是把文件改名为 `plugin-manifest.json.block`（当前 HEAD 有 20 个插件处于此状态，见第 11 节插件清单）。
+插件加载流程（`Plugin.js:757` 起）扫描 `Plugin/` 下每个子目录的 `plugin-manifest.json`；缺少 `name`/`pluginType`/`entryPoint` 任一字段的 manifest 会被静默跳过（`Plugin.js:838`）。禁用插件的方式是把文件改名为 `plugin-manifest.json.block`（当前 HEAD 有 20 个插件处于此状态，见第 11 节插件清单）。
 
-插件生命周期变化（`Plugin.js`）：
+插件生命周期变化见 `Plugin.js`：
 
-- **重载串行化**：`loadPlugins()` 通过 `pluginLoadPromise` 串行执行并合并“重载期间再次请求”的场景（`Plugin.js:757-786`），不再出现并发重载互相破坏插件表。
-- **重载前预校验**：`_validateLocalPluginManifestsBeforeReload()` 在关闭任何现有模块前先对全部启用清单做 JSON 解析校验，编辑中的半截 JSON 不会把正常运行的注册表破坏为部分加载状态（`Plugin.js:734-753`）。
-- **两级热更新**：`_flushPluginManifestChanges()`（`Plugin.js:2472` 起）先对变更清单做运行时签名比较：仅展示字段变化时走 `refreshPluginManifestMetadata` 元数据刷新（不重启任何模块，direct 常驻插件的运行字段保持内存版本）；运行字段变化时 direct 插件提示需重启、其余插件走完整重载。
-- **static 插件增量刷新**：`initializeStaticPlugins()`（`Plugin.js:477` 起）按 `_getStaticPluginSignature()`（entryPoint/communication/cron/configSchema/占位符声明）判断是否需要刷新；新增/删除/禁用插件或 cron 变更会精确取消失效 job、清理已删除占位符，分布式占位符仍由 serverId 生命周期管理。
-- **watcher 启动时机**：`startPluginWatcher()` 改为在初始化末尾显式调用（`server.js:1628-1631`），避免启动阶段文件写入触发多余重载；`shutdownAllPlugins()` 会关闭 watcher 并结算全部待审批项。
+- **重载串行化**：加载流程通过 `pluginLoadPromise` 串行执行并合并“重载期间再次请求”的场景（`Plugin.js:757-786`），不再出现并发重载互相破坏插件表。
+- **重载前预校验**：重载前先对全部启用清单做 JSON 解析校验，编辑中的半截 JSON 不会把正常运行的注册表破坏为部分加载状态（`Plugin.js:734-753`）。
+- **两级热更新**：变更清单先做运行时签名比较（`Plugin.js:2472` 起）：仅展示字段变化时刷新元数据（不重启任何模块，direct 常驻插件的运行字段保持内存版本）；运行字段变化时 direct 插件提示需重启、其余插件走完整重载。
+- **static 插件增量刷新**：static 插件按 entryPoint、communication、cron、configSchema 和占位符声明组成的签名判断是否需要刷新（`Plugin.js:477` 起）；新增/删除/禁用插件或 cron 变更会精确取消失效 job、清理已删除占位符，分布式占位符仍由 serverId 生命周期管理。
+- **watcher 启动时机**：文件 watcher 改为在初始化末尾显式启动（`server.js:1628-1631`），避免启动阶段文件写入触发多余重载；关机流程会关闭 watcher 并结算全部待审批项。
 
 ### 6.2 六种插件类型的生命周期差异
 
@@ -208,8 +208,8 @@ manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；
 
 ### 6.3 执行协议实现差异
 
-- **`stdio`**：`executePlugin`（`Plugin.js:1472` 起，spawn 调用在 `:1577`，超时计算在 `:1598`）用 `child_process.spawn(command, args, {cwd: plugin.basePath, shell: true, env: finalEnv, windowsHide: true, detached: process.platform !== 'win32'})`。**注意 `shell: true`**——这意味着 `entryPoint.command` 字符串会经过系统 shell 解析，如果该字符串本身可控（目前是 manifest 固定值，不受运行期参数拼接），风险有限，但这是命令注入的潜在放大面，若未来任何代码路径允许拼接用户输入到 `entryPoint.command`，将直接构成 shell 注入。当前**未发现**此类拼接（`command` 固定来自 manifest 静态配置）。非 Windows 平台 spawn 带 `detached` 建立进程组，配合 `_killProcessTree` 的 Unix 进程组强杀（见第 7 节）。
-- **`direct`**：manifest 声明 `entryPoint.script`，`loadPlugins()` 用 `require()` 动态加载该模块到进程内（`Plugin.js:856-871`），模块需暴露 `initialize()`/`processToolCall()`/`shutdown()` 等约定方法。这意味着 `direct` 协议插件与主服务进程**同权限、同内存空间**运行，没有任何进程隔离。
+- **`stdio`**：执行入口从 `Plugin.js:1472` 起使用 `child_process.spawn`，调用位置在 `:1577`，超时计算在 `:1598`。**注意 `shell: true`**——这意味着 `entryPoint.command` 字符串会经过系统 shell 解析，如果该字符串本身可控（目前是 manifest 固定值，不受运行期参数拼接），风险有限，但这是命令注入的潜在放大面，若未来任何代码路径允许拼接用户输入到 `entryPoint.command`，将直接构成 shell 注入。当前**未发现**此类拼接（command 固定来自 manifest 静态配置）。非 Windows 平台 spawn 带 `detached` 建立进程组，配合进程树强杀逻辑（见第 7 节）。
+- **`direct`**：manifest 声明 `entryPoint.script`，加载流程用 `require()` 动态加载该模块到进程内（`Plugin.js:856-871`），模块需暴露 initialize、processToolCall、shutdown 等约定方法。这意味着 direct 协议插件与主服务进程**同权限、同内存空间**运行，没有任何进程隔离。
 - **`distributed`**：不在本地 spawn 任何进程，转发到远程节点的 WebSocket 连接（详见第 8 节）。
 
 ### 6.4 Node/Python/native 入口
@@ -257,17 +257,17 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 ### 8.3 节点声明工具的可信度
 
-`registerDistributedTools()`（`Plugin.js:1888` 起）对新注册工具做的唯一检查是"名称是否已存在于 `this.plugins`"——若已存在则跳过（不覆盖），否则接受并标记 `isDistributed:true`、`serverId`，displayName 加 `[云端]` 前缀。**已确认**：分布式节点**不能覆盖已存在的本地或其他节点的工具名**，但**可以自由注册任意新名字的工具**，包括故意构造与知名本地插件高度相似的名字（如 `FileOperatorPro`、`FileOperator_v2`）来诱导模型误选。manifest 内容（包括 `invocationCommands` 里的调用说明文本、是否 `requiresAdmin`）完全由远程节点自行提供，主服务器不做任何 schema 或内容审查就直接采纳并注入到 system prompt 描述中。
+分布式工具注册流程（`Plugin.js:1888` 起）对新工具做的唯一检查是名称是否已存在于插件表；若已存在则跳过（不覆盖），否则接受并标记为分布式工具，记录 serverId，并在 displayName 前加 `[云端]`。**已确认**：分布式节点**不能覆盖已存在的本地或其他节点的工具名**，但**可以自由注册任意新名字的工具**，包括故意构造与知名本地插件高度相似的名字（如 `FileOperatorPro`、`FileOperator_v2`）来诱导模型误选。manifest 内容（包括调用说明文本、是否 `requiresAdmin`）完全由远程节点自行提供，主服务器不做任何 schema 或内容审查就直接采纳并注入到 system prompt 描述中。
 
 ### 8.4 转发调用的审批是否仍然生效
 
-**已确认生效**：`PluginManager.processToolCall()` 中审批判定逻辑（`toolApprovalManager.getApprovalDecision`）发生在分支判断"是否为分布式插件"**之前**（`Plugin.js:1205` 位于 `if (plugin.isDistributed)` 判断之前），因此只要 `toolApprovalConfig.json` 中把该工具名列入 `approvalList`，分布式转发调用同样会先触发人工审批流程，审批通过后才会转发执行。
+**已确认生效**：工具处理流程中的审批判定发生在“是否为分布式插件”的分支**之前**（`Plugin.js:1205`），因此只要 `toolApprovalConfig.json` 中把该工具名列入 `approvalList`，分布式转发调用同样会先触发人工审批流程，审批通过后才会转发执行。
 
 ### 8.5 取消传播与结果归属绑定
 
 `WebSocketServer.js` 有三项分布式加固（提交 `a8e4e41d` 等）：
 
-- **`tool_result` 归属绑定**：`pendingToolRequests` 的条目携带 `serverId`，收到 `tool_result` 时若消息来源节点不是目标节点，则记录警告并**忽略**该消息，不完成 Promise（`WebSocketServer.js:851-869`），关闭了“任何节点都可以用同一个 requestId 完成/伪造结果”的缺口；`plugin_callback_forward` 的来源节点绑定仍未加（见第 10 节）。
+- **`tool_result` 归属绑定**：待处理请求条目携带 `serverId`，收到结果时若消息来源节点不是目标节点，则记录警告并**忽略**该消息，不完成 Promise（`WebSocketServer.js:851-869`），关闭了“任何节点都可以用同一个 requestId 完成/伪造结果”的缺口；`plugin_callback_forward` 的来源节点绑定仍未加（见第 10 节）。
 - **取消传播**：节点在 `register_tools` 时可声明 `capabilities.cancelTool: true`；`executeDistributedTool()` 超时时，若目标 socket 仍 OPEN 且节点声明了该能力，则 best-effort 发送一次 `cancel_tool` 帧（`sendCancelToolIfSupported`，`WebSocketServer.js:876-892`）。旧节点未声明能力时收不到该帧，但节点侧自己的本地 deadline/AbortController 仍独立生效——文档明确两者都是必要边界（`docs/DISTRIBUTED_ARCHITECTURE.md`）。
 - **断线清理**：节点断开时 `rejectPendingToolRequestsForServer()` 立即 reject 该节点全部 pending，不会让请求悬挂到超时；`executeDistributedTool()` 发送消息失败也会立即 reject（`WebSocketServer.js:508-511,900-908,944-971`）。配套新增 `tests/distributedToolCancellation.test.js`。
 
@@ -400,9 +400,9 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 `AgentAssistant` 插件（`hybridservice`/`direct`）承担 Agent 间通讯与任务委派：
 
-- **即时通讯/定时联络**：`agent_name`+`prompt` 直接发起一次对某配置好的 Agent 的调用，`timely_contact` 可延迟到未来时间点（复用 `ToolExecutor._scheduleTimedToolCall` 的通用定时机制，写入 `VCPTimedContacts/` 目录由任务调度器到点执行）。`removeVCPThinkingChain()` 按 `responseFromVCP.data.model` 判断是否启用 `ReasoningToContent`，启用时会一并剥离主总线转换到正文的 `<think>`/`<thinking>` 标签块（含未闭合块），防止推理标签污染 AA 会话历史（`AgentAssistant.js:307-349,888-895`）。
-- **异步委托（`task_delegation:true`）**：`AgentAssistant.js` 内维护 `activeDelegations` Map，`delegationMaxRounds`（默认 15 轮，来自 `config.json` 的 `delegationMaxRounds`，`AgentAssistant.js:181`）是委托任务的自主循环轮数上限，`while (state.currentRound < DELEGATION_MAX_ROUNDS)`（`AgentAssistant.js:1016`）驱动被委托 Agent 反复推理直到自行判定完成或达到轮数上限；`delegationTimeout` 限制单轮超时。达到最大轮数后**不会**报错，而是生成"达到最大轮数限制，任务尚未自动上报完成"的报告（`AgentAssistant.js:1128`）。
-- **临时工具注入（`inject_tools`）**：允许发起方为单次委托临时拼接额外工具的说明文本到被委托 Agent 的 system 提示词尾部，manifest 明确声明"不影响 Agent 的长期固定系统提示词"，但这意味着发起方（可能是另一个 AI）可以在运行时临时扩大某个 Agent 会话内可见的工具面，这是一个**未做权限限制**的能力扩展点——任何能调用 `AgentAssistant` 的角色都能给任意配置好的下游 Agent 临时"塞"任意已加载的工具描述,只受限于"该工具本身是否需要审批/管理员校验"这一层。
+- **即时通讯/定时联络**：`agent_name`+`prompt` 直接发起一次对某配置好的 Agent 的调用，`timely_contact` 可延迟到未来时间点（复用通用定时机制，写入 `VCPTimedContacts/` 目录由任务调度器到点执行）。系统按 `responseFromVCP.data.model` 判断是否启用 `ReasoningToContent`，启用时会一并剥离主总线转换到正文的 `<think>`/`<thinking>` 标签块（含未闭合块），防止推理标签污染 AA 会话历史（`AgentAssistant.js:307-349,888-895`）。
+- **异步委托（`task_delegation:true`）**：AgentAssistant 内维护委派状态，`delegationMaxRounds`（默认 15 轮，来自 `config.json`）是自主循环轮数上限；循环会驱动被委托 Agent 反复推理直到自行判定完成或达到上限，`delegationTimeout` 限制单轮超时（`AgentAssistant.js:181,1016`）。达到最大轮数后**不会**报错，而是生成"达到最大轮数限制，任务尚未自动上报完成"的报告（`AgentAssistant.js:1128`）。
+- **临时工具注入（`inject_tools`）**：允许发起方为单次委托临时拼接额外工具的说明文本到被委托 Agent 的 system 提示词尾部，manifest 明确声明"不影响 Agent 的长期固定系统提示词"，但这意味着发起方（可能是另一个 AI）可以在运行时临时扩大某个 Agent 会话内可见的工具面，这是一个**未做权限限制**的能力扩展点——任何能调用 AgentAssistant 的角色都能给任意配置好的下游 Agent 临时"塞"任意已加载的工具描述，只受限于"该工具本身是否需要审批/管理员校验"这一层。
 - **`ScheduleManager`/`TimedTaskQuery`/`ScheduleBriefing`** 等插件提供了独立于 `AgentAssistant` 的定时任务能力，本次调查未逐一深入其后台调度实现细节（列入未验证事项）。
 
 依据：[AgentAssistant.js:181,647-711,1016-1128](../../VCPToolBox/Plugin/AgentAssistant/AgentAssistant.js)、[AgentAssistant/plugin-manifest.json:6,28](../../VCPToolBox/Plugin/AgentAssistant/plugin-manifest.json)、[toolExecutor.js:491-543](../../VCPToolBox/modules/vcpLoop/toolExecutor.js)。
@@ -415,7 +415,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 4. **`LinuxShellExecutor` 的分层校验**：因代码量大（近 3000 行），本次仅确认其存在分层校验和可选沙箱后端，未逐层验证每一层校验逻辑对异常输入的完整处理。
 5. **Docker 部署下 `SANDBOX_BACKEND=docker` 的实际可用性**：是否需要挂载 docker socket、在容器化部署下是否真正可用，未在容器化环境实测。
 6. **`ImageServer`（`ImageFileServer` 插件）的 `/pw=<key>/images/*`、`/pw=<key>/files/*` key 校验逻辑**：未逐行复核该 key 的生成与比对。
-7. **`ScheduleManager`/`TimedTaskQuery`/`ScheduleBriefing` 等定时任务插件的后台调度实现**：未深入其持久化与到点执行的具体代码路径,只确认了 `ToolExecutor._scheduleTimedToolCall` 这一条通用定时机制；`VCPTaskAssistant` 的调度链已在新笔记（独特功能）中单独确认。
+7. **`ScheduleManager`/`TimedTaskQuery`/`ScheduleBriefing` 等定时任务插件的后台调度实现**：未深入其持久化与到点执行的具体代码路径，只确认了通用定时机制；`VCPTaskAssistant` 的调度链已在新笔记（独特功能）中单独确认。
 8. **除本笔记重点复核的插件之外的其余插件**：本次未逐一审查每个插件内部的参数校验、路径处理、命令拼接细节，其余插件的分类基于功能类别的合理推断（生成类插件通常只调用外部 API），未逐一读取全部源码。
 9. **外部抓取内容混入上下文后是否会被解析为工具调用**：未做实际端到端测试（构造包含 VCP 协议文本的网页内容，验证其被 `UrlFetch`/`FlashDeepSearch`/`BrowserSearch` 等插件抓取混入上下文后是否会被解析器当作工具调用）。`toolApprovalConfig.json` 当前 `enabled: true` 且名单含 `PowerShellExecutor`/`FileOperator` 是当前默认防护，但 `enabled` 可被关闭。
 10. **敏感环境变量的日志输出**：未逐一检查各插件的 debug 日志输出是否会打印 `DECRYPTED_AUTH_CODE`、API Key 等值。

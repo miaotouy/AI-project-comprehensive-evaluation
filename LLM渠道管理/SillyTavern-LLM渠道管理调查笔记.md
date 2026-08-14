@@ -30,9 +30,9 @@ main_api
 
 - Chat Completion 有 26 个 `chat_completion_source`，Text Completion 有 15 个 `textgen_type`；
 - Chat Completion 后端按 source 分支构造各家端点、Header、payload 和流式解析，Custom 路径兼容 OpenAI Chat Completions；
-- Connection Profile 保存 `api`、`api-url`、`model`、`proxy`、`secret-id` 等引用，可快速切整套连接；
+- Connection Profile 保存 API、URL、模型、代理和 Secret ID 等引用，可快速切换整套连接；
 - Secret Manager 对同一种 Secret 支持多条带 UUID、标签和 active 状态的 Key；
-- 新写入的 Key 会成为唯一 active Key，也可以手动 rotate，Profile 还能显式固定某个 Secret ID；
+- 新写入的 Key 会成为唯一启用项，也可以手动 rotate，Profile 还能显式固定某个 Secret ID；
 - 多 Key 不会随机或轮询，不会因 401/429 自动切换，也没有失败计数、熔断和恢复；
 - 普通聊天请求没有统一自动重试和指数退避，失败直接返回前端；
 - `/profile-genstream` 专用命令在流式失败时会改成非流式再请求一次，但仍使用同一 Profile、模型和 Secret；
@@ -129,7 +129,7 @@ Profile 本身没有以下调度字段：
 
 ### 2.1 Chat Completion 后端集中适配
 
-[`src/endpoints/backends/chat-completions.js`](../../SillyTavern/src/endpoints/backends/chat-completions.js) 根据 `chat_completion_source` 选择：
+[`src/endpoints/backends/chat-completions.js`](../../SillyTavern/src/endpoints/backends/chat-completions.js) 根据所选 Chat Completion 来源决定：
 
 - 固定官方 Base URL；
 - 用户填写的 Custom URL；
@@ -155,9 +155,9 @@ Header 合并使用结构化对象/YAML 解析，而不是字符串拼接。自�
 
 支持代理的 Provider 可把 `reverse_proxy` 作为 Base URL，把 `proxy_password` 作为请求凭据。UI 还支持命名 proxy preset。
 
-Proxy preset 保存 `name`、`url`、`password`，并进入 `settings.json`。这与 `secrets.json` 的 API Key 隔离机制不同：proxy password 属于普通设置明文，也会进入 settings snapshot 和默认全量备份。
+Proxy preset 保存名称、URL 和密码，并进入 `settings.json`。这与 `secrets.json` 的 API Key 隔离机制不同：代理密码属于普通设置明文，也会进入设置快照和默认全量备份。
 
-导入 OpenAI preset 时，代码会识别 `reverse_proxy`、`proxy_password`、`custom_url`、自定义 Body/Header、Azure URL 等敏感字段，提示用户是否删除；这是导入时的提醒，不是静态加密。
+导入 OpenAI preset 时，代码会识别代理 URL、代理密码、自定义 URL、自定义 Body/Header 和 Azure URL 等敏感字段，提示用户是否删除；这是导入时的提醒，不是静态加密。
 
 ### 2.3 Text Completion 的附加 Header
 
@@ -191,11 +191,11 @@ Proxy preset 保存 `name`、`url`、`password`，并进入 `settings.json`。�
   -> 读取 active=true 的值
 ```
 
-Connection Profile 可以记录 `secret-id`，因此两个 Profile 可以使用同一 Provider 类型、不同 URL 和不同 Key，而不必反复切换全局 active Key。
+Connection Profile 可以记录 Secret ID，因此两个 Profile 可以使用同一 Provider 类型、不同 URL 和不同 Key，而不必反复切换全局启用的 Key。
 
 ### 3.2 rotate 是手工选择，不是自动轮询
 
-前端 [`public/scripts/secrets.js`](../../SillyTavern/public/scripts/secrets.js) 提供新增、删除、重命名、查看掩码和 rotate。rotate 请求把指定 ID 设为唯一 active，并触发重新连接。
+前端 [`public/scripts/secrets.js`](../../SillyTavern/public/scripts/secrets.js) 提供新增、删除、重命名、查看掩码和 rotate。rotate 请求把指定条目设为唯一启用项，并触发重新连接。
 
 源码中没有：
 
@@ -209,9 +209,9 @@ Connection Profile 可以记录 `secret-id`，因此两个 Profile 可以使用�
 
 ### 3.3 客户端默认看不到明文
 
-`/api/secrets/read` 返回每条 Secret 的 ID、标签、active 状态和掩码值。长度较长时只显示最后 3 个字符；较短值显示固定星号。
+`/api/secrets/read` 返回每条 Secret 的 ID、标签、启用状态和掩码值。长度较长时只显示最后 3 个字符；较短值显示固定星号。
 
-只有 `config.yaml` 的 `allowKeysExposure: true` 时，`/view` 和普通 Secret `/find` 才允许返回明文。少数纯 URL 类型列在 `EXPORTABLE_KEYS` 中，即使不开启暴露也可读取。
+只有部署配置开启 `allowKeysExposure` 时，`/view` 和普通 `/find` 查询才允许返回明文；少数纯 URL 类型列在 `EXPORTABLE_KEYS` 中，即使不开启暴露也可读取。
 
 这降低了浏览器侧意外展示 Key 的风险，但服务端磁盘上的 Secret 仍是明文。
 
@@ -232,7 +232,7 @@ Text Completion 也按 type 使用各自的模型拉取函数，例如 Ollama、
 
 ### 4.2 模型字段随 Provider 分散保存
 
-`oai_settings` 为不同 Provider 保存独立字段，例如：
+oai_settings 为不同 Provider 保存独立字段，例如：
 
 - `openai_model`；
 - `claude_model`；
@@ -242,13 +242,13 @@ Text Completion 也按 type 使用各自的模型拉取函数，例如 Ollama、
 - `azure_openai_model`；
 - 各聚合平台和厂商的专属 model 字段。
 
-切换 source 时，`getChatCompletionModel()` 从对应字段取当前模型。Connection Profile 则把最终的 API 和模型值固化为通用 `api + model`。
+切换来源时，`getChatCompletionModel()` 从对应 Provider 字段取当前模型；Connection Profile 则把最终选定的 API 和模型固化为通用字段。
 
 模型列表排序和分组只影响 UI。即使模型条目包含上下文、定价或 Provider 元数据，也没有本地调度器按成本或延迟自动选择模型。
 
 ### 4.3 `model_list` 是异构上游对象数组
 
-[`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js) 的全局 `model_list` 没有统一 TypeScript/Zod schema。状态请求返回后，前端基本做浅拷贝并按 `id` 排序；同一个概念会因 Provider 使用不同路径：
+[`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js) 的全局 `model_list` 没有统一 schema。状态请求返回后，前端基本做浅拷贝并按 ID 排序；同一个概念会因 Provider 使用不同路径：
 
 | 概念 | 实际读取示例 |
 |---|---|
@@ -259,9 +259,16 @@ Text Completion 也按 type 使用各自的模型拉取函数，例如 Ollama、
 | 工具 | `metadata.function_call`、`supported_features`、Provider 固定模型表 |
 | Tokenizer | OpenRouter 的 `architecture.tokenizer` |
 
-[`src/endpoints/backends/chat-completions.js`](../../SillyTavern/src/endpoints/backends/chat-completions.js) 作为服务端代理只做少量标准化：Google AI Studio 去掉 `models/` 前缀并保留原对象，Pollinations 把数组包装为 `{data}`，Chutes 把 `prompt/completion` 复制为 `input/output`。其余 Provider 大多原样透传，因此前端分支必须了解每家字段结构。
+[`src/endpoints/backends/chat-completions.js`](../../SillyTavern/src/endpoints/backends/chat-completions.js) 作为服务端代理只做少量标准化：
 
-当前 Cohere 分支还有明显的代码顺序问题：通用路径先执行 `statusResponse.send(data)`，随后才把 `data.models` 转成 `{id, ...model}` 的 `data.data`。这个转换不会进入已经发送的响应，前端能否正确加载 Cohere 模型取决于原始响应是否恰好符合后续预期。
+- Google AI Studio：去掉 `models/` 前缀并保留原对象；
+- Pollinations：把数组包装为 `{data}`；
+- Chutes：把 `prompt/completion` 复制为 `input/output`；
+- 其余 Provider：大多原样透传。
+
+因此前端分支必须了解每家字段结构。
+
+当前 Cohere 分支还有明显的代码顺序问题：通用路径先发送原始响应，随后才把 `data.models` 转成 `{id, ...model}` 形式的 `data.data`。这个转换不会进入已经发送的响应，前端能否正确加载 Cohere 模型取决于原始响应是否恰好符合后续预期。
 
 ### 4.4 元数据用于模型列表展示
 
@@ -270,14 +277,14 @@ SillyTavern 对富元数据利用最完整的是聚合平台选择器：
 - OpenRouter 显示名称、context 和按 prompt 价格换算的 tokens/$；
 - ElectronHub 显示输入/输出价格、context、视觉、推理、工具和 premium 标记；
 - Chutes、NanoGPT 等按各自字段显示 context、价格和能力图标；
-- `sortModelsBy()` 可按字母、context、输入价或输出价排序；
-- `groupModelsByVendor()` 按模型 ID/Provider 规则分组。
+- 排序函数可按字母、context、输入价或输出价排序；
+- 分组函数按模型 ID/Provider 规则分组。
 
 价格还用于计算“当前最大 prompt + completion”的估算成本，但只是前端提示。它不读取真实账单、不处理缓存 token、阶梯价或按请求费用，也不参与自动路由。
 
 ### 4.5 上下文上限是动态字段加硬编码 fallback
 
-模型切换时，SillyTavern 会按 Provider 调用不同的 `get*MaxContext()`：优先读取 `model_list` 中该 Provider 的 context 字段，缺失时再查本地模型 ID 映射，最后使用 8K、32K、128K 等 Provider 默认值。OpenRouter 例外地直接用 `context_length`，缺失时回退 128K。
+模型切换时，SillyTavern 会按 Provider 调用不同的取最大上下文函数：优先读取模型列表中该 Provider 的 context 字段，缺失时再查本地模型 ID 映射，最后使用 8K、32K、128K 等 Provider 默认值。OpenRouter 例外地直接用 `context_length`，缺失时回退 128K。
 
 随后 `openai_max_context` 会被裁剪到该上限。用户开启 `max_context_unlocked` 后可绕过元数据限制，说明 context metadata 是 UI 安全边界，不是不可突破的协议校验。
 
@@ -285,17 +292,17 @@ SillyTavern 对富元数据利用最完整的是聚合平台选择器：
 
 ### 4.6 能力元数据直接控制多模态与推理
 
-[`isImageInliningSupported()`](../../SillyTavern/public/scripts/openai.js)、`isVideoInliningSupported()` 和 `isAudioInliningSupported()` 混合使用两种判断：有富模型目录的 Provider 读取实时条目，OpenAI、Claude、Gemini、Z.AI 等则匹配硬编码模型名。Custom Provider 默认允许图片输入。
+图片、视频和音频的内联支持判断（见 [`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js)）混合使用两种方式：有富模型目录的 Provider 读取实时条目，OpenAI、Claude、Gemini、Z.AI 等则匹配硬编码模型名。Custom Provider 默认允许图片输入。
 
 因此“目录返回 vision=false/缺失”的含义不统一：某些 Provider 会真正关闭图片内联；另一些 Provider 完全不看目录而由模型名表决定。新模型常需要等项目更新硬编码表，或者使用 Custom 模式绕过保守判断。
 
 ElectronHub 是少数用单模型元数据校验 reasoning effort 的分支：只有 `metadata.supported_reasoning_efforts` 包含当前档位才发送，否则删除该参数。其他 Provider 大多由设置和模型名逻辑决定，尚未形成统一的 per-model 参数支持矩阵。
 
-OpenRouter 的 `architecture.tokenizer` 还会选择 Llama、Mistral、Yi、Gemini、Qwen、Cohere 等本地 tokenizer；无法识别时再按模型 ID 启发式判断。错误 metadata 会影响 Token 估算和上下文裁剪，但不会改变实际 Provider。
+OpenRouter 的 tokenizer 元数据还会选择 Llama、Mistral、Yi、Gemini、Qwen、Cohere 等本地 tokenizer；无法识别时再按模型 ID 启发式判断。错误 metadata 会影响 Token 估算和上下文裁剪，但不会改变实际 Provider。
 
 ### 4.7 缓存与持久化边界
 
-`model_list` 是当前页面会话中的内存数组，切换 Provider 或刷新状态时替换。用户设置持久化的是各 Provider 的选中 model ID、排序/分组、context 和生成参数，而不是整份上游模型对象。
+模型列表是当前页面会话中的内存数组，切换 Provider 或刷新状态时替换。用户设置持久化的是各 Provider 的选中 model ID、排序/分组、context 和生成参数，而不是整份上游模型对象。
 
 因此目录的新价格和能力在下次状态检查时自然更新，不会和旧 snapshot 合并；反过来，Provider 暂时不可达时也没有可复用的持久化富元数据。已有 model ID 仍可留在设置中，但 context、能力图标、成本估算和动态参数 gate 会退回硬编码或默认路径。
 
@@ -312,7 +319,7 @@ Chat Completion 的前端把统一生成设置转为 `generate_data`，后端再
 - SSE 或流式 JSON 解析；
 - reasoning、image、tool call 等响应字段抽取。
 
-Text Completion 则由 `textgen_type` 决定 URL 规则、模型发现、模板能力和 Header。
+Text Completion 则由后端类型决定 URL 规则、模型发现、模板能力和 Header。
 
 这套路由是一请求一 Adapter：请求进来时 source/type 已确定，不会在错误后换到另一条 Adapter 分支。
 
@@ -329,7 +336,7 @@ Text Completion 则由 `textgen_type` 决定 URL 规则、模型发现、模板�
 
 ### 6.1 普通聊天没有统一自动重试
 
-[`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js) 的 `sendOpenAIRequest()` 对本地后端只执行一次 `fetch`。后端 Provider 分支对上游也通常只执行一次 `fetch`；非 2xx 或业务错误被返回给前端。
+[`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js) 的 `sendOpenAIRequest()` 对本地后端只执行一次网络请求；后端 Provider 分支对上游也通常只执行一次，非 2xx 或业务错误被返回给前端。
 
 源码没有统一的：
 
@@ -404,18 +411,13 @@ backups/settings_<handle>_<timestamp>.json
 
 默认每类保留 50 份，重复内容可跳过。设置 snapshot 可列出、查看和恢复。
 
-Connection Profile 位于 `extension_settings`，因此会进入 `settings.json` 和设置快照；Secret 值位于单独的 `secrets.json`，不会进入设置快照。Profile 里的 Secret UUID 只有和对应 `secrets.json` 一起恢复才有意义。
+Connection Profile 存放在扩展设置块中，因此会进入 `settings.json` 和设置快照；Secret 值位于单独的 `secrets.json`，不会进入设置快照。Profile 里的 Secret UUID 只有和对应 Secret 文件一起恢复才有意义。
 
-Proxy password、自定义 Header、reverse proxy URL 等普通设置可能进入设置快照，不能因为 API Key 被拆到 Secret Manager 就把整个 `settings.json` 视为无敏感信息。
+Proxy password、自定义 Header、reverse proxy URL 等普通设置可能进入设置快照，不能因为 API Key 被拆到 Secret Manager 就把整个设置文件视为无敏感信息。
 
 ### 7.3 全量 ZIP 默认排除 Secret
 
-[`src/users.js`](../../SillyTavern/src/users.js) 的 `createBackupArchive()` 归档整个用户根目录，但默认 `allowKeysExposure: false` 时排除：
-
-- `secrets.json`；
-- `backups/secrets_migration_*.json`。
-
-只有部署者将 `allowKeysExposure` 设为 true，完整备份才包含这些文件。`backups.allowFullDataBackup` 则单独控制用户能否请求全量 ZIP。
+[`src/users.js`](../../SillyTavern/src/users.js) 的 `createBackupArchive()` 归档整个用户根目录，但默认 `allowKeysExposure` 未开启时，会排除 `secrets.json` 及 Secret 迁移备份两类文件。只有部署者开启该开关，完整备份才包含这些文件；`backups.allowFullDataBackup` 则单独控制用户能否请求全量 ZIP。
 
 这带来明确的恢复取舍：
 
@@ -435,7 +437,7 @@ Chat Completion 的 `getStatusOpen()` 会：
 3. 请求本地 `/status`；
 4. 后端取当前 active Secret；
 5. 请求上游模型目录或专用探测；
-6. 更新全局 `online_status` 和 `model_list`。
+6. 更新全局 `online_status` 和模型列表。
 
 部分 Provider 明确跳过模型验证，只显示“Key 已保存，请发送 Test Message”。Azure 会先 GET models，再对 deployment 发送一个最多 5 token 的最小 Chat Completions 探测。
 

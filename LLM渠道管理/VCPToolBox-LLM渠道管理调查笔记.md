@@ -38,7 +38,7 @@ config.env
 - 当前没有 `ModelRedirect.json`，所以模型重定向能力在本快照默认未启用；
 - `VCPModelAuto` 用最后 user/assistant 内容的 embedding 与 route description 做余弦相似度排序，低于阈值时选默认模型；
 - 普通 Chat 最多执行 `ApiRetries` 次总尝试，默认 3；重试 500、503、429、特定 token 型 401、连接/首包超时和网络错误；
-- 退避是 `ApiRetryDelay * attempt` 的线性延迟，不读取 `Retry-After`，也没有抖动；
+- 退避是按尝试次序递增的线性延迟，不读取 `Retry-After`，也没有抖动；
 - 普通指定模型重试时模型不变；只有语义虚拟模型请求才会在每次尝试前沿候选模型链改写 `body.model`；
 - 语义 fallback 仍使用同一个 `API_URL + API_Key`，本地不知道不同模型是否落到不同 Provider 渠道；
 - Embedding 有独立的主模型 + 最多 9 个备用模型/逗号列表，失败后按顺序换模型，但 URL 和 Key 不变；
@@ -159,14 +159,14 @@ Authorization: Bearer <Key>
 app.use(specialModelRouter)
 ```
 
-之后才注册通用 `Authorization === Bearer ${serverKey}` 中间件。命中 [`routes/specialModelRouter.js`](../../VCPToolBox/routes/specialModelRouter.js) 白名单的请求会在 Router 内直接结束响应，不再进入后面的鉴权。
+之后才注册通用 `Authorization === Bearer ${serverKey}` 中间件。命中 [`routes/specialModelRouter.js`](../../VCPToolBox/routes/specialModelRouter.js) 白名单的请求会在该路由内直接结束响应，不再进入后面的鉴权。
 
 受影响的有效组合是：
 
 - `POST /v1/chat/completions` + `WhitelistImageModel` 中的模型；
 - `POST /v1/embeddings` + `WhitelistEmbeddingModel` 中的模型。
 
-Router 会用服务器 `API_Key` 访问上游，所以只要外部能够到达 VCP HTTP 端口，就可能在不知道 `Key` 的情况下消耗白名单模型额度。这是当前路由挂载顺序形成的鉴权缺口，不应理解成有意提供的公开渠道。
+该旁路路由会用服务器 `API_Key` 访问上游，所以只要外部能够到达 VCP HTTP 端口，就可能在不知道 `Key` 的情况下消耗白名单模型额度。这是当前路由挂载顺序形成的鉴权缺口，不应理解成有意提供的公开渠道。
 
 ## 3. 模型目录、别名与选择
 
@@ -175,15 +175,15 @@ Router 会用服务器 `API_Key` 访问上游，所以只要外部能够到达 V
 [`server.js`](../../VCPToolBox/server.js) 的 `/v1/models`：
 
 1. 单次请求 `${API_URL}/v1/models`；
-2. 使用固定 `API_Key`；
-3. 解析 `{ data: [...] }`；
-4. 若启用 ModelRedirect，把上游内部 ID 改成公开名；
-5. 附加 Semantic Router 的虚拟模型；
+2. 使用固定的上游 `API_Key`；
+3. 解析返回的 data 数组；
+4. 若启用模型重定向，把上游内部 ID 改成公开名；
+5. 附加语义虚拟模型；
 6. 返回给客户端。
 
 没有本地持久化目录、定时刷新、ETag、分页合并或按 Provider 分组。每次客户端请求都会访问同一个上游目录。
 
-当上游返回非 2xx 或 JSON 无法解析时，只要存在语义虚拟模型，代码会返回 HTTP 200 和仅含虚拟模型的列表。这是“目录可选择性 fallback”，不代表任一真实模型可推理。网络异常直接进入 catch 返回 500。
+当上游返回非 2xx 或 JSON 无法解析时，只要存在语义虚拟模型，代码会返回 HTTP 200 和仅含虚拟模型的列表。这是“目录可选择性 fallback”，不代表任一真实模型可推理。网络异常则直接返回 500。
 
 ### 3.2 ModelRedirect 是静态一对一别名
 
@@ -202,7 +202,7 @@ Router 会用服务器 `API_Key` 访问上游，所以只要外部能够到达 V
 - 健康探测；
 - 失败后 fallback。
 
-当前仓库没有 `ModelRedirect.json`，只有 [`ModelRedirect.json.example`](../../VCPToolBox/ModelRedirect.json.example)，所以调查快照中该能力默认关闭。加载发生在启动阶段，Handler 自身没有文件 watcher。
+当前仓库没有 `ModelRedirect.json`，只有 [`ModelRedirect.json.example`](../../VCPToolBox/ModelRedirect.json.example)，所以调查快照中该能力默认关闭。加载发生在启动阶段，该处理器自身不做文件监听。
 
 ### 3.3 语义虚拟模型加入目录
 
@@ -213,11 +213,11 @@ Router 会用服务器 `API_Key` 访问上游，所以只要外部能够到达 V
 
 这些条目的 `owned_by` 是 `vcp-semantic-router`。它们不是上游真实模型，而是本地选择器入口；客户端选择后，Chat handler 才把它解析为真实模型 ID。
 
-配置支持文件监听和 250ms 防抖热加载。管理 API 也能校验、写入并立即调用 `loadConfig()`。
+配置支持文件监听和 250ms 防抖热加载。管理 API 也能校验、写入并立即触发配置重载。
 
 ### 3.4 真实模型元数据是透明透传
 
-[`server.js`](../../VCPToolBox/server.js) 会把上游 `/v1/models` 响应读成 JSON，对 `data[]` 做修改后重新序列化。对真实模型只可能改变 `id`，其余字段原样保留：
+[`server.js`](../../VCPToolBox/server.js) 会把上游 `/v1/models` 响应读成 JSON，对 data 数组做修改后重新序列化。对真实模型只可能改变 `id`，其余字段原样保留：
 
 ```js
 return { ...model, id: publicModelName };
@@ -225,7 +225,7 @@ return { ...model, id: publicModelName };
 
 因此 `object`、`created`、`owned_by`，以及上游自定义的 context、pricing、capability、architecture 等字段都可穿过 VCP。VCPToolBox 本身不声明这些扩展字段的 schema，也不验证数值单位、能力真实性或字段新鲜度。
 
-响应会复制大部分上游 Header，但移除 content-length、content-encoding、transfer-encoding、connection、keep-alive，再由 Express 输出新的 JSON。它不是字节级透明代理；签名、ETag 或与原始 body 绑定的校验头若被上游返回，当前代码没有专门重算或剔除。
+响应会复制大部分上游 Header，但移除 content-length、content-encoding、transfer-encoding 等字节层头，再由 Express 输出新的 JSON。它不是字节级透明代理；签名、ETag 或与原始 body 绑定的校验头若被上游返回，当前代码没有专门重算或剔除。
 
 ### 3.5 虚拟模型只有最小元数据
 
@@ -240,7 +240,7 @@ return { ...model, id: publicModelName };
 
 它不声明 context window、最大输出、输入模态、工具、视觉、推理或价格，因为虚拟入口最终可能选择不同真实模型。给它写一个固定能力或价格会产生误导；更合理的扩展方式是声明“候选能力交集/并集”和“最终模型在响应中可观测”，而不是伪造单一静态值。
 
-语义路由使用的元数据保存在 [`SemanticModelRouter.json`](../../VCPToolBox/SemanticModelRouter.json)：route/preset 的 description、candidate model ID、优先级和 context weights。description 会被 embedding 后参与相似度选模，但这些字段不会暴露到 `/v1/models`，客户端无法解释一个虚拟模型会路由到哪些候选或依据什么选择。
+语义路由使用的元数据保存在 [`SemanticModelRouter.json`](../../VCPToolBox/SemanticModelRouter.json)：各路由条目的描述、候选模型 ID、优先级和上下文权重。description 会被向量化后参与相似度选模，但这些字段不会暴露到 `/v1/models`，客户端无法解释一个虚拟模型会路由到哪些候选或依据什么选择。
 
 ### 3.6 没有本地模型注册表
 
@@ -280,7 +280,7 @@ ModelRedirect 只改标识，不更新 `owned_by`、display name 或描述。别
 - `POST /v1beta/models/:model:generateContent`；
 - `POST /v1beta/models/:model:streamGenerateContent`。
 
-桥接层把输入提取成 OpenAI Chat `messages`，保护并转换 tools 字段，然后用 VCP 自己的 `Key` 通过 loopback HTTP 回送 `/v1/chat/completions`。返回时再转成 Responses、Anthropic 或 Gemini 结构/SSE。
+桥接层把输入提取成 OpenAI Chat 消息格式，保护并转换工具字段，然后用 VCP 自己的 `Key` 通过本机 loopback HTTP 回送 `/v1/chat/completions`。返回时再转成 Responses、Anthropic 或 Gemini 结构/SSE。
 
 这样不同客户端协议能复用插件、RAG、角色分割和重试管线，但增加了一次本机 HTTP hop。
 
@@ -306,10 +306,10 @@ Authorization: Bearer API_Key
 | 变量 | 默认 | 作用 |
 |---|---|---|
 | `ReasoningToContentEnabled` | `false` | 总开关 |
-| `ReasoningToContentModel` | `kimi,claude`（示例） | 逗号分隔模型名片段，对真实后端模型名做 include 子串匹配（大小写不敏感） |
+| `ReasoningToContentModel` | `kimi,claude`（示例） | 逗号分隔模型名片段，对真实后端模型名做包含子串匹配（大小写不敏感） |
 | `ReasoningToContentTag` | `think` | 转换后的标签名，`thinking` 或回退 `think` |
 
-`shouldConvertReasoningForModel()`（`reasoningContentAdapter.js:41-49`）按"启用 && 模型名匹配白名单片段"判定。`streamHandler`/`nonStreamHandler` 在**转发给客户端的副本**上把 `reasoning_content`/`reasoning`/`reasoning_chunk`/`thinking`/`thoughts` 等字段提取为 `<think>` 标签正文（流式按块拼接、规范闭合、finish 时补闭合标签），并删除原始推理字段；内部 `collectedContentThisTurn`/VCP 循环仍只用原始 `content`（`streamHandler.js:172-218` 定义、`:332`/`:375` 使用；`nonStreamHandler.js:272-306`）。语义要点：
+判定函数（`reasoningContentAdapter.js:41-49`）按总开关与模型名白名单匹配决定是否转换。流式与非流式处理链在**转发给客户端的副本**上，把 `reasoning_content`、`reasoning`、`reasoning_chunk`、`thinking`、`thoughts` 等推理字段提取为 `<think>` 标签正文（流式按块拼接、规范闭合、结束时补闭合标签），并删除原始推理字段；内部循环仍只用原始 `content`（`streamHandler.js:172-218` 定义、`:332`/`:375` 使用；`nonStreamHandler.js:272-306`）。语义要点：
 
 - 这是**客户端展示协议**的转换，不是渠道或 Adapter 变化：出站仍只发 OpenAI-compatible body，不新增任何上游字段；
 - 转换结果不进工具解析、OneRing、日记与 AgentAssistant 历史（AgentAssistant 反而会按模型名把 `<think>` 块从对话文本中剥掉，见 Agent 角色笔记 3.5）；
@@ -332,7 +332,7 @@ Authorization: Bearer API_Key
 7. 只保留达到 `matchThreshold` 的 route；
 8. 首项成为主模型，低于阈值或 embedding 不可用则使用 `defaultModel`。
 
-这里的 `contextWeights` 是 user/assistant 上下文向量权重，不是渠道流量权重。
+这里的上下文权重指 user/assistant 上下文向量的合成权重，不是渠道流量权重。
 
 ### 5.2 候选链生成规则
 
@@ -341,7 +341,7 @@ Authorization: Bearer API_Key
 - `routes[]`：名称、模型、描述、`failoverPool`；
 - `defaultModel`；
 - `fallbackModels[]`；
-- `matchThreshold` 和 `contextWeights`。
+- `matchThreshold` 与 `contextWeights` 控制选模阈值和上下文合成权重。
 
 候选链为：
 
@@ -353,7 +353,7 @@ Authorization: Bearer API_Key
   -> 去重
 ```
 
-若首选 route 的 `failoverPool=false`，不会把其他语义命中 route 加入链，但仍会追加 `defaultModel + fallbackModels`。因此 `failoverPool=false` 不是“完全禁止 fallback”，而是“不进入 route 互备池”。
+若首选路由的 `failoverPool` 为 false，不会把其他语义命中路由加入链，但仍会追加默认模型与显式回退模型。因此该标志为 false 不是“完全禁止 fallback”，而是“不进入路由互备池”。
 
 ### 5.3 fallback 是模型级，不是 Provider 实体级
 
@@ -361,7 +361,7 @@ Authorization: Bearer API_Key
 
 如果 NewAPI 把候选模型名映射到不同供应商，最终可能间接跨渠道；但 VCPToolBox 本地看不到 Provider、渠道 Key、权重和健康状态。因此，VCP 实现的是经单一聚合上游执行的跨模型 failover，本地没有跨 Provider 渠道容灾。
 
-README 称模型路由"语义级自动选模与容灾……跨模型上下文无缝持久化"。实现侧，容灾指语义虚拟模型的候选链 fallback（仍经单一 `API_URL`+`API_Key`，模型级而非 Provider 级）；"跨模型上下文无缝持久化"在当前代码中没有独立的跨模型上下文存储，上下文由客户端随请求携带（`contextTokenLimit` 是客户端扩展参数），同一会话切换模型时历史不丢是"客户端持有历史"的结果，不是服务端持久化。README 的"容灾"表述应理解为模型 fallback 链，不能按多 Provider 容灾理解。
+README 称模型路由"语义级自动选模与容灾……跨模型上下文无缝持久化"。实现侧，容灾指语义虚拟模型的候选链 fallback（仍经单一 `API_URL`+`API_Key`，模型级而非 Provider 级）；"跨模型上下文无缝持久化"在当前代码中没有独立的跨模型上下文存储，上下文由客户端随请求携带，同一会话切换模型时历史不丢是"客户端持有历史"的结果，不是服务端持久化。README 的"容灾"表述应理解为模型 fallback 链，不能按多 Provider 容灾理解。
 
 ### 5.4 不按成本或延迟选模
 
@@ -382,7 +382,7 @@ README 称模型路由"语义级自动选模与容灾……跨模型上下文无
 
 普通 400、403、404、502、504 等直接返回，不重试。外部用户中断或客户端断联触发的 Abort 也不重试。
 
-`ApiConnectionTimeoutMs` 只覆盖等待 fetch 返回响应头/首包的阶段，不限制完整 SSE 生成总时长。
+该超时只覆盖等待上游返回响应头/首包的阶段，不限制完整 SSE 生成总时长。
 
 ### 6.2 `ApiRetries` 是总尝试数
 
@@ -394,21 +394,21 @@ README 称模型路由"语义级自动选模与容灾……跨模型上下文无
 ApiRetryDelay * (attempt index + 1)
 ```
 
-默认模板 `ApiRetryDelay=200`。3 次总尝试时，正常会在第 2、3 次尝试前分别等待约 200ms、400ms；若第 3 次仍返回可重试 HTTP 状态，当前实现还会多等待约 600ms，随后因循环耗尽抛出错误。代码不读取上游 `Retry-After`，没有指数退避或随机抖动。
+模板默认延迟 200ms，3 次总尝试时正常会在第 2、3 次尝试前分别等待约 200ms、400ms；若第 3 次仍返回可重试 HTTP 状态，当前实现还会多等待约 600ms，随后因循环耗尽抛出错误。代码不读取上游 `Retry-After`，没有指数退避或随机抖动。
 
 ### 6.3 语义候选数可扩展总尝试数
 
-`maxAttempts` 取 `ApiRetries` 与语义候选数的较大值：
+总尝试数取 `ApiRetries` 与语义候选数二者的较大值：
 
 ```text
 max(ApiRetries, semanticModelFallbackCandidates.length)
 ```
 
-每次 attempt 选择对应候选；attempt 超出候选数时重复最后一个模型。因此：
+每次尝试选择对应候选；超出候选数时重复最后一个模型。因此：
 
 - 普通模型：所有尝试均为同一模型；
-- 候选数大于 `ApiRetries`：为走完候选链而扩大总尝试数；
-- 候选数小于 `ApiRetries`：走完候选后，剩余尝试继续重试最后一个模型。
+- 候选数大于重试配置：为走完候选链而扩大总尝试数；
+- 候选数小于重试配置：走完候选后，剩余尝试继续重试最后一个模型。
 
 这是一条明确的模型 fallback 与 transport retry 耦合策略。
 
@@ -437,15 +437,15 @@ WhitelistEmbeddingModel
   -> EmbeddingModelBackup 兼容列表
 ```
 
-每个 batch 对每个候选最多尝试一次。429 会按 `min(5s * attempt, 15s)` 等待后切到下一个模型；其他 HTTP、JSON 或结构错误进入 catch，按 `1s * attempt` 等待后换模型。
+每个 batch 对每个候选最多尝试一次。429 会按每次尝试 5 秒、封顶 15 秒的退避等待后切到下一个模型；其他 HTTP、JSON 或结构错误按每次 1 秒递增等待后换模型。
 
-所有候选仍使用传入的同一 `config.apiUrl + config.apiKey`。该请求没有 AbortController/显式超时，也没有 Key 或 Base URL fallback。它与主 Chat 的 `ApiRetries` 是两套独立实现。
+所有候选仍使用调用方传入的同一 URL 与 Key。该请求没有显式超时，也没有 Key 或 Base URL fallback。它与主 Chat 的 `ApiRetries` 是两套独立实现。
 
 ## 7. 凭据存储、编辑与备份
 
 ### 7.1 `config.env` 是明文真相源
 
-核心 URL、上游 Key、VCP 对外 Key、管理员密码、NewAPI Monitor token 以及多种插件凭据都以环境变量/`config.env` 明文加载。`.gitignore` 排除任意 `**/config.env`，能降低误提交风险，但不提供磁盘加密。
+核心 URL、上游 Key、VCP 对外 Key、管理员密码、NewAPI Monitor token 以及多种插件凭据都以环境变量或 `config.env` 明文加载。`.gitignore` 排除所有 config.env 文件，能降低误提交风险，但不提供磁盘加密。
 
 源码没有 DPAPI、Keychain、Vault/KMS 封装或字段级加密。文档建议限制文件权限，实际保密边界仍是操作系统账户、目录权限和部署环境。
 
@@ -456,11 +456,11 @@ WhitelistEmbeddingModel
 - `GET /admin_api/config/main`；
 - `GET /admin_api/config/main/raw`
 
-会把完整 `config.env` 内容返回给通过 Admin Basic Auth 的前端，没有对 `API_Key`、`AdminPassword` 或其他 Secret 做掩码。`POST /config/main` 又把前端提交的整段文本直接 `fs.writeFile()` 覆盖文件。
+会把完整 `config.env` 内容返回给通过管理 Basic Auth 的前端，没有对 `API_Key`、`AdminPassword` 等 Secret 做掩码。保存接口 `POST /config/main` 又把前端提交的整段文本直接覆盖写回配置文件。
 
 这是方便的远程配置编辑器，但意味着管理员浏览器会接触所有明文 Secret。写入过程没有临时文件、回读校验或自动 `.bak`。
 
-保存后 API 只调用 `pluginManager.loadPlugins()`；主服务的 `apiUrl`、`apiKey`、`serverKey` 和 Chat handler 配置是启动时捕获的常量。因此核心 LLM URL/Key 改动不会仅靠该保存接口原地热更新，通常仍需重启进程。Semantic Router 的独立 JSON 则支持热加载。
+保存后 API 只触发插件重载；主服务的 URL、上游 Key、对外 Key 和 Chat handler 配置都是启动时捕获的常量。因此核心 LLM URL/Key 改动不会仅靠该保存接口原地热更新，通常仍需重启进程。Semantic Router 的独立 JSON 则支持热加载。
 
 ### 7.3 备份默认扩大 Secret 暴露面
 
@@ -472,8 +472,7 @@ WhitelistEmbeddingModel
 
 只排除 `.git`、依赖/虚拟环境和 `dailynote/MusicDiary`。因此它默认包含：
 
-- 根 `config.env`；
-- 插件 `config.env`；
+- 根与插件的 `config.env`；
 - `SemanticModelRouter.json`；
 - `ModelRedirect.json`（存在时）；
 - 其他可能含 token、Cookie 或运行数据的 JSON/TXT。
@@ -496,7 +495,7 @@ WhitelistEmbeddingModel
 
 ### 8.2 日志详细，但不是结构化渠道健康表
 
-[`modules/logger.js`](../../VCPToolBox/modules/logger.js) 将 console 写入 `DebugLog/ServerLog.txt`，默认 5MB 轮转、归档保留 7 天。`DebugMode=true` 时，主流程会把多个阶段的完整请求上下文写入 Debug 归档；`CHAT_LOG_ENABLED=true` 时，还会保存每次 Chat 的请求/响应 JSON。
+[`modules/logger.js`](../../VCPToolBox/modules/logger.js) 把控制台输出写入 `DebugLog/ServerLog.txt`，默认 5MB 轮转、归档保留 7 天。`DebugMode=true` 时，主流程会把多个阶段的完整请求上下文写入 Debug 归档；`CHAT_LOG_ENABLED=true` 时，还会保存每次 Chat 的请求/响应 JSON。
 
 这些日志有助于复现模型选择、重试和上游错误，但可能包含完整对话、系统提示和工具结果，属于敏感数据。它们也不是按 Provider/Key 聚合的 metrics store。
 
@@ -504,9 +503,9 @@ WhitelistEmbeddingModel
 
 [`routes/admin/newapiMonitor.js`](../../VCPToolBox/routes/admin/newapiMonitor.js) 用独立管理 token 查询 NewAPI 的 quota/log API，生成：
 
-- summary：请求、token、quota、RPM/TPM；
-- trend：按时间聚合；
-- models：按模型聚合。
+- 概览：请求、token、quota、RPM/TPM；
+- 趋势：按时间聚合；
+- 按模型聚合。
 
 它没有把数据反馈给 Semantic Router 或重试器，也不记录 VCP 本地的端到端延迟、错误率和候选切换结果。若上游不是兼容 NewAPI 管理 API，这套监控不可用。
 

@@ -91,7 +91,7 @@ Agent、Topic 和 Message 都分别保存 `provider` 与 `model`。新 Topic 会
 
 ### 1.3 内置目录、环境变量与用户差量
 
-[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照（HEAD）的固定列表有 84 张卡（`index.ts` 84 个 import），其中品牌 `lobehub` 由 `ENABLE_BUSINESS_FEATURES` 条件加入（`index.ts:145-146`），即开源默认 83、商业构建 84——与上快照（4edba1b7）口径一致，成员无增减。
+[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照（HEAD）的固定列表有 84 张卡（该文件 84 个 import），其中品牌 `lobehub` 由 `ENABLE_BUSINESS_FEATURES` 条件加入（`index.ts:145-146`），即开源默认 83、商业构建 84——与上快照（4edba1b7）口径一致，成员无增减。
 
 有效配置来自三层：
 
@@ -107,7 +107,7 @@ Agent、Topic 和 Message 都分别保存 `provider` 与 `model`。新 Topic 会
 
 ### 2.1 `keyVaults` 统一承载连接秘密
 
-不同 Runtime 会从 `keyVaults` 读取各自需要的字段，常见字段包括：
+不同 Runtime 会从这一加密字段读取各自需要的字段，常见字段包括：
 
 - `apiKey`；
 - `baseURL` 或 `endpoint`；
@@ -123,7 +123,7 @@ Header 和端点规则主要由各 Provider Runtime 或 OpenAI-compatible factor
 
 ### 2.2 自定义 Provider 的协议选择
 
-自定义 Provider 创建时需要独立 ID、名称和 Base URL，可选 API Key，并通过 `sdkType` 选择适配器。类型层 `AiProviderSDKEnum` 仍保留 14 种（`anthropic, azure, azureai, bedrock, cloudflare, comfyui, google, huggingface, ollama, openai, qwen, replicate, router, volcengine`，`packages/model-bank/src/types/aiProvider.ts`），但**自定义 Provider 创建界面已收敛为 9 个选项**（`src/features/Settings/provider/features/customProviderSdkOptions.ts:3-13`：openai/azure/anthropic/google/cloudflare/qwen/volcengine/ollama/router）——`azureai`/`bedrock`/`huggingface`/`replicate`/`comfyui` 在类型与 API 层仍可写，只是不再出现在 UI 选项中。
+自定义 Provider 创建时需要独立 ID、名称和 Base URL，可选 API Key，并通过 `sdkType` 选择适配器。类型层 `AiProviderSDKEnum` 仍保留 14 种（`anthropic, azure, azureai, bedrock, cloudflare, comfyui, google, huggingface, ollama, openai, qwen, replicate, router, volcengine`，`packages/model-bank/src/types/aiProvider.ts`），但**自定义 Provider 创建界面已收敛为其中的 9 个选项**（`src/features/Settings/provider/features/customProviderSdkOptions.ts:3-13`）——`azureai`/`bedrock`/`huggingface`/`replicate`/`comfyui` 在类型与 API 层仍可写，只是不再出现在 UI 选项中。
 
 运行时不是根据 URL 猜协议，而是按 Provider 元数据中的 SDK Type 选择 Model Runtime。相同 OpenAI 兼容协议可以对应多个不同 Provider ID，各自保存 Base URL、Key、模型目录和开关。
 
@@ -149,7 +149,7 @@ Header 和端点规则主要由各 Provider Runtime 或 OpenAI-compatible factor
 3. PostgreSQL `ai_models` 的用户差量；
 4. Provider Runtime 的远程 `models()` API。
 
-远程拉取同样遵循 `fetchOnClient`：浏览器直连 Provider，或调用 `/webapi/models/:provider` 由服务端代取。用户可以在设置中启停、编辑或新增模型。
+远程拉取同样遵循浏览器直连开关：浏览器直连 Provider，或调用 `/webapi/models/:provider` 由服务端代取。用户可以在设置中启停、编辑或新增模型。
 
 Model Bank 的 fallback 用于补充模型能力、上下文、定价等元数据。它不会在推理失败时把请求送到另一个 Provider。
 
@@ -175,7 +175,7 @@ Model Bank 的 fallback 用于补充模型能力、上下文、定价等元数�
 
 新价格结构支持 fixed、tiered、lookup 三种策略，单位可为百万 token、百万字符、图片、视频、像素、秒，并分别描述文本、音频、图片、视频和缓存读写。它能表达“按分辨率查价”或“超过阈值后分段计价”，不是只有两个 token 单价。
 
-同一类型模块还定义了 benchmark rating，包括 intelligence、speed、price、agentic、writing 和 design 的 0-100 归一化分数及来源日期；但评分不是 `AiFullModelCard` 或 `ai_models` 的字段，而是商业层通过 `useBusinessModelRating()` 按 Provider/模型另行注入。它只用于详情和比较界面，不进入普通请求路由，也不构成基于质量的自动选模器。
+同一类型模块还定义了 benchmark rating，包括 intelligence、speed、price、agentic、writing 和 design 的 0-100 归一化分数及来源日期；但评分不是内置模型卡类型或 `ai_models` 的字段，而是商业层通过 `useBusinessModelRating()` 按 Provider/模型另行注入。它只用于详情和比较界面，不进入普通请求路由，也不构成基于质量的自动选模器。
 
 ### 3.4 四种来源的字段完整度不同
 
@@ -191,18 +191,18 @@ model-id=显示名<context:reasoning:vision:fc:file:video:search:imageOutput>
 
 Provider `/models` 通常只返回 ID、owner、created 等薄条目。远端结果适合发现“当前渠道实际提供什么”，但不能单独承担可靠 capability 和价格目录；同 ID 的 Model Bank 卡片仍负责富化。完全未知的自定义模型则可能只有 ID、类型和空 abilities，需要用户补录。
 
-数据库 `ai_models` 保存用户对内置模型的差量，也保存自定义/远端模型。`source` 区分 `builtin`、`remote`、`custom`，但 source 只是来源标识，不决定请求 Adapter；Adapter 仍由 Provider 和模型类型/设置决定。
+数据库 `ai_models` 保存用户对内置模型的差量，也保存自定义/远端模型。`source` 区分 `builtin`、`remote`、`custom`，但该字段只是来源标识，不决定请求 Adapter；Adapter 仍由 Provider 和模型类型/设置决定。
 
 ### 3.5 合并与覆盖语义
 
 [`packages/database/src/repositories/aiInfra/index.ts`](../../lobehub/packages/database/src/repositories/aiInfra/index.ts) 在聊天可用模型列表中，以 `providerId + modelId` 匹配内置卡和数据库行。用户值按字段覆盖：
 
 - 非空 user `abilities`、`config`、`pricing` 覆盖内置值；
-- 数值型 `contextWindowTokens`、布尔 `enabled`、`sort` 优先使用用户值；
+- 数值型上下文窗口、启停与排序等字段优先使用用户值；
 - `settings` 做深合并，用户子字段覆盖内置子字段；
 - 未被内置列表命中的数据库模型再追加到结果。
 
-Provider 设置页的模型列表则用 `mergeArrayById(defaultModels, aiModels)` 合并，并强制让内置 `type` 覆盖远端/数据库错误类型。原因是多数 `/models` 响应没有类型，直接保存会把 Sora 等视频模型误归为 chat。
+Provider 设置页的模型列表则用 `mergeArrayById` 合并，并强制让内置 `type` 覆盖远端/数据库错误类型。原因是多数 `/models` 响应没有类型，直接保存会把 Sora 等视频模型误归为 chat。
 
 这种处理体现了“用户配置优先，但已知分类事实优先”的折中。不同查询为服务各自用途，覆盖字段并非完全同构；扩展元数据字段时需要同时检查聊天列表、设置页列表和 enabled-model selector，不能只改一处 merge。
 
@@ -210,29 +210,29 @@ Provider 设置页的模型列表则用 `mergeArrayById(defaultModels, aiModels)
 
 元数据在 LobeHub 中至少参与以下行为：
 
-- Model Select 可按 vision、functionCall、reasoning 等 `abilities` 过滤；
+- 模型选择器可按 `abilities` 中的视觉、函数调用、推理等能力过滤；
 - capability 决定上传、工具、搜索、思考、结构化输出和多模态控件；
-- `settings.extendParams` 决定展示哪一种 reasoning effort、thinking budget、image aspect ratio、verbosity 等扩展参数；推理强度参数新增了**用户级模型实例配置层**（提交 `03929d283`）：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，`packages/model-bank/src/types/aiModel.ts:323-349`）按 `userId + providerId + modelId` 保存该模型实例的 reasoning-effort 族默认值（`AiModelModel.updateModelReasoningConfig`），运行时经 `modelExtendParams` 映射进请求参数；与 Agent 级 `chatConfig` 的模型专属字段（gpt5ReasoningEffort 等）并存，两层的合并/覆盖优先级本次未走通（见未验证事项）。
+- `settings.extendParams` 决定展示哪种推理强度、思考预算、图像宽高比、详细程度等扩展参数；推理强度参数新增了**用户级模型实例配置层**（提交 `03929d283`）：`ai_models.config.chatConfig`（类型 `AiModelReasoningConfig`，定义见 `aiModel.ts:323-349`）按 `userId + providerId + modelId` 保存该模型实例的推理强度族默认值，运行时经 `modelExtendParams` 映射进请求参数；它与 Agent 级配置的模型专属字段（如 gpt5ReasoningEffort）并存，两层的合并/覆盖优先级本次未走通（见未验证事项）。
 - `disabledParams` 会隐藏并从出站请求删除模型拒绝的 temperature/top-p 等字段；
 - `searchImpl` 区分 tool、params、internal 三种联网实现；
 - `contextWindowTokens` 用于上下文预算与模型详情，`maxOutput` 约束生成；
-- pricing 驱动模型详情和 Message Usage 费用展示，品牌 Provider 还可在展示前替换为 credits 定价；Model Bank 定价的音频输入费用估计（`Pricing` 的 audio 维度，提交 `cd474dfcc`）也会进入成本展示与 Message Usage 费用计算。
+- pricing 驱动模型详情和 Message Usage 费用展示，品牌 Provider 还可在展示前替换为 credits 定价；Model Bank 定价的音频输入费用估计（`Pricing` 的 audio 维度，提交 `cd474dfcc`）也会计入同一费用计算。
 
 这些字段不会触发跨 Provider 调度。即使两个渠道中同一个模型的评分或价格不同，普通聊天仍使用 Topic/Agent 中显式保存的 Provider。
 
 ### 3.7 一致性风险
 
-- Model Bank 随应用版本发布，远端 `/models` 刷新不会自动刷新能力、价格、知识截止和参数策略；新模型在下一版内置卡发布前可能只有薄元数据。
+- Model Bank 随应用版本发布，远端模型列表刷新不会自动刷新能力、价格、知识截止和参数策略；新模型在下一版内置卡发布前可能只有薄元数据。
 - 环境变量 parser、数据库 Zod schema 和 TypeScript `ModelAbilities` 的可表达字段并非完全一致；例如类型层可以描述更多能力，创建/更新接口未必全部开放编辑。
 - 用户 ability 非空时会整体替换内置 abilities，而不是逐个布尔字段深合并。只保存一个能力的旧数据可能意外丢掉新版 Model Bank 新增的其他能力。
-- `pricing` 同样通常整体采用用户对象。用户一旦手工覆盖，内置价格更新不会自动补齐该模型的新计费单位。
+- pricing 同样通常整体采用用户对象。用户一旦手工覆盖，内置价格更新不会自动补齐该模型的新计费单位。
 - 远端同名模型只在当前 Provider 作用域内富化。不能把 Model Bank 的组织归属或 family 当作 Provider 路由键，否则会把聚合平台提供的模型错误改道到原厂。
 
 ## 4. Adapter 与协议路由
 
 ### 4.1 普通 Provider 是一对一 Runtime 选择
 
-Model Runtime 根据内置 Provider ID或自定义 Provider 的 `sdkType` 选择具体实现。Provider Runtime 再负责：
+Model Runtime 根据内置 Provider ID 或自定义 Provider 的 SDK 类型选择具体实现。Provider Runtime 再负责：
 
 - SDK 客户端构造；
 - Base URL 规范化；
@@ -263,7 +263,7 @@ Model Runtime 根据内置 Provider ID或自定义 Provider 的 `sdkType` 选择
 
 它可表达一个逻辑 Provider 下的多个真实 channel，也允许 fallback 时从 OpenAI API 切到 Anthropic、Vertex AI 等不同 `apiType`。这是当前代码中最接近完整渠道路由器的部分。
 
-但需要严格区分“框架能力”和“当前品牌配置”。[`packages/business/model-runtime/src/router-runtime-options.ts`](../../lobehub/packages/business/model-runtime/src/router-runtime-options.ts) 中开源的 `lobehubRouterRuntimeOptions.routers()` 直接返回空数组；[`packages/model-runtime/src/providers/lobehub/index.ts`](../../lobehub/packages/model-runtime/src/providers/lobehub/index.ts) 只是把这份配置交给 RouterRuntime。
+但需要严格区分“框架能力”和“当前品牌配置”。[`packages/business/model-runtime/src/router-runtime-options.ts`](../../lobehub/packages/business/model-runtime/src/router-runtime-options.ts) 中开源的 `lobehubRouterRuntimeOptions.routers()` 直接返回空数组；[`packages/model-runtime/src/providers/lobehub/index.ts`](../../lobehub/packages/model-runtime/src/providers/lobehub/index.ts) 只是把这份配置交给 Router 运行时。
 
 因此当前仓库能确认：
 
@@ -277,11 +277,11 @@ Model Runtime 根据内置 Provider ID或自定义 Provider 的 `sdkType` 选择
 
 一条 Provider 的 `apiKey` 可以是逗号分隔字符串。服务端 [`apps/server/src/modules/ModelRuntime/apiKeyManager.ts`](../../lobehub/apps/server/src/modules/ModelRuntime/apiKeyManager.ts) 的选择模式是：
 
-- 默认 `API_KEY_SELECT_MODE=random`：每次初始化时随机选一个；
-- `API_KEY_SELECT_MODE=turn`：按完整 Key 字符串维护轮询位置；
+- `API_KEY_SELECT_MODE` 默认 `random`：每次初始化时随机选一个；
+- `turn`：按完整 Key 字符串维护轮询位置；
 - KeyStore 以完整逗号字符串为缓存键。
 
-客户端 `ClientApiKeyManager` 固定为随机模式，没有接线允许用户切换到 `turn`。
+客户端 `ClientApiKeyManager` 固定为随机模式，没有接线允许用户切换到轮询模式。
 
 这只是请求分摊，不包含：
 
@@ -316,7 +316,7 @@ Model Runtime 根据内置 Provider ID或自定义 Provider 的 `sdkType` 选择
 
 Client 和 Server Agent Runtime 都使用这套策略。Provider 和模型在 `call_llm` 准备阶段已固定，重试不会跨 Provider 或跨模型。
 
-品牌 Provider `lobehub` 被列入 `noRetryProviders`，Client（`src/store/chat/agents/transports/ClientLLMTransport.ts`）和 Server Transport 都不会在 Agent Runtime 再自行重放该逻辑渠道；`resolveLLMMaxRetries`/`shouldRetryLLM` 保持默认 `maxRetries = 5`（`runtimeRetry.ts:1,30-33`）。结合 RouterRuntime 的 fallback 扩展面，可推断其意图是让品牌渠道自身处理一次请求内的路由；但真实策略未在开源 Router 配置中，不能继续推断具体 SLA 或算法。
+品牌 Provider `lobehub` 被列入 `noRetryProviders`，客户端（`src/store/chat/agents/transports/ClientLLMTransport.ts`）和 Server Transport 都不会在 Agent Runtime 再自行重放该逻辑渠道；重试次数与判定仍保持默认 `maxRetries = 5`（`runtimeRetry.ts:1,30-33`）。结合 Router 运行时的 fallback 扩展面，可推断其意图是让品牌渠道自身处理一次请求内的路由；但真实策略未在开源 Router 配置中，不能继续推断具体 SLA 或算法。
 
 还需注意：旧的或零散调用所用 `fetchSSE()` 本身没有这套业务级重试循环，不能把 Agent Runtime 的 5 次重试描述成所有 ModelRuntime 调用的统一保证。
 
@@ -330,7 +330,7 @@ Client 和 Server Agent Runtime 都使用这套策略。Provider 和模型在 `c
 - 健康探测结果参与请求调度；
 - 多 Base URL 加权负载均衡。
 
-RouterRuntime 提供了 `sortRouterOptions`、`shouldStopFallback`、`onRouteAttempt` 等扩展点，可以由商业包或部署侧实现健康降级、排序和记录，但仓库中的默认 `lobehub` 配置没有给出实现。
+Router 运行时提供了 option 排序、fallback 终止判定和 attempt 观测等扩展点，可以由商业包或部署侧实现健康降级、排序和记录，但仓库中的默认 `lobehub` 配置没有给出实现。
 
 第三方网关自身可能提供 load balancing 或 fallback，那属于上游服务能力。LobeHub 客户端只看到一个 Provider/Base URL 时，不应把上游内部路由写成客户端跨 Provider failover。
 
@@ -345,17 +345,17 @@ RouterRuntime 提供了 `sortRouterOptions`、`shouldStopFallback`、`onRouteAtt
 - Web Crypto 返回的最后 16 字节作为认证标签；
 - 数据库存储格式为 `iv:authTag:ciphertext` 的十六进制字符串。
 
-Provider 创建和更新时加密 `keyVaults`，读取 Provider 详情或 Runtime 状态时再解密。数据库静态泄露不会直接得到明文 Key，但应用服务器持有主密钥，且浏览器直连模式会获得运行时明文。
+Provider 创建和更新时加密该字段，读取 Provider 详情或 Runtime 状态时再解密。数据库静态泄露不会直接得到明文 Key，但应用服务器持有主密钥，且浏览器直连模式会获得运行时明文。
 
 ### 7.2 CLI 是管理入口，不是安全导入格式
 
-[`apps/cli/src/commands/provider.ts`](../../lobehub/apps/cli/src/commands/provider.ts) 支持 list、view、create、config、test、toggle、delete。`config` 可写入 API Key、Base URL、check model、Responses API 和浏览器请求设置。
+[`apps/cli/src/commands/provider.ts`](../../lobehub/apps/cli/src/commands/provider.ts) 支持 list、view、create、config、test、toggle、delete 等子命令。配置子命令可写入 API Key、Base URL、检测模型、Responses API 和浏览器请求设置。
 
 CLI 通过已认证的 tRPC 调用服务器，Key 在服务端入库前加密。它没有单独的 Provider 配置文件导入/导出协议，也没有多渠道批量迁移时的密钥重包封装。
 
 ### 7.3 全量导出包含 Provider 密文
 
-[`packages/database/src/repositories/dataExporter/index.ts`](../../lobehub/packages/database/src/repositories/dataExporter/index.ts) 的 `DATA_EXPORT_CONFIG` 明确包含 `aiProviders` 和 `aiModels`。导出器直接查询表行并移除 `userId`，没有解密或剔除 `keyVaults`。
+[`packages/database/src/repositories/dataExporter/index.ts`](../../lobehub/packages/database/src/repositories/dataExporter/index.ts) 的 `DATA_EXPORT_CONFIG` 明确包含 `aiProviders` 和 `aiModels`。导出器直接查询表行并移除 `userId`，没有解密或剔除凭据密文。
 
 这意味着：
 
@@ -363,9 +363,9 @@ CLI 通过已认证的 tRPC 调用服务器，Key 在服务端入库前加密。
 - 但包含可离线保存的 `key_vaults` 密文；
 - 用同一 `KEY_VAULTS_SECRET` 恢复数据库后可以继续解密；
 - 换了主密钥的另一实例无法直接使用这些凭据；
-- 恢复设计应同时备份数据库与 `KEY_VAULTS_SECRET`，并按同等敏感级别保护两者。
+- 恢复设计应同时备份数据库与主密钥，并按同等敏感级别保护两者。
 
-导入器对 `aiProviders` 使用保留 ID、冲突时 skip 的策略，对 `aiModels` 保留 `providerId + modelId` 关系。它没有对 Provider 密文做解密再加密，因此不是跨主密钥迁移工具。
+导入器对渠道表使用保留 ID、冲突时跳过的策略，对模型表保留 `providerId + modelId` 关系。它没有对 Provider 密文做解密再加密，因此不是跨主密钥迁移工具。
 
 工作区 API Key 与 Provider 凭据是两套独立机制：`api_keys` 表新增 `capability_scopes` 列（提交 `0c7e2c713`/`ee7b69d17`/`a9bf96d95`/`b0fbd5f18`），工作区 API Key 按成员权限收敛作用域，受限 Key 仍可访问 `/users/me`；本节的静态加密结论不涉及这类 Key。
 
@@ -385,18 +385,18 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
   -> 返回 ok / status / error
 ```
 
-持久化的是用户选择的 `checkModel`，不是检测结果。Web 的成功/错误只存在当前组件状态，CLI 直接输出结果；两者都没有写 Provider 健康度、连续失败次数、延迟 EWMA 或熔断状态。
+持久化的是用户选择的检测模型，不是检测结果。Web 的成功/错误只存在当前组件状态，CLI 直接输出结果；两者都没有写 Provider 健康度、连续失败次数、延迟 EWMA 或熔断状态。
 
 ### 8.2 运行时观测
 
 可观测性分成几层：
 
-- Agent Runtime 发布 `stream_retry`，UI 可显示重试进度；
+- Agent Runtime 发布 `stream_retry` 事件，UI 可显示重试进度；
 - Runtime 和 Transport 记录请求错误；
 - 连接检测带 trace 名称，可进入已有 tracing 链路；
-- RouterRuntime 可通过 `onRouteAttempt` 记录 option、channel ID、API type、耗时、成功和错误；
-- RouterRuntime 还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata；
-- `packages/model-runtime/src/core/providerDiagnostics.ts`（`ProviderResponseDiagnostics`，`appendRawProviderEvent`/`captureRawProviderResponse`）在 provider 边界捕获原始响应事件（有界记录、超限丢弃计数，避免污染 Redis 序列化），是 provider 层新增的诊断捕获点；`signatureScope.ts` 处理签名级（reasoning 等）的状态作用域。
+- Router 运行时可通过 `onRouteAttempt` 记录 option、channel ID、API type、耗时、成功和错误；
+- 它还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata；
+- `providerDiagnostics.ts` 中的 `ProviderResponseDiagnostics` 在 provider 边界捕获原始响应事件（有界记录、超限丢弃计数，避免污染 Redis 序列化），是 provider 层新增的诊断捕获点；`signatureScope.ts` 处理签名级（reasoning 等）的状态作用域。
 
 但这些信号默认没有形成普通 Provider 的健康调度闭环。观测到失败不等于后续请求会降低该渠道权重或熔断。
 
@@ -431,13 +431,13 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 
 ### 值得借鉴
 
-- 把模型身份稳定表示为 `providerId + modelId`，避免同名模型误路由；
+- 把模型身份稳定表示为 Provider ID 加模型 ID 的组合，避免同名模型误路由；
 - Provider、模型和工作区作用域分表，便于用户差量覆盖内置目录；
 - 用明确的 SDK Type 选择协议 Adapter，而不是从 URL 猜测协议；
 - 将不可重试认证/参数错误与 429、5xx、网络错误分类处理；
 - 重试过程发布结构化事件，让 UI 能解释当前状态；
 - 凭据数据库静态加密，并在更新时合并 OAuth token 等未出现在表单中的字段；
-- RouterRuntime 将路由选择、option fallback、停止条件、排序和 attempt 观测拆成独立扩展点。
+- Router 运行时将路由选择、option fallback、停止条件、排序和 attempt 观测拆成独立扩展点。
 
 ### 需要补强或谨慎复用
 
@@ -445,7 +445,7 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - 随机/轮询只做分摊，不能替代配额感知和熔断；
 - 不同 Transport 的 Runtime 生命周期使 retry 是否换 Key 不一致；
 - 连接检测不进入调度闭环，无法避免持续命中已知故障渠道；
-- `fetchOnClient` 会扩大凭据暴露面，应在 UI 和权限设计中明确提示；
+- 浏览器直连开关会扩大凭据暴露面，应在 UI 和权限设计中明确提示；
 - 全量导出绑定主密钥，跨实例恢复需要显式密钥迁移流程；
 - RouterRuntime 的扩展能力不应在缺少真实路由配置时被描述为现成高可用方案。
 

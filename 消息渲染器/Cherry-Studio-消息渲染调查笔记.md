@@ -17,7 +17,7 @@
 Cherry Studio 通过一套分层的消息 UI 运行时完成消息渲染，Markdown 只负责其中的正文呈现：
 
 1. 主进程经 IPC 发送 AI SDK `UIMessageChunk`。
-2. renderer 按 topic、execution 和 anchor 拆分流，并用 AI SDK `readUIMessageStream` 组装 `UIMessage.parts`；overlay 逻辑从 hook 抽成窗口级服务 `ExecutionStreamOverlayService`，组件卸载不再拆掉 reader。
+2. renderer 按 topic、execution 和 anchor 拆分流，用 AI SDK 的 `readUIMessageStream` 组装 `UIMessage.parts`；overlay 逻辑从 hook 抽成窗口级服务 `ExecutionStreamOverlayService` 后，组件卸载不再拆掉 reader。
 3. 当前流式快照以 overlay 形式覆盖数据库历史，持久化数据保持不变；分支草稿（awaiting-input 空叶子）以持久化行保存，不再属于渲染层临时态。
 4. 页面 adapter 将 Home、Agent 等业务能力注入统一的 `MessageListProvider`。
 5. `MessageList` 虚拟化消息组，将历史层与高频更新的 live tail 隔离。
@@ -106,7 +106,7 @@ Home adapter 承担的适配工作较多，将聊天页的删除、重试、翻�
 - `src/renderer/pages/agents/components/AgentSessionMessages.tsx`
 - `src/renderer/pages/agents/messages/agentMessageListAdapter.tsx:127`
 
-Agent 同样渲染统一的 `MessageList`。差异由 adapter 提供，包括：
+Agent 同样渲染统一的 MessageList，差异由 adapter 提供，包括：
 
 - Agent profile 和 session topic。
 - Agent 工具终止、定位和图片导出。
@@ -144,7 +144,7 @@ Agent 同样渲染统一的 `MessageList`。差异由 adapter 提供，包括：
 
 ### Cherry 自定义 data part
 
-定义于 `src/shared/data/types/uiParts.ts`（`CherryDataPartTypes`，`uiParts.ts:139-151`）：
+定义于 `src/shared/data/types/uiParts.ts:139-151`（`CherryDataPartTypes`）：
 
 - `data-error`
 - `data-translation`
@@ -156,9 +156,9 @@ Agent 同样渲染统一的 `MessageList`。差异由 adapter 提供，包括：
 - `data-knowledge-scope`
 - `data-clear`（上下文清理边界标记）
 - `data-code`
-- `data-retry`（模型重试/fallback 状态；**瞬时 part**——流式期间实时显示，`PersistenceListener` 在持久化前剥离，永不落库，`uiParts.ts:112-129`）
+- `data-retry`（模型重试/fallback 状态；**瞬时 part**——流式期间实时显示，持久化监听器在写库前剥离、永不落库，见 `uiParts.ts:112-129`）
 
-其中 `data-agent-task-event`、`data-knowledge-scope`、`data-clear` 等是隐藏状态，不直接进入聊天正文。
+其中 data-agent-task-event、data-knowledge-scope、data-clear 等是隐藏状态，不直接进入聊天正文。
 
 ### part metadata
 
@@ -170,7 +170,7 @@ Cherry 在 `providerMetadata.cherry` 下存储不同 part 的扩展信息：
 - file：内部文件 ID、composer file token 关联。
 - error：持久化的 AI 错误诊断。
 
-访问器 `readCherryMeta()` 会按 part type 用 Zod 验证 metadata，为读取过程提供明确的校验边界。不过，`MessagePartsRenderer` 中仍保留了局部未经验证的 `getCherryMeta()` 强制转换，相关约束尚未完全统一。
+访问器 `readCherryMeta()` 会按 part type 用 Zod 验证 metadata，为读取过程提供明确的校验边界。不过，部件渲染器中仍保留了局部未经验证的 `getCherryMeta()` 强制转换，相关约束尚未完全统一。
 
 ## 流式消息链路
 
@@ -194,24 +194,24 @@ anchor 用于区分同一 execution 中的不同 turn。同一模型 execution �
 
 - 注册监听后才请求 `ai.stream.attach`，避免 attach 瞬间遗漏 chunk。
 - 支持 Main 返回 buffered chunks，窗口重连时可回放。
-- `done`、`paused`、`error` 分别关闭对应 execution 分支。
+- done、paused、error 三种结束事件分别关闭对应 execution 分支。
 - 组件卸载时默认执行 detach，不会触发 abort；Main 可继续生成并持久化。
-- error 会先转成 `data-error` part 推入 live branch，再结束流。
+- error 会先转成 data-error part 推入 live branch，再结束流。
 
 ### 一次性 execution reader
 
-核心：`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`（窗口级服务；reader/快照/rAF 批处理均在此，从 `useExecutionOverlay` 抽出；`useExecutionOverlay.ts` 只是 React 绑定，`useExecutionOverlay.ts:1-94`）。
+核心：`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`。窗口级服务——reader、快照和 rAF 批处理都集中在此，从原 `useExecutionOverlay` hook 抽出；该 hook 现在只负责 React 绑定（`useExecutionOverlay.ts:1-94`）。
 
-overlay 生命周期按 transport `topicId` 引用计数：reader 只从挂载中的 consumer 启动（`syncExecutions`），组件卸载只释放引用、不拆 reader——路由/标签页切换期间 Main 继续生成，重挂载时同步恢复 live overlay；`refCount===0` 时自然结束的 execution 立即丢弃 overlay（落库行接管），LRU（`MAX_ENTRIES=32`）兜底泄漏条目并先取消 reader，避免截断流被报成成功完成；`settledKeys` 墓碑防止重挂载用陈旧集合重启已结束的 execution。
+overlay 生命周期按 transport 的 `topicId` 引用计数：reader 只从仍在挂载的消费方启动，组件卸载仅释放引用、不拆 reader——路由或标签页切换期间 Main 继续生成，重挂载时同步恢复 live overlay；引用计数归零时，自然结束的 execution 立即丢弃 overlay，由落库行接管；容量 32 的 LRU 兜底清理泄漏条目，且先取消 reader，避免截断的流被误报为成功完成；`settledKeys` 墓碑防止重挂载时用陈旧集合重启已结束的 execution。
 
-每个 execution 仍是一个一次性 `readUIMessageStream` reader，跨 turn 无状态。继续工具审批时，reader 用数据库当前 anchor message 作为 seed，以便新到的 tool output 合并到既有 tool input；seed 来自 consumer 当前提供的 DB 行（`getSeedMessages`），每次 reader 启动重新派生，不跨 turn 携带。
+每个 execution 仍是一次性 readUIMessageStream reader，跨 turn 无状态。继续工具审批时，reader 用数据库当前 anchor message 作为 seed，以便新到的 tool output 合并到既有 tool input；seed 来自消费方当前提供的 DB 行（`getSeedMessages`），每次 reader 启动重新派生，不跨 turn 携带。
 
 ### 按帧提交 overlay
 
-`ExecutionStreamOverlayService` 通过以下机制合并 chunk 引发的 React state 更新：
+该服务通过以下机制合并 chunk 引发的 React state 更新：
 
-- 最新 snapshot 先放入 `pendingSnapshots`（`{epoch, readerVersion, snapshot}`）。
-- 通过 `requestAnimationFrame`（`frameId`）合并同一帧内的更新。
+- 最新快照先放入 `pendingSnapshots`（携带 epoch、readerVersion 与快照本体）。
+- 通过 `requestAnimationFrame` 把同一帧内的更新合并成一次提交。
 - terminal frame 会同步 flush，保证最终画面先可见，再执行持久化交接。
 - epoch 与 readerVersion 防止 topic 切换、旧 reader 和待处理帧写回过期状态。
 
@@ -219,14 +219,14 @@ AI SDK 每处理一个 chunk 都会克隆整条消息。`shareSettledPartReferen
 
 ### history 与 overlay 的交接
 
-`src/renderer/components/chat/messages/stream/useStableMessagePartsLayers.ts`（配合 `useMessageStreamingLayers.ts` 产出 `streamingLayers`）
+核心文件 `src/renderer/components/chat/messages/stream/useStableMessagePartsLayers.ts` 配合 `useMessageStreamingLayers.ts` 产出 streamingLayers 层。
 
-`useStableMessagePartsLayers()` 生成两层 map：
+该 hook 生成两层 map：
 
 - `historyPartsByMessageId`：数据库历史加翻译 overlay，不接收高频 execution 快照。
 - `partsByMessageId`：live execution parts 覆盖 history，用于当前可变尾部。
 
-两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。`MessageList.tsx:238-247` 的 `firstLiveGroupIndex` 与 `liveMessageIds`（`streamingLayers.liveMessageIds`）把同一批消息切成历史段/live 段。
+两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。`MessageList.tsx:238-247` 依据 `firstLiveGroupIndex` 和 liveMessageIds 把同一批消息切成历史段与实时段。
 
 ## 列表与消息骨架
 
@@ -248,7 +248,7 @@ AI SDK 每处理一个 chunk 都会克隆整条消息。`shareSettledPartReferen
 
 ### 消息分组
 
-`MessageList` 先把平铺消息稳定地分组成 user/assistant group，并支持：
+MessageList 先把平铺消息稳定地分组成 user/assistant group，并支持：
 
 - 单模型与多模型 sibling。
 - horizontal、vertical、fold、grid 多模型布局。
@@ -291,10 +291,10 @@ MessageList
 
 `MessageList.tsx:112-127` 明确建立两个边界：
 
-- `MessageHistoryLayer`：memo 封闭的历史，使用 `historyPartsByMessageId`。
+- `MessageHistoryLayer`：memo 封闭的历史，使用 historyPartsByMessageId 层。
 - `MessageLiveLayer`：只给 mutable tail 接收逐帧 snapshot。
 
-`firstLiveGroupIndex` 之前的消息组不会因最后一条消息继续输出而重渲染。历史区与活动区的这层隔离是性能设计的关键。
+firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而重渲染。历史区与活动区的这层隔离是性能设计的关键。
 
 ## parts 布局投影
 
@@ -314,7 +314,7 @@ MessageList
 
 ### completed message
 
-`projectCompletedMessageParts()`（第 256 行）把最终消息分成：
+`projectCompletedMessageParts()`（`messagePartLayouts.ts:256`）把最终消息分成：
 
 - `historyEntries`：推理和工具过程。
 - `resultEntries`：最终正文及相邻图片、文件、视频或错误。
@@ -324,7 +324,7 @@ MessageList
 
 ### 相邻 part 分组
 
-`MessagePartsRenderer` 还会把：
+投影层还会把相邻 part 分组：
 
 - 连续图片合成 gallery。
 - 连续工具合成 `ToolBlockGroup`。
@@ -364,7 +364,7 @@ MessageList
 
 - 从未参与流式输出的历史内容使用 `Markdown`，即 Streamdown `mode="static"`。
 - 当前输出使用 `StreamingMarkdown`，开启 incomplete Markdown repair 和 fade-in。
-- 一个 block 只要曾经 streaming，结束后仍保持 `StreamingMarkdown` 组件类型，但关闭动画和 incomplete repair。
+- 一个 block 只要曾经 streaming，结束后仍保持 StreamingMarkdown 组件类型，但关闭动画和 incomplete repair。
 
 最后一点避免 terminal frame 从 StreamingMarkdown 切成 Markdown 时重建整棵 React 子树，从而保护选择区、focus 和 block 本地状态。
 
@@ -391,7 +391,7 @@ MessageList
 
 ### React component overrides
 
-`useChatMarkdownComponents.tsx` 已拆分：当前映射集中在 `ChatMarkdownRenderers.tsx` + `ChatMarkdownRenderContext.tsx`（`src/renderer/components/chat/messages/markdown/`），citation 相关（`CitationSup.tsx`/`CitationTooltip.tsx`）负责行内引用展示：
+`useChatMarkdownComponents.tsx` 已拆分：当前映射集中在同目录的 `ChatMarkdownRenderers.tsx` 与 `ChatMarkdownRenderContext.tsx`。citation 展示由 `CitationSup.tsx` / `CitationTooltip.tsx` 负责：
 
 - `a` -> citation tooltip 或普通 link hover card。
 - `code` -> inline code、file path、CodeBlockView 或 HTML artifact。
@@ -426,13 +426,13 @@ raw HTML parse
 - 保留 citation 与 composer token 所需的少量 data attribute；
 - 对 ID 加 `user-content-` 前缀。
 
-`ChatMarkdown` 会检测 `<style>` 并注册 `MarkdownShadowDomRenderer`，但当前 schema 在 React component mapping 之前 strip 掉 `style`，因此这条 Shadow DOM 路径在现有管线下不可达（注释与实现不一致）。
+ChatMarkdown 会检测 `<style>` 并注册 `MarkdownShadowDomRenderer`，但当前 schema 在组件映射前就剥离了 style，因此这条 Shadow DOM 路径在现有管线下不可达（注释与实现不一致）。
 
 MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki 生成的高亮 HTML；原始输入先经 Shiki tokenizer 生成待注入的 HTML。
 
 ### HTML artifact 预览
 
-Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:10` 组件默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（`HTML_PREVIEW_IFRAME_SANDBOX`），iframe 使用 `srcDoc`；聊天内 artifact 的实际调用点会按用途覆盖——`HtmlArtifactView` 的 `AdaptiveHtmlPreview`（fragment/未同意交互的 document）显式传 `sandbox="allow-same-origin"` + 严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`HtmlArtifactView.tsx:465-471`），同意交互后的 document 走沙箱 webview（安全细节与运行分级见生成式输出与运行时笔记）。Main window 在 `windowRegistry.ts:88` 配置 `webSecurity: false`、`sandbox: false`、`webviewTag: true`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:10` 的默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（常量 `HTML_PREVIEW_IFRAME_SANDBOX`），iframe 通过 `srcDoc` 注入内容。聊天内 artifact 的实际调用点会按用途覆盖默认值：`HtmlArtifactView` 的 `AdaptiveHtmlPreview` 对 fragment 或未同意交互的 document 显式传 `sandbox="allow-same-origin"` 与严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`HtmlArtifactView.tsx:465-471`）；同意交互后的 document 走沙箱 webview（安全细节与运行分级见生成式输出与运行时笔记）。主窗口在 `windowRegistry.ts:88` 关闭 `webSecurity` 与 `sandbox`、开启 `webviewTag`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
 
 ### 平滑文本播放
 
@@ -461,7 +461,7 @@ Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`�
 - `output-error` -> `error`
 - denied/cancelled -> `cancelled`
 
-它还结合 tool name、metadata、MCP 命名规则和 provider metadata 判断工具类型：`mcp`、`builtin` 或 `provider`。
+它还结合 tool name、metadata、MCP 命名规则和 provider metadata 判断工具类型为 mcp、builtin 或 provider。
 
 ### 分派层
 
@@ -503,10 +503,10 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 已看到的测试覆盖包括：
 
-- `useExecutionOverlay` 的多 execution、seed、terminal、清理和 overlay 行为。
-- `TopicStreamSubscription` 与 `IpcChatTransport`。
+- useExecutionOverlay 的多 execution、seed、terminal、清理和 overlay 行为。
+- TopicStreamSubscription 与 IpcChatTransport。
 - live/completed part layout 投影。
-- `MessagePartsRenderer` 的正文、reasoning、工具和边界情况。
+- MessagePartsRenderer 的正文、reasoning、工具和边界情况。
 - MessageVirtualList、滚动状态机、位置记忆和平滑滚动。
 - Markdown、StreamingMarkdown、代码块、链接、表格、citation。
 - sanitize schema 与 SVG plugin。
@@ -526,7 +526,7 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 ### 优点
 
-- 消息 UI 有本地 `README.md`，职责和 adapter 规则清晰。
+- 消息 UI 有本地 README 文档，职责和 adapter 规则清晰。
 - 数据协议、布局投影和 leaf renderer 分层明确。
 - Home 与 Agent 正在收敛到一个消息组件族。
 - 关键性能约束通常配有说明设计原因的注释和测试。
@@ -537,16 +537,16 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 - `MessagePartsRenderer.tsx` 已超过 1,400 行、约 50KB，同时承担 part 分组、投影衔接、工具缓存、展示决策和渲染分派。
 - `homeMessageListAdapter.tsx` 接近业务 facade，集中处理大量动作；后续可考虑按 capability 拆分内部 hook，同时保留统一的 Provider contract。
 - agent/home/message runtime 正处于 v2 重构期，目录仍位于 shared components，而架构文档计划最终迁到 `features/chat`。
-- `getCherryMeta()` 的未验证读取与共享层 `readCherryMeta()` 并存。
+- 未验证的 getCherryMeta 读取与共享层 readCherryMeta 并存。
 - HTML artifact 与普通 Markdown 的防护强度不一致。
 
 ## 扩展指南
 
 ### 新增普通显示 part
 
-1. 在 `src/shared/data/types/uiParts.ts` 增加 data shape 和 `CherryDataPartTypes` 条目。
+1. 在 `src/shared/data/types/uiParts.ts` 增加 data shape 和 CherryDataPartTypes 条目。
 2. 判断它是 result、process、hidden 还是 side channel。
-3. 更新 `messagePartLayouts.ts` 的集合或投影规则。
+3. 更新 messagePartLayouts.ts 的集合或投影规则。
 4. 在 `MessagePartsRenderer.renderPart()` 增加 leaf component。
 5. 为 active、completed、empty、error 和相邻 part 顺序添加表驱动测试。
 

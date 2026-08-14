@@ -22,26 +22,26 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 
 ## 系统边界与总体装配
 
-**界面栈。** Vue 3 + Pinia + `@pinia/colada` + vue-router（hash history）+ vue-i18n；样式 Tailwind CSS v4 + tailwindcss-animate + tw-animate-css；
+**界面栈。** Vue 3 + Pinia + @pinia/colada + vue-router（hash history）+ vue-i18n；样式 Tailwind CSS v4 + tailwindcss-animate + tw-animate-css；
 
-组件层 = `src/shadcn`（shadcn-vue 原始组件，底层 Reka UI reka-ui@^2.10.1）+ `src/dc-ui`（业务公共壳：DcButton/DcConfirmDialog/DcEmpty/DcSkeleton/DcSheetPanel/StatusPill/InlineError 等）+ 业务组件目录。无 Element Plus/antd/Naive；
+组件层 = src/shadcn（shadcn-vue 原始组件，底层 Reka UI reka-ui@^2.10.1）+ src/dc-ui（业务公共壳：DcButton、DcConfirmDialog、DcEmpty、DcSkeleton、DcSheetPanel、StatusPill、InlineError 等）+ 业务组件目录。无 Element Plus/antd/Naive；
 
-无 framer-motion。`package.json` 依赖确认 Reka UI、vue-sonner、@vueuse/core、@iconify/vue、vue-virtual-scroller、vuedraggable、tippy.js 等在列，但**依赖清单不等于使用证据**，下文的库使用均有源码接入点。
+无 framer-motion。package.json 依赖确认 Reka UI、vue-sonner、@vueuse/core、@iconify/vue、vue-virtual-scroller、vuedraggable、tippy.js 等在列，但**依赖清单不等于使用证据**，下文的库使用均有源码接入点。
 - **渲染入口装配**（`src/renderer/src/main.ts:14-44`）：`bootstrap()` 先 await createRendererI18n 并把 document.documentElement.dir 设为 rtl/auto（:20），随后才 createApp + Pinia + PiniaColada（staleTime: 30_000、gcTime: 300_000，注释说明 renderer 数据走 IPC、保持热缓存，:27-33）+ router + i18n，mount('#app') 后再 setTimeout 预载图标（:39-43）。
 
   **挂载前没有主题内联脚本**（见第 4 节）。
 
-**应用壳。** `App.vue:6` → `ChatMainApp.vue`。
+**应用壳。** App.vue → ChatMainApp.vue。
 
-应用壳依次装入 TooltipProvider、标题栏、侧栏和主路由。路由在启动状态就绪后才渲染；其后统一挂载消息框、MCP 交互弹窗、通知 Host、文本菜单、翻译浮层和 Spotlight 等全局浮层。（`App.vue:537-573`）
+应用壳依次装入 TooltipProvider、标题栏、侧栏和主路由。路由在启动状态就绪后才渲染；其后统一挂载消息框、MCP 交互弹窗、通知 Host、文本菜单、翻译浮层和 Spotlight 等全局浮层，装配见 `App.vue:537-573`。
 
-工具提示、主题/语言投影、语义通知订阅、快捷键/深链 IPC 也都在壳层接通（useAppIpcRuntime :381-421、主题 watch :107-126）。
+工具提示、主题/语言投影、语义通知订阅、快捷键/深链 IPC 也都在壳层接通，相关入口见 `App.vue:381-421,107-126`。
 
-**多窗口与多入口。** 同一 `src/renderer/src` 代码树被多个入口复用——主聊天窗与设置窗各挂自己的 NotificationHost（`ChatMainApp.vue:560` 与 `src/renderer/settings/App.vue:88`）；
+**多窗口与多入口。** 同一 src/renderer/src 代码树被多个入口复用——主聊天窗与设置窗各挂自己的 NotificationHost（`ChatMainApp.vue:560` 与 `src/renderer/settings/App.vue:88`）；
 
-悬浮聊天窗加载的是**同一个 chat-main index.html 的 `#/chat` 路由**（`src/main/desktop/window/FloatingChatWindow.ts:255-265`，tabPresenter.registerFloatingWindow 注册 webContents 桥）；
+悬浮聊天窗加载的是**同一个 chat-main index.html 的 #/chat 路由**（`src/main/desktop/window/FloatingChatWindow.ts:255-265`，由 tabPresenter 注册 webContents 桥）；
 
-另有 `src/renderer/floating`（悬浮按钮，自建轻量 Vue 根，`floating/main.ts:19-24`，主题经 `floatingButtonAPI.getTheme()` 独立拉取）与 `src/renderer/browser-overlay`（浏览器浮层）两个入口。
+另有 src/renderer/floating（悬浮按钮，自建轻量 Vue 根，`floating/main.ts:19-24`，主题经 floatingButtonAPI 独立拉取）与 src/renderer/browser-overlay（浏览器浮层）两个入口。
 
 跨窗口同步走主进程事件广播（主题/语言/设置变更事件），运行时状态（session busy/streaming）为窗口内内存（见 ChatUI 笔记 §1）。
 
@@ -51,44 +51,44 @@ Toast 由 renderer 模块级 NotificationManager 持有（不依赖组件树）�
 
 ## 1. 界面栈、公共组件与状态所有权
 
-- **shadcn 原始层**（`src/shadcn/components/ui/*`，49 个目录）：Dialog/AlertDialog/Popover/DropdownMenu/ContextMenu/Tooltip/Sheet/Tabs/Select 等均为 Reka UI 薄封装（例如 `dialog/DialogContent.vue:31-52` 就是 DialogPortal + DialogOverlay + DialogContent + 默认关闭按钮 + Tailwind 动画类）。
+- **shadcn 原始层**（src/shadcn/components/ui/*，49 个目录）：Dialog、AlertDialog、Popover、DropdownMenu、ContextMenu、Tooltip、Sheet、Tabs、Select 等均为 Reka UI 薄封装（例如 `dialog/DialogContent.vue:31-52` 就是 Portal、遮罩、内容、默认关闭按钮和 Tailwind 动画类）。
 
   Reka UI 内部的 Esc、遮罩点击、focus trap、动画、`data-[state]` 类均属依赖库内部行为，本次未下钻 node_modules，一律标为未核实。
-- **dc-ui 业务壳**（`src/dc-ui/components`，17 个组件目录）：DcButton/DcCopyButton、DcConfirmDialog、DcEmpty、DcSkeleton、DcSheetPanel、StatusPill、ToggleRow、DcTooltip/DcPopover、SectionCard、InlineError、Form/FormActions、Badge、DropdownActionItem、DcToast。
+- **dc-ui 业务壳**（src/dc-ui/components，17 个组件目录）：包含按钮、确认框、空态、骨架、侧面板、状态徽标、提示、表单和 DcToast 等公共组件。
 
-  其中 DcToast（`src/dc-ui/components/toast/DcToast.ts:19-24`）是 notifyRenderer 的 success/info/warning/error 门面，但**全仓库检索（src 下所有 .vue/.ts）零消费**，仅被自己的 index.ts 引用——属于已导出未接入的过渡组件；
+其中 DcToast（`src/dc-ui/components/toast/DcToast.ts:19-24`）是 notifyRenderer 的 success、info、warning、error 门面，但**全仓库检索（src 下所有 .vue/.ts）零消费**，仅被自己的 index.ts 引用——属于已导出未接入的过渡组件；
 
-  实际业务全部直呼 `@renderer-notifications/rendererNotificationPort` 的 notifyRenderer（约 33 个文件命中）。
+实际业务全部直呼 @renderer-notifications/rendererNotificationPort 的 notifyRenderer（约 33 个文件命中）。
 
-**状态所有权模式。** 通知——renderer 模块级单例 rendererNotificationManager（`rendererNotificationRuntime.ts:9-13`），命令入口与渲染 viewport 共享同一 store；主题——主进程权威 + renderer Pinia store 订阅投影；
+**状态所有权模式。** 通知由 renderer 模块级单例 rendererNotificationManager 持有（`rendererNotificationRuntime.ts:9-13`），命令入口与渲染 viewport 共享同一 store；主题由主进程持有权威状态，renderer Pinia store 订阅投影；
 
-侧栏/侧边面板——Pinia store，宽度与折叠态经 useStorage 落 localStorage（见第 5 节）；全局确认对话框——主进程 DialogService（见第 2 节）。
+侧栏/侧边面板使用 Pinia store，宽度与折叠态经 useStorage 落 localStorage（见第 5 节）；全局确认对话框由主进程 DialogService 持有状态（见第 2 节）。
 
 ## 2. 弹窗、浮层与菜单
 
 ### 2.1 三类弹窗消费方式
 
-1. **全局命令式确认 MessageDialog**：主进程 DialogService（`src/main/desktop/dialog.ts:32-66`）`showDialog()` 生成 DialogRequest（nanoid id、按钮、可选 timeout），经 dialog.requested 事件发给当前活动窗口；
+1. **全局命令式确认 MessageDialog**：主进程 DialogService（`src/main/desktop/dialog.ts:32-66`）的发送入口生成请求（含 nanoid、按钮和可选超时），经 dialog.requested 事件发给当前活动窗口；
 
-renderer `stores/dialog.ts` 收事件后驱动 `MessageDialog.vue`（shadcn AlertDialog 呈现，`MessageDialog.vue:2-49`）。特性：同一窗口同时只有一个 pending 对话框（重复调用会先对旧请求 handleError）；
+renderer 的对话框 store 收事件后驱动 MessageDialog（shadcn AlertDialog 呈现，`MessageDialog.vue:2-49`）。同一窗口同时只有一个 pending 对话框，重复调用会先处理旧请求；
 
-`timeout > 0` 且有默认按钮时倒计时（100ms 步进）到期自动按默认键提交（`stores/dialog.ts:23-34`）；按钮文本默认按 i18n 键翻译（i18n 标志）。消费方示例：useMessageActions 的删除确认经 DcConfirmDialog（页面内），而知识库索引重建等主进程侧场景经 MessageDialog。
-2. **页面内业务确认 DcConfirmDialog**（`src/dc-ui/components/confirm-dialog/DcConfirmDialog.vue:55-90`）：包 shadcn AlertDialog + 自研 AlertDialogAsyncAction（`src/shadcn/components/ui/alert-dialog/AlertDialogAsyncAction.vue`，把动作按钮包成 Button 组件）；
+当 timeout 大于 0 且有默认按钮时，倒计时以 100ms 步进，到期自动提交默认键（`stores/dialog.ts:23-34`）；按钮文本默认按 i18n 键翻译。消费方示例：useMessageActions 的删除确认经 DcConfirmDialog（页面内），知识库索引重建等主进程场景经 MessageDialog。
+2. **页面内业务确认 DcConfirmDialog**（`src/dc-ui/components/confirm-dialog/DcConfirmDialog.vue:55-90`）：包 shadcn AlertDialog，并用自研异步动作组件封装按钮；
 
-props 支持 danger/confirmLabel/busy（内嵌 Spinner）/disabledConfirm。ChatPage 删除消息确认即此组件（`ChatPage.vue:302-312`，状态 pendingDeleteMessageId 在 useMessageActions 内，`useMessageActions.ts:59`）。
+该组件支持 danger、确认文案、忙碌态和禁用确认。ChatPage 删除消息确认即此组件，状态 pendingDeleteMessageId 由 useMessageActions 持有（`ChatPage.vue:302-312`、`useMessageActions.ts:59`）。
 3. **组件内 Dialog**：图片全屏查看（`MessageBlockImage.vue:31-63`）、fork 确认（`MessageItemAssistant.vue:202-218`，legacy 路径）等，直接使用 shadcn Dialog 原始件。
 
 ### 2.2 层级、Portal 与关闭机制
 
-**Portal。** shadcn DialogContent 经 DialogPortal 投到 body（`dialog/DialogContent.vue:31`）；Spotlight 自行 `Teleport to="body"`（`SpotlightOverlay.vue:2`）；SidePanel 全屏模式不投 body，直接在布局内提升 `z-index: var(--dc-z-sidepanel)`（`ChatSidePanel.vue:167-171`）。
+**Portal。** shadcn DialogContent 经 Portal 投到 body（`dialog/DialogContent.vue:31`）；Spotlight 也自行传送到 body（`SpotlightOverlay.vue:2`）；SidePanel 全屏模式不投 body，而是在布局内提升层级（`ChatSidePanel.vue:167-171`）。
 
-**z-index 契约。** `style.css:134-146` 定义统一堆叠刻度 `--dc-z-*`（base 0 < sticky 10 < float 20 < sidepanel 30 < popover 50 < spotlight 90 < modal 100 < toast 1000），注释明确"tooltip/popover 用 --dc-z-popover，永远不用 --dc-z-toast"。
+**z-index 契约。** `style.css:134-146` 定义统一堆叠刻度（base 0 < sticky 10 < float 20 < sidepanel 30 < popover 50 < spotlight 90 < modal 100 < toast 1000），并规定 tooltip/popover 使用 popover 层级，不能使用 toast 层级。
 
-shadcn 原始 Dialog 默认 z-50（等价 --dc-z-popover），PromptParamsDialog 显式提到 `--dc-z-modal`（100）；`--dc-z-toast`（1000）由 NotificationHost 消费（`NotificationHost.vue:39`）。
+shadcn 原始 Dialog 默认 z-50（等价 popover 层级），PromptParamsDialog 显式使用 modal 层级（100）；toast 层级为 1000，由 NotificationHost 消费（`NotificationHost.vue:39`）。
 
 **Esc / 遮罩 / 焦点。** shadcn Dialog/AlertDialog 的 Esc 关闭、遮罩点击、焦点陷阱与归还均来自 Reka UI 默认行为，封装层未覆盖（`dialog/DialogContent.vue` 无 @escape-key-down 等透传），**Reka 内部行为未下钻，不写成已确认事实**。
 
-Spotlight 是自实现：Esc/ArrowUp/Down/Home/End/Enter 在 handleKeydown 处理（`SpotlightOverlay.vue:201-240`），@mousedown.self 点外层关闭（:8），打开时 focusInput 聚焦输入框（:143-148），无 focus trap（Tab 可穿透，未验证实际影响）。
+Spotlight 是自实现：键盘导航由键盘处理器负责（`SpotlightOverlay.vue:201-240`），点击外层关闭，打开时聚焦输入框（同文件 :8、:143-148），无 focus trap（Tab 可穿透，未验证实际影响）。
 
 应用级还有一个 window keydown Esc 处理器，仅用于关闭浮窗聊天窗（`ChatMainApp.vue:424-428` handleEscKey → windowClient.closeFloatingCurrent）。
 
@@ -102,9 +102,9 @@ Spotlight 是自实现：Esc/ArrowUp/Down/Home/End/Enter 在 handleKeydown 处�
 
 托盘菜单与浮窗按钮菜单同样走主进程 Menu（见第 7 节）。
 
-**Renderer 自绘右键菜单（Reka ContextMenu）。** 消息助手气泡（`MessageItemAssistant.vue:1-200` 新路径）、图片（`ImageActionContextMenu.vue:3-15`，复制/保存，经 useImageActions）、工作区文件树（`WorkspaceFileNode.vue:4-45`）。
+**Renderer 自绘右键菜单（Reka ContextMenu）。** 消息助手气泡、图片和工作区文件树分别接入该路径（`MessageItemAssistant.vue:1-200`、`ImageActionContextMenu.vue:3-15`、`WorkspaceFileNode.vue:4-45`）。
 
-注意 MessageItemAssistant 的 useLegacyActions 默认 `true`（`MessageItemAssistant.vue:367`），默认路径仍是 legacy 行为（无 Reka 右键菜单，handleContextMenuOpen 直接 return，:592-597）；
+注意 MessageItemAssistant 的 useLegacyActions 默认值为 `true`（`MessageItemAssistant.vue:367`），因此默认仍走 legacy 行为，不启用 Reka 右键菜单（同文件 :592-597）；
 
 `MessageListRow.vue:36` 显式传 `use-legacy-actions="false"` 才启用 ContextMenu 路径。消息正文选中文本的"复制/引用"等操作在两种路径下的差异未逐一验证。
 
@@ -118,21 +118,21 @@ Spotlight 是自实现：Esc/ArrowUp/Down/Home/End/Enter 在 handleKeydown 处�
 
 `NotificationHost.vue:44-58` 每窗口挂一个：位置 top-right、visible-toasts: 2、expand: true、gap 10、close-button: false、主题/方向/container-aria-label 透传，主窗口 top offset 96、设置窗 52（:15），宽度 min(356px, calc(100vw - 32px))，样式变量映射到 `--dc-notification-*` 与 `--popover` 等 token（:22-40）。
 
-业务侧经 `rendererNotificationPort.ts:5-16` 的 notifyRenderer(request) 入队。
-2. **管理层 = NotificationManager**（`src/renderer/services/notifications/notificationManager.ts:64-555`）：请求归一化（`notificationRequest.ts`）→ 按 identity 聚合（同 identity 二次 notify 合并计数/成员，:204-251，contract 变化抛错）→ 交仲裁器。
+业务侧经 rendererNotificationPort 的 notifyRenderer 入队（`rendererNotificationPort.ts:5-16`）。
+2. **管理层 = NotificationManager**（`src/renderer/services/notifications/notificationManager.ts:64-555`）：请求先归一化，再按 identity 聚合，最后交给仲裁器；同一 identity 的 contract 变化会抛错（:204-251）。
 
 **瞬态仲裁**（`notificationArbitration.ts:23-133`）：单 active + 单 candidate；新通知优先于 active 则抢占（旧 toast 以 preempted 关闭），否则 warning/error 降为 candidate（8s 新鲜度，到期丢弃），success/info 低优先级直接关闭（记录 diagnostic）。
 
 **持久仲裁**（:135-298）：actionable 队列容量 3、TTL 10 分钟、按优先级+顺序排序；progress 按 operationId 单例、可被 actionable 抢占；progress 手动关闭是 suppress 而非移除（:185-196）。
 
-**策略层**（`notificationPolicy.ts` + `src/shared/notifications/notificationPolicy.ts:15-36`）：displayBudget 2.4s/4s/6s/8s、maxLifetime 15s/30s/45s/60s（success/info/warning/error）；
+**策略层**（`src/shared/notifications/notificationPolicy.ts:15-36`）：按 success、info、warning、error 分别配置展示预算 2.4s/4s/6s/8s 和最长生命周期 15s/30s/45s/60s；
 
 success/info 无 key 时用 sonner 原生 toast（content: 'native'），带 key 或 warning/error 用托管组件。
-3. **呈现层 = SonnerNotificationPresenter**（`sonnerNotificationPresenter.ts:14-72`）：native 内容走 `toast.success/info`（warning/error 无 native，:71 抛错），托管内容 toast.custom(ManagedNotificationToast)。
+3. **呈现层 = SonnerNotificationPresenter**（`sonnerNotificationPresenter.ts:14-72`）：native 内容走 Sonner 原生方法，托管内容走自定义 Toast；warning/error 没有 native 路径（:71）。
 
-`ManagedNotificationToast.vue` 订阅 ObservableNotificationRecord（:18-21），按 kind 显示图标/颜色、occurrence ×N 徽标、pending +N 徽标、action 按钮（点击防重入、失败内联提示、成功后关闭）、progress 进度条（indeterminate 动画）；
+ManagedNotificationToast 订阅通知记录（:18-21），按 kind 显示图标和颜色，并提供聚合计数、排队计数、action 按钮及 progress 进度条；
 
-aria：error/warning/actionable 为 `role="alert"`，其余 `role="status"`（:103-107），progress 有完整 `role="progressbar"`（:178-183），含 prefers-reduced-motion 关闭动画（:415-421）。
+aria 语义按通知重要性分级：error、warning 和 actionable 使用 `role="alert"`，其余使用 `role="status"`；progress 使用 `role="progressbar"`，并有 prefers-reduced-motion 动画关闭处理（:103-107、:178-183、:415-421）。
 
 **默认时长由展示预算 + sonner lifecycle 控制，error/warning 的展示预算为 6s/8s，不是"永不消失"**（与 Cherry 的 error 常驻不同）。
 
@@ -140,29 +140,29 @@ aria：error/warning/actionable 为 `role="alert"`，其余 `role="status"`（:1
 
 - 主进程 WindowNotificationRouter 维护 episode 注册表。MCP、Provider 和数据库修复等语义事件通过 occur/recover 进入路由，再按窗口能力与焦点状态选择 main 或 settings 目标，并通过 IPC 投递。（`src/main/app/composition.ts:671-712`）
 
-  renderer 侧 SemanticNotificationController（`semanticNotificationController.ts:56-114`）把 episode 映射回 NotificationManager 请求（含 action、ack、recover 绑定），如 databaseSecurity.repairSuggested 是 retention: 'until-resolved' 的 actionable，点动作开设置窗数据库修复页。
+  renderer 侧 SemanticNotificationController（`semanticNotificationController.ts:56-114`）把 episode 映射回通知请求，并绑定 action、ack 和 recover；例如 databaseSecurity.repairSuggested 是 retention 为 until-resolved 的 actionable，点动作开设置窗数据库修复页。
 
   这是 renderer 内通知与"主进程跨窗口定向通知"的唯一对接层。
 
-**系统通知（Electron Notification）是另一条独立通道。** `src/main/desktop/notification.ts:14-48` NotificationService.showNotification（受 notificationsEnabled 开关控制），点击经 appRuntime.systemNotificationClicked 广播，renderer `useAppIpcRuntime.ts:63-65` 收事件并跳转到对应会话（`ChatMainApp.vue:404-419`）。
+**系统通知（Electron Notification）是另一条独立通道。** NotificationService 受 notificationsEnabled 开关控制，点击后由主进程广播，renderer 接收事件并跳转到对应会话（`src/main/desktop/notification.ts:14-48`、`useAppIpcRuntime.ts:63-65`、`ChatMainApp.vue:404-419`）。
 
 业务触发点在主进程侧（远程/循环事件等），renderer 不直接发系统通知。
 
 ### 3.3 加载、空状态与错误反馈
 
-**聊天首屏加载。** `ChatPage.vue:111-122` isSessionViewPreparing 时铺 ChatSessionSkeleton（`ChatSessionSkeleton.vue`，三条伪消息骨架，容器 `aria-hidden="true"`，外层 `role="status" aria-live="polite" aria-busy="true"`），层级 `--dc-z-sticky`。
+**聊天首屏加载。** isSessionViewPreparing 时铺 ChatSessionSkeleton（三条伪消息骨架，容器 `aria-hidden="true"`，外层 `role="status" aria-live="polite" aria-busy="true"`），层级为 sticky（`ChatPage.vue:111-122`）。
 
 **历史翻页加载/失败。** 顶部粘性 pill（`ChatPage.vue:53-85`）：isLoadingHistory 显示 common.loading；historyLoadError 显示错误 + 重试按钮（`role="alert"`）。
 
-**通用骨架/空态。** DcSkeleton（`src/dc-ui/components/skeleton/DcSkeleton.vue:33`）与 DcEmpty（`src/dc-ui/components/empty/DcEmpty.vue:25-47`，图标+标题+描述+action slot、虚线边框）是 dc-ui 公共件；DcEmpty 在设置/插件页等 11 个文件消费。
+**通用骨架/空态。** DcSkeleton 与 DcEmpty 是 dc-ui 公共件，后者提供图标、标题、描述和 action slot（`DcSkeleton.vue:33`、`DcEmpty.vue:25-47`）；DcEmpty 在设置/插件页等 11 个文件消费。
 
 Spotlight 空态/加载态用 Spinner + search-x 图标（`SpotlightOverlay.vue:91-107`）。图片加载中在 `MessageBlockImage.vue:23-25` 用 Spinner。
 
-**错误边界。** renderer **未找到**应用级 app.config.errorHandler、onErrorCaptured、window.onerror/unhandledrejection（搜索范围：`main.ts`、`App.vue`、`ChatMainApp.vue`、`composables/`、`foundation/`）。
+**错误边界。** renderer **未找到**应用级错误处理器、捕获钩子或 window 级错误监听（搜索范围：main.ts、App.vue、ChatMainApp.vue、composables/、foundation/）。
 
-错误反馈是分场景的：消息执行错误走消息块 `MessageBlockError.vue`（可折叠、`aria-expanded/aria-controls`）；设置页表单错误走 DcInlineError；瞬态操作失败走 `notifyRenderer({kind:'error'})` toast（33 个消费文件）。
+错误反馈是分场景的：消息执行错误走可折叠的 MessageBlockError（带 `aria-expanded/aria-controls`）；设置页表单错误走 DcInlineError；瞬态操作失败走 error toast（33 个消费文件）。
 
-`bootstrap().catch` 只打 console.error（`main.ts:46-48`）。即"组件级错误呈现有、应用级错误边界无"。
+bootstrap 的 catch 只打 console.error（`main.ts:46-48`）。即“组件级错误呈现有、应用级错误边界无”。
 
 **加载中的阻塞反馈。** 发送中 Composer 前置准备条 `role="status" aria-live="polite"` + Spinner（`ChatInputBox.vue:32-41`）；设置页路由切换 aria-busy + Spinner（`settings/App.vue:50-59`）。
 
@@ -170,20 +170,20 @@ Spotlight 空态/加载态用 Spinner + search-x 图标（`SpotlightOverlay.vue:
 
 ### 4.1 权威源与链路
 
-**主进程权威。** DesktopSettings（`src/main/desktop/settings.ts:47-77`）持 appTheme 键（默认 `system`），启动 initializeTheme 设 nativeTheme.themeSource 并监听 nativeTheme.on('updated')（仅 system 模式响应）→ 广播 config.systemTheme.changed；
+**主进程权威。** DesktopSettings（`src/main/desktop/settings.ts:47-77`）持 appTheme 键，默认值为 `system`；启动时设置 nativeTheme.themeSource，并在 system 模式监听更新，再广播 config.systemTheme.changed；
 
 setTheme 写设置 + 广播 config.theme.changed（payload 含解析后的 isDark）。渲染层只是订阅者。
 - **renderer store**（`src/renderer/src/stores/theme.ts`）：VueUse useDark/useToggle 管 isDark；
 
-  initTheme 特意**先 `setupThemeListeners()` 再 `getThemeState()` 取快照**，并用 stateRevision 防"快照返回前事件已更新"的竞态（:53-76 注释"先注册监听再读快照，避免另一窗口的更新丢失"）；setThemeMode 乐观置 mode + revision 校验（:78-87）。
+  initTheme 特意先注册主题监听再取快照，并用 stateRevision 防止快照返回前事件已更新的竞态（:53-76）；setThemeMode 采用乐观更新并校验 revision（:78-87）。
 
-  cycleTheme 提供 light→dark→system→light 循环。主题初始值：store 默认 `themeMode='system'`、isDark 初始值来自 VueUse useDark 默认行为（内部实现未下钻）。
+  cycleTheme 提供 light→dark→system→light 循环。store 默认 themeMode 为 `system`，isDark 初始值来自 VueUse useDark 默认行为（内部实现未下钻）。
 
-**DOM 投影。** applyDocumentAppearance（`src/renderer/src/foundation/appearance/documentAppearance.ts:33-96`）给 html/body 加减 `light`/`dark` 类（含可选 data-theme）、字号类（text-xs..text-2xl）、lang/dir；
+**DOM 投影。** applyDocumentAppearance（`src/renderer/src/foundation/appearance/documentAppearance.ts:33-96`）维护 html/body 的明暗类、可选 data-theme、字号类以及 lang/dir；
 
 跨主题切换时加 dc-theme-switching 类一帧（:52-57,85-95），CSS 里该类的规则是 transition: none !important（`style.css:904-910`，注释：避免上百个元素同时触发颜色过渡导致的重绘卡顿）。
 
-`ChatMainApp.vue:107-126` 与 `settings/App.vue:626-645` 各自 watch 主题+字号并以 disableThemeTransition 首帧禁用过渡。
+聊天窗与设置窗各自监听主题和字号，并以 disableThemeTransition 在首帧禁用过渡（`ChatMainApp.vue:107-126`、`settings/App.vue:626-645`）。
 
 **首屏防闪烁。** 主/设置窗口均 show: false + ready-to-show 才显示（`src/main/desktop/window/index.ts:652,697-707` 与 :1308-1311）；`index.html` 无内联主题脚本；
 
