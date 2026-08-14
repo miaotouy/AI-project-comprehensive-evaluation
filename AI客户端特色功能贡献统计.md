@@ -2,7 +2,7 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-13
+> 对比更新日期：2026-08-14
 >
 > 依据：各单项目调查笔记（含通用类目、十六项目独特功能调查笔记、独特功能待查清单、“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比，并参考《AI 客户端完整体验栈与模块组合构想》；本次另复核 VCPToolBox 的 RAGDiaryPlugin、LightMemo、KnowledgeBaseManager、RiverMemo 原生内核与管理路由，以及 VCPChat 的 DeepMemo 2.0/VCP-CDS 适配链；同时参考公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 对思维簇资产、语义组和 K 值构型的实际打包方式；AIO Recall、VCP 记忆召回与 SillyTavern 世界书之间的演变关系采用用户提供的项目演变补充信息，深化程度仍以当前源码主链为依据
 >
@@ -22,6 +22,7 @@
 - **Hermes Agent、OpenCode、Open WebUI** 分别在持续 Agent 后端、编码会话服务、多人模型工作区三个方向形成宽覆盖。Open WebUI 的 Channels、Notes、Memory、Calendar、Automations 和 Arena/ELO 均形成完整产品链。
 - **VCPChat** 以 Agent 可控 Hi-Fi 播放器、系统级划词助手、双语自动语音链和 Scriptorium 共笔文坊（VDOC/VPPTX 工程 + 文脉 PR 审批）构成主贡献，论坛客户端、RAG Observer 和 3D 物理骰子则扩展 VCP 运行时。Loom v1.4.0 与 VCP Agent WebCore 属于 LoomAPP 数据驱动创作运行时，不重复计数。
 - **VCPToolBox** 的 RAG/记忆系统不能只按一个“高级召回”功能计量。复核后拆为两个主贡献族：TagMemo/RiverMemo 负责生成前自动召回、私人语义传播、拓扑重排与解释；VCP 元思考负责用持久链配置逐簇递归检索，并让前一阶段结果改变后一阶段查询。公开的 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 进一步证明这条链已经形成可迁移的内容资产契约：外部作者可以把“内心会议簇 + 四属性域 + 24 个原子模块”连同语义组配置打包，按 K 值组合成不同认知构型并直接部署到 VCP 的日记/RAG 目录；它是 F102 的生态证据，不作为新增项目或重复主贡献。LightMemo 的 KNN/TagMemo/RiverMemo 同候选域对照属于调优与验证机制，另入机制表；一致性预览/修复作为自动召回族的维护子链，Rust/Rayon 内核和 RAG Observer 分别归原生计算机制与辅助观察表面，不重复抬分。AIO Recall 作为后续独立产品化形态，仍在自动召回族计辅助贡献。多观点 Agent 会议同样是主贡献，Skill 目录索引作为 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
+- **媒体创作类目已正式建立，但不新增统计分。** AIO Hub、VCPToolBox、Chatbox 的 F48 仍按原口径计入；[媒体创作横向对比](媒体创作/媒体创作横向对比.md)只把三者共同的任务、历史、资产和结果复用契约抽出比较，VCPChat 的 ComfyGen/Loom/Scriptorium 与 Hi-Fi 播放器保留为扩展或相邻边界。
 - **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别覆盖 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主贡献和辅助贡献，DeepChat 的 CLI 本地控制平面归入“外部表面驾驶本地会话”主贡献族。
 - **LobeHub** 的异构外部 Agent 托管统一六种 CLI、平台任务、原生会话、事件投影与取消；业务应用连接治理把账号、凭据、作用域和逐动作权限组织成 Connector 产品面。两者均为主贡献。DeepChat 与 Cherry Studio 以 ACP 安装运行时和 Claude Agent SDK 会话构成前一功能族的辅助贡献。
 - **AIO Hub** 的对话分享稿工作台把任意消息选区、独立视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成完整交付表面；NextChat 的固定品牌模板计辅助贡献。Cherry Studio 与 DeepChat 的离屏完整列表、现场滚动截图属于成熟捕获路线，记录在类目笔记中但不因工程完整度加分。
@@ -154,7 +155,7 @@
 | F26 | Notebook、Pyodide、Jupyter 与 Terminal 执行表面 | Open WebUI | Cherry Studio | 代码输出成为可编辑、可运行的工作区 |
 | F28 | 终端原生组件树、diff 预演和图片/ASCII 投影 | Pi | - | 在 ANSI 边界内形成完整 Agent 工作台 |
 | F29 | 同一消息组件链投影到 WebChat 和多个 IM 平台 | AstrBot | - | 平台适配器把统一业务语义转换为不同消息能力 |
-| F48 | 媒体生成与资产创作工作站 | AIO Hub、VCPToolBox、Chatbox | - | 覆盖生成、历史/资产持久化、编辑或插件化媒体工作流 |
+| F48 | 媒体生成与资产创作工作站 | AIO Hub、VCPToolBox、Chatbox | - | 覆盖生成、历史/资产持久化、编辑或插件化媒体工作流；正式类目见[媒体创作横向对比](媒体创作/媒体创作横向对比.md) |
 | F49 | 中央资产导入、去重、索引与复用 | AIO Hub | - | 资产从字节导入到 SHA-256 去重、JSONL 索引和跨工作流复用 |
 | F52 | 可分离窗口与跨窗口状态同步 | AIO Hub | - | 工具/组件可脱离主窗并保持逻辑状态同步 |
 | F56 | 内嵌 Web 应用门户与小程序运行池 | Cherry Studio | - | 预设和自定义 Web 应用有 launchpad、侧栏与 keep-alive 生命周期 |
@@ -290,6 +291,7 @@ AstrBot、OpenCode、Pi、VCPToolBox 本来就不以普通桌面 Chat 为边界�
 - [LLM 渠道管理横向对比](LLM渠道管理/LLM渠道管理横向对比.md)
 - [消息渲染器横向对比](消息渲染器/消息渲染器横向对比.md)
 - [生成式输出与运行时横向对比](生成式输出与运行时/生成式输出与运行时横向对比.md)
+- [媒体创作横向对比](媒体创作/媒体创作横向对比.md)
 - [外部执行体与应用协作横向对比](外部执行体与应用协作/外部执行体与应用协作横向对比.md)
 - [对话图片分享生成局部横向对比](对话导出与分享/图片分享生成局部横向对比.md)
 - [应用界面基础设施横向对比](应用界面基础设施/应用界面基础设施横向对比.md)
