@@ -14,7 +14,7 @@
 
 ## 1. 结论摘要
 
-Cherry Studio 的角色系统核心对象是 **`Assistant`**（助手），一个助手对应一套"模型 + 提示词 + 推理参数 + 工具源"的稳定配置。与 Chatbox 不同，模型参数（temperature、topP、maxTokens 等）**写在 Assistant 内部**（`settings` 字段），而不是 Session 级别，因此同一个助手在不同对话中使用相同的参数基准。
+Cherry Studio 的角色系统核心对象是 **`Assistant`**（助手），一个助手对应一套"模型 + 提示词 + 推理参数 + 工具源"的稳定配置。与 Chatbox 不同，模型参数（temperature、topP、maxTokens 等）**写在 Assistant 内部**（`settings` 字段），不在 Session 级别，因此同一个助手在不同对话中使用相同的参数基准。
 
 助手通过 `mcpServerIds` 和 `knowledgeBaseIds` 关联外部工具和知识库；通过 `modelId`（`"providerId::modelId"` 格式）绑定默认模型；通过 `groupId` 加入分组。这四个维度合起来决定了助手的能力边界。
 
@@ -161,7 +161,7 @@ interface AssistantSettings {
 
 ### 5.4 Claude Code Agent Session
 
-`src/main/ai/agentSession/AgentSessionRuntimeService.ts` 实现了独立的 Agent 会话路径，基于 Claude Code SDK 运行 Agent 循环（`runAgentTask`），使用独立的持久化后端（`AgentSessionMessageBackend`）。这条路径不依赖 `AssistantSettings.mcpMode`，而是走 Claude Code 自己的工具注册表。启用入口在助手编辑器的"代码解释器"或 Agent 模式开关；工具权限和审批策略参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
+`src/main/ai/agentSession/AgentSessionRuntimeService.ts` 实现了独立的 Agent 会话路径，基于 Claude Code SDK 运行 Agent 循环（`runAgentTask`），使用独立的持久化后端（`AgentSessionMessageBackend`）。这条路径不依赖 `AssistantSettings.mcpMode`，直接走 Claude Code 自己的工具注册表。启用入口在助手编辑器的"代码解释器"或 Agent 模式开关；工具权限和审批策略参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
 
 ## 6. 内置角色方向
 

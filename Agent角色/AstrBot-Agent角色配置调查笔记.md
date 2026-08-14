@@ -19,7 +19,7 @@ AstrBot 的"Agent 角色"（Persona）是**纯指令 + 能力白名单**模型�
 关键事实（快照 346b85d）：
 
 - **存储**：v4 起存 SQLite `personas` 表（po.py:145-178，SQLModel），`persona_id` 即显示名（字符串，非 UUID）；v3 的 config.json `persona` 键已废弃，由迁移脚本改写（migra_3_to_4.py:236-276）。
-- **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:353-432）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3` 而非 DB 模型。
+- **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:353-432）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3`，不是 DB 模型。
 - **解析优先级**（`resolve_selected_persona`，persona_mgr.py:75-127）：会话规则强制 `session_service_config.persona_id` → 对话 `persona_id` → `provider_settings.default_personality` → webchat 特例 `_chatui_default_`；`"[%None]"` 哨兵显式禁用。
 - **注入位置**：persona prompt 以 `\n# Persona Instructions\n\n{prompt}\n` 追加到 `req.system_prompt`（astr_main_agent.py:533-534）；`begin_dialogs` 以 `_no_save: True` 字典插到上下文最前（:535-536），每轮重注入、不入库。
 - **三态语义**：`tools`/`skills` 三态——None=全部、[]=禁用全部、列表=白名单；workspace Skills 不受 persona 过滤。
@@ -287,7 +287,7 @@ subagent router_prompt
 
 ### 10.2 取舍（平衡决策）
 
-- **v3 兼容层而非迁移清理**：运行时代价是一次冗余转换缓存，收益是 v3 插件 API（`get_persona_v3_data` 等）与 v4 并存；
+- **v3 兼容层，不是迁移清理**：运行时代价是一次冗余转换缓存，收益是 v3 插件 API（`get_persona_v3_data` 等）与 v4 并存；
 - **persona_id 即显示名**：用户可读、易管理，代价是改名人脸经 DB 更新（无独立 slug）；
 - **tools/skills 双三态**：None 语义在 WebUI 与 API 间靠 `NOT_GIVEN` 哨兵区分"未修改"与"显式置空"（persona_mgr.py:142-144）——API 设计细节；
 - **workspace skills 不过滤**：persona 白名单只管注册 skills，工作区 skill 合并进主集（:563-567）——本地优先的设计意图；

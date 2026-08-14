@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-NextChat 的角色是“提示词、示例上下文、模型参数和工具选择”的组合，而不是一个独立运行时：
+NextChat 的角色是“提示词、示例上下文、模型参数和工具选择”的组合，不是一个独立运行时：
 
 1. `Mask` 类型同时保存名称、头像、`context` 示例消息、`modelConfig`、语言、插件 id，以及 Artifact/code fold 等显示开关（`app/store/mask.ts:9-23`）。
 2. 用户 Mask 通过 Zustand 持久化 store CRUD；内置 Mask 从构建产物 `/masks.json` 异步加载，并在展示时把全局模型配置覆盖到内置 Mask 的局部配置上（`app/store/mask.ts:49-105`、`app/masks/index.ts:22-37`）。
@@ -82,7 +82,7 @@ NewChat 页面
 
 `app/components/new-chat.tsx:77-107` 负责列出 Mask 和通过命令/URL 选择；`startChat` 调用 `newSession` 后进入聊天页（`app/components/new-chat.tsx:91-95`）。
 
-`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”的顺序合并。会话模型是 `ChatSession.mask`，而不是只保存一个 Mask id；后续编辑会直接修改这份副本。
+`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”的顺序合并。会话模型是 `ChatSession.mask`，不只保存一个 Mask id；后续编辑会直接修改这份副本。
 
 这也是 fork 行为的关键：`forkSession` 深拷贝消息并复制 Mask 及其 `modelConfig`（`app/store/chat.ts:243-267`），所以分叉会话之后可以拥有独立角色参数。
 
@@ -147,7 +147,7 @@ Mask 页面导出时只导出 `builtin === false` 的 Mask JSON；导入支持�
 
 ## 7. 风险、边界和未验证事项
 
-1. **Mask 是可变副本**：会话保存完整 Mask，而不是不可变引用。修改全局 Mask 定义不会自动回写已经创建的会话，除非它仍处于全局同步状态。
+1. **Mask 是可变副本**：会话保存完整 Mask，不是不可变引用。修改全局 Mask 定义不会自动回写已经创建的会话，除非它仍处于全局同步状态。
 2. **`hideContext` 语义容易误解**：它只隐藏聊天 UI 中的示例消息，不提供隐私隔离或请求脱敏。
 3. **插件与角色耦合**：`Mask.plugin` 直接决定可用工具，但没有按角色声明权限、审批或参数范围。
 4. **导入信任边界宽**：JSON 导入几乎不校验字段，恶意/过大的 context、模型配置和插件 id 可以进入持久化状态。

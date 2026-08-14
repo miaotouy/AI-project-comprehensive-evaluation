@@ -59,12 +59,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **事实对象**（三类，均无"记录"语义）：
   1. 插件调用（无持久化的调用记录对象，工具调用记录 `toolCallRecordStore` 属 Agent 工具类目）；
   2. 产物文件：`image/media-renderer/`（PNG/JPG/WebP/GIF）与 `file/media-renderer/`（MP4/WebM/WAV），命名 `<stem>-<Date.now()>-<3字节随机>.ext`（MediaRenderer.js:1323），图像插件写各自子目录（如 `image/fluxgen/`，见 FluxGen manifest 描述）；
-  3. 异步 job 文件：`VCPAsyncResults/<pluginName>-<taskId>.json`（无过期清理，独特功能笔记能力五已记录）。
-
-**必查问题落点**：
-1. 用户目标：多目标混合——文生图/图生图/多图合成/修图（图像插件族）、HTML/SVG 可编程渲染与逐帧动画（MediaRenderer）、程序音乐（GenerateAudio）、视频生成与拼接（AgnesVideoGen concat / Wan2.1）；**无资产管理目标**（无资产库/去重/索引）。
-2. 触发者：仅 Agent（模型工具调用）与定时/管理面启停；无用户直触、无工作流/定时媒体任务。
-3. 事实对象：如上，任务/历史/资产"记录"均不存在——声明"没有某能力"的检查范围是本快照 `Plugin/` 15 个媒体插件目录 + 根层 `server.js`/`Plugin.js`/`modules/messageProcessor.js`，未发现媒体会话/资产记录模块。
+   3. 异步 job 文件：`VCPAsyncResults/<pluginName>-<taskId>.json`（无过期清理，独特功能笔记能力五已记录）。
 
 ## 2. 参数、素材与模型/渲染执行
 
@@ -109,8 +104,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 | ImageFileServer | service/direct | 图片/文件静态托管 | 无（本机路径） |
 | MediaRenderer | hybridservice/direct | RenderImage / RenderAnimation / GenerateAudio | 托管 Chrome + FFmpeg + sharp/puppeteer/mime-types |
 
-**必查问题落点**：4（执行位置：外部模型 API / 托管 Chrome / Node 子进程 / FFmpeg，如上表）；5（参数经工具块 + manifest 契约，素材经 Node 预取改写 Data URI 或插件内转 Base64/file 上传，见下节）。
-
 ## 3. 任务状态、异步回调与取消
 
 - **同步插件**（图像族、MediaRenderer 渲染/音频）：单次 stdio/direct 调用返回结果，无任务状态对象；MediaRenderer 渲染队列 `renderQueue` 进程内串行（`enqueueRender` :1654-1658），无取消接口（中断只能靠 manifest/单步超时，超时对音频子进程杀进程树、对 FFmpeg SIGKILL，:1008-1049,1109-1112）。
@@ -120,8 +113,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **回调端点**：`POST /plugin-callback/:pluginName/:taskId`（server.js:1471-1515）写 JSON 文件 + 可选 WS 推送；**无鉴权**（server.js:870-873 对 `/plugin-callback` 豁免 Bearer），taskId 无签名——与独特功能笔记能力五的边界记录一致。分布式节点回调经 `handleDistributedPluginCallback`（WebSocketServer.js:95-144）落同一目录。
 - **取消**：全链路无用户/模型可发起的任务取消；无重启恢复语义（服务重启后异步结果文件仍在、可被占位符读取，但生成中任务不会续跑）。
 
-**必查问题落点**：7（如上：进度=模型轮询 query 或回调回注；失败=回调 status Failed 或插件错误文本；取消/重启=不存在；重试=模型重新调用工具，无专用重试对象）。
-
 ## 4. 结果、历史、资产与工程持久化
 
 - **结果**：产物文件落 `image/`（图片/GIF）与 `file/`（MP4/WebM/WAV），URL 形态 `<VarHttpUrl>:<port>/pw=<key>/images|files/media-renderer/<name>`（`saveArtifact` MediaRenderer.js:1320-1352，键来自 ImageServer 插件配置，经 Plugin.js:1520-1527 注入）；静态图片可 `showBase64=true` 额外内联 Data URI（:1448-1455）。图像/视频插件各自写 `image/<plugin>/` 或 `file/<plugin>/` 并由各自代码构造 URL。
@@ -130,8 +121,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **工程对象**：不存在（无节点图/工程文件；ComfyUIGen 的 workflow-template-cli 属禁用插件且对象是外部 ComfyUI 配置，非 VCPToolBox 媒体工程）。
 - **持久化服务**：ImageFileServer（service 插件）提供 `/pw=[key]/images/...` 与 `/pw=[key]/files/...` 受密码静态托管（manifest services：ProtectedImageHosting/ProtectedFileHosting；server.js:860-868 对 `/pw=` 路径豁免 Bearer、以路径 key 鉴权）；产物即文件，重启后可访问。
 
-**必查问题落点**：8（命名/去重/索引/来源：如上，均不存在；跨工作流复用=URL 作为后续工具参数，如 GPTImageGen edit 的 image 字段、AgnesVideoGen concat 的 video_url 数组、NanoBananaGen2 compose 的 image_url_N）。
-
 ## 5. 预览、编辑、重试、分支与复用
 
 - **预览**：无项目内媒体查看器/画廊；预览由**模型在消息里渲染**——插件返回文本中带 `<img src="URL">` / `<video controls autoplay loop>` / `<audio controls>` 展示提示（MediaRenderer.js:1426-1431,1631），实际展示依赖客户端聊天端解析 HTML 片段（属消息渲染器类目，本页不展开）。
@@ -139,8 +128,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **重试/分支**：无 UI 级重试/分支对象；Agent 可重新发起工具调用（等价重试），改参数重渲（等价分支）。Wan2.1/Agnes 的 `query` 可反复查询同一 job。
 - **导出/分享**：产物即文件服务 URL，可直接外链/下载；无打包导出。
 - **复用**：URL 复用（见第 4 节）；无资产面板选择复用。
-
-**必查问题落点**：6（预览/编辑/重试/分支/导出/再次引用：如上，均依赖 Agent 在工具层完成，无工作站 UI 承接）。
 
 ## 6. Agent 回流、插件协议与外部依赖
 
@@ -153,8 +140,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
   - 各图像/视频插件的模型 API key 与 `CALLBACK_BASE_URL`；
   - npm 依赖 puppeteer/sharp/mime-types（复用根项目依赖，MediaRenderer README:51；本快照仓库无 node_modules）。
 
-**必查问题落点**：9（Agent 发现能力=manifest 描述注入上下文，无动态发现/目录查询工具；读取历史=无；调用已有资产=URL/file:// 引用；接收结果=URL+异步回注占位符）；10（外部依赖边界：如上，另有 DNS 解析、HTTP 重定向、云元数据阻断等网络边界）。
-
 ## 7. 权限、资源边界与失败恢复
 
 - **权限**：
@@ -164,8 +149,6 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **资源/大小限额**（MediaRenderer.js:16-40 常量，均源码事实）：像素 ≤4096²；源码 ≤2MB；单素材 ≤50MB、合计 ≤100MB、每步 ≤24 素材；批量 ≤16 步串行；动画帧 ≤MaxAnimationFrames（默认 600/上限 3600）；音频代码 ≤1MB、总采样 ≤3000 万、输出 ≤128MB、Worker 输出 ≤256KB、stdin ≤2MB（AudioSynthesisWorker.js:5）；单步超时 ≤120s、FFmpeg 单次 ≤600s、音频子进程 ≤300s；超时杀进程树（Windows taskkill /T /F，:1051-1069）。
 - **执行域隔离**：AI 合成代码只在独立 Node 子进程运行（主服务不执行，MediaRenderer.js:1071-1145）；HTML JS 默认关闭；页面运行时网络全阻断；FFmpeg 用参数数组 spawn（无 shell，:1008-1014）；文件名校名净化（`sanitizeFileStem` :282-290）；产物目录按服务类型固定（图片/GIF→image/，MP4/WebM/WAV→file/，:1324-1335）。
 - **失败恢复**：MediaRenderer `processToolCall` 捕获一切异常返回 `{status:'error', error, result:{text}}`（:1668-1677），不向上抛；FFmpeg 不可用有探测缓存与明确错误（:1179-1194）；WAV 结果主进程重新校验头/PCM/时长（±2ms，:1147-1177）；异步回调失败在插件侧置失败状态回传；服务重启后 `VCPAsyncResults/` 文件仍在（无过期清理），占位符可继续读取；无任务重试/恢复编排。
-
-**必查问题落点**：11（文件=产物目录白名单+文件名净化+大小上限；网络=白名单预取+运行时阻断+云元数据常禁+私网开关；进程=子进程隔离+超时杀树；额度=帧数/采样/素材上限，无 token 额度；脚本=CDN 白名单重定向）。
 
 ## 8. 设计取舍、已确认边界与未验证事项
 

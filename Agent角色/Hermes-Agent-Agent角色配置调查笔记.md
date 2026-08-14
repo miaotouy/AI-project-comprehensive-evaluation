@@ -117,7 +117,7 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 
 ## 5. 工具、知识、记忆与子 Agent
 
-- 人格/提示词**不授权工具**。工具授权在平台级 `tools.<platform>.enabled/disabled`、`hermes tools`（`hermes_cli/tools_config.py`）。工具是否加载影响提示词中是否注入对应指引（比如有 `memory` 工具才加入 MEMORY_GUIDANCE，`system_prompt.py:228-245`），这是“授权影响提示词”而非“角色绑工具”。
+- 人格/提示词**不授权工具**。工具授权在平台级 `tools.<platform>.enabled/disabled`、`hermes tools`（`hermes_cli/tools_config.py`）。工具是否加载影响提示词中是否注入对应指引（比如有 `memory` 工具才加入 MEMORY_GUIDANCE，`system_prompt.py:228-245`），这是“授权影响提示词”，角色本身不绑工具。
 - **Skills**：技能索引只在存在 skills 工具时生成（`build_skills_system_prompt`），放入 volatile。技能位于 `~/.hermes/skills/`；技能命令以 user 消息注入（不破坏缓存）。
 - **记忆**：MEMORY.md（agent 记忆）与 USER.md（用户画像）都在 volatile 段（`system_prompt.py:515-524`）。USER.md 有独立开关 `memory.user_profile_enabled`。
 - **外部记忆 Provider**：可选插件，同一时刻至多启用一个，由 `memory.provider` 配置；插件目录 `plugins/memory/<name>`，经 `agent/memory_manager.py` 编排，其 `build_system_prompt()` 追加 volatile 段（`system_prompt.py:527-533`）。
@@ -162,7 +162,7 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 ## 9. 设计取舍与已确认边界
 
 1. **提示缓存第一**：system prompt 一次构建、字节稳定，只有压缩时重建（AGENTS.md 的 “prompt caching is sacred” 约束）。这使“角色编写”能不破坏缓存，但代价是**角色修改只在下一次重建/新建会话生效**；CLI 用 `self.agent = None` 显式触发，TUI 用 `ephemeral_system_prompt` 就地替换实现会话内即时生效。
-2. **人格即文本叠加，不是对象**：没有角色版本、头像、开场白等承载字段；横向比较时应把 Hermes 归为“配置聚合/全局语义”而不是“角色卡实体”。
+2. **人格即文本叠加，不是对象**：没有角色版本、头像、开场白等承载字段；横向比较时应把 Hermes 归为“配置聚合/全局语义”，不是“角色卡实体”。
 3. **Profile 隔离是有意的**：profile 之间不继承（`--clone` 是唯一的“从默认开始”手段），与“profiles are independent islands”设计一致（AGENTS.md）。
 4. **ephemeral 不入轨迹** 是双刃：人格不会污染历史，但也意味着轨迹/审计记录无法精确重放当时人格文本。
 5. **配置 UI 字段不一定在请求链路生效**：`custom_prompt`（TUI `config.set prompt`）有 UI 与存储（`server.py:11135-11145`、`methods_config.py:194`），但本次检索仅发现读写，**没有读取它的请求路径**——典型的“界面存在、链路未消费”案例。

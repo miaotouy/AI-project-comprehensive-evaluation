@@ -78,7 +78,7 @@ VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应�
 | --- | --- |
 | `{{AgentName}}` | 当前 Agent 的 `name` 字段值 |
 
-这是唯一已确认的内置宏，不同于 AIO Hub 的完整宏系统；VCPToolBox 的 `{{VarXxx}}` 等宏不在 VCPChat 客户端侧处理，而是由上游 VCPToolBox 服务器处理。
+这是唯一已确认的内置宏，不同于 AIO Hub 的完整宏系统；VCPToolBox 的 `{{VarXxx}}` 等宏不在 VCPChat 客户端侧处理，由上游 VCPToolBox 服务器处理。
 
 ### 3.2 话题（Topics）
 

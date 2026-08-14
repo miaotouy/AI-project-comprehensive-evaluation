@@ -55,9 +55,9 @@ MediaGenerationInput.handleSend（Ctrl+Enter，MediaGenerationInput.vue:411）
 
 **入口**：工具页 `/media-generator`（`media-generator.registry.ts:44` toolConfig），四 Tab：工作台/画廊/任务列表/生成设置（`views/MediaGeneratorView.vue:41`）；工作台内「创作会话 / 快速生成」双模式（`MediaWorkbench.vue:52` workbenchMode 持久化于 localStorage）。右侧 `AssetGallery` 直接引用全局资产库。
 
-**触发者**（必查问题 2）：用户手动为主；Agent 为次——`getMetadata()` 每次被调用时对可见模型生成 `generate_<sanitized_model_id>` 方法并绑定 handler（`media-generator.registry.ts:217`）；可见性受 `settings.agentConfig` 黑/白名单、`profilePriority`、`fastModelIds` 控制（`collectVisibleModels`，registry.ts:150）。**本次未找到**定时任务、外部服务或工作流触发媒体生成的入口；工作台无后台常驻执行。
+**触发者**：用户手动为主；Agent 为次——`getMetadata()` 每次被调用时对可见模型生成 `generate_<sanitized_model_id>` 方法并绑定 handler（`media-generator.registry.ts:217`）；可见性受 `settings.agentConfig` 黑/白名单、`profilePriority`、`fastModelIds` 控制（`collectVisibleModels`，registry.ts:150）。**本次未找到**定时任务、外部服务或工作流触发媒体生成的入口；工作台无后台常驻执行。
 
-**事实对象**（必查问题 3）三个，真源不同：
+**事实对象**三个，真源不同：
 
 | 对象 | 定义 | 真源 |
 |---|---|---|
@@ -70,11 +70,11 @@ MediaGenerationInput.handleSend（Ctrl+Enter，MediaGenerationInput.vue:411）
 
 ## 2. 参数、素材与模型/渲染执行
 
-**参数**（必查问题 5）：每媒体类型一套 `MediaTypeConfig.params`（`types.ts:156`：size/quality/style/negativePrompt/seed/steps/cfgScale/background/inputFidelity/partialImages/duration、Suno 的 suno_mode/mv/tags/title/make_instrumental、TTS 的 audioConfig/instructions 等），持久化在 `generation-config.json`（全局配置，`useMediaStorage.ts:99`）。请求前经 `sanitizeParams` 按模型 `mediaGenParams` 规则剔除不支持参数、clamp 数值、校验枚举、填充默认值；xAI/Gemini 类模型走 `aspectRatioMode`（`buildXaiSizeParams`）或专用 adapter。UI 参数别名映射（steps→numInferenceSteps、cfgScale→guidanceScale、duration→durationSeconds）在 `useMediaGenerationManager.ts:524-547`。
+**参数**：每媒体类型一套 `MediaTypeConfig.params`（`types.ts:156`：size/quality/style/negativePrompt/seed/steps/cfgScale/background/inputFidelity/partialImages/duration、Suno 的 suno_mode/mv/tags/title/make_instrumental、TTS 的 audioConfig/instructions 等），持久化在 `generation-config.json`（全局配置，`useMediaStorage.ts:99`）。请求前经 `sanitizeParams` 按模型 `mediaGenParams` 规则剔除不支持参数、clamp 数值、校验枚举、填充默认值；xAI/Gemini 类模型走 `aspectRatioMode`（`buildXaiSizeParams`）或专用 adapter。UI 参数别名映射（steps→numInferenceSteps、cfgScale→guidanceScale、duration→durationSeconds）在 `useMediaGenerationManager.ts:524-547`。
 
 **素材**：按媒体类型过滤参考图/参考音频/参考视频（`MediaGenerationInput.vue:215` referenceAttachmentConfig），拖放、粘贴、文件选择都先 `importAssetFromPath` 入资产库再作为附件（`MediaGenerationInput.vue:324-404`）。执行时 Asset 转 Base64（`getAssetBinary` → `convertArrayBufferToBase64`），超过模型 `maxImageDimension` 先缩放（`useMediaGenerationManager.ts:453-488`）。多轮上下文：`includeContext` 开关 + `contextMessageIds` 手动指定；单轮模型自动带入上一条 Assistant 结果的图片作为参考（`collectSingleTurnReferenceAssets`，:156）；不支持多轮上下文的端点显式降级为单轮（:433 日志）。
 
-**执行位置**（必查问题 4）：请求由 `useLlmRequest.sendRequest` 发往用户配置的 LLM Profile 的远程 API；适配器族按 profile 类型分发（openai image/video/audio、gemini image/chat、suno-newapi、minimax-music、siliconflow、cohere 等，`src/llm-apis/adapters/*`），统一产出 `LlmResponse.images/videos/audios`（`src/llm-apis/common.ts:572`）。视频/音乐存在轮询式异步 API（如 Ark/Agnes 视频、Suno、MiniMax Music），由各 adapter 封装。本地无渲染/编码器，纯前端 + 远程模型（源码事实）。
+**执行位置**：请求由 `useLlmRequest.sendRequest` 发往用户配置的 LLM Profile 的远程 API；适配器族按 profile 类型分发（openai image/video/audio、gemini image/chat、suno-newapi、minimax-music、siliconflow、cohere 等，`src/llm-apis/adapters/*`），统一产出 `LlmResponse.images/videos/audios`（`src/llm-apis/common.ts:572`）。视频/音乐存在轮询式异步 API（如 Ark/Agnes 视频、Suno、MiniMax Music），由各 adapter 封装。本地无渲染/编码器，纯前端 + 远程模型（源码事实）。
 
 ## 3. 任务状态、异步回调与取消
 
@@ -86,16 +86,16 @@ MediaGenerationInput.handleSend（Ctrl+Enter，MediaGenerationInput.vue:411）
 
 ## 4. 结果、历史、资产与工程持久化
 
-- **会话历史**（必查问题 6/8）：`{appConfigDir}/media-generator/` 下 `sessions-index.json`（轻量索引 + 当前会话 ID）、`sessions/{id}.json`（树详情）、`tasks.json`（全局任务池）、`settings.json`（用户设置）、`generation-config.json`（全局生成配置）。双层防抖：store 层 1s（`useMediaGenPersistence.ts:291`）+ storage 层 2s（`useMediaStorage.ts:458`）。索引自愈 `syncIndex`：扫描物理目录补齐/剔除索引项（`useMediaStorage.ts:296`）。
+- **会话历史**：`{appConfigDir}/media-generator/` 下 `sessions-index.json`（轻量索引 + 当前会话 ID）、`sessions/{id}.json`（树详情）、`tasks.json`（全局任务池）、`settings.json`（用户设置）、`generation-config.json`（全局生成配置）。双层防抖：store 层 1s（`useMediaGenPersistence.ts:291`）+ storage 层 2s（`useMediaStorage.ts:458`）。索引自愈 `syncIndex`：扫描物理目录补齐/剔除索引项（`useMediaStorage.ts:296`）。
 - **启动自愈**：`generating` 遗留节点按关联任务完成情况修 `complete`/`error`（元数据注明"应用重启，生成中断"，`useMediaGenPersistence.ts:178-192`）；`activeLeafId` 修复到最深叶子；无根节点自动创建。运行时另有"僵死节点" watch：任务结束而节点仍 generating 时自动修复（`mediaGenStore.ts:334-360`）。
-- **资产持久化**（必查问题 8）：`$APPDATA/assets/` 按 类型/月份 分目录；Rust `AssetCatalog` 内存 Catalog（RwLock）+ `assets.jsonl` 中央索引（mark_dirty 落盘）；每目录 `.index.json` 月度哈希索引。`import_asset_from_bytes`（`asset_manager.rs:870`）：SHA-256 → `check_duplicate_in_current_month`（:1265，仅当月+同类型）→ 命中：若 sourceModule 不同则追加 `origin` 并 emit `asset-imported` 直接返回既有资产；未命中：写文件、提取图片宽高、生成缩略图/音频封面、写月度索引、入 Catalog。`rebuild_hash_index`（:1720）可全量重建哈希索引。图片宽高、`audio_waveform`（前端 Web Audio 采样后 `update_audio_waveform`，:2767）、`derived` 元数据都挂在 `AssetMetadata`。
+- **资产持久化**：`$APPDATA/assets/` 按 类型/月份 分目录；Rust `AssetCatalog` 内存 Catalog（RwLock）+ `assets.jsonl` 中央索引（mark_dirty 落盘）；每目录 `.index.json` 月度哈希索引。`import_asset_from_bytes`（`asset_manager.rs:870`）：SHA-256 → `check_duplicate_in_current_month`（:1265，仅当月+同类型）→ 命中：若 sourceModule 不同则追加 `origin` 并 emit `asset-imported` 直接返回既有资产；未命中：写文件、提取图片宽高、生成缩略图/音频封面、写月度索引、入 Catalog。`rebuild_hash_index`（:1720）可全量重建哈希索引。图片宽高、`audio_waveform`（前端 Web Audio 采样后 `update_audio_waveform`，:2767）、`derived` 元数据都挂在 `AssetMetadata`。
 - **来源生命周期**：`origins[]` 记录 (originType/source/sourceModule)；`remove_asset_source`（:2476）在最后一个来源被移除时删除物理文件；`add_asset_source` 追加来源。生成结果标记 `origin.type="generated"`、`source=revisedPrompt||taskId`、`sourceModule="media-generator"`。
 - **衍生数据**：每次入库同时写 `derived/media-generator/{date}/{assetId}.json` 并 `update_asset_derived_data` 挂到 `metadata.derived["generation"]`（`useMediaGenerationManager.ts:912`）；asset-manager 侧边操作「查看生成参数」优先读 derived、缺失时 `get_asset_binary` + `extractMetadata` 从文件内嵌元数据提取（`media-generator.registry.ts:301-358`）。音频还支持标准媒体标签写入（ID3/WAV INFO，含用户档案作者、prompt 注释，`useMediaGenerationManager.ts:1011` buildStandardAudioMetadata，默认关闭 `metadataWrite.enabled=false`）。
 - **删除**：`removeTask` 先清任务池再级联删除会话节点（`mediaGenStore.ts:294`）；删除会话走 `deleteSession`。资产删除在 asset-manager UI/Rust 侧（`remove_asset_completely`）。
 
 ## 5. 预览、编辑、重试、分支与复用
 
-- **预览**（必查问题 6）：`openTaskResult` 按类型分发到 image/video/audio 全局查看器（`mediaGenStore.ts:170`）；`autoOpenAsset` 可选生成后自动打开；任务卡内联：视频海报 + 悬停播放（`MediaTaskCard.vue:325`）、音频波形懒采样并回写任务/节点（:200-222）、`getAssetUrl` 统一解析；画廊 Tab 与右侧 AssetGallery 展示历史资产。
+- **预览**：`openTaskResult` 按类型分发到 image/video/audio 全局查看器（`mediaGenStore.ts:170`）；`autoOpenAsset` 可选生成后自动打开；任务卡内联：视频海报 + 悬停播放（`MediaTaskCard.vue:325`）、音频波形懒采样并回写任务/节点（:200-222）、`getAssetUrl` 统一解析；画廊 Tab 与右侧 AssetGallery 展示历史资产。
 - **重试**：`regenerateFromNode`（`mediaGenStore.ts:489`）→ `getRetryParams` 从 `taskSnapshot` 恢复参数（`useTaskActionManager.ts:152`，复用当前类型配置参数并强制 `seed=-1`）→ `createRegenerateBranch` 在源 User 节点下建兄弟 Assistant 节点 → 复用参数建新任务（`task.id = assistantNode.id`）→ `startGenerationWithTask` 直接执行。重试期间同一源节点加锁防重复（`retryingSourceMessageIds`）。
 - **分支**：`createRegenerateBranch`（重试语义）、`createBranch`（纯复制语义，`useBranchManager`）、`switchToBranch`（`findDeepestLeaf` 后切换）、`saveToBranch`（复制后改内容）；节点删除为级联硬删除。会话模式用树路径 `getNodePath` 渲染活跃路径（`store.messages`）。
 - **编辑**：`editMessage`、`updateNodeData`（禁止改 id/parentId/childrenIds，`mediaGenStore.ts:680`）、`MessageDataEditor` 直接编辑节点 JSON；批量模式可选中多条消息后删除（批量下载为 TODO 占位，`MediaWorkbench.vue:160-163`）。
@@ -104,17 +104,17 @@ MediaGenerationInput.handleSend（Ctrl+Enter，MediaGenerationInput.vue:411）
 
 ## 6. Agent 回流、插件与外部依赖
 
-- **发现**（必查问题 9）：动态方法族 `generate_<model_id>`，方法参数声明由模型 `mediaGenParams` 规则生成（`buildParameters`，`buildAgentMethods.ts:259`），描述含模型/渠道/快速模式/额外说明（`buildDescription`）。同一 modelId 多渠道时按 `profilePriority` 路由（`registry.ts:189` resolveProfileRoute）。配置变更（agentConfig/Profile 列表）通过 watch 失效工具发现缓存（`registry.ts:87` setupDiscoveryInvalidation）。
+- **发现**：动态方法族 `generate_<model_id>`，方法参数声明由模型 `mediaGenParams` 规则生成（`buildParameters`，`buildAgentMethods.ts:259`），描述含模型/渠道/快速模式/额外说明（`buildDescription`）。同一 modelId 多渠道时按 `profilePriority` 路由（`registry.ts:189` resolveProfileRoute）。配置变更（agentConfig/Profile 列表）通过 watch 失效工具发现缓存（`registry.ts:87` setupDiscoveryInvalidation）。
 - **调用与返回**：handler 校验 prompt 必填、媒体类型支持、非 fast 模型必须异步执行（`buildAgentMethods.ts:651-665`）；成功返回 `{success, taskId, type, prompt, assets: [appdata://…], assetIds}`，失败返回 `{success:false, error}`（`buildResult`，:605-638）。
 - **编程接口**：`addContentToInput/setInputContent/addAssets` 是注册表的公开方法但**不在 `getMetadata()` 中**（非 agentCallable），供其他模块写输入框/附件（`registry.ts:231-295`）。`getAssetSidecarActions` 让资产右键菜单挂"查看生成参数"。
 - **审批与异步**：Agent 媒体生成走通用 tool-calling 审批/执行链（executor 二次校验 agentCallable、审批状态机、异步任务框架），细节见 Agent 工具笔记第 5/6/11 节，本笔记不重复。
-- **外部依赖**（必查问题 10）：生成请求依赖用户 LLM Profile（远程 API/Key）；远程媒体下载走 Tauri HTTP 插件（`tauriFetch`，30s connectTimeout），失败回退 `fetchWithTimeout(forceProxy, relaxIdCerts)` 本地代理（`useMediaGenerationManager.ts:1123` fetchAsArrayBuffer）；本地文件走 `convertFileSrc`。**本次未找到**媒体插件族/manifest 协议（通用插件系统是 JS/Sidecar/Native，不承载媒体生成扩展点）；无 FFmpeg/ComfyUI/浏览器服务依赖（生成链内）。
+- **外部依赖**：生成请求依赖用户 LLM Profile（远程 API/Key）；远程媒体下载走 Tauri HTTP 插件（`tauriFetch`，30s connectTimeout），失败回退 `fetchWithTimeout(forceProxy, relaxIdCerts)` 本地代理（`useMediaGenerationManager.ts:1123` fetchAsArrayBuffer）；本地文件走 `convertFileSrc`。**本次未找到**媒体插件族/manifest 协议（通用插件系统是 JS/Sidecar/Native，不承载媒体生成扩展点）；无 FFmpeg/ComfyUI/浏览器服务依赖（生成链内）。
 
 ## 7. 权限、资源边界与失败恢复
 
 - **参数边界**：`sanitizeParams` 是模型参数的最后一道闸（剔除/钳制/枚举校验），但 `prompt` 不做任何内容过滤，完全由 LLM/用户控制（源码事实，与 Agent 工具笔记一致）。
 - **素材边界**：参考素材按媒体类型过滤扩展名（`MediaGenerationInput.vue:215`）；图片按 `maxImageDimension` 缩放；MiniMax 翻唱限制单参考音频并校验两步工作流前置条件（`useMediaGenerationManager.ts:1091` validateMiniMaxTwoStepCover、`useMiniMaxCoverWorkflow.ts:128` ensureTwoStepReady，预处理结果 24h 过期）。
-- **资源限额**（必查问题 11）：超时/重试可配；**本次未找到**任务数、文件大小、磁盘配额或并发数的执行级限额（`maxConcurrentTasks`/`autoCleanCompleted` 均无执行消费者）；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
+- **资源限额**：超时/重试可配；**本次未找到**任务数、文件大小、磁盘配额或并发数的执行级限额（`maxConcurrentTasks`/`autoCleanCompleted` 均无执行消费者）；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
 - **失败恢复**：请求异常 → 任务 `error` + statusText（:630）；AbortError 单独处理为"已中止"；单条资产入库失败只记日志不中断其余资产（:887-889），全部失败则整体报错（:904）；`embedMetadata`/标准元数据写入失败降级继续入库（:844-851、:826-841）；远程下载 tauriFetch 失败自动走代理回退（:1155-1170）。崩溃/重启：generating 节点修复为 error，任务池保持最后状态但**不自动恢复执行**（静态推断：`taskManager.init` 只有加载，无重新入队路径）。
 
 ## 8. 设计取舍、已确认边界与未验证事项

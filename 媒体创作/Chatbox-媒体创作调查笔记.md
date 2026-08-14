@@ -59,9 +59,9 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 
 ## 1. 创作入口、触发者与事实对象
 
-**入口与触发者**（必查 1、2）：用户主导的工作台是唯一独立入口，路由 `createFileRoute('/image-creator/')`（`routes/image-creator/index.tsx:74`）；侧栏 `Sidebar.tsx:89`、快捷键 `useShortcut.tsx:104`、聊天输入框空态 `InputBox.tsx:1384` 均有跳转。第二个触发者是聊天内的 Agent 工具链：`chatbox image generate`（`packages/chatbox-cli/images.ts:344-351`）以后台任务方式发起生成，属于 Agent 驱动的 M5 边界，见第 6 节。无插件、定时任务或外部服务触发入口（本次未找到）。
+**入口与触发者**：用户主导的工作台是唯一独立入口，路由 `createFileRoute('/image-creator/')`（`routes/image-creator/index.tsx:74`）；侧栏 `Sidebar.tsx:89`、快捷键 `useShortcut.tsx:104`、聊天输入框空态 `InputBox.tsx:1384` 均有跳转。第二个触发者是聊天内的 Agent 工具链：`chatbox image generate`（`packages/chatbox-cli/images.ts:344-351`）以后台任务方式发起生成，属于 Agent 驱动的 M5 边界，见第 6 节。无插件、定时任务或外部服务触发入口（本次未找到）。
 
-**核心事实对象**（必查 3）：`ImageGeneration` 记录（`src/shared/types/image-generation.ts:26-47`）：
+**核心事实对象**：`ImageGeneration` 记录（`src/shared/types/image-generation.ts:26-47`）：
 
 - 参数：`prompt`、`model {provider, modelId}`、`dalleStyle`、`imageGenerateNum`、`aspectRatio`、`referenceImages`（存储键数组）
 - 结果：`generatedImages`（存储键或 URL 数组）、`generatedImageThumbnails`（与结果对齐）
@@ -74,18 +74,18 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 
 ## 2. 参数、素材与模型/渲染执行
 
-**模型能力目录**（必查 5）：`useImageModelGroups`（`hooks/useImageModelGroups.ts:45-128`）按 provider 分组：ChatboxAI（license 下远程 manifest + excludedModels 过滤）、Gemini（内置或自定义 Gemini provider 的远程+手动 image 型模型合并）、OpenAI（`isOpenAIImageGenerationAuthSupported` 排除 OAuth 会话，`packages/image-model-catalog.ts:68-74`——源码注释表明避免 OAuth 会话走 DALL-E 计费路径）。非 React 侧（chatbox_cli）用等价的 `getAvailableImageModels`（同文件 `:107-157`）。
+**模型能力目录**：`useImageModelGroups`（`hooks/useImageModelGroups.ts:45-128`）按 provider 分组：ChatboxAI（license 下远程 manifest + excludedModels 过滤）、Gemini（内置或自定义 Gemini provider 的远程+手动 image 型模型合并）、OpenAI（`isOpenAIImageGenerationAuthSupported` 排除 OAuth 会话，`packages/image-model-catalog.ts:68-74`——源码注释表明避免 OAuth 会话走 DALL-E 计费路径）。非 React 侧（chatbox_cli）用等价的 `getAvailableImageModels`（同文件 `:107-157`）。
 
 **比例与风格**：`getRatioOptionsForModel` 按模型族给选项（openai 4 项、gemini 11 项，`src/shared/providers/definitions/image-models.ts:3-7`）；`'auto'` 在提交时归一化为 undefined（不约束，`imageGenerationActions.ts:126-128`）。`dalleStyle` 仅 `vivid | natural`。
 
-**参考图进入请求**（必查 5）：上传时校验 `file.type.startsWith('image/')` 并写 blob（`index.tsx:321-355`）；提交时逐项转换：http(s) URL 原样透传，存储键经 `dependencies.storage.getImage` 读 blob 转 data URL（`adapters/index.ts:89-96`），最终以 `images: [{image_url}]` 进入请求（`imageGenerationActions.ts:196-206,326-336`）。该行为已被运行验证：`imageGenerationActions.test.ts` 的"reference images as image_url entries"用例（URL 与存储键两种来源）。
+**参考图进入请求**：上传时校验 `file.type.startsWith('image/')` 并写 blob（`index.tsx:321-355`）；提交时逐项转换：http(s) URL 原样透传，存储键经 `dependencies.storage.getImage` 读 blob 转 data URL（`adapters/index.ts:89-96`），最终以 `images: [{image_url}]` 进入请求（`imageGenerationActions.ts:196-206,326-336`）。该行为已被运行验证：`imageGenerationActions.test.ts` 的"reference images as image_url entries"用例（URL 与存储键两种来源）。
 
-**执行位置**（必查 4）——两条路径由 provider 决定（`shouldUseAsyncPath` 仅 ChatboxAI 走异步，`imageGenerationActions.ts:42-44`）：
+**执行位置**——两条路径由 provider 决定（`shouldUseAsyncPath` 仅 ChatboxAI 走异步，`imageGenerationActions.ts:42-44`）：
 
 1. **异步路径**（ChatboxAI）：`POST /api/images/async_generations` 提交，返回 task_id 与 items 数组（`packages/remote.ts:1145-1168`）；客户端不直接渲染，只轮询 `GET /api/images/async_generations/{taskId}`，`IMAGE_GENERATION_POLL_INTERVAL_MS = 2000`（`remote.ts:1195-1219`）。接口 schema 注释明确：结构预留数组但产品功能层不支持一次异步生成多张图，后端现阶段写死 item 为 1（`remote.ts:1135-1137`）。
 2. **直接路径**（OpenAI/Gemini/自定义 Gemini）：`model.paint` 在客户端逐张调用——Gemini 走 `generateText` + `responseModalities: ['TEXT','IMAGE']`（`gemini.ts:98-145`），ChatboxAI 网关的 Gemini 模型走 `streamText` 流式收集图片文件（`chatboxai.ts:320-371`），ChatboxAI 的 `apiStyle` 非 google 模型走 `/api/ai/paint`（`chatboxai.ts:409-442`）。两条调用均设 `maxRetries: 0`，注释明确"Image generation is billable; network-error retries could double-charge"（`chatboxai.ts:358-359`、`gemini.ts:132-133`）。参考图在 Gemini 路径下拼入消息内容（text+image 交替），OpenAI/DALL-E 路径经 `images` 字段发送。
 
-## 3. 任务状态、异步回调与取消（必查 7）
+## 3. 任务状态、异步回调与取消
 
 **状态机**：本地四态 `pending -> generating -> done | error`；`generateImages` 渐进更新——轮询中一旦有新图完成就立即写入 `generatedImages`（`imageGenerationActions.ts:239-254`），终态按 items 结果折叠（`:256-276`）；直接路径回调里逐张写 blob 并 `addGeneratedImage`（`:355-363`），终态按返回数量判定部分失败（`:366-387`）。聊天侧 `ToolCallPartUI` 另有 pending/generating 的"等待后台回调"渲染状态，见第 6 节。
 
@@ -99,7 +99,7 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 
 **失败**：异步路径把失败 item 的 `error_message / error_code / uuid` 折叠进记录（`:58-68,262-276`）；ChatboxAI API 层错误经 `BaseError.code`（数字）保留（`:46-56`）。运行验证：`imageGenerationActions.test.ts` 覆盖了结构化错误码（20004）、内容审核失败 item 映射、缩略图与原文分离、resume 终态回写。
 
-## 4. 结果、历史、资产与工程持久化（必查 8）
+## 4. 结果、历史、资产与工程持久化
 
 **记录持久化**：`ImageGenerationStorage` 接口（`storage/ImageGenerationStorage.ts:7-15`）两个实现——IndexedDB（桌面 `desktop_platform.ts:363-368`、Web `web_platform.ts:207-212`，库名 `chatbox-image-generation`、`createdAt` 索引）与 SQLite（移动 `mobile_platform.ts:323-328`，`SQLiteImageGenerationStorage.ts:36-70` 建表 + `addColumnIfNotExists` 迁移 + 时间索引）。记录也纳入数据迁移流程（`stores/migration.ts:523`）。
 
@@ -111,7 +111,7 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 
 **历史与分页**：`useImageGenerationHistory` 每页 20 条、cursor 分页、5 分钟 staleTime（`imageGenerationStore.ts:60-74`）；历史面板按记录列出 prompt/模型/时间，可点击载入（`index.tsx:457-466`）、删除（`index.tsx:482-489`）、加载更多（`:476-480`）。
 
-## 5. 预览、编辑、重试、分支与复用（必查 6）
+## 5. 预览、编辑、重试、分支与复用
 
 - **预览**：`GeneratedImagesGallery`（photoswipe 全屏、按实际宽高自适应、移动端 1:1 封面）；`blobToDataUrl` 兼容 jpeg/png base64（`-components/constants.ts:21-27`）；加载失败显示占位并可点击重试（`GeneratedImagesGallery.tsx:207-224`）。
 - **导出**：全屏与缩略图两处下载，URL 走 `platform.exporter.exportByUrl`，本机键走 `exportImageFile`（`GeneratedImagesGallery.tsx:52-71,176-188`）。
@@ -120,13 +120,13 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 - **分支**：无显式分支 UI；DAG（parentIds）在数据层保留多父迭代关系，本次未找到以 DAG 为面的导航/画布，仅历史列表线性呈现。
 - **复用**：三处——"用作参考"（下一轮输入，`index.tsx:577`）、历史点击重新载入 prompt/参考图（`:457-466`）、聊天消息内结果图以 `ImageGenerationResultGallery` 展示并进入消息资产体系（`components/chat/ImageGenerationResultGallery.tsx`）。
 
-## 6. Agent 回流、插件与外部依赖（必查 9、10）
+## 6. Agent 回流、插件与外部依赖
 
 **Agent 触发与回流**：聊天内的 `chatbox image generate`（`packages/chatbox-cli/images.ts:344-351`）是后台任务式入口：审批通过后（`requestAppActionApproval`，`:252-287`，审批详情含 provider/model/count/风格与计费归属 `chatbox_quota | provider`，ChatboxAI 附加剩余图片配额与 compute points 比例）用 `startImageGeneration` 发起，并在 `onRecordCreated` 钩子里把 `{signature, recordId, startedAt}` 持久化到 `chatbox-cli:image-generation-execution:<sessionId>:<toolCallId>`（`:291-316`），形成"同一 tool call 幂等绑定"（`cacheExecution` + 签名校验，`:130-152,221-240`；跨重启从持久化元数据恢复，`:229-240`）。完成后经 `queueImageTaskCompletion` 以 `type: 'image_generation'` 后台任务通知回填原会话（`image-task-follow-up.ts:23-46`）；`ToolCallPartUI` 渲染等待卡并支持在中断后从聊天内恢复（`ToolCallPartUI.tsx:1585-1598,1632-1648`，恢复按钮仅当记录有 taskId；无 taskId 或记录丢失判为不可恢复）。Agent 还可读历史：`chatbox image status|history|models`（`images.ts:356-392`），`compactRecord` 返回带 `wait` 提示（callback/manual_resume/manual_retry）的精简记录。
 
-**外部依赖边界**（必查 10）：无 ComfyUI/FFmpeg/自有渲染器/文件服务。依赖面为：ChatboxAI API（异步任务、/api/ai/paint、模型 manifest 网关）、OpenAI/Gemini 官方 SDK 直连、本地 IndexedDB/SQLite 与 blob 存储。远程 manifest 与异步任务均依赖 ChatboxAI 后端可用性（离线不可用，本次未运行验证）。
+**外部依赖边界**：无 ComfyUI/FFmpeg/自有渲染器/文件服务。依赖面为：ChatboxAI API（异步任务、/api/ai/paint、模型 manifest 网关）、OpenAI/Gemini 官方 SDK 直连、本地 IndexedDB/SQLite 与 blob 存储。远程 manifest 与异步任务均依赖 ChatboxAI 后端可用性（离线不可用，本次未运行验证）。
 
-## 7. 权限、资源边界与失败恢复（必查 11）
+## 7. 权限、资源边界与失败恢复
 
 - **计费与凭据**：ChatboxAI 路径必须持 licenseKey（`getLicenseKey` 抛错，`imageGenerationActions.ts:34-40`），UI 层在未登录时 toast 拦截（`index.tsx:373-376`）；OpenAI OAuth 会话被排除出图像模型目录（见第 2 节）。
 - **输入限额**：参考图 ≤ 14 张且仅 `image/*`（`constants.ts:1`、`index.tsx:324,328`）；CLI 侧 prompt ≤ 8000 字符、count 1–4、--style 白名单（`images.ts:161,165,168-170`）。
@@ -136,23 +136,6 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 - **文件/进程权限**：本次范围内无文件系统直写（导出经平台 exporter）、无子进程、无沙箱执行；超出本文范围。
 
 ## 8. 设计取舍、已确认边界与未验证事项
-
-### 必查问题落点
-
-| # | 问题 | 落点 |
-|---|---|---|
-| 1 | 用户目标 | 生成图像并保留可复用记录（M1 工作站），见结论摘要与 §1 |
-| 2 | 入口触发者 | 用户工作台路由 + 聊天 Agent 工具（chatbox image generate），§1、§6 |
-| 3 | 核心事实对象 | `ImageGeneration` 记录（含 parentIds/source/taskId），§1 |
-| 4 | 执行位置 | ChatboxAI 服务端异步+客户端轮询；OpenAI/Gemini 客户端直连，§2 |
-| 5 | 参数/参考图/能力 | 模型目录规则、比例族、参考图 base64 化、`maxRetries:0`，§2 |
-| 6 | 结果复用 | 全屏/下载/用作参考/历史载入/聊天展示，§5 |
-| 7 | 异步任务语义 | 2s 轮询、Abort 取消、Resume 按 taskId 取回、Retry 全新发起，§3 |
-| 8 | 资产命名/去重/来源 | picture: 键、按记录 id 命名、无内容去重、引用计数 blob GC + parentIds DAG，§4 |
-| 9 | Agent 能力 | image 命令族（generate/status/history/models）、审批、后台回填、聊天内恢复，§6 |
-| 10 | 外部依赖边界 | ChatboxAI API + AI SDK 直连；无 ComfyUI/FFmpeg/文件服务，§6 |
-| 11 | 权限与限额 | license 门禁、OAuth 排除、14 张参考图、count/prompt 上限、单并发，§7 |
-| 12 | 证据区分 | 正文就近标注；本表后文"未验证事项"集中列出 |
 
 ### 设计取舍与已确认边界
 

@@ -14,7 +14,7 @@
 
 ## 1. 结论摘要
 
-AIO Hub 的 Agent 不是单独的一段 system prompt，而是一个可保存、可切换的对话配置集合。它把以下几层合并到 `AgentBaseConfig`：
+AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把以下几层合并到 `AgentBaseConfig`：
 
 1. **人格与上下文**：名称、描述、分类、标签、预设消息树、开场白、用户档案、世界书、会话变量。
 2. **模型偏好**：指定模型/渠道（实例字段）、temperature、maxTokens 以及其他 LLM 参数、思考块识别、上下文后处理和富文本显示规则。
@@ -23,7 +23,7 @@ AIO Hub 的 Agent 不是单独的一段 system prompt，而是一个可保存、
 
 因此，AIO Hub 的“角色”可以同时是普通助手、固定人格、专家工作流、世界模拟器或带工具的 Agent。角色气质主要由预设消息和示例对话决定；工具、知识库和虚拟时间等字段则决定它在运行时能做什么。
 
-从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 `ChatAgent`，模型选择、采样参数、上下文限制/压缩和预设消息会随 Agent 配置持久化，而不是只在当前聊天窗口临时生效。
+从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 `ChatAgent`，模型选择、采样参数、上下文限制/压缩和预设消息随 Agent 配置持久化，不在当前聊天窗口临时生效。
 
 在本次十六个项目的统一调查范围内，AIO Hub 是**一体化 Agent 预设配置能力最强、编辑入口最完整**的项目。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层；AIO 则把消息配方、模型与参数、知识、工具、变量、资产和显示规则集中在同一个 Agent 对象及其编辑器中。
 
@@ -128,7 +128,7 @@ LLM Chat 的右侧栏（`LeftSidebar.vue`，组件类名为 `right-sidebar`）�
 
 `presetGroups` 可以把若干消息做成复选组（`checkbox`）或单选组（`radio`），并通过组级 `enabled` 开关决定是否参与上下文。适合把“说话风格”“当前场景”“可选身份”“输出协议”等提示块做成可切换模块。
 
-组不是仅用于视觉整理的文件夹，而是会改变有效提示词集合：
+组会改变有效提示词集合：
 
 - **多选组**：组内每条消息保留独立开关，可启用任意组合；
 - **单选组**：切换一条消息时，同组其他消息会被关闭，组内同时最多一条生效；
@@ -147,7 +147,7 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 - 内容编辑使用 Monaco，并提供编辑、宏处理后纯文本预览和 Markdown/富文本渲染预览三种模式；
 - 工具栏可插入宏、会话变量和 Recall/知识库占位符（占位符编辑器为 `RecallPlaceholderEditor`，按集合 ID 配置），也能为消息选择 Agent 私有资产附件；
 - 预设消息本身可独立复制或导入导出为 JSON/YAML；v2 格式同时保存 `groups` 与 `messages`，不必导出整个 Agent；
-- 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，而不是把来源字段直接摊到主编辑器中。
+- 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，不把来源字段直接摊到主编辑器中。
 
 这解释了 AIO 与 SillyTavern 的体验差异：酒馆的 Prompt Manager 也支持拖拽、逐条开关、角色、相对/深度注入、注入顺序和 generation trigger，表达力并不弱；但它还同时暴露 `marker`、`system_prompt`、`forbid_overrides`、extension source 等内部语义，并与角色卡和采样 Preset 分离。AIO 的字段同样很多，但大部分被包装成消息、组、匹配规则和注入策略四类直接可见对象，用户更容易理解“当前到底启用了哪套上下文”。
 
@@ -185,7 +185,7 @@ Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/P
 
 ### 4.3 模型参数编辑器的实际分组与语义
 
-侧边栏和 Agent 编辑器共用 `ModelParametersEditor`，界面不是把所有类型字段无条件展示，而是根据 Profile 类型和模型 `capabilities` 动态过滤。可见分组如下：
+侧边栏和 Agent 编辑器共用 `ModelParametersEditor`，界面根据 Profile 类型和模型 `capabilities` 动态过滤可见字段。分组如下：
 
 | UI 分组 | 主要字段 | 说明 |
 | --- | --- | --- |
@@ -202,7 +202,7 @@ Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/P
 
 ### 4.4 上下文压缩配置（`parameters.contextCompression`）
 
-压缩设置确实属于 Agent 的 `parameters`，并由侧边栏“参数 → 上下文压缩”直接编辑，而不是聊天全局设置。可持久化字段及默认值为：
+压缩设置确实属于 Agent 的 `parameters`，由侧边栏“参数 → 上下文压缩”直接编辑，不属于聊天全局设置。可持久化字段及默认值为：
 
 | 字段 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -344,7 +344,7 @@ AIO Hub 的架构文档把三层分得很清楚：
 | 世界/场景模拟 | 艾尔德拉大陆 | 世界观百科 + NPC 档案 + 行动选项 + 虚拟时间 | 连续叙事、状态一致性、沉浸感 |
 | 配置向导 | `agent-config-wizard.ts` | 结构化 system prompt + 工具策略 + 读写审批拆分 | 解释、创建、导入和修改其他 Agent |
 
-典型偏好不是由一个 `personality` 字段表达，而是分散在 system prompt、few-shot、温度、开场白、世界书/知识库和输出指南中。
+典型偏好没有独立的 `personality` 字段，分散在 system prompt、few-shot、温度、开场白、世界书/知识库和输出指南中。
 
 ## 9. 持久化、导入导出与会话绑定
 

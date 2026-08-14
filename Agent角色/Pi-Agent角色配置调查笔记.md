@@ -47,7 +47,7 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 
 - **创建**：角色即文件，用户直接编辑/新建 `.pi/SYSTEM.md`、`APPEND_SYSTEM.md`、`AGENTS.md`、skills 等；`/reload` 命令重新加载全部资源（`slash-commands.ts:40`），无需重启会话。
 - **复制/导入**：无角色复制、导入导出；`/export`（HTML/JSONL）导出的是会话本身。
-- **绑定**：不是角色绑定会话，而是**资源按 cwd 解析**：`ResourceLoader` 每次 `load()` 以当前会话 cwd 发现上下文文件（`resource-loader.ts:514-524`），切换目录（`/new`、`/resume` 跨 cwd、fork）后重建 runtime 即换一套上下文（`agent-session-runtime.ts:214-221`）。同一会话内不存在运行时切换角色入口。
+- **绑定**：角色不绑定会话，**资源按 cwd 解析**：`ResourceLoader` 每次 `load()` 以当前会话 cwd 发现上下文文件（`resource-loader.ts:514-524`），切换目录（`/new`、`/resume` 跨 cwd、fork）后重建 runtime 即换一套上下文（`agent-session-runtime.ts:214-221`）。同一会话内不存在运行时切换角色入口。
 
 ## 3. 提示词字段与最终拼装顺序
 
@@ -62,7 +62,7 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 
 - **角色级绑定**：无角色→模型绑定；模型/思考等级是**会话级**状态（`agent.state.model/thinkingLevel`），切换时写 `model_change`/`thinking_level_change` 会话条目（`session-manager.ts:58-67`），`/model`、Ctrl+P 切换（`agent-session.ts:1594` 附近）。
 - **默认值**：设置项 `defaultProvider/defaultModel/defaultThinkingLevel`（`settings-manager.ts:91-93`）；初始模型选择优先级为 CLI > scoped models > 设置默认 > 按 `defaultModelPerProvider` 匹配首个可用模型（`model-resolver.ts:620-700`）。`defaultThinkingLevel` 默认 `"medium"`（`defaults.ts:3`），模型不支持时 `clampThinkingLevel` 收敛（`models.ts:913-932`）。
-- **其他生成参数**：无角色级温度/输出格式；Provider 请求层支持 `samplingParams`（透传给 OpenAI-compatible 服务，`packages/ai/src/types.ts:174-188`）与 `thinkingBudgets`，但绑定在模型元数据/设置而不是角色上。
+- **其他生成参数**：无角色级温度/输出格式；Provider 请求层支持 `samplingParams`（透传给 OpenAI-compatible 服务，`packages/ai/src/types.ts:174-188`）与 `thinkingBudgets`，但绑定在模型元数据/设置，不绑定在角色上。
 
 ## 5. 工具、知识库、记忆与子 Agent
 
@@ -88,7 +88,7 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 - **UI**：`/settings` 选择器可改默认 Provider/模型/思考等级等；无角色编辑 UI。`/model`、`/scoped-models` 命令（slash-commands.ts:21-22）；无 `/skills` 内置命令（skills 经 `/skill:name` 调用）。
 - **运行时可见性**：footer 显示当前模型/状态（`components/footer.ts`）；`/session` 显示统计；`agent.state.systemPrompt` 可通过扩展读取（`extensions/types.ts:706`），HTML 导出可见全文。**当前生效提示词无内置查看命令**——本次未找到类似 `/system-prompt` 的展示入口。
 - **历史快照**：assistant 消息持久化 provider/model/usage（`packages/ai/src/types.ts:415-430`，`AssistantMessage` 带 `api/provider/model/responseModel/usage/stopReason`，无采样参数），会话条目记模型切换；`model_change` 条目只记 provider+modelId（`session-manager.ts:63-67`）；system prompt 本体不随会话条目保存。
-- **重试/重新生成**：无用户级 retry/regenerate 命令（`core/slash-commands.ts:19-41` 的 BUILTIN_SLASH_COMMANDS 无此项；grep `resend|replay|regenerate` 无命中）；全部 retry 是瞬时错误的自动重试（`agent-session.ts:2683-2747` `_scheduleRetry`/`_prepareRetryableError`），同上下文重发同轮请求，无兄弟分支、无参数快照。人工"重新生成"的最近似路径是 `/fork`/`/clone`（slash-commands.ts:31-32）从旧 user 消息重开分支，但那是新建会话分支而非同节点重试。
+- **重试/重新生成**：无用户级 retry/regenerate 命令（`core/slash-commands.ts:19-41` 的 BUILTIN_SLASH_COMMANDS 无此项；grep `resend|replay|regenerate` 无命中）；全部 retry 是瞬时错误的自动重试（`agent-session.ts:2683-2747` `_scheduleRetry`/`_prepareRetryableError`），同上下文重发同轮请求，无兄弟分支、无参数快照。人工"重新生成"的最近似路径是 `/fork`/`/clone`（slash-commands.ts:31-32）从旧 user 消息重开分支，但那是新建会话分支，不是同节点重试。
 
 ## 9. 设计取舍与已确认边界
 

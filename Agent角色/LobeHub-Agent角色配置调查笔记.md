@@ -58,7 +58,7 @@ MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包
 
 **fewShots 的消费缺口**：`fewShots` 在 `src/` 与 `packages/agent-runtime/` **零命中**；`apps/server` 侧有三处命中——`globalConfig/parseDefaultAgent.test.ts`（默认 Agent 解析测试）、`routers/lambda/agentGroup.ts`（群组 Agent 结构）、`services/agentEvalRun/index.ts`（评估运行读取配置），均非 UI 编辑或请求注入路径。DB schema 列与市场导入映射（examples→fewShots）仅提供字段定义与导入来源。因此横向比较时应把 fewShots 视为"字段存在、消费未确认"（且服务端仅配置/评估侧读取）。
 
-`openingMessage`/`openingQuestions` 只存于 agents 表（`packages/database/src/schemas/agent.ts:73`），topics/messages 表无开场白列；展示是运行时实时渲染（空话题才显示，`src/features/Conversation/ChatList/index.tsx:199` 附近），从不写入消息历史，也不存在 AIO Hub 式"开场白固化"状态机。openingQuestions 可编辑（#18003）：AgentSetting 提供 `AgentOpening` 分区（`src/features/AgentSetting/AgentOpening/OpeningMessage.tsx` + `OpeningQuestions.tsx`，含 FollowUpChips 调整），编辑的是 agent 配置而非消息历史，"开场白不落库"的结论不受影响。
+`openingMessage`/`openingQuestions` 只存于 agents 表（`packages/database/src/schemas/agent.ts:73`），topics/messages 表无开场白列；展示是运行时实时渲染（空话题才显示，`src/features/Conversation/ChatList/index.tsx:199` 附近），从不写入消息历史，也不存在 AIO Hub 式"开场白固化"状态机。openingQuestions 可编辑（#18003）：AgentSetting 提供 `AgentOpening` 分区（`src/features/AgentSetting/AgentOpening/OpeningMessage.tsx` + `OpeningQuestions.tsx`，含 FollowUpChips 调整），编辑的是 agent 配置，不是消息历史，"开场白不落库"的结论不受影响。
 
 ### 3.3 输入模板
 
@@ -165,7 +165,7 @@ interface LobeAgentConfig {
 - `{ identifier, mode: 'auto' }`：自动激活，由 Agent 决定是否使用；
 - `{ identifier, mode: 'disabled' }`：在此 Agent 中禁用该插件。
 
-推荐用 `getActivePluginIds()`、`getPinnedPluginIds()`、`getDisabledPluginIds()`、`getPluginMode()` 等帮助函数操作，而非直接读取字段。
+推荐用 `getActivePluginIds()`、`getPinnedPluginIds()`、`getDisabledPluginIds()`、`getPluginMode()` 等帮助函数操作，不要直接读取字段。
 
 ### 5.2 知识库
 

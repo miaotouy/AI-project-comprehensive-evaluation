@@ -20,7 +20,7 @@ Jan 的“角色”即 `Assistant` 实体：**每个助手一个目录一个 JSO
 
 1. `Assistant` 含 `model`、`instructions?`、`tools?: AssistantTool[]`、`file_ids`；web 侧另有形状不同的 `Assistant` 类型（含 `parameters`，无 `model/tools/file_ids`）——两侧类型不一致。
 2. 迁移 v2 写入 Menlo Research 指令与 `DEFAULT_PARAMETERS = {temperature:0.7, top_k:20, top_p:0.8, repeat_penalty:1.12}`；迁移 v3 去掉身份前缀。
-3. 线程绑定是“嵌入快照”而非引用：`ThreadAssistantInfo` 把 name/model/instructions/tools 拷贝进 thread；无助手时写入 `{id:'model-only', name:'Model'}`。
+3. 线程绑定保存“嵌入快照”，不持有引用：`ThreadAssistantInfo` 把 name/model/instructions/tools 拷贝进 thread；无助手时写入 `{id:'model-only', name:'Model'}`。
 4. system prompt 由 `renderInstructions(threadAssistant.instructions)` 生成，`{{current_date}}` 用 UTC 长月份替换；线程有助手且非 `model-only` 时才采用其推理参数。
 5. 默认助手带一个 `type:'retrieval'` 且 `enabled:false` 的工具定义（top_k=2、chunk_size=1024、chunk_overlap=64、retrieval_template）——RAG 工具能力挂靠在助手工具声明上。
 
@@ -38,7 +38,7 @@ AssistantSwitcher / AssistantsMenu 选择助手
       （web-app/src/lib/custom-chat-transport.ts:1229-1240，见 Chat 笔记 §3.2）
 ```
 
-- 快照语义：切换助手改写的是线程内嵌快照而非全局 assistant 对象；`SamplerPopover.tsx:106` 在线程内编辑参数时同样走 `updateCurrentThreadAssistant`。
+- 快照语义：切换助手改写线程内嵌快照，不动全局 assistant 对象；`SamplerPopover.tsx:106` 在线程内编辑参数时同样走 `updateCurrentThreadAssistant`。
 - 无助手（`model-only`）时 `instructions` 为空、systemMessage 为 undefined，请求不带助手指令（threads/default.ts:86-91）。
 - 生效边界：指令与推理参数走线程快照；助手的 `model:'*'` 与模型能力（tools/vision）的运行时解析关系未逐项核对（见 §6 未验证）。
 

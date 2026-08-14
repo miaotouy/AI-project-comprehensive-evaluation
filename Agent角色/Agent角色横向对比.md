@@ -63,7 +63,7 @@
 9. **无角色实体、文件约定型：Pi。** 角色能力由 `SYSTEM.md`（整篇替换默认提示词）、`APPEND_SYSTEM.md`（追加）、`AGENTS.md/CLAUDE.md` 祖先链（`<project_context>` 块）与 skills 文件组合，全部按会话 cwd 在启动时解析；模型/思考等级是会话级状态，默认值来自全局+项目设置。没有任何角色对象、角色 UI 或角色导入导出，system prompt 本体不随会话条目保存。
 10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为 `opencode.json` 的 `agent` 字段与 `{agent,agents}/**/*.md`（带 frontmatter，mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、model/variant/temperature/top_p、permission 规则与 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
 
-最关键的横向差异不是“能否填写 system prompt”，而是**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。Hermes Agent 介于后两者之间：人格配置是全局当前值，但会话会记录构建好的 system prompt（hash 去重）与模型快照，而运行时注入的人格文本不随轨迹保存。
+最关键的横向差异在于：**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。Hermes Agent 介于后两者之间：人格配置是全局当前值，但会话会记录构建好的 system prompt（hash 去重）与模型快照，而运行时注入的人格文本不随轨迹保存。
 
 若单独比较**预设可配置范围与日常编辑体验**，结论会与“社区生态成熟度”不同：AIO Hub 是当前样本中最强的一体化候选。它把消息角色、顺序、锚点/深度、模型匹配、消息组、宏、变量、知识库占位符、资产附件、模型参数和工具策略放在同一个 Agent 编辑流程里；其中消息组可设多选或单选，并有组级总开关和侧边栏快速切换。它还自带世界书编辑器与运行时，支持关键词/正则、selective、概率、扫描深度、递归、过滤、包含组与 depth 注入等可执行子集。SillyTavern 的优势仍是角色卡标准、社区资产、传统角色扮演工作流、扩展事件和 World Info 全语义覆盖；这不能简化为“AIO 的角色能力远弱于酒馆”，也不能反过来用 AIO 的配置聚合优势否定酒馆生态。
 
@@ -131,7 +131,7 @@ Pi 介于“全局当前值”与“运行时引用”之间：提示词文件�
 
 OpenCode 属于“运行时引用”的变体：会话只保存 agent 名字与当时的 model 快照，下一轮生成时按当前配置重新构建 agent 与权限；但每条消息额外带 agent/model 字段，使历史渲染仍能显示当时的角色与模型，而 Manifold Desktop 与 Pi 都做不到这一点。
 
-AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍会随 Agent 同步；第一次发送后，全部开场白分支固化为会话消息。其余 Agent 配置在每次发送、续写和重新生成时重新读取，重新生成则基于同一用户节点创建新的助手兄弟分支。这种设计优先支持在相同历史下修改 Agent 后即时对比，而不是把会话做成完整角色版本快照。
+AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍会随 Agent 同步；第一次发送后，全部开场白分支固化为会话消息。其余 Agent 配置在每次发送、续写和重新生成时重新读取，重新生成则基于同一用户节点创建新的助手兄弟分支。这种设计优先支持在相同历史下修改 Agent 后即时对比，不把会话做成完整角色版本快照。
 
 其余项目可归入或接近上述类别：Cherry Studio 和 LobeHub 是运行时引用（每次请求重读 Assistant/Agent 当前配置，消息另存作者/模型快照）；DeepChat 是“创建时快照 + 工具实时”的混合（systemPrompt/生成参数在会话创建时快照进 session 行，工具与记忆策略按 agent_id 实时重读）；SillyTavern 是“创建时快照 + 每轮重读”的混合（开场白随 JSONL 固化且 tainted 阻止回写，每次生成重读角色卡）；VCPChat 发送使用内存缓存引用、重新生成时重读最新配置并截断重建；VCPToolBox 以内存映射 + 热重载接近运行时引用但没有任何消息级快照；Manifold Desktop 确认连消息本身都不落盘。
 
@@ -257,7 +257,7 @@ SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享�
 - **需要角色内容交换**：SillyTavern 的社区规范最明确，AIO Hub 的包覆盖资产和运行配置更广。两者之间仍需处理模型参数、消息位置和权限语义的差异。
 - **需要服务端多 Agent 编排**：DeepChat、LobeHub、VCPToolBox 和 AstrBot 都有相关入口，但 subagent slot、异构 Agent、AgentAssistant 委托和 Persona router 是不同机制，不能只用“支持多 Agent”合并评价。
 - **只需要所有聊天共用一条指令**：Manifold Desktop 的全局模型足够直接，但缺乏角色选择、会话级复现和能力隔离；Hermes Agent 也以全局提示词为基础，但 `agent.system_prompt`/`SOUL.md` 有 personalities 选择与 Profile 级隔离作为补充。
-- **提示词即文件、随项目分发**：Pi 是十六个项目中唯一把整条角色链路做成普通 Markdown 文件的项目——SYSTEM.md/AGENTS.md 可进 git、按目录作用域天然隔离，代价是没有角色选择、导入格式、字段校验或运行时可见性。OpenCode 同样支持 `{agent,agents}/**/*.md`（frontmatter 角色文件，可进 git），但它是配置对象而非纯文件约定：还接受 opencode.json 字段、提供角色选择 UI 与权限/参数绑定，markdown 只是载体之一。
+- **提示词即文件、随项目分发**：Pi 是十六个项目中唯一把整条角色链路做成普通 Markdown 文件的项目——SYSTEM.md/AGENTS.md 可进 git、按目录作用域天然隔离，代价是没有角色选择、导入格式、字段校验或运行时可见性。OpenCode 同样支持 `{agent,agents}/**/*.md`（frontmatter 角色文件，可进 git），但它是配置对象，不是纯文件约定：还接受 opencode.json 字段、提供角色选择 UI 与权限/参数绑定，markdown 只是载体之一。
 
 ## 已确认边界与证据缺口
 

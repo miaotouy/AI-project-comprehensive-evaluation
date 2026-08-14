@@ -63,7 +63,7 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 
 ## 4. 提示词字段与最终拼装顺序
 
-角色配置中的 `systemPrompt` 不是单独注入的字符串，而是作为 system prompt 的第一段进入最终请求。证据链：
+角色配置中的 `systemPrompt` 作为 system prompt 的第一段进入最终请求。证据链：
 
 1. `PromptAssemblyService.build`（`src/main/agent/deepchat/runtime/promptAssemblyService.ts:59-74`）把会话的 `configuredPrompt`（即 Agent 配置的 system prompt，或会话级覆盖后的值）作为 `basePrompt` 传给 `buildSystemPromptWithSkills`。
 2. `buildSystemPromptWithSkills`（`src/main/agent/deepchat/resources/systemPromptBuilder.ts:89-274`）按固定顺序拼接：`basePrompt`（角色 systemPrompt，:260，位于最前）→ 运行时能力提示 runtimePrompt（:261）→ 环境提示 envPrompt（:262，含 provider/model/workdir/当前时间）→ Skills 元数据（:263）→ 已激活 Skill 内容（:264）→ 工具使用说明 toolingPrompt（:265，来自 `ToolService.buildToolSystemPrompt`）→ orchestration 策略（:266）→ 权限规则（:267）→ 验证策略（:268）。各段以空行连接（`composePromptSections`，:312-317）。
@@ -101,7 +101,7 @@ parent_session_id + subagent_meta_json
 orchestration_policy (explicit | proactive)
 ```
 
-创建 session 时这些字段与 Agent 选择一并写入（`:137-196`）。这表示角色配置不是每次请求临时读取的名称，而是通过 session agent id、项目路径和会话级覆盖共同生效。`DeepChatToolResolver` 会再次读取 session row，按当前 parent/child 关系计算 tool policy。
+创建 session 时这些字段与 Agent 选择一并写入（`:137-196`）。角色配置通过 session 保存的 agent id、项目路径和会话级覆盖共同生效。`DeepChatToolResolver` 会再次读取 session row，按当前 parent/child 关系计算 tool policy。
 
 ### 7.1 创建时快照与工具/记忆实时重读的混合模型
 
@@ -118,7 +118,7 @@ orchestration_policy (explicit | proactive)
 ### 7.2 消息执行元数据与重新生成语义
 
 - 每条消息保存执行元数据：`MessageMetadata`（`agent-interface.d.ts:375-404`）含 model/provider/token 统计/runId 等；运行时 `process.ts:787-788` 写 `state.metadata.provider/model`，经 `transcript.updateAssistantMetadata`（`session/data/transcript.ts:276-278`）持久化到 `deepchat_messages.metadata`（`deepchatMessages.ts:42-53`），usage 统计也从该字段回读（transcript.ts:1121-1135）。但不包含温度等完整请求参数快照。
-- 重新生成是**破坏性替换**而非分支：`SessionTranscriptMutations.prepareRetryMessage/commitRetryMessage`（`src/main/session/transcriptMutations.ts:39-64`）在 retry 时 `deleteFromOrderSeq` 删除源用户消息起的全部消息再重发（路由 `sessionsRetryMessageRoute`，`renderer/api/SessionClient.ts:214-219`）。活动运行时消息表 `deepchat_messages` 无 parent_id/is_variant；`is_variant` 仅存在于旧 `messages.ts:26`，用于 legacy 导入。
+- 重新生成是**破坏性替换**，不是分支：`SessionTranscriptMutations.prepareRetryMessage/commitRetryMessage`（`src/main/session/transcriptMutations.ts:39-64`）在 retry 时 `deleteFromOrderSeq` 删除源用户消息起的全部消息再重发（路由 `sessionsRetryMessageRoute`，`renderer/api/SessionClient.ts:214-219`）。活动运行时消息表 `deepchat_messages` 无 parent_id/is_variant；`is_variant` 仅存在于旧 `messages.ts:26`，用于 legacy 导入。
 
 ## 8. Subagent slot 与 authority
 
