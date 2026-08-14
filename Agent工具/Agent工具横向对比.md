@@ -141,7 +141,7 @@ Pi 是本地编码 Agent，工具循环内置在 `packages/agent/src/agent-loop.
 
 ### OpenCode
 
-OpenCode 是 Effect 服务化的编码 Agent，工具循环整体让渡给 Vercel AI SDK：`streamText`（`llm.ts:318`）驱动工具选择与执行，opencode 侧通过 `LLMAISDK.toLLMEvents` 消费 `fullStream`（`llm/ai-sdk.ts:76-286`）并持久化 `ToolPart` 四态状态机（`processor.ts:216-419`）。注册与过滤在 `ToolRegistry`（`src/tool/registry.ts:286-335`）：内置 16+1 个工具按模型家族（GPT-5 系切 `apply_patch`/隐藏 edit/write）、provider（websearch 仅 opencode 或 exa/parallel flag）、client（question 仅 app/cli/desktop）与实验 flag（lsp/plan/execute）过滤；自定义 `{tool,tools}/*.js|ts`、插件 `tool` hook、MCP 工具与 Skill 六路来源汇入。参数校验统一在 `Tool.wrap`（`src/tool/tool.ts:99-149`）用 Effect Schema decode，失败转 `InvalidArgumentsError` 以“重写输入”文案回注模型。审批为 allow/ask/deny 三档（`src/permission/index.ts:28-214`），`ask` 阻塞在无超时的 Deferred 上等待 UI 回复，支持 reject/once/always 且 always 级联放行。执行全部在 node 进程内：shell 为普通子进程（无 pty、无沙箱，默认 2 分钟超时 + `external_directory` 检查兜底），MCP stdio 服务器退出时递归杀进程树。结果统一 `truncate.output`（默认 2000 行/50KB）截断并落盘 `tool-output/`。TaskTool 派生子 agent 走新 Session + 权限收窄 + `subagent_depth` 限制，与“无审批子 agent”形态相反。
+OpenCode 是 Effect 服务化的编码 Agent，工具循环整体让渡给 Vercel AI SDK 的 `streamText`（`llm.ts:318`）：工具选择、执行与结果回注都由 SDK 承担，opencode 侧只消费 fullStream 事件并持久化 ToolPart 状态机。审批为 allow/ask/deny 三档，ask 阻塞在无超时的 Deferred 上等待 UI 回复。执行全部在 node 主进程内：shell 为普通子进程，无 pty、无沙箱，默认 2 分钟超时外加 `external_directory` 检查兜底；MCP stdio 服务器退出时递归杀进程树。结果统一按默认 2000 行/50KB 截断并落盘 `tool-output/`。注册来源、过滤组合与参数校验细节见 [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md)。
 
 ### SillyTavern
 

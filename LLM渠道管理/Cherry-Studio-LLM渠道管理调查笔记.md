@@ -363,7 +363,11 @@ maxRetries: maxRetries ?? 0
 
 即 SDK 层默认不重试（`buildAgentParams.ts:583`）。调用方可以通过 `requestOptions.maxRetries` 覆盖，但 SDK 重试仍绑定已经解析完成的同一 Provider、Endpoint、Key 和模型；它不会重新执行渠道决策。
 
-**用户可配置重试/fallback（`12498d68ec`，model-retry）**：聊天生成入口用 ai-retry 的 `createRetryableWrap`（`src/main/ai/runtime/aiSdk/retry/createRetryableWrap.ts`）包住模型——同一模型对瞬态 API 错误（429/503/529 等）按策略重试，并可按 `buildFallbackModels`（`retry/buildFallbackModels.ts`）解析出的 fallback 模型列表接管失败调用（解析时按能力过滤：function-calling、视觉、PDF、原生文件支持等不匹配的 fallback 会被跳过）。策略来自偏好组 `chat.retry.*`：`chat.retry.enabled` 默认 false、`chat.retry.max_attempts` 默认 3（范围 1-10），另有退避开关与 fallback 模型 ID 列表两项（`retryPolicy.ts:14-25`，`preferenceSchemas.ts:194-200,616-619`）。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧 `maxRetries` 被置 0，避免双重重试（`AiService.ts:565-601`）。重试/切换过程以瞬时 `data-retry` part 实时呈现在消息里（持久化前剥离，见消息渲染器笔记）。因此：
+**用户可配置重试/fallback（`12498d68ec`，model-retry）**：重试默认只作用于同一模型，失败后可在配置的候补模型中换兼容者接管。聊天生成入口用 ai-retry 的 `createRetryableWrap` 包住模型调用（`src/main/ai/runtime/aiSdk/retry/`），同一模型对 429/503/529 等瞬态 API 错误按策略重试；启用 fallback 时，由同目录的 `buildFallbackModels` 解析出的候补模型列表接管失败调用，解析时按能力过滤，function-calling、视觉、PDF、原生文件支持等不匹配的候补会被跳过。
+
+重试与 fallback 的开关和参数都通过偏好配置控制，集中在偏好组 `chat.retry.*` 之下：`chat.retry.enabled` 默认关闭，`chat.retry.max_attempts` 默认 3、范围 1-10，另有退避开关与 fallback 模型 ID 列表两项。相关 schema 见 `retryPolicy.ts:14-25、preferenceSchemas.ts:194-200,616-619`。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧同一参数被置 0，避免两层重试叠加（`AiService.ts:565-601`）。
+
+重试与切换过程只在消息流中实时可见，持久化前会被剥离：该过程以瞬时 `data-retry` part 呈现在消息里（见消息渲染器笔记）。因此：
 
 - "普通聊天默认不重试"（SDK 层）仍成立；
 - "没有跨 Provider、跨模型自动 failover"改为：**默认没有**，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；

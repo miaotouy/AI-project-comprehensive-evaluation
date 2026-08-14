@@ -342,7 +342,27 @@ Desktop Push 同时是一种显示语法和流式副作用协议。
 
 完整 Markdown 路径只把块转成“已推送到桌面画布”的状态卡。流式路径则在 chunk 级维护 `desktopPushStates`：识别开始标签、缓冲内容、二次验证内容前缀、创建 widget、定期 append，并在结束标记或长时间无新 token 时 finalize。
 
-聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。流式拦截器为 `processDesktopPushToken`（`streamManager.js:1898-1906`），前缀白名单（`streamManager.js:21`）为 `<!doctype`、`<div`、`<section`、`<article`、`<main`、`<header`、`<nav`、`<aside`、`<canvas`、`<svg`、`<style`、`target:`、`<!--`；发送节流 100ms、空闲 150 秒超时。
+聊天累积文本仍保留完整开始/结束块，供最终渲染生成可解释的占位卡；桌面 IPC 的增量发送则由单独状态机完成。同一原始协议由此产生两个投影：聊天记录中的说明性 UI，以及桌面画布中的实际内容。
+
+流式拦截器 `processDesktopPushToken`（`streamManager.js:1898-1906`）在创建 widget 前对内容前缀做二次验证，只接受文档声明、常见语义容器、绘图元素、样式和目标指令等前缀；完整前缀白名单定义于 `streamManager.js:21`，逐行列于下方：
+
+```text
+<!doctype
+<div
+<section
+<article
+<main
+<header
+<nav
+<aside
+<canvas
+<svg
+<style
+target:
+<!--
+```
+
+发送另有 100ms 节流和 150 秒空闲超时。
 
 ### 5.6 附件打开的安全分支与音频播放器
 

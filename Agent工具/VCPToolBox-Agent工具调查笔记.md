@@ -214,7 +214,22 @@ WebSocket 服务收到 `tool_approval_response` 消息时，**只要消息来自
 
 ### 6.4 Node/Python/native 入口
 
-`entryPoint.type` 可以是 `nodejs`（`command: "node xxx.js"`）；仓库内也存在 Python 插件（如 `SciCalculator` 有专门的预热逻辑 `prewarmPythonPlugins()`，`Plugin.js:583` 起，用 `spawn('python', ['-c', 'import sympy...'])` 预热科学计算库）和 Rust 原生模块（`rust-vexus-lite`，通过 Dockerfile 编译为 `.node` N-API addon，供向量检索使用，不是通过 `plugin-manifest.json` 的 `entryPoint` 机制加载，而是被 Node 主进程直接 `require`）。另有两类 Rust **二进制插件**以 Node 包装器为 manifest 入口：`CodeSearcher`（`c4c4d00`→`1ae9b63c` 起 entryPoint 由直接执行 exe 改为 `node CodeSearcher.js`，包装器按 `win32/linux/darwin × x64/arm64` 三元组在候选路径中选原生二进制再 spawn，`Plugin/CodeSearcher/CodeSearcher.js:10-61`）与 `DailyNoteSearcher`（hybridservice 常驻 Rust HTTP 服务，JS 桥同样按平台选二进制并带 instance-id/关闭令牌的健康与优雅退出，`Plugin/DailyNoteSearcher/DailyNoteSearcher.js:42-87,290-345`）。环境变量传递给子进程插件时，除插件自身 `config.env` 外，主服务额外注入 `PROJECT_BASE_PATH`、`VCP_REQUEST_IP`、`SERVER_PORT`、`PYTHONIOENCODING=utf-8`,若 `requiresAdmin` 则注入 `DECRYPTED_AUTH_CODE`，若为 `asynchronous` 类型则注入 `CALLBACK_BASE_URL`/`PLUGIN_NAME_FOR_CALLBACK`（`Plugin.js:1494-1566`）。
+Node 插件在 manifest 中以 `entryPoint.type: nodejs` 声明入口类型，并用 `command: "node xxx.js"` 指定启动命令。主服务随后按协议类型把该命令拆成可执行文件与参数后 spawn 子进程（`Plugin.js:1577`）。
+
+Python 插件在 manifest 中通过入口类型声明语言，执行方式与 Node 插件一致、同样由主服务 spawn 子进程，差别在于多一步预热：服务器启动阶段调用 `prewarmPythonPlugins()`（`Plugin.js:583` 起），为 `SciCalculator` spawn 一个 python 子进程预先导入 sympy、scipy、numpy 等科学计算库，避免首次调用时的导入耗时。
+
+`rust-vexus-lite` 是原生模块特例，加载完全绕开 manifest 的入口声明：它在镜像构建阶段被编译为 `.node`（N-API addon），运行时由主进程直接 `require`，供记忆与向量检索相关模块使用。
+
+另有两类 Rust 二进制插件不把原生二进制直接作为 manifest 入口，而以 Node 包装器为入口，由包装器负责拉起原生进程：
+
+- **`CodeSearcher`**：入口命令由直接执行 exe 改为 `node CodeSearcher.js`（提交范围 `c4c4d00`→`1ae9b63c`），包装器按操作系统与架构（win32/linux/darwin 与 x64/arm64）组合在候选路径中定位原生二进制再 spawn（`Plugin/CodeSearcher/CodeSearcher.js:10-61`）。
+- **`DailyNoteSearcher`**：`hybridservice` 常驻模式，JS 桥在进程内启动并管理 Rust HTTP 服务，同样按操作系统与架构选择二进制，并以 instance-id 与关闭令牌做健康检查与优雅退出（`Plugin/DailyNoteSearcher/DailyNoteSearcher.js:42-87,290-345`）。
+
+主服务 spawn 子进程插件时，除插件自身的 `config.env` 外，还会按三类条件追加环境变量——运行上下文类、管理员校验类与异步回调类；合并逻辑见 `Plugin.js:1494-1566`。
+
+- **运行上下文类**：注入 `PROJECT_BASE_PATH`、`VCP_REQUEST_IP`、`SERVER_PORT`，并统一追加 `PYTHONIOENCODING=utf-8`。
+- **`requiresAdmin`**：注入 `DECRYPTED_AUTH_CODE`。
+- **`asynchronous`**：注入 `CALLBACK_BASE_URL`、`PLUGIN_NAME_FOR_CALLBACK`。
 
 ### 6.5 `requiresAdmin` 的实际生效点
 

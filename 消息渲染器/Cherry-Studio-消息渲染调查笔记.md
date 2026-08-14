@@ -432,7 +432,14 @@ MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki �
 
 ### HTML artifact 预览
 
-Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。`HtmlPreviewFrame.tsx:10` 的默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（常量 `HTML_PREVIEW_IFRAME_SANDBOX`），iframe 通过 `srcDoc` 注入内容。聊天内 artifact 的实际调用点会按用途覆盖默认值：`HtmlArtifactView` 的 `AdaptiveHtmlPreview` 对 fragment 或未同意交互的 document 显式传 `sandbox="allow-same-origin"` 与严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`（`HtmlArtifactView.tsx:465-471`）；同意交互后的 document 走沙箱 webview（安全细节与运行分级见生成式输出与运行时笔记）。主窗口在 `windowRegistry.ts:88` 关闭 `webSecurity` 与 `sandbox`、开启 `webviewTag`；preload 在 `preload.ts:362-363` 暴露 `window.electron` 和完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。预览的承载方式与安全边界随内容形态和交互状态分四种情形：
+
+- 默认 iframe：`HtmlPreviewFrame.tsx:10` 的默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（常量 `HTML_PREVIEW_IFRAME_SANDBOX`），iframe 通过 `srcDoc` 注入内容。
+- 受限预览：fragment 或未同意交互的 document 走 `HtmlArtifactView.tsx:465-471` 的 `AdaptiveHtmlPreview`，显式传 `sandbox="allow-same-origin"` 与严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`。
+- 交互预览：用户同意交互后的 document 不再走受限 iframe，而是切入沙箱 webview 运行；其安全细节与运行分级见生成式输出与运行时笔记。
+- 主窗口边界：主窗口在 `windowRegistry.ts:88` 关闭 `webSecurity` 与沙箱、开启 webview 标签，以宽权限承载上面三类内嵌页面；配套 preload 在 `preload.ts:362-363` 暴露 `window.electron` 与完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+
+四种边界以“由紧到松、各层分别承载”的方式共存：预览内容按形态与交互状态在默认最小权限、受限预览、放开后的沙箱 webview 之间切换，主窗口则始终以宽权限提供运行底座。
 
 ### 平滑文本播放
 
