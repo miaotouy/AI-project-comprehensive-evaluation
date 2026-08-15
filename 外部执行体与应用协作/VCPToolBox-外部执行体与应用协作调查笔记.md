@@ -59,13 +59,31 @@ AICodeWorker 使用 jobId 管理异步 CLI 任务。分布式节点以 WebSocket
 
 ## 执行、回流与控制语义
 
-外部执行结果可同步返回、轮询 job、WebSocket 推送或经 `{{VCP_ASYNC_RESULT}}` 回注。跨节点路径有 `cancel_tool`，SnowBridge 另有 `vcp_tool_status/result/cancel_ack` 帧；浏览器路径返回页面快照、截图和动作结果；SSH 路径按会话流返回输出；人类工具 API 复用 Bearer 鉴权和审批链（鉴权在 `/v1/*` 全局中间件层）。AICodeWorker 的取消、SSH 会话中断与断线竞争语义未运行验证。
+外部执行结果可同步返回、轮询 job、WebSocket 推送或经 `{{VCP_ASYNC_RESULT}}` 占位符回注。各接入路径的回流与取消语义如下：
+
+- 跨节点：`cancel_tool` 传播；SnowBridge 另有 `vcp_tool_status/result/cancel_ack` 帧
+- 浏览器：返回页面快照、截图和动作结果
+- SSH：按会话流返回输出
+- 人类工具 API：复用 Bearer 鉴权和审批链（鉴权在 `/v1/*` 全局中间件层）
+
+AICodeWorker 的取消、SSH 会话中断与断线竞争语义未运行验证。
 
 产品表面（dashboard/管理面板）显示节点连接、任务面板与工具审批请求；执行位置（本地/节点/SSH 主机/浏览器）按接入点分别展示，无统一连接管理页。外部输入按不可信处理：工具调用统一过 `toolApprovalManager`，文件请求有速率与并发限制，浏览器限制在 localhost 绑定范围，但私网/云元数据地址防护本次未在 `browserRuntimeManager` 中找到，不构成已确认的安全边界。
 
 ## 权限、凭据与治理边界
 
-不同接入点的治理并不统一：工具审批是全局面（`toolApprovalManager` + `toolApprovalConfig.json` 的 approveAll/approvalList/SilentReject），`/v1/human/tool` 只是触发源之一，审批请求经 WebSocket 广播到管理面板；人类工具 API 有 Bearer；浏览器 runtime 默认关闭、绑定 localhost 且有 managed token 刷新，私网/云元数据限制未确认；WebSocket 节点依赖服务端连接身份，SnowBridge 另有 bridge access token；SSH 凭据按主机配置保存，刷新与作用域未验证；MCP/邮箱/外部检索插件各自保存配置。不能将这些插件推断为 LobeHub 式统一 Connector 账号系统。
+不同接入点的治理并不统一，逐项对照如下：
+
+| 接入点 | 鉴权/治理 |
+|---|---|
+| 工具审批（全局） | `toolApprovalManager` + `toolApprovalConfig.json` 的 `approveAll`/`approvalList`/`SilentReject` 策略；`/v1/human/tool` 只是触发源，审批请求经 WebSocket 广播到管理面板 |
+| 人类工具 API | Bearer 鉴权 |
+| 浏览器 runtime | 默认关闭、绑定 localhost，managed token 可刷新；私网/云元数据限制未确认 |
+| WebSocket 节点 | 依赖服务端连接身份，SnowBridge 另有 bridge access token |
+| SSH | 凭据按主机配置保存，刷新与作用域未验证 |
+| MCP/邮箱/外部检索插件 | 各自保存配置 |
+
+不能将这些插件推断为 LobeHub 式统一 Connector 账号系统。
 
 ## 相邻类目交接
 

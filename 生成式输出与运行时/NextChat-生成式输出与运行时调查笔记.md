@@ -24,32 +24,52 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 **主链路（HTML Artifact：触发 → 生成 → 运行 → 交互 → 保存 → 重新打开）**：
 
-1. **触发**：模型在助手消息中输出 `<!DOCTYPE html>` 开头的裸文本或 ` ```html ` 代码块。`_MarkDownContent` 在渲染前调用 `tryWrapHtmlCode` 把裸 doctype 文本补成代码块（`app/components/markdown.tsx:249-268`）；`PreCode` 挂载后在 `code.language-html` 或 `<!DOCTYPE`/`<svg`/`<?xml` 前缀命中时提取 `htmlCode`（`app/components/markdown.tsx:83-100`），600ms 防抖。开关为全局 `config.enableArtifacts` 与会话 mask 的 `mask.enableArtifacts` 双重允许（`markdown.tsx:102-104`；`app/store/config.ts:54`；`app/store/mask.ts:21`）。
-2. **生成**：流式 SSE 逐 token 拼接文本，`onUpdate` 整体覆盖 `botMessage.content`（`app/store/chat.ts:464-472`）；流结束 `key` 从 `"loading"` 变 `"done"` 触发 Markdown 重挂载并重新提取（`app/components/chat.tsx:1970-1972`）。
-3. **运行**：`HTMLPreview` 把源码注入 iframe `srcDoc`，同时注入一段 ResizeObserver 脚本回传高度（`app/components/artifacts.tsx:81-105`），沙箱为 `allow-forms allow-modals allow-scripts`（`artifacts.tsx:100`），外层包 `FullScreen` 容器并附重载按钮与分享按钮（`markdown.tsx:151-171`）。
+1. **触发**：模型在助手消息中输出 `<!DOCTYPE html>` 开头的裸文本或 ` ```html ` 代码块。
+   - 预处理：渲染前调用 `tryWrapHtmlCode` 把裸 doctype 文本补成代码块（`app/components/markdown.tsx:249-268`）；
+   - 探测：`PreCode` 挂载后在语言为 html 或内容以 doctype/svg/xml 前缀开头时提取 HTML 源码（`markdown.tsx:83-100`），600ms 防抖；
+   - 开关：双重允许（判定见 `markdown.tsx:102-104`）——全局 `config.enableArtifacts`（`app/store/config.ts:54`）与会话 mask 的 `mask.enableArtifacts`（`app/store/mask.ts:21`）。
+2. **生成**：流式 SSE 逐 token 拼接文本，`onUpdate` 整体覆盖 `botMessage.content`（`app/store/chat.ts:464-472`）；流结束 `key` 从 `"loading"` 变 `"done"`，触发 Markdown 重挂载并重新提取（`app/components/chat.tsx:1970-1972`）。
+3. **运行**：`HTMLPreview` 把源码注入 iframe 的 `srcDoc`，并注入脚本回传高度（`app/components/artifacts.tsx:81-105`）；沙箱属性为 `allow-forms allow-modals allow-scripts`（`artifacts.tsx:100`）。外层包全屏容器并附重载与分享按钮（`markdown.tsx:151-171`）。
 4. **交互**：页面脚本在 iframe 内运行；用户可操作页面内容、重载（换 key 重建 iframe，`artifacts.tsx:64-68`）、全屏（`app/components/ui-lib.tsx:555`）。无源码编辑。
-5. **保存**：HTML 源码不单独落盘，随消息文本存入 IndexedDB（zustand persist，`app/utils/store.ts:37`、`app/utils/indexedDB-storage.ts`）。分享时 POST 全文到 `/api/artifacts`，服务端以 md5 为 key 写入 Cloudflare KV（`app/api/artifacts/route.ts:12-50`；`artifacts.tsx:127-143`），返回 id 与分享 URL `#/artifacts/<md5>`。
-6. **重新打开**：独立路由 `/artifacts/:id`（`app/components/home.tsx:177-182`）→ `Artifacts` 组件 GET `/api/artifacts?id=` 取回全文（`artifacts.tsx:212-227`）→ 同一 `HTMLPreview` iframe 渲染；另可下载 `.html` 单文件或复制链接（`artifacts.tsx:165-200`）。
+5. **保存**：HTML 源码不单独落盘，随消息文本存入 IndexedDB（zustand persist，`app/utils/store.ts:37`、`app/utils/indexedDB-storage.ts`）。分享时 POST 全文到 `/api/artifacts`，服务端以 md5 为 key 写入 Cloudflare KV（`app/api/artifacts/route.ts:12-50`），返回 id 与分享 URL `#/artifacts/<md5>`。
+6. **重新打开**：独立路由 `/artifacts/:id`（`app/components/home.tsx:177-182`）→ `Artifacts` 组件 GET `/api/artifacts?id=` 取回全文（`artifacts.tsx:212-227`）→ 同一 `HTMLPreview` iframe 渲染。另可下载 `.html` 单文件或复制链接（`artifacts.tsx:165-200`）。
 
 主链已按静态代码走通；未运行验证（见“未验证事项”）。
 
 ## 1. 触发方式、输出协议与对象模型
 
-- **触发方式**：全部为**模型自由文本探测**，无结构化 part、无专用标记语言、无工具调用触发的输出对象。HTML 探测规则见 `markdown.tsx:89-99`；MCP 用 ` ```json:mcp:{clientId}` 代码块信息串触发（`app/mcp/utils.ts:2-8`，属 Agent 工具交点点）。
+- **触发方式**：全部为**模型自由文本探测**，无结构化 part、无专用标记语言、无工具调用触发的输出对象；HTML 探测规则见 `markdown.tsx:89-99`。
+- **Agent 工具交点点**：MCP 用 ` ```json:mcp:{clientId}` 代码块信息串触发（`app/mcp/utils.ts:2-8`），属 Agent 工具类目。
 - **协议鲁棒性**：无协议解析层，因此没有半截流、转义、嵌套处理；误触发仅靠 `enableArtifacts` 开关与“以 doctype/svg/xml 前缀开头”的启发式（`markdown.tsx:94-97`）。裸 HTML 补代码块的正则会忽略已含 ``` 的内容（`markdown.tsx:252-254`）。
-- **对象模型**：**不存在输出对象类型**。消息模型 `ChatMessage` 仅含 `id/role/date/streaming/isError/model/content/tools/audio_url/isMcpResponse`（`app/store/chat.ts:57-66`），无 artifact/object/version 字段。Artifact 的“id”仅在分享时由 `md5(全文)` 生成（`route.ts:14`），内容变化即 id 变化，无版本与状态。事实源单一：**消息文本**。预览 DOM 与 KV 副本都是从消息文本派生的投影。
+- **对象模型**：**不存在输出对象类型**。消息模型 `ChatMessage`（`app/store/chat.ts:57-66`）字段集合为：
+
+  ```text
+  id / role / date / streaming / isError / model / content / tools / audio_url / isMcpResponse
+  ```
+
+  无 artifact/object/version 字段。Artifact 的“id”仅在分享时由 `md5(全文)` 生成（`route.ts:14`），内容变化即 id 变化，无版本与状态。事实源单一：**消息文本**。预览 DOM 与 KV 副本都是从消息文本派生的投影。
 
 ## 2. 增量生成、更新与最终化
 
-- 更新粒度：**整段文本覆盖**。所有平台流式实现均为 `responseText += fetchText; options.onUpdate?.(responseText, fetchText)`（如 `app/client/platforms/baidu.ts:157-178`、`iflytek.ts:117-135`），`onUpdate` 将全文写回 `botMessage.content` 并触发状态更新（`store/chat.ts:464-472`）。无稳定前缀、节点 patch、AST 或文件 diff。
-- 最终化：`onFinish` 置 `streaming=false`、补日期、追加到会话并触发 `onNewMessage`（`store/chat.ts:473-481`）；失败时把错误对象以 JSON 文本追加进消息内容并置 `isError`（`store/chat.ts:498-518`）。中止由 `ChatControllerPool` 与 AbortController 收口。
+- 更新粒度：**整段文本覆盖**。所有平台流式实现均为“响应全文累加 + 回调全文覆盖”模式（如 `app/client/platforms/baidu.ts:157-178`、`iflytek.ts:117-135`）：
+
+  ```ts
+  responseText += fetchText;
+  options.onUpdate?.(responseText, fetchText);
+  ```
+
+  `onUpdate` 将全文写回 `botMessage.content` 并触发状态更新（`store/chat.ts:464-472`）。无稳定前缀、节点 patch、AST 或文件 diff。
+- 最终化（`store/chat.ts:473-518`）：
+  - 正常：`onFinish` 置 `streaming=false`、补日期、追加到会话并触发 `onNewMessage`（:473-481）；
+  - 失败：把错误对象以 JSON 文本追加进消息内容并置 `isError`（:498-518）；
+  - 中止：由 `ChatControllerPool` 与 `AbortController` 收口。
 - Artifact 提取在挂载期一次性执行（`markdown.tsx:107-131` 的 `useEffect` 依赖为空），流式中途的预览内容以“开始挂载时已收到的文本”为准，流结束后随 `key` 变化重挂载再提取（推断：中途更新不会增量刷新 iframe 内容）。
 
 ## 3. 投影表面与多视图关系
 
 - 消息内（inline）：Mermaid 图（`markdown.tsx:28-72`）、HTML 预览嵌于代码块下方（`markdown.tsx:151-171`）。
 - 独立路由（external-ish）：`/artifacts/:id` 是应用内独立页面（`home.tsx:177-182`），不是桌面窗口或外部浏览器；分享链接可贴到任何浏览器打开同部署实例。
-- 同一源码可有多个投影：消息内预览 + 分享页面 + 下载的 `.html` 文件 + KV 副本。四份状态之间**无同步机制**：下载/分享取当前 `htmlCode` 或 `code` 快照（`artifacts.tsx:154,177`），互相独立，任何一方修改都不影响其他。重新打开分享页后用户改动只存在于该 iframe，不会写回消息。
+- 同一源码可有多个投影：消息内预览 + 分享页面 + 下载的 `.html` 文件 + KV 副本。四份状态之间**无同步机制**：下载/分享取当前源码快照（`artifacts.tsx:154,177`），互相独立，任何一方修改都不影响其他。重新打开分享页后用户改动只存在于该 iframe，不会写回消息。
 
 ## 4. 表现类型、依赖与运行环境
 
@@ -80,14 +100,20 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 - **HTML 预览**：执行位置为宿主 DOM 内的沙箱 iframe（`artifacts.tsx:96-104`），sandbox 属性授予 `allow-forms/allow-modals/allow-scripts`；无 `allow-same-origin`（不透明源，无法访问宿主存储，推断）、无 `allow-downloads`、无 `allow-popups`。唯一的宿主桥是高度/标题 postMessage。
 - **插件函数工具**（Agent 工具交点点）：OpenAPI 定义编译为 function-calling 工具（`app/store/plugin.ts`），由浏览器端直接 fetch 外部 API 执行（`app/utils/chat.ts:457-503`），无沙箱；结果文本注入下一轮请求并展示为工具状态卡片（`chat.tsx:1949-1967`）。
-- **MCP**（Agent 工具交点点）：` ```json:mcp:` 代码块触发服务端 `executeMcpAction`（`store/chat.ts:827-856`），经 stdio 子进程连接 MCP server（`app/mcp/client.ts:9-39`），结果作为 `isMcpResponse` 用户消息回流（`store/chat.ts:844-848`）。执行在 Node 服务端进程，非浏览器。
-- **桌面壳**：Tauri 仅提供 `stream_fetch` HTTP 代理命令（`src-tauri/src/main.rs:8`、`src-tauri/src/stream.rs:34-35`），无 webview 专属输出能力；导出图片走 `__TAURI__.dialog.save` + `fs.writeBinaryFile`（`exporter.tsx:457-477`）。
+- **MCP**（Agent 工具交点点）：` ```json:mcp:` 代码块触发服务端 `executeMcpAction`（`store/chat.ts:827-856`）。执行在 Node 服务端进程：经 stdio 子进程连接 MCP server（`app/mcp/client.ts:9-39`），结果作为 `isMcpResponse` 用户消息回流（`store/chat.ts:844-848`）。
+- **桌面壳**：Tauri 仅提供 `stream_fetch` HTTP 代理命令（`src-tauri/src/main.rs:8`、`src-tauri/src/stream.rs:34-35`），无 webview 专属输出能力；导出图片走 Tauri 对话框与二进制写入（`exporter.tsx:457-477`）。
 - 无能力授予/审批模型，无跨域代理策略应用于 iframe 内容。
 
 ## 8. 持久化、恢复、分享与导出
 
 - 消息与 SD draw 列表持久化于 IndexedDB（zustand persist，`utils/store.ts:37`、`store/sd.ts:159-162`）；会话重开自动 rehydrate（`utils/store.ts:39-42`）。
-- Artifact 分享：POST 全文 → KV（md5 key，可选 TTL）；GET 按 id 取回（`route.ts:12-63`）。依赖服务端环境变量 `CLOUDFLARE_ACCOUNT_ID/KV_NAMESPACE_ID/KV_API_KEY/KV_TTL`（`app/config/server.ts:245-248`），未配置时分享不可用（推断，未运行验证）。
+- Artifact 分享：POST 全文 → KV（md5 key，可选 TTL）；GET 按 id 取回（`route.ts:12-63`）。依赖服务端环境变量（`app/config/server.ts:245-248`）：
+
+  ```text
+  CLOUDFLARE_ACCOUNT_ID / KV_NAMESPACE_ID / KV_API_KEY / KV_TTL
+  ```
+
+  未配置时分享不可用（推断，未运行验证）。
 - 导出：会话级导出 Markdown/JSON/长图（`app/components/exporter.tsx:140-197`、`ImagePreviewer`）；Artifact 单文件下载（`artifacts.tsx:176-180`）。均按当前消息文本快照导出，不包含 iframe 运行状态。
 - 删除/迁移：无输出对象删除语义；KV 过期依赖 TTL，消息删除即删除对象。
 
@@ -106,7 +132,14 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 ## 11. 测试、已确认边界与未验证事项
 
-**测试**：仓库 34 个测试文件集中在工具函数与协议解析（`test/`），与输出运行时相关者仅 `extract-mcp-json.test.ts`、`is-mcp-json.test.ts`、`create-message.test.ts`、`format-chunks.test.ts`。**未找到** artifacts 渲染、iframe 沙箱行为、KV 分享、导出、持久化恢复、资源释放等任何测试（检查范围：`test/` 全部文件）。全部结论未经运行验证。
+**测试**：仓库 34 个测试文件集中在工具函数与协议解析（`test/`），与输出运行时相关者仅四个：
+
+- `extract-mcp-json.test.ts`
+- `is-mcp-json.test.ts`
+- `create-message.test.ts`
+- `format-chunks.test.ts`
+
+**未找到** artifacts 渲染、iframe 沙箱行为、KV 分享、导出、持久化恢复、资源释放等任何测试（检查范围：`test/` 全部文件）。全部结论未经运行验证。
 
 **已确认边界（本次搜索范围：`app/`、`src-tauri/`、`docs/`、`README*.md` 全量文本）**：
 

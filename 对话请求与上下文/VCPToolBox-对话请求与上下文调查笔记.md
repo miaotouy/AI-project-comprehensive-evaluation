@@ -65,8 +65,14 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 4. 优先执行 `VCPTavern`。触发器 `{{VCPTavern::Preset...}}` 只从 system 查找（`Plugin/VCPTavern/VCPTavern.js:239-250`），触发器本身及其他消息中的同名残留会被删除（291-310）；预设按 embed → relative → depth 注入，relative/depth 可插入新的消息对象，并可解析 `{{LastChatTime}}`/`{{TimeSinceLastChat}}` 会话时间变量（`Plugin/VCPTavern/VCPTavern.js:419-580` 注入、314-388 时间追踪）。
 5. 若请求模型是语义路由模型，使用 Tavern 注入后的消息选出真实后端模型，再应用模型重定向和思维开关（`modules/chatCompletionHandler.js:911-947`；语义路由实现见 `modules/semanticModelRouter.js`）。
 6. 逐条深拷贝消息并执行变量解析（972-1021）。只有 `system`，或以 `[系统提示:]` / `[系统邀请指令:]` 开头的 user，才有权限展开 Agent/Toolbox（`modules/messageProcessor.js:153`）；整个请求只展开一个 Agent，同名 Toolbox 只展开一次（166-206、208-248）。随后处理时间、环境、SAR、日记/知识库、动态工具、插件描述等其他占位符（`modules/messageProcessor.js:601-871`，SAR 注入 606-674，动态工具与 VCPAllTools 803-812）。
-7. 按配置调用多模态预处理器（`MultiModalProcessor` 优先，否则 `ImageProcessor`），再遍历其余插件 messagePreprocessors（`modules/chatCompletionHandler.js:1023-1061`）。预处理器注册顺序由 `preprocessor_order.json` 中的已知顺序优先，未列出的插件按名称排序追加（`Plugin.js:881-904`，`Array.sort()` 在 899）；当前保存顺序为 `VCPTavern → ImageProcessor → RAGDiaryPlugin → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2`（`preprocessor_order.json`）。因此插件可能修改原消息内容、插入消息，或仅挂载数组元数据。
-8. 后置执行 Detector/SuperDetector（`modules/messageProcessor.js:575-599` 的 `applyDetectorsToMessages`）；最后按开关运行 Role Divider（`modules/chatCompletionHandler.js:1109-1121`，skipCount=1 跳过首条）。Role Divider 识别 `<<<[ROLE_DIVIDE_SYSTEM/ASSISTANT/USER]>>>` 标签拆出新消息，保护 `TOOL_REQUEST` 与 DailyNote 标记块不被拆开（`modules/roleDivider.js:11-27` 标签、101-121 保护块、383-399 process）。
+7. 按配置调用多模态预处理器（`MultiModalProcessor` 优先，否则 `ImageProcessor`），再遍历其余插件 messagePreprocessors（`modules/chatCompletionHandler.js:1023-1061`）。预处理器注册顺序以 `preprocessor_order.json` 中的已知顺序优先，未列出的插件按名称排序追加（`Plugin.js:881-904`，`Array.sort()` 在 899）。当前保存顺序（`preprocessor_order.json`）：
+
+   - VCPTavern → ImageProcessor → RAGDiaryPlugin → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2
+
+   因此插件可能修改原消息内容、插入消息，或仅挂载数组元数据。
+8. 后置处理分两步：
+   - **检测器**：执行 Detector/SuperDetector（`modules/messageProcessor.js:575-599` 的 `applyDetectorsToMessages`）；
+   - **Role Divider**：按开关运行（`modules/chatCompletionHandler.js:1109-1121`，skipCount=1 跳过首条），识别 `<<<[ROLE_DIVIDE_SYSTEM/ASSISTANT/USER]>>>` 标签拆出新消息，并保护 `TOOL_REQUEST` 与 DailyNote 标记块不被拆开（`modules/roleDivider.js:11-27` 标签、101-121 保护块、383-399 process）。
 9. 以处理后的 body 建立首次上游请求，并写入内存 `finalContextStore`（`modules/chatCompletionHandler.js:1142-1148`）。这个快照是**首次 fetch 前**的请求，不包含后续 VCP 工具递归回合；最多保留 5 组（`modules/finalContextStore.js:21`、288-301），并附带 token 统计摘要（含 tiktoken cl100k_base 精确计数与多模态估算，`modules/finalContextStore.js:10-19`、40-133）。
 
 ## 3. 预算、截断与压缩：RAG、时间线与折叠在消息中的实际形态

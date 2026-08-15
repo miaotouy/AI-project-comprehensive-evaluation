@@ -37,21 +37,21 @@ Manifold Desktop 的 Chat 界面是一套较薄的"标签页内存状态"实现�
 
 ## 1. 页面结构、导航与多窗口
 
-- 布局为固定四区：`#tab-bar`、`#main-area`（内含 `#side-panel` 与 `#tab-content`）、`#input-bar`、`#toast-container`（`index.html:18-26`）。
-- `tab-bar.js` 渲染标签条：`role=tablist`/`aria-selected`、每个标签的关闭按钮、末尾 "+" 新建按钮（`:48-81`）。标签类型由 `app.js` 决定：Home 常驻不可关（`:33-44`），chat/terminal/compare 由 `openChatTab/openTerminalTab/openCompareTab` 创建（`:138-174`）。
+- 布局为固定四区：标签条、主区（内含侧栏与标签内容）、输入栏、Toast 容器（`index.html:18-26`）。
+- `tab-bar.js` 渲染标签条：`role=tablist`/`aria-selected`、每个标签的关闭按钮、末尾 "+" 新建按钮（:48-81）。标签类型由 `app.js` 决定：Home 常驻不可关（:33-44），chat/terminal/compare 由三个创建函数生成（:138-174）。
 - 本快照为单 WebView2 窗口（`MainWindow.xaml.cpp:197-236`），未发现多窗口或分离窗口机制（检查范围：前端与 MainWindow 源码，无第二窗口创建点）。
 - 侧栏折叠：`side-panel.js:23-25` 导出 `toggle()` 但全仓库无调用点，未发现折叠入口。
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **侧栏**（`side-panel.js`）：搜索输入（`:43-47`）、New Chat/Terminal 按钮（`:54-55`）、会话列表（`:74-147`）。列表项支持双击标题重命名（`:84-105`，发送 `SAVE_SESSION {title}`，数据语义见会话与消息管理笔记）、悬停显示的删除（×，带确认，`:117-127`）与 MD 导出（`:129-137`）。无置顶、归档、分组或拖放。
+- **侧栏**（`side-panel.js`）：搜索输入（:43-47）、New Chat/Terminal 按钮（:54-55）、会话列表（:74-147）。列表项支持双击标题重命名（:84-105，发送 `SAVE_SESSION {title}`，数据语义见会话与消息管理笔记）、悬停显示的删除（×，带确认，:117-127）与 MD 导出（:129-137）。无置顶、归档、分组或拖放。
 - **Home 页**：Recent Sessions 网格最多 12 条（`home-tab.js:100`）、Import Session 按钮（`:88`）。
-- **搜索浮层**（`search-overlay.js`，Ctrl+F 打开）：300ms 防抖（`:24-32`）、↑↓/Enter/Esc 键盘导航（`:34-58`）、结果点击后关闭浮层并 `openChatTab(item.sessionId)` 定位（`:76-79`）。底层是后端逐文件子串扫描（会话与消息管理笔记第 5 节），无会话内搜索。
+- **搜索浮层**（`search-overlay.js`，Ctrl+F 打开）：300ms 防抖（:24-32）、↑↓/Enter/Esc 键盘导航（:34-58）、结果点击后关闭浮层并 `openChatTab(item.sessionId)` 定位（:76-79）。底层是后端逐文件子串扫描（会话与消息管理笔记第 5 节），无会话内搜索。
 - **现场恢复**：磁盘会话可从侧栏/Home/搜索重新打开并渲染（`chat-tab.js:101-114`）；内存标签关闭后无恢复路径。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- **输入区**：单一全局 `input-bar`（`app.js:26` 创建一次），textarea 自动增高（`input-bar.js:79,186-191`）、Enter 发送 / Shift+Enter 换行（`:73-78`）、字符数/4 的 `~tokens` 估算（`:84-87`）。Home 与 terminal 标签下输入栏不渲染（`:41-42`）。
+- **输入区**：单一全局 `input-bar`（`app.js:26` 创建一次），textarea 自动增高（`input-bar.js:79,186-191`）、Enter 发送 / Shift+Enter 换行（:73-78）、按字符数/4 估算 token 数（:84-87）。Home 与 terminal 标签下输入栏不渲染（:41-42）。
 - **草稿**：不持久化；发送后清空（`:173`）。标签切换时 `setTabType()` 无条件调用 `render()` 重建 DOM（`:32-42`），未发送的文本随重建丢失——此为静态推断（render 清空 innerHTML 后无草稿恢复逻辑）。
 - **提示词库**：输入栏 📋 按钮经 `LIST_PROMPTS` 弹出下拉（`input-bar.js:109-154`）；标记为 system 的提示词替换全局系统提示，其余插入文本（`:133-143`）。
 - **附件**：无附件 UI 入口（后端附件链路未接线，见对话请求与上下文笔记第 9 节）。
@@ -65,7 +65,7 @@ Manifold Desktop 的 Chat 界面是一套较薄的"标签页内存状态"实现�
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **发送**：发送按钮（`input-bar.js:92-97`）→ `doSend` → `app.js:86-123` 加入 `messages[]` 并发送 `CHAT_SEND`；发送后按钮禁用、Cancel 显示（`setStreaming`，`input-bar.js:22-30`）。
+- **发送**：发送按钮（`input-bar.js:92-97`）→ 发送编排（`app.js:86-123`）把用户消息加入 `messages[]` 并发送 `CHAT_SEND`；发送后按钮禁用、Cancel 显示（流式状态复位，`input-bar.js:22-30`）。
 - **流式反馈**：chunk 追加 `streamingText` 并重设 `innerHTML`（`chat-tab.js:42-45`）；首个文本 chunk 的 innerHTML 赋值会移除流式指示器（`:37-44`）；完成时挂 cost badge（`:61-85`）。
 - **滚动**：每个 chunk 无条件滚到底（`chat-tab.js:58`），无"停留在历史位置"的开关。
 - **排队与停止**：无界面级排队指示；停止入口是输入栏 Cancel（`input-bar.js:100-106`）→ `providerApi.cancelChat()`（`app.js:126-129`），停止语义是后端单线程 stop+join（对话请求与上下文笔记第 7 节）。无每标签停止按钮。
@@ -84,7 +84,7 @@ Manifold Desktop 的 Chat 界面是一套较薄的"标签页内存状态"实现�
 
 ## 8. Chat UI 状态所有权与同步
 
-- `messages[]`、`streamingText` 均为 `chat-tab` 组件局部状态（`chat-tab.js:19-22`），标签切换时随组件保留；标签登记在 `app.js` 的 `tabPanes` Map（`:18`）。
+- `messages[]`、`streamingText` 均为 chat-tab 组件局部状态（`chat-tab.js:19-22`），标签切换时随组件保留；标签登记在 `app.js` 的 `tabPanes` Map（:18）。
 - 输入栏状态（provider/model 选择、streaming 标志）是模块级单例（`input-bar.js:4-12`），不随标签区分；草稿不保存。
 - 应用级 `appStreaming` 布尔（`app.js:21`）只用于关闭确认与输入栏状态复位（`:132-135`）。
 - 用量统计存 localStorage（`pricing.js:40-61`）；设置经 `settings-store.js` + 后端 `SAVE_SETTINGS`。

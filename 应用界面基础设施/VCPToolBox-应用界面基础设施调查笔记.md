@@ -22,19 +22,19 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 ## 系统边界与总体装配
 
-**托管方式。** 管理面板由独立进程 `adminServer.js`（监听 PORT+1，`adminServer.js:2-3`）托管 `AdminPanel-Vue/dist` 静态产物（:237-240），非扩展名路径一律回退 `index.html`（history fallback，:242-250），`/AdminPanelLegacy` 保留旧路径兼容（:240,250）；
+**托管方式。** 管理面板由独立进程 `adminServer.js`（监听 PORT+1）托管 `AdminPanel-Vue/dist` 静态产物（:237-240），非扩展名路径一律回退 `index.html`（history fallback，:242-250），`/AdminPanelLegacy` 保留旧路径兼容（:240,250）；
 
 主进程对 `/AdminPanel` 302 重定向（`server.js:837-846`）。物理解耦细节见 [`../仓库分布/VCPToolBox-仓库分布调查笔记.md`](../仓库分布/VCPToolBox-仓库分布调查笔记.md) 与 [`../Chat UI/VCPToolBox-ChatUI调查笔记.md`](<../Chat UI/VCPToolBox-ChatUI调查笔记.md>)。
 
-**前端装配。** `src/main.ts` 顺序为 createApp → 创建 Pinia 与 auth store → setFeedbackSink(feedbackSink)（:20，把命令式反馈总线接到模块级实现）→ setAuthExpiredListener（:21-42，401 时登出并跳转 Login）→ 注册全局 v-lazy 指令（:45）→ mount。`App.vue` 只渲染 `<router-view>`。
+**前端装配。** `src/main.ts` 顺序为：创建应用与 Pinia、初始化鉴权 store、把命令式反馈总线接到模块级实现（setFeedbackSink，:20）、注册 401 自动登出监听（:21-42）、注册全局 v-lazy 指令（:45）后挂载；`App.vue` 只渲染 `router-view`。
 
-**布局 shell。** `MainLayout.vue` 是唯一业务壳（Login 独立路由），挂载 SolarSystemBg、ImmersiveCelestialPanel、顶栏、侧栏、内容区、FeedbackHost、NotificationsDrawer、GlobalCommandPalette（:11-126）。
+**布局 shell。** `MainLayout.vue` 是唯一业务壳（Login 独立路由），挂载星空背景、沉浸观星面板、顶栏、侧栏、内容区、反馈宿主、通知抽屉与全局命令面板（:11-126）。
 
-应用级滚动策略是 **body 滚动锁死、只有 `.content-scroll-region` 滚动**：`useMainLayoutDomEffects.ts:165-166` 挂载时把 body.style.overflow 设为 hidden，内容区独立 overflow-y: auto（`MainLayout.vue:263-274`）。
+应用级滚动策略是 **body 滚动锁死、只有 `.content-scroll-region` 滚动**：`useMainLayoutDomEffects.ts:165-166` 挂载时把 body 滚动设为 hidden，内容区独立滚动（`MainLayout.vue:263-274`）。
 
 **路由与守卫。** 40 条路由来自 `src/app/routes/manifest.ts`，除 login 外全部作为 Main 的子路由（`router/index.ts:28-51`）；beforeEach 统一做鉴权（checkAuth + 5 分钟缓存，`stores/auth.ts:20-26,43-82`），未登录跳 Login 并带安全 redirect（:69-121）；`base.ts` 把 `/AdminPanelLegacy` 路径归一化到 `/AdminPanel`（:14-40）。
 
-**页头动作机制。** `MainLayout.vue:56-63` 提供 `#page-header-actions` 容器，32 个业务页面各自 `Teleport to="#page-header-actions"` 把自己的操作按钮（保存/导入/导出等）挂进统一页头（如 `views/ThemeEditor.vue:3-31`、`views/PluginStore.vue:3`）。
+**页头动作机制。** `MainLayout.vue:56-63` 提供 `#page-header-actions` 容器，32 个业务页面各自 Teleport 把自己的操作按钮（保存/导入/导出等）挂进统一页头（如 `views/ThemeEditor.vue:3-31`、`views/PluginStore.vue:3`）。
 
 **Chat UI 边界。** 按 Chat UI 类目判定，本项目不产出最终用户聊天表面（见前述 ChatUI 笔记），本笔记无聊天主链交点需要记录；Nova 气泡、沉浸观星等装饰元素属 Dashboard 业务，不纳入。
 
@@ -48,7 +48,7 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 设置类页面通过 UiSettings* 系列构成统一的"设置卡片 + 表单分组 + 开关行"骨架。
 - **状态所有权**（按问题 7）：
-  - **全局 Pinia**：`stores/app.ts`（主题、动画开关、沉浸模式、导航项、插件列表与置顶）、`stores/auth.ts`（会话）、`stores/loading.ts`（按 key 计数的加载计数）、`stores/notifications.ts`（通知 WebSocket 连接与列表）、`stores/diary.ts`、`stores/pluginConfig.ts`。
+  - **全局 Pinia**：六个 store，分别负责主题与界面偏好、鉴权会话、按 key 计数的加载计数、通知连接与列表、日记、插件配置（文件：`stores/app.ts`、`stores/auth.ts`、`stores/loading.ts`、`stores/notifications.ts`、`stores/diary.ts`、`stores/pluginConfig.ts`）。
   - **模块级单例（不经 Pinia）**：`platform/feedback/feedbackState.ts` 的 reactive 状态 + 队列，见第 2、3 节。
   - **组件本地 + localStorage**：布局瞬态（菜单开合、移动菜单、命令面板开关）放在 `useMainLayoutControls.ts` 的组件内 ref（:7-16），其中侧栏折叠持久化到 useLocalStorage("sidebarCollapsed")（:9）；偏好类统一走 useLocalStorage（响应式 ref 包装 + storage 事件跨标签同步，`composables/useLocalStorage.ts:80-125`）。
   - **服务端**：插件列表（pluginApi.getPlugins）、通知内容（WebSocket，见第 3 节）来自服务端；主题、侧栏偏好等全部本地。
@@ -59,9 +59,9 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 `src/components/ui/BaseModal.vue` 是页面级内容弹窗的公共底座，消费方 11 处（EmojiGallery 预览、ImageCacheEditor、ThemeEditor 导入/另存、ToolCallRecordsManager 详情、ThinkingChainsEditor、ToolboxManager、GlobalCommandPalette、rag-tuning 两个分析弹窗、DailyNotesManager/PlaceholderViewer 子弹窗等）：
 
-**Portaling。** `<Teleport :to="teleportTo">` 默认 body（:35），外层套 `<Transition name="base-modal-fade">`（:3-11）；面板与遮罩 attrs 通过作用域插槽交给业务层（overlay-attrs/panel-attrs/panel-ref，:61-73）。
+**Portaling。** 用 Teleport 默认挂到 body（:35），外层套过渡动画（:3-11）；面板与遮罩 attrs 通过作用域插槽交给业务层（overlay-attrs/panel-attrs/panel-ref，:61-73）。
 
-**遮罩与 Esc。** 遮罩点击要求 `event.target === event.currentTarget`（点击面板内部不关，:128-138）；Esc 经 overlay 的 onKeydown 处理（:140-145）；两者都受 closeOnBackdrop/closeOnEscape props 控制（默认均 `true`，:36-40）。
+**遮罩与 Esc。** 遮罩点击要求事件目标与遮罩自身相等（点击面板内部不关，:128-138）；Esc 经 overlay 的 onKeydown 处理（:140-145）；两者都受 closeOnBackdrop/closeOnEscape props 控制（默认均 `true`，:36-40）。
 
 **焦点管理。** 打开时记录 previousActiveElement，nextTick 后聚焦面板内第一个可聚焦元素（:94-102,177-200）；Tab 在首尾元素间循环（getFocusableElements 用标准选择器过滤 disabled，:75-92,147-175）；关闭时把焦点归还给触发元素（:194-197）。
 
@@ -75,22 +75,22 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 **总线可替换。** `platform/feedback/feedbackBus.ts` 定义 FeedbackSink 接口（showLoading/showMessage/askConfirm/askInput，:26-35），默认 noopSink 回退到原生 `confirm/prompt`（:37-58），`main.ts:20` 替换为 feedbackState 实现——业务代码只依赖总线，不依赖组件。
 
-**状态与队列。** `feedbackState.ts` 用模块级 reactive 单例承载 loadingCount/message/confirm/input 四个通道；confirm 与 input 都是 **Promise + 队列**（askConfirm 返回 `Promise<boolean>` 入队，:220-229，openNextConfirmRequest 一次只展示一个，:156-173；
+**状态与队列。** `feedbackState.ts` 用模块级 reactive 单例承载 loadingCount/message/confirm/input 四个通道；confirm 与 input 都是 **Promise + 队列**（askConfirm 返回布尔结果的 Promise 入队，:220-229，openNextConfirmRequest 一次只展示一个，:156-173；
 
 input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个（:185-188）。
 
 **渲染层。** `FeedbackHost.vue`（挂在 MainLayout :86）把四个通道渲染为全屏 loading 遮罩、右上角 message 弹条、ConfirmDialog、InputDialog。
 - **ConfirmDialog 与 InputDialog 是独立实现**，不用 BaseModal：均为 Teleport to body + 自己的 overlay（:82-93、:135-146）。
 
-  差异点：InputDialog 有 @keydown.esc 关闭（`InputDialog.vue:11`）、Enter/Ctrl+Enter 提交（:25-26,36）、打开时聚焦并全选输入框（:109-118）；
+  差异点：InputDialog 有 Esc 关闭（`InputDialog.vue:11`）、Enter/Ctrl+Enter 提交（:25-26,36）、打开时聚焦并全选输入框（:109-118）；
 
-  **ConfirmDialog 静态代码中未绑定任何 Esc 处理**（模板只有 `@click.self="handleCancel"`，:10），两者也都没有 Tab 焦点陷阱与滚动锁定——即命令式对话框的键盘关闭与焦点圈与 BaseModal 不一致（运行表现未验证）。层级均为 `calc(var(--z-index-modal) + 1)`（10001，:86/:139），在 BaseModal 之上。
+  **ConfirmDialog 静态代码中未绑定任何 Esc 处理**（模板只有遮罩点击取消，:10），两者也都没有 Tab 焦点陷阱与滚动锁定——即命令式对话框的键盘关闭与焦点圈与 BaseModal 不一致（运行表现未验证）。层级均为 `calc(var(--z-index-modal) + 1)`（10001，:86/:139），在 BaseModal 之上。
 
 ### 下拉菜单、抽屉与命令面板
 
 - **顶栏下拉**（系统/用户菜单）：`TopBar.vue:114-170` 手动开关两个 `.dropdown`，关闭路径有三条：文档级 click 监听（`useMainLayoutDomEffects.ts:113-118` 匹配 `.dropdown` 之外点按）、MainLayout 的 `.dropdown-backdrop` 遮罩（:110-114，z-998）、全局 Esc（`useMainLayoutDomEffects.ts:127-141`）。
 
-**通知抽屉。** `NotificationsDrawer.vue` Teleport 到 body，backdrop 点击关闭（:4-9），`role="dialog" aria-modal`（:15-18），见第 3 节。
+**通知抽屉。** `NotificationsDrawer.vue` Teleport 到 body，backdrop 点击关闭（:4-9），`role="dialog"` aria-modal（:15-18），见第 3 节。
 
 **全局命令面板。** `GlobalCommandPalette.vue` 用 BaseModal 承载，`Ctrl/Cmd+K` 唤起、Esc 关闭（`useMainLayoutDomEffects.ts:121-125`），结果区 `role="listbox"` + 行 `role="option"` + aria-activedescendant（:34,56-78），空结果有专属空态（:46-54）。
 
@@ -128,12 +128,12 @@ input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个�
 
 **权威源与持久化。** 全部主题状态在 **localStorage**（`themeEngine.ts:8-18` 列出全部键），无服务端存储、无系统跟随。模式选项只有 `dark`/`light`（THEME_MODE_OPTIONS，`themeEngine.ts:36-39`）；prefers-color-scheme 仅出现在 `assets/vite.svg` 资产内的 CSS（Grep 依据），JS 中零使用。
 
-**首屏防闪烁。** `index.html:11-21` 内联脚本在应用加载前读 localStorage.theme（兼容旧裸字符串，`stores/app.ts:39-54`）设 data-theme 与 `meta[name="theme-color"]`。
+**首屏防闪烁。** `index.html:11-21` 内联脚本在应用加载前读 localStorage.theme（兼容旧裸字符串，`stores/app.ts:39-54`）设 data-theme 与浏览器主题色 meta。
 
 **token 体系。** `style/index.css` 用 OKLCH 定义 `--*-dark`/`--*-light` 两套变量，:root 默认暗色（:5-56），`html[data-theme="dark"/"light"]` 把语义别名（`--primary-bg` 等）切到对应套并同步 color-scheme（:237-334）；
 
 另有 z-index（:161-169，`--z-index-modal:10000` 等）、圆角、4pt 间距、流体字号 `clamp()`（:202-229）、`--app-viewport-height` 默认 100dvh（:231-235）。
-- **预设与自定义引擎**（`src/features/theme-editor/themeEngine.ts` + `src/style/theme-presets.css`）：**17 个预设**（`themeEngine.ts:146-302`），其中 7 个的色板由 hueColors(h) 色相函数生成 8 个变量（:133-144），editorial-graphite/anthropic 等为特制；
+- **预设与自定义引擎**（`src/features/theme-editor/themeEngine.ts` + `src/style/theme-presets.css`）：**17 个预设**（`themeEngine.ts:146-302`），其中 7 个的色板由色相函数生成 8 个变量（:133-144），editorial-graphite/anthropic 等为特制；
 
   色板实际渲染不靠行内变量，而是 applyThemePreferences 写 data-theme-preset 属性（:895-903）命中 `theme-presets.css` 的 `html[data-theme-preset="..."]` 属性选择器（含 editorial-graphite 的 `[data-theme="light"/"dark"]` 明暗复合选择器与 color-mix 值，:7-224）；
 
@@ -145,7 +145,9 @@ input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个�
 
 **编辑器运行时变量发现与结构 token 锁。** `ThemeEditor.vue` 挂载时 refreshGlobalCssVars（:1282-1292）用 getComputedStyle 枚举 :root 全部 `--*` 变量，按关键字启发式归入内建分组与 10 个扩展分类（resolveGlobalVariableCategoryId，:1030-1102）；
 
-LOCKED_THEME_VAR_RULES（:951-976）把 `--z-index-`/`--app-*`/`--space-*`/`--font-(fluid|size|mono)`/`--transition-`/`--switch-` 类结构 token 锁为只读"受保护变量"（模板 :427-440 展示锁定原因），其余非内建变量以文本输入可调；
+LOCKED_THEME_VAR_RULES（:951-976）把以下前缀类结构 token 锁为只读"受保护变量"（模板 :427-440 展示锁定原因），其余非内建变量以文本输入可调：
+- `--z-index-`、`--app-*`、`--space-*`
+- `--font-(fluid|size|mono)`、`--transition-`、`--switch-`
 
 改动命中当前预设或用户主题的变量时会自动清除预设标记（:1421-1445）。
 
@@ -173,13 +175,13 @@ LOCKED_THEME_VAR_RULES（:951-976）把 `--z-index-`/`--app-*`/`--space-*`/`--fo
 
 **视口高度。** syncViewportHeight 用 visualViewport?.height ?? innerHeight 同步 `--app-viewport-height`（:61-73），配合 @supports (height:100dvh) 默认值（`index.css:231-235`），随 resize/visualViewport change 更新。
 
-**侧栏三态。** 桌面端折叠是**手动命令**（顶栏按钮 + useLocalStorage("sidebarCollapsed")，`useMainLayoutControls.ts:9,36-41`），折叠后可 hover 临时展开（`isHoverEnabled/isHoveringSidebar`，:11，`Sidebar.vue:6-11,80-82`），不随窗口变窄自动折叠；
+**侧栏三态。** 桌面端折叠是**手动命令**（顶栏按钮 + useLocalStorage("sidebarCollapsed")，`useMainLayoutControls.ts:9,36-41`），折叠后可 hover 临时展开（悬停状态标志，:11，`Sidebar.vue:6-11,80-82`），不随窗口变窄自动折叠；
 
 移动端（<768px）侧栏切换为抽屉模式（sidebar-overlay 遮罩 + 顶栏汉堡按钮，`MainLayout.vue:47-52,347-365`，`TopBar.vue:6-14`），路由切换与 Esc 都会关闭（closeTransientUi，`useMainLayoutControls.ts:58-63`）。
 
 **布局外壳。** data-theme-shell-layout（inset 默认 / sidebar）改变容器圆角与贴边策略（`MainLayout.vue:320-345`、`TopBar.vue:336-341`、`Sidebar.vue:268-274`），属主题选项而非自动响应式。
 
-**Dashboard 网格。** 两层机制——卡片内 @container dashboard-card 容器查询断点（520/420/360/280px，`components/dashboard/dashboard-card.css:207-283`，约 14 个卡片消费）；
+**Dashboard 网格。** 两层机制——卡片内容器查询断点（520/420/360/280px，`components/dashboard/dashboard-card.css:207-283`，约 14 个卡片消费）；
 
 网格层用 CSS Grid auto-fit 且通过 getComputedStyle(gridTemplateColumns) 反推列数判定 desktop/tablet/mobile 模式（`Dashboard.vue:319-358`），卡片大小 token `desktopCols/tabletCols/rows` 以自定义属性 `--dashboard-card-cols-desktop/-tablet/--dashboard-card-rows` 下发（:309-317），布局持久化于 localStorage（`useDashboardLayoutV2.ts`，含旧版布局迁移 :130-152）。
 
@@ -193,7 +195,7 @@ LOCKED_THEME_VAR_RULES（:951-976）把 `--z-index-`/`--app-*`/`--space-*`/`--fo
 
 图片懒加载有公共机制：全局指令 v-lazy（`directives/lazy.ts`，IntersectionObserver + rootMargin 50px + 共享 observer + 卸载清理），用于 `ImageCacheEditor.vue:113`、`EmojiGallery.vue:339` 的缩略图。
 
-**上传。** **无公共上传组件**，三处各自实现：①`PluginStore.vue`（`/plugin-store`）——HTML5 拖放 drop zone + 压缩包 `<input type="file">` + webkitdirectory 文件夹选择 + 安装日志面板（:475-502,538-568），拖放视觉反馈是 isDragging 类名切换；
+**上传。** **无公共上传组件**，三处各自实现：①`PluginStore.vue`（`/plugin-store`）——HTML5 拖放 drop zone + 压缩包文件选择 + webkitdirectory 文件夹选择 + 安装日志面板（:475-502,538-568），拖放视觉反馈是 isDragging 类名切换；
 
 ②`EmojiGallery.vue`——图片/压缩包多选、accept 过滤、上传结果与拒绝列表；
 
@@ -225,7 +227,7 @@ LOCKED_THEME_VAR_RULES（:951-976）把 `--z-index-`/`--app-*`/`--space-*`/`--fo
 
 **reduced-motion。** prefers-reduced-motion: reduce 覆盖面广（BaseModal/ConfirmDialog/InputDialog/UiButton/UiInput 等 30+ 组件与页面各有一处，如 `BaseModal.vue:231-236`、`layout.css:1150`）。
 
-**动画体系。** 无动画库（无 framer-motion/GSAP）；全部为 Vue `<Transition>` + CSS（fade/slide/backdrop-fade，`MainLayout.vue:482-513,607-615`）与 @keyframes（spinner、emoji shimmer 等）。
+**动画体系。** 无动画库（无 framer-motion/GSAP）；全部为 Vue 过渡 + CSS（fade/slide/backdrop-fade，`MainLayout.vue:482-513,607-615`）与 @keyframes（spinner、emoji shimmer 等）。
 
 用户级开关 animationsEnabled（localStorage，`app.ts:67`，顶栏系统菜单可切换）控制星空背景（`SolarSystemBg.vue:6`）、Nova 动画（`VcpAnimation.vue:4,453,510,559`）与 dashboard 动画（`useDashboardState.ts:640,742`）。
 

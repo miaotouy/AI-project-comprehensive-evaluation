@@ -18,7 +18,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - **聊天输出对象模型**：消息节点（`ChatMessageNode`）有稳定 ID、来源、角色、状态与丰富元数据，但内容只是一段 `content: string`，不存在独立的 Artifact 对象；HTML 代码块在展示时进入 iframe 沙箱（`HtmlInteractiveViewer`）成为可运行预览，属"展示时物化"，无独立生命周期。
 - **web-canvas**：`{appDataDir}/canvases/projects/{id}/` 下的物理项目 + `.canvas.json` 元数据 + 独立 Git 仓库；Monaco 编辑直接写盘（500ms 防抖），预览 iframe 用 `asset://` 加载入口文件并注入日志/错误捕获脚本。预览只在独立画布窗口中创建；审批钩子不是事务快照，而是先写工作树、拒绝时按 HEAD 回退。
-- **工具结果**：工具调用先经过 `ToolCallingProtocol` 表示层；当前快照的 `SUPPORTED_PROTOCOLS` 只注册 `VcpToolCallingProtocol`，所以实际使用 VCP 文本标记 `<<<[TOOL_REQUEST]>>>`。解析执行后，结果被格式化为文本写入"tool 角色"消息节点内容，随会话 JSON 持久化；结果本身不物化为独立对象，但 web-canvas 的文件操作结果会直接落到物理文件。当前 VCP 是实现范围，不是工具系统的架构上限。
+- **工具结果**：工具调用先经过 `ToolCallingProtocol` 表示层；当前快照的协议注册表只登记 VCP 一种实现，所以实际使用 VCP 文本标记 `<<<[TOOL_REQUEST]>>>`。解析执行后，结果被格式化为文本写入"tool 角色"消息节点内容，随会话 JSON 持久化；结果本身不物化为独立对象，但 web-canvas 的文件操作结果会直接落到物理文件。当前 VCP 是实现范围，不是工具系统的架构上限。
 - **持久化**：聊天会话按会话独立 JSON 文件存储；画布为物理文件 + Git；媒体生成结果通过 `importAssetFromBytes` 进入资产管理系统并带生成来源元数据。
 - **执行位置**：全部在前端 JS（Tauri WebView）内执行；无远端沙箱、无容器、无独立进程执行模型代码。聊天 HTML 预览会注入 iframe CSP；canvas 预览不会，且 scripts + same-origin 使其不能被视为可靠宿主隔离。应用级 CSP 与 fs/asset scope 均较宽（见第 7 节）。
 
@@ -41,13 +41,13 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 本节列出已确认的结构性断点与缺口；均为静态源码确认，未启动 Tauri 应用：
 
-1. **运行时错误闭环在窗口边界断开。** `useCanvasPreview` 只被 `components/window/CanvasWindow.vue` 使用，预览运行在独立 WebView；错误写入该窗口自己的 `useCanvasStore()`。`useCanvasSync` 只同步 `activeCanvasId` 与文件变更通知，不同步 `runtimeErrors`，所以主窗口 `CanvasAgentService.getExtraPromptContext()` 通常看不到预览窗口捕获的错误。此前“错误自动回流模型”的结论只是模块内意图，不是贯通链路。
-2. **审批预览不是可逆事务。** 通用执行器先调用 `onToolCallPreview`，批准后仍会调用真实工具方法（`tool-calling/core/executor.ts:233-287,363-398`）。`apply_canvas_diff` 因而先修改一次、批准后再匹配同一 search 块，第二次通常失败；`write_canvas_file` 会重复写入。拒绝时按当前 Git 状态对已有文件执行 `checkout` 到 HEAD、对未跟踪文件直接删除（`CanvasAgentService.ts:306-330`），会一并丢掉审批前已经存在但尚未提交的用户修改，而不是恢复“本次预览前”的内容。批准路径也没有清理 `previewRequests`。
+1. **运行时错误闭环在窗口边界断开。** 预览引擎 `useCanvasPreview` 只在独立画布窗口（`components/window/CanvasWindow.vue`）中运行，捕获到的错误写入该窗口自己的 store；跨窗口同步 `useCanvasSync` 只传当前画布 ID 与文件变更通知，不传 `runtimeErrors`。主窗口的 Agent 上下文注入 `CanvasAgentService.getExtraPromptContext()` 通常因此看不到预览窗口捕获的错误；此前“错误自动回流模型”的结论只是模块内意图，不是贯通链路。
+2. **审批预览不是可逆事务。** 通用执行器先调用预览钩子 `onToolCallPreview`，批准后仍会调用真实工具方法（`tool-calling/core/executor.ts:233-287,363-398`）：`apply_canvas_diff` 因而被应用两次，第二次匹配同一 search 块通常失败，`write_canvas_file` 则重复写入。拒绝时按当前 Git 状态回退——已有文件检出到 HEAD、未跟踪文件直接删除（`CanvasAgentService.ts:306-330`）——会一并丢掉审批前已存在但未提交的用户修改，而不是恢复“本次预览前”的内容；批准路径也不会清理预览请求记录。
 3. **所谓外部编辑兼容没有实时检测。** 仓库内没有文件系统 watcher 或轮询；预览刷新与 Git 状态更新只由应用内部的 `emitFileChanged`、打开画布和显式操作触发。VSCode 修改文件会落到同一事实源，但当前界面不会自动感知或刷新，需重新打开/触发读取。
 4. **Monaco 防抖写盘有跨文件竞态。** `debouncedWriteFile(content)` 在 500ms 后读取当时的 `activeTab.value`，没有把编辑发生时的路径一同捕获，也未在切换/卸载时 flush/cancel；快速编辑 A 后切到 B，A 的内容可能写入 B（`CanvasEditorPanel.vue:127-139`）。同组件注册的 `store.onFileChanged` 也未在卸载时注销（:169-184）。
 5. **画布状态不是按项目隔离。** `dirtyFiles` 是 store 级单一 `Map`，`refreshGitStatus(canvasId)` 每次整体覆盖它。Agent 绑定画布与 UI 当前画布不同时，`getExtraPromptContext` 虽读取绑定画布的文件树，却可能附带另一画布的未提交文件列表；独立窗口自己的 store 又通常没有刷新这张 Map。
-6. **画布预览没有专用 CSP，且消息校验不足。** `useCanvasPreview` 只注入 `<base>` 和日志脚本；聊天 `HtmlInteractiveViewer` 的 CSP 注入不适用于 canvas。canvas iframe 使用 `allow-scripts allow-same-origin allow-popups`，宿主消息处理只检查 `event.data.type`，不检查 `event.source`/`origin`（`CanvasPreviewPane.vue:23-29,53-57`）。因此“iframe 不授予宿主能力”不能仅凭未显式注入 Tauri bridge 认定；同源脚本可接触宿主窗口对象的风险需要运行验证。
-7. **Agent 文件路径缺少画布根目录约束。** `readPhysicalFile`/`writePhysicalFile`/`deletePhysicalFile` 直接 `join(basePath, filepath)`，未拒绝绝对路径或 `..`，Canvas registry 也没有 `checkSecurityPolicy`。在 Tauri fs scope 允许的范围内，模型提供的路径存在逃出项目目录的静态风险。
+6. **画布预览没有专用 CSP，且宿主消息校验不足。** 预览引擎 `useCanvasPreview` 只注入 `<base>` 与日志捕获脚本，聊天 HTML 沙箱的 CSP 注入不适用于 canvas；其 iframe 同时启用 `allow-scripts` 与 `allow-same-origin`（另含 popups），生成脚本与宿主同源。宿主侧消息处理只检查事件类型字段，不校验来源（`CanvasPreviewPane.vue:23-29,53-57`）。因此“iframe 不授予宿主能力”不能仅凭未显式注入 Tauri bridge 认定；同源脚本可接触宿主窗口对象的风险需要运行验证。
+7. **Agent 文件路径缺少画布根目录约束。** 画布的读写删三个方法（如 `readPhysicalFile`）直接把 Agent 提供的 `filepath` 拼接到项目根路径，未拒绝绝对路径或 `..`，画布注册表也没有安全策略钩子（`checkSecurityPolicy`）。在 Tauri fs scope 允许的范围内，模型提供的路径存在逃出项目目录的静态风险。
 8. **web-canvas 无专项测试。** 目录下没有测试文件；通用工具调用测试也没有覆盖上述预览双执行、拒绝前快照、跨窗口错误同步、跨画布状态、路径约束或编辑器切换竞态。
 
 ## 系统边界与完整主链路
@@ -58,9 +58,9 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 2. **画布层**（`src/tools/web-canvas`）：Agent/用户围绕磁盘项目协作，模型经工具调用直接改文件，Git 追踪版本，iframe 预览并回传运行时错误。
 3. **资产层**（`src/composables/useAssetManager` 等）：媒体生成等产物物化为带元数据的 Asset，可被消息引用（`agent-asset://`、`【file::id】` 占位符）。
 
-**主链一（聊天，静态确认）**：用户在 `ChatArea` 发送 -> `useToolCallOrchestrator.orchestrate` 创建 assistant 节点 -> `useSingleNodeExecutor` 流式请求 -> `useChatResponseHandler` 将 chunk 同时写入 `node.content` 与可重放流源（`useStreamingMessageSources.ts:116` appendStreamingMessageChunk）-> `RichTextRenderer` 以 AST patch 渲染，HTML 代码块进入 `HtmlInteractiveViewer` iframe 沙箱 -> 用户可对消息执行"编辑"（`useBranchManager.editMessage`，`useBranchManager.ts:108`）或"保存到分支" -> `sessionManager.persistSession` 落盘（`useChatStorageSeparated.ts:496`）-> 重新打开会话时从 `{appConfig}/llm-chat/sessions/{id}.json` 加载，HTML 预览从内容重新生成。链路各环节均有源码依据；未运行验证。
+**主链一（聊天，静态确认）**：用户在 `ChatArea` 发送后，编排器创建 assistant 节点，执行器流式请求，响应处理器把 chunk 同时写入节点内容与可重放流源；渲染器以 AST patch 增量更新，HTML 代码块进入 `HtmlInteractiveViewer` iframe 沙箱。消息可"编辑"（`useBranchManager.editMessage`，`useBranchManager.ts:108`）或"保存到分支"，最后由会话管理器落盘（`useChatStorageSeparated.ts:496`）。重新打开会话时从会话 JSON 文件加载（见第 8 节），HTML 预览从内容重新生成。链路各环节均有源码依据；未运行验证。
 
-**主链二（画布，静态确认）**：用户在 `CanvasWorkbench` 创建画布 -> `CanvasService.createCanvas` 从模板复制文件、`git init` + 首次提交（`CanvasService.ts`）-> Monaco 编辑防抖写盘（`CanvasEditorPanel.vue:128`）-> 预览引擎注入 `<base>` 与日志/错误捕获脚本后以 srcdoc 渲染（`useCanvasPreview.ts:47`）-> 提交（`canvasStore.commitChanges`，`canvasStore.ts:402`）/ 丢弃（`discardChanges`，:457）-> 关闭后从索引 `projects.json` + 磁盘元数据重新打开（`loadCanvasList`，:172）。Agent 侧闭环见第 9 节。
+**主链二（画布，静态确认）**：用户在画布工作台创建项目，服务层 `CanvasService.createCanvas` 从模板复制文件并完成 Git 初始化与首次提交；Monaco 编辑防抖写盘（`CanvasEditorPanel.vue:128`），预览引擎注入 base 标签与日志/错误捕获脚本后以 srcdoc 渲染（`useCanvasPreview.ts:47`）。提交与丢弃、关闭后从索引 `projects.json` 重新打开，均由 canvas store 承担（`canvasStore.ts:402,457,172`）。Agent 侧闭环见第 9 节。
 
 **主链三（工具结果，静态确认）**：assistant 流文本 -> 按 Agent 配置经 `ToolCallingProtocol` 路由（当前为 `VcpToolCallingProtocol`）-> 解析请求 -> `processCycle` 审批 + 执行 -> 结果格式化为文本写入 tool 节点（`useToolCallOrchestrator.ts:310-365`）-> 节点随会话持久化；其中 web-canvas 类方法会直接写物理文件。
 
@@ -68,21 +68,21 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 1.1 聊天输出：无独立对象，消息节点即对象
 
-- 触发由用户消息驱动；模型回复文本流式写入 assistant 节点。节点模型 `ChatMessageNode`（`src/tools/llm-chat/types/message.ts:110-416`）具有稳定 `id`、`parentId`、`role`、`status`（generating/complete/error 等）、`metadata`（模型、Agent、usage、推理内容、翻译、工具调用等），但**内容唯一载体是 `content: string`**。没有 Artifact/part 类型的结构化输出对象；`type?: MessageType` 只用于"预设消息/历史占位符"，与生成内容无关。
+- 触发由用户消息驱动；模型回复文本流式写入 assistant 节点。节点模型 `ChatMessageNode`（`src/tools/llm-chat/types/message.ts:110-416`）带稳定 ID、来源、角色、状态与 `metadata`（模型、Agent、usage、推理内容、翻译、工具调用等）等字段。但**内容唯一载体是 `content: string`**，没有 Artifact/part 类型的结构化输出对象；`type?: MessageType` 只用于"预设消息/历史占位符"，与生成内容无关。
 - 与 typed part 类协议相比，聊天内容层采用**自由文本 + 约定标记**：当前 VCP 工具调用块、`<think>` 思考块、HTML 标签、Mermaid 围栏都由渲染器在展示时识别（`rich-text-renderer/ARCHITECTURE.md` §3.2、§5.2），而非发送/存储时的结构化 part。这里的“当前 VCP”只描述工具调用协议的已接入实现，不等于 AIO 的全部输出协议或工具来源。
 - 唯一接近"part 语义"的是 `LlmReasoningArtifact`（`src/llm-apis/common.ts` 相关类型，`message.ts:282`），但它是 DeepSeek/OpenAI/Gemini 推理内容的**回放状态**，供上下文压缩后精确重放推理文本，不是可操作输出对象。
 
 ### 1.2 工具输出：文本结果节点 + 物理副作用
 
-- `tool-calling` 通过 `ToolCallingProtocol` 把工具元数据、调用请求和执行结果与模型通信表示隔开。接口负责工具定义生成、使用说明生成、请求解析和结果格式化；解析后的统一请求仍由协议外的发现、校验、审批、执行和循环引擎处理（`core/protocols/base.ts`、`core/discovery.ts`、`core/engine.ts`、`core/executor.ts`）。因此增加另一种**文本协议**可以复用现有工具目录与执行策略，但当前不是运行期可注册的协议市场，也没有直接覆盖模型 API 的结构化 `tool_calls`。
-- 当前快照只在 `SUPPORTED_PROTOCOLS` 注册 `vcp`，`resolveProtocol()` 对现有配置路由到 `VcpToolCallingProtocol`，`ToolCallConfig.protocol` 也收窄为 `"vcp"`。以下 VCP 标记语法是当前实现事实，不能据此把 AIO 的整体工具架构等同于 VCP。
+- `tool-calling` 通过 `ToolCallingProtocol` 把工具元数据、调用请求和执行结果与模型通信表示隔开：接口负责工具定义生成、使用说明生成、请求解析和结果格式化；解析后的统一请求仍由协议外的发现、校验、审批、执行与循环引擎处理（职责链入口 `core/protocols/base.ts`，其余见文末源码索引）。因此增加另一种**文本协议**可以复用现有工具目录与执行策略，但当前不是运行期可注册的协议市场，也没有直接覆盖模型 API 的结构化 `tool_calls`。
+- 当前快照只在协议注册表 `SUPPORTED_PROTOCOLS` 登记 `vcp` 一种；`resolveProtocol()` 对现有配置一律路由到 `VcpToolCallingProtocol`，配置字段 `ToolCallConfig.protocol` 也收窄为该值。以下 VCP 标记语法是当前实现事实，不能据此把 AIO 的整体工具架构等同于 VCP。
 - 当前 VCP 实现由模型自由文本中的 `<<<[TOOL_REQUEST]>>> ... <<<[END_TOOL_REQUEST]>>>` 标记触发（`src/tools/tool-calling/core/protocols/vcp-protocol.ts`），支持 `TOOL_REQUEST_ESCAPE` 嵌套与转义。
 - 执行结果经 `formatCycleResults` 委托当前协议序列化为文本，写入 role 为 `"tool"` 的消息节点（`useToolCallOrchestrator.ts:325-345`），节点 `metadata.toolCalls[]` 记录每个请求的 requestId/工具名/状态/耗时/原始参数。**结果不物化为独立对象**；若工具本身有物理副作用（如画布写文件），结果对象身份在文件侧。
 - 工具节点可被"重新解析"（`reparseAndOrchestrate`，`useToolCallOrchestrator.ts:449`），即对已有内容重新走工具调用检测与执行，属于后续回合重入入口。
 
 ### 1.3 画布对象模型
 
-- 画布项目有稳定 ID（`cp_{yyyyMMdd}_{shortId}`，`web-canvas/utils/id.ts:22`）、名称、模板、入口文件、创建/更新时间（`.canvas.json` 元数据 + `projects.json` 索引，`web-canvas/ARCHITECTURE.md` §2）。
+- 画布项目有稳定 ID（`cp_{yyyyMMdd}_{shortId}`，`web-canvas/utils/id.ts:22`）、名称、模板、入口文件与创建/更新时间；项目元数据与索引分别落在 `.canvas.json` 与 `projects.json`（`web-canvas/ARCHITECTURE.md` §2）。
 - **事实源是磁盘文件 + Git**：没有影子文件或内存 VFS，编辑即写盘（`web-canvas/ARCHITECTURE.md` §1.2 "Physical-First"）。这保证外部编辑器与应用指向同一文件，却不等于实时同步：当前无文件 watcher/轮询。画布与聊天的衔接有两个用户侧入口：聊天输入区内置"画布控制"（`MiniCanvasControl.vue`，绑定/新建/预览/跳转管理）与输入工具栏的 web-canvas 开关（`MessageInputToolbar.vue:163-196`）；但**没有把聊天中模型生成的 HTML 一键转入画布的通道**（本次未找到此类入口，`rich-text-renderer` 中无 web-canvas 引用）。
 - 项目索引与元数据分离、索引可修复（`repairProject`，`canvasStore.ts:511`）。
 
@@ -90,7 +90,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 2.1 聊天流式
 
-- 逐 token 注入：`useChatResponseHandler` 把流式 chunk 追加到 `node.content`，同时喂给按节点 ID 缓存的可重放流源 `ReplayableMessageStreamSource`（`useStreamingMessageSources.ts:20-89`），渲染器以流式 AST patch 更新（`text-append`/`replace-node`/`insert-after` 等 op，`rich-text-renderer/ARCHITECTURE.md` §3.4）。
+- 逐 token 注入：`useChatResponseHandler` 把流式 chunk 追加到 `node.content`，同时喂给按节点 ID 缓存的可重放流源（`useStreamingMessageSources.ts:20-89`）；渲染器以流式 AST patch 更新，patch 操作形如文本追加、节点替换、后插等（`rich-text-renderer/ARCHITECTURE.md` §3.4）。
 - 渲染器内部是**整段文本重解析 + patch**：V2 自研解析器维护"稳定区/待定区"，稳定区复用已有 AST，待定区每次重解析，经 diff 生成 patch（`core/StreamProcessorV2.ts`）。不是按 AST 节点增量生成，也不是外部 diff/patch 协议。
 - 最终化：请求完成调用 `completeAndDisposeStreamingMessageSource`（`useChatResponseHandler.ts:503`）；失败走 `handleNodeError`（:647），错误写入节点 `metadata.error` 并在 UI 显示可复制错误条；空响应写入 `emptyResponseDiagnostic` 诊断。
 - 网络层流式节流与 VCP 块冲刷由 `core/StreamController.ts` 处理（`rich-text-renderer/ARCHITECTURE.md` §3.4），保证协议块不被平滑拆碎。
@@ -118,16 +118,34 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ## 4. 表现类型、依赖与运行环境
 
-- **表现层次**（`RichTextRenderer`，`src/tools/rich-text-renderer`）：Markdown/GFM（表格、Alert）、KaTeX/MathJax 公式、Mermaid（`MermaidInteractiveViewer`，缩放/下载/分屏）、HTML 深度混合排版（`GenericHtmlNode`/`HtmlBlockNode`）、`<video>`/`<audio>` 拦截为项目播放器、`<details>` 折叠面板、`<style>` 作用域隔离、可交互按钮（`ActionButtonNode`，白名单动作 send/input/copy）、`<svar>` 会话变量徽章、`<think>` 思考块。
+- **表现层次**：渲染器 `RichTextRenderer`（`src/tools/rich-text-renderer`）支持 Markdown/GFM、公式、Mermaid 图表、HTML 深度混合排版、可交互按钮、会话变量徽章与思考块等类型，清单如下：
+
+| 类型 | 说明与入口 |
+|---|---|
+| Markdown/GFM | 表格、Alert 等 |
+| KaTeX/MathJax 公式 | 通用公式语法 |
+| Mermaid 图表 | `MermaidInteractiveViewer`（缩放/下载/分屏） |
+| HTML 深度混合排版 | `GenericHtmlNode`/`HtmlBlockNode`；`<video>`/`<audio>` 拦截为项目播放器、`<details>` 折叠面板、`<style>` 作用域隔离 |
+| 可交互按钮 | `ActionButtonNode`，白名单动作 send/input/copy |
+| 其他标记 | `<svar>` 会话变量徽章、`<think>` 思考块 |
 - **代码块**：CodeMirror 只读查看器（`CodeMirrorSourceViewer.vue`），懒初始化 + `PreCodeNode` 兜底；`html` 语言代码块可切换"预览模式"进入 `HtmlInteractiveViewer` 沙箱（`CodeBlockNode.vue:74-104`），支持内嵌预览 / 弹窗预览 / 无缝模式 / 冻结。
-- **HTML 沙箱**（`HtmlInteractiveViewer.vue`）：srcdoc iframe，`sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"`（:138）；注入 CSP meta（默认 `default-src 'self' 'unsafe-inline' ...`，允许外部脚本时放宽为 `*`，:320-327）；注入日志/错误捕获/交互感知/自适应高度脚本（:335-450）；CDN 本地化（`cdnLocalizer.ts`）替换 jsdelivr/cdnjs/unpkg 等为本地 `public/libs`。
+- **HTML 沙箱**（`HtmlInteractiveViewer.vue`）：srcdoc iframe，配置如下表；此外注入日志/错误捕获/交互感知/自适应高度脚本（:335-450）。
+
+| 项 | 配置 |
+|---|---|
+| sandbox 属性 | `allow-scripts allow-same-origin allow-forms allow-popups allow-modals`（:138） |
+| CSP meta | 默认 `default-src 'self' 'unsafe-inline' ...`，允许外部脚本时放宽为 `*`（:320-327） |
+| CDN 本地化 | `cdnLocalizer.ts` 把 jsdelivr/cdnjs/unpkg 等替换为本地 `public/libs` |
 - **依赖提供**：本地 CDN 资源本地化 + `asset://`/`agent-asset://` 本地资产协议；无语言解释器、无 Python/Node 进程执行。
 - **移动端**：`mobile/src/tools/rich-text-renderer/RichTextRenderer.vue` 是 `marked` 的简单渲染器，HTML 块直接 `v-html`，无沙箱、无 iframe 预览、无 Mermaid/KaTeX（概览结论，未逐行核对其余工具）。
 
 ## 5. 用户交互、事件与错误反馈
 
-- **HTML 沙箱回传**：iframe 通过 `postMessage` 回传 `iframe-log`（console 捕获）、`iframe-height`（自适应高度）、`iframe-mousemove/enter/leave`（悬浮状态）；宿主侧 `handleIframeMessage`（`HtmlInteractiveViewer.vue:517-583`）把 error 级日志收集为 `iframeErrors`（上限 200 条），UI 提供错误浮窗/复制/清空；卸载时主动 `srcdoc=""` + `about:blank` 释放（:596-603）。
-- **画布回传**：独立预览 iframe 回传 `canvas-console` 与 `canvas-runtime-error`（`useCanvasPreview.ts:80-171`）；`useCanvasErrors` 在该窗口的 Pinia store 中做去重、限流、stale 标记（`CanvasWindow.vue:165-198`）。消息处理没有核验 `event.source` 或 `origin`。
+- **HTML 沙箱回传**：iframe 通过 `postMessage` 向宿主回传事件，宿主侧 `handleIframeMessage`（`HtmlInteractiveViewer.vue:517-583`）把 error 级日志收集为 `iframeErrors`（上限 200 条），UI 提供错误浮窗/复制/清空；卸载时清空 srcdoc 并跳转 `about:blank` 释放资源（:596-603）。事件类型：
+  - `iframe-log`：console 捕获
+  - `iframe-height`：自适应高度
+  - `iframe-mousemove`/`enter`/`leave`：悬浮状态
+- **画布回传**：独立预览 iframe 回传两类事件：`canvas-console`（控制台）与 `canvas-runtime-error`（运行时错误）（`useCanvasPreview.ts:80-171`）。`useCanvasErrors` 在该窗口的 Pinia store 中做去重、限流与 stale 标记（`CanvasWindow.vue:165-198`）；宿主消息处理同样未核验事件来源（见“已确认断点与缺口”第 6 点）。
 - **错误反馈去向**：`CanvasAgentService` 确实会从主窗口 store 格式化错误（:96-104），但捕获错误的是独立预览窗口的 store，现有同步协议不传 `runtimeErrors`。因此当前快照只完成“预览 -> 子窗口状态”和“主窗口状态 -> Agent”两段，缺少中间一段，不能确认模型实际收到错误。
 - **运行状态恢复**：`MessageList.vue` 有 keep-alive 滚动位置恢复（:73-99）；画布分离窗口关闭后重新打开时从磁盘重新加载（`CanvasWindow.vue:137-158`）；弹幕覆盖窗等桌面窗不在本类目。
 
@@ -135,23 +153,23 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - **聊天消息编辑**：全文覆盖式编辑（`useBranchManager.editMessage`，`useBranchManager.ts:108-156`），仅限 user/assistant 角色；"保存到分支"复制内容到兄弟节点形成分支（:162-209）。无选区编辑、无结构化 patch、无撤销栈持久化（`useChatStorageSeparated.ts:199-204` 明确移除 history 字段）。版本表达依赖消息树分支语义，属于 Chat 类目，此处只记交接点。
 - **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖；未发现 CRDT、基于 revision 的冲突检测或外部文件 watcher，写盘以"最后写入者"为准。Monaco 防抖回调还存在跨 tab 写错文件的静态竞态（见“已确认断点与缺口”第 4 点）。
-- **版本**：Git 提交/回退/丢弃（`canvasStore.commitChanges` :402、`discardChanges` :457）；`GitInternalService` 提供 init/add/commit/log/checkout/statusMatrix（`GitInternalService.ts:149-234`）。**本次未找到**画布 UI 中的提交历史查看器或 diff 视图组件（`gitLog` 仅存在于服务层，未被组件调用）；Agent 的 `commit_changes`/`discard_changes` 是版本操作入口。
-- **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布侧 `onToolCallPreview` 会在审批前直接写工作树；通用执行器批准后还会再次调用真实方法，使 `apply_canvas_diff` 通常发生第二次匹配失败。拒绝不是恢复审批前快照，而是新文件删除、已有文件 `git checkout` 到 HEAD，可能清除审批前未提交修改（`executor.ts:233-287,363-398`；`CanvasAgentService.ts:270-331`）。
+- **版本**：Git 提交/回退/丢弃走 canvas store（`canvasStore.ts:402,457`）；服务层封装 Git 的初始化、暂存、提交、历史、检出与状态矩阵等操作（`GitInternalService.ts:149-234`）。**本次未找到**画布 UI 中的提交历史查看器或 diff 视图组件（`gitLog` 仅存在于服务层，未被组件调用）。Agent 侧的 `commit_changes`/`discard_changes` 是版本操作入口。
+- **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布侧审批不是可逆事务——审批前直接写工作树、批准后二次执行、拒绝回退到 HEAD 而非预览前快照，细节见“已确认断点与缺口”第 2 点。
 
 ## 7. 能力桥、执行位置与权限范围
 
 - **执行位置**：全部模型输出运行在前端 JS 上下文；工具方法在 Tauri WebView 主窗口执行（`tool-calling/core/executor.ts:177` 起，直接调用 registry 方法），底层文件/Shell 能力经 Tauri plugin（fs、shell、dialog 等，`src-tauri/Cargo.toml`）与 Rust command（画布窗口 `canvas_window.rs`、目录树 `generate_directory_tree`）实现。**未找到**容器/远端沙箱/独立进程执行模型代码的机制。
 - **iframe 沙箱与 IPC 隔离**：聊天 HTML 沙箱和画布预览都没有显式给生成代码注入一套窄 Tauri API，但不能据此断言 canvas 脚本无法触达宿主能力。canvas `srcdoc` 同时启用 `allow-scripts allow-same-origin`，脚本与父窗口同源，可接触父窗口 DOM/全局对象；是否能沿父窗口对象调用 Tauri internals 需运行验证。其 `postMessage` 接收端也未校验 source/origin。
-- **CSP 现状（文档与实现不一致点）**：`src-tauri/tauri.conf.json:15` 设置 `"csp": null`，`index.html:6-8` 的 meta CSP 很宽。聊天 `HtmlInteractiveViewer` 会按预览内容注入 iframe CSP（:320-327），但 **web-canvas 的 `useCanvasPreview` 不注入 CSP**，只注入 `<base>` 与控制台/错误捕获脚本；此前将聊天预览的 CSP 机制推广到 canvas 是错误的。
+- **CSP 现状（文档与实现不一致点）**：`src-tauri/tauri.conf.json:15` 设置 `"csp": null`，`index.html:6-8` 的 meta CSP 很宽。聊天 `HtmlInteractiveViewer` 会按预览内容注入 iframe CSP（:320-327），但 web-canvas 的 `useCanvasPreview` 不注入 CSP，只注入 base 标签与控制台/错误捕获脚本；此前将聊天预览的 CSP 机制推广到 canvas 是错误的。
 - **能力授予**：`executor.ts:156-169` 支持工具级 `checkSecurityPolicy`（block/approve）；Agent 侧按工具/method 的 autoApprove/手动审批矩阵控制（`executor.ts:421-423`）；`aio-file-operator` 另有 whitelist/blacklist 沙箱模式（`src/tools/aio-file-operator/composables/useFileOperator.ts:32`）约束文件操作范围，属工具自身策略。
-- **asset 协议**：`tauri.conf.json:16-23` 启用 assetProtocol，scope 为 `**` + `$APPLOCALDATA`/`$APPDATA`，即 iframe 可经 `asset://` 读取本地资产，范围宽（事实记录，不做整改建议）。
-- **文件路径边界**：canvas 的读写删方法直接把 Agent 提供的 `filepath` 与项目根路径 `join`，没有绝对路径/`..` 拒绝、规范化后前缀校验或工具级 `checkSecurityPolicy`；`src-tauri/capabilities/default.json` 又给读写文本/文件等多项权限配置了 `"**"`，因此画布项目根目录不是已落实的能力边界，存在越出项目的静态风险。
+- **asset 协议**：`tauri.conf.json:16-23` 启用 assetProtocol，scope 为 `**` 加 `$APPLOCALDATA`/`$APPDATA`。即 iframe 可经 `asset://` 读取本地资产，范围宽（事实记录，不做整改建议）。
+- **文件路径边界**：canvas 的读写删方法直接把 Agent 提供的 `filepath` 拼接到项目根路径，未做绝对路径与 `..` 拒绝、规范化后前缀校验或工具级安全策略（`checkSecurityPolicy`；同“已确认断点与缺口”第 7 点）。`src-tauri/capabilities/default.json` 又给读写文本/文件等多项权限配置了 `"**"`，因此画布项目根目录不是已落实的能力边界，存在越出项目的静态风险。
 - **`ActionButtonNode` 窄桥**：模型生成的 `<button>` 只能触发白名单动作 send/input/copy（`ActionButtonNode.vue:28, 93-117`），是唯一"声明式控件 -> 宿主动作"通道，对应 G2 级元素。
 
 ## 8. 持久化、恢复、分享与导出
 
-- **聊天会话**：`{appConfigDir}/llm-chat/sessions/{sessionId}.json` 每会话一文件（`useChatStorageSeparated.ts:98-242`），索引 `sessions-index.json`；保存时内容比对避免无谓写盘；防抖批量保存（:642-660）；目录扫描自愈索引（`syncIndex` :321）。恢复 = 启动加载索引 -> 按需 `loadSession`。导出/分享属 Chat 类目（`llm-chat/components/export/`，本次未展开）。
-- **画布项目**：物理文件 + `.canvas.json` + `projects.json` 索引（原子写、可修复）；健康检查区分 missing/unindexed/corrupted（`CanvasService.performHealthCheck`）。分享/导出途径：`openInVSCode`（`canvasStore.ts:527`）与 Git 提交本身；未找到打包导出/分享链接功能。
+- **聊天会话**：每会话一个 JSON 文件（`{appConfigDir}/llm-chat/sessions/{sessionId}.json`，`useChatStorageSeparated.ts:98-242`），另有 `sessions-index.json` 索引；保存时内容比对避免无谓写盘、防抖批量保存（:642-660）、目录扫描自愈索引（`syncIndex` :321）。恢复 = 启动加载索引 -> 按需 `loadSession`。导出/分享属 Chat 类目，本次未展开。
+- **画布项目**：物理文件 + `.canvas.json` 元数据 + `projects.json` 索引（原子写、可修复）；健康检查区分缺失、未登记、损坏三种状态（`CanvasService.performHealthCheck`）。分享/导出途径为 `openInVSCode`（`canvasStore.ts:527`）与 Git 提交本身；未找到打包导出/分享链接功能。
 - **媒体生成**：结果经 `importAssetFromBytes`/`importAssetFromPath` 进入资产系统（`useMediaGenerationManager.ts:853-886`），origin 标记 `type: "generated"`，并写衍生数据 JSON（:912 起）；消息附件引用这些 Asset，构成"生成 -> 入库 -> 可复用"链（G1 级物化）。
 - **HTML 预览导出**：Blob URL 新窗口打开（`HtmlInteractiveViewer.vue:636-649`），可另存为单文件；无版本概念。
 
@@ -160,14 +178,21 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - **画布（文件闭环成立，运行反馈闭环未贯通）**：
   - 查询：`getExtraPromptContext`（`CanvasAgentService.ts:32-113`）意图注入项目名、入口文件、文件树、未提交变更列表和运行时错误摘要；但 `dirtyFiles` 是全局单 Map，绑定画布与 UI 活动画布不同时可能串项目，独立预览窗口的 `runtimeErrors` 也未同步回主窗口；
   - 读取：`read_canvas_file` 带行号返回（:118-139）；
-  - 定向修改：`apply_canvas_diff`（含策略/行号/警告反馈）、`write_canvas_file`、`create_canvas`、`commit_changes`、`discard_changes`、`clear_runtime_errors`（`web-canvas.registry.ts:84-241`，`agentCallable: true`）；
-  - 身份绑定：三处入口——Agent 设置页的 `canvas-bound-id`（`web-canvas.registry.ts:41-54`）、聊天输入区的 `MiniCanvasControl`（`MiniCanvasControl.vue:70-93` 写入 `toolSettings["web-canvas"].canvasId`）、Agent 工具调用导致隐式建画布后的 `canvas:auto-created` 自动绑定（:125-131）；无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）。绑定能选择同一项目 ID，但不能保证所有 store 派生状态也随该 ID 隔离。
-- **聊天（有限回流）**：模型侧可感知的只有上下文历史（消息文本本身）；"重新解析"与"续写"（`isContinuation`，`message.ts:385-389`）允许对已有节点继续生成。`llm-chat.registry.ts:270-532` 虽有 10 个 `agentCallable: true` 方法，但全部是**智能体管理**（list/search/read/set agent、预设消息 CRUD、`find_replace_in_presets` 对预设消息内容做查找替换、导入导出），**不针对会话中已生成的输出消息**；本次未找到模型对会话消息对象的"列出/读取/定向修改"工具方法。
+  - 定向修改：六个 `agentCallable: true` 的画布方法（`web-canvas.registry.ts:84-241`）：
+    - `apply_canvas_diff`：含策略/行号/警告反馈
+    - `write_canvas_file`
+    - `create_canvas`
+    - `commit_changes`
+    - `discard_changes`
+    - `clear_runtime_errors`
+  - 身份绑定（三个入口）：Agent 设置页的 `canvas-bound-id`（`web-canvas.registry.ts:41-54`）；聊天输入区的 `MiniCanvasControl`（`MiniCanvasControl.vue:70-93`，把所选画布写入工具的 canvasId 设置）；隐式建画布后的 `canvas:auto-created` 自动绑定（:125-131）。
+  - 身份绑定的兜底与限制：无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）；绑定能选择同一项目 ID，但不能保证所有 store 派生状态也随该 ID 隔离。
+- **聊天（有限回流）**：模型侧可感知的只有上下文历史（消息文本本身）；"重新解析"与"续写"（`isContinuation`，`message.ts:385-389`）允许对已有节点继续生成。`llm-chat.registry.ts:270-532` 虽有 10 个 `agentCallable: true` 方法，但全部是**智能体管理**——agent 的列出/搜索/读取/设置、预设消息 CRUD 与查找替换（`find_replace_in_presets`）、导入导出——**不针对会话中已生成的输出消息**；本次未找到模型对会话消息对象的"列出/读取/定向修改"工具方法。
 - **媒体生成**：任务与资产结果关联（`mediaGenStore`），模型不可直接操作资产。
 
 ## 10. 生命周期、资源治理与性能
 
-- **不可见对象**：聊天消息级 `content-visibility: auto` 跳过离屏渲染（`MessageList.vue`，`rich-text-renderer/ARCHITECTURE.md` §3.7）；HTML 预览按消息深度冻结（`MessageContent.vue:846-856` -> `shouldFreeze`），冻结时显示占位并停止 iframe，弹窗打开时内嵌预览冻结避免双份运行（`CodeBlockNode.vue:76-103`）；视口外消息冻结渲染配置（`MessageContent.vue:804-831`）。
+- **不可见对象**：聊天消息级 `content-visibility: auto` 跳过离屏渲染（`MessageList.vue`）。HTML 预览按消息深度冻结（`MessageContent.vue:846-856` 的 `shouldFreeze` 判定）：冻结时显示占位并停止 iframe，弹窗打开时内嵌预览冻结避免双份运行（`CodeBlockNode.vue:76-103`）。视口外消息另有冻结渲染配置（`MessageContent.vue:804-831`）。
 - **释放**：HTML 沙箱卸载时清空 srcdoc/src（`HtmlInteractiveViewer.vue:596-603`）；流源完成即 dispose（`useStreamingMessageSources.ts:131`）；`useMarkdownAst.dispose` + 各节点组件取消异步/释放 Blob URL（`rich-text-renderer/ARCHITECTURE.md` §3.7）；错误列表限额（iframe 200 条、画布 `maxRuntimeErrors` 默认 10）；预览刷新防抖 300ms / 编辑写盘防抖 500ms。
 - **限额**：流式渲染安全护栏（`safetyGuardEnabled`，超限降级停止 patch）；patch 队列上限 1000；token 限制与上下文压缩属 Chat 类目。
 - **长时间会话/多画布**：画布窗口注册表（`canvas_window.rs:32-33`）与关闭清理（:160-173）保证窗口生命周期登记；未发现对多画布并发 Agent 会话的显式配额。
@@ -233,7 +258,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - `src/tools/rich-text-renderer/components/nodes/ActionButtonNode.vue:28,93-117`：白名单交互按钮
 - `src/tools/llm-chat/components/message-input/MiniCanvasControl.vue:70-131`：聊天输入区的画布绑定/新建/预览控制（`canvas:auto-created` 自动绑定）
 - `src/tools/llm-chat/llm-chat.registry.ts:270-532`：智能体管理类 agentCallable 方法（预设消息 CRUD，不覆盖会话输出）
-- `src/tools/tool-calling/core/protocols/base.ts`、`core/discovery.ts`、`composables/useToolCalling.ts`：协议抽象、当前 VCP 路由与工具发现
+- `src/tools/tool-calling/core/protocols/base.ts`、`core/discovery.ts`、`core/engine.ts`、`composables/useToolCalling.ts`：协议抽象、当前 VCP 路由、执行循环与工具发现
 - `src/tools/tool-calling/core/protocols/vcp-protocol.ts`：当前 VCP 文本协议实现
 - `src/tools/web-canvas/stores/canvasStore.ts:113-398,402-469`：Git 状态、写盘、diff、提交/丢弃
 - `src/tools/web-canvas/services/CanvasAgentService.ts:32-190,270-331`：Agent 上下文、带行号读取、diff 反馈、审批预览/回滚

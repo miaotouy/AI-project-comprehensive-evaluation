@@ -40,7 +40,10 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 - **两级会话**：会话（session）= 聊天窗口，以 `unified_msg_origin` 标识；对话（conversation）= 会话内子对话，可新建/切换/删除。
 - **持久化**：对话历史存 SQLite `conversations` 表（`ConversationV2.content` = OpenAI 格式 JSON 列表）；当前对话 ID 经 SharedPreferences `sel_conv_id`（scope=umo）持久化；内存缓存 60s 防抖。
 - **AstrMessageEvent**：事件载体，`stop_event()` 可任意点截断传播；`role` 在唤醒阶段被标记（admin 等）。
-- **并发状态**：`SessionLockManager`（按事件循环隔离、UMO 粒度 `asyncio.Lock` + 引用计数自动清理）；follow-up 序号状态机（捕获时分配单调序号）；`ActiveEventRegistry`（stop_all 硬断 vs `agent_stop_requested` 软停；软停同时经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，事件传播与历史保存仍继续，见 #9602）。
+- **并发状态**：三类并发状态互不隶属：
+  - `SessionLockManager`：按事件循环隔离、UMO 粒度 `asyncio.Lock`，引用计数自动清理；
+  - follow-up 序号状态机：捕获时分配单调序号；
+  - `ActiveEventRegistry`：stop_all 硬断 vs `agent_stop_requested` 软停；软停同时经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，事件传播与历史保存仍继续，见 #9602。
 
 ## 专项导航
 

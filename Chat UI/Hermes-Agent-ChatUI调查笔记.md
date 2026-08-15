@@ -36,13 +36,16 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 | TUI（`hermes --tui`，Node/Ink） | Node 前端进程 → stdio → 后端 | 换行分隔 JSON-RPC over stdio |
 | gateway / CLI | 同进程 | 直接调用 |
 
-桌面端 spawn 参数为 `['serve','--host','127.0.0.1','--port','0']`（`electron/backend-command.ts:18-22`）；`backendSupportsServe()`（`electron/main.ts:1935-1990`）先读 `hermes_cli/subcommands/dashboard.py` 源码探测 `add_parser("serve")`（:1948-1955），失败再 `serve --help` 探针（:1957-1982），结果按 runtime 缓存；旧 runtime 回退为 `dashboard --no-open`（`getBackendArgsForRuntime`，:1995-1997）。`HERMES_SERVE_HEADLESS=1` 由 headless 分支设置（`hermes_cli/main.py:10471-10474`），`mount_spa()` 据此只挂 JSON-RPC/WS/API 面（`hermes_cli/web_server.py:16296`，headless 分支 `:16313`）。
+桌面端后端进程的启动参数与 serve 探测链：
+- spawn 参数为 `['serve','--host','127.0.0.1','--port','0']`（`electron/backend-command.ts:18-22`）。
+- `backendSupportsServe()`（`electron/main.ts:1935-1990`）探测后端是否支持 `serve`：先读 `hermes_cli/subcommands/dashboard.py` 确认 `add_parser("serve")` 存在，失败再 `serve --help` 探针，结果按 runtime 缓存；旧 runtime 回退为 `dashboard --no-open`（`getBackendArgsForRuntime`），探测与回退逻辑见 `electron/main.ts:1948-1997`。
+- headless 分支设置 `HERMES_SERVE_HEADLESS=1`（`hermes_cli/main.py:10471-10474`），`mount_spa()` 据此只挂 JSON-RPC/WS/API 面（`hermes_cli/web_server.py:16296`，headless 分支 :16313）。
 
 桌面连接生命周期：
 
-- `JsonRpcGatewayClient`（`apps/shared/src/json-rpc-gateway.ts:72` 起）：请求按 `frame.id` 匹配 pending Map（`:74`），默认超时 120s（`DEFAULT_REQUEST_TIMEOUT_MS=120_000`，`:66`）；事件帧按 `params.type` 分发。`HermesGateway` 子类把超时改为 30s（`hermes.ts:230-239`）。
+- `JsonRpcGatewayClient`（`apps/shared/src/json-rpc-gateway.ts:66-74`）统一处理请求与事件帧：请求按 `frame.id` 匹配挂起的等待项，默认超时 120s（`DEFAULT_REQUEST_TIMEOUT_MS=120_000`）；事件帧按 `params.type` 分发。`HermesGateway` 子类把超时收紧到 30s（`hermes.ts:230-239`）。
 - `resolveGatewayWsUrl`（`websocket-url.ts:39` 起）：OAuth 模式每次拨号重新铸造一次性 ticket（`:12` 注释）。
-- 重连（`use-gateway-boot.ts`）：全抖动指数退避，300ms 基、15s 上限（`:226`）；连续失败 45s 后升级为可恢复错误覆盖层（`RECONNECT_ESCALATE_AFTER_MS=45_000`，`:56`）；power/online/visibilitychange 触发立即重连（`:432-446`）。重连成功后丢弃过期 runtime id（`resetTileRuntimeBindings`，`:190`），再 `refreshSessions` 重新同步。请求层自带按需重连与失败重放（`use-gateway-request.ts`）。
+- 重连（`use-gateway-boot.ts:56,226,432-446`）：全抖动指数退避，300ms 基、15s 上限；连续失败 45s 后升级为可恢复错误覆盖层（`RECONNECT_ESCALATE_AFTER_MS=45_000`）；power/online/visibilitychange 触发立即重连。重连成功后丢弃过期 runtime 绑定（`resetTileRuntimeBindings`，:190），再 `refreshSessions` 重新同步。请求层自带按需重连与失败重放（`use-gateway-request.ts`）。
 - 多 profile 场景每个活跃 profile 一条独立二级 socket（`store/gateway.ts:30-41`，`createSecondary` `:219`，每条 socket 都进同一个 `handleGatewayEvent`）。
 
 用户主链：
@@ -63,39 +66,53 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 
 ## 1. 页面结构、导航与多窗口
 
-- 桌面端是标准 GUI 工作台：侧栏（会话列表 + pin）+ 正文（transcript）。侧栏走 `/api/profiles/sessions/sidebar` 分 profile 分片（`hermes.ts:427` `listAllProfileSessions`/`:455-640` 批量 `sidebar` 请求，含 recents/cron/messaging 三切片与旧端点兼容回退），`SIDEBAR_SESSIONS_PAGE_SIZE` + `loadMoreSessions` 翻页（`use-session-list-actions.ts:264`）；侧栏行用 TanStack `@tanstack/react-virtual` 虚拟化（`package.json:97`；`virtual-session-list.tsx:67-78`，行估计 28px `:46`、overscan 12 `:47`、`measureElement` 动态测量），无 Virtuoso（全仓库零命中）。
-- **侧栏过滤/排序菜单**（`store/layout.ts:316-323` + `store/sidebar-sort.ts`）：`$sidebarGrouping`（按日期/项目/状态分组）、`$sidebarOrdering`（updated/created/status/tokens/cost 排序）、`$sidebarRowMeta`（行尾元数据）、状态过滤与 PR/项目/归档过滤；全部持久化且可一键重置（`resetSidebarView`，`layout.ts:617`）。排序实现为分组上层的统一排序键（`sidebar-sort.ts:40-46` 注释明示“旧实现把排序键作用在扁平列表上，分组视图下完全失效”；`$sidebarSessionRankIds` `:51`）。
+- 桌面端是标准 GUI 工作台：侧栏（会话列表 + pin）+ 正文（transcript）。
+- 侧栏数据走 `/api/profiles/sessions/sidebar` 分 profile 分片批量拉取（`hermes.ts:427,455-640`，`listAllProfileSessions`，含 recents/cron/messaging 三切片与旧端点兼容回退），翻页由 `SIDEBAR_SESSIONS_PAGE_SIZE` + `loadMoreSessions` 完成（`use-session-list-actions.ts:264`）。
+- 侧栏行用 TanStack `@tanstack/react-virtual` 虚拟化（`package.json:97`；`virtual-session-list.tsx:46-78`：行估计 28px、overscan 12、`measureElement` 动态测量），无 Virtuoso（全仓库零命中）。
+- **侧栏过滤/排序菜单**（`store/layout.ts:316-323` + `store/sidebar-sort.ts`）：状态原子分工如下，全部持久化且可一键重置（`resetSidebarView`，`layout.ts:617`）：
+  - `$sidebarGrouping`：按日期/项目/状态分组；
+  - `$sidebarOrdering`：按 updated/created/status/tokens/cost 排序；
+  - `$sidebarRowMeta`：行尾元数据；
+  - 另有状态过滤与 PR/项目/归档过滤。
+  排序实现为分组上层的统一排序键（`sidebar-sort.ts:40-51`，`$sidebarSessionRankIds`；注释说明旧实现把排序键作用在扁平列表上、分组视图下完全失效）。
 - **会话状态点**（`store/session-dot-state.ts:28`）：单一状态来源（working/stalled/unread/draft/needs-input/background/idle），7 状态按优先级解析，状态在 lineage 别名下认领（跨压缩轮转仍正确，`:75-104`），并驱动侧栏状态过滤与排序桶（`sessionStatusBucket` `:44`）。
-- 正文列表无 virtualizer：`RENDER_BUDGET=600` 成本单位（`components/assistant-ui/thread/list.tsx:66`，多窗格分摊预算 `:358`）+ “Show earlier” 翻页 + `content-visibility` 活跃尾部（`LIVE_TAIL_PARTS=40`，`list.tsx:209`）；另有一层 store 侧转录窗口 `TRANSCRIPT_WINDOW_BUDGET=1200`/`TRANSCRIPT_WINDOW_MIN_MESSAGES=30`（`app/chat/transcript-window.ts:29-36`）。渲染预算与 `content-visibility` 的实现细节见消息渲染器笔记。
+- 正文列表无 virtualizer，用渲染预算与分页控制成本：`RENDER_BUDGET=600` 成本单位、多窗格分摊预算、`LIVE_TAIL_PARTS=40` 的 `content-visibility` 活跃尾部与 “Show earlier” 翻页（以上见 `components/assistant-ui/thread/list.tsx:66,209,358`）；另有一层 store 侧转录窗口预算（`TRANSCRIPT_WINDOW_BUDGET=1200`/`TRANSCRIPT_WINDOW_MIN_MESSAGES=30`，`app/chat/transcript-window.ts:29-36`）。渲染细节见消息渲染器笔记。
 - 路由匹配基于 `_lineage_root_id`（`session.ts:246-247` `sessionPinId`），压缩轮转后路由跟随消费新 storedSessionId（见 §8）。
-- **HUD 模式**（`store/hud.ts` + `store/windows.ts` + `electron/main.ts:8973` 起）：无边框、透明、置顶的浮动聊天窗（`main.ts:9217, 9236`），是**完整 renderer 而非傀儡窗**——渲染 `ChatView` 的 `hud` 变体（注释明确“NOT a puppet window. Unlike the pet overlay / quick entry”，`hud.ts:8`），使用真实 composer，支持会话切换与跨窗口草稿同步（`requestComposerDraftSync('flush')`，`hud.ts:56`）；进入 HUD 时主窗隐藏、退出时按 `hudSessionId` 回迁（`main.ts:8983-9001, 9284-9317`）。
+- **HUD 模式**（`store/hud.ts` + `store/windows.ts` + `electron/main.ts:8973` 起）：无边框、透明、置顶的浮动聊天窗，是**完整 renderer 而非傀儡窗**——渲染 `ChatView` 的 `hud` 变体（注释明确 “NOT a puppet window”），使用真实 composer，支持会话切换与跨窗口草稿同步（`requestComposerDraftSync('flush')`，`hud.ts:8,56`）；进入 HUD 时主窗隐藏、退出时按 `hudSessionId` 回迁（`main.ts:8983-9001, 9217-9317`）。
 - 多窗口/多 profile：每个活跃 profile 一条独立二级 socket；多窗口并发事件时序未实测（未验证事项）。
 
 ## 2. 会话列表、搜索与现场恢复
 
 - 会话列表数据分页接口在会话与消息管理笔记 §5.1；侧栏翻页与虚拟列表的界面呈现见 §1。
 - 搜索：搜索的数据实现在会话与消息管理笔记 §5.3（FTS 矩阵、命中前后端标、`context` 字段）。桌面端有 `lib/session-search.ts` 的本地会话过滤；搜索弹窗的界面工作流本次未覆盖（检查范围：未追踪聊天工作台之外的搜索面板组件）。FTS 命中高亮属于消息渲染类目。
-- **现场恢复**：重连成功后 `refreshSessions` 重新同步（连接生命周期见上文）；complete 后按需 `hydrateFromStoredSession` 兜底回填，并增加 adopted turn 水合分支（接管“已在别处运行”的会话时先水合历史，否则用户消息不显示，`use-message-stream/index.ts:695-712`）；被压缩轮转的会话跳过回填（`compactedTurnRef`）。每会话真实状态缓存在 `sessionStateByRuntimeIdRef`（`use-session-state-cache.ts:84`），经 `syncSessionStateToView` 发布（:210-267），切换会话可回到对应现场。
-- **pin**：`sessionPinId = session._lineage_root_id ?? session.id`（`session.ts:246-247`，压缩轮转后 pin 仍存活），持久化到 localStorage（`layout.ts:30` `SIDEBAR_PINNED_STORAGE_KEY`，`:91` `$pinnedSessionIds` persistentAtom），后端镜像 `PATCH /api/sessions/{id}`，`session-pin-sync.ts` 双向同步（push 先行带围栏防旧页回滚，pull 以后端为权威，boot 时重断言全量，`:10-21, 136-177`）。
+- **现场恢复**：重连成功后 `refreshSessions` 重新同步（连接生命周期见上文）；complete 后按需 `hydrateFromStoredSession` 兜底回填，并有 adopted turn 水合分支——接管“已在别处运行”的会话时先水合历史，否则用户消息不显示（`use-message-stream/index.ts:695-712`）；被压缩轮转的会话跳过回填（`compactedTurnRef`）。
+- 每会话真实状态缓存在 `sessionStateByRuntimeIdRef`（`use-session-state-cache.ts:84`），经 `syncSessionStateToView` 发布（:210-267），切换会话可回到对应现场。
+- **pin**：以 `session._lineage_root_id ?? session.id` 为 pin 依据（`session.ts:246-247`，压缩轮转后仍存活），本地持久化在 localStorage（`layout.ts:30,91`，键 `SIDEBAR_PINNED_STORAGE_KEY`，`$pinnedSessionIds` 为 persistentAtom），后端镜像 `PATCH /api/sessions/{id}`；`session-pin-sync.ts`（:10-21,136-177）双向同步——push 先行带围栏防旧页回滚，pull 以后端为权威，boot 时重断言全量。
 - **草稿标题**（`lib/draft-title.ts:5-18`）：未发送草稿按输入内容实时派生标题（`deriveDraftTitle`，客户端实现 `derive_title` 的孪生逻辑：首行、折叠空白、48 字符词边界截断；斜杠命令取其参数），会话创建后由后端命名替换（见会话与消息管理笔记 §2.4 的标题机制）；持久化草稿重启后也带标题（`store/composer.ts:155-172`）。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- 发送路径入口：`submitText`（`use-prompt-actions/index.ts:587`）→ `useSubmitPrompt`（`submit.ts`）：`sanitizeComposerInput`、busy 门控（`:169` 附近，`isTargetSessionBusy` 按**目标会话**的 busy 判断——显式目标（tile/队列排空）通常不是当前屏上会话）、storedId/runtimeId 配对校验（含排空时跨会话泄漏防护 `isBackgroundQueueDrain`，`:198-202`）、session 切换 drift 守卫、无 runtime 时路由 resume 或 `createBackendSessionForSend`；提交调用在 `withSessionNotFoundResume(withSessionBusyRetry(...))` 组合内（`submit.ts:645-650`，容错原语在 `utils.ts:146, 244`）。
-- **草稿按会话持久化（本次核实修正）**：`store/composer.ts`——草稿正文按会话键（`draftKey`，未命名会话用 `__new__`，`:129`）存入 localStorage（`SESSION_DRAFTS_STORAGE_KEY='hermes:composer-drafts:v3'` `:118`，`persistDraftTexts` `:279-294`，上限 `MAX_PERSISTED_DRAFTS=50` `:121`，仅文本、附件不持久化）；`stashSessionDraft`/`takeSessionDraft`（`:296/:310`）是唯一进出通道。跨窗口：localStorage `storage` 事件触发 `reloadPersistedDrafts` 合并（`:211-237`，注释“Merge, don't clobber——本地 map 可能持有从未持久化的附件”）；HUD/主窗交接用 `requestComposerDraftSync('flush'/'reload')` 事件（`:240-266`）。压缩轮转时 `migrateSessionDraft` 把旧 tip 的草稿迁移到新 tip（`:327-349`，不覆盖非空目标）。
-- 附件拖放捕获：`useFileDropZone`（`chat/hooks/use-file-drop-zone.ts:33` 起）；`partitionDroppedFiles` 分流（`use-composer-actions.ts:240` 起）——应用内路径（工作区相对）直接转内联 `@file:`/`@line:` ref 插入文本，OS 拖入（本机绝对路径）走附件管线：目录 → `@folder:`（`:533`）、图片 → `attachImagePath`（base64 缩略图，`:404` 起）、文件 → `@file:` 相对 ref（`:395`）。提交注入点（`syncAttachmentsForSubmit` → `uploadComposerAttachment` → `file.attach`/`image.attach_bytes` RPC）在对话请求与上下文笔记 §9。
-- 附件预览：`attachmentRefs` 挂在 `ChatMessage` 上（`chat-messages.ts:13-32`），`toChatMessages` 从 `@image:` 行提取回 attachmentRefs（:922 起，`:1005-1009` 注释）。
+- 发送路径入口：`submitText`（`use-prompt-actions/index.ts:587`）→ `useSubmitPrompt`（`submit.ts`）在提交前做一组门控——busy 检查（按**目标会话**判断，显式目标如 tile/队列排空通常不是当前屏上会话，:169 附近）、storedId/runtimeId 配对校验（含排空时跨会话泄漏防护，:198-202）、session 切换 drift 守卫，无 runtime 时先路由 resume 或新建后端会话；提交整体包在“会话未找到则 resume、busy 则重试”的容错组合里（:645-650，容错原语 `utils.ts:146,244`）。
+- **草稿按会话持久化（本次核实修正）**：`store/composer.ts` 负责按会话键存取草稿，仅文本、附件不持久化：
+  - 存储：正文按会话键（`draftKey`，未命名会话用 `__new__`，:129）写入 localStorage（键 `SESSION_DRAFTS_STORAGE_KEY='hermes:composer-drafts:v3'`，上限 `MAX_PERSISTED_DRAFTS=50`，写入逻辑 :279-294）；`stashSessionDraft`/`takeSessionDraft`（:296/:310）是唯一进出通道。
+  - 跨窗口：localStorage `storage` 事件触发 `reloadPersistedDrafts` 合并（:211-237，注释 “Merge, don't clobber”——本地 map 可能持有未持久化的附件）；HUD/主窗交接用 `requestComposerDraftSync('flush'/'reload')` 事件（:240-266）。
+  - 压缩轮转：`migrateSessionDraft` 把旧 tip 的草稿迁移到新 tip（:327-349），不覆盖非空目标。
+- 附件拖放捕获：`useFileDropZone`（`chat/hooks/use-file-drop-zone.ts:33` 起）接住拖入，`partitionDroppedFiles`（`use-composer-actions.ts:240` 起）按来源分流：
+  - 应用内路径（工作区相对）→ 直接转内联 `@file:`/`@line:` ref 插入文本；
+  - OS 拖入（本机绝对路径）→ 附件管线：目录 `@folder:`、图片 `attachImagePath`（base64 缩略图）、文件 `@file:` 相对 ref（各分支见 `use-composer-actions.ts:395-533`）。
+- 提交注入点（`syncAttachmentsForSubmit` → `uploadComposerAttachment` → 文件 attach 相关 RPC）在对话请求与上下文笔记 §9。
+- 附件预览：`attachmentRefs` 挂在 `ChatMessage` 上（`chat-messages.ts:13-32`），`toChatMessages` 从 `@image:` 行提取回该字段（`chat-messages.ts:922,1005-1009`）。
 - 编辑 composer：`user-message.tsx:326-355`——点击进入编辑 composer，发送即“interrupt + rewind”（注释：即使流式进行中也可点击编辑，发送即 revert；执行语义在对话请求与上下文笔记 §7）。
-- 斜杠命令面板：桌面端有客户端侧命令编目与派发管线（`lib/desktop-slash-commands.ts`、`app/chat/composer/hooks/use-slash-completions.ts`、`use-prompt-actions/slash.ts` `useSlashCommand` :155），内置命令本地处理或经 `commands.catalog`/`slash.exec` 落后端；技能/quick command 走 `slash.exec` → `command.dispatch` 落为普通 prompt。面板组件细节未逐项展开。
+- 斜杠命令面板：桌面端有客户端侧命令编目与派发管线（`lib/desktop-slash-commands.ts`、`app/chat/composer/hooks/use-slash-completions.ts`、`use-prompt-actions/slash.ts` 的 `useSlashCommand` :155），内置命令本地处理或落后端执行；技能/quick command 经 `slash.exec` → `command.dispatch` 落为普通 prompt。面板组件细节未逐项展开。
 
 ## 4. Agent、模型、工具与发送前配置
 
-- 配置作用域是会话级：`model_override`/`create_reasoning_override`/`create_service_tier_override` 为每会话字段（`methods_session.py:50-71, 96-98`，数据语义在会话与消息管理笔记 §8）；运行中 `/model` 切换以 `model_switch` 时间线条目入史（`server.py:3970` `_append_model_switch_marker` 先剥离旧 marker），不计入 user 轮计数。
+- 配置作用域是会话级：`model_override`/`create_reasoning_override`/`create_service_tier_override` 是每会话字段（`methods_session.py:50-71,96-98`，数据语义在会话与消息管理笔记 §8）；运行中 `/model` 切换以 `model_switch` 时间线条目入史（`server.py:3970`，先剥离旧 marker 再追加），不计入 user 轮计数。
 - 桌面端模型选择器与参数面板的组件细节本次未逐一展开（检查范围：`use-model-controls.ts` 等模型切换 hook 存在，UI 装配在消息渲染器/设置类目边界）；可确认的交互是：composer 的模型 pill 选择随 `session.create` 作为每会话 override 上送（`methods_session.py:45-49` 注释），新会话不会污染 profile 全局配置。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **发送**：`submitText` → `useSubmitPrompt`（§3）；`prompt.submit` 带 1800s 超时（`submit.ts:650` `PROMPT_SUBMIT_REQUEST_TIMEOUT_MS=1_800_000`，turn 完成靠流事件而非 RPC ACK）；`session not found`/超时 → resume 后重试一次、busy 时按目标会话重试（`withSessionBusyRetry`/`withSessionNotFoundResume`，`utils.ts:146, 244`）。
+- **发送**：`submitText` → `useSubmitPrompt`（§3）；`prompt.submit` 带 1800s 超时（`submit.ts:650`，`PROMPT_SUBMIT_REQUEST_TIMEOUT_MS=1_800_000`），turn 完成靠流事件而非 RPC ACK；会话未找到或超时则 resume 后重试一次、busy 时按目标会话重试（容错原语 `utils.ts:146,244`）。
 - **busy 状态**：`$busy`/`$awaitingResponse`（`store/session.ts:548-549`）；`message.start` → busy 置位（`gateway-event.ts`）。排队：后端返回 `{status: "queued"}` 时桌面端排空机制走 `use-background-queue-drain.ts`，其界面提示（队列横幅等）本次未逐项展开。
 - **流式反馈**：delta 经自适应节流队列刷入界面（33ms 起、上限 250ms，机制在对话请求与上下文笔记 §5）；`message.start` → `flushQueuedDeltas`；interim 气泡原位结算防双泡（`use-message-stream/index.ts:506-530, 615-640`）。
 - **停止**：桌面端（apps/desktop）没有名为 `interruptResponse` 的符号（该名字只在 TUI 侧作为 `SessionInterruptResponse` 类型存在，`ui-tui/src/gatewayTypes.ts:313`）：`cancelRun` 先在本地定稿（`finalizeInterruptedMessages`，`rewind.ts:122`）再调 `session.interrupt` RPC；此后本地 `interrupted` 状态使迟到流事件拒收（中断层级与执行语义见对话请求与上下文笔记 §7）。

@@ -33,11 +33,15 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 ### 关键结论
 
-1. **工具注册集中在 `tools/registry.py`**，所有普通工具文件在 import 时 `registry.register()`；agent-level 工具（`todo`/`memory`/`session_search`/`delegate_task`）由 `_AGENT_LOOP_TOOLS`（model_tools.py: 680）与执行框架特判拦截，不进入 registry 分发。新建内建工具仍遵守仓库 AGENTS.md 的约定：工具文件负责 `registry.register()`，还要在 `toolsets.py` 的工具集里显式启用，否则会出现“注册成功但不可发现”或“可发现但调用失败”的不一致。
+1. **工具注册集中在 `tools/registry.py`**：所有普通工具文件在 import 时调用注册函数 `registry.register()`；四个 agent-level 工具（`todo`/`memory`/`session_search`/`delegate_task`）由 `_AGENT_LOOP_TOOLS`（model_tools.py: 680）与执行框架特判拦截，不进入 registry 分发。新建内建工具除在工具文件里注册外，还要在 `toolsets.py` 的工具集中显式启用，否则会出现“注册成功但不可发现”或“可发现但调用失败”的不一致。
 
-2. **工具参数校验的收敛点**：模型回吐的 JSON 工具参数先经 `handle_function_call` 里的 `_sanitize_tool_error`/`tool_error` 统一输出错误 JSON；并行路径在 `tool_executor._parse_tool_arguments` 处先把非 JSON_object 参数判定为 `Invalid tool arguments`。参数类型校验依赖 `coerce_tool_args` 与 `_normalize_json_strings_for_schema`（string→number/bool 转换），不存在独立的“schema 强制校验器”。`enabled_tools` / `enabled_toolsets` 过滤只发生在 `get_tool_definitions`（发现阶段），注册表 `dispatch` 不按会话复验工具名归属，子代理/delegate 路径的工具集归属依赖各 agent 实例的 `valid_tool_names`（未完全证实，见未验证事项）。
+2. **工具参数校验的收敛点**：模型回吐的 JSON 工具参数先经 `handle_function_call` 的错误统一出口（`_sanitize_tool_error`/`tool_error`）输出错误 JSON；并行路径在 `tool_executor._parse_tool_arguments` 处把非 JSON_object 参数判为 `Invalid tool arguments`。类型校验依赖 `coerce_tool_args` 与 `_normalize_json_strings_for_schema`（string→number/bool 转换），不存在独立的 schema 强制校验器。
 
-3. **“前端确认框”不等于执行端鉴权。** CLI 交互审批（`prompt_dangerous_approval`）只是 `check_dangerous_command` 的一环，且 `HERMES_YOLO_MODE` 冻结或会话 yolo 开启时整个审批门可被跳过（approval.py: 3290-3291）。真正的执行端是 `tools/registry.py: dispatch`，其 handler 只收到校验过的参数，不重新核对审批标记。另：`execute_code` 沙箱的 `_rpc_server_loop`（code_execution_tool.py: 649）直接调用 `model_tools.handle_function_call` 执行已授权子工具（allow-list 由 `enabled_tools`/`_last_resolved_tool_names` 提供，执行危险命令不另走审批门），是一条独立于编排层的工具调用旁路（详见第 8 节）。
+   同一机制的边界：`enabled_tools`/`enabled_toolsets` 过滤只发生在 `get_tool_definitions`（发现阶段），注册表 `dispatch` 不按会话复验工具名归属；子代理/delegate 路径的工具集归属依赖各 agent 实例的 `valid_tool_names`（未完全证实，见未验证事项）。
+
+3. **“前端确认框”不等于执行端鉴权。** CLI 交互审批（`prompt_dangerous_approval`）只是 `check_dangerous_command` 的一环，且 `HERMES_YOLO_MODE` 冻结或会话 yolo 开启时整个审批门可被跳过（approval.py: 3290-3291）。真正的执行端是 `tools/registry.py: dispatch`，其 handler 只收到校验过的参数，不重新核对审批标记。
+
+   另：`execute_code` 沙箱的 `_rpc_server_loop`（code_execution_tool.py: 649）直接调用 `model_tools.handle_function_call` 执行已授权子工具（allow-list 由 `enabled_tools`/`_last_resolved_tool_names` 提供，执行危险命令不另走审批门），是一条独立于编排层的工具调用旁路（详见第 8 节）。
 
 4. **结果回注**：`tool_result_storage.py` 维护三层持久化预算（per-tool 上限、per-turn 聚合预算、preview），超出上限的结果落盘到沙箱临时目录并用 preview + 文件引用回填；大小限制只控制上下文膨胀，不构成输出内容过滤。未发现与“工具输出无过滤”相对的输出侧信任标记。
 
@@ -45,10 +49,13 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 ### 总体调用链
 
-顶层入口 `agent/conversation_loop.py: run_conversation`（:1422）接受 `stream_callback`、`persist_user_message`、`moa_config` 等参数。循环局部状态包括 `max_compression_attempts=3`、`_pending_verification_response`、`_pending_verification_response_previewed`（#65919，verify-on-stop 的待核验回复；verify 子系统并入既有验证栈，`47a35d63` 系列：`agent/verify/`（recipes/environment/runner）+ `verification_evidence.py`）。循环条件为 `api_call_count < max_iterations and iteration_budget.remaining > 0`，外加 `_budget_grace_call` 一次宽限。
+顶层入口 `agent/conversation_loop.py: run_conversation`（:1422）接受流回调、持久化用户消息、MOA 配置等参数。循环局部状态包括 `max_compression_attempts=3`、verify-on-stop 的待核验回复标志（`_pending_verification_response` 及其 previewed 变体，#65919）；verify 子系统并入既有验证栈（`47a35d63` 系列：`agent/verify/`（recipes/environment/runner）+ `verification_evidence.py`）。循环条件为“请求次数 < max_iterations 且迭代预算 > 0”，外加 `_budget_grace_call` 一次宽限。
 
 - **API 请求组装**：`run_agent._build_api_kwargs`（:7129）→ `agent.chat_completion_helpers.build_api_kwargs`，把 `agent.tools` attach 到 `tools=`。
-- **返回校验**：对每个 `assistant_message.tool_calls`：id 去重（`_uniquify_tool_call_ids`）；name 不在 `agent.valid_tool_names` 时 `_repair_tool_call` 近似修复；JSON 解析失败进入 `_invalid_json_retries < 3` 重试，超限则注入 recovery 工具结果并追加 `recovery_assistant` 消息保持角色交替。
+- **返回校验**：对每个 `assistant_message.tool_calls` 依次：
+  - id 去重（`_uniquify_tool_call_ids`）；
+  - name 校验——不在 `agent.valid_tool_names` 时 `_repair_tool_call` 近似修复；
+  - JSON 解析——失败重试 ≤3 次（`_invalid_json_retries`），超限则注入 recovery 工具结果并追加 `recovery_assistant` 消息保持角色交替。
 - **执行**：`agent._execute_tool_calls`（run_agent.py: 7729）按 model 返回的 tool_calls 数量分级：≤1 直接 sequential；多工具先 `_plan_tool_batch_segments` 分成“平行安全段 + 顺序障碍”，可并发段走 `execute_tool_calls_concurrent`（tool_executor.py:758）。
 - **回注**：`tool_dispatch_helpers.make_tool_result_message` 生成 `role=tool` 消息；`maybe_persist_tool_result` 决定是否落盘；之后回到压缩检查。
 - **终止**：`max_iterations` 上限；`iteration_budget` 耗尽触发强制压缩/退出；`/stop` 或新消息在并发等待循环中被轮询落地。全局紧急停止 `hermes pause`/`resume`（`agent/estop.py`，`5db1b72b`）置全局停止位，跨会话生效。
@@ -97,7 +104,14 @@ def get_tool_definitions(
 
 ## 4. 模型调用表示与 Provider 适配
 
-`get_tool_definitions()` 输出已含 `{"type":"function", ...}` 数组，`build_api_kwargs` 直接挂 `tools=`（OpenAI 兼容）。Provider 适配分布在 `agent/transports/chat_completions.py`（原生 tool_calls）、`agent/anthropic_adapter.py`（tool_use / 结果重建）、`agent/codex_responses_adapter.py`、`agent/bedrock_adapter.py` 与 `agent/auxiliary_client.py`（session_search 等旁路 side-LLM 工件）。`_supports_reasoning_extra_body`（run_agent.py: 6994）按宿主/供应商判定 `reasoning_effort` 附加字段：Nous Portal、ai-gateway.vercel.sh、GitHub models（经 `github_model_reasoning_efforts`）、LM Studio（仅 off）、Ollama Cloud（/api/show 能力探测）。
+`get_tool_definitions()` 输出已含 `{"type":"function", ...}` 数组，`build_api_kwargs` 直接挂 `tools=`（OpenAI 兼容）。Provider 适配分布在五个模块：
+- `agent/transports/chat_completions.py`：原生 tool_calls；
+- `agent/anthropic_adapter.py`：tool_use / 结果重建；
+- `agent/codex_responses_adapter.py`；
+- `agent/bedrock_adapter.py`；
+- `agent/auxiliary_client.py`：session_search 等旁路 side-LLM 工件。
+
+`_supports_reasoning_extra_body`（run_agent.py: 6994）按宿主/供应商判定 `reasoning_effort` 附加字段：Nous Portal、ai-gateway.vercel.sh、GitHub models（经 `github_model_reasoning_efforts`）、LM Studio（仅 off）、Ollama Cloud（/api/show 能力探测）。
 
 `agent/auxiliary_client.py` 是独立的 side-LLM 胶水（session_search、title 等旁路任务），不参与主工具循环。
 
@@ -127,13 +141,13 @@ def get_tool_definitions(
 
 ### 审批（tools/approval.py）
 
-- `prompt_dangerous_approval`（:2709）：CLI 交互，`once/session/always/deny/timeout` 五选一，`allow_permanent` 控制是否显示 `[a]lways` 选项；`approval_callback` 由 CLI 注册（`terminal_tool.set_approval_callback`，terminal_tool.py:287）。
+- `prompt_dangerous_approval`（:2709）：CLI 交互，在 `once/session/always/deny/timeout` 五种决定里五选一，`allow_permanent` 控制是否显示 always 选项；审批回调 `approval_callback` 由 CLI 注册（`terminal_tool.set_approval_callback`，terminal_tool.py:287）。
 - `check_dangerous_command`（:3416）：终端执行前总入口；先查容器/host 跳过条件（`_should_skip_container_guards`，仅 `has_host_access=False` 生效）；yolo 模式跳过（`HERMES_YOLO_MODE` 在 import 时冻结，`approval.py:36`）；allowlist 直接放行；危险 pattern 命中则进 `_run_approval_gate`。
 - `request_tool_approval`（:3486）：插件 `action: approve` 的路由；`rule_key` 粒度、`[a]lways` 允许清单基于 `tool+reason` 哈希隔离。
 - fail-closed：无交互用户、非网关、无 callback、超时，全部 deny（`fail_closed_when_no_human=True`）。cron 走 `approvals.cron_mode` 配置。
 - 免审批路径：`HERMES_YOLO_MODE` 冻结（启动参数）；gateway /yolo 会话级开关；tirith 扫描告警时禁止 `always` 宽授（`allow_permanent=False`）。
 - **`hermes approvals test`**（`hermes_cli/approvals_test.py`，`563f0a6f`）：对给定命令/工具做**干跑审批判定**（不弹交互、不执行），用于验证策略与模式覆盖。
-- **自仓库 git 保护**（`tools/self_repo_guard.py`，`206531a1` 系列）：检测并硬阻断针对**当前运行源码 checkout** 的 git 变更（worktree 移除/移动源码根、`git bisect` 视为工作树变更、运行中根目录防护 `886092bc`/`f0a3ef8b`），`terminal_tool` 集成（`ecbe6ef0`）；安全 git 命令不再 spawn alias 查询子进程（`cd869f26`）。
+- **自仓库 git 保护**（`tools/self_repo_guard.py`，`206531a1` 系列）：检测并硬阻断针对**当前运行源码 checkout** 的 git 变更——worktree 移除/移动源码根、`git bisect` 视为工作树变更、运行中根目录防护（`886092bc`/`f0a3ef8b`）；`terminal_tool` 集成（`ecbe6ef0`）；安全 git 命令不再 spawn alias 查询子进程（`cd869f26`）。
 - **终端执行边界硬化**：本地后台执行器在 systemd 下隔离进独立 cgroup/scope（`099eb737`/`7cfa90d9`/`21de22a4` 系列，PTY 隔离、单元名 kill、`--quiet`、全限定 `.scope`），worker 内存与数量有界（`b0346ba4`/`5f930832`），SSH 远端保持登录 home cwd（`9c69d988`）；`terminal` 工具错误结果字段脱敏（`530d3782`）。
 
 ### 执行边界
@@ -181,7 +195,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - 每工具 schema 通过 `_convert_mcp_schema`（const-only 的 anyOf/oneOf 联合折叠为属性枚举，`37cc9999`）；不安全描述经 `_scan_mcp_description`（threat pattern）过滤。
 - 传输 stdio/HTTP/SSE；`timeout/connect_timeout/keepalive_interval/idle_timeout_seconds/max_lifetime_seconds` 生命周期回收受支持。Agent Plugins 便携包的 **streamable-http 映射**进入原生 MCP 运行时（`471baea5`）。
 - 每 server 可声明 `supports_parallel_tool_calls`。
-- **trust-tier 门控**（`c8369e37`，`mcp_tool.py:3909-3926` 注释）：`mcp_servers.<name>.trust: full|untrusted`——untrusted server 上仅有 `annotations.readOnlyHint=True` 的**写能力工具**被拒绝（hint 是 server 自报，untrusted 时只能缩小不能扩大权限）；默认无 trust 键 = full（gate off）。另：启动时 401 的 server 可在重新登录后恢复（`f99d2912`）、每 server 独立 MCP identity header（`9fad45fc`）。
+- **trust-tier 门控**（`c8369e37`，`mcp_tool.py:3909-3926` 注释）：`mcp_servers.<name>.trust` 取 `full|untrusted` 两档——untrusted server 上只有 `annotations.readOnlyHint=True` 的写能力工具被拒绝（hint 由 server 自报，untrusted 时只能缩小不能扩大权限）；默认无 trust 键 = full（门控关闭）。另：启动时 401 的 server 可在重新登录后恢复（`f99d2912`）、每 server 独立 MCP identity header（`9fad45fc`）。
 
 ### 技能
 
@@ -193,7 +207,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - `_subagent_auto_deny` 是默认；`delegation.subagent_auto_approve: true` 时改用 `_subagent_auto_approve`；threadlocal callback 通过 `_set_subagent_approval_cb` 注入。
 - `_run_single_child`（:2076）：保存/恢复 `model_tools._last_resolved_tool_names`（避免子代理污染父进程 global）；凭据池租借/移除；heartbeat 线程让父代理在 gateway 中不判死。
 - 会话隔离：子代理 `session_key`/terminal独立；`inherit_mcp_toolsets` 子代理可选继承父 MCP 工具。
-- `delegate_task` 支持**可选结构化输出 schema**（`tools/delegation_output_schema.py`，`d6ee58b5`；批次任务先校验质量再派发 `94bc3194`，per-delegation 成本随结果返回 `d7635e43`）；**steering 生命周期绑定会话代际**（`9d4ef04e`/`a94ebf5f`：steer 只作用当前代、子代理存活期内不丢未送达 steer `60e1f751`）；`_build_child_agent`（:1305）。
+- `delegate_task` 支持**可选结构化输出 schema**（`tools/delegation_output_schema.py`，`d6ee58b5`）：批次任务先校验质量再派发（`94bc3194`），per-delegation 成本随结果返回（`d7635e43`）。**steering 生命周期绑定会话代际**（`9d4ef04e`/`a94ebf5f`）——steer 只作用当前代，子代理存活期内不丢未送达 steer（`60e1f751`）。子代理构建入口为 `_build_child_agent`（:1305）。
 
 ## 9. 设计取舍与已确认边界
 

@@ -24,31 +24,37 @@ Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 **两层装配关系**：
 
-- 原生层只有一个窗口。`App::OnLaunched` 创建 MainWindow 并 `Activate()`（App.xaml.cpp:38-42）；MainWindow.xaml 只有 RootGrid + 一个空的 Border WebViewHost（MainWindow.xaml:12-14），无任何业务 XAML 控件——整个 UI 是 WebView2 渲染的网页。
+- 原生层只有一个窗口。`App::OnLaunched`（App.xaml.cpp:38-42）创建 MainWindow 并激活；MainWindow.xaml 只有 RootGrid 加一个空的 Border WebViewHost（:12-14），无任何业务 XAML 控件——整个 UI 是 WebView2 渲染的网页。
 - WebView2 初始化是异步 COM 回调链（MainWindow.xaml.cpp:197-236）：CreateCoreWebView2EnvironmentWithOptions → CreateCoreWebView2Controller(m_hwnd) → OnWebViewCreated。
 
   装载顺序为：设置深色默认背景 → 禁用浏览器加速键（把 Ctrl+N/T/W 让给 JS，:261-265）→ 虚拟主机映射 `manifold.local → <exe目录>\frontend`（:277-281）→ 注册 WebMessageReceived 与 NavigationCompleted → `Navigate(https://manifold.local/index.html)`（:321）。
 
-**握手协议。** 导航完成后原生发送 HOST_READY（providerKeys、settings、version，:300-319），前端 `settings-store.js` 在收到后才把设置状态置 ready 并应用主题/字号（`frontend/services/settings-store.js:46-57`）；
+**握手协议。** 导航完成后原生发送 HOST_READY（providerKeys、settings、version，:300-319），前端 `frontend/services/settings-store.js:46-57` 在收到后才把设置状态置 ready 并应用主题/字号；
 
 前端启动即发 FRONTEND_READY（`frontend/app.js:221`），但原生 OnWebMessage 的派发表（MainWindow.xaml.cpp:419-454）没有对应分支——该消息无消费者，是空路径。
 
-**桥。** 双向 JSON 字符串消息。前端 `bridge.js` 的 `send/on/once`（`frontend/services/bridge.js:4-41`）封装 window.chrome.webview.postMessage 与 message 事件；
+**桥。** 双向 JSON 字符串消息。前端 `frontend/services/bridge.js:4-41` 的 send/on/once 封装 window.chrome.webview.postMessage 与 message 事件；
 
 原生 OnWebMessage 按 type 字段分发到 Handle* 方法（MainWindow.xaml.cpp:404-454），回程统一走 PostMessageToWeb（:456-462）。流式数据经 m_dispatcherQueue.TryEnqueue 从后台 `std::jthread` 切回 UI 线程（如 HandleChatSend :819-821）。
 - 原生侧消息表里出现但前端没有任何发送/监听点的消息：GET_SETTINGS、OPEN_FILE_DIALOG（对应 FILE_ATTACHED 回程）——附件链路是原生已实现、前端未接线的死路径（Grep `frontend/**/*.js` 无命中）。
 
 **原生层的"界面基础设施"存量**（即全部）：
 
-1. 窗口状态持久化：关闭时 SaveWindowState 写 `%LOCALAPPDATA%\Manifold\window-state.json`（位置/大小/最大化，MainWindow.xaml.cpp:343-367），构造时 RestoreWindowState 恢复并做工作区越界修正与最小尺寸兜底（:369-400）。
+1. 窗口状态持久化：关闭时 SaveWindowState 写 `%LOCALAPPDATA%\Manifold\window-state.json`（位置/大小/最大化），构造时 RestoreWindowState 恢复并做工作区越界修正与最小尺寸兜底（MainWindow.xaml.cpp:343-400）。
 2. 系统对话框：IFileOpenDialog/IFileSaveDialog Win32 公共对话框，用于会话导出/导入、Markdown 导出（:559-617、:619-646、:648-677、:679-722）。
 3. 剪贴板与外部 URL：COPY_TO_CLIPBOARD 用 Win32 OpenClipboard/SetClipboardData(CF_UNICODETEXT)（:724-744）；OPEN_EXTERNAL_URL 用 ShellExecuteW（:746-753）。
 4. DPI：app.manifest:16 声明 PerMonitorV2；`RootGrid().SizeChanged` 触发 ResizeWebView 用 GetClientRect 像素设置 put_Bounds（MainWindow.xaml.cpp:176, 325-332）。
 5. 窗口关闭清理：Closed 时保存窗口状态、停止终端进程、关停插件与 MCP、释放 WebView COM 指针（:179-192）。
 
-**未找到**（Grep 范围 `*.cpp/*.h/*.xaml/*.idl`）：ContentDialog、Flyout、MenuFlyout、TeachingTip、InfoBar、ToastNotification/AppNotification——原生层没有任何 WinUI 浮层、提示或系统通知控件；主题相关只有 MainWindow.xaml:12 一处 ThemeResource（ApplicationPageBackgroundThemeBrush）。
+**未找到**（Grep 范围 `*.cpp/*.h/*.xaml/*.idl`）：
+- ContentDialog、Flyout、MenuFlyout、TeachingTip、InfoBar、ToastNotification/AppNotification——原生层没有任何 WinUI 浮层、提示或系统通知控件；
+- 主题相关只有 MainWindow.xaml:12 一处 ThemeResource（ApplicationPageBackgroundThemeBrush）。
 
-**前端装配**：`index.html:18-29` 固定四区（`#tab-bar`、`#main-area`[侧栏+标签内容]、`#input-bar`）加独立 `#toast-container`；`app.js:24-30` 一次性创建 tab-bar/side-panel/input-bar/settings-panel/search-overlay 五个单例并挂载，Home 标签常驻（:41-44）。
+**前端装配**：`index.html:18-29` 固定四个区域加一个独立 toast 容器：
+- `#tab-bar`、`#main-area`（侧栏+标签内容）、`#input-bar`
+- `#toast-container`
+
+`app.js:24-30` 一次性创建 tab-bar/side-panel/input-bar/settings-panel/search-overlay 五个单例并挂载，Home 标签常驻（:41-44）。
 
 无 Provider/Portal/Overlay Host 抽象，无路由，无 store 框架（见第 1 节）。
 
@@ -57,11 +63,18 @@ Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。�
 **界面栈。** 原生层 WinUI 3（Windows App SDK 1.8.260101001，packages.config:8-17）；前端为无框架 vanilla ES Modules + 手写 CSS，依赖仅 `vendor/marked.min.js` 与 `vendor/highlight.min.js`（`index.html:27-28`）。
 
 前端无构建步骤（`docs/architecture.md:88` 原话 "no virtual DOM, no framework, and no build step"）。
-- **公共组件清单**（模块级单例）：`services/toast.js`（Toast）、`services/confirm.js`（确认弹窗）、`components/search-overlay.js`（搜索浮层）、`components/settings-panel.js`（设置抽屉）、`services/settings-store.js`（设置缓存 store）。没有统一的命令式弹窗服务、浮层队列或 Portal 概念；各浮层各自管理自己的挂载与 z-index。
+- **公共组件清单**（模块级单例）：
+  - `services/toast.js`（Toast）
+  - `services/confirm.js`（确认弹窗）
+  - `components/search-overlay.js`（搜索浮层）
+  - `components/settings-panel.js`（设置抽屉）
+  - `services/settings-store.js`（设置缓存 store）
+
+  没有统一的命令式弹窗服务、浮层队列或 Portal 概念；各浮层各自管理自己的挂载与 z-index。
 
 **状态所有权。** 业务偏好（theme、fontSize、temperature、systemPrompt、streamResponses、provider 配置、MCP/插件开关）的权威在原生 `Manifold::Core::AppSettings`（`Manifold.Core/SettingsManager.h:23-51`），落盘 `%LOCALAPPDATA%\Manifold\settings.json`（SettingsManager.cpp:82, 136-144）。
 
-    前端 `settings-store.js` 是缓存：HOST_READY 初始化（`settings-store.js:46-57`）、SETTINGS_UPDATED 订阅原生回传（:59-64）、updateSettings 乐观更新本地后发 SAVE_SETTINGS（:31-35）。
+    前端 `settings-store.js` 是缓存：HOST_READY 初始化、SETTINGS_UPDATED 订阅原生回传、updateSettings 乐观更新本地后发 SAVE_SETTINGS（:31-35,46-57,59-64）。
 
     改动设置时原生 HandleSaveSettings 做钳制（温度 0-2、字号 10-24、系统提示词 10000 字，MainWindow.xaml.cpp:480-494）。
   - UI 状态（标签、聊天消息、流式文本、搜索浮层可见性、设置面板可见性）：全部组件局部或模块级闭包，无全局 store；聊天状态细节见 Chat UI 笔记第 8 节。
@@ -71,18 +84,25 @@ Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 ## 2. 弹窗、浮层与菜单
 
-原生层无浮层控件（见系统边界）；以下全部是 Web 侧机制。z-index 分层：设置抽屉 100（`styles/base.css:403`）、Toast 200（:460）、搜索浮层 250（`styles/search.css:9`）、Confirm 遮罩 300（`styles/layout.css:67`）。
+原生层无浮层控件（见系统边界）；以下全部是 Web 侧机制。z-index 分层：
+
+| 浮层 | z-index | 位置 |
+|---|---|---|
+| 设置抽屉 | 100 | `styles/base.css:403` |
+| Toast | 200 | :460 |
+| 搜索浮层 | 250 | `styles/search.css:9` |
+| Confirm 遮罩 | 300 | `styles/layout.css:67` |
 
 ### Confirm 确认弹窗（`services/confirm.js`）
 
-- 唯一命令式弹窗：showConfirm(message) 返回 `Promise<boolean>`（`confirm.js:2-31`），每次调用动态创建 `.confirm-overlay` + `.confirm-dialog`，两个按钮 + 遮罩点击关闭（:24-26，`e.target === overlay` 判断点击的是遮罩本体）。
+- 唯一命令式弹窗：showConfirm(message) 返回 `Promise<boolean>`（`confirm.js:2-31`），每次调用动态创建遮罩与对话框两个 DOM 节点，两个按钮加遮罩点击关闭（:24-26，以点击目标是否为遮罩本体判断）。
 - 焦点与键盘：打开后 `ok.focus()`（:29）；**无 Esc 处理、无焦点陷阱、无关闭后焦点归还**——全部静态确认（文件全文无 keydown 监听）。
 - 消费方：流式期间关闭聊天标签（`app.js:66-69`）、删除会话（`side-panel.js:122-127`）。Chat UI 笔记第 5 节已指出 Ctrl+W 直接关闭绕过该确认（`app.js:186-196`）。
 - 打开期间未发现滚动锁定机制（body 无 overflow:hidden 切换；静态推断，另 `base.css:87` 中 body 本就 overflow:hidden，应用级滚动区域在内部容器）。
 
 ### 搜索浮层（`components/search-overlay.js`）
 
-- 单例，Ctrl+F 切换（`app.js:206-209`）。`show()` 清空输入并 `input.focus()`（`search-overlay.js:87-94`），遮罩点击关闭（:19）、Esc 关闭（:35）、↑↓/Enter 键盘导航结果（:36-58）。300ms 防抖发 SEARCH_SESSIONS（:24-32），结果点击后关闭并 onOpenSession 打开会话（:76-79）。无 aria 属性（`role=dialog`/aria-modal 均未设置）。
+- 单例，Ctrl+F 切换（`app.js:206-209`）。打开时清空输入并聚焦输入框（`search-overlay.js:87-94`），遮罩点击、Esc 关闭，方向键与 Enter 导航结果（:19,35,36-58）。300ms 防抖发 SEARCH_SESSIONS（:24-32），结果点击后关闭并打开会话（:76-79）。无 aria 属性（`role=dialog`/aria-modal 均未设置）。
 - 关闭后焦点不归还：`hide()` 只移除 `.open` 类（:96-100），无焦点管理。
 
 ### 设置抽屉（`components/settings-panel.js`）
@@ -92,7 +112,7 @@ Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 ### 提示词下拉（`components/input-bar.js:109-153`）
 
-- 📋 按钮发 LIST_PROMPTS，响应到达后动态建 `.prompt-dropdown`（`position:absolute; bottom:100%`，无定位父级翻转、无聚焦/键盘导航）。关闭方式只有：点击某项后移除、或文档任意点击一次后移除（:149-151 的 `{once:true}` 监听）；**无 Esc 处理**。
+- 📋 按钮发 LIST_PROMPTS，响应到达后动态建 `.prompt-dropdown`（`position:absolute; bottom:100%`，无定位父级翻转、无聚焦/键盘导航）。关闭方式只有两种：点击某项后移除，或文档任意点击一次后移除（:149-151 的一次性监听）；**无 Esc 处理**。
 - 选中 system 提示词会替换全局系统提示并持久化（:133-137，注意此时 `updateSettings({systemPrompt})` 走设置链路而非仅插入文本）。
 
 ### 其它浮层/菜单
@@ -130,15 +150,27 @@ Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 非 vendor 代码无 matchMedia/prefers-color-scheme 使用——prefers-color-scheme 字符串仅出现在 `vendor/highlight.min.js:316` 的媒体查询特性列表内（依赖库内部），不做系统跟随。
 
-**Token 体系全集。** `base.css:2-11` :root 定义 8 个布局/字体常量：`--font-size:14px`、`--mono-family`、`--sans-family`、`--radius:8px`、`--radius-sm:4px`、`--transition:150ms ease`、`--sidebar-width:260px`、`--header-height:42px`。
+**Token 体系全集。** `base.css:2-11` 的 :root 定义 8 个布局/字体常量：
+
+```
+--font-size:14px
+--mono-family
+--sans-family
+--radius:8px
+--radius-sm:4px
+--transition:150ms ease
+--sidebar-width:260px
+--header-height:42px
+```
 
 dark 与 light 两档各定义 29 个同名语义变量，覆盖背景、文本、边框、强调色、消息气泡、代码块、输入框、滚动条、阴影和状态色。两套变量集合完全对齐，组件无需为明暗模式切换类名。（`base.css:14-77`）
 
 去重后语义变量 29 个 + 根常量 8 个 = 37 个。`index.html:2` 硬编码 `data-theme="dark"` 作首帧默认。字号由 `settings-store.js:75-76` 以行内 `--font-size` 同名覆盖 :root 值。
 
-**强调色、字体、密度均无自定义。** 强调族 4 个 token 随主题档硬编码（dark `#6366F1`/light `#4F46E5`，`base.css:25-28, 58-61`），设置面板 general 分区只有 Theme/Temperature/Font Size/System Prompt/Stream 五组控件（`settings-panel.js:127-155`）——无强调色选择器、无字体设置（fontFamily 全仓库无命中；
-
-字体仅 `--mono-family`/`--sans-family` 两个固定族，`base.css:4-5`）、无密度/圆角设置项（`--radius`/`--radius-sm` 固定 8/4px）。
+**强调色、字体、密度均无自定义。** 设置面板 general 分区只有 Theme/Temperature/Font Size/System Prompt/Stream 五组控件（`settings-panel.js:127-155`），无强调色选择器、字体设置与密度/圆角设置项：
+- 强调色：4 个 token 随主题档硬编码（dark `#6366F1` / light `#4F46E5`，`base.css:25-28,58-61`）；
+- 字体：fontFamily 全仓库无命中，只有 `--mono-family`/`--sans-family` 两个固定族（`base.css:4-5`）；
+- 密度与圆角：`--radius`/`--radius-sm` 固定 8/4px，无设置项。
 
 **theme 值无白名单校验。** HandleSaveSettings 只钳制 temperature（0-2）、fontSize（10-24）、systemPrompt（10000 字），theme 字符串任意值直通（MainWindow.xaml.cpp:480-494）；非法值经 applyTheme 写入 data-theme 后无匹配 CSS 规则，token 回退 :root 默认（静态推断，未运行验证）。
 
@@ -148,12 +180,17 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 **首屏与持久化路径。** 首帧固定暗色（index.html 硬编码），HOST_READY 到达后按保存值切换，无防闪烁机制；localStorage 不参与主题（manifold_onboarded 与 manifold_usage 是仅有的两个 localStorage 键，均与主题无关）。跨窗口同步问题不存在（单窗口）。
 
-**其它组件接入 token。** 除公共样式外，终端状态灯动画与选择高亮用 `--accent`/`--accent-transparent`（`terminal.css:34-45`）；消息渲染器代码块行内样式直引 `--code-bg`/`--border`（`message-renderer.js:99`）；提示词下拉等行内样式直引 `var(--...)`（`input-bar.js:123`）——均为对公共变量的直接引用，无组件级私有主题化。
+**其它组件接入 token。** 各处消费方均为对公共变量的直接引用，无组件级私有主题化：
+- 终端状态灯动画与选择高亮：`--accent`/`--accent-transparent`（`terminal.css:34-45`）；
+- 消息渲染器代码块行内样式：`--code-bg`/`--border`（`message-renderer.js:99`）；
+- 提示词下拉等行内样式：`var(--...)`（`input-bar.js:123`）。
 
 **代码块高亮。** `highlight-github-dark.min.css` 无条件加载（`index.html:15`），与 `data-theme="light"` 无关——浅色模式下代码块仍使用深色高亮主题（静态推断，未验证是否有深色代码块与浅色页面混搭的视觉表现）。
-- **本次未找到**（主题体系专项 Grep，范围 `frontend/**` 非 vendor、`Manifold.Core/**`、原生层 `*.cpp/*.h/*.xaml/*.idl`）：主题市场/商店与主题导入导出（importTheme/exportTheme/`theme.json` 均无命中，frontend 下无任何 `*.json` 文件、无 `themes/` 目录）；
-
-  壁纸/背景图（wallpaper/backgroundImage 无命中，`styles/*.css` 无 `url()` 引用）；自定义 CSS（customCss/userStyle 无命中）；原生层 RequestedTheme 无命中——原生主题通道只有 MainWindow.xaml:12 一处 ThemeResource。
+- **本次未找到**（主题体系专项 Grep，范围 `frontend/**` 非 vendor、`Manifold.Core/**`、原生层 `*.cpp/*.h/*.xaml/*.idl`）：
+  - 主题市场/商店与主题导入导出：importTheme/exportTheme/`theme.json` 均无命中，frontend 下无任何 `*.json` 文件、无 `themes/` 目录；
+  - 壁纸/背景图：wallpaper/backgroundImage 无命中，`styles/*.css` 无 `url()` 引用；
+  - 自定义 CSS：customCss/userStyle 无命中；
+  - 原生层 RequestedTheme 无命中——原生主题通道只有 MainWindow.xaml:12 一处 ThemeResource。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -191,7 +228,11 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 **无公共浮层抽象。** Confirm/搜索/设置/下拉各自为政，无统一 Portal、无层级队列、无 Esc 契约——同一浮层打开时另一个浮层可见性不做互斥管理（如设置抽屉开着时 Ctrl+F 打开搜索浮层，两者并存，z-index 决定覆盖；静态推断）。
 
-**死代码存量。** FRONTEND_READY（原生无 handler）、GET_SETTINGS（前端无发送点）、OPEN_FILE_DIALOG/FILE_ATTACHED（前端无消费点）、`.settings-overlay`/`.loading-dots`/`.streaming-dots` 样式（无 JS 使用点）——均经 Grep 确认。
+**死代码存量。** 以下项目均经 Grep 确认无对应消费：
+- FRONTEND_READY：原生无 handler；
+- GET_SETTINGS：前端无发送点；
+- OPEN_FILE_DIALOG / FILE_ATTACHED：前端无消费点；
+- `.settings-overlay` / `.loading-dots` / `.streaming-dots`：样式无 JS 使用点。
 
 **深浅色边界不一致。** `index.html` 首帧硬编码 dark + WebView2 默认背景硬编码深色 + 高亮 CSS 固定深色，与设置持久化主题解耦；浅色主题下存在首帧与边缘露色的静态推断风险。
 

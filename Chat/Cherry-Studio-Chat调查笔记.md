@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。会话单位是 Topic（SQLite），消息是 adjacency-list 树（`message.parentId` 自引用外键），"切换分支"是 `active_node_id` 指针重定向而非重排树。一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复是 N 个独立 execution 真并行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
+Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。会话单位是 Topic（SQLite），消息是 adjacency-list 树（`message.parentId` 自引用外键），"切换分支"是 `active_node_id` 指针重定向而非重排树。
+
+一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复是 N 个独立 execution 真并行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
 
 ## 产品表面与系统边界
 
@@ -26,10 +28,10 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 一条 text 调用链：
 
-1. `ChatComposer.buildComposerQueuedPayload`（`ChatComposer.tsx:978-1002`）汇总草稿/附件/知识库范围，`useChatRuntimeState.sendMessage` → `useConversationTurnController.ts:59` 经 IPC `ai.stream.open` 发送 `buildStreamRequest` 结果。
-2. 主进程 `PersistentChatContextProvider.prepareDispatch`（`:143-331`）：解析模型数组（多于一个即多模型）、`createUserMessageWithPlaceholders` 单事务建 1 条用户消息 + N 条 assistant 占位消息、`resolveCompactedHistory`（`:367-387`）按锚点路径 + `data-clear` 标记 + 压缩视图拼装上下文；`toModelMessages`（`messageRules.ts:75-83`）重放工具输出、剔除媒体、合并相邻同角色消息。
-3. `AiStreamManager.send`（`AiStreamManager.ts:322-407`）为每个模型 `createAndLaunchExecution` 并行 `runExecutionLoop`，AI SDK Agent（`Agent.ts:238`）把 initialMessages 转 model messages，provider runtime 发起流式调用。
-4. 流式块经各自 `PersistenceListener` 写回占位消息；渲染层 `useExecutionOverlay`（`useExecutionOverlay.ts:149-379`）读流式增量，`useStableMessagePartsLayers` 与 DB 历史合并，`MessageList.tsx:170-186` 按 `firstLiveGroupIndex` 把同一批消息切成"已封存历史段/live 段"渲染。
+1. `ChatComposer`（`ChatComposer.tsx:978-1002`）汇总草稿、附件与知识库范围，经发送链由 `useConversationTurnController.ts:59` 通过 IPC `ai.stream.open` 发出请求。
+2. 主进程 `PersistentChatContextProvider.prepareDispatch`（`:143-331`）：解析模型数组（多于一个即多模型），单事务建 1 条用户消息 + N 条 assistant 占位消息；随后按锚点路径、`data-clear` 标记与压缩视图拼装上下文，并重放工具输出、剔除媒体、合并相邻同角色消息（`messageRules.ts:75-83`）。
+3. `AiStreamManager.send`（`AiStreamManager.ts:322-407`）为每个模型并行启动并执行生成循环；AI SDK Agent（`Agent.ts:238`）把 initialMessages 转成 model messages 后由 provider runtime 发起流式调用。
+4. 流式块经各自的 `PersistenceListener` 写回占位消息；渲染层通过 `useExecutionOverlay`（`useExecutionOverlay.ts:149-379`）读取流式增量并与 DB 历史合并，`MessageList.tsx:170-186` 按 `firstLiveGroupIndex` 把同一批消息切成已封存历史段与 live 段渲染。
 5. 最终化落库后 `TopicNamingService` 两阶段自动命名（首条用户消息临时标题 → 首轮回复后 AI 摘要标题），`isNameManuallyEdited` 手动改名后永久停止。
 
 ## 核心对象与状态权威

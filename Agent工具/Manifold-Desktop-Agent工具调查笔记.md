@@ -29,15 +29,20 @@ MCP tools/list
   -> 结束
 ```
 
-`MCPClient::CallTool()` 已实现，但全仓库没有运行时调用点；`ToolResult` 和 `maxToolCallRounds` 也只有类型或字段定义。`docs/architecture.md` 描述的“调用工具、追加结果、重新请求模型”与当前代码不一致（`MCPClient.cpp:131-155`、`MainWindow.xaml.cpp:757-841`）。
+`MCPClient::CallTool()` 已实现，但全仓库没有运行时调用点；`ToolResult`、`maxToolCallRounds` 也只有类型或字段定义。
+
+`docs/architecture.md` 描述的“调用工具、追加结果、重新请求模型”与当前代码不一致（`MCPClient.cpp:131-155`、`MainWindow.xaml.cpp:757-841`）。
 
 ## MCP 发现与注入
 
-`MCPClient::ConnectServer()` 根据配置创建 stdio 或 SSE transport，发送 `initialize`，随后请求 `tools/list` 和 `resources/list`（`MCPClient.cpp:12-80`）。代码构造了 `notifications/initialized` JSON，但没有把 `notifLine` 交给 transport，因此该通知实际未发送（`MCPClient.cpp:40-49`）。
+- `MCPClient::ConnectServer()`（`MCPClient.cpp:12-80`）根据配置创建 stdio 或 SSE transport；连接后先发送 `initialize` 握手，再请求 `tools/list` 与 `resources/list`。
+- 代码构造了 `notifications/initialized` JSON，但没有把 `notifLine` 交给 transport，因此该通知实际未发送（`MCPClient.cpp:40-49`）。
 
 发现的工具被扁平转换为 `ToolDefinition`：名称、描述和一层 `properties/required` 会进入 Provider 请求（`MCPClient.cpp:104-128`）。同名工具以后连接的服务器覆盖路由表中的先前条目（`MCPClient.cpp:63`）。
 
-常规聊天无条件注入全部已连接工具（`MainWindow.xaml.cpp:785-789`）；Compare 路径没有设置 `req.tools`（`MainWindow.xaml.cpp:1078-1090`）。Gemini、OpenAI 和 Anthropic 均实现了各自的工具 schema 与 tool call 解析，OpenAICompat 继承 OpenAI 格式。
+常规聊天无条件注入全部已连接工具（`MainWindow.xaml.cpp:785-789`）；Compare 路径没有设置 `req.tools`（`MainWindow.xaml.cpp:1078-1090`）。
+
+Gemini、OpenAI 和 Anthropic 均实现了各自的工具 schema 与 tool call 解析，OpenAICompat 继承 OpenAI 格式。
 
 ## 传输与运行边界
 
@@ -48,7 +53,9 @@ MCP tools/list
 
 ## 插件工具
 
-`PluginContext` 声明 `RegisterProvider`、`RegisterTool` 和 `RegisterTabType` 等接口，但仓库没有实现 `PluginContext` 的类。`PluginManager::LoadEnabled()` 会加载 DLL、调用 `CreatePlugin` 并注册前端虚拟主机，却没有调用 `IPlugin::Initialize(context)`；随后直接把状态标为 `Initialized`（`PluginManager.cpp:67-129`）。设置页切换插件也只修改状态和配置，不会即时加载或卸载 DLL（`PluginManager.cpp:151-157`、`MainWindow.xaml.cpp:1177-1187`）。
+- 接口声明：`PluginContext` 提供 `RegisterProvider`、`RegisterTool`、`RegisterTabType` 等注册接口，但仓库没有实现该接口的类。
+- 加载链路未接通：`PluginManager::LoadEnabled()` 会加载 DLL、调用 `CreatePlugin` 并注册前端虚拟主机，却**没有调用 `IPlugin::Initialize(context)`**，随后直接把状态标为 `Initialized`（`PluginManager.cpp:67-129`）。
+- 设置页切换：只修改状态和配置，不会即时加载或卸载 DLL（`PluginManager.cpp:151-157`、`MainWindow.xaml.cpp:1177-1187`）。
 
 因此，插件工具目前是接口骨架，不会进入模型请求。
 

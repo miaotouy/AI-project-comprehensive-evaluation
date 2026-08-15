@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文不是单一字符串，而是 `text / reasoning / file / tool-*` 部件数组（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE = {TEXT, FILE, REASONING}`，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
+Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文不是单一字符串，而是 `text / reasoning / file / tool-*` 部件数组（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE` 仅 TEXT/FILE/REASONING 三种，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
 
-Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json:97`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, harden]`**。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
+Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json:97`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, harden]`**（插件常量见 §2.1 代码块）。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
 
 Jan 值得关注的三个设计点：
 
@@ -82,7 +82,7 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 ```
 
 - **Fork 插件替换确认**：`REHYPE_PLUGINS` 没有沿用 streamdown 默认的 `rehype-raw + rehype-sanitize`，而是替换为 `[rehypeKatex, harden]`；`rehype-raw` 仅存在于 `package.json` 依赖清单（L90），src 中无 `rehypeRaw` 使用点。
-- `Streamdown` props（L354-370，逐行核验）：`mode`（L356）、`parseIncompleteMarkdown`（L357）、`animate`（L358）、`animationDuration={500}`（L359）、`linkSafety`（L360）、mermaid 错误组件（L370）；含 `className`/`messageId`。
+- `Streamdown` props（L354-370，逐行核验）：`mode`、`parseIncompleteMarkdown`、`animate`、`animationDuration={500}`、`linkSafety`、mermaid 错误组件等（L356-370）；含 `className`/`messageId`。
 - 插件引用被 hoist 到模块级常量（L58-60 注释：Streamdown 是 memoized 的，若每次渲染传入新字面量会破坏 memo，导致每个流式 token 全量重解析 + 重高亮）。
 - 代码块样式钩子：`[data-streamdown="code-block-header"]` 相关样式在 `index.css:261`。
 
@@ -90,7 +90,7 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 
 - 流式输入走 AI SDK `useChat`（throttle 50ms），`useDeferredValue` 合并 token（L220-231）；
 - 流式中代码块不跑 Shiki（`StreamingCode`，L72-95）：活动代码块在流式期间渲染纯文本，避免每 token 全量高亮（webkitgtk 慢）；流结束由 Shiki `CodeBlock` 接管；
-- LaTeX 规范化占位符管道（L97-201）：PUA 占位符保护代码/数学 → 逐行 `maskInlineMath` → 货币 `\$` 转义 → ZWSP 修复强调 flanking（`fixEmphasisFlanking`，L103-108）→ `\[..\]`/`\(..\)` → `$$..$$`。ZWSP 只加在代码/数学被遮蔽之后，避免 KaTeX 报 “Unrecognized Unicode character 8203”。
+- LaTeX 规范化占位符管道（L97-201）：先用 PUA 占位符遮蔽代码/数学，再做行内数学掩码与货币符号转义，随后插入 ZWSP 修复强调 flanking（`fixEmphasisFlanking`，L103-108），最后把 `\[..\]`/`\(..\)` 归一为 `$$..$$`。ZWSP 只加在代码/数学被遮蔽之后，避免 KaTeX 报 "Unrecognized Unicode character 8203"。
 
 ### 2.3 组件覆盖
 
@@ -104,12 +104,12 @@ LINK_SAFETY       = { enabled: false }                                       (L6
 - 正文 HTML 消毒由 streamdown fork 的 `defaultRehypePlugins.harden` 承担（L62）；仓库源码中未发现 DOMPurify 使用；
 - `LINK_SAFETY = { enabled: false }`（L65、L360）——链接安全检查被显式关闭；
 - `web-app/src/components/HtmlArtifact.tsx`（151 行）：iframe 承载，默认严格 CSP + sandbox 不透明源；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；
-- 链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源。`lib/citation-parser.ts` 与 `lib/grounding.ts`（句子切分 + 余弦相似度）负责从工具输出提取引用并做真值校验。
+- 链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源；`lib/citation-parser.ts` 与 `lib/grounding.ts` 负责从工具输出提取引用（句子切分 + 余弦相似度）并做真值校验。
 
 ## 3. 扩展方式与新增节点机制
 
-- **部件层无注册表**：消息部件按 `part.type` 在 `MessageItem.renderedParts`（L413-475）中顺序分派——`text` → renderTextPart（RenderMarkdown）、`file` → renderFilePart、`reasoning`/`tool-*` → ChainOfThoughtGroup（`isCotPart`，L416-417）；新增类型需同时改转换层（`messages.ts` 的 ThreadMessage ↔ UIMessage 转换，§1.1）与分派分支，无插件注册表；
-- **Markdown 层扩展点**：`RenderMarkdown` 的 `mergedComponents`（L233-252）覆写 `a`（`#cite-`/`#webcite-` 锚点 → CitationLink/WebCitationChip）与 `table` → MarkdownTable，并与调用方传入的 `components` prop 合并；代码/数学/Mermaid 走 Streamdown 插件常量（§2.1），注释明确不覆写 `code` 组件以保留 html/svg 拆段（L254-257）；
+- **部件层无注册表**：消息部件按 `part.type` 在 `MessageItem.renderedParts`（L413-475）中顺序分派——文本进 renderTextPart（RenderMarkdown）、文件进 renderFilePart、推理与工具进 `ChainOfThoughtGroup`（`isCotPart`，L416-417）；新增类型需同时改转换层（`messages.ts` 的 ThreadMessage ↔ UIMessage 转换，§1.1）与分派分支，无插件注册表；
+- **Markdown 层扩展点**：`RenderMarkdown` 的 `mergedComponents`（L233-252）覆写 `a` 为 `#cite-`/`#webcite-` 锚点（CitationLink/WebCitationChip）、`table` 为 MarkdownTable，并与调用方传入的 `components` prop 合并；代码/数学/Mermaid 走 Streamdown 插件常量（§2.1），注释明确不覆写 `code` 组件以保留 html/svg 拆段（L254-257）；
 - **扩展边界（静态确认）**：本快照未发现 schema 驱动或注册表式的动态渲染组件机制；新增节点类型是硬编码分派。
 
 ## 4. 边界与未验证事项

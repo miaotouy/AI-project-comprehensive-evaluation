@@ -27,11 +27,33 @@ Cherry Studio 是 Electron 主应用与内部共享包合仓的 TypeScript monor
 
 相对 `0001d730ae` 快照：跟踪文件 7,828 → 8,002，源码行 1,068,550 → 1,116,566（净增约 +48k 行，与区间内 1,171 个文件被修改、净 +56k 行的 diff 规模吻合），测试源码行 476,569 → 506,552（测试/源码占比 44.6% → 45.4%）。
 
-主要区域是 `src/renderer`（2,631 文件/495,622 行）、`src/main`（1,820/432,627）、`packages/ui`（2,168/80,009）、`src/shared`（316/42,199），以及 provider registry（181/17,802）与 AI core（90/17,761）两个约 1.8 万行的包。`v2-refactor-temp` 仍有 181 个跟踪文件，但已只剩 `README.md`、`docs/` 与 `tools/data-classify` 等文档/工具（源码已清空，0 行可识别源码），其文档仍计入上表的 166 个 `v2-refactor-temp` 文档文件。
+主要区域按量级依次为：
+
+| 区域 | 文件 / 源码行 |
+| --- | ---: |
+| `src/renderer` | 2,631 / 495,622 |
+| `src/main` | 1,820 / 432,627 |
+| `packages/ui` | 2,168 / 80,009 |
+| `src/shared` | 316 / 42,199 |
+| provider registry | 181 / 17,802 |
+| AI core | 90 / 17,761 |
+
+provider registry 与 AI core 是两个约 1.8 万行的内部包。`v2-refactor-temp` 仍有 181 个跟踪文件，但源码已清空（0 行可识别源码），只剩 `README.md`、`docs/` 与 `tools/data-classify` 等文档/工具；其文档仍计入上表的 166 个 v2-refactor-temp 文档文件。
 
 ## 语言、文档与测试
 
-TypeScript 1,099,512 行（98.5%），语言统一度很高。文档主要位于 `v2-refactor-temp`（166 文件）、`docs`（111，含 `docs/references`）、`.agents/skills`（87）与 `resources`（33）；前两类用途分别是重构材料与 Agent 指令，不等同于用户文档。测试集中在 renderer 865 文件、main 779、shared 83、`packages/ui` 66，以及 aiCore 30、provider-registry 18 等内部包（合计约 115 个）。
+TypeScript 1,099,512 行（98.5%），语言统一度很高。
+
+文档主要位置：
+
+| 位置 | 文件数 | 用途 |
+| --- | ---: | --- |
+| `v2-refactor-temp` | 166 | 重构材料，不等同于用户文档 |
+| `docs`（含 `docs/references`） | 111 | 用户与开发文档 |
+| `.agents/skills` | 87 | Agent 指令 |
+| `resources` | 33 | 资源 |
+
+测试集中在 renderer 865 文件、main 779、shared 83、`packages/ui` 66，以及 aiCore 30、provider-registry 18 等内部包（合计约 115 个）。
 
 ## 跨平台组织与边界
 

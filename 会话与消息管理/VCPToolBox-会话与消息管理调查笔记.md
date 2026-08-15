@@ -42,11 +42,19 @@ VCPToolBox **不拥有会话事实源**。它是无会话归属的请求级消�
 | VCPTavern `access_logs.json` | 预设 + 会话键的最后访问时间（`Plugin/VCPTavern/VCPTavern.js:7` 文件路径、13 内存 Map、17-36 加载/保存） | 唯一的"会话键"持久化，但只存时间戳，用于 `{{LastChatTime}}`/`{{TimeSinceLastChat}}` 时间变量，不含消息 |
 | `tool-call-records.sqlite3` | 工具调用审计记录（`modules/toolCallRecordStore.js:11` DB 路径、137 建表） | 插件调用台账，非聊天消息存储 |
 
-内存态（非持久化）：`activeRequests` 在途请求注册表（`server.js:142`，供 `/v1/interrupt` 与关机排空使用）、`ResponseReplayCache` 按 `clientIp::messageId` 的响应去重缓存（`modules/chatCompletionHandler.js:56-124`）、VCPTavern 与 VCPClawMail 的内存会话 Map（`Plugin/VCPClawMail/VCPClawMail.js:222-233`，Agent 信箱服务的默认会话历史，含过期清理）。
+内存态（非持久化）：
+- `activeRequests` 在途请求注册表（`server.js:142`，供 `/v1/interrupt` 与关机排空使用）；
+- `ResponseReplayCache` 按 `clientIp::messageId` 的响应去重缓存（`modules/chatCompletionHandler.js:56-124`）；
+- VCPTavern 与 VCPClawMail 的内存会话 Map（`Plugin/VCPClawMail/VCPClawMail.js:222-233`，Agent 信箱服务的默认会话历史，含过期清理）。
 
 ## 2. 生命周期、消息操作与检索（均不适用）
 
-- **创建/切换/归档/删除/恢复**：不存在会话对象，本类操作无处承载。检查范围：`server.js` 全部路由（887/997/1058/1217/1231/1250/1471 及 protocolBridge 983/1036/1068、adminServer.js `/admin_api` 系列）与 `routes/admin/` 各模块，均无会话列表/消息 CRUD 端点。
+- **创建/切换/归档/删除/恢复**：不存在会话对象，本类操作无处承载。检查范围：`server.js` 全部路由、`protocolBridge`、`adminServer.js` 的 `/admin_api` 系列与 `routes/admin/` 各模块（端点行号见下），均无会话列表或消息 CRUD 端点：
+  ```text
+  server.js 路由：887 / 997 / 1058 / 1217 / 1231 / 1250 / 1471
+  protocolBridge：983 / 1036 / 1068
+  adminServer.js：/admin_api 系列
+  ```
 - **编辑、重试、续写、分支**：不适用。请求级"重试"是上游调用重试（见对话请求与上下文笔记）；客户端重发同一 `messageId` 仅可能命中 ResponseReplayCache 响应回放，不产生会话级版本。
 - **列表、分页、搜索**：不适用。`finalContextStore.listFinalContexts` 只返回快照元信息（id/capturedAt/模型/消息数/token 统计），供调试页切换查看，不是会话索引。
 - **一致性、多窗口、并发**：不适用（无共享会话状态）。响应级去重只有 ResponseReplayCache（`modules/chatCompletionHandler.js:64-67` 键、96-123 回放）。

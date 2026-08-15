@@ -22,15 +22,15 @@ TUI 没有主题市场、壁纸、字体、密度或圆角设置。键盘由统�
 
 ## 系统边界与总体装配
 
-**界面栈。** `packages/tui` 是自研终端 UI 库（`packages/tui/package.json` 依赖仅 get-east-asian-width、marked），组件模型为 Component（render(width)/handleInput/invalidate）+ Container 组合 + Focusable（focused + CURSOR_MARKER APC 序列定位硬件光标供 IME 使用，`packages/tui/src/tui.ts:23-79`）。
+**界面栈。** `packages/tui` 是自研终端 UI 库（`packages/tui/package.json` 依赖仅两个小包），组件模型为：组件（渲染、输入处理与失效标记）+ 容器组合 + 可聚焦节点（focused 状态 + CURSOR_MARKER APC 序列定位硬件光标供 IME 使用，`packages/tui/src/tui.ts:23-79`）。
 
 不采用 Ink/blessed/react 等框架。
 
-**两种渲染器。** TuiMainScreen（regular，渲染进主屏与滚动回滚，行级差分比较；`tui-main-screen.ts:180` 起 doRender）与 TuiAltScreen（fullscreen 备屏，应用自有 viewport + 布局引擎；`tui-alt-screen.ts:159`，ViewportTUI 标记符号 VIEWPORT_TUI，`tui.ts:320`）。
+**两种渲染器。** TuiMainScreen（regular：渲染进主屏与滚动回滚，行级差分比较；`tui-main-screen.ts:180` 起 doRender）与 TuiAltScreen（fullscreen 备屏：应用自有视口与布局引擎；`tui-alt-screen.ts:159`，ViewportTUI 标记符号，`tui.ts:320`）。
 
-**装配。** createInteractiveTui（`interactive-mode.ts:343-355`）按 tuiMode 选择渲染器，fullscreen 时注入 searchMatchStyle/openUrl: openBrowser/onRightClickPaste；
+**装配。** createInteractiveTui（`interactive-mode.ts:343-355`）按 tuiMode 选择渲染器，fullscreen 时注入搜索匹配样式、链接打开与右键粘贴回调；
 
-InteractiveMode.init（:842 起）构建组件树（documentContainer/pendingMessagesContainer/statusContainer/editorContainer/footerContainer，:891-899 mount），并构造 fullscreen 布局根（transcript ScrollView + dock VStack，:872-890）。
+InteractiveMode.init（:842 起）构建组件树（文档、待处理消息、状态、编辑器、页脚五个容器，:891-899 挂载），并构造 fullscreen 布局根（transcript 滚动视图 + dock 垂直栈，:872-890）。
 
 **渲染器热切换。** switchTuiMode（:791-840）在 regular/fullscreen 之间替换渲染器但保留同一组件树、焦点与渲染状态（TuiMainScreenRenderState capture/restore，:802-822）；组件持有的 TUI 引用经 createInteractiveTuiReference（:358-386）的 Proxy 跟随当前渲染器。
 
@@ -40,8 +40,8 @@ InteractiveMode.init（:842 起）构建组件树（documentContainer/pendingMes
 
 ## 1. 界面栈、公共组件与状态所有权
 
-- **公共组件**（`packages/tui/src/components/`）：基础布局组件包括 Text/TruncatedText/Box/Spacer 和 Stack（VStack/HStack：basis/grow/shrink/minSize/maxSize/visible 回调，`stack.ts:4-11,82-87`）；ScrollView 提供 follow-end、overscroll chain/contain 和三态滚动条（`scroll-view.ts:21`）。
-- 输入与内容组件包括 Input（`input.ts:19`）、Editor（多行、autocomplete、历史/kill-ring/undo，`editor.ts:270`）、SelectList（`select-list.ts:40`，键盘导航由 handleInput :112-137 处理）、SettingsList（含子菜单与搜索，`settings-list.ts:34,198-220`）、Markdown（`markdown.ts:236`，主题接口 MarkdownTheme :200-218）、Loader/CancellableLoader（见 §3）和 Image（见 §6）。
+- **公共组件**（`packages/tui/src/components/`）：基础布局包括文本、截断文本、盒、间隔与 VStack/HStack 栈（basis/grow/shrink/minSize/maxSize/visible 回调，`stack.ts:4-11,82-87`）；ScrollView 提供尾随、overscroll 链/包含与三态滚动条（`scroll-view.ts:21`）。
+- 输入与内容组件包括：输入框、多行编辑器（自动补全、历史/kill-ring/undo，`editor.ts:270`）、选择列表（键盘导航，`select-list.ts:40`）、设置列表（含子菜单与搜索，`settings-list.ts:34,198-220`）、Markdown（主题接口 MarkdownTheme，`markdown.ts:236`）、加载器（见 §3）与图片（见 §6）。
 
 **fullscreen 布局引擎。** `layout.ts` renderLayoutFrame（:353-382）按终端尺寸逐帧布局，render 缓存按组件+宽度键控（:62-75），scroll 节点计算 scrollTop 与 clip（:130-162），paintBox 逐行合成并处理 Kitty 图片裁剪与滚动条绘制（:304-351），全宽行有直接引用快速路径（:319-325）；滚动条几何 getScrollbarGeometry（:266-291）。
 
@@ -70,7 +70,7 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
 ### 对话框/命令面板的常规形态：编辑器插槽替换
 
-- showSelector（`interactive-mode.ts:4354-4377`）：把 editorContainer 里的 editor 换成选择器组件并转移焦点，done 回调恢复 editor；单实例互斥（disposeActiveSelector token 校验）。全部业务选择器（`/settings`、`/resume`、`/tree`、`/fork`、`/model`、`/login` 等）走此路径，业务细节见 Chat UI 笔记 §1-§3。
+- showSelector（`interactive-mode.ts:4354-4377`）：把编辑器容器里的编辑器换成选择器组件并转移焦点，done 回调恢复编辑器；单实例互斥（token 校验）。全部业务选择器（设置、续聊、文件树、fork、模型、登录等）走此路径，业务细节见 Chat UI 笔记 §1-§3。
 
 **确认形态。** 删除会话等"确认"以选择器内嵌确认行实现（如 `session-selector.ts:576-601` Ctrl+D 进入删除确认），无独立 Modal 组件。
 
@@ -85,7 +85,7 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
 ### fullscreen flash（Toast 等价物）
 
-- AltScreenFlashContainer（`packages/tui/src/components/alt-screen-flash.ts:13-51`）：默认 1000ms 自动消失、反显样式（`\x1b[7m`）、从顶部行右对齐合成（`tui-alt-screen.ts:1209-1221`）。仅 TuiAltScreen 提供 `flash()`；
+- AltScreenFlashContainer（`packages/tui/src/components/alt-screen-flash.ts:13-51`）：默认 1000ms 自动消失、反显样式、从顶部行右对齐合成（`tui-alt-screen.ts:1209-1221`）。仅 TuiAltScreen 提供 flash()；
 
   regular 模式无此通道——`interactive-mode.ts:5956-5969` 复制命令在 ui instanceof TuiAltScreen 时 flash("Copied!")，否则退化为 showStatus。TUI 接口 TUI 本身不含 flash 方法。
 
@@ -112,13 +112,13 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
   颜色值允许 hex、256 色索引、""（终端默认色）、var 引用；withThemeColorFallbacks（:331-344）为可选 token 提供回退（全表：scrollbarThumb→selectedBg、searchMatchBg→selectedBg、searchMatchText→text、thinkingMax→thinkingXhigh，Theme 构造内同套逻辑 :371-384）。
 
-  内置 `dark.json`/`light.json` 示例：`dark.json:22-44` 的 accent: "accent" 即 vars 引用，text: "#d4d4d4" 为直接 hex。
+  内置的 `dark.json` 示例（:22-44）：accent 即 vars 引用，text: "#d4d4d4" 为直接 hex。
 
 **颜色模式。** 按 `getCapabilities().trueColor` 选 24bit 或 256 色（:628-629），256 色路径有加权距离的 RGB→索引映射（:200-265）；fg/bg 生成 ANSI 序列包裹文本（:390-400）。
 
-**组件接入。** getMarkdownTheme/getSelectListTheme/getSettingsListTheme/getEditorTheme（:1271-1335）把全局 theme 转成各组件主题接口；组件内部不再感知主题切换，切换后 `ui.invalidate() + requestRender` 全量重绘（`theme-controller.ts:109-112`，onThemeChange 回调 `theme.ts:923-925`）。
+**组件接入。** 四个主题适配器（:1271-1335）把全局 theme 转成各组件主题接口；组件内部不再感知主题切换，切换后 invalidate + 请求重绘全量重绘（`theme-controller.ts:109-112`，onThemeChange 回调 `theme.ts:923-925`）。
 
-**初始化与持久化。** `main.ts:884` `initTheme(settingsManager.getTheme(), appMode === "interactive")`；设置键 Settings.theme?: string（`settings-manager.ts:98`），getThemeSetting/setTheme（:730-745）落 global `settings.json`。
+**初始化与持久化。** `main.ts:884` 以交互模式与设置的主题值初始化主题系统；设置键（`settings-manager.ts:98`）的读写（:730-745）落全局 `settings.json`。
 
 值可为主题名或 `light/dark` 斜杠自动模式（parseAutoThemeSetting :681-696，resolveThemeSetting :698-709）。
 
@@ -126,7 +126,7 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
 ②OSC 11 背景色查询（queryTerminalBackgroundColor `tui.ts:1207-1228`）按亮度阈值判明暗（`theme.ts:763-765`）；③COLORFGBG 环境变量兜底（:767-786）。
 
-InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时订阅颜色方案变化实时切换 `lightTheme/darkTheme`（:120-138）；`startup-ui.ts:92-100` 启动后异步补一次检测（首帧用 env 检测先撑住）。
+InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时订阅颜色方案变化实时切换明暗两套主题（:120-138）；`startup-ui.ts:92-100` 启动后异步补一次检测（首帧用 env 检测先撑住）。
 
 **检测结果回写与重订阅。** 未设置主题且非 auto 时，OSC 11 高置信度检测结果会写入 settings.theme 并 flush（`theme-controller.ts:60-66`），下次启动直接生效；rebindTui 在渲染器热切换（regular/fullscreen）后重订阅颜色方案通知（:38-42）。
 
@@ -136,23 +136,23 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 ### 主题资源来源与注册表合并
 
-**内置主题。** getThemesDir 指向打包目录（Bun binary 为 `theme/`，Node/tsx 为 src 或 dist 的 `modes/interactive/theme`，`config.ts:391-404`），仅 `dark.json`/`light.json` 两个。
+**内置主题。** 主题目录按运行方式不同指向打包产物或源码内的固定位置（`config.ts:391-404`），仅 `dark.json`/`light.json` 两个。
 
 **自定义目录。** `~/.pi/agent/themes/<name>.json`（`config.ts:523-525`），逐文件 try-catch 加载，无效主题在此静默忽略（注释说明由资源加载器在启动/重载时统一报诊断，`theme.ts:529-545`）。
 
-**设置 themes 键。** 全局与项目级两套"主题文件或目录路径数组"（`settings-manager.ts:118`、getThemePaths/setThemePaths/setProjectThemePaths :1040-1054）；`/config` 选择器可增删该资源组（`config-selector.ts:26-38,537-575`）。
+**设置 themes 键。** 全局与项目级各有一套"主题文件或目录路径数组"（`settings-manager.ts:118`，读写 :1040-1054）；`/config` 选择器可增删该资源组（`config-selector.ts:26-38,537-575`）。
 
-**自动发现目录。** 用户级 `~/.pi/agent/themes` 与项目级 `<cwd>/.pi/themes` 由 package-manager 作为资源目录收集（`package-manager.ts:903-904,2363-2374`、collectAutoThemeEntries :493 起），项目级仅在项目受信任时生效（:2395）。
+**自动发现目录。** 用户级 `~/.pi/agent/themes` 与项目级 `<cwd>/.pi/themes` 由 package-manager 作为资源目录收集（`package-manager.ts:903-904,2363-2374`），项目级仅在项目受信任时生效（:2395）。
 
 **CLI。** `--theme <path>`（文件或目录，可重复，`cli/args.ts:162-164`）与 `--no-themes`（关闭主题发现与加载，:169；帮助文本 :285-286）。
 
-**包与扩展贡献。** npm 包资源、`pi-manifest.ts:7` 的 themes 字段、扩展 resources.discover 返回的 themePaths（`core/extensions/runner.ts:1153-1192`、`core/agent-session.ts:2267-2279`）。
+**包与扩展贡献。** npm 包资源、清单文件（`pi-manifest.ts:7`）的 themes 字段、扩展资源发现返回的 themePaths（`core/extensions/runner.ts:1153-1192`、`core/agent-session.ts:2267-2279`）。
 
-**注册表合并。** 全部来源经 setRegisteredThemes（`theme.ts:863-873`）灌入模块级注册表（启动时 `startup-ui.ts:78`，交互运行中 `interactive-mode.ts:584/1888/5743` 从 `resourceLoader.getThemes()` 刷新）；getAvailableThemesWithPaths（`theme.ts:493-520`）按内置→自定义目录→注册表顺序合并、同名去重、按名排序。
+**注册表合并。** 全部来源经 setRegisteredThemes（`theme.ts:863-873`）灌入模块级注册表（启动时 `startup-ui.ts:78`，交互运行中从资源加载器刷新）；getAvailableThemesWithPaths（`theme.ts:493-520`）按内置→自定义目录→注册表顺序合并、同名去重、按名排序。
 
 ### 主题选择 UI 与预览
 
-- **`/settings` 主题子菜单**（ThemeSubmenu，`components/settings-selector.ts:276-470`）：单主题模式列出全部可用主题；自动模式分别选择 light/dark 两个主题（getAutomaticThemeSetting 拼出 `light/dark` 斜杠设置值）。
+- **`/settings` 主题子菜单**（`components/settings-selector.ts:276-470`）：单主题模式列出全部可用主题；自动模式分别选择明暗两套主题（斜杠设置值）。
 
   移动光标即触发 onThemePreview → themeController.preview（`theme-controller.ts:82-89`，setTheme + 全量重绘，**不落盘**）；确认后才 settingsManager.setTheme + applyFromSettings（`interactive-mode.ts:4470-4474`）。
 
@@ -164,7 +164,7 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 - 扩展面：ctx.theme（当前 Theme 实例）、getAllThemes/getTheme/setTheme（`core/extensions/types.ts:265-275`）；ui.setTheme 接受主题名或 Theme 实例（`interactive-mode.ts:2382-2395`）。
 
-**内存主题实例。** 传实例走 setThemeInstance（`theme.ts:914-921`）——currentThemeName 置 `<in-memory>` 并**停止热重载 watcher**（注释 "Can't watch a direct instance"，:917）；非交互扩展运行器中主题 API 为空实现或报 "UI not available"（`runner.ts:258-263`、`modes/rpc/rpc-mode.ts:290-298`）。
+**内存主题实例。** 传实例走 setThemeInstance（`theme.ts:914-921`）——当前主题名置为内存标记并**停止热重载 watcher**（注释 "Can't watch a direct instance"，:917）；非交互扩展运行器中主题 API 为空实现或报 "UI not available"（`runner.ts:258-263`、`rpc-mode.ts:290-298`）。
 
 **仓库内调用实例。** `examples/extensions/mac-system-theme.ts` 轮询 macOS 外观（osascript，2s 间隔）并 `ctx.ui.setTheme("dark"/"light")` 跟随系统明暗——说明扩展可在内置三级检测之外自建系统跟随通道。
 
@@ -179,21 +179,25 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 ## 5. 响应式、终端尺寸与窗口适配
 
-- **regular 模式**（`tui-main-screen.ts:269-292`）：宽度变化 → 全量重绘（换行变化）；高度变化 → 全量重绘保持视口对齐，但 Termux 场景（软键盘反复触发）跳过全量重绘（:277-283）；内容收缩时按 clearOnShrink 清空多余空行（默认开，`PI_CLEAR_ON_SHRINK=0` 或设置关闭，`tui.ts:345`）。
+- **regular 模式**（`tui-main-screen.ts:269-292`）：宽度变化触发全量重绘（换行变化），高度变化也全量重绘以保持视口对齐，但 Termux 场景（软键盘反复触发）跳过（:277-283）；内容收缩时按 clearOnShrink 清空多余空行（默认开，`PI_CLEAR_ON_SHRINK=0` 或设置关闭，`tui.ts:345`）。
 
-**fullscreen 模式。** 每帧 renderLayoutFrame 按当前终端尺寸重新布局，VStack `grow/shrink/minSize` 分配（dock 里 editor minSize: 3、footer minSize: 1，`interactive-mode.ts:879-890`）；visible 回调可按视口条件隐藏条目（`stack.ts:82-87`），dock 本身未用，扩展可注入。
+**fullscreen 模式。** 每帧按当前终端尺寸重新布局，VStack 弹性分配（dock 里编辑器与页脚最小高度固定，`interactive-mode.ts:879-890`）；visible 回调可按视口条件隐藏条目（`stack.ts:82-87`），dock 本身未用，扩展可注入。
 
 **overlay 自适应。** visible 回调每渲染帧评估（尺寸不足自动隐藏，`tui.ts:666-672`）；百分比宽高按当前终端计算（resolveOverlayLayout :957-1055）。
 
-**手动控制。** tuiMode（regular/fullscreen）是设置项 + `/settings` 切换（`settings-manager.ts:1131-1137`，`settings-selector.ts:638-640`）+ `--tui-mode` CLI（`cli/args.ts:182-186`）；fullscreenExitOutput/fullscreenScrollbar 同层（:1141-1157）。
+**手动控制。** tuiMode（regular/fullscreen）是设置项，可经 `/settings` 切换（`settings-manager.ts:1131-1137`、`settings-selector.ts:638-640`）或 `--tui-mode` CLI（`cli/args.ts:182-186`）；全屏输出与滚动条开关同层（:1141-1157）。
 
-**其它终端适配。** 多路复用器（tmux/zellij/STY）鼠标跟踪降级为按钮运动模式（`tui-alt-screen.ts:271-284`）；SSH 下 ESC 重组窗口 100ms（`terminal.ts:104-121`）；cell size 查询 CSI 16 t 校准图片行高（`tui.ts:735-743,933-951`）；term 宽度回退 COLUMNS/80、高度 LINES/24（`terminal.ts:493-499`）。
+**其它终端适配。** 四项：
+- 多路复用器（tmux/zellij/STY）下鼠标跟踪降级为按钮运动模式（`tui-alt-screen.ts:271-284`）；
+- SSH 下 Esc 重组窗口 100ms（`terminal.ts:104-121`）；
+- cell size 查询校准图片行高（`tui.ts:735-743,933-951`）；
+- 终端尺寸回退默认值：宽度 COLUMNS/80、高度 LINES/24（`terminal.ts:493-499`）。
 
 ## 6. 图片、附件、剪贴板与常见内容交互
 
 ### 剪贴板（多层兜底链）
 
-- copyToClipboard（`utils/clipboard.ts:73-175`）：优先 native addon（`@mariozechner/clipboard`，`clipboard-native.ts:31`，Linux 跳过——注释解释 clipboard-rs 在 Wayland 会话不保留 selection ownership，:82-87）；
+- copyToClipboard（`utils/clipboard.ts:73-175`）：优先 native 插件（`@mariozechner/clipboard`，Linux 跳过——注释解释其底层库在 Wayland 会话不保留 selection ownership，:82-87）；
 
   失败或未覆盖平台依次走 pbcopy/clip/termux-clipboard-set/wl-copy（spawn 防 hang，:134-143）/xclip/xsel；OSC 52（`\x1b]52;c;…`，base64 ≤100KB，:26-33）作为远程会话（SSH/MOSH）优先或本地兜底。读取 readClipboardText（:53-71，Wayland 用 wl-paste）。
 
@@ -221,7 +225,7 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 **键注册表分层。** TUI 层 TUI_KEYBINDINGS（`packages/tui/src/keybindings.ts:71-210`，tui.select.*/tui.editor.*/tui.input.*/tui.altScreen.*）；
 
-coding-agent 用 `declare module "@earendil-works/pi-tui"` 声明合并扩展 app.* 键（`core/keybindings.ts:13-62`），KeybindingsManager 继承 TUI 基类并加载 `~/.pi/agent/keybindings.json` 用户覆盖（:340-367），同键多绑定记录冲突（`packages/tui/src/keybindings.ts:243-268`），旧键名迁移表（`core/keybindings.ts:209-269`）。
+coding-agent 通过模块声明合并扩展 app.* 键（`core/keybindings.ts:13-62`），KeybindingsManager 继承 TUI 基类并加载 `~/.pi/agent/keybindings.json` 用户覆盖（:340-367），同键多绑定记录冲突（`packages/tui/src/keybindings.ts:243-268`），旧键名有迁移表（`core/keybindings.ts:209-269`）。
 
 组件只通过 keybindings.matches(data, …) 消费，不硬编码键（Pi 的 AGENTS.md 也强制此规则）。
 

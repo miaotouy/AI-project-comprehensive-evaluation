@@ -48,7 +48,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 内置斜杠命令列表定义于 `packages/coding-agent/src/core/slash-commands.ts:19-42`，入口在 `interactive-mode.ts:2895-2914` 分发：
 
-- `/export [file]`：带 `.jsonl` 后缀走 JSONL，否则走 HTML；无参数时默认输出 `pi-session-<会话文件basename>.html`（`export-html/index.ts:274-278`），JSONL 无参数时生成带时间戳文件名（`agent-session.ts:3250-3253`）。目标为个人存档与人际传播。
+- `/export [file]`：按后缀分流，带 .jsonl 走 JSONL、否则走 HTML；无参数时默认输出 `pi-session-<会话文件basename>.html`（`export-html/index.ts:274-278`）。JSONL 无参数时生成带时间戳文件名（`agent-session.ts:3250-3253`）。目标为个人存档与人际传播。
 - `/import <path.jsonl>`：确认后复制文件到会话目录并切换运行时（`agent-session-runtime.ts:361-396`），目标为跨机恢复与接续。
 - `/share`：一键把当前会话发布为 secret Gist 并给出查看链接，目标为分享给他人查看（`interactive-mode.ts:5862-5954`）。
 - `/copy`：复制最后一条助手消息文本到剪贴板（`interactive-mode.ts:5956-5972`、`agent-session.ts:3291-3306`）；属于普通复制，不构成选区/格式工作流。
@@ -62,20 +62,20 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 **JSONL 导出 = 当前分支线性化**（`agent-session.ts:3249-3280`）：
 
 - 头行：`{type:"session", version:CURRENT_SESSION_VERSION(3), id, timestamp, cwd}`（不带 `parentSession`）。
-- 条目：`this.sessionManager.getBranch()`（`session-manager.ts:1260-1270` 从 leafId 沿 parentId 走到根）取当前分支路径，注释明确“Re-chain parentIds to form a linear sequence”——每条重写 `parentId` 为前一条的 id。侧枝、分支摘要节点等路径外条目全部丢弃；导入后是线性会话。
+- 条目：`getBranch()`（`session-manager.ts:1260-1270`，从 leafId 沿 parentId 走到根）取当前分支路径，注释明确“Re-chain parentIds to form a linear sequence”——每条重写父指针为前一条的 id。侧枝、分支摘要节点等路径外条目全部丢弃；导入后是线性会话。
 - 路径上所有条目类型都保留（message、compaction、model_change、thinking_level_change、label、custom_message、branch_summary 等），不做字段裁剪。
 
 **HTML 导出 = 完整树嵌入 + 分支视图**：
 
-- `sessionData` 含 `header`、`entries`（`getEntries()` 返回全部条目，含侧枝与隐藏消息）、`leafId`，TUI 路径还带 `systemPrompt`、`tools`、`renderedTools`（`export-html/index.ts:263-270`）。
+- `sessionData` 携带头部、全部条目（含侧枝与隐藏消息）与 `leafId`，TUI 路径还附带 system prompt、工具定义与预渲染工具 HTML（`export-html/index.ts:263-270`）。
 - 模板 JS 用 `getPath(leafId)` 渲染消息视图（当前分支），用 `buildTree()` 渲染侧栏完整树；点击树节点跳转到该节点下最新叶子（`template.js:73-176, 133-145, 1495-1551`）。
 - 内容口径是“持久化原始数据”（含 thinking、工具调用/结果、bash 命令与输出、文件路径、图片 base64），未转换为请求 Payload，也未生成脱敏副本。
 - 树/消息的显隐由查看器端过滤控制：默认模式隐藏设置类条目（label、custom、model_change、thinking_level_change），另有 no-tools / user-only / labeled-only / all 过滤与搜索（`template.js:368-424`，模板按钮在 `template.html:20-27`）。这些是查看时过滤，导出文件本身始终含全部条目。
-- 隐藏消息：toolResult 条目内联进对应助手 tool-call 块，消息视图不单独渲染（`template.js:1287, 904-1063`）；thinking 块默认展开、可折叠（`template.js:1249-1254, 1792-1800`）；`custom_message` 仅 `display:true` 的渲染（`template.js:1309-1314`）。
+- 隐藏消息：工具结果条目内联进对应助手工具调用块，消息视图不单独渲染（`template.js:904-1063,1287`）；thinking 块默认展开、可折叠（`template.js:1249-1254,1792-1800`）；自定义消息仅 display 为 true 的渲染（`template.js:1309-1314`）。
 
 ## 3. 附件、资源与离线封装
 
-- 生成 HTML 时把模板 CSS、模板 JS、`vendor/marked.min.js`、`vendor/highlight.min.js` 全部读入并替换进 `template.html` 占位符（`export-html/index.ts:143-175`），模板文件本身无任何外部 `<script src>`/`<link>`/`@import`/`url()`（`template.html` 全文；CSS 检查无外部资源，字体用系统字体栈 `template.css:19`）。
+- 生成 HTML 时把模板 CSS、模板 JS 与 marked、highlight 两个 vendor 库全部读入并替换进 `template.html` 占位符（`export-html/index.ts:143-175`）；模板文件本身无任何外部脚本、样式、导入或 URL 引用（`template.html` 全文），字体用系统字体栈（`template.css:19`）。
 - 会话图片内容块（`ImageContent` 的 base64 data）以 `data:<mimeType>;base64,<data>` 内联（`template.js:924, 1208, 1230`），离线可见。
 - Markdown 正文中的图片 URL 走 `sanitizeMarkdownUrl` 后原样输出 `<img src>`（`template.js:616-626, 1599-1610`），保持远端引用；离线打开时这类图片需网络。
 - 结论：HTML 交付物基本单文件自包含，可复制为单个文件离线打开（静态推断，未运行验证）；“本地文件双击打开”下深链与剪贴板 API 的部分行为依赖浏览器能力。
@@ -83,18 +83,18 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 ## 4. 格式、schema 与往返能力
 
 - 格式只有 JSONL（v3，见 `docs/session-format.md` 的完整字段文档）与 HTML（v3 数据嵌 base64 JSON）两种；未发现 Markdown/PDF/PNG 导出、剪贴板图片导出或打印链路（搜索 `pdf|toPng|print` 只命中与导出无关的终端图片转换/CLI print 模式）。
-- JSONL 无独立导出 schema 版本：头行带 `version: 3`，条目即持久化格式原样。往返：`/import` 走 `loadEntriesFromFile`（`session-manager.ts:514-556`，要求首行 `type:"session"` 且有 id，容忍坏行跳过）→ `SessionManager.open` → `_buildIndex` 把最后一条设为 leaf。因此 `/export x.jsonl` 的产物可直接导回，但分支关系已被线性化，无法还原侧枝；未知字段原样保留。
-- HTML 查看器内置“下载 JSONL”按钮（`template.js:1069-1090`）重建 `{type:'header', ...header}` + 全部 entries（完整树、不重排 parentId）。按 `loadEntriesFromFile` 的要求，该文件首行是 `type:'header'` 而非 `type:'session'`，导入会被判为“not a valid pi session”（静态推断，未运行验证）；而 `.pi/extensions/import-repro.ts:96-118` 从 HTML 反向提取时写回的是 `type:'session'` 头、可导入。两处 JSONL 重建口径不一致。
+- JSONL 无独立导出 schema 版本：头行带 `version: 3`，条目即持久化格式原样。往返：导入走 `loadEntriesFromFile`（`session-manager.ts:514-556`），要求首行 `type:"session"` 且有 id，容忍坏行跳过；随后打开会话并把最后一条设为 leaf。因此 `/export x.jsonl` 的产物可直接导回，但分支关系已被线性化，无法还原侧枝；未知字段原样保留。
+- HTML 查看器内置“下载 JSONL”按钮（`template.js:1069-1090`）重建头部 + 全部条目（完整树、不重排 parentId）。按导入端校验要求，该文件首行是 `type:'header'` 而非 `type:'session'`，会被判为“not a valid pi session”（静态推断，未运行验证）。`.pi/extensions/import-repro.ts:96-118` 从 HTML 反向提取时写回的是 `type:'session'` 头、可导入。两处 JSONL 重建口径不一致。
 - `docs/session-format.md` 与代码一致地声明 v3 = 树结构（`session-manager.ts:30`）。
 
 ## 5. 分享稿编辑、编排与预览
 
-本次未找到独立于聊天现场的“分享稿编辑器”。HTML 导出即交付物：无选区编辑、内容开关（导出前）、主题之外无布局/品牌配置，唯一的导出期变量是 `themeName`（`agent-session.ts:3226-3227`）与自定义工具 HTML 预渲染（`preRenderCustomTools`，`export-html/index.ts:183-230`，`TEMPLATE_RENDERED_TOOLS = bash/read/write/edit/ls` 由模板直接渲染，其余走工具定义的 TUI 渲染器经 ANSI→HTML 转换，`tool-renderer.ts`、`ansi-to-html.ts`）。导出前无预览步骤；查看器内的过滤/展开属于交付物交互而非导出前编辑。
+本次未找到独立于聊天现场的“分享稿编辑器”。HTML 导出即交付物：无选区编辑、内容开关（导出前）、主题之外无布局/品牌配置，唯一的导出期变量是 `themeName`（`agent-session.ts:3226-3227`）与自定义工具 HTML 预渲染。后者分两路：bash/read/write/edit/ls 五个内置工具由模板直接渲染，其余走工具定义的 TUI 渲染器经 ANSI→HTML 转换（`export-html/index.ts:183-230`、`tool-renderer.ts`、`ansi-to-html.ts`）。导出前无预览步骤；查看器内的过滤/展开属于交付物交互而非导出前编辑。
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
 - HTML 生成是“模板字符串替换”路线，非 DOM 重排或截图；无图片/PDF 生成能力（本次未找到）。
-- 富内容保真（`template.js` 渲染器）：Markdown 用内联 marked，禁 HTML tokenizer（HTML 当纯文本，对齐 TUI）、GFM+breaks、hljs 高亮（指定语言失败回退 auto-detect，再失败转义）、链接/图片 scheme 白名单（https/mailto/tel/ftp）；思考块、工具卡（bash/read/write/edit/ls 专用版式 + 其余 JSON fallback + 自定义工具预渲染 HTML）、compaction/分支摘要折叠卡、skill 调用折叠卡、图片网格均有对应渲染。KaTeX/Mermaid 本次未在导出端发现（未内联 MathJax/Mermaid 库）。
+- 富内容保真（`template.js` 渲染器）：管线配置上，Markdown 用内联 marked、禁 HTML tokenizer（HTML 当纯文本，对齐 TUI）、GFM+breaks、hljs 高亮（指定语言失败回退 auto-detect，再失败转义）、链接与图片 scheme 白名单（https、mailto、tel、ftp）。渲染对象上，思考块、工具卡（bash/read/write/edit/ls 专用版式 + 其余 JSON fallback + 自定义工具预渲染 HTML）、compaction/分支摘要折叠卡、skill 调用折叠卡、图片网格均有对应渲染。KaTeX/Mermaid 本次未在导出端发现（未内联 MathJax/Mermaid 库）。
 - 工具结果长输出折叠（前 N 行预览 + “…(N more lines)”展开），`formatExpandableOutput`（`template.js:848-902`）。
 
 ## 7. 生成历史、版本与持久化
@@ -106,24 +106,24 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 `/share`（`interactive-mode.ts:5862-5954`）：
 
 - 前置检查：`gh auth status` 非零则提示先 `gh auth login`；未安装 gh 则提示安装（`5864-5873`）。
-- 导出 `session.html` 到 `os.tmpdir()`，`spawn("gh", ["gist", "create", "--public=false", tmpFile])`（`5914`）——secret Gist、单文件、无 description。
-- 从 `gh` 输出 URL 尾部截取 gistId，拼 `getShareViewerUrl(gistId)`：默认 `https://pi.dev/session/#<gistId>`，可用环境变量 `PI_SHARE_VIEWER_URL` 覆盖（`config.ts:502-508`；文档见 `docs/environment-variables.md:88`）。
-- 上传的内容是自包含 HTML（其中嵌有 header+全部条目+leafId+systemPrompt+tools+renderedTools 的 base64 JSON）。“消息/标题/元数据”均以会话数据形式存在于 HTML 内，Gist 本身无标题字段。
+- 导出 `session.html` 到临时目录，随后以子进程执行 `gh gist create --public=false`（`5914`）——secret Gist、单文件、无 description。
+- 从 `gh` 输出 URL 尾部截取 gistId，拼出查看链接：默认 `https://pi.dev/session/#<gistId>`，可用环境变量 `PI_SHARE_VIEWER_URL` 覆盖（`config.ts:502-508`）。文档见 `docs/environment-variables.md:88`。
+- 上传的内容是自包含 HTML（其中嵌有头部、全部条目、leafId 与 system prompt、工具定义、预渲染工具 HTML 的 base64 JSON）。“消息/标题/元数据”均以会话数据形式存在于 HTML 内，Gist 本身无标题字段。
 - 访问语义：secret Gist 属于“有链接即可访问”的 GitHub 平台语义；同仓库 `import-repro.ts:263-281` 用匿名 `GET https://api.github.com/gists/{id}`（无认证头）拉取 Gist 文件，说明创作者侧的消费路径不依赖登录态。撤销/更新/删除路径在客户端本次未找到；Gist 生命周期完全交给 GitHub（手动删除为止），分享 URL 无法猜测性（32 位十六进制 ID）与可枚举性由 GitHub 决定，未运行验证。
-- `pi.dev/session` 查看器本体不在本仓库；模板预留了 iframe srcdoc 注入钩子（`meta[name="pi-share-base-url"]`、`meta[name="pi-url-params"]`，`template.js:23-29, 1096-1118`），推断查看器以 srcdoc 方式嵌入 Gist 内容并支持 `?leafId=&targetId=` 深链、每条消息“复制链接”按钮（`renderCopyLinkButton`，`template.js:1165-1172`）——查看器实际行为未验证。
-- 同仓库 CI 复用同一语义：`issue-analysis.yml:539-569` 用 `PI_GIST_TOKEN` 调 `github.rest.gists.create({public:false, files:{session.html, session.jsonl}})` 创建含双文件的 secret Gist，`570+` 把 gist URL 与 share URL 评论到 issue（GitHub Actions bot），`import-repro.ts:236-261` 再从 issue 评论中提取 gistId。
+- `pi.dev/session` 查看器本体不在本仓库。模板预留了 iframe srcdoc 注入钩子（pi-share-base-url、pi-url-params 两个 meta 标签，`template.js:23-29,1096-1118`），推断查看器以 srcdoc 方式嵌入 Gist 内容，并支持 `?leafId=&targetId=` 深链与每条消息的“复制链接”按钮（`template.js:1165-1172`）——查看器实际行为未验证。
+- 同仓库 CI 复用同一语义：`issue-analysis.yml:539-569` 用 `PI_GIST_TOKEN` 调用 GitHub API 创建含 session.html 与 session.jsonl 双文件的 secret Gist，随后把 gist URL 与分享 URL 评论到 issue（GitHub Actions bot），`import-repro.ts:236-261` 再从 issue 评论中提取 gistId。
 
 ## 9. 隐私、安全与内容治理
 
 - 导出/分享**无隐私提示、无脱敏**：HTML/JSONL 原样携带 system prompt、工具定义、thinking 全文、bash 命令与输出、文件路径、read 出的文件内容、图片与自定义消息；`/share` 在创建 Gist 前没有任何内容确认或警告。API 密钥本身不进入会话文件（auth 存于 `~/.pi/agent/auth.json`），但 bash 输出等可能包含秘密的内容会原样进入交付物。
-- 分享方向（HTML）做了输入侧硬化：marked 禁用原生 HTML 渲染（HTML 按纯文本输出）、链接/图片 scheme 白名单并剥离 C0 控制字符、href/id/mimeType/data 全部 `escapeHtml`（`template.js:607-626, 1557-1637`；对应静态断言测试 `test/export-html-xss.test.ts`、`export-html-skill-block.test.ts`、`export-html-whitespace.test.ts`）。自定义工具预渲染 HTML（`renderedTools`）直接注入 `innerHTML`，其安全性依赖工具渲染器自身输出（静态推断）。
+- 分享方向（HTML）做了输入侧硬化：marked 禁用原生 HTML 渲染（HTML 按纯文本输出）、链接/图片 scheme 白名单并剥离 C0 控制字符、href/id/mimeType/data 全部做 HTML 转义（`template.js:607-626,1557-1637`）。对应的静态断言测试为 `test/export-html-xss.test.ts`、`export-html-skill-block.test.ts`、`export-html-whitespace.test.ts`。自定义工具预渲染 HTML 直接注入 innerHTML，其安全性依赖工具渲染器自身输出（静态推断）。
 - 分享方向（Gist/查看器）的访问控制完全依赖 GitHub secret Gist 与查看器服务端；pi 客户端无任何服务端治理参与。
 
 ## 10. 性能、失败恢复与测试
 
-- 失败处理：`/export` 异常统一 showError；`/share` 有可取消的 BorderedLoader（`onAbort` kill 子进程、恢复编辑器、删除临时文件），`gh` 非零退出码、gistId 解析失败均显式报错（`interactive-mode.ts:5884-5953`）；临时文件在成功/失败路径都尝试清理。
+- 失败处理：`/export` 异常统一弹错误提示；`/share` 有可取消的加载指示（取消时终止子进程、恢复编辑器、删除临时文件），`gh` 非零退出码、gistId 解析失败均显式报错（`interactive-mode.ts:5884-5953`）；临时文件在成功/失败路径都尝试清理。
 - HTML 生成用 `Buffer.from(...).toString("base64")` + 同步 `writeFileSync`，大会话的序列化与体积未发现分块或上限处理（静态推断：超大会话导出时 HTML 体积随条目数线性增长）。
-- 测试覆盖：`test/export-html-*.test.ts` 是对模板 JS 文本的静态断言（转义/白名单/skill 块/空白），`test/suite/regressions/5596-missing-theme-export.test.ts` 覆盖 `exportToHtml` 的 theme 路径；未发现 `/share` 的 gh 子进程 mock 测试；HTML 离线打开、Gist 可访问性均无运行证据。
+- 测试覆盖：`test/export-html-*.test.ts` 是对模板 JS 文本的静态断言（转义/白名单/skill 块/空白），`test/suite/regressions/5596-missing-theme-export.test.ts` 覆盖 `exportToHtml` 的 theme 路径。未发现 `/share` 的 gh 子进程 mock 测试；HTML 离线打开、Gist 可访问性均无运行证据。
 
 ## 11. 设计取舍与已确认边界
 

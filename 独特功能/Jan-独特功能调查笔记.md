@@ -49,13 +49,16 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **入口与触发者**：设置页、首次运行引导（`configureBackends`）、后端更新按钮（`updateBackend`）与硬件/依赖建议对话框（`DependencyAdvice.tsx`）触发；主要执行者是 llamacpp-extension（`extensions/llamacpp-extension/src/index.ts`）。
 
-**事实对象**：`<data>/llamacpp/backends/<version>/<backend>/` 后端目录（保留两个版本供回滚）、`update_history.json`（`BackendUpdateRecord`，`index.ts:118`）、`router.preset.ini`（`preset.ts` 生成：全局 `[*]` 节 + 逐模型节，含 MTP、fit、采样服务端默认值）。
+**事实对象**：
+- `<data>/llamacpp/backends/<version>/<backend>/` 后端目录：保留两个版本供回滚；
+- `update_history.json`：更新记录（`BackendUpdateRecord`，`index.ts:118`）；
+- `router.preset.ini`：由 `preset.ts` 生成，全局节加逐模型节，含 MTP、fit 与采样服务端默认值。
 
-**完整主链**：`configureBackends`（`index.ts:1413`）按远端清单（`backend.ts`，按 OS/CPU 指令集/GPU 过滤）下载并 sha512 校验 → 生成 preset → `startRouter`（`index.ts:996`）经 Rust 插件（`src-tauri/plugins/tauri-plugin-llamacpp/src/router.rs`、`backend.rs`、`process.rs`）拉起单进程 Router 承载多模型 → 运行后验证：`readiness.ts` 的 `verifyGpuOffload` 对比引擎 device 列表与硬件 GPU 数、`verifyEmbeddingModel` 真实跑向量探针；`gpuBackendMatch.ts` 判定"已装后端 vs 探测 GPU"的 `gpuUnused`/`vendorMismatch` → `updateBackend`（`index.ts:1835`）升级后 `restartRouterAndProbe` 健康检查，失败回滚（`update_history.json` + 保留版本目录）。
+**完整主链**（总入口 `extensions/llamacpp-extension/src/index.ts:1413`，其余入口行号见文末索引）：配置函数按远端清单（`backend.ts`，按 OS/CPU 指令集/GPU 过滤）下载后端二进制并做 sha512 校验，生成 preset 后由 Router 启动器经 Rust 插件拉起单进程 Router 承载多模型。运行后验证 GPU 是否真的被用上：`readiness.ts` 的 GPU 卸载校验对比引擎设备列表与硬件 GPU 数，向量探针真实执行嵌入；`gpuBackendMatch.ts` 判定"已装后端 vs 探测 GPU"的不匹配。`updateBackend` 升级后做健康检查，失败时按 `update_history.json` 与保留版本目录回滚。
 
-**持续性**：后端目录与 preset 落盘，重启后按配置恢复；`adoptRouter` 接管孤儿 Router 进程（崩溃恢复）；`updateBackend` 带并发去重与排队（测试覆盖见 `extensions/llamacpp-extension/src/test/index.test.ts` 的 updateBackend 系列）。
+**持续性**：后端目录与 preset 落盘，重启后按配置恢复；崩溃恢复由 `adoptRouter` 接管孤儿 Router 进程；升级带并发去重与排队（测试见 `extensions/llamacpp-extension/src/test/index.test.ts` 的 updateBackend 系列）。
 
-**外部依赖与执行域**：二进制下载依赖远端后端清单（GitHub 发布），校验与运行在本机；硬件探测在 `src-tauri/plugins/tauri-plugin-hardware/src/gpu.rs`、`cpu.rs`、`vendor/`（NVIDIA/AMD/Vulkan 厂商识别 + 显存占用轮询）。
+**外部依赖与执行域**：二进制下载依赖远端后端清单（GitHub 发布），校验与运行在本机；硬件探测模块负责 NVIDIA/AMD/Vulkan 厂商识别与显存占用轮询（`src-tauri/plugins/tauri-plugin-hardware/src/` 的 gpu.rs、cpu.rs 与 vendor/）。
 
 **独特性判断**：通用"生成式输出与运行时"类目覆盖模型服务抽象层；这里是推理器二进制的设备级生命周期（版本、硬件驱动后端、依赖库 CUDA/Vulkan/cuDNN 检查、进程收养）与"探测→推荐→预测→验证"闭环，调查样本中未见同类实现。
 
@@ -83,7 +86,11 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **入口与触发者**：`src-tauri/src/bin/jan-cli.rs` 的 `jan serve`、`jan launch <agent>`、`jan threads`、`jan models`；由用户在终端触发。
 
-**完整主链**：`jan serve` 按 router 预设启动本地 API 服务 → `jan launch claude` 默认开启 `--fit`（按显存自动配上下文，`jan-cli.rs:1149`）并以 `ANTHROPIC_AUTH_TOKEN` 环境变量指向本地端点；`jan launch openclaw` 写入/合并 `~/.openclaw/openclaw.json` 的 jan provider 条目并设默认模型（`configure_openclaw`，`jan-cli.rs:1254`），随后拉起 `openclaw tui`；`jan threads` 直读数据目录线程（`src-tauri/src/core/cli/mod.rs`，无 AppHandle 直读）。
+**完整主链**：
+- `jan serve`：按 router 预设启动本地 API 服务；
+- `jan launch claude`：默认开启按显存自动配上下文的 `--fit`（`jan-cli.rs:1149`），并以 `ANTHROPIC_AUTH_TOKEN` 环境变量指向本地端点；
+- `jan launch openclaw`：向 `~/.openclaw/openclaw.json` 写入/合并 jan provider 条目并设默认模型（`configure_openclaw`，`jan-cli.rs:1254`），随后拉起 `openclaw tui`；
+- `jan threads`：不经 AppHandle 直读数据目录线程（`src-tauri/src/core/cli/mod.rs`）。
 
 **持续性**：桌面数据目录是唯一事实源，CLI 与桌面共享；`jan launch` 写的配置持久化于外部 Agent 的配置目录。
 
@@ -95,7 +102,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **用户目标**：当 MCP 服务器很多时，用独立小模型对用户意图做工具级路由选择，LLM 不可用时降级为关键词分类，并把每次路由决策与降级原因记入遥测，供用户观察"为什么用了/没用哪个工具"。
 
-**入口与触发者**：前端路由选择面（`web-app/src/lib/mcp-orchestrator/` 的 `intent-classifier.ts`、`mcp-router-llm.ts`、`mcp-router-model-filter.ts`；`McpRouterModelPicker.tsx` 选择路由器模型；docs `mcp-routing-telemetry.mdx`）。
+**入口与触发者**：前端路由选择面位于 `web-app/src/lib/mcp-orchestrator/`，含意图分类、LLM 路由与模型过滤三个模块，另有路由器模型选择组件与遥测文档（文件清单见文末索引）。
 
 **完整主链**：意图分类（阈值 5、最多 5 个服务器、打分）→ LLM 路由器（约 3.5s 超时）→ 七类 `fallbackReason` 降级路径 → 路由结果进入工具调用面；遥测回调记录决策。
 

@@ -18,7 +18,7 @@ Jan 的“角色”即 `Assistant` 实体：**每个助手一个目录一个 JSO
 
 关键事实：
 
-1. `Assistant` 含 `model`、`instructions?`、`tools?: AssistantTool[]`、`file_ids`；web 侧另有形状不同的 `Assistant` 类型（含 `parameters`，无 `model/tools/file_ids`）——两侧类型不一致。
+1. 两侧 `Assistant` 类型不一致：core 侧含 `model`、`instructions?`、`tools?`、`file_ids`，web 侧含 `parameters` 且无上述字段（完整字段对照见 §1.1）。
 2. 迁移 v2 写入 Menlo Research 指令与 `DEFAULT_PARAMETERS = {temperature:0.7, top_k:20, top_p:0.8, repeat_penalty:1.12}`；迁移 v3 去掉身份前缀。
 3. 线程绑定保存“嵌入快照”，不持有引用：`ThreadAssistantInfo` 把 name/model/instructions/tools 拷贝进 thread；无助手时写入 `{id:'model-only', name:'Model'}`。
 4. system prompt 由 `renderInstructions(threadAssistant.instructions)` 生成，`{{current_date}}` 用 UTC 长月份替换；线程有助手且非 `model-only` 时才采用其推理参数。
@@ -58,21 +58,28 @@ Assistant {
 AssistantTool { type, enabled, useTimeWeightedRetriever?, settings }
 ```
 
-`AssistantTool` 只有 `retrieval` 一种类型定义。`ThreadAssistantInfo`（`core/src/types/thread/threadEntity.ts:29-35`）：`id`、`name`、`model: ModelInfo`、`instructions?`、`tools?`。
+`AssistantTool` 只有 `retrieval` 一种类型定义。线程助手快照 `ThreadAssistantInfo`（`core/src/types/thread/threadEntity.ts:29-35`）字段：
+
+```text
+ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
+```
 
 ### 1.1 类型不一致
 
-web 侧 `web-app/src/types/threads.d.ts:57` 的 `Assistant`（`avatar/id/name/created_at/description/instructions/parameters`）与 core 的 `Assistant`（含 `model/tools/file_ids`，无 `parameters`）形状不同；assistant-extension 的 v2 迁移却写入 `parameters` 字段（L184-187）。web 侧未见 tools 持久化路径。这是源码层面的事实性不一致，横向比较时需要注意 core/web 两侧对“助手能干什么”的表述并不一致。
+- web 侧 `Assistant`（`web-app/src/types/threads.d.ts:57`）完整字段为 `avatar/id/name/created_at/description/instructions/parameters`；core 侧含 `model/tools/file_ids` 而无 `parameters`，形状不同。
+- assistant-extension 的 v2 迁移却写入 `parameters` 字段（L184-187），web 侧又未见 tools 持久化路径——这是源码层面的事实性不一致，横向比较时需要注意 core/web 两侧对“助手能干什么”的表述并不一致。
 
 ### 1.2 工具、知识库与记忆（交接 Agent 工具笔记）
 
-助手侧能声明的能力只有 `retrieval` 工具（`AssistantTool`）与 `file_ids`；文档嵌入线程后前端自动 `approveToolForThread`（`$threadId.tsx:1028`）。MCP/Web 搜索/RAG 工具的实际加载、注入、审批与执行链路属 Agent 工具类目，见 `../Agent工具/Jan-Agent工具调查笔记.md`，本笔记只记录助手声明这一交接点；记忆与子 Agent 机制本次未在助手层找到（见 §6）。
+助手侧能声明的能力只有 `retrieval` 工具（`AssistantTool`）与 `file_ids`；文档嵌入线程后前端自动 `approveToolForThread`（`$threadId.tsx:1028`）。
+
+MCP/Web 搜索/RAG 工具的实际加载、注入、审批与执行链路属 Agent 工具类目，见 `../Agent工具/Jan-Agent工具调查笔记.md`，本笔记只记录助手声明这一交接点；记忆与子 Agent 机制本次未在助手层找到（见 §6）。
 
 ## 2. 持久化与迁移
 
 `extensions/assistant-extension/src/index.ts`（355 行）：
 
-- 存储：`file://assistants/<id>/assistant.json`（L120-124、L258-262、L282-291）；`getAssistants` 空库时回退 `[this.defaultAssistant]`（L275-279）；`createAssistant`/`deleteAssistant` 均为单文件读写（L281-303）；
+- 存储：每个助手一个 JSON 文件 `file://assistants/<id>/assistant.json`；`getAssistants` 空库时回退内置默认（L275-279），`createAssistant`/`deleteAssistant` 均为单文件读写（L281-303）；
 - 迁移版本文件：`file://assistants/.migration_version`（L12），`CURRENT_MIGRATION_VERSION = 3`（L11）；
 - v1：更新 assistant instructions（L98+）；
 - v2：写入 Menlo Research 指令与 `DEFAULT_PARAMETERS`（L140-209）；
@@ -94,7 +101,8 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
           settings:{ top_k:2, chunk_size:1024, chunk_overlap:64, retrieval_template } }]
 ```
 
-web 侧 `hooks/useAssistant.ts`（209 行）也有默认助手（id `'jan'`、`created_at: 1747029866.542`（硬编码，L33）、`avatar:'👋'`、`parameters:{}`、较长指令模板，L30-56），localStorage 键 `defaultAssistantId`/`lastUsedAssistant`（`web-app/src/constants/localStorage.ts:23`）——即前端有第二份默认助手表示，与 core 侧 `defaultAssistant`（assistant-extension index.ts:305-354）内容基本相同但分属两处定义，结构互不共享。
+- web 侧 `hooks/useAssistant.ts`（209 行）也内嵌一份默认助手：id 与 core 侧相同、`parameters:{}`、较长指令模板（L30-56）、硬编码的 `created_at: 1747029866.542`（L33）。
+- localStorage 键 `defaultAssistantId`/`lastUsedAssistant`（`web-app/src/constants/localStorage.ts:23`）记录默认与最近使用——即前端有第二份默认助手表示，与 core 侧内容基本相同但分属两处定义，结构互不共享。
 
 `useAssistant` store 事实（行级核验）：
 
@@ -115,8 +123,10 @@ web 侧 `hooks/useAssistant.ts`（209 行）也有默认助手（id `'jan'`、`c
 ### 4.1 消息元数据与重新生成语义
 
 - **消息不保存模型/参数元数据**：onFinish 持久化的 metadata 只是流式元数据（finishReason/usage）加 `parentId`/`stopped`（`$threadId.tsx:351-411`）；`ThreadMessage.assistant_id?`（`core/src/types/message/messageEntity.ts:18`）在 web-app 无任何赋值点，无 model/parameters 字段。
-- **重新生成保留旧回复为 sibling**：`handleRegenerate`（`$threadId.tsx:1315-1346`）调 `ensureBranched()`，新回复在 onFinish 以 parentId 挂为新分支；版本切换靠 `activeRootId` + `computeActivePath`（:849-855、:1225-1246），测试断言 "regenerate … keeps the prior version (no delete)"（`__tests__/$threadId.test.tsx:543`）。这与 AIO Hub 的"同历史兄弟分支"类似，但 thread 的 instructions/parameters 来自内嵌快照，重新生成不重读 Assistant 当前配置。
-- **无开场白与提示词分组**：Assistant 无 greeting 字段，创建 thread 不注入开场消息（`useThreads.ts:315-361`、`threads/default.ts:78-119`）；`instructions` 是单段字符串，仅整段替换 `{{current_date}}`（`lib/instructionTemplate.ts`），无块级拆分或组级开关（`predefinedParams.ts:554` 的 groupIds 是采样参数 UI 分组，非提示词块）。
+- **重新生成保留旧回复为 sibling**：`handleRegenerate`（`$threadId.tsx:1315-1346`）先做分支拆分，新回复在 onFinish 以 parentId 挂为新分支；版本切换靠 `activeRootId` + `computeActivePath`（:849-855、:1225-1246），测试断言 "regenerate … keeps the prior version (no delete)"（`__tests__/$threadId.test.tsx:543`）。
+- 这与 AIO Hub 的"同历史兄弟分支"类似，但 thread 的 instructions/parameters 来自内嵌快照，重新生成不重读 Assistant 当前配置。
+- **无开场白**：Assistant 无 greeting 字段，创建 thread 不注入开场消息（`useThreads.ts:315-361`、`threads/default.ts:78-119`）。
+- **提示词无分组**：`instructions` 是单段字符串，仅整段替换 `{{current_date}}`（`lib/instructionTemplate.ts`），无块级拆分或组级开关（`predefinedParams.ts:554` 的 `groupIds` 是采样参数 UI 分组，非提示词块）。
 
 ## 5. 设置 UI
 

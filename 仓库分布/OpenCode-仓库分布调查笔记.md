@@ -25,7 +25,22 @@ OpenCode 是以 `packages` 为中心的 Bun/TypeScript monorepo，同时交付 C
 | 文档 | 820 文件 / 230,083 行 |
 | 测试 | 955 文件 / 188,690 源码行 |
 
-主要区域为 `packages/opencode`（762 文件/176,788 行）、`packages/app`（642/172,930）、`packages/core`（489/67,546）、`packages/console`（557/54,093）、`packages/ui`（1,694/45,785）、`packages/tui`（241/31,850）、`packages/sdk`（48/30,329）、`packages/session-ui`（118/26,679）、`packages/stats`（108/26,260）与 `packages/llm`（152/20,527）。TypeScript 674,908 行（93.5%），CSS 42,284 行（5.9%）。
+主要区域：
+
+| 区域 | 文件 / 行数 |
+| --- | ---: |
+| `packages/opencode` | 762 / 176,788 |
+| `packages/app` | 642 / 172,930 |
+| `packages/core` | 489 / 67,546 |
+| `packages/console` | 557 / 54,093 |
+| `packages/ui` | 1,694 / 45,785 |
+| `packages/tui` | 241 / 31,850 |
+| `packages/sdk` | 48 / 30,329 |
+| `packages/session-ui` | 118 / 26,679 |
+| `packages/stats` | 108 / 26,260 |
+| `packages/llm` | 152 / 20,527 |
+
+TypeScript 674,908 行（93.5%），CSS 42,284 行（5.9%）。
 
 相对快照 b8bd889（6,407 文件）净增 103 个跟踪文件、源码约 +48,946 行，增量几乎全部来自 `packages/app`（+34 文件，i18n 新增约 40 个语言字典）、`packages/ui`（+34）与 `packages/desktop`（+35）的多语言翻译文件与 `desktop-native.ts` 语言探测；文档数（820）不变，行数 +29（zen 定价文档改写与 app/desktop/ui 新增 AGENTS.md 约定）。
 

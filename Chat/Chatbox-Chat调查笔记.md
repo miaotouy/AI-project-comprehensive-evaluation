@@ -18,7 +18,9 @@ Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模�
 
 ## 产品表面与系统边界
 
-Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊天工作台固定为 `Header → MessageList → InputBox` 三段式：消息列表是 react-virtuoso 虚拟列表（缓存每会话滚动快照），移动端一级导航是左侧滑出的 `SwipeableDrawer`（没有底部 Tab Bar），桌面端侧栏常驻挤压布局。侧栏会话项带"生成中/回复完成未读"指示（状态存于内存 zustand store `sessionActivityStore`/`generation-runtime`，不落盘、不进入 `SessionMetaRecord`）。数据完全 local-first：完整 Session 对象与消息存于通用 storage（IndexedDB），侧栏元信息存于独立的 IndexedDB meta store（游标分页、置顶优先），react-query 缓存是 UI 侧视图，两者靠每会话 `UpdateQueue` 串行合并保持最终一致。
+Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊天工作台固定为 `Header → MessageList → InputBox` 三段式：消息列表是 react-virtuoso 虚拟列表（缓存每会话滚动快照），移动端一级导航是左侧滑出的 `SwipeableDrawer`（没有底部 Tab Bar），桌面端侧栏常驻挤压布局。侧栏会话项带"生成中/回复完成未读"指示（状态存于内存 zustand store，不落盘、不进入 `SessionMetaRecord`）。
+
+数据完全 local-first：完整 Session 对象与消息存于通用 storage（IndexedDB），侧栏元信息存于独立的 IndexedDB meta store（游标分页、置顶优先），react-query 缓存是 UI 侧视图，两者靠每会话 `UpdateQueue` 串行合并保持最终一致。
 
 外部系统边界：模型请求由 `packages/model-calls` 的 API 适配层组装并发出，provider 侧 token 截断与最终 HTTP payload 字段不在本次概览范围；Agent 角色/工具、知识库等能力分属 Agent 专项与渠道管理类目；消息渲染（Markdown、结构化 part、虚拟列表）由独立的消息渲染器笔记承接。
 
@@ -39,10 +41,10 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 
 ## 核心对象与状态权威
 
-- **`Session`**（`shared/types.ts`）：完整会话对象，含 `messages`、`threads: SessionThread[]`、`messageForksHash`、`settings`；权威源在 storage，react-query 缓存是 UI 侧视图。
-- **`SessionMetaRecord`/`SessionMetaSchema`**（`shared/types.ts:390-400`）：侧栏唯一认知的元信息（`starred`/`hidden`/`archivedAt`/`sortOrder` 等，不含任何消息级字段）；权威源在 IndexedDB meta store（页大小 50，置顶记录优先游标扫描）。
-- **`Message`**（`shared/types.ts`）：`contentParts`/`files`/`links`、`generating` 标记、`isSummary`、`isForkMarker` + `forkedFromSessionId`。
-- **`uiStore`**：会话级开关（`sessionWebBrowsingMap`/`sessionKnowledgeBaseMap`/`sessionAgentModeMap`）与 `newSessionState`；`'new'` 假会话的待发送状态分散在本地 state、`newSessionState`、通用 map（以 `'new'` 作 key）三处，首次发送时统一迁移。
+- **`Session`**（`shared/types.ts`）：完整会话对象，由消息数组、thread 列表、消息分支哈希与会话设置组成；权威源在 storage，react-query 缓存是 UI 侧视图。
+- **`SessionMetaRecord`/`SessionMetaSchema`**（`shared/types.ts:390-400`）：侧栏唯一认知的元信息，含置顶、隐藏、归档时间与排序序号等字段，不含任何消息级字段；权威源在 IndexedDB meta store（页大小 50，置顶记录优先游标扫描）。
+- **`Message`**（`shared/types.ts`）：由内容部件、文件与链接组成，并带生成中标记、压缩摘要与分支标记（`isSummary`、`isForkMarker` + `forkedFromSessionId`）。
+- **`uiStore`**：持有网页浏览、知识库与 Agent 模式三个会话级开关，以及 `newSessionState`；`'new'` 假会话的待发送状态分散在本地 state、`newSessionState` 与通用 map 三处，首次发送时统一迁移。
 - **生成中的消息**：streaming cache（queryClient）→ 每会话 `UpdateQueue` → 磁盘；节流 2000ms，`mergeCachedGeneratingMessages` 保证落盘旧快照不回退生成中消息。
 
 ## 专项导航
@@ -60,7 +62,7 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 
 ## 关键能力与已确认边界
 
-1. **分支（fork）**：重新生成/在新分支重试产生消息级平行分支（`messageForksHash`），`ForkNav` 在同一消息位置切换内容，替代回复可折叠进 `ForkGroup` 分支组；fork 与 thread 可叠加共存，`cleanupEmptyForkBranches` 在 root/thread 两分支共享同一实现（`chatStore.ts:881`）。
+1. **分支（fork）**：重新生成或在新分支重试会产出消息级平行分支（`messageForksHash`）；`ForkNav` 在同一消息位置切换内容，替代回复可折叠进 `ForkGroup` 分支组。fork 与 thread 可叠加共存，两类分支的清理逻辑共享同一入口（`chatStore.ts:881`）。
 2. **搜索**：`SearchDialog` 提供"当前会话/全部会话"两个入口，按消息模型扫描（覆盖 thread 历史与文本/reasoning/tool-call 状态），点击结果切换会话并 `scrollToMessage` 定位；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30，最多 50 条命中）。
 3. **停止**：生成中消息的停止按钮调用其 `cancel()` 并以 `generating:false` 乐观写回；流结束/出错/暂停各补一次无条件落盘；停止时仍在运行的 tool-call 会被收口为 `error` 态并落盘，不再悬挂 `call` 状态。
 4. **压缩**：自动压缩在消息上打 `isSummary` 标记，由 `SummaryMessage` 专用组件渲染，提供"删除摘要、恢复原文参与上下文计算"的操作；压缩以 `CompactionPoint`（boundary+summary 消息对）落盘，在 fork 分支切换与复制会话时做完整性重映射（`shared/context/compaction-points.ts`）。

@@ -44,8 +44,8 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 “从顶部”的起点是容器内第一个已挂载 `[data-message-id]`（`useMessageCapture.ts:129-134`），它并不等于会话第一条消息，受两层约束：
 
-- 历史懒加载：会话打开只恢复约 100 条消息（`ChatPage.vue:437` INITIAL_MESSAGE_RESTORE_COUNT）；更早历史以 100 条/页游标分页，仅在用户滚动到顶部时经 `loadOlderMessagesAtTop` 加载（`stores/ui/message.ts:743-797`；`ChatPage.vue:684-693`）。捕获的程序化滚动不会触发分页——`onScroll` 要求 `hadUpwardPaginationIntent`（用户滚动手势意图）才可能加载，`notifyViewportScroll` 对非用户滚动返回 `'native'`，且 `consumeUpwardPaginationIntent()` 在无手势意图时返回 false 直接早退（`ChatPage.vue:684-692`；`composables/chat/useChatScrollController.ts:244-263`）。因此长会话的“从顶部”截图覆盖的是已加载页的最早消息，而非会话真实起点。
-- 消息窗口化：已加载消息超过 `MESSAGE_WINDOWING_THRESHOLD = 160` 条时启用窗口化渲染（`ChatPage.vue:438`），只挂载视口 ±2400px overscan 范围内的行，其余区域用 `beforeSpacerHeight`/`afterSpacerHeight` 占位（`ChatPage.vue:86-107`；`MessageList.vue:5-36`；`composables/useMessageVirtualization.ts:81-125`）。捕获滚动时窗口随 `onScroll` 的 rAF 指标同步移动，但没有代码在捕获前强制窗口已就位，未挂载区域的占位空白是否进入分段取决于滚动与挂载的时序（运行行为未验证）。≤160 条时全部挂载，无占位空白问题。
+- 历史懒加载：会话打开只恢复约 100 条消息（`ChatPage.vue:437`）；更早历史以 100 条/页游标分页，仅在用户滚动到顶部时经 `loadOlderMessagesAtTop` 加载。捕获的程序化滚动不会触发分页：滚动监听要求用户手势意图（`hadUpwardPaginationIntent`）才可能加载，非用户滚动被视口通知直接判定为 native 而跳过，无手势意图时也会早退（`ChatPage.vue:684-692`；`useChatScrollController.ts:244-263`）。因此长会话的“从顶部”截图覆盖的是已加载页的最早消息，而非会话真实起点。
+- 消息窗口化：已加载消息超过 `MESSAGE_WINDOWING_THRESHOLD = 160` 条时启用窗口化渲染（`ChatPage.vue:438`），只挂载视口 ±2400px overscan 范围内的行，其余区域用前后 spacer 占位（`ChatPage.vue:86-107`；`MessageList.vue:5-36`；`useMessageVirtualization.ts:81-125`）。捕获滚动时窗口随滚动监听的 rAF 指标同步移动，但没有代码在捕获前强制窗口已就位，未挂载区域的占位空白是否进入分段取决于滚动与挂载的时序（运行行为未验证）。≤160 条时全部挂载，无占位空白问题。
 
 ## 2. 分段捕获与垂直拼接
 
@@ -53,7 +53,11 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 `usePageCapture.captureArea()` 以 `.message-list-container` 为滚动容器，保存原滚动位置和 `scrollBehavior`。默认参数为每段等待 350ms、最多 30 次、扣除 20px 滚动条宽度；它计算目标在滚动内容中的绝对范围，逐段滚动到目标位置，经 `tabClient.captureCurrentArea(rect)` 取得图片数据，完成后恢复原位置（`composables/usePageCapture.ts:154-324`）。
 
-迭代上限收口（代码路径确认，未运行验证）：上限常量是 `maxIterations`，默认 30（`usePageCapture.ts:172`，注释“防止无限循环”），调用方 `captureMessage` 未覆盖该值。循环条件为 `totalCapturedContentHeight < effectiveTargetContentHeight && iteration < maxIterations`（`usePageCapture.ts:245-248`）。命中上限且目标未完成时循环直接退出，之后仅检查 `imageDataList.length === 0`；只要已捕获到分段就继续拼接并返回 `success: true`（`usePageCapture.ts:299-320`）。因此超限结果是静默截断：长图只覆盖约 30 个视口高度（约 30 段 × 容器可视高度），没有“部分完成”标记或专用错误码，与触发方式（短按/长按）无关。若某段 `captureCurrentArea` 返回空或抛错，循环同样 break，已收集分段仍会进入拼接（`usePageCapture.ts:279-291`）。`isCapturing` 防并发，捕获期间再次进入直接返回“正在进行截图”错误（`usePageCapture.ts:159-161`）。
+迭代上限收口（代码路径确认，未运行验证）：上限常量 `maxIterations` 默认 30（`usePageCapture.ts:172`，注释“防止无限循环”），调用方未覆盖该值。循环条件为“累计捕获高度小于目标高度且迭代次数未达上限”（`usePageCapture.ts:245-248`）。
+
+命中上限且目标未完成时循环直接退出，之后仅检查已捕获分段是否为空；只要已捕获到分段就继续拼接并返回成功（`usePageCapture.ts:299-320`）。因此超限结果是静默截断：长图只覆盖约 30 个视口高度（约 30 段 × 容器可视高度），没有“部分完成”标记或专用错误码，与触发方式（短按/长按）无关。若某段 `captureCurrentArea` 返回空或抛错，循环同样 break，已收集分段仍会进入拼接（`usePageCapture.ts:279-291`）。
+
+`isCapturing` 防并发，捕获期间再次进入直接返回“正在进行截图”错误（`usePageCapture.ts:159-161`）。
 
 收集到的分段交给 `tabClient.stitchImagesWithWatermark()`。主进程 `ScrollCaptureManager`/拼接实现使用 Sharp 读取每段宽高，取最大宽度和高度总和，居中垂直合成 PNG；带水印版本由 desktop tab 路由承接（`src/main/lib/scrollCapture.ts:275-340`；`src/main/desktop/tab.ts:981-1010`）。
 
@@ -69,14 +73,18 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 `captureAndCopy()` 在拼接成功后调用 `deviceClient.copyImage(imageData)`。preload 将该动作暴露给 renderer，最终写入系统剪贴板（`composables/usePageCapture.ts:337-355`；`src/preload/index.ts:23-25`）。当前消息工具栏没有保存文件或系统分享入口，用户需要从剪贴板粘贴到目标应用。
 
-剪贴板交付细节：`window.api.copyImage` 直接 `nativeImage.createFromDataURL(image)` + `clipboard.writeImage(img)`（`src/preload/index.ts:23-26`），无平台分支、无 try/catch、无返回值；Electron 内部按平台转换格式（Windows/CF_DIB、macOS/NSPasteboard、Linux/X11），未传 `scaleFactor`（默认 1）。`captureAndCopy` 调用后无条件返回 true，不检查写入结果（`usePageCapture.ts:344-346`）；若 `writeImage` 抛错，异常沿 IPC 抛回 renderer，`captureMessage` 无 catch 分支，表现为未处理的 Promise 拒绝（`useMessageCapture.ts:160-186`）。工具栏的“复制成功”浮层在 mouseup/键盘触发时即显示（`MessageToolbar.vue:227-249`），先于实际捕获与写入完成，与实际成败无关。Web 平台路径不存在：renderer 的 `getDeepchatBridge` 在无 `window.deepchat` 时直接抛错（`renderer/api/core.ts:8-14`），`window.api` 仅由 Electron preload 暴露（`src/preload/index.ts:114-133`），本快照未找到浏览器端 mock 或独立 Web 构建目标。
+剪贴板交付细节：`window.api.copyImage` 直接 `nativeImage.createFromDataURL(image)` + `clipboard.writeImage(img)`（`src/preload/index.ts:23-26`），无平台分支、无 try/catch、无返回值；Electron 内部按平台转换格式（Windows/CF_DIB、macOS/NSPasteboard、Linux/X11），未传 `scaleFactor`（默认 1）。
+
+`captureAndCopy` 调用后无条件返回 true，不检查写入结果（`usePageCapture.ts:344-346`）；若 `writeImage` 抛错，异常沿 IPC 抛回 renderer，`captureMessage` 无 catch 分支，表现为未处理的 Promise 拒绝（`useMessageCapture.ts:160-186`）。工具栏的“复制成功”浮层在 mouseup/键盘触发时即显示（`MessageToolbar.vue:227-249`），先于实际捕获与写入完成，与实际成败无关。
+
+Web 平台路径不存在：renderer 的 `getDeepchatBridge` 在无 `window.deepchat` 时直接抛错（`renderer/api/core.ts:8-14`），`window.api` 仅由 Electron preload 暴露（`src/preload/index.ts:114-133`），本快照未找到浏览器端 mock 或独立 Web 构建目标。
 
 ## 4. 富内容与边界
 
 截图对象是现场消息 DOM，内容口径不取自原始数据。每段由主进程 `webContents.capturePage(rect)` 抓取视口位图（`src/main/desktop/tab.ts:958-968`），因此进入图片的是“当前渲染后的可见内容”：已渲染的 Markdown/代码、流式输出进行到一半的文本、折叠/展开的当前 UI 状态，均按捕获瞬间的 DOM 呈现。捕获期间有两项针对性处理：
 
-- Markdown 节点级虚拟化在捕获期间被关闭：`shouldDisableMarkdownVirtualization = props.disableMarkdownVirtualization || isCapturingValue`（`MessageList.vue:103-105`），使 MarkdownRenderer 的 `resolvedNodeVirtual` 变 false、`maxLiveNodes` 归零（`MarkdownRenderer.vue:243-249`，平时静态长文最多保留 260 个 live 节点），保证已挂载消息的节点全部渲染进截图；
-- 工具栏整体隐藏（`MessageToolbar.vue:2` v-if="!isCapturingImage"），与 `.chat-capture-hide` 覆盖层（顶栏、输入区、只读工具交互浮层，`ChatPage.vue:9,127,141`）一起避免操作控件入图（`useMessageCapture.ts:33-53`）。
+- Markdown 节点级虚拟化在捕获期间被关闭（`MessageList.vue:103-105` 的条件使 MarkdownRenderer 的 `resolvedNodeVirtual` 变 false、`maxLiveNodes` 归零，`MarkdownRenderer.vue:243-249`；平时静态长文最多保留 260 个 live 节点），保证已挂载消息的节点全部渲染进截图；
+- 工具栏整体隐藏（`MessageToolbar.vue:2`，捕获中不再渲染），与 `.chat-capture-hide` 覆盖层（顶栏、输入区、只读工具交互浮层，`ChatPage.vue:9,127,141`）一起避免操作控件入图（`useMessageCapture.ts:33-53`）。
 
 `.chat-capture-hide` 是明确的截图排除契约；除此之外，本次没有找到针对敏感内容、system prompt、路径或工具参数的专用过滤。
 

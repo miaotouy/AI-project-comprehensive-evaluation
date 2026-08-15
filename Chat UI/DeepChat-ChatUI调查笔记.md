@@ -40,38 +40,41 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
 ## 1. 页面结构、导航与多窗口
 
-- **应用壳**：`ChatMainApp.vue` 组合 `AppBar`、`WindowSideBar`、`SpotlightOverlay`、`RouterView` 与通知宿主（`src/renderer/src/App.vue:2` → `src/renderer/src/apps/chat-main/ChatMainApp.vue`）；聊天工作台是路由页 ChatPage。
-- **ChatPage 布局**（`src/renderer/src/features/chat-page/ChatPage.vue:1-314`）：顶栏 `ChatTopBar`（:8；组件内标题内联重命名 `src/renderer/src/components/chat/ChatTopBar.vue:52-58`、项目名 :36-38、子会话返回父级 :31）；消息滚动区（:33-123，历史加载指示/错误重试 :52-85，`MessageList` :86-107）；只读 interaction 区（:124-136）；Composer 区（:137-279）：`PendingInputLane`（:146-162）、plan/question 浮层（:166-209，plan 与 question 可合并面板或单独呈现）、`ChatInputBox`（:224-272）、`ChatStatusBar`（:273）；附件准备对话框 ×2（:283-301，composer 发送与 retry 各一）；删除确认对话框（:302-312）。
+- **应用壳**：`ChatMainApp.vue` 组合应用栏、侧栏、Spotlight 搜索浮层、路由视图与通知宿主（`src/renderer/src/App.vue:2`）；聊天工作台是路由页 ChatPage。
+- **ChatPage 布局**（`src/renderer/src/features/chat-page/ChatPage.vue:1-314`）：顶栏（标题内联重命名、项目名、子会话返回父级，`ChatTopBar.vue:52-58`）；消息滚动区（历史加载指示/错误重试、`MessageList`）；只读 interaction 区；Composer 区（`PendingInputLane`、plan/question 浮层——可合并面板或单独呈现、`ChatInputBox`、`ChatStatusBar`）；附件准备对话框 ×2（composer 发送与 retry 各一）；删除确认对话框。
 - **subagent 只读**：`isReadOnlySession` computed（:428，`sessionKind === 'subagent'`），只读时隐藏 Composer（:139）并显示 `ChatToolInteractionOverlay`（:124-136）。
 - **多窗口**：active session 按 webContentsId 绑定、IPC 定向更新按 webContentsId 过滤（`src/main/desktop/sessionBinding.ts:13-64`、`src/renderer/src/stores/ui/sessionIpc.ts:29-35`）。草稿经 localStorage 跨窗口共享，但 busy/streaming 等运行时状态为窗口内内存，本次未找到跨窗口同步机制（数据侧结论见会话与消息管理笔记 §5；检查范围：renderer stores 与 sessionIpc）。
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **侧栏**（`src/renderer/src/components/WindowSideBar.vue`）：新建聊天（`app-new-chat-button`，:172-173）、侧栏搜索输入（`sidebar-session-search-input`，:162-168）是对**已加载会话列表的客户端过滤**（`matchesSessionSearch` 按标题包含匹配，:902-908，应用于置顶与分组 :911-924）；置顶区（:247-266）、分组区（:287-309）、加载更多（:556-560）。
-- **Spotlight 跨会话搜索**：`app-search-command-button`（:182-183）打开 Spotlight；`runSearch`（`src/renderer/src/stores/ui/spotlight.ts:305-333`）调用 `sessionClient.searchHistory`（:314，服务端 FTS 历史搜索，数据侧见会话与消息管理笔记 §5.3），会话命中可直接选择，消息命中写入 `pendingMessageJump`（:440）并在 ChatPage 提交后定位滚动（`ChatPage.vue:797-843` `focusPendingSpotlightMessageJump`，带重试与高亮）。
-- **会话内查找**：Cmd/Ctrl+F 打开 `ChatSearchBar`（`ChatPage.vue:15-32`），`useChatSearch`（`src/renderer/src/features/chat-page/composables/useChatSearch.ts`）在已加载 display messages 上匹配、高亮与定位（`revealChatSearchResult` :110-137 经共享滚动控制器 `requestChatScroll('search-navigation', ...)`，不与流式自动跟随冲突）；键盘：Esc 关闭、Enter/Shift+Enter 下一条/上一条（`handleSearchKeydown` :237-265）。
-- **现场恢复**：`useSessionRestore`（`src/renderer/src/features/chat-page/composables/useSessionRestore.ts:29-`）以 restore 请求 epoch 保证异步写入不串会话；`messageStore.loadMessages` 拉取首屏（默认 100 条，`ChatPage.vue:437`），session 切换时保存/恢复测量快照（`recentMessageMeasurementCache`，:845-848、:984-988）；历史向上翻页在滚动到顶时触发（`loadOlderMessagesAtTop` :700-795，以窗口首行作锚点做滚动补偿）；提交后自动跟随滚动（:1049-1072）。
+- **侧栏**（`src/renderer/src/components/WindowSideBar.vue`）：新建聊天、侧栏搜索输入是对**已加载会话列表的客户端过滤**（按标题包含匹配，`matchesSessionSearch`，:902-908，应用于置顶与分组 :911-924）；置顶区、分组区、加载更多（:556-560）。
+- **Spotlight 跨会话搜索**：搜索命令按钮打开 Spotlight；`runSearch`（`src/renderer/src/stores/ui/spotlight.ts:305-333`）调用 `sessionClient.searchHistory`（服务端 FTS 历史搜索，数据侧见会话与消息管理笔记 §5.3），会话命中可直接选择，消息命中写入待跳转状态并在 ChatPage 提交后定位滚动（`ChatPage.vue:797-843`，带重试与高亮）。
+- **会话内查找**：Cmd/Ctrl+F 打开 `ChatSearchBar`（`ChatPage.vue:15-32`），`useChatSearch`（`src/renderer/src/features/chat-page/composables/useChatSearch.ts`）在已加载 display messages 上匹配、高亮与定位（经共享滚动控制器请求滚动，不与流式自动跟随冲突）；键盘：Esc 关闭、Enter/Shift+Enter 下一条/上一条（`handleSearchKeydown` :237-265）。
+- **现场恢复**：`useSessionRestore`（`src/renderer/src/features/chat-page/composables/useSessionRestore.ts:29-`）以 restore 请求 epoch 保证异步写入不串会话；`messageStore.loadMessages` 拉取首屏（默认 100 条，`ChatPage.vue:437`），session 切换时保存/恢复测量快照（:845-848、:984-988）；历史向上翻页在滚动到顶时触发（`loadOlderMessagesAtTop` :700-795，以窗口首行作锚点做滚动补偿）；提交后自动跟随滚动（:1049-1072）。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- **编辑器**：`ChatInputBox`（`src/renderer/src/components/chat/ChatInputBox.vue`）是 TipTap 编辑器（`EditorContent` :24），扩展 Mention 与 slash Mention（:51、:81-82）、文件附件节点（:72）、占位符/历史等；提及对话框经 `useChatInputMentions`（:145）提交。附件经 `@update:files` 进入草稿（`useComposerSubmit.onFilesChange`，`src/renderer/src/features/chat-page/composables/useComposerSubmit.ts:1172-1198`），并按当前模型能力过滤不支持的音频（:399-418）。
-- **工具栏**（`src/renderer/src/components/chat/ChatInputToolbar.vue`）：附件（:10-14）、provider 搜索开关（`chat-search-toggle`，:21-36）、语音输入（:42-52）、steer 按钮（生成中且有输入时显示，:119-133）；主按钮是四态状态机（:268-273）：`cancel-preparation / stop / queue / send`，由 `handlePrimaryAction` 分发（:281-294）。
+- **编辑器**：`ChatInputBox`（`src/renderer/src/components/chat/ChatInputBox.vue`）是 TipTap 编辑器（`EditorContent` :24），扩展 Mention 与 slash Mention（:51、:81-82）、文件附件节点（:72）、占位符/历史等；提及对话框经 `useChatInputMentions`（:145）提交。附件经文件变更事件进入草稿（`useComposerSubmit.ts:1172-1198`），并按当前模型能力过滤不支持的音频（:399-418）。
+- **工具栏**（`src/renderer/src/components/chat/ChatInputToolbar.vue`）：附件、provider 搜索开关（:21-36）、语音输入、steer 按钮（生成中且有输入时显示，:119-133）；主按钮是四态状态机（:268-273）：取消准备 / 停止 / 排队 / 发送，由 `handlePrimaryAction` 分发（:281-294）。
 - **草稿持久化**：`composerDraftPersistence.ts` 按会话键 `deepchat.composerDraft.v1.<sessionId>`（:12）把文本、附件、active skills 与 TipTap document 镜像到 localStorage（400ms 防抖 :13、:543-554；空草稿删除、损坏视为无 :148-155、:164-168）；切换会话即时恢复（`switchComposerSession`，`useComposerSubmit.ts:669-700`），`pagehide/beforeunload` 同步 flush（:566-572）。草稿状态机（revision/fingerprint）在 `model/composerDraftState.ts`。
 - **快捷输入**：slash 命令（`/compact` 手动压缩，`useComposerSubmit.ts:952-996`，命令定义 `src/renderer/src/components/chat/mentions/utils.ts:36-37`）；`@` 提及（编辑器扩展）。
 
 ## 4. Agent、模型、工具与发送前配置
 
 - **模型切换**：`ChatStatusBar` 的模型切换器（`app-model-switcher`，`src/renderer/src/components/chat/ChatStatusBar.vue:85-105`）在当前会话内选择 provider/model（会话级绑定见会话与消息管理笔记 §8）。
-- **provider 搜索开关**：`isSearchAvailable`（`useComposerSubmit.ts:287-297`）按 `modelClient.getCapabilities` 的 `supportsSearch && searchExecution === 'provider'` 解析（`refreshSearchCapability` :302-338），`toggleSearch`（:361-364）写入 session store 的 per-session `searchIntents`（`src/renderer/src/stores/ui/session.ts:352`、`getSearchIntent` :377、`toggleSearchIntent` :387-391），发送时以 `input.search === true` 进入 `SendMessageInput`（`captureSubmissionSeed` :605-614）。
+- **provider 搜索开关**（provider 原生搜索的发送前开关）：
+  - 可用性：`isSearchAvailable`（`useComposerSubmit.ts:287-297`）按 `modelClient.getCapabilities` 的 `supportsSearch && searchExecution === 'provider'` 解析（`refreshSearchCapability` :302-338）；
+  - 切换：`toggleSearch`（:361-364）写入 session store 的 per-session `searchIntents`（`src/renderer/src/stores/ui/session.ts:352`、`getSearchIntent` :377、`toggleSearchIntent` :387-391）；
+  - 发送：以 `input.search === true` 进入 `SendMessageInput`（`captureSubmissionSeed` :605-614）。
 - **active skills**：编辑器内选择，进入草稿的 `activeSkills`（`recordComposerSkillsChange` :659-667），随 payload 提交。
-- **附件准备**：发送前 `attachmentRouter` 检查（执行侧），`needs_user_action` 时在 `AttachmentPreparationDialog` 呈现（`ChatPage.vue:283-301`），支持 retry / send_without_image_content / 切换视觉模型（`useComposerSubmit.ts:1270-1284`）。
+- **附件准备**：发送前执行附件路由检查（执行侧），需要用户介入时在 `AttachmentPreparationDialog` 呈现（`ChatPage.vue:283-301`），支持 retry / 不带图片内容发送 / 切换视觉模型（`useComposerSubmit.ts:1270-1284`）。
 - 设置作用域：模型/搜索意图/技能均按会话记忆；生成参数（temperature 等）在设置页，不在 ChatPage 内（本次未展开）。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **发送路径**：`onSubmit`（`useComposerSubmit.ts:998-1047`）：生成中 → `pendingInputStore.queueInput` 入队（:1027）；空闲 → `dispatchComposerAttempt`（:826-950，发送前先 `beginOutgoingTurnFeedback` :810-816 插入乐观 user 消息与 pending-assistant 占位，被拒则回滚并弹附件对话框）。`onQueueSubmit`（:1098-1128）、`onSteer`（:1130-1170）、slash 命令发送（:1049-1096）。
-- **pending lane**（`src/renderer/src/components/chat/PendingInputLane.vue`）：队列计数与 blocked 计数徽标（:13-23）；resume 按钮（`pending-resume-queue`，:25-40，显示条件 `ChatPage.vue:1299-1309` `showPendingQueueResume`：非 ACP、视图已提交、无生成中、`pendingInputStore.resumeAvailable`）；`retry_required` 项琥珀色标记 + 重试按钮（:208-229）；blocked 项 retry / send-without 按钮（:174-207）；拖拽排序（:53-62，blocked/retry_required/编辑中禁用）、行内编辑（:95-133）。动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
-- **流式反馈**：消息列表随 IPC 增量更新（renderer message store 与 `messageIpc.ts` 的 stream 注册表，见会话与消息管理笔记 §6）；`useDisplayMessages` 用稳定 render key 把占位/流式行与落盘消息关联（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:339-355`、:367-438）；rate-limit 临时块（`ephemeralRateLimitBlock`，:235-250）在列表尾部内联呈现。
+- **发送路径**：`onSubmit`（`useComposerSubmit.ts:998-1047`）：生成中 → `pendingInputStore.queueInput` 入队（:1027）；空闲 → `dispatchComposerAttempt`（:826-950，发送前先插入乐观 user 消息与 pending-assistant 占位，被拒则回滚并弹附件对话框）。另有排队提交（`onQueueSubmit` :1098-1128）、steer（`onSteer` :1130-1170）与 slash 命令发送（:1049-1096）。
+- **pending lane**（`src/renderer/src/components/chat/PendingInputLane.vue`）：队列计数与 blocked 计数徽标（:13-23）；resume 按钮（显示条件 `ChatPage.vue:1299-1309`：非 ACP、视图已提交、无生成中、`pendingInputStore.resumeAvailable`）；`retry_required` 项琥珀色标记 + 重试按钮（:208-229）；blocked 项 retry / send-without 按钮（:174-207）；拖拽排序（:53-62，阻塞/待重试/编辑中禁用）、行内编辑（:95-133）。动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
+- **流式反馈**：消息列表随 IPC 增量更新（renderer message store 与 `messageIpc.ts` 的 stream 注册表，见会话与消息管理笔记 §6）；`useDisplayMessages` 用稳定 render key 把占位/流式行与落盘消息关联（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:339-355`、:367-438）；rate-limit 临时块在列表尾部内联呈现（`ephemeralRateLimitBlock`，:235-250）。
 - **停止**：`onStop`（`ChatPage.vue:1346-1374`）→ `chatClient.stopStream`（失败 toast），停止中状态 `stoppingSessionIds` 防重入；执行层 abort 链见对话请求与上下文笔记 §7。
 
 ## 6. 消息操作、分支与版本导航
@@ -97,8 +100,15 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 ## 8. Chat UI 状态所有权与同步
 
 - **session store**（`src/renderer/src/stores/ui/session.ts`）：会话列表/分页（列表 epoch :330-344）、`activeSessionId`（:351）、`searchIntents`（:352）、分组模式（:401-416）、删除墓碑（:340-342）。
-- **message store**（`src/renderer/src/stores/ui/message.ts`）：`messageIds/messageCache`（:62-63）、`committedSessionId`（:68）、分页游标与 `hasMoreHistory`（:69-71）、解析缓存（:76）；streaming 状态委托给 `stream` store（`streamingBlocks/currentStreamSessionId/currentStreamMessageId/streamRevision`，:53-59）。
-- **pendingInput store**（`src/renderer/src/stores/ui/pendingInput.ts:11-27`）：`items/resumeAvailable/loading/resumingSessionId/retryingItemId`，`listPendingInputs` 路由返回 `{ items, resumeAvailable }`（`src/main/session/routes.ts:247-259`）。
+- **message store**（`src/renderer/src/stores/ui/message.ts`）：
+  - 消息 ID/缓存：`messageIds/messageCache`（:62-63）；
+  - `committedSessionId`（:68）；
+  - 分页游标与 `hasMoreHistory`（:69-71）；
+  - 解析缓存（:76）；
+  - streaming 状态委托给 `stream` store（`streamingBlocks`、`currentStreamSessionId`、`currentStreamMessageId`、`streamRevision`，:53-59）。
+- **pendingInput store**（`src/renderer/src/stores/ui/pendingInput.ts:11-27`）：
+  - 状态字段：`items`、`resumeAvailable`、`loading`、`resumingSessionId`、`retryingItemId`；
+  - 路由：`listPendingInputs` 返回 `{ items, resumeAvailable }`（`src/main/session/routes.ts:247-259`）。
 - **草稿**：feature 内 `composerDraftState` + localStorage（§3）。
 - **plan**：`agentPlanStore`（`ChatPage.vue:406` 实例化，导入 :350）按会话存 plan 快照与折叠状态，plan 浮层生命周期 `usePlanFloatLifecycle`（:1117-1131）。
 - **切换会话**：清 pendingInput（:993）、切换草稿（:976）、清搜索状态（:977）、重置 display 缓存（:978）、保存/恢复测量快照（:970-972、:984-988）、清其他会话流式状态（:989）；恢复 epoch 贯穿所有异步写（§2）。
@@ -106,7 +116,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 
-- 键盘事件：`useChatPageEventBridge` 在 window 上注册 keydown（`src/renderer/src/features/chat-page/composables/useChatPageEventBridge.ts:74`）→ `handleWindowKeydown`（`ChatPage.vue:1074-1082`）：滚动意图键（方向键/PageUp/Home 等，:494-503）驱动窗口化测量，搜索快捷键（Cmd/Ctrl+F、Enter/Shift+Enter、Esc）经 `handleSearchKeydown`（`useChatSearch.ts:237-265`）。
+- 键盘事件：`useChatPageEventBridge` 在 window 上注册 keydown（`useChatPageEventBridge.ts:74`）→ `handleWindowKeydown`（`ChatPage.vue:1074-1082`）：滚动意图键（方向键/PageUp/Home 等，:494-503）驱动窗口化测量，搜索快捷键（Cmd/Ctrl+F、Enter/Shift+Enter、Esc）经 `handleSearchKeydown`（`useChatSearch.ts:237-265`）。
 - 焦点保持：question/permission 激活时 Composer 用 `v-show + inert` 保留（`ChatPage.vue:217-221`），避免 TipTap 草稿与 IME 状态被卸载。
 - 无障碍标记：滚动区 `role="status"/aria-live`（:116-119）、删除对话框 title/description、工具栏按钮 aria-label 等静态可见。
 - 焦点顺序、响应式断点、实际键盘可用性未运行验证（§11）。

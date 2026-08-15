@@ -29,7 +29,11 @@ AstrBot 是 Python 服务核心与 Vue 管理界面合仓的前后端项目。`a
 
 ## 语言、文档与测试
 
-Python 202,621 行（66.9%）、Vue 71,421 行（23.6%）、TypeScript 17,531 行（5.8%）。文档由 `docs/zh`（106 文件）、`docs/en`（101）和 `changelogs`（200）构成，文档数量较多但约一半是版本记录。测试集中在 `tests`：顶层用例 84 文件、`tests/unit` 61、`tests/agent` 3，Dashboard 仅扫描到 6 个测试文件。
+Python 202,621 行（66.9%）、Vue 71,421 行（23.6%）、TypeScript 17,531 行（5.8%）。
+
+文档由 `docs/zh`（106 文件）、`docs/en`（101）和 `changelogs`（200）构成，文档数量较多但约一半是版本记录。
+
+测试集中在 `tests`：顶层用例 84 文件、`tests/unit` 61、`tests/agent` 3，Dashboard 仅扫描到 6 个测试文件。
 
 ## 跨平台组织与边界
 

@@ -16,12 +16,14 @@
 
 Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能力由四条可配置链路组合而成，全部在**会话启动时**按 cwd 解析、在**每轮请求前**拼装进 system prompt：
 
-1. **System prompt 文件**：`.pi/SYSTEM.md`（项目，需项目受信）或 `~/.pi/agent/SYSTEM.md`（全局）整篇替换默认 system prompt；`.pi/APPEND_SYSTEM.md`/全局 `APPEND_SYSTEM.md` 追加在末尾（`resource-loader.ts:1022-1048`）。
-2. **项目上下文文件**：`AGENTS.override.md > AGENTS.md > AGENTS.MD > CLAUDE.md > CLAUDE.MD` 按“全局目录 → cwd 向上各祖先目录”收集，去重并以 `<project_instructions path="...">` 块包进 `<project_context>`（`resource-loader.ts:70-89, 118-156`）。
-3. **Skills 与 Prompt 模板**：skills 由 `formatSkillsForPrompt`（skills.ts:335-361）生成 XML `<available_skills>` 区块进 system prompt 建索引，支持 `/skill:name` 全文注入（agent-session.ts:1309-1333）；`prompts/` 目录模板支持 `/template` 调用（展开在 agent-session.ts:1163/1351/1371）。
+1. **System prompt 文件**：`.pi/SYSTEM.md`（项目，需项目受信）或 `~/.pi/agent/SYSTEM.md`（全局）整篇替换默认 system prompt；项目或全局的 `APPEND_SYSTEM.md` 追加在末尾（`resource-loader.ts:1022-1048`）。
+2. **项目上下文文件**：按“全局目录 → cwd 向上各祖先目录”收集 AGENTS/CLAUDE 系列文件并去重，每个文件以一个 `<project_instructions path="...">` 块包进 `<project_context>`；候选优先级为 `AGENTS.override.md > AGENTS.md > AGENTS.MD > CLAUDE.md > CLAUDE.MD`（`resource-loader.ts:70-89, 118-156`）。
+3. **Skills 与 Prompt 模板**：skills 列表在拼装时生成 XML `<available_skills>` 区块建索引，支持 `/skill:name` 全文注入；`prompts/` 目录模板支持 `/template` 调用（注入与模板展开见 `agent-session.ts:1309-1333, 1163/1351/1371`）。
 4. **扩展每轮改写**：`before_agent_start` 扩展事件可以替换整份 system prompt 或注入 custom 消息，且优先级高于基础拼装（`agent-session.ts:1232-1261`）。
 
-模型/思考等级绑定在会话状态并以 `model_change`/`thinking_level_change` 条目落入会话文件；默认 Provider/模型/思考等级存在设置文件（全局 `~/.pi/agent/settings.json` + 项目 `.pi/settings.json` 深合并，`settings-manager.ts:139-165`）。历史消息里 assistant 消息自带 provider/model/usage，但 system prompt 本体不进会话文件（仅 HTML 导出时快照，`export-html/index.ts:134`）。
+模型/思考等级绑定在会话状态，切换时以 `model_change`/`thinking_level_change` 条目落入会话文件；默认 Provider/模型/思考等级来自全局 `~/.pi/agent/settings.json` 与项目 `.pi/settings.json` 的深合并结果（`settings-manager.ts:139-165`）。
+
+历史消息里的 assistant 消息自带 provider/model/usage 等元数据，但 system prompt 本体不进会话文件，仅在 HTML 导出时快照（`export-html/index.ts:134`）。
 
 ## 总体生效链路
 
@@ -39,37 +41,48 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 ## 1. 角色数据模型与存储
 
 - **角色实体**：本次未找到任何“角色/Persona/Mask/Character”对象、表或文件格式。与之最近的概念是 system prompt 的**文件源**：`SYSTEM.md`（整篇替换）与 `APPEND_SYSTEM.md`（追加），都是普通 Markdown 文件，无版本字段、无 schema 校验、无用户数据模型。
-- **存储位置**：全局在 `~/.pi/agent/`（`getAgentDir()`，`config.ts`），项目在 `<cwd>/.pi/`（`CONFIG_DIR_NAME`）。`SYSTEM.md` 项目路径仅在 `isProjectTrusted()` 时读取（`resource-loader.ts:1022-1026`），全局路径无条件读取。
+- **存储位置**：全局配置目录为 `~/.pi/agent/`，项目配置目录为 `<cwd>/.pi/`（目录常量定义于 `config.ts`）。项目级 `SYSTEM.md` 仅在 `isProjectTrusted()` 通过时读取（`resource-loader.ts:1022-1026`），全局级文件则无条件读取。
 - **内置/用户角色区分**：无内置角色；内置的是默认 system prompt 模板（`system-prompt.ts:121-138` 的“You are an expert coding assistant operating inside pi...”），用户 `SYSTEM.md` 出现即替换该模板。
 - **删除策略**：删除文件即失效，无配置级删除操作。
 
 ## 2. 创建、选择与会话绑定
 
-- **创建**：角色即文件，用户直接编辑/新建 `.pi/SYSTEM.md`、`APPEND_SYSTEM.md`、`AGENTS.md`、skills 等；`/reload` 命令重新加载全部资源（`slash-commands.ts:40`），无需重启会话。
+- **创建**：角色即文件——直接编辑/新建 `.pi/SYSTEM.md`、`AGENTS.md` 等文件即可；`/reload` 命令重新加载全部资源（`slash-commands.ts:40`），无需重启会话。
 - **复制/导入**：无角色复制、导入导出；`/export`（HTML/JSONL）导出的是会话本身。
-- **绑定**：角色不绑定会话，**资源按 cwd 解析**：`ResourceLoader` 每次 `load()` 以当前会话 cwd 发现上下文文件（`resource-loader.ts:514-524`），切换目录（`/new`、`/resume` 跨 cwd、fork）后重建 runtime 即换一套上下文（`agent-session-runtime.ts:214-221`）。同一会话内不存在运行时切换角色入口。
+- **绑定**：角色不绑定会话，**资源按 cwd 解析**：`ResourceLoader` 每次 `load()` 以当前会话 cwd 发现上下文文件（`resource-loader.ts:514-524`）。
+- **目录切换**：经 `/new`、`/resume`（跨 cwd）或 fork 重建 runtime 后即换一套上下文（`agent-session-runtime.ts:214-221`）；同一会话内不存在运行时切换角色入口。
 
 ## 3. 提示词字段与最终拼装顺序
 
 `buildSystemPrompt`（`system-prompt.ts:28-162`）的两种形态：
 
-- **自定义 SYSTEM.md 存在时**：`customPrompt` 整篇替换默认模板，然后依次追加：`APPEND_SYSTEM.md` 内容 → `<project_context>`（每个 AGENTS/CLAUDE 文件一个 `<project_instructions path="...">` 块）→ skills 索引区（仅当 read 工具在激活集时，`system-prompt.ts:63-67`）→ `Current working directory: <cwd>`。
+- **自定义 SYSTEM.md 存在时**：`customPrompt` 整篇替换默认模板，随后按序追加以下区块：
+  - `APPEND_SYSTEM.md` 内容；
+  - `<project_context>`：每个 AGENTS/CLAUDE 文件包成一个 `<project_instructions path="...">` 块；
+  - skills 索引区（仅当 read 工具在激活集时，`system-prompt.ts:63-67`）；
+  - 当前工作目录提示（`Current working directory: <cwd>`）。
 - **默认模板形态**：固定开场（“expert coding assistant operating inside pi…”）→ `Available tools:`（只有带一行 snippet 的激活工具才列出，`system-prompt.ts:80-84`）→ `Guidelines:`（按工具集推导 + `promptGuidelines` 扩展注入 + 固定两条“Be concise/Show file paths”）→ Pi 自身文档指引（README/docs/examples 路径及按主题的阅读指引）→ 追加段 → project_context → skills → cwd。
-- **skills 索引格式**：`formatSkillsForPrompt`（skills.ts:335-361）生成 XML `<available_skills>` 区块（`<skill>` 含 name/description/location）供模型发现；全文经 `/skill:name` 注入（`agent-session.ts:1309-1333`，`<skill name=... location=...>` 块 + 相对路径提示）。
-- **每轮改写**：`before_agent_start` 扩展事件返回的 `systemPrompt` 直接替换 `agent.state.systemPrompt`（`_systemPromptOverride`），本轮结束后复位为基础 prompt（`agent-session.ts:1071`）。
+- **skills 索引格式**：`formatSkillsForPrompt`（skills.ts:335-361）把每个 skill 生成一个 `<skill>` 元素（含 name/description/location），汇总为 XML `<available_skills>` 区块供模型发现；需要全文时经 `/skill:name` 注入，注入块带 location 与相对路径提示（`agent-session.ts:1309-1333`）。
+- **每轮改写**：`before_agent_start` 扩展事件返回的 `systemPrompt` 直接替换会话的 `agent.state.systemPrompt`，本轮结束后复位为基础 prompt（`agent-session.ts:1071`）。
 
 ## 4. 模型、Provider 与生成参数
 
-- **角色级绑定**：无角色→模型绑定；模型/思考等级是**会话级**状态（`agent.state.model/thinkingLevel`），切换时写 `model_change`/`thinking_level_change` 会话条目（`session-manager.ts:58-67`），`/model`、Ctrl+P 切换（`agent-session.ts:1594` 附近）。
-- **默认值**：设置项 `defaultProvider/defaultModel/defaultThinkingLevel`（`settings-manager.ts:91-93`）；初始模型选择优先级为 CLI > scoped models > 设置默认 > 按 `defaultModelPerProvider` 匹配首个可用模型（`model-resolver.ts:620-700`）。`defaultThinkingLevel` 默认 `"medium"`（`defaults.ts:3`），模型不支持时 `clampThinkingLevel` 收敛（`models.ts:913-932`）。
+- **角色级绑定**：无角色→模型绑定；模型与思考等级是会话级状态，存在 `agent.state.model/thinkingLevel`，切换时写入 `model_change`/`thinking_level_change` 会话条目（`session-manager.ts:58-67`）。
+- **切换入口**：`/model` 命令或 Ctrl+P 快捷键（`agent-session.ts:1594` 附近）。
+- **默认值**：
+  - 设置项：`defaultProvider`、`defaultModel`、`defaultThinkingLevel`（`settings-manager.ts:91-93`）；
+  - 初始模型选择优先级：CLI 参数 > scoped models > 设置默认 > 按 `defaultModelPerProvider` 匹配首个可用模型（`model-resolver.ts:620-700`）；
+  - 思考等级默认 `"medium"`（`defaults.ts:3`），模型不支持时由 `clampThinkingLevel` 收敛（`models.ts:913-932`）。
 - **其他生成参数**：无角色级温度/输出格式；Provider 请求层支持 `samplingParams`（透传给 OpenAI-compatible 服务，`packages/ai/src/types.ts:174-188`）与 `thinkingBudgets`，但绑定在模型元数据/设置，不绑定在角色上。
 
 ## 5. 工具、知识库、记忆与子 Agent
 
-- **工具授权**：无角色级工具授权。工具激活集是会话级列表（默认 `[read, bash, edit, write]`，`agent-session.ts:211-212`），`--tools`/设置可改；工具是否出现在 system prompt 由其“一行 snippet”是否存在决定（`system-prompt.ts:80-84`），全部工具经扩展注册。
+- **工具授权**：无角色级工具授权；工具激活集是会话级列表（默认 `[read, bash, edit, write]`，`agent-session.ts:211-212`），可用 `--tools` 或设置项修改。
+- **提示词可见性与注册**：工具是否出现在 system prompt 由其“一行 snippet”是否存在决定（`system-prompt.ts:80-84`）；全部工具经扩展注册。
 - **知识库**：无向量知识库；等价物是 `<project_context>` 上下文文件（静态文本）与 skills 文件（按需注入）。
 - **记忆**：无独立记忆服务；长期记忆即会话历史 + 压缩摘要（`compaction`），跨会话无自动记忆。
-- **子 Agent**：`packages/agent` 的 `createAgent` 可被扩展用作子 Agent；无角色级子 Agent 配置。示例扩展 `examples/extensions/subagent/` 中，未指定 `model` 的子 Agent 继承分发会话的当前模型与思考等级（`ctx.model/ctx.thinkingLevel` 传入子进程 `--model`/`--thinking`，`examples/extensions/subagent/index.ts:265-270, 298-308`，#7897）。
+- **子 Agent**：`packages/agent` 的 `createAgent` 可被扩展用作子 Agent，无角色级子 Agent 配置；示例见 `examples/extensions/subagent/`。
+- 未指定 `model` 的子 Agent 继承分发会话的当前模型与思考等级，两者经 `--model`/`--thinking` 参数传入子进程（`examples/extensions/subagent/index.ts:265-270, 298-308`，#7897）。
 
 ## 6. 资产、变量、开场白与用户档案
 
@@ -80,15 +93,21 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 ## 7. 导入、导出、迁移与兼容性
 
 - **导入导出**：角色无导入导出格式。会话 `/export` HTML 含 system prompt 快照与工具渲染（`export-html/index.ts:134, 267`）。
-- **未知字段/脚本/远程资源**：`SYSTEM.md`/`AGENTS.md` 是纯文本，无字段校验；`AGENTS.override.md` 专门用于覆盖仓库自带 `AGENTS.md`（候选顺序 `resource-loader.ts:71`）。
+- **未知字段/脚本/远程资源**：`SYSTEM.md`/`AGENTS.md` 是纯文本，无字段校验；`AGENTS.override.md` 专门用于覆盖仓库自带的上下文文件（候选顺序 `resource-loader.ts:71`）。
 - **兼容性**：多项目工作流按“祖先目录链 + 全局目录”合并，重复路径去重；嵌套 git worktree 场景有去重处理（`findShadowedContextFile`，`resource-loader.ts:100-116`）。
 
 ## 8. 配置 UI 与运行时可见性
 
-- **UI**：`/settings` 选择器可改默认 Provider/模型/思考等级等；无角色编辑 UI。`/model`、`/scoped-models` 命令（slash-commands.ts:21-22）；无 `/skills` 内置命令（skills 经 `/skill:name` 调用）。
+- **UI**：`/settings` 选择器可改默认 Provider/模型/思考等级等，无角色编辑 UI。
+- **命令**：内置 `/model`、`/scoped-models` 命令（`slash-commands.ts:21-22`）；无 `/skills` 内置命令，skills 经 `/skill:name` 调用。
 - **运行时可见性**：footer 显示当前模型/状态（`components/footer.ts`）；`/session` 显示统计；`agent.state.systemPrompt` 可通过扩展读取（`extensions/types.ts:706`），HTML 导出可见全文。**当前生效提示词无内置查看命令**——本次未找到类似 `/system-prompt` 的展示入口。
-- **历史快照**：assistant 消息持久化 provider/model/usage（`packages/ai/src/types.ts:415-430`，`AssistantMessage` 带 `api/provider/model/responseModel/usage/stopReason`，无采样参数），会话条目记模型切换；`model_change` 条目只记 provider+modelId（`session-manager.ts:63-67`）；system prompt 本体不随会话条目保存。
-- **重试/重新生成**：无用户级 retry/regenerate 命令（`core/slash-commands.ts:19-41` 的 BUILTIN_SLASH_COMMANDS 无此项；grep `resend|replay|regenerate` 无命中）；全部 retry 是瞬时错误的自动重试（`agent-session.ts:2683-2747` `_scheduleRetry`/`_prepareRetryableError`），同上下文重发同轮请求，无兄弟分支、无参数快照。人工"重新生成"的最近似路径是 `/fork`/`/clone`（slash-commands.ts:31-32）从旧 user 消息重开分支，但那是新建会话分支，不是同节点重试。
+- **历史快照**：assistant 消息持久化请求元数据（`AssistantMessage`，`packages/ai/src/types.ts:415-430`）：
+  - 记录 api、provider、model、responseModel、usage、stopReason，不保存采样参数；
+  - 会话条目只记模型切换：`model_change` 条目仅含 provider 与 modelId（`session-manager.ts:63-67`）；
+  - system prompt 本体不随会话条目保存。
+- **重试/重新生成**：无用户级 retry/regenerate 命令——内置命令表 `BUILTIN_SLASH_COMMANDS`（`core/slash-commands.ts:19-41`）无此项，grep `resend|replay|regenerate` 无命中。
+- 仅有的 retry 是瞬时错误的自动重试（`agent-session.ts:2683-2747` 的 `_scheduleRetry`/`_prepareRetryableError`）：同上下文重发同轮请求，无兄弟分支、无参数快照。
+- 人工“重新生成”的最近似路径是 `/fork`/`/clone`（`slash-commands.ts:31-32`）：从旧 user 消息重开分支，但那是新建会话分支，不是同节点重试。
 
 ## 9. 设计取舍与已确认边界
 

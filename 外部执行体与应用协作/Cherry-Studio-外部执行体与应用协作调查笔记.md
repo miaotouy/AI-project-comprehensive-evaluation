@@ -24,9 +24,9 @@ Cherry Studio 有两条独立的完整主链，均达到 `主链确认`（静态
 ## 接入角色与系统边界
 
 - **外部执行体**：`@anthropic-ai/claude-agent-sdk` 提供的 Agent runtime。SDK 持有自身工具循环与 Bash/Read/Write/Edit 等执行；Cherry 持有 Agent Session 产品对象、workspace、消息后端、工具曝光策略、审批 UI 和事件投影。
-- **外部控制表面**：六平台 IM 渠道（`src/main/ai/channels/`）。`ChannelManager` 以数据库渠道行（`AgentChannelEntity`）保存连接，适配器覆盖 discord/feishu/qq/slack/telegram/wechat；入站消息经 `ChannelMessageHandler.handleIncoming` 启动 Agent Session 运行并流式回投，`/new`、`/compact`、`/help` 命令控制会话。
+- **外部控制表面**：六平台 IM 渠道（`src/main/ai/channels/`）。`ChannelManager` 以数据库渠道行（`AgentChannelEntity`）保存连接，适配器覆盖 discord/feishu/qq/slack/telegram/wechat；入站消息经渠道消息处理器启动 Agent Session 运行并流式回投，`/new` 等斜杠命令控制会话。
 
-Cherry 还把宿主自身作为工具面暴露给外部 runtime：`src/main/ai/mcp/servers/assistant.ts` 以 SDK MCP 形式注入会话，提供 `navigate`（路由白名单）、`product_info`、`create_agent`、`apply_setting` 等工具，外部 Agent 可操作宿主应用。
+Cherry 还把宿主自身作为工具面暴露给外部 runtime：`src/main/ai/mcp/servers/assistant.ts` 以 SDK MCP 形式注入会话，提供页面导航（路由白名单）、产品信息、创建 Agent、应用设置等工具，外部 Agent 可操作宿主应用。
 
 ## 完整主链
 
@@ -51,21 +51,21 @@ IM 渠道
 
 Agent Session 使用独立于普通 Topic/Assistant 消息路径的持久化后端，workspace 是 Agent 文件操作的事实边界。SDK session 与 Cherry session 的完整 resume 标识本次未单独展开，但运行时、消息后端和工作区均有稳定产品对象，不是一次性 `query()` 按钮。
 
-IM 渠道的身份绑定到平台账号/线程与 `AgentChannelEntity` 渠道行；协议层面走 OpenClaw 家族兼容实现：Feishu adapter 实现 `openclaw-lark` 的 `/oauth/v1/app/registration` 设备码端点，WeChat adapter 兼容 openclaw-weixin 双编码，`FlushController` 注释自述启发自 openclaw-lark。Agent Session 归属用户、Workspace 与账号体系之间的绑定关系本次未展开。
+IM 渠道的身份绑定到平台账号/线程与 `AgentChannelEntity` 渠道行；协议层面走 OpenClaw 家族兼容实现：Feishu 适配器实现 `openclaw-lark` 的设备码注册端点，WeChat 适配器兼容 openclaw-weixin 的双编码方案，`FlushController` 的注释自述启发自 openclaw-lark。Agent Session 归属用户、Workspace 与账号体系之间的绑定关系本次未展开。
 
 ## 执行、回流与控制语义
 
-`ClaudeCodeStreamAdapter` 解析 SDK 的 `stream_event/system/result` 与 tool use block，投影为 Cherry 消息块。SDK 原生工具在主进程外部 runtime 执行；Cherry 通过 `disallowedTools`、`canUseTool` 和 `PreToolUse` hook 控制曝光与审批，并显示文件/命令过程。
+`ClaudeCodeStreamAdapter` 解析 SDK 的 `stream_event/system/result` 与 tool use block，投影为 Cherry 消息块。SDK 原生工具在主进程外部 runtime 执行；Cherry 通过禁用名单、使用权限判定与执行前钩子三类 SDK 机制（`disallowedTools`、`canUseTool`、`PreToolUse`）控制曝光与审批，并显示文件/命令过程。
 
 取消由 Agent Session runtime 的 AbortController 进入 SDK 查询。工具并发、子 Agent/Team 等行为主要由 SDK 决定，Cherry 没有统一重写其调度器。
 
-IM 渠道的执行与回流与桌面 Agent Session 共用同一 runtime：外部线程消息触发与桌面会话相同的工作区与审批语义，流式结果按平台格式转换后回投。渠道层自带不可信输入防护（`ExternalContentGuard`、`WorkspaceFileGuard`、`OutputSanitizer`），外部内容可触发 SDK 工具执行与工作区写入，属于本类目必须关注的副作用面。产品表面（渠道管理页与 Agent 会话）显示已连接渠道、会话状态与命令入口，接管入口即 IM 线程内直接发言或 `/open` 类命令。
+IM 渠道的执行与回流与桌面 Agent Session 共用同一 runtime：外部线程消息触发与桌面会话相同的工作区与审批语义，流式结果按平台格式转换后回投。渠道层自带外部内容、工作区文件与输出消毒三类不可信输入防护（`ExternalContentGuard`、`WorkspaceFileGuard`、`OutputSanitizer`），外部内容可触发 SDK 工具执行与工作区写入，属于本类目必须关注的副作用面。产品表面（渠道管理页与 Agent 会话）显示已连接渠道、会话状态与命令入口，接管入口即 IM 线程内直接发言或 `/open` 类命令。
 
 ## 权限、凭据与治理边界
 
 默认权限模式下，Bash 等原生工具逐次审批；`bypassPermissions` 会显著放宽执行。文件类工具由 workspace path hook 限制在工作区或 Agent 数据目录。MCP 工具可采用自身自动审批配置，但不能把普通 MCP 的权限模型等同于 SDK 原生工具。
 
-SDK 持有真实执行，宿主无法完全替代 runtime 的权限边界；宿主侧工具曝光通过 `disallowedTools`/`canUseTool`/`PreToolUse` 收口，宿主内建工具集（`cherryBuiltinTools`、`cherryAutonomyTools`、`cherryKnowledgeTools`、`cherryCliTools` 等）聚合进 `cherry-tools` 注入 SDK 会话，其中 CLI 安装类工具需用户审批。模型/API 凭据管理与 SDK 会话凭据作用域本次未展开。
+SDK 持有真实执行，宿主无法完全替代 runtime 的权限边界；宿主侧工具曝光仍由前文的三类 SDK 钩子收口，宿主内建工具集（基础、自主操作、知识检索、CLI 安装等组）聚合进 `cherry-tools` 注入 SDK 会话，其中 CLI 安装类工具需用户审批。模型/API 凭据管理与 SDK 会话凭据作用域本次未展开。
 
 ## 相邻类目交接
 

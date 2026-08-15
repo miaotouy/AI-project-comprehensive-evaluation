@@ -64,7 +64,11 @@ Session/Agent 配置
 - `disabledAgentTools` 只作用于 user-configurable Agent 工具；system-model exposure 工具不被该列表隐藏。
 - 若工具名已由 MCP mapper 注册，Agent 同名工具被丢弃，日志记录冲突并保留 MCP 版本（`:221-233`）。
 
-AgentToolManager 的定义集合分为文件系统和命令工具（`read`、`write`、`edit`、`glob`、`grep`、`exec`、`process`，`agentToolManager.ts:797-970`）、Skills（`:2152` 起，含 skill_list/skill_run）、以及 question、计划、Tape、memory、图片生成、cron、subagent 和设置/浏览器工具（分散在 `:2150-2766` 与各 handler 文件）。每个定义带 `TOOL_EXECUTION` 合同：读取操作可标记 sequential/parallel，写入操作固定 sequential。
+AgentToolManager 的定义集合按功能分为三组，每个定义带 `TOOL_EXECUTION` 执行合同——读取操作可标记 sequential/parallel，写入操作固定 sequential：
+
+- 文件系统与命令工具：`read`、`write`、`edit`、`glob`、`grep`、`exec`、`process`（`agentToolManager.ts:797-970`）；
+- Skills：`skill_list`/`skill_run`（`:2152` 起）；
+- question、计划、Tape、memory、图片生成、cron、subagent 与设置/浏览器工具（分散在 `:2150-2766` 与各 handler 文件）。
 
 ## 3. 工具调用与权限
 
@@ -77,11 +81,20 @@ AgentToolManager 的定义集合分为文件系统和命令工具（`read`、`wr
 - 已批准记录必须同时匹配 conversation、serverId、configGeneration、bindingHash、toolName、executionId、参数 hash、来源和权限类型。
 - 单会话 pending 请求有上限，默认请求会超时；会话清理会取消全部 pending。
 
-命令工具在 `CommandPermissionService`（`src/main/tool/permission/commandPermissionService.ts`）另外做 base command、signature 和风险等级判断。安全白名单按 shell dialect 分开（`:31-50`）：posix 的 `ls`、`pwd`、`echo`、`cat`、`head`、`tail`、`wc`、`grep`、`diff`、`find`、`sort`、`uniq`；powershell 的 `get-childitem`、`select-string` 等；cmd 的 `dir`、`findstr` 等（git-bash 下 `diff/find/sort/uniq` 反而需要审批）。破坏性/网络模式按 dialect 分别匹配（`:52-58`），并新增引号感知的控制语法检测（`hasPosixControlSyntax`/`hasPowerShellControlSyntax`/`hasCmdControlSyntax`，`:90-200`）。命令审批请求现在携带 `shellProfile`（`src/main/session/contracts.ts:60`）；`approvePermission` 返回 grant 结果——命令类返回 `oneShotGrantId` 一次性授权（可被 `revokeOneShotCommandPermission` 撤销），非命令类返回 `granted`（`:73-79`）。
+命令工具在 `CommandPermissionService`（`src/main/tool/permission/commandPermissionService.ts`）里额外做 base command、signature 与风险等级判断。安全白名单按 shell dialect 分开（`:31-50`）：
 
-**命令 shell 化（#2109，源码确认）**：`src/shared/commandShell.ts` 定义 `AgentCommandShellConfig`（preference：`auto|windows-powershell|git-bash`）与 `ResolvedCommandShell`（profile/dialect/pathStyle/executable/args，四种：posix、cmd、windows-powershell、git-bash）。`AgentBashHandler.executeCommand` 与后台 `backgroundExecSessionManager` 全部改收 `ResolvedCommandShell`（`agentBashHandler.ts:124-186`）；RTK 改写只在 posix dialect 启用（`:713-724`）；工作目录按 `pathStyle` 归一化（`normalizeCommandShellFilePath`，`:293-310`）。设置面：`src/renderer/settings/components/common/CommandShellSettingsSection.vue`（新增，Windows 下可选 shell 偏好与 Git Bash 路径覆盖）。
+- posix：`ls`、`pwd`、`echo`、`cat`、`head`、`tail`、`wc`、`grep`、`diff`、`find`、`sort`、`uniq`
+- powershell：`get-childitem`、`select-string` 等
+- cmd：`dir`、`findstr` 等
+- git-bash 下 `diff/find/sort/uniq` 反而需要审批
 
-**输出上限（#2103，源码确认）**：`DeepChatAgentConfig` 新增 `readFileAutoTruncateChars`/`toolOutputInlineChars`/`commandOutputInlineChars`（`agent-interface.d.ts:650-652`），`src/shared/lib/agentOutputLimits.ts` 归一化到 1,000–200,000（默认 4,500/5,000/12,000）；文件读取截断（`agentFileSystemHandler.ts:829-831`）与工具/命令输出内联预览使用这些值。执行侧还有 `executionContract` 分派门：`ToolService.callTool` 在 MCP 与 Agent 工具分派前都调 `assertExecutionContractDispatchAllowed`（`src/main/tool/index.ts:329`、`:388`、`:475`），违反冻结契约抛 `ExecutionContractDispatchError`（来自 Tape 契约谱系，见独特功能笔记能力卡 2）。
+破坏性/网络模式按 dialect 分别匹配（`:52-58`），另有引号感知的控制语法检测（`hasPosixControlSyntax`/`hasPowerShellControlSyntax`/`hasCmdControlSyntax`，`:90-200`）。命令审批请求携带 `shellProfile`（`src/main/session/contracts.ts:60`）；`approvePermission` 返回授权结果——命令类返回 `oneShotGrantId` 一次性授权（可被 `revokeOneShotCommandPermission` 撤销），非命令类返回 `granted`（`:73-79`）。
+
+**命令 shell 化（#2109，源码确认）**：`src/shared/commandShell.ts` 定义两份数据结构——`AgentCommandShellConfig`（preference 取值 `auto|windows-powershell|git-bash`）与 `ResolvedCommandShell`（含 profile/dialect/pathStyle/executable/args，dialect 有 posix、cmd、windows-powershell、git-bash 四种）。`AgentBashHandler.executeCommand` 与后台 `backgroundExecSessionManager` 全部改收 `ResolvedCommandShell`（`agentBashHandler.ts:124-186`）；RTK 改写只在 posix dialect 启用（`:713-724`）；工作目录按 `pathStyle` 归一化（`normalizeCommandShellFilePath`，`:293-310`）。设置面：`src/renderer/settings/components/common/CommandShellSettingsSection.vue`（新增，Windows 下可选 shell 偏好与 Git Bash 路径覆盖）。
+
+**输出上限（#2103，源码确认）**：`DeepChatAgentConfig` 新增 `readFileAutoTruncateChars`/`toolOutputInlineChars`/`commandOutputInlineChars`（`agent-interface.d.ts:650-652`），`src/shared/lib/agentOutputLimits.ts` 归一化到 1,000–200,000（默认 4,500/5,000/12,000）；文件读取截断（`agentFileSystemHandler.ts:829-831`）与工具/命令输出内联预览都使用这些值。
+
+**执行契约分派门**：`ToolService.callTool` 在 MCP 与 Agent 工具分派前都调 `assertExecutionContractDispatchAllowed`（`src/main/tool/index.ts:329`、`:388`、`:475`），违反冻结契约抛 `ExecutionContractDispatchError`（来自 Tape 契约谱系，见独特功能笔记能力卡 2）。
 
 **二进制读取放宽（#2110，源码确认）**：`src/main/lib/binaryReadGuard.ts` 移除文档 MIME 例外与 `isLikelyTextFile` 探测，`shouldRejectAgentBinaryRead` 现在只拒绝 `ALWAYS_BINARY_MIMES` 与 audio/video（`:27-36`），octet-stream 文本文件允许读取。
 
@@ -108,8 +121,11 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 
 ## 6. 参数解析、校验与错误处理
 
-- **参数文本解析**：`ToolService.callTool` 对 Agent 工具先走 `parseAgentToolArguments`（`src/main/tool/index.ts:542-560`）：`JSON.parse` 失败后用 `jsonrepair` 修复，再失败则记录警告并返回空参数对象（:548-558）——即"解析失败降级为空参数"而不是抛错，由后续 schema 校验兜底。legacy `<function_call>` 文本的解析失败路径见 §5（`toolProtocol.ts`）。
-- **schema 校验**：Agent 工具的执行入口在各 handler 前用 zod `schema.safeParse(args)` 校验（`agentToolManager.ts:997` process 工具、`:1114` 文件工具、`:2533`/`:2586` question 等工具、`:2644` skill_run；文件读写各子命令的解析在 `agentFileSystemHandler.ts:799-1183`）；MCP 工具的 `inputSchema` 校验发生在 MCP service 侧，本笔记未展开。校验失败的工具以 `tool_call_error`/错误响应回注（见 §7），不进入执行端。
+- **参数文本解析**：`ToolService.callTool` 对 Agent 工具先走 `parseAgentToolArguments`（`src/main/tool/index.ts:542-560`）：`JSON.parse` 失败后用 `jsonrepair` 修复，再失败则记录警告并返回空参数对象（:548-558）——即“解析失败降级为空参数”而不是抛错，由后续 schema 校验兜底。legacy `<function_call>` 文本的解析失败路径见 §5。
+- **schema 校验**：Agent 工具的执行入口在各 handler 前用 zod `schema.safeParse(args)` 校验，主要入口包括：
+  - `agentToolManager.ts:997` process 工具、`:1114` 文件工具、`:2533`/`:2586` question 等工具、`:2644` skill_run；
+  - 文件读写各子命令的解析在 `agentFileSystemHandler.ts:799-1183`。
+  MCP 工具的 `inputSchema` 校验发生在 MCP service 侧，本笔记未展开。校验失败的工具以 `tool_call_error`/错误响应回注（见 §7），不进入执行端。
 - **权限/执行失败反馈**：审批未通过时 `ToolService.callTool` 返回 `createPermissionRequiredResponse`（`tool/index.ts:355-361`），以 `action_type: tool_call_permission` 交互块进入 UI（见消息渲染器笔记 §1）；执行异常由 `createAgentToolErrorResult` 包装为可恢复错误（`tool/index.ts:413-428`，`recoverable: true`）。
 
 ## 7. 结果回注与 UI 状态

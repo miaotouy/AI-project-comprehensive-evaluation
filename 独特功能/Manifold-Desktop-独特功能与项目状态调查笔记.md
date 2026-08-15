@@ -64,13 +64,13 @@ Manifold Desktop 当前更适合视为一个**能够通过编译验证、但关�
 
 ### 会话与上下文
 
-前端实际使用 `chat-tab.js` 闭包内的 `messages[]`，而实现 `createSession()`、`addMessage()`、`updateModelMessage()` 和 `save()` 的 `session-store.js` 没有导入方。assistant 流式内容只累积到 `streamingText` 和 DOM，`getMessages()` 返回的数组因而不含上一轮 assistant 回复。详细证据见[Chat 概览](../Chat/Manifold-Desktop-Chat调查笔记.md)、[会话与消息管理](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)和[对话请求与上下文](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)。
+前端实际使用 `chat-tab.js` 闭包内的 `messages[]`，而实现会话创建、消息追加、模型消息更新与保存的 `session-store.js` 没有任何导入方。assistant 流式内容只累积到 `streamingText` 和 DOM，`getMessages()` 返回的数组因而不含上一轮 assistant 回复。详细证据见[Chat 概览](../Chat/Manifold-Desktop-Chat调查笔记.md)、[会话与消息管理](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)和[对话请求与上下文](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)。
 
 普通多轮 Chat 的状态闭环尚未成立。即使单次 Provider 请求能够返回文本，关闭、恢复、续聊和多标签隔离仍没有形成一致语义。
 
 ### MCP 与插件
 
-`MCPClient::CallTool()` 已有实现，但全仓库没有运行时调用点；模型工具调用在 Provider 层解析后只作为流式块发给前端。`maxToolCallRounds` 和 `ToolResult` 也没有进入执行循环。插件侧则缺少 `PluginContext` 实现，`PluginManager::LoadEnabled()` 不调用插件初始化方法。详细证据见[Agent 工具调查](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)。
+`MCPClient::CallTool()` 已有实现，但全仓库没有运行时调用点；模型工具调用在 Provider 层解析后只作为流式块发给前端，轮次上限与工具结果对象也没有进入执行循环。插件侧则缺少 `PluginContext` 实现，插件加载器不调用插件的初始化方法。详细证据见[Agent 工具调查](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)。
 
 这两项都属于“接口和局部构件存在，产品主链未接通”，不能因为 README 列出 MCP 或 Plugin 就计为特色贡献。
 

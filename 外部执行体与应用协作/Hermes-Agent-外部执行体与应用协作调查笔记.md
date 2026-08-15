@@ -17,8 +17,8 @@
 Hermes Agent 的多表面控制与反向 Agent 接入均达到 `主链确认`（静态证据）：
 
 - 桌面、TUI 和 Web 控制面共享同一个 Python `tui_gateway`/`AIAgent` runtime、profile 数据库和 session lineage，并通过 JSON-RPC 提交、流式接收、取消和恢复任务。
-- `acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code/Zed/JetBrains 等外部宿主，支持 NewSession/Resume/Prompt/Fork/Cancel。
-- REST API gateway（`api_server` 平台）提供 `/v1/chat/completions`、`/v1/responses`、`/v1/runs`、`/api/sessions` 与 cron 任务接口。
+- `acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code/Zed/JetBrains 等外部宿主，覆盖会话新建、恢复、提示、分叉与取消操作。
+- REST API gateway（`api_server` 平台）提供补全、响应与运行类端点，以及会话管理与 cron 任务接口；具体路由见下方主链。
 
 消息平台 gateway 存在且平台枚举 20+（telegram/discord/whatsapp/slack/signal/mattermost/matrix/钉钉/企业微信/微信/飞书/QQ 机器人/email/sms/webhook/MS Graph 等），但本轮未逐 adapter 走通，标为 `入口确认`。
 
@@ -61,7 +61,7 @@ profile 是配置和数据隔离单位；持久会话由 `session_key` 标识，
 
 ## 执行、回流与控制语义
 
-JSON-RPC 支持 prompt、工具审批、interrupt、resume、branch、steer 和 redirect。流式事件包括消息、reasoning、thinking、工具和 subagent。桌面连接采用指数退避重连，恢复后丢弃过期 runtime binding 并刷新 session；正在运行的 turn 可被新客户端收养为 adopted running turn。REST 面支持 run 级 stop 与审批回传；ACP 面提供 Cancel 与审批回调。外部应用分型中，MS Graph webhook（`msgraph_webhook.py`）是明确的业务系统事件入站样本：Graph 订阅校验握手、通知入站、CIDR 白名单与 client_state 强制。
+JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重定向等控制操作；流式事件包括消息、推理、思考、工具与子 Agent。桌面连接采用指数退避重连，恢复后丢弃过期 runtime binding 并刷新 session；正在运行的 turn 可被新客户端收养为 adopted running turn。REST 面支持 run 级 stop 与审批回传；ACP 面提供 Cancel 与审批回调。外部应用分型中，MS Graph webhook（`msgraph_webhook.py`）是明确的业务系统事件入站样本：Graph 订阅校验握手、通知入站、CIDR 白名单与 client_state 强制。
 
 产品表面（桌面/TUI/Web/终端）显示 profile、会话、连接状态与运行中 turn；接管入口为 session resume/steer 与 adopted running turn。来自 IM、webhook 与 REST 的内容进入同一 Agent 执行域，可触发文件、命令与平台投递副作用；审批与工具放行在 gateway 侧集中处理，不可信输入整体按外部消息处理，但逐平台消毒未验证。
 

@@ -38,9 +38,13 @@ SillyTavern 根 README 只有一句话（README.md:1-13），无功能清单；�
 
 README 无功能清单（README.md:1-13）。按任务要求从三个来源反向盘点：
 
-1. **扩展注册表**：`public/scripts/extensions/` 14 个内置扩展（assets/attachments/caption/connection-manager/expressions/gallery/memory/quick-reply/regex/stable-diffusion/third-party/token-counter/translate/tts/vectors）；第三方扩展经 Git 安装到 `third-party/`（机制已在 Agent 工具笔记覆盖）。
-2. **产品资产**：`default/content/`——`presets/context`（Adventure/ChatML/Default/Dots1 等 20+ 上下文模板）、`presets/instruct`、`presets/samplers`、`presets/system`、`presets/regex`、`presets/quick responses`、`presets/textgen`、`presets/reasoning`、`backgrounds/`（20+ 场景图）、`user.css`（自定义样式）、`comfy workflow`（Char_Avatar/Default 两个 ComfyUI 工作流）。
-3. **核心模块**：`public/scripts/` 中 preset-manager.js、authors-note.js、char-data.js、bulk-edit.js、connection-manager、expressions、vectors 等构成产品表面。
+1. **扩展注册表**：`public/scripts/extensions/` 14 个内置扩展，覆盖附件、记忆、正则、绘图、翻译、TTS、表情、向量检索等方向（完整目录见能力三扩展目录表）；第三方扩展经 Git 安装到 `third-party/`（机制已在 Agent 工具笔记覆盖）。
+2. **产品资产**：`default/content/`——按用途分组：
+   - `presets/`：六类预设目录（context、instruct、samplers、system、regex、quick responses、textgen、reasoning），其中 context 含 20+ 上下文模板（Adventure/ChatML/Default/Dots1 等）；
+   - `backgrounds/`：20+ 场景图；
+   - `user.css`：自定义样式；
+   - `comfy workflow`：Char_Avatar/Default 两个 ComfyUI 工作流。
+3. **核心模块**：`public/scripts/` 中预设管理、作者注释、角色数据与批量编辑、连接配置、表情、向量检索等模块构成产品表面（各模块详见下文能力描述）。
 
 ## 已确认的独特能力
 
@@ -48,13 +52,21 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 
 **用户目标**：把“提示长什么样”（上下文模板/指令模板/系统提示/采样参数/推理格式化）做成可命名、可导出、可随角色自动切换的资产——提示词工程的产品化。
 
-**主链**：切换聊天 → `eventSource.on(CHAT_CHANGED, autoSelectPreset)`（`public/scripts/preset-manager.js:985`）→ `autoSelectPreset` 取当前角色名或群名 → `presetManager.findPreset(name)`（`:385`，按选项文本精确匹配）→ 命中则 `selectPreset` 触发 change（`:49-76`）→ 生成时由上下文拼装链消费（拼装细节在对话请求与上下文笔记）。
+**主链**：切换聊天时，系统监听 `CHAT_CHANGED` 事件取当前角色名或群名，在预设库中精确匹配（`public/scripts/preset-manager.js:985` 事件绑定，`:385` 匹配），命中即应用该预设（`:49-76`）；生成时由上下文拼装链消费（拼装细节在对话请求与上下文笔记）。
 
-**事实对象**：六类模板由 `PresetManager.masterSections` 统一描述（`preset-manager.js:117-207`）——instruct（input/output sequence 等）、context（`story_string` 主模板）、sysprompt（name/content）、preset（text completion 采样参数）、reasoning（prefix/suffix/separator）、srw（Start Reply With 回复前缀）；每类有 schema 探测函数（`isPossiblyInstructData` 等，`:209-236`）。保存到服务端 `/api/presets/save`（`:477`，`{ preset, name, apiId }`），按 apiId 分目录持久化。
+**事实对象**：六类模板由 `PresetManager.masterSections` 统一描述（`preset-manager.js:117-207`）：
+- instruct：指令模板（输入/输出序列等）；
+- context：主模板（`story_string`）；
+- sysprompt：系统提示（name/content）；
+- preset：文本补全采样参数；
+- reasoning：推理格式（prefix/suffix/separator）；
+- srw：Start Reply With 回复前缀。
+
+每类有 schema 探测函数（`isPossiblyInstructData` 等，`:209-236`）。保存到服务端 `/api/presets/save`（`:477`），按 apiId 分目录持久化。
 
 **用户结果**：“Save Preset As” 提示 “Use a character/group name to bind preset to a specific chat”（`:445`）——预设名与角色名一致即自动绑定；`performMasterImport`（`:244-300`）对导入文件做六类 schema 自动探测并逐节确认导入（master import 弹窗），实现整套提示工程配置的单一文件迁移。
 
-**持续性**：服务端预设文件（`src/endpoints/presets.js` 同族端点）；不同 API（OpenAI/textgen/kobold/novel/instruct/context/sysprompt/reasoning）各自一套预设名单（`getPresetList`，`:522-580`）。
+**持续性**：服务端预设文件（`src/endpoints/presets.js` 同族端点）；不同后端（OpenAI/textgen/kobold/novel/instruct/context/sysprompt/reasoning）各自一套预设名单（`getPresetList`，`:522-580`）。
 
 **外部依赖**：无（纯前端 + 本机服务端文件）。
 
@@ -64,9 +76,9 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 
 **用户目标**：长聊天中按语义召回相关旧消息并重新注入（而不是只按顺序截断）；附件文件（Data Bank）与 World Info 也可向量化检索——浏览器侧的本地 RAG。
 
-**主链**：扩展 manifest 声明 `generate_interceptor: "vectors_rearrangeChat"`（`public/scripts/extensions/vectors/manifest.json`）→ 每次生成前 `runGenerationInterceptors` 调用 `globalThis.vectors_rearrangeChat`（`index.js:891` 注册，`:776` 实现）→ 清空旧的扩展提示（`setExtensionPrompt` 双 tag：聊天与数据银行）→ 按设置处理文件（`processFiles`，`:788`）与 World Info（`activateWorldInfo`，`:792`）→ 聊天消息数不足 `settings.protect` 则跳过（`:806`）→ `getQueryText` 取查询文本（`:901`）→ `queryCollection(chatId, queryText, settings.insert)`（`:1151`，嵌入相似度检索）→ 对命中消息按相关性顺序重排（`:836-838`）→ 从原 chat 数组摘出并格式化为单块文本（`:853-868`）→ `setExtensionPrompt` 注入到指定 depth/position。
+**主链**：扩展 manifest 声明生成前拦截器（`public/scripts/extensions/vectors/manifest.json`），每次生成前拦截器调用重排函数（`index.js:776` 实现）：清空旧的扩展提示（聊天与数据银行双 tag）→ 按设置处理附件文件与 World Info → 聊天消息数不足保护阈值则跳过 → 取查询文本 → 做嵌入相似度检索（`queryCollection`，`:1151`）→ 对命中消息按相关性顺序重排，从原 chat 数组摘出并格式化为单块文本 → 注入到指定 depth/position。其余步骤的入口行号见文末索引。
 
-**事实对象**：向量 collection 按 chatId 与文件 hash 组织（`insertVectorItems`/`deleteVectorItems`，`:1051,1127`）；附件经 `ingestDataBankAttachments` 分块（chunkSize/overlapPercent，`:727`）入库，`injectDataBankChunks` 检索后注入（`:678`）；消息 hash 用 `getStringHash(substituteParams(message.mes))`（`:829`）保持宏展开后的内容一致。
+**事实对象**：向量 collection 按 chatId 与文件 hash 组织（`insertVectorItems`/`deleteVectorItems`，`:1051,1127`）；附件按分块参数入库、检索后注入（入口行号见文末索引）；消息 hash 用 `getStringHash(substituteParams(message.mes))`（`:829`）保持宏展开后的内容一致。
 
 **执行域**：全部在浏览器前端；嵌入来源三选一——远程 Extras API embeddings 模块、浏览器内 WebLLM（`webllm.js`，`createWebLlmEmbeddings`，`:1435`）、koboldcpp（`:1454`）。
 
@@ -82,20 +94,20 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 
 | 内置扩展 | 作用（按 manifest display_name 与入口确认） | 证据状态 |
 |---|---|---|
-| connection-manager | 连接配置：把 api/preset/api-url/model/proxy/stop-strings/reasoning-template/secret-id 等 slash 命令录成 profile 并在切换聊天时回放（`connection-manager/index.js` `CC_COMMANDS` 列表） | `入口确认` |
+| connection-manager | 连接配置：把连接所需的 slash 命令序列（端点、预设、模型、代理、停止串、推理模板、密钥等）录成 profile 并在切换聊天时回放（`connection-manager/index.js` `CC_COMMANDS` 列表） | `入口确认` |
 | expressions | 表情系统：LLM 情绪分类（`DEFAULT_LLM_PROMPT` 分类提示，`expressions/index.js`）或 classify 模块 → 角色表情 sprite 切换，自定义表情与流式更新 | `入口确认` |
 | vectors | 见能力二 | `主链确认` |
 | memory | 世界书驱动记忆（World Info 体系内） | 归并（世界书已有覆盖） |
 | quick-reply | 自动化脚本（事件触发 STscript） | 已有覆盖（对话请求与上下文笔记 §8、Agent 工具笔记 §11.3） |
 | regex / stable-diffusion / translate / tts / caption / token-counter / gallery / assets / attachments | 正则、出图、翻译、TTS、看图、计数、媒体库 | 分属已有类目或通用扩展，未专项调查 |
 
-**表达式中链**（`入口确认`）：`expressions/index.js` 监听消息渲染事件 → 从最后一条消息文本分类情绪（`UPDATE_INTERVAL=2000` 轮询，流式 10s）→ 按 `extension_settings.expressionOverrides` 与角色卡表达式集匹配 → 切换 `#avatar` 表情图。依赖 classify 模块或 LLM 分类提示；静态代码确认入口与状态，未运行验证。
+**表达式中链**（`入口确认`）：`expressions/index.js` 监听消息渲染事件 → 从最后一条消息文本分类情绪（2 秒轮询，流式 10 秒）→ 按 `extension_settings.expressionOverrides` 与角色卡表达式集匹配 → 切换 `#avatar` 表情图。依赖 classify 模块或 LLM 分类提示；静态代码确认入口与状态，未运行验证。
 
 **连接配置主链**（`入口确认`）：`connection-manager/index.js` 录制当前连接状态为一组 slash 命令值（`DEFAULT_SETTINGS.profiles`）→ `selectedProfile` 持久化 → 切换聊天时按 profile 回放命令（含 `secret-id` 切换）。单文件 JSON 设置持久化。
 
 ### 能力四：作者注释（Author's Note）（`入口确认`/`归并已有类目`）
 
-`public/scripts/authors-note.js` 为独立的 floating-prompt 模块（`MODULE_NAME = '2_floating_prompt'`，刻意排在 memory 之后）：提示文本 + interval/depth/position/role 注入参数 + `/note` slash 命令读写；文本存 `chat_metadata`（`note_prompt` 等 metadata_keys，`:25-33`），随聊天文件持久化。注入位置支持 replace/before/after（`chara_note_position`，`:41-45`）。该机制已并入“上下文 DSL 与提示词工程”聚类的描述（Agent 角色笔记 §10.3 提及可覆盖 `post_history_instructions`）；作为独立候选只到 `入口确认`，与预设体系/向量注入共同构成提示工程工作台。
+`public/scripts/authors-note.js` 为独立的 floating-prompt 模块（`MODULE_NAME = '2_floating_prompt'`，刻意排在 memory 之后）：提示文本 + 注入参数（间隔、深度、位置、角色）+ `/note` slash 命令读写；文本存聊天元数据 `chat_metadata`（note_prompt 等字段，`:25-33`），随聊天文件持久化。注入位置支持 replace/before/after（`chara_note_position`，`:41-45`）。该机制已并入“上下文 DSL 与提示词工程”聚类的描述（Agent 角色笔记 §10.3 提及可覆盖 `post_history_instructions`）；作为独立候选只到 `入口确认`，与预设体系/向量注入共同构成提示工程工作台。
 
 ## 已归并到现有类目的能力
 
@@ -106,7 +118,7 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 
 ## 声明不符、外部依赖与暂缓项
 
-- **QR 生成**：任务提示中列为候选，但全仓检索（`Select-String -Pattern "qrcode|QRCode|qr-code|generateQR"` 覆盖 `public/scripts/**/*.js`、`src/**/*.js`）零命中；`data/` 与 `default/` 亦无相关资产。结论：本次未找到该能力，按指南写清检查范围，不写成项目级绝对结论。若指“通过第三方扩展提供”，则属于外部扩展生态，不在本仓库。
+- **QR 生成**：任务提示中列为候选，但全仓检索（以 qrcode、QRCode、qr-code、generateQR 等关键词覆盖 `public/scripts/**/*.js` 与 `src/**/*.js`）零命中；`data/` 与 `default/` 亦无相关资产。结论：本次未找到该能力，按指南写清检查范围，不写成项目级绝对结论。若指“通过第三方扩展提供”，则属于外部扩展生态，不在本仓库。
 - **表达式/向量/连接配置的运行时行为**：依赖 Extras API、WebLLM、classify 模块或 LLM 分类调用，静态代码只确认到入口与状态；视觉效果与性能未运行验证。
 - **第三方扩展生态**（Git 安装的 `third-party/*`）能力不在本仓库盘点范围，机制面见 Agent 工具笔记。
 
@@ -127,7 +139,7 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 ## 关键源码索引
 
 - 预设体系：`public/scripts/preset-manager.js`（autoSelectPreset 49-76、masterSections 117-207、findPreset 385、performMasterImport 244-300、CHAT_CHANGED 绑定 985）。
-- 向量存储：`public/scripts/extensions/vectors/manifest.json`（generate_interceptor）、`index.js`（rearrangeChat 776-859、queryCollection 1151、insertVectorItems 1051、WebLLM 嵌入 1435）。
+- 向量存储：`public/scripts/extensions/vectors/manifest.json`（generate_interceptor）、`index.js`（rearrangeChat 776-859、queryCollection 1151、insertVectorItems 1051、附件分块 727/检索注入 678、WebLLM 嵌入 1435）。
 - 扩展体系：`public/scripts/extensions.js`（manifest 加载 533-622、runGenerationInterceptors 2015）。
 - 表达式：`public/scripts/extensions/expressions/index.js`（分类提示、UPDATE_INTERVAL）。
 - 连接配置：`public/scripts/extensions/connection-manager/index.js`（CC_COMMANDS、DEFAULT_SETTINGS）。

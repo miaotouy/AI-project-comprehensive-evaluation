@@ -20,7 +20,7 @@ Jan 的 Chat 管线是"前端直连模型服务"模式：没有后端聊天业�
 
 1. **三个 store 协作**：`useThreads`（线程列表/排序/搜索/增删改）、`useMessages`（乐观写 + 异步持久化）、`useChatSessions`（AI SDK 会话与流状态）；`$threadId.tsx`（1863 行）是线程页中枢，承载分支/编辑/续写/上下文扩展全部仲裁。
 2. **流式管线**：`experimental_throttle: 50`（只节流 UI 状态）、`resume: false`（重启不恢复未完成回合）；transport 实例按 sessionId 复用；推理参数（temperature/top_k 等）不经 AI SDK 层，而是经 `createCustomFetch` 注入 HTTP body。
-3. **上下文管理在 transport 内**：`max_context_tokens>0` 时 `auto_compact ? compactMessages（模型总结） : trimMessages`；`finishReason==='length'` 且 token ≥ 0.9×ctx_len 时冻结部分消息并提示扩容（阶梯 `<8192→8192→32768→×1.5`）。
+3. **上下文管理在 transport 内**：`max_context_tokens>0` 时按 `auto_compact` 开关选择模型总结或纯截断；`finishReason==='length'` 且 token 消耗达到上下文 90% 时冻结部分消息并提示扩容，扩容按阶梯 `<8192→8192→32768→×1.5` 逐级提升。
 4. **分支/编辑**：`ensureBranched` + `parentId` 树 + `makeSibling` 产生新版；Continue 原地续写（`setContinueFromContent`，不 fork）；编辑消息只保留纯文本（媒体 content 丢失回退），助理编辑不重新生成；删除与编辑在流式态禁用。
 5. **队列**：发送时若正在流式且当前线程存在则入队，`status==='ready'` 时自动发下一条，`error` 或离开线程清队列（`QueuedMessageChip` 显示在输入区顶部）。
 6. **错误与恢复**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；扩容阶梯写 model.yml + 重启 router（llamacpp）或 stopModel（其他 provider），然后消费续写并在 1s 后 regenerate。
@@ -33,13 +33,31 @@ Jan 的 Chat 管线是"前端直连模型服务"模式：没有后端聊天业�
 
 ## 端到端聊天主链
 
-一条 text 调用链：`ChatInput.handleSendMessage` → `$threadId.processAndSendMessage`（附件合并/摄取 → 持久化 userMessage 并写 parentId → `sendMessage`）→ `useChatSDK` → `CustomChatTransport.sendMessages`（`custom-chat-transport.ts:1102-1519`）：模型创建（`createModelOrAbort`，合并模型采样默认/线程参数/reasoning 参数，llamacpp 固定 `id_slot=0` 复用 KV 缓存）→ `refreshTools` → 上下文管理（compact/trim）→ 消息清洗链（coalesce/resolveOrphan/encode 音视频/strip 不支持图片 part）→ `streamText` 流式 → `toUIMessageStream` 回写 → 落盘（`createMessage`/`modifyMessage`，Rust 整文件重写）→ `status==='ready'` 时自动发下一条队列消息。
+```text
+ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/摄取 → 持久化 userMessage 并写 parentId → sendMessage）
+→ useChatSDK → CustomChatTransport.sendMessages（custom-chat-transport.ts:1102-1519）
+   模型创建（createModelOrAbort：合并模型采样默认/线程参数/reasoning 参数，llamacpp 固定 id_slot=0 复用 KV 缓存）
+   → refreshTools → 上下文管理（compact/trim）
+   → 消息清洗链（coalesce / resolveOrphan / 音视频编码 / 剔除不支持的图片 part）
+   → streamText 流式 → toUIMessageStream 回写
+→ 落盘（createMessage/modifyMessage，Rust 整文件重写）→ status==='ready' 时自动发下一条队列消息
+```
 
 ## 核心对象与状态权威
 
-- **Thread**（`core/src/types/thread/threadEntity.ts`）：`id`（默认 ULID）、`title`、`assistants`（`ThreadAssistantInfo` 嵌入快照而非对全局 assistant 的引用）、`created/updated`、`metadata`（分支 `activeRootId` 等）；`isFavorite` 是顶层字段；Rust 侧以服务端 uuid 覆盖前端 id。
-- **Message**（`core/src/types/message/messageEntity.ts`）：`ThreadMessage` 的 `content` 是结构化 parts 数组（TEXT / FILE / REASONING）；`status` 由 AI SDK 映射为 `submitted|streaming|ready|error`；`metadata.stopped` 在 `isAbort || finishReason==='length'` 时写 true，Continue 按钮仅 `isLastMessage && isStopped` 显示。
-- **持久化权威**：Rust 层——`helpers.rs` 全局 per-thread 锁 `MESSAGE_LOCKS` 串行化同一线程消息写，`write_messages_to_file` 用 `File::create` 整文件重写；`commands.rs` 的 `create_message`/`modify_message` 有 upsert 去重（已存在直接返回）。移动端 `db.rs` 走 SQLite（`INSERT OR IGNORE` / `ON CONFLICT DO UPDATE`）。前端 `useMessages` 乐观写后按 id 替换（`addMessage` L46-55）。
+- **Thread**（`core/src/types/thread/threadEntity.ts`）：
+  - `id`（默认 ULID）、`title`、`created/updated`：基础字段；
+  - `assistants`：`ThreadAssistantInfo` 嵌入快照，非对全局 assistant 的引用；
+  - `metadata`：分支 `activeRootId` 等；`isFavorite` 是顶层字段。
+  - Rust 侧以服务端 uuid 覆盖前端 id。
+- **Message**（`core/src/types/message/messageEntity.ts`）：
+  - `content`：结构化 parts 数组（`TEXT` / `FILE` / `REASONING`）；
+  - `status`：由 AI SDK 映射为 `submitted` / `streaming` / `ready` / `error`；
+  - `metadata.stopped`：`isAbort` 或 `finishReason==='length'` 时写 true，Continue 按钮仅 `isLastMessage && isStopped` 时显示。
+- **持久化权威**：分三层——
+  - Rust 层：全局 per-thread 锁 `MESSAGE_LOCKS` 串行化同一线程消息写，`write_messages_to_file` 用 `File::create` 整文件重写（`helpers.rs`）；`commands.rs` 的创建/修改消息命令带 upsert 去重（已存在直接返回）。
+  - 移动端 `db.rs`：SQLite 幂等写（`INSERT OR IGNORE` / `ON CONFLICT DO UPDATE`）。
+  - 前端 `useMessages`：乐观写后按 id 替换（`addMessage` L46-55）。
 - **会话流状态**：`chat-session-store.ts` 按 sessionId 保存 Chat 实例 + transport，跨渲染复用（`use-chat.ts` transportRef）。
 
 ## 专项导航

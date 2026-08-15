@@ -16,7 +16,7 @@
 
 此前"覆盖闭环、无独立独特能力卡"的结论不成立。需要注意：当前仓库是经过大重构的 V2 结构（`packages/core` 事件溯源会话核心、`packages/opencode` 主 CLI、`packages/codemode`、`packages/session-ui`、`packages/slack` 等 32 个包），旧结论可能基于旧结构。本轮确认以下达到 `主链确认`（静态证据）的新候选：
 
-1. **多表面/多设备会话连续性**（主贡献候选）：headless server + 事件溯源同步（单写者、seq 全序、`owner_id`）+ `/sync` 的 replay/steal（所有权接管），TUI/Web/Desktop/WSL/局域网（mdns `opencode.local`）/云端 workspace 共享同一批会话与进行中的任务。
+1. **多表面/多设备会话连续性**（主贡献候选）：headless server + 事件溯源同步（单写者、seq 全序、`owner_id`）+ `/sync` 的重放/接管（steal），TUI、Web、Desktop、WSL、局域网（mdns `opencode.local`）与云端 workspace 共享同一批会话与进行中的任务。
 2. **CodeMode 受限 JS 编排**（主贡献候选）：模型用一小段受限 JS 编排多个 MCP 工具（无 eval 解释器、plain-data 边界、超时/输出上限、busy-loop 中断），是直接工具调用、任务分派之外的第三类执行范式。
 3. **会话档案闭环**（主贡献候选）：导出（`--sanitize` 脱敏）/ 导入 / 云端分享实时同步 / PR body 内嵌分享链接自动续作，构成"研究轨迹"聚类中 Pi、Hermes Agent 之外的第三样本。
 4. **ACP 服务端**（辅助贡献候选）：被其他 ACP 宿主客户端（Claude Code、Cursor、Gemini CLI 等）驱动，与自身 GitHub Copilot 渠道构成双向互操作。
@@ -25,7 +25,11 @@
 
 ## 介绍声明与候选盘点
 
-候选归属的权威表面是 packages 结构：`packages/core`（事件溯源会话与事件存储）、`packages/opencode`（CLI 命令、server、sync、share、acp、snapshot、worktree、control-plane）、`packages/codemode`（受限 JS 运行时）、`packages/tui`/`packages/app`/`packages/desktop`/`packages/slack`（各表面）。
+候选归属的权威表面是 packages 结构：
+- `packages/core`：事件溯源会话与事件存储；
+- `packages/opencode`：CLI 命令、server、sync、share、acp、snapshot、worktree、control-plane；
+- `packages/codemode`：受限 JS 运行时；
+- `packages/tui`/`packages/app`/`packages/desktop`/`packages/slack`：各表面。
 
 | 候选 | 证据状态 | 结论 |
 |---|---|---|
@@ -47,11 +51,11 @@
 
 **用户目标**：在 TUI、Web、Desktop、WSL 远程、局域网、云端 workspace 之间共享同一批会话与进行中的任务，任一表面可接管继续；断线后按事件日志重放恢复——而不是各端各存一份会话。
 
-**入口与触发者**：headless 服务 `packages/opencode/src/cli/cmd/serve.ts`；各表面作为客户端挂载：`cli/cmd/attach.ts`（TUI 远程挂载，`--fork/--session/--replay`）、`cli/cmd/web.ts`、`packages/desktop/src/main/sidecar.ts`（桌面端 worker 内嵌同一 `Server.listen`）、`packages/app/src/wsl/dialog-add-server.tsx`（Web UI 直连 WSL 内 server）；局域网发现经 `server/mdns.ts`（Bonjour 发布 `opencode.local`）。
+**入口与触发者**：headless 服务 `packages/opencode/src/cli/cmd/serve.ts`；各表面作为客户端挂载——TUI 远程挂载（`cli/cmd/attach.ts`，支持 fork/会话/重放参数）、Web、桌面端 worker 内嵌同一 `Server.listen`（`packages/desktop/src/main/sidecar.ts`）、Web UI 直连 WSL 内 server；局域网发现经 `server/mdns.ts`（Bonjour 发布 `opencode.local`）。各表面入口文件见文末索引。
 
-**事实对象**：事件溯源表 `event_sequence`（`aggregate_id` 主键 + `owner_id`，`packages/core/src/event/sql.ts:4-7`）与 `event`（`aggregate_id`/`seq`/`type`/`data`，唯一索引 `event_aggregate_seq_idx`）；会话状态由事件投影（projector）重建。
+**事实对象**：事件溯源表 `event_sequence`（`aggregate_id` 主键 + `owner_id`，`packages/core/src/event/sql.ts:4-7`）与 `event` 表（聚合标识、序号、类型与数据，唯一索引保证事件全序）；会话状态由事件投影（projector）重建。
 
-**完整主链**：任意表面写入事件（带 `owner_id` 单写者约束，全序 seq）→ `/sync` HTTP API（`packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts`）提供 `start`/`replay`（`replayAll(payload, { ownerID, strictOwner: true })`）/`steal`（所有权接管）/`history` → 消费端（`packages/tui/src/context/sync.tsx`）按事件重放并投影 UI → 断线重连从断点续播。本地↔云端：`control-plane/workspace.ts` 的 `sessionWarp`/`startWorkspaceSyncing` + `adapters/worktree.ts` 把 worktree 作为远程 workspace 适配器。Slack 面（`packages/slack`）每线程映射一个会话，参与同一事件协议。
+**完整主链**：任意表面写入事件（带 `owner_id` 单写者约束、全序 seq）→ `/sync` HTTP API（`packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts`）提供开始、重放、所有权接管（steal）与历史四个操作 → 消费端（`packages/tui/src/context/sync.tsx`）按事件重放并投影 UI → 断线重连从断点续播。本地↔云端：`control-plane/workspace.ts` 的工作区同步服务把 worktree 作为远程 workspace 适配器。Slack 面（`packages/slack`）每线程映射一个会话，参与同一事件协议。
 
 **持续性**：事件日志为唯一事实源，跨进程/跨设备/断线重放恢复；`owner_id` 保证同一时刻单一写者，`steal` 显式转移所有权。
 
@@ -65,9 +69,9 @@
 
 **用户目标**：让模型用一小段受限 JavaScript（分支/循环/并行/数据变换）编排多个 MCP 工具，替代多轮串行工具调用——在"直接工具调用"和"任务分派"之外提供"可编程编排"执行范式。
 
-**入口与触发者**：模型经 `packages/opencode/src/tool/code-mode.ts` 的 `execute` 工具触发；解释执行在 `packages/codemode`（独立包：`codemode.ts`、`tool.ts`、`tool-runtime.ts`、`tool-schema.ts`）。
+**入口与触发者**：模型经 `packages/opencode/src/tool/code-mode.ts` 的 `execute` 工具触发；解释执行在 `packages/codemode`（独立包，内部模块见文末索引）。
 
-**完整主链**：工具注册（`execute`）→ 受限解释器解析（无 eval）→ 子工具调用经权限过滤（MCP 工具目录白名单）→ 子调用审计与附件投影回会话 → 结果数据化返回。资源边界：`maxToolCalls`/`timeoutMs`/`maxOutputBytes`、并发上限 8、busy-loop 中断、plain-data 边界（模型代码不直接接触宿主对象）。
+**完整主链**：工具注册（`execute`）→ 受限解释器解析（无 eval）→ 子工具调用经权限过滤（MCP 工具目录白名单）→ 子调用审计与附件投影回会话 → 结果数据化返回。资源边界：调用次数、超时与输出字节上限，并发上限 8，busy-loop 中断，以及模型代码不直接接触宿主对象的数据边界（plain-data）。
 
 **安全与资源边界**：执行域为受限解释器 + 预算化的工具目录与搜索；子工具调用逐条审计并记录在会话中。
 
@@ -79,11 +83,15 @@
 
 **用户目标**：把整段会话导出为可移植 JSON（可脱敏）、从文件或 `opncd.ai/share/...` 链接导入重建、分享后实时同步，甚至在 PR body 里带分享链接供 `opencode pr` 自动导入续作——会话成为可流动的"档案对象"。
 
-**入口与触发者**：CLI `packages/opencode/src/cli/cmd/export.ts`（`--sanitize` 全字段脱敏，`export.ts:163` `sanitize`）、`cli/cmd/import.ts`（文件/分享 URL，`parseShareUrl`/`transformShareData`，消息-part 层次重建）、`cli/cmd/pr.ts`（`gh pr checkout` + 提取 PR body 分享链接导入再续作）；Web UI 经 `packages/app/src/utils/session-export.ts` 与 `pages/session/use-session-commands.tsx`（`command.session.export`）。
+**入口与触发者**：三条 CLI 路径 + Web UI：
+- 导出：`packages/opencode/src/cli/cmd/export.ts`（`--sanitize` 全字段脱敏）；
+- 导入：`cli/cmd/import.ts`（文件或分享 URL，`parseShareUrl`/`transformShareData`，消息-part 层次重建）；
+- PR 续作：`cli/cmd/pr.ts`（检出 PR + 提取 PR body 分享链接导入再续作）；
+- Web UI：`packages/app/src/utils/session-export.ts` 与 `pages/session/use-session-commands.tsx`（`command.session.export`）。
 
-**事实对象**：`Session.Info` + `SessionV1.WithParts` 消息序列化的可移植 JSON；分享服务侧 `packages/opencode/src/share/share-next.ts`（create/sync/remove/data）。
+**事实对象**：`Session.Info` + `SessionV1.WithParts` 消息序列化的可移植 JSON；分享服务侧 `packages/opencode/src/share/share-next.ts` 提供创建、同步、删除与读取四类操作。
 
-**完整主链**：导出（选择会话 → 序列化 → 可选脱敏 → 文件或分享）→ 导入（文件/URL → 校验与转换 → 按 part 重建会话）→ 分享（create 建立 → sync 实时更新 → remove）→ PR 续作（`pr.ts` 检出 PR → 解析 body 分享链接 → 导入 → 继续对话）。
+**完整主链**：导出（选择会话 → 序列化 → 可选脱敏 → 文件或分享）→ 导入（文件/URL → 校验与转换 → 按 part 重建会话）→ 分享（建立 → 实时同步 → 删除）→ PR 续作（检出 PR → 解析 body 分享链接 → 导入 → 继续对话）。
 
 **持续性**：本地文件或分享服务均持有一份可重建的档案；导入即重建独立会话，不依赖原数据目录。
 
@@ -95,9 +103,9 @@
 
 **用户目标**：让 Claude Code、Cursor、Gemini CLI 等 ACP（Agent Client Protocol）宿主把 OpenCode 当 agent 调用——new/load/resume/fork session、prompt、cancel、权限回调、MCP 能力广播。
 
-**入口与触发者**：`packages/opencode/src/cli/cmd/acp.ts` 启动服务；外部 ACP 宿主经协议端点调用 `packages/opencode/src/acp/service.ts` 的 `initialize`/`newSession`/`loadSession`/`resumeSession`/`fork`/`setSessionModel`/`prompt`/`cancel`（`service.ts:56-61` 接口，`94-488` 实现）。
+**入口与触发者**：`packages/opencode/src/cli/cmd/acp.ts` 启动服务；外部 ACP 宿主经协议端点调用 `packages/opencode/src/acp/service.ts` 的服务接口（`service.ts:56-61`，实现 `94-488`），覆盖初始化、会话的新建/加载/续作/分叉、模型设置、提示输入与取消。
 
-**完整主链**：宿主 initialize 握手（能力声明，`service.ts:115`）→ 新建/加载/续作/分叉会话 → prompt 进入既有 Session/工具/权限系统执行 → 事件回传给宿主；权限面经 `acp/permission.ts` 回调宿主确认。MCP 能力经协议广播（initialize 能力声明）。
+**完整主链**：宿主先握手声明能力（`service.ts:115`）→ 新建/加载/续作/分叉会话 → 提示进入既有 Session/工具/权限系统执行 → 事件回传给宿主；权限面经 `acp/permission.ts` 回调宿主确认。MCP 能力经协议广播（initialize 能力声明）。
 
 **独特性判断**："LLM 渠道"是 OpenCode 消费外部模型；ACP 是反向被集成（OpenCode 作为 agent 服务被外部客户端驱动）。同一仓库同时内置 GitHub Copilot 渠道（`packages/core/src/github-copilot/`），构成"消费 Copilot + 服务 ACP"的双向互操作。
 

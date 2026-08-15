@@ -24,7 +24,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端，聊天体系是“客户端 Zu
 ## 产品表面与系统边界
 
 - **产品表面**：浏览器 Web 单页（Router 渲染 Chat/NewChat/Masks/Settings/Plugin/MCP market/Artifact 页面，`app/components/home.tsx:160-220`）；消息窗口是分页投影而非虚拟列表（`CHAT_PAGE_SIZE=15`，最多一次取 3 页，`app/constant.ts:914`）。
-- **系统边界**：模型推理由外部 provider 完成（`getClientApi(providerName).llm.chat`）；Next.js 服务端只承担 `/api/config` 能力查询与页面壳；会话事实源在浏览器本地——`createPersistStore`（`app/utils/store.ts:29-77`）强制 IndexedDB、失败回退 localStorage，persist key/version 为 `3.3`（`app/store/chat.ts:861-868`），服务端不保存历史。
+- **系统边界**：模型推理由外部 provider 完成（`getClientApi(providerName).llm.chat`）；Next.js 服务端只承担 `/api/config` 能力查询与页面壳；会话事实源在浏览器本地——持久化工厂强制 IndexedDB、失败回退 localStorage（`app/utils/store.ts:29-77`），persist key/version 为 `3.3`（`app/store/chat.ts:861-868`），服务端不保存历史。
 - Mask 是会话附属模板对象（context、模型配置与摘要提示词），可独立管理并套用到新会话。
 
 ## 端到端聊天主链
@@ -44,7 +44,7 @@ Chat 输入（doSubmit）
 
 ## 核心对象与状态权威
 
-- **ChatSession/ChatMessage**（`app/store/chat.ts:44-120`）：`content` 可为字符串或 `text+image_url` 多模态数组；assistant 的 `tools` 保存工具调用状态，工具工作流与最终正文共享同一消息容器。
+- **ChatSession/ChatMessage**（`app/store/chat.ts:44-120`）：消息正文可为纯字符串或多模态 `text+image_url` 数组；assistant 消息的 `tools` 字段保存工具调用状态，工具工作流与最终正文共享同一消息容器。
 - **权威源**：`useChatStore`（客户端唯一权威，IndexedDB 为持久层）；UI 只是投影——`renderMessages` 合并 `session.mask.context` 与 `session.messages`（`app/components/chat.tsx:1333-1384`）。
 - **运行态**：`ChatControllerPool` 持有 AbortController，Stop/Retry 经其回收控制器（`app/store/chat.ts:519-526`）。
 

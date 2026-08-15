@@ -53,25 +53,31 @@ renderer.js 发送/中断事件
 
 ### 3.1 单聊路径：无超时保护
 
-`chatManager.js` 的 `attemptTopicSummarizationIfNeeded()`（`modules/chatManager.js:896-947`），触发时机是 `renderer.js` 在收到 VCP 流 `'end'` 事件、且该消息属于当前可见视图、且不是群聊消息时调用（`renderer.js:585-586`）。触发条件（`chatManager.js:901`）：`currentSelectedItem.type === 'agent'` 且 `currentChatHistory.length >= 4`（至少两轮对话）且 `currentTopicId` 存在。默认名判断（`:920-923`）：重新从磁盘拉取最新 agent 配置后，若当前 topic 的 `name === "主要对话"` 或以 `"新话题"` 开头，才认为是"默认名"，进而调用 `messageRenderer.summarizeTopicFromMessages`（最终转发到 `window.summarizeTopicFromMessages`，即 `modules/topicSummarizer.js:11`）请求 AI 总结，成功后 `electronAPI.saveAgentTopicTitle` 落盘（`:927`）。
+`chatManager.js` 的 `attemptTopicSummarizationIfNeeded()`（`modules/chatManager.js:896-947`），触发时机是 `renderer.js` 在收到 VCP 流 `'end'` 事件、且该消息属于当前可见视图、且不是群聊消息时调用（`renderer.js:585-586`）。触发条件（`chatManager.js:901`）：
 
-**关键发现：单聊总结请求没有超时保护。** `modules/topicSummarizer.js` 里的 `summarizeTopicFromMessages` 直接 `fetch(settings.vcpServerUrl, {...})`（`:44-56`），**没有 `AbortController`，没有 `setTimeout` 兜底**。如果 VCP 服务器对这次总结请求没有响应或响应极慢，这个 `await fetch` 会一直挂着，且由于 `attemptTopicSummarizationIfNeeded` 是在正常发消息流程收尾时 `await` 调用的（`renderer.js:569`），虽然不会阻塞其它消息发送（因为它是独立触发的异步回调），但也没有任何机制探测/中止这个悬挂请求。
+- 当前选中项类型是 agent（`currentSelectedItem.type === 'agent'`）、历史至少两轮对话（`currentChatHistory.length >= 4`）、且存在 `currentTopicId`；
+- 重新从磁盘拉取最新 agent 配置后，仅当 topic 名是默认名（`name === "主要对话"` 或以 `"新话题"` 开头，`:920-923`）才调用 `messageRenderer.summarizeTopicFromMessages`（最终转发到 `window.summarizeTopicFromMessages`，即 `modules/topicSummarizer.js:11`）请求 AI 总结，成功后 `electronAPI.saveAgentTopicTitle` 落盘（`:927`）。
+
+**关键发现：单聊总结请求没有超时保护。** `modules/topicSummarizer.js` 里的 `summarizeTopicFromMessages` 直接对 VCP 服务器发起 fetch（`:44-56`），**没有 `AbortController`，也没有 `setTimeout` 兜底**。如果服务器对这次总结请求没有响应或响应极慢，这个 `await fetch` 会一直挂着；而 `attemptTopicSummarizationIfNeeded` 是在正常发消息流程收尾时 `await` 调用的（`renderer.js:569`），虽然不会阻塞其它消息发送（它是独立触发的异步回调），但也没有任何机制探测或中止这个悬挂请求。
 
 ### 3.2 群聊路径：20 秒超时
 
-`Groupmodules/topicTitleManager.js` 的 `generateTitleFromAI`（`:76-130`），**有明确的 20 秒超时**：`const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), 20000);`（`:86-87`），并在 `finally` 里 `clearTimeout`。触发条件在 `triggerSummarizationIfNeeded`（`:142-195`）：`groupHistory.length >= MIN_MESSAGES_FOR_SUMMARY(=4)` 且当前话题名是 `DEFAULT_TOPIC_NAMES = ["主要群聊"]` 中的一个，或以 `"新话题"` 开头（`:8`, `:151`）。清洗逻辑 `cleanSummarizedTitle`（`:15-30`）会去掉标点、数字编号、常见前后缀，截断到 15 字符，若清洗后为空则回退为 `"AI总结话题"` 常量，且如果最终标题等于这个回退值或与原标题相同，则**不会**写回（`:184-188`），避免把占位字符串当真标题存进配置。
+`Groupmodules/topicTitleManager.js` 的 `generateTitleFromAI`（`:76-130`），**有明确的 20 秒超时**：创建 `AbortController` 并 `setTimeout(() => controller.abort(), 20000)`（`:86-87`），`finally` 里 `clearTimeout`。触发条件在 `triggerSummarizationIfNeeded`（`:142-195`）：
+
+- `groupHistory.length >= MIN_MESSAGES_FOR_SUMMARY(=4)`，且当前话题名是默认名集合（`DEFAULT_TOPIC_NAMES = ["主要群聊"]`）中的一个，或以 `"新话题"` 开头（`:8`, `:151`）；
+- 清洗逻辑 `cleanSummarizedTitle`（`:15-30`）去掉标点、数字编号、常见前后缀，截断到 15 字符；清洗后为空则回退 `"AI总结话题"` 常量，且最终标题等于该回退值或与原标题相同时**不会**写回（`:184-188`），避免把占位字符串当真标题存进配置。
 
 也就是说**同一功能（话题自动总结）在单聊和群聊两条代码路径里的健壮性不对等**——群聊有超时保护，单聊没有。这是本次调查发现的具体设计缺口。总结结果写入 `topics[]` 元数据的数据语义见会话与消息管理笔记 2.3。
 
 ## 4. SDK、Provider、模型与协议交接
 
-- 单聊请求在 `modules/ipc/chatHandlers.js` 的 `send-to-vcp` handler（`:855-1270`）内：读 `settings.json` 拿 `vcpServerUrl/vcpApiKey`，拼 `finalVcpUrl`，直接 `fetch`，没有 SDK 或 Adapter 层。当前 HEAD 发送前还会：清理未设置采样参数（`omitUnsetOptionalModelParams`，`:95-118`、`:1064`）并附加 `vcpchatExtensions.requestContext`（`:53-82`、`:1071`）。
+- 单聊请求在 `send-to-vcp` handler（`modules/ipc/chatHandlers.js:855-1270`）内：读 `settings.json` 拿服务器地址与 API key，拼出最终 URL 后直接 `fetch`，没有 SDK 或 Adapter 层。当前 HEAD 发送前还会清理未设置的采样参数（`omitUnsetOptionalModelParams`，`:95-118`、`:1064`）并附加 `vcpchatExtensions.requestContext`（`:53-82`、`:1071`）。
 - 群聊：主进程按 agent 逐个发起 fetch（`Groupmodules/groupchat.js:864-865` 带 60 秒 `AbortController` 超时）；群聊 assistant 消息记录 `model/modelSource`（`'group_unified'` 或 `'agent'`，`:950`），说明请求携带的模型标识同时落盘为消息字段。
-- `modules/vcpClient.js` 中存在一份完整的 `sendToVCP`/`interruptRequest` 实现（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），但经过 grep 全仓库确认它**从未被 `main.js` 或任何其它文件 `require`**（`main.js` 里注册的是 `chatHandlers.initialize`，且 `main.js` 有注释说"VCP Server Communication is now handled in modules/ipc/chatHandlers.js"）——`vcpClient.js` 是彻底的死代码/被架空的重构半成品，真正跑的还是 `chatHandlers.js` 里那份没有本地 abort、也没有请求超时的实现。
+- `modules/vcpClient.js` 中存在一份完整的 `sendToVCP`/`interruptRequest` 实现（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（`main.js` 里注册的是 `chatHandlers.initialize`，且注释声明 VCP 服务器通信已改由 `modules/ipc/chatHandlers.js` 负责）——`vcpClient.js` 是彻底的死代码/被架空的重构半成品，真正跑的还是 `chatHandlers.js` 里那份没有本地 abort、也没有请求超时的实现。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- 单聊流式消费：`send-to-vcp` 拿到 `response.body.getReader()` 后交给内部的 `processStream(reader, decoder)`（`modules/ipc/chatHandlers.js:1181-1241`）一直 `await reader.read()` 直到服务端主动结束流或连接关闭——**没有客户端超时**，如果远端挂死，单聊窗口会无限等待。
+- 单聊流式消费：`send-to-vcp` 拿到响应体的 reader 后交给内部的 `processStream`（`modules/ipc/chatHandlers.js:1181-1241`）一直 `await reader.read()` 直到服务端主动结束流或连接关闭——**没有客户端超时**，如果远端挂死，单聊窗口会无限等待。
 - 流事件链：主进程把 chunk 作为 `vcp-stream-event` 发回渲染进程，`renderer.js` 统一分发（`renderer.js:540-764`）；流式增量渲染、缓冲队列与 30 FPS 合帧属于消息渲染器笔记（[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 6 节）。
 - 群聊流式：单个 agent 的 fetch 请求有 60 秒超时（`AbortController` + `setTimeout(() => controller.abort(), 60000)`，`Groupmodules/groupchat.js:864-865`）。
 
@@ -80,10 +86,10 @@ renderer.js 发送/中断事件
 不管中断是否成功打断本地流，最终收尾都走同一个函数：`modules/renderer/streamManager.js` 的 `finalizeStreamedMessage(messageId, finishReason, context, finalPayload)`（`:2190-2400`）。要点：
 
 - 若消息还处于 `'pending'`（尚未完成初始化）就收到 finalize 事件，会先缓存到 `pendingFinalizationEvents`，等 `startStreamingMessage` 完成初始化后重放（`:2192-2195`, `:1790-1802` 附近）——防止 finalize 事件抢在初始化之前到达导致丢消息。
-- 文本选择逻辑（`:2249-2269` 附近）：优先用本地累积的 `accumulatedStreamText`，但如果 `finalPayload.fullResponse`（主进程侧提供的兜底文本）更长，或包含 `[!WARNING]` 标记（说明是错误恢复场景），就采用 `payloadFullResponse` 代替——这是为了兼容"流式中途出错，主进程把已收到的部分文本通过 error 事件的 `fullResponse` 字段回传"的场景（对应 `renderer.js:605-609` 给错误消息追加"流式响应中断"提示）。
-- 找到历史数组里对应消息、写回 `content/finishReason/isThinking=false`（`:2286-2295` 附近），如果是当前视图会同步刷新 DOM 和 `currentChatHistoryRef`（`:2286-2362` 附近）。
-- 存盘走 `debouncedSaveHistory`（**1 秒防抖**，`streamManager.js:348-375`），但**群聊消息永远不在这里存盘**——`saveHistoryForContext` 一进来就 `if (context.isGroupMessage) return;`（`:379-383`），注释解释是"群聊由主进程 `groupchat.js` 作为历史单一真源，避免渲染进程重复保存造成竞态"（群聊落盘点与数据语义见会话与消息管理笔记 6.1）。
-- 群聊侧 `AbortError` 分支（`Groupmodules/groupchat.js:1030-1039`）会把已累积的 `accumulatedResponse` 连同 `interrupted:true` 标记写入 `groupHistory` 并发 `'end'` 事件——**中断即真正停止本地流读取，并把已生成部分落盘**，这条路径设计是自洽的。
+- 文本选择（`:2249-2269` 附近）：优先用本地累积的流文本，但若主进程兜底文本（`finalPayload.fullResponse`）更长，或包含 `[!WARNING]` 标记（说明是错误恢复场景），就改用兜底文本——这是为了兼容"流式中途出错、主进程把已收到的部分文本通过 error 事件的 `fullResponse` 字段回传"的场景（对应 `renderer.js:605-609` 给错误消息追加"流式响应中断"提示）。
+- 找到历史数组里对应消息，写回 `content`/`finishReason`/`isThinking=false`（`:2286-2295` 附近）；当前视图会同步刷新 DOM 和 `currentChatHistoryRef`（`:2286-2362` 附近）。
+- 存盘走 `debouncedSaveHistory`（**1 秒防抖**，`streamManager.js:348-375`），但**群聊消息永远不在这里存盘**——`saveHistoryForContext` 一进来就检查是否群聊消息并直接返回（`:379-383`），注释解释是"群聊由主进程 `groupchat.js` 作为历史单一真源，避免渲染进程重复保存造成竞态"（群聊落盘点与数据语义见会话与消息管理笔记 6.1）。
+- 群聊侧 `AbortError` 分支（`Groupmodules/groupchat.js:1030-1039`）会把已累积的响应连同 `interrupted:true` 标记写入 `groupHistory` 并发 `'end'` 事件——**中断即真正停止本地流读取，并把已生成部分落盘**，这条路径设计是自洽的。
 
 ## 7. 停止、重试、续写与重新生成
 
@@ -91,15 +97,17 @@ renderer.js 发送/中断事件
 
 `interruptActiveResponseFromSendButton()`（`renderer.js:200-247`）区分群聊/单聊：
 
-- 群聊：`chatAPI.interruptGroupRequest(activeMessage.id)`（`:218`）→ IPC `redo`/`interrupt-group-chat` 系列 → `Groupmodules/groupchat.js` 的 `interruptGroupRequest(messageId)`（`:1910-1954`）。这里**确实**维护了一个 `activeRequestControllers = new Map()`（`groupchat.js:28`），每次给某个 agent 发起 fetch 前用 `activeRequestControllers.set(messageIdForAgentResponse, controller)`（`:866`）注册，`interruptGroupRequest` 拿到后**真的调用 `controller.abort()`**（`:1914`）中断本地 fetch/reader，然后再补发一次远端 `/v1/interrupt` POST（`:1917-1947`）。
+- 群聊：`chatAPI.interruptGroupRequest(activeMessage.id)`（`:218`）→ IPC `interrupt-group-chat` → `Groupmodules/groupchat.js` 的 `interruptGroupRequest`（`:1910-1954`）。这里**确实**维护了 `activeRequestControllers = new Map()`（`groupchat.js:28`），每次给某个 agent 发起 fetch 前按 `messageIdForAgentResponse` 注册 controller（`:866`），该入口拿到后**真的调用 `controller.abort()`**（`:1914`）中断本地 fetch/reader，然后再补发一次远端 `/v1/interrupt` POST（`:1917-1947`）。
 
-- **单聊**：`interruptHandler.interrupt(activeMessage.id)`（`renderer.js:222-223` → `modules/interruptHandler.js:18-42`）只是转发 `electronAPI.interruptVcpRequest({messageId})`，落到 `modules/ipc/chatHandlers.js:1272-1317` 的 `interrupt-vcp-request` handler。**这个 handler 完全没有本地 AbortController**：它只是读 `settings.json` 拿 `vcpServerUrl/vcpApiKey`，拼出 `/v1/interrupt` 的 URL，`fetch(interruptUrl, {method:'POST', body:{requestId: messageId}})` 发一个远端信号（`:1292-1301`），然后就返回了。而真正在跑的流式请求，在同文件的 `send-to-vcp` handler（`:855-1270`）里，`fetch(finalVcpUrl, {...})` 时**没有创建/传入任何 `AbortController.signal`**（`:1100-1112` 附近），拿到 `response.body.getReader()` 后交给内部的 `processStream(reader, decoder)`（`:1181-1241`）一直 `await reader.read()` 直到服务端主动结束流或连接关闭。
+- **单聊**：`interruptHandler.interrupt(activeMessage.id)`（`renderer.js:222-223` → `modules/interruptHandler.js:18-42`）只是把 `electronAPI.interruptVcpRequest({messageId})` 转发到 `interrupt-vcp-request` handler（`modules/ipc/chatHandlers.js:1272-1317`）。**这个 handler 完全没有本地 AbortController**：
+  - 它只读 `settings.json` 拿服务器地址与 API key，拼出 `/v1/interrupt` URL 后发一次 `fetch`（`{method:'POST', body:{requestId: messageId}}`，`:1292-1301`）就返回；
+  - 真正在跑的流式请求（同文件 `send-to-vcp`，`:855-1270`）发起 `fetch` 时**没有创建/传入任何 `AbortController.signal`**（`:1100-1112` 附近），拿到响应体 reader 后交给 `processStream`（`:1181-1241`）一直 `await reader.read()` 直到服务端主动结束流或连接关闭。
 
   换句话说，单聊场景点击"中止回复"，**本地读取循环完全不会被打断**，UI 上是否真正停止完全取决于远端 VCP 服务器收到 `/v1/interrupt` 后是否老实地停止推送、关闭响应流。如果远端没有及时响应（网络问题、服务端 bug、或者 `/v1/interrupt` 本身在代理链路的某一跳没被正确转发），前端会一直显示"中止已发送"的 toast，但实际内容仍会持续流入直到远端自己断流。
 
 ### 7.2 死代码对照：vcpClient.js
 
-与此形成对照的是：仓库里还存在一份 `modules/vcpClient.js`，其中的 `sendToVCP`/`interruptRequest` 实现了**完整**的本地 `AbortController` 管理（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），本应是正确的单聊中断实现，但经过 grep 全仓库确认它**从未被 `main.js` 或任何其它文件 `require`**（`main.js` 里注册的是 `chatHandlers.initialize`，且 `main.js` 有注释说"VCP Server Communication is now handled in modules/ipc/chatHandlers.js"）——`vcpClient.js` 是彻底的死代码/被架空的重构半成品（当前 HEAD 它还同步应用了 `requestContext` 与参数省略两处修改，现 589 行，但依然没有引用方），真正跑的还是 `chatHandlers.js` 里那份没有本地 abort、也没有请求超时的实现。相应地，单聊的 VCP 请求也**没有任何客户端超时**（群聊侧在 `groupchat.js:865` 有明确 60 秒 `AbortController` 超时；单聊侧无对应机制），如果远端挂死，单聊窗口会无限等待，中止按钮也救不了。
+与此形成对照的是：仓库里还存在一份 `modules/vcpClient.js`，其中的 `sendToVCP`/`interruptRequest` 实现了**完整**的本地 `AbortController` 管理（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），本应是正确的单聊中断实现，但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（引用证据见第 4 节），且当前 HEAD 它还同步应用了 `requestContext` 与参数省略两处修改（现 589 行，依然没有引用方）。相应地，单聊的 VCP 请求也**没有任何客户端超时**（群聊侧在 `groupchat.js:865` 有明确 60 秒 `AbortController` 超时；单聊侧无对应机制），如果远端挂死，单聊窗口会无限等待，中止按钮也救不了。
 
 **这是本次调查里最值得写进结论的设计问题**：中断能力在群聊和单聊之间不对称实现，单聊缺乏客户端超时和真正的本地中断，是一个真实存在、有代码证据的可靠性缺口。
 
@@ -114,7 +122,13 @@ renderer.js 发送/中断事件
 三种发言模式通过策略对象注册在 `CHAT_MODES`（`Groupmodules/groupchat.js:22-26`）：
 
 - **sequential**（`Groupmodules/modes/sequentialMode.js`）：`determineSpeakers` 直接返回全部 `activeMembersConfigs`，即所有成员按配置里的成员顺序全部发言一轮（无随机性）。
-- **naturerandom**（`Groupmodules/modes/natureRandomMode.js`）：按优先级依次判定——① `@角色名` 直接提及（`:68-78`）；② tag 匹配，`strict` 模式看 tag 是否出现在最近 8 条历史上下文或当前用户消息中（`:166-173`），`natural` 模式区分 tag 来源（用户/其他 agent 提及 vs 自己历史消息里提到自己的 tag，前者 100% 触发，后者按"是否是刚发言的人"给 0.2~0.75 的动态概率，`:102-161`）；③ `@所有人`（`:178-188`）；④ 未触发成员按 15% 基础概率（`strict` 模式下如果 tag 命中过历史上下文可提升到 85%，`:194-220`）；⑤ 保底：以上全部落空时随机选一个成员发言，避免群聊完全沉默（`:226-247`）；最后按"tag 是否命中用户最新发言"排序，命中的排最前（`:253-265`）。
+- **naturerandom**（`Groupmodules/modes/natureRandomMode.js`）：`determineSpeakers` 按优先级依次判定：
+  1. 直接提及：`@角色名` 出现在消息中（`:68-78`）；
+  2. tag 匹配：`strict` 模式看 tag 是否出现在最近 8 条历史上下文或当前用户消息中（`:166-173`）；`natural` 模式区分 tag 来源——用户/其他 agent 提及则 100% 触发，自己历史消息里提到自己的 tag 则按"是否是刚发言的人"给 0.2~0.75 的动态概率（`:102-161`）；
+  3. `@所有人`（`:178-188`）；
+  4. 未触发成员按 15% 基础概率，`strict` 模式下若 tag 命中过历史上下文可提升到 85%（`:194-220`）；
+  5. 保底：以上全部落空时随机选一个成员发言，避免群聊完全沉默（`:226-247`）；
+  最后按"tag 是否命中用户最新发言"排序，命中的排最前（`:253-265`）。
 - **invite_only**（`Groupmodules/modes/inviteOnlyMode.js`）：`determineSpeakers` 直接返回空数组，AI 完全不自动发言，只能通过前端"邀请发言"按钮触发 `handleInviteAgentToSpeak`（`groupchat.js:1130`起）。
 
 ### 8.2 并发粒度

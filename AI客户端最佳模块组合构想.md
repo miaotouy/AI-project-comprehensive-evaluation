@@ -37,18 +37,28 @@
 - 正文走 AIO 的 stable/pending AST + keyed Patch，尾部收口用权威全文替换；运行时状态（DOM 焦点、动画帧）在稳定区内不被清除。
 - 声明式交互组件（流程节点、工具状态、选择器、候选回复切换条）由宿主按注册表原生渲染，对应 LobeHub 的 conversation-flow 思路；模型 payload 只声明意图，不直接触发 handler。
 - 需要任意 HTML/CSS/JS 的内容进入独立 Artifact realm（opaque origin，无 preload，禁直接宿主 API），对应 VCPChat 的能力目标但替换运行域。
-- `MessagePart` 生命周期：`discovered → streaming → stable | waiting → approved/denied → completed | failed | cancelled`；每个 part 有稳定 ID、renderer 类型和可用动作集合，重启和重放产生同一组 parts。
+- `MessagePart` 生命周期（每个 part 有稳定 ID、renderer 类型和可用动作集合，重启和重放产生同一组 parts）：
+  ```text
+  discovered → streaming → stable | waiting → approved/denied → completed | failed | cancelled
+  ```
 
 **用户体验**：审批卡不会因刷新消失；工具失败后直接在时间线上重试；候选回复在同一消息气泡内切换不产生新消息；Artifact 里的计时器不会因消息列表滚动被清除。
 
 ### 2. 对象跨轮次持续
 
-**当前空白**：VCPChat 的桌面挂件最接近 G5（独立 ID、文件持久化、模型 create/replace/query），但 widgetFS 桥接方法是宽能力模型，缺少版本和权限档位。OpenCode 的文件工作区闭环最干净，但没有用户可见的对象列表和状态面板。LobeHub 的文档是最强的结构化 G4，但 ArtifactDeploymentActions 是空桩。VCPChat 新增的 Scriptorium 文坊是样本中第一个“按对象身份继续修改”的通道（Agent 以可审阅 PR 提交到既有 VDOC 工程，文脉带版本与审批语义），但合并仍是整份 source 替换 + 人工裁决，没有定向 patch、运行状态读取（只有 GetVisualContext/GetViewportSource 层面的感知）或能力档位。没有任何项目实现：模型可以列举当前活动对象、读取其运行状态、定向 patch 同一对象。
+**当前空白**：VCPChat 的桌面挂件最接近 G5——对象有独立 ID、文件持久化和模型的 create/replace/query 操作，但 widgetFS 桥接方法是宽能力模型，缺少版本和权限档位。OpenCode 的文件工作区闭环最干净，但没有用户可见的对象列表和状态面板；LobeHub 的文档是样本中最强的结构化 G4，但 ArtifactDeploymentActions 仍是空桩。
+
+VCPChat 新增的 Scriptorium 文坊是样本中第一个“按对象身份继续修改”的通道：Agent 以可审阅的 PR 提交到既有 VDOC 工程，文脉带版本与审批语义。但合并仍是整份 source 替换加人工裁决，没有定向 patch、运行状态读取（只有 GetVisualContext/GetViewportSource 层面的感知）或能力档位。
+
+没有任何项目实现：模型可以列举当前活动对象、读取其运行状态、定向 patch 同一对象。
 
 **组合逻辑**：
 
 - 对象注册表：每个 Artifact/文档/工作区文件在 Host 层有稳定 `objectId`、类型、来源消息、当前 revision、能力档位（`prose / active / trusted`）和生命周期状态。
-- 三档能力：`prose`（静态渲染，无脚本）、`active`（独立 realm 内脚本，可选网络，无宿主原生 API）、`trusted`（版本化 runtime SDK，可请求文件/工具/会话事件，每项仍由宿主校验）。
+- 三档能力，逐档声明边界：
+  - `prose`：静态渲染，无脚本；
+  - `active`：独立 realm 内脚本，可选网络，无宿主原生 API；
+  - `trusted`：版本化 runtime SDK，可请求文件/工具/会话事件，每项仍由宿主校验。
 - 文件工作区事实源对应 OpenCode/Cherry：工具调用落 SQLite Part，文件系统是工作区，影子 Git 记录回合快照，模型通过 read/glob/grep 再次读取。
 - 文档对象对应 LobeHub：DB 行 + Redis 编辑锁 + 节点级寻址 + diff 逐项接受/拒绝 + saveSource 区分 llm_call；但 ArtifactDeploymentActions 必须真正落地。
 - 模型上下文回流：下一轮请求前自动注入对象列表摘要（id/type/status/lastModified）；`trusted` 档对象可提供 `serializeState()` 接口。
@@ -62,8 +72,10 @@
 **组合逻辑**：
 
 - 四层失败分离（照搬 Hermes）：同请求重试 → Key 轮换 → 同 Provider 模型 fallback → 跨 Provider failover；每层记录不同事件，分配不同预算，声明流开始后是否可安全重放。
-- 语义路由（照搬 VCPToolBox 原理，加约束）：每个 Agent 可声明任务类型标签（coding/roleplay/search/summarize/multimodal），每个 Provider 实例可声明适配标签和成本/延迟基线；路由器按余弦相似度 + 实时健康分 + 预算约束打分，结果写入 `RouteDecisionEvent`（候选链、实际模型、分数、路由原因）。
-- Key 健康状态机（照搬 AIO Hub）：每个 Key 有 `active/cooling/exhausted/dead` 状态，按 429/503/401 响应转换；状态持久化到 SQLite，重启后不重置。
+- 语义路由（照搬 VCPToolBox 原理，加约束）：每个 Agent 可声明任务类型标签（编码、角色扮演、检索、摘要、多模态等），每个 Provider 实例可声明适配标签和成本/延迟基线；路由器按余弦相似度 + 实时健康分 + 预算约束打分，结果写入 `RouteDecisionEvent`（候选链、实际模型、分数、路由原因）。
+- Key 健康状态机（照搬 AIO Hub）：按响应码转换状态，状态与转换响应都持久化到 SQLite，重启后不重置：
+  - 状态：`active` / `cooling` / `exhausted` / `dead`
+  - 转换响应：429 / 503 / 401
 - 配额门控：每个 Provider 实例可设置每日 token 预算上限和成本上限；超限时路由器降级到其他 Provider 而不是静默失败。
 - 成本/延迟感知选路：路由器在用户可设置的"优先成本"/"优先延迟"/"优先质量"三个策略下，把实时健康分和历史分位数纳入评分；策略变更记录审计事件。
 
@@ -71,7 +83,13 @@
 
 ### 4. 角色即可移植生态
 
-**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF + Character Book）、传统角色扮演工作流和完整 World Info/扩展协议，但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 分离。AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。AIO 对 ST 世界书的支持已覆盖独立编辑、导入导出和实际条件注入运行时，不只是格式转换；部分扩展字段仅保留/编辑或降级映射，因此仍是可执行子集。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载（人格选择收敛为 `display.personality` 权威名称 + 单一所有者渲染模块，仍是命名模板而非版本化实体）。没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
+**当前空白**：SillyTavern 有最成熟的角色卡生态（PNG/CharX/BYAF 与 Character Book）、传统角色扮演工作流和完整 World Info/扩展协议，但角色内部没有字段级继承，角色卡、推理 Preset、Prompt Manager 与 Advanced Formatting 互相分离。
+
+AIO Hub 的 Agent 包格式最全面（ZIP/JSON/YAML/PNG 四种），也是当前样本中最完整的一体化预设编辑原型：消息可按模型和注入位置配置，还能组成多选组、单选组并使用组级总开关。AIO 对 ST 世界书的支持已覆盖独立编辑、导入导出和实际条件注入运行时，不只是格式转换；部分扩展字段仅保留/编辑或降级映射，因此仍是可执行子集。它对进行中会话采用有意的实时引用，修改 Agent 后可基于同一历史立即重新生成做对比；开场白则在首次发送后固化。真正缺少的是可见的绑定模式、完整配置 revision 和可复原的生成快照，而不是“旧会话必须永远不受修改影响”。
+
+Hermes 的 Profile 包（config/SOUL.md/skills/记忆）是最完整的"可迁移运行环境"，但 personas 字段无导入承载：人格选择收敛为 `display.personality` 权威名称 + 单一所有者渲染模块，仍是命名模板而非版本化实体。
+
+没有任何项目同时支持角色 prompt 版本 diff、跨角色字段级继承、显式 live/pinned 绑定、可追溯行为 A/B 测试和注入内容的分段 token 预算。
 
 **组合逻辑**：
 
@@ -84,13 +102,17 @@
     ├─ KnowledgePolicyRef   知识库与召回规则
     └─ MemoryPolicyRef      读写权限/命名空间/压缩策略
   ```
-- 会话绑定显式区分两种模式：`live` 每次执行读取 Agent 当前 revision，服务于 AIO 式同历史即时调试；`pinned` 固定 `AgentRevisionSnapshot`，服务于长期会话复现。两种模式都不能隐式切换，且每个生成节点记录实际 revision、ContextRecipe 编译 hash 和请求参数。
+- 会话绑定显式区分两种模式，都不能隐式切换，且每个生成节点记录实际 revision、ContextRecipe 编译 hash 和请求参数：
+  - `live`：每次执行读取 Agent 当前 revision，服务于 AIO 式同历史即时调试；
+  - `pinned`：固定 `AgentRevisionSnapshot`，服务于长期会话复现。
 - 角色字段级继承（填补全局空白）：角色 B 可声明 `extends: A`，只覆盖差异字段；编译器在运行时展平，用户界面显示继承链。
-- `ContextRecipe` 保留 AIO 的可操作消息配方：每个 block 可独立启停、声明 role/anchor/depth/model match；多个 block 可组成 `multi` 或 `single` 选择组，并有组级开关。组状态直接参与编译，不依赖 UI 把状态回写到各成员。
-- 生态资产格式统一入口（对应 SillyTavern/AIO Hub 的社区生态）：PNG/JSON/CharX/AIO ZIP/LobeAgent JSON 在导入时一次性编译为内部 IR；外部格式只在导入层存在，不进入主存储和运行时契约。
+- `ContextRecipe` 保留 AIO 的可操作消息配方：每个 block 可独立启停，声明注入角色、锚点、深度和模型匹配条件；多个 block 可组成 `multi` 或 `single` 选择组，并有组级开关。组状态直接参与编译，不依赖 UI 把状态回写到各成员。
+- 生态资产格式统一入口（对应 SillyTavern/AIO Hub 的社区生态）：PNG、JSON、CharX、AIO ZIP、LobeAgent JSON 在导入时一次性编译为内部 IR；外部格式只在导入层存在，不进入主存储和运行时契约。
 - 版本化 runtime SDK 允许角色在 `trusted` Artifact 内查询和修改自身的 MemoryPolicy（对应 VCPToolBox AgentDream 的能力目标，但写入须经过 gate）。
 
-**用户体验**：把 SillyTavern 角色卡拖进来，World Info 条目转换为 ContextRecipe 中的 `match` 触发 block；用户可以在聊天侧栏将“叙事视角”设为单选、将“文风修饰”设为多选，并一键关闭整组背景规则；调试会话使用 `live` 模式，修改人格后直接在同一用户消息上重新生成并并排比较，旧回复不会消失；长期剧情会话使用 `pinned` 模式，除非用户主动迁移 revision，否则行为保持不变。
+**用户体验**：把 SillyTavern 角色卡拖进来后，World Info 条目转换为 ContextRecipe 中的 `match` 触发 block；用户可以在聊天侧栏将“叙事视角”设为单选、将“文风修饰”设为多选，并一键关闭整组背景规则。
+
+调试与长期会话使用显式绑定：调试会话用 `live` 模式，修改人格后直接在同一用户消息上重新生成并并排比较，旧回复不会消失；长期剧情会话用 `pinned` 模式，除非用户主动迁移 revision，否则行为保持不变。
 
 ### 5. 后台认知与记忆演化
 
@@ -98,7 +120,11 @@
 
 **组合逻辑**：
 
-- `BackgroundJob` 实体：每个任务有类型（memory_consolidation/compaction/scheduled_agent/cron）、预算（token上限、时间上限）、触发条件（时间/事件/用户授权）、取消令牌和审计尾。与前台 Agent Loop 完全分离，不共用同一个对话上下文。
+- `BackgroundJob` 实体与前台 Agent Loop 完全分离，不共用同一个对话上下文；每项任务声明：
+  - 类型：memory_consolidation / compaction / scheduled_agent / cron
+  - 预算：token 上限、时间上限
+  - 触发条件：时间、事件、用户授权
+  - 取消令牌和审计尾
 - 记忆整理（照搬 AgentDream 架构，加门控）：非对话时段，Agent 可提交 `MemoryWriteProposal`（合并/删除/感悟）；所有操作生成 JSON 索引后进入审批队列；默认需要用户审批，可配置为自动批准低风险操作（如去重合并）但高风险操作（如删除）始终需要人工。
 - compaction-as-fork（照搬 Hermes）：压缩时生成新 session_id + lineage_root_id；原始 transcript 通过 lineage 仍可寻址；压缩摘要保存为带 `compaction_revision` 标签的 summary block，记录覆盖范围。
 - 定时 Agent（照搬 Hermes cron）：用户可以为 Agent 设置 cron 计划，在空闲时段执行；执行结果落 BackgroundJob 日志，不自动注入主会话（除非用户选择"同步到会话"）。
@@ -182,7 +208,7 @@ OutputObject(objectId, type, sourceMessageId, capabilityTier, status, currentRev
   -> grantedCapabilities[]
 ```
 
-capabilityTier：`prose`（静态渲染）/ `active`（独立 realm 内脚本）/ `trusted`（版本化 runtime SDK，每项能力仍由宿主校验）。
+capabilityTier 取三档：`prose` 静态渲染、`active` 独立 realm 内脚本、`trusted` 版本化 runtime SDK（每项能力仍由宿主校验）。
 
 ### ToolInvocation 状态机
 
@@ -226,7 +252,12 @@ ContextRecipe(id, revision, parentRevision?, extends?)
 
 **分段 token 预算**是十六个项目均未实现的能力空白：每个 ContextBlock 有独立 `tokenBudget`（固定 token 或总预算百分比）；超预算时按优先级裁剪——先移除低优先级召回，再压缩旧 turns，保留最近完整交互；工具调用完整保留，不整体截断。这与 AIO Hub/LobeHub/NextChat 的"整体历史压缩"机制完全不同。
 
-`slot` 取具名语义位置（安全前言/身份/环境/记忆/历史前/历史/历史后/当前输入前/输入后/工具尾）；`condition` 支持 `always/manual/match/retrieve/event/dependency`。
+`slot` 取具名语义位置，`condition` 决定触发方式，取值如下：
+
+```text
+slot：安全前言 / 身份 / 环境 / 记忆 / 历史前 / 历史 / 历史后 / 当前输入前 / 输入后 / 工具尾
+condition：always / manual / match / retrieve / event / dependency
+```
 
 三档编辑体验（基础/高级/专家）共享同一结构化模型。Context Inspector 在发送前和历史回放时均可打开，显示 block 顺序、token 占比、激活原因和降级记录。
 
@@ -234,7 +265,11 @@ ContextRecipe(id, revision, parentRevision?, extends?)
 
 ### World Info 的 ContextRecipe 映射
 
-World Info 条目映射为 `condition: match` + 关键词检索的 `ContextBlock`；递归激活在编译期求值，不在运行时循环；`at_depth` 位置映射到具名 slot，不依赖历史数组偏移量。这样 SillyTavern/AIO 格式可以在导入时一次性转换为内部 IR，不需要运行时再解析文本标记。
+World Info 条目按以下规则映射为 ContextRecipe 块，导入时一次性转换为内部 IR，不需要运行时再解析文本标记：
+
+- 激活条件映射为 `condition: match` + 关键词检索的 `ContextBlock`；
+- 递归激活在编译期求值，不在运行时循环；
+- `at_depth` 位置映射到具名 slot，不依赖历史数组偏移量。
 
 ## 六、安全默认值
 

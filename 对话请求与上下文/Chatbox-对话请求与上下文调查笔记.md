@@ -41,9 +41,9 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 
 ## 1. 提交入口、任务对象与状态机
 
-- `InputBox.tsx:837` 的 `handleSubmit`（`InputBox.tsx:837-946`）先做发送前校验（禁用态/模型存在/RAG 附件索引未就绪时弹"文档仍在索引中"确认，`:881-884`），再调 `sessionHelpers.constructUserMessage`（`sessionHelpers.ts:872-`）：图片进 `contentParts`，文件进 `files`，链接进 `links`，然后经 `onSubmit?.(params)` 提交；`onUserMessageReady` 回调负责清草稿与输入历史（`:905-931`）。提交参数里的 `settingsPatch: reasoningSettingsPatch` 携带推理级别修改。
-- `stores/session/messages.ts:177` 的 `submitNewUserMessage` 用 `withSessionGenerationLock`（`generation-lock.ts:8-26`）包装；内部 `submitNewUserMessageUnlocked`（`messages.ts:184-310`）先跑 `runCompactionWithUIState`（`:201`，发送前压缩检查，见第 3 节），再插入用户消息，随后插入 assistant 占位（`generating: true`，附件/链接时带 `sending_file`/`loading_webpage` status，`:224-246`），最后 `_generateWithoutSessionLock`（`generation.ts:15-37`）按会话类型进入 chat 或 picture 生成。
-- **任务对象就是目标消息本身**：没有独立的"任务记录"。生成状态落在消息字段上——`initializeTargetMessage`（`stores/session/utils.ts:129-148`）把占位消息置为 `generating: true` 并填入 provider/model/`isStreamingMode`；`orchestrateGeneration`（`orchestration.ts:480-514`）创建 AbortController，把 `cancel` 函数同时暴露到本地目标与权威缓存消息上（`exposeGenerationCancel`，`:466-478`），并登记/结算"会话生成中"计数（`beginSessionGeneration`/`settleSessionGeneration`，`generation-runtime.ts:13-35`）。
+- `InputBox.tsx:837` 的 `handleSubmit`（`InputBox.tsx:837-946`）先做发送前校验（禁用态/模型存在/RAG 附件索引未就绪时弹"文档仍在索引中"确认，`:881-884`），再调 `sessionHelpers.constructUserMessage`（`sessionHelpers.ts:872-`）把图片、文件、链接分别归入消息的 `contentParts`/`files`/`links` 三组字段，然后经 `onSubmit?.(params)` 提交；`onUserMessageReady` 回调负责清草稿与输入历史（`:905-931`）。提交参数里的 `settingsPatch` 携带推理级别修改（`reasoningSettingsPatch`）。
+- `stores/session/messages.ts:177` 的 `submitNewUserMessage` 用每会话生成锁包装（`withSessionGenerationLock`，`generation-lock.ts:8-26`）；内部 `submitNewUserMessageUnlocked`（`messages.ts:184-310`）先跑发送前压缩检查（`runCompactionWithUIState`，`:201`，见第 3 节），再插入用户消息与 assistant 占位（占位带 `generating: true`，附件/链接时分别带 `sending_file`/`loading_webpage` 状态，`:224-246`），最后 `_generateWithoutSessionLock`（`generation.ts:15-37`）按会话类型进入 chat 或 picture 生成。
+- **任务对象就是目标消息本身**：没有独立的"任务记录"。生成状态落在消息字段上——`initializeTargetMessage`（`stores/session/utils.ts:129-148`）把占位消息置为 `generating: true` 并填入 provider/model/`isStreamingMode`；`orchestrateGeneration`（`orchestration.ts:480-514`）创建 `AbortController`，把 `cancel` 函数同时暴露到本地目标与权威缓存消息上（`exposeGenerationCancel`，`:466-478`），并登记/结算"会话生成中"计数（`beginSessionGeneration`/`settleSessionGeneration`，`generation-runtime.ts:13-35`）。
 - 生成锁由 `withSessionGenerationLock`（`generation-lock.ts`）实现：每会话一条 promise 尾链，前一个任务完成后才执行下一个，任务失败不影响后续（`:3-7` 注释）。
 - 首页"假会话"首次发送时会先走 `createPersistedChatSession` 创建真实 Session 再提交（数据语义见会话与消息管理笔记 3.1）。
 - 停止时存在 `generating: true` 的消息调用其 `cancel()`；停止收口逻辑在 `stores/session/generation-cancellation.ts`（`stopGeneratingMessages`/`cancelRunningToolCallBatch`/`finishAbortedGeneration`，见第 7 节）。
@@ -58,7 +58,15 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 4. 按 `maxContextMessageCount` 消息数上限裁剪历史（`applyMessageLimit`，`:166-180`：上限只作用于历史，当前输入始终保留）；
 5. 注入附件内容（`injectAttachments`，`:182-227`：内联文件 >500 行时只给前 100 行预览 + `<TRUNCATED>` 提示，`:364-383`；sandbox 模式只注入文件元数据；session-retrieval 附件注入检索占位与提醒，`:385-414`）。
 
-**拼装顺序（最终请求）**：`buildContext`（`agent-harness.ts:249-256`）→ 无视觉模型时 OCR 预处理图片并追加 info part（`:260-279`）→ legacy 工具回退（`applyLegacyToolFallback`，`:281-287`）→ `buildToolsForSession` 注册工具（`:306-317`，见第 9 节）→ `injectModelSystemPrompt`（模型级 system prompt + 工具 instructions 合并注入，`:321-326`）→ 不支持 system 消息的模型把 system role 改写为 user（`:328-333`）→ `sequenceMessages` 排序（`:335`）→ `convertToModelMessages`（`:337-`，含 DeepSeek reasoning 保留等模型差异）。
+**拼装顺序（最终请求）**：
+1. `buildContext`（`agent-harness.ts:249-256`）构建基础上下文；
+2. 无视觉模型时 OCR 预处理图片并追加 info part（`:260-279`）；
+3. legacy 工具回退（`applyLegacyToolFallback`，`:281-287`）；
+4. `buildToolsForSession` 注册工具（`:306-317`，见第 9 节）；
+5. 注入模型级 system prompt（`injectModelSystemPrompt`，含工具 instructions 合并，`:321-326`）；
+6. 不支持 system 消息的模型把 system 角色改写为 user（`:328-333`）；
+7. `sequenceMessages` 排序（`:335`）；
+8. `convertToModelMessages` 转换（`:337-`，含 DeepSeek reasoning 保留等模型差异）。
 
 - **system prompt**：Copilot 的 `prompt` 在选中时写入 `session.messages[0]`（`{ role: 'system', contentParts: [...] }`），随历史一起进入请求（数据语义见会话与消息管理笔记 8）。
 - **附件**保留在用户消息的 parts/files 字段中，随消息模型进入请求（第 2 步注入内容）。
@@ -68,8 +76,8 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 ## 3. 预算、截断、摘要与压缩
 
 - **消息数上限**：`settings.maxContextMessageCount` 在 `buildContext` 中生效（`agent-harness.ts:253` → `builder.ts:44-46`），按"历史消息数 + 1 条当前输入"裁剪，不是 token 预算。
-- **自动压缩触发**（发送前同步检查，阻塞发送）：`messages.ts:201` 的 `runCompactionWithUIState` → `compaction.ts` 的 `needsCompaction`（`:57-125`）用 token 估算（带 react-query 缓存，`context-tokens.ts`）调 `checkOverflow`（`compaction-detector.ts:31-58`）：`isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compactionThreshold`，`compactionThreshold` 默认 0.6、可全局设置；模型上下文窗口来自 provider 设置或模型注册表（`getModelContextWindowFromSettings`/`getModelContextWindowSync`），未知模型不触发。
-- **执行与提交**：`runCompactionWithStreaming`（`compaction.ts:167-263`）流式生成摘要（UI 态经 `setCompactionUIState`），摘要消息打 `isSummary: true`，boundary 取"最后一个通过上下文合格性过滤且非 summary 的消息"（`compaction-boundary.ts:12-21`），生成 `CompactionPoint` 后经 `buildCompactionCommitPatch`（`compaction-commit.ts:28`）原子提交；摘要流式期间 boundary 被删除则放弃提交（`:240-247`）。压缩契约 `compactionPoints` 随 fork/复制重映射（数据语义见会话与消息管理笔记 1.4）。
+- **自动压缩触发**（发送前同步检查，阻塞发送）：`messages.ts:201` 的 `runCompactionWithUIState` → `compaction.ts` 的 `needsCompaction`（`:57-125`）用 token 估算（带 react-query 缓存，`context-tokens.ts`）调 `checkOverflow`（`compaction-detector.ts:31-58`），判定为 `isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compactionThreshold`，`compactionThreshold` 默认 0.6、可全局设置；模型上下文窗口来自 provider 设置或模型注册表（`getModelContextWindowFromSettings`/`getModelContextWindowSync`），未知模型不触发。
+- **执行与提交**：`runCompactionWithStreaming`（`compaction.ts:167-263`）流式生成摘要（UI 态经 `setCompactionUIState`），摘要消息打 `isSummary: true`；boundary 取"最后一个通过上下文合格性过滤且非 summary 的消息"（`compaction-boundary.ts:12-21`），生成 `CompactionPoint` 后经 `buildCompactionCommitPatch`（`compaction-commit.ts:28`）原子提交；摘要流式期间 boundary 被删除则放弃提交（`:240-247`）。压缩契约 `compactionPoints` 随 fork/复制重映射（数据语义见会话与消息管理笔记 1.4）。
 - **压缩可逆**：删除摘要消息（UI 上 SummaryMessage 的"删除摘要"操作）即恢复原文参与上下文计算，`compactionPoints` 中对应点随之清理（`chatStore.ts:803-816`）。
 - provider 侧 token 截断策略未在本次入口范围内完全核实（`packages/model-calls` 适配层职责）。
 
@@ -86,8 +94,8 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 
 `stores/session/messages.ts`：
 
-- `updateStreamingCache(sessionId, message)`（`:132-137`）：只调 `chatStore.updateMessageCache` → `updateSessionCache`/`updateSessionCacheSync`（`chatStore.ts:414-433`）→ 直接 `queryClient.setQueryData` 改 react-query 缓存，**不碰 storage**，注释里写明"性能优先，不检查 session 存在性"。
-- `persistStreamingMessage(sessionId, message, options)`（`:143-155`）：调 `chatStore.updateMessage` → `updateSessionWithMessages`（`chatStore.ts:351-392`），走每会话一个的 `UpdateQueue`（`stores/updateQueue.ts`，基于 `queueMicrotask` 的串行合并队列，避免并发 update 互相覆盖），**真正写 storage**。
+- `updateStreamingCache(sessionId, message)`（`:132-137`）：只调 `chatStore.updateMessageCache`（`chatStore.ts:414-433`）经内部缓存函数直接改 react-query 缓存（`queryClient.setQueryData`），**不碰 storage**，注释里写明"性能优先，不检查 session 存在性"。
+- `persistStreamingMessage(sessionId, message, options)`（`:143-155`）：调 `chatStore.updateMessage`（`updateSessionWithMessages`，`chatStore.ts:351-392`），走每会话一个的 `UpdateQueue`（`stores/updateQueue.ts`，基于 `queueMicrotask` 的串行合并队列，避免并发 update 互相覆盖），**真正写 storage**。
 
 ### 5.2 节流策略：2 秒定时 + 特例立即持久化
 
@@ -117,7 +125,7 @@ if (shouldPersist) {
 }
 ```
 
-也就是：**每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存**（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停/中止时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（`:543, 575, 605, 617, 673, 706, 907, 942, 963, 973`），确保最终态一定落盘。
+也就是：**每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存**（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停/中止时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（调用点 `:543, 575, 605, 617, 673, 706, 907, 942, 963, 973`），确保最终态一定落盘。
 
 `tool-call` 被特殊处理的原因写在注释里：tool-call 可能长时间阻塞在等用户批准（`user_exec_approval`/`file_mutation_approval`/`app_action_approval`），如果不立刻持久化，用户刷新/关闭应用会丢失这个待批准状态。
 
@@ -125,11 +133,11 @@ if (shouldPersist) {
 
 ### 5.3 一处疑似死代码：`throttleWriteSessionAtom.ts`
 
-`stores/atoms/throttleWriteSessionAtom.ts` 里实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`）——看起来是同一个"节流落盘"想法的另一份实现。全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。也就是说这个模块里"创建/写入 atom"的那部分（`createSessionAtom`、`WriteQueue`）是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
+`stores/atoms/throttleWriteSessionAtom.ts` 是疑似死代码：它实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`），看起来是同一个"节流落盘"想法的另一份实现。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。也就是说该模块"创建/写入 atom"的那部分（`createSessionAtom`、`WriteQueue`）是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
 
 ## 6. 完成、异常、半截流与最终回写
 
-- **成功收口**（`orchestration.ts:930-946`）：`generating: false`、清除 `cancel`、`finishReason`、`usage`、`generationDuration`，无条件 `persistStreamingMessage(..., { refreshCounting: true })`；首次成功会话标记（`markFirstSuccessfulChatCompleted`，`:943-945`）。
+- **成功收口**（`orchestration.ts:930-946`）：置 `generating: false`、清除 `cancel`，写回 `finishReason`/`usage`/`generationDuration`，并无条件 `persistStreamingMessage(..., { refreshCounting: true })`；首次成功会话另有完成标记（`markFirstSuccessfulChatCompleted`，`:943-945`）。
 - **tool-call 暂停收口**（`:896-909` 与 catch 分支 `:947-965`）：存在 `state === 'paused'` 的 tool-call part 或捕获到暂停错误时，消息以 `finishReason: 'tool-call-paused'` 落盘（`markToolCallPaused`），保留已执行部分的 contentParts。
 - **中止收口**（`:867-894`）：`persistAbortedGenerationIfNeeded` → `finishAbortedGeneration`（`generation-cancellation.ts:54-82`），`finishReason: 'canceled'`。
 - **错误收口**：`handleGenerationError`（`utils.ts:153-227`）把 `errorCode/error/errorExtra`（含 OCR 提供商、HTTP 状态码、requestId 等）写回消息并落盘（`orchestration.ts:969-975`）。
@@ -137,7 +145,10 @@ if (shouldPersist) {
 
 ## 7. 停止、重试、续写与重新生成
 
-- **停止**（数据侧）：`stopGeneratingMessages`（`generation-cancellation.ts:84-101`）逐个调 `message.cancel()`，然后对每个消息：`contentParts` 为空（还没产出任何内容的占位）→ `removeMessage` 直接删除；非空 → `finishAbortedGeneration` 收口（`cancelRunningToolCallBatch`，`:21-51`：`user_exec`/`code_execution` 收口为 `result`（`exitCode: 130, cancelled: true`），其余工具收口为 `error`（`cancelled: true`），reasoning part 补 duration）并 `persistMessage` 落盘。界面入口（停止按钮、消息内停止）见 Chat UI 笔记。
+- **停止**（数据侧）：`stopGeneratingMessages`（`generation-cancellation.ts:84-101`）逐个调 `message.cancel()`，然后对每个消息分类收口：
+  - `contentParts` 为空（还没产出任何内容的占位）→ `removeMessage` 直接删除；
+  - 非空 → `finishAbortedGeneration` 收口（`cancelRunningToolCallBatch`，`:21-51`）。工具批收口规则：`user_exec`/`code_execution` 收口为 `result`（`exitCode: 130, cancelled: true`），其余工具收口为 `error`（`cancelled: true`），reasoning part 补 duration，最后 `persistMessage` 落盘。
+  界面入口（停止按钮、消息内停止）见 Chat UI 笔记。
 - **重新生成/在新分支里重试**：`regenerateInNewFork`（`generation.ts:104-139`）在目标消息的上一条非 summary 消息处创建新 fork（`createNewFork`）后重新生成；fork pivot 会跳过锚定压缩摘要（`:123-130`）。`generateMoreInNewFork`（`:95-100`）先 `createNewFork` 再在分叉点下方续写。分支数据语义见会话与消息管理笔记 1.3。
 - **在下方继续回复**：`generateMore`（`generation.ts:80-93`）：picture 会话走生成锁串行，chat 会话刻意绕过锁、经 `createInactiveFork` 保存当前分支后以"替代回复"并行生成（`:63-78` 注释：消息写入由 chatStore UpdateQueue 串行化兜底）。
 - **工具错误重试**：`retryFromLastToolCallAfterApiError`（`orchestration.ts:1399-`）从最后可重试工具步骤继续；UI 上用户可选择重试整条消息或从最后工具步骤重试（入口见 Chat UI 笔记的消息操作）。
@@ -145,7 +156,7 @@ if (shouldPersist) {
 
 ## 8. 队列、多会话并发与后台生成
 
-- **同会话串行化**：`submitNewUserMessage`/`generate`/`generateMoreInNewFork`/`regenerateInNewFork` 走 `withSessionGenerationLock` 每会话 promise 尾链（`generation-lock.ts:8-26`）；替代回复（`generateMore` chat 分支）故意绕过锁并行运行，写入由 `UpdateQueue` 串行合并（`chatStore.ts:349-392`）。
+- **同会话串行化**：`submitNewUserMessage`/`generate`/`generateMoreInNewFork`/`regenerateInNewFork` 都走每会话 promise 尾链（`withSessionGenerationLock`，`generation-lock.ts:8-26`）；替代回复（`generateMore` chat 分支）故意绕过锁并行运行，写入由 `UpdateQueue` 串行合并（`chatStore.ts:349-392`）。
 - **多会话并行**：锁是 per-session 的，不同会话的生成互不阻塞；本次未发现全局发送队列或后台任务管理器——多会话并发与后台生成没有独立的调度层，都是直接发起的生成任务。
 - **流排空等待**：新生成在启动前会等待同会话未结算的 stream drain（`orchestration.ts:594-608`，可被自己的停止按钮中止等待），保证前一次停止的工具残留不会与新生成交错。
 - 多窗口并发写入的合并语义在会话与消息管理笔记 6 的 UpdateQueue 部分有部分覆盖。
@@ -154,11 +165,18 @@ if (shouldPersist) {
 
 ### 9.1 Copilot：本质是"系统提示词模板"，不是独立会话类型
 
-`CopilotDetail`（`src/shared/types.ts:94-110`）：`{id, name, prompt, picUrl(deprecated), avatar, backgroundImage, description, tags, screenshots, createdAt, updatedAt, usedCount, sourceId, starred}`。选中一个 copilot 时（`routes/index.tsx:211-234`），行为是把 `session.copilotId` 设成该 id，并把 `session.messages[0]` 设成 `{ role: 'system', contentParts: [{type:'text', text: copilot.prompt}] }`——创建出来的仍然是一个普通 `type: 'chat'` 的 Session，只是多了一个 `copilotId` 字段用于用量统计（`remote.recordCopilotUsage`，`routes/index.tsx:302-306`）。
+`CopilotDetail`（`src/shared/types.ts:94-110`）的字段如下（`picUrl` 已标记 deprecated）：
+
+```ts
+{ id, name, prompt, picUrl(deprecated), avatar, backgroundImage, description,
+  tags, screenshots, createdAt, updatedAt, usedCount, sourceId, starred }
+```
+
+选中一个 copilot 时（`routes/index.tsx:211-234`），行为是把 `session.copilotId` 设成该 id，并把 `session.messages[0]` 设成 `{ role: 'system', contentParts: [{type:'text', text: copilot.prompt}] }`——创建出来的仍然是一个普通 `type: 'chat'` 的 Session，只是多了一个 `copilotId` 字段用于用量统计（`remote.recordCopilotUsage`，`routes/index.tsx:302-306`）。
 
 ### 9.2 知识库：客户端只存 id/name 句柄，真正生效靠"工具"
 
-前端状态只是 `Pick<KnowledgeBase, 'id'|'name'>`，没有把知识库内容拉到前端。真正生效的地方是生成阶段的 `buildToolsForSession`（`stores/session/tools-builder.ts:241, 246-253`）：
+前端状态只是 `Pick<KnowledgeBase, 'id'|'name'>`，没有把知识库内容拉到前端。真正生效的地方是生成阶段的 `buildToolsForSession`（`stores/session/tools-builder.ts:241, 246-253`），判定逻辑见下方代码块：
 
 ```ts
 const kbSupported = Boolean(knowledgeBase) && model.isSupportToolUse('knowledge-base')
@@ -172,11 +190,22 @@ if (knowledgeBase && kbSupported) {
 
 ### 9.3 网页浏览：每会话布尔开关 + provider 默认值
 
-生成时 `getSessionWebBrowsing(sessionId, provider)`（`stores/session/utils.ts:33-40`，显式设置优先，否则 ChatboxAI 默认开、其他 provider 默认关）解析出布尔值，再在 `tools-builder.ts:242, 299-306` 判断 `webBrowsing && model.isSupportToolUse('web-browsing')` 决定要不要注册 `web_search` 工具，并按所选搜索 provider 的能力决定是否附加 `parse_link`（`:244, 303-305`）。同样是"工具开关"模式，不是"胶水 prompt"模式。界面上的默认值规则与按钮状态见 Chat UI 笔记。
+生成时 `getSessionWebBrowsing(sessionId, provider)`（`stores/session/utils.ts:33-40`；显式设置优先，否则 ChatboxAI 默认开、其他 provider 默认关）解析出布尔开关，再在 `tools-builder.ts:242, 299-306` 判断该开关与模型是否支持 `'web-browsing'`，都满足才注册 `web_search` 工具，并按所选搜索 provider 的能力决定是否附加 `parse_link`（`:244, 303-305`）。同样是"工具开关"模式，不是"胶水 prompt"模式。界面上的默认值规则与按钮状态见 Chat UI 笔记。
 
 ### 9.4 三者收敛到同一条流水线
 
-Agent 模式（`agent-mode.ts`，`agentModeValue` 经 `computeEffectiveAgentMode` 结合平台/模型能力收敛，`agent-harness.ts:215`）、知识库、网页浏览三个开关最终都汇入同一次调用——`orchestrateGeneration`（`orchestration.ts:713`）里的 `prepareAgentGenerationHarness`，内部统一走 `buildToolsForSession`（`agent-harness.ts:306-317`）。工具注册顺序（`tools-builder.ts:291-365`）：MCP（仅 agent 模式）→ `web_search`/`parse_link`（独立于 agent 模式）→ 知识库 → session-attachment RAG → 文件读取 → code_execution → 文件系统 → skills/`user_exec`/`install_skill`（仅 agent 模式）。也就是说输入区这几个"上下文增强按钮"在架构上是同一个工具注册管线里的布尔开关，每个开关各自受模型能力（`isSupportToolUse(scope)`）门控。
+Agent 模式（`agent-mode.ts`，`agentModeValue` 经 `computeEffectiveAgentMode` 结合平台/模型能力收敛，`agent-harness.ts:215`）、知识库、网页浏览三个开关最终都汇入同一次调用——`orchestrateGeneration`（`orchestration.ts:713`）里的 `prepareAgentGenerationHarness`，内部统一走 `buildToolsForSession`（`agent-harness.ts:306-317`）。工具注册顺序（`tools-builder.ts:291-365`）：
+
+- MCP（仅 agent 模式）；
+- `web_search`/`parse_link`（独立于 agent 模式）；
+- 知识库；
+- session-attachment RAG；
+- 文件读取；
+- code_execution；
+- 文件系统；
+- skills/`user_exec`/`install_skill`（仅 agent 模式）。
+
+也就是说输入区这几个"上下文增强按钮"在架构上是同一个工具注册管线里的布尔开关，每个开关各自受模型能力（`isSupportToolUse(scope)`）门控。
 
 ### 9.5 工具审批的暂停语义
 

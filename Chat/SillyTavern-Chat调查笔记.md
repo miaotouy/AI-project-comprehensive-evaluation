@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + Node 服务端 `src/`），聊天核心状态全部驻留前端内存：`chat` 是 `ChatMessage[]` 可变数组（`public/script.js:410`），连同 `chat_metadata`（`:453`）定期整份序列化到 JSONL 文件，无增量日志或数据库表。聊天状态机、swipe、checkpoint/branch、流式渲染主体都在 `public/script.js`（`chats.js` 只是消息级工具函数，`streaming-display.js` 是与主聊天渲染脱钩的悬浮组件）。详细结论已迁移至专项，本概览只保留端到端地图与入口。
+SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 + Node 服务端），聊天核心状态全部驻留前端内存：`chat` 是 `ChatMessage[]` 可变数组（`public/script.js:410`），连同 `chat_metadata`（`:453`）定期整份序列化到 JSONL 文件，无增量日志或数据库表。
+
+聊天状态机、swipe、checkpoint/branch 与流式渲染主体都集中在 `public/script.js`；`chats.js` 只是消息级工具函数，`streaming-display.js` 是与主聊天渲染脱钩的悬浮组件。详细结论已迁移至专项，本概览只保留端到端地图与入口。
 
 ## 产品表面与系统边界
 
@@ -25,12 +27,24 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + No
 
 ## 端到端聊天主链
 
-用户输入 → `sendTextareaMessage()`（`script.js:1705`）→ `Generate()`（`:4231`，开头可被 slash command 整体劫持短路，`processCommands` `:3066-3074`）→ 历史筛选与角色转换 → World Info 注入与 generation interceptors → 按 API 分支生成 text completion 或 OpenAI messages 结构 → 流式/非流式请求发出 → 流式分支由 `StreamingProcessor`（`:3481-3853`）把清洗后的文本逐段写回占位消息 DOM 与 `chat[]` → 流结束触发 `saveReply()`（`:6583`）落定消息 → `saveChat()`（`:7336-7421`）整份写回 JSONL；渲染入口 `printMessages()`（`:1475`）→ `redisplayChat()`（`:1497`）整体重绘 DOM。
+```text
+用户输入 → sendTextareaMessage()（script.js:1705）→ Generate()（:4231，开头可被 slash command 整体劫持短路，processCommands :3066-3074）
+→ 历史筛选与角色转换 → World Info 注入与 generation interceptors → 按 API 分支生成 text completion 或 OpenAI messages 结构
+→ 流式/非流式请求发出 → 流式分支由 StreamingProcessor（:3481-3853）把清洗后的文本逐段写回占位消息 DOM 与 chat[]
+→ 流结束触发 saveReply()（:6583）落定消息 → saveChat()（:7336-7421）整份写回 JSONL
+→ 渲染入口 printMessages()（:1475）→ redisplayChat()（:1497）整体重绘 DOM
+```
 
 ## 核心对象与状态权威
 
-- `chat`（`script.js:410`）：消息事实源，所有渲染、生成、保存逻辑直接读写该数组；消息关键字段 `mes`/`swipe_id`/`swipes`/`swipe_info`，`ensureSwipes()`（`:6778`）负责老文件读取时懒惰补齐。
-- `chat_metadata`（`:453`）：`main_chat`（checkpoint 回链）、`tainted`（是否脱离"纯净"首条问候语）、`integrity`（防并发覆写 UUID slug）、`attachments`。
+- `chat`（`script.js:410`）：消息事实源，所有渲染、生成、保存逻辑直接读写该数组。
+- 消息关键字段：正文 `mes` 与 swipe 候选（`swipe_id`/`swipes`/`swipe_info`）。
+- `ensureSwipes()`（`:6778`）负责老文件读取时懒惰补齐 swipe 数据。
+- `chat_metadata`（`:453`）：
+  - `main_chat`：checkpoint 回链；
+  - `tainted`：是否脱离"纯净"首条问候语；
+  - `integrity`：防并发覆写 UUID slug；
+  - `attachments`。
 - 群聊对象：成员/设置存 `<user>/groups/<id>.json`，`chats: string[]` 列出该群聊天文件；群聊消息用 `extra.gen_id` 标记同一轮生成。
 - 持久化权威：服务端文件；加载时一次性整份读入内存（`getChat()` `:7575-7623`、`getGroupChat()` `group-chats.js:255-320`），无分页读取。
 - 可见 UI 状态：`power_user` 设置、DOM 节点与 body 属性（如 `data-generating`）为展示层状态，不是消息事实源。
@@ -46,7 +60,8 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 `public/` + No
 
 ## 关键能力与已确认边界
 
-- **Swipe**：消息级候选回复（`swipes` 并行数组），`getOverswipeBehavior()`（`:9163-9181`）状态机区分 `REGENERATE`/`LOOP`/`PRISTINE_GREETING`/`NONE`；备选开场白复用 swipe 机制塞进第 0 条消息；Swipe Picker 支持从某个候选开分支。
+- **Swipe**：消息级候选回复（`swipes` 并行数组），备选开场白复用 swipe 机制塞进第 0 条消息，Swipe Picker 支持从某个候选开分支；越界行为由 `getOverswipeBehavior()`（`:9163-9181`）状态机决定，四档取值：
+  - `REGENERATE`、`LOOP`、`PRISTINE_GREETING`、`NONE`
 - **Checkpoint 与 Branch 不对称**：共用"截断另存为新文件"的底层（`bookmarks.js`），但 checkpoint 不跳转、`extra.bookmark_link` 单值且新建覆盖；branch 必定跳转、`extra.branches` 数组追加、支持连同指定 swipe 版本截断。回到主聊天只能靠 `/checkpoint-exit` 手动切文件，无树状导航 UI。
 - **流式渲染两套机制**：主聊天走 `StreamingProcessor`（直接写 `innerHTML`，流式期间隐藏 swipe 按钮，渲染事件只在流结束时 emit 一次）；`streaming-display.js` 是仅 `/profile-genstream` 使用的独立浮层，脱离 `chat[]`。
 - **渲染模型非虚拟化**：默认只渲染最近 100 条（`power_user.chat_truncation`，`power-user.js:133`），"Show more"单向向前追加永不回收；`refreshSwipeButtons()`（`:9190-9249`）全量扫描已渲染 DOM。

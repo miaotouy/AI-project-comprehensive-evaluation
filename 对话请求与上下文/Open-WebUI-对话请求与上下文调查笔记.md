@@ -45,16 +45,20 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 
 1. `submitPrompt`（2493-2540 行）：收集非图片文件（2496-2506 行）→ 构造用户消息（uuid、`parentId=history.currentId`、`childrenIds`、timestamp=Unix 秒、`models`，2509-2519 行）→ 挂到 history 树并更新 `currentId`（2521-2529 行）→ `sendMessage`；
 2. `sendMessage`（2773-2935 行）：为每个选中模型创建 assistant 占位消息（`modelIdx` 保留列序，2808-2845 行）；无 chat_id 时创建 `temporary:{socket.id}` 会话 ID（2868-2871 行，`src/lib/utils/chatId.ts:4`）；视觉能力检查（2880-2902 行）；以单请求多模型方式只发主模型，`message_ids` 列表全量转发（2904-2930 行）；
-3. `sendMessageSocket`（2974-3259 行）：请求体含 `stream`（默认 true）、`messages`（**仅临时会话携带对话历史**，持久会话由后端从 DB 加载，3037-3093 行）、`params`（设置+会话参数+stop tokens）、`files`、`filter_ids`、`tool_ids`/`skill_ids`/`terminal_id`/`tool_servers`、`features`、`variables`、`session_id`/`chat_id`/`folder_id`、`id`、`message_ids`、`parent_id`/`user_message`、`regeneration_prompt`、`assistant_message_id`（续写时）、`background_tasks`（标题/标签仅新会话首消息下发、追问恒发，3171-3183 行）、`stream_options.include_usage`；
+3. `sendMessageSocket`（2974-3259 行）：请求体按用途分四组——
+   - 消息与流：`stream`（默认 true）、`messages`（**仅临时会话携带对话历史**，持久会话由后端从 DB 加载，3037-3093 行）；
+   - 参数：`params`（设置+会话参数+stop tokens）、`stream_options.include_usage`；
+   - 能力与注入：`files`、`filter_ids`、`tool_ids`/`skill_ids`/`terminal_id`/`tool_servers`、`features`、`variables`；
+   - 身份与续写：`session_id`/`chat_id`/`folder_id`、`id`、`message_ids`、`parent_id`/`user_message`、`regeneration_prompt`、`assistant_message_id`（续写时）、`background_tasks`（标题/标签仅新会话首消息下发、追问恒发，3171-3183 行）；
 4. 响应处理（3221-3253 行）：收集 `task_ids`；新会话返回的 `chat_id` 更新 store + URL `/c/{id}`（`history.replaceState`，3238 行）+ 刷新列表 + 持久化会话 params。
 
 ### 1.2 服务端 `chat_completion` 端点（main.py 1052-1794 行）
 
 1. 请求解析（1062-1178 行）：`message_ids` 支持 list `[{model_id, message_id, modelIdx}]` 或 legacy dict（1145-1155 行）；`user_message`/`chat_variables`/`tool_servers`（无 `features.direct_tool_servers` 权限时丢弃，1168-1178 行）从请求体中取出；model params 合并优先级：全局默认 < 模型级 < 请求级（1086-1097 行）；
-2. metadata 构造（1180-1209 行）：user_id/chat_id/session_id/folder_id/filter_ids/tool_ids/files/features/variables/model/direct/params（含 stream_delta_chunk_size、reasoning_tags、compact_token_threshold、function_calling）；
+2. metadata 构造（1180-1209 行）：把用户标识、会话标识、注入字段与请求参数（含 `stream_delta_chunk_size`、`reasoning_tags`、`compact_token_threshold`、`function_calling`）收进 metadata 后向下传递；
 3. 新会话判定（1139 行）：`parent_id` 存在于请求体且为 None 且无 `chat_id` 时 `is_new_chat=True`，生成 uuid4 作为 chat_id（1211-1212 行）；
 4. `channel:` 分支权限门（1223-1258 行）：群聊/DM 需频道成员，其余需 `AccessGrants` 写权限，且 message_id 必须属于该频道；
-5. 新会话持久化（1260-1392 行）：构造含全部 assistant 占位符的 history（保留 modelIdx，1266-1291 行）→ `insert_new_chat`（1293 行）→ `EVENTS.CHAT_CREATED`（1318 行）→ `emit_chat_list_event`（1325 行）→ 用户消息与各 assistant 占位的 `EVENTS.MESSAGE_CREATED`（1326-1351 行）→ 插入 chat 文件（1353-1369 行）→ 初始标题后台任务（`run_initial_title_generation`，1386-1392 行，仅当请求带 `background_tasks.title_generation`）；
+5. 新会话持久化（1260-1392 行）：构造含全部 assistant 占位符的 history（保留 `modelIdx`，1266-1291 行）→ `insert_new_chat`（1293 行）→ 依次发 `EVENTS.CHAT_CREATED`（1318 行）、`emit_chat_list_event`（1325 行）、用户消息与各 assistant 占位的 `EVENTS.MESSAGE_CREATED`（1326-1351 行）→ 插入 chat 文件（1353-1369 行）→ 初始标题后台任务（`run_initial_title_generation`，1386-1392 行，仅当请求带 `background_tasks.title_generation`）；
 6. 已有会话（1393-1533 行）：所有权校验（1395 行）→ 持久化 chat 级 fields 与变量（1409-1420 行）→ 保存用户消息（含取消 `chat.user_message` 定时器，1441-1449 行）→ grandparent 链接 childrenIds（1451-1461 行）→ 保存全部 assistant 占位符（1481-1533 行）；
 7. `process_chat`（1547-1570 行）：`process_chat_payload`（1549 行）→ `chat_completion_handler`（真实模型调用，1551 行）→ provider 返回 ≥400 转异常（1558-1566 行）→ `build_chat_response_context`（1568 行）→ `process_chat_response`（1570 行）；
 8. 取消/异常（1571-1622 行）：`CancelledError` 经 `asyncio.shield` 发 `chat:tasks:cancel`（1575-1580 行）；普通异常把 `error` 写入消息并发 `chat:message:error` + `chat:tasks:cancel`（1587-1610 行）；无 chat_id 的 legacy/direct 路径转 HTTP 400；
@@ -65,7 +69,7 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 ## 2. 上下文来源与拼装顺序
 
 - `process_chat_payload`（`utils/middleware.py:2248-...`）：管线顺序见文件内注释（2253-2255 行：Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files）；arena 模型在入口处解析为具体子模型（2260-2284 行）；
-- 持久会话的历史由后端从 DB 加载（`load_messages_from_db`，`middleware.py:2040`），优先消息表行以保留结构化 `output`（2295-2318 行），续写时额外加载被续写 assistant 消息（2305-2315 行）；system prompt 从请求 `messages[0]` 提取后置前（2317-2318 行）；图片文件转 `image_url` content part（2320-2342 行）——即上下文的"历史部分"以数据库行/快照为准（数据侧见会话与消息管理笔记）；
+- 持久会话的历史由后端从 DB 加载（`load_messages_from_db`，`middleware.py:2040`）：优先消息表行以保留结构化 `output`（2295-2318 行），续写时额外加载被续写 assistant 消息（2305-2315 行）；system prompt 从请求 `messages[0]` 提取后置前（2317-2318 行）；图片文件转 `image_url` content part（2320-2342 行）——即上下文的"历史部分"以数据库行/快照为准（数据侧见会话与消息管理笔记）；
 - 外部能力以请求体字段注入：`tool_ids`/`skill_ids`/`terminal_id`/`tool_servers`、`filter_ids`、`files`、`variables`、`features`（请求体构造见 1.1 第 3 步）。
 
 ## 3. 预算、截断与压缩
@@ -87,12 +91,26 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 ### 5.1 服务端（socket/main.py）
 
 - 事件注册：`usage`（339）、`heartbeat`（421）、`events:chat`（534，处理 `last_read_at` → 房间广播 `chat:list`）、`events:channel`（487）、Ydoc 协作事件等；
-- `get_event_emitter`（968 行）：向 `user:{user_id}` 房间发 `'events'`，payload 结构 `{chat_id, message_id, data: event_data}`（986-995 行）；`update_db=True` 时按类型落库：`status`→status_history 追加、`message`→content 追加、`replace`→content 覆盖、`embeds`/`files`→追加或覆盖、`source`/`citation`→sources 追加（997-1092 行，数据语义见会话与消息管理笔记第 6 节）；
+- `get_event_emitter`（968 行）：向 `user:{user_id}` 房间发 `'events'`，payload 结构 `{chat_id, message_id, data: event_data}`（986-995 行）；`update_db=True` 时按类型落库（997-1092 行，数据语义见会话与消息管理笔记第 6 节）：
+
+  | 事件类型 | 落库方式 |
+  |---|---|
+  | `status` | status_history 追加 |
+  | `message` | content 追加 |
+  | `replace` | content 覆盖 |
+  | `embeds` / `files` | 追加或覆盖 |
+  | `source` / `citation` | sources 追加 |
 - `_make_channel_emitter`（898-965 行）：`channel:` 会话专用，`chat:completion` 按 `THROTTLE_INTERVAL = 0.15` 秒节流后更新频道消息并 emit `events:channel`（908、956 行）。
 
 ### 5.2 流式响应处理器（utils/middleware.py `streaming_chat_response_handler`，3750 行）
 
-- `extra_params` 注入 `__event_emitter__`/`__event_call__`/`__user__`/`__metadata__`/`__oauth_token__`/`__request__`/`__model__`（3766-3774 行）→ 过滤器（3776-3778 行）→ task_id 生成（3784 行）→ 内嵌 `response_handler`：`tag_output_handler`（reasoning/solution/code_interpreter 标签切分，3792 行起）、delta 缓冲（`queue_pending_delta_data`，4203 行，按 delta_count/delta_chunk_size 聚合）、SSE `data:` 前缀解析、多轮工具调用（`execute_tool_call`，4969 行）、结束处 `publish_chat_finished_event`（5538 行）+ `outlet_filter_handler`（5552 行）+ `background_tasks_handler`（5553 行）、`stream_wrapper` 重试/取消包装（5600 行，取消时 `aclose` 上游 body 并保存半截状态 5554-5574 行）。
+按处理顺序分五步：
+
+1. 注入：`extra_params` 给管道注入 `__event_emitter__`/`__event_call__`/`__user__`/`__metadata__`/`__oauth_token__`/`__request__`/`__model__` 七个参数（3766-3774 行）→ 过滤器（3776-3778 行）→ task_id 生成（3784 行）；
+2. 标签切分：内嵌 `response_handler` 的 `tag_output_handler` 按 reasoning/solution/code_interpreter 标签切分（3792 行起）；
+3. 缓冲：`queue_pending_delta_data`（4203 行）按 delta_count/delta_chunk_size 聚合 delta；
+4. 工具与收尾：SSE `data:` 前缀解析、多轮工具调用（`execute_tool_call`，4969 行）、结束处 `publish_chat_finished_event`（5538 行）+ `outlet_filter_handler`（5552 行）+ `background_tasks_handler`（5553 行）；
+5. 取消包装：`stream_wrapper` 重试/取消包装（5600 行，取消时 `aclose` 上游 body 并保存半截状态 5554-5574 行）。
 
 ### 5.3 前端消费（Chat.svelte）
 
@@ -123,7 +141,10 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 ## 7. 停止、重试、续写与重新生成
 
 - **停止**：前端 `stopResponse`（`Chat.svelte:3303-3345`）→ `stopTasksByChatId`（会话级）或逐个 `stopTask`（3305-3317 行）→ 所有 response 消息标记 `done`（3321-3329 行）→ `generationController.abort()`（3338 行，仅 MoA 合并的 fetch 流）→ `processNextInQueue`；
-- **任务调度**（`tasks.py`）：进程内 `tasks: dict[str, asyncio.Task]` + `item_tasks`（14-15 行）；Redis 键 `{prefix}:tasks`（哈希）、`{prefix}:tasks:item`（集合）、`{prefix}:tasks:commands`（pubsub，18-20 行）；`redis_task_command_listener`（23-39 行）**只处理 `stop` 命令**，按 task_id 取消本地任务——这是多实例协作的唯一通道；`create_task`（102-122 行）返回 `(task_id, task)` 并写 Redis；`stop_task`（143-177 行）：Redis 模式 PUBLISH 广播 stop 命令并直接清理 Redis 记账，本地模式 `task.cancel()` 并等待取消；`stop_item_tasks`（180-193 行）与会话级停止对应；
+- **任务调度**（`tasks.py`）：
+  - 记账：进程内 `tasks: dict[str, asyncio.Task]` + `item_tasks`（14-15 行）；Redis 键 `{prefix}:tasks`（哈希）、`{prefix}:tasks:item`（集合）、`{prefix}:tasks:commands`（pubsub，18-20 行）；
+  - 监听：`redis_task_command_listener`（23-39 行）**只处理 `stop` 命令**，按 task_id 取消本地任务——这是多实例协作的唯一通道；
+  - 创建/停止：`create_task`（102-122 行）返回 `(task_id, task)` 并写 Redis；`stop_task`（143-177 行）Redis 模式 PUBLISH 广播 stop 并直接清理 Redis 记账，本地模式 `task.cancel()` 并等待取消；`stop_item_tasks`（180-193 行）与会话级停止对应；
 - **重新生成** `regenerateResponse`（3380-3411 行）：多模型会话按 `modelId + modelIdx` 单列重生成（3402-3408 行），可带 `regeneration_prompt`（后端把该 prompt 追加为最后一条 user 消息，`middleware.py:2344-2345`）；
 - **继续生成** `continueResponse`（3413-3437 行）：done 消息重置为未完成（3419 行），传 `assistant_message_id`，后端加载原回复内容续写（1.2/2 节）；
 - **MoA 合并** `mergeResponses`（3439-3489 行）：调 `generateMoACompletion` + `createOpenAITextStream`，走独立的 HTTP fetch 流（非 Socket.IO），结果写入 `message.merged`；
@@ -133,7 +154,12 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 
 - 提交排队：`chatRequestQueues` store（`src/lib/stores/index.ts:107`）+ `processNextInQueue`（`Chat.svelte:2157-2177`，合并多次提交的 prompt 与文件后一次性发送）——前端按会话串行化提交，同一会话生成期间的新提交进队列；不同会话并行；后台生成由服务端任务承载，`chat:active` 事件驱动前端状态；
 - 多模型并行（MoA / side-by-side）是内建概念而非插件：一个请求 fan-out 多个任务（1.2 第 10 步），消息树用 `modelIdx` 保持列序，UI 支持逐列重新生成与合并（7）；
-- `background_tasks_handler`（`middleware.py:3194-3409`）：**FOLLOW_UP_GENERATION**（3251 行，生成追问并落库/事件）→ **TITLE_GENERATION**（3302 行，标题生成并 `chat:title`）→ **TAGS_GENERATION**（3364 行，标签生成并 `chat:tags`）→ `review_memory_after_turn`（3401 行，记忆抽取）；前端通过 `background_tasks` 字段按需携带开关，标题/标签仅新会话首消息下发，追问恒发（1.1 第 3 步）；会话在生成期间被删除则跳过后台任务（3207-3209 行）；
+- `background_tasks_handler`（`middleware.py:3194-3409`）按固定顺序执行四类任务：
+  1. `FOLLOW_UP_GENERATION`（3251 行）：生成追问并落库/事件；
+  2. `TITLE_GENERATION`（3302 行）：标题生成并发 `chat:title`；
+  3. `TAGS_GENERATION`（3364 行）：标签生成并发 `chat:tags`；
+  4. `review_memory_after_turn`（3401 行）：记忆抽取。
+  前端通过 `background_tasks` 字段按需携带开关，标题/标签仅新会话首消息下发，追问恒发（1.1 第 3 步）；会话在生成期间被删除则跳过后台任务（3207-3209 行）；
 - `outlet_filter_handler`（3412 行）：outlet 过滤器内联执行，输出经 `chat:outlet` 事件同步回写前端（1030-1040 行处理）；
 - 任务系统是「asyncio + Redis 记账」而非任务队列：任务不跨 worker 迁移，Redis 仅用于跨实例取消（pubsub）与状态查询（哈希/集合）。
 

@@ -26,163 +26,168 @@ NextChat 没有引入完整 UI 组件库。弹窗、确认框、输入框、Toas
 
 `package.json` 无 antd/Radix/Tailwind/framer-motion，公共依赖只有 `@hello-pangea/dnd`（会话列表拖拽）、emoji-picker-react、mermaid、html-to-image（导出）等点状工具。
 
-**根装配。** `app/layout.tsx` 输出 `<meta name="config">`（getClientConfig 构建期配置）、site.webmanifest 链接与 `serviceWorkerRegister.js`；`app/page.tsx` 渲染 Home。
+**根装配。** 根布局文件（`app/layout.tsx`）输出构建期配置 meta（getClientConfig 提供）、站点 manifest 链接与 Service Worker 注册脚本；入口页 `app/page.tsx` 渲染 Home。
 
-Home（`app/components/home.tsx:237-272`）依次执行 useSwitchTheme、useLoadData、useHtmlLang、访问配置拉取与可选 MCP 初始化，然后 useHasHydrated（`home.tsx:127-135`，仅 effect tick 节流，不检查 store 的 _hasHydrated）之后渲染 `ErrorBoundary > Router(HashRouter) > Screen`。
-- **Screen**（`home.tsx:160-221`）：按路径渲染 Artifacts/Auth/SD 独立分支或 SideBar + WindowContent + Routes，页面组件全部 dynamic 懒加载；应用外壳容器是"窗口卡片"形态（桌面 Web 90vw/1200px 圆角卡片，`home.module.scss:1-18`）。
+Home（`app/components/home.tsx:237-272`）依次执行主题、数据加载、文档语言、访问配置与可选 MCP 等初始化，再经水合门控（`home.tsx:127-135`，仅做渲染节流，不检查 store 水合标志）后渲染错误边界包裹的 HashRouter 客户端路由与 Screen 外壳。
+- **Screen**（`home.tsx:160-221`）：按路径分发到若干独立页面（如 Artifacts、Auth、SD）或由侧栏、内容区与路由组成的常规布局，页面组件全部懒加载；应用外壳是"窗口卡片"形态（桌面 Web 90vw 宽、1200px 上限的圆角卡片，`home.module.scss:1-18`）。
 
 **无 Provider 树。** 全应用没有 Context Provider 装配（浮层不走 portal 也不经 provider）；grep createPortal 全 app 目录无匹配，唯一 ResizeObserver 出现在 artifacts 的 iframe 内嵌脚本（`app/components/artifacts.tsx:82`）。
 
-**持久化。** 全局 store 统一走 createPersistStore（`app/utils/store.ts:29-78`）→ zustand persist + `createJSONStorage(() => indexedDBStorage)`；
+**持久化。** 全局 store 统一经持久化工厂（`app/utils/store.ts:29-78`）接入 zustand 的 persist 中间件，存储适配器（`app/utils/indexedDB-storage.ts:7-45`）优先使用 idb-keyval，失败时回退 localStorage，并跳过水合完成前的写入。
 
-indexedDBStorage（`app/utils/indexedDB-storage.ts:7-45`）优先 idb-keyval，失败回退 localStorage，且 setItem 会跳过未水合（`_hasHydrated === false`）的写入。
-
-Store 键见 `app/constant.ts:90-101`（chat/config/access/mask/prompt/plugin/update/sync/sd-list/mcp）。
+会话、配置、访问、面具、提示词、插件、更新、同步、SD 列表与 MCP 等十个 store 的键名集中定义在 `app/constant.ts:90-101`。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-- **自研公共组件**（`app/components/ui-lib.tsx`）：Modal、Popover、Card、`List/ListItem`、Loading、`Input/PasswordInput`、Select、Selector（列表选择器，模型选择复用）、FullScreen（原生 requestFullscreen API 封装，`ui-lib.tsx:555-589`）；
+- **自研公共组件**集中在 `app/components/ui-lib.tsx`：浮层类（Modal、Popover）、卡片与列表、加载指示、表单控件（Input/PasswordInput、Select）、列表选择器 Selector（模型选择复用）与封装原生全屏 API 的 FullScreen（`ui-lib.tsx:555-589`）；
 
-  按钮是 IconButton（`app/components/button.tsx:9-66`，SVG 图标 + 可选文字，aria prop 可选）；头像/表情是 Avatar/AvatarPicker（`app/components/emoji.tsx`，emoji 走 jsdelivr CDN）。
+  图标按钮组件（`app/components/button.tsx:9-66`）由 SVG 图标与可选文字组成，并支持可选 aria 属性；头像与表情选择组件（`app/components/emoji.tsx`）从 jsdelivr CDN 加载 emoji。
 
 **状态所有权。** 弹窗/Toast 是**无状态命令式 API**——每次调用在组件树外自建根节点，无队列、无单例、无 store 参与（区别于 Cherry Studio 的 popup/toast store）；
 
-界面偏好（theme/sidebarWidth/fontSize/tightBorder/submitKey 等）全部在 useAppConfig（`app/store/config.ts:41-107`）并持久化；会话与消息在 useChatStore；窗口几何状态由 Tauri 侧 tauri-plugin-window-state 持久化（见 §7）。
+界面偏好（明暗、侧栏宽度、字号、紧凑边框、回车键行为等）统一由应用配置 store（`app/store/config.ts:41-107`）持有并持久化，会话与消息归会话 store 管理，窗口几何状态由 Tauri 侧窗口状态插件持久化（见 §7）。
 
-**消费方式。** 业务组件通过 `useChatStore()`/`useAppConfig()`（zustand hooks）或命令式 `showXxx()` 调用；`config.update()` 走深拷贝合并（`app/utils/store.ts:61-68`）。
+**消费方式。** 业务组件通过 zustand hooks（如会话与配置 store）或命令式入口调用；配置更新走深拷贝合并（`app/utils/store.ts:61-68`）。
 
 ## 2. 弹窗、浮层与菜单
 
-- **Modal 组件**（`ui-lib.tsx:122-179`）：标题栏含最大化/最小化（-max 类切 95vw/95vh）与关闭按钮；Esc 关闭由组件内部 useEffect 在 window 上挂 keydown 监听实现（`ui-lib.tsx:123-136`，依赖数组为空，首次渲染的 onClose 闭包常驻）。
-- **命令式弹窗四件套**（`ui-lib.tsx:181-475`）：showModal/showConfirm/showPrompt/showImageModal 均为 document.createElement("div") + createRoot(div)，div 挂 `.modal-mask`（`app/styles/globals.scss:246-261`，z-index: 9999，flex 居中，移动端 align-items: flex-end 底部弹起）。
+- **Modal 组件**（`ui-lib.tsx:122-179`）：标题栏含最大化/最小化（以 -max 类切换 95vw/95vh）与关闭按钮；Esc 关闭由组件挂载时在 window 上注册 keydown 监听实现（`ui-lib.tsx:123-136`，依赖数组为空，首次渲染的关闭回调闭包常驻）。
+- **命令式弹窗四件套**（`ui-lib.tsx:181-475`）：showModal、showConfirm、showPrompt 与 showImageModal 实现一致——每次调用自建 div 节点与 React root，节点挂到 modal-mask 遮罩样式上（`app/styles/globals.scss:246-261`，z-index 9999、flex 居中、移动端底部弹起）。
 
-  遮罩点击关闭靠 div.onclick 里 `e.target === div` 判定（`ui-lib.tsx:193-197`）；关闭即 `root.unmount() + div.remove()`，无两阶段退场（区别于 Cherry 的 200ms 延迟卸载）。showConfirm 返回 `Promise<boolean>`，确认按钮 autoFocus；
+  遮罩点击通过事件目标与遮罩节点是否相等来判定（`ui-lib.tsx:193-197`）；关闭即卸载 React root 并移除节点，没有两阶段退场（区别于 Cherry Studio 的 200ms 延迟卸载）。showConfirm 返回布尔结果的 Promise 且确认按钮自动聚焦，showPrompt 返回字符串结果。
 
-  showPrompt 返回 `Promise<string>`。
+**层级。** 无统一 z-index 管理，四层硬编码值：
+- modal-mask 遮罩 9999
+- Toast 99999（§3）
+- Selector 全屏遮罩 999（`ui-lib.module.scss:301-311`）
+- Popover 内联 z-index 2（`ui-lib.module.scss:10-13`）
 
-**层级。** modal-mask 9999、toast 99999（§3）、Selector 全屏遮罩 999（`ui-lib.module.scss:301-311`）、Popover 内联 z-index: 2（`ui-lib.module.scss:10-13`）——无统一 z-index 管理，四层硬编码值。
+**焦点与滚动。** 本次未找到焦点陷阱或焦点归还逻辑（无 Tab 键圈禁、无焦点事件兜底）；body 全局滚动锁定（`globals.scss:97-118`），应用滚动都在容器内部，弹窗无需滚动锁定。自动聚焦只有确认弹窗的确认按钮与提示输入的 autoFocus。
+- **Popover**（`ui-lib.tsx:29-46`）：不走 Portal——相对定位容器内的绝对定位内容面板（宽 350px、右对齐，`ui-lib.module.scss:15-26`）配固定半透明模糊遮罩（popover-mask）点击关闭；内容超出屏幕边界时无翻折处理（静态推断）。
 
-**焦点与滚动。** 本次未找到焦点陷阱/焦点归还逻辑（无 tabIndex 圈禁、无 focus 事件兜底）；body 全局 overflow: hidden（`globals.scss:97-118`），应用滚动都在容器内部，弹窗无需滚动锁定。自动聚焦只有 showConfirm 确认按钮与 PromptInput 的 autoFocus。
-- **Popover**（`ui-lib.tsx:29-46`）：非 portal——position: relative 容器内 absolute 内容面板（宽 350px，右对齐，`ui-lib.module.scss:15-26`）+ fixed 半透明模糊遮罩（`.popover-mask`）点击关闭；内容定位溢出屏幕边界无翻折处理（静态推断）。
-
-**菜单类。** 本次未找到 Tooltip、ContextMenu 或 Dropdown 公共机制（`ui-lib.tsx` 导出清单与 `app/components` 目录内均无对应文件）；代码块"复制"按钮是纯 CSS hover 显示（`globals.scss:273-305`）；输入区按钮组的弹出面板复用 Popover/Selector/Modal（见 Chat UI 笔记 §3/§4）。
+**菜单类。** 本次未找到 Tooltip、ContextMenu、Dropdown 之类的公共菜单机制（ui-lib 导出清单与公共组件目录内均无对应文件）；代码块"复制"按钮是纯 CSS hover 显隐（`globals.scss:273-305`）；输入区按钮组的弹出面板复用既有浮层组件（见 Chat UI 笔记 §3/§4）。
 
 **销毁时机。** 路由切换时组件树内弹窗随卸载；命令式弹窗独立于路由，只随调用方 close 逻辑销毁（静态推断，未运行验证）。
 
 ## 3. 通知、加载态与错误反馈
 
-- **Toast**（`ui-lib.tsx:232-256`）：`showToast(content, action?, delay=3000)` 每次调用独立建 div（`.show`，`ui-lib.module.scss:183-198`，z-index: 99999，position: fixed 底部居中），delay 后加 `.hide` 类（0.3s 退场）再 setTimeout unmount 移除。
+- **Toast**（`ui-lib.tsx:232-256`）：showToast 每次调用独立创建节点（`.show` 类，`ui-lib.module.scss:183-198`，z-index 99999、底部居中 fixed），延时到期后加 `.hide` 类播放 0.3s 退场，再由定时器卸载。
 
-  **无堆叠/队列机制**：多个 toast 并存时都是 fixed 在窗口底部同一区域，视觉上会重叠（静态推断，未运行验证）。支持一个 action 按钮（如删除会话的 5 秒撤销：`app/store/chat.ts:368-377` 传 `delay=5000`）；无成功/错误/严重级别区分，无 role/aria-live 语义。
+  **无堆叠/队列机制**：多个 toast 同时存在时都固定在窗口底部同一区域，视觉上会重叠（静态推断，未运行验证）。每条支持一个操作按钮（如删除会话的 5 秒撤销，`app/store/chat.ts:368-377` 以 5000ms 延时实现）；没有成功/错误/严重级别区分，也没有 role 与 aria-live 语义。
 
-**Loading。** Loading（全屏三圆点 SVG，`home.tsx:34-41`）用作 `dynamic()` 页面懒加载 fallback（`home.tsx:43-83`）与首屏 useHasHydrated 门控；`ui-lib.tsx:98-112` 另有一个等价全屏 Loading。消息流式打字/预览态在 Chat UI 笔记 §5。
+**Loading。** 全屏三圆点 SVG 加载组件（`home.tsx:34-41`）用作页面懒加载的 fallback（`home.tsx:43-83`）与首屏水合门控；`ui-lib.tsx:98-112` 另有一个等价的全屏版本。消息流式打字/预览态在 Chat UI 笔记 §5。
 
-**空状态。** MCP 市场有 "No servers available"（`mcp-market.tsx:463-464`）、SD 页有 Locale.Sd.EmptyRecord（`sd.tsx:332`）；会话列表无空态渲染（`chat-list.tsx:134-173` 只 map sessions，最后一条会话删除时 store 自动 push 空会话 `store/chat.ts:352-355`）；
+**空状态。** 按位置分三类：
+- MCP 市场有 "No servers available" 文案（`mcp-market.tsx:463-464`），SD 页有本地化空记录文案（`sd.tsx:332`）；
+- 会话列表无空态渲染（`chat-list.tsx:134-173` 只遍历会话，最后一条删除时 store 自动补空会话 `store/chat.ts:352-355`）；
+- 聊天窗无欢迎/空态文本（grep Welcome|EmptyChat 无匹配，检查范围 app 目录）。
 
-聊天窗无欢迎/空态文本（grep Welcome|EmptyChat 无匹配，检查范围 app 目录）。
+**错误边界。** ErrorBoundary（`app/components/error.tsx:19-73`）以 class 组件挂在 Home 最外层，捕获后展示错误栈、Report This Error（GitHub issue 链接）与 Clear All Data；清空需经确认弹窗，确认后先导出数据再清除。
 
-**错误边界。** ErrorBoundary（`app/components/error.tsx:19-73`）class 组件挂在 Home 最外层，捕获后展示错误栈、Report This Error（GitHub issue 链接）与 Clear All Data（showConfirm 确认后先 `useSyncStore.export()` 再 `clearAllData()`）。
-
-**系统通知。** 仅 Tauri 桌面端、仅应用更新场景（`app/store/update.ts:92-128`，window.__TAURI__.notification.sendNotification）；聊天完成无系统通知（Chat UI 笔记 §7 已确认，grep Notification 全 app 目录无其他消费点）。
+**系统通知。** 只出现在 Tauri 桌面端的应用更新场景（`app/store/update.ts:92-128`，经 window.__TAURI__.notification 发送）；聊天完成不触发系统通知（Chat UI 笔记 §7 已确认，app 目录 grep Notification 无其他消费点）。
 
 ## 4. 主题、视觉 token 与持久化
 
-**权威源。** useAppConfig store 的 config.theme（`Theme.Auto/Dark/Light`，`app/store/config.ts:33-37`，默认 auto，:48），持久化到 IndexedDB；Web 端无主进程概念，浏览器内唯一权威。
+**权威源。** 主题权威源是应用配置 store 的 config.theme（三态枚举 `Theme.Auto/Dark/Light`，`app/store/config.ts:33-37`，默认 auto），持久化到 IndexedDB；Web 端无主进程，浏览器内唯一权威。
 
-**应用链路。** useSwitchTheme（`home.tsx:85-114`）effect 中给 document.body 加减 `light`/`dark` 类；
+**应用链路。** useSwitchTheme（`home.tsx:85-114,98-112`）在 effect 中给 body 加减明暗类；两个 theme-color meta 的初始值由 Next viewport 元数据提供（`app/layout.tsx:20-28`），切换时 auto 模式写回两套硬编码色，非 auto 模式读取 --theme-color 的计算值（`app/utils.ts:220-222`）同时写入两个 meta。
 
-两个 `meta[name="theme-color"][media]` 的初始值由 Next viewport 元数据提供（`app/layout.tsx:20-28`，light `#fafafa`/dark `#151515`），切换时 auto 模式写回硬编码 `#151515`/`#fafafa`，非 auto 模式读 `--theme-color` 的计算值（getCSSVar，`app/utils.ts:220-222`，基于 getComputedStyle(body)）同时写入两个 meta（`home.tsx:98-112`）。
+auto 模式不加减类，由 `globals.scss:84-88` 的媒体查询（prefers-color-scheme: dark）让根元素跟随系统。
 
-auto 模式不加类，由 `globals.scss:84-88` 的 @media (prefers-color-scheme: dark) 让 :root 跟随系统。
+**视觉 token。** SCSS 明暗混合（`globals.scss:4-45`）定义两组 CSS 变量，挂在明暗类与根元素媒体查询上（:47-88）：
+- 颜色：`--primary`（rgb(29,147,171)，明暗同值）、`--white`、`--black`、`--gray`、`--second`、`--hover-color`、`--bar-color`、`--theme-color`（取 gray 值）、`--theme` 模式标识
+- 阴影：`--shadow`、`--card-shadow`
+- 描边：`--border-in-light`
 
-**视觉 token。** SCSS `@mixin light/dark`（`globals.scss:4-45`）定义明暗两组 CSS 变量并挂在 `.light`/`.dark` 类与 :root 媒体查询上（:47-88）：颜色 `--primary`（rgb(29,147,171)，明暗同值）、`--white`、`--black`、`--gray`、`--second`、`--hover-color`、`--bar-color`、`--theme-color`（`= var(--gray)`）、`--theme` 模式标识；
+布局变量定义在根元素（`globals.scss:59-68`），600px 断点下整体重定义（:70-82）：
+- `--window-width` 90vw、`--window-height` 90vh、`--full-height`（整页高度）
+- `--sidebar-width` 300px、`--window-content-width` 为总宽减侧栏宽
+- `--message-max-width` 80%
 
-阴影 `--shadow`/`--card-shadow`；描边 `--border-in-light`。
+暗色下对 SVG 图标做全局反色滤镜（:42-44），no-dark 类可豁免。
 
-布局变量在 :root（`globals.scss:59-68`）：`--window-width`（90vw）、`--window-height`（90vh）、`--sidebar-width`（300px）、`--window-content-width`（`calc(100% - var(--sidebar-width))`）、`--message-max-width`（80%）、`--full-height`，600px 断点下整体重定义（:70-82）。
+**悬空 token**：`--primary-10` 与 `--primary-dark` 只在 `mcp-market.module.scss:273` 等六处被引用（焦点环/按钮背景），全仓样式文件无定义（grep 定义语法无匹配），CSS 变量未定义时引用属性失效，视觉表现需运行确认。
 
-暗色下对 SVG 图标做全局 filter: invert(0.5)（:42-44），no-dark 类可豁免。
+**字体配置。** 字号（默认 14，滑块 12-40，`settings.tsx:1644-1657`）与字体系列（默认空串，文本输入，`settings.tsx:1660-1675`）都存入应用配置（`config.ts:46-47`）；
 
-**悬空 token**：`--primary-10`/`--primary-dark` 仅在 `mcp-market.module.scss:273,297,339,467,515,548` 被引用（焦点环/按钮背景），全仓 `.scss/.css` 无定义（grep 定义语法 `--primary-10\s*:` 无匹配），CSS 变量无定义时引用属性失效，视觉表现需运行确认。
-
-**字体配置。** fontSize（默认 14，滑块 12-40，`settings.tsx:1644-1657`）与 fontFamily（默认空串，文本输入，`settings.tsx:1660-1675`）存 config（`config.ts:46-47`）；
-
-消费端是 Markdown 容器内联样式（`markdown.tsx:337-338`：`${fontSize}px` + fontFamily || "inherit"），消息渲染（`chat.tsx:995-996,1983-1984,2092-2093`）与导出（`exporter.tsx:578-579`）传入。
+消费端以内联样式注入 Markdown 容器（`markdown.tsx:337-338`），消息渲染（`chat.tsx:995-996,1983-1984,2092-2093`）与导出（`exporter.tsx:578-579`）传入同一份字号与字体。
 
 基础字体栈写在 html 上（`globals.scss:93-94`：Noto Sans/SF Pro/PingFang SC/Helvetica 等）；
 
-loadAsyncGoogleFont（`home.tsx:137-150`）在 Screen effect 中动态注入 Google Fonts 的 Noto Sans 300/400/700/900，非 export 构建经自身 `/google-fonts` 代理加载、export 构建直连 fonts.googleapis.com。
+loadAsyncGoogleFont（`home.tsx:137-150`）在 Screen effect 中动态注入 Google Fonts 的 Noto Sans 多个字重，非 export 构建经自身 `/google-fonts` 代理加载，export 构建直连 fonts.googleapis.com。
 
-**切换入口。** 输入区主题按钮循环 Auto→Light→Dark（`chat.tsx:516-521, 632-640`）与设置页 Select（`settings.tsx:1606-1617`）；两者都写 config.theme。
+**切换入口。** 两个：输入区主题按钮循环 Auto→Light→Dark（`chat.tsx:516-521,632-640`）与设置页下拉（`settings.tsx:1606-1617`），都写 config.theme。
 
-**首屏闪烁。** 本次未找到防闪烁内联脚本（`layout.tsx` head 只有 manifest 与 SW 脚本）——:root 默认 light，用户持久化为 dark 且系统为 light 时，CSR 首帧先亮、useSwitchTheme effect 后变暗（静态推断；useHasHydrated 只节流渲染不参与主题）。第三方组件 emoji-picker-react 独立传 `theme={EmojiTheme.AUTO}`（`emoji.tsx:39`），自行跟随系统。
+**首屏闪烁。** 本次未找到防闪烁内联脚本（layout.tsx 的 head 只有 manifest 与 SW 脚本）——根元素默认亮色，用户持久化为暗色且系统为亮色时，CSR 首帧先亮、切换 effect 后变暗（静态推断；水合门控只节流渲染，不参与主题）。第三方组件 emoji-picker-react 独立跟随系统（`emoji.tsx:39`）。
 
 **主题扩展能力（本次未找到）。** 主题市场/商店与主题导入导出（grep `importTheme|exportTheme|theme.json` 全仓无匹配，glob `**/themes/**` 无目录）；
 
-壁纸/背景图（grep wallpaper 无匹配，backgroundImage 仅 `chat.tsx:2103` 的消息图片渲染、`globals.scss:333-336` 的代码折叠渐变，均非主题背景）；
+壁纸/背景图（grep wallpaper 无匹配；backgroundImage 仅用于消息图片渲染 `chat.tsx:2103` 与代码折叠渐变 `globals.scss:333-336`，均非主题背景）；
 
-自定义主色/强调色设置（grep accent 仅 `markdown.scss:41-42,87-88` 的 GitHub 风格 markdown 变量 `--color-accent-fg/emphasis`，不属应用主题系统；customCss|userStyle 无匹配；JS setProperty 写 CSS 变量的唯一消费是 `--sidebar-width`，`sidebar.tsx:130`）；
+自定义主色/强调色设置（grep accent 仅命中 Markdown 样式的 GitHub 风格变量 `--color-accent-fg/emphasis`（`markdown.scss:41-42,87-88`），不属应用主题系统；customCss|userStyle 无匹配。JS 写 CSS 变量的唯一消费是侧栏宽度，`sidebar.tsx:130`）；
 
 Tailwind 配置（无 tailwind.config.*）。
 
 ## 5. 响应式、移动端与窗口适配
 
-**断点。** 600px 单断点双轨一致——JS `MOBILE_MAX_WIDTH = 600`（`app/utils.ts:145-150`，基于 useWindowSize 的 resize 监听）+ CSS @media (max-width: 600px)（`globals.scss:70-82,111-113`、`home.module.scss:108-134`、`ui-lib.module.scss:22-26,171-181`）。
+**断点。** 600px 单断点双轨一致——JS 常量 `MOBILE_MAX_WIDTH = 600`（`app/utils.ts:145-150`，基于窗口尺寸监听）+ CSS @media (max-width: 600px)（覆盖全局、主布局与 UI 库样式：`globals.scss:70-82,111-113`、`home.module.scss:108-134`、`ui-lib.module.scss:22-26,171-181`）。
 
 useMobileScreen 驱动多个组件差异（如移动端隐藏全屏/快捷键按钮、附件与弹窗入口差异，见 Chat UI 笔记 §9）。
 
-**窗口形态。** 桌面 Web 为居中卡片（90vw×90vh）；isApp（Tauri 构建，BUILD_APP 环境变量，`app/config/build.ts:12`）或 config.tightBorder 时切 tight-container 全屏无边框（`home.module.scss:24-38`）；移动端容器去边框去圆角全宽。聊天头部另有 tightBorder 切换按钮（`chat.tsx:1748-1762`）。
+**窗口形态。** 桌面 Web 为居中卡片（90vw×90vh）；Tauri 构建（BUILD_APP 环境变量，`app/config/build.ts:12`）或启用紧凑边框时切换为全屏无边框容器（`home.module.scss:24-38`）；移动端容器去边框去圆角全宽。聊天头部另有紧凑模式切换按钮（`chat.tsx:1748-1762`）。
 
-**侧栏。** 桌面可拖拽调宽（300 默认/230 最小/500 最大/100 窄栏），useDragSideBar（`sidebar.tsx:65-137`）用 pointermove 节流 20ms 更新 config.sidebarWidth，松手距按下 <300ms 视为点击切换窄栏；
+**侧栏。** 桌面可拖拽调宽（默认 300、最小 230、最大 500、窄栏 100），useDragSideBar（`sidebar.tsx:65-137`）以 20ms 节流更新配置中的侧栏宽度，松手距按下小于 300ms 视为点击切换窄栏；
 
-宽度经 effect 写入 document.documentElement.style.setProperty("--sidebar-width")（`sidebar.tsx:125-131`）。
+宽度经 effect 写入根元素的 `--sidebar-width` 样式属性（`sidebar.tsx:125-131`）。
 
-移动端侧栏是纯 CSS 抽屉：`position: absolute; left: -100%`，仅 Home 路由加 sidebar-show 类滑入（`home.module.scss:118-129`，z-index 1000；`home.tsx:190-193`）。
+移动端侧栏是纯 CSS 抽屉：定位在视口外，仅 Home 路由加 sidebar-show 类滑入（`home.module.scss:118-129`，z-index 1000；`home.tsx:190-193`）。
 
 **PWA。** site.webmanifest（standalone，`start_url: "/"`）；
 
-ServiceWorker（`public/serviceWorker.js`）**只拦截 `/api/cache/*`**（图片上传/读取/删除），install 时 `cache.addAll([])` 空列表、`serviceWorkerRegister.js:10-12` 首次安装即整页 reload——本次未找到离线应用壳能力。SW 注册成功后置 window._SW_ENABLED，决定上传路径（§6）。
+ServiceWorker（`public/serviceWorker.js`）只拦截图片上传/读取/删除的 `/api/cache/*` 通道，install 阶段缓存列表为空、注册脚本首次安装即整页 reload（`serviceWorkerRegister.js:10-12`）——本次未找到离线应用壳能力。注册成功后置 window._SW_ENABLED 标志，决定上传路径（§6）。
 
-**Tauri 窗口。** 单窗口 960×600、Overlay 标题栏（titleBarStyle: "Overlay"、hiddenTitle: true，`src-tauri/tauri.conf.json:108-118`）；窗口几何由 tauri-plugin-window-state 持久化（`src-tauri/src/main.rs:9`）。
+**Tauri 窗口。** 单窗口 960×600，Overlay 标题栏配置（`src-tauri/tauri.conf.json:108-118`）；窗口几何由窗口状态插件持久化（`src-tauri/src/main.rs:9`）。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-**剪贴板。** copyToClipboard（`app/utils.ts:28-51`）三路：Tauri writeText（window.__TAURI__ 存在时）→ navigator.clipboard → textarea + document.execCommand("copy") 兜底，成功/失败各有 toast。
+**剪贴板。** copyToClipboard（`app/utils.ts:28-51`）三级回退：Tauri 写入（存在全局 Tauri API 时）、浏览器剪贴板 API、隐藏 textarea + execCommand 兜底，成功失败各有 toast。
 
-**下载与读取。** downloadAs（`utils.ts:53-94`）Tauri 走 dialog.save + fs.writeTextFile，浏览器走 data URL + `<a download>`；图片导出在 Tauri 下走 dialog.save + writeBinaryFile（`exporter.tsx:457-477`）；
+**下载与读取。** downloadAs（`utils.ts:53-94`）在 Tauri 下经原生保存对话框写文件，浏览器下用 data URL 触发下载；图片导出同样分平台走两条路径（`exporter.tsx:457-477`）；
 
-readFromFile 用隐藏 `<input type="file" accept="application/json">`（`utils.ts:96-114`）。
-- **图片上传链路**（`app/utils/chat.ts`）：uploadImage（:144-165）在 window._SW_ENABLED 时 POST `/api/cache/upload`（由 ServiceWorker upload 拦截写入 Cache Storage 并返回 `/api/cache/<nanoid>.<ext>`，`public/serviceWorker.js:22-41`）；
+readFromFile 用隐藏的 JSON 文件选择输入（`utils.ts:96-114`）。
+- **图片上传链路**（`app/utils/chat.ts`）：Service Worker 启用时上传走 `/api/cache/upload`，由 SW 拦截写入 Cache Storage 并返回缓存地址（`public/serviceWorker.js:22-41`）；
 
-  SW 不可用时回退 compressImage（:15-71）——canvas 渐进压缩到 ≤256KB base64，HEIC 先经 heic2any 转 JPEG；cacheImageToBase64Image（:113-132）对已上传图片二次压缩并做模块级内存缓存。上传失败会 toast 错误（Chat UI 笔记 §3 有业务侧流程）。
+  SW 不可用时回退到本地压缩（`chat.ts:15-71`）：canvas 渐进压缩到不超过 256KB 的 base64，HEIC 先转 JPEG；已上传图片另有二次压缩与模块级内存缓存（`chat.ts:113-132`）。上传失败会 toast 错误（Chat UI 笔记 §3 有业务侧流程）。
 
-**拖放。** 本次未找到文件拖放支持——grep onDrop|onDragOver|dataTransfer|DragEvent 全 app 目录无业务代码匹配（`@hello-pangea/dnd` 内部实现未下钻，属于库内部）。图片只能经文件选择器或粘贴（`chat.tsx:1512-1598`）。
+**拖放。** 本次未找到文件拖放支持——grep 拖放事件相关关键词（onDrop/onDragOver/dataTransfer/DragEvent）在 app 目录无业务代码匹配（拖拽排序库内部未下钻）。图片只能经文件选择器或粘贴（`chat.tsx:1512-1598`）。
 
-**图片预览。** showImageModal（`ui-lib.tsx:452-475`）只是 Modal 里一个 `<img>`，无缩放/旋转/导航；消费方为导出图片预览（`exporter.tsx:483`）、mermaid 图点击（`markdown.tsx:47-53`）、SD 页图片（`sd.tsx:170`）。**聊天消息图片无灯箱**：消息列表渲染裸 `<img>` 且无 onClick（`chat.tsx:1988-2022`）。
+- **图片预览。** showImageModal（`ui-lib.tsx:452-475`）只是 Modal 里一个 img，无缩放/旋转/导航；消费方包括导出图片预览（`exporter.tsx:483`）、mermaid 图点击（`markdown.tsx:47-53`）与 SD 页图片（`sd.tsx:170`）。
+- **聊天消息图片无灯箱**：消息列表渲染裸 img 且无点击处理（`chat.tsx:1988-2022`）。
 
-**内容嵌入。** Markdown 链接按扩展名自动内嵌 `<audio>`/`<video>`（`markdown.tsx:293-307`）；代码块复制按钮与 HTML/mermaid 预览（`markdown.tsx:74-174`）。
+**内容嵌入。** Markdown 链接按扩展名自动内嵌音频/视频（`markdown.tsx:293-307`）；代码块复制按钮与 HTML/mermaid 预览在 `markdown.tsx:74-174`。
 
 ## 7. 扩展调查
 
 ### 桌面与系统集成（Tauri 壳交点）
 
-**桥接方式。** withGlobalTauri: true（`tauri.conf.json:8`），渲染层直接读 window.__TAURI__（类型见 `app/global.d.ts:14-42`）；权限走 Tauri v1 allowlist（dialog/clipboard/fs/notification/http 全开，`tauri.conf.json:15-59`）。
+**桥接方式。** 渲染层直接读取全局 Tauri API（类型见 `app/global.d.ts:14-42`），权限走 Tauri v1 allowlist，dialog/clipboard/fs/notification/http 全开（`tauri.conf.json:15-59`）。
 
-**流式请求桥接。** 浏览器 fetch 在 Tauri 下换成 `app/utils/stream.ts:22-108`——invoke("stream_fetch", ...) 发起，Rust 侧 `src-tauri/src/stream.rs:34-144` 用 reqwest 请求并把响应按 ChunkPayload/EndPayload 事件（stream-response）逐块 emit 回渲染层写入 TransformStream；
+**流式请求桥接。** 浏览器 fetch 在 Tauri 下换成 `app/utils/stream.ts:22-108`：invoke 发起流式请求，Rust 侧（`src-tauri/src/stream.rs:34-144`）用 reqwest 请求并把响应按分块与结束两种事件逐块发回渲染层，写入 TransformStream；AbortSignal 关闭流。用于绕开桌面端跨域/CORS 限制（Chat UI 笔记主链即经此桥）。
 
-AbortSignal 关闭流。用于绕开桌面端跨域/CORS 限制（Chat UI 笔记主链即经此桥）。
+**标题栏。** 各页面头部通过 data-tauri-drag-region 属性支持原生拖窗，四处页面位置见本节末尾源码列表。
 
-**标题栏。** 各页面头部 data-tauri-drag-region 支持原生拖窗（`chat.tsx:1685`、`sidebar.tsx:186`、`settings.tsx:1504`、`sd.tsx:111`）。
-
-**系统通知与更新。** 仅更新检查通知（§3）；clientUpdate 走 `updater.checkUpdate/installUpdate`（`utils.ts:449-470`），安装模式 passive（`tauri.conf.json:103-105`）。
+**系统通知与更新。** 只有更新检查通知（§3）；客户端更新走官方 updater 的检查与安装（`utils.ts:449-470`），安装模式为 passive（`tauri.conf.json:103-105`）。
 
 **未找到。** 托盘、原生菜单、全局快捷键、多窗口（grep tray|Tray|globalShortcut|setMenu|Window 相关在 `src-tauri/src` 与 app 中无匹配，检查范围为本快照 Tauri 源码与 app 目录）。
 
+本节源码定位：
+- 拖窗区域：`chat.tsx:1685`、`sidebar.tsx:186`、`settings.tsx:1504`、`sd.tsx:111`
+
 ### 无障碍与动画（静态代码结论）
 
-- IconButton 可选 aria prop，多处传入（如 `chat.tsx:1733,1813` 的 `aria={...}`）；但多数图标按钮只带 title 而无 aria-label（`button.tsx:37` 的 title 不自动进 aria-label，读屏可访问名称覆盖参差——静态推断）。
-- Modal/Toast/Popover 均无 role/aria-modal/aria-live 语义；PromptToast 入口有 `role="button"`（`chat.tsx:246-248`）。
-- 动画：无动画库，全部手写 CSS——`animation.scss` 的 slide-in/slide-in-from-top keyframes 用于弹窗/列表进场（`ui-lib.module.scss:18,44,84,99,190`）；Toast 用 opacity/translateY transition 退场；prefers-reduced-motion 处理本次未找到。
+- 图标按钮可选 aria 属性，多处传入（如 `chat.tsx:1733,1813`）；但多数图标按钮只有 title 而无 aria-label（`button.tsx:37` 的 title 不自动进入 aria-label，读屏可访问名称覆盖参差——静态推断）。
+- Modal/Toast/Popover 均无 role/aria-modal/aria-live 语义；PromptToast 入口有 role="button"（`chat.tsx:246-248`）。
+- 动画：无动画库，全部手写 CSS——animation.scss 的 slide-in 等 keyframes 用于弹窗/列表进场（`ui-lib.module.scss:18,44,84,99,190`）；Toast 用透明度/位移过渡退场；prefers-reduced-motion 处理本次未找到。
 
   代码块复制按钮 hover 显隐、消息悬停等为 CSS transition（`globals.scss:273-305`、`home.module.scss:208-224`）。
 

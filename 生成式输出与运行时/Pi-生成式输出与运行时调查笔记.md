@@ -33,7 +33,13 @@ Pi 是 Agent/LLM/TUI 库集合。模型输出只有三种结构化 part——tex
 
 **触发方式**：全部为文本/工具调用，无 artifact 类特殊标记。入口包括：普通用户消息、`@file` 展开、粘贴图片、`!`/`!!` bash 命令（interactive-mode.ts:3009-3023，且同时只允许一个 bash 运行 :3013-3017）、扩展命令与 `/` 斜杠命令、steer/followUp 队列（agent-session.ts:1379-1408）。
 
-**输出协议**：typed part 流。消息 part 只有 `TextContent`、`ThinkingContent`、`ToolCall`（packages/ai/src/types.ts:338-368）；事件协议为 `AssistantMessageEvent`：`start/text_start/text_delta/text_end/thinking_*/toolcall_start/toolcall_delta/toolcall_end/done/error`（types.ts:523-539）。本次全文检索（pattern：`artifact|canvas|notebook`）未在输出协议中发现 HTML/notebook/artifact 类型对象 part；`artifact` 仅出现在 evals 包的测试产物与 agent types.ts 的扩展示例注释中（types.ts:304）。
+**输出协议**：typed part 流。消息 part 只有 `TextContent`、`ThinkingContent`、`ToolCall`（packages/ai/src/types.ts:338-368）；事件协议为 `AssistantMessageEvent`，事件类型集合为：
+
+```text
+start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolcall_delta / toolcall_end / done / error
+```
+
+（types.ts:523-539）。本次全文检索（pattern：`artifact|canvas|notebook`）未在输出协议中发现 HTML/notebook/artifact 类型对象 part；`artifact` 仅出现在 evals 包的测试产物与 agent types.ts 的扩展示例注释中（types.ts:304）。
 
 **半截流与容错**：`toolcall_delta` 携带原始 JSON 片段，`partialJson` 累积并即时 `parseStreamingJson`（packages/agent/src/proxy.ts:322-336）；输出 token 截断时所有未完成工具调用统一标记错误、提示模型重发（agent-loop.ts:381-406）。thinking 被安全过滤时保留 `thinkingSignature` 供多轮连续（types.ts:343-351）。
 
@@ -43,7 +49,10 @@ Pi 是 Agent/LLM/TUI 库集合。模型输出只有三种结构化 part——tex
 
 - 文本/thinking：逐 token 注入（text_delta 追加到 part，proxy.ts:252-264），TUI 每次事件重渲染 Markdown（interactive-mode.ts:3148-3151）。
 - 工具参数：逐片段累积 JSON 并即时解析（proxy.ts:322-336）；参数完成前 TUI 即展示（tool-execution.ts:158-162）；`toolcall_end` 现在携带最终完整 `ToolCall` 并 `Object.assign` 覆盖 partial 累积结果（proxy.ts:338-345）。
-- 文件更新：无 diff/patch 应用层，工具直接改文件——`write` 全文覆盖（core/tools/write.ts:194-226，自动建父目录）；`edit` 精确文本替换（core/tools/edit.ts:308-362），每处 oldText 必须唯一、不重叠，先全部匹配原文件再倒序应用（edit-diff.ts:304-366）；失败收口为异常→错误工具结果（未找到/重复/重叠/无变化均有专门错误文案，edit-diff.ts:257-293）。`edit` 支持模糊匹配（Unicode 引号/破折号/空白归一化，edit-diff.ts:33-54,206-244）并保留未改动行的原始字节（131-172）。
+- 文件更新：无 diff/patch 应用层，工具直接改文件：
+  - `write` 全文覆盖（core/tools/write.ts:194-226，自动建父目录）；
+  - `edit` 精确文本替换（core/tools/edit.ts:308-362）：每处 oldText 必须唯一、不重叠，先全部匹配原文件再倒序应用（edit-diff.ts:304-366）；支持模糊匹配（Unicode 引号/破折号/空白归一化，edit-diff.ts:33-54,206-244）并保留未改动行的原始字节（131-172）。
+  - 失败收口为异常→错误工具结果（未找到/重复/重叠/无变化均有专门错误文案，edit-diff.ts:257-293）。
 - bash 输出：流式累积，截断后完整输出存临时文件（bash.ts:349-480；OutputAccumulator）。
 - 最终化：`done`/`error` 事件后 `response.result()` 取最终消息（agent-loop.ts:346-371）；同一文件并发写经按 realpath 的 mutation queue 串行化（file-mutation-queue.ts:32-61）。
 
@@ -82,10 +91,17 @@ Pi 是 Agent/LLM/TUI 库集合。模型输出只有三种结构化 part——tex
 
 ## 8. 持久化、恢复、分享与导出
 
-- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首次 assistant 消息后整文件 flush（session-manager.ts:1015-1042）。损坏容忍：agent 侧 JSONL 加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/agent/src/harness/session/jsonl/storage.ts:69-105`，此前为直接截断写回；torn-tail 与 fork 共用 `publishFileAtomically` :33-57）；harness 侧 fork 本次改为整文件原子发布（`storage.ts:110-118`）；coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:230-291,503-556）。
+- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首次 assistant 消息后整文件 flush（session-manager.ts:1015-1042）。
+- 损坏容忍与原子发布：
+  - agent 侧 JSONL 加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/agent/src/harness/session/jsonl/storage.ts:69-105`，此前为直接截断写回；torn-tail 与 fork 共用 `publishFileAtomically` :33-57）；
+  - harness 侧 fork 本次改为整文件原子发布（`storage.ts:110-118`）；
+  - coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:230-291,503-556）。
 - 恢复：`SessionManager.open`（session-manager.ts:1530-1550）、`continueRecent`（1557-1565）、CLI 会话选择器（interactive-mode.ts:5107-5134）；模型/thinking level 从会话 entry 恢复（sdk.ts:188-231）。
 - 分享导出：`/export`（HTML 或 JSONL 副本，interactive-mode.ts:5773-5787）、`/import`（agent-session-runtime.ts:361-396）、`/share`（gh gist，interactive-mode.ts:5862-5954）。HTML 导出为自包含单文件（模板 + base64 会话数据，core/export-html/index.ts:143-175），内置工具按模板渲染、自定义工具预渲染（178-230）。
-- 独立后端：`packages/agent` 的 Session 存储抽象（SessionStorage）另有 `session-backends/sqlite-node` 实现：node:sqlite 适配、迁移、物化视图与可选 FTS 搜索；search 是独立服务，与 repository 共享同一数据库，FTS 表与触发器在首次非空搜索时懒创建并一次性重建，之后由触发器同步（其 README.md:1-22 与 `sqlite/search-backend.ts`）；搜索接口与 agent 侧统一为异步迭代器（`search(text, { entryTypes, limit, signal })`，`#b75be04` 起的迁移），且移除 SQL 中 CTE、按迭代器分页（#e7fb8eb/#ae1e410）。coding-agent 当前仍使用 JSONL 路径。
+- 独立后端：`packages/agent` 的 Session 存储抽象（SessionStorage）另有 `session-backends/sqlite-node` 实现，分两部分：
+  - 后端实现：node:sqlite 适配、迁移、物化视图与可选 FTS 搜索；
+  - search 是独立服务：与 repository 共享同一数据库，FTS 表与触发器在首次非空搜索时懒创建并一次性重建，之后由触发器同步（其 README.md:1-22 与 `sqlite/search-backend.ts`）。
+  搜索接口与 agent 侧统一为异步迭代器（`search(text, { entryTypes, limit, signal })`，`#b75be04` 起的迁移），且移除 SQL 中 CTE、按迭代器分页（`#e7fb8eb`/`#ae1e410`）。coding-agent 当前仍使用 JSONL 路径。
 
 ## 9. 模型回流、对象感知与持续维护
 

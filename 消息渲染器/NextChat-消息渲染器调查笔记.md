@@ -17,7 +17,7 @@
 NextChat 的消息渲染器是一个以 `react-markdown` 为核心、由 Chat 组件负责消息窗口和状态装配的轻量链：
 
 1. `Chat` 先把 Mask context、会话消息、loading/input preview 组成可视窗口，再按 user/assistant/system 角色渲染头像、操作、工具状态、Markdown、图片和音频。
-2. Markdown 使用 `react-markdown + remark-gfm + remark-math + remark-breaks + rehype-katex + rehype-highlight`。在解析前会把 `\[...\]`/`\(...\)` 转成 KaTeX 可识别形式，并尝试把裸 HTML 文档包进 `html` 代码块。
+2. Markdown 使用 `react-markdown` 加一组插件：GFM、数学、软换行、KaTeX 与高亮（插件名见 §2.2 清单）。在解析前会把 `\[...\]`/`\(...\)` 转成 KaTeX 可识别形式，并尝试把裸 HTML 文档包进 `html` 代码块。
 3. `<pre>` 被替换为 `PreCode`：Mermaid 代码单独交给 Mermaid 渲染成 SVG；HTML/DOCTYPE/SVG/XML 代码在 Artifact 开启时进入 sandbox iframe；普通代码支持复制和超过 400px 后折叠。
 4. SSE 流式文本通过 `requestAnimationFrame` 缓慢吐给 UI；`reasoning_content` 或 `<think>` 块被转成 Markdown 引用行 `> `，没有独立的 reasoning 数据结构。
 5. Artifact 通过 `srcDoc` 和 `sandbox="allow-forms allow-modals allow-scripts"`（无 `allow-same-origin`）预览，分享内容写入 Cloudflare KV。
@@ -110,7 +110,12 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 ### 2.3 媒体链接
 
-`a` override（`app/components/markdown.tsx:292-310`）按扩展名把 `.aac/.mp3/.opus/.wav` 渲染为 `<audio controls>`，把 `.3gp/.3g2/.webm/.ogv/.mpeg/.mp4/.avi` 渲染为 `<video controls>`。内部 `/#...` 链接使用 `_self`，其他链接默认为传入 target 或 `_blank`；没有看到统一的 `rel="noopener noreferrer"` 注入。
+`a` override（`app/components/markdown.tsx:292-310`）按扩展名把媒体链接渲染成内嵌播放器：
+
+- 音频扩展名 `.aac`/`.mp3`/`.opus`/`.wav` → `<audio controls>`；
+- 视频扩展名 `.3gp`/`.3g2`/`.webm`/`.ogv`/`.mpeg`/`.mp4`/`.avi` → `<video controls>`。
+
+内部 `/#...` 链接使用 `_self`，其他链接默认为传入 target 或 `_blank`；没有看到统一的 `rel="noopener noreferrer"` 注入。
 
 ## 3. 代码块、Mermaid 和 Artifact
 
@@ -120,7 +125,7 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 ### 3.2 Mermaid
 
-检测到 `code.language-mermaid` 后，`PreCode` 把纯文本交给 `Mermaid`（`app/components/markdown.tsx:83-100`、`148-150`）。`Mermaid` 调用 `mermaid.run({ nodes: [ref.current], suppressErrors: true })`，错误时返回空内容；点击容器会序列化其中的 SVG，创建 `image/svg+xml` Blob 并打开图片 modal（`app/components/markdown.tsx:28-72`）。
+检测到 `code.language-mermaid` 后，`PreCode` 把纯文本交给 `Mermaid`（`app/components/markdown.tsx:83-100`、`148-150`）。`Mermaid` 调用 `mermaid.run`（绑定容器节点、`suppressErrors: true`），错误时返回空内容；点击容器会序列化其中的 SVG，创建 `image/svg+xml` Blob 并打开图片 modal（`app/components/markdown.tsx:28-72`）。
 
 这是一条“代码块先出现在 DOM，再由 Mermaid 替换/追加 SVG”的路径，不是服务端预渲染。
 
@@ -137,7 +142,7 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 ### 4.1 文本动画
 
-`stream`/`streamWithThink` 在 `app/utils/chat.ts:197-220`、`423-446` 中维护 `responseText` 与 `remainText`。每个 animation frame 取 `Math.max(1, Math.round(remainText.length / 60))` 个字符，调用 `options.onUpdate(responseText, fetchText)`；连接关闭或 `[DONE]` 后一次性收尾。
+`stream`/`streamWithThink` 在 `app/utils/chat.ts:197-220`、`423-446` 中维护 `responseText` 与 `remainText`。每个 animation frame 按剩余长度的比例取出若干字符（约 1/60，下限 1），调用 `options.onUpdate(responseText, fetchText)`；连接关闭或 `[DONE]` 后一次性收尾。
 
 Chat store 的 `onUpdate` 更新 assistant message.content，Chat 组件用 `message.streaming` 改变 Markdown key 和 loading 状态（`app/store/chat.ts:459-480`、`app/components/chat.tsx:1969-1987`）。
 
@@ -164,7 +169,7 @@ OpenAI adapter 读取 `delta.reasoning_content`（`app/client/platforms/openai.t
 sandbox="allow-forms allow-modals allow-scripts"
 ```
 
-没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。组件通过注入的 `ResizeObserver` 脚本以 `parent.postMessage(..., '*')` 向父窗口发送高度和 title（`app/components/artifacts.tsx:81-87`），父窗口在 `message` listener 中只按 frame id 匹配、未校验 `e.origin`/`e.source`，随机 frame id 用于降低误收概率（`app/components/artifacts.tsx:50-62`）。该 iframe 路径没有独立 CSP 或请求 allowlist。
+没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。组件通过注入的 `ResizeObserver` 脚本以 `parent.postMessage(..., '*')` 向父窗口发送高度和 title（`app/components/artifacts.tsx:81-87`）；父窗口在 `message` listener 中只按 frame id 匹配，未校验 `e.origin`/`e.source`，随机 frame id 用于降低误收概率（`app/components/artifacts.tsx:50-62`）。该 iframe 路径没有独立 CSP 或请求 allowlist。
 
 ### 5.2 分享和 Cloudflare KV
 

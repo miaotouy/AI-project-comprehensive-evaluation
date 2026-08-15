@@ -16,7 +16,7 @@
 
 Jan 的“渠道”由两层构成：
 
-1. **远程 provider**：`web-app/src/constants/providers.ts` 内置 11 个预定义 provider（openai/azure/anthropic/openrouter/mistral/groq/xai/gemini/minimax/huggingface/nvidia），每个 provider 只有 api key、base url、模型列表与少量自定义 header；另支持用户自定义 OpenAI 兼容端点（api_type 可选 `openai`/`anthropic`）。
+1. **远程 provider**：`web-app/src/constants/providers.ts` 内置 11 个预定义 provider（完整清单见 1.1），每个 provider 只有 api key、base url、模型列表与少量自定义 header；另支持用户自定义 OpenAI 兼容端点（api_type 可选 `openai`/`anthropic`）。
 2. **本地引擎**：llamacpp-extension 与 mlx-extension 把 GGUF/MLX 模型通过 router 暴露为 OpenAI 兼容端点；Rust 侧 `src-tauri/src/core/server/` 提供本地 API server 代理、认证与远程 provider 转发。
 
 聊天请求不经过任何后端业务服务，由前端 `CustomChatTransport` 直接经 `createCustomFetch` 包装的 fetch 发出；**推理参数在 HTTP 层注入 body**，`streamText` 本身只传 AI SDK 字段。请求默认打到本地 router 代理，Rust 按模型 ID 决定转发远程 provider 还是路由到 llama-server/mlx-server 子进程。
@@ -33,9 +33,26 @@ Jan 的“渠道”由两层构成：
 
 ### 1.1 预定义 provider
 
-`web-app/src/constants/providers.ts`（402 行）`predefinedProviders`（L54）：
+`web-app/src/constants/providers.ts`（402 行）`predefinedProviders`（L54）内置 11 个预定义 provider：
 
-- 字段：`provider`、`api_key`、`base_url`、`explore_models_url`、`settings`（controller 描述）、`models`、可选 `custom_header`（Anthropic 的 `anthropic-version: 2023-06-01` 与 `anthropic-dangerous-direct-browser-access: true`，L136-145）、可选 `api_type: 'anthropic'`（L117）；
+```text
+openai / azure / anthropic / openrouter / mistral / groq / xai / gemini / minimax / huggingface / nvidia
+```
+
+- 字段：
+
+  ```
+  provider / api_key / base_url / explore_models_url / settings（controller 描述）/ models
+  可选 custom_header / 可选 api_type: 'anthropic'（L117）
+  ```
+
+- `custom_header` 示例（Anthropic，L136-145）：
+
+  ```
+  anthropic-version: 2023-06-01
+  anthropic-dangerous-direct-browser-access: true
+  ```
+
 - 内置模型列表只有 OpenRouter/HuggingFace/MiniMax 带条目（带 `capabilities`，如 `['completion','tools']`）；
 - 预定义远程 provider 在详情页**隐藏设置卡片**（`$providerName.tsx` L826-941），api-key 交由顶部 key 区。
 
@@ -43,7 +60,11 @@ Jan 的“渠道”由两层构成：
 
 `AddProviderDialog.tsx`：四字段 name/baseUrl/apiKey/apiType（默认 openai，L36）；`URL_PATTERN = /^https?:\/\/[^\s]+$/i`（L26）；`handleCreate` 仅做必填 + URL 正则校验，**无连接测试、无 key 校验**。
 
-`CreateProvider`（`index.tsx` L42-87）：重名忽略大小写判重并 toast（L49-52）；`apiType==='anthropic'` → `anthropicProviderSettings`、否则 `openAIProviderSettings` 模板深拷贝（L55-58），注入 base-url/api-key（L60-66）；新 provider `{provider, active:true, models:[], settings, api_key, base_url, api_type 仅 anthropic 写入}`（L67-75）。
+`CreateProvider`（`index.tsx` L42-87）：重名忽略大小写判重并 toast（L49-52）；`apiType==='anthropic'` 时用 `anthropicProviderSettings` 模板、否则用 `openAIProviderSettings` 模板深拷贝（L55-58），再注入 base-url/api-key（L60-66）；新 provider 对象（L67-75）：
+
+```text
+{provider, active: true, models: [], settings, api_key, base_url, api_type（仅 anthropic 写入）}
+```
 
 ### 1.3 设置 UI 列表页
 
@@ -69,7 +90,11 @@ Jan 的“渠道”由两层构成：
 
 ### 2.3 连接测试
 
-`handleTestApiKeys`（L426-496）：逐 key 对 `${base_url}/models` 发 GET；**同时发 `x-api-key` 与 `Authorization: Bearer` 双头**（L452-455）；localhost/127.0.0.1 时额外带 `Origin: tauri://localhost`（L458-461）；状态映射 200→ok、401→unauthorized、403→forbidden、429→rate_limited、异常→network_error（L464-489）。
+`handleTestApiKeys`（L426-496）：逐 key 对 `${base_url}/models` 发 GET；**同时发 `x-api-key` 与 `Authorization: Bearer` 双头**（L452-455）；localhost/127.0.0.1 时额外带 `Origin: tauri://localhost`（L458-461）。状态映射（L464-489）：
+
+```text
+200 → ok；401 → unauthorized；403 → forbidden；429 → rate_limited；其他异常 → network_error
+```
 
 ### 2.4 轮换与 keyring
 
@@ -85,8 +110,20 @@ Jan 的“渠道”由两层构成：
 ### 3.1 ParamDef 结构
 
 `ParamControllerType`（L11-16）：slider/dropdown/textarea/input/checkbox。
-`SamplerCap`（L18-36）：core/client_only/top_k/min_p/repetition/penalties/json_schema/mirostat/typical_p/top_n_sigma/dynatemp/xtc/dry/grammar/sampler_order/backend_sampling/ignore_eos/thinking_budget。
-`ParamDef`（L51-62）：`key/title/description/value/controllerType/controllerProps/capability/effectHint/disabledBy`；`disabledBy` 返回非空字符串即解释禁用原因。
+`SamplerCap`（L18-36）能力标签清单：
+
+```text
+core / client_only / top_k / min_p / repetition / penalties / json_schema / mirostat /
+typical_p / top_n_sigma / dynatemp / xtc / dry / grammar / sampler_order /
+backend_sampling / ignore_eos / thinking_budget
+```
+`ParamDef`（L51-62）字段：
+
+```text
+key / title / description / value / controllerType / controllerProps / capability / effectHint / disabledBy
+```
+
+`disabledBy` 返回非空字符串即解释禁用原因。
 
 ### 3.2 paramsSettings 默认值（L70-392，节选）
 
@@ -143,7 +180,9 @@ Jan 的“渠道”由两层构成：
 - `resolveProviderCaps`（L166-174）：`api_type==='anthropic'` → ANTHROPIC，否则按 provider ID 查表，未命中 → CUSTOM_PERMISSIVE；
 - `getProviderApiType`（L177-183）：未配置 → 'openai'；`provider.api_type` 优先；否则 provider==='anthropic' → anthropic；
 - `isPredefinedRemoteProvider`（L193-199）：`id in BUILTIN_CAPS && ∉ {llamacpp,mlx}`；
-- 模型级拒绝（L212-273）：`REASONING_MODEL_RE = /^(o[1-9]|gpt-?[5-9])/i`；openai/azure 推理系硬拒 temperature/top_p/frequency_penalty/presence_penalty；xai：`grok-3-mini` 拒 temp/top_p、`grok-[3-9]` 拒 penalties；按“参数 key”而非 capability 判断（注释 L217-221）；
+- 模型级拒绝（L212-273）：`REASONING_MODEL_RE = /^(o[1-9]|gpt-?[5-9])/i` 匹配的 openai/azure 推理系硬拒 temperature/top_p/frequency_penalty/presence_penalty；
+- xai 系列：`grok-3-mini` 拒 temp/top_p、`grok-[3-9]` 拒 penalties；
+- 判定按“参数 key”而非 capability（注释 L217-221）；
 - `getMutualExclusionDrops`（L229-241）：唯一规则——anthropic 同时带 temperature+top_p 时保留 temperature、丢 top_p；
 - `paramsForProviders`（L288-307）：并集得到 `ParamSupportEntry{def, supportedBy[], maybeBy[]}` 供 UI tooltip。
 
@@ -169,13 +208,23 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 
 ### 5.2 上游 body 组装（Rust）
 
-`proxy.rs` `upstream_converter.convert_request`（L2606-2613）按 api_type 重写上游 body；mlx 有 `model_param_defaults` 注入 `inject_sampling_defaults`（L2615-2631）——注释明确：llamacpp 走 router preset（不进此 bucket），远程 provider 有意不注入。密钥轮换：`session_api_keys` 空 → `vec![None]`，否则逐 key（L2633-2637）。
+`proxy.rs` `upstream_converter.convert_request`（L2606-2613）按 api_type 重写上游 body；mlx 有 `model_param_defaults` 注入 `inject_sampling_defaults`（L2615-2631）——注释明确：llamacpp 走 router preset（不进此 bucket），远程 provider 有意不注入。
+
+密钥轮换：`session_api_keys` 空 → `vec![None]`，否则逐 key（L2633-2637）。
 
 ## 6. 模型系统与下载链
 
 ### 6.1 模型对象
 
-`core/src/types/model/modelEntity.ts`：`ModelInfo{id, settings?, parameters?, engine?}`；`Model`：object/version/format/sources/name/created/description/settings/parameters/metadata/engine；`ModelSettingParams`（ctx_len/ngl/embedding/n_parallel/cpu_threads/prompt_template/…）；`ModelRuntimeParams`（temperature/max_tokens/stop/…）；`ModelMetadata.default_ctx_len/default_max_tokens` 用于跨线程保留模型设置。
+`core/src/types/model/modelEntity.ts` 的类型与关键字段：
+
+```text
+ModelInfo           {id, settings?, parameters?, engine?}
+Model               object/version/format/sources/name/created/description/settings/parameters/metadata/engine
+ModelSettingParams  ctx_len/ngl/embedding/n_parallel/cpu_threads/prompt_template/…
+ModelRuntimeParams  temperature/max_tokens/stop/…
+ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型设置）
+```
 
 ### 6.2 模型列表与刷新
 
@@ -220,7 +269,14 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 - `PRESET_AFFECTING_KEYS`（L138）→ 600ms 防抖 `scheduleRouterRestart()`（L2386-2404）重启 router，`selfInflicted` 防自激；
 - 模型配置中 `quant_type: undefined` 为硬编码 TODO（L2438）。
 
-`ModelConfig`（`src-tauri/plugins/tauri-plugin-llamacpp/guest-js/types.ts:104-116`）：`model_path`（必填，相对 `<jan_data>`）、`mmproj_path?`、`name`、`size_bytes`、`sha256?`、`mmproj_sha256?`、`embedding?`、`template_kwargs?`、`template_kwargs_check_v?`；另 `ModelPlan`/`DownloadItem`。
+`ModelConfig`（`src-tauri/plugins/tauri-plugin-llamacpp/guest-js/types.ts:104-116`）：
+
+```text
+model_path（必填，相对 <jan_data>）/ mmproj_path? / name / size_bytes / sha256? /
+mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
+```
+
+另有 `ModelPlan`/`DownloadItem` 类型。
 
 ## 8. Rust server 与代理
 
@@ -236,7 +292,9 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 
 ### 8.2 代理链路
 
-`proxy_request`（L1286）→ `router_upstream`（L832）按模型选上游：本地 → llama-server/mlx-server 子进程；远程 → `call_openai_chat_completions`（L1082）带 Bearer key 直连（L858/L1102）；`run_server_side_openai_orchestration`（L1136-1282）服务端编排：max_turns 默认 8、clamp 1-20，每轮 `stream:false` + `tool_choice:'auto'`，超轮次返回 422。
+`proxy_request`（L1286）→ `router_upstream`（L832）按模型选上游：本地 → llama-server/mlx-server 子进程；远程 → `call_openai_chat_completions`（L1082）带 Bearer key 直连（L858/L1102）。
+
+`run_server_side_openai_orchestration`（L1136-1282）服务端编排：max_turns 默认 8、clamp 1-20，每轮 `stream:false` + `tool_choice:'auto'`，超轮次返回 422。
 
 ### 8.3 转换器与流式转发
 
@@ -262,7 +320,13 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 
 - 启动链（L130-178）：`ensureModelForServer`（无模型报错）→ `startServer({host, port, prefix, apiKey, trustedHosts, isCorsEnabled, isVerboseEnabled, proxyTimeout, enableServerToolExecution})` → 实际端口回写（移动端 port=0 自动分配）→ setServerStatus；
 - 错误优先级（L180-216）：端口占用 > 模型路径 > 模型启动 > 通用；
-- `useLocalApiServer.ts`（110 行）：`serverPort 移动端 0 else 1337`（L61）、`apiPrefix:'/v1'`、`corsEnabled:true`、`proxyTimeout:600`、`enableServerToolExecution:false`；persist 名 `settingLocalApiServer`，version:3，迁移 v0/v1/v2（L88-107）。
+- `useLocalApiServer.ts`（110 行）默认值：
+
+  ```text
+  serverPort：移动端 0，否则 1337（L61）
+  apiPrefix: '/v1'；corsEnabled: true；proxyTimeout: 600；enableServerToolExecution: false
+  persist 名 settingLocalApiServer，version: 3，迁移 v0/v1/v2（L88-107）
+  ```
 
 ### 8.7 remote_provider_commands.rs / provider_secrets.rs
 
@@ -274,7 +338,7 @@ SSE 过滤（L474-484）：`filterNamedSseEvents` 仅 OpenAI 兼容流过滤非�
 
 ### 9.1 https-proxy
 
-`routes/settings/https-proxy.tsx` + `Settings.tsx` 目录：proxyUrl/proxyEnabled/username/password/ignoreSSL/noProxy；唯一挂点读取（llamacpp 下载 proxy + Rust downloads）。
+`routes/settings/https-proxy.tsx` + `Settings.tsx` 目录：提供代理 URL、启用开关、用户名/密码、ignoreSSL 与 noProxy 等配置项；唯一挂点读取（llamacpp 下载 proxy + Rust downloads）。
 
 ### 9.2 hardware
 

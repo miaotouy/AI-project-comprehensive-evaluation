@@ -16,7 +16,7 @@
 
 NextChat 的“Agent 工具”不是一个独立的规划器或多步 Agent runtime，而是挂在普通聊天请求上的两条工具链：
 
-1. **OpenAPI 插件工具**把 YAML/JSON OpenAPI 文档的 operation 转成 OpenAI 风格的 `function` schema，同时生成一个本地执行映射。模型返回原生 `tool_calls` 后，浏览器并发执行对应 HTTP operation，把 `assistant.tool_calls` 和 `role: tool` 结果追加回请求，再递归发起下一轮请求。
+1. **OpenAPI 插件工具**把 YAML/JSON OpenAPI 文档的 operation 转成 OpenAI 风格的 `function` schema，同时生成一个本地执行映射。模型返回原生工具调用（`tool_calls`）后，浏览器并发执行对应 HTTP operation，把助手侧调用记录与工具结果消息（`role: tool`）追加回请求，再递归发起下一轮请求。
 2. **MCP 工具**不进入原生 `tools` 数组。已连接 stdio MCP server 的工具描述被拼入 system prompt，模型按 `json:mcp:<clientId>` fenced block 输出请求；客户端正则提取并通过 MCP SDK 执行，再把结果作为带 `isMcpResponse` 标记的用户消息送回模型。
 3. 插件选择存放在当前会话的 `Mask.plugin` 中，只有当前会话选中的插件才会通过 `getAsTools` 注入。内置插件在插件 store hydration 时从 `public/plugins.json` 加载，用户插件和内置插件使用同一套 OpenAPI 转换路径。
 4. 工具执行完全在客户端/桌面端请求上下文内，没有统一的审批、沙箱、权限策略或 Agent 步数上限。插件 endpoint、认证位置和 token 均可由用户配置；MCP stdio 子进程继承整个 `process.env`，因此执行边界很宽。
@@ -52,11 +52,13 @@ MCP 支路：
 
 ### 1.1 插件数据模型
 
-`app/store/plugin.ts:12-23` 的 `Plugin` 保存 `id`、标题、版本、原始 `content`、`builtin` 标志以及可选认证信息：
+`Plugin`（`app/store/plugin.ts:12-23`）保存基础字段与可选认证信息：
 
-- `authType`：`custom`、`basic`、`bearer` 等；
-- `authLocation`：默认 header，也支持 query/body；
-- `authHeader`、`authToken`：认证名称和值。
+- 基础：`id`、标题、版本、原始 `content`、`builtin` 标志；
+- 认证（可选）：
+  - `authType`：如 `custom`、`basic`、`bearer` 等；
+  - `authLocation`：默认 header，也支持 query/body；
+  - `authHeader`、`authToken`：认证名称和值。
 
 `FunctionToolService.add(plugin)`（`app/store/plugin.ts:41-156`）是转换核心：
 
@@ -69,7 +71,8 @@ MCP 支路：
 
 ### 1.2 插件来源和选择
 
-`usePluginStore` 也是 `createPersistStore` 创建的持久化 store（`app/store/plugin.ts:168-232`）。rehydrate 时浏览器读取 `./plugins.json`，对尚未存在的内置插件再拉取其 `schema`，然后调用同一个 `FunctionToolService.add`（`app/store/plugin.ts:233-269`）。
+- `usePluginStore` 是用 `createPersistStore` 创建的持久化 store（`app/store/plugin.ts:168-232`）。
+- rehydrate 时浏览器读取 `./plugins.json`，对尚未存在的内置插件再拉取一次插件清单 schema，然后走同一转换入口 `FunctionToolService.add`（`app/store/plugin.ts:233-269`）。
 
 当前会话的工具集合由 `Mask.plugin` 给出。OpenAI adapter 在发起流式请求前执行：
 
@@ -79,13 +82,14 @@ usePluginStore.getState().getAsTools(
 )
 ```
 
-证据位于 `app/client/platforms/openai.ts:306-320`。`getAsTools`（`app/store/plugin.ts:209-219`）只选择给定 id 的插件，合并所有工具 schema 和 `funcs` 映射；未被当前 Mask 选中的插件不会出现在本轮 `tools` 数组。
+调用证据位于 `app/client/platforms/openai.ts:306-320`。`getAsTools`（`app/store/plugin.ts:209-219`）只选择给定 id 的插件，合并工具 schema 与执行映射（`funcs`）；未被当前 Mask 选中的插件不会进入本轮工具数组。
 
 ## 2. 原生 tool call 的执行循环
 
 ### 2.1 请求和流式解析
 
-`ChatGPTApi.chat`（`app/client/platforms/openai.ts:186-305`）先合并全局和会话模型配置，处理多模态图片、DALL-E、reasoning model 的参数限制，然后在流式路径把 `tools`、`funcs` 交给 `streamWithThink`。SSE 的 `delta.tool_calls` 以 id 为边界收集；后续没有 id 的 chunk 被视为前一个调用的 arguments 续片（`app/client/platforms/openai.ts:322-353`）。
+- `ChatGPTApi.chat`（`app/client/platforms/openai.ts:186-305`）先合并全局与会话模型配置，处理多模态图片、DALL-E、reasoning model 的参数限制，再在流式路径把工具与执行映射交给 `streamWithThink`。
+- SSE 解析（`app/client/platforms/openai.ts:322-353`）：`delta.tool_calls` 以 id 为边界收集，后续没有 id 的 chunk 视为前一调用的 arguments 续片。
 
 ### 2.2 并发执行和结果回注
 
@@ -94,11 +98,11 @@ usePluginStore.getState().getAsTools(
 1. `[DONE]`、连接关闭或 abort 触发 `finish()`。
 2. `runTools` 非空且当前没有执行任务时，构造 `{ role: "assistant", tool_calls }`。
 3. 对每个 tool call 调用 `options.onBeforeTool`，执行 `funcs[tool.function.name](JSON.parse(arguments))`。
-4. 多个工具通过 `Promise.all` 并发；成功结果优先读取 `res.data`，否则读取 `res.statusText`，非字符串结果转 JSON 字符串；HTTP 状态大于等于 300 进入错误分支。
-5. 每个结果都转换成 `{ name, role: "tool", content, tool_call_id }`，并通过 `processToolMessage` 追加到 `requestPayload.messages`（`app/utils/chat.ts:225-280`）。
+4. 多个工具并发执行；成功结果优先读 `res.data`，否则用状态文本兜底，非字符串结果转 JSON 字符串；HTTP 状态大于等于 300 进入错误分支。
+5. 每个结果先包装成 `{ name, role: "tool", content, tool_call_id }` 形式的工具结果消息，再经 `processToolMessage` 追加到请求消息数组（`app/utils/chat.ts:225-280`）。
 6. 60ms 后重新调用同一 `chatApi`，把原工具数组再次放入请求；模型可以继续产生下一轮工具调用，直到最终没有工具调用（`app/utils/chat.ts:280-295`）。
 
-`ChatStore.onUserInput` 用 `onBeforeTool`/`onAfterTool` 把工具状态写入当前 assistant message 的 `tools` 数组（`app/store/chat.ts:459-497`），所以 UI 能显示工具名、加载、成功和失败状态。
+`ChatStore.onUserInput` 在工具前后回调中把工具状态写入当前 assistant 消息的 `tools` 数组（`app/store/chat.ts:459-497`），UI 据此显示工具名、加载、成功和失败状态。
 
 ### 2.3 工具执行的边界
 
@@ -112,13 +116,14 @@ usePluginStore.getState().getAsTools(
 
 ### 3.1 初始化和工具发现
 
-`Home` 首次挂载时读取 `getServerSideConfig().enableMcp`，开启后调用 `initializeMcpSystem`（`app/components/home.tsx:242-259`）。MCP 配置从 `app/mcp/mcp_config.json` 读取；每个 active server 经 `createClient` 建立 `StdioClientTransport`，再调用 `listTools` 保存到内存 `clientsMap`（`app/mcp/actions.ts:101-161`）。
+- `Home` 首次挂载时读取 `getServerSideConfig().enableMcp`，开启后调用 `initializeMcpSystem`（`app/components/home.tsx:242-259`）；
+- 配置与发现：MCP 配置读自 `app/mcp/mcp_config.json`；每个 active server 经 `createClient` 建立 stdio transport，工具目录（`listTools`）存入内存 `clientsMap`（`app/mcp/actions.ts:101-161`）。
 
 `app/mcp/client.ts:15-25` 明确把整个 `process.env` 复制进子进程环境，再叠加配置中的 `env`。这方便 CLI 型 MCP server 找到运行时依赖，但也意味着服务器配置可以接触到宿主进程环境变量。
 
 ### 3.2 Prompt 协议和回注
 
-`getMcpSystemPrompt`（`app/store/chat.ts:205-224`）把每个 client 的 `listTools` 结果序列化后填进 `MCP_TOOLS_TEMPLATE`，再套上 `MCP_SYSTEM_TEMPLATE`（`app/constant.ts:299-354`）。提示词要求模型使用单个 fenced block：
+`getMcpSystemPrompt`（`app/store/chat.ts:205-224`）把各 client 的工具目录序列化后填入 `MCP_TOOLS_TEMPLATE`；外层再套 `MCP_SYSTEM_TEMPLATE`（模板定义见 `app/constant.ts:299-354`）。提示词要求模型输出单个 fenced block：
 
 ```json:mcp:<clientId>
 {
@@ -127,7 +132,11 @@ usePluginStore.getState().getAsTools(
 }
 ```
 
-模型输出结束后，`checkMcpJson` 调用 `isMcpJson`/`extractMcpJson`。正则位于 `app/mcp/utils.ts:1-10`，只匹配 `json:mcp:<clientId>` 标记并直接 `JSON.parse` block 内容。执行通过 `executeMcpAction` 转到已连接的 MCP client（`app/mcp/actions.ts:336-352`）。成功结果被包装成 `json:mcp-response:<clientId>` fenced block，调用 `onUserInput(..., true)`，跳过普通输入模板（`app/store/chat.ts:826-855`、`407-434`）。
+模型输出结束后的处理链：
+
+1. 提取：`checkMcpJson` → `isMcpJson`/`extractMcpJson`，按 `json:mcp:<clientId>` 标记提取并直接解析 block 内容（`app/mcp/utils.ts:1-10`）；
+2. 执行：经 `executeMcpAction` 转到已连接的 MCP client（`app/mcp/actions.ts:336-352`）；
+3. 回注：成功结果包装成 `json:mcp-response:<clientId>` fenced block，调用 `onUserInput(..., true)` 并跳过普通输入模板（`app/store/chat.ts:826-855`、`407-434`）。
 
 这条链是“模型文本协议 + 客户端回注”，不是 OpenAI `tools`/`tool_calls` 协议；模型要等一条用户消息形式的结果后再继续。
 
@@ -135,8 +144,14 @@ usePluginStore.getState().getAsTools(
 
 - 插件定义、MCP 配置和客户端状态分开保存：插件进入 Zustand 持久化 store，MCP server 配置写回 `app/mcp/mcp_config.json`，活跃 client 只存在进程内 `clientsMap`。
 - 当前 Mask 的 `plugin` 数组决定普通插件工具集合；MCP 工具由全局 MCP 开关和当前活跃 server 决定，不受 Mask.plugin 过滤。
-- Chat message 的 `tools` 数组保存 `id`、函数名、参数、结果和 `isError`；`app/components/chat.tsx:1943-1967` 按这些状态渲染图标和函数名。
-- MCP server 有 `undefined`、`initializing`、`active`、`paused`、`error` 状态，操作包括添加、暂停、恢复、移除和重启（`app/mcp/actions.ts:26-74`、`163-333`）。
+- 消息对象的 `tools` 数组记录工具 id、函数名、参数、结果与 `isError` 标志；`app/components/chat.tsx:1943-1967` 据此渲染图标和函数名。
+- MCP server 生命周期状态字面量（`app/mcp/actions.ts:26-74`）：
+
+```text
+undefined | initializing | active | paused | error
+```
+
+对应操作：添加、暂停、恢复、移除和重启（`app/mcp/actions.ts:163-333`）。
 
 ## 5. 风险、边界和未验证事项
 

@@ -42,8 +42,8 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 ## 1. 页面结构、导航与多窗口
 
-- **工作台拓扑**：左侧栏 `LeftSidebar`（`components/left-sidebar/index.tsx`，shadcn `Sidebar` variant="floating" collapsible="offcanvas"）——`NavMain`（新建聊天/搜索/项目入口与 `SearchDialog` 宿主，`NavMain.tsx:171-251`）+ `NavChats`（线程列表）+ `NavProjects`；主区 = `HeaderPage`（模型下拉 `DropdownModelProvider`）+ 消息区（`Conversation`，`use-stick-to-bottom` 吸附底部，`role="log"` 无障碍角色，`components/ai-elements/conversation.tsx:10-18`）+ 底部 `ChatInput`（`$threadId.tsx:1676-1860`）。
-- **首页新聊天**：`routes/index.tsx`——无会话状态下的大输入框（`ChatInput initialMessage`，无 onSubmit 时创建线程并导航，`ChatInput.tsx:418-518`）；无可用 provider 时显示 `SetupScreen`。
+- **工作台拓扑**：左侧栏 `LeftSidebar`（shadcn Sidebar，floating 变体、offcanvas 折叠）——导航区（新建聊天/搜索/项目入口，`NavMain.tsx:171-251`）+ 线程列表 + 项目列表；主区 = 顶栏（模型下拉）+ 消息区（吸附底部滚动，`role="log"` 无障碍角色，`components/ai-elements/conversation.tsx:10-18`）+ 底部 `ChatInput`（`$threadId.tsx:1676-1860`）。
+- **首页新聊天**：`routes/index.tsx`——无会话状态下的大输入框（无提交处理器时创建线程并导航，`ChatInput.tsx:418-518`）；无可用 provider 时显示 `SetupScreen`。
 - **临时对话**：`temporary-chat` 线程（查询参数进入），消息不落盘（数据侧在会话笔记 §1.1）。
 - **多窗口**：聊天状态无跨窗口同步机制（本次未找到；检查范围：web-app chat stores 与 `services/window` 调用点——window 服务仅用于主题/扩展窗口）；多窗口并发的界面行为未运行验证。侧栏在窄屏下的抽屉化行为由 shadcn Sidebar 提供，未运行验证。
 
@@ -53,7 +53,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 - **线程菜单**（L180-265）：重命名 / 添加到项目 / 移出项目 / 删除；删除项在 `What is Jan?` 且未完成 onboarding（`setup-completed` localStorage）时禁用（L253-260）。
 - **批量删除**：`NavChats.tsx:49-64` 在线程数 **>1** 时挂 `DeleteAllThreadsDialog`（旧笔记"≥1"有误）；删除后导航回首页（`DeleteAllThreadsDialog.tsx:49-51`）。
 - **重命名**：`RenameThreadDialog`（Enter 或按钮保存，无变化/空标题禁用保存；自动聚焦并全选）；数据侧 `metadata.titleSetManually=true`（会话笔记 §2.4）。
-- **搜索**：`SearchDialog`（`containers/dialogs/SearchDialog.tsx`，376 行）——localStorage `recentSearches`（max 5，可清空）、Fzf 结果按有无 project 分组显示、↑↓/Enter 键盘导航、选中项滚动入视口（L166-173）、选择后 `navigate` 到 `/threads/$threadId`；快捷键打开（`KeyboardShortcuts.tsx:71-76`，`PlatformShortcuts.SEARCH`）；搜索数据实现在 `useThreads.getFilteredThreads`（会话笔记 §5）。
+- **搜索**：`SearchDialog`（`containers/dialogs/SearchDialog.tsx`，376 行）——localStorage 最近搜索（max 5，可清空）、Fzf 结果按有无 project 分组显示、↑↓/Enter 键盘导航、选中项滚动入视口、选择后导航到线程页（`/threads/$threadId`）；快捷键打开（`KeyboardShortcuts.tsx:71-76`，`PlatformShortcuts.SEARCH`）；搜索数据实现在 `useThreads.getFilteredThreads`（会话笔记 §5）。
 - **现场恢复**：进入线程页时——`activeRootId` 读线程 metadata 重建活跃分支（`$threadId.tsx:849-857`）；待发送初始消息经 `sessionStorage` 键 `initial-message-<threadId>` 恢复发送（L1145-1172，发送前即移除防重复）；分支/版本切换后的滚动定位行为未运行验证。
 
 ## 3. Composer、草稿、附件与快捷输入
@@ -114,7 +114,16 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 ## 8. Chat UI 状态所有权与同步
 
-- **store 分工**：`useThreads`（列表/排序/搜索/增删改）、`useMessages`（乐观写 + 异步持久化）、`useChatSessions`（Chat 实例与流状态）、`useAppState`（当前线程、busy/embedding 标记、oom/backend 错误、abort controllers）、`usePrompt`（草稿与历史）、`useMessageQueue`（per-thread 队列）、`useMessageErrors`（错误文本）、`useChatAttachments`（per-thread 附件，`NEW_THREAD_ATTACHMENT_KEY` 首页中转）；`$threadId.tsx` 是仲裁中枢（数据语义在会话笔记 §2.4/§6）。
+- **store 分工**：
+  - `useThreads`：列表/排序/搜索/增删改；
+  - `useMessages`：乐观写 + 异步持久化；
+  - `useChatSessions`：Chat 实例与流状态；
+  - `useAppState`：当前线程、busy/embedding 标记、oom/backend 错误、abort controllers；
+  - `usePrompt`：草稿与历史；
+  - `useMessageQueue`：per-thread 队列；
+  - `useMessageErrors`：错误文本；
+  - `useChatAttachments`：per-thread 附件（`NEW_THREAD_ATTACHMENT_KEY` 首页中转）；
+  - `$threadId.tsx` 是仲裁中枢（数据语义在会话笔记 §2.4/§6）。
 - **乐观写**：`addMessage` 先入内存再按 id 替换；ThreadItem 磁盘为空不覆盖乐观写（§2）。
 - **删除清理**：`deleteThread` 级联清 session/queue/attachments/向量库 + 重建搜索索引（数据侧会话笔记 §3）；离开线程清队列（`$threadId.tsx:1654-1658`）、abort 工具循环与审批（L879-888）。
 - **错误状态**：`message-errors.ts` 与 `metadata.error` 双写（对话请求笔记 §6）；banner 端配置控制呈现。

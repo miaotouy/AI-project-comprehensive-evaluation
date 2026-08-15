@@ -16,13 +16,15 @@
 
 Open WebUI v0.11.0 的「Agent 角色」载体是**自定义模型（Workspace Models）**：一个模型条目 = 上游基础模型 + system prompt + 推理参数 + 知识引用 + 工具/技能/过滤器绑定 + 访问授权。没有独立的 persona 实体。
 
-- `Model` 表在 v0.11.0 已重构为 8 列：`id / user_id / base_model_id / name / params(JSON) / meta(JSON) / is_active / updated_at / created_at`（models/models.py 114-127 行）；旧版的 `system`、`files`、`modelfile`、`meta_categories` 独立字段已删除——system prompt 现在存于 `params.system`，知识库改为 `meta.knowledge` 引用列表，`access_control` 被独立的 `access_grants` 表取代；
-- 自定义模型有两种形态（utils/models.py 157-242 行）：**Override（覆盖型）** `base_model_id = NULL`，沿用上游模型的同一个 id 只覆盖 name/info；**Preset（预设型）** `base_model_id = 上游id`，生成全新 id 且列表带 `preset: true`；
+- `Model` 表在 v0.11.0 已重构为 8 列（models/models.py 114-127 行，列名见 1.1）；旧版的 `system`、`files`、`modelfile`、`meta_categories` 独立字段已删除——system prompt 现在存于 `params.system`，知识库改为 `meta.knowledge` 引用列表，`access_control` 被独立的 `access_grants` 表取代；
+- 自定义模型有两种形态（utils/models.py 157-242 行）：**Override（覆盖型）** 不设 `base_model_id`，沿用上游模型的同一个 id 只覆盖 name/info；**Preset（预设型）** `base_model_id` 指向上游，生成全新 id 且列表带 `preset: true`；
 - 模型 id 语法：本版本**没有** `user/modelid` 前缀，也没有旧式 `"model-id:params"` 内联参数语法；id 是用户名的 slug 化（ModelEditor.svelte 69-76 行），限长 256（routers/models.py 91-92 行），参数一律存 DB、由服务端合并应用；
-- 生效链路是**双层合并**：前端请求 body 带 `params` → `main.py` 三层合并「全局默认 < 模型params < 请求params」（1086-1097 行）→ `process_chat_payload` 捕获 `system`（middleware.py 2286-2289 行）→ 真正的注入在**路由层**：openai/ollama 端点各自按 `model_id` 重新读 DB，`apply_model_params_to_body_*` + `apply_system_prompt_to_body`（routers/openai.py 1210-1232 行、routers/ollama.py 1124-1141 行）——即「persona 的权威来源是 DB，不是前端缓存」；
-- 权限是核心安全机制：模型 `params`（含 system prompt）对**只读调用者直接剥空**（routers/models.py 197-200、540-547 行）；写操作要求 owner / write-grant / admin；`BYPASS_MODEL_ACCESS_CONTROL`、`BYPASS_ADMIN_ACCESS_CONTROL` 两个环境变量全局绕过；
+- 生效链路是**双层合并**：
+  - 请求侧：前端请求带 `params`，经 `main.py` 按「全局默认 < 模型 params < 请求 params」三层合并（1086-1097 行），`process_chat_payload` 捕获 `system`（middleware.py 2286-2289 行）；
+  - 注入侧：真正的注入在**路由层**——openai/ollama 端点各自按 `model_id` 重新读 DB 后应用参数与 system prompt（routers/openai.py 1210-1232 行、routers/ollama.py 1124-1141 行），即「persona 的权威来源是 DB，不是前端缓存」；
+- 权限是核心安全机制：模型 `params`（含 system prompt）对**只读调用者直接剥空**（routers/models.py 197-200、540-547 行）；写操作要求 owner、write-grant 或 admin；`BYPASS_MODEL_ACCESS_CONTROL`、`BYPASS_ADMIN_ACCESS_CONTROL` 两个环境变量可全局绕过；
 - 工具/能力默认全部开启：`capabilities` 与 `builtinTools` 缺失时默认 True（utils/tools.py 533-540 行），前端 `DEFAULT_CAPABILITIES` 同名默认（constants.ts 100-113 行）；没有 per-model 的 "eval" 开关——Evaluation 是独立的竞技场功能；
-- system prompt 支持变量模板：`resolve_system_prompt`（utils/payload.py 13-39 行）依次渲染 chat.variables → user.variables → metadata.variables → 旧式 `{{ }}` 模板；模型 system 在出站时**前置拼接**到已有 system message 之前（`add_or_update_system_message`，utils/misc.py 580-596 行），实现「模型人设 + 聊天级 system 并存」。
+- system prompt 支持变量模板：`resolve_system_prompt`（utils/payload.py 13-39 行）依次渲染聊天变量、用户变量、元数据变量，最后是旧式 `{{ }}` 模板；模型 system 在出站时**前置拼接**到已有 system message 之前（`add_or_update_system_message`，utils/misc.py 580-596 行），实现「模型人设 + 聊天级 system 并存」。
 
 ## 1. 数据模型
 
@@ -31,17 +33,22 @@ Open WebUI v0.11.0 的「Agent 角色」载体是**自定义模型（Workspace M
 | 类 | 关键点 |
 |---|---|
 | `ModelParams`（61-65 行） | `extra='allow'`，任何推理参数都能存 |
-| `ModelMeta`（67-75 行） | `profile_image_url / description / capabilities / knowledge`，`extra='allow'`；`knowledge` 写入前剥掉重复的 extracted text（26-55、93-96 行）；`tags` 归一化为 `{name}` 列表（98-111 行）；profile_image_url 校验防 SVG 注入（77-91 行） |
-| `Model` ORM（114-127 行） | 上述 8 列 |
+| `ModelMeta`（67-75 行） | `profile_image_url / description / capabilities / knowledge`，`extra='allow'`；字段处理细节见表格下方 |
+| `Model` ORM（114-127 行） | `id` / `user_id` / `base_model_id` / `name` / `params`(JSON) / `meta`(JSON) / `is_active` / `updated_at` / `created_at` |
 | `ModelModel`（130-147 行） | API 形状，含 `access_grants` 列表 |
 | `ModelUserResponse` / `ModelAccessResponse`（150-155 行） | +user / +write_access |
 | `ModelForm`（172-181 行） | 写模型：id / base_model_id / name / meta / params / access_grants / is_active，`extra='ignore'` |
+
+`ModelMeta` 的字段处理：
+- `knowledge` 写入前剥掉重复的 extracted text（26-55、93-96 行）；
+- `tags` 归一化为 `{name}` 列表（98-111 行）；
+- `profile_image_url` 校验防 SVG 注入（77-91 行）。
 
 ### 1.2 存储层（ModelsTable，184-654 行）
 
 - `insert_new_model`（208-231 行）：写表 + `AccessGrants.set_access_grants`；
 - `get_base_models`（290-302 行）：`base_model_id IS NULL` 即「上游模型行」；
-- `search_models`（336-444 行）：分页、模糊匹配 name/base_model_id/用户、SQL 级 access filter（367-373 行）、tag 按 JSON 文本模式匹配（SQLite/PostgreSQL 两种转义）、排序 name/created_at/updated_at；
+- `search_models`（336-444 行）：分页、模糊匹配名称/基础模型/用户、SQL 级访问过滤（367-373 行）、tag 按 JSON 文本模式匹配（SQLite/PostgreSQL 两种转义）、按名称或时间排序；
 - `sync_models`（593-651 行）：外部同步（差量 upsert + 删除）。
 
 ### 1.3 默认/内置模型
@@ -69,7 +76,11 @@ Open WebUI v0.11.0 的「Agent 角色」载体是**自定义模型（Workspace M
 ### 前端
 
 - 聊天选择器：`src/lib/components/chat/ModelSelector.svelte`（items 直接来自 `$models` store，取 `model.id/name`，支持多选/固定/设为默认，47-86 行）；子组件 `ModelItemMenu.svelte` 跳编辑页（48-67 行）；
-- 用户创建页：`src/lib/components/workspace/Models.svelte` + `Models/ModelEditor.svelte`。ID 由名字 slug 化（69-76 行）；提交时把 `system/toolIds/skillIds/filterIds/defaultFilterIds/actionIds/defaultFeatureIds/builtinTools/terminalId/knowledge/access_grants` 全部塞进 `meta`，`system` 塞 `params.system` 并清空空值（261-366 行）；
+- 用户创建页：`src/lib/components/workspace/Models.svelte` + `Models/ModelEditor.svelte`。ID 由名字 slug 化（69-76 行）；提交时把下列绑定全部塞进 `meta`，`system` 单独塞 `params.system` 并清空空值（261-366 行）：
+  - 工具类：`toolIds`、`builtinTools`；
+  - 技能与过滤器：`skillIds`、`filterIds`、`defaultFilterIds`；
+  - 动作与默认功能：`actionIds`、`defaultFeatureIds`；
+  - 其他：`terminalId`、`knowledge`、`access_grants`；
 - 管理员页：`Settings/Models.svelte`（列表、启用/禁用、排序拖拽、Public/Shared/Private 徽章 107-123 行）；`Settings/Models/ModelDefaultsPanel.svelte` 通过 `getModelsConfig/setModelsConfig` 读写 `DEFAULT_MODEL_METADATA`/`DEFAULT_MODEL_PARAMS`（82-116 行）。
 
 ## 3. 模型解析与生效
@@ -88,7 +99,7 @@ Ollama 基线查找：id.split(':')[0] 登记 + 精确 id 登记，精确优先�
 
 ### 3.2 访问控制
 
-- `check_model_access`（utils/models.py 431-472 行）：arena 读 `meta.access_grants`；普通模型查 `AccessGrants.has_access(read)` + `has_base_model_access` 沿 `base_model_id` 链逐跳校验（utils/access_control/__init__.py 301-339 行，中间无 DB 行的基模型只放行 admin）；
+- `check_model_access`（utils/models.py 431-472 行）：arena 读 `meta.access_grants`；普通模型查 `AccessGrants.has_access(read)` 与 `has_base_model_access`，沿 `base_model_id` 链逐跳校验（utils/access_control/__init__.py 301-339 行，中间无 DB 行的基模型只放行 admin）；
 - `get_filtered_models`（475-529 行）：用户或 admin（未开 BYPASS）且未开 `BYPASS_MODEL_ACCESS_CONTROL` 时，只返回 owner/可读/admin 的模型；
 - grant 模型：`AccessGrants` 表 `principal_type ∈ user/group/anyone`，`principal_id='*'` 为公开；空列表=私有；旧 `access_control` dict 有自动迁移（access_control/__init__.py 179-217 行）。
 
@@ -97,7 +108,7 @@ Ollama 基线查找：id.split(':')[0] 登记 + 精确 id 登记，精确优先�
 ### 4.1 前端（Chat.svelte 3124-3192 行）
 
 - `model.info.params.stream_response` 决定流式（3032-3036 行）；`params.system || $settings.system` 作为 `messages[0]` 发送（3039-3043 行）；
-- 选中模型时从 `model.info.meta` 读 `toolIds / skillIds / defaultFilterIds / defaultFeatureIds / terminalId`（762-844 行）；`features`（web_search/image_generation/code_interpreter/memory）按 `capabilities` 与用户权限生成（816-841 行）。
+- 选中模型时从 `model.info.meta` 读工具、技能、默认过滤器、默认功能与终端等绑定（762-844 行）；`features`（web_search/image_generation/code_interpreter/memory）按 `capabilities` 与用户权限生成（816-841 行）。
 
 ### 4.2 后端合并（main.py 1052 行起）
 
@@ -111,23 +122,36 @@ Models.get_model_by_id(model_id)（1074）
 
 ### 4.3 路由层注入（权威来源）
 
-- `routers/openai.py generate_chat_completion`（1182 行起）：`base_model_id` 改写 `payload['model']`（1214-1219 行）→ `system = params.pop('system')`（1224 行）→ `apply_model_params_to_body_openai`（1226 行）→ 非 `bypass_system_prompt` 时 `apply_system_prompt_to_body`（1227-1228 行）→ `check_model_access`（1230 行）；
-- `routers/ollama.py generate_chat_completion`（1086-1160 行）：同样逻辑 + `apply_model_params_to_body_ollama`（1132-1137 行）；
-- `utils/payload.py`：`resolve_system_prompt`（13-39 行）渲染变量；`apply_model_params_to_body_openai/ollama`（108-219 行）含参数类型强转、`max_tokens→num_predict`、`custom_params` JSON 解析、Ollama 根级 `format/keep_alive/think` 提升（205-215 行）；`remove_open_webui_params` 剔除 `stream_response/function_calling/reasoning_tags/system` 等内部字段（81-104 行）。
+- `routers/openai.py generate_chat_completion`（1182 行起）的注入顺序：
+  1. 按 `base_model_id` 改写 `payload['model']`（1214-1219 行）；
+  2. 取出并弹出 `system`（1224 行）；
+  3. 应用模型参数 `apply_model_params_to_body_openai`（1226 行）；
+  4. 非 `bypass_system_prompt` 时应用 `apply_system_prompt_to_body`（1227-1228 行）；
+  5. `check_model_access`（1230 行）。
+- `routers/ollama.py generate_chat_completion`（1086-1160 行）：同样逻辑，参数应用为 `apply_model_params_to_body_ollama`（1132-1137 行）；
+- `utils/payload.py` 的处理函数：
+  - `resolve_system_prompt`（13-39 行）：渲染变量；
+  - `apply_model_params_to_body_openai/ollama`（108-219 行）：参数类型强转、`max_tokens→num_predict`、`custom_params` JSON 解析、Ollama 根级 `format/keep_alive/think` 提升（205-215 行）；
+  - `remove_open_webui_params`（81-104 行）：剔除 `stream_response`、`function_calling`、`reasoning_tags`、`system` 等内部字段。
 
 ### 4.4 middleware 中的角色处理（process_chat_payload 2248-2987 行）
 
 - arena 子模型随机解析（2260-2284 行）；
 - 捕获 `model_system_prompt` 后再 pop params（2286-2289 行）；
 - 文件夹级 system_prompt 注入（2449-2450 行）；
-- legacy 模式下模型 `meta.knowledge` 展开成 `files` 做 RAG（2462-2502 行）；native FC 模式下知识走内置工具 `query_knowledge_files` 等（utils/tools.py 602-638 行，`get_attached_knowledge` 汇总 model/chat/note 知识 460-517 行）；
+- 知识注入按模式分流：legacy 模式下模型 `meta.knowledge` 展开成 `files` 做 RAG（2462-2502 行）；native FC 模式下知识走内置工具 `query_knowledge_files`（utils/tools.py 602-638 行），`get_attached_knowledge` 汇总模型/聊天/笔记三处知识（460-517 行）；
 - 技能 `<skill>` 注入 / `<available_skills>` 清单（2607-2685 行）；
 - 内置工具按能力注入（2888-2900 行）；
 - 模型 system 解析后**前置拼接**到已有 system message 内容，存入 `metadata['system_prompt']`（2937-2948 行），供子代理/定时器/工具循环还原用（main.py 1692、utils/subagents.py 321、utils/timers.py 111 行）。
 
 ## 5. System prompt 处理
 
-- `utils/misc.py`：`get_system_message`（514-518 行）、`replace_system_message_content`（572-577 行）、`add_or_update_system_message`（580-596 行，`append=False` 时前置）、`update_message_content`（556-569 行）、`merge_system_messages`（529-553 行，多个 system 合并到位置 0，兼容 Qwen 等模板）；
+- `utils/misc.py` 的系统消息工具：
+  - `get_system_message`（514-518 行）：取系统消息；
+  - `replace_system_message_content`（572-577 行）：替换内容；
+  - `add_or_update_system_message`（580-596 行）：`append=False` 时前置；
+  - `update_message_content`（556-569 行）：更新内容；
+  - `merge_system_messages`（529-553 行）：多个 system 合并到位置 0，兼容 Qwen 等模板；
 - `utils/task.py`：`prompt_template`（旧式 API `{{ ... }}`）、`prompt_variables_template`（WebUI 元数据变量）——由 `resolve_system_prompt` 串联；
 - Chat Controls（用户侧 system）走 `apply_system_prompt_to_body(..., replace=True)` 渲染变量后替换（middleware.py 2387-2394 行）；
 - Ollama 侧：system 若落在 options 里会被提升为根级 `system` 字段（payload.py 361-366 行）。
@@ -164,11 +188,15 @@ Models.get_model_by_id(model_id)（1074）
 
 ## 8. 会话级快照与重新生成
 
-chat 表（`backend/open_webui/models/chats.py:70-102`）的 `chat` JSON 列保存 `{id, title, models, history, params, files}`（model id 存于 `chatContent.models`，无独立列），另有 `meta/variables/tasks/summary/current_message_id` 列；前端加载后据此恢复（`src/lib/components/chat/Chat.svelte:1992-2026`），后端合并保存（`routers/chats.py:1358-1366`）。chat_message 表（`models/chat_messages.py:128-172`）中 assistant 消息有 `model_id` 列（:145），`content/output/files/sources/embeds/meta/usage` 等 JSON 列，但**无 params 快照列**，`meta` 只存内部标记（timer/delegation/status）。
+会话与消息两层的持久化结构：
 
-- **chat 级 params 是用户侧覆盖**：Chat Controls 写入的 `chat.params`（Chat.svelte:3130-3134 把 `{...$settings.params, ...chat.params, stop}` 放请求体）随 chat JSON 保存并随请求发送，与模型 params 并存（模型侧出站前置拼接）；chat 表不保存模型 system prompt 快照，模型 system 的权威来源仍是 DB（`routers/openai.py:1210-1232`）。
-- **regenerate 是纯前端实现**：后端无 regenerate API（仅权限开关 `regenerate_response`，config.py:1967）；`Chat.svelte:3380` 的 `regenerateResponse` 复用父 user message id 调 `sendMessage`，生成**新 uuid 的 assistant 消息**追加到 `parent.childrenIds`（Chat.svelte:2809-2844），即新建兄弟分支、不替换原消息；多模型对话用 `message.model/modelIdx` 恢复列（:3402-3408）。
-- **开场白与提示词分组不存在**：Workspace Model 无 greeting/opening 字段（后端 .py 全量 grep 无模型侧命中），空聊天的 Suggestions/Placeholder 是静态引导 UI；`params.system` 是单一 textarea（ModelEditor.svelte:78、427），无多段/逐段启停；模型整体导入/导出存在（routers/models.py:315-502），无段级导入导出。
+- chat 表（`backend/open_webui/models/chats.py:70-102`）的 `chat` JSON 列保存 `{id, title, models, history, params, files}`（model id 存于 `chatContent.models`，无独立列），另有 `meta/variables/tasks/summary/current_message_id` 列；前端加载后据此恢复（`src/lib/components/chat/Chat.svelte:1992-2026`），后端合并保存（`routers/chats.py:1358-1366`）；
+- chat_message 表（`models/chat_messages.py:128-172`）：assistant 消息有 `model_id` 列（:145），另有 `content/output/files/sources/embeds/meta/usage` 等 JSON 列，但**无 params 快照列**，`meta` 只存内部标记（timer/delegation/status）。
+
+- **chat 级 params 是用户侧覆盖**：Chat Controls 写入的 `chat.params`（Chat.svelte:3130-3134 把用户设置、聊天参数与 stop 合并进请求体）随 chat JSON 保存并随请求发送，与模型 params 并存（模型侧出站前置拼接）；chat 表不保存模型 system prompt 快照，模型 system 的权威来源仍是 DB（`routers/openai.py:1210-1232`）。
+- **regenerate 是纯前端实现**：后端无 regenerate API（仅权限开关 `regenerate_response`，config.py:1967）；`Chat.svelte:3380` 的 `regenerateResponse` 复用父 user 消息 id 调 `sendMessage`，生成**新 uuid 的 assistant 消息**追加到 `parent.childrenIds`（Chat.svelte:2809-2844），即新建兄弟分支、不替换原消息；
+- 多模型对话用 `message.model/modelIdx` 恢复列（:3402-3408）。
+- **开场白与提示词分组不存在**：Workspace Model 无 greeting/opening 字段（后端 .py 全量 grep 无模型侧命中），空聊天的 Suggestions/Placeholder 是静态引导 UI；`params.system` 是单一 textarea（ModelEditor.svelte:78、427），无多段/逐段启停；模型整体导入/导出存在（routers/models.py:315-502），但无段级导入导出。
 
 ## 9. 关键源码索引
 

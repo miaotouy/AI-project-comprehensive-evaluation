@@ -14,21 +14,31 @@
 
 ## 结论摘要
 
-Hermes 的 `session.save`（TUI/桌面 `/save` 调用的 RPC，`tui_gateway/methods_session.py:2676`）与经典 CLI `/save`（`cli.py:8679` `save_conversation`）都是**按需触发的本地 JSON 快照**，写入 `~/.hermes/sessions/saved/hermes_conversation_<时间戳>.json`。项目自身文档明确称其为"convenience exports"（`website/docs/user-guide/sessions.md:773`），canonical 会话事实源是 SQLite `state.db`。快照内容为会话内存历史的原始拷贝，不做转换、脱敏或重排；CLI 版只含 `model/session_id/session_start/messages`，TUI/桌面版多一个 `system_prompt` 字段。
+Hermes 提供两条按需触发的本地 JSON 快照路径：TUI/桌面端的 `/save` 调用 `session.save` RPC（`tui_gateway/methods_session.py:2676`）。经典 CLI 入口则走 `save_conversation`（`cli.py:8679`）。快照写入 `~/.hermes/sessions/saved/hermes_conversation_<时间戳>.json`；项目自身文档把这类文件称为 convenience exports（`website/docs/user-guide/sessions.md:773`），canonical 会话事实源是 SQLite `state.db`。快照内容是会话内存历史的原始拷贝，不转换、不脱敏、不重排；CLI 版只写模型、会话 ID、开始时间与消息四类基础字段，TUI/桌面版在此基础上额外写 `system_prompt`（精确字段清单见 §2）。
 
 **边界判断：`session.save` 是面向个人存档/离线查看的本地快照，位于项目“导出交付”主链之外**。它没有下游消费者（无导入、无渲染、无分享管道），源码 docstring 自称"convenience export for sharing or off-line inspection"（`cli.py:8682-8685`），但分享只停留在“用户自己拿走这个文件”层面。
 
 Hermes 另有一套完整的对话导出子系统，入口独立于 `/save`：
 
-- `hermes sessions export`（`hermes_cli/sessions_cmd.py:313`）支持 `jsonl` / `md` / `qmd` / `html` / `trace` 五种格式，从 SessionDB 抽取（含压缩血缘合并 `--lineage logical`），可选 `--redact` 强制脱敏，Markdown 导出带 SHA256 校验行与 `manifest.jsonl`，HTML 为独立单文件（图片占位、reasoning 折叠块、CSP+转义），`trace` 输出 Claude Code JSONL 并可 `--upload` 到 Hugging Face 数据集（默认私有）；
-- 导入往返存在：`SessionDB.import_sessions`（`hermes_state_portability.py:376`）+ Web `POST /api/sessions/import`（`hermes_cli/web_routers/sessions.py:448`）+ 网页端入口（`web/src/lib/api.ts:441`）；CLI 子命令层面本次未找到 `sessions import`；
-- 研究轨迹交接存在两条：`save_trajectories` 参数把每轮会话追加为 ShareGPT 格式 JSONL（`run_agent.py:2358`、`agent/trajectory.py:30`，默认关闭），以及 `hermes sessions export --format trace --upload` 发布 HF Agent Trace 数据集（`agent/trace_upload.py`）。
+- 命令行入口 `hermes sessions export`（`hermes_cli/sessions_cmd.py:313`）从 SessionDB 抽取数据，支持五种输出格式与两类可选加工（`--redact` 强制脱敏、`--lineage logical` 合并压缩血缘链）：
+  - `jsonl`：每行一个完整会话对象；
+  - `md`/`qmd`：Markdown 文档，带 SHA256 校验行与 `manifest.jsonl` 导出记录；
+  - `html`：独立单文件（图片占位、reasoning 折叠块、CSP+转义）；
+  - `trace`：Claude Code JSONL，可 `--upload` 到 Hugging Face 数据集（默认私有）。
+- 导入往返存在：服务端 `import_sessions`（`hermes_state_portability.py:376`）暴露为 Web `POST /api/sessions/import`（`web_routers/sessions.py:448`），网页端另有对应入口；CLI 子命令层面本次未找到对应的导入命令。
+- 研究轨迹交接有两条：`save_trajectories` 参数（`run_agent.py:2358`，默认关闭）把每轮会话追加为 ShareGPT 格式 JSONL；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（`agent/trace_upload.py`）。
 
-能力分型：`E1` 数据交换（jsonl/md/qmd 文件导出与 DB 导入往返）、`E5` 发布与研究（HF 轨迹数据集、ShareGPT 格式轨迹 JSONL、`trajectory_compressor.py` 与 `datagen-config-examples/` 面向轨迹数据集生产）、`E2` 阅读交付的简化形态（HTML 单文件，但正文是转义纯文本、无 Markdown 渲染、图片为占位）。`E3` 图片分享与 `E4` 对话链接分享本次未找到。
+能力分型如下（`E3` 图片分享与 `E4` 对话链接分享本次未找到）：
+- `E1` 数据交换：多格式文件导出与 DB 导入往返；
+- `E2` 阅读交付的简化形态：HTML 单文件，但正文是转义纯文本、无 Markdown 渲染、图片为占位；
+- `E5` 发布与研究：HF 轨迹数据集与 ShareGPT 格式轨迹 JSONL，配套 `trajectory_compressor.py`、`datagen-config-examples/` 面向轨迹数据集生产。
 
 ## 系统边界与完整主链
 
-会话事实源：SQLite `state.db`（`hermes_state.py` `SessionDB`）是 canonical 消息存储，消息逐轮增量写入；`~/.hermes/sessions/saved/`、`~/.hermes/sessions/session_*.json`、`~/.hermes/sessions/sessions.json` 都是旁路产物（`sessions.md:750-779`）。
+会话事实源：SQLite `state.db` 中的 `SessionDB`（`hermes_state.py`）是 canonical 消息存储，消息逐轮增量写入。以下三类路径均为旁路产物（`sessions.md:750-779`）：
+- `~/.hermes/sessions/saved/`
+- `~/.hermes/sessions/session_*.json`
+- `~/.hermes/sessions/sessions.json`
 
 主链 A（本地快照，三入口共用一个目标目录）：
 
@@ -59,7 +69,7 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
   → 跳过已存在 id；孤儿子会话拆离；activity 字段重置为 NULL；尺寸/条数上限校验
 ```
 
-`hermes sessions export` 的 jsonl 输出与 `import_sessions` 的输入是同一形状（`export_session` dict），构成往返；`hermes sessions recover`（`sessions_cmd.py:122`）是 DB 文件级恢复（整库恢复范畴，不属于本类目交付物）。
+`hermes sessions export` 的 jsonl 输出与 `import_sessions` 的输入共用同一 `export_session` dict 形状，因此导入与导出可直接构成往返；`hermes sessions recover`（`sessions_cmd.py:122`）是 DB 文件级恢复，属整库恢复范畴，不计入本类目交付物。
 
 ## 1. 入口、用户目标与导出源
 
@@ -71,16 +81,22 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 | `hermes sessions export` | `hermes_cli/sessions_cmd.py:313`、`main.py:12261` | `SessionDB`（SQLite） | 个人存档、迁移、备份分析、研究发布 |
 | Web 会话导出/导入 | `web_routers/sessions.py:722`（流式 JSON）、`:448`（导入） | `SessionDB` | 页面内下载/恢复 |
 
-导出粒度：整会话；`--lineage logical`（md/qmd）把压缩血缘链合并为一个逻辑会话（`export_session_lineage`，`hermes_state_portability.py:274-292`）；过滤器批量（`--older-than`、`--source`、`--model` 等）；`export_all` 全量。单消息、连续范围或任意选区导出本次未找到；`--only user-prompts` 把用户消息压平成一条条记录，供 prompt 库或记忆摄入使用，不承担消息范围选择。
+导出粒度固定为整会话。md/qmd 的 `--lineage logical` 会把压缩血缘链合并为一个逻辑会话（`export_session_lineage`，`hermes_state_portability.py:274-292`）。批量选取支持按时间、来源、模型等条件过滤（`--older-than`、`--source`、`--model`）。不传过滤器时 `export_all` 全量导出。单消息、连续范围或任意选区导出本次未找到；`--only user-prompts` 把用户消息压平成逐条记录，供 prompt 库或记忆摄入使用，不承担消息范围选择。
 
 ## 2. 范围选择、内容口径与字段过滤
 
-- **`/save`（CLI）**：`json.dump({"model","session_id","session_start","messages"})`，`messages` 是 `conversation_history` 的**原样拷贝**（`cli.py:8700-8707`）。历史是 OpenAI 风格消息（`role/content/tool_calls/tool_call_id/…`），是否含 `reasoning` 取决于运行时会话历史对象——静态推断会随消息对象保留（agent 回环的 assistant 消息带 `reasoning` 字段，AGENTS.md:409），未运行验证。无脱敏、无字段过滤。
-- **`session.save`（TUI/桌面）**：额外写 `system_prompt`（取 `agent._cached_system_prompt`），`messages` 同样来自内存历史原样拷贝（`methods_session.py:2712-2742`）。注释说明"include the system prompt so the export matches the dashboard save"（`:2700-2702`）。
-- **`_save_session_log`（`run_agent.py:2997`）**：受 `sessions.write_json_snapshots`（默认 `False`，`config_defaults.py:2798`）门控的**自动**快照，每轮持久化后重写 `~/.hermes/sessions/session_<sid>.json`；内容最全（`system_prompt`、`tools`、`base_url`、`platform`、`message_count`），且会做两种加工：`REASONING_SCRATCHPAD` → `<think>` 标签归一、`redact_sensitive_text` 脱敏（`:3037-3047,3073`）。默认关闭，注释自称"legacy"，为外部工具消费而存在（`:3000-3003`）。
-- **`hermes sessions export jsonl`**：`export_session` 输出 DB 行 + 全部消息字段。DB schema 保留 `reasoning`/`reasoning_content` 列（`hermes_state_portability.py:424-434` 的导入字段白名单可证），因此 jsonl 是**含 reasoning 的完整会话对象**；可选 `--redact` 用 force 模式深拷贝脱敏（`session_export_md.py:219-244`）。
+- **`/save`（CLI）**：把内存历史原样转储为 JSON（`cli.py:8700-8707`），只写四个基础字段 `model`、`session_id`、`session_start`、`messages`，无脱敏、无字段过滤；历史消息是 OpenAI 风格对象。是否含 `reasoning` 取决于运行时会话历史对象——静态推断 agent 回环的 assistant 消息带该字段（`AGENTS.md:409`），可能随消息保留，未运行验证。
+- **`session.save`（TUI/桌面）**：在 CLI 快照基础上额外写 `system_prompt`（取 `agent._cached_system_prompt`），消息数组同样来自内存历史原样拷贝（`methods_session.py:2712-2742`）；注释说明这是为了让导出与 dashboard 保存一致（`methods_session.py:2700-2702`）。
+- **`_save_session_log`（`run_agent.py:2997`）**：受配置 `sessions.write_json_snapshots` 门控的自动快照（默认关闭，`config_defaults.py:2798`），每轮持久化后重写 `~/.hermes/sessions/session_<sid>.json`。它是三套快照里内容最全的一套：
+  - 字段：消息之外还含 `system_prompt`、`tools`、`base_url`、`platform`、`message_count`；
+  - 加工：`REASONING_SCRATCHPAD` 归一为 `<think>` 标签，`redact_sensitive_text` 脱敏（`run_agent.py:3037-3047,3073`）；
+  - 代码注释自称 legacy，为外部工具消费而存在（`run_agent.py:3000-3003`）。
+- **`hermes sessions export jsonl`**：`export_session` 输出 DB 行与全部消息字段。DB schema 为 `reasoning`/`reasoning_content` 保留了列（可从导入字段白名单反推，`hermes_state_portability.py:424-434`），因此 jsonl 是含 reasoning 的完整会话对象；可选 `--redact` 以 force 模式深拷贝脱敏（`session_export_md.py:219-244`）。
 - **md/qmd**：消息内容原样写入，`tool_calls` 以 JSON 代码块呈现（`session_export_md.py:66-69,99-108`）；reasoning 字段不渲染。
-- **html**：`image_url` 内容块 → `[Image Attachment]` 占位；`tool_calls` → 折叠块；reasoning/reasoning_content → 可折叠 Reasoning 块；正文一律 `_escape_html`（`session_export_html.py:651-759`）。
+- **html**：正文一律 HTML 转义（`_escape_html`，`session_export_html.py:651-759`），三类富内容降级如下：
+  - `image_url` 内容块 → `[Image Attachment]` 占位；
+  - `tool_calls` → 折叠块；
+  - reasoning/reasoning_content → 可折叠 Reasoning 块。
 - **trace**：跳过 system 消息；assistant 的 content+tool_calls 转 Anthropic 风格 `text`/`tool_use` 块；tool 结果变 user 轮 `tool_result`；`reasoning` 字段不转换（`agent/trace_upload.py:185-238`）。
 - **错误信息**：`end_reason` 等会话字段进 jsonl/md frontmatter；消息级错误主要落在 content 文本内，各格式均按 content 原样处理，无独立"错误"字段过滤逻辑。
 
@@ -94,8 +110,15 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 
 ## 4. 格式、schema 与往返能力
 
-- jsonl：`export_session`/`export_all` dict 每行一个，与 `import_sessions` 输入同形状，**往返存在**；往返语义：同 id 跳过、父链仅在父存在时恢复否则拆离、`last_activity_*` 导入时重置为 NULL（`hermes_state_portability.py:376-394`）、尺寸/条数硬上限（`_IMPORT_MAX_*`）。
-- md/qmd：frontmatter 含 `exporter` 版本（`EXPORTER_VERSION = "hermes sessions export (md/qmd) v1"`，`session_export_md.py:18`）、`lineage_session_ids`、SHA256 校验行与"Export verification"段落（`:154-180`）；`verify_export_file` 可复核哈希与消息数（`:200-216`）；`manifest.jsonl` 追加每次导出记录（含 sha256，`:263-279`）。**无 Markdown 导入路径**（本次未找到）。
+- **jsonl**：导出输出每行一个会话对象，与 `import_sessions` 的输入同形状，往返存在（`hermes_state_portability.py:376-394`）。往返语义如下：
+  - 同 id 会话跳过；
+  - 父链仅在父存在时恢复，否则拆离为孤立会话；
+  - `last_activity_*` 字段导入时重置为 NULL；
+  - 尺寸与条数受硬上限约束（`_IMPORT_MAX_*`）。
+- **md/qmd**：无 Markdown 导入路径（本次未找到）。导出侧包含：
+  - frontmatter 带 exporter 版本标记（`EXPORTER_VERSION = "hermes sessions export (md/qmd) v1"`，`session_export_md.py:18`）与 `lineage_session_ids` 血缘 id 列表；
+  - SHA256 校验行与 "Export verification" 段落（`session_export_md.py:154-180`），`verify_export_file` 可复核哈希与消息数（`session_export_md.py:200-216`）；
+  - `manifest.jsonl` 追加每次导出记录（含 sha256，`session_export_md.py:263-279`）。
 - trace：Claude Code JSONL，供 Hugging Face Agent Trace Viewer 消费，非 Hermes 自有格式（`trace_upload.py:4-9`）。
 - html：无版本/schema 标记。
 
@@ -134,9 +157,13 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 ## 10. 性能、失败恢复与测试
 
 - 大会话防护：`hermes sessions export`（console 引擎）有 per-session 消息数 guard（`sessions.max_export_messages` 默认 20000，`console_engine.py:1432-1445`；`config_defaults.py:2840`）；Web 导出用 keyset 分页流式输出（`web_routers/sessions.py:749-774`）。
-- 导入上限：`_IMPORT_MAX_SESSIONS`/`_IMPORT_MAX_MESSAGES_PER_SESSION`/`_IMPORT_MAX_SESSION_BYTES`/`_IMPORT_MAX_TOTAL_BYTES` 硬限 + 原子写入（`hermes_state_portability.py:395-548`）。
+- 导入上限：`_IMPORT_MAX_SESSIONS`、`_IMPORT_MAX_MESSAGES_PER_SESSION`、`_IMPORT_MAX_SESSION_BYTES`、`_IMPORT_MAX_TOTAL_BYTES` 四类硬限（分别约束会话数、单会话消息数、单会话字节数、总字节数），配合原子写入（`hermes_state_portability.py:395-548`）。
 - `/save` 失败只打印错误不中断会话（`cli.py:8696,8711`）；目录创建失败同样只报错返回（`methods_session.py:2704-2707`）。
-- 已有测试：`tests/test_tui_gateway_server.py:14186`（/save 写 profile 目录而非 CWD）、`tests/cli/test_save_conversation_location.py`、`tests/hermes_cli/test_session_export.py`、`tests/hermes_cli/test_sessions_export_md_cli.py`、`tests/hermes_state/test_session_md_export.py`、`tests/agent/test_trace_upload.py`、`tests/test_hermes_state.py`（export→import 往返，`:4056-4061`）、`tests/hermes_cli/test_console_engine.py`（export 预算 guard）。运行行为未在本机复验。
+- 已有测试（运行行为未在本机复验）：
+  - `/save` 写 profile 目录而非 CWD：`tests/test_tui_gateway_server.py:14186`；
+  - 保存位置与导出各格式：`tests/cli/test_save_conversation_location.py`、`tests/hermes_cli/test_session_export.py`、`tests/hermes_cli/test_sessions_export_md_cli.py`、`tests/hermes_state/test_session_md_export.py`；
+  - export→import 往返：`tests/test_hermes_state.py:4056-4061`；
+  - trace 上传与导出预算 guard：`tests/agent/test_trace_upload.py`、`tests/hermes_cli/test_console_engine.py`。
 
 ## 11. 设计取舍与已确认边界
 
@@ -166,6 +193,6 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 - `hermes_cli/session_export_md.py`、`hermes_cli/session_export_html.py`、`hermes_cli/session_export.py`
 - `agent/trace_upload.py`（Claude Code JSONL 构建与 HF 上传）
 - `agent/trajectory.py`、`agent/agent_runtime_helpers.py`（`convert_to_trajectory_format`）
-- `hermes_cli/web_routers/sessions.py`（`/api/sessions/import` :448、`/api/sessions/{id}/export` :722）
+- `hermes_cli/web_routers/sessions.py`（`/api/sessions/import` :448、`/api/sessions/{id}/export` :722）、`web/src/lib/api.ts`（网页端导入入口 :441）
 - `ui-tui/src/app/slash/commands/core.ts`（:554）、`apps/desktop/src/lib/desktop-slash-commands.ts`（:297-300）
 - `website/docs/user-guide/sessions.md`（存储定位，:750-779）

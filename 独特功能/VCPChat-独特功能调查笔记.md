@@ -67,13 +67,17 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 - **用户目标**：在不修改 Agent 配置与聊天历史的前提下，对每次 AI 请求做按需、可开关的提示词干预；这是普通 Chat 与通用 Agent 底座没有的"请求级临时设定"层。
 - **入口与触发者**：用户右键发送按钮弹出「高级回复」浮窗（逐条开关），浮窗齿轮进入「规则管理」模态（新建/编辑/删除/拖拽排序）。渲染端 `Tavernmodules/tavern-manager.js:96-255`（浮窗）、`:258-596`（管理模态）。
-- **事实对象**：规则实体 `{id, name, type, enabled, content, scope, wrap, role?, depth?}`，持久化在 `AppData/VCPChatTarven.json`（`modules/ipc/tavernHandlers.js:88`，读写经 `tavern:get-rules`/`tavern:save-rules`，`:95-112`），主进程带 mtime 缓存。
+- **事实对象**：规则实体为九字段 JSON（`{id, name, type, enabled, content, scope, wrap, role?, depth?}`），持久化在 `AppData/VCPChatTarven.json`，读写经 `tavern:get-rules`/`tavern:save-rules` 两个 IPC 通道（`modules/ipc/tavernHandlers.js:88-112`），主进程带 mtime 缓存。
 - **完整主链**：右键发送按钮 → 开关/编辑规则 → 主进程写 JSON → 发送时 `getActiveRulesForScope`（`tavern-manager.js:602-608`）取生效规则 → 引擎按类型注入 → VCP 提交。三种注入由纯逻辑引擎 `modules/tavernRulesEngine.js` 实现：
   - `system_suffix`：系统提示词尾部追加（`applySystemSuffix`，`:78-89`）；
   - `user_suffix`：仅追加到本轮提交给 AI 的用户文本副本，**不写入历史**（`applyUserSuffix`，`:99-110`）；
-  - `context_inject`：以独立 user/assistant 消息按 `depth` 插入上下文（`applyContextInject`，`:123-149`，`depth=0` 为末尾、`depth=N` 为倒数第 N+1 条之前，从大到小排序避免索引错位）。
+  - `context_inject`：以独立 user/assistant 消息插入上下文（`applyContextInject`，`:123-149`）；depth 表示距末尾的位置，为 0 时插到末尾，为 N 时插到倒数第 N+1 条之前，按从大到小排序避免索引错位。
   - 包裹标记 `[本信息由VCPChat客户端注入]…[临时注入结束]`（`:27-28`），每条规则可关闭（裸注入）。
-- **作用范围（scope）**：`global / agent / group` 三档（`isRuleActive`，`:56-61`）。单聊应用点：`modules/chatManager.js:1124`（user suffix）、`:1311/:1316`（system suffix）、`:1327`（context inject）；重试/编辑路径 `modules/renderer/messageContextMenu.js:788/:934/:950`。群聊应用点：`Groupmodules/groupchat.js:518`（user suffix 只改提交副本，历史落 `originalUserText`，`:531`）、`:607`（system suffix）、`:736`（context inject），邀约发言路径同样应用（`:1189/:1308`）——"群聊不丢注入"的声明成立。
+- **作用范围（scope）**：`global / agent / group` 三档（`isRuleActive`，`:56-61`）。单聊与群聊的全部发言路径（含重试/编辑与邀约发言）都接入三类注入；群聊的 user suffix 只改提交副本，历史落 `originalUserText`——"群聊不丢注入"的声明成立。各应用点定位如下：
+  - 单聊：`modules/chatManager.js:1124`（user suffix）、`:1311/:1316`（system suffix）、`:1327`（context inject）
+  - 重试/编辑路径：`modules/renderer/messageContextMenu.js:788/:934/:950`
+  - 群聊：`Groupmodules/groupchat.js:518`（user suffix，历史落 `originalUserText` 于 `:531`）、`:607`（system suffix）、`:736`（context inject）
+  - 邀约发言：`Groupmodules/groupchat.js:1189/:1308`
 - **持续性**：规则 JSON 文件重启后恢复；开关即时生效（mtime 缓存失效）。
 - **人机关系**：用户可在浮窗逐条开关，管理模态全量 CRUD；无 Agent 侧写入入口。
 - **外部依赖**：纯前端 + 主进程文件，无后端依赖。
@@ -84,10 +88,15 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 - **用户目标**：把 AI 自动记录与整理的日记/记忆库从"文件目录"升级为"可视化记忆拓扑 + 批量整理 + 整合代笔"的工作台；这是普通聊天客户端没有的长期记忆管理面。
 - **入口与触发者**：主窗口头部按钮右键打开 Memo 窗口（`main.html:690`，`modules/ipc/windowHandlers.js:342` 加载 `Memomodules/memo.html`）；VCPDesktop 桌面图标 `vchat-app-memo` 亦可进入（`Desktopmodules/桌面图标与启动API指南.md:33`）。
-- **事实对象**：后端 `admin_api/dailynotes/*` 管理的日记文件（文件夹/思维簇分类）；前端不落盘，全部经带 Basic Auth 的 REST 调用（`Memomodules/memo.js:501-520`；`loadFolders` `:524`、`loadMemos` `:700`、保存 `:941`、批量删除/移动 `:1354-1412`）。
+- **事实对象**：后端 `admin_api/dailynotes/*` 管理日记文件（文件夹/思维簇分类）；前端不落盘，全部经带 Basic Auth 的 REST 调用，主要操作定位如下：
+  - 公共请求封装：`Memomodules/memo.js:501-520`
+  - `loadFolders`（取文件夹）：`:524`；`loadMemos`（取日记）：`:700`
+  - 保存：`:941`；批量删除/移动：`:1354-1412`
 - **完整主链**：
   - 云图：日记卡 → "关联" → 选文件夹与 k/boost 参数 → `POST /associative-discovery`（`memo-graph.js:71-155`）→ 后端返回联想节点 → 前端 Canvas 力导向图渲染（斥力/引力、连线分数、节点卡、多选、缩放平移，`:157-567`）→ 节点详情可加载全文并批量加入工作台（`:611-692`）。
-  - 工作台：选中多篇日记 → `DiaryWorkbench`（`memo-workbench.js:18-97`）→ 引用卡片/完整阅读（`:285-332`）→ 新建整合日记 → 构造 `<<<[TOOL_REQUEST]>>> tool_name:DailyNote, command:create` 经 `/v1/human/tool` 发布（`:158-234`）→ 发布后可对旧日记归档（`/move` 到「已整理」，`:266-282`）或批量删除（`:335-348`）。
+  - 工作台：选中多篇日记 → `DiaryWorkbench`（`memo-workbench.js:18-97`）→ 引用卡片/完整阅读 → 新建整合日记 → 以 `<<<[TOOL_REQUEST]>>>` 包装 DailyNote 的 create 命令（tool_name:DailyNote, command:create）经 `/v1/human/tool` 发布（`:158-234`）→ 发布后可对旧日记归档到「已整理」或批量删除，归档与删除定位见下。
+    - 归档：`/move` 到「已整理」（`:266-282`）
+    - 批量删除：`:335-348`
   - Agent 代笔与语义搜索：`memo.js:1060/:1160` 同样调用 `/v1/human/tool`（LightMemo/语义检索），结果经 `processSemanticSearchResults` 归一化为可打开路径（`:1197-1320`）。
 - **持续性**：全部日记由后端持有；前端仅持久化 UI 偏好（隐藏文件夹/排序，`saveMemoConfig` `:1428`）。
 - **人机关系**：用户主导整理（批量编辑、移动、归档）；Agent 通过工具代笔与语义检索参与；"模型回流"指模型经 DailyNote 工具写日记、经 Memo 窗口再被阅读与检索。
@@ -98,7 +107,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 ### 能力卡 2A：DeepMemo 2.0 中央会话回忆适配器（主动历史 RAG）
 
 - **用户目标**：让 Agent 通过工具主动查找其他 Topic 中的历史对话，并把命中的上下文窗口带回当前会话；它检索的是聊天历史，不是 Memo 工作台管理的日记文件。
-- **入口与触发者**：模型调用 `DeepMemo` 工具后，由 `DeepMemoService.processToolCall()`（`VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js:42-126`）接收参数；VCP 主服务器把聊天请求中的白名单 `requestContext` 复制为内部 `_vcpContext`。模型工具参数不能覆盖其中的 `agentId`、`topicId` 或 owner 信息（`Plugin/DeepMemo/README.md` 调用链与上下文上传说明）。
+- **入口与触发者**：模型调用 `DeepMemo` 工具后，由 `DeepMemoService.processToolCall()` 接收参数（`VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js:42-126`）。VCP 主服务器把聊天请求中白名单内的 `requestContext` 复制为内部 `_vcpContext`；模型工具参数不能覆盖其中的 agentId、topicId 或 owner 信息（调用链与上下文上传说明见该插件 README）。
 - **事实对象**：VCP-CDS 中央聊天数据服务维护的会话/Topic 历史索引。DeepMemo 2.0 不再扫描 Agent 目录、`history.json`，也不再创建独立 Tantivy/FlexSearch 索引；插件是常驻薄适配器，只消费 `ChatDataServiceClient.searchMemories()`。
 - **完整主链**：规范化 `keyword`、窗口大小和结果上限 → 以可信 Agent/Topic 上下文构造中央搜索请求（`DeepMemoService.js:135-205`）→ 默认排除当前 Topic，按前后窗口扩展命中 → 选择性调用外部 Rerank（候选批次有文档数、字符数和超时界限）→ 按字符预算筛选 → 清理 HTML/CSS 后格式化回注当前工具结果；中央服务失败时按配置决定是否使用旧版回退程序。
 - **持续性与边界**：索引和聊天历史由 VCP-CDS 持有；适配器自身不持久化记忆，不提供自动生成前注入、递归思考链或人工记忆维护。真实 CDS 搜索、精排效果和跨 Topic 结果未运行验证。
@@ -106,18 +115,24 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 ### 能力卡 3：VCPDesktop 流式推送与持久挂件
 
-既有 `Agent工具` 与 `生成式输出与运行时` 笔记已确认 `<<<[DESKTOP_PUSH]>>>` 流式拦截（`modules/renderer/streamManager.js:1906` `processDesktopPushToken`）、挂件收藏目录 `AppData/DesktopWidgets/<id>/`（`modules/ipc/desktopHandlers.js:999-1095`）与模型侧远程控制（`desktopRemoteHandlers.js`）。本卡补充运行恢复、资源治理与近期提交范围三个面：
+既有 `Agent工具` 与 `生成式输出与运行时` 笔记已确认 DESKTOP_PUSH 流式拦截（`modules/renderer/streamManager.js:1906`）、挂件收藏目录 `AppData/DesktopWidgets/<id>/`（`modules/ipc/desktopHandlers.js:999-1095`）与模型侧远程控制。本卡补充运行恢复、资源治理与近期提交范围三个面：
 
-- **运行恢复**：收藏 = 截图 + HTML 落盘（`Desktopmodules/favorites/favoritesManager.js:21-73`）；恢复 = `desktopLoadWidget` 读文件 → `widget.create` 重建 → 延迟执行内联脚本（`:108-139`），运行状态不持久，重启后脚本重新执行。收藏列表经 `desktop-list-widgets` 从目录扫描（`desktopHandlers.js:1228-1271`），并自动维护 `CATALOG.md` 索引（`:212-295`）。
-- **资源治理**：挂件沙箱跟踪自身 `_intervals/_timeouts/_windowListeners/_docListeners` 以便销毁清理（`Desktopmodules/core/widgetManager.js:460-538`）；`performanceManager` 按周期打点 JS 执行时长与帧数，估算每挂件 CPU%/FPS（`core/performanceManager.js:41-143`）；`visibilityFreezer` 冻结不可见区域的壁纸 iframe/视频动画（`core/visibilityFreezer.js:237`）；另有 zIndex 管理与删除 fallback。
-- **近期提交范围**：`Desktopmodules` 仅两次变更（`0f8aa6d` Loom 工程落地、`3f14e93` fix），挂件主链无结构性改动；变化集中在 `VCPDistributedServer`（动态壁纸/自动 TTS 插件 `649e9af`、LoomController `3e3c6b9`、VCP-CDS 数据库重构 `d00c10b`），见能力卡 10 与 11。
+- **运行恢复**：收藏时把截图与 HTML 落盘（`Desktopmodules/favorites/favoritesManager.js:21-73`）；恢复时读文件、重建挂件并延迟执行内联脚本（`:108-139`），运行状态不持久，重启后脚本重新执行。收藏列表从目录扫描生成（`desktopHandlers.js:1228-1271`），并自动维护 `CATALOG.md` 索引（`:212-295`）。
+- **资源治理**：挂件沙箱跟踪自身的定时器与窗口/文档监听器，以便销毁时清理（`Desktopmodules/core/widgetManager.js:460-538`）；`performanceManager` 按周期打点 JS 执行时长与帧数，估算每挂件 CPU% 与 FPS（`core/performanceManager.js:41-143`）；`visibilityFreezer` 冻结不可见区域的壁纸 iframe 与视频动画（`core/visibilityFreezer.js:237`）；另有 zIndex 管理与删除 fallback。
+- **近期提交范围**：`Desktopmodules` 仅两次变更（`0f8aa6d` Loom 工程落地、`3f14e93` fix），挂件主链无结构性改动；变化集中在 `VCPDistributedServer` 侧的三处提交（见下列清单），对应能力卡 10 与 11：
+  - 动态壁纸/自动 TTS 插件：`649e9af`
+  - LoomController：`3e3c6b9`
+  - VCP-CDS 数据库重构：`d00c10b`
 - **证据强度**：恢复与资源治理为源码事实；真实桌面渲染、动画冻结效果与性能数据未运行验证。
 
 ### 能力卡 4：FlowLock 主动连续工作
 
 既有 `Agent工具` 笔记已确认状态机、心跳、重试与完整请求重建。本卡补充（协议文档 `Flowlockmodules/README.md` 与代码一致）：
 
-- **用户可见状态**：Agent 侧栏头像活动状态环、当前标题发光/悦动、心跳脉冲动画（`Flowlockmodules/flowlock.css`）；消息内渲染 Start/Stop/Complete/Fail/NextHeartbeat/NextPrompt 状态气泡（`flowlock-protocol.js:326-330`，`data-vcp-block-type="flowlock"`）。
+- **用户可见状态**：Agent 侧栏头像活动状态环、当前标题发光/悦动、心跳脉冲动画（`Flowlockmodules/flowlock.css`）；消息内按协议状态渲染对应气泡（`flowlock-protocol.js:326-330`，`data-vcp-block-type="flowlock"`）。状态字面量：
+  ```text
+  Start / Stop / Complete / Fail / NextHeartbeat / NextPrompt
+  ```
 - **用户操作**：右键聊天标题 = 启动（不立即续写）/停止；中键 = 启动并立即续写/停止；`Ctrl+G`（macOS `Command+G`）同中键（`flowlock-integration.js:272-367`）。
 - **跨 Topic 接管**：`CreateFlowlockTopic` 由 TopicSponsor 插件创建带 `flowlockRequest`（UUID 请求 ID、pending 状态）的话题，前端在最终回复完整落盘后经 `claimPendingFlowlockTopic` 原子认领并交接 Session（`flowlock.js:163-260`；IPC `preloads/chat.js:265-267`），失败时补偿恢复为 pending；页面重载后枚举恢复，冲突保持 pending。
 - **取消与资源上限**：Stop/Complete/Fail 取消定时器并增加 generation 防复活（README 5 节）；心跳延迟钳制在 1–86400 秒（`topicsponsor.js:151-158`）；续写失败默认最多重试三次后自动停止（README 7.4）；协议解析屏蔽工具请求/结果、Desktop Push、元思考链、think 块与代码围栏（README 6.1）；历史渲染只出状态气泡不重放命令（6.2）。
@@ -126,9 +141,10 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 ### 能力卡 5：VCP 人类工具箱（人类工具面）与插件 manifest → 表单转译
 
 - **用户目标**：把 AI 才能用的 VCP 工具以表单化 GUI 开放给人类，无需手写 `<<<[TOOL_REQUEST]>>>`；普通客户端没有"把 Agent 工具面投影为人类可操作面板"的能力。
-- **入口与触发者**：主窗口「工具箱」按钮经 `launchStandaloneElectronApp('VCPHumanToolBox', 'Human Toolbox')` 启动独立 Electron 应用（`modules/ipc/desktopHandlers.js:1376`）；VCPDesktop 图标 `vchat-app-toolbox` 亦可进入。独立应用自身 `VCPHumanToolBox/main.js:238-295` 注册 `vcp-ht-execute-tool-proxy` 代理。
+- **入口与触发者**：主窗口「工具箱」按钮经 launchStandaloneElectronApp 启动独立 Electron 应用 `VCPHumanToolBox`（`modules/ipc/desktopHandlers.js:1376`）；VCPDesktop 图标 `vchat-app-toolbox` 亦可进入。独立应用自身在 `VCPHumanToolBox/main.js:238-295` 注册 `vcp-ht-execute-tool-proxy` 执行代理。
 - **事实对象**：工具定义库 `renderer_modules/config.js`（46 个出厂工具，7 种参数 widget 类型）+ 用户导入工具 `settings.vcpht_userTools`（Config Overlay 优先于出厂定义）。
-- **完整主链**：工具网格 → `buildToolForm()` 按 params schema 生成表单 → 用户填参执行 → `vcp-ht-execute-tool-proxy` → 主进程拼装 `<<<[TOOL_REQUEST]>>>` → `POST /v1/human/tool`（Bearer Token）→ `renderResult()` 多模态渲染。插件导入链：管理 Tab → 连接后端 Admin API → `GET /admin_api/plugins`（`renderer_modules/tool-manager.js:79-103`）→ manifest 参数解析（`parseDescription` 支持四种格式、三层 fallback，`:220-310`；`invocationCommands` → config.js 格式适配，`:364-413`）→ 可视化表单/JSON 双编辑器 → `vcp-ht-save-settings` 持久化。
+- **完整主链（执行链）**：工具网格 → `buildToolForm()` 按参数 schema 生成表单 → 用户填参执行 → 经 `vcp-ht-execute-tool-proxy` 由主进程拼装 `<<<[TOOL_REQUEST]>>>` 并 `POST /v1/human/tool`（Bearer Token）→ `renderResult()` 多模态渲染。
+- **完整主链（插件导入链）**：管理 Tab 连接后端 Admin API，`GET /admin_api/plugins`（`renderer_modules/tool-manager.js:79-103`）→ 解析 manifest 参数（支持四种格式与三层 fallback，`:220-310`；`invocationCommands` 适配为 config.js 格式，`:364-413`）→ 可视化表单/JSON 双编辑器 → `vcp-ht-save-settings` 持久化。
 - **持续性**：用户工具随 `AppData/settings.json` 持久化；Admin 连接配置存 localStorage。
 - **安全边界**：`contextIsolation + nodeIntegration:false`、preload 白名单 12 个 IPC 通道、路径校验（`getPluginManagerPluginDir`，`desktopHandlers.js:67-78`）。
 - **外部依赖**：执行由 VCPDistributedServer/后端负责；应用自身 README 明确"不是权限管理系统"。
@@ -139,7 +155,8 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 - **用户目标**：把多个 VCP 工具调用编排为可保存、可复用、可逐步执行的节点工作流。
 - **入口与触发者**：HumanToolBox 顶部「工作流」按钮 → `openWorkflowEditor`（`renderer.js:1678-1722`）→ `WorkflowEditorLoader_Simplified` 动态加载模块（模块本身已由 `index.html:52-67` 预加载）。
 - **事实对象**：jsPlumb 节点画布上的节点（VCPChat 插件 / VCPToolBox 插件 / 辅助节点）与连接，状态由 `WorkflowEditor_StateManager` 管理（位置、配置、连接、拓扑分层）。
-- **完整主链**：拖拽建节点连线 → 执行按钮（`WorkflowEditor_UIManager.js:80/:173/:2468-2522`）→ `ExecutionEngine.executeWorkflow`（`WorkflowEditor_ExecutionEngine.js:65-159`：环检测、预飞行检查、分层拓扑、同层并发 + maxConcurrency 限流、错误策略 stop/continue）→ 插件节点构造 `<<<[TOOL_REQUEST]>>>` 并 `fetch /v1/human/tool`（`:596-874`，含智能命令匹配）→ 结果归一化存 `nodeResults` 并传播到下游输入。辅助节点含数据转换、条件、延时、循环（loopStart/loopEnd）、正则、代码编辑、URL 渲染、内容输入、AI 拼接等（`:520-563` 分发）。
+- **完整主链**：拖拽建节点连线 → 执行按钮（`WorkflowEditor_UIManager.js:80/:173/:2468-2522`）→ `ExecutionEngine.executeWorkflow`（`WorkflowEditor_ExecutionEngine.js:65-159`）：先做环检测与预飞行检查，按分层拓扑同层并发执行并受 maxConcurrency 限流，错误策略可选 stop/continue → 插件节点构造 `<<<[TOOL_REQUEST]>>>` 并请求 `/v1/human/tool`（`:596-874`，含智能命令匹配）→ 结果归一化后存入节点结果对象并传播到下游输入。
+- **辅助节点**：覆盖数据转换、条件、延时、循环（`loopStart`/`loopEnd`）、正则、代码编辑、URL 渲染、内容输入与 AI 拼接等类型（`:520-563` 分发）。
 - **文档与实现不一致**：`VCPHumanToolBox/README.md` §8 声称"执行管线为空壳、不建议在生产中依赖"，但当前代码已实现完整执行链；按 AGENTS.md 约定以可执行路径为准，README 属陈旧说明。
 - **持续性**：工作流保存/加载由 StateManager 承接（README §8 已实现列表）；本轮未核实落盘格式与位置。
 - **证据强度**：入口、UI 绑定、执行引擎均为源码事实；未运行验证节点执行结果与保存/加载往返。
@@ -148,14 +165,21 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 - **用户目标**：为后端 ComfyUIGen 图像生成插件提供人类可用的参数与资产管理面板（工作流模板、LoRA、模型、提示词），与工具网格的"用户/Agent 共用参数面"形成闭环。
 - **入口与触发者**：HumanToolBox 工具网格中 `ComfyUIGen` 卡片右上角 ⚙ 按钮 → `openComfyUISettings`（`renderer.js:1608-1650`）→ `ComfyUILoader` 动态加载 ComfyUI 模块族。
-- **完整主链**：配置抽屉三 Tab（连接/生成参数/工作流管理，`ComfyUI_UIManager.js:157-305`）→ 测试连接（本地 ComfyUI，默认 `http://localhost:8188`）→ 保存配置经 `comfyui:save-config` 写回 `VCPToolBox/Plugin/ComfyUIGen/comfyui-settings.json`（`ComfyUImodules/README.md:48`，PathResolver 定位插件目录）；工作流支持导入 ComfyUI API 格式 JSON → 校验 → 转换保存（`import-and-convert-workflow`）；LoRA 需工作流含 `WeiLinComfyUIPromptToLoras` 节点才会自动注入（`ComfyUImodules/README.md:16-25`）。
+- **完整主链**：配置抽屉三 Tab（连接/生成参数/工作流管理）→ 测试连接（本地 ComfyUI，默认 `http://localhost:8188`）→ 保存配置写回后端插件目录 → 工作流导入（ComfyUI API 格式 JSON，校验后转换）→ 含 `WeiLinComfyUIPromptToLoras` 节点时自动注入 LoRA。抽屉与 Tab 实现见 `ComfyUI_UIManager.js:157-305`。
+- **配置持久化与转换**：保存经 `comfyui:save-config` 写回 `VCPToolBox/Plugin/ComfyUIGen/comfyui-settings.json`（`ComfyUImodules/README.md:48`，PathResolver 定位插件目录）；工作流转换经 `import-and-convert-workflow`；LoRA 注入条件见 `ComfyUImodules/README.md:16-25`。
 - **外部依赖**：ComfyUI 本地服务与后端插件（VCPToolBox）；本仓库只实现配置管理链，生成执行仍经工具网格或 Agent 调用。
 - **证据强度**：入口与 IPC 链为源码事实；连接测试、模板转换与参数注入行为未运行验证。
 
 ### 能力卡 8：Agent 正则系统（四类作用点）
 
 - **用户目标**：对 Agent 的渲染文本与发送给模型的上下文做可分层、按深度与角色生效的正则改写；比通用"消息过滤"更接近 SillyTavern 的提示词工程层。
-- **入口与触发者**：Agent 设置中的正则规则编辑模态（`main.html:1822-1884`：标题、查找/替换、作用域、角色、min/max 深度）；`import-regex-rules` 支持导入 SillyTavern 正则脚本（`modules/ipc/regexHandlers.js:36-55`，映射 `placement` 1=user/2=assistant、`markdownOnly`→前端、`promptOnly`→上下文、min/maxDepth）。
+- **入口与触发者**：Agent 设置中的正则规则编辑模态（`main.html:1822-1884`，含标题、查找/替换、作用域、角色与 min/max 深度）；`import-regex-rules` 支持导入 SillyTavern 正则脚本（`modules/ipc/regexHandlers.js:36-55`），导入时的字段映射如下：
+  ```text
+  placement: 1=user, 2=assistant
+  markdownOnly → 前端（渲染）
+  promptOnly → 上下文
+  min/maxDepth → 直接对应
+  ```
 - **事实对象**：Agent 配置 `stripRegexes` 数组（`agentHandlers.js:58/:279-281` 单独读写 `regex_rules.json`，不入 config.json 主体）。
 - **完整主链（四类作用点）**：
   - 上下文（历史内容）正则：发送时对每条历史消息按"轮次深度"映射逐条应用（`modules/chatManager.js:1091-1114`，`buildTurnDepthMap` `:54-81` 以轮次为单位算深度）；
@@ -170,52 +194,93 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 - **用户目标**：把一条消息（含文本与附件）带来源标识与附言转发到另一个 Agent/群组话题，解决"信息跨上下文流动"。
 - **入口与触发者**：消息右键「转发消息」（`modules/renderer/messageContextMenu.js:211-220`；中键快捷动作 `middleClickHandler.js:634-640`）。
-- **完整主链**：`showForwardModal`（`renderer.js:2426-2470`：目标列表来自 `getAllItems`，含 Agent 与群组，可搜索）→ `handleConfirmForward`（`:2508-2564`）用 `getOriginalMessageContent` 取原始消息 → 构造 `> 转发自 **sender** 的消息:` + 原文 + 可选附加评论（`forwardAdditionalComment`）→ `chatManager.handleForwardMessage`（`modules/chatManager.js:1607-1651`）：切换到目标 → 填充输入框与附件（`localPath: att.src` + `_fileManagerData`）→ 走标准 `handleSendMessage` 触发完整 AI 响应。
+- **完整主链**：转发模态先展示目标列表（含 Agent 与群组，可搜索）→ 确认后用原始消息构造 `> 转发自 **sender** 的消息:` 前缀、原文与可选附言 → 聊天管理器切换到目标会话、填充输入框与附件后走标准发送链触发完整 AI 响应。入口与发送处理分别在 `renderer.js:2426-2470` 与 `modules/chatManager.js:1607-1651`；其余函数与字段定位见下：
+  - `handleConfirmForward`：`renderer.js:2508-2564`；原文取 `getOriginalMessageContent`；附言字段 `forwardAdditionalComment`
+  - 附件填充：`localPath: att.src` + `_fileManagerData`
+  - 标准发送入口：`handleSendMessage`
 - **持续性**：转发内容作为目标话题的普通消息落盘；评论只是消息文本一部分，无独立评论对象。
 - **声明核对**：README 所述"右键消息气泡添加评论附加在原始消息下方"未找到独立实现——实际只有转发对话框内的"附加评论"字段；独立气泡评论本次未找到。
 - **证据强度**：转发主链为源码事实；附件在目标端的历史重建与展示未运行验证。
 
 ### 能力卡 10：前端插件机制与 LoomAPP 运行时
 
-- **插件注册与注入**：插件 manifest 的 `frontend: {style, script}` 字段声明渲染器插件（`VChatDynamicWallpaper`、`VChatAutoTTS` 的 `plugin-manifest.json` 均为 `pluginType: renderer`）；主进程 `listEnabledFrontendPlugins`（`modules/ipc/desktopHandlers.js:96-120`）扫描 `VCPDistributedServer/Plugin/*`，路径经 `resolveFrontendPluginResource` 白名单校验后返回相对 URL；`frontend-plugin-loader.js` 在 `DOMContentLoaded` 后把样式/脚本注入主窗口并派发 `vcp-frontend-plugins-loaded`。
+- **插件注册**：插件 manifest 的 `frontend` 字段以 style/script 两字段声明渲染器插件；主进程 `listEnabledFrontendPlugins` 扫描 `VCPDistributedServer/Plugin/*`（`modules/ipc/desktopHandlers.js:96-120`），路径经 `resolveFrontendPluginResource` 白名单校验后返回相对 URL。
+- **注入与事件**：`frontend-plugin-loader.js` 在 DOMContentLoaded 后注入样式与脚本，并派发 `vcp-frontend-plugins-loaded`；现有插件为 `VChatDynamicWallpaper` 与 `VChatAutoTTS`（manifest 均标 `pluginType: renderer`）。
 - **两个现存插件（入口确认）**：VChatDynamicWallpaper（文件夹视频壁纸 + 紧凑播放控制）、VChatAutoTTS（自动朗读与代码块朗读开关），均为 `649e9af` 引入，插件本体行为未运行验证。
-- **LoomAPP 运行时（主链确认）**：`modules/loom/VCPLoomManager.js`（现 2,076 行）用 `WebContentsView` 托管"LoomAPP"（manifest 含 id/startUrl/窗口/视口/UA/注入 css+js，`inject.css`/`inject.js` 有 2MB 上限，`SAFE_APP_ID` 校验）；用户面 `Loommodules/manager.html`（应用抽屉、导入/导出）+ `Loommodules/device-menu.html`（WebHID/WebUSB/WebSerial/WebBluetooth 设备授权选择，`loom:device-candidates` 事件）；Agent 侧 `LoomController` 1.4.0 插件提供 13+ 命令（`plugin-manifest.json`）：原 ListApps/CreateApp/OpenApp/CloseApp/GetAppSources/GetRuntimeSource/GetRenderedText/EditAppSources 之外，新增 **GetPageInfo**（Web Agent 页面快照 + Grounded Markdown，含 action handle/documentGeneration/snapshotId/pageGraph）、**GetPageImage**（按图片 ID 返回 `data:image/...` 多模态回执）、**ExecuteAction**（Web Core 标准动作目录）与**串行指令协议**（`command1/command2/...` 编号步骤 + wait，任一步失败停止但保留成功步骤回执，`partial_failure`）。底层新接入 **VCP Agent WebCore**（`modules/loom/webcore/*`，8 个文件约 5,075 行：chrome/electron 双 adapter + web-agent-protocol + page/runtime core），由 LoomControllerService（306 → 656 行）路由到 `VCPLoomManager.getWebAgentPageInfo/executeWebAgentAction`。测试：`tests/loom-controller.test.js`、`tests/loom-electron-adapter.test.js`、`tests/loom-manager-runtime.test.js`（新增）。
+- **LoomAPP 运行时（主链确认）**：
+  - **运行时托管**：`modules/loom/VCPLoomManager.js`（现 2,076 行）用 `WebContentsView` 托管 LoomAPP：manifest 声明 id、startUrl、窗口/视口、UA 与注入的 css/js（`inject.css`/`inject.js` 有 2MB 上限，`SAFE_APP_ID` 校验）。
+  - **用户面**：`Loommodules/manager.html`（应用抽屉、导入/导出）与 `Loommodules/device-menu.html`（WebHID/WebUSB/WebSerial/WebBluetooth 设备授权选择，`loom:device-candidates` 事件）。
+  - **Agent 侧 LoomController 1.4.0**：提供 13+ 命令（`plugin-manifest.json`），在原有八个命令 ListApps/CreateApp/OpenApp/CloseApp/GetAppSources/GetRuntimeSource/GetRenderedText/EditAppSources 之外新增四类能力：
+    - **GetPageInfo**：Web Agent 页面快照 + Grounded Markdown（含 action handle/documentGeneration/snapshotId/pageGraph）；
+    - **GetPageImage**：按图片 ID 返回 `data:image/...` 多模态回执；
+    - **ExecuteAction**：Web Core 标准动作目录；
+    - **串行指令协议**：`command1/command2/...` 编号步骤 + wait，任一步失败停止但保留成功步骤回执（`partial_failure`）。
+  - **底层 WebCore 与测试**：新增 VCP Agent WebCore（`modules/loom/webcore/*`，8 个文件约 5,075 行：chrome/electron 双 adapter + web-agent-protocol + page/runtime core），由 LoomControllerService（306 → 656 行）路由到 VCPLoomManager 的 getWebAgentPageInfo/executeWebAgentAction；测试：`tests/loom-controller.test.js`、`tests/loom-electron-adapter.test.js`、`tests/loom-manager-runtime.test.js`（新增）。
 - **证据强度**：注册、注入、Loom 命令分发与 WebCore 适配层均为源码事实；LoomAPP 实际运行、WebCore 页面感知与隔离边界未运行验证。
 
 ### 能力卡 11：VCPMobileSync 跨端双向增量同步
 
 - **用户目标**：让 VCPChat 桌面端与 VCPMobile 手机端保持聊天数据（Agent/群组/话题/消息/头像）的物理双向同步；"跨端记忆"的 README 声明（中心记忆库实时同步）实际由后端承担，本插件同步范围不含记忆库。
 - **入口与触发者**：桌面端全局设置开启「VCP 分布式服务器」后插件随 `VCPDistributedServer` 加载；手机端配置 HTTP（默认 5974）/WebSocket（默认 5975）与 Sync Token 握手。
-- **事实对象**：`sync_state.db`（entity_index / message_index / attachment_index / avatar_index / message_attachments 五表，README §5）+ 中央索引模式下的 VCP-CDS SQLite/Tantivy。
-- **完整主链（三阶段协议 V2）**：Phase 1 Reconcile 扫描 `Agents/AgentGroups/UserData` 建索引（`VCPMobileSync/index.js:313`）→ Phase 2 双哈希差分（configHash + Merkle contentHash，`sync/manifest.js:88-195` 同步清单；`sync/diff.js:114-197` 消息级 toPull/toPush/delete，Fast-Path 直接跳过）→ Phase 3 NDJSON 流式吞吐（`sync/message.js:29-191`：逐行消费、文件锁 `acquireLock`、临时文件 + rename 原子写、writeIntentLock 防 watcher 死循环）。冲突策略：双向增量合并，同一实体并发修改按最新时间戳胜出（README §1）；墓碑拦截 + 30 天清理防"幽灵数据回流"（README §6）。
-- **中央索引模式**：`MobileSyncUseCentralIndex=True` 时 Manifest/Diff/Pull/Push/Tombstone/Change Feed 由 Rust 服务 `vcp_chat_data_service`（VCP-CDS）承接（`rust_chat_data_service/README.md:8-16`），身份模型 `(owner_type, owner_id, topic_id)`（`:110-120`）；测试 `tests/mobile-sync-central-adapter.test.js` 存在。旧 `sync_state.db` 链路可切换回退。
+- **事实对象**：`sync_state.db` 维护五张表（README §5，字面量见下）；中央索引模式下改用 VCP-CDS 的 SQLite/Tantivy。
+  ```text
+  entity_index / message_index / attachment_index / avatar_index / message_attachments
+  ```
+- **完整主链（三阶段协议 V2）**：Phase 1 Reconcile 扫描 `Agents/AgentGroups/UserData` 建索引（`VCPMobileSync/index.js:313`）；Phase 2 双哈希差分（configHash + Merkle contentHash）生成消息级 toPull/toPush/delete 清单（同步清单 `sync/manifest.js:88-195`，消息级 diff `sync/diff.js:114-197`，Fast-Path 直接跳过）；Phase 3 以 NDJSON 流式吞吐（`sync/message.js:29-191`）：逐行消费、文件锁、临时文件 + rename 原子写，并以 writeIntentLock 防止 watcher 死循环。冲突策略：双向增量合并，同一实体并发修改按最新时间戳胜出（README §1）；墓碑拦截 + 30 天清理防"幽灵数据回流"（README §6）。
+- **中央索引模式**：开启 `MobileSyncUseCentralIndex=True` 后，同步清单、差分、拉取/推送、墓碑与变更流六类操作改由 Rust 服务 `vcp_chat_data_service`（VCP-CDS）承接（`rust_chat_data_service/README.md:8-16`），身份模型为三元组（`:110-120`，字面量见下）；测试 `tests/mobile-sync-central-adapter.test.js` 存在，旧 sync_state.db 链路可切换回退。
+  ```text
+  同步操作：Manifest / Diff / Pull / Push / Tombstone / Change Feed
+  身份模型：(owner_type, owner_id, topic_id)
+  ```
 - **边界**：附件表存在但"实际上不能同步"（README §4 表格明确标注）；头像参与同步。
 - **证据强度**：协议、表结构、原子写与中央适配为源码事实；真实手机端握手、大文件吞吐与冲突收敛未运行验证。
 
 ### 能力卡 12：Agent 自主管理 Topic（TopicSponsor）
 
 - **用户目标**：让后台运行的 Agent 主动创建/发现/回复自己的聊天话题，实现"Agent 主动向用户发起聊天"的自主交互（README 自主话题管理）。
-- **入口与触发者**：Agent 经 VCP 工具调用 `TopicSponsor` 插件（`VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js`），命令分发 `:23-53`：CreateTopic / CreateFlowlockTopic / ReadUnlockedTopics / CheckNewTopics / CheckUnreadMessages / ReplyToTopic / CheckTopicOwnership / ListUnlockedTopics / ReadTopicContent。
+- **入口与触发者**：Agent 经 VCP 工具调用 `TopicSponsor` 插件（`VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js`，命令分发 `:23-53`），命令族如下：
+  ```text
+  CreateTopic / CreateFlowlockTopic / ReadUnlockedTopics / CheckNewTopics /
+  CheckUnreadMessages / ReplyToTopic / CheckTopicOwnership / ListUnlockedTopics / ReadTopicContent
+  ```
 - **事实对象**：直接读写 `AppData/Agents/<uuid>/config.json`（topics 数组）与 `AppData/UserData/<uuid>/topics/<topicId>/history.json`。
-- **完整主链**：CreateTopic（`:344-447`）校验 Agent 存在 → 生成 `topic_<ts>_<uuid>` 话题目录与带 `_metadata.topicCreator` 的初始 assistant 消息 → topics 数组插入（`locked:false, unread:true, creatorSource:"plugin:TopicSponsor"`）→ 临时文件 + rename 原子写 config；ReplyToTopic（`:551-614`）在 locked 且已读话题上拒绝写入，追加带 `isPluginReply/originalSender` 元数据的消息；CheckTopicOwnership（`:616-655`）读 `_creator` 判定 `is_owner`。前端侧：Flowlock 认领链 `claimPendingFlowlockTopic/restoreFlowlockClaim/listPendingFlowlockTopics`（`preloads/chat.js:265-267`，主进程按 Agent 串行化、多候选拒绝、失败补偿恢复 pending，见能力卡 4）。普通话题的"前端实时刷新"（新话题出现在侧栏）机制本轮未单独核实——前端在会话切换/重载时重读 config，无 watcher 证据。
+- **完整主链**：
+  - **CreateTopic**（`:344-447`）：校验 Agent 存在 → 生成 `topic_<ts>_<uuid>` 话题目录与带 `_metadata.topicCreator` 的初始 assistant 消息 → topics 数组插入创建元数据（`locked:false, unread:true, creatorSource:"plugin:TopicSponsor"`）→ 临时文件 + rename 原子写 config；
+  - **ReplyToTopic**（`:551-614`）：在 locked 且已读话题上拒绝写入，追加带 `isPluginReply`/`originalSender` 元数据的消息；
+  - **CheckTopicOwnership**（`:616-655`）：读 `_creator` 判定 `is_owner`。
+- **前端认领链**：`claimPendingFlowlockTopic`/`restoreFlowlockClaim`/`listPendingFlowlockTopics`（`preloads/chat.js:265-267`），主进程按 Agent 串行化、多候选拒绝、失败补偿恢复 pending（见能力卡 4）。普通话题的"前端实时刷新"（新话题出现在侧栏）机制本轮未单独核实——前端在会话切换/重载时重读 config，无 watcher 证据。
 - **独特性判断**：与 FlowLock 同属"主动 Agent"聚类但事实对象不同（话题持久化 vs 运行时 Session）；跨 Agent 回复（一个 Agent 往另一 Agent 的话题追加消息）是仅 VCP 系出现的拓扑。
 - **证据强度**：插件命令与认领 IPC 为源码事实；插件与前端 IPC 的真实对接运行未验证。
 
 ### 能力卡 13：VCP Hi-Fi 音频引擎与音乐播放器（Agent 可控的本机播放子系统）
 
 - **用户目标**：在聊天客户端内获得一个专业级本机音乐播放器——Hi-Fi DSP 处理、WASAPI 独占输出、WebDAV 远程曲库、无缝隙切歌，且 Agent 能通过对话"点歌"、桌面挂件能随时控制。这是普通 Chat 客户端没有的"本机媒体播放子系统"。
-- **入口与触发者**：用户侧三入口——聊天页/托盘音乐按钮（`open-music-window` IPC，`modules/ipc/musicHandlers.js:290` 创建单例无边框窗口 `Musicmodules/music.html`）、VCPDesktop 内置音乐迷你条挂件（`Desktopmodules/builtinWidgets/musicWidget.js:150-173`）、音乐窗"分享到聊天"（`music-share-track`，`musicHandlers.js:705`）。Agent 侧：`MusicController` 工具经 `<<<[TOOL_REQUEST]>>>` 到达 `VCPDistributedServer.js:656-687` 注入调用 `handleMusicControl`（`musicHandlers.js:201-269`：play 可带 target 点歌/pause/stop/next/previous）；全局设置 `agentMusicControl` 开启后把"点歌台{{VCPMusicController}}"注入系统提示词（`modules/ipc/chatHandlers.js:948-962`、`modules/vcpClient.js:249-260`）。
-- **事实对象**：本地音频文件 + WebDAV 服务器曲库（`Musicmodules/music-webdav.js` + `modules/webdavManager.js`）；播放列表 `AppData/songlist.json`、自定义歌单 `AppData/custom_playlists.json`（`musicHandlers.js:279/:670`）；歌词 `AppData/lyric/*.lrc`；封面缓存 `AppData/MusicCoverCache`；引擎设置 `AppData/audio_settings.json`（`rust_audio_engine/src/settings.rs:257`）；响度元数据 `loudness_cache.db`（SQLite，`server.rs:638-649`）；重采样缓存 `resample_cache/`（SHA-256 文件名，`main.js:664`）。
-- **完整主链（自研引擎）**：主进程启动时预热 Rust 二进制 `audio_engine/audio_server.exe`（`main.js:166-232`，spawn `--port 63789`，stdout 等待 `RUST_AUDIO_ENGINE_READY` 信号，退出时 POST `/shutdown` 优雅关停并兜底强杀），引擎 = actix-web HTTP API（`server.rs`）+ WebSocket 频谱/事件推送（`server/ws_handlers.rs`，50ms 帧间隔 + 事件位掩码 load_complete/track_changed/needs_preload）：
+- **入口与触发者（用户侧三入口）**：聊天页/托盘音乐按钮经 `open-music-window` IPC 创建单例无边框窗口（`modules/ipc/musicHandlers.js:290`，页面 Musicmodules/music.html）；VCPDesktop 内置音乐迷你条挂件（`Desktopmodules/builtinWidgets/musicWidget.js:150-173`）；音乐窗"分享到聊天"经 `music-share-track`（`musicHandlers.js:705`）。
+- **入口与触发者（Agent 侧）**：`MusicController` 工具经 `<<<[TOOL_REQUEST]>>>` 到达 `VCPDistributedServer.js:656-687`，注入调用 `handleMusicControl`（`musicHandlers.js:201-269`：play 可带 target 点歌，另支持 pause/stop/next/previous）。
+- **入口与触发者（提示词注入）**：全局设置 `agentMusicControl` 开启后，把 `点歌台{{VCPMusicController}}` 指令注入系统提示词（`modules/ipc/chatHandlers.js:948-962`、`modules/vcpClient.js:249-260`）。
+- **事实对象**：音频源为本地文件与 WebDAV 服务器曲库（`Musicmodules/music-webdav.js`、`modules/webdavManager.js`）；播放器与引擎的持久化对象如下表（播放列表与歌单均位于 AppData 下）：
+  | 对象 | 落盘位置 | 定位 |
+  |---|---|---|
+  | 播放列表 | `AppData/songlist.json` | `musicHandlers.js:279` |
+  | 自定义歌单 | `AppData/custom_playlists.json` | `musicHandlers.js:670` |
+  | 歌词 | `AppData/lyric/*.lrc` | — |
+  | 封面缓存 | `AppData/MusicCoverCache` | — |
+  | 引擎设置 | `AppData/audio_settings.json` | `rust_audio_engine/src/settings.rs:257` |
+  | 响度元数据 | `loudness_cache.db`（SQLite） | `server.rs:638-649` |
+  | 重采样缓存 | `resample_cache/`（SHA-256 文件名） | `main.js:664` |
+- **完整主链（自研引擎）**：主进程启动时预热 Rust 二进制 `audio_engine/audio_server.exe`（`main.js:166-232`：spawn 时带 `--port 63789`，从 stdout 等待 `RUST_AUDIO_ENGINE_READY` 信号；退出时 POST `/shutdown` 优雅关停并兜底强杀）。引擎对外接口分两层，子模块分工如下：
+  - 接口：actix-web HTTP API（`server.rs`）+ WebSocket 频谱/事件推送（`server/ws_handlers.rs`，50ms 帧间隔，事件位掩码含 load_complete/track_changed/needs_preload）；
   - 解码：Symphonia（`decoder.rs`，f64 全链路，支持本地路径与带 Basic Auth 的 HTTP(S) URL）；
   - 播放：cpal 共享模式 + **WASAPI 独占模式**（`wasapi_output.rs`，绕过系统混音器直通硬件，Windows 专用线程）；
-  - 实时 DSP 链（音频线程无锁原子参数，`player/audio_thread.rs` + `player/callback.rs`，debug 构建下 `assert_no_alloc` 审计回调）：IIR 10 段 EQ（lock-free）/**FIR EQ 真实卷积**（1023+ taps 可调，`player/mod.rs:890-996`）、饱和、crossfeed、动态响度、峰值限制、噪声整形（Lipshitz5/FWeighted9/ModifiedE9/ImprovedE9/TpdfOnly 五曲线 + 16/24/32 位深输出，`server/effects.rs`）；
-  - 响度：EBU R128（`processor/loudness.rs`），track/album/streaming/replaygain 五种模式，全曲扫描 + SQLite 缓存 + 后台扫描任务（信号量限流、TTL 回收、可取消，`server.rs:65-88`、`server/playback.rs:509-653`）；
+  - 实时 DSP 链（音频线程用无锁原子参数，`player/audio_thread.rs`、`player/callback.rs`；debug 构建下以 `assert_no_alloc` 审计回调）：IIR 10 段 EQ（lock-free）、**FIR EQ 真实卷积**（1023+ taps 可调，`player/mod.rs:890-996`）、饱和、crossfeed、动态响度与峰值限制；
+  - 噪声整形与位深：五种整形曲线（`Lipshitz5/FWeighted9/ModifiedE9/ImprovedE9/TpdfOnly`，`server/effects.rs`），输出位深可选 16/24/32；
+  - 响度：EBU R128（`processor/loudness.rs`），`track/album/streaming/replaygain` 四种模式，全曲扫描 + SQLite 缓存 + 后台扫描任务（信号量限流、TTL 回收、可取消，`server.rs:65-88`、`server/playback.rs:509-653`）；
   - 重采样：SoX VHQ（`processor/resampler.rs`），目标采样率 8k–384k（`playback.rs:330-365`），缓存键含文件大小+mtime（`player/mod.rs:377-409`）；
   - 无缝隙切歌：预加载下一首解码 → pending buffer 原子交换（`player/gapless.rs`）；
   - 外置 IR 卷积（`load_ir`，64MB 上限，预置 `audio_engine/IRPreset/`，`musicHandlers.js:498-528` 列表管理）；
   - 安全：`validate_path`（`server.rs:99-189`）拒绝路径穿越、UNC、Windows 保留设备名，URL 拒绝私网/环回地址（SSRF 防护）。
-- **前端播放器主链**：选曲 → `music-load` IPC → `audioEngineApi('/load')`（`musicHandlers.js:166-196`）→ 引擎异步解码（进度经 WS 推送）→ play/pause/seek/volume/设备选择/独占开关 → `/state` 轮询 + `/ws` 50ms 频谱帧（`music-visualizer.js:102`）驱动 Canvas 粒子可视化 → 歌词本地 LRC/网易云拉取逐行滚动 + 翻译（`music-lyrics.js`）→ 曲终预加载下一首实现 gapless（`music-player.js:223-258`，含切歌事件竞争抑制 `music-visualizer.js:130-153`）。
+- **前端播放器主链（控制与渲染）**：选曲后经 `music-load` IPC 调引擎 `/load`（`musicHandlers.js:166-196`）→ 引擎异步解码（进度经 WS 推送）→ play/pause/seek/volume/设备选择/独占开关等控制 → 状态轮询与 50ms 频谱帧驱动 Canvas 粒子可视化（`music-visualizer.js:102`）。
+- **前端播放器主链（歌词与切歌）**：歌词支持本地 LRC 与网易云拉取，逐行滚动并附翻译（`music-lyrics.js`）；曲终预加载下一首实现 gapless（`music-player.js:223-258`，切歌事件竞争抑制见 `music-visualizer.js:130-153`）。
 - **持续性**：播放列表/歌单/歌词/封面/引擎设置全部落盘 AppData，重启恢复；引擎随应用生命周期启停（启动预热、退出优雅关闭），播放运行状态不持久。
 - **人机与多 Agent 关系**：用户全权控制（窗口/挂件/分享）；Agent 经 MusicController 只能按曲名/歌手匹配播放列表点歌与基础控制，无曲库写权限；`agentMusicControl` 可整体关闭。README"音乐实时被 agent 听到"的实际实现是**曲目元数据注入**——每请求 system 消息注入 `[当前播放音乐：title - artist (album)]` 与播放列表（`vcpClient.js:238-284`），非音频流/频谱转发（全仓无频谱上传给 Agent 的代码）。
 - **外部依赖**：WebDAV 服务器（用户自备）；引擎纯本机，无后端依赖；`MusicController` 工具分发走 VCP 服务器但不依赖其能力。
@@ -226,7 +291,12 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 ### 能力卡 14：划词小助手（Rust 桌面感知引擎）
 
 - **用户目标**：在任意应用的任意文本上划选即可唤出悬浮动作条（翻译/总结/解释/搜索/配图），用内部 Agent 处理并回话，无需离开当前工作窗口；这是"系统级文本感知 + AI 处理"的旁路产品面。
-- **入口与触发者**：设置开启全局文本监听后，由系统级划选事件（左键拖选）触发；Rust sidecar `assistant_core_server`（actix-web，:63791，`rust_assistant_engine/src/main.rs:16-21`）经 Windows UIA（`uia_selection_provider.rs`）/macOS/Linux 捕获选区 → stdout `ASSISTANT_EVENT`（`modules/assistant/assistant-rust-adapter.js:88-108`）→ 主进程 `processSelectedText`（`modules/ipc/assistantHandlers.js:215-345`）→ 悬浮条 `assistant-bar.html`（`:1049`）→ 点击动作（`assistant-action`，`:1291-1320`）→ 独立对话窗口 `assistant.html`（`:1115`，复用 messageRenderer 流式渲染），会话保存为真实 Agent 话题（`assistant.js:107-119`）；也支持"分享到笔记"（`:1298-1308`）。
+- **入口与触发者**：设置开启全局文本监听后，由系统级划选事件（左键拖选）触发。Rust sidecar `assistant_core_server`（actix-web，端口 63791，`rust_assistant_engine/src/main.rs:16-21`）经 Windows UIA（`uia_selection_provider.rs`）/macOS/Linux 捕获选区，经 stdout `ASSISTANT_EVENT` 桥接回主进程（`modules/assistant/assistant-rust-adapter.js:88-108`）。
+- **完整主链**：主进程 `processSelectedText`（`modules/ipc/assistantHandlers.js:215-345`）→ 悬浮动作条 → 点击动作（`assistant-action`）→ 独立对话窗口（复用 messageRenderer 流式渲染），会话保存为真实 Agent 话题（`assistant.js:107-119`）；也支持"分享到笔记"。悬浮条/窗口/动作/分享的定位如下：
+  - 悬浮条：`assistant-bar.html`（`:1049`）
+  - 独立对话窗口：`assistant.html`（`:1115`）
+  - 动作分发：`assistant-action`（`:1291-1320`）
+  - 分享到笔记：`:1298-1308`
 - **事实对象**：配置 `AppData/rust-assistant-config.json`（whitelist/blacklist/guard rules，`assistantHandlers.js:74/:449-452`）；会话走真实 Agent 话题持久化。
 - **持续性**：守护进程随应用启停（启动/恢复/崩溃拉起，`assistantHandlers.js:489-638`）；配置与话题落盘。
 - **声明核对**：README §划词小助手——"全域右键呼出"实际只跟踪左键划选（`windows_event_source.rs:33`），`声明不符`；"文件夹工作区模式"未找到实现（grep 零命中），`声明不符`；悬浮动作条、全局文本监听、独立对话窗口、分享笔记均 `主链确认`。
@@ -236,11 +306,20 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 ### 能力卡 15：Scriptorium 共笔文坊（人机协作文档工作台，b6ffa22 → fb66a52 范围）
 
 - **用户目标**：在同一工作台内完成"人类直接编辑渲染后的文档版式 + Agent 可审阅地修改文档源码"的富文档/演示创作，文档用 VCP 自有的 VDOC 工程模型（VDOCX 连续流文稿 / VPPTX 逐页演示，ZIP 容器 + `document.json` + SHA-256 内容寻址资源）而不是原位编辑 OOXML（`ScriptoriumModules/README.md`）。这是聊天客户端中罕见的"文档即协作对象"产品面。
-- **入口与触发者**：托盘应用栏"文坊"（`trayManager.js:26` 的 `vchat-app-scriptorium` → `open-scriptorium-window`，`desktopHandlers.js:779-781` 映射到 `WINDOW_APP_IDS.DOCX='docx-editor'`）；主进程 `docxHandlers.initialize`（`main.js:1083-1092`）注册文档打开/保存/导入/导出 IPC（`modules/ipc/docxHandlers.js`，1,091 行，`.vdocx/.vpptx` 工程 + HTML/MD/TXT/RTF/DOCX/PPTX 导入 + HTML/PDF 导出）；窗口用 `preloads/docx.js`（`PRELOAD_ROLES.DOCX`）。Agent 侧：`ScriptoriumCollaborator` direct 插件（`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`，Service 818 行 + manifest，版本 2.1.0）经 `ScriptoriumAgentControlService`（`modules/services/scriptoriumAgentControlService.js`，428 行）操作当前窗口文档。
-- **事实对象**：`AppData/ScriptoriumDocument/VDOCX|VPPTX/` 下的 `.vdocx/.vpptx` 工程（`scriptoriumAgentControlService.js:133` 的 `documentRoot`；源码 HTML 是唯一真相：VDOCX 单份完整 source，VPPTX 每页一份 source + 共享 deckCss）；**文脉（版本上下文）是工程数据**——人类刻点与 Agent PR 以 pending/applied/rejected/conflict/failed 状态进入同一条文脉，含操作元数据、changeSet、工程内嵌版本快照与审批回执（可回溯、回溯前自动保存、不删后续文脉）。
-- **完整主链（Agent 协作）**：Agent 调 `ScriptoriumCollaborator` 的 GetDocumentInfo/GetRenderedText/GetOutline/GetSection/GetSource/SearchSource/GetViewportSource/GetVisualContext 感知 → `SubmitSourcePr` 提交带唯一 source 的 PR（`AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`）→ 人类在文坊界面审阅/回执（pending/applied/rejected/conflict）→ 应用的修订进入文脉；`CreateDocument` 可直接创建并落盘完整 VDOCX/VPPTX 工程。导入链：`scriptoriumImportService.js`（776 行，DOCX 语义导入）+ `scriptoriumPptxImportService.js`（439 行，PPTX 静态版式导入）。
+- **入口与触发者（用户侧）**：托盘应用栏"文坊"经 `trayManager.js:26` 的 `vchat-app-scriptorium` 触发 `open-scriptorium-window` 打开独立窗口（`desktopHandlers.js:779-781`，映射到 `WINDOW_APP_IDS.DOCX='docx-editor'`）。
+- **入口与触发者（IPC 注册与格式）**：主进程 `docxHandlers.initialize`（`main.js:1083-1092`）注册文档打开/保存/导入/导出 IPC（`modules/ipc/docxHandlers.js`，1,091 行）：管理 `.vdocx/.vpptx` 工程，导入支持 HTML/MD/TXT/RTF/DOCX/PPTX，导出 HTML/PDF；窗口 preload 见 `preloads/docx.js`（`PRELOAD_ROLES.DOCX`）。
+- **入口与触发者（Agent 侧）**：`ScriptoriumCollaborator` direct 插件（`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`，Service 818 行 + manifest，版本 2.1.0）经 `ScriptoriumAgentControlService`（`modules/services/scriptoriumAgentControlService.js`，428 行）操作当前窗口文档。
+- **事实对象（工程文件）**：`AppData/ScriptoriumDocument/VDOCX|VPPTX/` 下的 `.vdocx/.vpptx` 工程（`scriptoriumAgentControlService.js:133` 的 `documentRoot`）；源码 HTML 是唯一真相：VDOCX 为单份完整 source，VPPTX 每页一份 source 加共享 deckCss。
+- **事实对象（文脉）**：**文脉（版本上下文）是工程数据**——人类刻点与 Agent PR 以五态（`pending/applied/rejected/conflict/failed`）进入同一条文脉，含操作元数据、changeSet、工程内嵌版本快照与审批回执；文脉可回溯，回溯前自动保存且不删后续文脉。
+- **完整主链（Agent 协作）**：Agent 调 ScriptoriumCollaborator 的感知命令（`GetDocumentInfo/GetRenderedText/GetOutline/GetSection/GetSource/SearchSource/GetViewportSource/GetVisualContext`）读取文档 → `SubmitSourcePr` 提交带唯一 source 的 PR（`AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`）→ 人类在文坊界面审阅/回执（pending/applied/rejected/conflict）→ 应用的修订进入文脉；`CreateDocument` 可直接创建并落盘完整 VDOCX/VPPTX 工程。
+- **导入链**：`scriptoriumImportService.js`（776 行，DOCX 语义导入）与 `scriptoriumPptxImportService.js`（439 行，PPTX 静态版式导入）。
 - **运行时**：工程源码是可编程内容——VDOCX/VPPTX 的 source 含文档级 `<style>`、正文 HTML 与内联交互 `<script>`（`vdoc-hybrid-compiler.js` 910 行编译，`scriptorium-programmable-content.js` 412 行，隔离 iframe 预览）；KaTeX 数学渲染、SVG 图形、对象环绕/锚点、80 步撤销历史。
-- **持续性与导出**：工程落盘 `AppData/ScriptoriumDocument/`；导出连续流/分页 HTML 与 PDF（资源转 `data:` 内联，Anime.js/Three.js 依赖嵌入单文件）。测试：`tests/重构中禁用脚本/` 下 12 个 scriptorium 测试/冒烟脚本（hybrid-compiler/importers/container/async/collaborator/cdn-localization/export-resources/vpptx/electron-smoke 等，约 3,620 行）+ `tests/test-export-inline.cjs`（210 行）；子目录名"重构中禁用脚本"表明测试当前被搁置，未纳入运行。
+- **持续性与导出**：工程落盘 `AppData/ScriptoriumDocument/`；导出连续流/分页 HTML 与 PDF（资源转 `data:` 内联，Anime.js/Three.js 依赖嵌入单文件）。
+- **测试现状**：`tests/重构中禁用脚本/` 下 12 个 scriptorium 测试/冒烟脚本（约 3,620 行）与 `tests/test-export-inline.cjs`（210 行），主题覆盖如下；子目录名"重构中禁用脚本"表明测试当前被搁置，未纳入运行。
+  ```text
+  hybrid-compiler / importers / container / async / collaborator /
+  cdn-localization / export-resources / vpptx / electron-smoke
+  ```
 - **外部依赖**：无（纯本地）；原生 Office 文件仅作为导入源，不保证像素级还原（README 声明）。
 - **证据强度**：工程模型、PR 协议、导入导出与运行链均为源码事实；窗口内编辑体验、PDF 导出与实际审批流未运行验证。
 
@@ -275,7 +354,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 
 - **群文件、共享工作区与协同编辑（候选 11）**：README 声称"为每个群组提供专属共享文件空间和工作区，支持实时协同编辑"。检查范围：全仓库 grep `群文件/GroupFiles/groupFiles/group-files` 零命中；群聊的"文件共享"实际是消息级附件（`attachments` 数组挂 user 消息，`groupchat.js:532`、`grouprenderer.js:1221-1285`），群成员通过历史可见；"协同编辑"仅存在于单用户 Canvas 双窗口场景。判定：群文件/共享工作区/群内协同编辑为 `声明不符`（未实现）。
 - **ST 预设、角色卡、世界书与可视化注入（候选 9）**：README 声称"完全兼容并支持挂载 SillyTavern 的预设、角色卡和世界书，可直接创建和管理"。检查范围：`Promptmodules`（三种系统提示词模式：原始/积木块/预设文件）是 VCPChat 自己的提示词编辑器，无 ST 角色卡/世界书格式；全仓库 grep `世界书/WorldBook/角色卡/CharacterCard` 无前端实现命中；唯一确认的 ST 兼容入口是正则脚本导入（`regexHandlers.js:36-55`）。VCPToolBox 管理面板存在 `VcptavernEditor`（见 VCPToolBox Chat UI 笔记），判定：VCPChat 前端 `声明不符`，相关能力在外部仓库，暂缓归因。
-- **分布式多模态文件追踪与跨模态转译（候选 15）**：节点侧主链已确认——主服务器发 `execute_tool`（internal_request_file），节点 `VCPDistributedServer.js:605-644` 将 `file://` URL 转本地路径读取并返回 base64+mimeType；`FileFetcherServer 新协议` 注释（`:606`）表明与后端联动。"全 URL 超栈追踪"与"高阶模型对低阶模型能力转译"的主服务器逻辑在 VCPToolBox，本仓库无实现；判定：节点侧 `入口确认`，完整闭环 `暂缓`（外部依赖）。
+- **分布式多模态文件追踪与跨模态转译（候选 15）**：节点侧主链已确认——主服务器经 `execute_tool` 工具发起（internal_request_file），节点 `VCPDistributedServer.js:605-644` 把 `file://` URL 转本地路径读取并返回 base64 与 mimeType；其中 `:606` 的 FileFetcherServer 新协议注释表明与后端联动。"全 URL 超栈追踪"与"高阶模型对低阶模型能力转译"的主服务器逻辑在 VCPToolBox，本仓库无实现；判定：节点侧 `入口确认`，完整闭环 `暂缓`（外部依赖）。
 - **跨端记忆（候选 12 的记忆部分）**：README"跨端记忆"描述的是以 VCP 后端为中心的统一记忆库，VCPMobileSync 同步范围明确不含记忆（其 README 同步类型表只有 Agent/Group/Topic/Message/Attachment(不实际)/Avatar）；判定：记忆同步 `暂缓`（外部后端），消息/元数据同步 `主链确认`。
 - **Agent 自主管理 Topic 的"前端刷新"（候选 8 补充项）**：TopicSponsor 创建话题后，普通话题在侧栏的即时出现机制未找到 watcher/事件证据（前端重读 config 而非订阅）；Flowlock 话题有明确的认领轮询。该项保留为未验证，不判不存在。
 - **音频引擎"DSD 256bit 硬解码"（能力卡 13）**：引擎全量源码 grep `dsd|dsf` 零命中，Symphonia 无 DSD 解码支持；README §专业级音频引擎的 Hi-Res 声明不成立。

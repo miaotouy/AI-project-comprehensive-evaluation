@@ -32,7 +32,11 @@ Open WebUI 在"模型/Agent/RAG/工具/代码执行"通用底座之外，提供�
 
 ## 介绍声明与候选盘点
 
-README 功能清单（约 30 条）密度高，其中待查清单第二批明确的十一项属于"协作与平台产品面"。前端 `src/routes/` 与后端 `routers/` 一一对应，是候选归属的权威表面：`/notes`、`/channels/[id]`、`/calendar`、`/automations`、`/admin/evaluations`（Arena）、`/admin/analytics`（用量分析）、`/admin/users`（身份）、`scim.py`（SCIM 路由）、`utils/google-drive-picker.ts` 与 `onedrive-file-picker.ts`（云文件）、`socket/main.py`（Redis 多节点）。
+README 功能清单（约 30 条）密度高，其中待查清单第二批明确的十一项属于"协作与平台产品面"。前端 `src/routes/` 与后端 `routers/` 一一对应，是候选归属的权威表面，关键路径：
+- `/notes`、`/channels/[id]`、`/calendar`、`/automations`：协作功能页；
+- `/admin/evaluations`（Arena）、`/admin/analytics`（用量分析）、`/admin/users`（身份）、`scim.py`（SCIM 路由）；
+- `utils/google-drive-picker.ts`、`onedrive-file-picker.ts`：云文件；
+- `socket/main.py`：Redis 多节点。
 
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|
@@ -54,11 +58,13 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：把"单用户聊天"升级为团队 + AI 共处的实时时间线——群组/私聊/公告三类频道，线程、反应、置顶、文件、Webhook 入站，模型可被 @ 拉入对话。会话与消息管理笔记明确排除了 channel 体系，本能力是新的覆盖。
 
-**入口与触发者**：前端 `/channels/[id]`；用户发消息（`POST /api/v1/channels/{id}/messages/post` → `post_new_message` → `new_message_handler`，`routers/channels.py:1125`）。模型参与由**用户 @ 或回复触发**（`model_response_handler`，`channels.py:951`）——不是模型主动发言。
+**入口与触发者**：前端 `/channels/[id]`；用户发消息走后端消息入口（`POST /api/v1/channels/{id}/messages/post`，`routers/channels.py:1125`）。模型参与由**用户 @ 或回复触发**（`model_response_handler`，`channels.py:951`）——不是模型主动发言。
 
-**事实对象**：`channel` / `channel_member` / `channel_file` / `channel_webhook` 四张表（`models/channels.py`）+ `messages.py` 的频道消息模型（`channel_id`、`parent_id` 线程、`reply_to_id`、`meta.model_id` 标记模型消息）。
+**事实对象**：四张频道表（`models/channels.py`）——`channel`、`channel_member`、`channel_file`、`channel_webhook`；频道消息模型用 `parent_id` 表达线程、`reply_to_id` 表达回复、`meta.model_id` 标记模型消息。
 
-**完整主链**：用户发消息 → 校验成员/权限（group/dm 需成员，公告频道走 access grants）→ `Messages.insert_new_message` 落库 → `sio.emit('events:channel', to='channel:{id}')` 实时广播（回复同时给父消息发 `message:reply`）→ 若消息 @ 了模型或回复了模型消息：`model_response_handler` 解析提及 → 为每个被 @ 模型创建占位消息（`meta.model_id`）→ 组装线程历史（含图片 Base64 与文件列表）→ 以 `chat_id='channel:{channel.id}'`、`session_id='channel:{channel.id}'` 调用完整 `CHAT_COMPLETION_HANDLER`（工具、Filters、RAG 全链路，流式经 socket 的 channel emitter 回推）→ 模型回复以模型身份落库。置顶/反应/线程/Webhook（`{token}` 匿名发布）各有独立端点。
+**完整主链**（用户消息与模型参与分两段）：
+- **用户消息**：校验成员/权限（group/dm 需成员，公告频道走 access grants）→ `Messages.insert_new_message` 落库 → 实时广播（回复同时给父消息发回复通知）→ 置顶/反应/线程/Webhook（`{token}` 匿名发布）各有独立端点；
+- **模型参与**：消息 @ 了模型或回复了模型消息时，`model_response_handler` 解析提及 → 为每个被 @ 模型创建占位消息（`meta.model_id`）→ 组装线程历史（含图片 Base64 与文件列表）→ 以频道会话标识调用完整 `CHAT_COMPLETION_HANDLER`（工具、Filters、RAG 全链路，流式经 socket 的 channel emitter 回推）→ 模型回复以模型身份落库。
 
 **持续性**：全部状态在数据库（SQLite/PostgreSQL），多节点经 Redis socket 广播一致；`channel_member.last_read_at`/`is_active` 维护已读与在线。
 
@@ -72,11 +78,13 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：会话之外的内容工作区——富文本笔记、AI 改写选中文本、笔记↔聊天双向绑定（`GET /notes/{id}/chat` 建立隐藏聊天让模型直接编辑笔记）、实时多人协作。
 
-**入口与触发者**：前端 `/notes`、`/notes/[id]`；用户创建/编辑为主，模型通过 `view_note` / `write_note` / `replace_note_content` 内建工具（`tools/builtin.py:1087/1149/1198`）写入。
+**入口与触发者**：前端 `/notes`、`/notes/[id]`；用户创建/编辑为主，模型通过查看、写入与替换内容三个内建工具（`tools/builtin.py:1087-1198`）写入。
 
-**事实对象**：`note` 表（`models/notes.py`，含 `data.content.md` 富文本结构）+ `pinned_note` 表 + `access_grant`（resource_type='note'）。
+**事实对象**：`note` 表（`models/notes.py`，含 `data.content.md` 富文本结构）+ `pinned_note` 表（置顶）+ `access_grant`（resource_type='note' 的访问授权）。
 
-**完整主链**：创建 → `Notes.insert_new_note` → 编辑经 REST 更新（`update_note_by_id`）或 Yjs 协作（socket `document:save` 事件，`socket/main.py:679-698` 校验写权限后落库）→ 每页列表/搜索（`/notes/search`，支持组过滤与查询）→ "与 AI 对话"入口 `get_note_chat_by_id`：按 `note_id` 查找/创建 `internal_meta={internal: True, type: 'note'}` 的隐藏聊天，system prompt 固定为"用 view_note 查看、replace_note_content 修改"的契约（`notes.py:340-401`）→ 模型经工具直接改笔记 → socket `events:note` 实时回推。聊天附加笔记注入：聊天 `meta.note_id` 在 `process_chat_payload`（`middleware.py:2621`）读取并注入上下文。
+**完整主链**（编辑与 AI 对话分两段）：
+- **创建与编辑**：`Notes.insert_new_note` 创建，编辑经 REST 更新（`update_note_by_id`）或 Yjs 协作（socket `document:save` 事件，`socket/main.py:679-698` 校验写权限后落库）；列表/搜索（`/notes/search`，支持组过滤与查询）；变更经 socket 实时回推；
+- **与 AI 对话**：`get_note_chat_by_id` 查找/创建 `internal_meta={internal: True, type: 'note'}` 的隐藏聊天，system prompt 固定为"用 view_note 查看、replace_note_content 修改"的契约（`notes.py:340-401`）→ 模型经工具直接改笔记。聊天附加笔记注入：聊天 `meta.note_id` 在 `process_chat_payload`（`middleware.py:2621`）读取并注入上下文。
 
 **持续性**：笔记、置顶、权限全部在 DB；多节点经 Redis 的 `YdocManager`（`socket/utils.py`）同步 Yjs 文档更新（`ydoc:{doc}:updates` 列表 + 压缩）。
 
@@ -90,7 +98,11 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：AI 跨会话记住用户事实——用户在 A 聊天提到的偏好，B 聊天自动带入，且可手动增删、按路径组织、由模型后台复盘。
 
-**入口与触发者**：三条写入通道 + 一条注入链。手动：`POST /memories/add`；工具：`add_memory/update_memory/replace_memory_content/delete_memory/list_memories/search_memories/list_memory_paths/read_memory_path`（`builtin.py:663-988`，受 `MUTATING_MEMORY_TOOLS` 治理）；后台：`review_memory_after_turn`（`utils/memory.py:408`）在每轮对话结束后按 `memories.review_interval_turns`（默认 10 轮）触发异步复盘——用独立 LLM 请求（`_generate_memory_operations`，输出 JSON 操作数组）对最近 16 条消息决定 add/replace/move/remove，经 `source='background_review'` 落库。注入：每次聊天请求前 `add_memory_context`（`memory.py:290`）把最近 7 条用户消息拼为查询 → 向量检索 `user-memory-{user.id}` 集合（k=8，按 `rag.relevance_threshold` 过滤）→ 与"user 类型全量 + 路径邻域"合并为 `[User Memory]/[Memory Neighborhood]/[Relevant Context]` 三段，写入 system 消息（`MEMORY_CONTEXT_OPEN/CLOSE` 标记包裹，旧段先移除），受 `memories.user_char_limit`/`context_char_limit` 截断。
+**入口与触发者**：三条写入通道 + 一条注入链。
+- **手动**：`POST /memories/add`；
+- **工具**：`add_memory/update_memory/replace_memory_content/delete_memory/list_memories/search_memories/list_memory_paths/read_memory_path`（`builtin.py:663-988`，受 `MUTATING_MEMORY_TOOLS` 治理）；
+- **后台复盘**：`review_memory_after_turn`（`utils/memory.py:408`）在每轮对话结束后按 `memories.review_interval_turns`（默认 10 轮）触发异步复盘——用独立 LLM 请求（`_generate_memory_operations`，输出 JSON 操作数组）对最近 16 条消息决定 add/replace/move/remove，经 `source='background_review'` 落库；
+- **注入**：每次聊天请求前 `add_memory_context`（`memory.py:290`）把最近 7 条用户消息拼为查询 → 向量检索 `user-memory-{user.id}` 集合（k=8，按 `rag.relevance_threshold` 过滤）→ 与"user 类型全量 + 路径邻域"合并为 `[User Memory]/[Memory Neighborhood]/[Relevant Context]` 三段写入 system 消息（`MEMORY_CONTEXT_OPEN/CLOSE` 标记包裹，旧段先移除），受长度配置截断。
 
 **事实对象**：`memory` 表（content/type: user|context/path/meta）+ 每用户向量集合 `user-memory-{user.id}`。
 
@@ -106,11 +118,11 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：内置个人与共享日历（月/周/日视图、重复事件、颜色、参与者、提醒），且模型可通过函数调用直接查询/创建/更新日程（"帮我安排周五 3 点的会"）。
 
-**入口与触发者**：用户经 `/calendar` UI；模型经内建工具 `search_calendar_events` / `create_calendar_event` / `update_calendar_event`（`builtin.py:3965/4058/4185`，函数调用由 Agent 工具笔记的调用循环触发）。
+**入口与触发者**：用户经 `/calendar` UI；模型经内建工具 `search_calendar_events` / `create_calendar_event` / `update_calendar_event`（`builtin.py:3965-4226`，函数调用由 Agent 工具笔记的调用循环触发）。
 
-**事实对象**：`calendar` / `calendar_event` / `calendar_event_attendee` 三张表（`models/calendar.py`），事件含 `rrule`（重复规则）、`color`、`meta.alert_minutes` 提醒、RSVP 状态。
+**事实对象**：`calendar` / `calendar_event` / `calendar_event_attendee` 三张表（`models/calendar.py`）分别记录日历、事件与参与者；事件带 `rrule`（重复规则）、颜色、`meta.alert_minutes` 提醒与 RSVP 状态。
 
-**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验 calendar access grants，默认日历兜底）→ UI 按范围查询 `get_events_by_range` / `search_events` → 提醒由 `scheduler_worker_loop` 的 `_check_calendar_alerts` 轮询（`utils/automations.py:249-254`）→ 通知经 `notifications` 系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
+**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验日历访问授权，默认日历兜底）→ UI 按范围查询与搜索 → 提醒由调度器循环的 `_check_calendar_alerts` 轮询（`utils/automations.py:249-254`）→ 经通知系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
 
 **持续性**：全量 DB；时区由 `tz` 参数（用户 timezone）归一。
 
@@ -126,7 +138,9 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **事实对象**：`automation` + `automation_run` 两张表（`models/automations.py`），rrule 存 `automation.data['rrule']`。
 
-**完整主链**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:203`，每实例运行、`SCHEDULER_POLL_INTERVAL` 默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务 → `execute_automation`（`automations.py:412`）：复验所有者权限（被降权/停用即失败记录）→ `prompt_template` 渲染 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ `sio.emit` 通知前端刷新列表 → 解析模型工具/特性/Filters（`_resolve_model_tool_ids` 等，与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的 `_build_request` 无头调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 事件 `AUTOMATION_RUN_*` 发布。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
+**完整主链**（调度与执行分两段）：
+- **调度**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:203`，每实例运行、轮询间隔默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务；
+- **执行**：`execute_automation`（`automations.py:412`）复验所有者权限（被降权/停用即失败记录）→ 渲染 prompt 模板 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ 通知前端刷新列表 → 解析模型工具/特性/Filters（与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的无头请求调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 发布运行事件。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
 
 **主动性与取消**：完全后台主动；`toggle` 停用、`delete` 删除、`/{id}/run` 手动立即执行；限额系统防滥用。
 
@@ -142,7 +156,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **事实对象**：`feedback` 表（`models/feedbacks.py`，`LeaderboardFeedbackData` 只取 id+data 供排行计算）。
 
-**完整主链**：用户评分落 `feedback` → `GET /evaluations/leaderboard`（`routers/evaluations.py:216`）：取全部反馈 → `_calculate_elo`（初始 1000、K=32、expected 公式；可选 `similarities` 权重）→ `_get_top_tags` 聚合话题标签 → 按 rating 降序返回。查询加权：带 query 时用 sentence-transformers 对标签做余弦相似度，相似度作 Elo 权重（`_compute_similarities`）。配置 `evaluation.arena.enable`/`evaluation.arena.models` 控制参与 Arena 的模型集合；`/leaderboard/{model_id}/history` 提供单模型历史。
+**完整主链**：用户评分落 `feedback` → `GET /evaluations/leaderboard`（`routers/evaluations.py:216`）：取全部反馈 → `_calculate_elo`（初始 1000、K=32、expected 公式；可选相似度权重）→ 聚合话题标签 → 按 rating 降序返回。查询加权：带 query 时用 sentence-transformers 对标签做余弦相似度，相似度作 Elo 权重。参与 Arena 的模型集合由 `evaluation.arena` 配置控制（enable/models）；`/leaderboard/{model_id}/history` 提供单模型历史。
 
 **持续性**：全部来自 `feedback` 表，排行榜为实时计算（无缓存表）；仅 admin 可见。
 
@@ -154,7 +168,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：免提语音交互——按住说话转文字进聊天、模型回复语音朗读，摄像头可抓图作为消息附件。
 
-**入口**：`src/lib/components/chat/MessageInput/CallOverlay.svelte`（输入栏通话浮层）。行为链（静态确认）：`getUserMedia` 采集麦克风 → `MediaRecorder` 录制 → `transcribeAudio` API（后端 `routers/audio.py`，多 STT 引擎：本地 Whisper/OpenAI/Deepgram/Azure）→ 转录文本进聊天；模型回复经 TTS（`synthesizeOpenAISpeech`/Transformers/Kokoro WebAPI 引擎，带音频缓存）朗读；`getUserMedia({video})` 摄像头画面 → canvas 截帧作为图片内容。**注意**：README 称"voice/video calls"，实现是单用户免提模式（STT→聊天→TTS 朗读 + 摄像头取图），**不是** WebRTC 点对点通话，也无通话信令服务。
+**入口**：`src/lib/components/chat/MessageInput/CallOverlay.svelte`（输入栏通话浮层）。行为链（静态确认）：浏览器媒体接口采集麦克风 → `MediaRecorder` 录制 → 转写 API（后端 `routers/audio.py`，多 STT 引擎：本地 Whisper/OpenAI/Deepgram/Azure）→ 转录文本进聊天；模型回复经 TTS（OpenAI 语音/Transformers/Kokoro WebAPI 引擎，带音频缓存）朗读；摄像头画面经 canvas 截帧作为图片内容。**注意**：README 称"voice/video calls"，实现是单用户免提模式（STT→聊天→TTS 朗读 + 摄像头取图），**不是** WebRTC 点对点通话，也无通话信令服务。
 
 **独特性判断**：把语音闭环做进聊天输入层，与终端/桌面伴生应用的语音能力有交集，但属于 WebUI 本体。
 
@@ -180,7 +194,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 ### 能力十：多节点运行（Redis 支撑）— `入口确认`
 
-`WEBSOCKET_MANAGER='redis'` 时：`socketio.AsyncRedisManager` 做跨节点事件广播（`socket/main.py:67-82`）；`socket/utils.py` 提供 `RedisDict`（会话状态哈希）、`RedisLock`（SET NX/EX 分布式锁 + 续期/释放 Lua 脚本）、`YdocManager`（Yjs 文档更新列表 + 压缩 + 用户集合，跨节点协作文档）。配合 DB 层（SQLite 加密/PostgreSQL）、会话/任务在 Redis 中取消（`stopTask` 经 Redis pubsub，对话请求与上下文笔记已确认）与自动化认领（`claim_due` 的原子更新），构成水平扩展基础。**注意**：这是平台运行机制，不是用户可见产品特性，按调查指南"工程机制单独标注"处理，不进入特色贡献计数。
+`WEBSOCKET_MANAGER='redis'` 时：`socketio.AsyncRedisManager` 做跨节点事件广播（`socket/main.py:67-82`）；`socket/utils.py` 提供三类 Redis 支撑——`RedisDict`（会话状态哈希）、`RedisLock`（SET NX/EX 分布式锁 + 续期/释放 Lua 脚本）、`YdocManager`（Yjs 文档更新列表 + 压缩 + 用户集合，跨节点协作文档）。配合 DB 层（SQLite 加密/PostgreSQL）、会话/任务在 Redis 中取消（对话请求与上下文笔记已确认）与自动化认领的原子更新，构成水平扩展基础。**注意**：这是平台运行机制，不是用户可见产品特性，按调查指南"工程机制单独标注"处理，不进入特色贡献计数。
 
 **证据强度**：socket 模块源码为静态事实；多节点真实部署未验证。
 
@@ -199,7 +213,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 ## 声明不符、外部依赖与暂缓项
 
-- **Artifact KV（`声明不符`，按当前快照）**：README 宣称"Persistent Artifact Storage: Built-in key-value storage API for artifacts, enabling journals, trackers, leaderboards, and collaborative tools with personal and shared data scopes"。本次搜索范围：`backend/open_webui/routers/` 全部文件、`models/`、`utils/`、`tools/`、`socket/`、`internal/`，关键词 `artifact`/`kv`/`leaderboard`/`tracker`/`journal`/`/api/v1/data`，前端 `src/lib` 的 `artifact`/`kv` 命中仅为 Artifact 渲染 store（`stores/index.ts:133` 的 `artifactCode`）与代码块提取。**未找到独立 KV 存储 API 入口**；接近语义的是 channel 消息的 `data` 字段、calendar/note 的 `data` 字段与聊天任务清单（`create_tasks`/`update_task` 存 `Chat.tasks`，`builtin.py:3421`，即 README "Live Workflow & Message Flow" 的实现）。结论：该条 README 声明在当前可执行路径中找不到对应产品契约，可能指未来功能或文档愿景，不能据此计数。
+- **Artifact KV（`声明不符`，按当前快照）**：README 宣称"Persistent Artifact Storage: Built-in key-value storage API for artifacts, enabling journals, trackers, leaderboards, and collaborative tools with personal and shared data scopes"。本次搜索范围：后端全部路由与模型/工具/socket/内部目录（`backend/open_webui/` 的 routers、models、utils、tools、socket、internal），关键词 artifact/kv/leaderboard/tracker/journal 与 `/api/v1/data`；前端 `src/lib` 的 artifact/kv 命中仅为 Artifact 渲染 store（`stores/index.ts:133` 的 `artifactCode`）与代码块提取。**未找到独立 KV 存储 API 入口**；接近语义的是 channel 消息的 data 字段、calendar/note 的 data 字段与聊天任务清单（创建/更新函数存 `Chat.tasks`，`builtin.py:3421`，即 README "Live Workflow & Message Flow" 的实现）。结论：该条 README 声明在当前可执行路径中找不到对应产品契约，可能指未来功能或文档愿景，不能据此计数。
 - **语音/视频通话**：README 用语（"voice/video calls"）比实现（单用户免持 STT/TTS + 摄像头取图，无 WebRTC 对端）更宽，已按实现记录。
 - **SCIM**：文件头自述 experimental 且"may not fully comply with SCIM 2.0"，按 `入口确认` 记录并保留差异说明。
 - **伴生仓库**（不属于本仓库主链）：Open WebUI Computer、Open Terminal/Terminals、oikb、桌面 App（README 生态节），本轮不调查，标 `暂缓`。本仓库内的 `/terminals` 前端与 `routers/terminals.py` 仅代理外部 terminal server，未走主链。

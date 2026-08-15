@@ -29,7 +29,7 @@ Provider::StreamChat
 
 ## Chat 与 Compare
 
-历史 assistant 消息通过 `renderMessage()` 调用带自定义 code renderer 的 `renderMarkdown()`；流式 Chat 和 Compare 则直接调用裸 `marked.parse()`（`message-renderer.js:1-33, 80-105`；`chat-tab.js:27-59`；`compare-tab.js:40-56`）。因此两条路径行为不同：
+历史 assistant 消息通过 `renderMessage()` 调用带自定义 code renderer 的 `renderMarkdown()`；流式 Chat 和 Compare 则直接调用裸 `marked.parse()`。三处入口分别在 `message-renderer.js:1-33, 80-105`、`chat-tab.js:27-59` 与 `compare-tab.js:40-56`，因此两条路径行为不同：
 
 - 流式路径每个 chunk 都重新解析累计全文并替换整块 DOM，没有节流；
 - 流式代码块没有自定义语言栏、复制按钮或显式 hljs 调用；

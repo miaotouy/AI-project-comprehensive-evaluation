@@ -16,10 +16,10 @@
 
 LobeHub 的 Agent 是七个项目里配置维度最多的。单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
 
-1. **人格/元数据**：`systemRole`（系统提示词）、`title`、`avatar`、`backgroundColor`、`fewShots`（少样本对话）、`openingMessage`、`openingQuestions`；
-2. **模型偏好**：`model`、`provider`、`params`（LLMParams：temperature、topP、maxTokens 等）；
-3. **对话配置**（`chatConfig: LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；
-4. **外部能力**：`plugins`（市场插件）、`knowledgeBases`（知识库）、`files`（附件）、`tts`（语音合成）、`agencyConfig`（异构 Agent 绑定）。
+1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）与开场白（`openingMessage`/`openingQuestions`）；
+2. **模型偏好**：`model`、`provider` 与标准推理参数 `params`（temperature、topP、maxTokens 等）；
+3. **对话配置**（`chatConfig`，`LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；
+4. **外部能力**：市场插件（`plugins`）、知识库（`knowledgeBases`）、附件（`files`）、语音合成（`tts`）与异构 Agent 绑定（`agencyConfig`）。
 
 与 Cherry Studio 类似，模型参数写在 Agent 内部，不在 Session 级；每个 Agent 还可以独立选择模型和 provider，比 Cherry Studio 更细粒度（支持 `provider` 字段单独覆盖）。
 
@@ -41,12 +41,16 @@ Agent 存在后端数据库，通过 `lambdaClient.agent` trpc 接口读写。�
 | --- | --- | --- |
 | `systemRole` | `string` | 系统提示词，必填，空字符串表示无系统提示 |
 | `title` | `string?` | 显示名称 |
-| `personalName` | `string?` | 个人名（`packages/types/src/agent/item.ts:21`），标签解析用 `agentDisplayName(item, fallback)`（`packages/types/src/agent/displayName.ts:35-60`，`agentSecondaryDisplayName` 处理角色与个人名重复）；`353f00006` 给新 Agent 生成个人名、`3776063c1` 支持随机名组合与骰子按钮 |
+| `personalName` | `string?` | 个人名（`packages/types/src/agent/item.ts:21`），标签解析见表格下方说明 |
 | `avatar` | `string?` | Emoji 或图片 URL；服务端对 agent 配置快照也应用内建头像回退（`7aaabfc7f`，此前只在前端解析） |
 | `backgroundColor` | `string?` | 头像背景色 |
 | `virtual` | `boolean?` | 是否为自动生成（如从模板创建）的虚拟 Agent |
 
-MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包含 `avatar`、`backgroundColor`、`description`、`tags`、`title`，这些在 UI 的"元数据"标签页编辑；`loadingState` 为每个 meta 字段单独跟踪保存状态。
+`personalName` 的标签解析由 `agentDisplayName(item, fallback)` 完成（`packages/types/src/agent/displayName.ts:35-60`），`agentSecondaryDisplayName` 处理角色与个人名重复。相关提交：
+- `353f00006`：给新 Agent 生成个人名；
+- `3776063c1`：支持随机名组合与骰子按钮。
+
+MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包含头像、背景色、描述、标签、标题等展示字段，在 UI 的"元数据"标签页编辑；`loadingState` 为每个 meta 字段单独跟踪保存状态。
 
 ### 3.2 少样本与开场
 
@@ -56,9 +60,16 @@ MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包
 | `openingMessage` | 用户进入对话时 Agent 显示的开场白文本 |
 | `openingQuestions` | 开场推荐问题列表，UI 作为快捷提问显示 |
 
-**fewShots 的消费缺口**：`fewShots` 在 `src/` 与 `packages/agent-runtime/` **零命中**；`apps/server` 侧有三处命中——`globalConfig/parseDefaultAgent.test.ts`（默认 Agent 解析测试）、`routers/lambda/agentGroup.ts`（群组 Agent 结构）、`services/agentEvalRun/index.ts`（评估运行读取配置），均非 UI 编辑或请求注入路径。DB schema 列与市场导入映射（examples→fewShots）仅提供字段定义与导入来源。因此横向比较时应把 fewShots 视为"字段存在、消费未确认"（且服务端仅配置/评估侧读取）。
+**fewShots 的消费缺口**：`fewShots` 在 `src/` 与 `packages/agent-runtime/` **零命中**；`apps/server` 侧仅三处读取，均非 UI 编辑或请求注入路径：
+- `globalConfig/parseDefaultAgent.test.ts`：默认 Agent 解析测试；
+- `routers/lambda/agentGroup.ts`：群组 Agent 结构；
+- `services/agentEvalRun/index.ts`：评估运行读取配置。
 
-`openingMessage`/`openingQuestions` 只存于 agents 表（`packages/database/src/schemas/agent.ts:73`），topics/messages 表无开场白列；展示是运行时实时渲染（空话题才显示，`src/features/Conversation/ChatList/index.tsx:199` 附近），从不写入消息历史，也不存在 AIO Hub 式"开场白固化"状态机。openingQuestions 可编辑（#18003）：AgentSetting 提供 `AgentOpening` 分区（`src/features/AgentSetting/AgentOpening/OpeningMessage.tsx` + `OpeningQuestions.tsx`，含 FollowUpChips 调整），编辑的是 agent 配置，不是消息历史，"开场白不落库"的结论不受影响。
+DB schema 列与市场导入映射（examples→fewShots）只提供字段定义与导入来源。因此横向比较时应把 fewShots 视为"字段存在、消费未确认"（且服务端仅配置/评估侧读取）。
+
+`openingMessage`/`openingQuestions` 只存于 agents 表（`packages/database/src/schemas/agent.ts:73`），topics/messages 表无开场白列；展示是运行时实时渲染——空话题才显示（`src/features/Conversation/ChatList/index.tsx:199` 附近）——从不写入消息历史，也不存在 AIO Hub 式"开场白固化"状态机。
+
+openingQuestions 可编辑（#18003）：AgentSetting 的 `AgentOpening` 分区（`src/features/AgentSetting/AgentOpening/` 下的 OpeningMessage、OpeningQuestions 两个组件，含 FollowUpChips 调整）编辑的是 agent 配置而不是消息历史，"开场白不落库"的结论不受影响。
 
 ### 3.3 输入模板
 
@@ -101,7 +112,14 @@ interface LobeAgentConfig {
 | `enableAdaptiveThinking` | Claude Opus 4.6 自适应思考 |
 | `effort` | `'low'` / `'medium'` / `'high'` / `'max'` |
 | `preserveThinking` | 保留历史思考内容传给模型（Qwen preserve_thinking） |
-| 模型专属推理字段 | `gpt5ReasoningEffort`、`grok4_3ReasoningEffort`、`deepseekV4ReasoningEffort`、`hy3ReasoningEffort`、`codexMaxReasoningEffort`、`opus47Effort`、`glm5_2ReasoningEffort` 等（各模型独立枚举值；`chatConfig.ts:30-173` 列出 `gpt5_1`/`gpt5_2`/`gpt5_2Pro`/`gpt5_6`/`grok4_5`/`grok4_20`/`ring2_6`/`step3_5`/`kimiK3` 等模型专属字段）。推理强度另有**用户级模型实例默认层**：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，按 userId+providerId+modelId 存储，`updateModelReasoningConfig` 维护），Composer 的 Effort 预设读取该层（`ChatInput/ActionBar/Effort/`），与 Agent 级 chatConfig 字段并存——两层的覆盖优先级本次未走通（见调查边界） |
+| 模型专属推理字段 | 各模型独立的推理强度枚举，字段与模型清单见表格下方 |
+
+模型专属推理字段与模型清单定义于 `chatConfig.ts:30-173`：
+
+- 推理强度字段：`gpt5ReasoningEffort`、`grok4_3ReasoningEffort`、`deepseekV4ReasoningEffort`、`hy3ReasoningEffort`、`codexMaxReasoningEffort`、`opus47Effort`、`glm5_2ReasoningEffort` 等；
+- 模型专属字段：`gpt5_1`、`gpt5_2`、`gpt5_2Pro`、`gpt5_6`、`grok4_5`、`grok4_20`、`ring2_6`、`step3_5`、`kimiK3` 等。
+
+推理强度另有**用户级模型实例默认层**：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，按 userId+providerId+modelId 存储，由 `updateModelReasoningConfig` 维护），Composer 的 Effort 预设读取该层（`ChatInput/ActionBar/Effort/`），与 Agent 级 chatConfig 字段并存；两层的覆盖优先级本次未走通（见调查边界）。
 
 **上下文与历史**
 
@@ -165,7 +183,7 @@ interface LobeAgentConfig {
 - `{ identifier, mode: 'auto' }`：自动激活，由 Agent 决定是否使用；
 - `{ identifier, mode: 'disabled' }`：在此 Agent 中禁用该插件。
 
-推荐用 `getActivePluginIds()`、`getPinnedPluginIds()`、`getDisabledPluginIds()`、`getPluginMode()` 等帮助函数操作，不要直接读取字段。
+推荐用内置帮助函数操作（如 `getActivePluginIds` 查询激活插件），不要直接读取字段。
 
 ### 5.2 知识库
 
@@ -185,16 +203,18 @@ interface LobeAgentConfig {
 - 设备级工作目录绑定（`workingDirByDevice`）；
 - 指定异构 Agent Provider（用于 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`）。
 
-`agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行，异构 Agent 类型收敛）与 `displayName.ts`；复制 Agent 时保留 `agencyConfig`（`6c356bcb0`），迁移接受嵌套 `config.meta` 并替换过期 profile（`242e3f511`）。
+`agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`。相关提交：
+- `6c356bcb0`：复制 Agent 时保留 `agencyConfig`；
+- `242e3f511`：迁移接受嵌套 `config.meta` 并替换过期 profile。
 
 ## 6. 内置 Agent 方向
 
 LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过以下渠道引入：
 
-1. **Chat Group Wizard 模板**（`src/components/ChatGroupWizard/templates.ts`）：提供 brainstorm、analysis、writing、planning、product、game 六类群组模板，每个模板包含 2–4 个成员 Agent，每个成员有 `title`、`avatar`、`systemRole`、可选 `plugins`；这些是 Agent 组的起点，不是单个 Agent 的完整配置。
+1. **Chat Group Wizard 模板**（`src/components/ChatGroupWizard/templates.ts`）：提供头脑风暴、分析、写作、规划、产品、游戏六类群组模板，每个模板包含 2–4 个成员 Agent，成员带 `title`、`avatar`、`systemRole` 与可选 `plugins`；这些是 Agent 组的起点，不是单个 Agent 的完整配置。
 2. **Agent 市场**（`lobe-chat-agents` + 远端 API）：市场 Agent 通过 `src/services/agent.ts` 的 `normalizeMarketAgentConfig()` 导入，自动处理 `model` 字段为对象/字符串两种格式的兼容。
 3. **Agent Builder**（`src/features/AgentBuilder/`）：AI 驱动的 Agent 建议芯片（`SuggestionChips`），帮助用户一步步配置 systemRole 和其他字段。
-4. **project-coordinator**：`packages/builtin-agents/src/agents/project-coordinator/index.ts`——按项目生成协调者内置 Agent（systemRole 含项目名与 identifier，`title: ${name} Coordinator`），是 Project 实体（见独特功能笔记）的内置执行角色。
+4. **project-coordinator**：`packages/builtin-agents/src/agents/project-coordinator/index.ts`——按项目生成协调者内置 Agent（提示词内嵌项目名与 identifier，标题为 `${name} Coordinator`），是 Project 实体（见独特功能笔记）的内置执行角色。
 
 `chatConfig.toolMode: 'custom'` 可以创建"精确范围"的子 Agent（如验证器），只拥有声明的插件，不注入任何默认工具。
 
@@ -207,11 +227,14 @@ LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过
 
 ## 8. 会话绑定、请求时解析与重新生成
 
-- **发送时实时读 Agent 配置**：`src/store/chat/slices/agentRun/actions/entries/conversationLifecycle.ts` 在 :289、:1194、:1800、:1699 用 `agentSelectors.getAgentConfigById(agentId)` 取配置，:1734 经 `agentService.getAgentConfigById(agentId)` 从 DB 加载；`src/services/chat/index.ts:314` 发送时取 `agentConfig.systemRole` 构造请求。会话/话题不保存 Agent 配置副本。
-- **消息与话题的模型快照**：messages 表有 `model`/`provider` 列（`packages/database/src/schemas/message.ts:116-117`），topics 表同样（`schemas/topic.ts:73-74`），assistant 消息创建时写入（conversationLifecycle.ts:1382-1383）。无完整请求参数/上下文配方快照。
-- **regenerate 是删除-重生成**：`src/features/Conversation/store/slices/generation/action.ts:734` 的 `delAndRegenerateMessage` 先 `deleteMessage`（:757）再 `regenerateUserMessage`（:764），注释明确 "Delete first, then regenerate…switches to a new branch"——即覆盖语义，旧回复被删除，与 AIO Hub 的兄弟分支保留不同。
+- **发送时实时读 Agent 配置**：`conversationLifecycle.ts`（`src/store/chat/slices/agentRun/actions/entries/`）在多个调用点用 `agentSelectors.getAgentConfigById(agentId)` 取配置，另有调用点经 `agentService.getAgentConfigById(agentId)` 从 DB 加载；`src/services/chat/index.ts:314` 发送时取 `systemRole` 构造请求。会话/话题不保存 Agent 配置副本。
+- **消息与话题的模型快照**：messages 与 topics 表均有 `model`/`provider` 列（`packages/database/src/schemas/message.ts:116-117`、`schemas/topic.ts:73-74`），assistant 消息创建时写入（`conversationLifecycle.ts:1382-1383`）。无完整请求参数/上下文配方快照。
+- **regenerate 是删除-重生成**：`delAndRegenerateMessage`（`src/features/Conversation/store/slices/generation/action.ts:734`）先删除旧消息再重新生成用户消息，注释明确 "Delete first, then regenerate…switches to a new branch"——即覆盖语义，旧回复被删除，与 AIO Hub 的兄弟分支保留不同。
 - **开场白不落库**：见 §3.2；修改 Agent 的 openingMessage 后，尚无消息的既有 topic 实时显示新文本，首次发送后因消息非空而消失，无固化。
-- **提示词块分组不存在**：`LobeAgentConfig` 的 systemRole 是单字符串、fewShots 是平铺 `LLMMessage[]`，均无 groupId/enabled/单选多选（`packages/types/src/agent/item.ts`）；`ChatGroup`（`packages/types/src/agentGroup/index.ts`）是 Agent 级分组（组级 systemPrompt/openingMessage + 成员 Agent 的 enabled 开关），不是提示词块分组；`chatConfig.topicGroupMode`/`sessionGroupId` 是话题/会话列表分组，同样无关。
+- **提示词块分组不存在**：`systemRole` 是单字符串、`fewShots` 是平铺的 `LLMMessage[]`（`packages/types/src/agent/item.ts`），均无 groupId/enabled 或单选多选。三个相近概念也都与提示词块无关：
+  - `ChatGroup`（`packages/types/src/agentGroup/index.ts`）：Agent 级分组，提供组级 systemPrompt/openingMessage 与成员 Agent 的 enabled 开关；
+  - `chatConfig.topicGroupMode`：话题列表分组；
+  - `sessionGroupId`：会话列表分组。
 
 ## 9. 主要源码依据
 

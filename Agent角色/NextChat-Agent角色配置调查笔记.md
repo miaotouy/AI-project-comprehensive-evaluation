@@ -16,7 +16,7 @@
 
 NextChat 的角色是“提示词、示例上下文、模型参数和工具选择”的组合，不是一个独立运行时：
 
-1. `Mask` 类型同时保存名称、头像、`context` 示例消息、`modelConfig`、语言、插件 id，以及 Artifact/code fold 等显示开关（`app/store/mask.ts:9-23`）。
+1. `Mask` 类型同时保存名称、头像、示例上下文（`context`）、模型配置（`modelConfig`）、语言、插件 id，以及 Artifact/code fold 等显示开关（`app/store/mask.ts:9-23`）。
 2. 用户 Mask 通过 Zustand 持久化 store CRUD；内置 Mask 从构建产物 `/masks.json` 异步加载，并在展示时把全局模型配置覆盖到内置 Mask 的局部配置上（`app/store/mask.ts:49-105`、`app/masks/index.ts:22-37`）。
 3. 新会话创建时会复制传入 Mask，并把全局 `modelConfig` 与 Mask 局部配置合并；会话之后持有自己的 Mask 副本。用户在当前会话切换模型或其他模型参数时，`syncGlobalConfig` 被关闭。
 4. `context` 是有顺序的 `ChatMessage[]`，编辑器支持增删、拖拽排序、文本/图片示例。发送请求时它被直接插入 system prompt 之后；`hideContext` 只影响聊天页面是否显示这些上下文消息，不会从请求上下文中删除。
@@ -48,7 +48,7 @@ Mask
 | `hideContext` | 是否在聊天窗口显示 context | 仅 UI；`getMessagesWithMemory` 未读取它 |
 | `enableArtifacts`、`enableCodeFold` | 当前角色的渲染能力开关 | 影响 Markdown/Artifact UI |
 
-`createEmptyMask` 默认使用当前全局模型配置、当前语言、空 context、空插件列表，并将 `syncGlobalConfig` 设为 true（`app/store/mask.ts:34-47`）。
+`createEmptyMask` 默认使用当前全局模型配置、当前语言、空的示例上下文与插件列表，并把 `syncGlobalConfig` 设为 true（`app/store/mask.ts:34-47`）。
 
 ## 2. 创建、持久化和内置角色
 
@@ -63,7 +63,11 @@ Mask
 
 ### 2.2 内置 Mask 构建和加载
 
-`app/masks/build.ts:9-25` 把 `CN_MASKS`、`TW_MASKS` 和 `EN_MASKS` 写为 `public/masks.json`。浏览器端 `app/masks/index.ts:22-37` 获取该文件，为每个条目分配递增内置 id，并放入 `BUILTIN_MASKS`/`BUILTIN_MASK_STORE`。`BuiltinMask` 允许 `modelConfig` 使用 `Partial<ModelConfig>`（`app/masks/typing.ts:4-7`），所以内置角色可以只覆盖少数模型参数。
+内置 Mask 的构建与加载：
+
+- 构建脚本（`app/masks/build.ts:9-25`）把 `CN_MASKS`、`TW_MASKS`、`EN_MASKS` 三组常量合并写为 `public/masks.json`；
+- 浏览器端（`app/masks/index.ts:22-37`）获取该文件，为每个条目分配递增内置 id，放入 `BUILTIN_MASKS`/`BUILTIN_MASK_STORE`；
+- 内置条目类型允许 `modelConfig` 使用部分配置（`Partial<ModelConfig>`，`app/masks/typing.ts:4-7`），因此内置角色可以只覆盖少数模型参数。
 
 `getAll` 返回内置角色时会把当前全局 `config.modelConfig` 与 Mask 的局部配置合并（`app/store/mask.ts:92-104`）。这意味着同一个内置角色在不同全局模型设置下，最终会话配置可能不同。
 
@@ -80,9 +84,9 @@ NewChat 页面
   -> navigate(Path.Chat)
 ```
 
-`app/components/new-chat.tsx:77-107` 负责列出 Mask 和通过命令/URL 选择；`startChat` 调用 `newSession` 后进入聊天页（`app/components/new-chat.tsx:91-95`）。
+`app/components/new-chat.tsx:77-107` 负责列出 Mask 与命令/URL 选择，`startChat` 调用 `newSession` 后进入聊天页。
 
-`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”的顺序合并。会话模型是 `ChatSession.mask`，不只保存一个 Mask id；后续编辑会直接修改这份副本。
+`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”顺序合并；会话保存的是 `ChatSession.mask` 完整副本而非 id，后续编辑直接修改这份副本。
 
 这也是 fork 行为的关键：`forkSession` 深拷贝消息并复制 Mask 及其 `modelConfig`（`app/store/chat.ts:243-267`），所以分叉会话之后可以拥有独立角色参数。
 
@@ -98,7 +102,7 @@ NewChat 页面
 - `ModelConfigList` 中的模型和生成参数；
 - 通过 `ContextPrompts` 管理 context。
 
-`ContextPrompts`（`app/components/mask.tsx:324-440`）把每条示例作为 `ChatMessage` 编辑，支持插入、删除和拖拽排序；编辑图片示例时会把文本与 `image_url` 重新组织为 `MultimodalContent[]`（`app/components/mask.tsx:338-349`）。
+`ContextPrompts`（`app/components/mask.tsx:324-440`）把每条示例作为 `ChatMessage` 编辑，支持插入、删除和拖拽排序；编辑图片示例时会把文本与 `image_url` 重组为 `MultimodalContent[]`。
 
 ### 4.2 请求拼接顺序
 
@@ -118,9 +122,9 @@ system prompt（可选，含 MCP 工具目录）
 
 ## 5. 全局配置同步和角色局部化
 
-Mask 的模型编辑由 `MaskConfig.updateConfig` 完成：先复制 `props.mask.modelConfig`，应用编辑，再设置 `mask.syncGlobalConfig = false`（`app/components/mask.tsx:85-95`）。聊天页的模型选择也直接改当前 session Mask，并关闭同步（`app/components/chat.tsx:682-714`）。
+Mask 的模型编辑由 `MaskConfig.updateConfig` 完成（`app/components/mask.tsx:85-95`）：复制当前 `modelConfig`、应用编辑，然后设置 `syncGlobalConfig = false`。聊天页的模型选择同样直接修改当前会话的 Mask 副本并关闭同步（`app/components/chat.tsx:682-714`）。
 
-当 `syncGlobalConfig` 为 true，聊天组件的 effect 会把全局 `config.modelConfig` 复制到当前 session Mask（`app/components/chat.tsx:1148-1175`）。重新打开同步时，编辑器会要求确认，然后用全局配置覆盖 Mask 局部模型配置（`app/components/mask.tsx:219-245`）。
+当 `syncGlobalConfig` 为 true 时，聊天组件的 effect 会把全局模型配置复制到当前会话 Mask（`app/components/chat.tsx:1148-1175`）；重新打开同步时，编辑器会要求确认并用全局配置覆盖局部配置（`app/components/mask.tsx:219-245`）。
 
 这形成了一个简单的状态规则：
 
@@ -134,10 +138,11 @@ syncGlobalConfig = true
 
 ### 5.1 开场白、消息元数据与重新生成
 
-- **开场白是固定欢迎语、与 Mask 无关**：`BOT_HELLO`（`app/store/chat.ts:99-102`，i18n 文案如"有什么可以帮你的吗"）在 chat 页 useMemo 中当 `context.length === 0 && messages[0]?.content !== BOT_HELLO.content` 时推入本地数组（`app/components/chat.tsx:1337-1346`），**不写入 session.messages**，用户发首条消息后不再显示；无每 Mask 自定义 greeting 字段，`newSession`（chat.ts:307-328）不插入任何开场消息，修改 Mask 后既有会话也不更新开场白。
-- **消息元数据极薄**：userMessage 无 model 字段；仅 botMessage 创建时快照 `model: modelConfig.model`（`chat.ts:436-440`），无 temperature 等参数快照（`ChatMessage` 字段仅 date/streaming/isError/id/model/tools/audio_url/isMcpResponse，chat.ts:57-66）。
-- **regenerate 是"删除旧配对 + 新建"**：`onResend` 先 `deleteMessage(userMessage.id)` 与 `deleteMessage(botMessage?.id)`，再以当时文本/图片重新调 `chatStore.onUserInput`（`app/components/chat.tsx:1217-1269`）——新 user/bot 消息拿新 id，并用重发时刻的 `session.mask.modelConfig`。
-- **context 编辑器无逐条启停**：`ContextPromptItem` 只有 role 下拉、文本输入、删除按钮、拖拽柄（`app/components/mask.tsx:260-322`），连逐条 enabled 开关都没有；`useMaskGroup`（`app/components/new-chat.tsx:35-75`）只是 NewChat 页 Mask 卡片墙的视觉分组，与 context 语义无关。
+- **开场白是固定欢迎语、与 Mask 无关**：`BOT_HELLO`（`app/store/chat.ts:99-102`，i18n 文案如"有什么可以帮你的吗"）在聊天页 useMemo 中仅当示例上下文为空且首条消息不是它本身时推入本地数组（`app/components/chat.tsx:1337-1346`），**不写入 session.messages**，用户发首条消息后不再显示。
+- **无每 Mask 开场白字段**：`newSession`（`app/store/chat.ts:307-328`）不插入任何开场消息，修改 Mask 后既有会话也不更新开场白。
+- **消息元数据极薄**：用户消息无 model 字段；仅 botMessage 创建时快照 `model: modelConfig.model`（`chat.ts:436-440`），无 temperature 等参数快照——`ChatMessage` 只含 id、日期、流式与错误标记、模型、工具、音频 URL 与 MCP 响应等字段（chat.ts:57-66）。
+- **regenerate 是"删除旧配对 + 新建"**：`onResend` 先删除用户与助手旧消息，再以当时的文本/图片重新触发 `chatStore.onUserInput`（`app/components/chat.tsx:1217-1269`）——新消息拿新 id，并使用重发时刻的 `session.mask.modelConfig`。
+- **context 编辑器无逐条启停**：`ContextPromptItem`（`app/components/mask.tsx:260-322`）只有 role 下拉、文本输入、删除与拖拽，连逐条 enabled 开关都没有；`useMaskGroup`（`app/components/new-chat.tsx:35-75`）只是 NewChat 页卡片墙的视觉分组，与 context 语义无关。
 
 ## 6. 导入、导出和分享
 

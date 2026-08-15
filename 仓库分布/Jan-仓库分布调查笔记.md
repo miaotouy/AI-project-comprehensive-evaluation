@@ -23,7 +23,11 @@ Jan 是 Web 前端、Tauri/Rust 原生层、可插拔扩展和文档站合仓的
 - **语言识别**：按源文件扩展名归类（ts/tsx/mts/cts → TypeScript，rs → Rust，swift → Swift）；JSON、YAML、锁文件、图片与二进制不计入编程语言行数。
 - **文档识别**：`.md/.mdx/.rst/.adoc/.asciidoc/.txt`，按一级目录与用途解释分布。
 - **测试识别**：目录名含 `__tests__`/`tests`/`specs`/`e2e`/`playwright`/`cypress` 或文件名含 `.test.`/`.spec.` 的源码文件；Rust 内嵌测试模块（`tests.rs` 等）不匹配该规则、不计入测试行数——下文测试规模对 Rust 侧偏保守。
-- **仓库形态**：Yarn workspaces monorepo（`package.json:5-10` 声明 `core`/`web-app`/`extensions/*`）；web-app 用 Vite 构建（`web-app/package.json:7-8`）、`core/` 用 rolldown 打包（`core/rolldown.config.mjs`）；统一测试为 vitest（`package.json:18-25`）；桌面壳为 Tauri 2（`src-tauri/tauri.conf.json`）。
+- **仓库形态**：Yarn workspaces monorepo。
+  - workspace 声明：`package.json:5-10` 纳入 `core`、`web-app` 与 `extensions/*`
+  - 构建工具：web-app 用 Vite（`web-app/package.json:7-8`），`core/` 用 rolldown 打包（`core/rolldown.config.mjs`）
+  - 统一测试：vitest（`package.json:18-25`）
+  - 桌面壳：Tauri 2（`src-tauri/tauri.conf.json`）
 
 ## 1. 模块分布与量级
 
@@ -34,13 +38,31 @@ Jan 是 Web 前端、Tauri/Rust 原生层、可插拔扩展和文档站合仓的
 | 文档 | 157 文件 / 16,735 行 |
 | 测试 | 319 文件 / 60,401 源码行 |
 
-主要区域为 `web-app/src`（953 文件/119,779 行）、`src-tauri/src`（52/21,539）、`src-tauri/plugins`（168/13,858）、`extensions/llamacpp-extension`（23/10,477）和文档站 `docs/src`。workspace 将 web-app 与 `extensions/*` 纳入统一依赖图（`package.json:5-10`）。
+主要区域：
+
+| 区域 | 文件 / 行数 |
+| --- | ---: |
+| `web-app/src` | 953 / 119,779 |
+| `src-tauri/src` | 52 / 21,539 |
+| `src-tauri/plugins` | 168 / 13,858 |
+| `extensions/llamacpp-extension` | 23 / 10,477 |
+| `docs/src` | 文档站 |
+
+workspace 将 web-app 与 `extensions/*` 纳入统一依赖图（`package.json:5-10`）。
 
 按职责分：
 
 - `web-app/`：React + Vite 前端主仓（components、routes、hooks、lib 与 locales）；
 - `core/`（104 文件/5,034 行）：共享 TS 类型与扩展接口契约，单独打包并可发布 npm（`.github/workflows/publish-npm-core.yml`）；
-- `extensions/*`（78 文件/15,440 行）：7 个独立包——llamacpp-extension（本地推理，23/10,477）、mlx-extension、assistant-extension、conversational-extension、rag-extension、vector-db-extension、download-extension；运行时由前端 `web-app/src/lib/extension.ts:62` 的 `ExtensionManager` 动态加载；
+- `extensions/*`（78 文件/15,440 行）：7 个独立包，覆盖本地推理、MLX、助手、会话、RAG、向量库与下载能力，运行时由前端 `web-app/src/lib/extension.ts:62` 的 `ExtensionManager` 动态加载。包清单：
+
+  - `llamacpp-extension`（本地推理，23/10,477）
+  - `mlx-extension`
+  - `assistant-extension`
+  - `conversational-extension`
+  - `rag-extension`
+  - `vector-db-extension`
+  - `download-extension`
 - `src-tauri/`（268/37,661）：`src`（核心命令与服务端代理，52/21,539）+ `plugins`（Tauri 插件，168/13,858，各含 guest-js）+ `utils`（13/2,158）；
 - `mlx-server/`（11/2,221）：Swift 实现的 macOS MLX 推理服务；
 - 其他：`docs/`（Nextra 文档站）、`autoqa/`（26/2,534，Python 自动 QA 框架）、`flatpak/`（Linux 打包清单）。
@@ -58,11 +80,25 @@ TypeScript 147,256 行（76.8%）、Rust 36,437 行（19.0%）、Swift 2,221 行
 
 ## 3. 文档分布与数量
 
-文档共 157 文件/16,735 行：`docs/src` 126 文件/11,711 行（Nextra 文档站主体，构建入口 `docs/package.json` 的 `next build`）、`src-tauri/plugins` 6 文件/2,194 行（各插件 README）、根目录 README/CONTRIBUTING 4/806、`.github/ISSUE_TEMPLATE` 4/87。`docs/` 共 554 个跟踪文件，其中 428 个为站点资产（public/static 图片与样式），不计入文档行数。
+文档共 157 文件/16,735 行，主要位置：
+
+- `docs/src`：126 文件/11,711 行，Nextra 文档站主体（构建入口为 `docs/package.json` 的 `next build`）
+- `src-tauri/plugins`：6 文件/2,194 行，各插件 README
+- 根目录 README/CONTRIBUTING：4 文件/806 行
+- `.github/ISSUE_TEMPLATE`：4 文件/87 行
+
+`docs/` 共 554 个跟踪文件，其中 428 个为站点资产（public/static 图片与样式），不计入文档行数。
 
 ## 4. 测试分布与数量
 
-测试 319 文件/60,401 源码行：`web-app/src` 256 文件（vitest，随组件与 lib 共置 `__tests__` 目录）、`core/src` 34、`extensions/*` 共 21（llamacpp-extension 9、rag 3、mlx 3、vector-db 2、assistant 2、download 2、conversational 2）、`docs/tests` 3、`autoqa` 2。Rust 侧以 `tests.rs` 内嵌模块为主（如 `src-tauri/src/core/threads/tests.rs`），未计入上述测试文件数。未发现 playwright/cypress/e2e 端到端测试目录。
+测试 319 文件/60,401 源码行，主要分布：
+
+- `web-app/src`：256 文件（vitest，随组件与 lib 共置 `__tests__` 目录）
+- `core/src`：34
+- `extensions/*`：共 21（llamacpp-extension 9 个居首，其余各 2-3 个）
+- `docs/tests`：3；`autoqa`：2
+
+Rust 侧以 `tests.rs` 内嵌模块为主（如 `src-tauri/src/core/threads/tests.rs`），未计入上述测试文件数。未发现 playwright/cypress/e2e 端到端测试目录。
 
 ## 5. 跨平台与发布组织
 
@@ -74,11 +110,23 @@ TypeScript 147,256 行（76.8%）、Rust 36,437 行（19.0%）、Swift 2,221 行
 
 ## 6. 工程配套与结构特征
 
-- **CI**：`.github/workflows/` 34 个文件——`jan-linter-and-test.yml`（push/PR 触发 `yarn test:coverage`）、`jan-tauri-build.yaml`（tag 发布构建）、`jan-docs.yml`（文档站构建部署）、`publish-npm-core.yml`（core 包发布 npm）、`autoqa-*`（手动触发的自动 QA）与各平台构建模板；
-- **脚本**：`scripts/download-bin.mjs`（发布时下载 llama-server 等二进制）、`find-missing-i18n-key.js`/`find-missing-translations.js`（i18n 完整性校验）、`rust-coverage.sh`；
+- **CI**：`.github/workflows/` 34 个文件：
+  - `jan-linter-and-test.yml`：push/PR 触发 `yarn test:coverage`
+  - `jan-tauri-build.yaml`：tag 触发发布构建
+  - `jan-docs.yml`：文档站构建部署
+  - `publish-npm-core.yml`：core 包发布 npm
+  - `autoqa-*`：手动触发的自动 QA
+  - 各平台构建模板
+- **脚本**：
+  - `scripts/download-bin.mjs`：发布时下载 llama-server 等二进制
+  - `find-missing-i18n-key.js`、`find-missing-translations.js`：i18n 完整性校验
+  - `rust-coverage.sh`：Rust 覆盖率
 - **国际化**：`web-app/src/locales/` 17 个语言目录、256 个文件（每语言一组 JSON，含 `__tests__` 键完整性测试）；
 - **自动 QA**：`autoqa/`（Python：main.py + reportportal 上报 + 各平台安装/运行脚本）；
-- **打包与资源**：`flatpak/`（`ai.jan.Jan.yml` 等 4 文件）、`src-tauri/resources` 与 `icons`、`src-tauri/tauri.conf.json`；
+- **打包与资源**：
+  - `flatpak/`：Linux 打包清单（`ai.jan.Jan.yml` 等 4 文件）
+  - `src-tauri/resources`、`icons`：打包资源与图标
+  - `src-tauri/tauri.conf.json`：Tauri 应用配置
 - **结构信号**：根目录含 34 个 workflow 与 5 个 issue 模板；docs/ 自成一站（独立 package.json，bun.lock 与 yarn.lock 并存）；扩展按引擎/能力一包一目录，边界清晰。
 
 ## 7. 设计取舍与已确认边界

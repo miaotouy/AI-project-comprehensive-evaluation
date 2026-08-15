@@ -18,7 +18,7 @@ SillyTavern 的"角色"是**角色卡（Character Card）**，一个标准的 JS
 
 角色卡的关键特点：
 
-1. 提示词分成多个语义字段（`description`、`personality`、`scenario`、`system_prompt`、`post_history_instructions`），不是单一文本；
+1. 提示词分成多个语义字段（描述、人格、场景、系统提示、历史后指令等），不是单一文本；
 2. `system_prompt` 可覆盖应用层的全局系统提示；`post_history_instructions` 注入到历史消息末尾；
 3. `character_book`（内嵌世界书）让角色可携带按关键词触发的背景知识；
 4. `extensions` 提供开放扩展点，第三方工具可在此存储额外数据（如 depth_prompt、talkativeness）；
@@ -34,7 +34,7 @@ SillyTavern 的"角色"是**角色卡（Character Card）**，一个标准的 JS
 | V2 | `spec: 'chara_card_v2'`, `spec_version: '2.0'` | 主流标准，必选字段列表严格 |
 | V3 | `spec: 'chara_card_v3'`, `spec_version: '3.x'` | 新增规范，`TavernCardValidator` 已支持 |
 
-V1 字段名使用旧格式（`char_name`、`char_persona`、`char_greeting`、`example_dialogue`、`world_scenario`），导入时由 `character-card-parser.js` 自动映射到 V2 字段。
+V1 使用旧式字段名（如 `char_name`、`char_persona`），导入时由 `character-card-parser.js` 自动映射到 V2 字段，完整映射见 2.4 表。
 
 ### 2.2 V2 角色卡（data 层）必填字段
 
@@ -120,7 +120,7 @@ character_book:
 - `depth`：`at_depth` 时距历史末尾的深度；
 - `case_sensitive`：关键词大小写是否敏感；
 - `enabled`：是否启用；
-- `extensions`：条目级扩展数据（可包含 `match_persona_description`、`match_character_personality`、`match_creator_notes` 等）。
+- `extensions`：条目级扩展数据，可包含 `match_persona_description` 等匹配类开关。
 
 世界书支持递归扫描（一个条目的 content 包含另一个条目的触发词，自动激活）。
 
@@ -150,21 +150,26 @@ SillyTavern 还有一个 **User Persona** 系统，独立于角色卡：
 
 开场白（`first_mes` + `alternate_greetings`）采用"创建时实例化 + tainted 固化"的语义：
 
-1. **创建会话**：`getChatResult`（`script.js:7625-7648`）在 chat 为空时调 `getFirstMessage()`（script.js:7651-7683）：`first_mes` 作为首条消息，`alternate_greetings` 全部转成 swipes 及其 `swipe_info`（send_date 相同、gen_* 为 void 0），经宏展开后写入并 `saveChatConditional` 落盘。
-2. **修改角色卡后的重建**：`createOrEditCharacter` 的 `shouldRegenerateMessage`（script.js:9844-9861）要求 `!chat_metadata.tainted && chat 为空或仅一条首条`，满足时用 `getFirstMessage()` 整体替换 chat；`tainted` 在 Generate（script.js:4288）等多处置 true——**首次生成后开场白即固化**，不再跟随角色卡后续修改。此后仅每次生成对 `chat[0].mes` 做 `substituteParams` 宏展开（script.js:4430-4432）。
-3. **快照落盘**：首条消息对象（mes + swipes + swipe_info）随 `saveChat`（script.js:7336）→ `/api/chats/save`（src/endpoints/chats.js:470）写入 JSONL；没有"重新选择 greeting"UI，备选以 swipe 呈现，overswipe 的 PRISTINE_GREETING 只是循环回 swipe 0（script.js:9163-9181），不重新拉取角色卡。
+1. **创建会话**：`getChatResult`（`script.js:7625-7648`）在 chat 为空时调 `getFirstMessage()`（`script.js:7651-7683`）。`first_mes` 作为首条消息，`alternate_greetings` 全部转成 swipes 及其 `swipe_info`（send_date 相同、gen_* 为 void 0）。这些内容经宏展开后由 `saveChatConditional` 落盘。
+2. **修改角色卡后的重建**：`shouldRegenerateMessage`（`script.js:9844-9861`）要求 `!chat_metadata.tainted` 且 chat 为空或仅一条首条，满足时用 `getFirstMessage()` 整体替换 chat。`tainted` 在 Generate（`script.js:4288`）等多处被置 true，因此**首次生成后开场白即固化**，不再跟随角色卡后续修改。此后每次生成只对 `chat[0].mes` 做 `substituteParams` 宏展开（`script.js:4430-4432`）。
+3. **快照落盘**：首条消息对象（mes + swipes + swipe_info）经 `saveChat`（`script.js:7336`）→ `/api/chats/save`（`src/endpoints/chats.js:470`）写入 JSONL。没有“重新选择 greeting”UI：备选以 swipe 呈现，overswipe 的 `PRISTINE_GREETING` 只是循环回 swipe 0（`script.js:9163-9181`），不会重新拉取角色卡。
 
 ## 9. 每次生成的配置读取与请求参数快照
 
-- 每次发送/续写/swipe/regenerate 都重新读角色卡当前配置：`Generate`（script.js:4231）每次调 `getCharacterCardFields()`（script.js:4401-4411，读 live `characters[this_chid]`），`depth_prompt` 也从当前卡读取（script.js:4424-4426）。
-- 每条消息/每个 swipe 保存 `extra.api`（`getGeneratingApi`，script.js:6980）与 `extra.model`（`getGeneratingModel`，script.js:6991）；`swipe_info` 结构为 `{send_date, gen_started, gen_finished, extra: structuredClone}`（script.js:6734-6749）。**未找到**温度/采样参数/预设名快照（全仓 grep `extra.temp|extra.preset|generation_parameters` 零命中）——与 AIO Hub 的 `metadata.requestParameters` 相比，只快照 api/model。
-- **swipe 与 regenerate 的关系**：swipe 越过末尾（OVERSWIPE_BEHAVIOR.REGENERATE，script.js:10350-10357）走 `Generate('swipe')`，`saveReply` type='swipe'（script.js:6612-6637）在 swipes 数组**追加**新版、旧回复保留；Ctrl+Enter 的 `Generate('regenerate')`（script.js:11578）在 4340-4353 先把最后一条助手消息从 chat 删除，`saveReply` 走非 swipe 分支（6682-6725）**新建消息、旧回复被丢弃**（覆盖语义）。swipe 时提示装配先 `coreChat.pop()` 剔除被重生成消息（script.js:4438-4440）。
+- 每次发送、续写、swipe 或 regenerate 都会重新读取角色卡当前配置：`Generate`（`script.js:4231`）每次调 `getCharacterCardFields()` 读取 live `characters[this_chid]`，`depth_prompt` 同样取自当前卡（`script.js:4401-4411, 4424-4426`）。
+- 每条消息或每个 swipe 只保存 `extra.api` 与 `extra.model`（由 `getGeneratingApi`/`getGeneratingModel` 写入，`script.js:6980/6991`）。
+- `swipe_info` 结构为 `{send_date, gen_started, gen_finished, extra: structuredClone}`（`script.js:6734-6749`）。
+- **未找到**温度/采样参数/预设名快照（全仓 grep `extra.temp|extra.preset|generation_parameters` 零命中）——与 AIO Hub 的 `metadata.requestParameters` 相比，这里只快照 api/model。
+- **swipe 与 regenerate 的关系**：两者都复用发送链，但保存语义相反：
+  - swipe 越过末尾（`OVERSWIPE_BEHAVIOR.REGENERATE`，`script.js:10350-10357`）走 `Generate('swipe')`，`saveReply`（`script.js:6612-6637`）在 swipes 数组**追加**新版，旧回复保留；
+  - Ctrl+Enter 触发 `Generate('regenerate')`（`script.js:11578`），先把最后一条助手消息从 chat 删除（`script.js:4340-4353`），`saveReply` 走非 swipe 分支（`script.js:6682-6725`）**新建消息、旧回复被丢弃**（覆盖语义）；
+  - swipe 时提示装配先 `coreChat.pop()` 剔除被重生成的消息（`script.js:4438-4440`）。
 
 ## 10. 模型与 Preset 系统
 
 角色卡不携带模型参数。SillyTavern 的推理参数由以下层次管理：
 
-1. **Preset**（预设）：temperature、top_p、max_tokens、top_k、repetition_penalty 等；每个 Preset 以 JSON 文件存储，与角色卡分离；
+1. **Preset**（预设）：temperature、top_p 等采样参数，每个 Preset 以 JSON 文件存储，与角色卡分离；
 2. **Context Template**：控制 `[INST]`、`<s>` 等 prompt 格式的模板，根据模型类型选择；
 3. **Author's Note / Depth**：在 Advanced Formatting 中独立配置，可覆盖 `post_history_instructions`；
 4. **System Prompt Override**：角色卡的 `data.system_prompt` 若非空，会覆盖 Preset 中的系统提示词。

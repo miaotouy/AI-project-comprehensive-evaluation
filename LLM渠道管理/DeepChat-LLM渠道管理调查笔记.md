@@ -16,7 +16,7 @@
 
 DeepChat 的渠道管理把“Provider 身份”“模型目录/能力”和“请求执行 runtime”分开：
 
-1. Provider 记录保存 id、apiType、apiKey、baseUrl、模型列表、customModels、启停状态和 rate limit；ModelConfig 单独保存上下文、生成参数、vision/function-call/reasoning、媒体和 endpoint 能力。
+1. Provider 记录保存身份、协议类型（apiType）、apiKey、baseUrl、模型列表、customModels、启停状态和 rate limit；ModelConfig 单独保存上下文、生成参数、vision/function-call/reasoning、媒体和 endpoint 能力。
 2. `DEFAULT_PROVIDERS` 覆盖 OpenAI-compatible、Anthropic、Gemini、Vertex、Ollama、Bedrock、GitHub Copilot、ACP 等多类 apiType；`providerRegistry` 再把 provider id/apiType 映射到 AI SDK runtime behavior preset 和 credential/route 策略。
 3. `ProviderSettings` 负责默认初始化、用户 Provider CRUD/排序、模型启停、custom model、模型 config、能力快照、Provider DB 刷新和旧配置迁移；设置写入 SQLite-backed store，并保留兼容迁移路径。
 4. AI SDK runtime 统一消息映射、原生/legacy tool、reasoning、图片/视频/TTS、embedding、trace、timeout/abort；ACP 的 `apiType: acp` 仍由 AgentManager 的 ACP backend 处理，不等同于普通聊天 Provider。
@@ -34,13 +34,20 @@ enable / custom / websites
 rateLimit / rateLimitConfig
 ```
 
-`ModelConfig`（`src/shared/types/provider.ts:370-398`）把模型有效能力归一化为 `maxTokens`、`contextLength`、`timeout`、temperature/topP、vision、speech recognition、function call、reasoning、thinking/reasoning effort、endpoint type，以及 search、image/video generation、TTS 等字段。用户覆盖和 Provider/system 能力通过 `IModelConfig.source` 区分（`:404-413`）。
+`ModelConfig`（`src/shared/types/provider.ts:370-398`）把模型有效能力归一化为上下文长度、最大输出与超时、采样参数（temperature/topP）、vision、语音识别、工具调用、推理与思考等级、endpoint 类型，以及 search、图片/视频生成、TTS 等媒体字段。用户覆盖和 Provider/system 能力通过 `IModelConfig.source` 区分（`:404-413`）。
 
 ## 2. 默认渠道与注册表
 
-`src/main/provider/defaults.ts:3-25` 起定义默认 Provider，后续条目覆盖大量 OpenAI-compatible 渠道，并明确列出 OpenAI Responses、OpenAI Codex、ACP、Gemini、Vertex AI、Anthropic、GitHub Copilot、Azure OpenAI、AWS Bedrock 等（`:209-239`、`:284-344`、`:569-570`、`:978-1011`）。新增 **AMD GPU Cloud**（`amd-developer`，apiType `openai-completions`，baseUrl `https://developer.amd.com.cn/radeon/api/v1`，默认关闭，`:49-63`；registry 条目在 `providerRegistry.ts:133-139`，复用 `OPENAI_BASE` preset + api-key credential）。默认 Provider 会在 `ProviderSettings` 构造阶段与已存在配置合并（`src/main/provider/settings.ts:379-411`）。
+- **默认渠道定义**：`src/main/provider/defaults.ts:3-25` 起定义默认 Provider，后续条目覆盖大量 OpenAI-compatible 渠道，并明确列出 OpenAI Responses、OpenAI Codex、ACP、Gemini、Vertex AI、Anthropic、GitHub Copilot、Azure OpenAI、AWS Bedrock 等（`:209-239`、`:284-344`、`:569-570`、`:978-1011`）。
+- **新增 AMD GPU Cloud**：`amd-developer`，apiType `openai-completions`，baseUrl `https://developer.amd.com.cn/radeon/api/v1`，默认关闭（`:49-63`）；registry 条目在 `providerRegistry.ts:133-139`，复用 `OPENAI_BASE` preset + api-key credential。
+- **默认合并**：默认 Provider 会在 `ProviderSettings` 构造阶段与已存在配置合并（`src/main/provider/settings.ts:379-411`）。
 
-`providerRegistry.ts:50-67` 的 `AiSdkProviderDefinition` 将渠道映射到：runtime kind、behavior preset、模型来源、连通性检查、credential strategy、route strategy、embedding strategy 和默认 headers。解析优先匹配 provider id，再匹配 apiType（`:684-690`）。同一个 OpenAI-compatible apiType 可以因此复用统一 runtime，同时保留 Provider 自己的 endpoint/key。
+- **定义**：`providerRegistry.ts:50-67` 的 `AiSdkProviderDefinition` 把渠道映射为以下配置：
+  - runtime kind、behavior preset；
+  - 模型来源、连通性检查；
+  - credential strategy、route strategy、embedding strategy；
+  - 默认 headers。
+- **解析顺序**：优先匹配 provider id，再匹配 apiType（`:684-690`）。同一个 OpenAI-compatible apiType 可以因此复用统一 runtime，同时保留 Provider 自己的 endpoint/key。
 
 ## 3. ProviderSettings 生命周期
 
@@ -66,11 +73,15 @@ Provider + model config + capability snapshot
   -> AI SDK stream/generate
 ```
 
-请求 signal 由 caller signal 和模型 timeout 合并（`:1286-1291`）；runtime 还统一处理 reasoning、图片/视频生成和 TTS（`:716-803`、`:1357-1519`），embedding 路径在 `:1587-1766`。`requestTrace` 记录 provider id、model id、endpoint、headers/body 摘要和 logical round，具体是否落盘由调用方控制。
+- 请求 signal 由 caller signal 和模型 timeout 合并（`:1286-1291`）；runtime 还统一处理 reasoning、图片/视频生成和 TTS（`:716-803`、`:1357-1519`），embedding 路径在 `:1587-1766`。
+- `requestTrace` 记录 provider id、model id、endpoint、headers/body 摘要和 logical round，具体是否落盘由调用方控制。
 
 **另有两条 provider 级路径（源码确认）**：
 
-- **DeepSeek 原生 web 搜索（#2093）**：`src/main/provider/deepseekResponsesAdapter.ts`（新增 547 行）只对 `providerId === 'deepseek'` + `modelId === 'deepseek-v4-flash'` + 官方 `https://api.deepseek.com` endpoint 生效（`isOfficialDeepSeekEndpoint`）。`runAiSdkCoreStream` 增加 `options.search`：搜索时注入 `deepseek_provider_web_search` 工具并开启 `include.rawChunks`，`streamAdapter.ts:254-291` 把 raw/source 流部件投影为 `providerSearch`/`providerUrlSource` 事件（http/https 白名单、去重、来源上限 100）；搜索调用以 `provider_replay` 信封存于消息（1 MiB 上限），由 `clientMessageProjection.ts` 在向 renderer 投影时剥离，下一轮经 `mapReplay` 重建。provider 能力字段新增 `supportsSearch/searchExecution`（`model-capabilities.ts`、`streamAdapter` 侧），Composer 据此显示搜索开关（见 Chat UI 笔记 §3）。
+- **DeepSeek 原生 web 搜索（#2093）**：`src/main/provider/deepseekResponsesAdapter.ts`（新增 547 行）只对 `providerId === 'deepseek'` + `modelId === 'deepseek-v4-flash'` + 官方 `https://api.deepseek.com` endpoint 生效（`isOfficialDeepSeekEndpoint`）。
+  - 搜索注入：`runAiSdkCoreStream` 增加 `options.search`，注入 `deepseek_provider_web_search` 工具并开启 `include.rawChunks`；`streamAdapter.ts:254-291` 把 raw/source 流部件投影为 `providerSearch`/`providerUrlSource` 事件（http/https 白名单、去重、来源上限 100）。
+  - 结果持久化：搜索调用以 `provider_replay` 信封存于消息（1 MiB 上限），由 `clientMessageProjection.ts` 在向 renderer 投影时剥离，下一轮经 `mapReplay` 重建。
+  - 能力标记：provider 能力字段新增 `supportsSearch`/`searchExecution`（`model-capabilities.ts`、`streamAdapter` 侧），Composer 据此显示搜索开关（见 Chat UI 笔记 §3）。
 - **独立语音生成（`generateSpeechStandalone`）**：`src/main/provider/index.ts:767-851` 用 TTS 模型走 `coreStream` 收集 `audio/*` 的 `image_data` 事件，是 CLI 媒体能力（`cli/audioTranscriptionService` 之外的 TTS 输出侧）的基础。
 
 原生 tool stream 与 `<function_call>` legacy 兼容由 `streamAdapter.ts:57-124`、`toolProtocol.ts:38-150` 负责；这使渠道差异集中在 capability snapshot 和 provider definition，而上层 Agent loop 仍消费统一 core stream event。
@@ -83,27 +94,37 @@ Provider + model config + capability snapshot
 
 ## 6. 限流、队列与状态
 
-`RateLimitManager`（`src/main/provider/managers/rateLimitManager.ts:24-80`）默认关闭限流，启用时持久化 `enabled/qpsLimit`。`executeWithRateLimit`（`:122-190`）允许立即执行，否则把请求放入 Provider 队列并支持 Abort；队列处理按 `1/qpsLimit` 间隔依次释放（`:284-325`）。状态 API 返回 config、currentQps、queueLength、lastRequestTime（`:82-119`），排队和执行会发出 provider event。
+- **默认与队列**：`RateLimitManager`（`src/main/provider/managers/rateLimitManager.ts:24-80`）默认关闭限流，启用时持久化 `enabled/qpsLimit`；`executeWithRateLimit`（`:122-190`）允许立即执行，否则把请求放入 Provider 队列并支持 Abort，队列按 `1/qpsLimit` 间隔依次释放（`:284-325`）。
+- **状态事件**：状态 API 返回 config、`currentQps`、`queueLength`、`lastRequestTime`（`:82-119`），排队和执行会发出 provider event。
 
 `ProviderInstanceManager` 与 `ModelManager` 维护 Provider runtime 实例和模型启停状态；本次未发现根据失败率、成本或延迟在多个 Provider 之间自动选择的路由器。
 
 ## 7. 凭据、Header 与代理边界
 
-- **静态存储**：Provider 的 `apiKey` 与 `baseUrl` 作为 `providers` 表的普通列明文落库（`src/main/provider/data/settingsTable.ts:189` 的 `api_key` 列，:168-199 的 INSERT/UPDATE），同时整份 `provider_json` 也写入该表（:182）；数据库本身使用 `better-sqlite3-multiple-ciphers`（见 `package.json` dependencies），但源码未显示对单条 apiKey 的加密处理。API key、OAuth token 和 baseUrl 属于 Provider 配置对象；本次未运行数据库加密、导入导出和备份流程（沿用 §10 未验证）。
+- **静态存储**：Provider 的 `apiKey` 与 `baseUrl` 作为 `providers` 表的普通列明文落库（`src/main/provider/data/settingsTable.ts:189` 的 `api_key` 列，:168-199 的 INSERT/UPDATE），同时整份 `provider_json` 也写入该表（:182）；数据库本身使用 `better-sqlite3-multiple-ciphers`（见 `package.json` dependencies），但源码未显示对单条 apiKey 的加密处理。
+- API key、OAuth token 和 baseUrl 属于 Provider 配置对象；本次未运行数据库加密、导入导出和备份流程（沿用 §10 未验证）。
 - **OAuth 凭据例外**：OpenAI Codex 与 xAI Grok 的 OAuth token 走专用 `credentialStore`，使用 Electron `safeStorage` 加密封装（`src/main/provider/auth/openaiCodex/credentialStore.ts:22-43`、`src/main/provider/auth/xaiGrok/credentialStore.ts`，`isEncryptionAvailable()` 不可用时回退 file 存储）。
 - **Header 组装**：请求头在 AI SDK runtime 统一构造——`buildPromptRuntime` 经 `createAiSdkProviderContext` 带入 `defaultHeaders`（`src/main/provider/aiSdk/runtime.ts:1187-1194`），`ProviderSettings` 构造阶段为部分 Provider 补齐 `defaultHeaders`（`src/main/provider/baseProvider.ts:54-67`）；HTTP(S) 代理依赖 `https-proxy-agent`（`package.json`），具体注入点在 providerFactory 的 fetch 适配层，本次未逐渠道核对。
-- **脱敏与日志**：`src/main/lib/redact.ts:4-40` 定义敏感 Header/Body key 列表（`authorization`、`api-key`、`token`、`secret`、`password` 等），用于请求 trace payload 的脱敏；trace 是否落盘由调用方控制（见 §9）。凭据是否进入导出/备份文件本次未验证。
+- **脱敏与日志**：`src/main/lib/redact.ts:4-40` 定义敏感 Header/Body key 列表，用于请求 trace payload 的脱敏：
+
+  ```
+  authorization、api-key、token、secret、password（等）
+  ```
+
+  trace 是否落盘由调用方控制（见 §9）。凭据是否进入导出/备份文件本次未验证。
 
 ## 8. 运行时选择、绑定与路由
 
 - **实例解析**：`ProviderInstanceManager`（`src/main/provider/managers/providerInstanceManager.ts:31-100`）持有 Provider id → `BaseLLMProvider` 实例的映射，`getProviderInstance(providerId)`（:100）按需创建并缓存；Provider 配置变更时重建实例（:130-207 的变更监听）。
-- **渠道身份**：运行时的"选择"发生在会话/Agent 层——session 记录 `providerId + modelId`（见 Chat 笔记 `new_sessions` 字段），请求时由 `ProviderRuntime.check`（`src/main/provider/index.ts:774-821`）或 AI SDK runtime 按 providerId 取实例；同一 `apiType` 的多个 Provider 各自持有独立 endpoint/key，不存在按 apiType 合并渠道的行为。
+- **渠道身份**：运行时的"选择"发生在会话/Agent 层——session 记录 `providerId + modelId`（见 Chat 笔记 `new_sessions` 字段），请求时由 `ProviderRuntime.check`（`src/main/provider/index.ts:774-821`）或 AI SDK runtime 按 providerId 取实例；同一 apiType 的多个 Provider 各自持有独立 endpoint/key，不存在按 apiType 合并渠道的行为。
 - **路由边界**：本次未发现基于失败率、成本、延迟或权重的跨 Provider 自动路由；模型 fallback 若存在则由会话层（`deepChatLoopRunner` 的 provider attempt 管线，见 Chat 笔记 §8.5）驱动，不属于渠道层职责。
 
 ## 9. 连接检测、日志与可观测性
 
-- **连接测试**：`ProviderService.testConnection`（`src/main/provider/providerService.ts:52-61`）带 5 秒超时（`PROVIDER_QUERY_TIMEOUT_MS = 5_000`，:18），通过 `providerExecutionPort.testConnection` 转发到真实执行端口（`src/main/provider/routes.ts:94-95`）。实际执行在 `ProviderRuntime.check`（`src/main/provider/index.ts:863-930`）：提供 modelId 时用真实 completions 调用（发送 `'hi'` 测试消息，:870-880，60 秒兜底）验证，未提供时走 Provider 自己的 `check()`（:895，如 `acpProvider.ts:286`）。因此设置页的连接测试复用真实运行链路，不是独立 mock 路径。
-- **请求 trace**：`requestTrace.ts` 的 `resolveRequestTraceContext`（`src/main/provider/requestTrace.ts:18-26`）从 `ModelConfig.requestTraceContext` 读取 enabled/persist 回调；runtime 在 `buildPromptRuntime` 中记录 endpoint、headers、body 摘要（`src/main/provider/aiSdk/runtime.ts:1329/1442/1495/1551`），经 `redact.ts` 脱敏后交给 persist，是否落盘由注入方（会话 runtime）决定——笔记 §4 所述"具体是否落盘由调用方控制"即指此。
+- **连接测试**：`ProviderService.testConnection`（`src/main/provider/providerService.ts:52-61`）带 5 秒超时（`PROVIDER_QUERY_TIMEOUT_MS = 5_000`，:18），通过 `providerExecutionPort.testConnection` 转发到真实执行端口（`src/main/provider/routes.ts:94-95`）。
+- **实际执行**：在 `ProviderRuntime.check`（`src/main/provider/index.ts:863-930`）进行——提供 modelId 时用真实 completions 调用（发送 `'hi'` 测试消息，:870-880，60 秒兜底）验证，未提供时走 Provider 自己的 `check()`（:895，如 `acpProvider.ts:286`）。
+- 因此设置页的连接测试复用真实运行链路，不是独立 mock 路径。
+- **请求 trace**：`requestTrace.ts` 的 `resolveRequestTraceContext`（`src/main/provider/requestTrace.ts:18-26`）从 `ModelConfig.requestTraceContext` 读取 enabled/persist 回调；runtime 在 `buildPromptRuntime` 中记录 endpoint、headers、body 摘要（`src/main/provider/aiSdk/runtime.ts:1329/1442/1495/1551`），经 `redact.ts` 脱敏后交给 persist，是否落盘由注入方（会话 runtime）决定（对应 §4 所述"具体是否落盘由调用方控制"）。
 - **错误归一化**：连接测试把 Provider 异常统一折叠为 `{ isOk, errorMsg }`（`provider/index.ts:800-813`）；聊天链路错误以 `error` 事件和错误块进入 transcript（见 Chat 笔记 §2），Provider 层未见独立的跨渠道错误归一化表，不同 AI SDK 的错误文本由上层 `formatAssistantErrorSummary` 处理（`contextBuilder.ts:820-854`）。
 
 ## 10. 边界与未验证事项

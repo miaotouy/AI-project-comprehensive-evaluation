@@ -42,13 +42,19 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
   -> 完成：runAgent.ts 停止 loading + 桌面通知 + markTopicUnread
 ```
 
-发送入口以全局 ChatStore 为主：`conversationLifecycle.ts`（2154 行）承载发送主逻辑，`sendMessage`（265 起）与 `operationContext` 构造（510 起）在这里创建"临时消息 + operation"；局部 `sendMessage.ts`（`src/features/Conversation/store/slices/message/action/sendMessage.ts:1-106`）只剩前置 hook/abort 检查与转发。`/compact` 由 Command Bus（`processCommands`，410-433）处理；`/goal` 命令向选定工具注入 `lobe-goal`（323-328 行）；单 Agent 直接 @mention 成为执行路由（353-370 行）；运行时选择统一走 `selectRuntimeType`（398-408 行）。发送入口还支持 Web 语音消息（`a58d18130`，`ChatInput/VoiceMessage/` + `sendVoiceMessage`）。
+发送入口以全局 ChatStore 为主：`conversationLifecycle.ts`（2154 行）承载发送主逻辑，在此创建"临时消息 + operation"；会话级的 `sendMessage.ts` 只剩前置 hook/abort 检查与转发。命令类输入走 Command Bus：`/compact` 转压缩 operation，`/goal` 向选定工具注入 `lobe-goal`，单 Agent 直接 @mention 成为执行路由，运行时选择统一走 `selectRuntimeType`。Web 端另有语音消息入口（`sendVoiceMessage`）。
+
+发送入口定位：
+- `sendMessage` 与 `operationContext` 构造：`conversationLifecycle.ts:265`、`:510`
+- 会话级入口：`src/features/Conversation/store/slices/message/action/sendMessage.ts:1-106`
+- Command Bus：`processCommands`（`conversationLifecycle.ts:410-433`）；`/goal` 注入（323-328）；@mention 执行路由（353-370）；`selectRuntimeType`（398-408）
+- 语音消息：commit `a58d18130`，`ChatInput/VoiceMessage/` + `sendVoiceMessage`
 
 ## 核心对象与状态权威
 
 - `ConversationContext`/`messageMapKey`（`messageMapKey.ts`）：定位坐标与分桶 key，按优先级归一化 scope 后拼字符串。
-- `UIChatMessage`：扁平消息行（id/parentId/threadId/groupId/role/tools/agentId 等）；权威源在服务端，前端缓存与两处展示副本均为派生。
-- 全局 ChatStore：`dbMessagesMap`（原始）/`messagesMap`（parse 后）、`operations/operationsByContext/operationsByMessage`（生成任务，刻意全局以支持多 Agent/Topic 并行；`operation/types.ts` 中 `INPUT_LOADING_OPERATION_TYPES` 位于 472 行、`QUEUE_BLOCKING_OPERATION_TYPES` 位于 505 行）。
+- `UIChatMessage`：扁平消息行（携带标识、父子归属、角色、工具与 agent 关联等字段）；权威源在服务端，前端缓存与两处展示副本均为派生。
+- 全局 ChatStore：`dbMessagesMap`（原始）/`messagesMap`（parse 后）双缓存；生成任务保存在 operation 相关 map 中（刻意全局以支持多 Agent/Topic 并行；两类阻塞型 operation 常量位于 `operation/types.ts` 的 472 与 505 行）。
 - 会话级 ConversationStore：`dbMessages`/`displayMessages` + generation/editing/selection/scroll/virtua/`pendingArgsUpdates`（按 contextKey 隔离的 UI 态，切换即重建）。
 - 服务端：message/topic 表、`message:list` 缓存 key（`query.ts` 的 `representableBucketKey` 防御位于 318-325 行，归属 `#writeThroughMessageCache`）、BM25 检索、Gateway agent 状态。
 

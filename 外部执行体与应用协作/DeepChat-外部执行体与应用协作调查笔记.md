@@ -64,7 +64,7 @@ IM 端可发起 Agent 工作、停止生成、查看并回答 pending interactio
 
 ## 权限、凭据与治理边界
 
-IM 渠道凭据保存在本地设置，endpoint 通过配对码授权；凭据刷新与失效流程未单独验证。CLI token 带 scope，变更类命令经过 `CliMutationGuard` 与 `approvalBroker`；`CliAuditLog` 把策略审计落盘，上传、JSON 响应、流记录和审批文本都有边界常量。外部 Agent 在沙箱内调用 `deepchat` CLI 时由 `AgentCliCommandAccess` 按 domain/verb scope 收口。执行仍发生在本机主进程，不因入口位于 IM 或终端改变文件与命令权限域。
+IM 渠道凭据保存在本地设置，endpoint 通过配对码授权；凭据刷新与失效流程未单独验证。CLI token 带 scope，变更类命令经 `CliMutationGuard` 与审批代理收口，策略审计由 `CliAuditLog` 落盘，上传、JSON 响应、流记录和审批文本都有边界常量。外部 Agent 在沙箱内调用 `deepchat` CLI 时由 `AgentCliCommandAccess` 按 domain/verb scope 收口。执行仍发生在本机主进程，不因入口位于 IM 或终端改变文件与命令权限域。
 
 ## 相邻类目交接
 

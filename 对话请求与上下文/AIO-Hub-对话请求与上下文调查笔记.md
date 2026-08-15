@@ -43,14 +43,26 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 3. 创建用户消息节点与占位助手节点（`createMessagePair`），`generatingNodes.add(id)` → `updateActiveLeaf` → 最后才真正调用 `executeRequest`——这个顺序保证 UI 能立刻看到"正在生成"的占位气泡，即使还没发出网络请求；
 4. 若 `isSessionGenerating(sessionId)` 为真（会话仍在生成时又发消息），走排队分支：消息节点被创建、持久化但不触发实际 LLM 请求，节点打 `metadata.isQueued = true` 且 `status: "queued"`（`useChatHandler.ts:523-557`，见第 8 节）。
 
-执行器分层：`useChatExecutor`（LLM 请求执行、附件/Token 前置处理，`useChatExecutor.ts:86-169` 的 `executeRequest`）与 `useSingleNodeExecutor`（单次请求 + 重试策略，`useSingleNodeExecutor.ts:82-374`，含前缀续写 `prefix: true` 的调用，`useSingleNodeExecutor.ts:241`）。Provider/协议 Adapter 层本次调查范围未覆盖（见第 4 节）。
+执行器分层：`useChatExecutor`（LLM 请求执行、附件/Token 前置处理，`useChatExecutor.ts:86-169` 的 `executeRequest`）与 `useSingleNodeExecutor`（单次请求 + 重试策略，`useSingleNodeExecutor.ts:82-374`，含前缀续写 `prefix: true` 的调用，`:241`）。Provider/协议 Adapter 层本次调查范围未覆盖（见第 4 节）。
 
 ## 2. 历史选择与上下文拼装顺序
 
 发送给模型的内容并非简单的"活动路径消息数组"：
 
-- **历史选择**：`core/context-processors/session-loader.ts:105-153` 的 `getBranchHistory` 两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID（`session-loader.ts:115-129`），第二遍跳过这些原消息而保留摘要节点（`session-loader.ts:131-151`，压缩的"非破坏性遮罩"语义，见附录 A.2）；tool 角色按 `convertToolRoleToUser` 转 user；仅保留"无 toolCallsRequested 的最终回答"的 reasoningContent（`session-loader.ts:255-268`）；可选把旧消息 HTML 转 Markdown 以省 token（`session-loader.ts:229-253`）。
-- **上下文管道**：`contextPipelineStore.ts:49-219` 注册并按 `priority` 排序执行 11 个处理器（`sortedAndEnabledProcessors`，`contextPipelineStore.ts:114-118`），当前默认顺序是：会话加载（100）→ 异步任务结果（110）→ 正则（200）→ 转写/文本提取（250）→ 世界书（300）→ 预设注入组装（400）→ Recall 检索（450，原 `knowledge-processor` 已被 `recall-processor` 替换，见 9.6）→ 会话变量（500）→ Token 限制（600）→ 消息格式化（800）→ 附件解析（10000）。启用状态和用户调整后的顺序持久化到 `llm-chat/pipeline-settings.json`（配置 UI `PipelineConfig.vue` 见 Chat UI 4.4）。压缩发生在这个管道之前（由会话加载器把原消息替换为摘要）；图片实际缩放/Base64 化在管道末端才发生（9.3）。
+- **历史选择**：`getBranchHistory`（`core/context-processors/session-loader.ts:105-153`）两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID（`:115-129`），第二遍跳过这些原消息而保留摘要节点（`:131-151`，压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user（`convertToolRoleToUser`）；仅保留"无 toolCallsRequested 的最终回答"的 reasoningContent（`:255-268`）；可选把旧消息 HTML 转 Markdown 以省 token（`:229-253`）。
+- **上下文管道**：`contextPipelineStore.ts:49-219` 注册并按 `priority` 排序执行 11 个处理器（`sortedAndEnabledProcessors`，`contextPipelineStore.ts:114-118`）。当前默认顺序：
+  1. 会话加载（100）；
+  2. 异步任务结果（110）；
+  3. 正则（200）；
+  4. 转写/文本提取（250）；
+  5. 世界书（300）；
+  6. 预设注入组装（400）；
+  7. Recall 检索（450，原 `knowledge-processor` 已被 `recall-processor` 替换，见 9.6）；
+  8. 会话变量（500）；
+  9. Token 限制（600）；
+  10. 消息格式化（800）；
+  11. 附件解析（10000）。
+  启用状态和用户调整后的顺序持久化到 `llm-chat/pipeline-settings.json`（配置 UI `PipelineConfig.vue` 见 Chat UI 4.4）。压缩发生在这个管道之前（由会话加载器把原消息替换为摘要）；图片实际缩放/Base64 化在管道末端才发生（9.3）。
 
 ## 3. 预算、截断、摘要与压缩（模型、入口与不变量）
 
@@ -72,8 +84,10 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 流式正文和持久化更新分离的具体机制在 `composables/chat/useStreamingMessageSources.ts` + `useChatResponseHandler.ts`（渲染侧的显示交接见消息渲染器笔记 2 节，这里记录执行与落盘侧）：
 
-- **渲染通道**：`useStreamingMessageSources.ts` 维护模块级 `Map<nodeId, ReplayableMessageStreamSource>`（`useStreamingMessageSources.ts:91`），**完全独立于 `session.nodes[id].content`**；`getOrCreateStreamingMessageSource(nodeId, initialContent)`（`useStreamingMessageSources.ts:102-114`）是渲染层唯一入口，`MessageContent.vue` 只在 `isGenerating.value` 为真时创建/获取（细节见渲染器笔记 2.1）。
-- **持久化通道**：`useChatResponseHandler.handleStreamUpdate()`（`useChatResponseHandler.ts:177-274`）对正文（非 reasoning）分支：把 chunk 同时塞进 `contentUpdateBuffer` 里的 `persistBuffer`（用于落地节点内容）和 `syncBuffer`（用于跨窗口同步）；`scheduleStreamSync()`（`useChatResponseHandler.ts:121-147`）用 `requestAnimationFrame` 节流，把 `syncBuffer` 通过 `useWindowSyncBus().syncState("chat:streaming-delta", ...)` 广播给分离窗口（主窗口/悬浮输入框窗口共享生成状态的机制）；`scheduleContentFlush()`（`useChatResponseHandler.ts:109-119`）用 `setTimeout`，延迟由 `getContentPersistDelay()`（`useChatResponseHandler.ts:78-84`）决定——如果设置开启了增量保存（`enableIncrementalSave`），延迟取 `max(250, incrementalSaveInterval)` 毫秒，否则固定 2000ms；到时后 `flushContentToNode()`（`useChatResponseHandler.ts:86-107`）才真正把 `persistBuffer` 写入 `nodeToUpdate.content` 并调用 `triggerIncrementalSave()`（按配置的 `incrementalSaveInterval` 节流地调用 `persistSession` 落盘，`useChatResponseHandler.ts:149-172`）。
+- **渲染通道**：`useStreamingMessageSources.ts` 维护模块级 `Map<nodeId, ReplayableMessageStreamSource>`（`:91`），**完全独立于节点的持久化 content**（`session.nodes[id].content`）；`getOrCreateStreamingMessageSource(nodeId, initialContent)`（`useStreamingMessageSources.ts:102-114`）是渲染层唯一入口，`MessageContent.vue` 只在生成中为真时创建/获取（细节见渲染器笔记 2.1）。
+- **持久化通道**：`useChatResponseHandler.handleStreamUpdate()`（`useChatResponseHandler.ts:177-274`）对正文（非 reasoning）分支把 chunk 同时塞进 `contentUpdateBuffer` 里的 `persistBuffer`（用于落地节点内容）与 `syncBuffer`（用于跨窗口同步）。节流分两路：
+  - **跨窗口同步**：`scheduleStreamSync()`（`:121-147`）用 `requestAnimationFrame` 节流，把 `syncBuffer` 经 `useWindowSyncBus().syncState("chat:streaming-delta", ...)` 广播给分离窗口（主窗口/悬浮输入框窗口共享生成状态的机制）；
+  - **内容落盘**：`scheduleContentFlush()`（`:109-119`）用 `setTimeout`，延迟由 `getContentPersistDelay()`（`:78-84`）决定——若开启增量保存（`enableIncrementalSave`），延迟取 `max(250, incrementalSaveInterval)` 毫秒，否则固定 2000ms；到时 `flushContentToNode()`（`:86-107`）才把 `persistBuffer` 写入节点 `content` 并触发按配置节流的增量落盘（`triggerIncrementalSave()`，`:149-172`）。
 
 也就是说：**渲染路径**（流缓冲区 → RAF 节流 → UI）和**持久化路径**（chunk 缓冲 → setTimeout 节流 → 节点 content → 落盘）是两套完全独立的节流策略，渲染更新几乎实时（RAF 级别），持久化写盘则明显更慢（默认 2 秒或用户配置的增量保存间隔）。这解释了为什么应用崩溃时可能丢失最后几秒的流式内容——`content` 字段本身滞后于屏幕显示。`finalizeNode()`（`useChatResponseHandler.ts:364-642`）在生成结束时会强制 flush 所有缓冲区（`flushAllBuffers`，`useChatResponseHandler.ts:371-394`），确保最终落盘内容完整，但过程中的中间态确实可能因为节流而未落盘。
 
@@ -91,11 +105,15 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 - **重新生成（regenerateFromNode）**：`useChatHandler.regenerateFromNode()`（`useChatHandler.ts:585-736`）负责取 Agent 配置，若 `options.modelId/profileId` 存在则覆盖模型并用 `filterParametersForModel` 过滤出目标模型支持的参数——这就是"切换模型重试"的执行链（UI 层"切换模型重新生成"按钮在 Chat UI 6.1）。节点语义（给同一用户消息新增兄弟助手节点）在会话管理 4.3。
 - **续写（continueGeneration）**：`useChatHandler.continueGeneration()`（`useChatHandler.ts:741-862`）：对 assistant 节点新建内容等于原内容、`isContinuation` 的兄弟节点，发送时用 `prefix: true`（`useSingleNodeExecutor.ts:241`）让支持前缀续写的 API 从 `continuationPrefix` 后继续；对 user 节点是"角色接力"（空子节点）。最终内容的前缀补回在 `finalizeNode`（第 6 节）。
-- **停止/abort**：`abortControllers: Map<string, AbortController>` 在 `sessionRuntimeManager`（数据语义在会话管理 6）。停止走 `llmChatStore.abortSending`/`abortNodeGeneration`（`llmChatStore.ts:587-604`）：先 `toolCallingStore.cancelBySession` 拒绝挂起的审批，再 `sessionRuntime.abortSessionGeneration`/`abortNodeGeneration`（`sessionRuntimeManager.ts:77-122`）——`controller.abort()` 后把节点标记为"用户手动停止"（有内容 → complete，无内容 → error + `metadata.error: "用户手动停止"`），并清掉 generatingNodes/流源。网络级中断层（AbortController 具体接到哪个请求对象、服务端任务是否取消）本次未核实。
+- **停止/abort**：`abortControllers: Map<string, AbortController>` 在 `sessionRuntimeManager`（数据语义在会话管理 6）。停止走 `llmChatStore.abortSending`/`abortNodeGeneration`（`llmChatStore.ts:587-604`）：先拒绝挂起的审批（`toolCallingStore.cancelBySession`），再 `sessionRuntime.abortSessionGeneration`/`abortNodeGeneration`（`sessionRuntimeManager.ts:77-122`）——`controller.abort()` 后把节点标记为"用户手动停止"（有内容 → complete，无内容 → error + `metadata.error: "用户手动停止"`），并清掉 generatingNodes/流源。网络级中断层（controller 具体接到哪个请求对象、服务端任务是否取消）本次未核实。
 
 ## 8. 队列、多会话并发与后台生成
 
-`sessionGenerationManager.ts`：如果用户在会话仍在生成时又发消息，`sendMessage()` 检测到 `isSessionGenerating(sessionId)` 为真，就把该 sessionId 加入 `queuedSessionIds`，并调用 `chatHandler.sendMessage(..., {skipGeneration: true})`（`sessionGenerationManager.ts:279-344`）——这条消息节点会被创建、持久化，但不触发实际 LLM 请求；节点会打上 `metadata.isQueued = true`，`status` 也同步写为 `"queued"`（`useChatHandler.ts:523-557`：combined 模式标在 user 节点上，chained 模式标在占位 assistant 节点上；旧数据里的 `pending` 状态在展示层仍按 queued 兼容）。等当前生成结束（`llmChatStore.ts` 里对 `generatingNodes.value.size` 减少的 watch，`llmChatStore.ts:129-207`，且需 `settings.uiPreferences.autoTriggerGenerationAfterQueue` 为真，`llmChatStore.ts:192`）后，`triggerQueuedGenerationForSession()`（`sessionGenerationManager.ts:113-277`）会找到 `isQueued` 节点并自动触发合并回复或链式生成：user 节点走 `regenerateFromNode`（合并回复），assistant 占位节点走 `continueGeneration`（链式追加），具体由 `queueReplyMode`（`"combined"`/`"chained"`，默认 combined）决定；找不到 `isQueued` 标记时有基于 activeLeaf/pending 的兜底判断（`sessionGenerationManager.ts:185-252`）。
+`sessionGenerationManager.ts` 的排队机制分三部分：
+
+- **排队写入**：`sendMessage()` 检测到会话仍在生成（`isSessionGenerating(sessionId)`）时，把该 sessionId 加入 `queuedSessionIds`，并调用 `chatHandler.sendMessage(..., {skipGeneration: true})`（`sessionGenerationManager.ts:279-344`）——消息节点会被创建、持久化，但不触发实际 LLM 请求；节点打 `metadata.isQueued = true`，`status` 同步写为 `"queued"`（`useChatHandler.ts:523-557`：combined 模式标在 user 节点上，chained 模式标在占位 assistant 节点上；旧数据里的 `pending` 状态在展示层仍按 queued 兼容）。
+- **触发条件**：当前生成结束（`llmChatStore.ts` 对 `generatingNodes.value.size` 减少的 watch，`llmChatStore.ts:129-207`）且 `settings.uiPreferences.autoTriggerGenerationAfterQueue` 为真（`llmChatStore.ts:192`）。
+- **触发执行**：`triggerQueuedGenerationForSession()`（`sessionGenerationManager.ts:113-277`）找到 `isQueued` 节点并自动触发合并回复或链式生成——user 节点走 `regenerateFromNode`（合并回复），assistant 占位节点走 `continueGeneration`（链式追加），具体由 `queueReplyMode`（`"combined"`/`"chained"`，默认 combined）决定；找不到 `isQueued` 标记时有基于 activeLeaf/pending 的兜底判断（`:185-252`）。
 
 多会话并行：`generatingNodes` 是节点粒度集合，会话间互不阻塞（数据语义在会话管理 6）。排队与等待的可见 UI 提示有明确实现：`utils/messageStatus.ts` 把 queued/waiting 映射为"排队/等待"徽标，`MessageHeader` 按 `showMessageStatus`（默认开启）展示（Chat UI 5.2）。
 
@@ -107,7 +125,12 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 ### 9.2 转写注入
 
-`useTranscriptionManager.ts` 负责发送前转换：支持图片、音频、视频、PDF 和 DOCX，转写模型按"类型专用模型 → 转写兜底模型 → Chat 全局默认模型 → 当前会话/Agent 模型"四级选择（`getTranscribeModelIdentifier`，`useTranscriptionManager.ts:72-99`）。聊天默认启用 `smart` 策略：模型原生不支持该模态时使用转写；较老的附件超过 `forceTranscriptionAfter`（默认 10 条，`config/defaultSettings.ts:117`）后可强制转写；如果已有转写且 `smartPrioritizeTranscription` 为真（默认 true），则优先发文本（`useTranscriptionManager.ts:465-507`）。另一种 `always` 策略始终使用转写（`useTranscriptionManager.ts:424`）。发送和上下文预览都会在执行管道前调用 `ensureTranscriptions()` 等待必要任务（`useChatHandler.ts:442-499` 与 `useSingleNodeExecutor.ts:174-227`），管道中的 `transcription-processor`（priority 250）再把 `【file::assetId】` 占位符或附件替换为转写文本/文本提取结果。附件卡片的单项重试/取消与批量转写动作是界面工作流（Chat UI 3.4）。
+`useTranscriptionManager.ts` 负责发送前转换：支持图片、音频、视频、PDF 和 DOCX，转写模型按"类型专用模型 → 转写兜底模型 → Chat 全局默认模型 → 当前会话/Agent 模型"四级选择（`getTranscribeModelIdentifier`，`useTranscriptionManager.ts:72-99`）。两种策略：
+
+- **smart（默认）**：模型原生不支持该模态时才使用转写；较老的附件超过 `forceTranscriptionAfter`（默认 10 条，`config/defaultSettings.ts:117`）后可强制转写；已有转写且 `smartPrioritizeTranscription` 为真（默认 true）时优先发文本（`useTranscriptionManager.ts:465-507`）。
+- **always**：始终使用转写（`useTranscriptionManager.ts:424`）。
+
+发送和上下文预览都会在执行管道前调用 `ensureTranscriptions()` 等待必要任务（`useChatHandler.ts:442-499` 与 `useSingleNodeExecutor.ts:174-227`），管道中的 `transcription-processor`（priority 250）再把 `【file::assetId】` 占位符或附件替换为转写文本/文本提取结果。附件卡片的单项重试/取消与批量转写动作是界面工作流（Chat UI 3.4）。
 
 ### 9.3 图片压缩
 
@@ -115,14 +138,17 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 ### 9.4 会话变量注入
 
-Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解析消息中的 `<svar name="player.hp" op="-" value="10" />`，支持赋值和 `+ - * /` 运算，并按变量定义的 min/max 截断；`$[player.hp]` 读取单值，`$[svars::json|table|list]` 输出全部非隐藏变量。处理器从活动分支最近的 `metadata.sessionVariableSnapshot` 起点继续回放，所以切分支后能按该分支历史重建状态；含变更的消息会写快照，压缩节点即使没有新变更也强制写一份锚点快照（快照字段数据语义在会话管理 1.3）。消息菜单的"变量快照"和上下文分析器的"变量状态"页是这套数据的可视化入口（Chat UI 6.3）。
+Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解析消息中的 `<svar name="player.hp" op="-" value="10" />` 标签，支持赋值和 `+ - * /` 运算，并按变量定义的 min/max 截断；`$[player.hp]` 读取单值，`$[svars::json|table|list]` 输出全部非隐藏变量。处理器从活动分支最近的 `metadata.sessionVariableSnapshot` 起点继续回放，所以切分支后能按该分支历史重建状态；含变更的消息会写快照，压缩节点即使没有新变更也强制写一份锚点快照（快照字段数据语义在会话管理 1.3）。消息菜单的"变量快照"和上下文分析器的"变量状态"页是这套数据的可视化入口（Chat UI 6.3）。
 
 ### 9.5 工具调用审批暂停与编排循环
 
 分两层：
 
-- **状态层**：`stores/toolCallingStore.ts` 维护 `pendingRequests: PendingToolRequest[]`，每条请求带一个 `resolve: (result) => void`（Promise resolver）。`requestApproval(sessionId, request, externalId?, options?)`（`toolCallingStore.ts:148-187`）返回一个 Promise，UI 调用 `approveRequest`/`rejectRequest`/`approveByIds`/`rejectByIds` 时才会 resolve 对应 Promise（`toolCallingStore.ts:189-225`）。这个设计使得工具调用执行流程可以用 `await` 直接"卡住"等待用户点击审批按钮，而不需要额外的状态机轮询。审批不再必然永久挂起——新增可配置超时（默认 `toolApprovalTimeoutEnabled: false` 即无限等待；开启后按 `toolApprovalTimeoutSeconds`（5 秒–24 小时，默认 60 秒，`toolCallingStore.ts:25-27`）定时自动拒绝，`scheduleTimeout` 在 `toolCallingStore.ts:122-133`），调用方也可显式传 `timeoutMs` 或 `AbortSignal`，会话删除/清理时按 sessionId 批量拒绝（`cancelBySession`，`toolCallingStore.ts:227-233`），窗口关闭（beforeunload/pagehide）时全部拒绝（`toolCallingStore.ts:251-255,273-277`）。`externalId` 用于兼容 VCP（一个通过 WebSocket 连接的外部协议）广播过来的审批请求——这类请求的 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套（审批条 UI 因此不按 sessionId 精确匹配，见 Chat UI 5.3）。
-- **编排层**：`composables/chat/useToolCallOrchestrator.ts` 的 `orchestrate()`（`useToolCallOrchestrator.ts:70-463`）驱动"LLM 生成 → 检测工具请求 → 等待审批 → 执行 → 把结果拼回上下文 → 再请求"循环。每一轮先用 `parseToolRequests()` 检测响应文本中的工具调用（VCP 或其他协议），检测到后创建一个 `role: "tool"` 的节点，`metadata.toolCalls` 初始状态为 `"awaiting_approval"`（`useToolCallOrchestrator.ts:222-254`）；随后由 `processCycle()` 调用 `toolCallingStore.requestApproval()` 等待审批（`useToolCallOrchestrator.ts:276-327`）。`processCycle()` 来自 `@/tools/tool-calling`——其内部解析/校验/执行/结果格式化的细节已由 [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md)（同代码快照）承接。循环上限由 `toolCallConfig.maxIterations` 控制，默认 5（`useToolCallOrchestrator.ts:107`）；`rateLimitInterval` 支持从上次请求开始或从上次流结束开始计时（`useToolCallOrchestrator.ts:130-157`）。所有请求被拒绝或节点标记为 `isSilent` 时循环终止（`useToolCallOrchestrator.ts:388-396`），否则创建下一个 assistant 节点继续对话；结束后自动命名 `generateSessionTopic`（`useToolCallOrchestrator.ts:444`）。
+- **状态层**：`stores/toolCallingStore.ts` 维护 `pendingRequests: PendingToolRequest[]`，每条请求带一个 `resolve: (result) => void`（Promise resolver）。`requestApproval(sessionId, request, externalId?, options?)`（`toolCallingStore.ts:148-187`）返回一个 Promise，UI 调用 `approveRequest`/`rejectRequest`/`approveByIds`/`rejectByIds` 时才 resolve 对应 Promise（`toolCallingStore.ts:189-225`）——工具执行流程因此可以用 `await` 直接"卡住"等待用户点击审批，而不需要额外的状态机轮询。相关行为：
+  - **可配置超时**：默认 `toolApprovalTimeoutEnabled: false`（无限等待）；开启后按 `toolApprovalTimeoutSeconds`（5 秒–24 小时，默认 60 秒，`toolCallingStore.ts:25-27`）定时自动拒绝（`scheduleTimeout`，`toolCallingStore.ts:122-133`），调用方也可显式传 `timeoutMs` 或 `AbortSignal`；
+  - **批量拒绝**：会话删除/清理按 sessionId 批量拒绝（`cancelBySession`，`toolCallingStore.ts:227-233`），窗口关闭（beforeunload/pagehide）时全部拒绝（`toolCallingStore.ts:251-255,273-277`）；
+  - **VCP 兼容**：`externalId` 用于兼容 VCP（通过 WebSocket 连接的外部协议）广播过来的审批请求——这类请求的 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套，审批条 UI 因此不按 sessionId 精确匹配（见 Chat UI 5.3）。
+- **编排层**：`composables/chat/useToolCallOrchestrator.ts` 的 `orchestrate()`（`useToolCallOrchestrator.ts:70-463`）驱动"LLM 生成 → 检测工具请求 → 等待审批 → 执行 → 把结果拼回上下文 → 再请求"循环。每一轮先用 `parseToolRequests()` 检测响应文本中的工具调用（VCP 或其他协议），检测到后创建一个 `role: "tool"` 的节点，`metadata.toolCalls` 初始状态为 `"awaiting_approval"`（`:222-254`）；随后 `processCycle()` 调用 `requestApproval()` 等待审批（`:276-327`）。`processCycle()` 来自 `@/tools/tool-calling`——其内部解析/校验/执行/结果格式化的细节已由 [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md)（同代码快照）承接。循环上限由 `toolCallConfig.maxIterations` 控制（默认 5，`:107`）；`rateLimitInterval` 支持从上次请求开始或从上次流结束开始计时（`:130-157`）。所有请求被拒绝或节点标记为 `isSilent` 时循环终止（`:388-396`），否则创建下一个 assistant 节点继续对话；结束后自动命名 `generateSessionTopic`（`:444`）。
 
 ### 9.6 外部能力注入概览（已确认入口，未逐分支展开）
 
@@ -180,7 +206,13 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 
 ### A.1 配置、触发条件与调用时机
 
-上下文压缩是 **Agent 级配置**，字段位于 `LlmParameters.contextCompression`，默认配置在 `types/llm.ts:378-392`：总开关默认关闭，自动触发默认开启，触发模式默认 `token`，Token 阈值 80000、消息阈值 50、最小历史数 15、最近消息保护数 10、单次最多压缩 20 条，摘要节点默认使用 `system` 角色。配置面板位于 Agent 参数编辑器的 `ContextCompressionConfigPanel.vue`（界面见 Chat UI 4.3）；当前实现已经移除了 Session 级压缩配置，生效优先级是"调用参数 > 当前选中 Agent 的配置 > 默认值"（`useContextCompressor.getEffectiveConfig()`，`useContextCompressor.ts:422-447`）。
+上下文压缩是 **Agent 级配置**，字段位于 `LlmParameters.contextCompression`，默认配置在 `types/llm.ts:378-392`：
+
+- 总开关默认关闭，自动触发默认开启，触发模式默认 `token`；
+- Token 阈值 80000、消息阈值 50、最小历史数 15、最近消息保护数 10、单次最多压缩 20 条；
+- 摘要节点默认使用 `system` 角色。
+
+配置面板位于 Agent 参数编辑器的 `ContextCompressionConfigPanel.vue`（界面见 Chat UI 4.3）；当前实现已经移除了 Session 级压缩配置，生效优先级是"调用参数 > 当前选中 Agent 的配置 > 默认值"（`useContextCompressor.getEffectiveConfig()`，`useContextCompressor.ts:422-447`）。
 
 自动判断先检查 `enabled` 和 `autoTrigger`，再检查 `minHistoryCount`（`checkAndCompress`，`useContextCompressor.ts:466-490`）。`triggerMode` 支持 `token`、`count`、`both`；`both` 是 Token 或消息数任一超限即触发（OR），比较符是严格的 `>`，等于阈值时不会触发（`shouldCompress`，`useContextCompressor.ts:64-90`）。Token 优先使用 `llmChatStore.contextStats.totalTokenCount`，统计未就绪才回退为路径节点 `metadata.tokenCount` 之和（`calculateContextStats`，`useContextCompressor.ts:95-138`）。代码里有两个自动检查点：`useChatHandler.sendMessage()` 在创建新用户消息前调用一次，保证本轮请求可以使用刚生成的摘要；`useSingleNodeExecutor.execute()` 在助手节点完成后又调用一次，工具循环中的单节点执行也会经过后一个检查点。两处都捕获压缩错误，因此摘要请求失败不会阻断正常聊天。
 

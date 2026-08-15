@@ -16,9 +16,17 @@
 
 LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者是站内管理操作（`cloneTopic`、`importTopic`、`forwardTopic`），在数据库内部完成，不产生任何交付文件；后者是面向交付的四格式导出弹窗（截图/文本/PDF/JSON）与一个独立的链接分享体系（`topic_shares` 表 + `/share/t/:id` 公开页）。
 
-本地导出通过一个 `ShareModal` 统一入口提供四个 Tab：截图（`@zumer/snapdom` 对专用分享版式离屏成像，支持 JPG/PNG/SVG/WEBP，DPR=2）、文本（Markdown 预览+复制/下载）、PDF（服务端 `marked`+`pdfkit` 渲染，CDN 下载中文字体）、JSON（simple OpenAI 风格 / full 无损 `ExportedTopic` v2.0）。另有一个单消息分享弹窗（截图/文本/PDF，仅助手消息）。四处导出均无选区与版本历史，JSON full 与 `importTopic` 构成一条可往返的导入链路。
+本地导出通过 `ShareModal` 统一入口提供四个 Tab：
+- 截图：`@zumer/snapdom` 对专用分享版式离屏成像，支持 JPG/PNG/SVG/WEBP，DPR=2；
+- 文本：Markdown 预览 + 复制/下载；
+- PDF：服务端 `marked`+`pdfkit` 渲染，运行时从 CDN 下载中文字体；
+- JSON：simple（OpenAI 风格）与 full（无损 `ExportedTopic` v2.0）两种模式。
 
-链接分享是"实时分享"而非快照：分享页每次请求都从 `topic_shares` 关联的源 topic 现读消息，`visibility: 'link'` 时匿名可访问，`'private'` 仅创建者可见；分享记录可被 `disableSharing` 删除（本次未找到客户端 UI 调用）。OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopover（链接分享入口）被该开关隐藏，导出弹窗不受影响。
+另有一个单消息分享弹窗（截图/文本/PDF，仅助手消息）。四处导出均无选区与版本历史，JSON full 与 `importTopic` 构成可往返的导入链路。
+
+链接分享是实时分享而非快照：分享页每次请求都从 `topic_shares` 关联的源 topic 现读消息；`visibility` 为 `'link'` 时匿名可访问，`'private'` 时仅创建者可见；分享记录可被 `disableSharing` 删除（本次未找到客户端 UI 调用）。
+
+OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopover（链接分享入口）被该开关隐藏，导出弹窗不受影响。
 
 ## 系统边界与完整主链
 
@@ -63,16 +71,31 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 ## 2. 范围选择、内容口径与字段过滤
 
 - **范围**：固定为当前 topic 全部消息，顺序按服务端返回顺序；无选区、无"从开头到某条"、无分支选择。线程消息：分享弹窗以 `threadId: null` 打开（`useDropdownMenu.tsx:93`），只导出主链；单消息分享则只取该条消息（`ShareMessageModal/ShareText/index.tsx:25`）。
-- **内容口径**：截图与分享页走聊天现场同一套 `MessageItem` 渲染（`src/features/ShareModal/ShareImage/ChatList/index.tsx:23-25`、`src/routes/share/t/[id]/SharedMessageList.tsx:37-40`），所见即所得；文本/PDF 从 `displayMessages` 的 `content` 字段拼接（`ShareText/template.ts:13-61`）；JSON full 从 `dbMessages` 逐字段投影。
-- **system/reasoning/工具**：文本导出默认 `withRole` 输出 User/Assistant/Tools Calling 三级标题，工具消息内容包进 json 代码块（`template.ts:40-58`），`includeTool/includeUser` 可关；`withSystemRole` 开关控制是否带 system prompt（多入口默认 false，JSON 默认 true）。reasoning：文本导出前经 `normalizeThinkTags` 与 `processWithArtifact` 预处理（`template.ts:34`、`src/features/Conversation/utils/markdown.ts:19-96`），即保留 `<think>`/`<lobeThinking>` 与 artifact 标记结构，不剥离思考内容；`LOADING_FLAT` 占位消息被过滤（`template.ts:29`）。
+- **内容口径**：三条路径口径不同：
+  - 截图与分享页走聊天现场同一套 `MessageItem` 渲染（`src/features/ShareModal/ShareImage/ChatList/index.tsx:23-25`、`src/routes/share/t/[id]/SharedMessageList.tsx:37-40`），所见即所得；
+  - 文本/PDF 从 `displayMessages` 的 `content` 字段拼接（`ShareText/template.ts:13-61`）；
+  - JSON full 从 `dbMessages` 逐字段投影。
+- **system/reasoning/工具**：文本导出对三类内容处理不同：
+  - 角色与工具：默认 `withRole` 输出 User/Assistant/Tools Calling 三级标题，工具消息内容包进 JSON 代码块（`template.ts:40-58`）；`includeTool`/`includeUser` 可关闭；
+  - system prompt：由 `withSystemRole` 开关控制（多入口默认 false，JSON 默认 true）；
+  - reasoning 与 artifact：文本导出不剥离思考内容，预处理保留 `<think>`/`<lobeThinking>` 与 artifact 标记结构；预处理函数见 `normalizeThinkTags`、`processWithArtifact`（`template.ts:34`、`src/features/Conversation/utils/markdown.ts:19-96`）；
+  - 占位消息：`LOADING_FLAT` 被过滤（`template.ts:29`）。
 - **隐藏分支**：本次未找到导出隐藏分支或全部版本内容的路径；`generateFullExport` 按消息数组原样输出（`ShareJSON/generateFullExport.ts:23-52`），不区分活动路径与旁支。
 
 ## 3. 附件、资源与离线封装
 
-- **JSON full**：只输出 content/plugin/pluginState/tools/reasoning/metadata 等字段（`generateFullExport.ts:26-51`），不含消息模型查询时拼接的 `files` 附件数组；附件不打包进任何导出文件。
+- **JSON full**：
+  - 输出字段：`content`、`plugin`、`pluginState`、`tools`、`reasoning`、`metadata`（`generateFullExport.ts:26-51`）；
+  - 不含：消息模型查询时拼接的 `files` 附件数组——附件不打包进任何导出文件。
 - **Markdown/PDF**：消息 content 中的图片 Markdown 链接（通常为 `/f/:id` 访问 URL）按原文保留；无内联、无代理转换，离线打开时引用可能失效。PDF 服务端渲染根本不解析图片/表格 token（见 §6）。
-- **截图**：`snapdom`（`@zumer/snapdom` ^1.9.14，package.json 顶层）对 DOM 成像时会内联资源；栅格格式调用 `useProxy: 'https://proxy.corsfix.com/?'` 作为跨域图片代理（`src/hooks/useScreenshot.ts:54-57`）。分享版式头部会渲染模型/插件标签（`ShareImage/Preview.tsx:115-120`），`withPluginInfo` 默认关闭。
-- **分享页附件**：消息服务端返回时把文件 URL 改写为访问 URL（`apps/server/src/routers/lambda/message.ts:393-395`），生产环境为 `/f/:id` 公开代理（`apps/server/src/services/file/index.ts:128-136`）；`src/app/(backend)/f/[id]/route.ts:20-23` 注释明确该端点"intentionally unauthenticated"，按 id 公开访问、302 到预签名 URL。`/f/:id` 路由代码属于 web 壳，Electron 桌面端分享路由未注册（`src/spa/router/desktopRouter.sync.test.tsx:199-207`）。
+- **截图**：三条行为：
+  - `snapdom`（`@zumer/snapdom` ^1.9.14，package.json 顶层依赖）对 DOM 成像时会内联资源；
+  - 栅格格式经 `useProxy: 'https://proxy.corsfix.com/?'` 跨域图片代理（`src/hooks/useScreenshot.ts:54-57`）；
+  - 分享版式头部渲染模型/插件标签（`ShareImage/Preview.tsx:115-120`），`withPluginInfo` 默认关闭。
+- **分享页附件**：
+  - 服务端返回消息时把文件 URL 改写为访问 URL（`apps/server/src/routers/lambda/message.ts:393-395`）；
+  - 生产环境为 `/f/:id` 公开代理（`apps/server/src/services/file/index.ts:128-136`）。该端点注释明确 intentionally unauthenticated（`src/app/(backend)/f/[id]/route.ts:20-23`）：按 id 公开访问、302 到预签名 URL；
+  - `/f/:id` 路由属于 web 壳，Electron 桌面端未注册分享路由（`src/spa/router/desktopRouter.sync.test.tsx:199-207`）。
 
 ## 4. 格式、schema 与往返能力
 
@@ -80,20 +103,38 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 - **JSON**：两种模式（`packages/types/src/export.ts:20` `TopicExportMode`）：
   - simple：`{role, content}` 数组，可选前置 system 消息，带 `tool_call_id`/`tools`（`ShareJSON/generateMessages.ts:11-36`）；
   - full：`ExportedTopic`，`version: '2.0'`、`title`、`exportedAt`、messages 数组（`generateFullExport.ts:66-71`；`packages/types/src/export.ts:26-35`）。
-- **往返**：full/simple 文件均可经"Topic 列表 -> 导入 .json"回到 `topic.importTopic`（`apps/server/src/routers/lambda/topic.ts:641-662`）。`TopicImporterRepo` 按 `version` 键是否存在区分两种格式（`packages/database/src/repositories/topicImporter/index.ts:125-141`），但不校验版本值；过滤 system 消息、重建 parentId 链、重生成消息 ID，并把 plugin 写入 `messagePlugins`（`:77-118,146-241`）；无 parentId 的简单数组按数组顺序补成线性链（`:234-238`）。**不导入**：文件关联（messagesFiles）、翻译、TTS、压缩组。往返语义成立但非无损。
+- **往返**：full/simple 文件均可经 "Topic 列表 -> 导入 .json" 回到 `topic.importTopic`（`apps/server/src/routers/lambda/topic.ts:641-662`）。`TopicImporterRepo`（`packages/database/src/repositories/topicImporter/index.ts:125-141`）的处理行为：
+  - 按 `version` 键是否存在区分两种格式，但不校验版本值；
+  - 过滤 system 消息、重建 `parentId` 链、重生成消息 ID，并把插件写入 `messagePlugins`（`index.ts:77-118,146-241`）；
+  - 无 parentId 的简单数组按数组顺序补成线性链（`index.ts:234-238`）；
+  - 不导入：文件关联（`messagesFiles`）、翻译、TTS、压缩组。往返语义成立但非无损。
 - **导出不携带分享稿编辑痕迹**：schema 中无分享稿对象，导出即当前数据的一次投影。
 
 ## 5. 分享稿编辑、编排与预览
 
-- 截图 Tab：独立分享版式（品牌头像+标题+模型标签+可选 system role 区+消息列表+可选页脚品牌区，`ShareImage/Preview.tsx:89-140`），选项仅 `widthMode`（窄 480px / 宽 100%，`src/features/ShareModal/useContainerStyles.ts:36-43`）、`withBackground`（装饰背景，`ShareImage/style.ts:6-13`）、`withFooter`、`withSystemRole`、`withPluginInfo`、`imageType`；实时预览与生成物是同一 DOM（`id="preview"`），无独立"渲染-生成"两条管线。
+- 截图 Tab：独立分享版式（品牌头像、标题、模型标签、可选 system role 区、消息列表、可选页脚品牌区，`ShareImage/Preview.tsx:89-140`）；实时预览与生成物是同一 DOM（`id="preview"`），无独立"渲染-生成"两条管线。可配置项共六个：
+  - `widthMode`：窄 480px 或宽 100%（`src/features/ShareModal/useContainerStyles.ts:36-43`）；
+  - `withBackground`：装饰背景（`ShareImage/style.ts:6-13`）；
+  - `withFooter`：页脚品牌区开关；
+  - `withSystemRole`：system role 区开关；
+  - `withPluginInfo`：头部模型/插件标签开关；
+  - `imageType`：输出图片格式。
 - 文本/JSON Tab：侧栏选项 + 预览区（`Markdown` 渲染 / JSON 缩进文本），复制与下载用同一份 `content` 字符串（`ShareText/index.tsx:64-98`、`ShareJSON/index.tsx:87-115`）。
 - 移动端布局：选项表单折叠到底部按钮区（各 `index.tsx` 的 `isMobile` 分支）。
 - 本次未找到：自定义字体、分页、水印、品牌覆盖、元信息编辑或分享稿工作台。
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
-- **截图**：`useScreenshot` 用 `snapdom`（html-to-image 系 fork）对 `#preview` DOM 成像，`scale: 2` 固定 DPR；SVG 走 `toRaw`，栅格走 `toBlob`（`src/hooks/useScreenshot.ts:39-64`）。复制为 PNG：`toBlob` -> `ClipboardItem` -> `navigator.clipboard.write`（`src/hooks/useImgToClipboard.ts:13-24`）；下载为 data URL `<a download>`，文件名 `${BRANDING_NAME}_${title}_${date}.${ext}`（`useScreenshot.ts:102-115`）。无长图分段拼接、无 Canvas 尺寸上限处理代码。
-- **PDF**：`exporter.exportPdf` 服务端生成（`apps/server/src/routers/lambda/exporter.ts:182-198`）：`marked` lexer 分词后由 `pdfkit` 逐 token 排版（heading/paragraph/list/blockquote/code/hr，`:89-149`），A4、50px 边距、页码；中文字体运行时从 jsdelivr CDN 拉取 Source Han Sans（`:30-47`），失败即抛错。不处理图片、表格、数学、Mermaid 与行内代码高亮（token 文本化输出）。OSS 下 RBAC 中间件是放行桩（`packages/business-server/src/trpc-middlewares/rbacPermission.ts:14-28`），登录用户即可用。
+- **截图**：三条行为与一个边界：
+  - 成像：`useScreenshot` 用 `snapdom`（html-to-image 系 fork）对 `#preview` DOM 成像，DPR 固定为 2（`scale: 2`）。SVG 走 `toRaw`，栅格走 `toBlob`（`src/hooks/useScreenshot.ts:39-64`）；
+  - 复制为 PNG：`toBlob` → `ClipboardItem` → `navigator.clipboard.write`（`src/hooks/useImgToClipboard.ts:13-24`）；
+  - 下载为 data URL（`<a download>`），文件名按 `${BRANDING_NAME}_${title}_${date}.${ext}` 模板生成（`useScreenshot.ts:102-115`）；
+  - 无长图分段拼接、无 Canvas 尺寸上限处理代码。
+- **PDF**：`exporter.exportPdf` 在服务端生成（`apps/server/src/routers/lambda/exporter.ts:182-198`）：
+  - 渲染：`marked` lexer 分词后由 `pdfkit` 逐 token 排版（heading/paragraph/list/blockquote/code/hr，`exporter.ts:89-149`），A4、50px 边距、页码；
+  - 字体：中文字体运行时从 jsdelivr CDN 拉取 Source Han Sans（`exporter.ts:30-47`），失败即抛错；
+  - 保真度：不处理图片、表格、数学、Mermaid 与行内代码高亮（token 文本化输出）；
+  - 访问控制：OSS 下 RBAC 中间件是放行桩（`packages/business-server/src/trpc-middlewares/rbacPermission.ts:14-28`），登录用户即可用。
 - **富内容保真**：截图与分享页直接复用聊天现场 `MessageItem`/`ChatList` 渲染器（含 Markdown、工具卡、Artifact、图片等全部现场表达）；文本导出则回到纯 Markdown 文本，工具调用以 `tools` JSON 代码块形式出现（`ShareText/template.ts:55-58`）；PDF 保真度最低（纯文本流）。
 
 ## 7. 生成历史、版本与持久化
@@ -104,13 +145,29 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 
 ## 8. 分享载体、访问控制与撤销
 
-- **载体**：`topic_shares` 表（`packages/database/src/schemas/topic.ts:231-258`），shareId 为 8 位 nanoId（`:235`），`visibility` 默认 `'private'`，`pageViewCount` 计数；topic 删除时级联删除（`:240`）。
-- **创建/更新**：`enableSharing` 建记录（`onConflictDoNothing` 幂等）、`updateShareVisibility` 切换 private/link、`disableSharing` 删记录（`apps/server/src/routers/lambda/topic.ts:412-458,871-894`；模型实现 `packages/database/src/models/topicShare.ts:43-116`）。SharePopover 打开时若尚无记录会**自动创建 private 分享**（`src/features/SharePopover/index.tsx:80-84`）；切到 link 时自动复制链接并 toast（`:97-103`），并弹出隐私提醒（工具调用/凭据/图片/文件四类，`:113-160`）。
-- **访问语义**：`findByShareIdWithAccessCheck`——private 仅 owner（`accessUserId === ownerId`）可读，link 任何人可读（`topicShare.ts:214-235`）。公开读取走 `publicProcedure`（`packages/trpc/src/lambda/index.ts:34`，匿名免登录）：`share.getSharedTopic` 返回元数据并自增 pageViewCount（`apps/server/src/routers/lambda/share.ts:14-56`）；`message.getMessages` 带 `topicShareId` 时以分享属主身份构造 MessageModel/FileService 现读消息（`apps/server/src/routers/lambda/message.ts:347-411`），并强制 `skipWorks: true` 防止把运行中的 Work 状态泄漏给访客（`:387-391` 注释）。
+- **载体**：`topic_shares` 表（`packages/database/src/schemas/topic.ts:231-258`）承载分享记录：
+  - `shareId`：8 位 nanoId（`:235`）；
+  - `visibility`：默认 `'private'`；
+  - `pageViewCount`：访问计数；
+  - topic 删除时分享记录级联删除（`:240`）。
+- **创建/更新**：服务端三个操作（`apps/server/src/routers/lambda/topic.ts:412-458,871-894`；模型实现 `packages/database/src/models/topicShare.ts:43-116`）：
+  - `enableSharing`：建记录（`onConflictDoNothing` 幂等）；
+  - `updateShareVisibility`：切换 private/link；
+  - `disableSharing`：删记录。
+  SharePopover 打开时若尚无记录会**自动创建 private 分享**（`src/features/SharePopover/index.tsx:80-84`）；切到 link 时自动复制链接并 toast（`index.tsx:97-103`），并弹出隐私提醒（工具调用、凭据、图片、文件四类，`index.tsx:113-160`）。
+- **访问语义**：
+  - 判定：`findByShareIdWithAccessCheck`（`topicShare.ts:214-235`）——private 仅 owner（`accessUserId === ownerId`）可读，link 任何人可读；
+  - 公开入口：`publicProcedure`（`packages/trpc/src/lambda/index.ts:34`，匿名免登录），`share.getSharedTopic` 返回元数据并自增 `pageViewCount`（`apps/server/src/routers/lambda/share.ts:14-56`）；
+  - 实时读取：`message.getMessages` 带 `topicShareId` 时以分享属主身份现读消息（`apps/server/src/routers/lambda/message.ts:347-411`），并强制 `skipWorks: true` 防止把运行中的 Work 状态泄漏给访客（`message.ts:387-391` 注释）。
 - **快照 vs 实时**：实时。分享页每次请求都读源 topic 当前消息；分享记录本身（标题、agent 元数据）在创建时固化于 join 查询，消息内容不固化。
-- **撤销/删除**：`disableSharing` 删记录后 shareId 不可解析（NOT_FOUND）。本次未找到客户端 UI 调用 `disableSharing`——SharePopover 只有 private/link 选择器，切回 private 即对非 owner 隐藏，记录保留。workspace 模式下分享管理限创建者或 workspace owner（`topic.ts:98-117` `assertCanManageTopicShare`），并有 `resource.shared/unshared` 审计日志（`:125-142`）。
-- **入口开关**：SharePopover 只在 `serverConfig.enableBusinessFeatures` 为真时挂载（`ShareButton/index.tsx:27,50-54`），而 OSS 常量默认 `ENABLE_BUSINESS_FEATURES = false`（`packages/business/const/src/index.ts:7`），服务端 `getServerAuthConfig` 将该值下发（`apps/server/src/globalConfig/getServerAuthConfig.ts:16`）。即：链接分享的服务端与页面代码都在本仓库，但 OSS 自托管默认从 UI 隐藏入口；云版覆盖该开关。
-- **分享页**：`/share/t/:id`（Web/移动端注册，Electron 不注册）复用 `ShareShell`，正文用 `SharedMessageList` 以 `topicShareId` 上下文拉消息（`src/routes/share/t/[id]/index.tsx:14-44`、`SharedMessageList.tsx:19-65`），禁用编辑与操作条，页脚显示免责声明（`sharePageDisclaimer`）；`/share/page/:id` 是文档对象分享，不在本类目范围。
+- **撤销/删除**：
+  - `disableSharing` 删记录后 shareId 不可解析（NOT_FOUND）；但本次未找到客户端 UI 调用它——SharePopover 只有 private/link 选择器，切回 private 即对非 owner 隐藏，记录保留；
+  - workspace 模式下分享管理限创建者或 workspace owner（`assertCanManageTopicShare`，`topic.ts:98-117`），并有 `resource.shared/unshared` 审计日志（`topic.ts:125-142`）。
+- **入口开关**：配置下发链路为：OSS 常量 `ENABLE_BUSINESS_FEATURES = false`（`packages/business/const/src/index.ts:7`）→ 服务端 `getServerAuthConfig` 下发（`apps/server/src/globalConfig/getServerAuthConfig.ts:16`）→ SharePopover 仅在 `serverConfig.enableBusinessFeatures` 为真时挂载（`ShareButton/index.tsx:27,50-54`）。即：链接分享的服务端与页面代码都在本仓库，但 OSS 自托管默认从 UI 隐藏入口；云版覆盖该开关。
+- **分享页**：会话分享页 `/share/t/:id`（Web/移动端注册，Electron 不注册）：
+  - 复用 `ShareShell`，正文用 `SharedMessageList` 以 `topicShareId` 上下文拉消息（`src/routes/share/t/[id]/index.tsx:14-44`、`SharedMessageList.tsx:19-65`）；
+  - 禁用编辑与操作条，页脚显示免责声明（`sharePageDisclaimer`）。
+  `/share/page/:id` 是文档对象分享，不在本类目范围。
 
 ## 9. 隐私、安全与内容治理
 
@@ -122,14 +179,22 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 
 ## 10. 性能、失败恢复与测试
 
-- 失败反馈：截图复制/下载 catch 后仅 `console.error`（`useScreenshot.ts:111-114`、`useImgToClipboard.ts:21-24`）；PDF 生成失败显示错误块与"错误描述"（`SharePdf/index.tsx:146-170`）并可重试；importTopic 失败弹 `importError` toast 并复位（`src/store/chat/slices/topic/action.ts:277-282`）。
+- 失败反馈：三条路径各不相同：
+  - 截图复制/下载失败仅 `console.error`（`useScreenshot.ts:111-114`、`useImgToClipboard.ts:21-24`）；
+  - PDF 生成失败显示错误块与"错误描述"（`SharePdf/index.tsx:146-170`）并可重试；
+  - importTopic 失败弹 `importError` toast 并复位（`src/store/chat/slices/topic/action.ts:277-282`）。
 - 长会话：截图无分段拼接；PDF 逐 token 换页但无页数上限控制代码；分享页分页参数存在（`limit/offset`，`topic.ts:153-183` `getTopicTranscript`）。
 - 测试：`apps/server/src/routers/lambda/__tests__/integration/topicShare.integration.test.ts`（enable/update/disable 的属主与越权矩阵）、`topic.integration.test.ts` 的 cloneTopic 用例、`topic.test.ts` 的 share 各方法 mock 用例；PDF/截图生成未见自动化测试。运行验证（图片保真、字体 CDN、跨域代理、剪贴板、匿名访问）本次均未执行。
 
 ## 11. 设计取舍与已确认边界
 
 - **站内操作与对外交付分离**：`cloneTopic`（复制）、`importTopic`（导入）、`forwardTopic`（把整 topic 转录作为用户消息发给另一 agent，`src/store/chat/slices/forward/action.ts:99-106`）都是数据库内操作，无文件产出；"转发"连复制都不算，只生成一段转录文本作为新对话首条消息。
-- **复制语义**（`packages/database/src/models/topic.ts:1086-1198`）：新 topic 继承 `agentId/groupId/sessionId` 原位，重置 usage 汇总（`COPIED_TOPIC_USAGE_RESET`，`packages/database/src/utils/copiedTranscript.ts:55-62`）；消息生成新 id、parentId 按映射重建、tools 的 id 与 plugin.toolCallId 换新、`metadata.copied: true` 标记（`packages/database/src/utils/copyMessagesInDatabase.ts:32-38`），token/cost 数字保留但用量报表过滤 copied 行（`copiedTranscript.ts:36-44`）。**不复制**：messagesFiles 文件关联、translates、TTS、messageGroups 压缩组、chunks/queries——与 SQL 版 `copyMessagesInDatabase`（覆盖全部子表，`:253-304`）口径不同，topic 复制是较轻的一份。
+- **复制语义**（`packages/database/src/models/topic.ts:1086-1198`）：
+  - 继承：新 topic 原位继承 `agentId`/`groupId`/`sessionId`；
+  - 重置：usage 汇总清零（`COPIED_TOPIC_USAGE_RESET`，`copiedTranscript.ts:55-62`）；
+  - 消息重写：生成新 id、按映射重建 `parentId` 链、tools 的 id 与 plugin `toolCallId` 换新、`metadata.copied: true` 标记（`copyMessagesInDatabase.ts:32-38`）；
+  - 计数口径：token/cost 数字保留，但用量报表过滤 copied 行（`copiedTranscript.ts:36-44`）；
+  - 不复制：`messagesFiles`（文件关联）、translates、TTS、messageGroups（压缩组）、chunks/queries；与 SQL 版 `copyMessagesInDatabase`（覆盖全部子表，`:253-304`）口径不同，topic 复制是较轻的一份。
 - **导出四格式共用同一数据源与预览-产物一致原则**：截图预览即产物；文本与 PDF 共享 `generateMarkdown` 的同一份 content 字符串，JSON 的预览、复制与下载共用同一份 JSON 字符串（`ShareJSON/index.tsx:87`），保证预览所见即所得。
 - **分享是实时非快照**：与"快照分享"路线相反，服务端在每次访问时以属主身份现读；`skipWorks` 是唯一的内容治理点。这也意味着源 topic 后续变化会直接反映到已分享链接。
 - **OSS/云能力分层**：RBAC 与 `usePermission` 在 OSS 是放行桩（`src/hooks/usePermission.ts:12-15`），`enableBusinessFeatures` 是硬开关；链接分享 UI 默认隐藏，服务端与路由代码齐备。导出弹窗不受开关影响。

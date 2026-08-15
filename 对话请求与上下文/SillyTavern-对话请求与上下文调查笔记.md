@@ -51,8 +51,8 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 ## 1. 提交入口、任务对象与状态机
 
-- 入口：`sendTextareaMessage()`（`public/script.js:1705-1740`）在 `swipeState === NONE`、`!is_send_press`、无 slash command 执行中时继续；"继续生成"开关（`power_user.continue_on_send`）在空输入 + 最后一条是角色消息时把类型改成 `continue`（1722-1731）。发送按钮绑定 `SimpleMutex(sendTextareaMessage)` 串行化（11099-11102），防止连点并发。
-- 任务对象：没有独立的任务/请求对象——生成状态就是模块级变量组合：`is_send_press`（602）加锁、`abortController`（460）、`streamingProcessor`（455）、`swipeState`、`chat_metadata.tainted`（4288 在非 dryRun 时置真）。事件 `GENERATION_STARTED`（4240）与 `GENERATION_AFTER_COMMANDS`（4262）成对，slash 短路时只发前者。
+- 入口：`sendTextareaMessage()`（`public/script.js:1705-1740`）在 `swipeState === NONE`、非按键发送（`!is_send_press`）、无 slash command 执行中时继续；"继续生成"开关（`power_user.continue_on_send`）在空输入 + 最后一条是角色消息时把类型改成 `continue`（1722-1731）。发送按钮绑定 `SimpleMutex(sendTextareaMessage)` 串行化（11099-11102），防止连点并发。
+- 任务对象：没有独立的任务/请求对象——生成状态就是模块级变量组合：`is_send_press`（602）加锁、`abortController`（460）、`streamingProcessor`（455）、`swipeState`、`chat_metadata.tainted`（4288 在非 dryRun 时置真）。事件成对：`GENERATION_STARTED`（4240）与 `GENERATION_AFTER_COMMANDS`（4262），slash 短路时只发前者。
 - 用户消息：`sendMessageAsUser()`（5815-5864）先正则（5816）再宏替换（5823）后 push 进 `chat`，发 `MESSAGE_SENT`/`USER_MESSAGE_RENDERED`（5858-5860）；bias 消息（只有 bias 无正文）改走 `sendSystemMessage`（4390-4393）。
 - 回复消息：`saveReply()`（6583-6771）按类型分支：`normal` 新建消息、`swipe` 复用最后一条的 swipes、`append`/`continue`/`appendFinal` 追加正文；群聊消息额外写 `force_avatar`/`original_avatar`/`extra.gen_id`（6708-6717）。
 
@@ -60,15 +60,15 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 按 `Generate()` 内的实际顺序：
 
-1. **筛选**：`chat.filter(x => !x.is_system || (canUseTools && Array.isArray(x.extra?.tool_invocations)))`（4437）——隐藏消息（`is_system`）排除，工具调用 system 消息例外保留。
-2. **逐条处理**：按消息类型取 `regex_placement.USER_INPUT`/`AI_OUTPUT` 跑 `getRegexedString(..., {isPrompt: true, depth})`（4444-4447）；`appendFileContent` 展开消息附件文件文本（4448）；`extra.append_title` 与媒体标题拼接（4450-4463）。
+1. **筛选**（4437）：`chat.filter` 排除隐藏消息（`is_system`），工具调用 system 消息（`extra?.tool_invocations` 且 `canUseTools`）例外保留。
+2. **逐条处理**（4444-4463）：按消息类型取 `regex_placement.USER_INPUT`/`AI_OUTPUT` 跑 `getRegexedString(..., {isPrompt: true, depth})`；`appendFileContent` 展开消息附件文件文本（4448）；`extra.append_title` 与媒体标题拼接（4450-4463）。
 3. **reasoning**：从最新往回给每条消息前缀 reasoning（4472-4498，`regex_placement.REASONING` 跑正则），群聊只处理当前生成角色（4478）。
-4. **字符字段**：`getCharacterCardFields()` 取 description/personality/scenario/examples/system/jailbreak 等（4401-4411）；depth prompt（角色/群聊）注入为 extension prompt（4414-4427）。
-5. **World Info**：`chatForWI`（名称+正文的反向数组）→ `getWorldInfoPrompt(chat, this_max_context, ...)`（4565-4576）→ 扫描结果按 before/after/depth/example/outlet 注入 extension prompts（4605-4622）；`WORLD_INFO_ACTIVATED` 事件在非 dryRun 时发出（`world-info.js:900-903`）。
+4. **字符字段**（4401-4427）：`getCharacterCardFields()` 取 description/personality/scenario/examples/system/jailbreak 等；depth prompt（角色/群聊）注入为 extension prompt。
+5. **World Info**（4565-4622）：`chatForWI`（名称+正文的反向数组）→ `getWorldInfoPrompt(chat, this_max_context, ...)`（4576）→ 扫描结果按 before/after/depth/example/outlet 注入 extension prompts（4605-4622）；`WORLD_INFO_ACTIVATED` 事件在非 dryRun 时发出（`world-info.js:900-903`）。
 6. **系统提示**：text completion API 用 `power_user.sysprompt`（`substituteParams(system, {original: ...})` 或 `baseChatReplace`，4627-4638）；jailbreak 在继续生成时插到倒数第二条之前（4696-4704）。
 7. **story string**：按 before/after anchor 与各字段模板渲染，`IN_CHAT` 位置时注入（4640-4676）；`doChatInject` 执行 chat 注入（4684-4687）。
-8. **角色转换**：text completion 走 `formatMessageHistoryItem`（instruct 模式加首/末序列，4723-4757）；OpenAI 走 `setOpenAIMessages`（`public/scripts/openai.js:561-640`，处理 narrator→system、名称前缀策略、媒体、工具调用、reasoning 签名）。
-9. **组合**：`getCombinedPrompt` 按  story string + examples + 聊天 + 最后一行（名字/quiet prompt/bias）拼出 `finalPrompt`（5073-5181）；期间发 `GENERATE_BEFORE_COMBINE_PROMPTS`（5175）与 `GENERATE_AFTER_COMBINE_PROMPTS`（5183-5185）事件，扩展可以替换整个 prompt。
+8. **角色转换**（4708-4777）：text completion 走 `formatMessageHistoryItem`（instruct 模式加首/末序列，4723-4757）；OpenAI 走 `setOpenAIMessages`（`public/scripts/openai.js:561-640`，处理 narrator→system、名称前缀策略、媒体、工具调用、reasoning 签名）。
+9. **组合**（5073-5185）：`getCombinedPrompt` 按 story string + examples + 聊天 + 最后一行（名字/quiet prompt/bias）拼出 `finalPrompt`；期间发 `GENERATE_BEFORE_COMBINE_PROMPTS`（5175）与 `GENERATE_AFTER_COMBINE_PROMPTS`（5183-5185）事件，扩展可以替换整个 prompt。
 
 ## 3. 预算、截断、摘要与压缩
 
@@ -81,14 +81,20 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 ## 4. Provider、模型与协议交接
 
-- **协议 Adapter 的接管点**：`Generate` 内 `switch (main_api)`（5190-5257）按 Kobold/KoboldHorde/TextGen/Novel/OpenAI 分支构建 `generate_data`（`getKoboldGenerationData`/`getTextGenGenerationData`/`getNovelGenerationData`/`prepareOpenAIMessages`）。
-- **发送**：流式 `sendStreamingRequest`（6088-6105）按 API 调 `sendOpenAIRequest`/`generateTextGenWithStreaming`/`generateNovelWithStreaming`/`generateKoboldWithStreaming`；非流式 `sendGenerationRequest`（6057-6079）OpenAI 走 `sendOpenAIRequest`，Horde 走 `generateHorde`，其余 `fetch(getGenerateUrl(main_api))`。
+- **协议 Adapter 的接管点**：`Generate` 内 `switch (main_api)`（5190-5257）按 Kobold/KoboldHorde/TextGen/Novel/OpenAI 分支构建 `generate_data`，各分支的数据构建函数如下：
+  - Kobold：`getKoboldGenerationData`；
+  - TextGen：`getTextGenGenerationData`；
+  - Novel：`getNovelGenerationData`；
+  - OpenAI：`prepareOpenAIMessages`。
+- **发送**（6057-6105）按流式/非流式两条路径分发：
+  - 流式 `sendStreamingRequest`：`sendOpenAIRequest`/`generateTextGenWithStreaming`/`generateNovelWithStreaming`/`generateKoboldWithStreaming`；
+  - 非流式 `sendGenerationRequest`：OpenAI 走 `sendOpenAIRequest`，Horde 走 `generateHorde`，其余 `fetch(getGenerateUrl(main_api))`。
 - **网络路径**：浏览器不直连外部 provider，而是打到 SillyTavern 服务端代理端点（`getGenerateUrl`，6113-6126，如 `/api/backends/text-completions/generate`；服务端 `src/endpoints/backends/text-completions.js:272` 再转发并透传流式响应）。abort 也经服务端（`text-completions.js:89` 转发 `/api/extra/abort`）。
 - **模型/参数解析**：`main_api`/`oai_settings`/`kai_settings` 等模块级设置是事实源；服务端不参与 prompt 语义，只做代理转发。fallback/重试机制：本次在 text-completions 后端未找到重试逻辑（搜索 `retry` 无命中）；Horde 有 `adjustHordeGenerationParams` 的上下文/长度自适应（4516-4528）。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- **流式消费**：`StreamingProcessor`（3481+）持有生成器，`generate()` 逐段消费（5337）；`onProgressStreaming`（3584-3685）每段先 `cleanUpMessage`（含 stopping strings 截断与正则）再写 `chat[messageId].mes` 与 DOM，`swipe`/`continue` 类型同步回 `swipes[swipe_id]`（3646-3654）。
+- **流式消费**（`StreamingProcessor`，3481+）：`generate()` 逐段消费生成器（5337）；`onProgressStreaming`（3584-3685）每段先 `cleanUpMessage`（含 stopping strings 截断与正则）再写 `chat[messageId].mes` 与 DOM，`swipe`/`continue` 类型同步回 `swipes[swipe_id]`（3646-3654）。
 - **顺序保证**：文本按到达顺序追加，无并发缓冲队列；`stream_fade_in`/`streaming_fps` 是渲染侧节流（渲染器笔记）。
 - **事件时机**：`MESSAGE_RECEIVED`/`CHARACTER_MESSAGE_RENDERED` 只在流结束（`finalizeIntermediaryMessage` 3740-3741）或错误收尾（`onErrorStreaming` 3768-3771，swipe/impersonate/continue 不发）emit 一次，不随 token 触发；`MESSAGE_SWIPED` 每次 swipe 动画后发（10255）。
 - **interceptors**：`runGenerationInterceptors(chat, contextSize, abort, type)`（`public/scripts/extensions.js:2015-2040`）按 manifest 顺序执行全局函数，可 `abort(true)` 立即终止后续并在 `Generate` 内短路返回（4505-4511）。
@@ -114,7 +120,7 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 ## 8. 队列、多会话并发与后台生成
 
 - **同一会话串行**：`is_send_press` 单锁 + 发送按钮 `SimpleMutex`；`swipeState` 禁止发送/swipe 交错；编辑态（`swipeState === EDITING`）拒绝发送与继续（1707-1711, 11587-11590）。
-- **群聊内串行**：`generateGroupWrapper`（`group-chats.js:945-1092`）`is_group_generating` 重入保护（958-960），按激活策略（NATURAL/LIST/POOLED/MANUAL + swipe/continue/impersonate/quiet 特例，1002-1031）选出成员，循环 `setCharacterId` → `GROUP_MEMBER_DRAFTED`（1059）→ `Generate()` → 可能的 auto-continue 循环（1067-1070），全部完成才解锁（1077-1089）。`group_generation_id = Date.now()`（988）即该批次的 `gen_id`。
+- **群聊内串行**：`generateGroupWrapper`（`group-chats.js:945-1092`）以 `is_group_generating` 重入保护（958-960），按激活策略（NATURAL/LIST/POOLED/MANUAL + swipe/continue/impersonate/quiet 特例，1002-1031）选出成员，循环执行 `setCharacterId` → `GROUP_MEMBER_DRAFTED`（1059）→ `Generate()` → 可能的 auto-continue 循环（1067-1070），全部完成才解锁（1077-1089）。`group_generation_id = Date.now()`（988）即该批次的 `gen_id`。
 - **后台生成**：生成期间输入框保持可用（`is_send_press` 只挡重复发送），但同一聊天的 swipe/重新生成被禁；群聊 auto mode 由 `setAutoModeWorker`/`groupChatAutoModeWorker` 在核心代码内定时驱动（`group-chats.js:144, 1398`）。
 - **不同会话**：一次只显示一个聊天；没有"多会话并行生成"的 UI 概念（欢迎屏/后台通知均无，见 Chat UI 笔记）。
 

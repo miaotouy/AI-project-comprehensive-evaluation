@@ -25,17 +25,58 @@ AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带
 | 文档 | 372 文件 / 73,314 行（332 / 65,431） |
 | 测试 | 343 文件 / 60,405 行（102 / 20,608） |
 
-统计口径与旧笔记一致：源码按 `.vue/.ts/.tsx/.rs/.js/.css/.scss/.html/.kt/.kts/.cs` 扩展名识别（含测试文件，测试单独再计一次）；文档为 `.md`；测试按 `*.test.*`/`*.spec.*` 文件名或 `__tests__/`、`tests/` 目录识别。本次提交范围内新增约 482 个跟踪文件，主要来自移动端（`mobile/` 测试与组件）、桌面端 `tests/tauri-e2e` 新目录、recall/knowledge-base 重构与 llm-chat 会话持久化改造。
+统计口径与旧笔记一致：源码按扩展名识别并计入测试文件（测试单独再计一次），文档按 Markdown 计数，测试按文件名模式与测试目录识别。扩展名与识别规则如下：
 
-主要区域依次是 `src/tools`（1,482 文件/448,538 源码行，旧 1,359/420,929）、`mobile/src`（295/57,597，旧 172/32,714）、`src-tauri/src`（88/53,904，旧 81/40,794）和桌面视图 `src/views`（66/31,237，旧 64/28,715）。`packages/llm-core` 是较小但独立发布边界，主仓 `package.json:23-26` 将其与 `mobile` 纳入 workspace。
+```text
+源码：.vue/.ts/.tsx/.rs/.js/.css/.scss/.html/.kt/.kts/.cs
+文档：*.md
+测试：*.test.*、*.spec.*，以及 __tests__/、tests/ 目录
+```
+
+本次提交范围内新增约 482 个跟踪文件，主要来源包括：
+
+- 移动端 `mobile/` 的测试与组件
+- 桌面端新目录 `tests/tauri-e2e`
+- recall/knowledge-base 重构
+- llm-chat 会话持久化改造
+
+主要区域按量级依次为：
+
+| 区域 | 文件 / 源码行（旧快照） |
+| --- | ---: |
+| `src/tools` | 1,482 / 448,538（1,359 / 420,929） |
+| `mobile/src` | 295 / 57,597（172 / 32,714） |
+| `src-tauri/src` | 88 / 53,904（81 / 40,794） |
+| `src/views` | 66 / 31,237（64 / 28,715） |
+
+`packages/llm-core` 是较小但独立的发布边界，主仓 `package.json:23-26` 将其与 `mobile` 纳入 workspace。
 
 ## 语言、文档与测试
 
-TypeScript 338,193 行（46.5%，超过 Vue 成为第一大语言）、Vue 319,291 行（43.9%）、Rust 61,881 行（8.5%），三者对应共享逻辑/业务逻辑、组件模板和 Tauri 原生层。文档主要位于 `src/tools`（122 文件，旧 111）及 `docs/user-guide`（128）、`docs/design`（24，旧 18）、`docs/architecture`（18，旧 17）。测试分布明显扩散：随 `src/tools`（101 文件，旧 44）、`mobile`（65，旧 13）、新增的 `tests/`（97，Tauri E2E 与 Recall 验收）、`src/llm-apis`（20）和 `packages/llm-core`（20）。
+TypeScript 338,193 行（46.5%，超过 Vue 成为第一大语言）、Vue 319,291 行（43.9%）、Rust 61,881 行（8.5%），三者对应共享逻辑/业务逻辑、组件模板和 Tauri 原生层。
+
+文档主要位置：
+
+| 位置 | 文件数（旧快照） |
+| --- | ---: |
+| `src/tools` | 122（111） |
+| `docs/user-guide` | 128 |
+| `docs/design` | 24（18） |
+| `docs/architecture` | 18（17） |
+
+测试分布明显扩散，主要落在五个区域：
+
+| 区域 | 文件数（旧快照） |
+| --- | ---: |
+| `src/tools` | 101（44） |
+| `mobile` | 65（13） |
+| `tests/` | 97（新增，Tauri E2E 与 Recall 验收） |
+| `src/llm-apis` | 20 |
+| `packages/llm-core` | 20 |
 
 ## 跨平台组织与边界
 
-根 `src` 与 `src-tauri` 组成 Windows、macOS、Linux 桌面应用；`mobile/src` 与 `mobile/src-tauri` 是另一套 Tauri 移动入口，构建脚本明确提供 Android/iOS 命令（`package.json:50-53`）。桌面和移动端共享 workspace 与部分包，但不是同一入口的条件编译。README 的桌面发布矩阵见 `README.md:209-211`；本次未实际构建各平台。
+根 `src` 与 `src-tauri` 组成 Windows、macOS、Linux 桌面应用；`mobile/` 下另有源码与 Tauri 壳组成移动入口，构建脚本明确提供 Android/iOS 命令（`package.json:50-53`）。桌面和移动端共享 workspace 与部分包，但不是同一入口的条件编译。README 的桌面发布矩阵见 `README.md:209-211`；本次未实际构建各平台。
 
 ## 关键源码索引
 

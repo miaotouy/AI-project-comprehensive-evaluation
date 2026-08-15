@@ -48,7 +48,7 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 `onUserInput(content, attachImages?, isMcpResponse?)`（`app/store/chat.ts:407-528`）执行以下步骤：
 
 1. 读取当前会话的 `session.mask.modelConfig`（`app/store/chat.ts:412-413`）。
-2. 普通输入经 `fillTemplateWith` 填入 `{{input}}`、`{{model}}`、`{{time}}`、`{{lang}}`、`{{ServiceProvider}}`、`{{cutoff}}` 变量；模板缺 `{{input}}` 时自动追加；输入以模板开头时去重（`app/store/chat.ts:161-203`）。MCP response 跳过模板（`app/store/chat.ts:416-418`）。
+2. 普通输入经 `fillTemplateWith` 展开 `{{input}}`、`{{model}}`、`{{time}}`、`{{lang}}`、`{{ServiceProvider}}`、`{{cutoff}}` 六个模板变量；模板缺 `{{input}}` 时自动追加；输入以模板开头时去重（`app/store/chat.ts:161-203`）。MCP response 跳过模板（`app/store/chat.ts:416-418`）。
 3. 图片附件与文本合并为 `text + image_url` 多模态数组（`app/store/chat.ts:420-428`）。
 4. 用 `createMessage` 创建 user 消息与 `streaming: true` 的 assistant 占位（`app/store/chat.ts:430-440`）。
 5. 调用 `getMessagesWithMemory()`，把历史与新 user 消息组成 `sendMessages`（`app/store/chat.ts:443-444`）。
@@ -60,7 +60,7 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 
 `getMessagesWithMemory`（`app/store/chat.ts:542-640`）：
 
-- **system prompt**：仅当模型以 `gpt-`/`chatgpt-` 开头且 `enableInjectSystemPrompts` 开启时生成，内容为 `DEFAULT_SYSTEM_TEMPLATE`（`app/constant.ts:290-297`）填充后拼接 MCP 工具段（`app/store/chat.ts:553-573`）；MCP 启用但无 system prompt 时单独发送 MCP system 消息（`app/store/chat.ts:574-581`）。
+- **system prompt**：仅当模型名以 `gpt-`/`chatgpt-` 开头且 `enableInjectSystemPrompts` 开启时生成，内容为 `DEFAULT_SYSTEM_TEMPLATE`（`app/constant.ts:290-297`）填充后拼接 MCP 工具段；MCP 启用但无 system prompt 时单独发送 MCP system 消息（两处均在 `app/store/chat.ts:553-581`）。
 - **长期记忆**：`sendMemory && memoryPrompt 非空 && lastSummarizeIndex > clearContextIndex` 时才发送，内容包在 `Locale.Store.Prompt.History` 模板里（`app/store/chat.ts:530-540, 589-598`）。
 - **预置 context**：`session.mask.context` 原样进入请求（`app/store/chat.ts:550, 632-637`）。
 - **短期历史**：从末尾向前扫描，起点为 `max(clearContextIndex, min(lastSummarizeIndex, 总条数 - historyMessageCount))`；反向循环按 `estimateTokenLength` 累计，达到 `max_tokens` 停止；`isError` 消息跳过不发送（`app/store/chat.ts:600-630`）。
@@ -84,7 +84,10 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 - **摘要**：`summarizeSession`（`app/store/chat.ts:661-797`）：
   - 起点 `max(lastSummarizeIndex, clearContextIndex)`，过滤错误消息（`app/store/chat.ts:727-733`）；
   - 待总结内容估算长度超过 `max_tokens` 时只保留最近 `historyMessageCount` 条（`app/store/chat.ts:737-742`）；
-  - 超过 `compressMessageLengthThreshold`（默认 1000）且 `sendMemory` 为 true 时，追加 "总结" system prompt，用配置的 `compressModel` 或 `getSummarizeModel` 发起流式请求（`app/store/chat.ts:758-796`）；`getSummarizeModel` 对 gpt/chatgpt 系列强制找 `gpt-4o-mini`（`SUMMARIZE_MODEL`，`app/constant.ts:423`），gemini 用 `gemini-pro`、deepseek 用 `deepseek-chat`（`app/store/chat.ts:122-152`）；
+  - 超过 `compressMessageLengthThreshold`（默认 1000）且 `sendMemory` 为 true 时，追加 "总结" system prompt，用配置的 `compressModel` 或 `getSummarizeModel` 发起流式请求（`app/store/chat.ts:758-796`）；`getSummarizeModel` 按模型系选择摘要模型（`app/store/chat.ts:122-152`）：
+    - gpt/chatgpt 系强制 `gpt-4o-mini`（`SUMMARIZE_MODEL`，`app/constant.ts:423`）；
+    - gemini 用 `gemini-pro`；
+    - deepseek 用 `deepseek-chat`；
   - 流式 `onUpdate` 直接写 `session.memoryPrompt`（`app/store/chat.ts:780-782`）；`onFinish` 仅响应 200 时提交 `lastSummarizeIndex` 与最终文本（`app/store/chat.ts:783-791`）。
 - **自动标题**：`enableAutoGenerateTitle` 开启、topic 仍是默认值且估算消息长度达到 50（`SUMMARIZE_MIN_LEN`）时，取最近 `historyMessageCount` 条消息 + topic 提示词，用非流式请求生成标题（`app/store/chat.ts:685-726`）；头部"刷新标题"按钮用 `summarizeSession(true, session)` 强制再生成（入口 `app/components/chat.tsx:1716-1726`）。
 - **触发点**：`onNewMessage` 在每次成功 assistant 消息后依次更新统计、检测 MCP JSON、调用 `summarizeSession(false, targetSession)`（`app/store/chat.ts:394-405`）。
@@ -107,23 +110,23 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 以默认 OpenAI 系链路为例，`streamWithThink`（`app/utils/chat.ts:392-667`）：
 
 - **SSE 消费**：`fetchEventSource` 逐条 `onmessage`，`[DONE]` 或重复到达时收尾（`app/utils/chat.ts:586-589`）；空数据跳过；parseSSE 抛错只记录不中断（`app/utils/chat.ts:595-599, 650-653`）。
-- **缓冲与节流**：文本先进 `remainText`，`animateResponseText` 用 `requestAnimationFrame` 每帧最多取 `max(1, round(remain/60))` 个字符刷入 `responseText` 并回调 `onUpdate(responseText, chunk)`（`app/utils/chat.ts:424-443`）——这是唯一的输出节流，位置在渲染动画层；`finish` 时把残留文本一次合并（`app/utils/chat.ts:425-427, 519-520`）。
+- **缓冲与节流**（`app/utils/chat.ts:424-443`）：文本先进 `remainText`，`animateResponseText` 用 `requestAnimationFrame` 每帧最多取 `max(1, round(remain/60))` 个字符刷入 `responseText` 并回调 `onUpdate(responseText, chunk)`——这是唯一的输出节流，位置在渲染动画层；`finish` 时把残留文本一次合并（:425-427、:519-520）。
 - **think 块**：`<think>`/`</think>` 标记剥离并转成 `>` 引用块前缀（`app/utils/chat.ts:602-649`）。
-- **工具调用**：parseSSE 累积 `tool_calls`（`openai.ts:322-385`，`runTools` 按 id 分段拼接 arguments）；流结束 `finish()` 时若有余留工具，逐个 `onBeforeTool`/`onAfterTool` 执行插件 funcs，再经 `processToolMessage` 把 tool_calls 消息与结果 splice 进 `requestPayload.messages`，60ms 后重新发起请求（`app/utils/chat.ts:448-513`、`openai.ts:387-402`）——一轮 SSE 连接对应用户的一次提交。
+- **工具调用**（`openai.ts:322-385`、`app/utils/chat.ts:448-513`）：parseSSE 累积 `tool_calls`（`runTools` 按 id 分段拼接 arguments）；流结束 `finish()` 时若有余留工具，逐个 `onBeforeTool`/`onAfterTool` 执行插件 funcs，再经 `processToolMessage` 把 tool_calls 消息与结果 splice 进 `requestPayload.messages`，60ms 后重新发起请求——一轮 SSE 连接对应用户的一次提交。
 - **顺序保证**：依赖 SSE 单连接顺序；无服务端重连与断点续传（`fetchEventSource` 自身的错误重试行为未验证，见 §11）。
 - **超时**：`REQUEST_TIMEOUT_MS = 60000`（`app/constant.ts:115`）在每次请求时设置定时 abort（`app/utils/chat.ts:541-544`）。
 
 ## 6. 完成、异常、半截流与最终回写
 
 - **完成**：`onFinish` 写入最终内容与 date、`streaming = false`、触发 `onNewMessage`（统计、MCP 检测、自动标题/摘要，§3），并从 `ChatControllerPool` 移除 controller（`app/store/chat.ts:473-481`）。
-- **异常**：`onError` 把错误对象以 `prettyObject` 追加到 assistant.content，`streaming = false`；aborted 错误（消息含 "aborted"）不置 `isError`，其余情况 user/assistant 双双置 `isError`，随后移除 controller（`app/store/chat.ts:498-517`）。
-- **半截流**：连接关闭（`onclose`）、`[DONE]` 或 abort 都汇入 `finish()` 一次性收尾（`app/utils/chat.ts:586-588, 655-657`；abort 接线 `:298, :524`）；全程空响应触发 `onError("empty response from server")`（`app/utils/chat.ts:428-430`）。
+- **异常**（`app/store/chat.ts:498-517`）：`onError` 把错误对象以 `prettyObject` 追加到 assistant.content，`streaming = false`；aborted 错误（消息含 "aborted"）不置 `isError`，其余情况 user/assistant 双双置 `isError`，随后移除 controller。
+- **半截流**：连接关闭（`onclose`）、`[DONE]` 或 abort 都汇入 `finish()` 一次性收尾（`app/utils/chat.ts:586-588, 655-657`；abort 接线 :298、:524）；全程空响应触发 `onError("empty response from server")`（:428-430）。
 - **回写对象**：始终是当前会话的占位消息（`updateTargetSession` 按 id 定位会话后原地更新数组，`app/store/chat.ts:805-814`），不产生额外任务对象。
 - **摘要/标题子请求**：独立的 `api.llm.chat` 调用，`onFinish` 校验 `responseRes.status === 200` 后才提交（`app/store/chat.ts:715-724, 783-791`）。
 
 ## 7. 停止、重试、续写与重新生成
 
-- **停止**：`ChatControllerPool`（`app/client/controller.ts:2-37`）按 `sessionId,messageId` 保存 AbortController；`stop` 调用 `controller.abort()`（`controller.ts:15-19`）；controller 在 `onController` 中注册（`app/store/chat.ts:519-526`）。abort 后 `signal.onabort → finish()` 收尾（`app/utils/chat.ts:298, 524`），错误路径因消息含 "aborted" 不置 `isError`（§6）。停止入口与按钮状态见 Chat UI 笔记 §5。
+- **停止**：`ChatControllerPool`（`app/client/controller.ts:2-37`）按 `sessionId,messageId` 保存 AbortController，`stop` 调用 `controller.abort()`（:15-19），controller 在 `onController` 中注册（`app/store/chat.ts:519-526`）。abort 后 `signal.onabort` 触发 `finish()` 收尾（`app/utils/chat.ts:298, 524`），错误路径因消息含 "aborted" 不置 `isError`（§6）。停止入口与按钮状态见 Chat UI 笔记 §5。
 - **重试**：`onResend`（`app/components/chat.tsx:1217-1271`）——assistant 消息向前找最近 user 消息，user 消息向后找下一条 assistant 消息；删除这对消息后用相同文本与图片重新 `onUserInput`，生成全新消息节点。重试上下文起点由当时的 `clearContextIndex`/`lastSummarizeIndex` 决定，无独立重试起点参数。
 - **续写**：本次未找到独立"继续生成"执行链（检查范围 `app/components/chat.tsx` 消息操作清单与 `app/store/chat.ts` 方法集）。
 - **重新生成标题**：头部刷新按钮 `summarizeSession(true, session)`（`app/components/chat.tsx:1716-1726`）。
@@ -138,7 +141,7 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- **插件工具**：仅 OpenAI 系 adapter 在发起请求时用 `usePluginStore.getAsTools(session.mask.plugin)` 生成 tools 定义与本地 funcs（`openai.ts:308-313`；`app/store/plugin.ts:209-220`），工具执行由流收尾处的 `finish()` 完成并带结果重发（§5）。非 OpenAI 系 adapter 的工具行为未逐一核实。
+- **插件工具**：仅 OpenAI 系 adapter 在发起请求时生成 tools 定义与本地 funcs（`usePluginStore.getAsTools(session.mask.plugin)`，`openai.ts:308-313`；`app/store/plugin.ts:209-220`），工具执行由流收尾处的 `finish()` 完成并带结果重发（§5）。非 OpenAI 系 adapter 的工具行为未逐一核实。
 - **MCP**：`isMcpEnabled` 时 `getMcpSystemPrompt` 把全部 MCP 客户端工具 JSON 注入 system prompt（`app/store/chat.ts:205-224, 558-581`）；执行走服务端 `"use server"` actions（`app/mcp/actions.ts:337-352`），客户端实例存活于 Next.js 服务端进程，配置在 `app/mcp/mcp_config.json`（`app/mcp/actions.ts:22, 142-161`）；工具结果经回注通道进入会话（§7）。
 - **附件**：图片进消息 content 多模态数组（`app/store/chat.ts:420-428`）；vision 模型在 adapter 内 `preProcessImageContent` 压缩/转 base64（`openai.ts:219-227`，`app/utils/chat.ts:73-132`）；DALL-E 取最后一条消息文本作 prompt（`openai.ts:204-217`）。
 - **变量**：`{{input}}`/`{{model}}`/`{{time}}`/`{{lang}}`/`{{ServiceProvider}}`/`{{cutoff}}` 在 `fillTemplateWith` 展开（`app/store/chat.ts:161-203`）。

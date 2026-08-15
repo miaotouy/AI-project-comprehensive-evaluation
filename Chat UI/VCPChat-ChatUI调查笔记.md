@@ -41,35 +41,36 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 ### 1.1 主界面布局不是单一聊天页
 
-`main.html` 将窗口拆成左侧 sidebar、中央 chat、右侧 notifications sidebar。左侧用"助手 / 话题 / 设置"三个 tab，助手 tab 负责 Agent/Group 选择，话题 tab 负责 Topic 搜索与列表，设置 tab 打开全局配置；窄侧栏另有 compact navigation。`renderer.js` 在启动时把这些 DOM 节点注入各模块，并根据 `sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive` 和 `sidebarAvatarOnly` 恢复布局状态。窗口侧栏可拖拽调整宽度，通知栏可独立开关，因而"会话选择"和"消息阅读"是并列的工作区而非路由跳转。`main.html` 的 CSP `media-src` 允许 `blob:`，并引入 `VCPDistributedServer/frontend-plugin-loader.js`（defer）为 renderer 型前端插件（VChatDynamicWallpaper 动态壁纸、VChatAutoTTS 自动朗读）提供注入主窗口的机制（插件明细见 Agent 工具笔记）。
+`main.html` 将窗口拆成左侧 sidebar、中央 chat、右侧 notifications sidebar。左侧用"助手 / 话题 / 设置"三个 tab，助手 tab 负责 Agent/Group 选择，话题 tab 负责 Topic 搜索与列表，设置 tab 打开全局配置；窄侧栏另有 compact navigation。`renderer.js` 在启动时把这些 DOM 节点注入各模块，并根据侧栏宽度、通知栏宽度、激活 tab 和头像模式四个配置项恢复布局状态。窗口侧栏可拖拽调整宽度，通知栏可独立开关，因而"会话选择"和"消息阅读"是并列的工作区而非路由跳转。`main.html` 的 CSP `media-src` 允许 `blob:`，并引入 `VCPDistributedServer/frontend-plugin-loader.js`（defer）为 renderer 型前端插件（动态壁纸、自动朗读两类）提供注入主窗口的机制（插件明细见 Agent 工具笔记）。
 
 ### 1.2 侧栏宽度与 Compact 导航
 
-**侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 的 `computed.minWidth` / `computed.maxWidth` 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，`:93`, `:98`），最大宽度 fallback 600px（`:57`）。拖拽过程中通过 `requestAnimationFrame` 节流更新，拖拽时禁用元素 `transition` 以避免卡顿（`:88`）。
+**侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 计算样式动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，`:93-98`），最大宽度 fallback 600px（`:57`）。拖拽过程中通过 `requestAnimationFrame` 节流更新，拖拽时禁用元素过渡动画以避免卡顿（`:88`）。
 
-**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1577`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 触发 `leftSidebar.classList.add('compact-topics-open')`，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（`:451`）；点击话题项后自动关闭抽屉（`:439-441`）。
+**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 `settings.sidebarAvatarOnly` 字段控制**（`renderer.js:1577`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。点击菜单项中的 Topics 时给左侧栏加上话题抽屉展开类，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉，点击话题项后自动关闭（`uiManager.js:451, 439-441`）。
 
 ### 1.3 三种聊天呈现模式是同一消息数据的 CSS/渲染投影
 
-`main.html` 提供 `bubble`（气泡）、`panel`（统一面板）和 `immersive`（刊物/沉浸）三个选项，顶部还有快速切换器；`renderer.js` 的 `applyChatPresentationMode` 通过 body class 和 CSS 变量切换宽度、字体、用户气泡元信息等参数，并调用 `messageRenderer.refreshLayoutDependentState()`。它不会转换 `history.json`，也不会创建不同的消息组件树。该设计使用户可以在阅读过程中切换视觉风格，同时保留当前 Topic、滚动位置和流式状态。
+输入区模板 `main.html` 提供 `bubble`（气泡）、`panel`（统一面板）和 `immersive`（刊物/沉浸）三个选项，顶部还有快速切换器；主脚本的呈现模式应用函数通过 body class 和 CSS 变量切换宽度、字体、用户气泡元信息等参数，并调用消息渲染器的布局刷新接口。它不会转换 `history.json`，也不会创建不同的消息组件树。该设计使用户可以在阅读过程中切换视觉风格，同时保留当前 Topic、滚动位置和流式状态。
 
 ## 2. 会话列表、搜索与现场恢复
 
 ### 2.1 话题列表渐进呈现
 
-`topicListManager.js` 初始只渲染 40 条 Topic（`TOPIC_INITIAL_RENDER_COUNT`），滚动距离底部 320px 后按 30 条批量追加（`TOPIC_PROGRESSIVE_BATCH_SIZE`），并用 `requestAnimationFrame` 分帧（`modules/topicListManager.js:16-17`, `:407-497`）；每一行先显示消息数占位符 `...`，由 `IntersectionObserver` 在进入视口前 240px 才读取 history 计算总数/未读标记（计数逻辑的数据侧见会话与消息管理笔记 5.3/5.4）。行点击切换 Topic，右键打开重命名、删除、标记已读等菜单，搜索模式下禁用拖放排序。这个列表策略与消息区的"整段 DOM 重绘"相互独立：Topic 多时减少首次 IO，消息流中仍直接更新当前气泡。
+`topicListManager.js` 初始只渲染 40 条 Topic（`TOPIC_INITIAL_RENDER_COUNT`），滚动距离底部 320px 后按 30 条批量追加（`TOPIC_PROGRESSIVE_BATCH_SIZE`），并用逐帧分片渲染（`modules/topicListManager.js:16-17`，:407-497）；每一行先显示消息数占位符，由 `IntersectionObserver` 在进入视口前 240px 才读取 history 计算总数/未读标记（计数逻辑的数据侧见会话与消息管理笔记 5.3/5.4）。行点击切换 Topic，右键打开重命名、删除、标记已读等菜单，搜索模式下禁用拖放排序。这个列表策略与消息区的"整段 DOM 重绘"相互独立：Topic 多时减少首次 IO，消息流中仍直接更新当前气泡。
 
 ### 2.2 拖放排序
 
-用 SortableJS，初始化在 `initializeTopicSortable(itemId, itemType)`（`modules/topicListManager.js:635-694`）。`onStart` 时如果全局"划词监听"（selection listener）处于开启状态会临时关闭，`onEnd` 时恢复（`:653-671`，避免拖拽过程与全局划词快捷键冲突）。`onEnd` 拿到新顺序的 `topicId` 数组后调用 `saveTopicOrder`（agent）或 `saveGroupTopicOrder`（group）（`:674-676`），排序落地到配置文件的语义见会话与消息管理笔记 5.1。排序失败会 toast 报错并 `loadTopicList()` 回滚展示（`:680-693`）。搜索状态下不启用拖拽排序（`renderTopicListProgressively` 里 `!searchTerm` 才 `initializeTopicSortable`，`:407` 起）。
+用 SortableJS，初始化在 `initializeTopicSortable(itemId, itemType)`（`modules/topicListManager.js:635-694`）。onStart 时如果全局"划词监听"（selection listener）处于开启状态会临时关闭，onEnd 时恢复（:653-671，避免拖拽过程与全局划词快捷键冲突）。onEnd 拿到新顺序的话题 id 数组后调用 `saveTopicOrder`（agent）或 `saveGroupTopicOrder`（group）（:674-676），排序落地到配置文件的语义见会话与消息管理笔记 5.1。排序失败会 toast 报错并重新加载列表回滚展示（:680-693）。搜索状态下不启用拖拽排序（仅非搜索态重新初始化，:407 起）。
 
 ### 2.3 搜索入口
 
-`loadTopicList()`（`modules/topicListManager.js:498-616`）读取 `#topicSearchInput` 的值经 `parseTopicSearchQuery` 解析（`:533` 起）：普通关键词走前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）；完整输入"未读话题"/"unread topic"时跳过文本搜索，改由 `prioritizeUnreadTopics` 把未读话题置顶（`:599`）。搜索框提示与 `aria-label` 已更新为"搜索话题或未读话题"（`main.html:213-216`）。话题条目另带"未读 N"/"未读"文字指示器（`.topic-unread-indicator`、`has-unread-topic` class，`ensureTopicUnreadIndicator`，`topicListManager.js:178-198`、`:330-365`）；发送消息会清除持久化未读（`chatManager.handleSendMessage` 调 `setTopicUnread(false)`，`modules/chatManager.js:1037-1055`；未读语义细节见会话与消息管理笔记 5.3）。
+`loadTopicList()`（`modules/topicListManager.js:498-616`）读取搜索框的值经 `parseTopicSearchQuery` 解析（:533 起）：普通关键词走前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）；完整输入"未读话题"/"unread topic"时跳过文本搜索，改由未读置顶逻辑把未读话题置顶（:599）。搜索框提示与 `aria-label` 已更新为"搜索话题或未读话题"（`main.html:213-216`）。
+- 话题条目另带"未读 N"/"未读"文字指示器（样式类与创建函数见 `topicListManager.js:178-198`、`:330-365`）；发送消息会清除持久化未读（`modules/chatManager.js:1037-1055`；未读语义细节见会话与消息管理笔记 5.3）。
 
 ### 2.4 现场恢复
 
-切换 Topic 成功会写 `localStorage.lastActiveTopic_*` 与 `settings.json` 的 `lastOpenItemId/lastOpenItemType/lastOpenTopicId`（`modules/chatManager.js:275-292`, `:525-526`，数据语义见会话与消息管理笔记 2.4/3.1）——再次启动时据此恢复上次会话与话题。
+切换 Topic 成功会写 `localStorage.lastActiveTopic_*` 与 `settings.json` 的最后打开项/话题字段（`modules/chatManager.js:275-292`, `:525-526`，字段清单见第 8 节；数据语义见会话与消息管理笔记 2.4/3.1）——再次启动时据此恢复上次会话与话题。
 
 ## 3. Composer、草稿、附件与快捷输入
 
@@ -78,20 +79,21 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 - **附件**：点击、删除、预览、自动伸缩都在输入区完成；附件数据对象（`type/src/name/size/_fileManagerData` 等）随用户消息落盘（`modules/chatManager.js:992-1002`）。
 - **换行**：`#messageInput` 明示 Shift+Enter 换行（`modules/event-listeners.js:443-444`）。
 - **Loom 文本分享**：`renderer.js:500-517` 订阅 `onLoomShareTextToInput`，把 LoomAPP 选中的文本插入 `#messageInput`。
-- **表情包选择器**（`modules/emoticonManager.js`）：从服务端 API `getEmoticonLibrary()` 加载表情库，只筛选当前用户对应的分类（`"通用表情包"` + `"${userName}表情包"` 两个分类，`:53-59`）。UI 是平铺图片网格，没有搜索框、分类切换或分页（`:85-99`），面板固定尺寸 270×240px，出现在按钮上方（`:158-165`）；点击面板外部关闭（100ms 延迟绑定，避免立即触发，`:107`）。点击表情包将 `<img src="..." width="80">` HTML 标签插入 `textarea.value`（`:131-135`），不是转义后的 Markdown 语法。表情库为空时显示"没有找到可用的表情包"占位文字（`:89-90`）。
+- **表情包选择器**（`modules/emoticonManager.js`）：从服务端 API `getEmoticonLibrary()` 加载表情库，只筛选当前用户对应的分类（"通用表情包" + 按用户名的分类，:53-59）。UI 是平铺图片网格，没有搜索框、分类切换或分页（:85-99），面板固定尺寸 270×240px，出现在按钮上方（:158-165）；点击面板外部关闭（100ms 延迟绑定，避免立即触发，:107）。
+- 点击表情包把带尺寸属性的 `<img>` 标签插入输入框值（`:131-135`），不是转义后的 Markdown 语法；表情库为空时显示"没有找到可用的表情包"占位文字（`:89-90`）。
 - **群聊**：输入区另有邀请 Agent 发言按钮（触发 `handleInviteAgentToSpeak`，执行语义见对话请求与上下文笔记 8 节）。
 - 发送按钮右键打开高级回复菜单；草稿（输入框未发送内容）按什么粒度保存**未在原调查中核实**。
 
 ## 4. Agent、模型、工具与发送前配置
 
 - 左侧 Agent 列表支持搜索、点击切换、创建、编辑和删除；群组可创建并邀请 Agent 发言。
-- 当前 Agent 设置中的**模型按钮可替换模型**，模型参数、上下文上限、流式输出和 TTS 在**折叠设置段落**中修改；模型参数（temperature/contextTokenLimit/maxOutputTokens/top_p/top_k）留空时显示"未设置"并存 `null`（`modules/settingsManager.js:1886-1890`，发送侧行为见 Agent 角色笔记）。
+- 当前 Agent 设置中的**模型按钮可替换模型**，模型参数、上下文上限、流式输出和 TTS 在**折叠设置段落**中修改；模型参数（temperature、contextTokenLimit、maxOutputTokens、top_p、top_k）留空时显示"未设置"并存 `null`（`modules/settingsManager.js:1886-1890`，发送侧行为见 Agent 角色笔记）。
 - 标题栏提供当前 Agent 设置、通知/监控、主题、语音聊天和气泡/统一/刊物 presentation mode 切换器。
 - 发送按钮右键的高级回复菜单属发送前配置的一部分，具体选项未在原调查中逐项列出。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **按钮态与中断触发**：`renderer.js` 里 `updateSendButtonState()`（`:190-198`）根据 `getInterruptibleMessageForCurrentChat()`（`:150-188`）是否返回非空来切换按钮的 `dataset.mode` 为 `'interrupt'` 或 `'send'`，并替换按钮内部 SVG（方块图标代表"中止"）。判定逻辑：先在当前内存 `currentChatHistory` 里从后往前找一条 `role==='assistant'`，若其 `isThinking===true` 或其 DOM 节点带 `.streaming` class，就认为"当前有活跃回复"（`:151-162`）；如果历史里没找到，再兜底查 `window.streamManager.getActiveStreamingMessageId()` 加当前上下文校验（`:164-187`）——这层兜底是为了覆盖"消息还没写进 `currentChatHistory` 但 streamManager 已经在流式处理"的时间窗口。
+- **按钮态与中断触发**：`renderer.js` 里 `updateSendButtonState()`（:190-198）根据 `getInterruptibleMessageForCurrentChat()`（:150-188）是否返回非空来切换按钮的 data 模式属性（`interrupt`/`send`）并替换按钮内部 SVG（方块图标代表"中止"）。判定逻辑：先在当前内存历史里从后往前找最后一条助手消息，若其思考中或其 DOM 节点带 `.streaming` 类，就认为"当前有活跃回复"（:151-162）；如果历史里没找到，再兜底查流式管理器当前正在处理的消息 id 并加当前上下文校验（:164-187）——这层兜底是为了覆盖"消息还没写进历史但流式管理器已经在处理"的时间窗口。
 - 点击后走 `handleSendButtonAction()`（`:249-258`）→ 若有活跃消息则 `interruptActiveResponseFromSendButton()`（`:200-247`），否则走正常发送。**单聊与群聊共用发送按钮外观，但中断实现不同（本地 abort vs 仅远端信号），UI 上看不出本地 abort 是否真正生效**——执行层的不对称见对话请求与上下文笔记 7.1。
 - 流式反馈：`.message-item.streaming` 的流光边框等属于消息渲染器笔记；中断后"中止已发送"toast 与"流式响应中断"提示分别见对话请求与上下文笔记 7.1 与 `renderer.js:605-609`。
 
@@ -104,15 +106,15 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 ## 7. 多会话、多模型、群聊与后台生成
 
 - 群聊界面：群组可创建并邀请 Agent 发言（第 4 节）；同一 topic 内多个 agent 的发言按调度结果呈现，调度执行在对话请求与上下文笔记 8 节。
-- 语音聊天窗口（`Voicechatmodules/voicechat.html`）：独立子窗口，初始 `inputMode='text'`，点击切换按钮（`toggleInputModeBtn`）在文本模式和语音模式之间切换（`:55`, `:311-320`）。语音模式使用语音识别（browser speech API 或外部识别器），有 3 秒无语音超时（`SPEECH_TIMEOUT_DURATION=3000`，`:58`）。关闭窗口时自动将本次对话历史保存为当前 Agent 的一个新 Topic（`:131-163`），并尝试调用话题自动总结（执行语义见对话请求与上下文笔记 3 节）。audioContext 在首次用户手势时初始化（`:14-23`），避免浏览器自动播放限制。
+- 语音聊天窗口（`Voicechatmodules/voicechat.html`）：独立子窗口，初始文本输入模式，点击切换按钮在文本模式和语音模式之间切换（`:55, 311-320`）。语音模式使用语音识别（browser speech API 或外部识别器），有 3 秒无语音超时（常量 `SPEECH_TIMEOUT_DURATION=3000`，:58）。关闭窗口时自动将本次对话历史保存为当前 Agent 的一个新 Topic（`:131-163`），并尝试调用话题自动总结（执行语义见对话请求与上下文笔记 3 节）。audioContext 在首次用户手势时初始化（`:14-23`），避免浏览器自动播放限制。
 - 多窗口之间的聊天状态同步（主窗口 vs 语音窗口 vs 图片查看器）未在原调查中核实。
 
 ## 8. Chat UI 状态所有权与同步
 
-- **布局状态**：`sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive`、`sidebarAvatarOnly` 由 `renderer.js` 启动时恢复（1.1）。
-- **最后打开状态**：`lastOpenItemId/lastOpenItemType/lastOpenTopicId` 存 `settings.json`，`lastActiveTopic_*` 存 localStorage（2.4）。
+- **布局状态**：`sidebarWidth`、`notificationsSidebarWidth`、`sidebarActive`、`sidebarAvatarOnly` 四个配置项由 `renderer.js` 启动时恢复（1.1）。
+- **最后打开状态**：`lastOpenItemId`/`lastOpenItemType`/`lastOpenTopicId` 存 `settings.json`，`lastActiveTopic_*` 存 localStorage（2.4）。
 - **桌面集成交点**（完整托盘/窗口逻辑盘点保留在源文件 13.8）：
-  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。当前 HEAD 托盘另增 Loom 菜单项（`trayManager.js:34`，`open-loom-manager`）与 Scriptorium"文坊"应用项（`trayManager.js:26`，`open-scriptorium-window`）。
+  - 系统托盘左键点击切换主窗口显隐（`main.js:422-528`）；关闭主窗口时若桌面模式（Desktop 窗口）处于活跃状态，主窗口隐藏到托盘而非退出（`:362`）。当前 HEAD 托盘另增 Loom 菜单项与 Scriptorium"文坊"应用项（`trayManager.js:26, 34`）。
   - 语音聊天是独立子窗口（第 7 节），与主窗口并行存在。
   - VCP Loom Manager 是独立管理窗口（`Loommodules/manager.html`），LoomAPP 运行时用 WebContentsView 承载（`modules/loom/VCPLoomManager.js`）。
   - 应用**不发送系统桌面通知**（未发现 `new Notification(...)` 或 Electron `Notification` 类调用），所有 AI 消息通知通过右侧内置通知侧栏和浮动 Toast 呈现——通知机制的完整盘点保留在源文件 13.2。
@@ -158,7 +160,7 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 - **三种 presentation mode 只改变布局/样式**，工具块、思考链和 DailyNote 的协议解析仍由同一套 renderer 完成（1.3）；presentation 切换没有专属过渡动画，是瞬间切换（动画盘点保留在源文件 13.7）。
 - **消息区不是虚拟列表**，长 Topic 的初始批量渲染和后续 `redisplayChat` 会带来整段 DOM 成本——渲染策略见消息渲染器笔记 8.1。
 - **单聊与群聊共用发送按钮外观，但中断实现不同**，UI 上看不出本地 abort 是否真正生效（第 5 节）。
-- **弹窗与通知交点**（通用机制完整盘点保留在源文件 13.1/13.2）：删除确认对话框（`showConfirmDialog`，`modules/ui-helpers.js:889-977`，支持 Esc 取消/Enter 确认/遮罩取消，`isDanger` 时红色）服务于聊天主链的危险操作；`tool_approval_request` 类型的通知**永不自动消失**（`modules/notificationRenderer.js:463-465`），须用户点击允许/拒绝后才消失；浮动 Toast 默认 7 秒自动消失（`:460`）。模型选择弹窗（`modelSelectModal`）与全局设置弹窗走通用 Modal 懒加载路径（`modules/ui-helpers.js:323-360`）。
+- **弹窗与通知交点**（通用机制完整盘点保留在源文件 13.1/13.2）：删除确认对话框（`showConfirmDialog`，`modules/ui-helpers.js:889-977`，支持 Esc 取消/Enter 确认/遮罩取消，危险模式时红色）服务于聊天主链的危险操作；`tool_approval_request` 类型的通知**永不自动消失**（`modules/notificationRenderer.js:463-465`），须用户点击允许/拒绝后才消失；浮动 Toast 默认 7 秒自动消失（`:460`）。模型选择弹窗与全局设置弹窗走通用 Modal 懒加载路径（`modules/ui-helpers.js:323-360`）。
 - **类目边界**：会话数据语义在会话与消息管理笔记，请求执行在对话请求与上下文笔记，消息壳与内容渲染在消息渲染器笔记。
 
 ## 11. 未验证事项

@@ -16,7 +16,7 @@
 
 NextChat 的渠道管理采用“Provider 枚举 + 协议 adapter + 客户端配置 store + Next.js 代理”的组合，而不是数据库化的渠道实体：
 
-1. `ServiceProvider` 声明 OpenAI、Azure、Google、Anthropic、Baidu、ByteDance、Alibaba、Tencent、Moonshot、Stability、Iflytek、XAI、ChatGLM、DeepSeek、SiliconFlow 和 302.AI；`ClientApi` 再把内部 `ModelProvider` 映射到各个平台 adapter（`app/constant.ts:120-164`、`app/client/api.ts:136-183`）。
+1. `ServiceProvider` 声明 16 个平台（OpenAI、Azure、Google、Anthropic、DeepSeek 等，完整清单见 1.1 的 adapter 映射）；`ClientApi` 再把内部 `ModelProvider` 映射到各个平台 adapter（`app/constant.ts:120-164`、`app/client/api.ts:136-183`）。
 2. 所有聊天 adapter 共享 `LLMApi` 接口：`chat`、`speech`、`usage`、`models`。OpenAI/Azure 以兼容协议实现，其他渠道在 `app/client/platforms/` 中有独立请求格式；Stability 图片生成由 `app/store/sd.ts` 单独处理，不通过普通 `getClientApi`。
 3. Web 模式默认把请求发往 Next.js `/api/...` 代理，桌面 App/导出模式根据 Provider 直接访问官方 endpoint。代理会做认证注入、Azure 路径调整、自定义模型限制和超时转发。
 4. 用户 API key、endpoint、模型覆盖和 provider 选择存在 `useAccessStore`，通过统一的 IndexedDB 持久化。服务端环境变量通过 `/api/config` 暴露能力与模型控制项；服务端可从逗号分隔的 key 中随机选择一项。

@@ -25,7 +25,25 @@ VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能�
 | 文档 | 692 文件 / 161,572 行 |
 | 测试 | 32 文件 / 7,056 源码行 |
 
-主要区域为 `AdminPanel-Vue/src`（270 文件/98,552 行）、其 `vendor`（46/67,369）、`Plugin/SkillBridge`（616/37,409）、根服务源码（约 20,813 行）和 `Plugin/PaperReader`（81/19,992）。`AdminPanel-Vue/dist` 还有 320 个跟踪文件，进一步抬高文件数。`c4c4d00`→`1ae9b63c` 净增 17 个跟踪文件：`Plugin/ChromeBridge/VCPChrome/webcore/` 运行时内核（7 文件/约 4,459 行，扩展主链逻辑从 `content_script.js` 迁入）、`CodeSearcher` 的 Node 包装器与 Windows x64 原生二进制、`DailyNoteSearcher` Windows 二进制、`scripts/build_rust_plugin.js` 与 `tests/chromeBridge/` 4 个新测试。
+主要区域：
+
+| 区域 | 文件 / 行数 |
+| --- | ---: |
+| `AdminPanel-Vue/src` | 270 / 98,552 |
+| `AdminPanel-Vue/vendor` | 46 / 67,369 |
+| `Plugin/SkillBridge` | 616 / 37,409 |
+| 根服务源码 | 约 20,813 行 |
+| `Plugin/PaperReader` | 81 / 19,992 |
+
+`AdminPanel-Vue/dist` 还有 320 个跟踪文件，进一步抬高文件数。
+
+`c4c4d00`→`1ae9b63c` 净增 17 个跟踪文件：
+
+- `Plugin/ChromeBridge/VCPChrome/webcore/`：运行时内核（7 文件/约 4,459 行，扩展主链逻辑从 `content_script.js` 迁入）
+- `CodeSearcher` 的 Node 包装器与 Windows x64 原生二进制
+- `DailyNoteSearcher` Windows 二进制
+- `scripts/build_rust_plugin.js`
+- `tests/chromeBridge/` 4 个新测试
 
 ## 语言、文档与测试
 
@@ -33,7 +51,15 @@ JavaScript 234,967 行（51.1%）、Vue 68,638 行（14.9%）、Rust 39,524 行�
 
 ## 跨平台组织与边界
 
-产品主形态是服务端加浏览器管理台，不是原生多端客户端；Docker CI 明确构建 Linux amd64/arm64（`.github/workflows/ci.yml:19-120`）。插件和 Rust 辅助程序各自带构建边界，`OpenWebUISub`/`SillyTavernSub` 是第三方页面集成层。`c4c4d00`→`1ae9b63c` 提交集中做多系统兼容加固：`Plugin.js` 进程树终止跨平台化（Windows taskkill 失败回退、Unix 进程组 SIGKILL）、`sqliteHealthManager.js` 针对 macOS 关闭 mmap 并改用 PASSIVE checkpoint、`CodeSearcher`/`DailyNoteSearcher` 按 `win32/linux/darwin × x64/arm64` 三元组选择原生二进制（`scripts/build_rust_plugin.js` 统一构建）。非容器环境的平台兼容性仍因插件而异，本次未逐插件运行。
+产品主形态是服务端加浏览器管理台，不是原生多端客户端；Docker CI 明确构建 Linux amd64/arm64（`.github/workflows/ci.yml:19-120`）。插件和 Rust 辅助程序各自带构建边界，`OpenWebUISub`/`SillyTavernSub` 是第三方页面集成层。
+
+`c4c4d00`→`1ae9b63c` 提交集中做多系统兼容加固：
+
+- `Plugin.js`：进程树终止跨平台化（Windows taskkill 失败回退、Unix 进程组 SIGKILL）
+- `sqliteHealthManager.js`：针对 macOS 关闭 mmap 并改用 PASSIVE checkpoint
+- `CodeSearcher`/`DailyNoteSearcher`：按 win32/linux/darwin × x64/arm64 三元组选择原生二进制（`scripts/build_rust_plugin.js` 统一构建）
+
+非容器环境的平台兼容性仍因插件而异，本次未逐插件运行。
 
 ## 关键源码索引
 

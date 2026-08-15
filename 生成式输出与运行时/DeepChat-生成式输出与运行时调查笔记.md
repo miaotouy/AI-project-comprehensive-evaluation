@@ -16,9 +16,9 @@
 
 DeepChat 有三条可区分的生成式输出机制，共享同一消息对象模型：
 
-1. **Artifact 对象**：模型在消息正文中输出 `<antArtifact>` XML 标记（6 种 MIME 类型），由内置内存 MCP 服务器 `Artifacts` 通过 `get_artifact_instructions` 工具注入使用规范。渲染器把标记解析为独立对象，在消息内显示卡片，并在右侧工作区面板（Workspace）中提供预览/代码双视图。对象事实源是消息块正文原文（SQLite），没有独立对象表。
+1. **Artifact 对象**：模型在消息正文中输出 `<antArtifact>` XML 标记（6 种 MIME 类型），使用规范由内置内存 MCP 服务器通过专用指令工具注入。渲染器把标记解析为独立对象，在消息内显示卡片，并在右侧工作区面板中提供预览/代码双视图。对象事实源是消息块正文原文（SQLite），没有独立对象表。
 2. **MCP App 沙箱**：任何 MCP 工具若声明 `ui` 元数据与 `text/html;profile=mcp-app` 资源，其 HTML 结果可进入 `mcp-app://` 协议的双层 iframe 沙箱，通过 JSON-RPC/postMessage 桥回宿主调用工具、资源、发消息与更新模型上下文，全部能力需用户逐次同意。
-3. **Agent 本机执行**：`exec`/`process` 工具在本机 shell 中执行命令（目录白名单 + 命令权限审批 + 后台会话），`write`/`edit` 写文件，`read`/glob/grep 读工作区，图像生成工具产出 image 块。
+3. **Agent 本机执行**：命令类工具在本机 shell 中执行（目录白名单 + 命令权限审批 + 后台会话），文件写入类工具改工作区文件，读取与检索类工具读工作区，图像生成工具产出 image 块。
 
 **能力等级判定：`G3`（可执行 Artifact）**。HTML/React Artifact 进入带 `sandbox` 属性的 iframe 运行环境（脚本可执行、依赖经 `deepcdn://` 本地协议注入）；Agent exec 在宿主进程的子进程执行任意 shell 命令（经权限审批）。**未达 G4**：用户对 Artifact 无编辑保存通道（工作区代码视图显式只读，消息内编辑器无写回路径）；**未达 G5**：对象依附于消息文本，无独立环境级生命周期。
 
@@ -57,15 +57,20 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 - 触发源是**模型自由文本**中的 XML 标记，无独立结构化 part，无用户命令触发。
 - 使用规范通过 MCP 工具 `get_artifact_instructions` 注入（`artifactsServer.ts:573-585`），提示词明确要求：>15 行、可复用、独立成文的内容才用 Artifact；一个消息最多一个；更新时**复用旧 identifier**（`artifactsServer.ts:38-41`）。
-- 该服务器是主进程内内存 MCP 服务器，默认启用（`mcp/settings.ts:249` `DEFAULT_ENABLED_SERVER_NAMES = ['Artifacts', ...]`），由 `inMemoryServerFactory` 在 `mcpClient.ts:514-517` 创建。
+- 该服务器是主进程内内存 MCP 服务器，默认启用（`DEFAULT_ENABLED_SERVER_NAMES = ['Artifacts', ...]`，`mcp/settings.ts:249`），由内存服务器工厂在 `mcpClient.ts:514-517` 创建。
 
 ### 输出协议
 
-- 标记格式：`<antArtifact identifier="…" type="…" title="…" language="…">content</antArtifact>`，类型白名单为：
-  `application/vnd.ant.code` / `text/markdown` / `text/html` / `image/svg+xml` / `application/vnd.ant.mermaid` / `application/vnd.ant.react`（`useArtifacts.ts:43-49`）。
+- 标记格式：`<antArtifact identifier="…" type="…" title="…" language="…">content</antArtifact>`，类型白名单为六种（`useArtifacts.ts:43-49`）：
+  - `application/vnd.ant.code`
+  - `text/markdown`
+  - `text/html`
+  - `image/svg+xml`
+  - `application/vnd.ant.mermaid`
+  - `application/vnd.ant.react`
 - 解析器是 renderer 的正则扫描器 `generatePart`（`useArtifacts.ts:322-499`）：
   - 处理**半截流**：未闭合的 `ARTIFACT_UNCLOSED_RE` 会在流式期间把剩余文本当作 loading 态 Artifact（`useArtifacts.ts:97-98, 300-319`）；
-  - 处理嵌套/转义：正则要求属性 `type`/`identifier`/`title` 出现在开标签内（lookahead），内容为懒惰匹配到 `</antArtifact>`，不支持转义、不支持嵌套；
+  - 处理嵌套/转义：正则要求 `type`/`identifier`/`title` 属性出现在开标签内（前瞻匹配），内容懒惰匹配到 `</antArtifact>`，不支持转义、不支持嵌套；
   - 误触发面：仅白名单 6 种 type 才被识别为 artifact part，其它内容按文本渲染；`<tool_call>`/`<tool_response>` 等标记被同一定位（`NEXT_TAG_RE`），与 Artifact 并存于同一正文流；
   - 有 last-parse memo（`useArtifacts.ts:157-159`），流式重复解析同字符串时直接返回缓存。
 - 输入侧安全过滤：深链粘贴内容在 `src/main/deeplink/index.ts:666-693` 对 `antArtifact` 内容做危险模式扫描（script/iframe/javascript:/on*= 等），命中即整段丢弃。
@@ -73,16 +78,16 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 ### 对象模型
 
 - **无独立对象存储**：Artifact 没有自己的表、ID 体系或版本号。对象身份 = `(messageId, blockId, identifier)` 三元组；`identifier` 只是模型自选字符串，宿主不校验唯一性（同一消息内同 identifier 的多个 Artifact 会作为多项显示）。
-- 消息块的 `artifact?` 字段（identifier/title/type/language）在展示模型 `displayMessage.ts:152-163` 中定义，但持久化时**不单独落列**：`deepchatAssistantBlocks.ts:80-102` 只存 `text_content` 原文与 `extra_json`，artifact 属性靠 renderer 重新解析文本获得。运行中的 `ArtifactState`（`stores/artifact.ts:5-12`）是内存视图，含 id/type/title/content/status/language。
+- 消息块的 artifact 字段（identifier/title/type/language）在展示模型 `displayMessage.ts:152-163` 中定义，但持久化时**不单独落列**：`deepchatAssistantBlocks.ts:80-102` 只存 `text_content` 原文与 `extra_json`，artifact 属性靠 renderer 重新解析文本获得。运行中的 `ArtifactState`（`stores/artifact.ts:5-12`）是内存视图，含身份、类型、标题、内容与状态字段。
 - 事实源层级：消息块原文（SQLite）→ 渲染时解析 → 运行态 Pinia store 缓存。三者由 renderer 单向往 artifactStore 同步（`MessageBlockContent.vue:95-143`），不存在用户侧反写路径。
 - 对话级开关：`conversations.artifacts` 列（`src/main/data/schemaCatalog.ts:74`）存在，但本次仅在导出器 `nowledgeMemExporter.ts:206` 读到其使用；UI 侧是否暴露该开关未验证。
 
 ## 2. 增量生成、更新与最终化
 
-- **生成粒度**：token 级追加到当前 `content` 块（`accumulator.ts:99-107`），一个块内直接 `block.content += event.content`；未闭合的 `<antArtifact>` 在渲染侧随文本逐 token 增长，解析器以"未闭合即 loading"处理（`useArtifacts.ts:300-319`）。
-- **投影刷新**：全块快照，非 diff。`echo.ts:24-37` 每 120ms 把整块数组序列化后发 `chat.stream.updated`（`kind: 'snapshot'`），renderer 用 memo 化解析（`generatePart` 缓存 + `MessageBlockContent` 快照比对）避免每帧重算。
+- **生成粒度**：token 级追加到当前 content 块（`accumulator.ts:99-107`）；未闭合的 `<antArtifact>` 在渲染侧随文本逐 token 增长，解析器以"未闭合即 loading"处理（`useArtifacts.ts:300-319`）。
+- **投影刷新**：全块快照，非 diff。`echo.ts:24-37` 每 120ms 把整块数组序列化后发 `chat.stream.updated`（`kind: 'snapshot'`），renderer 用 memo 化解析（解析缓存 + `MessageBlockContent` 快照比对）避免每帧重算。
 - **落盘**：每 600ms 节流 `updateAssistantContent` 整体替换块（`echo.ts:39-57`）；停止/错误/中止时 `flush()` 全量收口。
-- **最终化**：`accumulator.ts:26-38` 把尾部的 pending narrative 块置为 success；error 事件把 pending 块全置 error 并追加 error 块（`accumulator.ts:266-281`）；工具批处理收口在 `dispatch.ts` 的 `settleToolBatch`/`finalize`（未逐行核实其全部分支，属次要环节）。
+- **最终化**：`accumulator.ts:26-38` 把尾部的 pending narrative 块置为成功；error 事件把挂起块全置错误并追加错误块（`accumulator.ts:266-281`）；工具批处理收口在 `dispatch.ts` 的 `settleToolBatch`/`finalize`（未逐行核实其全部分支，属次要环节）。
 - **更新语义**：Artifact 内容更新唯一途径是模型在新消息里复用同一 identifier 再生成一份；旧消息内容不变，工作区列表按 createdAt 排序会把新版排前，但没有"合并/覆盖"操作（见 §6）。
 
 ## 3. 投影表面与多视图关系
@@ -98,7 +103,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 - 同一 Artifact 可同时出现在消息卡片与工作区列表（列表来自对所有 assistant 消息的实时解析，`WorkspacePanel.vue:273-301`），两处共享 `artifactStore`，内容为同一内存对象，无编辑所以不存在不同步问题。
 - 视图模式：preview/code 双标签（`useWorkspaceViewerModel.ts:78-107`）；`application/vnd.ant.code` 类型强制 code 视图（`:118-124`）。
-- 文件投影（工作区）：`workspaceReadFilePreviewRoute` 提供 markdown/html/pdf/svg/image/text/binary 等预览，HTML/SVG/PDF 经 `workspace-preview://` 协议 iframe 呈现（`protocols.ts:250-299` + `workspacePreviewProtocol.ts`），与 Artifact 预览共用 WorkspacePreviewPane。工作区管理入口移入侧栏（#2138：`WindowSideBar.vue` 新增 workspace 注册/归档管理，project store 增加 `defaultChatWorkspacePath` 与环境归档同步，`WorkspaceFileNode.vue` 组件被移除），`WorkspacePanel` 本身的预览/查看链路不变（仅按钮换用 dc-ui 组件）。
+- 文件投影（工作区）：预览路由提供 markdown/html/pdf/svg/image/text/binary 等格式的预览，其中 HTML/SVG/PDF 经 `workspace-preview://` 协议 iframe 呈现（`protocols.ts:250-299` + `workspacePreviewProtocol.ts`），与 Artifact 预览共用同一查看器。工作区管理入口在 #2138 移入侧栏：侧栏新增 workspace 注册/归档管理，项目 store 增加 `defaultChatWorkspacePath` 并与环境归档同步，原文件节点组件被移除；`WorkspacePanel` 本身的预览/查看链路不变，仅按钮换用新组件库。
 - 桌面挂件/窗口投影：本次未找到（无 artifact 桌面挂件；浮动窗口仅用于浏览器/CUA 预览，`src/renderer/src/floating`、`src/main/desktop/floatingButton`）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -107,13 +112,13 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - **SVG**：SvgArtifact.vue 直接注入（v-html 风格渲染，内容来自模型，见 `SvgArtifact.vue:28` 的 content 容器）。
 - **Mermaid**：markstream-vue 的 MermaidBlockNode 渲染。
 - **HTML Artifact**：`HTMLArtifact.vue:4-11` 用 `iframe srcdoc=block.content`，`sandbox="allow-scripts allow-same-origin"`，预览模式注入 viewport meta 与 reset CSS。**脚本可执行**，同源允许但 iframe 无宿主 DOM 访问（沙箱属性在渲染进程层生效，非 CSP 头）。
-- **React Artifact**：`ReactTemplate.ts:1-46` 把模型内容包进带 `deepcdn://` 引用的 HTML 模板（react/react-dom/babel/lucide/prop-types/Recharts/tailwind），`ReactArtifact.vue` 以 `sandbox="allow-scripts"`（无 allow-same-origin）的 iframe srcdoc 加载；`deepcdn://` 由主进程协议处理器只读本地 `resources/cdn` 目录（`protocols.ts:154-205`，含路径越界检查 `resolvePathInsideRoot`）。依赖为内置本地副本，无外网 CDN。
+- **React Artifact**：`ReactTemplate.ts:1-46` 把模型内容包进带 `deepcdn://` 引用的 HTML 模板（react 全家桶、babel、lucide、prop-types、Recharts、tailwind 等内置依赖），`ReactArtifact.vue` 以 `sandbox="allow-scripts"`（无 allow-same-origin）的 iframe srcdoc 加载；该协议由主进程协议处理器只读本地 `resources/cdn` 目录（`protocols.ts:154-205`，含路径越界检查）。依赖为内置本地副本，无外网 CDN。
 - **Code Artifact**：Monaco（stream-monaco）只读展示 + 复制；`CodeArtifact.vue:70-74` 未传 readOnly，可编辑与否取决于 stream-monaco 默认值（node_modules 未安装，无法核实）；**无论可不可编辑都没有写回路径**。
 - **图像生成**：`agentImageGenerationTool.ts` 走供应商图像模型，结果转为独立 image 块（`imageGenerationBlocks.ts:42-58` 把 imagePreviews 提升为 `type:'image'` 块）。
-- **图像持久化（#2094）**：生成的图片经 `src/main/platform/imageCache.ts` 落盘并以 `imgcache://` 引用出现在消息文本；MCP 工具调用时 `ToolManager` 把参数中的 `imgcache://` 引用解析回 data URL（上限 8 个引用、展开后参数 ≤32 MiB，`src/main/mcp/toolManager.ts:1206-1256`）；renderer 侧已提升为独立 image 块的图不再在 Markdown 中重复显示（`hiddenImageSources` → `MarkdownRenderer` 的 `postTransformNodes`，消息渲染器笔记 §3）。
+- **图像持久化（#2094）**：生成的图片经 `src/main/platform/imageCache.ts` 落盘并以 `imgcache://` 引用出现在消息文本；MCP 工具调用时 `ToolManager` 把参数中的 `imgcache://` 引用解析回 data URL（上限 8 个引用、展开后参数 ≤32 MiB，`src/main/mcp/toolManager.ts:1206-1256`）；renderer 侧已提升为独立 image 块的图不再在 Markdown 中重复显示（经渲染器的后变换节点隐藏已物化的图像源，消息渲染器笔记 §3）。
 - **MCP App**：见 §7。
 - 工作区文件 HTML 预览 iframe：`WorkspacePreviewPane.vue:189-195` 同样 `sandbox="allow-scripts allow-same-origin"`，经 `workspace-preview://` 协议由主进程流式供档（协议响应带 `X-Content-Type-Options: nosniff`，`protocols.ts:271-277`）。
-- 视频/音频/Canvas/WebGL/notebook：本次未找到（grep `notebook|Notebook` 主进程无命中，renderer 仅图标名；canvas 仅用于 CUA/浏览器 PiP 帧缓冲与图片压缩，非生成式画布；accumulator 只处理 text/reasoning/plan/tool_call/image_data/usage/stop/error 事件）。
+- 视频/音频/Canvas/WebGL/notebook：本次未找到（grep `notebook|Notebook` 主进程无命中，renderer 仅图标名；canvas 仅用于 CUA/浏览器 PiP 帧缓冲与图片压缩，非生成式画布；accumulator 只处理内容、推理、计划、工具调用、图像数据、用量、停止与错误等事件）。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -124,7 +129,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
   - 工作区查看器：preview/code 切换、全屏（`WorkspaceViewer.vue`）；文件视图可"打开外部文件"（`workspaceOpenFileRoute`）；
   - 流式期间 ArtifactThinking.vue 显示"生成中"占位，`artifact_think_collapse` 设置持久化（`ArtifactThinking.vue:18-27`）；
   - **导出/另存**：`useArtifactExport.ts`（SVG 导出/Mermaid 渲染、代码下载、复制为图片）**无任何组件调用**（grep 全文仅定义处命中），即导出按钮本次未找到；工作区查看器对 Artifact 无下载/保存按钮。
-- **工具调用反馈**：`MessageBlockToolCall.vue` 提供参数/响应折叠视图、exec/终端输出样式、`editText`/`textReplace` 的 diff 视图（`:543-576` 从响应 JSON 提取 original/updated 渲染 CodeBlockNode diff）、图像预览徽标与缩略图、长时工具自动展开（`:482-492`）、子代理任务卡、权限审批状态环。错误状态映射在 `displayMessage.ts:141-150` 与块 status 上。
+- **工具调用反馈**：`MessageBlockToolCall.vue` 提供参数/响应折叠视图、exec/终端输出样式、文本编辑类工具结果的 diff 视图（`:543-576` 从响应 JSON 提取前后文本渲染为 diff）、图像预览徽标与缩略图、长时工具自动展开（`:482-492`）、子代理任务卡、权限审批状态环。错误状态映射在 `displayMessage.ts:141-150` 与块 status 上。
 - **交互状态恢复**：展开/收起、viewMode、全屏是 renderer 内存态（sidepanel store），重新打开应用后不保留；Artifact 内容本身从 DB 恢复。未发现交互状态持久化。
 - **MCP App**：见 §7。
 
@@ -142,25 +147,25 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 ### 7.1 MCP App 沙箱（最完整的受控运行时）
 
-- **执行位置**：renderer 中 `<iframe :src="mcp-app://{instanceId}/sandbox.html">`（`McpAppView.vue:567-582`）；主进程 `protocol.handle(MCP_APP_SCHEME)` 返回沙箱代理页（`sandboxProtocol.ts:198-234`），代理页再创建内层 `sandbox="allow-scripts allow-same-origin allow-forms"` iframe 写入 App HTML（`:94-96, 140-144`）。双层结构把 `mcp-app://` 协议源与 App 内容的执行源隔离。
-- **协议约束**：代理页响应带动态 CSP 头（`buildMcpAppContentSecurityPolicy`，`:25-43`：default-src 'none'，script/style 仅 self+unsafe-inline+声明域，connect-src 默认 'none'，frame-src 默认 'none'，object/form-action 禁用）与 Permissions-Policy（camera/microphone/geolocation/clipboard-write 默认关闭，`:45-55`）。CSP 域声明来自工具资源的 `_meta.ui.csp`，经 `appHost.ts:60-123` 严格归一化（拒绝 `*`、凭据、非 https 等）。
-- **桥**：JSON-RPC 2.0 over postMessage（官方 `@modelcontextprotocol/ext-apps/app-bridge`，`McpAppView.vue:236-351`），消息大小上限 20MiB，`isBoundedRpcMessage` 校验；代理页还校验自己处于 iframe 且与宿主隔离（`sandboxProtocol.ts:75-82`）。
+- **执行位置**：renderer 中 `<iframe :src="mcp-app://{instanceId}/sandbox.html">`（`McpAppView.vue:567-582`）；主进程协议处理器返回沙箱代理页（`sandboxProtocol.ts:198-234`），代理页再创建内层 `sandbox="allow-scripts allow-same-origin allow-forms"` iframe 写入 App HTML（`:94-96, 140-144`）。双层结构把协议源与 App 内容的执行源隔离。
+- **协议约束**：代理页响应带动态 CSP 头（`buildMcpAppContentSecurityPolicy`，`:25-43`）——默认拒绝一切加载，脚本与样式仅放行自身源、内联与声明域，连接与嵌套框架默认关闭，对象与表单动作禁用；Permissions-Policy 默认关闭摄像头/麦克风/定位/剪贴板写（`:45-55`）。CSP 域声明来自工具资源的 `_meta.ui.csp`，经 `appHost.ts:60-123` 严格归一化（拒绝 `*`、凭据、非 https 等）。
+- **桥**：JSON-RPC 2.0 over postMessage（官方 app-bridge 库，`McpAppView.vue:236-351`），消息大小上限 20MiB 且经边界校验；代理页还校验自己处于 iframe 且与宿主隔离（`sandboxProtocol.ts:75-82`）。
 - **能力桥（全部需同意或审批）**：
   - 调工具：`callAppTool` → `appHost.ts:293-400`，经 ToolPermissionBroker 逐次审批，拒绝后 `toolAccessSuspended` 挂起（可 retry）；
   - 读资源/列工具：`listAppTools/readAppResource/...` → `appHost.ts:402-525`；
   - 打开外链：`openAppLink` → 用户同意后 `shell.openExternal`（`appHost.ts:527-544`，仅 http/https 无凭据）；
   - 发送消息：`authorizeAppMessage` 同意后写入会话（`McpAppView.vue:328-335`，`appHost.ts:546-566`）；
   - 更新模型上下文：`updateAppModelContext` 同意后把内容**持久化到消息块**（`deepchatAssistantBlocks.ts:223-271` `updateMcpAppModelContext`），供后续回合回流。
-- **实例生命周期**：`McpAppSandboxRegistry` 限额 64 实例/窗口 32（`sandboxRegistry.ts:14-15`），TTL 30 分钟（`:11`），webContents 销毁/服务器变更/源不匹配（`validateLive` + `assertDescriptorCurrent`，校验 configGeneration/bindingHash）即撤销；同意请求 2 分钟超时、去重、上限 64（`:12-13, 297-308`）。**重载后实例不恢复**（内存态），但持久化工具结果里的 `app` 描述符（`resultProjection.ts:137-156`）允许重新 prepare 一个新的沙箱实例——恢复的是"可再生视图"而非原实例状态。
+- **实例生命周期**：`McpAppSandboxRegistry` 限额 64 实例/窗口 32、TTL 30 分钟（`sandboxRegistry.ts:11-15`）；webContents 销毁、服务器变更或源不匹配（每次使用都校验配置代际与绑定哈希）即撤销实例；同意请求 2 分钟超时、去重、上限 64（`:12-13,297-308`）。**重载后实例不恢复**（内存态），但持久化工具结果里的 `app` 描述符（`resultProjection.ts:137-156`）允许重新 prepare 一个新的沙箱实例——恢复的是"可再生视图"而非原实例状态。
 - **来源校验**：App HTML 必须来自 MCP 资源（`text/html;profile=mcp-app`，2MiB 上限，`appHost.ts:146-168, 247`）；每次 prepare/callTool 都重新校验工具声明与持久化结果一致（`assertBoundServerCurrent` 等）。
 
 ### 7.2 Agent 代码执行（本机进程）
 
-- **exec 工具**：`agentBashHandler.ts` 经 `spawn(shell)` 在**主进程本机**执行（`runDetachedShellProcess`/`runManagedShellProcess`），默认超时 120s、kill 宽限 5s（`:33-36`），目录限定 `allowedDirectories`（工作区根 + skill 根 + 会话目录 + temp + 用户批准路径，`agentToolManager.ts:1137-1147`），cwd 越界拒绝（`agentBashHandler.ts:293-310`）。
-- **命令 shell 可配置（#2109）**：执行 shell 从 `getUserShell()` 改为 `ResolvedCommandShell`（`src/shared/commandShell.ts`：posix / cmd / windows-powershell / git-bash 四种 profile，含 dialect 与 pathStyle），`spawn(shell, [...args, shellCommand])` 按 dialect 拼命令（`agentBashHandler.ts:409-416`）；RTK 改写只在 posix dialect 启用（`:713-724`）；后台 `backgroundExecSessionManager` 同样携带 commandShell。命令审批请求携带 `shellProfile`（Agent 工具笔记 §3）。
-- **权限**：`CommandPermissionService` 分级（low/medium/high/critical）审批，白名单与破坏性/网络模式按 shell dialect 分别匹配，未批准抛 `CommandPermissionRequiredError` 转为 UI 审批请求（`agentBashHandler.ts:143-186`）；命令类审批通过后返回 `oneShotGrantId` 一次性授权（可撤销）。文件读写走 `FilePermissionService`（read/write/all，`agentToolManager.ts:885-889`）。
-- **输出预览与落盘**：执行结果按 `outputPreviewChars`（默认 12,000 字符）截取内联预览，超过 `offloadThresholdChars`（默认 10,000）的完整输出落会话目录 log 文件（`agentBashHandler.ts:348-355`、`:409-413`）；`Agent` 配置的 `commandOutputInlineChars`/`toolOutputInlineChars` 可调节内联上限（Agent 角色笔记 §1）。
-- **后台会话**：`backgroundExecSessionManager` 支持 background/yield 与 `process` 工具（list/poll/log/write/kill/clear/remove，`agentToolManager.ts:891-986`），输出超限落会话目录 log 文件（`agentBashHandler.ts:33, 487-511`）。
+- **exec 工具**：`agentBashHandler.ts` 经 `spawn(shell)` 在**主进程本机**执行（分离/托管两种子进程形态），默认超时 120s、kill 宽限 5s（`:33-36`），目录限定 `allowedDirectories`（工作区根 + skill 根 + 会话目录 + temp + 用户批准路径，`agentToolManager.ts:1137-1147`），cwd 越界拒绝（`agentBashHandler.ts:293-310`）。
+- **命令 shell 可配置（#2109）**：执行 shell 从用户默认 shell 改为解析后的命令 shell 类型（`ResolvedCommandShell`，`src/shared/commandShell.ts`：posix / cmd / windows-powershell / git-bash 四种 profile，含方言与路径风格），按 dialect 拼命令（`agentBashHandler.ts:409-416`）；RTK 改写只在 posix 方言启用（`:713-724`）；后台会话同样携带该配置；命令审批请求附带 shellProfile（Agent 工具笔记 §3）。
+- **权限**：`CommandPermissionService` 按低/中/高/关键四级审批，白名单与破坏性/网络模式按 shell 方言分别匹配，未批准抛 `CommandPermissionRequiredError` 转为 UI 审批请求（`agentBashHandler.ts:143-186`）；命令类审批通过后返回一次性授权（可撤销）。文件读写走 `FilePermissionService`（read/write/all 三档，`agentToolManager.ts:885-889`）。
+- **输出预览与落盘**：执行结果按 `outputPreviewChars`（默认 12,000 字符）截取内联预览，超过 `offloadThresholdChars`（默认 10,000）的完整输出落会话目录 log 文件（`agentBashHandler.ts:348-355,409-413`）；Agent 配置的 `commandOutputInlineChars`/`toolOutputInlineChars` 可调节内联上限（Agent 角色笔记 §1）。
+- **后台会话**：`backgroundExecSessionManager` 支持 background/yield 与 `process` 工具（查询、轮询、日志、写入、终止、清理、移除七种操作，`agentToolManager.ts:891-986`），输出超限落会话目录 log 文件（`agentBashHandler.ts:33, 487-511`）。
 - **命令改写**：RTK（`rtkRuntimeService`）对 posix 命令做受限改写，失败自动回退原文（`agentBashHandler.ts:709-730`）。
 - **执行结果反馈**：工具输出作为 `tool_call.response` 存入块并展示（§5），错误/权限拒绝分别以 `tool_call_error` 与 `action_type=tool_call_permission` 表达。
 - **二进制读取放宽（#2110）**：`binaryReadGuard.ts:27-36` 的 `shouldRejectAgentBinaryRead` 只拒绝 zip/audio/video 等固定二进制 MIME，`application/octet-stream` 不再做文件内容探测即可读取（文本型 octet-stream 文件允许）。
@@ -171,7 +176,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 
 ## 8. 持久化、恢复、分享与导出
 
-- **持久化对象**：SQLite 表 `deepchat_assistant_blocks`，`text_content` 存 content 块原文（含 `<antArtifact>` 标签），`extra_json` 存 extra/tool_call 附加信息（`deepchatAssistantBlocks.ts:80-166`）；助手消息行在 `deepchat_messages`（`tables/deepchatMessages.ts:42`）。
+- **持久化对象**：SQLite 表 `deepchat_assistant_blocks` 的 `text_content` 存 content 块原文（含 `<antArtifact>` 标签），`extra_json` 存额外信息与工具调用（`deepchatAssistantBlocks.ts:80-166`）；助手消息行在 `deepchat_messages`（`tables/deepchatMessages.ts:42`）。
 - **恢复**：重新打开会话 → 读块 → renderer 重新解析 → artifactStore 同步（`MessageBlockContent.vue:95-143` 与历史加载共用同一解析链）。Artifact 在会话重载后**可恢复**，但交互状态（展开、viewMode、侧栏上下文）不恢复。
 - **复制/分享**：仅文本复制（copyText）；`useArtifactExport.ts` 的 SVG/代码导出与"复制为图片"未被任何组件接入（见 §5）；无 artifact 级分享 URL。
 - **导出**：会话导出（`conversationExporter.ts:371-429`）把 content 块原样带出（`formatInlineHtml(block.content)`），`artifact-thinking` 块单独渲染为"创作思考"模板（`conversationExportTemplates.ts:127-132`）；MCP App 的模型上下文随块 extra_json 持久化。

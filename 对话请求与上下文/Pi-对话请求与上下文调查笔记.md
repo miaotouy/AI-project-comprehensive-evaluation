@@ -39,7 +39,19 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 1. 提交入口、任务对象与状态机
 
-**输入处理顺序**（`prompt()`，`agent-session.ts:1116-1273`）：扩展 `/command` 立即执行（`_tryExecuteExtensionCommand`，:1278-1302）→ `input` 扩展钩子（可 handled/transform，:1142-1157）→ `_expandSkillCommand` 展开 `/skill:name` 为 `<skill>` 块（:1309-1333）→ `expandPromptTemplate` 展开文件模板（:1163）→ 若正在流式则入 steer/followUp 队列（:1167-1180）→ 校验模型与认证（:1186-1203）→ `_checkCompaction` 预压缩（:1205-1210）→ 组装 user 消息 + 挂起的 nextTurn 自定义消息（:1212-1230）→ `before_agent_start` 扩展事件（可改 systemPrompt、注入 custom 消息，:1232-1261）→ `_runAgentPrompt`（:1063-1075，循环 `agent.prompt()` + `_handlePostAgentRun` + `agent.continue()`）。以上展开受 `PromptOptions.expandPromptTemplates`（默认 true，:1117）控制；扩展 API 的 `sendUserMessage` 新增同名选项（默认 false，与 `deliverAs` 并列，`agent-session.ts:1481-1511`），扩展可按需复用命令/skill/模板展开。
+**输入处理顺序**（`prompt()`，`agent-session.ts:1116-1273`）依次执行：
+1. 扩展 `/command` 立即执行（`_tryExecuteExtensionCommand`，`:1278-1302`）；
+2. `input` 扩展钩子（可 handled/transform，`:1142-1157`）；
+3. `_expandSkillCommand` 把 `/skill:name` 展开为 `<skill>` 块（`:1309-1333`）；
+4. `expandPromptTemplate` 展开文件模板（`:1163`）；
+5. 若正在流式则入 steer/followUp 队列（`:1167-1180`）；
+6. 校验模型与认证（`:1186-1203`）；
+7. `_checkCompaction` 预压缩（`:1205-1210`）；
+8. 组装 user 消息 + 挂起的 nextTurn 自定义消息（`:1212-1230`）；
+9. `before_agent_start` 扩展事件（可改 systemPrompt、注入 custom 消息，`:1232-1261`）；
+10. `_runAgentPrompt`（`:1063-1075`，循环 `agent.prompt()` + `_handlePostAgentRun` + `agent.continue()`）。
+
+以上展开受 `PromptOptions.expandPromptTemplates`（默认 true，`:1117`）控制；扩展 API 的 `sendUserMessage` 新增同名选项（默认 false，与 `deliverAs` 并列，`agent-session.ts:1481-1511`），扩展可按需复用命令/skill/模板展开。
 
 任务对象：没有独立的"任务记录"；运行状态在 `Agent`/`AgentSession` 内，事件（`message_start/update/end`、`agent_start/end`、`queue_update`）是唯一对外通道。
 
@@ -52,8 +64,10 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 ## 3. 预算、截断、摘要与压缩
 
 - **token 估算**：`estimateTokens` 基于字符/块长度按角色估算（`compaction/compaction.ts:266-306`，chars/4 启发式；此前笔记标注的 `compaction/utils.ts` 位置有误，`utils.ts` 只含文件操作清单与 `SUMMARIZATION_SYSTEM_PROMPT`，见 `compaction/utils.ts:156`）；`estimateMessagesTokens`（`agent-session.ts:286-292`）配合模型 `contextWindow`。
-- **压缩触发**：`shouldCompact`：`contextTokens > contextWindow - reserveTokens`（`compaction.ts:235-238`，默认 reserve 16384、keepRecent 20000：`compaction.ts:132-136`、`settings-manager.ts:780-786`）。两条路径：`_handlePostAgentRun` 的 `_checkCompaction`（`agent-session.ts:1962-2053`）和发送前检查；溢出（`isContextOverflow`/可恢复 length）走"压缩并自动重试一次"（overflow 分支 :1993-2022，`_overflowRecoveryAttempted` 只允许一次，随后 `_runAutoCompaction("overflow", willRetry)` :2021），阈值路径压缩不重试（:2049-2051）。
-- **压缩执行**：`prepareCompaction`（`compaction.ts:710-789`）计算 cut point（`findCutPoint`，:403-461，只切 user/assistant 等上下文可见条目、不切 toolResult、支持 turn 内分割）；`compact`（`compaction.ts:817-919`）以 `SUMMARIZATION_SYSTEM_PROMPT` 生成摘要、记录 `firstKeptEntryId`/`tokensBefore`/文件操作清单（`CompactionDetails`）；压缩本身也是 LLM 调用，经 `completeSummarization` 统一入口并复用 `settings.retry`（`compaction.ts:562-581`）。`SessionManager.appendCompaction` 落盘（`session-manager.ts:1097-1119`）；`/compact` 手动触发（`compact()`，`agent-session.ts:1790-1933`，入口见 Chat UI 笔记 §1）。
+- **压缩触发**：`shouldCompact` 判定 `contextTokens > contextWindow - reserveTokens`（`compaction.ts:235-238`，默认 reserve 16384、keepRecent 20000：`compaction.ts:132-136`、`settings-manager.ts:780-786`）。两条路径：
+  - **常规检查**：`_handlePostAgentRun` 的 `_checkCompaction`（`agent-session.ts:1962-2053`）与发送前检查；阈值路径压缩不重试（`:2049-2051`）；
+  - **溢出恢复**：溢出（`isContextOverflow`/可恢复 length）走"压缩并自动重试一次"（overflow 分支 `:1993-2022`，`_overflowRecoveryAttempted` 只允许一次，随后 `_runAutoCompaction("overflow", willRetry)`，`:2021`）。
+- **压缩执行**：`prepareCompaction`（`compaction.ts:710-789`）计算 cut point（`findCutPoint`，`:403-461`：只切 user/assistant 等上下文可见条目、不切 toolResult、支持 turn 内分割）；`compact`（`compaction.ts:817-919`）以 `SUMMARIZATION_SYSTEM_PROMPT` 生成摘要，记录 `firstKeptEntryId`/`tokensBefore`/文件操作清单（`CompactionDetails`）。压缩本身也是 LLM 调用，经 `completeSummarization` 统一入口并复用 `settings.retry`（`compaction.ts:562-581`）；`SessionManager.appendCompaction` 落盘（`session-manager.ts:1097-1119`）。`/compact` 手动触发（`compact()`，`agent-session.ts:1790-1933`，入口见 Chat UI 笔记 §1）。
 - 压缩是重写而非分页：旧条目仍在文件中但不再进上下文（持久化形状见会话与消息管理笔记 §9）。
 
 ## 4. SDK、Provider、模型与协议交接

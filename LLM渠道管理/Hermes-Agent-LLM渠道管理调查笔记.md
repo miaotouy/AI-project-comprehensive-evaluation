@@ -14,12 +14,21 @@
 
 ## 结论摘要
 
-- **无“LLM 渠道”实体**。本仓库没有独立的“渠道（channel）”概念：LLM 提供方在代码里是**声明式 ProviderProfile 标识（providers/base.py:38）+ 凭据表（hermes_cli/auth.py:195 PROVIDER_REGISTRY）**；用户在配置里实例化的是 `providers:`/`custom_providers:` 自定义端点（config，`providers` 是 v12+ 的键控 schema，`hermes_cli/config_defaults.py:7-11`），每个端点带 base_url + key_env/api_key + 可选 extra_headers。因此“渠道”在本项目中实际等于「Provider 标识 + 一个 base_url + 一份凭据」的组合；一个 Provider 默认一支独苗（一个 config block），多端点通过多个 custom_providers 条目表达。
-- **运行时可动态切换，但启动解析与聊天链路走不同代码路径**。真实聊天流经 `hermes_cli/runtime_provider.py:1665 resolve_runtime_provider()` 产出运行时 dict，再交由 transport 组装请求；而桌面/Web 设置页的“连接测试/凭据校验”走 `hermes_cli/web_server.py:7507 /api/providers/validate` 与 `:7479 /api/providers/custom-endpoints/validate`（独立 HTTP 探针），并不复用真实 resolver 链路 —— 二者的探测面与失败语义不一致（详见 §8）。
-- **凭据是层化存储、高度可配置、卸载时全链路清理**：API Key 默认存放 `.env`（config.py:3703 load_env / :3924 save_env_value），OAuth/多渠道凭据存放在 `auth.json`（auth.py:1038 `_auth_file_path`、`AUTH_STORE_VERSION=1`）；任意 `.env` 值可被“借用”进 credential pool（auth.json `credential_pool` 键，auth.py:1574/1688 读写）。所有子进程环境都会被脱敏（输出白名单），日志、UI、备份均做脱敏（§3）。
-- **模型目录是【静态表 + 远端拉取 + 用户输入】三层**：`_PROVIDER_MODELS` 静态快照（hermes_cli/models.py:221）、OpenRouter/Nous Portal 拉取（models.py:1504/955，带 `provider_models_cache.json` 磁盘缓存 models.py:3197）、用户可任选手动输入；custom 端点 `/v1/models` 探活另有磁盘缓存（models.py:4737）。能力/上下文长度元数据集中 `agent/model_metadata.py`（provider 前缀实时查注册表）。
-- **协议适配集中在 transport 层**：`agent/transports/` 按 `api_mode` 注册（`chat_completions`/`anthropic_messages`/`codex_responses`/`bedrock_*` 等），`agent/transports/__init__.py:21 register_transport`、`:26 get_transport`；profile 存在时由 profile 驱动 `build_kwargs`（agent/transports/chat_completions.py:375-420、`:599 _build_kwargs_from_profile`）。Provider 本身不持有运行时客户端。
-- **重试、Key 轮换、模型 fallback、跨渠道 failover 分四层**：应用层重试（`agent.api_max_retries`，默认 3，`hermes_cli/config_defaults.py:71`）→ 同 Provider 多 Key credential pool 轮换（`agent/agent_runtime_helpers.py:1025 _rotate_failed_credential`，429/401/供应商错误）→ 跨渠道 fallback 链（`hermes_cli/fallback_config.py:80` 读取 + `agent/chat_completion_helpers.py:1923 try_activate_fallback` 推进）→ 会话层面用于恢复的 `restore_primary_runtime`（`agent/agent_runtime_helpers.py:1459`）。各层的触发条件见 §7。
+- **无“LLM 渠道”实体**。本仓库没有独立的“渠道（channel）”概念：LLM 提供方在代码里是**声明式 ProviderProfile 标识（`providers/base.py:38`）+ 凭据表（`hermes_cli/auth.py:195` 的 `PROVIDER_REGISTRY`）**，用户不创建“Provider 实例”。
+- **自定义端点即渠道等价物**。用户在配置里实例化的是 `providers:`/`custom_providers:` 端点（`providers` 是 v12+ 的键控 schema，`hermes_cli/config_defaults.py:7-11`），每个端点带 base_url、key_env/api_key 与可选 extra_headers。因此“渠道”在本项目中实际等于「Provider 标识 + 一个 base_url + 一份凭据」的组合；一个内置 Provider 默认一支独苗（一个 config block），多端点通过多个 custom_providers 条目表达。
+- **运行时可动态切换，但启动解析与聊天链路走不同代码路径**。真实聊天流经 `resolve_runtime_provider()`（`hermes_cli/runtime_provider.py:1665`）产出运行时 dict，再交由 transport 组装请求；而桌面/Web 设置页的“连接测试/凭据校验”走独立 HTTP 探针（`hermes_cli/web_server.py:7507 /api/providers/validate` 与 `:7479 /api/providers/custom-endpoints/validate`），并不复用真实 resolver 链路 —— 二者的探测面与失败语义不一致（详见 §8）。
+- **凭据是层化存储、高度可配置、卸载时全链路清理**：
+  - API Key 默认存放 `.env`（`config.py:3703 load_env` / `:3924 save_env_value`），OAuth/多渠道凭据存放在 `auth.json`（`auth.py:1038` `_auth_file_path`、`AUTH_STORE_VERSION=1`）；
+  - 任意 `.env` 值可被“借用”进 credential pool（`auth.json` 的 `credential_pool` 键，`auth.py:1574/1688` 读写）；
+  - 所有子进程环境都会被脱敏（输出白名单），日志、UI、备份均做脱敏（§3）。
+- **模型目录是【静态表 + 远端拉取 + 用户输入】三层**：
+  - 静态快照 `_PROVIDER_MODELS`（`hermes_cli/models.py:221`）；
+  - OpenRouter/Nous Portal 拉取（`models.py:1504/955`，带 `provider_models_cache.json` 磁盘缓存 `models.py:3197`）；
+  - 用户可任选手动输入；
+  - custom 端点 `/v1/models` 探活另有磁盘缓存（`models.py:4737`）。
+  能力/上下文长度元数据集中 `agent/model_metadata.py`（provider 前缀实时查注册表）。
+- **协议适配集中在 transport 层**：`agent/transports/` 按 `api_mode` 注册与分发（`__init__.py:21 register_transport`、`:26 get_transport`），覆盖 OpenAI 兼容、Anthropic、Responses、Bedrock 等模式（清单见 5.1）；profile 存在时由 profile 驱动 `build_kwargs`（`chat_completions.py:375-420`、`:599 _build_kwargs_from_profile`）。Provider 本身不持有运行时客户端。
+- **重试、Key 轮换、模型 fallback、跨渠道 failover 分四层**：应用层重试（`agent.api_max_retries`，默认 3，`hermes_cli/config_defaults.py:71`）→ 同 Provider 多 Key 的 credential pool 轮换（429/401/供应商错误）→ 跨渠道 fallback 链（`fallback_config.py:80` 读取、`chat_completion_helpers.py:1923` 推进）→ 会话层 `restore_primary_runtime` 恢复主通道（`agent_runtime_helpers.py:1459`）。各层的触发条件与完整定位见 §7。
 - **可观测性**：`hermes doctor` 连接健康检查（`hermes_cli/doctor.py:2475 _probe_apikey_provider`；`hermes doctor --live` 真实元数据探针见 §8）、日志脱敏（`agent/redact.py`）、全局 `provider_models_cache.json` 缓存、用量/成本由各自的 provider resolution + usage tracker 处理（本次不在范围）。
 
 ---
@@ -28,11 +37,24 @@
 
 为避免跨层混淆，先定义本项目各概念含义（均为静态代码确认）：
 
-- **Provider（提供方标识）**：代码/插件注册声明的 `ProviderProfile`（`providers/base.py:38`），字段含 `name`、`api_mode`、`aliases`、`env_vars`、`base_url`、`auth_type`、`display_name`、`description`、`signup_url`、`default_aux_model`、`supports_health_check`。它是声明性的：`providers/base.py:7-9` 明确写出“不持有客户端构造、凭据轮换、流式”。Provider 不是用户实例，也不是运行时连接。
-- **渠道 / Endpoint（端点实例，即“渠道”等价物）**：用户在配置中定义的 `providers:<name>:`（含 base_url / key_env / api_key / model / max_output_tokens / extra_headers），或 legacy `custom_providers` 列表条目（`hermes_cli/config.py:1532 get_compatible_custom_providers` 把两者合并为统一视图）。运行时会为每个条目解析出一个具体 base_url + 凭据通道。同一厂商可配置多个端点（多 custom 条目），但内置 Provider 各自只有一套指定 base_url / 凭据 env（由 `PROVIDER_REGISTRY` 描述）。
-- **Profile（HERMES_HOME）**：当前活动配置目录（`hermes_constants.get_hermes_home()`）。所有凭据、配置、缓存均按 Profile 隔离；`agent/secret_scope.py` 提供 `set_secret_scope`/`build_profile_secret_scope`，网关 multiplex 多 Profile 时会强制限定环境变量访问范围（`set_multiplex_active`，`agent/secret_scope.py:40-52`）。
+- **Provider（提供方标识）**：代码/插件注册声明的 `ProviderProfile`（`providers/base.py:38`），字段：
+
+  ```
+  name / api_mode / aliases / env_vars / base_url / auth_type / display_name /
+  description / signup_url / default_aux_model / supports_health_check
+  ```
+
+  它是声明性的：`providers/base.py:7-9` 明确写出“不持有客户端构造、凭据轮换、流式”。Provider 不是用户实例，也不是运行时连接。
+- **渠道 / Endpoint（端点实例，即“渠道”等价物）**：用户在配置中定义的 `providers:<name>:`（字段见下），或 legacy `custom_providers` 列表条目（`hermes_cli/config.py:1532 get_compatible_custom_providers` 把两者合并为统一视图）。运行时会为每个条目解析出一个具体 base_url + 凭据通道：
+
+  ```
+  base_url / key_env / api_key / model / max_output_tokens / extra_headers
+  ```
+
+  同一厂商可配置多个端点（多 custom 条目），但内置 Provider 各自只有一套指定 base_url / 凭据 env（由 `PROVIDER_REGISTRY` 描述）。
+- **Profile（HERMES_HOME）**：当前活动配置目录（`hermes_constants.get_hermes_home()`）。所有凭据、配置、缓存均按 Profile 隔离；`agent/secret_scope.py` 提供 `set_secret_scope`/`build_profile_secret_scope` 装配入口，网关 multiplex 多 Profile 时经 `set_multiplex_active` 强制限定环境变量访问范围（`agent/secret_scope.py:40-52`）。
 - **Model（模型 ID）**：`model:` 配置中的 `default:`，或者每个 fallback 条目里的 `model:`。可为任意用户输入字符串，也来自静态表 / 远端拉取。
-- **Credential（凭据）**：API Key / access_token；存放于 `.env`（key api_key）（环境）、`auth.json`（provider 状态）、config.yaml 内嵌 api_key（不推荐），或外部进程/OAuth 文件。凭据的“借用”进入 credential pool 即复制一份放入 `auth.json`，由 `PooledCredential`（`agent/credential_pool.py`）管理。
+- **Credential（凭据）**：API Key / access_token；存放于 `.env`（key `api_key`）、`auth.json`（provider 状态）、config.yaml 内嵌 api_key（不推荐），或外部进程/OAuth 文件。凭据的“借用”进入 credential pool 即复制一份放入 `auth.json`，由 `PooledCredential`（`agent/credential_pool.py`）管理。
 - **Fallback 链（故障转移“跨渠道”）**：可在配置里定义 `fallback_providers` / legacy `fallback_model`（顶层，见 `cli-config.yaml.example` 与 `hermes_cli/fallback_config.py:80 get_fallback_chain`）。每条 fallback 条目 = provider + model + base_url + api_key/key_env；运行时按顺序尝试，属于**跨渠道（端点）故障转移**，不是同渠道重试。
 
 ---
@@ -41,14 +63,14 @@
 
 以 CLI 真实对话为例（静态代码路径）：
 
-1. CLI 组装 `AIAgent`（`cli.py` 内 `create_agent` / `agent/agent_init.py`）接收 `provider/model/base_url/api_key/credential_pool` 等参数。
+1. CLI 组装 `AIAgent`（`cli.py` 内 `create_agent` / `agent/agent_init.py`）接收 provider、model、base_url、api_key、credential_pool 等参数。
 2. 构造输入之一来自 `load_config`：`cli.py:4546 _fallback_model = get_fallback_chain(CLI_CONFIG)` 在启动时读 fallback 链。
-3. `AIAgent` 内：`_resolve_runtime_from_pool_entry`、`resolve_runtime_provider`（`hermes_cli/runtime_provider.py:1665`）决定具体 `provider + api_mode + base_url + api_key`，并生成 transport 组件（`self.client`）。
-4. transport：`agent/transports/__init__.py:26 get_transport(api_mode)` 拿到对应 `ChatCompletionsTransport` 等，`build_kwargs` 组装请求体（`agent/transports/chat_completions.py:356` 或 profile 分支 `:599`）。
-5. 会话循环：`agent/conversation_loop.py` 若干 retry / 429 / credential pool 恢复；失败且池用尽后调用 `try_activate_fallback`（`agent/chat_completion_helpers.py:1730`）推进 fallback 链并重建 transport（`create_openai_client`，`agent/agent_runtime_helpers.py:2241`）。
+3. `AIAgent` 内经 `resolve_runtime_provider`（`hermes_cli/runtime_provider.py:1665`）决定具体 provider + api_mode + base_url + api_key，并生成 transport 组件。
+4. transport：`get_transport(api_mode)`（`agent/transports/__init__.py:26`）拿到对应 transport 实现，`build_kwargs` 组装请求体（`agent/transports/chat_completions.py:356`，profile 分支 `:599`）。
+5. 会话循环处理 retry / 429 / credential pool 恢复；池用尽后调用 `try_activate_fallback`（`agent/chat_completion_helpers.py:1730`）推进 fallback 链并重建 transport（`create_openai_client`，`agent/agent_runtime_helpers.py:2241`）。
 6. 输出响应 → `agent.conversation_loop` 返回 `result_to_console`。
 
-Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（`hermes_cli/runtime_provider.py` 文档注释即宣称“共用”。）Gateway multiplex 时每请求装 profile secret scope（`gateway/run.py:1911 set_secret_scope(build_profile_secret_scope(...))`）。
+Gateway/TUI 复用同样的 `load_config` / `resolve_runtime_provider` 路径（`hermes_cli/runtime_provider.py` 文档注释即宣称“共用”）；multiplex 时每请求装配 profile secret scope（`gateway/run.py:1911`）。
 
 ---
 
@@ -56,7 +78,8 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 
 ### 1.1 Provider 注册（插件化）
 
-- 目录：`providers/__init__.py` 中的懒发现扫描（`_discover_providers()`，`providers/__init__.py:147`）；`register_provider()`（`:54`）/ `get_provider_profile()`（`:68`）/ `list_providers()`（`:79`）。扫描顺序：仓库 `plugins/model-providers/<name>/` → `$HERMES_HOME/plugins/model-providers/<name>/` → legacy `providers/<name>.py`（兼容，`providers/__init__.py:1-22` docstring）。用户同名插件后注册覆盖内置（last-writer-wins）。
+- **扫描机制**：`providers/__init__.py` 中懒发现扫描（`_discover_providers()`，`providers/__init__.py:147`），入口为 `register_provider()`（`:54`）、`get_provider_profile()`（`:68`）、`list_providers()`（`:79`）。
+- **扫描顺序**：仓库 `plugins/model-providers/<name>/` → `$HERMES_HOME/plugins/model-providers/<name>/` → legacy `providers/<name>.py`（兼容，docstring 见 `providers/__init__.py:1-22`）。用户同名插件后注册覆盖内置（last-writer-wins）。
 - 仓库内模型提供插件共 35 个目录（`plugins/model-providers/`：anthropic、openrouter、gemini、custom、azure-foundry、bedrock 等）。示例：
   - `plugins/model-providers/anthropic/__init__.py:47`：`api_mode="anthropic_messages"`, env `ANTHROPIC_API_KEY/ANTHROPIC_TOKEN/CLAUDE_CODE_OAUTH_TOKEN`, `base_url https://api.anthropic.com`, `auth_type="api_key"`。
   - `plugins/model-providers/custom/__init__.py`：`api_mode="chat_completions"`，用于自定义/OLLAMA 类本地服务，包含 `build_extra_body` / `build_api_kwargs_extras` 处理（如 Ollama `num_ctx` 等）。
@@ -69,10 +92,15 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 
 ### 1.3 配置 schema（用户可创建多个 Endpoint）
 
-顶层（`cli-config.yaml.example` 及各行）：
-- `model.default` / `model.provider` / `model.base_url` / `model.api_key`（主模型）；
-- `fallback_providers: [ {provider, model, base_url, key_env/api_key}... ]`；
-- `providers.<name>:`（v12+）与 legacy `custom_providers: [...]`，二者由 `get_compatible_custom_providers()`（`hermes_cli/config.py:1532`）去重合并为同一视图，供设计层与 UI。
+顶层（`cli-config.yaml.example` 及各行）三类配置键：
+
+```text
+model.default / model.provider / model.base_url / model.api_key    # 主模型
+fallback_providers: [ {provider, model, base_url, key_env/api_key}... ]  # fallback 链
+providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定义端点
+```
+
+`providers.<name>:` 与 legacy `custom_providers` 二者由 `get_compatible_custom_providers()`（`hermes_cli/config.py:1532`）去重合并为同一视图，供设计层与 UI。
 
 ### 1.4 配置加载与合并
 
@@ -85,8 +113,17 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 - **自定义端点创建/删除**：Desktop / Web 设置页经由 `POST /api/providers/custom-endpoints`（`hermes_cli/web_server.py:7522`）、`DELETE .../:id`（`:7575`）、`POST .../:id/activate`（`:7541`），写回 `config.yaml`（`providers`）。
 
    — 校验：`POST /api/providers/custom-endpoints/validate`（`:7600`）与 `POST /api/providers/validate`（`:7628`），均由 web_server 直接 `httpx` 探活 endpoint `/models`（规则见 §8）。
-- **`.env` 写入/删除**：`PUT /api/env` → `hermes_cli.credential_lifecycle.save_provider_env_credential`（`hermes_cli/credential_lifecycle.py:213`）写 `.env` + 同步 config.yaml 镜像；`DELETE /api/env` → `remove_provider_env_credential`（同一文件 `:245`）清理 `.env` 条目 + pool 内 env-seeded 条目 + `model.api_key` 等镜像（`purge_env_credential_references` `:178`）。`auth.json`/`.env` 的读取统一为 UTF-8（BOM 容错），避免 Windows 代码页损坏导致凭据丢失（`hermes_cli/auth.py`、`env_loader.py`，如 `762f1c58` 系列）。
-- **auth.json**：`AUTH_STORE_VERSION = 1`（`hermes_cli/auth.py:109`）；`_auth_file_path`（`hermes_cli/auth.py:1038`）→ `~/.hermes/auth.json`。结构至少有：`{"version":1, "providers": {...}}` 与可选 `credential_pool`（写回时合并，auth.py 附近）；credential_pool 形如 `{provider_id: [entry, ...]}`，读写见 §7。env 凭据刷新后池条目 id 会重新绑定（`bf7c7166`，`agent/agent_runtime_helpers.py`）。
+- **`.env` 写入**：`PUT /api/env` → `hermes_cli.credential_lifecycle.save_provider_env_credential`（`hermes_cli/credential_lifecycle.py:213`）写 `.env` + 同步 config.yaml 镜像。
+- **`.env` 删除**：`DELETE /api/env` → `remove_provider_env_credential`（`credential_lifecycle.py:245`）清理 `.env` 条目 + pool 内 env-seeded 条目 + `model.api_key` 等镜像（`purge_env_credential_references`，`:178`）。
+- **读取编码**：`auth.json`/`.env` 的读取统一为 UTF-8（BOM 容错），避免 Windows 代码页损坏导致凭据丢失（`hermes_cli/auth.py`、`env_loader.py`，如 `762f1c58` 系列）。
+- **auth.json**：版本 `AUTH_STORE_VERSION = 1`（`hermes_cli/auth.py:109`）；路径 `_auth_file_path`（`auth.py:1038`）→ `~/.hermes/auth.json`。结构至少含：
+
+  ```
+  {"version":1, "providers": {...}}   # 必选
+  credential_pool: {provider_id: [entry, ...]}   # 可选，写回时合并
+  ```
+
+  池的读写见 §7；env 凭据刷新后池条目 id 会重新绑定（`bf7c7166`，`agent/agent_runtime_helpers.py`）。
 - **迁移**：`hermes_cli/config_migrations.py` 处理 config schema 升级；`AUTH_STORE_VERSION=1` 固定。
 
 ---
@@ -103,15 +140,19 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 ### 3.2 进入请求
 
 - API Key 选择顺序（`hermes_cli/auth.py:668 _resolve_api_key_provider_secret`）：PROVIDER_REGISTRY 声明的 env_vars 优先序 → custom provider 配置 api_key → pool。
-- Header 附加：`providers.<name>.extra_headers`（渗透性威胁，注释 `cli-config.yaml.example:96-110`）；`_lift_extra_headers`（`hermes_cli/runtime_provider.py:658`，注释明确 extra_headers 值常携带凭据、禁止记录）把校验后的 dict 并入运行时结果，再经 OpenAI client 的 `default_headers` 生效（`create_openai_client`，`agent/agent_runtime_helpers.py:2241`；OpenAI-SDK 层的实际注入点未逐行验证）。
+- **Header 附加**：`providers.<name>.extra_headers` 用于注入自定义头（注释 `cli-config.yaml.example:96-110` 明确其值常携带凭据、禁止记录，属渗透性威胁）；`_lift_extra_headers`（`hermes_cli/runtime_provider.py:658`）把校验后的 dict 并入运行时结果，再经 OpenAI client 的 `default_headers` 生效（`agent/agent_runtime_helpers.py:2241`，SDK 层实际注入点未逐行验证）。
 
 ### 3.3 脱敏
 
-- **Subprocess**：`tools/environments/local.py:456 _sanitize_subprocess_env` 剥离 Hermes 管理的 secrets（API_KEYS 等）再传给 CLI 子进程（如 bang `!` 命令）。CLI 持有全部 API key 于 `os.environ`（`bang_shell.py:131`），子进程不被外泄（`bang_shell.py:132-141`）。
-- **日志脱敏**：`agent/redact.py` 全局用正则替换常见 API key / token pattern（HERMES_REDACT_SECRETS / config.yaml `security.redact_secrets` 均可关闭，`agent/redact.py:68-76`）。`redact_key()`（`hermes_cli/config.py:4243`）对 UI / 导出。redact 另有控制字符剥离与跨行跨度处理（`e9d1551e`、`9377c5a5`、`8969ebac`）。
+- **Subprocess**：`_sanitize_subprocess_env`（`tools/environments/local.py:456`）剥离 Hermes 管理的 secrets（API_KEYS 等）再传给 CLI 子进程（如 bang `!` 命令）；CLI 持有全部 API key 于 `os.environ`，子进程不被外泄（`bang_shell.py:131-141`）。
+- **日志脱敏**：`agent/redact.py` 全局用正则替换常见 API key / token pattern（`agent/redact.py:68-76`，HERMES_REDACT_SECRETS 与 config.yaml `security.redact_secrets` 均可关闭），另有控制字符剥离与跨行跨度处理（`e9d1551e`、`9377c5a5`、`8969ebac`）；`redact_key()`（`hermes_cli/config.py:4243`）对 UI / 导出生效。
 - **MCP server env**：`agent_import.py:85-100 is_secret_key` + `sanitize_mcp_env`。
 - **UI front-end**：`GET /api/env` 返回 `redacted_value` 字段（`hermes_cli/web_server.py:7053`），明文字只在 `POST /api/env/reveal`（`:7597`，带 rate-limit 5/30s + audit）回报。
-- **备份导出**：`hermes_cli/backup.py:128 _SECRET_FILE_NAMES = {".env","auth.json","state.db"}`，导出时会脱敏（`backup.py` 相关逻辑）。
+- **备份导出**：`_SECRET_FILE_NAMES`（`hermes_cli/backup.py:128`）标记以下文件，导出时脱敏：
+
+  ```
+  .env、auth.json、state.db
+  ```
 
 ### 3.4 进程间传递（Profile / Gateway）
 
@@ -124,8 +165,9 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 ### 4.1 来源
 
 - **静态表**：`_PROVIDER_MODELS`（`hermes_cli/models.py:221`）与 `CANONICAL_PROVIDERS`（`models.py:1116`，模型的 canonical 元组）、`OPENROUTER_MODELS` 快照（远程拉取失败兜底，models.py:49）。
-- **远端拉取**：`fetch_openrouter_models()`（`models.py:1504`）、`fetch_nous_recommended_models`（`models.py:955`）；结果缓存至 `provider_models_cache.json`（路径 `models.py:3197-3199`，TTL 1h、stale-serve 7d，`:3131-3141`），`clear_provider_models_cache`（models.py:3358）。
-- **自定义端点探活缓存**（`models.py:4737 cached_fetch_api_models`）：`/model` 打开等路径对 custom provider（命名 `custom_providers` 行、bare `provider: custom`、endpoint-map 条目）的 `/v1/models` 探活原本每次都直连，现按 `custom:<base_url>` 键 + 凭据指纹（blake2b）做 TTL 磁盘缓存，与一等 Provider 的 `cached_provider_model_ids`（`:3308`）对齐（`fb435aae`）。
+- **远端拉取**：`fetch_openrouter_models()`（`models.py:1504`）、`fetch_nous_recommended_models`（`models.py:955`）；结果缓存至 `provider_models_cache.json`（路径 `models.py:3197-3199`，TTL 1h、stale-serve 7d，`:3131-3141`），另有 `clear_provider_models_cache` 负责清缓存（`models.py:3358`）。
+- **自定义端点探活缓存**（`cached_fetch_api_models`，`models.py:4737`）：custom provider 的 `/v1/models` 探活原本每次都直连，现按 `custom:<base_url>` 键 + 凭据指纹（blake2b）做 TTL 磁盘缓存，与一等 Provider 的 `cached_provider_model_ids`（`:3308`）对齐（`fb435aae`）。
+- 适用对象：命名 `custom_providers` 行、bare `provider: custom`、endpoint-map 条目。
 - **用户输入**：模型 picker 中可自由输入 `model:`；custom provider 的 `model` 字段可主推默认模型。
 
 ### 4.2 能力元数据
@@ -178,7 +220,10 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 - `resolve_requested_provider` 就做别名归一。
 - OpenRouter 聚合内部路由由服务端决定（`provider_routing` 配置，`cli-config.yaml:165` 为 OpenRouter 端选项，note：不是 Hermes 自身）。
 - 负载均衡：无；同一 provider pool 是多 Key 轮换，不跨 base_url 均衡。
-- **运行时 `/model` 切换**（`hermes_cli/model_switch.py`）：picker/`switch_model` 的用户 provider key 读取改走 per-profile secret scope（`_scoped_key_env`，`0569c001`/`0c97a883`，multiplex 下不再误取他 profile 的 key）；歧义别名（如 `/model opus` 命中多个目录模型）改为**列出候选**而非启发式猜测（`b79e8382`）；`_model_sort_key` 把 YYYYMMDD 日期戳从版本元组中拆出，修复日期型快照（如 claude-opus-4-20250514）被当作版本号 20,250,514 排序的错误（`21bc9ba3`）。
+- **运行时 `/model` 切换**（`hermes_cli/model_switch.py`）经多次提交修复了三类问题：
+  - 凭据作用域：picker/`switch_model` 的用户 provider key 读取改走 per-profile secret scope（`_scoped_key_env`，`0569c001`/`0c97a883`），multiplex 下不再误取他 profile 的 key；
+  - 歧义别名：如 `/model opus` 命中多个目录模型时，改为列出候选而非启发式猜测（`b79e8382`）；
+  - 日期型快照排序：`_model_sort_key` 把 YYYYMMDD 日期戳从版本元组中拆出，修复 claude-opus-4-20250514 被当作版本号 20,250,514 排序的错误（`21bc9ba3`）。
 
 ---
 
@@ -194,8 +239,8 @@ Gateway/TUI 采用同样的 `load_config` / `resolve_runtime_provider` 路径（
 | L3 | **模型 fallback（同渠道换模型）** | 模型 400 / context overflow / 单模型报错 | `agent/conversation_loop.py`；通过 `agent.model` 切换 |
 | L4 | **跨渠道 fallback 链**（不同 provider/provider endpoint） | L1-L3 后仍在失败 / 明确 error | `agent/chat_completion_helpers.py:1923 try_activate_fallback` → `agent/agent_runtime_helpers.py:1459 restore_primary_runtime` 恢复主通道 |
 
-- credential pool 持久化：`write_credential_pool`（`hermes_cli/auth.py:1688`）+ `read_credential_pool`（`:1574`）；条目含 `last_status / quota / cooldown`，冷环境冷却结束后自动恢复，`selector` 见 `credential_pool.py` 的 `_cooldown_remaining`（`agent/credential_pool.py` 约 `:729` 附近、未逐行确认）。
-- 是否重复计费/重复生成：一个 `AIAgent.chat` 调用同一请求出现 429 时 `recover_with_credential_pool` 只换 Key 重发（同一 `api_kwargs` 不重建 messages），`try_activate_fallback` 则重建 transport 并重新发送同一消息（同一内容，通常会产生第二次调用费用）。重复生成风险在 L4 切换后显著存在——文档注释（`chat_completion_helpers.py:1923-1990` 附近）说明 switch 后继续同一任务；是否重复计费取决于 Provider 撤回策略，笔记无法定论——标注为“**存在重复计费可能（推断）**”。
+- credential pool 持久化：`write_credential_pool`（`hermes_cli/auth.py:1688`）与 `read_credential_pool`（`:1574`）；条目含 `last_status`/`quota`/`cooldown`，冷却结束后自动恢复，选择逻辑见 `_cooldown_remaining`（`agent/credential_pool.py` 约 `:729`，未逐行确认）。
+- 是否重复计费/重复生成：同一请求 429 时 `recover_with_credential_pool` 只换 Key 重发（同一 `api_kwargs`，不重建 messages）；`try_activate_fallback` 则重建 transport 并重新发送同一消息，通常会产生第二次调用费用——重复生成风险在 L4 切换后显著存在（`chat_completion_helpers.py:1923-1990` 附近注释说明 switch 后继续同一任务）。是否重复计费取决于 Provider 撤回策略，笔记无法定论——标注为“**存在重复计费可能（推断）**”。
 - `cli.py:4546`/`agent/chat_completion_helpers` 都从 `get_fallback_chain` 读取 `fallback_model`/`fallback_providers`。
 
 ---

@@ -44,13 +44,16 @@ JSON 导入主链：
 ## 1. 入口、用户目标与导出源
 
 - **Markdown 导出**：唯一入口是侧栏会话列表项上的 "MD" 小按钮，初始 `opacity: 0`，鼠标进入该行才显示（`frontend/components/side-panel.js:128-141`）。入口按"会话项"逐个提供，无批量操作、无命令行、无快捷键。导出源为单个整会话（`LoadSession(id)`），目标为个人存档/文本交换。
-- **JSON 导出**：`EXPORT_SESSION` 已注册进 bridge 分发器（`MainWindow.xaml.cpp:428`），handler 完整（`MainWindow.xaml.cpp:619-646`），但在前端全部源码中搜索 `EXPORT_SESSION` 无任何发送方；git 历史中 `-S "EXPORT_SESSION" -- frontend` 亦无匹配（代码自 6057749 初始上传起，前端从未发送过该消息）。结论：源码中确实存在但从未接 UI，非"本次未找到调用"的模糊情况——是历史与现状一致的无 UI 状态。
+- **JSON 导出**：`EXPORT_SESSION` 已注册进 bridge 分发器且 handler 实现完整（分发器 `MainWindow.xaml.cpp:428`，handler `MainWindow.xaml.cpp:619-646`），但前端全部源码中搜索该消息无任何发送方；git 历史中 `-S "EXPORT_SESSION" -- frontend` 亦无匹配（自 6057749 初始上传起）。结论：源码中确实存在但从未接 UI，非"本次未找到调用"的模糊情况——是历史与现状一致的无 UI 状态。
 - **JSON 导入**：首页 Quick Actions 的 "Import Session" 按钮（`frontend/components/home-tab.js:88`），无会话选择、单文件导入。
 
 ## 2. 范围选择、内容口径与字段过滤
 
 - 无消息级选择、无连续范围、无分支概念、无批量导出；粒度固定为整会话。会话文件本身是扁平 `messages` 数组（`frontend/services/session-store.js:34-46` 定义的 `{role, text, parts, timestamp}` 结构），不存在分支树。
-- **Markdown 口径**（`MainWindow.xaml.cpp:686-698`）：`# title` + `**Provider:**/ **Model:**/ **Date:**(updatedAt)` 头部行 + `---`；每条消息按角色映射为 `### User` / `### Assistant`，其余角色（含 system）一律 `### System`，正文取 `msg.value("content", msg.value("text", ""))`，消息间以 `---` 分隔。
+- **Markdown 口径**（`MainWindow.xaml.cpp:686-698`）：输出由头部、角色映射与分隔规则构成：
+  - 头部：`# title` + `**Provider:**`/`**Model:**`/`**Date:**`（取 updatedAt）三行 + `---`；
+  - 角色映射：`### User` / `### Assistant`，其余角色（含 system）一律 `### System`；
+  - 正文：取 `msg.value("content", msg.value("text", ""))`，消息间以 `---` 分隔。
 - **字段过滤**：只输出正文文本字段。reasoning、工具调用、附件（parts）、system prompt 均无结构化导出路径——工具调用只有以文本形式写进 content 才会出现；`parts` 字段从未被任何导出/导入逻辑读取。system prompt 属 SettingsManager 全局设置，不进入会话 JSON，因此不进入导出。
 - 比较模式（Compare tab）的对话不产生会话文件、不进入导出。
 
@@ -62,7 +65,7 @@ JSON 导入主链：
 ## 4. 格式、schema 与往返能力
 
 - **Markdown**：手写拼接的普通文本，无 schema 版本、无元数据；导出后无任何导入路径（全仓未找到 Markdown 导入），不可往返。
-- **JSON**：导出即会话文件原样 `data.dump(2)` 缩进输出（`MainWindow.xaml.cpp:639`），无包装、无版本字段；导入为 parse 后原样 `SaveSession`（`MainWindow.xaml.cpp:665-669`），未知字段原样保留。因此"导出文件→再导入"对同 schema 文件可往返（往返语义 = 整对象回存），但缺少版本标识，未来 schema 演化无法自动判别。导入时无 `id` 字段则生成 `imported-<unix时间>` 作为 id（`:667`），此时源会话身份不保留。
+- **JSON**：导出即会话文件原样 `data.dump(2)` 缩进输出（`MainWindow.xaml.cpp:639`），无包装、无版本字段。导入为 parse 后原样 `SaveSession`（`MainWindow.xaml.cpp:665-669`），未知字段原样保留。因此"导出文件→再导入"对同 schema 文件可往返（往返语义 = 整对象回存），但缺少版本标识，未来 schema 演化无法自动判别。导入时无 `id` 字段则生成 `imported-<unix时间>` 作为 id（`:667`），此时源会话身份不保留。
 - 消息 `parts`、时间戳等字段往返时原样保留（导入是整对象存储），但没有任何读取/展示路径使用它们。
 
 ## 5. 分享稿编辑、编排与预览
@@ -71,7 +74,7 @@ JSON 导入主链：
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
-本次未找到：全仓搜索 `toPng`/`toBlob`/`html2canvas`/`screenshot`/`PDF`/`Share`/`gist` 只命中前端 Compare 的 "shared messages" UI 命名与 vendor 库内部，无任何对话转图片、HTML、PDF 的捕获或生成代码（`frontend/vendor/` 仅有 marked.js 与 highlight.js，无截图库）。富内容保真不适用——导出的是源文本，聊天现场的 Markdown 渲染（marked + hljs，`frontend/components/message-renderer.js:80-105`）与导出端完全隔离。
+本次未找到：全仓搜索 `toPng/toBlob/html2canvas/screenshot/PDF/Share/gist` 只命中前端 Compare 的 "shared messages" UI 命名与 vendor 库内部，无任何对话转图片、HTML、PDF 的捕获或生成代码（`frontend/vendor/` 仅有 marked.js 与 highlight.js，无截图库）。富内容保真不适用——导出的是源文本，聊天现场的 Markdown 渲染（marked + hljs，`frontend/components/message-renderer.js:80-105`）与导出端完全隔离。
 
 ## 7. 生成历史、版本与持久化
 
@@ -95,7 +98,10 @@ JSON 导入主链：
 
 ## 11. 设计取舍与已确认边界
 
-- 导出/导入全部由 C++ 后端执行文件对话框与 I/O，前端零文件能力，这是 WebView2 架构下的自然边界；但 UI 入口、handler 注册与数据格式之间的一致性较差：`EXPORT_SESSION` 无 UI、`OPEN_FILE_DIALOG` 无前端调用、`SESSION_IMPORTED` 无前端监听（导入后侧栏列表不会自动刷新，`side-panel.js:12-15` 只监听 SESSIONS_LOADED/SEARCH_RESULTS/SESSION_SAVED/SESSION_DELETED）。
+- 导出/导入全部由 C++ 后端执行文件对话框与 I/O，前端零文件能力，这是 WebView2 架构下的自然边界；但 UI 入口、handler 注册与数据格式之间的一致性较差，三处典型不一致：
+  - `EXPORT_SESSION`：无 UI；
+  - `OPEN_FILE_DIALOG`：无前端调用；
+  - `SESSION_IMPORTED`：无前端监听（导入后侧栏列表不会自动刷新，`side-panel.js:12-15` 只监听 SESSIONS_LOADED/SEARCH_RESULTS/SESSION_SAVED/SESSION_DELETED 四个事件）。
 - 当前快照的会话持久化链路未闭合（详见未验证事项第 1 条），导出能力因此处于"管线完整、上游缺源"的状态；README 与 `docs/architecture.md:60` 声称的"session export/import、markdown export"与代码存在不一致：文档描述的能力部分无 UI（export）、部分依赖未被引用的模块。
 - Markdown 是"整会话扁平文本"口径，与 NextChat 的逐条选择、AIO Hub 的分支树结构化导出形成不同路线；JSON 是"事实源原样拷贝"口径，往返能力依赖同一 schema 文件，没有版本化格式。
 

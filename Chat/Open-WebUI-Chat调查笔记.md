@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.0 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。聊天消息 CRUD 全部集中在 `routers/chats.py`（无独立 messages 路由）；生成主链 `POST /api/chat/completions` 经 `process_chat_payload` 到上游后，多模型并行以 `asyncio.Task` fan-out（Redis 记账、跨实例取消），流式推送统一走 Socket.IO `events` 事件（`user:{user_id}` 房间），前端 `Chat.svelte` 按 `data.type` 分发约 25 种消息类型。前端状态机整体内聚于 `Chat.svelte`（约 4205 行）。
+Open WebUI v0.11.0 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。聊天消息 CRUD 全部集中在 `routers/chats.py`（无独立 messages 路由）。
+
+生成主链 `POST /api/chat/completions` 经 `process_chat_payload` 到上游后，多模型并行以 `asyncio.Task` fan-out（Redis 记账、跨实例取消），流式推送统一走 Socket.IO `events` 事件到用户专属房间；前端 `Chat.svelte` 按事件类型分发约 25 种消息，状态机整体内聚于该组件（约 4205 行）。
 
 ## 产品表面与系统边界
 
@@ -39,7 +41,7 @@ Chat.svelte submitPrompt（构造用户消息挂 history 树）→ sendMessage�
 ## 核心对象与状态权威
 
 - **`Chat` 表**（`models/chats.py:70-102`）：`chat` 字段即含完整 history 消息快照的 JSON，`current_message_id`/`last_read_at` 维护消息指针；`meta.internal=True` 为内部会话（子代理）。
-- **`ChatMessage` 表**（`models/chat_messages.py:128-172`）：`{chat_id}-{message_id}` 复合键，`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型列序；`upsert_message` 逐字段覆盖，`get_messages_map_by_chat_id` 把行还原为与 history 同构的字典（无行时回退旧版 JSON blob）。
+- **`ChatMessage` 表**（`models/chat_messages.py:128-172`）：`{chat_id}-{message_id}` 复合键，`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型列序；写入按字段覆盖，读取时把行还原为与 history 同构的字典（无行时回退旧版 JSON blob）。
 - **双写权威划分**：前端渲染读 history 快照（O(1)）；增量同步/统计/恢复读消息表；`reconcile_messages_by_chat_id` 负责两处对齐。
 - **任务状态**：`tasks.py` 进程内 `asyncio.Task` + Redis 哈希/pubsub（`stop` 命令是跨实例协作唯一通道）。
 

@@ -24,18 +24,23 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 - **服务端中间层**（本仓库）：认证 → 消息预处理（变量替换、RAG 注入、多模态翻译、Detector、角色分割）→ 上游模型调用 → 流式直通 + VCP 工具循环 → 工具执行（本地/远端）→ 结果回注 → 派生物落盘。
 - **聊天前端**（仓库外）：VCPChat（官方桌面端，`docs/TECHNICAL_LITE.md:186-190` 说明为独立项目）、OpenWebUI、SillyTavern。本仓库只提供用户脚本与正则增强（`OpenWebUISub/`、`SillyTavernSub/`）。
-- **管理面板**（`AdminPanel-Vue` + `adminServer.js`）：纯管理/查看界面，无聊天界面。本次在 `AdminPanel-Vue/src` 全量检索未找到聊天流渲染组件，`marked` 仅用于日记/占位符预览（`AdminPanel-Vue/src/views/DailyNotesManager.vue:105`）。
+- **管理面板**（`AdminPanel-Vue` + `adminServer.js`）：纯管理/查看界面，无聊天界面。本次在 `AdminPanel-Vue/src` 全量检索未找到聊天流渲染组件，`marked` 仅用于日记/占位符预览（views/DailyNotesManager.vue:105）。
 - **Rust 向量引擎**（`rust-vexus-lite`）：记忆/检索计算后端，不直接参与输出生成。
 
 完整主链路（触发 → 生成 → 展示 → 保存 → 重新打开）：
 
 1. 客户端 POST `/v1/chat/completions`（或 `/v1/chatvcp/completions` 强制展示 VCP 信息），请求体含 `messages`、`stream`、可选 `requestId/messageId`（`server.js:1217-1242`）。
-2. `ChatCompletionHandler.handle` 执行消息预处理：VCPTavern 注入 → 变量替换 → RAGDiaryPlugin 等 messagePreprocessor 注入知识块 → Detector/SuperDetector → 角色分割（`modules/chatCompletionHandler.js:899-1121`）。
+2. 处理器入口执行消息预处理：VCPTavern 注入 → 变量替换 → RAGDiaryPlugin 等预处理器注入知识块 → Detector/SuperDetector → 角色分割（chatCompletionHandler.js:899-1121）。
 3. 以重试机制向上游 `{apiUrl}/v1/chat/completions` 发起请求（`modules/chatCompletionHandler.js:1152-1182`）。
 4. 流式：SSE 逐行直通转发给客户端，同时后台累积全文；非流式：累积 JSON 响应（`streamHandler.js:143-406`）。
-5. 工具循环：从累积正文解析 `<<<[TOOL_REQUEST]>>>` 块（最多 `MaxVCPLoopStream` 轮，默认 5，`streamHandler.js:70`），执行插件工具，工具结果以 `<!-- VCP_TOOL_PAYLOAD -->` user 消息回灌后再次调用上游（`streamHandler.js:441-735`）。
-6. 展示：文本与 `[[VCP调用结果信息汇总:...]]` 块随 SSE 到达前端；外部前端渲染 Markdown；`VCPLog` 插件经 WebSocket 推送工具调用详情（`vcpInfoHandler.js:117`、`WebSocketServer.js:583`）。
-7. 保存：可选 chat 日志（`DebugLog/chat/`，`server.js:478-499`）；模型输出的 `<<<DailyNoteStart>>>` 块由 `handleDiaryFromAIResponse` 解析并交给 DailyNoteWrite 插件写入 `dailynote/`（`server.js:1303-1417`）；VCPForum 插件把帖子写入 `dailynote/VCP论坛/*.md`（`Plugin/VCPForum/VCPForum.js:247-294`）；生图插件把图片写入 `image/` 并经 ImageFileServer 提供 URL（`Plugin/GPTImageGen/GPTImageGen.js:1070-1100`）；工具调用记录可选写入 SQLite（`modules/toolCallRecordStore.js`）。
+5. 工具循环：从累积正文解析 `<<<[TOOL_REQUEST]>>>` 块（最多 `MaxVCPLoopStream` 轮，默认 5，streamHandler.js:70），执行插件工具，结果以 `<!-- VCP_TOOL_PAYLOAD -->` 前缀的 user 消息回灌后再次调用上游（streamHandler.js:441-735）。
+6. 展示：文本与 `[[VCP调用结果信息汇总:...]]` 块随 SSE 到达前端；外部前端渲染 Markdown；`VCPLog` 插件经 WebSocket 推送工具调用详情（vcpInfoHandler.js:117、WebSocketServer.js:583）。
+7. 保存：派生物按各自通道落盘——
+   - chat 日志（可选）：`DebugLog/chat/`（server.js:478-499）；
+   - 日记：模型输出的 `<<<DailyNoteStart>>>` 块经解析交给 DailyNoteWrite 插件写入 `dailynote/`（server.js:1303-1417）；
+   - 论坛帖子：`dailynote/VCP论坛/*.md`（VCPForum.js:247-294）；
+   - 图片：`image/` 并经图床提供 URL（GPTImageGen.js:1070-1100）；
+   - 工具调用记录（可选）：SQLite（toolCallRecordStore.js）。
 8. 重新打开：聊天历史由外部前端持有，服务端不提供聊天恢复接口；服务端持久化的派生物可被模型重新读取（论坛 `ReadPost`、日记 RAG 注入、文件工具、`ToolCallRecordQuery`）。此环节依赖外部前端，本次未运行验证。
 
 ## 1. 触发方式、输出协议与对象模型
@@ -49,7 +54,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 - 工具结果回灌：`<!-- VCP_TOOL_PAYLOAD -->` 前缀（`streamHandler.js:686`）。
 - RAG 知识块：`<!-- VCP_RAG_BLOCK_START {metadata} --> ... <!-- VCP_RAG_BLOCK_END -->`（`chatCompletionHandler.js:546`）。
 
-**协议健壮性**：解析器处理半截流（SSE 行缓冲 + StringDecoder，`streamHandler.js:146-311`）、转义（`「始ESCAPE」` 等，`toolCallParser.js:10-20`）、思考块剥离（未闭合 `<think>` 之后的内容被丢弃以防潜藏工具调用被执行，`toolCallParser.js:36-67`）、误触发防护（模糊匹配器 `modules/vcpLoop/toolMarkerFuzzyMatcher.js`；`[[VCPToolUse=Forbidden]]` 占位符禁用工具解析，`chatCompletionHandler.js:42`）。上述为源码直接确认，边界情形未运行验证。
+**协议健壮性**：解析器以 SSE 行缓冲 + StringDecoder 处理半截流（streamHandler.js:146-311）；参数用「始ESCAPE」等转义承载字面量（toolCallParser.js:10-20）；未闭合 `<think>` 之后的内容被丢弃，防止潜藏工具调用被执行（toolCallParser.js:36-67）；模糊匹配器与 `[[VCPToolUse=Forbidden]]` 占位符构成误触发防护（toolMarkerFuzzyMatcher.js、chatCompletionHandler.js:42）。上述为源码直接确认，边界情形未运行验证。
 
 **对象模型**：本次未找到"输出对象"概念。聊天输出没有服务端对象 ID、类型、版本或生命周期——流式直通时每个 chunk 的 `id` 由服务端临时构造（如 `chatcmpl-vcp-${Date.now()}`，`vcpInfoHandler.js:129`），不构成持久对象。具有稳定身份的实体是**派生物**而非输出对象：
 
@@ -84,7 +89,13 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 - **文本/Markdown**：服务端不渲染；`docs/Markdown_Output_Guideline.md` 规定插件以 `content: [{type:'text', text:'<markdown>'}]` 返回 Markdown 文本，交由模型转发、前端渲染（`docs/Markdown_Output_Guideline.md:9-25`）。
 - **图片**：生成图片落盘 `image/gptimagegen/` 等目录，返回 HTTP URL（经 `/pw=<key>/images/...` 图床）和可选 base64 `image_url` part（`GPTImageGen.js:1070-1199`）；富内容 `image_url` 会被多模态翻译管线处理（`streamHandler.js:79-124`）。
-- **HTML/SVG/JS 执行**：`Plugin/MediaRenderer` —— AI 编写的 HTML/SVG 在服务端托管 Chrome 的独立浏览器上下文渲染为 PNG/JPG/WebP/GIF/MP4/WebM；AI 编写的 JS 音乐合成代码在独立 Node 子进程运行输出 WAV。安全约束：HTML 的 JS 默认关闭（动画/内置库模式才开启）、资源由 Node 预取改写为 Data URI、页面运行时网络请求被阻断、云元数据地址禁止、执行超时与进程树回收、`GenerateAudio` 需要 6 位管理员验证码（`Plugin/MediaRenderer/README.md:321-342`）。`modules/browserRuntimeManager.js:516` 管理 Chrome 进程生命周期。
+- **HTML/SVG/JS 执行**：`Plugin/MediaRenderer` —— AI 编写的 HTML/SVG 在服务端托管 Chrome 的独立浏览器上下文渲染为 PNG/JPG/WebP/GIF/MP4/WebM；AI 编写的 JS 音乐合成代码在独立 Node 子进程运行输出 WAV。安全约束（README.md:321-342）：
+  - HTML 的 JS 默认关闭，动画/内置库模式才开启；
+  - 资源由 Node 预取改写为 Data URI；
+  - 页面运行时网络请求被阻断，云元数据地址禁止；
+  - 执行超时与进程树回收；
+  - `GenerateAudio` 需要 6 位管理员验证码。
+  托管 Chrome 的进程生命周期由 browserRuntimeManager.js:516 管理。
 - **语言解释器/CLI**：AICodeWorker 调度本机 opencode CLI（analyze/patch/write 三模式，jobId 异步任务，`Plugin/AICodeWorker/README.md:112-149`）；PowerShellExecutor（`requiresAdmin:true`，`Plugin/PowerShellExecutor/plugin-manifest.json`）、LinuxShellExecutor、SSHManagerService 提供系统命令执行。
 - **完整项目/IDE 工作区**：本次未找到（CodeSearcher 是编译好的搜索二进制，非项目工作区）。
 - **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:335`、`Plugin.js:1577`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
@@ -108,8 +119,8 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **执行位置**：本地主进程（direct/hybridservice 插件 in-process require，`Plugin.js:1107`）、stdio 子进程（spawn，`shell:true`，`Plugin.js:335`、`Plugin.js:1577`）、托管 Chrome（`modules/browserRuntimeManager.js`）、远端节点（WebSocket 分布式，`WebSocketServer.js`，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
-- **能力授予**：按插件权限边界而非统一能力桥：`requiresAdmin` 插件需验证码（PowerShellExecutor、MediaRenderer GenerateAudio）；AICodeWorker 靠 `ALLOWED_PROJECT_ROOTS` 白名单 + `MAX_CONCURRENT_JOBS` 硬闸门（`Plugin/AICodeWorker/README.md:72-83`）；图床路径受 `/pw=<key>/` 保护（`server.js:859-868` 白名单放行）。网络能力在普通插件内不受限（插件自行 axios/fetch，如 `Plugin/VSearch`），MediaRenderer 渲染环境例外地阻断网络。
+- **执行位置**：本地主进程（direct/hybridservice 插件 in-process require，Plugin.js:1107）、stdio 子进程（spawn，`shell:true`，Plugin.js:335、1577）、托管 Chrome（browserRuntimeManager.js）、远端节点（WebSocket 分布式，WebSocketServer.js，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
+- **能力授予**：按插件权限边界而非统一能力桥：`requiresAdmin` 插件需验证码（PowerShellExecutor、MediaRenderer GenerateAudio）；AICodeWorker 靠 `ALLOWED_PROJECT_ROOTS` 白名单 + `MAX_CONCURRENT_JOBS` 硬闸门（AICodeWorker/README.md:72-83）；图床路径受 `/pw=<key>/` 保护（server.js:859-868 白名单放行）。网络能力在普通插件内不受限（插件自行 axios/fetch，如 `Plugin/VSearch`），MediaRenderer 渲染环境例外地阻断网络。
 - **宿主动作**：shell 执行、文件读写、定时任务（`timely_contact` → `VCPTimedContacts/` 任务文件，`toolExecutor.js:333-341`、`server.js:997-1046`）、WebSocket 广播均有对应实现；工具审批（Human-in-the-loop）由 `modules/toolApprovalManager.js` 按配置规则执行。
 
 ## 8. 持久化、恢复、分享与导出
@@ -123,7 +134,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 存在三类回流路径，均为源码确认：
 
-- **日记回流**（闭环最完整）：模型输出含 `<<<DailyNoteStart>>>` 块 → `handleDiaryFromAIResponse` 解析 → DailyNoteWrite 落盘（`server.js:1303-1417`）→ 后续请求中 RAGDiaryPlugin 检索并按 `<!-- VCP_RAG_BLOCK_START -->` 块注入上下文（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135`），还可按新上下文刷新历史 RAG 块（`chatCompletionHandler.js:531-625` 的 `_refreshRagBlocksIfNeeded`）。即"模型输出 → 持久化 → 再进入模型上下文"的闭环存在。
+- **日记回流**（闭环最完整）：模型输出含 `<<<DailyNoteStart>>>` 块 → 解析并落盘（server.js:1303-1417）→ 后续请求中 RAGDiaryPlugin 检索并按 `<!-- VCP_RAG_BLOCK_START -->` 块注入上下文（RAGDiaryPlugin.js:1135），还可按新上下文刷新历史 RAG 块（chatCompletionHandler.js:531-625）。即"模型输出 → 持久化 → 再进入模型上下文"的闭环存在。
 - **工具记录回流**：`ToolCallRecordQuery` 工具允许模型查询工具调用记录（`modules/toolCallRecordStore.js:23` 配置中排除自查询）；`VCPTimeLine`、`OneRingMemo` 提供时间线/记忆读取。
 - **对象感知与定向修改**：VCPForum 支持 `ReadPost`/`ListAllPosts`/`ReplyPost` 按 UID 定向续写（`Plugin/VCPForum/VCPForum.js:349-387`）；AICodeWorker 支持 `query(jobId)` 查任务结果（`Plugin/AICodeWorker/README.md:132-136`）。但对象身份只存在于各插件的自有命名空间（UID/jobId/文件名），无统一对象注册表，模型无法"列出我的全部输出"。
 - **持续维护**：无跨回合的"同一对象继续修改"协议——每次工具调用都是新请求，靠插件自己持久化状态。
@@ -137,7 +148,7 @@ VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`�
 
 ## 11. 测试、已确认边界与未验证事项
 
-**测试覆盖**（`tests/`，node:test，共 11 个测试脚本，另含 2 个 HTML 样本）：动态工具注册表、OpenHerPersona 预处理器、占位符探索、结果去重、图床路径安全、分布式取消，以及 ChromeBridge 运行时核心/页面句柄/页面图片/内容可编辑回复四组测试（`tests/chromeBridge/{runtime-core,page-runtime-handle,page-runtime-image,contenteditable-reply-editor}-test.js`）。根 `package.json` 的 `npm test` 是占位脚本（`package.json:6`）。未发现针对流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析的自动化测试。
+**测试覆盖**（`tests/`，node:test，共 11 个测试脚本，另含 2 个 HTML 样本）：动态工具注册表、OpenHerPersona 预处理器、占位符探索、结果去重、图床路径安全、分布式取消，以及 ChromeBridge 运行时核心/页面句柄/页面图片/内容可编辑回复四组测试（`tests/chromeBridge/` 下对应 test.js）。根 `package.json` 的 `npm test` 是占位脚本（package.json:6）。未发现针对流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析的自动化测试。
 
 **本次明确未验证/未覆盖**：
 

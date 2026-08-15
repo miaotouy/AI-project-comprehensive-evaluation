@@ -30,15 +30,15 @@ Hermes Agent 同时维护 Electron 桌面、Ink TUI 和 Web dashboard 三套界�
 
 **桌面端根装配。** Provider 顺序是错误边界、查询、国际化、主题、触觉反馈、全局 Tooltip 和路由。TooltipProvider 被提升为全应用单例，以避免拖动分栏时重复渲染；路由关闭 transition，是为了防止流式令牌更新长期挤压导航提交。（`apps/desktop/src/main.tsx:53-85`）
 
-多窗口入口由 URL 参数 win 分支（`main.tsx:40-52`）：hud/overlay/quick/wake 各自挂独立根（HUD 是完整 renderer，见 Chat UI 笔记 §1），其余走主装配。模块级副作用在渲染前安装：剪贴板 IPC shim（`main.tsx:30`，`lib/clipboard.ts`）、active-work/power/translucency store。
+多窗口入口由 URL 参数 win 分支（`main.tsx:30,40-52`）：hud/overlay/quick/wake 各自挂独立根（HUD 是完整 renderer，见 Chat UI 笔记 §1），其余走主装配。模块级副作用在渲染前安装：剪贴板 IPC shim（`lib/clipboard.ts`）与 active-work/power/translucency 等 store。
 
-应用根是贡献注册表驱动的 ContribController（`app/contrib/controller.tsx:697-786`）：SidebarProvider 包住 ContribWiring，内部是固定 34px 标题栏（`titleBar.left/center/right` 三个 slot，-webkit-app-region 拖拽区与控件区分离）、LayoutTreeRoot（pane 树，见下）、SessionTileCloseConfirm、状态栏（未挂载即关闭，statusbarVisible 为 false 时整条 unmount，`controller.tsx:781`）。
+应用根是贡献注册表驱动的 ContribController（`app/contrib/controller.tsx:697-786`）：SidebarProvider 包住 ContribWiring，内部是固定 34px 标题栏（left/center/right 三个 slot，拖拽区与控件区分离）、LayoutTreeRoot（pane 树，见下）、SessionTileCloseConfirm 与状态栏——状态栏未挂载时整条 unmount（:781）。
 
 pane、布局预设、快捷键、命令面板条目全部通过 ContributionRegistry 注册（`contrib/registry.ts`）：按 area 分桶、快照缓存、区域级失效（改一个状态栏条目不会重渲染标题栏 slot），核心界面与插件走同一注册 API（discoverBundledPlugins 在核心之后加载，同名贡献后者覆盖前者，`controller.tsx:395-402`）。
 
 四个 wired surface（sidebar/chatRoutes/terminal/statusbar，`app/contrib/surfaces.tsx`）各自 memo 化、各自订阅自己的 atom；动作全部收进稳定身份 actions ref（`wiring.tsx:861-924`），任何 pane 的内容级更新不经过控制器。
 
-**TUI 根装配**（`ui-tui/src/entry.tsx`）：启动即 `resetTerminalModes()`（清残留 DEC 鼠标/粘贴模式），GatewayClient 走 stdio，内存监视与优雅退出链（EIO/EPIPE 连续 5 次即退出，`entry.tsx:80-88`），`ink.render(<App gw={gw}/>, { exitOnCtrlC:false, onHyperlinkClick })`。
+**TUI 根装配**（`ui-tui/src/entry.tsx`）：启动即 resetTerminalModes 清残留 DEC 鼠标/粘贴模式；GatewayClient 走 stdio；内存监视与优雅退出链（EIO/EPIPE 连续 5 次即退出，:80-88）；ink.render 挂载 App，禁用 Ctrl+C 退出、启用超链接点击。
 
 App（`app.tsx:9-25`）只有 GatewayProvider + AppLayout 两层；AppLayout 再组装状态栏（上下两条 StatusRulePane）、FloatingOverlays、PromptZone、两侧 AmbientRail、底部 AmbientDock、ActiveWidgetSlot（`appLayout.tsx:366, 448, 538-582`）。
 
@@ -48,7 +48,7 @@ App（`web/src/App.tsx:371-823`）内嵌 ProfileProvider，侧栏（移动抽屉
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**桌面端**：公共组件在 `src/components/ui/`（75 个文件：dialog/sheet/popover/dropdown-menu/context-menu/tooltip/select/button/alert/empty-state/error-state/skeleton/loader/…），全部基于 radix-ui（合并包 1.6.7）封装 + Tailwind v4 token 类。
+**桌面端**：公共组件集中在 `src/components/ui/`（75 个文件，覆盖弹窗、浮层、菜单、按钮、提示、空态、骨架屏与加载器等），全部基于 radix-ui（合并包 1.6.7）封装 + Tailwind v4 token 类。
 
 另有少量局部使用 `motion/react`（`components/ui/diff-count.tsx:1`、`app/right-sidebar/review/file-tree.tsx:3` 的 AnimatePresence）与 cmdk（命令面板）。
 
@@ -56,7 +56,7 @@ App（`web/src/App.tsx:371-823`）内嵌 ProfileProvider，侧栏（移动抽屉
 
 **状态所有权**（桌面）：遵从 `apps/desktop/AGENTS.md` 的“按权威放状态”契约——后端权威的数据走 react-query 缓存 + store 投影（聊天主链见 Chat UI 笔记 §8）；Electron 权威的机器事实走 window.hermesDesktop 窄桥；
 
-渲染层自己拥有的是“纯本窗口呈现”状态（`store/` 下 151 个 nanostores atom：layout、sidebar、theme、composer、notifications、windows、hud…）。持久化偏好按“作用域自声明”原则存 localStorage（如主题按 profile 分键、侧栏视图状态、预览标签）。
+渲染层自己拥有的是“纯本窗口呈现”状态（`store/` 下 151 个 nanostores atom，覆盖布局、侧栏、主题、输入框、通知、窗口等）。持久化偏好按“作用域自声明”原则存 localStorage（如主题按 profile 分键、侧栏视图状态、预览标签）。
 
 命令式 UI 状态（弹窗开合、toast、调色板开关）都是模块级 atom（`$commandPaletteOpen`、`$notifications`、`$sessionPickerOpen`），不经过 React context，命令入口与渲染视图共享同一 store。
 
@@ -77,14 +77,19 @@ App（`web/src/App.tsx:371-823`）内嵌 ProfileProvider，侧栏（移动抽屉
   横幅变体 banner（error/warn/info 三色调，底部贴边，`dialog.tsx:125-170`）。
 - **弹窗内 Popover 改投**（`components/ui/dialog-portal-context.ts`）：Radix 的 Select/Popover/DropdownMenu 默认 portal 到 document.body，会成为 Dialog 的 DOM 兄弟——弹窗内点下拉时，DismissableLayer 把弹窗内交互判为“outside”误关整个弹窗，且 z-index 在跨 body 兄弟间不可控。
 
-  DialogContent 把自身 content 节点发布进 context（`dialog.tsx:100, 146, 192`），usePopoverPortalContainer 让 popover/select/dropdown 的 Portal container 改为弹窗节点（`popover.tsx:33-36`、`select.tsx:50-53`、`dropdown-menu.tsx:79-82`）——浮层成为弹窗真子节点，焦点不出弹窗，层级共享弹窗 stacking context。
+  DialogContent 把自身 content 节点发布进 context（`dialog.tsx:100,146,192`），下列三个浮层组件的 Portal container 都改为弹窗节点：
+  - `popover.tsx:33-36`
+  - `select.tsx:50-53`
+  - `dropdown-menu.tsx:79-82`
+
+  浮层成为弹窗真子节点后，焦点不出弹窗，层级共享弹窗 stacking context。
 - **ConfirmDialog**（`components/ui/confirm-dialog.tsx`）：共享确认弹窗，Enter/Space 从弹窗任意位置触发确认（onKeyDown，:99-106），内部自带 pending→done→close 节拍（done 后 600ms 自动关）、内联错误（throw 后保持打开）、dismissOnConfirm 乐观模式。
 - **覆盖层视图**（settings/command-center/agents/cron/profiles/webhooks/starmap）：不是 Modal，而是挂在 ContribWiring 尾部、由 hash 路由驱动的全尺寸视图（`wiring.tsx:1057-1119`，懒加载 Suspense）；关闭时回跳被覆盖前的路由（`use-overlay-routing.ts:33-59` 的 returnPathRef）。
 - **命令面板 ⌘K**（`app/command-palette/index.tsx`）：Radix Dialog + 透明 overlay（保留 click-away 与焦点陷阱，无遮罩变暗，:1270-1272）+ cmdk。搜索排序是自研的（scoreItem/rankGroups，:180-241，cmdk 只当键盘/选择机制，`shouldFilter={false}`）；
 
-  支持嵌套子页（to，PAGE_PARENTS，Esc/空输入退格逐级回退 :1315-1323）；关闭动画由 content 的 animationend 驱动卸载，`EXIT_FALLBACK_MS=1000` 仅兜底（:254, 1284-1288）；行列表在打开后第二帧渲染（useDeferredValue，:280-283）。
+  支持嵌套子页，Esc 或空输入时逐级回退（:1315-1323）；关闭动画由 content 的 animationend 事件驱动卸载，`EXIT_FALLBACK_MS=1000` 仅作兜底（:254,1284-1288）；行列表在打开后第二帧渲染（useDeferredValue，:280-283）。
 
-**window 级 Esc 协商。** 应用自有的多个 window keydown 处理器（窄屏侧栏揭示、布局编辑、zone 编辑器、覆盖层、拖拽）通过 `escape-layers.ts` 的 pushEscapeLayer/isTopEscapeLayer 按优先级（10-50，ESCAPE_PRIORITY）串行化，一次 Esc 只命中最上层；Radix 弹窗由于 stopPropagation 天然排在契约最上（`escape-layers.ts:6-15`）。
+**window 级 Esc 协商。** 多个 window keydown 处理器（窄屏侧栏揭示、布局编辑、zone 编辑器、覆盖层、拖拽）经 `escape-layers.ts:6-15` 的 pushEscapeLayer/isTopEscapeLayer 按优先级（10-50）串行化，一次 Esc 只命中最上层；Radix 弹窗因 stopPropagation 天然排在契约最上。
 - 右键/上下文菜单：`components/ui/context-menu.tsx`（Radix ContextMenu 封装，子菜单额外 portal 出父 Content 防 overflow 裁剪，:140-165）；业务侧消息/会话行等消费点在 Chat UI 与消息渲染器笔记。
 
 ### TUI：单一 overlayStore + 三种形态
@@ -98,7 +103,7 @@ App（`web/src/App.tsx:371-823`）内嵌 ProfileProvider，侧栏（移动抽屉
 
 ### Web：`@nous-research/ui` 组件库
 
-ConfirmDialog（重启/更新确认，`web/src/App.tsx:1068-1095`）、useToast（见第 3 节）来自 `@nous-research/ui`（`web/src/App.tsx:63` 等）；OAuth 登录模态是自绘（`components/OAuthLoginModal.tsx`，遮罩点击关闭 :160）；
+ConfirmDialog（重启/更新确认，:1068-1095）与 useToast（见第 3 节）来自 `@nous-research/ui`（`web/src/App.tsx:63` 等）；OAuth 登录模态是自绘（`components/OAuthLoginModal.tsx`，遮罩点击关闭 :160）；
 
 主题/语言切换器在窄屏用底部 sheet 形态 portal 到 body（`components/LanguageSwitcher.tsx:26-31` 注释、`components/ThemeSwitcher.tsx:22-27` 注释）。该库内部实现（焦点陷阱、Esc、层级）未下钻。
 
@@ -110,13 +115,17 @@ ConfirmDialog（重启/更新确认，`web/src/App.tsx:1068-1095`）、useToast�
 
   位置默认 `error/warning` 或带 action 的走顶部居中、其余右下（defaultPlacement，:67-73）。
 
-  `notifyError()` 有错误摘要规则表（ERROR_SUMMARIES，:91-133：磁盘满 → “释放空间”、gateway_auth_failed、OpenAI API key 拒绝带状态码、ElevenLabs/麦克风权限等），并把超 180 字符错误折叠成 fallback + 可展开 detail。
+  notifyError 维护错误摘要规则表（ERROR_SUMMARIES，:91-133），覆盖磁盘满、网关鉴权失败、OpenAI API key 被拒（带状态码）、ElevenLabs/麦克风权限等常见错误，并把超过 180 字符的错误折叠为 fallback 加可展开 detail。
 - **渲染**（`components/notifications.tsx`）：两个 portal 到 body 的栈——TopCenterStack（`role="region"`，最新一条常显 + “+N more”展开 + clear-all，:104-141）与 BottomRightStack（全部平铺，:145-164）。
 
   单条 role/aria-live 按 kind（error → alert/assertive，其余 status/polite，:205-207）；detail 用 `<details>` 折叠 + 复制按钮；成功/错误/警告触发对应 haptic（:71-77）。注释说明 portal 到 body 的必要性：React 根子树内的 toast 会被 body 级弹窗遮罩盖住（:99-103）。
-- **后端通知接入**（`store/agent-notices.ts`）：notification.show 负载（Python `agent/credits_tracker.py` 的 AgentNotice 脊线经 `tui_gateway/server.py` 转发）映射为 toast——剥离前导严重级字形（CLI/TUI 用字形表达级别，桌面 toast 已有图标，stripGlyph，:39-44）、· 分隔主文本与 meta、key 兼作 toast id 使同 key 重复发射原地替换（额度 50→75→90 逐级原地升级，:107-109）、额度用量按 75%/90% 门槛变色（noticeAccent，:74-98）。
+- **后端通知接入**（`store/agent-notices.ts`）：后端 notification.show 负载（Python `agent/credits_tracker.py` 的 AgentNotice 经 `tui_gateway/server.py` 转发）映射为 toast，映射规则如下：
+  - 剥离前导严重级字形（CLI/TUI 用字形表达级别，桌面 toast 已有图标，stripGlyph，:39-44）；
+  - 用 · 分隔主文本与 meta；
+  - key 兼作 toast id，同 key 重复发射原地替换（额度 50→75→90 逐级原地升级，:107-109）；
+  - 额度用量按 75%/90% 门槛变色（noticeAccent，:74-98）。
 
-  notification.clear 按 key 关闭。原生 OS 通知只放行 credits.depleted/credits.restored 两种（:180-206）。
+  notification.clear 按 key 关闭；原生 OS 通知只放行 credits.depleted/credits.restored 两种（:180-206）。
 - **原生系统通知**（`store/native-notifications.ts`）：与 in-app toast 分开的独立通道，7 类 kind 各自独立开关（approval/input/turnDone/turnError/backgroundDone/credits/plugin），1s 节流去重（:94-111），仅“后台”（document.hidden 或失焦）时发送，但 approval/input 属于 ATTENTION_KINDS 前台也发（:26, 116-120）。
 
 ### TUI 通知
@@ -180,7 +189,14 @@ ConfirmDialog（重启/更新确认，`web/src/App.tsx:1068-1095`）、useToast�
 
   字体覆盖独立于主题（服务端权威 + localStorage 防闪，:41, 443-449, 521-541）。
 
-  token 输出为 :root 行内变量：palette 分层（`--background/-midground/-foreground` 的 color-mix 透明度层，:68-78）、排版、布局（半径/密度系数 `--theme-spacing-mul`）、`--color-*` shadcn 覆盖、数据序列色、`--theme-asset-*`（背景/徽标等）、`--component-<bucket>-*` 组件样式桶、customCSS（单一 `<style>` 标签复用替换，:260-276）、终端前景/背景（xterm 使用，:392-400）；
+  token 输出为 :root 行内变量：
+  - palette 分层：`--background`/`--midground`/`--foreground` 的 color-mix 透明度层（:68-78）；
+  - 排版与布局：字体参数、半径与密度系数 `--theme-spacing-mul`；
+  - `--color-*`：shadcn 覆盖与数据序列色；
+  - `--theme-asset-*`：背景、徽标等；
+  - `--component-<bucket>-*`：组件样式桶；
+  - customCSS：单一 `<style>` 标签复用替换（:260-276）；
+  - 终端前景/背景：xterm 使用（:392-400）。
 
   切换时清上一主题的全部动态变量（:351-373）。
 
@@ -200,7 +216,10 @@ ConfirmDialog（重启/更新确认，`web/src/App.tsx:1068-1095`）、useToast�
 窄视口下 collapsible 边栏（sessions/files/review）**离开网格**转为边缘覆盖层：边条 hover 悬停揭示 + ⌘B/⌘G 钉住揭示 + Esc 关闭（`narrow-overlays.tsx:103-147`），宽度取 pane 声明宽与 85vw 的小者。
 
 pane 树本身是重量级可拖拽布局（split/group 权重、preset：Default/Focus/Terminal deck/Quad，`controller.tsx:342-391`），会话选项卡可拖成独立 pane。
-- **窗口最小尺寸**（Electron）：主窗 `MIN_WIDTH=400`（`electron/window-state.ts:14`，默认 1220×? 记忆化恢复），独立会话窗 `SESSION_WINDOW_MIN_WIDTH=420`/`MIN_HEIGHT=620`（`electron/session-windows.ts:10-11`），HUD 窗 minWidth: 380（`electron/main.ts:9213`）。
+- **窗口最小尺寸**（Electron）：
+  - 主窗：`MIN_WIDTH=400`（`electron/window-state.ts:14`，默认 1220×? 记忆化恢复）
+  - 独立会话窗：`SESSION_WINDOW_MIN_WIDTH=420` / `MIN_HEIGHT=620`（`electron/session-windows.ts:10-11`）
+  - HUD 窗：minWidth 380（`electron/main.ts:9213`）
 
   无按窗口宽度的自动侧栏折叠——768 断点只作用于 renderer 视口。
 - **多窗口**（`store/windows.ts` + `electron/main.ts`）：win 参数区分主窗/secondary（单会话无侧栏窗）/hud/pet overlay/quick entry/wake；watch 参数是子代理旁观窗（懒恢复、live-mirror）；`isAuxiliaryWindow()` 决定安装/引导 overlay 只属于主窗（`windows.ts:79-84`）。
@@ -219,7 +238,11 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 
   无缩放/旋转/多图导航——比 Cherry Studio 的灯箱能力面小。
 
-  消费点：消息 markdown 图片（`components/assistant-ui/markdown-text.tsx:389`）、指令文本（`directive-text.tsx:370, 433`）、工具输出图（`tool/fallback.tsx:611`）、生成的图片结果、composer 附件（`app/chat/composer/attachments.tsx:156-164`，测试断言“附件图走灯箱不进预览 rail”）。
+  消费点覆盖消息 markdown 图片、指令文本、工具输出图、生成的图片结果与 composer 附件（测试断言“附件图走灯箱不进预览 rail”）：
+  - `components/assistant-ui/markdown-text.tsx:389`
+  - `directive-text.tsx:370,433`
+  - `tool/fallback.tsx:611`
+  - `app/chat/composer/attachments.tsx:156-164`
 - **预览 rail**（桌面，`store/preview.ts`）：文件/URL/artifact 三类 PreviewTarget 的右侧标签页列表（`previewKind: binary/html/image/pdf/text`），标签持久化（hermes.desktop.previewTabs.v2，:63），dataUrl 目标仅内存不落盘（:27-28）——这是“查看文件”的主通道，与图片灯箱并存分工（附件图灯箱、文件图 rail）。
 
 **拖放。** composer 文件拖入（useFileDropZone + partitionDroppedFiles：应用内路径→@file: ref、OS 文件→附件管线、目录→@folder:、图片→base64 缩略图）已在 Chat UI 笔记 §3 详录，不重复；统一视觉是 DROP_SHEET_CLASS 虚线 sheet（`components/ui/drop-affordance.tsx`）。
@@ -236,7 +259,15 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 **HUD 与辅助窗口。** HUD 是完整 renderer（非傀儡窗），其快照快捷键、窗口位置记忆（`hud-state.json`）在 Chat UI 笔记 §1/§8；pet overlay/quick entry/wake indicator 是独立最小根（`main.tsx:46-51`）。
 
 **快捷键。** `store/keybinds.ts` 是可重绑定 action 注册表（KEYBINDS_AREA 贡献），TipKeybindLabel 从注册表自动读标签+组合键渲染 tooltip 提示（`components/ui/tooltip.tsx:216-223`）；快捷键面板经自定义事件 hermes:open-keybinds 打开设置页（`wiring.tsx:293-298`）。
-- **浮层层级变量**（`styles.css:222-236`）：`--z-modal-backdrop:120` / `--z-modal:130` / `--z-modal-popover:140` / `--z-over-modal:200` / `--z-over-modal-content:210` / `--z-crash:1500`；Toast 与命令面板在 over-modal 层。
+- **浮层层级变量**（`styles.css:222-236`）：
+  - `--z-modal-backdrop`：120
+  - `--z-modal`：130
+  - `--z-modal-popover`：140
+  - `--z-over-modal`：200
+  - `--z-over-modal-content`：210
+  - `--z-crash`：1500
+
+  Toast 与命令面板在 over-modal 层。
 
 **动画。** 桌面开合动画全走 Tailwind data-state 类（无 JS 补间）；`motion/react` 仅两处局部（diff 计数、文件树折叠）；Loader 是 rAF 驱动的自研曲线。TUI 的动画是终端字符级（shimmer 扫过、FaceTicker 表情帧）。
 

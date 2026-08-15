@@ -43,7 +43,7 @@ Connect Agent / 模型选择
   -> UI cancel 终止进程树或平台任务
 ```
 
-OpenClaw/Hermes 不走本地 JSONL adapter。`GatewayConnectionCtr.runHeteroTask` 按 topic/task 启动进程，OpenClaw 通过 `lh notify` 回传，Hermes 通过 stdout/stderr 与 `agentNotify.notify` 回流；任务表保存 PID 并支持终止。
+OpenClaw/Hermes 不走本地 JSONL adapter。`GatewayConnectionCtr.runHeteroTask` 按 topic/task 启动进程，OpenClaw 经 `lh notify` 回传，Hermes 经标准输出与通知接口回流；任务表保存 PID 并支持终止。
 
 ```text
 Bot 平台（slack/discord/telegram/feishu/line/qq/imessage/wechat）
@@ -61,11 +61,22 @@ Connector 以个人、Workspace 或 Agent scope 保存持久连接；Messenger i
 
 ## 执行、回流与控制语义
 
-统一事件模型覆盖文本、reasoning、工具、todo、subagent、文件变化、额度、干预和终态。Claude Code/Qoder 可接收临时 MCP 配置；`browserMcpTools.ts` 把 `navigate/snapshot/click/fill/press/scroll/screenshot/readPage` 投给外部 Agent，使其能操作 LobeHub 内置浏览器。
+统一事件模型覆盖文本、推理、工具、待办、子 Agent、文件变化、额度、干预和终态。Claude Code/Qoder 可接收临时 MCP 配置；`browserMcpTools.ts` 把下列浏览器操作投给外部 Agent，使其能操作 LobeHub 内置浏览器：
 
-`claude-code-sdk` 与 `codex-app-server` 传输的权限语义不同于 CLI spawn：前者使用 `permissionMode: 'bypassPermissions'` 并禁用 `AskUserQuestion/Monitor/ScheduleWakeup`，后者携带 `--dangerously-bypass-approvals-and-sandbox` 类标志，另由 inactivity timeout 与 task 状态机（starting/running/monitoring/idle/stale）接管超时。`agent_intervention_request/response` 允许外部 runtime 在执行中挂起并向用户提结构化问题。取消由本地进程树终止或 gateway task 终止到达真实执行体。
+```text
+navigate / snapshot / click / fill / press / scroll / screenshot / readPage
+```
 
-产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口；CLI 侧提供 `lh connect/device/hetero/bot/botMessage/botMessengers/notify` 控制设备、任务与 bot。外部 CLI 输出的文本、工具调用和文件变化按事件流进入宿主会话，可触发文件写盘与浏览器操作，属于不可信输入面；其信任边界取决于各 runtime 的权限模型与宿主注入工具的审批，真实提权风险未做运行评估。
+`claude-code-sdk` 与 `codex-app-server` 两种传输的权限语义不同于 CLI spawn，对照如下：
+
+| 传输 | 权限语义 | 超时兜底 |
+|---|---|---|
+| `claude-code-sdk` | 使用 `permissionMode: 'bypassPermissions'`，禁用 `AskUserQuestion`/`Monitor`/`ScheduleWakeup` | 空闲超时与任务状态机（`starting`/`running`/`monitoring`/`idle`/`stale`） |
+| `codex-app-server` | 携带 `--dangerously-bypass-approvals-and-sandbox` 类标志 | 同上 |
+
+`agent_intervention_request/response` 允许外部 runtime 在执行中挂起并向用户提出结构化问题；取消由本地进程树终止或 gateway task 终止到达真实执行体。
+
+产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口；CLI 侧提供 `lh` 命令族（连接、设备、异构 Agent、bot 管理、消息与通知等子命令）控制设备、任务与 bot。外部 CLI 输出的文本、工具调用和文件变化按事件流进入宿主会话，可触发文件写盘与浏览器操作，属于不可信输入面；其信任边界取决于各 runtime 的权限模型与宿主注入工具的审批，真实提权风险未做运行评估。
 
 ## 权限、凭据与治理边界
 

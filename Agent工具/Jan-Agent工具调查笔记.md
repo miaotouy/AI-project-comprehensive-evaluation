@@ -40,7 +40,17 @@ Jan 的工具体系是 **AI SDK `streamText` 原生 tool calling + 扩展来源*
 | `retrieve` / `list_attachments` / `get_chunks` | `extensions/rag-extension/src/tools.ts`（`getRAGTools(retrievalLimit)` L8；`callTool` switch 在 index.ts L110-127；retrieve 返回 citations 载荷） | 线程有文档（`hasDocuments`）且 RAG 可用；`server='rag-internal'` |
 | MCP server 任意工具 | `web-app/src/services/mcp/tauri.ts` → `window.core.api` → Rust（`src-tauri/src/core/mcp/commands.rs` `collect_mcp_tools`；本地 API 代理执行 `src-tauri/src/core/server/proxy.rs` L1015/1260/2052 `execute_mcp_tool_calls`） | 模型 `capabilities` 含 `tools` 且未被禁用 |
 
-Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = exa(无 key)/tavily(需 key)/searxng(需 endpoint)`，默认 exa（L16-41）；**API 密钥经 `set_secret`/`get_secret` 存 OS keyring，绝不明文写入 settings.json**（L69-80、L89-94，partialize 只持久化 webSearchEnabled/searchProvider/endpoints）。
+Web 搜索配置集中在 `useWebSearchConfig.ts`（112 行），`WEB_SEARCH_PROVIDERS` 只含三个 provider，默认 exa（L16-41）：
+
+| provider | 配置要求 |
+|---|---|
+| `exa` | 无 key，默认 |
+| `tavily` | 需 key |
+| `searxng` | 需 endpoint |
+
+**API 密钥经 `set_secret`/`get_secret` 存入 OS keyring，绝不明文写入 `settings.json`**（L69-80、L89-94）。
+
+partialize 只持久化 `webSearchEnabled`、`searchProvider`、`endpoints` 三个字段。
 
 ## 2. MCP 服务生命周期（Rust 侧）
 
@@ -53,18 +63,29 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 
 ### 2.2 启动与进程管理
 
-- `run_mcp_commands`（`helpers.rs:62-161`）：对所有已配置 server **并行**拉起；`start_mcp_server`（`helpers.rs:318-395`）自带**幂等保护**（重复调用不会重复 spawn，issue #8411）。
+- `run_mcp_commands`（`helpers.rs:62-161`）：对所有已配置 server **并行**拉起；
+- `start_mcp_server`（`helpers.rs:318-395`）：自带**幂等保护**，重复调用不会重复 spawn（issue #8411）。
 - 进程生命周期与传输类型绑定（`helpers.rs:397` 起，约 819 行内分区实现）：
   - **http streamable**（stdio 的替代，长连接内传 SSE）；
   - **sse**；
   - **stdio**（最常用）。
-- Windows 下用 `CREATE_NO_WINDOW`（`0x08000000`，`helpers.rs:615`）避免弹出控制台；Unix 侧 `process_group(0)`（`helpers.rs:622`）让子进程做进程组组长；`kill_on_drop`（`helpers.rs:624`）随 ServerHandle drop 时清理。
-- runtime 覆盖：配置指定时优先 `bun`/`uvx`（override 判定 L585-588、命令重写分支 L590-612），**启动失败自动回退系统 `npx`/`uvx` 重试一次**（L640-691，`use_override` loop 的 L673-680）；启动后 500ms 稳定性检查（L720-733，起不来的 server 标记失败），另有 `tools/list` 可达性验证（L735 起，最多 3 次、单次 2s 超时、1s 退避）。
+- 子进程创建与清理按平台处理：
+  - Windows：`CREATE_NO_WINDOW`（`0x08000000`）避免弹出控制台（`helpers.rs:615`）；
+  - Unix：`process_group(0)` 让子进程做进程组组长（`helpers.rs:622`）；
+  - 清理：`kill_on_drop` 随 ServerHandle drop 时清理子进程（`helpers.rs:624`）。
+- runtime 处理（override 判定 L585-588、命令重写 L590-612）：
+  - 优先：配置指定时使用 `bun`/`uvx`；
+  - 回退：优先 runtime 启动失败时自动改用系统 `npx`/`uvx` 重试一次（L640-691，`use_override` 循环的 L673-680）；
+  - 检查：启动后 500ms 稳定性检查（L720-733，起不来的 server 标记失败），另有 `tools/list` 可达性验证（L735 起，最多 3 次、单次 2s 超时、1s 退避）。
 
 ### 2.3 命令入口
 
-- `web-app/src/services/mcp/tauri.ts`：`getToolsForServers`/`callTool`/`callToolWithCancellation`（cancellationToken）/`cancelToolCall`/`activateMCPServer`/`deactivateMCPServer`；
-- 执行落在 Rust `collect_mcp_tools`（`src-tauri/src/core/mcp/commands.rs`）与 `execute_mcp_tool_calls`（代理场景在 `src-tauri/src/core/server/proxy.rs` L1015/1260/2052 复用）——即前端只经 `window.core.api` 发命令，真正的 MCP 会话在 Rust 侧维护。
+- 前端入口是 `TauriMCPService`（`web-app/src/services/mcp/tauri.ts`），方法按用途分组：
+  - 工具枚举：`getTools`、`getToolsForServers`；
+  - 调用与取消：`callTool`、`callToolWithCancellation`（cancellationToken）、`cancelToolCall`；
+  - 启停：`activateMCPServer`、`deactivateMCPServer`；
+  - 配置：`getMCPConfig`（解析 MCP 配置 JSON，含 legacy 顶层 server 兼容，L46-63）。
+- 执行落在 Rust 侧：`collect_mcp_tools`（`src-tauri/src/core/mcp/commands.rs`）与 `execute_mcp_tool_calls`（代理场景复用 `src-tauri/src/core/server/proxy.rs` L1015/1260/2052）。前端只经 `window.core.api` 发命令，真正的 MCP 会话在 Rust 侧维护。
 
 ## 3. 加载与注入
 
@@ -73,11 +94,11 @@ Web 搜索配置 `useWebSearchConfig.ts`（112 行）：`WEB_SEARCH_PROVIDERS = 
 `custom-chat-transport.ts` `refreshTools`（L815-977）：
 
 1. 仅 `selectedModel.capabilities.includes('tools')` 时加载（L831-834）；
-2. RAG 工具：`hasDocuments`（线程 metadata 或 `VectorDBExtension.listAttachmentsForProject`，L838-859）且 `ragFeatureAvailable`（回退 `useAttachments.enabled`，L861-863）；
-3. MCP 工具：`enableSmartToolRouting` 时经 `mcpOrchestrator.getRelevantTools(lastUserMessage, …)`（L898-933）；**路由结果冻结**（`frozenRoutedTools` + 签名，防每次请求工具集变化破坏提示缓存，L730-735、L908-933）；同名校验（L943-948）；
+2. RAG 工具：要求线程有文档且 RAG 功能可用；文档检查（`hasDocuments`）经线程 metadata 或 VectorDBExtension 附件列表接口（L838-859），功能开关 `ragFeatureAvailable` 回退 `useAttachments.enabled`（L861-863）；
+3. MCP 工具：开启智能路由（`enableSmartToolRouting`）时按最后一条用户消息筛选相关工具（L898-933）；**路由结果冻结**——`frozenRoutedTools` 加签名缓存，防止每次请求的工具集变化破坏提示缓存（L730-735、L908-933）；另有同名校验（L943-948）；
 4. 轻量路由模型 `resolveRouterModel`（L979-1024，`isRouterModelSelectable` 校验）；
-5. 全部转 `jsonSchema(normalizeToolInputSchema(...))`（L876-881、L950-956）；
-6. 禁用过滤：全局 `useToolAvailable.getState().getDisabledTools()`，复合 key `${serverName}::${toolName}`（L823-828）。
+5. 统一转为 JSON Schema（经 `normalizeToolInputSchema` 规整，L876-881、L950-956）；
+6. 禁用过滤：按全局禁用列表过滤，复合 key `${serverName}::${toolName}`（L823-828）。
 
 `use-chat.ts`（L111-117）：MCP/RAG 工具名变化时自动 `refreshTools()`，保证 MCP server 启停后工具集及时更新。
 
@@ -130,7 +151,7 @@ useChat.sendMessage
        -> toUIMessageStream 流式更新 DOM
 ```
 
-`TauriMCPService`（`web-app/src/services/mcp/tauri.ts`）：`getTools()`/`getToolsForServers`/`callTool`/`callToolWithCancellation`（带 cancellationToken）/`cancelToolCall`/`activateMCPServer`/`deactivateMCPServer`；`getMCPConfig` 解析 MCP 配置 JSON（含 legacy 顶层 server 兼容，L46-63）。
+执行链上的调用对象是 `TauriMCPService`（`web-app/src/services/mcp/tauri.ts`），其方法按用途分组，清单见 2.3。
 
 ### 5.2 渲染
 

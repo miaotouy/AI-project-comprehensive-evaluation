@@ -59,7 +59,14 @@
 
 ## 消息操作、分支导航与呈现投影
 
-- **分支/版本导航入口**：Chatbox 的 ForkGroup 折叠分支组（`N / M` 位置指示，替代已移除的 ForkNav"◀ 1/2 ▶"，替代回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；Jan 的 `< n/m >` 版本导航与 activeRootId 切换；Cherry Studio 的 `TopicBranchPanel`（React Flow 画布选分支辅助面板）；AIO Hub 的 Vue Flow 树图与 `BranchNavigator`；Open WebUI 的 Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；SillyTavern 的 checkpoint 旗标（Shift+点击新建）与 branch 跳转；Pi 的 label/分支切换选择器。
+- **分支/版本导航入口**：
+  - Chatbox：ForkGroup 折叠分支组（`N / M` 位置指示，替代已移除的 ForkNav"◀ 1/2 ▶"，替代回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；
+  - Jan：`< n/m >` 版本导航与 activeRootId 切换；
+  - Cherry Studio：`TopicBranchPanel`（React Flow 画布选分支辅助面板）；
+  - AIO Hub：Vue Flow 树图与 `BranchNavigator`；
+  - Open WebUI：Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；
+  - SillyTavern：checkpoint 旗标（Shift+点击新建）与 branch 跳转；
+  - Pi：label/分支切换选择器。
 - **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
 - **呈现投影**：同一份会话数据可以有多种用户可见投影——AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图、VCPChat 的 bubble/panel/immersive 三种 CSS 投影、Chatbox 和 Jan 的分支版本导航。仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
@@ -90,7 +97,7 @@
 
 ## 界面层技术债（有具体代码证据支撑的）
 
-- **Chatbox**：文件拖入输入区没有任何高亮遮罩或视觉反馈（`react-dropzone` 未使用 `isDragActive` 等状态）；桌面端 `SessionItem` 没有右键菜单；初始断点判定用 599.95px、后续响应式用 640px，两个数字之间存在窄缝；`newSessionState.webBrowsing` 是死字段。
+- **Chatbox**：文件拖入输入区没有任何高亮遮罩或视觉反馈（`react-dropzone` 未使用拖拽激活等状态字段）；桌面端会话项没有右键菜单；初始断点判定用 599.95px、后续响应式用 640px，两个数字之间存在窄缝；`newSessionState.webBrowsing` 是死字段。
 - **Cherry Studio**："助手回复完成通知"开关可勾选，但全仓库找不到任何发送调用——**是不生效的死开关**。
 - **SillyTavern**：swipe（候选回复切换）在移动端是**点按钮，不是划手势**，与功能名字暗示的手势操作不符；"角色正在输入"三点动画 keyframe 存在但未挂到主聊天流。
 - **VCPChat**：compact navigation 由 `sidebarAvatarOnly` 字段显式控制，**不是宽度断点自动触发**；表情包选择器是平铺图片网格，无搜索无分类，点击插入原始 `<img>` HTML 标签。

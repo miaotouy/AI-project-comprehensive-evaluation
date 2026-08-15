@@ -14,13 +14,17 @@
 
 ## 结论摘要
 
-OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核心：所有工具统一为 `Tool.Def`（`packages/opencode/src/tool/tool.ts:55-65`），经 `ToolRegistry`（`src/tool/registry.ts`）与 `SessionTools`（`src/session/tools.ts`）包装后交给 AI SDK 的 `streamText`，工具执行与结果回注由 AI SDK 完成，opencode 侧只消费 `fullStream` 事件。工具来源有五类：内置、自定义目录 `{tool,tools}/*.js|ts`、插件 `tool` hook、MCP 工具与 MCP 资源工具；Skill 是通过 `skill` 工具按名加载的文本资源，不是工具注册来源。审批采用 allow/ask/deny 三档规则求值（`src/permission/index.ts`），执行发生在 node 进程内（shell 为普通子进程、无沙箱），结果统一截断落盘（`src/tool/truncate.ts`）。
+OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核心：所有工具统一为 `Tool.Def`，经 `ToolRegistry`、`SessionTools` 包装后交给 AI SDK 的 `streamText` 执行（`packages/opencode/src/tool/tool.ts:55-65`）。
+
+工具执行与结果回注由 AI SDK 完成，opencode 侧只消费 `fullStream` 事件。
+
+工具来源有五类：内置、自定义目录 `{tool,tools}/*.js|ts`、插件 `tool` hook、MCP 工具与 MCP 资源工具；Skill 是经 `skill` 工具按名加载的文本资源，不是工具注册来源。审批采用 allow/ask/deny 三档规则求值（`src/permission/index.ts`），执行发生在 node 进程内（shell 为普通子进程、无沙箱），结果统一截断落盘（`src/tool/truncate.ts`）。
 
 关键事实（快照 1f94d8a）：
 
 - **内置工具 16+1 个**，按模型、provider、client 与实验 flag 过滤（registry.ts:226-244、286-335）。
-- **参数校验在 `Tool.wrap` 统一完成**：Effect Schema `decodeUnknownEffect` 失败转 `InvalidArgumentsError`，其 message 即模型可见的「重写输入」反馈（tool.ts:99-149）。
-- **编排循环是 `SessionPrompt.runLoop` 无限 while**，上限为 agent 的 `steps`，最后一轮注入 `MAX_STEPS_PROMPT`（prompt.ts:1178-1181、1281）。
+- **参数校验在 `Tool.wrap` 统一完成**：Effect Schema 解码失败转 `InvalidArgumentsError`，其 message 即模型可见的「重写输入」反馈（tool.ts:99-149）。
+- **编排循环是 `SessionPrompt.runLoop` 无限 while**，上限为 agent 的 steps 配置，最后一轮注入 `MAX_STEPS_PROMPT`（prompt.ts:1178-1181、1281）。
 - **审批阻塞在 Deferred 上**：`Permission.ask` 发布事件等 UI 回复，reply 支持 reject/once/always（permission/index.ts:67-167）。
 - **结果截断默认 2000 行 / 50KB**，超限写入 `tool-output/` 目录并提示用 Task/Grep/Read 接力（truncate.ts:13-16、85-141）。
 - **TaskTool 是唯一“旁路”**：创建子会话（新 Session）执行子 agent，权限收窄继承（tool/task.ts、agent/subagent-permissions.ts）。
@@ -73,19 +77,30 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 | `plan_exit` | src/tool/plan.ts:15-16 | 计划模式退出（实验 flag + cli） |
 | `execute` | src/tool/code-mode.ts:188 | code-mode 沙箱脚本（实验 flag） |
 
-条件注册：`execute` 需 `flags.experimentalCodeMode`（registry.ts:113-114、221）；`lsp` 需 `experimentalLspTool`（:242）；`plan_exit` 需 `experimentalPlanMode && client==="cli"`（:243）；`question` 需 `["app","cli","desktop"].includes(flags.client) || flags.enableQuestionTool`（:202、228）。
+条件注册：
+
+| 工具 | 注册条件 | 定位 |
+|---|---|---|
+| `execute` | `flags.experimentalCodeMode` | registry.ts:113-114、221 |
+| `lsp` | `experimentalLspTool` | :242 |
+| `plan_exit` | `experimentalPlanMode && client==="cli"` | :243 |
+| `question` | `["app","cli","desktop"].includes(flags.client) \|\| flags.enableQuestionTool` | :202、228 |
 
 另有三类 MCP 资源工具 `list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource`，在任一台已连接 MCP 服务器声明 `resources` 能力时按需注入（src/session/tools.ts:27-31、136-139），不经过 registry 的 builtin 列表。
 
 ### 1.3 自定义工具（registry.ts:178-192）
 
 - 扫描 `{tool,tools}/*.{js,ts}`（Glob.scanSync，cwd 为每个 `config.directories()` 目录，:178-181）；有匹配文件时先 `config.waitForDependencies()`（:182）。
-- 动态 `import(pathToFileURL(match))`（Windows 兼容，:186-187）；每个命名导出若形如 `{args, description, execute}`（`isPluginTool`，:350-352）即注册为工具；`default` 导出用文件名作命名空间（:190）。
+- 动态 `import(pathToFileURL(match))`（Windows 兼容，:186-187）。
+- 每个命名导出若形如 `{args, description, execute}`（`isPluginTool` 判定，:350-352）即注册为工具；`default` 导出用文件名作命名空间（:190）。
 - 名称：`id === "default" ? namespace : namespace_id`（:190）。
 
 ### 1.4 插件工具（registry.ts:194-199、120-176）
 
-- `plugin.list()` 的每个 `p.tool` 条目经 `fromPlugin` 包装：参数 `def.args`（Zod）全为 Zod 时转 `z.object` 并生成 JSON Schema（`zodJsonSchema`，:369-376）；含非 Zod 项时回退 `legacyJsonSchema`（:358-367，所有 properties 置 required）。包装层把宿主 Effect 的 `ask` 桥接为 Promise（:140-148），并对输出统一截断（:153-163）。
+- `plugin.list()` 的每个 `p.tool` 条目经 `fromPlugin` 包装，参数 schema 按以下分支处理：
+  - 全为 Zod（`def.args`）：归一为 `z.object` 并生成 JSON Schema（`zodJsonSchema`，:369-376）；
+  - 含非 Zod 项：回退 `legacyJsonSchema`（:358-367，所有 properties 置 required）。
+- 包装层把宿主 Effect 的 `ask` 桥接为 Promise（:140-148），并对输出统一截断（:153-163）。
 - 参数 schema 兼容注释：pre-1.14.49 曾 `z.object(undefined)` 静默容忍（#27451、#27630），现归一为 `{}`（:124-126）。
 
 ## 2. 工具发现、过滤与注入
@@ -99,20 +114,22 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 | `execute` | 仅当 `describeCodeMode` 返回非空描述（MCP 工具经权限可见非空，:275-284、300-303） |
 | 其余 | 恒暴露（:297） |
 
-- `task` 工具描述动态追加可调用的子 agent 清单（`describeTask`，:260-273）：列出非 primary 且 `Permission.evaluate("task", name, agent.permission) !== "deny"` 的 agent，按名称排序。
-- 每个可见工具触发插件 `tool.definition` 事件（:313），插件可改写 `description/parameters`，改动后采用插件版 JSON Schema（:314-317），description 追加 task/code-mode 附加说明（:320-326）。
+- `task` 工具描述动态追加可调用的子 agent 清单（`describeTask`，:260-273）：列出非 primary 且权限求值非 deny 的 agent，按名称排序。
+- 每个可见工具触发插件 `tool.definition` 事件（:313），插件可改写 `description`/`parameters`；改动后采用插件版 JSON Schema（:314-317）。
+- description 还会追加 task/code-mode 的附加说明（:320-326）。
 
 ### 2.2 注入路径
 
 1. `SessionTools.resolve`（src/session/tools.ts:41-493）把 registry 工具 + MCP 工具 + 资源工具包装为 AI SDK `Record<string, AITool>`，在 `prompt.ts:1226-1241` 注入。
-2. `LLM.StreamInput.tools`（llm.ts:45），processor 传入 `handle.process({tools})`（prompt.ts:1272-1286）。
-3. `LLMRequestPrep.resolveTools` 二次过滤（llm/request.ts:208-214）：prompt 请求的 `user.tools` 可显式禁用单个工具；`Permission.disabled` 全量禁用集合（`pattern==="*" && deny` 时整工具移除，src/permission/index.ts:204-214，edit/write/apply_patch 共享 `edit` 权限、MCP 资源工具共享 `read` 权限）进一步隐藏。
-4. AI SDK `streamText({ tools: prepared.tools })`（llm.ts:318）。
+2. `LLM.StreamInput.tools`（llm.ts:45）；processor 以 `handle.process` 传入（prompt.ts:1272-1286）。
+3. `LLMRequestPrep.resolveTools` 二次过滤（llm/request.ts:208-214）：prompt 请求的 `user.tools` 可显式禁用单个工具。
+4. `Permission.disabled` 全量禁用集合进一步隐藏：`pattern==="*" && deny` 时整工具移除（src/permission/index.ts:204-214）；edit/write/apply_patch 共享 `edit` 权限、MCP 资源工具共享 `read` 权限。
+5. AI SDK `streamText({ tools: prepared.tools })`（llm.ts:318）。
 
 ### 2.3 插件事件
 
 - `tool.definition`（plugin/src/index.ts:334）触发于 registry.ts:313。
-- `tool.execute.before/after`（plugin/src/index.ts:266-281）触发于 tools.ts:106-125（registry 工具）、:175-215/:258-299/:338-384（MCP 资源工具）、:402-424（MCP 工具）、code-mode.ts:141-184（code-mode 子工具）。
+- `tool.execute.before/after`（plugin/src/index.ts:266-281）在工具执行前后触发，覆盖 registry 工具、MCP 工具与 MCP 资源工具；各触发点定位合并进文末源码索引（见 tools.ts 条目）。
 
 ## 3. 模型调用表示与 Provider 适配
 
@@ -125,18 +142,21 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 ## 4. 参数解析、校验与错误处理
 
 - 每个工具 init 时编译一次 `Schema.decodeUnknownEffect(toolInfo.parameters)` 闭包并复用（tool.ts:107-111），避免每次调用重复编译。
-- `execute` 包装层先 `decode(args)`，失败 `Effect.mapError` 转 `InvalidArgumentsError({tool, detail})`（tool.ts:121-129）；`formatValidationError` 可自定义格式（:126、64），默认 `String(error)`。
+- `execute` 包装层先 `decode(args)`，失败经 `Effect.mapError` 转 `InvalidArgumentsError({tool, detail})`（tool.ts:121-129）。
+- `formatValidationError` 可自定义格式（:126、64），默认 `String(error)`。
 - 校验失败不中断循环：错误作为工具结果回注模型，提示「Please rewrite the input so it satisfies the expected schema.」（:32）。
 - 包装统一 `Effect.orDie` + `Tool.execute` span，span 带 tool.name/session.id/message.id/call_id 属性（tool.ts:114-119、145）。
 
 ## 5. 编排循环、并发与终止条件
 
 - **驱动者**：`SessionPrompt.loop` → `runLoop`（prompt.ts:1081-1341）无限 `while`，每轮创建一个 assistant 消息与 processor handle，`handle.process` 消费一次 LLM 流；工具选择与执行在 AI SDK 内部。
-- **迭代上限**：`maxSteps = agent.steps ?? Infinity`，`isLastStep = step >= maxSteps`（prompt.ts:1178-1179）；最后一轮把 `MAX_STEPS_PROMPT`（core/src/session/runner/max-steps.ts：「已达到最大步数，禁止再调用工具，只输出文本总结」）追加进请求（prompt.ts:1281）。
-- **退出条件**：`lastAssistant.finish !== "tool-calls"` 且无未执行工具 part（prompt.ts:1111-1130，:1113 排除列表只有 `"tool-calls"`；`"unknown"` 同样退出）；processor 返回 `stop`（:1319）；compaction 任务触发（:1149-1159）。
-- **并发**：单会话由 `SessionRunState.ensureRunning` 保证串行（run-state.ts:88-94，忙时排队等待前一轮完成，effect/runner.ts:115-138，不抛错）；抛 `Session.BusyError` 的是 `startShell`（run-state.ts:96-105）与 `assertNotBusy`（:71-75）。opencode 未设置 `toolParallelism`，单 step 内工具并行由 AI SDK 默认行为决定。
+- **迭代上限**：`maxSteps = agent.steps ?? Infinity`，最后一轮把 `MAX_STEPS_PROMPT` 追加进请求（prompt.ts:1178-1179、1281），提示模型已达最大步数、禁止再调用工具，只输出文本总结（该提示位于 core/src/session/runner/max-steps.ts）。
+- **退出条件**：`lastAssistant.finish !== "tool-calls"` 且无未执行工具 part 时退出；排除列表只有 `"tool-calls"` 一种，`"unknown"` 同样退出（prompt.ts:1111-1130）。
+- processor 返回 `stop`（:1319）；compaction 任务触发（:1149-1159）。
+- **并发**：单会话由 `SessionRunState.ensureRunning` 保证串行（run-state.ts:88-94、96-105、:71-75；排队等待语义见 effect/runner.ts:115-138）：忙时排队等前一轮完成、不抛错，只有 `startShell` 与 `assertNotBusy` 抛 `Session.BusyError`。opencode 未设置 `toolParallelism`，单 step 内的工具并行由 AI SDK 默认行为决定。
 - **超时**：llm.ts:361-364 每流创建 AbortController；shell 工具另有默认 2 分钟超时（见第 7 节）。
-- **取消**：processor `Effect.onInterrupt` 置 `aborted=true` 走 `halt(AbortError)`（processor.ts:648-655）；`cleanup` 等待运行中工具（每 Deferred 最多 250ms，:571-575），未完成 tool part 标 `error: "Tool execution aborted"` + `interrupted:true`（:577-593）。
+- **取消**：processor 在 `Effect.onInterrupt` 时置 `aborted=true` 走 `halt(AbortError)`（processor.ts:648-655）。
+- `cleanup` 等待运行中工具（每 Deferred 最多 250ms，:571-575），未完成 tool part 标 `error: "Tool execution aborted"` 与 `interrupted:true`（:577-593）。
 - **doom-loop 检测**：同一工具连续 3 次相同入参触发 `doom_loop` 权限审批（processor.ts:29、356-380）。
 - **上下文溢出**：step-finish 时 `isOverflow` 置 `needsCompaction`，`Stream.takeUntil` 中断流，process 返回 `"compact"`，由 runLoop 创建 compaction 任务（processor.ts:477-482、679；prompt.ts:1320-1328）。
 - **拒绝后行为**：`experimental.continue_loop_on_deny` 配置决定审批拒绝后是否继续循环（processor.ts:200-201、633）。
@@ -147,25 +167,42 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 ### 6.1 权限求值（src/permission/index.ts）
 
 - `evaluate`：多条 ruleset 平铺后 `findLast` 匹配（后写优先），默认 `{action:"ask"}`（:28-38）。
-- `ask`（:67-107）：任一 pattern `deny` 立即抛 `DeniedError`；全部 `allow` 直接通过；否则生成 `Request` 进 pending Map、发布 `Event.Asked`、`Deferred.await` 阻塞等待。
-- `reply`（:109-167）：`reject` → `Deferred.fail(RejectedError` 或带反馈的 `CorrectedError)`，并级联拒绝同 session 其他 pending；`once` 仅放行当前；`always` 把规则写入 `approved` 并级联放行同 session 满足条件的 pending。
-- 策略分级：动作仅 `allow/ask/deny` 三档；来源为 config `permission` 字段（`fromConfig`，:186-198，支持 `~`/`$HOME` 展开）；agent 与 session 权限用 `merge` 拼接（:200-202）。
+- `ask`（:67-107）按条件求值：
+  - 任一 pattern 为 `deny`：立即抛 `DeniedError`；
+  - 全部 `allow`：直接通过；
+  - 其他：生成 `Request` 进 pending Map、发布 `Event.Asked`，经 `Deferred.await` 阻塞等待。
+- `reply`（:109-167）按回复类型处理：
+  - `reject`：`Deferred.fail(RejectedError)` 或带反馈的 `CorrectedError`，并级联拒绝同 session 其他 pending；
+  - `once`：仅放行当前；
+  - `always`：规则写入 `approved`，级联放行同 session 满足条件的 pending。
+- 策略分级：动作仅 `allow`/`ask`/`deny` 三档。
+- 来源为 config 的 `permission` 字段（`fromConfig`，:186-198，支持 `~`/`$HOME` 展开）；agent 与 session 权限用 `merge` 拼接（:200-202）。
 - 生命周期：pending Map 在 InstanceState 内，finalizer 拒绝所有挂起项（:54-61）。
-- 工具接入：`Tool.Context.ask` 由 tools.ts:81-89 实现，自动补 `sessionID`、`tool:{messageID,callID}`、`ruleset: merge(agent.permission, session.permission)`。每个工具声明自己的权限与 pattern（如 edit 工具 `permission:"edit"` + 相对路径 patterns + `always:["*"]`，edit.ts:102-110；shell 用 `external_directory` + `shell` 权限，shell.ts:263-291）。
+- 工具接入：`Tool.Context.ask` 由 tools.ts:81-89 实现，自动补充 `sessionID`、`tool:{messageID,callID}` 与 `ruleset: merge(agent.permission, session.permission)`。
+- 每个工具声明自己的权限与 pattern：edit 工具为 `permission:"edit"` + 相对路径 patterns + `always:["*"]`（edit.ts:102-110）；shell 用 `external_directory` 与 `shell` 权限（shell.ts:263-291）。
 
 ### 6.2 执行域与隔离
 
-- **shell**：`ChildProcess.make`（effect/unstable/process），非 node-pty；Windows+PowerShell 用 `[shell, -NoLogo,-NoProfile,-NonInteractive,-Command, command]`，其余 `ChildProcess.make(command, [], {shell, cwd, env, stdin:"ignore", detached: 非win32})`（shell.ts:293-310）。默认超时 `flags.bashDefaultTimeoutMs ?? 2*60*1000`（:347），超时/中止后 `handle.kill({forceKillAfter:"3 seconds"})`（:548-555）。**无沙箱**，靠权限审批 + `external-directory.ts:15-45` 的 `containsPath` 工作区外检查兜底。前置扫描用 tree-sitter wasm 解析 bash/PowerShell AST 提取命令生成权限 pattern（:311-336、permission/arity.ts）。输出超限流式落盘（:481-531，`limits.maxBytes*2` 环形缓冲）。
+- **shell**：
+  - 启动：`ChildProcess.make`（effect/unstable/process，非 node-pty）；Windows+PowerShell 参数为 `[shell, -NoLogo,-NoProfile,-NonInteractive,-Command, command]`，其余平台 `ChildProcess.make(command, [], {shell, cwd, env, stdin:"ignore", detached: 非win32})`（shell.ts:293-310）；
+  - 超时与中止：默认 `flags.bashDefaultTimeoutMs ?? 2*60*1000`（:347），超时/中止后 `handle.kill({forceKillAfter:"3 seconds"})`（:548-555）；
+  - 隔离兜底：**无沙箱**，靠权限审批 + `external-directory.ts:15-45` 的 `containsPath` 工作区外检查；前置扫描用 tree-sitter wasm 解析 bash/PowerShell AST 提取命令生成权限 pattern（:311-336、permission/arity.ts）；
+  - 输出：超限流式落盘（:481-531，`limits.maxBytes*2` 环形缓冲）。
 - **MCP 本地子进程**：stdio transport（mcp/index.ts:340-370），退出时 finalizer 用 `pgrep -P` 递归收集后代 SIGTERM 再 `client.close()`（:418-440、531-556）。
 - **code-mode**：`execute` 工具在 `@opencode-ai/codemode` 沙箱解释器中执行受限脚本（code-mode.ts:239-274），MCP 工具作为沙箱子工具调用（:134-186）。
-- **桌面端（Electron）**：无独立工具执行域——主进程 `utilityProcess.fork` sidecar 运行同一 opencode server（desktop/src/main/server.ts:57-184），工具全部在 sidecar 内执行；审批/提问 UI 复用共享 app 组件（app/src/pages/session/composer/session-permission-dock.tsx、session-question-dock.tsx）；question 工具注册含 `client==="desktop"`（registry.ts:202），桌面请求带 `x-opencode-client: desktop`（llm/request.ts:193）。desktop 包独有能力仅原生附件选择（desktop/src/main/ipc.ts:165-197）与 Windows WSL 终端 pty（main/wsl/runtime.ts:4）。
+- **桌面端（Electron）**：无独立工具执行域——主进程经 `utilityProcess.fork` 启动 sidecar 运行同一 opencode server（desktop/src/main/server.ts:57-184），工具全部在 sidecar 内执行。
+- 审批/提问 UI 复用共享 app 组件（app/src/pages/session/composer/session-permission-dock.tsx、session-question-dock.tsx）；question 工具注册含 `client==="desktop"`（registry.ts:202），桌面请求带 `x-opencode-client: desktop`（llm/request.ts:193）。
+- desktop 包独有能力仅原生附件选择（desktop/src/main/ipc.ts:165-197）与 Windows WSL 终端 pty（main/wsl/runtime.ts:4）。
 
 ## 7. 结果回注与 UI 状态
 
 - **ToolPart 状态机**（schema/src/v1/session.ts:259-325）：`pending`（input/raw）→ `running`（+title/metadata/time.start）→ `completed`（+output/metadata/time.end）或 `error`（+error/metadata）。
-- **持久化**：processor `ensureToolCall` 创建 pending（processor.ts:216-253）→ `tool-call` 置 running（:331-351）→ `tool-result/tool-error` 置 completed/error（:383-419）；每次更新经 `session.updatePart` 落库并发布 `message.part.updated`。
+- **持久化**：processor 经 `ensureToolCall` 创建 pending（processor.ts:216-253），`tool-call` 事件置 running（:331-351），`tool-result`/`tool-error` 置 completed/error（:383-419）。
+- 每次更新经 `session.updatePart` 落库并发布 `message.part.updated`。
 - **重放回注**：`MessageV2.toModelMessagesEffect`（message-v2.ts:290-360）把 ToolPart 转 AI SDK `tool-<name>` part（`toolCallId/input/output/errorText/state`），未完成 part 转 `output-error`。
-- **截断**：`truncate.output`（src/tool/truncate.ts:85-141），默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）；超限写全量到 `<xdgData>/opencode/tool-output/tool_<id>`（truncation-dir.ts），返回截断预览 + 提示；提示分档：agent 有 `task` 权限时建议用 Task 工具委派，否则建议 Grep/Read（:129-131）。保留 7 天，每小时清理按**文件 mtime** 判定是否过期（:12、:53-63、:143-145），不再解析文件名中的时间戳（d468201）。
+- **截断**：`truncate.output`（src/tool/truncate.ts:85-141）默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）。
+- 超限时全量写入 `<xdgData>/opencode/tool-output/tool_<id>`（truncation-dir.ts），返回截断预览与提示：agent 有 `task` 权限时建议用 Task 工具委派，否则建议 Grep/Read（:129-131）。
+- 输出保留 7 天，每小时清理一次，按文件 mtime 判定过期（:12、:53-63、:143-145），不再解析文件名时间戳（d468201）。
 - **附件**：工具可返回 `attachments`（tool.ts:48-53），tools.ts:112-120 补 id 后随 tool result 持久化；processor 对超大图片附件剔除并计数（processor.ts:390-411）；重放经 `toModelOutput`（message-v2.ts:161-193）转媒体 part 或独立 user 消息。
 - **UI 状态**：`message.part.updated` 驱动前端 part 渲染（详见消息渲染器笔记）；pending/running 显示 shimmer 与进度。
 
@@ -174,8 +211,10 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 ### 8.1 MCP（src/mcp/）
 
 - **配置**：`opencode.json` 的 `mcp` 字段（core/src/v1/config/mcp.ts）：`local`（type/command/cwd/environment/enabled/timeout）、`remote`（type/url/enabled/headers/oauth/timeout，oauth 可为对象或 false）。
-- **客户端**：`local` 走 StdioClientTransport（mcp/index.ts:340-370）；`remote` 依次尝试 StreamableHTTP → SSE（:269-284），支持 OAuth（McpOAuthProvider，:251-267）；连接超时 `mcp.timeout ?? 30_000`（:286）。能力只声明 `roots`（:39-50）。
-- **目录获取**：`McpCatalog.listTools` 分页（catalog.ts:145-162；常量 `MAX_LIST_PAGES=1000`、`DEFAULT_TIMEOUT=30s` 定义在 :11-12），outputSchema 校验失败降级宽松 schema 重试（:164-168）；`tools/list_changed` → 重拉 → `ToolsChanged` 事件（mcp/index.ts:461-471）。启动时并行连接全部服务器（:505-529）。
+- **客户端**：`local` 走 `StdioClientTransport`（mcp/index.ts:340-370）；`remote` 依次尝试 StreamableHTTP → SSE（:269-284），支持 OAuth（`McpOAuthProvider`，:251-267）；连接超时 `mcp.timeout ?? 30_000`（:286）。
+- 能力声明只含 `roots`（:39-50）。
+- **目录获取**：`McpCatalog.listTools` 分页获取（catalog.ts:145-162；常量 `MAX_LIST_PAGES=1000`、`DEFAULT_TIMEOUT=30s` 位于 :11-12），outputSchema 校验失败降级为宽松 schema 重试（:164-168）。
+- `tools/list_changed` 触发重拉并发布 `ToolsChanged` 事件（mcp/index.ts:461-471）；启动时并行连接全部服务器（:505-529）。
 - **工具 schema 注入**：`convertTool` 强制 `type:"object"`、`additionalProperties:false`（catalog.ts:42-48），再经 `ProviderTransform.schema` 按模型转换（tools.ts:395-397）；OpenAI 系强制 `strict:false`（llm/request.ts:152-158）。
 - **调用**：调用前 `ctx.ask({permission: 工具全名, patterns:["*"], always:["*"]})`（tools.ts:408）；结果归一化 text/image/resource 三类 content，二进制资源有 mime 白名单与 10MB 上限（:426-462）。
 - **命名**：`sanitize(clientName)_sanitize(toolName)`（catalog.ts:117-119）。
@@ -183,9 +222,16 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 
 ### 8.2 Skill（src/skill/、src/tool/skill.ts）
 
-- **发现**：全局 `~/.claude/skills/**/SKILL.md`、`~/.agents/skills/**/SKILL.md`（skill/index.ts:21-23、186-194）；项目沿目录树同样两外部目录（:196-202）；配置目录 `{skill,skills}/**/SKILL.md`（:24、205-208）；config `skills.paths`（:211-220）；`skills.urls` 网络 index.json（:222-227 + skill/discovery.ts:49-132，带版本缓存）。内置 `customize-opencode`（:32-35、276-283）。
+- **发现**，按来源：
+  - 全局：`~/.claude/skills/**/SKILL.md`、`~/.agents/skills/**/SKILL.md`（skill/index.ts:21-23、186-194）；
+  - 项目：沿目录树查找同样的两个外部目录（:196-202）；
+  - 配置目录：`{skill,skills}/**/SKILL.md`（:24、205-208）；
+  - config 显式路径：`skills.paths`（:211-220）；
+  - 网络：`skills.urls` 的 index.json（:222-227 + skill/discovery.ts:49-132，带版本缓存）；
+  - 内置：`customize-opencode`（:32-35、276-283）。
 - **可见性**：`Permission.evaluate("skill", name, agent.permission) !== "deny"`（:310-315）。
-- **暴露**：系统提示输出 `<available_skills>` 清单（system.ts:98-110）；`skill` 工具仅参数 `name`，调用前 `ctx.ask({permission:"skill", patterns:[name], always:[name]})`（tool/skill.ts:27-32），输出 `<skill_content>` + `<skill_files>`（ripgrep 抽样 limit 10，:36-66）。
+- **暴露**：系统提示输出 `<available_skills>` 清单（system.ts:98-110）；`skill` 工具仅一个参数 `name`，调用前 `ctx.ask({permission:"skill", patterns:[name], always:[name]})`（tool/skill.ts:27-32）。
+- 工具输出 `<skill_content>` 与 `<skill_files>` 两部分（ripgrep 抽样 limit 10，:36-66）。
 
 ### 8.3 子 Agent（src/tool/task.ts）
 
@@ -216,7 +262,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 
 - `packages/opencode/src/tool/tool.ts`：Tool.Def/Info/Context（:36-91）、参数校验与截断包装（:99-149）
 - `packages/opencode/src/tool/registry.ts`：内置/自定义/插件工具注册（:116-249）、注入过滤（:286-335）
-- `packages/opencode/src/session/tools.ts`：AI SDK 工具包装与 MCP 工具并入（:41-493）
+- `packages/opencode/src/session/tools.ts`：AI SDK 工具包装与 MCP 工具并入（:41-493）；工具执行事件触发点（:106-125、:175-215、:258-299、:338-384、:402-424、code-mode.ts:141-184）
 - `packages/opencode/src/session/prompt.ts`：runLoop 主循环（:1081-1341）
 - `packages/opencode/src/session/processor.ts`：LLMEvent 消费与 ToolPart 状态机（:278-537）
 - `packages/opencode/src/permission/index.ts`：权限求值与审批（:28-214）

@@ -33,13 +33,13 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 ### 能力一：会话数据生产与分享（研究轨迹候选）
 
 1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 明示“Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks”（README.md:94）；`docs/usage.md:140` 写明用于“model, prompt, tool, and evaluation research”。这不是普通导出存档，而是把会话文件格式、导出命令与外部发布工具组合成一条数据生产工作流。
-2. **入口与触发者**：用户触发。交互命令 `/export`（HTML 或 JSONL 副本，`interactive-mode.ts:5773-5787`，命令分发在 :2895）与 `/share`（:2905）；另有 docs 指向的伴生 CLI `pi-share-hf` 批量发布。
-3. **事实对象**：JSONL 会话树文件（v3 格式，`~/.pi/agent/sessions/<编码cwd>/`）。`docs/session-format.md` 公开条目类型与消息结构，注释明言“Understanding these types is essential for parsing sessions and writing extensions”（session-format.md:41）——第三方解析器依赖此格式契约。
-4. **完整主链**：会话落盘（append-only JSONL，见会话笔记 §2）→ `/export` 生成 HTML 自包含单文件（`core/export-html/`，模板 + base64 会话数据）或 JSONL 副本 → `/share` 调 `gh gist create --public=false` 上传并返回 `getShareViewerUrl(gistId)` 预览链接（interactive-mode.ts:5862-5954，gist 创建 :5914，预览链接 :5946）→ 外部工具 `pi-share-hf` 读 JSONL 发布为 HF 数据集。仓库内链已静态确认；发布端在仓库外。
+2. **入口与触发者**：用户触发。交互命令 `/export`（HTML 或 JSONL 副本）与 `/share` 实现见 `interactive-mode.ts:5773-5954`（命令分发 :2895-2906）；另有 docs 指向的伴生 CLI `pi-share-hf` 批量发布。
+3. **事实对象**：JSONL 会话树文件（v3 格式，`~/.pi/agent/sessions/<编码cwd>/`）。`docs/session-format.md` 公开条目类型与消息结构，注释明言理解这些类型是解析会话与编写扩展的前提（session-format.md:41）——第三方解析器依赖此格式契约。
+4. **完整主链**：会话落盘（append-only JSONL，见会话笔记 §2）→ `/export` 生成 HTML 自包含单文件（`core/export-html/`，模板 + base64 会话数据）或 JSONL 副本 → `/share` 调 `gh gist create --public=false` 上传并返回预览链接 → 外部工具 `pi-share-hf` 读 JSONL 发布为 HF 数据集。仓库内链已静态确认；发布端在仓库外。
 5. **持续性**：会话文件本身长期保留（无自动清理证据，会话笔记 §7）；gist 与 HF 数据集生命周期由外部平台管理。
 6. **主动性与取消**：无后台调度；全部用户触发；`/share` 失败有 showError 错误路径（interactive-mode.ts:5930-5933），上传期间有可取消的 loader（:5885-5910）。
 7. **人机与多 Agent 关系**：无多 Agent 参与；用户可检查导出文件内容后决定是否分享。
-8. **外部依赖与执行域**：本机 JSONL/HTML 导出（仓库内）；`gh` CLI 与 GitHub gist（`/share`，需本机安装 gh 与登录态）；`pi-share-hf`（伴生仓库 badlogic/pi-share-hf）与 Hugging Face（发布端，README.md:98-104 引用）。`packages/telemetry` 与本能力无关：它是 vendor-neutral 遥测契约包，本次更新新增 `InMemoryTelemetryContext` 内存参考实现与 conformance 测试（`createTypedSpanStarter`、`AGENT_TELEMETRY_SCHEMAS` 供 ai/agent 包做类型化 span），但仍是"无 exporter、无全局 span 状态、不依赖后端"的契约包（telemetry/README.md:5-13），无会话数据上报路径。
+8. **外部依赖与执行域**：本机 JSONL/HTML 导出（仓库内）；`gh` CLI 与 GitHub gist（`/share`，需本机安装 gh 与登录态）；`pi-share-hf`（伴生仓库 badlogic/pi-share-hf）与 Hugging Face（发布端，README.md:98-104 引用）。`packages/telemetry` 与本能力无关：它是 vendor-neutral 遥测契约包，本次更新新增内存参考实现与 conformance 测试（供 ai/agent 包做类型化 span），但仍是"无 exporter、无全局 span 状态、不依赖后端"的契约包（telemetry/README.md:5-13），无会话数据上报路径。
 9. **安全与资源边界**：`/share` 创建的是 secret gist（`--public=false`）；导出仅发生在本机用户文件与用户授权的外部账号之间，无自动外发。会话 JSONL 含完整对话与工具输出（含命令与错误），分享与否完全由用户决定。
 10. **独特性判断**：现有类目只解释“会话导出”（会话/导出是普通功能）；本能力把导出格式、公开文档与研究导向的发布工作流连成闭环，属于指南中的“研究轨迹”标签。最接近项目：Hermes Agent（研究轨迹候选，待查清单第二批）、OpenCode（会话 export/import 工具，但无研究数据导向的发布链路）——尚未形成三项目自然聚类，保留为稀有能力卡。
 11. **证据强度**：README 与 docs 声明（介绍候选）；仓库内 `/export`/`/share` 主链为静态源码确认（主链确认，限定仓库边界）；HF 发布端为伴生仓库引用（外部依赖，未验证）。未运行验证。

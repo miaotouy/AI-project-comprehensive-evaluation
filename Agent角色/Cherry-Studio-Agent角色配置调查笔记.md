@@ -14,11 +14,15 @@
 
 ## 1. 结论摘要
 
-Cherry Studio 的角色系统核心对象是 **`Assistant`**（助手），一个助手对应一套"模型 + 提示词 + 推理参数 + 工具源"的稳定配置。与 Chatbox 不同，模型参数（temperature、topP、maxTokens 等）**写在 Assistant 内部**（`settings` 字段），不在 Session 级别，因此同一个助手在不同对话中使用相同的参数基准。
+Cherry Studio 的角色系统核心对象是 **`Assistant`**（助手），一个助手对应一套"模型 + 提示词 + 推理参数 + 工具源"的稳定配置。与 Chatbox 不同，模型参数写在助手内部（`settings` 字段），不在会话级别，因此同一个助手在不同对话中使用相同的参数基准。
 
-助手通过 `mcpServerIds` 和 `knowledgeBaseIds` 关联外部工具和知识库；通过 `modelId`（`"providerId::modelId"` 格式）绑定默认模型；通过 `groupId` 加入分组。这四个维度合起来决定了助手的能力边界。
+助手通过四个关联维度决定能力边界：
 
-除普通助手会话外，Cherry Studio 还支持 **Agent Session**（`AgentSessionRuntimeService`），基于 Claude Code SDK 进入工具调用循环，走独立的 `AgentSessionMessageBackend` 持久化路径。
+- `mcpServerIds`、`knowledgeBaseIds`：关联 MCP 工具与知识库
+- `modelId`（`"providerId::modelId"` 格式）：绑定默认模型
+- `groupId`：加入分组
+
+除普通助手会话外，Cherry Studio 还支持 **Agent Session**（`AgentSessionRuntimeService`）。它基于 Claude Code SDK 进入工具调用循环，消息使用独立的 `AgentSessionMessageBackend` 持久化。
 
 ## 2. 配置入口与数据格式
 
@@ -47,7 +51,7 @@ assistant(
 
 ### 2.2 默认助手预设
 
-首次启动时，`DefaultAssistantSeeder` 自动写入一个空提示词的助手（`Cherry 助手` / `Cherry Assistant`），绑定 `CHERRYAI_DEFAULT_UNIQUE_MODEL_ID`。这是唯一的内置实例，不是多个预设角色的集合。
+首次启动时，`DefaultAssistantSeeder` 自动写入一个空提示词的助手（Cherry 助手 / Cherry Assistant），绑定内置默认模型（`CHERRYAI_DEFAULT_UNIQUE_MODEL_ID`）。这是唯一的内置实例，不是多个预设角色的集合。
 
 ### 2.3 资源目录（Catalog）
 
@@ -80,7 +84,7 @@ interface Assistant {
 
 `assembleSystemPrompt` 函数（`src/main/ai/runtime/aiSdk/params/assembleSystemPrompt.ts`）：
 
-1. 若 `assistant.prompt` 非空，调用 `replacePromptVariables(assistant.prompt, model.name)` 替换变量后写入；
+1. 若 `assistant.prompt` 非空，先做变量替换（`replacePromptVariables`，代入模型名）再写入；
 2. 若工具集中包含 `tool_search` 工具，追加推迟工具的命名空间目录提示词（`deferredToolsSystemPrompt`）；
 3. 所选首方查询工具带 citation-id 契约时（`hasCitableTools`）追加 `CITATIONS_SYSTEM_PROMPT` 引用格式说明段（`assembleSystemPrompt.ts:19-25,41-49`）；
 4. 多段用 `\n\n` 连接，全空返回 `undefined`。
@@ -89,11 +93,26 @@ interface Assistant {
 
 ### 3.3 会话绑定与历史快照语义
 
-会话（topic）只保存 `assistantId` 引用（`src/main/data/db/schemas/topic.ts:20`，另有 `activeNodeId`），不保存 Assistant 配置副本。发送时每次请求按 id 重读当前 Assistant：`modelResolution.ts:32-45` 的 `resolveAssistantModelId` → `assistantDataService.getById`；`AiService.ts` 的 `getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`，`buildAgentParams` 用其当前 prompt/settings/tools 建参（`assembleSystemPrompt.ts` 直接读 `assistant.prompt`）。因此修改助手后，既有会话的下一次请求即使用新配置，属于"运行时引用"语义。例外是自动命名：`TopicNamingService.generateSummaryTitle` 生成标题的请求刻意**不携带 `assistantId`**，避免把助手的工具配置（MCP/联网/知识库）挂到标题生成请求上。
+会话（topic）只保存 `assistantId` 引用（`src/main/data/db/schemas/topic.ts:20`，另有 `activeNodeId`），不保存助手配置副本；每次发送请求都按 id 重读当前助手，因此修改助手后，既有会话的下一次请求立即使用新配置，属于"运行时引用"语义。
 
-消息侧有部分快照：每条 assistant 消息保存 `modelId` 与 `messageSnapshot`（作者 id/name/emoji + 内嵌模型快照，`src/main/data/db/schemas/message.ts:39-41`；`MessageSnapshotSchema` 在 `src/shared/data/types/message.ts:396-402`），由 `PersistentChatContextProvider.ts:39-55` 的 `buildAssistantMessageSnapshot` 在占位消息创建时写入（:246）。快照不含 temperature 等采样参数；未找到完整 Assistant 配置的 revision 快照。
+重读发生在请求构造阶段：先解析模型，再按 id 读取助手，最后用当前 prompt/settings/tools 构建请求参数（链路见本节末尾源码定位）。
 
-重新生成不是覆盖：`src/renderer/pages/home/hooks/useChatWriteActions.ts:304` 的 `regenerateWithCapabilities` 带 `parentAnchorId` 调 `ai.stream.open(trigger: 'regenerate-message')`；主进程 `PersistentChatContextProvider` 的 isRegenerate 分支经 `modelResolution.ts:53-64` 的 `resolvePersistentSiblingsGroupId` 继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。另外，"从历史节点开新分支"采用持久化空 user 叶子（`reserveBranch`/`fill-reserved`），该语义属会话与消息管理类目。
+例外是自动命名：`TopicNamingService.generateSummaryTitle` 生成标题的请求刻意**不携带 `assistantId`**，避免把助手的工具配置（MCP/联网/知识库）挂到标题生成请求上。
+
+消息侧只有部分快照：每条 assistant 消息保存 `modelId` 与 `messageSnapshot`（作者 id/name/emoji 加内嵌模型快照），由 `buildAssistantMessageSnapshot` 在占位消息创建时写入；快照不含 temperature 等采样参数，未找到完整助手配置的 revision 快照。
+
+本节源码定位：
+
+- `modelResolution.ts:32-45`：`resolveAssistantModelId`，随后 `assistantDataService.getById` 读取助手
+- `AiService.ts`：`getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`
+- `assembleSystemPrompt.ts`：`buildAgentParams` 建参时直接读 `assistant.prompt`
+- `src/main/data/db/schemas/message.ts:39-41`、`src/shared/data/types/message.ts:396-402`：消息快照字段定义
+- `PersistentChatContextProvider.ts:39-55`（:246）：`buildAssistantMessageSnapshot` 写入点
+- `modelResolution.ts:53-64`：`resolvePersistentSiblingsGroupId`（重新生成分支）
+
+重新生成不是覆盖：前端入口 `regenerateWithCapabilities`（`src/renderer/pages/home/hooks/useChatWriteActions.ts:304`）发起流式请求，主进程在重生成分支中为回复继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。
+
+另外，"从历史节点开新分支"采用持久化空 user 叶子（`reserveBranch`/`fill-reserved`），该语义属会话与消息管理类目。
 
 本快照未找到开场白字段（`ConversationGreeting.tsx` 只是空会话占位组件，不落库）和提示词块分组/组级开关（`assistant.prompt` 是单文本；`prompt` 表是独立"用户提示词片段"，非分组机制）。
 
@@ -134,7 +153,7 @@ interface AssistantSettings {
 
 `enable*` 标志的语义：`false` 时字段值保留在数据库，但构建 API 请求时不传入，让模型使用自己的默认值；`true` 时才将存储值发送给 API。这个模式消除了"禁用时字段需要变为 null"的问题。
 
-`customParameters` 支持任意键值对，适合传递 provider 专有参数（如 `top_k`、`repetition_penalty`）；四种类型（string/number/boolean/json）均有对应的 UI 组件（文本框/数字 spinner/开关/JSON 编辑器）。
+`customParameters` 支持任意键值对，适合传递 provider 专有参数，例如 `top_k`、`repetition_penalty`；字符串、数字、布尔与 JSON 四种类型各有对应的 UI 组件（文本框、数字微调、开关、JSON 编辑器）。
 
 ### 4.2 MCP 工具模式
 
@@ -153,7 +172,7 @@ interface AssistantSettings {
 
 ### 5.2 Web 搜索
 
-`enableWebSearch: true` 注入 `web_search` 工具到工具集；实际执行由 `extension.webSearch` 全局设置决定使用哪个搜索 provider（build-in / bing / tavily / bocha / querit）。
+`enableWebSearch` 开启后，`web_search` 工具注入工具集；实际执行由全局 `extension.webSearch` 设置决定使用哪个搜索 provider（内置、bing、tavily、bocha、querit 五选一）。
 
 ### 5.3 图像生成
 
@@ -161,20 +180,30 @@ interface AssistantSettings {
 
 ### 5.4 Claude Code Agent Session
 
-`src/main/ai/agentSession/AgentSessionRuntimeService.ts` 实现了独立的 Agent 会话路径，基于 Claude Code SDK 运行 Agent 循环（`runAgentTask`），使用独立的持久化后端（`AgentSessionMessageBackend`）。这条路径不依赖 `AssistantSettings.mcpMode`，直接走 Claude Code 自己的工具注册表。启用入口在助手编辑器的"代码解释器"或 Agent 模式开关；工具权限和审批策略参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
+`src/main/ai/agentSession/AgentSessionRuntimeService.ts` 实现了独立的 Agent 会话路径，基于 Claude Code SDK 运行 Agent 循环，使用独立的持久化后端（`AgentSessionMessageBackend`）。这条路径不依赖 `AssistantSettings.mcpMode`，直接走 Claude Code 自己的工具注册表。启用入口在助手编辑器的"代码解释器"或 Agent 模式开关；工具权限和审批策略参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
 
 ## 6. 内置角色方向
 
 Cherry Studio 只有一个内置助手实例（空提示词的 "Cherry 助手"），不预置多个角色人格。角色的个性化完全靠用户的 `prompt` 字段，以及从资源目录市场导入的模板。
 
-需要区分：**内置 cherry-assistant Agent**（`resources/builtin-agents/cherry-assistant/`，含 `SOUL.md`/`agent.json`/`product-manifest.json`）走的是 Claude Code Agent 路径的内置 Agent 体系，与 `DefaultAssistantSeeder` 生成的普通 Assistant 实例是两套对象：前者是 Agent（有 SOUL/工具白名单），后者是空提示词助手——"只有一个内置助手、不预置多角色人格"的结论只适用于 Assistant 体系。
+需要区分：**内置 cherry-assistant Agent**（`resources/builtin-agents/cherry-assistant/`）走的是 Claude Code Agent 路径的内置 Agent 体系，与 `DefaultAssistantSeeder` 生成的普通 Assistant 实例是两套对象：前者是 Agent（有 SOUL/工具白名单），后者是空提示词助手——"只有一个内置助手、不预置多角色人格"的结论只适用于 Assistant 体系。Agent 目录包含以下文件：
 
-Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段（`type`、`group`、`messages` 少样本对话、`enableUrlContext`、`knowledgeRecognition`、`regularPhrases` 等），v2 迁移时做了精简，主要能力保留在 `AssistantSettings` 中或移到了独立关联表。
+- `SOUL.md`
+- `agent.json`
+- `product-manifest.json`
+
+Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段，v2 迁移时做了精简：主要能力保留在 `AssistantSettings` 中，或移到了独立关联表。旧版字段（部分列举）包括：
+
+- `type`、`group`
+- `messages`（少样本示例对话）
+- `enableUrlContext`
+- `knowledgeRecognition`
+- `regularPhrases`
 
 ## 7. 导入与兼容性
 
 - **资源目录**：通过 `resourceCatalog/` 和 `assistantTransfer.ts`，支持从市场导入助手模板；工具配置不跨随助手迁移，需在目标机器重新绑定。
-- **v1 → v2 迁移**：`AssistantMigrator.ts` 把旧版字段映射到新 Schema；部分字段（`contextCount`、`toolUseMode`）被废弃或合并到 `AssistantSettings`。
+- **v1 → v2 迁移**：`AssistantMigrator.ts` 把旧版字段映射到新 Schema；部分字段（如 `contextCount`、`toolUseMode`）被废弃或并入助手设置层。
 - **SillyTavern/AIO Hub 迁移**：没有官方路径；将源角色的系统提示词导入 `prompt` 字段即可，少样本对话和世界书没有原生对应字段。
 
 ## 8. 主要源码依据

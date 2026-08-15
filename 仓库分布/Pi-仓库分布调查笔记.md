@@ -25,7 +25,16 @@ Pi 是按可发布能力拆包的 TypeScript monorepo，而不是 GUI 客户端�
 | 文档 | 97 文件 / 32,624 行 |
 | 测试 | 500 文件 / 114,906 源码行 |
 
-`packages/coding-agent` 为 643 文件/128,619 行，`packages/ai` 326/60,607，`packages/tui` 92/33,873，`packages/agent` 86/21,454。TypeScript 256,665 行（95.6%）。文档与测试也按同样包边界分布：coding-agent 64 文档/255 测试文件、AI 2/138、TUI 4/39、agent 5/26；`packages/session-backends`（sqlite-node）测试 12 文件/1,807 行、`packages/telemetry` 测试 2 文件/243 行（新增 telemetry conformance 测试与 sqlite 迁移/搜索测试）。
+主要区域：
+
+| 区域 | 文件 / 行数 |
+| --- | ---: |
+| `packages/coding-agent` | 643 / 128,619 |
+| `packages/ai` | 326 / 60,607 |
+| `packages/tui` | 92 / 33,873 |
+| `packages/agent` | 86 / 21,454 |
+
+TypeScript 256,665 行（95.6%）。文档与测试也按同样包边界分布：coding-agent 64 文档/255 测试文件、AI 2/138、TUI 4/39、agent 5/26；`packages/session-backends`（sqlite-node）测试 12 文件/1,807 行、`packages/telemetry` 测试 2 文件/243 行（新增 telemetry conformance 测试与 sqlite 迁移/搜索测试）。
 
 ## 跨平台组织与边界
 

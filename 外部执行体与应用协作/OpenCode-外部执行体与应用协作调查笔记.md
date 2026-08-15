@@ -47,11 +47,17 @@ HTTP 审批与提问
 
 ## 身份、协议与状态映射
 
-SQLite message/part 与事件序列是权威状态；`owner_id` 和 sync handler 处理多客户端写所有权。客户端本地 store 是投影。ACP session 映射到 OpenCode session，工作目录与项目状态继续由服务端持有。客户端/ACP 宿主身份经 HTTP 密码鉴权（`middleware/authorization.ts`）、sidecar 用户名密码与 CORS 白名单绑定；mDNS 发布在 loopback 之外提供局域网发现（`mdns.ts`，`入口确认`），云 control-plane 的账号绑定不在本仓库默认路径。
+SQLite message/part 与事件序列是权威状态；`owner_id` 和 sync handler 处理多客户端写所有权。客户端本地 store 是投影。ACP session 映射到 OpenCode session，工作目录与项目状态继续由服务端持有。客户端/ACP 宿主身份经 HTTP 密码鉴权（`middleware/authorization.ts`）、sidecar 用户名密码与 CORS 白名单绑定。mDNS 在 loopback 之外提供局域网发现（`mdns.ts`，`入口确认`），云 control-plane 的账号绑定不在本仓库默认路径。
 
 ## 执行、回流与控制语义
 
-SSE 推送消息、part、delta 和工具状态；sync 支持历史重放与 owner steal。ACP service 暴露创建、恢复、提示、权限、取消和分叉语义。HTTP 面另有 `permission.ts`/`question.ts` 的审批与提问回复通道、PTY 终端 WebSocket attach（connect token + 一次性 ticket 鉴权）和 `tui.ts` 的 `appendPrompt/submitPrompt/controlNext/controlResponse` 远程控制 TUI 会话。CLI `serve/attach/web`、Desktop sidecar、Web/TUI 均消费同一事实源；Slack bot 按 channel/thread 建 session，但产品面较窄；SessionShare 可生成共享 URL（`入口确认`）。
+SSE 推送消息、part、delta 和工具状态；sync 支持历史重放与 owner steal。ACP service 暴露创建、恢复、提示、权限、取消和分叉语义。HTTP 面另有三类远程入口：
+
+- 审批与提问回复通道：`permission.ts` / `question.ts`
+- PTY 终端 WebSocket attach：connect token + 一次性 ticket 鉴权
+- 远程 TUI 控制：`tui.ts`，方法 `appendPrompt`/`submitPrompt`/`controlNext`/`controlResponse`
+
+CLI `serve/attach/web`、Desktop sidecar、Web/TUI 均消费同一事实源；Slack bot 按 channel/thread 建 session，但产品面较窄；SessionShare 可生成共享 URL（`入口确认`）。
 
 产品表面（TUI/Web/Desktop）显示会话列表、连接与运行状态、工作目录和工具执行过程；接管入口为 session 列表选择与 owner steal。外部客户端提交的 prompt、replay 数据和 ACP 输入直接进入 Agent 工具循环，可触发文件、命令与浏览器副作用；本地工具权限仍由 OpenCode runtime 承担，外部宿主只经 ACP/HTTP 审批面参与放行，不可信输入的边界与本地用户一致。
 

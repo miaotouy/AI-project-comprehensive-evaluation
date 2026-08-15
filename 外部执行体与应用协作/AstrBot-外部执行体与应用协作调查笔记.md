@@ -34,7 +34,7 @@ AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。
   -> adapter 发回原 endpoint 或主动投递目标
 ```
 
-统一 webhook 路由通过 `/webhooks/platforms/{webhook_uuid}` 将请求分发给对应 platform service，另保留 legacy `/webhook/{uuid}` 与 dashboard `/api/platform/webhook/{uuid}` 两处别名，配置提示指向后者；部分平台也支持 socket 或 long connection，其中 Satori 与 aiocqhttp（OneBot v11 反向 WS）是出站 WebSocket 客户端形态，连接外部协议网关而不是被动收 webhook。
+统一 webhook 路由通过 `/webhooks/platforms/{webhook_uuid}` 将请求分发给对应平台服务，另保留 legacy 与 dashboard 两处兼容别名（配置提示指向 dashboard 侧）；部分平台也支持 socket 或长连接，其中 Satori 与 aiocqhttp（OneBot v11 反向 WS）是出站 WebSocket 客户端形态，连接外部协议网关而不是被动收 webhook。
 
 ```text
 平台注册/登录绑定

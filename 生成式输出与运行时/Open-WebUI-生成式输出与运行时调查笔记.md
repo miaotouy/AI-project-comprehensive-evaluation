@@ -21,24 +21,44 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 两类主要输出链路：
 
 1. **代码解释器链**（模型自由文本触发，XML 标签协议）：
-   `模型流式输出 <code_interpreter> 标签` → `middleware.tag_output_handler` 切分消息并创建 `open_webui:code_interpreter` output item（逐 chunk 累积 code）→ 流结束后 `middleware.py:5325` 循环执行（最多 5 轮）：pyodide 引擎经 `socket/main.py get_event_call`（`sio.call` 带超时）向本人生动会话发 `execute:python` RPC → `src/routes/+layout.svelte:556` 收到后送共享 Pyodide worker/沙箱执行 → 回调回传 `{stdout, stderr, result}`；jupyter 引擎经 `backend/open_webui/utils/code_interpreter.py` 连远端 Jupyter → base64 图片转换为 files 记录 URL → `ci_item['output']` 就地填充、`status='completed'` → 追加 assistant message item 并 `convert_output_to_messages(raw=True)` 把“代码+输出”回流给模型继续分析 → 全部 output 落库 `ChatMessage.output` → 前端按 output item 渲染，代码块内嵌 `attributes.output` 恢复上次运行结果，用户可编辑重跑、保存回写消息。
+   模型流式输出 `<code_interpreter>` 标签，`tag_output_handler` 切分消息并创建 `open_webui:code_interpreter` output item（逐 chunk 累积 code）；流结束后 `middleware.py:5325` 循环执行（最多 5 轮）：
+   - pyodide 引擎：经 `get_event_call`（`socket/main.py`，`sio.call` 带超时）向本人生动会话发 `execute:python` RPC，`src/routes/+layout.svelte:556` 收到后送共享 Pyodide worker/沙箱执行，回调回传 `{stdout, stderr, result}`；
+   - jupyter 引擎：经 `backend/open_webui/utils/code_interpreter.py` 连远端 Jupyter，base64 图片转换为 files 记录 URL。
+   执行后 `ci_item['output']` 就地填充、`status='completed'`，追加 assistant message item 并 `convert_output_to_messages(raw=True)` 把“代码+输出”回流给模型继续分析；全部 output 落库 `ChatMessage.output`。前端按 output item 渲染，代码块内嵌 `attributes.output` 恢复上次运行结果，用户可编辑重跑、保存回写消息。
 
 2. **Artifact 链**（模型自由文本代码块探测）：
-   模型输出 ` ```html/css/js ` 或内联 `<html>/<style>/<script>` → `src/lib/utils/index.ts getCodeBlockContents` 分组提取 → `Chat.svelte getContents` 组装完整 HTML 文档 → `artifactContents` store → `Artifacts.svelte` 侧栏 iframe 预览（CSP 注入 + sandbox）→ 关闭面板后内容仍是消息正文的一部分；重新打开聊天即重新派生。无独立持久化对象。
+   模型输出 ` ```html/css/js ` 或内联 `<html>/<style>/<script>` → `src/lib/utils/index.ts` 的 `getCodeBlockContents` 分组提取 → `Chat.svelte` 的 `getContents` 组装完整 HTML 文档 → 内容 store → `Artifacts.svelte` 侧栏 iframe 预览（CSP 注入 + sandbox）。关闭面板后内容仍是消息正文的一部分；重新打开聊天即重新派生。无独立持久化对象。
 
-3. **工具结果物化链**：工具执行后 `process_tool_result` 分出 `tool_result_files` / `tool_result_embeds` / 引用 sources，经 `files`/`embeds` 事件进入 `message.files` / `message.embeds`（FullHeightIframe 渲染）/ `message.sources`（Citations），全部落库为 ChatMessage 的 JSON 列（`backend/open_webui/models/chat_messages.py:142-150`）。
+3. **工具结果物化链**：工具执行后 `process_tool_result` 分出文件、嵌入与引用 sources 三类结果，经 `files`/`embeds` 事件分别进入 `message.files`、`message.embeds`（FullHeightIframe 渲染）与 `message.sources`（Citations），全部落库为 ChatMessage 的 JSON 列（`backend/open_webui/models/chat_messages.py:142-150`）。
 
 ## 1. 触发方式、输出协议与对象模型
 
-**代码解释器**：私有 XML 标记协议，不是 typed part。系统提示注入（`backend/open_webui/config.py:456-471`）：`<code_interpreter type="code" lang="python"></code_interpreter>`，要求“用标签包裹后立即停止”，禁止反引号。触发有五重门控（`backend/open_webui/utils/middleware.py:4129-4142`）：`features.code_interpreter`、模型 `builtinTools.code_interpreter`、全局 `code_interpreter.enable`、模型 capabilities、用户权限 `features.code_interpreter`。流式检测器 `tag_output_handler`（`middleware.py:3792`）用“已扫描长度 + 回看窗口”处理半截流，`extract_attributes` 解析标签属性（lang/type），结束标签出现时 `end=True` 立即收口（`middleware.py:4773-4781`）。误触发风险由门控和标签完整性共同控制；`convert_output_to_messages` 中 `open_webui:code_interpreter` 和 output 文本会转成 `<code_interpreter>`/`<code_interpreter_output>` 回填，防止模型重跑（`backend/open_webui/utils/misc.py:445-462`）。
+**代码解释器**：私有 XML 标记协议，不是 typed part。
+- **协议与注入**：系统提示注入（`backend/open_webui/config.py:456-471`）为 `<code_interpreter type="code" lang="python"></code_interpreter>`，要求“用标签包裹后立即停止”，禁止反引号。
+- **五重门控**（`backend/open_webui/utils/middleware.py:4129-4142`）：功能开关 `features.code_interpreter`、模型 `builtinTools.code_interpreter`、全局 `code_interpreter.enable`、模型 capabilities、用户权限 `features.code_interpreter`。
+- **流式检测**：检测器 `tag_output_handler`（`middleware.py:3792`）用“已扫描长度 + 回看窗口”处理半截流，`extract_attributes` 解析标签属性（lang/type），结束标签出现时 `end=True` 立即收口（`middleware.py:4773-4781`）。误触发风险由门控和标签完整性共同控制。
+- **防重跑回填**：`convert_output_to_messages` 中 `open_webui:code_interpreter` 和 output 文本会转成 `<code_interpreter>`/`<code_interpreter_output>` 回填（`backend/open_webui/utils/misc.py:445-462`），防止模型重跑。
 
-**对象模型**：唯一具备稳定 ID 的输出对象是 Responses API 风格 output item：`{type:'open_webui:code_interpreter', id: output_id('ci'), status, attributes, lang, code, output, duration}`（`middleware.py:3912-3921`）。输出项由 `output_id` 生成 ID、`status` 从 `in_progress` 到 `completed/failed/incomplete`，与 `message`、`reasoning`、`function_call`/`function_call_output` 并列，存储于消息的 `output` JSON 列（`models/chat_messages.py:142`）。事实源是聊天消息（`ChatMessage` 表），文件与运行实例都不是事实源。Artifact 无对象模型——没有 ID、状态或版本字段，只是渲染侧的派生内容。
+**对象模型**：唯一具备稳定 ID 的输出对象是 Responses API 风格 output item（`middleware.py:3912-3921`），结构为：
 
-**Artifact**：纯自由文本探测，无协议、无转义设计；`getCodeBlockContents`（`src/lib/utils/index.ts:2072`）以正则 ```` ```[\s\S]*?``` ```` 提取代码块，按 lang 分组（html 开新组，css/js 追加），fallback 用内联 `<html>/<style>/<script>` 正则。半截流由 `hasClosingCodeFence(raw)`（`src/lib/components/chat/Messages/ContentRenderer.svelte:135`）判断“闭合代码围栏后才自动打开面板”，避免流式途中误触发。
+```text
+{ type: 'open_webui:code_interpreter', id: output_id('ci'), status, attributes, lang, code, output, duration }
+```
+
+输出项由 `output_id` 生成 ID，`status` 从 `in_progress` 到 `completed/failed/incomplete`，与其他 output item 类型并列存储于消息的 `output` JSON 列（`models/chat_messages.py:142`）。并列类型为：
+
+```text
+message / reasoning / function_call / function_call_output / open_webui:code_interpreter
+```
+
+事实源是聊天消息（`ChatMessage` 表），文件与运行实例都不是事实源。Artifact 无对象模型——没有 ID、状态或版本字段，只是渲染侧的派生内容。
+
+**Artifact**：纯自由文本探测，无协议、无转义设计。`getCodeBlockContents`（`src/lib/utils/index.ts:2072`）以代码围栏正则提取代码块，按 lang 分组（html 开新组，css/js 追加），fallback 用内联 `<html>/<style>/<script>` 正则。半截流由 `hasClosingCodeFence(raw)`（`src/lib/components/chat/Messages/ContentRenderer.svelte:135`）判断“闭合代码围栏后才自动打开面板”，避免流式途中误触发。
 
 ## 2. 增量生成、更新与最终化
 
-- 代码解释器：流式 chunk 直接追加到 `output[-1]['code']`（`middleware.py:4704-4707`），属于“逐 token 注入 + 结束标签收口”，无 AST/节点级更新。消息结束时若最后一个 item 是 `open_webui:code_interpreter`，进入执行循环（`middleware.py:5325-5498`）：每次先 `chat:completion` 推送中间状态，执行（pyodide/jupyter），失败重试最多 5 次，成功后 `ci_item['output']` 就地写入、`status='completed'`，追加空 message item 再请求模型续写；模型仍输出代码解释器标签则继续循环。取消时以 `output` 半成品落库（`middleware.py:5567-5585`）。
+- 代码解释器：流式 chunk 直接追加到 `output[-1]['code']`（`middleware.py:4704-4707`），属于“逐 token 注入 + 结束标签收口”，无 AST/节点级更新。
+- 执行循环（`middleware.py:5325-5498`）：消息结束时若最后一个 item 是 `open_webui:code_interpreter` 则进入；每次先 `chat:completion` 推送中间状态，执行（pyodide/jupyter），失败重试最多 5 次，成功后 `ci_item['output']` 就地写入、`status='completed'`，追加空 message item 再请求模型续写；模型仍输出代码解释器标签则继续循环。取消时以 `output` 半成品落库（`middleware.py:5567-5585`）。
 - Artifact：无增量机制，消息渲染完整后才派生。
 - 工具文件/嵌入：事件流（`files`/`embeds`，`middleware.py:1291-1309`）增量进入前端消息对象并随消息保存。
 
@@ -52,22 +72,26 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 
 ## 4. 表现类型、依赖与运行环境
 
-- 代码执行：两个引擎。**Pyodide**（默认）：`createPyodideWorker`（`src/lib/pyodide/createPyodideWorker.ts:7-10`）按 `features.enable_pyodide_file_persistence` 选择真实 Worker 或隐藏 iframe 沙箱；worker 模式加载 `loadPyodide` + micropip 按需装包（`src/lib/workers/pyodide.worker.ts:22-74`），matplotlib 的 `plt.show` 被 patch 成 base64 PNG 打印（`pyodide.worker.ts:193-220`）；iframe 沙箱模式 `sandbox="allow-scripts"`、隐藏、经 postMessage 通信（`pyodideSandboxHost.ts:196-288`），同一份代码逻辑内嵌在 `sandboxScript`。**Jupyter**：`JupyterCodeExecuter` 走 Jupyter REST API 建 kernel + WebSocket channels 执行，收集 stdout/stderr/execute_result/display_data（含 image/png base64）与 traceback（`backend/open_webui/utils/code_interpreter.py:69-189`）。
+- 代码执行：两个引擎。**Pyodide**（默认）：`createPyodideWorker`（`src/lib/pyodide/createPyodideWorker.ts:7-10`）按 `features.enable_pyodide_file_persistence` 选择真实 Worker 或隐藏 iframe 沙箱：
+  - worker 模式加载 `loadPyodide` + micropip 按需装包（`src/lib/workers/pyodide.worker.ts:22-74`），matplotlib 的 `plt.show` 被 patch 成 base64 PNG 打印（`pyodide.worker.ts:193-220`）；
+  - iframe 沙箱模式 `sandbox="allow-scripts"`、隐藏、经 postMessage 通信（`pyodideSandboxHost.ts:196-288`），同一份代码逻辑内嵌在 `sandboxScript`。
+  **Jupyter**：`JupyterCodeExecuter` 走 Jupyter REST API 建 kernel + WebSocket channels 执行，收集 stdout/stderr/execute_result/display_data（含 image/png base64）与 traceback（`backend/open_webui/utils/code_interpreter.py:69-189`）。
 - 依赖提供：Pyodide 引擎由前端代码内 import 探测自动列包（requests/numpy/pandas/matplotlib 等，`CodeBlock.svelte:224-238`），micropip 安装；Jupyter 引擎依赖管理员配置的 Jupyter 服务器（token/password 认证，`config.py:440-450`）。
-- HTML Artifact：完整 HTML/CSS/JS 文档跑在 `srcdoc` iframe 里，`injectCsp` 注入 CSP（`src/lib/utils/csp.ts` + `$config?.ui?.iframe_csp`），sandbox `allow-scripts allow-downloads`（可配 allow-forms/allow-same-origin，`Artifacts.svelte:246-260`）。外部导航被拦截（同源 pushState、异源阻止，`Artifacts.svelte:41-61`）。SVG 走 `SvgPanZoom` 本地渲染。
+- HTML Artifact：完整 HTML/CSS/JS 文档跑在 `srcdoc` iframe 里。安全配置：`injectCsp` 注入 CSP（`src/lib/utils/csp.ts` + `$config?.ui?.iframe_csp`），sandbox 为 `allow-scripts allow-downloads`（可配 allow-forms/allow-same-origin，`Artifacts.svelte:246-260`）。外部导航被拦截（同源 pushState、异源阻止，`Artifacts.svelte:41-61`）；SVG 走 `SvgPanZoom` 本地渲染。
 - 工具嵌入（embeds）：`FullHeightIframe` 渲染任意 HTML URL，带 `processHtmlForDeps`（Alpine/Chart.js 依赖处理）、高度协商 postMessage（`FullHeightIframe.svelte:33-235`）。
 - 终端：文件预览含 Office（mammoth/xlsx/pptx→图片）、SQLite（浏览器内 SqliteView）、notebook（ipynb 单元格渲染 + Jupyter 会话执行）。RAG 检索结果呈现为 citations/sources，不执行代码。
 
 ## 5. 用户交互、事件与错误反馈
 
-- 代码块：编辑（CodeMirror）→ Run（pyodide 本地执行或 `executeCode` API→Jupyter，`CodeBlock.svelte:142-221`）→ 60 秒超时（`CodeBlock.svelte:259-268`，超时后终止并重建非共享 worker）→ stdout/stderr/result/图片分区展示；`attributes.output`（来自消息 output item 的序列化结果）在挂载时恢复历史运行输出（`CodeBlock.svelte:404-419`）。执行中按钮显示 Running、禁用重复点击。
-- 结构化输出折叠卡：reasoning/function_call/code_interpreter 按 `buildOutputDisplayItems`（`structuredOutput.ts:266-333`）渲染为 `detail_group`/`detail_single`，`done` 状态驱动 “Thinking.../Analyzing...” 与完成态切换；tool_calls 用 `ToolCallDisplay` 显示参数与结果。
+- 代码块：编辑（CodeMirror）→ Run（pyodide 本地执行或 `executeCode` API→Jupyter，`CodeBlock.svelte:142-221`），60 秒超时（`CodeBlock.svelte:259-268`，超时后终止并重建非共享 worker），结果按 stdout/stderr/result/图片分区展示；执行中按钮显示 Running、禁用重复点击。
+- 历史结果恢复：`attributes.output`（来自消息 output item 的序列化结果）在挂载时恢复上次运行输出（`CodeBlock.svelte:404-419`）。
+- 结构化输出折叠卡：reasoning/function_call/code_interpreter 类型的 output item 按 `buildOutputDisplayItems`（`structuredOutput.ts:266-333`）渲染为 `detail_group`/`detail_single`，`done` 状态驱动 “Thinking.../Analyzing...” 与完成态切换；tool_calls 用 `ToolCallDisplay` 显示参数与结果。
 - 错误反馈：执行错误进 `stderr`（含 Python traceback、Jupyter 超时信息、event_caller 会话断开错误），消息级错误走 `get_message_error_content` 的 error 事件；前端 toast 提示。
 - 交互状态恢复：`CodeExecutions` 徽章列表（名称/成功/失败/运行中）和 `CodeExecutionModal`（代码+输出+文件链接）由 `message.code_executions` 驱动——该字段本次未在后端模型中找到写入路径，属未确认事项。
 
 ## 6. 编辑、diff、版本与协作
 
-- 代码块编辑保存：`CodeBlock` Save → `onSave` → `ContentRenderer` → `ResponseMessage.svelte:850-874`：在 `sourceMessage.output` 上以 `replaceOutputMessageText`（`structuredOutput.ts:343-380`，按文本包含匹配替换第一个 message item 内容）或全文 `content.replace(raw, ...)`，然后 `updateChat()` 持久化。整块覆盖，无 diff、无撤销、无版本。
+- 代码块编辑保存：保存从代码块组件一路走到消息渲染层（`ResponseMessage.svelte:850-874`）：在 `sourceMessage.output` 上以 `replaceOutputMessageText`（`structuredOutput.ts:343-380`，按文本包含匹配替换第一个 message item 内容）或全文 `content.replace(raw, ...)`，然后 `updateChat()` 持久化。整块覆盖，无 diff、无撤销、无版本。
 - 整条消息编辑：`OutputEditView`（视觉行编辑器 + CodeMirror JSON 双模式，`OutputEditView.svelte:21-86`）编辑 `message.output` 数组本身（可删行、改文本），Save/Save As Copy 走 `editMessage` API（`ResponseMessage.svelte:411-440`）。
 - Notebook（终端）：单元格内联编辑（textarea/CodeMirror `CellEditor`），Run/Run All/Restart/Stop，执行输出（text/html/image/error）就地写入 cell，编辑先于执行应用（`NotebookView.svelte:158-194`）；但 cell 改动与输出的**回写持久化到 .ipynb 文件**本次未找到（`FilePreview` 的 ipynb 保存路径未确认）。
 - 终端文件：文本/代码/markdown 文件可编辑并 `uploadToTerminal` 回写（`FileNav.svelte:1368-1379`），整体覆盖。
@@ -75,14 +99,25 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **Pyodide（浏览器内 WASM）**：代码跑在真实 Worker 或隐藏 iframe（`sandbox="allow-scripts"`，无 allow-same-origin、无 allow-forms、无 allow-modals），无网络授权（Python `requests` 包可装，但浏览器沙箱无跨域出网通道——CORS/混合内容由浏览器决定，未专门配置代理）；文件系统是沙箱内内存 FS，文件进出经宿主桥（fs:upload/fs:list/fs:read/fs:delete/fs:mkdir/fs:sync，`pyodide.worker.ts:265-317`）；`/mnt/uploads` 是唯一约定目录。后端→浏览器的执行桥是 `sio.call` RPC，仅限请求用户自己的活动会话（`socket/main.py:1100-1128`），超时/断开返回 error。
+- **Pyodide（浏览器内 WASM）**：代码跑在真实 Worker 或隐藏 iframe，沙箱属性与宿主桥命令如下（`pyodide.worker.ts:265-317`）：
+
+  ```text
+  sandbox="allow-scripts"（无 allow-same-origin / allow-forms / allow-modals）
+  文件进出经宿主桥：fs:upload / fs:list / fs:read / fs:delete / fs:mkdir / fs:sync
+  ```
+
+  无网络授权（Python `requests` 包可装，但浏览器沙箱无跨域出网通道——CORS/混合内容由浏览器决定，未专门配置代理）；`/mnt/uploads` 是唯一约定目录。后端→浏览器的执行桥是 `sio.call` RPC，仅限请求用户自己的活动会话（`socket/main.py:1100-1128`），超时/断开返回 error。
 - **Jupyter（远端）**：后端进程直接连用户配置的 Jupyter 服务器（token/password），执行位置与网络能力属管理员环境；`CODE_INTERPRETER_BLOCKED_MODULES` 可注入 import 拦截（`builtin.py:526-549`，仅对 `__main__` 直接 import 生效）。
 - **终端服务器（远端）**：文件、进程、端口、notebook 全部委托外部 Open WebUI Terminal 服务；能力桥是 HTTP API + WebSocket，凭据为 bearer key 或会话 token（`FileNav.svelte:235-249`）。
 - 模型在 pyodide 引擎下经系统提示被告知“不能装包、沙箱无网络”（`config.py:474-486`），属提示级约束，非强制。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 事实源：`ChatMessage` 表（`chat_messages.py:128-150`），`content` + `output` + `files` + `sources` + `embeds` 全 JSON 列；`Chats.upsert_message_to_chat_by_id_and_message_id` 随流式事件持续写入（`middleware.py:4160-4168`、`5513-5536`）。重新打开聊天即从 `/api/v1/chats/{id}` 恢复历史，渲染器按 `output` 重建代码块及 `attributes.output` 历史结果。
+- 事实源：`ChatMessage` 表（`chat_messages.py:128-150`）有五列 JSON 存储（清单见下）；`Chats.upsert_message_to_chat_by_id_and_message_id` 随流式事件持续写入（`middleware.py:4160-4168`、`5513-5536`）。重新打开聊天即从 `/api/v1/chats/{id}` 恢复历史，渲染器按 `output` 重建代码块及 `attributes.output` 历史结果。JSON 列清单：
+
+  ```text
+  content / output / files / sources / embeds
+  ```
 - 代码解释器输出图片：base64 → `upload_image` → files 表 + URL（`middleware.py:5415-5440`、`builtin.py:609-643`），消息里留 `![Output Image](url)`，可下载。
 - 图像生成工具：图片文件 URL 经 `Chats.add_message_files_by_id_and_message_id` 挂到消息（`builtin.py:388-405`）。
 - Pyodide 文件系统：仅当 `ENABLE_PYODIDE_FILE_PERSISTENCE=true`（`backend/open_webui/env.py:1137`）时 worker 模式挂 IDBFS 到 IndexedDB 并 `syncfs` 持久化（`pyodide.worker.ts:49-73`、`96-105`）；隐藏 iframe 沙箱模式无持久化，刷新即失。默认关闭。
@@ -119,7 +154,15 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
   - `message.code_executions` 字段的后端写入路径（前端有渲染组件，本次未找到写入方）；
   - notebook 编辑/执行结果是否持久化回 .ipynb 文件；
   - 模型经 `execute:python` RPC 在无浏览器活动会话（后台标签）时的可用性（代码有 session 校验与超时提示，未运行确认）。
-- 能力等级（横向对比口径，不表示产品成熟度）：**G3（可执行 Artifact：Pyodide/Jupyter 代码执行、HTML 沙箱预览、工具结果物化）为主体，部分 G4（代码块与 notebook 单元编辑保存、文件编辑回写，但无 diff/版本/接受拒绝）与部分 G5（模型可读写沙箱文件系统、同一输出项就地更新并回流，但仅会话级、无对象查询协议、默认不跨会话持久化）**。各轴单列：协议开放度=私有 XML 标记 + 代码块探测（低开放）；更新粒度=整块+就地字段（低）；投影表面=inline + sidecar（无 canvas/desktop）；执行强度=WASM 沙箱 / 远端 Jupyter / 远端进程（中）；持续性=消息持久化 + 会话级文件系统（中）；闭环程度=可执行、可编辑、可回流（中）；能力范围=无网络授权默认、文件经宿主桥（窄）；可移植性=artifact 单文件可下载、其余仅宿主可用（低）。
+- 能力等级（横向对比口径，不表示产品成熟度）：**G3（可执行 Artifact：Pyodide/Jupyter 代码执行、HTML 沙箱预览、工具结果物化）为主体，部分 G4（代码块与 notebook 单元编辑保存、文件编辑回写，但无 diff/版本/接受拒绝）与部分 G5（模型可读写沙箱文件系统、同一输出项就地更新并回流，但仅会话级、无对象查询协议、默认不跨会话持久化）**。各轴单列：
+  - 协议开放度：私有 XML 标记 + 代码块探测（低开放）；
+  - 更新粒度：整块+就地字段（低）；
+  - 投影表面：inline + sidecar（无 canvas/desktop）；
+  - 执行强度：WASM 沙箱 / 远端 Jupyter / 远端进程（中）；
+  - 持续性：消息持久化 + 会话级文件系统（中）；
+  - 闭环程度：可执行、可编辑、可回流（中）；
+  - 能力范围：无网络授权默认、文件经宿主桥（窄）；
+  - 可移植性：artifact 单文件可下载、其余仅宿主可用（低）。
 
 ## 12. 关键源码索引
 

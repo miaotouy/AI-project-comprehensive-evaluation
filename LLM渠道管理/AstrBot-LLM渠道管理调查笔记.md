@@ -16,14 +16,14 @@
 
 AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（provider）**两级配置，中间由 `ProviderManager` 组装运行时实例。数据模型上，"一个 provider 配置项 = 一个能力实例"，同一来源的多模型通过 `provider_source_id` 合并配置。这与容器型客户端（一个 Provider 通道内多模型）不同，更像"每条渠道就是一个独立实例"。
 
-五个能力子类（`Provider` / `STTProvider` / `TTSProvider` / `EmbeddingProvider` / `RerankProvider`）统一抽象，`ProviderType` 枚举 5 种；设计上允许同一适配器被多个实例复用（OpenAI 类适配器被 Groq/XAI/OpenRouter 等十几个渠道继承）。
+五类能力子类（对话、语音识别、语音合成、Embedding、Rerank）统一抽象，`ProviderType` 枚举 5 种取值；设计上允许同一适配器被多个实例复用（OpenAI 类适配器被 Groq/XAI/OpenRouter 等十几个渠道继承）。
 
 核心事实链（详见各节）：
 
-- **注册**：`register_provider_adapter` 装饰器在 import 时写入 `provider_registry` 与 `provider_cls_map`（register.py:6-49），同名类型直接抛 `ValueError`。真正的模块 import 发生在 `ProviderManager.dynamic_import_provider`（manager.py:356-523）——`type` 字符串到类的 `match` 分派，导入失败记 critical 并跳过。
+- **注册**：注册装饰器在 import 时写入两个全局容器（`provider_registry` 与 `provider_cls_map`，register.py:6-49），同名类型直接抛 `ValueError`。真正的模块 import 发生在 `ProviderManager.dynamic_import_provider`（manager.py:356-523）——type 字符串到类的 match 分派，导入失败记 critical 并跳过。
 - **加载**：`load_provider`（manager.py:597-758）先合并 source 配置、解析 `$ENV` 键（仅 chat_completion 类型）、跳过 disabled/agent_runner，再校验类继承关系后实例化，最后写 `inst_map` 与五类实例列表。
 - **路由**：`get_using_provider`（manager.py:218-281）优先级为"umo 会话偏好 → 全局默认 → 实例列表第一个"；会话偏好存 SharedPreferences（`provider_perf_<type>`，umo scope）。
-- **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环：429 换 key / 超长弹历史 / 非 VLM 删图 / 工具不支持去 tools / 图片审核删图）。
+- **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环，按 429、上下文超长、非 VLM、工具不可用、图片审核等类别分别降级，详见 4.2）。
 - **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
 - **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
 - **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
@@ -81,7 +81,11 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 ### 1.2 ProviderRequest
 
-字段（entities.py:90-117）：`prompt`、`session_id`（标注已废弃）、`image_urls`、`audio_urls`、`extra_user_content_parts`（在用户消息后追加内容块，如系统提醒/知识库结果）、`func_tool: ToolSet`、`contexts`（OpenAI 格式消息列表）、`system_prompt`、`conversation`、`tool_calls_result`（多轮工具结果，`append_tool_calls_result` :132-138）、`model`（每请求覆盖，None 用默认）。
+字段（entities.py:90-117）：
+
+- `prompt`、`system_prompt`、`conversation`、`contexts`（OpenAI 格式消息列表）、`model`（每请求覆盖，None 用默认）、`session_id`（标注已废弃）；
+- `image_urls`、`audio_urls`、`extra_user_content_parts`（在用户消息后追加内容块，如系统提醒/知识库结果）；
+- `func_tool: ToolSet`、`tool_calls_result`（多轮工具结果，`append_tool_calls_result` :132-138）。
 
 `_print_friendly_context()`（:140-186）：日志友好，checkpoint 跳过、图片/音频折叠为 `[+N images]`，避免 base64 刷日志（与消息组件 `__repr_args__` 同样的防日志污染思路）。
 
@@ -94,11 +98,17 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 ### 1.3 LLMResponse
 
-统一响应（entities.py:296-448）：
+统一响应（entities.py:296-448）的字段：
 
-- `result_chain: MessageChain`（最终渲染链）；`reasoning_content` / `reasoning_signature`；`tools_call_args/name/ids/extra_content` 四个并行数组；`raw_completion`（OpenAI/Anthropic/GenAI 原始对象）；`is_chunk`；`id`；`usage`。
-- `completion_text` property：若 result_chain 存在则 `get_plain_text()`，否则 `_completion_text`；setter 会**清空链中全部 `Plain` 组件再在头部插入新 Plain**（:394-404），保证"最后一次文本写入"是权威的。
-- `to_openai_tool_calls_model`（:426-443）输出 pydantic `ToolCall` 模型；旧串行方法 `to_openai_tool_calls` 打了 `@deprecated`；另外还有一个打错名字的别名 `to_openai_to_calls_model`（:445-448），双重过时痕迹。
+```text
+result_chain: MessageChain                最终渲染链
+reasoning_content / reasoning_signature   推理内容与签名
+tools_call_args/name/ids/extra_content    工具结果四个并行数组
+raw_completion                            OpenAI/Anthropic/GenAI 原始对象
+is_chunk / id / usage
+```
+- `completion_text` 属性：结果链存在时返回其纯文本（`get_plain_text()`），否则回退 `_completion_text`；setter 会清空链中全部 `Plain` 组件再在头部插入新 Plain（:394-404），保证"最后一次文本写入"是权威的。
+- `to_openai_tool_calls_model`（:426-443）输出 pydantic `ToolCall` 模型；旧串行方法与一个拼写错误的别名 `to_openai_to_calls_model`（:445-448）均已打 deprecated，属双重过时痕迹。
 
 ### 1.4 配置结构与默认值
 
@@ -118,13 +128,19 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 | `llm_compress_provider_id` | `""` | :138 |
 | `max_context_length` | -1（不限制轮次） | :139 |
 
-- 迁移后模型（`astrbot/core/utils/migra_helper.py:45-128` `_migra_provider_to_source_structure`）：provider 条目只剩 6 个字段（id/provider_source_id/model/modalities/custom_extra_body/enable），key/api_base/timeout/proxy/custom_headers 全部归入 `provider_sources`。这是 v4.x 的大重构，旧 key 全部迁到 source 后 provider 变轻。
+- 迁移后模型（`astrbot/core/utils/migra_helper.py:45-128` `_migra_provider_to_source_structure`）：provider 条目只剩 6 个字段，其余 key/api_base/timeout/proxy/custom_headers 全部归入 `provider_sources`。这是 v4.x 的大重构，旧 key 全部迁到 source 后 provider 变轻。
+
+  迁移后 provider 条目字段：
+
+  ```
+  id、provider_source_id、model、modalities、custom_extra_body、enable
+  ```
 
 ## 2. ProviderManager：加载、热更新与实例生命周期
 
 ### 2.1 结构
 
-- `inst_map: dict[provider_id, Providers]`（manager.py:64-68）；五类列表 `provider_insts`/`stt_provider_insts`/`tts_provider_insts`/`embedding_provider_insts`/`rerank_provider_insts`（:54-63）。
+- `inst_map: dict[provider_id, Providers]`（manager.py:64-68）；另按能力维护五类实例列表（chat/stt/tts/embedding/rerank，:54-63）。
 - 变更通知两套并存的机制：`set_provider_change_callback`（单回调，兼容）与 `register_provider_change_hook`（多订阅），`_notify_provider_changed` 逐个发，异常只 warning（:101-128）。
 - 注释明确 `curr_provider_inst` 是 deprecated 全局字段，推荐 `get_using_provider()`（:71-77）。
 
@@ -147,16 +163,16 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 ### 2.4 terminate / reload / CRUD
 
-- `terminate_provider`（manager.py:809-845）：从三列表移除、清 off `curr_*`、调用 `terminate()`（若有）、`del inst_map[id]`；
+- `terminate_provider`（manager.py:809-845）：从各类实例列表移除、清空 `curr_*` 引用、调用实例终止方法（若有）并删除 `inst_map` 条目；
 - `reload`（:760-804）：锁内 terminate + load + **清理配置中已被删除的实例**（按 `config_ids` 对 `inst_map` 反查 terminate，实现三列表与 config 的同步），并重选 `curr_*`；
-- `delete_provider(provider_id, provider_source_id)`（:847-869）：按 id 或按 `provider_source_id` 级联删除目标 provider 集合，`config.save_config()` 后同步内存 `providers_config`（:868），删除后 API 列表查询不再读到旧实例（#9568）；
+- `delete_provider(provider_id, provider_source_id)`（:847-869）：按 id 或按 provider_source_id 级联删除目标 provider 集合，落盘（`config.save_config()`）后同步内存 `providers_config`（:868），删除后 API 列表查询不再读到旧实例（#9568）；
 - `update_provider`（:869-891）：查 id 重复冲突才报错，替换 config，save_config，reload；
 - `create_provider`（:893-909）：append config → save → load → 同步内存 `providers_config`；
 - `terminate`（:911-925）：**先 cancel MCP init 后台任务**，再逐个 terminate，最后 `disable_mcp_server`。
 
 ### (misc) 全部终止时 curr 兜底
 
-`reload` 里若 provider_insts 为空则 `curr_provider_inst = None`；若最近一次 reload 后仍有实例但 curr 为 None，则自动选第一个并`logger.info`——"自动选第一"是刻意行为不是异常。
+`reload` 后若 chat 实例列表为空则当前实例置空；若仍有实例但当前实例为空，则自动选第一个并记 info 日志——"自动选第一"是刻意行为不是异常。
 
 ## 3. 注册机制
 
@@ -169,12 +185,40 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 ### 3.2 已注册适配器全清单（全仓 grep 确认 42 个）
 
-- **Chat（12）**：openai_chat_completion、openai_responses、anthropic_chat_completion、googlegenai_chat_completion、groq / longcat / xai / aihubmix / openrouter / zhipu / xiaomi / kimi_code 的 chat_completion。
-- **STT（5）**：whisper_api、whisper_selfhosted、sensevoice_stt_selfhost、mimo_stt_api、xinference_stt。
-- **TTS（14）**：azure_tts、dashscope_tts、edge_tts、elevenlabs_tts、fishaudio_tts_api、gemini_tts、genie_tts、gsv_tts_selfhost、gsvi_tts_api、mimo_tts_api、minimax_tts_api、openai_tts_api、volcengine_tts（+1 直通式 SDK 实现，共 14）。
-- **Embedding（5）**：openai_embedding、gemini_embedding、nvidia_embedding、ollama_embedding、dashscope_embedding。
-- **Rerank（5）**：vllm_rerank、xinference_rerank、bailian_rerank、nvidia_rerank、tei_rerank。
-- **TokenPlan（2）**：minimax_token_plan、xiaomi_token_plan（属额外"计费/套餐"适配，未列入枚举）。
+- **Chat（12）**：
+
+  ```
+  openai_chat_completion、openai_responses、anthropic_chat_completion、googlegenai_chat_completion、
+  groq / longcat / xai / aihubmix / openrouter / zhipu / xiaomi / kimi_code 的 chat_completion
+  ```
+
+- **STT（5）**：
+
+  ```
+  whisper_api、whisper_selfhosted、sensevoice_stt_selfhost、mimo_stt_api、xinference_stt
+  ```
+
+- **TTS（14）**：
+
+  ```
+  azure_tts、dashscope_tts、edge_tts、elevenlabs_tts、fishaudio_tts_api、gemini_tts、genie_tts、
+  gsv_tts_selfhost、gsvi_tts_api、mimo_tts_api、minimax_tts_api、openai_tts_api、volcengine_tts
+  （+1 直通式 SDK 实现，共 14）
+  ```
+
+- **Embedding（5）**：
+
+  ```
+  openai_embedding、gemini_embedding、nvidia_embedding、ollama_embedding、dashscope_embedding
+  ```
+
+- **Rerank（5）**：
+
+  ```
+  vllm_rerank、xinference_rerank、bailian_rerank、nvidia_rerank、tei_rerank
+  ```
+
+- **TokenPlan（2）**：`minimax_token_plan`、`xiaomi_token_plan`（属额外"计费/套餐"适配，未列入枚举）。
 
 `astrbot/api/provider/` 目录仍是空的 `__init__.py`（旧清理遗留），全部实现都在 `core/provider/`。
 
@@ -187,17 +231,17 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 - `text_chat_stream`（:135-172）基类直接 `raise NotImplementedError`——**流式需各适配器自己实现**；
 - `pop_record`（:174-187）：从 contexts **弹 2 条**首个非 system 记录（`poped==2` break），供上下文超长时重试；
 - `_ensure_message_to_dicts`（:189-205）：过滤 checkpoint 消息，统一 dict；
-- `test()`（:207-211）默认超时 45s，发送 `prompt="REPLY \`PONG\` ONLY"`——各适配器覆盖此探测 prompt（如 STT 用 `samples/stt_health_check.wav`，TTS 生成 `get_audio("hi")` 并校验文件大小非 0）。
+- `test()`（:207-211）默认超时 45s，发送 `prompt="REPLY PONG ONLY"` 探测文本——各适配器覆盖此探测 prompt（如 STT 用 `samples/stt_health_check.wav`，TTS 生成 `get_audio("hi")` 并校验文件大小非 0）。
 
 TTS 基类 `support_stream()` 默认 False；`get_audio_stream`（:256-297）默认实现是"攒整段 → 一次性 get_audio → 读文件 → 队列送 (text, bytes)"，真正的边生成边送需要子类重写。
 
-Embedding 基类提供 `get_embeddings_batch`（:344-412）：`batch_size=16 / tasks_limit=3（信号量）/ max_retries=3`，`asyncio.gather(return_exceptions=True)`，指数退避 `2**attempt`，单批最终失败会抛出"第 N 批失败"。
+Embedding 基类提供批量接口 `get_embeddings_batch`（:344-412）：默认批次 16、信号量限制 3、重试 3 次，并发收集结果（`asyncio.gather(return_exceptions=True)`）并指数退避重试，单批最终失败会抛出"第 N 批失败"。
 
 ### 4.2 OpenAI 适配器（openai_source.py，57KB）
 
 外层选择与错误分类是本项目渠道管理的最核心代码：
 
-- `text_chat` / `text_chat_stream`（:1185-1337）：**内层 `for retry_cnt in range(max_retries=10)`**，每次随机 `random.choice(available_api_keys)`，`self.client.api_key = chosen_key` 后 `_query`；`_handle_api_error`（:1071-1183）按 str(e) 先字符串分类：
+- `text_chat` / `text_chat_stream`（:1185-1337）：**内层最多重试 10 次**，每轮随机挑一把可用 key 设到 client 后再请求；错误处理入口 `_handle_api_error`（:1071-1183）按错误字符串先分类：
   - `429` → 睡眠 1s（最后一次不睡），**剔除当前 key**，随机再取一个，返回 `(False, new_key, ...)` 进入下一轮；key 用尽直接 `raise`；
   - `context length` → 弹记录 + 更新 payload，retry；
   - `The model is not a VLM` → `_fallback_to_text_only_and_retry`（只删图片重试，`image_fallback_used` 防止重复删）；
@@ -212,8 +256,13 @@ Embedding 基类提供 `get_embeddings_batch`（:344-412）：`batch_size=16 / t
 
 ### 4.3 其他协议要点
 
-- **Anthropic**（anthropic_source.py）：`_PROMPT_CACHE_CONTROL = {"type":"ephemeral"}`（:38）；`_init_api_key` 取 key 列表第一个（:105-111）；`_prepare_payload`（:160）把 OpenAI 消息转 Anthropic，thinking 块签名回传（:144-158, :549-552）；prompt caching 即 `last_block["cache_control"]`（:490-492）；timeout 默认 120（:94）。
-- **Gemini**（gemini_source.py）：`google.genai` SDK 强 httpx 后端（:92-116）；CATEGORY_MAPPING/THRESHOLD_MAPPING 安全设置（:47-59）；`_handle_api_error` 429 或 "API key not valid" → 换 key（: 131-158）；timeout 默认 180（:72）。
+- **Anthropic**（anthropic_source.py）：
+  - 协议转换：`_prepare_payload`（:160）把 OpenAI 消息转 Anthropic，thinking 块签名回传（:144-158、:549-552）；
+  - prompt caching：`_PROMPT_CACHE_CONTROL = {"type":"ephemeral"}`（:38），作用在消息末块 `last_block["cache_control"]`（:490-492）；
+  - key 与超时：`_init_api_key` 取 key 列表第一个（:105-111），timeout 默认 120（:94）。
+- **Gemini**（gemini_source.py）：
+  - 传输与安全：使用 `google.genai` SDK 且强依赖 httpx 后端（:92-116），安全设置由 `CATEGORY_MAPPING`/`THRESHOLD_MAPPING` 两表控制（:47-59）；
+  - 错误处理：`_handle_api_error` 在 429 或 "API key not valid" 时换 key（:131-158），timeout 默认 180（:72）。
 
 ## 5. 请求路由与会话绑定
 
@@ -231,7 +280,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 
 ### 5.2 会话级/事件级/命令级切换
 
-- 会话偏好：`set_provider`（manager.py:146-172）写 `provider_perf_chat_completion`（umo scope），`session_put` → `sp.session_put`（SQLite preferences）。管理员可 `/provider` 切换（builtin_stars/builtin_commands/commands/provider.py:231-246）。
+- 会话偏好：`set_provider`（manager.py:146-172）写入 umo scope 的 `provider_perf_chat_completion`，经 SharedPreferences 会话读写落 SQLite。管理员可 `/provider` 切换（builtin_stars/builtin_commands/commands/provider.py:231-246）。
 - 事件级 model 覆盖：`req.model = event.get_extra("selected_model")`（astr_main_agent.py:1411-1412）→ `ProviderRequest.model` → 各适配器 `model or self.get_model()`。
 - WebChat/API 请求可直接 `event.get_extra("selected_provider")`（`_select_provider`，astr_main_agent.py:229-258）。
 - 会话组批量：`batch_update_service`（session_management_service.py:438-494，`sp.session_get`/`session_put` 逐会话读写）。
@@ -253,11 +302,17 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 
 两层重试的完整拼图：
 
-**传输层**（provider/sources/request_retry.py）基于 tenacity：默认 5 次、指数退避 0.2s-30s、可重试判定 `_is_retryable_provider_request_error`（连接错误 / APIConnectionError / APITimeoutError / 408,409,429,500,502,503,504,529 或 5xx）、429 可由 `retry_rate_limits=False` 关闭。`provider_settings.request_max_retries` 页面可调（default.py:106）→ text_chat 形参 `request_max_retries`。
+**传输层**（provider/sources/request_retry.py）基于 tenacity：默认 5 次、指数退避 0.2s-30s、可重试判定 `_is_retryable_provider_request_error` 覆盖连接错误 / APIConnectionError / APITimeoutError 与下列状态码，429 可由 `retry_rate_limits=False` 关闭：
+
+```
+408, 409, 429, 500, 502, 503, 504, 529 或 5xx
+```
+
+`provider_settings.request_max_retries` 页面可调（default.py:106）→ text_chat 形参 `request_max_retries`。
 
 **适配器内层**（OpenAI）max_retries=10 的错误分类循环（见 4.2），能识别 429/context/非 VLM/审核/工具不可用。两者叠加意味着一个 429 极端情况下最多可能尝试十几次。
 
-**Key 轮换边界**：`key` 数组在适配器构造时解析进 `self.api_keys`；429/无效时移除；**多 key 只是错误驱动的本地轮换 handleState，不跨实例/渠道共享**。Anthropic 只取 `key[0]`，不改 key（:105-111）。
+**Key 轮换边界**：`key` 数组在适配器构造时解析为 `self.api_keys`，429 或无效时被剔除——多 key 只是错误驱动的本地轮换，不跨实例/渠道共享。Anthropic 只取 `key[0]` 且不轮换（:105-111）。
 
 **fallback 语义**：参见 5.3，只覆盖图片模态退化 + 空输出/err 回复；`_iter_llm_responses_with_fallback`（tool_loop_agent_runner.py:533-634）候选 `[provider, *fallback_providers]`，主 provider 空输出（`EMPTY_OUTPUT_RETRY_ATTEMPTS=3` 指数退避）轮到下一个，普通错误抛给上层重试。
 
@@ -266,7 +321,8 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 ### 7.1 读写链路
 
 - 启动：`astrbot/core/__init__.py:33` `AstrBotConfig()`；缺项 `check_config_integrity` 递归补默认（astrbot_config.py:173-230）；`save_config`（: 232-323）原子写（临时文件 + fsync + os.replace + revision 去重提交）。
-- 新配置端：`AstrBotConfigManager`（astrbot_config_mgr.py:31-309）`confs["default"]` + 多会话 `abconf_<uuid>.json`，`get_conf(umo)` 经 `UmopConfigRouter`；档案映射 `abconf_mapping` 存 SharedPreferences global 键（:54-66），启动时 `initialize()` 异步加载（:49-52，core_lifecycle.py:188），`create_conf`/`delete_conf`/`update_conf_info` 已全部异步化并加 `_abconf_lock` 串行（:191-301，#9582/#9584）。
+- 新配置端：`AstrBotConfigManager`（astrbot_config_mgr.py:31-309）维护默认配置与多会话 `abconf_<uuid>.json`，会话配置经 `get_conf(umo)`/`UmopConfigRouter` 路由；档案映射 `abconf_mapping` 存 SharedPreferences global 键（:54-66），启动时 `initialize()` 异步加载（:49-52，core_lifecycle.py:188）。
+- 配置 CRUD（create/delete/update）已全部异步化并以 `_abconf_lock` 串行（:191-301，#9582/#9584）。
 - 热更新：Dashboard REST（`astrbot/dashboard/api/providers.py` + `config_service.py`）→ ProviderManager 的 create/update/delete。
 - `get_provider_schema`（config_service.py:1361-1393）合并 `CONFIG_METADATA_2` 模板 + `provider_cls_map[type].default_config_tmpl` → WebUI 动态表单。
 

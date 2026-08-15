@@ -18,10 +18,10 @@ AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM
 
 关键事实（快照 a9bb8a6）：
 
-- **组件体系**：`ComponentType` 枚举 22 种（components.py:46-70），`BaseMessageComponent`（pydantic v1/v3 条件导入，:35-38）提供 `toDict()` 同步（:98-106）与 `to_dict()` 异步双轨序列化；`__repr_args__` 截断 base64/超长字段防日志污染（:79-96）。
+- **组件体系**：组件枚举 22 种，基类提供同步/异步双轨序列化（`toDict` 与 `to_dict`），并覆写 repr 把 base64 与超长字段截断，日志与异常输出自动安全（components.py:35-110）。
 - **业务语义元协议**：`MessageChain.type` 字段（message_event_result.py:33-34）承载 `tool_call`/`reasoning`/`audio_chunk` 等业务语义，仅 WebChat 出站序列化与前端消费，其他平台忽略。
-- **装饰阶段做链重写**（result_decorate/stage.py）：思考内容注入（:287-309）、TTS 文本→Record（:311-360）、t2i 文本→整链单图（:362-404）、超长转发（:406-418）、@/Reply 前缀（:420-439）。
-- **RespondStage 分段发送**（respond/stage.py）：组件有效性校验表（:21-50）、Reply/At 提取为"头"（:256-284）、Record 强制单独发（:255）、间隔对数/均匀随机（:98-107）、流式直通（:211-225）、重复文本防重（:182-204）。
+- **装饰阶段做链重写**（result_decorate/stage.py:21-439）：集中完成思考内容注入、TTS 文本转音频、文本转图、超长转发和 @/Reply 前缀五类重写，细节见 §4.1 表格。
+- **RespondStage 分段发送**（respond/stage.py:169-325）：校验组件有效性、提取 Reply/At 为"头"、Record 强制单独发、间隔随机防风控、流式直通与重复文本防重，细节见 §4.2。
 - **平台层处理长度与协议差异**：Telegram 4096 逐级切分、LINE 5000 截断、aiocqhttp 缓冲合并或句号切分双策略、QQ 官方 Markdown 流式、Satori 转义等。
 - **WebChat 半开放协议**：出站 `{"type","data",...}` + `[IMAGE]/[RECORD]/[FILE]` 前缀字符串（webchat_event.py:50-149），前端反向解析；历史记录走结构化 parts（message_parts_helper.py）。
 - **前端渲染**：`messageBlocks()` 按 think/tool_call/content 切块（useMessages.ts:1317-1359），`MarkdownRender` 流式 + `MARKDOWN_RENDER_MAX_LIVE_NODES=320` 节点上限。
@@ -47,7 +47,12 @@ LLM 结果 / 插件 CommandResult
 
 ### 1.1 枚举与基类
 
-- `ComponentType`（:46-70）：`Plain/Image/Record/Video/File/Face/At/Node/Nodes/Poke/Reply/Forward/RPS/Dice/Shake/Share/Contact/Location/Music/Json/Unknown`（22 种；RPS/Dice/Shake/Contact/Location 标注 TODO，仅占位）；
+- `ComponentType`（:46-70）：22 种组件，其中 RPS/Dice/Shake/Contact/Location 标注 TODO，仅占位。完整清单：
+
+  ```text
+  Plain / Image / Record / Video / File / Face / At / Node / Nodes / Poke / Reply
+  / Forward / RPS / Dice / Shake / Share / Contact / Location / Music / Json / Unknown
+  ```
 - `BaseMessageComponent(BaseModel)`（:73-110）：
   - `type: ComponentType` 必填（:74）；
   - `__repr_args__`（:79-96）：覆盖 pydantic repr，`base64://` 前缀显示为 `base64://<N chars>`，>64 字符截断——日志与异常输出自动安全；
@@ -85,7 +90,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 ```
 
 - `derive(chain)`（:36-47）：继承 `use_t2i_/use_markdown_/type` 的派生链（RespondStage 分段发送用）；
-- 构建方法：`message()`（:49-58）、`at()`（:60-69）、`at_all()`（:71-80）、`url_image/file_image/base64_image`（:93-125）、`use_t2i()`（:127-135）、`use_markdown()`（:137-147）；
+- 构建方法（:49-147）：文本消息、@某人、@全体、三种图片来源（url/文件/base64）与 t2i、markdown 模式的快捷构造，均继承基础字段；
 - `get_plain_text(with_other_comps_mark)`（:149-168）：默认空格拼接所有 Plain；带标记时非 Plain 输出 `[类名]`、Json 输出 `data`；
 - `squash_plain()`（:170-192）：所有 Plain 聚合到第一个 Plain（aiocqhttp 非流式缓冲合并用）。
 
@@ -111,7 +116,15 @@ type: str | None = None             # 业务语义元协议（:33-34）
 
 ### 4.1 ResultDecorateStage（result_decorate/stage.py:21-439）
 
-初始化（:23-102）：`reply_prefix`、`reply_with_mention`、`reply_with_quote`、`t2i_word_threshold`（默认 150、下限 50，:32-37）、`t2i_strategy`（local/remote）、`forward_threshold`、TTS `trigger_probability`（夹在 [0,1]，:46-56）、分段回复配置（:58-88）、内容安全复查（:91-99，复用 ContentSafetyCheckStage 实例）、`show_reasoning`（:101-102）。
+初始化（:23-102）一次性读取本阶段全部可调项：回复与 @ 相关开关、文本转图阈值与策略、转发阈值、TTS 触发概率、分段回复配置、内容安全复查（复用 ContentSafetyCheckStage 实例）与思考内容显示开关。配置键如下：
+
+```text
+reply_prefix / reply_with_mention / reply_with_quote
+t2i_word_threshold（默认 150、下限 50） / t2i_strategy（local/remote）
+forward_threshold
+TTS trigger_probability（夹在 [0,1]）
+分段回复配置（:58-88） / 内容安全复查（:91-99） / show_reasoning（:101-102）
+```
 
 | 装饰 | 位置 | 行为 |
 |---|---|---|
@@ -123,7 +136,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 
 ### 4.2 RespondStage（respond/stage.py:169-325）
 
-组件有效性校验表（:21-50）：每种组件的非空 lambda（Plain strip、Record 需 file、Reply 需 id+sender_id、Music 分 custom 两类等）。
+组件有效性校验表（:21-50）：对每种组件规定一条非空判定，例如文本 strip 后非空、Record 必须带文件、Reply 必须带 id 与发送者、Music 按 custom 类别区分等。
 
 `process` 流程：
 
@@ -132,7 +145,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 3. **流式直通**（:211-225）：`STREAMING_RESULT` → `event.send_streaming(result.async_stream, realtime_segmenting)`（realtime_segmenting = `unsupported_streaming_strategy == "realtime_segmenting"`，:216-222）；
 4. **路径映射**（:227-233）：`path_mapping` 平台设置对 File 段生效（`path_Mapping`）；
 5. 空链校验（:235-241）+ 空 Plain 移除（:243-251）；
-6. **分段回复**（`is_seg_reply_required` :130-147：enable 且（非 only_llm_result 或模型结果）且平台不在 qq_official_webhook/weixin_official_account/dingtalk 排除表）：Reply/At 提取为 header（:256-261），其余组件逐条 `asyncio.sleep(_calc_comp_interval)` 后发送（:270-284）；`_calc_comp_interval`（:98-107）：`interval_method=="log"` 时 Plain 按 `log(wc+1, log_base)` 随机插值，否则 `uniform(1.5, 3.5)`（默认区间 :78-88）；Record 强制单独发（:255、:274-275）；
+6. **分段回复**：启用条件为开关开启、结果类型符合（非 only_llm_result 或模型结果）且平台不在 QQ 官方/微信公众号/钉钉排除表（`is_seg_reply_required` :130-147）。启用后 Reply/At 先提取为"头"（:256-261），其余组件逐条按随机间隔发送（:270-284），Record 强制单独发（:255、:274-275）；间隔计算（:98-107）采用对数或均匀随机两种策略：对数模式按字数对数插值（`interval_method=="log"` 时 Plain 按 `log(wc+1, log_base)` 随机插值），否则在默认区间 [1.5, 3.5] 秒内均匀随机（默认区间 :78-88）；
 7. **非分段**：链仅 Reply/At 时跳过（:286-295）；Record 先逐条单独发（:296-310），剩余链一次发（:311-320）；
 8. `OnAfterMessageSentEvent` hook（:322-323）→ `clear_result`（:325）。
 
@@ -142,7 +155,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 
 - `_from_segment_to_dict`（:35-67）：Image/Record → `base64://`（:37-45）；File → `to_dict()` + 绝对路径无协议头转 `file:` URI（:46-62）；Video → `to_dict()`；其余 `toDict()`；
 - `_parse_onebot_json`（:69-87）：At 后**强制插入空格 Plain**防粘连（:74-78）、空 Plain 跳过（:79-83）；
-- `send_message`（:125-181）：链含 Node/Nodes/File 时逐条发送（:144-153）；Node 包成 Nodes 走 `send_group_forward_msg`/`send_private_forward_msg`（:155-172）；普通逐条间隔 0.5s（:181）；`_dispatch_send` 按数字 session_id 路由 group/private/event 兜底（:89-123）；
+- `send_message`（:125-181）：链含合并转发节点或 File 时逐条发送（:144-153），转发节点统一包成 Nodes 走群聊/私聊合并转发接口（:155-172），普通消息逐条间隔 0.5s（:181）；发送前按数字 session_id 路由群聊/私聊/事件兜底（:89-123）；
 - `send_streaming`（:199-234）：非 fallback **先缓冲全部链 + `squash_plain()` 合并一次发**（:204-215）；fallback 按 `[^。？！~…]+[。？！~…]+` 正则切句逐段发（:217-233，`process_buffer` 限速 1.5s）。
 
 ### 5.2 Telegram（tg_event.py）
@@ -207,7 +220,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 
 | 模块 | 位置 | 内容 |
 |---|---|---|
-| `useMessages.ts` | :990-1160 `processStreamPayload` | SSE/WebSocket 双通道（TransportMode :5）；按 `msgType/chainType` 分派（reasoning→think part、tool_call→upsertToolCall、audio_chunk 直通）；`[IMAGE]/[RECORD]/[FILE]/[VIDEO]` 前缀与 `\|` 分隔符解析（:1131-1159）；`resolvePartMedia`（:202-238）attachment_id 三级回退 |
+| `useMessages.ts` | :990-1160 `processStreamPayload` | SSE/WebSocket 双通道（TransportMode :5）；按 `msgType`/`chainType` 分派：推理进 think part、工具调用进 upsertToolCall、audio_chunk 直通；`[IMAGE]/[RECORD]/[FILE]/[VIDEO]` 前缀与 `\|` 分隔符解析（:1131-1159）；`resolvePartMedia`（:202-238）attachment_id 三级回退 |
 | `messageBlocks()` | :1317-1359 | parts 流按 think/tool_call 与 content 切块——思考折叠 + 内容块渲染基础 |
 | `MessageList.vue` | renderBlocks :355-361；media 分支 :38-187 | ReasoningBlock、MarkdownMessagePart、reply 引用、partUrl（:369-380）embedded_url→attachment_id→filename 回退 |
 | `MarkdownMessagePart.vue` / `ThreadedMarkdownMessagePart.vue` | :12/:11 | `markstream-vue` MarkdownRender（custom-html-tags + smooth-streaming），`max-live-nodes` |
@@ -217,8 +230,8 @@ type: str | None = None             # 业务语义元协议（:33-34）
 
 ## 9. 媒体转换与文件服务
 
-- `MediaResolver`（`astrbot/core/utils/media_utils.py`）：统一处理 `file://` / http / `base64://` / `data:` 四种来源 → `to_path`/`to_base64`（Record 固定 wav，:29-32 附近 silk↔wav 转换辅助）；
-- 文件服务：`register_to_file_service` 注册到 `{callback_api_base}/api/file/{token}`（components.py:560-581 等），`file_token_service` 签发 token——`Image.register_to_file_service`（:560-581）、TTS 音频（result_decorate :337-343）、t2i 结果（:395-401）、Record/Video 出站兜底复用。
+- `MediaResolver`（`astrbot/core/utils/media_utils.py`）：统一处理 `file://` / http / `base64://` / `data:` 四种来源，提供转路径与转 base64 两条通道（Record 固定 wav，:29-32 附近 silk↔wav 转换辅助）；
+- 文件服务：`register_to_file_service` 把资源注册到 `{callback_api_base}/api/file/{token}`，由 `file_token_service` 签发 token（components.py:560-581 等）；TTS 音频、t2i 结果与 Record/Video 出站兜底复用同一机制（result_decorate :337-343、:395-401）。
 
 ## 10. 设计取舍与边界
 

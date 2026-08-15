@@ -43,7 +43,10 @@ TUI 输入（interactive-mode.ts）
 
 ## 核心对象与状态权威
 
-- **SessionEntry 树**（`session-manager.ts:144-153`）：`message/thinking_level_change/model_change/compaction/branch_summary/custom/custom_message/label/session_info`；`custom` 不参与 LLM 上下文，`custom_message` 参与并控制 TUI 显示。
+- **SessionEntry 树**（`session-manager.ts:144-153`）：记录九种条目类型，`custom` 不参与 LLM 上下文，`custom_message` 参与并控制 TUI 显示：
+  - `message`、`thinking_level_change`、`model_change`、`compaction`
+  - `branch_summary`、`custom`、`custom_message`
+  - `label`、`session_info`
 - **AgentMessage/AssistantMessage**（`packages/ai/src/types.ts:415-430`）：含 `content` 块数组、usage、stopReason、errorMessage；工具结果以独立 `ToolResultMessage` 成消息。
 - **权威源**：磁盘 JSONL（`SessionManager` 追加写）；`leafId` 是分支位置权威指针；模型/thinking level 与会话级工具启用集（默认 `[read, bash, edit, write]`）绑定在会话状态；UI 状态行只是投影。
 
@@ -57,7 +60,12 @@ TUI 输入（interactive-mode.ts）
 
 ## 关键能力与已确认边界
 
-- 支持：分支（`branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`）、`/tree` 树导航与 label 书签、compaction 自动压缩（`contextTokens > contextWindow - reserveTokens`，默认 reserve 16384/keepRecent 20000）与溢出“压缩+自动重试”、自动重试（sleep 退避）、steer/followUp 运行中投递、会话删除（trash 优先）、HTML/JSONL 导出与 gist 分享、列表并发扫描（上限 10）与 fuzzy/re: 搜索、fullscreen transcript 搜索与半页/单行滚动（Chat UI 笔记 §1/§4）。
+- 支持：
+  - 分支：`branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary` 四个入口，`/tree` 树导航与 label 书签；
+  - 压缩与重试：`contextTokens > contextWindow - reserveTokens` 触发 compaction 自动压缩（默认 reserve 16384 / keepRecent 20000），溢出后“压缩+自动重试”，自动重试带 sleep 退避；
+  - 运行中投递：steer/followUp；
+  - 会话管理：删除（trash 优先）、HTML/JSONL 导出与 gist 分享；
+  - 检索：列表并发扫描（上限 10）与 fuzzy/re: 搜索、fullscreen transcript 搜索与半页/单行滚动（Chat UI 笔记 §1/§4）。
 - 已确认边界：历史是追加型，无消息就地编辑（修改以分支表达）；续写无独立入口；消息级搜索未接入 TUI/AgentSession 路径（`createScanningSessionSearch` 在 harness SDK，见会话与消息管理笔记 §5）；压缩是“重写上下文而非删历史”，旧条目保留可回溯；`custom`/`bashExecution(excludeFromContext)`/`custom_message(display=false)` 各自独立控制“是否进 LLM 上下文”与“是否可见”。
 
 ## 未验证事项

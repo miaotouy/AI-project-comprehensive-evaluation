@@ -14,12 +14,12 @@
 
 ## 结论摘要
 
-AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布式节点：远端服务端可注册工具清单、下发 `execute_tool` 调用、取消、审批和心跳；AIO 同时把远端插件的工具清单桥接为本地 `ToolRegistry` 供自身 Agent 调用。双向协议、节点身份、持续生命周期、任务映射与治理边界五项准入门槛全部满足，达到 `主链确认`（静态证据）。它是本类目的反向样本：与 VCPToolBox 笔记的"宿主编排节点"视角互补，本笔记记录"节点被远端驱动"一侧。
+AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布式节点：远端服务端可注册工具清单，并下发执行、取消、审批与心跳等控制帧；AIO 同时把远端插件的工具清单桥接为本地工具注册表，供自身 Agent 调用。双向协议、节点身份、持续生命周期、任务映射与治理边界五项准入门槛全部满足，达到 `主链确认`（静态证据）。它是本类目的反向样本：与 VCPToolBox 笔记的"宿主编排节点"视角互补，本笔记记录"节点被远端驱动"一侧。
 
 ## 接入角色与系统边界
 
 - **被驱动的执行面**：远端 Agent/服务端（VCPToolBox 或其他 VCP 兼容端）作为控制方，AIO 持有本地工具执行、文件操作、在途调用（requestId → AbortController）与审批发起。
-- **工具桥接**：`VcpBridgeFactory` 经 `get_vcp_manifests` 拉取远端插件清单，`VcpToolProxy` 包装为本地工具，异步任务以 `vcp_{id}` 映射到本地 taskManager。
+- **工具桥接**：桥接工厂拉取远端插件清单，工具代理把插件包装为本地工具，异步任务以 `vcp_{id}` 前缀映射到本地任务管理器。
 - 宿主 AIO 自身 Agent 的普通工具调用属于 Agent 工具类目，不在本页。
 
 ## 完整主链
@@ -50,7 +50,13 @@ AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布
 
 ## 身份、协议与状态映射
 
-节点身份是 `nodeId`/`VCP_Key`/`serverName` 注册对象，不是匿名 URL。协议帧按 `VcpMessageType` 区分（register_tools、execute_tool、tool_result、cancel_tool、approval、report_ip 等），消息结构与分布式配置见 `types/distributed.ts`。状态映射：`requestId` ↔ 在途调用，`vcp_{id}` ↔ 本地 taskManager 任务，`tool_status` ↔ 任务面板。断线时服务端不再能下发取消帧，因此本地以"断线即清理在途调用"作为一致化策略。
+节点身份由 `nodeId`、`VCP_Key` 与 `serverName` 组成，不是匿名 URL。协议帧按 `VcpMessageType` 区分，覆盖工具注册与执行、结果回传、取消、审批和心跳上报等类型，消息结构与分布式配置见 `types/distributed.ts`。状态映射见下表；断线时服务端不再能下发取消帧，因此本地以"断线即清理在途调用"作为一致化策略。
+
+| 外部状态 | 本地对应 |
+|---|---|
+| `requestId` | 在途调用 |
+| `vcp_{id}` | 本地 taskManager 任务 |
+| `tool_status` | 任务面板 |
 
 ## 执行、回流与控制语义
 
@@ -58,7 +64,7 @@ AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布
 
 ## 权限、凭据与治理边界
 
-- 暴露面治理：`distributedExposed` 白名单 + `disabledToolIds` 黑名单，`internal_request_file` 强制内置（见 `docs/internal-file-request.md`）。
+- 暴露面治理：`distributedExposed` 白名单与 `disabledToolIds` 黑名单共同收口；文件请求工具 `internal_request_file` 强制内置，说明见 `docs/internal-file-request.md`。
 - 审批：远端工具调用与桥接工具的审批均走请求/响应帧。
 - 资源边界：`EXTERNAL_FILE_RATE_LIMIT=20`/`EXTERNAL_FILE_MAX_CONCURRENCY=2`，115s 调用超时。
 - 凭据以 VCP_Key/节点密钥与服务端配置保存，刷新与轮换机制本次未展开。

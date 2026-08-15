@@ -17,7 +17,7 @@
 Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐个渲染 token」的管线，而不是 marked 官方 HTML renderer 的字符串输出。
 
 - 渲染入口 `Messages/Message.svelte` 按 `role` 与父消息模型数分发到 `UserMessage` / `ResponseMessage` / `MultiResponseMessages`，并利用浏览器原生 `content-visibility: auto` 做离屏虚拟化；
-- Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及，并禁用单波浪线删除线；
+- Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用标记 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及，并禁用单波浪线删除线；
 - 代码高亮用 highlight.js（仅 github-dark 主题），只读渲染走 hljs，编辑模式改用 CodeMirror 6；Shiki 仅用于 Notebook 文件预览；
 - Math 用 KaTeX（动态加载 + mhchem），`renderToString` 失败时把源文本 HTML 实体化后输出，避免原始字符进入 `{@html}`；
 - HTML token 一律先 `DOMPurify.sanitize`（默认配置）再渲染；Mermaid/vega 生成的 SVG 再经 `sanitizeSvg` 白名单清洗；Vega loader 阻断一切外部资源；
@@ -50,7 +50,12 @@ content (流式累加)
 ```
 
 - `Markdown.svelte` 的 `<script context="module">`（1-28 行）用 `marked.use(...)` 注册全部扩展；
-- token 覆盖：hr/heading/code/table/blockquote(alert)/list/details/html/iframe/paragraph/text/inlineKatex/blockKatex/colonFence；
+- token 覆盖共 14 类，逐一有对应渲染分支：
+
+  ```text
+  hr / heading / code / table / blockquote(alert) / list / details / html
+  / iframe / paragraph / text / inlineKatex / blockKatex / colonFence
+  ```
 - 代码 token：含 ``` 围栏 → `CodeBlock`，否则纯文本（163-188 行）；
 - 连续 `tool_calls/reasoning/code_interpreter` details 归并成 `detail_group`，展开 `Collapsible`/`ToolCallDisplay`（384-495 行）；
 - `<details>` 块由 `utils/marked/extension.ts`（29-103 行）深度配对解析并捕获 `type` 属性；
@@ -74,7 +79,7 @@ content (流式累加)
 
 ## 4. 可视化与 Artifacts
 
-- `CodeBlock.svelte`（358-390 行）：仅 `lang ∈ {mermaid, vega, vega-lite}` 且围栏闭合时触发 `renderMermaidDiagram` / `renderVegaVisualization`，结果可放大（SvgPanZoom 433-446 行）；
+- `CodeBlock.svelte`（358-390 行）：仅 mermaid/vega/vega-lite 三种语言且围栏闭合时触发 `renderMermaidDiagram` / `renderVegaVisualization`，结果可放大（SvgPanZoom 433-446 行）；
 - mermaid 初始化 `htmlLabels: false`（utils/index.ts 1954-1963 行），`securityLevel: 'loose'` 但输出 SVG 被 `sanitizeSvg` 清洗；
 - `Artifacts.svelte`（41-61 行）：iframe 内点击拦截，外部链接仅 `console.info` 阻止不导航；246-260 行 `srcdoc={injectCsp(contents[idx].content, $config?.ui?.iframe_csp)}` + `sandbox="allow-scripts allow-downloads"`；`ui.iframe_csp` 默认空字符串 → 不注入 CSP（csp.ts "first CSP meta wins"）；
 - 引用文档预览：`CitationModal.svelte`（215-257 行）`sandbox="allow-scripts allow-forms"` + 可选 allow-same-origin + srcdoc CSP；普通文本预览用 Markdown 或 `<pre>`，HTML 内容走 sandbox iframe。
@@ -84,7 +89,7 @@ content (流式累加)
 - `structuredOutput.ts`（126-195 行）：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems`（266-333 行）产出 message/详情序列；
 - `StructuredOutputRenderer.svelte`（43-168 行）：message → Markdown（或纯文本），详情 → `ToolCallDisplay`/`Collapsible`；
 - `CodeExecutions.svelte`（28-63 行）：`message.code_executions` → 齿轮徽章 + error/output/incomplete 状态点；`CodeExecutionModal.svelte` 显示 ERROR/OUTPUT + `result.files` 链接；
-- 执行后端：`$config.code.engine==='jupyter'` → `executeCode` API（从 stdout 抽 `data:image/png`）；否则 `executePythonAsWorker`（CodeBlock.svelte 149-356 行，自动探测 import→依赖，60s 超时）→ `createPyodideWorker` / `PyodideSandboxHost`（iframe srcdoc + `sandbox="allow-scripts"`，matplotlib 内联 base64 PNG 补丁）。
+- 执行后端分两条通道（按 `$config.code.engine` 选择）：配置为 `'jupyter'` 时走 `executeCode` API（从 stdout 抽 `data:image/png`）；否则浏览器端 `executePythonAsWorker`（CodeBlock.svelte 149-356 行，自动探测 import→依赖，60s 超时），经 Pyodide worker 沙箱运行（iframe srcdoc + `sandbox="allow-scripts"`，matplotlib 内联 base64 PNG 补丁）。
 
 ## 6. 模型输出 vs 工具/检索内容
 
@@ -100,7 +105,7 @@ content (流式累加)
 
 ## 7. 流式渲染优化
 
-- `Markdown.svelte`（61-97 行）：`content` 变化 → `done` 时立即 `parseTokens`，否则 `requestAnimationFrame` 节流一次；`done` 时 `cancelAnimationFrame` 丢弃残留帧；`lastContent`/`lastParsedContent` 双缓存避免重复 lexer；
+- `Markdown.svelte`（61-97 行）：`content` 变化时若已完成立即 `parseTokens`，否则 `requestAnimationFrame` 节流合并一次解析；完成时 `cancelAnimationFrame` 丢弃残留帧；`lastContent`/`lastParsedContent` 双缓存避免重复 lexer；
 - `MarkdownTokens.svelte`（43-54 行）：text token 经 `MarkdownInlineTokens` → `TextToken`（流式期间避免每次全量替换 DOM）；heading/paragraph/table 递归 `svelte:self` 复用 token 引用；
 - `ResponseMessage.svelte`（193-196 行）：流式期间对 message 做 `structuredClone` 快照 + content/done/output 快速比较，避免组件属性抖动导致 destroy/mount；
 - `CodeBlock.svelte`（400-402 行）：`_token` 版本跟踪，只有文本真正变化才重新 `render()`。

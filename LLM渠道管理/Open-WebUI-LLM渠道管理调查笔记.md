@@ -22,7 +22,7 @@ Open WebUI v0.11.0 把「渠道」建模为**一条 Base URL 一行**的配置�
 - Ollama 多后端若托管同名模型，`merge_models_lists` 记录 `urls: [idx,...]`，请求时 `random.choice(urls)` 随机选一台——这是仓库中唯一的渠道级分摊/冗余逻辑；
 - 模型解析统一在 `utils/models.py`：`get_all_base_models` 并发拉 OpenAI + Ollama + 函数模型，`base_model_lookup` 对 Ollama 先按 `id.split(':')[0]` 再按精确 id 匹配，自定义模型分「覆盖（base_model_id=None）」与「预设（preset）」两种形态并入列表；
 - OpenAI 兼容层功能全：同一 `generate_chat_completion` 支持 OpenAI 原生、任意兼容服务、Azure（deployments 重写）、Anthropic（`x-api-key` 头）、Responses API 转换；`provider=='litellm'` 与 Anthropic URL 判定为 passthrough；
-- 每连接 `auth_type` 支持 bearer / none / session / system_oauth / azure_ad / microsoft_entra_id，外加自定义 headers 模板（可引用 `{{USER_ID}}` 等变量）；
+- 每连接 `auth_type` 支持多种认证模式（bearer、session、OAuth、Azure AD 等，完整矩阵见 5.1 表格），外加自定义 headers 模板（可引用 `{{USER_ID}}` 等变量）；
 - **LLM 调用路径无 retry**：openai.py / ollama.py / utils/chat.py 均无重试循环，只有超时（默认 300s）、模型列表 10s 超时与错误归一化事件（`MODEL_PROVIDER_REQUEST_FAILED`，按状态码分类并记录 key 末四位）；
 - 模型 id 语法：v0.11.0 不强制 `user.model` 命名，workspace 模型 id 是任意 ≤256 字符唯一串；上游 `prefix_id` 前缀在出站时剥离。
 
@@ -52,7 +52,12 @@ Open WebUI v0.11.0 把「渠道」建模为**一条 Base URL 一行**的配置�
 
 - 下游（RAG、图片、音频）引用单数变量，多渠道路由引用复数列表（DB key `openai.api_base_urls` 等）；
 - 种子注册：`seed_registered_defaults` → `Config.seed_defaults`（models/config.py 239-264 行），`DEFAULT_CONFIG` 在 config.py 2788-3183 行；
-- 迁移：`migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py` 把旧扁平 key 折叠为逐行配置，`API_CONFIG_FIELDS` 覆盖 enable/key/prefix_id/tags/model_ids/connection_type/provider/auth_type/headers/azure/api_type/api_version/extra_params/passthrough_params。
+- 迁移：`migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py` 把旧扁平 key 折叠为逐行配置，`API_CONFIG_FIELDS` 覆盖：
+
+  ```text
+  enable / key / prefix_id / tags / model_ids / connection_type / provider / auth_type /
+  headers / azure / api_type / api_version / extra_params / passthrough_params
+  ```
 
 ### 1.2 运行时配置（models/config.py）
 
@@ -78,7 +83,11 @@ Open WebUI v0.11.0 把「渠道」建模为**一条 Base URL 一行**的配置�
 
 - `get_openai_connection(idx)`（300-305 行）：按序号取 `(url, key, api_config)`，config 查找顺序 `configs[str(idx)]` → `configs[url]`（旧兼容）；
 - `get_all_models_responses`（528-612 行）：对每个启用渠道并发 `GET {url}/models`（Anthropic 走专用拉取）；`model_ids` 白名单存在时**不请求上游**直接构造列表；`prefix_id` 加前缀（599-600 行）、tags/connection_type/provider 注入；
-- `get_all_models`（646-711 行，aiocache TTL=`MODELS_CACHE_TTL` 默认 1s）：`get_merged_models` 按 model_id 去重，**首见渠道获胜**（683 行），`urlIdx` 记录来源；`api.openai.com` 主机过滤不支持关键词（babbage/dall-e/davinci/embedding/tts/whisper）；
+- `get_all_models`（646-711 行，aiocache TTL=`MODELS_CACHE_TTL` 默认 1s）：`get_merged_models` 按 model_id 去重，**首见渠道获胜**（683 行），`urlIdx` 记录来源；`api.openai.com` 主机过滤以下不支持关键词：
+
+  ```
+  babbage / dall-e / davinci / embedding / tts / whisper
+  ```
 - `GET /models` 与 `/models/{url_idx}`（714-785 行）：单渠道直连测试。
 
 ### 3.2 chat/completions 转发（1182-1435 行）
@@ -99,7 +108,11 @@ enabled 检查
 ```
 
 - 流式转发剔除 `Content-Encoding/Content-Length/Transfer-Encoding`（80-87 行）；超大 chunk 超过 `CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE` 时输出空 `{}` 并跳过（utils/misc.py 1152-1198 行）；
-- 其它端点：`/embeddings`（1438）、`/responses`（1564）、`/verify`（795-880 行，管理员手动测连接）、`/audio/speech`（455）、`/config` + `/config/update`（392-452 行，更新后清缓存并发 `MODEL_PROVIDER_CONFIG_UPDATED` 事件）、`/{path:path}` 透传代理（1674-1793 行，默认 403，`ENABLE_OPENAI_API_PASSTHROUGH` 开关）。
+- 其它端点：
+  - `/embeddings`（1438）、`/responses`（1564）、`/audio/speech`（455）；
+  - `/verify`（795-880 行，管理员手动测连接）；
+  - `/config` + `/config/update`（392-452 行，更新后清缓存并发 `MODEL_PROVIDER_CONFIG_UPDATED` 事件）；
+  - `/{path:path}` 透传代理（1674-1793 行，默认 403，`ENABLE_OPENAI_API_PASSTHROUGH` 开关）。
 
 ### 3.3 Ollama 代理（routers/ollama.py，挂载 `/ollama`）
 
@@ -125,7 +138,11 @@ enabled 检查
 - key 列表归一化：`normalize_openai_api_keys`（openai.py 290-297 行）与 `/config/update`（408-411 行）把 key 列表裁剪/补齐到与 URL 列表等长；
 - **OpenAI 侧无轮换、无故障转移**：模型 id → urlIdx 固定（首见获胜），渠道挂了该模型即 404（1244-1247 行）；无健康检查端点（仅 `POST /verify` 是手动测连接）；
 - **Ollama 侧随机选择**：多后端同名模型 `random.choice(urls)`——这是唯一的冗余/分摊逻辑；选中后端失败即报错，无重试（推测：该行为从代码推断，未实测）；
-- 请求失败事件 `publish_model_provider_request_failed`（events.py 1182-1250 行）：按状态码分类（404→model_not_found、401/403→authentication_failed、429→rate_limited、≥500→server_failed），记录 `api_key_suffix`（末 4 位）并发布 `MODEL_PROVIDER_REQUEST_FAILED` 事件。
+- 请求失败事件 `publish_model_provider_request_failed`（events.py 1182-1250 行）：按状态码分类，记录 `api_key_suffix`（末 4 位）并发布 `MODEL_PROVIDER_REQUEST_FAILED` 事件：
+
+  ```
+  404 → model_not_found；401/403 → authentication_failed；429 → rate_limited；≥500 → server_failed
+  ```
 
 ## 5. 认证、流式、错误归一化、重试、超时
 
@@ -154,7 +171,13 @@ enabled 检查
 ## 6. 前端管理
 
 - `src/lib/components/admin/Settings/Connections.svelte`：OpenAI/Ollama 各自逐 URL 行渲染、增删（删除后 config 序号重排 267-277 行）、`/openai/config/update` 与 `/ollama/config/update`；`ENABLE_DIRECT_CONNECTIONS` 与 `ENABLE_BASE_MODELS_CACHE` 开关；
-- `AddConnectionModal.svelte`：每连接的 `enable/tags/prefix_id/model_ids/connection_type/auth_type/headers/passthrough_params`；Azure 需要 `api_version` + deployment `model_ids`；`provider='azure'` 与 URL 探测联动；
+- `AddConnectionModal.svelte`：每连接的字段：
+
+  ```text
+  enable / tags / prefix_id / model_ids / connection_type / auth_type / headers / passthrough_params
+  ```
+
+  Azure 需要 `api_version` + deployment `model_ids`；`provider='azure'` 与 URL 探测联动；
 - `OpenAIConnection.svelte` / `OllamaConnection.svelte`：行组件（Ollama key 存 `config.key`）；
 - `Settings/Models.svelte`：模型 upsert（覆盖式写 `base_model_id:null`）、克隆（`base_model_id=model.id, id='xxx-clone'`）、隐藏/公开/排序；
 - API 封装：`src/lib/apis/openai/index.ts`、`src/lib/apis/ollama/index.ts`。
