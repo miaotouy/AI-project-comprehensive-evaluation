@@ -1,10 +1,10 @@
 # LLM 渠道管理横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-16
 >
-> 依据：同目录十六份源码调查笔记及其中记录的代码快照
+> 依据：同目录十七份源码调查笔记及其中记录的代码快照
 >
 > 对比方法：统一比较渠道数据模型、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十六个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPToolBox 分别位于单网关客户端和单上游编排层。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
+十七个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPToolBox 分别位于单网关客户端和单上游编排层。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
 
 横向核验后的主要结论如下：
 
@@ -27,14 +27,15 @@
 - **VCPToolBox 是协议与模型编排层，不是多 Provider 渠道池。** 它统一多种入站协议，支持模型别名、语义选模、特定请求的模型 fallback 和普通请求重试；所有核心请求仍走同一个 OpenAI-compatible 上游和同一枚 Key。
 - **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key、无跨 Provider failover。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
 - **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK 的 `streamText`（内置 Provider 表 + npm 动态安装），另有可选的 native 协议实现。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 请求默认自动做 prompt caching，可通过 `setCacheKey` 关闭。
+- **DeepSeek Harness 是 Pi 家族衍生：渠道治理全在 dsh 侧，pi-ai 只贡献模型目录、Provider 构造与事件流。** `LlmRuntime` 持有 route → adapter 实例注册表，route 只是注册键不是用户实体，注册与替换同步原子；直连适配器 `dsh-llm-deepseek`（fetch + SSE）与 pi-ai 适配器 `dsh-llm-pi-ai`（复用 `@earendil-works/pi-ai`）自始实现同一 `StreamChunk` 词汇以验证 seam 中性，凭据解析、retry policy、settings 分层与错误分类全在 dsh 侧。key 永不进配置：只存 `apiKeyEnv` 引用，经凭据 seam 每请求解析（继承环境 > `.credentials.yaml` > `.env`）；重试在 agent 步边界由 `agent/request-error` 瀑布执行，normal 默认最多 2 次；模型目录是配置，不自动刷新。
 - **AstrBot、DeepChat 与 Open WebUI 都是服务端/主进程渠道层，但治理重点不同。** AstrBot 允许同一来源生成多个能力实例，错误驱动换 Key，并在图片能力或空输出时走显式 fallback；DeepChat 将 Provider、ModelConfig、runtime registry 与 QPS 队列分开；Open WebUI 以 URL 配置行表示连接，OpenAI 模型固定到首见连接，Ollama 同名模型可随机选后端。
 - **Hermes Agent 是样本中唯一确认实现显式跨渠道 fallback 链的项目。** 它把应用重试、同 Provider credential pool、模型 fallback、跨 Provider/端点 fallback 与恢复主通道分成四层。该链需用户配置，不是健康感知的动态路由器；切换后会重发同一任务，存在重复生成与计费可能。
 - **Jan 的多 Key 与凭据边界较完整。** 主 Key 加 fallback Key 链保存在 OS keyring，401/403/429 会在当前请求换 Key；远程 Provider 与 llama.cpp/MLX 本地引擎都经本地 router 暴露为 OpenAI-compatible 路径。它不做跨 Provider failover。
 - **NextChat 与 Manifold Desktop 是轻量客户端路线。** NextChat 用 Provider 枚举、adapter、客户端 store 和 Next.js 代理组合渠道，服务端可从逗号 Key 随机选一枚但失败不换 Key；Manifold Desktop 只有每 Provider 单 Key、全局默认选择和少数 adapter，且本地 Proxy/Ollama 路径存在已确认的拼接/协议不一致。
-- **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；但十六者都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
+- **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；但十七者都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 对数据库 Provider 凭据做 AES-GCM 加密；Jan 与 Manifold Desktop 分别使用 OS keyring 和 Windows Credential Manager。Hermes Agent 以 `.env`/`auth.json` 分层存储并在日志、UI、备份和子进程环境中脱敏，但底层文件不是密文库。其余多项目仍有明文配置或客户端持久化边界。备份是否包含 Key 必须单独核对。
-- **不适合给十六者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
+- **不适合给十七者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
 
 ## 一览矩阵
 
@@ -45,6 +46,7 @@
 | Chatbox | Provider 注册项 + 设置 | `provider + modelId` | 单 Key / 不适用 | 429/5xx 最多 5 次 | 无 | Electron Store 明文 |
 | Cherry Studio | `user_provider` 实例 | 含 `providerId` 的模型标识 | 结构化数组 / 不换 | 默认关闭 | 无 | SQLite JSON 明文，renderer 边界收窄 |
 | DeepChat | `LLM_PROVIDER` + `ModelConfig` + runtime registry | `provider.id + modelId` | 单 Provider 凭据 / 无多 Key | runtime/adapter 依定义；无统一跨渠道重试 | 无 | apiKey 明文存 SQLite；OAuth 走 OS safeStorage |
+| DeepSeek Harness | `LlmRuntime` 注册表 route → adapter 实例 | provider + model | 每 route 单凭据 / 不换 | agent 步边界，normal 默认最多 2 次 | 无 | `.credentials.yaml` 0600 明文；配置只存 `apiKeyEnv` 引用 |
 | Hermes Agent | ProviderProfile + endpoint config + credential pool | provider + endpoint + model | credential pool / 401、429 等换 | 应用层默认 3 次 | **有，显式 fallback 链** | `.env`/`auth.json` 分层明文，日志/UI/备份脱敏 |
 | Jan | 远程 Provider + 本地 llama.cpp/MLX router | provider + model | 主 Key + fallbacks / 401、403、429 换 | Key 链内重发 | 无 | OS keyring |
 | LobeHub | `ai_providers` | `providerId + modelId` | 逗号 Key / 无稳定保证 | Agent Runtime 默认 5 次 retry | 普通 Provider 无；Router 可扩展 | PostgreSQL AES-GCM |
@@ -140,6 +142,10 @@ Hermes Agent 的 ProviderProfile 是声明，不持有客户端；用户端点�
 
 NextChat 以 Provider 枚举、平台 adapter、客户端 access store 和 Next.js 代理组合；Manifold Desktop 以 C++ ProviderRegistry 和 Windows Credential Manager 组合。两者都适合小型客户端，但缺少健康状态、自动故障转移和规范化多实例生命周期；Manifold 的 Ollama/Proxy 路径还存在当前快照已确认的端点拼接和协议不一致。
 
+### 13. 注册键 + 双适配器型：DeepSeek Harness
+
+DeepSeek Harness 的 Provider 是 `LlmRuntime` 注册表里的 route 键，不是用户实体：同一 adapter 实例可注册多条 route，注册与替换同步原子，请求观察不到注册空隙。两个适配器自始实现同一流式词汇——直连适配器走 fetch + SSE，pi-ai 适配器复用 `@earendil-works/pi-ai` 的 Models 集合、Provider 构造与事件流；凭据解析、retry policy、settings 分层与错误分类全在 dsh 侧，SDK 重试被强制为 0。key 永不进配置，只存 `apiKeyEnv` 引用，经凭据 seam 每请求解析到 0600 的 `.credentials.yaml` 托管文档或继承环境。重试在 agent 步边界，normal 默认最多 2 次；模型目录是配置，不自动刷新。HTTP 代理配置本次未找到。
+
 ## 渠道身份与配置复用
 
 稳定身份决定了模型收藏、历史记录、统计和故障切换能否准确指向原连接。
@@ -162,6 +168,7 @@ NextChat 以 Provider 枚举、平台 adapter、客户端 access store 和 Next.
 | VCPToolBox | 无上游渠道实体 | 直接替换全局上游 | 无法并存或选择多条上游连接 |
 | Pi | Provider id（代码注册项） | `models.json`/扩展覆盖；Radius 网关按配置生成新 id | 同服务多账号只能并入单凭据或依赖 Radius 多实例 |
 | OpenCode | Provider id（branded string，内置 11 个 + 自定义） | 注册多个自定义 provider id；同 id 单凭据 | `options` 无数组形态，多端点需新 id；模型别名经 config `models.<alias>.id` |
+| DeepSeek Harness | route 注册键（adapter 声明 route 集，原子 replace） | 同一 adapter 实例多 route；pi-ai 一实例多 profile；settings 加 route | 无用户渠道实体；settings 只能加 route、删不掉 base 的 route |
 
 Cherry Studio 的 `providerId` 与 `presetProviderId` 分离值得借鉴。前者保证用户实例稳定，后者保留继承关系；用户可拥有两条继承同一预设、但凭据和端点独立的渠道。AIO Hub 的 Profile 也能直接表达多实例，结构更集中。LobeHub 和 Chatbox 可以用自定义 ID 达到类似结果，但内置实例和自定义实例需要按各自规则管理。
 
@@ -187,7 +194,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 
 ## 模型目录与元数据
 
-模型目录在十六个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
+模型目录在十七个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
 
 | 项目 | 主要来源 | 模型归属 | 元数据对运行时的作用 |
 |---|---|---|---|
@@ -196,6 +203,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 | Chatbox | Provider API、后端 manifest、本地保存、models.dev | Provider | 能力富化和模型实例化 |
 | Cherry Studio | Registry + 上游目录 + 用户覆盖 | Provider | Endpoint、能力和参数多层合并 |
 | DeepChat | 默认目录 + Provider DB 聚合 JSON + 用户 customModels/config | Provider | 有效能力快照决定 route、tool、媒体和 endpoint |
+| DeepSeek Harness | 直连适配器配置列表（默认 V4 Flash/Pro）；pi-ai 安装目录 + `models` 整表替换 + `modelOverrides`；无自动刷新 | Provider/route | 上下文、输出上限、思考等级参与请求构造；未列出 id 直连 pass-through、pi-ai 报 `UNKNOWN_MODEL` |
 | Hermes Agent | 静态表 + OpenRouter/Nous 远端缓存（`provider_models_cache.json`）+ 用户输入 + custom 端点 `/v1/models` 探活磁盘缓存（`custom:<base_url>` 键 + blake2b 凭据指纹 TTL，models.py:4737） | Provider/endpoint | profile 与 metadata 决定 transport、上下文和辅助模型 |
 | Jan | Provider `/models`、远端目录、本地 GGUF/MLX 下载库 | Provider/本地引擎 | capability 与参数表决定 wire 字段和 router 目标 |
 | LobeHub | 内置 Model Bank、环境与用户数据 | Provider | 能力和参数影响 Runtime |
@@ -227,6 +235,7 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | Chatbox | 单 Key/OAuth | 固定 | 继续使用同一凭据重试 | 不适用 |
 | Cherry Studio | 带 ID、标签、启停的数组 | 跨请求 round-robin | 不记录健康 | 无 |
 | DeepChat | Provider `apiKey/oauthToken` | 固定 | 单 Provider 凭据，无多 Key 结构 | 不适用 |
+| DeepSeek Harness | 每 route 一个 `CredentialRef` 引用，解析后单值 | 固定 | 无多 Key 结构，同凭据重试 | 不适用 |
 | Hermes Agent | auth.json `credential_pool`，含状态/冷却 | selector 选可用项 | 401/429/供应商错误标记耗尽并轮换，冷却后恢复 | **有** |
 | Jan | 主 Key + `api-key-fallbacks` 有序链 | 首 Key | 401/403/429 换下一枚 | **有** |
 | LobeHub | 逗号分隔字符串 | server 随机/轮询，client 随机 | 不记录健康 | 无主动保证 |
@@ -256,6 +265,7 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 | Chatbox | 最多 5 次 attempt | 429/5xx，指数退避；网络错误默认不重试 | Provider、端点、Key、模型不变 |
 | Cherry Studio | 默认 `maxRetries: 0` | 调用方可显式覆盖 | 不重新选择 Provider/Key |
 | DeepChat | 由 runtime behavior/AI SDK 执行；另有 Provider QPS 队列 | timeout/abort 与 adapter 策略；未确认统一次数 | Provider/模型固定 |
+| DeepSeek Harness | `agent/request-error` 瀑布执行 route 注册时捕获的策略，normal 最多 2 次、always 无上限；SDK 重试强制 0 | 五个可重试码，500ms → 10s 指数退避 + 10% 抖动 | Provider/模型/Key 不变 |
 | Hermes Agent | 应用层默认 3 次，随后 credential pool、模型 fallback、Provider fallback 分层推进 | 按 429/401/provider 错误分类；pool 有冷却 | 可依次换 Key、模型、Provider/端点 |
 | Jan | `createApiKeyRotatingFetch` 在认证/限流错误后重发 | 401/403/429 | 同 Provider 换 Key，模型/端点不变 |
 | LobeHub | Agent Runtime 默认 5 次 retry | 可重试错误，指数退避 1s 起、上限 30s | Provider/模型固定；Key 行为依 Runtime 生命周期 |
@@ -296,7 +306,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 
 ## 路由依据：显式绑定仍是主流
 
-十六个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
+十七个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
 
 | 路由依据 | 已确认项目 | 实际作用 |
 |---|---|---|
@@ -321,6 +331,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 | Chatbox | Electron Store `config.json` | 明文 | 桌面设置持有 Key/OAuth/AWS 凭据 |
 | Cherry Studio | SQLite JSON 字段 | 明文 | Renderer 读取普通 Provider 时不含秘密 |
 | DeepChat | SQLite-backed Provider store | apiKey 明文存 `providers.api_key` 列；OAuth 走 OS safeStorage credentialStore | Provider 对象含 apiKey/oauthToken；Header 统一注入、脱敏在 redact.ts |
+| DeepSeek Harness | `$DSH_HOME/.credentials.yaml`（ref → 明文值映射）；settings/配置只存引用 | 明文，0600 + 0700 目录 + 原子写 + 文件锁；POSIX 拒绝 group/other 可读 | `credentials.describe` 只返回 configured/source/writable；错误只命名引用不回显 key |
 | Hermes Agent | `.env` + `auth.json` + 可选 config 内嵌 | 文件本身明文；输出/日志/UI/子进程环境脱敏 | runtime resolver 读取，设置页返回脱敏值 |
 | Jan | OS keyring；设置只保留引用/非秘密配置 | OS 凭据库 | 前端注册/注销 Provider，Key 正文不写 settings.json |
 | LobeHub | PostgreSQL `keyVaults` | AES-GCM | `fetchOnClient` 路径会下发解密后的运行时配置 |
@@ -346,6 +357,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | Chatbox | 自动配置备份复制完整 `config.json`；主动聊天导出默认剔除凭据 | 自动备份与用户导出边界不同 |
 | Cherry Studio | legacy 备份引擎已升级为 **v7 full/slim 双布局，包含 `cherrystudio.sqlite`**（`220dff874f` 起） | 备份会落盘明文 Provider 凭据（SQLite 无静态加密）；v2 backup 仍在开发中 |
 | DeepChat | 模型 config 支持导入/导出；凭据备份未确认 | 不能由 config 导出推断包含 Provider Key |
+| DeepSeek Harness | 无数据库、无导入导出；备份链单项目笔记未确认 | `.credentials.yaml` 即全部 key 值所在，复制文件等于复制凭据；settings 不含 key 可共享 |
 | Hermes Agent | 备份导出对 `.env`、`auth.json`、`state.db` 做脱敏 | 连接恢复是否完整取决于重新提供 Secret |
 | Jan | 单项目笔记未确认全量备份；Key 在 OS keyring | settings 迁移会重新注册 keyring，但不等于可移机导出 |
 | LobeHub | 全量导出含 Provider 密文 | 跨主密钥恢复需要额外流程 |
@@ -371,6 +383,7 @@ VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置�
 | Chatbox | Provider/模型连接能力 | 常规错误与重试 | 无持久健康调度 |
 | Cherry Studio | 单 Provider、批量模型、多 Key 检查并显示延迟 | HTTP Trace、取消控制 | 无 |
 | DeepChat | Registry connectivity strategy、模型目录刷新 | requestTrace + QPS/队列状态事件 | 只影响限流队列，不跨 Provider 路由 |
+| DeepSeek Harness | 无独立连接测试；Models 页就绪 = `credentials.describe` 三态 + settings 存在性静态组合；真实探测仅配置时 `discoverModels`（GET /models，不进运行时） | `llm/retry` 与 `llm/retry-started` 事件、`llm/adapters-updated` 拓扑事件、`assistant/chunk` 可重建请求、`LlmError` 稳定 code + failure | 无；错误码只驱动同 route 内重试 |
 | Hermes Agent | `hermes doctor` 与设置页独立探针 | 日志脱敏、credential pool 状态/冷却、usage tracker | pool/fallback 影响选择；探针结果不直接驱动 fallback |
 | Jan | 每 Key `/models` 测试 | Key 状态结果、router/本地引擎状态 | 失败请求可换 Key；测试结果不形成持续健康调度 |
 | LobeHub | Web/CLI 单模型最小请求 | 结构化 retry 事件 | 无 |
@@ -449,7 +462,7 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 
 ## 组合式参考架构
 
-十六个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
+十七个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
 
 1. **渠道实体采用 Cherry Studio/AIO Hub 的稳定实例 ID。** Provider 预设与用户实例分离，模型身份始终包含渠道 ID。
 2. **协议选择采用 Cherry Studio 的 Endpoint Type + Adapter Family 或 LobeHub 的显式 SDK Type。** 不从 URL 猜协议，也不把多 Endpoint 宣称为容灾。
@@ -479,6 +492,7 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 | “Open WebUI 多连接会自动容灾” | OpenAI 模型固定到首见连接；Ollama 同名模型只在请求前随机选后端，失败后不改选 |
 | “OpenCode 支持多 Provider 自动 failover” | 会话级重试、SDK `maxRetries` 与 native 重试都不改变 Provider/模型/Key；context overflow 自动压缩重试是模型内行为 |
 | “OpenCode 的 `@`/`#`/`:latest` 模型语法” | 本快照仅 `provider/model[/variant]` 语义，无 `@` 全局、`#` 本地或 `:latest` 后缀代码 |
+| “DeepSeek Harness 复用 pi-ai 即拥有 Pi 的渠道管理” | pi-ai 只贡献 Models 集合、Provider 构造、事件词汇与思考等级；凭据解析、retry policy、settings 分层与错误分类全在 dsh 侧，SDK 自动重试被强制为 0 |
 | “配置原子写入等于 Secret 安全” | 原子写入保护完整性；静态加密和备份控制保护保密性 |
 | “模型定价已存在，所以可以按成本路由” | 本次样本中的定价和用量数据未进入通用调度 |
 
@@ -500,12 +514,13 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 | 多入站协议、语义选模和插件编排 | VCPToolBox | 本地仍是单一 OpenAI-compatible 上游 |
 | 终端编码 Agent、多 Provider 直连与模型覆盖 | Pi | 无渠道实例与多 Key；凭据明文；依赖外部容器化做隔离 |
 | 服务端 Agent 运行时、多前端共用与自动模型目录 | OpenCode | 单 provider 单凭据；无多 Key 与跨渠道 failover；凭据明文；模型目录依赖远端拉取（可禁用） |
+| 服务端 Agent 平台、组合配置热重载与双适配器渠道层 | DeepSeek Harness | 无多 Key 与跨 Provider failover；模型目录需写配置不自动刷新；HTTP 代理配置本次未找到 |
 
 这张表描述的是实现接近度，不是产品推荐。最终选择还取决于部署位置、是否允许凭据进入客户端、是否已有聚合网关、生成请求能否安全重放，以及运维方是否真正维护健康状态。
 
 ## 横向结论
 
-十六个项目展示了七条清晰路线：
+十七个项目展示了七条清晰路线：
 
 1. AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 在应用内建立稳定 Provider/连接实体，差别集中在实例模型、多 Key、限流、重试和凭据保护；
 2. SillyTavern 用活动设置和 Profile 服务于完整创作环境切换，渠道自动化让位于兼容性和用户控制；
@@ -517,7 +532,7 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 
-在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是十六个项目共同未闭合的部分。
+在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是十七个项目共同未闭合的部分。
 
 ## 依据与范围
 
@@ -526,6 +541,7 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 - [Chatbox LLM 渠道管理调查笔记](Chatbox-LLM渠道管理调查笔记.md)
 - [Cherry Studio LLM 渠道管理调查笔记](Cherry-Studio-LLM渠道管理调查笔记.md)
 - [DeepChat LLM 渠道管理调查笔记](DeepChat-LLM渠道管理调查笔记.md)
+- [DeepSeek Harness LLM 渠道管理调查笔记](DeepSeek-Harness-LLM渠道管理调查笔记.md)
 - [Hermes Agent LLM 渠道管理调查笔记](Hermes-Agent-LLM渠道管理调查笔记.md)
 - [Jan LLM 渠道管理调查笔记](Jan-LLM渠道管理调查笔记.md)
 - [LobeHub LLM 渠道管理调查笔记](LobeHub-LLM渠道管理调查笔记.md)

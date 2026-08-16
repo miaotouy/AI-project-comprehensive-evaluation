@@ -1,8 +1,8 @@
 # Chat 横向对比（概览与跨类目导航）
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-16
 >
 > 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比；本文档只保留跨层综合结论
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十六个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+十七个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）与事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness，ReactLoopAgent 驱动 turn/step 生命周期，边界全部是 durable session 事件）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 ## 跨层综合结论
 
@@ -48,6 +48,10 @@ VCPChat 仍是"同一产品两条路径不对称"证据最完整的案例。Herm
 
 VCPToolBox 不提供最终用户聊天主界面，但仍负责消息构建。它把调用方提交的历史归一化为 OpenAI `messages`，在首次请求前完成裁剪、注入和预处理；模型输出 VCP 工具标记后，再把 assistant 正文和工具结果 user payload 追加到内存上下文并递归请求。`FinalContextViewer` 只捕获首次上游 fetch 前的最近 5 份内存快照，不包含后续工具递归消息，也不是会话数据库。AdminPanel-Vue 是独立进程（监听 `PORT+1`），与聊天主链物理解耦；OpenWebUISub 是运行在第三方聊天页面里的浏览器脚本。给模型的工具结果使用 `<!-- VCP_TOOL_PAYLOAD -->` user 消息，给前端的可见结果由 `vcpInfoHandler.js` 另行写入 SSE/最终 JSON，两者不能混为同一份消息。完整证据链见[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)的 VCPToolBox 一节。
 
+### DeepSeek Harness：事件溯源驱动的 Agent 会话运行时
+
+DeepSeek Harness 是构建在 vendored Cordis 插件框架上的 agent harness，"一切皆插件"。对话运行核心是 agent-loop 的 ReactLoopAgent：step 是一次模型请求加其工具调用，turn 是零或多个 step，边界全部是 durable session 事件（turn/start → step/start → user/message → assistant/chunk* → assistant/message → tool/call* → tool/result* → step/end → turn/end）。与其他项目最大的差异是事件溯源：Session 是追加式事件日志、唯一事实源，模型历史由日志派生，UI 只是事件消费者；事件分 session 持久、agent live、capability 策略三域。输入经 inbox 两条 pending 列表投递，followup/steer 唤醒驱动、inject 只排队；取消是协作式 abort；headless 一键任务。与 pi 的关联仅在 llm-pi-ai 适配层，循环无继承证据。
+
 ## 选择提示（基于已核实机制）
 
 | 侧重点 | 项目 | 已确认的边界 |
@@ -66,6 +70,7 @@ VCPToolBox 不提供最终用户聊天主界面，但仍负责消息构建。它
 | 多角色群聊与长期 Topic 关系 | VCPChat | 单聊没有本地 abort，可靠中止依赖远端 |
 | 终端本地编码 Agent、追加型树会话与工具循环 | Pi | 单会话单循环；消息编辑以分支表达；无消息级搜索索引；系统提示不随会话保存 |
 | 服务端 Agent 会话运行时、事件广播与多前端共用 | OpenCode | SQLite 权威 + SSE 投影；删除式 revert 与复制式 fork；无消息级全文搜索；Web/TUI 两套渲染栈 |
+| 事件溯源驱动循环、插件层循环控制与 headless 一键任务 | DeepSeek Harness | turn/step 边界全部是 durable 事件、可重放重建；模型可见 ⟺ 已记录；内置无 turn 预算；与 pi 无循环继承证据（仅 llm-pi-ai 适配层） |
 
 Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会出现哪些断层"的对照样本，不宜仅凭已存在的 SessionManager API 判断会话能力已经完成。
 

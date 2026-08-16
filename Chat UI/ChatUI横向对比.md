@@ -1,10 +1,10 @@
 # Chat UI 横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-12
+> 对比更新日期：2026-08-16
 >
-> 依据：本类目 16 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
+> 依据：本类目 17 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -20,6 +20,7 @@
 - **输入区承载了大量 Agent 交互**：DeepChat 的 steer/queue/permission、Jan 的排队与附件、Open WebUI 的工具确认和终端事件，与 AIO/Chatbox/Cherry/Lobe/VCPChat 的附件、知识库、mention、审批共同组成了输入协议。
 - **窗口化与搜索存在结构性冲突**：Chatbox/Cherry/LobeHub/DeepChat 通过虚拟或窗口列表控制长会话成本，但 Cherry 的 DOM 搜索以及任何依赖已挂载节点的扩展会漏掉窗口外消息；NextChat 的固定页窗也需要显式移动窗口。
 - **UI 调查应记录"呈现投影"**：同一份会话数据可以有多种用户可见投影（分支树图、side-by-side、bubble/panel/immersive 模式），仅记录 schema 无法解释用户实际如何切换、编辑、停止和定位。
+- **DeepSeek Harness 的"前端"是浏览器里的第二条 Cordis 插件树**：React 18 + Vite 只是薄壳，每个 UI 能力是 `dsh.client` 插件包，由宿主启动图按需取回；四象限 RPC 中上行是 HTTP POST、下行是每条逻辑流一条 WebSocket；会话事件窗口 → `ConversationNodeAssembler` → 块级不可变流式累积（animation-frame 合并）→ ChatView 按 key 订阅座位；工具调用按工具名键控槽分发；设置表单经 schemastery schema 下发、路径式草稿写回。
 
 ## 工作台与导航
 
@@ -30,6 +31,7 @@
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
 | Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读；Composer 显示 DeepSeek 原生 web 搜索开关（`supportsSearch/searchExecution` 能力字段，仅官方 deepseek-v4-flash 生效） | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
+| DeepSeek Harness | 三栏工作台（sidebar \| conversation \| details，CSS grid + 两个拖拽手柄，窄视口自动折叠侧栏）；无会话 Hero 先选工作区、复用或创建 blank 会话；侧栏行点击即切换，Session 常驻后台吃帧、切回即时恢复 | InputBar 输入状态机（plain/adjudicating/claimed/submitting）+ slash/@ 命令裁决；停止按钮 `session.cancel()`，队列 Dock 只读展示、项可编辑/移除/steer | 浏览器内第二条 Cordis 插件树，UI 能力都是按需取回的 `dsh.client` 插件包；组件不 import 框架，数据经 slot 四份额 props 与 uSES 快照到达；ChatView 按 key 订阅座位，流式增量只替换 key 值不重挂 |
 | Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
 | LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |
@@ -55,6 +57,7 @@
 - **Jan**：SearchDialog 展示并导航 Thread（Fzf 懒建索引的会话列表搜索）。
 - **AIO Hub**：会话内搜索是前端线性扫描，仅覆盖当前活动路径，无法命中隐藏分支；跨会话搜索只能定位到会话，两套搜索没有衔接。
 - **Pi**：搜索在选择器内对 `id+名称+全部消息文本+cwd` 做 token/正则匹配，结果是会话级命中；harness SDK 另存 `createScanningSessionSearch`（异步迭代器分页扫描，未接入 TUI/AgentSession，数据侧见会话与消息管理横向对比）。
+- **DeepSeek Harness**：侧栏 WorkspaceBrowser 提供本地过滤 + 宿主全文搜索（`session.search`，250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询），结果粒度是会话/工作区行；命中具体消息并定位的行为本次笔记未确认。
 - **Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode**：本次笔记未确认用户可见的"命中具体消息并跳转"链路（Open WebUI 后端 `/search` 结果粒度是 Chat；OpenCode 仅会话标题搜索；VCPChat 的"未读话题"/"unread topic"是置顶约定词，非内容搜索）。
 
 ## 消息操作、分支导航与呈现投影
@@ -66,8 +69,10 @@
   - AIO Hub：Vue Flow 树图与 `BranchNavigator`；
   - Open WebUI：Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；
   - SillyTavern：checkpoint 旗标（Shift+点击新建）与 branch 跳转；
-  - Pi：label/分支切换选择器。
+  - Pi：label/分支切换选择器；
+  - DeepSeek Harness：无树图式分支导航，分支是消息操作栏动作，仅已完成回合的 transcript 尾可用，传消息 seq 给 `session.fork` 按 turn 分叉。
 - **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
+- **消息操作入口（DeepSeek Harness）**：消息操作栏提供复制（剪贴板 + 1 秒对勾反馈）、分支与按需时钟指标（运行时长/TTFT/tok/s），插槽式扩展位供第三方动作（如 Like/Dislike）挂载；历史是追加型，未找到就地编辑与删除入口，修改以分支表达。
 - **呈现投影**：同一份会话数据可以有多种用户可见投影——AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图、VCPChat 的 bubble/panel/immersive 三种 CSS 投影、Chatbox 和 Jan 的分支版本导航。仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
 ## 停止入口与生成反馈（用户可见部分）
@@ -81,6 +86,7 @@
 - **Pi**：TUI 键盘停止（abort），中断后消息以 stopReason 持久化、下次恢复可见。
 - **VCPChat**：发送/中止同一按钮；单聊只通知远端，前端没有本地 abort 的完整反馈闭环。
 - **Jan**：流式态禁止编辑/删除；AI SDK 与 transport 控制当前生成，`resume:false` 不恢复未完成回合。
+- **DeepSeek Harness**：停止按钮 → `session.cancel()`（保留 pending inbox 工作，结算后按 FIFO 恢复；子 agent 会话走 `subagent.interrupt`）；运行中 TurnStatus 显示 "Deep diving..."，15 秒后叠加运行时钟。
 
 ## 键盘、焦点与无障碍（聊天关键路径）
 
@@ -92,6 +98,7 @@
 - **LobeHub**：有多处规范实现（`role="progressbar"`、`aria-live="polite"` 等），但 Topic 行、消息操作栏图标按钮普遍缺 `aria-label`——"点状覆盖，非体系化"。
 - **SillyTavern**：`index.html` 全文仅 1 处 `aria-hidden`；245 个"按钮"全是 `<div class="menu_button">`；为此专门写了 `keyboard.js`（MutationObserver + 动态 tabindex + Enter 触发）做键盘可达性补偿，但屏幕阅读器语义几乎空白——**无障碍最薄弱**。
 - **VCPChat**：Presentation mode 切换、侧栏 tab、compact navigation 等有基础 ARIA；但 Agent/Topic/消息列表项均无 `aria-label`/`role`，无 focus trap。
+- **DeepSeek Harness**：关键路径键盘绑定有静态证据（无会话 Hero 以 Enter/Space 打开工作区选择器、IME 合成保护、组合框菜单 ↑↓/Enter/Esc 且焦点留在 textarea、rail 搜索等 300ms 侧栏动画完成）；焦点顺序、无障碍名称与中文输入法下 Enter 边界未运行验证。
 
 **共同结论**：各项目的无障碍语义都不完整，缺口的性质不同；键盘可达性（Tab/Enter）与屏幕阅读器语义（ARIA）是两件独立的事，SillyTavern 用自研框架解决前者、放弃后者。
 
@@ -103,6 +110,7 @@
 - **VCPChat**：compact navigation 由 `sidebarAvatarOnly` 字段显式控制，**不是宽度断点自动触发**；表情包选择器是平铺图片网格，无搜索无分类，点击插入原始 `<img>` HTML 标签。
 - **LobeHub**：移动端是独立路由树 + 独立构建产物，不是同构响应式；资源管理器的文件拖拽是团队主动放弃 `dnd-kit`、自建原生 HTML5 drag/drop。
 - **AIO Hub**：侧栏拖拽宽度由自研 `useResizable` 实现，200–600px 硬编码约束。
+- **DeepSeek Harness**：开发期 HMR 链默认 disabled（`cordis.patch.yml` 标注 TODO），改插件需重建 bundle 并重挂纤维，且 HMR 单插件重载会丢 React 状态。
 
 ## 设计取舍与已确认边界
 
@@ -111,8 +119,13 @@
 - **通用界面盘点不在本对比范围**：弹窗/Toast/主题/动画/图片预览等跨项目盘点在 [`../应用界面基础设施/应用界面基础设施横向对比.md`](../应用界面基础设施/应用界面基础设施横向对比.md)，本对比只记录与聊天主链的交点。
 - **类目边界**：消息如何被绘制（虚拟化、滚动、消息壳）在消息渲染器横向对比；停止/重试的真实执行在对话请求与上下文横向对比；搜索索引与命中数据在会话与消息管理横向对比。
 
+### DeepSeek Harness
+
+Web Chat UI 是运行在浏览器里的第二条 Cordis 插件树：宿主进程一条 cordis 树、浏览器一条 client 树，每个 UI 能力是 `dsh.client` 插件包，由启动图按需取回，React 18 + Vite 只是薄壳。连接走四象限 RPC（上行 HTTP POST、下行双 WebSocket），重连即重建、无 resume 游标。会话事件先进事件窗口，由装配器折叠成业务节点，块级不可变累积经 animation-frame 合并后按 key 订阅座位、行级更新；工具调用按工具名键控槽分发，未注册落 `GenericToolCard`；设置表单经 schemastery schema 下发、路径式草稿写回。代价是自研快照批处理与 slot 契约接线；未运行 `dsh web`，视觉效果与键盘可用性未实测。
+
 ## 未验证事项
 
 - 键盘可达性与屏幕阅读器实际体验大多只有静态证据（各项目笔记均标注 `STATIC_ONLY`）。
 - SillyTavern 长聊天下 swipe 高频操作与整段重绘的性能影响未实测。
 - LobeHub 的 `@lobehub/ui` 内部焦点管理未下钻。
+- DeepSeek Harness 未运行 `dsh web`：视觉效果、动画、CSS 主题、焦点顺序、键盘可用性、IME 行为、滚动与流式性能均未实测（笔记 §14）。
