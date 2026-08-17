@@ -1,10 +1,10 @@
 # Agent 工具横向调查与对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
 > 对比更新日期：2026-08-16
 >
-> 依据：同目录十七份单项目调查笔记及其记录的代码快照
+> 依据：同目录十八份单项目调查笔记及其记录的代码快照
 >
 > 对比方法：只读源码、类型定义、注册表、执行器、调用入口和单项目调查笔记，逐项核对实现
 >
@@ -30,6 +30,7 @@
 | Open WebUI | [Open-WebUI-Agent工具调查笔记.md](Open-WebUI-Agent工具调查笔记.md) | 178 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
 | OpenCode | [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md) | 225 | `dev` | `1f94d8a3c86b67f4f49a0e341de74e9188381b3a` |
 | Pi | [Pi-Agent工具调查笔记.md](Pi-Agent工具调查笔记.md) | 122 | `main` | `534bcbffb7e1e7551d9ee3572dfeb278e203e493` |
+| Risuai | [Risuai-Agent工具调查笔记.md](Risuai-Agent工具调查笔记.md) | 185 | `main` | `0551d283faeba6e73899b01dd85ea38307b24699` |
 | SillyTavern | [SillyTavern-Agent工具调查笔记.md](SillyTavern-Agent工具调查笔记.md) | 418 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
 | VCPChat | [VCPChat-Agent工具调查笔记.md](VCPChat-Agent工具调查笔记.md) | 299 | `main` | `fb66a52dd038a6fd147ee91cd1a39fe17555867e` |
 | VCPToolBox | [VCPToolBox-Agent工具调查笔记.md](VCPToolBox-Agent工具调查笔记.md) | 407 | `main` | `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` |
@@ -54,7 +55,7 @@
 
 ## 结论摘要
 
-十七个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”，不能与其余十六个已有执行回环的项目视为同等工具运行时。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十一条观察：
+十八个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”，不能与其余十七个已有执行回环的项目视为同等工具运行时。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十二条观察：
 
 1. **策略层完整但默认放行面大：LobeHub。** 人工审批状态机 `humanIntervention` 是七个项目里设计最完整的：支持四种模式，API 级规则可覆盖 manifest 级规则，`always` 不会被 auto-run 绕过；但绝大多数内建工具根本不声明该字段，未声明即默认 `never` 自动执行。凭证、浏览器、消息与代理管理四类插件——`lobe-creds` 的凭证保存与注入、`lobe-browser` 的八个 API、`lobe-message` 约 30 个 API（含 `deleteBot`）、`lobe-agent-management` 的 `callAgent`/`installPlugin`——均零声明。
 2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio、DeepChat。** 三者都有逐次审批或权限 broker。Chatbox 让计费与应用状态变更类操作不受 `agentFullAccess` 放行；DeepChat 将审批绑定到会话、服务器身份、配置代数、binding hash、execution id 与参数 hash，并设 pending 上限和超时；Cherry Studio 则在 renderer、主进程和 Claude SDK hook 之间串联审批。各自边界分别是 Windows 无 OS 隔离、`acceptEdits` 首词白名单，以及 DeepChat 各工具实际 preflight 与 MCP transport 尚未运行核验。
@@ -67,6 +68,7 @@
 9. **AI SDK 工具回环 + 桌面 MCP：Jan。** Web 搜索、RAG 和 MCP 经 `streamText` 汇合，工具集按模型能力与最后一条用户消息裁剪并冻结路由结果；审批有 thread/server/global/allow-all 四级，MCP 执行落在 Rust/Tauri。它没有独立 Agent 规划器，浏览器 MCP 工具被 UI 开关列表过滤但是否仍可调用尚未运行确认。
 10. **普通聊天上的轻量回环与未闭合骨架：NextChat、Manifold Desktop。** NextChat 的 OpenAPI 工具使用原生 `tool_calls` 并行执行后递归请求，MCP 则使用 fenced JSON 文本协议；两条链都没有审批、沙箱或步数上限。Manifold Desktop 已能发现 MCP、注入三家 Provider 并展示调用，但 `MCPClient::CallTool()` 无运行时调用点，尚不存在结果回注与下一轮生成。
 11. **作用域分层 + 瀑布式执行管线的注册制运行时：DeepSeek Harness。** 工具是注册在内存 registry 的代码对象：`ToolDefinition` 含模型可见 schema、强制 `output` 输出契约与纯函数 `presentCall`/`presentResult`；作用域是全局加每 agent 的层链，restrict 的 allow/deny 只过滤继承面。执行沿固定管线：`tool/call` 落盘 → pre-execute 策略瀑布（ask 经 approval seam 放行，唯一放行结果 allowed-once）→ 单调 guard → execute → post-execute → `tool/result` 落盘，`deriveMessages` 从日志投影模型历史。调度器按 executionMode 分 exclusive 屏障与 parallel 滚动池（默认并发 10）。能力经 capability seam 三角色与工具解耦，bash/pwsh、fs、web、terminal、skill、subagent、MCP 桥等各有 seam，provider 可整体替换而模型可见 schema 不变。
+12. **MCP 为唯一工具协议、全量注入零过滤、审批几近缺失的聊天前端：Risuai。** 工具面完全以 MCP 为骨架——模块声明的远程 MCP、内置 internal 客户端、插件 `registerMCP` 与 OpenAI Responses 内置 `web_search_preview` 四类来源，没有独立函数注册表。发现与注入零过滤：主聊天请求不传工具参数，请求入口每请求拉取全部已激活 MCP 的工具注入四类请求体，无模型能力判定、无会话裁剪、无 token 预算、无去重。编排没有统一驱动层：非流式链递归请求函数自身，流式链在流包装器内联续请求，工具串行、未找到任何迭代上限，Claude 流式路径不解析 `tool_use`、是唯一没有工具循环的格式。审批只存在于 `internal:risuai` 13 个写/删工具的执行端，其余工具无任何审批；全部执行在前端上下文，插件工具在 iframe 沙箱内。
 
 ## 四个必答问题
 
@@ -88,6 +90,7 @@
 | Open WebUI | 条件内置、DB 工具、MCP/OpenAPI 与子代理 | 服务端 Python、前端 direct/pyodide、Jupyter、外部 server | AccessGrants/能力开关；无统一逐次人工审批 | MCP 客户端默认 `verify=False`；direct/代码解释器跨多个执行域 |
 | OpenCode | ToolRegistry（内置/自定义/插件）+ SessionTools 并入 MCP 工具 | node 主进程；shell 为普通子进程；MCP stdio 子进程 | 权限 `ask` 需人工批准，`*:allow` 时自动执行 | `ask` 审批无超时兜底，UI 不响应则永久挂起；shell 无沙箱 |
 | Pi | 会话级工具集（内置 7 工具 + 扩展注册），每轮注入 | 本地进程内执行（bash 为 spawn 子进程） | 无逐次审批，`beforeToolCall` 钩子默认放行 | 无 MCP；执行端不二次鉴权，扩展钩子缺失时任何工具直接执行；`!` bash 直通用户权限 |
+| Risuai | 每请求全量注入全部已激活 MCP 工具（模块声明的远程 MCP、内置 internal 客户端、插件 registerMCP、Responses 内置 web_search_preview） | 前端 JS 上下文；远程 MCP 桌面经 Tauri Rust 侧 fetch、stdio 为 Tauri 子进程、插件工具在 iframe 沙箱 | 仅 internal:risuai 13 个写/删工具执行端 alertConfirm；其余无审批 | 全量注入零过滤 + 除极少数 internal:risuai 工具外无任何审批；远程 MCP 无 SSRF 过滤、递归无迭代上限 |
 | SillyTavern | 扩展注册并适配到 provider 的 function tools | 浏览器前端 extension action | 未发现逐次审批 | 扩展 action 与宿主同权，安装即授权 |
 | VCPChat | 上游 `tool_calls` / VCP 文本块 / 自带节点工具 | **自带 `VCPDistributedServer` 子进程**、远端 ToolBox | 审批终端，规则可配得任意宽 | 自带节点在本机执行 PowerShellExecutor 等高危插件 |
 | VCPToolBox | 插件 manifest 描述 + 上下文占位符 | Node/Python/native 子进程、分布式节点 | 命中规则才审批，超时拒绝 | 审批响应无身份校验，任何持全局 Key 的连接可批准任意请求 |
@@ -150,6 +153,10 @@ Pi 是本地编码 Agent，工具循环内置在 `packages/agent/src/agent-loop.
 
 OpenCode 是 Effect 服务化的编码 Agent，工具循环整体让渡给 Vercel AI SDK 的 `streamText`（`llm.ts:318`）：工具选择、执行与结果回注都由 SDK 承担，opencode 侧只消费 fullStream 事件并持久化 ToolPart 状态机。审批为 allow/ask/deny 三档，ask 阻塞在无超时的 Deferred 上等待 UI 回复。执行全部在 node 主进程内：shell 为普通子进程，无 pty、无沙箱，默认 2 分钟超时外加 `external_directory` 检查兜底；MCP stdio 服务器退出时递归杀进程树。结果统一按默认 2000 行/50KB 截断并落盘 `tool-output/`。注册来源、过滤组合与参数校验细节见 [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md)。
 
+### Risuai
+
+Risuai 的工具面完全以 MCP 为骨架，没有独立函数注册表：模块声明的远程 MCP、内置 internal 客户端、插件 `registerMCP` 模块与 OpenAI Responses 内置搜索四类来源汇入同一 MCP 注册表。发现与注入零过滤：主聊天请求不传工具参数，请求入口每请求拉取全部已激活 MCP 的工具注入四类请求体，无模型能力判定、无会话裁剪、无 token 预算、无去重。模型协议是各家原生结构化字段，应用自有的 `<tool_call>` 标签只做持久化：调用与结果按 ID 存入 localforage，消息文本留引用，下一轮解码还原。编排无统一驱动层：非流式链递归请求函数，流式链在流包装器内联续请求，工具串行、无迭代上限；Claude 流式路径不处理工具调用，是唯一没有工具循环的格式。审批只存在于 `internal:risuai` 13 个写/删工具的执行端，拒绝返回 "Access denied by user." 文本；其余工具无任何审批。所有工具在前端上下文执行：远程 MCP 桌面经 Tauri Rust 侧 fetch、stdio 为 Tauri 子进程、插件工具在 iframe 沙箱。
+
 ### SillyTavern
 
 SillyTavern 的 `ToolManager` 将多家 provider 的 function calling 归一化到浏览器侧 action，按返回顺序串行执行并最多递归五轮。核心没有逐次审批或工具级沙箱，扩展 action 与宿主同权。信任边界也不只在扩展安装：`/tools-register` 允许角色卡、World Info 或 Quick Reply 中的 STscript closure 定义模型工具，使“导入内容”也可能改变工具面。
@@ -182,6 +189,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | Open WebUI | 54 个条件内置 + DB Python 工具 + MCP/OpenAPI server | 原生 tools/function-call items；direct 工具转前端事件 | 模型 meta、全局配置、模型能力、用户权限、AccessGrants 与连接过滤 |
 | OpenCode | ToolRegistry 六路来源：内置（16+1）、自定义 `{tool,tools}/*.js\|ts`、插件 `tool` hook、MCP、MCP 资源工具、Skill | 原生 tools 字段（AI SDK `streamText`） | 按模型家族（apply_patch/edit/write）、provider（websearch）、client（question）与实验 flag（lsp/plan/execute）；权限全量禁用集合；prompt `user.tools` 显式禁用 |
 | Pi | 内置工具工厂 + 扩展 `registerTool` 注册表；无 MCP | 原生 tools 字段（每轮注入当前工具集） | 会话级激活集（`setActiveToolsByName`），system prompt 只列带 snippet 的工具 |
+| Risuai | 模块 mcp.url 声明（http/stdio/internal/plugin 前缀）+ 插件 registerMCP + Responses web_search_preview 开关；无独立函数注册表 | 四类请求体原生 tools/functionDeclarations 字段（simplifySchema 规整）；请求入口每请求全量 getTools() 拉取 | 无（全量注入、无去重、无 token 预算；enabledModules 不参与 MCP 过滤） |
 | SillyTavern | 扩展调 `registerFunctionTool` | 原生 tools 字段，`tool_choice: "auto"` | `function_calling` 开关、provider/模型支持、`shouldRegister` |
 | VCPChat | 消费上游目录；自带节点向服务端 `register_tools` | 上游注入 | 客户端不负责收窄 |
 | VCPToolBox | 插件 manifest 扫描 | 描述文本进 system prompt，占位符体系 | 插件启用/禁用 |
@@ -208,6 +216,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | Open WebUI | 自研 FastAPI middleware 循环 + MCP Python client | 服务端掌握目录、循环、结果处理与再请求；direct/pyodide 工具委托浏览器 |
 | OpenCode | Vercel AI SDK v6 `streamText` 原生 tool_calls（`llm.ts:318`）；SDK 内部完成工具执行与结果回注 | **工具循环（选择、执行、重试、并行度）全部由 SDK 承担**，opencode 只消费 `fullStream` 事件并做参数校验、审批、截断与持久化；执行发生在 node 主进程内 |
 | Pi | 自研 `agent-loop` 编排 + 各 Provider API 原生 tool_calls 适配 | 发现、校验、执行全部由应用掌握；无第三方 agent SDK 参与工具执行 |
+| Risuai | 自研 MCP JSON-RPC 客户端（mcplib）与四家 provider 请求适配；无第三方 agent SDK | 发现、注入、解析、执行、回注与持久化全部由前端应用掌握 |
 | SillyTavern | 自研 extension action 与多 Provider function-call 适配 | 工具执行在浏览器扩展/服务端 plugin，核心没有 SDK 层的统一审批边界 |
 | VCPChat | 自研 VCP 文本协议与分布式节点协议 | 客户端消费上游调用，节点注册和插件执行不经过通用工具 SDK |
 | VCPToolBox | 自研文本解析器、plugin manifest 与执行器 | 模型输出到插件执行的协议、审批与分布式转发均由自身实现负责 |
@@ -230,6 +239,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | Open WebUI | 原生 tool call / Responses function-call item | `JSON.parse` 失败回退 `ast.literal_eval`；按 spec properties 过滤参数键 |
 | OpenCode | 原生 tool call（AI SDK） | `experimental_repairToolCall` 修正工具名大小写，无法修复时改写参数重定向到 `invalid` 工具（llm.ts:296-312）；参数校验失败由 AI SDK 把错误作为结果回注 |
 | Pi | 原生 tool call（Provider 适配） | `prepareToolCall` 查找 + TypeBox 校验 + `prepareArguments` shim；未知工具/校验失败转 isError 结果 |
+| Risuai | 各家原生结构化字段（tool_calls / tool_use / functionCall / function_call）；`<tool_call>` 标签仅消息内持久化引用 | arguments 仅 JSON.parse，失败转文本错误回注；工具名未注入时写 "No tool found" 消息；无 JSON Schema 校验；Claude 流式不解析 tool_use |
 | SillyTavern | 原生 function call，五家格式归一化 | 归一化后按模型返回顺序串行 `await` |
 | VCPToolBox | VCP 文本块 | 状态机扫描，带 `fuzzyToolMatching` 开关；**不保护 code fence** |
 
@@ -255,6 +265,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | Open WebUI | `max_tool_call_iterations`；代码解释器检测另最多 5 次 | 普通工具逐项；`delegate_task` 特殊并发且有信号量上限 | 取决于工具/server；无统一值 | 事件/请求链可终止，外部工具的实际取消未共同确认 |
 | OpenCode | `agent.steps`（默认 Infinity），最后一轮注入 `MAX_STEPS_PROMPT` 强制收尾（prompt.ts:1178-1181） | 单会话串行（`SessionRunState.ensureRunning`）；单 step 内工具并行由 AI SDK 默认行为 | shell 默认 2 分钟，参数可覆盖；LLM 流级 AbortController | 中断后 `cleanup` 把未完成 tool part 标 `"Tool execution aborted"`；doom-loop 连续 3 次相同入参触发审批 |
 | Pi | 未发现迭代上限（终止依赖 stopReason、`shouldStopAfterTurn` 与队列排空） | 默认并行 `Promise.all`，`executionMode: "sequential"` 或配置串行时顺序执行 | bash 工具按参数可选超时，其余无 | AbortSignal 贯穿工具执行；中止立即生效 |
+| Risuai | 未找到任何迭代上限（递归直到模型不再调用或 abortSignal） | 串行 await，无并发 | 未找到统一工具超时；续请求失败按 db.requestRetrys 默认 2 重试后以已有结果收尾 | abortSignal 中断后续 fetch；工具调用期间停止生成即中断 |
 | SillyTavern | 递归上限 5 | 串行 `await` | — | — |
 | VCPToolBox | 有迭代上限 | 同轮 `Promise.all` | 有 | 审批超时 5 分钟后拒绝 |
 
@@ -278,6 +289,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | Open WebUI | 以资源访问授权和能力开关为主，无统一逐次确认 | 用户/模型/工具/连接级 AccessGrants | 管理配置与模型绑定 | 未授权连接不注入；各 direct 工具失败方向不同 |
 | OpenCode | 权限规则三档 allow/ask/deny；内置 agent 默认 `*:allow` + 关键项 ask（agent.ts:119-136） | 工具名 + pattern（`{pattern: action}`），后写优先 | agent 级 permission + 会话级 permission 合并 | `ask` 无超时 → **永久挂起**；`continue_loop_on_deny` 决定拒绝后是否继续 |
 | Pi | 默认自动执行（无审批层） | 无策略粒度；`beforeToolCall` 钩子可整体 block | 无 | 钩子缺失或异常时直接放行 |
+| Risuai | 自动执行；仅 internal:risuai 13 个写/删工具执行端逐次 alertConfirm | 仅 internal:risuai 写/删工具逐个；无风险分级 | 无全局审批开关 | 审批拒绝返回 "Access denied by user." 文本且不发生变更；无超时（挂起行为未运行验证） |
 | SillyTavern | 无逐次审批 | — | — | — |
 | VCPChat | 命中规则自动允许 | 字符串 contains/exact/regex，无风险分级 | — | 规则可配成 `.*` → 全部自动通过 |
 | VCPToolBox | 命中规则才审批 | 工具名 + 参数匹配 | — | 超时/无连接 → **拒绝（fail-closed）** |
@@ -304,6 +316,7 @@ Chatbox 的 `AppActionApprovalPausedError` 值得单独点出：计费与应用�
 | Open WebUI | Python 服务端、浏览器 direct/pyodide、Jupyter、远端 MCP/OpenAPI | AccessGrants、能力开关、Jupyter blocked modules；MCP 默认不校 TLS | 部署者决定服务端/Jupyter/浏览器的实际隔离 |
 | OpenCode | node 主进程（全部工具）；shell 为普通子进程；MCP stdio 子进程；code-mode 沙箱解释器（实验 flag） | **shell 无沙箱**，权限审批 + `external_directory` 工作区外检查 + 2 分钟超时兜底；MCP 退出时递归杀进程树 | Windows 走 PowerShell `-NoProfile -NonInteractive`；无平台级隔离差异 |
 | Pi | 本地进程内执行；bash 为 `spawn` 子进程（进程树终止、可选超时） | 无框架级沙箱；默认以启动用户权限运行，隔离靠外部容器化 | `detached`/进程树终止在非 Windows 与 Windows 有平台分支 |
+| Risuai | 全前端 JS 上下文：远程 MCP 桌面经 Tauri Rust 侧 fetch（web 走 CORS 代理）、stdio 为 Tauri shell 子进程（仅桌面）、插件工具在 iframe 沙箱、内置工具直接操作浏览器 API 与数据库 | 插件 iframe 沙箱（CSP connect-src 'none' + API 白名单）；internal:fs 依赖 File System Access 目录句柄；无框架级沙箱；MCP URL 只校验 http/https 前缀、未发现 SSRF 过滤 | stdio 仅桌面；web 端 fetchNative 拒绝 localhost/内网请求 |
 | SillyTavern | 浏览器前端、服务端 plugin | 无工具级隔离 | — |
 | VCPChat | **自带 `VCPDistributedServer` 子进程**、远端 ToolBox | 自带节点对自己的插件也不做隔离 | — |
 | VCPToolBox | Node/Python/native 子进程、分布式节点 | 无框架级沙箱；`LinuxShellExecutor` 自带八层校验与可选 bubblewrap/firejail/docker，`PowerShellExecutor` 只有关键字黑名单 | 两个 shell 插件风险等级不对等 |
@@ -330,10 +343,11 @@ AIO Hub 的路径沙箱需要特别标注：前端沙箱已加固——`resolve_
 | Open WebUI | 依工具实现；未确认统一字符上限 | function_call_output、引用 source、图片 input_image、HTML embed | 无统一过滤层 |
 | OpenCode | 默认 2000 行 / 50KB（config `tool_output` 可覆盖），超限落盘 `tool-output/` 7 天保留 | `metadata.truncated` + `outputPath`，提示用 Task/Grep/Read 接力 | 无 |
 | Pi | bash/read 等按字节/行数截断并落全量文件（`truncate.ts`、`fullOutputPath`） | 截断提示随结果文本回注 | 无 |
+| Risuai | 笔记未涉及截断 | 按各家协议回注（role:'tool' / tool_result / functionResponse / function_call_output）；`<tool_call>` 标签 + localforage ID 引用持久化（OpenAI 链图片块被丢弃、Claude 转 base64） | 笔记未涉及 |
 | SillyTavern | — | — | 无 |
 | VCPToolBox | 有 | — | 无 |
 
-十六个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、LobeHub、OpenCode 和 Pi 都有落盘/预览方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
+十七个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、LobeHub、OpenCode 和 Pi 都有落盘/预览方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
 
 ## 基础审计框架
 
@@ -480,6 +494,7 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 | Open WebUI | DB Python 工具、MCP/OpenAPI server、Function/Filter、远程 Pipeline、子代理 | AccessGrants、连接授权与 Valves；Python 插件/远端 server 具有各自执行权限 |
 | OpenCode | 自定义 `{tool,tools}/*.js\|ts`、插件 `tool` hook（含 `tool.definition`/`tool.execute.before/after` 事件）、MCP（stdio/StreamableHTTP/SSE + OAuth）、Skill（SKILL.md + `skill` 工具）、code-mode 子工具 | 权限规则按工具名 + pattern 分级（allow/ask/deny），MCP 工具调用前全名审批；Skill 与 MCP 工具按同一 permission 过滤；子 agent（TaskTool）权限收窄 + 深度限制，非旁路 |
 | Pi | 扩展 `registerTool`、`registerCommand`、MarkdownTransformer、自定义消息/条目渲染器；skills 为文本资源 | 扩展代码与宿主同权（本地进程）；项目信任门约束 `.pi` 资源加载；无 MCP、无内容侧工具定义入口 |
+| Risuai | 模块 mcp.url 声明（远程 MCP、stdio、内置 internal、插件 plugin）、插件 v3 API registerMCP、Responses web_search_preview 开关 | 插件 iframe 沙箱（CSP + postMessage RPC + API 白名单，v3 不静态扫描、纯靠沙箱）；stdio 仅桌面；审批只覆盖 internal:risuai 写/删工具；远程 MCP 无 SSRF 过滤 |
 | SillyTavern | 浏览器扩展、服务端 plugin、**`/tools-register` 的 STscript closure** | 安装信任，且被内容路径削弱：第三方 Git 仅允许 HTTP(S)、首装有警告（可永久关闭）、目录名净化；plugin 走本地 ES module `import()`；但工具定义还能由角色卡/世界书/QR 提供，不经过任何安装动作 |
 | VCPChat | 自带节点的 `Plugin/*` 目录 | 无——自带节点不隔离自己的插件 |
 | VCPToolBox | plugin manifest、分布式节点 | 插件宿主自身权限 + 审批规则；节点只有一层全局 `VCP_Key` |

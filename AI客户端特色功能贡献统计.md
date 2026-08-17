@@ -1,8 +1,8 @@
 # AI 客户端特色功能贡献统计
 
-> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
+> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-14
+> 对比更新日期：2026-08-17
 >
 > 依据：各单项目调查笔记（含通用类目、十六项目独特功能调查笔记、独特功能待查清单、“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比，并参考《AI 客户端完整体验栈与模块组合构想》；本次另复核 VCPToolBox 的 RAGDiaryPlugin、LightMemo、KnowledgeBaseManager、RiverMemo 原生内核与管理路由，以及 VCPChat 的 DeepMemo 2.0/VCP-CDS 适配链；同时参考公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 对思维簇资产、语义组和 K 值构型的实际打包方式；AIO Recall、VCP 记忆召回与 SillyTavern 世界书之间的演变关系采用用户提供的项目演变补充信息，深化程度仍以当前源码主链为依据
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十六个项目的专项笔记共归并出 **94 个产品功能族**，另整理 **18 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
+十七个项目的专项笔记共归并出 **97 个产品功能族**，另整理 **19 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
 
 > 覆盖说明：全部计分项均已达到静态源码意义上的 `主链确认`，但大量能力尚未运行验证。`入口确认`、外部依赖和声明不符项不计分；默认关闭的已确认能力仍可计入，但在理由中保留边界。
 
@@ -28,6 +28,7 @@
 - **AIO Hub** 的对话分享稿工作台把任意消息选区、独立视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成完整交付表面；NextChat 的固定品牌模板计辅助贡献。Cherry Studio 与 DeepChat 的离屏完整列表、现场滚动截图属于成熟捕获路线，记录在类目笔记中但不因工程完整度加分。
 - **Hermes Agent** 的会话心跳和目标质量门达到主链确认，属于“主动 Agent”族的主贡献候选；对应入口为 `/heartbeat` 与 `/goal`。该候选需与至少三个项目聚类后再建立局部比较，暂不计分。
 - **NextChat** 有 fork、隔离 Artifact 与固定模板对话分享三项辅助贡献；**Manifold Desktop** 为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
+- **Risuai** 以模型指令标签驱动的角色媒体闭环构成主贡献（Emotion Images 双路径：inlay 指令标签与独立分类请求，群聊多角色分屏）；插件系统（API v2.1/v3.0 iframe 沙箱 + CSP nonce + postMessage RPC）作为机制贡献单列；翻译（渲染链内嵌结构保留翻译、多后端与 LLM 缓存）、Multisend（按文件类型分派的批量发送流水线）、WebRTC 房间（纯 P2P 实时共享角色与聊天）与 Risu Hub（角色市场）各计辅助贡献。
 
 这里的“贡献”表示：组合新产品时，现有调查会优先从哪个项目提取该能力的产品契约或实现原型。它不是代码贡献、原创权或项目整体成熟度判定，但明确的参考与演变关系会影响主、辅助贡献分配：同一技术路线不能因换名或重新产品化而重复记为多个主贡献，后继实现只有在显著改写产品契约时才可另立功能族。
 
@@ -74,7 +75,7 @@
 | VCPChat RAG Observer | 后端 VCP Info/WS 事件 → 独立透明窗口 → 召回阶段展示与工具批准/拒绝 | 用户持续观察 RAG 与工具信息流 | F93 辅助贡献；依赖外部 VCP 后端 |
 | VCPChat DeepMemo 2.0 | 以可信会话身份查询 VCP-CDS 中央聊天历史，排除当前主题后扩展窗口、可选精排并回注工具结果 | Agent 可主动回看其他会话中的相关对话片段，模型参数不能覆盖可信会话身份；身份字段为 `agentId/topicId` | 主链确认；属于常规会话历史 RAG，不另计特色分 |
 
-边界说明：TDB 冷知识库的 BM25 + 稠密向量 + 图扩散、AIMemo 候选总结、附件/时间/署名过滤都增强了检索链，但仍服务于 SearchRAG 的同一主动查询目标。RiverMemo 的查询降噪、守恒传播、双尺度场、候选曲线和 Ω 泛函是同一排序契约的内部阶段。第三方思维簇仓库是外部内容资产，不是本次 16 个项目比较对象；它用于证明 VCP 的思维簇生态已经出现可公开分发形态，不把外部仓库的内容创作误记为 VCPToolBox 的新增代码或独立分值。若按模块名逐项计分，会重新造成实现复杂度与产品贡献混算。
+边界说明：TDB 冷知识库的 BM25 + 稠密向量 + 图扩散、AIMemo 候选总结、附件/时间/署名过滤都增强了检索链，但仍服务于 SearchRAG 的同一主动查询目标。RiverMemo 的查询降噪、守恒传播、双尺度场、候选曲线和 Ω 泛函是同一排序契约的内部阶段。第三方思维簇仓库是外部内容资产，不是本次 17 个项目比较对象；它用于证明 VCP 的思维簇生态已经出现可公开分发形态，不把外部仓库的内容创作误记为 VCPToolBox 的新增代码或独立分值。若按模块名逐项计分，会重新造成实现复杂度与产品贡献混算。
 
 ## 产品功能统计
 
@@ -94,8 +95,9 @@
 | 12 | AstrBot | 4 | 2 | 6 | 10 | 跨 IM 事件流水线、Agent Sandbox、主动 Agent、组件投影和语音管道 |
 | 13 | Jan | 2 | 5 | 7 | 9 | 设备级本地推理器、隔离 Artifact、本地 Agent 编排与 CLI 外接 |
 | 14 | Chatbox | 1 | 5 | 6 | 7 | 图像工作站与多项高级能力的稳健辅助实现 |
-| 15 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
-| 16 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
+| 15 | Risuai | 1 | 4 | 5 | 6 | 模型指令标签驱动的角色媒体、多后端结构保留翻译、批量发送流水线、实时房间共享与 Risu Hub 角色市场 |
+| 16 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
+| 17 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
 
 排序先看产品特色点，再看主贡献数和覆盖功能族。分数相近不表示能力同质，例如 DeepChat 与 VCPChat 分别偏向可观测 Agent 会话和消息/桌面运行时，不能互相替代。
 
@@ -106,7 +108,7 @@
 | ID | 产品功能族 | 主贡献 | 辅助贡献 | 计入理由 |
 |---|---|---|---|---|
 | F01 | 一体化 Agent 配方编辑：消息树、锚点、消息组、变量、资产和工具策略 | AIO Hub | LobeHub、SillyTavern | 把角色、上下文和工具配置收进同一编辑流程 |
-| F02 | 可移植角色卡与社区资产兼容 | SillyTavern | AIO Hub | SillyTavern 定义 PNG/CharX/BYAF 等角色内容生态；AIO 可导入 ST V2/V3 JSON/PNG、Context Preset、正则、快捷动作和嵌入式世界书并映射到自己的 Agent 对象。AIO 是跨格式汇入与可继续编辑的辅助形态，尚未复现酒馆全部扩展/事件协议 |
+| F02 | 可移植角色卡与社区资产兼容 | SillyTavern | AIO Hub、Risuai | SillyTavern 定义 PNG/CharX/BYAF 等角色内容生态；AIO 可导入 ST V2/V3 JSON/PNG、Context Preset、正则、快捷动作和嵌入式世界书并映射到自己的 Agent 对象。AIO 是跨格式汇入与可继续编辑的辅助形态，尚未复现酒馆全部扩展/事件协议。Risuai 以 Risu Hub 角色市场（浏览/下载/上传 + 资源服务器与账号体系）提供角色卡分发辅助形态，并兼容 Tavern V2/V3、PNG、JSON、CharX、Chub 等格式 |
 | F03 | World Info / lore 条件触发与分层注入 | SillyTavern | AIO Hub | SillyTavern 定义完整 World Info 生态；AIO 有独立世界书管理/编辑/导入导出，并在真实请求中执行关键词/正则、selective、概率、扫描深度、过滤、递归、sticky/cooldown/delay、包含组和位置注入。部分字段只保留/编辑或降级映射，因此计可运行子集的辅助贡献，而非“仅兼容导入” |
 | F04 | 可迁移且相互隔离的完整 Agent/Profile 运行环境 | Hermes Agent | AIO Hub、SillyTavern | Profile/包覆盖配置、技能、记忆或资产，而非单段 prompt |
 | F05 | Persona、模型、知识、工具与访问控制合一的 Workspace Model | Open WebUI | LobeHub | 模型目录项同时成为多人工作区中的角色与权限对象 |
@@ -122,6 +124,7 @@
 | F102 | 可配置的逐阶段递归检索思考链与可迁移思维簇生态 | VCPToolBox | - | `[[VCP元思考:…]]` DSL 选择持久化链与语义簇，每一阶段检索结果的平均向量会与原查询融合，生成下一阶段查询；链配置、缓存、自动选链参数和 RAG Observer 事件形成独立于单次召回的执行与观察契约。公开第三方 VCP-Disco-Elysium-Mod 将 1 个启动簇、4 个属性域、24 个原子模块和语义组配置打包为可直接放入 `dailynote/` 的内容资产，并用 K 值定义认知构型，说明该契约可被外部作者复用。当前 VCP 快照只有 default 链，文档所称 `thinktheme/*.json` 未实现，运行效果未验证 |
 | F73 | 神经云图与日记记忆工作台 | VCPChat | - | 将记忆网络、搜索、日记和可视化组织为独立用户工作台 |
 | F82 | Agent 私有资产协议与作用域管理 | AIO Hub | - | agent-asset 协议把资产绑定 Agent，并贯通管理、宏注入和渲染 |
+| F103 | 模型指令标签驱动的角色动态媒体 | Risuai | - | 模型回复后按情绪切换角色立绘：inlay 路径由模型直接输出 `<Emotion="…">` 指令标签并经解析器换图，普通路径走独立分类请求（LLM 示例分类或嵌入相似度检索）；群聊按视图模式分屏。与 SillyTavern 表达式系统（仅 `入口确认` 且依赖外部模块）相比形成本地完整闭环 |
 
 ### 会话演化、连续性与研究轨迹
 
@@ -140,6 +143,7 @@
 | F59 | IM 渠道远程控制本地 Agent 会话 | DeepChat | - | 远端命令与本地会话绑定、执行和结果投递形成闭环；CLI 本地控制平面（token 鉴权 + 审批 broker + detached runs）以同一“多表面连续性”标签并入本族，不重复计数 |
 | F75 | 跨设备双向增量同步 | VCPChat | - | VCPMobileSync 用稳定身份、增量状态和删除传播同步产品数据 |
 | F77 | 跨聊天消息转发与气泡附言 | - | VCPChat | 转发保持来源并允许附言，已闭环但独特性不足以单列首要参考 |
+| F105 | 纯 P2P 实时共享角色与聊天 | - | Risuai | PeerJS WebRTC 房间码即 peer ID，共享当前角色与聊天、生成互斥检查、生成后广播；无鉴权/加密/持久化/撤销，断线即结束。作为"实时共享会话"的轻量旁路，与文件导出的快照语义形成两极 |
 
 ### 生成式输出、协作与创作表面
 
@@ -160,7 +164,7 @@
 | F52 | 可分离窗口与跨窗口状态同步 | AIO Hub | - | 工具/组件可脱离主窗并保持逻辑状态同步 |
 | F56 | 内嵌 Web 应用门户与小程序运行池 | Cherry Studio | - | 预设和自定义 Web 应用有 launchpad、侧栏与 keep-alive 生命周期 |
 | F57 | 跨 Topic、Session 与消息内容的联邦全局搜索 | Cherry Studio | - | 应用级命令汇聚实体搜索与 FTS5 内容搜索，并支持分页定位 |
-| F58 | 消息级流式翻译与译文持久化 | - | Cherry Studio、AIO Hub | Cherry 以 `data-translation` part 持久并可重译覆盖；AIO Hub 以 `metadata.translation` 持久并支持原文/译文/双语显示切换，独特性中等 |
+| F58 | 消息级流式翻译与译文持久化 | - | Cherry Studio、AIO Hub、Risuai | Cherry 以 `data-translation` part 持久并可重译覆盖；AIO Hub 以 `metadata.translation` 持久并支持原文/译文/双语显示切换，独特性中等。Risuai 以渲染链内嵌的结构保留翻译（DOM 遍历文本节点、超长分块拼接、LLM/DeepL/DeepLX/Bergamot/Google 多后端与预设、LLM 翻译缓存）构成相邻辅助形态 |
 | F67 | Agent 运营汇报与版本化 Work 产物 | LobeHub | - | 任务结果沉淀为 Brief 分类、Inbox 汇报和独立 Work 对象 |
 | F68 | 人类与模型共同参与的实时 Channels | Open WebUI | - | 频道、线程、反应、置顶和模型 @ 参与形成协作空间 |
 | F69 | 与隐藏会话及工具互通的协作 Notes | Open WebUI | - | Note CRUD、Yjs 协作和模型读写工具构成独立文档工作区 |
@@ -176,6 +180,7 @@
 | F97 | 项目实体与项目协调 Agent | - | LobeHub | 独立项目实体（数据表、tRPC 管理接口和 CLI 命令）+ 按项目名生成协调者内置 Agent，与按工作目录的话题分组并存；辅助贡献（主链确认） |
 | F98 | 人机共笔文档工作台（VDOC 工程 + 文脉 PR 审批） | VCPChat | - | VDOCX/VPPTX 工程、人类直编渲染版式、Agent 以可审阅 PR（pending/applied/rejected/conflict）协作编辑源码，文脉带版本快照与审批回执（主链确认） |
 | F101 | 可编排、可迭代的对话分享稿工作台 | AIO Hub | NextChat | AIO Hub 把消息选区、视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成独立交付表面；NextChat 以任意选消息、Mask context 和固定品牌模板补充轻量形态 |
+| F104 | 按文件类型分派的批量发送流水线 | - | Risuai | Multisend 按文件类型分派：`.po` 逐条翻译流水线、pdf/txt/xml 本地嵌入检索后剪裁发送、媒体存 inlay 资产；主链已闭合，但批量发送本身更接近输入侧增强，独特性不足以定义产品身份 |
 
 ### Agent 工具、运行时与外部互操作
 
@@ -244,6 +249,7 @@
 | M16 | 备份/恢复覆盖主数据库并做写方排空 | Cherry Studio | - | 备份 v7 full/slim 双布局均含 `cherrystudio.sqlite`，恢复经 checkpoint + 崩溃安全 promotion 门原子替换，备份前对写方 quiesce（已接通） |
 | M17 | JSONL 原子发布与 torn-tail 修复 | Pi | - | 整文件临时文件 + 原子 rename 发布，fork 与 torn-tail 截断共用同一原子路径，同 cwd+id 并发 create/fork 拒绝 |
 | M18 | 同权限候选域的多检索构型对照 | VCPToolBox | - | LightMemo 让 KNN、TagMemo V9、RiverMemo Topology V3 共用 SQL 作用域、查询向量和候选事实域，输出三组 Top-K 重合率与统一排名；它验证和调优记忆寻址，不另算一种用户记忆能力 |
+| M19 | 双层安全模型的插件运行时沙箱 | Risuai | - | v3.0 插件在 CSP 隔离 iframe（sandbox 仅放行 allow-scripts/allow-modals/allow-downloads、`connect-src` 置 `'none'`）内经 postMessage RPC 运行，含 SafeDocument/SafeElement 包装、流桥、AbortSignal 转发与热重载；v2.1 走 AST 静态检查与符号改写。为浏览器端插件扩展提供可复制的权限切分原型 |
 
 明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约。VCPChat DeepMemo 2.0 已闭合“可信 Agent/Topic 上下文 → 中央聊天历史搜索 → 窗口扩展/可选精排 → 回注”的主动会话回忆链，但其产品契约仍属于常规历史 RAG 工具；这里把它记入 VCP RAG 能力地图，不另立特色族。VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
 
@@ -280,6 +286,7 @@ AstrBot、OpenCode、Pi、VCPToolBox 本来就不以普通桌面 Chat 为边界�
 - [AIO Hub 独特功能调查笔记](独特功能/AIO-Hub-独特功能调查笔记.md)
 - [VCPChat 独特功能调查笔记](独特功能/VCPChat-独特功能调查笔记.md)
 - [VCPToolBox 独特功能调查笔记](独特功能/VCPToolBox-独特功能调查笔记.md)
+- [Risuai 独特功能调查笔记](独特功能/Risuai-独特功能调查笔记.md)
 - [VCP-Disco-Elysium-Mod（公开第三方思维簇模组）](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)
 - [上下文编译与提示词工程边界研究](独特功能/上下文编译与提示词工程边界研究.md)
 - [AI 客户端完整体验栈与模块组合构想](AI客户端最佳模块组合构想.md)
