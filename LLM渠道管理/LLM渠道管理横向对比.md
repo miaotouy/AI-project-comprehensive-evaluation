@@ -2,13 +2,13 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-17
+> 对比更新日期：2026-08-18
 >
 > 依据：同目录十八份源码调查笔记及其中记录的代码快照
 >
-> 对比方法：统一比较渠道数据模型、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
+> 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
-> 对比范围：渠道数据模型、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性
+> 对比范围：渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -33,6 +33,7 @@
 - **Hermes Agent 是样本中唯一确认实现显式跨渠道 fallback 链的项目。** 它把应用重试、同 Provider credential pool、模型 fallback、跨 Provider/端点 fallback 与恢复主通道分成四层。该链需用户配置，不是健康感知的动态路由器；切换后会重发同一任务，存在重复生成与计费可能。
 - **Jan 的多 Key 与凭据边界较完整。** 主 Key 加 fallback Key 链保存在 OS keyring，401/403/429 会在当前请求换 Key；远程 Provider 与 llama.cpp/MLX 本地引擎都经本地 router 暴露为 OpenAI-compatible 路径。它不做跨 Provider failover。
 - **NextChat 与 Manifold Desktop 是轻量客户端路线。** NextChat 用 Provider 枚举、adapter、客户端 store 和 Next.js 代理组合渠道，服务端可从逗号 Key 随机选一枚但失败不换 Key；Manifold Desktop 只有每 Provider 单 Key、全局默认选择和少数 adapter，且本地 Proxy/Ollama 路径存在已确认的拼接/协议不一致。
+- **渠道配置的底层能力与管理界面覆盖经常不一致。** AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 已提供较完整的图形化生命周期；OpenCode 的配置文件能修改完整 Provider 定义，复用同一设置页的 Web 与桌面端却只能新增自定义渠道或断开已有渠道，不能从界面编辑已保存的定义；Manifold Desktop 也只能在桌面设置页修改 Ollama endpoint，兼容 Provider 的新增和编辑仍依赖手工修改配置文件。
 - **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；但十八者都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 对数据库 Provider 凭据做 AES-GCM 加密；Jan 与 Manifold Desktop 分别使用 OS keyring 和 Windows Credential Manager。Hermes Agent 以 `.env`/`auth.json` 分层存储并在日志、UI、备份和子进程环境中脱敏，但底层文件不是密文库。其余多项目仍有明文配置或客户端持久化边界。备份是否包含 Key 必须单独核对。
@@ -77,6 +78,7 @@
 | 模型 fallback | 错误后改用另一个模型 ID | 改用另一条 Provider 渠道 |
 | 跨 Provider failover | 错误后选择另一条独立 Provider/URL/凭据组合 | 聚合上游内部可能发生但本地不可见的切换 |
 | 健康调度 | 连接检测或请求结果形成持久状态，并直接影响后续选路 | 只在设置页显示成功、失败和延迟 |
+| 配置管理覆盖 | 分别核对配置文件、CLI、TUI、Web 和桌面端对已有与新建渠道提供的操作 | 底层 schema、数据库或 API 存在相应读写能力 |
 
 这组定义解释了几个常见现象：多 Endpoint 通常解决协议选择，不等于容灾；`@模型` 并行调用解决结果比较，不等于失败候补；模型目录拉取失败后的本地列表 fallback 也不表示推理请求能够切换渠道。
 
@@ -180,6 +182,37 @@ Risuai 把渠道拆散成模型条目与全局活动设置，没有独立实体�
 Cherry Studio 的 `providerId` 与 `presetProviderId` 分离值得借鉴。前者保证用户实例稳定，后者保留继承关系；用户可拥有两条继承同一预设、但凭据和端点独立的渠道。AIO Hub 的 Profile 也能直接表达多实例，结构更集中。LobeHub 和 Chatbox 可以用自定义 ID 达到类似结果，但内置实例和自定义实例需要按各自规则管理。
 
 VCPChat 和 VCPToolBox 则应作为另一种部署选择看待。它们预期多渠道复杂度由统一上游承担，本地不必再复制一套 Provider 池。只有当上游确实提供并运维这些能力时，这种简化才成立；单一自建接口本身不会自动获得容灾。
+
+## 配置入口与操作覆盖
+
+渠道配置是否能落盘，与用户能否在当前入口维护已有渠道是两个问题。下表优先记录产品提供的管理入口；“无”表示单项目笔记在当前源码范围内未找到相应操作，不把手工改数据库或二进制文件算成正式管理能力。界面入口、状态和事件绑定来自静态源码，保存结果、平台文件对话框和实际网络测试仍以各单项目笔记的未验证项为准。
+
+| 项目 | 主要管理入口 | 已有配置 | 新建与复制 | 启停与删除 | 导入导出与连接测试 |
+|---|---|---|---|---|---|
+| AIO Hub | 桌面端与移动端各自的设置页 | 两端均可完整编辑；配置分别持久化 | 均可新建；无直接复制按钮 | 均支持 | 桌面端支持渠道导入导出；两端有模型/能力探测 |
+| AstrBot | Dashboard；配置文件为补充入口 | source 与 provider 均可编辑 | 可新建；复制只覆盖非聊天 provider | provider 可启停/删除；删 source 会级联 | 只有整体备份，无渠道级导入导出；已加载 provider 可测试 |
+| Chatbox | 桌面端与 Web 共用 Provider 设置页 | 内置项可改公开设置，自定义项可完整编辑和删除 | 可新建自定义渠道；无复制 | 无渠道启停；只删自定义项 | Provider JSON/深链导入，导出随通用备份；可发测试请求 |
+| Cherry Studio | Electron Provider Settings | 可编辑完整实例；规范预设不能改身份或删除 | 可新建自定义渠道，也可复制 Provider | 支持启停；只删用户实例 | 支持 deep link 导入和数据库备份，无 Provider 专用导出；支持模型/Key 检查 |
+| DeepChat | Electron 设置页与本地 CLI | 可编辑；自定义渠道可删除 | 可新建自定义渠道；无复制 | 支持启停；只删自定义项 | 桌面端有导入向导、无 Provider 导出；桌面端与 CLI 均可测试 |
+| DeepSeek Harness | Web Models 设置页、配置文件与有限 CLI | 可编辑凭据、地址和模型；只有用户层 profile 可删除 | 可从目录或自定义表单新增；无复制 | 页面无 route 级启停；只删用户新增项 | 无渠道导入导出；模型发现只探测目录，不等于聊天健康测试 |
+| Hermes Agent | Electron Desktop Settings；CLI 可编辑更完整配置 | 桌面端可编辑自定义 endpoint | 可新增 endpoint；无复制 | 可激活；非 direct-config 项可删除，无 endpoint 停用 | 桌面端无 endpoint 导入导出；Test 只验证 `/models` |
+| Jan | Tauri WebView 设置页 | 内置远程渠道编辑受限，自定义渠道可编辑和删除 | 可新建自定义渠道；无复制 | 支持启停；只删自定义项 | 无 Provider 导入导出；API Key 面板逐 Key 请求 `/models` |
+| LobeHub | Web/桌面共享设置页与 CLI | 内置项按元数据编辑，自定义项可编辑和删除 | 可新建自定义渠道；无复制 | 支持启停；只删自定义项 | 只有数据库级备份，无 Provider 专用导入导出；Web 与 CLI 均可测试 |
+| Manifold Desktop | `settings.json`；Windows 设置页只覆盖少量字段 | 桌面端只能改 Ollama endpoint，不能改已有 compatible Provider | 配置文件可手工新增；桌面端不能新增或复制 | 只可在文件中控制 compatible 项；桌面端无启停/删除 | 无渠道导入导出；虽有底层校验消息，设置页没有测试按钮 |
+| NextChat | Web 与 Tauri App 共用设置页 | 可编辑每个枚举 Provider 的单一全局槽位 | 无渠道实例新增或复制 | 只有全局自定义配置开关，无逐渠道启停/删除 | 仅整套本地状态备份；无普通 LLM 连接测试 |
+| Open WebUI | 管理员 Web Connections | 连接行可完整编辑 | 可新增连接；无复制 | 逐连接启停和删除均支持 | 无单连接导入导出，通用管理员配置支持 JSON；有独立 `/verify` |
+| OpenCode | 配置文件；Web 与桌面端共用 Provider 设置页 | 配置文件可完整修改；界面中的已有渠道只能 Disconnect，不能载入表单编辑定义 | 界面可新增自定义渠道；无复制 | 配置文件可控制启停和删除定义；界面断开自定义项时移除凭据并禁用 | 无 Provider 导入导出或独立连接测试 |
+| Pi | `models.json`；CLI/TUI 只管理认证和模型选择 | 配置文件可覆盖定义；TUI 只能登录、登出和选模型 | 文件可定义新 Provider；无产品化复制 | 无渠道级启停或删除界面 | 会话导入导出与渠道无关；`auth check` 不发真实请求 |
+| Risuai | Web 与 Tauri 共用设置页 | 内置模型只读；`customModels` 可编辑和删除 | 可新增自定义模型条目；无复制 | 没有 Provider/模型 enabled 状态 | 预设导入导出不等于渠道导入导出；无独立测试 |
+| SillyTavern | Web；Electron 复用同一页面 | 可编辑当前 API 设置和 Connection Profile | 可从当前设置新建 Profile；无 Provider 实例或直接复制 | 通过切换 API/Profile 生效；Profile 可删除 | OpenAI preset 可导入导出；有状态探测和 Test Message |
+| VCPChat | Electron 全局设置 | 可编辑唯一网关 URL、Key 和 Agent 模型 | 无 Provider 实例新增或复制 | 无逐渠道启停/删除 | 无渠道导入导出或独立连接测试 |
+| VCPToolBox | Web 管理端与 `config.env` | 可编辑唯一全局上游和语义路由 | 无上游 Provider 实体；只能新增路由 preset/route | 无逐上游启停/删除 | 全目录备份不等于渠道导入导出；管理端可测模型目录和真实 Chat |
+
+AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 的图形入口覆盖了已有渠道编辑、新建、启停、删除和连接测试；差异主要在复制与导入导出。AstrBot 的 Dashboard 也覆盖主要生命周期，但 source、聊天模型 provider 和其他能力 provider 的复制、删除与测试规则不同，不能压成一个“全支持”。LobeHub 的 Web、桌面和 CLI 共用服务端权限与持久化边界，入口较完整，但仍没有渠道复制或专用导入导出。
+
+OpenCode 和 Manifold Desktop 展示了最明显的“底层可配置、界面不可达”。OpenCode 的 Web/桌面设置页可以创建自定义 Provider，却不能把已有 Provider 定义载回同一表单修改；Disconnect 处理凭据和禁用状态，也不等于删除配置定义。Manifold Desktop 的 `providerConfigs` 能在文件中表达多个 compatible Provider，桌面设置页却没有新增表单，也不能编辑已有 compatible endpoint。两者若只按 schema 或配置文件判断，都会高估桌面端的渠道管理能力。
+
+NextChat、Risuai、SillyTavern、VCPChat 和 VCPToolBox 的缺项还受到数据模型影响：它们分别管理全局 Provider 槽位、模型条目、活动连接快照、单网关或单上游，并不存在可统一套用增删改查的渠道实例。横向比较应先说明实际管理对象，再评价界面是否缺少该对象已有的生命周期操作。
 
 ## 协议、端点与 Adapter
 
@@ -522,6 +555,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 | 主要需求 | 更接近的现有实现 | 需要接受的边界 |
 |---|---|---|
+| 在图形界面中管理多条渠道的完整生命周期 | AIO Hub、Cherry Studio、DeepChat、Open WebUI | 各自仍缺少部分复制或渠道级导入导出；运行时故障转移能力需另行比较 |
 | 桌面端直连多 Provider，并管理多 Key 状态 | AIO Hub | 无请求内换 Key 和跨 Profile failover；凭据明文 |
 | 多认证、多协议端点和同预设多实例 | Cherry Studio | 默认不重试，无 Key 健康；SQLite 明文 |
 | 服务端多用户 Provider、加密凭据和可观察重试 | LobeHub | 普通开源路径无跨 Provider 路由；密钥迁移复杂 |
@@ -535,7 +569,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 | 客户端统一接入已有网关 | VCPChat | 单 URL/Key 是故障点，模型缺少 Provider 命名空间 |
 | 多入站协议、语义选模和插件编排 | VCPToolBox | 本地仍是单一 OpenAI-compatible 上游 |
 | 终端编码 Agent、多 Provider 直连与模型覆盖 | Pi | 无渠道实例与多 Key；凭据明文；依赖外部容器化做隔离 |
-| 服务端 Agent 运行时、多前端共用与自动模型目录 | OpenCode | 单 provider 单凭据；无多 Key 与跨渠道 failover；凭据明文；模型目录依赖远端拉取（可禁用） |
+| 服务端 Agent 运行时、多前端共用与自动模型目录 | OpenCode | 单 provider 单凭据；Web/桌面端不能编辑已有 Provider 定义；无多 Key 与跨渠道 failover；凭据明文；模型目录依赖远端拉取（可禁用） |
 | 服务端 Agent 平台、组合配置热重载与双适配器渠道层 | DeepSeek Harness | 无多 Key 与跨 Provider failover；模型目录需写配置不自动刷新；HTTP 代理配置本次未找到 |
 | 角色创作工作流、模型 ID 即选模入口与多协议 Custom API | Risuai | 无渠道实体、多 Key 与健康状态；凭据明文并随同步、备份与日志扩散；Web 端经 /proxy2 中转经过第三方进程 |
 
@@ -553,6 +587,8 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 6. AstrBot 将来源与能力实例分开，Jan 将远程 Provider 和本地引擎汇入 router，分别服务于 IM Agent 和本地桌面推理。
 7. Hermes Agent 将 Profile、credential pool、模型 fallback 与跨 Provider/端点 fallback 分层，是静态故障转移链最完整的样本；NextChat 与 Manifold Desktop 则保留枚举/注册表加轻量代理的客户端路线。
 8. Risuai 把渠道摊薄到模型条目与全局活动设置，服务于角色创作工作流，多连接靠条目变体、全局 reverse_proxy 单例与自定义条目表达，失败处理止于同模型重试和用户静态 fallback 候选链。
+
+配置管理入口形成了另一条独立比较轴。AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 已在图形界面覆盖主要生命周期；OpenCode 与 Manifold Desktop 的底层配置表达力明显高于桌面设置页；其余缺项有些来自入口未暴露，有些来自项目本身没有独立渠道实体。选择产品时需要同时核对运行时能力和已有配置是否能在目标前端继续维护。
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 

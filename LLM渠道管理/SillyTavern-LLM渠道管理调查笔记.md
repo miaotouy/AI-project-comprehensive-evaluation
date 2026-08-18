@@ -1,14 +1,14 @@
 # SillyTavern LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\SillyTavern`
+> 调查对象：`E:\works\GitStudyNotes\SillyTavern`
 >
-> 调查更新日期：2026-08-02
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
 >
-> 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
+> 调查方式：只读源码梳理；补查配置文件、Web 操作入口、CLI、TUI 和 Electron 边界；未修改目标仓库
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
+> 调查范围：LLM 渠道数据模型、配置生命周期、配置文件、CLI/TUI/Web/Electron 操作覆盖、协议适配、模型目录、凭据、导入导出、重试、备份与可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -42,6 +42,9 @@ main_api
 - `settings.json` 的自动快照包含 Connection Profile、URL 和普通设置，但不包含独立 `secrets.json`；
 - 全量用户 ZIP 默认排除 `secrets.json` 及 Secret 迁移备份，只有显式开启 `allowKeysExposure` 才把它们纳入归档；
 - 状态检查主要调用 Provider `/models`，部分 Provider 只提示用 Test Message 验证；成功/失败只更新全局 UI 状态，不参与后续调度。
+- 本次补查未找到独立的 CLI/TUI 渠道管理界面。CLI 只解析服务启动、网络、数据根目录和请求代理等参数；Electron 入口只启动同一 HTTP 服务并把 Web 页面装入窗口。
+- Web 是当前源码中唯一直接提供渠道配置管理的界面：普通 API 设置通过设置页和 preset 操作，Connection Profile 提供查看、新建、编辑、更新、重新应用和删除，Secret Manager 提供查看掩码、新增、重命名、复制、人工启用和删除。
+- 现有 Profile 可以更新和编辑，但没有 Profile 复制按钮；“新建 Profile”实际读取当前全局 API 设置生成快照，因此新建渠道与已有渠道不是同一层对象，也不存在把一个 Provider 实例复制成另一个独立 Endpoint 的后端 CRUD。
 
 ## 总体调用链
 
@@ -61,6 +64,60 @@ main_api
   -> 单次 fetch 上游
   -> 透传流或归一化 JSON
 ```
+
+## 三类对象与平台边界
+
+### 当前 API 设置、Connection Profile、Secret Manager 的区别
+
+这三个对象分别处于活动状态、配置快照和凭据库三个层级，不能互相替代：
+
+| 对象 | 实际载体 | 作用 | 是否代表独立渠道实例 |
+|---|---|---|---|
+| 当前 API 设置 | 用户 `settings.json` 中的 `main_api`、Provider 字段、URL、模型、Preset 和代理字段 | 当前页面和普通聊天请求实际读取的全局活动连接 | 否；同一 API/source 通常只有一套当前字段 |
+| Connection Profile | `settings.json` 的 `extension_settings.connectionManager` | 将一组 API、URL、模型、Preset、代理、模板和 Secret UUID 保存为可命名快照 | 部分是；可表达多套连接组合，但没有独立后端实体、健康状态或调度策略 |
+| Secret Manager | 用户目录的 `secrets.json`，按 Secret 类型保存带 UUID 的值数组 | 保存 API Key、服务账号 JSON、部分 URL/标识，并按 active 或指定 UUID 解析 | 否；它只保存凭据，不保存 Provider URL、模型或协议配置 |
+
+Profile 的 `secret-id` 只是对 Secret Manager 条目的引用。Profile 删除不会删除对应 Secret；删除或迁移 Secret 也可能使 Profile 保留失效引用。当前 API 设置中的普通字段与 Profile 快照通过 slash command 逐项读写，Profile 不是独立的服务端连接记录（`public/scripts/extensions/connection-manager/index.js:215-248, 258-317, 392-434`）。
+
+### 配置文件与默认值
+
+- 部署级 `config.yaml` 由 `src/command-line.js` 读取并与命令行参数合并。它控制端口、监听地址、数据根目录、请求代理、认证、备份和 `allowKeysExposure` 等服务行为，不定义用户 Provider 实例列表，也不创建 Connection Profile。
+- 用户 `settings.json` 由 `/api/settings/save` 原子写入；其中包含普通 API 设置、Provider 专属模型和 URL、preset 选择、代理预设以及 Connection Profile。服务端在启动、保存和定时流程中创建设置快照（`src/endpoints/settings.js:118-156, 206-216`）。
+- 用户 Provider preset 是按 API ID 分目录保存的 JSON 文件。OpenAI preset 位于用户 `openAI_Settings` 目录，由 `/api/presets/save`、`/delete` 和 `/restore` 管理；preset 保存的是生成/连接字段子集，不是 Secret 文件，也不是 Profile（`src/endpoints/presets.js:16-36, 42-101`）。
+- `secrets.json` 是用户目录独立文件，服务端 `SecretManager` 原子写入；默认设置和用户 preset 不会把 Secret 值自动合并进去。
+
+### 配置入口操作矩阵
+
+下表按源码能确认的入口记录操作。静态源码能够确认按钮、事件和 endpoint；未运行浏览器时不把保存成功、不同平台视觉表现或重启后的即时效果写成已验证事实。
+
+| 入口/对象 | 查看 | 新增 | 编辑 | 复制 | 启停/切换 | 删除 | 导入 | 导出 | 连接测试 |
+|---|---|---|---|---|---|---|---|---|---|
+| 配置文件：`config.yaml` | 有，服务启动读取 | 可手工写入配置键 | 可手工编辑 | 未找到专用复制 | 有服务级开关，如代理、监听、备份；不是渠道启停 | 可手工删键，未找到渠道删除语义 | 未找到配置导入命令 | 未找到配置导出命令 | 不适用；只配置服务行为 |
+| 用户 `settings.json` | 有，Web `/api/settings/get` 读取并加载 | Web 保存当前设置或 Profile 后写入 | Web 设置控件和快照恢复可改写 | 可通过文件复制/快照恢复，未找到渠道复制 API | 可切换 `main_api`、source/type、Profile；不是独立渠道 active 状态 | 可删字段或恢复旧快照，未找到 Provider 实例删除 API | 未找到通用 settings 上传恢复入口 | 设置快照可查看；全量 ZIP 可下载 | 由 Web 设置页调用 Provider status 或 Test Message |
+| Web 当前 API 设置 | 有，Provider 连接设置页显示当前字段和状态 | 选择已有 source/type 并填写 URL、模型、凭据；没有“新建 Provider”表单 | 有，输入框、下拉框、开关和保存设置 | preset 的 `Save As` 可复制设置子集，未复制 Secret | 可切换 API/source/type；`online_status` 不是持久化启停状态 | 可删除 preset，不删除 Provider 代码项或 Secret | OpenAI preset 支持 JSON 文件导入，可选择移除代理/自定义端点字段 | OpenAI preset 支持 JSON 下载，可选择移除连接字段 | `/api/backends/.../status`、部分专用探测和 Test Message |
+| Web Connection Profile | 下拉选择和详情按钮 | 从当前 API 设置新建命名 Profile | Update 记录当前设置；Edit 改名称和纳入字段 | 未找到专用复制按钮；可用 `profile-create` 以当前设置另建 | 选择或 reload 应用 Profile；无 active/disabled 字段 | 删除选中 Profile | 未找到 Profile JSON 导入入口 | 未找到 Profile JSON 导出入口；设置快照/全量 ZIP 间接包含 Profile | 应用 Profile 后重新连接；`profile-genstream` 使用指定 Profile |
+| Web Secret Manager | 列出 ID、标签、active 和掩码；明文查看受配置限制 | 输入值和可选标签新增 | 只能重命名标签；未找到原值编辑，改值实际是新增 | 可复制 ID；明文复制值受 `allowKeysExposure` 限制 | rotate 人工指定某 UUID 为唯一 active | 按 ID 删除；删除 active 后首条剩余值 active | 未找到 Secret 专用导入入口 | 未找到 Secret 专用导出入口；全量 ZIP 默认排除 | 凭据被 status、Test Message 和实际请求使用 |
+| CLI | 可查看 `--help` 和启动参数 | 未找到 Provider/Profile/Secret 新增命令 | 未找到 | 未找到 | 只能配置服务启动开关，不切换渠道 | 未找到 | 未找到 | 未找到 | 未找到渠道测试命令 |
+| TUI | 未找到 TUI 实现 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 |
+| Electron 桌面端 | 窗口中加载 Web 页面 | 复用 Web | 复用 Web | 复用 Web | 复用 Web | 复用 Web | 复用 Web | 复用 Web | 复用 Web |
+
+### Web 当前设置与新建 Profile 的差异
+
+当前 API 设置是单份全局可变状态。选择 source/type、填写 URL 或模型、写入 Secret 后，设置保存接口把整个设置对象写回用户 `settings.json`；普通聊天请求直接从这份状态构造请求。它能编辑连接字段，但不能把“同一 Provider 的多个 URL”作为多个后端实体列出来。
+
+Connection Profile 的“新建”读取当前 `cc` 或 `tc` 模式下由命令列表定义的字段，要求用户输入唯一名称，然后把快照追加到 `extension_settings.connectionManager.profiles`。已有 Profile 的查看、Update、Edit、Reload 和 Delete 都在浏览器内操作该数组并调用设置保存；没有服务端 Profile endpoint。Edit 只改变名称和包含字段，若不点击带保存语义的 Update，当前设置变化不会自动重新抓取到 Profile（`public/scripts/extensions/connection-manager/index.js:769-882`）。
+
+因此：
+
+- 新建 Profile 不是新增 Secret，也不是新增 Provider 代码注册项；它只是把当前设置组合保存为另一个可应用快照。
+- 已有 Profile 可以应用到当前全局设置，也可以更新快照，但应用不会创建新的运行时连接池成员。
+- Web 没有 Profile 复制、JSON 导入或 JSON 导出按钮。可确认的间接迁移方式是 `settings.json` 快照或用户全量 ZIP；两者携带 Profile，但默认不携带 `secrets.json`。
+
+### Preset 的导入、导出、复制边界
+
+OpenAI 设置页的 preset 具有独立于 Profile 的文件生命周期：保存/更新通过 `/api/presets/save`，删除通过 `/api/presets/delete`，恢复内置默认 preset 通过 `/api/presets/restore`。`Save As` 是复制当前 preset 内容并以新名称保存，rename 实现为先保存新名称再删除旧名称（`public/scripts/preset-manager.js:441-517, 774-836`）。
+
+OpenAI preset 导入读取本地 JSON；如果发现代理、自定义 URL、Header/Body 等敏感连接字段，会先让用户选择移除或按原样导入。导出也会提示是否移除这些字段，并另有选项删除连接数据。这里的“敏感字段”仍属于普通 preset JSON，不等于 Secret Manager 的 Key；源码未显示 preset 导入会自动写入 Secret Manager（`public/scripts/openai.js:4661-4742, 4744-4785`）。
 
 ## 1. 渠道数据模型
 
@@ -507,7 +564,15 @@ Chat Completion 的 `getStatusOpen()` 会：
 - 默认全量备份恢复 Profile 后会留下失效的 Secret ID 引用，需要单独迁移 Key；
 - 上游聚合服务的 fallback 不应误记为本地渠道容灾。
 
-## 11. 关键源码索引
+## 11. 未验证事项
+
+- 本次未运行 SillyTavern Web 页面，因此按钮点击后的实际浏览器提示、网络失败时的交互、保存时序和不同浏览器表现未验证；表格中的操作覆盖来自静态 HTML、事件绑定和请求代码。
+- 本次未对 Electron 打包产物运行验证；源码只确认 `src/electron/index.js` 在服务启动后创建 `BrowserWindow` 并加载服务 URL，桌面端操作是否存在额外菜单、权限或打包配置未确认。
+- 本次未找到独立 TUI 实现，但未对所有可选插件、用户脚本或外部启动器进行运行时扫描；“未找到”限于当前代码快照和仓库内入口。
+- 普通 API 设置中每个 Provider 的具体连接字段、状态探测和导入导出差异并非完全同构；本文以 OpenAI Chat Completion、Text Completion、Connection Profile 和 Secret Manager 的共用入口为主，未逐一运行全部 Provider。
+- 全量 ZIP 的下载权限、用户账号模式和部署配置组合未运行验证；凭据排除结论来自 `createBackupArchive()` 的静态路径。
+
+## 12. 关键源码索引
 
 - Chat Provider 与设置：[`public/scripts/openai.js`](../../SillyTavern/public/scripts/openai.js)
 - Text Provider 与设置：[`public/scripts/textgen-settings.js`](../../SillyTavern/public/scripts/textgen-settings.js)
@@ -520,6 +585,9 @@ Chat Completion 的 `getStatusOpen()` 会：
 - 追加 Header：[`src/additional-headers.js`](../../SillyTavern/src/additional-headers.js)
 - Secret 服务端：[`src/endpoints/secrets.js`](../../SillyTavern/src/endpoints/secrets.js)
 - Secret 前端：[`public/scripts/secrets.js`](../../SillyTavern/public/scripts/secrets.js)
+- CLI 参数与配置合并：[`src/command-line.js`](../../SillyTavern/src/command-line.js)
+- Electron 启动包装：[`src/electron/index.js`](../../SillyTavern/src/electron/index.js)
+- Preset 文件 API：[`src/endpoints/presets.js`](../../SillyTavern/src/endpoints/presets.js)
 - 设置与 snapshot：[`src/endpoints/settings.js`](../../SillyTavern/src/endpoints/settings.js)
 - 全量用户备份：[`src/users.js`](../../SillyTavern/src/users.js)
 - 全量备份入口：[`src/endpoints/users-private.js`](../../SillyTavern/src/endpoints/users-private.js)

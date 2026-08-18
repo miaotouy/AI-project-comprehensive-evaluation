@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
+> 调查范围：LLM 渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、凭据、重试、备份与可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -102,9 +102,44 @@ Agent / 临时模型 / 辅助任务
 
 `relaxIdCerts` 和 `http1Only` 默认都是 `true`。前者放宽无效证书校验，后者强制 HTTP/1.1；它们提高私有/老旧网关兼容性，但不是官方 HTTPS API 的保守安全与性能默认值。
 
-## 2. 创建、导入与持久化
+## 2. 配置生命周期、管理入口与持久化
 
-### 2.1 创建与编辑
+### 2.1 管理入口按平台的实际覆盖
+
+当前代码把渠道管理分成桌面端和移动端两套状态/配置实现，并没有一个由 CLI、TUI、Web 服务统一承载的 Profile 管理后端。桌面端 `useLlmProfiles` 保存到 `llm-service/profiles.json`，移动端 Pinia Store 保存到独立的 `llm-profiles/llm_profiles.json`；二者共享部分类型和 Provider Core，但不是同一份运行时配置。桌面端入口是 Tauri WebView 中的 `LlmServiceSettings.vue`，移动端入口是移动应用的 `LlmSettingsView.vue`（`src/composables/useLlmProfiles.ts:43-51`、`mobile/src/tools/llm-api/stores/llmProfiles.ts:27-32`）。
+
+| 入口 | 源码确认的能力 | 边界与证据状态 |
+|---|---|---|
+| 配置文件 | 文件内容是包含 `profiles` 数组的 JSON；启动时加载、规范化旧字段并保存。直接编辑文件可以改变渠道的全部持久化字段，包含启停、模型、端点、Header 和凭据。桌面端还会从旧 `localStorage` 迁移一次。 | **源码确认**配置读写和迁移；配置文件没有单独的“复制/测试/删除”命令，直接改 JSON 属于手工配置，不是应用提供的管理工作流。桌面端文件为 `llm-service/profiles.json`，移动端为 `llm_profiles.json`，不是同一文件。 |
+| CLI | 根 `package.json` 的脚本是构建、检查、测试、文档和 Tauri 启动等开发命令；本次在根脚本、`scripts/` 和渠道相关源码中未找到读取/新增/编辑/复制/启停/删除/导入/导出/连接测试 Profile 的 CLI 命令。 | **本次未找到**渠道管理 CLI；不能据此断言仓库未来版本或外部脚本不存在。`scripts/version.ts` 等 `process.argv` 使用属于构建/版本脚本，不是渠道管理入口。 |
+| TUI | 未找到 Ink、Blessed 或其他终端 UI 渠道列表/编辑器，也未找到 Profile 专用 TUI 命令。 | **本次未找到** TUI 渠道管理入口。 |
+| Web | 代码使用 Vue 页面，但其桌面管理页依赖 Tauri 文件对话框和 Tauri FS 插件导出；未找到独立 Web 服务、HTTP 配置 API 或浏览器部署版的渠道管理页。 | **静态推断**当前 `src/` 页面属于桌面 Tauri WebView，不应把它概括为可远程访问的 Web 管理端；未启动浏览器或 Tauri 验证实际可达性。 |
+| 桌面端 | 完整支持查看、新建、编辑、启停、删除、排序、配置导入、渠道包导出、模型列表获取、模型/Key/能力探测。侧边栏显示名称、Provider 类型和模型数，编辑器显示当前 Profile 的完整配置。 | **源码确认**入口和事件绑定见 `src/views/Settings/llm-service/LlmServiceSettings.vue:579-660,1016-1111`；保存成功、文件对话框和真实请求结果本次未运行验证。 |
+| 移动端 | 独立设置页支持查看、新建、预设创建、编辑、显式保存、启停、删除、请求头/端点/模型编辑、模型列表获取和模型/批量探测。 | **源码确认** UI 和 Store 事件绑定见 `mobile/src/tools/llm-api/views/LlmSettingsView.vue:31-100,115-179`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:106-149,346-665`；本次未找到移动端渠道包导入、导出或复制入口。 |
+
+配置文件层和 UI 层的“删除”语义也不同：桌面端删除调用 Profile Store 的 `deleteProfile` 后保存整个列表；移动端删除同时把选中 ID 指向列表首项或清空。两端都没有发现删除关联 Agent、会话历史或 Key 健康状态的级联清理代码；历史消息保留实际渠道快照的行为仍由聊天链路负责，不能推断删除会清理历史引用（`src/composables/useLlmProfiles.ts:212-232`、`mobile/src/tools/llm-api/stores/llmProfiles.ts:106-112`）。
+
+### 2.2 已有渠道与新建渠道的操作差异
+
+桌面端新建有三条路径。空白创建生成新的 ID、默认 OpenAI 地址、启用状态、空模型列表和默认请求头；预设创建复制预设的 Provider、地址、默认模型、图标、端点和默认请求头；配置导入可以一次生成多个候选渠道。空白和预设创建后都会立即调用 `saveCurrentProfile`，所以新渠道先以可编辑对象落盘，再由表单变化触发后续自动保存（`src/views/Settings/llm-service/composables/useProfileEditor.ts:137-168`）。
+
+已有桌面渠道被选中时，编辑器先深拷贝 Profile 到 `editForm`，避免输入过程直接修改列表对象；表单深度变化后等待 1 秒调用 `saveCurrentProfile`，而 API Key 输入框在失焦时才把逗号/换行文本拆成数组。因而“已有渠道编辑”是编辑副本加防抖保存，“新建渠道”是先保存初始对象再进入同一编辑流程（`useProfileEditor.ts:127-135,184-203`）。删除和启停直接作用于已存在 Profile；启停只翻转 `enabled` 并保存，不创建新的运行时实例。
+
+桌面端没有看到独立的“复制渠道”按钮。复制效果存在于两条间接路径：导入一个带 `sourceProfile` 的候选时，如果 ID 冲突会生成新 ID，并把名称改为“副本”加序号；从已存在渠道打开“配置导入”时，导入草稿覆盖当前编辑副本，保留当前 ID，属于编辑/合并而不是复制。原生渠道包导入也会在 ID 冲突时按创建逻辑生成副本；因此应将“导入冲突复制”与“用户点击复制”区分记录（`LlmServiceSettings.vue:318-367,373-463`）。
+
+桌面端已有渠道可以单独或批量导出，默认不包含 API Key、自定义鉴权 Header 等敏感值；勾选“包含敏感信息”才写出完整凭据。导入创建态支持多个候选批量创建，编辑态只应用一个草稿：带完整 `sourceProfile` 时替换除当前 ID 外的 Profile 数据，否则按字段合并到当前编辑表单。创建态导入会为冲突 ID 重新生成 ID，编辑态不会改变当前 ID（`src/views/Settings/llm-service/components/LlmProfileExportDialog.vue:112-171`、`LlmServiceSettings.vue:373-463`、`src/utils/llm-profile-transfer.ts:286-351`）。
+
+移动端的新建渠道只在点击编辑器中的“保存”后进入 Store；预设和空白创建只是先构造内存中的 `editingProfile` 并打开编辑弹窗。已有渠道打开时会深拷贝到 `innerProfile`，保存事件再按 ID 判断调用 `addProfile` 或 `updateProfile`。因此移动端与桌面端的差异是：桌面端新建立即落盘并自动保存，移动端新建需要显式保存；移动端已有渠道也没有桌面端的 1 秒自动保存。移动端源码中未找到已有渠道复制按钮、渠道包导入导出或配置文件选择器（`mobile/src/tools/llm-api/views/LlmSettingsView.vue:31-89`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:92-113`）。
+
+### 2.3 查看、启停、模型获取与连接测试
+
+“查看”在桌面端是侧边栏选择后展开完整 Profile 编辑器，在移动端是点击卡片后打开全屏编辑弹窗。两者都显示启用状态、地址和模型数量；桌面端还在列表中提供排序，移动端虽保留管理模式和多选状态字段，但当前设置页没有发现进入管理模式的按钮或批量动作绑定，因此**静态代码只能确认状态结构，不能确认批量管理入口可达**（`src/views/Settings/shared/ProfileSidebar.vue:1-150`、`mobile/src/tools/llm-api/views/LlmSettingsView.vue:20-22,102-108,146-161`）。
+
+启停都是 Profile 级 `enabled` 字段，不是 Key 或单模型状态。桌面端普通请求会检查该字段，但设置页探测可以对当前编辑中的禁用渠道发起探测；移动端卡片开关直接调用 `updateProfile`。两端都没有发现“暂停后删除凭据”或“停用后禁止查看/编辑”的逻辑，已有渠道停用后仍可打开和修改。
+
+连接测试不是一个单一的健康字段，而是设置页的独立探测路径。桌面端“检查模型列表”调用 `channel-probe-service` 的 `model-list` 探测；模型编辑区可按模型、端点、流式模式和媒体成本确认执行推理探测，也可批量探测；Key 管理器可指定某个 Key 和模型测试，并把结果反馈给 Key 健康状态。移动端编辑器提供模型列表获取、模型探测和批量探测，但未找到与桌面端原生渠道包导入导出相连的测试入口。探测结果包含分类、耗时和响应摘要，不能据此推断真实聊天请求一定成功；探测使用的是独立的系统探测上下文（`src/views/Settings/llm-service/composables/useConnectionTest.ts:57-133,135-213`、`src/views/Settings/llm-service/probe/channel-probe-service.ts:55-149`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:132-149,228-239`）。
+
+### 2.4 桌面端创建与编辑
 
 `src/views/Settings/llm-service/LlmServiceSettings.vue` 是桌面渠道管理页，支持：
 
@@ -118,7 +153,7 @@ Agent / 临时模型 / 辅助任务
 
 渠道停用只阻止普通 `useLlmRequest` 调用。设置页探测通过 `allowDisabledProfile` 或直接调用 Adapter，可以验证尚未启用的渠道。
 
-### 2.2 多格式导入
+### 2.5 多格式导入
 
 `src/utils/llm-config-import/` 提供与 UI 解耦的解析层，可从以下内容生成一个或多个 `ParsedLlmProfileDraft`：
 
@@ -134,7 +169,7 @@ Agent / 临时模型 / 辅助任务
 
 除上述解析式导入外，还有**原生渠道导入导出**——`src/utils/llm-profile-transfer.ts` 定义 `LlmProfileBundle` 序列化格式，导出对话框（`LlmProfileExportDialog.vue`）支持搜索、多选、单渠道/批量导出，敏感信息自动检测与脱敏（导出时可选择是否包含凭据），导入时无损保留网络策略、自定义端点等完整配置（提交 `17ed5f04b`）；JSON 解析器新增 New API“复制连接信息”格式（`_type: "newapi_channel_conn"` → OpenAI-Compatible 渠道候选，无效 URL 校验且密钥不进入警告日志，提交 `8ddbbedfa`）。
 
-### 2.3 明文配置文件
+### 2.6 明文配置文件
 
 `useLlmProfiles` 使用 `createConfigManager` 将全部 Profile 保存到应用配置目录下的：
 
@@ -369,6 +404,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 ### 已实现
 
 - Profile 级渠道增删改查、启停和排序；
+- 桌面端完整的渠道创建、编辑、删除、排序、启停、导入、导出和独立探测入口；移动端有独立的增删改、启停和探测入口，但配置包导入导出与复制未找到；
 - 丰富的官方/兼容 Provider 预设（含 Azure，运行时适配器已补齐）；
 - 多格式配置导入、重复提示与 New API"复制连接信息"、原生 `LlmProfileBundle` 导入导出（可脱敏）；
 - 多 Key 轮询、手动启停、错误状态、按 Profile 隔离的熔断/恢复和分类化健康策略；
@@ -390,6 +426,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - `auto` 网络策略不是自动择优；
 - 模型列表请求固定走代理；
 - 设置页可见 Provider 与运行时 Adapter 的单一注册源约束已通过 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 建立，旧"Azure 漂移"问题已关闭。
+- 未找到面向渠道管理的 CLI、TUI、独立 Web 服务或 HTTP 配置 API；这表示本次调查范围内没有这些管理入口，不等于外部脚本或未来版本绝对不存在。
 
 ## 11. 关键源码索引
 
@@ -404,8 +441,12 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - 桌面 Transport：[`src/llm-apis/transports/desktop.ts`](../../aio-hub/src/llm-apis/transports/desktop.ts)
 - Rust 代理入口：[`src/llm-apis/common.ts`](../../aio-hub/src/llm-apis/common.ts)
 - 设置页：[`src/views/Settings/llm-service/LlmServiceSettings.vue`](../../aio-hub/src/views/Settings/llm-service/LlmServiceSettings.vue)
+- 桌面 Profile 编辑与自动保存：[`src/views/Settings/llm-service/composables/useProfileEditor.ts`](../../aio-hub/src/views/Settings/llm-service/composables/useProfileEditor.ts)
+- 桌面渠道导出与序列化：[`src/views/Settings/llm-service/components/LlmProfileExportDialog.vue`](../../aio-hub/src/views/Settings/llm-service/components/LlmProfileExportDialog.vue)、[`src/utils/llm-profile-transfer.ts`](../../aio-hub/src/utils/llm-profile-transfer.ts)
 - 渠道探测：[`src/views/Settings/llm-service/probe/channel-probe-service.ts`](../../aio-hub/src/views/Settings/llm-service/probe/channel-probe-service.ts)
 - 配置导入：[`src/utils/llm-config-import`](../../aio-hub/src/utils/llm-config-import)
+- 移动端 Profile Store：[`mobile/src/tools/llm-api/stores/llmProfiles.ts`](../../aio-hub/mobile/src/tools/llm-api/stores/llmProfiles.ts)
+- 移动端渠道设置页与编辑器：[`mobile/src/tools/llm-api/views/LlmSettingsView.vue`](../../aio-hub/mobile/src/tools/llm-api/views/LlmSettingsView.vue)、[`mobile/src/tools/llm-api/components/ProfileEditor.vue`](../../aio-hub/mobile/src/tools/llm-api/components/ProfileEditor.vue)
 - Agent 运行时选择：[`src/tools/llm-chat/composables/chat/useChatExecutor.ts`](../../aio-hub/src/tools/llm-chat/composables/chat/useChatExecutor.ts)
 
 ## 12. 未验证事项
@@ -413,5 +454,6 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 1. 本次未启动 Tauri 桌面端，没有实测官方 Provider、自建网关和代理模式下的 TLS/HTTP 行为。
 2. 未检查真实用户配置目录的文件 ACL；“明文落盘”基于序列化与写入实现，不等于配置文件一定对其他系统账户可读。
 3. 未实测 Azure 渠道的真实调用（运行时适配器已补齐，`prepareAzureOpenAiProfile` 转换与端到端行为仍属静态确认）。
-4. 移动端共用 Provider Core，但有独立 Profile Store、KeyManager 和 Transport；本笔记以桌面端渠道管理为主，没有逐屏比较移动端 UI 能力。
+4. 未启动移动端 Tauri/Android 运行态；移动端配置文件路径、保存成功、真实模型探测和平台文件权限均为源码确认或静态推断，未做设备实测。
 5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；它们不等于 LLM Chat 的 Key/渠道故障转移，本次未逐项展开。
+6. 未运行桌面端或移动端 UI，因此桌面文件选择器、导出文件实际内容、导入后的提示/错误、移动端弹窗保存和探测结果展示均未验证；Web、CLI、TUI 的“未找到”结论也未覆盖仓库外部脚本或未来构建产物。

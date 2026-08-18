@@ -2,19 +2,19 @@
 
 > 调查对象：`E:\works\GitStudyNotes\Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
 >
-> 调查方式：只读源码梳理，覆盖模型目录、请求层、存储层、网络层、设置 UI 与 Node/Tauri 后端；未运行应用；调查时工作树干净
+> 调查方式：只读源码梳理，覆盖模型目录、请求层、存储层、网络层、设置 UI、Node/Tauri 后端，并搜索 CLI/TUI 入口；未运行应用；调查时工作树干净
 >
-> 调查范围：渠道实体模型、配置创建与持久化、凭据存储与传递、模型目录、协议 Adapter 与请求组装、运行时选择、重试与 fallback、连接检测与可观测性；不包含消息与上下文构建（对话请求类目）、模型选择器的聊天工作流（Chat UI 类目）与角色配置
+> 调查范围：渠道实体模型；配置文件、CLI、TUI、Web、桌面端的查看、新增、编辑、复制、启停、删除、导入、导出和连接测试；凭据、模型目录、协议 Adapter、运行时选择、重试与 fallback、可观测性；不包含消息与上下文构建（对话请求类目）、模型选择器的聊天工作流（Chat UI 类目）与角色配置
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Risuai 没有 Provider 实体表或渠道实例对象。`Provider` 只是模型元数据上的枚举分类，`渠道`由"模型 ID + 若干全局设置字段"组合表达，`Endpoint` 被硬编码进模型条目或由用户级 URL 字段承载，`凭据`全部明文存放在唯一的全局 `Database` 对象中。多连接通过复制模型条目或创建自定义条目表达。
+Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条目上的分类标签；运行时使用的是模型 ID 和全局 Database 字段组合出的连接参数。Endpoint 被内置模型条目、反向代理字段或自定义模型记录承载，凭据存放在同一个 Database 对象中。这里的 botPreset 是整组聊天设置的快照，不能当作 Provider 或渠道实例。
 
 当前快照的关键结论：
 
@@ -22,7 +22,8 @@ Risuai 没有 Provider 实体表或渠道实例对象。`Provider` 只是模型�
 - 协议适配集中在请求层的格式分发：`LLMFormat` 枚举的每个值对应一个 Adapter 函数，OpenAI 兼容协议是主干，Custom API（`reverse_proxy`）可切换格式以复用 Anthropic/Gemini/Responses 等 Adapter；
 - 凭据以明文字符串存于 `database.bin`（Tauri）或 IndexedDB（Web），UI 仅提供开关控制的输入掩码；请求日志、云同步与备份都会携带完整凭据；
 - 失败处理分三层：同模型重试（`requestRetrys` 默认 2）、按任务模式分离的模型 fallback 候选链、工具调用链重试；没有多 Key、Key 轮换、熔断或健康状态，也没有健康感知的跨渠道 failover；
-- 没有独立的连接测试入口；设置页实时加载模型目录与请求体预览（Preview Body）承担验证作用，请求日志（20 条内存记录）是主要的可观测手段。
+- 管理入口只有应用内设置 UI；未找到项目内 CLI 或 TUI。Web 和 Tauri 桌面复用同一套 Svelte 组件，桌面端没有另一套 Provider 管理面板；设置页实时加载模型目录与请求体预览（Preview Body）承担部分验证作用，但没有独立的连接测试入口。
+- “启停”对 Provider 和模型条目均不适用：模型目录没有 enabled 字段，当前模型通过 `aiModel`/`subModel` 选择，清空可选槽位只表示不使用该槽位；botPreset 也没有启用状态。
 
 ## 术语定义
 
@@ -30,11 +31,11 @@ Risuai 没有 Provider 实体表或渠道实例对象。`Provider` 只是模型�
 
 | 术语 | Risuai 中的含义 |
 |---|---|
-| Provider | `LLMModel.provider` 上的枚举分类（`LLMProvider`），是模型目录的标签，不是用户可创建或启停的实体 |
-| 渠道 / Endpoint | 无独立实体。由模型 ID 决定协议与默认 URL，用户级 URL 字段（`forceReplaceUrl`、`customModels[].url`、`ollamaURL` 等）覆盖端点；同一 Provider 多连接靠多个模型条目表达 |
+| Provider | `LLMModel.provider` 上的枚举分类（`LLMProvider`），是模型目录分组标签，不是用户可创建、编辑、复制、删除或启停的实体 |
+| 渠道 / Endpoint | 无独立实体。由模型 ID 决定协议与默认 URL，用户级 URL 字段（`forceReplaceUrl`、`customModels[].url`、`ollamaURL` 等）覆盖端点；同一服务的多连接靠全局字段或多个自定义模型条目表达 |
 | 模型 | `LLMModel` 条目（ID、Provider、格式、能力 flags、参数、Tokenizer、内部 ID、endpoint、keyIdentifier），是选择与请求构造的最小单位 |
 | 凭据 | `Database` 中的字符串字段（API Key、Token、Header 值等），无独立存储 |
-| Profile | `botPresets` 中的命名配置快照，可保存/切换/导入/导出，导出时清空 Key 与 URL |
+| botPreset | `botPresets` 中的命名聊天配置快照，可保存、切换、复制、删除、导入和导出；包含模型选择及部分 URL/凭据字段，但不是独立渠道记录 |
 
 ## 总体调用链
 
@@ -65,13 +66,47 @@ Risuai 没有 Provider 实体表或渠道实例对象。`Provider` 只是模型�
 
 插件模型是第四类：插件调用 `addProvider` 注册回调后，自动生成 `pluginmodel:::<name>` 条目进入 `customV3ProviderMetaStore`（`src/ts/plugins/apiV3/v3.svelte.ts:679-705`）。同一 Provider 实例（如一个 OpenRouter 账号）不能创建多条独立连接，只能通过 `customModels` 或 `reverse_proxy` 条目另起；内置 Provider 条目是全局单例。
 
-## 2. 配置创建、持久化与迁移
+## 2. 配置生命周期、管理入口与持久化
 
 全部配置（含凭据）是唯一的 `Database` 对象，由 `setDatabase()` 在加载时对缺失字段逐个补默认值并执行字段级迁移（`src/ts/storage/database.svelte.ts:30-722`），"默认配置"与"用户配置"的合并就是这次启动补齐，没有独立的默认配置层。
 
 持久化使用自定义分块格式：`RisuSaveEncoder` 把数据库按 root、preset、modules、loadouts、plugins、pluginStorage、每个角色独立块打包为 msgpack + 可选 gzip，写入 `database.bin`（`src/ts/storage/risuSave.ts:124-326`）。`saveDb()` 用 Svelte 5 的 `$effect` 监听数据库变化，500ms 防抖后写主文件并同时生成 `dbbackup-<时间戳>.bin`，最多保留 20 份（`src/ts/globalApi.svelte.ts:292-529`）；损坏时启动流程按时间倒序尝试恢复备份（`src/ts/bootstrap.ts:89-153`）。Web 端同一文件存 IndexedDB（localforage），Tauri 端存 AppData 目录；启用账号同步后改经 `/api/account/write` 上传同一份 `database.bin`（`src/ts/storage/accountStorage.ts:22-58`）。
 
-配置快照是 `botPresets`：保存当前活动设置（含模型、URL、`openAIKey`、`proxyKey` 等）、切换、复制，并支持 `.risupreset`（用固定字符串密钥加密）与 JSON 两种导出（`database.svelte.ts:2036-2275, 2291-2337`）。导出前会清空 `openAIKey`、`proxyKey`、各 URL 字段；JSON 导入时用 `presetTemplate` 兜底合并。版本迁移分两级：`setDatabase` 的字段级默认值补齐，以及 `checkNewFormat` 按 `formatversion` 逐级升级（`bootstrap.ts:335-507`）。
+### 2.1 各对象的操作边界
+
+| 对象 | 查看 | 新增/编辑 | 复制 | 启停 | 删除 | 导入/导出 | 连接测试 |
+|---|---|---|---|---|---|---|---|
+| Provider 标签 | 模型选择器按 Provider 分组显示 | 不适用；由源码静态表、动态目录或插件注册产生 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
+| 已有模型条目 | Web/Tauri 的模型选择器可选择和查看名称 | 本次未找到对内置条目的字段编辑入口 | 本次未找到条目复制入口 | 不适用；选择 `aiModel`/`subModel` 只是激活槽位 | 本次未找到删除入口 | 本次未找到单条内置模型导入/导出 | 不适用；无独立测试按钮 |
+| `customModels` 模型条目 | Advanced > Custom Models 展开查看 | 可新增；可编辑名称、请求模型名、URL、Tokenizer、格式、Key、附加参数和能力 flags | 本次未找到复制按钮 | 不适用；没有 enabled 字段 | 可删除，也可上下移动排序 | 本次未找到单条自定义模型导入/导出 | 不适用；Preview Body 仅对部分格式可用 |
+| `botPresets` | 预设弹窗查看名称、切换当前项；编辑模式可改名称 | 加号按 `presetTemplate` 新建；Bot Settings 的当前设置保存回当前预设；编辑模式只直接编辑名称 | 有复制按钮 | 不适用；没有启用字段 | 可删除，但至少保留一项 | 支持 JSON 与 `.risup`/`.risupreset` 导入导出；导出会清空预设中的 Key 和 URL | 不适用；预设弹窗没有测试动作 |
+
+上表是源码入口的静态结论，按钮是否成功完成保存、不同设备上的文件选择器表现和实际错误提示未运行验证。尤其要区分“已有模型条目可被选择”和“可编辑 Provider”：`ModelList.svelte` 只改变绑定的模型 ID；它没有修改内置模型表的操作。
+
+自定义模型的新增记录使用 `xcustom:::<uuid>` ID，编辑器直接修改 `DBState.db.customModels`，删除使用数组删除；因此它是用户可管理的模型条目集合，仍不是 Provider CRUD。它有 URL、Key、协议格式和能力 flags，但没有独立启用状态（`src/lib/Setting/Pages/Advanced/CustomModelsSettings.svelte:34-188`）。
+
+botPreset 的生命周期不同：新建和导入都是向 `botPresets` 追加快照，复制先保存当前预设再深拷贝目标项并追加 “Copy”；切换把快照字段写回全局 Database，删除时切换到第一个预设并删除目标项。快照包含 `aiModel`、`subModel`、代理 URL/Key、请求模型名、fallback 与生成参数等字段，但不包含 `customModels` 这一独立数组（`src/ts/storage/database.svelte.ts:2036-2275, 2291-2504`）。
+
+### 2.2 配置文件、Web、桌面、CLI 与 TUI
+
+下表按入口归纳操作覆盖；“不适用”表示该入口或对象没有对应生命周期，“未找到”表示本次源码搜索没有找到专用操作，不把底层文件可手工改写等同于正式管理能力。
+
+| 入口 | 查看 | 新增/编辑 | 复制 | 启停 | 删除 | 导入/导出 | 连接测试 |
+|---|---|---|---|---|---|---|---|
+| 配置文件 | 可由 RisuSave 解码逻辑读取 `database.bin`；不是人类可读 Provider 表 | 手工改二进制格式不是产品入口；源码确认启动补默认值和迁移 | 未找到专用复制格式 | 不适用；无 enabled 字段 | 手工改文件可改变数组/字段，但未找到专用删除命令 | `database.bin`、备份和数据库同步可整体搬运；未找到渠道级格式 | 不适用；文件读写不发探测请求 |
+| CLI | 未找到渠道查看命令 | 未找到渠道新增/编辑命令 | 未找到 | 未找到；没有模型/Provider enabled 状态 | 未找到 | 未找到 | 未找到 |
+| TUI | 未找到渠道查看界面 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 |
+| Web 设置 UI | 可查看 Provider 分组、内置模型、动态目录、自定义模型和 botPreset | 可编辑全局 Database 字段、新增/编辑 `customModels` 和 botPreset | 只有 botPreset 复制 | 不适用 | 可删 `customModels` 和 botPreset；内置模型/Provider 无删除入口 | botPreset 支持 JSON/`.risup`/`.risupreset`；设置报告是脱敏后的整体报告 | 未找到独立测试；目录拉取和 Preview Body 仅为间接验证 |
+| Tauri 桌面设置 UI | 与 Web 使用同一 Svelte 设置组件 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同，文件落 AppData/本地文件系统 | 与 Web 相同；真实请求经 Tauri 网络命令 |
+
+- **配置文件**：`database.bin` 是 RisuSave 自定义分块文件，不是面向用户逐条编辑的 Provider 配置文件。应用启动时读取、补默认值并迁移；保存时写入主文件和最多 20 份带时间戳备份。源码提供备份恢复，但本次未找到面向 CLI/TUI 的配置文件编辑命令（`src/ts/storage/risuSave.ts`、`src/ts/globalApi.svelte.ts:292-529`）。
+- **Web**：设置组件直接绑定 `DBState.db`；主数据库落在 IndexedDB，预设 JSON/`.risup` 导入导出通过浏览器文件 API 完成。Web 端没有独立服务端 Provider CRUD API，服务端主要承担代理和数据库同步路径。
+- **桌面端**：Tauri WebView 使用同一套设置组件和生命周期操作，主数据库改存 Tauri AppData 下的数据库文件；Tauri Rust 命令主要提供文件、网络和运行环境能力，没有发现独立的渠道管理命令或 TUI。桌面与 Web 的 UI 操作覆盖因此相同，持久化位置和请求网络路径不同。
+- **CLI/TUI**：`package.json` 只有 Vite、检查、测试、Node server 和 Tauri 等脚本；在源码、脚本和 Tauri 命令中未找到 `process.argv`、命令解析器、交互式终端 UI 或渠道管理子命令。本次结论是“未找到项目内 CLI/TUI”，不是断言外部脚本不能直接修改文件。
+
+已有模型与新建模型的差异也只发生在模型条目类型上：内置条目只能在选择器中被选用，不能从设置页改写；新建 `customModels` 条目先得到空白记录，保存后与已有自定义条目使用同一编辑器和删除路径。botPreset 则没有“已有渠道/新建渠道”的语义：新建的是整组设置快照，复制和导入都追加快照，切换后才把快照字段投影到全局 Database。
+
+版本迁移分两级：`setDatabase` 的字段级默认值补齐，以及 `checkNewFormat` 按 `formatversion` 逐级升级（`src/ts/storage/database.svelte.ts:30-722`、`src/ts/bootstrap.ts:335-507`）。默认模型和默认 botPreset 在数据库缺字段时写入；动态远端模型目录不写回配置文件。
 
 ## 3. 凭据、Header 与代理边界
 

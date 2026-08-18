@@ -1,14 +1,14 @@
 # VCPChat LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\VCPChat`
+> 调查对象：`E:\works\GitStudyNotes\VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
+> 调查范围：配置文件、CLI/TUI/Web/桌面端管理入口，LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与连接检测；不把 Agent 管理、VCPToolBox 服务端或一般聊天 UI 当作本地 Provider 管理
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -44,6 +44,17 @@ Agent config.json
 - 设置保存使用临时文件、JSON 回读校验、旧文件备份和原子替换，但这些机制保证写入完整性，不提供 Secret 保密性；
 - 每日设置备份和一键 ZIP 都会携带明文 Key；
 - 模型刷新兼作基本连通性检查，没有独立最小生成测试、持久化健康状态、延迟/错误率统计或熔断器。
+
+本次按入口复核后的操作结论：
+
+- **配置文件：源码确认可查看和编辑** `AppData/settings.json`；它只能保存一套全局 VCP URL/Key。直接修改文件属于文件操作，不是应用内导入流程。
+- **桌面主界面：源码确认可查看和编辑全局连接字段及 Agent 的裸模型 ID**，可新增、编辑、删除 Agent；未找到 Provider/Endpoint 卡片、复制渠道、渠道启停或独立连接测试。
+- **CLI：未找到** Provider 管理 CLI。`package.json` 中只有 Electron 启动、构建和打包脚本；`process.argv` 只用于启动模式开关，不能管理渠道。
+- **TUI：未找到** 终端 UI 或交互式渠道管理入口。
+- **Web：未找到** 面向渠道管理的浏览器 Web 前端或 HTTP 管理 API。项目内的 HTML 页面主要是 Electron renderer；`WebIndexTTS2` 是 TTS 管理页，不是 LLM 渠道管理页。
+- **桌面端扩展：源码确认只复用主设置中的连接**。VCPdesktop 从主进程取得 Bearer 凭据，widget 可通过代理发起真实的非流式 Chat Completion，但没有 Provider 配置和测试按钮。
+- 没有本地 Provider 实体时，新增、编辑、复制、启停、删除和按渠道导入/导出均对 VCPChat **不适用**；可操作的对象是全局网关设置、Agent 配置或备份文件。
+- “未找到”表示本次对当前仓库源码和入口配置搜索未发现该能力；没有实际启动每个窗口和服务器做交互验证的项目，另标为“未验证”。
 
 ## 总体调用链
 
@@ -106,6 +117,29 @@ LLM 相关字段包括：
 VCPChat 把对话请求发给 VCP 网关后，上游可以自行做模型映射、多 Key、重试和 Provider fallback，但这些能力不会出现在客户端调用链中。
 
 所以本篇只评价 VCPChat 自己能否表达和调度渠道。独立 VCPToolBox 仓库中的服务端实现应单列调查，不能因请求经过 VCP 网关就写成“VCPChat 支持多 Provider 路由”。
+
+### 1.4 配置生命周期与管理对象
+
+VCPChat 的配置生命周期分成两类，不能合并为 Provider 生命周期：
+
+1. **全局网关设置**：`main.html` 的“服务器连接”表单显示 URL、Bearer Key、日志地址、文件密码和日志 Key；`modules/global-settings-manager.js:38-106` 读取表单，`modules/ipc/settingsHandlers.js:121-148` 经主进程保存到 `AppData/settings.json`。设置保存会合并默认字段，但没有数组化的渠道记录、唯一渠道 ID 或每条渠道的启停状态。
+2. **Agent 配置**：Agent 是本地角色目录 `AppData/Agents/<agent>/config.json`，其中的 `model` 只是发给同一个网关的模型 ID。主界面可以创建、查看、编辑和删除 Agent；`modules/ipc/agentHandlers.js:248-321,408-477` 提供读写、创建和删除 IPC。该生命周期不代表创建了一个 LLM Provider。
+
+对调查指南要求的管理动作，当前源码覆盖如下。这里的“未找到”是源码检索结果，“不适用”是因为 VCPChat 没有对应的 Provider 实体；保存是否在实际运行环境成功仍属于未验证事项。
+
+| 管理动作 | 配置文件 | CLI | TUI | Web | Electron 桌面端 | 对本地 Provider 的结论 |
+|---|---|---|---|---|---|---|
+| 查看 | 直接查看 `settings.json` 或 Agent `config.json` | 未找到 | 未找到 | 未找到渠道管理页 | 源码确认可查看全局设置、Agent 和模型 ID | 可查看的是设置/Agent，不是 Provider 列表 |
+| 新增 | 可手工新增 JSON 字段，但 schema 没有 Provider 数组 | 未找到 | 未找到 | 未找到 | 源码确认可新增 Agent；未找到新增渠道表单 | Provider 新增不适用 |
+| 编辑 | 源码确认可直接改文件 | 未找到 | 未找到 | 未找到 | 源码确认可编辑全局 URL/Key、摘要模型和 Agent 模型 | 只能编辑单一全局连接或裸模型 |
+| 复制 | 未找到渠道配置复制格式或命令 | 未找到 | 未找到 | 未找到 | 未找到 Provider 复制；普通复制仅属编辑器/内容操作 | 渠道复制不适用 |
+| 启停 | 只有布尔功能设置，如 `enableVcpToolInjection`，不是渠道状态 | 未找到 | 未找到 | 未找到 | 源码确认可切换工具注入等功能；未找到网关启停开关 | Provider 启停不适用 |
+| 删除 | 可手工删除字段/文件，但无 Provider 删除语义 | 未找到 | 未找到 | 未找到 | 源码确认可删除 Agent，不提供删除网关 Profile | Provider 删除不适用 |
+| 导入 | 未找到设置 JSON 导入恢复 | 未找到 | 未找到 | 未找到 | 未找到渠道配置导入 UI | 配置导入不适用；备份恢复需文件操作 |
+| 导出 | `backup.py` 源码确认可把 AppData 根文件和指定目录写入 ZIP | 未找到渠道导出命令 | 未找到 | 未找到 | 未找到渠道导出按钮 | 这是全量文件归档，不是 Provider 导出 |
+| 连接测试 | 未找到独立测试文件或测试命令 | 未找到 | 未找到 | 未找到 | 源码确认“刷新模型”请求 `/v1/models`；桌面 widget 的 `vcpPost()` 是实际推理代理而非测试入口 | 没有本地 Provider 级测试对象 |
+
+配置文件与界面的默认值合并也只发生在全局设置层：`appSettingsManager.js:83-156` 用默认设置补齐缺失字段，`readSettings()` 在文件不存在时返回默认对象；Agent 列表在缺少 `config.json` 时会生成内存默认配置，但正式创建 Agent 仍由 `create-agent` 写入独立目录。源码未找到将多个 Provider 默认配置合并为连接池的逻辑。
 
 ## 2. Base URL、端点、Header 与凭据
 
@@ -172,6 +206,18 @@ Authorization: Bearer <vcpApiKey>
 ```
 
 `modelConfig` 中未设置的采样参数（null 或空）经 `omitUnsetOptionalModelParams()` 清理后不再出现在请求体；`vcpchatExtensions` 可能只含 `requestContext`（消息时间戳绑定为空时省略该段），后者携带本轮请求与 Agent/Topic 的上下文标识；清理与构建逻辑见 `chatHandlers.js:53-118`。实际字段仍由 `modelConfig` 展开，工具注入、上下文清理和扩展对象可能继续增补内容。协议入口兼容 OpenAI Chat Completions，但不是纯粹只发 OpenAI 标准字段。
+
+### 2.4 配置文件、CLI、TUI、Web 与桌面端边界
+
+**配置文件。** 主进程把应用数据根目录固定为项目内 `AppData`，全局设置文件是 `AppData/settings.json`；Agent 的模型和生成参数在 `AppData/Agents/<agent>/config.json`。设置管理器负责默认字段补齐、锁、临时文件、回读校验、备份和替换，但没有 Provider 配置文件 schema。手工编辑 JSON 可以改变当前连接，却不会产生可被列表选择的渠道实例。
+
+**CLI/TUI。** `package.json` 的脚本只有 Electron 启动、构建和打包；主进程的 `process.argv` 仅识别 `--desktop-only` 和 `--rag-observer-only`。本次在仓库脚本、依赖和源码中未找到渠道管理 CLI、交互式终端界面、命令参数解析器或 TUI 状态循环。因此 CLI/TUI 对查看、新增、编辑、复制、启停、删除、导入、导出和连接测试均未找到。
+
+**Web。** 本仓库没有独立的 Provider 管理 Web 服务或浏览器渠道管理页。Electron 加载 `main.html` 及各模块 HTML，`WebIndexTTS2/public` 对应的是 IndexTTS 管理页面；项目中若访问 VCP 服务端的 `admin_api`，属于论坛、任务、日志或 widget 数据功能，不是客户端本地 Provider 管理。不能因为页面使用 `fetch` 或名称中含 Web 就判定存在 Web 渠道管理入口。
+
+**桌面端。** 主 Electron renderer 的全局设置可以查看和编辑 URL、Key、摘要模型以及工具注入开关；Agent 设置可以查看和编辑模型字段，创建和删除 Agent 的入口在 `modules/ipc/agentHandlers.js`。`Desktopmodules` 是桌面画布/widget 层：`vcpProxy.js:17-51` 从主进程拿到凭据并缓存，`vcpProxy.js:94-150` 以非流式 POST 调用已经配置的 Chat endpoint。它提供的是对现有单网关的运行时代理，不提供 Provider/Endpoint CRUD、复制、启停、导入导出或测试按钮。
+
+静态源码只能确认上述事件绑定、IPC 和文件路径；本次未启动 Electron 逐项点击验证保存后窗口刷新、错误提示、不同平台文件权限及 widget 实际请求结果。
 
 ## 3. 模型目录与模型选择
 
@@ -383,6 +429,17 @@ AppData/UserData/backups/settings-<timestamp>.json
 
 但它不发送最小 Chat Completion，所以不能验证指定模型能否完成推理、工具注入端点是否工作、流式 SSE 是否兼容。失败时主要写控制台日志、清空缓存并让 UI 没有可用模型。
 
+这里要区分四种容易混淆的行为：
+
+| 行为 | 实际请求 | 是否是真实连接测试 | 结论 |
+|---|---|---|---|
+| 模型刷新 | `GET /v1/models`，带 Bearer Key | 否，只是基础探测 | 能验证 origin、认证和模型目录响应，但不能验证生成 |
+| 普通聊天 | `POST /v1/chat/completions`，或工具注入时改为 `/v1/chatvcp/completions` | 不是测试功能 | 是用户真实请求，会产生真实推理副作用和可能的费用 |
+| 桌面 widget `vcpPost()` | 对已配置 Chat endpoint 发非流式 `POST` | 不是测试功能 | 是桌面挂件使用的真实推理代理；源码未找到“仅测试”按钮或专用小请求 |
+| 备份脚本 | 读取 AppData 并写 ZIP | 否 | 只验证本地文件归档路径，不触碰 VCP 服务器 |
+
+因此本项目“连接测试”在能力矩阵中只能记为基础的模型目录刷新。没有本地 Provider 实体，也就没有按 Provider 逐项测试 URL、Key、模型和协议的测试对象；服务端若存在 Provider 健康检查，客户端不会读取其结果。
+
 ### 8.2 没有持久化渠道健康表
 
 源码未见按 URL、模型或 Key 记录：
@@ -400,6 +457,10 @@ AppData/UserData/backups/settings-<timestamp>.json
 ### 8.3 使用次数不是调用质量观测
 
 模型使用统计在发送 HTTP 请求之前就增加，因此失败请求也可能被计数。它没有 token、耗时、状态和成本字段，只适合作为 UI 热门模型指标，不应作为成功调用量或账单审计数据。
+
+### 8.4 未找到独立的连接测试入口
+
+本次搜索 `test connection`、健康检查、连接测试按钮和独立测试 IPC，未找到面向 VCP 网关的专用入口。模型选择弹窗只有刷新模型列表按钮（`main.html:1750-1760`、`modules/settingsManager.js:716-727`）；它调用 `refresh-models`，而不是最小聊天生成。桌面端的 `vcpPost()` 虽然能完成真实请求，但由 widget 脚本按需调用，不能当成设置页的连接测试。
 
 ## 9. 能力矩阵
 
@@ -428,11 +489,31 @@ AppData/UserData/backups/settings-<timestamp>.json
 | 设置自动备份 | 有 | 每日复制，保留最新 7 份 |
 | 全量备份包含凭据 | 是 | ZIP 默认包含根目录 settings |
 | 配置导入恢复 | 未见 | 主要依赖文件操作 |
-| 连接测试 | 基础有 | `/v1/models` 刷新 |
+| 连接测试 | 基础有 | `/v1/models` 刷新；不是最小生成测试 |
+| 配置文件查看/编辑 | 有 | `AppData/settings.json` 和 Agent `config.json`；没有 Provider schema |
+| Provider CRUD | 不适用 | 无本地 Provider/Endpoint 实体 |
+| Agent 新增/编辑/删除 | 有 | 可管理本地 Agent，但不创建或删除渠道 |
+| 渠道复制/启停 | 不适用 | 没有渠道记录、Profile 或渠道状态 |
+| 配置导入 | 未找到 | 未找到设置 JSON 导入恢复 UI/命令 |
+| 全量配置导出 | 有 | `backup.py` 写 ZIP，默认包含 settings 明文凭据 |
+| CLI 渠道管理 | 未找到 | `package.json` 只有 Electron/build/pack 脚本 |
+| TUI 渠道管理 | 未找到 | 未找到终端 UI |
+| Web 渠道管理 | 未找到 | 未找到独立浏览器 Provider 管理前端 |
+| 桌面 widget 真实调用 | 有 | `vcpPost()` 复用单一网关，非测试入口 |
 | 最小生成测试 | 无 | 未独立验证 Chat/stream/tool endpoint |
 | 健康结果参与调度 | 无 | 无本地调度器 |
 
-## 10. 对其他项目的可借鉴点
+## 10. 未验证事项
+
+以下事项不是源码缺失结论，而是本次采用静态调查、没有启动应用或实际服务端的范围边界：
+
+- 未运行 Electron 验证全局设置保存、URL 自动补全、模型刷新失败提示和设置重载后的实际行为。
+- 未连接可用 VCP 网关，未验证 `/v1/models` 的真实响应形状、Key 权限、模型 ID 是否可推理，以及工具注入端点的服务端行为。
+- 未实际调用桌面 widget 的 `vcpPost()`；其请求组装和错误处理由源码确认，但网络成功、费用和响应兼容性未验证。
+- 未在 Windows 之外运行；文件锁、路径大小写、备份权限和 Electron 窗口行为的跨平台表现未验证。
+- 未调查独立 `VCPToolBox` 仓库内部的 Provider、Key、Adapter、健康检查或服务端管理界面；本笔记不把这些潜在能力归给 VCPChat。
+
+## 11. 对其他项目的可借鉴点
 
 ### 值得借鉴
 
@@ -456,7 +537,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 - ZIP 默认包含 Key，却没有显式敏感数据提示或加密；
 - 连接错误和延迟没有形成结构化指标，无法驱动自动容灾。
 
-## 11. 关键源码索引
+## 12. 关键源码索引
 
 - 应用数据目录、模型目录和刷新 IPC：[`main.js`](../../VCPChat/main.js)
 - 当前 Chat/SSE/中断请求主链：[`modules/ipc/chatHandlers.js`](../../VCPChat/modules/ipc/chatHandlers.js)

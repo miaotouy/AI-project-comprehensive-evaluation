@@ -2,13 +2,13 @@
 
 > 调查对象：`../../pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
 >
 > 调查方式：只读源码梳理 `packages/ai` 的 Provider/认证/模型目录与 `packages/coding-agent` 的 ModelRuntime 组合层；未运行真实 Provider 请求
 >
-> 调查范围：Provider 与 Endpoint 实体、配置生命周期、凭据边界、模型目录、协议 Adapter、运行时选路、重试与故障转移、可观测性；未覆盖浏览器端和 server/client 包的 RPC 通道
+> 调查范围：Provider 与 Endpoint 实体、配置生命周期及配置文件/CLI/TUI/Web/桌面端入口、凭据边界、模型目录、协议 Adapter、运行时选路、重试与故障转移、可观测性；Web/桌面端仅检查仓库内对应包和 RPC 契约
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -29,7 +29,8 @@ Pi 的 LLM 渠道管理由 `packages/ai`（协议与 Provider 实现）和 `pack
    - SDK 层重试在 `api/*` 的 `retryProviderRequest`；
    - Assistant 消息层重试在 `retryAssistantCall`（`packages/ai/src/utils/retry.ts`）与 `coding-agent` 会话级 `auto_retry`（`core/agent-session.ts:2686`）；
    - 未发现跨 Provider 的自动故障转移；OpenRouter/Vercel Gateway 的上游路由是把路由策略作为请求字段交给聚合服务（`types.ts:685-764`）。
-6. **可观测性以内置为主**：用量与成本由 `calculateCost` 依据模型价格表计算（`models.ts:878-898`），TUI footer 展示 token/成本；连接检测复用 `checkAuth`（仅确认凭据完整，不发起真实请求）。
+6. **配置管理以文件和扩展为主，TUI 只覆盖认证及运行时刷新**：`models.json` 的 schema 能表达自定义 Provider、Endpoint 和模型，但 Pi 没有渠道配置编辑器；TUI 的 `/login`、`/logout`、`/model`、`/reload` 分别处理凭据、模型选择和重新加载，不能新增、复制、删除或启停 `models.json` 渠道。
+7. **可观测性以内置为主**：用量与成本由 `calculateCost` 依据模型价格表计算（`models.ts:878-898`），TUI footer 展示 token/成本；连接检测复用 `checkAuth`（仅确认凭据完整，不发起真实请求）。
 
 ## 总体调用链
 
@@ -67,7 +68,7 @@ CLI/会话层 (AgentSession)
   - xAI（`xai.ts:17`）。
   `ModelRuntime.isUsingSubscription`（`model-runtime.ts:462`）据此判断，footer 只对已知订阅制显示 `(sub)`。
 
-## 2. 配置创建、持久化与迁移
+## 2. 配置生命周期、管理入口与持久化
 
 - **内置注册**：`builtinProviders()`（`providers/all.ts:89-121`）在 `ModelRuntime.create` 时逐一构造（`model-runtime.ts:184-188`），每个非 radius 内置 Provider 再用 `withRemoteCatalog` 包裹（`remote-catalog-provider.ts:45`）。
 - **用户配置**：`models.json` 由 `ModelConfig.load` 读取并做 TypeBox 校验（`core/model-config.ts:245-284`，schema 见 `ModelConfigSchema`），支持 provider 级字段（`model-config.ts:193-204`）：
@@ -79,8 +80,14 @@ CLI/会话层 (AgentSession)
   校验失败时记录错误而不是中断启动，`getError()` 供 UI 展示（`model-runtime.ts:422-431`）。
 - **默认与用户合并**：`composeModelProvider`（`provider-composer.ts:420-520`）按“内置 → models.json → 扩展”顺序合并：`applyModelsJson` 先改内置模型（baseUrl、compat、新增/替换模型），`applyExtension` 再套扩展模型列表，最后 `modelOverrides` 做最顶层单模型字段覆盖（:434-443）。
 - 无覆盖层时 `recomposeProvider`（`model-runtime.ts:241-263`）直接使用内置 Provider 原对象。
-- **动态目录持久化**：远端目录刷新结果写入 `models-store.json`（`FileModelsStore`，`core/models-store.ts:46`），与 auth.json 同用 `AuthStorageBackend` 文件锁；`ModelsStoreEntry` 记录 `lastModified`、`checkedAt`、`etag`（`packages/ai/src/models-store.ts:3-14`）。
-- **登录/登出**：`Models.login`（`models.ts:565-615`）执行 Provider 的 apiKey 或 oauth 登录方法后写入 CredentialStore；`ModelRuntime.login/logout`（`model-runtime.ts:673-687`）在凭据变更后重新组合 Provider 并刷新该 Provider 的可用性快照。`models.json` 的增删改需要手动编辑文件后 `/reload` 或重启，源码未见热编辑 API。
+- **动态目录持久化**：远端目录刷新结果写入 `models-store.json`（`FileModelsStore`，`core/models-store.ts:46`），与 auth.json 同用 `AuthStorageBackend` 文件锁；`ModelsStoreEntry` 记录 `lastModified`、`checkedAt`、`etag`（`packages/ai/src/models-store.ts:3-14`）。这是模型目录缓存，不是用户渠道配置。
+- **配置文件入口**：`~/.pi/agent/models.json`（也可通过 `agentDir`/SDK 指定路径）是唯一直接定义用户 Provider 的持久化入口。schema 支持新增 Provider、覆盖内置 Provider、设置 `baseUrl`、API、Header、凭据表达式、模型列表和单模型覆盖（`core/model-config.ts:194-209`）；文档明确自定义 Provider 通过该文件添加，配置文件在打开 `/model` 时重新加载（`docs/models.md:1-3,92-92`）。源码确认读取、解析、校验和不可变快照；未找到由 Pi 写回 `models.json` 的新增、编辑、复制、删除、导入或导出服务。静态推断是用户需用外部编辑器或脚本修改文件，再由 `/model` 或 `/reload` 使运行时重新组合。
+- **配置文件中的已有与新建渠道差异**：已有内置渠道只需在 `providers` 下使用同名 key 覆盖 `baseUrl`、Header 或 `modelOverrides`，内置模型仍保留；提供 `models` 时按模型 id 合并/替换。新建渠道必须提供模型和可用的 `baseUrl`/API（除非由扩展提供完整 Provider），且认证配置完成后才会出现在可用模型列表（`docs/models.md:300-335`、`docs/models.md:132-145`）。两者都没有文件级启停字段；从模型选择范围中排除属于模型作用域设置，不等于禁用渠道。
+- **CLI**：帮助和命令分发确认 CLI 提供 `--list-models`、`pi update --models`、`pi auth check`、`auth print-api-key` 和 `auth print-bearer-token`，分别用于查看可用模型、刷新模型目录、检查凭据就绪度和显式输出凭据（`cli/args.ts:244-290`、`cli/auth-command.ts:17-45`）。本次未找到 CLI 的 Provider create/edit/copy/enable/disable/delete/import/export 命令；`--api-key` 是当前运行的临时凭据，不会写入渠道配置。`pi update --models` 只刷新目录缓存，不创建或修改 Provider。
+- **TUI**：交互命令处理器确认 `/login` 可按 Provider 选择 OAuth 或 API key，成功后调用 `ModelRuntime.login` 并同步凭据和可用性；`/logout` 只删除 `/login` 保存的凭据，明确不改环境变量和 `models.json`（`interactive-mode.ts:2955-2979,5227-5257,5635-5645,5361-5402`）。`/model` 负责查看和选择当前可用模型，触发模型目录刷新；`/reload` 重新加载扩展、资源并重新读取 `models.json`，不是渠道编辑器（`interactive-mode.ts:5683-5770`）。因此 TUI 对已有内置渠道和通过配置/扩展出现的新渠道都能做认证、登出和模型选择，但不能新增、复制、编辑 Endpoint、启停或删除渠道；删除扩展注册的 Provider 只存在于扩展 API 的 `unregisterProvider`，不是用户 TUI 操作（`core/model-runtime.ts:733-786`）。
+- **导入、导出与连接测试**：TUI/CLI 的 `/import`、`/export` 和 `--export` 针对 session JSONL/HTML，不是渠道配置（`interactive-mode.ts:5773-5829`、`cli/args.ts:288-289`）。CLI `auth check` 返回 `ready/not_ready/invalid`，可选刷新 OAuth，但 `ModelRuntime.checkAuth` 只检查凭据解析，不发真实 Provider 请求（`cli/auth-check.ts:22-52`）；本次未找到独立的真实连接测试入口。`/login` 的 OAuth/API key 登录可能访问认证服务，但它是认证流程，不应推断为通用 Endpoint 连通性测试。
+- **Web、server/client 与桌面端**：仓库内未找到 Web UI 或桌面应用目录（本次按 `*.html`、`*.tsx`、`*.jsx`、`*.vue`、`*.svelte` 检查仅见导出 HTML 模板）。`packages/server` 的 `PiServerService` 只要求宿主提供会话和模型列表/创建/打开能力，协议的模型快照包含 Provider、模型元数据和认证布尔值，但没有渠道配置 CRUD、凭据或连接测试命令（`packages/server/src/types.ts:54-60`、`packages/protocol/src/schemas.ts:47-73`）。`packages/client` 只是该会话协议的客户端。因此 Web/桌面端对渠道管理记为**未找到**，而非“不适用”；若外部宿主自行实现 UI，其行为不属于当前仓库源码可确认范围。
+- **凭据生命周期**：登录写入 `auth.json`，登出通过 `AuthStorage.delete` 删除指定 Provider 的存储凭据（`core/auth-storage.ts:474-483`）；运行时 key 由 `setRuntimeApiKey/removeRuntimeApiKey` 管理，不持久化（`core/model-runtime.ts:536-559`）。这解释了“已有渠道可登出”与“新建渠道不能由 TUI 删除”的差异：前者删除的是凭据记录，后者的 Provider 定义仍来自 `models.json` 或扩展。
 
 ## 3. 凭据、Header 与代理边界
 
@@ -176,11 +183,14 @@ CLI/会话层 (AgentSession)
 - **模型目录去中心化**：内置目录 gitignore 且构建期生成，运行时以 pi.dev 远端目录增量覆盖，用户可 models.json 全量自定义——这使离线/CI 需要 `build:offline` 与 `PI_OFFLINE`（`model-runtime.ts:194`）语义配合，也意味着静态代码中看不到完整模型清单。
 - **凭据未加密**：auth.json 0600 + 文件锁，无静态加密；models.json 内嵌 key 是明文文件的一部分，属于已确认的设计（官方文档以“配置文件属于用户自己”为前提）。
 - **无跨渠道高可用**：重试闭环在同一 Provider/模型内；OpenRouter/Vercel Gateway 的上游路由是外部能力，不作为本地 failover。
-- **平台边界**：`packages/ai` 可运行于 Node/Bun；browser 构建通过 `importNodeModule` 动态引用与 `env-api-keys.ts` 的惰性加载保持可用（`auth/context.ts:11-18`），但本地文件凭据、ambient AWS/ADC 依赖 node 运行时。
+- **平台边界**：`packages/ai` 可运行于 Node/Bun；browser 构建通过 `importNodeModule` 动态引用与 `env-api-keys.ts` 的惰性加载保持可用（`auth/context.ts:11-18`），但本地文件凭据、ambient AWS/ADC 依赖 node 运行时。当前仓库的 server/client 协议只传递模型快照和会话操作，不把渠道配置管理提升为平台服务。
+- **管理入口的取舍**：配置定义留在用户可编辑的 `models.json`，扩展注册留在代码，认证凭据留在 `auth.json`；TUI 只对凭据和模型作用域提供操作。这样已有 Provider 可以通过覆盖复用内置目录，新 Provider 可以通过文件或扩展加入，但配置的复制、删除、导入、导出和真实连通性验证没有统一产品入口。
 
 ## 10. 未验证事项
 
 - 未运行真实请求，`checkAuth` 与真实链路的一致性未实测。
+- 未运行 `/login`、`/logout`、`/model`、`/reload`、`pi auth check` 或 `pi update --models`，因此文件变更后的热加载、凭据同步、模型选择器显示和目录刷新行为仍以静态代码与文档为依据。
+- 未运行或接入外部 Web/桌面宿主；server/client 的“未找到渠道管理 API”结论仅基于当前协议、服务接口和仓库文件搜索。
 - `data/*.json` 构建期生成，本次未检查生成后的实际模型数与价格数据。
 - 代理（`httpProxy`）注入后的各 SDK 消费路径未逐层追完。
 - OAuth 各 Provider 流程（device-code/PKCE/回调）仅在 `auth/oauth/` 静态阅读，未运行。
@@ -195,6 +205,10 @@ CLI/会话层 (AgentSession)
 - `packages/coding-agent/src/core/model-runtime.ts:172-213`：ModelRuntime.create；`model-runtime.ts:219-230`：Radius 配置；`model-runtime.ts:462`：isUsingSubscription
 - `packages/coding-agent/src/core/provider-composer.ts:420-520`：三层组合；`model-config.ts:193-209`：models.json schema
 - `packages/coding-agent/src/core/auth-storage.ts:47-202`：auth.json 文件锁存储；`runtime-credentials.ts`：运行时 key
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts:2889-2979`：`/model`、`/login`、`/logout`、`/reload` 命令入口；`interactive-mode.ts:4741-4864`：模型选择与刷新；`interactive-mode.ts:5683-5770`：重载流程
+- `packages/coding-agent/src/cli/args.ts:244-305`：CLI 命令及选项；`cli/auth-command.ts:17-45`：auth 子命令；`cli/auth-check.ts:22-52`：凭据就绪检查
+- `packages/coding-agent/docs/models.md:1-3,92-92,132-145,300-335`：models.json 的添加、重载和已有 Provider 覆盖语义；`docs/custom-provider.md:188-217`：扩展 Provider 注销的运行时 API
 - `packages/coding-agent/src/core/remote-catalog-provider.ts:45-131`：pi.dev 目录叠加
+- `packages/server/src/types.ts:54-60`：server 服务边界；`packages/protocol/src/schemas.ts:47-73`：模型快照字段
 - `packages/coding-agent/src/core/model-resolver.ts:620-700`：初始模型选择
 - `packages/ai/src/utils/retry.ts:162-211`：消息层重试；`utils/provider-retry.ts:105-125`：SDK 层重试

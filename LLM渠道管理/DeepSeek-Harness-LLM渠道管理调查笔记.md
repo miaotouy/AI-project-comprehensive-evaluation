@@ -2,13 +2,13 @@
 
 > 调查对象：`../../deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/bundle/base`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
 >
-> 调查方式：静态源码阅读：`packages/llm` 全部包源码与 README、agent-loop 请求路径、credentials/settings 服务与文件 provider、dsh 基座 bundle 与 examples 组合、`docs/subsystems/llm-streaming.md` 与 `docs/config-catalog.md` 对照；未运行真实 Provider 请求，未执行测试
+> 调查方式：静态源码阅读：`packages/llm` 全部包源码与 README、agent-loop 请求路径、credentials/settings 服务与文件 provider、dsh 基座 bundle 与 examples 组合、Web Models 设置页及其远程 API、CLI reference、`docs/subsystems/llm-streaming.md` 与 `docs/config-catalog.md` 对照；未运行真实 Provider 请求，未执行测试
 >
-> 调查范围：llm capability seam 三角色（Service Definition / Provider / Consumer）、两个 DeepSeek 渠道适配器、pi-ai 复用边界、凭据与配置生命周期、流式词汇与组装、重试与 token 计量、默认模型解析与 dsh 基座配置；未覆盖 web Models 页 UI 交互细节、ACP/JSON-RPC 通道、会话持久化格式
+> 调查范围：llm capability seam 三角色（Service Definition / Provider / Consumer）、两个 DeepSeek 渠道适配器、pi-ai 复用边界、凭据与配置生命周期、流式词汇与组装、重试与 token 计量、默认模型解析与 dsh 基座配置，以及配置文件、CLI、TUI、Web、桌面端的渠道管理入口与操作覆盖；未覆盖 ACP/JSON-RPC 通道、会话持久化格式和运行时视觉/平台行为
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -73,7 +73,25 @@ dsh-agent-loop (packages/core/agent-loop/src/agent.ts step/buildRequest)
 
 **每操作重读**：适配器通过 thunk 读取解析后的连接事实，每次流调用重解析（直连 `index.ts:200-222`、pi-ai `index.ts:150-173`），settings 修改在下一个请求生效，一次在途流保持其开始时的快照。settings 快照越过 schema 但违反附加约束时保留"最后一个好配置"并记录日志；pi-ai 的 `assertServiceable` 使不可服务的 profile 在 `settings.mutate` 写入处就被拒绝（`settings-rejected`），而不是先存储再静默失效。
 
-**迁移**：无数据库、无导入导出。pi-ai 对 pre-release 形状做 fail-loud 迁移：`providers` 数组形状、每 profile 的 `provider` 字段、`maxRetries`/`maxRetryDelayMs` 字段都拒绝加载并给出迁移方向（`llm-pi-ai/src/config.ts:276-291`），避免"SDK 重试 + agent 重试"叠加。直连适配器无此类历史形状。
+**迁移**：无数据库、无导入导出。pi-ai 对 pre-release 形状做 fail-loud 迁移：`providers` 数组形状、每 profile 的 `provider` 字段、`maxRetries`/`maxRetryDelayMs` 字段都拒绝加载并给出迁移方向（`llm-pi-ai/src/config.ts:276-291`），避免“SDK 重试 + agent 重试”叠加。直连适配器无此类历史形状。
+
+### 2.1 配置文件、CLI、TUI、Web 与桌面端操作覆盖
+
+下表只记录当前代码能够定位到的入口。静态源码确认了入口和写入动作；未运行 Web，因而不把保存成功、热重载时序或原生打开文件的实际平台表现写成已验证事实。
+
+| 入口 | 查看 | 新增 | 编辑 | 复制 | 启停 | 删除 | 导入/导出 | 连接测试 |
+|---|---|---|---|---|---|---|---|---|
+| 配置文件 | **源码确认**：直接读取 `$DSH_HOME/cordis.patch.yml`、profile `cordis.patch.yml`、`$DSH_HOME/settings.yaml` 与凭据文件 | **源码确认**：手工增加 patch 行、settings profile 或凭据引用；不能把 key 写进 LLM 配置 | **源码确认**：patch/settings 文件可手工修改，文件 provider watcher 热重载 | **未找到**专用渠道复制格式或命令；可由用户手工复制 YAML，但不属于产品操作 | **源码确认**：通过 patch 行的 `disabled` 或组合层是否挂载来改变插件/适配器是否存在；单个已注册 route 没有独立 enabled 字段 | **源码确认**：删除用户 settings profile 可使用户新增 route 消失；删除 base/组合配置需改 patch；凭据可单独 unset | **未找到**渠道专用导入/导出格式；`settings.yaml`、凭据 YAML 和 `cordis.patch.yml` 可作为文件级备份，但不是产品导出 | **不适用**：文件编辑本身不发网络探测；模型抓取属于 Web 的 `discoverModels` |
+| CLI | **源码确认**：`dsh --dump-config` / `--dump-default-config` 查看组合后的 Cordis 配置，`--profile` 启动 profile；`apps/cli/src/bin.ts` 只分派 profile、plugin、dump-config | **源码确认**：用 `--patch` 叠加配置，或 `dsh plugin ... add` 安装提供 bundle 的插件；未找到渠道向导 | **源码确认**：通过 `--patch` 或 watched home/profile patch 间接编辑；未找到 `provider edit` 命令 | **未找到**渠道复制命令 | **源码确认**：patch 的 `disabled`/插件挂载状态可控制组合项；未找到 route 级 enable/disable 命令 | **源码确认**：`dsh plugin ... remove` 删除插件依赖及其 bundle 层；未找到用户渠道 profile 的专用 delete 命令 | **未找到**渠道专用 import/export；dump 是只读组合结果，不是可回灌导出格式 | **未找到**CLI 连接测试命令；CLI 本身没有调用 `llm.discoverModels` 的入口 |
+| TUI | **未找到**当前源码树中的渠道管理 TUI 页面、表单或 provider 操作绑定；CLI 文档提到存在 TUI profile，但本次没有找到该 profile 的渠道管理实现 | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未验证**：不能据 CLI 的 TUI profile 文档推断渠道设置能力 |
+| Web Models 设置页 | **源码确认**：`ModelsSettingsStore.load()` 合并 `llm.providers`、`settings.describe`、`credentials.describe`；行显示已配置 route、displayName、custom 标签和凭据状态 | **源码确认**：两条新增路径：从 dormant catalog 选择一个已有 adapter route；或 `CustomProviderCard` 新建 pi-ai hand-declared route | **源码确认**：已有行打开 `ProviderEditor`；可改 API key、baseURL、模型表；自定义 pi-ai route 还可改 displayName 与 API protocol | **未找到**复制按钮或复制 API；新增 custom route 需要重新填写，不是复制已有 profile | **部分支持，需区分层级**：可通过用户 profile 的存在/删除和组合 patch 的 adapter 挂载改变可用性；页内没有显式启用/停用开关，已有行也没有 route enabled 字段 | **源码确认**：仅 `row.removable` 的用户新增 profile 可删除；确认后先删页面拥有的 `<ROUTE>_API_KEY` 凭据，再 unset profile；base 配置 route 不可从页内删除 | **未找到**渠道配置导入/导出；页面只通过 API 写入 settings/credentials；模型“Fetch available models”是候选发现，不是配置文件导入 | **没有独立连接测试**。`ModelListEditor` 调用 `llm.discoverModels` 做模型列表探测，可携带未保存 baseURL 和未保存 key；它不是聊天请求的健康检查，且只对可读的 OpenAI-compatible 目录有效 |
+| 桌面端 | **未找到** Electron、Tauri 或独立 desktop app；当前 Web 的 privileged settings/credentials/`discoverModels` API 由 loopback Host 处理，不能据此认定存在桌面 UI | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未找到** | **未验证**：Host 可执行 `settings.openDocument` 打开本地配置文件，但这是文件查看/编辑委托，不是桌面渠道管理器或连接测试 |
+
+**已有渠道与新建渠道的差异**：Web 中“已有渠道”包括已配置的 catalog route、首次使用时的 whole-section route，以及手工声明后再次打开的 custom route。它们共用凭据输入、baseURL 和模型列表编辑器，并以 path ops 修改用户层；只有用户层拥有的 profile 才可删除。新建 catalog route 只从 dormant directory 选择 route，不让用户填写 route id、displayName 或 protocol；新建 custom route 则必须填写唯一的 route id、endpoint、protocol 和至少一个模型，写入 `providers.<route>` 的整段 profile。custom route 的 key 写入失败后 profile 已经存在，重试只补写凭据；已有 profile 的编辑则不会重新创建整个 profile。直连 DeepSeek route 是组合事实，Web 没有新建同类 route 的入口。
+
+**启停的准确边界**：本次源码未找到 Web 的“启用/禁用渠道”按钮。`active` 来自 adapter 注册拓扑，页面只读取它参与 `providerUsable` 判断；组合文件中的插件 `disabled` 和 settings profile 是否存在影响 route 是否可服务，但它们分别属于部署组合和用户配置层，不是渠道行上的持久化启停状态。
+
+**导入/导出与文件打开**：settings 文件 provider 支持 YAML/JSON 文件读写、原子写和 watcher 热重载；Web General settings 只在 `settings.describe` 报告存在本地文档时提供 `settings.openDocument`，请求 Host 用系统程序打开该文件。该入口可辅助手工编辑，但本次未找到把渠道配置序列化为独立导出包、从导出包导入或在 UI 中复制渠道的实现。CLI 的 `--dump-config` 输出的是组合树诊断结果，且 `!!js` 表达式不求值，不能视作可直接导入的渠道备份。
 
 ## 3. 凭据、Header 与代理边界
 
@@ -191,13 +209,13 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 
 ## 8. 连接检测、日志与可观测性
 
-**连接检测**：没有独立"连接测试"真实请求路径。Models 页的 Provider 就绪状态来自 `credentials.describe`（configured/source/writable 布尔）与 settings 节存在性的静态组合（`packages/client/ui-settings-models/src/client/store.ts:161-184`）；真实网络探测只有配置时的 `discoverModels`（GET /models，见 §4），且其结果不进入运行时路由。认证失败只出现在真实请求的错误码上（`AUTH`/`INVALID_CREDENTIAL`/`MISSING_CREDENTIAL`）。
+**连接检测**：没有独立“连接测试”真实请求路径。Models 页的 Provider 就绪状态来自 `credentials.describe`（configured/source/writable 布尔）与 settings 节存在性的静态组合（`packages/client/ui-settings-models/src/client/store.ts:161-184`）；真实网络探测只有配置时的 `discoverModels`（GET /models，见 §4），且其结果不进入运行时路由。Web 的模型编辑器可以把当前表单中的未保存 baseURL、协议和一次性 key 传给该探测；`LlmRuntime.discoverModels()` 明确说明不会读写 settings 或 credentials，只返回供界面采纳的候选（`packages/llm/llm/src/index.ts:523-558`）。因此它不是保存后的聊天健康检查，认证失败仍只在真实请求的错误码上（`AUTH`/`INVALID_CREDENTIAL`/`MISSING_CREDENTIAL`）或探测调用自身的错误上出现。
 
 **会话日志（请求重建）**：`request/header` 记录完整调用配置（含 `adapterDefaults` 标记、渲染后的 system、工具顺序），`request/context` 记录 provider/model/contextWindow，`assistant/chunk` 按序落原始 chunk，`assistant/message` 落组装块 + usage + `sourceEventSeqs`。请求可完全从日志重建（见 docs/subsystems/session.md 的 request-header 语义与 2026-07-05-reconstructable-requests.md 笔记）；dev invariant 对每个 loop 请求重算该等式。
 
 **token 计量**：`dsh-token-meter`（`packages/llm/token-meter/src/index.ts:74-156`）提供 `measure(session, requestHeader?)` 与 estimateMessage。固定启发式（4 字符/token + 角色/块/信封结构开销）；当最新成功调用的规范请求信封与测量信封一致时，优先复用 provider 报告的 usage 作为锚点，否则全量启发式估计。三个投影单元（真实 usage 汇总、上下文压力并可选项含外推的 `projectedTokens`、启发式组成）是独立 last-wins 记录，不是同一边界的一次原子观测；README 明确占用百分比只是参考值，compaction 走 `measure()` 而不是投影。**价格不参与**：pi-ai 侧 replay 把成本清零（"harness 从不读 pi-ai 的 cost 元数据"），直连适配器无价格表。
 
-**错误与拓扑可观测**：`LlmError` 携带稳定 `code` + 可序列化 `failure`（status/providerRetryAfterMs/requestId），`errorChain` 渲染完整 cause 链供 UI/日志；pi-ai 路径拿不到 HTTP status（README 记录的限制）。拓扑变更经 `llm/adapters-updated` 事件与 listProviders/listModels/listConfigurableProviders/resolveModelInfo 等查询可见。遥测行 `session-telemetry-otel` 存在于基座组合，但本次未追到 LLM 请求路径的具体埋点。
+**错误与拓扑可观测**：`LlmError` 携带稳定 `code` + 可序列化 `failure`（status/providerRetryAfterMs/requestId），`errorChain` 渲染完整 cause 链供 UI/日志；pi-ai 路径拿不到 HTTP status（README 记录的限制）。拓扑变更经 `llm/adapters-updated` 事件与 listProviders/listModels/listConfigurableProviders/resolveModelInfo 等查询可见。Web Models 页还订阅 settings 文档、凭据和适配器拓扑三类推送失效事件，已打开页面才重新加载 joined snapshot，不靠轮询（`packages/client/ui-settings-models/src/client/index.ts:98-116`）。遥测行 `session-telemetry-otel` 存在于基座组合，但本次未追到 LLM 请求路径的具体埋点。
 
 ## 9. pi-ai 复用边界
 
@@ -239,7 +257,9 @@ pi-ai 版本 `^0.82.1`（`packages/llm/llm-pi-ai/package.json:45`，lock 解析�
 - 未运行真实 Provider 请求与测试，pi-ai 错误文本分类（`classifyPiAiError`）与真实错误正文的匹配度未实测。
 - `node_modules` 未安装，pi-ai 0.82.1 库内实现未直接核对；其内部行为依据 package.json、pnpm-lock、README 注释与 Pi 仓库笔记推断。
 - settings-file/credentials-local 的 watcher 竞态与热重载行为仅静态阅读。
-- web Models 页的完整交互（onboarding、store 刷新、CustomProvider 表单）只追到 API 调用点，未逐组件核对。
+- Web Models 页的入口、状态 join、已有渠道编辑、catalog route 新增、custom route 新增、模型表编辑/删除/重置、候选探测与采用、凭据联动删除已逐组件静态核对；未运行浏览器，因此保存成功后的实际提示、页面视觉/交互表现、WebSocket/推送时序和 Host 原生打开文件行为未验证。
+- TUI 只确认 CLI 文档存在 `tui` profile 的启动示例；在当前仓库源码、依赖和应用入口中未找到渠道管理 TUI，不能据此推断该 profile 的完整组成或仓库外实现。
+- 当前仓库未找到 Electron、Tauri 或独立 desktop app；loopback Host 的 `settings.openDocument` 只确认了打开本地 settings 文档的 API 语义，未验证任何桌面打包形态。
 - 遥测（`session-telemetry-otel`）是否覆盖 LLM 请求路径未追完。
 - `agent/request` 瀑布的消费者清单未穷举（除 model-selection 与 agent-loop 自身外）。
 - 会话恢复（resume）时 `requestHeader` 恢复的具体行为仅在 `buildRequest` 静态阅读，未跑重放。
@@ -264,5 +284,3 @@ pi-ai 版本 `^0.82.1`（`packages/llm/llm-pi-ai/package.json:45`，lock 解析�
 - `packages/core/agent-default-model/src/index.ts`：默认模型服务
 - `packages/bundle/base/cordis.patch.yml:63-67,72-96,450-451`：默认模型、llm-retry、settings/credentials、dormant pi-ai、llm-deepseek
 - `packages/web/web-search-deepseek/src/provider.ts:27-38`：搜索 provider 的独立端点与模型默认
-
-

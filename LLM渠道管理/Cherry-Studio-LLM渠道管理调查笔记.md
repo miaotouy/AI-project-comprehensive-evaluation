@@ -2,13 +2,13 @@
 
 > 调查对象：`E:\works\git\cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
-> 调查范围：LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与可观测性
+> 调查范围：LLM 渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、凭据、重试、备份与可观测性；未将外部 CLI 自身的交互界面当作 Cherry 渠道管理入口
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -116,6 +116,40 @@ Provider 创建后默认 `isEnabled: false`。启用动作会把它移到同组�
 因此“官方 OpenAI + 两个 OpenAI 兼容中转”可以表达为三个 Provider 实例，而不是挤在一个 Provider 的上游数组中。
 
 内置预设行不能删除；用户复制出的预设实例和纯自定义 Provider 可以删除。删除 Provider 时关联模型通过外键级联处理，模型 Pin 等引用也由服务层清理。
+
+### 1.4 配置生命周期与管理入口
+
+Cherry Studio 的渠道配置管理入口是 Electron 桌面端的 Provider Settings 页面。Renderer 通过 Data API 访问 Main 进程中的 ProviderService；ProviderService 再以 SQLite 的 `user_provider` 行为写入单位。设置页列表支持查看、搜索、按启用状态过滤和拖拽排序；详情页显示认证、模型列表、连接测试以及启停开关。列表项的上下文菜单和详情页 Header 分别提供编辑、复制、删除和启停入口，静态代码确认了这些事件绑定，但本次没有启动应用验证弹窗、保存后的刷新和不同平台上的实际表现（`src/renderer/pages/settings/ProviderSettings/ProviderList/ProviderList.tsx:36-328`、`ProviderListItemWithContextMenu.tsx:43-80`、`ProviderHeader.tsx:16-91`）。
+
+已有渠道和新建渠道的操作范围并不完全相同：
+
+下表中的“源码确认”表示在当前快照中找到直接的入口、Schema 或服务实现；“静态推断”表示由调用关系或数据结构推导出的边界；“未找到”只表示本次搜索范围没有找到对应入口；“未验证”表示需要启动桌面端、实际读写文件或连接服务才能确认；“不适用”表示该对象或操作不属于这条流程。表中没有把“未找到”写成项目级绝对不支持。
+
+| 对象或操作 | 已有渠道 | 新建渠道 | 依据与边界 |
+|---|---|---|---|
+| 查看 | **源码确认**：列表读有效 Provider，详情读单个 Provider、认证资源和模型资源 | **源码确认**：创建成功后选中并进入同一详情页 | `useProvider.ts` 的 `/providers`、`/providers/:providerId` 及子资源查询 |
+| 新增 | **不适用**：已有行不能通过“新增”改变 ID | **源码确认**：可从空白自定义流程创建，也可复制一个 Provider 作为新实例；新 ID 由 Renderer 生成，数据库默认禁用 | `useProviderEditor.ts:21-53,136-149`；`ProviderService.create()` 默认 `isEnabled: false` |
+| 编辑 | **源码确认**：可改名称、默认文本端点、认证配置、Endpoint 覆盖、Provider 设置、能力覆盖和 API Key；列表编辑抽屉当前只提交名称、默认端点和 Logo，Base URL/Key 等在详情页管理 | **源码确认**：创建表单可填写名称、首个 API Key、自定义 Endpoint；复制流程只把来源的预设关系和部分端点信息带入，不复制凭据 | `ProviderEditorDrawer.tsx:352-425`；`providers.ts:61-115`；`ProviderService.update():386-488` |
+| 复制 | **源码确认**：预设实例可作为模板复制；复制后生成独立 API Key 池、Endpoint 覆盖、设置、模型差量、启停状态和排序 | **源码确认**：复制结果本身仍是新建流程，可继续选择预设实例来源 | `ProviderList.tsx:248-265`；`ProviderEditorDrawer.tsx:396-425` |
+| 启用/停用 | **源码确认**：详情 Header 的 Switch 写入 `isEnabled`；从停用变启用时事务内移到同组首位；列表过滤只改变显示 | **源码确认**：创建后保持停用，需用户在详情页手动启用；**静态推断**：有模型时部分 onboarding 流程可自动启用 | `ProviderHeader.tsx:24-85`；`ProviderService.update():382-384,462-471`；`providerEnablement.ts` |
+| 删除 | **源码确认**：自定义渠道和复制出的预设实例可删除；规范预设行被 Main 侧拒绝；删除同时清理关联模型 Pin 和 Logo 引用 | **源码确认**：新建但尚未成为规范预设的实例适用同一删除规则 | `ProviderService.delete():811-868`；删除前由 `ConfirmActionPopup` 二次确认 |
+| 导入 | **未找到**通用文件导入；**源码确认**已找到 Provider deep link 导入，先确认再按 ID 新建或更新端点，并追加 API Key | **源码确认**：新 ID 走 create；已有 ID 走 update，因而不是纯新增操作 | `useProviderDeepLinkImport.ts:41-136` |
+| 导出 | **未找到** Provider 专用导出按钮、导出 DTO 或导出文件格式；**源码确认**通用备份会包含 SQLite，因此属于数据库级备份而不是脱敏渠道导出 | **静态推断**：同样随 SQLite 备份，没有单独的新建渠道导出路径 | `LegacyBackupManager.ts` 的 v7 full/slim 备份路径；Provider API schema 未声明 export 路由 |
+| 连接测试 | **源码确认**详情页可对单个渠道选择模型和 Key 发起最小请求，也可批量检查模型与 Key；**源码确认**诊断结果不改变启停或 Key 健康状态 | **源码确认**新建流程保存后才有正式 Provider ID；创建抽屉自身没有独立连接测试按钮 | `useProviderConnectionCheck.ts`、`checkModelsHealth.ts`；`ProviderEditorDrawer.tsx:508-516` |
+
+这里的“配置文件”需要分成两种含义。SQLite 文件 `<Electron userData>/cherrystudio.sqlite` 是渠道和凭据的持久化文件，但源码没有把它暴露为面向用户的逐渠道编辑器；直接修改数据库属于未支持的外部操作。另一种是 Code CLI 的外部配置文件，例如 Claude、Codex、OpenCode、Gemini、Qwen、Kimi 和 Pi 的 JSON、TOML 或 dotenv 文件。Code 页面可以读取这些文件生成草稿，也可以在启用或编辑当前 CLI Provider 时写回文件；Main 侧只接受预先枚举的 target，并负责路径解析、原子写入、权限和回滚。这些文件表达的是“当前选中的 Provider/模型如何注入外部 CLI”，不是 `user_provider` 的替代存储，也没有 Provider 列表级的复制、删除或渠道健康测试（`src/shared/utils/cliConfig.ts:11-98`、`src/shared/ipc/schemas/codeCli.ts:61-82`、`src/renderer/pages/code/cliConfig/draft.ts:24-33,108-185`）。
+
+Code CLI 的启停语义也不同于普通 Provider。选择外部 CLI Provider 时，页面先解析保存的模型和凭据、写入 CLI 配置文件，成功后才把该 Provider 记为当前项；取消选择时先清理 Cherry 管理的配置文件，再清除当前项。若没有可解析模型，启用操作会打开配置面板而不是创建一个新的 LLM Provider。所谓 own login 是外部 CLI 自己的登录配置，Cherry 会清理其管理的凭据和模型字段，但可以保留工具参数；这属于 CLI 连接选择，不是普通 Provider 的 `isEnabled` 开关（`useConfigPanelController.ts:222-325`）。
+
+按入口归纳，本次源码范围得到以下边界：
+
+- **配置文件**：SQLite 可确认是持久化真源；Code CLI 文件可读、编辑和写回，支持按工具批量写入以及 Codex `auth.json` 删除。未找到面向普通 Provider 的 JSON/YAML 导入导出文件格式，也未找到文件级渠道复制或连接测试。
+- **CLI**：仓库中的 Code CLI 功能负责启动外部 Claude Code、Codex 等工具，并为其写入配置；未找到 Cherry 自身用于 Provider CRUD 的命令行入口。外部 CLI 的命令和登录界面属于外部项目，本次未调查。
+- **TUI**：本仓库未找到 TUI 组件、终端渠道管理命令或 TUI Provider CRUD 入口；结论是“本次未找到”，不是对外部 CLI TUI 能力的否定。
+- **Web**：API Gateway 是本地 HTTP 推理网关，提供 `/v1/models` 和聊天协议接口，读取已启用 Provider/模型；未找到通过 Web API 管理 `user_provider` 的 CRUD、导入导出或连接测试路由。它可以启停网关本身，但这不是渠道启停（`src/main/features/apiGateway/utils/models.ts:42-123`、`docs/references/api-gateway/README.md:80-98,213-283`）。
+- **桌面端**：这是源码确认的完整渠道管理入口，覆盖查看、新增、编辑、复制、启停、删除、deep link 导入和连接检查；没有 Provider 专用导出，数据库级备份另见 §3.4。
+
+默认预设与用户配置的生命周期是 insert-only seed 加读取时合并。应用启动或 Registry 变更不会覆盖用户行；未被用户覆盖的端点、适配器和模型元数据可以随 Registry 更新。新建自定义 Provider 没有 `presetProviderId` 时只拥有用户提交的配置，复制预设则继续继承来源的 Registry 元数据。更新 Endpoint 时服务层会把等于 Registry 基线的字段投影掉，避免一次普通编辑把默认值永久冻结到用户行（`ProviderService.ts:160-200,335-378,424-445`）。
 
 ## 2. Endpoint 与 Adapter 路由
 
@@ -440,6 +474,11 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 - 批量健康检查：[`src/renderer/pages/settings/ProviderSettings/ModelList/checkModelsHealth.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ModelList/checkModelsHealth.ts)
 - 健康检查协议：[`src/renderer/pages/settings/ProviderSettings/utils/healthCheck.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/utils/healthCheck.ts)
 - Provider 创建/复制：[`src/renderer/pages/settings/ProviderSettings/ProviderList/ProviderEditorDrawer.tsx`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ProviderList/ProviderEditorDrawer.tsx)
+- Provider 列表操作：[`src/renderer/pages/settings/ProviderSettings/ProviderList/ProviderList.tsx`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ProviderList/ProviderList.tsx)
+- Provider 详情启停：[`src/renderer/pages/settings/ProviderSettings/components/ProviderHeader.tsx`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/components/ProviderHeader.tsx)
+- Provider CRUD Schema：[`src/shared/data/api/schemas/providers.ts`](../../cherry-studio/src/shared/data/api/schemas/providers.ts)
+- Code CLI 配置文件：[`src/shared/utils/cliConfig.ts`](../../cherry-studio/src/shared/utils/cliConfig.ts)、[`src/renderer/pages/code/cliConfig/draft.ts`](../../cherry-studio/src/renderer/pages/code/cliConfig/draft.ts)、[`src/renderer/pages/code/hooks/useConfigPanelController.ts`](../../cherry-studio/src/renderer/pages/code/hooks/useConfigPanelController.ts)
+- API Gateway 管理边界：[`src/main/features/apiGateway/utils/models.ts`](../../cherry-studio/src/main/features/apiGateway/utils/models.ts)、[`src/main/features/apiGateway/ApiGatewayService.ts`](../../cherry-studio/src/main/features/apiGateway/ApiGatewayService.ts)
 - 自定义多端点：[`src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts)
 - Deep Link 导入：[`src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts)
 - 多模型解析：[`src/main/ai/streamManager/context/modelResolution.ts`](../../cherry-studio/src/main/ai/streamManager/context/modelResolution.ts)
@@ -452,3 +491,7 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 3. 没有检查操作系统对 Electron `userData` 目录施加的账户级 ACL；“明文”结论只指应用没有额外静态加密。
 4. 备份/恢复管线已接线（v7 full/slim 布局 + checkpoint/promotion 恢复门，见 §3.4），但恢复的端到端行为（quiesce 失败、损坏归档、promotion 失败回退）未运行验证；本笔记只描述静态确认的调用路径。
 5. CherryIN、AiHubMix 等服务端可能在客户端不可见的位置做模型或上游容灾；本仓库客户端只把它们视为一个 Provider 实例，不能据此推断服务端内部没有 failover。
+6. 本次未启动桌面端，未实测 Provider 列表的右键菜单、编辑抽屉、复制流程、删除确认、启停排序、deep link 弹窗确认和保存后的缓存刷新；相关结论是源码确认的入口与事件绑定，实际视觉和平台行为未验证。
+7. 本次未实际读写 Claude、Codex、OpenCode、Gemini、Qwen、Kimi 或 Pi 的用户配置文件；Code CLI 文件的 target 白名单、草稿构建、写入前校验和 Main 侧写入边界来自源码，外部 CLI 是否按各自版本接受生成内容未验证。
+8. “未找到 Cherry 自身 CLI/TUI Provider CRUD”和“未找到 Web Provider CRUD/导出/连接测试路由”来自本次对 `package.json`、`src/main`、`src/renderer`、`src/shared` 及 API Gateway 路由的静态搜索；未运行打包产物或外部 CLI，不能排除运行时动态加载或仓库外组件提供入口。
+9. SQLite 级备份包含 Provider 凭据的结论已由备份实现静态确认，但本次未运行导出、恢复、损坏归档和跨版本迁移；因此不能据此确认每一种用户可见备份设置的界面提示和最终归档内容。

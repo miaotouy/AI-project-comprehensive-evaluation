@@ -1,14 +1,14 @@
 # Jan LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\jan`
+> 调查对象：`E:\works\GitStudyNotes\jan`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 provider/参数体系、Rust server 代理全量行级阅读）；未修改 Jan 仓库
 >
-> 调查范围：provider 定义与配置、API key 管理与验证、模型能力与采样参数过滤、llama.cpp/MLX 本地引擎、router 与本地 API 代理、Rust 转发链路、https 代理与硬件设置
+> 调查范围：provider 定义与配置、配置文件/CLI/TUI/Web/桌面端的渠道生命周期操作、API key 管理与验证、模型目录与导入、模型能力与采样参数过滤、llama.cpp/MLX 本地引擎、router 与本地 API 代理、Rust 转发链路、https 代理与硬件设置；渠道导入导出及 CLI/TUI 能力按源码搜索结果标注
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -28,6 +28,54 @@ Jan 的“渠道”由两层构成：
 - API key：主 key + fallback 链（`api-key-fallbacks` 设置项），401/403/429 轮换重试；连接测试对 `/models` 发 GET 并同时发 `x-api-key` 与 `Authorization: Bearer` 双头；远程 key 的 secrets 只在 OS keyring（`register_provider_config`），绝不明文写 settings.json；
 - llama-server 鉴权 key = `BASE64(HMAC-SHA256(apiSecret='JustAskNow', msg=modelId))`，知道端口+公开 secret 即可本地伪造——防局域网误连、不防本地恶意进程；
 - `SecurityConfigDialog.tsx`（auth/设备/日志三 tab）是**孤儿死代码**：9 个 `security_*` Tauri 命令在 src-tauri 中不存在，组件无任何挂载点（【代码确认】）——需要与“真实认证”区分：真实认证在 `proxy.rs`（`config.proxy_api_key` + Bearer/X-Api-Key 双头校验）。
+
+## 系统边界与总体调用链
+
+Jan 中需要区分三个层次：
+
+- **Provider 注册项**：`predefinedProviders` 提供内置远程 provider；`EngineManager` 提供 `llamacpp`、`mlx` 等本地引擎项。
+- **用户渠道实例**：Web 设置页创建的自定义 provider 以 `provider` 字符串作为唯一标识，保存一个 base URL、协议类型、模型列表和设置；当前没有独立的 Endpoint 子实体，因此同名 provider 不能并存，也没有在同一 provider 下创建多个 Endpoint 的 UI。
+- **运行时连接配置**：桌面端启动时把有 key 且启用的远程 provider 注册到 Rust 的 `provider_configs` 内存表；请求代理根据模型 ID 在本地引擎和远程 provider 间路由。注册配置不是另一份可供用户编辑的渠道目录。
+
+完整主链路是：桌面 Tauri 启动 `TauriProvidersService.getProviders()` 合并内置 provider 与引擎 provider，Zustand `useModelProvider` 从 `settings.json` 恢复用户状态；`DataProvider` 从 keyring 回填密钥，并对启用的远程 provider 调用 `register_provider_config`。用户在 Web 设置页修改状态后，Zustand 持久化非敏感 provider 数据，状态同步再注册或注销 Rust 运行时配置；聊天请求最终由前端 fetch 或本地 API server 代理发往 endpoint。Web 模式没有 Tauri 服务，provider service 的默认实现返回空列表、模型列表和 keyring 操作均为 no-op，且持久化退回浏览器 localStorage（`web-app/src/services/providers/default.ts:7-29`、`web-app/src/lib/backendStorage.ts:22-60`）。
+
+## 配置生命周期与管理入口
+
+### 操作覆盖矩阵
+
+下表只记录 provider/渠道本身；模型的新增、编辑、复制、删除和本地文件导入另见 6.2 及本节后文。静态源码能够确认入口和事件绑定，未运行桌面应用，因此不据此确认保存时机或跨平台视觉行为。
+
+| 入口 | 查看 | 新增 | 编辑 | 复制 | 启停 | 删除 | 导入/导出 | 连接测试 |
+|---|---|---|---|---|---|---|---|---|
+| 配置文件 | `settings.json` 中可读到序列化的 `model-provider` Zustand 状态；provider secrets 不在此文件 | **未找到**稳定的手工 schema/命令 | 可手工改非 secret JSON，但不属于产品化入口，效果未验证 | 未找到 | 可改 `active`，效果未验证 | 可从 JSON 删除对象，keyring 残留处理未验证 | **未找到** provider 专用导入/导出格式或命令 | **未找到**文件级测试机制 |
+| CLI | `jan models list` 查看本地模型，不查看远程 provider 目录 | **不适用/未找到**远程渠道新增命令 | `serve`/`launch` 只接受运行时模型、端口和 API key，不编辑 provider | 未找到 | `serve` 启动/退出本地模型服务；不是 provider `active` 开关 | Ctrl+C 或进程退出停止本地服务；不是删除渠道 | **未找到**渠道导入/导出；`launch openclaw` 会写入外部 `~/.openclaw/openclaw.json` 的 `jan` provider，但这是 agent 配置联动 | **未找到**独立 provider 连接测试 |
+| TUI | **未找到 Jan 自身 TUI**；CLI 的模型/agent 选择器是交互式终端选择，不是渠道管理界面 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 |
+| Web（浏览器实现） | 默认 provider service 返回空，provider 管理依赖 Tauri；仅确认 backendStorage 在非 Tauri 下使用 localStorage | **源码未找到可用的远程 provider 数据来源** | 同上，不能据此确认浏览器模式可管理 provider | 未找到 | 未找到可执行的 provider 列表状态 | 未找到可执行的 provider 删除 | 未找到 | 未找到 |
+| Web UI（桌面 Tauri 壳内） | 设置 > Model Providers 列出 provider、模型数量、启用状态；详情页展示设置、key、模型 | `AddProviderDialog` 新增自定义远程 provider | 详情页编辑设置、Azure base URL、API key/fallback、模型元数据；无 provider 重命名 | 未找到 provider 复制入口 | 列表和详情页均有 `active` 开关；停用 llamacpp 会先停止全部模型 | 仅自定义 provider 显示删除确认；内置 provider 和 EngineManager provider 不显示删除 | provider 导入/导出未找到；llama.cpp/MLX 的**模型**有文件导入入口 | 高级 API key 面板逐 key GET `/models`，显示 200/401/403/429/网络错误 |
+
+### 新建渠道与已有渠道的差异
+
+新建自定义渠道只能通过 `AddProviderDialog` 提交名称、base URL、API key 和 `openai`/`anthropic` 类型。表单只做必填、URL 正则和大小写不敏感的重名检查，不在创建前测试 endpoint；创建对象固定为 `active: true`、空模型列表，并从相应协议模板复制设置（`web-app/src/routes/settings/providers/index.tsx:42-85`、`web-app/src/containers/dialogs/AddProviderDialog.tsx:26-71`）。
+
+已有 provider 的可操作范围取决于来源：
+
+- 内置远程 provider 可以查看模型、修改 API key 链并刷新/手动添加模型，但详情页隐藏通用设置卡；除 Azure 外 base URL 由内置常量提供，不能通过该 UI 改 endpoint。
+- 自定义远程 provider 可以编辑通用设置、Azure 式 base URL、主 key/fallback、模型列表和模型元数据，也可以删除；当前没有复制 provider 或修改 provider 名称的入口。
+- llamacpp/MLX 是 EngineManager 提供的本地 provider，不按普通远程渠道处理。它们可以编辑引擎设置、导入本地模型、编辑/删除模型和启停单模型；删除 provider 被 `DeleteProvider` 明确屏蔽，停用 llamacpp 还会先 `stopAllModels()`。
+
+### 持久化、合并与迁移
+
+桌面端的 provider Zustand 状态以 `model-provider` 命名空间写入 `<jan_data>/settings.json`；Rust 设置存储保存的是扁平 JSON 对象中一个序列化的 store blob，并以 500ms 防抖、原子替换方式写盘（`src-tauri/src/core/app/settings_store.rs:1-14,25-27,111-119`）。`useModelProvider` 的 `partialize` 在写入前清空 `api_key`、fallback 和设置数组中的 secret 值，因此配置文件不是完整渠道备份。
+
+恢复时 `TauriProvidersService.getProviders()` 重新生成内置 provider 和引擎 provider，`setProviders` 将它们与已有状态按 provider 名合并；已保存的自定义 provider 不会由引擎服务返回，但会保留在 Zustand 状态中。内置/引擎设置的元数据以新拉取版本为准，用户值按条件保留；迁移函数当前版本为 17，包含 base URL、协议类型和旧 provider/model 字段迁移（`web-app/src/hooks/useModelProvider.ts:64-236,338-762`）。因此“已有渠道”不是从单独 provider 配置文件恢复，而是由默认注册项、引擎注册项和持久化用户状态合并得到。
+
+### 渠道操作与模型操作的边界
+
+Web 详情页确实提供“刷新、手动新增、编辑、删除”按钮，但这些按钮作用于模型列表。远程刷新向 endpoint 的 `/models` 获取 ID；llama.cpp/MLX 的 Import 按钮选择并导入本地模型文件；删除模型会写入 `deletedModels` 软删除标记，重新下载或导入的本地模型会清理对应 tombstone。源码中未找到把 provider 配置整体导入/导出为文件的入口，也未找到“复制渠道”实现。`autoqa/checklist.md` 中的 “Create a Custom Provider”“Disabled Model Providers”“Custom Providers can be deleted”是测试清单，能佐证预期场景，但不能增加源码中不存在的导入、导出或复制能力。
+
+### CLI 与 TUI 边界
+
+`src-tauri/src/bin/jan-cli.rs` 的命令树只有 `serve`、`launch`、`threads` 和 `models`。其中 `serve`/`launch` 通过命令行参数或交互选择器加载本地模型；不会读取或修改 Web provider 列表，也没有远程 provider 的 CRUD、key 测试、导入导出命令。`launch openclaw` 是例外性的外部配置联动：它把当前本地 Jan server 写入 `~/.openclaw/openclaw.json` 的 `models.providers.jan`，并设置默认模型，不等同于 Jan 渠道管理。仓库中未找到 Jan 自身 TUI 目录或 provider 管理 TUI；CLI 的选择器只选择 agent/model。
 
 ## 1. Provider 定义与配置模型
 
@@ -365,6 +413,10 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 | API key 链/测试 | `web-app/src/lib/provider-api-keys.ts`、`$providerName.tsx:261-497` |
 | provider 设置 UI | `web-app/src/routes/settings/providers/index.tsx`、`web-app/src/routes/settings/providers/$providerName.tsx` |
 | 添加 provider | `web-app/src/containers/dialogs/AddProviderDialog.tsx` |
+| provider 状态持久化与迁移 | `web-app/src/hooks/useModelProvider.ts:50-236,325-762`、`web-app/src/lib/backendStorage.ts:22-60`、`src-tauri/src/core/app/settings_store.rs:1-14,98-119` |
+| 远程 provider 运行时注册 | `web-app/src/providers/DataProvider.tsx:38-144`、`src-tauri/src/core/server/remote_provider_commands.rs:15-195` |
+| provider 密钥持久化 | `src-tauri/src/core/server/provider_secrets.rs:1-16,163-216` |
+| Jan CLI | `src-tauri/src/bin/jan-cli.rs:55-234`、`docs/src/pages/docs/desktop/cli.mdx:42-217` |
 | 远程目录 | `web-app/src/lib/remoteModelCatalog.ts` |
 | 本地 API server | `web-app/src/routes/settings/local-api-server.tsx`、`hooks/useLocalApiServer.ts` |
 | 下载 | `extensions/download-extension/src/index.ts`、`src-tauri/src/core/downloads/commands.rs` |

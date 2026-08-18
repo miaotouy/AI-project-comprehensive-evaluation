@@ -1,14 +1,14 @@
 # AstrBot LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\AstrBot`
+> 调查对象：`E:\works\GitStudyNotes\AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
 >
-> 调查方式：只读源码（provider 抽象层、实体、管理器、主要适配器、配置层、fallback 编排、Dashboard 后端）与仓库文档交叉梳理；未修改目标仓库
+> 调查方式：只读源码（provider 抽象层、实体、管理器、主要适配器、配置层、fallback 编排、Dashboard 后端、CLI、备份与桌面运行时）与仓库文档交叉梳理；未修改目标仓库
 >
-> 调查范围：Provider 数据模型与配置结构、注册机制与 42 个适配器、协议适配与统一消息格式、请求路由与 Model 绑定、错误处理与两层重试、Key 轮换、fallback 语义、配置持久化与热更新、Dashboard/WebUI 配置面
+> 调查范围：Provider 数据模型与配置结构、注册机制与 42 个适配器、协议适配与统一消息格式、请求路由与 Model 绑定、错误处理与两层重试、Key 轮换、fallback 语义、配置持久化与热更新、配置文件/CLI/TUI/Web/桌面端管理入口、备份导入导出与 Dashboard/WebUI 配置面
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -27,6 +27,7 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 - **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
 - **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
 - **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
+- **管理入口**：源码确认 WebUI 提供 source 与 provider 两级查看、新增、编辑、启停、删除和连接测试，非聊天能力的 provider 卡片还提供复制；配置文件和备份机制支持整体查看、导入、导出，CLI 只管理少量通用键，未找到 provider 专用 CLI/TUI；桌面端在本仓库中只是托管同一后端的外部客户端，渠道管理界面未在本仓库确认。
 - **未实现机制**：无渠道池/权重/负载均衡（`provider_pool` 与 `persona_pool` 只声明在默认配置，全仓 grep 无消费者）；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
 
 ## 总体调用链
@@ -173,6 +174,42 @@ is_chunk / id / usage
 ### (misc) 全部终止时 curr 兜底
 
 `reload` 后若 chat 实例列表为空则当前实例置空；若仍有实例但当前实例为空，则自动选第一个并记 info 日志——"自动选第一"是刻意行为不是异常。
+
+### 2.5 配置生命周期与管理入口
+
+渠道配置的可管理对象仍然是两级：`provider_sources[]` 保存共享的上游地址、凭据和协议参数，`provider[]` 保存具体模型实例及 `enable` 状态。配置文件可以直接表达两级对象；WebUI 则把聊天能力明确呈现为“source 列表 + source 下的模型实例”，其他能力类型直接展示 provider 卡片。删除 source 会连带删除其关联 provider，source 重命名还会迁移关联 provider 的 `provider_source_id`；删除单个 provider 不影响同 source 下的其他模型。相关行为由 `ProviderConfigService.upsert_provider_source/delete_provider_source` 和 `ProviderManager.delete_provider/update_provider` 共同完成（`astrbot/dashboard/services/config_service.py:1406-1445`、`1711-1724`；`astrbot/core/provider/manager.py:847-909`）。
+
+#### 配置文件入口
+
+**源码确认**主配置文件是 `data/cmd_config.json`，其中 `provider_sources` 与 `provider` 是普通 JSON 数组；`AstrBotConfig` 启动时读取并把缺失字段递归补入默认值，保存时采用临时文件、`fsync`、`os.replace` 和 revision 去重（`astrbot/core/config/astrbot_config.py:31-113,232-323`）。**静态推断**直接编辑配置文件可以表达查看、新增、编辑、启停和删除已有或新建渠道；复制没有独立字段或命令，实际只能由用户复制 JSON 条目并改写唯一 `id`，导入/导出也不是 provider 专用格式，而是整体备份 ZIP 中的 `config/cmd_config.json`。备份导出读取该文件原文，导入以 replace 模式覆盖现有配置，并在覆盖前写出 `.bak`（`astrbot/core/backup/exporter.py:160-167`；`astrbot/core/backup/importer.py:456-475`）。
+
+配置文件本身没有连接测试动作；修改后由下一次启动读取，或由运行中的 WebUI 保存流程触发热更新。配置文件也不提供独立的“启用/停用”操作，启停表现为修改 provider 条目的 `enable` 布尔值。默认配置与用户配置的关系是启动时以 `DEFAULT_CONFIG` 初始化，再把文件内容合并进 `AstrBotConfig`，不是把每个 provider 与一个独立的默认 provider 实例合并；source 与 provider 的字段合并只发生在命中 `provider_source_id` 的运行时解析阶段（`astrbot/core/config/astrbot_config.py:46-113`；`astrbot/core/provider/manager.py:525-546`）。
+
+#### CLI 与 TUI
+
+CLI 源码直接确认只有 `astrbot conf get/set` 这组常用配置命令。可读写的白名单是时区、日志等级、Dashboard 端口/用户名/密码和回调地址，不包括 `provider_sources`、`provider` 或 provider 设置；所以 CLI 能查看/编辑少量系统配置，但不能新增、复制、启停、删除、导入、导出或测试渠道（`astrbot/cli/commands/cmd_conf.py:70-78,157-240`，仓库文档 `docs/zh/use/cli.md:87-112`）。其保存路径是直接写 `data/cmd_config.json`，且使用的是 CLI 自己的 JSON 写入函数，不是 `AstrBotConfig.save_config` 的原子写路径（`cmd_conf.py:81-110`）。
+
+本次检查的 CLI 命令注册、依赖和源码目录中**未找到** Textual、prompt-toolkit、curses 等 TUI 框架或 provider 管理命令。因此 TUI 对上述渠道操作的结论是**未找到**，不能据此断言项目所有发行形态都绝对没有其他外置 TUI；本仓库快照中没有可复查入口。
+
+#### Web / Dashboard
+
+WebUI 是当前源码确认最完整的渠道管理入口。`/api/v1/providers/schema` 返回注册适配器模板、现有 provider/source 和模型元数据；source 端点支持列表、按 ID 查看、新增/更新、重命名时迁移关联 provider、删除，以及在 source 下列出和新增模型 provider。provider 端点支持列表、查看（可选 merged 配置）、新增、编辑、删除、启停和测试（`astrbot/dashboard/api/providers.py:90-183,251-365,383-414`）。这些接口要求 provider scope，旧的 `/api/config/provider*` 与 `/api/config/provider_sources*` 路径仍作为兼容别名存在；它们复用同一 `ProviderConfigService`，不代表另一套生命周期。
+
+聊天能力的新建流程与已有渠道不同：页面先从适配器模板创建 source，source 只在保存时写入服务端；保存后可以调用 source 的模型列表接口，或手动输入模型，再为每个模型创建一个独立 provider，默认 ID 是 `<source_id>/<model>`，默认启用并依据模型元数据填入 modalities、上下文长度和 reasoning（`dashboard/src/composables/useProviderSources.ts:447-472,498-577,580-640`）。已有聊天 source 可以编辑共享字段、删除 source、拉取模型；已有模型 provider 可以编辑、启停、测试和删除，但当前聊天 source 工作台没有复制 provider 的独立按钮。删除 source 会级联删除其下模型，删除模型只删除该模型实例。source 新建的未保存项可在前端状态中直接移除，不会请求后端；已保存项才调用删除 API。
+
+非聊天能力（STT、TTS、Embedding、Rerank，以及页面列出的 Agent Runner）按 provider 卡片管理。页面提供新建、已有项编辑、复制、启停、删除和单项连接测试；复制由前端深拷贝已有配置、生成不冲突的 `<id>_copy`（必要时追加序号），并将副本设置为停用后调用普通 create 接口（`dashboard/src/views/ProviderPage.vue:147-206,485-612`）。因此“复制”不是后端独立能力，已有渠道和新建渠道最终都进入相同的 create/update/delete/reload 链路，但已有项能测试、启停和删除，新建项在保存前只有表单状态，不能测试或启停。
+
+连接测试也有明确边界：WebUI 只对已加载到 `ProviderManager.inst_map` 的 provider 调用 `target.test()`；基类默认发送 `REPLY PONG ONLY`，具体适配器可覆盖探测请求。未启用的非聊天卡片在前端阻止测试，Agent Runner 页面改为提示去“配置文件”页测试；这不是 provider 的真实连接测试路径（`astrbot/dashboard/services/config_service.py:1751-1770`；`astrbot/dashboard/src/views/ProviderPage.vue:639-708`；`astrbot/core/provider/provider.py:207-211`）。测试结果只返回本次 available/unavailable 状态和错误，不作为持久化健康评分。
+
+WebUI 的“配置文件”页是另一层配置入口：它可以查看、编辑和保存系统配置及多份 `abconf_<uuid>.json` 配置档案，也能新建、复制、重命名和删除档案；保存档案时可以通过右侧聊天抽屉测试该档案。该页面的复制是整个配置档案复制，不是单个 provider 复制（`dashboard/src/views/ConfigPage.vue:112-167,486-556,672-890`；`astrbot/dashboard/api/config_profiles.py:85-167`）。源码确认配置档案与 provider 管理 API 是并列入口；本次未进一步验证一个非默认档案中的 provider 是否会独立初始化成另一组运行时 provider 实例，避免把档案 CRUD 直接等同于渠道实例隔离。
+
+WebUI 还提供系统级备份入口，可查看备份列表、异步导出、上传或分片上传 ZIP、预检查、下载、重命名、删除和确认导入。导入明确是覆盖式 replace，会清空并覆盖现有数据；它是全局备份恢复，不支持只导入某一个 provider/source，也没有渠道级脱敏导出（`astrbot/dashboard/api/backups.py:106-154,274-357,373-425`；`astrbot/dashboard/services/backup_service.py:271-305,510-561`）。本次在 provider 页面未找到独立的 provider 导入/导出按钮。
+
+#### 桌面端
+
+源码和仓库文档直接确认，桌面端客户端位于独立仓库 `AstrBotDevs/AstrBot-desktop`，本仓库的 `desktop_runtime.py` 只负责识别桌面托管后端、会话密钥和重启提示；它没有另一套 provider CRUD（`astrbot/core/desktop_runtime.py:5-60`；`docs/zh/deploy/astrbot/desktop.md:1-9`）。因此本仓库能确认的桌面端行为是：桌面客户端托管同一个后端，渠道管理能力是否完整暴露取决于外部桌面仓库对 WebUI/API 的封装；桌面端查看、新增、编辑、复制、启停、删除、导入、导出和连接测试的逐项覆盖在本次调查中均为**未验证**，不能仅凭“桌面端提供图形化配置”文档推断。
+
+按配置对象归纳，WebUI 对已有 provider 的可操作范围是查看、编辑、启停、删除、测试，非聊天类型另有复制；聊天类型已有 source 还可拉取模型，已有 source 下模型可编辑、启停、删除，但不能在当前页面复制。新建渠道在模板或表单提交前只能编辑本地草稿；source 保存后才可拉取模型，provider 保存并加载成功后才可启停、删除或测试。配置文件和整体备份可以复制或搬运完整 JSON，但不会自动生成新的 provider ID，也没有渠道级连接测试或选择性导入。
 
 ## 3. 注册机制
 
@@ -381,6 +418,12 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 | `astrbot/core/utils/migra_helper.py` | provider→source 结构迁移 |
 | `astrbot/dashboard/api/providers.py`、`services/config_service.py` | Dashboard CRUD 后端 |
 | `dashboard/src/views/ProviderPage.vue` | WebUI 渠道配置面 |
+| `dashboard/src/composables/useProviderSources.ts`、`dashboard/src/components/provider/ProviderModelsPanel.vue` | 聊天 source 与模型实例的 WebUI 生命周期 |
+| `astrbot/cli/commands/cmd_conf.py` | CLI 常用配置白名单与直接 JSON 写入 |
+| `astrbot/dashboard/api/backups.py`、`services/backup_service.py` | 全局备份的查看、导入、导出与文件管理 |
+| `astrbot/core/backup/exporter.py`、`importer.py` | `cmd_config.json` 在备份 ZIP 中的导出与覆盖式导入 |
+| `dashboard/src/views/ConfigPage.vue`、`astrbot/dashboard/api/config_profiles.py` | 多配置档案的查看、复制、编辑、删除与保存测试入口 |
+| `astrbot/core/desktop_runtime.py`、`docs/zh/deploy/astrbot/desktop.md` | 桌面托管边界；桌面客户端位于外部仓库 |
 
 ## 11. 未验证事项
 
@@ -388,3 +431,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 2. `provider_pool`/`persona_pool` 无消费者基于全仓 grep；若存在动态拼接 key 的隐式引用可能漏检。
 3. minio TTS/SST 各适配器内部的厂商参数细节未逐行展开（本文聚焦框架层）。
 4. `dynamic_import_provider` 覆盖面与 42 注册数基于 grep，个别适配器（如 `azure_tts` 的大厂参数）未读全。
+5. 未运行 CLI、WebUI、备份导入导出或配置热更新的端到端流程；新增、编辑、启停、删除和测试的保存成功、生效时机及异常提示主要依据静态事件绑定和后端调用链。
+6. TUI 在本仓库中未找到；外部桌面仓库 `AstrBotDevs/AstrBot-desktop` 未拉取，桌面端逐项渠道操作覆盖、桌面端是否完整复用 WebUI 以及桌面端备份行为均未验证。
+7. 未验证非默认 `abconf_<uuid>.json` 配置档案中的 provider 是否独立初始化运行时实例，也未验证备份导入后 ProviderManager 是否无需重启即可恢复全部 provider 状态。
+8. 未运行验证配置文件手工复制 provider 条目时的 schema 校验、ID 冲突、source 引用完整性和跨版本迁移结果；“可表达”结论是静态推断。

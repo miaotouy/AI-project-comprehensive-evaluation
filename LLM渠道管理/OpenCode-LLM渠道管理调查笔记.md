@@ -2,13 +2,13 @@
 
 > 调查对象：`../../opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
 >
-> 调查方式：只读源码静态梳理 Provider 组装、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
+> 调查方式：只读源码静态梳理 Provider 组装、配置生命周期、各管理入口、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
 >
-> 调查范围：Provider 实体与配置生命周期、凭据边界、模型目录、AI SDK/native 协议适配、运行时选择与路由、多 Key/重试/故障转移、可观测性、平台边界、OAuth 流程；不覆盖 opencode zen 控制台前端
+> 调查范围：Provider 实体与配置生命周期、配置文件/CLI/TUI/Web/桌面端管理入口、凭据边界、模型目录、AI SDK/native 协议适配、运行时选择与路由、多 Key/重试/故障转移、可观测性、平台边界、OAuth 流程；不覆盖 opencode zen 控制台前端
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -50,7 +50,31 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 - 运行时 `Provider.Model` schema（provider.ts:1036-1051）含 `cost`（带 tiers）、`experimentalOver200K`、`status` 等；媒体能力收敛为 `capabilities.input/output` 布尔（:991-999），无顶层 `modalities` 字段——数组形态的 modalities 只存在于 models.dev 元数据（`ModelsDev.Model`，models-dev.ts:67-121、:92-97）。
 - **多 Endpoint**：`ConfigProviderV1.Info` 是单对象（core/src/v1/config/provider.ts:82-126），`options` 为 `Record<string, unknown>`，**无 options 数组/多端点支持**（源码确认）。唯一的动态多实例是 GitLab `discoverModels`（provider.ts:661-726，按账号发现模型）。
 
-## 2. 配置创建、持久化与迁移
+## 2. 配置生命周期、管理入口与持久化
+
+OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider 定义属于合并后的配置，旧版配置使用单数 `provider` 对象；凭据由 `auth.json`、环境变量或 V2 的 credential 表提供。因而界面上的“连接”通常是新增或替换凭据，不是创建一个新的 Endpoint 实例；自定义 Provider 才会同时写入配置定义和凭据。
+
+### 配置文件与服务端写入
+
+- **查看**：配置文件可直接查看；`opencode debug config` 输出当前实例解析后的配置，而不是某一个源文件的原文（`packages/opencode/src/cli/cmd/debug/config.ts:5-13`）。全局文件按 `opencode.jsonc`、`opencode.json`、`config.json` 的优先级选择写入目标，加载时三个文件仍会按顺序合并（`packages/opencode/src/config/config.ts:139-145、246-260`）。
+- **新增、编辑、复制、删除**：源码确认配置 schema 支持在 `provider` 下新增或修改 Provider 定义、模型、选项和 Header；复制没有专门命令或 API，通常只能手工复制配置对象并改 Provider ID。删除也未找到独立的 Provider 删除接口，需从配置文件移除对象；删除凭据不会删除配置定义。
+- **启停**：旧版通过 `disabled_providers` 禁用，以及 `enabled_providers` 作为允许列表限制目录；运行时和 Provider 列表都会按这两个字段过滤（`packages/opencode/src/provider/provider.ts:1388-1390`）。这属于配置层启停，不会删除凭据。V2 设计稿改用 `disabled` 与 `experimental.policies`，但当前 Web 自定义 Provider 表单仍受 `protocol() === "v1"` 限制，不能据此认定 V2 已提供同等用户入口（`specs/v2/config.md:171-206`；`packages/app/src/components/dialog-custom-provider.tsx:132-152`）。
+- **导入、导出**：本次检查未找到 Provider 配置专用的导入/导出命令。CLI 的 `export`/`import` 针对会话 JSON，不是 Provider 配置（`packages/opencode/src/cli/cmd/export.ts:222-234、287-290`；`packages/opencode/src/cli/cmd/import.ts:94-110`）。
+- **连接测试**：配置文件写入本身不发起 Provider 请求。API Key 连接流程只把 key 写入凭据存储，OAuth 流程执行授权回调；源码未找到“保存后用真实模型或探活接口验证”的通用测试请求。
+
+服务端暴露的是配置和凭据的基础操作，而不是 Provider CRUD：配置 API 可以读取或更新合并后的配置，凭据 API 可以设置或移除某个 Provider 的凭据；Provider API 主要列目录、返回认证方法并承载 OAuth 授权与回调（`packages/opencode/src/server/routes/instance/httpapi/handlers/config.ts:14-32`；`packages/opencode/src/server/routes/instance/httpapi/handlers/control.ts:13-25`；`packages/opencode/src/server/routes/instance/httpapi/groups/provider.ts:34-93`）。静态代码中未找到复制、导入、导出或通用连接测试端点。
+
+### 各管理入口的实际覆盖
+
+| 入口 | 源码确认的查看与新增 | 已有渠道的编辑、复制、启停、删除 | 导入、导出与连接测试 | 已有渠道和新建渠道的差异 |
+|---|---|---|---|---|
+| 配置文件 | 直接查看源文件；在 `provider` 下手工新增或修改定义、模型、`options`、Header；可用 `opencode debug config` 查看解析结果 | 手工修改或移除配置对象；可手工复制对象；用 `disabled_providers`/`enabled_providers` 控制启停；凭据删除独立于配置删除 | 未找到 Provider 专用导入/导出；未找到保存后的通用测试请求 | 已有 Provider 可覆盖定义；新 Provider 需要新的 ID 和完整自定义配置，凭据仍另存 |
+| CLI | `opencode providers list` 查看已存凭据和命中的环境变量；`providers login` 新增或覆盖凭据；`debug config` 查看解析配置 | `providers logout` 删除凭据；重新 login 可替换凭据；未找到 Provider 定义编辑、复制或启停命令 | `export`/`import` 仅处理会话；未找到 Provider 连接测试命令 | 已有 Provider 可选择内置或插件认证方法；`Other` 只保存自定义 Provider 凭据，并明确提示仍需编辑 `opencode.json` |
+| TUI | `/connect`（`provider_connect` keybind）列出 Provider 并新增 API Key/OAuth 凭据；可显示已连接标记 | 本次未找到 TUI 中对已有渠道的编辑、复制、断开、启停或删除入口；未找到 Provider 配置导入/导出 | OAuth 授权回调是认证流程，不是独立连接测试；未找到测试请求 | 选择已有 Provider 会进入其认证方法；`Other` 只询问 Provider ID 并保存凭据，随后提示在 `opencode.json` 中配置 |
+| Web | 设置页列出已连接 Provider、来源标签和可连接 Provider；内置 Provider 支持 API Key/OAuth；V1 支持自定义表单，可新增 Provider、Base URL、模型和 Header，并可选写入 key | 已有内置渠道只有 Disconnect；自定义渠道 Disconnect 会移除凭据并加入 `disabled_providers`；自定义表单允许用同一 ID 重新连接已禁用项，但未提供已保存配置的编辑或复制界面 | 未找到 Provider 配置导入/导出；提交 API Key 直接调用连接接口并刷新目录，未发起独立模型探测请求 | 已有渠道展示来源并只能断开；新建自定义渠道可一次写配置和凭据，保存时会移除该 ID 的禁用状态（`packages/app/src/components/settings-providers.tsx:87-146、224-258`；`packages/app/src/components/dialog-custom-provider.tsx:117-166`） |
+| 桌面端 | 桌面端渲染器复用 Web App 的设置页和 Provider 对话框；通过 sidecar 连接本地服务 | 未找到桌面主进程专属 Provider CRUD、复制、启停或删除逻辑；实际覆盖随 Web/sidecar 路径 | 未找到桌面专属导入/导出或连接测试 | 桌面端是部署和服务连接边界，不是另一套渠道模型；sidecar 启动后提供同一 Server API（`packages/desktop/src/renderer/index.tsx:348-435`；`packages/desktop/src/main/server.ts:57-211`） |
+
+上述表格中的“未找到”仅表示在本次检查的配置、CLI、TUI、Web、桌面端入口及其调用链中未发现对应能力，不等同于项目全局绝对不存在。
 
 - **schema**（opencode.json 的 `provider` 字段，v1/config/config.ts:110-112；类型定义 v1/config/provider.ts:13-126）：
 
@@ -75,6 +99,8 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
   model.provider.npm > provider.npm > existing > modelsDev > "@ai-sdk/openai-compatible"
   ```
 - **登录不写 opencode.json**：只写 auth.json（cli/cmd/providers.ts:480-485）。
+- **配置写入位置**：实例配置更新写入项目目录下的 `config.json` 并与已有内容深度合并；全局配置更新写回当前全局配置文件，`.jsonc` 使用保留格式的补丁写入，并在发生变化后使缓存失效（`packages/opencode/src/config/config.ts:624-659`）。Web 设置页的 `updateConfig` 调用全局配置 API，随后使各作用域的 Provider 查询失效（`packages/app/src/context/server-sync.tsx:660-670`）。
+- **V2 生命周期边界**：V2 Core 已有运行时 Catalog 的 `provider.update/remove` 和 Integration credential 的 `connection.update/remove`，但本快照中未找到把这些 Draft/Service 操作完整暴露为 Web、CLI 或 TUI Provider 管理界面的通用入口（`packages/core/src/catalog.ts:29-59`；`packages/core/src/integration.ts:140-192`）。因此不能用 V2 内部可变数据结构推断前端已支持编辑、复制或删除 Provider。
 
 ## 3. 凭据、Header 与代理边界
 
@@ -191,6 +217,9 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 3. OAuth 各插件（openai/github-copilot/xai 等）的 device flow 未实测。
 4. 重试重复计费、prompt cache 命中率等运行时经济行为未实测（静态推断）。
 5. models.dev 网络拉取失败时构建期快照的实际覆盖范围未验证。
+6. Web 设置页、TUI `/connect` 和桌面端未实际启动操作；表格中的入口、按钮状态和事件调用链是源码确认，视觉表现、权限、错误提示及跨平台行为未验证。
+7. 未验证配置文件或 Web 更新后各已存在实例何时重载，以及自定义 Provider 断开后删除凭据、写入禁用列表和目录刷新之间的实际时序。
+8. 未验证 V2 Catalog/Integration 的内部更新与删除操作是否会在后续版本通过其他未检查的适配层暴露；当前结论仅针对本快照已读入口。
 
 ## 11. 关键源码索引
 
@@ -202,5 +231,11 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 - `packages/opencode/src/session/retry.ts`：重试策略
 - `packages/core/src/models-dev.ts`：模型目录
 - `packages/core/src/provider.ts`、`src/credential.ts`、`src/account/`：V2 凭据与账户
+- `packages/opencode/src/config/config.ts`、`src/server/routes/instance/httpapi/handlers/config.ts`：配置读取、合并与写入
+- `packages/opencode/src/server/routes/instance/httpapi/handlers/control.ts`、`groups/provider.ts`：凭据与 Provider/OAuth API
+- `packages/opencode/src/cli/cmd/providers.ts`、`src/cli/cmd/debug/config.ts`：CLI 凭据生命周期与解析配置查看
+- `packages/app/src/components/settings-providers.tsx`、`dialog-connect-provider.tsx`、`dialog-custom-provider.tsx`：Web Provider 管理入口
+- `packages/tui/src/component/dialog-provider.tsx`、`src/config/keybind.ts`：TUI `/connect` 入口
+- `packages/desktop/src/renderer/index.tsx`、`src/main/server.ts`：桌面端 Web/sidecar 边界
 - `packages/llm/src/protocols/`、`packages/llm/src/route/`：native 协议实现
-- `packages/opencode/src/cli/cmd/providers.ts`、`models.ts`：CLI 登录与模型查看
+- `packages/opencode/src/cli/cmd/models.ts`：CLI 模型查看

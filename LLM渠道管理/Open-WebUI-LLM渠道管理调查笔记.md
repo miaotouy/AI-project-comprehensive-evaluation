@@ -1,222 +1,215 @@
 # Open WebUI LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\open-webui`
+> 调查对象：`E:\works\GitStudyNotes\open-webui`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-18
 >
 > 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
 >
-> 调查方式：只读源码核对（config.py 环境变量、models/config.py 持久化配置、routers/openai.py 与 routers/ollama.py、utils/models.py 模型解析、main.py 路由挂载）；未修改目标仓库
+> 调查方式：只读核对当前快照的 Python 后端、Svelte Web 界面、TypeScript API 封装、环境变量示例、CLI 入口、变更记录和仓库文件分布；未运行服务，未修改项目源码
 >
-> 调查范围：渠道配置来源、统一模型解析、OpenAI 兼容代理与 Ollama 代理、密钥与多后端、认证与流式转发、错误归一化与重试、前端管理页
+> 调查范围：配置文件、数据库配置、管理员 Web Connections、用户 Direct Connections、CLI、TUI、桌面端、模型目录、连接测试、协议适配、凭据、启停、删除、导入导出、路由和故障处理
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Open WebUI v0.11.0 把「渠道」建模为**一条 Base URL 一行**的配置行（OpenAI 兼容与 Ollama 各有独立的 URL 列表），并在运行时统一成一个 OpenAI 风格模型目录，对客户端暴露 `/api/chat/completions` 单入口。
+Open WebUI 当前把服务端 LLM 渠道表示为 OpenAI 兼容连接或 Ollama 后端的配置行，而不是一个独立的 Provider 实体。每条连接至少由 URL 和按索引关联的配置对象组成；OpenAI 连接另有同索引的 API Key，Ollama 的 Key 放在该连接配置对象中。一个服务端可以配置多个 OpenAI 兼容 URL 和多个 Ollama URL，但没有通用的渠道复制、导入单条连接或导出单条连接操作。
 
-- 配置双轨制：环境变量只是启动种子（`DEFAULT_CONFIG`），运行时逐 key 持久化在数据库 `Config` 表，`ENABLE_PERSISTENT_CONFIG` 默认开启使 DB 优先于环境变量；
-- 多渠道用分号分隔的列表表达：`OPENAI_API_BASE_URLS` / `OPENAI_API_KEYS` / `OLLAMA_BASE_URLS` 均按 `;` 拆分，每条 URL 配一个序号 idx，`OPENAI_API_CONFIGS` 以 `"0"`/`"1"` 为 key（兼容以 URL 为 key 的旧格式）；单个 `OPENAI_API_KEY`/`OPENAI_API_BASE_URL` 只代表「官方 OpenAI 渠道」；
-- OpenAI 兼容渠道按「模型 id → urlIdx」**固定路由**（模型目录合并时首见渠道获胜），渠道失效即该模型 404，无故障转移；
-- Ollama 多后端若托管同名模型，`merge_models_lists` 记录 `urls: [idx,...]`，请求时 `random.choice(urls)` 随机选一台——这是仓库中唯一的渠道级分摊/冗余逻辑；
-- 模型解析统一在 `utils/models.py`：`get_all_base_models` 并发拉 OpenAI + Ollama + 函数模型，`base_model_lookup` 对 Ollama 先按 `id.split(':')[0]` 再按精确 id 匹配，自定义模型分「覆盖（base_model_id=None）」与「预设（preset）」两种形态并入列表；
-- OpenAI 兼容层功能全：同一 `generate_chat_completion` 支持 OpenAI 原生、任意兼容服务、Azure（deployments 重写）、Anthropic（`x-api-key` 头）、Responses API 转换；`provider=='litellm'` 与 Anthropic URL 判定为 passthrough；
-- 每连接 `auth_type` 支持多种认证模式（bearer、session、OAuth、Azure AD 等，完整矩阵见 5.1 表格），外加自定义 headers 模板（可引用 `{{USER_ID}}` 等变量）；
-- **LLM 调用路径无 retry**：openai.py / ollama.py / utils/chat.py 均无重试循环，只有超时（默认 300s）、模型列表 10s 超时与错误归一化事件（`MODEL_PROVIDER_REQUEST_FAILED`，按状态码分类并记录 key 末四位）；
-- 模型 id 语法：v0.11.0 不强制 `user.model` 命名，workspace 模型 id 是任意 ≤256 字符唯一串；上游 `prefix_id` 前缀在出站时剥离。
+- 环境变量是启动默认值。`OPENAI_API_BASE_URL(S)`、`OPENAI_API_KEY(S)`、`OLLAMA_BASE_URL(S)` 和对应配置在启动配置中形成默认配置；当前代码的 `Config.seed_defaults` 只向数据库补入不存在的 key，已有数据库值优先。
+- 服务端运行时配置保存于数据库 `config` 表，按配置 key 分行存储，连接数组和连接配置字典分别保存为 `openai.api_base_urls`、`openai.api_keys`、`openai.api_configs`、`ollama.base_urls`、`ollama.api_configs`。管理员 Web Connections 的保存直接更新这些值。
+- `config.json` 仅保留旧版本迁移用途：首次发现 `DATA_DIR/config.json` 时读入数据库并改名为 `old_config.json`。本次未找到把当前连接配置持续写回配置文件的路径。
+- 管理员 Web Connections 支持查看、添加、编辑、启用/停用、删除和连接测试；没有复制单条连接入口。保存后会清模型目录缓存并重新拉取模型列表，但这不是连接测试。
+- 用户 Web Direct Connections 是另一套用户设置中的 OpenAI 兼容连接列表。管理员只控制 `ENABLE_DIRECT_CONNECTIONS` 开关；用户可以查看、添加、编辑、启用/停用、删除并在浏览器中直接测试。它不进入服务端 `Config` 表，也不提供 Ollama、服务端代理、管理员导入导出或跨用户共享。
+- OpenAI 和 Ollama 的连接测试都是独立的管理员后端 `/verify` 路径：OpenAI 通常请求 `{url}/models`，Azure 请求模型端点，Anthropic 使用专用模型请求；Ollama 请求 `{url}/api/version`。模型列表刷新则使用 `/models` 或 `/api/tags`，不能用来替代连接测试。
+- OpenAI 模型在合并时通常由首次出现的连接占用固定 `urlIdx`，没有通用跨连接 failover；Ollama 同名模型记录多个后端索引，请求时随机选择后端。代码中未找到 LLM 请求失败后的通用重试循环。
+- CLI 入口只有 `serve`、`dev` 和 `--version` 等启动相关命令，没有渠道查看、新增、编辑或测试子命令。本仓库内未找到 TUI。变更记录提到独立的 `open-webui/desktop` 桌面仓库，但该仓库不在本次调查范围内，因此桌面端连接管理能力未验证。
 
-## 1. 渠道配置来源
+## 系统边界与总体调用链
 
-### 1.1 环境变量（config.py）
+这里的“渠道”指一个可被 Open WebUI 代理访问的模型服务连接；Provider 是连接配置中的适配提示，例如 Azure、LiteLLM 或 llama.cpp，不是可独立创建的注册实体；Endpoint 是 URL；模型是上游模型目录中的条目或 Open WebUI 数据库中的 workspace model；凭据是 API Key、会话/OAuth 令牌或自定义 Header。
 
-**Ollama（224-302 行）**：
-
-| 变量 | 行为 |
-|---|---|
-| `ENABLE_OLLAMA_API` | 默认 True |
-| `OLLAMA_API_BASE_URL` | 默认 `http://localhost:11434/api` |
-| `OLLAMA_BASE_URL` | 由 API 地址去 `/api` 推导；为空时 `_resolve_ollama_base_url`（255-277 行）并发探测 11434/12434 端口 |
-| `OLLAMA_BASE_URLS` | `;` 拆分列表，多后端 |
-| `OLLAMA_API_CONFIGS` | JSON 解析为 `{idx: {...}}` |
-
-**OpenAI（304-357 行）**：
-
-| 变量 | 行为 |
-|---|---|
-| `ENABLE_OPENAI_API` | 默认 True |
-| `OPENAI_API_KEY` / `OPENAI_API_BASE_URL` | 单数变量，默认官方 `https://api.openai.com/v1` |
-| `OPENAI_API_KEYS` / `OPENAI_API_BASE_URLS` | `;` 拆分列表；空项补官方地址 |
-| `OPENAI_API_CONFIGS` | JSON 对象，key 为序号或旧式 URL |
-| 351-357 行特殊行为 | 解析完成后单数变量被重置为官方渠道对应值；真正多渠道路由全部走复数列表 |
-
-- 下游（RAG、图片、音频）引用单数变量，多渠道路由引用复数列表（DB key `openai.api_base_urls` 等）；
-- 种子注册：`seed_registered_defaults` → `Config.seed_defaults`（models/config.py 239-264 行），`DEFAULT_CONFIG` 在 config.py 2788-3183 行；
-- 迁移：`migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py` 把旧扁平 key 折叠为逐行配置，`API_CONFIG_FIELDS` 覆盖：
-
-  ```text
-  enable / key / prefix_id / tags / model_ids / connection_type / provider / auth_type /
-  headers / azure / api_type / api_version / extra_params / passthrough_params
-  ```
-
-### 1.2 运行时配置（models/config.py）
-
-- `ENABLE_PERSISTENT_CONFIG`（默认 True）使 DB 优先：`Config.get_many` 先读 DB 逐 key 存储，缺失回退环境变量；
-- 前端管理页「Connections」按行渲染每条 URL 连接，每条可独立 enable、配置 auth/headers/model_ids 等——即「连接行 = 渠道」。
-
-## 2. 统一模型解析（utils/models.py）
-
-- `fetch_ollama_models`（33-48 行）：`/api/tags` 的 `model/name` 归一成 OpenAI 风格 `{id, name, owned_by:'ollama', connection_type, tags}`；
-- `get_all_base_models`（56-64 行）：并发拉 OpenAI + Ollama + 函数模型，顺序为 functions + openai + ollama；
-- `get_all_models`（67-428 行）：
-  - 缓存：`request.app.state.BASE_MODELS`（开关 `models.base_models_cache`），最终结果写 `request.app.state.MODELS`；
-  - `base_model_lookup`（149-153 行）：Ollama 模型先用 `id.split(':')[0]`（去 tag）登记，再按精确 id 登记，**精确优先**；
-  - 自定义模型（157-242 行）：`base_model_id is None` → 对基础模型**覆盖**（同名覆盖 name/info/actions/filters）；`base_model_id` 存在 → 生成新条目 `{id: custom_model.id, owned_by: 继承, preset: True, ...}`；基础模型查找有 `split(':')[0]` 回退；`params` 被删除避免泄露给列表 API；
-  - 全局默认 meta 合并（312-332 行）、actions/filters 装配（360-414 行）；
-- `check_model_access`（431-472 行）：arena 走 access_grants，普通模型查 `Models.get_model_by_id` + `AccessGrants` + `has_base_model_access`（沿 base_model_id 链逐跳）；
-- 排序/去重在 `main.py /api/models`（839-887 行）：按 `ui.model_order_list` 排序、按 id 去重、过滤 pipeline 类型、去 profile_image_url；
-- 失败兜底：`ENABLE_CUSTOM_MODEL_FALLBACK`（默认 False）时自定义模型的 base_model 缺失则回退 `ui.default_models` 第一项（main.py 1100-1115 行）。
-
-## 3. OpenAI 兼容代理路由（routers/openai.py，挂载 `/openai`）
-
-### 3.1 连接与模型目录
-
-- `get_openai_connection(idx)`（300-305 行）：按序号取 `(url, key, api_config)`，config 查找顺序 `configs[str(idx)]` → `configs[url]`（旧兼容）；
-- `get_all_models_responses`（528-612 行）：对每个启用渠道并发 `GET {url}/models`（Anthropic 走专用拉取）；`model_ids` 白名单存在时**不请求上游**直接构造列表；`prefix_id` 加前缀（599-600 行）、tags/connection_type/provider 注入；
-- `get_all_models`（646-711 行，aiocache TTL=`MODELS_CACHE_TTL` 默认 1s）：`get_merged_models` 按 model_id 去重，**首见渠道获胜**（683 行），`urlIdx` 记录来源；`api.openai.com` 主机过滤以下不支持关键词：
-
-  ```
-  babbage / dall-e / davinci / embedding / tts / whisper
-  ```
-- `GET /models` 与 `/models/{url_idx}`（714-785 行）：单渠道直连测试。
-
-### 3.2 chat/completions 转发（1182-1435 行）
+管理员服务端链路如下：
 
 ```text
-enabled 检查
-  -> base_model_id 解析（改写 payload['model']）
-  -> apply_model_params_to_body_openai + apply_system_prompt_to_body
-  -> 查 OPENAI_MODELS 定 urlIdx（模型 id -> 渠道固定路由）
-  -> strip_provider_model_prefix（剥离 prefix_id 前缀）
-  -> 推理模型参数处理（is_openai_new_model）
-  -> headers/cookies（auth_type 分支）
-  -> Azure 分支（convert_to_azure_payload + api-key 头 + api-version）
-     / Responses 分支（convert_to_responses_payload）
-  -> aiohttp 转发（超时 get_client_timeout(stream=...)）
-  -> SSE 检测 text/event-stream 流式透传（stream_wrapper + stream_chunks_handler）
-  -> 非 2xx 归一化返回 + publish_model_provider_request_failed
+环境变量/默认配置
+  -> 启动时 seed_defaults 或旧 config.json 迁移
+  -> 数据库 Config 表
+  -> 管理员 Web Settings > Connections
+  -> /openai/config/update 或 /ollama/config/update
+  -> 清理模型缓存并拉取 /models 或 /api/tags
+  -> 根据模型元数据记录的 urlIdx 路由真实聊天请求
 ```
 
-- 流式转发剔除 `Content-Encoding/Content-Length/Transfer-Encoding`（80-87 行）；超大 chunk 超过 `CHAT_STREAM_RESPONSE_CHUNK_MAX_BUFFER_SIZE` 时输出空 `{}` 并跳过（utils/misc.py 1152-1198 行）；
-- 其它端点：
-  - `/embeddings`（1438）、`/responses`（1564）、`/audio/speech`（455）；
-  - `/verify`（795-880 行，管理员手动测连接）；
-  - `/config` + `/config/update`（392-452 行，更新后清缓存并发 `MODEL_PROVIDER_CONFIG_UPDATED` 事件）；
-  - `/{path:path}` 透传代理（1674-1793 行，默认 403，`ENABLE_OPENAI_API_PASSTHROUGH` 开关）。
-
-### 3.3 Ollama 代理（routers/ollama.py，挂载 `/ollama`）
-
-- `send_request`（96-196 行）：POST/GET 统一转发，失败时 `publish_model_provider_request_failed`（142-162 行）；
-- `merge_models_lists`（351-366 行）：多后端同名模型去重，`urls` 记录所有后端 idx；
-- `get_all_models`（386-451 行）：对每个后端 `GET {url}/api/tags`（可带 key），prefix_id/tags/connection_type/model_ids 过滤后合并，失败后端记入 `failed_idxs` 并在 `/api/ps` 中跳过；
-- `/api/chat`（1086-1160 行）：模型权限 → base_model 解析 → `apply_model_params_to_body_ollama` → `get_ollama_url`（1068-1083 行，`random.choice(models[model]['urls'])`）→ `strip_provider_model_prefix` → 转发；`validate_ollama_backend_idx`（1055-1065 行）限制普通用户不能指定任意后端；
-- 其它：`/api/tags`、`/api/ps`、`/api/version`（多后端取最低版本）、`/api/generate`、`/api/embed(s)`、`/api/pull/push/create/copy/delete/show/unload`。
-
-### 3.4 统一归一（utils/chat.py 282-307 行）
+用户直连链路不同：
 
 ```text
-模型元数据分流：
-  pipe -> pipelines 函数
-  owned_by=='ollama' -> OpenAI payload 转 Ollama 格式，调 /ollama/api/chat，响应再转回 OpenAI 格式
-  否则 -> /openai/chat/completions
+用户 Settings > Connections
+  -> 浏览器保存到用户设置中的 directConnections
+  -> 允许时直接请求用户填写的 OpenAI 兼容 URL
 ```
 
-- 格式转换：`convert_payload_openai_to_ollama`（utils/payload.py 299-387 行，`max_tokens→num_predict`、options 映射）、`convert_response_ollama_to_openai` / `convert_streaming_response_ollama_to_openai`（utils/response.py 215-275 行，Ollama `thinking`→reasoning_content、`data: [DONE]` 收尾）。
+管理员 Web 读取 `/openai/config`、`/ollama/config` 和 `/configs/connections`；保存连接分别调用 `/openai/config/update`、`/ollama/config/update`。后端路由使用管理员依赖保护这些服务端配置接口。实现见 `backend/open_webui/routers/openai.py:392-429`、`backend/open_webui/routers/ollama.py:288-348` 和 `backend/open_webui/routers/configs.py:139-160`。
 
-## 4. 密钥管理与多后端
+## 1. Provider、渠道与 Endpoint 数据模型
 
-- key 列表归一化：`normalize_openai_api_keys`（openai.py 290-297 行）与 `/config/update`（408-411 行）把 key 列表裁剪/补齐到与 URL 列表等长；
-- **OpenAI 侧无轮换、无故障转移**：模型 id → urlIdx 固定（首见获胜），渠道挂了该模型即 404（1244-1247 行）；无健康检查端点（仅 `POST /verify` 是手动测连接）；
-- **Ollama 侧随机选择**：多后端同名模型 `random.choice(urls)`——这是唯一的冗余/分摊逻辑；选中后端失败即报错，无重试（推测：该行为从代码推断，未实测）；
-- 请求失败事件 `publish_model_provider_request_failed`（events.py 1182-1250 行）：按状态码分类，记录 `api_key_suffix`（末 4 位）并发布 `MODEL_PROVIDER_REQUEST_FAILED` 事件：
+### 1.1 服务端连接
 
-  ```
-  404 → model_not_found；401/403 → authentication_failed；429 → rate_limited；≥500 → server_failed
-  ```
+OpenAI 兼容连接由三个并行数组/字典组成：URL 列表、Key 列表和按数字索引保存的配置字典。读取连接时先按数字索引查配置，只有旧数据才回退到以 URL 为 key 的格式。后端会将 Key 列表裁剪或补空，使其长度与 URL 列表一致。Ollama 使用 URL 列表和配置字典；其中 `config.key` 是该后端的 Key。
 
-## 5. 认证、流式、错误归一化、重试、超时
+每个连接配置可保存启用状态、模型白名单、模型 ID 前缀、标签、连接类型、认证类型、自定义 Header、Provider、Azure 参数、API 类型和允许透传的参数。OpenAI 可选择 Chat Completions 或 Responses API；Azure 的部署名称通过 `model_ids` 录入。字段契约见 `backend/open_webui/models/config.py:38-53`，表单组装见 `src/lib/components/AddConnectionModal.svelte:198-214`。
 
-### 5.1 认证（openai.py `get_headers_and_cookies` 156-219 行）
+同一类连接可以创建多个 Endpoint。OpenAI 合并同名模型时保留首次出现的连接并记录 `urlIdx`；Ollama 合并同名模型时保留所有后端索引，之后由随机选择逻辑挑选后端。分别见 `backend/open_webui/routers/openai.py:529-711` 和 `backend/open_webui/routers/ollama.py:351-366`。
 
-| auth_type | 行为 |
-|---|---|
-| bearer（默认） | `Authorization: Bearer` |
-| none | 无 token |
-| session | 透传会话 cookie + JWT |
-| system_oauth | `oauth_manager` 取 access_token |
-| azure_ad / microsoft_entra_id | `DefaultAzureCredential` |
+### 1.2 用户 Direct Connections
 
-- 自定义 headers 模板可引用 `{{USER_ID}}` 等变量（utils/headers.py 87-141 行）；`ENABLE_FORWARD_USER_INFO_HEADERS` 时附加用户头/签名 JWT（37-62 行）；
-- openrouter 特供 `HTTP-Referer`/`X-Title`（168-174 行）；
-- Ollama：`Authorization: Bearer {key}`（ollama.py 76-81、116-119 行）；
-- Anthropic：`x-api-key` + `anthropic-version`（utils/anthropic.py 49-52 行）；main.py `/api/message`（1881-1954 行）把 Anthropic Messages 请求转 OpenAI 再转回。
+Direct Connections 只允许用户填写 OpenAI 兼容 Endpoint。每个用户设置对象仍然使用 URL、Key 和按索引的配置字典，但这些值属于用户设置，管理员 Web 连接和服务端数据库配置不会自动合并进去。用户端组件明确把配置放入 `saveSettings({ directConnections: config })`，见 `src/lib/components/chat/Settings/Connections.svelte:22-63`。
 
-### 5.2 错误归一化与超时
+## 2. 配置生命周期、管理入口与持久化
 
-- 上游错误体尽量原样回传（JSONResponse/PlainTextResponse），同时分类记录；连接异常 → HTTPException 500 `SERVER_CONNECTION_ERROR`；SSE 且 ≥400 时先读 body 再返回 JSON 错误（1352-1390 行）；
-- 超时（env.py）：`AIOHTTP_CLIENT_TIMEOUT` 默认 300s（574-578 行）、流式 `sock_read` 空闲超时默认不限制（581-591 行）、模型列表 `AIOHTTP_CLIENT_TIMEOUT_MODEL_LIST` 默认 10s（610-617 行）；
-- 共享连接池 `AIOHTTP_POOL_CONNECTIONS`/`_PER_HOST`/`DNS_TTL`（664-688 行）；`MODELS_CACHE_TTL` 默认 1s（968-975 行）；SSL `AIOHTTP_CLIENT_SESSION_SSL`（597 行）；
-- **Retry：无**（grep 确认 openai.py/ollama.py/utils/chat.py 无 LLM 调用级重试）；检索/向量库/Redis 有各自重试，与渠道无关。
+### 2.1 配置文件和数据库
 
-## 6. 前端管理
+`.env.example` 展示的 `OLLAMA_BASE_URL`、`OPENAI_API_BASE_URL` 和 `OPENAI_API_KEY` 是部署时的环境变量入口。完整默认配置在 `backend/open_webui/config.py` 中组装，并通过 `DEFAULT_CONFIG` 提供给配置模型。环境变量不会像 Web 表单一样提供逐连接编辑器；要修改它们需改部署环境并重启。
 
-- `src/lib/components/admin/Settings/Connections.svelte`：OpenAI/Ollama 各自逐 URL 行渲染、增删（删除后 config 序号重排 267-277 行）、`/openai/config/update` 与 `/ollama/config/update`；`ENABLE_DIRECT_CONNECTIONS` 与 `ENABLE_BASE_MODELS_CACHE` 开关；
-- `AddConnectionModal.svelte`：每连接的字段：
+当前配置模型每个 key 使用一行数据库记录，列为 `key`、JSON `value` 和更新时间。`Config.get`/`get_many` 在持久化配置开启时先查数据库，缺失时回退默认值；`seed_defaults` 只插入不存在的默认 key。因此环境变量是种子/回退来源，数据库是运行时权威来源，而不是每次启动都覆盖数据库。见 `backend/open_webui/models/config.py:99-165`、`196-218`、`239-264`。
 
-  ```text
-  enable / tags / prefix_id / model_ids / connection_type / auth_type / headers / passthrough_params
-  ```
+旧版 `DATA_DIR/config.json` 会在启动迁移函数中整体写入数据库，然后重命名为 `old_config.json`。这是迁移路径，不是当前连接的文件编辑协议。见 `backend/open_webui/config.py:82-89`。
 
-  Azure 需要 `api_version` + deployment `model_ids`；`provider='azure'` 与 URL 探测联动；
-- `OpenAIConnection.svelte` / `OllamaConnection.svelte`：行组件（Ollama key 存 `config.key`）；
-- `Settings/Models.svelte`：模型 upsert（覆盖式写 `base_model_id:null`）、克隆（`base_model_id=model.id, id='xxx-clone'`）、隐藏/公开/排序；
-- API 封装：`src/lib/apis/openai/index.ts`、`src/lib/apis/ollama/index.ts`。
+### 2.2 管理员 Web Connections 操作矩阵
 
-## 7. 能力矩阵
-
-| 能力 | 当前实现 | 说明 |
+| 操作 | OpenAI/Ollama 管理员 Connections | 证据与边界 |
 |---|---|---|
-| OpenAI 兼容多渠道 | 有 | URL 列表 + 序号配置 |
-| Ollama 多后端 | 有 | 同名模型随机选择 |
-| 按模型固定渠道路由 | 有 | urlIdx 固定，无 failover |
-| 渠道故障转移 | 无 | 渠道失效即模型不可用 |
-| 渠道健康状态 | 无 | 仅手动 verify 与失败事件 |
-| Key 轮换/分摊 | 无（OpenAI）/ 随机（Ollama） | Ollama 后端随机为唯一分摊逻辑 |
-| 请求重试 | 无 | LLM 调用路径无 retry |
-| 超时控制 | 有 | 300s 默认，模型列表 10s |
-| 自定义认证 | 有 | 6 种 auth_type + headers 模板 |
-| Azure 适配 | 有 | deployments 重写 |
-| Anthropic 适配 | 有 | 头 + 格式转换 |
-| Responses API | 有 | 可选转换 |
-| 上游错误归一化 | 有 | 分类事件 + 原样回传 |
-| 模型目录缓存 | 有 | TTL 1s |
-| prefix_id 前缀 | 有 | 出站剥离 |
-| 透传代理 | 可选 | `ENABLE_OPENAI_API_PASSTHROUGH` |
+| 查看已有渠道 | 支持 | 页面加载两个 `/config` 接口，按 URL 行渲染；Key 通过敏感输入展示。 |
+| 新增渠道 | 支持 | `Add Connection` 弹窗追加 URL 和对应配置索引，随后保存到服务端。 |
+| 编辑已有渠道 | 支持 | 每行的配置按钮打开编辑弹窗；URL 在行内只读，但编辑弹窗可修改。 |
+| 复制渠道 | 未找到 | 检查 Connections、AddConnectionModal 和连接 API，未找到复制已有连接并生成新索引的入口。 |
+| 启停 | 支持 | 全局 OpenAI/Ollama 开关控制整类服务；每行 `config.enable` 控制单连接。 |
+| 删除 | 支持 | 删除 URL、Key 并重排配置索引，随后调用对应更新接口。 |
+| 导入单条渠道 | 未找到 | 未找到连接专用导入格式或导入按钮。 |
+| 导出单条渠道 | 未找到 | 未找到连接专用导出按钮。 |
+| 连接测试 | 支持 | 新建/编辑弹窗的 Verify Connection 调用独立 `/verify`；测试不保存配置。 |
 
-## 8. 关键源码索引
+管理员页面由 `src/lib/components/admin/Settings/Connections.svelte:54-139` 负责保存和新增，由 `:257-334` 负责已有连接的编辑、删除和启停。编辑器的验证、字段校验和删除确认见 `src/lib/components/AddConnectionModal.svelte:74-230`、`:741-788`。
 
-- Ollama 环境变量：[`config.py`](../../open-webui/backend/open_webui/config.py)（224-302 行）
-- OpenAI 环境变量：[`config.py`](../../open-webui/backend/open_webui/config.py)（304-357 行）
-- 持久化配置：[`models/config.py`](../../open-webui/backend/open_webui/models/config.py)（99-265 行）
-- 配置迁移：[`migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py`](../../open-webui/backend/open_webui/migrations/versions/3ff2c63645b8_reshape_config_to_per_key_rows.py)
-- 统一模型解析：[`utils/models.py`](../../open-webui/backend/open_webui/utils/models.py)（56-428 行）
-- OpenAI 代理：[`routers/openai.py`](../../open-webui/backend/open_webui/routers/openai.py)（300、528、1182 行）
-- Ollama 代理：[`routers/ollama.py`](../../open-webui/backend/open_webui/routers/ollama.py)（351-451、1086-1160 行）
-- 统一分流：[`utils/chat.py`](../../open-webui/backend/open_webui/utils/chat.py)（282-307 行）
-- 参数转换：[`utils/payload.py`](../../open-webui/backend/open_webui/utils/payload.py)（299-387 行）
-- 响应转换：[`utils/response.py`](../../open-webui/backend/open_webui/utils/response.py)（215-275 行）
-- Anthropic 适配：[`utils/anthropic.py`](../../open-webui/backend/open_webui/utils/anthropic.py)
-- 连接池与超时：[`utils/session_pool.py`](../../open-webui/backend/open_webui/utils/session_pool.py)
-- 失败事件：[`events.py`](../../open-webui/backend/open_webui/events.py)（1182-1250 行）
-- 前端连接管理：[`src/lib/components/admin/Settings/Connections.svelte`](../../open-webui/src/lib/components/admin/Settings/Connections.svelte)
-- 连接编辑器：[`src/lib/components/AddConnectionModal.svelte`](../../open-webui/src/lib/components/AddConnectionModal.svelte)
+### 2.3 用户 Web Direct Connections 操作矩阵
+
+| 操作 | Direct Connections | 证据与边界 |
+|---|---|---|
+| 查看已有渠道 | 支持 | 用户设置加载 `settings.directConnections` 并逐行显示。 |
+| 新增渠道 | 支持 | 用户设置中的 Add Connection 复用连接弹窗。 |
+| 编辑渠道 | 支持 | 复用编辑弹窗，保存整个用户连接配置。 |
+| 复制渠道 | 未找到 | 用户连接组件和弹窗未提供复制入口。 |
+| 启停 | 支持 | 每行 `config.enable` 由 Switch 修改。 |
+| 删除 | 支持 | 删除 URL、Key 并重排配置索引；需要之后提交用户设置。 |
+| 导入/导出 | 未找到 | 本次未在用户连接组件或其 API 中找到连接导入导出。 |
+| 连接测试 | 支持 | `direct=true` 时浏览器直接请求 `{url}/models`，依赖上游 CORS；不是服务端 `/verify`。 |
+
+Direct Connections 的总开关位于管理员 Connections 页面，保存为 `direct.enable`；默认值来自 `ENABLE_DIRECT_CONNECTIONS`。这个开关只决定能力是否开放，不把用户连接写进管理员的 OpenAI 连接列表，见 `backend/open_webui/routers/configs.py:42-45` 和 `src/lib/components/admin/Settings/Connections.svelte:352-383`。
+
+### 2.4 通用管理员配置导入导出
+
+管理员 Database 设置提供通用配置 JSON 导入导出，而非连接专用格式。`GET /configs/export` 返回 `Config.get_all()`，`POST /configs/import` 将传入字典直接 upsert；前端把导出结果保存为 `config-<timestamp>.json`。因此从静态实现看，通用导出可能包含 OpenAI/Ollama 连接配置及凭据，且本次未找到对 API Key 的导出排除或加密处理。相关路径为 `backend/open_webui/routers/configs.py:97-121`、`src/lib/components/admin/Settings/Database.svelte:85-118`。
+
+这项通用导入可以改变数据库配置，但不等同于 Web Connections 页面中的逐条新增、编辑、删除，也没有在本次静态调查中确认导入后前端缓存和正在运行的连接状态如何更新。
+
+## 3. 凭据、Header 与代理边界
+
+服务端 OpenAI Key 与 URL 并列保存在数据库配置 JSON 中；Ollama Key 保存在对应连接配置中。连接读取接口向管理员前端返回配置，前端使用 `SensitiveInput` 进行界面展示。`Config` 模型本身是普通 JSON 列，没有显示加密字段或密钥专用存储逻辑；通用配置导出也直接返回全部配置。因此源码确认了 UI 敏感输入，但没有确认静态存储加密、导出脱敏或日志中全面排除凭据。
+
+请求前，后端按 `auth_type` 组装 Bearer、无认证、会话凭据、系统 OAuth 或 Azure 身份凭据；自定义 Header 模板和用户信息 Header 也在此阶段处理。OpenAI 连接测试复用这套 Header/Cookie 组装逻辑，Ollama 验证只接收 URL 和 Key。真实聊天请求随后按连接 Provider 处理 Azure、Anthropic、Responses 或普通 OpenAI 兼容路径。入口见 `backend/open_webui/routers/openai.py:795-880` 和 `backend/open_webui/routers/ollama.py:247-285`。
+
+用户 Direct Connections 的 Key 直接由浏览器发送给用户填写的 Endpoint，并且 OpenAI 测试也是浏览器直接访问 `{url}/models`。代码和界面均提示需要上游正确配置 CORS；这与管理员连接由 Open WebUI 服务端代发请求的边界不同。
+
+## 4. 模型目录与能力元数据
+
+OpenAI 连接默认从 `{url}/models` 拉模型；Ollama 从 `{url}/api/tags` 拉模型。连接配置提供 `model_ids` 白名单：有白名单时后端不必依赖完整上游目录，可直接或筛选出指定模型。前缀、标签、连接类型和 Provider 会注入统一模型条目。模型目录缓存由后端维护，保存连接后会清空相关缓存并重新获取模型。
+
+`/models`、`/api/tags` 以及页面加载时的模型刷新只回答“有哪些模型”或更新缓存，不验证聊天生成能力。连接验证是单独的请求：OpenAI 普通连接请求 `/models`，Azure 和 Anthropic 有专用分支；Ollama 请求 `/api/version`。因此即使模型列表刷新成功，也不能据此记录为连接测试成功。
+
+workspace 模型是另一层数据库实体，可以覆盖基础模型或基于基础模型生成预设，也有独立的模型编辑、克隆、导入导出和删除能力。本笔记不把 workspace 模型的克隆/导入导出算作渠道复制/导入导出；其路由位于 `backend/open_webui/routers/models.py`，与 Connections 配置分开。
+
+## 5. Adapter、协议与请求组装
+
+统一聊天入口根据模型元数据选择 Pipelines、Ollama 或 OpenAI 兼容路径。OpenAI 兼容路由会根据模型条目的 `urlIdx` 取得 URL、Key 和配置，剥离 `prefix_id`，再按 Provider 和认证类型组装请求。Azure 会改写模型部署路径和 API 版本；Anthropic 使用专用 Header/模型目录处理；Responses API 可由连接配置选择。
+
+Ollama 既提供原生 `/api/chat` 等路径，也提供 OpenAI 风格 `/v1/chat/completions`、Anthropic Messages 和 Responses 适配路径。统一聊天工具会在 Ollama 模型与 OpenAI 风格请求之间转换请求参数和响应格式。连接类型字段主要影响元数据和请求策略，不创建独立 Provider 注册表。
+
+## 6. 运行时选择、绑定与路由
+
+聊天请求携带模型 ID。Open WebUI 先解析 workspace 模型与基础模型关系，再从已拉取的模型目录查找具体连接。OpenAI 模型条目保存一个 `urlIdx`，因此同名模型合并后的首个连接获胜；连接失败不会自动切换到同名的其他 OpenAI 连接。Ollama 同名模型保存多个 `urls` 索引，请求时随机选取一个后端；这是随机分摊，不是失败后重新选择的通用 failover。
+
+`prefix_id` 可避免不同连接的模型 ID 冲突；展示和路由使用带前缀的 ID，出站请求前剥离该前缀。`tags`、`connection_type`、模型白名单和访问授权影响目录展示及可访问性，但本次未找到按价格、延迟或语义自动路由的实现。
+
+## 7. 多 Key、限流、重试与故障转移
+
+OpenAI Key 与 URL 按索引一一对应，没有在连接管理或请求路径中找到 Key 轮换、冷却或多 Key 负载均衡。Ollama 每个 URL 配一个可选 Key；多个后端同名模型随机选择后端，但未找到失败后重试另一后端的逻辑。
+
+连接配置的 `enable` 会在拉取模型和请求时排除该连接；全局开关会关闭整类后端。请求使用统一超时和连接池设置，模型列表还有单独的较短超时。源码检索当前 OpenAI/Ollama 代理及聊天工具路径未找到 LLM 调用级重试循环；错误会归一化为连接错误或按上游状态返回，并发布模型提供方失败事件。
+
+因此当前能力边界为：
+
+| 能力 | 结论 |
+|---|---|
+| 多 OpenAI Endpoint | 支持，固定模型到 `urlIdx` |
+| 多 Ollama Endpoint | 支持，同名模型随机选择后端 |
+| Key 轮换 | 未找到 |
+| 请求重试 | 未找到 LLM 调用级重试 |
+| 跨 OpenAI 渠道 failover | 未找到 |
+| Ollama 失败后跨后端 failover | 未找到；随机选择不等于 failover |
+| 持久化健康状态 | 未找到 |
+| 手动连接测试 | 支持，独立 `/verify` |
+
+## 8. 连接检测、日志与可观测性
+
+管理员新增/编辑弹窗中的 Verify Connection 不保存连接。OpenAI 后端验证普通 Endpoint 的模型列表接口，Azure 使用对应 Azure 模型接口，Anthropic 使用专用模型获取逻辑；Ollama 验证版本接口。测试结果以返回数据或错误提示呈现，未发现把验证结果作为持久化健康状态保存。
+
+管理员保存连接后，前端主动刷新模型列表；后端更新接口清理缓存、清空应用状态中的基础/Provider 模型，并发布配置更新事件。这是配置变更后的目录刷新，不是连接测试。模型拉取失败也可能只表现为目录缺少模型，不能据此推断 `/verify` 的结果。
+
+运行时上游失败会发布 `MODEL_PROVIDER_REQUEST_FAILED` 事件并按状态码分类，例如模型不存在、认证失败、限流和服务端错误；请求错误通常仍以 HTTP 错误体或连接错误返回。用量、成本和延迟不作为本次渠道管理结论，静态检查未在 Connections 管理页发现专门的连接级成本/延迟面板。
+
+## 9. 平台与入口矩阵
+
+| 入口 | 查看 | 新增/编辑 | 复制 | 启停/删除 | 导入/导出 | 连接测试 | 结论 |
+|---|---|---|---|---|---|---|---|
+| 环境变量/配置文件 | 可通过部署文件或环境读取 | 手工改环境并重启；旧 `config.json` 仅迁移 | 未找到 | 由配置值控制全局或连接 | 当前连接无专用文件格式；通用 JSON 迁移/导出走 Web API | 未找到文件/CLI 测试 | 配置种子和迁移来源，不是交互管理器 |
+| CLI | 仅启动、开发、版本 | 未找到渠道子命令 | 未找到 | 未找到 | 未找到 | 未找到 | `backend/open_webui/__init__.py` 只有 `serve`、`dev` 和版本选项 |
+| TUI | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 本仓库文件和依赖中本次未找到 TUI 入口；不是“确认不支持整个项目”的绝对结论 |
+| 管理员 Web Connections | 支持 | 支持 | 未找到 | 支持 | 单条未找到；通用管理员配置 JSON 支持 | 支持 `/verify` | 服务端 OpenAI/Ollama 渠道的主要管理入口 |
+| 用户 Web Direct Connections | 支持 | 支持 OpenAI 兼容连接 | 未找到 | 支持 | 未找到 | 支持，浏览器直连 `/models` | 用户级设置，依赖 CORS，不等同管理员渠道 |
+| 桌面端 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 未验证 | 变更记录指向独立 `open-webui/desktop` 仓库，本地未提供其源码 |
+
+桌面端的已确认事实仅限于当前仓库的 `CHANGELOG.md`：0.9.0 条目说明存在独立原生桌面应用，可运行本地 Open WebUI 或连接远程实例。该描述没有证明桌面端是否复用管理员 Web Connections、是否能管理连接，因此这些项目在本次调查中标记为未验证。
+
+## 10. 设计取舍与已确认边界
+
+- 服务端配置采用数据库逐 key 持久化，使环境变量可以作为首次启动默认值，同时避免每次启动覆盖管理员在 Web 中的修改。
+- OpenAI 和 Ollama 共享相似的 URL 列表加连接配置结构，但连接测试协议不同：一个以模型目录为主，另一个以版本接口为主。
+- 管理员连接通过服务端代理访问上游，用户 Direct Connections 直接从浏览器访问上游；两者在凭据暴露、CORS 和权限范围上有明确差异。
+- 连接行的 `enable`、模型白名单、前缀和标签属于目录/路由配置；它们不等于上游服务本身的运行状态，也不产生持久化健康检查。
+- 通用配置导入导出覆盖数据库中的全部配置 key，不能当作安全的单条连接分享格式。源码确认存在凭据返回和导出路径，但本次未验证实际部署数据库加密、备份保护或日志内容。
+- Ollama 的随机后端选择提供了简单分摊，OpenAI 的固定 `urlIdx` 提供了确定性路由；二者都不能概括为通用的自动故障转移。
+
+## 11. 未验证事项
+
+- 未运行 WebUI，因此未验证浏览器实际视觉交互、保存失败时的界面状态、CORS、上游认证、缓存刷新时序和不同权限用户的可见结果。
+- 未运行 `/verify`、`/models` 或 `/api/tags`，连接测试与模型刷新结论来自静态请求路径。
+- 未对 SQLite、PostgreSQL 或其他部署方式实际检查数据库文件权限、备份内容和凭据是否由外部存储层加密。
+- 未调查独立 `open-webui/desktop` 仓库，因此桌面端连接管理、导入导出和多服务器切换不能从本仓库推断。
+- 本仓库内未找到 TUI 和渠道 CLI；这表示本次搜索范围内未找到实现，不将其扩展为对外部发行版或外部脚本的绝对否定。
+- 未将模型刷新、workspace 模型克隆、Ollama 模型下载/复制/删除与 LLM 渠道的复制、导入、导出混同；这些是模型实体或上游模型管理操作。
+
+## 12. 关键源码索引
+
+- 环境变量、默认配置和旧配置迁移：`backend/open_webui/config.py:82-89`、`:217-357`
+- 数据库配置模型、默认种子和持久化优先级：`backend/open_webui/models/config.py:99-165`、`:196-264`
+- OpenAI 配置读取、保存和模型索引：`backend/open_webui/routers/openai.py:267-305`、`:392-429`、`:529-711`
+- OpenAI 连接测试：`backend/open_webui/routers/openai.py:795-880`
+- Ollama 配置读取、保存和连接测试：`backend/open_webui/routers/ollama.py:213-348`
+- Ollama 多后端模型合并：`backend/open_webui/routers/ollama.py:351-366`、`:386-451`
+- 管理员 Connections 页面：`src/lib/components/admin/Settings/Connections.svelte:54-139`、`:209-401`
+- 连接新增/编辑/验证/删除弹窗：`src/lib/components/AddConnectionModal.svelte:74-230`、`:270-788`
+- 管理员 OpenAI/Ollama 行组件：`src/lib/components/admin/Settings/Connections/OpenAIConnection.svelte`、`OllamaConnection.svelte`
+- 用户 Direct Connections：`src/lib/components/chat/Settings/Connections.svelte:22-150`、`Connections/Connection.svelte`
+- 通用配置导入导出：`backend/open_webui/routers/configs.py:97-121`、`src/lib/components/admin/Settings/Database.svelte:85-118`
+- CLI 入口：`backend/open_webui/__init__.py:11-107`
+- 桌面端线索：`CHANGELOG.md:885-890`，指向外部 `open-webui/desktop` 仓库
