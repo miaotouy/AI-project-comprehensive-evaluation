@@ -97,7 +97,7 @@ tools = { ...tools, ...filesystemToolSet.tools }  // :332
 - `src/renderer/packages/model-calls/toolsets/filesystem.ts:297-339` 也定义 list_files（列目录）。
 - 合并顺序中知识库工具集先写入，文件系统工具集后写入并覆盖，具体顺序见 `tools-builder.ts:309-332`。
 
-当 knowledgeBase 与 agentMode=on 同时成立时（kbSupported 为真），知识库版本会被文件系统版本静默覆盖，模型永远拿不到“列出知识库文件”的能力，只能拿到“列目录”。系统提示词仍会保留知识库工具集的说明，造成“提示词声称的工具”与“实际可调用的工具”不一致——这是模型侧的隐性行为缺陷，而不是安全问题。相关拼接逻辑见 tools-builder.ts:270-332；横向调查笔记未提及此点，属新发现。
+当 knowledgeBase 与 agentMode=on 同时成立时（kbSupported 为真），知识库版本会被文件系统版本静默覆盖，模型永远拿不到“列出知识库文件”的能力，只能拿到“列目录”。系统提示词仍会保留知识库工具集的说明，造成“提示词声称的工具”与“实际可调用的工具”不一致——这是模型侧的隐性行为缺陷，而不是安全问题。相关拼接逻辑见 tools-builder.ts:270-332；
 
 read_file 也有类似的双重定义：一个面向用户上传的大文件，一个面向沙箱文件；但二者互斥出现。needFileToolSet 要求 !codeExecution，因此不会同时注册，不构成冲突，判断见 tools-builder.ts:239。
 

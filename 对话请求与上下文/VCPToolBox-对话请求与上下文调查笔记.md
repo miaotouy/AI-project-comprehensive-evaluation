@@ -21,7 +21,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **上下文裁剪是字符数估算**（`contextManager.pruneMessages`），不是摘要压缩，也不保证严格 token 上限；
 - **VCP 工具循环走纯文本标记协议**：`<<<[TOOL_REQUEST]>>>`，模型正文即调用声明，工具结果以 `<!-- VCP_TOOL_PAYLOAD -->` user 消息回送再次 POST；
 - **模型上下文与前端显示分叉**：工具循环维护独立的 `currentMessagesForLoop`，推理字段另存于日志消息，客户端看到的 SSE/JSON 与模型下一轮读取的内容不是同一份；
-- **存在显式的请求级停止与重试机制**：`/v1/interrupt` 端点 + 客户端断联级联中止（本次调查新核实，旧版本未记录）；上游调用有状态码重试、连接超时、语义路由候选模型回退；响应层有按 `clientIp::messageId` 的去重回放。
+- **存在显式的请求级停止与重试机制**：`/v1/interrupt` 端点 + 客户端断联级联中止；上游调用有状态码重试、连接超时、语义路由候选模型回退；响应层有按 `clientIp::messageId` 的去重回放。
 
 ## 系统边界与生成任务主链
 
@@ -113,7 +113,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 
 ## 5. 停止、重试与并发
 
-本次调查核实到明确的请求级停止与重试机制（旧版笔记未记录，结论已修正）：
+明确的请求级停止与重试机制：
 
 - **显式停止**：`POST /v1/interrupt`（`server.js:1058-1167`）按 `requestId`/`messageId` 在 `activeRequests` 中查找，置 `aborted` 标志并调用 `AbortController.abort()`；流式请求回发"请求已被用户中止"的 SSE chunk + `[DONE]`，非流式回发同文案 JSON；随后延迟 1 秒删除注册表条目。这是一个独立端点，与聊天主链通过共享 Map 关联。
 - **客户端断联级联中止**：`handle()` 为有 id 的请求注册 `req 'aborted'/'close'` 与 `res 'close'` 监听，传输层断联（无法区分用户停止/刷新/断网）会触发同样的 abort 链路（`modules/chatCompletionHandler.js:763-807`）。`fetchWithRetry` 对 AbortError 不重试（493-510），handler 循环每轮检查 `abortController.signal.aborted` 提前退出（`streamHandler.js:423-427`、309-313 非流式）。

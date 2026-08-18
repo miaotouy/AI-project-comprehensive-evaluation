@@ -22,7 +22,7 @@ Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地�
 - thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复可折叠为分支组）、summary（消息级压缩标记）与 starred（置顶分组）是**四套独立的数据结构**，唯一的交叉点是"move thread to conversations"会把 thread 转成新的顶层会话（第 1 节）。
 - 归档 = `hidden: true` + `archivedAt` 时间戳，不删除任何数据；恢复归档不会重置 `sortOrder`。
 - 消息搜索没有持久化倒排索引，按分页读取完整 Session 后逐条扫描。
-- 自动压缩触发阈值已核实：按模型上下文窗口与 `compactionThreshold`（默认 0.6）计算 token 预算（第 1.4 节），此前标注"未逐行展开"的事项本次已核实。
+- 自动压缩触发阈值：按模型上下文窗口与 `compactionThreshold`（默认 0.6）计算 token 预算（第 1.4 节）。
 
 ## 系统边界与数据主链
 
@@ -90,7 +90,7 @@ renderer 侧由 `packages/context-management/compaction-boundary.ts:12-21`（bou
 
 复制会话/挪 thread 成独立会话时，`remapCompactionPoints`（`src/shared/types.ts:313-337`）按完整 id 映射重映射压缩点，映射不上的点被丢弃（`stores/session/crud.ts:92-102`）。
 
-**触发阈值（本次核实）**：`compaction-detector.ts` 的 `checkOverflow`（`:31-58`）按下式判定；其中固定输出预留 32,000 token，默认阈值系数 0.6，`compactionThreshold` 可经全局设置调整（常量定义与取值见 `:4-5、:49`）；未知模型（无法确定 contextWindow）不触发。
+**触发阈值**：`compaction-detector.ts` 的 `checkOverflow`（`:31-58`）按下式判定；其中固定输出预留 32,000 token，默认阈值系数 0.6，`compactionThreshold` 可经全局设置调整（常量定义与取值见 `:4-5、:49`）；未知模型（无法确定 contextWindow）不触发。
 
 ```text
 isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compactionThreshold

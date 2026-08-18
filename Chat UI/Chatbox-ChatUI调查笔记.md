@@ -20,7 +20,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 - 首页是一个"假会话"（id 固定为 `'new'`），发送前的临时状态被分散存放在三种不同的容器里；首次发送时转入真实 Session。
 - 消息区用 `react-virtuoso` 虚拟化，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不丢阅读位置；流式跟随由自研 smooth-follow 控制器接管。
 - Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换），替代回复不再以独立导航条平铺；两者与侧栏分组无关。
-- 发送/停止按钮本身没有 `aria-label`（生成态外包了一层 Tooltip 显示 "Stop"），是本次调查发现的最直接的无障碍缺口。
+- 发送/停止按钮本身没有 `aria-label`（生成态外包了一层 Tooltip 显示 "Stop"），是最直接的无障碍缺口。
 - 桌面端全局快捷键只有"显示/隐藏窗口"，托盘不显示聊天状态，系统通知 API 未接入（`new Notification(` 全仓库无匹配）。
 - 草稿按会话粒度存 localStorage：首页假会话用固定 key `'new-chat'`，真实会话用 `draft-${sessionId}`（300ms 防抖）；发送成功后清除。
 - 网页浏览开关经 uiStore 的 persist 中间件持久化（跨重启保留），知识库与 Agent 模式开关不持久化（重启丢失）。
@@ -125,7 +125,7 @@ const [session, setSession] = useState<Session>({
 
 ### 3.2 草稿：按会话粒度的 localStorage
 
-草稿由 `useMessageInput` 管理：key 规则是首页假会话固定 `'new-chat'`、真实会话按 `draft-${sessionId}`（`useMessageInput.ts:18-20`），输入 300ms 防抖写入 localStorage（:29-35），挂载时恢复、发送成功后清除对应 key（:22-27, 62-79）。首页假会话的草稿在创建真实会话后被显式删除（`routes/index.tsx:336`）——此前曾标注"未找到写入点"，本次已核实为草稿 key。真实会话按会话各自独立，切换会话不串草稿。
+草稿由 `useMessageInput` 管理：key 规则是首页假会话固定 `'new-chat'`、真实会话按 `draft-${sessionId}`（`useMessageInput.ts:18-20`），输入 300ms 防抖写入 localStorage（:29-35），挂载时恢复、发送成功后清除对应 key（:22-27, 62-79）。首页假会话的草稿在创建真实会话后被显式删除（`routes/index.tsx:336`）。真实会话按会话各自独立，切换会话不串草稿。
 
 ### 3.3 输入快捷操作
 
@@ -148,7 +148,7 @@ Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工
 ## 5. 发送、排队、流式反馈与停止
 
 - **提交顺序**：提交处理器先更新 UI 滚动状态（标记新消息并瞬间滚到底部），再经 `submitNewUserMessage` 提交；输入区提交前有禁用态合并检查（生成中、预处理中、等待审批、存在预处理错误、RAG 附件索引未就绪时弹"文档仍在索引中"确认框，`InputBox.tsx:838-848, 881-884, 1936-1967`）。
-- **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称）——屏幕阅读器用户聚焦该按钮时得不到文字描述，这是本次调查里发现的最直接的无障碍缺口；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
+- **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称）——屏幕阅读器用户聚焦该按钮时得不到文字描述，这是最直接的无障碍缺口；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
 - **生成中占位**：`Message.tsx:982-991` 在生成且内容为空时渲染自定义 `Loading` 组件（`components/icons/Loading.tsx`）——手写 SVG 动画：四个圆点用 `<animate>` 标签分别做纵坐标/透明度/半径三个属性的关键帧动画（周期 1.25s），四个点依次延迟 0s/0.2s/0.4s/0.6s 开始，形成"依次跳动"的等待指示器。
 - **工具调用等待中**：`MessageLoading.tsx` 提供 `MessageStatuses`/`PreparingToolCallStatus`（`Message.tsx:89` 引入，`:955-957` 渲染），用于区分"纯文本生成中"和"准备/等待工具调用"两种状态展示。
 - **网络请求失败**：走消息级的 `MessageErrTips.tsx`，根据 HTTP 状态码查一张文案映射表（`httpStatusCodeI18nKeys`，覆盖 401/403/408/429/500/502/503/504），给出可读文案；还会检测错误内容是不是网关返回的原始 HTML 页面（`isHtmlContent`），避免把一整页 HTML 源码糊给用户看。
@@ -209,7 +209,7 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ### 9.1 无障碍
 
-- **发送/停止按钮没有 `aria-label`**：`InputBox.tsx:1493-1510` 的发送/停止按钮只用图标区分状态，没有可访问名称、没有 title 属性；生成态有 Tooltip 包裹（"Stop"/"Stop all N replies"，:1486-1492），但 Mantine Tooltip 不向触发元素注入可访问名称属性——屏幕阅读器用户聚焦此按钮时仍得不到文字描述。这是本次调查里发现的最直接的无障碍缺口。输入框本身有可访问名称（`MessageInputField`，:1477）。
+- **发送/停止按钮没有 `aria-label`**：`InputBox.tsx:1493-1510` 的发送/停止按钮只用图标区分状态，没有可访问名称、没有 title 属性；生成态有 Tooltip 包裹（"Stop"/"Stop all N replies"，:1486-1492），但 Mantine Tooltip 不向触发元素注入可访问名称属性——屏幕阅读器用户聚焦此按钮时仍得不到文字描述。这是最直接的无障碍缺口。输入框本身有可访问名称（`MessageInputField`，:1477）。
 - **模型选择器有 Tooltip，但触发元素本身没有 `aria-label`**：`InputBox.tsx:1899-1920` 的模型选择器触发按钮没有可访问名称，视觉上靠内部文本文案传达当前模型名，对屏幕阅读器不算严重问题（有文本内容可读），但下拉箭头图标没有 `aria-hidden`。内部的行项组件（`ModelRow.tsx:113, 121, 127, 144`）反而做得更完整：视觉能力图标（Vision/Reasoning）、模型详情、收藏按钮都有 `aria-label`。
 - **`trapFocus={false}` 的弹窗**（消息编辑、会话设置、Copilot 详情与设置四个弹窗）打开时键盘 Tab 键可以聚焦到弹窗背后的页面元素——这是 git log 可查证的、有意为之的修复（为解决 iOS Safari 里 Modal 内文本框无法长按选中文字的问题），但客观上牺牲了这四个弹窗的键盘可达性边界，是一个真实存在、有代码证据、且项目方明知取舍的无障碍缺口。
 - **做得相对完整的反例**：项目里多处图标按钮补了可访问名称——

@@ -27,7 +27,7 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
 | Agent Groups | `入口确认`/`归并已有类目` | 群组对象与模板已被 Agent 角色笔记覆盖；群聊会话表面在会话类目边界内，本次只确认路由与成员编辑面 |
-| Project | `主链确认`（静态证据） | 上快照无独立 project 表、仅按工作目录分组；本快照已落地 `projects` 实体（表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent），与按工作目录的话题分组并存 |
+| Project | `主链确认`（静态证据） | 已落地 `projects` 实体（表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent），与按工作目录的话题分组并存 |
 
 README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可走通主链的独特能力**；Agent 运营（Brief/Work）是第三个高价值候选，但“hires”（Agent 市场/雇用）与统计页只到入口级。源码范围还确认了首页未展开的**异构 Agent 统一托管**：本地 coding CLI 和 OpenClaw/Hermes 都成为一等执行对象。Workspace 与 Pages 属于跨类目组合能力，达到入口确认，完整主链依赖既有类目笔记的文档/权限/设备链。**Goals（目标任务闭环）** 已具备可走通的静态主链（见能力五），Project 从“轻量组织概念”升级为独立实体。
 
@@ -177,7 +177,7 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 ## 声明不符、外部依赖与暂缓项
 
-- **Project（按项目组织）**：上快照的结论（数据库无 project 表、仅按工作目录分组）已过时。本快照（HEAD）新增完整 Project 实体，四层落地：
+- **Project（按项目组织）**：新增完整 Project 实体，四层落地：
   - **表**：`projects` 实体含 `projects`/`projectAgents`/`projectChatGroups`/`projectKnowledgeBases`/`projectCompletionReviews` 五张表（`packages/database/src/schemas/project.ts:28`，migration 0134-0139）；
   - **API**：tRPC 路由覆盖创建/更新/删除/状态/验收/挂接 Agent 与知识库等操作，写操作带 `withScopedPermission('agent:update')` 保护（`apps/server/src/routers/lambda/project.ts`）；
   - **CLI**：`project list/view/create/edit/delete/status`，描述为"Manage goal-oriented projects"（`apps/cli/src/commands/project.ts`）；

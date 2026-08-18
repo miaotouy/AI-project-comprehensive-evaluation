@@ -34,7 +34,7 @@ Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一�
 - 没有渠道权重、优先级、成本或延迟路由；
 - 设置页的批量健康检查会测试每个模型与每个 Key 并显示延迟，但结果不参与运行时调度。
 
-Provider Key、OAuth Token 和云 IAM 凭据以 SQLite JSON 文本字段落在 `<Electron userData>/cherrystudio.sqlite`，当前没有 SQLCipher、字段加密或系统 Keychain。**备份覆盖已接通 SQLite**（见 §3.4）：v7 直接备份的 full/slim 两种布局都包含 `cherrystudio.sqlite`，恢复时经 checkpoint + 崩溃安全 promotion 门落回数据库——"v2 Provider 配置与凭据不进真实备份"的旧结论已不成立。
+Provider Key、OAuth Token 和云 IAM 凭据以 SQLite JSON 文本字段落在 `<Electron userData>/cherrystudio.sqlite`，当前没有 SQLCipher、字段加密或系统 Keychain。**备份覆盖已接通 SQLite**（见 §3.4）：v7 直接备份的 full/slim 两种布局都包含 `cherrystudio.sqlite`，恢复时经 checkpoint + 崩溃安全 promotion 门落回数据库。
 
 ## 总体调用链
 

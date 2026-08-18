@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-此前"覆盖闭环、无独立独特能力卡"的结论不成立。需要注意：当前仓库是经过大重构的 V2 结构（`packages/core` 事件溯源会话核心、`packages/opencode` 主 CLI、`packages/codemode`、`packages/session-ui`、`packages/slack` 等 32 个包），旧结论可能基于旧结构。本轮确认以下达到 `主链确认`（静态证据）的新候选：
+当前仓库是经过大重构的 V2 结构（`packages/core` 事件溯源会话核心、`packages/opencode` 主 CLI、`packages/codemode`、`packages/session-ui`、`packages/slack` 等 32 个包）。确认以下达到 `主链确认`（静态证据）的新候选：
 
 1. **多表面/多设备会话连续性**（主贡献候选）：headless server + 事件溯源同步（单写者、seq 全序、`owner_id`）+ `/sync` 的重放/接管（steal），TUI、Web、Desktop、WSL、局域网（mdns `opencode.local`）与云端 workspace 共享同一批会话与进行中的任务。
 2. **CodeMode 受限 JS 编排**（主贡献候选）：模型用一小段受限 JS 编排多个 MCP 工具（无 eval 解释器、plain-data 边界、超时/输出上限、busy-loop 中断），是直接工具调用、任务分派之外的第三类执行范式。

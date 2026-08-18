@@ -267,7 +267,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 **一个值得记录的空路径。** 偏好 app.notification.assistant.enabled 和对应设置项开关（`NotificationSettings.tsx:36-48`，"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用 source: 'backup' 和 source: 'update'。
 
-即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩（不同于代码里自己写 TODO 承认的 update 缺口，见 `NotificationService.ts:17-20`；assistant 这条连 TODO 都没提到，属于本次调查新发现）。
+即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩（不同于代码里自己写 TODO 承认的 update 缺口，见 `NotificationService.ts:17-20`）。
 
 **全局快捷键。** `ShortcutService.ts` 按**本地/全局分轨**注册——global 标记的仍走 globalShortcut（含失焦时的注册集），其余本地快捷键不再注册到系统，而是挂在窗口 webContents.before-input-event（含 did-attach-webview 挂上的 guest webview 输入）上按命令解析拦截（`ShortcutService.ts:123-196`），应用失焦时本地快捷键自然不生效；
 

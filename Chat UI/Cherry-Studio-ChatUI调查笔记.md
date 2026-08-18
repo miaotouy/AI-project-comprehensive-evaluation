@@ -19,7 +19,7 @@
 - **搜索是双轨的**：会话内搜索（`MessageListSearch` + `FindBar`）是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"的混合实现，`a012837e5c` 起支持虚拟化窗口外的消息定位；跨会话全局搜索（`GlobalSearchPopup`，`app.search` 命令）走主进程 FTS（数据侧见会话与消息管理笔记 5）。
 - **多模型并行**通过 Composer 的"提及模型"多选触发：选中 N 个模型 → 主进程并行 N 个 execution，读侧按兄弟组横向/网格展示（执行语义见对话请求与上下文笔记 8）。
 - **桌面集成与聊天状态联动最少**："助手回复完成"系统通知开关仍接不到任何触发点（全仓库无 `source: 'assistant'` 调用）、托盘无未读/流式角标、无快捷键速查浮层。
-- **无障碍**：Topic/Session 列表有完整的 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮现在都有 `aria-label`（取自 action 的翻译 label，本次调查确认已修复）；Composer 输入区本体仍没有可访问名称（RichEditor 内核支持可选 `ariaLabel`，但 ComposerSurface 未传入）。
+- **无障碍**：Topic/Session 列表有完整的 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮现在都有 `aria-label`（取自 action 的翻译 label）；Composer 输入区本体仍没有可访问名称（RichEditor 内核支持可选 `ariaLabel`，但 ComposerSurface 未传入）。
 
 ## 工作台边界与用户主链
 
@@ -69,7 +69,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
   | 已完成但未读 | 绿色小圆点（`:47`） |
 
   状态由 `Topics.tsx:1727-1735` 从 topic 流状态派生（`isFulfilled = done && lastCompletedAt !== lastSeenCompletion`，`useTopicStreamStatus.ts:48`；读收条语义：只有非当前行且未读才显示完成点）；指示器是绝对定位 overlay，悬停/聚焦时淡出让位给 pin/delete 操作（`ConversationRowStatus.tsx:17-18`）。
-- **草稿存在指示**（本次调查新确认）：Topic 行还有草稿图标指示（`TopicDraftIndicator`，`Topics.tsx:1900-1912`），订阅草稿缓存的按会话存在性查询（`chatDraftCache.ts:50-52`），当前行与高优先级状态不显示（`:1890-1897`）。
+- **草稿存在指示**：Topic 行还有草稿图标指示（`TopicDraftIndicator`，`Topics.tsx:1900-1912`），订阅草稿缓存的按会话存在性查询（`chatDraftCache.ts:50-52`），当前行与高优先级状态不显示（`:1890-1897`）。
 
 ### 2.2 Topic 拖拽排序：仅助手分组可拖
 
@@ -253,14 +253,14 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 
-### 9.1 无障碍：列表完整，输入区有缺口（本次核实两处旧结论）
+### 9.1 无障碍：列表完整，输入区有缺口
 
 **做得到位的地方**（有代码实证）：
 
 - `ResourceList`（Topic 列表、Agent Session 列表共用的基础组件）实现标准的 **roving tabindex + `aria-activedescendant`** 模式，容器与行的 ARIA 角色如下；方向键/Home/End/Enter 等键盘操作都有对应测试覆盖并断言该属性正确移动（`__tests__/ResourceList.test.tsx:611-674`）——会话导航这条关键路径的键盘可用性有保障。
   - 容器：`role="listbox"`（`ResourceListVirtual.tsx:554,788`）
   - 行：`role="option"` + `aria-selected`（`ResourceList.tsx:416-417`）
-- **消息操作栏按钮都有 `aria-label`**（本次核实为已修复）：按钮组件显式传入 `aria-label`，值为 action 的翻译文本，如"编辑/复制/重新生成"（`MessageMenuBarToolbarRenderers.tsx:83,107`，label 来源 `messageMenuBarActions.tsx:291-412`）；模型选择器、翻译、更多菜单也显式传入（`:292,316,367,424`）。旧结论"默认渲染路径缺 aria-label、只有视觉 Tooltip"已不成立。
+- **消息操作栏按钮都有 `aria-label`**：按钮组件显式传入 `aria-label`，值为 action 的翻译文本，如"编辑/复制/重新生成"（`MessageMenuBarToolbarRenderers.tsx:83,107`，label 来源 `messageMenuBarActions.tsx:291-412`）；模型选择器、翻译、更多菜单也显式传入（`:292,316,367,424`）。
 - 折叠交互（用户消息折叠、Thinking 块展开/收起）用真实的 `aria-expanded`/`aria-controls`，且是可聚焦、可键盘触发的 `role="button"`（`MainTextBlock.tsx:291-292`、`ThinkingBlock.tsx:115-129`）——但这两个是消息内容组件，渲染细节见消息渲染器笔记。
 
 **实证的缺失**：

@@ -65,7 +65,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 
 ### 2.3 搜索入口
 
-`loadTopicList()`（`modules/topicListManager.js:498-616`）读取搜索框的值经 `parseTopicSearchQuery` 解析（:533 起）：普通关键词走前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）；完整输入"未读话题"/"unread topic"时跳过文本搜索，改由未读置顶逻辑把未读话题置顶（:599）。搜索框提示与 `aria-label` 已更新为"搜索话题或未读话题"（`main.html:213-216`）。
+`loadTopicList()`（`modules/topicListManager.js:498-616`）读取搜索框的值经 `parseTopicSearchQuery` 解析（:533 起）：普通关键词走前端过滤 + 后端内容检索的并集（数据侧见会话与消息管理笔记 5.2）；完整输入"未读话题"/"unread topic"时跳过文本搜索，改由未读置顶逻辑把未读话题置顶（:599）。搜索框提示与 `aria-label` 为"搜索话题或未读话题"（`main.html:213-216`）。
 - 话题条目另带"未读 N"/"未读"文字指示器（样式类与创建函数见 `topicListManager.js:178-198`、`:330-365`）；发送消息会清除持久化未读（`modules/chatManager.js:1037-1055`；未读语义细节见会话与消息管理笔记 5.3）。
 
 ### 2.4 现场恢复

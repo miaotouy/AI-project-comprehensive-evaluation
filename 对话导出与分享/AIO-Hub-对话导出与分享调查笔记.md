@@ -20,7 +20,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 本次未找到截图模块内直接改写消息正文副本的 `contenteditable`、textarea、CodeMirror 或消息内容更新入口。当前实现中的“可编辑”仅指分享稿的选区与视觉编排，不包含独立的正文编辑器。
 
-本轮补充确认了三件事。其一，截图候选列表的来源是唯一的：`ShareScreenshotDialog` 只在 `ChatArea.vue:638-650` 实例化，消息一律来自活动路径与智能体开场白展示消息，范围不含完整树；消息菜单、树图节点菜单和导出弹窗“生成分享长图”都汇入同一个对话框。其二，截图内容是数据驱动的独立重渲染：复用消息组件但隐藏编辑、menubar、流式指示器等现场交互元素；生成流程对消息内容没有快照冻结，运行中生成时理论上可能截到流式更新的中间态（推断）。其三，结构化分支导出（Markdown/JSON/Raw JSON）只产生文件，没有导入入口；项目内仅批量备份 ZIP 管线支持会话往返。
+截图候选列表的来源是唯一的：`ShareScreenshotDialog` 只在 `ChatArea.vue:638-650` 实例化，消息一律来自活动路径与智能体开场白展示消息，范围不含完整树；消息菜单、树图节点菜单和导出弹窗“生成分享长图”都汇入同一个对话框。其二，截图内容是数据驱动的独立重渲染：复用消息组件但隐藏编辑、menubar、流式指示器等现场交互元素；生成流程对消息内容没有快照冻结，运行中生成时理论上可能截到流式更新的中间态（推断）。其三，结构化分支导出（Markdown/JSON/Raw JSON）只产生文件，没有导入入口；项目内仅批量备份 ZIP 管线支持会话往返。
 
 ## 系统边界与完整主链
 
@@ -86,7 +86,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 这些配置通过 `v-model` 直接进入预览面板和渲染器，预览 DOM 会实时变化（`components/screenshot/ShareScreenshotDialog.vue:35-64`）。预览支持 40%–200% 缩放和拖拽平移；预览缩放不改变最终图片倍率（`ScreenshotPreviewPanel.vue:20-110,389-456`）。
 
-运行保真关系（本轮确认）：渲染器用同一批消息组件按传入数据重新渲染，数据响应式来自 store（LlmChat computed → ChatArea props → 对话框 → 预览面板 → 渲染器）。因此图片与聊天现场的一致性取决于“store 数据 vs 现场 DOM 状态”的同步程度。
+运行保真关系：渲染器用同一批消息组件按传入数据重新渲染，数据响应式来自 store（LlmChat computed → ChatArea props → 对话框 → 预览面板 → 渲染器）。因此图片与聊天现场的一致性取决于“store 数据 vs 现场 DOM 状态”的同步程度。
 
 截图模式下，编辑/重新生成/翻译按钮、菜单栏、流式指示器、gpt-image-2 部分预览和翻译控件被显式隐藏（`components/message/MessageContent.vue:1000,1163,1173-1177`；`message/ChatMessage.vue:319`；`message/ToolCallMessage.vue:1130-1133`）；工具卡展开由折叠策略接管、不接受交互（`ToolCallMessage.vue:284-289`）。
 
@@ -107,7 +107,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 最终只输出 PNG：复制使用系统剪贴板，保存通过 Tauri 文件对话框写入 PNG 字节。字节转换用 `atob` 解码 Data URL，刻意避开受 CSP 限制的 `fetch(dataUrl)`（`utils/screenshotCapture.ts:960-993`）。
 
-极长图没有尺寸防护（本轮确认）：捕获拼接把全部消息拼到单张 Canvas，尺寸直接取总宽总高与输出倍率之积，没有任何维度上限检查、分块或分段保存（`utils/screenshotCapture.ts:391-393`）。高度只受运行平台 Canvas 上限与内存约束；宽度上限 1280 CSS px 与 3x 输出意味着最宽约 3840px，长会话下高度先触及平台上限（约 32767/65535px 级），失败表现与触发点取决于 WebView 实现。
+极长图没有尺寸防护：捕获拼接把全部消息拼到单张 Canvas，尺寸直接取总宽总高与输出倍率之积，没有任何维度上限检查、分块或分段保存（`utils/screenshotCapture.ts:391-393`）。高度只受运行平台 Canvas 上限与内存约束；宽度上限 1280 CSS px 与 3x 输出意味着最宽约 3840px，长会话下高度先触及平台上限（约 32767/65535px 级），失败表现与触发点取决于 WebView 实现。
 
 失败处理只有两层：单条消息 `drawImage` 失败被捕获后跳过继续（`screenshotCapture.ts:479-484`），大画布创建或 `toDataURL` 编码失败统一走“生成截图失败”提示，无尺寸专项提示或降级路径。另外，截图历史每一项同时在内存中持有 Canvas 与 Data URL（`ScreenshotPreviewPanel.vue:477-487`），多次生成大图会叠加占用内存。
 
@@ -117,7 +117,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map（`composables/features/useExportManager.ts:607-841,1078-1130`）。
 
-往返结论（本轮确认）：本次未找到 Markdown/JSON/Raw JSON 三种导出格式的导入入口。在 `src/tools/llm-chat` 全目录搜索导入路径，只发现会话备份 ZIP 导入（`components/sidebar/BatchManagerDialog.vue:676-708` → `services/sessionImportExportService.ts:163-201` → `stores/session/sessionLifecycleManager.ts:381`）、SillyTavern 正则/世界书导入、快捷操作导入和智能体导入，没有任何代码读取分支 Markdown/JSON 回写会话。上述搜索覆盖 TypeScript 文件中的文件读取调用与各 Dialog 入口，足以确认结构化导出格式不支持往返。
+往返结论：本次未找到 Markdown/JSON/Raw JSON 三种导出格式的导入入口。在 `src/tools/llm-chat` 全目录搜索导入路径，只发现会话备份 ZIP 导入（`components/sidebar/BatchManagerDialog.vue:676-708` → `services/sessionImportExportService.ts:163-201` → `stores/session/sessionLifecycleManager.ts:381`）、SillyTavern 正则/世界书导入、快捷操作导入和智能体导入，没有任何代码读取分支 Markdown/JSON 回写会话。上述搜索覆盖 TypeScript 文件中的文件读取调用与各 Dialog 入口，足以确认结构化导出格式不支持往返。
 
 项目内真正可往返的是另一条批量备份管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:119-125,127-161`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`:70-117,203-257`）。
 
@@ -134,7 +134,7 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 3. 子组件观察到已生成 URL 变为空，把全部已有项标记为 `stale=true`，但不删除；
 4. 用户可以切换缩略图、查看大图、复制或保存任一旧版本，也可单删或清空历史（`ShareScreenshotDialog.vue:309-322`；`ScreenshotPreviewPanel.vue:473-540`）。
 
-历史没有进入 store、Tauri command 或持久化 service，是组件局部运行时状态（本轮进一步确认：`BaseDialog` 默认 `destroyOnClose: true`，`src/components/common/BaseDialog.vue:20,147`，对话框内容在关闭时卸载，`ScreenshotPreviewPanel` 随重建，历史列表在关闭并重新打开后不保留）。
+历史没有进入 store、Tauri command 或持久化 service，是组件局部运行时状态（`BaseDialog` 默认 `destroyOnClose: true`，`src/components/common/BaseDialog.vue:20,147`，对话框内容在关闭时卸载，`ScreenshotPreviewPanel` 随重建，历史列表在关闭并重新打开后不保留）。
 
 ## 6. 富内容、隐私与已确认边界
 

@@ -131,7 +131,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 ### 渠道与调度
 
-- **LLM 渠道管理与 Provider 适配**：一条渠道建模为一个 `LlmProfile`，同时持有协议类型、Base URL、多 Key、模型目录、自定义 Header/端点、网络策略与 Provider 专属参数；桌面端有 21 种可见渠道类型，包括 New API、Sub2API、通用聚合和 OpenCode Go 四类聚合渠道。渠道类型负责配置身份，真实请求仍由模型执行路由解析到协议适配器；Azure 漂移已修复，适配器注册通过完整类型约束保证每个 Provider 都有实现。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) 1/6。
+- **LLM 渠道管理与 Provider 适配**：一条渠道建模为一个 `LlmProfile`，同时持有协议类型、Base URL、多 Key、模型目录、自定义 Header/端点、网络策略与 Provider 专属参数；桌面端有 21 种可见渠道类型，包括 New API、Sub2API、通用聚合和 OpenCode Go 四类聚合渠道。渠道类型负责配置身份，真实请求仍由模型执行路由解析到协议适配器；适配器注册通过完整类型约束保证每个 Provider 都有实现。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) 1/6。
 
 - **多 Key 轮询与熔断**：同渠道多 Key 按轮询选择并过滤健康状态，记录启停、连续错误、429 熔断与自动恢复；多 Key 不是请求级重试器，某次失败只更新 Key 状态并把错误抛给上层。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md) 5。
 
@@ -188,7 +188,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 ### web-canvas 子系统的当前边界
 
-本轮上游增量已经改变旧快照中八项断点的静态结论：审批改用不落盘候选覆盖层，错误经窗口总线回到主窗口，当前画布目录有递归 watcher，Monaco 写入捕获原目标并在生命周期边界 flush/cancel，dirty 状态按 canvasId 分区，canvas iframe 使用 opaque origin、专用 CSP 与消息来源校验，文件入口限制为规范化相对路径，并新增专项回归测试。
+审批改用不落盘候选覆盖层，错误经窗口总线回到主窗口，当前画布目录有递归 watcher，Monaco 写入捕获原目标并在生命周期边界 flush/cancel，dirty 状态按 canvasId 分区，canvas iframe 使用 opaque origin、专用 CSP 与消息来源校验，文件入口限制为规范化相对路径，并新增专项回归测试。
 
 仍需保留的边界如下：
 

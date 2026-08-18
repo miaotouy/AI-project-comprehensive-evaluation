@@ -183,7 +183,7 @@ LOCKED_THEME_VAR_RULES（:951-976）把以下前缀类结构 token 锁为只读"
 
 **Dashboard 网格。** 两层机制——卡片内容器查询断点（520/420/360/280px，`components/dashboard/dashboard-card.css:207-283`，约 14 个卡片消费）；
 
-网格层用 CSS Grid auto-fit 且通过 getComputedStyle(gridTemplateColumns) 反推列数判定 desktop/tablet/mobile 模式（`Dashboard.vue:319-358`），卡片大小 token `desktopCols/tabletCols/rows` 以自定义属性 `--dashboard-card-cols-desktop/-tablet/--dashboard-card-rows` 下发（:309-317），布局持久化于 localStorage（`useDashboardLayoutV2.ts`，含旧版布局迁移 :130-152）。
+网格层用 CSS Grid auto-fit 且通过 getComputedStyle(gridTemplateColumns) 反推列数判定 desktop/tablet/mobile 模式（`Dashboard.vue:319-358`），卡片大小 token `desktopCols/tabletCols/rows` 以自定义属性 `--dashboard-card-cols-desktop/-tablet/--dashboard-card-rows` 下发（:309-317），布局持久化于 localStorage（`useDashboardLayoutV2.ts`，含布局迁移 :130-152）。
 
 **移动端路由。** 无独立移动端路由或入口；Login 独立页其余共享同一 shell。
 

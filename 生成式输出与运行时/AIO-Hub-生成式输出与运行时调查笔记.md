@@ -37,11 +37,9 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 **能力等级认定**：综合 **G4（可编辑工作区）**。web-canvas 有稳定项目 ID、物理文件、Git、候选预览和运行错误回流，具备若干 G5 原料；但运行实例和审批候选层都不持久，也没有后台持续维护或跨会话自主调度，因此当前快照的 **G5 证据仍不足**。聊天内 HTML 代码块沙箱为局部 G3，其余聊天输出停留在 G0–G1。
 
-### 已修正机制与剩余边界
+### 剩余边界
 
-旧快照中审批提前写盘、窗口错误不回流、路径未限制、跨画布 dirty 状态混用、外部编辑无监听和 Monaco 跨标签写错文件等行为，在当前实现中已有对应机制变化：
-
-1. **审批预览改为瞬时内存覆盖层。** 预览钩子登记 mutation 并重建候选文件映射，不调用正式写入；批准后 executor 只执行一次真实方法，完成或失败后消费候选记录，拒绝则移除该请求并重算其余候选。候选层不持久化，应用重启或窗口异常关闭后的预览恢复未验证（`CanvasAgentService.ts:299-415`、`canvasStore.ts:580-640`）。
+1. **审批预览为瞬时内存覆盖层。** 预览钩子登记 mutation 并重建候选文件映射，不调用正式写入；批准后 executor 只执行一次真实方法，完成或失败后消费候选记录，拒绝则移除该请求并重算其余候选。候选层不持久化，应用重启或窗口异常关闭后的预览恢复未验证（`CanvasAgentService.ts:299-415`、`canvasStore.ts:580-640`）。
 2. **运行时错误链已静态贯通。** 预览窗口把校验后的错误通过 `canvas:runtime-error` 全量消息发送，主窗口总线再次校验、裁剪并写入按 canvasId 管理的错误 store；`getExtraPromptContext()` 再把绑定画布的错误摘要交给 Agent。跨窗口时序、重复去重和真实脚本报错仍需运行验证（`CanvasWindow.vue:176-202`、`useCanvasSync.ts:113-151`、`CanvasAgentService.ts:32-108`）。
 3. **外部文件变更进入当前画布监听。** Store 打开画布后递归 watch 项目目录，忽略 `.git` 与元数据文件，对其余变更做 300ms 合并，刷新 Git 状态、标记旧错误并广播文件变化。监听器一次只绑定一个当前画布，多个窗口或快速切换项目的实际行为未验证（`canvasStore.ts:118-173`、`useCanvasStorage.ts:163-176`）。
 4. **编辑与状态按目标绑定。** Monaco 防抖任务捕获 `canvasId + filepath + content`，提交前 flush、丢弃时 cancel，组件卸载会释放文件变化监听；Git dirty 状态保存在 `dirtyFilesByCanvas`，Agent 上下文按绑定 canvasId 读取（`CanvasEditorPanel.vue:127-205`、`canvasStore.ts:94-116`）。用户与 Agent 仍没有 revision、CRDT 或冲突合并，实际并发写入遵循最后写入者。

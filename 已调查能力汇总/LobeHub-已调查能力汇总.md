@@ -24,7 +24,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 - 静态源码确认：37 项（约 67%）——入口、状态与执行链源码可循
 - 入口确认：3 项——入口与主结构存在，完整往返未逐平台/逐场景走通
 - 归并已有类目：5 项——能力已并入其他类目笔记，本文件只记一行指认
-- 声明不符：1 项——上一快照结论已过时，本快照已更新
+- 声明不符：1 项
 - 暂缓：0 项
 
 合计 55 项。已贯通确认面（主链确认 + 静态源码确认）46 项，约 84%；其余为入口级或边界/待验证项，集中在文末"已知边界与待验证事项"，不在正文反复出现。Agent Groups / Pages 另带入口确认标记，统计时并入归并已有类目计数，避免重复。
@@ -161,7 +161,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 ### 声明不符
 
-- **Project（按项目组织）**：独特功能笔记上快照"数据库无 project 表、仅按工作目录分组"的结论已过时。本快照落地 projects 实体（projects/projectAgents/projectChatGroups/projectKnowledgeBases/projectCompletionReviews 五张表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent），实体侧为主链确认（静态证据）；话题侧"按项目组织"仍以工作目录为键，两套"项目"语义并存，关联链（topic 如何归属 projects 表）未走通。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
+- **Project（按项目组织）**：projects 实体（projects/projectAgents/projectChatGroups/projectKnowledgeBases/projectCompletionReviews 五张表 + tRPC CRUD + CLI 命令 + project-coordinator 内置 Agent）已落地，实体侧为主链确认（静态证据）；话题侧"按项目组织"仍以工作目录为键，两套"项目"语义并存，关联链（topic 如何归属 projects 表）未走通。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 
 ### 入口确认未闭合
 

@@ -93,7 +93,7 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 ## 3. Composer、草稿、附件与快捷输入
 
 - 发送路径入口：`submitText`（`use-prompt-actions/index.ts:587`）→ `useSubmitPrompt`（`submit.ts`）在提交前做一组门控——busy 检查（按**目标会话**判断，显式目标如 tile/队列排空通常不是当前屏上会话，:169 附近）、storedId/runtimeId 配对校验（含排空时跨会话泄漏防护，:198-202）、session 切换 drift 守卫，无 runtime 时先路由 resume 或新建后端会话；提交整体包在“会话未找到则 resume、busy 则重试”的容错组合里（:645-650，容错原语 `utils.ts:146,244`）。
-- **草稿按会话持久化（本次核实修正）**：`store/composer.ts` 负责按会话键存取草稿，仅文本、附件不持久化：
+- **草稿按会话持久化**：`store/composer.ts` 负责按会话键存取草稿，仅文本、附件不持久化：
   - 存储：正文按会话键（`draftKey`，未命名会话用 `__new__`，:129）写入 localStorage（键 `SESSION_DRAFTS_STORAGE_KEY='hermes:composer-drafts:v3'`，上限 `MAX_PERSISTED_DRAFTS=50`，写入逻辑 :279-294）；`stashSessionDraft`/`takeSessionDraft`（:296/:310）是唯一进出通道。
   - 跨窗口：localStorage `storage` 事件触发 `reloadPersistedDrafts` 合并（:211-237，注释 “Merge, don't clobber”——本地 map 可能持有未持久化的附件）；HUD/主窗交接用 `requestComposerDraftSync('flush'/'reload')` 事件（:240-266）。
   - 压缩轮转：`migrateSessionDraft` 把旧 tip 的草稿迁移到新 tip（:327-349），不覆盖非空目标。

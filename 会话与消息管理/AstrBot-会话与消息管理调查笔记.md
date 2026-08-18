@@ -18,7 +18,7 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 - **两级会话概念**：会话（session）= 聊天窗口（如一个群），以 `unified_msg_origin`（`platform_id:message_type:session_id`，message_session.py:18-27）标识；对话（conversation）= 会话内的子对话，可新建/切换/删除（conversation_mgr.py:1-5 docstring）。
 - **持久化双轨**：LLM 对话历史存 SQLite `conversations` 表（content 为 OpenAI 格式 JSON 列表）；当前对话指针经 SharedPreferences `sel_conv_id` 持久化（落 `preferences` 表）；WebChat 的显示消息与会话行另存 `platform_message_history`、`platform_sessions` 两张表。
-- **写入即时、无防抖**：新建/切换对话的入口内直接写 SharedPreferences（conversation_mgr.py:123、:137）。类字段 `save_interval = 60`（:25）在全仓无任何引用（ripgrep 检索 `save_interval` 仅命中定义处一处），不存在旧版所谓"60 秒防抖保存"；崩溃丢最近对话的推断不成立，已删除。
+- **写入即时、无防抖**：新建/切换对话的入口内直接写 SharedPreferences（conversation_mgr.py:123、:137）。类字段 `save_interval = 60`（:25）在全仓无任何引用（ripgrep 检索 `save_interval` 仅命中定义处一处），不存在"60 秒防抖保存"；崩溃丢最近对话的推断不成立。
 - **WebChat 独有分支机制**：消息带 `llm_checkpoint_id` 关联对话历史 turn；编辑/重生成/侧线程（thread）都基于 checkpoint 定位 turn 范围后截断或复制历史（chat_service.py:1621-1712、:1721-1825、:1459-1530）。
 - **群历史可选持久化**：`provider_ltm_settings.group_message_history_enable`（默认关，default.py:229）开启后，群消息与 bot 回复写入平台消息历史表，按配置上限 700 条裁剪（`group_message_history_max_cnt`，default.py:230），并暴露读取工具（message_tools.py:357-361）。
 

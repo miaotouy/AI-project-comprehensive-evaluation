@@ -132,7 +132,7 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 
 ## 声明不符、外部依赖与暂缓项
 
-- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token；`computer_use_runtime` 默认 `none`，即能力默认关闭，需显式启用（“声明不符”不成立，属默认关闭配置，“暂缓”运行验证）。
+- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token；\computer_use_runtime\ 默认 one\，即能力默认关闭，需显式启用。
 - 主动回复默认关闭，概率为 0.1；能力存在但默认不激活。
 - 远端沙箱（shipyard/cua 云镜像）依赖外部服务可用性。
 

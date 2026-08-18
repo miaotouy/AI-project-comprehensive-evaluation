@@ -238,7 +238,7 @@ applyBlendMode 实现，:102-156），作用于 sidebar/card/header/input/contai
 
 自定义 CSS 不属于上述三层主题计算链，而是设置系统中的独立覆盖通道。`src/config/settings.ts:50-55` 注册“CSS 样式覆盖”分区并异步加载 `CssOverrideSettings.vue`；设置页用 `RichCodeEditor` 以 CSS 模式编辑全局样式，提供启用开关、纯自定义模式、内置预设和用户预设，选中预设时先预览，再由用户明确应用（`CssOverrideSettings.vue:35-51,118-150,190-305`；预设定义在 `src/config/css-presets.ts`）。
 
-状态由 `useCssOverrides.ts` 持有，并写入应用设置的 `cssOverride` 字段。`UserCssSettings` 包含 enabled、basedOnPresetId、customContent、pureCustomContent、userPresets 与 selectedPresetId；纯自定义内容和基于预设修改的内容分字段保存，旧版 customContent 还有向 pureCustomContent 的兼容迁移（`useCssOverrides.ts:42-49,124-179`；`src/types/css-override.ts:32-40`）。编辑内容变化后 500ms 防抖保存到 appSettingsStore，同时在启用状态下无防抖调用 applyCssToPage（`useCssOverrides.ts:401-426`）。
+状态由 `useCssOverrides.ts` 持有，并写入应用设置的 `cssOverride` 字段。`UserCssSettings` 包含 enabled、basedOnPresetId、customContent、pureCustomContent、userPresets 与 selectedPresetId；纯自定义内容和基于预设修改的内容分字段保存，customContent 还有向 pureCustomContent 的兼容迁移（`useCssOverrides.ts:42-49,124-179`；`src/types/css-override.ts:32-40`）。编辑内容变化后 500ms 防抖保存到 appSettingsStore，同时在启用状态下无防抖调用 applyCssToPage（`useCssOverrides.ts:401-426`）。
 
 实际应用方式是向当前 document.head 创建或复用 `<style id="custom-css-override">`，再把编辑器文本原样写入 textContent；禁用或内容为空时移除该节点（`useCssOverrides.ts:369-399`）。因此它可以覆盖整个当前 WebView 的应用样式，并可引用 `--primary-color` 等主题变量，但代码侧没有选择器作用域、规则校验或 CSS 安全过滤。
 

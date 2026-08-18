@@ -346,7 +346,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 
 **模型能否伪造审批 UI**：
 - **不能伪造出真正可点击、能生效的审批卡片**——因为 `findToolPartByCallId()` 是从渲染器自己解析的 `partsMap`（AI SDK 结构化 `UIMessage.parts`，由主进程流式 chunk 组装，模型只能通过工具调用协议本身产生这些 part，不能在纯文本 `text` part 里"注入"出一个假的 `tool-*` part 类型）中查找,`approvalId` 字段来自主进程 `toolApprovalRegistry`/DB 持久化决策，模型输出的普通文本无法伪造这个字段。
-- **能造成视觉混淆**：模型在**普通文本正文**里完全可以输出形似"⚠️ 需要您批准: 是否允许执行 rm -rf /?"这样的字符串，但这段文本会被当作普通 Markdown 渲染（消息渲染器笔记确认了 Markdown 有白名单净化），不会被识别为真实的审批 part，也不会有 `confirm`/`cancel` 按钮——只是纯文本视觉欺骗，用户如果看不出区别可能误以为需要"回复"该文本从而触发下一轮对话（一种社会工程学风险，而非技术层面的权限绕过）。这一点消息渲染器笔记未覆盖，是本次调查新增的交叉发现。
+- **能造成视觉混淆**：模型在**普通文本正文**里完全可以输出形似"⚠️ 需要您批准: 是否允许执行 rm -rf /?"这样的字符串，但这段文本会被当作普通 Markdown 渲染（消息渲染器笔记确认了 Markdown 有白名单净化），不会被识别为真实的审批 part，也不会有 `confirm`/`cancel` 按钮——只是纯文本视觉欺骗，用户如果看不出区别可能误以为需要"回复"该文本从而触发下一轮对话（一种社会工程学风险，而非技术层面的权限绕过）。这一点消息渲染器笔记未覆盖，属于交叉发现。
 - 工具块折叠/展开、`ToolBlockGroup` 聚合等渲染细节与审批状态无关，纯 UI 呈现问题，不构成安全边界。
 
 依据：`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`（工具渲染章节）、`../../cherry-studio/src/renderer/components/chat/messages/tools/chooseTool.tsx:271-294`、`../../cherry-studio/src/renderer/components/chat/messages/tools/hooks/useToolApproval.ts:1-146`。

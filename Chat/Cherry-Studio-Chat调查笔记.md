@@ -56,7 +56,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
 - **消息搜索为 DOM 搜索**：`ContentSearch.tsx` 用 TreeWalker 遍历真实渲染文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容天然搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
-- **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩，本次调查新发现）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已被文档更新修复（旧文档与代码不符的问题已解决）。
+- **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已更正。
 - **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 的附件回收改由 FileManager 引用计数 + 策略化 GC 兜底（原 `TopicService.ts:316` TODO 注释已移除）。
 
 ## 未验证事项

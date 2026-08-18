@@ -76,7 +76,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **Agent Session（Claude Code SDK 运行时）**：`AgentSessionRuntimeService` 把 Claude Agent SDK 作为独立会话执行者接入，覆盖工作区、独立消息持久化后端（`AgentSessionMessageBackend`）、流事件、工具审批与取消；`ClaudeCodeRuntimeDriver` 以 cwd=workspace 调 SDK `query()`，原生工具（Bash/Read/Write/...）由 SDK 子进程执行，Cherry 通过禁用名单、使用权限判定与 PreToolUse hook 三层控制，不持有执行本身。证据状态：主链确认（静态证据）；SDK 级运行行为见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
-- **Agent 工具体系（双路径）**：普通聊天 MCP 路径（`McpRuntimeService` 管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory server，工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 工具表，按 `scope.mcpToolIds` 过滤）与 Claude Code Agent 路径（声明式 `toolRegistry.ts` 定义每个 SDK 原生工具与进程内 MCP 工具的 `exposure`：user/internal/disabled）各自独立、共享 MCP 运行时与审批 UI。进程内 MCP（cherry-tools/agent-memory/assistant/skills）在主进程直接函数调用；执行域全部落在 Electron 主进程，Bash 等原生工具无通用命令沙箱；工具 id 双轨制（legacy 名称型 + AI SDK catalog 哈希型）已消除碰撞面。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
+- **Agent 工具体系（双路径）**：普通聊天 MCP 路径（`McpRuntimeService` 管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory server，工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 工具表，按 `scope.mcpToolIds` 过滤）与 Claude Code Agent 路径（声明式 `toolRegistry.ts` 定义每个 SDK 原生工具与进程内 MCP 工具的 `exposure`：user/internal/disabled）各自独立、共享 MCP 运行时与审批 UI。进程内 MCP（cherry-tools/agent-memory/assistant/skills）在主进程直接函数调用；执行域全部落在 Electron 主进程，Bash 等原生工具无通用命令沙箱；工具 id 双轨制（legacy 名称型 + AI SDK catalog 哈希型）消除碰撞面。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
 - **工具审批与安全边界**：普通聊天 MCP 走 AI SDK 原生 approval 状态机、决定持久化到消息 parts；Claude Code 走内存 `toolApprovalRegistry` 快路径（IPC 方法名共享、主进程分发不同）。权限模式优先级：MCP server 级强制提示 > bypassPermissions > acceptEdits > 默认安全工具 > prompt；always allow 仅 MCP 路径可持久化，Claude Code 原生工具每次调用都要逐次审批。路径校验 `workspacePathHook` 只覆盖六个结构化字段、Bash 命令文本不校验（源码注释确认刻意为之）；模型无法伪造真正可点击的审批卡片，但可在正文输出形似审批的文本造成社会工程学混淆。证据状态：代码已确认（静态源码）；待验证项见末尾小节。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md) 第 7、12、14 节
 
@@ -106,9 +106,9 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **Agent workspace**：已归并到已有类目（Chat UI §6.2 与 Agent 工具笔记覆盖，见"生成与创作"集群的"Agent 工作区文件"条目）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)
 
-- **桌面集成与通知**：托盘按系统明暗切换图标、点击行为可配置（唤起 QuickAssistant 或主窗口），系统通知经 Electron 原生 API、点击唤起主窗口，快捷键本地/全局分轨注册；已确认边界：托盘无未读/流式角标，Agent Session 列表无拖拽排序。证据状态：静态源码确认（空挂钩为本次调查新发现，见末尾小节）。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 8.2 节、[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
+- **桌面集成与通知**：托盘按系统明暗切换图标、点击行为可配置（唤起 QuickAssistant 或主窗口），系统通知经 Electron 原生 API、点击唤起主窗口，快捷键本地/全局分轨注册；已确认边界：托盘无未读/流式角标，Agent Session 列表无拖拽排序。证据状态：静态源码确认（空挂钩，见末尾小节）。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 8.2 节、[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 
-- **无障碍与键盘路径**：Topic/Session 列表有完整 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮带 `aria-label`（已修复）；会话内搜索/输入历史/变量遍历等键盘主链已确认。已确认边界：Composer 输入区本体无可访问名称、分支树图键盘导航未核实（见末尾小节）。证据状态：静态源码确认；视觉与读屏表现属运行验证项，见末尾小节。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 9 节
+- **无障碍与键盘路径**：Topic/Session 列表有完整 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮带 `aria-label`；会话内搜索/输入历史/变量遍历等键盘主链已确认。已确认边界：Composer 输入区本体无可访问名称、分支树图键盘导航未核实（见末尾小节）。证据状态：静态源码确认；视觉与读屏表现属运行验证项，见末尾小节。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 9 节
 
 ## 工程与基础设施摘要
 

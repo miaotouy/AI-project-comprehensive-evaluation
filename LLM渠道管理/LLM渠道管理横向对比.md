@@ -88,7 +88,7 @@
 
 这三者都有稳定的渠道实体，并把模型归属显式绑定到 Provider。
 
-AIO Hub 的 `LlmProfile` 是聚合根，协议类型、Base URL、Key 池、模型、Header、端点和网络选项集中在一条记录中。优点是编辑、导入、请求构造和健康状态都围绕同一个 ID 展开；代价是 Profile 承担的字段较多。当前实现已补齐 Azure 运行时适配，并用完整类型约束检查 Provider 映射；模型执行还会按显式路由绑定、端点类型唯一识别和 Provider 默认映射依次解析。New API、Sub2API、通用聚合与 OpenCode Go 等渠道名称表达配置身份，最终线协议仍由解析结果决定。
+AIO Hub 的 `LlmProfile` 是聚合根，协议类型、Base URL、Key 池、模型、Header、端点和网络选项集中在一条记录中。优点是编辑、导入、请求构造和健康状态都围绕同一个 ID 展开；代价是 Profile 承担的字段较多。模型执行还会按显式路由绑定、端点类型唯一识别和 Provider 默认映射依次解析。New API、Sub2API、通用聚合与 OpenCode Go 等渠道名称表达配置身份，最终线协议仍由解析结果决定。
 
 Cherry Studio 用三层合并减少重复：Registry 保存 Provider/模型基线，用户表保存实例及差量，运行时再应用默认值。Endpoint Type 和 Adapter Family 分开后，同一 Provider 可以拥有多个协议端点，模型还可覆盖默认端点。这个结构适合长期维护不断增加的 Provider 和认证方式，但高可用状态没有进入这套实体模型。
 
@@ -220,7 +220,7 @@ NextChat、Risuai、SillyTavern、VCPChat 和 VCPToolBox 的缺项还受到数�
 
 AIO Hub、Chatbox、Cherry Studio、LobeHub 和 SillyTavern 都能按 Provider 或协议族构造不同请求。Cherry Studio 的拆分最明确：Endpoint Type 决定本次调用使用 OpenAI Chat、Responses、Anthropic Messages 或 Gemini GenerateContent 等接口，Adapter Family 决定协议实现，Base URL 又可按 Endpoint Type 独立覆盖。
 
-AIO Hub 允许 Chat、Responses、Anthropic、Gemini、Embedding、Rerank 和媒体生成使用不同端点，并提供自定义 Header 与 Provider options。它适合一个 Provider 同时暴露多种能力的情形。当前模型路由编辑器支持显式绑定和批量应用探测结果；无法解析时会抛出专用路由错误，而不是退回到不可追踪的隐式猜测。Azure 的旧漂移已在当前快照修复。
+AIO Hub 允许 Chat、Responses、Anthropic、Gemini、Embedding、Rerank 和媒体生成使用不同端点，并提供自定义 Header 与 Provider options。它适合一个 Provider 同时暴露多种能力的情形。当前模型路由编辑器支持显式绑定和批量应用探测结果；无法解析时会抛出专用路由错误，而不是退回到不可追踪的隐式猜测。
 
 Chatbox 把内置 Provider 的 Host、Path 和模型创建逻辑收进注册表，自定义 Provider 覆盖 OpenAI Chat、OpenAI Responses、Anthropic 和 Gemini 四类协议。LobeHub 主要由内置 ID 或自定义 Provider 的 `sdkType` 选择 Runtime。SillyTavern 的 Chat Completion source 和 Text Completion type 分轨，兼容的后端数量多，但分支和 Provider 专属字段也更多。
 

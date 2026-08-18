@@ -221,7 +221,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 - **文件类**：`aio-file-operator` 走 Tauri 的 `read_text_file_force`/`write_text_file_force`/`delete_file_to_trash` 等命令（`file_operations.rs`）。这些 Rust 命令本身不做路径策略限制，安全边界在前端 `security.ts` 的白名单/黑名单判断（第 4、9 节详述）：校验前先经 Rust 命令把目标与规则路径解析成真实路径（含符号链接），再做 `isPathWithinRoot` 边界比较。
 - **外部传输专用命令**：`inspect_file_for_external_transfer`/`read_file_for_external_transfer` 是唯一在 Rust 侧再次校验沙箱/规则/大小的读取命令，专供 VCP 外部文件传输，不暴露给 Agent 工具（见第 9 节）。
-- **子进程类**：`ffmpeg-tools` 用 Rust 标准子进程 API + 数组式参数执行（不经 shell），Windows 下设 `CREATE_NO_WINDOW` 隐藏窗口（`ffmpeg_processor.rs:449-453`）；`skill-manager` 的 `run_skill_script` 同样用数组式参数，工作目录限定在 skill 的 `base_path`，并校验脚本路径必须位于该目录的 `scripts/` 子目录下防止穿越（`skill_manager.rs:542-544`）——这是本次调查中**唯一发现的 Rust 侧显式路径穿越防护**。
+- **子进程类**：`ffmpeg-tools` 用 Rust 标准子进程 API + 数组式参数执行（不经 shell），Windows 下设 `CREATE_NO_WINDOW` 隐藏窗口（`ffmpeg_processor.rs:449-453`）；`skill-manager` 的 `run_skill_script` 同样用数组式参数，工作目录限定在 skill 的 `base_path`，并校验脚本路径必须位于该目录的 `scripts/` 子目录下防止穿越（`skill_manager.rs:542-544`）——这是 **Rust 侧显式路径穿越防护**。
 - **平台差异（Windows）**：`ffmpeg_processor.rs` 用 `#[cfg(target_os = "windows")]` 单独设置 `CREATE_NO_WINDOW`；`skill_manager.rs` 通过公共工具函数统一隐藏子进程窗口。
 - **脚本运行时解析**（`resolve_runtime()`）按扩展名选运行时：
   ```

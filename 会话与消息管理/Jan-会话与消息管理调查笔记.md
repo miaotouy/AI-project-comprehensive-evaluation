@@ -25,7 +25,7 @@ Jan 的聊天数据层是"前端直连持久化后端"模式：没有后端聊�
    - 树形链接：消息 `metadata.parentId` + `metadata.activeChildId`，活跃根 `activeRootId` 存线程元数据
    - 编辑：`makeSibling` 产生新版（内容替换为纯文本，媒体丢失）
    - 续写：原地替换（删除旧 partial，不 fork）
-   - 自愈：`repairDetachedAssistants` 修复旧版 `parentId:null` 幽灵根缺陷（#8357 系）
+   - 自愈：`repairDetachedAssistants` 修复 `parentId:null` 幽灵根缺陷（#8357 系）
 5. **删除**：`deleteThread` 级联清理各 store、向量库集合与搜索索引；`deleteAllThreads` 保留收藏与带 project 的线程；无回收站（本次未找到软删除/回收站机制，检查范围见 §3）。
 
 ## 系统边界与数据主链
@@ -109,7 +109,7 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 - `backfillParentIds`（L142-145）：首次 fork 时沿当前线性路径铺平 parentId（只写需要的消息，幂等）。
 - `makeSibling`（L236-256）：新 id/时间戳、继承父节点、清 `error` 与 `activeChildId`、content 可整体替换为纯文本。
 - `planContinuation`（L217-230）：原地续写——继承被续半截消息的 `parentId` 并返回待删 id，使续写替换原半截消息而非 fork。
-- `repairDetachedAssistants`（L170-204）：修复旧版本（#8357 及其变体）分支线程里 assistant 回复被写成 `parentId:null`（或无父链）的"幽灵根"：重挂到其回答的 user 回合并把被挤掉的后续 user 重新链接。幂等；对未分支线程无操作。
+- `repairDetachedAssistants`（L170-204）：修复分支线程里 assistant 回复被写成 `parentId:null`（或无父链）的"幽灵根"：重挂到其回答的 user 回合并把被挤掉的后续 user 重新链接。幂等；对未分支线程无操作。
 - 活跃根指针 `activeRootId` 存线程 `thread.json` 的元数据（`$threadId.tsx` 的写入/读取入口分别在 L1236-1256、L1259-1269），因此分支状态跨重启可恢复。旧数据（尚无 parentId 的线性线程）在首次 fork 时才回填，回填前的树完整性未验证。
 
 ## 2. 事实源、索引与持久化

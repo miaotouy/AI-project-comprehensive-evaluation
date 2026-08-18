@@ -20,7 +20,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 - **Composer**（`ChatInput.tsx`，2648 行，memo 无自定义比较器）承担文本输入、附件摄取、发送与停止；发送时若正在流式则 `enqueue` 入队，队列消息以 `QueuedMessageChip` 显示在输入区顶部。
 - **消息操作**：编辑（`EditMessageDialog`，Ctrl+Enter 保存）、删除（`DeleteMessageDialog` 确认）、复制、Continue（仅末条且 `metadata.stopped`）、Regenerate（仅末条）；流式态下编辑/删除禁用。
-- **版本导航**：`< n/m >` 切换器渲染在**消息项**（`MessageItem.tsx:477-502`，非线程列表）——旧笔记"线程列表内切换"的说法有误；重新生成产生兄弟 sibling 并成为 active；Continue 原地续写不 fork。
+- **版本导航**：`< n/m >` 切换器渲染在**消息项**（`MessageItem.tsx:477-502`，非线程列表）；重新生成产生兄弟 sibling 并成为 active；Continue 原地续写不 fork。
 - **错误反馈**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；"Increase Context Size" 手动扩容按钮。
 - **现场恢复**：待发送初始消息经 `sessionStorage`（键 `initial-message-<threadId>`）恢复；活跃分支经线程 metadata 的 `activeRootId` 重建（数据侧在会话笔记）。
 - 消息列表全量渲染、无窗口化（滚动锚定与渲染细节在消息渲染器笔记）。
@@ -51,7 +51,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 - **线程列表**（`ThreadList.tsx`，317 行）：`ThreadItem` 懒加载消息（磁盘为空不覆盖乐观写，L68-98）；项目模式下显示省略的用户消息预览（L164-168）；排序按 `updated` 降序（L297-301，数据侧在会话笔记 §5）；运行中线程显示加载图标（L159-161, L173-175）。
 - **线程菜单**（L180-265）：重命名 / 添加到项目 / 移出项目 / 删除；删除项在 `What is Jan?` 且未完成 onboarding（`setup-completed` localStorage）时禁用（L253-260）。
-- **批量删除**：`NavChats.tsx:49-64` 在线程数 **>1** 时挂 `DeleteAllThreadsDialog`（旧笔记"≥1"有误）；删除后导航回首页（`DeleteAllThreadsDialog.tsx:49-51`）。
+- **批量删除**：`NavChats.tsx:49-64` 在线程数 **>1** 时挂 `DeleteAllThreadsDialog`；删除后导航回首页（`DeleteAllThreadsDialog.tsx:49-51`）。
 - **重命名**：`RenameThreadDialog`（Enter 或按钮保存，无变化/空标题禁用保存；自动聚焦并全选）；数据侧 `metadata.titleSetManually=true`（会话笔记 §2.4）。
 - **搜索**：`SearchDialog`（`containers/dialogs/SearchDialog.tsx`，376 行）——localStorage 最近搜索（max 5，可清空）、Fzf 结果按有无 project 分组显示、↑↓/Enter 键盘导航、选中项滚动入视口、选择后导航到线程页（`/threads/$threadId`）；快捷键打开（`KeyboardShortcuts.tsx:71-76`，`PlatformShortcuts.SEARCH`）；搜索数据实现在 `useThreads.getFilteredThreads`（会话笔记 §5）。
 - **现场恢复**：进入线程页时——`activeRootId` 读线程 metadata 重建活跃分支（`$threadId.tsx:849-857`）；待发送初始消息经 `sessionStorage` 键 `initial-message-<threadId>` 恢复发送（L1145-1172，发送前即移除防重复）；分支/版本切换后的滚动定位行为未运行验证。
@@ -153,7 +153,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 - **编辑丢媒体**：编辑改写文本时数据侧丢弃图片/媒体 content，原版本保留可回退（会话笔记 §9）。
 - **`resume:false`**：重启不恢复未完成回合（执行侧对话请求笔记 §10）。
 - **banner 与 metadata.error 并存**：全局 banner 隐藏最后一条失败 assistant 消息，同时 error 又写 `metadata.error`——两者可能同时存在，UI 呈现交由 banner 端配置【代码确认】，行为未运行验证。
-- **版本切换器位置**：`< n/m >` 在消息项操作区而非线程列表（§6，修正旧笔记）。
+- **版本切换器位置**：`< n/m >` 在消息项操作区而非线程列表（§6）。
 - **边界**：线程数据语义在会话笔记；请求执行在对话请求笔记；消息壳与操作栏装配在消息渲染器笔记。
 
 ## 11. 未验证事项

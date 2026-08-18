@@ -27,7 +27,6 @@ AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有�
 
 它没有“同模型的多渠道池”、渠道权重、优先级、成本路由或跨渠道自动故障转移。多 Key 也不是请求级重试器：某次调用失败后只会更新 Key 健康状态并把错误抛给上层，下一次请求才可能选择另一个 Key。
 
-- **Azure 不一致已修复**：旧快照中设置和 `ProviderType` 都包含 `azure`、运行时却缺少对应映射的问题已消除。Azure 适配器复用 OpenAI Chat Completions/Embeddings 的 Wire 格式，只转换 Azure 特有配置；适配器注册通过完整类型约束保证每个 Provider 都有实现，依据见 `src/llm-apis/adapters/azure/index.ts` 与 `src/llm-apis/adapters/index.ts`。
 - **模型执行路由已落地**：请求分发先查模型按操作保存的协议/端点绑定，再尝试把远端声明的唯一端点类型映射为协议。普通渠道随后回退到 Provider 默认协议；聚合渠道则继续查渠道级默认协议、内置模型路由表和静态操作默认。仍无法解析时抛出 `UnresolvedModelRouteError`，不根据模型名静默猜测。探测结果可由用户逐模型或批量确认并写回绑定；这是**同一渠道内的模型到协议/端点路由**，不是跨渠道故障转移（`packages/llm-core/src/model-execution-routing.ts:371-449`、`src/views/Settings/llm-service/probe/route-application.ts`）。
 - **audio.cpp 成为一等本地音频渠道**：渠道预设同时声明 OpenAI 兼容 TTS 与 Whisper 风格 ASR 端点。模型带 `asr` 能力且请求提供转写输入时，通用请求入口改走 `/v1/audio/transcriptions` multipart，而不是把音频塞入 Chat 消息；桌面转写工具会先把非 WAV 输入转换为 WAV（`src/composables/useLlmRequest.ts:226-262`、`src/tools/transcription/engines/audio.engine.ts:56-305`）。
 
@@ -98,7 +97,7 @@ Agent / 临时模型 / 辅助任务
 
 适配器注册入口再把这些渠道身份映射到实际协议实现。OpenAI-Compatible Adapter 还被 Groq、OpenRouter、Ollama、SiliconFlow 与 audio.cpp 复用；DeepSeek、Gemini、Anthropic、Cohere、Vertex 和媒体协议有专用实现。四种聚合渠道不是第五套线协议：执行路由先把它们解析为 OpenAI Chat/Responses、Anthropic、Gemini 等适配器，再将 `effectiveProfile.type` 改成实际协议类型（`src/llm-apis/adapters/index.ts:104-139`、`packages/llm-core/src/model-execution-routing.ts:404-441`）。
 
-类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；当前已用完整类型约束避免遗漏，Azure 漂移也已修复。Ollama 改用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。预设实现已从单个大文件拆成 `src/config/llm-presets/presets/` 下按渠道独立模块，由 `index.ts` 统一注册；这是维护边界变化，不改变 Profile 的持久化结构。
+类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；当前已用完整类型约束避免遗漏。Ollama 改用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。预设实现已从单个大文件拆成 `src/config/llm-presets/presets/` 下按渠道独立模块，由 `index.ts` 统一注册；这是维护边界变化，不改变 Profile 的持久化结构。
 
 ### 1.3 网络与安全默认值
 
@@ -209,7 +208,6 @@ llm-service/key-states.json
 
 远端结果被转换成渠道内的模型快照，保留模型 ID、名称、Provider、上下文长度、输出上限、输入/输出模态、支持参数和价格。OpenRouter 还会请求并保留更完整的输出模态信息。
 
-与旧快照相比，这里有两处行为变化（提交 `c64f99c61`、`20e7f7722`）：
 
 - **能力合并不再“只由远端推导”**：转换逻辑先并入当前激活的模型元数据规则能力，再用 API 显式返回的能力覆盖；API 未返回某项能力时不再写入 `false`，视觉与思考能力只有在输入模态或支持参数明确给出时才写入。
 - **路由信息随模型持久化**：远端返回的支持端点类型会写入模型 routing 字段，供执行路由的“端点类型唯一识别”分支使用（见第 4 节）。
@@ -337,7 +335,7 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 - `record-only` → 只记录，不计数也不自动禁用；
 - `success`/`ignore` → 无操作。
 
-旧的“429 立即熔断、其他错误累计 3 次熔断、成功清零”计数规则仍保留，但自动熔断现在多一个前提：**同渠道还有其他可用 Key**，且该 Profile 开启了自动禁用；最后一个可用 Key 不会因连续失败被自动熔断。设置页探测与普通请求共用同一份策略文件（旧结论“只服务设置页探测”已过时）。
+旧的“429 立即熔断、其他错误累计 3 次熔断、成功清零”计数规则仍保留，但自动熔断现在多一个前提：**同渠道还有其他可用 Key**，且该 Profile 开启了自动禁用；最后一个可用 Key 不会因连续失败被自动熔断。设置页探测与普通请求共用同一份策略文件。
 
 ### 5.3 没有请求内换 Key 重试
 
@@ -413,7 +411,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 
 - Profile 级渠道增删改查、启停和排序；
 - 桌面端完整的渠道创建、编辑、删除、排序、启停、导入、导出和独立探测入口；移动端有独立的增删改、启停和探测入口，但配置包导入导出与复制未找到；
-- 丰富的官方/兼容 Provider 预设（含 Azure，运行时适配器已补齐）；
+- 丰富的官方/兼容 Provider 预设；
 - 多格式配置导入、重复提示与 New API"复制连接信息"、原生 `LlmProfileBundle` 导入导出（可脱敏）；
 - 多 Key 轮询、手动启停、错误状态、按 Profile 隔离的熔断/恢复和分类化健康策略；
 - 模型手工维护、远端发现（含能力合并与路由信息持久化）和能力元数据；
@@ -433,7 +431,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - 没有加密或系统凭据库；
 - `auto` 网络策略不是自动择优；
 - 模型列表请求固定走代理；
-- 设置页可见 Provider 与运行时 Adapter 的单一注册源约束已通过 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 建立，旧"Azure 漂移"问题已关闭。
+- 设置页可见 Provider 与运行时 Adapter 的单一注册源约束已通过 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 建立。
 - 未找到面向渠道管理的 CLI、TUI、独立 Web 服务或 HTTP 配置 API；这表示本次调查范围内没有这些管理入口，不等于外部脚本或未来版本绝对不存在。
 
 ## 11. 关键源码索引
@@ -465,7 +463,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 
 1. 本次未启动 Tauri 桌面端，没有实测官方 Provider、自建网关和代理模式下的 TLS/HTTP 行为。
 2. 未检查真实用户配置目录的文件 ACL；“明文落盘”基于序列化与写入实现，不等于配置文件一定对其他系统账户可读。
-3. 未实测 Azure 渠道的真实调用（运行时适配器已补齐，`prepareAzureOpenAiProfile` 转换与端到端行为仍属静态确认）。
+3. 未实测 Azure 渠道的真实调用。
 4. 未启动移动端 Tauri/Android 运行态；移动端配置文件路径、保存成功、真实模型探测和平台文件权限均为源码确认或静态推断，未做设备实测。
 5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；它们不等于 LLM Chat 的 Key/渠道故障转移，本次未逐项展开。
 6. 未运行桌面端或移动端 UI，因此桌面文件选择器、导出文件实际内容、导入后的提示/错误、移动端弹窗保存和探测结果展示均未验证；Web、CLI、TUI 的“未找到”结论也未覆盖仓库外部脚本或未来构建产物。

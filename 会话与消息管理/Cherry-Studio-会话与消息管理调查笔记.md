@@ -19,7 +19,7 @@
 - 新建 Topic 的同一写事务里就会创建一条虚拟根消息（`createRootMessageTx`），不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
 - **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
 - 分支草稿是**持久化空叶子**：`POST /messages/:id/branches` 落一条空的 successful user 行（`reserveBranch`），等待输入状态由结构派生（`isBlankUserTurn`），不依赖渲染层假节点；只有流式增量仍是不落库的纯前端 overlay。
-- **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch`，`a012837e5c` 起支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。旧结论"消息搜索没有持久化全文索引"已过时，需要按这两条路分别描述。
+- **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch`，`a012837e5c` 起支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。
 - **崩溃恢复有明确机制**：主进程启动时把上次崩溃遗留的 `pending` assistant 行统一翻为 `error`（boot reconcile），避免 UI 永久停留在"思考中"。
 - 删除 Topic 不主动清理磁盘附件文件，但内部附件经 `chat_message_file_ref` 引用计数，FileManager 有策略化条目回收（`delete_when_unreferenced` 宽限期扫描 + 孤儿条目扫描），不是无主泄漏。
 
@@ -171,7 +171,7 @@
 - 分支预留行在流式进行中创建时带 `activate=false`，不挪动正在跑的 active 路径（`useTopicBranchActions.ts:20`）；用户选中该预留行并在 topic 仍 live 时发送，排队负载携带预留行 id（`useChatRuntimeState.ts:206-227`，模式 `reserved-branch`），等待 topic 空闲后才提交；主进程侧 `PersistentChatContextProvider` 拒绝流式期间的该模式提交作为竞态兜底（`PersistentChatContextProvider.ts:247-253`）。
 - 空叶子的删除带 `awaitingInputOnly=true` 守卫：已填充的行拒绝删除（`MessageService.ts:1679-1684`），避免"删掉一条刚被填充的消息"。
 
-与旧实现（三态 ref 状态机）相比，数据语义从"临时态"变成"持久化结构"，跨重载/重挂载保持不变。
+
 
 ### 4.4 编辑、删除、重试、翻译的数据变更入口
 
@@ -244,7 +244,7 @@
 
 - **三层数据复杂度是有意为之的取舍**：真树结构 + `activeNodeId` 指针 + live overlay 三层，配合 Home/Agent 双适配器，让"保留过程、支持分支比较、多模型并行"这些能力得以实现；代价是要理解至少四层数据（DB 树、SWR 缓存、execution overlay、live branch 前端态）才能追踪一条消息从输入到渲染的完整生命周期，调试门槛明显高于单层 session 客户端。
 - **虚拟根是存储层不变量而非约定**：CHECK 约束 + 部分唯一索引把"每 topic 一根、根 ⇔ null parent、内容必有 parent"固化在 schema（1.2），服务层的大量校验只是友好错误入口（`MessageService.ts:935-940,1349-1364,1675-1677`）。
-- **分支草稿从临时态变成持久化态**：等待输入分支现在是 DB 行（empty successful user leaf），`isAwaitingInput` 由结构派生、无 draft 标记；代价是出现"空叶子必须保持不可见/不可当普通消息处理"的派生规则（列表隐藏、删除/填充带守卫）。
+- **分支草稿是持久化态**：等待输入分支现在是 DB 行（empty successful user leaf），`isAwaitingInput` 由结构派生、无 draft 标记；代价是出现"空叶子必须保持不可见/不可当普通消息处理"的派生规则（列表隐藏、删除/填充带守卫）。
 - **删除语义收敛为"splice 保留可达历史"**：首轮消息可删（子节点挂回虚拟根）、多模型组删除只删兄弟回复并 reparent 子节点、组删除在回复生成中被禁用；`SET NULL` 方案被明确否掉（会在级联删除中途制造第二个 null-parent 行，`message-tree.md:109-112`）。
 - **删除 Topic 的磁盘文件回收交给 FileManager GC**：删除动作本身不做文件清理，但文件条目有引用计数 + 策略化扫描回收（3.3）。
 - **搜索双轨的边界**：会话内搜索是"已加载数据 + 已挂载 DOM"（流式行被排除、未加载页搜不到，这是分页 + 数据匹配的固有限制）；全局搜索才是持久化 FTS（trigram），命中定位到消息级别，不提供 DOM 级高亮。

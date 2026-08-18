@@ -127,7 +127,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
   - 模型与 thinking level：`agent.state.model/thinkingLevel`，切换写入 `model_change`/`thinking_level_change` 条目（`setModel`/`cycleModel`，`agent-session.ts:1586-1673`；`appendModelChange`/`appendThinkingLevelChange`，`session-manager.ts:1070-1094`）；
   - 工具启用集：会话级 `setActiveToolsByName`（`agent-session.ts:928-943`），默认 `[read, bash, edit, write]`（`_buildRuntime` 的 `defaultActiveToolNames`，`agent-session.ts:2600-2602`），`--tools`/设置可增删。
 - **Agent 形态**：`Agent` 是单活动运行（activeRun 守卫，`packages/agent/src/agent.ts:347-358`、`:486-489`）的工具循环 runtime，`AgentSession` 包一层事件/持久化/压缩。子 Agent 相关边界：
-  - 此前笔记所称 README 中 "No sub-agents" 的表述本次未在 `packages/agent/README.md` 找到；
+  - `packages/agent/README.md` 中未找到 "No sub-agents" 表述；
   - 子 Agent 目前由扩展自行实现（示例 `packages/coding-agent/examples/extensions/subagent/`），harness 文档提到 lanes 可支撑 subagents（`packages/agent/docs/harness.md:98`），但均非 `Agent` 内置能力；
   - 扩展可用 `createAgentSession`（`core/sdk.ts:169`）自行启动子会话；本次未找到 UI 层面的多 Agent 编排。
 - **附件**：图片以 `ImageContent` 进 user 消息（剪贴板图片、`--image`、拖动/粘贴，入口见 Chat UI 笔记 §1）；`settings.images.autoResize`/`blockImages` 控制自动缩放与阻止发送（`settings-manager.ts:46-49`、`:1161-1185`）。工具结果中的图片可回注为上下文图像（`normalizeToolResultImages`，`agent-session.ts:517-531`）。

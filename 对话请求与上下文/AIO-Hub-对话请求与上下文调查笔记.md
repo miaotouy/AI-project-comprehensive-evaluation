@@ -228,11 +228,7 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 
 压缩成功后会立即 `persistSessions()` 并刷新上下文 Token 统计（`useContextCompressor.ts:613-617`）。返回值里的 `savedTokenCount` 只是被遮罩节点记录的 Token 总和，**没有减去新摘要自身的 Token**（`useContextCompressor.ts:598-602,619-623`），所以它是"原内容 Token 数"，不是严格意义上的净节省量。
 
-### A.3 压缩实现与仓库说明的差异（已修复）
-
-旧快照曾确认：仓库 `docs/architecture/context-compression.md` 声称多次压缩会使用 `CONTINUE_CONTEXT_COMPRESSION_PROMPT`，把旧摘要作为 `previousSummary` 生成一份新的滚动摘要，但 `executeCompression()` 明确把已有压缩节点排除在候选集外，且调用 `generateSummary(nodesToCompress, effectiveConfig)` 时不传 `previousSummary`，文档与实现不一致。
-
-在提交 `dbfe2d620`（feat(llm-chat): 优化连续压缩时旧摘要的继承与隐藏）之后，该差异已消除（当前快照中的代码为静态确认）：
+### A.3 压缩实现与仓库说明的差异
 
 - `executeCompression()` 先定位本次压缩范围之前最近一个"已启用且未被遮罩"的摘要节点（`useContextCompressor.ts:572-583`）；
 - 把它作为 `previousSummary` 传给 `generateSummary()`（`useContextCompressor.ts:591-596`），`generateSummary()` 在有前情提要时改用续写模板（`CONTINUE_CONTEXT_COMPRESSION_PROMPT` 或用户配置的 `continueSummaryPrompt`，`useContextCompressor.ts:183-199`）；
@@ -240,7 +236,7 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 - 新摘要的 `originalTokenCount`/`originalMessageCount` 会继承旧摘要承载的历史统计（`compressNodes`，`useContextCompressor.ts:294-308`）；
 - 仓库文档 `context-compression.md` 同步改写了对应段落。
 
-因此"增量摘要滚动合并"现在是可执行路径上的行为，不再是文档超前。注：旧摘要的定位只找"本次压缩范围之前最近"的一个，且摘要生成/隐藏链路为静态代码确认，未做运行验证。
+注：旧摘要的定位只找"本次压缩范围之前最近"的一个，且摘要生成/隐藏链路为静态代码确认，未做运行验证。
 
 ### A.4 后台压缩的状态依赖错位
 

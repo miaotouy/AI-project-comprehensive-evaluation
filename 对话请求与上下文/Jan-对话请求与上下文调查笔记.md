@@ -58,7 +58,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 4. **system 拼接**（L1229-1240）：`systemMessage`（`renderInstructions(threadAssistant.instructions)`，`$threadId.tsx:205-208`）+ `buildFilesSystemInstruction`（L1594-1613，静态说明 `[ATTACHED_FILES]` 块、不随附件变化保提示缓存）+ `buildWebSearchSystemInstruction`（L1621-1634，教模型用 `web_search`/`web_fetch` 并内联 `[[cite:URL]]`）；空白 system 不发送。
 5. **上下文管理**（L1258-1297）：`maxContextTokens>0` 时 `auto_compact && this.model ? compactMessages : trimMessages`；system 计 token；预算 = maxCtx − maxOutput − system。
 6. **`hasGenuineUserQuery`**（L1302-1306）：用 `TOOL_RESPONSE_ONLY` 正则（L590）判定纯工具结果回合；没有真实用户查询则提前报错（L599-608）。
-7. **消息清洗链**（L1310-1323）：依次合并相邻用户消息、补齐孤儿工具调用、移除模型不支持的图片、编码音视频和注入 inline 文档；发送侧的 fetch 包装再把音视频标记解码回 `input_audio`/`input_video`（`model-factory.ts:655-732`）。旧笔记把解码位置写成 model-factory L1537-1585 有误，已修正。
+7. **消息清洗链**（L1310-1323）：依次合并相邻用户消息、补齐孤儿工具调用、移除模型不支持的图片、编码音视频和注入 inline 文档；发送侧的 fetch 包装再把音视频标记解码回 `input_audio`/`input_video`（`model-factory.ts:655-732`）。
 8. **continue 续写 prefill**：`baseMessages + assistant{reasoning,text}` 作为续写前置（L1327-1349）；`prependContinuationToUIStream`（L680-723）把 partial 注入新流首个 reasoning/text delta，UI 无缝衔接。
 9. **`streamText`**（L1369-1389）：启用工具时使用当前工具集，工具选择为 auto，并传入最大输出 token 及远程 provider 的 reasoning 选项（L1356-1361）。工具参数修复只处理 Windows 路径反斜杠；`toUIMessageStream` 在 finish-step 和 finish 阶段收集 tokenSpeed、usage 并写入消息 metadata（L1380-1452）。
 
