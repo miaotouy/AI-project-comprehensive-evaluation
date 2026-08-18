@@ -1,10 +1,10 @@
 # AIO Hub 独特功能调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
 >
@@ -20,7 +20,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 2. **中央资产管理器（asset-manager）**：应用数据目录下的资产文件、SHA-256 去重、Rust 索引和来源追踪，构成跨工具的资产事实源（主链确认）。
 3. **LLM 请求检查器（llm-inspector）**：Rust 外部代理与前端内部钩子组成双层监控，可透视应用内所有 LLM 调用（主链确认）。
 4. **快捷动作系统（Quick Actions）**：宏模板、行级后处理、自动发送和 SillyTavern Quick Reply 导入（主链确认）。
-5. **宏系统**：实际注册 72 个内建宏（README 宣称 60+），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
+5. **宏系统**：实际注册 74 个内建宏（README 宣称 60+），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
 6. **自由窗口管理**：组件级分离窗口 + logicHook 响应式同步 + 位置记忆/可见性自愈（`主链确认`）。
 7. **Agent 私有资产**：`agent-asset://` 协议、`{{assets}}` 宏和渲染器解析链（主链确认）。
 8. **Skill 沙箱**：Rust 路径锁定、超时和多运行时探测，支持渐进式披露（主链确认，执行细节已由 Agent 工具笔记承接）。
@@ -48,7 +48,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|
 | 上下文分析器 | `归并已有类目` | 对话请求与上下文笔记 9.8 已确认：以所选节点为终点重跑真实上下文管道预览 |
-| 60+ 宏与正则管道 | `主链确认` | 内建宏 72 个（macro-engine/macros/*.ts）；regex-processor 为管道处理器（priority 200），Global/Agent/User 三层合并 |
+| 60+ 宏与正则管道 | `主链确认` | 内建宏 74 个（macro-engine/macros/*.ts）；regex-processor 为管道处理器（priority 200），Global/Agent/User 三层合并 |
 | 快捷动作 | `主链确认` | messageInputStore.handleQuickAction 完整执行链 + quick-actions 目录持久化 |
 | Agent 私有资产 | `主链确认` | `agent-asset://` 协议 + AgentAssetsManager + `{{assets}}` 宏 + 渲染器 resolveAsset |
 | 自由窗口 | `主链确认` | useDetachable/useDetachedManager + DetachedComponentContainer + logicHook 同步 |
@@ -149,19 +149,19 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：store/composable/组件三处源码为静态事实；UI 行为未运行验证。
 
-### 能力五：宏系统（72 个内建宏，三阶段管道）— `主链确认`
+### 能力五：宏系统（74 个内建宏，三阶段管道）— `主链确认`
 
 **用户目标**：让 Prompt 文本可编程——时间日期、系统环境、随机/掷骰、角色信息、变量读写、知识库、工具定义等都以 `{{name}}` 形式在发送前展开，属于"上下文 DSL"聚类（待查清单第 8 行）。
 
 **事实对象**：`MacroDefinition`（name/type/phase/handler/example），注册在 `MacroRegistry`（reactive Map）。
 
-**完整主链**：`MacroProcessor` 按 PRE_PROCESS、SUBSTITUTE、POST_PROCESS 三阶段执行，分别处理初始化、主体替换和格式化输出；每阶段批量处理对应宏，未注册宏记录 warning。内建宏实测 74 个，分类数量为 datetime 26、core 19、variables 8、functions 7、system 6、tools 3、recall 2、knowledge 1，另有 assets 和 cssVariables 各 1；旧 `{{kb}}` 宏已移除，统计依据是 `macro-engine/macros/*.ts` 及相关提交。全局和局部变量支持读写、增减及全局变量操作，会话变量快照语义见对话请求与上下文笔记 9.4；三阶段入口见 `macro-engine/MacroProcessor.ts:84`。
+**完整主链**：`MacroProcessor` 按 PRE_PROCESS、SUBSTITUTE、POST_PROCESS 三阶段执行，分别处理初始化、主体替换和格式化输出；每阶段批量处理对应宏，未注册宏记录 warning。内建宏实测 74 个，分类数量为 datetime 25、core 19、variables 8、functions 7、system 7、tools 3、recall 2、knowledge 1，另有 assets 和 cssVariables 各 1。system 组新增 `appVersion`，通过 Tauri `getVersion()` 读取应用版本，失败时返回 `Unknown`；旧 `{{kb}}` 宏已移除。全局和局部变量支持读写、增减及全局变量操作，会话变量快照语义见对话请求与上下文笔记 9.4；三阶段入口见 `macro-engine/MacroProcessor.ts:84`，版本宏见 `macro-engine/macros/system.ts:144-164`。
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
 **独特性判断**：README"60+"宣称实测为 74 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
 
-**证据强度**：逐文件正则统计宏名（72 个）+ 管道代码为静态事实；未运行宏展开验证。
+**证据强度**：逐文件统计注册定义（74 个）+ 管道代码为静态事实；未运行宏展开验证。
 
 ### 能力六：自由窗口管理（分离窗口系统）— `主链确认`
 

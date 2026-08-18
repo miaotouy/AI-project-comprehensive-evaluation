@@ -1,10 +1,10 @@
 # AIO-Hub 会话与消息管理调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -137,7 +137,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 ### 3.4 恢复与保留语义
 
 - 撤销/重做只在单次会话运行期间有效（2.2）。
-- 应用重启后残留生成中节点会在加载时自动修复：修复入口对每个状态为 `generating` 的节点，有内容（非空字符串）标记为 `complete`、无内容标记为 `error` 并写入错误提示（"生成意外中断"），同时更新 `updatedAt`；随后刷新消息计数并回写磁盘与索引（`sessionLifecycleManager.ts:67-91、168-187`）。加载启动与按需加载详情两条路径都会调用。
+- 应用重启后残留的等待中或生成中节点会在加载时自动修复：修复入口对每个状态为 `waiting` 或 `generating` 的节点，有内容（非空字符串）标记为 `complete`、无内容标记为 `error` 并写入错误提示（"生成意外中断"），同时更新 `updatedAt`；随后刷新消息计数并回写磁盘与索引（`sessionLifecycleManager.ts:64-87,168-187`）。加载启动与按需加载详情两条路径都会调用。
 - 索引损坏时先尝试 `.bak`/临时文件回退，失败则进入可取消的后台恢复并展示恢复横幅（2.3）；索引的 `messageCount`/`displayAgentId` 数值漂移在正常启动时不再全量修复，只有手动 `refreshSessionsIndex` 才完整重算。
 - 删除的会话进入回收站目录（`sessions-trash/`）并留下 tombstone，但进程内没有任何回收站恢复入口（界面只有删除确认，无"恢复已删除会话"操作；本次未在 llm-chat 目录找到读取 `sessions-trash/` 的代码）。
 
@@ -295,5 +295,4 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 - `src-tauri/src/commands/llm_chat_persistence.rs`（原子写/删除/回收站/tombstone）、`src-tauri/src/commands/llmchat_search.rs`（跨会话全文搜索）
 - `src/tools/llm-chat/composables/features/useAttachmentManager.ts`、`services/greetingService.ts`、`services/sessionImportExportService.ts`、`services/sillyTavernParser.ts`、`composables/features/useExportManager.ts`
 - `src/tools/llm-chat/composables/chat/useLlmSearch.ts`、`components/search/ChatSearchPanel.vue`、`composables/sidebar/useSessionsSidebarLogic.ts`
-
 

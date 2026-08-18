@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-16
+> 对比更新日期：2026-08-18
 >
 > 依据：同目录十八份单项目调查笔记及其记录的代码快照
 >
@@ -16,7 +16,7 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | --- | --- | --- |
-| AIO Hub | [AIO-Hub-Agent工具调查笔记.md](AIO-Hub-Agent工具调查笔记.md) | 355 | `main` | `023bc63ac10201bf0f663bf49d642fd55c29a3d0` |
+| AIO Hub | [AIO-Hub-Agent工具调查笔记.md](AIO-Hub-Agent工具调查笔记.md) | 274 | `dev` | `2ddbb19288c08bda1c080fc9a5f2e71149feaebc` |
 | AstrBot | [AstrBot-Agent工具调查笔记.md](AstrBot-Agent工具调查笔记.md) | 357 | `master` | `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` |
 | Chatbox | [Chatbox-Agent工具调查笔记.md](Chatbox-Agent工具调查笔记.md) | 536 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
 | Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 366 | `main` | `cd82f996fb6c3a523b6d40de31314f2b86f56281` |
@@ -225,7 +225,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 
 | 项目 | 表示 | 解析边界 |
 | --- | --- | --- |
-| AIO Hub | 可替换的 `ToolCallingProtocol`；当前唯一实现为 VCP 文本块 | 当前 VCP 解析器用复合正则**跳过** Markdown code fence 与 inline code；执行器在协议外二次核验 `agentCallable` |
+| AIO Hub | 可替换的 `ToolCallingProtocol`；当前唯一实现为 VCP 文本块 | 共享边界扫描跳过 Markdown code fence、inline code 和完整 ESCAPE 区域；坏块可在后续同级请求起点恢复，执行器在协议外二次核验 `agentCallable` |
 | AstrBot | Provider 原生 tool call（三类 schema） | runner 查找工具；handler 参数按 schema properties 白名单过滤，未知工具/异常转结果文本 |
 | Chatbox | 原生 tool call | provider 差异由 AI SDK 吸收；`toolCallId` 去重 |
 | Cherry Studio | 原生 tool call + SDK 消息流 | `mcp__*` 命名与 wire id 映射 |
@@ -243,7 +243,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | SillyTavern | 原生 function call，五家格式归一化 | 归一化后按模型返回顺序串行 `await` |
 | VCPToolBox | VCP 文本块 | 状态机扫描，带 `fuzzyToolMatching` 开关；**不保护 code fence** |
 
-这里有一处跨项目的实质不一致：**AIO Hub 与 VCPToolBox 跑同一套 VCP 文本协议，但 AIO Hub 的解析器会跳过 Markdown 代码块，VCPToolBox 的状态机不会。** 同一段模型输出——例如在代码块里“演示”一个工具调用——在 AIO Hub 侧被忽略，在 VCPToolBox 侧会被真实解析并执行。VCPToolBox 的 `fuzzyToolMatching` 开关进一步放宽了协议（容忍 `{始}`、`<<[TOOL_REQUEST]>>` 等变体），扩大了误触发面。这既是兼容性问题，也是安全问题。
+这里有一处跨项目的实质不一致：**AIO Hub 与 VCPToolBox 跑同一套 VCP 文本协议，但边界容错并不相同。** AIO 会跳过 Markdown 代码块、inline code 和 ESCAPE 参数区，并在未闭合坏块后从下一同级请求起点恢复；VCPToolBox 的状态机不保护 code fence，另有 `fuzzyToolMatching` 开关容忍多种标记变体。同一段模型输出在两端可能得到不同调用集合，这既是兼容性问题，也是安全边界差异。AIO 渲染器还有仅用于显示的模糊恢复，工具执行侧不会因此放宽。
 
 AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成、请求解析和结果格式化四个接口，解析与执行引擎都经由该接口完成协议转换和统一请求处理。新增协议仍需修改协议注册表、解析入口与协议配置（`SUPPORTED_PROTOCOLS`、`resolveProtocol()`、`ToolCallConfig.protocol`），属于代码级扩展点，尚未做到运行期插件注册。工具元数据、审批和执行语义没有写死为 VCP，但该接口输入输出仍是字符串，目前预留的是**多种文本协议**，并未直接覆盖模型 API 的结构化 `tool_calls`。VCPToolBox 的工具协议、插件目录与分布式路由则直接围绕 VCP 组织。
 
@@ -383,7 +383,7 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 ### 2. 协议两端的解析语义是否一致
 
-**AIO Hub 与 VCPToolBox 已确认不一致**（code fence 保护，见上文）。凡是同一文本协议由多个独立实现解析的架构，都要逐边界比对：code fence、inline code、嵌套、参数含分隔符、流式截断、畸形块、同轮多块、大小写与空白容忍。任一端更宽松，整个系统的有效边界就是最宽松那一端。
+**AIO Hub 与 VCPToolBox 已确认不一致**（code fence、ESCAPE 与坏块恢复，见上文）。凡是同一文本协议由多个独立实现解析的架构，都要逐边界比对：code fence、inline code、嵌套、参数含分隔符、流式截断、畸形块、同轮多块、大小写与空白容忍。任一端更宽松，整个系统的有效边界就是最宽松那一端。
 
 ### 3. 策略层失效时的方向
 

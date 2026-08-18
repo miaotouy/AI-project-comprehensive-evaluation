@@ -2,9 +2,9 @@
 
 > 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：只读通读 media-generator 的 ARCHITECTURE.md、registry、store、生成/任务/持久化 composable 与 buildAgentMethods，asset-manager 的 ARCHITECTURE 与 Rust `asset_manager.rs` 关键命令，llm-apis 适配器族与测试；用 `node -e` 解析 package.json/tauri.conf.json/capabilities，`node --check` 抽查两个纯 JS 文件；未运行 Tauri 应用，未修改被调查仓库
 >
@@ -20,12 +20,13 @@ AIO Hub 是本次类目三种正式样本中唯一**应用级桌面媒体工作�
 - **结果资产化**：每次生成先把解码/下载的字节内嵌生成参数（`embedMetadata`），再经 `importAssetFromBytes` 入资产库；衍生数据另写 `derived/media-generator/{date}/{assetId}.json`（`useMediaGenerationManager.ts:712` handleResponseAssets）。
 - **去重索引**：Rust 侧按当月目录做 SHA-256 去重（`check_duplicate_in_current_month`，`src-tauri/src/commands/asset_manager.rs:1265`）：命中时只给既有资产追加 `origin` 并回发 `asset-imported` 事件，不重复落盘；未命中才写文件，并更新月度 `.index.json` 与内存 Catalog。
 - **Agent 共用入口**：`getMetadata()` 按当前启用的 Profile/模型与可见性配置动态生成 `generate_<model_id>` 方法族，`isFast` 模型同步返回结果，其余走 tool-calling 异步任务框架（`buildAgentMethods.ts:754`）；注册表另有三个非 agentCallable 的编程接口供外部注入输入框与附件（见第 6 节）。
+- **本地音频渠道适配**：audio.cpp 通过普通 LLM Profile 接入 TTS。工作台按服务端语义默认不发送 OpenAI 的 `alloy` 音色，并把默认输出设为 WAV；响应仍以实际 `Content-Type` 判定格式，避免把 WAV 字节按 MP3 扩展名入库。Agent 动态方法同样把 audio.cpp 的 `audio_format` 限定为 `wav`（`packages/llm-core/src/providers/sync-media.ts:208-244`、`buildAgentMethods.ts:155-203`）。
 
 与独特功能笔记[能力一、二](../独特功能/AIO-Hub-独特功能调查笔记.md)证据一致；本笔记是类目专页，只交接媒体创作维度，不再重复完整源码调查。全部结论基于静态源码；真实模型生成、UI 渲染与资产索引性能均未运行验证。
 
 ## 系统边界与完整主链
 
-边界：media-generator（工作台）+ asset-manager（资产层）为主贡献；聊天模块的多模态附件、转写、弹幕播放器与 FFmpeg 工具属于相邻边界，不入本主链。执行域是「Tauri 前端渲染进程 + 用户配置的远程 LLM Profile」，无本地生成器、无独立后端进程；生成链路内不依赖 FFmpeg/ComfyUI/浏览器渲染服务。
+边界：media-generator（工作台）+ asset-manager（资产层）为主贡献；聊天模块的多模态附件、转写、弹幕播放器与 FFmpeg 工具属于相邻边界，不入本主链。执行域是「Tauri 前端渲染进程 + 用户配置的 LLM Profile」，服务可以是远程 API，也可以是本机 audio.cpp HTTP 服务。应用不内嵌生成器或独立生成后端；生成链路内不依赖 FFmpeg、ComfyUI 或浏览器渲染服务。
 
 主链（用户会话模式）：
 
@@ -79,9 +80,11 @@ Suno：suno_mode, mv, tags, title, make_instrumental
 TTS：audioConfig, instructions 等
 ```
 
+audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空表示使用服务端 `default_voice_preset`，界面允许自由输入服务端 preset、`voice_dir` 音色名或 cached voice ID；输出格式默认且只允许 WAV。通用音频适配器不会注入 `alloy`，并优先按响应 `Content-Type` 推断真实容器格式（`useMediaGenParameterState.ts:402-441`、`ModelParameterFields.vue:499-518`、`packages/llm-core/src/providers/sync-media.ts:208-244`）。
+
 **素材**：参考素材按媒体类型过滤（`referenceAttachmentConfig`，`MediaGenerationInput.vue:215`），拖放、粘贴与文件选择都先经 `importAssetFromPath` 导入资产库，再作为附件提交（同文件 `:324-404`）。执行时资产转 Base64，超过模型 `maxImageDimension` 时先缩放（`useMediaGenerationManager.ts:453-488`）。多轮上下文由 `includeContext` 开关与 `contextMessageIds` 手动指定；单轮模型自动带上一条 Assistant 结果图片作参考，不支持的端点显式降级为单轮（`collectSingleTurnReferenceAssets`，`useMediaGenerationManager.ts:156,433`）。
 
-**执行位置**：请求由 `useLlmRequest.sendRequest` 发往用户配置的 LLM Profile 的远程 API，适配器族按 profile 类型分发——openai 覆盖 image/video/audio、gemini 覆盖 image/chat，另有 suno-newapi、minimax-music、siliconflow、cohere 等（目录 `src/llm-apis/adapters/*`），统一产出 `LlmResponse.images/videos/audios`（`src/llm-apis/common.ts:572`）。视频/音乐走轮询式异步 API（如 Ark/Agnes 视频、Suno、MiniMax Music），由各适配器封装。本地无渲染/编码器，纯前端 + 远程模型（源码事实）。
+**执行位置**：请求由 `useLlmRequest.sendRequest` 发往用户配置的 LLM Profile。适配器族按 Profile 类型分发：OpenAI 族覆盖 image/video/audio，Gemini 覆盖 image/chat，另有 Suno NewAPI、MiniMax Music、SiliconFlow、Cohere 与 audio.cpp 等渠道（目录 `src/llm-apis/adapters/*`），统一产出 `LlmResponse.images/videos/audios`。视频/音乐走轮询式异步 API，由各适配器封装；audio.cpp 则是用户另行运行的本机 HTTP 服务。应用自身没有内嵌渲染器或编码器，生成执行仍发生在所配置的外部服务中。
 
 ## 3. 任务状态、异步回调与取消
 
@@ -141,7 +144,7 @@ TTS：audioConfig, instructions 等
 
 ## 6. Agent 回流、插件与外部依赖
 
-- **发现**：动态方法族 `generate_<model_id>` 的参数声明由模型 `mediaGenParams` 规则生成（`buildAgentMethods.ts:259`），方法描述含模型、渠道与快速模式等说明（`buildDescription`）。同一 modelId 多渠道时按 Profile 优先级路由（`resolveProfileRoute`，`registry.ts:189`）；agentConfig/Profile 配置变更经 watch 使工具发现缓存失效（`setupDiscoveryInvalidation`，`registry.ts:87`）。
+- **发现**：动态方法族 `generate_<model_id>` 的参数声明由模型 `mediaGenParams` 规则生成（`buildAgentMethods.ts:269`），方法描述含模型、渠道与快速模式等说明。语音参数还读取渠道类型：audio.cpp 不套用 OpenAI 音色枚举，输出格式只暴露 WAV。同一 modelId 多渠道时按 Profile 优先级路由；agentConfig/Profile 配置变更经 watch 使工具发现缓存失效。
 - **调用与返回**：handler 先校验 prompt 必填、媒体类型支持，并要求非 fast 模型必须异步执行（`buildAgentMethods.ts:651-665`）；成功或失败时由 `buildResult` 组装结构化结果（同文件 :605-638）：
 
   ```text
@@ -150,7 +153,7 @@ TTS：audioConfig, instructions 等
   ```
 - **编程接口**：`addContentToInput`、`setInputContent`、`addAssets` 是注册表的公开方法，但**不在 `getMetadata()` 中**（非 agentCallable），供其他模块写入输入框与附件（`registry.ts:231-295`）。`getAssetSidecarActions` 让资产右键菜单挂“查看生成参数”。
 - **审批与异步**：Agent 媒体生成走通用 tool-calling 审批/执行链（executor 二次校验 agentCallable、审批状态机、异步任务框架），细节见 Agent 工具笔记第 5/6/11 节，本笔记不重复。
-- **外部依赖**：生成请求依赖用户 LLM Profile（远程 API/Key）；远程媒体下载走 Tauri HTTP 插件（`tauriFetch`，30s connectTimeout），失败回退 `fetchWithTimeout(forceProxy, relaxIdCerts)` 本地代理（`useMediaGenerationManager.ts:1123` fetchAsArrayBuffer）；本地文件走 `convertFileSrc`。**本次未找到**媒体插件族/manifest 协议（通用插件系统是 JS/Sidecar/Native，不承载媒体生成扩展点）；无 FFmpeg/ComfyUI/浏览器服务依赖（生成链内）。
+- **外部依赖**：生成请求依赖用户 LLM Profile 对应的远程或本地 HTTP 服务；audio.cpp 需要用户自行运行服务进程。远程媒体下载走 Tauri HTTP 插件，失败回退本地代理；本地文件走 `convertFileSrc`。**本次未找到**媒体插件族/manifest 协议；生成链本身不依赖 FFmpeg、ComfyUI 或浏览器渲染服务。
 
 ## 7. 权限、资源边界与失败恢复
 
@@ -177,7 +180,7 @@ TTS：audioConfig, instructions 等
 
 **已确认边界**：
 
-- 无本地生成/渲染引擎：所有生成都是远程 API 调用，离线不可用（源码事实）。
+- 应用不内嵌生成/渲染引擎；生成通过 Profile 对应的 HTTP 服务执行。audio.cpp 可以部署在本机，但它是独立外部服务，不随应用内置。
 - 任务状态与进度主要面向 UI 展示，无统一回调注册面；Agent 进度经 `reportStatus` 桥接。
 - `autoCleanCompleted`、`maxConcurrentTasks`、批量下载为"设置/占位存在、执行链未实现"（静态推断，基于全仓 grep 无消费者）。
 
@@ -201,6 +204,7 @@ TTS：audioConfig, instructions 等
 - `src/tools/media-generator/composables/useMediaStorage.ts`（sessions-index.json/tasks.json/settings.json/generation-config.json 管理器、syncIndex:296、双层防抖:458）
 - `src/tools/media-generator/composables/logic/useMediaGenPersistence.ts`（init 自愈:75-248、generating→error:178、防抖:291）
 - `src/tools/media-generator/composables/useMediaGenParamRules.ts`（sanitizeParams:147、buildXaiSizeParams:394）
+- `src/tools/media-generator/composables/useMediaGenParameterState.ts`、`components/ModelParameterFields.vue`（audio.cpp 音色与 WAV 参数语义）
 - `src/tools/media-generator/composables/useMediaExportManager.ts`（exportBranchAsMarkdown:38）
 - `src/tools/media-generator/composables/useMiniMaxCoverWorkflow.ts`（startPreprocess:161、ensureTwoStepReady:128、24h 过期:219）
 - `src/tools/media-generator/types.ts`（MediaTask:88、MediaMessage:65、GenerationSession:338、MediaGeneratorSettings:265）
@@ -209,3 +213,4 @@ TTS：audioConfig, instructions 等
 - `src-tauri/src/commands/asset_manager.rs`（import_asset_from_bytes:870、check_duplicate_in_current_month:1265、月度索引:1208、list_assets_paginated:2200、remove_asset_source:2476、rebuild_hash_index:1720、import_backup_asset:1067、update_audio_waveform:2767）
 - `src/composables/useAssetManager.ts`（assetManagerEngine 全局单例:73、importAssetFromBytes:113、getAssetUrl:174）
 - `src/llm-apis/common.ts`（DEFAULT_MEDIA_TIMEOUT:32、LlmResponse:572）、`src/llm-apis/adapters/{openai,gemini,suno-newapi,minimax-music,siliconflow}/*`（媒体适配器族）
+- `packages/llm-core/src/providers/sync-media.ts`（audio.cpp TTS 默认值与响应格式推断）

@@ -1,10 +1,10 @@
 # AIO Hub LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
 > 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库
 >
@@ -18,17 +18,18 @@ AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有�
 
 这套方案的特点是“**渠道配置集中、运行时显式路由、协议适配与网络传输分层**”：
 
-- 桌面端提供 16 种可见 Provider 类型，其中大部分协议族最终复用 OpenAI-Compatible Adapter；
+- 桌面端提供 21 种可见渠道类型，其中 4 种聚合渠道把渠道身份与线协议解耦，其余不少类型最终复用 OpenAI-Compatible Adapter；
 - 每条渠道可配置多个 Key，按轮询选择，并记录启停、连续错误、429 熔断和自动恢复状态；
 - 模型属于渠道，既可手工维护，也可调用模型列表端点获取，再由模型元数据规则补全能力；
-- Chat、Responses、Anthropic、Gemini、Embedding、Rerank 和媒体生成可以使用不同端点；
+- Chat、Responses、Anthropic、Gemini、Embedding、Rerank、媒体生成和语音转写可以使用不同端点；
 - Provider 请求构造/响应解析位于共享 TypeScript Core，桌面网络默认经本地 Rust 代理；
 - Agent 默认绑定一个渠道和模型，单次发送、重试、续写时可临时覆盖；历史消息保存实际使用的渠道/模型快照。
 
 它没有“同模型的多渠道池”、渠道权重、优先级、成本路由或跨渠道自动故障转移。多 Key 也不是请求级重试器：某次调用失败后只会更新 Key 健康状态并把错误抛给上层，下一次请求才可能选择另一个 Key。
 
 - **Azure 不一致已修复**：旧快照中设置和 `ProviderType` 都包含 `azure`、运行时却缺少对应映射的问题已消除。Azure 适配器复用 OpenAI Chat Completions/Embeddings 的 Wire 格式，只转换 Azure 特有配置；适配器注册通过完整类型约束保证每个 Provider 都有实现，依据见 `src/llm-apis/adapters/azure/index.ts` 与 `src/llm-apis/adapters/index.ts`。
-- **模型执行路由已落地**：请求分发经 `resolveModelExecution()` 按“模型路由绑定、端点类型唯一识别、Provider 默认映射”的顺序解析操作，必要时覆盖 `customEndpoints`。模型发现的 `supportedEndpointTypes` 会持久化到 routing 字段；这是**渠道内的模型到协议/端点路由**，不是跨渠道故障转移，入口位于 `packages/llm-core`。
+- **模型执行路由已落地**：请求分发先查模型按操作保存的协议/端点绑定，再尝试把远端声明的唯一端点类型映射为协议。普通渠道随后回退到 Provider 默认协议；聚合渠道则继续查渠道级默认协议、内置模型路由表和静态操作默认。仍无法解析时抛出 `UnresolvedModelRouteError`，不根据模型名静默猜测。探测结果可由用户逐模型或批量确认并写回绑定；这是**同一渠道内的模型到协议/端点路由**，不是跨渠道故障转移（`packages/llm-core/src/model-execution-routing.ts:371-449`、`src/views/Settings/llm-service/probe/route-application.ts`）。
+- **audio.cpp 成为一等本地音频渠道**：渠道预设同时声明 OpenAI 兼容 TTS 与 Whisper 风格 ASR 端点。模型带 `asr` 能力且请求提供转写输入时，通用请求入口改走 `/v1/audio/transcriptions` multipart，而不是把音频塞入 Chat 消息；桌面转写工具会先把非 WAV 输入转换为 WAV（`src/composables/useLlmRequest.ts:226-262`、`src/tools/transcription/engines/audio.engine.ts:56-305`）。
 
 ## 总体结构
 
@@ -47,7 +48,8 @@ Agent / 临时模型 / 辅助任务
        -> 校验渠道启用状态与渠道内模型
        -> useLlmKeyManager.pickKey()          Key 轮询/健康过滤
        -> filterParametersByCapabilities()   参数裁剪
-       -> adapters[profile.type]             协议与能力分派
+       -> resolveModelExecution()            按操作解析协议/端点
+       -> adapters[effectiveProfile.type]    协议与能力分派
        -> @aiohub/llm-core Provider Adapter
        -> desktopLlmTransport
        -> fetchWithTimeout
@@ -74,7 +76,7 @@ Agent / 临时模型 / 辅助任务
 | `models[]` | 该渠道可选模型及其能力、参数、价格等元数据 |
 | `customHeaders` | 用户自定义请求头，支持预设值和高级兼容配置 |
 | `customEndpoints` | 按 API 能力覆盖相对路径或完整 URL |
-| `options` | Azure、Vertex 等 Provider 特有字段 |
+| `options` | Azure、Vertex 等 Provider 特有字段；聚合渠道还可保存按操作配置的 `routingDefaults` |
 | `toolHandling` | 渠道工具处理声明（`callConsumer`：`aio`/`upstream`；`upstreamProtocol`：`provider-native`/`vcp-text`/`transparent`/`none`；`aioDistributedExposure`），供聊天工具编排判断"本机消费还是 VCP 上游消费"（消费方见 Agent 工具笔记 §12） |
 | `networkStrategy` | `auto`、`proxy` 或 `native` |
 | `relaxIdCerts` / `http1Only` | Rust 网络层兼容选项 |
@@ -83,18 +85,20 @@ Agent / 临时模型 / 辅助任务
 
 ### 1.2 支持的 Provider 类型
 
-`src/config/llm-providers.ts` 当前向设置页声明：
+`src/config/llm-providers.ts` 当前向设置页声明 21 种渠道类型：
 
 - OpenAI、OpenAI-Compatible、OpenAI Responses；
 - DeepSeek、Anthropic Claude、Google Gemini、Cohere；
 - SiliconFlow、Groq、OpenRouter、xAI；
 - Ollama；
+- audio.cpp；
 - Azure OpenAI、Vertex AI；
-- Suno (NewAPI)、MiniMax Music。
+- Suno (NewAPI)、MiniMax Music；
+- New API、Sub2API、通用聚合渠道与 OpenCode Go。
 
-适配器注册入口再把这些类型映射到实际实现。OpenAI-Compatible Adapter 还被复用于 Groq、OpenRouter、Ollama、SiliconFlow 等渠道；DeepSeek、Gemini、Anthropic、Cohere、Vertex 和媒体协议有专用实现，注册位置见 `src/llm-apis/adapters/index.ts`。
+适配器注册入口再把这些渠道身份映射到实际协议实现。OpenAI-Compatible Adapter 还被 Groq、OpenRouter、Ollama、SiliconFlow 与 audio.cpp 复用；DeepSeek、Gemini、Anthropic、Cohere、Vertex 和媒体协议有专用实现。四种聚合渠道不是第五套线协议：执行路由先把它们解析为 OpenAI Chat/Responses、Anthropic、Gemini 等适配器，再将 `effectiveProfile.type` 改成实际协议类型（`src/llm-apis/adapters/index.ts:104-139`、`packages/llm-core/src/model-execution-routing.ts:404-441`）。
 
-类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；当前已用完整类型约束避免遗漏，Azure 漂移也已修复。Ollama 改用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。适配器表还保留若干兼容别名，但它们不在 `ProviderType` 的设置枚举中，主要依赖预设或兼容路径，而不是完整的一等配置类型。
+类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；当前已用完整类型约束避免遗漏，Azure 漂移也已修复。Ollama 改用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。预设实现已从单个大文件拆成 `src/config/llm-presets/presets/` 下按渠道独立模块，由 `index.ts` 统一注册；这是维护边界变化，不改变 Profile 的持久化结构。
 
 ### 1.3 网络与安全默认值
 
@@ -114,7 +118,7 @@ Agent / 临时模型 / 辅助任务
 | CLI | 根 `package.json` 的脚本是构建、检查、测试、文档和 Tauri 启动等开发命令；本次在根脚本、`scripts/` 和渠道相关源码中未找到读取/新增/编辑/复制/启停/删除/导入/导出/连接测试 Profile 的 CLI 命令。 | **本次未找到**渠道管理 CLI；不能据此断言仓库未来版本或外部脚本不存在。`scripts/version.ts` 等 `process.argv` 使用属于构建/版本脚本，不是渠道管理入口。 |
 | TUI | 未找到 Ink、Blessed 或其他终端 UI 渠道列表/编辑器，也未找到 Profile 专用 TUI 命令。 | **本次未找到** TUI 渠道管理入口。 |
 | Web | 代码使用 Vue 页面，但其桌面管理页依赖 Tauri 文件对话框和 Tauri FS 插件导出；未找到独立 Web 服务、HTTP 配置 API 或浏览器部署版的渠道管理页。 | **静态推断**当前 `src/` 页面属于桌面 Tauri WebView，不应把它概括为可远程访问的 Web 管理端；未启动浏览器或 Tauri 验证实际可达性。 |
-| 桌面端 | 完整支持查看、新建、编辑、启停、删除、排序、配置导入、渠道包导出、模型列表获取、模型/Key/能力探测。侧边栏显示名称、Provider 类型和模型数，编辑器显示当前 Profile 的完整配置。 | **源码确认**入口和事件绑定见 `src/views/Settings/llm-service/LlmServiceSettings.vue:579-660,1016-1111`；保存成功、文件对话框和真实请求结果本次未运行验证。 |
+| 桌面端 | 完整支持查看、新建、编辑、启停、删除、排序、配置导入、渠道包导出、模型列表获取、模型/Key/能力探测，以及模型级和批量协议路由绑定。侧边栏显示名称、渠道类型和模型数，编辑器显示当前 Profile 的完整配置。 | **源码确认**入口和事件绑定见 `src/views/Settings/llm-service/LlmServiceSettings.vue`、`components/ModelRoutingEditor.vue` 与 `BatchRouteBindingDialog.vue`；保存成功、文件对话框和真实请求结果本次未运行验证。 |
 | 移动端 | 独立设置页支持查看、新建、预设创建、编辑、显式保存、启停、删除、请求头/端点/模型编辑、模型列表获取和模型/批量探测。 | **源码确认** UI 和 Store 事件绑定见 `mobile/src/tools/llm-api/views/LlmSettingsView.vue:31-100,115-179`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:106-149,346-665`；本次未找到移动端渠道包导入、导出或复制入口。 |
 
 配置文件层和 UI 层的“删除”语义也不同：桌面端删除调用 Profile Store 的 `deleteProfile` 后保存整个列表；移动端删除同时把选中 ID 指向列表首项或清空。两端都没有发现删除关联 Agent、会话历史或 Key 健康状态的级联清理代码；历史消息保留实际渠道快照的行为仍由聊天链路负责，不能推断删除会清理历史引用（`src/composables/useLlmProfiles.ts:212-232`、`mobile/src/tools/llm-api/stores/llmProfiles.ts:106-112`）。
@@ -137,7 +141,7 @@ Agent / 临时模型 / 辅助任务
 
 启停都是 Profile 级 `enabled` 字段，不是 Key 或单模型状态。桌面端普通请求会检查该字段，但设置页探测可以对当前编辑中的禁用渠道发起探测；移动端卡片开关直接调用 `updateProfile`。两端都没有发现“暂停后删除凭据”或“停用后禁止查看/编辑”的逻辑，已有渠道停用后仍可打开和修改。
 
-连接测试不是一个单一的健康字段，而是设置页的独立探测路径。桌面端“检查模型列表”调用 `channel-probe-service` 的 `model-list` 探测；模型编辑区可按模型、端点、流式模式和媒体成本确认执行推理探测，也可批量探测；Key 管理器可指定某个 Key 和模型测试，并把结果反馈给 Key 健康状态。移动端编辑器提供模型列表获取、模型探测和批量探测，但未找到与桌面端原生渠道包导入导出相连的测试入口。探测结果包含分类、耗时和响应摘要，不能据此推断真实聊天请求一定成功；探测使用的是独立的系统探测上下文（`src/views/Settings/llm-service/composables/useConnectionTest.ts:57-133,135-213`、`src/views/Settings/llm-service/probe/channel-probe-service.ts:55-149`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:132-149,228-239`）。
+连接测试不是一个单一的健康字段，而是设置页的独立探测路径。桌面端“检查模型列表”调用 `channel-probe-service` 的 `model-list` 探测；模型编辑区可按模型、端点、流式模式和媒体成本确认执行推理探测，也可批量探测；Key 管理器可指定某个 Key 和模型测试，并把结果反馈给 Key 健康状态。探测若确认某个模型只有一种可用协议，可生成路由应用候选，由用户选择后写入模型绑定；模型列表返回的端点声明也可形成批量绑定候选。探测结果不会未经确认自动改变生产路由（`src/views/Settings/llm-service/probe/route-application.ts:1-58`、`components/ModelProbeDialog.vue:129-157,589-604`）。移动端编辑器提供模型列表获取、模型探测和批量探测，但本次未找到桌面端这套路由应用 UI。探测结果包含分类、耗时和响应摘要，不能据此推断真实聊天请求一定成功。
 
 ### 2.4 桌面端创建与编辑
 
@@ -147,6 +151,7 @@ Agent / 临时模型 / 辅助任务
 - 启用、停用、排序、删除和编辑渠道；
 - 配置 Base URL、多 Key、网络策略、自定义 Header 和端点；
 - 手工添加/编辑模型，或获取远端模型列表；
+- 对单个模型按操作绑定协议与自定义端点，或批量绑定 Chat 协议；
 - 测试模型列表、指定模型、指定能力与指定端点；
 - 批量检测模型，查看首字节和总耗时；
 - 对图片/音频等可能计费的探测要求显式确认。
@@ -300,8 +305,8 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 2. 优先使用显式传入的 Key，否则从该渠道的凭据池选择一个；随后克隆 Profile 并缩成当前 Key，避免 Adapter 自行再选。
 3. 按模型能力过滤不支持的生成参数，再叠加模型自定义参数。
 4. 注入 Profile 的网络/TLS/HTTP 选项。
-5. 按操作类型解析**执行路由**；`preferChat` 和 `_forceChatMode` 可强制走 chat。模型绑定优先，其次使用唯一端点类型，最后回退 Provider 默认映射；结果可能改写 Profile 类型与端点，并把适配器、路由来源和渠道类型写入 Inspector 上下文。
-6. 用有效的 Profile 类型选择协议实现，再按模型能力选择 Chat、Embedding、Rerank 或媒体方法。
+5. 按操作类型解析**执行路由**；`preferChat` 和 `_forceChatMode` 可强制走 chat。模型绑定优先，其次使用唯一端点声明。普通渠道再回退 Provider 默认；聚合渠道依次检查渠道默认、内置模型表和静态操作默认，仍无结果就显式报错。解析结果可能改写 Profile 类型与端点，并把适配器、路由来源和渠道类型写入 Inspector 上下文。
+6. 用有效的 Profile 类型选择协议实现，再按模型能力选择 Chat、Embedding、Rerank、媒体或专用语音转写方法。
 7. 成功或失败后按错误分类更新 Key 健康状态（见第 5 节），并把响应或异常交还调用方。
 
 路由是确定性的，没有读取 Profile 顺序、权重、延迟、剩余额度或价格来改选渠道——模型执行路由只做**渠道内的协议/端点选择**，不跨渠道改选。
@@ -347,14 +352,15 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 
 ## 6. Provider Adapter 与协议边界
 
-`src/llm-apis/adapters/index.ts` 定义应用层 `LlmAdapter`，能力方法包括 `chat`、`embedding`、`image`、`audio` 和 `video`。具体实现逐步下沉到 `packages/llm-core`：
+`src/llm-apis/adapters/index.ts` 定义应用层 `LlmAdapter`，能力方法包括 `chat`、`embedding`、`image`、`audio`、`video` 和可选的 `transcribe`。具体实现逐步下沉到 `packages/llm-core`：
 
 - OpenAI-Compatible Chat Completions；
 - OpenAI Responses；
 - Anthropic Messages；
 - Gemini / Vertex GenerateContent；
 - Cohere Chat V2；
-- Embedding、Rerank、模型列表和异步媒体任务。
+- Embedding、Rerank、模型列表和异步媒体任务；
+- OpenAI/Whisper 风格的 multipart 语音转写。
 
 共享 Core 使用 canonical request/response 和 `ProviderAdapter`，负责请求体、URL、Header、流式 Decoder 与 Provider 语义；它不读取 Vue Store，也不持有 Key 状态。桌面和移动端各自负责把 Profile 变成 Core DTO，并注入平台 Transport。
 
@@ -364,7 +370,7 @@ Provider 层的原生工具调用编解码已修补（提交 `27e899483`）—�
 
 ## 7. 自定义端点与 Header
 
-一个 Profile 可分别覆盖 Chat Completions、Responses、Anthropic Messages、Gemini GenerateContent、Completions、Models、Embeddings、Rerank、图片、音频、审查和视频端点。
+一个 Profile 可分别覆盖 Chat Completions、Responses、Anthropic Messages、Gemini GenerateContent、Completions、Models、Embeddings、Rerank、图片、语音生成、语音转写、审查和视频端点。
 
 端点既可为相对路径，也可为完整 URL；部分端点支持 `{model}`、`{video_id}` 等占位符。Adapter 根据协议读取对应字段，Anthropic 还兼容用 `chatCompletions` 作为旧配置回退。
 
@@ -434,9 +440,11 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 
 - 渠道与模型类型：[`src/types/llm-profiles.ts`](../../aio-hub/src/types/llm-profiles.ts)
 - Provider 声明：[`src/config/llm-providers.ts`](../../aio-hub/src/config/llm-providers.ts)
+- 渠道预设注册：[`src/config/llm-presets/index.ts`](../../aio-hub/src/config/llm-presets/index.ts)
 - Profile 持久化：[`src/composables/useLlmProfiles.ts`](../../aio-hub/src/composables/useLlmProfiles.ts)
 - Key 状态与轮询：[`src/composables/useLlmKeyManager.ts`](../../aio-hub/src/composables/useLlmKeyManager.ts)
 - 通用请求入口：[`src/composables/useLlmRequest.ts`](../../aio-hub/src/composables/useLlmRequest.ts)
+- 模型执行路由：[`packages/llm-core/src/model-execution-routing.ts`](../../aio-hub/packages/llm-core/src/model-execution-routing.ts)
 - Adapter 注册：[`src/llm-apis/adapters/index.ts`](../../aio-hub/src/llm-apis/adapters/index.ts)
 - 模型列表：[`src/llm-apis/model-fetcher.ts`](../../aio-hub/src/llm-apis/model-fetcher.ts)
 - 共享 Provider Core：[`packages/llm-core/src`](../../aio-hub/packages/llm-core/src)
@@ -446,6 +454,8 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - 桌面 Profile 编辑与自动保存：[`src/views/Settings/llm-service/composables/useProfileEditor.ts`](../../aio-hub/src/views/Settings/llm-service/composables/useProfileEditor.ts)
 - 桌面渠道导出与序列化：[`src/views/Settings/llm-service/components/LlmProfileExportDialog.vue`](../../aio-hub/src/views/Settings/llm-service/components/LlmProfileExportDialog.vue)、[`src/utils/llm-profile-transfer.ts`](../../aio-hub/src/utils/llm-profile-transfer.ts)
 - 渠道探测：[`src/views/Settings/llm-service/probe/channel-probe-service.ts`](../../aio-hub/src/views/Settings/llm-service/probe/channel-probe-service.ts)
+- 路由编辑与探测结果应用：[`src/views/Settings/llm-service/components/ModelRoutingEditor.vue`](../../aio-hub/src/views/Settings/llm-service/components/ModelRoutingEditor.vue)、[`src/views/Settings/llm-service/probe/route-application.ts`](../../aio-hub/src/views/Settings/llm-service/probe/route-application.ts)
+- 语音转写适配：[`src/llm-apis/adapters/openai/transcription.ts`](../../aio-hub/src/llm-apis/adapters/openai/transcription.ts)
 - 配置导入：[`src/utils/llm-config-import`](../../aio-hub/src/utils/llm-config-import)
 - 移动端 Profile Store：[`mobile/src/tools/llm-api/stores/llmProfiles.ts`](../../aio-hub/mobile/src/tools/llm-api/stores/llmProfiles.ts)
 - 移动端渠道设置页与编辑器：[`mobile/src/tools/llm-api/views/LlmSettingsView.vue`](../../aio-hub/mobile/src/tools/llm-api/views/LlmSettingsView.vue)、[`mobile/src/tools/llm-api/components/ProfileEditor.vue`](../../aio-hub/mobile/src/tools/llm-api/components/ProfileEditor.vue)

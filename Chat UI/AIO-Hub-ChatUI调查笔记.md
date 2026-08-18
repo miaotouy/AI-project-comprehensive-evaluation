@@ -1,10 +1,10 @@
 # AIO-Hub Chat UI 调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -132,12 +132,14 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 会话生成中再发消息时，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`、`status: "queued"`），当前生成结束后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队/等待状态的界面呈现：`utils/messageStatus.ts:33-103` 把节点状态映射为展示状态，`MessageHeader.vue` 在偏好开关开启（默认 true，`config/defaultSettings.ts:33`）时于消息头渲染对应徽标（图标 + 文案 + tooltip 详情，生成中带旋转动画，截图模式隐藏；`MessageHeader.vue:325-350`）。映射如下：
 
 - `queued` → "排队"；旧数据 `pending` 兼容识别为 queued
-- `waiting` → "等待"
+- `waiting` → "等待中"
 - `generating` → "生成中"
 - `error` → "错误"
 - 空响应诊断 → "异常回复"
 
 ### 5.3 工具审批条
+
+三点流式指示器在 `waiting` 与 `generating` 两个阶段都显示，只依赖消息生命周期状态和错误标记，不再依赖可能异步同步的 `generatingNodes` 集合；渲染器流源仍使用后者判断真实生成任务。这个拆分避免首字到达、状态从等待中切换为生成中时指示器短暂消失（`MessageContent.vue:263-300,1173-1180`）。
 
 工具调用暂停时，`ToolCallingApprovalBar.vue` 在输入区上方提供允许/拒绝/全部允许/全部拒绝/静默执行等动作（`ToolCallingApprovalBar.vue:154-172,187-220`）。"全部允许/全部拒绝"按钮特意不按会话 ID 精确匹配，而是基于 UI 当前渲染出来的可见请求 ID 列表——因为 VCP 广播来的审批请求会话 ID 是 `vcp-${maid}` 格式，跟本地 llm-chat 会话 ID 体系不是一套（`ToolCallingApprovalBar.vue:145-153` 注释里专门解释了这个原因；审批状态语义在对话请求与上下文 9.5）。
 
@@ -256,4 +258,3 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 - `src/tools/llm-chat/composables/ui/useLlmChatUiState.ts`（198-230行 selectAgent）、`composables/input/useChatInputManager.ts`
 - `src/tools/llm-chat/components/context-analyzer/ContextAnalyzerDialog.vue`、`components/export/ExportBranchDialog.vue`、`components/screenshot/ShareScreenshotDialog.vue`
 - `src-tauri/src/tray.rs`（托盘）
-

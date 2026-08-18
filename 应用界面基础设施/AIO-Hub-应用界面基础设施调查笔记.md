@@ -1,10 +1,10 @@
 # AIO-Hub 应用界面基础设施调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -242,7 +242,7 @@ applyBlendMode 实现，:102-156），作用于 sidebar/card/header/input/contai
 
 实际应用方式是向当前 document.head 创建或复用 `<style id="custom-css-override">`，再把编辑器文本原样写入 textContent；禁用或内容为空时移除该节点（`useCssOverrides.ts:369-399`）。因此它可以覆盖整个当前 WebView 的应用样式，并可引用 `--primary-color` 等主题变量，但代码侧没有选择器作用域、规则校验或 CSS 安全过滤。
 
-**装配边界。** 全 src 搜索 `useCssOverrides()` 只命中 composable 自身和 `CssOverrideSettings.vue`。`Settings.vue:508-636` 会在进入设置页时一次挂载全部设置模块，所以已保存 CSS 会在设置页挂载后加载并注入；普通启动链和 `useRootInit` 没有初始化该 composable。离开设置页时 style 节点按设计不会移除（`useCssOverrides.ts:441-449`），但应用重启后、用户尚未进入设置页前，以及其他独立 WebView 窗口中，未找到自动恢复注入的调用路径。这是当前快照的静态代码结论，实际窗口行为未运行验证。
+**装配边界。** 持久配置的启动恢复已经从设置页 composable 中拆成无状态入口 `applyPersistedCssOverrides()`。主窗口与分离窗口初始化都会先加载 `settings.json`，随后立即把 `cssOverride` 注入各自文档的 `<style id="custom-css-override">`，早于主题与服务的并行初始化；进入设置页后，`useCssOverrides()` 再负责编辑、副本状态、预设和实时应用（`src/stores/appInitStore.ts:80-105,147-168`、`src/composables/useCssOverrides.ts:39-69,413-466`）。因此“重启后必须先进入设置页”“独立 WebView 不恢复”已不再成立；多窗口运行期修改是否即时同步仍未运行验证。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -338,7 +338,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 **主题系统三层分工。** useTheme（明暗+系统跟随）→ themeColors（五色主色注入 Element Plus 色阶）→ useThemeAppearance（壁纸/取色/混合/窗口特效），各自独立持久化到 settings.json 的不同字段；theme-changed CustomEvent 已无监听者，跨窗口主题同步实际靠各窗口启动时读同一 settings.json 自行应用（见第 1 节）。
 
-**自定义 CSS 是独立旁路。** useCssOverrides 不参与三层主题计算，只把用户文本原样注入当前 document.head，并把配置持久化到 settings.json 的 cssOverride。它支持预设与实时编辑，但当前调用方仅在设置页；保存状态与启动时生效状态因此不是同一件事。
+**自定义 CSS 是独立旁路。** useCssOverrides 不参与三层主题计算，只把用户文本原样注入当前 document.head，并把配置持久化到 settings.json 的 cssOverride。设置页负责预设与实时编辑；应用初始化则用无状态恢复入口把同一配置应用到主窗口和分离窗口。
 
 **双通道自动取色用两套算法。** ColorThief（背景叠加色，按亮度取次暗/次亮）与 node-vibrant（主题主色，策略化优先级链），提取结果都经 OKLCH 感知修正保证对比度；两个开关独立，开启时切壁纸/切明暗都会重新提取。
 
@@ -378,7 +378,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 - 主题外观系统全部为静态核对，未运行验证：壁纸提取（ColorThief/node-vibrant）的真实取色效果、OKLCH 修正后的视觉观感、16 种混合模式的叠加表现、毛玻璃与分层透明度的实际渲染、no-global-wallpaper 分离窗口表现；initThemeAppearance 初始化失败/清理路径未实测。
 - OS 级窗口特效（mica/acrylic/blur/vibrancy）在不同平台与窗口系统（Windows 版本差异、macOS 透明）下的可用性与降级表现未运行验证。
 - iframe 主题注入（useIframeTheme）与 SVG 单色替换（useThemeAwareIcon）在真实内容（含 JS 动态改色的 SVG）上的表现未运行验证。
-- 自定义 CSS 的实时覆盖、预设预览与保存已静态确认，未运行验证大段或无效 CSS 的编辑性能与失败表现；当前快照也未验证重启后未进入设置页时、离开设置页后及独立 WebView 窗口中的实际生效范围。
+- 自定义 CSS 的实时覆盖、预设预览、保存和主/分离窗口启动恢复已静态确认；未运行验证大段或无效 CSS 的编辑性能、窗口初始化时的实际视觉效果，以及一个窗口运行期修改后其他已打开窗口何时更新。
 
 ## 10. 关键源码索引
 

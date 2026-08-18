@@ -2,9 +2,9 @@
 
 > 调查对象：`../../aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试
 >
@@ -14,13 +14,13 @@
 
 ## 结论摘要
 
-AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保持为"消息树节点上的纯文本字符串"，在展示时由 `RichTextRenderer` 动态解释为 Markdown/Mermaid/KaTeX/HTML 沙箱等；工作区层则提供 `web-canvas`——一个以磁盘文件为事实源、Git 为版本追踪的 Agent 协作工作区。模型可查询、读取、修改和提交文件，但审批事务、跨窗口错误同步和每画布状态隔离存在结构性断点，因此不能再把它表述为已经验证的完整"运行 -> 报错 -> 修复"闭环。
+AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保持为“消息树节点上的纯文本字符串”，在展示时由 `RichTextRenderer` 动态解释为 Markdown、Mermaid、KaTeX 和 HTML 沙箱；工作区层则提供 web-canvas，一个以磁盘文件为事实源、Git 为版本追踪的 Agent 协作工作区。模型可以查询、读取、修改和提交文件，独立预览窗口捕获的运行时错误也会同步回主窗口并进入后续 Agent 上下文。静态代码已经贯通“修改 -> 预览 -> 报错 -> 回流 -> 再修改”，但真实窗口、网络和 Tauri WebView 行为仍未运行验证。
 
 - **聊天输出对象模型**：消息节点（`ChatMessageNode`）有稳定 ID、来源、角色、状态与丰富元数据，但内容只是一段 `content: string`，不存在独立的 Artifact 对象；HTML 代码块在展示时进入 iframe 沙箱（`HtmlInteractiveViewer`）成为可运行预览，属"展示时物化"，无独立生命周期。
-- **web-canvas**：`{appDataDir}/canvases/projects/{id}/` 下的物理项目 + `.canvas.json` 元数据 + 独立 Git 仓库；Monaco 编辑直接写盘（500ms 防抖），预览 iframe 用 `asset://` 加载入口文件并注入日志/错误捕获脚本。预览只在独立画布窗口中创建；审批钩子不是事务快照，而是先写工作树、拒绝时按 HEAD 回退。
+- **web-canvas**：`{appDataDir}/canvases/projects/{id}/` 下的物理项目、`.canvas.json` 元数据和独立 Git 仓库构成持久对象。Monaco 编辑以 500ms 防抖写盘；审批前的 Agent 写入或 diff 先重放到不落盘的内存覆盖层，批准后才正式写盘一次，拒绝只移除候选层，不改变已有工作区。预览 iframe 会内联候选 HTML/CSS/JS，并同步显示（`CanvasAgentService.ts:358-415`、`useCanvasPreview.ts:39-87`）。
 - **工具结果**：工具调用先经过 `ToolCallingProtocol` 表示层；当前快照的协议注册表只登记 VCP 一种实现，所以实际使用 VCP 文本标记 `<<<[TOOL_REQUEST]>>>`。解析执行后，结果被格式化为文本写入"tool 角色"消息节点内容，随会话 JSON 持久化；结果本身不物化为独立对象，但 web-canvas 的文件操作结果会直接落到物理文件。当前 VCP 是实现范围，不是工具系统的架构上限。
 - **持久化**：聊天会话按会话独立 JSON 文件存储；画布为物理文件 + Git；媒体生成结果通过 `importAssetFromBytes` 进入资产管理系统并带生成来源元数据。
-- **执行位置**：全部在前端 JS（Tauri WebView）内执行；无远端沙箱、无容器、无独立进程执行模型代码。聊天 HTML 预览会注入 iframe CSP；canvas 预览不会，且 scripts + same-origin 使其不能被视为可靠宿主隔离。应用级 CSP 与 fs/asset scope 均较宽（见第 7 节）。
+- **执行位置**：生成代码在 Tauri WebView 的 iframe 中执行；无远端沙箱、容器或独立语言进程。聊天 HTML 与 canvas 预览分别注入自己的 CSP。canvas iframe 只授予 `allow-scripts`，形成 opaque origin，宿主还校验 `event.source` 与 `origin === "null"`；其 CSP 仍允许 HTTP(S)、WebSocket、外部 frame 和 asset 资源，能力边界见第 7 节。
 
 横向对比轴（桌面端）：
 
@@ -31,24 +31,22 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 | 投影表面 | inline（消息内）+ 弹窗 + 分离窗口 | 工具页项目列表/Monaco 编辑器 + 独立 Tauri 预览窗口；工具页无内嵌运行预览 |
 | 执行强度 | HTML/CSS/JS 浏览器脚本（iframe 沙箱） | 同左，入口文件加载本地 `asset://` 资源 |
 | 持续性 | 会话文件（跨会话可恢复） | 物理项目 + Git（长期活对象） |
-| 闭环程度 | 只生成 + 可编辑消息 + 可续写/重解析 | 文件查询/读写/提交成立；运行时错误回流在独立窗口与主窗口状态之间断开 |
+| 闭环程度 | 只生成 + 可编辑消息 + 可续写/重解析 | 文件查询/读写/提交成立；预览错误经窗口总线回流 Agent 上下文，可继续修改 |
 | 能力范围 | 无桥接（iframe 只回传日志/高度） | 工具方法调用（读文件、写文件、提交、Git） |
 | 可移植性 | HTML 预览可"在浏览器中打开"导出单文件 | 可提交 Git、可在 VSCode 中打开 |
 
-**能力等级认定**：综合 **G4（可编辑工作区）**。web-canvas 有稳定项目 ID、物理文件和 Git，具备若干 G5 原料，但运行实例不持久、错误状态未跨窗口回到 Agent、审批修改也没有独立 revision/快照，所以当前快照的 **G5 证据不足**。聊天内 HTML 代码块沙箱为局部 **G3**，其余聊天输出停留在 G0–G1。
+**能力等级认定**：综合 **G4（可编辑工作区）**。web-canvas 有稳定项目 ID、物理文件、Git、候选预览和运行错误回流，具备若干 G5 原料；但运行实例和审批候选层都不持久，也没有后台持续维护或跨会话自主调度，因此当前快照的 **G5 证据仍不足**。聊天内 HTML 代码块沙箱为局部 G3，其余聊天输出停留在 G0–G1。
 
-### 已确认断点与缺口
+### 已修正机制与剩余边界
 
-本节列出已确认的结构性断点与缺口；均为静态源码确认，未启动 Tauri 应用：
+旧快照中审批提前写盘、窗口错误不回流、路径未限制、跨画布 dirty 状态混用、外部编辑无监听和 Monaco 跨标签写错文件等行为，在当前实现中已有对应机制变化：
 
-1. **运行时错误闭环在窗口边界断开。** 预览引擎 `useCanvasPreview` 只在独立画布窗口（`components/window/CanvasWindow.vue`）中运行，捕获到的错误写入该窗口自己的 store；跨窗口同步 `useCanvasSync` 只传当前画布 ID 与文件变更通知，不传 `runtimeErrors`。主窗口的 Agent 上下文注入 `CanvasAgentService.getExtraPromptContext()` 通常因此看不到预览窗口捕获的错误；此前“错误自动回流模型”的结论只是模块内意图，不是贯通链路。
-2. **审批预览不是可逆事务。** 通用执行器先调用预览钩子 `onToolCallPreview`，批准后仍会调用真实工具方法（`tool-calling/core/executor.ts:233-287,363-398`）：`apply_canvas_diff` 因而被应用两次，第二次匹配同一 search 块通常失败，`write_canvas_file` 则重复写入。拒绝时按当前 Git 状态回退——已有文件检出到 HEAD、未跟踪文件直接删除（`CanvasAgentService.ts:306-330`）——会一并丢掉审批前已存在但未提交的用户修改，而不是恢复“本次预览前”的内容；批准路径也不会清理预览请求记录。
-3. **所谓外部编辑兼容没有实时检测。** 仓库内没有文件系统 watcher 或轮询；预览刷新与 Git 状态更新只由应用内部的 `emitFileChanged`、打开画布和显式操作触发。VSCode 修改文件会落到同一事实源，但当前界面不会自动感知或刷新，需重新打开/触发读取。
-4. **Monaco 防抖写盘有跨文件竞态。** `debouncedWriteFile(content)` 在 500ms 后读取当时的 `activeTab.value`，没有把编辑发生时的路径一同捕获，也未在切换/卸载时 flush/cancel；快速编辑 A 后切到 B，A 的内容可能写入 B（`CanvasEditorPanel.vue:127-139`）。同组件注册的 `store.onFileChanged` 也未在卸载时注销（:169-184）。
-5. **画布状态不是按项目隔离。** `dirtyFiles` 是 store 级单一 `Map`，`refreshGitStatus(canvasId)` 每次整体覆盖它。Agent 绑定画布与 UI 当前画布不同时，`getExtraPromptContext` 虽读取绑定画布的文件树，却可能附带另一画布的未提交文件列表；独立窗口自己的 store 又通常没有刷新这张 Map。
-6. **画布预览没有专用 CSP，且宿主消息校验不足。** 预览引擎 `useCanvasPreview` 只注入 `<base>` 与日志捕获脚本，聊天 HTML 沙箱的 CSP 注入不适用于 canvas；其 iframe 同时启用 `allow-scripts` 与 `allow-same-origin`（另含 popups），生成脚本与宿主同源。宿主侧消息处理只检查事件类型字段，不校验来源（`CanvasPreviewPane.vue:23-29,53-57`）。因此“iframe 不授予宿主能力”不能仅凭未显式注入 Tauri bridge 认定；同源脚本可接触宿主窗口对象的风险需要运行验证。
-7. **Agent 文件路径缺少画布根目录约束。** 画布的读写删三个方法（如 `readPhysicalFile`）直接把 Agent 提供的 `filepath` 拼接到项目根路径，未拒绝绝对路径或 `..`，画布注册表也没有安全策略钩子（`checkSecurityPolicy`）。在 Tauri fs scope 允许的范围内，模型提供的路径存在逃出项目目录的静态风险。
-8. **web-canvas 无专项测试。** 目录下没有测试文件；通用工具调用测试也没有覆盖上述预览双执行、拒绝前快照、跨窗口错误同步、跨画布状态、路径约束或编辑器切换竞态。
+1. **审批预览改为瞬时内存覆盖层。** 预览钩子登记 mutation 并重建候选文件映射，不调用正式写入；批准后 executor 只执行一次真实方法，完成或失败后消费候选记录，拒绝则移除该请求并重算其余候选。候选层不持久化，应用重启或窗口异常关闭后的预览恢复未验证（`CanvasAgentService.ts:299-415`、`canvasStore.ts:580-640`）。
+2. **运行时错误链已静态贯通。** 预览窗口把校验后的错误通过 `canvas:runtime-error` 全量消息发送，主窗口总线再次校验、裁剪并写入按 canvasId 管理的错误 store；`getExtraPromptContext()` 再把绑定画布的错误摘要交给 Agent。跨窗口时序、重复去重和真实脚本报错仍需运行验证（`CanvasWindow.vue:176-202`、`useCanvasSync.ts:113-151`、`CanvasAgentService.ts:32-108`）。
+3. **外部文件变更进入当前画布监听。** Store 打开画布后递归 watch 项目目录，忽略 `.git` 与元数据文件，对其余变更做 300ms 合并，刷新 Git 状态、标记旧错误并广播文件变化。监听器一次只绑定一个当前画布，多个窗口或快速切换项目的实际行为未验证（`canvasStore.ts:118-173`、`useCanvasStorage.ts:163-176`）。
+4. **编辑与状态按目标绑定。** Monaco 防抖任务捕获 `canvasId + filepath + content`，提交前 flush、丢弃时 cancel，组件卸载会释放文件变化监听；Git dirty 状态保存在 `dirtyFilesByCanvas`，Agent 上下文按绑定 canvasId 读取（`CanvasEditorPanel.vue:127-205`、`canvasStore.ts:94-116`）。用户与 Agent 仍没有 revision、CRDT 或冲突合并，实际并发写入遵循最后写入者。
+5. **文件和 iframe 边界已收紧。** 存储层拒绝绝对路径、盘符、空段、`.`、`..` 和 NUL，再把规范化相对路径拼入画布根目录。预览 iframe 只启用脚本、使用 opaque origin，并注入禁止 object/form 的 CSP；宿主校验消息来源、origin、类型与长度。CSP 仍允许 HTTP(S)、WebSocket、外部 frame 与 asset 资源，网络访问不是默认封闭（`useCanvasStorage.ts:43-75`、`CanvasPreviewPane.vue:23-135`、`useCanvasPreview.ts:233-251`）。
+6. **存在专项回归测试但没有完整窗口 E2E。** `web-canvas.test.ts` 覆盖相对路径拒绝、内存候选层、HTML/CSS/JS 候选内联、拒绝不回退 HEAD、批量审批预览只分发一次和正式方法只执行一次。真实 Tauri 窗口、文件 watcher、CSP、运行错误回流和 Git 恢复仍未由该单测覆盖。
 
 ## 系统边界与完整主链路
 
@@ -83,7 +81,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 1.3 画布对象模型
 
 - 画布项目有稳定 ID（`cp_{yyyyMMdd}_{shortId}`，`web-canvas/utils/id.ts:22`）、名称、模板、入口文件与创建/更新时间；项目元数据与索引分别落在 `.canvas.json` 与 `projects.json`（`web-canvas/ARCHITECTURE.md` §2）。
-- **事实源是磁盘文件 + Git**：没有影子文件或内存 VFS，编辑即写盘（`web-canvas/ARCHITECTURE.md` §1.2 "Physical-First"）。这保证外部编辑器与应用指向同一文件，却不等于实时同步：当前无文件 watcher/轮询。画布与聊天的衔接有两个用户侧入口：聊天输入区内置"画布控制"（`MiniCanvasControl.vue`，绑定/新建/预览/跳转管理）与输入工具栏的 web-canvas 开关（`MessageInputToolbar.vue:163-196`）；但**没有把聊天中模型生成的 HTML 一键转入画布的通道**（本次未找到此类入口，`rich-text-renderer` 中无 web-canvas 引用）。
+- **事实源是磁盘文件 + Git**：常规编辑直接写盘，不使用内存 VFS；审批候选内容例外，只存在于瞬时覆盖层。画布打开后，store 会递归监听当前项目目录，外部编辑器的改动经合并后刷新 Git 状态并通知编辑器和预览（`canvasStore.ts:118-171`、`useCanvasStorage.ts:163-173`）。画布与聊天的衔接有两个用户侧入口：聊天输入区内置"画布控制"（`MiniCanvasControl.vue`，绑定/新建/预览/跳转管理）与输入工具栏的 web-canvas 开关（`MessageInputToolbar.vue:163-196`）；但**没有把聊天中模型生成的 HTML 一键转入画布的通道**（本次未找到此类入口，`rich-text-renderer` 中无 web-canvas 引用）。
 - 项目索引与元数据分离、索引可修复（`repairProject`，`canvasStore.ts:511`）。
 
 ## 2. 增量生成、更新与最终化
@@ -98,8 +96,8 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 2.2 画布更新
 
 - Agent 侧：Search/Replace diff 引擎 `applySearchReplaceDiff`（`web-canvas/utils/diff.ts:71`），匹配策略 exact -> trimEnd -> trim -> fuzzy（Bigram Dice，阈值 0.85），支持行号剥离、`start_line` 消歧、缩进修复、重匹配警告；应用结果写盘并刷新 Git 状态（`canvasStore.ts:354-398`）。
-- 用户侧：Monaco 以纯 ESM 方式加载（`src/utils/monaco.ts`），编辑内容 500ms 防抖整体写盘（`CanvasEditorPanel.vue:128-139`）；回调执行时读取当前 `activeTab`，快速切换文件存在把旧内容写入新文件的竞态，且未见卸载时 flush/cancel。
-- 应用内部写入会触发 `emitFileChanged` -> 预览刷新（300ms 防抖，`useCanvasPreview.ts:47`）+ 分离窗口通知；外部编辑器写入不会触发该事件。
+- 用户侧：Monaco 以纯 ESM 方式加载（`src/utils/monaco.ts`），编辑内容 500ms 防抖整体写盘。防抖参数会捕获编辑发生时的画布、文件路径和内容；提交前 flush，丢弃时 cancel，组件卸载时先 flush 再 cancel（`CanvasEditorPanel.vue:133-169,214-219`）。
+- 应用内部写入通过文件变化事件触发预览刷新与分离窗口通知；当前画布目录的递归 watcher 也会把外部编辑器写入合并为同一类刷新。预览刷新另有 300ms 防抖（`canvasStore.ts:146-171`、`useCanvasPreview.ts:39-87`）。
 
 ## 3. 投影表面与多视图关系
 
@@ -112,7 +110,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 | 外部浏览器 | HTML 预览导出 | `HtmlInteractiveViewer.vue:636-649`（Blob URL 新窗口打开） |
 | 桌面覆盖窗 | 弹幕播放器透明覆盖窗口（非模型输出，记相邻） | `useDanmakuOverlay.ts:146` |
 
-- 同一项目有编辑器与独立预览窗两个表面。`useCanvasSync`（`useCanvasSync.ts:53-87`）只同步 `activeCanvasId` 与文件变更通知；运行时错误、Git `dirtyFiles`、编辑器 tab 和运行状态均未同步。代码注册了 write/commit/discard 的 action 代理，但当前独立预览 UI 未找到对应编辑/提交入口，因此不能按架构文档把它们计为已暴露交互。
+- 同一项目有编辑器与独立预览窗两个表面。跨窗口机制同步活动画布 ID、文件变化通知和审批候选覆盖层；预览窗口捕获的运行时错误会单向回传主窗口。Git 变更集合、编辑器标签和一般运行状态仍是各窗口本地状态。代码还注册了 write/commit/discard 的 action 代理，但当前独立预览 UI 未找到对应编辑/提交入口，因此不能按架构文档把它们计为已暴露交互（`useCanvasSync.ts:63-168`）。
 - 聊天消息的"分离"是把整个聊天组件搬到新 WebView 窗口（`useDetachedChatArea.ts`），消息对象本身无多投影。
 - 聊天 HTML 预览与画布预览是**两份独立运行时**：前者渲染消息 `content` 中提取的代码块文本，后者渲染磁盘入口文件；彼此无同步。
 
@@ -145,25 +143,25 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
   - `iframe-log`：console 捕获
   - `iframe-height`：自适应高度
   - `iframe-mousemove`/`enter`/`leave`：悬浮状态
-- **画布回传**：独立预览 iframe 回传两类事件：`canvas-console`（控制台）与 `canvas-runtime-error`（运行时错误）（`useCanvasPreview.ts:80-171`）。`useCanvasErrors` 在该窗口的 Pinia store 中做去重、限流与 stale 标记（`CanvasWindow.vue:165-198`）；宿主消息处理同样未核验事件来源（见“已确认断点与缺口”第 6 点）。
-- **错误反馈去向**：`CanvasAgentService` 确实会从主窗口 store 格式化错误（:96-104），但捕获错误的是独立预览窗口的 store，现有同步协议不传 `runtimeErrors`。因此当前快照只完成“预览 -> 子窗口状态”和“主窗口状态 -> Agent”两段，缺少中间一段，不能确认模型实际收到错误。
+- **画布回传**：独立预览 iframe 回传控制台与运行时错误两类事件。宿主要求消息来自当前 iframe 的 opaque origin，随后校验类型并裁剪字段；窗口内错误 store 负责去重、限流与 stale 标记（`CanvasPreviewPane.vue:67-145`、`CanvasWindow.vue:165-202`）。
+- **错误反馈去向**：预览窗口通过窗口总线发送完整的运行时错误消息，主窗口再次校验后写入对应 canvasId 的错误 store；Agent 上下文会读取这个 store。因此静态代码已形成“iframe -> 预览窗口 -> 主窗口 -> Agent”链路，真实窗口通信时序和错误触发效果仍需运行验证（`useCanvasSync.ts:113-151`、`CanvasAgentService.ts:32-108`）。
 - **运行状态恢复**：`MessageList.vue` 有 keep-alive 滚动位置恢复（:73-99）；画布分离窗口关闭后重新打开时从磁盘重新加载（`CanvasWindow.vue:137-158`）；弹幕覆盖窗等桌面窗不在本类目。
 
 ## 6. 编辑、diff、版本与协作
 
 - **聊天消息编辑**：全文覆盖式编辑（`useBranchManager.editMessage`，`useBranchManager.ts:108-156`），仅限 user/assistant 角色；"保存到分支"复制内容到兄弟节点形成分支（:162-209）。无选区编辑、无结构化 patch、无撤销栈持久化（`useChatStorageSeparated.ts:199-204` 明确移除 history 字段）。版本表达依赖消息树分支语义，属于 Chat 类目，此处只记交接点。
-- **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖；未发现 CRDT、基于 revision 的冲突检测或外部文件 watcher，写盘以"最后写入者"为准。Monaco 防抖回调还存在跨 tab 写错文件的静态竞态（见“已确认断点与缺口”第 4 点）。
+- **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖，当前画布的外部文件变化由递归 watcher 接入刷新。未发现 CRDT 或基于 revision 的冲突检测，因此并发写入仍以最后写入者为准。
 - **版本**：Git 提交/回退/丢弃走 canvas store（`canvasStore.ts:402,457`）；服务层封装 Git 的初始化、暂存、提交、历史、检出与状态矩阵等操作（`GitInternalService.ts:149-234`）。**本次未找到**画布 UI 中的提交历史查看器或 diff 视图组件（`gitLog` 仅存在于服务层，未被组件调用）。Agent 侧的 `commit_changes`/`discard_changes` 是版本操作入口。
-- **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布侧审批不是可逆事务——审批前直接写工作树、批准后二次执行、拒绝回退到 HEAD 而非预览前快照，细节见“已确认断点与缺口”第 2 点。
+- **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布写入和 diff 在审批前只登记 mutation，并把候选结果放入内存覆盖层供预览；批准后正式方法写盘一次，拒绝只移除该请求的候选层，不回退 Git HEAD。覆盖层不持久化，也不构成可跨重启恢复的事务日志（`CanvasAgentService.ts:299-415`、`canvasStore.ts:580-632`）。
 
 ## 7. 能力桥、执行位置与权限范围
 
 - **执行位置**：全部模型输出运行在前端 JS 上下文；工具方法在 Tauri WebView 主窗口执行（`tool-calling/core/executor.ts:177` 起，直接调用 registry 方法），底层文件/Shell 能力经 Tauri plugin（fs、shell、dialog 等，`src-tauri/Cargo.toml`）与 Rust command（画布窗口 `canvas_window.rs`、目录树 `generate_directory_tree`）实现。**未找到**容器/远端沙箱/独立进程执行模型代码的机制。
-- **iframe 沙箱与 IPC 隔离**：聊天 HTML 沙箱和画布预览都没有显式给生成代码注入一套窄 Tauri API，但不能据此断言 canvas 脚本无法触达宿主能力。canvas `srcdoc` 同时启用 `allow-scripts allow-same-origin`，脚本与父窗口同源，可接触父窗口 DOM/全局对象；是否能沿父窗口对象调用 Tauri internals 需运行验证。其 `postMessage` 接收端也未校验 source/origin。
-- **CSP 现状（文档与实现不一致点）**：`src-tauri/tauri.conf.json:15` 设置 `"csp": null`，`index.html:6-8` 的 meta CSP 很宽。聊天 `HtmlInteractiveViewer` 会按预览内容注入 iframe CSP（:320-327），但 web-canvas 的 `useCanvasPreview` 不注入 CSP，只注入 base 标签与控制台/错误捕获脚本；此前将聊天预览的 CSP 机制推广到 canvas 是错误的。
+- **iframe 沙箱与 IPC 隔离**：聊天 HTML 沙箱和画布预览都没有向生成代码提供一套窄 Tauri API。canvas iframe 只启用 `allow-scripts`，没有 `allow-same-origin`，所以 srcdoc 获得 opaque origin；宿主同时校验 `event.source`、`origin === "null"`、消息类型和字段长度。该隔离在 Tauri WebView2 中的实际强度仍需运行验证（`CanvasPreviewPane.vue:23-145`）。
+- **CSP 现状**：`src-tauri/tauri.conf.json:15` 的应用级 CSP 仍为 null，`index.html:6-8` 的 meta CSP 较宽；聊天与 canvas 会分别向预览文档注入 CSP。canvas 策略禁止默认来源、object 和 form，但为脚本、样式、媒体、连接与 frame 保留 asset、HTTP(S) 或 WebSocket 等来源，因此它隔离宿主同源能力，却不封闭网络访问（`useCanvasPreview.ts:233-251`）。
 - **能力授予**：`executor.ts:156-169` 支持工具级 `checkSecurityPolicy`（block/approve）；Agent 侧按工具/method 的 autoApprove/手动审批矩阵控制（`executor.ts:421-423`）；`aio-file-operator` 另有 whitelist/blacklist 沙箱模式（`src/tools/aio-file-operator/composables/useFileOperator.ts:32`）约束文件操作范围，属工具自身策略。
 - **asset 协议**：`tauri.conf.json:16-23` 启用 assetProtocol，scope 为 `**` 加 `$APPLOCALDATA`/`$APPDATA`。即 iframe 可经 `asset://` 读取本地资产，范围宽（事实记录，不做整改建议）。
-- **文件路径边界**：canvas 的读写删方法直接把 Agent 提供的 `filepath` 拼接到项目根路径，未做绝对路径与 `..` 拒绝、规范化后前缀校验或工具级安全策略（`checkSecurityPolicy`；同“已确认断点与缺口”第 7 点）。`src-tauri/capabilities/default.json` 又给读写文本/文件等多项权限配置了 `"**"`，因此画布项目根目录不是已落实的能力边界，存在越出项目的静态风险。
+- **文件路径边界**：canvas 存储入口先校验画布 ID，再把反斜杠统一为斜杠，并拒绝绝对路径、盘符、NUL、空目录段、`.` 和 `..`；读写删方法使用规范化后的相对路径拼入项目根目录（`useCanvasStorage.ts:35-69,106-159`）。Tauri 文件权限本身仍配置得较宽，画布目录边界主要由这层应用校验落实。
 - **`ActionButtonNode` 窄桥**：模型生成的 `<button>` 只能触发白名单动作 send/input/copy（`ActionButtonNode.vue:28, 93-117`），是唯一"声明式控件 -> 宿主动作"通道，对应 G2 级元素。
 
 ## 8. 持久化、恢复、分享与导出
@@ -175,8 +173,8 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ## 9. 模型回流、对象感知与持续维护
 
-- **画布（文件闭环成立，运行反馈闭环未贯通）**：
-  - 查询：`getExtraPromptContext`（`CanvasAgentService.ts:32-113`）意图注入项目名、入口文件、文件树、未提交变更列表和运行时错误摘要；但 `dirtyFiles` 是全局单 Map，绑定画布与 UI 活动画布不同时可能串项目，独立预览窗口的 `runtimeErrors` 也未同步回主窗口；
+- **画布（文件与运行反馈闭环在静态代码中成立）**：
+  - 查询：`getExtraPromptContext`（`CanvasAgentService.ts:32-113`）注入项目名、入口文件、文件树、对应 canvasId 的未提交变更和运行时错误摘要；变更集合按画布分区，预览错误经窗口总线回到主窗口；
   - 读取：`read_canvas_file` 带行号返回（:118-139）；
   - 定向修改：六个 `agentCallable: true` 的画布方法（`web-canvas.registry.ts:84-241`）：
     - `apply_canvas_diff`：含策略/行号/警告反馈
@@ -186,7 +184,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
     - `discard_changes`
     - `clear_runtime_errors`
   - 身份绑定（三个入口）：Agent 设置页的 `canvas-bound-id`（`web-canvas.registry.ts:41-54`）；聊天输入区的 `MiniCanvasControl`（`MiniCanvasControl.vue:70-93`，把所选画布写入工具的 canvasId 设置）；隐式建画布后的 `canvas:auto-created` 自动绑定（:125-131）。
-  - 身份绑定的兜底与限制：无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）；绑定能选择同一项目 ID，但不能保证所有 store 派生状态也随该 ID 隔离。
+  - 身份绑定的兜底与限制：无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）；项目文件、Git 变更和错误上下文都按 canvasId 读取，但 watcher 一次只绑定 store 当前打开的画布。
 - **聊天（有限回流）**：模型侧可感知的只有上下文历史（消息文本本身）；"重新解析"与"续写"（`isContinuation`，`message.ts:385-389`）允许对已有节点继续生成。`llm-chat.registry.ts:270-532` 虽有 10 个 `agentCallable: true` 方法，但全部是**智能体管理**——agent 的列出/搜索/读取/设置、预设消息 CRUD 与查找替换（`find_replace_in_presets`）、导入导出——**不针对会话中已生成的输出消息**；本次未找到模型对会话消息对象的"列出/读取/定向修改"工具方法。
 - **媒体生成**：任务与资产结果关联（`mediaGenStore`），模型不可直接操作资产。
 
@@ -201,23 +199,22 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 11.1 验证体系（未运行）
 
-- 本次**未运行任何测试**（仓库未安装 node_modules；`bunx vitest` 因解析依赖超时被终止）。以下为测试文件清单（静态确认）：
+- 本轮更新前的调查未运行测试；本轮尝试按锁文件安装依赖，但本机 Bun `1.2.5` 低于仓库声明的 `1.3.11`，`bun install --frozen-lockfile` 长时间停在依赖解析阶段后被终止，针对性测试未实际启动。以下为测试文件清单：
   - `rich-text-renderer`：`composables/__tests__/useMarkdownAst.test.ts`、`parser/block/__tests__/parseVcpRole.test.ts`；
   - `llm-chat`：`useStreamingMessageSources.test.ts`、`emptyResponseDiagnostics.test.ts`、`message-format-processors.test.ts`、`sessionManagers.test.ts`、`PipelineEngine.test.ts` 等 10 个文件；
   - `tool-calling`：`__tests__/tool-calling.test.ts`（协议解析/执行器）；另有 `web-distillery.registry.test.ts`。
-  - **web-canvas 目录下未找到任何测试文件**（`**/*.test.*` 无命中）。
-- 未覆盖：canvas 专用 CSP（当前不存在）、iframe 同源边界、Git 在 Tauri fs 适配下的行为、多窗口错误/状态同步、审批事务、路径约束、编辑器切换写盘和保存/恢复端到端行为，均需运行验证或补测。
+  - `web-canvas`：`__tests__/web-canvas.test.ts` 覆盖路径校验、审批候选覆盖层、HTML/CSS/JS 内联、拒绝语义、批量审批与单次正式执行。
+- 当前专项单测未覆盖真实 Tauri 窗口、文件 watcher、WebView CSP、跨窗口错误同步、Git 适配层和保存/恢复端到端行为；这些仍需运行验证。
 
 ### 11.2 已确认边界（静态）
 
 - 聊天输出没有独立 Artifact 对象与生命周期（搜索 `artifact` 仅命中推理回放 artifacts，见第 1.1 节）。
 - 未找到聊天中模型生成的 HTML 输出一键转入画布/工作区的通道（聊天侧仅有画布绑定/新建/预览控制 `MiniCanvasControl.vue`，无内容迁移）。
 - 未找到画布提交历史/文件 diff 的可视化 UI（`gitLog` 仅服务层）。
-- 未找到外部文件 watcher/轮询；“VSCode 改文件自动可见”不成立，只有同一物理文件与重新读取能力。
-- 预览运行时错误未从独立窗口 store 同步到主窗口 Agent store；当前自动错误回流链不完整。
-- 审批预览批准后会再次执行真实方法，拒绝则回到 HEAD 而非审批前快照；不能视为可靠的接受/拒绝 diff。
-- `dirtyFiles` 未按 canvasId 分区，Agent 绑定非活动项目时上下文可能混入其他项目状态。
-- canvas 文件 API 未发现项目根目录约束；Monaco 防抖写盘未绑定编辑发生时的 filepath。
+- 外部文件 watcher 一次只监听 store 当前打开的画布；多画布、多窗口或快速切换时的覆盖范围未经运行验证。
+- 审批候选层只在内存中存在，重启和窗口异常关闭后不能恢复候选预览。
+- dirty 状态和运行时错误按 canvasId 分区，但没有 revision、CRDT 或冲突合并协议。
+- canvas 相对路径校验覆盖读写删入口；其对符号链接或 Tauri 文件系统特殊路径的实际行为未运行验证。
 - 未找到模型对**会话中已生成消息**的直接查询/修改工具方法（llm-chat registry 的 agentCallable 方法仅覆盖智能体配置与预设消息，见第 9 节）。
 - 移动端无 HTML 沙箱与画布（概览）。
 - `notebook` 关键词全仓仅命中图标数据，无 notebook 类能力。
@@ -225,7 +222,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 11.3 未验证事项
 
-- 所有 UI 行为（编辑保存、审批预览-回滚、冻结、分离窗口同步、滚动恢复）未经运行验证；其中审批双执行、错误不同步、全局 dirty map 与跨 tab 防抖竞态已可由静态控制流直接确认。
+- UI 行为（编辑保存、审批候选预览、冻结、分离窗口同步、滚动恢复）仍未经真实应用运行验证；静态代码和专项单测只能确认事件绑定、数据流与纯逻辑结果。
 - Git 操作经 `isomorphic-git` + Tauri fs 适配层，未经真实仓库验证。
 - HTML 沙箱的实际隔离强度与 CSP 在 Tauri WebView2 下的生效情况未验证。
 - 测试套件是否通过未验证。
@@ -235,9 +232,9 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 12.1 设计取舍
 
 - **"当前文本协议 + 展示时物化"而非 typed part**：当前 VCP 等文本协议通过适配层进入工具调用链；聊天全链路（存储、上下文、渲染）仍以纯文本为单一载体，解析器在渲染层承担协议解释。好处是存储与模型上下文一致、无需对象迁移，代价是输出没有独立生命周期，模型无法对"图表/HTML 预览"本身做定向更新。
-- **Physical-First 画布**：放弃影子文件/内存 VFS，使 VSCode 与应用编辑同一物理文件，并以 Git 状态追踪；但当前没有外部变更监听，不能把“同源”写成“自动同步”。物理先行还放大了审批前写盘、拒绝回 HEAD、路径边界和防抖写错文件的后果。
-- **两套 iframe 策略并不一致**：聊天 `HtmlInteractiveViewer` 使用 sandbox + 注入 CSP；canvas 只有 sandbox，且同时开放 scripts/same-origin，没有专用 CSP。不能把聊天层的“双重隔离”推广为 AIO 所有生成代码的统一边界。
-- **错误回路只在画布中有设计，但当前未贯通**：聊天 HTML 沙箱错误不回流；canvas 的捕获发生在独立窗口，Agent 注入发生在主窗口，中间缺少错误状态同步。
+- **Physical-First 画布配合瞬时候选层**：正式项目仍以磁盘和 Git 为事实源，外部编辑由 watcher 接入；审批阶段另建不落盘的内存覆盖层，避免候选内容提前改变工作区。代价是候选预览无法跨重启恢复，且并发编辑仍没有 revision 或冲突合并。
+- **两套 iframe 策略分别配置**：聊天与 canvas 都使用 sandbox 和文档内 CSP，但许可项不同。canvas 采用 opaque origin 与消息来源校验，同时允许预览访问网络和外部 frame；这是一条“隔离宿主同源能力、保留网页运行兼容性”的边界，而不是封闭网络的执行沙箱。
+- **错误回路只在画布中进入模型上下文**：聊天 HTML 沙箱错误停留在用户可见的错误面板；canvas 错误通过跨窗口总线回到主窗口，并由 Agent 上下文读取。真实 WebView 中的事件来源、时序和重复行为仍待运行验证。
 
 ### 12.2 扩展调查：移动端（概览）
 
@@ -260,12 +257,14 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - `src/tools/llm-chat/llm-chat.registry.ts:270-532`：智能体管理类 agentCallable 方法（预设消息 CRUD，不覆盖会话输出）
 - `src/tools/tool-calling/core/protocols/base.ts`、`core/discovery.ts`、`core/engine.ts`、`composables/useToolCalling.ts`：协议抽象、当前 VCP 路由、执行循环与工具发现
 - `src/tools/tool-calling/core/protocols/vcp-protocol.ts`：当前 VCP 文本协议实现
-- `src/tools/web-canvas/stores/canvasStore.ts:113-398,402-469`：Git 状态、写盘、diff、提交/丢弃
-- `src/tools/web-canvas/services/CanvasAgentService.ts:32-190,270-331`：Agent 上下文、带行号读取、diff 反馈、审批预览/回滚
+- `src/tools/web-canvas/stores/canvasStore.ts:80-171,580-632`：按画布区分的 Git 状态、外部文件监听与审批候选覆盖层
+- `src/tools/web-canvas/services/CanvasAgentService.ts:32-190,299-415`：Agent 上下文、diff 反馈与不落盘审批预览
 - `src/tools/web-canvas/web-canvas.registry.ts:84-241`：Agent 可调用方法元数据
-- `src/tools/web-canvas/composables/useCanvasPreview.ts:47-192`：预览引擎（base 注入 + 控制台/错误捕获）
+- `src/tools/web-canvas/composables/useCanvasStorage.ts:35-69,106-173`：画布 ID、相对路径校验与递归文件监听
+- `src/tools/web-canvas/composables/useCanvasPreview.ts:39-251`：候选文件内联、预览 CSP 与控制台/错误捕获
+- `src/tools/web-canvas/components/window/CanvasPreviewPane.vue:23-145`：opaque-origin iframe 与消息来源/字段校验
 - `src/tools/web-canvas/utils/diff.ts:71`：Search/Replace diff 引擎
-- `src/tools/web-canvas/composables/useCanvasSync.ts:53-80`：跨窗口状态同步
+- `src/tools/web-canvas/composables/useCanvasSync.ts:63-168`：文件、候选覆盖层与运行时错误的跨窗口同步
 - `src-tauri/src/commands/canvas_window.rs:45-118,160-173`：画布独立窗口创建与清理
 - `index.html:6-8` 与 `src-tauri/tauri.conf.json:15-23`：应用 CSP 与 asset 协议（实现与配置并存）
 - `src/tools/tool-calling/core/executor.ts:156-169,177-219`：安全策略与执行入口

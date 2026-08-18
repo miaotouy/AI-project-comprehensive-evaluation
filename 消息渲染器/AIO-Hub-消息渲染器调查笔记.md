@@ -1,10 +1,10 @@
 # AIO Hub 消息渲染器调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：只读源码梳理，并核对目标仓库内的架构文档、用户指南和性能调查；未修改目标仓库
 >
@@ -24,6 +24,7 @@ AIO Hub 的"消息渲染器"实际由两层组成：
 - Markdown、嵌套 HTML、代码块、KaTeX、Mermaid、图片/音视频；
 - `<think>` 等可配置思考标签；
 - VCP 工具请求、角色分隔、调用结果和日记节点；
+- VCP ESCAPE 围栏、坏块恢复和可关闭的仅显示侧模糊修复；
 - 正则显示规则、宏展开后的规则、Agent 资产协议；
 - 流式平滑、稳定区/待定区拆分、AST diff、Patch 节流；
 - HTML/SVG 代码块的 iframe 交互预览；
@@ -227,7 +228,13 @@ Tokenizer 对 `code`、`pre`、`script`、`style` 等采用 raw mode，避免内
 - `html_block`、`html_inline`、`generic_html`；
 - Mermaid、KaTeX、媒体和 GitHub Alert。
 
-### 5.2 稳定区与待定区
+### 5.2 VCP 块边界与仅显示侧恢复
+
+V2 Tokenizer 解析 VCP 参数时允许冒号后的可选空白，并按 ESCAPE、exp、普通围栏的顺序提取。共享的块边界扫描器会完整跳过 `「始ESCAPE」...「末ESCAPE」`，其中出现的工具请求起止标记只作为参数文本，不会错误中断外层工具块；如果未闭合块先遇到后续同级请求起点，则丢弃坏块并从新起点恢复扫描（`src/utils/vcpBlockBoundary.ts:29-91`、`parser/Tokenizer.ts:581-685`）。
+
+模型把 `「始ESCAPE」` 错写成由普通 `「末」` 闭合时，渲染器还有一条默认开启的模糊恢复。它只在严格解析已判定未闭合、候选结束位置唯一且剩余文本能完整收敛为 VCP 字段时修复显示，并把原始调用与“围栏格式错误 · 已修复显示”警告交给工具节点；用户可通过 `uiPreferences.vcpFuzzyModeEnabled` 关闭。该恢复不进入工具执行协议，错误调用仍不会执行（`parser/vcpFenceRecovery.ts:154-232`、`components/nodes/VcpToolNode.vue:60-75`、`llm-chat/config/defaultSettings.ts:67`）。
+
+### 5.3 稳定区与待定区
 
 `MarkdownBoundaryDetector` 查找安全切分点：稳定区尽可能复用旧 AST，末尾待定区每轮重解析。完整新树由两者合并，再与旧树统一 diff。
 
@@ -235,7 +242,7 @@ Tokenizer 对 `code`、`pre`、`script`、`style` 等采用 raw mode，避免内
 
 处理器忙时不会并发解析每个 delta，而只保存最新 `pendingBuffer`；本轮完成后直接处理最新快照，中间态可丢弃。
 
-### 5.3 Patch 状态层
+### 5.4 Patch 状态层
 
 `useMarkdownAst.ts` 用 `shallowRef<AstNode[]>` 保存根树，支持 8 类 Patch：
 
@@ -431,6 +438,7 @@ AIO Hub 让渲染器直接理解业务协议：VCP、思考标签、资产 URL�
 | V2 流处理 | `src/tools/rich-text-renderer/core/StreamProcessorV2.ts` |
 | 自研 parser | `src/tools/rich-text-renderer/core/CustomParser.ts` |
 | Tokenizer | `src/tools/rich-text-renderer/parser/Tokenizer.ts` |
+| VCP 块边界与显示恢复 | `src/utils/vcpBlockBoundary.ts`、`src/tools/rich-text-renderer/parser/vcpFenceRecovery.ts` |
 | AST/Patch 类型 | `src/tools/rich-text-renderer/types.ts` |
 | Patch store | `src/tools/rich-text-renderer/composables/useMarkdownAst.ts` |
 | 节点分派 | `src/tools/rich-text-renderer/components/AstNodeRenderer.tsx` |

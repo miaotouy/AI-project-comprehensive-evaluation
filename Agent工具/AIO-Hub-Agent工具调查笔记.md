@@ -1,10 +1,10 @@
 # AIO Hub Agent 工具调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`E:\works\GitStudyNotes\aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-18
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
 >
 > 调查方式：只读源码通读（`tool-calling`、`vcp-connector`、各工具 registry、Rust 侧 Tauri command、Tauri capability 配置），并结合 `VCPToolBox` 当前工作树源码核实协议契约；未修改被调查仓库任何文件
 >
@@ -136,15 +136,15 @@ VCP 分布式的 `includeToolIds` 参数可以无视 `config.enabled` 强制包�
 | 场景 | 行为 | 源码位置 |
 |---|---|---|
 | Markdown code fence / inline code 包含示例 TOOL_REQUEST | 复合正则 `scanner` 优先匹配 fence/inline code 整体跳过，避免解析伪请求 | `vcp-protocol.ts:356` |
-| 嵌套 TOOL_REQUEST（一个请求块内文本又含另一个请求块） | 必须用 `TOOL_REQUEST_ESCAPE` 包裹整个内层块，否则外层 `indexOf(endMarker, ...)` 会在第一个 `END_TOOL_REQUEST` 处截断 | `vcp-protocol.ts:365-368` |
-| 参数值本身含 `「始」`/`「末」` | 必须用 `「始ESCAPE」...「末ESCAPE」`包裹该参数值，否则标准正则会把值内的分隔符当作新参数边界 | 协议使用说明第 4 条，`vcp-protocol.ts:339` |
-| 流式截断（末尾缺 `END_TOOL_REQUEST`） | `blockEnd === -1` 时记录 warning 并 `break`（整个扫描停止，之后的合法块也不再解析），返回已解析的请求列表，不抛异常 | `vcp-protocol.ts:374-383` |
+| 坏块后又出现 TOOL_REQUEST | 边界扫描器把后续标准或转义请求起点视为恢复点：丢弃被中断的坏块，把扫描位置移到新起点后继续；两个请求不会被合并 | `vcp-protocol.ts:373-397`、`src/utils/vcpBlockBoundary.ts:44-91` |
+| 参数值本身含协议分隔符或请求标记 | 用 `「始ESCAPE」...「末ESCAPE」` 包裹参数值；边界扫描会跳过完整 ESCAPE 区域，其中的请求标记不会中断外层块。冒号后允许可选空白 | `vcp-protocol.ts:32-37,116-141`、`src/utils/vcpBlockBoundary.ts:29-81` |
+| 流式截断（末尾缺 `END_TOOL_REQUEST`，且没有后续恢复起点） | 记录 warning 并停止扫描，返回此前已解析的请求列表，不抛异常 | `vcp-protocol.ts:399-407` |
 | 参数缺少闭合 `「末」` | `RE_VCP_PENDING` 捕获未闭合的键值，仍尝试提取到 value，但在 `validation.errors` 里记录“未正确闭合” | `vcp-protocol.ts:166-172` |
 | 缺少 `tool_name` 或 `command` | 分别 push 到 `errors`，`validation.isValid = false`；executor 遇到 `!isValid` 直接返回 error 结果，不会真正路由执行 | `vcp-protocol.ts:183-194`、`executor.ts:186-194` |
 | 同一轮回复含多个 TOOL_REQUEST 块 | `scanner.lastIndex` 每次成功解析后跳到 `blockEnd + endMarker.length`，循环继续扫描剩余文本，支持多块 | `vcp-protocol.ts:395-397` |
 | 值内含反斜杠双写（如 LLM 习惯性 JSON 转义 `\\`） | `sanitizeValue()` 尝试 `JSON.parse` 还原，失败则简单 `replace(/\\\\/g, "\\")` | `vcp-protocol.ts:43-59` |
 
-渲染层（`rich-text-renderer`）里另有一份**独立的 Tokenizer 实现**同样解析 `<<<[TOOL_REQUEST]>>>`（`../../aio-hub/src/tools/rich-text-renderer/parser/Tokenizer.ts:564-685`），用于把工具调用块渲染为 `VcpToolNode` 组件；这份解析逻辑与 `tool-calling` 模块的解析器**代码完全独立、各自维护**（正则、转义处理逐字重复），是可读性/一致性债务点：若未来只改一处的转义规则，两处会产生行为分叉。
+渲染层仍由自己的 Tokenizer 把同一文本块转换为 `VcpToolNode`，参数提取与 AST 生成没有与执行解析器合并；两侧现在只共享 `findVcpBlockBoundary()` 的块边界扫描。渲染侧另外允许可关闭的模糊恢复：当模型用普通 `「末」` 错误关闭 ESCAPE 字段时，只在候选唯一且后缀结构完整的条件下修复显示并给出警告；执行侧继续严格解析，这种错误调用返回空列表、不会执行（`rich-text-renderer/parser/vcpFenceRecovery.ts:154-232`、`tool-calling/__tests__/tool-calling.test.ts:243-250`）。因此两侧有意维持“显示容错、执行严格”的不同契约。
 
 **依据**：[`tool-calling/core/protocols/base.ts`](../../aio-hub/src/tools/tool-calling/core/protocols/base.ts)、[`tool-calling/core/discovery.ts`](../../aio-hub/src/tools/tool-calling/core/discovery.ts)、[`tool-calling/composables/useToolCalling.ts`](../../aio-hub/src/tools/tool-calling/composables/useToolCalling.ts)、[`agent-manager/types/agent.ts`](../../aio-hub/src/tools/agent-manager/types/agent.ts)、[`tool-calling/core/protocols/vcp-protocol.ts`](../../aio-hub/src/tools/tool-calling/core/protocols/vcp-protocol.ts)、[`rich-text-renderer/parser/Tokenizer.ts`](../../aio-hub/src/tools/rich-text-renderer/parser/Tokenizer.ts)。
 
