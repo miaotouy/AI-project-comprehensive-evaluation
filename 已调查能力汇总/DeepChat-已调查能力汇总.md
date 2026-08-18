@@ -1,6 +1,6 @@
 # DeepChat 已调查能力汇总
 
-> 汇总对象：`DeepChat（E:\works\git\deepchat）`
+> 汇总对象：`DeepChat（https://github.com/ThinkInAIXYZ/deepchat）`
 >
 > 汇总更新日期：2026-08-18
 >

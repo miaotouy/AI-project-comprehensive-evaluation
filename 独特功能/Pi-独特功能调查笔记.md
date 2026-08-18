@@ -1,6 +1,6 @@
 # Pi 独特功能调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/coding-agent`、`packages/agent`、`packages/telemetry`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent`、`packages/agent`、`packages/telemetry`）
 >
 > 调查更新日期：2026-08-12
 >

@@ -1,6 +1,6 @@
 # Cherry Studio 会话与消息管理调查笔记
 
-> 调查对象：`E:\works\git\cherry-studio`
+> 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
 > 调查更新日期：2026-08-12
 >

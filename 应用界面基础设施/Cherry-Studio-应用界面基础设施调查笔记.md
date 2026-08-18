@@ -1,6 +1,6 @@
 # Cherry Studio 应用界面基础设施调查笔记
 
-> 调查对象：`E:\works\git\cherry-studio`
+> 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
 > 调查更新日期：2026-08-13
 >

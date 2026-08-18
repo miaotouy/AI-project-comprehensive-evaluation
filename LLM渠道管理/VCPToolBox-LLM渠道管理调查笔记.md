@@ -1,6 +1,6 @@
 # VCPToolBox LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\VCPToolBox`
+> 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
 > 调查更新日期：2026-08-18
 >

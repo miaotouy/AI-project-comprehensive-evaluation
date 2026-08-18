@@ -1,6 +1,6 @@
 # Chatbox 媒体创作调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\chatbox`（Electron + React 桌面客户端，另含 web/移动目标）
+> 调查对象：`https://github.com/chatboxai/chatbox`（Electron + React 桌面客户端，另含 web/移动目标）
 >
 > 调查更新日期：2026-08-14
 >

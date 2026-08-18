@@ -1,6 +1,6 @@
 # Open WebUI 已调查能力汇总
 
-> 汇总对象：`Open WebUI`（本地路径 `E:\works\git\open-webui`，单仓，代码快照 `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` / main）
+> 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` / main）
 >
 > 汇总更新日期：2026-08-18
 >

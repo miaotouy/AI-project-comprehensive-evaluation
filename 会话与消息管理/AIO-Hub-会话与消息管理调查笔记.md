@@ -1,6 +1,6 @@
 # AIO-Hub 会话与消息管理调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\aio-hub`
+> 调查对象：`https://github.com/miaotouy/aio-hub`
 >
 > 调查更新日期：2026-08-18
 >

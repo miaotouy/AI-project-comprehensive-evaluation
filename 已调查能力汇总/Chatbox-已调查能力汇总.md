@@ -1,6 +1,6 @@
 # Chatbox 已调查能力汇总
 
-> 汇总对象：`Chatbox`（源码仓库 `E:\works\git\chatbox`，又称 `E:\works\GitStudyNotes\chatbox`）
+> 汇总对象：`Chatbox`（源码仓库 `https://github.com/chatboxai/chatbox`）
 >
 > 汇总更新日期：2026-08-18
 >

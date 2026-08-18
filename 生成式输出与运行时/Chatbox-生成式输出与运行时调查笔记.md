@@ -1,6 +1,6 @@
 # Chatbox 生成式输出与运行时调查笔记
 
-> 调查对象：`../../chatbox`
+> 调查对象：`https://github.com/chatboxai/chatbox`
 >
 > 调查更新日期：2026-08-12
 >

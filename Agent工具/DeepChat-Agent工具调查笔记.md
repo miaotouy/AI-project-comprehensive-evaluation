@@ -1,6 +1,6 @@
 # DeepChat Agent 工具调查笔记
 
-> 调查对象：`E:\works\git\deepchat`（重点 `src/main/agent/deepchat/loop/`、`src/main/agent/deepchat/runtime/`、`src/main/tool/`、`src/main/provider/aiSdk/`）
+> 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/agent/deepchat/loop/`、`src/main/agent/deepchat/runtime/`、`src/main/tool/`、`src/main/provider/aiSdk/`）
 >
 > 调查更新日期：2026-08-12
 >

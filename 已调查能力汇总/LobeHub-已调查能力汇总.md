@@ -1,6 +1,6 @@
 # LobeHub 已调查能力汇总
 
-> 汇总对象：`LobeHub`（本地路径 `E:\works\git\lobehub`，monorepo，代码快照 `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` / canary）
+> 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` / canary）
 >
 > 汇总更新日期：2026-08-18
 >

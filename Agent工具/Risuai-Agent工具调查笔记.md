@@ -1,6 +1,6 @@
 # RisuAI Agent 工具调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\Risuai`
+> 调查对象：`https://github.com/kwaroran/Risuai`
 >
 > 调查更新日期：2026-08-17
 >

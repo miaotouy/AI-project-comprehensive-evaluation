@@ -1,6 +1,6 @@
 # Jan Chat UI 调查笔记
 
-> 调查对象：`E:\works\git\jan`
+> 调查对象：`https://github.com/janhq/jan`
 >
 > 调查更新日期：2026-08-12
 >

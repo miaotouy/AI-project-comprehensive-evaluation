@@ -1,6 +1,6 @@
 # NextChat Chat 概览
 
-> 调查对象：`E:\works\git\NextChat`（重点 `app/components/home.tsx`、`app/components/chat.tsx`、`app/store/chat.ts`、`app/utils/store.ts`）
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/home.tsx`、`app/components/chat.tsx`、`app/store/chat.ts`、`app/utils/store.ts`）
 >
 > 调查更新日期：2026-08-12
 >

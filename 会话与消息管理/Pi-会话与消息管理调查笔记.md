@@ -1,6 +1,6 @@
 # Pi 会话与消息管理调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/session-manager.ts`、`packages/coding-agent/src/core/agent-session.ts`、`packages/agent/src/harness/session/`、`packages/agent/src/search/`、`packages/session-backends/sqlite-node/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/session-manager.ts`、`packages/coding-agent/src/core/agent-session.ts`、`packages/agent/src/harness/session/`、`packages/agent/src/search/`、`packages/session-backends/sqlite-node/`）
 >
 > 调查更新日期：2026-08-12
 >

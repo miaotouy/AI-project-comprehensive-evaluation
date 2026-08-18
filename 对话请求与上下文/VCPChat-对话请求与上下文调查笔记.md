@@ -1,6 +1,6 @@
 # VCPChat 对话请求与上下文调查笔记
 
-> 调查对象：`E:\works\git\VCPChat`
+> 调查对象：`https://github.com/lioensky/VCPChat`
 >
 > 调查更新日期：2026-08-12
 >

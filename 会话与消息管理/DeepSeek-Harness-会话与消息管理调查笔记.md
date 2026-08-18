@@ -1,6 +1,6 @@
 # DeepSeek-Harness 会话与消息管理调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/core/session`、`packages/session/session-persistence`、`session-persistence-jsonl`、`session-persistence-sqlite`、`session-projection`、`session-projection-cache`、`session-checkpoint-policy`、`packages/core/agent-loop`、`packages/session-query/session-query`、`session-query-sqlite`、`packages/workspace/workspace`、`packages/core/scope`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/session/session-persistence`、`session-persistence-jsonl`、`session-persistence-sqlite`、`session-projection`、`session-projection-cache`、`session-checkpoint-policy`、`packages/core/agent-loop`、`packages/session-query/session-query`、`session-query-sqlite`、`packages/workspace/workspace`、`packages/core/scope`）
 >
 > 调查更新日期：2026-08-16
 >

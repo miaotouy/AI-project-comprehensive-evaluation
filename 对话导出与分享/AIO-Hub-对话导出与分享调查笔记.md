@@ -1,6 +1,6 @@
 # AIO Hub 对话导出与分享调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`https://github.com/miaotouy/aio-hub`
 >
 > 调查更新日期：2026-08-14
 >

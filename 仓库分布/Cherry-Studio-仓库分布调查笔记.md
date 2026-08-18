@@ -1,6 +1,6 @@
 # Cherry Studio 仓库分布调查笔记
 
-> 调查对象：`../../cherry-studio`
+> 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
 > 调查更新日期：2026-08-12
 >

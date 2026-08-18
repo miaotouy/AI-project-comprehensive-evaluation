@@ -1,6 +1,6 @@
 # Open WebUI 生成式输出与运行时调查笔记
 
-> 调查对象：`../../open-webui`
+> 调查对象：`https://github.com/open-webui/open-webui`
 >
 > 调查更新日期：2026-08-10
 >

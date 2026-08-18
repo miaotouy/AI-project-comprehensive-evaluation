@@ -1,6 +1,6 @@
 # Pi Chat 概览
 
-> 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
 > 调查更新日期：2026-08-12
 >

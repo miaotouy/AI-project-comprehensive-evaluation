@@ -1,6 +1,6 @@
 # AIO Hub 消息渲染器调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\aio-hub`
+> 调查对象：`https://github.com/miaotouy/aio-hub`
 >
 > 调查更新日期：2026-08-18
 >

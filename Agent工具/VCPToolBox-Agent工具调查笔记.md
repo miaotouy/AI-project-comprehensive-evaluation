@@ -1,6 +1,6 @@
 # VCPToolBox Agent 工具运行时调查笔记
 
-> 调查对象：`E:\works\git\VCPToolBox`
+> 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
 > 调查更新日期：2026-08-12
 >

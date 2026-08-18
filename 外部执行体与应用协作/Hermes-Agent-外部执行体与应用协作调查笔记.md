@@ -1,6 +1,6 @@
 # Hermes Agent 外部执行体与应用协作调查笔记
 
-> 调查对象：`E:\works\git\hermes-agent`
+> 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
 > 调查更新日期：2026-08-13
 >

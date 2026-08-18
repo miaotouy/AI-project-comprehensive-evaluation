@@ -1,6 +1,6 @@
 # NextChat 仓库分布调查笔记
 
-> 调查对象：`../../NextChat`
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
 > 调查更新日期：2026-08-12
 >

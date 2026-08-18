@@ -1,6 +1,6 @@
 # VCPToolBox 媒体创作调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\VCPToolBox`（Node 服务端 + 插件架构）
+> 调查对象：`https://github.com/lioensky/VCPToolBox`（Node 服务端 + 插件架构）
 >
 > 调查更新日期：2026-08-14
 >

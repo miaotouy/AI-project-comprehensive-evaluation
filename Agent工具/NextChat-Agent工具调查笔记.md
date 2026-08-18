@@ -1,6 +1,6 @@
 # NextChat Agent 工具调查笔记
 
-> 调查对象：`E:\works\git\NextChat`（重点 `app/store/plugin.ts`、`app/client/platforms/openai.ts`、`app/utils/chat.ts`、`app/mcp/`）
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/store/plugin.ts`、`app/client/platforms/openai.ts`、`app/utils/chat.ts`、`app/mcp/`）
 >
 > 调查更新日期：2026-08-12
 >

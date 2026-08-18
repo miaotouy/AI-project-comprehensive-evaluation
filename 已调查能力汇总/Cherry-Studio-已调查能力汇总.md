@@ -1,6 +1,6 @@
 # Cherry Studio 已调查能力汇总
 
-> 汇总对象：`Cherry Studio（E:\works\git\cherry-studio）`
+> 汇总对象：`Cherry Studio（https://github.com/CherryHQ/cherry-studio）`
 >
 > 汇总更新日期：2026-08-18
 >

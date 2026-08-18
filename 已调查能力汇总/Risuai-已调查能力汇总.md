@@ -1,6 +1,6 @@
 # Risuai 已调查能力汇总
 
-> 汇总对象：`Risuai（E:\works\GitStudyNotes\Risuai）`
+> 汇总对象：`Risuai（https://github.com/kwaroran/Risuai）`
 >
 > 汇总更新日期：2026-08-18
 >

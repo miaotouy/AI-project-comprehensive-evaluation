@@ -1,6 +1,6 @@
 # DeepSeek Harness Agent 角色配置调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/preset/agent-presets`、`packages/preset/persona`、`packages/core/system-prompt`、`packages/core/agent`、`packages/core/scope`、`apps/cli/config/agent-presets`、`packages/context/agent-instructions`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/preset/agent-presets`、`packages/preset/persona`、`packages/core/system-prompt`、`packages/core/agent`、`packages/core/scope`、`apps/cli/config/agent-presets`、`packages/context/agent-instructions`）
 >
 > 调查更新日期：2026-08-16
 >

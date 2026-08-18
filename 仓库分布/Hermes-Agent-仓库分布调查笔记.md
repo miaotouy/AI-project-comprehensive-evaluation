@@ -1,6 +1,6 @@
 # Hermes Agent 仓库分布调查笔记
 
-> 调查对象：`../../hermes-agent`
+> 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
 > 调查更新日期：2026-08-12
 >

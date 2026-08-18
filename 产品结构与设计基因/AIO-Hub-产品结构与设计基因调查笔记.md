@@ -1,6 +1,6 @@
 # AIO-Hub 产品结构与设计基因调查笔记
 
-> 调查对象：`AIO-Hub`（本地路径 `E:\works\GitStudyNotes\aio-hub`）
+> 调查对象：`AIO-Hub`（远端仓库 `https://github.com/miaotouy/aio-hub`）
 >
 > 调查更新日期：2026-08-18
 >

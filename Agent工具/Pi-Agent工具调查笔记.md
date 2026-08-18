@@ -1,6 +1,6 @@
 # Pi Agent 工具调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/tools/`、`core/extensions/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/tools/`、`core/extensions/`）
 >
 > 调查更新日期：2026-08-12
 >

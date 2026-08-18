@@ -1,6 +1,6 @@
 # DeepSeek Harness Chat 概览
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/core/agent-loop`、`packages/core/agent`、`packages/core/session`、`docs/architecture.md`、`docs/agent-lifecycle.md`、`docs/subsystems/core.md`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/agent-loop`、`packages/core/agent`、`packages/core/session`、`docs/architecture.md`、`docs/agent-lifecycle.md`、`docs/subsystems/core.md`）
 >
 > 调查更新日期：2026-08-16
 >

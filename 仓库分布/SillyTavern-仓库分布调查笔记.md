@@ -1,6 +1,6 @@
 # SillyTavern 仓库分布调查笔记
 
-> 调查对象：`../../SillyTavern`
+> 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
 > 调查更新日期：2026-08-06
 >

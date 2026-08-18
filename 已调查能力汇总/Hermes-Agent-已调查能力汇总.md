@@ -1,6 +1,6 @@
 # Hermes-Agent 已调查能力汇总
 
-> 汇总对象：`Hermes-Agent`（本地路径 `E:\works\git\hermes-agent`，产品命令 `hermes`）
+> 汇总对象：`Hermes-Agent`（远端仓库 `https://github.com/NousResearch/hermes-agent`，产品命令 `hermes`）
 >
 > 汇总更新日期：2026-08-18
 >

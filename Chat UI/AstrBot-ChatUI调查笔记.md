@@ -1,6 +1,6 @@
 # AstrBot Chat UI 调查笔记
 
-> 调查对象：`E:\works\git\AstrBot`
+> 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
 > 调查更新日期：2026-08-12
 >

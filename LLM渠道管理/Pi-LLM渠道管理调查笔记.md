@@ -1,6 +1,6 @@
 # Pi LLM 渠道管理调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
 >
 > 调查更新日期：2026-08-18
 >

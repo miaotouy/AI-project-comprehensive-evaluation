@@ -1,6 +1,6 @@
 # Pi 消息渲染器调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/components/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/components/`）
 >
 > 调查更新日期：2026-08-12
 >

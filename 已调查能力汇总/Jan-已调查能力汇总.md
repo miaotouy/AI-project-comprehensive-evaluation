@@ -1,6 +1,6 @@
 # Jan 已调查能力汇总
 
-> 汇总对象：`Jan（本地路径 E:\works\git\jan）`
+> 汇总对象：`Jan（https://github.com/janhq/jan）`
 >
 > 汇总更新日期：2026-08-18
 >

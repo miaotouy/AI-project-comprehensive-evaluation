@@ -1,6 +1,6 @@
 # DeepSeek-Harness 已调查能力汇总
 
-> 汇总对象：`DeepSeek-Harness`（本地路径 `../../deepseek-harness`，npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）
+> 汇总对象：`DeepSeek-Harness`（远端仓库 `https://github.com/deepseek-ai/deepseek-harness`，npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）
 >
 > 汇总更新日期：2026-08-18
 >

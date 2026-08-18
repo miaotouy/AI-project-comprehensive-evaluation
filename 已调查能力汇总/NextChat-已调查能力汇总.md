@@ -1,6 +1,6 @@
 # NextChat 已调查能力汇总
 
-> 汇总对象：`NextChat`（本地路径 `E:\works\git\NextChat`）
+> 汇总对象：`NextChat`（远端仓库 `https://github.com/ChatGPTNextWeb/NextChat`）
 >
 > 汇总更新日期：2026-08-18
 >

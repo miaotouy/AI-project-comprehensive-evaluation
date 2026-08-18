@@ -1,6 +1,6 @@
 # OpenCode 外部执行体与应用协作调查笔记
 
-> 调查对象：`E:\works\git\opencode`
+> 调查对象：`https://github.com/anomalyco/opencode`
 >
 > 调查更新日期：2026-08-13
 >

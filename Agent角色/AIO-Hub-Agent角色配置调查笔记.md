@@ -1,6 +1,6 @@
 # AIO Hub Agent / 角色配置调查笔记
 
-> 调查对象：`E:\works\git\aio-hub`
+> 调查对象：`https://github.com/miaotouy/aio-hub`
 >
 > 调查更新日期：2026-08-13
 >

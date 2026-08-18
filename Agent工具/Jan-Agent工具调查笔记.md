@@ -1,6 +1,6 @@
 # Jan Agent 工具调查笔记
 
-> 调查对象：`E:\works\git\jan`（重点 `web-app/src/lib/custom-chat-transport.ts`、`web-app/src/hooks/useToolApproval.ts`、`web-app/src/services/mcp/tauri.ts`、`extensions/rag-extension/src/tools.ts`、`web-app/src/lib/webSearchTool.ts`）
+> 调查对象：`https://github.com/janhq/jan`（重点 `web-app/src/lib/custom-chat-transport.ts`、`web-app/src/hooks/useToolApproval.ts`、`web-app/src/services/mcp/tauri.ts`、`extensions/rag-extension/src/tools.ts`、`web-app/src/lib/webSearchTool.ts`）
 >
 > 调查更新日期：2026-08-06
 >

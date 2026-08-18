@@ -1,6 +1,6 @@
 # NextChat 对话导出与分享调查笔记
 
-> 调查对象：`E:\works\git\NextChat`
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
 > 调查更新日期：2026-08-14
 >

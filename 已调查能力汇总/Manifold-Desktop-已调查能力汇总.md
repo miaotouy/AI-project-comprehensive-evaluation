@@ -1,6 +1,6 @@
 # Manifold Desktop 已调查能力汇总
 
-> 汇总对象：`Manifold Desktop`（本地路径 `E:\works\git\Manifold-Desktop`）
+> 汇总对象：`Manifold Desktop`（远端仓库 `https://github.com/gregorik/Manifold-Desktop`）
 >
 > 汇总更新日期：2026-08-18
 >

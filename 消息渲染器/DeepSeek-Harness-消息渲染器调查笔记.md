@@ -1,6 +1,6 @@
 # DeepSeek Harness 消息渲染器调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/core/tools`、`packages/host/apiproxy`、`packages/session/session-projection`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/core/tools`、`packages/host/apiproxy`、`packages/session/session-projection`）
 >
 > 调查更新日期：2026-08-16
 >

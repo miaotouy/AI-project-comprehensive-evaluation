@@ -1,6 +1,6 @@
 # AstrBot 已调查能力汇总
 
-> 汇总对象：`AstrBot`（本地路径 `E:\works\git\AstrBot`，代码快照 `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` / `master`）
+> 汇总对象：`AstrBot`（远端仓库 `https://github.com/AstrBotDevs/AstrBot`，代码快照 `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` / `master`）
 >
 > 汇总更新日期：2026-08-18
 >

@@ -1,6 +1,6 @@
 # DeepChat 仓库分布调查笔记
 
-> 调查对象：`../../deepchat`
+> 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
 > 调查更新日期：2026-08-12
 >

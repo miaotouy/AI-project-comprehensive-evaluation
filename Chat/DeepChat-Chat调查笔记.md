@@ -1,6 +1,6 @@
 # DeepChat Chat 概览
 
-> 调查对象：`E:\works\git\deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
+> 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
 >
 > 调查更新日期：2026-08-12
 >

@@ -1,6 +1,6 @@
 # NextChat 独特功能调查笔记
 
-> 调查对象：`../../NextChat`（重点 `app/components/home.tsx`、`app/components/exporter.tsx`、`app/client/api.ts`、`app/components/search-chat.tsx`、`next.config.mjs`）
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/home.tsx`、`app/components/exporter.tsx`、`app/client/api.ts`、`app/components/search-chat.tsx`、`next.config.mjs`）
 >
 > 调查更新日期：2026-08-12
 >

@@ -1,6 +1,6 @@
 # Open WebUI 会话与消息管理调查笔记
 
-> 调查对象：`E:\works\git\open-webui`
+> 调查对象：`https://github.com/open-webui/open-webui`
 >
 > 调查更新日期：2026-08-12
 >

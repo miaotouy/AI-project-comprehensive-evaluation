@@ -1,6 +1,6 @@
 # Hermes-Agent（hermes-agent）LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\hermes-agent`
+> 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
 > 调查更新日期：2026-08-18
 >

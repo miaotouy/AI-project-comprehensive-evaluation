@@ -1,6 +1,6 @@
 # Manifold Desktop 消息渲染调查笔记
 
-> 调查对象：`E:\works\git\Manifold-Desktop`
+> 调查对象：`https://github.com/gregorik/Manifold-Desktop`
 >
 > 调查更新日期：2026-08-06
 >

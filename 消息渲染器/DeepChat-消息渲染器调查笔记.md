@@ -1,6 +1,6 @@
 # DeepChat 消息渲染器调查笔记
 
-> 调查对象：`E:\works\git\deepchat`（重点 `src/shared/chat.d.ts`、`src/renderer/src/components/message/`、`src/renderer/src/components/markdown/`、`src/renderer/src/components/artifacts/`）
+> 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/shared/chat.d.ts`、`src/renderer/src/components/message/`、`src/renderer/src/components/markdown/`、`src/renderer/src/components/artifacts/`）
 >
 > 调查更新日期：2026-08-12
 >

@@ -1,6 +1,6 @@
 # DeepSeek Harness 外部执行体与应用协作调查笔记
 
-> 调查对象：`../../deepseek-harness`
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
 > 调查更新日期：2026-08-16
 >

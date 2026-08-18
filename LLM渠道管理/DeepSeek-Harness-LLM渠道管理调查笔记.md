@@ -1,6 +1,6 @@
 # DeepSeek-Harness LLM 渠道管理调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/bundle/base`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/bundle/base`）
 >
 > 调查更新日期：2026-08-18
 >

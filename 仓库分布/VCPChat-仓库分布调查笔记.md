@@ -1,6 +1,6 @@
 # VCPChat 仓库分布调查笔记
 
-> 调查对象：`../../VCPChat`
+> 调查对象：`https://github.com/lioensky/VCPChat`
 >
 > 调查更新日期：2026-08-12
 >

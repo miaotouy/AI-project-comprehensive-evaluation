@@ -1,6 +1,6 @@
 # DeepSeek-Harness Agent 工具调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/core/tools/`、`packages/core/agent-loop/`、`packages/core/session/`、`packages/core/system-prompt/` 与各 `packages/*/tool-*` 工具包）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/tools/`、`packages/core/agent-loop/`、`packages/core/session/`、`packages/core/system-prompt/` 与各 `packages/*/tool-*` 工具包）
 >
 > 调查更新日期：2026-08-16
 >

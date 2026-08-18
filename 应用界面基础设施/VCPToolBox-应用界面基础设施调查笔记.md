@@ -1,6 +1,6 @@
 # VCPToolBox 应用界面基础设施调查笔记
 
-> 调查对象：`E:\works\git\VCPToolBox`
+> 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
 > 调查更新日期：2026-08-13
 >

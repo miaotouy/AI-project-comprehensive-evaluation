@@ -1,6 +1,6 @@
 # Pi 仓库分布调查笔记
 
-> 调查对象：`../../pi`
+> 调查对象：`https://github.com/earendil-works/pi`
 >
 > 调查更新日期：2026-08-12
 >

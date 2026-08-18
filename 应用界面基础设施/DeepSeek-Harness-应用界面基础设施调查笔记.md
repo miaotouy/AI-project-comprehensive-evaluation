@@ -1,6 +1,6 @@
 # DeepSeek Harness 应用界面基础设施调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `apps/web/`、`packages/client/`、`packages/host/`、`packages/api/`、`packages/typert/`、`packages/extensions/`、`packages/sdk/`、`packages/boot/`、`apps/cli/`、`packages/util/`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web/`、`packages/client/`、`packages/host/`、`packages/api/`、`packages/typert/`、`packages/extensions/`、`packages/sdk/`、`packages/boot/`、`apps/cli/`、`packages/util/`）
 >
 > 调查更新日期：2026-08-16
 >

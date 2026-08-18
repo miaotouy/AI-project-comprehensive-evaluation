@@ -1,6 +1,6 @@
 # DeepChat LLM 渠道管理调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\deepchat`
+> 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
 > 调查更新日期：2026-08-18
 >

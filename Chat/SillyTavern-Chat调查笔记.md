@@ -1,6 +1,6 @@
 # SillyTavern Chat 概览
 
-> 调查对象：`E:\works\git\SillyTavern`
+> 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
 > 调查更新日期：2026-08-07
 >

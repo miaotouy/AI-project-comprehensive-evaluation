@@ -1,6 +1,6 @@
 # Pi 已调查能力汇总
 
-> 汇总对象：`Pi（本地路径 E:\works\git\pi，来源笔记多用相对路径 ../../pi）`
+> 汇总对象：`Pi（https://github.com/earendil-works/pi）`
 >
 > 汇总更新日期：2026-08-18
 >

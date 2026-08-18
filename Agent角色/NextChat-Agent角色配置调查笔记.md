@@ -1,6 +1,6 @@
 # NextChat Agent 角色配置调查笔记
 
-> 调查对象：`E:\works\git\NextChat`（重点 `app/store/mask.ts`、`app/masks/`、`app/components/mask.tsx`、`app/components/new-chat.tsx`）
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/store/mask.ts`、`app/masks/`、`app/components/mask.tsx`、`app/components/new-chat.tsx`）
 >
 > 调查更新日期：2026-08-12
 >

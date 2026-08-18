@@ -1,6 +1,6 @@
 # LobeHub 媒体创作调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\lobehub`（Next.js 16 SPA + Hono/tRPC 服务端 + Drizzle/PostgreSQL，另含 Electron 桌面目标）
+> 调查对象：`https://github.com/lobehub/lobehub`（Next.js 16 SPA + Hono/tRPC 服务端 + Drizzle/PostgreSQL，另含 Electron 桌面目标）
 >
 > 调查更新日期：2026-08-14
 >

@@ -1,6 +1,6 @@
 # Pi Agent 角色配置调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/coding-agent/src/core/` 的 system-prompt、resource-loader、settings-manager）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/` 的 system-prompt、resource-loader、settings-manager）
 >
 > 调查更新日期：2026-08-12
 >

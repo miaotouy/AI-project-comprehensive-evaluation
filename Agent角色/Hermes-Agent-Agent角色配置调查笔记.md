@@ -1,6 +1,6 @@
 # Hermes-Agent Agent 角色配置调查笔记
 
-> 调查对象：`E:\works\git\hermes-agent`（Hermes Agent）
+> 调查对象：`https://github.com/NousResearch/hermes-agent`（Hermes Agent）
 >
 > 调查更新日期：2026-08-12
 >

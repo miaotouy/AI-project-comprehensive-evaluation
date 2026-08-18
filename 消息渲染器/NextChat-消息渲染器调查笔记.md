@@ -1,6 +1,6 @@
 # NextChat 消息渲染器调查笔记
 
-> 调查对象：`E:\works\git\NextChat`（重点 `app/components/markdown.tsx`、`app/components/chat.tsx`、`app/utils/chat.ts`、`app/components/artifacts.tsx`）
+> 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/markdown.tsx`、`app/components/chat.tsx`、`app/utils/chat.ts`、`app/components/artifacts.tsx`）
 >
 > 调查更新日期：2026-08-12
 >

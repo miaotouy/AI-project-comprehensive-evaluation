@@ -1,6 +1,6 @@
 # VCPToolBox 已调查能力汇总
 
-> 汇总对象：`VCPToolBox`（本地路径 `E:\works\git\VCPToolBox`）
+> 汇总对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
 > 汇总更新日期：2026-08-18
 >

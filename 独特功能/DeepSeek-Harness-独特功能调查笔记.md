@@ -1,6 +1,6 @@
 # DeepSeek Harness 独特功能调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/extensions/`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`，关联 `packages/bundle/`、`packages/runtime-diagnostics/invariants`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/e2b/`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`，关联 `packages/bundle/`、`packages/runtime-diagnostics/invariants`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/e2b/`）
 >
 > 调查更新日期：2026-08-16
 >

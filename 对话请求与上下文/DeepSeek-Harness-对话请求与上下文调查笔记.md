@@ -1,6 +1,6 @@
 # DeepSeek-Harness 对话请求与上下文调查笔记
 
-> 调查对象：`../../deepseek-harness`（重点 `packages/core/session`、`packages/core/system-prompt`、`packages/core/agent-loop`、`packages/compaction/`、`packages/spill/`、`packages/context/`、`packages/interaction/`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/core/system-prompt`、`packages/core/agent-loop`、`packages/compaction/`、`packages/spill/`、`packages/context/`、`packages/interaction/`）
 >
 > 调查更新日期：2026-08-16
 >

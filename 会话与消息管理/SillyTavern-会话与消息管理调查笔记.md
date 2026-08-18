@@ -1,6 +1,6 @@
 # SillyTavern 会话与消息管理调查笔记
 
-> 调查对象：`E:\works\git\SillyTavern`
+> 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
 > 调查更新日期：2026-08-12
 >

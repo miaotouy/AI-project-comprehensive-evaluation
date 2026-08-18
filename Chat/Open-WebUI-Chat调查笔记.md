@@ -1,6 +1,6 @@
 # Open-WebUI Chat 概览
 
-> 调查对象：`E:\works\git\open-webui`
+> 调查对象：`https://github.com/open-webui/open-webui`
 >
 > 调查更新日期：2026-08-10
 >

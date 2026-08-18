@@ -1,6 +1,6 @@
 # Pi 应用界面基础设施调查笔记
 
-> 调查对象：`../../pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`）
+> 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`）
 >
 > 调查更新日期：2026-08-13
 >

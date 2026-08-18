@@ -1,6 +1,6 @@
 # AstrBot 仓库分布调查笔记
 
-> 调查对象：`../../AstrBot`
+> 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
 > 调查更新日期：2026-08-12
 >

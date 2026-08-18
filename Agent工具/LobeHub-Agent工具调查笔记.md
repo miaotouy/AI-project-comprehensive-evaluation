@@ -1,6 +1,6 @@
 # LobeHub Agent 工具调查笔记
 
-> 调查对象：`E:\works\git\lobehub`（monorepo，重点 `apps/server`、`apps/desktop`、`packages/agent-runtime`、`packages/builtin-tools`、`packages/context-engine`、`packages/types`）
+> 调查对象：`https://github.com/lobehub/lobehub`（monorepo，重点 `apps/server`、`apps/desktop`、`packages/agent-runtime`、`packages/builtin-tools`、`packages/context-engine`、`packages/types`）
 >
 > 调查更新日期：2026-08-12
 >

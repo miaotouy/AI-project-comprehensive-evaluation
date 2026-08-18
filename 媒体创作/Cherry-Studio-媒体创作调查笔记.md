@@ -1,6 +1,6 @@
 # Cherry Studio 媒体创作调查笔记
 
-> 调查对象：`E:\works\GitStudyNotes\cherry-studio`（Electron + React 桌面客户端，v2 架构）
+> 调查对象：`https://github.com/CherryHQ/cherry-studio`（Electron + React 桌面客户端，v2 架构）
 >
 > 调查更新日期：2026-08-14
 >
