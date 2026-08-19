@@ -4,7 +4,7 @@
 >
 > 对比更新日期：2026-08-17
 >
-> 依据：各单项目调查笔记（含通用类目、十六项目独特功能调查笔记、独特功能待查清单、“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比，并参考《AI 客户端完整体验栈与模块组合构想》；本次另复核 VCPToolBox 的 RAGDiaryPlugin、LightMemo、KnowledgeBaseManager、RiverMemo 原生内核与管理路由，以及 VCPChat 的 DeepMemo 2.0/VCP-CDS 适配链；同时参考公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 对思维簇资产、语义组和 K 值构型的实际打包方式；AIO Recall、VCP 记忆召回与 SillyTavern 世界书之间的演变关系采用用户提供的项目演变补充信息，深化程度仍以当前源码主链为依据
+> 依据：各单项目调查笔记（含通用类目、十六项目独特功能调查笔记、独特功能待查清单、“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次另复核 VCPToolBox 的 RAGDiaryPlugin、LightMemo、KnowledgeBaseManager、RiverMemo 原生内核与管理路由，以及 VCPChat 的 DeepMemo 2.0/VCP-CDS 适配链；同时参考公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 对思维簇资产、语义组和 K 值构型的实际打包方式；AIO Recall、VCP 记忆召回与 SillyTavern 世界书之间的演变关系采用用户提供的项目演变补充信息，深化程度仍以当前源码主链为依据
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -289,7 +289,6 @@ AstrBot、OpenCode、Pi、VCPToolBox 本来就不以普通桌面 Chat 为边界�
 - [Risuai 独特功能调查笔记](独特功能/Risuai-独特功能调查笔记.md)
 - [VCP-Disco-Elysium-Mod（公开第三方思维簇模组）](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)
 - [上下文编译与提示词工程边界研究](独特功能/上下文编译与提示词工程边界研究.md)
-- [AI 客户端完整体验栈与模块组合构想](AI客户端最佳模块组合构想.md)
 - [Agent 角色横向对比](Agent角色/Agent角色横向对比.md)
 - [Agent 工具横向对比](Agent工具/Agent工具横向对比.md)
 - [会话与消息管理横向对比](会话与消息管理/会话与消息管理横向对比.md)
