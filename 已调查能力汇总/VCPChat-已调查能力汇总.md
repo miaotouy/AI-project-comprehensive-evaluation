@@ -155,7 +155,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - 全部调查结论均为静态源码分析，未运行应用、未发起真实模型请求；运行行为未验证的项包括：流式事件时序与中断恢复、桌面挂件实际渲染与动画冻结效果、移动同步握手与吞吐、音频引擎 WASAPI 独占/DSP 听感/gapless 切歌、划词助手 UIA 选区读取与三平台行为、ComfyUI 连接与模板转换、LoomAPP 运行与隔离、Pyodide 加载与包安装、Canvas 外部变更 diff 交互、CSP 与 preload 组合下模型脚本的实际可达面、气泡内 iframe 无 sandbox 属性与本机 Python 无沙箱的实际安全影响。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
 - 已确认的可靠性风险（静态证据，未实际触发验证）：`history.json` 裸数组整份覆盖写、无原子写（进程崩溃可能截断）；群聊多次调度之间无文件锁（并发覆盖写丢消息风险）；单聊中断无本地 abort/无客户端超时；话题自动总结单聊无超时保护；话题内容搜索对多模态数组有盲点。见 [会话与消息管理调查笔记](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 与 [Chat调查笔记](../Chat/VCPChat-Chat调查笔记.md)。
 - 测试覆盖现状：`tests/` 顶层 7 个文件覆盖前端插件、Loom 控制器/适配器/管理器、DeepMemo 与移动同步适配器；另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"，未纳入运行）；未找到针对聊天渲染管线、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试；Flowlock 等核心模块无自动化测试覆盖。见 [仓库分布调查笔记](../仓库分布/VCPChat-仓库分布调查笔记.md) 与 [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
-- 来源笔记的调查对象路径此前存在标注差异（`E:\works\GitStudyNotes\VCPChat` 与 `E:\works\git\VCPChat`），已统一为远端链接 `https://github.com/lioensky/VCPChat`；全部十二份来源笔记均存在且结论摘要可识别，无缺失。
+- 来源笔记的调查对象路径此前存在标注差异（`E:\works\GitStudyNotes\VCPChat` 与改名前的 `E:\works\git\VCPChat`），已统一为远端链接 `https://github.com/lioensky/VCPChat`；全部十二份来源笔记均存在且结论摘要可识别，无缺失。
 - 特色贡献统计建议（见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md) 相关口径）：主贡献候选为高级回复、Memo 工作台、VCPDesktop 持久挂件、FlowLock、人类工具箱、工作流编辑器、Agent 正则系统、VCPMobileSync、LoomAPP 运行时、音频引擎、划词小助手、Scriptorium 文坊；辅助贡献为跨聊天转发、前端插件机制、双语混合朗读、3D 骰子、RAG Observer。
 
 ## 来源笔记索引

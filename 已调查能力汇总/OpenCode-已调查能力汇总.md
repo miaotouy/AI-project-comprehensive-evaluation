@@ -175,7 +175,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 - V2 事件溯源链路（session_input/event 表、projector、run-coordinator、drain）未运行验证；post-crash continuation recovery 明确标注为未来工作。
 - 附件 data URL 在超长上下文中的 token 成本、`part_text_accum_delta` 断线重连与事件乱序行为、重试可能重复计费、快照跨重启 diff/revert 有效性（受 7 天 prune 影响）、上下文压缩触发阈值均未实测。
 - code-mode 沙箱隔离强度、MCP `tools/list_changed` 热重连、npm 动态安装在离线/代理环境的行为、AI SDK 内部工具并行度与 `experimental_repairToolCall` 实际行为未实测。
-- 来源笔记的调查对象路径此前存在不一致（`E:\works\git\opencode` 本地不存在），已统一为远端链接 `https://github.com/anomalyco/opencode`；不影响结论。
+- 来源笔记的调查对象路径此前存在不一致（改名前的 `E:\works\git\opencode` 本地不存在），已统一为远端链接 `https://github.com/anomalyco/opencode`；不影响结论。
 - 本次汇总的 14 份来源笔记文件均存在且"结论摘要"章节完整可识别，无缺失或无法识别的情况。
 
 ## 来源笔记索引

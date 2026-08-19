@@ -42,7 +42,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 - **会话单位**：会话 id 由 `SessionManager` 构造时用 `uuidv7` 生成（`createSessionId`，`session-manager.ts:208-210`），其余命名规则分三点：
   - 文件名：`<ISO时间戳(冒号与句点替换为连字符)>_<id>.jsonl`（`session-manager.ts:951-953`）；
-  - 会话目录按 cwd 编码：`--<cwd 中 / \ : 替换为 ->--`（Windows 上 `E:\works\git\pi` → `--E-works-git-pi--`，`getDefaultSessionDirPath`，`session-manager.ts:476-481`）；
+  - 会话目录按 cwd 编码：`--<cwd 中 / \ : 替换为 ->--`（Windows 上 `E:\works\GitStudyNotes\pi` → `--E-works-GitStudyNotes-pi--`，`getDefaultSessionDirPath`，`session-manager.ts:476-481`）；
   - 文件首行：`SessionHeader { type, version(当前3), id, timestamp, cwd, parentSession? }`（`session-manager.ts:32-39`）。
 - **条目类型**：`SessionEntry` 联合 `message/thinking_level_change/model_change/compaction/branch_summary/custom/custom_message/label/session_info`（`session-manager.ts:144-153`），用途分三类：
   - `custom`：扩展状态存储，不参与 LLM 上下文（`session-manager.ts:94-108` 注释）；
