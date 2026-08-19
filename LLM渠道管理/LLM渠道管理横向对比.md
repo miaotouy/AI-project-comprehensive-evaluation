@@ -2,13 +2,13 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-18
+> 对比更新日期：2026-08-19
 >
 > 依据：同目录十八份源码调查笔记及其中记录的代码快照
 >
-> 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
+> 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、SDK 使用与请求组装、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
-> 对比范围：渠道数据模型、配置生命周期与管理入口、协议适配、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性
+> 对比范围：渠道数据模型、配置生命周期与管理入口、协议适配、SDK 使用与请求组装、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -37,6 +37,7 @@
 - **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；但十八者都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 对数据库 Provider 凭据做 AES-GCM 加密；Jan 与 Manifold Desktop 分别使用 OS keyring 和 Windows Credential Manager。Hermes Agent 以 `.env`/`auth.json` 分层存储并在日志、UI、备份和子进程环境中脱敏，但底层文件不是密文库。其余多项目仍有明文配置或客户端持久化边界。备份是否包含 Key 必须单独核对。
+- **SDK 使用分三类：AI SDK 统一抽象、官方 SDK 直用、自研协议实现。** 凡项目级重试与 SDK 重试并存的项目都显式分权——Chatbox、Cherry Studio 与 DeepSeek Harness 关闭 SDK 内层 retry，Pi 镜像官方 SDK 判定；SDK 只承担协议层，渠道决策、Key 选择与平台传输都在 SDK 之外。
 - **不适合给十八者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
 
 ## 一览矩阵
@@ -233,6 +234,51 @@ Risuai 把协议适配集中在请求层：主入口按 `LLMFormat` 枚举分发
 多 Endpoint 常用于区分 Chat、Responses、Embedding、Rerank 或媒体生成。它们可能共用同一 Provider 和凭据，也可能指向不同路径。除非实现同时维护独立健康状态并在失败后改选 Endpoint，否则不能把它当作故障转移。
 
 Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox 的固定 `/v1/*` 路径都属于能力分派。Chatbox 的 Host/Path 可定制，但重试仍固定当前 Provider 设置。SillyTavern 按 source/type 选择端点，OpenRouter 的路由参数则由上游执行。
+
+## SDK 使用情况与请求组装边界
+
+本类目考察谁构造线上请求、SDK 与项目自有逻辑如何分权，以及 SDK 依赖如何固定；协议覆盖面与端点多态细节见「协议、端点与 Adapter」一节。
+
+### 三类请求构造层
+
+| 项目 | 请求构造层 | 请求体与流式由谁负责 | 项目保留在 SDK 外的控制 |
+|---|---|---|---|
+| AIO Hub | 自研 ProviderAdapter（`packages/llm-core`）+ 平台 Transport | 协议请求体、URL、Header、流式解码与工具编解码 | Key 状态与轮询、模型执行路由、探测与错误分类 |
+| AstrBot | 官方 SDK：OpenAI 客户端与 `google.genai` | 协议请求体、鉴权与流式；Anthropic 适配器自行转换 | 错误分类重试循环、Key 剔除轮换、payload 修正 |
+| Chatbox | 混合：统一模型类 + AI SDK adapter | OpenAI 兼容走自研模型类；Claude/Gemini/Responses 走 AI SDK | 外层重试包装（SDK 内层 retry 置 0）、代理 |
+| Cherry Studio | AI SDK（Adapter Family 映射 Provider）+ 专用 builder | 协议请求体、鉴权与流式 | Endpoint Type/Adapter Family 解析、Key 轮询、重试偏好包装 |
+| DeepChat | AI SDK provider factory + behavior registry | 协议请求体、鉴权与流式 | Provider→runtime 映射、QPS 队列、代理注入 |
+| DeepSeek Harness | 双适配器：自研 fetch + SSE；pi-ai（自带官方 SDK，lazy 加载） | 流式统一为 `StreamChunk` 词汇 | 凭据解析、retry policy、错误分类；SDK 重试强制 0 |
+| Hermes Agent | OpenAI Python SDK；Gemini 用 GeminiNativeClient | 协议请求体与鉴权 | resolver、credential pool、fallback 链；SDK 内建重试为第 0 层 |
+| Jan | AI SDK `streamText` + `createCustomFetch` | SDK 协议字段 | 推理参数注入、Key 链轮换、本地/远程 router 选择 |
+| LobeHub | 各 Provider Runtime（按 `sdkType`）；OpenAI 兼容 factory + `fetchSSE` | 协议请求体、鉴权与流式 | Agent Runtime 重试、apiKeyManager、RouterRuntime |
+| Manifold Desktop | C++ 自研 Provider 类 | 协议请求体与 SSE 解析 | 凭据访问、模型目录、Key 校验 |
+| NextChat | 平台 adapter 自研 + fetch | 协议路径、Header、请求体与流式解析 | Provider→adapter 映射、服务端代理 |
+| Open WebUI | 服务端路由自研组装 | 协议请求体与 Header/凭据组装 | 连接行索引、模型合并、随机后端选择 |
+| OpenCode | AI SDK（内置 Provider 表 + npm 动态安装）；native 可选 | 协议请求体、鉴权、流式与 telemetry | 目录组装、会话级 `Effect.retry`、错误归一化、usage 落库 |
+| Pi | pi-ai 自研 API 层，底层复用官方 SDK 传输 | 协议请求体、鉴权与流式 | `retryProviderRequest`（镜像 SDK 策略）、消息层重试 |
+| Risuai | 自研 Adapter 集合；Ollama 用 `ollama` SDK | 协议请求体与流式解析 | 同模型重试、fallback 候选链、平台网络路由 |
+| SillyTavern | 自研 source 分支 + 单次 fetch + SSE 解析 | 协议请求体与流式解析 | 无统一重试；流式降级局部特例 |
+| VCPChat | 自研单次 fetch | OpenAI 风格 payload | 无（单网关，URL/Key 全局） |
+| VCPToolBox | 自研 `fetchWithRetry` | 入站协议转换与出站 payload | 重试策略、语义路由、取消级联 |
+
+请求构造层决定协议兼容面与流式词汇的归属。自研实现并不等于协议覆盖少：SillyTavern 的 26 个 Chat Completion source 与 Risuai 的 24 个 LLMFormat 分支都是自研，覆盖面反而最宽；官方 SDK 直用者获得协议兼容与原生错误类型，却要在 SDK 之外叠加重试与 Key 逻辑；AI SDK 使用者把协议差异压缩进 provider 抽象，代价是协议行为受 SDK 版本约束。
+
+### SDK 内外的职责划分
+
+AI SDK 使用者（Cherry Studio、DeepChat、OpenCode、Jan，以及 Chatbox 的部分协议）把协议请求体、Header 与流式解析交给 SDK，项目代码只保留 Provider 解析、Key 选择和模型路由等渠道决策。四家的映射入口不同，但共同点是渠道决策全部发生在 SDK 调用之前；SDK 内建重试不会重新执行 Provider、模型或 Key 的选择，这与「重试、模型回退与跨渠道故障转移」一节的核验一致。
+
+官方 SDK 直用者把 SDK 内建行为当作契约处理。AstrBot 在 OpenAI 客户端之上做错误分类、最多 10 次内层重试与 Key 剔除轮换，Gemini 适配器依赖 `google.genai`；Hermes Agent 把 OpenAI SDK 内建重试明确列为第 0 层，其上再叠加应用层重试、credential pool 与 fallback 链；Pi 的 SDK 层重试复制官方 SDK 的 `x-should-retry` 与 `retry-after` 判定，而不是绕过它。
+
+自研协议实现者拥有最完整的控制面：请求体、SSE 解析、错误分类与重试全部自有，不需要协调 SDK 策略；代价是协议兼容与上游字段演进（如 Responses 新字段、推理摘要）都要自己跟踪。DeepSeek Harness 刻意让直连 fetch 适配器与 pi-ai 库适配器自始实现同一 `StreamChunk` 词汇，用双实现钉住协议语义。
+
+SDK 自带重试与项目级重试并行时，需要显式分权。Chatbox 与 Cherry Studio 把 AI SDK 内层 retry 置 0，由外层包装接管；DeepSeek Harness 强制 SDK 自动重试为 0，把重试全部移到 agent 步边界，理由是流已发出部分 chunk 后不可重放；OpenCode 的会话级、SDK 级与 native 级三层重试各自独立配置。未做分权的项目要接受模糊边界，例如 LobeHub 的重试是否换 Key 取决于 Runtime 生命周期，而不是明确决策。
+
+### SDK 依赖固定与传输层边界
+
+SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收录的 provider 包用 npm 动态安装，把 SDK 依赖推迟到运行时；LobeHub 的 `sdkType` 类型层保留 14 种、创建界面收敛为 9 种，形成 API 可写而 UI 不可达的差异；DeepSeek Harness 用编译期 drift gate 拦截 pi-ai 升级带来的模态、思考等级与思考格式漂移。
+
+请求构造层与网络传输层分离是另一条观察轴。AIO Hub 把协议适配放在共享 Core，桌面端再经 Rust 代理或 WebView fetch 发送；Risuai 的适配器之上统一走平台路由，Tauri 端经 `streamed_fetch`、Web 端经 `/proxy2` 中转；Open WebUI 的管理员连接由服务端代发，用户 Direct Connections 则由浏览器直连；NextChat 的 Web 模式经 Next.js 代理，App 模式直连官方 URL。无论使用哪种 SDK，平台边界（CORS、代理、本地文件、凭据暴露面）都由项目自有的传输层处理，这解释了同一协议在不同项目里呈现的可用性与安全差异。
 
 ## 模型目录与元数据
 
