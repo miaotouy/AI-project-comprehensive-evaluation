@@ -18,7 +18,7 @@
 
 横向核验后的主要结论如下：
 
-- **AIO Hub 的本地渠道运行状态最完整。** `LlmProfile` 同时容纳协议、端点、模型和多 Key；21 种可见渠道类型包含四类聚合服务入口，渠道身份再经模型路由解析到实际协议适配器。Key 具有启停、错误计数、429 熔断和恢复状态；当前请求仍不会换 Key，也没有跨 Profile 故障转移。
+- **AIO Hub 的本地渠道运行状态最完整。** `LlmProfile` 同时容纳协议、端点、模型和多 Key；21 种可见渠道类型包含四类聚合服务入口，渠道身份再经模型路由解析到实际协议适配器。Key 具有启停、错误计数、429 熔断和恢复状态；渠道层单次调用不换 Key，但主聊天链路在应用层等待重试（默认最多 2 次、3 秒固定间隔，429 追加 5 秒惩罚）并重新选 Key，失败 Key 已熔断/标坏时重试即换 Key；仍无跨 Profile 故障转移。
 - **Cherry Studio 的 Provider 实例模型和认证边界最规整。** 预设、用户差量、Endpoint Type、Adapter Family、模型覆盖和多种认证被拆成明确层次；同一预设可复制成多条独立渠道。多 Key 只做跨请求轮询，普通聊天默认不重试。
 - **LobeHub 在服务端凭据保护和重试框架上领先。** Provider 凭据以 AES-GCM 密文进入 PostgreSQL，Agent Runtime 有错误分类、指数退避和结构化重试事件。开源普通 Provider 仍固定 `providerId + modelId`；`RouterRuntime` 的扩展能力不能等同于已经配置好的跨渠道高可用。
 - **Chatbox 的优势是注册表、模型目录和通用客户端的可预期行为。** 它覆盖多种内置 Provider、四类自定义协议、OAuth 和多来源模型数据，对 429/5xx 做同渠道重试。它没有多 Key 池，内置 Provider ID 也只能保存一个端点实例。
@@ -44,7 +44,7 @@
 
 | 项目 | 核心连接对象 | 模型身份 | 多 Key / 当前请求换 Key | 普通重试 | 跨 Provider/端点 failover | 凭据静态边界 |
 |---|---|---|---|---|---|---|
-| AIO Hub | `LlmProfile` | `profileId + modelId` | 结构化 Key 池 / 不换 | 渠道层不负责 | 无 | 明文本地配置 |
+| AIO Hub | `LlmProfile` | `profileId + modelId` | 结构化 Key 池 / 渠道层不换，聊天应用层重试时重选（可换） | 渠道层无；聊天链路默认最多 3 次尝试 | 无 | 明文本地配置 |
 | AstrBot | `provider_sources` + 能力 `provider` 实例 | provider instance + model | Key 数组 / 429、无效时换 | transport 5 次 + adapter 最多 10 次 | 仅图片能力、空输出/错误的配置 fallback | `cmd_config.json` 明文；Dashboard 可返回完整 Key |
 | Chatbox | Provider 注册项 + 设置 | `provider + modelId` | 单 Key / 不适用 | 429/5xx 最多 5 次 | 无 | Electron Store 明文 |
 | Cherry Studio | `user_provider` 实例 | 含 `providerId` 的模型标识 | 结构化数组 / 不换 | 默认关闭 | 无 | SQLite JSON 明文，renderer 边界收窄 |
@@ -63,7 +63,7 @@
 | VCPChat | 全局 VCP URL/Key | 裸 model id | 单 Key / 不适用 | 无 | 无 | `settings.json` 明文 |
 | VCPToolBox | 全局上游 URL/Key | 上游或虚拟 model id | 单 Key / 不适用 | 默认 3 次总尝试 | 本地无；语义模型可换候选模型 | `.env` 明文 |
 
-矩阵中的“重试次数”沿用各项目自己的配置语义，不能直接横比。Chatbox 计总 attempt，LobeHub 配置 retry 次数，VCPToolBox 的 `ApiRetries` 表示总尝试数；Pi、OpenCode、AstrBot 与 Hermes Agent 还各自叠加多层重试；Risuai 的 `requestRetrys` 是同一模型内的最多重试次数，fallback 候选链推进会整体重发请求。Hermes Agent 的静态 fallback 链是本次确认最完整的跨 Provider/端点通用链路，Risuai 的模型 fallback 候选链也能沿用户配置的模型 ID 跨 Provider 切换，但两者都不是按实时健康动态选择。
+矩阵中的“重试次数”沿用各项目自己的配置语义，不能直接横比。Chatbox 计总 attempt，LobeHub 配置 retry 次数，VCPToolBox 的 `ApiRetries` 表示总尝试数；AIO Hub 的渠道层不重试，重试在聊天应用层（默认最多 2 次、可配置间隔与模式）并重新选 Key；Pi、OpenCode、AstrBot 与 Hermes Agent 还各自叠加多层重试；Risuai 的 `requestRetrys` 是同一模型内的最多重试次数，fallback 候选链推进会整体重发请求。Hermes Agent 的静态 fallback 链是本次确认最完整的跨 Provider/端点通用链路，Risuai 的模型 fallback 候选链也能沿用户配置的模型 ID 跨 Provider 切换，但两者都不是按实时健康动态选择。
 
 ## 比较口径
 
@@ -243,7 +243,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 
 | 项目 | 请求构造层 | 请求体与流式由谁负责 | 项目保留在 SDK 外的控制 |
 |---|---|---|---|
-| AIO Hub | 自研 ProviderAdapter（`packages/llm-core`）+ 平台 Transport | 协议请求体、URL、Header、流式解码与工具编解码 | Key 状态与轮询、模型执行路由、探测与错误分类 |
+| AIO Hub | 自研 ProviderAdapter（`packages/llm-core`）+ 平台 Transport | 协议请求体、URL、Header、流式解码与工具编解码 | Key 状态与轮询、聊天层重试、模型执行路由、探测与错误分类 |
 | AstrBot | 官方 SDK：OpenAI 客户端与 `google.genai` | 协议请求体、鉴权与流式；Anthropic 适配器自行转换 | 错误分类重试循环、Key 剔除轮换、payload 修正 |
 | Chatbox | 混合：统一模型类 + AI SDK adapter | OpenAI 兼容走自研模型类；Claude/Gemini/Responses 走 AI SDK | 外层重试包装（SDK 内层 retry 置 0）、代理 |
 | Cherry Studio | AI SDK（Adapter Family 映射 Provider）+ 专用 builder | 协议请求体、鉴权与流式 | Endpoint Type/Adapter Family 解析、Key 轮询、重试偏好包装 |
@@ -321,7 +321,7 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 
 | 项目 | 表示 | 正常选择 | 失败处理 | 当前请求换 Key |
 |---|---|---|---|---|
-| AIO Hub | 带状态的 `apiKeys[]` | 轮询 | 记录错误，429 可熔断并恢复 | 无 |
+| AIO Hub | 带状态的 `apiKeys[]` | 轮询 | 记录错误，429 可熔断并恢复 | 渠道层无；聊天应用层重试时重选 Key |
 | AstrBot | source `key` 数组 | 随机选一 | 429/无效剔除当前 Key，耗尽后报错 | **有** |
 | Chatbox | 单 Key/OAuth | 固定 | 继续使用同一凭据重试 | 不适用 |
 | Cherry Studio | 带 ID、标签、启停的数组 | 跨请求 round-robin | 不记录健康 | 无 |
@@ -340,7 +340,7 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | VCPChat | 单值 | 固定 | 无 | 不适用 |
 | VCPToolBox | 单值 | 固定 | 无 | 不适用 |
 
-AIO Hub、Hermes Agent、AstrBot 和 Jan 都会让 Key 失败影响选择，但时间边界不同。AIO Hub 只影响后续请求；AstrBot 与 Jan 可在当前请求内沿 Key 链重试；Hermes Agent 还会持久化 credential pool 状态、冷却并在池耗尽后推进 fallback。四者都仍需与跨 Provider 健康调度区分。
+AIO Hub、Hermes Agent、AstrBot 和 Jan 都会让 Key 失败影响选择，但时间边界不同。AIO Hub 的渠道层失败只影响后续请求，但主聊天链路在应用层等待重试并重新选 Key，失败 Key 已熔断或标坏时重试即换 Key；AstrBot 与 Jan 可在当前请求内沿 Key 链即时重试；Hermes Agent 还会持久化 credential pool 状态、冷却并在池耗尽后推进 fallback。四者都仍需与跨 Provider 健康调度区分。
 
 Cherry Studio 的结构化 Key 数组便于展示标签、启停和逐 Key 检测，轮询可以分摊正常流量。失败不会让某枚 Key 离开候选池，当前请求也不会自动换 Key。LobeHub 的逗号字符串配置更轻，但缺少独立 ID、标签和状态；而且不同 Transport 是否重建 Runtime 会影响 retry 是否重新抽取 Key，不能形成一致承诺。
 
@@ -352,7 +352,7 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 
 | 项目 | 普通请求行为 | 错误范围与退避 | 请求目标是否改变 |
 |---|---|---|---|
-| AIO Hub | 渠道层失败后抛错 | 更新 Key 状态 | 当前请求不改变 |
+| AIO Hub | 渠道层抛错；聊天应用层默认最多 2 次重试（共 3 次尝试） | 固定/指数间隔（默认 3s），429 追加 5s 惩罚；400 与流式已输出后不重试 | 重试重新 pickKey，可换 Key；渠道/模型不变 |
 | AstrBot | transport tenacity 5 次 + OpenAI adapter 最多 10 次分类循环 | 指数退避；429/无效 Key、超长、图片/工具能力分别处理 | 可换 Key；只有图片/空输出等特定条件换 fallback 模型 |
 | Chatbox | 最多 5 次 attempt | 429/5xx，指数退避；网络错误默认不重试 | Provider、端点、Key、模型不变 |
 | Cherry Studio | 默认 `maxRetries: 0` | 调用方可显式覆盖 | 不重新选择 Provider/Key |
@@ -393,7 +393,7 @@ SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给
 5. 记录每次 attempt 的渠道、错误、延迟和最终结果；
 6. 处理流式响应已经开始后的不可重放边界。
 
-AIO Hub 已覆盖第 2、4 项的一部分，但作用对象是同一 Profile 内的 Key。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。Pi 覆盖第 2、3 项的一部分（错误分类 + 同渠道重放），没有候选池与健康状态。OpenCode 覆盖第 2、3 项的一部分（错误归一化 + 同渠道重放，V2 runner 的 context overflow 自动压缩再试属模型内行为），同样没有候选池与健康状态。Risuai 覆盖第 2、3 项的一部分：候选链按任务模式静态配置、错误与空响应后推进并完整重发请求，但没有持久健康状态。其余项目主要停留在固定目标重试或人工切换。
+AIO Hub 已覆盖第 2、3、4、6 项的一部分：错误分类与等待重试作用于同一 Profile 内的 Key，聊天链路每次重试重新选 Key，失败、冷却与恢复状态跨请求持久化，流式已输出后不再重放。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。Pi 覆盖第 2、3 项的一部分（错误分类 + 同渠道重放），没有候选池与健康状态。OpenCode 覆盖第 2、3 项的一部分（错误归一化 + 同渠道重放，V2 runner 的 context overflow 自动压缩再试属模型内行为），同样没有候选池与健康状态。Risuai 覆盖第 2、3 项的一部分：候选链按任务模式静态配置、错误与空响应后推进并完整重发请求，但没有持久健康状态。其余项目主要停留在固定目标重试或人工切换。
 
 Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显式配置，credential pool 有冷却状态，跨端点切换会留下运行状态；但候选不是持续健康探测形成，流开始后的重放边界也未形成通用保证。它更准确地属于“静态高可用链”，还不是完整健康调度器。AstrBot 的 fallback 只覆盖特定图片能力与空输出/错误语义，Open WebUI 的 Ollama 随机分摊则只发生在请求前。
 
@@ -405,7 +405,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 |---|---|---|
 | 用户/会话显式选择 | 全部 | 固定本次 Provider 或网关模型 |
 | Key 随机/轮询 | AIO Hub、Cherry Studio、LobeHub | 同一渠道内分摊凭据 |
-| 错误健康状态 | AIO Hub | 影响后续 Key 选择 |
+| 错误健康状态 | AIO Hub | 影响后续 Key 选择，聊天链路重试时也据此改选 |
 | 任务模式静态 fallback 候选链 | Risuai | 错误或空响应后沿候选推进，候选是用户配置的任意模型 ID |
 | 语义相似度 | VCPToolBox | 选择虚拟模型的真实候选 |
 | 上游 Provider order | SillyTavern/OpenRouter、Pi/OpenRouter 与 Vercel Gateway | 把路由偏好交给聚合服务 |
@@ -581,7 +581,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 | 容易写出的结论 | 源码支持的准确表述 |
 |---|---|
-| “AIO Hub 失败会自动换 Key 重试” | 失败会更新 Key 状态；当前请求抛错，后续请求可能选择其他 Key |
+| “AIO Hub 渠道层会换 Key 重试” | 渠道层单次调用抛错并更新 Key 状态；重试在聊天应用层，等待后重发并重新 pickKey，已熔断/标坏的 Key 被跳过，同渠道有其他可用 Key 时换 Key |
 | “Cherry Studio 多 Key 可容灾” | 多 Key 跨请求 round-robin；无健康状态和当前请求换 Key |
 | “LobeHub 已有跨 Provider Router” | RouterRuntime 支持 option fallback；当前开源 `lobehub` 路由表为空，普通 Provider 固定 |
 | “Chatbox 支持多 Key 重试” | 它使用单 Key/OAuth，对 429/5xx 在同一渠道、同一凭据重试 |
@@ -604,7 +604,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 | 主要需求 | 更接近的现有实现 | 需要接受的边界 |
 |---|---|---|
 | 在图形界面中管理多条渠道的完整生命周期 | AIO Hub、Cherry Studio、DeepChat、Open WebUI | 各自仍缺少部分复制或渠道级导入导出；运行时故障转移能力需另行比较 |
-| 桌面端直连多 Provider，并管理多 Key 状态 | AIO Hub | 无请求内换 Key 和跨 Profile failover；凭据明文 |
+| 桌面端直连多 Provider，并管理多 Key 状态 | AIO Hub | 渠道层不换 Key，聊天链路有等待重试并重选 Key；无跨 Profile failover；凭据明文 |
 | 多认证、多协议端点和同预设多实例 | Cherry Studio | 默认不重试，无 Key 健康；SQLite 明文 |
 | 服务端多用户 Provider、加密凭据和可观察重试 | LobeHub | 普通开源路径无跨 Provider 路由；密钥迁移复杂 |
 | 显式多 Key、模型与跨 Provider fallback 链 | Hermes Agent | 需手工配置候选；不是健康感知动态路由；重发可能重复计费 |

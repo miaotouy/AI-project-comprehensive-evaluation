@@ -25,7 +25,7 @@ AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有�
 - Provider 请求构造/响应解析位于共享 TypeScript Core，桌面网络默认经本地 Rust 代理；
 - Agent 默认绑定一个渠道和模型，单次发送、重试、续写时可临时覆盖；历史消息保存实际使用的渠道/模型快照。
 
-它没有“同模型的多渠道池”、渠道权重、优先级、成本路由或跨渠道自动故障转移。多 Key 也不是请求级重试器：某次调用失败后只会更新 Key 健康状态并把错误抛给上层，下一次请求才可能选择另一个 Key。
+它没有“同模型的多渠道池”、渠道权重、优先级、成本路由或跨渠道自动故障转移。Key 选择分两层：渠道层单次调用只选一次 Key，失败后更新健康状态并抛错；主聊天链路在应用层自带重试循环（默认最多重试 2 次、固定间隔 3 秒，429 追加 5 秒惩罚等待），每次重试重新走 Key 选择，已被 429 熔断或认证失败标坏的 Key 会被跳过，因此同渠道还有其他可用 Key 时重试会换 Key（详见第 5.3 节）。
 
 - **模型执行路由已落地**：请求分发先查模型按操作保存的协议/端点绑定，再尝试把远端声明的唯一端点类型映射为协议。普通渠道随后回退到 Provider 默认协议；聚合渠道则继续查渠道级默认协议、内置模型路由表和静态操作默认。仍无法解析时抛出 `UnresolvedModelRouteError`，不根据模型名静默猜测。探测结果可由用户逐模型或批量确认并写回绑定；这是**同一渠道内的模型到协议/端点路由**，不是跨渠道故障转移（`packages/llm-core/src/model-execution-routing.ts:371-449`、`src/views/Settings/llm-service/probe/route-application.ts`）。
 - **audio.cpp 成为一等本地音频渠道**：渠道预设同时声明 OpenAI 兼容 TTS 与 Whisper 风格 ASR 端点。模型带 `asr` 能力且请求提供转写输入时，通用请求入口改走 `/v1/audio/transcriptions` multipart，而不是把音频塞入 Chat 消息；桌面转写工具会先把非 WAV 输入转换为 WAV（`src/composables/useLlmRequest.ts:226-262`、`src/tools/transcription/engines/audio.engine.ts:56-305`）。
@@ -305,7 +305,7 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 4. 注入 Profile 的网络/TLS/HTTP 选项。
 5. 按操作类型解析**执行路由**；`preferChat` 和 `_forceChatMode` 可强制走 chat。模型绑定优先，其次使用唯一端点声明。普通渠道再回退 Provider 默认；聚合渠道依次检查渠道默认、内置模型表和静态操作默认，仍无结果就显式报错。解析结果可能改写 Profile 类型与端点，并把适配器、路由来源和渠道类型写入 Inspector 上下文。
 6. 用有效的 Profile 类型选择协议实现，再按模型能力选择 Chat、Embedding、Rerank、媒体或专用语音转写方法。
-7. 成功或失败后按错误分类更新 Key 健康状态（见第 5 节），并把响应或异常交还调用方。
+7. 成功或失败后按错误分类更新 Key 健康状态（见第 5 节），并把响应或异常交还调用方；聊天调用方会在应用层等待重试并重新选 Key（见第 5.3 节）。
 
 路由是确定性的，没有读取 Profile 顺序、权重、延迟、剩余额度或价格来改选渠道——模型执行路由只做**渠道内的协议/端点选择**，不跨渠道改选。
 
@@ -337,16 +337,15 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 
 旧的“429 立即熔断、其他错误累计 3 次熔断、成功清零”计数规则仍保留，但自动熔断现在多一个前提：**同渠道还有其他可用 Key**，且该 Profile 开启了自动禁用；最后一个可用 Key 不会因连续失败被自动熔断。设置页探测与普通请求共用同一份策略文件。
 
-### 5.3 没有请求内换 Key 重试
+### 5.3 渠道层不重试，聊天应用层重试并重新选 Key
 
-一次发送只选择一次 Key 并调用一次 Adapter；失败后分类记录健康状态并立即把错误交还调用方。它不会在同一请求中：
+`useLlmRequest.sendRequest` 单次调用只选一次 Key 并调用一次 Adapter；失败后分类记录健康状态并立即把错误抛给调用方，渠道层内部没有重放、退避或跨 Profile 切换。
 
-- 换下一个 Key 重放；
-- 判断流是否已经输出部分内容；
-- 对 429/5xx 做退避；
-- 切换到另一条 Profile。
+重试下放在调用方。llm-chat 主聊天链路的 `useSingleNodeExecutor.ts:245-345` 在应用层实现重试循环：`maxRetries` 默认 2（共最多 3 次尝试）、`retryInterval` 默认 3 秒、`retryMode` 默认固定间隔（可改指数，默认值见 `defaultSettings.ts:160-167`），429 还会追加 5 秒惩罚等待。每次重试重新调用 `sendRequest`，因此会重新执行 `pickKey()`：轮询下标继续推进，且已被熔断或标坏的 Key 被过滤，同渠道还有其他可用 Key 时重试就换 Key。流式模式收到首个 chunk 后失败不再重试，避免已输出内容重放；400/`INVALID_ARGUMENT` 与用户中止也不重试（`useSingleNodeExecutor.ts:296-318`）。
 
-因此这里的“负载均衡”更准确地说是跨请求的 Key 轮询；“熔断”也是影响后续请求的状态管理，不是当前请求的高可用恢复。
+媒体生成与媒体会话命名还有结构化输出降级尝试（`useMediaGenAILogic.ts:170-227`），每次也重新走 Key 选择，但那是解析兜底，不是网络失败重试；翻译、话题命名、上下文压缩等辅助任务本次未发现重试循环。
+
+因此“负载均衡”仍是跨请求的 Key 轮询，但“熔断”不只是影响后续请求：聊天链路的重试会立即利用熔断状态，失败后等待并改选下一枚可用 Key。
 
 ## 6. Provider Adapter 与协议边界
 
@@ -426,7 +425,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 
 - 没有跨 Profile 的同模型聚合或别名层；
 - 没有渠道权重、优先级、配额、成本或延迟路由（模型执行路由是渠道内的协议/端点选择，不跨渠道改选）；
-- 没有当前请求内 Key 重试；
+- 没有渠道层请求内 Key 重试（重试在 llm-chat 应用层，等待后重发并重新选 Key，见第 5.3 节）；
 - 没有跨渠道 failover；
 - 没有加密或系统凭据库；
 - `auto` 网络策略不是自动择优；
@@ -458,6 +457,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - 移动端 Profile Store：[`mobile/src/tools/llm-api/stores/llmProfiles.ts`](../../aio-hub/mobile/src/tools/llm-api/stores/llmProfiles.ts)
 - 移动端渠道设置页与编辑器：[`mobile/src/tools/llm-api/views/LlmSettingsView.vue`](../../aio-hub/mobile/src/tools/llm-api/views/LlmSettingsView.vue)、[`mobile/src/tools/llm-api/components/ProfileEditor.vue`](../../aio-hub/mobile/src/tools/llm-api/components/ProfileEditor.vue)
 - Agent 运行时选择：[`src/tools/llm-chat/composables/chat/useChatExecutor.ts`](../../aio-hub/src/tools/llm-chat/composables/chat/useChatExecutor.ts)
+- 聊天链路应用层重试：[`src/tools/llm-chat/composables/chat/useSingleNodeExecutor.ts`](../../aio-hub/src/tools/llm-chat/composables/chat/useSingleNodeExecutor.ts)
 
 ## 12. 未验证事项
 
