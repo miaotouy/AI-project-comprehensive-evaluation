@@ -367,6 +367,32 @@ Authorization: Bearer API_Key
 判定函数（`reasoningContentAdapter.js:41-49`）按总开关与模型名白名单匹配决定是否转换。流式与非流式处理链在**转发给客户端的副本**上，把 `reasoning_content`、`reasoning`、`reasoning_chunk`、`thinking`、`thoughts` 等推理字段提取为 `<think>` 标签正文（流式按块拼接、规范闭合、结束时补闭合标签），并删除原始推理字段；内部循环仍只用原始 `content`（`streamHandler.js:172-218` 定义、`:332`/`:375` 使用；`nonStreamHandler.js:272-306`）。语义要点：
 
 - 这是**客户端展示协议**的转换，不是渠道或 Adapter 变化：出站仍只发 OpenAI-compatible body，不新增任何上游字段；
+- 它是只读展示适配：转换只发生在流式/非流式推向客户端的响应流与响应体中，不写回历史消息，不影响后续轮次输入；
+- 白名单判断基于模型重定向与语义路由解析出的**真实后端模型名**，而非客户端请求的公开别名。
+
+### 6.5 前端/渠道劫持与提示词夺舍（VCPBridgeServer 与 SystemPromptHacker）
+
+在 VCP 架构中，“渠道夺舍”或“前端接管”是指：**对于硬编码了内部 System Prompt、固定上游端点或限制模型名称的闭源客户端/CLI（如 Claude Code、Codex CLI、Cursor、Kiro、各种 IDE 插件等），在请求链路中间建立协议劫持与提示词重写代理，强行剥离/覆盖原厂提示词，并无缝注入 VCP 规范或改写目标模型**。
+
+VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridgeServer`（`Plugin/VCPBridgeServer/`），配合主服务器的 `protocolBridge.js`，提供两种维度的接管方案：
+
+#### 1. 独立透明劫持代理（VCPBridgeServer）
+- **独立端口运行**：默认监听 `3100`（或 `6003`），专为不能修改 System Prompt 的外部 CLI/前端设计。
+- **四大劫持模式 (`hijackMode`)**：
+  - `replace`（彻底夺舍）：直接丢弃下游请求自带的所有 `system` 消息，完全替换为 VCP 配置的 System Prompt；
+  - `prepend`（置顶注入）：在客户端原 System Prompt 之前插入 VCP 规范，获取最高优先级；
+  - `append`（追加覆盖）：在客户端原 System Prompt 之后追加注入；
+  - `merge`（融合重组）：合并所有 system 消息为一条置顶消息；
+  - `off`：仅做协议转发与模型映射，不改写提示词。
+- **请求级模型映射 (`modelMap`)**：下游客户端请求固定模型（如 `gpt-4`）时，透明映射为配置的真实上游模型（如 `claude-3-7-sonnet` 或 `gemini-2.5-pro`）。
+- **多 Profile 场景路由**：
+  - 优先级按 `URL 路径前缀 (/v1/<profile>/...)` > `HTTP Header (x-bridge-profile)` > `模型名前缀 (<profile>/<model>)` > `defaultProfile` 匹配；
+  - 每个 Profile 拥有独立的提示词文件、劫持模式和模型覆盖；
+  - 运行时真相源为 `Plugin/VCPBridgeServer/bridge-config.json` 及 `profiles/` 目录，通过 `chokidar` 实现热加载。
+
+#### 2. 主服务全链路接管（protocolBridge）
+- **定位**：如果不仅需要劫持提示词，还希望下游 CLI/客户端透明接入 VCP 的 RAG（RiverMemo/TagMemo）、变量系统（Tar/Sar/Var）和全量工具生态，则将客户端 Base URL 指向主服务端口（默认 `6006`）。
+- **串联拓扑**：两者可串联使用（`CLI -> BridgeServer 劫持提示词/映射模型 -> VCP 主服务器走完整 RAG 与工具管线 -> 上游 API`）。
 - 转换结果不进工具解析、OneRing、日记与 AgentAssistant 历史（AgentAssistant 反而会按模型名把 `<think>` 块从对话文本中剥掉，见 Agent 角色笔记 3.5）；
 - 默认关闭；配置了模型名单才生效，留空名单时不转换任何模型。
 
@@ -586,6 +612,7 @@ VCP 当前不会持久化：
 | 自定义 Base URL | 有 | `API_URL` |
 | 自定义上游 Header | 无 | 固定 Bearer + Accept/User-Agent |
 | 入站多协议 | 有 | Chat、Responses、Anthropic、Gemini |
+| 渠道/前端劫持与 Prompt 夺舍 | 有 | VCPBridgeServer 独立透明代理（replace/prepend/append/merge）+ 多 Profile 路由 |
 | 推理字段展示层转换 | 有（默认关闭） | ReasoningToContent，按模型白名单转 `<think>` 标签 |
 | 出站多 Provider Adapter | 无 | 统一 OpenAI-compatible Chat |
 | 远程模型目录 | 有 | 单次代理 `/v1/models` |
@@ -658,6 +685,8 @@ VCP 当前不会持久化：
 - 主配置模板：[`config.env.example`](../../VCPToolBox/config.env.example)
 - 管理端主配置读写：[`routes/admin/config.js`](../../VCPToolBox/routes/admin/config.js)
 - 管理端 AI/模型测试代理：[`routes/admin/aiChat.js`](../../VCPToolBox/routes/admin/aiChat.js)
+- 前端劫持与 Prompt 夺舍代理：[`Plugin/VCPBridgeServer/bridgeserver.js`](../../VCPToolBox/Plugin/VCPBridgeServer/bridgeserver.js) 与 [`bridgeConfig.js`](../../VCPToolBox/Plugin/VCPBridgeServer/bridgeConfig.js)
+- AdminPanel-Vue 前端劫持配置：[`AdminPanel-Vue/src/views/BridgeHijackConfig.vue`](../../VCPToolBox/AdminPanel-Vue/src/views/BridgeHijackConfig.vue)
 - AdminPanel-Vue 全局配置编辑：[`AdminPanel-Vue/src/views/BaseConfig.vue`](../../VCPToolBox/AdminPanel-Vue/src/views/BaseConfig.vue)
 - AdminPanel-Vue 语义路由编辑：[`AdminPanel-Vue/src/views/SemanticModelRouterEditor.vue`](../../VCPToolBox/AdminPanel-Vue/src/views/SemanticModelRouterEditor.vue)
 - AdminPanel-Vue 语义路由 API：[`AdminPanel-Vue/src/api/semanticRouter.ts`](../../VCPToolBox/AdminPanel-Vue/src/api/semanticRouter.ts)

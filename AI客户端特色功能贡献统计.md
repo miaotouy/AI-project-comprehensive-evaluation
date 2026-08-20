@@ -21,7 +21,7 @@
 - **AIO Hub** 的覆盖面最宽。网页蒸馏室、窗口自动化语言、实时字幕 OCR、跨播放器弹幕和对话分享稿工作台构成主贡献；Git 提交台、长文翻译与 Recall 思绪集计辅助贡献。它还在 F18 以 HTML/SVG/JS/Canvas iframe 小应用和 Action Button 计可执行消息的辅助贡献，在 F02/F03 以角色卡导入、独立世界书编辑器及真实条件注入运行时计 ST 兼容辅助贡献。Recall 参考 VCP 的记忆召回路线后形成独立产品面，采用预设法与候选模块组成的检索管线，以 SQLite 为真源并使用 `【recall::…】` 严格占位符协议；它的工程产品化完整，但不再与 VCP 的上位记忆演化能力拆成两个主贡献族。Knowledge 是主动资料库工具，宏共 74 个。
 - **Hermes Agent、OpenCode、Open WebUI** 分别在持续 Agent 后端、编码会话服务、多人模型工作区三个方向形成宽覆盖。Open WebUI 的 Channels、Notes、Memory、Calendar、Automations 和 Arena/ELO 均形成完整产品链。
 - **VCPChat** 以 Agent 可控 Hi-Fi 播放器、系统级划词助手、双语自动语音链和 Scriptorium 共笔文坊（VDOC/VPPTX 工程 + 文脉 PR 审批）构成主贡献，论坛客户端、RAG Observer 和 3D 物理骰子则扩展 VCP 运行时。Loom v1.4.0 与 VCP Agent WebCore 属于 LoomAPP 数据驱动创作运行时，不重复计数。
-- **VCPToolBox** 的 RAG/记忆系统不能只按一个“高级召回”功能计量。复核后拆为两个主贡献族：TagMemo/RiverMemo 负责生成前自动召回、私人语义传播、拓扑重排与解释；VCP 元思考负责用持久链配置逐簇递归检索，并让前一阶段结果改变后一阶段查询。公开的 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 进一步证明这条链已经形成可迁移的内容资产契约：外部作者可以把“内心会议簇 + 四属性域 + 24 个原子模块”连同语义组配置打包，按 K 值组合成不同认知构型并直接部署到 VCP 的日记/RAG 目录；它是 F102 的生态证据，不作为新增项目或重复主贡献。LightMemo 的 KNN/TagMemo/RiverMemo 同候选域对照属于调优与验证机制，另入机制表；一致性预览/修复作为自动召回族的维护子链，Rust/Rayon 内核和 RAG Observer 分别归原生计算机制与辅助观察表面，不重复抬分。AIO Recall 作为后续独立产品化形态，仍在自动召回族计辅助贡献。多观点 Agent 会议同样是主贡献，Skill 目录索引作为 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
+- **VCPToolBox** 的 RAG/记忆系统不能只按一个“高级召回”功能计量。复核后拆为两个主贡献族：TagMemo/RiverMemo 负责生成前自动召回、私人语义传播、拓扑重排与解释；VCP 元思考负责用持久链配置逐簇递归检索，并让前一阶段结果改变后一阶段查询。此外，新版正式确立了 F108 “渠道与前端劫持代理（VCPBridgeServer）” 为主贡献，使其主贡献分提升至 13 分。公开的 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 进一步证明这条链已经形成可迁移的内容资产契约：外部作者可以把“内心会议簇 + 四属性域 + 24 个原子模块”连同语义组配置打包，按 K 值组合成不同认知构型并直接部署 to VCP 的日记/RAG 目录；它是 F102 的生态证据，不作为新增项目或重复主贡献。LightMemo 的 KNN/TagMemo/RiverMemo 同候选域对照属于调优与验证机制，另入机制表；一致性预览/修复作为自动召回族的维护子链，Rust/Rayon 内核和 RAG Observer 分别归原生计算机制与辅助观察表面，不重复抬分。AIO Recall 作为后续独立产品化形态，仍在自动召回族计辅助贡献。多观点 Agent 会议同样是主贡献，Skill 目录索引作为 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
 - **媒体创作类目已正式建立，但不新增统计分。** AIO Hub、VCPToolBox、Chatbox 的 F48 仍按原口径计入；[媒体创作横向对比](媒体创作/媒体创作横向对比.md)只把三者共同的任务、历史、资产和结果复用契约抽出比较，VCPChat 的 ComfyGen/Loom/Scriptorium 与 Hi-Fi 播放器保留为扩展或相邻边界。
 - **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别覆盖 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主贡献和辅助贡献，DeepChat 的 CLI 本地控制平面归入“外部表面驾驶本地会话”主贡献族。
 - **DeepSeek Harness** 正式纳入第十八个比较对象。模型在会话中检查、定义、运行、停止和删除自身 Cordis 插件的自引用运行时，以及由会话事件日志持久化并可跨恢复、分叉和压缩一致重放的 plan mode，各形成一个主贡献族；同会话 goal 以事件溯源目标、轮次预算和连续阻塞判定补充目标闭环，session-local schedule 以“日志规则 + 可弃定时投影 + 原会话回合投递”补充定时 Agent 族，均计辅助贡献。进程沙箱、能力缝和子代理委派策略进入机制表，不重复计产品分。
@@ -84,7 +84,7 @@
 |---:|---|---:|---:|---:|---:|---|
 | 1 | AIO Hub | 13 | 13 | 26 | 39 | 上下文召回产品化、网页蒸馏、桌面 RPA、媒体/资产、对话分享稿与跨播放器工具枢纽 |
 | 2 | VCPChat | 13 | 4 | 17 | 30 | 消息即应用、主动 Agent、桌面感知、Hi-Fi 媒体、文档共笔、记忆工作台与跨端同步 |
-| 3 | VCPToolBox | 12 | 1 | 13 | 25 | 自动联想记忆、递归检索思考链、上下文语言、托管浏览器、Agent 社会和异步插件编排 |
+| 3 | VCPToolBox | 13 | 1 | 14 | 27 | 自动联想记忆、递归检索思考链、上下文语言、托管浏览器、前端与 Prompt 劫持、Agent 社会和异步插件编排 |
 | 4 | Open WebUI | 10 | 5 | 15 | 25 | 多用户模型工作区、协作频道与文档、记忆、日历自动化和模型评估 |
 | 5 | Hermes Agent | 8 | 7 | 15 | 23 | 谱系化会话、后台任务、闭环学习、自进化 Skill、目标质量门和跨界面 Agent 后端 |
 | 6 | LobeHub | 8 | 6 | 14 | 22 | 异构 Agent 托管、业务应用连接、Agent 调度与运营、白盒记忆、目标闭环与协作文档对象 |
@@ -228,6 +228,7 @@
 | F70 | 个人/共享日历与模型调度面 | Open WebUI | - | 日历事件、参与者、工具和时间轴形成完整产品链 |
 | F71 | 定时 Prompt Automations 与运行记录 | Open WebUI | - | 自动化配置、调度循环、运行表和日历投影闭环 |
 | F72 | 模型 Arena / ELO 评估工作台 | Open WebUI | - | 用户反馈进入 Elo 排名和话题加权检索，不只是用量统计 |
+| F108 | 独立端口透明 API 代理、前端劫持与 Prompt 夺舍 | VCPToolBox | - | 独立透明代理（端口 3100）支持 replace/prepend/append/merge 四种夺舍模式、模型改写与多 Profile 动态路由 |
 
 ## 机制贡献统计
 

@@ -36,6 +36,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | UserAuth 管理员认证码 | `主链确认` | 支撑机制（安全） | 每小时 6 位码经 code.bin 注入 `DECRYPTED_AUTH_CODE`，requireAdmin 工具消费 |
 | DigitalOracle 金融数据聚合 | `主链确认` | — | 15 个 Provider 宏观/利率/加密/预测市场/期权；全局宏面板并发聚合 |
 | DeepWikiVCP 仓库文档 MCP 客户端 | `主链确认` | — | 全仓库唯一 MCP-over-HTTP 客户端；结构/内容/问答/Deep Research/多仓库 |
+| VCPBridgeServer 前端劫持与 Prompt 夺舍代理 | `主链确认` | 渠道与协议 | 独立透明代理（端口 3100），支持 4 种劫持模式（replace/prepend/append/merge）、模型重映射与多 Profile 动态路由 |
 | 人类直接调用工具 API（/v1/human/tool） | `入口确认` | 人类工具面 | 有鉴权与全审批链，VCPToolBox 内无独立产品 UI |
 | OneRing / 时间线 / ContextFolding | `归并已有类目` | — | 上下文编排，归并入“对话请求与上下文”笔记 |
 | 语义虚拟模型路由 | `归并已有类目` | — | 归并入“LLM 渠道管理”笔记；README“容灾”=模型级 fallback |
@@ -459,6 +460,37 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 **独特性判断**：全仓库唯一 MCP 客户端型插件（MCP over Streamable HTTP 直连），是"外部 Agent 协议/工具协议"聚类候选；与普通网页抓取不同（协议层 JSON-RPC + SSE 双格式解析）。
 
 **证据强度**：源码事实（339 行全文读完）；DeepWiki 服务端 MCP 端点行为未运行验证。
+
+### 能力二十：VCPBridgeServer 前端劫持与 Prompt 夺舍代理（渠道与协议接管）
+
+**用户目标**：在使用闭源商业 CLI 工具（如 Claude Code、Codex CLI、Cursor、Kiro 等）时，绕过其不可编辑的内置 System Prompt 与预设模型限制，强行注入项目自定义规范、替换模型映射或接入个性化人格设定。
+
+**入口与触发者**：客户端将 `ANTHROPIC_BASE_URL` 或 `OPENAI_BASE_URL` 指向 VCPBridgeServer 独立端口（默认 `3100` 或 `6003`）；管理入口位于 AdminPanel 前端劫持配置页面（`AdminPanel-Vue/src/views/BridgeHijackConfig.vue`）。
+
+**事实对象**：`Plugin/VCPBridgeServer/bridge-config.json`（运行真相源）、`Plugin/VCPBridgeServer/profiles/` 目录下的多 Profile JSON 配置与 `.txt` 提示词文件。
+
+**完整主链**：
+1. 监听与解析：BridgeServer 独立 Express 实例拦截入站请求，支持 OpenAI Chat、Responses、Anthropic Messages 与 Gemini 端点；
+2. Profile 匹配：按优先级依次从 URL 路径前缀（`/v1/<profile>/...`）、Header（`x-bridge-profile`）、模型名前缀（`<profile>/<model>`）解析生效的 Profile，未匹配时回退到 `defaultProfile` 或全局兜底配置；
+3. 提示词劫持：执行 `applySystemPromptHijackWithConfig`，按模式处理原请求中的 `system` 消息：
+   - `replace`：清空原请求中所有 system 消息，完全替换为 VCP 提示词；
+   - `prepend`：在原 system 消息前插入；
+   - `append`：在最后一条 system 消息后追加；
+   - `merge`：合并为一条置顶 system 消息；
+4. 模型改写与转发：应用 `modelMap` 将客户端请求的模型 ID 转换为目标真实模型，按配置转发至上游 API（或本机 VCP 主服务）；
+5. 协议转换与回送：将上游响应（JSON 或 SSE 流式事件）转换为下游客户端所需的原生数据格式。
+
+**持续性**：配置文件与 Profile 均落盘存储；通过 `chokidar` 文件监听器实现毫秒级热加载（修改配置或 Profile 文件无需重启主服务）。
+
+**人机与多 Agent 关系**：管理员可通过 AdminPanel 在线管理 Profile、测试 System Prompt 注入并切换默认激活状态。
+
+**外部依赖与执行域**：独立 Node.js Service 插件，运行于本地 Node.js 进程。
+
+**安全与资源边界**：支持配置独立上游 API Key 或透传客户端 Bearer Key；管理 API 需通过 AdminPanel 鉴权。
+
+**独特性判断**：将协议网关与“链路级提示词强制清洗/夺舍”结合，无需修改任何第三方 CLI 源码即可实现上游提示词的彻底接管与动态 Profile 分流。
+
+**证据强度**：源码事实（`Plugin/VCPBridgeServer/bridgeserver.js:637-720`、`bridgeConfig.js:11-35`、`routes/admin/bridgeProfiles.js`）。
 
 ## 已归并到现有类目的能力
 
