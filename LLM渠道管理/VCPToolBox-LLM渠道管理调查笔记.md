@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：静态阅读当前 HEAD 的配置模板、主服务、管理 API、AdminPanel-Vue 前端、语义路由实现及脚本/入口文件；使用 Glob/Grep 检查 CLI、TUI、桌面端和导入导出入口；未修改被调查仓库，未运行服务验证 UI 保存和网络请求
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：静态复核 AICodeWorker、SSH/WebSocket 节点、跨节点文件、浏览器 runtime、异步回注、人类工具 API 与 MCP 客户端插件；复用 Agent 工具、运行时和独特功能笔记；未启动外部服务
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPToolBox 不是统一桌面 Agent 控制台，但已经形成多条可比较的外部协作主链：AICodeWorker 调度 opencode/Antigravity CLI；WebSocket 节点与 SnowBridge 承担远端工具和文件；SSHManagerService 执行远端设备；托管浏览器暴露页面观察/控制；异步插件把长任务结果回注原会话；`/v1/human/tool` 允许外部人类客户端走统一工具审批。综合达到 `主链确认`（静态证据）。
+VCPToolBox 不是统一桌面 Agent 控制台，但已经形成多条可比较的外部协作主链：AICodeWorker 调度 opencode/Antigravity CLI；WebSocket 节点与 SnowBridge 承担远端工具和文件；SSHManagerService 执行远端设备；托管浏览器暴露页面观察/控制；异步插件把长任务结果回注原会话；`/v1/human/tool` 允许外部人类客户端走统一工具审批。浏览器运行时启动前会探测配置 profile 中已存在的 DevTools 端点，复用可达的 Chrome 进程；新启动的进程也会等待端点就绪后再返回状态（`modules/browserRuntimeManager.js:483-590,656-710`）。综合达到 `主链确认`（静态证据）。
 
 ## 接入角色与系统边界
 

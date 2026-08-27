@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`（Node 服务端 + 插件架构）
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：只读源码梳理 + 尽力而为运行验证。通读 `Plugin/MediaRenderer/`（manifest、MediaRenderer.js 全文 1701 行、AudioSynthesisWorker.js、README、config.env.example），node 解析 15 个媒体插件 manifest，核对 `Plugin.js` hybridservice/asynchronous 分发、`server.js:1471` 回调端点、`modules/messageProcessor.js:827-867` 回注、`WebSocketServer.js:95-144` 分布式回调；运行验证含 `node --check`、音频 Worker 独立实测（成功与错误路径）、FFmpeg 按插件参数实测编码 GIF/MP4
 >
@@ -22,6 +22,8 @@ VCPToolBox 的媒体创作能力是**服务端媒体供给/编排层**：项目�
 4. **异步回注链**：异步视频插件（Wan2.1）后台轮询完成后回调 `/plugin-callback/:pluginName/:taskId` 端点，结果落盘为 `VCPAsyncResults/<plugin>-<taskId>.json`，后续请求经占位符注入上下文；分布式节点经 `plugin_callback_forward` 走同一条落盘链。
 
 **核心边界**：媒体事实对象是"插件调用 + 产物文件 + 可选异步 job 文件"，**不存在**任务/历史/资产记录、去重索引、版本或用户可浏览的创作历史 UI；持续性与复用依赖文件服务 URL 的再次引用。资源白名单（单资源 50MB/总 100MB/每步 24 资源/源码 2MB/帧数上限/30M 采样数）、脚本白名单（仅内置 Anime.js/Three.js）、页面运行时网络全阻断、云元数据地址常禁、音频 requireAdmin 6 位验证码构成治理契约。
+
+MediaRenderer 现增加 Windows 鼠标主题生成：模型提交一份包含角色 SVG 的 HTML，服务端要求 15 个核心角色各声明一次（`pin`、`person` 可回退至箭头），在 16--256 像素的指定档位逐个截图；静态角色编码为多尺寸 CUR，带确定性绝对时间渲染函数的角色编码为 ANI。结果写为含光标、预览、原始 HTML、安装/卸载脚本和 `theme.json` 的 ZIP，并另托管总览 PNG。它扩大了可编程媒体的交付物类型，但 ZIP 内的源文件与元数据仍只是可下载文件，不形成可查询、可版本化的媒体工程对象（`Plugin/MediaRenderer/MediaRenderer.js:1667-2058`、`CursorThemePackager.js:11-685`）。
 
 **证据分层**：全链为源码事实；`node --check` 通过、音频 Worker 成功/失败两路径实测、FFmpeg GIF/MP4 编码实测、15 份 manifest 解析通过（运行验证）；真实渲染输出、外部模型生成、回调端到端注入、托管浏览器进程行为未验证。
 
@@ -50,6 +52,8 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 
 **完整主链（GenerateAudio）**：`command=generateaudio` 直调（MediaRenderer.js:1664-1666）：先比对 6 位验证码（:451-463），再做参数清洁（:391-449），随后 spawn 独立 Node 子进程（`node --max-old-space-size=512 AudioSynthesisWorker.js`，stdin 传 JSON）执行 AI 合成代码写出 PCM16 WAV；主进程重新校验 WAV 头、PCM 与时长（:1147-1177）后经 `saveArtifact` 进文件服务。
 
+**完整主链（GenerateCursorTheme）**：模型提交 HTML、主题名和可选尺寸 → 复用资源预取、网络阻断与托管 Chrome → 页面加载后验证角色名、顶层 SVG、viewBox、热点、动画帧数及全主题帧数 → 每个角色按绝对 `timeMs` 截图 32/48/64 等多尺寸 PNG → 静态帧编码 CUR、动画帧编码 ANI → 生成带首帧及热点十字的总览 PNG 和安装包 ZIP → `saveArtifact` 分别托管 ZIP 与预览 URL 并回注模型。主题默认包含 15 个核心角色，两个扩展角色缺失时在安装配置中回退到箭头；真实 Windows 安装及光标视觉效果未运行验证（`MediaRenderer.js:1667-2058`、`CursorThemePackager.js:11-685`）。
+
 **完整主链（Wan2.1 视频异步回注）**：`submit` 提交外部 API 后立即返回 requestId，插件内起后台线程轮询终态（成功/失败/超时），完成后 POST 到 `{CALLBACK_BASE_URL}/{plugin_name}/{request_id}`；回调端点把结果写为 `VCPAsyncResults/Wan2.1VideoGen-<id>.json`，manifest 开启 `webSocketPush` 时另广播进度。模型被要求在回复中保留异步结果占位符，后续请求由消息处理器读该文件替换为结果文本（缺失时替换为"结果待更新..."）。轮询、回调地址注入、落盘与替换逻辑见 video_handler.py:214-302,440,465、Plugin.js:1553-1562、server.js:1471,1500-1512、modules/messageProcessor.js:830-868。
 
 ## 1. 创作入口、触发者与事实对象
@@ -60,6 +64,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
   1. 插件调用（无持久化的调用记录对象，工具调用记录 `toolCallRecordStore` 属 Agent 工具类目）；
   2. 产物文件：`image/media-renderer/`（PNG/JPG/WebP/GIF）与 `file/media-renderer/`（MP4/WebM/WAV），命名 `<stem>-<Date.now()>-<3字节随机>.ext`（MediaRenderer.js:1323），图像插件写各自子目录（如 `image/fluxgen/`，见 FluxGen manifest 描述）；
   3. 异步 job 文件：`VCPAsyncResults/<pluginName>-<taskId>.json`（无过期清理，独特功能笔记能力五已记录）。
+  4. 光标主题 ZIP：包含 CUR/ANI、原始 HTML、`theme.json` 与安装文件；其身份仍是文件服务中的一次性文件 URL，并不建立主题记录或版本链。
 
 ## 2. 参数、素材与模型/渲染执行
 
@@ -109,6 +114,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 | VideoGenerator（Wan2.1VideoGen） | asynchronous/stdio（python） | submit / query | SiliconFlow Wan2.1；后台轮询+回调回注；`webSocketPush` video_generation_status |
 | ImageFileServer | service/direct | 图片/文件静态托管 | 无（本机路径） |
 | MediaRenderer | hybridservice/direct | RenderImage / RenderAnimation / GenerateAudio | 托管 Chrome + FFmpeg + sharp/puppeteer/mime-types |
+| MediaRenderer | hybridservice/direct | GenerateCursorTheme | 托管 Chrome + sharp；编码 CUR/ANI 与 ZIP，不依赖外部模型 API |
 
 ## 3. 任务状态、异步回调与取消
 
@@ -132,7 +138,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - **预览**：无项目内媒体查看器/画廊；预览由**模型在消息里渲染**——插件返回文本中带 `<img src="URL">` / `<video controls autoplay loop>` / `<audio controls>` 展示提示（MediaRenderer.js:1426-1431,1631），实际展示依赖客户端聊天端解析 HTML 片段（属消息渲染器类目，本页不展开）。
 - **编辑**：两路——① 图像插件原生的图生图/修图/合成命令（各插件命令见第 2 节插件族盘点表），输入支持 http/file/data URI 与多图数组；② MediaRenderer 改源码重渲染（无编辑器，靠模型改 HTML/参数再调用）。
 - **重试/分支**：无 UI 级重试/分支对象；Agent 可重新发起工具调用（等价重试），改参数重渲（等价分支）。Wan2.1/Agnes 的 `query` 可反复查询同一 job。
-- **导出/分享**：产物即文件服务 URL，可直接外链/下载；无打包导出。
+- **导出/分享**：一般产物即文件服务 URL，可直接外链/下载；鼠标主题是例外，会生成可下载 ZIP，同时将源 HTML、预览与安装/卸载脚本放入压缩包，但没有项目内主题库或导出历史。
 - **复用**：URL 复用（见第 4 节）；无资产面板选择复用。
 
 ## 6. Agent 回流、插件协议与外部依赖

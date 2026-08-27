@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：只读源码梳理，并与 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；另做插件目录全量盘点（89 个插件目录逐一核对 manifest 与入口文件），修正 3 处细节并补充 8 项新能力卡；在 `c4c4d00`→`1ae9b63c` 范围核对 ChromeBridge 2.4（能力六正文图片语义、Popup 人工 Managed、agent 不再隐式控制托管运行时）、插件清单状态（89 目录/69 启用/20 禁用不变）与 Plugin.js 行号；全部为静态证据，未运行验证
 >
@@ -27,7 +27,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | 跨节点文件透明获取与取消传播 | `主链确认` | 分布式多模态 | 来源绑定、缓存、循环保护、断线清理、cancel_tool |
 | TaskAssistant 定时/手动任务派发 | `主链确认` | 主动 Agent | interval/cron/once/manual、历史与结果归属、无进行中取消 |
 | VCPForum 文件事实源社区 | `主链确认` | Agent 社会 | 帖子=Markdown 文件；Agent 可发帖/回复；无用户治理机制 |
-| 多媒体生成与媒体插件族 | `主链确认` | 创作工作站 | MediaRenderer 渲染/动画/程序音乐 + 图像/视频生成族；统一 VCP 块协议 |
+| 多媒体生成与媒体插件族 | `主链确认` | 创作工作站 | MediaRenderer 渲染/动画/程序音乐/Windows 光标主题 + 图像/视频生成族；统一 VCP 块协议 |
 | LightMemo 轻量记忆检索与生产构型 A/B 对照 | `主链确认` | 记忆演化 | 复用 RAGDiaryPlugin 索引/Rust 引擎；KNN/TagMemo V9/RiverMemo V3 三轨同域 A/B 重合率对照 |
 | VCPEverything 本地全盘文件检索 | `主链确认` | — | Everything HTTP 服务桥，毫秒级全盘搜索 |
 | SkillBridge 技能目录索引 | `主链确认` | 自进化 Skill | 启动扫描 SKILL/ 生成 vcp_fold 折叠技能索引 `{{VCPSkillBridge}}`；Ink 模式读取工作流约定 |
@@ -262,12 +262,13 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 **完整主链（以 MediaRenderer 为代表）**：
 - `RenderImage`/`RenderAnimation`：模型提供 HTML/SVG 源码 → 插件在 Node 侧提取 `data:`/`file://`/HTTP(S) 资源逐跳校验（单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步），云元数据地址（169.254.169.254）始终阻断，`AllowPrivateNetworkAssets` 默认 true 允许内网但可关 → 改写为 Data URI 后交给托管 Chrome 渲染（静态图）或按确定性逻辑时间逐帧截图 + FFmpeg 编码（GIF/MP4/WebM，`window.__MEDIA_RENDERER__.setFrameRenderer(timeMs,…)` 协议）；Anime.js/Three.js 只接受 jsDelivr/unpkg/cdnjs 白名单并替换为本地内置脚本，其他远程脚本禁止执行；
 - `GenerateAudio`：模型写 `function synthesize(api)` 合成代码（内置 oscillator/envelope/addNote/噪声 API，seed 确定），在独立 Node 子进程执行生成 PCM16 WAV——**强制 requireAdmin 6 位验证码**（`MediaRenderer.js:451-463 validateAdminForAudio`；验证码来源闭环见能力十七 UserAuth），总采样数上限 3000 万；
+- `GenerateCursorTheme`：模型提交一份 HTML，声明 15 个核心 SVG 光标角色；插件校验角色、热点、尺寸与动画帧数后，以绝对逻辑时间截取 32/48/64 等尺寸，静态角色写 CUR、动画角色写 ANI，并打包原 HTML、`theme.json`、预览与 Windows 安装/卸载脚本为 ZIP；
 - 产物托管到图片服务/文件服务（`ImageFileServer`），URL 回注模型；
 - 视频类走 asynchronous 回调回注（能力五的回注链）。
 
 **持续性**：产物落盘由图片/文件服务托管；Profile/浏览器复用为渲染基础设施。
 
-**独特性判断**：不是"接一个图像 API"，而是"让模型用 HTML/JS 写作品 → 受控渲染 → 资产托管"的可编程创作面 + 程序音乐合成，工具链与安全边界（资源白名单、验证码、帧数上限）在同一插件族内闭环。
+**独特性判断**：不是"接一个图像 API"，而是"让模型用 HTML/JS 写作品 → 受控渲染 → 资产托管"的可编程创作面，覆盖程序音乐与 Windows 光标主题等可安装交付物；工具链与安全边界（资源白名单、验证码、帧数上限、结构校验）在同一插件族内闭环。
 
 **证据强度**：源码事实（manifest 描述+实现符号）；真实渲染输出、FFmpeg 可用性未运行验证。
 

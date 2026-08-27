@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：对比旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 diff，核对关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
 >
@@ -21,7 +21,7 @@ VCPToolBox 是**服务器端的 VCP 中间层**，不是用户直接对话的客
 
 这两层可以独立使用：提示词文件层服务于变量注入管线；AgentAssistant 层服务于多 Agent 场景（AI 调用 AI、任务调度）。
 
-Agent 文件层、AgentAssistant 配置模型、TaskAssistant 任务模型和 AgentDream 架构基本未变；变化集中在：(a) AgentAssistant 增加按模型剥离推理标签的清理（配合新 `ReasoningToContent` 总线能力）；(b) VCPTimeLine 新增模型驱动的正文精简端点；(c) OpenHerPersona 增加按 Agent 删除状态与陈旧观察任务失效；(d) TVStxt 记忆操作指南内容更新。AgentDream 仍处于**默认禁用**（`.block`）状态，其审批执行链确认由管理面板路由 `routes/admin/dream.js` 承担（插件内部导出的审批函数仅为未实现占位）。
+Agent 文件层、TaskAssistant 任务模型和 AgentDream 架构基本未变。AgentAssistant 的委托循环增加 Flowlock 协议：回复中的开始、完成、失败、停止和心跳指令由独立解析器提取，严格模式只有显式开始后才继续自主心跳，完成/失败/停止按固定优先级收口；未使用该标记的旧委托仍保留兼容循环。委托状态同时保存协议模式、下次心跳与最终报告预览（`Plugin/AgentAssistant/flowlockProtocol.js:148-182`、`AgentAssistant.js:1064-1154`）。OpenHerPersona 的状态观察和 VCPTavern 的预设占位符解析也有增量调整；AgentDream 仍处于**默认禁用**（`.block`）状态，其审批执行链确认由管理面板路由 `routes/admin/dream.js` 承担（插件内部导出的审批函数仅为未实现占位）。
 
 ## 2. 提示词文件层（Agent/ 目录）
 

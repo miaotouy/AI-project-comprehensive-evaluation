@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：只读源码核对（对照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 38 个提交与 diff 重新定位关键结论，重点覆盖浏览器协议 v3、RiverMemo、多媒体、分布式取消）；未修改被调查仓库
 >
@@ -28,7 +28,7 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 9. **分布式取消与结果归属绑定**：分布式执行的 pending 项绑定目标 `serverId`，`tool_result` 只接受目标节点返回；节点声明 `capabilities.cancelTool=true` 时，超时会 best-effort 发送 `cancel_tool` 帧；目标节点断线会立即 reject 其全部 pending（`WebSocketServer.js:876-1002`）。
 10. **插件热重载精细化**：manifest 变更分“元数据刷新”与“完整重载”两级——direct 常驻插件只合并展示字段、运行时变更提示需重启；static 插件按签名增量刷新并清理失效占位符与 cron；加载插件的流程串行化并增加重载前 manifest 预校验（`Plugin.js:734-786,1067-1206,2326-2412`）。
 11. **浏览器协议 v3 与托管运行时**：ChromeBridge 使用协议 v3（Grounded Markdown Agent 视图、稳定内容 Hash、快照去重、动作验证、默认敏感 DOM 脱敏、指标），`modules/browserRuntimeManager.js` 提供扩展 staging 清单 hash 完整性校验、运行时实例 ID 与上次关闭原因；`UrlFetch` 的 managed Chrome backend 已接线但默认关闭。
-12. **插件面**：当前启用 69 个、禁用（`.block`）20 个（清单见第 11 节），含 `BrowserSearch`（复用托管 Chrome 持久化 Profile 的免 API 搜索）、`MediaRenderer`（HTML/SVG 渲染、FFmpeg 动画、程序音乐合成，`requiresAdmin`）、`PlaceholderExplorer` + `PlaceholderExplorerCommand`（占位符索引/编辑/预览）。
+12. **插件面**：当前启用 69 个、禁用（`.block`）20 个（清单见第 11 节），含 `BrowserSearch`（复用托管 Chrome 持久化 Profile 的免 API 搜索）、`MediaRenderer`（HTML/SVG 渲染、FFmpeg 动画、程序音乐与 Windows 光标主题；光标链会校验角色、热点和帧数，再编码 CUR/ANI 与 ZIP；`requiresAdmin`）、`PlaceholderExplorer` + `PlaceholderExplorerCommand`（占位符索引/编辑/预览）。
 
 ## 调用链总览
 

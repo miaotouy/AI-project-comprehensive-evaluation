@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：静态代码审查。用 grep/glob 检索 artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/preview/markdown/chat/stream 等关键词，通读 server.js、modules/chatCompletionHandler.js、modules/handlers/streamHandler.js 与 nonStreamHandler.js、modules/vcpLoop/toolCallParser.js 与 toolExecutor.js、vcpInfoHandler.js、Plugin.js、modules/toolCallRecordStore.js、modules/finalContextStore.js、Plugin/OneRing/OneRingDB.js、Plugin/RAGDiaryPlugin、Plugin/VCPForum/VCPForum.js、Plugin/GPTImageGen/GPTImageGen.js、Plugin/MediaRenderer、Plugin/AICodeWorker、routes/forumApi.js、routes/protocolBridge.js；对照 docs/Markdown_Output_Guideline.md、docs/FRONTEND_COMPONENTS.md、docs/PLUGIN_ECOSYSTEM.md 等文档与源码交叉核对
 >
@@ -15,6 +15,8 @@
 ## 结论摘要
 
 VCPToolBox 是 OpenAI 兼容的 AI 中间层服务端（`/v1/chat/completions`），本身不渲染聊天，也不持有聊天事实源：模型输出以标准 SSE 流直通转发，工具执行结果以文本块形式回注聊天流，界面渲染交给外部前端（官方 VCPChat 为独立仓库，OpenWebUI/SillyTavern 通过 `OpenWebUISub`/`SillyTavernSub` 用户脚本增强）。服务端具备明确的"输出协议"（VCP 纯文本标记）、"工具执行运行时"（stdio 子进程 / in-process / 分布式 WebSocket 节点）和"派生对象持久化"（日记文件、论坛帖子、图片、工具调用记录、OneRing 时间线），但不存在带稳定 ID 的输出对象模型，无 diff/接受/拒绝的协作编辑层。模型生成的 HTML/SVG/JS 可经 MediaRenderer（托管浏览器 + 音频合成子进程）与 AICodeWorker（opencode CLI）进入受控执行环境，属局部 G3；主链路的聊天输出本身停留在 G0-G1（文本 + 落盘文件）。
+
+MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生成 HTML 经受控浏览器渲染后可变成多尺寸 CUR/ANI、预览 PNG 和带安装脚本的 ZIP，且把原 HTML 与 `theme.json` 一并保存；这些内容仍由文件服务以 URL 托管，调用之间没有主题 ID、版本编辑或协作合并语义，因此不改变 G1 主形态和局部 G3 的分级（`Plugin/MediaRenderer/MediaRenderer.js:1667-2058`、`CursorThemePackager.js:11-685`）。
 
 能力等级认定：**G1（主形态）＋ 局部 G3（MediaRenderer / AICodeWorker 等插件级执行环境）**。依据：输出没有独立对象生命周期（G0 特征）；大量产物以文件/图片落盘并可单独查看、下载、被模型回读（G1 特征）；MediaRenderer 对模型编写的 HTML/SVG/JS 提供隔离执行（网络阻断、JS 默认关闭、子进程超时），AICodeWorker 以 jobId 异步管理 opencode 子任务（G3 特征）；但无 schema 化声明式对象（非 G2）、无用户与模型围绕同一对象持续编辑的 diff/版本机制（非 G4）、输出对象不长期存在于桌面/环境（非 G5）。
 

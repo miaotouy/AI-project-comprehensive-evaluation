@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支：`main`）
+> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
 > 调查方式：直接阅读源码：server.js 聊天端点与 /v1/interrupt、routes/protocolBridge.js 协议归一化、modules/chatCompletionHandler.js 请求管线、contextManager.js、messageProcessor.js、roleDivider.js、vcpLoop/toolCallParser.js、handlers/streamHandler.js 与 nonStreamHandler.js、reasoningContentAdapter.js、vcpInfoHandler.js，以及 Plugin/VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的 processMessages
 >
@@ -21,6 +21,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **上下文裁剪是字符数估算**（`contextManager.pruneMessages`），不是摘要压缩，也不保证严格 token 上限；
 - **VCP 工具循环走纯文本标记协议**：`<<<[TOOL_REQUEST]>>>`，模型正文即调用声明，工具结果以 `<!-- VCP_TOOL_PAYLOAD -->` user 消息回送再次 POST；
 - **模型上下文与前端显示分叉**：工具循环维护独立的 `currentMessagesForLoop`，推理字段另存于日志消息，客户端看到的 SSE/JSON 与模型下一轮读取的内容不是同一份；
+- **预设占位符有按项收敛的注入边界**：VCPTavern 只对预设声明的允许名单、且标为伪系统消息的文本展开运行时占位符；其余占位符保留原文，嵌套消息对象递归处理（`Plugin/VCPTavern/VCPTavern.js:155-242,397-640`）；
 - **存在显式的请求级停止与重试机制**：`/v1/interrupt` 端点 + 客户端断联级联中止；上游调用有状态码重试、连接超时、语义路由候选模型回退；响应层有按 `clientIp::messageId` 的去重回放。
 
 ## 系统边界与生成任务主链
