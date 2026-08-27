@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：只读源码定位目录构建、工具执行链、审批与回注路径；结合仓库 AGENTS.md 与工具 docstring 核验设计意图
 >
@@ -217,6 +217,10 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - **统一错误外壳**：`tool_error(...)` 固定错误 JSON，全部 handler 必须返回 JSON 字符串；`_normalize_handler_result` 强制该契约。
 - **容器风险豁免**：`_should_skip_container_guards` 仅在容器且 `has_host_access=False`（无 host 挂载）时跳过危险命令审批，本地执行无此豁免。
 - **持久化在副作用前**：内存中的 assistant.tool_calls 块在所有工具副作用前写入 `session_db`（conversation_loop.py: 6320-6351），崩溃/重启后恢复仍看到该批次；工具期间 session_db 不可写时 `_turn_exit_reason="session_persistence_failed"` 中断。
+
+## 当前工具面变化
+
+浏览器工具新增经用户配置同意的真实 Chromium 档案通道：`browser.use_real_profile` 默认关闭，启用后先复制默认档案，再由 Hermes 管理的 Chromium 使用复制件；配置不兼容、档案锁定或启动失败都返回错误而不回退到临时档案（`tools/browser_tool.py:1430-1454`、`1538-1706`）。终端环境也获得插件注册表（`agent/terminal_env_registry.py:54-95`），而不是把每种执行后端变为模型工具。两者都扩大了工具执行的适配面，并保留显式同意或插件装配边界。
 
 ## 未验证事项
 

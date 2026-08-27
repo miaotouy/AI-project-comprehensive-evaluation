@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、MEDIA 等关键词；重点阅读 `tools/code_execution_tool.py`、`tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/desktop_ui.py`、`apps/desktop/src/store/artifacts.ts`、`apps/desktop/src/store/preview.ts`、`apps/desktop/src/app/chat/right-rail/preview-*.tsx`、`tui_gateway/server.py`、`gateway/platforms/base.py` 等；未运行应用与测试
 >
@@ -141,6 +141,8 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - 性能手段：artifact 检测纯函数、delta 增量调用但结果有界；卡片只注册一次（哈希去重）；`AssistantMessage` 通过稳定选择子避免流式重渲染整棵消息树（`assistant-message.tsx:60-96`）。
 
 ## 11. 测试、已确认边界与未验证事项
+
+当前提交未引入统一的 artifact 数据契约或新的画布/笔记本运行时。桌面端仍从消息记录重建代码围栏 artifact；本轮浏览器与会话基础设施变化不应被外推为生成式输出对象模型已经类型化。
 
 **测试覆盖（静态确认存在）**：
 - `apps/desktop/src/lib/artifact-detect.test.ts`：检测门槛/标题/排除表

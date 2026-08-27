@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：静态阅读 Python（tui_gateway / agent / run_agent / hermes_state）与 TypeScript（apps/desktop、apps/shared、ui-tui）源码；以函数行号精确引用；未运行任何组件。
 >
@@ -79,6 +79,10 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 - **压缩触发**：无 token 级截断原语；`should_compress` 阈值由 context_length 比例算出；preflight 多 pass（至多 3 轮，要求行数减少或 token 降幅 >5%）+ idle 压缩（墙上时间门）；另有 gpt-5.6 直接 OpenAI 路由的 native 服务端压缩（`agent/native_compaction.py`）与 stable/volatile 缓存边界注册表（`agent/prompt_cache_boundary.py`），详见对话请求笔记 §3。
 - **搜索边界**：FTS 索引矩阵（unicode61/bigram/trigram + LIKE 兜底），cjk/trigram 明确跳过 `role='tool'` 行（约 90% 字节是机器噪声）；rewind 行默认隐藏、压缩归档行默认可见。
 - **标题机制**：会话在首轮 turn prologue 即得 derived 即时标题、后台 LLM 升级，provenance（derived < llm < user）防自动覆盖，压缩轮转携带标题不变（详见会话与消息管理笔记 §2.4）。
+
+## 当前链路补充
+
+桌面重连时，客户端以 session 为单位保存事件序号并补取缺口，回放帧仍进入正常事件处理链（`apps/shared/src/json-rpc-gateway.ts:110-121`、`522-523`）；会话请求同时带 profile/connection 路由（`apps/desktop/src/api/sessions.ts:16-31`）。请求侧的压缩默认改为只保留 10K--25K token 的 lean tail（`agent/context_compressor.py:869-883`）。完整的事实源、请求执行和渲染影响分别由会话与消息管理、对话请求与上下文、消息渲染器笔记继续承接。
 
 ## 未验证事项
 

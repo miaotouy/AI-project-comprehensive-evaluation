@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：只读盘点根 README 功能表、AGENTS.md 架构说明与源码（`agent/`、`tools/`、`plugins/memory/`、仓库根工具脚本）；未修改仓库源码
 >
@@ -160,6 +160,10 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 - 辅助贡献：持久记忆与用户建模（与记忆演化聚类中 VCP/LobeHub/Open WebUI 形成自然聚类，比较维度：对象形态文件 vs 结构化、触发方式计数 vs 定时 vs 梦境、写入是否需人审）。
 - 记忆写审批门与"模型写记忆被拦截"在横向对比中可作为人机关系维度证据。
 - `/refine` 并入闭环学习计数、verify/estop 不进入特性统计（见新增候选小节）。
+
+## 当前实现中的扩展边界
+
+扩展不再只作用于模型工具、记忆与消息平台。插件上下文现在可注册终端环境提供者，由 `agent/terminal_env_registry.py:54-95` 按作用域保存；这让远端或隔离执行环境仍能沿用核心终端工具，而不是新增一个核心工具。会话库管理也以 bundled Skill 的形式出现，跨 profile 会话引用被限定为只读（`skills/productivity/session-librarian/SKILL.md:98`）。这些能力保持“窄核心、边缘扩展”的既有产品边界。
 
 ## 未验证事项
 

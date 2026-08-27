@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：静态代码调查（未运行、未构建）。重点读取 `tui_gateway/`（Python 网关与事件发射）、`ui-tui/`（Ink/React TUI 渲染链）与 `apps/desktop/src/components/assistant-ui/`（Electron 桌面渲染链），辅以 `web/src`、`apps/shared`、相关测试文件的全局搜索与局部阅读。
 >
@@ -212,6 +212,10 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 - **桌面主对话 ≠ dashboard 富渲染**：dashboard 无自己的 transcript 渲染器，`web Markdown.tsx` 仅辅助。
 - **性能兜底**：`VERBOSE_TRAIL_MAX=800/12`、`MAX_HISTORY=800`、16000 字直播上限（`lib/text.ts:137`）、记忆注解引用（`#34089` OOM 事件）等表明"防爆防炸"是刻意约束，不是省略。
 - **未发现**：TUI 无 iframe、无 `dangerouslySetInnerHTML`、桌面 `embed` 预览未完全溯源；`web/Markdown.tsx` 仅允许 http(s|mailto)。
+
+## 重连回放与渲染输入
+
+共享 JSON-RPC 客户端会对每个 session 保存最近事件序号，重连后向后端补取缺口，并通过与实时帧相同的分发器投递（`apps/shared/src/json-rpc-gateway.ts:110-121`、`522-523`）。因此渲染层的输入已不再只能假定“连接期间连续到达”；UI 仍须依赖既有事件幂等与状态归属来避免把已显示的增量重复物化。静态阅读未验证断网中的最终视觉结果。
 
 ## 未验证事项
 

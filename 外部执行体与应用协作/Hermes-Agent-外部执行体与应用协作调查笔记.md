@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：静态复核 Python gateway、桌面/TUI/Web JSON-RPC 客户端、ACP adapter、REST gateway 和消息平台边界；复用 Chat、Chat UI 和独特功能笔记；未运行跨客户端或 IM 平台
 >
@@ -74,6 +74,10 @@ JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重�
 - 会话、lineage、JSON-RPC 与事件流细节见[Chat 笔记](../Chat/Hermes-Agent-Chat调查笔记.md)和[Chat UI 笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
 - `delegate_task` 创建的子会话由 Hermes 自身 runtime 管理，属于 Agent 编排，不计外部执行体。
 - Tool Gateway 连接托管搜索、媒体和沙箱服务，但当前主要是工具供给入口，账号/动作生命周期未达到业务应用分型门槛。
+
+## 当前执行体交接
+
+ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 provider 且其协议允许工具调用时，外部 agent 的工具活动会回流并并入发起回合。该变化加强外部执行体与 Hermes turn 的衔接，但不表示 ACP 宿主获得 Hermes 内部会话库的直接写权限；会话数据仍由各 profile 的后端管理。
 
 ## 已确认边界与未验证事项
 

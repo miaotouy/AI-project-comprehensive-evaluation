@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -290,6 +290,10 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 **错误文本规范化。** 桌面 notifyError 对远程调用包装（“Error invoking remote method…”）、"detail" JSON、磁盘满/API key 等常见错误做摘要化（`notifications.ts:91-153`）。
 
 **边界。** 聊天主链（草稿/附件/流式/消息操作）在 Chat UI 笔记；消息内容渲染在消息渲染器类目；Python 核心的 UI 交点仅皮肤 YAML 与 notification.show 协议。
+
+## 当前连接与会话作用域
+
+桌面基础设施继续把 connection、profile 与 session 分开建模。会话 API 的作用域由 `sessionScoped` 统一生成，读取与写入由同一 profile/connection 路由承接（`apps/desktop/src/api/sessions.ts:16-31`）；事件缓存也记录这三个维度（`apps/desktop/src/store/session-states.ts:80`）。这为远端连接、profile rail 与同 ID 会话并存提供了状态边界，视觉与跨窗口交互仍未运行验证。
 
 ## 9. 未验证事项
 

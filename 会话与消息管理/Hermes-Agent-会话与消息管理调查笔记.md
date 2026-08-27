@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Python Agent 会话运行时 run_agent.py / hermes_state、SQLite 存储、事件协议、桌面端与 TUI 前端实现），所有符号与行号在 HEAD 快照处逐一核对；行为类结论区分源码事实与静态推断
 >
@@ -321,6 +321,10 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - **FTS 排除 tool 行**：trigram 索引明确跳过 `role='tool'` 行（约 90% 字节为机器噪声），tool 内容走 LIKE 兜底。
 - **state.db 是唯一规范存储**：可选 JSON 快照写入默认关闭；残余 JSONL（trajectory、moa-trace、spawn 树）均非消息主存储。
 - **子代理级联删除契约**：标记子会话递归级联删除，未标记子会话“孤儿化不删”防环（§8）。
+
+## 当前重连与 profile 归属
+
+桌面/TUI 客户端的 JSON-RPC 连接维护每个会话的事件序号水位；重连后只请求水位之后的事件，并把回放帧交给通常的事件分发路径（`apps/shared/src/json-rpc-gateway.ts:110-121`、`522-523`）。桌面端的会话请求同时带有 profile/connection 作用域，跨 profile 的同名 session 不应再按单独 ID 合并（`apps/desktop/src/api/sessions.ts:16-31`、`334-413`）。这改变的是缓存和恢复时的身份判定，不改变 SQLite 是会话与消息事实源的结论。
 
 ## 10. 未验证事项
 

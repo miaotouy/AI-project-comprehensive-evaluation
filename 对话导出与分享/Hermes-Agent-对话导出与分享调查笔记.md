@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：静态源码调查，未运行应用。读取 `session.save` RPC、CLI/TUI/桌面 `/save` 入口、`_save_session_log`、SessionDB 可移植性 mixin、`hermes sessions export` 全部分支、Markdown/HTML/JSONL/trace 渲染器、HF 轨迹上传、trajectory 保存与压缩工具；全文检索导入、链接分享、附件打包、剪贴板导出等关键词确认缺失面
 >
@@ -173,6 +173,10 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 - 隐私默认值不对称：面向研究的 trace 默认强制脱敏、拒绝风险上传；面向个人的 `/save` 零加工。脱敏是可选项而非默认（jsonl/md 的 `--redact`）。
 - HTML"无远程依赖"声明与 Google Fonts 外链并存（`session_export_html.py:5,30-34`），离线性需运行验证。
 - 会话删除保护闭环：md 导出校验（哈希+消息数+session id）通过才允许删源会话，是少见地把"导出验证"接入"删除授权"的设计。
+
+## 当前状态快照的边界
+
+当前代码继续把 `/snapshot restore` 归入 profile 状态恢复而非对话交付：恢复 SQLite 时使用备份 API，并且针对仍被本进程连接持有的数据库拒绝继续（`hermes_cli/backup.py:691-729`、`hermes_state.py:2303`）。这强化了本笔记原有的区分：状态备份/恢复不是 `session.save` 或 `hermes sessions export` 所生成的面向分享内容。
 
 ## 12. 未验证事项
 

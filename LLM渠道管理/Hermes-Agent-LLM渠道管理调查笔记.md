@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：全量源码静态阅读 + git 历史核查；补查 CLI、TUI、Web、Electron Desktop 的渠道管理入口；未运行程序、未发起真实请求
 >
@@ -309,6 +309,10 @@ providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定�
 7. **No channel concept**：未发现 `channel` 作为 LLM Provider 语义的关键词（检索 `hermes_cli/` `agent/` 后只有消息平台 channel）。若行业中其他项目把“一个 baseURL+key 组合”叫渠道，本项目的对应物就是**custom provider 条目 / provider_pool 条目**。
 
 ---
+
+## 当前 Provider 发现与参数边界
+
+Provider 注册新增 pip entry-point 来源，但仍受插件启用配置约束：发现器只加载已启用的 `hermes_agent.plugins` 条目，失败记录为诊断而不是隐式启用（`providers/__init__.py:149-251`、`287-301`）。自定义 `base_url` 在模型拉取时优先于 `models_url`，减少自建兼容端点把模型查询错误导向目录地址的风险。推理强度也按具体模型的 wire vocabulary 转换；因此配置中相同的抽象级别不再可假定会向所有 Provider 发送同一字面值。
 
 ## 未验证事项（本次未覆盖/未能确认）
 

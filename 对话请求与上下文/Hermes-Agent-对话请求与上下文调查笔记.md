@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Python Agent 会话运行时 run_agent.py / agent/ 包、tui_gateway JSON-RPC 网关、桌面端与 TUI 事件消费），所有符号与行号在 HEAD 快照处逐一核对；行为类结论区分源码事实与静态推断
 >
@@ -178,6 +178,10 @@ WS 端对 message.delta 等高频帧做 token 合批（`ws.py:44-60`，间隔 0.
 - 桌面端请求层：prompt.submit 超时为 1800 秒，回合完成依靠流事件而不是 RPC ACK；找不到会话或超时后，resume 会触发一次重试，busy 则按目标会话重试（`submit.ts:650`、`use-prompt-actions/utils.ts:146, 244`）。
 - 可观测性：message.complete 携带 usage 和 billing，错误终帧携带 error、recoverable、partial 和 failure_reason（`server.py:10196-10230`）。任务级日志和 trace 不在本次调查范围。
 - 已确认边界：无 token 级截断原语（§3）；`display_type` 参数不存在（§1）；桌面端没有 `interruptResponse` 符号（§7）。
+
+## 当前压缩与 Provider 交接
+
+上下文压缩的默认保留策略已收紧为 lean tail：保护尾部的下限与上限分别是 10,000 和 25,000 token，另保留受预算约束的近期用户消息与工具回合（`agent/context_compressor.py:869-883`）。因此“压缩后尽量保留大段原始上下文”的旧理解不再成立；当前实现优先保留较短的可验证尾部，其余依赖压缩摘要。ACP 侧也把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中将该 provider 自身的工具工作合并回当前 turn；运行时效果仍未执行验证。
 
 ## 11. 未验证事项
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`76d832d3857551a029c4b39c23945eb47c16fe5b`（分支：`main`）
+> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Electron 主进程、React renderer 状态层与组件、apps/shared 连接层、TUI Ink 前端、后端事件协议），符号与行号在 HEAD 快照处逐一核对；界面视觉、焦点与键盘行为标注“未运行验证”
 >
@@ -159,6 +159,10 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - **1800s 超时 + resume 后重试一次**：turn 完成靠流事件而非 RPC ACK（§5）。
 - **HUD 是完整 renderer**：真实 composer 与草稿同步，非傀儡窗（§1）。
 - **边界**：会话数据语义、列表检索、一致性在会话与消息管理笔记；流式机制、中断层级、队列在对话请求与上下文笔记；操作栏装配、消息渲染在消息渲染器笔记。通用界面盘点（主题、断点、动画、Modal/Toast 全量统计）按 Chat UI 指南的通用过滤规则不纳入。
+
+## 当前多 profile 恢复链
+
+聊天工作台把活动会话的 owner route 保存为 connection + profile，恢复消息页时把同一作用域传入 session API（`apps/desktop/src/app/chat/index.tsx:276-281`、`apps/desktop/src/api/sessions.ts:334-413`）。后端事件重连依据每会话水位补取缺失帧（`apps/shared/src/json-rpc-gateway.ts:522-523`），所以 profile 切换、短断线和同 ID 会话不会共享一份未标注归属的前端缓存。该结论确认数据流与控件绑定，不替代实际键盘、焦点和断线体验测试。
 
 ## 11. 未验证事项
 
