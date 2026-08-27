@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`App.svelte` 的条件渲染工作台、`ChatScreens/` 系列组件的 Composer 与消息操作、`SideBars/Sidebar.svelte` 与 `SideChatList.svelte` 的会话导航、`process/index.svelte.ts` 的发送/流式/中止链路、`globalApi.svelte.ts` 的会话切换与保存、`hotkey.ts`、`sync/multiuser.ts`、`Mobile/` 组件），并以 grep 核对草稿持久化、消息搜索入口、停止与重试的实际调用链；本次未运行应用
 >
@@ -91,13 +91,13 @@
 - 所有操作按钮带 `button-icon-*` class，供热键系统按 class 触发（见第 9 节）。
 - **禁用时机**：流式消息（`isOptimizedStreamingMessage`）隐藏编辑/翻译/局部编辑；多用户房间内隐藏删除按钮；复制受 `useChatCopy` 开关、TTS 受角色模式、书签受 `enableBookmark` 控制；首条问候语消息的轮换箭头受 `swipe` 与 `showFirstMessagePages` 控制。
 - **复制**：优先写富文本剪贴板（`ClipboardItem`，把消息渲染为带样式的 HTML 并内联图片），失败回退纯文本。
-- **编辑**：编辑按钮或 `clickToEdit` 点击消息进入 textarea 编辑态，再点确认写回；另有 `PartialEditController` 提供区块级与拖拽选择的局部编辑（受 `enableBlockPartialEdit`/`enableDragPartialEdit` 开关）。
+- **编辑**：编辑按钮或 `clickToEdit` 点击消息进入 textarea 编辑态，再点确认写回；另有 `PartialEditController` 提供区块级与拖拽选择的局部编辑（受 `enableBlockPartialEdit`/`enableDragPartialEdit` 开关）。当页面正在显示 LLM 翻译时，局部编辑从翻译缓存取文本并写回同一缓存键，不改原消息；翻译缓存尚未取得时回退编辑原文。原文编辑、翻译编辑与翻译视图控制互斥，避免并发编辑模式（`Chat.svelte:136-276,498-546`、`PartialEditController.svelte:18-63,238-307`）。
 - **删除**：`rm` 支持普通删除（`askRemoval` 开关决定是否确认）、Shift 点击截断到该条之前、长按（`longpress` 指令）与 `instantRemove` 的二次确认路径。
 - **分支**：分支按钮把当前会话快照复制到 idx+1（名称自动编号，可选放进新文件夹），末尾追加一条 `{{specialcomment::branchedfrom::…}}` 注释消息并切换到新会话；点击该注释链接通过 `changeChatTo` + `foldChatToMessage` 跳回源会话并折叠到分支点（`Chat.svelte:830-865`、`globalApi.svelte.ts:2390-2408`），折叠态下消息区只渲染到该消息，底部出现"加载更多"按钮恢复全量。
 - **分支树视图**：会话列表底部按钮打开 `AlertComp` 的 branches 弹窗，`gui/branches.ts` 按消息内容哈希求共同前缀把全部会话画成一棵连接线树，节点 hover 预览消息文本；**节点点击只切换预览、不能导航**（静态代码确认 onclick 仅设置 `branchHover`），实际跳转仍走会话列表与回链注释。
 - **书签**：消息书签按钮弹输入框命名（默认取后半段文本），书签列表弹窗（`BookmarkList.svelte`）展开预览、改名、删除，跳转通过 `ScrollToMessageStore` 触发 `scrollToMessage`（临时扩页、等待图片、滚动并加蓝色 ring 高亮）。
 - **reroll/swipe**：左右箭头渲染在每条消息上（`Chats.svelte` 挂载时统一传 `rerollIcon:'dynamic'`），但动作总是作用于**会话尾部**：reroll 在无新候选时弹出尾部角色消息重新生成，完成后把新消息段快照推入组件内快照栈（切角色时清空，切会话不重置——快照与具体会话的对应关系未做校验，属静态观察）；同时按 `generationId` 在 `process/prereroll.ts` 模块级缓存流式分块，支持生成过程中的逐块回退。候选栈与分块缓存都在内存中，刷新即失。首条消息的问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。
-- **翻译与生成信息**：翻译按钮切换 `translated` 显示态，LLM 翻译可编辑缓存文本；生成信息按钮弹出该消息的请求明细（`alertRequestData`）。
+- **翻译与生成信息**：翻译按钮切换 `translated` 显示态，LLM 翻译可编辑缓存文本；缓存被编辑后以渲染版本号触发 `ChatBody` 重新解析，翻译为空字符串也被视为有效缓存结果。重新翻译、切换原文/翻译与两种编辑态在加载或编辑中禁用；生成信息按钮弹出该消息的请求明细（`Chat.svelte:89-276,427-546,844-872`、`ChatBody.svelte:66-174,255`）。
 
 ## 7. 多会话、多模型与后台生成
 

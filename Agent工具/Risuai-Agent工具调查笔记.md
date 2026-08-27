@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：只读源码梳理（`src/ts/process/mcp/`、`src/ts/process/request/`、`src/ts/plugins/`、`src/ts/process/modules.ts`、`src/ts/storage/database.svelte.ts`、`src/ts/globalApi.svelte.ts` 等），未修改被调查仓库
 >
@@ -132,7 +132,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 ## 8. MCP、插件、Skill 与子 Agent
 
-插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1125-1126）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。插件安装路径上，v2.1 插件会先过 `checkCodeSafety` 静态扫描（eval、new Function、sessionStorage、cookieStore 黑名单加 window/document 等标识符重写），v3 插件不扫描、纯靠沙箱（plugins.svelte.ts:345-361 与 pluginSafety.ts）。
+插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1125-1126）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0；不过数据库里已保存的 2.1 插件仍会在启动时走旧的主线程加载分支。因而“阻止新安装”不等于清除或禁用存量插件（`plugins.svelte.ts:343-361,421-429,890-910`）。
 
 未找到 Skill、子 Agent 或任务委派机制。
 

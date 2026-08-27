@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/process/index.svelte.ts` 的 `sendChat` 全链、`request/` 各 Provider 的流式实现与工具循环、`memory/` 四个记忆引擎、`globalApi.svelte.ts` 网络层与持久化循环、`src-tauri` 的请求命令），静态追踪调用链与状态分支；未运行应用
 >
@@ -15,7 +15,7 @@
 ## 结论摘要
 
 - 一次生成由 `sendChat(chatProcessIndex, arg)`（`src/ts/process/index.svelte.ts:99`）统一驱动。没有独立任务对象：运行状态是全局 store 与调用方参数的组合（`doingChat` 锁、`chatProcessStage` 阶段进度、UI 持有的中止信号），任务的权威记录是写回消息的 `generationInfo`——含 `generationId`、输入/输出 token 估算与四个阶段的耗时。
-- 上下文拼装分两遍：先用"提示词模板"卡片（或旧式 `formatingOrder` 分组）逐项预检 token 并装入分组桶，再按同一顺序把各桶拼成最终消息数组；无模板时走固定分组顺序。最终请求以 `requestChatData` 收到的数组为准，可用 DevTool/快捷键的 preview 模式核对。
+- 上下文拼装分两遍：先用"提示词模板"卡片（或旧式 `formatingOrder` 分组）逐项预检 token 并装入分组桶，再按同一顺序把各桶拼成最终消息数组；无模板时走固定分组顺序。模板中的 persona、描述、作者注和记忆卡可将本槽位发为 user、assistant 或 system，未设置仍为 system；lorebook 条目也可提供默认角色，正文内的 `@@role` 优先。最终请求以 `requestChatData` 收到的数组为准，可用 DevTool/快捷键的 preview 模式核对（`index.svelte.ts:654-708,1273-1437`）。
 - 预算以全局 `maxContext` 为上限：无记忆引擎时从消息数组头部整条删除；启用记忆后由所选引擎（SupaMemory / HypaMemoryV2 / HypaMemoryV3 / HanuraiMemory）各自截断或摘要，压缩不可逆；拼装后还有一次只清空可移除消息的 token 重检。
 - Provider 交接点是 `requestChatData` → `requestChatDataMain` 的 `LLMFormat` 分发（`src/ts/process/request/request.ts:484-528`），此前先做 `reformater` 角色兼容；OpenAI/Claude/Gemini 各自解析 SSE 并把**累计全文**放进 key 为 `0` 的流式块，消费端每次整段替换消息文本。
 - 流式占位消息在请求前就已写入会话（`chatId = generationId`），持久化由全局保存循环（500ms 防抖 + 全库编码写盘）持续进行，因此半截消息会随保存落盘，与"流结束才落定"的实现不同。

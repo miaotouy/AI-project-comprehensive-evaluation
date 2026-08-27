@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：只读盘点根 README、AGENTS.md 与 `src/ts`/`src/lib` 目录注册表；对 Emotion Images、插件系统、记忆、翻译、Multisend、多用户同步、Risu Hub 等候选逐项走“入口 → 状态/对象 → 执行 → 用户结果 → 持久化”主链；核对现有 Risuai 六份类目笔记的去重边界；全部为静态证据，未运行应用
 >
@@ -69,7 +69,7 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 **用户目标**：为角色扮演场景提供可分享、可热更新、且不会污染主应用安全的第三方能力扩展——比“注入脚本”更进一步的产品化插件生态。
 
-**入口与触发者**：设置页导入 `.js`/`.ts` 文件或代码文本（`src/ts/plugins/plugins.svelte.ts:129-428` 的 `importPlugin`），头部注释声明插件名、API 版本（2.0/2.1/3.0）、参数、更新地址与版本号；API 2.0 已拒绝安装。v3 插件随设置页开发模式支持文件监听热重载（`src/ts/plugins/apiV3/developMode.ts`）。
+**入口与触发者**：设置页导入 `.js`/`.ts` 文件或代码文本（`src/ts/plugins/plugins.svelte.ts:129-428` 的 `importPlugin`），头部注释声明插件名、API 版本、参数、更新地址与版本号；新导入已拒绝 2.0 与 2.1，只接受 3.0。数据库内已有的 2.1 插件仍会在启动时走旧加载器，不因这一入口限制被自动移除。v3 插件随设置页开发模式支持文件监听热重载（`plugins.svelte.ts:343-361,421-429`、`src/ts/plugins/apiV3/developMode.ts`）。
 
 **完整主链**：导入 → 头解析与校验 → 按 API 版本分流执行 → 插件对象持久化到 `db.plugins` → 应用启动/导入后经 `loadPlugins` 重载（`plugins.svelte.ts:432-443`）。两条执行路径：
 
@@ -79,7 +79,7 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 **API 面与钩子**：插件可注册自定义 AI Provider（`pluginV2.providers`）、消息编辑钩子（编辑输入/处理/显示/输出文本共四类，注册表见 `plugins.svelte.ts:468-480`）、请求前后替换、生成完成监听、TTS 前/后处理钩子（`src/ts/process/ttsHooks.ts`）与 MCP 模块注册（`v3.svelte.ts:15` 引用的 `registerMCPModule`）以及菜单/面板注入；DOM 访问经 SafeDocument/SafeElement 包装层（含标签白名单与 `freezed` 元素禁止访问，`src/ts/plugins/pluginSafeClass.ts`），插件存储分设备级与插件级，随存档持久化。
 
-**安全与资源边界**：v3 iframe 内无网络、无顶层 DOM 直连；v2.1 靠静态改写兜底（校验结果按代码哈希缓存于 localStorage，`pluginSafety.ts:58-71`）。插件脚本本身是用户主动导入的可信代码，更新地址强制 https（`plugins.svelte.ts:280-293`）。
+**安全与资源边界**：v3 iframe 内无网络、无顶层 DOM 直连；存量 v2.1 靠静态改写兜底（校验结果按代码哈希缓存于 localStorage，`pluginSafety.ts:58-71`）。v3 的输出监听器现在复用 replacer 授权，读取 inlay 资产另设 inlay 授权；两者都是按插件名和脚本哈希记录的同意，并对 periodic 权限按三天重新确认（`v3.svelte.ts:567-625,728-750`）。插件脚本本身是用户主动导入的可信代码，更新地址强制 https（`plugins.svelte.ts:280-293`）。
 
 **独特性判断**：双层安全模型（AST 改写 + iframe 沙箱）在同一插件系统内并存，且 v3 的“结构化克隆 RPC + 流桥 + AbortSignal 转发”在样本中未见同等实现；SillyTavern 扩展（manifest + `import()` 动态加载、生成拦截器）无沙箱层，VCPChat 插件为本体注入而非隔离运行时。这既是产品生态能力，也构成独立的安全工程机制（统计时机制单列）。
 

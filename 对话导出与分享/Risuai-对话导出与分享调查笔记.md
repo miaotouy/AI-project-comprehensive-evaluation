@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：静态源码局部调查；阅读 `src/ts/characters.ts` 的单会话导出/导入/批量导出、`src/lib/ChatScreens/DefaultChatScreen.svelte` 的聊天截图与菜单入口、`SideChatList`/`ChatList` 两处聊天列表入口、`src/ts/storage/exportAsDataset.ts` 数据集导出、`src/ts/sync/multiuser.ts` 多用户房间、`parser.svelte.ts` 的 `parseMarkdownSafe` 与 `ParseMarkdown` 双管线、`database.svelte.ts` 的会话与消息 schema、下载与文件选择工具；检索 navigator.share、html-to-image、jsPDF 等库的实际使用面；未运行应用
 >

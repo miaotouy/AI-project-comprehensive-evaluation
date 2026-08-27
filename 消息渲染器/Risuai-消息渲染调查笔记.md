@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：只读源码梳理；对 `src/ts/parser/`、`src/ts/process/index.svelte.ts`、`src/lib/ChatScreens/` 逐文件阅读，并用全文检索交叉验证调用点；未安装依赖、未运行应用
 >
@@ -134,7 +134,7 @@ Message.data（字符串）
 4. `parseThoughtsAndTools`：深度配对的 `<Thoughts>` 折叠为 `<details><summary>`；`<tool_call>id\uf100名称</tool_call>` 替换为一行 `x-risu-tool-call` 提示（parser.svelte.ts:713-734）。
 5. `encodeStyle`：`<style>` 内容 hex 编码成 `<risu-style>` 保护起来，防止 DOMPurify 直接处理。
 6. `renderHighlightableMarkdown`：`$$...$$` 先被 `katex.renderToString` 替换（`renderMarkdown`，parser.svelte.ts:152-204，`output: 'mathml'`、`displayMode: false`），随后 markdown-it 渲染（`html: true`、`breaks`、`typographer`、引号占位符机制）；带语言标记的代码围栏由第二个 markdown-it 实例（`mdHighlight`）输出 `pre-hljs-placeholder` 占位，之后逐块按需 `import` highlight.js 语言并生成 `pre.hljs`（switch 共映射 18 种语言，未知语言转义为纯文本，`risuerror` 输出错误面板）。
-7. `trimMarkdown`（ChatBody 渲染时）：DOMPurify 清洗 + `decodeStyle` 恢复样式并二次清洗。
+7. `trimMarkdown`（ChatBody 渲染时）：普通内容直接经 DOMPurify 清洗；含 `risu-style` 时先取得清洗后的 DOM，再只解码其中真实的样式节点并原地替换为 style。CSS 不再作为 HTML 字符串重新交给 DOMPurify，因而其中含有类似标记的文本或 SVG data URL 时不会被清洗器误删（`parser.svelte.ts:779-834,966-1003`）。
 
 两个 markdown-it 实例都 `disable(['code'])`（缩进代码块规则），正文行内代码与围栏行为由上述占位机制统一处理。引号处理值得一提：markdown-it 的 typographer 把引号替换为 PUA 字符，随后按 `customQuotes`/`blockquoteStyling` 设置决定是原样还原还是包成 `<mark risu-mark>` 引用样式。
 
@@ -166,7 +166,7 @@ DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 - `uponSanitizeAttribute`：class 逐个加 `x-risu-` 前缀（`hljs`、`x-risu-` 开头的例外）；href 只允许 `http://`/`https://` 并加 `target="_blank"`，其余置空；`IMG/SOURCE/VIDEO/AUDIO/STYLE` 的 `blob:` src 通过 `forceKeepAttr` 保留（inlay 依赖）。
 - `ADD_TAGS`/`ADD_ATTR` 白名单：style、risu-style、iframe、MathML 系列（KaTeX 的 annotation/semantics/mrow 等），以及 risu-ctrl/risu-btn/risu-trigger/risu-mark/risu-id/x-hl-lang/x-hl-text 等自定义属性。
 
-消息内 `<style>` 走特殊路径（parser.svelte.ts:900-968）：hex 编码躲过首轮清洗，`decodeStyle` 用 `@adobe/css-tools` 解析 CSS，选择器加 `.chattext ` 前缀、class 加 `x-risu-` 前缀，随后恢复成真实 `<style>` 并二次清洗。这与 SillyTavern 的 custom-style 思路同类：样式留在主文档，隔离靠选择器前缀而非 Shadow DOM。解析失败时按 `returnCSSError` 设置回显错误文本或丢弃；`@import` 规则只有 data: 开头才被保留，且被清空为 `data:,`。
+消息内 `<style>` 走特殊路径（parser.svelte.ts:930-1003）：内容先以 hex 编码躲过 HTML 清洗，随后由 `decodeStyleContent` 用 `@adobe/css-tools` 解析 CSS，选择器加 `.chattext ` 前缀、class 加 `x-risu-` 前缀，再把所得 CSS 放进已清洗 DOM 的真实 style 节点。这与 SillyTavern 的 custom-style 思路同类：样式留在主文档，隔离靠选择器前缀而非 Shadow DOM。解析失败时按 `returnCSSError` 设置回显错误文本或丢弃；`@import` 规则只有 data: 开头才被保留，且被清空为 `data:,`。为避免样式标签提早闭合，恢复前会转义 CSS 内的 `</style` 序列。
 
 主文档 `index.html` 的 CSP meta 处于注释状态（index.html:14），页面级 CSP 未启用。插件运行在独立沙箱 iframe（`src/ts/plugins/apiV3/factory.ts:438, 784-788, 894-921`）：sandbox 仅 `allow-scripts allow-modals allow-downloads`（无 `allow-same-origin`，保持 opaque origin），srcdoc 附带 CSP，插件与主文档通过 postMessage RPC 桥通信（`SandboxHost`）。该沙箱服务于插件 UI，不参与普通消息正文的渲染路径。iframe 内 CSP 指令如下：
 

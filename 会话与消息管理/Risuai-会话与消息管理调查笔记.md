@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/storage` 持久化层、`globalApi.svelte.ts` 的保存循环、`bootstrap.ts` 加载主链、`process/index.svelte.ts` 生成入口、UI 层 Chat/DefaultChatScreen/SideChatList/ChatList、冷存储、角色与聊天导入导出、多用户同步），针对必查问题逐一核对当前 HEAD 的可执行路径；本次为静态调查，未运行应用
 >

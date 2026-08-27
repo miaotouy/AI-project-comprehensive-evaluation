@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：只读核对角色与数据库类型定义、导入导出实现、发送链与提示词装配、lorebook 运行时、请求参数解析和角色配置界面；未修改被调查仓库源码，未运行应用
 >
@@ -76,7 +76,7 @@ Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局�
 ['main','description','personaPrompt','chats','lastChat','jailbreak','lorebook','globalNote','authorNote']
 ```
 
-若启用 `promptTemplate`（预设可携带），则完全按卡片序列装配，卡片类型如下（键名见源码），支持内联格式包裹与 `{{slot}}` 填充、角色转换与缓存点标记（`index.svelte.ts:676-820` 与 `1271-1461`）；`utilityBot` 角色强制使用一套精简模板（`index.svelte.ts:379-408`）。
+若启用 `promptTemplate`（预设可携带），则完全按卡片序列装配，卡片类型如下（键名见源码），支持内联格式包裹与 `{{slot}}` 填充、角色转换与缓存点标记（`index.svelte.ts:676-820` 与 `1271-1461`）；`utilityBot` 角色强制使用一套精简模板（`index.svelte.ts:379-408`）。persona、description、authornote 与 memory 卡可单独把本槽位改标为 user、bot 或 system；未填或导入值无效时保留 system 默认。description 卡只改角色本体描述，前后位置的 lorebook 仍按条目角色处理；lorebook 条目也新增默认角色，正文 `@@role` 仍可逐条覆盖（`PromptDataItem.svelte:56-58,364-376`、`index.svelte.ts:654-708,1273-1437`、`database.svelte.ts:2543-2552`）。
 
 ```
 persona / description / lorebook / chat / authornote / memory / cache / plain / jailbreak / cot / chatML / postEverything

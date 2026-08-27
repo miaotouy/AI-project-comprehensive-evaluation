@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-17
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：静态代码审查；关键词 grep（inlay/iframe/sandbox/eval/Function/pyodide/lua/streaming/reroll 等）定位能力边界，通读生成主链（process/index.svelte.ts 的流式与最终化）、inlay 资产层（process/files/inlays.ts）、消息解析与净化管线（parser/parser.svelte.ts）、图像与语音产出（stableDiff.ts、tts.ts）、插件沙箱（plugins/ 与 apiV3/）、脚本引擎（scriptings.ts、pyworker.ts）及持久化入口（globalApi.svelte.ts、storage/、drive/）
 >
@@ -78,7 +78,7 @@ Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息�
 
 ## 6. 编辑、diff、版本与协作
 
-- **编辑**：全文覆盖式。编辑保存直接覆写消息 `data`（`Chat.svelte:129-131`）；局部编辑同样整段覆盖。编辑后 inlay 占位符保留与否取决于用户操作，系统不校验引用完整性。
+- **编辑**：全文覆盖式。编辑保存直接覆写消息 `data`；局部编辑同样整段覆盖。显示 LLM 翻译时的局部编辑改写的是翻译缓存而非原消息，缓存修订会触发该翻译视图重新解析；原文、译文两种编辑态互斥（`Chat.svelte:136-276,498-546`、`PartialEditController.svelte:18-63,238-307`）。编辑后 inlay 占位符保留与否取决于用户操作，系统不校验引用完整性。
 - **版本**：reroll 是唯一版本机制，且为**内存级**：生成时按 chunk 累积各候选文本（`addRerolls`，`src/ts/process/prereroll.ts:26-29`），reroll 时以 `safeStructuredClone` 快照整段消息数组替换（`DefaultChatScreen.svelte:218-317`），不落盘，刷新即失。无 diff、无 patch、无接受/拒绝、无分支。
 - **协作**：单用户本地应用，无协作；云同步（drive）只同步主数据库与 assets（见 §8），对象级冲突处理不存在。
 
@@ -86,9 +86,9 @@ Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息�
 
 - **执行位置**：模型输出只在宿主 DOM 渲染，无脚本执行。插件系统分两代：
   - API 3.0：隐藏 iframe + postMessage 桥，sandbox 允许 `allow-scripts`、`allow-modals`、`allow-downloads`，带 CSP；插件代码在 iframe 内经 `eval('(async () => ...)')` 运行（`src/ts/plugins/apiV3/factory.ts:296`、`771-788`、`921`）。iframe 默认隐藏，可 `showContainer` 放大为全屏 UI（`v3.svelte.ts:916-941`）。
-  - API 2.1：主线程 `new Function` 执行，先经 `checkCodeSafety` 静态改写（`src/ts/plugins/plugins.svelte.ts:903-910`）。
+  - API 2.1：仅存量插件仍可在主线程 `new Function` 执行，先经 `checkCodeSafety` 静态改写；新的 2.1 导入已被拒绝（`src/ts/plugins/plugins.svelte.ts:343-361,890-910`）。
   插件 iframe **承载插件自身 UI 与代码，不承载模型输出**；模型文本不会注入 iframe 执行。
-- **能力桥**：插件 API 可读取 inlay（`readInlay`，`v3.svelte.ts:739-741`）、读写数据库、网络请求、注册输出监听器与 replacer；脚本引擎（Lua/Python）可调用 `generateImage` 生成图片并写入 inlay（`src/ts/process/scriptings.ts:392-404`），触发脚本有 `runImgGen` 效果（`src/ts/process/triggers.ts:1539-1557`）——这些桥接由脚本作者（用户/角色）预编译，模型本身只能通过文本标记间接驱动。无逐项授权/审批 UI；权限按插件名在安装/运行期确认（`getPluginPermission`）。
+- **能力桥**：插件 API 可读取 inlay、读写数据库、网络请求、注册输出监听器与 replacer；脚本引擎（Lua/Python）可调用 `generateImage` 生成图片并写入 inlay（`src/ts/process/scriptings.ts:392-404`），触发脚本有 `runImgGen` 效果（`src/ts/process/triggers.ts:1539-1557`）——这些桥接由脚本作者（用户/角色）预编译，模型本身只能通过文本标记间接驱动。v3 读取 inlay 与注册输出监听器会分别取得 inlay 或 replacer 权限，并按插件名、脚本哈希及三天周期复核；其余权限边界仍按 `getPluginPermission` 的 API 调用点决定（`v3.svelte.ts:567-625,728-750`）。
 - 模型输出侧无网络、存储或宿主动作能力声明：媒体引用全部解析为已存在资产，外部图片地址不加载执行（仅 img 标签可显示，且受 `hideAllImages` 控制）。
 
 ## 8. 持久化、恢复、分享与导出

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`0551d283faeba6e73899b01dd85ea38307b24699`（分支：`main`）
+> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
 >
 > 调查方式：只读源码梳理，覆盖模型目录、请求层、存储层、网络层、设置 UI、Node/Tauri 后端，并搜索 CLI/TUI 入口；未运行应用；调查时工作树干净
 >
@@ -148,7 +148,7 @@ Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust comman
 
 模型目录有三层来源：
 
-1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）；
+1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）。本快照新增 Gemini Flash 3.7 条目：它使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 等能力，并与 3.5/3.6 Flash 一样在 Vertex 请求中固定走 global endpoint（`model/providers/google.ts:4-17`、`process/request/google.ts:412-417`）；
 2. 动态注册 `registerModelDynamic`：启动时若 `dynamicModelRegistry` 开启，分别调用 Google `v1beta/models`、Anthropic `/v1/models`、OpenAI `/v1/models`（只收 `gpt-` 前缀），以 `dynamic_<provider>_<id>` 追加到内存数组（`modellist.ts:613-770`，启动入口 `bootstrap.ts:255`）；
 3. 设置页实时拉取：OpenRouter（含价格、context、缓存价与推理价元数据，`src/ts/model/openrouter.ts:51-106`）、NanoGPT（模型与订阅目录，`src/ts/model/nanogpt.ts:162-192`）、Ollama `/api/tags`（`src/ts/model/ollama.ts:23-45`）、Horde `status/models`（模块级内存缓存，`src/ts/horde/getModels.ts:19-44`）。
 
