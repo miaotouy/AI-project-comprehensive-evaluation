@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/core/system-prompt`、`packages/core/agent-loop`、`packages/compaction/`、`packages/spill/`、`packages/context/`、`packages/interaction/`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读。先读 `docs/architecture.md`、`docs/agent-lifecycle.md` 及 `docs/subsystems/` 下 session、system-prompt、compaction、spill、core 页面，再逐包核对实现（agent-loop 主循环全量、session surface/deriveMessages、compaction-basic 全量、spill-policy、context 四插件、user-questions），并对 `packages/context`、`packages/compaction`、`packages/core` 全文检索 `@earendil-works`/pi 引用；未运行任何交互会话
 >
@@ -173,6 +173,8 @@ chunk、turn/step 边界、log-only 记录一律不投影。派生带缓存：`r
 | token 估算（chars/4 启发式） | token-meter（chars/4 + usage 锚定） | 估算密度相同，dsh 另以 provider usage 校准 |
 
 dsh 的请求头落盘（`request/header` 可重建性）与"模型可见即已落盘"不变量在 pi 中无对应物。dsh 自身文档也把 pi 仅作为外部参照引用（如重试边界决策笔记引用 pi 的 settings 文档）。
+
+当前收口路径保留已记录的部分 assistant 输出，并把取消前尚未分派的工具调用补成可回放的终态结果；重试耗尽后的错误也作为回合结束事实保留，而不会因下一次请求覆盖。图片输入则在构建 provider context 时按消息内容顺序读取附件，具体图片规范化和大小策略由附件服务与 adapter 配置共同决定（`packages/core/agent-loop/src/tool-calls.ts`、`packages/llm/llm-pi-ai/src/context.ts`、`packages/llm/llm-deepseek/src/adapter.ts`）。
 
 ## 11. 未验证事项
 

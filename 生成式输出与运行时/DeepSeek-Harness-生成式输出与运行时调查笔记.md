@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/llm`（llm、llm-retry、token-meter）、`packages/core`（session、agent-loop、tools）、`packages/session`（session-persistence 及其 jsonl/sqlite 后端、session-checkpoint-policy、session-projection）、`packages/terminal`、`packages/shell`、`packages/subprocess`、`packages/spill`、`packages/attachment`、`packages/feedback`、`packages/util/output-retention`、`packages/client`（runtime 与 ui-conversation 消费侧）及 `docs/subsystems` 的 llm-streaming.md、tools.md、persistence.md 等页面；未运行任何命令或测试
 >
@@ -142,6 +142,8 @@ turn/step 事件括号定义回合生命周期，abort 以合成工具结果收�
 输出预算贯穿全链：请求层 maxTokens、工具结果层（保留器、spill 上限、finalizeContent）、子进程层（内存尾 + 整流 spill 上限）、终端层（viewport/scrollback 双上限）。性能手段：`TextRetainer` 只保留前缀与单块尾窗（大流不累积内存）、chunk 运行打包、表面派生增量缓存、客户端按动画帧批量通知与节流视觉更新。会话级不可见对象无冻结/卸载机制——终端/作业持续占用直至关闭或进程退出。
 
 ## 11. 设计取舍与已确认边界
+
+代码执行输出现可由 Python provider 承接：运行时协议把控制消息与程序标准输出分开传输，执行结果仍回到既有工具结果和会话事件模型，并未引入可独立编辑、版本化的代码 artifact。图像附件也保持为消息内容的一部分，附件服务负责内容寻址与规范化，LLM adapter 只在请求构建时解析它们（`packages/code-runtime/code-runtime-python/src/protocol.ts`、`packages/attachment/attachment-local/src/{store,normalization}.ts`）。
 
 - **日志即事实源**：连原始 token 级 chunk 都落日志，换取精确回放与"请求可从日志重建"的强不变量；代价是存储体积，用 zstd + chunk 打包缓解。usage 附着在 assistant/message 上而不是单独记录，保证计量与消息同生同灭。
 - **流协议闭合、词汇可合并**：StreamChunk 用闭合联合强制消费者处理新变体；ContentBlock 与 MessageSource 用可合并映射允许插件扩展。新 block 类型要求 adapter、UI、compaction、重放全链路支持（llm-streaming.md §Content blocks）。

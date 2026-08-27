@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读，覆盖 subagent 六个 provider、MCP 客户端桥、ACP 服务器、hooks 双桥与 hook-protocol、subprocess/terminal/shell 执行世界、code-runtime、E2B、boot/cmdline 与 apps/cli 入口及示例组装；未运行任何外部 Agent、真实 CLI 或协议往返
 >
@@ -135,6 +135,8 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 - CLI headless 是一次性宿主执行入口（`dsh --profile headless "task"`），web profile 是交互表面；`dsh plugin` 安装外部 bundle 是"发现/安装外部对象"的轻量样本，不构成独立主链。
 
 ## 已确认边界与未验证事项
+
+进程内可续接子 Agent 的生命周期已进一步明确：持久 child session 在进程内至多对应一个 activation；首次提交只在 inbox 接收后返回 child/message id，后续 follow-up 继续使用同一 FIFO inbox。子 Agent 可以选择向直接父 Agent 报告，`quiet` 只注入消息，`next-step` 会在父 Agent 空闲或下一步边界唤醒；运行时另以独立来源记录最终结算，避免将管理器的事实归因给子 Agent。该机制不改变进程外 ACP、Claude Code、Codex 与 dsh-sdk provider 的 one-shot 边界（`docs/subsystems/subagent.md:114-159, 191-234`）。
 
 - 本仓库没有 GUI 产品表面：外部执行体状态、子进程工作目录与连接状态只体现在会话日志事件、CLI 输出和 stderr 诊断中，不存在图形化的执行位置/接管入口。
 - 四条主链均为静态走通；未运行真实 Claude Code/Codex/外部 ACP 子进程，CLI 版本兼容、SDK 版本行为（Codex 协议锁定 0.147.0）与真实进程终止未验证。

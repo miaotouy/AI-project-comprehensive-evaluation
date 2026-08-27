@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/*`、`packages/host/*`、`packages/api/*`、`packages/typert/`、`packages/extensions/ui-cordis`、`packages/core/tools/src/presentation.ts`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读，并对照仓库 `.agents/notes/implemented/architecture/` 下的 GUI 系列架构决策记录（加载链、slot 系统、对象层、RPC 协议、输入状态机、工具展示归属等）逐项核实；未运行 `dsh web`，视觉效果、键盘可用性与运行行为未实测
 >
@@ -192,6 +192,8 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 关键路径键盘：Hero（无会话时整个虚线卡片可用 Enter/Space 打开工作区选择器）→ 输入框输入（IME 合成保护、Ctrl+Enter 换行）→ Enter 提交 / 空格触发的 slash 裁决（Space 只认 leadingInput 命令，防止误触不可逆副作用）→ 组合框菜单 ↑↓/Enter/Esc 仲裁 → 停止按钮、队列项操作均可指针/键盘到达。焦点传播：菜单打开时焦点留在 textarea；弹层外点击关闭并返回文本区焦点；rail 搜索聚焦等待 300ms 侧栏展开动画完成（避免同步 focus 卡顿）。以上是静态代码可确认的绑定；焦点顺序、无障碍名称、实际键盘行为（尤其 IME 在中文输入法下的 Enter 边界）需运行验证（见 §14）。
 
 ## 13. 设计取舍与已确认边界
+
+工作台继续以会话对象层而不是组件局部状态承接恢复。当前 Web 组合额外覆盖了冷启动空白会话、长历史分页、会话引用以及等待用户提问的路由场景；测试夹具把问题表面优先于底层运行状态的选择写成可回放断言。模型选择器可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`apps/web/tests/{cold-blank-session,complex-history,built-boot}.ts`、`packages/client/runtime/src/client/workspaces/service.ts`）。
 
 - **双 cordis 树 + 运行时插件加载**：浏览器复用宿主的 Loader 治理，模块系统自研（懒 CJS 表 + 同源外部脚本到达）；代价是 dev 每次改插件要重建 bundle + 纤维重挂，HMR 一次只重载一个插件、React 状态丢失（数据层不动）。web bundle 中 hmr 行当前默认 disabled（`cordis.patch.yml` 的 TODO）。
 - **对象层 React-free + uSES 快照**：令牌流不打乱渲染树，行级重渲染靠引用稳定；代价是自研快照/批处理机制（`markDirty` 微任务、`notifyNow` 仅用户手势直回声、`animation-frame` 流式合并）。

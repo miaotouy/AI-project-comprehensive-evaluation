@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/tools/`、`packages/core/agent-loop/`、`packages/core/session/`、`packages/core/system-prompt/` 与各 `packages/*/tool-*` 工具包）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读；辅以仓库自带架构文档（docs/architecture.md、docs/subsystems/tools.md、docs/tool-catalog.md、docs/tool-execution-pipeline.md、docs/capability-seams.md 生成图）；未运行真实工具调用
 >
@@ -193,6 +193,8 @@ repeat-tool-reminder 挂在 tools/post-execute：按 agent 维护连续相同调
 - **code collapse 在策略管线之前终结**：被折叠的直接调用不让 pre-execute/审批/guard 观察到，避免"被审批后必然失败"的调用进入审批面；未知工具则保留进入策略管线，让监听器看到每个到达的名字。
 - **无工具级 token 预算，未发现显式迭代上限**：长尾终止依赖模型停止原因、结论标记与用户中断，上下文压缩兜底。
 - **文档与实现一致性**：tool-catalog 等目录为生成并启动验证（boot 各工具包读取真实 schema），工具名可配置（如 tool-subagent 的 toolName），说明文档是运行期快照而非静态抄写。
+
+Python 代码运行时现在是独立的 `code-runtime-python` provider。它以受控的文件描述符通道承载运行时协议，TypeScript 侧与随包 Python 模块分别实现同一消息格式；因此模型侧仍通过既有 `run_code` 入口发起调用，Python 进程协议和结果传输则被限制在执行 provider 内部（`packages/code-runtime/code-runtime-python/src/{index,protocol}.ts`、`py/protocol.py`）。
 
 ## 10. 未验证事项
 

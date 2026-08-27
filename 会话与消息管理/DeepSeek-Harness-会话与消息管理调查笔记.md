@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/session/session-persistence`、`session-persistence-jsonl`、`session-persistence-sqlite`、`session-projection`、`session-projection-cache`、`session-checkpoint-policy`、`packages/core/agent-loop`、`packages/session-query/session-query`、`session-query-sqlite`、`packages/workspace/workspace`、`packages/core/scope`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读（核心 session 与 surface、持久化协调器与两个后端、checkpoint policy、投影与投影缓存、agent-loop 事件发射、session-query 及 workspace/scope/匿名身份包，配合 `docs/subsystems/session.md`、`persistence.md` 与生成目录 `docs/persistence-catalog.md` 交叉核对）；未运行测试或交互会话
 >
@@ -86,13 +86,15 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
 | 维度 | JSONL（`session-persistence-jsonl`） | SQLite（`session-persistence-sqlite`） |
 |---|---|---|
 | 布局 | 每会话一个目录 `<root>/<projectKey(cwd)>/<encodedId>/session.jsonl(.zstd)` | 一个数据库：`sessions` 表一行 header + `events` 表一行一事件 |
-| 物理编码 | 默认 zstd 帧（header 独占一帧），`packChunks` 把连续 chunk 打包成存储行（约小 60%）；可切纯文本 | 事件行 `(session_id, seq, type, time, data, source_event_seqs, surface_op, ignorable)` 与信封 1:1 |
+| 物理编码 | 默认 zstd 帧（header 独占一帧），连续 delta chunk 可合并为一条存储记录；可切纯文本 | 普通事件保留独立列；连续文本、推理或工具参数 delta 以 tagged packed row 合并，序列化数据在收益成立时再作 zstd 压缩 |
 | 原子性 | 首写物化用临时文件 + `link()` 发布（EEXIST 防并发覆盖）；追加失败回滚 truncate 到原长度 | append 批次与 repair 各是一个事务；`revision` 每次写入 +1 |
 | 读取 | 顺序媒体：`readFrom` 解析全文件再跳过；列表只读首行 header | 按 seq 直接 SELECT 后缀（`loadStoredFrom` 钩子），列表读 `sessions` 表 |
 | 崩溃修复 | 截断 torn 尾部到字节偏移 + 补 recovered events 与 closers | DELETE `seq >= tornFrom` + INSERT closers |
 | 产物 | `supportsRawArtifacts = true`，`readRaw` 返回逐字节原文（ZIP 导出依赖它） | `false`，无每会话独立产物 |
 
-关键实现定位：JSONL 后端的 `appendBatch`/`commitRepair`/`materialize` 见 `packages/session/session-persistence-jsonl/src/index.ts:422-626`，SQLite 后端事务写入见 `packages/session/session-persistence-sqlite/src/index.ts:284-338`。
+两种介质共用 `chunk-rows` 的无损打包格式：只合并同 block 的连续文本、推理或工具参数 delta；未知或未完全匹配的事件保持原样，读取时还原为原始事件序列。SQLite 的 `compression.ts` 负责 packed row 与 zstd 数据列的编解码，schema 和读取查询同时区分逻辑事件与物理记录（`packages/core/session/src/chunk-rows.ts`、`packages/session/session-persistence-sqlite/src/{compression,store}.ts`）。
+
+关键实现定位：JSONL 后端的 `appendBatch`/`commitRepair`/`materialize` 见 `packages/session/session-persistence-jsonl/src/index.ts:422-626`，SQLite 后端事务写入见 `packages/session/session-persistence-sqlite/src/store.ts`。
 
 惰性物化：`create` 只记意图，首个 append 才落盘，废弃会话不留文件（`coordinator.ts:645-658`）。
 

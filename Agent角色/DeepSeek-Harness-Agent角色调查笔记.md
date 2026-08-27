@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/preset/agent-presets`、`packages/preset/persona`、`packages/core/system-prompt`、`packages/core/agent`、`packages/core/scope`、`apps/cli/config/agent-presets`、`packages/context/agent-instructions`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：只读静态源码阅读，梳理 preset 发现/挂载/加入链路、scope 分层、system prompt 组装与会话日志记录；未运行交互会话，未执行测试
 >

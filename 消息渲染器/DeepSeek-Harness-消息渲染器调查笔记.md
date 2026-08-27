@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/core/tools`、`packages/host/apiproxy`、`packages/session/session-projection`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读（只读检查 git 工作树）；未运行应用、测试与快照回放
 >
@@ -117,6 +117,8 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 - 测试证据（均未运行）：DOM 字节级 parity 夹具、增量行为单测、组装快照测试（`apps/web/tests/search-card.snapshot.ts` 以文本字段钉住 grep 卡）、若干 markdown 与数学 e2e 的 `ui.expected.md`（可访问性树文本）、trajectory 虚拟化 e2e。
 
 ## 10. 扩展方式与已确认边界
+
+消息模型在当前快照中仍以内容块与会话事件为唯一输入；图片作为 content block 随消息进入同一投影链，推理内容则按独立 reasoning block 保持与正文、工具卡片分离。持久化层对连续 delta 的压缩不改变客户端看到的逻辑事件序列，因此渲染器无需识别 SQLite 或 JSONL 的物理存储格式（`packages/llm/llm/src/types.ts`、`packages/core/session/src/chunk-rows.ts`、`packages/client/runtime/src/client/sessions/session.ts`）。
 
 - 新工具卡片：工具声明 `presentCall`/`presentResult`（纯函数），需要专属外观时再注册 keyed `tool.call.toolview` 条目（ui-cordis 是完整范例）。
 - 新消息节点：注册 `ConversationNodeDefinition`（match/start/update/buildViewNode）+ keyed `conversation.chat.node` 渲染器；折叠按日志 seq 确定，可确定性重放（`ui-conversation/src/client/conversation-nodes/`）。

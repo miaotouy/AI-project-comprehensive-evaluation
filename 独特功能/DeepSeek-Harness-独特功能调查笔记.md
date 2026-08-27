@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`，关联 `packages/bundle/`、`packages/runtime-diagnostics/invariants`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/e2b/`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（goal、plan、schedule、sandbox、extensions、subagent、persistence、spill）与关键 src 文件（`tool-cordis`、`cordis-host-runner` 的 sandbox/lifecycle、`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/index、`sandbox-local`、`subagent` 的 index/continuation、`native/landlock-run` 入口 C 源）；未运行任何进程或测试
 >
@@ -92,6 +92,8 @@ dsh 的独特功能不在聊天或工具表面，而在把 agent 自身运行时
 5. **独特性判断**：与 OpenCode 子代理、LobeHub 外部 CLI 托管相比，这里是"一个契约、六种执行位置、可续会话对象"，且把策略继承做成可重放事件而不是运行时传递。证据强度：静态主链确认；ACP/Codex/Claude Code 真实子进程与跨进程冷恢复未运行验证。
 
 ## 工程与支撑机制盘点
+
+实验性 Agent Teams 已把多 Agent 协作提升为可组合的能力组：team runtime、成员与协作工具各自为插件，相关的会话事件和文档同样进入持久化目录。它仍属于实验性组合，不能据此推断存在成熟的团队管理 UI 或跨账户协作服务（`packages/experimental/agent-team/`、`docs/subsystems/agent-team.md`、`examples/headless-agent/team.cordis.snapshot.yml`）。
 
 以下机制已确认入口与契约，属于工程或支撑性质，不单独展开能力卡：
 

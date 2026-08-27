@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/bundle/base`）
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读：`packages/llm` 全部包源码与 README、agent-loop 请求路径、credentials/settings 服务与文件 provider、dsh 基座 bundle 与 examples 组合、Web Models 设置页及其远程 API、CLI reference、`docs/subsystems/llm-streaming.md` 与 `docs/config-catalog.md` 对照；未运行真实 Provider 请求，未执行测试
 >
@@ -120,6 +120,8 @@ dsh-agent-loop (packages/core/agent-loop/src/agent.ts step/buildRequest)
 **无远端刷新**：目录就是配置文档的内容；README 明确"route 的目录永远不会自我刷新"。`discoverModels` 是配置时端点探测而非目录刷新：目录 route 由安装目录直接作答（不发网络），未收录 route 才 `GET {baseURL}/models`（仅 openai-completions/openai-responses 两种协议可读，Azure/Codex 等明确排除），4MB 字节上限，探测 key 一次性使用不存储，结果只是给界面采纳的候选（`llm-pi-ai/src/discovery.ts`）。
 
 ## 5. Adapter、协议与请求组装
+
+图像输入已成为渠道解析的一部分，而非前端专属功能。直连 DeepSeek adapter 在每次请求时解析附件服务和图像策略，图片不可用时拒绝该请求但不影响纯文本路由；pi-ai adapter 也从附件服务读取图片并维持内容顺序。模型目录继续由配置决定，因而视觉能力、上下文容量、输出上限和 reasoning 等级都经同一 `resolveModel` 路径向选择器和请求构建暴露（`packages/llm/llm-deepseek/src/adapter.ts`、`packages/llm/llm-pi-ai/src/{adapter,catalog,context}.ts`）。
 
 **流式词汇**：`StreamChunk` 是 closed 判别联合（`packages/llm/llm/src/types.ts:291`），变体如下：
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/agent-loop`、`packages/core/agent`、`packages/core/session`、`docs/architecture.md`、`docs/agent-lifecycle.md`、`docs/subsystems/core.md`）
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：只读静态源码阅读，并以官方文档（architecture.md 的 turn flow、agent-lifecycle.md 时序图、subsystems/core.md 的 the-agent-handle 一节）交叉核对；未运行交互会话
 >

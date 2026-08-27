@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-08-16
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`47f943859bef60e4160492346772ded9b24f765a`（分支：`master`）
+> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
 >
 > 调查方式：静态源码阅读；读取 `packages/session-query/session-log-export` 的浏览器插件与 `/export` 命令、`packages/host/apiproxy` 的下载端点与流式 ZIP 实现、`packages/session/session-persistence` 的 raw artifact 契约与 JSONL 后端、`packages/session-query/session-query` 的血缘追踪与表面折叠、`packages/core/session` 的 surface 与消息派生、spill/attachment 存储、apps/cli 与 apps/web、session-telemetry，以及相关单元测试与 Web e2e；未运行应用
 >
