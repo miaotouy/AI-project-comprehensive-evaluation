@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，并核对 chatHandlers.js/vcpClient.js 变更与行号
 >
@@ -142,6 +142,12 @@ renderer.js 发送/中断事件
 - 群聊：每个 agent 的上下文按成员配置单独构建（`contextForAgentPromises`，`Groupmodules/groupchat.js:611-719`），群聊消息落盘 `agentId/model/modelSource` 字段（`:950`），说明"谁说了话、用的什么模型"在消息级快照保存。
 - 附件：user 消息携带 `attachments` 数组（`modules/chatManager.js:992-1002`），附件如何进入请求体**未在原调查中核实**。
 - VCPChat 是 VCPToolBox 的官方桌面前端：消息结构、会话存储与 VCPToolBox 请求编排的对应关系见 [`../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
+
+## 当前流式任务协调
+
+当前 renderer 通过 VCP stream bridge 和 coordinator 将服务端事件关联到具有 conversation key 与 generation 的流 session；当 surface 已撤离或路由被回收，后到事件不会再交给旧视图。该机制解决的是客户端投影与收尾顺序，不替代 HTTP 请求本身的取消、超时或远端 interrupt 协议：主聊天的请求、上下文装配和模型端点仍由 `chatHandlers` 持有，工具循环仍在外部 VCP 服务端。
+
+依据：`modules/chat/vcpStreamBridge.js:9-82`、`streamCoordinator.js:28-112,253-277`、`streamSession.js:21-91`、`modules/renderer/mainChatStreamConsumer.js:1-97`、`modules/ipc/chatHandlers.js`。
 
 ## 10. 退出恢复、日志与已确认边界
 

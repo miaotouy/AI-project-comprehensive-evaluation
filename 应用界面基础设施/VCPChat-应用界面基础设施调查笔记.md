@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -291,6 +291,12 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 **焦点管理**：确认对话框打开时确认按钮自动聚焦，通用 Modal 打开时也会聚焦自身（相关实现见 :347、:944），但无 focus trap，Tab 键可以穿透到背景。Agent/Topic 列表没有键盘导航支持，列表项无 tabindex。
 
 总体评估：核心功能控件有基础 ARIA，但主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，键盘可达性不完整，无障碍支持处于初步阶段。
+
+## 当前界面运行时与启动边界
+
+当前快照继续把通用 UI 的可释放资源收敛到 surface、task 与 contribution registries，并为嵌入应用、覆盖层、通知菜单和启动主题提供各自的生命周期控制器。另新增独立 Tauri bootstrapper：其职责是受管安装、环境检查、修复、更新与回滚后的桌面交接，和 Electron 主窗口的主题、弹窗、聊天状态不共享同一运行时。静态阅读只能确认状态与事件的所有权，不能证明实际窗口焦点、可访问性或升级回滚体验。
+
+依据：`modules/ui-system/surface-controller.js`、`task-handle.js`、`contribution-registry.js`、`next-shell/overlay-coordinator.js`、`apps/bootstrap-installer/src-tauri/src/lib.rs`、`process.rs`、`storage.rs`。
 
 ## 8. 设计取舍与已确认边界
 

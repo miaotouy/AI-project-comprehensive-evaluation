@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：只读源码梳理（未修改被调查仓库任何文件）；未运行仓库测试/构建，结论均以静态阅读源码为准
 >
@@ -293,6 +293,12 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 - **工具结果的两层信任降级**：消息渲染器笔记 5.3 节确认工具结果 HTML 走"收紧后的 Markdown"，比 assistant 正文的"完整 HTML 运行时"权限更低。这与本笔记确认的"工具结果本身在客户端不经过任何执行逻辑，只是展示"一致——工具执行发生在服务端/分布式节点，客户端接收到的只是文本结果，双重确认了 VCPChat 聊天窗口对工具结果是纯展示消费者。
 
 依据：[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 5.2-5.3、7.3 节；[`../../VCPChat/modules/notificationRenderer.js:248-396`](../../VCPChat/modules/notificationRenderer.js)（通知卡片 DOM 构造方式）。
+
+## 当前工具边界
+
+当前快照把 Scriptorium 协作器扩展为分布式节点的 direct 工具：它可读取文档信息、渲染文本、源码与视觉上下文，并以 `SubmitSourcePr` 提交待人工处理的完整源码修订；文档侧分别为请求和审阅设置 30 秒与 5 分钟的超时。该链路仍由服务端工具审批和文档内 PR 回执共同约束，不能与聊天文本中的普通工具展示混为一条执行路径。移动同步则继续以 VCP-CDS 的中央索引为默认数据面，保留旧本地索引回退；Wire 1.2 的 canonicalizer、错误契约和幂等入口使同步协议的约束比普通聊天历史写入更明确。
+
+依据：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:30-31`、`VCPDistributedServer/Plugin/VCPMobileSync/index.js:114-191`、`transport/routes.js:76-184`、`sync/canonical.js:178-400`。
 
 ## 11. 未验证事项与后续调查缺口
 

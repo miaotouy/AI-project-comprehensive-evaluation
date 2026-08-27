@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，核对范围覆盖 main.html、renderer.js、trayManager 等变更；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）见 [`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)
 >
@@ -22,6 +22,12 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，聊天工作台由左侧 side
 - 消息右键菜单承接复制、编辑、重新生成、创建分支、转发、朗读、阅读模式、删除等操作（第 6 节）。
 - 无障碍处于初步阶段：核心控件有基础 ARIA，但消息列表、Agent/Topic 列表无语义标注，发送按钮动态切换模式时未见对应 `aria-label` 更新（9.2）。
 - 通用界面盘点（弹窗库、Toast、主题、动画、灯箱、全局快捷键清单等）见 [`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)，本笔记只记录与聊天主链的交点。
+
+## 当前工作台状态所有权
+
+聊天主表面现由 `mainChatComposition` 与 `mainChatSurfaceAdapter` 组装。每个 surface 持有自己的 DOM renderer、流消费者和释放动作，发送控件、附件、Flowlock、设置展示与主题也各有 owner；会话选择对象由 `surfaceConversation` 提供。因此 UI 在切换话题或销毁内部表面时可撤销旧流路由，而不是继续依赖单例消息视图。此为生命周期和事件所有权调整，现有 sidebar、Topic 列表与 Composer 用户流程保持原有表面。
+
+依据：`renderer.js:296-360,555-599`、`modules/renderer/mainChatComposition.js:9-83`、`modules/renderer/mainChatSurfaceAdapter.js:88-152`、`modules/chat/chatSurface.js:7-58`。
 
 ## 工作台边界与用户主链
 

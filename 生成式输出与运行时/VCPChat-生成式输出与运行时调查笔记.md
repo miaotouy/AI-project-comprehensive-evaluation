@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：静态代码走读。grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、exec、preview、tool、message、markdown、highlight 等关键词；通读消息渲染管线（messageRenderer / contentPipeline / streamManager / contentProcessor）、阅读窗口（text-viewer）、Canvas 协同编辑器、桌面挂件与收藏链路、聊天历史持久化链路，以及 Scriptorium 文坊子系统（ScriptoriumModules + docxHandlers + ScriptoriumCollaborator 插件）。未运行应用、未发起真实模型请求。
 >
@@ -157,6 +157,12 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 - **桌面窗口**：`visibilityFreezer`（`Desktopmodules/core/visibilityFreezer.js:154-183`，冻结壁纸 iframe/视频）；挂件删除带 450ms fallback（`widgetManager.js:10-12`）；z-index 管理、拖动限位。
 - **渲染性能**：30fps 合帧、`findExplicitStablePrefix` 避免全量重解析、`renderHtmlCache`（`messageRenderer.js:1686-1752`，FNV1a 指纹，含 shouldBypassRenderHtmlCache 判定）、块级 HTML 缓存复用（`streamManager.js:568-606`）。
 - **限额**：HTML island 深度 128/256KB（`streamManager.js:44-45`）、推送块 150s 超时、代码行扫光动画最多并发 3（`:12-13`）；未找到挂件数量/进程数全局限额。
+
+## 当前 Scriptorium 协作运行时
+
+Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、编辑历史、来源编辑、版式、图形资源和演示文稿模块。它仍以源码为事实源，但 Agent 已可经 ScriptoriumCollaborator 查询文档与视觉上下文，并以完整 source PR 提交修订；文坊等待人类审阅后才产生 applied、rejected、conflict 或 failed 回执及文脉记录。相较消息内预览或 Canvas 文件，这是一条拥有显式对象、审阅回执和可追溯编辑记录的 G4 工作区链路；没有证据表明其具备 CRDT 或自动三方合并。
+
+依据：`ScriptoriumModules/scriptorium-document-store.js`、`scriptorium-render-coordinator.js`、`scriptorium-edit-history.js`、`scriptorium-pr-diff.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:30-31`。
 
 ## 11. 测试、已确认边界与未验证事项
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -502,6 +502,12 @@ AppData/UserData/backups/settings-<timestamp>.json
 | 桌面 widget 真实调用 | 有 | `vcpPost()` 复用单一网关，非测试入口 |
 | 最小生成测试 | 无 | 未独立验证 Chat/stream/tool endpoint |
 | 健康结果参与调度 | 无 | 无本地调度器 |
+
+## 当前快照的渠道复核
+
+本轮对聊天内核、启动器和同步模块的改动没有新增客户端 Provider、连接 Profile 或协议 Adapter。主聊天仍将单个 VCP 网关 URL 与 Key 交给 `chatHandlers`，模型目录仍是网关返回的 ID 列表；新的 managed bootstrapper 负责安装、修复和更新运行环境，不参与模型选择、凭据解析或请求 failover。此前关于单网关、单 Key、无本地重试/熔断的结论在当前快照仍成立。
+
+依据：`modules/ipc/chatHandlers.js`、`modules/utils/appSettingsManager.js`、`modules/modelUsageTracker.js`、`apps/bootstrap-installer/src-tauri/src/lib.rs`、`apps/bootstrap-installer/src-tauri/src/manifest.rs`。
 
 ## 10. 未验证事项
 

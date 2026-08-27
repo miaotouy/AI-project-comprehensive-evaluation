@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：静态源码梳理（当前 HEAD）；只读检查，未修改目标仓库
 >
@@ -501,6 +501,12 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 脚本内的 `document.querySelector/querySelectorAll/getElementById/getElementsByTagName` 被包装为"当前消息容器优先、document 回退"（`animation.js:282-360`）：同页面多条消息包含相同 id 或 `data-vdoc-island` 时，脚本默认命中自己消息内的节点而非页面第一份副本；对 script 标签的查询例外地保留全局行为并追加 `virtualCurrentScript`，以兼容依赖当前脚本引用的库代码。这是消息脚本 DOM 隔离的补充手段，不是新的隔离边界——脚本仍运行在聊天 renderer 的页面上下文。
 
 主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，消息脚本不能直接 require Node 模块；脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM 和页面全局对象。
+
+## 当前渲染会话边界
+
+流式渲染器在当前快照中被置于 surface-owned consumer 之后：bridge 先识别操作，再把事件交给对应 surface 的 projection runtime；surface dispose 或路由撤销会解除该操作的投影权限。消息 Markdown、私有块协议、HTML 预览和最终化策略仍由既有渲染管线负责，因此这不是新的消息格式或安全沙箱；它主要避免不同聊天表面、旧 Topic 或迟到事件相互污染。
+
+依据：`modules/renderer/mainChatSurfaceAdapter.js:115-152`、`mainChatStreamConsumer.js:1-97`、`modules/chat/vcpStreamBridge.js:9-82`、`streamCoordinator.js:28-112`、`modules/renderer/streamProjectionRuntime.js`。
 
 ## 8. 历史渲染、性能与生命周期
 

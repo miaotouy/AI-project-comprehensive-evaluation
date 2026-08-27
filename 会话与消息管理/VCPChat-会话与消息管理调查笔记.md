@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移；基于当前 HEAD 的静态源码核对 chatHandlers.js 行号，并补充新增的 VCP-CDS 子系统
 >
@@ -246,6 +246,12 @@ assistant 消息的流式临时状态与落盘时机：
 - **消息级**：群聊 assistant 消息快照保存 `agentId/model/modelSource`（`Groupmodules/groupchat.js:950`）——"谁说的话、用的什么模型"在消息层持久化；附件作为 `attachments` 数组挂在 user 消息上（`modules/chatManager.js:992-1002`）。
 - Agent 的模型等配置保存在 Agent 配置对象中（模型按钮与折叠设置段落的界面见 Chat UI 笔记），配置 schema 未在原调查中核实。
 - VCPChat 是 VCPToolBox 的官方桌面前端，消息结构、会话存储与 VCPToolBox 请求编排的对应关系见 [`../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
+
+## 当前快照的数据协调
+
+聊天内核新增了仓库、历史写入权威和持久化适配器的显式分层，流式协调器以 session、conversation key 与 generation 识别操作，并在 surface 脱离后停止其投影。该调整缩小了渲染层直接写历史或跨表面复用流状态的范围；它没有将 `history.json` 改为数据库事实源，也没有为普通单聊引入文件锁、事务或版本合并。VCP-CDS 与 VCPMobileSync 的中央索引仍是派生索引/同步数据面，不取代本地历史文件。
+
+依据：`renderer.js:188-195,517-599`、`modules/chat/chatHistoryMutationAuthority.js:11-91`、`chatHistoryPersistence.js:113-156`、`streamCoordinator.js:28-112`、`VCPDistributedServer/Plugin/VCPMobileSync/README.md:95-148`。
 
 ## 9. 设计取舍与已确认边界
 

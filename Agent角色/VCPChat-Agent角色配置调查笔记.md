@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读核对 agentConfigManager、agentHandlers、chatManager、settingsManager，未修改被调查仓库源码
 >
@@ -146,6 +146,10 @@ VCPChat 还支持多 Agent 群组对话（`Groupmodules/groupchat.js`），群�
 - 没有批量导入接口；角色通过在 UI 中手动创建并填写提示词来建立；
 - VCPToolBox 的 AgentAssistant 插件（`/admin_api/agent-assistant`）管理服务器侧 Agent；VCPChat 客户端 Agent 与 VCPToolBox AgentAssistant 的对应关系需手动维护；
 - SillyTavern 角色卡的 `system_prompt` 字段可直接粘贴为 VCPChat Agent 的 `systemPrompt`。
+
+## 当前快照的角色边界
+
+本轮改动触及 Tavern 示例配置、群组设置标记和群聊渲染，但没有引入新的 Agent 持久化实体、角色版本字段或渠道绑定模型。角色仍以本地 Agent/群组配置和 Tavern 规则共同定义；群聊界面的结构调整不改变角色字段进入聊天请求的既有责任边界。此结论来自对 `AppData/VCPChatTarven*.json`、`Groupmodules/`、`Tavernmodules/` 与角色 IPC 入口的静态核对，未运行导入或群聊场景。
 
 ## 10. 主要源码依据
 

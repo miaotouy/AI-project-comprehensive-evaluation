@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新（原内容迁移自 2026-08-05 长文调查）；逐文件精读源码 + 定向 grep 验证调用链
 >
@@ -21,6 +21,12 @@ VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（
 本次调查最值得记录的发现是**单聊与群聊中断实现不对称**：群聊侧有本地 AbortController 中断 + 60 秒请求超时（`groupchat.js`）；单聊侧（`chatHandlers.js` 的 `send-to-vcp`）**没有本地 abort、也没有客户端超时**，中止按钮只向远端 VCP 服务器发一个 `/v1/interrupt` 信号，是否真正停止完全依赖远端配合；仓库里 `modules/vcpClient.js` 有完整正确的中断实现，但从未被任何文件 require，是未接入的死代码。
 
 其余已确认边界：单聊话题自动总结无超时保护（群聊有 20 秒超时）；内容搜索只匹配字符串型 `content`（多模态数组匹配不到）；自动未读只统计"尚无用户参与"的话题；群聊多次调度之间无文件锁；`history.json` 无原子写保护。
+
+## 当前聊天内核边界
+
+当前主窗口不再把聊天视图、流式投影和历史写入集中在一个 renderer 全局对象中：初始化时分别建立会话上下文、仓库、历史写入权威和 presentation state，再由主聊天 composition 创建 surface adapter；VCP 流事件经过 bridge 与 coordinator，按操作和 surface generation 投递。因而切换话题、关闭内部表面或撤销路由时，旧操作可以停止向已失效的 DOM 投影，同时持久化仍经单独的 history authority 进入仓库。消息的磁盘事实源与单聊远端中断边界未因此改变。
+
+依据：`renderer.js:188-195,296-360,517-599`、`modules/renderer/mainChatComposition.js:9-83`、`modules/renderer/mainChatSurfaceAdapter.js:88-152`、`modules/chat/vcpStreamBridge.js:9-82`、`modules/chat/streamCoordinator.js:28-112,253-277`。
 
 ## 产品表面与系统边界
 
