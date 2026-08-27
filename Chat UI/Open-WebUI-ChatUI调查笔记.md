@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Svelte 组件与 store、`Chat.svelte` 会话状态机、Overview 消息树图组件、`MessageInput` 输入区）；界面视觉、焦点与键盘可用性未运行验证
 >
@@ -70,6 +70,7 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
   模型列表经 `ModelSelector.svelte`（90 行）选择，`selectedModels` 支持多选（side-by-side）；
 - 界面上的配置入口：Composer 旁的模型选择器、工具/技能/终端选择（`selectedToolIds`/`selectedSkillIds`，`Chat.svelte:3095-3117`）；参数设置由 `SettingsModal.svelte`（1281 行）承载，工具服务器与技能选择另有专门弹窗。
+- 输入菜单还允许把工具执行切换为完整访问或逐次确认。选择逐次确认时，未结算的工具调用会留在消息 output 中，待用户允许或拒绝后再恢复生成；该按钮只写入聊天参数，可信状态迁移在服务端完成（`Chat.svelte:418-469`、`MessageInput/InputMenu.svelte:56-63`）。
 - 作用域辨认：`@` 提及内联切换 `atSelectedModel`（单次会话模型覆盖，`MessageInput.svelte:1148-1151`），会话参数 `params` 在创建会话时持久化（对话请求与上下文笔记 1.1 第 4 步）。配置项在界面上的作用域标识（全局/会话/本次）未运行验证。
 
 ## 5. 发送、排队、流式反馈与停止

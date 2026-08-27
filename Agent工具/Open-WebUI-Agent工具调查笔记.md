@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：只读源码核对（utils/middleware.py 工具主循环、tools/builtin.py 内置工具、utils/tools.py、routers/tools.py、utils/filter.py、functions.py、utils/mcp、utils/subagents、代码解释器）；未修改目标仓库
 >
@@ -27,6 +27,7 @@ Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，而不
 - 子代理（Sub-agents）是内部 API 重入：`delegate_task`（builtin.py 1520 行）→ `utils/subagents.py: delegate`（270 行）创建独立 chat（`internal_meta` type=subagent）→ `_build_request` 伪造带 `typ: 'subagent'` token 的内部请求 → 递归调用 `CHAT_COMPLETION_HANDLER`。后台模式用信号量限流（上限 `subagents.max_concurrent`/`max_async`）；子代理内部禁用写类 memory 工具（`MUTATING_MEMORY_TOOLS`）。
 - Filter/Pipeline 是两条并行通道：本地函数插件经 `utils/filter.py` 的 `process_filter_functions`（197 行）按 inlet/stream/outlet handler 执行；远程 pipeline 服务器经 HTTP POST 到 `{url}/{filter_id}/filter/inlet|outlet`；执行顺序：Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files；
 - Valves 配置全部经 Fernet 加密存储（utils/valves.py），`WEBUI_SECRET_KEY` 派生密钥，`ENABLE_VALVE_ENCRYPTION` 开关；
+- 工具审批可在请求参数中选择“完整访问”或“逐次询问”。后者由服务端把首个待执行调用持久化为 pending、其余调用标为 queued；恢复请求会拒绝已结算的调用，并沿原会话参数继续执行。`ask_user` 不进入这条审批暂停链（`utils/middleware.py:3250-3428`、`utils/tool_approval.py:54-156`）。
 - 前端工具 UI 在 `MessageInput/IntegrationsMenu.svelte`（集成菜单的 Tools tab），非独立 Tools.svelte；工作区管理页 `workspace/Tools.svelte` 负责上传/编辑/Valves。
 
 ## 1. 内置工具生态
@@ -175,6 +176,7 @@ process_chat_payload (2248)
 
 - 工具调用主循环：[`utils/middleware.py`](../../open-webui/backend/open_webui/utils/middleware.py)（2248、2197、4969、871、5325-5395 行）
 - 内置工具实现：[`tools/builtin.py`](../../open-webui/backend/open_webui/tools/builtin.py)
+- 审批状态、决议与恢复请求：[`utils/tool_approval.py`](../../open-webui/backend/open_webui/utils/tool_approval.py)（`resolve_tool_approval`、`build_tool_approval_resume_payload`）
 - kb_exec：[`tools/knowledge_fs.py`](../../open-webui/backend/open_webui/tools/knowledge_fs.py)（1125-1183 行）
 - 工具加载/注入：[`utils/tools.py`](../../open-webui/backend/open_webui/utils/tools.py)（267、520、943-982 行）
 - 工具 CRUD：[`routers/tools.py`](../../open-webui/backend/open_webui/routers/tools.py)

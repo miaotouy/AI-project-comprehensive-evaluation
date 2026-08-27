@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：只读通读根 README、后端 `backend/open_webui/routers/` 全部路由、`models/` 表模型、`utils/memory.py`、`utils/automations.py`、`tools/builtin.py`、`socket/main.py`、`socket/utils.py`、前端 `src/routes/` 路由与 `src/lib` API 客户端；未启动服务，未修改被调查仓库
 >
@@ -140,6 +140,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **完整主链**（调度与执行分两段）：
 - **调度**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:203`，每实例运行、轮询间隔默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务；
+- **规则边界**：带 COUNT 的 rrule 必须同时给出 DTSTART；解析器拒绝缺少该锚点的规则，避免有限次数的自动化被按无起点规则持续调度（`utils/automations.py:130-135`）。
 - **执行**：`execute_automation`（`automations.py:412`）复验所有者权限（被降权/停用即失败记录）→ 渲染 prompt 模板 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ 通知前端刷新列表 → 解析模型工具/特性/Filters（与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的无头请求调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 发布运行事件。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
 
 **主动性与取消**：完全后台主动；`toggle` 停用、`delete` 删除、`/{id}/run` 手动立即执行；限额系统防滥用。

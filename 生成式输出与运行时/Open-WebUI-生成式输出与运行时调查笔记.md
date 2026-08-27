@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：静态代码阅读，grep/glob 覆盖前后端关键词（artifact、code interpreter、pyodide、jupyter、iframe、notebook、embeds、files、execute），沿“生成->物化->展示->执行->编辑->保存->回流”链路逐段核对；未运行构建、服务或任何执行流程
 >
@@ -20,7 +20,7 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 
 两类主要输出链路：
 
-1. **代码解释器链**（模型自由文本触发，XML 标签协议）：
+1. **代码解释器链**（legacy function-calling 模式下由模型自由文本触发，XML 标签协议）：
    模型流式输出 `<code_interpreter>` 标签，`tag_output_handler` 切分消息并创建 `open_webui:code_interpreter` output item（逐 chunk 累积 code）；流结束后 `middleware.py:5325` 循环执行（最多 5 轮）：
    - pyodide 引擎：经 `get_event_call`（`socket/main.py`，`sio.call` 带超时）向本人生动会话发 `execute:python` RPC，`src/routes/+layout.svelte:556` 收到后送共享 Pyodide worker/沙箱执行，回调回传 `{stdout, stderr, result}`；
    - jupyter 引擎：经 `backend/open_webui/utils/code_interpreter.py` 连远端 Jupyter，base64 图片转换为 files 记录 URL。
@@ -34,8 +34,8 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 ## 1. 触发方式、输出协议与对象模型
 
 **代码解释器**：私有 XML 标记协议，不是 typed part。
-- **协议与注入**：系统提示注入（`backend/open_webui/config.py:456-471`）为 `<code_interpreter type="code" lang="python"></code_interpreter>`，要求“用标签包裹后立即停止”，禁止反引号。
-- **五重门控**（`backend/open_webui/utils/middleware.py:4129-4142`）：功能开关 `features.code_interpreter`、模型 `builtinTools.code_interpreter`、全局 `code_interpreter.enable`、模型 capabilities、用户权限 `features.code_interpreter`。
+- **协议与注入**：legacy 模式的系统提示注入（`backend/open_webui/config.py:456-471`）要求用 `<code_interpreter>` 标签包裹后立即停止；native function-calling 模式改由内置工具执行，不再用标签探测。
+- **五重门控**：XML 检测还要求请求的 `function_calling` 为 legacy，之后才检查功能开关、模型内置工具标记、全局配置、模型 capabilities 与用户权限（`backend/open_webui/utils/middleware.py:4583-4598`）。
 - **流式检测**：检测器 `tag_output_handler`（`middleware.py:3792`）用“已扫描长度 + 回看窗口”处理半截流，`extract_attributes` 解析标签属性（lang/type），结束标签出现时 `end=True` 立即收口（`middleware.py:4773-4781`）。误触发风险由门控和标签完整性共同控制。
 - **防重跑回填**：`convert_output_to_messages` 中 `open_webui:code_interpreter` 和 output 文本会转成 `<code_interpreter>`/`<code_interpreter_output>` 回填（`backend/open_webui/utils/misc.py:445-462`），防止模型重跑。
 

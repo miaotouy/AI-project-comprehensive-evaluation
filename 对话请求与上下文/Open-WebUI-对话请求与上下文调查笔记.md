@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：直接阅读源码（FastAPI 主入口与生成管线 `utils/middleware.py`、任务调度 `tasks.py`、Socket.IO 通道 `socket/main.py`、前端 `Chat.svelte` 发送链与事件分发）
 >
@@ -111,6 +111,8 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 3. 缓冲：`queue_pending_delta_data`（4203 行）按 delta_count/delta_chunk_size 聚合 delta；
 4. 工具与收尾：SSE `data:` 前缀解析、多轮工具调用（`execute_tool_call`，4969 行）、结束处 `publish_chat_finished_event`（5538 行）+ `outlet_filter_handler`（5552 行）+ `background_tasks_handler`（5553 行）；
 5. 取消包装：`stream_wrapper` 重试/取消包装（5600 行，取消时 `aclose` 上游 body 并保存半截状态 5554-5574 行）。
+
+Responses 事件在流式期间已累积 output item 时，即使最终 completed 事件给出空 output 也保留累积结果；独立的 output-item 完成事件同样会合并进当前输出。这避免把已显示的 Responses 文本在收尾阶段覆盖为空（`utils/middleware.py:805-913`）。
 
 ### 5.3 前端消费（Chat.svelte）
 

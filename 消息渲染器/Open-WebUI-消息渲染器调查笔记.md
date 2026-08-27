@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：只读源码核对（src/lib/components/chat/Messages 组件树、src/lib/utils/marked 扩展、src/lib/utils/index.ts、Artifacts/代码执行相关）；未修改目标仓库
 >
@@ -48,6 +48,8 @@ content (流式累加)
   -> MarkdownTokens.svelte 逐 token 渲染（150-583 行）
   -> 块级组件（CodeBlock / details / HTMLToken / KatexRenderer / SourceToken ...）
 ```
+
+Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subject 作为标题、用 recipient 补充标题行；未带这些属性时仍显示 fence 类型。属性只在扩展定义的区块首行解析，未闭合或非花括号形式不会作为元数据采纳（`src/lib/utils/marked/colon-fence-extension.ts:12-38`、`Markdown/ColonFenceBlock.svelte:21-26`）。
 
 - `Markdown.svelte` 的 `<script context="module">`（1-28 行）用 `marked.use(...)` 注册全部扩展；
 - token 覆盖共 14 类，逐一有对应渲染分支：

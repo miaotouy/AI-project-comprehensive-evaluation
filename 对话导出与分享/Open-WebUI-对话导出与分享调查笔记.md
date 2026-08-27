@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：静态源码调查（未运行应用）；追踪聊天页与侧边栏的导出/分享入口、PDF 两种生成路径、/s 分享页、后端 share 端点与 shared_chat 快照表、access_grants 权限模型、社区分享与统计导出、DataControls 的 JSON 往返；未运行浏览器与后端服务
 >
@@ -108,6 +108,7 @@ PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Nav
 
 - 载体：站内快照 URL `{origin}/s/{uuid4}`（`ShareChatModal.svelte:31`），token 为 UUID，无枚举目录。`/s/[id]` 页面（`src/routes/s/[id]/+page.svelte`）无服务端加载逻辑，纯客户端拉取 `GET /chats/share/{share_id}`。
 - 快照语义：`GET /chats/share/{share_id}` 返回 shared_chat 快照行的 ChatModel 视图（`backend/open_webui/models/chats.py:1519-1538`）；它与源会话分离，源会话后续变化不自动反映，需显式“更新链接”重新快照。分享时复制会话 JSON，不复制附件。
+- 只读查看他人会话时，聊天页会按快照的 user_id 取得原作者资料，并把它传给消息列表和 Overview；因此头像等作者归属以会话所有者而不是当前查看者为准（`src/lib/components/chat/Chat.svelte:372-397,4086-4087`）。
 - 可见性三态（前端编辑入口 `AccessControl.svelte:217-245`；后端判定与过滤见 `backend/open_webui/utils/access_control/__init__.py:220-289`）：
   - private：无 `*` 授权，仅显式 user/group 授权可读；
   - public：`user:* read`，任一登录用户可读（`access_grants.py:562-620`）；

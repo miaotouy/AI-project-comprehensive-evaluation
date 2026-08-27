@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：只读源码核对（models/models.py 数据模型、routers/models.py、utils/models.py 模型解析、main.py 参数合并、routers/openai.py 与 ollama.py 的角色生效、前端 ModelEditor/ModelSelector）；未修改目标仓库
 >

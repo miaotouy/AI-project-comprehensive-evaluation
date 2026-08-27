@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`01f4282f1ffe0d6212f58d3afbeae21fffd0c4be`（分支：`main`）
+> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
 >
 > 调查方式：直接阅读源码（FastAPI 路由与模型层、Socket.IO 事件处理、Alembic schema 版本、前端 store）
 >
@@ -167,6 +167,7 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 ## 6. 缓存、一致性、多窗口与并发写入
 
 - **双写对齐是单向的**：`reconcile_messages_by_chat_id`（`models/chats.py:898-907`）只把快照消息 upsert 进表，不推断删除——`POST /{id}` 的合并策略（`merge_history`，773-793 行）同样只合并不删，前端并发快照与后端一致性的边界被明确划定；
+- **批量回填**：一次对齐会先筛出带 role 的消息，再交给 `ChatMessages.upsert_messages` 在一次数据库事务中写入；仍然是 best-effort 回填，失败只记录整次 chat 的告警，不改变快照为权威源的方向（`models/chats.py:1002-1015`、`models/chat_messages.py:294`）。
 - **流式增量落库**：生成中 `update_db=True` 的事件按类型写表（`socket/main.py:997-1092`），事件类型到写入行为的映射如下：
   ```text
   status → status_history 追加
