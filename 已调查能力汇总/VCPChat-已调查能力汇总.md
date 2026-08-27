@@ -2,25 +2,25 @@
 
 > 汇总对象：`VCPChat`（远端仓库 `https://github.com/lioensky/VCPChat`）
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
-> 依据：Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时十二个类目的单项目笔记；除 LLM渠道管理外均指向代码快照 `fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支 `main`）
+> 依据：Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时十二个类目的单项目笔记；既有结论除 LLM渠道管理外均指向代码快照 `fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支 `main`），受管启动、恢复与图形安装器条目补查至 `89e02b778d626078be91dfbad01e5c9554c47f76`（分支 `main`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；异常项（声明不符/暂缓/入口确认未闭合/未覆盖）集中到末尾"已知边界与待验证事项"小节
 >
-> 汇总范围：本次覆盖上述十二类目笔记的已调查结论；未做新的源码调查，未做跨项目横向比较
+> 汇总范围：保留上述十二类目笔记的已调查结论；本次仅补充独特功能笔记中的受管启动、恢复与图形安装器主链及测试证据，未做跨项目横向比较
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
 ## 项目概览
 
-VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 后端协议建立的"AI 原生桌面运行时"：聊天、桌面挂件、记忆工作台、人类工具面、移动同步和插件系统共享同一套 `AppData/` 文件事实源，由前端私有标记协议与后端工具链驱动。聊天以 Agent 或 AgentGroup 为一级会话主体、Topic 为二级会话单位；模型推理与流式输出由外部 VCP 服务器承担，客户端通过 HTTP 流式读取。除聊天主链外，项目还合仓了 Rust 音频引擎、Rust 历史索引服务（VCP-CDS）、Rust 桌面感知 sidecar、独立的分布式节点子进程和多个旁路子窗口应用。独特功能密度高：十六项候选中十五张能力卡达到 `主链确认`，能力覆盖与状态计数见下一节。
+VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 后端协议建立的"AI 原生桌面运行时"：聊天、桌面挂件、记忆工作台、人类工具面、移动同步和插件系统共享同一套 `AppData/` 文件事实源，由前端私有标记协议与后端工具链驱动。聊天以 Agent 或 AgentGroup 为一级会话主体、Topic 为二级会话单位；模型推理与流式输出由外部 VCP 服务器承担，客户端通过 HTTP 流式读取。除聊天主链外，项目还合仓了 Rust 音频引擎、Rust 历史索引服务（VCP-CDS）、Rust 桌面感知 sidecar、独立的分布式节点子进程和多个旁路子窗口应用。近期又增加独立的受管启动、恢复和安装器链，将桌面应用的维护交付从既有聊天运行时中分离。独特功能密度高，能力覆盖与状态计数见下一节。
 
 ## 完成度速览
 
 | 证据状态 | 条目数 | 说明 |
 | --- | ---: | --- |
-| 主链确认 | 23 项 | 16 张独特能力卡（含 DeepMemo 2A、卡 10 的机制与 Loom 主体）+ 7 项旁路产品面（双语朗读、3D 骰子、论坛、RAG Observer、语音聊天、笔记、翻译） |
+| 主链确认 | 24 项 | 17 张独特能力卡（含 DeepMemo 2A、卡 10 的机制与 Loom 主体、受管启动与安装器）+ 7 项旁路产品面（双语朗读、3D 骰子、论坛、RAG Observer、语音聊天、笔记、翻译） |
 | 入口确认 | 6 项 | 卡 10 两个渲染器插件本体、任务台、VchatManager、VCPLog 日志中心、分布式多模态文件追踪的节点侧 |
 | 归并已有类目 | 5 项 | 日记渲染、群聊发言模式、Canvas 协作、转发入口、VCPDesktop 渲染与流式 |
 | 声明不符 | 11 项 | README 声明核对（8 项 + 群文件/ST 角色卡/VCPLog WS）；能力卡局部边界另计 2 项（气泡评论未实现、工作流编辑器 README 陈旧）；另有骨架/未接线 4 项（主题系统、lyricFetcher/weatherService/modelUsageTracker） |
@@ -97,7 +97,8 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - **能力卡 12：Agent 自主管理 Topic（TopicSponsor）** — `主链确认`：分布式插件直接读写 `AppData/Agents|UserData` 创建话题、回复话题、检查所有权/未读，与 FlowLock 的 CreateFlowlockTopic 交接构成闭环；跨 Agent 回复是仅 VCP 系出现的拓扑。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md) 与 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
 - **能力卡 13：VCP Hi-Fi 音频引擎与音乐播放器** — `主链确认`：自研 Rust 解码/DSP/WASAPI 独占输出引擎（Symphonia 解码、FIR EQ 真实卷积、EBU R128 响度、SoX VHQ 重采样、无缝隙切歌、WebDAV 曲库）+ Agent 点歌工具（MusicController）+ 桌面音乐挂件；Agent 点歌时得到曲目元数据注入。README 多项 Hi-Fi 声明不符（DSD 硬解码、AI 歌词创作、音乐实时听音，见末尾小节）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md) 与 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
 - **能力卡 14：划词小助手（Rust 桌面感知引擎）** — `主链确认`：Rust sidecar 经 Windows UIA/macOS/Linux 捕获系统级划选文本，悬浮动作条（翻译/总结/解释/搜索/配图）内用独立对话窗口处理并回话，会话保存为真实 Agent 话题。README 声称的"全域右键呼出"与"文件夹工作区模式"未实现（见末尾小节）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
-- **能力卡 15：Scriptorium 共笔文坊** — `主链确认`（b6ffa22 → fb66a52 范围新增）：本地富文档/演示创作空间（VDOCX/VPPTX 工程、ZIP 容器 + document.json + SHA-256 内容寻址资源），人类直接编辑渲染版式，Agent 经 ScriptoriumCollaborator direct 插件以"可审阅 PR"（文脉刻点 + 审批回执 + 修订冲突保护）协作编辑源码；这是聊天侧之外第一套带独立对象模型、版本与冲突语义的协作面。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md) 与 [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
+- **能力卡 15：Scriptorium 共笔文坊** — `主链确认`：面向 AI 操作的多模态文档与演示工作台。VDOCX 使用 Markdown-first 混合真源（可保留 HTML、LaTeX、Mermaid 与可编程岛），VPPTX 使用逐页 HTML Scene；两者都不从渲染 DOM 回推保存。Agent 通过 ScriptoriumCollaborator 获取结构、章节、源码、视口源码和视觉上下文，其中视觉上下文同时返回语义摘要与截图，再以带 revision 和署名的 PR 提交修改，等待人工或 UI 自动允许策略审批。工程可管理图片、视频、音频和交互内容，并支持导入 HTML/MD/TXT/RTF/DOCX/PPTX、导出自包含 HTML/PDF。真实编辑、媒体、截图和审批尚未运行验证。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md) 与 [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
+- **能力卡 16：受管启动、恢复与图形安装器** — `主链确认`（fb66a52 → HEAD 范围新增）：独立入口先执行只读 Doctor，只有用户显式授权才修复，随后以 operation lock 和 main/preload/renderer ready 记录完成启动 handoff；恢复 UI 可取消受管进程树。更新使用签名 manifest、staging、闭包与健康检查，失败回滚；图形安装器对 dirty 源码树提供命名 stash、fast-forward 更新与恢复。边界：未做 Electron/Tauri 或跨平台实机安装更新，安装器契约测试有一条 ready 发布顺序的静态断言失败（16/17 通过）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 
 **归并已有类目项**（只记归并去向，不重复展开）：
 
@@ -147,6 +148,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - 数据层语义缺口：分支数据模型（树/指针/复制未核实）、消息编辑/重试/续写的数据变更语义、Topic 删除与恢复、导入导出与跨版本迁移均未在原调查中核实。见 [会话与消息管理调查笔记](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md)。
 - 请求层未核实：单聊上下文拼装顺序、附件如何进入请求体、重试/续写的请求重建语义（从哪个节点选起始上下文）未核实。见 [对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md)。
 - 旁路机制未核实：TopicSponsor 创建普通话题后侧栏的即时刷新机制（前端重读 config 而非订阅）、草稿保存粒度、多窗口聊天状态同步、切换会话/退出时任务收尾行为。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md) 与 [ChatUI调查笔记](<../Chat UI/VCPChat-ChatUI调查笔记.md>)。
+- 受管启动与安装器：Bootstrap 契约 46/46 通过，但安装器契约中 ready 发布顺序的静态正则断言未匹配当前 `main.js`（16/17 通过）；真实 Electron/Tauri handoff、签名安装、Windows/Linux 实机、生产公钥轮换和网络故障恢复仍未验证。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 - Agent 正则的"content 数组正则"：README 声称的作用点未定位到实现，`applyFrontendRegexRules` 与上下文路径均只处理字符串（能力卡 8 边界）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 - 前端插件本体（能力卡 10）：VChatDynamicWallpaper、VChatAutoTTS 两个渲染器插件仅确认注册与加载机制，插件本体 UI 行为与开关界面未运行验证。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 
@@ -156,7 +158,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - 已确认的可靠性风险（静态证据，未实际触发验证）：`history.json` 裸数组整份覆盖写、无原子写（进程崩溃可能截断）；群聊多次调度之间无文件锁（并发覆盖写丢消息风险）；单聊中断无本地 abort/无客户端超时；话题自动总结单聊无超时保护；话题内容搜索对多模态数组有盲点。见 [会话与消息管理调查笔记](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 与 [Chat调查笔记](../Chat/VCPChat-Chat调查笔记.md)。
 - 测试覆盖现状：`tests/` 顶层 7 个文件覆盖前端插件、Loom 控制器/适配器/管理器、DeepMemo 与移动同步适配器；另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"，未纳入运行）；未找到针对聊天渲染管线、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试；Flowlock 等核心模块无自动化测试覆盖。见 [仓库分布调查笔记](../仓库分布/VCPChat-仓库分布调查笔记.md) 与 [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
 - 来源笔记的调查对象路径此前存在标注差异（`E:\works\GitStudyNotes\VCPChat` 与改名前的 `E:\works\git\VCPChat`），已统一为远端链接 `https://github.com/lioensky/VCPChat`；全部十二份来源笔记均存在且结论摘要可识别，无缺失。
-- 特色贡献统计建议（见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md) 相关口径）：主贡献候选为高级回复、Memo 工作台、VCPDesktop 持久挂件、FlowLock、人类工具箱、工作流编辑器、Agent 正则系统、VCPMobileSync、LoomAPP 运行时、音频引擎、划词小助手、Scriptorium 文坊；辅助贡献为跨聊天转发、前端插件机制、双语混合朗读、3D 骰子、RAG Observer。
+- 特色贡献统计建议（见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md) 相关口径）：主贡献候选为高级回复、Memo 工作台、VCPDesktop 持久挂件、FlowLock、人类工具箱、工作流编辑器、Agent 正则系统、VCPMobileSync、LoomAPP 运行时、音频引擎、划词小助手、Scriptorium 文坊、受管启动与安装器；辅助贡献为跨聊天转发、前端插件机制、双语混合朗读、3D 骰子、RAG Observer。
 
 ## 来源笔记索引
 

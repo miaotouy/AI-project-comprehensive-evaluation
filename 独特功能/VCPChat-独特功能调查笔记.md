@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fb66a52dd038a6fd147ee91cd1a39fe17555867e`（分支：`main`）
+> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
 >
-> 调查方式：汇总现有十类单项目笔记，对十六项候选逐一走读源码主链（入口 → 状态/对象 → 执行 → 用户结果 → 持久化），核对模块注册（`main.html`、`main.js`、IPC handlers、`VCPDistributedServer` 插件目录）与近期 Git 历史；补充音频引擎专项（`rust_audio_engine` 源码 + `audio_engine` 部署产物 + `Musicmodules` + `musicHandlers.js` + MusicController 工具链）与旁路模块补查（划词小助手、主题、论坛、骰子、笔记、翻译、语音、TTS 族、RAG Observer、任务台、VchatManager、日志）；再核对 b6ffa22 → fb66a52 的 Loom v2/WebCore 升级与新增 Scriptorium 文坊子系统；未运行应用、未发起真实模型请求，全部结论为静态分析
+> 调查方式：汇总现有十类单项目笔记，对十六项候选逐一走读源码主链（入口 → 状态/对象 → 执行 → 用户结果 → 持久化），核对模块注册（`main.html`、`main.js`、IPC handlers、`VCPDistributedServer` 插件目录）与近期 Git 历史；补充音频引擎专项（`rust_audio_engine` 源码 + `audio_engine` 部署产物 + `Musicmodules` + `musicHandlers.js` + MusicController 工具链）与旁路模块补查（划词小助手、主题、论坛、骰子、笔记、翻译、语音、TTS 族、RAG Observer、任务台、VchatManager、日志）；再核对 b6ffa22 → fb66a52 的 Loom v2/WebCore 升级与新增 Scriptorium 文坊子系统；本次补查 fb66a52 → HEAD 的受管启动、恢复、更新和图形安装器链，并运行 Bootstrap 与安装器契约测试；未运行 Electron、Tauri 或真实更新，其他结论以静态分析为主
 >
-> 调查范围：待查清单中 VCPChat 的全部候选能力 + 音频引擎/音乐播放器专项 + 上轮排除与遗漏的旁路产品面补查；去重边界以现有类目笔记为准（群聊发言模式、Canvas、日记渲染、桌面挂件渲染等已有笔记覆盖的部分只补交点）
+> 调查范围：待查清单中 VCPChat 的全部候选能力 + 音频引擎/音乐播放器专项 + 上轮排除与遗漏的旁路产品面补查；本次覆盖受管启动与安装器的完整主链、更新边界和测试证据；去重边界以现有类目笔记为准（群聊发言模式、Canvas、日记渲染、桌面挂件渲染等已有笔记覆盖的部分只补交点）
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -32,6 +32,8 @@ VCPChat 是待查清单中独特功能密度最高的项目之一：十六项候
 12. **Agent 自主管理 Topic（TopicSponsor）**：分布式插件直接读写 `AppData/Agents|UserData` 创建话题、回复话题、检查所有权/未读，与 FlowLock 的 `CreateFlowlockTopic` 交接构成闭环。
 
 b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium 共笔文坊（VCP Scriptorium）**——本地富文档/演示创作空间（VDOCX/VPPTX 工程、DOCX/PPTX/MD/HTML/RTF/TXT 导入、HTML/PDF 导出），人类直接编辑渲染版式，Agent 经 `ScriptoriumCollaborator` direct 插件以"可审阅 PR"（文脉刻点 + 审批回执 + 修订冲突保护）协作编辑源码。详见能力卡 15。
+
+fb66a52 → HEAD 范围新增第 14 条 `主链确认` 能力：**受管启动、恢复与图形安装器**。它把源码版 VCPChat 的首次诊断、受控修复、启动就绪交接、可取消恢复、版本目录更新与回滚连为独立工作流；安装器还在源码树有本地修改时提供暂存、仅快进更新和恢复策略。该能力面服务于桌面应用的交付与维护，不改变既有聊天功能或原始启动脚本。详见能力卡 16。
 
 声明不符或依赖外部仓库的项：README 声称的"群文件/共享工作区/协同编辑"在本仓库未找到对应实现；"ST 预设、角色卡、世界书"在 VCPChat 前端无导入与管理入口（后端 VCPToolBox 才有）；"跨模态智能转译/全 URL 超栈追踪"的主服务器逻辑在 VCPToolBox，本仓库只确认节点侧 `internal_request_file` 拉取链；"跨端记忆"的中心记忆库同样位于后端。
 
@@ -60,6 +62,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 | 分布式多模态文件追踪与能力转译 | `入口确认`（节点侧）；追踪与转译在外部 | `internal_request_file` | 暂缓计入 |
 | 动态壁纸、自动 TTS、Loom 等前端插件 | `主链确认`（机制与 Loom）；`入口确认`（两个渲染器插件本体） | `frontend-plugin-loader.js` + manifest.frontend；Loom v1.4.0 + `modules/loom/webcore/*` | Loom 独立主贡献；插件机制辅助 |
 | Scriptorium 共笔文坊 | `主链确认` | `ScriptoriumModules/` + `docxHandlers.js` + ScriptoriumCollaborator 插件 | 主贡献（创作工作站族，能力卡 15） |
+| 受管启动、恢复与图形安装器 | `主链确认` | `scripts/vcpchat.mjs` + `modules/bootstrap/` + `apps/bootstrap-installer/` | 主贡献（多表面连续性/交付工作流，能力卡 16） |
 
 ## 已确认的独特能力
 
@@ -303,26 +306,29 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 - **独特性判断**：聊天客户端内置 Rust 系统级文本感知 sidecar（三平台 capture + Windows UIA 选区监听），同类客户端未发现同等方案；归入"人类工具面/桌面感知"聚类。
 - **证据强度**：Rust 捕获链、事件桥接、悬浮条与对话窗口为源码事实；真实划选触发、UIA 选区读取与三平台行为未运行验证。
 
-### 能力卡 15：Scriptorium 共笔文坊（人机协作文档工作台，b6ffa22 → fb66a52 范围）
+### 能力卡 15：Scriptorium 共笔文坊（面向 AI 操作的多模态文档与演示工作台）
 
-- **用户目标**：在同一工作台内完成"人类直接编辑渲染后的文档版式 + Agent 可审阅地修改文档源码"的富文档/演示创作，文档用 VCP 自有的 VDOC 工程模型（VDOCX 连续流文稿 / VPPTX 逐页演示，ZIP 容器 + `document.json` + SHA-256 内容寻址资源）而不是原位编辑 OOXML（`ScriptoriumModules/README.md`）。这是聊天客户端中罕见的"文档即协作对象"产品面。
+- **用户目标**：在同一工作台内完成"人类直接编辑渲染后的文档版式 + Agent 理解、查看并可审阅地修改同一份源码"的富文档/演示创作。它不是为传统 Office 文件外挂聊天窗口，而是以 VDOC 工程模型承载可阅读、可编辑和可运行的内容；VDOCX 为连续流文稿，VPPTX 为逐页演示，工程容器用 `document.json` 与 SHA-256 内容寻址资源组织（`ScriptoriumModules/README.md`、`vdoc-container.js`）。
 - **入口与触发者（用户侧）**：托盘应用栏"文坊"经 `trayManager.js:26` 的 `vchat-app-scriptorium` 触发 `open-scriptorium-window` 打开独立窗口（`desktopHandlers.js:779-781`，映射到 `WINDOW_APP_IDS.DOCX='docx-editor'`）。
 - **入口与触发者（IPC 注册与格式）**：主进程 `docxHandlers.initialize`（`main.js:1083-1092`）注册文档打开/保存/导入/导出 IPC（`modules/ipc/docxHandlers.js`，1,091 行）：管理 `.vdocx/.vpptx` 工程，导入支持 HTML/MD/TXT/RTF/DOCX/PPTX，导出 HTML/PDF；窗口 preload 见 `preloads/docx.js`（`PRELOAD_ROLES.DOCX`）。
 - **入口与触发者（Agent 侧）**：`ScriptoriumCollaborator` direct 插件（`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`，Service 818 行 + manifest，版本 2.1.0）经 `ScriptoriumAgentControlService`（`modules/services/scriptoriumAgentControlService.js`，428 行）操作当前窗口文档。
-- **事实对象（工程文件）**：`AppData/ScriptoriumDocument/VDOCX|VPPTX/` 下的 `.vdocx/.vpptx` 工程（`scriptoriumAgentControlService.js:133` 的 `documentRoot`）；源码 HTML 是唯一真相：VDOCX 为单份完整 source，VPPTX 每页一份 source 加共享 deckCss。
+- **事实对象（两类真源）**：工程位于 `AppData/ScriptoriumDocument/VDOCX|VPPTX/`。VDOCX 的唯一真源是 Markdown-first 的 `markdown-hybrid` 文稿与独立 document CSS，可原生保留 HTML、LaTeX、Mermaid 和可编程岛；VPPTX 的每页则是一份完整 HTML Scene，另有共享 deck CSS（`ScriptoriumModules/README.md`、`plugin-manifest.json:45-62`）。两者都不把渲染 DOM 作为保存对象。
 - **事实对象（文脉）**：**文脉（版本上下文）是工程数据**——人类刻点与 Agent PR 以五态（`pending/applied/rejected/conflict/failed`）进入同一条文脉，含操作元数据、changeSet、工程内嵌版本快照与审批回执；文脉可回溯，回溯前自动保存且不删后续文脉。
-- **完整主链（Agent 协作）**：Agent 调 ScriptoriumCollaborator 的感知命令（`GetDocumentInfo/GetRenderedText/GetOutline/GetSection/GetSource/SearchSource/GetViewportSource/GetVisualContext`）读取文档 → `SubmitSourcePr` 提交带唯一 source 的 PR（`AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`）→ 人类在文坊界面审阅/回执（pending/applied/rejected/conflict）→ 应用的修订进入文脉；`CreateDocument` 可直接创建并落盘完整 VDOCX/VPPTX 工程。
-- **导入链**：`scriptoriumImportService.js`（776 行，DOCX 语义导入）与 `scriptoriumPptxImportService.js`（439 行，PPTX 静态版式导入）。
-- **运行时**：工程源码是可编程内容——VDOCX/VPPTX 的 source 含文档级 `<style>`、正文 HTML 与内联交互 `<script>`（`vdoc-hybrid-compiler.js` 910 行编译，`scriptorium-programmable-content.js` 412 行，隔离 iframe 预览）；KaTeX 数学渲染、SVG 图形、对象环绕/锚点、80 步撤销历史。
-- **持续性与导出**：工程落盘 `AppData/ScriptoriumDocument/`；导出连续流/分页 HTML 与 PDF（资源转 `data:` 内联，Anime.js/Three.js 依赖嵌入单文件）。
-- **测试现状**：`tests/重构中禁用脚本/` 下 12 个 scriptorium 测试/冒烟脚本（约 3,620 行）与 `tests/test-export-inline.cjs`（210 行），主题覆盖如下；子目录名"重构中禁用脚本"表明测试当前被搁置，未纳入运行。
-  ```text
-  hybrid-compiler / importers / container / async / collaborator /
-  cdn-localization / export-resources / vpptx / electron-smoke
-  ```
-- **外部依赖**：无（纯本地）；原生 Office 文件仅作为导入源，不保证像素级还原（README 声明）。
-- **证据强度**：工程模型、PR 协议、导入导出与运行链均为源码事实；窗口内编辑体验、PDF 导出与实际审批流未运行验证。
+- **Agent 的观察面**：ScriptoriumCollaborator 先提供文档信息、渲染文本、分层目录、单章/源码检索和当前视口附近源码，因而长文档可按目录和章节读取，而不必把全文一次塞入上下文（`ScriptoriumCollaboratorService.js:565-631`、`plugin-manifest.json:25-57`）。`GetVisualContext` 另外返回 OpenAI content 数组，其中同时含 Markdown 语义摘要与实际 viewport 或指定演示页的 base64 截图；这才是它区别于只暴露 Markdown 的编辑器的 AI 多模态查看面（`ScriptoriumCollaboratorService.js:633-654`、`plugin-manifest.json:60-62`）。
+- **完整主链（Agent 编辑）**：Agent 先读取 revision、结构、源码或截图，再按追加、插行或精确替换提交 `SubmitSourcePr`。请求带 Agent 署名与 expected revision，先在窗口侧生成 PR，由人类或预设 UI 自动允许策略决定 applied、rejected、conflict 或 failed；超时也只保留提案，不会静默改写文档（`ScriptoriumCollaboratorService.js:784-806`、`plugin-manifest.json:70-72`）。已应用修订和审批回执进入工程文脉，形成可回溯的协作记录。
+- **创建与演示操作**：`CreateProject` 可以在不替换当前窗口的前提下直接落盘新的 VDOCX 或 VPPTX 工程；PPTX 另有 AddSlide、InsertSlide 和演示场景配置 PR。页面的完整源码可含样式、资源声明和交互脚本，运行时以注入的 scene 根限定页内查询（`ScriptoriumCollaboratorService.js:890-910`、`plugin-manifest.json:75-97`）。
+- **多模态与运行时边界**：工程可管理图片、视频和音频资源，VDOCX 还支持公式、SVG、对象锚点与 Mermaid；需要 Canvas、WebGL、动画或长期交互身份的内容必须放入有稳定 ID 的可编程岛。派生的 KaTeX DOM、Mermaid SVG、Canvas、截图和编辑标记都不回写成源内容（`ScriptoriumModules/README.md`、`scriptorium-media.js`、`scriptorium-programmable-content.js`）。
+- **导入、阅读与导出**：导入接受 HTML、Markdown、TXT、RTF、DOCX 和 PPTX，并将 Office 格式转换为新的 VDOC 工程，不承诺像素级原位编辑；导出可生成连续流或分页 HTML、PDF，资源会被本地化，演示导出物可脱离编辑器独立阅读或放映（`modules/ipc/docxHandlers.js:870-916/:1125-1192`、`scriptorium-export.js`）。
+- **证据与边界**：源码确认了 UI、工程持久化、Agent 端口、PR/文脉、导入导出和截图返回的完整静态链。`tests/重构中禁用脚本/` 内有 hybrid compiler、importer、容器、协作者、资源本地化和 VPPTX 的测试/冒烟脚本，但尚未纳入测试命令；本次没有运行真实编辑、媒体播放、截图、PR 审批或 Office 导入导出。
 
+### 能力卡 16：受管启动、恢复与图形安装器（fb66a52 → HEAD 范围）
+
+- **用户目标**：让源码版桌面应用在依赖缺失、原生模块不匹配、启动失败或更新中断时给出可解释的诊断和恢复路径，并把更新从工作树原地修改中分离出来。现有 `npm start`、BAT 和 VBS 入口保持原样；新入口是附加的托管工作流（`scripts/vcpchat.mjs:4-9`、`scripts/vcpchat-bootstrap.mjs:9-25`）。
+- **入口与对象**：开发者可用 `npm run vcpchat`，图形入口在 Windows/macOS/Linux 分别由 `launchers/VCPChat-Launcher.vbs`、`VCPChat-Setup.command` 和 `VCPChat-Launcher.sh` 定位 Tauri 安装器或恢复界面。核心状态并不写进聊天数据：启动 operation、ready 记录、修复日志、版本指针和锁都按项目根目录映射到独立 state root，避免同 lockfile 的不同 clone 共用状态（`modules/bootstrap/launch-protocol.js`、`scripts/vcpchat-dev-launcher.mjs:154-165`）。
+- **完整主链（启动与修复）**：托管入口先运行只读 Doctor；通过时写 completion marker 并启动 Electron，失败时只输出有预算的 repair plan。只有 `--repair --yes` 或图形界面中的明确确认才执行修复；修复结束再次 Doctor，失败则停止并转向恢复界面（`scripts/vcpchat.mjs:103-164`）。启动器获取 operation lock 后启动 Electron，必须收到同 operation、同 PID、主窗可见且 preload/renderer 都 ready 的记录才将所有权交回应用；超时、崩溃和已运行实例各有独立结果（`scripts/vcpchat-dev-launcher.mjs:77-128`、`:168-308`；`main.js:315-398`）。
+- **恢复、取消与资源边界**：恢复 UI 经独立 Electron 进程呈现修复计划和结构化进度，取消信号传给受管子进程树；平台层在 Windows 走 `taskkill /T`，在 POSIX 使用 detached process group 的终止策略（`bootstrap/recovery-main.cjs`、`modules/bootstrap/platform-process.js`）。修复清单以 lockfile 为身份基准，用 `npm ci` 与定向 native rebuild，Rust 或 vendor 修复保持 opt-in（`modules/bootstrap/repair-planner.js`、`tests/vcpchat-managed-bootstrap-m3-m8.test.mjs:23-94`）。
+- **更新与本地修改语义**：CLI 更新下载必须是 HTTPS、同源重定向、签名 manifest 和完整文件闭包校验；下载可用 `.part`/Range 续传，候选版本经 staging、磁盘/路径/symlink/hash 校验、ready 健康检查后才原子切换 current 指针，失败自动回滚（`scripts/vcpchat-update.mjs`、`modules/bootstrap/update-downloader.js`、`modules/bootstrap/update-manager.js`）。Tauri 安装器的源码更新先检查 upstream；有本地修改时须由用户选择命名 stash，更新仅允许 fast-forward，随后按记录的 stash OID 恢复。恢复冲突或更新后 Doctor 失败时，修改仍保留在可恢复的 stash 中（`apps/bootstrap-installer/src-tauri/src/lib.rs:290-380`、`tests/vcpchat-installer-git-update.test.mjs:68-123`）。
+- **证据与边界**：`npm run test:bootstrap` 的 46 项契约测试全部通过，覆盖锁、Doctor、显式修复、取消、跨平台进程边界、运行时闭包、签名下载、健康检查与回滚。`npm run test:installer-contract` 的 17 项中 16 项通过；失败的是 `main.js` ready 发布顺序的静态正则断言，源码仍存在 publish 调用（`main.js:364-368`），因此这只能证明测试断言与当前排版脱节，不能替代 Electron/Tauri 实机验证。Windows/Linux 安装、签名/公证、生产公钥分发、真实网络故障与长时更新均未运行确认；它是 Hermes-inspired 实现，不等同于已完成签名发布的独立产品安装器。
 ## 补查的旁路产品面与提案建议
 
 本表记录上轮排除（音频引擎、主题系统、论坛、骰子）与未覆盖区域（笔记、翻译、语音、TTS、RAG、任务、VchatManager、日志、划词小助手）的补查结果。除能力卡 13/14 外，其余模块按证据强度分级：
@@ -384,6 +390,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
   10. VCP Hi-Fi 音频引擎与音乐播放器——本机媒体/创作工作站聚类（能力卡 13；与 ComfyGen、Loom 并列为一个媒体能力族合计，还是单列，取决于横向统计口径，建议与 VCPToolBox 媒体插件族不重复计"生成"）；计入前提：以 `主链确认` 静态证据计，注明引擎为编译产物未验证；
   11. 划词小助手（Rust 桌面感知引擎）——人类工具面/桌面感知聚类（能力卡 14）。
 - **b6ffa22 → fb66a52 范围新增**：12. Scriptorium 共笔文坊——创作工作站/文档协作聚类（能力卡 15；Loom v1.4.0 升级计入既有 Loom 项，不重复计数）。
+- **fb66a52 → HEAD 范围新增**：13. 受管启动、恢复与图形安装器——多表面连续性/交付工作流聚类（能力卡 16）。它的用户价值是可恢复的桌面交付流程；更新与修复的可靠性机制单独标注，不与聊天能力混合计数。
 - **辅助贡献**：跨聊天消息转发与附言（Chat 工作流）；前端插件注册/注入机制（工程机制，单独标注）；双语混合朗读引擎（语音聚类）；3D 物理骰子与 RAG Observer 信息流监听（视统计口径可选）。
 - **不计入**：群文件/共享工作区、ST 预设/角色卡/世界书（前端）、跨模态转译闭环、"跨端记忆"本体、主题生成器、DSD 硬解码、AI 歌词创作、音乐实时听音、TTS"600% 剪枝"（均为声明不符）。
 - **机制贡献（单独标注，不与产品特性混分）**：正则与 Tavern 规则的安全屏蔽、Flowlock generation 防复活、VCPMobileSync 的原子写/墓碑/稳定哈希、挂件资源治理（定时器/监听器清理、性能打点、可见性冻结）、HumanToolBox 的 IPC 白名单与路径校验、音频引擎的路径穿越/SSRF 防护与无锁音频线程（assert_no_alloc 审计）、语音聊天的 Puppeteer 桥接方案。
@@ -400,6 +407,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 8. VCP-CDS（Rust）的中央索引模式仅确认了适配层与测试存在，未核实其查询/Change Feed 的完整行为。
 9. 两个渲染器前端插件（动态壁纸、自动 TTS）仅确认注册与加载机制，插件本体 UI 行为未验证；VChatAutoTTS 的双语自动朗读触发链为源码事实，合成效果未验证。
 10. `tests/` 顶层现有 7 个文件（frontend-plugins、loom-controller、loom-electron-adapter、loom-manager-runtime、deepmemo-central-adapter、mobile-sync-central-adapter 六个测试 + test-export-inline.cjs），另有 `tests/重构中禁用脚本/` 子目录 12 个 scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"，未纳入运行）；Flowlock 等核心模块无自动化测试覆盖；音频引擎未见测试目录。
+11. 受管启动与安装器未运行 Electron、Tauri、签名安装包或真实网络更新；`test:installer-contract` 的 ready 发布顺序静态断言在当前 `main.js` 失败（16/17 通过），需以修正断言后的测试和实机 handoff 结果补证。
 
 ## 关键源码索引
 
@@ -413,6 +421,7 @@ b6ffa22 → fb66a52 范围新增第 13 条 `主链确认` 能力：**Scriptorium
 - `VCPHumanToolBox/`：`renderer_modules/config.js`（工具定义）、`renderer_modules/tool-manager.js`（插件导入与参数解析）、`WorkflowEditormodules/WorkflowEditor_ExecutionEngine.js`（工作流执行）、`ComfyUImodules/ComfyUI_UIManager.js`（ComfyGen 面板）；`VCPHumanToolBox/README.md` §8（与代码矛盾的陈旧说明）。
 - `VCPDistributedServer/frontend-plugin-loader.js` + `modules/ipc/desktopHandlers.js:96-120`：前端插件注册与注入；`modules/loom/VCPLoomManager.js`（2,076 行）+ `modules/loom/webcore/*` + `VCPDistributedServer/Plugin/LoomController/`（1.4.0）：LoomAPP 运行时、WebCore 页面感知与动作命令。
 - Scriptorium：`ScriptoriumModules/`（scriptorium.js/scriptorium.html/vdoc-hybrid-compiler.js/vdoc-core.js 等，README.md 为权威说明）、`modules/ipc/docxHandlers.js`、`modules/services/scriptorium{AgentControl,Import,PptxImport}Service.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/`、`preloads/docx.js`、`main.js:1083-1092`（初始化）；`tests/重构中禁用脚本/`（12 个测试/冒烟脚本）。
+- 受管启动与安装：`scripts/vcpchat.mjs`（诊断/显式修复入口）、`scripts/vcpchat-bootstrap.mjs`（命令分发）、`scripts/vcpchat-dev-launcher.mjs`（operation lock、ready 与 handoff）、`scripts/vcpchat-update.mjs`（版本更新）、`modules/bootstrap/`（Doctor、修复、运行时闭包、进程边界、下载与回滚）、`bootstrap/`（恢复 UI）、`apps/bootstrap-installer/`（Tauri 图形安装器）、`launchers/`（三平台图形入口）、`tests/vcpchat-{bootstrap,managed-bootstrap-m3-m8,platform-boundary,installer-contract,installer-git-update}.test.mjs`。
 - `VCPDistributedServer/Plugin/VCPMobileSync/`（manifest/diff/message/central）与 `rust_chat_data_service/README.md`：跨端同步与中央索引。
 - `VCPDistributedServer/VCPDistributedServer.js:605-644`：节点侧 `internal_request_file` 文件拉取；`:656-687`：MusicController 工具注入调用；`:689-694`：SuperDice 注入调用。
 - `modules/renderer/messageContextMenu.js:211-220` + `renderer.js:2426-2564` + `modules/chatManager.js:1607-1651`：转发与附言主链。
