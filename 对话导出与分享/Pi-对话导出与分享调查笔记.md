@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：静态源码调查；读取 TUI 的 `/export`、`/import`、`/share`、`/copy` 处理链，`export-html` 模板（index/template.html/template.js/template.css/ansi-to-html/tool-renderer），SessionManager 树模型与 JSONL 读写，CLI `--export`、RPC `export_html`，`.pi/extensions/import-repro.ts`，`.github/workflows/issue-analysis.yml`，README 与 docs；未运行应用、浏览器、GitHub CLI 或 Hugging Face 操作
 >
@@ -143,7 +143,11 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 - 超大会话导出的 HTML 体积与内存表现、`gh gist create` 在大文件上的行为——未运行。
 - 自定义工具预渲染 HTML 注入的 XSS 实际风险——依赖第三方工具渲染器输出，未评估。
 
-## 13. 关键源码索引
+## 13. 分享载荷与交付路径
+
+`/share` 先导出当前分支的 JSONL，再在已配置且具备有效凭据时上传至 Radius 的组织可见 artifact；导出的附加 custom entry 包含本轮实际 system prompt 和激活工具的名称、描述与参数 schema。上传成功后只显示 artifact 的 canonical URL。没有 Radius provider 或凭据时，才退回以 `gh gist create --public=false` 创建私密 gist 的旧路径（`packages/coding-agent/src/modes/interactive/session-share.ts:24-151`）。因此分享内容的上下文完整度提高，但 Radius artifact 与 gist 分别受其外部平台的可见性和留存规则约束。
+
+## 14. 关键源码索引
 
 - `packages/coding-agent/src/modes/interactive/interactive-mode.ts`（`/export`、`/import`、`/share`、`/copy` 处理：5773-5972；分发：2895-2914）
 - `packages/coding-agent/src/core/agent-session.ts`（`exportToHtml` 3225-3241、`exportToJsonl` 分支线性化 3249-3280）

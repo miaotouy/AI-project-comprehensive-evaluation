@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/agent-session.ts`、`packages/coding-agent/src/core/compaction/`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/agent/src/agent.ts`、`packages/agent/src/agent-loop.ts`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`AgentSession.prompt` 主链路全量、`Agent`/`runLoop` 工具循环、compaction 模块、流式事件到 TUI 的消费点），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
 >
@@ -122,7 +122,11 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 - abort 的网络级取消与断网重连未验证。
 - 未运行交互会话；结论来自静态源码。
 
-## 12. 关键源码索引
+## 12. 摘要请求与扩展消息顺序
+
+压缩与分支摘要走独立的简单完成请求，不再强制传入 `toolChoice: "none"`，但摘要请求本身也不会附带工具目录；这避免了部分 provider 对显式工具选择的兼容问题，同时保持摘要模型不能发起本轮工具调用的边界。扩展以 `triggerTurn: false` 记录的 custom 消息，若发生在工具执行中的回合，会在该回合工具结果之后追加，保证回放给 provider 的工具调用与结果保持相邻（`packages/coding-agent/CHANGELOG.md` 的 Unreleased 修复项）。
+
+## 13. 关键源码索引
 
 - `packages/coding-agent/src/core/agent-session.ts:1116-1273`：prompt 主链路；`610-681`：事件处理与落盘；`2686-2736`：重试；`1343-1408`：steer/followUp；`1962-2053`：压缩判定
 - `packages/coding-agent/src/core/session-manager.ts:418-470`：上下文构建

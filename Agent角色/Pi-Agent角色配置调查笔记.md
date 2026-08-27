@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/` 的 system-prompt、resource-loader、settings-manager）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：只读源码梳理 system prompt 拼装、资源文件发现规则与设置合并；未运行交互会话
 >

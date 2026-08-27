@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`）
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -269,7 +269,11 @@ StdinBuffer 把批量输入拆成单序列（`stdin-buffer.ts`），bracketed pa
 - 扩展 overlay 模式仅确认 API 存在，无仓库内运行实例。
 - 进程级错误兜底（uncaughtCrash/emergencyTerminalExit）的触发路径未实测。
 
-## 10. 关键源码索引
+## 10. 终端能力配置
+
+终端链接、图片协议和真彩色能力除了环境探测外，也可由设置中的 `terminal` 对象或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量覆盖。设置层只接受明确的布尔值或受支持图片协议，未指定时保留自动探测；该能力决定链接、图片和色彩的投影策略，不改变消息内容或会话数据（`packages/coding-agent/src/core/settings-manager.ts:43-47,1135-1138`、`packages/tui/src/terminal-image.ts:143-170`）。
+
+## 11. 关键源码索引
 
 - `packages/tui/src/tui.ts`：`showOverlay`/`OverlayHandle`（`:549-642`）、`compositeOverlays`（`:1092-1151`）、渲染调度（`:765-817`）、OSC 11/颜色方案/cell size 查询（`:1207-1255`）
 - `packages/tui/src/tui-main-screen.ts`：`doRender` 差分渲染与 resize 处理（`:180-547`）、超宽行崩溃（`:447-474`）

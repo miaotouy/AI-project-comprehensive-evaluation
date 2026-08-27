@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/session-manager.ts`、`packages/coding-agent/src/core/agent-session.ts`、`packages/agent/src/harness/session/`、`packages/agent/src/search/`、`packages/session-backends/sqlite-node/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`SessionManager` 全文件通读、harness JSONL 后端、搜索模块、sqlite 后端包、TUI 删除入口），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
 >
@@ -148,7 +148,12 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 - 版本迁移的边界情况（中断迁移、损坏文件）未验证。
 - 未运行交互会话；结论来自静态源码。
 
-## 11. 关键源码索引
+## 11. 恢复与压缩边界
+
+- 继续会话时，若既有 JSONL 文件末尾缺少换行，追加前会补齐分隔，避免后一条 entry 与前一条粘连；该恢复修正覆盖正常续写路径，而不是改变会话树的数据模型（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 修复项）。
+- 压缩和分支摘要不会向 provider 暴露可调用工具；若摘要在输出 token 上限处截断，结果不会写入会话。扩展还能收到带失败原因、重试状态和来源的 `session_compact_failed` 事件（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 相关条目）。
+
+## 12. 关键源码索引
 
 - `packages/coding-agent/src/core/session-manager.ts`：`844-854`（树模型注释）、`1015-1042`（落盘时机）、`1638-1713`（列表扫描）、`1360-1512`（分支）、`1579-1630`（forkFrom）、`231-291`（版本迁移）、`514-556`（读取）
 - `packages/coding-agent/src/core/agent-session.ts`：`610-681`（message_end 落盘）、`928-943`（工具集）、`1159-1261`（外部能力链路）、`3122-3172`（统计）

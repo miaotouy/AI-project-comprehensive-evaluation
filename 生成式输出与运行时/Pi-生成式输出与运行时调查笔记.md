@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/ai`、`packages/agent`、`packages/coding-agent`、`packages/server`、`packages/session-backends/sqlite-node` 及 `packages/tui` 使用侧；未运行任何命令或测试
 >
@@ -130,7 +130,11 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 **未验证事项**：TUI 视觉行为（diff 着色、展开/折叠、滚动）需运行验证；流式编辑预览在长文件/高并发下的表现未运行；HTML 导出的浏览器端渲染行为未运行；sqlite 后端与 coding-agent 的集成路径未运行（README 仅描述 agent-core 用法）。
 
-## 12. 关键源码索引
+## 12. 会话投影的分享元数据
+
+Radius 分享会在导出的 JSONL 末尾追加一个 `pi.share` custom entry，保存当前 system prompt 和激活工具的定义后再上传。因此这仍是会话投影而非带独立 ID 的输出对象，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；没有 Radius 登录态时仍回退到私密 gist 分享（`packages/coding-agent/src/modes/interactive/session-share.ts:24-151`）。
+
+## 13. 关键源码索引
 
 - 输出协议与消息类型：`packages/ai/src/types.ts:338-368`（part）、`:523-539`（AssistantMessageEvent）、`:415-430`（AssistantMessage）
 - provider 归一化入口：`packages/ai/src/api/anthropic-messages.ts:590-617`、`openai-responses-shared.ts:462-502`、`pi-messages.ts:211-237`

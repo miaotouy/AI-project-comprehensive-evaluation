@@ -2,9 +2,9 @@
 
 > 汇总对象：`Pi（https://github.com/earendil-works/pi）`
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 13 个类目的 Pi 调查笔记（完整清单见文末来源笔记索引），均基于同一代码快照 `534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 13 个类目的 Pi 调查笔记（完整清单见文末来源笔记索引），均基于同一代码快照 `e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查与跨项目横向比较
 >
@@ -31,7 +31,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 
 已确认项（主链确认 + 静态源码确认）约占功能条目 82%；异常项（入口确认未闭合 + 暂缓）约占 6%，其余为归并项与已确认边界。所有异常与未验证细节集中在本文件末尾"已知边界与待验证事项"小节，正文只保留必要的指认。
 
-**"未运行验证"口径**：本汇总所有"主链确认/静态源码确认"均基于对当前代码快照（`534bcbff…`，分支 `main`）的源码贯通；Pi 是 Node/Bun 运行的完整本地主链应用（CLI/TUI + 本地进程执行），源码级确认即视为完成交付态。"未运行验证"仅指未进行黑盒运行、真实终端或端到端操作，不否定代码完备性；静态代码无法直接确认的视觉、焦点、性能与平台行为单独保留，不并入能力结论。
+**"未运行验证"口径**：本汇总所有"主链确认/静态源码确认"均基于对当前代码快照（`e868230…`，分支 `main`）的源码贯通；Pi 是 Node/Bun 运行的完整本地主链应用（CLI/TUI + 本地进程执行），源码级确认即视为完成交付态。"未运行验证"仅指未进行黑盒运行、真实终端或端到端操作，不否定代码完备性；静态代码无法直接确认的视觉、焦点、性能与平台行为单独保留，不并入能力结论。
 
 ## 功能能力摘要
 
@@ -57,7 +57,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 
 - **删除、命名与恢复**：删除在 UI 层做文件级删除（trash 优先、unlink 兜底），确认式、当前活动会话不可删；命名写 `session_info` 条目，空字符串清除；中断后 assistant 消息以 `stopReason: "aborted"` 持久化，`/resume` 恢复。`SessionManager` 类本身无删除方法，删除入口只存在于 UI 层。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)。
 
-- **对话导出与分享（E1/E4/E5 交接侧）**：`/export` 按后缀分流——JSONL 导出把当前分支线性化（重排 parentId，侧枝不进入），HTML 导出嵌入完整树（全条目 + leafId + system prompt + 工具定义，base64 JSON 内嵌的自包含单文件，默认按当前分支渲染、查看器侧栏可切换分支）；`/import` 复制 JSONL 到会话目录续跑（往返可用，分支关系已线性化）；`/share` 导出 HTML 后经 `gh gist create --public=false` 创建 secret Gist 并拼出查看链接；`/copy` 复制最后一条助手文本。HTML 端做了输入侧硬化（marked 禁 HTML、scheme 白名单、HTML 转义）。分享治理刻意轻量：客户端无更新/撤销/记录路径，导出/分享无隐私提示与脱敏，为已确认设计边界（隐私无护栏是有意还是疏漏无从判断，见末尾小节）。证据：静态源码确认（HTML 浏览器端行为与 Gist 平台语义未运行验证）。链接：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)。
+- **对话导出与分享（E1/E4/E5 交接侧）**：`/export` 按后缀分流——JSONL 导出把当前分支线性化（重排 parentId，侧枝不进入），HTML 导出嵌入完整树（全条目 + leafId + system prompt + 工具定义，base64 JSON 内嵌的自包含单文件，默认按当前分支渲染、查看器侧栏可切换分支）；`/import` 复制 JSONL 到会话目录续跑（往返可用，分支关系已线性化）；`/share` 优先把带 system prompt 与激活工具 schema 的当前分支 JSONL 上传为 Radius 组织 artifact，缺少 Radius provider 或凭据时才以 `gh gist create --public=false` 回退；`/copy` 复制最后一条助手文本。HTML 端做了输入侧硬化（marked 禁 HTML、scheme 白名单、HTML 转义）。分享治理仍无内容确认、脱敏与本地撤销，外部平台的可见性和留存语义需单独验证。证据：静态源码确认（HTML、Radius 和 Gist 平台行为未运行验证）。链接：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)。
 
 - **消息渲染体系（终端组件树）**：渲染是"Markdown 文本 → 终端行"管线——marked 解析（strikethrough + LaTeX 扩展）→ 主题函数着色 → ANSI 感知换行 → 边距填充；代码高亮为 highlight.js scope → 主题函数 → ANSI；消息壳层按 role/类型分派（user/assistant/bashExecution/compactionSummary/branchSummary 等），流式时每 `message_update` 全量重建 assistant 组件；性能策略是 Markdown 按 text+width 缓存 + TUI 16ms 帧节流；终端渲染不产生 HTML，无运行时 HTML 注入面。聊天区是普通 Container 无虚拟化，超长会话渲染成本线性增长。证据：静态源码确认（视觉/滚动行为需运行验证）。链接：[消息渲染器调查笔记](../消息渲染器/Pi-消息渲染器调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)。
 
@@ -75,7 +75,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 
 ### Agent 运行时与外部协作
 
-- **工具系统（内置 + 扩展注册，本地执行模型）**：内置 7 个工具（read/bash/edit/write/grep/find/ls），扩展经 `registerTool` 注册 `ToolDefinition`（TypeBox 参数 schema + prompt snippet + 渲染回调 + 执行函数）；默认激活集 [read, bash, edit, write]，`--tools`/设置按三类名单（initialActive/allowed/excluded）增删；工具是代码对象非独立持久化实体，全部本地进程内执行。MCP 客户端/协议实现本次未找到，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **工具系统（内置 + 扩展注册，本地执行模型）**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls），扩展经 `registerTool` 注册 `ToolDefinition`（TypeBox 参数 schema + prompt snippet + 渲染回调 + 执行函数）；PowerShell 是 Windows 上可选的本地执行工具。默认激活集仍为 [read, bash, edit, write]，但 `defaultTools` 可按全局或项目设置替换内置启动集且不关闭扩展/SDK 自定义工具，`--tools` 再以严格允许名单覆盖；工具是代码对象非独立持久化实体，全部本地进程内执行。MCP 客户端/协议实现本次未找到，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
 - **工具注入与模型协议**：激活集存于 `agent.state.tools`，每轮 `prepareNextTurnWithContext` 把当前工具集快照注入 `Context.tools`，由各 API Adapter 转成 OpenAI function calling、Anthropic tools、Google functionDeclarations 等格式；`Tool.constrainedSampling` 可要求严格 JSON schema（TypeBox schema 转 strict 子集，不可转换时回退或报错）或 Lark/regex grammar；`PI_EXPERIMENTAL=1` 时内置工具启用 strict 约束采样。无工具级 token 预算或自动裁剪。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
@@ -105,7 +105,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 
 以下能力卡保留[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)的证据状态。五个第三批候选中四个已由现有通用类目完整覆盖（归并已有类目），补查新确认的产品面是"会话数据生产与分享"。
 
-- **会话数据生产与分享（研究轨迹聚类候选）**：`入口确认`（仓库内主链）/ `外部依赖`（发布端）。把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据——根 README 设专门章节"Share your OSS coding agent sessions"，`docs/usage.md` 明确可用伴生工具 `badlogic/pi-share-hf` 发布为 Hugging Face 数据集用于"model, prompt, tool, and evaluation research"。仓库内主链（JSONL 会话树 → `/export` JSONL/HTML → `/share` secret Gist）达静态源码确认；HF 发布一步位于仓库外（外部依赖，未验证），细节见末尾小节。建议以 `入口确认` 列入研究轨迹聚类候选，暂不单独计为主贡献。链接：[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
+- **会话数据生产与分享（研究轨迹聚类候选）**：`入口确认`（仓库内主链）/ `外部依赖`（发布端）。把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据——根 README 设专门章节"Share your OSS coding agent sessions"，`docs/usage.md` 明确可用伴生工具 `badlogic/pi-share-hf` 发布为 Hugging Face 数据集用于"model, prompt, tool, and evaluation research"。仓库内主链（JSONL 会话树 → `/export` JSONL/HTML → `/share` Radius artifact，缺少凭据时回退私密 Gist）达静态源码确认；HF 发布一步位于仓库外（外部依赖，未验证），细节见末尾小节。建议以 `入口确认` 列入研究轨迹聚类候选，暂不单独计为主贡献。链接：[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
 
 - **已归并到现有类目的能力**（状态：`归并已有类目`，不重复展开）：
   - **自扩展 Agent harness**：扩展系统（registerTool、before_agent_start、custom 条目、Pi Packages）归并 Agent 工具/Agent 角色类目；harness 会话存储抽象在会话与消息管理笔记有交接记录。
@@ -136,8 +136,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 **暂缓与外部依赖**
 
 - **HF 数据集发布（暂缓）**：`badlogic/pi-share-hf` 不在本仓库，其读取格式、去重与推送行为未验证；"研究轨迹"闭环完整度依赖仓库外消费事实，本仓库只承担"生产与导出"侧，无法在本仓库验证。来源：[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
-- **pi.dev/session 查看器服务端**：不在本仓库，如何取 Gist、注入 srcdoc meta、解析 `#gistId` 未验证（模板预留了 iframe srcdoc 注入钩子，推断查看器以 srcdoc 方式嵌入）。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
-- **GitHub Gist 访问语义**：secret Gist 的匿名可访问性、URL 可枚举性、保留期与删除路径属于平台行为，需实际运行 `/share` 验证。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
+- **Radius artifact 与 Gist 平台语义**：Radius 的组织可见 artifact 的实际访问范围、留存和删除路径，以及私密 Gist 回退路径的匿名可访问性、保留期与删除路径，都属于外部平台行为，需实际运行 `/share` 验证。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
 
 **未覆盖类目（仓库内本次未找到，按来源笔记检索范围表述）**
 
@@ -147,14 +146,14 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 - 跨 Provider 自动故障转移、多 Key 池与轮询（重试闭环在同一 Provider/模型内，`--api-key` 是临时运行时 key）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 - 消息级搜索接入主路径（扫描器与 SQLite FTS5 后端独立存在，仅在本包测试中使用）；harness 搜索接口未接入 TUI。来源：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
 - 内置子 Agent 委托配置与 UI 层多 Agent 编排（子 Agent 仅由扩展经 `createAgentSession` 自建，无内置委托入口；单会话单 agent 循环，无多会话并行 UI）。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
-- 导出/分享无隐私提示、无脱敏：HTML/JSONL 原样携带 system prompt、thinking 全文、bash 命令与输出、文件路径与图片，`/share` 创建 Gist 前无内容确认或警告；来源笔记判断"隐私无护栏是有意为之还是疏漏，本次无从判断"。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
+- 导出/分享无隐私提示、无脱敏：HTML/JSONL 原样携带 system prompt、thinking 全文、bash 命令与输出、文件路径与图片；Radius 分享还附加激活工具 schema。`/share` 前无内容确认或警告；来源笔记判断"隐私无护栏是有意为之还是疏漏，本次无从判断"。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
 - 独立"续写到消息末尾"入口（续写经分支/新消息）、`/system-prompt` 查看命令、消息就地编辑（历史追加型）、独立真实连接测试入口（`checkAuth` 不发真实请求）、`/settings` 之外无渠道级配置 UI。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 
 **共性未验证（方法学约束，不否定代码完备性）**
 
 - 全部 13 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；Pi 是完整本地主链，源码级确认视为完成交付态（口径见"完成度速览"）。
 - TUI 视觉/键盘/焦点/IME/OSC 序列与图片能力/终端模拟器差异需运行验证；流式帧率、闪烁与长会话滚动性能未测量。
-- `/share` 端到端 gist 流程（依赖本机 gh 与 GitHub 账号）、HTML 导出浏览器端行为（template.js）、`estimateTokens` 与真实计费偏差、压缩后模型侧多轮一致性、多实例并发写会话文件、sqlite 后端集成路径均未运行验证。
+- `/share` 端到端 Radius artifact 流程与 Gist 回退流程（后者依赖本机 gh 与 GitHub 账号）、HTML 导出浏览器端行为（template.js）、`estimateTokens` 与真实计费偏差、压缩后模型侧多轮一致性、多实例并发写会话文件、sqlite 后端集成路径均未运行验证。
 - 容器化模式（Gondolin/Docker/OpenShell）在仓库内仅有部署文档，未做运行验证；`/trust` 各入口对资源加载的完整影响未逐条验证。
 - 与特色贡献统计的衔接：独特功能笔记建议将"会话数据生产与分享"以 `入口确认` 列入研究轨迹聚类候选，暂不单独计为主贡献；相关聚类与比较维度见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
@@ -167,7 +166,7 @@ Pi 是命令行编码 Agent（产品命令 `pi`），按可发布能力拆包的
 - [LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)：Provider/Endpoint/凭据概念模型、配置与各管理入口、协议 Adapter、运行时选路、重试与故障转移、可观测性。
 - [仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)：仓库形态与量级、语言与文档/测试分布、跨平台组织。
 - [会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)：会话/消息/分支数据模型、JSONL 持久化与迁移、生命周期、列表搜索、一致性、绑定与导入导出。
-- [对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)：HTML/JSONL 导出口径、导入往返、Gist 分享、HF 发布交接、隐私与安全、测试。
+- [对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)：HTML/JSONL 导出口径、导入往返、Radius artifact 与 Gist 回退分享、HF 发布交接、隐私与安全、测试。
 - [对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)：发送主链路、上下文拼装、token 估算与自动压缩、agentLoop 工具循环、流式事件、abort/重试/steer/followUp。
 - [应用界面基础设施调查笔记](../应用界面基础设施/Pi-应用界面基础设施调查笔记.md)：自研 TUI 装配、overlay/浮层、通知与错误反馈、主题 token 体系、响应式、剪贴板/图片/键盘基础设施。
 - [消息渲染器调查笔记](../消息渲染器/Pi-消息渲染器调查笔记.md)：终端组件树、事件驱动全量重建、Markdown/代码/LaTeX 管线、工具与附件节点、性能策略与扩展机制。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/components/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：只读源码梳理组件树、Markdown 管线与事件流；未在真实终端运行
 >
@@ -113,7 +113,11 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 - 流式期间的帧率与长会话性能未测量。
 - HTML 导出的浏览器端行为（`template.js`）未运行验证。
 
-## 12. 关键源码索引
+## 12. 终端能力覆盖
+
+渲染器的超链接、图片和真彩色分支现在既可依赖环境自动探测，也可由 `terminal` 设置或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量明确覆盖。覆盖结果集中缓存于 `getCapabilities()`，Markdown 链接、图片降级文本与工具结果共用该结果；静态阅读只能确认选择逻辑，具体终端对 OSC 8 和图片协议的实际表现仍需运行验证（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
+
+## 13. 关键源码索引
 
 - `packages/tui/src/components/markdown.ts:277-369`：Markdown 渲染主流程；`146-169`：流式围栏裁剪；`454` 起：token 渲染
 - `packages/coding-agent/src/utils/syntax-highlight.ts:80-142`：hljs scope→ANSI

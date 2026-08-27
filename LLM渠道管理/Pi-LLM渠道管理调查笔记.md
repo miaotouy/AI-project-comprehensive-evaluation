@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：只读源码梳理 `packages/ai` 的 Provider/认证/模型目录与 `packages/coding-agent` 的 ModelRuntime 组合层；未运行真实 Provider 请求
 >
@@ -196,7 +196,13 @@ CLI/会话层 (AgentSession)
 - OAuth 各 Provider 流程（device-code/PKCE/回调）仅在 `auth/oauth/` 静态阅读，未运行。
 - 遥测包在请求路径的具体埋点未逐层核对。
 
-## 11. 关键源码索引
+## 11. 模型与思考能力的近期边界
+
+内置目录新增 Z.AI Coding Plan 的中国区域模型与 Qwen Token Plan 的 DeepSeek V4 Pro，xAI 模型改经 Responses API 并把 Grok 4.6 作为默认项。Adapter 还补齐 OpenAI-compatible 的 reasoning details 回放、Google `thinkingLevelMap`、Azure Responses 的 `toolChoice` 以及 Bedrock 脱敏推理内容的保留，因而会话中的模型与思考状态在跨回合重放时比旧快照更完整（`packages/ai/CHANGELOG.md` 与 `packages/coding-agent/CHANGELOG.md` 的 0.84.3 条目）。
+
+模型和思考级别的即时选择仍写入会话条目；只有在选择器中按 Ctrl+S 才将所选默认值写回设置。模型与思考选择器均支持搜索和 default 标识，避免一次会话中的临时切换意外成为全局默认（`packages/coding-agent/src/modes/interactive/components/model-selector.ts:73-162`、`thinking-selector.ts:37-104`）。
+
+## 12. 关键源码索引
 
 - `packages/ai/src/types.ts:35-75`：KnownProvider 枚举；`types.ts:794-813`：Model 元数据；`types.ts:695-769`：OpenRouter/Vercel 路由参数
 - `packages/ai/src/models.ts:97-149`：Provider 接口；`models.ts:386-446`：refresh 生命周期；`models.ts:762-862`：createProvider 组合

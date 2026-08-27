@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/tools/`、`core/extensions/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：只读源码梳理工具定义、注入、校验、编排循环与执行；未运行真实工具调用
 >
@@ -16,7 +16,7 @@
 
 Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本地执行模型，由 `packages/agent` 的 agent-loop 统一编排：
 
-1. **工具是代码对象，不是独立持久化实体**：内置 7 个工具（read/bash/edit/write/grep/find/ls，`core/tools/index.ts:83-84`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:449-498`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
+1. **工具是代码对象，不是独立持久化实体**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls，`core/tools/index.ts:48-57`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:449-498`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。`powershell` 是 Windows 可选工具，优先调用 `pwsh.exe`，否则 Windows PowerShell；它与 bash 一样按启动用户权限执行，只是向命令加入 UTF-8 输出设置（`core/tools/powershell.ts:16-46`）。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
 2. **注入是会话级工具集 + 每轮上下文**：激活集存于 `agent.state.tools`（`agent-session.ts:928-943`），每轮 `prepareNextTurnWithContext` 把当前工具集快照注入请求上下文（`agent-session.ts:541-556`）；system prompt 的 Available tools 段只列出带一行 snippet 的工具（`system-prompt.ts:80-84`）。
 3. **协议是 Provider 原生 tool_calls**：`Context.tools` 传入 `Provider.stream`，由各 API Adapter 转成 OpenAI function calling、Anthropic tools、Google functionDeclarations 等格式（`packages/ai/src/types.ts:492-506`）。`Tool` 的 `constrainedSampling` 可要求严格 JSON schema 或 Lark/regex grammar；`constrained-sampling.ts` 提供 `makeStrictJsonSchema`，在 Provider 支持 strict 模式时把 TypeBox schema 转换为 strict 子集（`constrained-sampling.ts:29-130`），不可转换时回退，`strict: "require"` 时直接报错。strict 子集转换规则为：
 
@@ -53,7 +53,7 @@ Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本�
 - **统一接口**：`AgentTool`（`packages/agent/src/types.ts`）与扩展侧 `ToolDefinition`（`extensions/types.ts:449-498`）都是“name + description + TypeBox parameters + execute”。`ToolDefinition` 额外带：
   - `label`、`promptSnippet`、`promptGuidelines`、`constrainedSampling`；
   - `renderShell`、`prepareArguments`、`executionMode`、`renderCall`/`renderResult`。
-- **内置工具**：`createAllToolDefinitions`（`tools/index.ts:156-166`）构造 7 个工具；默认激活集是 read/bash/edit/write（`agent-session.ts:211-212`），`--tools` 或设置可增删（由 `initialActiveToolNames`/`allowedToolNames`/`excludedToolNames` 三类名单控制，`agent-session.ts:213-217`）。
+- **内置工具**：`createAllToolDefinitions`（`tools/index.ts:113-124`）构造 8 个工具；默认激活集仍是 read/bash/edit/write。`defaultTools` 可按全局或项目设置替换启动时启用的内置工具，空数组可关闭全部内置工具，同时保留扩展和 SDK 注册的自定义工具；`--tools` 仍以所有工具的严格允许名单覆盖此选择（`core/sdk.ts:259-263`、`docs/settings.md:225-243`）。
 - **扩展注册**：`registerTool`（扩展 API）把 `ToolDefinition` 放进 `_toolRegistry`/`_toolDefinitions`，经 `wrapRegisteredTools`（extensions/wrapper.ts:43，调用于 agent-session.ts:2514-2523）转成 AgentTool；before/afterToolCall 钩子安装在 agent-session.ts:479-533。
 - **Skill 与工具的关系**：skill 不是工具调用，是模型可见的文本资源（system prompt 索引 + `/skill:name` 全文注入），由模型以 read 工具或直接读取方式使用。
 - **来源校验**：扩展加载时 `validateExtensionProvider` 等校验只针对 Provider；工具名冲突处理在扩展装载（`detectExtensionConflicts` 等，`resource-loader.ts:1059-1067`）与 `_toolRegistry` 覆盖语义中。

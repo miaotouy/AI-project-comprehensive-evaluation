@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`534bcbffb7e1e7551d9ee3572dfeb278e203e493`（分支：`main`）
+> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
 >
 > 调查方式：直接阅读源码（interactive-mode 的事件消费与键盘绑定、TUI 组件与选择器、fullscreen 导航、设置入口），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话，静态代码无法确认的视觉/焦点/键盘行为标记为未验证
 >
@@ -140,7 +140,11 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
 - 流式期间的帧率、闪烁与长会话滚动性能未测量。
 - 多会话并行、通知与跨端连续性不适用（TUI 单进程），不做虚构比较。
 
-## 13. 关键源码索引
+## 13. 模型与思考设置工作流
+
+`/thinking` 打开可搜索的思考等级选择器，模型选择器也以同一模式显示默认项。用户按 Enter 的变更仅作用于当前会话，Ctrl+S 才持久化为默认设置；因此 TUI 可同时表达“本轮选择”和“后续启动默认值”两种作用域。运行中的 bash 输出在切换 thinking 可见性时会保留，而不会被局部界面重建清空（`packages/coding-agent/src/modes/interactive/components/thinking-selector.ts:37-104`、`model-selector.ts:73-162`、`packages/coding-agent/CHANGELOG.md` 的 0.84.3 修复项）。
+
+## 14. 关键源码索引
 
 - `packages/coding-agent/src/modes/interactive/interactive-mode.ts`：`2873-3060`（提交入口）、`3068-3396`（事件→UI）、`4955-5093`（树导航）、`5096-5129`（会话选择器）、`4193-4231`（队列显示/取回）、`2769-2795`（Esc 语义）
 - `packages/coding-agent/src/modes/interactive/components/session-selector.ts`（会话选择器）、`session-selector-search.ts:26-114`（搜索）
