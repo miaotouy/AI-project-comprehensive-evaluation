@@ -2,9 +2,9 @@
 
 > 汇总对象：`Jan（https://github.com/janhq/jan）`
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
-> 依据：13 个类目笔记——Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时
+> 依据：13 个类目笔记——Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；代码快照 `95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题归并重复能力，保留证据状态并链接来源；未新增源码调查
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多表面，无后端聊天业务服务，React 前端（web-app）经 AI SDK 直连本地 llama-server / mlx-server 或远程 provider。工程形态为 Yarn workspaces monorepo，能力由 7 个可插拔扩展提供。已调查 13 个类目，功能主体为聊天、工具、角色、渠道与本地推理服务，区别于一般 Chat UI 的独特面在于"本地推理器设备级管理 + 服务端 MCP 编排 + CLI 与外部 Agent 预接"。
+Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多表面，无后端聊天业务服务，React 前端（web-app）经 AI SDK 访问本地 llama.cpp worker / mlx-server 或远程 provider。工程形态为 Yarn workspaces monorepo，能力由 7 个可插拔扩展提供。已调查 13 个类目，功能主体为聊天、工具、角色、渠道与本地推理服务，区别于一般 Chat UI 的独特面在于“本地推理器设备级管理 + 服务端 MCP 编排 + CLI 与外部 Agent 预接”。
 
 ## 完成度速览
 
@@ -35,7 +35,7 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 
 - **Assistant 角色实体与持久化**：每个助手一个目录一个 JSON 文件（`assistant.json`），assistant-extension 负责增删改查与 v1–v3 版本迁移；core 与 web 两侧类型字段定义不一致（已确认事实，运行时影响未验证，见末尾小节）。[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
 - **默认助手**：id 固定 `jan`、`model:'*'`、内置 `type:'retrieval'` 且 `enabled:false` 的工具声明；web 侧另有第二份独立默认助手表示（useAssistant + localStorage），与 core 侧互不共享。[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
-- **线程绑定助手快照与 system prompt**：线程保存 `ThreadAssistantInfo` 嵌入快照而非引用，无助手时写 `model-only` 占位；systemMessage 由 `renderInstructions` 生成；消息不保存模型/参数元数据，重新生成不重读助手当前配置；无开场白、提示词为单段无分组。【代码确认】[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
+- **线程绑定助手快照与 system prompt**：线程保存 `ThreadAssistantInfo` 嵌入快照而非引用，无助手时写 `model-only` 占位；systemMessage 由 `renderInstructions` 生成；项目中新建对话优先采用项目指定助手。消息不保存模型/参数元数据，重新生成不重读助手当前配置；无开场白、提示词为单段无分组。【代码确认】[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
 - **指令模板与占位符**：支持 `{{current_date}}` 模板变量（UTC 长月份替换），无用户变量或场景变量系统。[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
 - **上下文管理**：`max_context_tokens>0` 时按 `auto_compact` 选择模型摘要压缩或纯截断（失败回退截断）；`finishReason==='length'` 且 token 达上下文 0.9 倍时冻结部分消息并提示手动扩容，阶梯 `<8192→8192→32768→×1.5`（封顶默认 131072），扩容由用户手动触发，无自动扩容。【代码确认】[对话请求与上下文调查笔记](../对话请求与上下文/Jan-对话请求与上下文调查笔记.md)
 
@@ -71,11 +71,11 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 
 ### 渠道与调度
 
-- **渠道双层结构**：远程 provider（11 个预定义 + 用户自定义 OpenAI 兼容端点，api_type 可选 openai/anthropic）+ 本地引擎（llamacpp / mlx 经 router 暴露为 OpenAI 兼容端点）；请求默认打到本地 router 代理，Rust 按模型 ID 决定转发远程 provider 或路由到子进程；无独立 Endpoint 子实体，同名 provider 不能并存。[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
+- **渠道双层结构**：远程 provider（11 个预定义 + 用户自定义 OpenAI 兼容端点，api_type 可选 openai/anthropic）+ 本地引擎（llamacpp / mlx 经兼容端点暴露）；llama.cpp 的独立 worker 按需加载模型，并保存、恢复通过 thread_id 识别的 KV 状态。请求默认打到本地代理，Rust 按模型 ID 决定转发远程 provider 或路由到本地引擎；无独立 Endpoint 子实体，同名 provider 不能并存。[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
 - **provider 管理与配置**：自定义 provider 支持新增、编辑、启停、删除与模型列表维护，创建时校验名称、URL 与协议类型；内置 provider 隐藏通用设置卡；llamacpp/MLX 作为本地引擎处理（停用 llamacpp 先停止全部模型）。[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
 - **API key 管理**：主 key + fallback 链（`api-key-fallbacks`），401/403/429 轮换重试；连接测试对 `/models` 发 GET 并同时发 `x-api-key` 与 `Authorization: Bearer` 双头；远程 secrets 只进 OS keyring（`set_secret`/`get_secret`），绝不明文写 settings.json。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Jan-Agent工具调查笔记.md)
 - **参数体系**：`predefinedParams.ts` 的 `ParamDef`（capability + 默认值 + disabledBy）为单一定义源；`providerCaps.ts` 能力表决定参数"转发/可能忽略/拒绝"，自定义 provider 落入全放行；wire 层按 `CLIENT_SIDE_PARAM_KEYS` / `LLAMACPP_ONLY_PARAM_KEYS` / `WIRE_KEY_REMAP` 三层过滤；OpenAI o 系与 grok 系列模型级拒绝采样参数；上游拒绝采样参数时自动去参重试一次。[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
-- **模型系统与下载链**：模型对象（ModelInfo/Model/Setting/Runtime 参数 + 默认 ctx/max_tokens）；catalog 与 `/models` 刷新 + 软删除 tombstone；下载支持断点续传、镜像前缀 + HMAC 签名、CancellationToken 取消；模型源按 `library_name` 过滤 mlx（非 macOS 隐藏）；llamacpp 每模型独立 `model.yml`、MTP/embedding 探测、600ms 防抖重启 router。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
+- **模型系统与下载链**：模型对象（ModelInfo/Model/Setting/Runtime 参数 + 默认 ctx/max_tokens）；catalog 与 `/models` 刷新 + 软删除 tombstone；下载支持断点续传、镜像前缀 + HMAC 签名、CancellationToken 取消；模型源按 `library_name` 过滤 mlx（非 macOS 隐藏）；llamacpp 每模型独立 `model.yml`、MTP/embedding 探测，并在预设变更后重启 worker。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
 - **本地 API server 代理**：`proxy.rs` 三路路由（云端 provider / MLX 会话 / llama.cpp router）；`proxy_api_key` 双头认证（Bearer / X-Api-Key，/configs 一律 404）；`converters.rs` 在 OpenAI/Anthropic/Gemini/OpenAI-Responses 间双向转换并流式转发；服务端工具执行受 `enable_server_tool_execution` 门控（默认 false）；工具 schema 规整对齐 GBNF（date/time format 与复杂 pattern 会被删）。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
 
 （设备级本地推理器管理闭环为独特功能卡，见"独特与差异化能力"小节。）
@@ -84,7 +84,7 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 
 保留独特功能笔记的能力卡标题与证据状态，完整机制见来源笔记：
 
-- **能力一：设备级本地推理器管理闭环 — `主链确认`**：管理"跑模型的引擎本身"而非只管理模型文件——按 OS/CPU 指令集/GPU 选 CUDA/Vulkan/CPU 后端、下载/升级/回滚 llama-server 二进制、单进程 Router 承载多模型、GPU 卸载校验与 fit 预测，形成"探测→推荐→预测→验证"闭环；后端目录保留两版本供回滚，`update_history.json` 记录更新，崩溃时 `adoptRouter` 收养孤儿进程。调查样本中未见同类实现，为独特功能主贡献候选。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)
+- **能力一：设备级本地推理器管理闭环 — `主链确认`**：管理“跑模型的引擎本身”而非只管理模型文件——按 OS/CPU 指令集/GPU 选 CUDA/Vulkan/CPU 后端、下载/升级/回滚运行组件、独立 worker 按需承载多模型，并对每线程 KV 状态做兼容校验后保存或恢复；GPU 卸载校验与 fit 预测构成“探测→推荐→预测→验证”闭环。后端目录保留两版本供回滚，`update_history.json` 记录更新。调查样本中未见同类实现，为独特功能主贡献候选。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)
 - **能力二：`/v1/orchestrations` 服务端 MCP 编排 — `主链确认`**：把 MCP 工具执行循环暴露为 HTTP 服务——外部客户端提交请求后，服务端加载 assistant 系统提示 → 模型出 tool_calls → 进程内执行 MCP 工具 → 循环至完成并返回聚合响应；`stream=true` 不支持，外部输入按请求处理，权限沿用 MCP 既有执行域。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
 - **能力三：Jan CLI 与外部 Agent 预接 — `主链确认`**：`jan serve` / `jan launch claude|openclaw` / `jan threads` / `jan models` 打通桌面数据目录、终端与外部 Agent CLI 三面；`launch claude` 默认按显存自动配上下文的 `--fit` 并以环境变量指向本地端点，`launch openclaw` 写入/合并 `~/.openclaw/openclaw.json`；Claude Code 走 Anthropic 协议、OpenClaw 走 OpenAI 协议打到同一本地服务。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
 - **能力四：MCP 智能工具路由 — `主链确认`**：用独立小模型对用户意图做工具级路由选择，LLM 不可用时降级关键词分类（七类 fallbackReason），路由决策与降级原因写入遥测；路由结果冻结（签名 + 缓存）以保持提示缓存稳定；为 Agent 工具类目的增强形态，不单独计主贡献。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Jan-Agent工具调查笔记.md)
@@ -95,9 +95,9 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 
 `仓库分布` 与 `应用界面基础设施` 两个类目的结论按主题概括如下，不逐条展开：
 
-- **仓库形态与模块量级**：Yarn workspaces monorepo——`web-app/src` 119,779 行、`src-tauri`（含插件）约 3.7 万行、`extensions/*` 7 个独立包 15,440 行、`core` 共享 TS 类型单独发布 npm；全仓 2,258 个跟踪文件、可识别源码 191,672 行。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
+- **仓库形态与模块量级**：Yarn workspaces monorepo——`web-app/src` 119,779 行、`src-tauri`（含插件）约 3.7 万行、`extensions/*` 7 个独立包 15,440 行、`core` 共享 TS 类型单独发布 npm；全仓 2,305 个跟踪文件、可识别源码 192,775 行。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **语言与运行时分工**：TypeScript 76.8%、Rust 19%（服务端代理 `proxy.rs` 3,577 行居首）、Swift 1.2%（`mlx-server` 仅 macOS）、Python 用于 autoqa；llamacpp 引擎二进制不入库，发布时经 `scripts/download-bin.mjs` 下载。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
-- **文档与测试分布**：文档 157 文件/16,735 行（docs 为 Nextra 文档站）；测试 319 文件/60,401 行（vitest 为主、共置 `__tests__`，Rust 用内嵌 `tests.rs` 不计入口径）。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
+- **文档与测试分布**：文档 187 文件/19,651 行（docs 为 Nextra 文档站）；测试 325 文件/60,919 行（vitest 为主、共置 `__tests__`，Rust 用内嵌 `tests.rs` 不计入口径）。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **跨平台与发布组织**：桌面覆盖 Windows/macOS/Linux，Tauri 提供 iOS/Android 构建入口（`--features mobile`，移动端 SQLite 持久化）；`.github/workflows` 34 个 workflow 覆盖 CI/发布/文档站/npm 发布/autoqa；扁平化打包在 flatpak 目录。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **扩展机制与 ServiceHub 契约**：`ExtensionManager` 动态加载 7 个扩展包（llamacpp/mlx/assistant/conversational/rag/vector-db/download），扩展间以 `@janhq/core` 的 service hub 为契约；`core/` 单独打包发布。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **界面栈与公共组件**：React 19 + Vite 6 + Tailwind 4 + TanStack Router（文件路由）+ zustand 5 + TanStack Virtual；`components/ui` 下 27 个 shadcn 风格 Radix 封装，Toast 用 sonner，移动抽屉用 vaul，无内部设计系统包。[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
@@ -146,14 +146,14 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 - **core/web 两侧 Assistant 类型不一致**：core 含 `model`/`tools`/`file_ids` 而无 `parameters`，web 含 `parameters` 而无前三者，v2 迁移却写 `parameters`；web 侧未见 tools 持久化路径，运行时影响未验证。[Agent 角色调查笔记](../Agent角色/Jan-Agent角色配置调查笔记.md)
 - **主题键名与持久化位置脱节**：内联防闪脚本读 localStorage('theme')、TauriWindowService 读 jan-theme 键（全仓库无写入方），实际持久化在 settings.json；迁移策略有意不清理 localStorage，首帧可能短暂显示错误主题。【代码确认】[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
 - **强调色最小覆盖与静态默认残留**：运行时只写 `--primary`/`--sidebar` 两变量，:root 静态默认值又与 gray 色板不一致（gray 的 primary 为品牌橙），水合前短暂显示静态色。【代码确认】[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
-- **llama-server 鉴权强度边界**：鉴权 key 为公开 secret（`'JustAskNow'`）派生的 HMAC key，`RouterInfo{port, api_key, pid}` 对 webview 可见——防局域网误连、不防本地恶意进程。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
+- **llama.cpp worker 鉴权强度边界**：鉴权 key 为公开 secret（`'JustAskNow'`）派生的 HMAC key，worker 的端口、api_key 和 pid 对 webview 可见——防局域网误连、不防本地恶意进程。【代码确认】[LLM 渠道管理调查笔记](../LLM渠道管理/Jan-LLM渠道管理调查笔记.md)
 
 ### 共性未验证
 
 按"完成度速览"口径，以下均为方法学约束（静态源码确认已完成，未做黑盒运行），不否定代码完备性：
 
-- 运行行为：视觉效果、时序、性能、真实 provider 上的流式、GPU 探测与 fit 预测、Router 多模型并发、外部 Agent 启动、`/v1/orchestrations` 端到端、MCP 智能路由真实 LLM 调用与遥测落库。
-- 多窗口/多会话并发：llamacpp 固定 `id_slot=0` 的 KV 复用语义、整文件重写互相覆盖的实际行为。
+- 运行行为：视觉效果、时序、性能、真实 provider 上的流式、GPU 探测与 fit 预测、worker 多模型并发、外部 Agent 启动、`/v1/orchestrations` 端到端、MCP 智能路由真实 LLM 调用与遥测落库。
+- 多窗口/多会话并发：llamacpp 固定 `id_slot=0` 下的 KV 状态保存、恢复时序与整文件重写互相覆盖的实际行为。
 - 数据与状态：分支树旧数据迁移完整性、compactMessages 摘要质量、banner 与 `metadata.error` 并存的 UI 呈现、消息编辑后引用/grounding 状态一致性。
 - 未运行项目测试或构建；全部结论记录来自静态源码，代码快照与调查日期以各来源笔记为准。
 

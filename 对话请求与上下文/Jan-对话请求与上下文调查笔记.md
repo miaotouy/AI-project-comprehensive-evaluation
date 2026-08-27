@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（AI SDK useChat 包装与自定义 ChatTransport、上下文管理模块、模型工厂与 fetch 注入、线程页执行仲裁、队列 store）并逐条核对符号与行号
 >
@@ -52,7 +52,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 `CustomChatTransport.sendMessages`（`custom-chat-transport.ts:1102-1519`）执行顺序：
 
-1. **模型创建**（L1128-1215）：先读取模型默认采样参数和线程助手参数，再解析 llamacpp 的思考预算；合并顺序是模型默认、线程参数、推理参数，后者优先级最高（L1176-1180）。预定义远程 provider 会删除采样参数键；llamacpp 固定 `id_slot=0` 复用 KV 缓存。模型加载与取消竞争由 `createModelOrAbort` 处理，取消时卸载 llamacpp 模型；推理开关最终进入 `chat_template_kwargs.enable_thinking`（相关实现见 L634-655、L1054-1100、L1181-1189）。
+1. **模型创建**（L1128-1215）：先读取模型默认采样参数和线程助手参数，再解析 llamacpp 的思考预算；合并顺序是模型默认、线程参数、推理参数，后者优先级最高（L1176-1180）。预定义远程 provider 会删除采样参数键；llamacpp 固定 `id_slot=0`，并传入 thread_id 使 worker 在同一模型与兼容配置下保存、恢复该线程的 KV 状态。模型加载与取消竞争由 `createModelOrAbort` 处理，取消时卸载 llamacpp 模型；推理开关最终进入 `chat_template_kwargs.enable_thinking`（相关实现见 L634-655、L1054-1100、L1181-1189、L1224-1231）。
 2. **refreshTools()**（L1217）：RAG/MCP/web 工具目录构建（禁用集过滤、MCP 智能路由、`web_search`/`web_fetch`），见 §9。
 3. **splitAssistantToolWaves**（L1223）：把工具调用后跟文本的 assistant 回合拆成连续多条，以保持 Claude 工具消息配对和 KV 缓存前缀一致（L530-567）。
 4. **system 拼接**（L1229-1240）：`systemMessage`（`renderInstructions(threadAssistant.instructions)`，`$threadId.tsx:205-208`）+ `buildFilesSystemInstruction`（L1594-1613，静态说明 `[ATTACHED_FILES]` 块、不随附件变化保提示缓存）+ `buildWebSearchSystemInstruction`（L1621-1634，教模型用 `web_search`/`web_fetch` 并内联 `[[cite:URL]]`）；空白 system 不发送。
@@ -110,7 +110,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 
 - **队列存储**：`message-queue-store.ts`（71 行）维护 per-thread 队列，提供入队、原子取删、移除、清空和读取操作；入队条件是流式态且处于当前线程（§1）。
 - **消费**：`status==='ready'` 且无挂起工具时自动发下一条（纯文本绕过附件，§1）；`error` 清空队列；离开线程清队列；`removeSession` 也清对应队列（`chat-session-store.ts:181`）。
-- **并发**：llamacpp 固定 `id_slot=0`（§2）暗示同一 llama-server 上同一活跃回合复用 KV——多窗口/多会话并发打到同一 server 的行为未验证（推测项）；不同线程各有独立 Chat 会话实例，`sessionData.tools` 也按线程隔离（`chat-session-store.ts:8-12`）。
+- **并发与本地缓存**：llamacpp 固定 `id_slot=0`，但以 thread_id 识别应保存或恢复的状态；worker 对换入的线程先保存被替换的 slot，再恢复目标线程状态，并以模型、预设、构建和模型文件校验其可用性（`engine/http.rs:225-280`、`engine/slots.rs:35-175`）。多窗口/多会话并发的实际排队和恢复时序未验证；不同线程仍各有独立 Chat 会话实例，`sessionData.tools` 也按线程隔离（`chat-session-store.ts:8-12`）。
 - **后台生成**：本次未发现独立的后台任务管理器（检查范围：web-app 无后台任务 store/队列；标题生成与嵌入是发送主链内的异步步骤）——标注为未找到。
 
 ## 9. Agent、工具、知识库与附件注入点

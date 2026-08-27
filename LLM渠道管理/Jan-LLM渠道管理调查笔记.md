@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 provider/参数体系、Rust server 代理全量行级阅读）；未修改 Jan 仓库
 >
@@ -17,7 +17,7 @@
 Jan 的“渠道”由两层构成：
 
 1. **远程 provider**：`web-app/src/constants/providers.ts` 内置 11 个预定义 provider（完整清单见 1.1），每个 provider 只有 api key、base url、模型列表与少量自定义 header；另支持用户自定义 OpenAI 兼容端点（api_type 可选 `openai`/`anthropic`）。
-2. **本地引擎**：llamacpp-extension 与 mlx-extension 把 GGUF/MLX 模型通过 router 暴露为 OpenAI 兼容端点；Rust 侧 `src-tauri/src/core/server/` 提供本地 API server 代理、认证与远程 provider 转发。
+2. **本地引擎**：llamacpp-extension 与 mlx-extension 把 GGUF/MLX 模型通过 OpenAI 兼容端点暴露；本轮 llama.cpp 改由独立 worker 管理模型驻留与线程 KV 状态。Rust 侧 `src-tauri/src/core/server/` 仍提供本地 API server 代理、认证与远程 provider 转发。
 
 聊天请求不经过任何后端业务服务，由前端 `CustomChatTransport` 直接经 `createCustomFetch` 包装的 fetch 发出；**推理参数在 HTTP 层注入 body**，`streamText` 本身只传 AI SDK 字段。请求默认打到本地 router 代理，Rust 按模型 ID 决定转发远程 provider 还是路由到 llama-server/mlx-server 子进程。
 
@@ -317,6 +317,8 @@ ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型
 - `PRESET_AFFECTING_KEYS`（L138）→ 600ms 防抖 `scheduleRouterRestart()`（L2386-2404）重启 router，`selfInflicted` 防自激；
 - 模型配置中 `quant_type: undefined` 为硬编码 TODO（L2438）。
 
+本轮 llama.cpp 插件不再在 Tauri 进程内直接承担引擎服务：worker 启动后握手返回端口、进程号和 API key；worker 内部 registry 按需加载模型、记录请求中的 busy 状态，并在容量已满时淘汰最近最少使用的空闲模型。固定 slot 的 KV 状态可按 thread_id 保存到磁盘，在模型、预设、llama.cpp 版本和模型文件都一致时恢复；缓存预算为零时功能关闭。进程实际生命周期、跨会话缓存命中率与淘汰时延均未运行验证（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs:288-409`、`engine/registry.rs:145-249,329-470`、`engine/http.rs:214-332`、`engine/slots.rs:35-175`）。
+
 `ModelConfig`（`src-tauri/plugins/tauri-plugin-llamacpp/guest-js/types.ts:104-116`）：
 
 ```text
@@ -408,6 +410,7 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 |---|---|
 | 预定义 provider | `web-app/src/constants/providers.ts:54-402` |
 | 参数定义 | `web-app/src/lib/predefinedParams.ts` |
+| llama.cpp worker、模型 registry 与 KV 状态 | `src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs`、`engine/registry.rs`、`engine/http.rs`、`engine/slots.rs` |
 | 能力表 | `web-app/src/lib/providerCaps.ts` |
 | 参数注入 fetch | `web-app/src/lib/model-factory.ts:366-535` |
 | API key 链/测试 | `web-app/src/lib/provider-api-keys.ts`、`$providerName.tsx:261-497` |

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：静态源码调查；grep/glob 关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、exec、spawn、eval、wasm、writeFile 等）；阅读聊天生成、消息渲染、线程持久化与工具执行主链路；未运行应用与测试
 >

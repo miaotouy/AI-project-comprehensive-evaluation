@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`（重点 `core/src/types/assistant/assistantEntity.ts`、`extensions/assistant-extension/src/index.ts`、`core/src/types/thread/threadEntity.ts`、`web-app/src/lib/instructionTemplate.ts`）
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 Jan 仓库
 >
@@ -117,6 +117,7 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
 - `custom-chat-transport.ts` `getActiveInferenceParams`（L773-784）：线程有助手且非 `'model-only'` 时才用其参数，否则为空；
 - `web-app/src/services/threads/default.ts` L86-91：无助手时写入 `{id:'model-only', name:'Model', model: modelPayload}`；
 - 指令模板 `lib/instructionTemplate.ts`（23 行）：仅替换 `{{current_date}}`（UTC 长月份，`formatDate`）。
+- 项目页创建首条对话时，Composer 优先按项目的 `assistantId` 选助手，再由既有 `createThread` 路径把该助手写成新线程快照；这只影响项目中新建的线程，不改写全局当前助手（`web-app/src/routes/project/$projectId.tsx:127-135`、`web-app/src/containers/ChatInput.tsx:235-242,477-496`）。
 
 模型切换（SamplerPopover）与助手切换（AssistantSwitcher）的联动由 `lastUsedModel`/`lastUsedAssistant` localStorage 维护。
 
@@ -153,6 +154,7 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
 - 推理参数来源：`web-app/src/lib/custom-chat-transport.ts:773-784`
 - 指令模板：`web-app/src/lib/instructionTemplate.ts`
 - 助手切换与线程绑定：`web-app/src/containers/AssistantSwitcher.tsx:68`、`web-app/src/hooks/useThreads.ts:362-379`
+- 项目新对话的助手选择：`web-app/src/routes/project/$projectId.tsx:127-135`、`web-app/src/containers/ChatInput.tsx:235-242,477-496`
 - web 侧助手 store：`web-app/src/hooks/useAssistant.ts`（store 结构 L6-20、默认助手 L30-56、初始状态 L104-111、setAssistants L192-208）、`web-app/src/providers/DataProvider.tsx:240-253`
 - 设置 UI：`web-app/src/routes/settings/assistant.tsx`、`web-app/src/containers/dialogs/AddEditAssistant.tsx`
 - 助手切换：`web-app/src/containers/AssistantsMenu.tsx`、`AssistantSwitcher.tsx`

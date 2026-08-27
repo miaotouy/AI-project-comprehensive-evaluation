@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`（重点 `web-app/src/containers/RenderMarkdown.tsx`、`web-app/src/containers/MessageItem.tsx`、`web-app/src/lib/messages.ts`、`web-app/src/components/HtmlArtifact.tsx`、`web-app/src/containers/ChatInput.tsx`）
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 Jan 仓库
 >

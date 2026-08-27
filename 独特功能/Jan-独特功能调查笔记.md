@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：只读通读根 README、docs 产品文档、扩展目录、src-tauri Rust 后端与 web-app 前端路由；由专项核验覆盖 7 个扩展、Tauri 插件与 CLI，并对关键入口（`proxy.rs` 编排端点、`llamacpp-extension`、`jan-cli.rs`）抽查复核；未运行应用，未修改被调查仓库
 >
@@ -45,7 +45,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 ### 能力一：设备级本地推理器管理闭环 — `主链确认`
 
-**用户目标**：管理"跑模型的引擎本身"而非只管理模型文件——按机器硬件选 CUDA/Vulkan/CPU 后端、下载与升级 llama-server 二进制、失败回滚、单进程 Router 承载多个模型、并验证 GPU 真的被用上（"模型装得下吗、会不会慢"）。
+**用户目标**：管理“跑模型的引擎本身”而非只管理模型文件——按机器硬件选 CUDA/Vulkan/CPU 后端、下载与升级 llama.cpp 运行组件、失败回滚、独立 worker 按需承载多个模型，并验证 GPU 真的被用上（“模型装得下吗、会不会慢”）。
 
 **入口与触发者**：设置页、首次运行引导（`configureBackends`）、后端更新按钮（`updateBackend`）与硬件/依赖建议对话框（`DependencyAdvice.tsx`）触发；主要执行者是 llamacpp-extension（`extensions/llamacpp-extension/src/index.ts`）。
 
@@ -53,16 +53,17 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 - `<data>/llamacpp/backends/<version>/<backend>/` 后端目录：保留两个版本供回滚；
 - `update_history.json`：更新记录（`BackendUpdateRecord`，`index.ts:118`）；
 - `router.preset.ini`：由 `preset.ts` 生成，全局节加逐模型节，含 MTP、fit 与采样服务端默认值。
+- slot state：按模型与线程保存的 KV 缓存及其元数据；只有模型、预设、llama.cpp 构建和模型文件一致时才可恢复。
 
-**完整主链**（总入口 `extensions/llamacpp-extension/src/index.ts:1413`，其余入口行号见文末索引）：配置函数按远端清单（`backend.ts`，按 OS/CPU 指令集/GPU 过滤）下载后端二进制并做 sha512 校验，生成 preset 后由 Router 启动器经 Rust 插件拉起单进程 Router 承载多模型。运行后验证 GPU 是否真的被用上：`readiness.ts` 的 GPU 卸载校验对比引擎设备列表与硬件 GPU 数，向量探针真实执行嵌入；`gpuBackendMatch.ts` 判定"已装后端 vs 探测 GPU"的不匹配。`updateBackend` 升级后做健康检查，失败时按 `update_history.json` 与保留版本目录回滚。
+**完整主链**（总入口 `extensions/llamacpp-extension/src/index.ts:1413`，其余入口行号见文末索引）：配置函数按远端清单（`backend.ts`，按 OS/CPU 指令集/GPU 过滤）下载运行组件并做 sha512 校验，生成 preset 后由 Rust 插件拉起独立 worker；worker 的 registry 按需加载模型，在容量受限时只淘汰空闲的最近最少使用模型。请求以 thread_id 标识 KV 状态，换入新线程前先保存旧状态；状态的身份校验失败就删除而不恢复。运行后验证 GPU 是否真的被用上：`readiness.ts` 的 GPU 卸载校验对比引擎设备列表与硬件 GPU 数，向量探针真实执行嵌入；`gpuBackendMatch.ts` 判定“已装后端 vs 探测 GPU”的不匹配。升级后做健康检查，失败时按 `update_history.json` 与保留版本目录回滚（`engine/worker.rs:288-409`、`engine/registry.rs:145-249`、`engine/http.rs:225-280`、`engine/slots.rs:35-175`）。
 
-**持续性**：后端目录与 preset 落盘，重启后按配置恢复；崩溃恢复由 `adoptRouter` 接管孤儿 Router 进程；升级带并发去重与排队（测试见 `extensions/llamacpp-extension/src/test/index.test.ts` 的 updateBackend 系列）。
+**持续性**：后端目录、preset 与 KV 状态元数据均落盘；worker 启动握手设有超时，关闭时保存驻留 slot。实际跨会话缓存命中、崩溃后的状态保留及升级路径未运行验证。
 
 **外部依赖与执行域**：二进制下载依赖远端后端清单（GitHub 发布），校验与运行在本机；硬件探测模块负责 NVIDIA/AMD/Vulkan 厂商识别与显存占用轮询（`src-tauri/plugins/tauri-plugin-hardware/src/` 的 gpu.rs、cpu.rs 与 vendor/）。
 
-**独特性判断**：通用"生成式输出与运行时"类目覆盖模型服务抽象层；这里是推理器二进制的设备级生命周期（版本、硬件驱动后端、依赖库 CUDA/Vulkan/cuDNN 检查、进程收养）与"探测→推荐→预测→验证"闭环，调查样本中未见同类实现。
+**独特性判断**：通用“生成式输出与运行时”类目覆盖模型服务抽象层；这里是推理器二进制的设备级生命周期（版本、硬件驱动后端、依赖库 CUDA/Vulkan/cuDNN 检查、worker 生命周期和线程 KV 状态）与“探测→推荐→预测→验证”闭环，调查样本中未见同类实现。
 
-**证据强度**：扩展与 Rust 插件源码、单元测试为静态事实；真实下载、GPU 探测与 Router 运行未验证。
+**证据强度**：扩展与 Rust 插件源码、单元测试为静态事实；真实下载、GPU 探测与 worker 运行未验证。
 
 ### 能力二：`/v1/orchestrations` 服务端 MCP 编排 — `主链确认`
 
@@ -138,7 +139,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 ## 未验证事项
 
-- 全部能力均未运行验证：真实后端下载/更新/回滚、GPU 探测与 fit 预测、Router 多模型并发、`/v1/orchestrations` 端到端编排、`jan launch` 拉起外部 Agent、LLM 路由器真实调用与遥测落库。
+- 全部能力均未运行验证：真实后端下载/更新/回滚、GPU 探测与 fit 预测、worker 多模型并发、`/v1/orchestrations` 端到端编排、`jan launch` 拉起外部 Agent、LLM 路由器真实调用与遥测落库。
 - `readiness.ts` 探针（`verifyGpuOffload`/`verifyEmbeddingModel`）的判定阈值与误报边界未核对。
 - MCP 智能路由的"最多 5 服务器"与阈值 5 的具体打分语义未逐行展开。
 - Project 工作流主链未走通（本轮未调查服务端权限与持久化细节）。

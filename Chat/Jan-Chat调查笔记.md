@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-06
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 store/hooks/Rust commands 全量行级阅读）；未修改 Jan 仓库
 >
@@ -36,7 +36,7 @@ Jan 的 Chat 管线是"前端直连模型服务"模式：没有后端聊天业�
 ```text
 ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/摄取 → 持久化 userMessage 并写 parentId → sendMessage）
 → useChatSDK → CustomChatTransport.sendMessages（custom-chat-transport.ts:1102-1519）
-   模型创建（createModelOrAbort：合并模型采样默认/线程参数/reasoning 参数，llamacpp 固定 id_slot=0 复用 KV 缓存）
+   模型创建（createModelOrAbort：合并模型采样默认/线程参数/reasoning 参数；llamacpp 固定 slot 0，并以 thread_id 交给本地引擎切换 KV 状态）
    → refreshTools → 上下文管理（compact/trim）
    → 消息清洗链（coalesce / resolveOrphan / 音视频编码 / 剔除不支持的图片 part）
    → streamText 流式 → toUIMessageStream 回写
@@ -72,7 +72,7 @@ ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/�
 
 - **Thread 目录 + JSONL 整文件重写**（`helpers.rs:34-44`）：每次写入全量 `File::create`，长会话每轮 O(消息数) 文件 I/O；per-thread 锁串行化但无增量维护。【代码确认】
 - **`resume:false`**：不恢复未完成回合；初始消息经 `stickySessionStorage(INITIAL_MESSAGE_PREFIX + threadId)` 恢复发送。【代码确认】
-- **`id_slot=0` KV 复用**（llamacpp）：同一活跃回合串行；多窗口/多会话并发打到同一 llama-server 的行为未验证。【推测】
+- **按线程的 KV 状态缓存**（llamacpp）：请求仍固定使用 slot 0，但 transport 同时传入 thread_id；worker 在换入其他线程前保存旧状态、再恢复同一模型和配置下的目标线程状态。模型、预设、llama.cpp 构建或模型文件变化会拒绝旧缓存；运行时命中率与多窗口并发行为未验证（`custom-chat-transport.ts:1224-1231`、`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:225-280`、`engine/slots.rs:35-175`）。
 - **分支树跨重启一致性**：`activeRootId` 存 thread.json 的 metadata；`backfillParentIds` 在发送时铺平 parentId；旧数据迁移完整性未验证。【代码确认（机制）+ 未验证行为】
 - **compactMessages 退化为纯 trim**：摘要失败提示"摘要失败已退回截断"，摘要削减对关键上下文的影响未做质量实测。【代码确认 + 推测】
 - **线程内助手快照**：编辑助手只在线程内生效（快照），线程内 SamplerPopover 编辑则"快照 + canonical 镜像"双写。
@@ -82,7 +82,7 @@ ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/�
 ## 未验证事项
 
 - 运行行为（视觉效果、时序、性能、真实 provider 上的流式）未实测；结论来自静态源码。
-- 多窗口/多会话并发行为（`id_slot=0` KV 复用语义）未验证。
+- 多窗口/多会话并发及按线程 KV 缓存的命中率、恢复时序未验证。
 - 分支树旧数据迁移完整性、compactMessages 摘要质量未验证。
 - banner 与 metadata.error 并存的 UI 呈现、队列在错误/离场场景的完整时序未实测。
 
@@ -91,6 +91,7 @@ ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/�
 - 前端中枢：`web-app/src/routes/threads/$threadId.tsx`（分支/编辑/续写/错误挂载）
 - 输入框/发送/队列：`web-app/src/containers/ChatInput.tsx`、`web-app/src/hooks/usePrompt.ts`、`web-app/src/stores/message-queue-store.ts`
 - transport 与上下文：`web-app/src/lib/custom-chat-transport.ts`（L1102-1519）、`web-app/src/lib/context-manager.ts`
+- 本地引擎缓存：`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:225-332`、`engine/slots.rs`
 - 消息转换与分支：`web-app/src/lib/messages.ts`、`completion.ts`、`web-app/src/lib/message-branching.ts`
 - Rust 持久化：`src-tauri/src/core/threads/commands.rs`、`helpers.rs`、`db.rs`、`constants.rs`
 - 前端 store：`web-app/src/hooks/useThreads.ts`、`useMessages.ts`、`use-chat.ts`、`web-app/src/stores/chat-session-store.ts`

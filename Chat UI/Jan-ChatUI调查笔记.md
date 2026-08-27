@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、zustand store、对话框与键盘处理、快捷键注册）；视觉效果、焦点顺序、键盘可用性等静态代码无法确认的项标注"未运行验证"
 >
@@ -75,6 +75,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 - **模型选择**：`DropdownModelProvider` 在 HeaderPage（线程页）与首页；无模型时发送被拦截并提示（`ChatInput.tsx:364-367`）。
 - **助手切换**：`AssistantSwitcher`（助手 >1 时显示，可键盘循环切换，`AssistantSwitcher.tsx:59-68`）；线程助手是嵌入快照，本线程内选择/编辑只影响该线程（会话笔记 §1.1/§8）。
+- **项目首条消息**：项目页把该项目的 assistantId 传给 Composer；创建线程时它优先于全局当前助手，因而选择器初始显示项目助手。已有线程仍按线程快照处理（`routes/project/$projectId.tsx:127-135`、`containers/ChatInput.tsx:235-242,477-496`）。
 - **推理参数**：`SamplerPopover`（线程内编辑 = 快照 + canonical 镜像双写，数据侧在会话笔记 §8）；参数如何进入请求（合并顺序、`createCustomFetch` 注入）在对话请求笔记 §2/§9。
 - **推理控制**：reasoning 开关（auto/on/off）与 Thinking Budget 等级（仅 llamacpp 显示 token 预算近似值，L2255-2562）；OpenAI 的 reasoning effort 独立子菜单（L2329-2413）。
 - **工具与外部能力开关**：MCP 工具下拉（`DropdownToolsAvailable`/`McpExtensionToolLoader`）、web 搜索开关（高亮激活态，L2221-2247）、Jan Browser 按钮（需 vision+tools 模型，L2066-2106）、embeddings 指示（L2108-2125）。

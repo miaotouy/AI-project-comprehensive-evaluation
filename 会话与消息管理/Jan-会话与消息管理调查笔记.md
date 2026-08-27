@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`fad3f12a147d138388a66f0d92a02b2675f65294`（分支：`main`）
+> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（core 类型定义、React 前端 store 与服务层、conversational 扩展桥接、Rust Tauri 持久化命令、SQLite 移动端模块）并逐条核对符号与行号
 >
