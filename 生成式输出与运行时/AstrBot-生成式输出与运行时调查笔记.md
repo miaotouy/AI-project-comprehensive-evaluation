@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 `astrbot/core` 与 `dashboard/src` 中 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、preview 等关键词；走通 WebChat 聊天链路（发送 → 流式生成 → 消息持久化 → 重新加载）与工具结果物化链路（执行 → 文件附件 → 工作区浏览）的实现路径；对照单元测试确认部分行为
 >
@@ -69,7 +69,7 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 
 **代码执行**：本地与沙箱四类运行时（未发现 notebook 或 REPL 类型的持续运行对象）：
 - 本地 Python：每次调用 `python -c` 起新子进程（`booters/local.py:828-866`），无持久 kernel；`kernel_id` 参数在协议层存在（`olayer/python.py:8-19`），本地实现忽略，Neo 实现标注 Bay SDK 不支持（`booters/shipyard_neo.py:62`）。
-- 本地 Shell：每次调用起子进程（Windows 用 PowerShell 5.1，`booters/local.py:148-156`）；另有 managed session 承载后台/交互式进程，输出写临时日志文件增量读取（`booters/local.py:213-825`）。
+- 本地 Shell：每次调用起子进程；Windows 优先探测 PowerShell 7（`pwsh`）再回退到 Windows PowerShell（`booters/local.py:56-58、163-180`）。另有 managed session 承载后台/交互式进程，输出写临时日志文件增量读取（`booters/local.py:213-825`）。
 - 远端沙箱：shipyard_neo（Bay，python-default profile，可含 browser 能力）、shipyard、cua（桌面 GUI）、boxlite 等运行时；选择与生命周期见 `computer_client.py:588-666`，能力装配见文末源码索引（`astr_main_agent.py:1125-1221`）。
 
 ## 5. 用户交互、事件与错误反馈

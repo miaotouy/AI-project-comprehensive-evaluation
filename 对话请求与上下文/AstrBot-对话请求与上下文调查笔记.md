@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：直接阅读源码（事件总线、流水线调度、各阶段实现、并发工具、上下文管理、Agent 构建与 runner、WebChat 流式链路），行号按当前 HEAD 逐一核对
 >
@@ -156,6 +156,8 @@ _run_compression（:83-121）:
 - **follow-up 消费**：runner 在当前轮次结束后把积压的 follow-up 文本以 `[SYSTEM NOTICE]` 提示合并进下一轮内容（tool_loop_agent_runner.py:702-721，使用点 :1103），提示模型优先处理用户插话。
 
 ## 8. 队列、多会话并发与后台生成
+
+RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而不同平台会话不会共用限流计数（rate_limit_check/stage.py:57-82）。cron 与后台工具唤醒主 Agent 时会保留结构化会话历史，并从当前 Provider 配置读取、校验 `max_agent_step` 后传给 runner；它们不再绕过常规的上下文截断与步数上限（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
 
 - **SessionLockManager**（session_lock.py:8-55）：外层按事件循环隔离（`WeakKeyDictionary[event_loop, manager]`，避免跨 loop 误用 asyncio.Lock）；内层 `_PerLoopSessionLockManager` 用 `defaultdict(asyncio.Lock)` 加引用计数，计数归零自动清理；单例。锁包住 `build_main_agent` 与整个 agent 运行（internal.py:220-425）——**同 UMO 串行化 LLM 请求，跨会话天然并行**。
 - **follow-up 严格序**（follow_up.py:16-218）：

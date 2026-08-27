@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -268,6 +268,8 @@ subagent router_prompt
 | 子 Agent | `views/SubAgentPage.vue` | agent → persona 关联 |
 
 校验规则（PersonaForm.vue）：`persona_id` 非空 + 唯一（后端 DB unique 兜底）；`system_prompt` 最短 10 字符（:247-251 附近）；begin_dialogs 按行配对（`getDialogRules` :116）。
+
+PersonaManager 的移动端工具栏现在始终保留新建文件夹入口，不再因已存在文件夹而隐藏；这是管理表面的可达性调整，不改变 persona 或文件夹的存储语义（`dashboard/src/views/persona/PersonaManager.vue:36-45`）。
 
 ## 10. 设计取舍与边界
 

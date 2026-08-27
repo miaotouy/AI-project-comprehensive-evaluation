@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：直接阅读源码（Dashboard 前端 Vue 组件与 composables、FastAPI 聊天接口、WebChat 平台适配器），行号按当前 HEAD 逐一核对；视觉、焦点顺序、键盘可用性等需运行确认的项标注"未运行验证"
 >

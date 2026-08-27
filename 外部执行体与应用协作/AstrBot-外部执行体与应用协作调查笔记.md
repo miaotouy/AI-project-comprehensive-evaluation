@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：静态复核平台 adapter、注册/登录绑定、统一 webhook、UMO、事件流水线和主动投递；复用 Chat、消息渲染和独特功能笔记；未连接真实 IM 平台
 >
@@ -15,6 +15,8 @@
 ## 结论摘要
 
 AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。`astrbot/core/platform/sources/` 下 18 个平台适配器（Telegram、Discord、Slack、飞书/Lark、企业微信、钉钉、QQ 官方/OneBot、KOOK、LINE、Mattermost、Misskey、Satori、微信公众平台/微信 OCR 等）不是单向通知通道，而是带身份、连接、入站事件、命令、会话映射、媒体转换和出站投递的产品主入口。
+
+QQ 官方适配器的本地大媒体文件改走分片上传器，并把最终失败继续向上抛给发送链；Telegram 入站音频文件会归一为 `Record` 组件。这两项扩展了平台媒体交接，未改变 UMO 到会话/Agent 的主链（qqofficial_chunked_upload.py；qqofficial_message_event.py:650-728；telegram/tg_adapter.py:585-607）。
 
 它与 DeepChat 的语义不同：AstrBot 本身就是 IM Agent 宿主，不是从 IM 远程驾驶另一个桌面客户端。正式横向比较应保留这一区别。
 

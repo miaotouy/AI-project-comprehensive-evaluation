@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -24,6 +24,7 @@ AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM
 - **RespondStage 分段发送**（respond/stage.py:169-325）：校验组件有效性、提取 Reply/At 为"头"、Record 强制单独发、间隔随机防风控、流式直通与重复文本防重，细节见 §4.2。
 - **平台层处理长度与协议差异**：Telegram 4096 逐级切分、LINE 5000 截断、aiocqhttp 缓冲合并或句号切分双策略、QQ 官方 Markdown 流式、Satori 转义等。
 - **WebChat 半开放协议**：出站 `{"type","data",...}` + `[IMAGE]/[RECORD]/[FILE]` 前缀字符串（webchat_event.py:50-149），前端反向解析；历史记录走结构化 parts（message_parts_helper.py）。
+- **T2I 默认渲染模板可迁移**：模板管理器会以哈希识别未自定义的旧核心模板并覆盖升级；已修改的用户副本维持不动，渲染产物仍经结果装饰阶段进入既有消息链（utils/t2i/template_manager.py:16-18、91-123）。
 - **前端渲染**：`messageBlocks()` 按 think/tool_call/content 切块（useMessages.ts:1317-1359），`MarkdownRender` 流式 + `MARKDOWN_RENDER_MAX_LIVE_NODES=320` 节点上限。
 
 ## 总体调用链

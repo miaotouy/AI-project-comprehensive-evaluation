@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：直接阅读源码（conversation_mgr、SQLite 数据层、SharedPreferences、WebChat 会话服务、schema 升级脚本与备份模块），所有行号按当前 HEAD 逐一核对
 >
@@ -142,6 +142,8 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 - **无跨表全文索引**：搜索均为 SQL 层 ilike 扫描，无独立搜索索引；命中定位由 WebChat 前端在已加载消息中滚动定位（scrollToMessage，Chat.vue:1472-1480），会话数据层无消息级定位 API。
 
 ## 6. 缓存、一致性、多窗口与并发写入
+
+SharedPreferences 现在不再在启动时镜像整张 `preferences` 表：内存仅保留本进程写入的覆盖层，未命中异步读取会按键查询 SQLite，避免插件 KV 很大时的全表预加载与内存膨胀；写入仍由 FIFO 队列异步落库（shared_preferences.py:44-57、182-224、267-288）。这改变的是偏好读取的缓存策略，不改变 `sel_conv_id` 等会话指针的持久化归属。
 
 - **读穿缓存**：`session_conversations` 无写回路径，一切切换即写库（见 §2），缓存失效即丢失但库中权威仍在。
 - **并发写入**：`update_conversation`（sqlite.py:482-504）按字段增量更新（title/persona_id/content/token_usage 各自非 None 才更新），同对话并发改写是 last-write-wins；`add_message_pair`（conversation_mgr.py:357-390）读-改-写没有锁，但实际调用受请求侧 UMO 级会话锁串行化（见请求侧笔记）。

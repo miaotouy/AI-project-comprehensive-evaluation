@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；结合 Agent 工具、Chat 等既有笔记做去重；未修改 AstrBot 仓库
 >
@@ -71,6 +71,8 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 **用户目标**：Agent 在用户不发言时也能行动：群聊概率性主动插话、按 cron/一次性计划执行任务、后台任务完成后主动向用户汇报。README 把 Proactive Agent 列为四大招牌之一。
 
 **入口与触发者**：三条并存的主动路径，触发者分别是平台事件（群消息）、时间调度（cron）、任务完成（后台工具）。
+
+主动路径现在保留结构化历史并让常规上下文截断处理；cron 与后台唤醒读取当前 `max_agent_step` 且将无效或非正值收敛为最小可用值（`astr_agent_tool_exec.py:548-596`、`cron/manager.py:444-487`）。因此这项能力仍是主动执行链，而非脱离会话上下文的独立任务系统。
 
 **完整主链**（静态走通）：
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -22,7 +22,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 - **四路注册汇合**：内置工具由 builtin_tool 装饰器注册（registry.py:232-254），插件工具从 star_handler.py:670-724 进入，MCP 工具由 mcp_server.json 配置并经初始化入口加入，子 Agent 则使用 HandoffTool（handoff.py:8-64）。
 - **同名工具去重规则为「active 优先、同状态后覆盖」**：工具集的添加逻辑见 tool.py:91-108，查找时再由管理器反向扫描（func_tool_manager.py:399-417）。
 - **执行串行无并行**：工具处理入口（tool_loop_agent_runner.py:1089-1355）对同一响应中的多个 tool_call 按顺序逐个等待执行（:1108-1112）。
-- **工具返回 None = 结束 Agent**：本地执行器中，工具直接给用户发消息后返回空结果（astr_agent_tool_exec.py:680-697），runner 将其转换为完成状态（tool_loop_agent_runner.py:1283-1298）。
+- **工具返回 None = 结束 Agent**：本地执行器中，工具直接给用户发消息后返回空结果（astr_agent_tool_exec.py:680-697），runner 将其转换为完成状态（tool_loop_agent_runner.py:1283-1298）。后台和定时路径则把 `max_agent_step` 解析为至少为 1 的整数后传给同一 runner，不再固定为 30 步（astr_agent_tool_exec.py:552-596；cron/manager.py:445-487）。
 - **安全分层**：非内置工具经过权限代理，按 tool_permissions 的 SharedPreferences 默认键查权限（func_tool_manager.py:214-285、:460-494）；默认 member 不限制，内置敏感工具则在自身实现内检查。
 - **五种产物级防护**：包括工具超时、结果 token 溢出落盘、重复调用提示、MAX_STEPS 截断和 skills_like 双段 requery，具体位置分别见 tool_loop_agent_runner.py:110-111、146-175、289-307、1060-1088、1395-1469。
 - **内置工具 5 组约 26 个 + shipyard_neo 14 个**，每组带 config 规则（`BuiltinToolConfigRule`），但**规则只驱动 WebUI 展示"可用状态"，不参与运行时注入**（唯一消费方 tools_service.py:533-569）。
@@ -170,7 +170,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 ### 5.4 后台任务唤醒主 Agent（astr_agent_tool_exec.py:509-619）
 
-- 后台结果通过 CronMessageEvent 模拟主动事件，重建主 Agent 并运行最多 30 步（:542-548、589、597）。
+- 后台结果通过 CronMessageEvent 模拟主动事件，重建主 Agent；步数来自当前 UMO 的 `provider_settings.max_agent_step`，非法或非正值回退/钳制到可用下限（astr_agent_tool_exec.py:552-596）。
 - 系统提示要求使用 send_message_to_user 交付结果，完成后经 persist_agent_history 写回对话历史（:572-582、611-616，utils/history_saver.py:9-27）。
 
 ## 6. 安全与限制

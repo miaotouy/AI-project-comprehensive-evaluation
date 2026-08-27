@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -19,6 +19,8 @@ AstrBot Dashboard 是 Vue 3、Vuetify 和 Pinia 构成的 Web 管理台。应用
 Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示。主题由两套 Vuetify theme 对象提供，支持明暗和系统跟随，自定义主色与次色会直接改写 theme 对象。项目没有主题市场、壁纸、主题导入导出、自定义 CSS 或密度与圆角设置。
 
 图片预览、上传和拖放主要由业务页面各自实现，没有公共灯箱或统一上传层。国际化实际使用自研 composable，已声明的 vue-i18n 没有源码消费。本次也没有找到应用级 Vue 错误边界；错误反馈依赖 axios 拦截器、业务 try/catch 和 Toast。
+
+配置渲染器新增 `secret` 字段类型，编辑时可切换掩码可见性；平台管理页则重构为工作区列表加独立编辑器，并显示加载进度（ConfigItemRenderer.vue:145-150、319-325；views/PlatformPage.vue；components/platform/PlatformEditor.vue）。这些仍复用既有的配置表单、i18n 与 Toast 基础设施。
 
 ## 系统边界与总体装配
 

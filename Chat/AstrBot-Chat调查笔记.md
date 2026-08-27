@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -57,9 +57,9 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 1. **九阶段洋葱调度**：阶段 `process()` 返回 `AsyncGenerator` 时挂起，递归执行后续阶段，完成后回到 yield 点执行后置逻辑——LLM 请求阶段先让 Respond 发送，再回来做历史保存等收尾；单事件单流水线，无跨阶段状态泄漏。
 2. **并发控制**：同 UMO 串行化（session_lock 包裹整个 LLM 流程），跨会话天然并行；follow-up 捕获时分配序号 + `asyncio.Condition` 队首放行，避免唤醒顺序漂移。
-3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。
+3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
 4. **群聊**：`GroupChatContext` 每 UMO 内存环形记录最多 1000 条原始消息（含图像 caption），注入为 `<system_reminder>` 块；群历史可选持久化 700 条上限并暴露 `get_group_message_history` 工具；`unique_session` 开启后按发送者隔离会话。
-5. **边界**：RateLimit 超限 stall 阻塞而非丢弃（消息堆积）；EventBus 无限队列无背压；阶段顺序硬编码于 `STAGES_ORDER`；agent 停止两态（stop_event 硬断 / agent_stop_requested 软停保历史）。
+5. **边界**：RateLimit 超限 stall 阻塞而非丢弃（消息堆积），队列键为完整 `unified_msg_origin`，不同 UMO 不再共享限额队列（rate_limit_check/stage.py:57-82）；EventBus 无限队列无背压；阶段顺序硬编码于 `STAGES_ORDER`；agent 停止两态（stop_event 硬断 / agent_stop_requested 软停保历史）。
 
 ## 未验证事项
 

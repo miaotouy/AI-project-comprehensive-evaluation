@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca`（分支：`master`）
+> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
 >
 > 调查方式：只读源码（provider 抽象层、实体、管理器、主要适配器、配置层、fallback 编排、Dashboard 后端、CLI、备份与桌面运行时）与仓库文档交叉梳理；未修改目标仓库
 >
@@ -26,6 +26,7 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 - **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环，按 429、上下文超长、非 VLM、工具不可用、图片审核等类别分别降级，详见 4.2）。
 - **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
 - **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
+- **近期渠道与元数据调整**：新增 SSYCloud 对话 Provider；模型元数据请求失败时会尝试备用端点；推理能力元数据已从 Provider 配置中分离，`reasoning_effort` 作为请求预设保存（ssycloud_source.py:7-59；utils/llm_metadata.py:38-84；astrbot/dashboard/services/config_service.py:1362-1407）。
 - **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
 - **管理入口**：源码确认 WebUI 提供 source 与 provider 两级查看、新增、编辑、启停、删除和连接测试，非聊天能力的 provider 卡片还提供复制；配置文件和备份机制支持整体查看、导入、导出，CLI 只管理少量通用键，未找到 provider 专用 CLI/TUI；桌面端在本仓库中只是托管同一后端的外部客户端，渠道管理界面未在本仓库确认。
 - **未实现机制**：无渠道池/权重/负载均衡（`provider_pool` 与 `persona_pool` 只声明在默认配置，全仓 grep 无消费者）；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
