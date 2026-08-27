@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-17
+> 对比更新日期：2026-08-27
 >
 > 依据：本类目 18 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
 >
@@ -22,6 +22,8 @@
 - **UI 调查应记录"呈现投影"**：同一份会话数据可以有多种用户可见投影（分支树图、side-by-side、bubble/panel/immersive 模式），仅记录 schema 无法解释用户实际如何切换、编辑、停止和定位。
 - **DeepSeek Harness 的"前端"是浏览器里的第二条 Cordis 插件树**：React 18 + Vite 只是薄壳，每个 UI 能力是 `dsh.client` 插件包，由宿主启动图按需取回；四象限 RPC 中上行是 HTTP POST、下行是每条逻辑流一条 WebSocket；会话事件窗口 → `ConversationNodeAssembler` → 块级不可变流式累积（animation-frame 合并）→ ChatView 按 key 订阅座位；工具调用按工具名键控槽分发；设置表单经 schemastery schema 下发、路径式草稿写回。
 - **Risuai 是"单缓冲 + 全局互斥"的极简工作流**：草稿是跨角色共享的组件级单缓冲、不持久化、刷新即失；生成全局串行、无排队与重试，停止即中断并保留半截回复；reroll 是内存快照，分支复制会话才是固化版本的唯一方式；刷新总是回首页，靠持久化的聊天指针重选角色恢复现场。
+
+- **表面所有权会直接改变可观察到的收尾行为**：VCPChat 已让每个聊天 surface 持有自己的 renderer、流消费者和释放动作；路由撤销后，迟到的流事件不再投影到旧视图。该机制约束的是界面生命周期，不能据此推断远端请求已经中止。
 
 ## 工作台与导航
 

@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-16
+> 对比更新日期：2026-08-27
 >
 > 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比；本文档只保留跨层综合结论
 >
@@ -15,6 +15,8 @@
 ## 结论摘要
 
 十八个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）与事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness，ReactLoopAgent 驱动 turn/step 生命周期，边界全部是 durable session 事件）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+
+AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路径顺序等待，空闲分支可并行生成；Cherry Studio 的 Agent 聊天则把 Claude Code、Pi 与 DeepSeek Harness 收束进同一调度与持久化边界。VCPChat 的聊天视图、流投影和历史写入已拆为各自的所有者，因此也进一步说明聊天主链的生命周期与消息磁盘事实源是两层问题。
 
 ## 跨层综合结论
 

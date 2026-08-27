@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-18
+> 对比更新日期：2026-08-27
 >
 > 依据：同目录十八份单项目调查笔记及其记录的代码快照
 >
@@ -16,24 +16,24 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | --- | --- | --- |
-| AIO Hub | [AIO-Hub-Agent工具调查笔记.md](AIO-Hub-Agent工具调查笔记.md) | 274 | `dev` | `2ddbb19288c08bda1c080fc9a5f2e71149feaebc` |
-| AstrBot | [AstrBot-Agent工具调查笔记.md](AstrBot-Agent工具调查笔记.md) | 357 | `master` | `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` |
-| Chatbox | [Chatbox-Agent工具调查笔记.md](Chatbox-Agent工具调查笔记.md) | 536 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
-| Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 366 | `main` | `cd82f996fb6c3a523b6d40de31314f2b86f56281` |
-| DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 135 | `dev` | `e142b2a2eb06f903dd014326e19f87947ab92f03` |
-| DeepSeek Harness | [DeepSeek-Harness-Agent工具调查笔记.md](DeepSeek-Harness-Agent工具调查笔记.md) | 222 | `master` | `47f943859bef60e4160492346772ded9b24f765a` |
-| Hermes Agent | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 226 | `main` | `76d832d3857551a029c4b39c23945eb47c16fe5b` |
-| Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 169 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
-| LobeHub | [LobeHub-Agent工具调查笔记.md](LobeHub-Agent工具调查笔记.md) | 590 | `canary` | `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` |
-| Manifold Desktop | [Manifold-Desktop-Agent工具调查笔记.md](Manifold-Desktop-Agent工具调查笔记.md) | 68 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
-| NextChat | [NextChat-Agent工具调查笔记.md](NextChat-Agent工具调查笔记.md) | 161 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
-| Open WebUI | [Open-WebUI-Agent工具调查笔记.md](Open-WebUI-Agent工具调查笔记.md) | 178 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
-| OpenCode | [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md) | 225 | `dev` | `1f94d8a3c86b67f4f49a0e341de74e9188381b3a` |
-| Pi | [Pi-Agent工具调查笔记.md](Pi-Agent工具调查笔记.md) | 122 | `main` | `534bcbffb7e1e7551d9ee3572dfeb278e203e493` |
-| Risuai | [Risuai-Agent工具调查笔记.md](Risuai-Agent工具调查笔记.md) | 185 | `main` | `0551d283faeba6e73899b01dd85ea38307b24699` |
-| SillyTavern | [SillyTavern-Agent工具调查笔记.md](SillyTavern-Agent工具调查笔记.md) | 418 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
-| VCPChat | [VCPChat-Agent工具调查笔记.md](VCPChat-Agent工具调查笔记.md) | 299 | `main` | `fb66a52dd038a6fd147ee91cd1a39fe17555867e` |
-| VCPToolBox | [VCPToolBox-Agent工具调查笔记.md](VCPToolBox-Agent工具调查笔记.md) | 407 | `main` | `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` |
+| AIO Hub | [AIO-Hub-Agent工具调查笔记.md](AIO-Hub-Agent工具调查笔记.md) | 373 | `dev` | `36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8` |
+| AstrBot | [AstrBot-Agent工具调查笔记.md](AstrBot-Agent工具调查笔记.md) | 317 | `master` | `8ea8ce613a0bee4ddb48b21490afe23418277c75` |
+| Chatbox | [Chatbox-Agent工具调查笔记.md](Chatbox-Agent工具调查笔记.md) | 512 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
+| Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 371 | `main` | `88cfe5dd2b77e63464be22968f66ebcb1d429483` |
+| DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 164 | `dev` | `7f3379524da3ac629918d35682e38833ad5c203e` |
+| DeepSeek Harness | [DeepSeek-Harness-Agent工具调查笔记.md](DeepSeek-Harness-Agent工具调查笔记.md) | 224 | `master` | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` |
+| Hermes Agent | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 251 | `main` | `791e2ae3257e211d14ca77e654dfe10ee1976a1c` |
+| Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 190 | `main` | `95e96d02c58ca361a3e54cb36360ed16bc534c8a` |
+| LobeHub | [LobeHub-Agent工具调查笔记.md](LobeHub-Agent工具调查笔记.md) | 546 | `canary` | `7c559cbd4d92a54289bce3a8aab96e057d0ce8c5` |
+| Manifold Desktop | [Manifold-Desktop-Agent工具调查笔记.md](Manifold-Desktop-Agent工具调查笔记.md) | 75 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
+| NextChat | [NextChat-Agent工具调查笔记.md](NextChat-Agent工具调查笔记.md) | 176 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
+| Open WebUI | [Open-WebUI-Agent工具调查笔记.md](Open-WebUI-Agent工具调查笔记.md) | 192 | `main` | `d3e8bf3405e848cfba377814d0aa7ba7290e414d` |
+| OpenCode | [OpenCode-Agent工具调查笔记.md](OpenCode-Agent工具调查笔记.md) | 272 | `dev` | `c2eacd72afc4a4984564c393e15ab30011057269` |
+| Pi | [Pi-Agent工具调查笔记.md](Pi-Agent工具调查笔记.md) | 136 | `main` | `e86823096c5bad39e1ca282ec24bc5eb9bec745b` |
+| Risuai | [Risuai-Agent工具调查笔记.md](Risuai-Agent工具调查笔记.md) | 185 | `main` | `e565563a288ebe4c65b6099a1645ba477d1c84b4` |
+| SillyTavern | [SillyTavern-Agent工具调查笔记.md](SillyTavern-Agent工具调查笔记.md) | 384 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
+| VCPChat | [VCPChat-Agent工具调查笔记.md](VCPChat-Agent工具调查笔记.md) | 315 | `main` | `89e02b778d626078be91dfbad01e5c9554c47f76` |
+| VCPToolBox | [VCPToolBox-Agent工具调查笔记.md](VCPToolBox-Agent工具调查笔记.md) | 438 | `main` | `e2762e4dab5c70952d88f96689fba1270624e5ef` |
 
 ## 调查方法与比较框架
 
@@ -69,6 +69,8 @@
 10. **普通聊天上的轻量回环与未闭合骨架：NextChat、Manifold Desktop。** NextChat 的 OpenAPI 工具使用原生 `tool_calls` 并行执行后递归请求，MCP 则使用 fenced JSON 文本协议；两条链都没有审批、沙箱或步数上限。Manifold Desktop 已能发现 MCP、注入三家 Provider 并展示调用，但 `MCPClient::CallTool()` 无运行时调用点，尚不存在结果回注与下一轮生成。
 11. **作用域分层 + 瀑布式执行管线的注册制运行时：DeepSeek Harness。** 工具是注册在内存 registry 的代码对象：`ToolDefinition` 含模型可见 schema、强制 `output` 输出契约与纯函数 `presentCall`/`presentResult`；作用域是全局加每 agent 的层链，restrict 的 allow/deny 只过滤继承面。执行沿固定管线：`tool/call` 落盘 → pre-execute 策略瀑布（ask 经 approval seam 放行，唯一放行结果 allowed-once）→ 单调 guard → execute → post-execute → `tool/result` 落盘，`deriveMessages` 从日志投影模型历史。调度器按 executionMode 分 exclusive 屏障与 parallel 滚动池（默认并发 10）。能力经 capability seam 三角色与工具解耦，bash/pwsh、fs、web、terminal、skill、subagent、MCP 桥等各有 seam，provider 可整体替换而模型可见 schema 不变。
 12. **MCP 为唯一工具协议、全量注入零过滤、审批几近缺失的聊天前端：Risuai。** 工具面完全以 MCP 为骨架——模块声明的远程 MCP、内置 internal 客户端、插件 `registerMCP` 与 OpenAI Responses 内置 `web_search_preview` 四类来源，没有独立函数注册表。发现与注入零过滤：主聊天请求不传工具参数，请求入口每请求拉取全部已激活 MCP 的工具注入四类请求体，无模型能力判定、无会话裁剪、无 token 预算、无去重。编排没有统一驱动层：非流式链递归请求函数自身，流式链在流包装器内联续请求，工具串行、未找到任何迭代上限，Claude 流式路径不解析 `tool_use`、是唯一没有工具循环的格式。审批只存在于 `internal:risuai` 13 个写/删工具的执行端，其余工具无任何审批；全部执行在前端上下文，插件工具在 iframe 沙箱内。
+
+当前样本还增加了几个更清晰的执行边界：Cherry Studio 已把 Claude Code、Pi 与 DeepSeek Harness 接入同一会话服务和审批注册表，但三者仍各自维护工具桥；AstrBot 允许工具以空结果结束 Agent，并把后台/定时路径纳入同一轮次上限；Pi 的本地 Shell 在 Windows 优先选择 PowerShell 7；VCPToolBox 的 AgentAssistant 则以 Flowlock 的开始、心跳和终止标记收束委托循环。它们分别说明“共用控制面”“循环收口”“本地执行域”和“协作协议”不能由同一个工具数量指标代替。
 
 ## 四个必答问题
 

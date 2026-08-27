@@ -2,7 +2,7 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox、Hermes Agent、Risuai
 >
-> 对比更新日期：2026-08-17
+> 对比更新日期：2026-08-27
 >
 > 依据：同目录十八份单项目调查笔记及其中记录的代码快照
 >
@@ -16,24 +16,24 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | ---: | --- | --- |
-| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 447 | `main` | `023bc63ac10201bf0f663bf49d642fd55c29a3d0` |
-| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 329 | `master` | `a9bb8a64ca69657e6262e3ca06541ecaf3a6d1ca` |
-| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 200 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
-| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 190 | `main` | `cd82f996fb6c3a523b6d40de31314f2b86f56281` |
-| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 157 | `dev` | `e142b2a2eb06f903dd014326e19f87947ab92f03` |
-| DeepSeek Harness | [DeepSeek-Harness-Agent角色调查笔记.md](DeepSeek-Harness-Agent角色调查笔记.md) | 165 | `master` | `47f943859bef60e4160492346772ded9b24f765a` |
-| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 148 | `main` | `fad3f12a147d138388a66f0d92a02b2675f65294` |
-| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 225 | `canary` | `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` |
-| Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 68 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
-| NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 168 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
-| Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 185 | `main` | `01f4282f1ffe0d6212f58d3afbeae21fffd0c4be` |
-| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 191 | `dev` | `1f94d8a3c86b67f4f49a0e341de74e9188381b3a` |
-| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 113 | `main` | `534bcbffb7e1e7551d9ee3572dfeb278e203e493` |
-| SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 206 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
-| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 150 | `main` | `fb66a52dd038a6fd147ee91cd1a39fe17555867e` |
-| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 239 | `main` | `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` |
-| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 203 | `main` | `76d832d3857551a029c4b39c23945eb47c16fe5b` |
-| Risuai | [Risuai-Agent角色配置调查笔记.md](Risuai-Agent角色配置调查笔记.md) | 221 | `main` | `0551d283faeba6e73899b01dd85ea38307b24699` |
+| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 447 | `dev` | `36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8` |
+| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 331 | `master` | `8ea8ce613a0bee4ddb48b21490afe23418277c75` |
+| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 239 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
+| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 228 | `main` | `88cfe5dd2b77e63464be22968f66ebcb1d429483` |
+| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 192 | `dev` | `7f3379524da3ac629918d35682e38833ad5c203e` |
+| DeepSeek Harness | [DeepSeek-Harness-Agent角色调查笔记.md](DeepSeek-Harness-Agent角色调查笔记.md) | 165 | `master` | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` |
+| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 160 | `main` | `95e96d02c58ca361a3e54cb36360ed16bc534c8a` |
+| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 255 | `canary` | `7c559cbd4d92a54289bce3a8aab96e057d0ce8c5` |
+| Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 74 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
+| NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 173 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
+| Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 213 | `main` | `d3e8bf3405e848cfba377814d0aa7ba7290e414d` |
+| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 271 | `dev` | `c2eacd72afc4a4984564c393e15ab30011057269` |
+| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 132 | `main` | `e86823096c5bad39e1ca282ec24bc5eb9bec745b` |
+| SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 211 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
+| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 162 | `main` | `89e02b778d626078be91dfbad01e5c9554c47f76` |
+| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 263 | `main` | `e2762e4dab5c70952d88f96689fba1270624e5ef` |
+| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 237 | `main` | `791e2ae3257e211d14ca77e654dfe10ee1976a1c` |
+| Risuai | [Risuai-Agent角色配置调查笔记.md](Risuai-Agent角色配置调查笔记.md) | 221 | `main` | `e565563a288ebe4c65b6099a1645ba477d1c84b4` |
 
 ## 比较口径
 
@@ -73,6 +73,8 @@
 若单独比较**预设可配置范围与日常编辑体验**，结论会与“社区生态成熟度”不同：AIO Hub 是当前样本中最强的一体化候选。它把消息角色、顺序、锚点/深度、模型匹配、消息组、宏、变量、知识库占位符、资产附件、模型参数和工具策略放在同一个 Agent 编辑流程里；其中消息组可设多选或单选，并有组级总开关和侧边栏快速切换。它还自带世界书编辑器与运行时，支持关键词/正则、selective、概率、扫描深度、递归、过滤、包含组与 depth 注入等可执行子集。SillyTavern 的优势仍是角色卡标准、社区资产、传统角色扮演工作流、扩展事件和 World Info 全语义覆盖；这不能简化为“AIO 的角色能力远弱于酒馆”，也不能反过来用 AIO 的配置聚合优势否定酒馆生态。
 
 跨项目比较酒馆兼容时，应拆成四层：格式能否导入、字段能否保留/编辑、字段是否在目标运行时生效、原生态协议是否完整复现。AIO 前三层已有相当覆盖，第四层并不完整：部分锚点降级映射，sticky、cooldown、delay 这些状态虽有运行时处理却缺少编辑控件，另一些扩展字段只能保存或编辑但未找到消费链。Risuai 同属酒馆生态入口：V2/V3、PNG、JSON、CharX 都能导入且主要字段进入运行时，但对 ST 扩展字段采用内联装饰符转译，字段能生效却不再保留原结构。用一个“支持/不支持”标签会同时掩盖它已有的能力和真实边界。
+
+Cherry Studio 的 Agent 运行时现覆盖 Claude Code、Pi 和 DeepSeek Harness；模型兼容性、审批和跨会话投递可以复用控制面，但这属于执行配置，未把普通 Assistant 的角色实体改成运行时专属对象。VCPChat 的当前 Tavern 与群聊调整同样没有新增角色版本、渠道绑定或持久化角色实体，仍应按本地 Agent/群组配置与 Tavern 规则的组合比较。
 
 ### DeepSeek Harness
 
