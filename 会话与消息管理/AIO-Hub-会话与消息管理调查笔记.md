@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -74,7 +74,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 | `status` | 节点生命周期状态，完整取值 `complete`/`generating`/`waiting`/`queued`/`error`；展示层映射在 `utils/messageStatus.ts`，旧数据 `pending` 兼容为 queued。 |
 | `reasoningContent` + `reasoningArtifacts` | 用于精确回放 provider 自己维护的 reasoning 状态，另配 `reasoningStateStatus`（`"intact"`/`"broken"`，`types/message.ts:283-290`）；上下文压缩隐藏历史后 replay artifact 失效，压缩节点生成 `reasoningStateWarning`（执行侧见对话请求与上下文附录 A.2）。 |
 | `translation` | 保存 `content`/`targetLang`/`modelIdentifier`/`timestamp`/`visible`/`displayMode` 及显示模式（`"original"`/`"translation"`/`"both"`，`types/message.ts:329-343`）；翻译的 LLM 调用在对话请求与上下文 9.7，界面入口在 Chat UI 6.1。 |
-| `isQueued` | 排队等待生成的消息节点置 `true`（执行语义在对话请求与上下文 8）。 |
+| `isQueued` | 排队等待生成的消息节点置 `true`；它是跨会话切换仍可扫描的持久化调度事实，同一路径按祖先关系串行，不同分支可并行（执行语义在对话请求与上下文 8）。 |
 | Agent/模型快照 | 记录生成时的 `metadata.agentId`/`agentName`/`agentIcon` 及 `profileId`/`profileName`/`modelId`/`modelName`（写入点在 `useChatHandler.sendMessage()`，见第 8 节）。 |
 | `isCompressionNode` | 压缩节点置 `true`，并记被遮罩 ID、原消息/Token 数等（见第 4.4 节与对话请求与上下文附录 A）。 |
 | `sessionVariableSnapshot` | 含变量变更的消息记录会话变量快照，是分支级状态回放的起点（注入语义在对话请求与上下文 9.4）。 |

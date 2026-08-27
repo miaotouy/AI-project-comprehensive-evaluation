@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）。
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-`llm-chat` 是 aio-hub（Tauri 桌面应用）内可独立分离窗口的聊天工具模块，基于**树形消息结构**，支持多 Agent、多分支、工具调用和上下文压缩，线性对话列表只是消息树的一种视图。分层清晰：`types/` 定义会话、消息节点等核心数据结构；`stores/llmChatStore.ts` 是 Pinia 入口，逻辑委托给 `stores/session/` 下的五个 Manager（访问、运行时、历史、生成、生命周期）；`composables/chat/` 承担请求执行、工具编排与流式响应；`composables/session/` 承担树形节点与分支操作；Rust 后端命令提供跨会话全文搜索。消息树 + 分支记忆、可重放流源驱动的流式渲染、非破坏性上下文遮罩是三个核心特征。
+`llm-chat` 是 aio-hub（Tauri 桌面应用）内可独立分离窗口的聊天工具模块，基于**树形消息结构**，支持多 Agent、多分支、工具调用和上下文压缩，线性对话列表只是消息树的一种视图。分层清晰：`types/` 定义会话、消息节点等核心数据结构；`stores/llmChatStore.ts` 是 Pinia 入口，逻辑委托给 `stores/session/` 下的五个 Manager（访问、运行时、历史、生成、生命周期）；`composables/chat/` 承担请求执行、工具编排与流式响应；`composables/session/` 承担树形节点与分支操作；Rust 后端命令提供跨会话全文搜索。消息树 + 分支记忆、以目标父节点到根路径为粒度的排队调度、可重放流源驱动的流式渲染和非破坏性上下文遮罩是核心特征；不同分支的空闲路径可以并行生成。
 
 ## 产品表面与系统边界
 

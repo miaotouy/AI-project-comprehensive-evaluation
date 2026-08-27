@@ -2,9 +2,9 @@
 
 > 调查对象：`AIO-Hub`（远端仓库 `https://github.com/miaotouy/aio-hub`）
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：只读核对当前产品文档、工具注册入口、47 个 registry 文件中的 Agent 暴露标记、Git 最早提交与 Chat/Tool Calling/Agent Manager 首次加入记录，并回查现有 15 篇 AIO-Hub 调查笔记；结合本次讨论中用户提供的作者观点，未修改被调查项目源码
 >

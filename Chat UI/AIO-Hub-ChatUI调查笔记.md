@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -129,7 +129,7 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 
 ### 5.2 排队反馈
 
-会话生成中再发消息时，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`、`status: "queued"`），当前生成结束后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队/等待状态的界面呈现：`utils/messageStatus.ts:33-103` 把节点状态映射为展示状态，`MessageHeader.vue` 在偏好开关开启（默认 true，`config/defaultSettings.ts:33`）时于消息头渲染对应徽标（图标 + 文案 + tooltip 详情，生成中带旋转动画，截图模式隐藏；`MessageHeader.vue:325-350`）。映射如下：
+会话中某条目标父节点路径仍在生成时再发消息，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`、`status: "queued"`）；同一会话其它分支不因此阻塞。调度器在对应路径空闲后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队/等待状态的界面呈现：`utils/messageStatus.ts:33-103` 把节点状态映射为展示状态，`MessageHeader.vue` 在偏好开关开启（默认 true，`config/defaultSettings.ts:33`）时于消息头渲染对应徽标（图标 + 文案 + tooltip 详情，生成中带旋转动画，截图模式隐藏；`MessageHeader.vue:325-350`）。映射如下：
 
 - `queued` → "排队"；旧数据 `pending` 兼容识别为 queued
 - `waiting` → "等待中"

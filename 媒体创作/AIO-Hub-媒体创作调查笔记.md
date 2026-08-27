@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：只读通读 media-generator 的 ARCHITECTURE.md、registry、store、生成/任务/持久化 composable 与 buildAgentMethods，asset-manager 的 ARCHITECTURE 与 Rust `asset_manager.rs` 关键命令，llm-apis 适配器族与测试；用 `node -e` 解析 package.json/tauri.conf.json/capabilities，`node --check` 抽查两个纯 JS 文件；未运行 Tauri 应用，未修改被调查仓库
 >
@@ -91,7 +91,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 - **状态机**：`pending → processing → completed | error | cancelled`（`types.ts:59`）；`progress`/`statusText` 随阶段更新（准备附件→生成中 30→入库 90→完成 100，`useMediaGenerationManager.ts:596-621`）。
 - **流式预览**：openai-responses 端点通过 `onPartialImage` 回调把中间预览图写入任务 `previewUrls`（:581-594）。
 - **取消**：每个任务持有独立的 `AbortController`，`abortTask`/`abortAll` 分别中止单个或全部任务（Map 管理，`useMediaGenerationManager.ts:74,312-338`）；取消引发的 `AbortError` 收敛为 `error` 状态并提示“已中止”（同文件 `:623`）。UI 侧取消入口为任务卡/任务列表的取消按钮（`handleCancelTask`，`MediaTaskList.vue:150`）与快速模式「停止全部」（`MediaWorkbench.vue:81,95`）。任务完成后保留在池中，由「清理已完成」按钮手动清理；`autoCleanCompleted` 设置项**本次未找到执行消费者**（仅出现在 settings/UI/文档，静态推断为未启用功能）。
-- **超时与重试**：请求默认超时 `600000ms`（`DEFAULT_MEDIA_TIMEOUT`，`src/llm-apis/common.ts:32`）；settings 可配超时与最大重试次数，默认不自动重试（`config.ts:284`），重试次数只传给请求层。`maxConcurrentTasks` 设置项默认值为 3（`config.ts:231`），但**本次未找到并发闸门实现**——实际并发取决于 UI 的 `isGenerating` 全局锁与用户操作节奏，非任务池级限流（静态推断）。
+- **超时、重试与并发**：请求默认超时 `600000ms`（`DEFAULT_MEDIA_TIMEOUT`，`src/llm-apis/common.ts:32`）；settings 可配超时与最大重试次数，默认不自动重试（`config.ts:284`），重试次数只传给请求层。`maxConcurrentTasks` 默认 3，`useMediaGenerationManager` 的模块级队列在获得槽位后才创建 AbortController 和发送请求；所有媒体工作区共享 `runningTaskIds` 与队列，设置变更会重新泵送等待任务（`useMediaGenerationManager.ts:91-111,727-756`）。
 - **Agent 侧异步**：非 `isFast` 模型的工具方法声明为异步执行，带进度、可取消与预计耗时等元信息（`buildAgentMethods.ts:781`），提交即返回 `taskId`，经 tool-calling 通用异步任务框架执行——应用重启后未完成任务标记为 `interrupted` 且不自动恢复（见 Agent 工具笔记第 11 节）。handler 通过取消信号转发 `abortTask`，并用 `reportStatus` 回传进度（`buildAgentMethods.ts:699-712`）。`isFast` 模型走同步方法，超时由 executor 的 `withTimeout` 兜底（默认 30s）。
 
 ## 4. 结果、历史、资产与工程持久化
@@ -159,7 +159,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - **参数边界**：`sanitizeParams` 是模型参数的最后一道闸（剔除/钳制/枚举校验），但 `prompt` 不做任何内容过滤，完全由 LLM/用户控制（源码事实，与 Agent 工具笔记一致）。
 - **素材边界**：参考素材按媒体类型过滤扩展名（`MediaGenerationInput.vue:215`）；图片按 `maxImageDimension` 缩放；MiniMax 翻唱限制单参考音频并校验两步工作流前置条件（`useMediaGenerationManager.ts:1091` validateMiniMaxTwoStepCover、`useMiniMaxCoverWorkflow.ts:128` ensureTwoStepReady，预处理结果 24h 过期）。
-- **资源限额**：超时/重试可配；**本次未找到**任务数、文件大小、磁盘配额或并发数的执行级限额（`maxConcurrentTasks`/`autoCleanCompleted` 均无执行消费者）；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
+- **资源限额**：超时/重试可配；`maxConcurrentTasks` 是全局执行级并发上限，但本次未找到任务总数、文件大小或磁盘配额的执行级限额。`autoCleanCompleted` 开启时会在五分钟后清理已完成任务，但会话树中的结果节点保留；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
 - **失败恢复**：各类失败按场景收敛（`useMediaGenerationManager.ts`）：
   - 请求异常：任务置 `error` 并写 statusText（:630）；取消类中断单独处理为“已中止”（见第 3 节）
   - 资产入库：单条失败只记日志不中断其余（:887-889），全部失败则整体报错（:904）
@@ -182,7 +182,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - 应用不内嵌生成/渲染引擎；生成通过 Profile 对应的 HTTP 服务执行。audio.cpp 可以部署在本机，但它是独立外部服务，不随应用内置。
 - 任务状态与进度主要面向 UI 展示，无统一回调注册面；Agent 进度经 `reportStatus` 桥接。
-- `autoCleanCompleted`、`maxConcurrentTasks`、批量下载为"设置/占位存在、执行链未实现"（静态推断，基于全仓 grep 无消费者）。
+- 批量下载仍为占位；`autoCleanCompleted` 与 `maxConcurrentTasks` 已接入任务池，前者延迟清理已完成任务，后者约束全部媒体工作区共享的并发请求数。
 
 **未验证事项**（均为"未运行验证：需要真实模型与图形环境"）：
 

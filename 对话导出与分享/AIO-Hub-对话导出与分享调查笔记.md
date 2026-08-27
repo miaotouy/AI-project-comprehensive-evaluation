@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：静态源码调查；读取分支/会话导出、消息截图对话框、独立截图渲染器、截图生成与历史管理实现，并与既有会话管理和 Chat UI 笔记交叉核对；未运行应用或实际生成图片
 >
@@ -117,11 +117,11 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map（`composables/features/useExportManager.ts:607-841,1078-1130`）。
 
-往返结论：本次未找到 Markdown/JSON/Raw JSON 三种导出格式的导入入口。在 `src/tools/llm-chat` 全目录搜索导入路径，只发现会话备份 ZIP 导入（`components/sidebar/BatchManagerDialog.vue:676-708` → `services/sessionImportExportService.ts:163-201` → `stores/session/sessionLifecycleManager.ts:381`）、SillyTavern 正则/世界书导入、快捷操作导入和智能体导入，没有任何代码读取分支 Markdown/JSON 回写会话。上述搜索覆盖 TypeScript 文件中的文件读取调用与各 Dialog 入口，足以确认结构化导出格式不支持往返。
+往返结论：Markdown、分支 JSON 与 Raw JSON 仍没有导入入口，不能直接回写会话；但会话导出对话框新增单会话备份 JSON。该格式用 `aiohub-chat-session` 与版本 `1.0.0` 标识，保存完整的 index/detail/tree；导入服务按 JSON 首字符分流并校验版本、会话结构及冲突策略，因此这一专用备份格式可以往返，不应与面向阅读的 JSON 导出混同（`components/export/ExportSessionDialog.vue:102-206`、`services/sessionImportExportService.ts:157-204,257-263`）。
 
 项目内真正可往返的是另一条批量备份管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:119-125,127-161`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`:70-117,203-257`）。
 
-该格式与分支导出的 Raw JSON 结构相近（都含 index/detail/nodes），但批量导入入口只接受 ZIP 文件（`BatchManagerDialog.vue:679-682` 的过滤器），单文件 Raw JSON 没有 UI 导入路径，两者在管线层面不互通。
+批量备份 ZIP 仍使用 `aiohub-chat-session-backup` v1.0.0，包含 `metadata.json` 与多份会话文件；单会话 JSON 则由同一导入服务处理。两者都保留完整树，但与分支导出的 Raw JSON 不是同一种格式，后者仍无导入管线。
 
 ## 5. 生成历史与版本语义
 

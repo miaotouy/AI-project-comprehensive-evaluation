@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -30,7 +30,7 @@ AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面�
 
 **全局挂载。** GlobalProviders 挂载全局图片查看器、弹窗和通知中心；App 在 `App.vue:81` 挂载引导流程宿主。通知中心不是 llm-chat 专属。
 
-**状态所有权。** 主题与自定义 CSS 等应用设置存于设置文件，由 appSettings 相关实现负责；通知由 useNotificationStore 持有并持久化；拖放能力是全局 composable，被消息输入和智能体侧栏等组件复用。
+**状态所有权。** 主题与自定义 CSS 等应用设置存于设置文件，由 appSettings 相关实现负责；首页快捷栏显隐与工具可见性同样在该设置中持久化，后者通过替换整个映射对象触发父级写入，供主侧栏和标题栏菜单共同读取（`utils/appSettings.ts:149,346`、`views/Settings/general/ToolsSettings.vue:82-90`、`components/MainSidebar.vue:144-147`）；通知由 useNotificationStore 持有并持久化；拖放能力是全局 composable，被消息输入和智能体侧栏等组件复用。
 
 ## 1. 界面栈、公共组件与状态所有权
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`2ddbb19288c08bda1c080fc9a5f2e71149feaebc`（分支：`dev`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试
 >
@@ -166,7 +166,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - **聊天会话**：每会话一个 JSON 文件（`{appConfigDir}/llm-chat/sessions/{sessionId}.json`，`useChatStorageSeparated.ts:98-242`），另有 `sessions-index.json` 索引；保存时内容比对避免无谓写盘、防抖批量保存（:642-660）、目录扫描自愈索引（`syncIndex` :321）。恢复 = 启动加载索引 -> 按需 `loadSession`。导出/分享属 Chat 类目，本次未展开。
 - **画布项目**：物理文件 + `.canvas.json` 元数据 + `projects.json` 索引（原子写、可修复）；健康检查区分缺失、未登记、损坏三种状态（`CanvasService.performHealthCheck`）。分享/导出途径为 `openInVSCode`（`canvasStore.ts:527`）与 Git 提交本身；未找到打包导出/分享链接功能。
-- **媒体生成**：结果经 `importAssetFromBytes`/`importAssetFromPath` 进入资产系统（`useMediaGenerationManager.ts:853-886`），origin 标记 `type: "generated"`，并写衍生数据 JSON（:912 起）；消息附件引用这些 Asset，构成"生成 -> 入库 -> 可复用"链（G1 级物化）。
+- **媒体生成**：任务先进入所有媒体工作区共享、由 `maxConcurrentTasks` 限制的模块级队列，获得槽位后再发送请求；结果经 `importAssetFromBytes`/`importAssetFromPath` 进入资产系统（`useMediaGenerationManager.ts:91-111,727-756,853-886`），origin 标记 `type: "generated"`，并写衍生数据 JSON（:912 起）；消息附件引用这些 Asset，构成"生成 -> 入库 -> 可复用"链（G1 级物化）。
 - **HTML 预览导出**：Blob URL 新窗口打开（`HtmlInteractiveViewer.vue:636-649`），可另存为单文件；无版本概念。
 
 ## 9. 模型回流、对象感知与持续维护

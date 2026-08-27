@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`023bc63ac10201bf0f663bf49d642fd55c29a3d0`（分支：`main`）
+> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令），并补充核对 ST 世界书类型、编辑/导入导出链与请求期处理器
 >
@@ -17,7 +17,7 @@
 - 提交入口 `useChatHandler.sendMessage` → 上下文管道（11 个处理器按 priority 拼装）→ 执行器请求模型 → 流式回调 → 节流写回。
 - 渲染与持久化是**两套独立节流**：流缓冲 → RAF 节流 → UI（显示几乎实时）；chunk 缓冲 → setTimeout（默认 2 秒或增量保存间隔）→ 节点 content → 落盘。崩溃时可能丢失最后几秒流式内容——`content` 字段本身滞后于屏幕显示。
 - 上下文压缩是**非破坏性遮罩**：只压当前活动路径、摘要由独立 LLM 请求生成、原消息保留可恢复。两个自动检查点 + 手动入口；连续压缩时旧摘要作为 `previous_summary` 传入续写模板、新摘要创建后旧摘要一并隐藏。
-- 生成中再发消息会**排队**（`skipGeneration` + `metadata.isQueued` 节点），当前生成结束后按 `queueReplyMode` 合并或链式触发（触发本身还受 `autoTriggerGenerationAfterQueue` 设置控制，默认开启）。
+- 目标父节点到根的路径仍在生成时再发消息会**排队**（`skipGeneration` + `metadata.isQueued` 节点）；同一会话的其它分支可继续并行。调度器扫描持久化队列标记，在该路径空闲后按 `queueReplyMode` 合并或链式触发（触发本身还受 `autoTriggerGenerationAfterQueue` 设置控制，默认开启）。
 - 工具调用审批用 Promise resolver 挂起执行（`toolCallingStore.requestApproval` 返回 Promise，UI 审批时才 resolve）；编排循环内部语义已由 Agent 工具笔记承接。
 
 ## 系统边界与生成任务主链
@@ -41,7 +41,7 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 1. 取 Agent 配置；附件未导入完成则等待（9.1）；
 2. 压缩检查点 1：创建新用户消息前调用一次（附录 A.1），保证本轮请求可以使用刚生成的摘要；
 3. 创建用户消息节点与占位助手节点（`createMessagePair`），`generatingNodes.add(id)` → `updateActiveLeaf` → 最后才真正调用 `executeRequest`——这个顺序保证 UI 能立刻看到"正在生成"的占位气泡，即使还没发出网络请求；
-4. 若 `isSessionGenerating(sessionId)` 为真（会话仍在生成时又发消息），走排队分支：消息节点被创建、持久化但不触发实际 LLM 请求，节点打 `metadata.isQueued = true` 且 `status: "queued"`（`useChatHandler.ts:523-557`，见第 8 节）。
+4. 若目标父节点到根的路径仍含生成节点，走排队分支：消息节点被创建、持久化但不触发实际 LLM 请求，节点打 `metadata.isQueued = true` 且 `status: "queued"`；切换到其它空闲分支则可直接执行（`useChatHandler.ts:523-557`，见第 8 节）。
 
 执行器分层：`useChatExecutor`（LLM 请求执行、附件/Token 前置处理，`useChatExecutor.ts:86-169` 的 `executeRequest`）与 `useSingleNodeExecutor`（单次请求 + 重试策略，`useSingleNodeExecutor.ts:82-374`，含前缀续写 `prefix: true` 的调用，`:241`）。Provider/协议 Adapter 层本次调查范围未覆盖（见第 4 节）。
 
@@ -111,9 +111,9 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 `sessionGenerationManager.ts` 的排队机制分三部分：
 
-- **排队写入**：`sendMessage()` 检测到会话仍在生成（`isSessionGenerating(sessionId)`）时，把该 sessionId 加入 `queuedSessionIds`，并调用 `chatHandler.sendMessage(..., {skipGeneration: true})`（`sessionGenerationManager.ts:279-344`）——消息节点会被创建、持久化，但不触发实际 LLM 请求；节点打 `metadata.isQueued = true`，`status` 同步写为 `"queued"`（`useChatHandler.ts:523-557`：combined 模式标在 user 节点上，chained 模式标在占位 assistant 节点上；旧数据里的 `pending` 状态在展示层仍按 queued 兼容）。
+- **排队写入**：`sendMessage()` 检测目标父节点到根的路径仍在生成时，把该 sessionId 加入 `queuedSessionIds`，并调用 `chatHandler.sendMessage(..., {skipGeneration: true})`（`sessionGenerationManager.ts:279-344`）——消息节点会被创建、持久化，但不触发实际 LLM 请求；节点打 `metadata.isQueued = true`，`status` 同步写为 `"queued"`（`useChatHandler.ts:523-557`：combined 模式标在 user 节点上，chained 模式标在占位 assistant 节点上；旧数据里的 `pending` 状态在展示层仍按 queued 兼容）。
 - **触发条件**：当前生成结束（`llmChatStore.ts` 对 `generatingNodes.value.size` 减少的 watch，`llmChatStore.ts:129-207`）且 `settings.uiPreferences.autoTriggerGenerationAfterQueue` 为真（`llmChatStore.ts:192`）。
-- **触发执行**：`triggerQueuedGenerationForSession()`（`sessionGenerationManager.ts:113-277`）找到 `isQueued` 节点并自动触发合并回复或链式生成——user 节点走 `regenerateFromNode`（合并回复），assistant 占位节点走 `continueGeneration`（链式追加），具体由 `queueReplyMode`（`"combined"`/`"chained"`，默认 combined）决定；找不到 `isQueued` 标记时有基于 activeLeaf/pending 的兜底判断（`:185-252`）。
+- **触发执行**：`triggerQueuedGenerationForSession()`（`sessionGenerationManager.ts:132-267`）扫描节点上的持久化 `isQueued`/`queued`/兼容 `pending` 标记，只启动没有排队祖先且目标路径已经空闲的节点；因此同一条排队链保持顺序，其他分支仍可并行。user 节点走 `regenerateFromNode`（合并回复），assistant 占位节点走 `continueGeneration`（链式追加），具体由 `queueReplyMode`（`"combined"`/`"chained"`，默认 combined）决定。
 
 多会话并行：`generatingNodes` 是节点粒度集合，会话间互不阻塞（数据语义在会话管理 6）。排队与等待的可见 UI 提示有明确实现：`utils/messageStatus.ts` 把 queued/waiting 映射为"排队/等待"徽标，`MessageHeader` 按 `showMessageStatus`（默认开启）展示（Chat UI 5.2）。
 
