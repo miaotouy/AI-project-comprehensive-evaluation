@@ -2,9 +2,9 @@
 
 > 汇总对象：`Cherry Studio（https://github.com/CherryHQ/cherry-studio）`
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 15 份单项目调查笔记（代码快照均为 `cd82f996fb6c3a523b6d40de31314f2b86f56281`，main 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 15 份单项目调查笔记（代码快照均为 `88cfe5dd2b77e63464be22968f66ebcb1d429483`，main 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、Node + SQLite 主进程、AI SDK 出网），TypeScript monorepo。产品表面分 Home（普通会话）与 Agent（Claude Code SDK 代理会话）两个入口，共用同一套"会话壳 + Composer + 消息列表"框架，以适配器注入差异。会话单位是 Topic，消息是 adjacency-list 树；一次生成由渲染层构建请求、主进程 `AiStreamManager` 集中编排；Agent 侧把 Claude Agent SDK runtime 作为独立会话执行者接入，另有六平台 IM 渠道作为外部控制表面。核心数据与运行状态都在主进程（SQLite + 状态机），渲染层以 SWR 缓存投影 + 流式 overlay 呈现。
+Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、Node + SQLite 主进程、AI SDK 出网），TypeScript monorepo。产品表面分 Home（普通会话）与 Agent（Claude Code、Pi、DeepSeek Harness 三类运行时会话）两个入口，共用同一套"会话壳 + Composer + 消息列表"框架，以适配器注入差异。会话单位是 Topic，消息是 adjacency-list 树；一次生成由渲染层构建请求、主进程 `AiStreamManager` 集中编排；Agent 侧的运行时拥有各自协议适配与工具桥，但复用会话服务、模型兼容性判断和审批注册表，另有六平台 IM 渠道作为外部控制表面。核心数据与运行状态都在主进程（SQLite + 状态机），渲染层以 SWR 缓存投影 + 流式 overlay 呈现。
 
 ## 完成度速览
 
@@ -33,6 +33,8 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 **口径说明**：本汇总所有"主链确认 / 静态源码确认"均基于对当前代码快照的源码贯通，在编译型桌面应用或完整本地主链中视为完成交付态；"未运行验证"仅指未进行黑盒运行、UI 或端到端操作，不否定代码完备性。以下正文中不再逐条重复该口径，只在与具体能力相关的边界处作一句带过。
 
 ## 功能能力摘要
+
+- **多运行时 Agent 与可恢复投递**：Claude Code、Pi 和 DeepSeek Harness 以独立工具桥接入同一会话服务；跨会话投递持久化待投递、执行与结果状态，子 Agent 返回不再只存在于当前流中。模型兼容性不足时使用运行时默认上下文窗口；重启和多窗口下的投递顺序仍未运行验证。证据状态：静态源码确认。来源：[Agent工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)。
 
 ### 角色与上下文
 
