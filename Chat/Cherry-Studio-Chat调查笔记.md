@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：逐文件通读源码 + 交叉核对文档
 >
@@ -58,6 +58,12 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
 - **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已更正。
 - **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 的附件回收改由 FileManager 引用计数 + 策略化 GC 兜底（原 `TopicService.ts:316` TODO 注释已移除）。
+
+## 当前聊天主链补充
+
+Agent 工作台的会话执行器已扩展为 Claude Code、Pi、DSH 三种运行时。它们经 `AgentSessionRuntimeService` 进入同一聊天调度与持久化边界；新增的跨会话投递服务会保存投递与结果状态，使子 Agent 的消息可在会话之外继续路由和恢复。Home Topic 的分支则仍以消息树和 active node 为事实源；从叶子消息新建分支会创建真实树分支，而非复用旧路径。
+
+普通聊天还新增“复制为新对话”消息操作；该入口由 Home 消息列表适配器交给既有 Topic 写入链处理。运行表现、跨窗口同步与异常恢复未在本次静态调查中验证。依据：`src/main/ai/agentSession/AgentSessionRuntimeService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/MessageService.ts`、`src/renderer/pages/home/messages/homeMessageListAdapter.tsx`。
 
 ## 未验证事项
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、适配器与 hook、IPC 命令绑定、主进程桌面服务），界面视觉与键盘行为以"未运行验证"标注
 >
@@ -273,7 +273,13 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - 输入区键盘操作（发送键配置、历史浏览、Tab 遍历变量、Escape）见 3.1；会话列表键盘（listbox）见 9.1；搜索栏键盘（Enter/Shift+Enter/Esc、输入框自动聚焦）见 2.3；分支面板的键盘操作（树图能否用键盘导航）未核实。
 - 响应式：无断点驱动的聊天侧栏自动折叠（1.2）；移动端/小屏布局未调查。
 
-## 10. 设计取舍与已确认边界
+## 10. 当前交互补充
+
+Agent 任务在工作台中新增悬浮进度胶囊，并提供子 Agent 流程的返回导航和更清晰的运行状态；定时任务卡片显示最近运行状态。消息菜单增加“复制为新对话”，消息页脚始终显示 token 用量。Composer 还支持分别配置发送、换行与 steer 快捷键，并保留粘贴截图携带的文本风味。
+
+上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/frame/MessageMenuBar.tsx`、`src/renderer/components/chat/variants/AgentComposer.tsx`。
+
+## 11. 设计取舍与已确认边界
 
 - **`ChatComposer.tsx` 单文件复杂度偏高**（1908 行）：`ChatComposerInner` 一个组件本体加上闭包状态混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等好几套独立状态机在同一个函数体内用一堆 ref 协调（3.3）。功能齐全，但可读性/可维护性门槛显著高于单一职责组件。
 - **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
@@ -282,14 +288,14 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **桌面集成缺口**（8.2）：通知空挂钩、托盘无角标、无快捷键速查浮层；Session 列表无拖拽排序（2.2）。
 - **类目边界**：本笔记只记录用户工作流与界面状态；树模型与指针语义在会话与消息管理笔记 1/4，流式执行与最终化在对话请求与上下文笔记 5/6，消息壳与 Markdown 渲染在消息渲染器笔记。
 
-## 11. 未验证事项
+## 12. 未验证事项
 
 - 视觉效果、焦点顺序、键盘可用性、响应式行为、系统通知需要运行验证（本笔记结论主要来自静态代码）。
 - 停止/暂停按钮状态与真实任务状态的对应关系、切走 Topic 后任务收口（见对话请求与上下文笔记 7、8）。
 - 草稿粒度已核实为"按会话缓存、跨导航保留"（3.3）；切换 Topic 保留的滚动位置、分支面板键盘操作仍未核实。
 - 移动端布局、QuickAssistant 悬浮窗与主窗口的状态同步未调查。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - `src/renderer/pages/home/Chat.tsx`、`ChatContent.tsx`、`ChatMain.tsx`（命令注册、重命名、搜索挂载）
 - `src/renderer/pages/home/Tabs/components/Topics.tsx`（拖拽排序、运行指示、草稿指示、空状态）

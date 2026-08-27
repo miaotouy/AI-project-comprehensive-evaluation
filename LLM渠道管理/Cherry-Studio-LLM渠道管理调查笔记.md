@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -421,7 +421,13 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 
 这是一种用户确认后的配置迁移，不是远程动态配置中心。负载中的 API Key 会经过 URL/路由参数进入应用，调用方仍需考虑浏览器历史、聊天记录或日志对深链的暴露。
 
-## 10. 能力边界与横向比较要点
+## 10. 当前渠道与模型适配补充
+
+Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Flash Vision Exp 的图像能力目录；同时移除了已退役的 GitHub Models 集成。Pi 与 DSH 的模型选择不直接复用普通聊天的任意 endpoint，而是经过各自兼容性和默认 Chat endpoint 解析；LM Studio 预设已补齐该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口则从 `/api/show` 读取。
+
+这些变化均在渠道解析、目录或 UI 选择层确认，第三方 endpoint 对所有组合的实际响应仍未运行验证。依据：`packages/provider-registry/src/providers/ollama.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/ai/dshModelCompatibility.ts`、`src/shared/data/presets/runtimeTransport.ts`、`src/renderer/components/ModelSelector`。
+
+## 11. 能力边界与横向比较要点
 
 ### 已实现
 
@@ -453,7 +459,7 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 - SQLite 凭据没有静态加密；
 - 备份/恢复已覆盖 SQLite，但备份文件与数据库同样明文保存凭据。
 
-## 11. 关键源码索引
+## 12. 关键源码索引
 
 - Provider Registry 设计：[`docs/references/provider-model/provider-registry.md`](../../cherry-studio/docs/references/provider-model/provider-registry.md)
 - Registry 数据：[`packages/provider-registry/data/`](../../cherry-studio/packages/provider-registry/data/)
@@ -484,7 +490,7 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 - 多模型解析：[`src/main/ai/streamManager/context/modelResolution.ts`](../../cherry-studio/src/main/ai/streamManager/context/modelResolution.ts)
 - 持久会话多模型调度：[`src/main/ai/streamManager/context/PersistentChatContextProvider.ts`](../../cherry-studio/src/main/ai/streamManager/context/PersistentChatContextProvider.ts)
 
-## 12. 未验证事项
+## 13. 未验证事项
 
 1. 本次没有启动 Electron 应用，也没有向真实 Provider 发起付费或流式请求；连接检查、代理、OAuth 回调和多模型 UI 结论来自源码。
 2. 没有枚举并实测 Registry 中每个 Provider 的全部协议组合；专用 Builder 仍可能有服务商级特殊限制。

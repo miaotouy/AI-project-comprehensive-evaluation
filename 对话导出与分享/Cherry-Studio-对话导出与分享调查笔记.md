@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：静态源码局部调查；本轮重点为分支消息（siblings）的最终显示、Agent 表面一致性（live 与 capture 两端组件与资料来源）与运行保真（流式/工具/富内容、32767px 边界、长图拼接）；未运行 Electron 应用或实际导出图片
 >
@@ -137,7 +137,11 @@ Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionI
 
 每次动作即时捕获并交给剪贴板或保存 API，没有截图预览、应用内结果列表、版本比较或过时标记。生成结果不绑定 Topic 数据库，也未形成远端分享对象。复制和保存之外的系统 Share Sheet、访问控制、撤销与过期不适用。
 
-## 7. 设计取舍与已确认边界
+## 7. 当前导出格式补充
+
+Markdown 导出现在会携带多模态图片，而非仅保留文本占位；Notion 转换也能把 Markdown alert 映射为 Notion callout。两项处理仍位于既有导出转换层，图片加载、外链可用性和目标 Notion API 的最终呈现需要运行环境验证。依据：`src/renderer/services/ExportService.ts`、`src/main/services/ExportService.ts`。
+
+## 8. 设计取舍与已确认边界
 
 - 离屏完整列表避免虚拟列表、当前滚动位置和当前页面未加载完整数据导致长图缺段。
 - 两条捕获路径（live 隐藏表面 vs 离屏宿主）共用同一执行器与工具函数；离屏宿主总是全量分页拉取，live 路径捕获的是当前内存中已加载的数据（live 与宿主使用同一扁平化投影，分支口径一致）。
@@ -147,7 +151,7 @@ Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionI
 - 交互 HTML Artifact 被主动排除，静态图片不会尝试执行或拍下该运行表面。
 - 当前实现属于“复刻并交付”，不提供“编辑分享稿再生成”的流程。
 
-## 8. 未验证事项
+## 9. 未验证事项
 
 - horizontal/grid 布局下内部滚动容器的实际截断效果，以及组菜单栏（布局图标、删除/重试按钮）在成品图片中的视觉呈现（运行验证）。
 - 32767px 边界附近的错误反馈、内存占用和取消行为；DPR>1 时画布实际尺寸先于 CSS 检查撞上限的推断。
@@ -158,7 +162,7 @@ Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionI
 - Windows/macOS/Linux 的剪贴板与保存文件结果；两条入口（聊天菜单 vs 列表菜单）产出图片的宽度差。
 - 图片捕获相关测试虽存在，本次未执行测试或构建。
 
-## 9. 关键源码索引
+## 10. 关键源码索引
 
 新增关键入口：
 

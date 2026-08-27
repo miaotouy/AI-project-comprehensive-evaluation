@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：只读源码梳理；结合根 README 功能声明与路由/组件盘点；未修改 cherry-studio 仓库
 >
@@ -112,6 +112,12 @@ GlobalSearchPopup -> GlobalSearchPanel
 **边界**：翻译语言目录、模型选择（走消息原 Provider 还是独立翻译模型）未展开核对；取消即丢弃（discard-on-cancel）。
 
 **独特性判断**：把译文作为消息 part 持久化、可重译覆盖的产品形态比"另开窗口翻译"完整，但翻译本身是常见功能，独特性中等——保留为辅助贡献。
+
+## 当前候选补充
+
+PDF 翻译已形成“选择文档 -> BabelDOC 保版式翻译 -> 写入翻译历史与文件管理器 -> 资源下载进度反馈”的专用主链，可作为创作工作站能力族下的 `主链确认` 候选；它与普通对话导出不同，产物是可管理的翻译文件。交互式截图带标注与 OCR 也已确认入口和输入回流，但本次尚未追到 OCR 结果在全部聊天/Agent 表面的持久化语义，维持 `入口确认`。
+
+这两项的媒体处理细节归入媒体创作笔记，不重复计入普通 Agent 工具或消息渲染能力。依据：`src/main/services/PdfTranslationService.ts`、`src/renderer/pages/translate/pdf/PdfTranslationView.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`。
 
 ## 已归并到现有类目的能力
 

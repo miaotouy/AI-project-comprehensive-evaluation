@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -479,6 +479,12 @@ Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`�
 工具投影用 WeakMap 以 part object identity 缓存；流式过程中 settled tool part 可复用旧投影。
 
 AskUserQuestion/approval 流程横跨消息区与输入区：awaiting approval 的 inline tool 可能不显示，approve/deny UI 由 composer override 提供。
+
+## 当前渲染行为补充
+
+消息流新增内联生成图片的直接投影；Markdown 渲染保留软换行，并在流式内联代码阶段提供动画。消息页脚的 token 用量改为始终可见，定位消息后会保持 token 详情折叠。Agent 工具渲染还扩展了 DSH 的 TodoWrite、会话创建、跨会话发送与结果卡片，使持久化投递状态在消息表面有对应投影。
+
+上述内容确认 part 到组件的装配，未以真实长会话测量虚拟列表、动画和图片加载性能。依据：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx`、`src/renderer/components/chat/messages/frame/MessageMenuBar.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionCreateTool.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionSendTool.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionResultCards.tsx`。
 
 ## 性能设计总结
 

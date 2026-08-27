@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：只读源码梳理（未修改被调查仓库任何文件）；未运行仓库测试/构建，结论均以静态阅读源码为准
 >
@@ -351,7 +351,13 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 
 依据：`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`（工具渲染章节）、`../../cherry-studio/src/renderer/components/chat/messages/tools/chooseTool.tsx:271-294`、`../../cherry-studio/src/renderer/components/chat/messages/tools/hooks/useToolApproval.ts:1-146`。
 
-## 15. 未验证事项与后续调查缺口
+## 15. 当前 Agent 运行时与工具扩展
+
+Agent 会话已不再只由 Claude Code 承担。运行时注册表同时接入 Claude Code、Pi 与 DeepSeek Harness（DSH）；三者都通过统一的会话服务、模型兼容性判断和审批注册表交给界面，但各自维持独立的协议适配与工具桥。Pi 的 Code Mode 会把工具 schema 转为 TypeScript 引导模型调用；DSH 则以本地 bridge 转译其子 Agent 与 Cherry 工具调用。跨会话投递由 `AgentSessionDeliveryService` 持久化，子 Agent 的创建、发送和结果因此成为可恢复的工具结果，而不是仅存在于当前流中的临时事件。
+
+内置 MCP 还新增 `install_mcp_server`：模型可请求把符合输入约束的服务写入 MCP 配置，仍经内建工具策略与审批链处理。该能力改变的是工具目录的管理面，不等同于允许模型绕过现有 MCP 注册、禁用和调用边界。依据：`src/main/ai/runtime/registerDrivers.ts`、`src/main/ai/runtime/pi/piCodeMode.ts`、`src/main/ai/runtime/dsh/DshCherryToolBridge.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/ai/mcp/servers/mcpManager.ts`。
+
+## 16. 未验证事项与后续调查缺口
 
 1. `streamAdapter.ts` 中 `MAX_TOOL_INPUT_SIZE`/`MAX_TOOL_INPUT_WARN` 超限后的具体处理分支（截断/报错/静默丢弃）未完整追踪。
 2. `error_max_turns` 终止原因在渲染层的具体呈现方式未验证。

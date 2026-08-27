@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：直接阅读源码（主进程 SQLite 数据层 `TopicService`/`MessageService`、schema 与 FTS 触发器、`docs/references/chat/message-tree.md` 文档、渲染层 DataApi 分页与搜索实现），并核对行号与符号至当前 HEAD
 >
@@ -240,7 +240,13 @@
 - **多模型**：`siblingsGroupId` 与 `modelId` 是消息级绑定字段（读侧按 `(siblingsGroupId, modelId)` 分桶，见 4.2）；"这次用哪些模型"本身是请求参数，不持久化在 topic 行（发送前配置见 Chat UI 笔记第 4 节）；assistant 头像/身份以 `messageSnapshot` 快照在回复行上（`PersistentChatContextProvider.ts:101-114` 构建，删除助手后 header 仍可渲染）。
 - **Agent 会话**：Agent 侧以 session 为数据单元，会话消息是独立的扁平表（`agent_session_message`，`message-tree.md:8-9` 明确其不适用树模型），不在本笔记覆盖范围内；Home 侧 Topic 与 Agent 侧 session 的差异在能力注入层而非消息壳（Home/Agent 适配器见 Chat UI 笔记 6.2）。
 
-## 9. 设计取舍与已确认边界
+## 9. 当前持久化语义补充
+
+从叶子消息创建分支现在由 `MessageService` 生成真实分支，而不是把新消息错误地附着到原路径的中间节点。Agent 会话另新增持久化的跨会话投递：`AgentSessionDeliveryService` 保存待投递、执行与结果状态，`agent_session_message` 的写入链因此需要同时表示本会话消息和其他会话返回的结果。普通 Topic 树与 Agent session 的扁平消息表仍是两种不同的数据模型。
+
+本次只确认服务与迁移路径；投递在重启、多个窗口和大量待投递任务下的实际恢复顺序尚未运行验证。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/AgentSessionMessageService.ts`、`migrations/sqlite-drizzle/0010_fuzzy_korath.sql`。
+
+## 10. 设计取舍与已确认边界
 
 - **三层数据复杂度是有意为之的取舍**：真树结构 + `activeNodeId` 指针 + live overlay 三层，配合 Home/Agent 双适配器，让"保留过程、支持分支比较、多模型并行"这些能力得以实现；代价是要理解至少四层数据（DB 树、SWR 缓存、execution overlay、live branch 前端态）才能追踪一条消息从输入到渲染的完整生命周期，调试门槛明显高于单层 session 客户端。
 - **虚拟根是存储层不变量而非约定**：CHECK 约束 + 部分唯一索引把"每 topic 一根、根 ⇔ null parent、内容必有 parent"固化在 schema（1.2），服务层的大量校验只是友好错误入口（`MessageService.ts:935-940,1349-1364,1675-1677`）。
@@ -251,7 +257,7 @@
 - **崩溃恢复有专门路径**：boot reconcile 把遗留 `pending` 翻成 `error`（3.5），加上 `clearActiveNode` 与事务原子性，异常退出后的数据语义是"已提交的写都保留、未提交的回滚、半截回复标为 error"（运行验证见第 10 节）。
 - **类目边界**：本笔记只回答数据语义。停止生成时半截消息最终如何落盘、重试如何选择上下文见对话请求与上下文；分支树图、兄弟导航与搜索工作流见 Chat UI；part 渲染、虚拟列表与消息壳装配见消息渲染器。
 
-## 10. 未验证事项
+## 11. 未验证事项
 
 - 崩溃恢复、多窗口竞争、数据库迁移与大数量级 FTS 搜索未做运行验证（静态代码只能确认事务、索引和写入入口，不能代替运行验证）。
 - `AiStreamManager` 状态机（`ActiveStream.status` 六种取值）的竞态风险未运行验证，执行侧详见对话请求与上下文笔记。
@@ -259,7 +265,7 @@
 - 流式期间中间增量落盘的频率未核实（最终态落盘语义见对话请求与上下文笔记第 6 节）。
 - schema 版本号演进、迁移执行时机与失败恢复未展开调查。
 
-## 11. 关键源码索引
+## 12. 关键源码索引
 
 - `src/shared/data/types/topic.ts`（Topic 模型）
 - `src/main/data/db/schemas/message.ts`（消息表、CHECK/索引、FTS 触发器语句）

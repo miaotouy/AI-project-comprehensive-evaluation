@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -273,7 +273,13 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 快捷键冲突（被其他应用占用）记录冲突集合并经 IPC 广播给渲染层展示提示（:281-303 附近）。另有标签页导航快捷键（324f26f728）。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这一个静态配置页（`ShortcutSettings.tsx`），不存在按一个快捷键呼出速查列表的入口。
 
-## 8. 设计取舍与已确认边界
+## 8. 当前基础设施补充
+
+截图覆盖层已经成为一项受窗口与输入法约束的应用级表面：全屏选择时工具栏会保持在可见区域，Escape 可在选择前关闭覆盖层，macOS 还保持覆盖层位于当前 Space。设置页增加聊天与工作列表位置、应用更新通知等偏好入口；这些偏好由既有设置与窗口基础设施承载，而非聊天页面私有状态。
+
+本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。依据：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`。
+
+## 9. 设计取舍与已确认边界
 
 **弹窗无 host 时降级 resolve。** 启动早期不挂起等待，直接以默认结果关闭并 warn。
 
@@ -297,7 +303,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 **折叠展开无高度动画。** hidden 硬切换 + 箭头旋转过渡，视觉瞬时。
 
-## 9. 未验证事项
+## 10. 未验证事项
 
 - 无 host 降级路径、160ms 防闪烁骨架的实际运行表现未实测。
 - Session 列表拖拽排序是否存在于 `src/renderer/pages/agents` 未检索确认。
@@ -310,7 +316,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 - 主题体系核对结论基于静态源码：pnpm theme:build 生成器输出与 `contract.css` 导入顺序的实际产物未构建验证；theme:check/validate-theme-contract 校验脚本未实际运行；用户主色在 dark 模式的对比度、`--cs-ring` dark 硬编码值不随主色的视觉影响未运行确认。
 - 自定义 CSS 注入在 main/subWindow/quickAssistant/selection 五类窗口的同步时机（偏好更新到 style 节点生效的延迟）、CodeMirror 编辑大段 CSS 时的性能、v1 标记内容的迁移提示流程未运行验证。
 
-## 10. 关键源码索引
+## 11. 关键源码索引
 
 - `packages/ui/src/components/primitives/dialog.tsx`
 - `packages/ui/src/components/primitives/toast.tsx`

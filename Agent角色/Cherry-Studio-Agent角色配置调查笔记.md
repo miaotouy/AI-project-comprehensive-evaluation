@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：只读核对 Assistant 类型定义、数据库 Schema、AssistantSettings、默认预设、系统提示词装配逻辑和 AgentSession 入口；未修改被调查仓库源码
 >
@@ -206,7 +206,13 @@ Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段�
 - **v1 → v2 迁移**：`AssistantMigrator.ts` 把旧版字段映射到新 Schema；部分字段（如 `contextCount`、`toolUseMode`）被废弃或并入助手设置层。
 - **SillyTavern/AIO Hub 迁移**：没有官方路径；将源角色的系统提示词导入 `prompt` 字段即可，少样本对话和世界书没有原生对应字段。
 
-## 8. 主要源码依据
+## 8. 当前角色能力边界
+
+Agent 的运行时选项现覆盖 Claude Code、Pi 与 DSH。创建与编辑界面依据模型兼容性为每种运行时筛选可选模型，并在缺失模型上下文窗口时以 256K 作为运行时默认值；这属于 Agent 执行配置，不改变 Assistant 普通聊天的渠道实体。Prompt 也可按 Assistant 或 Agent 目标建立可见性绑定，配置对象仍由资源目录和数据服务持久化，而非在单次聊天中临时拼接。
+
+Global Memory 的范围说明与概览文档明确了记忆的归属边界，但本次未运行验证跨会话召回的实际效果。依据：`src/shared/ai/agentRuntimeCapabilities.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/ai/dshModelCompatibility.ts`、`src/renderer/pages/settings/PromptSettings.tsx`、`src/main/data/services/PromptService.ts`、`docs/references/memory/overview.md`。
+
+## 9. 主要源码依据
 
 - `cherry-studio/src/shared/data/types/assistant.ts`：`AssistantSchema`、`AssistantSettingsSchema`、`DEFAULT_ASSISTANT_SETTINGS`。
 - `cherry-studio/src/main/data/db/schemas/assistant.ts`：数据库表定义及 `AssistantSettings` 存储策略。
@@ -217,6 +223,6 @@ Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段�
 - `cherry-studio/src/main/ai/agentSession/AgentSessionRuntimeService.ts`：Agent Session 运行时。
 - `cherry-studio/src/renderer/types/assistant.ts`：渲染层类型（含 `LegacyAssistant` 废弃类型）。
 
-## 9. 调查边界
+## 10. 调查边界
 
 本篇关注"助手配置模型"，未展开 MCP 执行位置、审批链路、工具注册表和 Claude Code Agent 的权限细节；这些内容参见 [Cherry-Studio-Agent工具调查笔记.md](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。

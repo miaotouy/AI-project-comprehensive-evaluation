@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：静态复核 Agent Session、Claude Agent SDK、工具注册、工作区链路与 IM 渠道层；复用 Agent 角色、Agent 工具和独特功能笔记；未运行 SDK runtime 或 IM 平台
 >
@@ -72,6 +72,12 @@ SDK 持有真实执行，宿主无法完全替代 runtime 的权限边界；宿�
 - Assistant 与 Agent Session 两套角色对象见[Agent 角色笔记](../Agent角色/Cherry-Studio-Agent角色配置调查笔记.md)。
 - 工具曝光、审批和路径边界见[Agent 工具笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)。
 - workspace 的文件树、编辑器和冲突检测见[生成式输出与运行时笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)。
+
+## 当前外部执行体补充
+
+Agent runtime 从单一 Claude Code 扩展为 Claude Code、Pi 和 DSH。Pi 在应用进程内通过运行时连接和 MCP adapter 接入，DSH 通过本地 bridge 与子进程交互；两者都使用统一审批和模型注入边界，但协议事件、工具投影及子 Agent 调用各自适配。DSH 的桥还会把委派子 Agent 的工具调用路由回根会话，避免独立子会话脱离当前控制面。
+
+这确认了协作协议的本地接入与回流路径，未验证外部模型服务、CLI 子进程或远程 MCP 服务在网络故障下的运行行为。依据：`src/main/ai/runtime/pi/PiRuntimeConnection.ts`、`src/main/ai/runtime/dsh/DshRuntimeConnection.ts`、`src/main/ai/runtime/dsh/DshBridgeServer.ts`、`src/main/ai/runtime/registerDrivers.ts`。
 
 ## 已确认边界与未验证事项
 

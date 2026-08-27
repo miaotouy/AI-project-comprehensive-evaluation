@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：直接阅读源码（渲染层提交链路、主进程 `AiStreamManager` 状态机与 `PersistentChatContextProvider` 上下文拼装、AI SDK Agent 交接、`messageRules` 消息整形与重试包装），并核对行号与符号至当前 HEAD
 >
@@ -128,7 +128,13 @@ ChatContent.onSend
 - **工具**：`ComposerToolRuntimeHost`/各 `defineTool`（`src/renderer/components/composer/tools/definitions/*.tsx`）在渲染期决定要不要显示；实际"要不要带上某工具"由主进程侧模型能力判定，不在这层。四类输入的组织方式并不统一：文件/知识库=消息 parts，联网=assistant 设置，推理=独立请求字段，工具=能力判定。
 - 工具执行循环的内部语义（发现、协议、执行、审批）属 Agent 工具类目，本笔记只记录注入点与交接契约。
 
-## 10. 退出恢复、日志与已确认边界
+## 10. 当前上下文预算与运行时补充
+
+上下文设置恢复了按最近 N 条消息取窗的限制；附件预算与路由改为先评估输入空间，并可在预算允许时读取完整附件。`fs_read` 同时受到显式门控，避免因附件扩展而无条件暴露文件读取。Agent 请求侧现按 Claude Code、Pi、DSH 三种运行时建立模型注入与流式适配；缺失 Agent 模型上下文窗口时以 256K 作为默认值。
+
+这些结论来自预算、请求参数和运行时构造代码；不同 Provider 对大附件、压缩和上下文上限的实际接受行为未运行验证。依据：`src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/messages/attachmentBudget.ts`、`src/main/ai/messages/maxMessagesWindow.ts`、`src/main/ai/runtime/pi/modelInjection.ts`、`src/main/ai/runtime/dsh/modelInjection.ts`。
+
+## 11. 退出恢复、日志与已确认边界
 
 - **启动/崩溃恢复**：boot reconcile 把遗留 `pending` 翻 `error`（第 1 节；`AiStreamManager.ts:497-506`）；`onStop` 在退出时 abort 所有 live 流并等待执行循环落盘完成（`:514-534`）。
 - **备份恢复**：`pause()`/`drainInFlight()` 写安静期（`:371-442`），dispatch 门禁返回 `blocked`（`:321-326`）。
@@ -136,14 +142,14 @@ ChatContent.onSend
 - **已确认边界（取舍）**：`AiStreamManager` 的中心化状态机复杂度是维护者自己承认的正确性隐患来源（第 1 节），属于"必要复杂度"，但新人理解成本高；ring buffer 与 approval 暂停淘汰是"可重放性优先于吞吐"的取舍。
 - **类目边界**：停止生成的半截消息最终如何保存（数据语义）见会话与消息管理；停止按钮状态、排队提示、重试入口等用户工作流见 Chat UI；流式事件到 DOM 的消费见消息渲染器。
 
-## 11. 未验证事项
+## 12. 未验证事项
 
 - 流式中断/停止的网络级取消效果、压缩触发阈值、不同 Agent runtime 的完整差异、provider 最终 HTTP payload 字段未运行验证。
 - 同会话串行/并发运行行为、steer 队列与 follow-up 队列的运行语义、后台生成收口、退出中途任务处理未验证。
 - 流式期间中间增量落盘的频率未核实（第 5 节）；审批空闲 2 小时上限、grace-period 驱逐的实际触发未运行验证。
 - 工具执行循环内部细节属 Agent 工具类目，本笔记未覆盖。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - `src/renderer/pages/home/ChatContent.tsx`、`useChatRuntimeState.ts`（提交入口与 `buildStreamRequest`）
 - `src/renderer/hooks/useConversationTurnController.ts`（IPC `ai.stream.open` 与阶段机）

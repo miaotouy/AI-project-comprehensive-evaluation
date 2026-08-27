@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`cd82f996fb6c3a523b6d40de31314f2b86f56281`（分支：`main`）
+> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
 >
 > 调查方式：静态代码阅读（grep/glob 检索 + 关键实现文件通读），辅以仓库内单元测试作为行为佐证；未构建、未运行应用
 >
@@ -135,20 +135,26 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 - Pyodide：单例 worker，终止时拒绝所有挂起请求；超时清理；模块状态跨次执行保留（可 reset）。
 - 限额：HTML 文件预览与文件编辑均限 2MB（`HtmlFilePreview.tsx:21-22`、`useFileEditSession.ts:21`）；artifact 预览高度上限为视口 72%（`HtmlArtifactView.tsx:54`）；长会话（agent）有 compaction/上下文用量管理，属 Agent 类目不展开。
 
-## 11. 测试、已确认边界与未验证事项
+## 11. 当前输出对象补充
+
+Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进入终态时会终止解析 worker，避免已完成或失败任务继续占用资源。PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影，除非继续进入上述文件或 Artifact 表面，否则不应升级为独立运行对象。
+
+依据：`src/renderer/components/FilePreview/plugins/spreadsheet/SpreadsheetFilePreview.tsx`、`src/renderer/components/FilePreview/plugins/spreadsheet/worker/xlsxParser.worker.ts`、`src/main/services/PdfTranslationService.ts`、`src/main/data/services/TranslateHistoryService.ts`。
+
+## 12. 测试、已确认边界与未验证事项
 
 - 单元测试覆盖（均属组件/服务级）：iframe 沙箱属性与 CSP（`CodeBlockView/__tests__/HtmlPreviewFrame.test.tsx`）、webview 附加时主进程强制沙箱/拒绝危险源（`MainWindowService.test.ts:233-300`）、artifact 请求白名单（`src/main/utils/__tests__/htmlArtifactRequest.test.ts`）、分类与流式表面切换（`markdown/__tests__/CodeBlock.test.tsx`、`CodeBlock.test.tsx` 内 MessageHtmlArtifact 分支）、编辑保存载荷（`homeMessageListAdapter.test.tsx:625`）、自动保存/冲突（`hooks/__tests__/useFileEditSession.test.tsx`）、report_artifacts 投影（`agentRightPaneProjection.test.ts`）。
 - 未发现覆盖"生成→展示→编辑→保存→重开"整链的端到端测试（`tests/e2e/` 仅 app-launch）。
 - 未运行验证：HTML artifact 实际渲染、同意流程交互、webview 执行行为、Pyodide 执行、自动保存/冲突对话框——本次仅静态确认入口、状态与事件绑定；视觉效果与平台行为（Windows/macOS）未验证。
 - 未覆盖/超出范围：`v2-refactor-temp/` 阶段代码、MiniApp webview（`persist:webview` 分区为自定义应用，非模型输出）、知识库文件处理 artifact（`knowledge.ts` 中为内部处理产物，非生成式输出）、MCP 工具调度。
 
-## 12. 设计取舍与能力定级
+## 13. 设计取舍与能力定级
 
 - **取舍**：HTML artifact 无独立 part 类型/对象 ID，换取"模型只需输出普通 Markdown"的协议零成本；对象身份退化为位置派生 ID，代价是无对象级查询与补丁。安全上宁可 fragment 恒禁脚本、document 须显式同意、artifact 资源走 DNS 级 SSRF 防护，体现"模型输出即不可信输入"的基线。agent 侧选择"文件即对象"——工作区磁盘作为共享状态，用户与模型通过同一文件系统协作，避免复制状态，但冲突处理只有写时版本校验，无三方合并。
 - **能力等级**：G3（可执行 Artifact：同意后 HTML 进沙箱 webview 可交互；Python 可执行）与 G4（可编辑工作区：agent 工作区文件树+编辑器+自动保存+冲突处理+模型持续维护同一磁盘对象）同时成立。G5 不具备——模型感知靠通用文件工具而非对象状态协议，chat 内 artifact 无跨会话身份。协议开放度：自由文本探测+工具声明（无 typed part）；更新粒度：整段/整文件覆盖；持续维度：文件为跨会话项目资产、chat artifact 为会话级文本；闭环程度：agent 侧"查询->读取->定向修改"成立，chat 侧仅历史重入。
 - **已确认边界**：agent 会话消息中的代码块不可编辑（`agentMessageListAdapter.tsx` 未提供 `saveCodeBlock`，`editable` 恒 false）；chat 主界面右侧 pane 无 artifact 面板（右 pane 为话题分支/追踪，`pages/home/Chat.tsx:335-341`）；mindmap/思维导图组件本次未找到（全 renderer 检索 `mindmap|markmap|mind-map` 无结果）。
 
-## 13. 关键源码索引
+## 14. 关键源码索引
 
 - 消息渲染到 artifact 的开关：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx:504-507`
 - HTML 分类与保护：`src/renderer/components/chat/messages/markdown/plugins/remarkHtmlArtifact.ts`
