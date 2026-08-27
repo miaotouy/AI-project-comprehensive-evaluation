@@ -54,16 +54,18 @@ function Convert-Groups($Table, [string]$NameProperty) {
 function Get-GitHistoryStats([string]$ProjectRoot) {
     Push-Location $ProjectRoot
     try {
-        $dates = @(git log HEAD --format='%aI') | ForEach-Object { [datetimeoffset]::Parse($_) }
-        $commitCount = [int](git rev-list --count HEAD)
-        $first = $dates | Select-Object -Last 1
-        $last = $dates | Select-Object -First 1
+        # Compare branch integration cadence rather than every commit reachable
+        # through merged side branches. Committer dates reflect mainline arrival.
+        $dates = @(git log --first-parent HEAD --format='%cI') | ForEach-Object { [datetimeoffset]::Parse($_) }
+        $commitCount = [int](git rev-list --first-parent --count HEAD)
+        $first = $dates | Sort-Object | Select-Object -First 1
+        $last = $dates | Sort-Object -Descending | Select-Object -First 1
         $spanDays = if ($first -and $last) { [math]::Max(1, [math]::Ceiling(($last - $first).TotalDays)) } else { 0 }
         $recentSince = [datetimeoffset]::Now.AddDays(-90)
         $recent90 = @($dates | Where-Object { $_ -ge $recentSince }).Count
         $shallow = ((git rev-parse --is-shallow-repository).Trim() -eq 'true')
         [pscustomobject]@{
-            CommitCount = $commitCount
+            MainlineCommitCount = $commitCount
             FirstCommitDate = if ($first) { $first.ToString('yyyy-MM-dd') } else { $null }
             LastCommitDate = if ($last) { $last.ToString('yyyy-MM-dd') } else { $null }
             HistoryDays = $spanDays
@@ -183,7 +185,7 @@ $results = foreach ($projectName in $Projects) {
         Project = $projectName
         Commit = $commit
         Branch = $branch
-        CommitCount = $history.CommitCount
+        MainlineCommitCount = $history.MainlineCommitCount
         FirstCommitDate = $history.FirstCommitDate
         LastCommitDate = $history.LastCommitDate
         HistoryDays = $history.HistoryDays
