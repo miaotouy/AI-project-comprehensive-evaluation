@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（TypeScript 服务端生成任务执行链、事件流与 TUI/Web 客户端提交路径），核对快照 HEAD 全部符号与行号
 >
@@ -25,7 +25,7 @@ OpenCode 的一次生成任务由 `api.session.prompt` 进入 `SessionPrompt.pro
   ```
 - **中断语义**：pending/running 的 tool part 标记为 `"Tool execution aborted"` + `interrupted:true`，重放时以错误回注（processor.ts:577-593、message-v2.ts:351-360）。
 - **流式落盘频率分三层**：delta 走 `updatePartDelta` 发增量事件、完整 part 在 end 事件时落库、tool part 状态迁移即时落库（事件产生与各事件语义见 5；落库的数据形状见会话与消息管理笔记 §3）。
-- **自动重试**：`SessionRetry.policy` 判定 5xx/429/超时/网络错误，context overflow 不重试；上限 5 次、指数退避 2s 起带 0.25 随机抖动（retry.ts:26-31、:79-82、:192）；无独立重试端点。
+- **自动重试**：`SessionRetry.policy` 判定 5xx/429/超时、已识别网络错误及“稍后重试/容量不足”提示，context overflow 不重试；上限 5 次、指数退避 2s 起带 0.25 随机抖动（`packages/opencode/src/session/retry.ts:26-42, 79-82, 192`）；无独立重试端点。
 - **V1/V2 双轨**：V1 走 `POST /session/:id/prompt_async`；V2 走生成客户端 `POST /api/session/{id}/prompt`。
 
 ## 系统边界与生成任务主链
@@ -87,7 +87,7 @@ messages 组装（prompt.ts:1257-1286）：
 
 ## 4. SDK、Provider、模型与协议交接
 
-- `llm.stream`（llm.ts:357-381）使用 AI SDK `streamText`（:280-353）；请求先经 `LLMRequestPrep.prepare`（llm/request.ts:56-206：system/消息/tools/参数/headers，工具按权限过滤 :208-214）。
+- `llm.stream`（llm.ts:357-381）使用 AI SDK `streamText`（:280-353）；请求先经 `LLMRequestPrep.prepare`（llm/request.ts:56-206：system/消息/tools/参数/headers，工具按权限过滤 :208-214）。父会话 ID 只要存在即作为 `x-parent-session-id` 加入请求，包含 OpenCode 自有 Provider 路径（`packages/opencode/src/session/llm/request.ts:187-204`）。
 - **运行时选择**：默认 AI SDK 路径；`OPENCODE_EXPERIMENTAL_NATIVE_LLM` 时先试 `LLMNativeRuntime.stream`（llm.ts:226-269），不支持则回退 AI SDK（native-runtime.ts）。
 - LLM 流经 `LLMAISDK.toLLMEvents` 转统一事件（llm/ai-sdk.ts:76-286），事件类型集合为：
 
@@ -123,7 +123,7 @@ messages 组装（prompt.ts:1257-1286）：
   4. `Runner.cancel`（runner.ts:171-202）中断 fiber；
   5. `onInterrupt` 置 aborted 走 `halt(DOMException AbortError)`（processor.ts:648-654），随后 `cleanup` 置终态（第 6 节）。
   界面入口（TUI 双击 Esc / Web 中断按钮）见 Chat UI 笔记。
-- **重试**：`SessionRetry.policy`（src/session/retry.ts:182-206）——`retryable` 判定 5xx/429/超时/网络错误（:84-154），context overflow 不重试（:86）；`delay` 尊重 retry-after 头、指数退避 2s 起加 0.25 随机抖动（:26-31、:46-82），`meta.attempt > RETRY_MAX_RETRIES(5)` 停止（:192）；接入 processor 的 `Effect.retry`（processor.ts:660-674），每次尝试发布 `{type:"retry",attempt,message,next}` 状态（:664-672）。
+- **重试**：`SessionRetry.policy`（src/session/retry.ts:182-206）——`retryable` 判定 5xx/429/超时、已识别网络错误及“稍后重试/容量不足”提示（:33-42、:84-158），context overflow 不重试（:86）；`delay` 尊重 retry-after 头、指数退避 2s 起加 0.25 随机抖动（:26-31、:46-82），`meta.attempt > RETRY_MAX_RETRIES(5)` 停止（:192）；接入 processor 的 `Effect.retry`（processor.ts:660-674），每次尝试发布 `{type:"retry",attempt,message,next}` 状态（:664-672）。
 - **重试与重新生成的区别**：无独立重试端点；前端对失败消息的重试本质是再次发送（续写语义见会话与消息管理笔记 4）。
 
 ## 8. 队列、多会话并发与后台生成

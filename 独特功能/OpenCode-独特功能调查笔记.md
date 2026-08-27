@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：只读通读根 README、AGENTS.md、packages 结构与核心模块；由专项核验覆盖 CLI/server/TUI/Desktop/app 各面，并对关键入口（`event/sql.ts`、`sync.ts`、`acp/service.ts`、`packages/codemode`、`export.ts`）抽查；未运行应用，未修改被调查仓库
 >

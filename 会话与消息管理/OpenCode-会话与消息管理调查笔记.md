@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（TypeScript 服务端会话存储与事件、TUI/Web 客户端投影），核对快照 HEAD 全部符号与行号
 >
@@ -121,7 +121,7 @@ POST /session（创建，groups/session.ts:203-214）-> createNext 生成 ses_ i
   - 递归删除子会话（:619-622）；
   - 发布 `session.deleted` 并移除事件（:624-625）。
 - **切换/归档**：归档标记是会话字段 `time.archived`（`sql.ts:59`），`PATCH /session/:id` 的对应分支调 `setArchived`（`handlers/session.ts:200-202`、`session.ts:759-761`）。
-- App 侧归档只从列表移除并调用更新（`directory-sync.ts:136-146`）；列表查询默认排除已归档（`session.ts:564`、`layout/helpers.ts:19`）。无独立"清空空会话"机制。
+- App 在持久化归档成功后移除目录列表项、逐会话缓存和首页索引；当前会话还按父会话、相邻会话或新草稿选择后续路由（`packages/app/src/pages/session/session-archive.ts:31-65`）。列表查询默认排除已归档（`session.ts:564`、`layout/helpers.ts:19`）。无独立"清空空会话"机制。
 - **恢复语义**：消息/parts 均逐步落库，异常退出后从 SQLite 恢复；进程内运行态（Runner/status）存于 InstanceState，随实例清理（run-state.ts:35-50）。V2 的 post-crash continuation recovery 明确标注为未来工作（core/src/session/runner/llm.ts:86）。
 
 ## 4. 编辑、重试、续写、回退与分支语义

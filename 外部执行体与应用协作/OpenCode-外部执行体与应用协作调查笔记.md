@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：静态复核 server、sync、ACP、CLI/TUI/Desktop/Web 客户端与 Slack 包；复用 Chat、会话和独特功能笔记；未运行多客户端或 ACP 宿主
 >

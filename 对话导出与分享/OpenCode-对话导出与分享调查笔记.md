@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：静态源码调查；读取 CLI export/import/pr/run 命令、share 客户端服务（share-next.ts/session.ts）、httpapi session 组、SessionV1 schema、core 持久化（session_share 表、share_url 列、projector）、TUI 与 Web 会话命令、GitHub Actions 分享交接及对应测试；未运行应用
 >

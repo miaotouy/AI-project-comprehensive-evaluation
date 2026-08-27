@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Solid TUI 与 Web App 双表面组件与事件绑定、Electron 窗口层），界面行为均为静态确认，视觉效果与键盘可用性需运行验证
 >
@@ -46,7 +46,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **侧栏列表（Web）**：目录同步模块按目录查询会话列表（倒序、限量参数见 `context/directory-sync.ts:124-134`），按 10 条递增分页（数据语义见会话与消息管理笔记 5）；归档会话从列表移除（:136-146）。
+- **侧栏与首页列表（Web）**：目录同步模块按目录查询会话列表（倒序、限量参数见 `context/directory-sync.ts:124-134`），按 10 条递增分页（数据语义见会话与消息管理笔记 5）。归档成功后会同步移除当前目录列表、会话缓存和首页索引；当前会话则导航到父会话、相邻会话或新草稿，避免页面继续指向已归档对象（`packages/app/src/pages/session/session-archive.ts:31-65`、`pages/home/home-sessions-controller.tsx:217-229`）。
 - **首页入口**：打开目录时若为空目录，自动初始化 Git 后注册为项目（`pages/home/home-controller.ts:89-109`），项目行支持右键菜单（`pages/home/home-projects-view.tsx:478`）。
 - 首页最近会话按"更新时间，缺省取创建时间"降序、id 决胜排序（`pages/layout/helpers.ts:12-16` 的 `compareSessionTime`，`home-sessions-controller.tsx:257`）。
 - **命令面板**：跨目录搜索会话，只查顶层会话并限量 50 条（`app/src/components/command-palette.ts:149`，入口在 `dialog-command-palette-v2.tsx:82`）；TUI 侧会话切换同样走命令面板（`component/command-palette.tsx`、`dialog-session-list.tsx`）。
@@ -70,7 +70,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 ## 4. Agent、模型、工具与发送前配置
 
 - 会话级 `session.agent` 与 `session.model` 绑定（数据语义见会话与消息管理笔记 8），发送时不一致会自动调用 `setAgentModel` 更新（`packages/opencode/src/session/prompt.ts:672-689`）；发送前模型与 Agent 选择改的是提交链读取的局部当前值（`submit.ts:338-341`）。
-- **界面选择器（Web）**：`SessionComposerControls`（`composer/session-composer-controls.ts:23-50`）提供 agents 查询与模型选择；V2 Composer 还暴露 agent 与 model variant 的循环切换快捷键（`agent.cycle`、`model.variant.cycle`）以及提交/停止按钮（`components/prompt-input-v2.tsx:385-409`）。**本快照中 Composer 暴露的是当前会话已绑定的 agent/model + variant 选择，未发现参数级（temperature 等）发送前配置界面**（参数由 agent/model 配置与 provider 默认决定，见对话请求与上下文笔记 4）。
+- **界面选择器（Web）**：`SessionComposerControls`（`composer/session-composer-controls.ts:23-50`）提供 agents 查询与模型选择；V2 Composer 还暴露 agent 与 model variant 的循环切换快捷键（`agent.cycle`、`model.variant.cycle`）以及提交/停止按钮（`components/prompt-input-v2.tsx:385-409`）。模型目录滚动时 Provider 分组标题保持可见（`packages/app/src/components/dialog-select-model.tsx:453`）。**本快照中 Composer 暴露的是当前会话已绑定的 agent/model + variant 选择，未发现参数级（temperature 等）发送前配置界面**（参数由 agent/model 配置与 provider 默认决定，见对话请求与上下文笔记 4）。
 - **TUI**：模型/Agent 切换走命令面板与对话框（component/dialog-model.tsx、dialog-agent.tsx、dialog-variant.tsx），未发现 Composer 内嵌选择器。
 
 ## 5. 发送、排队、流式反馈与停止

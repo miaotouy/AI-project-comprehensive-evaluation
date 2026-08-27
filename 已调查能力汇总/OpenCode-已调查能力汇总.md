@@ -2,9 +2,9 @@
 
 > 汇总对象：`opencode`（远端仓库 `https://github.com/anomalyco/opencode`）
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 份单项目调查笔记（代码快照均为 `1f94d8a3c86b67f4f49a0e341de74e9188381b3a`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 份单项目调查笔记（代码快照均为 `c2eacd72afc4a4984564c393e15ab30011057269`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
 >
@@ -77,7 +77,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **流式落库、最终化与异常收口**：文本/reasoning 的 delta 走 `updatePartDelta` 发增量事件、完整 part 在 end 事件落库；step-finish 累计 usage/cost、写 patch part、后台触发摘要；finish 事件收口写入 `time.completed` 与 finish 字段。中断/异常走 cleanup（未完成 part 置终态、tool part 标 "Tool execution aborted" + interrupted）、halt（错误归一化并发布 session.error），context overflow 在 auto compaction 开启时置 needsCompaction 而非直接失败。错误归一化为 8 种类型（AuthError/APIError/ContextOverflowError/AbortedError/StructuredOutputError/ContentFilterError/UnknownError/OutputLengthError）。证据状态：主链确认（静态源码）。[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 5、6 节
 
-- **停止、中断、自动重试与续写**：停止链路为 abort 端点 → SessionPrompt.cancel → Runner.cancel 中断 fiber → onInterrupt 置 aborted 走 halt；被中断的 tool part 重放为 `[Tool execution was interrupted]` 错误回注，不重执行（避免重复副作用）。自动重试 `SessionRetry.policy` 仅对 5xx/429/超时/网络错误，context overflow 不重试，上限 5 次、指数退避 2s 起带 0.25 随机抖动，尊重 retry-after 头；无独立重试端点，重试本质是重发。续写即同 session 追加，V2 有 `delivery: "steer"`（打断当前轮）与 `"queue"`（排队）。重试可能重复计费为静态推断（见末尾小节）。证据状态：主链确认（静态源码）。[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 7 节、第 1 节、[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 7 节
+- **停止、中断、自动重试与续写**：停止链路为 abort 端点 → SessionPrompt.cancel → Runner.cancel 中断 fiber → onInterrupt 置 aborted 走 halt；被中断的 tool part 重放为 `[Tool execution was interrupted]` 错误回注，不重执行（避免重复副作用）。自动重试 `SessionRetry.policy` 覆盖 5xx/429/超时、已识别网络错误及“稍后重试/容量不足”提示，context overflow 不重试，上限 5 次、指数退避 2s 起带 0.25 随机抖动，尊重 retry-after 头；无独立重试端点，重试本质是重发。续写即同 session 追加，V2 有 `delivery: "steer"`（打断当前轮）与 `"queue"`（排队）。重试可能重复计费为静态推断（见末尾小节）。证据状态：主链确认（静态源码）。[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 7 节、第 1 节、[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 7 节
 
 - **自动标题与摘要**：首轮 prompt 后 `ensureTitle` 调小模型生成标题（title agent 自带 temperature 0.5）；step-finish 后后台触发摘要并把回合 diff 预计算进用户消息 summary（`summary.diffs`）。证据状态：静态源码确认。[会话与消息管理调查笔记](../会话与消息管理/OpenCode-会话与消息管理调查笔记.md) 第 3 节、[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md) 第 1 节
 
@@ -89,7 +89,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **工具过滤、注入与参数校验**：`SessionTools.resolve` 把 registry + MCP + 资源工具包装为 AI SDK 工具表，`LLMRequestPrep.resolveTools` 按 user.tools 禁用与权限全量禁用集合二次过滤（`*` + deny 时整工具移除，edit/write/apply_patch 共享 edit 权限）；参数校验在 `Tool.wrap` 统一完成（Effect Schema 解码，失败转 `InvalidArgumentsError`，其 message 即模型可见的"请重写输入"回注）；AI SDK `experimental_repairToolCall` 修正工具名大小写、无法修复时重定向到 invalid 工具。插件事件 `tool.definition` 可改写 description/parameters。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 2、4 节
 
-- **编排循环与终止条件**：`SessionPrompt.runLoop` 无限 while，上限为 agent 的 steps 配置（默认 Infinity），最后一轮注入 MAX_STEPS_PROMPT 强制收尾；退出条件为 finish 非 "tool-calls" 且无未执行工具 part。doom-loop 检测同一工具连续 3 次相同入参触发审批；`experimental.continue_loop_on_deny` 决定审批拒绝后是否继续循环；未设置 toolParallelism，单 step 内工具并行由 AI SDK 默认行为决定。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 5 节
+- **编排循环与终止条件**：`SessionPrompt.runLoop` 无限 while，上限为 agent 的 steps 配置（默认 Infinity），最后一轮注入 MAX_STEPS_PROMPT 强制收尾；只有 finish 既非 `tool-calls` 也非 `unknown` 且无未执行工具 part 时才退出。doom-loop 检测同一工具连续 3 次相同入参触发审批；`experimental.continue_loop_on_deny` 决定审批拒绝后是否继续循环；未设置 toolParallelism，单 step 内工具并行由 AI SDK 默认行为决定。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 5 节
 
 - **审批授权与执行边界**：权限求值为 allow/ask/deny 三档规则，多条 ruleset 平铺后 `findLast` 匹配（后写优先），ask 阻塞在无超时的 Deferred 上等待 UI 回复（reply 支持 reject/once/always，always 写入 approved 并级联放行）。工具执行全部在 node 主进程内：shell 为普通子进程、无沙箱（默认 2 分钟超时 + `external_directory` 工作区外检查兜底，前置用 tree-sitter WASM 解析 bash/PowerShell AST 提取权限 pattern）；MCP stdio 服务器退出时递归杀进程树；code-mode 在独立沙箱解释器执行受限脚本。结果统一按默认 2000 行/50KB 截断落盘 `tool-output/`（7 天保留、每小时清理），超限提示用 Task/Grep/Read 接力。ask 无超时意味着 UI 不响应则调用永久挂起（见末尾小节）。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 6、7 节
 
@@ -97,7 +97,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **MCP 双运输与目录**：`local` 走 stdio 子进程，`remote` 依次尝试 StreamableHTTP → SSE，支持 OAuth；工具命名 `server_tool`，调用前全名审批；能力声明只含 roots，`tools/list_changed` 触发重拉并发布 ToolsChanged 事件；服务器 getInstructions 进系统提示 `<mcp_instructions>`。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 8.1 节
 
-- **TaskTool 子 agent 与后台任务**：TaskTool 创建子会话（新 Session）执行子 agent，权限收窄继承（父会话 deny 规则 + external_directory 规则，再强制追加 todowrite/task deny），`subagent_depth` 限制嵌套（默认 1）；`background=true` 时立即返回、完成后向父会话注入合成 user 消息。后台任务经 BackgroundJob 服务（进程内注册表，重启丢失状态）；`POST /experimental/session/:id/background` 可把阻塞会话的同步子 agent 转后台继续，TUI 快捷键 ctrl+b。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 8.3 节、[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 8 节
+- **TaskTool 子 agent 与后台任务**：TaskTool 创建子会话（新 Session）执行子 agent，权限收窄继承（父会话 deny 规则 + external_directory 规则，再强制追加 todowrite/task deny），`subagent_depth` 限制嵌套（默认 1）；子会话的 assistant 错误或末尾工具错误会被转为父任务的失败结果。`background=true` 时立即返回、完成后向父会话注入合成 user 消息。后台任务经 BackgroundJob 服务（进程内注册表，重启丢失状态）；`POST /experimental/session/:id/background` 可把阻塞会话的同步子 agent 转后台继续，TUI 快捷键 ctrl+b。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 8.3 节、[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 8 节
 
 - **外部执行体与应用协作**：OpenCode 主要不是托管其他 CLI Agent，而是把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 与 Slack 客户端暴露出去。外部客户端发现或启动 server（localhost、mDNS `opencode.local`、远程 URL），HTTP 创建/选择 session、SSE 订阅事件、prompt 写入、断线重连后 replay、必要时 steal 写所有权，cancel/revert/fork 回传服务端。身份经 HTTP 密码鉴权、sidecar 用户名密码与 CORS 白名单绑定；另有 PTY 终端 WebSocket attach（connect token + 一次性 ticket）与远程 TUI 控制接口（appendPrompt/submitPrompt/controlNext/controlResponse）。工具与文件权限由 OpenCode runtime 承担，外部宿主只经 ACP/HTTP 审批面参与放行。mDNS 与远端 workspace 路由为 `入口确认`，真实多客户端运行未实测（见末尾小节）。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenCode-外部执行体与应用协作调查笔记.md)
 
@@ -109,7 +109,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **协议适配与请求组装**：主路径为 AI SDK `streamText`（内置 BUNDLED_PROVIDERS 表 + 表外包名 npm 动态安装、`file://` URL 直接 import），另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`，仅 openai/opencode/anthropic 且非 OAuth 时经 `OPENCODE_EXPERIMENTAL_NATIVE_LLM` 切换，不支持则回退 AI SDK）；ollama/lmstudio/deepseek 等统一走 `@ai-sdk/openai-compatible`。请求参数经 ProviderTransform 输出 options/providerOptions/temperature/topP/maxOutputTokens/schema；Anthropic/Bedrock 家族自动 `cacheControl: ephemeral` prompt caching（可 `setCacheKey` 关）。无 `@`/`#`/`:latest` 模型语法（"latest"仅作排序权重）。证据状态：静态源码确认。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 5、6 节
 
-- **重试三层与故障边界**：重试分三层——会话级 `Effect.retry`（5xx/429/超时/网络错误，context overflow 不重试，上限 5 次、指数退避 2s 起带 0.25 随机抖动、尊重 retry-after 头）+ SDK 级 maxRetries + native 级 MAX_RETRIES=2；三层都不改变目标 Provider/模型/Key。错误归一化识别 context_length_exceeded/insufficient_quota 等映射为 ContextOverflowError/APIError。无多 Key 轮询、无跨 provider failover、无候选池与健康状态；登录流程无专门连接测试请求（仅插件 prompt 的 validate 回调与 GitLab discoverModels 真实调 API）；重试可能重复计费为静态推断（见末尾小节）。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 7、8 节
+- **重试三层与故障边界**：重试分三层——会话级 `Effect.retry`（5xx/429/超时、已识别网络错误与容量提示，context overflow 不重试，上限 5 次、指数退避 2s 起带 0.25 随机抖动、尊重 retry-after 头）+ SDK 级 maxRetries + native 级 MAX_RETRIES=2；三层都不改变目标 Provider/模型/Key。错误归一化识别 context_length_exceeded/insufficient_quota 等映射为 ContextOverflowError/APIError。无多 Key 轮询、无跨 provider failover、无候选池与健康状态；登录流程无专门连接测试请求（仅插件 prompt 的 validate 回调与 GitLab discoverModels 真实调 API）；重试可能重复计费为静态推断（见末尾小节）。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 7、8 节
 
 - **可观测性与用量成本**：usage/cost 按 model.cost tiers 乘 token 数算并投影到 session 表 cost/tokens 列，删除消息/part 回滚 usage；OTel 在 `OTEL_EXPORTER_OTLP_ENDPOINT` 时启用日志与 trace 导出；`packages/stats` 消费 tokens 聚合；重试状态经 SessionStatus 广播 `{type:"retry", attempt, message, action, next}`，UI 渲染倒计时卡片。Provider 日志只记 providerID/modelID 不含 key。证据状态：静态源码确认。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 8 节
 

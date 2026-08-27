@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 agent 配置加载、选择、提示词拼装与权限叠加链路；未运行构建与交互
 >
@@ -132,7 +132,7 @@ system = [
   ...(user.system ? [user.system] : []),          // prompt payload 的 system 字段
 ].join("\n")
 ```
-- provider 风格 prompt 按模型 api id 选择对应模板文件（system.ts:27-42，含 anthropic、gpt、gemini、default 等）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:27-31、prompt/meta.txt，提交 b9f3b38）。
+- provider 风格 prompt 按模型 api id 与 Provider 选择对应模板文件（`packages/opencode/src/session/system.ts:27-47`，含 anthropic、gpt、gemini、Kimi、default 等）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:27-31、prompt/meta.txt，提交 b9f3b38）。
 - 拼装后触发 `experimental.chat.system.transform` 插件钩子（request.ts:69-73）；OpenAI OAuth 场景改走 `options.instructions`（request.ts:99）——真正写入 `providerOptions.instructions` 的是 agent 生成逻辑的 isOpenaiOauth 分支（agent.ts:418-433，注入经 llm.ts:316）。
 
 **指令（AGENTS.md）加载**（src/session/instruction.ts，`systemPaths` :110-153）按来源顺序：

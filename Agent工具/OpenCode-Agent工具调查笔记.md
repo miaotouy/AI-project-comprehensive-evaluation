@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理，追踪工具注册、注入、执行与回注全链路；未运行构建与工具调用
 >
@@ -27,7 +27,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 - **编排循环是 `SessionPrompt.runLoop` 无限 while**，上限为 agent 的 steps 配置，最后一轮注入 `MAX_STEPS_PROMPT`（prompt.ts:1178-1181、1281）。
 - **审批阻塞在 Deferred 上**：`Permission.ask` 发布事件等 UI 回复，reply 支持 reject/once/always（permission/index.ts:67-167）。
 - **结果截断默认 2000 行 / 50KB**，超限写入 `tool-output/` 目录并提示用 Task/Grep/Read 接力（truncate.ts:13-16、85-141）。
-- **TaskTool 是唯一“旁路”**：创建子会话（新 Session）执行子 agent，权限收窄继承（tool/task.ts、agent/subagent-permissions.ts）。
+- **TaskTool 是唯一“旁路”**：创建子会话（新 Session）执行子 agent，权限收窄继承；子会话返回 assistant 错误或末尾工具错误时，TaskTool 将其转为包含子会话 ID 的失败结果，而非把空文本当作成功（`packages/opencode/src/tool/task.ts:214-224`）。
 - **MCP 双运输**：stdio 与 StreamableHTTP/SSE，工具命名 `server_tool`，调用前全名审批（src/mcp/index.ts、catalog.ts）。
 - **Skill 不是工具注册**：系统提示列出 `<available_skills>` + `skill` 工具按名加载（system.ts:98-110、tool/skill.ts）。
 
@@ -151,7 +151,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 
 - **驱动者**：`SessionPrompt.loop` → `runLoop`（prompt.ts:1081-1341）无限 `while`，每轮创建一个 assistant 消息与 processor handle，`handle.process` 消费一次 LLM 流；工具选择与执行在 AI SDK 内部。
 - **迭代上限**：`maxSteps = agent.steps ?? Infinity`，最后一轮把 `MAX_STEPS_PROMPT` 追加进请求（prompt.ts:1178-1179、1281），提示模型已达最大步数、禁止再调用工具，只输出文本总结（该提示位于 core/src/session/runner/max-steps.ts）。
-- **退出条件**：`lastAssistant.finish !== "tool-calls"` 且无未执行工具 part 时退出；排除列表只有 `"tool-calls"` 一种，`"unknown"` 同样退出（prompt.ts:1111-1130）。
+- **退出条件**：`lastAssistant.finish` 不为 `"tool-calls"` 或 `"unknown"`，且无未执行工具 part 时才退出；把 unknown 视为可继续，使带工具调用的非标准完成原因仍能回传工具结果（`packages/opencode/src/session/prompt.ts:1108-1131`）。
 - processor 返回 `stop`（:1319）；compaction 任务触发（:1149-1159）。
 - **并发**：单会话由 `SessionRunState.ensureRunning` 保证串行（run-state.ts:88-94、96-105、:71-75；排队等待语义见 effect/runner.ts:115-138）：忙时排队等前一轮完成、不抛错，只有 `startShell` 与 `assertNotBusy` 抛 `Session.BusyError`。opencode 未设置 `toolParallelism`，单 step 内的工具并行由 AI SDK 默认行为决定。
 - **超时**：llm.ts:361-364 每流创建 AbortController；shell 工具另有默认 2 分钟超时（见第 7 节）。

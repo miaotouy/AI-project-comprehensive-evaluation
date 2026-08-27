@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：源码静态调查，grep/glob 关键词交叉验证（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、snapshot、revert、pty、execution），并通读核心链路文件；未运行构建、测试或交互
 >

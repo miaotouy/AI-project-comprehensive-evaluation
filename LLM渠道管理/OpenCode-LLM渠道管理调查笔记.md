@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`1f94d8a3c86b67f4f49a0e341de74e9188381b3a`（分支：`dev`）
+> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 Provider 组装、配置生命周期、各管理入口、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
 >
@@ -167,7 +167,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
   - Bedrock 区域前缀（:367-455）；
   - Vertex GoogleAuth fetch（:529-543）；
   - SAP AI Core（:570-593）；
-  - Cloudflare AI Gateway（:767-842）；
+  - Cloudflare AI Gateway：OpenAI 与 Anthropic 原生模型保留各自协议路径，其他上游改经兼容 REST 路由；Anthropic 的带连字符原生 slug 也保留原样（`packages/opencode/src/provider/provider.ts:1249-1308`）。
   - GitLab（:604-728）。
 
 ## 6. 运行时选择、绑定与路由
@@ -184,7 +184,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 - **限流识别（AI SDK 路径）**：错误匹配 `429|500|502|503|504|524`、`rate limit`（session/retry.ts:31-38），`retry-after`/`retry-after-ms` 头解析为延迟（:44-75）。
 - **限流识别（native 路径）**：结构化解析 OpenAI `x-ratelimit-*` 与 Anthropic `anthropic-ratelimit-*`（llm/route/executor.ts:112-148），429 区分 `RateLimitReason`/`QuotaExceededReason`（:242-251）。
 - **重试三层**：
-  - 会话级：`Effect.retry(SessionRetry.policy)`（processor.ts:660-674）：`retryable` 判定 5xx 强制可重试、context overflow 不重试、`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action（retry.ts:77-147）；指数退避 2s 起、带 0.25 随机抖动，attempt 超过 5 停止（retry.ts:28-31、76-81、192）。
+  - 会话级：`Effect.retry(SessionRetry.policy)`（processor.ts:660-674）：`retryable` 判定 5xx 强制可重试、context overflow 不重试、已识别的网络错误与“稍后重试/容量不足”提示也可重试，`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action（`packages/opencode/src/session/retry.ts:33-42, 77-147`）；指数退避 2s 起、带 0.25 随机抖动，attempt 超过 5 停止（retry.ts:28-31、76-81、192）。
   - SDK 级：`maxRetries: input.retries ?? 0`（llm.ts:323）。
   - native 级：`MAX_RETRIES=2` 指数退避带 jitter（executor.ts:35-38、345-364）。
 - **跨 provider failover：不存在**（源码确认）；`closest`（provider.ts:1866-1876）与重试无关。
