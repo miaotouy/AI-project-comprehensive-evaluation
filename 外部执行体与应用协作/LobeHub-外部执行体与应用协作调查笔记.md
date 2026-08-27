@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：静态阅读异构 Agent、Gateway、Connector、Messenger 与 browser MCP 关键源码；复用 Agent 工具和独特功能笔记已确认链路；未运行 CLI、OAuth 或 IM 平台
 >
@@ -16,16 +16,16 @@
 
 LobeHub 是当前样本中覆盖面最宽的项目，三种接入角色都有实现：
 
-- `主链确认`：Amp、Claude Code、Codex、OpenCode、Pi、Qoder 六种本地 CLI；OpenClaw/Hermes 平台任务；Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
+- `主链确认`：Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE 十一种本地 CLI；OpenClaw/Hermes 平台任务；Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
 - `入口确认`：Slack、Discord、Telegram、WeChat Messenger 的安装、绑定、webhook/gateway 和 outbound 已存在，逐平台完整线程往返未静态走通。
 
-本地 CLI 内部还有第三种传输层次：注册表 `registry.ts` 除六种 CLI 外，另注册 `claude-code-sdk`（Claude Agent SDK 进程内 runtime）与 `codex-app-server`（stdio JSON-RPC 连接 Codex app server）两种适配器，均由 lab 开关门控。结论中的"六种本地 CLI"以 descriptor 目录为准，与 adapter 注册表层次不同，两者不冲突。
+本地 CLI 之外还有两种独立传输层次：注册表另注册 `claude-code-sdk`（Claude Agent SDK 进程内 runtime）与 `codex-app-server`（stdio JSON-RPC 连接 Codex app server）两种适配器，均由 lab 开关门控。CLI 描述器与 adapter 注册表不是同一层次，因此不应把后两项混入本地 CLI 数量。
 
 ## 接入角色与系统边界
 
 | 角色 | 外部对象 | 宿主持有的状态 |
 |---|---|---|
-| 外部执行体 | 六种本地 CLI、OpenClaw、Hermes | operation、topic、working directory、原生 session id、进程/任务和事件投影 |
+| 外部执行体 | 十一种本地 CLI、OpenClaw、Hermes | operation、topic、working directory、原生 session id、进程/任务和事件投影 |
 | 外部应用 | Connector、Composio 业务账号 | connection、credential、tool catalog、scope、permission |
 | 外部控制/交互表面 | Bot 平台、Messenger、设备网关、内置浏览器 | bot binding、webhook secret、步骤/完成回调、installation、binder、线程/用户、device、browser operation |
 
@@ -92,7 +92,7 @@ Connector 支持 OAuth2、bearer、API key 和自定义 header，凭据经 `KeyV
 
 ## 已确认边界与未验证事项
 
-- 六种 CLI 和两种平台任务均为静态主链确认，未逐个安装运行；`claude-code-sdk`/`codex-app-server` 传输与相应 lab 开关未运行验证。
+- 十一种 CLI 和两种平台任务均为静态主链确认，未逐个安装运行；`claude-code-sdk`/`codex-app-server` 传输与相应 lab 开关未运行验证。
 - Messenger 逐平台签名、附件、线程映射、审批与完整回复往返未验证；bot 平台层的微信二维码登录、队列回调与逐平台消息格式未运行验证。
 - 外部 CLI 进程退出后的会话恢复策略（重连、重放或接管）与断线语义未验证。
 - Connector 目录数量不表示每个应用和动作均可用或兼容。

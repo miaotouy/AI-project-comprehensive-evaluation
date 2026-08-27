@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（SPA 路由与 Agent 聊天页面、AgentSidebar Topic 列表、ChatInput 编辑器与发送区、Conversation 消息操作与审批卡片、设置页快捷键、桌面通知工具）+ grep 检索键盘/无障碍属性，全部行号按当前 HEAD 逐一核对；未运行验证
 >
@@ -17,7 +17,7 @@
 LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexical 工作台式输入区组成：
 
 - Topic 列表：单击/双击 250ms 定时器区分导航与开新 tab、拖拽引用到输入框、右键菜单、悬浮元数据卡、未读点、失败/运行/等待人工图标与运行耗时、草稿提示；Topic·Thread 并排（`ConversationArea` 的 portal 支持）与桌面端多 tab 由路由层承担。
-- 输入区是一个可扩展工作台：草稿按会话（messageMapKey）自动恢复、输入历史按 user×agent scope、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention（Fuse 模糊检索）、`/` slash action（编辑器插件实现）、goal tag chip、语音消息（MediaRecorder 录制上传后走常规发送链并 `preserveComposer`）。发送前配置区有 Token 用量明细与推理强度预设（模型实例级配置，跨 Agent 生效）。
+- 输入区是一个可扩展工作台：草稿按会话（messageMapKey）自动恢复、输入历史按 user×agent scope、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention（Fuse 模糊检索）、`/` slash action（编辑器插件实现）、goal tag chip、语音消息（MediaRecorder 录制上传后走常规发送链并 `preserveComposer`）。当前快照另有受功能开关控制的实时听写：浏览器采集音频后以 AudioWorklet 转为单声道 16 kHz PCM 帧，前端取得短期会话令牌并建立受校验的 WSS 连接，将识别的中间和最终文本写回编辑器；音频授权、AudioWorklet/WSS 不可用和协议错误都有可区分的失败状态（`src/features/ChatInput/Dictation/`）。发送前配置区有 Token 用量明细与推理强度预设（模型实例级配置，跨 Agent 生效）。
 - 发送/停止按钮是同一个交互位，`generating` 状态由 operation 驱动（经 ConversationStore 桥接全局 ChatStore 的 op 状态）；只读/无权限时提前置灰并给出 tooltip 原因；发送被阻塞时还会弹出队列托盘（QueueTray）提示排队与“立即发送”。
 - 工具审批卡片有全局键盘快捷键（1/2/↑/↓/Enter），由共享 arbiter 分发到唯一一张卡片；审批选项带 `role="radiogroup"/"radio"` 语义。无障碍覆盖是“点状”而非体系化的，消息操作栏图标按钮、Topic 行存在明确缺口。
 - 桌面端（Electron）完成/审批通知与聊天状态直接联动并深链回具体 Topic；Web/PWA 没有系统级通知，只靠未读点 UI。

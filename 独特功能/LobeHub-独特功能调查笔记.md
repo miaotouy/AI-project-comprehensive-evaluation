@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；补充复核异构 Agent runtime、设备网关和外部应用 Connector；未修改仓库源码
 >
@@ -22,7 +22,7 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Personal Memory | `主链确认`（静态证据） | 完整主链：对话 topic → Upstash Workflow（hourly / 用户触发）→ CEPA+Identity 五层提取 → 1024 维向量入库 → 记忆工具 9 API 读写 → 记忆管理页面编辑 |
 | Agent 运营（Brief 汇报 + Work 产物 + 用量统计） | `主链确认`（Brief/Work 部分）/ `入口确认`（统计部分） | “hires, schedules, reports”中的 reports 落在 Briefs（decision/result/insight/error）+ HomeInbox 双栏 + Work 版本化产物对象；统计页为独立入口 |
 | Agent Builder | `主链确认`（静态证据） | 内置 agent-builder 角色 + `lobe-agent-builder` 工具（读模型/搜工具/装插件/改配置），冲突工具被剥离；对话式配置 Agent 的完整闭环 |
-| 异构 Agent 统一托管 | `主链确认`（静态证据） | 六种本地 CLI（Amp/Claude Code/Codex/OpenCode/Pi/Qoder）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，详见[分类边界研究](外部执行体与应用协作边界研究.md) |
+| 异构 Agent 统一托管 | `主链确认`（静态证据） | 十一种本地 CLI（Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，详见[分类边界研究](外部执行体与应用协作边界研究.md) |
 | IM 网关（Messenger / Agent Bot） | `入口确认` | Slack/Discord/Telegram/WeChat 平台注册、OAuth 安装、webhook 入口、cron 保活；webhook → execAgent 的消息往返未逐平台验证 |
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
@@ -158,11 +158,11 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 
 **入口与触发者**：Composer 的 `/goal` 命令——`goalTag.ts` 把目标标记存为结构化 chip（`f777343c8`）；发送时 `conversationLifecycle.ts:323-328` 检测 goal 提示并注入 `lobe-goal` 工具。
 
-**事实对象**：goal 复用任务对象（无独立 goal 表）：`createGoal` 创建底层 task + 持久化验收标准（`TaskVerifyConfig`），`goalLoop.ts` 管理轮次（`DEFAULT_GOAL_MAX_ROUNDS`），`goalBudget.ts` 管理预算（可选 USD 上限），状态（done/paused/review/running）回写到创建工具卡（`goalLoop.ts:118-139`）。
+**事实对象**：Goal 已是独立实体：`goals` 表保存标题、完成要求、预算、生命周期以及可选的 `subjectType`/`subjectId` 执行载体；当前 `/goal` 仍可用 task 作为载体，但 schema 不再把 Goal 绑定为 task 配置。随后加入的 goal graph 用 nodes、edges、决策、Work 版本证据和追加式事件表保留目标拆解与跨运行的人工决策，节点可关联负责执行的 task（`packages/database/src/schemas/{goal,goalGraph}.ts`）。轮次、成本与验收等执行性状态仍由载体及现有运行时表承担。
 
 **完整主链**：`/goal` chip → `lobe-goal.createGoal`（`packages/builtin-tool-goal/src/manifest.ts`，`humanIntervention: 'always'`，创建必须人工确认）→ 创建任务话题并启动 goal 循环 → 有界自动修复/验证（`apps/server/src/services/verify/` 的 goalLoop/settle/sweep 三模块）→ 消息内实时结果卡 → goal 视图（`agent/goals`、`agent/goal/[goalId]` 路由：创建/详情/验收/HowItWorks）→ 完成/拒绝由用户验收。
 
-**持续性与资源边界**：全部状态在 PostgreSQL（task + verify 相关表）；轮次与花费双上限防止失控循环；`goalPhase` 驱动 UI 状态（done/paused/review/running）。
+**持续性与资源边界**：目标定义、图和事件在 PostgreSQL 持久化；task 与验收表继续承载执行细节。轮次与花费双上限防止失控循环；目标与载体的状态桥接、真实 UI 状态和恢复表现仍未运行验证。
 
 **独特性判断**：把“目标”建模为可验收、可自动修复、有预算上限的任务循环，且模型通过专门工具创建（非自由文本承诺）——与任务调度的关系是“目标是一次性任务的高级包装”，与 Brief 系统的关系是“验收结论进 brief 汇报”。在本样本中无对应实现。注意：README 未单独宣传 goals，本卡是 README 之外的实现面候选。
 
@@ -204,7 +204,7 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）；以及实体 `projects` 表与工作目录分组两套“项目”语义的关联链（见 Project 条目）。
 - Goal 循环在真实任务上的运行表现（轮次/预算触达后的 settle 行为、`sweep` 的巡检接线）——静态主链已确认但未运行验证。
 - image/video 创作工作台与 Work 对象的衔接。
-- 六种本地 CLI 与 OpenClaw/Hermes 的运行兼容性、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为。
+- 十一种本地 CLI 与 OpenClaw/Hermes 的运行兼容性、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为。
 
 ## 关键源码索引
 

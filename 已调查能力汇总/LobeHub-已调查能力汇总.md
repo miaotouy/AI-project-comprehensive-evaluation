@@ -1,8 +1,8 @@
 # LobeHub 已调查能力汇总
 
-> 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `3b57a07e3cc1f6b5aaabad36112e8ba40142df29` / canary）
+> 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `7c559cbd4d92a54289bce3a8aab96e057d0ce8c5` / canary）
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-08-27
 >
 > 依据：15 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；横向对比文档不在本次汇总范围
 >
@@ -29,13 +29,13 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 合计 55 项。已贯通确认面（主链确认 + 静态源码确认）46 项，约 84%；其余为入口级或边界/待验证项，集中在文末"已知边界与待验证事项"，不在正文反复出现。Agent Groups / Pages 另带入口确认标记，统计时并入归并已有类目计数，避免重复。
 
-口径说明：本汇总所有"主链确认/静态源码确认"均基于对当前代码快照的源码贯通，在编译型桌面应用或完整本地主链中视为完成交付态；"未运行验证"仅指未进行黑盒运行、UI 或端到端操作，不否定代码完备性。来源笔记统一基于代码快照 `3b57a07e`，全部结论为静态源码事实。
+口径说明：本汇总所有"主链确认/静态源码确认"均基于对当前代码快照的源码贯通，在编译型桌面应用或完整本地主链中视为完成交付态；"未运行验证"仅指未进行黑盒运行、UI 或端到端操作，不否定代码完备性。来源笔记统一基于代码快照 `7c559cbd`，全部结论为静态源码事实。
 
 ## 功能能力摘要
 
 ### 角色与上下文
 
-- **Agent 配置模型（LobeAgentConfig 四层）**：单个 Agent 对象含人格/元数据、模型偏好（model+provider+params）、对话配置（chatConfig 超过 40 个可选字段）、外部能力（plugins/knowledgeBases/files/tts/agencyConfig）四层；模型参数写在 Agent 内部不在 Session 级，并支持 provider 字段单独覆盖。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
+- **Agent 配置模型（LobeAgentConfig 四层）**：单个 Agent 对象含人格/元数据（另有 profile 角色档案）、模型偏好（model+provider+params）、对话配置（chatConfig 超过 40 个可选字段）、外部能力（plugins/knowledgeBases/files/tts/agencyConfig）四层；模型参数写在 Agent 内部不在 Session 级，并支持 provider 字段单独覆盖。Graph Agent 的开关和行为图已归入 agencyConfig，而非会话偏好。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
 - **人格与开场行为**：核心身份字段（systemRole/title/personalName/avatar/backgroundColor）与少样本、开场白配置完整；开场白不落库，空话题实时渲染。fewShots 消费链未确认，见末尾小节。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
@@ -47,7 +47,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **上下文拼装与发送预处理**：发送层从编辑器数据提取 skills/tools/mentions/文件引用并预加载选中工具内容（不伪造工具调用占位消息），operationContext 承载 group/thread/page 文档维度并绑定具体 conversation，user memory 有注入点。证据状态：主链确认（发送链前端侧）。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
-- **命令总线与上下文压缩**：Command Bus 处理 /compact（转独立 compression operation：服务端建压缩组→LLM 摘要流式回填→收口）、/newTopic（可注入 <refer_topic> 节点）与 /goal 注入；最终 token 截断在 Agent runtime/Gateway 侧，发送前 Token 明细条只是估算。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
+- **命令总线与上下文压缩**：Command Bus 处理 /compact（转独立 compression operation：服务端建压缩组→LLM 摘要流式回填→收口）、/newTopic（可注入 <refer_topic> 节点）与 /goal 注入；最终 token 截断在 Agent runtime/Gateway 侧，发送前 Token 明细条只是估算。压缩完成后运行时会保留 prompt headroom，并抑制同一上下文的连续重复压缩。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
 
 - **内置 Agent 方向与导入兼容**：不硬编码多套完整角色预设，角色人格经 ChatGroupWizard 六类群组模板、Agent 市场导入、Agent Builder 建议芯片与 project-coordinator 内置 Agent 引入；市场导入与 JSON 导出（generateFullExport）有路径，SillyTavern/AIO Hub 无官方迁移路径。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
@@ -73,7 +73,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **退出恢复（Gateway 重连）**：topic.metadata.runningOperation 在页面加载时被 useGatewayReconnect 捕获，刷新 JWT、新建 WebSocket 并回放事件，把 UI 重新挂到仍在跑的服务端任务。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
-- **Chat 界面交互工作台**：Topic 侧栏（单击/双击 250ms 定时器区分导航与开 tab、拖拽引用、未读点、运行/失败/等待人工图标、草稿提示）+ Lexical Composer 工作台（草稿按会话恢复、输入历史按 user×agent、IME 组合态、mention/slash/action tag、语音消息）+ 发送前配置（Token 明细、推理强度预设、模型切换）+ 发送/停止同一交互位与排队托盘 + 消息操作与分支导航 + 审批卡片全局快捷键（1/2/↑/↓/Enter，radiogroup 语义）+ 桌面通知深链回 Topic。UI 行为与跨 tab 同步等未验证项见末尾小节。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
+- **Chat 界面交互工作台**：Topic 侧栏（单击/双击 250ms 定时器区分导航与开 tab、拖拽引用、未读点、运行/失败/等待人工图标、草稿提示）+ Lexical Composer 工作台（草稿按会话恢复、输入历史按 user×agent、IME 组合态、mention/slash/action tag、语音消息，以及功能开关控制的实时听写）+ 发送前配置（Token 明细、推理强度预设、模型切换）+ 发送/停止同一交互位与排队托盘 + 消息操作与分支导航 + 审批卡片全局快捷键（1/2/↑/↓/Enter，radiogroup 语义）+ 桌面通知深链回 Topic。UI 行为与跨 tab 同步等未验证项见末尾小节。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
 
 - **对话导出与分享**：把站内复制/导入/转发（cloneTopic/importTopic/forwardTopic，数据库内完成、无交付文件）与四格式导出（截图 snapdom / 文本 Markdown / PDF 服务端 pdfkit / JSON simple+full）与链接分享（topic_shares 表 + /share/t/:id 公开页）明确分成两个面；分享页实时读源 topic 消息而非快照；JSON full 与 importTopic 构成可往返导入链（非无损：不导入文件关联/翻译/TTS/压缩组）。OSS 默认隐藏链接分享入口，见末尾小节。证据状态：静态源码确认。来源：[对话导出与分享调查笔记](../对话导出与分享/LobeHub-对话导出与分享调查笔记.md)
 
@@ -81,7 +81,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 ### 生成与创作
 
-- **Artifact 协议与 Portal 投影**：<lobeArtifact> 私有标记协议，消息内卡片 + 右侧 Portal 预览面板，按类型渲染 HTML iframe / React Sandpack / SVG / Mermaid / Markdown；逐 token 流式注入、同一 identifier 整段重写；Artifact 无独立持久化行，事实源是 messages.content 文本列，恢复靠正则提取。部分子接口（HTML 预览复制/下载、部署到工作区）为空桩，见末尾小节。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
+- **Artifact 协议与 Portal 投影**：<lobeArtifact> 私有标记协议，消息内卡片 + 右侧 Portal 预览面板，按类型渲染 HTML iframe / React Sandpack / SVG / Mermaid / Markdown；逐 token 流式注入、同一 identifier 整段重写；Artifact 无独立持久化行，事实源是 messages.content 文本列，恢复靠正则提取。工作区 HTML 预览与文件树还可收集本地资源、打包为 Artifact 后交由业务发布槽生成公开站点；OSS 默认槽不可用。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/LobeHub-对话导出与分享调查笔记.md)
 
 - **Cloud Sandbox 代码执行**：内置 lobe-cloud-sandbox 工具 13 个 API（executeCode/runCommand/文件操作与导出），远端沙箱执行 Python/JS/Shell，文件可导出为持久化文件对象并登记 work 资产；写文件/执行类工具（executeCode/writeFile/editFile/moveFiles/runCommand）标注 humanIntervention: required 逐个审批。沙箱网络隔离未运行验证，见末尾小节。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
@@ -105,7 +105,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **子 Agent 与任务委派**：callSubAgent 是异步 deferred 模型（fork 独立 async operation，父操作转入 waiting_for_async_tool，完成回调回填，启动失败则直接返回失败）；嵌套阻断三层防御（manifest 层删工具/执行体自检/runtime 兜底）；isolated thread 隔离、inheritMessages 默认 false；runInClient 显式选择桌面本机/服务端执行；execSubAgents 并发上限 15、群组 broadcast 无并发上限；客户端 AbortController 级联与服务端轮询式取消存在结构性差异。inheritMessages 转发与 callSubAgent 默认超时待验证，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
-- **外部执行体统一托管（异构 Agent）**：六种本地 CLI（Amp/Claude Code/Codex/OpenCode/Pi/Qoder）+ OpenClaw/Hermes 平台任务 + claude-code-sdk/codex-app-server 两种 lab 门控传输；统一事件模型覆盖文本/推理/工具/todo/subagent/文件变化/额度/干预/终态；浏览器 MCP 工具桥（navigate/snapshot/click/fill/press/scroll/screenshot/readPage）让外部 Agent 操作内置浏览器；agent_intervention_request/response 支持执行中挂起提问；外部 CLI 输出为不可信输入面。主链静态贯通，运行验证项见末尾小节。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
+- **外部执行体统一托管（异构 Agent）**：十一种本地 CLI（Amp/Claude Code/CodeBuddy/Codex/Cursor/Grok Build/Kimi Code/OpenCode/Pi/Qoder/TRAE）+ OpenClaw/Hermes 平台任务 + claude-code-sdk/codex-app-server 两种 lab 门控传输；统一事件模型覆盖文本/推理/工具/todo/subagent/文件变化/额度/干预/终态；浏览器 MCP 工具桥（navigate/snapshot/click/fill/press/scroll/screenshot/readPage）让外部 Agent 操作内置浏览器；agent_intervention_request/response 支持执行中挂起提问；外部 CLI 输出为不可信输入面。主链静态贯通，运行验证项见末尾小节。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
 - **Connector 与业务应用**：Connector 以个人/Workspace/Agent scope 保存持久连接，支持 OAuth2/bearer/API key/自定义 header，凭据经 KeyVaultsGateKeeper 加密；工具权限为 auto/needs_approval/disabled，客户端只拿 manifest、服务端调用时解密；Composio 预置 24 种业务应用类型。逐应用可用性未验证，见末尾小节。证据状态：静态源码确认。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
@@ -137,9 +137,9 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **能力四：Agent Builder——对话式 Agent 配置（主链确认）**：内置 agent-builder 角色 + lobe-agent-builder 工具（读模型/搜工具/装插件/改配置），同族 Agent/群组管理工具被剥离避免改到 builder 自己；写侧操作（装插件）注释明确"ALWAYS REQUIRES user approval even in auto-run mode"，配置变更经 AgentBuilderProvider 实时作用于目标 Agent；另有群组版本 group-agent-builder。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
-- **能力五：Goals——带验收计划与有界自动修复的目标闭环（主链确认）**：/goal 命令→lobe-goal.createGoal（humanIntervention: always，仅 /goal 前缀注入，模型不能自行触发）→创建任务话题并启动 goal 循环→有界自动修复/验证（goalLoop/settle/sweep）→用户验收；goal 复用任务对象（无独立表），TaskVerifyConfig 持久化验收标准，轮次（DEFAULT_GOAL_MAX_ROUNDS）与花费（可选 USD 上限）双上限防失控。真实任务运行表现未验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
+- **能力五：Goals——带验收计划与有界自动修复的目标闭环（主链确认）**：/goal 命令→lobe-goal.createGoal（humanIntervention: always，仅 /goal 前缀注入，模型不能自行触发）→创建任务话题并启动 goal 循环→有界自动修复/验证（goalLoop/settle/sweep）→用户验收；目标定义、预算与生命周期保存在独立的 goals 表，task 只是可选执行载体；目标图另保留拆解节点、关系、决策、Work 证据与事件。轮次与花费双上限防失控。真实任务运行表现未验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
-- **异构 Agent 统一托管（主链确认）**：六种本地 coding CLI 与 OpenClaw/Hermes 都成为一等执行对象，经 driver + stream adapter 统一为 operation/message；完整执行链见"Agent 运行时与外部协作"小节条目，此处保留独特功能笔记的能力卡结论。运行验证项见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
+- **异构 Agent 统一托管（主链确认）**：十一种本地 coding CLI 与 OpenClaw/Hermes 都成为一等执行对象，经 driver + stream adapter 统一为 operation/message；完整执行链见"Agent 运行时与外部协作"小节条目，此处保留独特功能笔记的能力卡结论。运行验证项见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
 **归并已有类目项**：
 
@@ -183,7 +183,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 - **会话与消息**：message.searchMessages 端点存在但未找到聊天 UI 调用；doctor/diagnose 补丁的自动应用路径未读（仅 TopicDoctorModal 人工触发）；全局 messagesMap 是否被 operation 状态选择器之外组件直接订阅未完全排查；多端并发写入合并未覆盖。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)
 - **Agent 角色**：fewShots 消费链未确认（src 与 agent-runtime 零命中，服务端仅配置/评估侧读取）；params 子字段以 model-bank 文档为准未展开；用户级与 Agent 级推理配置覆盖优先级未走通；记忆检索内部机制未覆盖。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 - **对话请求与上下文**：ModelRuntime 实现、各 provider adapter 最终 HTTP 字段、Gateway resume 服务端逻辑均未覆盖；流式缓冲/合并/节流完整链路未验证。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
-- **生成式输出**：桌面本地文件全链路与设备网关授权细节未覆盖；diff 节点在 @lobehub/editor 内的生成时机未深挖；Notebook 工具已标记 deprecated（不再注入 LLM 工具）；Artifact"部署到工作区"为空桩、HTML 预览禁用复制/下载。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
+- **生成式输出**：桌面本地文件全链路与设备网关授权细节未覆盖；diff 节点在 @lobehub/editor 内的生成时机未深挖；Notebook 工具已标记 deprecated（不再注入 LLM 工具）。本地 HTML 发布虽有入口，但依赖开源仓库未提供的业务发布槽。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/LobeHub-对话导出与分享调查笔记.md)
 - **Agent 工具（细节核实缺口）**：多份 manifest 的 humanIntervention 字段未逐条核实（已标注条目）；DiscoverService 内部（速率限制/参数二次校验）未深入；inheritMessages 转发、callSubAgent 默认超时落点待验证；桌面 Local Sandbox 围栏强度（进程/网络隔离、writable roots）未运行验证。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 - **独特功能运行链**：Goal 循环真实运行表现（轮次/预算触达后的 settle 行为、sweep 巡检接线）、两套"项目"语义的关联链、image/video 工作台与 Work 对象衔接（确认无 generation→Work 关联）未验证。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 
@@ -192,7 +192,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 以下均属方法学约束："未运行验证"仅指未进行黑盒运行、UI 或端到端操作，不否定上述静态源码确认的代码完备性。
 
 - 真实模型调用（各 provider 的 chat/createImage/createVideo）、S3 上传下载、PostgreSQL 事务与 webhook 网络往返。
-- 六种本地 CLI 与 OpenClaw/Hermes 的安装运行、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为；CLI 进程退出后的会话恢复策略（重连/重放/接管）与断线语义。
+- 十一种本地 CLI 与 OpenClaw/Hermes 的安装运行、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为；CLI 进程退出后的会话恢复策略（重连/重放/接管）与断线语义。
 - Messenger 逐平台签名、附件、线程映射、审批与完整回复往返；微信二维码登录、队列回调与逐平台消息格式；浏览器 MCP 真实登录态、页面安全提示与取消。
 - 两套审批恢复路径（Gateway vs 本地 client runtime）的行为等价性。
 - UI 行为、键盘可用性、动画、移动端适配与性能；跨 tab 草稿/busy 同步语义；桌面 renderer 崩溃后的白屏/重启/恢复行为。

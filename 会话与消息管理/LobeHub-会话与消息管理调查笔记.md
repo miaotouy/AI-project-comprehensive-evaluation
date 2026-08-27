@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（SPA 页面路由与 Conversation 组件、全局 ChatStore 与会话级 ConversationStore、conversation-flow 算法包、tRPC 服务端路由与数据库模型）+ grep 检索调用点，全部行号按当前 HEAD 逐一核对；未运行应用
 >

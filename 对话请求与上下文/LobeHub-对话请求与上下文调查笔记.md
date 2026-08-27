@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（会话级 ConversationStore 发送 action、全局 ChatStore 的 agentRun/operation/aiAgent slices、Gateway HTTP 路由、工具审批与恢复链）+ grep 检索调用点，全部行号按当前 HEAD 逐一核对；未运行应用
 >
@@ -78,7 +78,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 ## 3. 预算、截断、摘要与压缩
 
 - 发送层支持 `/compact`：现由 Command Bus（`processCommands`，410-421 行）识别，423-433 行在无进行中压缩 operation（`hasRunningCompressionOperation`）时转独立 compression operation（`executeCompression`，2046-2148 行），流程为：选待压缩消息（`getCompressionCandidateMessageIds`，2055 行）→ 服务端建压缩组（`messageService.createCompressionGroup`，2084-2093 行）→ 走 LLM 摘要并流式回填压缩组内容（`fetchPresetTaskResult`，2096-2112 行）→ 收口（`finalizeCompression`，2117-2126 行），abort 时删临时组（2130-2136 行）。
-- 常规请求的最终 token 截断由 Agent runtime/Gateway 负责：`ChatInput` 侧的 Token 预算明细条是发送前估算（`useTokenBreakdown`，见 Chat UI 笔记第 3 节），与实际截断算法不是同一条路径；本次未将每个模型 runtime 的预算算法展开——未核实。
+- 常规请求的最终 token 截断由 Agent runtime/Gateway 负责：`ChatInput` 侧的 Token 预算明细条是发送前估算（`useTokenBreakdown`，见 Chat UI 笔记第 3 节），与实际截断算法不是同一条路径。当前 Agent runtime 在压缩完成后保留 prompt headroom，并用运行时标记抑制同一上下文重复压缩；这只确认了避免连续压缩的收口策略，未逐一展开每个模型 runtime 的预算算法（`packages/agent-runtime/src/agents/GeneralChatAgent.ts`，提交 `718a960fb`）。
 
 ## 4. SDK、Provider、模型与协议交接
 

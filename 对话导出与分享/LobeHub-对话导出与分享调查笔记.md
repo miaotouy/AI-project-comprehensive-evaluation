@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：静态源码调查；读取前端 ShareModal/SharePopover/ShareMessageModal、store/service 调用链、服务端 lambda 路由器（topic、share、message、exporter）、数据库模型与 schema（TopicModel/TopicShareModel/TopicImporterRepo）、类型定义（ExportedTopic/ImportedMessage/SharedTopicData）及路由注册；未运行应用、未访问远端分享页
 >
@@ -27,6 +27,8 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 链接分享是实时分享而非快照：分享页每次请求都从 `topic_shares` 关联的源 topic 现读消息；`visibility` 为 `'link'` 时匿名可访问，`'private'` 时仅创建者可见；分享记录可被 `disableSharing` 删除（本次未找到客户端 UI 调用）。
 
 OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopover（链接分享入口）被该开关隐藏，导出弹窗不受影响。
+
+工作区本地文件另出现一条不经 Topic Share 的公开交付链：HTML 预览和文件树可发起发布，收集 HTML/CSS/JS 引用的本地资源，32 KB 以下资源内联，其他资源作为静态站点 sidecar；系统拒绝遗留的本地引用，并在收集期限制为最多 64 个文件、单文件及总量各不超过 50 MB。打包后的 HTML 先写成 Artifact 消息，再交给业务发布槽生成公开地址；开源默认槽会报告发布不可用，因此“可见入口”不等于 OSS 自托管环境一定能部署站点（`src/features/Portal/LocalFile/{prepareWorkspaceHtmlPublish,publishWorkspaceHtmlArtifact,readWorkspaceAsset}.ts`）。
 
 ## 系统边界与完整主链
 

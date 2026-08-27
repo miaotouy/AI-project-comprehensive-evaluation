@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`（Next.js 16 SPA + Hono/tRPC 服务端 + Drizzle/PostgreSQL，另含 Electron 桌面目标）
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：静态源码走读（只读，未修改仓库）；与独特功能笔记快照比对（HEAD 一致）；零依赖验证仅限 `node -e` 解析 5 个 package.json（全部通过）与 `git status` 工作树核对（0 改动）；未安装依赖、未运行测试、未启动应用（Next.js 应用在无模型/无 DB/S3 环境下 dev 跑不通）
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -24,7 +24,7 @@ LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，
 - 多 Key 没有失败计数、健康状态、熔断、冷却恢复或基于错误的主动换 Key；
 - Agent Runtime 默认对可重试错误重放 5 次，即最多 6 次 attempt，指数退避从 1 秒起、上限 30 秒；
 - 重试固定同一 Provider 与模型。是否重新随机取 Key 取决于 transport 是否重新初始化 Model Runtime，而不是健康调度；
-- 通用 `RouterRuntime` 支持一个逻辑 Provider 内按 option 顺序 fallback，option 还可切换底层 `apiType`；
+- 通用 `RouterRuntime` 支持一个逻辑 Provider 内按 option 顺序 fallback，option 还可切换底层 `apiType`；当前实现还允许在每次请求前对候选 option 做安全的重排，若 hook 返回非原列表的排列或抛错则忽略，避免策略 hook 自身缩小可用性（`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts:227-233`）；
 - 但当前开源 `lobehub` Router 配置的 `routers()` 返回空数组，真实托管渠道表及排序/健康策略不在这份开源配置中，不能据此宣称普通 Provider 已有跨渠道故障转移；
 - 连接检测只对指定模型发送一次最小非流式请求，结果仅保留在当前 UI 状态，不写入调度健康表；
 - Provider 凭据以 AES-GCM 密文保存在 PostgreSQL，但 `fetchOnClient` 场景会把解密后的运行时配置下发到浏览器内存；

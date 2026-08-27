@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`3b57a07e3cc1f6b5aaabad36112e8ba40142df29`（分支：`canary`）
+> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
 >
 > 调查方式：只读核对 LobeAgentConfig、LobeAgentChatConfig、MetaData、AgentPlugin 类型定义及 AgentSetting store；未修改被调查仓库源码
 >
@@ -16,9 +16,9 @@
 
 LobeHub 的 Agent 是七个项目里配置维度最多的。单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
 
-1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）与开场白（`openingMessage`/`openingQuestions`）；
+1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）、开场白（`openingMessage`/`openingQuestions`）和独立的角色档案（`profile`）；
 2. **模型偏好**：`model`、`provider` 与标准推理参数 `params`（temperature、topP、maxTokens 等）；
-3. **对话配置**（`chatConfig`，`LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；
+3. **对话配置**（`chatConfig`，`LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；图式编排已转入执行配置而非此处；
 4. **外部能力**：市场插件（`plugins`）、知识库（`knowledgeBases`）、附件（`files`）、语音合成（`tts`）与异构 Agent 绑定（`agencyConfig`）。
 
 与 Cherry Studio 类似，模型参数写在 Agent 内部，不在 Session 级；每个 Agent 还可以独立选择模型和 provider，比 Cherry Studio 更细粒度（支持 `provider` 字段单独覆盖）。
@@ -51,6 +51,8 @@ Agent 存在后端数据库，通过 `lambdaClient.agent` trpc 接口读写。�
 - `3776063c1`：支持随机名组合与骰子按钮。
 
 MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包含头像、背景色、描述、标签、标题等展示字段，在 UI 的"元数据"标签页编辑；`loadingState` 为每个 meta 字段单独跟踪保存状态。
+
+当前 schema 还把角色档案作为独立 JSONB 列保存：`profile` 的 `AgentProfile` 可记录人格标签、MBTI、星座、展示性别及头像/全身形象的生成方向、风格和参考图；`societyId` 是可检索的普通列，但当前没有对应 society 表的外键。档案类型的注释将这些内容定义为提示词和形象层可消费的线索，不是改变工具或模型行为的开关（`packages/types/src/agent/profile.ts`、`packages/database/src/schemas/agent.ts:61-72`）。本次未沿请求链确认每个档案字段是否都会进入提示词或绘图请求。
 
 ### 3.2 少样本与开场
 
@@ -148,13 +150,11 @@ interface LobeAgentConfig {
 | `memory.effort` | 记忆处理强度 `'low'` / `'medium'` / `'high'` |
 | `memory.toolPermission` | `'read-only'`（仅读记忆）/ `'read-write'`（可写入记忆） |
 
-**自迭代与图编排**
+**自迭代**
 
 | 字段 | 说明 |
 | --- | --- |
 | `selfIteration.enabled` | 允许 Agent 自我迭代 |
-| `enableGraphMode` | 开启图式编排运行时（Graph Runtime） |
-| `graph` | `ReasoningGraph` 对象（图式编排定义） |
 
 **图像生成**
 
@@ -202,6 +202,7 @@ interface LobeAgentConfig {
 `agencyConfig?: LobeAgentAgencyConfig` 支持：
 - 设备级工作目录绑定（`workingDirByDevice`）；
 - 指定异构 Agent Provider（用于 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`）。
+- 图式编排：`enableGraphMode` 与 `graph?: AgentGraph` 一起描述节点、边、路由条件和数据契约。它们在当前快照从 `chatConfig` 迁入 `agencyConfig`，因此归属 Agent 的执行行为，而不是每个会话的偏好（`packages/types/src/agent/agencyConfig.ts:811-838`）。
 
 `agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`。相关提交：
 - `6c356bcb0`：复制 Agent 时保留 `agencyConfig`；
@@ -240,6 +241,8 @@ LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过
 
 - `lobehub/packages/types/src/agent/item.ts`：`LobeAgentConfig` 主类型。
 - `lobehub/packages/types/src/agent/chatConfig.ts`：`LobeAgentChatConfig`（超过 40 个可选字段）。
+- `lobehub/packages/types/src/agent/profile.ts`、`packages/database/src/schemas/agent.ts`：角色档案与持久化列。
+- `lobehub/packages/types/src/agent/agencyConfig.ts`：异构 Agent 与 Graph Agent 的执行配置。
 - `lobehub/packages/types/src/agent/agentConfig.ts`：`AgentMode`、`RuntimeEnvMode`、`RuntimeEnvConfig`。
 - `lobehub/packages/types/src/agent/index.ts`：类型统一导出。
 - `lobehub/src/features/AgentSetting/store/initialState.ts`：`State` 中的 `config: LobeAgentConfig` 和 `meta: MetaData`。
