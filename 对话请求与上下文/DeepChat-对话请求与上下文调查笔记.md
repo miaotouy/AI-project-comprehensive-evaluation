@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SessionTurn/turnCoordinator 执行链、contextBuilder 与 promptAssembly、deepChatLoopRunner/process 流式管线、pending input 队列协调器、结构化日志事件面），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -13,6 +13,8 @@
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
+
+当前实现以 context occupancy 作为压缩判定的输入，并将压缩结果、边界原因和 Provider 用量分开记录。压缩期间会建立 checkpoint；若摘要不能收缩上下文或快照已过期，协调器拒绝继续采用该结果（`src/main/agent/deepchat/loop/contextCoordinator.ts:807-846`、`src/main/agent/deepchat/runtime/contextOccupancyCoordinator.ts`）。工具目录则在本轮请求开始时冻结为 tool-surface snapshot，避免工具激活改变已经发出的 Provider 请求（`contextCoordinator.ts:904-1049`）。
 
 DeepChat 的生成任务由 main process 编排，单会话串行、多会话各自独立：
 

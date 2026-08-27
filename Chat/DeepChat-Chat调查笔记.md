@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -21,6 +21,7 @@ DeepChat Chat 是 main process 驱动、renderer 订阅的持久化会话系统�
 3. 一次回复的生命周期：用户消息进入后创建 `pending` assistant 占位 → 流式过程反复替换 assistant blocks → 成功结算 `sent`，异常写 `error` block 并置 `error`。
 4. `SessionTurn` 同时提供普通发送、steer、queue、retry、delete、edit、fork、manual compaction 和 tool interaction response；pending input 有独立的 queue/steer 状态，不与已完成消息混同。
 5. renderer message store 维护持久化缓存、streaming blocks、解析缓存和 IPC 增量事件；`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象；消息窗口以测量 + spacer + anchor + 二分查找实现附近消息渲染。
+6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，而非伪装成普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:575-582`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
 
 ## 产品表面与系统边界
 

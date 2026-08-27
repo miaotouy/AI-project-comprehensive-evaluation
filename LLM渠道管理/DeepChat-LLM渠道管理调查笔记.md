@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码、CLI 指南和路由契约梳理 Provider 配置生命周期、桌面端管理入口、CLI 管理面、配置导入、模型目录和连接测试；未修改 DeepChat 仓库，也未运行桌面 UI、CLI 或真实 API 请求
 >
@@ -21,6 +21,7 @@ DeepChat 中的“渠道”主要是持久化的 `LLM_PROVIDER` 用户实例。�
 3. **TUI 不适用，远程 Web 管理未找到**：CLI V1 文档明确把 TUI/交互 shell 列为不包含能力；本次在 `src`、CLI surface 和文档中未找到独立 Web server 或浏览器端 Provider 管理 API。桌面 renderer 使用 Vue，但它属于 Electron 桌面端，不单列为远程 Web 前端。
 4. **导入是桌面设置页的数据迁移向导**：Provider import service 从 CC Switch、Alma、Cherry Studio、Hermes、OpenClaw 的本地数据中扫描配置，先预览和映射，再按选择创建或更新内置/自定义 Provider，并导入模型。它不是通用的 DeepChat Provider 导出/导入文件格式。
 5. **默认渠道与用户渠道的可操作范围不同**：默认 Provider 会参与初始化合并；内置 Provider 通常保留身份和协议，只允许修改凭据、启停及特定可编辑字段。自定义 Provider 可编辑 Base URL，并可从桌面端删除。CLI 还显式禁止修改内置 Provider 的 `apiType`，只允许删除自定义 Provider。
+6. **渠道请求可附加用户配置 Header**：Header 作为独立的 Provider 配置契约进入请求组装；APIMart、Synthorai 与 OpenAI Codex 图像生成均有 Provider 接线，模型目录和能力判断不能只按早期内置 Provider 集合理解（`src/main/provider/providerHeaders.ts`、`providers/apimartProvider.ts`、`openaiCodexAdapter.ts`）。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 

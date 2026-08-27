@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/agent/deepchat/loop/`、`src/main/agent/deepchat/runtime/`、`src/main/tool/`、`src/main/provider/aiSdk/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码梳理（覆盖命令 shell 化、输出上限、执行契约门与二进制读取等实现）；未修改 DeepChat 仓库
 >
@@ -22,6 +22,7 @@ DeepChat 的 Agent 工具由“会话工具目录 + 统一路由服务 + 独立�
 4. 原生工具调用走 AI SDK 的 tool stream；不支持原生工具的 Provider 走 `<function_call>` 文本协议，解析器用 `jsonrepair` 处理部分非严格 JSON。
 5. 执行前经过 `ToolPermissionBroker` 和命令专用的 `CommandPermissionService`。权限请求绑定会话、server identity、配置代数、binding hash、工具名、执行 id 和参数 hash，审批请求有数量上限和超时。
 6. `exec`/`process` 使用可配置命令 shell（`posix|cmd|windows-powershell|git-bash`，#2109）；Agent 配置有输出上限字段（#2103）；工具分派前经过 Tape 执行契约门（contract lineage）；octet-stream 文本文件允许读取（#2110）。
+7. 当前请求不再直接复用整份会话目录：循环会从有效目录派生并冻结 tool-surface snapshot，按激活证据决定下一视图可见的工具；程序化工具调用也绑定该快照的执行授权，取消或结束时撤销资格（`src/main/agent/deepchat/loop/contextCoordinator.ts:904-1049`、`loopRun.ts:519-616`）。
 
 ## 调用链
 

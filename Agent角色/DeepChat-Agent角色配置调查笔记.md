@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/shared/types/agent-interface.d.ts`、`src/main/agent/`、`src/main/session/data/tables/newSessions.ts`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -20,6 +20,7 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 2. `DeepChatAgentConfig` 同时保存模型选择、系统提示词、项目路径、权限、禁用工具、技能（Skills）、MCP、subagent 槽位、自动压缩、记忆（memory）与 persona 演化等配置。
 3. 内置 Agent id 固定为 `deepchat` 且 `protected`；手动创建的 DeepChat Agent id 为 `deepchat-${nanoid(8)}`。配置 JSON 存在 Agent 数据行中，写入时会规范化禁用工具列表和 subagent 不变量。
 4. 会话记录 `agent_id`、项目路径、会话类型、父会话与编排策略。Subagent 能力只在普通 DeepChat 会话且策略开启、存在有效槽位时可用；子会话的工具范围由父会话的 authority 重新计算。
+5. Agent 与会话更新契约还可携带 `toolModeOverride`；它决定本轮使用的工具模式，具体工具面的冻结和执行授权见 Agent 工具笔记。
 
 ## 1. 配置数据模型
 
@@ -29,7 +30,7 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 |---|---|---|
 | 模型 | `defaultModelPreset`、`assistantModel`、`visionModel`、`imageGenerationModel` | 默认会话、助手、视觉和图片生成模型及部分生成参数 |
 | 上下文 | `defaultProjectPath`、`systemPrompt` | 默认工作目录与系统提示词 |
-| 工具策略 | `permissionMode`、`disabledAgentTools` | 权限模式与用户可配置 Agent 工具禁用列表 |
+| 工具策略 | `permissionMode`、`disabledAgentTools`、`toolModeOverride` | 权限模式、用户可配置 Agent 工具禁用列表与本轮工具模式覆盖 |
 | 扩展 | `enabledSkillNames`、`enabledMcpServerIds` | 允许进入工具目录的 Skills 与 MCP servers |
 | 编排 | `subagentEnabled`、`subagents` | 是否允许 subagent 及其 slot 定义 |
 | 记忆/压缩 | `autoCompaction*`、`memory*` | 自动压缩阈值、保留轮数、embedding/retrieval/extraction 与注入预算 |

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/shared/chat.d.ts`、`src/renderer/src/components/message/`、`src/renderer/src/components/markdown/`、`src/renderer/src/components/artifacts/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -21,6 +21,7 @@ DeepChat 的 renderer 以结构化 assistant blocks 为主，Markdown 与 Artifa
 3. `MessageBlockContent` 通过 `useArtifacts` 解析 `<antThinking>`、`<antArtifact>` 和 legacy `<tool_call>` 标签，兼容流式未闭合标签，并把 artifact 交给 ArtifactBlock。
 4. `MarkdownRenderer` 使用 markstream-vue；代码块由 stream-monaco/Monaco surface 渲染，流式与静态内容采用不同的 render batch、viewport priority 和节点虚拟化参数。静态长文可虚拟化，流式内容保持平滑输出。
 5. Artifact 类型映射到 Code、Markdown、HTML、SVG、Mermaid、React。HTML/React 使用 iframe sandbox；SVG 先交给 main process sanitizer；Mermaid 在渲染前移除危险标签、事件属性和协议，并初始化为 `securityLevel: strict`。
+6. Markstream 渲染路径使用独立的流式 diff 工作池；同时，压缩边界由 `MessageListRow` 的专用分隔行表达，不进入 assistant block 分发（`src/renderer/src/lib/markstreamLanguage.ts`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
 
 ## 调用链
 

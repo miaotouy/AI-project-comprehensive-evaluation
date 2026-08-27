@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（renderer 的 ChatPage 组合、ChatInputBox/ChatInputToolbar/PendingInputLane 组件、useComposerSubmit/useMessageActions/useChatSearch 等 composable、Pinia store 与 IPC 桥），静态核对控件、状态与事件绑定；视觉效果、焦点顺序、键盘可用性与系统通知未运行验证
 >
@@ -22,6 +22,7 @@ DeepChat 是 Electron 桌面 GUI，聊天工作台由 ChatPage 单一页面组�
 - subagent session 在 ChatPage 中只读，但仍能显示消息、plan、工具状态与最终 child result。
 - 会话内查找（Cmd/Ctrl+F）与跨会话搜索（侧栏过滤 + Spotlight 历史搜索）并存，命中可定位到消息。
 - UI 状态（active session、working/error、message 缓存、streaming、pending input、草稿、plan）分散在 Pinia store 与页面局部状态，active session 按窗口绑定；键盘/焦点/响应式行为未运行验证（§11）。
+- 上下文压缩在消息列表中以状态化分隔行呈现；它明确区分正在压缩、已压缩及未生成可用摘要等状态，具体上下文与持久化语义见对话请求与上下文、会话与消息管理笔记（`MessageListRow.vue:10-24,180-187`）。
 
 ## 工作台边界与用户主链
 

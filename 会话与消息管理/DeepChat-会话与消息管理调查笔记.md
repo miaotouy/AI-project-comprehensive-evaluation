@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SQLite 表定义与 transcript/pending input 数据层、turn 与路由、renderer 的 message store 与 IPC 增量层），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -22,6 +22,7 @@ DeepChat 是 main process 驱动、renderer 订阅的持久化会话系统：
 - 队列输入是独立的 `deepchat_pending_inputs` 状态对象（待处理/已认领/阻塞/需重试/已消费五档），与已完成消息不混同；重启恢复把 claimed 但未物化的队列项释放回队列（`retry_required` 形态）、未读 steer 消息置 error。
 - 消息窗口按"估算测量 + spacer + anchor + 二分查找"只接收当前窗口的 `MessageListItem`，同时服务历史分页和流式追加。
 - 搜索分三层：会话内查找只匹配已加载的 display messages；跨会话历史搜索走 FTS5（触发器同步 + LIKE 回退），经 `sessionsSearchHistoryRoute` 服务 Spotlight；内存 MCP 服务器另把同一索引暴露为模型工具。
+- 上下文压缩的进行中与完成状态由消息 metadata 表达，并在启动时按持久化 marker 进行协调；它标示上下文边界，不改变普通 user/assistant 消息的三档状态模型（`src/shared/types/agent-interface.d.ts:442-445`、`createDeepChatAgentHarness.ts:575-582`）。
 
 ## 系统边界与数据主链
 

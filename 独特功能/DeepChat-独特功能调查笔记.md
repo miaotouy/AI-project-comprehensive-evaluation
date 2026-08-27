@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖提交范围 `dc4177c2..e142b2a` 的 Tape 执行日志/契约谱系、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
 >
@@ -19,7 +19,7 @@ DeepChat 的八个候选全部有实际实现，其中七项达到“主链确�
 | 候选 | 状态 | 依据 |
 |---|---|---|
 | IM 远程控制 | 主链确认 | `src/main/remote/` 完整子系统，5 个 IM 渠道 + 会话绑定 + 命令路由 + 投递服务，见能力卡 1 |
-| Tape & Trace | 主链确认 | `src/main/tape/` 分层子系统 + TraceDialog 界面 + tape 工具，含执行日志（execution journal）与执行/任务契约（execution/task contract）谱系，见能力卡 2 |
+| Tape & Trace | 主链确认 | `src/main/tape/` 分层子系统 + TraceDialog/Tape Trace Inspector 界面 + tape 工具，含执行日志（execution journal）与执行/任务契约（execution/task contract）谱系，见能力卡 2 |
 | Skill 跨工具迁移 | 主链确认 | `src/main/skill/sync/adapters/` 11+ 工具适配器 + 格式转换器，见能力卡 3 |
 | 搜索助手（web 搜索） | 主链确认（web 搜索链）/ 声明不符（"自定义搜索助手模型"） | bocha/brave/deepResearch 内存 MCP + YoBrowser 浏览工具 + DeepSeek 原生 web 搜索（`deepseek-v4-flash`，已接线）；README 声称的可配置自定义搜索引擎 UI 本次仍未找到消费方，见能力卡 4 |
 | Ollama 管理 | 主链确认 | OllamaManager + 专用设置页（下载/刷新/运行模型），见能力卡 5 |

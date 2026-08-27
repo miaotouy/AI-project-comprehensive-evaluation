@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-08-27
 >
-> 代码快照：`e142b2a2eb06f903dd014326e19f87947ab92f03`（分支：`dev`）
+> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
 > 调查方式：静态源码局部调查；本轮补充阅读虚拟列表窗口化（useMessageVirtualization/useMessageWindow）、历史懒加载分页（messageStore.loadOlderMessages）、Markdown 节点虚拟化、preload 剪贴板实现与相关测试；未运行 Electron 应用、未执行测试
 >
