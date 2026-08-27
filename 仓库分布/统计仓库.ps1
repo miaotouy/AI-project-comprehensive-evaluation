@@ -51,6 +51,32 @@ function Convert-Groups($Table, [string]$NameProperty) {
     } | Sort-Object Lines, Files -Descending)
 }
 
+function Get-GitHistoryStats([string]$ProjectRoot) {
+    Push-Location $ProjectRoot
+    try {
+        $dates = @(git log HEAD --format='%aI') | ForEach-Object { [datetimeoffset]::Parse($_) }
+        $commitCount = [int](git rev-list --count HEAD)
+        $first = $dates | Select-Object -Last 1
+        $last = $dates | Select-Object -First 1
+        $spanDays = if ($first -and $last) { [math]::Max(1, [math]::Ceiling(($last - $first).TotalDays)) } else { 0 }
+        $recentSince = [datetimeoffset]::Now.AddDays(-90)
+        $recent90 = @($dates | Where-Object { $_ -ge $recentSince }).Count
+        $shallow = ((git rev-parse --is-shallow-repository).Trim() -eq 'true')
+        [pscustomobject]@{
+            CommitCount = $commitCount
+            FirstCommitDate = if ($first) { $first.ToString('yyyy-MM-dd') } else { $null }
+            LastCommitDate = if ($last) { $last.ToString('yyyy-MM-dd') } else { $null }
+            HistoryDays = $spanDays
+            CommitsPer30Days = if ($spanDays -gt 0) { [math]::Round($commitCount * 30 / $spanDays, 2) } else { 0 }
+            Recent90Commits = $recent90
+            IsShallow = $shallow
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 if (-not $Projects -or $Projects.Count -eq 0) {
     $Projects = @(Get-ChildItem -LiteralPath $WorkspaceRoot -Directory |
         Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName '.git') } |
@@ -73,6 +99,8 @@ $results = foreach ($projectName in $Projects) {
     finally {
         Pop-Location
     }
+
+    $history = Get-GitHistoryStats $projectRoot
 
     $languages = @{}
     $topLevels = @{}
@@ -155,6 +183,13 @@ $results = foreach ($projectName in $Projects) {
         Project = $projectName
         Commit = $commit
         Branch = $branch
+        CommitCount = $history.CommitCount
+        FirstCommitDate = $history.FirstCommitDate
+        LastCommitDate = $history.LastCommitDate
+        HistoryDays = $history.HistoryDays
+        CommitsPer30Days = $history.CommitsPer30Days
+        Recent90Commits = $history.Recent90Commits
+        IsShallow = $history.IsShallow
         TrackedFiles = $trackedFiles.Count
         TrackedBytes = $totalBytes
         SourceFiles = $sourceFiles
