@@ -8,7 +8,7 @@
 >
 > 调查方式：直接静态追踪当前 Node.js、Rust N-API 与管理路由的可执行链；核对 Git 分支和提交；对照仓库内记忆/RAG 专项文档及历史知识切片；补充匿名化的外部运行观察。未运行服务、Embedding 上游、SQLite 实例或管理面板。
 >
-> 调查范围：会话内 DailyNote 工具的记录/更新和后续索引，日记和标签的摄取/索引，TagMemo 与 RiverMemo 的查询和派生资产，元思考链，AgentDream 的独立梦境内容与后台维护，以及作用域、预算、缓存、观测和恢复；补充比对内部文档的版本、术语和行为声明；不调查普通工具调用、会话裁剪或其他类别已覆盖的最终请求编排。
+> 调查范围：会话内 DailyNote 工具的记录/更新和后续索引，日记和标签的摄取/索引，TagMemo 与 RiverMemo 的查询和派生资产，元思考链，AgentDream 的独立梦境内容与后台维护，以及 OneRing 的跨端近期事实账本与 OneRingMemo 摘要注入；补充比对内部文档的版本、术语和行为声明；不调查普通工具调用、会话裁剪或其他类别已覆盖的最终请求编排。
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -21,6 +21,8 @@
 **源码事实。** 元思考不是 LLM 的逐步推理循环：它顺序检索已索引的“思维簇”，用上一阶段命中向量的均值与原查询向量加权融合，驱动下一阶段检索，并把每阶段文本拼成注入块。AgentDream 则从同一日记和向量索引形成跨时间层级的联想树，调用本地 VCP API 生成梦叙事；模型提出的合并、删除、感悟先落为 `pending_review` 日志，再由管理路由审批后写日记或删除源文件。
 
 **源码事实。** 主要的会话内日记写入入口不是 AgentDream，而是启用的 DailyNote 常驻工具服务。它对模型暴露创建和更新日记命令；请求按单进程 FIFO 执行，文件提交后即可返回，而 KnowledgeBaseManager 在后台协调 SQLite/Rust 索引更新。AgentDream 的 manifest 处于 `.block` 禁用态，并且它在缺少自己的 `config.env` 时主动休眠，故不能从当前默认文件状态把 Dream 作为默认对话记录来源。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin/DailyNote/dailynote.js:41-49,1573-1684`、`Plugin/AgentDream/plugin-manifest.json.block:1-48`、`Plugin/AgentDream/AgentDream.js:119-135`。
+
+**源码事实。** OneRing 补充的是另一类短期事实源，而不参与日记向量检索。顶层 system 提示词含 `[[OneRing::Agent::Frontend]]` 时，预处理器按 Agent 分库维护 user/assistant 消息的时间、来源前端和来源对象；随后 OneRingMemo 可将该账本中近期记录压缩为文本，替换顶层 system 中的 `[[OneRingMemo::Agent]]`。当前提交的 manifest 默认 `ONERING_RECORD_ONLY=true`，因此默认路径是同步同端 post、补来源尾标及异步写入 AI 最终回复，不进行跨端上下文补充；显式关闭该配置后才进入补齐分支。`Plugin/OneRing/OneRing.js:937-958,960-1073,3059-3143`、`Plugin/OneRing/OneRingMemo.js:190-237`、`Plugin/OneRing/plugin-manifest.json:37-51`。
 
 **匿名化运行观察。** 在一份外部部署中，会话内主动或指导式 DailyNote 写入是日记的主要来源；这与源码中启用的会话工具和异步索引衔接相符。Dream 的写入比例较低，但运行时不只是合并、删除或压缩已有日记：它会混入梦境专属的叙事和联想内容。该观察只描述该部署，不能外推为所有 VCPToolBox 安装的默认比例、调用频率或内容质量。
 
@@ -63,6 +65,18 @@
 **源码事实。** DailyNote 写入目录会清理路径成分；更新目录解析还以作者别名限制非公共目录匹配。服务关闭时停止接收新请求并等待队列排空。创建/更新后的文件监测、切块、标签提取、Embedding 与索引更新由知识库摄取管线接手；其中单个 chunk 的 Embedding 失败可被跳过。`Plugin/DailyNote/dailynote.js:80-126,175-192,1653-1691`、`modules/knowledgeBase/fileWatcher.js:20-257`、`modules/knowledgeBase/ingestionPipeline.js:100-257`。
 
 **未运行验证。** 当前快照能确认 DailyNote 是启用的会话工具和默认可用的记录路径，却不能仅凭 manifest 断言每个 Agent 都带有 `{{VCPDailyNote}}`，更不能量化其相对 AgentDream 或人工管理面板的实际写入比例。
+
+### OneRing：跨端近期事实与摘要注入
+
+**源码事实。** OneRing 是 message preprocessor，位于 RAGDiaryPlugin、VCPTimeLine 和 OpenHerPersona 之后、ContextFoldingV2 之前。它只从 messages 开头连续的 system 前缀寻找最后一个主触发符；孤立的 `[[OneRing::Only]]` 不会启动主链。触发后主符被替换为启动通知，Agent 名作为 SQLite 隔离键，frontend 名仅记录来源；每个 Agent 对应一个 WAL SQLite 文件。`preprocessor_order.json:1-9`、`Plugin/OneRing/plugin-manifest.json:3-15`、`Plugin/OneRing/OneRing.js:18-30,102-119,960-989`、`Plugin/OneRing/OneRingDB.js:10-60`。
+
+**源码事实。** 预处理先从 user 块剥离前置系统通知，过滤心跳、邀请和系统控制文本；AA 通讯头与群聊发言头只用于确定 sender。它为真实 user/assistant 块附加包含 sender、时间和 frontend 的尾标，并以来源尾标、快照或可信客户端时间绑定维持时间线元数据。当前请求中的同端块与上次快照可靠对齐时，内容编辑按既有 dbId 更新而不改原时间；快照不足才使用归一化 Levenshtein 模糊匹配。`Plugin/OneRing/OneRing.js:121-249,395-440`、`Plugin/OneRing/OneRingSnapshot.js:28-43,159-239,389-487`、`Plugin/OneRing/OneRingFuzzy.js:8-54,81-95`。
+
+**源码事实。** 非 Only 且关闭 record-only 后，插件从同一 Agent 的近期账本取不在当前 post 中的 role+归一化 hash，受总 block 余量限制；只有能由可信时间戳证明位置的记录才会前插或插入两个原块之间，无法定位时不强行重排。相邻同 role 的近重复块会在输出前消重。代码虽定义了“按时间范围排除当前 frontend”的数据库查询，但本次追踪的补齐路径读取的是该 Agent 的通用最近记录，因此不能称其为严格的“仅其他前端”补齐。`Plugin/OneRing/OneRing.js:701-824,910-935,1232-1240,1317-1406`、`Plugin/OneRing/OneRingDB.js:185-213`。
+
+**源码事实。** `::Only` 或独立 Only 标记会只同步同端 post 而不补齐；但 manifest 默认的 record-only 也会走这一分支。显式 Only 且异步开关开启时，先返回处理后的上游消息，再用定时任务完成落库，所以请求发出与账本写完之间存在可观察的时序窗口。流式和非流式响应 handler 会在工具循环完成后聚合可见正文，以 fire-and-forget 方式回调写入一条 assistant 记录；空正文将对应 pending turn 标为 aborted，推理字段不写入账本。`Plugin/OneRing/OneRing.js:1027-1073,2129-2240,3059-3143`、`modules/handlers/streamHandler.js:124-139,724-725`、`modules/handlers/nonStreamHandler.js:250-274,574-575`。
+
+**源码事实。** OneRingMemo 与主触发、Only 和主热开关解耦：每次预处理收尾只替换顶层 system 前缀中的最后一个 Memo 占位符。它读取最近 3 天账本，若记录不足则回退最近 30 条；摘要通过本机 chat completions 接口分段、递归生成，默认关闭自动生成，结果以临时文件加 rename 原子写入每 Agent JSON 文件。重启后可读取已写摘要，但生成锁与进度是内存状态，不恢复运行中的任务。`Plugin/OneRing/OneRingMemo.js:7-17,19-23,105-160,190-237,279-378`。
 
 ### 占位符到查询向量
 
@@ -131,16 +145,20 @@
 | 管理鉴权 | `/admin_api` 在路由前经过管理员 Basic/Cookie 鉴权；未配置管理员凭据时返回 503，认证失败返回 401，并有 IP 尝试限制。Dream 审批端点由这一全局中间件保护。`server.js:658-835`。 |
 | Dream 启用与路径边界 | 当前仓库快照的 Dream manifest 为 `.block`；匿名化运行观察显示某个外部部署已启用该链，并产出独立梦境叙事。部署者启用并配置后，审批路由才成为可达写回面。**静态推断：** `routes/admin/dream.js` 对日志文件名只检查 `.json` 后缀后 `path.join`，并未在该文件内做根目录规范化/前缀检查；操作中的 file URL 也直接转成本地路径再 `unlink`。即使入口受管理员认证保护，若攻击者能控制日志名或待审批日志内容，路径范围主要依赖调用者和日志可信性，不能从此路由确认有目录沙箱。`Plugin/AgentDream/plugin-manifest.json.block:1-48`、`routes/admin/dream.js:11-25, 49-59, 100-124, 211-218`。 |
 | 查询预算 | 动态 K、修饰符倍率、RiverMemo 候选并集上限、时间路配额、外部 rerank token 上限、最终 K/去重均为显式控制点；Dream 有候选数量、深层 top-3、上下文最多六轮及回忆字符上限。具体生效数值取决于未读取的运行时环境与 `rag_params.json`。 |
+| OneRing 近期事实 | 热配置默认最多补充 10 个 user/assistant block；每 Agent 默认只保留最新 100 条消息，设为非正数才不裁剪。OneRingMemo 默认覆盖 3 天、记录不足回退 30 条，输入/输出预算分别为 32,000/2,000 token。消息裁剪不同时清理 postTurns；摘要生成状态和锁不跨进程恢复。`Plugin/OneRing/OneRingConfig.json:1-10`、`Plugin/OneRing/OneRingDB.js:63-97`、`Plugin/OneRing/OneRingMemo.js:7-17,219-237`。 |
 | 缓存 | 插件有 query 与 embedding LRU/TTL 缓存，键是 JSON 参数 SHA-256；日记标签热更新会清 query cache。元思考主题向量有文件哈希磁盘缓存，元思考和 RAG 结果缓存还保存可重放的观察事件。`Plugin/RAGDiaryPlugin/CacheManager.js:6-153`，`MetaThinkingManager.js:34-103`。 |
 | 可观测性 | RAG 广播检索详情，RiverMemo 元数据带 artifact/query/Omega/regime/候选统计，元思考广播阶段明细，Dream 广播生命周期事件。RiverMemo 仅在 `includeTrace` 才返回详细拓扑证据，而 RAGDiary 调用固定 `includeTrace: false`，所以正常 RAG Observer 不会取得逐候选拓扑轨迹。`RAGDiaryPlugin.js:3144-3225, 3316-3324`。 |
 | 取消与超时 | Dream 的 HTTP 请求有超时；本次追踪的 RAG、RiverMemo N-API、TagMemo 派生队列和元思考链未找到请求级取消接口。派生任务有最大尝试次数与递增退避，但不是用户取消。`AgentDream.js:283-289`，`TagMemoEngine.js:3995-4099`。 |
 | 运行恢复 | 索引、Tag 基线和 RiverMemo artifact 有启动恢复/懒载与兼容性检查；SQLite 健康状态会门控队列和派生任务。Dream 恢复的是调度时间戳和日志，内存中的 dream 对话上下文在 shutdown 时清空。`KnowledgeBaseManager.js:263-409`，`AgentDream.js:106-114, 919-956`。 |
+| OneRing 观察与恢复 | 管理 API 可读写热配置、读取/编辑/生成 Memo，并可通过最终上下文快照查看处理后的上游 body。OneRing 数据库启用 WAL；Memo 文件以原子 rename 保存。未见 messages 裁剪时同步清理 postTurns 或快照的路径，Memo 的生成锁、进度和未完成任务重启后不会恢复。`routes/admin/finalContext.js:79-253`、`Plugin/OneRing/OneRingDB.js:13-60,63-97`、`Plugin/OneRing/OneRingMemo.js:19-23,105-160`。 |
 
 **未运行验证。** SQLite 损坏、Rust artifact checksum 不匹配、Embedding 部分失败、管理端中途断线、重启落在梦审批中、模型/维度切换、外部 reranker 故障和 RiverMemo native ABI 缺失时的端到端可见结果，均只看到局部错误处理或重试代码，尚未通过运行确认。
 
 ## 与相邻谱系的可比与不可比边界
 
 VCPToolBox 可以与传统长期记忆/RAG 实现比较以下事实：会话内日记工具写入、文件摄取、chunk/标签索引、关键词与向量候选融合、日记本作用域、结果格式、缓存、引用路径、观察事件和失败处理。
+
+OneRing 可与发送前的聊天摘要、跨端历史补齐和近期上下文注入比较：其事实对象是按 Agent 隔离的原始消息及可选摘要，查询不是 Embedding 相似度或知识库工具调用。它也不直接调用 RAGDiaryPlugin、VCPTimeLine 或向量索引；当前可直接确认的是预处理顺序、避免解析 RAG 注入块中的触发符，以及 ContextFoldingV2 在哈希和向量化前剥离 OneRing 尾标。`Plugin/OneRing/OneRing.js:26-72`、`preprocessor_order.json:1-9`、`Plugin/ContextFoldingV2/ContextFoldingV2.js:18,240-242,331-350`。
 
 它不应因使用了向量和 rerank 就与所有知识资产管线混成同一成熟度序列。RiverMemo 的产物包含查询场、六路候选覆盖、结构路径与河网可观测性；元思考的中间产物是下一阶段查询方向。DailyNote 则是模型在会话内显式提交的日记变更；匿名化运行观察表明，AgentDream 在启用的外部部署中还产生独立梦境叙事，并在审批后才形成后台维护提案。它们与“当前问题的相关 chunk”是不同的输出契约。
 
@@ -169,6 +187,9 @@ VCPToolBox 可以与传统长期记忆/RAG 实现比较以下事实：会话内�
 - 匿名化目录快照确认该部署存在思维簇和梦目录，但未包含文件内容、修改时间、索引状态、调用日志或生成来源；本文不从目录统计反推 DailyNote/Dream 的精确比例，也不据其评估梦叙事或元思考质量。
 - 未建立真实日记库，未确认文件 watcher、chunk 复用、标签派生、Rust artifact bootstrap 和 SQLite 恢复的实际时延、资源占用与异常日志。
 - 未调用 Embedding、外部 reranker 或 Dream 模型，未验证失败重试、超时、部分向量缺失和输出质量。
+- 未启动 OneRing，未验证 chokidar 热加载、WAL 并发、异步 Only 落库与响应 hook 的完成顺序、前端时间戳绑定格式，以及最终上下文快照中的尾标/伪 system user 块显示。
+- 未审计配置合并对 `ONERING_RECORD_ONLY` manifest 默认值的实际注入，也未验证自动 Memo 生成所需的本机 Key、模型和周期配置；不能由静态默认值推断任一部署必然只记录或必然生成摘要。
+- 未验证 Agent 名在上游配置中的约束以及数据库文件名的路径安全；本笔记只确认 OneRing 使用 Agent 名划分 SQLite 文件，不将其视为已验证的多租户或文件沙箱隔离。
 - 未进行认证会话或恶意/异常 dream 日志测试；Dream 路由的路径处理结论仅是静态代码推断，不能替代实际部署配置和访问路径验证。
 - 未验证各 Agent 的目录和署名约定能否满足实际隔离要求，也未验证公共无署名日记的预期归属。
 
@@ -184,3 +205,6 @@ VCPToolBox 可以与传统长期记忆/RAG 实现比较以下事实：会话内�
 - `TagMemoEngine.js:3539-3765, 3921-4099`：原生派生资产构建、队列、重试与恢复门控。
 - `RiverMemoEngine.js:231-464, 467-545` 与 `rust-vexus-lite/src/rivermemo_topology_v3.rs`：N-API 输入、Rust/Rayon 排序和结果契约。
 - `Plugin/AgentDream/plugin-manifest.json.block`、`Plugin/AgentDream/DreamWaveEngine.js:513-755`、`Plugin/AgentDream/AgentDream.js:119-363, 466-637`、`routes/admin/dream.js:49-164`：禁用态、启用条件、梦的多层召回、提案日志和审批写回。
+- `Plugin/OneRing/OneRing.js:937-1073, 1232-1406, 2992-3143`：主触发、默认 record-only 分支、补齐/时间线边界和异步 AI 回复入库。
+- `Plugin/OneRing/OneRingDB.js:13-97, 118-213` 与 `Plugin/OneRing/OneRingSnapshot.js:159-239,389-487`：按 Agent 账本、保留、turn 状态、同端编辑快照和时间线查询。
+- `Plugin/OneRing/OneRingMemo.js:190-237,279-468` 与 `routes/admin/finalContext.js:79-253`：摘要占位符、递归生成、持久化、管理接口及最终上下文观察面。
