@@ -2,19 +2,21 @@
 
 > 汇总对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
-> 汇总更新日期：2026-08-27
+> 汇总更新日期：2026-08-28
 >
-> 依据：13 篇来源笔记（Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
+> 依据：15 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；未做新的源码调查，未做跨项目横向比较
 >
-> 汇总范围：覆盖上述 13 个类目中 VCPToolBox 已调查的能力；默认关闭/默认禁用、声明不符、暂缓与归并项如实列入对应小节
+> 汇总范围：覆盖上述 15 个类目中 VCPToolBox 已调查的能力；默认关闭/默认禁用、声明不符、暂缓与归并项如实列入对应小节
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
 ## 项目概览
 
 VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维/配置中枢**，不是聊天产品本身：`/v1/chat/completions` 等端点是纯 API，官方桌面聊天前端是外部项目 VCPChat，仓库内不产出最终用户聊天界面。它同时是 VCP 生态里唯一真正执行工具、转发分布式调用并托管审批状态机的服务端。
+
+产品历史上，它从 2025-05-12 的“AI API 与工具交互”工具箱逐步扩展为插件运行时、分布式执行、管理面板和长期记忆中枢；当前 README 将整体定位提升为让 AI 持续存在的环境。RAG 是这一定位变化最集中的演进线：早期多路相似度与结构召回经浪潮 V1-V8、TagMemo V9.1/V9.2 发展到当前 RiverMemo Topology V3。历史作者自述、提交节点和当前执行边界见[产品结构与设计基因](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)与[检索增强与认知编排](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)；历史版本不替代当前源码。
 
 核心边界：不拥有会话事实源（客户端提交完整 `messages`，服务端在单次 HTTP 请求内复制、重排、展开、注入和裁剪）；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 89 个插件目录（69 启用、20 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
 
@@ -115,7 +117,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 **记忆演化**
 
-- **能力一：TagMemo 浪潮语义动力学 + RiverMemo 拓扑 V3**：让长期记忆按语义相关性而非关键词召回并维持可解释排序，写入/索引/查询/排序/解释/更新全链在一条可解释数学链内，排序内核在 Rust/Rayon 单次 N-API 边界交付；依赖上游 Embedding API。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力一。
+- **能力一：TagMemo 浪潮语义动力学 + RiverMemo 拓扑 V3**：让长期记忆按语义相关性而非关键词召回并维持可解释排序，写入/索引/查询/排序/解释/更新全链在一条可解释数学链内，排序内核在 Rust/Rayon 单次 N-API 边界交付；依赖上游 Embedding API。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md)能力一、[检索增强与认知编排调查笔记](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)。
 
 - **能力二：元思考递归推理链（VCP元思考）**：以提示词 DSL 触发多阶段递归 RAG，按链定义逐簇召回元逻辑模块并用上一阶段结果改变下一阶段查询方向；当前快照只有 default 链，主题配置存在文档与实现出入，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二。
 
@@ -220,10 +222,12 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - **静态证据为主**：全部主链为静态代码结论；记忆召回质量、梦境叙事、媒体渲染、托管浏览器进程行为、任务调度长跑、主题/无障碍/键盘运行态均未运行验证。
 - **分布式与外部执行**：分布式节点断线/重连/在途文件与取消竞争、SSH 会话中断、AICodeWorker 真实取消与工作区写入、SnowBridge 断线语义未运行验证；managed browser 的登录态、Profile 隔离、私网/云元数据防护未验证。
 - **安全边界**：`/plugin-callback` 无鉴权与 `plugin_callback_forward` 来源未绑定的实际利用面、白名单路由绕过 Bearer 的利用面、PowerShellExecutor 关键字黑名单绕过空间未做端到端验证；Docker 下 `SANDBOX_BACKEND=docker` 可用性未验证。
-- **范围说明**：各来源笔记均基于提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`（分支 `main`），具体以来源笔记元数据为准。
+- **范围说明**：较早来源主要基于提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`，仓库分布、产品结构及检索增强等近期来源已更新到 `e2762e4dab5c70952d88f96689fba1270624e5ef`；均为 `main` 分支，具体以各来源笔记元数据为准。
 
 ## 来源笔记索引
 
+- [产品结构与设计基因调查笔记](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)
+- [检索增强与认知编排调查笔记](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)
 - [Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)
 - [Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)
 - [Chat 调查笔记](../Chat/VCPToolBox-Chat调查笔记.md)
