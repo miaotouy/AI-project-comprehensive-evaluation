@@ -1,8 +1,8 @@
 # Chat 横向对比（概览与跨类目导航）
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-27
+> 对比更新日期：2026-08-28
 >
 > 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比；本文档只保留跨层综合结论
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十八个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）与事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness，ReactLoopAgent 驱动 turn/step 生命周期，边界全部是 durable session 事件）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+十九个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）与事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness，ReactLoopAgent 驱动 turn/step 生命周期，边界全部是 durable session 事件）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路径顺序等待，空闲分支可并行生成；Cherry Studio 的 Agent 聊天则把 Claude Code、Pi 与 DeepSeek Harness 收束进同一调度与持久化边界。VCPChat 的聊天视图、流投影和历史写入已拆为各自的所有者，因此也进一步说明聊天主链的生命周期与消息磁盘事实源是两层问题。
 
@@ -90,4 +90,5 @@ Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会�
 - 工作台、搜索入口、消息操作、停止反馈、键盘无障碍：[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)
 - 消息渲染实现：[消息渲染器横向对比](../消息渲染器/消息渲染器横向对比.md)
 - 通用界面盘点（弹窗/Toast/主题/图片预览/动画）：[应用界面基础设施横向对比](../应用界面基础设施/应用界面基础设施横向对比.md)
+- Dify 专项：[Chat](Dify-Chat调查笔记.md)、[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/Dify-对话请求与上下文调查笔记.md)、[Chat UI](<../Chat UI/Dify-ChatUI调查笔记.md>)、[消息渲染器](../消息渲染器/Dify-消息渲染器调查笔记.md)、[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)、[LLM 渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)、[生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)
 - Risuai 专项：[会话与消息管理](../会话与消息管理/Risuai-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/Risuai-对话请求与上下文调查笔记.md)、[Chat UI](<../Chat UI/Risuai-ChatUI调查笔记.md>)、[消息渲染](../消息渲染器/Risuai-消息渲染调查笔记.md)、[Agent 角色](../Agent角色/Risuai-Agent角色配置调查笔记.md)、[LLM 渠道管理](../LLM渠道管理/Risuai-LLM渠道管理调查笔记.md)、[Agent 工具](../Agent工具/Risuai-Agent工具调查笔记.md)、[生成式输出与运行时](../生成式输出与运行时/Risuai-生成式输出与运行时调查笔记.md)、[应用界面基础设施](../应用界面基础设施/Risuai-应用界面基础设施调查笔记.md)、[独特功能](../独特功能/Risuai-独特功能调查笔记.md)、[对话导出与分享](../对话导出与分享/Risuai-对话导出与分享调查笔记.md)、[仓库分布](../仓库分布/Risuai-仓库分布调查笔记.md)

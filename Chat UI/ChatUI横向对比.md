@@ -1,10 +1,10 @@
 # Chat UI 横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-27
+> 对比更新日期：2026-08-28
 >
-> 依据：本类目 18 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
+> 依据：本类目 19 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -35,6 +35,7 @@
 | Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读；Composer 显示 DeepSeek 原生 web 搜索开关（`supportsSearch/searchExecution` 能力字段，仅官方 deepseek-v4-flash 生效） | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
 | DeepSeek Harness | 三栏工作台（sidebar \| conversation \| details，CSS grid + 两个拖拽手柄，窄视口自动折叠侧栏）；无会话 Hero 先选工作区、复用或创建 blank 会话；侧栏行点击即切换，Session 常驻后台吃帧、切回即时恢复 | InputBar 输入状态机（plain/adjudicating/claimed/submitting）+ slash/@ 命令裁决；停止按钮 `session.cancel()`，队列 Dock 只读展示、项可编辑/移除/steer | 浏览器内第二条 Cordis 插件树，UI 能力都是按需取回的 `dsh.client` 插件包；组件不 import 框架，数据经 slot 四份额 props 与 uSES 快照到达；ChatView 按 key 订阅座位，流式增量只替换 key 值不重挂 |
+| Dify | 已发布应用的历史 WebChat、轻量 Chatbot 与嵌入式页；控制台编辑面另行隔离 | Composer 按应用 input schema 提交文本、变量和文件；可停止、重新生成、切换候选并处理 workflow 人工输入 | 公开页只呈现发布者预设的应用能力；历史页有会话导航，嵌入式页复用发送链但不具同等导航 |
 | Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
 | LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |

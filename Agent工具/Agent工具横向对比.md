@@ -1,10 +1,10 @@
 # Agent 工具横向调查与对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-27
+> 对比更新日期：2026-08-28
 >
-> 依据：同目录十八份单项目调查笔记及其记录的代码快照
+> 依据：同目录十九份单项目调查笔记及其记录的代码快照
 >
 > 对比方法：只读源码、类型定义、注册表、执行器、调用入口和单项目调查笔记，逐项核对实现
 >
@@ -22,6 +22,7 @@
 | Cherry Studio | [Cherry-Studio-Agent工具调查笔记.md](Cherry-Studio-Agent工具调查笔记.md) | 371 | `main` | `88cfe5dd2b77e63464be22968f66ebcb1d429483` |
 | DeepChat | [DeepChat-Agent工具调查笔记.md](DeepChat-Agent工具调查笔记.md) | 164 | `dev` | `7f3379524da3ac629918d35682e38833ad5c203e` |
 | DeepSeek Harness | [DeepSeek-Harness-Agent工具调查笔记.md](DeepSeek-Harness-Agent工具调查笔记.md) | 224 | `master` | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` |
+| Dify | [Dify-Agent工具调查笔记.md](Dify-Agent工具调查笔记.md) | 61 | `main` | `a9319c86ee9468f6e1a56b3f22945a63b95c282f` |
 | Hermes Agent | [Hermes-Agent-Agent工具调查笔记.md](Hermes-Agent-Agent工具调查笔记.md) | 251 | `main` | `791e2ae3257e211d14ca77e654dfe10ee1976a1c` |
 | Jan | [Jan-Agent工具调查笔记.md](Jan-Agent工具调查笔记.md) | 190 | `main` | `95e96d02c58ca361a3e54cb36360ed16bc534c8a` |
 | LobeHub | [LobeHub-Agent工具调查笔记.md](LobeHub-Agent工具调查笔记.md) | 546 | `canary` | `7c559cbd4d92a54289bce3a8aab96e057d0ce8c5` |
@@ -55,7 +56,7 @@
 
 ## 结论摘要
 
-十八个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”，不能与其余十七个已有执行回环的项目视为同等工具运行时。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十二条观察：
+十九个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”，不能与其余十八个已有执行回环的项目视为同等工具运行时。Dify 是租户服务端运行时：工具由发布应用或 Agent/workflow 配置决定，传统 Agent 串行执行并把结果回注下一轮。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十二条观察：
 
 1. **策略层完整但默认放行面大：LobeHub。** 人工审批状态机 `humanIntervention` 是七个项目里设计最完整的：支持四种模式，API 级规则可覆盖 manifest 级规则，`always` 不会被 auto-run 绕过；但绝大多数内建工具根本不声明该字段，未声明即默认 `never` 自动执行。凭证、浏览器、消息与代理管理四类插件——`lobe-creds` 的凭证保存与注入、`lobe-browser` 的八个 API、`lobe-message` 约 30 个 API（含 `deleteBot`）、`lobe-agent-management` 的 `callAgent`/`installPlugin`——均零声明。
 2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio、DeepChat。** 三者都有逐次审批或权限 broker。Chatbox 让计费与应用状态变更类操作不受 `agentFullAccess` 放行；DeepChat 将审批绑定到会话、服务器身份、配置代数、binding hash、execution id 与参数 hash，并设 pending 上限和超时；Cherry Studio 则在 renderer、主进程和 Claude SDK hook 之间串联审批。各自边界分别是 Windows 无 OS 隔离、`acceptEdits` 首词白名单，以及 DeepChat 各工具实际 preflight 与 MCP transport 尚未运行核验。
@@ -177,6 +178,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 
 | 项目 | 发现机制 | 注入形态 | 按会话/模式收窄 |
 | --- | --- | --- | --- |
+| Dify | tenant 下的内置、API、插件、MCP 与 workflow 工具 Provider | 传统 Agent 使用原生 function-call schema；Agent v2 另由 runtime request builder 组装 | 应用、节点或 Agent 配置决定；公开聊天用户不自由选择工具 |
 | AIO Hub | 统一 registry 运行期反射 `getMetadata()`，来源可为内建、factory、插件代理或 VCP proxy；筛 `agentCallable === true` | 由 `ToolCallingProtocol` 生成；当前是 system prompt 中的 VCP 定义，`{{tools}}` 与 `{{tool_context}}` 分离 | 单 Agent 的 toggle |
 | AstrBot | `ToolSet` 汇合内置装饰器、插件、MCP 与 Handoff；同状态后注册覆盖、active 优先 | OpenAI/Anthropic/Gemini 三类原生 schema；skills-like 可首轮只发轻量定义 | 按知识库、Web 搜索、persona、启停状态与请求分支重建 |
 | Chatbox | `buildToolsForSession()` 单一构造点 | 原生 tools 字段 | agentMode、模型能力、附件、知识库、MCP、平台 |
@@ -204,6 +206,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 
 | 项目 | SDK / 协议位置 | 对工具边界的含义 |
 | --- | --- | --- |
+| Dify | 服务端 Agent runner、工具管理器与 Plugin Daemon/MCP 客户端 | 工具配置、tenant 校验与结果回注在 Dify 侧；插件/远端工具的物理执行属于外部执行域 |
 | AIO Hub | 自研 `ToolRegistry`、`ToolCallingProtocol` 与 VCP 文本协议 | 工具发现、文本解析和执行前核验均由应用掌握 |
 | AstrBot | 自研 `ToolSet`/runner，Provider adapter 导出三类原生 schema | 目录、协议转换、串行执行和结果回填均由 Python 应用掌握 |
 | Chatbox | Vercel AI SDK v6 `ToolSet`，MCP 使用 `@ai-sdk/mcp` | SDK 吸收 Provider tool-call 差异；审批和具体执行仍由应用工具实现承担 |
@@ -227,6 +230,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 
 | 项目 | 表示 | 解析边界 |
 | --- | --- | --- |
+| Dify | 传统 Agent 使用 Provider 原生 tool call；Agent v2 经 runtime 请求协议调用 | 工具结果、thought/observation 写回后进入下一轮；具体 Provider 兼容差异未运行验证 |
 | AIO Hub | 可替换的 `ToolCallingProtocol`；当前唯一实现为 VCP 文本块 | 共享边界扫描跳过 Markdown code fence、inline code 和完整 ESCAPE 区域；坏块可在后续同级请求起点恢复，执行器在协议外二次核验 `agentCallable` |
 | AstrBot | Provider 原生 tool call（三类 schema） | runner 查找工具；handler 参数按 schema properties 白名单过滤，未知工具/异常转结果文本 |
 | Chatbox | 原生 tool call | provider 差异由 AI SDK 吸收；`toolCallId` 去重 |
@@ -253,6 +257,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 
 | 项目 | 步数/迭代上限 | 并发 | 工具超时 | 取消语义 |
 | --- | --- | --- | --- | --- |
+| Dify | 传统 Agent 默认/最高 10/99 次 | 原生 tool call 逐个串行执行 | 具体工具超时依执行域；未统一确认 | 停止请求和 deferred `ask_human` 路径分别处理；外部执行实际中断未运行验证 |
 | AIO Hub | 可配置最大迭代 | 同轮可配串/并行 | 可配置 | 审批默认无限等待；可开启按秒级超时（5s–24h）自动拒绝；AbortSignal/会话清理/窗口关闭会拒绝并清理（提交 `a94688ca0`/`f5d26d36a`） |
 | AstrBot | `max_agent_step` 默认 30，触顶移除工具强制收尾 | 同轮串行；后台任务独立运行 | `tool_call_timeout`；后台 3600s | abort 信号与执行结果竞争，用户停止可中断 |
 | Chatbox | `maxSteps` 恒为 `MAX_SAFE_INTEGER`，实际限制是应用层 25 次调用确认阈值（可经 `pauseOnToolCallLimit` 设置按会话或全局关闭，`1db662a9`） | — | `user_exec` 120s | — |
@@ -277,6 +282,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 
 | 项目 | 默认方向 | 粒度 | 总开关 | 失效时方向 |
 | --- | --- | --- | --- | --- |
+| Dify | 未确认通用逐调用人工审批 | `ask_human` 是可恢复工具，不构成所有工具的审批策略 | 应用/工具启停与 tenant 权限 | 未找到 Dify Tool/MCP/API 的通用批准令牌 |
 | AIO Hub | 可配置 | 工具级 + 方法级（方法级优先） | 有 | 默认无限等待；可开启按秒级超时自动拒绝（`toolApprovalTimeoutSeconds`，5s–24h）；中止/会话清理会拒绝并清理 |
 | AstrBot | 非内置工具默认 `member`，即普通成员可用 | 工具级 `member/admin`；内置工具自行检查 | 可通过 tool permissions/启停控制 | 权限读取异常方向未单独运行确认 |
 | Chatbox | 高风险需批准 | 命令/路径 | `agentFullAccess`，**有不可绕过类别** | — |
@@ -349,7 +355,7 @@ AIO Hub 的路径沙箱需要特别标注：前端沙箱已加固——`resolve_
 | SillyTavern | — | — | 无 |
 | VCPToolBox | 有 | — | 无 |
 
-十七个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、LobeHub、OpenCode 和 Pi 都有落盘/预览方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
+十八个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、Dify、LobeHub、OpenCode 和 Pi 都有落盘/预览或消息文件回流方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
 
 ## 基础审计框架
 

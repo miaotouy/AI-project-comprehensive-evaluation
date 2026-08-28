@@ -1,10 +1,10 @@
 # LLM 渠道管理横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
 >
-> 对比更新日期：2026-08-27
+> 对比更新日期：2026-08-28
 >
-> 依据：同目录十八份源码调查笔记及其中记录的代码快照
+> 依据：同目录十九份源码调查笔记及其中记录的代码快照
 >
 > 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、SDK 使用与请求组装、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十八个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPToolBox 分别位于单网关客户端和单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
+十九个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、Dify、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPToolBox 分别位于单网关客户端和单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
 
 横向核验后的主要结论如下：
 
@@ -46,6 +46,7 @@ AstrBot 的 SSYCloud 接入、元数据备用端点与推理强度预设，继�
 
 | 项目 | 核心连接对象 | 模型身份 | 多 Key / 当前请求换 Key | 普通重试 | 跨 Provider/端点 failover | 凭据静态边界 |
 |---|---|---|---|---|---|---|
+| Dify | tenant 下的 Provider 配置、模型设置与 Provider/模型两层凭据 | 应用或节点引用 Provider、模型类型与模型名，运行时由 ModelManager 解析实例 | 同模型多份 credential 可轮询；限流、授权和连接异常可冷却并改选 | 同一模型凭据池内处理可恢复异常 | 未确认跨 Provider failover | 凭据经 tenant 作用域加密保存，读取时脱敏 |
 | AIO Hub | `LlmProfile` | `profileId + modelId` | 结构化 Key 池 / 渠道层不换，聊天应用层重试时重选（可换） | 渠道层无；聊天链路默认最多 3 次尝试 | 无 | 明文本地配置 |
 | AstrBot | `provider_sources` + 能力 `provider` 实例 | provider instance + model | Key 数组 / 429、无效时换 | transport 5 次 + adapter 最多 10 次 | 仅图片能力、空输出/错误的配置 fallback | `cmd_config.json` 明文；Dashboard 可返回完整 Key |
 | Chatbox | Provider 注册项 + 设置 | `provider + modelId` | 单 Key / 不适用 | 429/5xx 最多 5 次 | 无 | Electron Store 明文 |
@@ -284,7 +285,7 @@ SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收�
 
 ## 模型目录与元数据
 
-模型目录在十八个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
+模型目录在十九个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
 
 | 项目 | 主要来源 | 模型归属 | 元数据对运行时的作用 |
 |---|---|---|---|
@@ -401,7 +402,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 
 ## 路由依据：显式绑定仍是主流
 
-十八个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
+十九个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 和模型，运行时据此调用。Dify 由应用或节点预设模型引用并在 tenant 侧解析。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
 
 | 路由依据 | 已确认项目 | 实际作用 |
 |---|---|---|
@@ -565,7 +566,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 ## 组合式参考架构
 
-十八个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
+十九个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
 
 1. **渠道实体采用 Cherry Studio/AIO Hub 的稳定实例 ID。** Provider 预设与用户实例分离，模型身份始终包含渠道 ID。
 2. **协议选择采用 Cherry Studio 的 Endpoint Type + Adapter Family 或 LobeHub 的显式 SDK Type。** 不从 URL 猜协议，也不把多 Endpoint 宣称为容灾。
@@ -627,7 +628,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 ## 横向结论
 
-十八个项目展示了八条清晰路线：
+十九个项目展示了八条清晰路线：
 
 1. AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 在应用内建立稳定 Provider/连接实体，差别集中在实例模型、多 Key、限流、重试和凭据保护；
 2. SillyTavern 用活动设置和 Profile 服务于完整创作环境切换，渠道自动化让位于兼容性和用户控制；
@@ -642,7 +643,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 
-在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体最薄的样本。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是十八个项目共同未闭合的部分。
+在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，Dify 的 tenant 级凭据加密与同模型多 Key 冷却、AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体最薄的样本。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是十九个项目共同未闭合的部分。
 
 ## 依据与范围
 
@@ -652,6 +653,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 - [Cherry Studio LLM 渠道管理调查笔记](Cherry-Studio-LLM渠道管理调查笔记.md)
 - [DeepChat LLM 渠道管理调查笔记](DeepChat-LLM渠道管理调查笔记.md)
 - [DeepSeek Harness LLM 渠道管理调查笔记](DeepSeek-Harness-LLM渠道管理调查笔记.md)
+- [Dify LLM 渠道管理调查笔记](Dify-LLM渠道管理调查笔记.md)
 - [Hermes Agent LLM 渠道管理调查笔记](Hermes-Agent-LLM渠道管理调查笔记.md)
 - [Jan LLM 渠道管理调查笔记](Jan-LLM渠道管理调查笔记.md)
 - [LobeHub LLM 渠道管理调查笔记](LobeHub-LLM渠道管理调查笔记.md)
