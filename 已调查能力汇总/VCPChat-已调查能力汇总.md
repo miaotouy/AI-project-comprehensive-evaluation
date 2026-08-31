@@ -4,7 +4,7 @@
 >
 > 汇总更新日期：2026-08-27
 >
-> 依据：Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时十二个类目的单项目笔记，均基于代码快照 `89e02b778d626078be91dfbad01e5c9554c47f76`（分支 `main`）
+> 依据：Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排、对话导出与分享、外部执行体与应用协作、媒体创作十六个类目的单项目笔记，均基于代码快照 `89e02b778d626078be91dfbad01e5c9554c47f76`（分支 `main`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；异常项（声明不符/暂缓/入口确认未闭合/未覆盖）集中到末尾"已知边界与待验证事项"小节
 >
@@ -40,6 +40,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - **三模式提示词管理器**：独立于 systemPrompt 字段，由 `promptMode` 决定 original、modular（积木块，扁平 blocks 带 disabled 与 variants）、preset（目录单选 `.md/.txt` 预设）三种模式；是全部调查项目中最接近 AIO Hub 消息组的块机制，但没有组级总开关。见 [Agent角色配置调查笔记](../Agent角色/VCPChat-Agent角色配置调查笔记.md)。
 - **发送时配置引用与历史快照语义**：发送用内存缓存引用、刷新点仅三处；重新生成总是重读最新配置并重新提取附件文本；消息不保存模型/参数元数据，`__vcpchatTimestampMeta` 只进请求 payload 不落盘；模型参数留空存 `null` 并在发送前省略。见 [Agent角色配置调查笔记](../Agent角色/VCPChat-Agent角色配置调查笔记.md) 与 [Chat调查笔记](../Chat/VCPChat-Chat调查笔记.md)。
 - **请求上下文扩展与脱敏**：发送请求携带 `requestContext` 扩展（请求 id、agent/topic 标识、所有者类型、群聊标记）；消息原始文本整体进入下一轮请求并按深度脱敏（contextSanitizer），思维链默认剥离；附件以 `attachments` 数组挂 user 消息。见 [对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) 与 [Chat调查笔记](../Chat/VCPChat-Chat调查笔记.md)。
+- **日记检索与认知事件观察**：客户端可向 VCP 网关发起日记语义检索和关联发现，并将服务端返回的候选归并为卡片或关系图；RAG Observer 可消费并展示检索、元思考和记忆事件。Embedding、索引、候选生成、重排与认知编排均由远端服务所有，不能归因给本仓库。证据状态：主链确认（静态）。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/VCPChat-检索增强与认知编排调查笔记.md)
 
 ### 会话与消息
 
@@ -50,6 +51,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - **话题自动总结**：流式回合收尾后自动为默认名话题请求 AI 总结并写回 `topics[]` 元数据。边界：单聊路径无超时保护、群聊路径有明确 20 秒超时，健壮性不对等（细节见末尾小节）。见 [对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md)。
 - **群聊串行调度与三种发言模式**（`归并已有类目`）：`Groupmodules/modes/` 策略注册表，sequential 全员轮发、naturerandom 按 @提及/tag 权重/保底发言者、invite_only 仅按钮驱动；单次调用内严格串行 await，杜绝 chunk 交错。边界：多次调度之间无文件锁（细节见末尾小节）。见 [对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 8.1 节。
 - **消息操作、重新生成与分支**：消息右键承接复制、编辑、重新生成、创建分支、转发、朗读、阅读模式、删除；重新生成是截断重建（覆盖语义），分支复制前缀历史到新话题。边界：编辑/删除/分支在数据层的表示与持久化语义未核实（见末尾小节）。见 [ChatUI调查笔记](<../Chat UI/VCPChat-ChatUI调查笔记.md>)、[对话请求与上下文调查笔记](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 与 [会话与消息管理调查笔记](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md)。
+- **Topic Markdown 与单消息图片交付**：Topic 可导出当前 DOM 的可见文本，或从 `history.json` 重读原始内容生成更完整的 Markdown 报告；单条消息的阅读模式可按消息 ID 重渲染并截图为 PNG，再复制或下载。两类交付均无可往返 schema、远端链接、访问控制或版本历史。来源：[对话导出与分享调查笔记](../对话导出与分享/VCPChat-对话导出与分享调查笔记.md)
 
 ### 生成与创作
 
@@ -64,6 +66,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 ### Agent 运行时与外部协作
 
 - **VCPDistributedServer 分布式节点**（默认开启，`enableDistributedServer: true`）：随主进程启动，以 WebSocket 分布式节点身份连接主 VCPToolBox 服务器，把本机 `VCPDistributedServer/Plugin/*` 插件目录（HEAD 30 个目录）的能力注册为工具；收到 `execute_tool` 后在本机 Node/Python 子进程执行；renderer 型插件跳过工具注册改走前端插件加载器。见 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
+- **作为 VCPToolBox 的外部执行节点**：节点连接后注册本机插件 manifest；上游以 requestId 下发 `execute_tool`，节点在本机插件或 Electron handler 中执行并以 `tool_result` 回传。HumanToolBox 可经人类工具端点进入同一生态，跨节点文件可通过 `internal_request_file` 回取并缓存；真实鉴权、取消和断线恢复未运行验证。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPChat-外部执行体与应用协作调查笔记.md)
 - **本机能力清单**：PowerShell/PTY Shell 执行、FileOperator 文件读写（受 ALLOWED_DIRECTORIES 约束）、ScreenPilot 截图/OCR/UI 自动化、MediaShot 媒体截取、MusicController 点歌控制、SuperDice 骰子、Flowlock 控制、DesktopRemote 桌面远程、`internal_request_file` 本机文件读回 Base64、DistImageServer 图床/下载服务、剪贴板读取（UI 触发），均由服务端规则审批。见 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
 - **DESKTOP_PUSH 旁路协议**（`主链确认`，既有）：模型在流式输出中吐出 `<<<[DESKTOP_PUSH]>>>...<<<[DESKTOP_PUSH_END]>>>` 包裹的 HTML/CSS/JS，renderer 侧直接拦截调用 `electronAPI.desktopPush()` 创建/写入桌面挂件，不经过 VCPToolBox 审批协议，唯一前置校验是前缀白名单；挂件收藏、持久化与资源治理见独特能力卡 3。见 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md) 与 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 - **审批终端与自动允许规则**：`tool_approval_request` 卡片永不自动消失，用户可允许/拒绝并附理由；自动允许规则支持 contain/exact/regex 三种匹配，明文存 `settings.json`。边界：匹配无权限分级、无 deny 优先、无高危工具强制人工审批的例外（静态确认的机制事实）。见 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
@@ -99,7 +102,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - **能力卡 12：Agent 自主管理 Topic（TopicSponsor）** — `主链确认`：分布式插件直接读写 `AppData/Agents|UserData` 创建话题、回复话题、检查所有权/未读，与 FlowLock 的 CreateFlowlockTopic 交接构成闭环；跨 Agent 回复是仅 VCP 系出现的拓扑。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md) 与 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
 - **能力卡 13：VCP Hi-Fi 音频引擎与音乐播放器** — `主链确认`：自研 Rust 解码/DSP/WASAPI 独占输出引擎（Symphonia 解码、FIR EQ 真实卷积、EBU R128 响度、SoX VHQ 重采样、无缝隙切歌、WebDAV 曲库）+ Agent 点歌工具（MusicController）+ 桌面音乐挂件；Agent 点歌时得到曲目元数据注入。README 多项 Hi-Fi 声明不符（DSD 硬解码、AI 歌词创作、音乐实时听音，见末尾小节）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md) 与 [Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)。
 - **能力卡 14：划词小助手（Rust 桌面感知引擎）** — `主链确认`：Rust sidecar 经 Windows UIA/macOS/Linux 捕获系统级划选文本，悬浮动作条（翻译/总结/解释/搜索/配图）内用独立对话窗口处理并回话，会话保存为真实 Agent 话题。README 声称的"全域右键呼出"与"文件夹工作区模式"未实现（见末尾小节）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
-- **能力卡 15：Scriptorium 共笔文坊** — `主链确认`：面向 AI 操作的多模态文档与演示工作台。VDOCX 使用 Markdown-first 混合真源（可保留 HTML、LaTeX、Mermaid 与可编程岛），VPPTX 使用逐页 HTML Scene；两者都不从渲染 DOM 回推保存。Agent 通过 ScriptoriumCollaborator 获取结构、章节、源码、视口源码和视觉上下文，其中视觉上下文同时返回语义摘要与截图，再以带 revision 和署名的 PR 提交修改，等待人工或 UI 自动允许策略审批。工程可管理图片、视频、音频和交互内容，并支持导入 HTML/MD/TXT/RTF/DOCX/PPTX、导出自包含 HTML/PDF。真实编辑、媒体、截图和审批尚未运行验证。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md) 与 [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)。
+- **能力卡 15：Scriptorium 共笔文坊** — `主链确认`：面向 AI 操作的多模态文档与演示工作台。VDOCX 使用 Markdown-first 混合真源（可保留 HTML、LaTeX、Mermaid 与可编程岛），VPPTX 使用逐页 HTML Scene；两者都不从渲染 DOM 回推保存。Agent 通过 ScriptoriumCollaborator 获取结构、章节、源码、视口源码和视觉上下文，其中视觉上下文同时返回语义摘要与截图，再以带 revision 和署名的 PR 提交修改，等待人工或 UI 自动允许策略审批。工程可管理图片、视频、音频和交互内容，并支持导入 HTML/MD/TXT/RTF/DOCX/PPTX、导出自包含 HTML/PDF。真实编辑、媒体、截图和审批尚未运行验证。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/VCPChat-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) 与 [媒体创作调查笔记](../媒体创作/VCPChat-媒体创作调查笔记.md)。
 - **能力卡 16：受管启动、恢复与图形安装器** — `主链确认`（fb66a52 → HEAD 范围新增）：独立入口先执行只读 Doctor，只有用户显式授权才修复，随后以 operation lock 和 main/preload/renderer ready 记录完成启动 handoff；恢复 UI 可取消受管进程树。更新使用签名 manifest、staging、闭包与健康检查，失败回滚；图形安装器对 dirty 源码树提供命名 stash、fast-forward 更新与恢复。边界：未做 Electron/Tauri 或跨平台实机安装更新，安装器契约测试有一条 ready 发布顺序的静态断言失败（16/17 通过）。见 [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)。
 
 **归并已有类目项**（只记归并去向，不重复展开）：
@@ -176,3 +179,7 @@ VCPChat 是 VCPToolBox 的官方 Electron 桌面前端，也是一个围绕 VCP 
 - [消息渲染器调查笔记](../消息渲染器/VCPChat-消息渲染器调查笔记.md)
 - [独特功能调查笔记](../独特功能/VCPChat-独特功能调查笔记.md)
 - [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md)
+- [检索增强与认知编排调查笔记](../检索增强与认知编排/VCPChat-检索增强与认知编排调查笔记.md)
+- [对话导出与分享调查笔记](../对话导出与分享/VCPChat-对话导出与分享调查笔记.md)
+- [外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPChat-外部执行体与应用协作调查笔记.md)
+- [媒体创作调查笔记](../媒体创作/VCPChat-媒体创作调查笔记.md)

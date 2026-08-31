@@ -4,7 +4,7 @@
 >
 > 汇总更新日期：2026-08-27
 >
-> 依据：15 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；横向对比文档不在本次汇总范围
+> 依据：16 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；横向对比文档不在本次汇总范围
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源笔记，不新增源码验证
 >
@@ -44,6 +44,8 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 - **上下文、历史与压缩配置**：chatConfig 控制历史条数（enableHistoryCount/historyCount）、maxTokens、上下文压缩（enableContextCompression/compressionModelId）、上下文缓存开关（disableContextCaching）、搜索（searchMode/useModelBuiltinSearch/searchFCModel）、记忆（memory.enabled/effort/toolPermission）与 toolResultMaxLength（默认 25,000 字符）。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
 - **外部能力绑定**：插件为三态（bare string/pinned/auto/disabled），知识库、文件附件、Agent 专属 TTS 与异构 Agent 绑定（agencyConfig：设备级工作目录/异构 provider）均挂在 Agent 对象上。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
+
+- **Personal Memory 的主动维护与工具化检索**：用户事实按身份、偏好、经历、活动、情境五层持久化并建立向量索引；用户主动分析或小时工作流按层提取，开启记忆的 Agent 才会获得可搜索、分类查询和读写的 Memory 工具。检索结果在工具循环中按需回注，不是发送前固定注入或已确认的多阶段认知编排。证据状态：主链确认（静态）。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/LobeHub-检索增强与认知编排调查笔记.md)
 
 - **上下文拼装与发送预处理**：发送层从编辑器数据提取 skills/tools/mentions/文件引用并预加载选中工具内容（不伪造工具调用占位消息），operationContext 承载 group/thread/page 文档维度并绑定具体 conversation，user memory 有注入点。证据状态：主链确认（发送链前端侧）。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
@@ -216,3 +218,4 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 - [消息渲染调查笔记](../消息渲染器/LobeHub-消息渲染调查笔记.md)
 - [独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 - [生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
+- [检索增强与认知编排调查笔记](../检索增强与认知编排/LobeHub-检索增强与认知编排调查笔记.md)
