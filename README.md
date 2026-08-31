@@ -40,13 +40,15 @@
 - [Risuai](已调查能力汇总/Risuai-已调查能力汇总.md) — https://github.com/kwaroran/Risuai
 - [SillyTavern](已调查能力汇总/SillyTavern-已调查能力汇总.md) — https://github.com/SillyTavern/SillyTavern
 - [VCPChat](已调查能力汇总/VCPChat-已调查能力汇总.md) — https://github.com/lioensky/VCPChat
-- [VCPMobile](仓库分布/VCPMobile-仓库分布调查笔记.md) — https://github.com/MRiecy/VCPMobile
+- [VCPMobile](已调查能力汇总/VCPMobile-已调查能力汇总.md) — https://github.com/MRiecy/VCPMobile
 - [VCPToolBox](已调查能力汇总/VCPToolBox-已调查能力汇总.md) — https://github.com/lioensky/VCPToolBox
 
 </details>
 
 <details>
 <summary><b>调查主题笔记矩阵（点击 ✅ 可直达对应调查笔记）</b></summary>
+
+标记说明：`✅` 已调查且存在该方向能力；`N/A` 已调查但该方向不适用；`—` 尚未调查。
 
 | 项目 | 能力汇总 | 仓库分布 | 产品基因与结构 | 消息与会话管理 | 请求与上下文 | Chat UI 体验 | 渲染器 | 导出与分享 | 渠道管理 | Agent 角色 | Agent 工具 | 外部协作体 | RAG与编排 | 生成运行时 | 媒体创作 | UI基础设施 | 独特功能 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -70,8 +72,8 @@
 | Risuai | [✅](已调查能力汇总/Risuai-已调查能力汇总.md) | [✅](仓库分布/Risuai-仓库分布调查笔记.md) | — | [✅](会话与消息管理/Risuai-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/Risuai-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/Risuai-ChatUI调查笔记.md) | [✅](消息渲染器/Risuai-消息渲染调查笔记.md) | [✅](对话导出与分享/Risuai-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/Risuai-LLM渠道管理调查笔记.md) | [✅](Agent角色/Risuai-Agent角色配置调查笔记.md) | [✅](Agent工具/Risuai-Agent工具调查笔记.md) | — | [✅](检索增强与认知编排/Risuai-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/Risuai-生成式输出与运行时调查笔记.md) | — | [✅](应用界面基础设施/Risuai-应用界面基础设施调查笔记.md) | [✅](独特功能/Risuai-独特功能调查笔记.md) |
 | SillyTavern | [✅](已调查能力汇总/SillyTavern-已调查能力汇总.md) | [✅](仓库分布/SillyTavern-仓库分布调查笔记.md) | — | [✅](会话与消息管理/SillyTavern-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/SillyTavern-ChatUI调查笔记.md) | [✅](消息渲染器/SillyTavern-消息渲染调查笔记.md) | [✅](对话导出与分享/SillyTavern-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/SillyTavern-LLM渠道管理调查笔记.md) | [✅](Agent角色/SillyTavern-Agent角色配置调查笔记.md) | [✅](Agent工具/SillyTavern-Agent工具调查笔记.md) | — | [✅](检索增强与认知编排/SillyTavern-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/SillyTavern-生成式输出与运行时调查笔记.md) | — | [✅](应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md) | [✅](独特功能/SillyTavern-独特功能调查笔记.md) |
 | VCPChat | [✅](已调查能力汇总/VCPChat-已调查能力汇总.md) | [✅](仓库分布/VCPChat-仓库分布调查笔记.md) | — | [✅](会话与消息管理/VCPChat-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/VCPChat-ChatUI调查笔记.md) | [✅](消息渲染器/VCPChat-消息渲染器调查笔记.md) | — | [✅](LLM渠道管理/VCPChat-LLM渠道管理调查笔记.md) | [✅](Agent角色/VCPChat-Agent角色配置调查笔记.md) | [✅](Agent工具/VCPChat-Agent工具调查笔记.md) | — | [✅](检索增强与认知编排/VCPChat-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) | — | [✅](应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md) | [✅](独特功能/VCPChat-独特功能调查笔记.md) |
-| VCPMobile | — | [✅](仓库分布/VCPMobile-仓库分布调查笔记.md) | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
-| VCPToolBox | [✅](已调查能力汇总/VCPToolBox-已调查能力汇总.md) | [✅](仓库分布/VCPToolBox-仓库分布调查笔记.md) | [✅](产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md) | [✅](会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/VCPToolBox-ChatUI调查笔记.md) | — | — | [✅](LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md) | [✅](Agent角色/VCPToolBox-Agent角色配置调查笔记.md) | [✅](Agent工具/VCPToolBox-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md) | [✅](检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md) | [✅](媒体创作/VCPToolBox-媒体创作调查笔记.md) | [✅](应用界面基础设施/VCPToolBox-应用界面基础设施调查笔记.md) | [✅](独特功能/VCPToolBox-独特功能调查笔记.md) |
+| VCPMobile | [✅](已调查能力汇总/VCPMobile-已调查能力汇总.md) | [✅](仓库分布/VCPMobile-仓库分布调查笔记.md) | [✅](产品结构与设计基因/VCPMobile-产品结构与设计基因调查笔记.md) | [✅](会话与消息管理/VCPMobile-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/VCPMobile-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/VCPMobile-ChatUI调查笔记.md) | [✅](消息渲染器/VCPMobile-消息渲染器调查笔记.md) | N/A | [✅](LLM渠道管理/VCPMobile-LLM渠道管理调查笔记.md) | [✅](Agent角色/VCPMobile-Agent角色配置调查笔记.md) | [✅](Agent工具/VCPMobile-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/VCPMobile-外部执行体与应用协作调查笔记.md) | [✅](检索增强与认知编排/VCPMobile-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/VCPMobile-生成式输出与运行时调查笔记.md) | — | [✅](应用界面基础设施/VCPMobile-应用界面基础设施调查笔记.md) | [✅](独特功能/VCPMobile-独特功能调查笔记.md) |
+| VCPToolBox | [✅](已调查能力汇总/VCPToolBox-已调查能力汇总.md) | [✅](仓库分布/VCPToolBox-仓库分布调查笔记.md) | [✅](产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md) | [✅](会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md) | N/A | — | — | [✅](LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md) | [✅](Agent角色/VCPToolBox-Agent角色配置调查笔记.md) | [✅](Agent工具/VCPToolBox-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md) | [✅](检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md) | [✅](媒体创作/VCPToolBox-媒体创作调查笔记.md) | [✅](应用界面基础设施/VCPToolBox-应用界面基础设施调查笔记.md) | [✅](独特功能/VCPToolBox-独特功能调查笔记.md) |
 
 </details>
 
