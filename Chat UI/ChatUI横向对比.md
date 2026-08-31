@@ -1,10 +1,10 @@
 # Chat UI 横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-08-28
+> 对比更新日期：2026-08-31
 >
-> 依据：本类目 19 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移）
+> 依据：本类目 20 篇单项目调查笔记（含 VCPMobile 2026-08-31 专项调查；自 `../Chat/Chat横向对比.md` 迁移）
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -44,6 +44,7 @@
 | Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
 | SillyTavern | Agent/群组/Topic 侧栏 + 中央消息 DOM + 通知/设置面板 | 发送按钮复用为中止；群聊邀请/多模式调度改变消息流 | 扩展性和可定制性最高，但长聊天没有虚拟化，重绘与旧 DOM 引用风险更明显 |
 | VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称；话题条目带"未读 N/未读"文字指示器（自动计数或持久化标记，用户参与即清除），搜索框完整输入"未读话题"可置顶未读话题 |
+| VCPMobile | 移动工作台：固定头部、消息区、底部 Composer 与 Agent/Group、Topic 侧栏 | 文本、相机/相册/文件、语音转文字和录音附件；生成中发送键变停止，群聊另有全局停止 | Topic 切换恢复最近项并以 epoch 隔离迟到加载；消息长按操作，列表按键集游标分页而非通用虚拟列表 |
 | VCPToolBox | 不提供聊天主界面；AdminPanel 是运维 SPA，OpenWebUISub 是第三方页面增强脚本 | 不承接会话输入/停止/导航 | 不能与其它聊天应用按 UI 直接排名，属于后端协议与外部前端适配层 |
 | OpenCode | 会话列表 + 虚拟化 timeline（Web）；TUI 全屏会话页 | Web 发送/中断/排队/followup dock；TUI 发送、双击 Esc 中断、shell 模式、`@` agent 提及 | 渲染核心独立成 `packages/session-ui` 包被 Web 复用；Web 与 TUI 是两套独立渲染栈，共享服务端事件协议 |
 | Risuai | 无路由条件渲染：`App.svelte` 按七种屏幕状态分支，聊天面 = 图标栏 + 四面板侧栏（会话列表/角色配置/DevTool/快捷设置）+ ChatScreen | 发送按钮原位变停止按钮、spinner 按生成阶段分四色；全局串行、无排队，群聊/续写/触发器递归共用同一停止信号；发送前开关在侧栏快捷设置可见、作用域分层 | 会话以角色为单位挂 `chats[]` 与持久化指针 `chatPage`；生成中禁止切换角色；刷新回首页后重选角色即恢复；草稿是组件级单缓冲、跨角色共享、不持久化 |
@@ -64,6 +65,7 @@
 - **Pi**：搜索在选择器内对 `id+名称+全部消息文本+cwd` 做 token/正则匹配，结果是会话级命中；harness SDK 另存 `createScanningSessionSearch`（异步迭代器分页扫描，未接入 TUI/AgentSession，数据侧见会话与消息管理横向对比）。
 - **DeepSeek Harness**：侧栏 WorkspaceBrowser 提供本地过滤 + 宿主全文搜索（`session.search`，250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询），结果粒度是会话/工作区行；命中具体消息并定位的行为本次笔记未确认。
 - **Risuai**：只有角色名搜索（桌面角色网格与移动端各一处，按名称过滤）；会话列表与消息内容搜索无 UI 入口，消息定位靠书签跳转与分支回链注释。
+- **VCPMobile**：聊天工作台只确认 Topic 标题和日期过滤；本地 FTS 索引由消息终结事务维护，但未确认把消息命中接入 UI 或跳转到目标消息的链路。
 - **Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode**：本次笔记未确认用户可见的"命中具体消息并跳转"链路（Open WebUI 后端 `/search` 结果粒度是 Chat；OpenCode 仅会话标题搜索；VCPChat 的"未读话题"/"unread topic"是置顶约定词，非内容搜索）。
 
 ## 消息操作、分支导航与呈现投影
@@ -77,11 +79,12 @@
   - SillyTavern：checkpoint 旗标（Shift+点击新建）与 branch 跳转；
   - Pi：label/分支切换选择器；
   - DeepSeek Harness：无树图式分支导航，分支是消息操作栏动作，仅已完成回合的 transcript 尾可用，传消息 seq 给 `session.fork` 按 turn 分叉。
-  - Risuai：分支按钮把当前会话快照复制为 idx+1 会话并追加回链注释，跳转走会话列表与回链；分支树弹窗只读预览、节点点击不导航；
+  - Risuai：分支按钮把当前会话快照复制为 idx+1 会话并追加回链注释，跳转走会话列表与回链；这是持久化的复制会话式分支，分支树弹窗只读预览、节点点击不导航；
+  - VCPMobile：本次未找到分支树、版本导航或候选切换；编辑和重新生成均截断后续线性历史。
 - **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
 - **消息操作入口（Risuai）**：操作栏分主次两层——复制/翻译/编辑/TTS/删除为主按钮，书签/分支/禁用收进弹出层，窄屏主按钮也收进弹出层；操作按钮带 `button-icon-*` class，供热键按 class 触发。
 - **消息操作入口（DeepSeek Harness）**：消息操作栏提供复制（剪贴板 + 1 秒对勾反馈）、分支与按需时钟指标（运行时长/TTFT/tok/s），插槽式扩展位供第三方动作（如 Like/Dislike）挂载；历史是追加型，未找到就地编辑与删除入口，修改以分支表达。
-- **reroll/swipe（Risuai）**：左右箭头渲染在每条消息上但动作总是作用于会话尾部；候选存组件内快照栈与模块级分块缓存，切角色清空、刷新即失；首条问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示——与候选的不落库形成不对称。
+- **reroll/swipe（Risuai）**：左右箭头渲染在每条消息上但动作总是作用于会话尾部；没有持久化的 swipe 候选，候选只存组件内快照栈与模块级分块缓存，切角色清空、刷新即失；首条问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。该内存候选与前述复制会话式分支是两条不同机制。
 - **呈现投影**：同一份会话数据可以有多种用户可见投影——AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图、VCPChat 的 bubble/panel/immersive 三种 CSS 投影、Chatbox 和 Jan 的分支版本导航。仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
 ## 停止入口与生成反馈（用户可见部分）

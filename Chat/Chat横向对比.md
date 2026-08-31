@@ -1,10 +1,10 @@
 # Chat 横向对比（概览与跨类目导航）
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-08-28
+> 对比更新日期：2026-08-31
 >
-> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比；本文档只保留跨层综合结论
+> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；本文档只保留跨层综合结论
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十九个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。新增项目补充了几种边界：IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi，自研 agent-loop + JSONL 追加型树会话），以及服务端 Agent 会话运行时（OpenCode，SQLite 权威 + 事件广播 + 客户端投影，Web 与 TUI 共用）与事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness，ReactLoopAgent 驱动 turn/step 生命周期，边界全部是 durable session 事件）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+二十个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。样本覆盖 IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi）、服务端 Agent 会话运行时（OpenCode）、事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness），以及 Android 优先、本地 SQLite 投影远端 VCP 服务 SSE 的客户端（VCPMobile）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路径顺序等待，空闲分支可并行生成；Cherry Studio 的 Agent 聊天则把 Claude Code、Pi 与 DeepSeek Harness 收束进同一调度与持久化边界。VCPChat 的聊天视图、流投影和历史写入已拆为各自的所有者，因此也进一步说明聊天主链的生命周期与消息磁盘事实源是两层问题。
 
@@ -32,7 +32,7 @@ AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路
 
 ### 搜索：索引、命中粒度和跳转能力仍是三件事
 
-结论：Chatbox 与 DeepChat 已确认能从数据层命中并定位具体消息（Chatbox 走 IndexedDB Session 扫描，DeepChat 走 FTS5 全文索引 + 命中 message_id 定位）；LobeHub、Hermes Agent 具有数据库或搜索文档基础，但用户可见定位链路的证据不齐；Jan、Open WebUI、AIO Hub、Manifold Desktop 主要返回会话级结果；Cherry Studio 与 VCPChat 分别受虚拟 DOM 和多模态内容形态限制。现有笔记仍未确认任何项目完整满足"持久化消息索引 + 跨分支/跨会话命中 + 直接定位具体消息"三个条件（DeepChat 的 FTS5 覆盖消息级命中与定位，但索引的写入触发点和清理策略本次未完整追踪）。逐项目细节见[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)与[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)。
+结论：Chatbox 与 DeepChat 已确认能从数据层命中并定位具体消息；VCPMobile 在消息终结事务中维护本地 FTS，数据侧具备消息索引，但跨 Topic 查询及 UI 命中跳转尚未确认。LobeHub、Hermes Agent 具有数据库或搜索文档基础，但用户可见定位链路证据不齐；Jan、Open WebUI、AIO Hub、Manifold Desktop 主要返回会话级结果；Cherry Studio 与 VCPChat 分别受虚拟 DOM 和多模态内容形态限制。因此不能再绝对宣称没有项目满足三项条件；现有材料只确认 VCPMobile 的持久化消息索引，尚不能判定其跨分支/跨会话命中和直接 UI 定位。逐项目细节见[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)与[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)。
 
 ### 中断/取消生成：按钮停止、任务取消和请求中止不是同一层
 
@@ -56,7 +56,7 @@ DeepSeek Harness 是构建在 vendored Cordis 插件框架上的 agent harness�
 
 ## Risuai：前端内存权威 + 整库增量编码的多载体单页应用
 
-Risuai 的产品表面是桌面 GUI（Tauri）、Web、移动 Web 与 Node 服务器内嵌四种载体切换的无路由单页应用，Node 侧只提供托管与存储适配，不拥有会话状态。消息规范由单一内存权威 `DBState.db` 持有，角色、会话、消息与全部设置都挂在同一个对象上，保存循环按角色分块增量编码整库写入单一二进制存档 `database/database.bin`，与 SillyTavern 每轮整份重写 JSONL 的取向形成对照。端到端主链交接点是 `sendChat` 单文件编排：UI 层直接 push 消息后，上下文、记忆、组装、渠道请求与流式回写全部在该入口串起，全程直接读写权威对象。Agent 与消息扩展取内存优先：重roll 候选只驻留内存、不随消息落盘，与 SillyTavern 的持久 swipe 字段相反；"分支"表达为整份会话副本加注释回链，而不是消息树。
+Risuai 的产品表面是桌面 GUI（Tauri）、Web、移动 Web 与 Node 服务器内嵌四种载体切换的无路由单页应用，Node 侧只提供托管与存储适配，不拥有会话状态。消息规范由单一内存权威 `DBState.db` 持有，角色、会话、消息与全部设置都挂在同一个对象上，保存循环按角色分块增量编码整库写入单一二进制存档 `database/database.bin`，与 SillyTavern 每轮整份重写 JSONL 的取向形成对照。端到端主链交接点是 `sendChat` 单文件编排：UI 层直接 push 消息后，上下文、记忆、组装、渠道请求与流式回写全部在该入口串起，全程直接读写权威对象。Reroll/swipe 候选只驻留内存、不随消息落盘；另一路的"分支"是持久化的整份会话副本加注释回链，而不是消息树。
 
 ## 选择提示（基于已核实机制）
 
@@ -78,6 +78,7 @@ Risuai 的产品表面是桌面 GUI（Tauri）、Web、移动 Web 与 Node 服�
 | 服务端 Agent 会话运行时、事件广播与多前端共用 | OpenCode | SQLite 权威 + SSE 投影；删除式 revert 与复制式 fork；无消息级全文搜索；Web/TUI 两套渲染栈 |
 | 事件溯源驱动循环、插件层循环控制与 headless 一键任务 | DeepSeek Harness | turn/step 边界全部是 durable 事件、可重放重建；模型可见 ⟺ 已记录；内置无 turn 预算；与 pi 无循环继承证据（仅 llm-pi-ai 适配层） |
 | 前端内存权威、无路由多载体单页应用与整库增量编码存档 | Risuai | 重roll 候选不落盘；分支为整份会话副本加注释回链，非消息树；未找到消息级搜索索引 |
+| Android 优先的本地 SQLite 聊天投影与 SSE 流收口 | VCPMobile | Topic 下线性历史；终结事务维护 FTS 与渲染缓存；编辑/重生成截断后续历史；FTS 的 UI 查询与命中跳转未确认 |
 
 Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会出现哪些断层"的对照样本，不宜仅凭已存在的 SessionManager API 判断会话能力已经完成。
 
@@ -92,3 +93,4 @@ Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会�
 - 通用界面盘点（弹窗/Toast/主题/图片预览/动画）：[应用界面基础设施横向对比](../应用界面基础设施/应用界面基础设施横向对比.md)
 - Dify 专项：[Chat](Dify-Chat调查笔记.md)、[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/Dify-对话请求与上下文调查笔记.md)、[Chat UI](<../Chat UI/Dify-ChatUI调查笔记.md>)、[消息渲染器](../消息渲染器/Dify-消息渲染器调查笔记.md)、[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)、[LLM 渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)、[生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)
 - Risuai 专项：[会话与消息管理](../会话与消息管理/Risuai-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/Risuai-对话请求与上下文调查笔记.md)、[Chat UI](<../Chat UI/Risuai-ChatUI调查笔记.md>)、[消息渲染](../消息渲染器/Risuai-消息渲染调查笔记.md)、[Agent 角色](../Agent角色/Risuai-Agent角色配置调查笔记.md)、[LLM 渠道管理](../LLM渠道管理/Risuai-LLM渠道管理调查笔记.md)、[Agent 工具](../Agent工具/Risuai-Agent工具调查笔记.md)、[生成式输出与运行时](../生成式输出与运行时/Risuai-生成式输出与运行时调查笔记.md)、[应用界面基础设施](../应用界面基础设施/Risuai-应用界面基础设施调查笔记.md)、[独特功能](../独特功能/Risuai-独特功能调查笔记.md)、[对话导出与分享](../对话导出与分享/Risuai-对话导出与分享调查笔记.md)、[仓库分布](../仓库分布/Risuai-仓库分布调查笔记.md)
+- VCPMobile 专项：[Chat](VCPMobile-Chat调查笔记.md)、[会话与消息管理](../会话与消息管理/VCPMobile-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/VCPMobile-对话请求与上下文调查笔记.md)、[Chat UI](<../Chat UI/VCPMobile-ChatUI调查笔记.md>)、[消息渲染器](../消息渲染器/VCPMobile-消息渲染器调查笔记.md)

@@ -1,10 +1,10 @@
 # Agent 角色配置横向调查与对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPToolBox、Hermes Agent、Risuai
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPMobile、VCPToolBox、Hermes Agent、Risuai
 >
-> 对比更新日期：2026-08-28
+> 对比更新日期：2026-08-31
 >
-> 依据：同目录十九份单项目调查笔记及其中记录的代码快照
+> 依据：同目录二十份单项目调查笔记及其中记录的代码快照
 >
 > 对比方法：统一比较角色实体、存储粒度、会话绑定、提示词装配、模型参数、工具授权、知识与记忆、导入格式和历史快照；只采用单项目笔记中已有的源码结论
 >
@@ -32,13 +32,14 @@
 | Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 132 | `main` | `e86823096c5bad39e1ca282ec24bc5eb9bec745b` |
 | SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 211 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
 | VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 162 | `main` | `89e02b778d626078be91dfbad01e5c9554c47f76` |
+| VCPMobile | [VCPMobile-Agent角色配置调查笔记.md](VCPMobile-Agent角色配置调查笔记.md) | 72 | `main` | `cecdbe432feda57821938bba7625a272113d21c1` |
 | VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 263 | `main` | `e2762e4dab5c70952d88f96689fba1270624e5ef` |
 | Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 237 | `main` | `791e2ae3257e211d14ca77e654dfe10ee1976a1c` |
 | Risuai | [Risuai-Agent角色配置调查笔记.md](Risuai-Agent角色配置调查笔记.md) | 221 | `main` | `e565563a288ebe4c65b6099a1645ba477d1c84b4` |
 
 ## 比较口径
 
-本文比较的是“哪一层拥有配置，以及运行时怎样消费配置”，不按字段数量给项目排名。十九个项目中，“角色”至少有十种不同含义：可执行 Agent、助手配置、人格模板、角色卡、自定义模型、应用发布配置、全局 system prompt、文件约定的提示词资源、编码 Agent 的配置对象、插件行组合的 preset，以及 Hermes 的分层提示词机制。只有先确定载体，模型绑定、工具权限和历史快照才有可比性。
+本文比较的是“哪一层拥有配置，以及运行时怎样消费配置”，不按字段数量给项目排名。二十个项目中，“角色”至少有十一种不同含义：可执行 Agent、助手配置、人格模板、角色卡、自定义模型、应用发布配置、全局 system prompt、文件约定的提示词资源、编码 Agent 的配置对象、插件行组合的 preset、移动端 SQLite Agent，以及 Hermes 的分层提示词机制。只有先确定载体，模型绑定、工具权限和历史快照才有可比性。
 
 矩阵使用以下表述：
 
@@ -53,21 +54,22 @@
 
 ## 结论摘要
 
-十九个项目没有一个共同的“Agent 角色”抽象，主要差异在配置所有权和会话继承方式。
+二十个项目没有一个共同的“Agent 角色”抽象，主要差异在配置所有权和会话继承方式。
 
 1. **配置聚合型 Agent：AIO Hub、Cherry Studio、LobeHub、DeepChat。** 角色同时拥有提示词、模型或模型引用、生成参数和外部能力。AIO Hub 还把可分组切换的消息树、资产、世界书、会话变量和工具审批放进同一实例；消息组支持多选、单选和组级开关，并在聊天侧边栏直接呈现。LobeHub 把长期记忆、图编排和插件模式纳入 Agent；DeepChat 把项目目录、权限、MCP、Skills、subagent slot 和 memory policy 放进 descriptor；Cherry Studio 的范围相对收敛，以模型、单段 prompt、MCP 和知识库关联为主。
 2. **模板与会话分层：Chatbox、AstrBot。** Chatbox 的 Copilot 只拥有人格元数据，模型、Skills、Agent Mode 和 RAG 位于 Session；创建会话时 prompt 被写入历史，形成静态快照。AstrBot Persona 拥有提示词与工具/Skills 白名单，但模型不属于 Persona；运行时按会话规则、对话绑定和全局默认逐轮解析。
 3. **会话副本型：Jan、NextChat。** Jan 把 Assistant 的 name/model/instructions/tools 复制进 thread；NextChat 把完整 Mask 复制进 session，fork 时再深拷贝。两者都使历史会话脱离模板的后续修改，但 NextChat 还保留全局模型配置同步开关。
 4. **模型即角色：Open WebUI。** Workspace Model 同时是上游模型别名、system prompt、参数包、知识和工具绑定、访问控制对象。请求按 model id 重新读数据库，角色生命周期直接复用模型目录和权限体系。
-5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前十九个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。AIO Hub 对这套生态的支持不止角色卡导入：它有独立世界书编辑器、持久化与导入导出服务，受支持字段会进入真实上下文管道；两者的差距主要落在社区资产、扩展协议与完整语义覆盖。
+5. **可移植内容型：SillyTavern。** Character Card 的边界是人格、场景、示例对话、开场白、世界书和扩展字段；模型与生成 Preset 分离。它在当前二十个项目中拥有最明确的社区角色卡格式和很细的提示词语义分区，但角色卡本身不承担模型和工具权限，实际配置还分散在角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 与扩展层。AIO Hub 对这套生态的支持不止角色卡导入：它有独立世界书编辑器、持久化与导入导出服务，受支持字段会进入真实上下文管道；两者的差距主要落在社区资产、扩展协议与完整语义覆盖。
 6. **文件/服务编排型：VCPChat、VCPToolBox。** VCPChat 每个 Agent 一个目录，模型和基础参数随 Agent 保存，工具策略留给 VCP 服务端。VCPToolBox 同时存在提示词文件和 AgentAssistant 配置两层，前者参与变量替换，后者承担具名多 Agent 通信和任务派发。
 7. **无角色实体：Manifold Desktop。** 只有全局 system prompt、温度、Provider/模型和文本提示词库；会话不保存发送时配置。因此它应作为“全局配置基线”比较，不能记成一个功能较少的 Agent 实现。
+8. **移动端持久化 Agent：VCPMobile。** SQLite `agents` 表的 Agent 同时拥有名称、双层系统提示词、裸模型 ID 和生成参数，并拥有多个话题；发送前实时读取当前 Agent 配置。网关 URL/Key 是全局单值，工具、知识、记忆、Provider 绑定、导入导出和版本字段均不在 Agent 内。
 8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件、命名人格模板、用户手动 system 提示词与运行时注入共同叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay）。启动或创建 agent 时优先把命名人格渲染成文本，否则回退到用户手动提示；环境变量仍最优先，**人格代码不会写回用户手动提示字段**（v33→v34 迁移会一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
 9. **无角色实体、文件约定型：Pi。** 角色能力由 `SYSTEM.md`（整篇替换默认提示词）、`APPEND_SYSTEM.md`（追加）、`AGENTS.md/CLAUDE.md` 祖先链（`<project_context>` 块）与 skills 文件组合，全部按会话 cwd 在启动时解析；模型/思考等级是会话级状态，默认值来自全局+项目设置。没有任何角色对象、角色 UI 或角色导入导出，system prompt 本体不随会话条目保存。
 10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为配置文件的 agent 字段与带 frontmatter 的角色文件（mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、模型与生成参数、permission 规则和 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
 11. **preset 组合型：DeepSeek Harness。** 角色是 per-session 的 agent 组合：一个 preset 是存放一份 `agent.cordis.yml`（顶层插件行列表）的目录，目录名即 preset id；每个 preset 在进程内单飞挂载一次（standing mount），所有选择它的会话通过 scope 父链共享同一批工具注册、prompt section 与插件实例，会话隔离靠插件内部按 Session/Agent 键实现。system prompt 是按 scope 分层的注册表，组装时按 agent → preset standing → global 就近覆盖，section 按 order 拼接，`complete` 可整篇替换（minimal 只留 persona 一句话）。切换仅限从未开始的 blank 会话，经 `agent-preset/selected` 事件落日志，header 冻结创建时值，冷读可重建组合。模型与生成参数不属角色，preset 不绑定模型；AGENTS.md/CLAUDE.md 不进 system prompt，而是经 agent-instructions 以 user 角色消息注入请求。
 
-12. **角色卡 + 全局预设（Risuai）。** 角色与群聊都是独立持久化对象，存放在单一数据库的 `characters` 数组里，以 `chaId` 标识，聊天作为 `chats[]` 元素内嵌在角色下。角色只持有提示词与内容字段，模型、采样参数、装配顺序和工具全部是全局 Database 字段，由预设成批切换，角色与聊天都不绑定预设，切换角色与切换预设互不影响。提示词按全局装配顺序或预设模板卡片拼装，角色侧只有 systemPrompt 与 replaceGlobalNote 两处占位符覆盖；开场白不落盘，按聊天级 `fmIndex` 实时取文本。lorebook 由角色、聊天与全局模块三源合并激活。历史只保存生成元数据，重生成是破坏性重建、无 swipe/分支；导入导出覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与 Risu Hub。
+12. **角色卡 + 全局预设（Risuai）。** 角色与群聊都是独立持久化对象，存放在单一数据库的 `characters` 数组里，以 `chaId` 标识，聊天作为 `chats[]` 元素内嵌在角色下。角色只持有提示词与内容字段，模型、采样参数、装配顺序和工具全部是全局 Database 字段，由预设成批切换，角色与聊天都不绑定预设，切换角色与切换预设互不影响。提示词按全局装配顺序或预设模板卡片拼装，角色侧只有 systemPrompt 与 replaceGlobalNote 两处占位符覆盖；开场白不落盘，按聊天级 `fmIndex` 实时取文本。lorebook 由角色、聊天与全局模块三源合并激活。历史只保存生成元数据，重生成是破坏性重建；没有持久化 swipe/候选版本，但可以复制聊天形成独立会话式分支；导入导出覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与 Risu Hub。
 
 最关键的横向差异在于：**修改角色后，既有会话下一轮使用新配置、旧快照，还是由全局设置覆盖**。这三种语义分别出现在 Open WebUI/AstrBot 一类的运行时解析、Chatbox/Jan/NextChat 的快照或副本，以及 Manifold Desktop 的全局当前值中。Hermes Agent 介于后两者之间：人格配置是全局当前值，但会话会记录构建好的 system prompt（hash 去重）与模型快照，而运行时注入的人格文本不随轨迹保存。Risuai 更接近运行时解析：开场白每轮实时取角色字段，历史只保留生成元数据与可选提示词信息，重生成破坏性重建，旧回复不随消息落盘。
 
@@ -83,7 +85,7 @@ DeepSeek Harness 没有角色对象，角色是 per-session 的 agent 组合：p
 
 ### Risuai
 
-Risuai 的角色与群聊都是独立持久化对象，存放在单一数据库的 `characters` 数组里，以 `chaId` 标识；聊天作为 `chats[]` 元素内嵌在角色下，选择角色即切换数组下标（全局 selectedCharID），选择聊天靠角色内的 chatPage 指针。角色只持有提示词、内容与外观字段，模型、采样参数、装配顺序和工具全部是全局 Database 字段，由预设成批切换，角色与聊天都不绑定预设，切换角色与切换预设互不影响。提示词按全局装配顺序或预设模板卡片拼装，角色侧只有 systemPrompt 与 replaceGlobalNote 两处占位符覆盖（分别替换主提示词与备注），其余字段并列拼接；开场白不写入历史，按聊天级 `fmIndex` 实时取文本，修改角色会直接影响既有会话的下一轮生成。lorebook 由角色、聊天与全局模块三源合并激活，受每角色预算设置约束。历史只保存 `generationInfo` 与可选的 `promptInfo`，reroll/regenerate 破坏性重建，旧回复刷新即丢失，无 swipe/分支。导入导出覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与 Risu Hub；与 SillyTavern 相比，世界书扩展字段被内联成 @@ 装饰符（即运行时语法）而非保留原结构，未知扩展键保留但不保证被读取。
+Risuai 的角色与群聊都是独立持久化对象，存放在单一数据库的 `characters` 数组里，以 `chaId` 标识；聊天作为 `chats[]` 元素内嵌在角色下，选择角色即切换数组下标（全局 selectedCharID），选择聊天靠角色内的 chatPage 指针。角色只持有提示词、内容与外观字段，模型、采样参数、装配顺序和工具全部是全局 Database 字段，由预设成批切换，角色与聊天都不绑定预设，切换角色与切换预设互不影响。提示词按全局装配顺序或预设模板卡片拼装，角色侧只有 systemPrompt 与 replaceGlobalNote 两处占位符覆盖（分别替换主提示词与备注），其余字段并列拼接；开场白不写入历史，按聊天级 `fmIndex` 实时取文本，修改角色会直接影响既有会话的下一轮生成。lorebook 由角色、聊天与全局模块三源合并激活，受每角色预算设置约束。历史只保存 `generationInfo` 与可选的 `promptInfo`，reroll/regenerate 破坏性重建，旧回复刷新即丢失；没有持久化 swipe/候选版本，但复制聊天会形成独立会话式分支。导入导出覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与 Risu Hub；与 SillyTavern 相比，世界书扩展字段被内联成 @@ 装饰符（即运行时语法）而非保留原结构，未知扩展键保留但不保证被读取。
 
 ## 架构分型
 
@@ -100,6 +102,7 @@ Risuai 的角色与群聊都是独立持久化对象，存放在单一数据库�
 | 模型预设 | Open WebUI | Workspace `Model` | 自定义模型同时承担 persona、参数、能力和权限 |
 | 角色卡 | SillyTavern | Character Card | 卡片拥有可移植角色内容，运行参数归应用 Preset |
 | Agent 目录 | VCPChat | `{agentId}/config.json` | Agent 拥有 prompt、模型、参数和 topic 列表，工具归服务端 |
+| 移动端持久化 Agent | VCPMobile | SQLite `agents` 表 | Agent 拥有双层提示词、裸模型 ID、参数和话题；网关凭据归全局设置，工具归远端 VCP 调度 |
 | 服务端双层 | VCPToolBox | `Agent/*.txt` + AgentAssistant | 文本层负责变量注入，插件层负责多 Agent 身份和委托 |
 | 全局设置 | Manifold Desktop | `AppSettings.systemPrompt` | 没有角色或会话级配置对象 |
 | 全局提示词 + Profile 容器 | Hermes Agent | `SOUL.md` + `agent.personalities`（`display.personality` 选中名称即权威）+ `agent.system_prompt`（用户手动提示词） | 角色本身只是提示词层；模型、工具、记忆和参数归全局/渠道/Profile 配置 |
@@ -126,11 +129,12 @@ Risuai 的角色与群聊都是独立持久化对象，存放在单一数据库�
 | Open WebUI | Workspace Model `id` | DB `Model` 行：`params/meta` JSON + access grants | 前端按 model id 请求，服务端路由按 id 重新读 DB；chat 表 JSON 列另存 `models` 列表与 `chat.params` 覆盖 | **运行时引用 + 局部快照**：assistant 消息有 `model_id` 列但无 params 快照；chat 级 params 随 chat 保存并随请求发送，与模型 params 并存；regenerate 纯前端在 parent 下新建 assistant 兄弟消息（不替换原消息） |
 | SillyTavern | Character Card 名称/文件 | `characters/` 下 PNG、JSON、CharX 或 BYAF | 应用选择角色卡；User Persona 另属全局/单会话层 | **创建时快照 + tainted 固化**：开场白（first_mes/alternate_greetings 转 swipes）随 JSONL 落盘；未 tainted 聊天在改卡后可整体重建开场白，首次生成后 `tainted` 置位固化；每次生成重读角色卡当前值；消息/每个 swipe 快照 `extra.api/model`，无温度/预设快照；swipe 追加保留旧回复，regenerate 删除末条助手消息重建 |
 | VCPChat | Agent 目录名 `agentId` | 每 Agent 目录：配置、规则、头像；每 topic 一个 `history.json` | 先选 Agent，再选其 topic；发送用 `currentSelectedItem.config` 内存缓存引用（设置保存/话题加载时刷新） | topic 历史与 Agent 配置分存；消息只含 role/name/content/timestamp/id/attachments，无模型/参数元数据；重新生成时重读最新配置并截断原消息及其后全部消息重建（覆盖语义）；分支是 topic 级 |
+| VCPMobile | `agent_id`（名称可用字符 + 创建时间）；无版本字段 | SQLite `agents` 表；头像独立表；每 Agent 拥有多个话题 | 当前会话保存 `agent_id/topicId`；发送前实时读取 Agent 配置 | **实时引用、无完整消息快照**：历史消息不携带角色/参数快照；未验证历史重放或重新生成的快照语义 |
 | VCPToolBox | 文件别名或 AgentAssistant `baseName/chineseName` | `.txt` + `agent_map.json`；插件 `config.json` | 变量引用、AgentAssistant 通信或 TaskAssistant 派发 | **无快照**：会话历史只存 `{role, content}` 裸消息对；每次请求从内存 `AGENTS` 映射现拼 payload（model/max_tokens/temperature）；config.json 仅 initialize/reloadConfig 时读取，Admin Panel 保存后热重载；无 regenerate API，OneRing 提供内容原地替换 |
 | Hermes Agent | 无角色实体；`personalities` 名称、SOUL.md 文件名 | `config.yaml`（agent.personalities / agent.system_prompt / display.personality）+ `$HERMES_HOME/SOUL.md` + Profile 目录 | `/personality` 写 `display.personality` 名称（不写 `agent.system_prompt`）；TUI 会话可存 `personality` 覆盖键；Profile 独立选择 | 会话保存构建后的 system prompt（sha256 全文去重）与 model/model_config；人格当前文本不入轨迹，属"全局当前值 + 提示词快照"；retry_last 复用内存缓存不重建；存储 prompt 与运行时比对只检查尾部 Model/Provider 行，修改人格文本不判 stale |
 | Pi | 无角色实体；文件即配置 | `SYSTEM.md`/`APPEND_SYSTEM.md`（全局 `~/.pi/agent/` 或项目 `.pi/`）+ `AGENTS.md` 链 + skills 文件 | 资源按会话 cwd 解析；无角色选择入口，`/reload` 重载文件 | 无快照：system prompt 不随会话条目保存（仅 HTML 导出含快照）；AssistantMessage 随消息记录 provider/model/usage/stopReason（无采样参数）；无用户级 retry/regenerate 命令，瞬时错误自动重试 |
 | OpenCode | `Agent.Info.name`（配置构建）；无独立版本字段 | 配置对象（`opencode.json` 的 `agent`/`mode` 字段 + `{agent,agents}/**/*.md` + `{mode,modes}/*.md`）；无 agent 表 | 输入框/对话框/`--agent`/`@` 提及选择；session 表保存 agent 名（`core/src/session/sql.ts:51`），发送时 `setAgentModel` 同步 | **引用 + 消息快照**：session 与消息各存 agent/model 字段（含 variant/tools，无温度等参数）；undo/revert 是物理删除 revert 点之后的消息再重发（非分支对比），重发时重建 agent 重新解析当前配置；分支手段只有 `session.fork`；part 不携带请求参数元数据 |
-| Risuai | `chaId`（UUID）标识 `character` 与 `groupChat`；无版本字段 | 整库经 msgpackr + gzip 序列化为一个 `.bin`（Tauri 写文件、Web 写 LocalForage），角色内嵌全部聊天；大聊天可外置 coldstorage | 全局 `selectedCharID` 是 `characters` 数组下标，`changeChar` 生成中拒绝切换；聊天用角色 `chats[]` + `chatPage` 指针选择 | **实时引用 + 生成元数据快照**：开场白与备选开场白不落盘，按聊天 `fmIndex` 实时取角色字段；消息保存 `generationInfo`（模型/token/上下文/耗时），开启选项后另存 `promptInfo`/`promptText`；reroll/regenerate 破坏性重建，旧回复仅存界面内存、刷新即丢，无 swipe/分支 |
+| Risuai | `chaId`（UUID）标识 `character` 与 `groupChat`；无版本字段 | 整库经 msgpackr + gzip 序列化为一个 `.bin`（Tauri 写文件、Web 写 LocalForage），角色内嵌全部聊天；大聊天可外置 coldstorage | 全局 `selectedCharID` 是 `characters` 数组下标，`changeChar` 生成中拒绝切换；聊天用角色 `chats[]` + `chatPage` 指针选择 | **实时引用 + 生成元数据快照**：开场白与备选开场白不落盘，按聊天 `fmIndex` 实时取角色字段；消息保存 `generationInfo`（模型/token/上下文/耗时），开启选项后另存 `promptInfo`/`promptText`；reroll/regenerate 破坏性重建，旧回复仅存界面内存、刷新即丢；无持久化 swipe/候选版本，但可复制聊天形成独立会话式分支 |
 
 这里可以明确区分四种继承模型：
 
@@ -174,6 +178,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | Open WebUI | `params.system`，支持 chat/user/metadata/旧式变量 | 参数为全局默认 < 模型 params < 请求 params；模型 system 在出站时前置到已有 system 内容 | Workspace Model 保存基础模型引用和任意参数；请求仍可覆盖 |
 | SillyTavern | description/personality/scenario/system/示例/post-history 分字段 | 非空 `system_prompt` 覆盖全局；`post_history_instructions` 放历史末尾；其他字段位置可由 Advanced Formatting 调整 | 角色卡不存模型参数；模型与生成参数归 Preset/连接设置 |
 | VCPChat | 单段 `systemPrompt` + `{{AgentName}}` | Agent system prompt 后应用全局 Tavern `system_suffix`；另有 user suffix 和 context depth 注入 | Agent 保存裸 model id、temperature、上下文和输出上限 |
+| VCPMobile | `mobile_system_prompt` + 同步 `system_prompt` | mobile 提示词非空时覆盖同步提示词；有效提示词再与历史和 Tavern 上下文装配 | Agent 保存裸模型 ID、token 限制、stream 与可选 temperature；网关 URL/Key 归全局设置 |
 | VCPToolBox | `.txt` 变量模板或 AgentAssistant `systemPrompt` | 多阶段替换 Var/Tar/Sar/VCP/TagMemo/agent/TVStxt；AgentAssistant `globalSystemPrompt` 追加到所有 Agent | AgentAssistant 每个 Agent 保存 modelId、temperature、maxOutputTokens；文本文件层不拥有模型 |
 | Hermes Agent | SOUL.md 文本 + `personalities` 单段提示（string 或 dict） | SOUL/默认身份 → 稳定指引 → 项目上下文（.hermes.md>AGENTS.md>CLAUDE.md>.cursorrules）→ 技能/记忆/USER.md/时间行 → 调用时附加 ephemeral（ephemeral 文本由 `resolve_ephemeral_system_prompt_from_config` 解析，`display.personality` 命名人格优先于 `agent.system_prompt`，env 最优先）；一次构建缓存、压缩时重建 | 人格不绑定模型；模型归全局 `model:`/session `/model`/ChannelOverride/Profile；温度与 max_tokens 由 Provider 适配层解析 |
 | Pi | SYSTEM.md（整篇替换）+ APPEND_SYSTEM.md（追加）| 自定义时：SYSTEM → APPEND → `<project_context>`（AGENTS/CLAUDE 链）→ skills 索引 → cwd；默认模板时：开场+工具列表+guidelines+文档指引 → APPEND → context → skills → cwd；`before_agent_start` 扩展可当轮整篇覆盖 | 模型/思考等级是会话级状态（`model_change` 条目），默认值在全局+项目设置；无角色级生成参数 |
@@ -208,6 +213,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | Open WebUI | Model meta 绑定 tools、skills、filters、builtin tools、terminal 和能力开关，并叠加 access grants | `meta.knowledge` 引用集合/文件 | memory 是可选内置 feature；角色笔记未确认 per-model 长期记忆命名空间 |
 | SillyTavern | 角色卡核心不承载工具授权；extensions 可扩展，工具安全另见工具笔记 | 内嵌 Character Book + 外部 World Info | User Persona 独立；角色卡本身无通用长期记忆字段 |
 | VCPChat | Agent config 无工具开关，工具由 VCP 服务端和全局连接决定 | 未提供角色级知识库字段 | 每 topic 独立历史；无已确认的长期记忆配置 |
+| VCPMobile | Agent 配置未找到工具、MCP、Skill、知识库或记忆字段；设备工具另由用户显式启用后供远端 VCP 调度 | 未提供角色级知识库字段 | 每 Agent 多话题；无已确认的长期记忆配置 |
 | VCPToolBox | 工具可见性来自 VCP 占位符、TVStxt、任务 `injectTools` 和全局插件状态，不是硬权限边界 | TagMemo/日记本变量可召回知识 | AgentAssistant 有历史轮数/TTL；AgentDream 有独立记忆整理和审批流程 |
 | Hermes Agent | 人格/提示词不授权工具；工具开关在平台级 `tools.<platform>` 与 `hermes tools`，工具加载与否才影响指引注入 | SOUL.md 是身份文本；项目 AGENTS.md/.cursorrules 随 cwd 提供；无角色级知识库字段 | MEMORY.md（agent 记忆）与 USER.md（用户画像）可注入 volatile 段；外部记忆 Provider（plugins/memory）追加提示；子 Agent 继承 ephemeral |
 | Pi | 无角色级工具授权；工具激活集是会话级列表（默认 read/bash/edit/write），system prompt 只列带 snippet 的工具 | 无知识库；等价物是 `<project_context>` 上下文文件与 skills 文本 | 无独立记忆；长期记忆即会话历史+压缩摘要，跨会话无自动记忆 |
@@ -238,6 +244,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | Open WebUI | Workspace Models import/export/sync API | 逐条校验 knowledge 文件权限和写权限；模型、参数、meta 与 grants 是平台内对象 |
 | SillyTavern | PNG、JSON、CharX、BYAF；V1 自动映射 V2，支持 V3 | 角色内容和内嵌资产/世界书可移植；模型参数和应用 Preset 不在角色卡中 |
 | VCPChat | 无批量导入；UI 手工创建 | 可手工粘贴 system prompt；客户端 Agent 与服务端 AgentAssistant 需人工对应 |
+| VCPMobile | 未找到角色导入、导出或复制入口 | 可手工编辑本机移动提示词和 Agent 参数；同步提示词由服务端补回，不能作为角色包交换 |
 | VCPToolBox | 放置 `.txt` 并登记 `agent_map.json`；Admin Panel 管 AgentAssistant | 文本容易导入，但 AIO 消息树、SillyTavern depth 等结构需展平，VCP 变量依赖服务端运行时 |
 | Hermes Agent | `hermes import-agent`（Claude Code/Codex）；`hermes backup`/`import`；`hermes profile export/import`；`profile install/update`（distribution.yaml）；`hermes claw migrate`（OpenClaw） | 导入 CLAUDE.md/AGENTS.md/memories→MEMORY、权限→command 白名单、skills、MCP；凭据一律排除；persona 字段无导入承载；profile 分发默认含 SOUL.md/config/skills，用户数据目录绝不覆盖 |
 | Pi | 无角色导入导出；`/export`（HTML/JSONL）只导出会话 | 角色即文件，复制文件即“导入”；无 schema 校验、无字段映射、无冲突处理 |
@@ -273,6 +280,7 @@ SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享�
 | Open WebUI | 模型选择器和 Workspace Model 编辑页；只读调用者看不到 params | 下一次请求按 model id 重新读 DB；请求参数仍可覆盖模型参数；regenerate 在 parent 下新建兄弟消息 |
 | SillyTavern | 角色卡与 Prompt Manager 可见 | 未 tainted 的聊天在改卡后可整体重建开场白；首次生成后 tainted 固化；每次生成重读角色卡当前值 |
 | VCPChat | 当前 Agent/topic、模型参数和历史文件边界明确 | 发送用内存缓存引用（设置保存/话题加载时刷新）；重新生成时重读最新配置并以截断重建落盘 |
+| VCPMobile | Agent 设置页可编辑本机提示词、模型和参数；同步提示词对前端读取被隐藏 | 后续发送实时读取当前 Agent；历史消息不带完整角色快照，重新生成语义未验证 |
 | VCPToolBox | Admin Panel 可热重载 AgentAssistant，文件层也热重载 | 新请求使用内存 `AGENTS` 映射的当前配置；历史只存 `{role, content}` 无快照可查 |
 | Hermes Agent | `/personality` 列出可用与当前值、`/status` 显示模型/Provider（含 `active_personality_name`）；TUI 会话 personality；web 编辑 SOUL.md | 修改人格写 `display.personality` 名称（不写 `agent.system_prompt`）：CLI 强制重建 agent（下一轮生效），TUI 就地改 `ephemeral_system_prompt` 不重置历史；轨迹不含人格文本，历史重放反映缓存 system prompt；retry_last 复用内存缓存不重建，存储 prompt 与运行时比对只检查尾部 Model/Provider 行 |
 | Pi | footer 显示当前模型/状态；`/session` 显示统计；无查看当前 system prompt 的内置命令 | 修改文件后 `/reload` 重建基础 prompt；`before_agent_start` 的当轮覆盖在轮末复位；历史只含消息与模型条目，无法从会话文件还原当时的提示词；无用户级重试命令（瞬时错误自动重试） |
@@ -290,12 +298,12 @@ SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享�
 - **需要角色内容交换**：SillyTavern 的社区规范最明确，AIO Hub 的包覆盖资产和运行配置更广。Risuai 是第三个角色卡生态入口，覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与自有 Hub，但对 ST 扩展字段做内联装饰符转译而非原结构保留。三者之间仍需处理模型参数、消息位置和权限语义的差异。
 - **需要服务端多 Agent 编排**：DeepChat、LobeHub、VCPToolBox 和 AstrBot 都有相关入口，但 subagent slot、异构 Agent、AgentAssistant 委托和 Persona router 是不同机制，不能只用“支持多 Agent”合并评价。
 - **只需要所有聊天共用一条指令**：Manifold Desktop 的全局模型足够直接，但缺乏角色选择、会话级复现和能力隔离；Hermes Agent 也以全局提示词为基础，但 `agent.system_prompt`/`SOUL.md` 有 personalities 选择与 Profile 级隔离作为补充。
-- **提示词即文件、随项目分发**：Pi 是十九个项目中唯一把整条角色链路做成普通 Markdown 文件的项目——SYSTEM.md/AGENTS.md 可进 git、按目录作用域天然隔离，代价是没有角色选择、导入格式、字段校验或运行时可见性。OpenCode 同样支持 `{agent,agents}/**/*.md`（frontmatter 角色文件，可进 git），但它是配置对象，不是纯文件约定：还接受 opencode.json 字段、提供角色选择 UI 与权限/参数绑定，markdown 只是载体之一。
+- **提示词即文件、随项目分发**：Pi 是二十个项目中唯一把整条角色链路做成普通 Markdown 文件的项目——SYSTEM.md/AGENTS.md 可进 git、按目录作用域天然隔离，代价是没有角色选择、导入格式、字段校验或运行时可见性。OpenCode 同样支持 `{agent,agents}/**/*.md`（frontmatter 角色文件，可进 git），但它是配置对象，不是纯文件约定：还接受 opencode.json 字段、提供角色选择 UI 与权限/参数绑定，markdown 只是载体之一。
 
 ## 已确认边界与证据缺口
 
 1. 单项目笔记的调查深度不完全一致。AIO Hub、AstrBot 对提示词装配和存储覆盖较深；Cherry Studio、LobeHub 重点在配置模型；DeepChat、Jan、NextChat、Open WebUI 更聚焦近期新增的持久化或运行链路。矩阵未用字段缺失填补这些深度差异。
-2. “历史快照语义”十九个项目均有源码级证据。AIO Hub 是开场白/历史消息固化与 Agent 当前配置实时引用并存；Cherry Studio 与 LobeHub 是实时引用 + 消息作者/模型快照；DeepChat 是 systemPrompt/生成参数创建时快照 + 工具/记忆实时重读；SillyTavern 是开场白 JSONL 固化（tainted）+ 每轮重读角色卡；Chatbox/Jan/NextChat 是创建时快照或副本；VCPChat/VCPToolBox 无消息级快照；Manifold Desktop 消息不落盘；Open WebUI 是运行时引用 + chat 级 params 快照；Pi 已确认无提示词快照；AstrBot 每轮重解析但消息不存 persona_id；Risuai 只保存生成元数据快照，开场白实时引用、重生成破坏性重建；DeepSeek Harness 是创建时绑定，header 冻结创建值 + `agent-preset/selected` 日志事件可重建组合；Dify 的传统应用读取 active config，Agent v2 则在会话 binding 中固定 generation。导出聊天、审计记录和历史重放的完整验证仍非全覆盖。
+2. “历史快照语义”二十个项目均有源码级证据。AIO Hub 是开场白/历史消息固化与 Agent 当前配置实时引用并存；Cherry Studio 与 LobeHub 是实时引用 + 消息作者/模型快照；DeepChat 是 systemPrompt/生成参数创建时快照 + 工具/记忆实时重读；SillyTavern 是开场白 JSONL 固化（tainted）+ 每轮重读角色卡；Chatbox/Jan/NextChat 是创建时快照或副本；VCPChat/VCPToolBox 无消息级快照；VCPMobile 每次发送实时读取 Agent，但历史重放与重新生成快照仍未验证；Manifold Desktop 消息不落盘；Open WebUI 是运行时引用 + chat 级 params 快照；Pi 已确认无提示词快照；AstrBot 每轮重解析但消息不存 persona_id；Risuai 只保存生成元数据快照，开场白实时引用、重生成破坏性重建且无持久化 swipe/候选版本，但可复制聊天形成会话式分支；DeepSeek Harness 是创建时绑定，header 冻结创建值 + `agent-preset/selected` 日志事件可重建组合；Dify 的传统应用读取 active config，Agent v2 则在会话 binding 中固定 generation。导出聊天、审计记录和历史重放的完整验证仍非全覆盖。
 3. 角色修改后既有会话的行为已有静态代码结论；仍未运行验证的包括 AstrBot 切换后的旧历史渲染、SillyTavern 改卡后的 UI 表现、VCPToolBox 委托持旧对象引用期间的并发行为、DeepChat 跨版本迁移分支等，需要运行验证才能完全定论。
 4. 工具字段只比较角色配置的挂载点。审批、沙箱、执行位置、模型可见定义和失效方向不在本文重复下结论。
 5. 知识库“已绑定”不等于内容一定进入请求。实际效果还受召回阈值、权限、索引状态、模型能力、注入模式和全局服务状态影响。
