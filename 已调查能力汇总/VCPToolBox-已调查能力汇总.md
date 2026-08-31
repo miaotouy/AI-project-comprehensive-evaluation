@@ -4,7 +4,7 @@
 >
 > 汇总更新日期：2026-08-28
 >
-> 依据：15 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
+> 依据：16 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；未做新的源码调查，未做跨项目横向比较
 >
@@ -145,9 +145,9 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 **主动 Agent**
 
-- **能力八：TaskAssistant 定时/手动任务派发**：interval/cron/once/manual 四种调度模式，任务与历史持久化于 `task-center-data.json`，派发给 AgentAssistant 定义的 Agent（进程内直连模块，不走 HTTP 回环）；结果归属任务对象与历史，无进行中取消；`globalEnabled` 默认关闭，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力八、[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
+- **能力八：TaskAssistant 定时/手动任务派发**：interval/cron/once/manual 规则与历史持久化于任务 JSON；到期后顺序派发具名 Agent，结果归任务 runtime/history。停用只停止未来调度，运行中取消未确认，且全局开关默认关闭。证据状态：`主链确认`。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/VCPToolBox-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力八、[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
 
-- **能力十六：VCPClawMail 邮箱轮询与投递**：常驻轮询邮箱、WebSocket 即达推送、`{{VCPClawMailInbox}}` 占位符注入，子邮箱可自动投递到对应 Agent；依赖 ClawMailKey 等外部配置，轮询间隔存在文档与实现出入，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力十六。
+- **能力十六：VCPClawMail 邮箱轮询与投递**：WebSocket 事件和后备轮询驱动子邮箱投递，文件化已处理 ID 抑制重启后重复；结果进入 AgentAssistant 或邮箱占位符。依赖 ClawMailKey 等外部配置，投递中取消与自动重试未确认。证据状态：`主链确认`。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/VCPToolBox-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力十六。
 
 **Agent 社会**
 

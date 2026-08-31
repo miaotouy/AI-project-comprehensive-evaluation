@@ -4,7 +4,7 @@
 >
 > 汇总更新日期：2026-08-31
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 15 个类目的 Hermes-Agent 调查笔记（完整清单见文末来源笔记索引），基于代码快照 `791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 个类目的 Hermes-Agent 调查笔记（完整清单见文末来源笔记索引），基于代码快照 `791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；未做新的源码调查与跨项目横向比较
 >
@@ -84,10 +84,10 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - **能力三：持久记忆与用户建模**：双轨记忆——内置 `MEMORY.md` / `USER.md` 文件记忆注入 system prompt volatile 段 + `MemoryProvider` ABC 外部后端（honcho/mem0/supermemory 等 8 个，同一时刻至多激活一个）；模型写记忆可能被人审拦截（写审批门，用户 `/memory approve` 后才落盘）；跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
 - **能力四：研究数据工具链（会话轨迹生产）**：`save_trajectories` 开关（默认关闭）把每轮会话按 ShareGPT 格式追加为 JSONL（成功/失败分文件）；`trajectory_compressor.py` 保护首尾只压缩中间段并替换为摘要；配套 `batch_runner.py` / `mini_swe_runner.py` / `datagen-config-examples/` 面向轨迹数据集批量生产；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（默认私有、强制脱敏）。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
 - **跨会话检索（session_search）**：FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，已并入学习闭环描述；同时是 `_AGENT_LOOP_TOOLS` 四个 agent-level 工具之一。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
-- **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令（如 `/heartbeat every 10m <prompt>`），到期且会话空闲时作为普通用户回合注入，忙碌时合并 tick、空闲后只补一次；状态持久化在会话数据库，`/resume` 可拾取；与 cron 分工明确（cron 是隔离会话的调度任务，heartbeat 是持续重入当前会话）。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
+- **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令到期且空闲时作为普通用户回合注入，忙碌时合并 tick；状态持久化在会话数据库。它与创建独立会话、执行账本和交付目标的 cron 分型不同。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **目标质量门（`/goal`，候选能力）**：目标循环每次"可能完成"时用 judge 复查，并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **终端后端（7 类）**：已归并到 Agent 工具类目（`tools/environments/` 下 local/ssh/docker/singularity/modal/daytona/vercel_sandbox 等，容器资源上限、execute_code 沙箱、容器风险豁免）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
-- **cron 定时任务**：已归并到既有类目（3 分钟硬中断、补跑窗口、文件锁防并发、cron 会话关闭记忆写入）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
+- **cron 定时任务**：profile 范围的 job、execution、输出与认领协议形成隔离日程运行；暂停可阻止新派发，运行期取消已进入 Agent/脚本路径。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)。
 - **verify-on-stop**：已归并到 Agent 工具类目（回合终止前对候选回复跑 run-recipe 检测与验证）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **委派 / 子 Agent、MCP、插件体系、人格系统**：已归并到 Agent 工具与 Agent 角色类目，本汇总不重写。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 

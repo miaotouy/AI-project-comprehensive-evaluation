@@ -4,7 +4,7 @@
 >
 > 汇总更新日期：2026-08-27
 >
-> 依据：16 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；横向对比文档不在本次汇总范围
+> 依据：17 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；横向对比文档不在本次汇总范围
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源笔记，不新增源码验证
 >
@@ -131,7 +131,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 本小节保留独特功能笔记的能力卡标题与证据状态（沿用独特功能类目指南定义）。
 
-- **能力一：Schedule——任务调度与自动化（主链确认）**：完整主链：创建任务→run/调度 tick→TaskRunnerService→headless execAgent→主题会话+Brief 汇报→PostgreSQL 持久化；QStash cron 与本地 setTimeout 双实现；任务对象（树、依赖、配额、验收）与 Agent 运行（topic、heartbeat、汇报）绑成一个生命周期，Agent 经 lh task 工具自我管理；"未解决 urgent brief"挂起后续自动化 tick。生产环境调度接线与真实运行未验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
+- **能力一：Schedule——任务调度与自动化（主链确认）**：任务、task topic 与 Brief 构成持久化的隔离日程运行；执行端重验状态，未解决 urgent Brief 会阻止下一轮，heartbeat 另以延迟 tick 续接。生产 QStash 与运行中中断仍未验证。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/LobeHub-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **能力二：Personal Memory——白盒个人记忆（主链确认）**：完整主链：对话 topic→Upstash Workflow（hourly/用户触发）→CEPA+Identity 五层提取→1024 维向量入库（HNSW）→lobe-user-memory 工具 9 API 读写→记忆管理页面逐条编辑；五层（身份/偏好/经历/活动/情境）+ 版本化合并策略 + 来源追踪 + 用户逐条编辑的对象模型在本样本中无对应实现；记忆工具同时是 Agent 可写面（read-only/read-write 权限）。hourly 扫描资源消耗与提取质量未运行验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 
