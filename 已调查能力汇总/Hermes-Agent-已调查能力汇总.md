@@ -82,7 +82,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - **能力一：闭环学习（后台记忆/技能复习 + /refine）**：每 N 轮 / 每 N 次工具迭代触发一次后台 fork 复习，fork 继承父会话模型配置、凭据与已缓存系统提示，命中同一提示缓存；后台复习只放行 memory 与 skill_manage 工具（线程级白名单），复习结果写 MEMORY.md / 技能目录或外部 provider；`/refine` 为用户显式触发同一 fork 的按需入口；复习失败仅捕获不抛出，best-effort。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
 - **能力二：Skill 生命周期（创建-使用中改进-curator 维护）**：`skill_manage` 提供六动作（create/patch/edit/delete/write_file/remove_file），"复杂任务成功 / 克服错误 / 用户纠正有效"定为创建时机；`.usage.json` 侧车记录使用统计；curator 惰性后台维护（按 stale_after_days/archive_after_days 标记与归档，从不删除、pinned 跳过、只处理 agent 创建技能），`hermes curator` CLI 提供状态查看/运行/暂停/回滚等子命令。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
 - **能力三：持久记忆与用户建模**：双轨记忆——内置 `MEMORY.md` / `USER.md` 文件记忆注入 system prompt volatile 段 + `MemoryProvider` ABC 外部后端（honcho/mem0/supermemory 等 8 个，同一时刻至多激活一个）；模型写记忆可能被人审拦截（写审批门，用户 `/memory approve` 后才落盘）；跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
-- **能力四：研究轨迹（会话轨迹生产）**：`save_trajectories` 开关（默认关闭）把每轮会话按 ShareGPT 格式追加为 JSONL（成功/失败分文件）；`trajectory_compressor.py` 保护首尾只压缩中间段并替换为摘要；配套 `batch_runner.py` / `mini_swe_runner.py` / `datagen-config-examples/` 面向轨迹数据集批量生产；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（默认私有、强制脱敏）。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
+- **能力四：研究数据工具链（会话轨迹生产）**：`save_trajectories` 开关（默认关闭）把每轮会话按 ShareGPT 格式追加为 JSONL（成功/失败分文件）；`trajectory_compressor.py` 保护首尾只压缩中间段并替换为摘要；配套 `batch_runner.py` / `mini_swe_runner.py` / `datagen-config-examples/` 面向轨迹数据集批量生产；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（默认私有、强制脱敏）。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
 - **跨会话检索（session_search）**：FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，已并入学习闭环描述；同时是 `_AGENT_LOOP_TOOLS` 四个 agent-level 工具之一。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 - **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令（如 `/heartbeat every 10m <prompt>`），到期且会话空闲时作为普通用户回合注入，忙碌时合并 tick、空闲后只补一次；状态持久化在会话数据库，`/resume` 可拾取；与 cron 分工明确（cron 是隔离会话的调度任务，heartbeat 是持续重入当前会话）。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **目标质量门（`/goal`，候选能力）**：目标循环每次"可能完成"时用 judge 复查，并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
@@ -136,7 +136,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - 全部 14 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；均已对齐代码快照 `791e2ae3257e211d14ca77e654dfe10ee1976a1c`，快照之外的历史未纳入。
 - 未运行验证：运行行为（视觉效果、时序、性能、真实 Provider 流式）、多客户端/多窗口并发、键盘与无障碍、FTS 实际布局、崩溃重放端到端、后台复习 fork 成本、HF 轨迹上传实际行为、VS Code 市场端到端链路。
 - 设置页连接测试与真实聊天链路走不同代码路径，测试通过不等于真实可用（已确认的工程边界）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
-- 与特色贡献统计的衔接：独特功能笔记建议新增主贡献候选（闭环学习、Skill 生命周期、研究轨迹、会话心跳 + 目标质量门）与辅助贡献（持久记忆与用户建模），相关聚类与比较维度见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
+- 与特色贡献统计的衔接：独特功能笔记建议新增主贡献候选（闭环学习、Skill 生命周期、研究数据工具链、会话心跳 + 目标质量门）与辅助贡献（持久记忆与用户建模），相关归并口径见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 来源笔记索引
 
@@ -152,6 +152,6 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - [对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)：提交入口与任务状态机、上下文拼装、预算与压缩、Provider 交接、流式事件、完成/中断/重试/续写、队列与后台生成。
 - [应用界面基础设施调查笔记](../应用界面基础设施/Hermes-Agent-应用界面基础设施调查笔记.md)：应用装配、弹窗浮层、通知反馈、主题 token、响应式、桌面集成与浮层细节。
 - [消息渲染器调查笔记](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)：四套渲染面、输入模型、流式链路、列表窗口化、Markdown/代码/富文本管线、HTML 与安全隔离、性能策略与扩展方式。
-- [独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)：闭环学习、Skill 生命周期、持久记忆与用户建模、研究轨迹四项能力卡，以及 Tool Gateway、heartbeat/goal/estop 候选与归并项盘点（入口确认与候选明细见"已知边界与待验证事项"）。
+- [独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)：闭环学习、Skill 生命周期、持久记忆与用户建模、研究数据工具链四项能力卡，以及 Tool Gateway、heartbeat/goal/estop 候选与归并项盘点（入口确认与候选明细见"已知边界与待验证事项"）。
 - [生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)：artifact 检测/预览/版本化、MEDIA 协议、模型回流、对象模型、执行环境与安全隔离、持久化与恢复。
 - [检索增强与认知编排调查笔记](../检索增强与认知编排/Hermes-Agent-检索增强与认知编排调查笔记.md)：内置与外部记忆、跨会话 FTS5 检索、写回、注入、预算与恢复边界。

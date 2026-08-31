@@ -67,7 +67,7 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 
 **证据强度**：全部静态源码确认；未运行真实 IM 平台回调（未验证事项见文末）。
 
-### 能力卡 2：Tape & Trace（研究轨迹）
+### 能力卡 2：Tape & Trace（执行轨迹审计与回放）
 
 **用户目标**：长任务可恢复、可审计、可回放的工作历史。README 称之为 Tape.systems 哲学（`README.md:139-141`）。
 
@@ -98,7 +98,7 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 
 **边界**：本次未验证 Tape 与 compaction（压缩后 entry 保留策略）的交互、FTS 投影的更新时序；Tape view 的确定性 hash 具体算法未逐行核对；execution journal 的崩溃恢复分类（`classifyExecutionJournalRows`）有专项测试（`test/main/tape/executionJournalCrash.test.ts`），但未在本机运行。
 
-**独特性判断**：这是把“请求轨迹 + 会话事实 + 审计视图”做成持久化对象的机制，区别于 Open WebUI 的对话回放和 Hermes Agent 的研究轨迹（后两者未调查可比对象）。标签：研究轨迹。
+**独特性判断**：这是把“请求轨迹 + 会话事实 + 审计视图”做成持久化对象的执行观测能力，区别于 Open WebUI 的对话回放和 Hermes Agent 的批量轨迹生成。标签：执行轨迹审计与回放。
 
 ### 能力卡 3：Skill 跨工具迁移（自进化 Skill 生态的传输面）
 
@@ -248,7 +248,7 @@ deepchat <command>（终端）
 
 ## 对特色贡献统计的影响
 
-建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（研究轨迹，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、Artifact。
+建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（执行轨迹审计与回放，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、Artifact。
 
 ## 未验证事项
 

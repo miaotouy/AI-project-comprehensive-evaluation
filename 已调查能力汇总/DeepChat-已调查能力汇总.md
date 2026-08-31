@@ -115,7 +115,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - **IM 远程控制（多表面连续性，能力卡 1）**：Telegram/Feishu-Lark/QQBot/Discord/WeChat iLink 五个渠道把桌面会话投影到 IM，外部消息经命令路由（/start /stop /pending /open /agent 等）驱动同一 SessionTurn/runtime，可答复 question/权限、停止生成、打开桌面会话并接收 cron remote delivery；PairCode 授权 TTL 10 分钟、失败上限 5；执行仍在本机主进程，Feishu/Weixin 等依赖平台应用注册（外部服务依赖，暂缓运行验证见末尾小节）。证据状态：主链确认（静态证据）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 1、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepChat-外部执行体与应用协作调查笔记.md)
 
-- **Tape & Trace（研究轨迹，能力卡 2）**：结构化记录系统（Tape entries + view manifest，DDD 分层，领域/应用/SQLite 基础设施分层）；严格执行日志以四类事件记录 run 边界与工具分派（崩溃可识别未收口 run）；执行契约按工具/工作区/深度冻结 ceilings（契约 64 KiB、工具 256、subagent 深度 1），工具服务分派前校验，绑定 id 写入 assistant block；TraceDialog 提供 request/view/entries/budget 四 tab，模型侧有 tape_search/tape_context 工具与跨会话 FTS 召回。证据状态：主链确认（静态证据）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 2、[Agent 工具调查笔记](../Agent工具/DeepChat-Agent工具调查笔记.md)
+- **Tape & Trace（执行轨迹审计与回放，能力卡 2）**：结构化记录系统（Tape entries + view manifest，DDD 分层，领域/应用/SQLite 基础设施分层）；严格执行日志以四类事件记录 run 边界与工具分派（崩溃可识别未收口 run）；执行契约按工具/工作区/深度冻结 ceilings（契约 64 KiB、工具 256、subagent 深度 1），工具服务分派前校验，绑定 id 写入 assistant block；TraceDialog 提供 request/view/entries/budget 四 tab，模型侧有 tape_search/tape_context 工具与跨会话 FTS 召回。证据状态：主链确认（静态证据）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 2、[Agent 工具调查笔记](../Agent工具/DeepChat-Agent工具调查笔记.md)
 
 - **Skill 跨工具迁移（能力卡 3）**：Settings → Skills 支持文件夹/ZIP/URL/拖放安装；导入/导出经格式转换器 + 11+ 工具适配器（claudeCode/codex/cursor/windsurf/copilot/openCode/goose/kiloCode/kiro/antigravity/agents），带文件名/路径安全校验；会话级 activeSkillNames 进入工具目录，skill_run 工具执行。证据状态：主链确认（静态走通）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 3、[Agent 工具调查笔记](../Agent工具/DeepChat-Agent工具调查笔记.md)
 

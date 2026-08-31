@@ -8,7 +8,7 @@
 >
 > 调查方式：静态源码调查，未运行应用。读取 `session.save` RPC、CLI/TUI/桌面 `/save` 入口、`_save_session_log`、SessionDB 可移植性 mixin、`hermes sessions export` 全部分支、Markdown/HTML/JSONL/trace 渲染器、HF 轨迹上传、trajectory 保存与压缩工具；全文检索导入、链接分享、附件打包、剪贴板导出等关键词确认缺失面
 >
-> 调查范围：`session.save` 快照与"导出交付"的边界、内容口径（system prompt/工具/附件/reasoning/错误）、导入路径、链接分享与研究轨迹交接。不覆盖整库备份恢复（`hermes backup`/`/snapshot`）、profile 归档（`/export`、`/import`）、`hermes debug share` 的诊断详情和 gateway 消息转发
+> 调查范围：`session.save` 快照与"导出交付"的边界、内容口径（system prompt/工具/附件/reasoning/错误）、导入路径、链接分享与研究数据交接。不覆盖整库备份恢复（`hermes backup`/`/snapshot`）、profile 归档（`/export`、`/import`）、`hermes debug share` 的诊断详情和 gateway 消息转发
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -26,7 +26,7 @@ Hermes 另有一套完整的对话导出子系统，入口独立于 `/save`：
   - `html`：独立单文件（图片占位、reasoning 折叠块、CSP+转义）；
   - `trace`：Claude Code JSONL，可 `--upload` 到 Hugging Face 数据集（默认私有）。
 - 导入往返存在：服务端 `import_sessions`（`hermes_state_portability.py:376`）暴露为 Web `POST /api/sessions/import`（`web_routers/sessions.py:448`），网页端另有对应入口；CLI 子命令层面本次未找到对应的导入命令。
-- 研究轨迹交接有两条：`save_trajectories` 参数（`run_agent.py:2358`，默认关闭）把每轮会话追加为 ShareGPT 格式 JSONL；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（`agent/trace_upload.py`）。
+- 研究数据交接有两条：`save_trajectories` 参数（`run_agent.py:2358`，默认关闭）把每轮会话追加为 ShareGPT 格式 JSONL；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（`agent/trace_upload.py`）。
 
 能力分型如下（`E3` 图片分享与 `E4` 对话链接分享本次未找到）：
 - `E1` 数据交换：多格式文件导出与 DB 导入往返；

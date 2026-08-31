@@ -8,13 +8,13 @@
 >
 > 调查方式：局部补查。通读根 README 与 `packages/coding-agent/docs/`（usage、session-format、containerization、extensions）；抽查 `interactive-mode.ts` 的 `/export`、`/share` 实现与 `packages/telemetry` 契约；与现有十类通用笔记交叉核对覆盖范围；未运行交互会话
 >
-> 调查范围：第三批候选——自扩展 Agent harness、终端组件树、分支会话、容器化、会话数据分享；会话数据生产/导出用于训练或研究的闭环（研究轨迹候选）
+> 调查范围：第三批候选——自扩展 Agent harness、终端组件树、分支会话、容器化、会话数据分享；会话数据生产/导出用于训练或研究的闭环（研究数据发布候选）
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Pi 的五个第三批候选中有四个已被现有通用类目笔记完整覆盖（归并已有类目）：扩展系统与工具注册（Agent 工具）、终端组件树（消息渲染器）、分支会话（会话与消息管理）、容器化部署文档（Agent 工具/生成式输出）。本次补查新确认的未覆盖产品面是**会话数据生产与分享**：根 README 设有专门章节“Share your OSS coding agent sessions”（README.md:90-105），`docs/usage.md:138-141` 明确说明 `/share` 之外可用伴生工具 `badlogic/pi-share-hf` 将会话发布为 Hugging Face 数据集“用于模型、提示词、工具与评估研究”。仓库内主链（JSONL 会话树 → `/export` JSONL/HTML → `/share`）已达主链确认；/share 优先创建 Radius artifact，并在无法使用 Radius 时才回退至私密 gist。发布到 HF 数据集的一步位于仓库外（伴生仓库），属外部依赖。该能力可作为**研究轨迹聚类**候选收录，进入特色统计前需明确仓库边界（本仓库只生产与导出会话数据，不消费）。
+Pi 的五个第三批候选中有四个已被现有通用类目笔记完整覆盖（归并已有类目）：扩展系统与工具注册（Agent 工具）、终端组件树（消息渲染器）、分支会话（会话与消息管理）、容器化部署文档（Agent 工具/生成式输出）。本次补查新确认的未覆盖产品面是**会话数据生产与分享**：根 README 设有专门章节“Share your OSS coding agent sessions”（README.md:90-105），`docs/usage.md:138-141` 明确说明 `/share` 之外可用伴生工具 `badlogic/pi-share-hf` 将会话发布为 Hugging Face 数据集“用于模型、提示词、工具与评估研究”。仓库内主链（JSONL 会话树 → `/export` JSONL/HTML → `/share`）已达主链确认；/share 优先创建 Radius artifact，并在无法使用 Radius 时才回退至私密 gist。发布到 HF 数据集的一步位于仓库外（伴生仓库），属外部依赖。该能力作为**研究数据发布**分型记录，不与 Hermes 的批量轨迹生成或 OpenCode 的会话档案合并为统一分类。
 
 ## 介绍声明与候选盘点
 
@@ -30,7 +30,7 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 
 ## 已确认的独特能力
 
-### 能力一：会话数据生产与分享（研究轨迹候选）
+### 能力一：会话数据生产与分享（研究数据发布候选）
 
 1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 明示“Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks”（README.md:94）；`docs/usage.md:140` 写明用于“model, prompt, tool, and evaluation research”。这不是普通导出存档，而是把会话文件格式、导出命令与外部发布工具组合成一条数据生产工作流。
 2. **入口与触发者**：用户触发。交互命令 `/export`（HTML 或 JSONL 副本）与 `/share` 实现见 `interactive-mode.ts:5773-5954`（命令分发 :2895-2906）；另有 docs 指向的伴生 CLI `pi-share-hf` 批量发布。
@@ -41,7 +41,7 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 7. **人机与多 Agent 关系**：无多 Agent 参与；用户可检查导出文件内容后决定是否分享。
 8. **外部依赖与执行域**：本机 JSONL/HTML 导出（仓库内）；Radius provider 与登录态可将 `/share` 上传为组织可见 artifact；缺少此条件时，`gh` CLI 与 GitHub gist（需本机安装 gh 与登录态）构成回退路径；`pi-share-hf`（伴生仓库 badlogic/pi-share-hf）与 Hugging Face 位于发布端（README.md:98-104 引用）。`packages/telemetry` 与本能力无关：它是 vendor-neutral 遥测契约包，本次更新新增内存参考实现与 conformance 测试（供 ai/agent 包做类型化 span），但仍是"无 exporter、无全局 span 状态、不依赖后端"的契约包（telemetry/README.md:5-13），无会话数据上报路径。
 9. **安全与资源边界**：Radius 路径创建组织可见 artifact，gist 回退路径仍创建 secret gist（`--public=false`）；两者都把外发动作限定在用户显式触发 `/share` 后。会话 JSONL 含完整对话、工具输出，以及 Radius 路径额外写入的 system prompt 与工具 schema，分享前需按实际外部平台可见性判断数据边界。
-10. **独特性判断**：现有类目只解释“会话导出”（会话/导出是普通功能）；本能力把导出格式、公开文档与研究导向的发布工作流连成闭环，属于指南中的“研究轨迹”标签。最接近项目：Hermes Agent（研究轨迹候选，待查清单第二批）、OpenCode（会话 export/import 工具，但无研究数据导向的发布链路）——尚未形成三项目自然聚类，保留为稀有能力卡。
+10. **独特性判断**：现有类目只解释“会话导出”（会话/导出是普通功能）；本能力把导出格式、公开文档与研究导向的发布工作流连成闭环，属于对话导出与分享的研究/发布分型。Hermes Agent 的批量轨迹生成、OpenCode 的可移植会话档案与本能力对象和消费者不同，暂不形成统一自然聚类，保留为稀有能力卡。
 11. **证据强度**：README 与 docs 声明（介绍候选）；仓库内 `/export`/`/share` 主链为静态源码确认（主链确认，限定仓库边界）；HF 发布端为伴生仓库引用（外部依赖，未验证）。未运行验证。
 
 ## 已归并到现有类目的能力
@@ -54,11 +54,11 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 ## 声明不符、外部依赖与暂缓项
 
 - **HF 数据集发布**：`badlogic/pi-share-hf` 不在本仓库，其读取格式、去重与推送行为未验证（暂缓，外部依赖）。
-- **“研究轨迹”闭环完整度**：本仓库只承担“生产与导出”侧；数据被外部消费为训练语料的事实无法在本仓库验证（README 声明 + 外部工具，非本仓库主链）。
+- **研究数据发布闭环完整度**：本仓库只承担“生产与导出”侧；数据被外部消费为训练语料的事实无法在本仓库验证（README 声明 + 外部工具，非本仓库主链）。
 
 ## 对特色贡献统计的影响
 
-- 建议将“会话数据生产与分享”以 `入口确认`（仓库内 `/export`、`/share` 主链静态确认；发布端外部）列入研究轨迹聚类候选，暂不单独计为主贡献；若后续确认伴生工具接入主链或出现三项目聚类，再升级。
+- 建议将“会话数据生产与分享”以 `入口确认`（仓库内 `/export`、`/share` 主链静态确认；发布端外部）列入对话导出与分享的研究/发布分型，暂不另建分类；若后续出现同一对象模型和消费者的多项目样本，再重新评估。
 
 ## 未验证事项
 

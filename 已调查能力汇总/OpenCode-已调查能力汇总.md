@@ -123,7 +123,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **能力二：CodeMode 受限 JS 编排** — `主链确认`（静态证据）：模型经 `execute` 工具用一小段受限 JavaScript（分支/循环/并行/数据变换）编排多个 MCP 工具，解释执行在 `packages/codemode`（无 eval 解释器、plain-data 边界、调用次数/超时/输出字节上限、并发上限 8、busy-loop 中断、子调用逐条审计）；是直接工具调用、任务分派之外的第三类执行范式。贡献统计建议：新能力族（F43）。（`packages/codemode/`、`packages/opencode/src/tool/code-mode.ts`）[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力二、[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 8 节
 
-- **能力三：会话档案闭环（导出/脱敏/分享/PR 续作）** — `主链确认`（静态证据）：整段会话导出为可移植 JSON（CLI `export --sanitize` 全字段脱敏；Web 等价下载）、从文件或 `opncd.ai/share/...` 链接导入重建、远端实时分享同步（`share-next.ts` 去抖批量 POST）、PR body 内嵌分享链接供 `opencode pr` 自动导入续作——会话成为可流动的"档案对象"。分享服务端在仓库外（本地只有 HTTP 客户端与 session_share 表，见末尾小节）；`--sanitize` 仅 CLI 导出、分享与 Web 导出无脱敏；`config.share: manual/auto/disabled` 与 `OPENCODE_DISABLE_SHARE` 可关闭。贡献统计建议：新能力族（F44 研究轨迹聚类第三样本）。（`cli/cmd/export.ts`、`cli/cmd/import.ts`、`cli/cmd/pr.ts`、`share/share-next.ts`）[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力三、[对话导出与分享调查笔记](../对话导出与分享/OpenCode-对话导出与分享调查笔记.md)
+- **能力三：会话档案闭环（导出/脱敏/分享/PR 续作）** — `主链确认`（静态证据）：整段会话导出为可移植 JSON（CLI `export --sanitize` 全字段脱敏；Web 等价下载）、从文件或 `opncd.ai/share/...` 链接导入重建、远端实时分享同步（`share-next.ts` 去抖批量 POST）、PR body 内嵌分享链接供 `opencode pr` 自动导入续作——会话成为可流动的"档案对象"。分享服务端在仓库外（本地只有 HTTP 客户端与 session_share 表，见末尾小节）；`--sanitize` 仅 CLI 导出、分享与 Web 导出无脱敏；`config.share: manual/auto/disabled` 与 `OPENCODE_DISABLE_SHARE` 可关闭。贡献统计建议：可移植会话档案与跨表面续作（F109）。（`cli/cmd/export.ts`、`cli/cmd/import.ts`、`cli/cmd/pr.ts`、`share/share-next.ts`）[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力三、[对话导出与分享调查笔记](../对话导出与分享/OpenCode-对话导出与分享调查笔记.md)
 
 - **能力四：ACP 服务端** — `主链确认`（静态证据）：让 Claude Code、Cursor、Gemini CLI 等 ACP 宿主把 OpenCode 当 agent 调用——new/load/resume/fork session、prompt、cancel、权限回调、MCP 能力广播；与自身 GitHub Copilot 渠道构成"消费 Copilot + 服务 ACP"的双向互操作。贡献统计建议：辅助贡献（F45）。（`packages/opencode/src/acp/service.ts`、`cli/cmd/acp.ts`、`acp/permission.ts`）[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力四、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenCode-外部执行体与应用协作调查笔记.md)
 
@@ -135,7 +135,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
   - GitHub Copilot 渠道、多 Provider（Zen/xAI OAuth）：归并 LLM 渠道类目
   - V2 事件溯源会话核心（Context Epoch/压缩 checkpoint、durable admission inbox）：归并会话与消息管理、对话请求与上下文类目
 
-- **能力等级与特色统计口径**：主链确认的四个候选均为静态证据；独特功能笔记明确"不重复计数"Git 快照回退、后台子代理、Skill/权限/渠道归并项。贡献统计中 OpenCode 的计入条目见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)（F27 多表面连续性、F43 CodeMode、F44 会话档案、F45 ACP 服务端，以及 F24/F30 既有贡献）。另有 4 项 `入口确认` 候选（Session Review、Git worktree、mDNS 局域网发现、云端 workspace 同步）未走通完整链路，详见末尾小节。[特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+- **能力等级与特色统计口径**：主链确认的四个候选均为静态证据；独特功能笔记明确"不重复计数"Git 快照回退、后台子代理、Skill/权限/渠道归并项。贡献统计中 OpenCode 的计入条目见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)（F27 多表面连续性、F43 CodeMode、F109 可移植会话档案与跨表面续作、F45 ACP 服务端，以及 F24/F30 既有贡献）。另有 4 项 `入口确认` 候选（Session Review、Git worktree、mDNS 局域网发现、云端 workspace 同步）未走通完整链路，详见末尾小节。[特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 
 ## 工程与基础设施摘要
 

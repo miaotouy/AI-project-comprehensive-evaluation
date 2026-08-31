@@ -8,7 +8,7 @@
 >
 > 调查方式：只读盘点根 README 功能表、AGENTS.md 架构说明与源码（`agent/`、`tools/`、`plugins/memory/`、仓库根工具脚本）；未修改仓库源码
 >
-> 调查范围：闭环学习（记忆/技能后台复习）、Skill 自动创建与维护（skill_manage + curator）、持久记忆与用户建模（内置 MEMORY.md/USER.md + MemoryProvider 外部插件）、研究轨迹（轨迹保存/压缩/批量生成）、Tool Gateway；cron、委派、网关、TUI 与终端后端按待查清单标注已有覆盖并回链，不重写；/heartbeat、/goal 质量门、/refine、verify-on-stop、estop 按候选盘点处理
+> 调查范围：闭环学习（记忆/技能后台复习）、Skill 自动创建与维护（skill_manage + curator）、持久记忆与用户建模（内置 MEMORY.md/USER.md + MemoryProvider 外部插件）、研究数据工具链（轨迹保存/压缩/批量生成）、Tool Gateway；cron、委派、网关、TUI 与终端后端按待查清单标注已有覆盖并回链，不重写；/heartbeat、/goal 质量门、/refine、verify-on-stop、estop 按候选盘点处理
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -21,7 +21,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 | 闭环学习（记忆/技能后台复习） | `主链确认`（静态证据） | 每 N 轮/每 N 次工具迭代触发一次后台 fork 复习，fork 继承主会话运行时与提示缓存，白名单只放行 memory 与 skill_manage |
 | 自动创建/改进 Skill | `主链确认`（静态证据） | `skill_manage` 六动作（create/patch/edit/delete/write_file/remove_file）+ 复杂任务（5+ 工具调用）创建指引 + curator 惰性后台维护（从不删除，只归档）+ `.usage.json` 统计 |
 | 持久记忆与用户建模 | `主链确认`（内置）/ `入口确认`（外部 provider） | 内置 MEMORY.md/USER.md 文件记忆 + MemoryProvider ABC 外部后端（honcho/mem0/supermemory 等 8 个）+ 记忆写审批门 + 每轮 prefetch/sync |
-| 研究轨迹 | `主链确认`（保存/压缩）/ `入口确认`（批量与数据集） | 轨迹 JSONL 保存 + trajectory_compressor 保护首尾压缩中间 + batch_runner/mini_swe_runner 批量生成；数据流水线为离线工具，不进入主会话 |
+| 研究数据工具链 | `主链确认`（保存/压缩）/ `入口确认`（批量与数据集） | 轨迹 JSONL 保存 + trajectory_compressor 保护首尾压缩中间 + batch_runner/mini_swe_runner 批量生成；数据流水线为离线工具，不进入主会话 |
 | Tool Gateway | `入口确认` | `tools/managed_tool_gateway.py` 统一路由 Nous 托管后端（firecrawl 搜索、fal-queue 图像、openai-audio TTS/转写、modal 沙箱）；外部订阅依赖 |
 | 六/七类终端后端 | `归并已有类目` | `tools/environments/` 七个后端已在 Agent 工具笔记覆盖，本笔记只回链并记录 README 与待查清单的数字差异 |
 | 跨会话检索（session_search） | `主链确认`（静态证据） | FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，一并归入学习闭环描述 |
@@ -111,7 +111,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **独特性判断**：记忆不是单一文件注入，而是"文件 + 插件 ABC + 后台同步 + 写审批 + 复习闭环"的组合。用户建模的"deepening"由 Honcho 的 dialectic 多轮推理承担（外部）。与 LobeHub 白盒记忆（结构化五层+工具读写）相比，Hermes 是自由文本记忆 + 外部语义建模。
 
-### 能力四：研究轨迹——会话轨迹生产（`主链确认`：保存与压缩；`入口确认`：批量与数据集）
+### 能力四：研究数据工具链——会话轨迹生产（`主链确认`：保存与压缩；`入口确认`：批量与数据集）
 
 **用户目标**：把真实 Agent 会话变成可训练数据（README "Batch trajectory generation, trajectory compression for training the next generation of tool-calling models"）。
 
@@ -129,7 +129,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **外部依赖**：压缩摘要调用 OpenRouter 模型（`trajectory_compressor.py` 导入 OpenRouter base url）；tokenizer 默认 `moonshotai/Kimi-K2-Thinking`。
 
-**独特性判断**：绝大多数客户端把会话历史当聊天记录存，Hermes 把轨迹当训练数据生产（保存/压缩/批量生成/数据集管理成一套工具链）。标签：`研究轨迹`。
+**独特性判断**：绝大多数客户端把会话历史当聊天记录存，Hermes 把轨迹当训练数据生产（保存/压缩/批量生成/数据集管理成一套工具链）。标签：`研究数据工具链`。
 
 ## 已归并到现有类目的能力
 
@@ -156,7 +156,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 ## 对特色贡献统计的影响
 
-- 建议新增主贡献候选：**闭环学习（后台记忆/技能复习 + /refine 按需）**、**Skill 生命周期（创建-改进-curator 维护）**（标签：`自进化 Skill`、`记忆演化`）；**研究轨迹工具链**（标签：`研究轨迹`）可作为独立贡献；**会话心跳 + 目标质量门**（标签：`主动 Agent`）可作为新主贡献候选（待与至少三个项目聚类后建立局部比较）。
+- 建议新增主贡献候选：**闭环学习（后台记忆/技能复习 + /refine 按需）**、**Skill 生命周期（创建-改进-curator 维护）**（标签：`自进化 Skill`、`记忆演化`）；**研究数据工具链**（标签：`研究数据生产与轨迹压缩`）作为项目独特能力记录，不单独建立跨项目顶层类目；**会话心跳 + 目标质量门**（标签：`主动 Agent`）可作为新主贡献候选（待与至少三个项目聚类后建立局部比较）。
 - 辅助贡献：持久记忆与用户建模（与记忆演化聚类中 VCP/LobeHub/Open WebUI 形成自然聚类，比较维度：对象形态文件 vs 结构化、触发方式计数 vs 定时 vs 梦境、写入是否需人审）。
 - 记忆写审批门与"模型写记忆被拦截"在横向对比中可作为人机关系维度证据。
 - `/refine` 并入闭环学习计数、verify/estop 不进入特性统计（见新增候选小节）。
@@ -181,6 +181,6 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 - Skill 生命周期：`tools/skill_manager_tool.py`（schema 语义 :1641-1676 附近；`is_background_review` 来源标记经 `tools/skill_provenance.py`）、`tools/skill_usage.py`（.usage.json）、`agent/curator.py`（惰性调度、不变量 15-20、状态文件 85-98）、`tools/skills_hub.py`。
 - 记忆与用户建模：`agent/memory_manager.py`（MemoryManager 364、写门相关 1019-1128）、`agent/memory_provider.py:81`（ABC）、`tools/memory_tool.py:919,1138`（写审批门与 pending 应用）、`plugins/memory/honcho/`（401 恢复系列：`864035b2`、`6ea01262`、`ecfc427b`、`086dcb8b`、`b1414baa`）。
 - 主动 Agent（新增候选）：`hermes_cli/heartbeat.py`（会话心跳，`6518aa18`）、`hermes_cli/goals.py`（/goal 质量门，`6e041d52`）、`agent/estop.py`（紧急停止，`5db1b72b`）。
-- 研究轨迹：`agent/trajectory.py:30`（save_trajectory）、`agent/agent_runtime_helpers.py:115`（convert_to_trajectory_format）、`trajectory_compressor.py`、`batch_runner.py`、`mini_swe_runner.py`、`datagen-config-examples/`。
+- 研究数据工具链：`agent/trajectory.py:30`（save_trajectory）、`agent/agent_runtime_helpers.py:115`（convert_to_trajectory_format）、`trajectory_compressor.py`、`batch_runner.py`、`mini_swe_runner.py`、`datagen-config-examples/`。
 - Tool Gateway：`tools/managed_tool_gateway.py:174-211`（resolve/is_ready）、`tools/web_tools.py:236-246`、`tools/tool_backend_helpers.py`。
 - 跨会话检索：`tools/session_search_tool.py:848`（session_search 主函数，FTS5+谱系去重）。
