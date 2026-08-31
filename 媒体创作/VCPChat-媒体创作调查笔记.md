@@ -115,4 +115,4 @@ Scriptorium 的内容防线包括 HTML/CSS 清理、依赖本地化、未知外�
 - 资源、运行时和文脉：`scriptorium-media.js`、`scriptorium-programmable-content.js`、`scriptorium-runtime.js`、`scriptorium-lineage-store.js`、`scriptorium-agent-port.js`。
 - Agent 协作：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/plugin-manifest.json`、`ScriptoriumCollaboratorService.js:560-1155`、`modules/services/scriptoriumAgentControlService.js:146-418`、`tests/scriptorium-collaborator.test.js`。
 - ComfyGen 配置边界：`VCPHumanToolBox/renderer.js:1608-1650`、`VCPHumanToolBox/ComfyUImodules/ComfyUI_UIManager.js`、`comfyui-ipc.js:82-356`、`PathResolver.js`、`ComfyUImodules/README.md`。
-- 交接依据：[`媒体创作横向对比`](媒体创作横向对比.md)、[`VCPChat 独特功能调查笔记`](../独特功能/VCPChat-独特功能调查笔记.md)、[`媒体创作分类边界研究`](../独特功能/媒体创作分类边界研究.md)。
+- 交接依据：[`媒体创作横向对比`](媒体创作横向对比.md)、[`VCPChat 独特功能调查笔记`](../独特功能/VCPChat-独特功能调查笔记.md)。

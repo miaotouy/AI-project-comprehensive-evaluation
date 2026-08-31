@@ -4,7 +4,7 @@
 >
 > 对比更新日期：2026-08-19
 >
-> 依据：各单项目调查笔记（含通用类目、十八项目独特功能调查笔记、独特功能待查清单、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据
+> 依据：各单项目调查笔记（含通用类目、十八项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -288,7 +288,6 @@ AstrBot、DeepSeek Harness、OpenCode、Pi、VCPToolBox 本来就不以普通桌
 ## 依据索引
 
 - [独特功能调查指南](独特功能/调查指南.md)
-- [独特功能待查清单](独特功能/待查清单.md)
 - [AIO Hub 独特功能调查笔记](独特功能/AIO-Hub-独特功能调查笔记.md)
 - [VCPChat 独特功能调查笔记](独特功能/VCPChat-独特功能调查笔记.md)
 - [VCPToolBox 独特功能调查笔记](独特功能/VCPToolBox-独特功能调查笔记.md)
@@ -296,7 +295,6 @@ AstrBot、DeepSeek Harness、OpenCode、Pi、VCPToolBox 本来就不以普通桌
 - [DeepSeek Harness 独特功能调查笔记](独特功能/DeepSeek-Harness-独特功能调查笔记.md)
 - [DeepSeek Harness 已调查能力汇总](已调查能力汇总/DeepSeek-Harness-已调查能力汇总.md)
 - [VCP-Disco-Elysium-Mod（公开第三方思维簇模组）](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)
-- [上下文编译与提示词工程边界研究](独特功能/上下文编译与提示词工程边界研究.md)
 - [Agent 角色横向对比](Agent角色/Agent角色横向对比.md)
 - [Agent 工具横向对比](Agent工具/Agent工具横向对比.md)
 - [会话与消息管理横向对比](会话与消息管理/会话与消息管理横向对比.md)

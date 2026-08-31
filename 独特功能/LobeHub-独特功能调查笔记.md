@@ -22,7 +22,7 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Personal Memory | `主链确认`（静态证据） | 完整主链：对话 topic → Upstash Workflow（hourly / 用户触发）→ CEPA+Identity 五层提取 → 1024 维向量入库 → 记忆工具 9 API 读写 → 记忆管理页面编辑 |
 | Agent 运营（Brief 汇报 + Work 产物 + 用量统计） | `主链确认`（Brief/Work 部分）/ `入口确认`（统计部分） | “hires, schedules, reports”中的 reports 落在 Briefs（decision/result/insight/error）+ HomeInbox 双栏 + Work 版本化产物对象；统计页为独立入口 |
 | Agent Builder | `主链确认`（静态证据） | 内置 agent-builder 角色 + `lobe-agent-builder` 工具（读模型/搜工具/装插件/改配置），冲突工具被剥离；对话式配置 Agent 的完整闭环 |
-| 异构 Agent 统一托管 | `主链确认`（静态证据） | 十一种本地 CLI（Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，详见[分类边界研究](外部执行体与应用协作边界研究.md) |
+| 异构 Agent 统一托管 | `主链确认`（静态证据） | 十一种本地 CLI（Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，横向比较见[外部执行体与应用协作类目](../外部执行体与应用协作/外部执行体与应用协作横向对比.md) |
 | IM 网关（Messenger / Agent Bot） | `入口确认` | Slack/Discord/Telegram/WeChat 平台注册、OAuth 安装、webhook 入口、cron 保活；webhook → execAgent 的消息往返未逐平台验证 |
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
@@ -173,7 +173,7 @@ README 四个宣传点中，**Schedule、Personal Memory 是真正形成了可�
 - **Agent 市场 / Community（hires 面）**：`community/` 路由族（agent/group_agent/model/provider/skill/mcp/user/org 详情与列表）、市场导入链在 Agent 角色笔记 §7 有记录；本次只做运营盘点的组成部分，不单独成卡。
 - **插件、知识库、搜索、设备工具**：全部回链 [Agent 工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)，不再重复。
 
-异构 Agent 的完整分类边界、与 Connector/Messenger/浏览器控制表面的关系及横向样本，见[外部执行体与应用协作分类边界研究](外部执行体与应用协作边界研究.md)。本笔记只在摘要保留状态，不重复主链细节。
+异构 Agent 与 Connector、Messenger、浏览器控制表面的横向样本见[外部执行体与应用协作横向对比](../外部执行体与应用协作/外部执行体与应用协作横向对比.md)。本笔记只在摘要保留状态，不重复主链细节。
 
 ## 声明不符、外部依赖与暂缓项
 
