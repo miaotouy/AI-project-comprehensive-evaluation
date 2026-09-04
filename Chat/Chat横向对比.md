@@ -1,10 +1,10 @@
 # Chat 横向对比（概览与跨类目导航）
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-08-31
+> 对比更新日期：2026-09-04
 >
-> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；本文档只保留跨层综合结论
+> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；本文档只保留跨层综合结论
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-二十个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。样本覆盖 IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi）、服务端 Agent 会话运行时（OpenCode）、事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness），以及 Android 优先、本地 SQLite 投影远端 VCP 服务 SSE 的客户端（VCPMobile）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+二十一个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。样本覆盖 IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi）、服务端 Agent 会话运行时（OpenCode）、事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness）、以本机 Gateway 为控制平面、多渠道与自有界面共用同一会话主链的本地 Agent 运行时（OpenClaw），以及 Android 优先、本地 SQLite 投影远端 VCP 服务 SSE 的客户端（VCPMobile）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路径顺序等待，空闲分支可并行生成；Cherry Studio 的 Agent 聊天则把 Claude Code、Pi 与 DeepSeek Harness 收束进同一调度与持久化边界。VCPChat 的聊天视图、流投影和历史写入已拆为各自的所有者，因此也进一步说明聊天主链的生命周期与消息磁盘事实源是两层问题。
 
@@ -58,6 +58,14 @@ DeepSeek Harness 是构建在 vendored Cordis 插件框架上的 agent harness�
 
 Risuai 的产品表面是桌面 GUI（Tauri）、Web、移动 Web 与 Node 服务器内嵌四种载体切换的无路由单页应用，Node 侧只提供托管与存储适配，不拥有会话状态。消息规范由单一内存权威 `DBState.db` 持有，角色、会话、消息与全部设置都挂在同一个对象上，保存循环按角色分块增量编码整库写入单一二进制存档 `database/database.bin`，与 SillyTavern 每轮整份重写 JSONL 的取向形成对照。端到端主链交接点是 `sendChat` 单文件编排：UI 层直接 push 消息后，上下文、记忆、组装、渠道请求与流式回写全部在该入口串起，全程直接读写权威对象。Reroll/swipe 候选只驻留内存、不随消息落盘；另一路的"分支"是持久化的整份会话副本加注释回链，而不是消息树。
 
+## OpenClaw：本机 Gateway 控制平面与多渠道共用的 Agent 会话运行时
+
+OpenClaw 的聊天表面分自有界面与外部消息渠道两层，但两层都不拥有消息事实源：自有界面经 Gateway 协议 RPC 发送，渠道消息在渠道插件内完成传输与动作编码后汇入同一 auto-reply 管线，两类输入共享同一个准入与执行主链。回合由本机 Gateway 的 `chat.send` 接收：准入与 ACK 之后转交给脱离 RPC 生命周期的 dispatch，嵌入式 Agent 运行器从 per-agent SQLite 恢复 transcript、拼装上下文并驱动 Agent Core 的工具与 Provider 流式循环，assistant 结果由运行器写回同一 transcript，Gateway 只把实时 chat/agent 事件投影给订阅者。因此在“消息规范由谁定义”与“执行发生在哪一层”两个跨层问题上，OpenClaw 的回答都指向本机 Gateway 与 per-agent SQLite，自有界面和渠道消息框只是可替换的输入与显示面。
+
+会话与消息事实源是本地追加型 transcript，且寻址与版本分离：session key 定位逻辑会话，轮换 transcript generation 表达分支、reset、rewind 与 fork，活动路径与 FTS 都是可重建投影。与同属本地 Agent 运行时的 DeepSeek Harness 相比，OpenClaw 的 SQLite transcript 是权威、实时事件只是派生投影面，而不是把事件日志当作唯一权威；与 Risuai 的前端内存权威相比，OpenClaw 的所有聊天界面都不持有消息主副本，可从持久化重建。显示层只组装 Gateway 投影后的历史与实时事件，控制消息、工具卡、thinking 与真实聊天气泡分开建模。
+
+专项交接点：数据模型与搜索见[会话与消息管理](../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md)，准入/上下文/中断见[对话请求与上下文](../对话请求与上下文/OpenClaw-对话请求与上下文调查笔记.md)，表面交互见[Chat UI](<../Chat UI/OpenClaw-ChatUI调查笔记.md>)，渲染投影见[消息渲染器](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)，端到端骨架见[OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)。以上结论均为静态源码主链确认，未做运行验证。
+
 ## 选择提示（基于已核实机制）
 
 | 侧重点 | 项目 | 已确认的边界 |
@@ -79,6 +87,7 @@ Risuai 的产品表面是桌面 GUI（Tauri）、Web、移动 Web 与 Node 服�
 | 事件溯源驱动循环、插件层循环控制与 headless 一键任务 | DeepSeek Harness | turn/step 边界全部是 durable 事件、可重放重建；模型可见 ⟺ 已记录；内置无 turn 预算；与 pi 无循环继承证据（仅 llm-pi-ai 适配层） |
 | 前端内存权威、无路由多载体单页应用与整库增量编码存档 | Risuai | 重roll 候选不落盘；分支为整份会话副本加注释回链，非消息树；未找到消息级搜索索引 |
 | Android 优先的本地 SQLite 聊天投影与 SSE 流收口 | VCPMobile | Topic 下线性历史；终结事务维护 FTS 与渲染缓存；编辑/重生成截断后续历史；FTS 的 UI 查询与命中跳转未确认 |
+| 本机 Gateway 控制平面、多渠道与自有界面共用会话主链 | OpenClaw | per-agent SQLite 追加型 transcript 是消息唯一事实源，session key 与 generation 分离、轮换保留历史；FTS 只索引活动路径文本；渠道消息框与自有界面都不持有消息主副本；控制消息/工具卡与聊天气泡分开建模；实时事件为派生投影（静态主链确认，未运行验证） |
 
 Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会出现哪些断层"的对照样本，不宜仅凭已存在的 SessionManager API 判断会话能力已经完成。
 

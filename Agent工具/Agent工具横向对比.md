@@ -1,10 +1,10 @@
 # Agent 工具横向调查与对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox、OpenClaw
 >
-> 对比更新日期：2026-08-31
+> 对比更新日期：2026-09-04
 >
-> 依据：同目录二十份单项目调查笔记及其记录的代码快照
+> 依据：同目录二十一份单项目调查笔记及其记录的代码快照；OpenClaw 依据 [OpenClaw-Agent工具调查笔记.md](OpenClaw-Agent工具调查笔记.md)
 >
 > 对比方法：只读源码、类型定义、注册表、执行器、调用入口和单项目调查笔记，逐项核对实现
 >
@@ -36,6 +36,7 @@
 | VCPChat | [VCPChat-Agent工具调查笔记.md](VCPChat-Agent工具调查笔记.md) | 315 | `main` | `89e02b778d626078be91dfbad01e5c9554c47f76` |
 | VCPMobile | [VCPMobile-Agent工具调查笔记.md](VCPMobile-Agent工具调查笔记.md) | 67 | `main` | `cecdbe432feda57821938bba7625a272113d21c1` |
 | VCPToolBox | [VCPToolBox-Agent工具调查笔记.md](VCPToolBox-Agent工具调查笔记.md) | 438 | `main` | `e2762e4dab5c70952d88f96689fba1270624e5ef` |
+| OpenClaw | [OpenClaw-Agent工具调查笔记.md](OpenClaw-Agent工具调查笔记.md) | 115 | `main` | `c64a640f5df5bc72537357417c54647c050cb863` |
 
 ## 调查方法与比较框架
 
@@ -57,7 +58,7 @@
 
 ## 结论摘要
 
-二十个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”；VCPMobile 会执行远端调度的设备工具，但本地没有 LLM 工具循环。这两者不能与其余十八个具有“LLM -> 工具 -> LLM”执行回环的项目视为同等工具运行时。Dify 是租户服务端运行时：工具由发布应用或 Agent/workflow 配置决定，传统 Agent 串行执行并把结果回注下一轮。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十三条观察：
+二十一个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”；VCPMobile 会执行远端调度的设备工具，但本地没有 LLM 工具循环。这两者不能与其余十九个具有“LLM -> 工具 -> LLM”执行回环的项目视为同等工具运行时。Dify 是租户服务端运行时：工具由发布应用或 Agent/workflow 配置决定，传统 Agent 串行执行并把结果回注下一轮。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十四条观察：
 
 1. **策略层完整但默认放行面大：LobeHub。** 人工审批状态机 `humanIntervention` 是七个项目里设计最完整的：支持四种模式，API 级规则可覆盖 manifest 级规则，`always` 不会被 auto-run 绕过；但绝大多数内建工具根本不声明该字段，未声明即默认 `never` 自动执行。凭证、浏览器、消息与代理管理四类插件——`lobe-creds` 的凭证保存与注入、`lobe-browser` 的八个 API、`lobe-message` 约 30 个 API（含 `deleteBot`）、`lobe-agent-management` 的 `callAgent`/`installPlugin`——均零声明。
 2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio、DeepChat。** 三者都有逐次审批或权限 broker。Chatbox 让计费与应用状态变更类操作不受 `agentFullAccess` 放行；DeepChat 将审批绑定到会话、服务器身份、配置代数、binding hash、execution id 与参数 hash，并设 pending 上限和超时；Cherry Studio 则在 renderer、主进程和 Claude SDK hook 之间串联审批。各自边界分别是 Windows 无 OS 隔离、`acceptEdits` 首词白名单，以及 DeepChat 各工具实际 preflight 与 MCP transport 尚未运行核验。
@@ -73,7 +74,9 @@
 12. **作用域分层 + 瀑布式执行管线的注册制运行时：DeepSeek Harness。** 工具是注册在内存 registry 的代码对象：`ToolDefinition` 含模型可见 schema、强制 `output` 输出契约与纯函数 `presentCall`/`presentResult`；作用域是全局加每 agent 的层链，restrict 的 allow/deny 只过滤继承面。执行沿固定管线：`tool/call` 落盘 → pre-execute 策略瀑布（ask 经 approval seam 放行，唯一放行结果 allowed-once）→ 单调 guard → execute → post-execute → `tool/result` 落盘，`deriveMessages` 从日志投影模型历史。调度器按 executionMode 分 exclusive 屏障与 parallel 滚动池（默认并发 10）。能力经 capability seam 三角色与工具解耦，bash/pwsh、fs、web、terminal、skill、subagent、MCP 桥等各有 seam，provider 可整体替换而模型可见 schema 不变。
 13. **MCP 为唯一工具协议、全量注入零过滤、审批几近缺失的聊天前端：Risuai。** 工具面完全以 MCP 为骨架——模块声明的远程 MCP、内置 internal 客户端、插件 `registerMCP` 与 OpenAI Responses 内置 `web_search_preview` 四类来源，没有独立函数注册表。发现与注入零过滤：主聊天请求不传工具参数，请求入口每请求拉取全部已激活 MCP 的工具注入四类请求体，无模型能力判定、无会话裁剪、无 token 预算、无去重。编排没有统一驱动层：非流式链递归请求函数自身，流式链在流包装器内联续请求，工具串行、未找到任何迭代上限，Claude 流式路径不解析 `tool_use`、是唯一没有工具循环的格式。审批只存在于 `internal:risuai` 13 个写/删工具的执行端，其余工具无任何审批；全部执行在前端上下文，插件工具在 iframe 沙箱内。
 
-当前样本还增加了几个更清晰的执行边界：Cherry Studio 已把 Claude Code、Pi 与 DeepSeek Harness 接入同一会话服务和审批注册表，但三者仍各自维护工具桥；AstrBot 允许工具以空结果结束 Agent，并把后台/定时路径纳入同一轮次上限；Pi 的本地 Shell 在 Windows 优先选择 PowerShell 7；VCPToolBox 的 AgentAssistant 则以 Flowlock 的开始、心跳和终止标记收束委托循环。它们分别说明“共用控制面”“循环收口”“本地执行域”和“协作协议”不能由同一个工具数量指标代替。
+14. **运行上下文装配 + 多层策略收敛的本地运行时：OpenClaw。** 工具目录每次运行按上下文重建，核心编码工具、OpenClaw 控制工具、渠道/插件工具与可选 MCP 目录汇入同一 Agent Core 契约；发现后经消息方、模型能力、会话/沙箱/发送者策略与 allow/deny 多层过滤，子 Agent 只继承父运行最终授权后的 allowlist，而非重信原始配置。执行分布在主机/sandbox 与本地 Gateway 适配器、MCP transport；审批是执行前策略链（循环准入→可信策略→插件 hook）的一环，允许一次/始终允许/拒绝/超时，超时与无审批面默认阻断（fail-closed）。
+
+这组样本还揭示了几条更清晰的执行边界：Cherry Studio 已把 Claude Code、Pi 与 DeepSeek Harness 接入同一会话服务和审批注册表，但三者仍各自维护工具桥；AstrBot 允许工具以空结果结束 Agent，并把后台/定时路径纳入同一轮次上限；Pi 的本地 Shell 在 Windows 优先选择 PowerShell 7；VCPToolBox 的 AgentAssistant 则以 Flowlock 的开始、心跳和终止标记收束委托循环。它们分别说明“共用控制面”“循环收口”“本地执行域”和“协作协议”不能由同一个工具数量指标代替。
 
 ## 四个必答问题
 
@@ -100,6 +103,7 @@
 | VCPChat | 上游 `tool_calls` / VCP 文本块 / 自带节点工具 | **自带 `VCPDistributedServer` 子进程**、远端 ToolBox | 审批终端，规则可配得任意宽 | 自带节点在本机执行 PowerShellExecutor 等高危插件 |
 | VCPMobile | 用户显式启用后向主服务注册的 14 项设备工具；本地聊天不注入该目录 | Tauri/Rust 进程与 Android 插件桥，由远端主服务的 `execute_tool` 调度 | 启用是前置授权；执行时仅复核已启用和名称存在，无逐次本机审批 | 持节点 WebSocket Key 的远端请求可调度已启用设备能力；服务端审批语义不在本仓库范围 |
 | VCPToolBox | 插件 manifest 描述 + 上下文占位符 | Node/Python/native 子进程、分布式节点 | 命中规则才审批，超时拒绝 | 审批响应无身份校验，任何持全局 Key 的连接可批准任意请求 |
+| OpenClaw | 按运行上下文装配、再经多层策略过滤的一次性工具目录（核心编码/OpenClaw 控制/渠道/插件/MCP，可选 Tool Search） | 主机或 sandbox workspace；Gateway/消息/渠道经本地 Gateway 适配；MCP 走 stdio/SSE/HTTP transport；节点/浏览器/计算机类需客户端能力 | 命中 `requireApproval` 才询问（允许一次/始终允许/拒绝/超时）；未命中自动执行，逐工具默认审批面未逐项核验 | 沙箱/workspace 边界非 OS 级隔离（取决于运行配置与沙箱实现，静态主链确认）；审批 UI、超时实际表现与真实 MCP 连接未运行验证 |
 
 ## 项目实现概览
 
@@ -179,6 +183,10 @@ VCPMobile 是远端 VCP 主服务可调度的移动设备节点，不是本地 A
 
 VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状态。插件可通过 Node、Python、native、stdio、direct 或 distributed 路径运行；框架没有统一沙箱，`requiresAdmin` 也不是框架强制点。它的解析器不保护 Markdown code fence，并可用 `fuzzyToolMatching` 放宽语法；审批超时会拒绝，但审批响应没有身份绑定，异步 `/plugin-callback` 也缺少鉴权。
 
+### OpenClaw
+
+OpenClaw 的工具面按运行上下文装配而非固定全局表：核心编码工具、OpenClaw 控制工具、渠道工具、插件工具与可选 MCP 目录汇入同一 Agent Core 契约（`toolCall` → `toolResult`），Provider 协议差异由流适配层承担。装配后经消息方、模型能力、会话/沙箱/发送者策略与 allow/deny 多层过滤（非 owner 会被移除控制面工具，内存压缩运行只留 read 与追加式 write），子 Agent 只继承父运行最终授权后的 allowlist。执行域按工具分布：读写编辑与 shell 在主机或 sandbox workspace，Gateway/消息/渠道经本地 Gateway 适配，MCP 走 stdio/SSE/HTTP transport，节点/屏幕/计算机类要求客户端能力。审批是执行前策略链（循环准入→可信策略→插件 hook）的一环，允许一次/始终允许/拒绝/超时，超时与 Gateway 不可用默认阻断；批次默认并行、逐工具可声明串行，结果以 `toolResult` 顺序回注，未启动/被跳过/拒绝/失败/取消均有可观察结果。MCP 连接以 session 级租约管理并限制目录预算，外部结果被显式标记为不可信网络内容；上述策略边界不等同于 OS 级隔离，实际隔离强度取决于运行配置与沙箱实现。
+
 ## 横向矩阵
 
 ### 工具发现与注入
@@ -205,6 +213,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | VCPChat | 消费上游目录；自带节点向服务端 `register_tools` | 上游注入 | 客户端不负责收窄 |
 | VCPMobile | Rust 内置设备注册表；仅用户显式启用的 manifest 在连接后 `register_tools` | 本地聊天不注入；目录供远端主服务消费 | disabled_names 持久化；新工具默认禁用 |
 | VCPToolBox | 插件 manifest 扫描 | 描述文本进 system prompt，占位符体系 | 插件启用/禁用 |
+| OpenClaw | 装配入口按运行上下文构建：核心编码工具、OpenClaw 控制、渠道、插件与 MCP `tools/list` 分页（页/条目/字节上限） | 统一 `toolCall` schema 经 `toToolDefinitions` 进会话；MCP 目录投影为 Agent 工具，resources/prompts 转只读工具 | 消息方、模型能力、会话策略、沙箱、群组、插件 allow/deny、owner denylist、客户端 capabilities；内存压缩运行只留 read 与追加式 write |
 
 工具集稳定性有三种不同做法：AIO Hub 将稳定定义与逐轮动态上下文拆开；Jan 对智能路由结果签名并冻结；Hermes Agent 则不缓存 tools 数组，为维持 system prompt cache 而主动缩小全量工具集。Cherry Studio 的 `exposure` 三态（`user`/`internal`/`disabled`）决定工具是给用户看、仅内部调用，还是硬禁用；Manifold Desktop 虽能注入目录，却不应被误计为可执行工具集。
 
@@ -234,6 +243,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | VCPChat | 自研 VCP 文本协议与分布式节点协议 | 客户端消费上游调用，节点注册和插件执行不经过通用工具 SDK |
 | VCPMobile | 自研 WebSocket 节点注册/执行协议 | 不参与本地模型调用或续写；仅接收远端 `execute_tool`、执行并回传 `tool_result` |
 | VCPToolBox | 自研文本解析器、plugin manifest 与执行器 | 模型输出到插件执行的协议、审批与分布式转发均由自身实现负责 |
+| OpenClaw | 自研 Agent Core（`toolCall`/`toolResult` 契约）+ Provider 流/定义适配层 | 工具发现、过滤、审批、执行与结果回注均由应用掌握；无第三方 agent SDK 接管循环 |
 
 ### 模型调用表示与解析
 
@@ -257,6 +267,7 @@ VCPToolBox 负责 VCP 文本解析、插件执行、分布式转发和审批状�
 | Risuai | 各家原生结构化字段（tool_calls / tool_use / functionCall / function_call）；`<tool_call>` 标签仅消息内持久化引用 | arguments 仅 JSON.parse，失败转文本错误回注；工具名未注入时写 "No tool found" 消息；无 JSON Schema 校验；Claude 流式不解析 tool_use |
 | SillyTavern | 原生 function call，五家格式归一化 | 归一化后按模型返回顺序串行 `await` |
 | VCPToolBox | VCP 文本块 | 状态机扫描，带 `fuzzyToolMatching` 开关；**不保护 code fence** |
+| OpenClaw | 统一 `toolCall` 内容块（id/名称/参数）经 `convertToLlm` 转换，Provider 流 tool-call start/delta/end 合并回 assistant | 参数按 TypeBox/JSON Schema 与执行体复查；找不到工具/参数无效/准备失败生成未执行错误结果；非标准返回值归一为 `content[]`，执行异常转 error 文本结果 |
 
 这里有一处跨项目的实质不一致：**AIO Hub 与 VCPToolBox 跑同一套 VCP 文本协议，但边界容错并不相同。** AIO 会跳过 Markdown 代码块、inline code 和 ESCAPE 参数区，并在未闭合坏块后从下一同级请求起点恢复；VCPToolBox 的状态机不保护 code fence，另有 `fuzzyToolMatching` 开关容忍多种标记变体。同一段模型输出在两端可能得到不同调用集合，这既是兼容性问题，也是安全边界差异。AIO 渲染器还有仅用于显示的模糊恢复，工具执行侧不会因此放宽。
 
@@ -285,6 +296,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | SillyTavern | 递归上限 5 | 串行 `await` | — | — |
 | VCPToolBox | 有迭代上限 | 同轮 `Promise.all` | 有 | 审批超时 5 分钟后拒绝 |
 | VCPMobile | 不适用：本地不驱动 LLM 工具循环 | 最多 8 个远端 `execute_tool` 在途执行 | manifest 声明 10 秒协议 timeout；远端实际超时未验证 | 节点断开时取消子任务并等待收束 |
+| OpenClaw | 未找到显式步数上限（终止靠 stopReason 与中止）；critical loop 首次可走一次恢复、再次命中生成终止消息且不执行 | 批次默认并行；任一工具 `executionMode:"sequential"` 或配置要求时整批串行 | 未找到统一工具超时（MCP runtime 有目录重试/冷却常量） | 执行前后检查 abort；串行每调用前查 steering 队列，未启动尾部调用生成 `skipped` 结果 |
 
 两处实现特征值得记：一是 Chatbox 的 `maxSteps` 名义无限，真实限制是应用层 25 次调用确认阈值（且该确认点可按会话/全局关闭）；二是 LobeHub 的并发治理采用两套标准——子 agent 批量硬编码上限 15，普通工具批量与群组广播都是无上限的并行请求。
 
@@ -312,6 +324,7 @@ AIO 的 `ToolCallingProtocol` 定义了工具说明生成、协议说明生成�
 | VCPChat | 命中规则自动允许 | 字符串 contains/exact/regex，无风险分级 | — | 规则可配成 `.*` → 全部自动通过 |
 | VCPMobile | 工具默认禁用，用户逐项显式启用后才注册 | 启用集 + 工具名；定位/通知另有 Android 权限 | 分布式节点与单项工具开关 | 配置缺失、损坏、过大或含未知名称时全部禁用；已接收调用不逐次审批 |
 | VCPToolBox | 命中规则才审批 | 工具名 + 参数匹配 | — | 超时/无连接 → **拒绝（fail-closed）** |
+| OpenClaw | 命中 `requireApproval` 才询问；未命中自动执行（逐工具默认审批面未逐项核验） | 工具级 + 策略链（循环准入→可信策略→插件 hook），可改写参数/阻断/要求审批 | 无单一总开关；由 policy pipeline、sandbox/subagent/owner denylist 分层收敛 | 超时、Gateway 不可用、hook 失败默认阻断（fail-closed） |
 
 同一个策略层在不同项目里的失效方向相反：VCPToolBox 与 Hermes Agent 超时/无交互时拒绝，DeepChat 的 pending 有上限与超时并在会话清理时取消，OpenCode 的 `ask` 无超时会永久挂起（AIO Hub 已把同类挂起改为可配置超时，默认仍无限等待），LobeHub 的 connector 权限查询失败则放行。评估“有审批”时必须同时记录其绑定粒度和失效方向。
 
@@ -340,6 +353,7 @@ Chatbox 的 `AppActionApprovalPausedError` 值得单独点出：计费与应用�
 | VCPChat | **自带 `VCPDistributedServer` 子进程**、远端 ToolBox | 自带节点对自己的插件也不做隔离 | — |
 | VCPMobile | Tauri/Rust 进程与 Android 插件桥 | 无容器或浏览器沙箱；工具执行前仅检查本机启用集和名称 | Android 定位、通知受平台权限约束；其他设备工具的逐项参数边界未验证 |
 | VCPToolBox | Node/Python/native 子进程、分布式节点 | 无框架级沙箱；`LinuxShellExecutor` 自带八层校验与可选 bubblewrap/firejail/docker，`PowerShellExecutor` 只有关键字黑名单 | 两个 shell 插件风险等级不对等 |
+| OpenClaw | 主机或 sandbox workspace；Gateway/消息/渠道经本地 Gateway 适配；MCP 走 stdio/SSE/HTTP transport；节点/屏幕/计算机类需客户端能力；子 Agent/ACP 子运行 | workspace/sandbox 根、workspace-only/read-only、进程 scope key、超时与 safe-bin 策略注入；外部 MCP 输出标不可信；非 OS 级隔离，取决于沙箱实现 | 静态主链未见平台级差异结论；Windows/容器真实隔离未运行验证 |
 
 Cherry Studio 这一行的"不持有执行本身"是理解它的关键：Claude Code 的 Bash/Read/Write 由 SDK 自带原生二进制执行，Cherry 只能通过禁用列表、`canUseTool` 回调和 hook 去拦，无法在执行点上加沙箱。这与 Chatbox 自己起沙箱进程、LobeHub 自己控制云沙箱是不同的权力位置。
 
@@ -367,8 +381,9 @@ AIO Hub 的路径沙箱需要特别标注：前端沙箱已加固——`resolve_
 | SillyTavern | — | — | 无 |
 | VCPToolBox | 有 | — | 无 |
 | VCPMobile | 不适用：结果只以 `tool_result` 回传远端主服务，本地不回注模型上下文 | success/error 结果消息 | 结果长度未确认 |
+| OpenClaw | 未找到统一结果截断值 | `toolResult` 消息 + `tool_execution_start/update/end` 事件；MCP 结果去 `_meta`、序列化为 JSON 文本并标 `untrustedMcpOutput` | 无输出侧过滤层；未启动/被跳过/拒绝/参数错误/失败/取消各有 result/diagnostic |
 
-十八个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、Dify、LobeHub、OpenCode 和 Pi 都有落盘/预览或消息文件回流方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
+十九个已形成执行回环的项目中，本次单项目笔记都未确认存在统一的工具结果内容信任标记或输出侧过滤层；Manifold Desktop 因无结果回注不适用。截断只解决过长，不解决内容是否可信。Hermes Agent、AstrBot、Dify、LobeHub、OpenCode 和 Pi 都有落盘/预览或消息文件回流方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
 
 ## 基础审计框架
 
@@ -520,6 +535,7 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 | VCPChat | 自带节点的 `Plugin/*` 目录 | 无——自带节点不隔离自己的插件 |
 | VCPMobile | Rust 内置设备工具注册表 | 只注册用户显式启用的内置工具；无 MCP、外部插件安装或 Skill 发现；远端主服务的目录消费和审批另属其边界 |
 | VCPToolBox | plugin manifest、分布式节点 | 插件宿主自身权限 + 审批规则；节点只有一层全局 `VCP_Key` |
+| OpenClaw | 插件（工具 + before-tool-call/trusted policy hook）、MCP server（stdio/SSE/HTTP，resources/prompts 投影只读工具）、Skill（读取路径快照 + Skill Workshop）、Tool Search、客户端托管工具 | 多来源汇入同一 Agent Core 后仍在最终授权阶段过滤；子 Agent 继承父运行最终授权后的 allowlist；审批超时/无审批面 fail-closed；MCP 输出视为不可信网络内容；非 owner 调用者被移除控制面工具 |
 
 一条容易混淆的区分：**MCP、Skill、Plugin 三者的权限模型完全不同。** MCP 通常连接进程或远端服务；Skill 通常是模型可读的指令/流程文本，本身不带权限；Plugin 往往是与宿主同权的可执行代码。Chatbox 的 skill 安装校验不替代 `user_exec` 审批；SillyTavern 的 Git 安装警告不替代 extension action 的权限隔离；VCPToolBox 的 `requiresAdmin` 声明不替代插件内部的实际比对。工具界面应当说明执行位置与权限，而不仅是工具名。
 

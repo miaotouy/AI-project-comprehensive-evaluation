@@ -1,10 +1,10 @@
 # AI 客户端特色功能贡献统计
 
-> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPToolBox`
+> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`Open WebUI`、`Pi`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-19
+> 对比更新日期：2026-09-04
 >
-> 依据：各单项目调查笔记（含通用类目、十八项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据
+> 依据：各单项目调查笔记（含通用类目、十九项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-十八个项目的专项笔记共归并出 **102 个产品功能族**，另整理 **20 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
+十九个项目的专项笔记共归并出 **102 个产品功能族**，另整理 **22 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
 
 > 覆盖说明：全部计分项均已达到静态源码意义上的 `主链确认`，但大量能力尚未运行验证。`入口确认`、外部依赖和声明不符项不计分；默认关闭的已确认能力仍可计入，但在理由中保留边界。
 
@@ -25,6 +25,7 @@
 - **媒体创作类目已正式建立，但不新增统计分。** AIO Hub、VCPToolBox、Chatbox 的 F48 仍按原口径计入；[媒体创作横向对比](媒体创作/媒体创作横向对比.md)只把三者共同的任务、历史、资产和结果复用契约抽出比较，VCPChat 的 ComfyGen/Loom/Scriptorium 与 Hi-Fi 播放器保留为扩展或相邻边界。
 - **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别覆盖 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主贡献和辅助贡献，DeepChat 的 CLI 本地控制平面归入“外部表面驾驶本地会话”主贡献族。
 - **DeepSeek Harness** 正式纳入第十八个比较对象。模型在会话中检查、定义、运行、停止和删除自身 Cordis 插件的自引用运行时，以及由会话事件日志持久化并可跨恢复、分叉和压缩一致重放的 plan mode，各形成一个主贡献族；同会话 goal 以事件溯源目标、轮次预算和连续阻塞判定补充目标闭环，session-local schedule 以“日志规则 + 可弃定时投影 + 原会话回合投递”补充定时 Agent 族，均计辅助贡献。进程沙箱、能力缝和子代理委派策略进入机制表，不重复计产品分。
+- **OpenClaw** 以两张达到主链确认的能力卡纳入，均属外部主体准入与第三方分发信任治理机制，按机制单列（M21、M22）、不进入产品功能计分：渠道 DM/设备配对审批门把静态 allowlist 升级为“请求-码-批准-白名单”的可操作审批生命周期，默认拒绝、批准持久化并驱动下一次准入；ClawHub 分发安装信任门在安装第三方 skill/plugin 前按发布信任元数据裁决，恶意发布直接拒绝、风险发布须在本机显式确认、裁决随安装记录落盘。前者依赖本机 Gateway，后者依赖仓库外 ClawHub 注册表；doctor 诊断-修复-迁移链维持入口确认亦不进入。以上均为静态源码主链确认、未运行验证，来源见[OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)。
 - **LobeHub** 的异构外部 Agent 托管统一六种 CLI、平台任务、原生会话、事件投影与取消；业务应用连接治理把账号、凭据、作用域和逐动作权限组织成 Connector 产品面。两者均为主贡献。DeepChat 与 Cherry Studio 以 ACP 安装运行时和 Claude Agent SDK 会话构成前一功能族的辅助贡献。
 - **AIO Hub** 的对话分享稿工作台把任意消息选区、独立视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成完整交付表面；NextChat 的固定品牌模板计辅助贡献。Cherry Studio 与 DeepChat 的离屏完整列表、现场滚动截图属于成熟捕获路线，记录在类目笔记中但不因工程完整度加分。
 - **Hermes Agent** 的会话心跳和目标质量门均达到主链确认。心跳作为“当前会话定时重入”的实现形态并入 F09，不在同一项目重复计分；目标质量门在 DeepSeek Harness 纳入后具备可比较对象，作为 F96 的辅助贡献计分。
@@ -99,9 +100,12 @@
 | 15 | DeepSeek Harness | 2 | 2 | 4 | 6 | 自引用插件运行时、日志化 plan mode、同会话目标驱动与定时重入 |
 | 16 | Risuai | 1 | 4 | 5 | 6 | 模型指令标签驱动的角色媒体、多后端结构保留翻译、批量发送流水线、实时房间共享与 Risu Hub 角色市场 |
 | 17 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
-| 18 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
+| 18 | OpenClaw | 0 | 0 | 0 | 0 | 外部主体显式准入与第三方扩展分发信任治理；差异化均属机制，按机制单列不并入产品分 |
+| 19 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
 
 排序先看产品特色点，再看主贡献数和覆盖功能族。分数相近不表示能力同质，例如 DeepChat 与 VCPChat 分别偏向可观测 Agent 会话和消息/桌面运行时，不能互相替代。
+
+Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊天主链未闭合的下限样本；后者的差异化能力均为安全与分发机制，已按机制单列进 M21、M22，不并入产品特色点。
 
 ## 产品功能族明细
 
@@ -258,8 +262,10 @@
 | M18 | 同权限候选域的多检索构型对照 | VCPToolBox | - | LightMemo 让 KNN、TagMemo V9、RiverMemo Topology V3 共用 SQL 作用域、查询向量和候选事实域，输出三组 Top-K 重合率与统一排名；它验证和调优记忆寻址，不另算一种用户记忆能力 |
 | M19 | 双层安全模型的插件运行时沙箱 | Risuai | - | v3.0 插件在 CSP 隔离 iframe（sandbox 仅放行 allow-scripts/allow-modals/allow-downloads、`connect-src` 置 `'none'`）内经 postMessage RPC 运行，含 SafeDocument/SafeElement 包装、流桥、AbortSignal 转发与热重载；v2.1 走 AST 静态检查与符号改写。为浏览器端插件扩展提供可复制的权限切分原型 |
 | M20 | 可重放的子 Agent 委派策略与多 Provider 能力缝 | DeepSeek Harness | - | 一个委派契约承接同进程 spawn/fork 与进程外 ACP、Claude Code、Codex、dsh SDK；父沙箱快照、子审批恒拒和 delegation scope 以事件写入子会话，可冷恢复且不能由子 Agent 扩权 |
+| M21 | 外部消息发送者与设备接入的显式准入审批门 | OpenClaw | - | 把渠道 allowlist 与设备接入升级为带请求、一次性码、过期与挂起上限、显式批准/驳回的审批工作流；批准持久化进白名单并驱动下一次准入，默认 fail-closed，为多消息渠道与设备配对提供统一的可审计接入决策（静态主链确认，未运行验证） |
+| M22 | 第三方扩展分发的发布信任裁决与落盘留痕 | OpenClaw | - | 安装链在下载前按 ClawHub 发布元数据裁决为 clean/blocked/review-required：恶意发布直接拒绝、风险发布须在本机显式确认，裁决字段随安装记录持久化、更新时重新过门；聊天命令面不能代替本机确认。依赖仓库外 ClawHub 注册表（静态主链确认，未运行验证） |
 
-明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约。VCPChat DeepMemo 2.0 已闭合“可信 Agent/Topic 上下文 → 中央聊天历史搜索 → 窗口扩展/可选精排 → 回注”的主动会话回忆链，但其产品契约仍属于常规历史 RAG 工具；这里把它记入 VCP RAG 能力地图，不另立特色族。VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。DeepSeek Harness 的 ACP 服务器、MCP 工具桥、通用子 Agent 能力和进程沙箱分别属于既有互操作能力或机制贡献，不因 Provider 数量和主链闭合另加产品分；仅达到入口确认的 workflow/jobs、bundle patch-layer、运行时 invariants 和 e2b POC 也不计入。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
+明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约。VCPChat DeepMemo 2.0 已闭合“可信 Agent/Topic 上下文 → 中央聊天历史搜索 → 窗口扩展/可选精排 → 回注”的主动会话回忆链，但其产品契约仍属于常规历史 RAG 工具；这里把它记入 VCP RAG 能力地图，不另立特色族。VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。DeepSeek Harness 的 ACP 服务器、MCP 工具桥、通用子 Agent 能力和进程沙箱分别属于既有互操作能力或机制贡献，不因 Provider 数量和主链闭合另加产品分；仅达到入口确认的 workflow/jobs、bundle patch-layer、运行时 invariants 和 e2b POC 也不计入。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。OpenClaw 的 doctor 诊断-修复-迁移链维持入口确认（完整修复闭环未逐条走查），其渠道准入与分发信任门按机制单列（M21、M22），同样不进入产品计分。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
 
 ## 如何解读结果
 
@@ -295,6 +301,7 @@ AstrBot、DeepSeek Harness、OpenCode、Pi、VCPToolBox 本来就不以普通桌
 - [VCPToolBox 独特功能调查笔记](独特功能/VCPToolBox-独特功能调查笔记.md)
 - [Risuai 独特功能调查笔记](独特功能/Risuai-独特功能调查笔记.md)
 - [DeepSeek Harness 独特功能调查笔记](独特功能/DeepSeek-Harness-独特功能调查笔记.md)
+- [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)
 - [DeepSeek Harness 已调查能力汇总](已调查能力汇总/DeepSeek-Harness-已调查能力汇总.md)
 - [VCP-Disco-Elysium-Mod（公开第三方思维簇模组）](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)
 - [Agent 角色横向对比](Agent角色/Agent角色横向对比.md)

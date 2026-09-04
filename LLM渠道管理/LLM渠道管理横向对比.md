@@ -1,10 +1,10 @@
 # LLM 渠道管理横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox、OpenClaw
 >
-> 对比更新日期：2026-08-31
+> 对比更新日期：2026-09-04
 >
-> 依据：同目录二十份源码调查笔记及其中记录的代码快照
+> 依据：同目录二十一份源码调查笔记及其中记录的代码快照；OpenClaw 依据 [OpenClaw-LLM渠道管理调查笔记.md](OpenClaw-LLM渠道管理调查笔记.md)
 >
 > 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、SDK 使用与请求组装、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-二十个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、Dify、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPMobile 都是单网关客户端，VCPToolBox 是单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
+二十一个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、Dify、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPMobile 都是单网关客户端，VCPToolBox 是单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体；OpenClaw 以 Provider 名、协议注册表与模型目录/凭据快照表达渠道，同样没有用户可管理的渠道实例。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
 
 横向核验后的主要结论如下：
 
@@ -28,6 +28,7 @@
 - **VCPToolBox 是协议与模型编排层，不是多 Provider 渠道池。** 它统一多种入站协议，支持模型别名、语义选模、特定请求的模型 fallback 和普通请求重试；所有核心请求仍走同一个 OpenAI-compatible 上游和同一枚 Key。
 - **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key、无跨 Provider failover。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
 - **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK 的 `streamText`（内置 Provider 表 + npm 动态安装），另有可选的 native 协议实现。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 请求默认自动做 prompt caching，可通过 `setCacheKey` 关闭。
+- **OpenClaw 用“逻辑 Provider + 协议注册表 + 模型目录/凭据”三层表达渠道，没有面向用户的渠道实例。** 模型引用 `provider/model` 是命名空间与品牌身份，执行实现按 `model.api` 在进程内按需注册的流式适配器注册表中选取（内置八组 lazy 注册，插件可注入 stream），运行时 `ModelRegistry` 把模型目录与凭据组织成会话解析快照；目录来源为 author-owned `models.json`、provider 插件 catalog（agent SQLite 缓存）与动态 `registerProvider`，Endpoint 粒度是 provider+model.id+baseUrl。凭据分 auth profile（SQLite auth store，带 cooldown/disabled 与 stickiness）与 SecretInput marker 两层，models.json 只存来源 marker 不落明文；同 provider 失败按同 key 瞬时重试、限流换 env key、auth profile 轮换、模型 fallback 四层收口，configured 主选的 `fallbacks` 链可跨 Provider，user pin 严格不回落。连接测试复用 CLI auth-probe 引擎并做成真实最小模型请求；没有健康感知的跨 Provider 调度闭环。
 - **DeepSeek Harness 是 Pi 家族衍生：渠道治理全在 dsh 侧，pi-ai 只贡献模型目录、Provider 构造与事件流。** `LlmRuntime` 持有 route → adapter 实例注册表，route 只是注册键不是用户实体，注册与替换同步原子；直连适配器 `dsh-llm-deepseek`（fetch + SSE）与 pi-ai 适配器 `dsh-llm-pi-ai`（复用 `@earendil-works/pi-ai`）自始实现同一 `StreamChunk` 词汇以验证 seam 中性，凭据解析、retry policy、settings 分层与错误分类全在 dsh 侧。key 永不进配置：只存 `apiKeyEnv` 引用，经凭据 seam 每请求解析（继承环境 > `.credentials.yaml` > `.env`）；重试在 agent 步边界由 `agent/request-error` 瀑布执行，normal 默认最多 2 次；模型目录是配置，不自动刷新。
 - **Risuai 的“模型 ID 即渠道 + 全局活动设置”形态把渠道实体弱化到极限。** 渠道由模型条目加全局设置字段组合表达，多连接靠内置条目变体、`reverse_proxy` 单例、`xcustom::` 数组与插件条目；凭据全库明文，Web 请求经 `/proxy2` 中转完整经过第三方进程，请求日志原样记录含鉴权头的 headers。失败处理分同模型重试、按任务模式分离的模型 fallback 候选链与工具链重试，候选是任意模型 ID 的用户静态配置，触发条件不是健康状态。
 - **AstrBot、DeepChat 与 Open WebUI 都是服务端/主进程渠道层，但治理重点不同。** AstrBot 允许同一来源生成多个能力实例，错误驱动换 Key，并在图片能力或空输出时走显式 fallback；DeepChat 将 Provider、ModelConfig、runtime registry 与 QPS 队列分开；Open WebUI 以 URL 配置行表示连接，OpenAI 模型固定到首见连接，Ollama 同名模型可随机选后端。
@@ -39,7 +40,7 @@
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 对数据库 Provider 凭据做 AES-GCM 加密；Jan 与 Manifold Desktop 分别使用 OS keyring 和 Windows Credential Manager。Hermes Agent 以 `.env`/`auth.json` 分层存储并在日志、UI、备份和子进程环境中脱敏，但底层文件不是密文库。其余多项目仍有明文配置或客户端持久化边界。备份是否包含 Key 必须单独核对。
 - **SDK 使用分三类：AI SDK 统一抽象、官方 SDK 直用、自研协议实现。** 凡项目级重试与 SDK 重试并存的项目都显式分权——Chatbox、Cherry Studio 与 DeepSeek Harness 关闭 SDK 内层 retry，Pi 镜像官方 SDK 判定；SDK 只承担协议层，渠道决策、Key 选择与平台传输都在 SDK 之外。
-- **不适合给二十者排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
+- **不适合给二十一个项目排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
 
 AstrBot 的 SSYCloud 接入、元数据备用端点与推理强度预设，继续落在来源实例、模型目录和请求预设三层；Cherry Studio 则补充了 DeepSeek V4 的路由与图像目录，并让 Pi/DeepSeek Harness 的模型选择经过独立兼容性解析。这些变化强化了“渠道目录、运行时可选模型和实际请求协议”应分开比较的口径。
 
@@ -67,6 +68,7 @@ AstrBot 的 SSYCloud 接入、元数据备用端点与推理强度预设，继�
 | VCPChat | 全局 VCP URL/Key | 裸 model id | 单 Key / 不适用 | 无 | 无 | `settings.json` 明文 |
 | VCPMobile | 全局 VCP URL/Key | 裸 model id | 单 Key / 不适用 | 无 | 无 | SQLite `settings.global` JSON 明文 |
 | VCPToolBox | 全局上游 URL/Key | 上游或虚拟 model id | 单 Key / 不适用 | 默认 3 次总尝试 | 本地无；语义模型可换候选模型 | `.env` 明文 |
+| OpenClaw | 无渠道实体；Provider 名 + api 注册表 + ModelRegistry 目录/凭据快照 | `provider/model`（目录行含 baseUrl/api/compat） | env key 集 + 多 auth profile；限流可换 env key，profile 轮换带 cooldown/disabled | 同 key 瞬时重试；超载类错误全链整链至多重试 10 次 | 无健康调度；configured 主选可沿 `fallbacks` 换模型/Provider（静态配置，user pin 不回落） | SQLite auth store（每 Agent）+ env/SecretRef marker；models.json 无明文 key；静态加密未确认 |
 
 矩阵中的“重试次数”沿用各项目自己的配置语义，不能直接横比。Chatbox 计总 attempt，LobeHub 配置 retry 次数，VCPToolBox 的 `ApiRetries` 表示总尝试数；AIO Hub 的渠道层不重试，重试在聊天应用层（默认最多 2 次、可配置间隔与模式）并重新选 Key；Pi、OpenCode、AstrBot 与 Hermes Agent 还各自叠加多层重试；Risuai 的 `requestRetrys` 是同一模型内的最多重试次数，fallback 候选链推进会整体重发请求。Hermes Agent 的静态 fallback 链是本次确认最完整的跨 Provider/端点通用链路，Risuai 的模型 fallback 候选链也能沿用户配置的模型 ID 跨 Provider 切换，但两者都不是按实时健康动态选择。
 
@@ -164,6 +166,10 @@ DeepSeek Harness 的 Provider 是 `LlmRuntime` 注册表里的 route 键，不�
 
 Risuai 把渠道拆散成模型条目与全局活动设置，没有独立实体：模型 ID 决定 Provider 分类、协议格式、端点与 Key 标识，URL 与 Key 则取自唯一 `Database` 对象的字段级覆盖；多连接靠内置条目变体、全局 `reverse_proxy` 单例、`xcustom::` 自定义数组与插件条目表达。失败处理分同模型重试、按任务模式分离的模型 fallback 候选链与工具链重试，候选是用户静态配置的任意模型 ID，触发条件是错误与空响应，不是健康状态。
 
+### 15. Provider 目录 + 协议注册表 + 凭据分层型：OpenClaw
+
+OpenClaw 的 Provider 名只是模型引用与凭据归属的品牌身份，协议执行按 `model.api` 在进程内注册的流式 adapter 注册表里选取（内置八组 lazy 注册，插件可注入 stream），运行时 `ModelRegistry` 把模型目录与凭据组织成会话解析的查询快照，三层各自独立演进。目录来源为 author-owned `models.json`、provider 插件 catalog（agent SQLite 缓存）与运行时 `registerProvider` 动态注入，Endpoint 粒度是 provider+model.id+baseUrl，没有用户可见的 Endpoint/渠道实例。凭据分 auth profile（SQLite auth store，含 cooldown/disabled、round-robin 与 stickiness）与 SecretInput marker 两层，models.json 只存来源 marker；失败处理按同 key 瞬时重试、限流换 env key、auth profile 轮换、模型 fallback 分层，configured 主选的 `fallbacks` 链可跨 Provider，user pin 严格不回落。它不是多 Provider 渠道池，也没有健康感知的跨 Provider 调度闭环。
+
 ## 渠道身份与配置复用
 
 稳定身份决定了模型收藏、历史记录、统计和故障切换能否准确指向原连接。
@@ -189,6 +195,7 @@ Risuai 把渠道拆散成模型条目与全局活动设置，没有独立实体�
 | OpenCode | Provider id（branded string，内置 11 个 + 自定义） | 注册多个自定义 provider id；同 id 单凭据 | `options` 无数组形态，多端点需新 id；模型别名经 config `models.<alias>.id` |
 | DeepSeek Harness | route 注册键（adapter 声明 route 集，原子 replace） | 同一 adapter 实例多 route；pi-ai 一实例多 profile；settings 加 route | 无用户渠道实体；settings 只能加 route、删不掉 base 的 route |
 | Risuai | 模型条目 ID + 全局字段覆盖 | 内置条目变体、`reverse_proxy` 单例、`xcustom::` 数组、插件条目 | 无独立渠道实体；同一 Provider 多连接靠条目复制与自定义条目维护 |
+| OpenClaw | Provider 名（品牌身份/命名空间）+ ModelRegistry 目录行 + auth profile；会话 pin `provider/model` | 同 provider 多模型、多凭据 profile；自定义 provider 插件或运行时 `registerProvider`；baseUrl 可写在 provider 或 model 级 | 无用户渠道实例与 Endpoint 表；删除 = 从 models.json/配置移除条目；未找到复制命令 |
 
 Cherry Studio 的 `providerId` 与 `presetProviderId` 分离值得借鉴。前者保证用户实例稳定，后者保留继承关系；用户可拥有两条继承同一预设、但凭据和端点独立的渠道。AIO Hub 的 Profile 也能直接表达多实例，结构更集中。LobeHub 和 Chatbox 可以用自定义 ID 达到类似结果，但内置实例和自定义实例需要按各自规则管理。
 
@@ -219,6 +226,7 @@ VCPChat 和 VCPToolBox 则应作为另一种部署选择看待。它们预期多
 | VCPChat | Electron 全局设置 | 可编辑唯一网关 URL、Key 和 Agent 模型 | 无 Provider 实例新增或复制 | 无逐渠道启停/删除 | 无渠道导入导出或独立连接测试 |
 | VCPMobile | 移动端设置页 | 可编辑唯一 VCP URL、Key 和 Agent 模型 | 无 Provider 实例新增或复制 | 无逐渠道启停/删除 | 无渠道导入导出；可验证 `/v1/models`，并可逐模型 ping |
 | VCPToolBox | Web 管理端与 `config.env` | 可编辑唯一全局上游和语义路由 | 无上游 Provider 实体；只能新增路由 preset/route | 无逐上游启停/删除 | 全目录备份不等于渠道导入导出；管理端可测模型目录和真实 Chat |
+| OpenClaw | Control UI（Settings → Model Providers）与 CLI（`onboard/configure`、`models` 子命令族）及配置文件 | UI 可编辑 provider apiKey（显示来源不显示明文）与 Default models/fallbacks；配置文件可完整编辑 | 可新增 provider/自定义端点；未找到复制入口（本次未找到） | provider 插件按 plugins 启停；模型行无独立启停开关，删除即移除 models.json/配置条目 | 已检查入口未找到 provider 级导入导出（本次未找到）；Test connection 经 `models.probe` 复用 CLI auth-probe 引擎，发起真实最小模型请求 |
 
 AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 的图形入口覆盖了已有渠道编辑、新建、启停、删除和连接测试；差异主要在复制与导入导出。AstrBot 的 Dashboard 也覆盖主要生命周期，但 source、聊天模型 provider 和其他能力 provider 的复制、删除与测试规则不同，不能压成一个“全支持”。LobeHub 的 Web、桌面和 CLI 共用服务端权限与持久化边界，入口较完整，但仍没有渠道复制或专用导入导出。
 
@@ -273,6 +281,7 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 | VCPChat | 自研单次 fetch | OpenAI 风格 payload | 无（单网关，URL/Key 全局） |
 | VCPMobile | 自研 Rust HTTP/SSE 客户端 | 普通 Chat Completions 或 `/v1/chatvcp/completions`；Bearer 鉴权 | 路径选择、Agent 参数、请求 ID 与中断租约；无多渠道选择 |
 | VCPToolBox | 自研 `fetchWithRetry` | 入站协议转换与出站 payload | 重试策略、语义路由、取消级联 |
+| OpenClaw | 自研 LlmRuntime + `packages/ai` api 注册表（内置八组 lazy 注册 + 插件 stream）+ transport 层 | 协议请求体、鉴权与流式由 adapter/transport 承担 | 目录合并、凭据解析优先级、auth profile 轮换与 cooldown、env key 旋转、模型 fallback、探测与脱敏 |
 
 请求构造层决定协议兼容面与流式词汇的归属。自研实现并不等于协议覆盖少：SillyTavern 的 26 个 Chat Completion source 与 Risuai 的 24 个 LLMFormat 分支都是自研，覆盖面反而最宽；官方 SDK 直用者获得协议兼容与原生错误类型，却要在 SDK 之外叠加重试与 Key 逻辑；AI SDK 使用者把协议差异压缩进 provider 抽象，代价是协议行为受 SDK 版本约束。
 
@@ -294,7 +303,7 @@ SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收�
 
 ## 模型目录与元数据
 
-模型目录在二十个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
+模型目录在二十一个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
 
 | 项目 | 主要来源 | 模型归属 | 元数据对运行时的作用 |
 |---|---|---|---|
@@ -317,6 +326,7 @@ SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收�
 | VCPChat | 同网关 `/v1/models` | 无本地 Provider 命名空间 | 主要用于选择、收藏和展示 |
 | VCPMobile | 同网关 `/v1/models`，SQLite 缓存 | 无本地 Provider 命名空间 | 仅 ID、对象类型、创建时间、owned_by 与本地收藏/使用统计；不提供能力、价格或上下文元数据 |
 | VCPToolBox | 上游 `/v1/models` + 别名 + 虚拟模型 | 单上游 | 公开名改写和语义路由 |
+| OpenClaw | author-owned `models.json` + provider 插件 manifest/catalog（agent SQLite `cache_entries` 缓存）+ 运行时 `registerProvider` + hosted catalog 增量（默认 URL，TTL 6h，仓库内无生成文件） | Provider/模型目录行（运行时查询快照，无 Provider 实体表） | api/协议、baseUrl、params/headers/compat、cost/contextWindow 等参与 adapter/transport 组装与“有凭据可用”过滤；目录进 SQLite 缓存与 UI 快照，热路径不新鲜轮询 |
 
 AIO Hub、Cherry Studio 和 LobeHub 都把模型稳定地放在 Provider 命名空间内，可以避免不同服务暴露同名模型时误路由。Chatbox 的运行时键同样包含 Provider。VCPChat 保存裸模型 ID，符合单网关假设；一旦用户替换网关，本地收藏或统计未必还指向原模型语义。
 
@@ -353,6 +363,7 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | VCPChat | 单值 | 固定 | 无 | 不适用 |
 | VCPMobile | 单值 | 固定 | 无 | 不适用 |
 | VCPToolBox | 单值 | 固定 | 无 | 不适用 |
+| OpenClaw | env key 集（`<P>_API_KEYS`/单 key/前缀枚举/manifest env，去重）+ SQLite auth profiles（api_key/token/oauth，cooldown/disabled） | profile 按配置顺序>存储顺序，缺省 round-robin（OAuth>token>api_key，同 tier lastUsed 旧者优先），会话 stickiness | env key 仅限流类错误旋转；profile 冷却 30s/1m/5m 上限，billing/permanent-auth 走 disabled 长退避 | **有**：限流换 env key；profile 耗尽后进入模型 fallback |
 
 AIO Hub、Hermes Agent、AstrBot 和 Jan 都会让 Key 失败影响选择，但时间边界不同。AIO Hub 的渠道层失败只影响后续请求，但主聊天链路在应用层等待重试并重新选 Key，失败 Key 已熔断或标坏时重试即换 Key；AstrBot 与 Jan 可在当前请求内沿 Key 链即时重试；Hermes Agent 还会持久化 credential pool 状态、冷却并在池耗尽后推进 fallback。四者都仍需与跨 Provider 健康调度区分。
 
@@ -385,6 +396,7 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 | VCPChat | 主链单次 `fetch` | Flowlock 是新续写轮次 | 不改变 |
 | VCPMobile | 主聊天单次请求 | 请求 ID 与中断租约防止同 ID 重入；未找到自动重试 | 不改变 |
 | VCPToolBox | 默认 3 次总尝试 | 500、503、429、特定 401、网络和连接/首包超时；线性退避 | 普通模型不变；语义模型可换候选 |
+| OpenClaw | 同 key 瞬时重试（分类网络/超时/5xx）；全链超载类错误整链至多重试 10 次 | 错误归一为 failover reason（rate_limit/overloaded/billing/auth 等）；profile cooldown 随失败增长；SDK 内重试等待上限可经 `OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS` 限制 | 瞬时重试不换目标；限流换 env key；profile 轮换换凭据；模型 fallback 换 model ref（可跨 Provider）；user pin 严格不回落 |
 
 Chatbox 对网络错误默认不重试，是为了避免服务端已经处理请求时发生重复计费。这个选择提醒我们：自动重试并非次数越多越好。对于非幂等生成请求，客户端在断线时通常无法确认服务端是否已经开始计费或生成；重放策略应同时考虑错误类别、是否收到响应头/首包和用户可见状态。
 
@@ -414,7 +426,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 
 ## 路由依据：显式绑定仍是主流
 
-二十个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 或网关模型，运行时据此调用。Dify 由应用或节点预设模型引用并在 tenant 侧解析。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
+二十一个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 或网关模型，运行时据此调用。Dify 由应用或节点预设模型引用并在 tenant 侧解析。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
 
 | 路由依据 | 已确认项目 | 实际作用 |
 |---|---|---|
@@ -454,6 +466,7 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 | VCPChat | `settings.json` | 明文 | 主进程使用全局 VCP Key |
 | VCPMobile | SQLite `settings` 表的 `global` JSON | 明文 | Rust 与移动端设置页使用全局 VCP Key；Android 系统层磁盘保护和备份范围未验证 |
 | VCPToolBox | 主/插件 `config.env` | 明文 | 已认证管理 API 可返回完整主配置原文 |
+| OpenClaw | per-agent SQLite auth store + `auth.profiles` metadata（不含 key）+ env/SecretRef；models.json 只存来源 marker | auth store 静态加密未确认；models.json 不落明文 key；OAuth 属可刷新运行时状态 | UI 显示来源不显示明文；probe/错误路径对凭据做脱敏投影 |
 
 静态加密、进程隔离和 UI 脱敏解决的是不同问题。Cherry Studio 把真实凭据留在 Main/Data API，能减少 Renderer 泄露面，但数据库文件本身仍是明文。SillyTavern 默认只向浏览器返回 Secret 的掩码和 ID，也不改变 `secrets.json` 的磁盘属性。LobeHub 保护了数据库静态数据；`fetchOnClient` 为浏览器直连而下发解密配置时，运行时暴露面又会扩大。
 
@@ -481,6 +494,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | SillyTavern | 设置快照不含独立 Secret；ZIP 默认排除 Secret | 恢复 Profile 后可能缺少对应 Secret ID |
 | VCPChat | 每日设置备份和一键 ZIP 包含明文 Key | 原子写入只保证完整性，不保证保密性 |
 | VCPToolBox | 默认归档所有 `.env` 和 JSON | 未加密 ZIP 扩大核心及插件 Secret 副本范围 |
+| OpenClaw | 单项目笔记未确认完整备份/导出链 | 配置文件与 models.json 不含明文 key；auth store 位于 per-agent SQLite，复制 Agent 目录/数据库是否携带凭据取决于迁移边界（OAuth 通常要求单独登录） |
 
 Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 的 legacy 备份引擎（类名仍标 `@deprecated LEGACY v1 CODE`）已升级为 v7 full/slim 双布局并接入 SQLite 备份（`220dff874f`），v2 Provider 与凭据因此随备份落盘——旧"备份不复制 SQLite 数据库、Provider 配置未进入备份链"的结论已被推翻；由于 Provider 凭据是 SQLite 明文，备份文件本身的保密性成为新的边界。
 
@@ -509,6 +523,7 @@ VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置�
 | VCPChat | `/models` 刷新 | 缺少结构化延迟/错误统计 | 无 |
 | VCPMobile | 设置页 `/v1/models` 验证（10 秒）与逐模型 ping（60 秒） | 模型测试返回延迟和错误；普通聊天有请求 ID 与中断租约 | 无 |
 | VCPToolBox | 模型目录、真实 Chat、语义 route preview | 日志 + 可选 NewAPI Monitor | 无 |
+| OpenClaw | CLI `models status/list --probe` 与 Gateway `models.probe`（Control UI Test connection）复用同一 auth-probe 引擎，发起真实最小模型请求（`PROBE_MAX_TOKENS=8`） | auth profile cooldown/usageStats、`model_fallback_decision` 结构化日志、usage/cost 随消息落库、subsystem 日志脱敏 | profile 冷却与模型 fallback 决策影响后续选择；probe 结果不直接形成动态选路 |
 
 检测覆盖面最丰富的是 AIO Hub、Cherry Studio 和 VCPToolBox，但三者的用途不同。AIO Hub 的 Key 请求结果会进入局部状态；Cherry Studio 的逐模型、逐 Key 检测适合人工诊断；VCPToolBox 能分别验证目录、真实生成和语义路由。后两者的结果仍不改变下一次生产请求。
 
@@ -580,7 +595,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 ## 组合式参考架构
 
-二十个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
+二十一个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
 
 1. **渠道实体采用 Cherry Studio/AIO Hub 的稳定实例 ID。** Provider 预设与用户实例分离，模型身份始终包含渠道 ID。
 2. **协议选择采用 Cherry Studio 的 Endpoint Type + Adapter Family 或 LobeHub 的显式 SDK Type。** 不从 URL 猜协议，也不把多 Endpoint 宣称为容灾。
@@ -644,7 +659,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 
 ## 横向结论
 
-二十个项目展示了八条清晰路线：
+二十一个项目展示了九条清晰路线：
 
 1. AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 在应用内建立稳定 Provider/连接实体，差别集中在实例模型、多 Key、限流、重试和凭据保护；
 2. SillyTavern 用活动设置和 Profile 服务于完整创作环境切换，渠道自动化让位于兼容性和用户控制；
@@ -654,12 +669,13 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 6. AstrBot 将来源与能力实例分开，Jan 将远程 Provider 和本地引擎汇入 router，分别服务于 IM Agent 和本地桌面推理。
 7. Hermes Agent 将 Profile、credential pool、模型 fallback 与跨 Provider/端点 fallback 分层，是静态故障转移链最完整的样本；NextChat 与 Manifold Desktop 则保留枚举/注册表加轻量代理的客户端路线。
 8. Risuai 把渠道摊薄到模型条目与全局活动设置，服务于角色创作工作流，多连接靠条目变体、全局 reverse_proxy 单例与自定义条目表达，失败处理止于同模型重试和用户静态 fallback 候选链。
+9. OpenClaw 把 Provider 做成“Provider 名 + 协议注册表 + 模型目录/凭据快照”的分层，服务于本地 Gateway 多前端与多 Agent；渠道能力止于 auth profile 轮换、configured 模型 fallback 与真实最小请求探测，没有用户渠道实例与健康感知调度闭环。
 
 配置管理入口形成了另一条独立比较轴。AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 已在图形界面覆盖主要生命周期；OpenCode 与 Manifold Desktop 的底层配置表达力明显高于桌面设置页；其余缺项有些来自入口未暴露，有些来自项目本身没有独立渠道实体。选择产品时需要同时核对运行时能力和已有配置是否能在目标前端继续维护。
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 
-在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，Dify 的 tenant 级凭据加密与同模型多 Key 冷却、AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体最薄的样本，VCPMobile 则是单网关移动客户端。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是二十个项目共同未闭合的部分。
+在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，Dify 的 tenant 级凭据加密与同模型多 Key 冷却、AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体最薄的样本，VCPMobile 则是单网关移动客户端。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是二十一个项目共同未闭合的部分。
 
 ## 依据与范围
 
@@ -683,5 +699,6 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 - [VCPChat LLM 渠道管理调查笔记](VCPChat-LLM渠道管理调查笔记.md)
 - [VCPMobile LLM 渠道管理调查笔记](VCPMobile-LLM渠道管理调查笔记.md)
 - [VCPToolBox LLM 渠道管理调查笔记](VCPToolBox-LLM渠道管理调查笔记.md)
+- [OpenClaw LLM 渠道管理调查笔记](OpenClaw-LLM渠道管理调查笔记.md)
 
 本文只比较上述笔记记录的代码快照，不把 README 宣称、未接线模块、框架扩展点、托管版私有配置或外部聚合网关能力直接计入当前实现。未运行真实账号下的限流、断网、重复计费、跨平台凭据读取和恢复演练；涉及这些行为的结论以源码可确认边界为限。
