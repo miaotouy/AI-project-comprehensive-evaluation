@@ -50,7 +50,7 @@ AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布
 
 ## 身份、协议与状态映射
 
-节点身份由 `nodeId`、`VCP_Key` 与 `serverName` 组成，不是匿名 URL。协议帧按 `VcpMessageType` 区分，覆盖工具注册与执行、结果回传、取消、审批和心跳上报等类型，消息结构与分布式配置见 `types/distributed.ts`。状态映射见下表；断线时服务端不再能下发取消帧，因此本地以"断线即清理在途调用"作为一致化策略。
+节点身份由 `nodeId`、`VCP_Key` 与 `serverName` 三部分组成。协议帧按 `VcpMessageType` 区分，覆盖工具注册与执行、结果回传、取消、审批和心跳上报等类型，消息结构与分布式配置见 `types/distributed.ts`。状态映射见下表；断线时服务端不再能下发取消帧，因此本地以"断线即清理在途调用"作为一致化策略。
 
 | 外部状态 | 本地对应 |
 |---|---|
@@ -60,7 +60,7 @@ AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布
 
 ## 执行、回流与控制语义
 
-远端 `execute_tool` 触发的是 AIO 本地真实执行（工具、文件、模型相关工具链），结果与事件异步回传，而非仅通知。可回传内容包括工具结果、进度帧与审批请求；取消经 `cancel_tool` 帧 best-effort 传播，并由超时与断线清理兜底。产品面（`VcpConnector.vue` 连接/监控/分布式三个 Tab、`DistributedNodePage`）展示连接状态、节点身份、暴露工具列表与桥接工具列表，接管入口即本地直接操作节点。
+远端 `execute_tool` 在 AIO 本地真实执行工具、文件与模型相关工具链，结果和事件异步回传。可回传内容包括工具结果、进度帧与审批请求；取消经 `cancel_tool` 帧 best-effort 传播，并由超时与断线清理兜底。产品面（`VcpConnector.vue` 连接/监控/分布式三个 Tab、`DistributedNodePage`）展示连接状态、节点身份、暴露工具列表与桥接工具列表，接管入口即本地直接操作节点。
 
 ## 权限、凭据与治理边界
 

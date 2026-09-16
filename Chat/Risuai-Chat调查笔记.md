@@ -18,7 +18,7 @@ Risuai 是 Svelte 5 + Tauri 2.5 的角色扮演聊天应用，聊天状态全部
 
 主链集中在巨型编排函数 `sendChat()`（`src/ts/process/index.svelte.ts:99`）：UI 层直接向消息数组 push 用户消息，sendChat 依次完成上下文拼装、记忆、组装、渠道请求与流式回写，全程直接读写 `DBState.db`，用 `reloadKeys` 计数驱动渲染。渲染入口是 `Chats.svelte` 的哈希差量挂载与 `ChatBody.svelte` 的 Markdown 管线。
 
-会话不是独立集合：会话数组与当前页索引挂在每个角色对象上；"分支"表达为整份会话副本（Copy/Branch 命名）而非消息树。重roll候选按 generationId 只存内存（`src/ts/process/prereroll.ts:1-29`），不随消息持久化，这是与 SillyTavern 持久 swipe 字段最明显的差异。
+会话不是独立集合：会话数组与当前页索引挂在每个角色对象上；"分支"表达为整份会话副本（Copy/Branch 命名）而非消息树。重roll候选按 generationId 只存内存（`src/ts/process/prereroll.ts:1-29`），不随消息持久化，与 SillyTavern 的持久 swipe 字段形成对照。
 
 ## 产品表面与系统边界
 

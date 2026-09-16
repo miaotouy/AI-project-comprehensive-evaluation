@@ -85,7 +85,7 @@ ModeInjection 与 RegexInjection 共享同一组字段：名称、启用、优�
 
 系统提示的来源由助手开关决定：允许对话覆盖且对话系统提示非空时用对话的，否则用助手的；记忆块仅在助手开启记忆时追加，内容是一条 JSON 数组；工具说明按工具顺序逐条追加（`GenerationLoop.kt:347-368`、`data/ai/GenerationPrompts.kt:9-26`）。
 
-**占位符**展开覆盖所有文本部件，不分角色，也不排除合成消息，因此系统提示与注入块里的占位符同样会被替换。可用键为 cur_date、model_id、model_name、locale、timezone、system_version、device_info、battery_level、nickname、char、user，值分别取系统日期、模型标识与显示名、系统语言、时区、Android 版本、设备厂商型号、电池电量，以及用户昵称，其中昵称/角色名留空时回退为 user/assistant。替换同时接受 `{{key}}` 和 `{key}` 两种写法且忽略大小写（`PlaceholderTransformer.kt:59-115`、`140-161`）。注意 `{{ key }}` 这种带空格的写法不在替换范围内，它与 Pebble 语法并不冲突。
+**占位符**展开覆盖所有文本部件，不分角色，也不排除合成消息，因此系统提示与注入块里的占位符同样会被替换。可用键为 cur_date、model_id、model_name、locale、timezone、system_version、device_info、battery_level、nickname、char、user，值分别取系统日期、模型标识与显示名、系统语言、时区、Android 版本、设备厂商型号、电池电量，以及用户昵称，其中昵称/角色名留空时回退为 user/assistant。替换同时接受 `{{key}}` 和 `{key}` 两种写法且忽略大小写（`PlaceholderTransformer.kt:59-115`、`140-161`）。`{{ key }}` 这种带空格的写法不在替换范围内，它与 Pebble 语法并不冲突。
 
 **模板**用 Pebble 逐条渲染消息的每一个文本部件，可用变量是 `message`、`role`（角色名小写）、`time`、`date`。模板正文取助手 `messageTemplate`，由自定义 Loader 按助手 ID 从 Settings 读取，引擎关闭了自动转义；变量时间取消息自身的 `createdAt` 而非当前时间，以便同一历史在多轮请求中渲染稳定、不破坏提示词缓存。`isSynthetic` 为真的消息直接跳过（`TemplateTransformer.kt:17-56`、`58-86`、`di/DataSourceModule.kt:52-64`）。由于系统消息在构造时就被标记为合成消息，模板实际只作用于会话历史（含对话创建时写入的预设消息），不作用于系统提示与注入块。
 

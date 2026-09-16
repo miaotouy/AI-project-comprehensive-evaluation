@@ -26,7 +26,7 @@ Cherry Studio 存在两条彼此独立、但共享部分基础设施（MCP 运�
 - **审批模型（in-memory MCP）**：`filesystem` 的 `write`/`edit`/`delete` 默认在 `disabledAutoApproveTools`（`builtinMcpServers.ts:96`），用户 "always allow"（`persistAutoApprove`）后会被从该列表移除、后续调用无提示写盘；两条路径的审批桥与 IPC 方法名共享，但主进程分发逻辑不同（Claude 侧命中内存 `toolApprovalRegistry` 快路径，MCP 侧落 DB 消息 parts）。
 - **执行域**：所有工具最终落在 Electron 主进程；`browser` in-memory MCP 使用全局共享的 `persist:default` 分区（`browser/README.md:16`），任何调用该 server 的会话共享同一份 cookie/localStorage，且 `execute` 工具可在页面上下文执行任意 JS，默认无头（`showWindow:false`）。
 - **路径校验边界**：`workspacePathHook` 越权检查只覆盖 Edit、Glob、Grep、NotebookEdit、Read、Write 六个结构化字段，Bash 命令文本中的路径不经过该检查（源码注释确认刻意为之）。
-- **安全边界事实**：assistant MCP 只在本地 Cherry Assistant 会话注入（外部渠道会话不注入），diagnose（读本机日志/源码/配置）被刻意排除在自动批准之外；自动批准工具集合的注释本身就是官方对“可读本机数据的工具与自动批准的网页抓取工具可能同会话出现”这一风险的设计依据。
+- **安全边界事实**：assistant MCP 只在本地 Cherry Assistant 会话注入（外部渠道会话不注入），diagnose（读本机日志/源码/配置）被刻意排除在自动批准之外；自动批准工具集合的注释把“可读本机数据的工具与自动批准的网页抓取工具可能同会话出现”这一风险列为设计依据。
 
 ## ASCII 调用链图
 
@@ -72,17 +72,17 @@ CLAUDE_TOOL_REGISTRY (静态声明: exposure/dependsOn/mcpServer)
 
 依据：`../../cherry-studio/src/shared/ai/claudecode/toolRegistry.ts:1-42`、`../../cherry-studio/src/main/ai/tools/adapters/claudeCode/toolConditions.ts:1-90`、`../../cherry-studio/src/main/ai/tools/adapters/aiSdk/mcp/mcpTools.ts:69-97`。
 
-exposure 三态是这份注册表的核心机制：enabled 时工具按条件注入模型调用，internal 时始终启用但 UI 隐藏，disabled 时加入 SDK 硬黑名单。internal 工具（如 Task、Agent、AskUserQuestion、SendMessage、TeamCreate 等 agent-teams 工具）本身并非 SDK ToolInputSchemas 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。
+internal 工具（如 Task、Agent、AskUserQuestion、SendMessage、TeamCreate 等 agent-teams 工具）本身并非 SDK ToolInputSchemas 联合类型的正式成员，只是运行时按环境变量条件注入（见下）。
 
 ## 2. 工具定义与注册
 
 ### 2.1 SDK 原生工具
 
-`CLAUDE_TOOL_DEFS`（`toolRegistry.ts:48-370`）逐条声明运行时名称（也是写回禁用工具设置的 id）、category、exposure、description，以及可选的依赖项和 MCP server。值得注意的条目：
+`CLAUDE_TOOL_DEFS`（`toolRegistry.ts:48-370`）逐条声明运行时名称（也是写回禁用工具设置的 id）、category、exposure、description，以及可选的依赖项和 MCP server。其中几条：
 
 - `BashOutput` 依赖 Bash，是渲染专用别名，真实 SDK 联合类型把它叫 TaskOutput（精确依赖声明见 `toolRegistry.ts:48-370`）。
 - `Task`/`TaskOutput`/`TaskStop`/`TaskCreate`/`TaskGet`/`TaskUpdate`/`TaskList` 都是 `internal`，其中注释区分了「渲染专用别名」（`Task`）与真实 `Agent` 编排工具、以及一组任务调度类工具。
-- `SendMessage`/`TeamCreate`/`TeamDelete`（agent-teams）**不是 SDK `ToolInputSchemas` 联合类型的成员**，仅在设置了 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 环境变量时由 runtime 注入（`settingsBuilder.ts:830` 无条件设置该变量为 `'1'`，即所有 Claude Code Agent 会话都启用了这一实验特性）。又无条件追加了 `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`（`f3399d38e9`，`settingsBuilder.ts:834`），走 SDK 的简单系统提示模式。
+- `SendMessage`/`TeamCreate`/`TeamDelete`（agent-teams）**不是 SDK `ToolInputSchemas` 联合类型的成员**，仅在设置了 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 环境变量时由 runtime 注入（`settingsBuilder.ts:830` 无条件设置该变量为 `'1'`，即所有 Claude Code Agent 会话都启用了这一实验特性）。又无条件追加了 `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1`（`settingsBuilder.ts:834`），走 SDK 的简单系统提示模式。
 - EnterWorktree/ExitWorktree 有运行时启用条件（见 §4）。
 - `CronCreate`/`CronDelete`/`CronList`/`ScheduleWakeup`/`RemoteTrigger`/`Monitor`/`PushNotification` 全部 `disabled`——这些是 SDK 自带的原生调度/推送工具，Cherry 用自家 `mcp__cherry-tools__cron`/`…__notify` 取代。
 
@@ -90,7 +90,7 @@ exposure 三态是这份注册表的核心机制：enabled 时工具按条件注
 
 ### 2.2 mcp__* 命名与 wire id 映射（双轨制）
 
-MCP 工具 id 拆成两套（`40914ab5cd`）：
+MCP 工具 id 拆成两套：
 
 1. **legacy 名称型 id**：`buildFunctionCallToolName(serverName, toolName)` 生成 `mcp__{camelCase(server)}__{camelCase(tool)}`，上限 63 字符，超长时用服务器名 FNV-1a 哈希后缀替代被截断的尾部（`mcpToolName.ts:114-165`）。它现在只服务**持久化的 source-policy 规则**与 **Claude Code 适配器**；原 `isFunctionCallToolNameForServer` 已删除（`mcpToolName.ts:165-167` 起不再导出）。
 2. **AI SDK catalog 身份 id**：主进程新增 `buildMcpToolWireId`（`src/main/ai/mcp/mcpToolId.ts:41-50`），以 `sha256(serverId + '\0' + toolName)` 的 20 位十六进制摘要结尾，`serverId` 参与哈希——非 ASCII 服务器/工具名（中文等）先经 `tiny-pinyin` 罗马化（`mcpToolId.ts:20-32`），无法罗马化的字符退化为摘要，彻底消除"两个不同 server 因长名截断/撞哈希生成同一 wire id"的碰撞面（原 §2.2 的"哈希碰撞 + 截断边界重合"风险对 catalog id 不再成立）。
@@ -125,7 +125,7 @@ MCP 工具 id 拆成两套（`40914ab5cd`）：
 - `REPL`/`NotebookEdit`（disabled）→ 无替代，纯移除；
 - `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`/`RemoteTrigger`/`Monitor`/`PushNotification`（全部 disabled）→ `mcp__cherry-tools__cron` / `…__notify`。
 
-新增的 cherry-tools 工具（`f1e793da79`）：`mcp__cherry-tools__to_markdown`（`CherryToMarkdown`，exposure `user`，`toolRegistry.ts:317-327`）——把普通文本工具读不了的本地文档（pdf/office/epub/csv 等）转成 Markdown 给模型读；它单独有开关（读取工作区外本地文件，禁用 Read 不能连带关掉这条路径）。
+新增的 cherry-tools 工具：`mcp__cherry-tools__to_markdown`（`CherryToMarkdown`，exposure `user`，`toolRegistry.ts:317-327`）——把普通文本工具读不了的本地文档（pdf/office/epub/csv 等）转成 Markdown 给模型读；它单独有开关（读取工作区外本地文件，禁用 Read 不能连带关掉这条路径）。
 
 依据：`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:258-404`、`../../cherry-studio/src/main/ai/tools/adapters/aiSdk/mcp/mcpTools.ts:114-159`。
 
@@ -153,12 +153,12 @@ Claude Code Agent 走 `@anthropic-ai/claude-agent-sdk` 的 `SDKMessage` 流（`s
 
 ### 6.1 普通聊天
 
-`stopWhen`/步数上限来自 AI SDK：`composeStopWhen()` 的 SDK 兜底仍是 `stepCountIs(20)`（`buildAgentParams.ts:650`），但默认 assistant 设置 `maxToolCalls` 已从 20 提到 100（`c992af0222`）（`assistant.ts:108`，`DEFAULT_ASSISTANT_SETTINGS.maxToolCalls`；合法范围 1-1000，`assistant.ts:31-35`）——没有显式自定义时，普通聊天默认工具轮次上限现在是 100 轮而非 20 轮，`ToolLoopTerminalError` 的过早终止问题被缓解。这是**模型侧的 tool-call 轮数上限**，与 Claude Code 的 `max_turns` 是两套独立机制。
+`stopWhen`/步数上限来自 AI SDK：`composeStopWhen()` 的 SDK 兜底仍是 `stepCountIs(20)`（`buildAgentParams.ts:650`），但默认 assistant 设置 `maxToolCalls` 已从 20 提到 100（`assistant.ts:108`，`DEFAULT_ASSISTANT_SETTINGS.maxToolCalls`；合法范围 1-1000，`assistant.ts:31-35`）——没有显式自定义时，普通聊天默认工具轮次上限现在是 100 轮而非 20 轮，`ToolLoopTerminalError` 的过早终止问题被缓解。这是**模型侧的 tool-call 轮数上限**，与 Claude Code 的 `max_turns` 是两套独立机制。
 
 ### 6.2 Claude Code Agent
 
 - `max_turns` 直接来自 `agent.configuration.max_turns`（`settingsBuilder.ts:385`），传给 SDK `Options.maxTurns`，超限行为由 SDK 自身处理（`streamAdapter.ts:245` 出现 `case 'error_max_turns'` 分支，说明适配层确实消费了该终止原因，但本次未继续追踪其向渲染层的具体呈现，**标记为待验证**）。
-- 并发：`McpRuntimeService.activeToolCalls` 改为 `Map<registrationKey, Set<AbortController>>`（`McpRuntimeService.ts:276`，同一 callId 可挂多个 controller），仍按调用隔离支持多个 MCP 调用并发在跑；（`191c372deb`，`mcpAbort.ts`）流中止信号会**传播进在途 MCP 调用**——stream abort 时对应的在途调用 controller 一并 abort，不再只等超时；Claude Code 侧的并发受 SDK 子进程自身模型控制，Cherry 未额外施加并发上限。
+- 并发：`McpRuntimeService.activeToolCalls` 改为 `Map<registrationKey, Set<AbortController>>`（`McpRuntimeService.ts:276`，同一 callId 可挂多个 controller），仍按调用隔离支持多个 MCP 调用并发在跑；（`mcpAbort.ts`）流中止信号会**传播进在途 MCP 调用**——stream abort 时对应的在途调用 controller 一并 abort，不再只等超时；Claude Code 侧的并发受 SDK 子进程自身模型控制，Cherry 未额外施加并发上限。
 - 超时：MCP 通用调用默认 60 秒（`server.timeout ? ... : 60000`），可 per-server 覆盖，`server.longRunning` 时改用 `resetTimeoutOnProgress` + 10 分钟 `maxTotalTimeout`（`McpRuntimeService.ts:1271-1275`）。MCP `initialize`（连接建立）走独立的 180 秒地板值 `MCP_CONNECT_TIMEOUT_FLOOR_MS`（`McpRuntimeService.ts:155`）。
 - `AbortController` 取消语义：`abortTool(callId)` 主动 abort 对应 controller；`onStop()` 生命周期钩子会 `abortActiveToolCalls()` 批量取消所有在途调用（`McpRuntimeService.ts:220-227,888-894,1316-1327`）。Claude Code 侧每个 `ClaudeCodeRuntimeConnection` 持有自己的 `abortController`，`close()` 时 `abort('agent-runtime-closed')`（`ClaudeCodeRuntimeDriver.ts:148,341-348`）；`toolApprovalRegistry` 同样监听该 signal 的 `abort` 事件把挂起审批自动 `deny`（`ToolApprovalRegistry.ts:42-52`）。
 - 错误回传：MCP 调用异常直接 `throw`，由上层 AI SDK `execute` 包装转成 `output-error` part；Claude Code 侧异常（包括流被 CLI 中途异常终止）由 `handleTruncationError()` 尝试“打捞”已缓冲文本为 `truncated` finish，打捞失败才作为 `error` 事件上抛（`ClaudeCodeRuntimeDriver.ts:455-467`）。
@@ -184,7 +184,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 
 工具调用判定（`toolRules.ts:108-126`）在上述基础上额外处理 acceptEdits 模式下 Bash 命令首词命中 `mkdir/touch/mv/cp` 时也降级为 auto——这是**唯一**允许该模式免审批执行 Bash 的路径，命令解析仅取空格分隔的首个 token，对 `; rm -rf /` 这种拼接命令不做进一步解析（因为只看首词）。
 
-但要注意：canUseTool 只是 SDK 侧的**一层**门控；禁用工具、工作区路径和交互权限等 PreToolUse hook 在**所有**权限模式下都会触发（`settingsBuilder.ts:896-901` 明确说明，SDK 在 bypassPermissions、acceptEdits 和默认安全工具场景会跳过 canUseTool，因此硬约束必须放在 hook 层）。这是本仓库审批体系里唯一贯穿所有权限模式的强制层。
+canUseTool 只是 SDK 侧的**一层**门控；禁用工具、工作区路径和交互权限等 PreToolUse hook 在**所有**权限模式下都会触发（`settingsBuilder.ts:896-901` 明确说明，SDK 在 bypassPermissions、acceptEdits 和默认安全工具场景会跳过 canUseTool，因此硬约束必须放在 hook 层）。这是本仓库审批体系里唯一贯穿所有权限模式的强制层。
 
 依据：`../../cherry-studio/src/shared/ai/tools/mcpSourcePolicy.ts:22-47`、`../../cherry-studio/src/shared/ai/tools/__tests__/mcpSourcePolicy.test.ts:32-42`、`../../cherry-studio/src/shared/ai/claudecode/toolRules.ts:30-126`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:896-950`。
 
@@ -195,7 +195,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 1. 先尝试 `AgentSessionRuntimeService.respondToolApproval()`（Claude-Agent 快路径：命中内存中的 `toolApprovalRegistry` 直接 `resolve()` 唤醒 `canUseTool` 的 Promise，不落库）；
 2. 未命中则走 MCP 路径：`messageService.applyToolApprovalDecisions()` 把决定写入 DB 消息 parts（事务化，防止多工具同轮并发审批互相覆盖），全部审批决定完成后才 `AiStreamManager.dispatch({trigger:'continue-conversation'})` 恢复流。
 
-（`1f99a7d3c0`）同一回复请求多个工具审批时，响应一个请求会把审批指针推进到下一个挂起请求——不再因响应当前可见请求而隐藏其余仍在等待的审批 UI。
+同一回复请求多个工具审批时，响应一个请求会把审批指针推进到下一个挂起请求——不再因响应当前可见请求而隐藏其余仍在等待的审批 UI。
 
 `hasLiveStream`/`hasLiveTurnStream` 前置检查防止“审批到达但流已结束/仍在跑”两种竞态场景导致审批被静默丢弃（`AiService.ts:271-280` 附近；`settingsBuilder.ts` 的 `OUT_OF_TURN_APPROVAL_DENIAL` 则处理 Claude 侧分离 turn 场景，直接 deny 而非挂起）。
 
@@ -222,7 +222,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 
 ### in-memory server 实际访问范围
 - **filesystem**：范围 = `resolveFilesystemBaseDir(args, envs)` 返回值，默认回退到 `application.getPath('feature.mcp.workspace')`（应用私有工作区），用户若显式配置 `args[0]` 或 `WORKSPACE_ROOT` 可扩大到任意目录（见 §5）。
-- **python**：`PythonServer`（主进程 in-memory MCP）本身不执行代码，而是通过 IPC 把脚本转发给 `PythonService`（主进程），后者再通过 IPC 把请求转给 **renderer 进程里的一个 Web Worker**（`PyodideService.ts:34-57`，`new WorkerModule.default()`），由该 Worker 内的 Pyodide（Wasm）实际运行 Python。也就是说 `python_execute` 这一个工具调用要跨越「Claude Code/MCP 调用方 → 主进程 PythonServer → 主进程 PythonService → IPC → renderer PyodideService → Web Worker → Pyodide」六层，执行沙箱边界落在 Wasm + Web Worker，而不是主进程本身——这与其余 in-memory MCP server（memory/fetch/filesystem/browser 均在主进程直接执行）架构不同，是本次阅读中发现的一处值得注意的架构差异。Pyodide 默认无法访问真实文件系统/网络（除非显式桥接），本次未继续深挖 Worker 侧是否暴露了任何 postMessage 桥接能力回主进程或 Node API，**标记为待验证**。
+- **python**：`PythonServer`（主进程 in-memory MCP）本身不执行代码，而是通过 IPC 把脚本转发给 `PythonService`（主进程），后者再通过 IPC 把请求转给 **renderer 进程里的一个 Web Worker**（`PyodideService.ts:34-57`，`new WorkerModule.default()`），由该 Worker 内的 Pyodide（Wasm）实际运行 Python。也就是说 `python_execute` 这一个工具调用要跨越「Claude Code/MCP 调用方 → 主进程 PythonServer → 主进程 PythonService → IPC → renderer PyodideService → Web Worker → Pyodide」六层，执行沙箱边界落在 Wasm + Web Worker，而不是主进程本身——这与其余 in-memory MCP server（memory/fetch/filesystem/browser 均在主进程直接执行）架构不同，是本次阅读中发现的一处架构差异。Pyodide 默认无法访问真实文件系统/网络（除非显式桥接），本次未继续深挖 Worker 侧是否暴露了任何 postMessage 桥接能力回主进程或 Node API，**标记为待验证**。
 - **browser**：`persist:default` 是**全局共享分区**（README 自述），意味着同一台机器上所有触发过 browser MCP 的会话/工具调用共享同一份登录态数据；`execute` 工具可执行任意 JS，且默认 `showWindow:false`（无头），用户不会看到页面在做什么。
 
 依据：`../../cherry-studio/src/main/ai/mcp/McpRuntimeService.ts:392-436,470-630`、`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:408-429,580-587`、`../../cherry-studio/src/main/utils/commandResolver.ts:384-476`、`../../cherry-studio/src/main/ai/mcp/servers/filesystem/types.ts:44-46`、`../../cherry-studio/src/main/ai/mcp/servers/filesystem/config.ts:1-8`、`../../cherry-studio/src/main/ai/mcp/servers/browser/README.md:16`、`../../cherry-studio/src/main/ai/mcp/servers/python.ts:82-117`。
@@ -269,7 +269,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 | `mcp__cherry-tools__web_fetch` | user | 抓取网页内容 | 同上 | 否（自动批准） | 同上 |
 | `mcp__cherry-tools__kb_search`/`…__kb_list`/`…__kb_read` | user（search/manage）／internal（list/read） | 知识库检索/浏览/深读 | 同上 | 否 | 依赖 `requiresKnowledgeScope`；无绑定知识库时工具不可用 |
 | `mcp__cherry-tools__kb_manage` | user | 增删/刷新知识库文档 | 同上 | **是**（显式排除自动批准） | 唯一会写用户知识库的 cherry-tools |
-| `mcp__cherry-tools__to_markdown` | user | 本地文档转 Markdown（pdf/office/epub/csv 等） | 同上 | 未显式排除自动批准（走默认规则） | 可读工作区外本地文件，单独开关（`f1e793da79` 新增） |
+| `mcp__cherry-tools__to_markdown` | user | 本地文档转 Markdown（pdf/office/epub/csv 等） | 同上 | 未显式排除自动批准（走默认规则） | 可读工作区外本地文件，单独开关（新增） |
 | `mcp__cherry-tools__cron` | user | 应用内任务调度 | 同上 | 否 | 仅影响 App 内调度，非系统级 |
 | `mcp__cherry-tools__notify` | user | 向已连接渠道发通知 | 同上 | 否 | 若外部渠道被 prompt injection 控制可被滥用发消息（影响范围限于已连接渠道） |
 | `mcp__cherry-tools__config` | user | 读写 Agent 自身配置/渠道 | 同上 | 否（但 headless 会话下特定 action 被 `headlessConfigMutationHook` 拒绝） | `rename`/`add_channel`等 mutation action 在无人值守场景被拒绝 |
@@ -315,7 +315,7 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 `mcp__skills__skills` 工具的 `search` action 直连 `https://claude-plugins.dev/api/skills`（硬编码域名，`skills.ts:12`），`install` 走 `skillService.install({installSource: 'claude-plugins:<identifier>'})`。本次未深入 `SkillService.install()` 内部对下载内容的校验逻辑（是否校验签名/来源/内容扫描），但已确认：
 - 安装后的 Skill 会被 `skillService.toggle()` 立即为当前 Agent 启用，无额外审批步骤；
 - Skill 本质是指令文本（`SKILL.md`）+ 支持文件，一旦启用即被 SDK 加载进系统提示/工具目录，其内容可以引导模型执行任何该会话已有权限的操作——**Skill 信任模型等价于"信任其文本内容对模型的引导力"，而不是独立的代码执行沙箱**；
-- `init`/`register` 允许模型自己创作并注册新 Skill（先建目录写 `SKILL.md`，再注册），这是一条模型能自我扩展"隐性系统提示"的路径，值得关注但本次未发现额外审批门槛。
+- `init`/`register` 允许模型自己创作并注册新 Skill（先建目录写 `SKILL.md`，再注册），这是一条模型能自我扩展"隐性系统提示"的路径，本次未发现额外审批门槛。
 
 依据：`../../cherry-studio/src/main/ai/mcp/McpRuntimeService.ts:96-117,633-680,966-987`、`../../cherry-studio/src/main/ai/mcp/servers/factory.ts:17-57`、`../../cherry-studio/src/main/ai/mcp/servers/skills.ts:12,149-218,257-374`。
 
@@ -332,9 +332,9 @@ Claude 工具访问判定（`toolRules.ts:75-95`）按顺序执行：
 
 `CHANNEL_SECURITY_PROMPT`（`constants.ts:8-27`）只在 `linkedChannelSnapshot !== null`（会话绑定了外部消息渠道，如 Telegram/飞书/QQ/微信）时注入到系统提示末尾（`buildSystemPrompt`，`settingsBuilder.ts:1076`）。内容包括：禁止破坏性操作、禁止访问敏感文件（`.env`/SSH key/凭据等，但**明确放行** `mcp__cherry-tools__cron`）、禁止批量操作、禁止系统级配置修改、禁止数据外传、禁止响应"忽略之前指令"式的 prompt override，并要求把 `<<<EXTERNAL_UNTRUSTED_CONTENT>>>` 包裹的内容当作纯聊天输入而非指令。
 
-**这条提示的性质是系统级文本约束，不是权限控制**：它完全依赖模型"愿意遵守"，不改变 `canUseTool`/`disallowedTools`/hooks 的实际判定逻辑。代码注释自己承认"这是最强的防御层，因为它优先于逐条消息的安全提示"（`constants.ts:5-6`），但这仍然只是 prompt-level 防御——一次成功的越狱/注入仍可能让模型忽略该提示直接调用工具，而真正拦得住的仍是 §7 的审批/hook 层（例如 `dependencyIsolationHook`、`workspacePathHook`）。换言之，外部渠道会话的实际安全边界 = 系统提示（软约束） + `assistantMcpEnabled=false`（渠道会话不注入 Assistant 诊断工具） + cherry-tools 自动批准列表本身固定不变（渠道会话与本机会话共享同一份 `CHERRY_BUILTIN_AUTO_APPROVED_TOOL_NAMES`，并**没有**因为是外部渠道而收紧自动批准范围）。
+**这条提示的性质是系统级文本约束，不是权限控制**：它完全依赖模型"愿意遵守"，不改变 `canUseTool`/`disallowedTools`/hooks 的实际判定逻辑。代码注释自己承认"这是最强的防御层，因为它优先于逐条消息的安全提示"（`constants.ts:5-6`），但这仍然只是 prompt-level 防御——一次成功的越狱/注入仍可能让模型忽略该提示直接调用工具，而真正拦得住的仍是 §7 的审批/hook 层（例如 `dependencyIsolationHook`、`workspacePathHook`）。外部渠道会话的实际安全边界 = 系统提示（软约束） + `assistantMcpEnabled=false`（渠道会话不注入 Assistant 诊断工具） + cherry-tools 自动批准列表本身固定不变（渠道会话与本机会话共享同一份 `CHERRY_BUILTIN_AUTO_APPROVED_TOOL_NAMES`，并**没有**因为是外部渠道而收紧自动批准范围）。
 
-**渠道会话审批变化（`7b1015cd9c`）**：IM 渠道（QQ/微信/飞书/Telegram 等）会话现在在 `canUseTool` 审批闸门里被当作 **background agent** 处理（`settingsBuilder.ts` 把 `linkedChannelSnapshot` 传入 `buildToolPermissions` 作为 `isChannelSession`）——此前渠道会话的 MCP 工具调用会因"out of turn"被直接 deny（`opts.agentID` 只在子 Agent 场景有值），现在常规工具在父 turn 结束后无需实时交互即可自动放行；交互式工具（`AskUserQuestion` 等）仍独立发问。也就是说渠道会话从"审批闸门误拒"变为"后台代理式自动放行"，自动批准的范围实际上比本笔记初稿时更大。
+**渠道会话审批变化**：IM 渠道（QQ/微信/飞书/Telegram 等）会话现在在 `canUseTool` 审批闸门里被当作 **background agent** 处理（`settingsBuilder.ts` 把 `linkedChannelSnapshot` 传入 `buildToolPermissions` 作为 `isChannelSession`）——此前渠道会话的 MCP 工具调用会因"out of turn"被直接 deny（`opts.agentID` 只在子 Agent 场景有值），现在常规工具在父 turn 结束后无需实时交互即可自动放行；交互式工具（`AskUserQuestion` 等）仍独立发问。也就是说渠道会话从"审批闸门误拒"变为"后台代理式自动放行"，自动批准的范围实际上比本笔记初稿时更大。
 
 **风险点**：`web_fetch`/`web_search` 在外部渠道会话中依然自动批准（结论来自 `settingsBuilder.ts` 注释自述"the untrusted-channel exposure this creates ... is bounded by the system-level channel security policy"），即防御完全押注在这条软性系统提示上,而没有代码层面为渠道会话单独收紧 `web_fetch` 审批策略。
 

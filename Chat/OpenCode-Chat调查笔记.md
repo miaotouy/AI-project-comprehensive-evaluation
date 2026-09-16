@@ -54,7 +54,7 @@ App submit（components/prompt-input/submit.ts） -> api.session.prompt
 ## 关键能力与已确认边界
 
 - 支持：流式三层落库——增量事件即时写、回合结束时完整写 part、工具状态即时落库；上下文压缩——把历史重排为「压缩请求、摘要、对话尾巴、继续请求」四段，旧工具输出打上 `time.compacted` 标记，压缩请求的对话历史以文本序列化拼接（`compaction.ts:52-83`、:387、:427-438）；回退——删除目标消息之后的全部消息（`revert.ts:74-75`、:106-114）；fork 复制新会话；多会话并发（不同会话并行、同会话串行）；后台任务与可分离的子代理；中断——把等待执行或执行中的工具 part 标记为已中止，展示文案 "Tool execution aborted"；自动重试覆盖 5xx、429、超时及已识别的网络/容量提示，上下文溢出不重试，最多 5 次、指数退避带 0.25 随机抖动（`packages/opencode/src/session/retry.ts:33-42, 182-206`）。
-- 已确认边界：无消息内容全文搜索，仅按会话标题做 LIKE 匹配（`session.ts:993-995`）；附件以 `data:` URL 内联存储，无独立附件目录；无整体编辑消息的端点，只能逐个 PATCH part；前端对失败消息的重试本质是再次发送；会话状态事件只有 idle/retry/busy 三态（`SessionStatusEvent.Info`）；V2 的崩溃后继续恢复机制明确标注为未来工作。
+- 已确认边界：无消息内容全文搜索，仅按会话标题做 LIKE 匹配（`session.ts:993-995`）；附件以 `data:` URL 内联存储，无独立附件目录；无整体编辑消息的端点，只能逐个 PATCH part；前端对失败消息的重试是再次发送；会话状态事件只有 idle/retry/busy 三态（`SessionStatusEvent.Info`）；V2 的崩溃后继续恢复机制明确标注为未来工作。
 
 ## 未验证事项
 

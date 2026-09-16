@@ -21,7 +21,7 @@
 
 VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应用户数据目录下一个以 `agentId` 命名的子目录，目录内的 `config.json` 存储所有配置字段，`regex_rules.json` 存储独立的正则处理规则，头像图片（支持 PNG/JPG/GIF/WEBP）也保存在同一目录。
 
-配置字段不多但实用：系统提示词、模型选择、温度、上下文长度限制、输出长度限制、流式输出开关，以及用于管理多线对话的话题列表。不能在 Agent 内部配置工具调用策略——工具调用由 VCP 分布式服务器负责，配置在全局或后端。
+可配置字段有系统提示词、模型选择、温度、上下文长度限制、输出长度限制、流式输出开关，以及用于管理多线对话的话题列表。不能在 Agent 内部配置工具调用策略——工具调用由 VCP 分布式服务器负责，配置在全局或后端。
 
 ## 2. 目录与文件结构
 
@@ -89,7 +89,7 @@ VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应�
 独立于 `systemPrompt` 字段，还存在**三模式 PromptManager**（`Promptmodules/prompt-manager.js:6`）：由 `promptMode` 决定使用 original、modular 还是 preset 模式，对应存储字段为 `advancedSystemPrompt`/`presetSystemPrompt`：
 
 - **original**：单段文本（对应笔记 §3 的 systemPrompt 路径）；
-- **modular（积木模式）**：`blocks` 是扁平数组，每块带独立 `disabled` 标志，组装时过滤禁用块（`Promptmodules/modular-prompt-module.js:60, 569, 1209`；主进程同逻辑见 `modules/ipc/promptHandlers.js:193-194`）。块内 `variants` 是多内容条目，配合 `selectedVariant` 单选（`modular-prompt-module.js:365-377, 130-131`）。支持块拖拽排序和小仓隐藏（hiddenBlocks/warehouse），但**没有组级总开关、没有单选/多选组**——块是平铺的，这也是全部调查项目中最接近 AIO Hub 消息组的机制；
+- **modular（积木模式）**：`blocks` 是扁平数组，每块带独立 `disabled` 标志，组装时过滤禁用块（`Promptmodules/modular-prompt-module.js:60, 569, 1209`；主进程同逻辑见 `modules/ipc/promptHandlers.js:193-194`）。块内 `variants` 是多内容条目，配合 `selectedVariant` 单选（`modular-prompt-module.js:365-377, 130-131`）。支持块拖拽排序和小仓隐藏（hiddenBlocks/warehouse），但**没有组级总开关、没有单选/多选组**——块是平铺的；
 - **preset**：从目录单选一个 `.md`/`.txt` 预设整段替换（`preset-prompt-module.js:269, 344`）。预设列表由 `load-preset-prompts` 扫描目录提供（`modules/ipc/promptHandlers.js:65-124`），默认目录为 `AppData/systemPromptPresets`。
 
 ### 3.4 发送时的配置引用与历史快照语义
@@ -147,16 +147,16 @@ VCPChat 还支持多 Agent 群组对话（`Groupmodules/groupchat.js`），群�
 - VCPToolBox 的 AgentAssistant 插件（`/admin_api/agent-assistant`）管理服务器侧 Agent；VCPChat 客户端 Agent 与 VCPToolBox AgentAssistant 的对应关系需手动维护；
 - SillyTavern 角色卡的 `system_prompt` 字段可直接粘贴为 VCPChat Agent 的 `systemPrompt`。
 
-## 当前快照的角色边界
+## 10. 当前快照的角色边界
 
 本轮改动触及 Tavern 示例配置、群组设置标记和群聊渲染，但没有引入新的 Agent 持久化实体、角色版本字段或渠道绑定模型。角色仍以本地 Agent/群组配置和 Tavern 规则共同定义；群聊界面的结构调整不改变角色字段进入聊天请求的既有责任边界。此结论来自对 `AppData/VCPChatTarven*.json`、`Groupmodules/`、`Tavernmodules/` 与角色 IPC 入口的静态核对，未运行导入或群聊场景。
 
-## 10. 主要源码依据
+## 11. 主要源码依据
 
 - `VCPChat/modules/utils/agentConfigManager.js`：原子读写、锁文件机制、缓存策略、默认配置值。
 - `VCPChat/modules/ipc/agentHandlers.js`：Agent CRUD IPC 处理、头像保存、目录结构初始化、字段定义。
 - `VCPChat/modules/chatManager.js`：systemPrompt 宏替换（`{{AgentName}}`）、Tavern Rules 应用、模型参数传递、streamOutput 解析。
 
-## 11. 调查边界
+## 12. 调查边界
 
 本篇关注 Agent 配置模型，未详细展开 VCP 协议分发链路、工具审批机制和 VCPDistributedServer 权限；参见 [VCPChat-Agent工具调查笔记.md](../Agent工具/VCPChat-Agent工具调查笔记.md)。

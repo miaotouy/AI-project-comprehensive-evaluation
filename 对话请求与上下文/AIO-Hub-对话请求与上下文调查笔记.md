@@ -47,7 +47,7 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 ## 2. 历史选择与上下文拼装顺序
 
-发送给模型的内容并非简单的"活动路径消息数组"：
+发送给模型的内容由历史选择与管道拼装共同决定：
 
 - **历史选择**：`getBranchHistory`（`core/context-processors/session-loader.ts:105-153`）两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID（`:115-129`），第二遍跳过这些原消息而保留摘要节点（`:131-151`，压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user（`convertToolRoleToUser`）；仅保留"无 toolCallsRequested 的最终回答"的 reasoningContent（`:255-268`）；可选把旧消息 HTML 转 Markdown 以省 token（`:229-253`）。
 - **上下文管道**：`contextPipelineStore.ts:49-219` 注册并按 `priority` 排序执行 11 个处理器（`sortedAndEnabledProcessors`，`contextPipelineStore.ts:114-118`）。当前默认顺序：
@@ -87,16 +87,15 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 - **渲染通道**：`useStreamingMessageSources.ts` 维护模块级 `Map<nodeId, ReplayableMessageStreamSource>`（`:91`），**完全独立于节点的持久化 content**（`session.nodes[id].content`）；`getOrCreateStreamingMessageSource(nodeId, initialContent)`（`useStreamingMessageSources.ts:102-114`）是渲染层唯一入口，`MessageContent.vue` 只在生成中为真时创建/获取（细节见渲染器笔记 2.1）。
 - **持久化通道**：`useChatResponseHandler.handleStreamUpdate()`（`useChatResponseHandler.ts:177-274`）对正文（非 reasoning）分支把 chunk 同时塞进 `contentUpdateBuffer` 里的 `persistBuffer`（用于落地节点内容）与 `syncBuffer`（用于跨窗口同步）。节流分两路：
   - **跨窗口同步**：`scheduleStreamSync()`（`:121-147`）用 `requestAnimationFrame` 节流，把 `syncBuffer` 经 `useWindowSyncBus().syncState("chat:streaming-delta", ...)` 广播给分离窗口（主窗口/悬浮输入框窗口共享生成状态的机制）；
-  - **内容落盘**：`scheduleContentFlush()`（`:109-119`）用 `setTimeout`，延迟由 `getContentPersistDelay()`（`:78-84`）决定——若开启增量保存（`enableIncrementalSave`），延迟取 `max(250, incrementalSaveInterval)` 毫秒，否则固定 2000ms；到时 `flushContentToNode()`（`:86-107`）才把 `persistBuffer` 写入节点 `content` 并触发按配置节流的增量落盘（`triggerIncrementalSave()`，`:149-172`）。
+  - **内容落盘**：`scheduleContentFlush()`（`:109-119`）用定时器延迟写盘，延迟由 `getContentPersistDelay()`（`:78-84`）计算：开启增量保存时取增量保存间隔（下限 250ms），否则固定 2000ms。延迟到时，`flushContentToNode()`（`:86-107`）把 persistBuffer 写入节点 `content`，再触发按配置节流的增量落盘。
 
-也就是说：**渲染路径**（流缓冲区 → RAF 节流 → UI）和**持久化路径**（chunk 缓冲 → setTimeout 节流 → 节点 content → 落盘）是两套完全独立的节流策略，渲染更新几乎实时（RAF 级别），持久化写盘则明显更慢（默认 2 秒或用户配置的增量保存间隔）。这解释了为什么应用崩溃时可能丢失最后几秒的流式内容——`content` 字段本身滞后于屏幕显示。`finalizeNode()`（`useChatResponseHandler.ts:364-642`）在生成结束时会强制 flush 所有缓冲区（`flushAllBuffers`，`useChatResponseHandler.ts:371-394`），确保最终落盘内容完整，但过程中的中间态确实可能因为节流而未落盘。
+渲染路径（流缓冲区 → RAF 节流 → UI）与持久化路径（chunk 缓冲 → setTimeout 节流 → 节点 content → 落盘）是两套独立的节流策略：渲染更新几乎实时（RAF 级别），持久化写盘则明显更慢（默认 2 秒或用户配置的增量保存间隔）。应用崩溃时可能丢失最后几秒的流式内容——`content` 字段本身滞后于屏幕显示。
 
-- **reasoning 不对称**：reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffer`，声明在 `useChatResponseHandler.ts:42-45`，处理分支在 196-241），没有单独的"流源"抽象，而是每帧把 buffer flush 进 `node.metadata.reasoningContent`。因此 reasoning 写入节点的频率高于正文（每帧对比默认每 2 秒），两条持久化路径并不对称。
+- **reasoning 不对称**：reasoning（思考内容）走另一套 RAF 节流缓冲（`reasoningUpdateBuffer`，声明在 `useChatResponseHandler.ts:42-45`，处理分支在 196-241），没有单独的"流源"抽象，而是每帧把 buffer flush 进 `node.metadata.reasoningContent`，因此 reasoning 写入节点的频率高于正文（每帧对比默认每 2 秒）。
 
 ## 6. 完成、异常、半截流与最终回写
 
-- `finalizeNode()`（`useChatResponseHandler.ts:364-642`）在生成结束时**强制 flush 所有缓冲区**（`flushAllBuffers`，`useChatResponseHandler.ts:371-394`），确保最终落盘内容完整；过程中的中间态可能因节流未落盘（第 5 节）。
-- `finalizeNode()`（`useChatResponseHandler.ts:490-501`）对 `metadata.isContinuation` 且返回内容未包含原 `continuationPrefix` 的节点手动补回前缀，防止模型漏复述前缀导致内容断裂（节点语义在会话管理 4.3）。
+- `finalizeNode()`（`useChatResponseHandler.ts:364-642`）在生成结束时**强制 flush 所有缓冲区**（`flushAllBuffers`，`useChatResponseHandler.ts:371-394`），确保最终落盘内容完整；过程中的中间态可能因节流未落盘（第 5 节）。同一函数（`:490-501`）对 `metadata.isContinuation` 且返回内容未包含原 `continuationPrefix` 的节点手动补回前缀，防止模型漏复述前缀导致内容断裂（节点语义在会话管理 4.3）。
 - 响应中的 Base64 内联图片会被转换为附件追加到节点（`finalizeNode` 内 `processInlineData`，`useChatResponseHandler.ts:399-488`）；usage 为 0 但有内容时用本地 token 计算修复（`validateAndFixUsage`，`useChatResponseHandler.ts:280-359`）。
 - 生成结束后，`llmChatStore.ts` 里对 `generatingNodes.value.size` 减少的 watch（`llmChatStore.ts:129-207`）触发排队任务处理（第 8 节）；同一 watch 也是"僵死节点修复"的触发点（数据语义在会话管理 9 缺陷 1）。
 - 半截流的错误诊断（错误与空响应诊断存 metadata）见消息渲染器笔记 1.1；执行侧的异常分支 `handleNodeError`（`useChatResponseHandler.ts:647-694`）区分超时/abort/普通错误并写 `metadata.error`，清理缓冲后收口。工具编排层异常由 `orchestrate` 的 catch 统一转交 `handleNodeError`（`useToolCallOrchestrator.ts:445-451`）。
@@ -154,7 +153,7 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
 
 | 功能 | 当前快照中确认的实现（注入点） |
 | --- | --- |
-| 世界书 | `worldbook-processor`（priority 300）合并全局、用户档案和 Agent 绑定的世界书，执行主/次关键词与正则匹配、selective/constant/概率、扫描深度、角色/名称/标签过滤、递归与延迟递归、sticky/cooldown/delay、包含组和加权选择，再按严格 depth 或降级 anchor 位置注入。这是 `st-worldbook-manager` 编辑/导入数据的真实运行主链，不是只保存兼容字段。部分 ST 扩展字段仍只有表示/编辑能力，未找到运行时消费。 |
+| 世界书 | `worldbook-processor`（priority 300）合并全局、用户档案和 Agent 绑定的世界书，执行主/次关键词与正则匹配、selective/constant/概率、扫描深度、角色/名称/标签过滤、递归与延迟递归、sticky/cooldown/delay、包含组和加权选择，再按严格 depth 或降级 anchor 位置注入。`st-worldbook-manager` 编辑与导入的世界书数据由这条处理器实际消费。部分 ST 扩展字段仍只有表示/编辑能力，未找到运行时消费。 |
 | Recall 思绪检索 | `recall-processor`（priority 450）解析 `【recall::...】` 严格占位符协议（`recall-placeholder.ts` 校验编码/参数/数值范围），执行检索并替换；Agent 配置 `autoInjectIfMacroMissing` 时按未引用绑定自动注入占位符到 `context_head` 或 `before_last_user`（`recall-processor.ts:151,180`）。原 `knowledge-processor` 已删除，旧 `【kb::...】`/`【knowledge::...】` 占位符只记录"已废弃"警告、不再执行检索。 |
 | Skill 集成 | `skill-manager` 的 `SkillManagerProxy` 以 `skill:system` 注册到工具调用系统，提供动态激活及 `skill_read_file`/`skill_list_dir`/`skill_run_script`；复用 9.5 的审批/工具循环，不是独立消息协议。 |
 | SillyTavern 兼容 | `sillyTavernParser.ts` 和 Agent 导入服务可解析 V2/V3 角色卡 JSON/PNG、提示词 `prompt_order` 和部分正则/宏；快捷操作导入还兼容 SillyTavern Quick Reply。独立 `st-worldbook-manager` 提供世界书编辑、持久化、JSON/`.lorebook` 与角色卡 PNG/AIO Bundle 导入、导出和 Agent/User Profile 绑定，受支持字段由上行 `worldbook-processor` 实际执行。兼容是可运行子集，不是完整复刻酒馆扩展/事件协议。 |
@@ -216,7 +215,7 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 
 自动判断先检查 `enabled` 和 `autoTrigger`，再检查 `minHistoryCount`（`checkAndCompress`，`useContextCompressor.ts:466-490`）。`triggerMode` 支持 `token`、`count`、`both`；`both` 是 Token 或消息数任一超限即触发（OR），比较符是严格的 `>`，等于阈值时不会触发（`shouldCompress`，`useContextCompressor.ts:64-90`）。Token 优先使用 `llmChatStore.contextStats.totalTokenCount`，统计未就绪才回退为路径节点 `metadata.tokenCount` 之和（`calculateContextStats`，`useContextCompressor.ts:95-138`）。代码里有两个自动检查点：`useChatHandler.sendMessage()` 在创建新用户消息前调用一次，保证本轮请求可以使用刚生成的摘要；`useSingleNodeExecutor.execute()` 在助手节点完成后又调用一次，工具循环中的单节点执行也会经过后一个检查点。两处都捕获压缩错误，因此摘要请求失败不会阻断正常聊天。
 
-输入框"更多"菜单的"压缩上下文"调用 `messageInputStore.handleCompressContext()` → `manualCompress()`（`useContextCompressor.ts:495-505`）。菜单会在当前 Agent 没有启用压缩时禁用；手动调用跳过自动开关与阈值判断，但仍受"最近 N 条保护区"约束，候选消息数不多于 `protectRecentCount` 时返回"没有可压缩的消息"。需要区分 UI 约束和函数契约：`manualCompress()` 本身没有再次检查 `enabled`，只是正常 UI 不会在未启用时让用户点到它。
+输入框"更多"菜单的"压缩上下文"调用 `messageInputStore.handleCompressContext()` → `manualCompress()`（`useContextCompressor.ts:495-505`）。菜单会在当前 Agent 没有启用压缩时禁用；手动调用跳过自动开关与阈值判断，但仍受"最近 N 条保护区"约束，候选消息数不多于 `protectRecentCount` 时返回"没有可压缩的消息"。`manualCompress()` 本身不再检查 `enabled`，未启用时点不到它只是菜单禁用的结果。
 
 ### A.2 压缩范围、树结构与可逆性
 

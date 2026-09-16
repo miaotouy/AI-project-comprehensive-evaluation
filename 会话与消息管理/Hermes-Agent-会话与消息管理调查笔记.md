@@ -150,7 +150,7 @@ reasoning 是 part 类型而非顶层字段（`:133-134`）；模型名不在消
 `agent/title_generator.py` 的命名现在是**两段式 + 带来源**：
 
 - **即时标题（derived）**：会话首个 turn 的 prologue 内同步执行（`turn_context.py:188` 的 `_maybe_title_session_at_turn_start`，经 `maybe_auto_title` `:234-255` 派发），无模型调用、不失败：
-  - `apply_instant_title`（`title_generator.py:474`）调 `derive_title`（`:250`）从开场消息取首个有效行、折叠空白、词边界截断（`MAX_DERIVED_TITLE_CHARS=48`，`:64`），用户发出首条消息后毫秒级可见；
+  - `apply_instant_title`（`title_generator.py:474`）调 `derive_title`（`:250`）从开场消息取首个有效行、折叠空白、词边界截断（`MAX_DERIVED_TITLE_CHARS=48`，`:64`），用户发出首条消息后立即可见；
   - 斜杠命令等控制包装被剥离（`is_titleable_user_message`，`:236`）；
   - 随后 `auto_title_session`（`:508`）在后台线程用小模型升级（约束 JSON `{"title": ...}`）。
 - **来源与覆盖（provenance）**：标题来源按 `derived(0) < llm(1) < user(2)` 排序（`:6479-6485`），写入是"优先级检查 + 写入"的单事务 compare-and-swap：
@@ -322,11 +322,11 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - **state.db 是唯一规范存储**：可选 JSON 快照写入默认关闭；残余 JSONL（trajectory、moa-trace、spawn 树）均非消息主存储。
 - **子代理级联删除契约**：标记子会话递归级联删除，未标记子会话“孤儿化不删”防环（§8）。
 
-## 当前重连与 profile 归属
+## 10. 当前重连与 profile 归属
 
 桌面/TUI 客户端的 JSON-RPC 连接维护每个会话的事件序号水位；重连后只请求水位之后的事件，并把回放帧交给通常的事件分发路径（`apps/shared/src/json-rpc-gateway.ts:110-121`、`522-523`）。桌面端的会话请求同时带有 profile/connection 作用域，跨 profile 的同名 session 不应再按单独 ID 合并（`apps/desktop/src/api/sessions.ts:16-31`、`334-413`）。这改变的是缓存和恢复时的身份判定，不改变 SQLite 是会话与消息事实源的结论。
 
-## 10. 未验证事项
+## 11. 未验证事项
 
 - FTS 实际线上布局、触发重建与 trigram 命中效果未验证。
 - 工具执行增量 flush 在工具杀死进程场景下的实际持久化结果未验证。
@@ -335,7 +335,7 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - REST 路由挂载点（`hermes_cli/web_server.py`）除 `mount_spa` 外未逐行核对。
 - 运行行为（视觉效果、时序、性能）全部为静态推断，未运行验证。
 
-## 11. 关键源码索引
+## 12. 关键源码索引
 
 - Schema：`hermes_state_common.py`——`sessions`（:207）、`messages`（:266）、FTS 表与触发器（:417-618）、子会话判定（:85-114）、`SCHEMA_VERSION=25`（:167）。
 - `hermes_state.py`：`create_session`（:3859）、`append_messages_batch`（:7781）、`replace_messages`（:8187）、`rewind_to_message`（:9084）、`set_session_archived`（:6750）、`delete_session`（:9526）、`delete_session_if_empty`（:9585）、`get_messages_as_conversation`（:8655）、`list_sessions_rich`（:7104）、`get_resume_conversations`（:8854）、`publish_compression_child`（:4670）/`archive_and_compact`（:8287）、`_lineage_root_id` 派生（:7464）、`set_auto_title`（:6688，标题 provenance compare-and-swap）。

@@ -20,7 +20,7 @@ Jan 是 Web 前端、Tauri/Rust 原生层、可插拔扩展和文档站合仓的
 
 ## 统计口径与仓库形态
 
-- **快照边界**：只统计当前 commit（`95e96d0`）的 Git 跟踪文件；不统计 `.git`、未跟踪文件、本地依赖、构建缓存与运行时数据。
+- **快照边界**：只统计当前 commit 的 Git 跟踪文件；不统计 `.git`、未跟踪文件、本地依赖、构建缓存与运行时数据。
 - **量级单位**：同时记录文件数与物理行数；行数含空行和注释，只用于仓库内部与同口径项目间的近似量级比较。
 - **语言识别**：按源文件扩展名归类（ts/tsx/mts/cts → TypeScript，rs → Rust，swift → Swift）；JSON、YAML、锁文件、图片与二进制不计入编程语言行数。
 - **文档识别**：`.md/.mdx/.rst/.adoc/.asciidoc/.txt`，按一级目录与用途解释分布。
@@ -129,7 +129,7 @@ Rust 侧以 `tests.rs` 内嵌模块为主（如 `src-tauri/src/core/threads/test
   - `flatpak/`：Linux 打包清单（`ai.jan.Jan.yml` 等 4 文件）
   - `src-tauri/resources`、`icons`：打包资源与图标
   - `src-tauri/tauri.conf.json`：Tauri 应用配置
-- **结构信号**：根目录含 34 个 workflow 与 5 个 issue 模板；docs/ 自成一站（独立 package.json，bun.lock 与 yarn.lock 并存）；扩展按引擎/能力一包一目录，边界清晰。
+- **结构信号**：根目录含 34 个 workflow 与 5 个 issue 模板；docs/ 自成一站（独立 package.json，bun.lock 与 yarn.lock 并存）；扩展按引擎/能力一包一目录。
 
 ## 7. 设计取舍与已确认边界
 

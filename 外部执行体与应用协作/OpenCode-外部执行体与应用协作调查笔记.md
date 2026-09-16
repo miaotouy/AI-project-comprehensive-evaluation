@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenCode 是本类目的反向主样本：它主要不是托管其他 CLI Agent，而是把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 和 Slack 客户端暴露出去。会话、事件、所有权、重放、取消和分叉形成完整控制主链，达到 `主链确认`（静态证据）。
+OpenCode 是本类目的反向主样本：它把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 和 Slack 客户端暴露给外部调用方，自身不托管其他 CLI Agent。会话、事件、所有权、重放、取消和分叉形成完整控制主链，达到 `主链确认`（静态证据）。
 
 ## 接入角色与系统边界
 

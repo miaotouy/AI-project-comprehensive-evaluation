@@ -6,7 +6,7 @@
 >
 > 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
-> 调查方式：对比旧快照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 diff，核对关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
+> 调查方式：对照近期 diff 核对关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
 >
 > 调查范围：VCPToolBox 的 Agent 角色系统——文件格式、变量体系、AgentAssistant 配置与运行时能力，及 TaskAssistant/AgentDream 的当前状态核对
 >
@@ -239,7 +239,7 @@ VCPToolBox Agent 提示词不像 AIO Hub 那样有显式的工具开关字段—
 - **AIO Hub 预设**：YAML 的 `presetMessages` 需手工拼接为单一文本，注入策略（depth/anchor）无法直接复用；
 - **VCPChat 集成**：VCPChat 客户端从 VCPToolBox 服务器获取已处理的提示词，`Agent/*.txt` 中的宏由 VCPToolBox 在服务器端替换后再下发给客户端。
 
-*此处未包含VCPTavern内置插件的调研，简单来说VCPTavern主要实现了部分酒馆风格的深入注入能力*
+*未包含 VCPTavern 内置插件的调研；VCPTavern 主要实现了部分酒馆风格的深入注入能力*
 
 ## 8.1 角色相关插件的其他变化
 

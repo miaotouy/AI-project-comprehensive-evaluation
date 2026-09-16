@@ -117,7 +117,7 @@ CherryStudio 导入器把备份当作 ZIP，读取其中的 `data.json`，再逐
 
 Chatbox 导入器面向 Chatbox 备份 v2：校验 `manifest.json` 的格式与版本，从 settings 文件里读 `providers` 对象，按 provider key 映射协议（`claude`/`anthropic`、`gemini`/`google`、其余 OpenAI 兼容），并用一张内置的 key 到 baseUrl 映射表补齐缺省端点（DeepSeek、Qwen、Moonshot、OpenRouter、SiliconFlow、Groq、xAI、Mistral、Perplexity 等）。它按 `apiStyle` 是否含 response 或模型级 `apiStyle` 决定 Responses 模式，模型能力来自 Chatbox 的 `capabilities` 数组（vision、image_generation、tool_use、reasoning）而不是本地注册表。同样跳过无 Key 的渠道；导入结果会与现有渠道按身份串去重，避免重复。
 
-值得注意的是两个导入器都要求凭据非空，也就是「导入渠道」在实现上等价于「导入带 Key 的渠道」；同时导入对象的 Uuid 由字符串哈希派生（Chatbox 用 name-based UUID），因此同一份备份重复导入会命中相同 Uuid，而不是每次生成新实例。
+两个导入器都要求凭据非空，也就是「导入渠道」在实现上等价于「导入带 Key 的渠道」；同时导入对象的 Uuid 由字符串哈希派生（Chatbox 用 name-based UUID），因此同一份备份重复导入会命中相同 Uuid，而不是每次生成新实例。
 
 `build.gradle` 层面没有单独的 provider 持久化迁移代码；渠道字段的变化靠 kotlinx 的默认值和 `ignoreUnknownKeys` 兜底，设置级迁移由 Version 1/2/3 三个迁移器处理，本次只确认它们存在于设置初始化路径，未逐行核对是否触及 `providers`。
 
@@ -197,7 +197,7 @@ Claude 实现外还有一层针对 `pause_turn` 的续跑逻辑：非流式与�
 
 LRU 策略按渠道 Uuid 分槽保存每个 Key 的最后使用时间，优先选从未使用过的 Key，否则选最久未使用的，并把本次使用时间写回。缓存文件位于应用缓存目录，结构是渠道到 Key 时间戳的映射，条目有效期 1 天，整个文件的读写放在同一个锁对象里以避免同一进程内多实现并发写坏。过期条目在读取时被丢弃，整槽过期的记录会被清理。
 
-需要区分的是：这套机制只做「用哪个 Key」，不记录 Key 的健康状态。本次未找到按 Key 的错误计数、冷却、熔断、恢复或失败后换 Key 的逻辑，因此某个 Key 持续失败时轮询仍会按 LRU 分派给它。
+这套机制只做「用哪个 Key」，不记录 Key 的健康状态。本次未找到按 Key 的错误计数、冷却、熔断、恢复或失败后换 Key 的逻辑，因此某个 Key 持续失败时轮询仍会按 LRU 分派给它。
 
 ### 7.2 重试与故障转移
 

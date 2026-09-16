@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenClaw 的界面设施按“一个 Web 主表面 + 多种独立客户端”分布，真正共享的跨页面基础设施集中在 Control UI（`ui/`，Lit 3 + Web Awesome 组件库 + `@openclaw/uirouter`），它也是 Gateway 同版本捆绑派发的管理界面。应用根由单个 `<openclaw-app>` 元素装配：一个 Lit Context 装载 gateway、agents、theme、overlays 等十余个能力对象，再套一层 Tooltip Provider 与两个业务 Hovercard Provider，随后才渲染壳。同一份 HTML/资源既承载完整 Shell，也通过 URL 解析成 approval/question/terminal/desktop/dashboard 等“聚焦文档”，复用一个入口、跳过壳 chrome。
+OpenClaw 的界面设施按“一个 Web 主表面 + 多种独立客户端”分布，共享的跨页面基础设施集中在 Control UI（`ui/`，Lit 3 + Web Awesome 组件库 + `@openclaw/uirouter`），它也是 Gateway 同版本捆绑派发的管理界面。应用根由单个 `<openclaw-app>` 元素装配：一个 Lit Context 装载 gateway、agents、theme、overlays 等十余个能力对象，再套一层 Tooltip Provider 与两个业务 Hovercard Provider，随后才渲染壳。同一份 HTML/资源既承载完整 Shell，也通过 URL 解析成 approval/question/terminal/desktop/dashboard 等“聚焦文档”，复用一个入口、跳过壳 chrome。
 
 浮层体系是“Web Awesome 原生组件 + 薄适配层”的混合：Modal 用 `wa-dialog` 包一层 `openclaw-modal-dialog`（登记开放 Modal 层集合、统一焦点归还与 `modal-cancel` 事件）；菜单用 `wa-dropdown` 加每菜单控制器；Tooltip 是自管延迟/冗余抑制/`aria-describedby` 的 `openclaw-tooltip`；另有面向 body 的 Hovercard 定位控制器与把 `<details>` 菜单提升进 top layer 的 `openclaw-menu-surface`。Toast 不是堆叠队列，而是单个常驻宿主元素，必要时被移入当前打开 Modal 的顶层。主题是 8 个家族 ×（暗/亮）经 `data-theme`/`data-theme-mode` 发布，index.html 内联脚本在首帧前读 localStorage 预置背景与调色板，避免白屏闪烁；偏好按 gateway 来源域分桶存 localStorage，其中外观类字段走服务端 config `ui.prefs` 的无哈希 LWW 同步，跨窗口/跨设备收敛，其余偏好为设备本地。
 
@@ -40,7 +40,7 @@ Modal 的公共底层只有一个适配器：`openclaw-modal-dialog` 把 Web Awe
 
 ## 通知、加载态与错误反馈
 
-Toast 是单槽非堆叠的：`showToast` 寻找唯一的 `openclaw-toast-host`，若尚未挂载则暂存最新一条消息（`lib/toast.ts:35,193-218`）。宿主默认 6 秒自动消失，支持可选锚点元素（按其几何把 toast 定位到锚点顶部居中）、图标、动作按钮与关闭原因回调；关闭有淡出并在 `prefers-reduced-motion` 下直接移除。值得注意的机制是 Modal 联动：宿主平时挂在 `.shell` 内，一旦有 Modal 打开，`showToast` 就把宿主用 `moveBefore` 移进当前 Modal 的元素树，并在 `wa-after-hide` 后移回，使 toast 视觉上跟随 modal 顶层而非被遮挡。
+Toast 是单槽非堆叠的：`showToast` 寻找唯一的 `openclaw-toast-host`，若尚未挂载则暂存最新一条消息（`lib/toast.ts:35,193-218`）。宿主默认 6 秒自动消失，支持可选锚点元素（按其几何把 toast 定位到锚点顶部居中）、图标、动作按钮与关闭原因回调；关闭有淡出并在 `prefers-reduced-motion` 下直接移除。宿主还有一层 Modal 联动：平时挂在 `.shell` 内，一旦有 Modal 打开，`showToast` 就把宿主用 `moveBefore` 移进当前 Modal 的元素树，并在 `wa-after-hide` 后移回，使 toast 视觉上跟随 modal 顶层而非被遮挡。
 
 应用级“注意型状态”由常驻 `overlays` 能力承担（`app/overlays.ts` 与 `overlays-types.ts`），状态而非弹窗机制是它的主体：执行审批队列、设备配对弹窗开合与生命周期、更新可用/计划/运行/横幅，全部从 gateway 事件与 operator 访问范围（能否审批、能否管理员）投影成快照，供 Shell、标题与通知消费。审批弹窗本身是懒加载的 `openclaw-exec-approval`，仅在队列非空且有显式打开请求时渲染 `openclaw-modal-dialog`，内部固定展示当前审批并列出其余待审项（`components/exec-approval.ts:93-150`）；文档标题上的 attention 计数与“生成结果待批准”的系统/推送通知是它的外呼通道。
 
@@ -52,7 +52,7 @@ token 权威源在 `ui/src/styles/base.css`：`:root`（暗底默认）定义背
 
 主题解析有两套并存实现并刻意保持 lockstep：运行期 `app/theme.ts` 的 `resolveTheme`/`resolveMode` 处理 `system` 跟随 `prefers-color-scheme`，把模式解析成 `ResolvedTheme`；`index.html` 里的内联脚本（23-93 行）在首帧前只读一次 localStorage，命中具名字体族时注入带 `blocking=render` 的调色板 `<link>`，并写 `data-theme`/`data-theme-mode`/`data-theme-resolved` 与 `.wa-light/.wa-dark`。head 中 `<meta name="color-scheme">`、带 media 的 theme-color 及 html 背景色回退覆盖第一帧，避免深色用户先看到白底（`index.html:10-13,94-165`）。因此防闪依赖“内联脚本 + render-blocking palette + 两套实现手工同步”的组合。
 
-模式切换路径 `theme.setMode`（`bootstrap.ts:176-191`）：持久化前先经 `startThemeTransition`——目前它只做“同目标立即应用、异目标先应用后清理动画 class”的收敛，真正的圆形扩散动画声明在 `styles/base.css:730-761`（View Transition API），并带 `prefers-reduced-motion` 关闭。`applyThemePresentation`（`bootstrap.ts:81-106`）写 `data-theme*`、style.colorScheme、文本缩放 `--control-ui-text-scale`，并为具名字体族按需挂载字库样式表。`system` 模式注册 matchMedia 监听，系统明暗变化时重新发布；全部修改走 `syncThemePaletteStylesheet` 的“等调色板 css 可读后再应用”栅栏，防止慢样式覆盖新选择（`theme.ts:121-153,136-154`）。
+模式切换路径 `theme.setMode`（`bootstrap.ts:176-191`）：持久化前先经 `startThemeTransition`——目前它只做“同目标立即应用、异目标先应用后清理动画 class”的收敛，圆形扩散动画本身声明在 `styles/base.css:730-761`（View Transition API），并带 `prefers-reduced-motion` 关闭。`applyThemePresentation`（`bootstrap.ts:81-106`）写 `data-theme*`、style.colorScheme、文本缩放 `--control-ui-text-scale`，并为具名字体族按需挂载字库样式表。`system` 模式注册 matchMedia 监听，系统明暗变化时重新发布；全部修改走 `syncThemePaletteStylesheet` 的“等调色板 css 可读后再应用”栅栏，防止慢样式覆盖新选择（`theme.ts:121-153,136-154`）。
 
 持久化与同步在 `app/settings.ts`：设置整体按 gateway 来源域（`gatewayOriginScope`）分桶存 localStorage，键形如 `openclaw.control.settings.v1:<scope>`，另有 gateway 选择与按域的会话记录键；token 只放 sessionStorage 且不再落 localStorage（`settings.ts:29-46,410-427,625-739`）。写失败（隐私模式/配额）时内存镜像 `unpersistedSettings` 保底。设置变更走唯一 `patchSettings` 写通道并广播给监听器。
 
@@ -78,7 +78,7 @@ TUI（`src/tui`）是基于 `@earendil-works/pi-tui` 的终端界面：组件层
 
 ## 设计取舍与已确认边界
 
-可确认的架构取向：应用根“一个入口多种文档模式 + 懒加载分块 + 每个文档一套能力对象”，把一致性建立在单一前端仓库、单一 token 样式表、单一 overlay 适配层与通过 Gateway 收敛的偏好同步上，而不是运行时框架提供的全局 store。浮层统一到 Web Awesome 的 dialog/popover top-layer 能力而非自建 Portal 树；正文大量页面级模块被降为“按需注册 + 动作回放”，配合 stale-chunk 重载，说明团队把分块加载失败也当作一等反馈面。CSS 无 `@layer`、多数组件用 light DOM 共享全局样式表（ui/AGENTS.md 解释了层叠顺序策略），Web Awesome 组件则以 shadow + `::part` 接 token。
+可确认的架构取向：应用根“一个入口多种文档模式 + 懒加载分块 + 每个文档一套能力对象”，把一致性建立在单一前端仓库、单一 token 样式表、单一 overlay 适配层与通过 Gateway 收敛的偏好同步上，而不是运行时框架提供的全局 store。浮层统一到 Web Awesome 的 dialog/popover top-layer 能力而非自建 Portal 树；正文大量页面级模块被降为“按需注册 + 动作回放”，配合 stale-chunk 重载；分块加载失败有独立错误卡、重试与静态 mount-fallback 页面，而不只是空白页。CSS 无 `@layer`、多数组件用 light DOM 共享全局样式表（ui/AGENTS.md 解释了层叠顺序策略），Web Awesome 组件则以 shadow + `::part` 接 token。
 
 边界与推断性质事项：Toast 单槽（一次一条、新消息替换旧消息并上报 replaced）是从“单个宿主 + 队列只留最新”的源码得出的行为推断，未运行确认堆叠缺失的用户体验；多窗口同步仅覆盖可同步外观键，窗口形态差异（折叠/抽屉）有意不跨 tab；聚焦文档与整页 Shell 共享 localStorage 但各自实例化能力对象，theme 等通过服务端偏好收敛。native companions 的主题/通知与 Web 无关。
 

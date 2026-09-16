@@ -17,7 +17,7 @@
 Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”是多个互补的提示词机制，按“身份 → 命名模板 → 全局/会话覆盖 → 运行时注入”分层叠加：
 
 1. **身份层（SOUL.md）**：`$HERMES_HOME/SOUL.md` 是代理的“主身份文件”，首次运行自动用 `DEFAULT_SOUL_MD` 种子（`hermes_cli/config.py:840-914`），进入 system prompt 的 stable 层；无文件时回退到硬编码 `DEFAULT_AGENT_IDENTITY`（`agent/prompt_builder.py:144`）。
-2. **人格模板（personalities）**：`agent.personalities` 配置是具名模板，值为纯字符串或“提示词 + 语气 + 风格”的映射；内置 14 个模板集中在**单一所有者模块**（`hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，由 CLI 默认值迁入，`da6f0030`/`fe9e4d17` 系列），用户条目按名覆盖内置。
+2. **人格模板（personalities）**：`agent.personalities` 配置是具名模板，值为纯字符串或“提示词 + 语气 + 风格”的映射；内置 14 个模板集中在**单一所有者模块**（`hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，由 CLI 默认值迁入），用户条目按名覆盖内置。
 3. **全局/会话 system prompt**：
    - `display.personality` 保存**选中的名称**（空 = 无 overlay）并成为权威来源。启动/建 agent 时按“env 覆盖 → 命名人格 → 用户手动提示”的优先级取文本：env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 最优先，命名人格渲染失败时回退到 user-owned 的 `agent.system_prompt`；最终收集为 agent 的 `ephemeral_system_prompt`，在主请求路径中附加在缓存 prompt 之后，**不写入轨迹**。
    - **人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示）；v33→v34 迁移一次性清理旧 `/personality` 写入的文本并重置选择（`config_migrations.py:648-717`）。
@@ -124,7 +124,7 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
   9. 平台提示（`PLATFORM_HINTS` + config `platform_hints` override）
 - **context**（cwd 相关）：在编码时 workspace 快照（coding_context）之后接 `system_message`（如调用方提供），再经 `build_context_files_prompt` 汇总（`prompt_builder.py:2273`）。
   - 项目上下文**优先级**：`.hermes.md`/`HERMES.md` → `AGENTS.md` → `CLAUDE.md` → `.cursorrules`，只取一种（优先级注释 :2281-2287）。
-  - **AGENTS.md 例外——目录链合并**：沿 git root 到 cwd 每个目录各取 `AGENTS.md`/`agents.md` 首个命中，带 provenance 标签合并成段、链上重复内容跳过（`_agents_md_directory_chain`，`prompt_builder.py:2139`；该机制源自 grok-cli，提交 `2e2fcc09`）。
+  - **AGENTS.md 例外——目录链合并**：沿 git root 到 cwd 每个目录各取 `AGENTS.md`/`agents.md` 首个命中，带 provenance 标签合并成段、链上重复内容跳过（`_agents_md_directory_chain`，`prompt_builder.py:2139`；该机制源自 grok-cli）。
   - SOUL.md 独立且总是包含（除非已作为身份载入，`skip_soul` 防止重复加载）。
   - cwd 回退到 Hermes 安装树时跳过项目上下文发现（:2316-2327）。
 - **volatile**（最易变，放最后）：技能索引（正因为在缓存稳定前缀中不需要）→ MEMORY.md（agent 记忆）→ USER.md（用户画像）→ 外部 memory provider 的 `build_system_prompt()` → 日期行（到天，保证全天 byte-stable，`system_prompt.py:543-552`）。
@@ -198,14 +198,11 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 1. **提示缓存第一**：system prompt 一次构建、字节稳定，只有压缩时重建（AGENTS.md 的 “prompt caching is sacred” 约束）。这使“角色编写”能不破坏缓存，但代价是**角色修改只在下一次重建/新建会话生效**；CLI 用 `self.agent = None` 显式触发，TUI 用 `ephemeral_system_prompt` 就地替换实现会话内即时生效。
 2. **人格即文本叠加，不是对象**：没有角色版本、头像、开场白等承载字段；横向比较时应把 Hermes 归为“配置聚合/全局语义”，不是“角色卡实体”。
 3. **Profile 隔离是有意的**：profile 之间不继承（`--clone` 是唯一的“从默认开始”手段），与“profiles are independent islands”设计一致（AGENTS.md）。
-4. **ephemeral 不入轨迹** 是双刃：人格不会污染历史，但也意味着轨迹/审计记录无法精确重放当时人格文本。
-5. **配置 UI 字段不一定在请求链路生效**：`custom_prompt`（TUI `config.set prompt`）有 UI 与存储（`server.py:11135-11145`、`methods_config.py:194`），但本次检索仅发现读写，**没有读取它的请求路径**——典型的“界面存在、链路未消费”案例。
+4. **ephemeral 不入轨迹** 是一处取舍：人格不会污染历史，但也意味着轨迹/审计记录无法精确重放当时人格文本。
+5. **配置 UI 字段不一定在请求链路生效**：`custom_prompt`（TUI `config.set prompt`）有 UI 与存储（`server.py:11135-11145`、`methods_config.py:194`），但本次检索仅发现读写，**没有读取它的请求路径**，属于“界面存在、链路未消费”。
 6. **SOUL 与项目规则分离**：身份（HERMES_HOME）与项目 AGENTS/CLAUDE/.cursorrules（cwd）独立、优先级明确，不会互相覆盖。
 7. **多段固定指引文本均为稳定文本**：稳定 system prompt 是对缓存友好的设计选择；压缩重建时只会重新渲染一次，不影响前缀缓存。
-
-## 当前角色边界
-
-当前提交没有新增独立持久化角色实体，也没有把插件、profile 或模型目录改造成角色对象。Provider 的推理强度映射与新增模型目录会影响角色引用解析后的实际请求参数，但角色仍只是提示词和运行时覆盖的组合，不能据此推断出新的角色配置层。
+8. **当前角色边界**：当前提交没有新增独立持久化角色实体，也没有把插件、profile 或模型目录改造成角色对象。Provider 的推理强度映射与新增模型目录会影响角色引用解析后的实际请求参数，但角色仍只是提示词和运行时覆盖的组合，不能据此推断出新的角色配置层。
 
 ## 10. 未验证事项
 

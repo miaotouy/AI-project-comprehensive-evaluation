@@ -14,15 +14,13 @@
 
 ## 结论摘要
 
-NextChat 的消息渲染器是一个以 `react-markdown` 为核心、由 Chat 组件负责消息窗口和状态装配的轻量链：
+NextChat 的消息渲染器是一条以 `react-markdown` 为核心、由 Chat 组件负责消息窗口和状态装配的渲染链：
 
 1. `Chat` 先把 Mask context、会话消息、loading/input preview 组成可视窗口，再按 user/assistant/system 角色渲染头像、操作、工具状态、Markdown、图片和音频。
 2. Markdown 使用 `react-markdown` 加一组插件：GFM、数学、软换行、KaTeX 与高亮（插件名见 §2.2 清单）。在解析前会把 `\[...\]`/`\(...\)` 转成 KaTeX 可识别形式，并尝试把裸 HTML 文档包进 `html` 代码块。
 3. `<pre>` 被替换为 `PreCode`：Mermaid 代码单独交给 Mermaid 渲染成 SVG；HTML/DOCTYPE/SVG/XML 代码在 Artifact 开启时进入 sandbox iframe；普通代码支持复制和超过 400px 后折叠。
 4. SSE 流式文本通过 `requestAnimationFrame` 缓慢吐给 UI；`reasoning_content` 或 `<think>` 块被转成 Markdown 引用行 `> `，没有独立的 reasoning 数据结构。
 5. Artifact 通过 `srcDoc` 和 `sandbox="allow-forms allow-modals allow-scripts"`（无 `allow-same-origin`）预览，分享内容写入 Cloudflare KV。
-
-Artifact 预览使用 opaque-origin 沙箱隔离；iframe 高度经 `postMessage` 回传给父窗口。
 
 ## ASCII 调用链图
 
@@ -136,7 +134,7 @@ rehype-highlight (detect=false, ignoreMissing=true)
 - `code.language-html`；
 - 代码文本以 `<!DOCTYPE`、`<svg` 或 `<?xml` 开头。
 
-检测结果只在 `session.mask.enableArtifacts !== false && config.enableArtifacts` 时展示（`app/components/markdown.tsx:102-105`、`148-171`）。预览包括刷新按钮、全屏容器和分享按钮，真正的 iframe 组件在 `app/components/artifacts.tsx:36-107`。
+检测结果只在 `session.mask.enableArtifacts !== false && config.enableArtifacts` 时展示（`app/components/markdown.tsx:102-105`、`148-171`）。预览包括刷新按钮、全屏容器和分享按钮，iframe 组件在 `app/components/artifacts.tsx:36-107`。
 
 ## 4. 流式文本和 reasoning
 

@@ -27,8 +27,6 @@ Cherry Studio 是 Electron 主应用与内部共享包合仓的 TypeScript monor
 | 文档 | 562 文件 / 72361 行 |
 | 测试 | 2141 文件 / 581597 源码行 |
 
-相对 `0001d730ae` 快照：跟踪文件 7,828 → 8,002，源码行 1,068,550 → 1,116,566（净增约 +48k 行，与区间内 1,171 个文件被修改、净 +56k 行的 diff 规模吻合），测试源码行 476,569 → 506,552（测试/源码占比 44.6% → 45.4%）。
-
 主要区域按量级依次为：
 
 | 区域 | 文件 / 源码行 |
@@ -40,7 +38,7 @@ Cherry Studio 是 Electron 主应用与内部共享包合仓的 TypeScript monor
 | provider registry | 181 / 17,802 |
 | AI core | 90 / 17,761 |
 
-provider registry 与 AI core 是两个约 1.8 万行的内部包。`v2-refactor-temp` 仍有 181 个跟踪文件，但源码已清空（0 行可识别源码），只剩 `README.md`、`docs/` 与 `tools/data-classify` 等文档/工具；其文档仍计入上表的 166 个 v2-refactor-temp 文档文件。
+provider registry 与 AI core 是两个约 1.8 万行的内部包。`v2-refactor-temp` 仍有 181 个跟踪文件，但源码已清空（0 行可识别源码），只剩 `README.md`、`docs/` 与 `tools/data-classify` 等文档/工具；其文档仍计入下表的 166 个 v2-refactor-temp 文档文件。
 
 ## 语言、文档与测试
 

@@ -16,7 +16,7 @@
 
 OpenCode 在"对话导出与分享"类目提供两条主链：本地 JSON 档案（`opencode export` / `opencode import`，Web 端等价下载）与远端实时分享（TUI /share 命令、Web 面板、`run --share`、GitHub Actions 自动分享）。两者采用同一内容口径：持久化的结构化原文（会话元数据与全部 part 类型，schema 细节见第 2 节），不经过渲染稿投影。
 
-能力分型上属于 `E1 数据交换`（JSON 导出 + 可往返导入）加 `E4 链接分享`；本次未找到 Markdown/HTML/PDF/PNG 交付物、分享稿编辑器、选区导出或数据集发布（`E2/E3/E5` 不适用）。
+能力分型上属于 `E1 数据交换`（JSON 导出，可往返导入）与 `E4 链接分享`；本次未找到 Markdown/HTML/PDF/PNG 交付物、分享稿编辑器、选区导出或数据集发布（`E2/E3/E5` 不适用）。
 
 - **脱敏**：`--sanitize` 只存在于 CLI 导出，按 part 类型逐字段替换为 `[redacted:kind:id]`，但 assistant 错误体（APIError.responseBody）、retry part、tool 错误字段等不在覆盖表内；Web 导出与分享链路不做任何脱敏。
 - **实时分享而非快照**：本地监听会话、消息、part、diff 四类事件，按会话去抖 1000ms 后批量 POST 到远端 `sync` 端点；服务端对象在仓库外（默认 `https://opncd.ai`，登录后经 enterprise/console 的 `/api/shares` 并带 Bearer 与组织 ID）。本地只持久化 `session_share` 表与会话的 `share_url` 列。
@@ -59,7 +59,7 @@ PR 续作：opencode pr <number> -> gh pr checkout -> 解析 PR body 分享链�
 
 内容口径是**持久化原始数据**，不采用可见渲染或请求 payload：导出对象只含会话元数据与消息数组（`export.ts:287`），消息按 `SessionV1.WithParts`（`schema/src/v1/session.ts:493-500`）序列化全部 11 种 part 类型。system 提示在 user 消息的 `info.system` 字段原样导出；reasoning part 原样导出；工具调用以结构化 ToolPart 导出（携带 callID、工具名、状态与 input/output 等字段）；API 调用记录不形成独立导出物，但 assistant 消息的 error（含响应体/响应头）与重试 part 的错误字段会随结构化数据导出。
 
-未开启脱敏开关前，导出无任何过滤或转换。
+未开启脱敏时，导出不做任何过滤或转换。
 
 ## 3. 脱敏规则（--sanitize）
 
@@ -99,7 +99,7 @@ FilePart 是引用式：`url` 字符串 + 可选 `source`（类型为 file/symbo
 
 ## 6. 分享稿编辑、编排与预览
 
-不适用：本次未找到分享稿编辑器、选区/主题/水印编排、实时预览或生成版本工作台。分享即"当前全量数据"的一次性建立 + 事件驱动持续同步，Web 查看端在仓库外。
+不适用：本次未找到分享稿编辑器、选区/主题/水印编排、实时预览或生成版本工作台。分享是"当前全量数据"的一次建立，随后由事件驱动持续同步；Web 查看端在仓库外。
 
 ## 7. 分享载体、访问控制与撤销
 
@@ -153,7 +153,7 @@ FilePart 是引用式：`url` 字符串 + 可选 `source`（类型为 file/symbo
 - 分享服务完全外置：本仓库只是客户端 + 本地记录；`packages/console` 未找到对应端点，服务端行为（认证、保留期、data 端点、公开页渲染）属外部边界。
 - `Session.diff` 在本次快照中返回空数组（`session/session.ts:825-828`），初始全量推送里的 session_diff 恒为空；真实 diff 只能靠后续事件同步。
 - 两套分享链接约定并存（服务端 `/share/<slug>` vs GitHub Actions `opencode.ai/s/<id>`），且 `pr.ts` 仍识别已弃用的 `opncd.ai/s/` 格式——属静态推断的演进残留，非运行确认。
-- 无图片/PDF/HTML 导出、无选区、无生成历史，均未实现（本次未找到，不做虚构）。
+- 无图片/PDF/HTML 导出、无选区、无生成历史，均未实现（本次未找到）。
 
 ## 12. 未验证事项
 

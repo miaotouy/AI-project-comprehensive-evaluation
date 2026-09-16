@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-AstrBot 的"Agent 角色"（Persona）是**纯指令 + 能力白名单**模型：一个 persona 由 `system_prompt` 文本、`begin_dialogs` 预设开场对话、工具与 Skills 白名单以及自定义错误文案组成。没有头像、语音、名字等富媒体字段（与"角色卡"类客户端差异明显）。运行时由 `_ensure_persona_and_skills`（astr_main_agent.py:499-664）负责，在每轮请求构造时把 persona 解析结果注入 ProviderRequest。
+AstrBot 的"Agent 角色"（Persona）是**纯指令 + 能力白名单**模型：一个 persona 由 `system_prompt` 文本、`begin_dialogs` 预设开场对话、工具与 Skills 白名单以及自定义错误文案组成。没有头像、语音、名字等富媒体字段（与"角色卡"类客户端不同）。运行时由 `_ensure_persona_and_skills`（astr_main_agent.py:499-664）负责，在每轮请求构造时把 persona 解析结果注入 ProviderRequest。
 
-关键事实（快照 346b85d）：
+关键事实：
 
 - **存储**：v4 起存 SQLite `personas` 表（po.py:145-178，SQLModel），`persona_id` 即显示名（字符串，非 UUID）；v3 的 config.json `persona` 键已废弃，由迁移脚本改写（migra_3_to_4.py:236-276）。
 - **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:353-432）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3`，不是 DB 模型。
@@ -104,7 +104,7 @@ PersonaFolder 表（po.py:112-142）：递归层级，`parent_id` NULL=根（:13
 5. 返回
 ```
 
-注意：`"[%None]"` 只对**对话级**生效（:107-108）；会话规则若直接绑定这个哨兵，persona_id 会被置为该值，后续查找（:112）失败后（非 webchat）返回空 persona，因此规则级也能禁用。
+`"[%None]"` 只对**对话级**生效（:107-108）；会话规则若直接绑定这个哨兵，persona_id 会被置为该值，后续查找（:112）失败后（非 webchat）返回空 persona，因此规则级也能禁用。
 
 ### 2.2 引用了不存在 persona 的行为
 
@@ -136,7 +136,8 @@ if begin_dialogs := copy.deepcopy(persona.get("_begin_dialogs_processed")):
 ### 3.3 skills 过滤（:543-575）
 
 ```text
-runtime = cfg.computer_use_runtime（默认 "local"）
+runtime = cfg.get("computer_use_runtime", "local")
+    # 配置默认 none（core/config/default.py:180）；键缺失时读侧回退 "local"（astr_main_agent.py:567）
 SkillManager().list_skills(active_only=True, runtime=runtime)
 _filter_skills_for_current_config（:467-496）：
     - 非插件源 skill 直接放行

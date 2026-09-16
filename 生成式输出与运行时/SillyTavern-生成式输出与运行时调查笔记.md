@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-SillyTavern 的输出模型非常单一：**模型输出只有"聊天气泡文本"一种对象形态**。聊天消息对象（ChatMessage）是唯一的事实源，`extra` 是开放元数据袋；展示上以 Markdown（showdown）+ DOMPurify 白名单净化为主，代码块仅有 highlight.js 高亮与复制按钮。本次未找到 artifact、canvas、notebook、sandbox、iframe/WebView 等任何输出运行环境，也未找到对模型文本的代码执行——全仓检索中 eval 与 `new Function` 只出现在注释和普通函数声明里。
+SillyTavern 的输出模型单一：**模型输出只有"聊天气泡文本"一种对象形态**。聊天消息对象（ChatMessage）是唯一的事实源，`extra` 是开放元数据袋；展示上以 Markdown（showdown）+ DOMPurify 白名单净化为主，代码块仅有 highlight.js 高亮与复制按钮。本次未找到 artifact、canvas、notebook、sandbox、iframe/WebView 等任何输出运行环境，也未找到对模型文本的代码执行——全仓检索中 eval 与 `new Function` 只出现在注释和普通函数声明里。
 
 能力分布：**G0（Markdown 聊天文本）为绝对主体**；**G1** 通过消息附带的媒体对象（`extra.media`，图片/视频可查看、下载、随聊天持久化）与记忆摘要等持久文本对象实现；**G2 部分**：OpenAI 兼容 function calling 让模型调用宿主注册的 JS 工具（`tool-calling.js` ToolManager），结果以系统消息物化并回注上下文，但没有 UI schema/声明式组件；正则扩展允许在展示与提示两侧重写文本（可注入受限 HTML，经净化）。**G3 及以上未找到**：无代码执行、无项目工作区、无桌面活对象。模型无法查询"对象列表"，只能通过聊天文本、工具注册表与变量间接感知状态；消息本身不可被模型定向寻址（无 UUID，仅有数组下标），工具的 id 由 API 返回。
 

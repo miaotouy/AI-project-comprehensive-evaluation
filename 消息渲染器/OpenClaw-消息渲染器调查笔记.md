@@ -43,7 +43,7 @@ iOS / Android:
   -> SwiftUI LazyVStack or Compose LazyColumn
 ```
 
-最有特色的实现选择有四点：
+实现上有四个选择：
 
 - Gateway 先做显示投影、隐藏回复过滤、内容预算和 transcript 身份补全，客户端通常不直接渲染原始运行时 envelope。
 - Control UI 把“持久消息、实时文本、工具流、提问和运行状态”保留为不同的投影对象，再在 thread builder 中合并为用户可读的 turn。
@@ -84,7 +84,7 @@ Gateway 没有为所有模型供应商强制一个固定的内容 part 联合。
 
 ### Control UI 模型
 
-Control UI 的 pane state 同时持有历史消息和实时投影。`history-merge.ts` 以 pane 为 owner 保存 session projection，避免分屏之间共享 live state；`session-message-apply.ts` 接受 Gateway 的 `session.message`，补入 `__openclaw` identity 后再交给 reducer。它还区分 producer-owned assistant、上一回合迟到的 assistant、用户消息和导入消息，避免把相关 run 的最终回复误放到新 turn，见 `ui/src/pages/chat/history-merge.ts:14-23,58-102,220-269`、`ui/src/pages/chat/session-message-apply.ts:63-176`。
+Control UI 的 pane state 同时持有历史消息和实时投影：以 pane 为 owner 保存 session projection，避免分屏之间共享 live state；收到 Gateway 的 `session.message` 后补入 `__openclaw` identity 再交给 reducer。它还区分 producer-owned assistant、上一回合迟到的 assistant、用户消息和导入消息，避免把相关 run 的最终回复误放到新 turn，见 `ui/src/pages/chat/history-merge.ts:14-23,58-102,220-269`、`ui/src/pages/chat/session-message-apply.ts:63-176`。
 
 历史消息进入 thread builder 后被抽象为两类主要对象：普通 `ChatItem` 和按 role、sender、run、边界分组的 `MessageGroup`。另外还有 stream、reading indicator、question、notice、divider、work-group、activity-run 和 agent-run-frame。`buildChatItems` 负责过滤 heartbeat、压缩/重置 marker、工具结果、Canvas 预览和 queued send；`groupMessages` 再按 role、run、sender 和 commentary/runtime activity 边界合并，见 `ui/src/pages/chat/chat-thread-build.ts:75-215`、`ui/src/pages/chat/chat-thread-grouping.ts:57-130`。
 

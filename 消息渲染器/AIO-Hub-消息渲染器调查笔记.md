@@ -31,7 +31,7 @@ AIO Hub 的"消息渲染器"实际由两层组成：
 - Agent/User Profile 级 Markdown 样式覆盖。
 - 桌面端与移动端各自提供内建的人工操作测试页；桌面测试台可直接驱动生产渲染器、模拟 Token 流和检查 AST/稳定区。
 
-这套实现的核心价值不只是"支持很多 Markdown 扩展"，它把 LLM 消息当作一种需要持续增量解释的结构化文档来处理：**流式正文与低频持久化分离**，末尾不稳定内容进入 pending 区，稳定内容保留 AST 节点身份，再把节点按类型交给专用 Vue 组件。代价是解析和状态层较复杂，HTML 执行环境、超长会话常驻成本、桌面与移动端能力差异都需要单独评估。
+这套实现把 LLM 消息当作一种需要持续增量解释的结构化文档来处理：**流式正文与低频持久化分离**，末尾不稳定内容进入 pending 区，稳定内容保留 AST 节点身份，再把节点按类型交给专用 Vue 组件。代价是解析和状态层较复杂，HTML 执行环境、超长会话常驻成本、桌面与移动端能力差异都需要单独评估。
 
 从产品能力判断，AIO Hub **已经有“消息即应用”的一种实现**：模型可在消息中输出 HTML/SVG 代码块，预览 iframe 能执行 JavaScript、表单和 Canvas 小应用；`action_button` 节点还可触发发送消息、插入文本或复制内容。它与 VCPChat 的实现深度不同：AIO 以 iframe 隔离单条消息内的小应用，并通过预定义动作与宿主聊天交互；VCPChat 还提供主消息 DOM 中的 HTML/CSS/JS 执行和定时器、动画库、Three.js 等宿主运行时生命周期治理。因而准确结论是“AIO 有 iframe 型可执行消息，宿主运行时契约弱于 VCPChat”，不是“缺少消息即应用”。
 
@@ -336,7 +336,7 @@ V2 当前常量为：
 - `mobile/src/tools/rich-text-renderer/RichTextRenderer.vue`
 - `mobile/src/tools/llm-chat/components/MessageContent.vue`
 
-移动端仍以 `marked.lexer()` 得到 token、由同一个 Vue 组件递归渲染，**没有**桌面的 AST/Patch、稳定区/待定区、Worker 分词、正则管线和样式系统，但它已不再只是"基础 HTML"：
+移动端仍以 `marked.lexer()` 得到 token、由同一个 Vue 组件递归渲染，**没有**桌面的 AST/Patch、稳定区/待定区、Worker 分词、正则管线和样式系统。移动端在此基础上补充了：
 
 - 新增专用节点组件：`ThinkBlock`（思考块，`<think|guguthink>` 正则提取）、`AlertBlock`（GitHub 提示块）、`KatexRenderer`（KaTeX 数学公式）、`MermaidDiagram`（安全 Mermaid，流式期间延迟渲染）、`VcpBlock`（VCP 协议输出）、`RichTextMediaNode`（受管媒体预览）、`CodeBlock`（优化代码块交互）；
 - 流式渲染增加 80ms 节流（`STREAM_RENDER_THROTTLE_MS`）：中间 chunk 合并渲染，最终内容立即渲染；`isStreaming` 不再只是类型占位，而是参与节流策略；

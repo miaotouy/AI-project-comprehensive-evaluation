@@ -19,7 +19,7 @@
 - 新建 Topic 的同一写事务里就会创建一条虚拟根消息（`createRootMessageTx`），不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
 - **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
 - 分支草稿是**持久化空叶子**：`POST /messages/:id/branches` 落一条空的 successful user 行（`reserveBranch`），等待输入状态由结构派生（`isBlankUserTurn`），不依赖渲染层假节点；只有流式增量仍是不落库的纯前端 overlay。
-- **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch`，`a012837e5c` 起支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。
+- **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch` 支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。
 - **崩溃恢复有明确机制**：主进程启动时把上次崩溃遗留的 `pending` assistant 行统一翻为 `error`（boot reconcile），避免 UI 永久停留在"思考中"。
 - 删除 Topic 不主动清理磁盘附件文件，但内部附件经 `chat_message_file_ref` 引用计数，FileManager 有策略化条目回收（`delete_when_unreferenced` 宽限期扫描 + 孤儿条目扫描），不是无主泄漏。
 
@@ -120,7 +120,7 @@
   - ②首轮回复完成后用 AI 生成摘要标题替换临时标题（`maybeRenameFromConversationSummary`，`:168-175`，实现 `doMaybeRenameFromConversationSummary` `:181+`）。
 
   两阶段都受 `canAutoRenameTopicName`（`:134`）与 `isNameManuallyEdited` 把关（`:150,190,196`）：topic 名为空或仍等于上次生成的临时标题才允许继续自动改名；用户一旦手动改名就永久停止自动命名——不存在"自动改名覆盖用户改名"。
-  - 提交 `b68fafcaf7` 起摘要生成请求不再携带 `assistantId`（测试断言 `generateText` 调用无该属性，`TopicNamingService.test.ts:137`），避免把助手的工具配置挂到标题生成请求上。
+  - 摘要生成请求不携带 `assistantId`（测试断言 `generateText` 调用无该属性，`TopicNamingService.test.ts:137`），避免把助手的工具配置挂到标题生成请求上。
 
 ### 3.3 删除：先消息后关联最后删行；附件回收交给 FileManager GC
 
@@ -151,15 +151,15 @@
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-### 4.1 持久层是真的树
+### 4.1 持久层是真实树结构
 
-证据：自引用外键（`message.ts:59`）+ `siblingsGroupId` 兄弟组 + CHECK 约束的虚拟根（见 1.2）；删除时的 `INVALID_OPERATION` 拦截与 reparent 语义（见 1.2）；`createSibling`（`MessageService.ts:926-974`，编辑后重发）在源未分组时分配新的兄弟组号、加入已有组时继承组号（`:942-946`），并立即把 active 指针移到新行（`:963`）。**树是真实的，不是线性链表/锚点跳转的伪装。**
+证据：自引用外键（`message.ts:59`）+ `siblingsGroupId` 兄弟组 + CHECK 约束的虚拟根（见 1.2）；删除时的 `INVALID_OPERATION` 拦截与 reparent 语义（见 1.2）；`createSibling`（`MessageService.ts:926-974`，编辑后重发）在源未分组时分配新的兄弟组号、加入已有组时继承组号（`:942-946`），并立即把 active 指针移到新行（`:963`）。**消息树是持久层的真实结构，不是渲染层临时拼装的视图。**
 
 ### 4.2 "切分支"是 activeNodeId 指针重定向，不是移动/复制消息
 
 - `TopicService.setActiveNodeTx`（`TopicService.ts:371-407`）就是一次 `UPDATE topic SET active_node_id = ?`（`:400-406`），唯一的校验是目标消息属于该 topic、且不是虚拟根（`:372-398`）。
 - 渲染时走 `getPathRowsToNodeTx`（`MessageService.ts:1885-1930`）：从目标节点往上走到虚拟根为止，虚拟根本身被排除在结果外（`:1925-1929`）。所以前端看到的"当前分支的完整对话"= 从 `activeNodeId` 反向 walk 到根的路径，**每次切分支都要重新 walk 一次**，不是维护链表指针跳转结构。
-- **兄弟分支导航与分支面板切换**：`ChatWriteActions.setActiveBranch(throughNodeId)`（`src/renderer/hooks/chat/ChatWriteContext.ts:66-75` 接口注释；实现 `useChatWriteActions.ts:450-479`）先 GET `/topics/:topicId/path?nodeId=throughNodeId` 拿到该分支的最新叶子（`MessageService.getPathThrough`，`:2019-2052`，取 `created_at` 最大且无存活子节点的后代），再把 `activeNodeId` 指到那个叶子——本质是"找到目标分支最新的叶子，移动指针"，这样切到中间节点也能看到它后续的完整追问链。读侧组装见下：
+- **兄弟分支导航与分支面板切换**：`ChatWriteActions.setActiveBranch(throughNodeId)`（`src/renderer/hooks/chat/ChatWriteContext.ts:66-75` 接口注释；实现 `useChatWriteActions.ts:450-479`）先 GET `/topics/:topicId/path?nodeId=throughNodeId` 拿到该分支的最新叶子（`MessageService.getPathThrough`，`:2019-2052`，取 `created_at` 最大且无存活子节点的后代），再把 `activeNodeId` 指到那个叶子——即"找到目标分支最新的叶子，移动指针"，这样切到中间节点也能看到它后续的完整追问链。读侧组装见下：
   - 用户消息按 `siblingsGroupId` 分组；
   - assistant 消息按 `(siblingsGroupId, modelId)` 分组（多模型多轮混合场景按模型分桶）；
   - 实现见 `useTopicMessages.ts:51-60,104-122,136-155`。
@@ -197,7 +197,7 @@
 - **会话内搜索：数据 + DOM 混合，不读 FTS**。`MessageListSearch`（`src/renderer/components/chat/messages/list/MessageListSearch.tsx`）先在**已加载的消息数据**上做粗匹配，再对**已挂载 DOM** 做精确 Range：
   - 数据粗匹配：`computeMessageSearchMatches`（`messageSearch.ts:120-162`）把每个消息的 text part 投影成纯文本（`markdownToPlainText` 降级渲染），排除 `pending` assistant（`:84`），多模型回复组以整组粒度出一个匹配（`:133-148`）；
   - DOM 精确匹配：`findRangesInScope`（`src/renderer/utils/contentSearch.ts:40-88`）用 TreeWalker 求 Range，`findTextMatches` 用 `Intl.Segmenter` 做整词（`:11,27-33`）；`messageSearchDom.ts` 的节点过滤（`:10-18`）排除按钮/引用/代码块工具栏等。
-  - 提交 `a012837e5c`（"fix(message-search): support virtualized conversations"）使虚拟化窗口外的消息可经粗匹配被找到，导航到未挂载行时 `locateMessage` 把行滚入视口（`MessageListSearch.tsx:337-339`）；
+  - 虚拟化窗口外的消息可经粗匹配被找到，导航到未挂载行时 `locateMessage` 把行滚入视口（`MessageListSearch.tsx:337-339`）；
   - 高亮用 CSS Custom Highlight API（`MessageListSearch.tsx:189-199,242-244`，样式 `src/renderer/assets/styles/index.css:227-228`）；
   - 流式期间匹配数据被锁存，流结束才重算（`MessageListSearch.tsx:97-102`）。
 - **跨会话全局搜索：FTS**。入口 `app.search` 命令打开 `GlobalSearchPopup`（`src/renderer/components/layout/AppShell.tsx:80-99`），提供两个端点：

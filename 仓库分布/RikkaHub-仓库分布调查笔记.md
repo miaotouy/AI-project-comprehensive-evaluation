@@ -85,7 +85,7 @@ RikkaHub 是一个面向 Android 的原生 LLM 聊天客户端，采用单个 Gr
 | HTML | 1 | 314 | `app` assets 的 `mark.html` |
 | C++ | 2 | 173 | `workspace` 的 `termux_pty.cpp`、`workspace.cpp` |
 
-语言占比带有明显的 vendor 影响，读占比时需注意：
+语言占比受 vendor 代码影响：
 
 - Java 的 64 个文件全部位于 `document/src/main/java/com/artifex/mupdf/fitz/`，是第三方 PDF 库绑定；`document` 自身的业务代码只有 4 个 Kotlin 解析器（`DocxParser`、`EpubParser`、`PdfParser`、`PptxParser`）。
 - JavaScript 的 3736 行主要由压缩后的 `mermaid.min.js` 贡献，业务 JS 只有 `highlight/tools` 下 2 个约 3.7KB/2.3KB 的 fixture 生成脚本。
@@ -146,7 +146,13 @@ Git 跟踪的测试文件共 193 个 / 12326 源码行，测试与源码的文�
 | 本地化工具链 | `locale-tui` 直接读写 Android 字符串资源 XML，独立 Python 运行时 |
 | 契约测试工具链 | `trace-cli` 独立 Bun 运行时，产出喂给 `ai` 模块测试 |
 
-Web 端的跨平台不是共享代码，而是协议复用：`web` 模块承担 Ktor 服务端（`ktor.server.cio`、`auth`/`jwt`、`sse`、`compression`、`cors`、`status pages`），`app/src/main/java/me/rerere/rikkahub/web/` 下再实现 `WebServerManager`、`WebApiModule`、`NsdServiceRegistrar` 与按域拆分的路由（Conversation、Settings、Files、Folder、Events、AIIcon）。`web-ui` 通过 `api.ts`/`events.ts` 消费这些 HTTP/SSE 接口。前端到 Android 的嵌入由 `web/build.gradle.kts` 的 `buildWebUi` Exec 任务完成：在 `web-ui` 目录执行 `pnpm run build`，输出到 `web/src/main/resources/static/`，并通过 `preBuild.dependsOn(buildWebUi)` 挂入 Android 构建。该任务只跑 `build` 不跑 `install`，因此在 CI 中需要预先安装前端依赖。
+Web 端通过协议复用接入：
+
+- `web` 模块承担 Ktor 服务端（`ktor.server.cio`、`auth`/`jwt`、`sse`、`compression`、`cors`、`status pages`）
+- `app/src/main/java/me/rerere/rikkahub/web/` 下实现 `WebServerManager`、`WebApiModule`、`NsdServiceRegistrar` 与按域拆分的路由（Conversation、Settings、Files、Folder、Events、AIIcon）
+- `web-ui` 通过 `api.ts`/`events.ts` 消费这些 HTTP/SSE 接口
+
+前端到 Android 的嵌入由 `web/build.gradle.kts` 的 `buildWebUi` Exec 任务完成：在 `web-ui` 目录执行 `pnpm run build`，输出到 `web/src/main/resources/static/`，并通过 `preBuild.dependsOn(buildWebUi)` 挂入 Android 构建。该任务只跑 `build` 不跑 `install`，因此在 CI 中需要预先安装前端依赖。
 
 发布通道只有一条自动化工作流。`.github/workflows/daily-build.yml` 在 UTC 09:00 与 18:00 触发，先判断过去 24 小时是否有新提交以决定是否构建；构建步骤要求 JDK 17（temurin）、pnpm 11、Node 22，并递归拉取子模块。签名与集成配置来自 Secrets（`KEY_BASE64` 解码为 `app/app.key`、`SIGNING_CONFIG` 写入 `local.properties`、`GOOGLE_SERVICES_JSON` 写入 `app/google-services.json`），随后执行 `./gradlew assembleRelease`，最后用 `softprops/action-gh-release` 把 APK 发布到固定 tag `nightly` 的 prerelease。工作流内注释指出 `gradle` 的 `buildWebUi` 任务只构建不安装依赖，因此流水线单独增加了 `pnpm install --frozen-lockfile` 步骤。仓库另有 `.github/workflows/close-blank-issues.yml` 与 3 个 issue 模板，属于社区维护配置。
 
@@ -183,7 +189,7 @@ Gradle 侧使用版本目录与工具链配置：`gradle/libs.versions.toml` 集
 - 开发工具链没有被抽象进 Gradle：`locale-tui` 与 `trace-cli` 各自维护独立清单与锁文件（`uv.lock`、`bun.lock`），与 Android 构建解耦，代价是需要各自的运行时。`web-ui` 虽然独立维护 `package.json` 与 `pnpm-lock.yaml`，但被 `web` 模块以进程调用方式纳入 Android 构建。
 - 测试策略偏向「离线夹具回放」：`ai` 的流式解码与 `highlight` 的分词结果都以仓库内快照为期望值，网络与渲染不在单元测试范围内。
 - 本快照中包含一处文档与实现不一致：`ai/README.md` 仍描述 MNN 子模块与 `src/main/cpp` 的 CMake 构建，而对应目录、子模块登记与 Gradle 原生构建配置均不存在或被注释。
-- 文档数量（134）包含 72 个代理技能文件与 43 个测试夹具，不能直接当作架构文档量；真正面向人类读者的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
+- 文档数量（134）包含 72 个代理技能文件与 43 个测试夹具，不能直接当作架构文档量；面向人的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
 
 ## 8. 未验证事项
 

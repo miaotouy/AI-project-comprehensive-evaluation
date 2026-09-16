@@ -172,11 +172,8 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 - 导出子系统把"研究"当一等公民：trace 格式选第三方标准（Claude Code JSONL）而非自有 schema，上传默认私有；轨迹 JSONL 走 ShareGPT 格式（系统消息含工具定义、reasoning 包 `<think>`，`agent/agent_runtime_helpers.py:116-179`），配套 `trajectory_compressor.py` 与 `datagen-config-examples/` 说明轨迹是数据生成管线的原料（`batch_runner.py:358`）。
 - 隐私默认值不对称：面向研究的 trace 默认强制脱敏、拒绝风险上传；面向个人的 `/save` 零加工。脱敏是可选项而非默认（jsonl/md 的 `--redact`）。
 - HTML"无远程依赖"声明与 Google Fonts 外链并存（`session_export_html.py:5,30-34`），离线性需运行验证。
-- 会话删除保护闭环：md 导出校验（哈希+消息数+session id）通过才允许删源会话，是少见地把"导出验证"接入"删除授权"的设计。
-
-## 当前状态快照的边界
-
-当前代码继续把 `/snapshot restore` 归入 profile 状态恢复而非对话交付：恢复 SQLite 时使用备份 API，并且针对仍被本进程连接持有的数据库拒绝继续（`hermes_cli/backup.py:691-729`、`hermes_state.py:2303`）。这强化了本笔记原有的区分：状态备份/恢复不是 `session.save` 或 `hermes sessions export` 所生成的面向分享内容。
+- 会话删除保护闭环：md 导出校验（哈希+消息数+session id）通过才允许删源会话，把"导出验证"接入"删除授权"。
+- 状态快照的边界：当前代码继续把 `/snapshot restore` 归入 profile 状态恢复而非对话交付，恢复 SQLite 时使用备份 API，并针对仍被本进程连接持有的数据库拒绝继续（`hermes_cli/backup.py:691-729`、`hermes_state.py:2303`）；状态备份/恢复与 `session.save`、`hermes sessions export` 生成的内容分属两类交付物。
 
 ## 12. 未验证事项
 

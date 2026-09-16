@@ -61,7 +61,7 @@ ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
 ```
 
 - web-app 另有私有 `Thread` 类型（`web-app/src/types/threads.d.ts:38-55`），增加顶层收藏、模型与排序字段及 `metadata.project`——core 共享类型没有这些字段。
-- **收藏的存取**：前端状态里 `isFavorite` 是顶层字段；服务层读写时把它映射到 `metadata.is_favorite`（`web-app/src/services/threads/default.ts:65` 读、`default.ts:139` 写），因此落盘的 thread.json 里是 `metadata.is_favorite`。旧笔记"顶层字段而非 metadata"的表述需要修正：顶层只是 web 端投影。
+- **收藏的存取**：前端状态里 `isFavorite` 是顶层字段；服务层读写时把它映射到 `metadata.is_favorite`（`web-app/src/services/threads/default.ts:65` 读、`default.ts:139` 写），因此落盘的 thread.json 里是 `metadata.is_favorite`，顶层字段只是 web 端投影。
 - **运行时"会话"**：AI SDK 的 Chat 会话按 threadId 保存在 `useChatSessions`（`web-app/src/stores/chat-session-store.ts`），不单独持久化，是线程的运行时流状态。
 - **临时会话**：`TEMPORARY_CHAT_ID = 'temporary-chat'`（`web-app/src/constants/chat.ts:5`）的内存线程——服务层对临时线程跳过读写（`threads/default.ts:79-82`、`messages/default.ts:16-19` 直接短路返回），界面与请求照常工作。
 - **id 生成**：线程 web 侧用 `ulid()`（`useThreads.ts:323`）；Rust 线程创建命令用服务端 UUID 无条件覆盖前端 id（`commands.rs:79-80`），前端以返回值为准。消息 id 由 AI SDK 生成（`$threadId.tsx:973`），新用户消息默认同款 ulid（`completion.ts:101`）；Rust 消息创建命令只在缺 id 时补 uuid。
@@ -213,7 +213,7 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 ## 5. 列表、分页、搜索与定位
 
 - **排序**：`ThreadList.tsx:297-301` 按 `updated` 降序；`updateThreadTimestamp`（`useThreads.ts:433-463`）置顶刷新。
-- **收藏**：`toggleFavorite` store 方法存在（§2.4），但本快照 **web-app 内没有 UI 调用点**（搜索 `toggleFavorite` 仅命中 store 与测试；侧栏无收藏分区）——旧笔记"界面入口改顶层 isFavorite"的说法不成立，收藏星标界面本次未找到。`deleteAllThreads` 的收藏保留逻辑仍有效。
+- **收藏**：`toggleFavorite` store 方法存在（§2.4），但本快照 **web-app 内没有 UI 调用点**（搜索 `toggleFavorite` 仅命中 store 与测试；侧栏无收藏分区）；收藏星标界面本次未找到。`deleteAllThreads` 的收藏保留逻辑仍有效。
 - **搜索**：`getFilteredThreads`（`useThreads.ts:104-138`）用 Fzf 按标题模糊搜索，索引懒建且排除 `TEMPORARY_CHAT_ID` 与无标题线程；搜索对话框的搜索记录（localStorage，上限 5）与键盘导航属于 Chat UI 笔记 §2。
 - **线程列表加载**：`ThreadList.tsx:68-98` ThreadItem 懒加载消息——磁盘为空（新线程）不覆盖乐观写；列表滚动加载策略未找到（全量渲染）。
 - **消息列表**：无分页接口——`fetchMessages`（`messages/default.ts:15-27`）全量返回；AI SDK 会话内消息全量渲染，窗口化策略在消息渲染器笔记（无窗口化/虚拟化）。

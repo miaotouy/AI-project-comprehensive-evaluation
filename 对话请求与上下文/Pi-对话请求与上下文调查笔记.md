@@ -106,7 +106,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 - 工具列表进 system prompt（默认模板，`buildSystemPrompt`，§2）；会话级工具启用集见会话与消息管理笔记 §8；工具调用前后钩子（`beforeToolCall`/`afterToolCall`）由扩展 runner 与图片规范化挂接（`agent-session.ts:479-533`）。
 - 附件/图片：`ImageContent` 进 user 消息（`prompt()` 组装 :1216-1224）；工具结果图片经 `normalizeToolResultImages` 回注为上下文图像（`agent-session.ts:517-531`，数据侧见会话与消息管理笔记 §8）。
 - 外部能力注入点（均在 `prompt()` 链路，`agent-session.ts:1159-1261`）：`/skill:name` 展开、`/template` 文件模板、扩展注入的 custom 消息（含 nextTurn 挂起消息 :1226-1230）、`before_agent_start` 改写 system prompt（§1）。
-- 知识库：本次未发现独立知识库注入机制（检查范围：`prompt()` 链路与 system prompt 组装入口），不虚构。
+- 知识库：本次未发现独立知识库注入机制（检查范围：`prompt()` 链路与 system prompt 组装入口）。
 
 ## 10. 退出恢复、日志与已确认边界
 

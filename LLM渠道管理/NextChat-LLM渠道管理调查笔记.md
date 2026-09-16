@@ -16,7 +16,7 @@
 
 NextChat 当前没有数据库化或列表化的“渠道实例”。渠道是代码内固定的 Provider 枚举；每个 Provider 在一个全局客户端 Access store 中对应一组 endpoint、凭据和协议参数。用户可以编辑当前 Provider 的配置，但不能在同一 Provider 下新增第二个命名 Endpoint，也不能建立带独立 ID 的渠道档案。
 
-1. 渠道实体粒度是“固定 Provider + 一组字段”，不是用户实例。`ServiceProvider` 提供固定选项，`useAccessStore` 只保存一份各 Provider 配置；当前会话的模型配置另存 `model` 和 `providerName`，两者不可混为一谈（`app/constant.ts:120-164`、`app/store/access.ts:65-154`、`app/store/config.ts:63-84`）。
+1. 渠道实体粒度是“固定 Provider + 一组字段”，不是用户实例。`ServiceProvider` 提供固定选项，`useAccessStore` 只保存一份各 Provider 配置；当前会话的模型配置另存 `model` 和 `providerName`，两者分属不同的 store（`app/constant.ts:120-164`、`app/store/access.ts:65-154`、`app/store/config.ts:63-84`）。
 2. Web 设置页可以查看和编辑固定 Provider 的 endpoint、key、版本等字段，并选择当前 Provider；App 构建会强制启用自定义配置。源码未找到渠道级新增、复制、删除、独立启停或命名管理入口。
 3. 本地配置可通过设置页导出和导入。导出的是多个 Zustand store 的完整非函数状态，其中包括 Access store，因此源码路径上 API key、endpoint 和 access code 会进入备份 JSON；未找到脱敏或排除凭据的导出逻辑（`app/utils/sync.ts:17-26`、`121-135`、`app/store/sync.ts:58-83`）。
 4. Web 默认通过 Next.js `/api/...` 代理；App/export 使用 Provider 官方 base URL 或用户填写的 URL 直连。Tauri Rust 层只注册流式请求命令，没有独立的渠道管理或凭据服务（`app/store/access.ts:31-63`、`src-tauri/src/main.rs:4-11`）。
@@ -52,7 +52,7 @@ NextChat 当前没有数据库化或列表化的“渠道实例”。渠道是�
 | 模型 | `model` 与 `providerName` 组合的会话引用 | 否，不代表渠道实例 |
 | Profile/渠道档案 | 未找到对应数据结构 | 未实现 |
 
-同一 Provider 可以通过用户编辑 URL 指向一个自定义服务，但源码没有第二份配置、名称、ID、排序或独立启用状态。因此“已有渠道”和“新建渠道”没有两套生命周期：系统只有预置 Provider 配置槽位，没有新建渠道流程。
+同一 Provider 可以通过用户编辑 URL 指向一个自定义服务，但源码没有第二份配置、名称、ID、排序或独立启用状态。因此“已有渠道”和“新建渠道”没有两套生命周期，只有预置的 Provider 配置槽位。
 
 ### 1.2 Endpoint 与默认值
 

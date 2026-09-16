@@ -6,9 +6,9 @@
 >
 > 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
 >
-> 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖提交范围 `dc4177c2..e142b2a` 的 Tape 执行日志/契约谱系、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
+> 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖 Tape 执行日志/契约谱系、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
 >
-> 调查范围：CLI 本地控制平面是否形成产品主链；Tape 执行日志与执行契约谱系；DeepSeek 原生 web 搜索接线；IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移的既有结论不受本次提交范围影响；明确排除普通 Chat 底座与已被现有十类笔记完整覆盖的机制
+> 调查范围：CLI 本地控制平面是否形成产品主链；Tape 执行日志与执行契约谱系；DeepSeek 原生 web 搜索接线；IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移的既有结论不受影响；明确排除普通 Chat 底座与已被现有十类笔记完整覆盖的机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -119,7 +119,7 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 
 **边界**：适配器的双向性（导入 vs 导出）未逐一核对；格式转换的兼容面（如 Claude Code 的 SKILL.md frontmatter 变体）未运行验证。
 
-**独特性判断**：跨工具 Skill 格式迁移是明确的独特产品面（"Skills That Travel"），与 Hermes Agent 的"从经验生成 Skill"（自进化）是同一生态的两个方向：前者是迁移，后者是生成。标签：自进化 Skill 的传输子面。
+**独特性判断**：跨工具 Skill 格式迁移是独特产品面（"Skills That Travel"），与 Hermes Agent 的"从经验生成 Skill"（自进化）是同一生态的两个方向：前者是迁移，后者是生成。标签：自进化 Skill 的传输子面。
 
 ### 能力卡 4：搜索助手（web 搜索链 + 深度研究）
 

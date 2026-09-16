@@ -20,7 +20,7 @@ Open WebUI v0.11.0 的 Chat 体系以**「会话 chat JSON 快照 + chat_message
 - 消息以 `{chat_id}-{message_id}` 复合键存储于 `chat_message` 表（`chat_messages.py:224`），`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型并行（side-by-side）的列序；
 - 编辑/删除消息粒度到单条消息；会话更新合并 history（`Chats.merge_history`，`chats.py:1360`），缺失 ID 不推断删除，删除走独立端点；
 - `meta.internal=True` 的会话视为内部会话（如子代理），不在普通列表展示（`chats.py` 模型层 `is_internal_chat`）；
-- 「history JSON 快照 + 消息表双写」与纯表存储的同类项目不同：前端读取快照 O(1)，写操作需要显式同步两处，`reconcile_messages_by_chat_id` 负责对齐；消息表缺失不破坏读取，可回退旧版 JSON blob 并自愈回填。
+- 「history JSON 快照 + 消息表双写」的直接后果是：前端读取快照 O(1)，写操作需要显式同步两处，`reconcile_messages_by_chat_id` 负责对齐；消息表缺失不破坏读取，可回退旧版 JSON blob 并自愈回填。
 
 ## 系统边界与数据主链
 
@@ -141,7 +141,7 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 
 - 惰性创建：空会话列表只是前端占位；真正的会话对象在 `POST /api/chat/completions` 判定 `is_new_chat` 时由后端创建（`main.py:1211-1392`），执行侧细节见对话请求与上下文笔记；
 - 删除消息的树语义在模型层 `delete_message_from_history`（`models/chats.py:795-833`）：被删消息的孙节点重挂到父节点，`currentId` 回退到活动叶子；
-- 恢复：`get_chat_by_id` 直接返回 `chat` JSON（快照天然自愈）；消息表缺失不破坏快照读取（第 2 节自愈策略）。异常退出时临时会话（`temporary:`）不落库、不恢复。
+- 恢复：`get_chat_by_id` 直接返回 `chat` JSON；消息表缺失不破坏快照读取（第 2 节自愈策略）。异常退出时临时会话（`temporary:`）不落库、不恢复。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -166,7 +166,7 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **双写对齐是单向的**：`reconcile_messages_by_chat_id`（`models/chats.py:898-907`）只把快照消息 upsert 进表，不推断删除——`POST /{id}` 的合并策略（`merge_history`，773-793 行）同样只合并不删，前端并发快照与后端一致性的边界被明确划定；
+- **双写对齐是单向的**：`reconcile_messages_by_chat_id`（`models/chats.py:898-907`）只把快照消息 upsert 进表，不推断删除——`POST /{id}` 的合并策略（`merge_history`，773-793 行）同样只合并不删，删除只能走独立端点；
 - **批量回填**：一次对齐会先筛出带 role 的消息，再交给 `ChatMessages.upsert_messages` 在一次数据库事务中写入；仍然是 best-effort 回填，失败只记录整次 chat 的告警，不改变快照为权威源的方向（`models/chats.py:1002-1015`、`models/chat_messages.py:294`）。
 - **流式增量落库**：生成中 `update_db=True` 的事件按类型写表（`socket/main.py:997-1092`），事件类型到写入行为的映射如下：
   ```text

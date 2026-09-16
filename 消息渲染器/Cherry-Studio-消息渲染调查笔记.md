@@ -294,7 +294,7 @@ MessageList
 - `MessageHistoryLayer`：memo 封闭的历史，使用 historyPartsByMessageId 层。
 - `MessageLiveLayer`：只给 mutable tail 接收逐帧 snapshot。
 
-firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而重渲染。历史区与活动区的这层隔离是性能设计的关键。
+firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而重渲染，历史区与活动区的这层隔离是性能设计的关键。
 
 ## parts 布局投影
 
@@ -439,7 +439,7 @@ Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`�
 - 交互预览：用户同意交互后的 document 不再走受限 iframe，而是切入沙箱 webview 运行；其安全细节与运行分级见生成式输出与运行时笔记。
 - 主窗口边界：主窗口在 `windowRegistry.ts:88` 关闭 `webSecurity` 与沙箱、开启 webview 标签，以宽权限承载上面三类内嵌页面；配套 preload 在 `preload.ts:362-363` 暴露 `window.electron` 与完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
 
-四种边界以“由紧到松、各层分别承载”的方式共存：预览内容按形态与交互状态在默认最小权限、受限预览、放开后的沙箱 webview 之间切换，主窗口则始终以宽权限提供运行底座。
+四种情形同时存在：预览内容按形态与交互状态在默认最小权限、受限预览和放开后的沙箱 webview 之间切换，主窗口始终以宽权限提供运行底座。
 
 ### 平滑文本播放
 

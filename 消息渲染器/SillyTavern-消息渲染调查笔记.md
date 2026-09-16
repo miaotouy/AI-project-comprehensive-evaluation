@@ -420,4 +420,4 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 
 SillyTavern 以字符串消息模型、统一富文本格式化、结构化旁路内容和命令式 DOM 生命周期组织消息渲染。它兼容角色卡 HTML/CSS、正则脚本、swipe、reasoning、媒体和扩展事件，主链也相对容易追踪。
 
-其技术债集中在两个方向：一是 `public/script.js` 承担过多职责，渲染状态依赖全局数组和 DOM；二是流式累计全文重渲染与主文档 CSS 能力分别带来性能上限和安全复杂度。消息装配、正文 pipeline 与流式 renderer 的职责相互纠缠，净化和 CSS 边界也缺乏直接测试。
+其技术债集中在两个方向：一是 `public/script.js` 承担过多职责，消息装配、正文 pipeline 与流式 renderer 相互纠缠，渲染状态依赖全局数组和 DOM；二是流式累计全文重渲染与主文档 CSS 能力分别带来性能上限和安全复杂度。净化和 CSS 边界也缺乏直接测试。

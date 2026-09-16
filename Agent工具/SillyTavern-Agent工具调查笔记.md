@@ -86,13 +86,13 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 
 `ToolManager.isToolCallingSupported(settings, model)` 的判定顺序：
 
-1. `main_api !== 'openai'` → 直接 false（也就是说 Text Completion / KoboldAI / 各类非 Chat Completion 后端**完全不支持**函数调用）。
+1. `main_api !== 'openai'` → 直接 false（Text Completion / KoboldAI / 各类非 Chat Completion 后端**完全不支持**函数调用）。
 2. `settings.function_calling` 必须为 true（用户开关，界面位于 `#openai_function_calling`）。
 3. `custom_prompt_post_processing` 必须属于 `{NONE, MERGE_TOOLS, SEMI_TOOLS, STRICT_TOOLS}`；其余后处理模式会把历史工具调用从 prompt 中强制剥除，视为不支持。
 4. 若能在 `model_list` 中找到当前模型，则按 `chat_completion_source` 走**逐 provider 的模型元数据判定**（表见下）；否则落到步骤 5 的固定支持列表。
 5. 固定支持列表包括 OpenAI、Claude、OpenRouter、Cohere、DeepSeek 等 provider（完整名称见源码中的列表）。
 
-`canPerformToolCalls(type, settings, model)` = `isToolCallingSupported() && type ∉ {'impersonate','quiet','continue'}`。也就是说“旁白/静默生成/续写”这三种生成类型即使模型支持工具也不会触发工具调用/执行（但仍可能把 `tools` 字段带上，见下）。
+`canPerformToolCalls(type, settings, model)` = `isToolCallingSupported() && type ∉ {'impersonate','quiet','continue'}`。“旁白/静默生成/续写”这三种生成类型即使模型支持工具也不会触发工具调用/执行（但仍可能把 `tools` 字段带上，见下）。
 
 注入点有两处，逻辑略有出入：
 - `public/scripts/openai.js:1301-1307`：Prompt 组装阶段仅为**预留 token 预算**调用了一次 `registerFunctionToolsOpenAI(toolData)`（临时对象，不进最终请求体），随后按 `canPerformToolCalls(type)`（不区分 canMultiSwipe）预留 budget。
@@ -158,7 +158,7 @@ static #parseParameters(parameters) {
 - 字符串 → JSON.parse，解析失败会抛出 SyntaxError，被调用入口捕获并包装为错误结果写回聊天消息（`error: true`），**不会中断整轮生成**，除非这是唯一一次调用且消息为空（见维度 5 的 shouldStopGeneration）。
 - 已是对象（Claude/Cohere 某些路径）→ 直接使用，同样不做 schema 一致性检查。
 
-也就是说，模型完全可以返回缺少 `required` 字段、类型不匹配、或包含 schema 未声明的额外字段的参数；这些校验责任被完全下放给各工具自己的 `action` 函数（如 SD 插件里手写的 `if (!args.prompt) throw ...`）。畸形/超范围参数的唯一"防线"是 JSON 语法本身是否合法，而不是内容是否合规。
+模型完全可以返回缺少 `required` 字段、类型不匹配、或包含 schema 未声明的额外字段的参数；这些校验责任被完全下放给各工具自己的 `action` 函数（如 SD 插件里手写的 `if (!args.prompt) throw ...`）。畸形/超范围参数的唯一"防线"是 JSON 语法本身是否合法，而不是内容是否合规。
 
 依据：`../../SillyTavern/public/scripts/tool-calling.js:306-345`
 
@@ -215,7 +215,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 - 可以执行任意 slash command，从而间接获得整套 STscript 能力（见维度 11）。
 - 唯一的边界是浏览器同源策略和 CSRF token（服务端默认开启 CSRF 保护，`default/config.yaml:180 disableCsrfProtection: false`），以及该用户账号自身在多用户模式下的权限（例如 `request.user.profile.admin` 决定能否操作 global 扩展/插件目录，但这是服务端 REST 层面的限制，与"工具 action 能调用什么"无关——工具 action 本身运行在已登录用户的浏览器会话里，天然具有该用户的全部权限）。
 
-服务端 plugin（`src/plugin-loader.js`）：完全不同的信任域——是 Node.js 进程内代码，通过 `import()` 动态加载 `plugins/` 目录下的模块，`init(router)` 拿到一个 Express Router 挂载到 `/api/plugins/{id}`。这意味着服务端 plugin：
+服务端 plugin（`src/plugin-loader.js`）：完全不同的信任域——是 Node.js 进程内代码，通过 `import()` 动态加载 `plugins/` 目录下的模块，`init(router)` 拿到一个 Express Router 挂载到 `/api/plugins/{id}`。服务端 plugin：
 
 - 拥有完整的 Node.js 权限（文件系统、子进程、网络、环境变量），不存在任何权限收窄机制。
 - 默认关闭（`enableServerPlugins: false`），需要显式在 `config.yaml` 打开。
@@ -232,7 +232,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 1. 一条新的系统消息（HTML，包含 details、summary、pre 和 code 结构；参数与结果经过解析后写入 textContent，而不是 innerHTML，因此这一步本身不引入 HTML 注入）。
 2. 消息的 `extra.tool_invocations` 结构化数组，其中含调用标识、名称、参数、结果、错误、签名和推理信息；该数组之后会被核心聊天过滤逻辑重新纳入下一轮 prompt（`public/script.js:4437`），即**工具调用记录会持续留在聊天历史里参与后续所有请求的上下文**，除非用户手动删除该系统消息或关闭函数调用开关。
 
-持久化：保存工具调用结果的流程依次把消息加入聊天、发出完成事件、加入 DOM、发出渲染事件，最后保存聊天（见消息渲染器笔记）。也就是说**工具调用结果会被写入磁盘上的聊天记录**，与普通消息同等持久化。
+持久化：保存工具调用结果的流程依次把消息加入聊天、发出完成事件、加入 DOM、发出渲染事件，最后保存聊天（见消息渲染器笔记）。**工具调用结果会被写入磁盘上的聊天记录**，与普通消息同等持久化。
 
 上下文污染面：由于结果原样进入 prompt 且无截断或内容过滤，一个恶意或错误的工具可以把任意大小、任意内容的文本注入后续所有轮次的模型上下文，构成间接提示注入放大器。模型编造不存在的工具名时，界面先显示兜底文案，之后才在真正执行阶段报错。
 
@@ -256,13 +256,13 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 
 - `manifest.json` 通过 `fetch('/scripts/extensions/{name}/manifest.json')` 拉取（`extensions.js:543`），字段包括 `js`/`css`/`loading_order`/`requires`/`dependencies`/`minimum_client_version`/`generate_interceptor`/`hooks`。
 - `activateExtensions()` 校验 `requires`（Extras 模块子集）、`dependencies`（其他扩展未禁用）、`minimum_client_version` 后，用 `import(url)`（`url = /scripts/extensions/{name}/{manifest.js}`）动态加载 JS 入口（`extensions.js:813-819`），加载后调用生命周期 hook `activate`（若 manifest 声明了 `hooks.activate`）。
-- `generate_interceptor`：manifest 可声明一个全局函数名，`runGenerationInterceptors` 在每次生成前按 `loading_order` 排序依次调用 `globalThis[interceptorKey](chat, contextSize, abort, type)`，可修改 `chat`/中止生成（`extensions.js:2015-2038`）。这本身不是"Agent 工具"（模型不可见、不经过 tool_calls），但是另一条扩展可以无审批干预生成流程的通道，值得在与 Agent 工具对比时区分开。
+- `generate_interceptor`：manifest 可声明一个全局函数名，`runGenerationInterceptors` 在每次生成前按 `loading_order` 排序依次调用 `globalThis[interceptorKey](chat, contextSize, abort, type)`，可修改 `chat`/中止生成（`extensions.js:2015-2038`）。这本身不是"Agent 工具"（模型不可见、不经过 tool_calls），但是另一条扩展可以无审批干预生成流程的通道，需与 Agent 工具区分开。
 
 **第三方 Git 安装流程：**
 
 - 客户端 `installExtension(url, global, branch)`（`extensions.js:1698-`）：校验 URL protocol 只能是 `http:`/`https:`；若不是 `isOfficialExtension(url)`（正则 `^https://github.com/SillyTavern/(.+)$`），弹出一次性可勾选"不再提醒"的信任警告 `Popup.show.confirm`，用户确认后才继续；确认状态用 `accountStorage`（浏览器本地存储）持久化，之后不再提示。
 - 服务端 `POST /api/extensions/install`（`src/endpoints/extensions.js:92-156`）：二次校验 URL protocol；用 `sanitize-filename` 库净化从 URL 提取的目录名（`extensionNameSanitized = sanitize(path.basename(parsedUrl.pathname, '.git'))`）防止路径穿越；用 `simple-git`（可切换 `git.backend`）`clone(url, extensionPath, {depth:1, branch})`；安装 `global` 扩展需要 `request.user.profile.admin`。
-- `enableServerPluginsAutoUpdate`（默认 true）会在服务器启动时对 `plugins/` 下所有 git 仓库自动 `fetch`+`pull`，**不做任何"这是否是官方仓库"的判断**，纯粹按目录是否是 git repo 来决定是否自动更新，这意味着一旦装了不可信插件，其上游仓库后续推送的任意代码都会被自动拉取并在下次重启时被 `import()` 执行。
+- `enableServerPluginsAutoUpdate`（默认 true）会在服务器启动时对 `plugins/` 下所有 git 仓库自动 `fetch`+`pull`，**不做任何"这是否是官方仓库"的判断**，纯粹按目录是否是 git repo 来决定是否自动更新；一旦装了不可信插件，其上游仓库后续推送的任意代码都会被自动拉取并在下次重启时被 `import()` 执行。
 
 **服务端 plugin 的 `import()` 加载：**
 
@@ -302,7 +302,7 @@ STscript 是 SillyTavern 工具面的最大非显式扩展路径。
 2. 工具被模型调用时，该 closure 的作用域会接收模型传来的参数（以 arg.xxx 形式注入为宏变量，`tool-calling.js:62-74`）。
 3. 执行这段 closure，结果通过管道作为工具返回值回给模型。
 
-这意味着：任何 STscript 能做的事情，都可以通过 `/tools-register` 变成模型可调用的工具。STscript 的能力包括（已在代码中确认的 slash command 子集）：
+任何 STscript 能做的事情，都可以通过 `/tools-register` 变成模型可调用的工具。STscript 的能力包括（已在代码中确认的 slash command 子集）：
 
 - `/gen` `/genraw`：静默调用模型生成，实现"工具嵌套生成"；
 - `/trigger`：触发指定群成员生成，构成群聊链式调用入口；

@@ -80,7 +80,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
   Sandpack 依赖 `@codesandbox/sandpack-react` + `packages/artifact-template` 生成 Vite+React+Tailwind 项目；iframe 由 `@lobehub/ui` HtmlPreview 提供（`src/components/HtmlPreview/InlinePreview.tsx`）。
 - 代码/项目级运行：Cloud Sandbox 提供 13 个 API（`packages/builtin-tool-cloud-sandbox/src/manifest.ts:8-318`），覆盖 `executeCode`（Python/JS/TS）、`runCommand`（含后台命令、120s 超时）、文件操作与导出；执行位置为远端沙箱，服务端经 `MarketSandboxProvider`/`OnlyboxesSandboxProvider` 桥接（`apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`），系统提示声明基于 AWS Bedrock AgentCore 且与用户本机隔离（`systemRole.ts:3`）。
-- 桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`，含环境创建、启动计划、运行时与能力探测等 API），相关提交：`e9b6d00ab`；`9b4f944cb`（给本地沙箱工作目录）；`95dfa1d38`（改为探测应用自带沙箱助手）。`src/helpers/localSandbox.ts` 在客户端判定是否围栏执行（`isLocalSandboxEnabled`/`resolveClientLocalSandbox`，含 `localSandboxNetwork` 成员/管理者双重判定），本地 system 工具因此多了“沙箱围栏”这一执行形态（与 device gateway 转发、裸 spawn 并存）；沙箱围栏强度（进程/网络隔离、writable roots）未运行验证。
+- 桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`，含环境创建、启动计划、运行时与能力探测等 API）。`src/helpers/localSandbox.ts` 在客户端判定是否围栏执行（`isLocalSandboxEnabled`/`resolveClientLocalSandbox`，含 `localSandboxNetwork` 成员/管理者双重判定），本地 system 工具因此多了“沙箱围栏”这一执行形态（与 device gateway 转发、裸 spawn 并存）；沙箱围栏强度（进程/网络隔离、writable roots）未运行验证。
 - 依赖提供：HTML 仅允许 cdnjs 外部脚本；React 预装 lucide-react、recharts、shadcn 并禁用外部图片（`content.ts:48-67`）；沙箱预装 Python 数据栈、Node、Chromium 等（`systemRole.ts:27-80`）。
 
 ## 5. 用户交互、事件与错误反馈
@@ -134,7 +134,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`；`packages/agent-templates/src/types.ts:4-45`）。
 - 注入链路在 context-engine 侧实现，三个处理器各司其职：
   - `AgentDocumentInjector/shared.ts`：按 `loadPosition`/`loadRules` 注入；
-  - `SystemReplaceInjector`：让动态激活文档只携带一次（提交 `5b348e814`）、用绝对日期索引（提交 `cc064ee9b`）；
+  - `SystemReplaceInjector`：让动态激活文档只携带一次、用绝对日期索引；
   - `ActivationResultTrim`：避免激活结果重复进 LLM 载荷（`packages/context-engine/src/processors/ActivationResultTrim.ts`）。
   文档写入前自动快照历史（`agentDocuments/index.ts:735-781`）；`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
 - 会话文件：上传文件自动同步进沙箱会话目录（`systemRole.ts:21-24`），沙箱每 topic 独立会话、过期重建（`systemRole.ts:222-227`）。

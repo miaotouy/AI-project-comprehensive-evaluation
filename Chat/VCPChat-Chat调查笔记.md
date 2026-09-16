@@ -18,7 +18,7 @@ VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（
 
 端到端职责由几个模块接力：`chatManager.js`（会话选择与发送编排）、`modules/ipc/chatHandlers.js`（单聊 IPC 与 VCP 请求）、`modules/renderer/streamManager.js`（流式增量与最终化落盘）、`topicListManager.js`（列表/未读/拖放）、`Groupmodules/groupchat.js`（群聊串行调度，主进程侧历史事实源）。打开 Topic 的优先级为 **Flowlock 锁定 > localStorage 记忆 > 最新创建**。
 
-本次调查最值得记录的发现是**单聊与群聊中断实现不对称**：群聊侧有本地 AbortController 中断 + 60 秒请求超时（`groupchat.js`）；单聊侧（`chatHandlers.js` 的 `send-to-vcp`）**没有本地 abort、也没有客户端超时**，中止按钮只向远端 VCP 服务器发一个 `/v1/interrupt` 信号，是否真正停止完全依赖远端配合；仓库里 `modules/vcpClient.js` 有完整正确的中断实现，但从未被任何文件 require，是未接入的死代码。
+单聊与群聊的中断实现不对称：群聊侧有本地 AbortController 中断和 60 秒请求超时（`groupchat.js`）；单聊侧（`chatHandlers.js` 的 `send-to-vcp`）**没有本地 abort、也没有客户端超时**，中止按钮只向远端 VCP 服务器发一个 `/v1/interrupt` 信号，是否真正停止依赖远端配合；仓库里 `modules/vcpClient.js` 有一份完整的中断实现，但从未被任何文件 require，是未接入的死代码。
 
 其余已确认边界：单聊话题自动总结无超时保护（群聊有 20 秒超时）；内容搜索只匹配字符串型 `content`（多模态数组匹配不到）；自动未读只统计"尚无用户参与"的话题；群聊多次调度之间无文件锁；`history.json` 无原子写保护。
 

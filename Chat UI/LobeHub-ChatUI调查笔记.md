@@ -44,7 +44,8 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **Topic 行交互**（`AgentSidebar/Topic/List/Item/index.tsx`）：桌面端单击延迟 250ms 以便把双击解释为“打开新 tab”——单击处理器（229-239 行）里 `setTimeout(..., 250)`，双击处理器（241-254 行）取消待执行单击并开 tab；模块级 `pendingSingleClickTimer`（76 行）保证快速跨行点击只执行最后一次动作；移动端单击直接导航（236-238 行）。拖拽引用到输入框走 `startTopicDrag`（220-227 行）；行内还有右键菜单、悬浮元数据卡（313-316 行，repo/branch/worktree/PR/CI）、未读点（288 行，含“运行尾巴”掩蔽期的即时未读 283-286 行）、失败/运行/等待人工图标（256-264 行，`#16518` 掩蔽已见输出的运行尾巴）、工作目录标签（270-281 行）与“草稿”红色提示（298-311 行 `useHasDraft`）。
+- **Topic 行交互**（`AgentSidebar/Topic/List/Item/index.tsx`）：桌面端单击延迟 250ms 以便把双击解释为“打开新 tab”——单击处理器（229-239 行）里 `setTimeout(..., 250)`，双击处理器（241-254 行）取消待执行单击并开 tab；模块级 `pendingSingleClickTimer`（76 行）保证快速跨行点击只执行最后一次动作；移动端单击直接导航（236-238 行）。拖拽引用到输入框走 `startTopicDrag`（220-227 行）。
+- **Topic 行的状态反馈**：右键菜单、悬浮元数据卡（313-316 行，repo/branch/worktree/PR/CI）、未读点（288 行，含“运行尾巴”掩蔽期的即时未读 283-286 行）、失败/运行/等待人工图标（256-264 行，`#16518` 掩蔽已见输出的运行尾巴）、工作目录标签（270-281 行）与“草稿”红色提示（298-311 行 `useHasDraft`）。
 - **搜索与全量查找**：`TopicSearchBar` 与 `AllTopicsDrawer`（`Topic/AllTopicsDrawer/Content.tsx:62-64` 有关键词时走服务端 `useSearchTopics`；服务端 BM25 匹配 Topic 标题与消息内容——实现见会话与消息管理笔记第 5 节；结果不会直接标出或滚动到命中的具体消息）。列表本身按 Flat/按时间/按状态/按项目多种模式组织（由列表视图参数驱动，改的是查询不是消息树）。
 - **消息列表滚动现场（快照）**：滚动快照 store（`ChatList/utils/scrollSnapshotStore.ts`，`saveScrollSnapshot` 133 行）持久化 `{atBottom, offset, savedAt}`，`useTopicScrollPersist`（`ChatList/hooks/useTopicScrollPersist.ts:61-195`）在离开/进入时保存与恢复（无快照时滚到最后一条，192-195 行）；虚拟列表滚动机制与 `keepMounted` 见消息渲染器笔记。
 - **小地图**：`ChatMiniMap` 在消息足够多时显示 user 消息锚点（`useMinimapData.ts:19` 只收 user 消息），悬停展开预览，点击 `scrollToIndex`（61 行），指示器带 `aria-label`（`MinimapIndicator.tsx:18`）与 aria-current。
@@ -81,7 +82,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - **状态来源**：按钮属性在 `src/features/Conversation/ChatInput/index.tsx:399-407` 组装——生成态由状态选择器按 `isInputVisiblyLoading` 计算（237、290-294 行），停止动作接 `stopGenerating`；禁用态（298-299 行）由输入空/上传中/`disableQueue && 输入加载中`/宿主只读决定。该状态是 operation 状态选择器（`INPUT_LOADING_OPERATION_TYPES`，见对话请求与上下文笔记第 1 节），**按钮状态并非根据 DOM 中最后一条消息猜测**。发送处理器（`handleSend`，332-397 行）在触发时重新校验（上传中/队列阻塞/内容为空则不发），有定时发送时先提交定时任务（372-376 行）。
 - **排队反馈**：发送被阻塞操作类型（`QUEUE_BLOCKING_OPERATION_TYPES`）阻塞时 `enqueueMessage`（执行侧见对话请求与上下文笔记第 8 节），输入区上方出现 `QueueTray`（463 行；`queuedMessageCount` 266-268 行）展示排队条目与“立即发送”（取消排队中阻塞 op），另有运行状态短语、进度与目标武装状态等悬浮托盘（464-468 行）。
 - **发送错误**：`InputCompletionErrorAlert` 与 sendMessageErrorMsg Alert（440-449 行）就地显示失败原因，编辑内容由执行链恢复（见对话请求与上下文笔记第 6 节）。
-- **交互层注意点**：发送权限在 UI 侧提前反映，但最终权限仍由服务端校验；只读用户可以阅读同一 Topic，但不能通过按钮绕过权限发送。`MessageFromUrl`（`?message=` 参数）在 Topic 转移回填（`AgentTransferMigration`）占位期挂起，回填完成后自动发送（`ConversationArea.tsx:208-216`）。
+- **权限边界**：发送按钮的置灰只在 UI 侧提前反映，最终权限仍由服务端校验（第 10 节）。`MessageFromUrl`（`?message=` 参数）在 Topic 转移回填（`AgentTransferMigration`）占位期挂起，回填完成后自动发送（`ConversationArea.tsx:208-216`）。
 
 ## 5. 消息操作、分支与版本导航
 
@@ -119,13 +120,13 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - `src/features/AudioPlayer/index.tsx:328` 播放/暂停按钮 `aria-label` 随状态切换文案（“播放”/“暂停”），另有 seek/download/voiceMessage 相关 `aria-label`（339/369/382/393 行）。
 - 工具审批选项带 **`role="radiogroup"`（`ApprovalActions.tsx:325`）与 `role="radio"`（333/362 行）** 语义关联（见 8.3 快捷键）。
 
-**明确的缺口**（如实指出，不夸大也不回避）：
+**明确的缺口**：
 - Topic 列表行（`AgentSidebar/Topic/List/Item/index.tsx`，grep 无 `tabIndex`/`onKeyDown`/`role`/`aria-label` 命中）；
 - 消息操作栏里的单个 icon 按钮（`Messages/components/MessageActionBar/index.tsx` 无 `aria-label`）——这些是 `ActionIcon`，视觉上靠 title/tooltip 提示，但本次没有确认 `@lobehub/ui` 的 `ActionIcon` 组件内部是否自动把 title 映射成可访问名称（三方包内部实现，未下钻），如果没有，纯图标按钮对屏幕阅读器就是无文字描述的。
 - 双击/单击 250ms 定时器（第 2 节）完全依赖鼠标事件（`onClick`/`onDoubleClick`），本次未找到对应的键盘可达实现（如 Enter 打开、Tab 可聚焦的 `tabIndex`）——键盘用户能否等效完成“单击导航/双击开新 tab”这两个操作未核实到证据，倾向于没有。
 - 虚拟列表（`ChatList/components/VirtualizedList.tsx`）渲染的消息条目本次未找到 `role="log"`/`aria-live` 一类支持“新消息到达时屏幕阅读器播报”的实现（仅 `onKeyDownCapture` 304 行与 `aria-hidden` 352 行），流式生成的文字增量对屏幕阅读器用户是不可感知的。
 
-**结论**：无障碍支持是工程师按需加的“点状覆盖”（哪个组件出问题/被特别关注就补一处 aria），而不是设计系统层面统一约定的产物——同一类交互（图标按钮）在有的地方有 `aria-label`（`ChatInput/ActionBar/Model/index.tsx:89`、`ChatInput/ControlBar/WorktreeSwitcher.tsx:674`、`Tools/useControls.tsx:655,1581,1594` 等），在另一些地方没有（Topic 行、消息操作栏），取决于具体开发者是否补充。真正的 WCAG 合规判定需要人工用屏幕阅读器/键盘走一遍实际操作流程，本次只是静态代码扫描，结论仅限于“代码里有没有写这些属性”。
+**结论**：可访问名称在同一类交互上覆盖不一致（点状）。同为图标按钮，`ChatInput/ActionBar/Model/index.tsx:89`、`ChatInput/ControlBar/WorktreeSwitcher.tsx:674`、`Tools/useControls.tsx:655,1581,1594` 等处有 `aria-label`，Topic 行与消息操作栏没有。WCAG 合规判定需要人工用屏幕阅读器/键盘走一遍实际操作流程，本次只是静态代码扫描，结论仅限于“代码里有没有写这些属性”。
 
 ### 8.2 快捷键面板/帮助
 
@@ -135,11 +136,11 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ### 8.3 工具审批快捷键
 
-`ApprovalActions.tsx:229-276` 支持 1/2/3…（数字选行）、↑/↓（切换选项）、Enter（提交），并正确跳过 INPUT/TEXTAREA/contentEditable 焦点（243 行）与组合键（245 行）。与旧实现不同，监听器现在不是每张卡片各挂一个 `window` listener，而是经 `registerPendingHotkeyCard`（282-296 行）注册到共享 arbiter（`packages/shared-tool-ui/src/pendingHotkeys.ts:38-46`）：arbiter 只挂一个 `window keydown`，按“包含事件目标的卡片优先，否则最近注册的卡片”把每次按键分派给**恰好一张**卡片（28-32 行），避免多张审批卡同时响应；containment 覆盖 `data-pending-hotkey-scope` 标记的 InterventionBar/全局审批卡（287-293 行）。选择拒绝后自动聚焦原因输入框（221-227 行），该输入框有独立的 Enter/↑ 处理（298-310 行）。视觉上选项带编号（365 行）。
+- `ApprovalActions.tsx:229-276` 支持 1/2/3…（数字选行）、↑/↓（切换选项）、Enter（提交），并正确跳过 INPUT/TEXTAREA/contentEditable 焦点（243 行）与组合键（245 行）。与旧实现不同，监听器不再每张卡片各挂一个 `window` listener，改为经 `registerPendingHotkeyCard`（282-296 行）注册到共享 arbiter（`packages/shared-tool-ui/src/pendingHotkeys.ts:38-46`）：arbiter 只挂一个 `window keydown`，按“包含事件目标的卡片优先，否则最近注册的卡片”把每次按键分派给**恰好一张**卡片（28-32 行），避免多张审批卡同时响应；containment 覆盖 `data-pending-hotkey-scope` 标记的 InterventionBar/全局审批卡（287-293 行）。选择拒绝后自动聚焦原因输入框（221-227 行），该输入框有独立的 Enter/↑ 处理（298-310 行）。视觉上选项带编号（365 行）。
 
 ## 9. 桌面通知与跨平台连续性
 
-桌面通知与聊天状态的联动是本次调查中确认度最高的一处集成：`src/store/chat/utils/desktopNotification.ts`（全文件 179 行）定义了两个统一注入点：
+桌面通知与聊天状态的联动在代码中完整可见：`src/store/chat/utils/desktopNotification.ts`（全文件 179 行）定义了两个统一注入点：
 
 - `notifyDesktopAgentCompleted`（155-179 行）：Agent 回复完成时调用，`title` 按“话题标题 → Agent 名称 → 通用兜底”优先级解析，`body` 是把 markdown 回复剥成纯文本并截断到 256 字符（`buildNotificationBody`，93-102 行，上限常量 27 行），导航深链回具体的 agent/topic/group 会话（38-57 行，按 groupId+topicId → groupId → agentId+topicId → agentId 四级优先级拼 URL，含 workspaceSlug 前缀 29-30 行）。调用点在 `store/chat/slices/aiAgent/actions/runAgent.ts:250-253`，紧跟在“停止 loading”之后触发，同批还会调用 `markTopicUnread`（255-263 行）——**桌面通知和“Topic 未读点”是同一个完成事件驱动的两个并行副作用**（执行侧见对话请求与上下文笔记第 6 节）。
 - `notifyDesktopHumanApprovalRequired`（104-133 行）：需要人工审批工具调用时触发，标题走同一套解析逻辑，额外调用 `desktopNotificationService.setBadgeCount(1)`（121 行）在 dock/任务栏打角标，并传 `force: true, requestAttention: true`（124-126 行，前台窗口也强制弹通知、抢占用户注意力，区别于普通完成通知）。调用点 `runAgent.ts:303`（`step_start` 的 human_approval 分支），同时把 Topic 置 `waitingForHuman`（304-317 行）。

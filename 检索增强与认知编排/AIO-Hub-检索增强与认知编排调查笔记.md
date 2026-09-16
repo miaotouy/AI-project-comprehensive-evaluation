@@ -16,7 +16,7 @@
 
 **源码事实。** 当前 AIO Hub 有两个独立检索域。Recall 是可编辑的完整思绪条目集合，既能被 Agent 工具读写，也能在聊天请求构造时由占位符被动召回并替换进消息。Knowledge 是带文件来源、分块、索引任务和 chunk 回源的本地文档资料库；它以 Agent 授权为前提，经工具调用或用户显式资料引用执行查询、续读和研究结果回注。两域各有存储和查询实现，通用 `retrievalRouter` 可在独立调用中做配额分流与 RRF，但此次沿聊天实际入口未发现把 Recall 与 Knowledge 自动混合注入的路径。
 
-**谱系定位。** Recall 同时属于“相似度召回”和“上下文即时注入”：稳定预设从关键词、条目内容向量及标签共现图产生候选，融合后按优先级重排；其输出是当回合 prompt 中的格式化条目。Knowledge 是“知识资产管线”与“工具化检索”：文件摄取、FTS/BM25、按向量空间隔离的语义检索、相邻块扩展和受权读取已经落在可执行代码中。Knowledge 的 research 会按规则拆分问题、搜索和读取，并据命中或粗略冲突补充查询；它不调用 LLM 来生成下一步计划或综合答案，所谓 conclusion 是对证据片段的模板化排序摘要。因此不能等同于检索驱动的多阶段认知编排。
+**谱系定位。** Recall 同时属于“相似度召回”和“上下文即时注入”：稳定预设从关键词、条目内容向量及标签共现图产生候选，融合后按优先级重排；其输出是当回合 prompt 中的格式化条目。Knowledge 是“知识资产管线”与“工具化检索”：文件摄取、FTS/BM25、按向量空间隔离的语义检索、相邻块扩展和受权读取已经落在可执行代码中。Knowledge 的 research 会按规则拆分问题、搜索和读取，并据命中或粗略冲突补充查询；它不调用 LLM 生成下一步计划或综合答案，其 conclusion 只是对证据片段的模板化排序摘要。因此不能等同于检索驱动的多阶段认知编排。
 
 **证据状态。** 本文“源码事实”均可由当前快照中的实现复查；“静态推断”只描述代码在成功依赖、配置和调用条件下的预期。真实模型向量质量、Tauri IPC、文件系统异常、监控界面、缓存命中率与权限在真实 Agent 运行时的效果均未运行确认。
 
@@ -58,7 +58,7 @@ Recall 的集合、启用状态和标签约束在候选阶段及 finalizer 前�
 
 Knowledge 查询可指定 keyword、semantic、hybrid 或 auto。auto 在有查询向量时落为 hybrid，否则为 keyword；前端按“向量空间 ID + 路由”分组，逐组生成查询向量。如果 auto 的向量生成或路由身份检查失败，该组退回关键词并在 trace 标明原因；显式 semantic/hybrid 错误不会自动退回。每个资料库中，FTS5 的 BM25 和全量向量余弦候选以 chunk ID 合并；双路命中的分数为 0.6 倍关键词分数加 0.4 倍向量分数，单路命中保留本路分数。见 `src/tools/knowledge-base/services/service.ts:371-529`、`src-tauri/src/knowledge/repository.rs:1914-2021,2960-3056`。
 
-后端再从已有候选沿 chunk edge 补一跳邻块，以种子分数的 0.08 作为图信号；前端 Agent 工具层会按每库原排序换算 RRF rank score，去重后可对前 topK 命中再添加前后相邻 chunk，新增项分数为种子 rank score 的一半。最终按 topK 与总字符预算截断，响应携带原始分数、rank score、BM25/向量/图信号、资料库、文档、chunk、标题、heading 和来源路径。这里的图扩展是局部证据连续性，而不是对下一轮问题方向的推断。见 `src-tauri/src/knowledge/repository.rs:3059-3096`、`src/tools/knowledge-base/services/application.ts:258-377`。
+后端再从已有候选沿 chunk edge 补一跳邻块，以种子分数的 0.08 作为图信号；前端 Agent 工具层会按每库原排序换算 RRF rank score，去重后可对前 topK 命中再添加前后相邻 chunk，新增项分数为种子 rank score 的一半。最终按 topK 与总字符预算截断，响应携带原始分数、rank score、BM25/向量/图信号、资料库、文档、chunk、标题、heading 和来源路径。这里的图扩展用于补足当前命中周围的证据，不涉及对下一轮问题方向的推断。见 `src-tauri/src/knowledge/repository.rs:3059-3096`、`src/tools/knowledge-base/services/application.ts:258-377`。
 
 通用 `routeRetrieval` 支持单域或 mixed 请求：mixed 并行取得 Recall 和 Knowledge 的固定配额，再以 `1/(60+域内名次)` 做 RRF 并按域名和对象 ID 打破平手。该函数是可调用服务，不能据其存在推断默认聊天路径已经启用跨域融合；此次检查的 Recall processor 与显式 Knowledge 路径均各自调用本域服务。见 `src/services/retrievalRouter.ts`。
 
@@ -74,7 +74,15 @@ Recall 占位符还有 always、turn、gate 与 static 模式。turn 以用户�
 
 ### Knowledge 的工具结果与规则化研究
 
-Knowledge 注册为 Agent 可调用的 `listLibraries`、search、read、research。工具必须取得含 Agent ID 与 `knowledgeAccess` 的上下文：未启用则拒绝；指定资料库必须在 allowlist；未指定只在 `allowSearchAll` 时扩展为该 allowlist；资料库还必须存在、可用且至少有关键词或语义索引。read 另要求 `allowDocumentRead`，research 另要求 `allowResearch`。过滤器可进一步约束文档 ID、来源类型、路径前缀和标签。见 `src/tools/knowledge-base/services/access.ts`、`src/tools/knowledge-base/services/application.ts:223-575`、`src/tools/knowledge-base/knowledge-base.registry.ts`。
+Knowledge 注册为 Agent 可调用的 `listLibraries`、search、read 和 research。工具必须取得含 Agent ID 与 `knowledgeAccess` 的上下文，放行条件为：
+
+- 未启用 `knowledgeAccess` 时拒绝；
+- 指定资料库时必须在 allowlist 内；
+- 未指定资料库时只有 `allowSearchAll` 才扩展为该 allowlist；
+- 资料库还必须存在、可用，并至少具备关键词或语义索引之一；
+- read 另要求 `allowDocumentRead`，research 另要求 `allowResearch`。
+
+过滤器可进一步约束文档 ID、来源类型、路径前缀和标签。见 `src/tools/knowledge-base/services/access.ts`、`src/tools/knowledge-base/services/application.ts:223-575`、`src/tools/knowledge-base/knowledge-base.registry.ts`。
 
 用户也可在聊天输入显式选择资料库。发送前会重新验证其中的稳定 library ID 和当前授权，而不是信任消息里仅用于显示的资料库快照；search 把结构化结果序列化为工具事件文本后再供后续回答使用。research 的默认上限为 3 轮、12 次 search/read、24000 证据字符和 120 秒，且可取消。它把问题按标点切成至多四个初始/缺口查询，对每轮命中读取 chunk，按相同标题中简单否定词差异记录潜在冲突；无命中或冲突时追加固定的补充查询。其“结论”只按问题词与摘录的重合度列出证据和空缺，不请求模型综合。见 `src/tools/knowledge-base/services/reference.ts`、`src/tools/knowledge-base/services/research.ts:90-498`、`src/tools/llm-chat/composables/chat/useChatHandler.ts:247-339`。
 

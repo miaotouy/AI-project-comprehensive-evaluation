@@ -16,7 +16,7 @@
 
 AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有协议类型、Base URL、多个 API Key、模型目录、自定义 Header、自定义端点、网络策略和 Provider 专属参数；业务侧用稳定的 `profileId + modelId` 明确选择请求目标。
 
-这套方案的特点是“**渠道配置集中、运行时显式路由、协议适配与网络传输分层**”：
+这套方案把渠道配置集中起来，运行时显式路由，并在协议适配与网络传输上分层：
 
 - 桌面端提供 21 种可见渠道类型，其中 4 种聚合渠道把渠道身份与线协议解耦；聚合渠道的默认协议只作为折叠的高级回退项，New API、Sub2API 与通用聚合渠道具有显式图标，其余不少类型最终复用 OpenAI-Compatible Adapter；
 - 每条渠道可配置多个 Key，按轮询选择，并记录启停、连续错误、429 熔断和自动恢复状态；
@@ -97,11 +97,11 @@ Agent / 临时模型 / 辅助任务
 
 适配器注册入口再把这些渠道身份映射到实际协议实现。OpenAI-Compatible Adapter 还被 Groq、OpenRouter、Ollama、SiliconFlow 与 audio.cpp 复用；DeepSeek、Gemini、Anthropic、Cohere、Vertex 和媒体协议有专用实现。四种聚合渠道不是第五套线协议：执行路由先把它们解析为 OpenAI Chat/Responses、Anthropic、Gemini 等适配器，再将 `effectiveProfile.type` 改成实际协议类型（`src/llm-apis/adapters/index.ts:104-139`、`packages/llm-core/src/model-execution-routing.ts:404-441`）。
 
-类型层、设置层和适配器注册层不是同一个声明源，历史上产生过漂移；当前已用完整类型约束避免遗漏。Ollama 改用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`，提交 `27e899483`）。预设实现已从单个大文件拆成 `src/config/llm-presets/presets/` 下按渠道独立模块，由 `index.ts` 统一注册；这是维护边界变化，不改变 Profile 的持久化结构。
+类型层、设置层和适配器注册层不是同一个声明源，现由完整类型约束避免遗漏。Ollama 使用 OpenAI 兼容端点，模型列表仍走原生 `/api/tags`，并声明工具参数支持（`src/config/llm-providers.ts`）。预设实现按渠道拆成 `src/config/llm-presets/presets/` 下独立模块，由 `index.ts` 统一注册；这属于维护边界，不改变 Profile 的持久化结构。
 
 ### 1.3 网络与安全默认值
 
-`DEFAULT_LLM_PROFILE` 默认启用渠道，并把 `networkStrategy` 设为 `auto`。当前 `fetchWithTimeout()` 的真实解释是：除显式 `native` 外都走 Rust 代理，所以 `auto` 实际等同于默认代理路径，而不是运行时在两种传输间探测择优。
+`DEFAULT_LLM_PROFILE` 默认启用渠道，并把 `networkStrategy` 设为 `auto`。当前 `fetchWithTimeout()` 的行为是：除显式 `native` 外都走 Rust 代理，因此 `auto` 等同于默认代理路径，不会在两种传输之间探测择优。
 
 `relaxIdCerts` 和 `http1Only` 默认都是 `true`。前者放宽无效证书校验，后者强制 HTTP/1.1；它们提高私有/老旧网关兼容性，但不是官方 HTTPS API 的保守安全与性能默认值。
 
@@ -171,7 +171,7 @@ Agent / 临时模型 / 辅助任务
 
 这种导入面向“迁移已有客户端配置”，不是运行时动态发现或远程配置中心。
 
-除上述解析式导入外，还有**原生渠道导入导出**——`src/utils/llm-profile-transfer.ts` 定义 `LlmProfileBundle` 序列化格式，导出对话框（`LlmProfileExportDialog.vue`）支持搜索、多选、单渠道/批量导出，敏感信息自动检测与脱敏（导出时可选择是否包含凭据），导入时无损保留网络策略、自定义端点等完整配置（提交 `17ed5f04b`）；JSON 解析器新增 New API“复制连接信息”格式（`_type: "newapi_channel_conn"` → OpenAI-Compatible 渠道候选，无效 URL 校验且密钥不进入警告日志，提交 `8ddbbedfa`）。
+除上述解析式导入外，还有**原生渠道导入导出**——`src/utils/llm-profile-transfer.ts` 定义 `LlmProfileBundle` 序列化格式，导出对话框（`LlmProfileExportDialog.vue`）支持搜索、多选、单渠道/批量导出，敏感信息自动检测与脱敏（导出时可选择是否包含凭据），导入时无损保留网络策略、自定义端点等完整配置；JSON 解析器支持 New API“复制连接信息”格式（`_type: "newapi_channel_conn"` → OpenAI-Compatible 渠道候选，无效 URL 校验且密钥不进入警告日志）。
 
 ### 2.6 明文配置文件
 
@@ -317,13 +317,13 @@ Key 管理器为每条 Profile 保存以下状态，入口见 `src/composables/u
 - `isBroken`、连续错误次数和最近错误；
 - 最近使用、失败和熔断时间；
 - Profile 上次选择的 Key 下标；
-- **按 Profile 隔离的开关与恢复设置**（`profileSettings`）——`enableAutoDisable`（默认 `false`）与 `autoRecoveryTime`（默认 60 秒）从旧版全局字段迁到每个 Profile 独立配置；存储版本升至 `1.1.0`，旧全局设置无法无歧义映射到具体渠道，迁移时丢弃并让各渠道按新默认值重新显式启用（`normalizeKeyStatesStorage`，提交 `5cb13afed`/`3ac5e99bf`）。
+- **按 Profile 隔离的开关与恢复设置**（`profileSettings`）——`enableAutoDisable`（默认 `false`）与 `autoRecoveryTime`（默认 60 秒）保存在每个 Profile 独立配置中，旧版全局字段会在迁移时归入；存储版本为 `1.1.0`，旧全局设置无法无歧义映射到具体渠道，迁移时丢弃并让各渠道按新默认值重新显式启用（`normalizeKeyStatesStorage`）。
 
 ### 5.1 选择策略
 
 Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后轮询。默认自动恢复时间为 60 秒；到期的熔断项会被恢复并重新参与选择，入口是 `pickKey()`。
 
-**“全部不可用回退第一个 Key”已移除**——没有可用 Key 时区分“全部被用户禁用”和“全部熔断”两种原因，并抛出 `ApiKeyUnavailableError`；后者附最早可恢复时间 `retryAt`，不再把请求打到已知坏 Key 上（提交 `54b528984`）。
+**没有可用 Key 时不再回退到第一个 Key**——改为区分“全部被用户禁用”和“全部熔断”两种原因，并抛出 `ApiKeyUnavailableError`；后者附最早可恢复时间 `retryAt`，不会把请求打到已知坏 Key 上。
 
 ### 5.2 失败判定
 
@@ -345,7 +345,7 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 
 媒体生成与媒体会话命名还有结构化输出降级尝试（`useMediaGenAILogic.ts:170-227`），每次也重新走 Key 选择，但那是解析兜底，不是网络失败重试；翻译、话题命名、上下文压缩等辅助任务本次未发现重试循环。
 
-因此“负载均衡”仍是跨请求的 Key 轮询，但“熔断”不只是影响后续请求：聊天链路的重试会立即利用熔断状态，失败后等待并改选下一枚可用 Key。
+因此“负载均衡”仍是跨请求的 Key 轮询；“熔断”除了影响后续请求，也会被聊天链路的重试立刻利用——失败后等待并改选下一枚可用 Key。
 
 ## 6. Provider Adapter 与协议边界
 
@@ -363,7 +363,7 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 
 这个边界让协议兼容可以跨端复用，同时把系统代理、无效证书、本地文件流上传等平台行为留在 Rust/桌面 Transport。
 
-Provider 层的原生工具调用编解码已修补（提交 `27e899483`）——统一 `LlmMessage` 契约支持 `tool` 角色、`toolCallId`、`metadata` 与工具名；OpenAI Chat/Responses 补齐 assistant `tool_calls` 与 tool 结果续轮编码，Gemini 保留函数调用 ID（流式聚合不再覆盖真实 ID），Cohere 支持 assistant 工具调用与并行 tool 结果编码；Ollama 切换 OpenAI 兼容端点并声明 `tools`/`toolChoice` 能力。OpenAI Responses 新增推理摘要解析并保持流式边界（`edf251a9c`）。LLM Inspector 增加基于最终请求体的原生工具声明/解码诊断（`src/llm-apis/tool-diagnostics.ts`）。这些修补为后续原生工具编排（区别于 VCP 文本协议）打基础，但模型通信层的工具协议仍以 VCP 为准（见 Agent 工具笔记第 3 节）。
+Provider 层的原生工具调用编解码统一到 `LlmMessage` 契约，支持 `tool` 角色、`toolCallId`、`metadata` 与工具名；OpenAI Chat/Responses 编码 assistant `tool_calls` 与 tool 结果续轮，Gemini 保留函数调用 ID（流式聚合不覆盖真实 ID），Cohere 支持 assistant 工具调用与并行 tool 结果编码；Ollama 使用 OpenAI 兼容端点并声明 `tools`/`toolChoice` 能力。OpenAI Responses 解析推理摘要并保持流式边界。LLM Inspector 提供基于最终请求体的原生工具声明/解码诊断（`src/llm-apis/tool-diagnostics.ts`）。这些能力为后续原生工具编排（区别于 VCP 文本协议）打基础，但模型通信层的工具协议仍以 VCP 为准（见 Agent 工具笔记第 3 节）。
 
 ## 7. 自定义端点与 Header
 

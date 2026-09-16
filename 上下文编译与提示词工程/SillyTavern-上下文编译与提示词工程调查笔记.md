@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-SillyTavern 的上下文编译不是单一的 prompt 模板处理器。一次生成在 `Generate()` 中依次对历史消息应用 prompt 用途的正则、补入角色字段与 depth prompt、扫描并按位置注入 World Info、合并 system/jailbreak/story string/chat inject 等内容，再按 text completion 或 OpenAI 两条链路转换并裁剪，最终形成 `finalPrompt` 或 OpenAI 消息数据。最终请求仍可被 `GENERATE_AFTER_COMBINE_PROMPTS` 事件监听器整体替换，因此配置或中间分项存在不等于本次请求实际携带（`public/script.js:4401-5257`）。
+SillyTavern 的一次生成在 `Generate()` 中依次对历史消息应用 prompt 用途的正则、补入角色字段与 depth prompt、扫描并按位置注入 World Info、合并 system/jailbreak/story string/chat inject 等内容，再按 text completion 或 OpenAI 两条链路转换并裁剪，最终形成 `finalPrompt` 或 OpenAI 消息数据。最终请求仍可被 `GENERATE_AFTER_COMBINE_PROMPTS` 事件监听器整体替换，因此配置或中间分项存在不等于本次请求实际携带（`public/script.js:4401-5257`）。
 
 已确认的规则结果有三条去向：`promptOnly` 正则只影响 prompt 组装；无标记正则还会在生成后清洗回复并写回权威消息；`markdownOnly` 正则只进入显示格式化。宏也不是统一的预编译阶段，而是在用户消息、首条问候语、bias、quiet prompt 和正则替换等各自路径分别展开。World Info 和扩展 prompt 的实际命中内容进入上下文拼装，生成拦截器则在组装早期按 manifest 顺序运行并可中止本次生成。
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenClaw 是以本地 Gateway 为控制平面的多渠道个人 AI 助手仓库。`src` 承担 Gateway、会话、工具和 CLI 主链，`extensions` 承担消息渠道与插件，`ui` 与 `apps` 提供 Control UI、桌面及移动伴侣应用，`packages` 提供共享 SDK/协议。当前快照有 34,147 个跟踪文件、30,474 个源码文件 / 9,092,080 行源码，是本次统计对象中规模最大的仓库之一。
+OpenClaw 是以本地 Gateway 为控制平面的多渠道个人 AI 助手仓库。`src` 承担 Gateway、会话、工具和 CLI 主链，`extensions` 承担消息渠道与插件，`ui` 与 `apps` 提供 Control UI、桌面及移动伴侣应用，`packages` 提供共享 SDK/协议。当前快照有 34,147 个跟踪文件、30,474 个源码文件 / 9,092,080 行源码。
 
 ## 统计与模块分布
 

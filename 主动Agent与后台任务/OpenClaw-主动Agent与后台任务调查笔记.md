@@ -131,7 +131,12 @@ main job 的 payload 实际上只能形成 system event 文本。它写入目标
 
 ### Cron 结果和状态
 
-执行结果与交付结果分开记录。`CronRunStatus` 是 `ok`、`error` 或 `skipped`；delivery 另有 `delivered`、`not-delivered`、`unknown` 和 `not-requested`。最终 job state 保存最近运行时间、状态、错误、持续时间、连续错误/跳过次数、下一次运行、delivery status/error 和 failure notification delivery，run history/task ledger 则保存本次运行的 session、model、provider、usage、diagnostics 和摘要（`src/cron/types.ts:114-160,229-244,398-475`）。
+执行结果与交付结果分开记录，两者的取值集合不同：
+
+- 执行结果 `CronRunStatus`：`ok`、`error`、`skipped`。
+- 交付结果 delivery：`delivered`、`not-delivered`、`unknown`、`not-requested`。
+
+最终 job state 保存最近运行时间、状态、错误、持续时间、连续错误/跳过次数、下一次运行、delivery status/error 和 failure notification delivery；run history/task ledger 另存本次运行的 session、model、provider、usage、diagnostics 和摘要（`src/cron/types.ts:114-160,229-244,398-475`）。
 
 隔离 Agent 的 finalize 顺序是：读取模型/usage/diagnostics，更新 session runtime model、context token 和 CLI binding，持久化 session entry；解析 payload 是否有可交付文本或结构化结果；按 delivery plan 发送；最后由 cron service 在 receipt-owned transaction 中把结果应用到 authoritative job row、更新 task ledger、发出 finished event，并计算下一次运行。一次性 run 的 detached session 可在交付后清理，persistent session 则保留 session 生命周期（`src/cron/isolated-agent/run-finalize.ts:58-177,301-395`、`src/cron/isolated-agent/run.ts:347-466`）。
 

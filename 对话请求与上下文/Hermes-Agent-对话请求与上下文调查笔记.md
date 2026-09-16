@@ -179,11 +179,11 @@ WS 端对 message.delta 等高频帧做 token 合批（`ws.py:44-60`，间隔 0.
 - 可观测性：message.complete 携带 usage 和 billing，错误终帧携带 error、recoverable、partial 和 failure_reason（`server.py:10196-10230`）。任务级日志和 trace 不在本次调查范围。
 - 已确认边界：无 token 级截断原语（§3）；`display_type` 参数不存在（§1）；桌面端没有 `interruptResponse` 符号（§7）。
 
-## 当前压缩与 Provider 交接
+## 11. 当前压缩与 Provider 交接
 
-上下文压缩的默认保留策略已收紧为 lean tail：保护尾部的下限与上限分别是 10,000 和 25,000 token，另保留受预算约束的近期用户消息与工具回合（`agent/context_compressor.py:869-883`）。因此“压缩后尽量保留大段原始上下文”的旧理解不再成立；当前实现优先保留较短的可验证尾部，其余依赖压缩摘要。ACP 侧也把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中将该 provider 自身的工具工作合并回当前 turn；运行时效果仍未执行验证。
+上下文压缩的默认保留策略已收紧为 lean tail：保护尾部的下限与上限分别是 10,000 和 25,000 token，另保留受预算约束的近期用户消息与工具回合（`agent/context_compressor.py:869-883`）。当前实现因此不保留大段原始上下文，而是优先保留较短的可验证尾部，其余依赖压缩摘要。ACP 侧也把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中将该 provider 自身的工具工作合并回当前 turn；运行时效果仍未执行验证。
 
-## 11. 未验证事项
+## 12. 未验证事项
 
 - `display.busy_input_mode` 各模式（steer/redirect/queue）在真实 provider 上的行为未验证。
 - 桌面端断网中断、快速切换会话、多窗口并发等事件时序未实测。
@@ -191,7 +191,7 @@ WS 端对 message.delta 等高频帧做 token 合批（`ws.py:44-60`，间隔 0.
 - 工具执行增量 flush 在工具杀死进程场景下的实际持久化结果未验证（持久化入口在会话与消息管理笔记 §2.3）。
 - 崩溃重放的端到端行为、多会话并发打到同一后端的表现未实测。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - prompt 方法：`tui_gateway/methods_prompt.py`（:67-346）；`hermes_cli/input_sanitize.py`（:65-70）。
 - 网关：`tui_gateway/server.py`——`_run_prompt_submit`（:9707）、`_handle_busy_submit`（:7598）、`_drain_queued_prompt`（:7682）、`_sync_session_key_after_compress`（:4919）、`_emit_terminal_turn_error`（:7796）、`_wait_agent_for_prompt`（:2035）、`_maybe_schedule_auto_continue`（:7444）、`_event_frame`/`_emit`（:1566/:1573）、`_append_inflight_delta`（:7303）。

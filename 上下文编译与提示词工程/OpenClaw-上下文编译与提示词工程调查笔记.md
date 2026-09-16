@@ -14,10 +14,10 @@
 
 ## 结论摘要
 
-OpenClaw 在本次检查范围内具备独立的运行时上下文编译能力，但它不是一个把所有规则合并成单一模板的编译器。规则对象分布在工作区 Markdown、skills、文件 prompt 模板、插件 hook、memory 插件和可选 context-engine 插件中；embedded 运行器先准备这些来源，再由 `buildAgentSystemPrompt` 生成系统提示词，并在模型调用前把会话消息转换成 Provider 可见的数组。
+OpenClaw 在本次检查范围内具备独立的运行时上下文编译能力。规则对象分布在工作区 Markdown、skills、文件 prompt 模板、插件 hook、memory 插件和可选 context-engine 插件中；embedded 运行器先准备这些来源，再由 `buildAgentSystemPrompt` 生成系统提示词，并在模型调用前把会话消息转换成 Provider 可见的数组。
 
 - 工作区文件是可编辑的上下文源，身份、用户偏好、长期记忆和首次运行仪式分别承担不同生命周期。文件是否注入取决于会话隐私、bootstrap 状态、memory provenance 和运行器类型（`src/agents/workspace.ts:57-68,1145-1288`；`src/agents/bootstrap-files.ts:237-371`）。
-- skills 是规则对象最完整的实现。加载器合并多个有优先级的根目录，过滤后生成有硬上限的 `<available_skills>` 目录；目录只放元数据，完整正文按需读取。显式 `$skill` 引用走另一条有限的请求前展开路径（`src/skills/loading/workspace-skill-loader.ts:375-570,588-680`；`src/skills/loading/workspace-skill-prompt.ts:31-75,121-190`）。
+- skills 是 OpenClaw 中实现最完整的一类规则对象：加载器合并多个有优先级的根目录，过滤后生成有硬上限的 `<available_skills>` 目录；目录只放元数据，完整正文按需读取。显式 `$skill` 引用走另一条有限的请求前展开路径（`src/skills/loading/workspace-skill-loader.ts:375-570,588-680`；`src/skills/loading/workspace-skill-prompt.ts:31-75,121-190`）。
 - prompt 模板与 slash command 提供文件型输入预处理。模板可从 agent、项目、显式路径和扩展资源加载，参数替换是单次展开；embedded 运行器接收上层准备好的资源，SDK session 在输入阶段展开模板（`src/agents/sessions/prompt-templates.ts:108-225`；`src/agents/sessions/agent-session-prompting.ts:119-160,348-387`）。
 - 插件 hooks、memory 与 context engine 能在不同阶段追加或替换模型上下文，也能影响工具面；各自有独立的 authority、超时和降级策略（`src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts:91-188`；`src/agents/embedded-agent-runner/run/attempt-history.ts:555-631`）。
 - 最终结果分为模型请求、权威会话和诊断投影三条去向。模型专用的 prepend context 不等于可见 transcript，`systemPromptReport` 和 `/context` 也不等于最终 Provider payload（`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts:165-337`；`src/auto-reply/reply/commands-context-report.ts:131-163,198-263`）。
@@ -116,7 +116,7 @@ context engine 是唯一明确以“assemble model context”为契约的插件�
 
 ### Bootstrap、skills 与系统提示词
 
-embedded 运行器的顺序不是简单的文件名拼接，而是先准备输入，再编译 prompt：
+embedded 运行器先准备输入，再编译 prompt：
 
 1. 运行入口确定 agent、workspace、执行目录、model/harness、session target 和 active project keys。
 2. session preparation 根据持久化 snapshot、watcher version、agent filter、node eligibility 和 session override 选择 skill 状态。
@@ -226,7 +226,7 @@ OpenClaw 有多层可解释表面，但覆盖范围不同：
 
 本次检查范围内未找到一个通用的、可编辑规则对象系统，能够像某些 preset/lorebook/宏引擎一样以统一 schema 保存任意规则、按关键词/概率/深度/冷却命中，再以统一编译顺序生成消息数组。OpenClaw 的独立能力是“多种文件与插件贡献者的上下文编译”，其中 skills、prompt templates、prompt hooks、memory 和 context engine 各自拥有 owner、schema、作用域和错误边界；它们不是一个共享的规则 AST。
 
-依据包括：系统提示词 renderer 接收已经准备好的 `contextFiles`、`skillsPrompt`、`extraSystemPrompt` 和 provider contribution，而不加载规则源本身（`src/agents/system-prompt.ts:787-870`）；embedded resource loader 明确关闭 ambient skills、prompt templates、themes 和 context-file discovery，要求上层提供 prepared resources（`src/agents/embedded-agent-runner/resource-loader.ts:5-28`）；普通 SDK session 的 template loader 和 embedded runner 的 skill/bootstrap loader 也是两条不同资源路径（`src/agents/sessions/resource-loader.ts:178-267`；`src/agents/embedded-agent-runner/run/attempt.ts:156-347`）。因此，若按“独立规则编译器”理解为统一规则 schema/命中器，本次应标为**归并到相邻类目**：具体能力分别归 skills、对话请求与上下文、记忆、context engine 和会话管理，而不是为了对称虚构一个 OpenClaw preset/macro/lorebook 层。
+依据包括：系统提示词 renderer 接收已经准备好的 `contextFiles`、`skillsPrompt`、`extraSystemPrompt` 和 provider contribution，而不加载规则源本身（`src/agents/system-prompt.ts:787-870`）；embedded resource loader 明确关闭 ambient skills、prompt templates、themes 和 context-file discovery，要求上层提供 prepared resources（`src/agents/embedded-agent-runner/resource-loader.ts:5-28`）；普通 SDK session 的 template loader 和 embedded runner 的 skill/bootstrap loader 也是两条不同资源路径（`src/agents/sessions/resource-loader.ts:178-267`；`src/agents/embedded-agent-runner/run/attempt.ts:156-347`）。因此，若按“独立规则编译器”理解为统一规则 schema/命中器，本次应标为**归并到相邻类目**：具体能力分别归 skills、对话请求与上下文、记忆、context engine 和会话管理，本次检查范围内未找到与之对应的统一 preset/macro/lorebook 层。
 
 ## 8. 未验证事项
 

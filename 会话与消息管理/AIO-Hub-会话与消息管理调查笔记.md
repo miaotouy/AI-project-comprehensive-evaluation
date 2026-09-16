@@ -187,7 +187,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 ### 5.1 跨会话全文搜索：全量扫描 + 正则预过滤
 
-`useLlmSearch.ts` 前端封装了对 Rust 流式搜索命令的调用（Channel 流式返回、300ms 防抖、支持"精确/全部/任一"三种匹配模式，`useLlmSearch.ts:272-301`；取消入口在 `useLlmSearch.ts:172-179`）。真正的搜索逻辑在 Rust 端 `src-tauri/src/commands/llmchat_search.rs`（当前 HEAD 仅注册流式搜索与取消两个命令，非流式搜索命令已删除，注册点在 `src-tauri/src/commands.rs:357-358`）：
+`useLlmSearch.ts` 前端封装了对 Rust 流式搜索命令的调用（Channel 流式返回、300ms 防抖、支持"精确/全部/任一"三种匹配模式，`useLlmSearch.ts:272-301`；取消入口在 `useLlmSearch.ts:172-179`）。实际搜索逻辑在 Rust 端 `src-tauri/src/commands/llmchat_search.rs`（当前 HEAD 仅注册流式搜索与取消两个命令，非流式搜索命令已删除，注册点在 `src-tauri/src/commands.rs:357-358`）：
 
 - **没有任何持久化的搜索索引**。每次搜索都是遍历 `llm-chat/sessions/` 与 `agent-manager/agents/` 目录下的全部文件（会话任务只找 `*.json`，Agent 任务找 `agent.json`，返回各自的完整路径，`llmchat_search.rs:44-46,485-492,647-656`），对每个文件异步读全文；
 - 用一个正则（`SearchMatcher::is_match`，`llmchat_search.rs:293-298`）先对**整个文件原始文本**做一次快速预过滤（不命中直接跳过，不做 JSON 解析），命中了才做部分反序列化（`PartialAgent`/`PartialSession` 只解析需要的字段，减少解析开销）；

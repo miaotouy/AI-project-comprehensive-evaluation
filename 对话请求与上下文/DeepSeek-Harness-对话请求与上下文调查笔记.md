@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-DeepSeek Harness（下文称 dsh）基于 vendored Cordis，"一切皆插件"：请求组装不是单一模块，而是循环（`dsh-agent-loop`）在若干可替换服务与事件瀑布上的编排。核心结论：
+DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做成插件。请求组装没有单一模块，而是由循环（`dsh-agent-loop`）在若干可替换服务与事件瀑布上编排，核心结论：
 
 1. **上下文唯一来源是会话事件日志**：模型历史由 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储；"模型可见即已落盘"是不变量。上下文增量（文件指令、时间、tmux、运行时上下文）都以 `user/message` 事件落盘后再进请求。
 2. **请求组装分两半**：system prompt 与工具 schema 由 `ctx.systemPrompt.assemble()` 从插件注册的 sections/contexts/tools/variables 组装；消息历史由日志派生；两者在每步 `buildRequest` 中合并为一次 `llm/stream` 调用，请求头（config+system+tools）本身也以 `request/header` 事件落盘。

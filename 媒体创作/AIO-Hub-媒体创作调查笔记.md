@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AIO Hub 是本次类目三种正式样本中唯一**应用级桌面媒体工作站**（分型 M1 + M3，Agent 面 M5）。media-generator 与 asset-manager 两模块形成一条完整闭环：媒体生成会话（`GenerationSession` 树）与全局任务池（`MediaTask`）解耦为双轨，结果资产经 SHA-256 去重汇入应用级中央资产库（`Asset`），之后可预览、重试、分支、导出、发送到聊天或作为下一轮参考图再次使用。
+AIO Hub 是**应用级桌面媒体工作站**（分型 M1 + M3，Agent 面 M5）。media-generator 与 asset-manager 两模块形成一条完整闭环：媒体生成会话（`GenerationSession` 树）与全局任务池（`MediaTask`）解耦为双轨，结果资产经 SHA-256 去重汇入应用级中央资产库（`Asset`），之后可预览、重试、分支、导出、发送到聊天或作为下一轮参考图再次使用。
 
 - **会话-任务双轨**：会话树只存交互历史与参数快照（`taskSnapshot`），任务池单独管理执行状态；桥接约定是 `assistantNode.id === task.id`（`src/tools/media-generator/stores/mediaGenStore.ts:203` 提交链、`src/tools/media-generator/composables/useTaskActionManager.ts:136`）。
 - **结果资产化**：每次生成先把解码/下载的字节内嵌生成参数（`embedMetadata`），再经 `importAssetFromBytes` 入资产库；衍生数据另写 `derived/media-generator/{date}/{assetId}.json`（`useMediaGenerationManager.ts:712` handleResponseAssets）。
@@ -22,11 +22,11 @@ AIO Hub 是本次类目三种正式样本中唯一**应用级桌面媒体工作�
 - **Agent 共用入口**：`getMetadata()` 按当前启用的 Profile/模型与可见性配置动态生成 `generate_<model_id>` 方法族，`isFast` 模型同步返回结果，其余走 tool-calling 异步任务框架（`buildAgentMethods.ts:754`）；注册表另有三个非 agentCallable 的编程接口供外部注入输入框与附件（见第 6 节）。
 - **本地音频渠道适配**：audio.cpp 通过普通 LLM Profile 接入 TTS。工作台按服务端语义默认不发送 OpenAI 的 `alloy` 音色，并把默认输出设为 WAV；响应仍以实际 `Content-Type` 判定格式，避免把 WAV 字节按 MP3 扩展名入库。Agent 动态方法同样把 audio.cpp 的 `audio_format` 限定为 `wav`（`packages/llm-core/src/providers/sync-media.ts:208-244`、`buildAgentMethods.ts:155-203`）。
 
-与独特功能笔记[能力一、二](../独特功能/AIO-Hub-独特功能调查笔记.md)证据一致；本笔记是类目专页，只交接媒体创作维度，不再重复完整源码调查。全部结论基于静态源码；真实模型生成、UI 渲染与资产索引性能均未运行验证。
+与独特功能笔记[能力一、二](../独特功能/AIO-Hub-独特功能调查笔记.md)证据一致；本页只覆盖媒体创作维度，不重复其中的完整源码调查。全部结论基于静态源码；真实模型生成、UI 渲染与资产索引性能均未运行验证。
 
 ## 系统边界与完整主链
 
-边界：media-generator（工作台）+ asset-manager（资产层）为主贡献；聊天模块的多模态附件、转写、弹幕播放器与 FFmpeg 工具属于相邻边界，不入本主链。执行域是「Tauri 前端渲染进程 + 用户配置的 LLM Profile」，服务可以是远程 API，也可以是本机 audio.cpp HTTP 服务。应用不内嵌生成器或独立生成后端；生成链路内不依赖 FFmpeg、ComfyUI 或浏览器渲染服务。
+边界：media-generator（工作台）+ asset-manager（资产层）为主贡献；聊天模块的多模态附件、转写、弹幕播放器与 FFmpeg 工具属于相邻边界，不入本主链。执行域是「Tauri 前端渲染进程 + 用户配置的 LLM Profile」，服务可以是远程 API，也可以是本机 audio.cpp HTTP 服务。应用不内嵌生成器、渲染器或独立生成后端，生成链路也不依赖 FFmpeg、ComfyUI 或浏览器渲染服务。
 
 主链（用户会话模式）：
 
@@ -90,8 +90,8 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - **状态机**：`pending → processing → completed | error | cancelled`（`types.ts:59`）；`progress`/`statusText` 随阶段更新（准备附件→生成中 30→入库 90→完成 100，`useMediaGenerationManager.ts:596-621`）。
 - **流式预览**：openai-responses 端点通过 `onPartialImage` 回调把中间预览图写入任务 `previewUrls`（:581-594）。
-- **取消**：每个任务持有独立的 `AbortController`，`abortTask`/`abortAll` 分别中止单个或全部任务（Map 管理，`useMediaGenerationManager.ts:74,312-338`）；取消引发的 `AbortError` 收敛为 `error` 状态并提示“已中止”（同文件 `:623`）。UI 侧取消入口为任务卡/任务列表的取消按钮（`handleCancelTask`，`MediaTaskList.vue:150`）与快速模式「停止全部」（`MediaWorkbench.vue:81,95`）。任务完成后保留在池中，由「清理已完成」按钮手动清理；`autoCleanCompleted` 设置项**本次未找到执行消费者**（仅出现在 settings/UI/文档，静态推断为未启用功能）。
-- **超时、重试与并发**：请求默认超时 `600000ms`（`DEFAULT_MEDIA_TIMEOUT`，`src/llm-apis/common.ts:32`）；settings 可配超时与最大重试次数，默认不自动重试（`config.ts:284`），重试次数只传给请求层。`maxConcurrentTasks` 默认 3，`useMediaGenerationManager` 的模块级队列在获得槽位后才创建 AbortController 和发送请求；所有媒体工作区共享 `runningTaskIds` 与队列，设置变更会重新泵送等待任务（`useMediaGenerationManager.ts:91-111,727-756`）。
+- **取消**：每个任务持有独立的 `AbortController`，`abortTask`/`abortAll` 分别中止单个或全部任务（Map 管理，`useMediaGenerationManager.ts:74,312-338`）；取消引发的 `AbortError` 收敛为 `error` 状态并提示“已中止”（同文件 `:623`）。UI 侧取消入口为任务卡/任务列表的取消按钮（`handleCancelTask`，`MediaTaskList.vue:150`）与快速模式「停止全部」（`MediaWorkbench.vue:81,95`）。任务完成后默认保留在池中，由「清理已完成」按钮手动清理；`autoCleanCompleted` 的消费者是全局任务池单例：任务状态置为 completed 时启动固定 5 分钟延迟（`MEDIA_TASK_AUTO_CLEAN_DELAY_MS`），到期把该任务从全局任务池移除，关闭设置则取消待执行的计时器（`useMediaTaskManager.ts:20,187-206,250-255`）。
+- **超时、重试与并发**：请求默认超时 `600000ms`（`DEFAULT_MEDIA_TIMEOUT`，`src/llm-apis/common.ts:32`）；settings 可配超时与最大重试次数，默认不自动重试（`config.ts:284`），重试次数只传给请求层。并发由模块级队列约束：`maxConcurrentTasks` 默认 3，队列获得槽位后才创建 AbortController 并发送请求；所有媒体工作区共享 `runningTaskIds` 与队列，设置变更会重新泵送等待任务（`useMediaGenerationManager.ts:91-111,727-756`）。
 - **Agent 侧异步**：非 `isFast` 模型的工具方法声明为异步执行，带进度、可取消与预计耗时等元信息（`buildAgentMethods.ts:781`），提交即返回 `taskId`，经 tool-calling 通用异步任务框架执行——应用重启后未完成任务标记为 `interrupted` 且不自动恢复（见 Agent 工具笔记第 11 节）。handler 通过取消信号转发 `abortTask`，并用 `reportStatus` 回传进度（`buildAgentMethods.ts:699-712`）。`isFast` 模型走同步方法，超时由 executor 的 `withTimeout` 兜底（默认 30s）。
 
 ## 4. 结果、历史、资产与工程持久化
@@ -159,7 +159,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - **参数边界**：`sanitizeParams` 是模型参数的最后一道闸（剔除/钳制/枚举校验），但 `prompt` 不做任何内容过滤，完全由 LLM/用户控制（源码事实，与 Agent 工具笔记一致）。
 - **素材边界**：参考素材按媒体类型过滤扩展名（`MediaGenerationInput.vue:215`）；图片按 `maxImageDimension` 缩放；MiniMax 翻唱限制单参考音频并校验两步工作流前置条件（`useMediaGenerationManager.ts:1091` validateMiniMaxTwoStepCover、`useMiniMaxCoverWorkflow.ts:128` ensureTwoStepReady，预处理结果 24h 过期）。
-- **资源限额**：超时/重试可配；`maxConcurrentTasks` 是全局执行级并发上限，但本次未找到任务总数、文件大小或磁盘配额的执行级限额。`autoCleanCompleted` 开启时会在五分钟后清理已完成任务，但会话树中的结果节点保留；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
+- **资源限额**：超时/重试可配；`maxConcurrentTasks` 是全局执行级并发上限，但本次未找到任务总数、文件大小或磁盘配额的执行级限额。`autoCleanCompleted` 开启时，已完成任务在固定 5 分钟延迟后从全局任务池移除（`useMediaTaskManager.ts:187-206`），会话树中的结果节点保留；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
 - **失败恢复**：各类失败按场景收敛（`useMediaGenerationManager.ts`）：
   - 请求异常：任务置 `error` 并写 statusText（:630）；取消类中断单独处理为“已中止”（见第 3 节）
   - 资产入库：单条失败只记日志不中断其余（:887-889），全部失败则整体报错（:904）
@@ -174,7 +174,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - 会话与任务解耦但以 ID 强耦合：`assistantNode.id === task.id`，重试时重建分支并复用节点 ID——简化了历史与执行的同步，代价是任务池删除必须级联节点删除（`removeTask` 语义即"删除消息"）。
 - 去重是"当月 + 同类型"窗口而非全局唯一（`check_duplicate_in_current_month`），跨月/跨类型重复会再落盘；备份导入路径则做全 Catalog 哈希查找（`import_backup_asset`，:1067 注释明确差异）。
-- 生成配置从会话中拆出为全局配置文件（提交 `76a4ed79a` 起），会话文件只保留节点与输入草稿；类型参数保存在全局配置而非任务内（重试用 `currentConfig.types[type]` + taskSnapshot 的 prompt 混合恢复）。
+- 生成配置从会话中拆出为全局配置文件，会话文件只保留节点与输入草稿；类型参数保存在全局配置而非任务内（重试用 `currentConfig.types[type]` + taskSnapshot 的 prompt 混合恢复）。
 - 工作台双模式（会话/快速）共用同一任务池与资产层，快速模式不建节点，历史只存在任务卡。
 - `generateMedia` 文档声明为占位未实现，Agent 面以动态方法族为准（独特功能笔记「声明不符项」，`ARCHITECTURE.md:420`）。
 
@@ -182,7 +182,7 @@ audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空�
 
 - 应用不内嵌生成/渲染引擎；生成通过 Profile 对应的 HTTP 服务执行。audio.cpp 可以部署在本机，但它是独立外部服务，不随应用内置。
 - 任务状态与进度主要面向 UI 展示，无统一回调注册面；Agent 进度经 `reportStatus` 桥接。
-- 批量下载仍为占位；`autoCleanCompleted` 与 `maxConcurrentTasks` 已接入任务池，前者延迟清理已完成任务，后者约束全部媒体工作区共享的并发请求数。
+- 批量下载仍为占位；`autoCleanCompleted` 与 `maxConcurrentTasks` 已接入任务池，前者在延迟后把已完成任务移出任务池，后者约束全部媒体工作区共享的并发请求数。
 
 **未验证事项**（均为"未运行验证：需要真实模型与图形环境"）：
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Pi 的 TUI 框架完全自研，提供差分渲染、regular 与 fullscreen 两种屏幕模式、overlay 栈和单焦点模型。常规选择器通过编辑器插槽替换显示，真正悬浮的 overlay 主要用于 fullscreen 搜索和扩展 API。
+Pi 的 TUI 框架完全自研，提供差分渲染、regular 与 fullscreen 两种屏幕模式、overlay 栈和单焦点模型。常规选择器通过编辑器插槽替换显示，作为浮层的 overlay 只用于 fullscreen 搜索和扩展 API。
 
 反馈分为聊天区状态文本、fullscreen flash 和 OSC 9;4 进度三类。主题使用 JSON token 和全局单例，支持终端色彩降级、变量引用、明暗自动模式与主题文件热重载；资源可以来自文件系统、项目、包和扩展，并在设置页实时预览。
 
@@ -246,7 +246,7 @@ StdinBuffer 把批量输入拆成单序列（`stdin-buffer.ts`），bracketed pa
 
 **反馈分轨。** regular 模式错误/状态是聊天区持久文本（随滚动，无自动消失），fullscreen 有 flash 反显条；无全局 toast host 概念。
 
-**主题 token 化 + 终端默认色通道。** "" 表示终端默认色（`theme.ts:272-300`），主题无法完全控制背景，是与 Web 主题的本质差异；自动模式允许 `light/dark` 两个主题名组合。
+**主题 token 化 + 终端默认色通道。** "" 表示终端默认色（`theme.ts:272-300`），主题无法完全控制背景；自动模式允许 `light/dark` 两个主题名组合。
 
 **主题分发无市场/导入导出。** 主题以 JSON 文件经文件系统（设置 themes 键/`--theme`/自动发现目录）、npm 包与扩展三条来源进入注册表；选择走"预览不落盘、确认才持久化"，避免浏览主题过程污染设置；主题名中 `/` 被保留给自动模式语法。
 
@@ -258,7 +258,7 @@ StdinBuffer 把批量输入拆成单序列（`stdin-buffer.ts`），bracketed pa
 
 **扩展 overlay API 未在仓库内被消费。** showExtensionCustom overlay 模式存在，但仓库内无 overlay: true 调用实例（仅 API 面，见 §2）。
 
-**动画/无障碍/桌面集成边界。** TUI 无读屏协议通道，可访问性靠键盘全功能 + 反显/强调色；动画仅 loader 帧动画与瞬时 flash，无过渡系统；"桌面集成"只表现为 OSC 通道（9;4 进度条、52 剪贴板、0 标题 setTitle `terminal.ts:532-535`），无托盘/系统通知概念。本笔记未展开这三项（机制过薄，无独立结论价值）。
+**动画/无障碍/桌面集成边界。** TUI 无读屏协议通道，可访问性靠键盘全功能 + 反显/强调色；动画仅 loader 帧动画与瞬时 flash，无过渡系统；"桌面集成"只表现为 OSC 通道（9;4 进度条、52 剪贴板、0 标题 setTitle `terminal.ts:532-535`），无托盘/系统通知概念。本笔记未展开这三项。
 
 ## 9. 未验证事项
 

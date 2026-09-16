@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScript 的 Web 应用是主体（`src` 占源码行 94.7%），同仓附带 Tauri 2 Rust 桌面壳、Node 自托管服务器、Capacitor 移动配置和 Cloudflare Functions 代理。584 个跟踪文件中源码 412 文件 / 126,194 行，TypeScript 82,706 行（65.5%）与 Svelte 36,389 行（28.8%）构成绝大部分；无生成代码影响占比，但跟踪了约 80 MB 的第三方 tokenizer 模型数据（`public/token`）。
+Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScript 的 Web 应用是主体（`src` 占源码行 94.7%），同仓附带 Tauri 2 Rust 桌面壳、Node 自托管服务器、Capacitor 移动配置和 Cloudflare Functions 代理。586 个跟踪文件中源码 413 文件 / 126,605 行，TypeScript 82,706 行（65.5%）与 Svelte 36,389 行（28.8%）构成绝大部分；无生成代码影响占比，但跟踪了约 80 MB 的第三方 tokenizer 模型数据（`public/token`）。
 
 业务逻辑集中在 `src/ts`（71,247 行），其中 `process` 子目录约 3 万行是聊天、请求、记忆与 MCP 的核心；UI 组件在 `src/lib`（36,646 行）；多语言文案在 `src/lang`（10,685 行）。根目录没有 workspace 声明，唯一的嵌套独立包是开发中的 `server/hono`，文档声明它将替换 `server/node` 的 Express 服务器。测试共 25 文件 / 4,147 行，全部为 Vitest 单元测试，无端到端测试。
 
@@ -24,7 +24,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 
 ## 统计口径与仓库形态
 
-机械统计使用本目录 `统计仓库.ps1` 的统一口径：只计 Git 跟踪文件（584 个），行数为物理行（含空行与注释），语言按扩展名归类，文档按 `.md/.txt` 等扩展名识别，测试按 `tests`/`__snapshots__` 目录与 `*.test.*` 文件名模式识别；`git rev-parse HEAD` 与任务给定的快照 SHA 一致。补充的模块级行数（标注“约”）用 PowerShell 分行计数获得，与脚本数值存在少量口径差异，仅用于量级描述。
+机械统计使用本目录 `统计仓库.ps1` 的统一口径：只计 Git 跟踪文件（586 个），行数为物理行（含空行与注释），语言按扩展名归类，文档按 `.md/.txt` 等扩展名识别，测试按 `tests`/`__snapshots__` 目录与 `*.test.*` 文件名模式识别；`git rev-parse HEAD` 与任务给定的快照 SHA 一致。补充的模块级行数（标注“约”）用 PowerShell 分行计数获得，与脚本数值存在少量口径差异，仅用于量级描述。
 
 仓库形态是“单根包 + 平台壳 + 服务端合仓”：根 `package.json` 为 private 单包（`packageManager: pnpm@10.34.1`），无 pnpm workspace、lerna 或 turborepo 等编排声明；`server/hono` 自带 `package.json`、`tsconfig.json`、`wrangler.jsonc` 与独立的 `pnpm-lock.yaml`，形成嵌套独立包；`src-tauri` 是 Cargo 包。`dist/` 与 `node_modules/` 未跟踪，构建产物不入仓。
 
@@ -44,7 +44,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 
 `src` 内部按职责分四块：
 
-- `src/ts` 197 文件 / 71,247 行，是真正的业务层，内部量级如下表；其余 `translator`、`drive`、`gui`、`network`、`media`、`sync`、`horde`、`kei` 等均为千行以下的小目录。
+- `src/ts` 197 文件 / 71,247 行，是业务层，内部量级如下表；其余 `translator`、`drive`、`gui`、`network`、`media`、`sync`、`horde`、`kei` 等均为千行以下的小目录。
 
 | `src/ts` 子目录 | 文件 | 约行数 | 职责 |
 | --- | ---: | ---: | --- |
@@ -86,7 +86,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 | Python | 3 | 164 | — | `src-tauri/src-python` 本地 LLM 服务 + 根目录残留脚本 |
 | Shell | 2 | 51 | — | `server.sh` 部署脚本与证书生成脚本 |
 
-TypeScript 与 Svelte 合计占 94.3%，且全部是手写业务代码；语言占比未被生成代码影响，但被第三方资源扭曲的是字节量而非行数。JavaScript 的 10 个文件是运行时必需的杂项：`server.cjs`（Node 服务器）、`public/assets` 下的翻译 worker（主 worker 是约 2.6 千行的压缩产物）、`public/sw.js`（服务 worker）、`public/functions` 的 3 个 Cloudflare 代理函数、`util/risuUserscript.user.js`（浏览器用户脚本）与 2 个构建/辅助小文件。
+TypeScript 与 Svelte 合计占 94.3%，且全部是手写业务代码；语言占比未被生成代码影响；第三方资源改变的是字节量，不改变行数。JavaScript 的 10 个文件是运行时必需的杂项：`server.cjs`（Node 服务器）、`public/assets` 下的翻译 worker（主 worker 是约 2.6 千行的压缩产物）、`public/sw.js`（服务 worker）、`public/functions` 的 3 个 Cloudflare 代理函数、`util/risuUserscript.user.js`（浏览器用户脚本）与 2 个构建/辅助小文件。
 
 运行时按平台分工：浏览器运行 Svelte 组件与 TypeScript 逻辑；Tauri 桌面由 Rust 层补齐原生能力（原生请求、流式事件、OAuth、Python 安装引导）；Node 运行 `server.cjs`；hono 骨架的目标运行时是 Node/Bun/Cloudflare Workers/Vercel；Python（FastAPI + llama_cpp）只在桌面端被 Rust 启动，端口 10026，提供本地推理与分词（`src-tauri/src-python/main.py`）。
 
@@ -94,7 +94,7 @@ TypeScript 与 Svelte 合计占 94.3%，且全部是手写业务代码；语言�
 
 仓内文档共 13 文件 / 2,810 行，其中绝大部分在根目录：`README.md`（产品介绍，用户文档指向 GitHub Wiki）、`plugins.md`（插件开发指南，约 1.6 千行）、`AGENTS.md`（开发者约定）。`src/ts/plugins/migrationGuide.md`（758 行）是插件 API v2→v3 迁移指南，位于插件代码目录内部。`.github/pull_request_template.md` 37 行；`server/node/readme.md` 与 `server/hono/README.md` 各 5 行，分别声明了未来弃用与开发中状态。
 
-其余文档命中来自统计口径而非真实文档意图：`public/token/glm4/SOURCE.md`、`glm5/SOURCE.md` 是 tokenizer 数据的来源说明，`public/colors.txt` 是颜色清单，`src-tauri` 下被计入的 `requirements.txt`、`key.txt`、`mainx.txt` 是配置或遗留文件。应用内帮助内容以 `.cbs` 自定义格式存放在 `src/etc/docs`（cbs_intro、cbs_docs、docs_text、regex 共 4 个文件，约 33 KB），不进入 Markdown 文档统计。用户手册主体在仓库外的 GitHub Wiki（README 标注 Work in Progress）。
+其余文档命中来自统计口径，实际并非说明文档：`public/token/glm4/SOURCE.md`、`glm5/SOURCE.md` 是 tokenizer 数据的来源说明，`public/colors.txt` 是颜色清单，`src-tauri` 下被计入的 `requirements.txt`、`key.txt`、`mainx.txt` 是配置或遗留文件。应用内帮助内容以 `.cbs` 自定义格式存放在 `src/etc/docs`（cbs_intro、cbs_docs、docs_text、regex 共 4 个文件，约 33 KB），不进入 Markdown 文档统计。用户手册主体在仓库外的 GitHub Wiki（README 标注 Work in Progress）。
 
 ## 4. 测试分布与数量
 
@@ -137,7 +137,7 @@ TypeScript 与 Svelte 合计占 94.3%，且全部是手写业务代码；语言�
 - 本地推理走“Rust 下载并引导 Python 环境 + FastAPI/llama_cpp 进程”的复合方案，但 `main.rs:241-246` 只完整实现了 Windows 的嵌入式 Python 下载路径，macOS/Linux 分支存在而未闭环。
 - `server/node` 与 `server/hono` 并存：前者可用但 readme 声明将被弃用，后者是未来替代骨架，目前 5 个源码文件均为入口存根。
 - 移动端只保证到“配置 + UI 变体”层次：无原生工程、无移动构建 CI，Capacitor 配置是静态声明，未运行验证。
-- 测试覆盖集中在解析器与请求层（最接近数据契约的代码），UI 层仅 1 个渲染测试，未识别到 e2e；这与“无综合测试套件、依赖类型检查”的开发者文档自述一致，但注意该文档同时描述了不存在的 `src/test/runTest.ts`。
+- 测试覆盖集中在解析器与请求层（最接近数据契约的代码），UI 层仅 1 个渲染测试，未识别到 e2e；这与“无综合测试套件、依赖类型检查”的开发者文档自述一致，但该文档同时描述了不存在的 `src/test/runTest.ts`。
 
 ## 8. 未验证事项
 

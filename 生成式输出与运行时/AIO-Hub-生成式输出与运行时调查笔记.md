@@ -65,7 +65,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 1.1 聊天输出：无独立对象，消息节点即对象
 
 - 触发由用户消息驱动；模型回复文本流式写入 assistant 节点。节点模型 `ChatMessageNode`（`src/tools/llm-chat/types/message.ts:110-416`）带稳定 ID、来源、角色、状态与 `metadata`（模型、Agent、usage、推理内容、翻译、工具调用等）等字段。但**内容唯一载体是 `content: string`**，没有 Artifact/part 类型的结构化输出对象；`type?: MessageType` 只用于"预设消息/历史占位符"，与生成内容无关。
-- 与 typed part 类协议相比，聊天内容层采用**自由文本 + 约定标记**：当前 VCP 工具调用块、`<think>` 思考块、HTML 标签、Mermaid 围栏都由渲染器在展示时识别（`rich-text-renderer/ARCHITECTURE.md` §3.2、§5.2），而非发送/存储时的结构化 part。这里的“当前 VCP”只描述工具调用协议的已接入实现，不等于 AIO 的全部输出协议或工具来源。
+- 与 typed part 类协议相比，聊天内容层采用**自由文本 + 约定标记**：当前 VCP 工具调用块、`<think>` 思考块、HTML 标签、Mermaid 围栏都由渲染器在展示时识别（`rich-text-renderer/ARCHITECTURE.md` §3.2、§5.2），而非发送/存储时的结构化 part。
 - 唯一接近"part 语义"的是 `LlmReasoningArtifact`（`src/llm-apis/common.ts` 相关类型，`message.ts:282`），但它是 DeepSeek/OpenAI/Gemini 推理内容的**回放状态**，供上下文压缩后精确重放推理文本，不是可操作输出对象。
 
 ### 1.2 工具输出：文本结果节点 + 物理副作用

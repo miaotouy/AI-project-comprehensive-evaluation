@@ -22,7 +22,7 @@ Jan 同时具有“上下文即时注入”和“工具化检索”两条附件�
 
 ## 谱系定位与系统边界
 
-本项目在本类目中横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`，但这不是独立 HTTP/RPC 服务端点：前端 RAG service 通过扩展管理器调用扩展，扩展再通过 Tauri API 调用本机 Vector DB 和文档解析插件（`core/src/browser/extensions/rag.ts:18-51`、`web-app/src/services/rag/default.ts:21-60`）。本次检查范围内未找到 RAG 对外网络端点或服务端租户层，不能据此推断不存在其他部署形态。
+本项目横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`，但这不是独立 HTTP/RPC 服务端点：前端 RAG service 通过扩展管理器调用扩展，扩展再通过 Tauri API 调用本机 Vector DB 和文档解析插件（`core/src/browser/extensions/rag.ts:18-51`、`web-app/src/services/rag/default.ts:21-60`）。本次检查范围内未找到 RAG 对外网络端点或服务端租户层，不能据此推断不存在其他部署形态。
 
 一条嵌入检索主链如下：
 
@@ -72,7 +72,7 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 作用域由调用所在线程决定：非项目线程检索该 thread collection；项目线程的 RAG 调用固定为 project scope，检索项目 collection。模型参数中的 scope/thread ID 在 service 层会被覆盖或补入当前上下文，避免模型任意指定别的 collection；`file_ids` 只能进一步缩小当前 collection 内候选。这里没有看到多用户、ACL 或内容隔离策略，因而本地桌面单用户 scope 不能等同于服务端授权边界（`web-app/src/routes/threads/$threadId.tsx:520-531`、`web-app/src/services/rag/default.ts:37-53`）。
 
-审批分两层理解。RAG 工具在实际执行分支中被认定为内置工具，始终自动允许；文档成功嵌入后，线程流程还把全部 RAG tool name 写入持久化的 thread 级 approval store。后一个写入对该执行分支并非必要条件，但会与通用审批状态保持一致。外部 MCP 的一次、线程、server、全局授权不应套用为 RAG 文件访问审批（`web-app/src/routes/threads/$threadId.tsx:491-531,1020-1029`、`web-app/src/hooks/useToolApproval.ts:6-89`）。检索内容作为工具结果直接交给模型；本次检查范围未找到对文档内不可信指令的隔离或检测层。
+审批有两处。RAG 工具在实际执行分支中被认定为内置工具，始终自动允许；文档成功嵌入后，线程流程还把全部 RAG tool name 写入持久化的 thread 级 approval store。后一个写入对该执行分支并非必要条件，但会与通用审批状态保持一致。外部 MCP 的一次、线程、server、全局授权不应套用为 RAG 文件访问审批（`web-app/src/routes/threads/$threadId.tsx:491-531,1020-1029`、`web-app/src/hooks/useToolApproval.ts:6-89`）。检索内容作为工具结果直接交给模型；本次检查范围未找到对文档内不可信指令的隔离或检测层。
 
 预算主要在摄取与候选层：文件大小、块长、重叠、embedding context、`top_k`、线性阈值及 ANN/linear 模式可配。没有找到 RAG 专用的总字符/token 截断、单次检索超时、最大工具回合数、并行候选预算或结果缓存。线程工具在 UI 执行器中串行并支持 AbortSignal；底层 Tauri 检索命令在本次静态范围内未见取消参数，取消能否中断已发出的 SQLite/embedding 操作尚未验证。
 

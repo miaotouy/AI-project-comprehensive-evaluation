@@ -71,7 +71,7 @@ Agent/群组配置（topics[] 数组，仅元数据）
 
 ### 2.2 裸数组、整份覆盖写、无原子写
 
-`history.json` 本身没有 schema 版本号或额外的 wrapper，就是裸数组，`fs.writeJson(file, history, {spaces:2})` 直接整份覆盖写（例如 `modules/ipc/chatHandlers.js:506`、`Groupmodules/groupchat.js:539`），**没有增量写入或原子写保护**（没见到先写临时文件再 rename 的模式）——如果写入过程中进程崩溃，理论上可能截断成非法 JSON，这是潜在风险点（未在代码里发现任何缓解措施，标注为"未核实是否曾经出问题"，但从实现上看确实缺乏保护）。
+`history.json` 本身没有 schema 版本号或额外的 wrapper，就是裸数组，`fs.writeJson(file, history, {spaces:2})` 直接整份覆盖写（例如 `modules/ipc/chatHandlers.js:506`、`Groupmodules/groupchat.js:539`），**没有增量写入或原子写保护**（未见先写临时文件再 rename 的模式）：写入过程中进程崩溃可能截断成非法 JSON，代码中未见缓解措施，本次未核实是否曾经出问题。
 
 ### 2.3 topics 元数据数组是会话级索引
 
@@ -116,7 +116,7 @@ Agent/群组配置中的 `topics[]` 是唯一的话题级索引，元素字段�
 
 ### 3.3 默认话题创建的两条路径与 id 不一致
 
-Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 格式不一致，是历史遗留的不一致点（非致命但值得注意）：
+Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 格式不一致，属历史遗留的不一致：
 
 - **新建 Agent 时**：`modules/ipc/agentHandlers.js` 的 `create-agent` handler 直接写入 `topics: [{ id: "default", name: "主要对话", createdAt: ... }]`（`agentHandlers.js:430`），话题 id 固定为字符串 `"default"`；
 - **fallback 创建时**：`chatManager.js` 调 `createNewTopicForAgent`，其 id 格式是 `topic_${Date.now()}`（`chatHandlers.js:555`）。
@@ -191,7 +191,7 @@ Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 
 - 计数内容：该函数据 `li.dataset` 读取 `itemId/itemType/topicId`，异步拉取该话题完整 `history.json` 算未读数（并顺带清理失效持久化标记，`:292`）和总消息数；
 - 防重复：**触发一次后立即 `unobserve`**（`:247`）且用 `dataset.countLoaded` 防止重复加载。
 
-这个设计的意义是：列表可能有大量话题，如果一次性给每个话题都发一次 IPC 读取历史文件会造成打开列表时的 IO 风暴，用 IntersectionObserver 把这个成本摊到"用户实际滚动到看见"的时刻。列表本身的渐进渲染策略（初始 40 条、触底批量追加 30 条、requestAnimationFrame 分帧）见 Chat UI 笔记。
+列表可能有大量话题，如果一次性给每个话题都发一次 IPC 读取历史文件，会造成打开列表时的 IO 风暴；用 IntersectionObserver 把这个成本摊到"用户实际滚动到看见"的时刻。列表本身的渐进渲染策略（初始 40 条、触底批量追加 30 条、requestAnimationFrame 分帧）见 Chat UI 笔记。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
@@ -202,13 +202,13 @@ Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 
 - 循环体内每个 agent 的上下文构建（`contextForAgentPromises`，`:611-719`）都是基于**同一个内存变量 `groupHistory` 数组**的当前状态，而不是每次重新读盘（尽管注释里讨论过"频繁读写文件"的取舍，`:585-591`，但最终实现选择了内存数组 + 各阶段写盘）；
 - 每个 agent 说完话后，无论流式还是非流式，都会 `groupHistory.push(...)` 后立即 `await fs.writeJson(groupHistoryPath, groupHistory, {spaces:2})`（例如流式结束分支 `:950-952`、`[DONE]` 分支 `:965-967`、非流式分支 `:1062-1064`），下一个 agent 在构建自己的上下文时就能看到上一个 agent 刚说的话。
 
-这就是"同一 topic 内多个 Agent 发言不交错"的实现基础：**因为是严格的串行 await 循环，不存在并发 fetch，天然不会有两个 agent 的流式 chunk 交错写入同一个 messageId**。
+由于这里是严格的串行 await 循环，不存在并发 fetch，同一 topic 内两个 agent 的流式 chunk 不会交错写入同一个 messageId。
 
-但这个"串行"只保证了**单次 `handleGroupChatMessage` 调用内部**的顺序，并没有对**多次调用之间**加锁。如果用户在上一次群聊消息还在处理中（比如某个 agent 的回复还没写完）时再次发送消息，或者同时点了"邀请发言"按钮（`handleInviteAgentToSpeak` 是完全独立的另一个函数，同样在开头 `await fs.readJson(groupHistoryPath)` 读一次全量历史，逻辑与 `handleGroupChatMessage` 类似），两次调用各自持有自己的内存 `groupHistory` 快照，各自在结尾 `fs.writeJson` 整份覆盖写——**没有看到任何文件锁、互斥量或版本号校验**。理论上后写入的调用会把先写入的调用追加的内容覆盖掉（丢消息），这是一个真实存在但未被验证触发过的并发风险点（标注"未核实是否在实际使用中触发过"，因为需要构造并发场景才能验证，但代码层面确实没有防护）。
+但这个"串行"只保证了**单次 `handleGroupChatMessage` 调用内部**的顺序，并没有对**多次调用之间**加锁。如果用户在上一次群聊消息还在处理中（比如某个 agent 的回复还没写完）时再次发送消息，或者同时点了"邀请发言"按钮（`handleInviteAgentToSpeak` 是完全独立的另一个函数，同样在开头 `await fs.readJson(groupHistoryPath)` 读一次全量历史，逻辑与 `handleGroupChatMessage` 类似），两次调用各自持有自己的内存 `groupHistory` 快照，各自在结尾 `fs.writeJson` 整份覆盖写——**没有看到任何文件锁、互斥量或版本号校验**。理论上后写入的调用会把先写入的调用追加的内容覆盖掉（丢消息）；本次未核实是否在实际使用中触发过，验证需要构造并发场景，代码层面没有防护。
 
 ### 6.2 群聊消息的单一真源在主进程
 
-存盘走 `debouncedSaveHistory`（**1 秒防抖**，`modules/renderer/streamManager.js:348-375`），但**群聊消息永远不在这里存盘**：`saveHistoryForContext` 一进来就判断 `context.isGroupMessage` 并直接 `return`（`:379-383`），注释解释是"群聊由主进程作为历史单一真源，避免渲染进程重复保存造成竞态"。也就是说群聊的落盘完全依赖 `groupchat.js` 里各个 `fs.writeJson(groupHistoryPath, ...)` 调用（`AbortError` 分支、正常结束分支等各自都会写一次），streamManager 只负责 UI。
+存盘走 `debouncedSaveHistory`（**1 秒防抖**，`modules/renderer/streamManager.js:348-375`），但**群聊消息永远不在这里存盘**：`saveHistoryForContext` 一进来就判断 `context.isGroupMessage` 并直接 `return`（`:379-383`），注释解释是"群聊由主进程作为历史单一真源，避免渲染进程重复保存造成竞态"。群聊的落盘因此完全依赖 `groupchat.js` 里各个 `fs.writeJson(groupHistoryPath, ...)` 调用（`AbortError` 分支、正常结束分支等各自都会写一次），streamManager 只负责 UI。
 
 ### 6.3 流式期间的临时状态与落盘时机
 
@@ -247,15 +247,15 @@ assistant 消息的流式临时状态与落盘时机：
 - Agent 的模型等配置保存在 Agent 配置对象中（模型按钮与折叠设置段落的界面见 Chat UI 笔记），配置 schema 未在原调查中核实。
 - VCPChat 是 VCPToolBox 的官方桌面前端，消息结构、会话存储与 VCPToolBox 请求编排的对应关系见 [`../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
 
-## 当前快照的数据协调
+## 9. 当前快照的数据协调
 
 聊天内核新增了仓库、历史写入权威和持久化适配器的显式分层，流式协调器以 session、conversation key 与 generation 识别操作，并在 surface 脱离后停止其投影。该调整缩小了渲染层直接写历史或跨表面复用流状态的范围；它没有将 `history.json` 改为数据库事实源，也没有为普通单聊引入文件锁、事务或版本合并。VCP-CDS 与 VCPMobileSync 的中央索引仍是派生索引/同步数据面，不取代本地历史文件。
 
 依据：`renderer.js:188-195,517-599`、`modules/chat/chatHistoryMutationAuthority.js:11-91`、`chatHistoryPersistence.js:113-156`、`streamCoordinator.js:28-112`、`VCPDistributedServer/Plugin/VCPMobileSync/README.md:95-148`。
 
-## 9. 设计取舍与已确认边界
+## 10. 设计取舍与已确认边界
 
-- **两级会话模型**（Agent/群组 → Topic）天然适合"多角色 + 长期关系"场景，但配套了 Flowlock、群聊多策略调度等重型运行时机制，比通用聊天客户端复杂得多（调度执行语义见对话请求与上下文笔记 8 节）。
+- **两级会话模型**（Agent/群组 → Topic）面向"多角色 + 长期关系"场景，并配套 Flowlock 锁定、群聊多策略调度等运行时机制（调度执行语义见对话请求与上下文笔记 8 节）。
 - **未读自动判定以"用户是否参与"为边界**：历史无用户消息时按 assistant 消息数计数，用户一发言即归零；持久化标记带 `unreadSource` 来源区分（手动标记保留、Agent/TopicSponsor 旧标记在用户参与后由前端主动清除）。
 - **话题内容搜索有盲点**：`searchTopicsByContent` 只匹配字符串型 `content`，多模态数组内容匹配不到（5.2）。
 - **`history.json` 整份覆盖写，无原子写**（临时文件+rename）保护，进程崩溃时点存在截断风险（未实际验证过是否发生过，仅代码层面推断）（2.2）。
@@ -263,7 +263,7 @@ assistant 消息的流式临时状态与落盘时机：
 - **默认话题 id 不一致**：`"default"` vs `"topic_<timestamp>"`（3.3）。
 - **类目边界**：本笔记只回答数据语义；停止生成的半截消息如何收口、话题自动总结请求的执行属于对话请求与上下文；消息列表渲染与滚动属于消息渲染器。
 
-## 10. 未验证事项
+## 11. 未验证事项
 
 - 崩溃导致的 `history.json` 截断是否实际发生过（2.2）。
 - 群聊多次调用并发覆盖写是否在实际使用中触发过（6.1）。
@@ -272,7 +272,7 @@ assistant 消息的流式临时状态与落盘时机：
 - 多窗口（主窗口/语音聊天窗口）同时写同一 Topic 的文件级并发未核实。
 - VCP-CDS 摄取一致性、Tantivy 重建与 `reconcile` 的耗时/正确性未运行验证（6.4）。
 
-## 11. 关键源码索引
+## 12. 关键源码索引
 
 - `modules/chatManager.js`：`selectItem` `:352-481`，`selectTopic` `:483-537`，`_saveLastOpenState` `:275-292`，附件组装 `:992-1002`
 - `modules/topicListManager.js`：`hasUserParticipation/countUnreadMessages/hasValidPersistentUnreadMarker` `:47-106`，"未读话题"置顶 `:128-175`，`ensureTopicCountObserver/loadTopicMessageCount` `:239-310`，`loadTopicList` `:498-616`，排序 `:635-694`，右键标记已读/未读 `:841-855`

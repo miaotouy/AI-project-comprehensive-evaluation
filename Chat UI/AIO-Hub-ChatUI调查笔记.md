@@ -19,7 +19,7 @@
 - 会话侧栏用 TanStack Virtual 只挂载可见项（固定预估行高 71px、overscan 10）；消息列表**不虚拟化**，全量 DOM + 浏览器 `content-visibility` 裁剪（机制细节在消息渲染器笔记 8）。
 - 搜索分两套：侧栏跨会话搜索（Rust 后端）命中只能到会话级；会话内搜索（Ctrl+F）只扫当前活动路径消息。
 - 键盘关键路径：发送可用快捷键完成；会话切换、树图操作基本依赖鼠标；线性视图的分支切换按钮是标准 `<button>` 可 Tab 聚焦。
-- 生成完成没有系统通知、托盘没有聊天状态菜单项；桌面集成与聊天状态联动最少。
+- 生成完成没有系统通知、托盘没有聊天状态菜单项；桌面集成与聊天状态的联动限于应用内的跨窗口同步（8.3）。
 
 ## 工作台边界与用户主链
 
@@ -47,7 +47,7 @@
 
 ### 1.2 可分离窗口
 
-标题栏拖拽调用 `useDetachable`（`ChatArea.vue:186-212`），输入框也能独立成悬浮窗口；分离组件集合变化后，主 ChatArea 会隐藏重复输入框（`ChatArea.vue:225-236`），并通过 `useWindowSyncBus` 同步主窗口与分离窗口的生成状态（`chat:streaming-delta` 广播，见 8.2）。这里的"分离"是 UI 视图拆分，不会创建新的 Session 或消息副本。
+标题栏拖拽调用 `useDetachable`，输入框也能独立成悬浮窗口；分离组件集合变化后，主 ChatArea 会隐藏重复输入框，并通过 `useWindowSyncBus` 同步主窗口与分离窗口的生成状态（`chat:streaming-delta` 广播，见 8.2；相关逻辑在 `ChatArea.vue:186-236`）。这里的"分离"是 UI 视图拆分，不会创建新的 Session 或消息副本。
 
 ### 1.3 线性与树图两种消息视图
 
@@ -77,7 +77,9 @@
 ### 2.3 搜索入口与定位工作流
 
 - **侧栏跨会话搜索**：前端 `useLlmSearch` 封装 Tauri 命令 `search_llm_data_stream`（300ms 防抖、精确/全部/任一匹配模式；后端全量扫描数据侧在会话管理 5.1）；命中后只能定位到会话本身，**无法直接跳到会话内的具体消息**。
-- **会话内消息搜索**：Ctrl+F 打开 `ChatSearchPanel.vue`（`ChatArea.vue:394-407` 的键盘拦截，焦点在 CodeMirror 内时不拦截，交给编辑器自己的搜索），纯内存线性扫描当前活动路径消息（内容 + 推理内容，最多 50 条，数据语义在会话管理 5.2）；选中结果后按消息 ID 找到对应 DOM 节点平滑滚动过去（`MessageList.vue:325-339`）。`content-visibility: auto` 只跳过屏外内容的渲染工作，不会从 DOM 中删除节点，因此不会妨碍该查询；真正的限制是搜索范围只有当前活动路径，不在当前分支路径上的节点既不会被搜索，也没有对应的消息 DOM。搜索面板自身支持角色筛选（user/assistant）与上下键 + Enter 键盘导航（`ChatSearchPanel.vue:130-149,220-243`）。
+- **会话内消息搜索**：Ctrl+F 打开 `ChatSearchPanel.vue`（键盘拦截在 `ChatArea.vue:394-407`，焦点在 CodeMirror 内时不拦截，交给编辑器自己的搜索），纯内存线性扫描当前活动路径消息（内容 + 推理内容，最多 50 条，数据语义在会话管理 5.2）；选中结果后按消息 ID 找到对应 DOM 节点平滑滚动过去（`MessageList.vue:325-339`）。
+
+  `content-visibility: auto` 只跳过屏外内容的渲染工作，不会从 DOM 中删除节点，因此不会妨碍该查询；限制在于搜索范围只有当前活动路径，不在当前分支路径上的节点既不会被搜索，也没有对应的消息 DOM。搜索面板自身支持角色筛选（user/assistant）与上下键 + Enter 键盘导航（`ChatSearchPanel.vue:130-149,220-243`）。
 
 ### 2.4 切换时的现场恢复
 
@@ -87,7 +89,9 @@
 
 ### 3.1 输入编辑器与发送约定
 
-`MessageInput.vue` 支持 CodeMirror/textarea 两种编辑器、Enter/Shift+Enter（或 Ctrl/Cmd+Enter）发送约定（发送键可配置，默认 Ctrl+Enter，`ChatCodeMirrorEditor.vue:293-303`、`ChatTextareaEditor.vue:224-232`）、输入区高度拖拽/双击复位、附件预览、文件拖入和剪贴板粘贴。附件先进入输入管理器（`useChatInputManager`）的临时列表，处理完成后才随用户消息提交；转写占位符由转录管理器按当前模型能力决定是否插入。生成中会禁用流式模式切换，发送按钮转为中止。工具栏可切换流式输出、宏、附件、迷你会话、临时模型、更多工具、工具调用设置、工具栏设置、输入框展开/收起（`MessageInputToolbar.vue`）。
+`MessageInput.vue` 支持 CodeMirror/textarea 两种编辑器，发送键可配置，默认 Ctrl+Enter，也可用 Enter、Shift+Enter 或 Ctrl/Cmd+Enter 发送（`ChatCodeMirrorEditor.vue:293-303`、`ChatTextareaEditor.vue:224-232`）；输入区高度可拖拽、双击复位，支持附件预览、文件拖入和剪贴板粘贴。
+
+附件先进入输入管理器（`useChatInputManager`）的临时列表，处理完成后才随用户消息提交；转写占位符由转录管理器按当前模型能力决定是否插入。生成中会禁用流式模式切换，发送按钮转为中止。工具栏可切换流式输出、宏、附件、迷你会话、临时模型、更多工具、工具调用设置、工具栏设置、输入框展开/收起（`MessageInputToolbar.vue`）。
 
 Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用选择器（`KnowledgeReferenceControl.vue`，带可访问名称），输入区上方渲染已引用资料库 chips（`KnowledgeReferenceChips.vue`，每个引用库一个 chip，含名称/ID/可用性 tooltip、不可用红色边框、可单独移除，同样带可访问名称）；随消息提交的引用会在发送入口里先执行一次资料检索/研究工具事件（生成 tool 节点）再进入正常生成链（执行侧见对话请求与上下文 9.9；数据结构 `ChatMessageNode.knowledgeReference`）。
 
@@ -196,7 +200,7 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 
 ### 9.1 关键路径键盘
 
-- **发送消息**：可以。`ChatCodeMirrorEditor.vue`/`ChatTextareaEditor.vue` 都支持 `Ctrl/Cmd+Enter` 或 `Enter` 发送（可配置 `sendKey`），不依赖鼠标点击发送按钮（9.1 见 3.1 引用）。
+- **发送消息**：可以。两个编辑器都支持 `Ctrl/Cmd+Enter` 或 `Enter` 发送（可配置 `sendKey`，见 3.1），不依赖鼠标点击发送按钮。
 - **切换会话**：不可以。会话列表项是绑定点击事件的可点击 `div`（`SessionItem.vue:92`），没有 `tabindex`、`role="option"` 或 `role="listbox"`，也没有方向键或 Ctrl+Tab 的会话切换绑定；div 默认不可聚焦，列表项不在 Tab 焦点序列里，纯键盘用户无法直接切换会话。
 - **查看分支**：部分可行。操作栏上一分支/下一分支按钮是标准 `<button>` 元素（可被 Tab 聚焦、可用 Enter/Space 激活，`MessageMenubar.vue:428-476`）；树图视图画布本身可聚焦（`tabindex="0"`，`FlowTreeGraph.vue:22`），但内部的节点选择、右键菜单操作、连线嫁接等均是鼠标驱动的交互（拖拽、右键、双击），**没有找到等效的键盘操作路径**，聚焦后也没有发现方向键选中/切换节点的绑定。
 - 结论：发送消息具备键盘路径，会话切换和树图操作基本依赖鼠标；线性视图下的分支切换按钮可通过 Tab 聚焦。该结论来自静态代码搜索，未经屏幕阅读器实测，不能作为正式的 WCAG 合规结论。
@@ -223,13 +227,13 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 ## 10. 设计取舍与已确认边界
 
 - **消息列表不再虚拟化**（当前方案的渲染机制在消息渲染器笔记 8，撤回历史留在这里）：Git 历史表明消息列表并非一直采用当前方案：
-  - `30b0ce71b`（2025-11-02）首次在 `MessageList.vue` 接入 TanStack Virtual（初版固定预估行高 200、overscan 5、只挂载可见消息、绝对定位加 translateY）；
-  - 此后多轮提交持续处理动态高度与滚动定位问题（`6efa00864`、`515c215de`、`bff4d7de8`、`d9f56e9a6`、`9cce774fe`、`f5e66344b` 等）；
-  - `5c6844727`（2026-04-29）撤回改用原生 DOM，提交说明将原因归结为聊天消息高度动态、倒序加载闪烁、估算不准和初始化复杂；在该项目"几百条消息"的目标规模下，作者实测会话切换由 3–5 秒降至 500ms 内（**该性能数字来自提交说明，笔记未独立复测**）；
+  - 2025-11-02 首次在 `MessageList.vue` 接入 TanStack Virtual（初版固定预估行高 200、overscan 5、只挂载可见消息、绝对定位加 translateY）；
+  - 此后多轮提交持续处理动态高度与滚动定位问题；
+  - 2026-04-29 撤回改用原生 DOM，提交说明将原因归结为聊天消息高度动态、倒序加载闪烁、估算不准和初始化复杂；在该项目"几百条消息"的目标规模下，作者实测会话切换由 3–5 秒降至 500ms 内（**该性能数字来自提交说明，笔记未独立复测**）；
   - 撤回后滚动和导航都改为基于真实 DOM（触底滚动、按消息 ID 查询并读取位置定位，`MessageList.vue:325-385`）；
-  - 后续 `1d971ff54`、`25ef4a7f5` 又处理了生产构建中 `content-visibility` 被优化器移除的问题。
+  - 后续提交又处理了生产构建中 `content-visibility` 被优化器移除的问题。
 
-  注意区分：旧方案是真正的列表虚拟化（屏外消息组件不挂载）；当前方案是"完整 DOM + 浏览器渲染裁剪"，所有活动路径消息仍在 DOM 中。
+  旧方案是列表虚拟化（屏外消息组件不挂载）；当前方案是"完整 DOM + 浏览器渲染裁剪"，所有活动路径消息仍在 DOM 中。
 - **线性视图与树图共用同一份节点数据**；树图的交互路径已做静态代码核实，大规模节点树的布局性能未做运行时压测（仓库 `docs/Plan/tree-graph-performance-investigation.md` 记录的是性能计划，不能据此得出性能结论）。
 - **分离窗口断连的回放依赖订阅时机**（8.2）。
 - **`QuickAction.hotkey` 未落地**：类型定义声明了 `hotkey?: string`（`types/quick-action.ts:33`），但 `src/tools/llm-chat` 中没有任何读取或注册该字段的代码（搜索 `.hotkey` 无消费方）——快捷操作按钮、模板展开和自动发送可用，配置快捷键本身没有执行链。

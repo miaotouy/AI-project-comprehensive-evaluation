@@ -35,7 +35,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
 18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
 
-辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`，提交 `045c52bd0`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
+辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
 
 归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。
 
@@ -113,7 +113,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **安全与资源边界**：`enable_deduplication` 开关控制去重；`remove_asset_source` 在最后一个来源移除时删除文件；Tauri capability 对 fs 读取无路径限制（Agent 工具笔记第 7 节已记录）。
 
-**独特性判断**：多数项目把文件挂在会话/知识库下；AIO Hub 用应用级资产层统一所有工具的产物并带来源生命周期，是 `创作工作站` 与"媒体/资产"聚类的关键支撑。
+**独特性判断**：通用做法是把文件挂在会话/知识库下；AIO Hub 用应用级资产层统一所有工具的产物并带来源生命周期，是 `创作工作站` 与"媒体/资产"聚类的关键支撑。
 
 **证据强度**：Rust 命令源码 + 前端单例 + ARCHITECTURE 为静态事实；10 万+资产性能上限（ARCHITECTURE 自述）未实测。
 
@@ -159,7 +159,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
-**独特性判断**：README"60+"宣称实测为 74 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
+**独特性判断**：README 宣称 60+，实测为 74 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
 
 **证据强度**：逐文件统计注册定义（74 个）+ 管道代码为静态事实；未运行宏展开验证。
 
@@ -209,7 +209,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **状态**：`config.json`（WS 地址/VCP Key）、`distributed-config.json`（节点名/暴露列表/自动注册开关）。分布式节点（AIO 作为节点被远端 `execute_tool` 调用，含 `internal_request_file` 强制内置）与工具桥（`VcpToolProxy` 把远端插件包装成本地 ToolRegistry）的执行细节已由 Agent 工具笔记第 7/9 节确认，本笔记不再重复。
 
-**独特性判断**：这是"外部 Agent 协议"标签（待查清单聚类行）中唯一以监控面板 + 分布式节点双向形态出现的桌面实现；监控 UI 本身属于新覆盖面。
+**独特性判断**：这是"外部 Agent 协议"标签中以监控面板 + 分布式节点双向形态出现的桌面实现；监控 UI 本身属于新覆盖面。
 
 **证据强度**：ARCHITECTURE + Agent 工具笔记为静态事实；六类事件的真实渲染与断线重连未运行验证。
 
@@ -221,7 +221,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：RecallCollection 表示思绪集，RecallEntry 保存 key、Markdown 内容、带权标签、优先级、内容哈希和资产引用，RecallResult 保存分数、匹配类型和高亮，另有检索过滤条件对象；预设字段 `presetId: "algorithmic" | "comprehensive"` 的定义见 types/pipeline.ts。
 
-**完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`）→ 按绑定/占位符参数（when/gate-tags/entries/limit/min-score）→ 检索管线执行 → 后置过滤 → `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧旧 `recall/search/` 四引擎模块（keyword/vector/lens/blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` + `retrieval_modules.rs`）：管线按预设（`Algorithmic`/`Comprehensive`）编排候选模块（内容向量/标签向量/Lens 关联等），产出带 `source_module_id`/ArtifactKey 的可追踪检索工件；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/预设/模型等要素（提交 `d2d82c605`、`92d78971d`、`c46cc2fed`、`5403999b1`、`ad958b0fd` 等）。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量 → 标签向量同步更新，HNSW 可按需重建。
+**完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`）→ 按绑定/占位符参数（when/gate-tags/entries/limit/min-score）→ 检索管线执行 → 后置过滤 → `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧旧 `recall/search/` 四引擎模块（keyword/vector/lens/blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` + `retrieval_modules.rs`）：管线按预设（`Algorithmic`/`Comprehensive`）编排候选模块（内容向量/标签向量/Lens 关联等），产出带 `source_module_id`/ArtifactKey 的可追踪检索工件；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/预设/模型等要素。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量 → 标签向量同步更新，HNSW 可按需重建。
 
 **持续性**：存储已切换为 **SQLite 真源**，由 SqliteRecallRepository 落盘数据库和向量文件，旧 knowledge 数据经幂等迁移，备份过程通过 recall-backup-progress 事件报告。knowledge-base 已重构为主动工具，提供资料库列表和多策略搜索，支持 topK、过滤条件、相邻内容和字符上限，并收敛资料库访问授权、聊天显式资料引用、研究任务编排及 FTS/标签管理；关键存储定位见 `src-tauri/src/recall/storage/sqlite.rs`。
 
@@ -247,7 +247,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ### 能力十二：Git 工作台与 AI 提交信息（git-committer）— `主链确认`
 
-**用户目标**：把"仓库状态浏览 + 暂存/取消 + diff 审查 + 提交/推送"做成多仓库并发全景工作台，并让 LLM 根据实际 diff 流式生成 commit message——名字平淡，核心是 AI 提交助手。
+**用户目标**：把"仓库状态浏览 + 暂存/取消 + diff 审查 + 提交/推送"做成多仓库并发全景工作台，并让 LLM 根据实际 diff 流式生成 commit message，核心是 AI 提交助手。
 
 **入口与触发者**：工具页 `/git-committer`；用户手动操作。无 Agent facade（registry methods 为空，Agent 工具笔记已 grep 确认）。
 
@@ -259,7 +259,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **独特性判断**：git-analyzer（git2-rs 原生分析 + `getFormattedAnalysis` Agent 报告，formatters 统一 Agent 与 UI 输出）与其互补；"AI 生成提交信息 + 多仓库并发操作台"组合在样本桌面 AI 客户端中少见，AGENTS.md 也要求 AI 生成的提交遵循 Conventional Commits + 结构化中文描述，工具与仓库规范一致。
 
-**证据强度**：`useGitCommitterRunner.ts` 全文 + registry 静态事实；未运行验证 LLM 输出质量与多仓库并发。仓库管理已重构，新增全景看板筛选（`PanoramaDashboard.vue` 按状态/标签等过滤仓库卡片，提交 `bef8660a8`），主链结论不受影响。
+**证据强度**：`useGitCommitterRunner.ts` 全文 + registry 静态事实；未运行验证 LLM 输出质量与多仓库并发。仓库管理提供全景看板筛选（`PanoramaDashboard.vue` 按状态/标签等过滤仓库卡片）。
 
 ### 能力十三：全局 Token 基础设施（token-calculator）— `主链确认`（机制贡献）
 
@@ -273,9 +273,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **持续性**：注册表持久化（bundled/local/remote 来源与校准参数）；Worker 资产按需下载缓存。
 
-**独特性判断**：多数项目只有简单估算或单 tokenizer；这里做成"Tokenizer 资产注册表 + 校准 + 多模态计费 + Worker 隔离"的全局基础设施，直接影响聊天上下文预算决策。按调查指南，工程机制单独标注，不与用户可见能力混计。
+**独特性判断**：常见实现只有简单估算或单 tokenizer；这里做成"Tokenizer 资产注册表 + 校准 + 多模态计费 + Worker 隔离"的全局基础设施，直接影响聊天上下文预算决策。按调查指南，工程机制单独标注，不与用户可见能力混计。
 
-**证据强度**：registry + `tokenizerRegistryStore.ts`（含"即使没有任何 UI 进入工具页，只要有其他模块消费也启动"注释，`:475`）+ 9+ 消费点静态事实；真实计费精度未运行验证。内置 Tokenizer 已资产化（`data/builtin-tokenizer-assets-manifest.ts` + `builtin-tokenizer-index.ts`），移除动态 JS loader，Worker 计算与注册表持久化链路重构（提交 `2b2252541`），内置分词资产随包分发、不再依赖运行时拉取脚本。
+**证据强度**：registry + `tokenizerRegistryStore.ts`（含"即使没有任何 UI 进入工具页，只要有其他模块消费也启动"注释，`:475`）+ 9+ 消费点静态事实；真实计费精度未运行验证。内置 Tokenizer 以资产形式随包分发（`data/builtin-tokenizer-assets-manifest.ts` + `builtin-tokenizer-index.ts`），Worker 计算与注册表持久化链路不依赖运行时拉取脚本。
 
 ### 能力十四：网页蒸馏室（web-distillery）— `主链确认`
 
@@ -355,7 +355,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ### 能力十九：弹幕播放器与外部播放器覆盖层（danmaku-player）— `主链确认`
 
-**用户目标**：两条使用路径——内置播放器加载本地视频 + ASS/B 站 JSON/XML 弹幕 + 外挂字幕在同一窗口渲染；外部播放器覆盖层把透明弹幕窗口同步到 MPC-BE/MPC-HC/PotPlayer/mpv/VLC 客户区正上方，在第三方播放器上叠显弹幕。名字平淡，实为跨播放器弹幕基础设施。
+**用户目标**：两条使用路径——内置播放器加载本地视频 + ASS/B 站 JSON/XML 弹幕 + 外挂字幕在同一窗口渲染；外部播放器覆盖层把透明弹幕窗口同步到 MPC-BE/MPC-HC/PotPlayer/mpv/VLC 客户区正上方，在第三方播放器上叠显弹幕，构成跨播放器弹幕基础设施。
 
 **入口与触发者**：工具页 `/danmaku-player`（`DanmakuPlayer.vue` 模式切换/文件拖放）；用户手动操作。无 Agent 方法（registry 仅 `initialize`，`danmaku-player.registry.ts:22-31`）。
 
@@ -363,7 +363,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **完整主链**（内置模式）：视频 `convertFileSrc` → 弹幕文件 `smartDecode()` 解码 → `parseDanmaku`（ASS + B 站 JSON `DanmakuElem[]` + B 站 XML `<d p=...>`）→ 字幕 `parseSubtitle`（SRT/VTT/ASS/SSA/LRC/SBV/SubViewer/MicroDVD/SAMI/TTML；IDX/SUP 图形字幕拒绝）→ `DanmakuEngine` 绑定 HTML5 video `currentTime`：`setDanmakus` 按 startTime 排序并预计算每条稳定哈希（`danmakuEngine.ts:67-75`）→ 每帧二分查找可见窗口（回溯最多 20s，`getVisibleWindow`）→ 内联执行类型/彩色/密度/屏蔽词过滤 + 显示区域限制 → Canvas 2D 绘制（描边/阴影/字体缩放缓存）→ 渲染节流约 30fps，无弹幕时停止 rAF。字幕双轨：普通文本走 DOM `SubtitleOverlay`（按当前时间筛选 active cues）；ASS/SSA 优先 `JassubRenderer` 动态 `import("jassub")` 高保真渲染（`object-fit: contain` 计算 letterbox 内实际视频区 + 极小 `backdrop-filter` 触发 WebView2 正常合成路径规避硬件 overlay 不可见），初始化失败降级 DOM（`JassubRenderer.vue:163`）。
 
-**完整主链**（外部覆盖模式）：`useExternalPlayer` 按播放器类型自动扫描常见 Win32 类名（`find_player_windows`，也可全量扫描手动选 HWND）→ `TauriExternalPlayerStatusProvider` 统一 `get_external_player_status` 读状态（MPC-BE/MPC-HC：`variables.html` 按 `<p id>` 提取 file/state/position/duration；PotPlayer 实验：SMTC session 优先、无则发 `WM_USER` 消息；mpv：JSON IPC named pipe `--input-ipc-server`；VLC：`requests/status.json` + Basic Auth；均经 Rust 代理规避 CSP）→ `create_danmaku_overlay_window`（透明、无边框、跳过任务栏、鼠标穿透）→ 主窗口经 `danmaku-overlay:init/config-update/danmaku-update/stop` 事件同步数据与配置 → 覆盖窗口内最小渲染应用（`DanmakuOverlayApp.vue`：透明 Canvas + DanmakuEngine + 状态 provider + 虚拟时钟）→ 虚拟时钟（`useVirtualClock.ts`）：rAF 帧增量推进（播放速率可调）、每 200ms 轮询真实进度、偏差超 500ms 才校准（`CALIBRATION_THRESHOLD = 0.5`，防微小抖动跳帧）、暂停→播放强制校准、seek 后 `seekTo` 复位 → 位置同步（`useDanmakuOverlay.ts`）：`get_player_window_rect` 取物理像素 → 按 `scaleFactor` 转逻辑像素 → 普通/全屏分别应用 `offsetTop/offsetBottom` 裁切 → 默认 100ms 同步，检测到位置/尺寸/DPI/全屏变化进入 1s 活跃期改 16ms → 每轮刷新 Z-Order（全屏增强时 `HWND_TOPMOST`）→ 目标 HWND 失效自动关闭覆盖窗口。
+**完整主链**（外部覆盖模式）：`useExternalPlayer` 按播放器类型自动扫描常见 Win32 类名（`find_player_windows`，也可全量扫描手动选 HWND）→ `TauriExternalPlayerStatusProvider` 统一 `get_external_player_status` 读状态。四类播放器的状态来源与访问方式不同，均经 Rust 代理规避 CSP：
+  - MPC-BE / MPC-HC：`variables.html` 按 `<p id>` 提取 file/state/position/duration；
+  - PotPlayer（实验支持）：SMTC session 优先，无则发 `WM_USER` 消息；
+  - mpv：JSON IPC named pipe `--input-ipc-server`；
+  - VLC：`requests/status.json` + Basic Auth。
+
+随后 → `create_danmaku_overlay_window`（透明、无边框、跳过任务栏、鼠标穿透）→ 主窗口经 `danmaku-overlay:init/config-update/danmaku-update/stop` 事件同步数据与配置 → 覆盖窗口内最小渲染应用（`DanmakuOverlayApp.vue`：透明 Canvas + DanmakuEngine + 状态 provider + 虚拟时钟）→ 虚拟时钟（`useVirtualClock.ts`）：rAF 帧增量推进（播放速率可调）、每 200ms 轮询真实进度、偏差超 500ms 才校准（`CALIBRATION_THRESHOLD = 0.5`，防微小抖动跳帧）、暂停→播放强制校准、seek 后 `seekTo` 复位 → 位置同步（`useDanmakuOverlay.ts`）：`get_player_window_rect` 取物理像素 → 按 `scaleFactor` 转逻辑像素 → 普通/全屏分别应用 `offsetTop/offsetBottom` 裁切 → 默认 100ms 同步，检测到位置/尺寸/DPI/全屏变化进入 1s 活跃期改 16ms → 每轮刷新 Z-Order（全屏增强时 `HWND_TOPMOST`）→ 目标 HWND 失效自动关闭覆盖窗口。
 
 **持续性**：弹幕显示配置（`useDanmakuConfig`）与外部播放器配置（`useExternalPlayer`）均 ConfigManager 防抖持久化；覆盖窗口位置不落盘，每次启动重新扫描对齐。
 

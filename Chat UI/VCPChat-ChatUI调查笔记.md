@@ -143,7 +143,7 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 
 全局快捷键（Super+Alt+Z 便签、Ctrl+Shift+I 开发者工具、CommandOrControl+Shift+P 划词助手）与完整清单保留在源文件 13.6。
 
-### 9.2 无障碍现状（如实记录，仅聊天关键路径）
+### 9.2 无障碍现状（仅聊天关键路径）
 
 **已有 ARIA 标注的区域**：
 - Presentation mode 切换器（`main.html:47-53`）：`role="radiogroup"` + `aria-label="聊天显示模式"`，各按钮有 `role="radio"` 和 `aria-checked`

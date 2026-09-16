@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 的请求主入口是 `api/services/app_generate_service.py:88` 的 `AppGenerateService.generate`。它不会把所有输入走同一聊天循环，而是依据应用模式分派：completion、chat、agent chat、agent、advanced chat 和 workflow 各有生成器；有 session 的 Agent 应用还会被视为 Agent Chat（170-174 行）。因此“上下文如何拼装、是否保存 conversation、能否 blocking 返回”都必须按模式判断。
+Dify 的请求主入口是 `api/services/app_generate_service.py:88` 的 `AppGenerateService.generate`。它按应用模式分派到各自的生成器：completion、chat、agent chat、agent、advanced chat 和 workflow；有 session 的 Agent 应用还会被视为 Agent Chat（170-174 行）。因此“上下文如何拼装、是否保存 conversation、能否 blocking 返回”都必须按模式判断。
 
 公开 WebChat 的主链为：
 
@@ -72,7 +72,7 @@ Chat runner 先以模板、输入、文件、query 与历史组织一次 prompt�
 
 ## 4. 流式事件、前端合并与最终化
 
-`task_entities.py` 定义统一的 `StreamResponse`，每个事件都有 task ID（98-105 行）。消息型事件包含文本、音频开始/结束、文件、替换、结束、Agent thought 和 Agent message（117-203 行）；工作流事件进一步区分开始、完成、暂停、人工输入、节点开始/完成/重试、迭代、循环、文本 chunk、reasoning chunk 和文本替换（206-773 行）。这解释了公开聊天为何需要分别维护答案、thought、附件和 workflow 运行信息，而不是只 append 一段字符串。
+`task_entities.py` 定义统一的 `StreamResponse`，每个事件都有 task ID（98-105 行）。消息型事件包含文本、音频开始/结束、文件、替换、结束、Agent thought 和 Agent message（117-203 行）；工作流事件进一步区分开始、完成、暂停、人工输入、节点开始/完成/重试、迭代、循环、文本 chunk、reasoning chunk 和文本替换（206-773 行）。据此，公开聊天需要分别维护答案、thought、附件和 workflow 运行信息。
 
 对于 workflow/advanced chat 的流式请求，服务在取得 workflow run ID 后调用 `MessageBasedAppGenerator.retrieve_events`，再把事件转换为应用事件流（`app_generate_service.py:255-262,311-318`）。前端 `useChat` 在数据回调中会接收 conversation ID、message ID 和 task ID，首个事件可回填刚创建的 conversation ID（`hooks.ts:616-638`），结束回调把 workflow run ID 交给调用方（656-659 行）。
 

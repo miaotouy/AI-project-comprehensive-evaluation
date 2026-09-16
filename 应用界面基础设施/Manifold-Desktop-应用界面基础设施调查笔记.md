@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Manifold Desktop 是极薄的 WinUI 3 原生壳加无框架 WebView2 前端。原生层只负责窗口、系统对话框、剪贴板和消息桥，Toast、确认框、搜索浮层、设置抽屉等界面机制全部由前端原生 DOM 与 CSS 实现。
+Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。原生层只负责窗口、系统对话框、剪贴板和消息桥，Toast、确认框、搜索浮层、设置抽屉等界面机制全部由前端原生 DOM 与 CSS 实现。
 
 这些浮层大多是创建后常驻的模块级单例，没有统一 Host、Portal 或栈管理器，层级依赖手写 z-index。搜索浮层支持 Esc 和方向键，确认框却没有同等的焦点陷阱、Esc 关闭和焦点归还，键盘行为并不一致。
 
@@ -224,7 +224,7 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 ## 7. 设计取舍与已确认边界
 
-**原生壳刻意做薄。** WinUI 层除了承载 WebView2 与系统级能力（窗口、对话框、剪贴板、DPAPI）外没有任何界面实现；浮层、主题、反馈全部落在 Web 侧，且全部为手写零依赖实现。
+**原生层只承载系统能力。** WinUI 层除了承载 WebView2 与系统级能力（窗口、对话框、剪贴板、DPAPI）外没有任何界面实现；浮层、主题、反馈全部落在 Web 侧，且全部为手写零依赖实现。
 
 **无公共浮层抽象。** Confirm/搜索/设置/下拉各自为政，无统一 Portal、无层级队列、无 Esc 契约——同一浮层打开时另一个浮层可见性不做互斥管理（如设置抽屉开着时 Ctrl+F 打开搜索浮层，两者并存，z-index 决定覆盖；静态推断）。
 
@@ -236,7 +236,7 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 **深浅色边界不一致。** `index.html` 首帧硬编码 dark + WebView2 默认背景硬编码深色 + 高亮 CSS 固定深色，与设置持久化主题解耦；浅色主题下存在首帧与边缘露色的静态推断风险。
 
-**视觉定制面极窄。** 视觉偏好仅 theme + fontSize 两项（`settings-panel.js:127-155`），强调色、字体、密度、圆角、壁纸与自定义 CSS 均无通道，全部 token 硬编码于 `base.css`；README 未宣称主题扩展能力（v0.2.0 changelog 的 "Terminal theme variable consistency" 是终端 token 修复条目，`README.md:172`）。
+**视觉定制面只有 theme 与 fontSize 两项**（`settings-panel.js:127-155`），强调色、字体、密度、圆角、壁纸与自定义 CSS 均无通道，全部 token 硬编码于 `base.css`；README 未宣称主题扩展能力（v0.2.0 changelog 的 "Terminal theme variable consistency" 是终端 token 修复条目，`README.md:172`）。
 
 **侧栏宽度 token 与硬编码并存。** `base.css:9` `--sidebar-width:260px` 与 `layout.css:27` 实际 `#side-panel { width: 240px }` 不一致，且 `base.css` 的 `.sidebar` 类规则无 JS 使用点（实际容器是 `#side-panel`，全部行内样式渲染）。
 

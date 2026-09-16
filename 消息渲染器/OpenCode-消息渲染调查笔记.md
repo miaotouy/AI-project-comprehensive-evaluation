@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`**（Web 端），由 `packages/app` 导入。渲染器接收的不是事件流而是最终 part 数组（`sync().data.part[msgId]`），流式增量通过 `part_text_accum_delta` 通道与 part 文本合并。markdown 管线为「marked 切块 → Web Worker 解析+shiki 高亮 → 主线程 DOMPurify → morphdom/增量 token span 写 DOM」：解析器与管线实现分别在 `packages/ui/src/context/` 与 `packages/session-ui/src/components/`。列表层用 `@tanstack/solid-virtual` 虚拟化 + 行复用，TUI 使用 opentui 内置 markdown 组件与 tree-sitter 代码高亮。各环节定位见文末 §12 关键源码索引。
+OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`**（Web 端），由 `packages/app` 导入。渲染器消费的是最终 part 数组（`sync().data.part[msgId]`），流式增量另经 `part_text_accum_delta` 通道与 part 文本合并。markdown 管线为「marked 切块 → Web Worker 解析+shiki 高亮 → 主线程 DOMPurify → morphdom/增量 token span 写 DOM」：解析器与管线实现分别在 `packages/ui/src/context/` 与 `packages/session-ui/src/components/`。列表层用 `@tanstack/solid-virtual` 虚拟化 + 行复用，TUI 使用 opentui 内置 markdown 组件与 tree-sitter 代码高亮。各环节定位见文末 §12 关键源码索引。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **Part 12 种类型**与组件注册表 `PART_MAPPING`（`session-ui/src/components/message-part.tsx:250`）；工具组件经 `ToolRegistry.register` 注册 14 个（:1776-2621），未注册走 `GenericTool`。
 - **流式期间是「先更新 state，Solid 再渲染」，但 markdown 正文是命令式 DOM 补丁**：非 code 块 morphdom 增量替换、code 块按 token 增量追加/裁剪（markdown.tsx:589-706）。
@@ -61,8 +61,9 @@ OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`
 
   - `message.updated` 与乐观合并按时间序键 `messageKey = time.created + id` 二分插入（`utils/session-message.ts:19-26` 的 `messageKey`/`compareMessages`，调用点 :1051、:1342）；`message.removed` 用 `findIndex` 按 id 定位删除（:1083-1089）；
   - `message.part.updated` 按 part id 二分插入/替换并删 accum（:1094-1189）；`message.part.delta` 写入 `part_text_accum_delta`（deltaBases 记录 base）并 `produce` 就地追加（:1190-1217）；
-  - v2 事件经 `server-session-v2-reducer.ts` 的 `createV2SessionReducer` 投影回 v1 形态（reduce 在 :17 起，调用点 server-session.ts:940）；global-sync 投影器同用 `messageKey`（`event-reducer.ts:279` 二分、:299 `findIndex` 删消息）；TUI 端一致（`tui/src/context/sync.tsx:54-58` 的 `compareMessage`/`messageKey`、:328）。
-- **DOM 更新**：Solid store 变化触发重渲染；markdown 正文例外——`Markdown` 组件对非 code 块用 morphdom 命令式替换（跳过 copy 按钮节点，markdown.tsx:589-633）、对 code 块用 worker 返回的 stable/unstable token 数组增量 span 追加/裁剪（:635-706，`renderedCodeTokens` WeakMap :55）。
+  - v2 事件经 `server-session-v2-reducer.ts` 的 `createV2SessionReducer` 投影回 v1 形态（reduce 在 :17 起，调用点 server-session.ts:940）；global-sync 投影器同用 `messageKey`（`event-reducer.ts:279` 二分、:299 `findIndex` 删消息）。
+  - TUI 端一致：`tui/src/context/sync.tsx:54-58` 的 `compareMessage`/`messageKey`、:328。
+- **DOM 更新**：Solid store 变化触发重渲染；markdown 正文另有命令式补丁路径——非 code 块用 morphdom 增量替换（跳过 copy 按钮节点），code 块按 worker 返回的 stable/unstable token 数组增量追加或裁剪，见 `markdown.tsx:589-706`（token 缓存 `renderedCodeTokens` :55）。
 - **节流**：`PacedMarkdown`/`createPacedValue`（message-part.tsx:252-334）：增量 ≤512 字符立即显示，否则按 `TEXT_RENDER_PACE_MS=24` 分步、`TEXT_RENDER_SNAP` 标点处截断。
 - **完成收口**：`AssistantMessage.time.completed` 出现即 `streaming=false`（message-part.tsx:1704-1706）；会话执行结果事件（succeeded/failed/interrupted）→ 会话状态归为 idle（server-session.ts:964-970）；`session.retry.scheduled` → 重试状态（:971-977）。
 
@@ -192,7 +193,9 @@ OpenCode 的消息渲染核心已从 app 迁入独立包 **`packages/session-ui`
 - 工具状态 `ToolPart`（:1702-1782）+ `InlineTool`（:1829-1905）+ `collapseToolOutput`（3 行截断）；
 - 导出文本 `util/transcript.ts:26-112`。
 
-**桌面端（Electron）不是第三套渲染栈**：renderer 以源码方式 import `@opencode-ai/app`（desktop/src/renderer/index.tsx:1-17 的 `AppInterface`/`PlatformProvider`，electron.vite.config.ts:93-105 用 app 的 `appPlugin`），markdown/消息渲染完全复用 app→session-ui 链路，desktop 包自身不依赖 session-ui（package.json 无该依赖）；生产环境经自定义 `oc://renderer` 协议加载打包的 renderer（main/windows.ts:291-332）。桌面独有的渲染代码仅 Splash 与首启引导（renderer/onboarding.tsx）；平台能力经 preload `window.api` 注入（src/preload/index.ts:13-138，含 draft 存储、窗口控制、剪贴板图片、原生文件选择）。
+**桌面端（Electron）不是第三套渲染栈**：renderer 以源码方式 import `@opencode-ai/app`（desktop/src/renderer/index.tsx:1-17 的 `AppInterface`/`PlatformProvider`，electron.vite.config.ts:93-105 用 app 的 `appPlugin`），markdown/消息渲染完全复用 app→session-ui 链路，desktop 包自身不依赖 session-ui（package.json 无该依赖）；生产环境经自定义 `oc://renderer` 协议加载打包的 renderer（main/windows.ts:291-332）。
+
+桌面独有的渲染代码仅 Splash 与首启引导（renderer/onboarding.tsx）；平台能力经 preload `window.api` 注入（src/preload/index.ts:13-138，含 draft 存储、窗口控制、剪贴板图片、原生文件选择）。
 
 **服务端**：无 markdown 渲染——`UI.markdown` 是直通函数（cli/ui.ts:128-130 `return text`）；webfetch 工具的 `convertHTMLToMarkdown`（src/tool/webfetch.ts:182）是 HTML→markdown 供模型上下文，与 UI 渲染无关。
 

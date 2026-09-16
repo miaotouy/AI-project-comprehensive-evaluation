@@ -168,7 +168,7 @@ Models.get_model_by_id(model_id)（1074）
 | 权限 | access_grants（user/group/anyone），只读者 params 剥空 | workspace 隔离 | 拥有者管理 |
 
 - 与 LobeHub 相比，Open WebUI 把 persona 直接折叠进模型 id，路由/目录/权限全部复用模型体系，没有独立的 agent 生命周期；
-- `params` 对只读调用者剥空是值得记录的设计：列表 API 只暴露控件级参数，system prompt 只在请求路径上经 DB 读取注入，避免前端缓存持有敏感人设。
+- `params` 对只读调用者剥空：列表 API 只暴露控件级参数，system prompt 只在请求路径上经 DB 读取注入，前端缓存因此不持有敏感人设。
 
 ## 7. 能力矩阵
 

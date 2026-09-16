@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gateway` 后端、由多套前端各自渲染的体系。仓库内实际存在四条可见路由：
+Hermes 的消息渲染由多套前端各自完成，它们共享一个 `tui_gateway` 后端。仓库内实际存在四条可见路由：
 
 1. **TUI（同仓主渲染面）**：Node/Ink（React）进程通过 stdio JSON-RPC 与 Python `tui_gateway` 通信（`tui_gateway/server.py`）。Python 侧把 agent 回调翻译成消息开始/增量/中间/完成，以及推理、思考、工具、子代理等事件（事件名录如 `message.delta`、`message.complete`、`tool.*`）；Ink 侧 `createGatewayEventHandler.ts` 分派事件，`turnController` 做流式缓冲与分段，`turnStore`（nanostores）承载状态，`StreamingAssistant`/`MessageLine` 交给自研 `Md`/`StreamingMd` 渲染器落屏。
 2. **桌面（Electron + React）**：复用 `tui_gateway` 后端（`apps/shared` 的 `JsonRpcGatewayClient` + WS，事件处理见 §2 与文末索引），渲染器基于 `@assistant-ui/react-streamdown`（Streamdown）+ `@streamdown/code`（Shiki）+ KaTeX（`katex-memo.ts` 记忆化）。
@@ -209,8 +209,8 @@ Hermes 的“消息渲染器”不是单一实现，而是共享一个 `tui_gate
 - **`message.complete` 段去重逻辑**：只在 `finalTail` 中剔除与最终文字重叠的 segment；`response_previewed` 时连已封 interims 也去重（`dedupeStart=interimBoundaryIndex ?? 0`）。Diff 段同理（`finalHasOwnFence`）。这是为了避免“同一 patch 两页”的已知 bug。
 - **系统消息不以 user 气泡呈现**：`display_kind` 的 `hidden/model_switch/auto_continue` 在 `toTranscriptMessages` 被转成 `kind:event` 或跳过；`pending_reaction_notes` 只进 model input 不进持久化文本（`methods_prompt.py`）。
 - **TUI 不渲染 Web 组件语义**：`<details>` 直接丢弃内容（`markdown.tsx:1102` 起 `</details>` 跳过），`<summary>` 变成 `▶ ` 行——这是终端渲染器与 DOM 的边界。
-- **桌面主对话 ≠ dashboard 富渲染**：dashboard 无自己的 transcript 渲染器，`web Markdown.tsx` 仅辅助。
-- **性能兜底**：`VERBOSE_TRAIL_MAX=800/12`、`MAX_HISTORY=800`、16000 字直播上限（`lib/text.ts:137`）、记忆注解引用（`#34089` OOM 事件）等表明"防爆防炸"是刻意约束，不是省略。
+- **桌面主对话与 dashboard 富渲染分离**：dashboard 无自己的 transcript 渲染器，`web Markdown.tsx` 仅辅助。
+- **性能兜底**：`VERBOSE_TRAIL_MAX=800/12`、`MAX_HISTORY=800`、16000 字直播上限（`lib/text.ts:137`）、记忆注解引用（`#34089` OOM 事件）等上限均来自有意设置的约束。
 - **未发现**：TUI 无 iframe、无 `dangerouslySetInnerHTML`、桌面 `embed` 预览未完全溯源；`web/Markdown.tsx` 仅允许 http(s|mailto)。
 
 ## 重连回放与渲染输入

@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、preload、renderer、Web 和 Capacitor 移动端共享 `src`。`src/renderer` 占 150,097 行，是主实现区；`src/shared` 和 `src/main` 分别承担跨端逻辑与桌面能力，边界比按产品平台复制整套代码更集中。
+Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、preload、renderer、Web 和 Capacitor 移动端共享 `src`。`src/renderer` 占 150,097 行，是主实现区；`src/shared` 和 `src/main` 分别承担跨端逻辑与桌面能力。
 
 ## 统计与模块分布
 
@@ -39,8 +39,6 @@ Chatbox 是 TypeScript 高度统一的多端应用仓库，Electron 主进程、
 ## 语言、文档与测试
 
 TypeScript 208,676 行（96.9%），其余主要是 JavaScript 5,258 行（2.4%）。文档集中在 `docs`（33 文件，其中 `docs/technical` 17）并辅以 `tasks` 和测试用例说明。测试分布为 renderer 171 文件、shared 59、main 34、integration 11，三个运行层都有对应测试。
-
-相对 `f90fc31a` 快照新增约 77 个跟踪文件、约 13,200 源码行，其中测试文件从 243 增至 282、测试源码行从 42,543 增至 49,839（新增 ForkGroup/MessageList/Message/Minimap/sandbox/MCP 等大量组件与主进程测试，见对应专项笔记）。
 
 ## 跨平台组织与边界
 

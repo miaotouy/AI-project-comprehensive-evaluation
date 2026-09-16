@@ -16,7 +16,7 @@
 
 VCPMobile 的角色实体是 SQLite `agents` 表中的 Agent，不是短生命周期的会话预设。唯一标识是由名称可用字符和创建时间组成的 `agent_id`；新建 Agent 同时获得一个锁定的“主要对话”话题。角色配置包含名称、双层系统提示词、模型与生成参数，头像则以独立资产记录关联。没有角色版本号、角色卡导入/导出、Provider 绑定、知识库/记忆/工具开关或子 Agent 字段。
 
-最重要的覆盖规则是：移动端专用提示词非空时优先，空时才退回同步来的系统提示词。模型和参数完全是 Agent 级别，网关凭据仍是全局设置。每次发送会重新读取该 Agent 配置、装配历史和 Tavern 上下文，再发到 VCP 网关；历史消息不携带角色快照。
+覆盖规则是：移动端专用提示词非空时优先，空时才退回同步来的系统提示词。模型和参数完全是 Agent 级别，网关凭据仍是全局设置。每次发送会重新读取该 Agent 配置、装配历史和 Tavern 上下文，再发到 VCP 网关；历史消息不携带角色或参数快照。
 
 ## 总体生效链路
 
@@ -44,7 +44,7 @@ VCPMobile 的角色实体是 SQLite `agents` 表中的 Agent，不是短生命�
 
 创建入口只要求用户填写名称。默认配置创建一个带提示词的 Agent、一个主要话题和默认模型/参数，然后在同一事务写入。创建 UI 随后选择这个 Agent、加载其话题并打开设置页。`src-tauri/src/vcp_modules/agent/agent_service.rs:584-688`，`src/features/agent/AgentsCreator.vue:16-52`。
 
-角色与对话的绑定粒度是 Agent 拥有多个话题，而不是角色快照写进每条消息。发送输入是当前 `ownerId/topicId`，服务端通过 `agent_id` 获取实时配置；因此后续发送会使用更新后的配置，但本次没有验证历史重放或重新生成时是否保存了完整的角色/参数快照。`src/core/stores/chatHistoryStore.ts:354-398`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:53-113`。
+角色与对话的绑定粒度是 Agent 拥有多个话题，而不是角色快照写进每条消息。发送输入是当前会话的 `ownerId/topicId`，服务端通过 `agent_id` 获取实时配置，因此后续发送会使用更新后的配置。重新生成同样不依赖消息内快照：它先删除目标用户消息时间戳之后的全部历史，再以不追加用户消息的方式复用同一发送链，因而也会读取当前 Agent 配置。消息行本身只持久化 Agent 标识、显示名和内容元数据，没有模型、参数或提示词快照。`src/core/stores/chatHistoryStore.ts:354-398`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:53-113`，`src-tauri/src/vcp_modules/chat/topic_service.rs:623-684`。
 
 ## 3. 提示词、模型与生成参数
 
@@ -69,4 +69,5 @@ VCPMobile 的角色实体是 SQLite `agents` 表中的 Agent，不是短生命�
 - `src-tauri/src/vcp_modules/agent/agent_types.rs`：Agent 配置契约和默认值。
 - `src-tauri/src/vcp_modules/agent/agent_service.rs`：读取、写入、创建、删除、缓存和同步哈希。
 - `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs`：角色配置进入实际请求的主链。
+- `src-tauri/src/vcp_modules/chat/message_service.rs`：消息行的持久化字段与流式消息收尾，可核对历史消息不含角色/参数快照。
 - `src/features/agent/AgentSettingsView.vue`：移动端可编辑字段与保存时机。

@@ -16,7 +16,7 @@
 
 Jan 的生成管线是"**前端直连模型服务**"模式：没有后端聊天业务服务，React 前端（web-app）通过 AI SDK 的 `useChat` + 自研 `CustomChatTransport` 直接发起流式请求（经 Tauri 本地 API 代理到 llama-server、mlx-server 或远程 provider）。桌面与移动端共用前端逻辑，只在持久化后端分流（数据语义见会话与消息管理笔记）。
 
-核心链条与关键事实（均有源码依据）：
+核心链条与关键事实：
 
 1. **流式管线**：`experimental_throttle: 50` 只节流 UI 状态，`resume: false` 不恢复未完成回合（实现分别见 `$threadId.tsx:292`、`use-chat.ts:101`）；transport 实例按 sessionId 复用。推理参数不经 AI SDK 层，而是由 `createCustomFetch` 注入 HTTP body（`model-factory.ts:366-564`）。
 2. **上下文管理在 transport 内**：启用 `max_context_tokens` 后，根据 `auto_compact` 选择摘要压缩或直接截断；完成原因是 length 且 token 达到上下文长度的 0.9 倍时冻结部分消息，并提示用户手动扩容，扩容阶梯为 8192、32768、再按 1.5 倍增长。
@@ -111,7 +111,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 - **队列存储**：`message-queue-store.ts`（71 行）维护 per-thread 队列，提供入队、原子取删、移除、清空和读取操作；入队条件是流式态且处于当前线程（§1）。
 - **消费**：`status==='ready'` 且无挂起工具时自动发下一条（纯文本绕过附件，§1）；`error` 清空队列；离开线程清队列；`removeSession` 也清对应队列（`chat-session-store.ts:181`）。
 - **并发与本地缓存**：llamacpp 固定 `id_slot=0`，但以 thread_id 识别应保存或恢复的状态；worker 对换入的线程先保存被替换的 slot，再恢复目标线程状态，并以模型、预设、构建和模型文件校验其可用性（`engine/http.rs:225-280`、`engine/slots.rs:35-175`）。多窗口/多会话并发的实际排队和恢复时序未验证；不同线程仍各有独立 Chat 会话实例，`sessionData.tools` 也按线程隔离（`chat-session-store.ts:8-12`）。
-- **后台生成**：本次未发现独立的后台任务管理器（检查范围：web-app 无后台任务 store/队列；标题生成与嵌入是发送主链内的异步步骤）——标注为未找到。
+- **后台生成**：本次未发现独立的后台任务管理器（检查范围：web-app 无后台任务 store/队列；标题生成与嵌入是发送主链内的异步步骤）。
 
 ## 9. Agent、工具、知识库与附件注入点
 

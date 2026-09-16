@@ -112,7 +112,7 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 ## 9. 隐私、安全与内容治理
 
-- 导出内容无过滤：system 提示词、工具 args/result（含可能的敏感数据）原样进入三种格式；reasoning 恰好被跳过。对话导出没有对应机制。
+- 导出内容无过滤：system 提示词、工具 args/result（含可能的敏感数据）原样进入三种格式；reasoning 恰好被跳过。
 - 备份侧有明确的密钥脱敏（`src/shared/utils/backup.ts:19-74`）：不勾选 "API KEY & License" 时移除以下凭据，license 运行时状态无论勾选与否都剔除：
   - 提供商凭据与搜索密钥；
   - `MinerU token`；

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复是普通文本/结构化内容 part（含 thinking、工具调用/结果、媒体引用等），最终以 assistant 消息进入 transcript，本身没有独立 ID 之外的活对象生命周期；媒体文件通过 artifact 服务获得可寻址引用但归属媒体创作类目。这个基座之上的“输出对象”机制集中在两处：**Canvas 文档**（把一段自包含 HTML/媒体预览落到 `state/canvas/documents/<id>/`，带 manifest 与 `cv_*` doc id，作为消息内 widget 预览或托管内容面）和**Session Board Widget**（以 widget name 为稳定身份、revision/instanceId/viewGeneration 为版本线，持久化在 per-agent SQLite 的 `board_tabs`/`board_widgets`，可以承载 HTML、plugin registered content、MCP App view 三种内容，并带 grantState 能力授权）。
+OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复是普通文本/结构化内容 part（含 thinking、工具调用/结果、媒体引用等），最终以 assistant 消息进入 transcript，除消息自身的 ID 外没有活对象生命周期；媒体文件通过 artifact 服务获得可寻址引用但归属媒体创作类目。这个基座之上的“输出对象”机制集中在两处：**Canvas 文档**（把一段自包含 HTML/媒体预览落到 `state/canvas/documents/<id>/`，带 manifest 与 `cv_*` doc id，作为消息内 widget 预览或托管内容面）和**Session Board Widget**（以 widget name 为稳定身份、revision/instanceId/viewGeneration 为版本线，持久化在 per-agent SQLite 的 `board_tabs`/`board_widgets`，可以承载 HTML、plugin registered content、MCP App view 三种内容，并带 grantState 能力授权）。
 
 `show_widget` 工具是唯一向模型公开的“生成可操作输出”入口（`src/canvas/widget-tool.ts:251-516`）。它把模型给出的 HTML/SVG 包进统一 document shell（CSP + host bridge + theme/snapshot/size 桥），随后走两条目标路径：未 pin 时物化成 assistant-message 内嵌 Canvas 文档（沙箱 iframe、无网络、只读演示 + 用户激活驱动的 prompt 回流）；`pin: true` 时调用 `board.widget.put` 写入 session board，成为 dashboard 上可长期存在、可被再次同名字段更新、可声明网络 origin 与工具能力的 widget。pinned widget 运行于带 view ticket 的隔离 iframe/专用沙箱 host，脚本默认 `connect-src 'none'`，声明并获准的网络 origin 才进入 `connect-src`；host bridge 暴露 `prompt.send/state.emit/data.read/action.run/cron.trigger`，其中 data/action/cron 与 prompt 免确认都要求 grantState 为 `granted` 且工具名在 declared 集合内。
 
@@ -64,7 +64,7 @@ OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复�
 
 ### 模型可见文本与结构化 part
 
-助手回合的模型输出在 Agent Core 中先归约为内存 assistant message（`packages/agent-core/src/agent-loop.ts:226-509`），part 语义与 Provider stream 增量无关紧要地在这里不是“对象身份”来源；最终 assistant 消息由 SessionManager 以 parent-linked entry 写入 transcript。Gateway 对外投递的是 `chat`/`agent` 事件和回复 payload，具体投影和缓冲节流在 [OpenClaw 对话请求与上下文调查笔记](../对话请求与上下文/OpenClaw-对话请求与上下文调查笔记.md) 已覆盖，本轮不重复。
+助手回合的模型输出在 Agent Core 中先归约为内存 assistant message（`packages/agent-core/src/agent-loop.ts:226-509`），part 语义与 Provider 流式增量在这里都不是“对象身份”的来源；最终 assistant 消息由 SessionManager 以 parent-linked entry 写入 transcript。Gateway 对外投递的是 `chat`/`agent` 事件和回复 payload，具体投影和缓冲节流在 [OpenClaw 对话请求与上下文调查笔记](../对话请求与上下文/OpenClaw-对话请求与上下文调查笔记.md) 已覆盖，本轮不重复。
 
 聊天历史对 Canvas widget 的可恢复展示做了一次专门的显示投影：`augmentChatHistoryWithCanvasBlocks` 会扫描 assistant 消息与 tool call/result 的 details，把工具结果里可识别的 canvas 载荷转成一个 `{type:"canvas", preview:{viewId/url/boardWidgetName/...}, rawText}` 内容块，追加/合并到最近的可渲染 assistant 消息上，保证只读客户端重载历史后仍能恢复内嵌 widget（`src/gateway/chat-display-projection.canvas.ts:195-238`、`:264-340`；入口见 `src/gateway/server-methods/chat-history-pages.ts:329-427`）。也就是说，消息正文内的 widget 在数据层上是“对象引用 + 预览块”，本体在 Canvas 文档或 Board Store 中。
 
@@ -87,7 +87,13 @@ OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复�
 
 ### Canvas 文档
 
-Canvas 文档是“一块托管内容”的最小对象：`cv_<hex>` id、kind（`html_bundle`/`url_embed`/`document`/`image`/`video_asset`）、title、preferredHeight、`surface`、`retentionScope`、`cspSandbox`、entryUrl、entry 文件清单与 manifest.json，落盘在 state dir 下 `canvas/documents/<id>/`（`src/canvas/documents.ts:38-54,336-378`）。文件是事实源；HTTP 层按 manifest 决定是否加 `Content-Security-Policy: sandbox allow-scripts`（`src/canvas/serve.runtime.ts:82-90`）。同一文档可被 assistant 消息引用，也可在 pin 时把 HTML 读出来作为 board widget 的内容（要求 `cspSandbox:"scripts"`，`src/gateway/server-methods/board.ts:310-319`）。canvas 文档不是通用可编辑工程，也没有版本/授权状态；其 manifest 只记录 kind、surface、retentionScope、创建时间与 entry 等元数据，配额内按 createdAt 逐最旧删除（`src/canvas/documents.ts:138-181`）。
+Canvas 文档是“一块托管内容”的最小对象，落盘在 state dir 下 `canvas/documents/<id>/`（`src/canvas/documents.ts:38-54,336-378`）。对象字段包括 `cv_<hex>` 形态的 id、kind、title、preferredHeight、`surface`、`retentionScope`、`cspSandbox`、entryUrl、entry 文件清单与 manifest.json；kind 取值为：
+
+```text
+html_bundle / url_embed / document / image / video_asset
+```
+
+文件是事实源；HTTP 层按 manifest 决定是否加 `Content-Security-Policy: sandbox allow-scripts`（`src/canvas/serve.runtime.ts:82-90`）。同一文档可被 assistant 消息引用，也可在 pin 时把 HTML 读出来作为 board widget 的内容（要求 `cspSandbox:"scripts"`，`src/gateway/server-methods/board.ts:310-319`）。canvas 文档不是通用可编辑工程，也没有版本/授权状态；其 manifest 只记录 kind、surface、retentionScope、创建时间与 entry 等元数据，配额内按 createdAt 逐最旧删除（`src/canvas/documents.ts:138-181`）。
 
 ### Board widget 与 snapshot
 
@@ -121,7 +127,7 @@ registered（插件 kind）widget 落盘只存 `source`；真正组装发生在�
 同一输出对象存在多个投影面，内容事实在 Store/DB，投影各自持有访问凭证：
 
 - **assistant 消息内嵌（inline）**：canvas 文档 URL 由 widget-card 在沙箱 iframe 中加载，属于客户端 DOM 面，见 [OpenClaw 消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。
-- **session dashboard / workspace board**：pinned widget 显示在 Chat 工作区 dashboard/board 面板，Control UI 通过 `board.get` 拉 snapshot 并对每个可渲染 widget 生成 `frameUrl` 与 `sandboxUrl`（`src/gateway/server-methods/board.ts:166-260`）；网格布局/侧 dock/tab 由 `board.update` 管理。dashboard 是 widget 的“长期住所”，这是本类目真正的对象投影面。
+- **session dashboard / workspace board**：pinned widget 显示在 Chat 工作区 dashboard/board 面板，Control UI 通过 `board.get` 拉 snapshot 并对每个可渲染 widget 生成 `frameUrl` 与 `sandboxUrl`（`src/gateway/server-methods/board.ts:166-260`）；网格布局/侧 dock/tab 由 `board.update` 管理。dashboard 是 widget 的“长期住所”，也是本类目对象能力最完整的投影面。
 - **当前渠道（current channel presenter）**：渠道插件可为同一 core 工具注册上下文 presenter，`show_widget` 结果可被投到当前 IM 会话（文档示例 Discord Activities“Open widget”按钮，见 `docs/tools/show-widget.md:12,18-20`），工具仍只有一次调用。
 - **node panel / 独立设备面板**：`presentation.target:"node_panel"` 时把同一个 wrapped document 交给已配对 widget-panel 能力节点，文档明示该面板第一阶段 render-only（`docs/tools/show-widget.md:110-114`）。
 
@@ -165,7 +171,15 @@ widget 内事件（`openclaw.state.emit`）到达 Gateway 后追加为“board n
 
 ## 9. 能力桥、执行位置与权限范围
 
-widget bridge 是唯一的受控宿主通道。它由 wrapper 在 widget 代码运行前先创建 MessageChannel 并向 parent 发送 port offer，宿主只在首次 load 且内容窗口确实是 OpenClaw 托管文档时才采纳，`openclaw` API 在 5 秒 init 超时内由 `openclaw:widget-host-init`（携带 view ticket）激活；桥方法：`prompt.send`、`state.emit`、`data.read`、`action.run`、`cron.trigger`、只读 `host.controlUiBaseUrl`，另有把点击的 http(s) 链接转交宿主打开（禁 popup）的 `host.open`（`src/canvas/wrap.ts:120-182`；宿主侧路由见 `ui/src/lib/board/widget-bridge.ts:146-218`）。
+widget bridge 是唯一的受控宿主通道。它由 wrapper 在 widget 代码运行前先创建 MessageChannel 并向 parent 发送 port offer，宿主只在首次 load 且内容窗口确实是 OpenClaw 托管文档时才采纳，`openclaw` API 在 5 秒 init 超时内由 `openclaw:widget-host-init`（携带 view ticket）激活。可调用的桥方法固定为以下名称：
+
+```text
+prompt.send / state.emit / data.read / action.run / cron.trigger
+host.controlUiBaseUrl（只读）
+host.open（把点击的 http(s) 链接转交宿主打开，禁 popup）
+```
+
+实现见 `src/canvas/wrap.ts:120-182`，宿主侧路由见 `ui/src/lib/board/widget-bridge.ts:146-218`。
 
 服务端按能力声明执行的最小权限：
 
@@ -210,7 +224,7 @@ widget bridge 是唯一的受控宿主通道。它由 wrapper 在 widget 代码�
 
 不可见 widget 无专门的服务端暂停/冻结机制：board 只在被读取/渲染时才由客户端起 iframe；定时器、动画等资源随 iframe 卸载自然释放，Gateway 不托管其生命周期。配额以上限+整批滚动为主，未见跨对象预算调度器。
 
-## 设计取舍与已确认边界
+## 14. 设计取舍与已确认边界
 
 - **消息内 widget 与 dashboard widget 是两套生命周期**：inline 是可滚动清理的会话内托管预览（低持久承诺），pin 才进入带授权/版本/DB 的对象路径。这让“给模型一个轻量可视化”的成本很低，而“长期活对象”有完整治理。
 - **授权绑定字节而非信任文本**：grant 冻结 hash，revision/instanceId/ticket 三重校验，内容更新后必须重审；模型声明能力而非拥有能力，网络/动作全部窄口。代价是每次内容更新都可能打断 dashboard 上已授权 widget 的运行状态。
@@ -218,7 +232,7 @@ widget bridge 是唯一的受控宿主通道。它由 wrapper 在 widget 代码�
 - **执行在客户端 iframe 而非服务器沙箱**：这是“浏览器双 iframe + CSP/无 same-origin”策略，不是容器/worker 执行；脚本能力由 CSP 与授权边界收敛，残余风险（WebRTC data channel 等）在仓库文档中被显式建模（`docs/tools/show-widget.md:158`）。该策略与本调查的“G3 可执行 artifact”判定不同轴：执行强度高但宿主隔离为主，没有出现服务端任意代码运行面。
 - **回流闭环是“会话事件 + 用户态 prompt”**，不是对象可查询 API。模型不能“读某 widget 内存状态”，只能通过被转成系统事件的 notice 与用户确认后的 prompt 感知；持续维护靠对象稳定 name 的重新生成。这是与 Desktop/Agent 风格活对象的关键差异，OpenClaw 的 widget 更像“长在会话里的可交互成果”，而不是环境级常驻代理工件。
 
-## 未验证事项
+## 15. 未验证事项
 
 1. 未启动 Gateway/Control UI/任何渠道或真实 Provider，全部为静态路径；iframe 内的实际渲染、CSP 头生效、MessageChannel 握手与 5s 超时行为未运行验证。
 2. pinned widget 的 “dedicated-origin、double-iframe sandbox host”（文档 `show-widget.md:20` 所述）只确认到 board sandbox path/CSP 与 ticketed frame 两层代码，sandbox host 的完整代理实现与 iframe 嵌套结构未全部走通。

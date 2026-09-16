@@ -45,7 +45,7 @@
 
 ### 与普通上下文机制的界线
 
-Agent 的 system prompt 会列出 skills 和工具，但 skill 名单、工具目录和固定提示词本身没有检索事实对象，也不会产生候选。因此本笔记不把它们称为 RAG。真正属于本类目的 prompt 变化有四种：memory-core 的 `Memory Recall` 工具指导、Bootstrap 文件内容、Active Memory 的检索结果前缀，以及 memory-wiki 的 compiled digest/工具结果。默认 legacy prompt assembly 会准备 memory prompt；有 active context engine 时，`attempt-system-prompt-prepare` 会关闭基础 memory section，把 memory prompt 组装责任交给该 context engine。`src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts:230-240,314-324`、`extensions/memory-core/src/memory-tool-contract.ts:105-127`。
+Agent 的 system prompt 会列出 skills 和工具，但 skill 名单、工具目录和固定提示词本身没有检索事实对象，也不会产生候选。因此本笔记不把它们称为 RAG。本项目内的 prompt 变化有四种：memory-core 的 `Memory Recall` 工具指导、Bootstrap 文件内容、Active Memory 的检索结果前缀，以及 memory-wiki 的 compiled digest/工具结果。默认 legacy prompt assembly 会准备 memory prompt；有 active context engine 时，`attempt-system-prompt-prepare` 会关闭基础 memory section，把 memory prompt 组装责任交给该 context engine。`src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts:230-240,314-324`、`extensions/memory-core/src/memory-tool-contract.ts:105-127`。
 
 ## 事实对象、摄取与索引
 
@@ -89,9 +89,16 @@ manager 在启动、首次搜索、文件变化、session transcript 更新或 C
 
 ### `memory_search` 的入口与 corpus 选择
 
-模型可见的 `memory_search` 参数是 query、可选 maxResults/minScore 和受限 corpus 枚举 `memory`、`wiki`、`all`、`sessions`。工具构造时通过当前 config 和 session agent 解析 source contract；执行时再次读取 live config，配置已失效会变成 revocation，而不是继续使用旧 captured context。模型只能请求 schema 中的 corpus，真正的 session corpus 还要由 trusted runtime 的 `conversationRecall` 或启用的 session source 授权；任意未知 corpus 会 fail closed，不能借参数把 recall-only transcripts 扩成普通搜索。`extensions/memory-core/src/memory-tool-contract.ts:11-45,66-99`、`extensions/memory-core/src/tools.shared.ts:53-78`、`extensions/memory-core/src/tools.ts:83-101,272-316`。
+模型可见的 `memory_search` 参数是 query、可选 maxResults/minScore 和受限 corpus 枚举 `memory`、`wiki`、`all`、`sessions`。工具构造时通过当前 config 和 session agent 解析 source contract；执行时再次读取 live config，配置已失效会变成 revocation，而不是继续使用旧 captured context。模型只能请求 schema 中的 corpus，实际的 session corpus 还要由 trusted runtime 的 `conversationRecall` 或启用的 session source 授权；任意未知 corpus 会 fail closed，不能借参数把 recall-only transcripts 扩成普通搜索。`extensions/memory-core/src/memory-tool-contract.ts:11-45,66-99`、`extensions/memory-core/src/tools.shared.ts:53-78`、`extensions/memory-core/src/tools.ts:83-101,272-316`。
 
-memory-core 工具执行时，普通 memory 查询与已注册的 Wiki corpus supplement 可以并发运行：`corpus=memory` 只保留 `source=memory`，`corpus=sessions` 只保留 session hits，`corpus=wiki` 只访问 Wiki supplement，`corpus=all` 才合并两类结果并为两个 corpus 各留出初始配额。各 backend 先保持自己的 ranked stream；最终按 score head merge，`all` 模式用近似均衡的 per-corpus cap，再填充余量。Wiki 不是 memory-core manager 的内部表，而是通过 `registerMemoryCorpusSupplement` 接入的独立事实域。`extensions/memory-core/src/tools.ts:165-228,330-392,465-525`、`extensions/memory-core/src/memory-corpus.ts:129-199`。
+memory-core 工具执行时，普通 memory 查询与已注册的 Wiki corpus supplement 可以并发运行，按 corpus 参数筛选：
+
+- `corpus=memory` 只保留 `source=memory`；
+- `corpus=sessions` 只保留 session hits；
+- `corpus=wiki` 只访问 Wiki supplement；
+- `corpus=all` 合并两类结果，并为两个 corpus 各留出初始配额。
+
+各 backend 先保持自己的 ranked stream；最终按 score head merge，`all` 模式用近似均衡的 per-corpus cap，再填充余量。Wiki 不是 memory-core manager 的内部表，而是通过 `registerMemoryCorpusSupplement` 接入的独立事实域。`extensions/memory-core/src/tools.ts:165-228,330-392,465-525`、`extensions/memory-core/src/memory-corpus.ts:129-199`。
 
 ### 内置候选生成
 
@@ -121,7 +128,7 @@ Bootstrap 不是对全 corpus 的相似度检索。它读取固定 workspace boo
 
 ### Active Memory 两条 recall lane
 
-`active-memory` 是当前实现中最接近“检索驱动认知编排”的组件，但它的阶段边界需要精确描述。
+`active-memory` 是当前实现中最接近“检索驱动认知编排”的组件，其阶段边界如下。
 
 **Lane 1 是无模型的即时触发召回。** `before_prompt_build` 只在有 turn tool authority、user trigger、eligible interactive persistent session 时进入；它并行执行一次 memory manager 的 lexical-only search（最多 24 个候选）和 `listTriggerCandidates`，不发送 query embedding 或网络请求。候选必须来自 `source=memory`、可信自动注入 provenance、curated root，并满足项目 key 全部 active；trigger phrase 与当前消息打分后最多取 3 条，组合为受限的 hidden `Context: <active_memory_plugin>` 前缀。`extensions/active-memory/trigger-recall.ts:11-19,59-124,127-185,222-237`。
 
@@ -143,7 +150,7 @@ Active Memory 的 hidden prefix 是 `before_prompt_build` hook 返回的 `prepen
 
 `memory-wiki` 不是普通 memory manager 的另一个 FTS 表。它维护 vault 下的 `sources/`、`entities/`、`concepts/`、`syntheses/`、`reports/` 等 Markdown 页面，页面包含 frontmatter、claims、evidence、privacy tier、freshness、contradictions 和 relationships。导入 source 时写 source page 和 append-only log，再编译相关页面、索引页、dashboard、backlinks 和 compiled cache；编译在 vault mutation lock 内执行，并以 vault generation、publication id、snapshot hash 和 source generation 验证后发布到 plugin BlobStore。`extensions/memory-wiki/src/vault.ts:23-34,107-186`、`extensions/memory-wiki/src/ingest.ts:68-158`、`extensions/memory-wiki/src/compile.ts:63-72,1224-1400`、`extensions/memory-wiki/src/compiled-cache.ts:15-19,220-367,409-465`。
 
-Wiki 查询按页面/claim 的 title、path、id、metadata、正文、claim confidence/status/freshness 和显式 search mode 评分；支持 `auto`、`find-person`、`route-question`、`source-evidence`、`raw-claim`，结果可携带 matched claim、evidence kinds/source IDs、privacy、provenance 和 updatedAt。它可以按 `wiki_search` → `wiki_get` 由模型继续精读，也可以在 `memory_search corpus=wiki/all` 中作为 supplement 被动合并。Wiki 的关系和 claims 改变当前页面候选与解释，不会在已确认的路径中生成固定下一阶段查询。`extensions/memory-wiki/src/query.ts:113-158,424-467,719-787,836-898,1195-1351`、`extensions/memory-wiki/src/tool.ts:145-192,269-320`、`extensions/memory-wiki/src/corpus-supplement.ts:6-55`。
+Wiki 查询按页面/claim 的 title、path、id、metadata、正文、claim confidence/status/freshness 和显式 search mode 评分；支持五种 search mode：`auto`、`find-person`、`route-question`、`source-evidence` 和 `raw-claim`。结果可携带 matched claim、evidence kinds/source IDs、privacy、provenance 和 updatedAt。它可以按 `wiki_search` → `wiki_get` 由模型继续精读，也可以在 `memory_search corpus=wiki/all` 中作为 supplement 被动合并。Wiki 的关系和 claims 改变当前页面候选与解释，不会在已确认的路径中生成固定下一阶段查询。`extensions/memory-wiki/src/query.ts:113-158,424-467,719-787,836-898,1195-1351`、`extensions/memory-wiki/src/tool.ts:145-192,269-320`、`extensions/memory-wiki/src/corpus-supplement.ts:6-55`。
 
 Wiki 还有可选的 compiled digest prompt：最多 4 个高信号页面，每页最多 2 个 claims，总 prompt 约 2800 字符，按 contradiction/open questions/claim count、confidence 和 freshness 选取。这是知识资产的摘要注入，不是 query-time semantic recall，也不应单独计为认知链。`extensions/memory-wiki/src/prompt-section.ts:12-24,70-124,191-207`。
 
@@ -165,7 +172,7 @@ Wiki 还有可选的 compiled digest prompt：最多 4 个高信号页面，每�
 
 每次 `memory_search` 成功得到 memory hits 时，若 dreaming 开启，工具会异步把 query、hit、score 和时间写入短期 recall store；这一写回不阻塞工具结果，并成为后续 dreaming 的 ranking evidence。短期状态本身保留在 plugin state，含 retention、seen hashes、phase signals 和 promotion markers，不等于将工具结果自动写成长期事实。`extensions/memory-core/src/tools.ts:422-447`、`extensions/memory-core/src/short-term-promotion-record.ts`、`extensions/memory-core/src/short-term-promotion-store.ts:25-57,148-183`。
 
-### Dreaming：主动记忆演化闭环
+### Dreaming：主动记忆演化
 
 当前 memory-core 默认启用一个 managed cron，目标是 isolated、delivery none 的后台维护 sweep；运行时会删除旧的 phase cron、去重 managed row，并在 Gateway 启动延迟或重载时重试 reconciliation。触发 token 只接受 heartbeat/cron 的受控 system event，普通 user message 含有相同文字不会直接触发。`extensions/memory-core/src/dreaming.ts:172-196,243-251,403-410,437-547,549-825,900-981,1103-1184`。
 

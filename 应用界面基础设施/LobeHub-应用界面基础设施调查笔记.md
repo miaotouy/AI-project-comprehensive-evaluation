@@ -18,7 +18,7 @@ LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之�
 
 主题系统由不同层共同完成：next-themes 解析明暗模式，应用主题 Provider 注入颜色和动效 token，HTML 内联脚本负责首屏预着色。明暗模式存于浏览器，主色和中性色存于用户设置并镜像到 cookie。这套分工支持系统跟随、服务端首屏和桌面原生外观，但也意味着“主题”没有单一持久化源。
 
-移动端采用独立路由树和独立构建产物，不是桌面页面在窄屏下的简单重排。错误反馈也有清楚的层级：路由错误屏处理整页失败，SafeBoundary 隔离局部渲染，BootErrorBoundary 尝试从启动失败中恢复，全局监听只处理动态分包加载失败。
+移动端采用独立路由树和独立构建产物，不是桌面页面在窄屏下的简单重排。错误反馈按整页、局部、启动和分包加载分层：路由错误屏处理整页失败，SafeBoundary 隔离局部渲染，BootErrorBoundary 尝试从启动失败中恢复，全局监听只处理动态分包加载失败。
 
 主题个性化集中在官方提供的明暗模式、预设色板和外观设置。本次没有找到主题市场、壁纸、主题文件导入导出或自定义 CSS。图片灯箱、弹窗焦点和 Toast 堆叠等能力由 `@lobehub/ui` 提供，项目侧只能确认接入方式，具体交互仍需下钻依赖或运行验证。
 
@@ -41,7 +41,7 @@ LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之�
 
 新弹窗主要通过 base-ui 的命令式接口创建。项目仍保留 `ImperativeModal`，用于把旧 antd Modal 风格的属性适配到新接口；设置、导入和插件安装等场景仍在消费这一兼容层。分享消息等较新的实现已经直接调用 base-ui。（`src/components/ImperativeModal/index.tsx:79-191`）
 
-`AntdStaticMethods` 仍会从 antd 上下文取得 modal 和 notification，但本次没有找到这些命名导出的生产调用方。提交 e305870bc 之后，旧的 antd message 通道已经移除，临时提示改由 base-ui Toast 承担。（`src/components/AntdStaticMethods/index.tsx:1-19`）
+`AntdStaticMethods` 仍会从 antd 上下文取得 modal 和 notification，但本次没有找到这些命名导出的生产调用方。旧的 antd message 通道已经移除，临时提示改由 base-ui Toast 承担。（`src/components/AntdStaticMethods/index.tsx:1-19`）
 
 ### 用户偏好
 
@@ -83,7 +83,7 @@ BootErrorBoundary 处理 SPA 首次渲染失败。它会增加强制刷新参数
 
 消息列表的 `RefreshError` 是请求失败重试条，不是应用级错误边界。首次加载失败使用页面级错误形态，后台刷新失败则在列表底部显示行内重试条。重试逻辑会区分 SWR 自动刷新和用户主动点击，只有后者进入按钮 loading。（`src/features/Conversation/ChatList/hooks/useMessageRefreshError.ts:1-98`）
 
-骨架屏在提交 3aee848b9 后形成了“共享骨架库加场景骨架”的结构。共享目录提供 Conversation、NavPanel、Settings 等命名骨架；社区发现页保留自己的网格和详情骨架。消息列表骨架会模拟用户消息和助手消息的不同布局，而不是显示无语义的统一占位块。（`src/components/Skeleton/index.ts`）
+骨架屏形成了“共享骨架库加场景骨架”的结构。共享目录提供 Conversation、NavPanel、Settings 等命名骨架；社区发现页保留自己的网格和详情骨架。消息列表骨架会模拟用户消息和助手消息的不同布局，而不是显示无语义的统一占位块。（`src/components/Skeleton/index.ts`）
 
 通用空状态主要使用 `@lobehub/ui` 的 Empty 组件。发现页会区分“搜索无结果”和“列表本身为空”，并在助手、模型、Provider、Skill 和 MCP 等页面复用这套表达。
 

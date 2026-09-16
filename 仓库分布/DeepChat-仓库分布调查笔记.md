@@ -16,21 +16,19 @@
 
 ## 结论摘要
 
-DeepChat 是 Electron/Vue 应用、平台插件与完整测试树合仓的多运行时仓库。`src/main` 大于 renderer，而 `test/main` 与 `test/renderer` 合计约 35 万行；这使测试树成为与产品源码并列的主要仓库组成，而非少量附属文件。
+DeepChat 是 Electron/Vue 应用、平台插件与完整测试树合仓的多运行时仓库。`src/main` 大于 renderer，而 `test/main` 与 `test/renderer` 合计约 35 万行；这使测试树成为与产品源码并列的主要仓库组成。
 
 工程配套（CI、打包/签名脚本、20 种语言的 i18n 树、插件与运行时资源）也全部合仓，一级目录按职责分成源码、测试、插件、文档、资源和脚本六类，具体结构与量级见第 1、6 节。
 
-相较上一批快照，当前净增的跟踪文件和源码主要来自三个新子系统，三者均有同目录测试树：
+三个子系统均有同目录测试树：
 
 - 本地控制平面 CLI 与审批（`src/main/cli/`、`src/main/approval/`）
 - 结构化主进程日志（`src/main/logging/`）
 - Tape 执行日志与契约层
 
-`src/main` 与 `test/main` 的相对位置不变。
-
 ## 统计口径与仓库形态
 
-本笔记采用《仓库分布调查指南》的统一口径，快照为当前 HEAD commit `7f337952` 的 Git 跟踪文件：
+本笔记采用《仓库分布调查指南》的统一口径，快照为当前 HEAD commit 的 Git 跟踪文件：
 
 - **快照边界**：只统计 `git ls-files` 跟踪的 4,584 个文件；不统计 `.git`、未跟踪文件、`node_modules`、构建输出（`out/`、`build/`）与运行时数据。
 - **量级单位**：同时记录文件数与物理行数（含空行与注释，用逐行读取计数）。
@@ -48,7 +46,7 @@ DeepChat 是 Electron/Vue 应用、平台插件与完整测试树合仓的多运
 
 平台插件（`plugins/cua`、`plugins/feishu`）各自包含 mcp、settings、skills 与原生依赖，是自包含单元。
 
-构建编排使用 pnpm（`package.json` 的 `packageManager` 字段声明 `pnpm@10.34.5`，锁文件 `pnpm-lock.yaml` 10,985 行），配合 electron-vite 与 electron-builder 两个构建工具。本地控制平面构建新增 `cli:build` 脚本（`scripts/build-cli.mjs`），随 `build` 链执行。
+构建编排使用 pnpm（`package.json` 的 `packageManager` 字段声明 `pnpm@10.34.5`，锁文件 `pnpm-lock.yaml` 10,985 行），配合 electron-vite 与 electron-builder 两个构建工具。本地控制平面构建由 `cli:build` 脚本（`scripts/build-cli.mjs`）承担，随 `build` 链执行。
 
 ## 1. 模块分布与量级
 
@@ -70,19 +68,19 @@ DeepChat 是 Electron/Vue 应用、平台插件与完整测试树合仓的多运
 
 全仓汇总（同口径）：Git 跟踪文件 4,584；可识别源码 3,203 文件 / 1,021,830 行；文档 310 文件 / 61,057 行；测试 1,019 文件 / 428,289 源码行。
 
-主进程和插件承担 Agent、本地运行时及原生能力，renderer 相对更薄；区域量级对比见本节表格。
+主进程和插件承担 Agent、本地运行时及原生能力，renderer 相对更薄。
 
-`src/main` 内的新增目录集中在新子系统，每个子系统在 `test/main` 下有同目录测试树：
+`src/main` 内的子系统各自在 `test/main` 下有同目录测试树：
 
 - `src/main/cli/`：本地控制平面，含 server/surface/runService/launcherService 等约 25 个文件
 - `src/main/approval/`：审批 broker，CLI 与 renderer 共用
 - `src/main/logging/`：结构化 JSONL 主进程日志，替代 `electron-log`
 
-对应测试树按同名子目录排列，并新增 `test/main/tape/` 覆盖执行记录契约。
+对应测试树按同名子目录排列，`test/main/tape/` 覆盖执行记录契约。
 
 ## 2. 语言分布与运行时分工
 
-TypeScript 722,613 行（79.9%）、Vue 99,815 行（11.0%）、JavaScript 33,831 行（3.7%）、Swift 25,408 行（2.8%）；其余为 Python 67 文件/17,075 行（1.9%，主要为 `plugins/cua` 插件脚本与工具）以及 Shell/HTML/CSS 30 文件/6,035 行（0.7%）。Swift 主要来自 `plugins/cua/vendor/cua-driver` 的 macOS 辅助程序源。TypeScript 覆盖主进程、preload 与 renderer 全部业务逻辑；Vue 集中在 renderer 组件；JavaScript 为 `scripts/` 下的打包/构建脚本与插件入口（如 `plugins/feishu/mcp/serve.mjs`）。增量主要来自 TypeScript（+75,186 行），与 CLI/日志/Tape 的新实现一致。
+TypeScript 722,613 行（79.9%）、Vue 99,815 行（11.0%）、JavaScript 33,831 行（3.7%）、Swift 25,408 行（2.8%）；其余为 Python 67 文件/17,075 行（1.9%，主要为 `plugins/cua` 插件脚本与工具）以及 Shell/HTML/CSS 30 文件/6,035 行（0.7%）。Swift 主要来自 `plugins/cua/vendor/cua-driver` 的 macOS 辅助程序源。TypeScript 覆盖主进程、preload 与 renderer 全部业务逻辑；Vue 集中在 renderer 组件；JavaScript 为 `scripts/` 下的打包/构建脚本与插件入口（如 `plugins/feishu/mcp/serve.mjs`）。
 
 ## 3. 文档分布与数量
 
@@ -90,28 +88,28 @@ TypeScript 722,613 行（79.9%）、Vue 99,815 行（11.0%）、JavaScript 33,83
 
 | 位置 | 文件数 | 说明 |
 | --- | ---: | --- |
-| `docs/architecture` | 116 | 架构说明与基线类 spec/tasks，本次新增 `sidebar-workspace-registration/`、`local-control-plane/` 等 SDD 计划文档 |
+| `docs/architecture` | 116 | 架构说明与基线类 spec/tasks，含 `sidebar-workspace-registration/`、`local-control-plane/` 等 SDD 计划文档 |
 | `docs/features` | 64 | 功能文档 |
-| `docs/issues` | 20 | 问题 spec，本次新增 `pending-input-explicit-retry`、`pending-input-restart-recovery` 等 |
+| `docs/issues` | 20 | 问题 spec，含 `pending-input-explicit-retry`、`pending-input-restart-recovery` 等 |
 | `resources/skills` | 39 | Skill 内容本身为 markdown |
-| `docs/guides` | — | 本次新增 `cli.md` 使用与验证指南 |
+| `docs/guides` | — | `cli.md` 使用与验证指南 |
 
-根级另保留架构、流程、发布流程与规范驱动开发等说明文件；仓库配 `scripts/generate-architecture-baseline.mjs` 与 renderer 版本两个生成脚本维护架构基线，说明架构文档与实现保持对照维护。
+根级另保留架构、流程、发布流程与规范驱动开发等说明文件；仓库配 `scripts/generate-architecture-baseline.mjs` 与 renderer 版本两个生成脚本维护架构基线。
 
 ## 4. 测试分布与数量
 
-测试 953 文件 / 366,497 源码行，主分区：
+测试 1,019 文件 / 428,289 源码行，主分区：
 
 | 分区 | 文件 / 行数 |
 | --- | ---: |
 | `test/main` | 605 / 265,279 |
 | `test/renderer` | 254 / 85,708 |
-| `test/e2e` | 40（Playwright，配置在 `test/e2e/playwright.config.ts`，本次新增启动 smoke 与浏览器路由 smoke 各一个 spec） |
+| `test/e2e` | 40（Playwright，配置在 `test/e2e/playwright.config.ts`，含启动 smoke 与浏览器路由 smoke 各一个 spec） |
 | 插件测试 | 约 37 |
 
 另有 `test/manual`（手工/评估入口）以及 fixtures、helpers、mocks 等辅助目录，并配专门的 memory 测试配置（`vitest.config.memory.ts` 等，见 `package.json` 的 `test:memory*` scripts）。
 
-`test/main` 覆盖 session/provider/agent 层，与 `src/main` 规模接近（605 vs 805 文件），是主进程行为契约的主要回归面；本次增量（约 +63 文件/+38.7 万行中的主要部分）集中在 `test/main/cli/`（约 35 个文件）、`test/main/tape/`（execution journal/contract 契约测试）与 `test/main/logging/`。
+`test/main` 覆盖 session/provider/agent 层，与 `src/main` 规模接近（605 vs 805 文件），是主进程行为契约的主要回归面；`test/main/cli/`（约 35 个文件）、`test/main/tape/`（execution journal/contract 契约测试）与 `test/main/logging/` 覆盖对应子系统。
 
 ## 5. 跨平台与发布组织
 
@@ -121,7 +119,7 @@ Electron 构建明确覆盖 Windows、macOS、Linux 及 x64/arm64 多种架构�
 
 macOS 签名与公证另有三个独立脚本（`scripts/notarize.js`、`scripts/notarize-dmg.js`、`scripts/apple-notarization.js`）。
 
-`package.json:58-73` 为构建矩阵入口，本次未运行原生插件。运行时版本：Electron 41.10.4（此前为 40.10.5）、Node 引擎 >=24.18.0、应用版本 1.1.0。
+`package.json:58-73` 为构建矩阵入口，本次未运行原生插件。运行时版本：Electron 41.10.4、Node 引擎 >=24.18.0、应用版本 1.1.0。
 
 ## 6. 工程配套与结构特征
 
@@ -148,11 +146,11 @@ macOS 签名与公证另有三个独立脚本（`scripts/notarize.js`、`scripts
 - **插件**：两个自包含插件单元，通过 `plugin:bundle` 系列脚本打包进各平台构建：
   - `plugins/cua`：浏览器/计算机使用 Agent 的本地插件，自含 mcp、沙箱策略、settings、skills、types、`vendor/cua-driver` 原生源与 `build/entitlements.plist`
   - `plugins/feishu`：飞书集成插件，自含 mcp 服务入口（`mcp/serve.mjs`）、settings 页面与 skills
-- **结构信号**：一级目录分工清晰，无根目录堆积；`src/shared` 同时被 main/preload/renderer 引用，是跨进程类型与契约的共享层；`docs/architecture` 与测试树都接近产品源码规模，属于主动维护的配套资产；未发现明显的历史实现并存或同类模块重复（同类目录功能分区见各专题笔记）。
+- **结构信号**：一级目录按职责分区，无根目录文件堆积；`src/shared` 同时被 main/preload/renderer 引用，是跨进程类型与契约的共享层；`docs/architecture` 与测试树都接近产品源码规模，属于主动维护的配套资产；未发现明显的历史实现并存或同类模块重复（同类目录功能分区见各专题笔记）。
 
 ## 7. 设计取舍与已确认边界
 
-- **测试树与源码树平行**：`test/main`（605 文件）与 `src/main`（805 文件）规模接近、目录一一对应，测试被当作第一等公民维护；代价是仓库总量显著膨胀（测试占全部可识别源码行的 40.5%）。
+- **测试树与源码树平行**：`test/main`（605 文件）与 `src/main`（805 文件）规模接近、目录一一对应，测试与实现按同等级维护；代价是仓库总量显著膨胀（测试占全部可识别源码行的 40.5%）。
 - **src 与 plugins 分离**：`src/` 是主进程/渲染进程运行时代码，`plugins/` 是带独立运行时契约（mcp、settings 页面、skills、原生 vendor）的插件单元，二者通过 `plugin:bundle` 与构建矩阵在发布期合并，运行期靠插件协议集成。
 - **多入口 renderer**：`src/renderer` 除主聊天 UI 外还含三个独立入口（`settings/`、`floating/`、`browser-overlay/`，见仓库形态节），共享同一 `src/renderer/src` 代码树（stores/composables），是"多窗口共享一个 renderer 源"的组织方式。
 - **资产与源码同仓**：`src/renderer` 中 835 个非源码文件（svg/json/图片）与源码同目录存放；`resources/` 承载更大的打包资源。本次未统计历史提交的演进，无法判断这些资产是否构成维护负担。

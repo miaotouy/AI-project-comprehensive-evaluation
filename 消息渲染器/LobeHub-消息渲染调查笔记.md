@@ -128,7 +128,7 @@ UI 中通常不会显示成五个互相独立的气泡，而是转换成一个 a
 
 `src/features/Conversation/ChatList/index.tsx`
 
-ChatList 首先处理 fetch、loading、welcome、刷新失败和后台错误。消息真正显示时，它只取：
+ChatList 首先处理 fetch、loading、welcome、刷新失败和后台错误。列出消息时它只取：
 
 ```ts
 displayMessageIds: string[]
@@ -268,7 +268,7 @@ Reasoning
   -> Error
 ```
 
-这个分组层是 Lobe 和普通 Chat UI 最大的区别：它需要表达“模型说了什么”和“模型为了得到答案做了什么”之间的关系。
+该分组层需要表达“模型说了什么”和“模型为了得到答案做了什么”之间的关系，这是 Lobe 与普通 Chat UI 在消息结构上的主要差异。
 
 以上细节均为静态代码核对（证据集中在消息组件目录和 conversation-flow 的解析入口）；视觉效果与动画行为未运行验证。
 

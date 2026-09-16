@@ -37,7 +37,7 @@ DeepSeek Harness（npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）是 De
 
 产品 API 脊柱集中在 `packages/core` 组（会话、提示词、工具、agent 与主循环五个包），其余能力组按 Service Definition / Service Provider / Consumer 三件套向外扩展；`packages/client` 是体积最大的区域，包含 39 个 `ui-*` 界面插件，以及连接、运行时与 web-react 壳层包。文档系统是仓库的显著特征：`docs/` 有 105 页中英双语文档，`.agents/notes` 收编 684 篇双语 Agent Notes，226 个包全部带 README 三件套。测试方面所有 226 个包都有测试文件，另有组装级 Web e2e、examples 快照回放和 scripts 仓库自检三类跨模块测试。
 
-框架层的“双持有”关系值得单独记录：Cordis 全家被 vendored 进 `vendor/`（9 个包、18 项本地修改清单），而 Pi 家族的 `@earendil-works/pi-ai` 以普通 npm 依赖被消费。该适配包 `llm-pi-ai` 与 `dsh-llm-deepseek` 构成同一 LLM 缝隙的 twin 双实现，详见第 1 节 llm 组。
+框架层对两套外部框架的持有方式不同：Cordis 全家被 vendored 进 `vendor/`（9 个包、18 项本地修改清单），Pi 家族的 `@earendil-works/pi-ai` 则以普通 npm 依赖被消费。该适配包 `llm-pi-ai` 与 `dsh-llm-deepseek` 构成同一 LLM 缝隙的 twin 双实现，详见第 1 节 llm 组。
 
 ## 统计口径与仓库形态
 
@@ -53,7 +53,7 @@ DeepSeek Harness（npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）是 De
 | 文档文件 / 行 | 2,575 / 180,765 | 2,563 / 179,947 |
 | 测试文件 | 1,918 | 1,918（vendor 无测试） |
 
-vendored 代码占比很小但属于结构核心：`vendor/` 的 74 个文件包含 cordis 框架本体及 loader、include、group、timer、hmr、logger-console、cosmokit、schemastery 共 9 个包，全部 rescoped 为 `@deepseek-ai` 名下，清单与 18 项本地修改日志见 `vendor/README.md`；所有产品包把 `@deepseek-ai/cordis` 声明为 peer dependency，`pnpm-workspace.yaml` 通过 linkWorkspacePackages 与 overrides 把保留的上游 semver 解析到 vendored 源码。
+vendored 代码占比很小，但被所有产品包依赖：`vendor/` 的 74 个文件包含 cordis 框架本体及 loader、include、group、timer、hmr、logger-console、cosmokit、schemastery 共 9 个包，全部 rescoped 为 `@deepseek-ai` 名下，清单与 18 项本地修改日志见 `vendor/README.md`；所有产品包把 `@deepseek-ai/cordis` 声明为 peer dependency，`pnpm-workspace.yaml` 通过 linkWorkspacePackages 与 overrides 把保留的上游 semver 解析到 vendored 源码。
 
 仓库形态依据：根 `package.json` 声明 pnpm workspace 与构建脚本（`package.json:7-18,19-143`），工作区成员由 pnpm-workspace.yaml 扩为 vendor、packages、apps、website、examples 与 native/landlock-run、python/sdk-runtime 七个层级。构建分“host / client”两个编译面：tsc -b 先出 lib/types，tsdown 再按面对应的 tsdown 配置打包运行时；测试由 6 个 vitest 配置分管单元、真实 API e2e、快照回放与 Web 三档。开发态 `dsh` 命令经 `node --import tsx/esm` 直接跑 `apps/cli/src/bin.ts` 源码。
 
@@ -95,7 +95,7 @@ vendored 代码占比很小但属于结构核心：`vendor/` 的 74 个文件包
 | `sandbox` | 73 | 9,235 | 进程隔离缝隙，bwrap/Landlock/Seatbelt/Windows ACL |
 | `compaction` | 54 | 8,032 | 上下文压缩缝隙与基础实现 |
 
-`packages/client` 内部不是单个大包，而是 48 个小包：39 个 `ui-*` 插件各自独立，另有一批支撑包与壳层包。最大的几个界面插件按文件数排序如下表，其余 ui 插件多为 15-30 个文件的中等规模：
+`packages/client` 由 48 个小包组成：39 个 `ui-*` 插件各自独立，另有一批支撑包与壳层包。最大的几个界面插件按文件数排序如下表，其余 ui 插件多为 15-30 个文件的中等规模：
 
 | 包 | 文件数 | 包 | 文件数 |
 | --- | ---: | --- | ---: |
@@ -103,7 +103,7 @@ vendored 代码占比很小但属于结构核心：`vendor/` 的 74 个文件包
 | `ui-conversation` | 125 | `ui-trajectory` | 50 |
 | `runtime` | 75 | `connection` | 35 |
 
-apps/web 只是 vite 壳（其 src 仅 main 与一个 node 桩），真正的界面代码在 client 组的 web 与 web-react 两个包。
+apps/web 只是 vite 壳（其 src 仅 main 与一个 node 桩），界面代码在 client 组的 web 与 web-react 两个包。
 
 其余组的量级特征如下（并列罗列，非排序）：
 

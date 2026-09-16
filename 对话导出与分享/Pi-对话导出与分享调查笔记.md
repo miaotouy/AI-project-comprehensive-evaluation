@@ -20,7 +20,7 @@ Pi 的对话导出与分享围绕“会话即 JSONL 树”这一事实源展开�
 - **HTML 是单文件自包含交付物**：CSS、应用 JS、marked.min.js、highlight.min.js 全部内联（`export-html/index.ts:143-175`），会话数据以 base64 JSON 嵌在 `<script id="session-data">` 中，图片内容块以 data: URL 渲染；无外部 CSS/JS/字体依赖，可离线打开（推断，未运行验证）。Markdown 中引用远端图片的 URL 仍保持引用，离线时该图不显示。
 - **`/share` 上传的是这份自包含 HTML**：先导出到临时文件，再 `gh gist create --public=false` 创建 secret Gist（单一 `session.html` 文件），拼出 `https://pi.dev/session/#<gistId>`。客户端只创建链接：无更新、撤销、删除、过期路径，也不记录已创建的 Gist。
 - **HF 数据集发布位于仓库外**：本仓库只承担“交付物与格式 + 引导”角色。README 指引使用外部伴生工具 `badlogic/pi-share-hf` 把会话发布为 HF 数据集（示例 `badlogicgames/pi-mono`）；数据来源、提示与权限默认值由外部工具负责，本次未找到仓库内任何 HF 上传代码或隐私提示。
-- 同仓库的 CI（`issue-analysis.yml`）复用同一导出链路：把分析会话导出为 HTML+JSONL 后经 GitHub API 创建 secret Gist（`public: false`），并把链接和 `/ir` 导入指令评论到 issue 上；`.pi/extensions/import-repro.ts` 则演示了匿名 `GET api.github.com/gists/{id}` 拉回 HTML/JSONL 并转回会话的往返消费闭环。
+- 同仓库的 CI（`issue-analysis.yml`）复用同一导出链路：把分析会话导出为 HTML+JSONL 后经 GitHub API 创建 secret Gist（`public: false`），并把链接和 `/ir` 导入指令评论到 issue 上；`.pi/extensions/import-repro.ts` 则演示了匿名 `GET api.github.com/gists/{id}` 拉回 HTML/JSONL 并转回会话的往返消费路径。
 
 ## 系统边界与完整主链
 
@@ -127,9 +127,9 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 11. 设计取舍与已确认边界
 
-- **同一会话、两种口径**：JSONL 导出线性化当前分支（可往返、结构干净），HTML 导出嵌入完整树（保留分支与隐藏内容但不可直接导回）。文档与代码对“导出=分支”的表述仅针对 JSONL（`agent-session.ts:3243-3248` 注释）。
+- **同一会话、两种口径**：JSONL 导出线性化当前分支（可往返），HTML 导出嵌入完整树（保留分支与隐藏内容但不可直接导回）。文档与代码对“导出=分支”的表述仅针对 JSONL（`agent-session.ts:3243-3248` 注释）。
 - **HTML 交付物即分享稿**：自包含、零外部依赖，牺牲体积换取可离线查看与 Gist 单文件托管；代价是无导出前编辑/预览、无图片/PDF 形态。
-- **分享治理刻意轻量**：/share 只负责“创建链接”，把查看、访问控制、保留期全部交给 GitHub + pi.dev 查看器；客户端不记录、不更新、不撤销。
+- **分享止于创建链接**：/share 把查看、访问控制、保留期全部交给 GitHub + pi.dev 查看器；客户端不记录、不更新、不撤销。
 - **研究发布走仓库外闭环**：本仓库止步于“可移植会话格式 + README 引导”，HF 发布（`badlogic/pi-share-hf`）与数据集（`badlogicgames/pi-mono`）作为外部伴生工具存在；会话 JSONL v3 与 `docs/session-format.md` 共同构成该闭环的数据契约。
 - 隐私无护栏是有意为之还是疏漏，本次无从判断：`/share` 上传的是含完整工具输出的 HTML，而 README 鼓励公开分享 OSS 会话，两者之间没有内容检查环节。
 

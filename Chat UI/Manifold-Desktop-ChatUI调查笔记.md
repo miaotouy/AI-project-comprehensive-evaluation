@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Manifold Desktop 的 Chat 界面是一套较薄的"标签页内存状态"实现：应用提供 home/chat/compare/terminal 多标签（`index.html:18-26` 布局），聊天内容与流式状态全部放在 `chat-tab` 组件局部（`messages[]`、`streamingText`），没有全局 UI store。与聊天主链直接相关的界面事实：
+Manifold Desktop 的 Chat 界面把状态放在标签页内存里：应用提供 home/chat/compare/terminal 多标签（`index.html:18-26` 布局），聊天内容与流式状态全部放在 `chat-tab` 组件局部（`messages[]`、`streamingText`），没有全局 UI store。与聊天主链直接相关的界面事实：
 
 - 新对话不持久化，关闭标签后内容丢失，界面没有对应的保存或恢复路径（数据语义见会话与消息管理笔记）。
 - 流式期间每个 chunk 无条件滚到底部，用户无法稳定停留在历史位置（`chat-tab.js:58`）。

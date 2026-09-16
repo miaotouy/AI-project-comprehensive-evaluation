@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AstrBot 在 Dashboard 提供 E1 数据交换型的批量会话导出：经 `POST /api/v1/conversations/export` 提交一组 UMO 用户标识与会话 ID，服务逐项重新读取持久化会话历史，生成一行一会话的 UTF-8 JSONL，并作为下载响应交付。导出源不是当前聊天页面 DOM、模型请求 Payload 或平台原始消息事件，而是 Conversation Manager 保存的 `conversation.history` JSON；每条记录同时携带会话、平台、角色与创建/更新时间元数据（`astrbot/dashboard/services/conversation_service.py:184-243`）。
+AstrBot 在 Dashboard 提供 E1 数据交换型的批量会话导出：经 `POST /api/v1/conversations/export` 提交一组 UMO 用户标识与会话 ID，服务逐项重新读取持久化会话历史，生成一行一会话的 UTF-8 JSONL，并作为下载响应交付。导出源是 Conversation Manager 保存的 `conversation.history` JSON，不是当前聊天页面 DOM、模型请求 Payload 或平台原始消息事件；每条记录同时携带会话、平台、角色与创建/更新时间元数据（`astrbot/dashboard/services/conversation_service.py:184-243`）。
 
 此链路按会话粒度工作，不提供单消息、范围、分支或字段开关。成功项目按请求顺序写入，单项读取或 JSON 解析失败会记入内部失败列表并跳过；只要至少一项成功，接口仍返回文件，因此调用方不会在响应中取得部分失败明细。前端 API 将响应作为 Blob 接收（`dashboard/src/api/v1.ts:1759-1764`）。
 
@@ -37,7 +37,7 @@ Dashboard 选定多个会话（user_id + cid）
 
 ## 1. 入口、导出源与内容口径
 
-导出请求的 schema 只接受 `conversations: list[ConversationRef]`，其中每项必须包含 `user_id` 和 `cid`，没有格式、范围或包含字段参数（`astrbot/dashboard/schemas.py:401-424`）。v1 入口要求 data scope；因此下载不是匿名公开链接，而是一次受 Dashboard 权限保护的请求（`astrbot/dashboard/api/conversations.py:113-145`）。
+导出请求的 schema 只接受 `conversations: list[ConversationRef]`，其中每项必须包含 `user_id` 和 `cid`，没有格式、范围或包含字段参数（`astrbot/dashboard/schemas.py:401-424`）。v1 入口要求 data scope，因此下载是一次受 Dashboard 权限保护的请求，不是匿名公开链接（`astrbot/dashboard/api/conversations.py:113-145`）。
 
 服务按请求数组顺序查询 Conversation Manager。每条成功记录的 `content` 来自将 `conversation.history` 反序列化后的对象，并附带 `cid`、`user_id`、`platform_id`、标题、`persona_id` 与时间字段。该口径保留持久化历史中已有的结构和内容，但服务不解释或筛选其中的 system、reasoning、工具、错误、附件引用或平台专有字段（`conversation_service.py:184-225`）。
 

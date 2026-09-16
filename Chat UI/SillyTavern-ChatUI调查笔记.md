@@ -88,7 +88,7 @@ SillyTavern 的聊天 UI 是"可变数组 + DOM 操作 + 扩展事件"的组合�
   REGENERATE / LOOP / PRISTINE_GREETING / NONE
   ```
 - **Swipe Picker**（`swipe-picker.js`，全文 444 行）：`openSwipePicker`（52-410）读当前消息的候选数组与元信息渲染滚动列表，每项可跳转（双击/Go）、删除（121-233，含确认与下标重算）、复制、**从这个候选开分支**（160-174 记录分支动作，387-390 按候选 id 调 `branchChat`）——这是"以某个候选为基础开分支"的唯一 UI 入口，底层与 `/branch-create` 汇到 `bookmarks.js`。
-- **触摸手势**（已核实，非缺失）：`public/lib/swiped-events.js`（132 行）在 document 上监听触摸开始/移动/结束（28-30）合成左右滑动事件；`RossAscends-mods.js:908-956` 处理它们：`power_user.gestures` 开启（默认 true，`power-user.js:179`）、不在弹窗中、目标在输入区内、非编辑态时触发最后一条消息的可见 swipe 按钮点击。范围限制：只作用于最后一条消息，且要求其 swipe 按钮当前可见。
+- **触摸手势**：`public/lib/swiped-events.js`（132 行）在 document 上监听触摸开始/移动/结束（28-30）合成左右滑动事件；`RossAscends-mods.js:908-956` 处理它们：`power_user.gestures` 开启（默认 true，`power-user.js:179`）、不在弹窗中、目标在输入区内、非编辑态时触发最后一条消息的可见 swipe 按钮点击。范围限制：只作用于最后一条消息，且要求其 swipe 按钮当前可见。
 
 ## 7. 多会话、多模型与后台生成
 

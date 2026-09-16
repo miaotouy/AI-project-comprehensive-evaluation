@@ -26,7 +26,7 @@ VCPChat 在 Electron renderer 进程内依次解释消息协议、更新流式 D
 
 各层的交接规则决定了这套实现的行为：原始消息文本是最终数据源；预处理后的 Markdown 是协议解释结果；Marked 输出是尚未增强的中间 HTML；最终 DOM 还包含大量无法从 HTML 字符串直接恢复的运行时状态。
 
-VCPChat 有三个值得关注的设计点：
+VCPChat 有三个设计点：
 
 - **有序占位转换隔离多层协议**：工具结果在外层 Marked 完成之前始终保持为 HTML 注释占位符；`contentPipeline.js` 的保护映射把 VCP 私有语法、LaTeX 和代码围栏拆成互不干扰的词法岛，避免任意返回内容破坏宿主消息结构。
 - **稳定区/尾区 + morphdom**：稳定前缀完整处理一次后永久固化，只对不稳定尾部使用 morphdom 增量更新；长回复中已生成的 Mermaid、动画和工具块不会反复初始化。
@@ -442,7 +442,7 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 新稳定范围只解析和追加一次，并可立即执行完整后处理；之后不再参与每帧重建。剩余尾部使用 `stream-fast` 预处理和专门的 `parseStreamTailMarkdown()`。
 
-这种分段比“整条消息每帧 Marked + innerHTML”更重要：长回复的成本主要落在仍有歧义的最后一小段，已完成表格、图表、按钮或动画不会反复初始化。
+这种分段避免每帧对整条消息重跑 Marked 并整体替换 innerHTML：成本主要落在仍有歧义的最后一小段，已完成表格、图表、按钮或动画不会反复初始化。
 
 切回仍在流式的后台会话时，流管理器从 `restoreStableBlocksForRecreatedDom`（`streamManager.js:563-609`）恢复稳定区 DOM，再由帧渲染入口（同文件 `:1361` 起）继续追加新的稳定范围。
 
@@ -502,27 +502,27 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 
 主窗口配置了 `contextIsolation: true` 和 `nodeIntegration: false`，消息脚本不能直接 require Node 模块；脚本仍运行在聊天 renderer 的页面上下文，可以访问同源 DOM 和页面全局对象。
 
-## 当前渲染会话边界
+## 8. 当前渲染会话边界
 
 流式渲染器在当前快照中被置于 surface-owned consumer 之后：bridge 先识别操作，再把事件交给对应 surface 的 projection runtime；surface dispose 或路由撤销会解除该操作的投影权限。消息 Markdown、私有块协议、HTML 预览和最终化策略仍由既有渲染管线负责，因此这不是新的消息格式或安全沙箱；它主要避免不同聊天表面、旧 Topic 或迟到事件相互污染。
 
 依据：`modules/renderer/mainChatSurfaceAdapter.js:115-152`、`mainChatStreamConsumer.js:1-97`、`modules/chat/vcpStreamBridge.js:9-82`、`streamCoordinator.js:28-112`、`modules/renderer/streamProjectionRuntime.js`。
 
-## 8. 历史渲染、性能与生命周期
+## 9. 历史渲染、性能与生命周期
 
-### 8.1 历史不是虚拟列表
+### 9.1 历史不是虚拟列表
 
 `renderHistory()` 默认先渲染最新 5 条，再以每批 10 条、批间约 100 ms 的方式从近到远补旧消息。首批并行创建，用 DocumentFragment 一次插入；旧批次优先在空闲回调中插到列表顶部。
 
 这改善了首屏时间，但最终仍会把全部历史消息保留在 DOM 中。它是渐进装载，不是窗口化虚拟列表。
 
-### 8.2 render session
+### 9.2 render session
 
 每次历史切换会递增 render session。异步附件、Mermaid、批次插入和延迟高亮在提交前检查 session 与节点连接状态。旧会话的异步任务即使稍后完成，也不应写进新会话 DOM。
 
 该机制是聊天切换一致性的核心，和 AbortController 不同：它不一定取消底层工作，而是在提交点拒绝过期结果。
 
-### 8.3 延迟重型增强
+### 9.3 延迟重型增强
 
 旧历史消息即使基础 HTML 已插入，也可以将 KaTeX、Mermaid、脚本等重型步骤标记为 pending。`visibilityOptimizer.isMessageInHotZone()` 以滚动容器上下约 200 px 为热区；进入热区后再调用消息保存的 `_vcp_activateHeavy()`。
 
@@ -531,7 +531,7 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 1. 尚未执行重型后处理的历史消息，接近视口时才激活。
 2. 已运行的动画消息离开视口后暂停，回来时恢复。
 
-### 8.4 动态资源登记与回收
+### 9.4 动态资源登记与回收
 
 `visibilityOptimizer` 为每个消息节点保存：Anime.js 实例、Three.js context、Web Animations、Canvas/rAF、媒体、SVG、GIF/WebP、可暂停 timer 和 MutationObserver。它还会拦截 `Element.prototype.animate`，把后创建的 Web Animation 归属到最近的 `.message-item`。
 
@@ -546,33 +546,33 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 
 这也解释了为什么正文替换不能只设置一次 `innerHTML`：旧子树上的浏览器资源和模块外状态不会随 DOM 字符串自动释放。
 
-## 9. 实现中的关键取舍
+## 10. 实现中的关键取舍
 
-### 9.1 字符串转换优先于 AST
+### 10.1 字符串转换优先于 AST
 
 VCPChat 没有为 VCP 语法建立统一 AST，而是在 Marked 前通过有序字符串转换和占位映射构造 Markdown。优势是容易兼容模型输出中的非严格格式，也可以在现有 Marked 上逐步叠加协议。
 
 代价是顺序本身成为隐式 grammar：任何新规则都必须知道工具结果、工具请求、代码、LaTeX、HTML 和流式残缺块何时已被保护。`contentPipeline.js` 的价值主要是把这套顺序从散落调用提升为显式协议，而不是消除字符串处理。
 
-### 9.2 完整渲染与流式渲染接受短暂不一致
+### 10.2 完整渲染与流式渲染接受短暂不一致
 
 `stream-fast` 只做 Persona 尾部剥离、表情 URL、缩进修正、通用处理和粗体边界等轻量幂等变换。复杂 VCP 块在流中可能暂时显示为普通文本、半成品卡片或保守尾区。
 
 系统不要求每一个 token 时刻都与最终 DOM 等价，而是保证结束后完整重放得到权威结果。这是一种明确的性能取舍：流中优先稳定与低开销，收尾时优先语义完整性。
 
-### 9.3 “稳定区”进一步缩小单次更新范围
+### 10.3 “稳定区”进一步缩小单次更新范围
 
 30 FPS 和 chunk 合帧只能减少更新次数；稳定前缀则减少每次更新所覆盖的数据量。对长消息而言，后者将潜在的“文本长度 × 帧数”重复解析，收敛为“每个稳定块完整处理一次 + 小尾部多次 diff”。
 
 它同时保护运行时状态：已经生成的 Mermaid、按钮、媒体和动画岛可以离开 morphdom 的变化区域，不必依赖越来越复杂的 diff preserve 规则。
 
-### 9.4 富消息能力与运行时治理
+### 10.4 富消息能力与运行时治理
 
 原始 HTML、CSS、脚本、Canvas 和 Three.js 让模型输出具备交互能力。消息因而接近在宿主页面执行的小应用，需要对应的运行时治理。
 
 CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与资源回收，不改变代码运行的宿主上下文。
 
-## 10. 测试与可验证性现状
+## 11. 测试与可验证性现状
 
 `package.json` 没有测试脚本，也未发现直接覆盖主消息渲染链的自动化测试。源码中的保障主要来自：
 
@@ -594,7 +594,7 @@ CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与资�
 
 流式链还多出初始化状态、累计原文、稳定截止点、尾部目标 HTML和最终权威文本。当前实现允许通过函数边界和 `stepsApplied` 观察这些层，但仓库中没有把它们固化成回归样例。
 
-## 11. 关键文件索引
+## 12. 关键文件索引
 
 > 行号为当前 HEAD 实测近似值。
 

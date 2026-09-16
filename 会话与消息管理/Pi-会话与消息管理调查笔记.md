@@ -150,7 +150,7 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 ## 11. 恢复与压缩边界
 
-- 继续会话时，若既有 JSONL 文件末尾缺少换行，追加前会补齐分隔，避免后一条 entry 与前一条粘连；该恢复修正覆盖正常续写路径，而不是改变会话树的数据模型（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 修复项）。
+- 继续会话时，若既有 JSONL 文件末尾缺少换行，追加前会补齐分隔，避免后一条 entry 与前一条粘连；该恢复修正只作用于正常续写路径，不改变会话树的数据模型（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 修复项）。
 - 压缩和分支摘要不会向 provider 暴露可调用工具；若摘要在输出 token 上限处截断，结果不会写入会话。扩展还能收到带失败原因、重试状态和来源的 `session_compact_failed` 事件（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 相关条目）。
 
 ## 12. 关键源码索引

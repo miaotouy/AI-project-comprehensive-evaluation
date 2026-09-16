@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenClaw 是本地单操作者助手，本类目的能力落点分两类：把一次会话固化为**可读可传的本地交付物**，以及把会话+运行时轨迹打成**可交给维护者的脱敏支持包**。共存在四条相互独立、无共享管线的抽取→交付路径：
+OpenClaw 是本地单操作者助手，本类目的能力落点分两类：把一次会话固化为**可读可传的本地交付物**，以及把会话连同运行时轨迹打成**可交给维护者的脱敏支持包**。共存在四条相互独立、无共享管线的抽取→交付路径：
 
 - 消息会话内的 owner-only 命令 `/export-session`（别名 `/export`）把持久化 transcript 渲染成**自包含 HTML 阅读稿**并写入工作区（阅读交付，含分支树与 system prompt，离线可用）。
 - `/export-trajectory` 与 CLI `openclaw sessions export-trajectory` 把活动分支 transcript + 每轮运行的轨迹事件打成**脱敏 JSONL 支持包**，写入工作区 `.openclaw/trajectory-exports/`（数据交换/支持交付）。
@@ -25,7 +25,7 @@ OpenClaw 是本地单操作者助手，本类目的能力落点分两类：把�
 
 ## 系统边界与总体调用链
 
-会话持久化的事实源是本地 SQLite：per-agent DB（`agents/<agentId>/agent/openclaw-agent.sqlite`）存放 transcript 行，轨迹事件也在该库（`docs/tools/trajectory.md` 说明 live capture 不再写 session-adjacent JSONL sidecar）。导出端全部只读 transcript 行与轨迹行，在**操作者宿主的工作区**生成文件；聊天消息渠道里的导出命令由 Gateway 的 auto-reply 命令处理器执行，工具与文件写入同样发生在宿主。因此导出的数据边界 = 该 SQLite 中已持久化的活动分支 + 运行轨迹，而不是渠道聊天框里渲染出的内容。
+会话持久化的事实源是本地 SQLite：per-agent DB（`agents/<agentId>/agent/openclaw-agent.sqlite`）存放 transcript 行，轨迹事件也在该库（`docs/tools/trajectory.md` 说明 live capture 不再写 session-adjacent JSONL sidecar）。导出端全部只读 transcript 行与轨迹行，在**操作者宿主的工作区**生成文件；聊天消息渠道里的导出命令由 Gateway 的 auto-reply 命令处理器执行，工具与文件写入同样发生在宿主。因此导出的数据边界是该 SQLite 中已持久化的活动分支与运行轨迹，渠道聊天框里渲染出的内容不参与导出。
 
 两条 in-chat 命令都是 owner-only：处理器声明 ownerOnly 门禁，注册描述把 HTML 导出标为 “owner-only” 文件（`src/auto-reply/commands-registry.shared.ts:329-356`、`src/auto-reply/reply/commands-info.ts:279-302`），只有命令所有者（operator）能触发。这决定了导出的内容口径含 system prompt、工具 schema 与调用、轨迹等敏感材料。
 
@@ -39,7 +39,7 @@ OpenClaw 是本地单操作者助手，本类目的能力落点分两类：把�
 | Control UI 会话 `/export-session`（/export） | 会话文本留存 | 客户端内存中当前加载的实时消息 | 浏览器下载 `<chat-<assistant>-<时间戳>.md` |
 | iOS/macOS “Export Transcript”（macOS ⌘⇧E） | 移动/桌面导出并系统分享 | 客户端 `viewModel.messages` | `.md`（macOS 存盘面板；iOS 临时文件→系统分享 sheet） |
 
-in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts:328-412`）。实现事实里默认文件名是 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
+in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts:328-412`）。默认文件名为 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
 
 轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts:429-462`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts:103-194`）。in-chat 版本并不直接写盘，而是组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求走审批通道执行（`commands-export-trajectory.ts:275-304`）。
 
@@ -53,9 +53,9 @@ Control UI 与原生应用的 Markdown 导出口径窄得多：只取消息的�
 
 ## 3. 附件、资源与离线封装
 
-HTML 导出是强离线的自包含文件：会话数据以 base64 内嵌到 `<script id="session-data">`，marked.min.js、highlight.min.js 与模板 JS/CSS 全部由服务端拼接内嵌（`commands-export-session.ts:102-203`；vendor 资源在构建期生成），打开不需要网络。
+HTML 导出是自包含的离线文件：会话数据以 base64 内嵌到 `<script id="session-data">`，marked.min.js、highlight.min.js 与模板 JS/CSS 全部由服务端拼接内嵌（`commands-export-session.ts:102-203`；vendor 资源在构建期生成），打开不需要网络。
 
-模板对图片采用内联 data URL 渲染：user 图片块与工具结果的 image 块先过 MIME/纯 base64 校验再拼进 `<img src="data:...">`（`export-html/template.js` 的 `renderDataUrlImage`），非 data URL 的远端 markdown 图片会被展平。需要留意：图片只有以 base64 数据块存在于 transcript 内容时才会真正显示；持久化模型同时存在“managed media references”（`docs/web/control-ui.md` 记载图片以稳定 artifact id 引用），是否普遍携带可内联字节属未验证项。
+模板对图片采用内联 data URL 渲染：user 图片块与工具结果的 image 块先过 MIME/纯 base64 校验再拼进 `<img src="data:...">`（`export-html/template.js` 的 `renderDataUrlImage`），非 data URL 的远端 markdown 图片会被展平。图片只有以 base64 数据块存在于 transcript 内容时才会真正显示；持久化模型同时存在“managed media references”（`docs/web/control-ui.md` 记载图片以稳定 artifact id 引用），是否普遍携带可内联字节属未验证项。
 
 Control UI 的 Markdown 导出不含任何附件（text-only）。原生应用导出的 Markdown 会把消息内联附件折叠成一行占位 `[attachment: 文件名]`，不复制文件本身，也未把附件放进取出的 Markdown（`ChatTranscriptExporter.swift:104-115`）。三处 Markdown 交付物都依赖阅读方自行解释 Markdown 语法与占位符。
 
@@ -69,7 +69,7 @@ HTML 导出没有外置 schema，交付物即单文件静态页；内嵌数据�
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
-HTML 阅读稿是这类目中唯一的富内容再渲染器，`export-html/template.js` 承担全部离线渲染：Markdown 用定制 marked 渲染器（HTML 转义、链接/图片白名单处理，`safeMarkedParse` 与 renderers 段），代码块带高亮；工具调用按工具名做专用展示（bash 命令、read/write 文件路径与内容、结果输出折叠与行数显示等）；thinking 可折叠、工具输出可整体展开，另有排序树形侧栏、搜索与 Default/No-tools/User/Labeled/All 过滤，并通过 URL `leafId`/`targetId` 深链定位。导出模板有配套安全测试 `export-html/template.security.test.ts`（转义原始 HTML、MIME/纯 base64 校验、展平不安全图片与链接、属性转义等），渲染逻辑是静态确认过的可执行路径，视觉效果未运行验证。
+HTML 阅读稿是本项目里唯一的富内容再渲染器，`export-html/template.js` 承担全部离线渲染：Markdown 用定制 marked 渲染器（HTML 转义、链接/图片白名单处理，`safeMarkedParse` 与 renderers 段），代码块带高亮；工具调用按工具名做专用展示（bash 命令、read/write 文件路径与内容、结果输出折叠与行数显示等）；thinking 可折叠、工具输出可整体展开，另有排序树形侧栏、搜索与 Default/No-tools/User/Labeled/All 过滤，并通过 URL `leafId`/`targetId` 深链定位。导出模板有配套安全测试 `export-html/template.security.test.ts`（转义原始 HTML、MIME/纯 base64 校验、展平不安全图片与链接、属性转义等），渲染逻辑是静态确认过的可执行路径，视觉效果未运行验证。
 
 **未找到**把整段对话渲染成 PNG/JPEG/PDF 的能力：Control UI、TUI、原生应用内搜索 export/screenshot 的产物均为测试截图或组件内临时文件，无面向对话的整图/长图管线。Android 的 `ChatWidgetExport.kt` 只把内联 widget（嵌在会话里的独立 web 内容）WebView 截图导出到剪贴板/Downloads，捕获对象不是对话列表，归入生成式输出边界，不记为本类目能力。
 
@@ -87,7 +87,7 @@ Control UI 的会话深链（`/chat/<agent>/<slug>-<shortId>` 等，`docs/web/ur
 
 ## 9. 隐私、安全与内容治理
 
-两条 in-chat 导出都是 owner-only，群聊场景对敏感结果另有处理：`/export-trajectory` 在群聊找不到私有 owner 路由时直接拒绝，找到则把审批与结果私有投递给 owner，群内只回简短 ACK（`commands-export-trajectory.ts:73-96`、`docs/tools/exec-approvals-advanced.md` 的敏感 owner-only 群命令规则）。审批提示明说轨迹包可含 prompt、模型消息、工具 schema 与结果、运行时事件与本地路径，并给出“按秘密对待、分享前审查”的指引（`commands-export-trajectory.ts:99-115`）。HTML 导出**不脱敏**——它刻意含 system prompt、工具 schema 与轨迹分支，敏感性与轨迹包同级但无提示文案；回复只回路径与统计，不回正文。
+两条 in-chat 导出都是 owner-only，群聊场景对敏感结果另有处理：`/export-trajectory` 在群聊找不到私有 owner 路由时直接拒绝，找到则把审批与结果私有投递给 owner，群内只回简短 ACK（`commands-export-trajectory.ts:73-96`、`docs/tools/exec-approvals-advanced.md` 的敏感 owner-only 群命令规则）。审批提示明说轨迹包可含 prompt、模型消息、工具 schema 与结果、运行时事件与本地路径，并给出“按秘密对待、分享前审查”的指引（`commands-export-trajectory.ts:99-115`）。HTML 导出**不脱敏**——它含 system prompt、工具 schema 与轨迹分支，敏感性与轨迹包同级但无提示文案；回复只回路径与统计，不回正文。
 
 轨迹导出是唯一做内容清洗的路径：导出前对事件、manifest 与各 JSON/文本文件执行路径与工具载荷清洗——本地工作区路径替换为 `$WORKSPACE_DIR`，检测 home/state 路径与 secret-like 字段，连对象键名也做工具载荷清洗（`src/trajectory/export.ts:806-919`，配合 `sanitizeDiagnosticPayload`/诊断支持包清洗函数），文档另外列明会移除图片数据与已知 secret 字段并声明“redaction 是尽力而为”。HTML 模板端到端的安全性由渲染端转义而非内容清洗承担。
 

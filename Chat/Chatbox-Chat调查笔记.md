@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模型聊天系统，Electron 桌面 + Web 双端。核心特征：会话列表只认识 `SessionMetaRecord` 元信息，完全不知道 thread/fork/summary 的存在；首页是 id 固定为 `'new'` 的假会话，真正的 Session 直到发出第一条消息才创建；流式生成把"UI 立即刷新"和"落盘持久化"拆成两条频率完全不同的路径（UI 缓存逐 token、落盘 2 秒节流）；Agent 模式、知识库、网页浏览在架构上是同一个工具注册管线里的三个开关，而不是三套独立的 prompt 拼接逻辑。thread（同会话历史区间）、fork（消息位置平行分支）、summary（消息级压缩标记）、starred（侧栏分组）是四套互不隶属的数据结构，唯一交叉点是"move thread to conversations"把 thread 转成新顶层会话。
+Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模型聊天系统，Electron 桌面 + Web 双端。核心特征：会话列表只认识 `SessionMetaRecord` 元信息，不知道 thread/fork/summary 的存在；首页是 id 固定为 `'new'` 的假会话，Session 直到发出第一条消息才创建；流式生成把 UI 立即刷新与落盘持久化拆成两条频率不同的路径——UI 缓存逐 token 更新，落盘按 2 秒节流。
+
+Agent 模式、知识库、网页浏览在架构上是同一个工具注册管线里的三个开关，共用同一套工具装配而非各自拼接 prompt。thread（同会话历史区间）、fork（消息位置平行分支）、summary（消息级压缩标记）、starred（侧栏分组）是四套互不隶属的数据结构，唯一交叉点是 move thread to conversations——把 thread 转成新顶层会话。
 
 ## 产品表面与系统边界
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Compose 构建，只有一个 Compose 导航栈。公共界面基础设施没有集中的 Overlay Host 或全局 Store，而是以五组 CompositionLocal 下发：导航控制器、设置快照、Toast 队列、共享元素作用域与朗读识别状态。弹窗与底部表由各页面自行组合 Material3 组件，不存在统一浮层表，遮罩与关闭语义依赖 Material3 默认行为。
+RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Compose 构建，只有一个 Compose 导航栈。公共界面基础设施没有集中的 Overlay Host 或全局 Store；跨页面能力以五组 CompositionLocal 下发：导航控制器、设置快照、Toast 队列、共享元素作用域与朗读识别状态。弹窗与底部表由各页面自行组合 Material3 组件，不存在统一浮层表，遮罩与关闭语义依赖 Material3 默认行为。
 
 主题是其中最集中的一块：明暗模式、动态取色、预置与自定义主题统一在 `RikkahubTheme` 解析，并叠加 AMOLED 纯黑、扩展色板、Expressive 动效与系统栏图标明暗。配色与自定义主题落盘 DataStore，色模式、AMOLED、启动是否新建会话等界面语义开关另走 SharedPreferences，形成两条持久化轨道。
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPMobile 不把普通 Markdown 完全交给浏览器即时解析。Rust 在消息写入/读取阶段把内容编译为结构化 blocks 和 Markdown AST，并压缩保存到 `render_cache`；Vue 的 `MessageRenderer` 将这些 AST 转成 HTML，同时为流式尾部应用稀疏 AST mutation。该设计把常规历史读取与流式 UI 的渲染成本分开。
+VCPMobile 在 Rust 侧预渲染消息内容：消息写入/读取阶段把内容编译为结构化 blocks 和 Markdown AST，并压缩保存到 `render_cache`；Vue 的 `MessageRenderer` 将这些 AST 转成 HTML，同时为流式尾部应用稀疏 AST mutation。该设计把常规历史读取与流式 UI 的渲染成本分开。
 
 ## 总体渲染链路
 

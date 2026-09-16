@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPChat 的单聊请求直连 VCP 服务器（`fetch(vcpServerUrl)`），群聊由主进程 `groupchat.js` 编排多 Agent 串行发言。最突出的结论：
+VCPChat 的单聊请求直连 VCP 服务器（`fetch(vcpServerUrl)`），群聊由主进程 `groupchat.js` 编排多 Agent 串行发言。
 
 - **单聊中断是不完整的**：`interrupt-vcp-request` handler 没有本地 `AbortController`，只向远端发一个 `/v1/interrupt` 信号；真正在跑的 `send-to-vcp` 流式读取没有任何客户端超时。同一功能在群聊侧（`groupchat.js`）却是本地 abort + 60 秒超时的完整实现（第 7 节）。
 - 仓库里留着一份实现正确但**从未被 require 的 `modules/vcpClient.js`**（完整 `AbortController` 管理 + 300 秒超时），疑似一次未完成的重构（7.2）。
@@ -49,7 +49,7 @@ renderer.js 发送/中断事件
 
 ## 3. 预算、截断、摘要与压缩
 
-话题标题自动总结是 VCPChat 唯一的"摘要类"能力，单聊与群聊两条路径健壮性不对等：
+话题标题自动总结是 VCPChat 唯一的"摘要类"能力，单聊与群聊分别由 `topicSummarizer.js` 与 `topicTitleManager.js` 实现，两者的超时保护不同：
 
 ### 3.1 单聊路径：无超时保护
 
@@ -58,7 +58,7 @@ renderer.js 发送/中断事件
 - 当前选中项类型是 agent（`currentSelectedItem.type === 'agent'`）、历史至少两轮对话（`currentChatHistory.length >= 4`）、且存在 `currentTopicId`；
 - 重新从磁盘拉取最新 agent 配置后，仅当 topic 名是默认名（`name === "主要对话"` 或以 `"新话题"` 开头，`:920-923`）才调用 `messageRenderer.summarizeTopicFromMessages`（最终转发到 `window.summarizeTopicFromMessages`，即 `modules/topicSummarizer.js:11`）请求 AI 总结，成功后 `electronAPI.saveAgentTopicTitle` 落盘（`:927`）。
 
-**关键发现：单聊总结请求没有超时保护。** `modules/topicSummarizer.js` 里的 `summarizeTopicFromMessages` 直接对 VCP 服务器发起 fetch（`:44-56`），**没有 `AbortController`，也没有 `setTimeout` 兜底**。如果服务器对这次总结请求没有响应或响应极慢，这个 `await fetch` 会一直挂着；而 `attemptTopicSummarizationIfNeeded` 是在正常发消息流程收尾时 `await` 调用的（`renderer.js:569`），虽然不会阻塞其它消息发送（它是独立触发的异步回调），但也没有任何机制探测或中止这个悬挂请求。
+`modules/topicSummarizer.js` 里的 `summarizeTopicFromMessages` 直接对 VCP 服务器发起 fetch（`:44-56`），没有 `AbortController`，也没有 `setTimeout` 兜底。如果服务器对这次总结请求没有响应或响应极慢，这个 `await fetch` 会一直挂着；而 `attemptTopicSummarizationIfNeeded` 是在正常发消息流程收尾时 `await` 调用的（`renderer.js:569`），虽然不会阻塞其它消息发送（它是独立触发的异步回调），但也没有任何机制探测或中止这个悬挂请求。
 
 ### 3.2 群聊路径：20 秒超时
 
@@ -67,13 +67,13 @@ renderer.js 发送/中断事件
 - `groupHistory.length >= MIN_MESSAGES_FOR_SUMMARY(=4)`，且当前话题名是默认名集合（`DEFAULT_TOPIC_NAMES = ["主要群聊"]`）中的一个，或以 `"新话题"` 开头（`:8`, `:151`）；
 - 清洗逻辑 `cleanSummarizedTitle`（`:15-30`）去掉标点、数字编号、常见前后缀，截断到 15 字符；清洗后为空则回退 `"AI总结话题"` 常量，且最终标题等于该回退值或与原标题相同时**不会**写回（`:184-188`），避免把占位字符串当真标题存进配置。
 
-也就是说**同一功能（话题自动总结）在单聊和群聊两条代码路径里的健壮性不对等**——群聊有超时保护，单聊没有。这是本次调查发现的具体设计缺口。总结结果写入 `topics[]` 元数据的数据语义见会话与消息管理笔记 2.3。
+总结结果写入 `topics[]` 元数据的数据语义见会话与消息管理笔记 2.3。
 
 ## 4. SDK、Provider、模型与协议交接
 
 - 单聊请求在 `send-to-vcp` handler（`modules/ipc/chatHandlers.js:855-1270`）内：读 `settings.json` 拿服务器地址与 API key，拼出最终 URL 后直接 `fetch`，没有 SDK 或 Adapter 层。当前 HEAD 发送前还会清理未设置的采样参数（`omitUnsetOptionalModelParams`，`:95-118`、`:1064`）并附加 `vcpchatExtensions.requestContext`（`:53-82`、`:1071`）。
 - 群聊：主进程按 agent 逐个发起 fetch（`Groupmodules/groupchat.js:864-865` 带 60 秒 `AbortController` 超时）；群聊 assistant 消息记录 `model/modelSource`（`'group_unified'` 或 `'agent'`，`:950`），说明请求携带的模型标识同时落盘为消息字段。
-- `modules/vcpClient.js` 中存在一份完整的 `sendToVCP`/`interruptRequest` 实现（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（`main.js` 里注册的是 `chatHandlers.initialize`，且注释声明 VCP 服务器通信已改由 `modules/ipc/chatHandlers.js` 负责）——`vcpClient.js` 是彻底的死代码/被架空的重构半成品，真正跑的还是 `chatHandlers.js` 里那份没有本地 abort、也没有请求超时的实现。
+- `modules/vcpClient.js` 中存在一份完整的 `sendToVCP`/`interruptRequest` 实现（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（`main.js` 里注册的是 `chatHandlers.initialize`，且注释声明 VCP 服务器通信已改由 `modules/ipc/chatHandlers.js` 负责）——`vcpClient.js` 没有被任何代码引用，实际执行的是 `chatHandlers.js` 里那份没有本地 abort、也没有请求超时的实现。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
@@ -89,7 +89,7 @@ renderer.js 发送/中断事件
 - 文本选择（`:2249-2269` 附近）：优先用本地累积的流文本，但若主进程兜底文本（`finalPayload.fullResponse`）更长，或包含 `[!WARNING]` 标记（说明是错误恢复场景），就改用兜底文本——这是为了兼容"流式中途出错、主进程把已收到的部分文本通过 error 事件的 `fullResponse` 字段回传"的场景（对应 `renderer.js:605-609` 给错误消息追加"流式响应中断"提示）。
 - 找到历史数组里对应消息，写回 `content`/`finishReason`/`isThinking=false`（`:2286-2295` 附近）；当前视图会同步刷新 DOM 和 `currentChatHistoryRef`（`:2286-2362` 附近）。
 - 存盘走 `debouncedSaveHistory`（**1 秒防抖**，`streamManager.js:348-375`），但**群聊消息永远不在这里存盘**——`saveHistoryForContext` 一进来就检查是否群聊消息并直接返回（`:379-383`），注释解释是"群聊由主进程 `groupchat.js` 作为历史单一真源，避免渲染进程重复保存造成竞态"（群聊落盘点与数据语义见会话与消息管理笔记 6.1）。
-- 群聊侧 `AbortError` 分支（`Groupmodules/groupchat.js:1030-1039`）会把已累积的响应连同 `interrupted:true` 标记写入 `groupHistory` 并发 `'end'` 事件——**中断即真正停止本地流读取，并把已生成部分落盘**，这条路径设计是自洽的。
+- 群聊侧 `AbortError` 分支（`Groupmodules/groupchat.js:1030-1039`）会把已累积的响应连同 `interrupted:true` 标记写入 `groupHistory` 并发 `'end'` 事件，即中断会停止本地流读取并落盘已生成部分。
 
 ## 7. 停止、重试、续写与重新生成
 
@@ -103,13 +103,11 @@ renderer.js 发送/中断事件
   - 它只读 `settings.json` 拿服务器地址与 API key，拼出 `/v1/interrupt` URL 后发一次 `fetch`（`{method:'POST', body:{requestId: messageId}}`，`:1292-1301`）就返回；
   - 真正在跑的流式请求（同文件 `send-to-vcp`，`:855-1270`）发起 `fetch` 时**没有创建/传入任何 `AbortController.signal`**（`:1100-1112` 附近），拿到响应体 reader 后交给 `processStream`（`:1181-1241`）一直 `await reader.read()` 直到服务端主动结束流或连接关闭。
 
-  换句话说，单聊场景点击"中止回复"，**本地读取循环完全不会被打断**，UI 上是否真正停止完全取决于远端 VCP 服务器收到 `/v1/interrupt` 后是否老实地停止推送、关闭响应流。如果远端没有及时响应（网络问题、服务端 bug、或者 `/v1/interrupt` 本身在代理链路的某一跳没被正确转发），前端会一直显示"中止已发送"的 toast，但实际内容仍会持续流入直到远端自己断流。
+  单聊场景点击"中止回复"，本地读取循环不会被打断，UI 上是否停止取决于远端 VCP 服务器收到 `/v1/interrupt` 后是否停止推送并关闭响应流。如果远端没有及时响应（网络问题、服务端 bug、或者 `/v1/interrupt` 本身在代理链路的某一跳没被正确转发），前端会一直显示"中止已发送"的 toast，但实际内容仍会持续流入直到远端自己断流。
 
 ### 7.2 死代码对照：vcpClient.js
 
-与此形成对照的是：仓库里还存在一份 `modules/vcpClient.js`，其中的 `sendToVCP`/`interruptRequest` 实现了**完整**的本地 `AbortController` 管理（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），本应是正确的单聊中断实现，但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（引用证据见第 4 节），且当前 HEAD 它还同步应用了 `requestContext` 与参数省略两处修改（现 589 行，依然没有引用方）。相应地，单聊的 VCP 请求也**没有任何客户端超时**（群聊侧在 `groupchat.js:865` 有明确 60 秒 `AbortController` 超时；单聊侧无对应机制），如果远端挂死，单聊窗口会无限等待，中止按钮也救不了。
-
-**这是本次调查里最值得写进结论的设计问题**：中断能力在群聊和单聊之间不对称实现，单聊缺乏客户端超时和真正的本地中断，是一个真实存在、有代码证据的可靠性缺口。
+与此形成对照的是：仓库里还存在一份 `modules/vcpClient.js`，其中的 `sendToVCP`/`interruptRequest` 实现了**完整**的本地 `AbortController` 管理（`activeRequests` Map，`vcpClient.js:7`；`:334-337` 带 300 秒超时自动 abort），本应是正确的单聊中断实现，但全仓库 grep 确认它**从未被 `main.js` 或任何其它文件 `require`**（引用证据见第 4 节），且当前 HEAD 它还同步应用了 `requestContext` 与参数省略两处修改（现 589 行，依然没有引用方）。相应地，单聊的 VCP 请求也没有客户端超时（群聊侧在 `groupchat.js:865` 有明确 60 秒 `AbortController` 超时），远端挂死时该请求会一直等待。
 
 ### 7.3 重试与续写
 
@@ -143,25 +141,25 @@ renderer.js 发送/中断事件
 - 附件：user 消息携带 `attachments` 数组（`modules/chatManager.js:992-1002`），附件如何进入请求体**未在原调查中核实**。
 - VCPChat 是 VCPToolBox 的官方桌面前端：消息结构、会话存储与 VCPToolBox 请求编排的对应关系见 [`../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
 
-## 当前流式任务协调
+## 10. 当前流式任务协调
 
 当前 renderer 通过 VCP stream bridge 和 coordinator 将服务端事件关联到具有 conversation key 与 generation 的流 session；当 surface 已撤离或路由被回收，后到事件不会再交给旧视图。该机制解决的是客户端投影与收尾顺序，不替代 HTTP 请求本身的取消、超时或远端 interrupt 协议：主聊天的请求、上下文装配和模型端点仍由 `chatHandlers` 持有，工具循环仍在外部 VCP 服务端。
 
 依据：`modules/chat/vcpStreamBridge.js:9-82`、`streamCoordinator.js:28-112,253-277`、`streamSession.js:21-91`、`modules/renderer/mainChatStreamConsumer.js:1-97`、`modules/ipc/chatHandlers.js`。
 
-## 10. 退出恢复、日志与已确认边界
+## 11. 退出恢复、日志与已确认边界
 
 - 切换会话、关闭窗口、应用退出时正在进行的任务如何处理：**未在原调查中核实**（流式期间的消息以临时 `isThinking` 状态驻留内存，落盘时机见第 6 节）。
 - 已确认边界：单聊无本地 abort、无客户端超时；群聊本地 abort + 60 秒超时；话题自动总结单聊无超时、群聊 20 秒超时。
 
-## 11. 未验证事项
+## 12. 未验证事项
 
 - 远端 `/v1/interrupt` 未及时响应时单聊 UI 行为（"中止已发送" toast 后内容继续流入）需要运行验证。
 - 群聊多次调用之间并发覆盖写的风险未验证是否实际触发过（会话与消息管理笔记 6.1）。
 - 单聊上下文拼装顺序、附件进入请求体的方式、重试/续写的请求重建语义未核实。
 - 切换会话、退出时任务收尾行为未核实。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - `renderer.js`：`interruptActiveResponseFromSendButton` `:200-247`，`handleSendButtonAction` `:249-258`，`onVCPStreamEvent` 分发 `:540-764`，错误消息"流式响应中断"提示 `:605-609`
 - `modules/chatManager.js`：`handleSendMessage` `:949-1450`，`attemptTopicSummarizationIfNeeded` `:896-947`

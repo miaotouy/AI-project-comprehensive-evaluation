@@ -16,7 +16,7 @@
 
 OpenCode 以「SQLite 持久化 + 事件发布 + 客户端投影」为会话数据核心：消息模型是 Session → Message（role: user/assistant）→ Part（12 种类型）三层，part 独立存表、读取时组装。`updateMessage`/`updatePart` 只发布事件，DB 写入由事件投影器完成（packages/opencode/src/session/session.ts:631-645、packages/core/src/session/projector.ts:262-330）——写入与广播强耦合，事件顺序即持久化顺序。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **ID 体系**：三类 id 前缀与编码方向见下；ID 主体是时间戳×0x1000 加计数器，再拼 14 字节随机 base62（`packages/schema/src/identifier.ts:14-29`、`packages/schema/src/session-id.ts:5-14`、`packages/opencode/src/id/id.ts:51-70`）：
   ```text
@@ -99,7 +99,7 @@ POST /session（创建，groups/session.ts:203-214）-> createNext 生成 ses_ i
 ## 2. 事实源、索引与持久化
 
 - **SQLite 位置**：数据库文件为 `Global.Path.data` 下的 `opencode.db`（路径拼接见 `packages/core/src/database/database.ts:43-55`，非 latest/beta/prod 渠道时按渠道加后缀）；启动时设置 WAL 等 PRAGMA 并执行迁移（:27-33）。迁移文件在 `core/src/database/migration/`（38 个，含 V2 会话相关）。
-- **事件即写入**：`Session.updateMessage/updatePart` 本身只发布事件，DB 写入由事件投影器完成——`message.updated` 事件 upsert 消息表、`part.updated` 事件 upsert part 表并加减 usage（`session.ts:631-645`；投影器在 `projector.ts:262-330`）。写入与广播强耦合，事件顺序即持久化顺序。
+- **事件即写入**：`Session.updateMessage/updatePart` 本身只发布事件，DB 写入由事件投影器完成——`message.updated` 事件 upsert 消息表、`part.updated` 事件 upsert part 表并加减 usage（`session.ts:631-645`；投影器在 `projector.ts:262-330`）。
 - **写入时机（V1 主链路）**：
   - prompt：user message 与 parts 立即落库（prompt.ts:1046-1047），agent/model 不一致时 `setAgentModel` 同步到 session 行（:672-689、session.ts:767-778）。
   - stream：assistant message 进入循环时先落库（prompt.ts:1186-1201）；流式 part 由 processor 逐个 `updatePart`/`updatePartDelta`（processor.ts:280-313、:499-532）。
@@ -137,7 +137,7 @@ POST /session（创建，groups/session.ts:203-214）-> createNext 生成 ses_ i
   4. 计算 diff 写入存储并发布 `session.diff`（:76-78），`setRevert` 持久化（:79-87）。
 - 回退范围：再次 prompt 前 `revert.cleanup`（:101-124）删除目标之后的消息——无 partID 时从目标轮次的最后一个 user 消息之后全部删除；有 partID 时保留该 user 消息、仅删 partID 起的 parts。
 - 目标与范围用 `findIndex`+`slice` 定位（:74-75、:106-114），不用 id 大小比较（导入消息 id 可能非单调）。
-- `unrevert` 恢复文件并清空回退状态（:91-99）。回退改的是原消息链（删除），不是新建分支节点。
+- `unrevert` 恢复文件并清空回退状态（:91-99）。回退改的是原消息链（删除），不新建分支节点。
 - **分支（fork）**：`POST /session/:id/fork`（`session.ts:693-734`）新建会话并复制截至某消息（缺省全部）的消息/parts：
   - 标题 `(fork #N)` 递增（:161-169）；
   - 复制边界由 `findIndex` 定位（:706）；
@@ -160,7 +160,7 @@ POST /session（创建，groups/session.ts:203-214）-> createNext 生成 ses_ i
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **事件即写入**：写入与广播强耦合，事件顺序即持久化顺序——简化一致性问题，代价是投影器顺序消费（projector.ts 的 events.project 各事件分支）。
+- **事件即写入**：消息写入与广播绑定在同一条事件流上，一致性问题因此简化，代价是投影器必须按事件顺序消费（projector.ts 的 events.project 各事件分支）。
 - **多窗口**：SSE 事件全量广播，多个窗口各自订阅同一事件流、独立投影到各自 store，无专门同步层（静态推断，见 Chat UI 笔记）。
 - **流式临时状态**：`part_text_accum_delta` 在客户端累积，结束事件完整替换（渲染器笔记）；断线重连与事件乱序下的文本合并正确性未实测。
 - **乐观更新**：store 按时间序键（`messageKey = time.created + id`，`app/src/utils/session-message.ts:21`）二分插入/替换并删除累积状态（`server-session.ts:1053`、`event-reducer.ts:272-339`；TUI 端同改，`tui/src/context/sync.tsx:55-58, 328`）。
@@ -180,7 +180,6 @@ POST /session（创建，groups/session.ts:203-214）-> createNext 生成 ses_ i
 
 ## 9. 设计取舍与已确认边界
 
-- **事件即写入**：DB 写入与广播强耦合，事件顺序即持久化顺序（第 2 节）。
 - **压缩改写历史而非删历史**：compaction 消息保留在链中，通过重排与 `time.compacted` 标记控制模型可见性（message-v2.ts:521-572；旧 tool 输出在 replay 时标 `[Old tool result content cleared]` :294）。
 - **revert 删除而非分支**：回退直接删消息，fork 才复制新会话（第 4 节）。
 - **消息内容不建全文索引**：仅标题搜索，长会话依赖分页与虚拟化（第 5 节）。

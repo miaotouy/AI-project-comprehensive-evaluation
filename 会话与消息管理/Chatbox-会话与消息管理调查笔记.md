@@ -17,7 +17,7 @@
 Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地持久化的业务对象：
 
 - 会话列表（sidebar）只认识 `SessionMetaRecord`（标识、名称、置顶、归档与排序等元信息），完全不知道 thread、fork、summary 这些"消息级"结构的存在（见第 1 节证据）。
-- 首页是一个"假会话"（id 固定为字符串 `'new'`），真正的 `Session` 记录直到用户发出第一条消息才被创建（第 3 节）。
+- 首页是一个"假会话"（id 固定为字符串 `'new'`），`Session` 记录直到用户发出第一条消息才被创建（第 3 节）。
 - 消息事实源是**双写**：完整 Session 对象写通用 `storage`，meta 记录写 IndexedDB `session-meta`，两者都要保持同步。
 - thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复可折叠为分支组）、summary（消息级压缩标记）与 starred（置顶分组）是**四套独立的数据结构**，唯一的交叉点是"move thread to conversations"会把 thread 转成新的顶层会话（第 1 节）。
 - 归档 = `hidden: true` + `archivedAt` 时间戳，不删除任何数据；恢复归档不会重置 `sortOrder`。
@@ -57,7 +57,7 @@ Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地�
 
 产生 thread 的时机（均在 `stores/session/threads.ts`）：
 
-- `switchThread(sessionId, threadId)`（`threads.ts:68-109`）：把**当前**消息打包成一个新 thread 塞进 `session.threads`，再把目标 thread 的消息换上来做当前消息——本质是"交换当前窗口与某个历史窗口"（经 `updateSessionWithMessages` 的队列 current 回调完成），且压缩点随各自消息列表一起交换（归档的 thread 保留当前会话的压缩点，恢复的会话取目标 thread 自己的压缩点，见 `threads.ts:89-106` 注释与代码）；
+- `switchThread(sessionId, threadId)`（`threads.ts:68-109`）：把**当前**消息打包成一个新 thread 塞进 `session.threads`，再把目标 thread 的消息换上来做当前消息——即"交换当前窗口与某个历史窗口"（经 `updateSessionWithMessages` 的队列 current 回调完成），且压缩点随各自消息列表一起交换（归档的 thread 保留当前会话的压缩点，恢复的会话取目标 thread 自己的压缩点，见 `threads.ts:89-106` 注释与代码）；
 - `refreshContextAndCreateNewThread`/`startNewThread`（`threads.ts:115-148, 150-157`）：把当前消息整个存成一条新 thread，当前消息清空成只留 system prompt，`compactionPoints` 清空；
 - `compressAndCreateThread`（`threads.ts:195-252`，上下文压缩/摘要功能触发）：同样把旧消息存成 thread，当前消息替换为"system prompt + 一条包含压缩摘要文本的 user 消息"，并清空 `messageForksHash` 与 `compactionPoints`。
 
@@ -100,9 +100,9 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 ### 1.5 ForkMarker：唯一真正打通"消息级"与"会话级"的地方
 
-`Message.isForkMarker` + `forkedFromSessionId`（`src/shared/types/session.ts:332-333`）是第四个概念：把 thread 挪成独立会话、或复制会话时，复制流程（`crud.ts:53-123`）会在**新会话**顶部插入一条 `isForkMarker: true` 的助手消息，该字段指回源会话 id。**这是唯一一处"消息级分支"和"侧栏新增一个会话条目"产生真实关联的地方**——把一段 thread 历史"独立"出来，本质是新建一个真正的会话元记录。
+`Message.isForkMarker` + `forkedFromSessionId`（`src/shared/types/session.ts:332-333`）是第四个概念：把 thread 挪成独立会话、或复制会话时，复制流程（`crud.ts:53-123`）会在**新会话**顶部插入一条 `isForkMarker: true` 的助手消息，该字段指回源会话 id。**这是唯一一处"消息级分支"和"侧栏新增一个会话条目"产生真实关联的地方**——把一段 thread 历史"独立"出来，就是新建一个会话元记录。
 
-**结论**：会话列表分组（starred）、thread（同会话内的历史区间）、fork（同一消息位置的平行分支）、summary（消息级压缩标记）是四套完全独立的数据结构和交互面，唯一的交叉点是"move thread to conversations"这个操作会把 thread 数据转成一个新的顶层会话。
+**结论**：会话列表分组（starred）、thread（同会话内的历史区间）、fork（同一消息位置的平行分支）、summary（消息级压缩标记）是四套彼此独立的数据结构和交互面，唯一的交叉点是"move thread to conversations"这个操作会把 thread 数据转成一个新的顶层会话。
 
 ## 2. 事实源、索引与持久化
 
@@ -178,7 +178,7 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 
 删除前会先调 `confirmSessionDeletion(id)`（`chatStore.ts:440-457`）：仅桌面端、且仅当该会话在沙箱里有可下载产物（`platform.sandboxHasArtifacts`）时才弹"删除会话将永久删除这些文件"的确认框；这个确认逻辑同时被 `routes/settings/archive.tsx:136`（归档列表里的删除按钮）复用。
 
-**数据恢复（本次新增核实）**：`recoverSessionList`（`chatStore.ts:975-1033`）扫描通用 storage 全部 `session:` 前缀 key，逐个读取完整会话重建 meta 记录（排序值按首条消息时间戳），清空 meta 后全量重写——这是"meta 表损坏/丢失后从完整会话重建列表"的恢复路径。
+**数据恢复**：`recoverSessionList`（`chatStore.ts:975-1033`）扫描通用 storage 全部 `session:` 前缀 key，逐个读取完整会话重建 meta 记录（排序值按首条消息时间戳），清空 meta 后全量重写——这是"meta 表损坏/丢失后从完整会话重建列表"的恢复路径。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -213,7 +213,7 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 - **首次创建时内联**：工作目录、全权限开关与 agentMode 在 `createPersistedChatSession` 里直接内联进新会话的 `settings`（3.1）；正式会话的 agentMode 也有持久化路径：`setSessionAgentMode`（`stores/session/agent-mode.ts:101` 起）写 `session.settings.agentMode`。
 - **知识库**：前端状态只存 `Pick<KnowledgeBase, 'id'|'name'>` 句柄（`uiStore.sessionKnowledgeBaseMap` 或新会话的 `newSessionState.knowledgeBase`），绑定以会话 id 为 key；真实检索发生在生成阶段（见对话请求与上下文笔记）。
 - **Copilot**：选中 copilot 时把会话的 `copilotId` 设成该 id，并把 `session.messages[0]` 设成 `{ role: 'system', contentParts: [{type:'text', text: copilot.prompt}] }`（`routes/index.tsx:211-234`）——创建出来的仍然是一个普通 chat 类型会话，只是多了该字段用于用量统计（`routes/index.tsx:302-306`）。
-- **网页浏览**：`sessionWebBrowsingMap`（`uiStore.ts:36`）按会话 id 保存布尔开关。**本次新核实**：uiStore 使用 zustand 持久化中间件（`uiStore.ts:20-21`），`partialize` 只持久化下列五个字段（`:235-241`）：
+- **网页浏览**：`sessionWebBrowsingMap`（`uiStore.ts:36`）按会话 id 保存布尔开关。uiStore 使用 zustand 持久化中间件（`uiStore.ts:20-21`），`partialize` 只持久化下列五个字段（`:235-241`）：
   - `widthFull`
   - `showCopilotsInNewSession`
   - `sidebarWidth`

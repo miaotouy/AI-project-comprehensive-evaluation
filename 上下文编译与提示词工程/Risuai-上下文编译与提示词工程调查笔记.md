@@ -17,7 +17,7 @@
 - Risuai 的请求上下文由 `sendChat` 编译：它先建立各来源的分组桶，再以提示词模板卡片的顺序，或无模板时的旧式 `formatingOrder`，生成最终消息数组。模板中的 persona、描述、作者注和记忆卡可指定 user、assistant 或 system；未指定时为 system。最终数组交给 `requestChatData`，而非编辑器预览，是模型可见结果的依据（`src/ts/process/index.svelte.ts:410-611, 1271-1497`）。
 - lorebook 是位置和深度都参与编译的规则来源。激活条目可进入普通 lorebook 桶、围绕角色描述的位置、收尾桶或历史深度；正文中的 `@@role` 优先于条目的默认角色，位置引用可递归解析至五层（`src/ts/process/index.svelte.ts:498-611, 1056-1066`）。原笔记确认其扫描角色、聊天和模块三层词条，但未涵盖词条的持久化 schema、编辑和导入导出语义。
 - 触发脚本与 Lua 钩子处在不同阶段：`start` 可追加提示或停止发送，`request` 在每次模型尝试前改写已拼装数组，`output` 在流结束后运行；Lua `editRequest` 位于最终拼装后、请求前。正则脚本另有 editinput、editprocess、editoutput、editdisplay 四种模式，但本次已有证据只追到前三者的调用，不能由配置名推断 editdisplay 的实际显示效果。
-- 输出处理不会直接证明请求被改写。流式块在消费端经 editoutput 后整体写回占位消息；`output` 触发脚本、inlay、插件监听与 TTS 在流结束后依次执行。它们属于生成后消息生命周期或后续副链，而非本轮输入的请求层编译（`src/ts/process/index.svelte.ts:1591-1793`）。
+- 输出处理发生在模型生成之后，不构成请求被改写的证据。流式块在消费端经 editoutput 后整体写回占位消息；`output` 触发脚本、inlay、插件监听与 TTS 在流结束后依次执行。它们属于生成后消息生命周期或后续副链，而非本轮输入的请求层编译（`src/ts/process/index.svelte.ts:1591-1793`）。
 - 可解释性表面包括 DevTool/快捷键的 preview 模式，可核对 `requestChatData` 实际收到的消息数组；fetch 日志以 chatId 关联请求，且源码存在输出完整 prompt 与记忆数据的 `console.log`。预览是否覆盖每一种规则组合及其与最终网络 payload 的一致性，尚未运行验证。
 
 ## 系统边界与规则编译主链

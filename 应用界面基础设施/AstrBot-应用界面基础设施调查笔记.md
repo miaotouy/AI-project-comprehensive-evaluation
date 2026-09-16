@@ -113,7 +113,7 @@ HTTP 层有统一拦截：对 401（非认证接口）清空 token 并跳 `/auth
 
 定义在 `src/theme/LightTheme.ts`（PurpleTheme）与 `DarkTheme.ts`（PurpleThemeDark），是两份完整的 ThemeTypes 颜色对象（colors 共 35 个槽位，其中 25 个自命名，如 lightprimary、containerBg、chatMessageBubble、mcpCardBg、codeBg，另有 facebook/twitter/linkedin 品牌色、gray100/primary200/secondary200 等；
 
-variables 还有 border-color、carousel-control-size 两项），**不是 CSS 变量 token 体系**；
+variables 还有 border-color、carousel-control-size 两项），**定义本身不是 CSS 变量 token 文件**；
 
 运行时权威是 Pinia customizer 的 uiTheme，经两条路径生效：FullLayout 绑定 v-app 的 theme，main.ts 对齐 Vuetify 全局主题名称，供 useTheme 消费者判断明暗（见 `FullLayout.vue:93`、`main.ts:74`）。
 
@@ -137,7 +137,7 @@ variables 还有 border-color、carousel-control-size 两项），**不是 CSS �
 
 项目自定义 CSS 变量共 10 个，主要覆盖 CJK 字体、代码颜色、菜单阴影和六个滚动条状态。滚动条颜色继续引用 Vuetify 的主色与表面色，并同时适配 WebKit 和 Firefox。（`_variables.scss:17-19`；`components/_VScrollbar.scss:4-9`）
 
-Vuetify 把 theme 对象生成 `--v-theme-*` CSS 变量，被业务组件与 scss 直接消费（grep `var(--v-theme-` 全 src 命中 100+ 处且被截断，含自定义槽位 `--v-theme-secondaryText`、`--v-theme-border`、`--v-theme-mcpCardBg`、`--v-theme-codeBg` 等）——即"JS theme 对象为权威、运行时以 CSS 变量扩散"的混合模式，并非纯对象直连。
+Vuetify 把 theme 对象生成 `--v-theme-*` CSS 变量，被业务组件与 scss 直接消费（grep `var(--v-theme-` 全 src 命中 100+ 处且被截断，含自定义槽位 `--v-theme-secondaryText`、`--v-theme-border`、`--v-theme-mcpCardBg`、`--v-theme-codeBg` 等）——权威仍是 JS theme 对象，但组件与 scss 实际消费的是 Vuetify 生成的 CSS 变量。
 
 深色适配不只在 `_override.scss:102-131`（scrim 更黑、surface 背景、代码色、扁平按钮透明度、markdown 链接色），还有两处：`components/_CodeBlockDark.scss:1-18`（shiki 代码块切 `--shiki-dark`/`--shiki-dark-bg`，markstream-vue 重定义 `--border/--background/--foreground/--secondary/--muted/--muted-foreground` HSL 变量）与 `components/_VScrollbar.scss`（无 dark 覆盖段，滚动条颜色直接由 `--v-theme-*` 动态值决定）。
 

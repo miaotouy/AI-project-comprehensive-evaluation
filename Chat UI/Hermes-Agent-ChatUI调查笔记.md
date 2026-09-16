@@ -87,12 +87,16 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - 搜索：搜索的数据实现在会话与消息管理笔记 §5.3（FTS 矩阵、命中前后端标、`context` 字段）。桌面端有 `lib/session-search.ts` 的本地会话过滤；搜索弹窗的界面工作流本次未覆盖（检查范围：未追踪聊天工作台之外的搜索面板组件）。FTS 命中高亮属于消息渲染类目。
 - **现场恢复**：重连成功后 `refreshSessions` 重新同步（连接生命周期见上文）；complete 后按需 `hydrateFromStoredSession` 兜底回填，并有 adopted turn 水合分支——接管“已在别处运行”的会话时先水合历史，否则用户消息不显示（`use-message-stream/index.ts:695-712`）；被压缩轮转的会话跳过回填（`compactedTurnRef`）。
 - 每会话真实状态缓存在 `sessionStateByRuntimeIdRef`（`use-session-state-cache.ts:84`），经 `syncSessionStateToView` 发布（:210-267），切换会话可回到对应现场。
-- **pin**：以 `session._lineage_root_id ?? session.id` 为 pin 依据（`session.ts:246-247`，压缩轮转后仍存活），本地持久化在 localStorage（`layout.ts:30,91`，键 `SIDEBAR_PINNED_STORAGE_KEY`，`$pinnedSessionIds` 为 persistentAtom），后端镜像 `PATCH /api/sessions/{id}`；`session-pin-sync.ts`（:10-21,136-177）双向同步——push 先行带围栏防旧页回滚，pull 以后端为权威，boot 时重断言全量。
+- **pin**：以 `session._lineage_root_id ?? session.id` 为 pin 依据（`session.ts:246-247`，压缩轮转后仍存活），本地持久化在 localStorage（`layout.ts:30,91`，键 `SIDEBAR_PINNED_STORAGE_KEY`，`$pinnedSessionIds` 为 persistentAtom），后端镜像 `PATCH /api/sessions/{id}`。
+
+  `session-pin-sync.ts`（:10-21,136-177）双向同步——push 先行带围栏防旧页回滚，pull 以后端为权威，boot 时重断言全量。
 - **草稿标题**（`lib/draft-title.ts:5-18`）：未发送草稿按输入内容实时派生标题（`deriveDraftTitle`，客户端实现 `derive_title` 的孪生逻辑：首行、折叠空白、48 字符词边界截断；斜杠命令取其参数），会话创建后由后端命名替换（见会话与消息管理笔记 §2.4 的标题机制）；持久化草稿重启后也带标题（`store/composer.ts:155-172`）。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- 发送路径入口：`submitText`（`use-prompt-actions/index.ts:587`）→ `useSubmitPrompt`（`submit.ts`）在提交前做一组门控——busy 检查（按**目标会话**判断，显式目标如 tile/队列排空通常不是当前屏上会话，:169 附近）、storedId/runtimeId 配对校验（含排空时跨会话泄漏防护，:198-202）、session 切换 drift 守卫，无 runtime 时先路由 resume 或新建后端会话；提交整体包在“会话未找到则 resume、busy 则重试”的容错组合里（:645-650，容错原语 `utils.ts:146,244`）。
+- 发送路径入口：`submitText`（`use-prompt-actions/index.ts:587`）→ `useSubmitPrompt`（`submit.ts`）在提交前做一组门控——busy 检查（按**目标会话**判断，显式目标如 tile/队列排空通常不是当前屏上会话，:169 附近）、storedId/runtimeId 配对校验（含排空时跨会话泄漏防护，:198-202）、session 切换 drift 守卫，无 runtime 时先路由 resume 或新建后端会话。
+
+  提交整体包在“会话未找到则 resume、busy 则重试”的容错组合里（:645-650，容错原语 `utils.ts:146,244`）。
 - **草稿按会话持久化**：`store/composer.ts` 负责按会话键存取草稿，仅文本、附件不持久化：
   - 存储：正文按会话键（`draftKey`，未命名会话用 `__new__`，:129）写入 localStorage（键 `SESSION_DRAFTS_STORAGE_KEY='hermes:composer-drafts:v3'`，上限 `MAX_PERSISTED_DRAFTS=50`，写入逻辑 :279-294）；`stashSessionDraft`/`takeSessionDraft`（:296/:310）是唯一进出通道。
   - 跨窗口：localStorage `storage` 事件触发 `reloadPersistedDrafts` 合并（:211-237，注释 “Merge, don't clobber”——本地 map 可能持有未持久化的附件）；HUD/主窗交接用 `requestComposerDraftSync('flush'/'reload')` 事件（:240-266）。
@@ -160,20 +164,18 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - **HUD 是完整 renderer**：真实 composer 与草稿同步，非傀儡窗（§1）。
 - **边界**：会话数据语义、列表检索、一致性在会话与消息管理笔记；流式机制、中断层级、队列在对话请求与上下文笔记；操作栏装配、消息渲染在消息渲染器笔记。通用界面盘点（主题、断点、动画、Modal/Toast 全量统计）按 Chat UI 指南的通用过滤规则不纳入。
 
-## 当前多 profile 恢复链
+## 11. 当前多 profile 恢复链
 
 聊天工作台把活动会话的 owner route 保存为 connection + profile，恢复消息页时把同一作用域传入 session API（`apps/desktop/src/app/chat/index.tsx:276-281`、`apps/desktop/src/api/sessions.ts:334-413`）。后端事件重连依据每会话水位补取缺失帧（`apps/shared/src/json-rpc-gateway.ts:522-523`），所以 profile 切换、短断线和同 ID 会话不会共享一份未标注归属的前端缓存。该结论确认数据流与控件绑定，不替代实际键盘、焦点和断线体验测试。
 
-## 11. 未验证事项
+## 12. 未验证事项
 
 - 桌面端断网中断、快速切换会话、多窗口并发等事件时序未实测。
 - 运行行为（视觉效果、时序、性能、真实 Provider 上的流式）全部为静态推断，未运行验证。
 - 键盘与无障碍（焦点顺序、Tab 遍历、可访问名称）、响应式行为、系统通知未做运行验证。
-- 排队提示、模型选择器/参数面板等发送前配置界面的组件细节未逐项展开。
-- 后台生成（auto-continue/async-delegation）的界面反馈未逐项展开。
-- 消息搜索弹窗与分支树视图的界面工作流未逐项展开。
+- 排队提示、模型选择器/参数面板、后台生成（auto-continue/async-delegation）界面反馈、消息搜索弹窗与分支树视图等组件细节与界面工作流未逐项展开。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - 桌面端：`apps/desktop/src/hermes.ts`（HermesGateway :230、`listAllProfileSessions` :427、sidebar 批量 :455-640）；`store/session.ts`（mergeSessionPage :393、sessionPinId :246、lineageAliases :307、状态原子 :481-549、`$unreadFinishedSessionIds` :643）；`use-session-state-cache.ts`（:84、:210）；`use-session-list-actions.ts`（sessionsToKeep :58、refreshSessions :150、loadMoreSessions :264）；`use-prompt-actions/index.ts`（submitText :587、rewind/edit 回滚 :877-948）、`submit.ts`（submitParams :619、超时 :650）、`rewind.ts`（finalizeInterruptedMessages :122、planReload :140）、`utils.ts`（withSessionNotFoundResume :146、withSessionBusyRetry :244）；`use-message-stream/index.ts`（completeAssistantMessage :538、scheduleSessionsRefresh :153、hydrate/adoptedRunningTurn :695-712）、`gateway-event.ts`（compacting :1165-1170）；`lib/chat-messages.ts`（ChatMessage :13、toChatMessages :922）；`chat/user-message.tsx`（编辑入口 :326-355）；`chat/hooks/use-file-drop-zone.ts`（:33）；`use-composer-actions.ts`（partitionDroppedFiles :240、attachImagePath :404）；`virtual-session-list.tsx`（:46-47、:67-78）；`session-pin-sync.ts`；`layout.ts`（pin 存储键 :30/:91、`$sidebarGrouping`/`$sidebarOrdering` :316-323）；以及 `store/hud.ts`、`store/windows.ts`、`store/sidebar-sort.ts`、`store/session-dot-state.ts`、`store/composer.ts`（草稿持久化 :118-349）、`lib/draft-title.ts`。
 - 共享/连接：`apps/shared/src/json-rpc-gateway.ts`（:66-72）、`websocket-url.ts`（:39）；`use-gateway-boot.ts`（重连 :56/:226）；`use-gateway-request.ts`；`store/gateway.ts`（:30-41）。

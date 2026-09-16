@@ -87,7 +87,7 @@ CLI/会话层 (AgentSession)
 - **TUI**：交互命令处理器确认 `/login` 可按 Provider 选择 OAuth 或 API key，成功后调用 `ModelRuntime.login` 并同步凭据和可用性；`/logout` 只删除 `/login` 保存的凭据，明确不改环境变量和 `models.json`（`interactive-mode.ts:2955-2979,5227-5257,5635-5645,5361-5402`）。`/model` 负责查看和选择当前可用模型，触发模型目录刷新；`/reload` 重新加载扩展、资源并重新读取 `models.json`，不是渠道编辑器（`interactive-mode.ts:5683-5770`）。因此 TUI 对已有内置渠道和通过配置/扩展出现的新渠道都能做认证、登出和模型选择，但不能新增、复制、编辑 Endpoint、启停或删除渠道；删除扩展注册的 Provider 只存在于扩展 API 的 `unregisterProvider`，不是用户 TUI 操作（`core/model-runtime.ts:733-786`）。
 - **导入、导出与连接测试**：TUI/CLI 的 `/import`、`/export` 和 `--export` 针对 session JSONL/HTML，不是渠道配置（`interactive-mode.ts:5773-5829`、`cli/args.ts:288-289`）。CLI `auth check` 返回 `ready/not_ready/invalid`，可选刷新 OAuth，但 `ModelRuntime.checkAuth` 只检查凭据解析，不发真实 Provider 请求（`cli/auth-check.ts:22-52`）；本次未找到独立的真实连接测试入口。`/login` 的 OAuth/API key 登录可能访问认证服务，但它是认证流程，不应推断为通用 Endpoint 连通性测试。
 - **Web、server/client 与桌面端**：仓库内未找到 Web UI 或桌面应用目录（本次按 `*.html`、`*.tsx`、`*.jsx`、`*.vue`、`*.svelte` 检查仅见导出 HTML 模板）。`packages/server` 的 `PiServerService` 只要求宿主提供会话和模型列表/创建/打开能力，协议的模型快照包含 Provider、模型元数据和认证布尔值，但没有渠道配置 CRUD、凭据或连接测试命令（`packages/server/src/types.ts:54-60`、`packages/protocol/src/schemas.ts:47-73`）。`packages/client` 只是该会话协议的客户端。因此 Web/桌面端对渠道管理记为**未找到**，而非“不适用”；若外部宿主自行实现 UI，其行为不属于当前仓库源码可确认范围。
-- **凭据生命周期**：登录写入 `auth.json`，登出通过 `AuthStorage.delete` 删除指定 Provider 的存储凭据（`core/auth-storage.ts:474-483`）；运行时 key 由 `setRuntimeApiKey/removeRuntimeApiKey` 管理，不持久化（`core/model-runtime.ts:536-559`）。这解释了“已有渠道可登出”与“新建渠道不能由 TUI 删除”的差异：前者删除的是凭据记录，后者的 Provider 定义仍来自 `models.json` 或扩展。
+- **凭据生命周期**：登录写入 `auth.json`，登出通过 `AuthStorage.delete` 删除指定 Provider 的存储凭据（`core/auth-storage.ts:474-483`）；运行时 key 由 `setRuntimeApiKey/removeRuntimeApiKey` 管理，不持久化（`core/model-runtime.ts:536-559`）。由此产生“已有渠道可登出”与“新建渠道不能由 TUI 删除”的差异：前者删除的是凭据记录，后者的 Provider 定义仍来自 `models.json` 或扩展。
 
 ## 3. 凭据、Header 与代理边界
 
@@ -129,7 +129,7 @@ CLI/会话层 (AgentSession)
   mistral-conversations / pi-messages / cloudflare-gateway-binding（AI Gateway 经 Cloudflare AI binding 传输，#7901）
   ```
 
-  每个模块导出 `stream`/`streamSimple`（`ProviderStreams` 契约，`types.ts:267-276`），lazy 包装用于 tree-shaking（`api/lazy.ts`）。Mistral 由 SDK 传输改为原生 HTTP 流（`api/mistral-conversations.ts`，去掉生成客户端与 schema 运行时开销，#9dd90a4）。
+  每个模块导出 `stream`/`streamSimple`（`ProviderStreams` 契约，`types.ts:267-276`），lazy 包装用于 tree-shaking（`api/lazy.ts`）。Mistral 使用原生 HTTP 流（`api/mistral-conversations.ts`，不经生成客户端与 schema 运行时开销）。
 - **请求组装**：Base URL 来自 `model.baseUrl`，路径在各 Adapter 内拼接。示例：
   - pi-messages：单 POST 到 `<baseUrl>/messages`（`api/pi-messages.ts:360`）；
   - OpenAI-compatible：SDK `baseURL: model.baseUrl`（`api/openai-completions.ts:674`）；
@@ -137,10 +137,10 @@ CLI/会话层 (AgentSession)
   - Azure：从 `AZURE_OPENAI_BASE_URL`/`AZURE_OPENAI_RESOURCE_NAME` 组装并规范化路径（`api/azure-openai-responses.ts:181-246`）；
   - Codex：默认 `DEFAULT_CODEX_BASE_URL`，WebSocket 与 fetch 双通道（`api/openai-codex-responses.ts:638-647`）。
 - **兼容探测**：OpenAI-compatible 的 `detectCompat`（`api/openai-completions.ts:1443`）按 provider 名 + baseUrl 特征（openrouter.ai、deepseek.com、api.z.ai、api.moonshot、gateway.ai.cloudflare.com、chutes.ai 等）自动决定 developer role、thinking 格式、max_tokens 字段、cache 控制等（`api/openai-completions.ts:1439-1489`），`model.compat` 可显式覆盖（`types.ts:545-597`）。
-- **兼容性修正（提交追溯）**：
+- **兼容性处理**：
   - DeepSeek 的 baseUrl 探测改为大小写不敏感，且发送 `max_tokens`（`openai-completions.ts`，#7933/#7930）；
   - Fireworks GLM 走 Anthropic Messages 兼容端点并修正 prompt caching（`providers/fireworks.ts` 用 `anthropicMessagesApi`，#7676）；
-  - OpenAI Responses 侧新增 `supportsAdditionalTools` 兼容开关（延迟工具经 `additional_tools` 注入，#e47b8e3）。
+  - OpenAI Responses 侧有 `supportsAdditionalTools` 兼容开关（延迟工具经 `additional_tools` 注入）。
 - **z.ai 特例**：仅走 openai-completions（`zai.ts:6-14`）；`api/anthropic-messages.ts:1228` 提及 z.ai 的注释与当前实现不一致。
 - **Provider 分发**：`createProvider` 支持单个 API 实现或按 `model.api` 分发的 map（`models.ts:762-862`）；组合层 `streamWith` 优先扩展 `streamSimple`、再内置 Provider、最后 `getApiProvider(model.api)` 的通用 API 实现（`provider-composer.ts:451-471`）。
 
@@ -198,7 +198,7 @@ CLI/会话层 (AgentSession)
 
 ## 11. 模型与思考能力的近期边界
 
-内置目录新增 Z.AI Coding Plan 的中国区域模型与 Qwen Token Plan 的 DeepSeek V4 Pro，xAI 模型改经 Responses API 并把 Grok 4.6 作为默认项。Adapter 还补齐 OpenAI-compatible 的 reasoning details 回放、Google `thinkingLevelMap`、Azure Responses 的 `toolChoice` 以及 Bedrock 脱敏推理内容的保留，因而会话中的模型与思考状态在跨回合重放时比旧快照更完整（`packages/ai/CHANGELOG.md` 与 `packages/coding-agent/CHANGELOG.md` 的 0.84.3 条目）。
+内置目录包含 Z.AI Coding Plan 的中国区域模型与 Qwen Token Plan 的 DeepSeek V4 Pro，xAI 模型经 Responses API 并默认使用 Grok 4.6。Adapter 支持 OpenAI-compatible 的 reasoning details 回放、Google `thinkingLevelMap`、Azure Responses 的 `toolChoice` 以及 Bedrock 脱敏推理内容的保留，会话中的模型与思考状态因此可在跨回合重放时完整恢复（`packages/ai/CHANGELOG.md` 与 `packages/coding-agent/CHANGELOG.md` 的 0.84.3 条目）。
 
 模型和思考级别的即时选择仍写入会话条目；只有在选择器中按 Ctrl+S 才将所选默认值写回设置。模型与思考选择器均支持搜索和 default 标识，避免一次会话中的临时切换意外成为全局默认（`packages/coding-agent/src/modes/interactive/components/model-selector.ts:73-162`、`thinking-selector.ts:37-104`）。
 

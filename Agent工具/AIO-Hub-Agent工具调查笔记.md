@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AIO Hub 没有把 Agent 工具系统写成一条只服务于 VCP 的固定管线。`tool-calling` 将工具能力、运行时上下文、审批与执行、模型通信协议拆成不同层：工具经统一注册接口接入，发现与执行层处理统一的内部对象，`ToolCallingProtocol` 再负责把这些对象转换成某种模型可读、可返回的调用表示。**当前产品在模型通信层只注册了 VCP 这一种协议实现，Agent 配置里的协议类型也只有 `"vcp"` 一种取值；VCP 是现阶段落地，不是该架构给工具系统划定的上限。**
+AIO Hub 的 Agent 工具系统按层拆分。`tool-calling` 将工具能力、运行时上下文、审批与执行、模型通信协议拆成不同层：工具经统一注册接口接入，发现与执行层处理统一的内部对象，`ToolCallingProtocol` 再负责把这些对象转换成某种模型可读、可返回的调用表示。**当前产品在模型通信层只注册了 VCP 这一种协议实现，Agent 配置里的协议类型也只有 `"vcp"` 一种取值；VCP 是现阶段落地，不是该架构给工具系统划定的上限。**
 
 核心事实：
 
@@ -22,7 +22,7 @@ AIO Hub 没有把 Agent 工具系统写成一条只服务于 VCP 的固定管线
 2. **模型通信协议有明确的替换边界，目前唯一实现是 VCP。** `ToolCallingProtocol` 只要求实现工具定义生成、使用说明生成、调用请求解析和结果格式化四项能力；工具发现把统一元数据交给协议生成定义，协议解析出的统一请求再进入校验、审批和方法执行。新增协议仍需改动 `SUPPORTED_PROTOCOLS`、`resolveProtocol()` 和 `ToolCallConfig.protocol`，所以这是一处代码级扩展点，尚不是可由插件在运行期注册的协议市场。当前 VCP 解析器会跳过 Markdown code fence/inline code，执行器还会二次核验 `agentCallable`。
 3. **工具能力也有多条接入路径。** 内建 registry、动态 `ToolRegistryFactory`、只注入环境信息的 `AgentExtension`、JS/Sidecar/Native 插件代理，以及把远端 manifest 包装成本地 registry 的 `VcpToolProxy`，最后都汇入同一发现和执行链。因而“目前只做了 VCP”准确地说只适用于**模型调用协议实现**，不适用于整个工具来源与扩展体系。
 4. **审批状态机是 Promise-based 单例 store，不做持久化。** `useToolCallingStore` 用内存数组 + `resolve` 回调管理待批准请求；应用重启或页面刷新会丢失所有 pending 状态（异步任务另有磁盘持久化，见下）。自动批准的匹配粒度到"工具级"和"方法级"，方法级优先于工具级。审批支持可配置超时（默认无限等待，开启后按秒级配置自动拒绝）与 AbortSignal/会话清理取消，见第 6 节。
-5. **`aio-file-operator` 的路径沙箱已加固**（提交 `386a56a2d`）：路径校验改为先经 Rust 命令把目标及规则路径解析成**真实路径**（防符号链接逃逸、处理 Windows 扩展前缀），再做目录包含关系判断（修复前缀碰撞）；Rust 侧另新增一组外部传输专用命令，为 VCP 文件读取提供二次沙箱/规则/大小校验与审计日志（见第 7/9 节）。普通强制读写命令本身仍不做路径限制，前端校验仍是主要边界。
+5. **`aio-file-operator` 的路径沙箱已加固**：路径校验改为先经 Rust 命令把目标及规则路径解析成**真实路径**（防符号链接逃逸、处理 Windows 扩展前缀），再做目录包含关系判断（修复前缀碰撞）；Rust 侧另新增一组外部传输专用命令，为 VCP 文件读取提供二次沙箱/规则/大小校验与审计日志（见第 7/9 节）。普通强制读写命令本身仍不做路径限制，前端校验仍是主要边界。
 6. **VCP 分布式节点是双向对等契约，已与 VCPToolBox 当前源码核实一致。** AIO 既能作为客户端拉取远端 manifest 并代理执行，也能作为节点被远端 `execute_tool` 调用本机标记为可调用或可分布暴露的方法。`internal_request_file` **不是 AIO 内可用的工具**，而是为满足 VCP 分布式契约实现的入向协议义务：它不在注册表里登记，本机模型无法发现或调用，只能由已连接的 VCP 主服务器通过 `execute_tool` 触发。它读取 `file://` 路径转 Base64 回传，但已接入 aio-file-operator 沙箱/审批区与 Rust 侧复校验（见第 9 节），并非无限制读取。
 
 ## 总体调用链
@@ -100,7 +100,7 @@ VCP 分布式节点（可选，仅当 Agent 使用的 Profile baseUrl 与 vcp-co
 - `{{tool_context}}` 宏对应 `getAgentContexts()`，**不缓存**，每次都并发调用所有已启用工具/扩展的 `getExtraPromptContext()`（`discovery.ts:445`），用 `<context_provider id="toolId">` 包裹拼接。
 - `{{tool_usage}}` 宏对应协议使用说明，是静态字符串（`vcp-protocol.ts:314`），无缓存但本身开销可忽略。
 
-三个宏在 `macro-engine/macros/tools.ts` 注册（priority 分别为 95/92/90），拼装位置由 Agent 的 preset message 决定；三个宏都缺失且开启 `toolCallConfig.autoInjectIfMacroMissing` 时，`injection-assembler.ts:378` 会在消息历史锚点前插入一条固定系统消息兜底注入（`injection-assembler.ts:391`）。**没有发现显式 Prompt Cache（如 Anthropic `cache_control` 或结构化 cache breakpoint）机制**：`{{tools}}` 与 `{{tool_context}}` 分离更多是为了让“工具定义”部分在同一 Agent 配置下字符串完全稳定，利于依赖模型侧/网关侧对相同前缀的隐式缓存，而不是项目自己实现了显式缓存协议层。
+三个宏在 `macro-engine/macros/tools.ts` 注册（priority 分别为 95/92/90），拼装位置由 Agent 的 preset message 决定；三个宏都缺失且开启 `toolCallConfig.autoInjectIfMacroMissing` 时，`injection-assembler.ts:378` 会在消息历史锚点前插入一条固定系统消息兜底注入（`injection-assembler.ts:391`）。**没有发现显式 Prompt Cache（如 Anthropic `cache_control` 或结构化 cache breakpoint）机制**：`{{tools}}` 与 `{{tool_context}}` 分离更多是为了让“工具定义”部分在同一 Agent 配置下字符串完全稳定，以便模型侧/网关侧对相同前缀做隐式缓存。
 
 过滤/开关集中在发现阶段生效：工具级由 `resolveToolEnabled()` 判断（`discovery.ts:82`，`toolToggles[toolId]` 优先于 `defaultToolEnabled`），方法级在 `generatePrompt()` 内联过滤（`discovery.ts:322`，仅 `methodToggles[toolId_methodName] !== false` 保留）。
 
@@ -119,9 +119,9 @@ VCP 分布式的 `includeToolIds` 参数可以无视 `config.enabled` 强制包�
 | `parseToolRequests()` | 把模型输出转换成 `ParsedToolRequest[]` | 只负责表示到内部对象的转换 |
 | `formatToolResults()` | 把统一执行结果转换成下一轮上下文 | 否 |
 
-解析后的注册表校验、`agentCallable` 复核、安全策略、人工审批、超时和真实方法调用仍由协议外的 parser/executor/engine 链处理。这使 AIO 可以增加另一种文本协议，同时复用现有工具目录与执行策略。这里的扩展范围也要说准：接口接收 `finalText: string`，工具定义与结果同样返回字符串，因此它目前是**多种文本协议的抽象**；若要直接接入模型 API 的结构化 `tool_calls`，还需扩展该接口及聊天消息编排链，不能视为现成能力。
+解析后的注册表校验、`agentCallable` 复核、安全策略、人工审批、超时和真实方法调用仍由协议外的 parser/executor/engine 链处理。这使 AIO 可以增加另一种文本协议，同时复用现有工具目录与执行策略。接口接收 `finalText: string`，工具定义与结果同样返回字符串，因此它目前是**多种文本协议的抽象**；若要直接接入模型 API 的结构化 `tool_calls`，还需扩展该接口及聊天消息编排链，不能视为现成能力。
 
-目前这项扩展只完成了接口和路由骨架：协议注册表里只有 `vcp`，`useToolCalling.resolveProtocol()` 对任何输入都回退到同一个 `VcpToolCallingProtocol`，Agent 配置里的协议类型也被收窄为 `"vcp"`。因此，下面记录的是**当前 VCP 实现的行为**，不能据此把 AIO 的整体工具架构等同于 VCP。
+目前这项扩展只完成了接口和路由骨架：协议注册表里只有 `vcp`，`useToolCalling.resolveProtocol()` 对任何输入都回退到同一个 `VcpToolCallingProtocol`，Agent 配置里的协议类型也被收窄为 `"vcp"`。下面记录的只是当前 VCP 实现的行为，不能据此把 AIO 的整体工具架构等同于 VCP。
 
 ### 3.1. VCP 文本块语法
 
@@ -189,7 +189,7 @@ mergedArgs = { ...schemaDefaults, ...agentPreset, ...cleanArgs }
 
 ## 6. 审批与策略
 
-审批状态机由 `useToolCallingStore`（Pinia，`../../aio-hub/src/tools/llm-chat/stores/toolCallingStore.ts:30`）承担，本质是一个内存数组：每条待批准请求记录 id、外部 id、会话 id、请求本体、创建/过期时间、是否用默认超时与一个 `resolve` 回调。`requestApproval()` 返回一个 Promise，只有用户批准/拒绝（含按 id 批量）或外部响应进来后调用 `resolve()` 才会结束等待；审批带超时兜底（提交 `a94688ca0`/`f5d26d36a`）——
+审批状态机由 `useToolCallingStore`（Pinia，`../../aio-hub/src/tools/llm-chat/stores/toolCallingStore.ts:30`）承担，实现是一个内存数组：每条待批准请求记录 id、外部 id、会话 id、请求本体、创建/过期时间、是否用默认超时与一个 `resolve` 回调。`requestApproval()` 返回一个 Promise，只有用户批准/拒绝（含按 id 批量）或外部响应进来后调用 `resolve()` 才会结束等待；审批带超时兜底——
 
 - 默认仍是无限等待：设置项 `uiPreferences.toolApprovalTimeoutEnabled` 默认 `false`；开启后按 `toolApprovalTimeoutSeconds`（范围 5 秒–24 小时，默认 60 秒）定时自动 `settleRequest(..., "rejected", "审批超时")`；
 - 调用方可通过 `requestApproval(..., options)` 显式传 `timeoutMs`（正数）或 `null`（显式禁用），显式值不跟随全局开关变化；
@@ -231,7 +231,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
   .py       -> python
   ```
   **Windows 下 `bash`/`sh` 类脚本不保证有可用运行时**，属已知平台断层，需用户在 `runtimeSettings` 里显式配置 WSL/Git Bash 路径。
-- **`file://` 解析（VCP 内置工具）**：`internal_request_file` 已收紧（提交 `5e768a94e`）：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL，拒绝凭据/端口/查询参数/片段，拒绝 UNC 与远程主机路径（`vcpNodeProtocol.ts`）；读取改走 `inspectFileForExternalTransfer` → `readFileForExternalTransfer`（aio-file-operator 的 Rust 加固命令），在审批区要求用户审批、Rust 侧重新校验沙箱/规则/文件大小并写审计日志，另有 60 秒速率窗口（`EXTERNAL_FILE_RATE_WINDOW_MS`）。
+- **`file://` 解析（VCP 内置工具）**：`internal_request_file` 已收紧：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL，拒绝凭据/端口/查询参数/片段，拒绝 UNC 与远程主机路径（`vcpNodeProtocol.ts`）；读取改走 `inspectFileForExternalTransfer` → `readFileForExternalTransfer`（aio-file-operator 的 Rust 加固命令），在审批区要求用户审批、Rust 侧重新校验沙箱/规则/文件大小并写审计日志，另有 60 秒速率窗口（`EXTERNAL_FILE_RATE_WINDOW_MS`）。
 - **`appdata://` 资产映射**：`media-generator` 等工具在资产路径拼接里使用该 scheme（`buildAgentMethods.ts:600-603`），最终由 Tauri asset protocol 或应用自己的资产解析服务映射到 `$APPDATA` 下的真实路径。
 - **Capability 权限范围**：`opener:allow-open-path` 显式限制在 `$APPDATA/**` 与 `$DOWNLOAD/**`（`capabilities/default.json:11-18`），但这只管“用系统程序打开文件”，**不管 `read_file_as_base64`/`invoke` 类命令的读取范围**（这些命令走 `fs:allow-read-file` 权限，capability 配置为 `{"path": "**"}`，即无限制）。
 - **网络访问范围**：Tauri `http:allow-fetch` 放开 `http://**`/`https://**`/`ws://**`/`wss://**`（`capabilities/default.json:79-88`），渲染进程可对任意主机发起 HTTP/WS 请求；`web-distillery`、`vcp-connector` 都依赖此权限，Tauri capability 层没有域名白名单。
@@ -270,7 +270,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 | `ffmpeg-tools` | `executeCommand`/`executePipeline`/`getMediaInfo` | 任意 FFmpeg 命令编排、媒体信息读取 | 前端 + Tauri 子进程（`tokio::process::Command`，数组式参数，非 shell） | 是（异步任务，需先提交任务） | `executeCommand`/`executePipeline` 允许 LLM 拼接**任意 FFmpeg CLI 参数数组**（如 `-f concat` 类可能读取任意路径的滤镜/协议参数），属于命令参数层面的高自由度，需 `hwaccel`/`args` 组合审查 |
 | `text-diff` | `generatePatch` | 生成统一 diff 补丁（不写盘） | 纯前端 | 是（一般会配自动批准，因为无副作用） | 无副作用（不读写文件） |
 | `json-formatter` | `formatJson` | JSON 格式化（支持 `filePath` 读取本地文件） | 前端 + Tauri（`filePath` 分支读盘） | 是 | `filePath` 无路径沙箱，可读任意可达路径下的文件内容并整段返回给模型 |
-| `data-filter` | `applyFilter` | JSON/YAML 数组过滤（UI 界面路径支持 `customScript` 自定义脚本条件） | 纯前端 JS（`new Function` 动态构造，运行在渲染进程主上下文，**已确认**） | 是 | **Agent 路径已隔离自定义脚本**（提交 `1910c2e0f`）——`parseFilterOptions()` 对 `operator: "custom"` 或含 `customScript` 字段的 conditions 直接返回错误"Agent 调用不支持 custom 操作符或 customScript"，只允许声明式操作符白名单（eq/ne/contains/truthy/falsy/gt/ge/lt/le）；`new Function` 执行只保留在**用户手动操作**的 DataFilter.vue 界面路径，LLM 生成的 VCP 参数不再能触发任意 JS。`applyFilter` 的方法描述同步改为"Agent 路径禁止 custom/customScript" |
+| `data-filter` | `applyFilter` | JSON/YAML 数组过滤（UI 界面路径支持 `customScript` 自定义脚本条件） | 纯前端 JS（`new Function` 动态构造，运行在渲染进程主上下文，**已确认**） | 是 | **Agent 路径已隔离自定义脚本**——`parseFilterOptions()` 对 `operator: "custom"` 或含 `customScript` 字段的 conditions 直接返回错误"Agent 调用不支持 custom 操作符或 customScript"，只允许声明式操作符白名单（eq/ne/contains/truthy/falsy/gt/ge/lt/le）；`new Function` 执行只保留在**用户手动操作**的 DataFilter.vue 界面路径，LLM 生成的 VCP 参数不再能触发任意 JS。`applyFilter` 的方法描述同步改为"Agent 路径禁止 custom/customScript" |
 | `media-info-reader` | `readImageMetadata` | 提取 AI 生图/角色卡元数据 | 前端（`@tauri-apps/plugin-fs` 读文件） | 是 | 无路径沙箱，只读 |
 | `media-generator` | `generate_<model_id>`（动态，每个可用模型一个） | 调用配置好的图片/视频/语音/音乐生成模型 | 前端 + 远程模型 API（走用户配置的 LLM Profile） | 是（`isFast` 模型走 sync 立即返回，其余走 async 任务） | 生成资源消耗真实 API 额度；`prompt` 完全由 LLM 控制，无内容过滤 |
 | `web-distillery` | `quickFetch`/`smartExtract` | 网页内容抽取（HTTP 直取 / 真实浏览器渲染） | 前端 + Tauri HTTP fetch 或内嵌浏览器实例 | 是 | `url` 参数无域名/协议白名单，可对任意地址发起请求（`http:allow-fetch` 权限本身放开 `http://**`/`https://**` 及局域网 IP 正则） |
@@ -290,7 +290,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 ## 10. 扩展机制
 
-这里需要区分两条互相正交的扩展轴：**协议扩展**决定模型如何描述调用，**能力扩展**决定有哪些工具和上下文进入系统。前者目前只有 VCP 实现；后者已经有四条实际入口：
+扩展轴有两条，互相正交：**协议扩展**决定模型如何描述调用，**能力扩展**决定有哪些工具和上下文进入系统。前者目前只有 VCP 实现；后者已经有四条实际入口：
 
 1. **`ToolRegistry`/`ToolRegistryFactory`**：`ToolRegistry` 是所有可调用能力的统一边界；既可由 `import.meta.glob` 发现随源码打包的 registry，也可由 factory 在运行期批量生成实例。内建工具与动态桥接都能落到这一接口，不能把 `ToolRegistryFactory` 仅理解为“内建工具”。
 2. **`AgentExtension`**：`ToolRegistry` 的基接口，不提供可调用方法，只提供只读上下文注入（如 `web-canvas` 的 Canvas 文件树、`skill:system` 的宿主环境信息），入口为 `getExtraPromptContext()`。生命周期：注册时初始化、注销/热重载时销毁，由 `ToolRegistryManager` 统一调度（`services/registry.ts:102-115`）。
@@ -300,9 +300,9 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
    - **Native 插件**：按平台加载动态库（`manifest.native.library[currentPlatform]`），是最高权限、最少隔离的扩展形式。
    - **兼容性校验**（`validatePluginCompatibility()`）：引入结构化诊断（`PluginDiagnostic`，字段 code/title/severity/resolution），严重问题记 `hardErrors` 并置 `proxy.isBroken = true`。调用点注释仍写“仅提示，不阻止加载”，但 API v3 插件（`apiVersion >= 3` 且 `requiresStrictPluginCompatibility`）会触发严格检查——应用版本范围无效、API 版本不兼容、平台二进制缺失等成为 hard error（版本常量见 `plugin-api-version.ts`：`CURRENT_PLUGIN_API_VERSION = 3`、`CURRENT_SIDECAR_PROTOCOL_VERSION = 3`；`plugin-loader.ts` 用 `@tauri-apps/plugin-os` 的真实 OS/arch 替换 navigator 嗅探）。加载不被阻止，但 broken 标记与诊断会落到插件对象上，是否执行取决于消费方；
    - 插件卸载 `uninstall_plugin` 走回收站（可恢复），`-dev` 后缀插件（开发模式加载）不允许通过 UI 卸载。
-4. **VCP Proxy（`VcpToolProxy`/`VcpBridgeFactory`）**：本质是把远端 HTTP/WS 服务的能力映射为本地 `ToolRegistry`，信任边界完全转移到远端节点，AIO 自身只做协议转换，见第 12 节。
+4. **VCP Proxy（`VcpToolProxy`/`VcpBridgeFactory`）**：把远端 HTTP/WS 服务的能力映射为本地 `ToolRegistry`，信任边界完全转移到远端节点，AIO 自身只做协议转换，见第 12 节。
 
-协议轴则由 `ToolCallingProtocol` 承担。增加新协议需要实现四个转换方法，并修改发现服务的 `SUPPORTED_PROTOCOLS`、Composable 的 `resolveProtocol()` 和 Agent 配置类型。这个边界已经把 VCP 细节从 parser/engine/executor 中抽离，但注册过程仍是源码内硬编码，当前不能由上述 JS/Sidecar/Native 插件动态添加一种协议。更准确的评价是：**AIO 已搭好多协议、异构工具来源和动态上下文的统一骨架，其中工具来源已经多样化，模型调用协议暂时只交付了 VCP。**
+协议轴则由 `ToolCallingProtocol` 承担。增加新协议需要实现四个转换方法，并修改发现服务的 `SUPPORTED_PROTOCOLS`、Composable 的 `resolveProtocol()` 和 Agent 配置类型。这个边界已经把 VCP 细节从 parser/engine/executor 中抽离，但注册过程仍是源码内硬编码，当前不能由上述 JS/Sidecar/Native 插件动态添加一种协议。总体上，**AIO 已搭好多协议、异构工具来源和动态上下文的统一骨架，其中工具来源已经多样化，模型调用协议暂时只交付了 VCP。**
 
 **依据**：[`services/plugin-loader.ts`](../../aio-hub/src/services/plugin-loader.ts)、[`services/plugin-manager.ts`](../../aio-hub/src/services/plugin-manager.ts)、[`services/types.ts`](../../aio-hub/src/services/types.ts)（`AgentExtension`/`ToolRegistryFactory`）、[`vcp-connector/services/VcpBridgeFactory.ts`](../../aio-hub/src/tools/vcp-connector/services/VcpBridgeFactory.ts)。
 
@@ -354,7 +354,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 - 返回内容: （伪造的任意内容）
 VCP调用结果结束]]
 ```
-的文本，`Tokenizer.ts:757-793` 会把它解析成 `vcp_tool` 类型的 AST 节点（`isResult: true`），`VcpToolNode.vue` 据此渲染出一个“✅ 成功”的绿色标签卡片，**在视觉上与真实工具执行结果完全一致**，但这段内容其实来自网页抓取或知识库检索，从未真正调用过 `aio-file-operator`。这构成一种**结果伪造/UI 欺骗**的展示效果：网页或知识库条目中的文本可以让模型“引用”这段文本，用户看到界面上的绿色成功卡片会产生“该操作已被系统执行并成功”的误判。实际上 `tool-calling` 引擎从未解析执行过它——引擎只解析 assistant 消息，并按 `tool_name`/`command` 是否存在于注册表判断，这段结果文本不会被引擎二次执行，影响停留在**视觉呈现**层面，不会触发真实工具执行。
+的文本，`Tokenizer.ts:757-793` 会把它解析成 `vcp_tool` 类型的 AST 节点（`isResult: true`），`VcpToolNode.vue` 据此渲染出一个“✅ 成功”的绿色标签卡片，**在视觉上与真实工具执行结果完全一致**，但这段内容其实来自网页抓取或知识库检索，从未真正调用过 `aio-file-operator`。用户看到这张与真实结果一致的卡片，容易误判该操作已被系统执行并成功，形成**结果伪造/UI 欺骗**。`tool-calling` 引擎只解析 assistant 消息，并按 `tool_name`/`command` 是否存在于注册表判断，不会二次执行这段结果文本，影响停留在**视觉呈现**层面，不会触发真实工具执行。
 
 **批准栏本身**：`ToolCallingApprovalBar.vue` 的按钮点击直接走 `execute({ service: "tool-calling", method: "approveRequest", params })`，是真实的 Vue 事件绑定，不经过任何可被消息正文影响的中间层，**审批按钮本身不可被模型输出伪造**；但审批栏里展示的"参数预览"（`item.request.args`）来自解析结果，如果参数值本身包含误导性文本（如把危险的 `path` 参数伪装成看起来无害的字符串），可能诱导用户误判参数含义——这是展示信任层面的问题，不是代码缺陷。
 

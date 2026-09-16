@@ -86,7 +86,7 @@ ACPX 侧保留 Gateway session key、backend、agent、runtime session name、id
   -> prompt、状态更新、权限/输入、cancel 和终态回到 ACP client
 ```
 
-`openclaw acp` 提供 ACP server 面，支持 new/load/list/resume/close session、prompt、cancel、set mode/config 等操作。`AcpGatewayAgent` 和 translator 将 ACP session、prompt stream、session updates 与 Gateway 的 session/chat 语义互相映射。这里的外部执行者是 ACP client，实际 OpenClaw Agent runtime 仍在 Gateway 侧；不能与 ACPX 启动外部 harness 的方向混为一谈。
+`openclaw acp` 提供 ACP server 面，支持 new/load/list/resume/close session、prompt、cancel、set mode/config 等操作。`AcpGatewayAgent` 和 translator 将 ACP session、prompt stream、session updates 与 Gateway 的 session/chat 语义互相映射。这里的外部执行者是 ACP client，实际 OpenClaw Agent runtime 仍在 Gateway 侧，与 ACPX 启动外部 harness 的方向相反。
 
 ### 节点调用链
 
@@ -124,7 +124,7 @@ Gateway client/server 使用 WebSocket `req`/`res`/`event` 帧。握手顺序为
 
 ACPX 元数据将 Gateway session key 映射到外部 backend/agent 和 upstream runtime session；persistent session 还由 cwd、command、session ID、stateDir 等条件约束。进程租约在 spawn 前写入 pending lease（`rootPid=0`），wrapper 写回 PID；租约包含 `leaseId`、`gatewayInstanceId`、`sessionKey`、wrapper root/path、`rootPid`、command hash 和 state。操作结束后按身份校验回收，Gateway 启动时回收 OpenClaw-owned stale process trees/orphans。
 
-渠道 binding 把 ACP session 映射到具体会话或 thread/topic；native ACP 则把 ACP session 映射到 Gateway-backed session；节点 registry 把设备 node ID 映射到当前连接和配对代际；attach grant 把短期 token 映射到 session key。这些映射共同构成“控制表面/外部执行体/设备/会话”的边界。
+渠道 binding 把 ACP session 映射到具体会话或 thread/topic；native ACP 则把 ACP session 映射到 Gateway-backed session；节点 registry 把设备 node ID 映射到当前连接和配对代际；attach grant 把短期 token 映射到 session key。
 
 ## 执行、回流与控制语义
 

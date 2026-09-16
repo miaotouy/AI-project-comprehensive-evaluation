@@ -67,7 +67,7 @@ ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
 ### 1.1 类型不一致
 
 - web 侧 `Assistant`（`web-app/src/types/threads.d.ts:57`）完整字段为 `avatar/id/name/created_at/description/instructions/parameters`；core 侧含 `model/tools/file_ids` 而无 `parameters`，形状不同。
-- assistant-extension 的 v2 迁移却写入 `parameters` 字段（L184-187），web 侧又未见 tools 持久化路径——这是源码层面的事实性不一致，横向比较时需要注意 core/web 两侧对“助手能干什么”的表述并不一致。
+- assistant-extension 的 v2 迁移却写入 `parameters` 字段（L184-187），web 侧又未见 tools 持久化路径——这是源码层面的事实性不一致，core/web 两侧对“助手能干什么”的表述并不一致。
 
 ### 1.2 工具、知识库与记忆（交接 Agent 工具笔记）
 

@@ -56,7 +56,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
   - 消息正文就是 AI SDK 的消息 parts（`src/shared/data/types/message.ts:136`），自定义 part 类型只有错误、翻译、视频、紧凑与 agent 任务事件等少数几种（`src/shared/data/types/uiParts.ts:139-151`），**没有 artifact part 类型**——HTML artifact 以 text part 承载。
   - `artifactId` 为 `${blockId}:${codeBlockId}`，`codeBlockId` 由 Markdown 节点行列偏移派生（`src/renderer/utils/markdown.ts:162`），是每次渲染重算的派生身份，仅用于列表项重挂载时保住已打开的弹窗会话（`src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 注释），无持久对象 ID。
   - Agent 侧 `report_artifacts` 是 zod 校验的结构化工具输入（`src/shared/ai/builtinTools.ts:489-552`，`REPORT_ARTIFACTS_TOOL_NAME`），以 tool part 持久化，是最接近"输出声明"的协议；声明只含 path/description/summary 三项，不含对象 ID 或版本。
-  - 另注：`ba25bea27f` 起所有内建工具去掉了 `strict: true`，`report_artifacts` schema 相应改为非 strict 形态。
+  - 另注：所有内建工具去掉了 `strict: true`，`report_artifacts` schema 相应改为非 strict 形态。
 - **事实源**：chat 消息行（SQLite `data` JSON）是消息文本的事实源；agent 文件的事实源是磁盘，消息只存声明与执行记录。
 
 ## 2. 增量生成、更新与最终化
@@ -95,8 +95,8 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 5. 用户交互、事件与错误反馈
 
 - 交互面：预览缩放（50%-200%）、预览/源码切换、分屏、全屏、PNG 截图（文件/剪贴板，需 `allow-same-origin` 读 contentDocument，`HtmlArtifactsPopup.tsx:148-176`）、下载、外部打开、同意交互预览。
-- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本的 console 消息通道上报高度与滚轮（`HtmlArtifactView.tsx:196-206,542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；该上下文由 `e6ebebe9cd` 从消息块目录迁入消息列表目录，并同时隔离嵌套滚动区）。
-- 错误反馈：渲染错误经日志与 toast；文件预览有加载中、过大、读取失败、空四种分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）；agent 文件编辑显式关闭时若保存失败可直接丢弃草稿，不再被失败保存阻塞（`5ac7d9a58b`）。
+- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本的 console 消息通道上报高度与滚轮（`HtmlArtifactView.tsx:196-206,542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；该上下文从消息块目录迁入消息列表目录，并同时隔离嵌套滚动区）。
+- 错误反馈：渲染错误经日志与 toast；文件预览有加载中、过大、读取失败、空四种分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）；agent 文件编辑显式关闭时若保存失败可直接丢弃草稿，不再被失败保存阻塞。
 - 交互状态恢复：弹窗会话可在列表项重挂载间存活（artifactId 派生身份），但**未发现**跨会话/跨重载的 artifact 视图状态持久化（缩放、弹窗开合均为运行时状态）。
 
 ## 6. 编辑、diff、版本与协作
@@ -119,7 +119,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 8. 持久化、恢复、分享与导出
 
 - chat artifact：源文本存于消息 `data.parts`（SQLite）；编辑后整体写回；重开会话从 DB 重读并重新渲染。分享/导出：下载 `.html`（经宿主文件保存 API）、临时文件外部打开、PNG 截图、剪贴板；消息图片导出时 `data-html-artifact` 标记被显式排除（`src/renderer/utils/image.ts:192-193`）。
-- agent 文件：磁盘即持久化，跨会话存活；系统工作区位于托管根目录按日期 + sessionId 生成（`src/main/data/services/AgentWorkspaceService.ts:47-56` 附近），用户工作区为任意绝对路径（DB 实体，`agentWorkspace` 表）。文件树展开态/选中态为渲染器状态，随 workspace 切换重置（`ArtifactPane.tsx:849-872`）。另有**删除影响预览**（`9b448194fa`）：删除工作区前先统计并预览引用它的会话/渠道/任务（`AgentWorkspaceService.ts:115-141`），确认对话框列出这些引用（`WorkspaceDeleteConfirmDialog.tsx`）。
+- agent 文件：磁盘即持久化，跨会话存活；系统工作区位于托管根目录按日期 + sessionId 生成（`src/main/data/services/AgentWorkspaceService.ts:47-56` 附近），用户工作区为任意绝对路径（DB 实体，`agentWorkspace` 表）。文件树展开态/选中态为渲染器状态，随 workspace 切换重置（`ArtifactPane.tsx:849-872`）。另有**删除影响预览**：删除工作区前先统计并预览引用它的会话/渠道/任务（`AgentWorkspaceService.ts:115-141`），确认对话框列出这些引用（`WorkspaceDeleteConfirmDialog.tsx`）。
 - 无 artifact 对象的复制/分享/删除协议（文件本身可复制删除）。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -130,14 +130,14 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 ## 10. 生命周期、资源治理与性能
 
-- 文件树：主进程先做初始扫描，再由 watcher 事件增量更新（含背压处理），共享 watcher 去重，缺失根目录可等待其出现（`src/main/services/file/tree/builder.ts:19-20,212-218,225-227` 及 `DirectoryTreeManager.ts`）；渲染端镜像按事件增删改。tree IPC 采用 `file.tree.create/activate/dispose` 三阶段握手（`f39b17d04c` 关闭"快照到流"交付间隙——consumer 创建后先挂起、变更在主进程排队，activate 成功才放行，被拒绝则重取快照，最多 3 次），渲染侧相应改为请求式调用，并给懒加载 watcher 加 10 秒 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`）吸收 `<Activity>` 标签切换（`45b4d902d5`）。
+- 文件树：主进程先做初始扫描，再由 watcher 事件增量更新（含背压处理），共享 watcher 去重，缺失根目录可等待其出现（`src/main/services/file/tree/builder.ts:19-20,212-218,225-227` 及 `DirectoryTreeManager.ts`）；渲染端镜像按事件增删改。tree IPC 采用 `file.tree.create/activate/dispose` 三阶段握手（关闭"快照到流"交付间隙——consumer 创建后先挂起、变更在主进程排队，activate 成功才放行，被拒绝则重取快照，最多 3 次），渲染侧相应改为请求式调用，并给懒加载 watcher 加 10 秒 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`）吸收 `<Activity>` 标签切换。
 - webview：分区会话随应用生命周期注册/释放（`setupHtmlArtifactPreviewSession` 的 `registerDisposable`）；`did-attach-webview` 拦截导航；未发现按可见性冻结/卸载 artifact 预览的机制（iframe 一直挂载，仅流式节拍降低重建频率）。
 - Pyodide：单例 worker，终止时拒绝所有挂起请求；超时清理；模块状态跨次执行保留（可 reset）。
 - 限额：HTML 文件预览与文件编辑均限 2MB（`HtmlFilePreview.tsx:21-22`、`useFileEditSession.ts:21`）；artifact 预览高度上限为视口 72%（`HtmlArtifactView.tsx:54`）；长会话（agent）有 compaction/上下文用量管理，属 Agent 类目不展开。
 
 ## 11. 当前输出对象补充
 
-Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进入终态时会终止解析 worker，避免已完成或失败任务继续占用资源。PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影，除非继续进入上述文件或 Artifact 表面，否则不应升级为独立运行对象。
+Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进入终态时会终止解析 worker，避免已完成或失败任务继续占用资源。PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影；除非进入上述文件或 Artifact 表面，否则在本类目中不构成独立运行对象。
 
 依据：`src/renderer/components/FilePreview/plugins/spreadsheet/SpreadsheetFilePreview.tsx`、`src/renderer/components/FilePreview/plugins/spreadsheet/worker/xlsxParser.worker.ts`、`src/main/services/PdfTranslationService.ts`、`src/main/data/services/TranslateHistoryService.ts`。
 
@@ -150,7 +150,7 @@ Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进
 
 ## 13. 设计取舍与能力定级
 
-- **取舍**：HTML artifact 无独立 part 类型/对象 ID，换取"模型只需输出普通 Markdown"的协议零成本；对象身份退化为位置派生 ID，代价是无对象级查询与补丁。安全上宁可 fragment 恒禁脚本、document 须显式同意、artifact 资源走 DNS 级 SSRF 防护，体现"模型输出即不可信输入"的基线。agent 侧选择"文件即对象"——工作区磁盘作为共享状态，用户与模型通过同一文件系统协作，避免复制状态，但冲突处理只有写时版本校验，无三方合并。
+- **取舍**：HTML artifact 无独立 part 类型/对象 ID，换取"模型只需输出普通 Markdown"的协议零成本；对象身份退化为位置派生 ID，代价是无对象级查询与补丁。安全上宁可 fragment 恒禁脚本、document 须显式同意、artifact 资源走 DNS 级 SSRF 防护，把模型输出当作不可信输入处理。agent 侧选择"文件即对象"——工作区磁盘作为共享状态，用户与模型通过同一文件系统协作，避免复制状态，但冲突处理只有写时版本校验，无三方合并。
 - **能力等级**：G3（可执行 Artifact：同意后 HTML 进沙箱 webview 可交互；Python 可执行）与 G4（可编辑工作区：agent 工作区文件树+编辑器+自动保存+冲突处理+模型持续维护同一磁盘对象）同时成立。G5 不具备——模型感知靠通用文件工具而非对象状态协议，chat 内 artifact 无跨会话身份。协议开放度：自由文本探测+工具声明（无 typed part）；更新粒度：整段/整文件覆盖；持续维度：文件为跨会话项目资产、chat artifact 为会话级文本；闭环程度：agent 侧"查询->读取->定向修改"成立，chat 侧仅历史重入。
 - **已确认边界**：agent 会话消息中的代码块不可编辑（`agentMessageListAdapter.tsx` 未提供 `saveCodeBlock`，`editable` 恒 false）；chat 主界面右侧 pane 无 artifact 面板（右 pane 为话题分支/追踪，`pages/home/Chat.tsx:335-341`）；mindmap/思维导图组件本次未找到（全 renderer 检索 `mindmap|markmap|mind-map` 无结果）。
 

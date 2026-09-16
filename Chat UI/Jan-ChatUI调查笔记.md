@@ -16,7 +16,7 @@
 
 Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`web-app/`），仓库顶层目录未发现独立的移动端界面实现。聊天表面是一个线程页工作台：左侧栏（`LeftSidebar`）+ 线程页（`$threadId.tsx`，1863 行，线程页中枢）+ 首页新聊天（`routes/index.tsx`）。
 
-关键工作流特征（均有源码依据，正文标注位置）：
+关键工作流特征：
 
 - **Composer**（`ChatInput.tsx`，2648 行，memo 无自定义比较器）承担文本输入、附件摄取、发送与停止；发送时若正在流式则 `enqueue` 入队，队列消息以 `QueuedMessageChip` 显示在输入区顶部。
 - **消息操作**：编辑（`EditMessageDialog`，Ctrl+Enter 保存）、删除（`DeleteMessageDialog` 确认）、复制、Continue（仅末条且 `metadata.stopped`）、Regenerate（仅末条）；流式态下编辑/删除禁用。
@@ -80,7 +80,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 - **推理控制**：reasoning 开关（auto/on/off）与 Thinking Budget 等级（仅 llamacpp 显示 token 预算近似值，L2255-2562）；OpenAI 的 reasoning effort 独立子菜单（L2329-2413）。
 - **工具与外部能力开关**：MCP 工具下拉（`DropdownToolsAvailable`/`McpExtensionToolLoader`）、web 搜索开关（高亮激活态，L2221-2247）、Jan Browser 按钮（需 vision+tools 模型，L2066-2106）、embeddings 指示（L2108-2125）。
 - **Token 计数**：`TokenCounter` 按设置显示紧凑/完整形态（`shouldShowTokenCounter` 条件，L226-232）。
-- **设置作用域可辨性**：模型级 `settings`（模型目录）、线程助手级 `parameters`（线程快照）——界面分层清晰【代码确认】，未运行验证。
+- **设置作用域可辨性**：模型级 `settings`（模型目录）与线程助手级 `parameters`（线程快照）在界面上分层呈现【代码确认】，未运行验证。
 
 ## 5. 发送、排队、流式反馈与停止
 

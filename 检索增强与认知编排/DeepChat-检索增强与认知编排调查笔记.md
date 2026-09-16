@@ -27,7 +27,7 @@ DeepChat 在本类目的已确认主链是 Session Tape 的工具化检索。Tap
 
 ## 事实对象、摄取与索引
 
-Tape 不是对上传文件做一次性切块，而是在会话运行过程中持久化执行事实和视图。已有 Tape/Trace 主链将消息与工具事实写入 SQLite，并维护 view manifest、lineage 和可审计执行记录；这里的搜索对象是在有效视图中可见的 entry，而非原始对话文本的无条件全文副本。
+Tape 在会话运行过程中持久化执行事实和视图。已有 Tape/Trace 主链将消息与工具事实写入 SQLite，并维护 view manifest、lineage 和可审计执行记录；搜索对象是有效视图中可见的 entry，既不是切块后的上传文件，也不是原始对话文本的无条件全文副本。
 
 召回服务可为当前 Tape 建立搜索投影。投影把 entry 的 kind、名称、用户消息摘要、证据文本和引用组合为 `searchText`，并保存摘要与 refs；投影元数据以最大 entry id 判断是否与 Tape 同步，不相符时追加或整体替换。见 `src/main/tape/application/recallService.ts:444-512`。SQLite 表及 FTS 维护在 `src/main/tape/infrastructure/sqlite/tapeSearchProjectionStore.ts`；本次未运行迁移与重建。
 

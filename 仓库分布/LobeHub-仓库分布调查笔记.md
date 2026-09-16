@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-LobeHub 是本组跟踪文件最多的 TypeScript monorepo，主 Web 应用、独立 server、Electron desktop、CLI 与大量业务/工具包共仓。代码没有只集中在单一 `src`：`apps/server`、`src/features`、database、store、model-runtime 和 routes 都是十万行级区域，显示其前后端与运行时边界已包化。
+LobeHub 是 TypeScript monorepo，主 Web 应用、独立 server、Electron desktop、CLI 与大量业务/工具包共仓。代码不集中在单一 `src`：`apps/server`、`src/features`、database、store、model-runtime 和 routes 都是十万行级区域，前后端与运行时已分别落在独立包中。
 
 ## 统计与模块分布
 
@@ -37,11 +37,11 @@ LobeHub 是本组跟踪文件最多的 TypeScript monorepo，主 Web 应用、�
 | `src/store` | 836 / 166,097 |
 | `packages/model-runtime` | 442 / 131,267 |
 | `apps/desktop` | 415 / 66,685 |
-| `src/routes` | 875 / 76,080（从 1,298 / 120,160 显著收缩） |
+| `src/routes` | 875 / 76,080 |
 
-features 与 routes 此消彼长来自结构迁移：提交 `8de42d5c3` 把六个路由域移入 `src/features`，设置页各分区（provider/memory/hotkey/oauth-apps 等）也整体从 `src/routes/(main)/settings/` 归并到 `src/features/Settings/`。
+路由与设置页的实现集中在 `src/features`：六个路由域移入其中，设置页各分区（provider/memory/hotkey/oauth-apps 等）也归并到 `src/features/Settings/`。
 
-新增可观察区域：
+其他可观察区域：
 
 - `packages/model-bank`（191/49,800）
 - `apps/cli`（182/44,988）
@@ -53,22 +53,22 @@ features 与 routes 此消彼长来自结构迁移：提交 `8de42d5c3` 把六�
 
 TypeScript 1,958,825 行（98.8%）。
 
-文档主要位于 `docs/usage`（221 文件）、`docs/self-hosting`（150）、`.agents/skills`（173）；`changelog` 仍只有 2 个文件却占 47,939 行，是按行数观察文档时的异常集中点；新增 `docs/development`（42 文件，含 agent-goals-design 等设计文档）。
+文档主要位于 `docs/usage`（221 文件）、`docs/self-hosting`（150）、`.agents/skills`（173）；`changelog` 仍只有 2 个文件却占 47,939 行，是按行数观察文档时的异常集中点；`docs/development` 另有 42 文件，含 agent-goals-design 等设计文档。
 
-测试分布：server（612 文件）、database（193）、store（240）、features（524）、model-runtime（191）与 desktop（102）；`apps/cli` 测试也增长到 76 文件。
+测试分布：server（612 文件）、database（193）、store（240）、features（524）、model-runtime（191）与 desktop（102）；`apps/cli` 测试为 76 文件。
 
 ## 跨平台组织与边界
 
 Web/自托管服务是主形态，另有 Docker 部署、独立 server、CLI 和 Electron desktop workspace（`pnpm-workspace.yaml`）。
 
-后端 Hono 路由已从 `apps/server/src/hono/` 更名为 `router-hono/` 并合并（`e32e2efe2`）。
+后端 Hono 路由位于 `apps/server/src/router-hono/`。
 
-本范围内新增多个独立包，边界进一步包化：
+多个独立包构成主要边界：
 
-- `packages/openapi`：由 hono-openapi 生成 openapi.yml（`3ea7afd5d`）
-- `packages/sdk`：从 OpenAPI spec 生成 `@lobehub/sdk`（`e86908812`）
+- `packages/openapi`：由 hono-openapi 生成 openapi.yml
+- `packages/sdk`：从 OpenAPI spec 生成 `@lobehub/sdk`
 - `packages/connector-data`：twitter/notion/github 等 connector 数据源
-- `packages/device-sandbox`：桌面本地沙箱执行环境（`e9b6d00ab`）
+- `packages/device-sandbox`：桌面本地沙箱执行环境
 - `packages/builtin-tool-goal`：goal 工具
 
 桌面通过 `apps/desktop` 的独立主进程包与 Web 前端桥接；本次未验证各桌面发行目标的运行结果。

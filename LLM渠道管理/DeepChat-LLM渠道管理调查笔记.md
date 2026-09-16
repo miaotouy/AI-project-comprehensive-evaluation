@@ -27,7 +27,7 @@ DeepChat 中的“渠道”主要是持久化的 `LLM_PROVIDER` 用户实例。�
 
 `LLM_PROVIDER`（`src/shared/types/provider.ts:74-106`）是渠道实例的主要数据结构，包含 `id`、名称、`apiType`、API Key/OAuth token、`baseUrl`、模型集合、模型启停状态、`enable`、`custom`、网站信息和限流配置等。`provider.id + modelId` 构成运行时选择的基本身份；同名模型在不同 Provider 下可以对应不同 Base URL、凭据和能力。
 
-Provider 不是单纯的代码注册项，也不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts:31-207`）。
+Provider 是持久化的配置与运行时实例，不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts:31-207`）。
 
 一个 Provider 实例只有一个持久化 `baseUrl` 字段，本次未找到在同一个 `LLM_PROVIDER` 内维护多个 Endpoint 或 Endpoint 列表的模型。若要使用同一协议的多个地址，实际做法是创建多个 Provider 实例；它们可以共享同一 `apiType`，但各自保存自己的 URL 和凭据。
 

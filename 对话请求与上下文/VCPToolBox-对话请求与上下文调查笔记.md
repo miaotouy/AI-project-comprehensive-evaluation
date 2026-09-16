@@ -128,7 +128,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 ## 6. 完成、异常、半截流与最终回写
 
 - **流式收口**：正常结束时回发 `finish_reason=stop` chunk + `[DONE]`（`streamHandler.js:442-461`）；SSE 转发带 5 秒幽灵心跳（242-250）与 90 秒 chunk 空闲超时保护（252-282，超时回发"[上游响应超时，流已中断]"并强制结束）；abort 时直接销毁上游 body 并结束（285-291）。
-- **非流式收口**：把 `conversationHistoryForClient`（AI 正文 + VCP 信息块拼接）写回初始 JSON 的 `choices[0].message.content`（`nonStreamHandler.js:565-583`），`finish_reason` 按循环是否触顶置 `length/stop`。**注意**：这个回写只发生在内存响应体里，不会持久化，也不回写模型上下文。
+- **非流式收口**：把 `conversationHistoryForClient`（AI 正文 + VCP 信息块拼接）写回初始 JSON 的 `choices[0].message.content`（`nonStreamHandler.js:565-583`），`finish_reason` 按循环是否触顶置 `length/stop`。这个回写只发生在内存响应体里，不会持久化，也不回写模型上下文。
 - **上游错误代理**：流式请求上游非 200 时，服务端回 200 并把错误文本作为 SSE chunk 流给客户端（`chatCompletionHandler.js:1187-1248`），避免前端监听器终止；连接失败/重试耗尽同样以 SSE chunk 报错（1307-1333）。
 - **快照与日志**：首次请求前快照入 `finalContextStore`（1142-1148）；ChatLog 可选落盘（见 4.2）。服务端不写回任何会话/消息存储（见会话与消息管理笔记）。
 

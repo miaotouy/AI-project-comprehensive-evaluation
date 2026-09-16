@@ -16,7 +16,7 @@
 
 Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。会话单位是 Topic（SQLite），消息是 adjacency-list 树（`message.parentId` 自引用外键），"切换分支"是 `active_node_id` 指针重定向而非重排树。
 
-一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复是 N 个独立 execution 真并行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
+一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复由 N 个独立 execution 并行执行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
 
 ## 产品表面与系统边界
 
@@ -54,7 +54,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 - **真树 + 指针切换**：分支是持久化树（`parentId`/`siblingsGroupId`），切分支 = `setActiveBranch` 先求目标分支最新 leaf 再改 `active_node_id`；`< i/N >` 兄弟导航与分支面板（React Flow + dagre 布局）同语义并存。
 - **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
-- **消息搜索为 DOM 搜索**：`ContentSearch.tsx` 用 TreeWalker 遍历真实渲染文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容天然搜不到（架构固有限制，非 bug）。
+- **消息搜索为 DOM 搜索**：`ContentSearch.tsx` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
 - **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已更正。
 - **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 的附件回收改由 FileManager 引用计数 + 策略化 GC 兜底（原 `TopicService.ts:316` TODO 注释已移除）。

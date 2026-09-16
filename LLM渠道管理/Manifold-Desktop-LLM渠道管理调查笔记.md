@@ -134,7 +134,7 @@ Proxy 优先请求其 `/v1/models` 并把结果标为免费；请求失败时退
 
 ## 8. 连接检测、日志与可观测性
 
-后端提供 `VALIDATE_KEY`，具体 Provider 会使用一个实际 API 请求判断 HTTP 状态是否为 200；Gemini 和 OpenAI-compatible 使用模型列表请求，Anthropic 使用最小消息请求。该消息通过 `provider-api.js` 暴露给前端，但当前设置页没有调用 `validateKey()` 或渲染校验结果的控件（`frontend/services/provider-api.js:33-36`；`frontend/components/settings-panel.js:200-259`）。因此“有连接测试后端能力”与“用户可从当前桌面设置页执行连接测试”需要区分。
+后端提供 `VALIDATE_KEY`，具体 Provider 会使用一个实际 API 请求判断 HTTP 状态是否为 200；Gemini 和 OpenAI-compatible 使用模型列表请求，Anthropic 使用最小消息请求。该消息通过 `provider-api.js` 暴露给前端，但当前设置页没有调用 `validateKey()` 或渲染校验结果的控件（`frontend/services/provider-api.js:33-36`；`frontend/components/settings-panel.js:200-259`）。因此连接测试目前只有后端能力，桌面设置页没有暴露执行入口。
 
 Provider 列表会暴露 `requiresApiKey`、流式和工具支持标志，以及模型目录；Key 只暴露存在性。聊天完成消息包含 prompt/completion token 和 finish reason，前端 `pricing.js` 另以静态价格表和 localStorage 做估算；本次未找到渠道级请求日志、HTTP 延迟、状态历史或统一错误分类。
 

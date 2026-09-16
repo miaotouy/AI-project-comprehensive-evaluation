@@ -64,7 +64,7 @@ VCPToolBox **不拥有会话事实源**。它是无会话归属的请求级消�
 
 ## 3. 设计取舍与已确认边界
 
-- 会话状态外置是架构取舍而非缺陷：`README.md:17` 自述定位是"给 AI 的一个能够持续存在的世界"，但聊天历史存储由外部前端（官方 VCPChat，`README.md:175`、`:221`）承担，服务端只做请求级增强。
+- 会话状态外置是架构取舍：`README.md:17` 自述定位是"给 AI 的一个能够持续存在的世界"，但聊天历史存储由外部前端（官方 VCPChat，`README.md:175`、`:221`）承担，服务端只做请求级增强。
 - 服务端"看起来像会话"的东西全部是审计/调试性质：finalContextStore（5 组内存快照）、ChatLog（可选文件）、toolCallRecordStore（SQLite 台账）、VCPTavern access_logs（时间戳）。
 
 ## 4. 未验证事项

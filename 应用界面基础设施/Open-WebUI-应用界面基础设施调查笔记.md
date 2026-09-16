@@ -292,7 +292,7 @@ common/Dropdown.svelte（359 行）：
 
 **主题是设备本地偏好。** 权威在 localStorage，服务端不存 theme——多设备不同步是有意的设计边界（设置里主题项无账户同步迹象，静态推断）；oled-dark 通过行内 CSS 变量覆盖 `--color-gray-*` 实现，而非独立 class 变体。
 
-**同一外观域内权威源分裂。** 主题（theme）走 localStorage 设备本地，而聊天背景图（backgroundImageUrl）与文本方向（chatDirection）走服务端用户设置、随账户同步——外观类偏好的持久化没有统一哲学（静态确认）。
+**同一外观域内权威源分裂。** 主题（theme）走 localStorage 设备本地，而聊天背景图（backgroundImageUrl）与文本方向（chatDirection）走服务端用户设置、随账户同步——外观类偏好的持久化不统一（静态确认）。
 
 **拖放与上传无公共抽象。** 12 处业务自实现 drop 处理、sortablejs 分散 6 处实例化，没有统一的上传队列/拖放 store（区别于聊天发送队列 chatRequestQueues）。
 

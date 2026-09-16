@@ -20,7 +20,7 @@ OpenCode 的 Agent 是「从配置构建的只读内存对象」，本身不落�
 
 最终 system prompt 由「agent.prompt（缺省用 provider 风格提示）→ env → AGENTS.md 指令 → MCP 指令 → skills」按序拼装（`src/session/llm/request.ts:56-66`、`src/session/prompt.ts:1257-1271`）。权限求值采用 agent 权限与会话权限合并的 allow/ask/deny 三档规则（`src/permission/index.ts`），工具的最终可见性在请求组装时按合并后的规则过滤。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **Agent 实体字段**（`packages/opencode/src/agent/agent.ts:35-56`）：
 
@@ -132,7 +132,7 @@ system = [
   ...(user.system ? [user.system] : []),          // prompt payload 的 system 字段
 ].join("\n")
 ```
-- provider 风格 prompt 按模型 api id 与 Provider 选择对应模板文件（`packages/opencode/src/session/system.ts:27-47`，含 anthropic、gpt、gemini、Kimi、default 等）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:27-31、prompt/meta.txt，提交 b9f3b38）。
+- provider 风格 prompt 按模型 api id 与 Provider 选择对应模板文件（`packages/opencode/src/session/system.ts:27-47`，含 anthropic、gpt、gemini、Kimi、default 等）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:27-31、prompt/meta.txt）。
 - 拼装后触发 `experimental.chat.system.transform` 插件钩子（request.ts:69-73）；OpenAI OAuth 场景改走 `options.instructions`（request.ts:99）——真正写入 `providerOptions.instructions` 的是 agent 生成逻辑的 isOpenaiOauth 分支（agent.ts:418-433，注入经 llm.ts:316）。
 
 **指令（AGENTS.md）加载**（src/session/instruction.ts，`systemPaths` :110-153）按来源顺序：
@@ -152,7 +152,7 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）把 agent 的 system 与
 - **参数合并顺序**（request.ts:84-128）：temperature 与 topP 优先取 agent 值，缺省由 `ProviderTransform` 按模型生成；`options` 按 base(provider) → model → agent → variant 的顺序合并（:84-91）。
 - **切换 agent 的模型行为**：App 端 `agent.set()` 保存 agent、模型与 variant（app/src/context/local.tsx:196-216），默认继承上一个模型，除非新 agent 自带 model；V2 `switchAgent` 不改 session.model（core/src/session.ts:393-401）。
 - **默认模型**：`Provider.defaultModel()`（provider.ts:1947-1980）依次取配置的 `cfg.model`、最近使用记录（state/model.json）、第一个已配置 provider 的排序首个模型。
-- App 端「当前默认模型」优先取 server `/config/providers` 响应的 `defaultModel`，`cfg.model` 仅作回退（provider-catalog.ts:28-38、提交 941e71d）。
+- App 端「当前默认模型」优先取 server `/config/providers` 响应的 `defaultModel`，`cfg.model` 仅作回退（provider-catalog.ts:28-38）。
 - **内置 title agent** 自带 `temperature: 0.5`（agent.ts:240）。
 
 ## 5. 工具、知识库、记忆与子 Agent
@@ -244,7 +244,7 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）把 agent 的 system 与
 - **配置即事实、内存快照**：agent 无独立持久化，重启后仅靠配置重建；会话记住的是名字引用。
 - **prompt 优先于 provider 风格**：agent 自定义 prompt 完全覆盖 provider 提示模板，无自动拼合。
 - **tools 字段废弃但保留兼容**：布尔表映射权限，与 permissions 双轨并存。
-- **未知配置字段静默忽略**：schema 解码用 `onExcessProperty:"ignore"`（config/parse.ts:40-47），对未知顶层键不抛 InvalidError（38e10eb）。
+- **未知配置字段静默忽略**：schema 解码用 `onExcessProperty:"ignore"`（config/parse.ts:40-47），对未知顶层键不抛 InvalidError。
 - **默认全开**：build/plan 权限 `*:allow`，靠 ask 审批兜底；explore 等专用 agent 用全 deny + 白名单。
 - **MCP/Skill 按 agent 的过滤全部在运行时**：配置层无 per-agent 挂接字段，权限规则是唯一杠杆。
 - **V1/V2 迁移中**：V2 的 agent.model 不被 runner 读取（静态推断：模型解析只看 session.model），V2 explore 工具集与 V1 有差异，迁移未完成。

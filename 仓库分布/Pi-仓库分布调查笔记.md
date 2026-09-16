@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Pi 是按可发布能力拆包的 TypeScript monorepo，而不是 GUI 客户端仓库。coding-agent、统一模型 API、TUI 与 agent runtime 四个包构成主体；server/client/protocol/session backend 提供可组合边界。测试文件/源码文件比为 42.5%，主要包都有独立测试区。
+Pi 是按可发布能力拆包的 TypeScript monorepo。coding-agent、统一模型 API、TUI 与 agent runtime 四个包构成主体；server/client/protocol/session backend 提供可组合边界。测试文件/源码文件比为 42.5%，主要包都有独立测试区。
 
 ## 统计与模块分布
 
@@ -36,7 +36,7 @@ Pi 是按可发布能力拆包的 TypeScript monorepo，而不是 GUI 客户端�
 | `packages/tui` | 92 / 33,873 |
 | `packages/agent` | 86 / 21,454 |
 
-TypeScript 256,665 行（95.6%）。文档与测试也按同样包边界分布：coding-agent 64 文档/255 测试文件、AI 2/138、TUI 4/39、agent 5/26；`packages/session-backends`（sqlite-node）测试 12 文件/1,807 行、`packages/telemetry` 测试 2 文件/243 行（新增 telemetry conformance 测试与 sqlite 迁移/搜索测试）。
+TypeScript 256,665 行（95.6%）。文档与测试也按同样包边界分布：coding-agent 64 文档/255 测试文件、AI 2/138、TUI 4/39、agent 5/26；`packages/session-backends`（sqlite-node）测试 12 文件/1,807 行、`packages/telemetry` 测试 2 文件/243 行（含 telemetry conformance 测试与 sqlite 迁移/搜索测试）。
 
 ## 跨平台组织与边界
 

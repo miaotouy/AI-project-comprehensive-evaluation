@@ -25,7 +25,7 @@ LobeHub 的一次生成任务从会话级 store 的发送 action 进入全局 Ch
 - **压缩**：`/compact` 由 Command Bus（`processCommands`）转为独立 `contextCompression` operation，`executeCompression` 先建服务端压缩组、再走 LLM 摘要流式回填、`finalizeCompression` 收口。
 - **完成副作用**：`runAgent.ts:250-263` 停止 loading 后同批触发桌面通知与 Topic 未读标记；审批需人工时触发角标通知并置 `waitingForHuman` 状态。
 - **退出恢复（Gateway 路径）**：topic 的 `metadata.runningOperation` 在页面加载时被 `useGatewayReconnect` 捕获，经 `reconnectToGatewayOperation` 刷新 JWT、新建 WebSocket 并回放事件，把 UI 重新挂到仍在跑的服务端任务上。
-- **重要边界（如实标注）**：本次调查主要是前端执行链；`ModelRuntime` 实现、各 provider adapter、Gateway resume 的服务端逻辑均未覆盖，本笔记不虚构其细节。
+- **重要边界**：本次调查主要是前端执行链；`ModelRuntime` 实现、各 provider adapter、Gateway resume 的服务端逻辑均未覆盖。
 
 ## 系统边界与生成任务主链
 
@@ -57,7 +57,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
    - 转发全局 `ChatStore.sendMessage`（83-89 行，透传 `onTopicCreated`/`inputEditor`/`messages`）；
    - 发送后触发 `onAfterMessageCreate`/`onAfterSendMessage`（91-104 行）。
 2. **全局发送入口**：`src/store/chat/slices/agentRun/actions/entries/conversationLifecycle.ts` 的 `sendMessage`（265-2040 行），一次发送的状态机大致为：
-   - 前置（317-333 行）：从编辑器数据解析选中的 skills/tools、被提及的 agents 与本地文件引用（`parseSelectedSkillsFromEditorData`/`parseSelectedToolsFromEditorData`/`parseMentionedAgentsFromEditorData`/`parseLocalFileReferencesFromEditorData`）；`/goal` 前缀把 `lobe-goal` 注入选定工具列表（323-328 行）；单 Agent 直接 @mention 成为执行路由（`parseSingleAgentMentionDirectRoute`，353-358 行，被提及 Agent 直接成为执行者，不走 supervisor 回合，359-370 行按被提及 Agent 解析配置）；运行时选择统一走 `selectRuntimeType`（398-408 行，含 `forceRuntime` 覆盖——任务话题可强制服务端运行，以及 workspace 成员设备覆盖 374-379 行、异构 provider 恢复 393-397 行）。
+   - 前置（317-333 行）：从编辑器数据解析选中的 skills/tools、被提及的 agents 与本地文件引用；`/goal` 前缀把 `lobe-goal` 注入选定工具列表（323-328 行）；单 Agent 直接 @mention 成为执行路由（`parseSingleAgentMentionDirectRoute`，353-358 行，被提及 Agent 直接成为执行者，不走 supervisor 回合，359-370 行按被提及 Agent 解析配置）；运行时选择统一走 `selectRuntimeType`（398-408 行，含 `forceRuntime` 覆盖——任务话题可强制服务端运行，以及 workspace 成员设备覆盖 374-379 行、异构 provider 恢复 393-397 行）。
    - Command Bus：`processCommands`（410-421 行）从 editorData 抽取内建命令 → `/compact`（423-433 行，见第 3 节）/`/newTopic`（435-456 行，可注入 `<refer_topic>` 节点）/goal 等。
    - 消息队列检查（578-670 行，见第 8 节）。
    - 铸造 id 与乐观状态（507-521 行 `mintedTopicId`/`operationContext`；719-720 行 `tempId`/`tempAssistantId`；721-729 行 `startOperation`；807-870 行乐观 user/assistant 消息；873-874 行 `associateMessageWithOperation`；903-923 行乐观 topic 行 + `switchTopic`；1139-1146 行把编辑器 JSON 存进 operation metadata 供取消时恢复）。
@@ -71,14 +71,15 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 ## 2. 历史选择与上下文拼装顺序
 
 - 历史选择：发送层以当前 display messages 为输入（`conversationLifecycle.ts:685-691`：优先调用方传入的 `inputMessages`，否则按 context key 读 display messages，过滤 `isLocalOnlyMessage`）；`lastMessage` 排除 `taskCallback` 轮次（697-698 行，避免把 callback 分支当对话尾巴）；`parentId` 由输入值或 `findLastMessageId(lastMessage.id)` 确定（707-711 行）。发送层不主动把其它显示分支拼入请求；持久化分支的具体解析留在消息服务和运行时层。
-- **system prompt、记忆、附件与工具**：发送层把文件引用列表（523 行）与 `userMessageMetadata`（537-548 行：contextSelections/pageSelections/localSystemToolSnapshots 进 metadata）随请求构造；预加载被选中的 skill/tool 内容（552-562 行，经 `SelectedSkillInjector`/`SelectedToolInjector` 注入，不伪造工具调用占位消息——注释 550-551 行 “no fake tool-call preload messages”）；client 分支再把去重后的 skill/tool 上下文**拼进持久化的 user 消息内容**（1611-1635 行：`previouslyMentionedSkills` 去重，`formatSelectedSkillsContext` 追加到 `persistedContent`），使选中工具跨轮次存活。
+- **system prompt、记忆、附件与工具**：发送层把文件引用列表（523 行）与 `userMessageMetadata`（537-548 行：contextSelections/pageSelections/localSystemToolSnapshots 进 metadata）随请求构造。
+- **skill/tool 预加载**：被选中的 skill/tool 内容在发送前预加载（552-562 行，经 `SelectedSkillInjector`/`SelectedToolInjector` 注入，不伪造工具调用占位消息——注释 550-551 行 “no fake tool-call preload messages”）；client 分支再把去重后的 skill/tool 上下文**拼进持久化的 user 消息内容**（1611-1635 行：`previouslyMentionedSkills` 去重，`formatSelectedSkillsContext` 追加到 `persistedContent`），使选中工具跨轮次存活。
 - **operationContext**：构造在 510-521 行，可承载 group（supervisor 标记 514-518 行）、thread（创建新 thread 时清 threadId 交给服务端 513 行）、page document（481-484 行从 page runtime 取当前文档 id 注入 519 行）、铸造 topicId（520 行），供 client agent 或 Gateway 继续注入 system prompt、工具和页面资源；`contextSelections`/`operationContext` 都绑定具体 conversation（多会话间不串扰）。
 - **User memory**：发送时 `setActiveMemoryContext`（700-705 行）把 agent meta、当前 topic、最近 user 消息与新消息喂给 user memory store——只记录注入点，记忆检索内部机制属于 Agent 角色/记忆专项。
 
 ## 3. 预算、截断、摘要与压缩
 
 - 发送层支持 `/compact`：现由 Command Bus（`processCommands`，410-421 行）识别，423-433 行在无进行中压缩 operation（`hasRunningCompressionOperation`）时转独立 compression operation（`executeCompression`，2046-2148 行），流程为：选待压缩消息（`getCompressionCandidateMessageIds`，2055 行）→ 服务端建压缩组（`messageService.createCompressionGroup`，2084-2093 行）→ 走 LLM 摘要并流式回填压缩组内容（`fetchPresetTaskResult`，2096-2112 行）→ 收口（`finalizeCompression`，2117-2126 行），abort 时删临时组（2130-2136 行）。
-- 常规请求的最终 token 截断由 Agent runtime/Gateway 负责：`ChatInput` 侧的 Token 预算明细条是发送前估算（`useTokenBreakdown`，见 Chat UI 笔记第 3 节），与实际截断算法不是同一条路径。当前 Agent runtime 在压缩完成后保留 prompt headroom，并用运行时标记抑制同一上下文重复压缩；这只确认了避免连续压缩的收口策略，未逐一展开每个模型 runtime 的预算算法（`packages/agent-runtime/src/agents/GeneralChatAgent.ts`，提交 `718a960fb`）。
+- 常规请求的最终 token 截断由 Agent runtime/Gateway 负责：`ChatInput` 侧的 Token 预算明细条是发送前估算（`useTokenBreakdown`，见 Chat UI 笔记第 3 节），与实际截断算法不是同一条路径。当前 Agent runtime 在压缩完成后保留 prompt headroom，并用运行时标记抑制同一上下文重复压缩；这只确认了避免连续压缩的收口策略，未逐一展开每个模型 runtime 的预算算法（`packages/agent-runtime/src/agents/GeneralChatAgent.ts`）。
 
 ## 4. SDK、Provider、模型与协议交接
 
@@ -87,7 +88,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
   - **异构 CLI**（`runtimeType === 'hetero' && heterogeneousProvider`，1150-1478 行）：先落库 user/assistant 行（1164-1214 行，携带铸造 id），解析服务端 topic 并把队列条目、语音占位行搬到新桶（`moveQueuedMessages`/`moveVoiceMessages`，1239-1262 行），`replaceMessages` 收敛乐观态（1272-1275 行），然后 `startOperation({ type: 'execHeterogeneousAgent' })`（1376-1382 行）并 `executeHeterogeneousAgent`（1422-1434 行，经 IPC 驱动本地 CLI 子进程）；`resolveHeteroResume` 按 cwd 是否变化决定是否带 `--resume`（1414-1420 行）。
   - **Gateway**（`runtimeType === 'gateway' && !directMentionRoute`，1481-1596 行）：`executeGatewayAgent` 携带 `clientIds`（assistantMessageId/topicId/userMessageId，1492-1496 行，服务端按客户端铸造 id 落库），`context` 在建新 topic 时去掉 topicId 让服务端创建（1502-1504 行），另传 `selectedToolIds`/`mentionedAgents` 让服务端 supervisor 启用对应工具与委派（1515-1524 行）；完成后 `afterUserMessagePersisted` 生成话题标题（1544-1556 行）。
   - **client**（默认，1598-2031 行）：`sendMessageInServer` 落库（1636-1689 行，同样携带铸造 id 与 `newTopic`/`newThread`），解析最终 topic/thread 并 `replaceMessages`（1691-1794 行），自动置空遗留 pending 干预（1898-1940 行），最后 `executeClientAgent`（2002-2013 行）以本地 Agent runtime 从 user 消息位置继续；`handoffSendOperation`（1944-1953 行）让 sendMessage op 在子 runtime 就绪后才 complete，保持队列屏障连续。
-- **边界**：Provider 最终 HTTP 字段由 `ModelRuntime`/各 provider adapter 生成，未逐一核对；`ModelRuntime` 自身实现（服务端 Agent runtime）未覆盖，本笔记不虚构其细节。
+- **边界**：Provider 最终 HTTP 字段由 `ModelRuntime`/各 provider adapter 生成，未逐一核对；`ModelRuntime` 自身实现（服务端 Agent runtime）未覆盖。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
@@ -112,7 +113,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 工具审批/拒绝/干预属于执行层任务控制，全部集中在全局 ChatStore 的 `src/store/chat/slices/agentRun/actions/entries/conversationControl.ts`（1626 行）。局部 store 只是薄转发层（数据层事实见会话与消息管理笔记 4.3）：
 
 - **停止**：`stopGenerateMessage`（228-243 行）按 `AI_RUNTIME_OPERATION_TYPES` + running 状态取消当前 context 的全部运行时 op；`cancelSendMessageInServer`（245-293 行）取消 `sendMessage` 阶段 op 并恢复编辑器。
-- `approveToolCalling`（374-532 行）：先用 `startOperation` 建一个携带完整 context 的过渡 op（396-407 行，让乐观更新落到正确的 messageMapKey 分桶），再按 `#shouldUseGatewayResume`（69-81 行，按 agent 的执行目标/异构 provider/gateway 开关重新 `selectRuntimeType`）分流——**两条完全独立的实现分叉**：
+- `approveToolCalling`（374-532 行）：先用 `startOperation` 建一个携带完整 context 的过渡 op（396-407 行，让乐观更新落到正确的 messageMapKey 分桶），再按 `#shouldUseGatewayResume`（69-81 行，按 agent 的执行目标/异构 provider/gateway 开关重新 `selectRuntimeType`）分流到两条独立实现：
   - Gateway 分支（440-478 行）：不在原 op 上恢复，而是发起一个**新的** Gateway op，携带 `resumeApproval`（`decision:'approved'`、`toolCallId`、`parentMessageId`，460-464 行），让服务端读目标工具消息、落库 `intervention=approved`、派发工具并流回结果；`#getRunningServerOps`（91-106 行）先快照暂停的 op，`#completeOpsById`（204-207 行）在 resume 成功后才退休它们（防服务端 `agent_runtime_end` 延迟导致 loading 卡死）。
   - 本地 client 分支（480-531 行）：用 `internal_createAgentState` 重建 agent 状态，`phase: 'human_approved_tool'`，调 `executeClientAgent` 从工具消息位置继续跑本地 runtime。
 - `submitToolInteraction`（699-948 行）、`skipToolInteraction`（948 行起）、`cancelToolInteraction`（1077 行起）逻辑类似；submit 还多一步“是否要插入一条合成的 user 消息”的分叉（`shouldCreateUserMessage`：735 行；Gateway 分支 782-821 行带 `resumeToolResult`；本地 tool-result-only 分支 829-880 行 `phase: 'tool_result'`，不重执行工具；默认分支 882-908 行起先 `optimisticCreateMessage` 合成 user 轮次再继续）。
@@ -121,7 +122,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 
 **调用链总结**：UI 组件（如 `AssistantGroup/Tool/Detail/Intervention/ApprovalActions.tsx`）→ 局部 `useConversationStore().approveToolCall` → 局部 `tool/action.ts` 转发 → 全局 `useChatStore().approveToolCalling` → `conversationControl.ts` 乐观更新 + 派发 Gateway/本地 runtime。
 
-**已知限制**：`INPUT_LOADING_OPERATION_TYPES` 的注释（`operation/types.ts:483-491`）自己承认：审批类“过渡态” op 在 Gateway 分支下没有转发 `parentOperationId`，导致这个窗口期按 Stop 不会真正中断请求（“loading briefly flickers, generation proceeds”）；而 `regenerate` 分支有转发（因为 retry guard 依赖它，488-491 行）。
+**已知限制**：`INPUT_LOADING_OPERATION_TYPES` 的注释（`operation/types.ts:483-491`）说明：审批类“过渡态” op 在 Gateway 分支下没有转发 `parentOperationId`，导致这个窗口期按 Stop 不会真正中断请求（“loading briefly flickers, generation proceeds”）；而 `regenerate` 分支有转发（因为 retry guard 依赖它，488-491 行）。
 
 **普通重试/重新生成**：`INTERIM_LOADING_OPERATION_TYPES` 含 `regenerate`（460-465 行），说明“重新生成”也是经过渡 op 的恢复流程；具体 regenerate 的任务链（从哪条消息重建请求）本次未展开——未验证。普通停止按钮的界面状态见 Chat UI 笔记；网络级取消效果未运行验证。
 
@@ -149,7 +150,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 
 - **页面重载/重新进入的 Gateway 恢复**：topic 的 `metadata.runningOperation`（写点在执行链，本笔记只确认读取端）由 `ConversationArea.tsx:98-103` 读取后交给 `useGatewayReconnect`（`src/hooks/useGatewayReconnect.ts:29-67`，SWR key 为 operationId 保证去重），内部调 `reconnectToGatewayOperation`（`gateway.ts:891-1004+`）完成：刷新 JWT（931-945 行，NOT_FOUND 时清本地过期标记）、跳过已建立的连接与更新的 op（920-929、950-952 行）、重建本地 op 并锚定真实 startTime（980-989 行）、把取消转发为服务端 `interruptTask`（993-997 行）、新建 WebSocket 并回放事件。**这是本次确认到的唯一“退出后恢复”路径（仅 Gateway 模式）**；client 本地 runtime 在页面重载后不恢复（进程内状态丢失），异构 CLI 依赖 `--resume` 会话。
 - **切换会话/关闭窗口**：切 topic 时 `switchTopic` 的 epoch 防竞态与 op 清理见第 8 节与 operation 状态机；关闭窗口/应用退出时的任务处理未调查。
-- **后端覆盖边界（如实标注）**：本次调查主要是前端代码。`ModelRuntime` 实现、各 provider adapter 的请求字段生成、Gateway resume 的服务端处理（读工具消息、落库 intervention、派发工具）均只观察到前端交接点（`route.ts:24,38-42` 与 `resumeApproval`/`resumeToolResult` 载荷），服务端内部未调查。
+- **后端覆盖边界**：本次调查主要是前端代码。`ModelRuntime` 实现、各 provider adapter 的请求字段生成、Gateway resume 的服务端处理（读工具消息、落库 intervention、派发工具）均只观察到前端交接点（`route.ts:24,38-42` 与 `resumeApproval`/`resumeToolResult` 载荷），服务端内部未调查。
 - **可观测性**：任务级日志/trace/用量关联本次未调查；完成事件的可观察出口（桌面通知深链、未读点、waitingForHuman 图标）在 Chat UI 笔记第 9 节与 Topic 侧栏。
 
 ## 11. 未验证事项

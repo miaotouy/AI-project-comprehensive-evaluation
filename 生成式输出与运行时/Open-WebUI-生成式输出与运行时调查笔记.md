@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模型上：代码解释器输出是唯一具备完整“触发->执行->结果->展示->编辑->保存->重新打开->模型回流”生命周期的输出对象（Responses API 风格 `open_webui:code_interpreter` output item，持久化在 `ChatMessage.output` JSON 列）；HTML/CSS/JS Artifact 是消息正文代码块的派生投影（侧栏 iframe），无独立对象身份、不可编辑、不可回流；Pyodide 文件系统是浏览器沙箱内的会话级活文件系统（可跨会话持久化但默认关闭）；终端工作区（文件浏览、notebook、端口预览）全部委托给外部 Terminal 服务器。代码执行引擎三选一：浏览器 Pyodide（WASM worker 或隐藏 iframe 沙箱）、远端 Jupyter（REST+WebSocket）、外部终端服务器。能力等级判定：**G3 为主（可执行 Artifact + 会话内活对象），兼具 G4 的部分特征（代码块/notebook 单元编辑保存、文件编辑回写）与 G5 的会话级局部（模型可读写 `/mnt/uploads` 并就地更新同一输出项）**；无 diff/版本/接受拒绝、无跨会话对象保证、无多投影同步。
+Open WebUI 的生成式输出分散在一套“消息即事实源”的模型上：代码解释器输出是唯一具备完整“触发->执行->结果->展示->编辑->保存->重新打开->模型回流”生命周期的输出对象（Responses API 风格 `open_webui:code_interpreter` output item，持久化在 `ChatMessage.output` JSON 列）；HTML/CSS/JS Artifact 是消息正文代码块的派生投影（侧栏 iframe），无独立对象身份、不可编辑、不可回流；Pyodide 文件系统是浏览器沙箱内的会话级活文件系统（可跨会话持久化但默认关闭）；终端工作区（文件浏览、notebook、端口预览）全部委托给外部 Terminal 服务器。代码执行引擎三选一：浏览器 Pyodide（WASM worker 或隐藏 iframe 沙箱）、远端 Jupyter（REST+WebSocket）、外部终端服务器。能力等级判定：**G3 为主（可执行 Artifact + 会话内活对象），兼具 G4 的部分特征（代码块/notebook 单元编辑保存、文件编辑回写）与 G5 的会话级局部（模型可读写 `/mnt/uploads` 并就地更新同一输出项）**；无 diff/版本/接受拒绝、无跨会话对象保证、无多投影同步。
 
 ## 系统边界与总体调用链
 
@@ -22,7 +22,7 @@ Open WebUI 的生成式输出深度分布在一套“消息即事实源”的模
 
 1. **代码解释器链**（legacy function-calling 模式下由模型自由文本触发，XML 标签协议）：
    模型流式输出 `<code_interpreter>` 标签，`tag_output_handler` 切分消息并创建 `open_webui:code_interpreter` output item（逐 chunk 累积 code）；流结束后 `middleware.py:5325` 循环执行（最多 5 轮）：
-   - pyodide 引擎：经 `get_event_call`（`socket/main.py`，`sio.call` 带超时）向本人生动会话发 `execute:python` RPC，`src/routes/+layout.svelte:556` 收到后送共享 Pyodide worker/沙箱执行，回调回传 `{stdout, stderr, result}`；
+       - pyodide 引擎：经 `get_event_call`（`socket/main.py`，`sio.call` 带超时）向本人活动会话发 `execute:python` RPC，`src/routes/+layout.svelte:556` 收到后送共享 Pyodide worker/沙箱执行，回调回传 `{stdout, stderr, result}`；
    - jupyter 引擎：经 `backend/open_webui/utils/code_interpreter.py` 连远端 Jupyter，base64 图片转换为 files 记录 URL。
    执行后 `ci_item['output']` 就地填充、`status='completed'`，追加 assistant message item 并 `convert_output_to_messages(raw=True)` 把“代码+输出”回流给模型继续分析；全部 output 落库 `ChatMessage.output`。前端按 output item 渲染，代码块内嵌 `attributes.output` 恢复上次运行结果，用户可编辑重跑、保存回写消息。
 

@@ -19,7 +19,7 @@ DeepSeek-Harness 的对话交付能力收敛为一条浏览器下载链路，属
 - **唯一导出能力是 Web 端“Session log”下载**：会话头按钮与 `/export` 斜杠命令共用同一个浏览器下载控制器，先 `HEAD` 预检，再让浏览器下载管理器接管 `GET /api/session.export`，得到流式 ZIP。该端点只在 Web bundle 挂载，是 host 专属下载面（无 RPC 信封），UI 侧不缓冲 ZIP 字节（`session-log-export/src/client/controller.ts:111-130`）。
 - **ZIP 内容是持久化工件的逐字原文**：每个会话的日志文件以 `session.jsonl` 原始文件名进入归档（`readRaw` 解码后的确切字节，绝不从解析后事件重建），子代理后代放在 `subagents/<id>/` 下，被引用图片按内容寻址去重后放在 `media/<attachmentId>.<ext>` 下，不写 manifest（`host/apiproxy/src/session-export.ts:1-20`）。浏览器恒定传 `includeDescendants=true`，覆盖整棵后代会话树，但不包含祖先会话。
 - **内容口径是“全量原始日志”**：ZIP 携带全部事件原文（含 reasoning、工具调用与结果、usage、被替换遮蔽的节点），不做过滤、脱敏或重建；这与 UI 实时对话视图（基于 surface 折叠的派生消息）是两条不同的数据路径。
-- **没有分享能力**：在 `packages/` 与 `apps/` 按 gist、navigator.share、分享等关键词检索均未见产品级分享功能；无 URL、远端对象、访问控制或撤销语义。交付物是本地文件，目标是个人存档与迁移，不面向人际传播或公开发布。
+- **没有分享能力**：在 `packages/` 与 `apps/` 按 gist、navigator.share、分享等关键词检索均未见产品级分享功能；无 URL、远端对象、访问控制或撤销语义。交付物是本地文件，本次检索未找到任何分享或发布入口，可见用途限于个人存档与迁移。
 - **导出格式即持久化格式**：ZIP 内就是后端落盘的那份 JSONL 文本，头行 `type:"session"` 携带 `version`，无独立导出 schema。往返语义等于“把文件放回持久化路径即可被后端重新读取”，客户端没有任何导入入口。
 - **CLI 无会话导出**：`--dump-config`/`--dump-default-config` 是配置组合诊断（打印 profile 装配树，与对话无关），`apps/cli/reference/` 是 CLI 行为参考文档而非命令；headless 单次任务把最后一条助手文本打印到 stdout，属于终端交付而非文件导出。
 - **邻接能力**：`dsh-session-telemetry` 以 `full | feedback-only | disabled` 三种共享策略把会话事件投影交给 OTel 后端，属于观测/研究方向的会话数据交接，与用户可见的对话导出分属两条管线，本次只记录边界。

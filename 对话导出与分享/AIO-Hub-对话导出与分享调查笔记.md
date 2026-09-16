@@ -8,7 +8,7 @@
 >
 > 调查方式：静态源码调查；读取分支/会话导出、消息截图对话框、独立截图渲染器、截图生成与历史管理实现，并与既有会话管理和 Chat UI 笔记交叉核对；未运行应用或实际生成图片
 >
-> 调查范围：结构化分支与会话导出、消息范围选择、截图分享稿编排、实时预览、PNG 生成、运行时生成历史、复制与保存；不覆盖会话导入、角色卡/预设资产交换和移动端资产分享
+> 调查范围：结构化分支与会话导出、消息范围选择、截图分享稿编排、实时预览、PNG 生成、运行时生成历史、复制与保存，以及备份与完整会话形状的导入往返；不覆盖角色卡/预设资产交换和移动端资产分享
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -20,7 +20,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 本次未找到截图模块内直接改写消息正文副本的 `contenteditable`、textarea、CodeMirror 或消息内容更新入口。当前实现中的“可编辑”仅指分享稿的选区与视觉编排，不包含独立的正文编辑器。
 
-截图候选列表的来源是唯一的：`ShareScreenshotDialog` 只在 `ChatArea.vue:638-650` 实例化，消息一律来自活动路径与智能体开场白展示消息，范围不含完整树；消息菜单、树图节点菜单和导出弹窗“生成分享长图”都汇入同一个对话框。其二，截图内容是数据驱动的独立重渲染：复用消息组件但隐藏编辑、menubar、流式指示器等现场交互元素；生成流程对消息内容没有快照冻结，运行中生成时理论上可能截到流式更新的中间态（推断）。其三，结构化分支导出（Markdown/JSON/Raw JSON）只产生文件，没有导入入口；项目内仅批量备份 ZIP 管线支持会话往返。
+截图候选列表的来源是唯一的：`ShareScreenshotDialog` 只在 `ChatArea.vue:638-650` 实例化，消息一律来自活动路径与智能体开场白展示消息，范围不含完整树；消息菜单、树图节点菜单和导出弹窗“生成分享长图”都汇入同一个对话框。截图内容是数据驱动的独立重渲染，复用消息组件但隐藏编辑、menubar、流式指示器等现场交互元素；生成流程对消息内容没有快照冻结，运行中生成时理论上可能截到流式更新的中间态（推断）。结构化分支导出中的分支 Markdown 与分支 JSON 只产生文件，没有导入入口；可往返的是备份管线（单会话备份 JSON 与批量备份 ZIP），导出会话对话框按完整会话形状产出的 Raw JSON 也能被同一导入服务读回。
 
 ## 系统边界与完整主链
 
@@ -113,15 +113,17 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 ## 4. 格式、schema 与往返能力
 
-结构化导出（Markdown/JSON/Raw JSON）经 `ExportBranchDialog` 预览后通过 `writeTextFile` 落盘（`components/export/ExportBranchDialog.vue:434-479`），是纯输出管线。
+结构化分支导出（Markdown/JSON/Raw JSON）经 `ExportBranchDialog` 预览后通过 `writeTextFile` 落盘，导出入口本身不提供导入（`components/export/ExportBranchDialog.vue:434-479`）。
 
 JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map（`composables/features/useExportManager.ts:607-841,1078-1130`）。
 
-往返结论：Markdown、分支 JSON 与 Raw JSON 仍没有导入入口，不能直接回写会话；但会话导出对话框新增单会话备份 JSON。该格式用 `aiohub-chat-session` 与版本 `1.0.0` 标识，保存完整的 index/detail/tree；导入服务按 JSON 首字符分流并校验版本、会话结构及冲突策略，因此这一专用备份格式可以往返，不应与面向阅读的 JSON 导出混同（`components/export/ExportSessionDialog.vue:102-206`、`services/sessionImportExportService.ts:157-204,257-263`）。
+往返结论：分支 Markdown 与分支 JSON 不能回写会话，单会话备份 JSON 与批量备份 ZIP 可以。备份 JSON 用 `aiohub-chat-session` 与版本 `1.0.0` 标识，保存完整的 index/detail/tree；导入服务按 JSON 首字符分流，校验版本与 id/nodes/rootNodeId/activeLeafId 结构后交给同一套冲突策略，因此这一专用格式可往返，不应与面向阅读的 JSON 导出混同（`components/export/ExportSessionDialog.vue:102-233`、`services/sessionImportExportService.ts:85-113,157-206`）。
 
-项目内真正可往返的是另一条批量备份管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:119-125,127-161`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`:70-117,203-257`）。
+同一导入服务还接受顶层为 `{index, detail}` 的完整会话形状，测试用例名为 “imports the existing Raw JSON shape”；导出会话对话框的 Raw 格式正是这一形状，因此在整会话导出场景下 Raw JSON 同样可被读回。分支导出只保留从根到所选节点的节点链，而 activeLeafId 沿用整会话的值，只有该链覆盖活动叶节点时才通过校验；分支 Markdown、分支 JSON 与面向阅读的会话 JSON 均在校验处被拒（`services/sessionImportExportService.ts:199-204`、`services/__tests__/sessionImportExportService.test.ts:97-153`）。
 
-批量备份 ZIP 仍使用 `aiohub-chat-session-backup` v1.0.0，包含 `metadata.json` 与多份会话文件；单会话 JSON 则由同一导入服务处理。两者都保留完整树，但与分支导出的 Raw JSON 不是同一种格式，后者仍无导入管线。
+批量备份走另一条管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:119-125,127-161`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`:70-117,203-257`）。
+
+单会话备份 JSON 与批量备份 ZIP 都保留完整树，且由同一导入服务处理；分支导出的 Raw JSON 虽同为 index/detail 形状，但只覆盖所选分支的节点链，能否读回取决于该链是否覆盖活动叶节点。
 
 ## 5. 生成历史与版本语义
 
@@ -153,7 +155,7 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 - 结构化导出与图片工作台分开实现，分别服务可移植数据和视觉交付。
 - 图片内容的一致性依赖共享数据；渲染器不复用现场 DOM。交互态、流式指示器不会进入图片，但消息内容变化会实时反映到预览；生成瞬间的内容以 store 数据为准，无快照冻结。
 - 长图采用单 Canvas 全量拼接，无尺寸上限与分块降级；逐消息捕获只降低单次捕获复杂度，没有解决总尺寸与编码内存问题。
-- 批量备份 ZIP 是唯一闭环的交换格式，与面向阅读的分支导出刻意分离。
+- 备份格式（单会话备份 JSON 与批量备份 ZIP）是闭环的交换格式，与面向阅读的分支导出刻意分离。
 
 ## 8. 未验证事项
 
@@ -180,6 +182,6 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 - `src/tools/llm-chat/stores/llmChatStore.ts`（活动路径计算 `256-289`）
 - `src/tools/llm-chat/stores/session/sessionAccessManager.ts`（活动路径回溯 `74-102`）
 - `src/tools/llm-chat/utils/chatPathUtils.ts`（预设展示消息 `61-125,88-124`）
-- `src/tools/llm-chat/services/sessionImportExportService.ts`（备份 ZIP 往返）
+- `src/tools/llm-chat/services/sessionImportExportService.ts`（单会话备份 JSON 与备份 ZIP 往返）
 - `src/tools/llm-chat/components/sidebar/BatchManagerDialog.vue`（批量备份导入导出入口）
 - `src/components/common/BaseDialog.vue`（默认 `destroyOnClose: true`）

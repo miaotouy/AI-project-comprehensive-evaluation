@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-OpenClaw 当前的会话存储是“逻辑会话节点 + 可轮换 transcript generation + 追加型事件树”的组合。逻辑会话以 `sessionKey` 寻址，`session_nodes.entry_json` 保存会话记录，`current_session_id` 指向当前 transcript；一个逻辑会话可以保留多个 `session_windows`，每个 window 对应一代 transcript。当前代码的主要事实源是 per-agent SQLite，活动路径、消息序号和全文搜索均是从 transcript 事件派生的投影，而不是另一份独立消息主库。总体 schema 版本为 17，transcript entry 的文件协议版本为 3。依据见 `src/state/openclaw-agent-schema.sql:1-3`、`src/state/openclaw-agent-db-contract.ts:5-22` 和 `src/config/sessions/version.ts`。
+OpenClaw 当前的会话存储是“逻辑会话节点 + 可轮换 transcript generation + 追加型事件树”的组合。逻辑会话以 `sessionKey` 寻址，`session_nodes.entry_json` 保存会话记录，`current_session_id` 指向当前 transcript；一个逻辑会话可以保留多个 `session_windows`，每个 window 对应一代 transcript。当前代码的主要事实源是 per-agent SQLite；活动路径、消息序号和全文搜索都是从 transcript 事件派生的投影，没有独立的第二份消息主库。总体 schema 版本为 17，transcript entry 的文件协议版本为 3。依据见 `src/state/openclaw-agent-schema.sql:1-3`、`src/state/openclaw-agent-db-contract.ts:5-22` 和 `src/config/sessions/version.ts`。
 
 消息不是简单的线性数组。每条可索引 entry 带有 `id`、`parentId` 和时间戳，形成父子链/DAG；活动 leaf 和追加游标决定当前可见路径。分支切换、回退和 fork 通过新增 transcript generation 或 leaf 控制改变活动路径，原始事件通常仍然保留。写入消息必须经过带 parent、幂等和脱敏处理的消息追加入口，不能把缺少 `parentId` 的 message 行直接作为普通事件写入。依据见 `src/agents/sessions/session-manager-types.ts:19-32`、`src/config/sessions/transcript-tree.ts:69-116` 和 `src/gateway/server-methods/AGENTS.md:1`。
 
-生命周期操作同时保护逻辑身份和 transcript 身份。删除会先处理运行中工作、并发期望值、归档和关联对象；reset、rewind、branch switch 等操作会轮换当前 `sessionId`，使旧 generation 成为可追踪的历史，而不是让旧 manager 继续覆盖新路径。写入和生命周期变化通过 per-store writer queue、同步 SQLite transaction、`sessionId`/`lifecycleRevision` 比较以及 post-commit 事件串联起来。
+生命周期操作同时保护逻辑身份和 transcript 身份。删除会先处理运行中工作、并发期望值、归档和关联对象；reset、rewind、branch switch 等操作会轮换当前 `sessionId`，使旧 generation 成为可追踪的历史，旧 manager 无法继续覆盖新路径。写入和生命周期变化通过 per-store writer queue、同步 SQLite transaction、`sessionId`/`lifecycleRevision` 比较以及 post-commit 事件串联起来。
 
 检索分成两条路径：会话列表面向 `session_nodes` 记录及其轻量字段，支持偏移分页、固定排序、归档和 owner 等过滤；`sessions.search` 面向当前活动 transcript 中的 user/assistant 文本 FTS。聊天历史则读取活动路径，并在 compaction/reset 边界处补入展示所需的控制消息。搜索索引落后时会返回 `indexing` 并后台 reconcile，不会把可能包含已回退文本的旧 FTS 行当作可靠结果。
 
@@ -129,7 +129,7 @@ SessionManager 在运行时保留 entry map、leaf、labels 和 append cursor，
 
 省略 key 时会先选择指定 agent 的 main alias，而不是简单复用兼容 owner 的 alias。没有显式 parent 的 durable dashboard session 在 `dmScope: "main"` 等条件下会挂到 agent main；incognito session 不建立 durable parent lineage。`createGatewaySession` 的条件见 `src/gateway/session-create-service.ts:648-683`。
 
-真正创建还是采用已有 key，是事务回调中以是否存在 `existingEntry` 判断的。已有 key 可以被采用，但不会重新盖写一次性创建 provenance，也不会伪造 `created` 事件。新 entry 写入后，如果请求包含初始消息，`sessions.create` 的 `afterCreate` 再通过 `chat.send` 追加消息并启动回合。实现见 `src/gateway/session-create-service.ts:913-1031`、`:1144-1233` 和 `src/gateway/server-methods/sessions-create.ts:575-620`。
+创建还是采用已有 key，由事务回调中是否存在 `existingEntry` 判断。已有 key 可以被采用，但不会重新盖写一次性创建 provenance，也不会伪造 `created` 事件。新 entry 写入后，如果请求包含初始消息，`sessions.create` 的 `afterCreate` 再通过 `chat.send` 追加消息并启动回合。实现见 `src/gateway/session-create-service.ts:913-1031`、`:1144-1233` 和 `src/gateway/server-methods/sessions-create.ts:575-620`。
 
 物理上为空的 SQLite transcript 可以由 SessionManager 延迟初始化 header；但含有 opaque 或损坏结构的非空 transcript 不会被当成全新会话静默替换。旧版本 transcript 在持久化 runtime target 上需要先经过 doctor/import migration，见 `src/agents/sessions/session-manager-core.ts:99-127`。
 
@@ -173,7 +173,7 @@ user message 可带幂等键。数据库对同一 session 的 message 幂等键�
 
 代码会拒绝不在活动路径上的 rewind 目标、非 user message、非 branch tip 的 switch，以及 session 已有活动工作时的这些操作。新 generation 的写入和当前 entry 更新在同一 agent 数据库 transaction 中完成，见 `src/config/sessions/session-accessor.sqlite-message-cut.ts:274-383`、`:386-448` 和 `src/gateway/server-methods/sessions-rewind.ts:276-345`。
 
-分支列表不是单独的 branch 表，而是扫描 transcript tree 后找没有后继引用的 tip；当前 leaf 排在最前，其余按事件位置倒序。分支摘要缓存由 transcript generation 和 max seq 校验，最多保留 32 个 session cache entry。实现见 `src/config/sessions/session-accessor.sqlite-message-cut.ts:83-165`、`:404-448`。
+分支列表没有单独的 branch 表：扫描 transcript tree 找没有后继引用的 tip，当前 leaf 排在最前，其余按事件位置倒序。分支摘要缓存由 transcript generation 和 max seq 校验，最多保留 32 个 session cache entry。实现见 `src/config/sessions/session-accessor.sqlite-message-cut.ts:83-165`、`:404-448`。
 
 带 upstream link 的外部 harness session 不进入本地 branch graph。它们不能在本地 rewind 或 switch，只有在存在唯一注册 fork harness 时才允许 fork；这样 fork 的实际 owner 仍是外部会话系统。Gateway 判断见 `src/gateway/server-methods/sessions-rewind.ts:247-255`、`:371-433`。
 

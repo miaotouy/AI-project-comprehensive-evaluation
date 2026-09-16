@@ -20,7 +20,7 @@ NextChat 的角色是“提示词、示例上下文、模型参数和工具选�
 2. 用户 Mask 通过 Zustand 持久化 store CRUD；内置 Mask 从构建产物 `/masks.json` 异步加载，并在展示时把全局模型配置覆盖到内置 Mask 的局部配置上（`app/store/mask.ts:49-105`、`app/masks/index.ts:22-37`）。
 3. 新会话创建时会复制传入 Mask，并把全局 `modelConfig` 与 Mask 局部配置合并；会话之后持有自己的 Mask 副本。用户在当前会话切换模型或其他模型参数时，`syncGlobalConfig` 被关闭。
 4. `context` 是有顺序的 `ChatMessage[]`，编辑器支持增删、拖拽排序、文本/图片示例。发送请求时它被直接插入 system prompt 之后；`hideContext` 只影响聊天页面是否显示这些上下文消息，不会从请求上下文中删除。
-5. “角色继承”非常轻量：默认同步全局模型配置，用户改动后转为会话/Mask 局部配置；没有版本继承、父子角色、权限隔离或角色运行时状态机。
+5. “角色继承”仅限模型配置同步：默认跟随全局模型配置，用户改动后转为会话/Mask 局部配置；没有版本继承、父子角色、权限隔离或角色运行时状态机。
 
 ## 1. Mask 数据模型
 
@@ -126,7 +126,7 @@ Mask 的模型编辑由 `MaskConfig.updateConfig` 完成（`app/components/mask.
 
 当 `syncGlobalConfig` 为 true 时，聊天组件的 effect 会把全局模型配置复制到当前会话 Mask（`app/components/chat.tsx:1148-1175`）；重新打开同步时，编辑器会要求确认并用全局配置覆盖局部配置（`app/components/mask.tsx:219-245`）。
 
-这形成了一个简单的状态规则：
+由此形成一条状态规则：
 
 ```text
 syncGlobalConfig = true

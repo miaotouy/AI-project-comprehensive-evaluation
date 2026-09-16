@@ -16,7 +16,7 @@
 
 AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核心：所有工具（内置、插件、MCP、子 Agent Handoff）最终都归一为 FunctionTool 对象，由其执行方法（astr_agent_tool_exec.py:130-187）按类型分发，主 Agent runner ToolLoopAgentRunner 在循环中串行消费。工具系统横跨四个代码域：定义与 schema、注册与生命周期、执行分发和运行循环，入口分别见 core/agent/tool.py、core/provider/func_tool_manager.py + core/tools/registry.py、core/astr_agent_tool_exec.py、core/agent/runners/tool_loop_agent_runner.py。
 
-关键事实（快照 a9bb8a6）：
+关键事实：
 
 - **三类协议 schema 由同一 ToolSet 导出**：三个导出方法分别生成 OpenAI、Anthropic 和 Google 格式，位置为 tool.py:203-330。Google 格式包含递归转换器，处理 JSON Schema 到 Gemini 格式的兼容细节，如 list 类型、删除 additionalProperties、array 缺省 items 回退等。
 - **四路注册汇合**：内置工具由 builtin_tool 装饰器注册（registry.py:232-254），插件工具从 star_handler.py:670-724 进入，MCP 工具由 mcp_server.json 配置并经初始化入口加入，子 Agent 则使用 HandoffTool（handoff.py:8-64）。
@@ -66,7 +66,6 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 ### 1.2 ToolSet 去重规则（add_tool，tool.py:91-108）
 
 - 同名冲突时，只有新工具 active 或旧工具 inactive 才覆盖（:105）；
-- 即**新工具 active 或旧工具 inactive** → 覆盖；否则保留旧的；
 - 结果语义：后加载的 inactive 工具不会覆盖已激活工具；MCP 工具（active 默认 True）可覆盖被禁用的内置工具。
 
 ### 1.3 派生工具集（供 LLM 消费）
@@ -226,7 +225,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 | `FileUploadTool` / `FileDownloadTool` | `astrbot_upload_file` / `astrbot_download_file`（fs.py:805、871） | sandbox |
 | `CuaScreenshotTool` / `CuaMouseClickTool` / `CuaKeyboardTypeTool` | `astrbot_cua_*`（cua.py:53、111、148） | sandbox + booter=cua |
 
-- runtime 选择由 astr_agent_tool_exec.py:189-245 的运行时工具组装逻辑完成，依据 provider_settings.computer_use_runtime（默认 local，:257）和 sandbox booter 选择工具；sandbox 有 8 个，cua 有 3 个，local 有 7 个。
+- runtime 选择由 astr_agent_tool_exec.py:189-245 的运行时工具组装逻辑完成，依据 provider_settings.computer_use_runtime 和 sandbox booter 选择工具；该键在配置 schema 中的默认值为 none（core/config/default.py:180），读侧仅在配置缺键时回退为 local（astr_agent_tool_exec.py:258）。sandbox 有 8 个，cua 有 3 个，local 有 7 个。
 
 ### 7.3 shipyard_neo（computer_tools/shipyard_neo/，14 个）
 

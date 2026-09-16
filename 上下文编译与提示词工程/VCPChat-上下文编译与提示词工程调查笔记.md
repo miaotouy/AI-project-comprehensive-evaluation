@@ -87,7 +87,7 @@ send-to-vcp
 
 群聊请求层可确认的是：发言选择结果影响哪些 agent 依次获得上下文；每个 agent 的上下文由 `contextForAgentPromises` 构建。群聊 assistant 消息还保存 agent、模型和模型来源字段，但原笔记没有确认完整请求消息数组、system prompt 内容或这些字段如何映射到最终 Provider payload。
 
-本次没有证据证明显示预览中的文本必然等于最终模型输入，也没有证据证明 `requestContext` 会改写权威历史消息。应将上述请求层结果与完整 payload 区分开来。
+本次没有证据证明显示预览中的文本必然等于最终模型输入，也没有证据证明 `requestContext` 会改写权威历史消息。上述请求层结果与完整 payload 属于不同证据层。
 
 ## 4. 消息生命周期变换与交接
 

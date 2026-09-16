@@ -16,7 +16,7 @@
 
 OpenCode 的一次生成任务由 `api.session.prompt` 进入 `SessionPrompt.prompt`，经 loop → processor → `LLM.stream`（AI SDK `streamText`）执行，每轮从数据库重读历史。LLM 事件流经 `LLMAISDK.toLLMEvents` 转统一事件，`SessionProcessor.handleEvent` 逐个更新消息/部件并发布事件，经 SSE 推送客户端。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **上下文压缩是"重写历史"**：compaction 生成 [compaction-user, summary-assistant, tail, continue-user] 重排，旧 tool 输出被清空并标记 compacted；压缩请求的对话历史改为**文本序列化**——按六种前缀逐条拼接、结果截断、compacted 标 `[Old tool result content cleared]`，拼进 summary 请求（compaction.ts:52-86、:385-441），不再经 `toModelMessagesEffect` 的 stripMedia 媒体剥离（该选项保留但无调用方）。序列化前缀如下：
 
@@ -124,7 +124,7 @@ messages 组装（prompt.ts:1257-1286）：
   5. `onInterrupt` 置 aborted 走 `halt(DOMException AbortError)`（processor.ts:648-654），随后 `cleanup` 置终态（第 6 节）。
   界面入口（TUI 双击 Esc / Web 中断按钮）见 Chat UI 笔记。
 - **重试**：`SessionRetry.policy`（src/session/retry.ts:182-206）——`retryable` 判定 5xx/429/超时、已识别网络错误及“稍后重试/容量不足”提示（:33-42、:84-158），context overflow 不重试（:86）；`delay` 尊重 retry-after 头、指数退避 2s 起加 0.25 随机抖动（:26-31、:46-82），`meta.attempt > RETRY_MAX_RETRIES(5)` 停止（:192）；接入 processor 的 `Effect.retry`（processor.ts:660-674），每次尝试发布 `{type:"retry",attempt,message,next}` 状态（:664-672）。
-- **重试与重新生成的区别**：无独立重试端点；前端对失败消息的重试本质是再次发送（续写语义见会话与消息管理笔记 4）。
+- **重试与重新生成的区别**：无独立重试端点；前端对失败消息的重试即再次发送（续写语义见会话与消息管理笔记 4）。
 
 ## 8. 队列、多会话并发与后台生成
 

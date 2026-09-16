@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-SillyTavern 是 Node 服务与传统浏览器前端合仓的单应用项目。`public/scripts` 141,344 行，是绝对主体；后端 `src/endpoints` 22,786 行。目录结构以按功能拆分的大量浏览器脚本为主，不是 package 化 monorepo。
+SillyTavern 是 Node 服务与传统浏览器前端合仓的单应用项目。`public/scripts` 141,344 行，是绝对主体；后端 `src/endpoints` 22,786 行。目录结构以按功能拆分的大量浏览器脚本为主。
 
 ## 统计与模块分布
 
@@ -31,7 +31,7 @@ JavaScript 192,388 行（86.1%）、CSS 15,733 行（7.0%）、HTML 13,345 行�
 
 ## 跨平台组织与边界
 
-主形态是跨操作系统 Node 服务加浏览器 UI，也提供 Docker 和 `src/electron` 启动器；后者只是 Electron server 包，不形成另一套业务前端。根脚本还提供 Deno/Bun 启动入口（`package.json:120-127`）。平台共享依赖 Web 技术栈，未见移动原生代码。
+主形态是跨操作系统 Node 服务加浏览器 UI，也提供 Docker 和 `src/electron` 启动器；后者只是 Electron server 包。根脚本还提供 Deno/Bun 启动入口（`package.json:120-127`）。平台共享依赖 Web 技术栈，未见移动原生代码。
 
 ## 关键源码索引
 

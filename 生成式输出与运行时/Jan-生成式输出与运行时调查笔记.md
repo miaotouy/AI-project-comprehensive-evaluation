@@ -33,7 +33,7 @@ Jan 的模型输出默认止于消息正文：文本/Markdown/代码块/数学/M
 
 ## 1. 触发方式、输出协议与对象模型
 
-- 触发方式：HTML/SVG artifact 完全由模型自由文本中的围栏触发，无用户命令、无结构化 part、无工具调用参与。识别正则 `ARTIFACT_RE` 匹配 html/svg 两种围栏及裸 `<svg>…</svg>` 标签，其余语言围栏（js、py 等）原样留在 Markdown 流中（web-app/src/lib/utils.ts:72-121）。防误触发起两点作用：一是要求围栏体是孤立的 SVG，二是流式中不拆段，未闭合围栏不会在 token 中途被抽出（web-app/src/containers/RenderMarkdown.tsx:258-264）。协议处理的是正则文本，无转义与嵌套概念——嵌套围栏不会被该正则识别，直接留在正文。
+- 触发方式：HTML/SVG artifact 完全由模型自由文本中的围栏触发，无用户命令、无结构化 part、无工具调用参与。识别正则 `ARTIFACT_RE` 匹配 html/svg 两种围栏及裸 `<svg>…</svg>` 标签，其余语言围栏（js、py 等）原样留在 Markdown 流中（web-app/src/lib/utils.ts:72-121）。防误触发靠两点：一是要求围栏体是孤立的 SVG，二是流式中不拆段，未闭合围栏不会在 token 中途被抽出（web-app/src/containers/RenderMarkdown.tsx:258-264）。协议处理的是正则文本，无转义与嵌套概念——嵌套围栏不会被该正则识别，直接留在正文。
 - 对象模型：**不存在独立对象**。artifact 是渲染期派生物：类型只有 html/svg 两种（由围栏语言决定），无稳定 ID、无来源消息字段、无版本、无状态、无能力声明。聊天消息对象是唯一事实源；运行实例（iframe）是瞬态 DOM。输出协议开放度：自由文本探测级别，无 typed part 或 UI schema。
 - 消息对象本身有完整身份：稳定 ID、所属线程、角色、状态、创建时间与元数据（元数据承载 `parentId` 分支、`stopped` 标记等）（web-app/src/routes/threads/$threadId.tsx:397-411），但那是 Chat/消息层身份，不属于输出对象。
 
@@ -46,7 +46,7 @@ Jan 的模型输出默认止于消息正文：文本/Markdown/代码块/数学/M
 ## 3. 投影表面与多视图关系
 
 - 表面只有一个：消息正文内联（artifact 组件直接渲染在消息流中）。无侧栏、独立标签页、画布、桌面或外部浏览器投影；无多视图同步（代码视图与预览视图是同一组件的互斥页签，切换即卸载 iframe）。搜索 `canvas|notebook|webview` 未发现其他投影面（sidebar 的 offcanvas 是 CSS 折叠布局，与本类目无关）。
-- 源（消息文本）→ 投影（artifact 组件）→ 运行实例（iframe）简化为两级：运行实例总是从源即时重建，无中间持久态。
+- 源（消息文本）与投影（artifact 组件）构成两级，运行实例（iframe）总是从源即时重建，无中间持久态。
 
 ## 4. 表现类型、依赖与运行环境
 

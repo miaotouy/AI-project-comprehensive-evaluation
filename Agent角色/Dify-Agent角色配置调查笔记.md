@@ -53,7 +53,7 @@ Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入�
 
 传统 Agent 的工具、策略和模型引用属于其 app config；Agent v2 的 Soul/配置则在发布后成为版本化运行输入。模型凭据由租户 Provider 配置解析，工具可来自内置、API、插件、MCP 或兼容 workflow。角色配置能够声明这些资源，并不表示它们都能成功执行或自动获得逐调用批准，详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)和[LLM渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
 
-其中包含媒体创作方向：传统 `agent-chat` 可以把 DALL-E、Stable Diffusion 或其他已安装的媒体工具编入工具列表（`README.md:108`）。仓库自带的“SVG Logo Design”推荐应用声明了 DALL-E 3 生成图片后再调用 Vectorizer 转为 SVG 的两步流程（`api/constants/recommended_apps.json:463`）。工具引擎会把 `IMAGE` / `IMAGE_LINK` 响应转为工具文件和消息输出（`api/core/tools/tool_engine.py:254-291`），因此 Agent 可以在一次会话内基于文字需求触发生成，并将结果交还给用户或后续节点。这个方向属于“Agent 驱动的媒体调用”，不是没有覆盖；模板所声明的跨工具传递与真实外部工具执行尚未运行验证。
+其中包含媒体创作方向：传统 `agent-chat` 可以把 DALL-E、Stable Diffusion 或其他已安装的媒体工具编入工具列表（`README.md:108`）。仓库自带的“SVG Logo Design”推荐应用声明了 DALL-E 3 生成图片后再调用 Vectorizer 转为 SVG 的两步流程（`api/constants/recommended_apps.json:463`）。工具引擎会把 `IMAGE` / `IMAGE_LINK` 响应转为工具文件和消息输出（`api/core/tools/tool_engine.py:254-291`），因此 Agent 可以在一次会话内基于文字需求触发生成，并将结果交还给用户或后续节点。这个方向属于“Agent 驱动的媒体调用”；模板所声明的跨工具传递与真实外部工具执行尚未运行验证。
 
 但它尚不能据此归入本项目笔记的独立“媒体创作”主链：本次静态检查没有找到 Dify 自身为这类结果维护的媒体专用工作台、生成任务历史、可编辑版本/分支或跨会话资产复用闭环。Dify 负责的是工具选择、调用与结果回流；实际生成、编辑、异步任务和资产生命周期仍由 DALL-E、Stable Diffusion、Vectorizer 或其他插件/外部服务承接。两种表述分别说明编排能力与产品工作站能力，不能相互替代。
 

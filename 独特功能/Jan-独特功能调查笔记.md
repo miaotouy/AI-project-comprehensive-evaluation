@@ -16,8 +16,8 @@
 
 以下达到 `主链确认`（静态证据）的新候选：
 
-1. **设备级本地推理器管理闭环**（主贡献候选）：llama.cpp 后端二进制下载/更新/回滚、按 OS/CPU 指令集/GPU 选型、Router 单进程多模型、GPU 未启用检测与 fit 预测——管理的是"引擎本身"，比通用"生成式输出与运行时"（模型服务抽象层）深一层。
-2. **`/v1/orchestrations` 服务端 MCP 编排端点**（辅助贡献候选）：把 MCP 工具执行作为 HTTP 服务暴露，可配置 router 模型预选工具——不是又一个 OpenAI 兼容服务，而是"本地 Agent 服务端"。
+1. **设备级本地推理器管理闭环**（主贡献候选）：llama.cpp 后端二进制下载/更新/回滚、按 OS/CPU 指令集/GPU 选型、Router 单进程多模型、GPU 未启用检测与 fit 预测——管理对象是推理引擎本身，通用"生成式输出与运行时"类目只覆盖模型服务抽象层。
+2. **`/v1/orchestrations` 服务端 MCP 编排端点**（辅助贡献候选）：把 MCP 工具执行作为 HTTP 服务暴露，可配置 router 模型预选工具；与本地 OpenAI 兼容服务相比，它多出服务端的工具编排。
 3. **Jan CLI + 外部 Agent 预接**（辅助贡献候选）：`jan serve` / `jan launch claude|openclaw` 打通桌面数据目录、终端与外部 Agent CLI 三面。
 4. **MCP 智能工具路由**（辅助贡献候选）：LLM 路由器模型 + 关键词分类降级 + 遥测回调，属 Agent 工具类目的增强形态。
 
@@ -77,7 +77,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **人机与多 Agent 关系**：外部客户端（其他 Agent 或脚本）以 HTTP 身份参与；工具执行发生在 Jan 服务端，权限边界沿用 MCP 工具的既有执行域。
 
-**独特性判断**："本地 OpenAI 兼容服务"可归并已有类目，但"把 MCP 工具执行编排暴露为 HTTP 端点"接近本地 Agent 服务器形态，样本中罕见。
+**独特性判断**："本地 OpenAI 兼容服务"可归并已有类目，但"把 MCP 工具执行编排暴露为 HTTP 端点"接近本地 Agent 服务器形态，样本中未找到同类端点。
 
 **证据强度**：`proxy.rs` 端点为静态事实；端到端编排行为未运行验证。
 
@@ -128,7 +128,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 - **本地↔云模型级 failover**：README 语境下的"容灾/路由"易被读成智能调度；按当前快照只有云端 API key 链 401 重试（`provider-api-keys.ts`）与 MCP 工具路由降级，无分片、无模型级本地↔云自动切换。统一路由 = 按 `model_id` 静态解析，结论维持归并。
 - **BrowserMCP**：伴生 Chrome 扩展（`JanBrowserExtensionDialog.tsx` 仅为配置入口），本仓库主链未接入，标外部依赖。
 - **Project 工作流**：`入口确认`（`web-app/src/routes/project/$projectId.tsx`、`services/projects/default.ts`、rag-extension `scope: "project"` 检索），证据以 UI 层为主；与"协同工作区"聚类（Open WebUI Notes、LobeHub Pages）重叠，本轮不单独提案，留待聚类比较。
-- **首次运行向导**（HEAD 提交 `fad3f12` 主题）：普通引导流程，归并设置类目，不进入统计。
+- **首次运行向导**：普通引导流程，归并设置类目，不进入统计。
 
 ## 对特色贡献统计的影响
 

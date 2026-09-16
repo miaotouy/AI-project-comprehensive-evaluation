@@ -81,7 +81,7 @@ Web 服务器是应用进程内的同一服务实例，`configureWebApi` 直接�
 
 ### MCP 侧
 
-服务器的本地身份是配置项里的 Uuid，用户可见身份是配置名，同时用作 MCP 客户端实现名与工具命名空间前缀；服务器名只允许字母数字（白名单），工具注册名由它拼成 `mcp__…__…`，构造与启用过滤见文末交接（`data/ai/tools/ChatToolFactory.kt:76-94`）。传输方式只有 `sse` 与 `streamable_http`，配置模型是密封类，从 MCP JSON 导入时也只解析 URL、type 与 headers（`data/ai/mcp/McpConfig.kt:62-95`、`72-95`；`ui/pages/setting/SettingMcpPage.kt:1017-1033`），未发现 stdio 或本地进程传输。
+服务器的本地身份是配置项里的 Uuid，用户可见身份是配置名，同时用作 MCP 客户端实现名与工具命名空间前缀；服务器名只允许字母数字（白名单），工具注册名由它拼成 `mcp__…__…`，构造与启用过滤见文末交接（`data/ai/tools/ChatToolFactory.kt:76-94`）。传输方式只有 `sse` 与 `streamable_http`，配置模型是密封类，从 MCP JSON 导入时也只解析 URL、type 与 headers（`data/ai/mcp/McpConfig.kt:62-95`；`ui/pages/setting/SettingMcpPage.kt:1017-1033`），未发现 stdio 或本地进程传输。
 
 工具的持久身份是工具名，重新同步时描述与输入 Schema 被服务器返回值覆盖，用户设置的启用开关与审批标志保留（`McpSessionRegistry.kt:499-512`）。是否触发重连只取决于传输类型、服务器 URL、客户端名与 headers 组成的连接键，工具开关变化不会重连（同文件 `465-497`）。OAuth 状态（动态注册结果、端点与令牌、过期时间）随服务器配置持久化，而连接客户端只在内存注册表里，重启后由配置流重新协调建立（`McpConfig.kt:23-51`）。
 
@@ -111,15 +111,25 @@ Web 端能发送与编辑消息、重生成、切换分支、设标题、移动/
 
 ## 权限、凭据与治理边界
 
-**MCP 凭据**。OAuth 的发现顺序是：先按 401 响应的 `WWW-Authenticate` 头定位受保护资源元数据，失败则退回 RFC 9728 的 well-known 路径；授权服务器元数据再按 RFC 8414 与 OIDC Discovery 查找（`data/ai/mcp/McpOAuthDiscoveryClient.kt:49-122`）。授权用 PKCE 与随机 state，回调走绑在 IPv4 回环地址的临时服务器（端口与路径固定为 52134），随首个会话打开启动、末个会话关闭停止，并按 state 路由回调（`data/ai/mcp/McpOAuthCoordinator.kt:24-28, 135-245`；`oauth/src/main/java/me/rerere/oauth/OAuthLoopbackCallbackServer.kt:33-114, 139-188`）。支持动态注册且本地无可复用 client_id 时先注册客户端，授权页经 Custom Tabs 打开（`oauth/src/main/java/me/rerere/oauth/OAuthAuthorizationLauncher.kt:13-20`）。令牌在临近过期 60 秒内按 serverId 串行刷新，失败则沿用旧配置而不中断（`McpOAuthCoordinator.kt:83-121`）。令牌与客户端密钥随设置持久化，`McpOAuthState` 的 `toString` 已脱敏，但存储未加密（`McpConfig.kt:39-51`）。
+**MCP 凭据**。OAuth 的发现顺序是：先按 401 响应的 `WWW-Authenticate` 头定位受保护资源元数据，失败则退回 RFC 9728 的 well-known 路径；授权服务器元数据再按 RFC 8414 与 OIDC Discovery 查找（`data/ai/mcp/McpOAuthDiscoveryClient.kt:49-122`）。授权用 PKCE 与随机 state，回调走绑在 IPv4 回环地址的临时服务器，端口与路径固定为 52134，随首个会话打开启动、末个会话关闭停止，并按 state 路由回调（`data/ai/mcp/McpOAuthCoordinator.kt:24-28, 135-245`；`oauth/src/main/java/me/rerere/oauth/OAuthLoopbackCallbackServer.kt:33-114, 139-188`）。
+
+本地无可复用 client_id 且服务器支持动态注册时先注册客户端，授权页经 Custom Tabs 打开（`oauth/src/main/java/me/rerere/oauth/OAuthAuthorizationLauncher.kt:13-20`）。令牌在临近过期 60 秒内按 serverId 串行刷新，失败则沿用旧配置而不中断（`McpOAuthCoordinator.kt:83-121`）。令牌与客户端密钥随设置持久化；`McpOAuthState` 的 `toString` 已脱敏，但存储未加密（`McpConfig.kt:39-51`）。
 
 **MCP 请求头**。用户 headers 原样附加；OAuth 已启用且已有访问令牌、用户又未自备 Authorization 头时注入 `Authorization: Bearer <token>`（`McpSessionRegistry.kt:446-497`），所以凭据作用域是"每台服务器一份"，不代表个人、Agent 或团队身份。
 
 **MCP 动作审批**。MCP 工具的审批需求随工具配置持久化，并成为宿主工具的审批标志（`McpConfig.kt:53-60`）；待审状态的生成、批准或拒绝后的结果回注属宿主通用工具机制，见文末交接。Web 端审批入口同样经 REST 回到同一个 `ChatService.handleToolApproval`。
 
-**workspace 边界**。这是用户态 PRoot 沙箱而非内核级隔离：PRoot 在宿主用户权限下重映射路径与 root 身份，`--root-id` 让 rootfs 内进程看到 root，`--link2symlink` 兼容不支持符号链接的场景，`--kill-on-exit` 保证退出时回收子进程（`ProotShellRunner.kt:68-79`）。文件区是应用私有的 `filesDir/workspaces/<root>/files`，Linux 区与临时区是同 workspace 下的 `linux`、`tmp`；跨目录访问由路径解析统一处理，`/workspace` 映射文件区，挂载表路径映射各自源目录，`/dev`、`/proc`、`/sys` 被明确拒绝为可读文件并要求改用 shell（`WorkspaceManager.kt:121-146, 255`）。越界写有产品边界：写文件与编辑文件默认免强制审批，目标路径落在 `/workspace`、`/tmp`、`/skills` 之外时强制转审批，并可按 workspace 覆盖落库（`WorkspaceTools.kt:26-34, 126, 169, 407-420`；`WorkspaceRepository.kt:104-114`）。断网或 rootfs 缺失时 shell 工具直接失败，shell 非就绪时 workspace 工具集根本不注入（`ChatToolFactory.kt:97-108`）。
+**workspace 边界**。这是用户态 PRoot 沙箱，不提供内核级隔离：PRoot 在宿主用户权限下重映射路径与 root 身份，`--root-id` 让 rootfs 内进程看到 root，`--link2symlink` 兼容不支持符号链接的场景，`--kill-on-exit` 保证退出时回收子进程（`ProotShellRunner.kt:68-79`）。
 
-**Web 边界**。JWT 鉴权开启时，除令牌换取接口外的 `/api` 路由全部要求 Bearer 令牌，校验动态读取当前访问口令，改口令后旧令牌立即失效；未开启则所有 API 与静态资源都不要求鉴权（`WebApiModule.kt:90-138, 170-186`）。服务器默认绑定全部接口并注册 mDNS 广播，只有显式选择仅本机模式才绑回环地址（`WebServerManager.kt:24-25, 63-101`）。需注意 `/api/events` 推送的设置快照是完整的 Settings 序列化结果，含 Web 访问口令字段，该字段的可见范围就是 SSE 的鉴权范围（`web/routes/EventsRoutes.kt:45-47`；`data/datastore/PreferencesStore.kt:561-565`）。Web 端也能触发文件类接口与会话操作，权限等价于本机已登录用户。
+文件区是应用私有的 `filesDir/workspaces/<root>/files`，Linux 区与临时区是同 workspace 下的 `linux`、`tmp`。跨目录访问由路径解析统一处理：`/workspace` 映射文件区，挂载表路径映射各自源目录，`/dev`、`/proc`、`/sys` 被明确拒绝为可读文件并要求改用 shell（`WorkspaceManager.kt:121-146, 255`）。
+
+越界写另有产品边界：写文件与编辑文件默认免强制审批，目标路径落在 `/workspace`、`/tmp`、`/skills` 之外时强制转审批，并可按 workspace 覆盖落库（`WorkspaceTools.kt:26-34, 126, 169, 407-420`；`WorkspaceRepository.kt:104-114`）。
+
+断网或 rootfs 缺失时 shell 工具直接失败，shell 非就绪时 workspace 工具集根本不注入（`ChatToolFactory.kt:97-108`）。
+
+**Web 边界**。JWT 鉴权开启时，除令牌换取接口外的 `/api` 路由全部要求 Bearer 令牌，校验动态读取当前访问口令，改口令后旧令牌立即失效；未开启则所有 API 与静态资源都不要求鉴权（`WebApiModule.kt:90-138, 170-186`）。
+
+服务器默认绑定全部接口并注册 mDNS 广播，只有显式选择仅本机模式才绑回环地址（`WebServerManager.kt:24-25, 63-101`）。`/api/events` 推送的设置快照是完整的 Settings 序列化结果，含 Web 访问口令字段，该字段的可见范围就是 SSE 的鉴权范围（`web/routes/EventsRoutes.kt:45-47`；`data/datastore/PreferencesStore.kt:561-565`）。Web 端也能触发文件类接口与会话操作，权限等价于本机已登录用户。
 
 ## 相邻类目交接
 

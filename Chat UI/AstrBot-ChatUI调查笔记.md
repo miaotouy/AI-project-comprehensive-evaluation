@@ -17,7 +17,7 @@
 AstrBot 主要面向外部 IM 平台（QQ/Telegram/Discord/微信），这些平台客户端的聊天界面不归 AstrBot 所有。按 Chat UI 类目适用性规则，本笔记只覆盖项目自带界面：**WebChat**（Dashboard 内嵌聊天工作台）与 **Dashboard 管理界面**。
 
 - **聊天主链**：`Chat.vue` 工作台（会话列表 + 消息区 + Composer）→ `useMessages` 以 SSE 或 WebSocket 双通道提交并消费流式事件（POST `/api/v1/chat`、`/api/v1/unified-chat/ws`）→ 事件进入 webchat 队列 → 与外部 IM 共享同一套事件总线 + 流水线（执行语义在对话请求与上下文笔记）；`scheduler.execute` 结束时以结束事件刷新 UI（scheduler.py:94-95）。
-- **现场恢复是显式设计的**：刷新页面后 `loadSessionMessages` 携带 `active_runs` 快照重建运行中的 bot 消息并重连 `/chat/runs/{id}/stream`（useMessages.ts:257-313）。
+- **现场恢复有专门路径**：刷新页面后 `loadSessionMessages` 携带 `active_runs` 快照重建运行中的 bot 消息并重连 `/chat/runs/{id}/stream`（useMessages.ts:257-313）。
 - **消息操作完整**：编辑（仅最新用户消息）、重生成（仅最新 turn）、选中文本创建侧线程（thread）、推理/引用面板——入口在 ChatMessageList，执行语义在会话与消息管理笔记 §4。
 - **Live Mode 前端当前未挂载**：`LiveMode.vue` 存在但全仓库无 import（仅 ChatInput.vue 的 `openLiveMode` 事件发射，按钮已注释），后台 `/api/v1/live-chat/ws` 与 `run_live_agent` 路径仍保留（live_chat.py:35-37；internal.py:293-329）。
 
@@ -35,7 +35,7 @@ AstrBot 主要面向外部 IM 平台（QQ/Telegram/Discord/微信），这些平
   → 切换会话/刷新：内存保留已加载会话，active_runs 快照恢复运行中生成
 ```
 
-WebChat 与外部 IM 共享同一套事件模型；界面只是结果的投递表面之一。管理界面（对话管理、会话规则、追踪、统计）位于同一 Dashboard，作为辅助表面单列。
+WebChat 与外部 IM 共享同一套事件模型，WebChat 界面只负责呈现结果。管理界面（对话管理、会话规则、追踪、统计）位于同一 Dashboard，作为辅助表面单列。
 
 ## 1. 页面结构、导航与多窗口
 
@@ -123,11 +123,10 @@ WebChat 与外部 IM 共享同一套事件模型；界面只是结果的投递�
 
 - **双通道传输**：SSE 为默认（长轮询式流），WebSocket 为可切换通道（`chat.transportMode`），后端统一走 back_queue + 订阅者广播，前端按类型合并，传输差异被封装。
 - **本地占位 + 服务端确认**：发送先本地渲染 user/bot 占位，收到 `user_message_saved`/`message_saved` 后替换为持久化 ID——网络失败时错误文本追加到 bot 消息（useMessages.ts:665-670），无重试按钮级恢复（本次未找到）。
-- **恢复优先**：active_runs 快照 + resume stream 是刷新/重连的主恢复路径，优于重新拉全量历史。
+- **恢复优先**：刷新/重连先走 active_runs 快照 + resume stream，不需要重新拉全量历史。
 - **编辑/重生成的"仅最新"约束**：UI 允许对任意 bot 消息点重生成，但后端只放行最新 checkpoint，旧 turn 重生成报错（数据语义在会话与消息管理笔记 §4）。
-- **Live Mode 半成品**：前端组件未挂载、按钮注释（ChatInput.vue:254）、`/astr_live_dev` 秘密命令发射的事件无监听者；后端 live-chat WS 与 run_live_agent 仍在——界面侧当前不可达（未运行验证）。
-- **通用 UI 盘点不在范围**：Modal/Toast/主题/动画等仅记录与聊天主链的交点（错误/删除/创建反馈经 toast 与确认对话框出现），不做全仓库盘点。
-- **外部 IM 界面不归项目所有**：QQ、Telegram、Discord、微信等客户端 UI 是第三方表面，不在 Chat UI 调查范围；项目拥有的是 WebChat（webchat 平台适配器）与 Dashboard。
+- **Live Mode 前端未挂载**：前端组件未挂载、按钮注释（ChatInput.vue:254）、`/astr_live_dev` 秘密命令发射的事件无监听者；后端 live-chat WS 与 run_live_agent 仍在——界面侧当前不可达（未运行验证）。
+- **界面边界**：通用 UI（Modal/Toast/主题/动画）只记录与聊天主链的交点（错误、删除、创建反馈经 toast 与确认对话框出现），不做全仓库盘点；QQ、Telegram、Discord、微信等第三方客户端 UI 不在范围内，项目拥有的是 WebChat（webchat 平台适配器）与 Dashboard。
 
 ## 11. 未验证事项
 

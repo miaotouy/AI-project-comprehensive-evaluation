@@ -20,7 +20,12 @@ AstrBot 的主动能力包含两种不同的运行形态，不能合并为同一
 
 ## 系统边界与主链
 
-cron 的事实对象是 `cron_jobs` 表中的 `CronJob`，含 job ID、任务类型、cron 或单次时间、时区、payload、enabled、persistent、run_once、状态、上次/下次时间和错误。持久化工作定义及其可观察的最近状态因此不依赖 APScheduler 内存，见 `astrbot/core/db/po.py:181-209`。
+cron 的事实对象是 `cron_jobs` 表中的 `CronJob`，见 `astrbot/core/db/po.py:181-209`。同一行同时保存工作定义与最近运行状态：
+
+- 定义字段：job ID、任务类型、cron 或单次时间、时区、payload，以及 enabled、persistent、run_once。
+- 最近状态字段：状态、上次/下次运行时间和错误。
+
+持久化工作定义及其可观察的最近状态因此不依赖 APScheduler 内存。
 
 active-agent cron 主链如下：
 

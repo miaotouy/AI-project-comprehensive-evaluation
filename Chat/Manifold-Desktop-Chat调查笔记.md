@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Manifold Desktop 的 Chat 是一套较薄的“标签页内存状态 + WebView2 消息桥 + C++ 文件存储”实现，聊天主链尚未完全接通，存在四个直接影响基本会话行为的问题：新对话不持久化（关闭标签即丢失）；assistant 流式回复只进 DOM 不回写 `messages[]`（第二轮请求缺少上一轮 assistant 上下文）；`CHAT_CHUNK`/`CHAT_DONE` 无会话标识（所有打开的标签监听同一广播）；侧栏重命名按整份 JSON 覆盖会话文件，会清空已有消息。
+Manifold Desktop 的 Chat 由标签页内存状态、WebView2 消息桥与 C++ 文件存储三部分组成，聊天主链尚未完全接通，存在四个直接影响基本会话行为的问题：新对话不持久化（关闭标签即丢失）；assistant 流式回复只进 DOM 不回写 `messages[]`（第二轮请求缺少上一轮 assistant 上下文）；`CHAT_CHUNK`/`CHAT_DONE` 无会话标识（所有打开的标签监听同一广播）；侧栏重命名按整份 JSON 覆盖会话文件，会清空已有消息。
 
 ## 产品表面与系统边界
 

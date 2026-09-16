@@ -29,7 +29,7 @@ WebApp / service API 提供 inputs、files、response_mode
   -> run 详情、节点执行和日志由专用服务查询/归档
 ```
 
-service API 将 response mode 定义为 blocking 或 streaming，默认 blocking；前者返回 JSON，后者返回 `text/event-stream` 和 `ChunkWorkflowEvent`（`controllers/service_api/app/workflow.py:75-80,285-293`）。这将同步结果与事件消费作为 API 契约，而不是由前端自行猜测。
+service API 将 response mode 定义为 blocking 或 streaming，默认 blocking；前者返回 JSON，后者返回 `text/event-stream` 和 `ChunkWorkflowEvent`（`controllers/service_api/app/workflow.py:75-80,285-293`）。同步结果与事件消费由此成为 API 契约。
 
 ## 1. 输入、配置与运行记录初始化
 
@@ -61,7 +61,7 @@ service API 可按 workflow run ID 取得详情（`workflow.py:121-276`），控
 
 节点执行的 inputs、outputs 与 process data 可以直接留在数据库，也可以通过 offload 记录转存到 UploadFile/对象存储；读取 detail 时依该引用回载完整内容。这样做是因为节点开始与完成要分别保存 inputs/outputs，不能等待完成后合并而牺牲运行中可观察性（`api/models/workflow.py:793-1221`）。它是执行审计的容量设计，不意味着用户获得可编辑文件工作区。
 
-归档并非只有后台目录：控制台先列出月度 archive bundle，再创建或复用 download task；任务由 Redis 状态和 Celery 准备过程驱动，状态依次可为 pending、processing、ready 或 failed，完成后控制器才重定向至预签名下载 URL（`controllers/console/workflow_run_archive.py:94-182`，`services/retention/workflow_run/archive_{log_service,download_preparation,download_task}.py`）。准备任务把归档 bundle 整理为面向用户的 CSV ZIP，bundle 索引避免请求时直接枚举对象存储。
+归档在控制台有独立入口：先列出月度 archive bundle，再创建或复用 download task；任务由 Redis 状态和 Celery 准备过程驱动，状态依次可为 pending、processing、ready 或 failed，完成后控制器才重定向至预签名下载 URL（`controllers/console/workflow_run_archive.py:94-182`，`services/retention/workflow_run/archive_{log_service,download_preparation,download_task}.py`）。准备任务把归档 bundle 整理为面向用户的 CSV ZIP，bundle 索引避免请求时直接枚举对象存储。
 
 当前快照的最新提交正重构 workflow run archive application service，显示归档仍在演进。静态路径能确认下载任务的状态收口和控制台访问边界；未运行存储/retention 任务，不能声明实际归档介质可用性、恢复时限、下载权限效果或清理成功率。
 
@@ -71,7 +71,7 @@ Dify 在本类目中可确认两层不同对象：消息中的 Markdown、代码
 
 这不等于 Dify 已确认提供了 HTML/JS Artifact 沙箱、可编辑文档画布、持续桌面活对象或“模型读取对象源码后定向维护”的完整闭环。本笔记的结论应收敛为**可寻址工作流执行记录**，而非泛称生成式 Artifact 或工作区：run 可以被查询、日志化和归档，却没有在本轮发现可在同一 run outputs 上编辑、版本化、接收 patch 或由模型再次定位维护的产品路径。已发布图的编辑/版本语义属于控制台 workflow 与 DSL 专项，不能由 run 的稳定 ID 推断。
 
-## 已确认边界与未验证事项
+## 7. 已确认边界与未验证事项
 
 - 已确认发布 workflow、tenant/user scope、repository 与 GraphEngine 的静态主链；控制台调试有独立触发来源。
 - 停止 API 只面向 streaming；它是否中断模型、插件、MCP 和外部 HTTP 需运行验证。

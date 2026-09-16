@@ -39,7 +39,9 @@
 
 ### 对象、可维护性与来源
 
-知识库元数据包含唯一 ID、名称、描述、图标、Embedding/Rerank provider ID、分块尺寸与重叠、稠密/稀疏候选数、最终数量、文档数和块数。文档具有独立 ID、所属库、文件名/类型/大小、块数和媒体数；媒体另存 ID、文件路径、MIME 类型和大小。块并不写入该元数据 SQLite，而是写入每库 `doc.db` 的 `documents` 表；其 JSON 元数据只有 `kb_id`、`kb_doc_id` 与 `chunk_index`。因此 Dashboard 能按库列文档、按文档列块、删除文档或单块，但当前结果不携带原始文件路径、段落标题或页面位置（`models.py:11-120`、`kb_helper.py:656-682`、`faiss_impl/document_storage.py:27-41`）。
+知识库元数据包含唯一 ID、名称、描述、图标、Embedding/Rerank provider ID、分块尺寸与重叠、稠密/稀疏候选数、最终数量、文档数和块数。文档具有独立 ID、所属库、文件名/类型/大小、块数和媒体数；媒体另存 ID、文件路径、MIME 类型和大小（`models.py:11-120`）。
+
+块并不写入该元数据 SQLite，而是写入每库 `doc.db` 的 `documents` 表；其 JSON 元数据只有 `kb_id`、`kb_doc_id` 与 `chunk_index`。因此 Dashboard 能按库列文档、按文档列块、删除文档或单块，但当前结果不携带原始文件路径、段落标题或页面位置（`kb_helper.py:656-682`、`faiss_impl/document_storage.py:27-41`）。
 
 Dashboard 的受 `kb` scope 保护 API 支持建库、改库、删除库、列文档/块、上传文件、导入预切块及 URL 导入。创建时会实际请求 Embedding，并校验返回维度；配置了 Rerank 时也会发送探测重排请求。删除整库先关闭并删除该库目录，再删元数据；删除文档先删除 SQLite 文档/媒体行，随后按 `kb_doc_id` 删除块与向量。文档与块可删除，但本次未找到面向已存在块的编辑和重新向量化接口（`dashboard/api/knowledge_bases.py:81-305`、`knowledge_base_service.py:347-405,738-795`、`kb_mgr.py:168-180`）。
 
@@ -78,9 +80,13 @@ Dashboard 的受 `kb` scope 保护 API 支持建库、改库、删除库、列�
 
 ### 候选、融合和 rerank
 
-稠密路径逐库调用 FAISS，要求块元数据的 `kb_id` 与当前库相等，先取两倍 `top_k_dense` 再过滤，返回每库设定数量。FAISS 的 L2 距离被映射为 `1 - distance / 2`，随后把各库结果汇总。稀疏路径先对查询去停用词并分词；优先保证 FTS5 内容无索引缺口后以 OR 查询和 SQLite `bm25()` 取每库 `top_k_sparse`，FTS5 不可用或搜索失败时才把涉及库的所有块载入内存构建 BM25Okapi。两条路径都是按当前 query 的单轮候选生成，并无查询改写或扩展（`retrieval/manager.py:195-240`、`sparse_retriever.py:56-182`、`faiss_impl/document_storage.py:464-583`）。
+稠密路径逐库调用 FAISS，要求块元数据的 `kb_id` 与当前库相等，先取两倍 `top_k_dense` 再过滤，返回每库设定数量；FAISS 的 L2 距离被映射为 `1 - distance / 2`，随后把各库结果汇总（`retrieval/manager.py:195-240`）。
 
-融合阶段不是纯 RRF：稠密相似度在所有候选中 min-max 归一，BM25 分数在各知识库内部归一，再以 0.9/0.1 加权。RRF 只在融合分数相等时参与次级排序，之后保留至全局 `kb_fusion_top_k`，默认 20，并仅按块正文完全相同去重，不折叠同一文档的相邻块。融合块需能回查 `KBDocument` 与 `KnowledgeBase` 元数据才会成为最终结果。若多个库配置了不同 rerank provider，当前实现选择遍历到的第一个可用 provider 处理全部融合候选，而不会按来源库分别重排；调用异常时记录警告、直接使用融合结果。最后截断至会话 `top_k` 或全局 `kb_final_top_k`，默认 5（`rank_fusion.py:58-205`、`retrieval/manager.py:148-193`、`config/default.py:318-321`）。
+稀疏路径先对查询去停用词并分词；优先保证 FTS5 内容无索引缺口后以 OR 查询和 SQLite `bm25()` 取每库 `top_k_sparse`，FTS5 不可用或搜索失败时才把涉及库的所有块载入内存构建 BM25Okapi。两条路径都是按当前 query 的单轮候选生成，并无查询改写或扩展（`sparse_retriever.py:56-182`、`faiss_impl/document_storage.py:464-583`）。
+
+融合分数由加权求和决定，RRF 不参与主排序：稠密相似度在所有候选中 min-max 归一，BM25 分数在各知识库内部归一，再以 0.9/0.1 加权。RRF 只在融合分数相等时参与次级排序，之后保留至全局 `kb_fusion_top_k`，默认 20，并仅按块正文完全相同去重，不折叠同一文档的相邻块。融合块需能回查 `KBDocument` 与 `KnowledgeBase` 元数据才会成为最终结果（`rank_fusion.py:58-205`）。
+
+若多个库配置了不同 rerank provider，当前实现选择遍历到的第一个可用 provider 处理全部融合候选，而不会按来源库分别重排；调用异常时记录警告、直接使用融合结果。最后截断至会话 `top_k` 或全局 `kb_final_top_k`，默认 5（`retrieval/manager.py:148-193`、`config/default.py:318-321`）。
 
 ## 阶段、反馈与结果注入
 
@@ -107,7 +113,7 @@ agentic 模式把同一个检索函数包装为 `astr_kb_search`。工具说明�
 
 AstrBot 可与 Dify、Open WebUI、Chatbox、AIO Knowledge 等知识资产管线比较本地资料摄取、分块、向量/关键词混合候选、重排、来源和恢复。其当前实现的特点是每库独立 SQLite/FAISS 文件与轻量 Dashboard 管理面，而非 Dataset/Pipeline 发布、租户 ACL 或异步任务队列体系。
 
-它也可与模型工具化检索实现比较“模型能否在结果后再次查询”：agentic 模式确实返回工具结果给通用 Agent 循环。不过这不等同于检索驱动认知编排。当前固定链输出的终点始终是本轮候选文本；本次在知识库检索器、工具和请求装配入口中未找到用命中内容、分数或向量构造下一阶段查询的机制，也未找到关系图、思维簇、主动记忆维护或检索质量评测。该结论只限所列入口和搜索范围，不能排除插件或用户提示自行组织额外循环。
+它也可与模型工具化检索实现比较“模型能否在结果后再次查询”：agentic 模式会把工具结果返回给通用 Agent 循环，但这不等同于检索驱动认知编排。当前固定链输出的终点始终是本轮候选文本；本次在知识库检索器、工具和请求装配入口中未找到用命中内容、分数或向量构造下一阶段查询的机制，也未找到关系图、思维簇、主动记忆维护或检索质量评测。该结论只限所列入口和搜索范围，不能排除插件或用户提示自行组织额外循环。
 
 ## 未验证事项
 

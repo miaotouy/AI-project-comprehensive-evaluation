@@ -69,7 +69,7 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 **层级。** 遮罩 `z-index: var(--z-index-modal)`（10000，:211）。
 
-**缺陷边界（静态）。** 嵌套弹窗时两套独立 focus trap 并存的行为未运行验证。
+**嵌套弹窗边界（静态）。** 两套独立 focus trap 并存时的行为未运行验证。
 
 ### 命令式 confirm/input：feedback 平台
 

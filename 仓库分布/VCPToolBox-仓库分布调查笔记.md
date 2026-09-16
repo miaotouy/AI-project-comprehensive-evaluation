@@ -39,23 +39,23 @@ VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能�
 
 `AdminPanel-Vue/dist` 还有 320 个跟踪文件，进一步抬高文件数。
 
-`c4c4d00`→`1ae9b63c` 净增 17 个跟踪文件：
+运行时内核、原生二进制与构建脚本集中在 `Plugin`、`scripts` 与 `tests`：
 
 - `Plugin/ChromeBridge/VCPChrome/webcore/`：运行时内核（7 文件/约 4,459 行，扩展主链逻辑从 `content_script.js` 迁入）
 - `CodeSearcher` 的 Node 包装器与 Windows x64 原生二进制
 - `DailyNoteSearcher` Windows 二进制
 - `scripts/build_rust_plugin.js`
-- `tests/chromeBridge/` 4 个新测试
+- `tests/chromeBridge/` 4 个测试
 
 ## 语言、文档与测试
 
-JavaScript 234,967 行（51.1%）、Vue 68,638 行（14.9%）、Rust 39,524 行（8.6%）、CSS 29,011 行（6.3%），另有 Python 与 Shell 等运行时（注：JS 行数按本次统计口径为 234,967，原表 235,918 含约 2% 的原统计工具口径差，其余语言统计值与原文一致）。文档集中在 SkillBridge（206 文件/76,199 行）、`docs`（52/32,752）和 `knowledge`（227 余文件）。测试只分布在 AdminPanel 18 文件、根 tests 13（`c4c4d00`→`1ae9b63c` 新增 5 个 chromeBridge 运行时/图片/编辑器样本与测试）和 scripts 1，未与插件数量成比例扩展。
+JavaScript 234,967 行（51.1%）、Vue 68,638 行（14.9%）、Rust 39,524 行（8.6%）、CSS 29,011 行（6.3%），另有 Python 与 Shell 等运行时（注：JS 行数按本次统计口径为 234,967，原表 235,918 含约 2% 的原统计工具口径差，其余语言统计值与原文一致）。文档集中在 SkillBridge（206 文件/76,199 行）、`docs`（52/32,752）和 `knowledge`（227 余文件）。测试只分布在 AdminPanel 18 文件、根 tests 13（含 chromeBridge 运行时/图片/编辑器样本与测试）和 scripts 1，未与插件数量成比例扩展。
 
 ## 跨平台组织与边界
 
 产品主形态是服务端加浏览器管理台，不是原生多端客户端；Docker CI 明确构建 Linux amd64/arm64（`.github/workflows/ci.yml:19-120`）。插件和 Rust 辅助程序各自带构建边界，`OpenWebUISub`/`SillyTavernSub` 是第三方页面集成层。
 
-`c4c4d00`→`1ae9b63c` 提交集中做多系统兼容加固：
+多系统兼容加固集中在以下文件：
 
 - `Plugin.js`：进程树终止跨平台化（Windows taskkill 失败回退、Unix 进程组 SIGKILL）
 - `sqliteHealthManager.js`：针对 macOS 关闭 mmap 并改用 PASSIVE checkpoint

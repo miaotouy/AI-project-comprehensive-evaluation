@@ -36,17 +36,17 @@ plugin trigger 的内部执行链可静态贯通：后台任务从缓存取原�
 
 普通 webhook 的配置只包含 method/content type/headers/params/body/静态响应和 timeout；未发现 secret、HMAC、timestamp 或 event-id/idempotency 字段。它在提交异步任务后立即回复节点配置的静态内容，该响应不能代表 workflow 最终结果。schedule poller 有数据库锁与启停控制，但其任务明确不重试失败执行；plugin trigger 可把 provider-specific signature 校验委托给 daemon/plugin，却没有 Dify 统一验签、delivery-id 去重、最终回调或对外 run 查询协议。因此 Trigger Provider 在本类目只能记为 `入口确认`，不能以内部日志链替代双向持续协作。
 
-## 接入角色、状态映射与准入判断
+## 4. 接入角色、状态映射与准入判断
 
 已发布应用的 service API 是外部业务系统调用 Dify 的稳定表面：调用者提交 inputs/files 或消息输入，Dify 在服务端创建应用运行记录并以流/阻塞结果返回。它满足“外部应用调用宿主”的一部分链路，但本轮没有追到外部系统的持久账号、资源 installation 或双向任务接管，因此不把普通 API 调用升级为外部执行体协作。
 
 MCP 与插件表现为 Dify 主动调用外部工具的机制。已确认 MCP Provider 配置、远端工具发现/调用、headers/OAuth 交接与工具结果进入 Agent/workflow；没有确认外部系统身份如何与本地会话/资源持续映射、断线后如何恢复或用户如何接管。Trigger Provider 与 webhook/schedule trigger 确实把外部事件映射为发布 workflow、触发型 End User、workflow run 与 trigger log，但同步 webhook 响应和异步 run 的结果面分离。当前没有确认外部系统接收最终 workflow 输出、取消正在执行的 run 或按关联 ID 恢复消费，故属于 `入口确认`，而不是本类目的静态 `主链确认`。
 
-## 结果回流与边界
+## 5. 结果回流与边界
 
 外部应用调用的结果以 JSON/SSE、message 或 workflow run 形式返回；工具调用结果以 Agent/节点事件进入后续模型或可见消息；触发器以 workflow run、workflow app log 和 trigger log 承接异步结果，webhook 调用方只得到预配置的同步 HTTP 响应。外部 API、MCP/插件和 trigger 的凭据均由服务端 tenant/workspace 层管理，但完整脱敏、审计和备份策略未覆盖。
 
-## 未验证事项
+## 6. 未验证事项
 
 - service API key、End User、文件上传及 run 查询的真实授权与限流。
 - SDK 请求序列化、流重连、错误兼容性和版本契约。
@@ -54,7 +54,7 @@ MCP 与插件表现为 Dify 主动调用外部工具的机制。已确认 MCP Pr
 - trigger 的签名验证、重试、幂等、事件顺序、多实例投递，以及外部系统获取最终 workflow 输出的协议。
 - schedule 的单次失败处理、Celery 发布与数据库提交之间的崩溃窗口、plugin provider 的签名/事件 ID 契约、原始请求日志的保留和敏感数据边界。
 
-## 关键源码索引
+## 7. 关键源码索引
 
 - `api/controllers/service_api/app/`：已发布应用 API
 - `api/controllers/web/workflow.py:41-116`：公开 Web workflow 调用与停止

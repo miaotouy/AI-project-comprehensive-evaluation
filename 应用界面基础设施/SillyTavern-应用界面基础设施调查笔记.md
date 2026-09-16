@@ -103,7 +103,7 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 ## 4. 主题、视觉 token 与持久化
 
-主题不是简单深浅二元切换，而是可配置的 CSS 变量集合：
+主题是一组可配置的 CSS 变量：
 
 - power_user.theme（默认 'Default (Dark) 1.7.1'，power-user.js:177）标识选中主题；
 
@@ -207,11 +207,11 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 **竖屏窄屏子断点。** max-width: 450px（:537-580）把抽屉宽度比例从 1/4、1/3 收窄成 1/2。
 
-**iOS 专属分支。** @supports (-webkit-touch-callout: none)（:583-656）处理 env(safe-area-inset-*) 刘海屏安全区与 PWA 模式（body.PWA）底部安全区内边距（:610-615）——官方认真对待"作为 PWA 装到 iOS 主屏幕"的场景。
+**iOS 专属分支。** @supports (-webkit-touch-callout: none)（:583-656）处理 env(safe-area-inset-*) 刘海屏安全区与 PWA 模式（body.PWA）底部安全区内边距（:610-615）。
 
 **触摸手势（已核实缺失）。** 全仓库搜索 swipe 相关代码 + `touchstart/touchmove/touchend` 绑定，**没有"消息上左右滑动触发 swipe 候选回复"的手势实现**——移动端 swipe 是点击 `<` `>` 箭头按钮（`.swipe_left`/`.swipe_right`）。
 
-真正用触摸事件的只有三处：滑动条触摸时锁页面滚动 300ms（`script.js:11696-11711`）、角色卡长按（见第 2 节）、头像放大层关闭点击兼容 touchend（`script.js:12225`）。
+用触摸事件的只有三处：滑动条触摸时锁页面滚动 300ms（`script.js:11696-11711`）、角色卡长按（见第 2 节）、头像放大层关闭点击兼容 touchend（`script.js:12225`）。
 
 **触屏专用调参。** getSortableDelay()（utils.js:358-364）——桌面拖拽排序延迟 50ms，移动端 750ms，注释明确“防止滚动页面时误触发拖拽”；sortable({ delay, handle }) 模式遍布 world-info、tags、openai、textgen-settings 等十余个文件，但各模块各自初始化，无集中的“可排序列表”组件封装。
 
@@ -223,7 +223,7 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 **点击放大/还原是纯 class toggle。** 点击图片切换 `.zoomed` class（`chats.js:941-945`），CSS 侧 `.img_enlarged` 用 object-fit: contain + cursor: zoom-in，`.zoomed` 切 object-fit: cover 并允许滚动（`style.css:5305-5319`，
 
-`.img_enlarged_holder:has(.zoomed) { overflow: auto; }`）——是"缩小适应"与"原始比例填充可滚动"的切换，不是支持拖拽平移/滚轮缩放的真正图像浏览器。
+`.img_enlarged_holder:has(.zoomed) { overflow: auto; }`）——只是"缩小适应"与"原始比例填充可滚动"两种填充模式的切换，不支持拖拽平移或滚轮缩放。
 - 视频走同样弹窗但换 `<video controls autoplay>`（`chats.js:913-919`）；音频类型**明确不支持展开**（`chats.js:896-898`，console.warn('Audio media cannot be expanded')）。
 - 点击弹窗背景关闭（`popup.dlg.addEventListener('click', () => popup.completeCancelled())`，`chats.js:964-966`）——与"Popup 不支持点遮罩关闭"不矛盾：这是调用方在内容层手动加的监听，非类内建能力。
 - 有标题媒体用 `<pre><code>` 渲染说明文字（`chats.js:947-957`），stopPropagation 防点击标题触发放大/关闭。
@@ -270,7 +270,7 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 这套系统解决 Tab 可达与 Enter 触发，但没解决读屏"怎么念这个按钮"——`<div tabindex="0">` 无 role/aria-label 时读屏通常跳过或只读文字内容。
 - title 属性大量存在（595 处）但不能替代 ARIA；手写 tabindex 只有 3 处（switch_input_type_icon 设 -1 刻意排除、mes_impersonate 设 0），其余靠 `keyboard.js` 运行时动态加。
-- 结论（已核实）：键盘可用性中等（有专门框架保障 Tab/Enter），读屏语义几乎没有；未做 NVDA/VoiceOver 实测，实际体验可能因浏览器/读屏兼容性而异，**未做运行时验证**。
+- 结论（已核实）：有专门框架保障 Tab/Enter 键盘路径，读屏语义几乎没有；未做 NVDA/VoiceOver 实测，实际体验可能因浏览器/读屏兼容性而异，**未做运行时验证**。
 
 ### 动画与过渡
 
@@ -284,9 +284,9 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 ## 8. 设计取舍与已确认边界
 
-**点遮罩不关闭弹窗。** 与大多数现代 Web 弹窗库相反的行为选择，已核实。
+**点遮罩不关闭弹窗。** 已核实：cancelListener 只绑 cancel 事件，无点击遮罩关闭逻辑。
 
-**双击 Esc 强制关闭阻塞弹窗。** 踩坑后留下的防御代码，作者注释自承原因不明。
+**双击 Esc 强制关闭阻塞弹窗。** 阻塞性弹窗首次 Esc 被吞，500ms 内连按两次经二级确认后强制关闭；作者注释自承原因不明（见第 2 节）。
 
 **toastr 无统一封装。** 988 处调用分散在 86 个文件，作为全局工具库随处调用；差异化时长只是零星个例。
 

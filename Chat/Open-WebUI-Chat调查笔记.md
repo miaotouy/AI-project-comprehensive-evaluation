@@ -55,7 +55,7 @@ Chat.svelte submitPrompt（构造用户消息挂 history 树）→ sendMessage�
 
 ## 关键能力与已确认边界
 
-1. **history JSON + 消息表双写**：读取快照 O(1)，写操作需显式同步两处（`reconcile_messages_by_chat_id`）；与纯表存储的同类项目不同，是历史兼容与可扩展性之间的折中。
+1. **history JSON + 消息表双写**：读取快照 O(1)，写操作需显式同步两处（`reconcile_messages_by_chat_id`），是历史兼容与可扩展性之间的取舍。
 2. **多模型并行内建**（MoA / side-by-side）：一个请求 fan-out 多个任务，`modelIdx` 保持列序，UI 支持逐列重新生成与合并（`mergeResponses` 走 MoA 通道）。
 3. **流式通道完全走 Socket.IO**（非 HTTP SSE）：`events` 事件命名空间承载状态 + 内容 + 任务控制 + 工具交互四种职责；REST 只负责发起与终止任务。
 4. **任务系统是 asyncio + Redis 记账**：任务不跨 worker 迁移，Redis 仅用于跨实例取消与状态查询；停止链路 `stopResponse → stopTasksByChatId → Redis stop 广播 → 本地 cancel`。

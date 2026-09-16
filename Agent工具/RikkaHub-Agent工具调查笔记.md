@@ -14,17 +14,17 @@
 
 ## 结论摘要
 
-RikkaHub 的工具体系由 `ai` 模块定义协议、`app` 模块组装具体工具、`workspace` 模块提供沙箱执行环境。工具体系的关键特征可以概括为四点。
+RikkaHub 的工具体系由 `ai` 模块定义协议、`app` 模块组装具体工具、`workspace` 模块提供沙箱执行环境。关键特征有四点。
 
-第一，工具协议是一个极简的自定义数据类，而不是绑定某个 SDK 的类型。每个工具由名称、描述、参数 schema 提供器、systemPrompt 生成器、审批判定器和挂起执行器组成（`ai/src/main/java/me/rerere/ai/core/Tool.kt:11-19`）。参数 schema 只有 `InputSchema.Obj` 一种对象形态，不表达数组、枚举等嵌套的完整 JSON Schema 能力，具体细节由各工具在构造时用 `buildJsonObject` 手工拼出。
+第一，工具协议是一个极简的自定义数据类，不绑定任何 SDK。每个工具由名称、描述、参数 schema 提供器、systemPrompt 生成器、审批判定器和挂起执行器组成（`ai/src/main/java/me/rerere/ai/core/Tool.kt:11-19`）。参数 schema 只有 `InputSchema.Obj` 一种对象形态，不表达数组、枚举等嵌套的完整 JSON Schema 能力，具体细节由各工具在构造时用 `buildJsonObject` 手工拼出。
 
-第二，工具结果不创建 TOOL 角色消息，而是内联在触发它的 ASSISTANT 消息的 parts 中。循环每轮把执行完的 `UIMessagePart.Tool` 回写到末尾助手消息，再进入下一轮模型调用（`app/src/main/java/me/rerere/rikkahub/data/ai/GenerationLoop.kt:304-322`）。协议序列化时才按工具边界重新分组，把工具调用拆成 `assistant.tool_calls` 加紧随其后的 `role:"tool"` 消息（`ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt:499-521`）。
+第二，工具结果写入触发它的 ASSISTANT 消息的 parts，不创建 TOOL 角色消息。循环每轮把执行完的 `UIMessagePart.Tool` 回写到末尾助手消息，再进入下一轮模型调用（`app/src/main/java/me/rerere/rikkahub/data/ai/GenerationLoop.kt:304-322`）。协议序列化时才按工具边界重新分组，把工具调用拆成 `assistant.tool_calls` 加紧随其后的 `role:"tool"` 消息（`ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt:499-521`）。
 
-第三，审批是编排层状态机，不是执行端鉴权。工具执行前先检查 `needsApproval`，命中则把 `ToolApprovalState` 从 `Auto` 改成 `Pending` 并中断本轮，等用户动作后再从 `Pending` 恢复；`Denied` 和 `Answered` 在编排层直接合成结果，不进入工具自身实现（`GenerationLoop.kt:172-297`）。
+第三，审批是编排层状态机，执行端不做鉴权。工具执行前先检查 `needsApproval`，命中则把 `ToolApprovalState` 从 `Auto` 改成 `Pending` 并中断本轮，等用户动作后再从 `Pending` 恢复；`Denied` 和 `Answered` 在编排层直接合成结果，不进入工具自身实现（`GenerationLoop.kt:172-297`）。
 
 第四，工具来源有七个，注册顺序在 `ChatToolFactory.createTools` 中固定为：记忆、搜索、本地、会话、工作区、Skill、MCP（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/ChatToolFactory.kt:43-95`）。这一顺序与 `docs/references/chat-generation-pipeline.md` 第四阶段的描述不一致，文档把搜索排在第一位且把 Memory 排在最后；当前快照以源码为准。
 
-值得横向比较的几点：工具目录是每轮生成现算的，没有持久化缓存；MCP 工具命名采用 `mcp__{server}__{tool}` 且服务名有字符白名单校验，非法名会让整次生成直接报错而不是静默丢弃；输出截断依赖“当前工具集中存在 workspace_shell”这一条件，而不是按输出类型判断。
+横向比较可注意三点：工具目录是每轮生成现算的，没有持久化缓存；MCP 工具命名采用 `mcp__{server}__{tool}` 且服务名有字符白名单校验，非法名会让整次生成直接报错，不会静默丢弃；输出截断依赖“当前工具集中存在 workspace_shell”这一条件，不按输出类型判断。
 
 ## 系统边界与总体调用链
 
@@ -51,15 +51,15 @@ ChatService.handleMessageComplete()
 
 入口在 `ChatService.handleMessageComplete`（`app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:658-805`），它先构造工具集，再把工具列表和生成参数一并交给 `GenerationLoop`。循环本身是一个 `flow`，每个 Step 通过 `GenerationChunk.Messages` 把最新消息列表推给 `ChatService`，后者更新会话状态并触发通知（`ChatService.kt:767-783`）。
 
-一个边界需要明确：模型是否真正看到工具，还取决于 provider 的序列化条件。OpenAI 兼容实现在 `params.model.abilities` 包含 `ModelAbility.TOOL` 且工具列表非空时才写入 `tools` 字段（`ChatCompletionsAPI.kt:420-439`）。也就是说“已注册”与“已注入”是两个不同层面，`ChatService` 在模型不支持工具时会额外发一条提示性错误（`ChatService.kt:682-690`）。
+模型是否真正看到工具，还取决于 provider 的序列化条件。OpenAI 兼容实现在 `params.model.abilities` 包含 `ModelAbility.TOOL` 且工具列表非空时才写入 `tools` 字段（`ChatCompletionsAPI.kt:420-439`）。“已注册”与“已注入”是两个不同层面，`ChatService` 在模型不支持工具时会额外发一条提示性错误（`ChatService.kt:682-690`）。
 
 ## 1. 工具定义、来源与注册
 
 ### 1.1 工具数据契约
 
-`Tool` 是一个序列化数据类，包含六个字段：名称、描述、可空参数 schema 提供器、systemPrompt 生成器、审批判定器、挂起执行器（`Tool.kt:11-19`）。参数与 systemPrompt 都是函数而非值，意味着每次构建请求时都重新求值，因此可以读取当次会话的 `Model` 和 `Messages`。参数 schema 的唯一形态是 `InputSchema.Obj`，带 `properties` 和一个可选 `required` 列表（`Tool.kt:21-29`）。
+`Tool` 是一个序列化数据类，包含六个字段：名称、描述、可空参数 schema 提供器、systemPrompt 生成器、审批判定器、挂起执行器（`Tool.kt:11-19`）。参数与 systemPrompt 都是函数，每次构建请求时重新求值，因此可以读取当次会话的 `Model` 和 `Messages`。参数 schema 的唯一形态是 `InputSchema.Obj`，带 `properties` 和一个可选 `required` 列表（`Tool.kt:21-29`）。
 
-执行器的返回类型是 `List<UIMessagePart>`，而不是字符串。这允许工具直接产出图片等非文本内容，工作区读图片工具就利用了这一点（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/WorkspaceTools.kt:295-312`）。
+执行器的返回类型是 `List<UIMessagePart>`，不是字符串。这允许工具直接产出图片等非文本内容，工作区读图片工具就利用了这一点（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/WorkspaceTools.kt:295-312`）。
 
 ### 1.2 七个工具来源
 
@@ -75,13 +75,13 @@ ChatService.handleMessageComplete()
 | 6 | Skill 工具 | `assistant.enabledSkills` 非空 | `createSkillTools`，`tools/SkillsTools.kt` |
 | 7 | MCP 工具 | 服务器启用、助手订阅且该工具 enable | `McpManager.getAllAvailableTools`，`mcp/McpManager.kt:106-116` |
 
-几点实现细节值得记录。记忆工具的存储目标是全局记忆还是助手私有记忆，由 `assistant.useGlobalMemory` 在构造回调时决定（`ChatToolFactory.kt:44-58`）。搜索工具的启用条件不是单纯看开关，而是判断模型自身是否已经内置搜索能力，避免重复注入（`ChatToolFactory.kt:21-23`）。工作区工具不是看配置存在与否，而是要求数据库中的 shell 状态等于 `READY`，否则直接跳过（`ChatToolFactory.kt:100-106`）。
+几处实现细节。记忆工具的存储目标是全局记忆还是助手私有记忆，由 `assistant.useGlobalMemory` 在构造回调时决定（`ChatToolFactory.kt:44-58`）。搜索工具的启用条件除开关外，还要判断模型自身是否已内置搜索能力，避免重复注入（`ChatToolFactory.kt:21-23`）。工作区工具不只看配置存在与否，还要求数据库中的 shell 状态等于 `READY`，否则直接跳过（`ChatToolFactory.kt:100-106`）。
 
 ### 1.3 各来源的工具清单
 
 本地工具是选项驱动的，`LocalToolOption` 定义了七种：JS 引擎、时间、剪贴板、TTS、询问用户、屏幕时间、日历（`tools/local/LocalToolOption.kt:6-35`）。其中日历选项一次产出查询和创建两个工具，因此本地工具实际最多八个（`LocalTools.kt:31-56`）。
 
-搜索工具最多两个。`search_web` 总是添加，`scrape_web` 只在当前搜索服务的 `scrapingParameters` 非空时添加（`SearchTools.kt:89-124`）。这说明抓取能力由搜索服务自身能力决定，而不是由独立开关控制。
+搜索工具最多两个。`search_web` 总是添加，`scrape_web` 只在当前搜索服务的 `scrapingParameters` 非空时添加（`SearchTools.kt:89-124`）。抓取能力由搜索服务自身能力决定，不单独由开关控制。
 
 会话工具固定两个：`recent_chats` 列最近会话标题与日期，`conversation_search` 对历史消息做全文检索（`ConversationTools.kt:23-111`）。注释明确说明这是为了不把近期聊天静态注入 system prompt 以保持提示缓存（`ConversationTools.kt:19-22`）。
 
@@ -95,7 +95,7 @@ MCP 工具在注册前会做一次服务名校验：所有可用工具的去重�
 
 ### 2.1 目录构建时机
 
-工具目录不是启动时构建的，而是每次 `handleMessageComplete` 调用时现算（`ChatService.kt:696-702`）。因此助手配置、工作区 shell 状态、MCP 连接状态的变化都会在下次生成时自然生效，不需要额外的失效逻辑。代价是每轮生成都重新组装列表，且工作区和 MCP 工具构建涉及数据库或网络状态查询。
+工具目录在每次 `handleMessageComplete` 调用时现算，不在启动时构建（`ChatService.kt:696-702`）。因此助手配置、工作区 shell 状态、MCP 连接状态的变化都会在下次生成时自然生效，不需要额外的失效逻辑。代价是每轮生成都重新组装列表，且工作区和 MCP 工具构建涉及数据库或网络状态查询。
 
 ### 2.2 MCP 工具的过滤链
 
@@ -109,13 +109,13 @@ MCP 工具可见性由三层条件叠加：服务器自身 `commonOptions.enable
 
 ### 2.4 参数 schema 注入
 
-参数 schema 在 Provider 序列化时求值。OpenAI 兼容实现把 `tool.parameters()` 的结果直接编码进 `function.parameters`，为空时退化为一个空的 `InputSchema.Obj`（`ChatCompletionsAPI.kt:428-434`）。这意味着工具必须自行保证 schema 合法，框架不做校验或补全。
+参数 schema 在 Provider 序列化时求值。OpenAI 兼容实现把 `tool.parameters()` 的结果直接编码进 `function.parameters`，为空时退化为一个空的 `InputSchema.Obj`（`ChatCompletionsAPI.kt:428-434`）。工具必须自行保证 schema 合法，框架不做校验或补全。
 
 ## 3. 模型调用表示与 Provider 适配
 
 ### 3.1 原生 tool_calls
 
-RikkaHub 使用 provider 原生工具协议，而不是文本协议。工具以函数形式写入请求的 `tools` 数组（`ChatCompletionsAPI.kt:420-439`），流式响应的工具调用由 `StreamChunkHandler` 按 `toolCallId` 增量合并（`ai/src/main/java/me/rerere/ai/ui/StreamChunkHandler.kt:155-176`）。
+RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函数形式写入请求的 `tools` 数组（`ChatCompletionsAPI.kt:420-439`），流式响应的工具调用由 `StreamChunkHandler` 按 `toolCallId` 增量合并（`ai/src/main/java/me/rerere/ai/ui/StreamChunkHandler.kt:155-176`）。
 
 ### 3.2 结果回传时的分组
 
@@ -127,7 +127,7 @@ RikkaHub 使用 provider 原生工具协议，而不是文本协议。工具以�
 
 ### 3.4 残缺参数的归一化
 
-流式生成中断可能留下不完整的工具参数 JSON。序列化时不直接使用原始字符串，而是调用 `inputAsJson()` 归一化，解析失败则退化为空对象（`ChatCompletionsAPI.kt:619-621`，`ai/src/main/java/me/rerere/ai/ui/UIMessagePart.kt:201-204`）。这样即使模型输出被截断，回传的 `arguments` 仍是合法 JSON。
+流式生成中断可能留下不完整的工具参数 JSON。序列化时调用 `inputAsJson()` 归一化原始字符串，解析失败则退化为空对象（`ChatCompletionsAPI.kt:619-621`，`ai/src/main/java/me/rerere/ai/ui/UIMessagePart.kt:201-204`）。这样即使模型输出被截断，回传的 `arguments` 仍是合法 JSON。
 
 ### 3.5 其他 Provider
 
@@ -147,7 +147,7 @@ RikkaHub 使用 provider 原生工具协议，而不是文本协议。工具以�
 
 ### 4.3 执行错误处理
 
-工具执行被 `runCatching` 包裹。取消异常必须向上传播，否则停止生成会被误报为工具执行错误；其他异常被打印并合成为带异常类名、消息和完整堆栈的 JSON 错误结果（`GenerationLoop.kt:257-295`）。这意味着普通工具错误不会中断循环，而是作为工具输出回注给模型，让模型有机会自我修正。
+工具执行被 `runCatching` 包裹。取消异常必须向上传播，否则停止生成会被误报为工具执行错误；其他异常被打印并合成为带异常类名、消息和完整堆栈的 JSON 错误结果（`GenerationLoop.kt:257-295`）。普通工具错误不中断循环，只作为工具输出回注给模型，让模型有机会自我修正。
 
 有一类错误在更早的层被处理：工作区工具内部的 `runRootfsCommand` 会把超时、非零退出码和输出截断统一转成异常，再由外层合成为错误结果（`WorkspaceTools.kt:343-366`）。
 
@@ -195,7 +195,7 @@ RikkaHub 使用 provider 原生工具协议，而不是文本协议。工具以�
 
 ### 6.3 审批策略的来源
 
-审批判定不是全局开关，而是每个工具自带的函数。工作区工具有一套默认表：读、写、编辑默认不需审批，shell 默认需要审批（`WorkspaceTools.kt:26-31`）。工作区还可以按名称覆盖默认值（`WorkspaceTools.kt:33-34`、`WorkspaceTools.kt:42-43`）。
+审批判定由每个工具自带的函数决定，不是全局开关。工作区工具有一套默认表：读、写、编辑默认不需审批，shell 默认需要审批（`WorkspaceTools.kt:26-31`）。工作区还可以按名称覆盖默认值（`WorkspaceTools.kt:33-34`、`WorkspaceTools.kt:42-43`）。
 
 写文件与编辑文件还有一个额外的强制审批条件：路径落在可写安全区之外时，无论默认值如何都必须审批（`WorkspaceTools.kt:126`、`WorkspaceTools.kt:169`）。可写安全区定义为 `/workspace`、`/tmp`、`/skills` 三个前缀（`WorkspaceTools.kt:407-420`）。
 
@@ -217,7 +217,7 @@ shell 命令默认超时 30 秒，可由模型通过 `timeout` 参数指定，�
 
 ## 7. 结果回注、执行状态与恢复
 
-### 7.1 结果内联而非 TOOL 消息
+### 7.1 结果内联，不生成 TOOL 消息
 
 执行结果被写回触发它的 `UIMessagePart.Tool.output`，整个助手消息用 `copy(parts = ...)` 替换（`GenerationLoop.kt:304-311`）。文档注释明确写了“NOT create TOOL message”（`GenerationLoop.kt:65`）。这种表示让同一助手消息可以同时承载文本、推理和多个工具调用及其结果，代价是每次回注都要重建整个消息。
 
@@ -257,7 +257,7 @@ MCP 子系统分三层：`McpManager` 是公共入口，协调配置、OAuth、�
 
 MCP 工具名格式为 `mcp__{serverName}__{toolName}`（`ChatToolFactory.kt:84-94`）。调用时把 `JsonObject` 参数透传给 `callTool`，请求超时 120 秒（`McpSessionRegistry.kt:139-167`）。返回值按内容类型转换：文本直接成为文本 part，图片解码后保存为本地文件并转为图片 part，其他内容编码为 JSON 文本（`McpManager.kt:118-133`）。
 
-客户端不可用时返回的是文本错误结果而不是抛异常（`McpManager.kt:123-125`），这与框架对普通工具错误的处理方式一致，都让错误作为工具输出回到模型。
+客户端不可用时返回文本错误结果，不抛异常（`McpManager.kt:123-125`），这与框架对普通工具错误的处理方式一致，都让错误作为工具输出回到模型。
 
 ### 8.6 Skill 工具
 
@@ -273,21 +273,21 @@ Skill 工具从助手启用的技能集合与磁盘上的技能列表求交集�
 
 工具协议极简，把参数校验完全下放给工具，框架不做统一 schema 校验。这让新增工具成本低，但也意味着各工具的错误风格不统一，有的抛异常有的返回错误 JSON。
 
-工具目录每轮现算而非缓存，牺牲少量重复计算换取配置变更立即生效。
+工具目录每轮现算，不做缓存，牺牲少量重复计算换取配置变更立即生效。
 
-结果内联在助手消息而非独立 TOOL 消息，简化了消息树与分支逻辑，代价是协议序列化时需要重新分组。
+结果内联在助手消息，不生成独立 TOOL 消息；这简化了消息树与分支逻辑，代价是协议序列化时需要重新分组。
 
 审批判定放在编排层，`Denied` 和 `Answered` 由框架合成结果，只有真正执行的工具才进入实现。这让审批流程对所有工具统一，但也意味着“审批通过”不等于“执行端重新鉴权”，工具实现内部若还有权限检查需要自己处理（日历和屏幕时间工具就各自检查了系统权限）。
 
 ### 9.2 已确认的边界
 
-截断依赖 `workspace_shell` 是否在工具集中，而不是按输出类型判断，因此没有工作区时超大输出不会被截断。
+截断依赖 `workspace_shell` 是否在工具集中，不按输出类型判断，因此没有工作区时超大输出不会被截断。
 
-MCP 服务名有字符白名单，非法名会让整次生成失败而不是丢弃该服务器。
+MCP 服务名有字符白名单，非法名会让整次生成失败，不会丢弃该服务器。
 
 工作区 shell 默认需要审批，但该默认值可被工作区配置覆盖，覆盖后 shell 可以免审批执行。
 
-`inputAsJson` 在解析失败时静默退化为空对象，模型可能收到一个参数为空的工具调用，而不是解析错误。
+`inputAsJson` 在解析失败时静默退化为空对象，模型收到的可能是一个参数为空的工具调用，不会收到解析错误。
 
 ### 9.3 文档与实现的不一致
 

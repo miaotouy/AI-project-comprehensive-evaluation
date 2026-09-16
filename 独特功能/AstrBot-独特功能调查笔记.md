@@ -62,7 +62,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **持续性**：会话级 booter 在会话存续期间复用；空闲回收/TTL 后下一次调用重新拉起。文件上传/下载的结果落本机临时目录。
 
-**独特性判断**：DeepChat 采用主进程子进程执行与权限审批的本机执行面；AstrBot 把容器或桌面环境作为一等执行域，并支持会话级复用与技能双向同步。shipyard_neo 还提供从执行历史到技能发布或回滚的流水线管理。当前样本中唯一形成完整沙箱主链的 IM 机器人项目。
+**独特性判断**：DeepChat 采用主进程子进程执行与权限审批的本机执行面；AstrBot 把容器或桌面环境作为一等执行域，并支持会话级复用与技能双向同步。shipyard_neo 还提供从执行历史到技能发布或回滚的流水线管理，构成完整的沙箱主链。
 
 **证据强度**：静态源码确认；booters 的远端容器行为（shipyard/cua 云镜像）依赖外部服务，未运行。
 
@@ -124,7 +124,7 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 
 **边界**：TTS 概率触发意味着同一条回复可能是文本或语音；`provider_tts_settings` 的完整字段面未逐项核对。
 
-**独特性判断**：把 14 个语音服务统一进"消息管道装饰"阶段、与平台无关，是 AstrBot 相对纯客户端项目的独特面；独特性中等偏上，建议辅助贡献。
+**独特性判断**：把 14 个语音服务统一进"消息管道装饰"阶段、与平台无关，是 AstrBot 相对纯客户端项目的独特面，建议按辅助贡献记录。
 
 ## 已归并到现有类目的能力
 
@@ -134,7 +134,7 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 
 ## 声明不符、外部依赖与暂缓项
 
-- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token；\computer_use_runtime\ 默认 one\，即能力默认关闭，需显式启用。
+- 沙箱默认 booter 为 shipyard_neo（远端容器服务），本地运行需配置 endpoint/token；`computer_use_runtime` 默认 `none`，即能力默认关闭，需显式启用。
 - 主动回复默认关闭，概率为 0.1；能力存在但默认不激活。
 - 远端沙箱（shipyard/cua 云镜像）依赖外部服务可用性。
 

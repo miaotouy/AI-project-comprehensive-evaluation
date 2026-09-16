@@ -17,12 +17,16 @@
 LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准执行”严格拆成三条独立的判定链，且服务端与前端复用同一套上下文引擎、Agent 运行时和内建工具实现。
 
 1. **工具目录**是 `packages/builtin-tools/src/index.ts:166-399` 里一个 35 项的静态注册表（条目见维度 9），每项声明标识符、manifest、隐藏/可发现状态和动态解析入口；manifest 类型 `builtin|default|markdown|mcp|standalone` 决定 schema 来源。注册表还定义群组编排工具集，以及手动 skill 激活模式下的排除项和专属控件（`index.ts:87-97,139`）。
-2. **注入到模型的可见集合**由 `ToolsEngine.generateTools()`（`packages/context-engine/src/engine/tools/ToolsEngine.ts`）统一裁剪，规则由启用检查器执行：先判断显式激活是否允许绕过，再做平台过滤，最后应用声明式规则表。服务端入口位于 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts`；三种模式使用不同规则和默认工具，chat mode 强制关闭显式激活。chat mode 的图像生成必须 **pinned 才注入**（`bb406736f`）；agent mode 会为 bot 会话注入消息工具，为群组注入 supervisor 编排工具，并应用 remote-device 锁定期规则（`index.ts:332-347`）。
+2. **注入到模型的可见集合**由 `ToolsEngine.generateTools()`（`packages/context-engine/src/engine/tools/ToolsEngine.ts`）统一裁剪，规则由启用检查器执行：先判断显式激活是否允许绕过，再做平台过滤，最后应用声明式规则表。服务端入口位于 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts`；三种模式使用不同规则和默认工具，chat mode 强制关闭显式激活。chat mode 的图像生成必须 **pinned 才注入**；agent mode 会为 bot 会话注入消息工具，为群组注入 supervisor 编排工具，并应用 remote-device 锁定期规则（`index.ts:332-347`）。
 3. **审批**是由 `GeneralChatAgent.checkInterventionNeeded` 执行的固定顺序判定：安全黑名单的 always 规则优先且不可绕过，其后依次处理动态规则、headless 特殊放行、required 规则、静态 always、自动运行、未知 manifest、白名单和 manual 配置。批准后进入 `waiting_for_human` 状态机，待审批工具消息持久化在数据库，前端依据工具调用 chunk 和审批事件渲染卡片。
-4. **执行位置**在 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:82-179`）分派：builtin 走 `BuiltinToolsExecutor`；MCP 按 `mcpParams.type` 分三路——`cloud` 走 market/discover gateway，`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）。**所有路径执行前**都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash。local-system 工具的客户端执行经 `20afc09c7` 收敛为共享运行时入口 `packages/tool-runtime/src/LocalSystemExecutionRuntime.ts`（+cwd 注入，`pathScope` 迁入 `tool-runtime/src/pathScope.ts`）；桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`：`createSandboxEnv`/`SrtSandboxRuntime`/`installDeviceSandbox` + `src/helpers/localSandbox.ts`，`e9b6d00ab`/`9b4f944cb`/`95dfa1d38`），`executionTarget.ts` 用 `isLocalSandboxEnabled` 判定——本地命令可在沙箱围栏内执行，也可“裸 spawn”执行（沙箱能力探测/安装/工作目录的细节见维度 13 与生成式输出笔记）。
+4. **执行位置**由 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:82-179`）分派：
+   - builtin 走 `BuiltinToolsExecutor`；
+   - MCP 按 `mcpParams.type` 分三路：`cloud` 走 market/discover gateway；`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）；
+   - 所有路径执行前都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash；
+   - local-system 工具的客户端执行收敛为共享运行时入口 `packages/tool-runtime/src/LocalSystemExecutionRuntime.ts`（+cwd 注入，`pathScope` 迁入 `tool-runtime/src/pathScope.ts`）；桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`：`createSandboxEnv`/`SrtSandboxRuntime`/`installDeviceSandbox` + `src/helpers/localSandbox.ts`），`executionTarget.ts` 用 `isLocalSandboxEnabled` 判定——本地命令可在沙箱围栏内执行，也可“裸 spawn”执行（沙箱能力探测/安装/工作目录的细节见维度 13 与生成式输出笔记）。
 5. **结果回注**统一走 `truncateToolResult`（默认 25,000 字符，`lobe-agent-documents` 例外），截断附带明确的 "[Content truncated...]" 提示文本,防止模型误判内容完整。
 
-以下各节对工具目录、注入、审批、执行边界给出精确到代码行的证据，其中几处细节需要单独强调：alwaysOnToolIds 只在 agent mode 生效（维度 2.1）；审批检查是固定顺序的多阶段判定管道，不是简单的“合并”（维度 6.2）；disabled 工具在统一执行入口的 connector 权限表处拦截（维度 7.3）。
+以下各节给出精确到代码行的证据；其中 alwaysOnToolIds 只在 agent mode 生效（维度 2.1），disabled 工具在统一执行入口的 connector 权限表处拦截（维度 7.3）。
 
 ## ASCII 调用链图
 
@@ -120,7 +124,7 @@ const isCustomMode = toolMode === 'custom';
 
 三种模式对应不同的规则对象和默认工具集合（本快照 `index.ts:289-349`）：
 
-- **chat 模式**（`index.ts:289-294`）：只有图像生成、知识库、记忆和网页浏览四个能力可能开启；其中图像生成**必须 pinned 才注入**（`bb406736f`）。chat mode 不允许显式激活其他工具（`index.ts:392`）。
+- **chat 模式**（`index.ts:289-294`）：只有图像生成、知识库、记忆和网页浏览四个能力可能开启；其中图像生成**必须 pinned 才注入**。chat mode 不允许显式激活其他工具（`index.ts:392`）。
 - **custom 模式**（`index.ts:300`）：工具集合严格等于 agent 声明的插件列表，不叠加常驻工具、默认工具或激活器，适用于聚焦型内建子代理（如 verify agent）。
 - **agent 模式**（`index.ts:302-349`）：在用户插件和常驻工具之上，再按运行环境、设备代理、在线状态和锁定状态加入系统工具；bot 会话自动加入消息工具，群组 supervisor 使用统一的编排工具集。设备能力不可用时，构建阶段还会从 manifest 中物理剔除设备工具。
 
@@ -245,7 +249,7 @@ api 级配置存在则**完全覆盖** manifest 级（不是合并/叠加，是�
 
 `HumanInterventionConfig` 有三种形态：简单策略字符串（`'never'|'required'|'always'`）、参数级规则数组（`HumanInterventionRule[]`，按 `match` 字段值匹配后取对应 `policy`，第一条匹配即返回，未匹配任何规则时**默认返回 `'required'`**——`InterventionChecker.shouldIntervene`，`packages/agent-runtime/src/core/InterventionChecker.ts:86-93`）、动态解析器（`{ dynamic: { type, policy?, default? } }`，`type` 是注册在 `GeneralChatAgent.dynamicInterventionAudits`/`packages/builtin-tools/src/dynamicInterventionAudits.ts` 里的 resolver key，目前唯一注册的是 `pathScopeAudit`）。
 
-### 6.2 九阶段判定管道（不是简单"合并"）
+### 6.2 九阶段判定管道
 
 `checkInterventionNeeded`（`GeneralChatAgent.ts:135-277`）对每个待判定工具调用按**固定顺序**跑以下阶段，命中即 `continue`：
 
@@ -280,7 +284,7 @@ api 级配置存在则**完全覆盖** manifest 级（不是合并/叠加，是�
 1. `matchesAlwaysPolicy`（`GeneralChatAgent.ts:86-109`）在 `auto-run`/`headless` 判断**之前**执行（阶段 5 在阶段 6/7 之前），确保无论用户设的模式多宽松，`always` 都先被拦下。
 2. 全局安全审计的 `always` 检查（阶段 1，`GeneralChatAgent.ts:181-184`）比 dynamic resolver、headless 特判都靠前，且没有任何 `approvalMode` 分支能跳过它。
 
-对应到用户可见文档语义：`HumanInterventionPolicy` 类型注释——`'always'` = "Always need intervention (cannot be bypassed by auto-run mode)"（`packages/types/src/tool/intervention.ts:9`）。
+`HumanInterventionPolicy` 类型注释把 `'always'` 定义为 "Always need intervention (cannot be bypassed by auto-run mode)"（`packages/types/src/tool/intervention.ts:9`）。
 
 ### 6.5 未知 manifest 的强制审批
 
@@ -411,7 +415,7 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-agent-documents` | 文档归档读取 | 未核实 | server | 非 hidden | 结果**永不截断**（`ARCHIVE_BYPASS_IDENTIFIERS`），是归档内容读取面 |
 | `lobe-creds` | `connectComposioService`/`initiateOAuthConnect`/`injectCredsToSandbox`/`saveCreds` | **全部未声明 → 默认 `'never'`**（`packages/builtin-tool-creds/src/manifest.ts:10-102`） | server（经 `MarketService.market.creds`） | 非 hidden | 保存/注入凭据、发起第三方 OAuth 授权，零审批（维度 10.5） |
 | `lobe-knowledge-base` | 知识库检索 | 未核实 | server | `defaultToolIds`,`chatModeAllowedToolIds`,`runtimeManagedToolIds`,`hidden` | 读取用户知识库内容 |
-| `lobe-image-generation` | 图像生成 | 未核实 | server | `chatModeAllowedToolIds`,`hidden` | chat mode 下必须 pinned 才注入（`bb406736f`），不做模型无原生 imageOutput 时的自动兜底 |
+| `lobe-image-generation` | 图像生成 | 未核实 | server | `chatModeAllowedToolIds`,`hidden` | chat mode 下必须 pinned 才注入，不做模型无原生 imageOutput 时的自动兜底 |
 | `lobe-goal` | `createGoal`（创建并立即启动带可编辑验收计划的目标任务，**只允许 /goal 前缀触发**） | **`'always'`**（`packages/builtin-tool-goal/src/manifest.ts:13`） | server | 非 hidden（注册表项） | 创建/启动目标循环任务；`humanIntervention: 'always'` 保证创建必须人工确认，且仅在 `/goal` 命令注入（`conversationLifecycle.ts:323-328`），模型不能自行触发 |
 | `lobe-page-agent` | 页面级子代理 | 未核实 | server | `hidden`,`discoverable:false` | 内部编辑器场景 |
 | `lobe-agent-builder`/`lobe-group-agent-builder` | Agent/Group 成员 CRUD | 未核实 | server（`agentBuilder.ts`）；group-agent-builder **无 server runtime**（`packages/builtin-tools/src/index.ts:129-134` 注释明确） | `hidden`,`discoverable:false` | 创建/修改 Agent 配置本身 |
@@ -423,7 +427,7 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 | `lobe-topic-reference` | 话题引用 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-web-onboarding` | 引导流程 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-user-interaction` | `askUserQuestion` 等 | `always`（复用于 `lobe-agent.askUserQuestion`，`packages/builtin-tool-lobe-agent/src/manifest.ts:189`） | server | `discoverable:false`,`hidden` | 交互式提问，本身低风险 |
-| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server（另有独立 server runtime `serverRuntimes/task.ts`（+107 行）与 client executor `builtin-tool-task/src/client/executor/index.ts`（+118 行），任务工具带客户端执行面） | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`）；任务回调投递串行化（`51e24a0e9`）、creator 回调持久化（`975e21cf8`） |
+| `lobe-task` | `createTask(s)`/`listTasks`/`viewTask`/`editTask`/`runTask`/`runTasks`/`setTaskSchedule`/`setTaskVerify`/`updateTaskStatus`/`deleteTask`/评论类 | 未核实每条，`runTasks` **顺序执行**（manifest 描述："Each task is started sequentially in array order"，`packages/builtin-tool-task/src/manifest.ts:298-299`） | server（另有独立 server runtime `serverRuntimes/task.ts`（+107 行）与 client executor `builtin-tool-task/src/client/executor/index.ts`（+118 行），任务工具带客户端执行面） | `defaultToolIds`,非 hidden | 可配置 cron/heartbeat 定时任务（`setTaskSchedule`）；任务回调投递串行化、creator 回调持久化 |
 | `lobe-brief` | 摘要生成 | 未核实 | server | `discoverable:false`,`hidden` | 低风险 |
 | `lobe-agent`(`LobeAgentManifest`) | `analyzeVisualMedia`/`createPlan`/`updatePlan`/`createTodos`/`updateTodos`/`clearTodos`/`askUserQuestion`/`callSubAgent` | `createPlan`/`createTodos`/`clearTodos`=`'required'`；`askUserQuestion`=`'always'`；`updatePlan`/`updateTodos`/`analyzeVisualMedia`/`callSubAgent`=未声明→`'never'`（`packages/builtin-tool-lobe-agent/src/manifest.ts` 各处） | server | `defaultToolIds`,`alwaysOnToolIds`,`runtimeManagedToolIds`,`hidden` | `callSubAgent` **零审批**即可派生新的独立 Agent 执行（维度 11） |
 | `lobe-delivery-checker` | 交付检查 | 未核实 | server | 非 hidden | 低风险 |

@@ -36,7 +36,7 @@
 6. `GenerationLoop.generateText()` 运行 Step 循环，在每一步调用 `generateInternal()` 完成上下文拼装与 Provider 调用（`data/ai/GenerationLoop.kt:74-325`）。
 7. Provider 返回 `Flow<StreamChunk>` 或一次性 `TextGenerationResult`，由 `StreamChunkHandler` 合并为 `UIMessage`（`ai/src/main/java/me/rerere/ai/ui/StreamChunkHandler.kt:69-303`）。
 
-需要留意的文档差异：`docs/references/chat-generation-pipeline.md` 把核心生成类记作 `GenerationHandler.kt`，但当前快照中该类已改名为 `GenerationLoop`，文件是 `data/ai/GenerationLoop.kt`，且日志 TAG 仍保留旧名 `"GenerationHandler"`（`data/ai/GenerationLoop.kt:54,69`）。
+文档差异：`docs/references/chat-generation-pipeline.md` 把核心生成类记作 `GenerationHandler.kt`，但当前快照中该类已改名为 `GenerationLoop`，文件是 `data/ai/GenerationLoop.kt`，且日志 TAG 仍保留旧名 `"GenerationHandler"`（`data/ai/GenerationLoop.kt:54,69`）。
 
 ## 1. 提交入口、任务对象与状态机
 

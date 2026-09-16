@@ -18,11 +18,11 @@ Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模
 
 Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json:97`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, harden]`**（插件常量见 §2.1 代码块）。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
 
-Jan 值得关注的三个设计点：
+Jan 的三个设计点：
 
-- **结构化 parts 消除了从 Markdown 反向解析私有标记的需要**：reasoning、工具调用和文件附件都是独立 part，渲染层按类型分派，不依赖正文 hack。
+- **reasoning、工具调用和文件附件都是独立 part**，渲染层按类型分派，不需要从 Markdown 反向解析私有标记，也不需要在正文里做 hack。
 - **HTML 工件默认严格沙箱**：`HtmlArtifact` iframe 默认使用不透明源 + 严格 CSP + sandbox；放宽路径由设置控制（非流式 + 设置开启时可用）。
-- **流式渲染有明确的性能优化链路**：`useDeferredValue` 合并 token、流式代码块推迟 Shiki 高亮、memo 比较器显式忽略无关字段，避免每 token 全量重渲。
+- **流式渲染针对每个 token 全量重渲做了三处处理**：`useDeferredValue` 合并 token、流式代码块推迟 Shiki 高亮、memo 比较器显式忽略无关字段。
 
 ## 1. 部件模型与分派
 

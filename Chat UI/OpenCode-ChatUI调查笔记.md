@@ -94,7 +94,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 
 - **多会话并发**：每 session 一个 Runner，同会话串行、不同会话并行；界面按会话呈现运行状态（session_status per session），无全局"正在生成"汇总标记（执行语义见对话请求与上下文笔记 8）。
 - **子会话/后台生成**：子 agent 以子会话（parentID）运行，TUI 底部显示 `SubagentFooter`（`routes/session/index.tsx:1310-1312`）；"detach 同步子 agent 到后台"的端点在 `handlers/experimental.ts:159-172`（`POST /experimental/session/:id/background`），TUI 快捷键 ctrl+b（`keybind.ts:98`）；后台任务完成的界面反馈本次未找到独立返回入口（结果经合成 user 消息回注，见对话请求与上下文笔记 8）。
-- **状态机**：只有 `idle`/`retry`/`busy` 三态（`schema/src/session-status-event.ts:9-32`），没有排队、运行、暂停、完成等独立字面状态（执行语义见对话请求与上下文笔记 1）；Web 端 V2 事件合成 busy/idle（`server-session.ts:963-976`）。
+- **状态机**：只有 `idle`/`retry`/`busy` 三态（`schema/src/session-status-event.ts:9-32`），没有排队、运行、暂停、完成等独立的状态字面量（执行语义见对话请求与上下文笔记 1）；Web 端 V2 事件合成 busy/idle（`server-session.ts:963-976`）。
 
 ## 8. Chat UI 状态所有权与同步
 
@@ -118,7 +118,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 ## 10. 设计取舍与已确认边界
 
 - **双表面共享服务端**：TUI 与 Web 是同一会话模型的两种交互协议，界面差异主要在输入与中断方式。
-- **状态三态**：`idle`/`retry`/`busy` 语义较粗，排队与后台状态没有独立字面状态（数据语义见对话请求与上下文笔记 1）；Web 端排队是客户端级暂存（followup dock），V2 另有服务端 `delivery:"queue"`（对话请求与上下文笔记 8）。
+- **状态三态**：`idle`/`retry`/`busy` 语义较粗，排队与后台状态没有独立的状态字面量（数据语义见对话请求与上下文笔记 1）；Web 端排队是客户端级暂存（followup dock），V2 另有服务端 `delivery:"queue"`（对话请求与上下文笔记 8）。
 - **多窗口无专门同步层**：依赖 SSE 全量广播 + 各窗口独立投影。
 - **类目边界**：本笔记只记录用户工作流与界面状态；审批/复制的组件装配在消息渲染器笔记；revert/fork 的数据变更在会话与消息管理笔记 4。
 - **本快照未调查**：模型/Agent 参数级（temperature 等）发送前配置界面（静态推断不存在，检查范围：session-composer-controls.ts、prompt-input-v2.tsx、submit.ts 均无参数编辑控件）。

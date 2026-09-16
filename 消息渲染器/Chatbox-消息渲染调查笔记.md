@@ -464,7 +464,7 @@ iframe sandbox 为：
 previewUrl：allow-scripts allow-forms allow-same-origin
 ```
 
-模型 HTML 路径没有 `allow-same-origin`，因此即使允许脚本，也保持 opaque origin，无法直接读取主窗口 DOM 或 preload API。这是当前渲染链里重要的隔离边界。
+模型 HTML 路径没有 `allow-same-origin`，因此即使允许脚本，也保持 opaque origin，无法直接读取主窗口 DOM 或 preload API。
 
 `create_download` 生成的 HTML artifact 优先通过 sandbox provider 创建 preview URL；否则读取文件、内联相对资源后走相同 modal。
 
@@ -480,7 +480,7 @@ const needArtifact = useMemo(...)
 
 但三个值都没有进入 JSX，`MessageArtifact` 也只被 import、没有被调用。当前实际交互只有“点击 HTML 代码块上的预览按钮”。
 
-Git 历史显示 `102fa1bd` 在重做代码块时删除了：
+Git 历史显示重做代码块时删除了：
 
 ```tsx
 {needArtifact && (

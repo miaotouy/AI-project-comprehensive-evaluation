@@ -153,7 +153,7 @@ Tauri 集成点全部是官方插件：单实例、更新器（passive 安装模
 
 **Tauri 原生拖放关闭。** `dragDropEnabled: false` 配合根元素 HTML5 拖放通道，文件导入与内部拖拽通过自定义 MIME 类型严格分流（dragTypes.ts 头注释是这套协议的规范说明）。
 
-**全局错误边界存在。** 与多数自研 Web 应用不同，Risuai 有 window error/unhandledrejection 钩子并汇入错误模态（见第 3 节）。
+**全局错误边界存在。** Risuai 用 window error/unhandledrejection 钩子把异常汇入错误模态（见第 3 节）。
 
 **未接线组件。** LiteMain.svelte 与 3DLoader.svelte 未被引用，按静态推断为遗留或测试入口，不代表存在对应能力。
 

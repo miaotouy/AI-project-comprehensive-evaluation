@@ -16,7 +16,7 @@
 
 DeepChat 同时覆盖外部执行体与外部控制表面，三条链均达到 `主链确认`（静态证据）：ACP agent 注册表（38 个条目）提供发现、安装、校验与启动外部 Agent runtime 的完整生命周期；五类 IM endpoint 远程驾驶桌面会话；本地 CLI 通过鉴权 RPC 发起和管理 Agent run。
 
-ACP 路径还增加了终端认证运行器和认证服务；认证被建模为 ACP runtime 生命周期的一部分，而不是由聊天 renderer 代填凭据（`src/main/agent/acp/auth/acpAuthService.ts`、`acpTerminalAuthRunner.ts`）。实际外部工具的认证交互仍未运行验证。
+ACP 路径还增加了终端认证运行器和认证服务；认证属于 ACP runtime 生命周期的一部分，不由聊天 renderer 代填凭据（`src/main/agent/acp/auth/acpAuthService.ts`、`acpTerminalAuthRunner.ts`）。实际外部工具的认证交互仍未运行验证。
 
 ## 接入角色与系统边界
 

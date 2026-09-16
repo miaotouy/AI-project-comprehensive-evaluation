@@ -28,7 +28,12 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 
 主链为：管理面或工具保存任务规则 -> 任务数据写入插件目录 JSON -> 初始化时重建 node-schedule 作业 -> 到期后创建运行状态并构造提示词 -> 顺序唤醒目标 Agent -> 汇总成功、部分成功或错误 -> 写回运行字段和历史。任务可为论坛巡航或自定义提示词；后者直接使用模板，前者先读取论坛帖子列表填充模板。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:177-215, 259-484, 608-614, 715-853`
 
-任务对象内含启用状态、调度规则、目标 Agent、派发参数和 runtime 字段；runtime 记录 running、开始/完成时间、上次结果/错误、耗时、计数和下一次运行。`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 86-170, 486-510`
+任务对象由配置字段和 runtime 字段组成：
+
+- 配置字段：启用状态、调度规则、目标 Agent、派发参数。
+- runtime 字段：running、开始/完成时间、上次结果/错误、耗时、计数和下一次运行。
+
+`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 86-170, 486-510`
 
 ### VCPClawMail：邮件条件唤醒
 

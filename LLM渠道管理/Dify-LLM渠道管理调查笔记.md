@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 的渠道管理单元是租户作用域下的 Provider 配置、模型配置、模型凭据与负载均衡配置，而不是浏览器直接保存的一组 API Key。主仓库负责凭据的租户隔离、加密/脱敏、实例选择、同模型多 Key 调度、统一结果和 usage/trace 交接；已安装的 Provider 插件与 Plugin Daemon 再持有厂商 HTTP 协议和上游行为。`ModelManager` 每次运行按 tenant、Provider、模型类型和模型名解析实例，故“模型渠道”是服务端加密配置到 plugin runtime 的完整交接链，而非前端设置页。
+Dify 的渠道管理单元是租户作用域下的 Provider 配置、模型配置、模型凭据与负载均衡配置，而不是浏览器直接保存的一组 API Key。主仓库负责凭据的租户隔离、加密/脱敏、实例选择、同模型多 Key 调度、统一结果和 usage/trace 交接；已安装的 Provider 插件与 Plugin Daemon 再持有厂商 HTTP 协议和上游行为。`ModelManager` 每次运行按 tenant、Provider、模型类型和模型名解析实例，故“模型渠道”是服务端加密配置到 plugin runtime 的交接链，而非前端设置页。
 
 ## 总体调用链
 

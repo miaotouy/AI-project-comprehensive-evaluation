@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-**准入结论：主链确认，纳入媒体创作正式比较。** OpenClaw 不是只有一次普通 Provider 图片调用：它提供三个媒体专用 Agent 工具 `image_generate`、`video_generate`、`music_generate`，由插件注册多个媒体生成 Provider 和模型能力目录；会话内请求会建立带 `taskId`、`runId`、会话归属和媒体任务类型的后台任务，结果落入媒体存储并通过内部完成事件回到原 Agent 会话，随后由 Gateway 转成受会话权限保护的媒体 Artifact。入口、任务、结果托管和 Agent 回流形成了一条可走通的最小主链。
+**准入结论：主链确认，纳入媒体创作正式比较。** OpenClaw 提供三个媒体专用 Agent 工具 `image_generate`、`video_generate`、`music_generate`，由插件注册多个媒体生成 Provider 和模型能力目录；会话内请求会建立带 `taskId`、`runId`、会话归属和媒体任务类型的后台任务，结果落入媒体存储并通过内部完成事件回到原 Agent 会话，随后由 Gateway 转成受会话权限保护的媒体 Artifact。入口、任务、结果托管和 Agent 回流构成一条可走通的最小主链。
 
 准入检查表如下：
 
@@ -27,7 +27,7 @@
 | 预览、编辑、重试、复用 | 部分确认 | Control UI 和 Artifact RPC 可预览、下载、取缩略图；参考素材可再次作为输入，失败可重新调用；未找到媒体专用编辑器、分支树或 `retry`/`edit existing artifact` action |
 | Agent 回流 | 已确认 | 完成事件携带结构化附件和回复指令，唤醒原会话的 Agent 生成可见回复；必要时有直接媒体回退路径的文档与实现支撑 |
 
-能力归类为 **M1 模型生成工作站的任务化子集 + M4 插件化媒体编排 + M5 Agent 驱动创作**。M3 只在“生成文件和会话托管附件”的局部成立，不应写成独立资产工作区；OpenClaw 没有本次指南所定义的完整媒体工作台、历史树或可继续编辑工程。
+能力归类为 **M1 模型生成工作站的任务化子集 + M4 插件化媒体编排 + M5 Agent 驱动创作**。M3 只在“生成文件和会话托管附件”的局部成立，不构成独立资产工作区；OpenClaw 没有本次指南所定义的完整媒体工作台、历史树或可继续编辑工程。
 
 ## 系统边界与完整主链
 
@@ -178,7 +178,7 @@ OpenClaw 有两类“回调”需要区分：
 
 媒体工具的 Agent 回流是本快照中最完整的产品闭环部分。后台 completion event 保存 `eventSource`、任务会话、任务 ID、状态、结果文本、结构化附件、媒体路径和 `replyInstruction`；`wakeTaskCompletion` 把事件交给 requester session 的 announce/delivery 路径，要求原 Agent 产生短的用户可见说明并带上全部结构化媒体。实现见 `src/agents/tools/media-generate-background-shared.ts:387-403,608-704`。
 
-工具说明和返回文本也参与 Agent 契约：初始结果明确给出 task ID，并要求不要为同一请求再次调用，等待完成事件；成功事件要求把附件送入当前可见回复，失败事件要求输出简短失败信息。因而媒体能力不是只有模型端“知道某个 API”，而是能回到原会话的 Agent 执行链，见 `src/agents/tools/media-generate-background-shared.ts:419-479`、`src/agents/tools/image-generate-tool.ts:809-814`、`src/agents/tools/video-generate-tool.ts:836-844`、`src/agents/tools/music-generate-tool.ts:551-557`。
+工具说明和返回文本也参与 Agent 契约：初始结果明确给出 task ID，并要求不要为同一请求再次调用，等待完成事件；成功事件要求把附件送入当前可见回复，失败事件要求输出简短失败信息。因而媒体能力不是只有模型端“知道某个 API”，还能回到原会话形成 Agent 执行链，见 `src/agents/tools/media-generate-background-shared.ts:419-479`、`src/agents/tools/image-generate-tool.ts:809-814`、`src/agents/tools/video-generate-tool.ts:836-844`、`src/agents/tools/music-generate-tool.ts:551-557`。
 
 当原 session 需要通过 Gateway/消息工具发送时，完成事件保留 requester origin 和会话归属；正常 Agent 回流失败时，任务 delivery 层可以进入 session queue 或按媒体缺失情况使用受控的直接回退。文档明确声明了“唤醒原会话、失败时只补发尚未送达的媒体”的行为，见 `docs/tools/media-overview.md:107-125`、`docs/automation/tasks.md:104-116`；本次没有运行真实频道和重启场景验证这一声明。
 

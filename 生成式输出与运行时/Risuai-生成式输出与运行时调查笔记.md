@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息正文文本为绝对主体（G0）**，但比 SillyTavern 多出**唯一一类获得独立对象身份的输出：inlay 资产**（G1）。inlay 是存放于独立 IndexedDB（localforage 实例 `inlay`）的媒体对象，以 UUID 寻址，类型分 image/video/audio/signature，通过 `{{inlay::id}}` 这类文本占位符嵌入消息 `data`；模型可通过 `<ImgGen="prompt">` 标记、Gemini 原生媒体返回或脚本/触发器生成它们，插件 API 可读取，提示构建时图片与签名可回注模型上下文。除此之外，SD 图片在非 inlay 模式下写入角色立绘存储（`CharEmotion`），TTS 音频仅即时播放不落对象。
+Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息正文文本为主体（G0）**，但比 SillyTavern 多出**唯一一类获得独立对象身份的输出：inlay 资产**（G1）。inlay 是存放于独立 IndexedDB（localforage 实例 `inlay`）的媒体对象，以 UUID 寻址，类型分 image/video/audio/signature，通过 `{{inlay::id}}` 这类文本占位符嵌入消息 `data`；模型可通过 `<ImgGen="prompt">` 标记、Gemini 原生媒体返回或脚本/触发器生成它们，插件 API 可读取，提示构建时图片与签名可回注模型上下文。除此之外，SD 图片在非 inlay 模式下写入角色立绘存储（`CharEmotion`），TTS 音频仅即时播放不落对象。
 
 **本次未找到** G2 及以上：无声明式组件协议、无模型输出进入任何执行环境（iframe 只用于插件自身 UI 与 YouTube 嵌入；Lua/Python 脚本引擎执行用户/角色维护的脚本，不属于模型输出运行面）。无 artifact 工作区、无画布、无桌面挂件；VisualNovel 模式在 `AGENTS.md` 中有目录条目，但本次快照全仓未找到对应代码。reroll（重掷）是内存级的整条消息版本替换，不持久化。
 

@@ -97,11 +97,11 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
   - harness 侧 fork 本次改为整文件原子发布（`storage.ts:110-118`）；
   - coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:230-291,503-556）。
 - 恢复：`SessionManager.open`（session-manager.ts:1530-1550）、`continueRecent`（1557-1565）、CLI 会话选择器（interactive-mode.ts:5107-5134）；模型/thinking level 从会话 entry 恢复（sdk.ts:188-231）。
-- 分享导出：`/export`（HTML 或 JSONL 副本，interactive-mode.ts:5773-5787）、`/import`（agent-session-runtime.ts:361-396）、`/share`（gh gist，interactive-mode.ts:5862-5954）。HTML 导出为自包含单文件（模板 + base64 会话数据，core/export-html/index.ts:143-175），内置工具按模板渲染、自定义工具预渲染（178-230）。
+- 分享导出：`/export`（HTML 或 JSONL 副本，interactive-mode.ts:5997-6013）、`/import`（agent-session-runtime.ts:361-396）、`/share`（先尝试 Radius 组织可见 artifact，无 Radius provider 或凭据时退回私密 gist，见第 12 节）。HTML 导出为自包含单文件（模板 + base64 会话数据，core/export-html/index.ts:143-175），内置工具按模板渲染、自定义工具预渲染（178-230）。
 - 独立后端：`packages/agent` 的 Session 存储抽象（SessionStorage）另有 `session-backends/sqlite-node` 实现，分两部分：
   - 后端实现：node:sqlite 适配、迁移、物化视图与可选 FTS 搜索；
   - search 是独立服务：与 repository 共享同一数据库，FTS 表与触发器在首次非空搜索时懒创建并一次性重建，之后由触发器同步（其 README.md:1-22 与 `sqlite/search-backend.ts`）。
-  搜索接口与 agent 侧统一为异步迭代器（`search(text, { entryTypes, limit, signal })`，`#b75be04` 起的迁移），且移除 SQL 中 CTE、按迭代器分页（`#e7fb8eb`/`#ae1e410`）。coding-agent 当前仍使用 JSONL 路径。
+  搜索接口与 agent 侧统一为异步迭代器（`search(text, { entryTypes, limit, signal })`），且移除 SQL 中 CTE、按迭代器分页。coding-agent 当前仍使用 JSONL 路径。
 
 ## 9. 模型回流、对象感知与持续维护
 
@@ -132,7 +132,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 12. 会话投影的分享元数据
 
-Radius 分享会在导出的 JSONL 末尾追加一个 `pi.share` custom entry，保存当前 system prompt 和激活工具的定义后再上传。因此这仍是会话投影而非带独立 ID 的输出对象，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；没有 Radius 登录态时仍回退到私密 gist 分享（`packages/coding-agent/src/modes/interactive/session-share.ts:24-151`）。
+`/share` 有主备两条路径（`packages/coding-agent/src/modes/interactive/session-share.ts:46-203`）：主路径把当前分支导出为 JSONL，追加一条 `pi.share` custom entry 保存当前 system prompt 与激活工具定义，再把该 JSONL 上传为 Radius 组织可见 artifact（`exportSessionForShare` :25-43、`tryShareViaRadius` :91-150）；只有在 Radius provider 不可用或取不到凭据时才退回 `gh gist create --public=false`（`shareViaGist` :152-203），而退回路径导出的是 HTML 而非 JSONL（`shareSession` :46-89）。一旦命中 provider 与凭据，上传失败只报错、不再退回 gist。因此分享物仍是会话投影而非带独立 ID 的输出对象，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；命令帮助文案仍写作向私密 gist 分享（`core/slash-commands.ts:27`），未反映 Radius 优先的实现。
 
 ## 13. 关键源码索引
 

@@ -42,7 +42,7 @@ dsh web（apps/cli 的 web 别名 = --profile web，装入 web-app bundle）
 
 ## 1. 技术栈与前端目录组织
 
-apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`）只有 10 行，找到挂载点后把启动交给壳包；真正的启动、加载、装配全在 `@deepseek-ai/dsh-client-web` 里。构建配置把 workspace 包 alias 到源码（让 CSS 走 vite 管线而非 CSS 外置的 lib 包），vendor 手工拆包只放 React-free 的重渲染库（katex、shiki、micromark 系列）——插件包**永远不进入** vite 打包图，它们以运行时 bundle 到达（`apps/web/vite.config.ts:92-160`）。开发模式下直接 `vite serve` 会被拒绝，必须有宿主注入 `__DSH_BOOT__`。
+apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`）只有 10 行，找到挂载点后把启动交给壳包；启动、加载、装配全在 `@deepseek-ai/dsh-client-web` 里。构建配置把 workspace 包 alias 到源码（让 CSS 走 vite 管线而非 CSS 外置的 lib 包），vendor 手工拆包只放 React-free 的重渲染库（katex、shiki、micromark 系列）——插件包**永远不进入** vite 打包图，它们以运行时 bundle 到达（`apps/web/vite.config.ts:92-160`）。开发模式下直接 `vite serve` 会被拒绝，必须有宿主注入 `__DSH_BOOT__`。
 
 `packages/client/*` 是前端本体，按到达方式分三类（`packages/client/AGENTS.md`）：
 
@@ -175,7 +175,10 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 
 ## 10. 多会话、子 Agent、后台与跨窗口
 
-多会话并行是常态：所有会话共享一条 mux 流，Session 常驻后台消费帧，侧栏行带运行标记（running 来自 `host/session-status`），可同时多会话在跑；Web 端没有 Pi 那样的并发/队列选择器——新会话即新 blank 会话，发送在每会话各自 Composer 内。子 agent 会话在侧栏以 catalog 形式列出（`session.list` 快照按 parentId 过滤），子会话可进入阅读（one-shot 只读、不可恢复发送），父会话侧展示运行/中断标记；子会话自身是独立 sessionId 的普通会话，切换进子会话即切换当前会话。后台任务：`session/jobs` 帧 + ui-jobs 在会话头部列出（jobsBySession 镜像）。跨窗口：同一 host 进程可服务多个标签页（每标签页独立的双流连接），blank 位、会话增删、运行状态经帧广播跨标签页对齐；未找到草稿或当前会话的跨标签页同步机制（刷新即回落到宿主权威列表）。
+- 多会话并行是常态：所有会话共享一条 mux 流，Session 常驻后台消费帧，侧栏行带运行标记（running 来自 `host/session-status`），可同时多会话在跑；Web 端没有 Pi 那样的并发/队列选择器——新会话即新 blank 会话，发送在每会话各自 Composer 内。
+- 子 agent 会话在侧栏以 catalog 形式列出（`session.list` 快照按 parentId 过滤），子会话可进入阅读（one-shot 只读、不可恢复发送），父会话侧展示运行/中断标记；子会话自身是独立 sessionId 的普通会话，切换进子会话即切换当前会话。
+- 后台任务：`session/jobs` 帧 + ui-jobs 在会话头部列出（jobsBySession 镜像）。
+- 跨窗口：同一 host 进程可服务多个标签页（每标签页独立的双流连接），blank 位、会话增删、运行状态经帧广播跨标签页对齐；未找到草稿或当前会话的跨标签页同步机制（刷新即回落到宿主权威列表）。
 
 ## 11. UI 状态所有权与同步
 
@@ -193,8 +196,9 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 
 ## 13. 设计取舍与已确认边界
 
-工作台继续以会话对象层而不是组件局部状态承接恢复。当前 Web 组合额外覆盖了冷启动空白会话、长历史分页、会话引用以及等待用户提问的路由场景；测试夹具把问题表面优先于底层运行状态的选择写成可回放断言。模型选择器可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`apps/web/tests/{cold-blank-session,complex-history,built-boot}.ts`、`packages/client/runtime/src/client/workspaces/service.ts`）。
-
+- **对象层承接恢复**：工作台以会话对象层承接现场恢复。
+- **Web 组合覆盖的场景**：冷启动空白会话、长历史分页、会话引用、等待用户提问的路由；测试夹具把"以问题表面为准、不依赖底层运行状态"这一选择写成可回放断言（`apps/web/tests/{cold-blank-session,complex-history,built-boot}.ts`）。
+- **模型选择器**：可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`packages/client/runtime/src/client/workspaces/service.ts`）。
 - **双 cordis 树 + 运行时插件加载**：浏览器复用宿主的 Loader 治理，模块系统自研（懒 CJS 表 + 同源外部脚本到达）；代价是 dev 每次改插件要重建 bundle + 纤维重挂，HMR 一次只重载一个插件、React 状态丢失（数据层不动）。web bundle 中 hmr 行当前默认 disabled（`cordis.patch.yml` 的 TODO）。
 - **对象层 React-free + uSES 快照**：令牌流不打乱渲染树，行级重渲染靠引用稳定；代价是自研快照/批处理机制（`markDirty` 微任务、`notifyNow` 仅用户手势直回声、`animation-frame` 流式合并）。
 - **重连即重建**：无 resume 游标，`mux` 的 `since` 是保留席位；换来的是实现简单与一致性，代价是重连会丢帧间隙（回填只补一次）。

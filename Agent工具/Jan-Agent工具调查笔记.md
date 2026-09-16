@@ -22,7 +22,7 @@ Jan 的工具体系是 **AI SDK `streamText` 原生 tool calling + 扩展来源*
 2. **RAG**：`retrieve` / `list_attachments` / `get_chunks`，来自 rag-extension，仅在线程有文档且 RAG 可用时启用；
 3. **MCP**：任意 MCP server 的工具，经 `TauriMCPService` → Rust `collect_mcp_tools` / `execute_mcp_tool_calls`。
 
-值得横向比较的几个事实：
+可横向比较的事实：
 
 - 工具仅在 `selectedModel.capabilities.includes('tools')` 时加载；
 - 智能路由开启时，工具集按最后一条用户消息筛选（`mcpOrchestrator.getRelevantTools`），且**路由结果被冻结**（签名 + 缓存），防止每次请求工具集变化破坏提示缓存；
@@ -151,7 +151,7 @@ useChat.sendMessage
        -> toUIMessageStream 流式更新 DOM
 ```
 
-执行链上的调用对象是 `TauriMCPService`（`web-app/src/services/mcp/tauri.ts`），其方法按用途分组，清单见 2.3。
+执行链上的调用对象是 `TauriMCPService`（`web-app/src/services/mcp/tauri.ts`），方法清单见 2.3。
 
 ### 5.2 渲染
 

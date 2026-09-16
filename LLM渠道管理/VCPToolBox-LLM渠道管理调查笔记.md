@@ -293,7 +293,7 @@ return { ...model, id: publicModelName };
 | `owned_by` | `vcp-semantic-router` |
 | `display_name` | 非默认 preset 可使用配置中的 displayName |
 
-它不声明 context window、最大输出、输入模态、工具、视觉、推理或价格，因为虚拟入口最终可能选择不同真实模型。给它写一个固定能力或价格会产生误导；更合理的扩展方式是声明“候选能力交集/并集”和“最终模型在响应中可观测”，而不是伪造单一静态值。
+它不声明 context window、最大输出、输入模态、工具、视觉、推理或价格，因为虚拟入口最终可能选择不同真实模型，写固定能力或价格会与实际路由结果不符。
 
 语义路由使用的元数据保存在 [`SemanticModelRouter.json`](../../VCPToolBox/SemanticModelRouter.json)：各路由条目的描述、候选模型 ID、优先级和上下文权重。description 会被向量化后参与相似度选模，但这些字段不会暴露到 `/v1/models`，客户端无法解释一个虚拟模型会路由到哪些候选或依据什么选择。
 
@@ -320,9 +320,9 @@ ModelRedirect 只改标识，不更新 `owned_by`、display name 或描述。别
 - 多个上游条目经反向映射后若落到相同公开名，结果也不会去重；
 - Semantic Router 追加虚拟模型时会检查已有 ID，发生碰撞就保留上游条目而不追加虚拟元数据。
 
-第三种情况会使目录展示上游模型元数据，而 Chat handler 仍把该名称识别为语义虚拟模型，实际请求转入本地选模。配置加载时应禁止 `autoModelName`、preset 名和 ModelRedirect 公开名与真实上游 ID 冲突。
+第三种情况会使目录展示上游模型元数据，而 Chat handler 仍把该名称识别为语义虚拟模型，实际请求转入本地选模。配置加载阶段不做 `autoModelName`、preset 名和 ModelRedirect 公开名与真实上游 ID 的冲突检测。
 
-模型目录失败时返回仅含虚拟模型的 HTTP 200，也意味着客户端看到的元数据集合并不等价于上游健康状态。若后续用于能力筛选或成本展示，应在响应中增加明确的 virtual/partial 标志，而不能仅靠 `owned_by` 猜测。
+模型目录失败时返回仅含虚拟模型的 HTTP 200，也意味着客户端看到的元数据集合并不等价于上游健康状态。响应中没有 virtual/partial 标志，虚拟条目只能靠 `owned_by` 区分。
 
 ## 6. Adapter 与协议路由
 
@@ -372,14 +372,14 @@ Authorization: Bearer API_Key
 
 ### 6.5 前端/渠道劫持与提示词夺舍（VCPBridgeServer 与 SystemPromptHacker）
 
-在 VCP 架构中，“渠道夺舍”或“前端接管”是指：**对于硬编码了内部 System Prompt、固定上游端点或限制模型名称的闭源客户端/CLI（如 Claude Code、Codex CLI、Cursor、Kiro、各种 IDE 插件等），在请求链路中间建立协议劫持与提示词重写代理，强行剥离/覆盖原厂提示词，并无缝注入 VCP 规范或改写目标模型**。
+在 VCP 架构中，“渠道夺舍”或“前端接管”是指：**对于硬编码了内部 System Prompt、固定上游端点或限制模型名称的闭源客户端/CLI（如 Claude Code、Codex CLI、Cursor、Kiro、各种 IDE 插件等），在请求链路中间建立协议劫持与提示词重写代理，剥离或覆盖原厂提示词，注入 VCP 规范或改写目标模型**。
 
 VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridgeServer`（`Plugin/VCPBridgeServer/`），配合主服务器的 `protocolBridge.js`，提供两种维度的接管方案：
 
 #### 1. 独立透明劫持代理（VCPBridgeServer）
 - **独立端口运行**：默认监听 `3100`（或 `6003`），专为不能修改 System Prompt 的外部 CLI/前端设计。
 - **四大劫持模式 (`hijackMode`)**：
-  - `replace`（彻底夺舍）：直接丢弃下游请求自带的所有 `system` 消息，完全替换为 VCP 配置的 System Prompt；
+  - `replace`（夺舍）：直接丢弃下游请求自带的所有 `system` 消息，替换为 VCP 配置的 System Prompt；
   - `prepend`（置顶注入）：在客户端原 System Prompt 之前插入 VCP 规范，获取最高优先级；
   - `append`（追加覆盖）：在客户端原 System Prompt 之后追加注入；
   - `merge`（融合重组）：合并所有 system 消息为一条置顶消息；

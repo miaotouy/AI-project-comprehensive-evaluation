@@ -136,7 +136,7 @@ ManagedNotificationToast 订阅通知记录（:18-21），按 kind 显示图标�
 
 aria 语义按通知重要性分级：error、warning 和 actionable 使用 `role="alert"`，其余使用 `role="status"`；progress 使用 `role="progressbar"`，并有 prefers-reduced-motion 动画关闭处理（:103-107、:178-183、:415-421）。
 
-**默认时长由展示预算 + sonner lifecycle 控制，error/warning 的展示预算为 6s/8s，不是"永不消失"**（与 Cherry 的 error 常驻不同）。
+**默认时长由展示预算 + sonner lifecycle 控制，error/warning 的展示预算为 6s/8s，两者都会自动消失**（与 Cherry 的 error 常驻不同）。
 
 ### 3.2 主进程语义通知路由（跨窗口）
 
@@ -283,7 +283,7 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 
 ### 7.2 无障碍（静态代码盘点）
 
-- 已见良好实践：ManagedNotificationToast 的 `role="alert"/"status"` 分级与 progressbar 语义（§3.1）；历史加载失败条 `role="alert"`（`ChatPage.vue:68`）；消息滚动区 `role="status" aria-live`（ChatUI 笔记 §9）；
+- 已有显式语义的位置：ManagedNotificationToast 的 `role="alert"/"status"` 分级与 progressbar 语义（§3.1）；历史加载失败条 `role="alert"`（`ChatPage.vue:68`）；消息滚动区 `role="status" aria-live`（ChatUI 笔记 §9）；
 
   MessageBlockError/ActivityGroup 折叠真实 `aria-expanded/aria-controls`；设置路由切换 aria-busy；Spotlight 结果行 data-spotlight-active 但无 aria-activedescendant 语义（自实现键盘导航，读屏联动未验证）。
 - 未核实/未见：Reka 组件（Dialog/Tooltip/DropdownMenu）内部焦点管理未下钻；useLegacyActions 默认路径下消息右键菜单不可达（键盘等效路径缺失是静态可见的，但影响未验证）；应用级 focus trap 策略未发现；prefers-reduced-motion 全局兜底存在（`style.css:930-943`：transition/animation 压到 1ms），业务组件局部覆盖未逐一核对。

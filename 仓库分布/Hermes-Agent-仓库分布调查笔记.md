@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Hermes Agent 是本组中运行面和配套资产最广的混合 monorepo：Python Agent/CLI/gateway/tools 与 TypeScript 桌面、Web、TUI 同仓，还包含 skills、插件和文档站。测试源码 821,783 行，约占全仓可识别源码 39.2%；文档 1,528 文件，其中大量来自技能包和多语言站点。
+Hermes Agent 把 Python Agent/CLI/gateway/tools 与 TypeScript 桌面、Web、TUI 放在同一仓库，另含 skills、插件和文档站。测试源码 821,783 行，约占全仓可识别源码 39.2%；文档 1,562 文件，其中大量来自技能包和多语言站点。
 
 ## 统计与模块分布
 
@@ -36,15 +36,15 @@ Hermes Agent 是本组中运行面和配套资产最广的混合 monorepo：Pyth
 | `agent` | 114,650 行 |
 | `tools` | 112,750 行 |
 
-测试按 gateway（151,809 行）、tools（122,570）、CLI（121,689）、agent（92,536）与桌面应用（90,878）分别成树，模块覆盖可见。
+测试按 gateway（151,809 行）、tools（122,570）、CLI（121,689）、agent（92,536）与桌面应用（90,878）分别成树。
 
 ## 语言、文档与测试
 
 Python 1,567,851 行（74.9%）、TypeScript 461,514 行（22.0%）。
 
-文档主要由 `website`（710 文件，其中 docs 与 i18n 两个子目录分别为 393 与 316）、`optional-skills`（415）和 `skills`（334）组成；技能说明占比很高，独立主题数不能由 1,528 直接推出。
+文档主要由 `website`（710 文件，其中 docs 与 i18n 两个子目录分别为 393 与 316）、`optional-skills`（415）和 `skills`（334）组成；技能说明占比很高，独立主题数不能由 1,562 直接推出。
 
-测试文件/源码文件比为 57.5%，是本组最高值，但该比例同样包含夹具和测试资源。
+测试文件/源码文件比为 57.5%，但该比例同样包含夹具和测试资源。
 
 ## 跨平台组织与边界
 
@@ -55,7 +55,7 @@ README 明确区分 Linux/macOS/WSL2、原生 Windows 和 Android/Termux 安装�
 - `web`
 - `tests-js`
 
-桌面壳、Web 和 TUI 是独立入口，共享 Agent/gateway 协议而非一个响应式 UI。
+桌面壳、Web 和 TUI 是独立入口，共享 Agent/gateway 协议，各自实现界面。
 
 ## 关键源码索引
 

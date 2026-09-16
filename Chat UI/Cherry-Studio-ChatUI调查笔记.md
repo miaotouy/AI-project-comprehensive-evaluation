@@ -16,9 +16,9 @@
 
 - **Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架**：共用类型契约而非组件树，两个适配器各自注入可选能力对象，下游组件按存在性判断渲染；旧的"`state.readonly` 标志"机制已不存在，差异由 `useMessageLeafCapabilities`/`normalInteractionsEnabled` 表达（组件装配见 1.1）。
 - **会话单位 Topic 是导航单位**：侧栏列表 + 右侧分支面板（React Flow 树图）+ 消息列表 `< i/N >` 兄弟导航三套入口并存；分支面板看到的是"DB 树 + live overlay"合并结果。
-- **搜索是双轨的**：会话内搜索（`MessageListSearch` + `FindBar`）是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"的混合实现，`a012837e5c` 起支持虚拟化窗口外的消息定位；跨会话全局搜索（`GlobalSearchPopup`，`app.search` 命令）走主进程 FTS（数据侧见会话与消息管理笔记 5）。
+- **搜索是双轨的**：会话内搜索（`MessageListSearch` + `FindBar`）是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"的混合实现，支持虚拟化窗口外的消息定位；跨会话全局搜索（`GlobalSearchPopup`，`app.search` 命令）走主进程 FTS（数据侧见会话与消息管理笔记 5）。
 - **多模型并行**通过 Composer 的"提及模型"多选触发：选中 N 个模型 → 主进程并行 N 个 execution，读侧按兄弟组横向/网格展示（执行语义见对话请求与上下文笔记 8）。
-- **桌面集成与聊天状态联动最少**："助手回复完成"系统通知开关仍接不到任何触发点（全仓库无 `source: 'assistant'` 调用）、托盘无未读/流式角标、无快捷键速查浮层。
+- **桌面集成不与聊天状态联动**："助手回复完成"系统通知开关仍接不到任何触发点（全仓库无 `source: 'assistant'` 调用）、托盘无未读/流式角标、无快捷键速查浮层。
 - **无障碍**：Topic/Session 列表有完整的 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮现在都有 `aria-label`（取自 action 的翻译 label）；Composer 输入区本体仍没有可访问名称（RichEditor 内核支持可选 `ariaLabel`，但 ComposerSurface 未传入）。
 
 ## 工作台边界与用户主链
@@ -82,7 +82,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **入口**：搜索命令 `chat.message.search`（快捷键默认 Ctrl+F，`preferenceSchemas.ts:794`）由搜索组件注册（`MessageListSearch.tsx:307-314`），取当前选中文本作为初始搜索词（`:310-311`），Esc 关闭（`:316`）。
 - **搜索栏 `FindBar`**：输入框、大小写/整词/包含用户三个开关、`i/N` 计数与上/下/关闭按钮依次对应 `FindBar.tsx:132,140-177,181-191,192-211`（输入框带 `aria-label`），Enter/Shift+Enter 前进后退（`:98-109`）。
 - **匹配对象**：先在**已加载的消息数据**上做粗匹配（文本 part 投影为纯文本、`pending` assistant 排除、多模型回复组以整组粒度匹配，`messageSearch.ts:133-148`），再对**已挂载 DOM** 求精确 Range（`src/renderer/utils/contentSearch.ts:40-88`；节点过滤排除按钮/引用/代码块工具栏等，`messageSearchDom.ts:10-18`）。
-- **虚拟化窗口外的定位**：`a012837e5c` 起窗口外的消息可以通过粗匹配被找到并滚入视口（`MessageListSearch.tsx:337-339`）；折叠的用户消息在导航时自动展开（`messageSearchDom.ts:29-34`）。
+- **虚拟化窗口外的定位**：窗口外的消息可以通过粗匹配被找到并滚入视口（`MessageListSearch.tsx:337-339`）；折叠的用户消息在导航时自动展开（`messageSearchDom.ts:29-34`）。
 - **流式期间的匹配边界**：匹配数据被锁存、流结束才重算（`MessageListSearch.tsx:97-102`）；live 消息被整体排除（`excludedMessageIds={liveMessageIdSet}`，`MessageList.tsx:746`）。
 - **高亮**：用浏览器原生 **CSS Custom Highlight API**（`CSS.highlights.set('message-search-matches'/'message-search-current', ...)`，`MessageListSearch.tsx:189-199,242-244`），样式在 `src/renderer/assets/styles/index.css:227-228` 用 `::highlight()` 伪元素定义。
 - **跳转**：先处理卡片/网格等内部滚动容器，再让虚拟列表滚动到该行（`MessageListSearch.tsx:233-234`；`MessageList.tsx:315-319`）。
@@ -110,7 +110,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 3.3 草稿与编辑恢复状态机
 
-`ChatComposerInner` 在一个组件内混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，用一堆 ref 协调（`inputHistoryToolsRef`、`skipDraftCacheWriteForHistoryPreviewRef`、`editingOriginalFilePartsByTokenIdRef`、`savedDraftBeforeEditingRef` 等）——功能齐全但可读性门槛高（取舍见第 10 节）。
+`ChatComposerInner` 在一个组件内混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，用多个 ref 协调（`inputHistoryToolsRef`、`skipDraftCacheWriteForHistoryPreviewRef`、`editingOriginalFilePartsByTokenIdRef`、`savedDraftBeforeEditingRef` 等）（取舍见第 10 节）。
 
 以下两个行为已确认：
 
@@ -239,7 +239,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **托盘**：`TrayService.ts` 在 mac 上根据系统明暗主题切换亮/暗两套托盘图标（`:29`）；点击托盘图标的行为受偏好 `feature.quick_assistant.click_tray_to_show` 控制——开则唤起 QuickAssistant 悬浮窗，关则唤起主窗口（`:61-71`）。
 - **托盘无角标**：托盘本身**不显示未读消息数/流式状态角标**，未检索到 `setBadgeCount`/`flashFrame`/`setOverlayIcon` 等角标 API 调用。
 - **系统通知**：主进程通知服务（`src/main/services/NotificationService.ts:7-20`）用 Electron 原生通知 API，点击通知会唤起主窗口并广播 `notification.clicked`（`:14-17`）；渲染层发送入口（`src/renderer/services/notification/NotificationService.ts:10-24`）先查 `assistant/backup/knowledge` 三个偏好开关，再决定是否调 IPC 发送。
-- **一个值得记录的空路径**：偏好 `app.notification.assistant.enabled` 和对应设置项（"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `source: 'assistant'` 的发送调用**——即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩。实际存在的发送调用点：
+- **通知空挂钩**：偏好 `app.notification.assistant.enabled` 和对应设置项（"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `source: 'assistant'` 的发送调用**——"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，用户能看到、能勾选，但不会生效。实际存在的发送调用点：
 
   - `BackupService.ts`：6 处 `source: 'backup'`（`:80,150,168,233,251,344`）
   - `useAutoBackupEvents.ts`：1 处（`:57-64`）
@@ -275,16 +275,19 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ## 10. 当前交互补充
 
-Agent 任务在工作台中新增悬浮进度胶囊，并提供子 Agent 流程的返回导航和更清晰的运行状态；定时任务卡片显示最近运行状态。消息菜单增加“复制为新对话”，消息页脚始终显示 token 用量。Composer 还支持分别配置发送、换行与 steer 快捷键，并保留粘贴截图携带的文本风味。
+- Agent 任务在工作台中新增悬浮进度胶囊，并提供子 Agent 流程的返回导航和更清晰的运行状态。
+- 定时任务卡片显示最近运行状态。
+- 消息菜单增加“复制为新对话”，消息页脚始终显示 token 用量。
+- Composer 支持分别配置发送、换行与 steer 快捷键，粘贴截图时携带其中的文本。
 
 上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/frame/MessageMenuBar.tsx`、`src/renderer/components/chat/variants/AgentComposer.tsx`。
 
 ## 11. 设计取舍与已确认边界
 
-- **`ChatComposer.tsx` 单文件复杂度偏高**（1908 行）：`ChatComposerInner` 一个组件本体加上闭包状态混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等好几套独立状态机在同一个函数体内用一堆 ref 协调（3.3）。功能齐全，但可读性/可维护性门槛显著高于单一职责组件。
+- **`ChatComposer.tsx` 单文件体量大**（1908 行）：`ChatComposerInner` 一个组件本体加上闭包状态，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，在同一个函数体内用多个 ref 协调（3.3）。
 - **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
 - **适配器模式的代价与收益**：能力注入（6.2）让"Home 可写、Agent 只读"不需要 if/else 分支，代价是追踪某个按钮为何出现需要跨两个 adapter 文件加能力 hook；`messageListProviderBuilder.ts` 的"只塞存在的字段"（`pickMessageLeafState` 等纯函数）保证 `actions.xxx &&` 判断语义清晰（该文件细节见消息渲染器笔记）。
-- **搜索的"数据 + DOM"双轨**（2.3）：粗匹配在已加载数据上、精确高亮在已挂载 DOM 上，虚拟化窗口外的消息可定位但无 DOM 高亮；流式行被排除、未加载页搜不到，是分页 + 数据匹配的固有限制，数据侧影响见会话与消息管理笔记 5。
+- **搜索的"数据 + DOM"双轨**（2.3）：粗匹配在已加载数据上、精确高亮在已挂载 DOM 上，虚拟化窗口外的消息可定位但无 DOM 高亮；流式行被排除、未加载页搜不到，由分页与数据匹配的组合决定，数据侧影响见会话与消息管理笔记 5。
 - **桌面集成缺口**（8.2）：通知空挂钩、托盘无角标、无快捷键速查浮层；Session 列表无拖拽排序（2.2）。
 - **类目边界**：本笔记只记录用户工作流与界面状态；树模型与指针语义在会话与消息管理笔记 1/4，流式执行与最终化在对话请求与上下文笔记 5/6，消息壳与 Markdown 渲染在消息渲染器笔记。
 

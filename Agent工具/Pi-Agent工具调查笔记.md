@@ -16,7 +16,7 @@
 
 Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本地执行模型，由 `packages/agent` 的 agent-loop 统一编排：
 
-1. **工具是代码对象，不是独立持久化实体**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls，`core/tools/index.ts:48-57`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:449-498`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。`powershell` 是 Windows 可选工具，优先调用 `pwsh.exe`，否则 Windows PowerShell；它与 bash 一样按启动用户权限执行，只是向命令加入 UTF-8 输出设置（`core/tools/powershell.ts:16-46`）。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
+1. **工具是代码对象，没有独立的持久化实体**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls，`core/tools/index.ts:48-57`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:449-498`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。`powershell` 是 Windows 可选工具，优先调用 `pwsh.exe`，否则 Windows PowerShell；它与 bash 一样按启动用户权限执行，只是向命令加入 UTF-8 输出设置（`core/tools/powershell.ts:16-46`）。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
 2. **注入是会话级工具集 + 每轮上下文**：激活集存于 `agent.state.tools`（`agent-session.ts:928-943`），每轮 `prepareNextTurnWithContext` 把当前工具集快照注入请求上下文（`agent-session.ts:541-556`）；system prompt 的 Available tools 段只列出带一行 snippet 的工具（`system-prompt.ts:80-84`）。
 3. **协议是 Provider 原生 tool_calls**：`Context.tools` 传入 `Provider.stream`，由各 API Adapter 转成 OpenAI function calling、Anthropic tools、Google functionDeclarations 等格式（`packages/ai/src/types.ts:492-506`）。`Tool` 的 `constrainedSampling` 可要求严格 JSON schema 或 Lark/regex grammar；`constrained-sampling.ts` 提供 `makeStrictJsonSchema`，在 Provider 支持 strict 模式时把 TypeBox schema 转换为 strict 子集（`constrained-sampling.ts:29-130`），不可转换时回退，`strict: "require"` 时直接报错。strict 子集转换规则为：
 
@@ -28,7 +28,7 @@ Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本�
 `PI_EXPERIMENTAL=1` 时 read/bash/edit/write 内置工具启用 `{ type: "json_schema", strict: "prefer" }` 约束采样（`core/experimental.ts:3-10`、`tools/read.ts:222` 等）。
 4. **校验集中在执行前**：`prepareToolCall`（`agent-loop.ts:600-664`）用 TypeBox 校验并做值转换（`packages/ai/src/utils/validation.ts:317-349`），未知工具与校验失败都转成 isError 工具结果回注给模型，而不是中断循环。
 5. **循环由 agent-loop 驱动，无显式迭代上限**：内层 while 处理“工具调用 + steering 队列”，外层 while 排空 followUp 队列（`agent-loop.ts:155-275`）；并行工具调用并发执行、结果按序回注；`length`（输出截断）时所有工具调用统一按失败处理（`failToolCallsFromTruncatedMessage`，`agent-loop.ts:381-406`）。源码未发现 maxIterations 类上限。
-6. **审批是回调钩子而非执行端强制**：`beforeToolCall` 返回 `block` 即拒绝执行（`agent-loop.ts:619-643`），扩展 `tool_call` 事件走同一钩子；没有按工具/风险分级的持久化审批策略。项目信任门不直接拦截 bash 执行，而是决定项目级 `.pi` 设置、资源、扩展与包是否加载（settings-manager.ts:355-356、resource-loader.ts:397-398）；只有当 shell 路径与命令前缀取自项目设置时，信任状态才间接影响 bash 的运行参数（project-trust.ts）。
+6. **审批是回调钩子，不在执行端强制**：`beforeToolCall` 返回 `block` 即拒绝执行（`agent-loop.ts:619-643`），扩展 `tool_call` 事件走同一钩子；没有按工具/风险分级的持久化审批策略。项目信任门不直接拦截 bash 执行，而是决定项目级 `.pi` 设置、资源、扩展与包是否加载（settings-manager.ts:355-356、resource-loader.ts:397-398）；只有当 shell 路径与命令前缀取自项目设置时，信任状态才间接影响 bash 的运行参数（project-trust.ts）。
 7. **执行边界是本地进程**：文件工具直接操作 fs；bash 用 `spawn` 子进程、进程树终止、可选超时与输出截断（`tools/bash.ts:88-126`、`killProcessTree`）；工具可流式上报部分结果（`onUpdate`）。
 8. **结果回注是 toolResult 消息**：内容支持文本+图片（图片自动缩放，`normalizeToolResultImages`），`isError` 标记失败，`addedToolNames` 支持 Provider 原生延迟工具加载（`packages/ai/src/types.ts:437-454`）。
 

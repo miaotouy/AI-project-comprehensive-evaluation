@@ -36,7 +36,7 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 
 **触发**：GenUI 由前端请求标志触发，而非用户命令。`enable_inline_genui` 默认 True（`astrbot/core/platform/sources/webchat/request_flags.py:4`），前端构造请求固定开启（`useMessages.ts:9`），由 `event.get_extra("enable_inline_genui")` 决定是否注入输出协议提示词（`astr_main_agent.py:509-510`）。非 WebChat 平台（QQ 等）没有该标志，也不会注入协议。
 
-**输出协议**：私有文本标记，无结构化 part。协议全部内容在 `CHATUI_INLINE_GENUI_SYSTEM_PROMPT`（`astr_main_agent_resources.py:61-76`）：输出恰好一个 `<html-genui>...</html-genui>` 块；开标签可带 `title` 属性；不允许 Markdown 代码围栏包裹；要求自包含 HTML/CSS/JS；修订时输出完整新块而非 diff。后端完全不解析该标记——它只是 `plain` part 的普通文本，协议解析完全发生在前端 markstream-vue 的 custom-tag 机制（`chatMarkdownComponents.ts`）。这带来两层含义：协议开放度很低（私有标记、靠提示词约定），且"误触发/半截流"处理依赖第三方渲染库的流式解析能力（本项目未实现自己的标记解析器）。
+**输出协议**：私有文本标记，无结构化 part。协议全部内容在 `CHATUI_INLINE_GENUI_SYSTEM_PROMPT`（`astr_main_agent_resources.py:61-76`）：输出恰好一个 `<html-genui>...</html-genui>` 块；开标签可带 `title` 属性；不允许 Markdown 代码围栏包裹；要求自包含 HTML/CSS/JS；修订时输出完整新块而非 diff。后端完全不解析该标记——它只是 `plain` part 的普通文本，协议解析完全发生在前端 markstream-vue 的 custom-tag 机制（`chatMarkdownComponents.ts`）。由此带来两点后果：协议开放度很低（私有标记、靠提示词约定），且"误触发/半截流"处理依赖第三方渲染库的流式解析能力（本项目未实现自己的标记解析器）。
 
 **对象模型**：不存在独立的输出对象。GenUI 块没有 ID、类型、状态、版本字段，它作为消息文本的一部分随消息持久化，消息结构形如：
 

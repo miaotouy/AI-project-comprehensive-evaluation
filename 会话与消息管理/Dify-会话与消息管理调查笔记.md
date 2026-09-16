@@ -37,7 +37,7 @@ Conversation 表示某终端用户在某应用下的会话状态，Message 为�
 
 会话列表由 `ConversationService.pagination_by_last_id` 提供（36 行起），消息历史由 `MessageService.pagination_by_last_id` 提供（164 行起）。服务返回 infinite-scroll 类型，确认公开路径采用基于最后 ID 的分页，而不是一次传输全部历史。`WebConversationService` 复用会话服务，使公开网页与 API 侧不拥有不同的数据存储。
 
-创建时机在运行链，而非仅由侧栏新建按钮决定。`MessageBasedAppGenerator._init_generate_records` 是消息型生成器的共同记录初始化入口（118 行起）；Chat/Agent worker 会在真正执行前重新按 ID 取得 conversation/message。前端“新建会话”可只是清空当前选择和输入，不能据此认为数据库已插入空 Conversation。
+创建时机在运行链，而非仅由侧栏新建按钮决定。`MessageBasedAppGenerator._init_generate_records` 是消息型生成器的共同记录初始化入口（118 行起）；Chat/Agent worker 会在实际执行前重新按 ID 取得 conversation/message。前端“新建会话”可只是清空当前选择和输入，不能据此认为数据库已插入空 Conversation。
 
 ## 3. 生命周期、列表与用户操作
 

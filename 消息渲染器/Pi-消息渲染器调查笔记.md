@@ -115,7 +115,7 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 
 ## 12. 终端能力覆盖
 
-渲染器的超链接、图片和真彩色分支现在既可依赖环境自动探测，也可由 `terminal` 设置或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量明确覆盖。覆盖结果集中缓存于 `getCapabilities()`，Markdown 链接、图片降级文本与工具结果共用该结果；静态阅读只能确认选择逻辑，具体终端对 OSC 8 和图片协议的实际表现仍需运行验证（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
+渲染器的超链接、图片和真彩色分支既可依赖环境自动探测，也可由 `terminal` 设置或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量明确覆盖。覆盖结果集中缓存于 `getCapabilities()`，Markdown 链接、图片降级文本与工具结果共用该结果（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
 
 ## 13. 关键源码索引
 

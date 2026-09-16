@@ -51,13 +51,17 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - **侧栏**（`src/renderer/src/components/WindowSideBar.vue`）：新建聊天、侧栏搜索输入是对**已加载会话列表的客户端过滤**（按标题包含匹配，`matchesSessionSearch`，:902-908，应用于置顶与分组 :911-924）；置顶区、分组区、加载更多（:556-560）。
 - **Spotlight 跨会话搜索**：搜索命令按钮打开 Spotlight；`runSearch`（`src/renderer/src/stores/ui/spotlight.ts:305-333`）调用 `sessionClient.searchHistory`（服务端 FTS 历史搜索，数据侧见会话与消息管理笔记 §5.3），会话命中可直接选择，消息命中写入待跳转状态并在 ChatPage 提交后定位滚动（`ChatPage.vue:797-843`，带重试与高亮）。
 - **会话内查找**：Cmd/Ctrl+F 打开 `ChatSearchBar`（`ChatPage.vue:15-32`），`useChatSearch`（`src/renderer/src/features/chat-page/composables/useChatSearch.ts`）在已加载 display messages 上匹配、高亮与定位（经共享滚动控制器请求滚动，不与流式自动跟随冲突）；键盘：Esc 关闭、Enter/Shift+Enter 下一条/上一条（`handleSearchKeydown` :237-265）。
-- **现场恢复**：`useSessionRestore`（`src/renderer/src/features/chat-page/composables/useSessionRestore.ts:29-`）以 restore 请求 epoch 保证异步写入不串会话；`messageStore.loadMessages` 拉取首屏（默认 100 条，`ChatPage.vue:437`），session 切换时保存/恢复测量快照（:845-848、:984-988）；历史向上翻页在滚动到顶时触发（`loadOlderMessagesAtTop` :700-795，以窗口首行作锚点做滚动补偿）；提交后自动跟随滚动（:1049-1072）。
+- **现场恢复**：`useSessionRestore`（`src/renderer/src/features/chat-page/composables/useSessionRestore.ts:29-`）以 restore 请求 epoch 保证异步写入不串会话；`messageStore.loadMessages` 拉取首屏（默认 100 条，`ChatPage.vue:437`），session 切换时保存/恢复测量快照（:845-848、:984-988）。
+
+  历史向上翻页在滚动到顶时触发（`loadOlderMessagesAtTop` :700-795，以窗口首行作锚点做滚动补偿）；提交后自动跟随滚动（:1049-1072）。
 
 ## 3. Composer、草稿、附件与快捷输入
 
 - **编辑器**：`ChatInputBox`（`src/renderer/src/components/chat/ChatInputBox.vue`）是 TipTap 编辑器（`EditorContent` :24），扩展 Mention 与 slash Mention（:51、:81-82）、文件附件节点（:72）、占位符/历史等；提及对话框经 `useChatInputMentions`（:145）提交。附件经文件变更事件进入草稿（`useComposerSubmit.ts:1172-1198`），并按当前模型能力过滤不支持的音频（:399-418）。
 - **工具栏**（`src/renderer/src/components/chat/ChatInputToolbar.vue`）：附件、provider 搜索开关（:21-36）、语音输入、steer 按钮（生成中且有输入时显示，:119-133）；主按钮是四态状态机（:268-273）：取消准备 / 停止 / 排队 / 发送，由 `handlePrimaryAction` 分发（:281-294）。
-- **草稿持久化**：`composerDraftPersistence.ts` 按会话键 `deepchat.composerDraft.v1.<sessionId>`（:12）把文本、附件、active skills 与 TipTap document 镜像到 localStorage（400ms 防抖 :13、:543-554；空草稿删除、损坏视为无 :148-155、:164-168）；切换会话即时恢复（`switchComposerSession`，`useComposerSubmit.ts:669-700`），`pagehide/beforeunload` 同步 flush（:566-572）。草稿状态机（revision/fingerprint）在 `model/composerDraftState.ts`。
+- **草稿持久化**：`composerDraftPersistence.ts` 按会话键 `deepchat.composerDraft.v1.<sessionId>`（:12）把文本、附件、active skills 与 TipTap document 镜像到 localStorage（400ms 防抖 :13、:543-554）；空草稿删除、损坏视为无（:148-155、:164-168）。
+
+  切换会话即时恢复（`switchComposerSession`，`useComposerSubmit.ts:669-700`），`pagehide/beforeunload` 同步 flush（:566-572）；草稿状态机（revision/fingerprint）在 `model/composerDraftState.ts`。
 - **快捷输入**：slash 命令（`/compact` 手动压缩，`useComposerSubmit.ts:952-996`，命令定义 `src/renderer/src/components/chat/mentions/utils.ts:36-37`）；`@` 提及（编辑器扩展）。
 
 ## 4. Agent、模型、工具与发送前配置
@@ -74,7 +78,9 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 ## 5. 发送、排队、流式反馈与停止
 
 - **发送路径**：`onSubmit`（`useComposerSubmit.ts:998-1047`）：生成中 → `pendingInputStore.queueInput` 入队（:1027）；空闲 → `dispatchComposerAttempt`（:826-950，发送前先插入乐观 user 消息与 pending-assistant 占位，被拒则回滚并弹附件对话框）。另有排队提交（`onQueueSubmit` :1098-1128）、steer（`onSteer` :1130-1170）与 slash 命令发送（:1049-1096）。
-- **pending lane**（`src/renderer/src/components/chat/PendingInputLane.vue`）：队列计数与 blocked 计数徽标（:13-23）；resume 按钮（显示条件 `ChatPage.vue:1299-1309`：非 ACP、视图已提交、无生成中、`pendingInputStore.resumeAvailable`）；`retry_required` 项琥珀色标记 + 重试按钮（:208-229）；blocked 项 retry / send-without 按钮（:174-207）；拖拽排序（:53-62，阻塞/待重试/编辑中禁用）、行内编辑（:95-133）。动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
+- **pending lane**（`src/renderer/src/components/chat/PendingInputLane.vue`）：队列计数与 blocked 计数徽标（:13-23）；resume 按钮的显示条件为非 ACP、视图已提交、无生成中，且 `pendingInputStore.resumeAvailable` 为真（`ChatPage.vue:1299-1309`）；`retry_required` 项琥珀色标记 + 重试按钮（:208-229）；blocked 项 retry / send-without 按钮（:174-207）；拖拽排序（:53-62，阻塞/待重试/编辑中禁用）、行内编辑（:95-133）。
+
+  动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
 - **流式反馈**：消息列表随 IPC 增量更新（renderer message store 与 `messageIpc.ts` 的 stream 注册表，见会话与消息管理笔记 §6）；`useDisplayMessages` 用稳定 render key 把占位/流式行与落盘消息关联（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:339-355`、:367-438）；rate-limit 临时块在列表尾部内联呈现（`ephemeralRateLimitBlock`，:235-250）。
 - **停止**：`onStop`（`ChatPage.vue:1346-1374`）→ `chatClient.stopStream`（失败 toast），停止中状态 `stoppingSessionIds` 防重入；执行层 abort 链见对话请求与上下文笔记 §7。
 
@@ -133,12 +139,11 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
 ## 11. 未验证事项
 
-- 视觉效果、动画、焦点顺序、键盘可用性与响应式行为未运行验证（静态代码只能确认控件与事件绑定）。
+- 视觉效果、动画、焦点顺序、键盘可用性与响应式行为未运行验证；本次未运行测试、构建或桌面端交互，结论来自 renderer 静态源码（静态代码只能确认控件与事件绑定）。
 - 系统通知（完成/错误通知）的实际呈现与点击返回行为未运行验证。
 - Spotlight 搜索弹窗的交互细节（结果列表、分组）静态确认入口，未运行。
 - 多窗口 busy/streaming 同步不存在（未找到实现），未验证真实多窗口行为。
 - 消息操作按钮在 `MessageListRow` 中的可见/禁用规则属消息渲染器装配，未在本笔记展开验证。
-- 未运行测试、构建或桌面端交互；结论来自 renderer 静态源码。
 
 ## 12. 关键源码索引
 

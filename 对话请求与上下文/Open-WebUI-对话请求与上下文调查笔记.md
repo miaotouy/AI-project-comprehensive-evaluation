@@ -163,7 +163,7 @@ Responses 事件在流式期间已累积 output item 时，即使最终 complete
   4. `review_memory_after_turn`（3401 行）：记忆抽取。
   前端通过 `background_tasks` 字段按需携带开关，标题/标签仅新会话首消息下发，追问恒发（1.1 第 3 步）；会话在生成期间被删除则跳过后台任务（3207-3209 行）；
 - `outlet_filter_handler`（3412 行）：outlet 过滤器内联执行，输出经 `chat:outlet` 事件同步回写前端（1030-1040 行处理）；
-- 任务系统是「asyncio + Redis 记账」而非任务队列：任务不跨 worker 迁移，Redis 仅用于跨实例取消（pubsub）与状态查询（哈希/集合）。
+- 服务端没有任务队列：任务对象只存在于发起请求的实例进程内，Redis 只承担跨实例取消广播与状态查询。
 
 ## 9. Agent、工具、知识库与附件注入点
 

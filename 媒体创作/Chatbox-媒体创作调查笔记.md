@@ -16,7 +16,7 @@
 
 Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作链，能力分型为 **M1 模型生成工作站 + M3 记录/资产生命周期**：单一事实对象 `ImageGeneration` 记录（prompt、模型、参数、参考图键、结果图键、状态、错误与来源），配套 blob 图片存储；执行按 provider 分两条路径（ChatboxAI 服务端异步任务 + 客户端 2 秒轮询；其余 provider 走 `model.paint` 直连），并统一折叠为 `pending / generating / done / error` 四种本地状态（`src/shared/types/image-generation.ts:6`）。
 
-媒体创作视角下三个关键机制（均相对独特功能笔记能力卡二的新增细节，见下文"交接专页"）：
+媒体创作视角下有三个关键机制，均为独特功能笔记能力卡二未展开的细节（分工见下文"交接专页"）：
 
 1. **参考图 DAG**：本地上传图先落 blob（`picture:image-creator-ref:*`），从历史记录"用作参考"时保留来源记录 id 并写入新记录的 `parentIds`；删除记录时做引用计数式 blob 清理，避免破坏 DAG（`src/renderer/routes/image-creator/index.tsx:380-382,436-441`、`src/renderer/stores/imageGenerationStore.ts:138-171`）。
 2. **取消/恢复/重试语义**：取消只中止轮询并把记录留在 `generating`，使"Resume Generation"按钮按已持久化的 `taskId` 继续取结果；重试则清空 taskId 与旧图重新发起，注释明确"retry means start fresh, not resume"（`src/renderer/stores/imageGenerationActions.ts:413-426,440-516,518-563`）。
@@ -38,7 +38,7 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 | 外部依赖 | ChatboxAI API（`/api/images/async_generations`、`/api/ai/paint`）、AI SDK provider（OpenAI/Gemini 直连） | `packages/remote.ts:1145-1168`、`chatboxai.ts:418` |
 | 聊天回填 | chatbox_cli 后台任务通知 + `ToolCallPartUI` 工具卡 | `packages/chatbox-cli/image-task-follow-up.ts:23-46`、`ToolCallPartUI.tsx:1585-1648` |
 
-未发现 ComfyUI、FFmpeg、服务端媒体供给层或插件协议：Chatbox 的媒体创作全部收敛在"客户端记录 + 外部图像 API"两层，属于窄而完整的用户级图像工作台，与 VCPToolBox 的服务端渲染供给层结构不同。
+未发现 ComfyUI、FFmpeg、服务端媒体供给层或插件协议：Chatbox 的媒体创作全部收敛在"客户端记录 + 外部图像 API"两层，与 VCPToolBox 的服务端渲染供给层结构不同。
 
 ### 完整主链（静态走通 + 部分运行验证）
 
@@ -129,7 +129,7 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
   - ChatboxAI 数字错误码：license_not_found、expired_license 等引导到设置页
   - 任务字符串错误码：`image_content_moderation_blocked`、`ai_provider_error`、`image_generation_failed`（`:21-41`）
   - 失败 item 的 UUID/TaskId 调试信息可复制
-- **分支**：无显式分支 UI；DAG（parentIds）在数据层保留多父迭代关系，本次未找到以 DAG 为面的导航/画布，仅历史列表线性呈现。
+- **分支**：无显式分支 UI；DAG（parentIds）在数据层保留多父迭代关系，本次未找到基于 DAG 的导航或画布，仅历史列表线性呈现。
 - **复用**：三处——"用作参考"（下一轮输入，`index.tsx:577`）、历史点击重新载入 prompt/参考图（`:457-466`）、聊天消息内结果图以 `ImageGenerationResultGallery` 展示并进入消息资产体系（`components/chat/ImageGenerationResultGallery.tsx`）。
 
 ## 6. Agent 回流、插件与外部依赖
@@ -185,7 +185,7 @@ Agent 还可读历史：`chatbox image status|history|models`（`images.ts:356-3
 
 ## 交接专页（与独特功能笔记的分工）
 
-本页承接 [Chatbox 独特功能调查笔记 能力卡 2](../独特功能/Chatbox-独特功能调查笔记.md)（快照同为 `81571269`，其中已有工作台产品面盘点：模型分组、参考图 base64、`createAndGenerate`、取消/恢复/重试、Gallery/HistoryPanel/ErrorTips、`image-model-catalog.ts` OAuth 规则、chatbox_cli 来源记录与 `image-task-follow-up` 回填）。独特功能笔记负责"该能力在产品面盘点中的地位与独特性判断"，本页负责媒体创作类目视角：
+本页承接 [Chatbox 独特功能调查笔记 能力卡 2](../独特功能/Chatbox-独特功能调查笔记.md)（其中已有工作台产品面盘点：模型分组、参考图 base64、`createAndGenerate`、取消/恢复/重试、Gallery/HistoryPanel/ErrorTips、`image-model-catalog.ts` OAuth 规则、chatbox_cli 来源记录与 `image-task-follow-up` 回填）。独特功能笔记负责"该能力在产品面盘点中的地位与独特性判断"，本页负责媒体创作类目视角：
 
 - **M1 图像工作台**：双执行路径与本地四态折叠（§2、§3）——独特功能笔记未展开的直接/异步路径差异、`maxRetries: 0` 计费防护、异步路径不落 blob。
 - **参考图 DAG**：`parentIds` 多父语义、引用计数 blob GC、DAG 只存数据不做图浏览（§4、§5）——独特功能笔记只有一句"保留来源 record id（DAG 语义）"。

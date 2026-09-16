@@ -16,7 +16,7 @@
 
 OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的运行时实例」的合成体：运行时按固定顺序组装 models.dev 目录、插件 hook、config `provider` 字段、环境变量、auth.json 凭据（`src/provider/provider.ts:1343-1668`），通过 AI SDK `streamText` 发起请求（`src/session/llm.ts:280-353`）。模型目录来自远端拉取与缓存（`core/src/models-dev.ts`），无硬编码内置清单；协议适配以 AI SDK 包（内置表 + npm 动态安装）为主路径，另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`）。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **Provider ID 11 个**（静态工厂 `schema/src/provider.ts:11-21`）：
 
@@ -152,8 +152,8 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 - **npm 动态安装**：表外包名 `Npm.add(model.api.npm)`（provider.ts:1781-1788；core/src/npm.ts:115-137，装到 `cache/packages/<sanitized>`，Arborist reify），动态 import 后找 `create*` 导出（:1793-1799）；`file://` URL 直接 import。
 - **baseURL/Header**：baseURL 优先级 `options.baseURL > model.api.url`，支持 `${VAR}` 插值（:1698-1719）；header 合并 `options.headers + model.headers`（:1721-1725）；会话级 header `x-session-affinity`、`X-Session-Id`、`User-Agent: opencode/<ver>`（llm/request.ts:187-204）。
 - **请求参数**：`ProviderTransform` 输出 options/providerOptions/message/temperature/topP/topK/maxOutputTokens/schema（src/provider/transform.ts:1151-1506、464-566），按 SDK 生成 `providerOptions`（sdkKey 映射表，:42-96）。
-- **topP 默认值特判**（transform.ts:548-559）：minimax-m2/kimi-k2.5 等 0.95；deepseek-v4-flash 仅 deepseek/opencode 渠道给 0.95（5d95348）。
-- **Copilot 模型能力**：image/pdf 输入能力由远端 `capabilities` 探测（plugin/github-copilot/models.ts:88-94、:133），`pdf` 不再硬编码 false（561afb4）。
+- **topP 默认值特判**（transform.ts:548-559）：minimax-m2/kimi-k2.5 等 0.95；deepseek-v4-flash 仅 deepseek/opencode 渠道给 0.95。
+- **Copilot 模型能力**：image/pdf 输入能力由远端 `capabilities` 探测（plugin/github-copilot/models.ts:88-94、:133），`pdf` 不是硬编码 false。
 - **native 协议（opt-in）**：`packages/llm/src/protocols/` 下实现：
 
   ```text
@@ -175,7 +175,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 - **解析**：`Provider.parseModel("provider/model")`（provider.ts:1997-2003）；variant 语法 `provider/model/variant`（acp/config-option.ts:123-130）。**未发现 `@` 全局模型、`#` 本地模型、`:latest` 后缀语义**（源码确认，全仓搜索无匹配）；"latest"仅作排序权重（provider.ts:1992）。
 - **resolve 流程**：`getModel`（provider 存在性 + 模型存在性校验，:1811-1833）→ `getLanguage`（构造/缓存 SDK 与 LanguageModel，:1835-1864）。
 - **会话默认模型**：`currentModel` 按 session 表 model 字段 → 最近 user 消息携带的 model → `provider.defaultModel()`（prompt.ts:614-633）的顺序解析；`defaultModel` 按 `cfg.model` → state/model.json 最近使用 → 第一个已配置 provider 的排序首个模型（provider.ts:1947-1980）。
-- **App 端解析**：改用 server `/config/providers` 响应新增的 `defaultModel {providerID, modelID}` 字段（global-sync/utils.ts:139-142），`cfg.model` 字符串仅作回退（app/src/hooks/provider-catalog.ts:28-38，941e71d）。
+- **App 端解析**：使用 server `/config/providers` 响应中的 `defaultModel {providerID, modelID}` 字段（global-sync/utils.ts:139-142），`cfg.model` 字符串仅作回退（app/src/hooks/provider-catalog.ts:28-38）。
 - **不存在模型**：抛 `ModelNotFoundError`（:1099-1113），携带 fuzzysort 建议（:1303-1330）；provider 不存在按 providerID 建议（:1814-1821）。**无静默兜底到其他 provider**。
 
 ## 7. 多 Key、限流、重试与故障转移
@@ -202,7 +202,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 
 - **超时三类可配**：`timeout`（整体）、`headerTimeout`（响应头）、`chunkTimeout`（SSE 块间），可 `false` 关闭（v1/config/provider.ts:101-120；provider.ts:1737-1768）；OpenAI 默认 headerTimeout 300s（provider.ts:35、208）。
 - **prompt caching**：Anthropic/Bedrock 家族自动 `cacheControl: ephemeral` 注入 system + 最后 2 条消息（transform.ts:357-406）；`promptCacheKey` 按 sessionID 设置（transform.ts:1254-1267）；V2 runner 用 `session.id.slice(4)` 作 key（runner/llm.ts:204）；`options.setCacheKey` 可关。
-- **重试可能重复计费**：会话级 `Effect.retry` 重跑整个 `llm.stream` effect，同一回合首请求若已计费则重试可能重复计费（静态推断；processor.ts:660-674 未做去重）。
+- **重试可能重复计费**：会话级 `Effect.retry` 重跑整个 `llm.stream` effect，同一回合首请求已计费时不会去重（静态推断；processor.ts:660-674）。
 - **凭据明文存储**：auth.json（0o600）与 credential/account 表均为明文，无加密；权限保护靠文件系统权限。
 - **浏览器不直连 provider**：OAuth 由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186、app/src/utils/server-compat.ts:408-450）。
 - **桌面隔离**：Electron 主进程 fork `sidecar.js`（utilityProcess.fork，packages/desktop/src/main/server.ts:57-184），带 password 的 Basic auth 健康检查（:186-211），设置 `OPENCODE_CLIENT=desktop`、`XDG_STATE_HOME=userDataPath`（:44-55）。

@@ -108,7 +108,7 @@ Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObje
 
 ### 2.3 message_node 的读写与写放大
 
-`ConversationRepository.updateConversation` 的策略是「整会话重写」：在一个 Room 事务里更新会话行，然后 `deleteByConversation` 删掉全部节点再按列表顺序整批插入（`ConversationRepository.kt:299-309`、:474-485）。节点 id 会保留，`node_index` 由列表下标重新生成。这意味着任何一次会话保存（包括生成结束）都会重写该会话的全部消息 JSON。读取侧相反，按 64 条一页循环翻页，遇到超大 blob 或非法状态时报错并跳过该页继续（:433-472）。
+`ConversationRepository.updateConversation` 的策略是「整会话重写」：在一个 Room 事务里更新会话行，然后 `deleteByConversation` 删掉全部节点再按列表顺序整批插入（`ConversationRepository.kt:299-309`、:474-485）。节点 id 会保留，`node_index` 由列表下标重新生成。因此任何一次会话保存（包括生成结束）都会重写该会话的全部消息 JSON。读取侧相反，按 64 条一页循环翻页，遇到超大 blob 或非法状态时报错并跳过该页继续（:433-472）。
 
 ### 2.4 FTS5 虚表与 jieba
 
@@ -124,7 +124,7 @@ FTS 不是 Room 实体，而在数据库 `onOpen` 回调中用 `CREATE VIRTUAL T
 
 ### 3.1 创建与惰性创建
 
-界面层「新建会话」只是生成一个 UUID 并导航过去，真正的对象创建推迟到第一次有内容时：`ChatService.initializeConversation` 若数据库无此 id，就用当前助手构造空会话并把助手预设消息塞进节点，然后 `updateConversation` 只改内存（`ChatService.kt:330-347`）；`saveConversation` 会拦住「新会话、标题为空、节点为空」的保存（:1144-1148），因此空会话不会落库，也就不会出现在列表里。「清空空会话」这一独立机制本次未找到。
+界面层「新建会话」只是生成一个 UUID 并导航过去，对象创建推迟到第一次有内容时：`ChatService.initializeConversation` 若数据库无此 id，就用当前助手构造空会话并把助手预设消息塞进节点，然后 `updateConversation` 只改内存（`ChatService.kt:330-347`）；`saveConversation` 会拦住「新会话、标题为空、节点为空」的保存（:1144-1148），因此空会话不会落库，也就不会出现在列表里。「清空空会话」这一独立机制本次未找到。
 
 ### 3.2 切换与打开
 
@@ -152,7 +152,7 @@ FTS 不是 Room 实体，而在数据库 `onOpen` 回调中用 `CREATE VIRTUAL T
 
 ### 4.1 编辑用户消息 = 追加候选
 
-`ChatService.editMessage` 找到包含该消息的节点，把新内容作为**同角色的另一条消息**追加，并把 `selectIndex` 指向末尾（`ChatService.kt:1230-1262`）。原消息不被覆盖，因此「编辑」天然产生一个可切换的版本；编辑本身不触发重新生成。
+`ChatService.editMessage` 找到包含该消息的节点，把新内容作为**同角色的另一条消息**追加，并把 `selectIndex` 指向末尾（`ChatService.kt:1230-1262`）。原消息不被覆盖，因此「编辑」本身产生一个可切换的版本；编辑本身不触发重新生成。
 
 ### 4.2 重新生成助手回复 = 追加候选
 
@@ -160,7 +160,7 @@ FTS 不是 Room 实体，而在数据库 `onOpen` 回调中用 `CREATE VIRTUAL T
 
 ### 4.3 分支切换 = 改 select_index
 
-`selectMessageNode` 校验下标范围后改写节点 `select_index` 并整会话保存（`ChatService.kt:1297-1323`）；Web 端对应 `POST /conversations/{id}/nodes/{nodeId}/select`（`ConversationRoutes.kt:323-333`）。因此「活动路径」不是持久化的指针链，而是每节点一个下标；切换分支只改一个整数。
+`selectMessageNode` 校验下标范围后改写节点 `select_index` 并整会话保存（`ChatService.kt:1297-1323`）；Web 端对应 `POST /conversations/{id}/nodes/{nodeId}/select`（`ConversationRoutes.kt:323-333`）。「活动路径」由每节点一个下标推得，没有持久化的指针链；切换分支只改这个整数。
 
 ### 4.4 删除消息
 

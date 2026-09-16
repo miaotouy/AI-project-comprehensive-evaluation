@@ -82,7 +82,7 @@ llm-chat 注册 12 个状态键，覆盖智能体、会话、收藏夹、生成�
 
 **入场/退场动画。** 内容过渡状态配合双重 requestAnimationFrame，绕开 v-if 刚插入 DOM 时过渡不生效的问题（`BaseDialog.vue:251-256`）；CSS 使用透明度和缩放、纵向位移，时长为 0.3 秒（`BaseDialog.vue:327`）。
 
-关闭时 `handleClose()` 先播 300ms 退场动画再真正 emit update:modelValue: false（enableTransition 为 `false` 时延迟归零）。
+关闭时 `handleClose()` 先播 300ms 退场动画再 emit update:modelValue: false（enableTransition 为 `false` 时延迟归零）。
 
 **消费方。** 导出、批量管理、收藏夹、聊天设置和正则编辑器等业务弹窗都使用 BaseDialog。批量管理表格带有 table 语义和会话列表名称；聊天设置关闭遮罩关闭与销毁，因而保留内部 tab 和滚动状态。
 
@@ -171,7 +171,7 @@ auto 用 window.matchMedia("(prefers-color-scheme: dark)") 读取系统当前值
 
 **CSS 切换方式。** `useDark()` 默认通过给根元素加/去 `dark` class（该 hook 标准实现，项目未覆盖默认行为），配合 `src/styles/variables.css` 的 CSS 变量分深浅两套取值（如 `--el-color-primary` 在 :root 和 :root.dark——`NotificationCenter.vue:448` 就有 :root.dark :global(.notification-drawer) 的暗色专属选择器，印证根节点 `.dark` class 切换机制）。
 
-llm-chat 内弹窗、消息卡片等大量用 `var(--card-bg)`/`var(--border-color)`/`var(--text-color)` 语义化变量而非硬编码颜色，理论上无需额外适配即可跟随全局主题切换——**未逐一验证 llm-chat 每个组件在深色模式下的实际视觉效果，只是确认变量机制存在且被使用**。
+llm-chat 内弹窗、消息卡片等大量用 `var(--card-bg)`/`var(--border-color)`/`var(--text-color)` 语义化变量而非硬编码颜色，因此切换主题时各组件不需要各自改色；**未逐一验证 llm-chat 每个组件在深色模式下的实际视觉效果，只是确认变量机制存在且被使用**。
 
 **首屏防闪机制。** index.html **没有挂载前内联主题脚本**；其中唯一的内联脚本用于 WebView 兼容性检测而非主题（`index.html:323-401`）。
 
@@ -318,7 +318,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 - `ChatSettingsDialog.vue` 是基于 BaseDialog 的全局聊天设置弹窗，`close-on-backdrop-click="false"` 防误触关闭。顶部 el-autocomplete 模糊搜索设置项，querySearch/handleSearchSelect/highlightedItemId 定位并高亮；下方卡片式 el-tabs 是滚动锚点，所有分区实际位于同一个可滚动容器；
 
   主体由 el-form + SettingListRenderer 渐进渲染，activeGroupCollapses 记录设置组展开状态，底部提供"恢复默认"。
-- 首次启动与升级引导由 `GuidedFlow/` 通用引导流程系统 + `src/flows/upgrade/` 升级引导承担（见系统边界），配套"首次启动基线门禁 + 生命周期迁移 + E2E 覆盖"（提交 eed23cd8e/a9f02cd4f/9434d4473/74675f45f 等）。
+- 首次启动与升级引导由 `GuidedFlow/` 通用引导流程系统 + `src/flows/upgrade/` 升级引导承担（见系统边界），配套"首次启动基线门禁 + 生命周期迁移 + E2E 覆盖"。
 
 ### 桌面集成
 
@@ -334,7 +334,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 **z-index 计数器只涨不跌。** 乱序关闭不精确回退，简化实现。
 
-**主题持久化在 settings.json 而非 localStorage。** 与"通常在浏览器层存"的预期相反，因为 Tauri 原生应用（300ms 防抖写入）；唯一例外是主色色阶引擎把五色缓存进 localStorage app-theme-color 等键供下次启动防闪（`themeColors.ts:284-295`）。
+**主题偏好持久化在 settings.json。** 原生应用的应用级设置不走浏览器存储，由 Tauri 侧设置文件承载，写入前有 300ms 防抖；唯一例外是主色色阶引擎把五色缓存进 localStorage 的 app-theme-color 等键供下次启动防闪（`themeColors.ts:284-295`）。
 
 **主题系统三层分工。** useTheme（明暗+系统跟随）→ themeColors（五色主色注入 Element Plus 色阶）→ useThemeAppearance（壁纸/取色/混合/窗口特效），各自独立持久化到 settings.json 的不同字段；theme-changed CustomEvent 已无监听者，跨窗口主题同步实际靠各窗口启动时读同一 settings.json 自行应用（见第 1 节）。
 
@@ -362,7 +362,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 **theme-changed 事件已无监听者。** 代码注释声明的订阅用途与现状不符（仅 2 处 dispatch，无 addEventListener），目前不影响功能但属于失效的通信约定。
 
-**无障碍初步阶段。** llm-chat 仅批量管理表格有主动 ARIA；会话切换与树图操作无键盘路径（静态结论）。
+**无障碍标注与键盘路径的覆盖面。** llm-chat 仅批量管理表格有主动 ARIA；会话切换与树图操作无键盘路径（静态结论）。
 
 ## 9. 未验证事项
 

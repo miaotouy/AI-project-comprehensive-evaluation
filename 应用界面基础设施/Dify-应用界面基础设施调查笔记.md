@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify Web 是 Next 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件、Provider 数据和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，而不是由一个全局自研 Portal 容器承载所有浮层。
+Dify Web 是 Next 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件、Provider 数据和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，没有全局自研 Portal 容器。
 
 主题由 next-themes 管理，HTML 使用 `data-theme` 属性，默认跟随系统并禁用切换动画；根部 ToastHost 固定为五秒超时、最多三条。静态代码可确认这些 Provider、状态归属和业务调用方式，但不能确认底层 overlay 的焦点陷阱、Esc/遮罩关闭、Portal 层级、读屏、触摸和响应式视觉效果，因为未下钻依赖实现或运行浏览器。
 

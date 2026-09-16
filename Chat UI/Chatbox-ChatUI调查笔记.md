@@ -73,7 +73,7 @@ if (oldIndex < 0 || newIndex < 0 || !areSessionsInSamePinGroup(activeSession, ov
 }
 ```
 
-`areSessionsInSamePinGroup`（`shared/utils/session-sort.ts:3-8`）就是判断两者 `starred` 值是否相同。也就是说**不能靠拖拽把一个未置顶会话拖进置顶区**，必须先手动点"置顶"。
+`areSessionsInSamePinGroup`（`shared/utils/session-sort.ts:3-8`）判断两者 `starred` 值是否相同；**不能靠拖拽把一个未置顶会话拖进置顶区**，必须先手动点"置顶"。
 
 移动端有一个独立的"调整顺序模式"：普通情况下小屏幕禁止拖拽（传感器条件与拖拽项禁用），必须先在长按菜单里点 "Adjust order"（`SessionItem.tsx:209-213`）进入重排状态，此时才出现拖拽把手图标（`SessionList.tsx:260-272`），顶部出现一条带 "Done" 按钮的提示条（`SessionList.tsx:150-170`）。这是典型的 iOS 风格"进入编辑模式再拖拽"。排序结果落地采用分数索引（数据侧见会话与消息管理笔记 2.3）。
 
@@ -119,7 +119,7 @@ const [session, setSession] = useState<Session>({
    - `sessionWebBrowsingMap: Record<string, boolean|undefined>`（`uiStore.ts:36`），`InputBox.tsx:261`：`sessionWebBrowsingMap[currentSessionId || 'new']`；
    - `sessionAgentModeMap: Record<string, AgentModeEntry>`（`uiStore.ts:60`），读取见 `stores/session/agent-mode.ts:20-26`（`legacyMap[sessionId]`，sessionId 传入的就是 `'new'`）。
 
-也就是说，`newSessionState.webBrowsing` 这个字段在类型定义里存在，但网页浏览的真实临时值走的是 `sessionWebBrowsingMap['new']`，两者是两套并行机制——全仓库 grep 该字段没有任何读写点，仅类型声明，是**未被使用的死字段**。
+`newSessionState.webBrowsing` 在类型定义里存在，但网页浏览的真实临时值走的是 `sessionWebBrowsingMap['new']`，两者并行——全仓库 grep 该字段没有任何读写点，仅有类型声明，是**未被使用的死字段**。
 
 首次发送时转入真实会话的逻辑（`createPersistedChatSession`，`routes/index.tsx:272-353`）的数据语义见会话与消息管理笔记 3.1；"首页输入框"和真实会话输入框呈现相同，但生命周期不同。
 
@@ -133,9 +133,9 @@ const [session, setSession] = useState<Session>({
 
 ### 3.4 附件拖入：没有拖拽过程的视觉反馈
 
-`InputBox.tsx:1318` 用 `react-dropzone` 的 `useDropzone` 实现拖拽上传，根 props 直接铺在整个输入区容器上。**但只解构了根与输入 props，没有解构拖拽激活/接受/拒绝三个状态字段**——这三个状态字段在 `InputBox.tsx` 里完全没有被使用。也就是说，用户把文件拖到输入区上方悬停时，**没有任何高亮遮罩、虚线边框或文案提示**"松手可上传"，唯一的反馈是松手瞬间文件立刻被处理（成功则出现在附件预览区；被拒绝的文件类型通过 toast 弹一条"不支持的文件类型"提示；Agent 模式接受所有文件类型）。这是一个静态代码可确认的交互缺口：拖拽全程用户得不到"目标区域已识别"的即时反馈。
+`InputBox.tsx:1318` 用 `react-dropzone` 的 `useDropzone` 实现拖拽上传，根 props 直接铺在整个输入区容器上。**但只解构了根与输入 props，没有解构拖拽激活/接受/拒绝三个状态字段**——这三个状态字段在 `InputBox.tsx` 里完全没有被使用。用户把文件拖到输入区上方悬停时，**没有任何高亮遮罩、虚线边框或文案提示**"松手可上传"，唯一的反馈是松手瞬间文件立刻被处理（成功则出现在附件预览区；被拒绝的文件类型通过 toast 弹一条"不支持的文件类型"提示；Agent 模式接受所有文件类型）。这是一个静态代码可确认的交互缺口：拖拽全程用户得不到"目标区域已识别"的即时反馈。
 
-对比之下，会话列表拖拽排序（dnd-kit）有完整的视觉反馈体系（`DragOverlay`、把手图标、编辑模式提示条），输入区文件拖拽在这方面明显更简陋。
+会话列表拖拽排序（dnd-kit）有 `DragOverlay`、把手图标和编辑模式提示条组成的反馈；输入区文件拖拽没有对应反馈。
 
 ## 4. Agent、模型、工具与发送前配置
 
@@ -148,7 +148,7 @@ Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工
 ## 5. 发送、排队、流式反馈与停止
 
 - **提交顺序**：提交处理器先更新 UI 滚动状态（标记新消息并瞬间滚到底部），再经 `submitNewUserMessage` 提交；输入区提交前有禁用态合并检查（生成中、预处理中、等待审批、存在预处理错误、RAG 附件索引未就绪时弹"文档仍在索引中"确认框，`InputBox.tsx:838-848, 881-884, 1936-1967`）。
-- **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称）——屏幕阅读器用户聚焦该按钮时得不到文字描述，这是最直接的无障碍缺口；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
+- **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称，见 9.1）；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
 - **生成中占位**：`Message.tsx:982-991` 在生成且内容为空时渲染自定义 `Loading` 组件（`components/icons/Loading.tsx`）——手写 SVG 动画：四个圆点用 `<animate>` 标签分别做纵坐标/透明度/半径三个属性的关键帧动画（周期 1.25s），四个点依次延迟 0s/0.2s/0.4s/0.6s 开始，形成"依次跳动"的等待指示器。
 - **工具调用等待中**：`MessageLoading.tsx` 提供 `MessageStatuses`/`PreparingToolCallStatus`（`Message.tsx:89` 引入，`:955-957` 渲染），用于区分"纯文本生成中"和"准备/等待工具调用"两种状态展示。
 - **网络请求失败**：走消息级的 `MessageErrTips.tsx`，根据 HTTP 状态码查一张文案映射表（`httpStatusCodeI18nKeys`，覆盖 401/403/408/429/500/502/503/504），给出可读文案；还会检测错误内容是不是网关返回的原始 HTML 页面（`isHtmlContent`），避免把一整页 HTML 源码糊给用户看。
@@ -195,7 +195,7 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ## 8. Chat UI 状态所有权与同步
 
-- **状态分散风险**："new" 临时状态分散在三种不同容器里（本地 state / `newSessionState` 专用对象 / 通用 map 复用字符串 `'new'` 作 key），且 `newSessionState.webBrowsing` 字段完全未被使用（3.1）。给后续新增"发送前可配置项"的开发者增加了选错容器、忘记转移的风险。
+- **状态分散**："new" 临时状态分散在三种不同容器里（本地 state / `newSessionState` 专用对象 / 通用 map 复用字符串 `'new'` 作 key），且 `newSessionState.webBrowsing` 字段完全未被使用（3.1）。
 - **草稿**：按会话粒度存 localStorage（`'new-chat'`/`draft-${sessionId}`），刷新与重启后恢复（3.2）；首页假会话的草稿在创建真实会话后被显式删除（会话与消息管理笔记 3.1 第 6 步）。
 - **滚动位置**：每个 Session 的滚动快照缓存最多 100 个，切换会话不丢阅读位置（1.1）；`clearScrollPositionCache` 随会话删除清理（`MessageList.tsx:79-81`）。
 - **会话级开关**：网页浏览开关（`sessionWebBrowsingMap`）经 uiStore persist 持久化；知识库（`sessionKnowledgeBaseMap`）与 Agent 模式（`sessionAgentModeMap`）仅内存态，重启丢失（会话与消息管理笔记 8）。
@@ -211,13 +211,13 @@ const handleContextMenu = (event: MouseEvent) => {
 
 - **发送/停止按钮没有 `aria-label`**：`InputBox.tsx:1493-1510` 的发送/停止按钮只用图标区分状态，没有可访问名称、没有 title 属性；生成态有 Tooltip 包裹（"Stop"/"Stop all N replies"，:1486-1492），但 Mantine Tooltip 不向触发元素注入可访问名称属性——屏幕阅读器用户聚焦此按钮时仍得不到文字描述。这是最直接的无障碍缺口。输入框本身有可访问名称（`MessageInputField`，:1477）。
 - **模型选择器有 Tooltip，但触发元素本身没有 `aria-label`**：`InputBox.tsx:1899-1920` 的模型选择器触发按钮没有可访问名称，视觉上靠内部文本文案传达当前模型名，对屏幕阅读器不算严重问题（有文本内容可读），但下拉箭头图标没有 `aria-hidden`。内部的行项组件（`ModelRow.tsx:113, 121, 127, 144`）反而做得更完整：视觉能力图标（Vision/Reasoning）、模型详情、收藏按钮都有 `aria-label`。
-- **`trapFocus={false}` 的弹窗**（消息编辑、会话设置、Copilot 详情与设置四个弹窗）打开时键盘 Tab 键可以聚焦到弹窗背后的页面元素——这是 git log 可查证的、有意为之的修复（为解决 iOS Safari 里 Modal 内文本框无法长按选中文字的问题），但客观上牺牲了这四个弹窗的键盘可达性边界，是一个真实存在、有代码证据、且项目方明知取舍的无障碍缺口。
-- **做得相对完整的反例**：项目里多处图标按钮补了可访问名称——
+- **`trapFocus={false}` 的弹窗**（消息编辑、会话设置、Copilot 详情与设置四个弹窗）打开时键盘 Tab 键可以聚焦到弹窗背后的页面元素——这是 git log 可查证的、有意为之的修复（为解决 iOS Safari 里 Modal 内文本框无法长按选中文字的问题），但这也牺牲了这四个弹窗的键盘可达性边界，是有代码证据的有意取舍。
+- **多处图标按钮补了可访问名称**：
   - 消息跳转导航：真实 `<button type="button">` 元素 + 可访问名称（"Jump to message N"）+ focus-visible 焦点环，装饰性圆点用 `aria-hidden="true"` 正确隔离（`MessageMinimapRail.tsx:350-365`）；
   - 模型行、会话项的置顶/归档按钮、拖拽把手、分支标记与分支切换按钮等处的图标按钮（`ModelRow.tsx`、`SessionItem.tsx:310, 332`、`SessionList.tsx:264`、`ForkMarkerMessage.tsx:45`、`ForkGroup.tsx:160, 212`）；
   - 侧栏活动指示：状态角色 + 可访问名称（`SessionItem.tsx:280-282`）。
 
-  也就是说项目里**存在无障碍意识**，但覆盖不均——发送/停止这个全应用最高频的交互点恰恰是缺失的。
+  覆盖并不整齐：发送/停止按钮没有可访问名称。
 - **Tab 顺序**：未系统性测试（需要实机/自动化工具验证，本次仅代码静态阅读），但从 DOM 结构看没有发现人为的 `tabIndex` 乱序设置；`trapFocus={false}` 造成的"跳出弹窗"是唯一从代码里能直接证实的 Tab 顺序问题。
 
 ### 9.2 快捷键面板
@@ -229,7 +229,7 @@ const handleContextMenu = (event: MouseEvent) => {
 - **"new" 临时状态分散**在三种容器里，且 `newSessionState.webBrowsing` 是死字段（3.1）。
 - **拖拽排序被限制在同一置顶分组内**（`areSessionsInSamePinGroup`），不能靠拖拽把未置顶会话直接拖进置顶区（2.2）。
 - **附件拖拽无过程反馈**：拖拽悬停时没有任何"松手可上传"的视觉提示（3.4），与 dnd-kit 排序的完整反馈形成反差。
-- **桌面端无右键菜单、无系统通知、无托盘状态徽标**：桌面集成与聊天状态联动最少（8）；侧栏会话项的"生成中/未读完成"指示仅存在于应用内，不走系统通知（1.2）。
+- **桌面端无右键菜单、无系统通知、无托盘状态徽标**：桌面集成与聊天状态的联动只发生在应用内（8）；侧栏会话项的"生成中/未读完成"指示仅存在于应用内，不走系统通知（1.2）。
 - **生成中消息可编辑/删除**、ForkGroup 替代回复折叠组、审批浮动胶囊（PendingApprovalPill）属新增交互（6.1/6.2/5）。
 - **"Stop all N replies"并发停止**：同一会话多个替代回复并行生成时，消息内停止按钮按 `shouldShowConcurrentReplyStop` 门控出现，主列表最新回复由输入框按钮停止（6.1）。
 - **类目边界**：本笔记只记录用户工作流与界面状态；Thread/Fork 的数据模型在会话与消息管理笔记 1，流式节流与工具注入在对话请求与上下文笔记 5/9，消息壳与 Markdown 渲染在消息渲染器笔记。

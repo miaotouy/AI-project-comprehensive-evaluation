@@ -17,8 +17,8 @@
 Chatbox 的一次生成任务由输入区提交开始，最终落到 `orchestrateGeneration` 消费模型流式输出：
 
 - **主链**：`InputBox.handleSubmit` → `constructUserMessage` → `submitNewUserMessage`（写用户消息 + 插入 assistant 占位）→ `orchestrateGeneration` → `model.chatStream()` 逐 chunk 消费。
-- **流式更新拆成两条频率完全不同的路径**：每个 text-delta/reasoning-delta chunk 立刻刷新 UI 缓存（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"chunk 是 tool-call"时才真正写 storage；流结束/出错/暂停时再无条件补一次最终落盘。
-- **Agent 模式、知识库、网页浏览三种"输入区上下文增强"在底层统一建模成同一个工具注册管线里的三个开关**，而不是三套独立的 prompt 拼接逻辑，每个开关受模型能力（`isSupportToolUse(scope)`）门控。
+- **流式更新拆成两条频率不同的路径**：每个 text-delta/reasoning-delta chunk 立刻刷新 UI 缓存（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"chunk 是 tool-call"时才真正写 storage；流结束/出错/暂停时再无条件补一次最终落盘。
+- **Agent 模式、知识库、网页浏览三种"输入区上下文增强"共用同一个工具注册管线**，各自是管线里的一个开关，受模型能力（`isSupportToolUse(scope)`）门控。
 - **同会话生成串行化**：`submitNewUserMessage`/`generate`/`generateMoreInNewFork` 等入口被每会话的生成锁（promise 尾链）串行化；"在下方继续回复"（`generateMore`）在 chat 会话刻意绕过锁以支持并行替代回复，其消息写入由 chatStore 的 UpdateQueue 串行兜底。
 - 上下文按"消息数上限（`maxContextMessageCount`）"裁剪历史，自动压缩按 token 预算（上下文窗口 × 阈值 0.6）触发；provider 最终 payload 字段属于未核实事项。
 - 停止时生成锁保持到流真正排空；未完成的 tool-call 批收口为 error/result 态（`cancelled: true`），空内容占位消息直接删除。
@@ -125,7 +125,7 @@ if (shouldPersist) {
 }
 ```
 
-也就是：**每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存**（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停/中止时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（调用点 `:543, 575, 605, 617, 673, 706, 907, 942, 963, 973`），确保最终态一定落盘。
+每个 text-delta/reasoning-delta chunk 都会立刻刷新 UI 缓存（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"这个 chunk 是 tool-call"时才真正写 storage。流结束/出错/暂停/中止时还各自补一次无条件的 `persistStreamingMessage(..., { refreshCounting: true })`（调用点 `:543, 575, 605, 617, 673, 706, 907, 942, 963, 973`）。
 
 `tool-call` 被特殊处理的原因写在注释里：tool-call 可能长时间阻塞在等用户批准（`user_exec_approval`/`file_mutation_approval`/`app_action_approval`），如果不立刻持久化，用户刷新/关闭应用会丢失这个待批准状态。
 
@@ -133,7 +133,7 @@ if (shouldPersist) {
 
 ### 5.3 一处疑似死代码：`throttleWriteSessionAtom.ts`
 
-`stores/atoms/throttleWriteSessionAtom.ts` 是疑似死代码：它实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`），看起来是同一个"节流落盘"想法的另一份实现。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。也就是说该模块"创建/写入 atom"的那部分（`createSessionAtom`、`WriteQueue`）是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
+`stores/atoms/throttleWriteSessionAtom.ts` 是疑似死代码：它实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`），看起来是同一个"节流落盘"想法的另一份实现。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。该模块"创建/写入 atom"的部分（`createSessionAtom`、`WriteQueue`）因此是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
 
 ## 6. 完成、异常、半截流与最终回写
 
@@ -163,7 +163,7 @@ if (shouldPersist) {
 
 ## 9. Agent、工具、知识库与附件注入点
 
-### 9.1 Copilot：本质是"系统提示词模板"，不是独立会话类型
+### 9.1 Copilot：以系统提示词模板实现，复用普通 chat 会话
 
 `CopilotDetail`（`src/shared/types.ts:94-110`）的字段如下（`picUrl` 已标记 deprecated）：
 
@@ -174,7 +174,7 @@ if (shouldPersist) {
 
 选中一个 copilot 时（`routes/index.tsx:211-234`），行为是把 `session.copilotId` 设成该 id，并把 `session.messages[0]` 设成 `{ role: 'system', contentParts: [{type:'text', text: copilot.prompt}] }`——创建出来的仍然是一个普通 `type: 'chat'` 的 Session，只是多了一个 `copilotId` 字段用于用量统计（`remote.recordCopilotUsage`，`routes/index.tsx:302-306`）。
 
-### 9.2 知识库：客户端只存 id/name 句柄，真正生效靠"工具"
+### 9.2 知识库：前端只持有 id/name 句柄，检索以工具形式注册
 
 前端状态只是 `Pick<KnowledgeBase, 'id'|'name'>`，没有把知识库内容拉到前端。真正生效的地方是生成阶段的 `buildToolsForSession`（`stores/session/tools-builder.ts:241, 246-253`），判定逻辑见下方代码块：
 
@@ -186,11 +186,11 @@ if (knowledgeBase && kbSupported) {
 }
 ```
 
-即知识库是作为**一个模型可调用的工具**注册进去的（`getToolSet as getKBToolSet` 来自 `@/packages/model-calls/toolsets/knowledge-base`），依赖模型是否支持 `'knowledge-base'` 这个 `ToolUseScope`（`src/shared/types/session.ts:227`：`ToolUseScopeSchema = z.enum(['agent','web-browsing','knowledge-base','read-file'])`），而不是把知识库检索结果拼进 prompt 文本。
+即知识库是作为**一个模型可调用的工具**注册进去的（`getToolSet as getKBToolSet` 来自 `@/packages/model-calls/toolsets/knowledge-base`），依赖模型是否支持 `'knowledge-base'` 这个 `ToolUseScope`（`src/shared/types/session.ts:227`：`ToolUseScopeSchema = z.enum(['agent','web-browsing','knowledge-base','read-file'])`）。
 
 ### 9.3 网页浏览：每会话布尔开关 + provider 默认值
 
-生成时 `getSessionWebBrowsing(sessionId, provider)`（`stores/session/utils.ts:33-40`；显式设置优先，否则 ChatboxAI 默认开、其他 provider 默认关）解析出布尔开关，再在 `tools-builder.ts:242, 299-306` 判断该开关与模型是否支持 `'web-browsing'`，都满足才注册 `web_search` 工具，并按所选搜索 provider 的能力决定是否附加 `parse_link`（`:244, 303-305`）。同样是"工具开关"模式，不是"胶水 prompt"模式。界面上的默认值规则与按钮状态见 Chat UI 笔记。
+生成时 `getSessionWebBrowsing(sessionId, provider)`（`stores/session/utils.ts:33-40`；显式设置优先，否则 ChatboxAI 默认开、其他 provider 默认关）解析出布尔开关，再在 `tools-builder.ts:242, 299-306` 判断该开关与模型是否支持 `'web-browsing'`，都满足才注册 `web_search` 工具，并按所选搜索 provider 的能力决定是否附加 `parse_link`（`:244, 303-305`）。界面上的默认值规则与按钮状态见 Chat UI 笔记。
 
 ### 9.4 三者收敛到同一条流水线
 
@@ -205,11 +205,9 @@ Agent 模式（`agent-mode.ts`，`agentModeValue` 经 `computeEffectiveAgentMode
 - 文件系统；
 - skills/`user_exec`/`install_skill`（仅 agent 模式）。
 
-也就是说输入区这几个"上下文增强按钮"在架构上是同一个工具注册管线里的布尔开关，每个开关各自受模型能力（`isSupportToolUse(scope)`）门控。
-
 ### 9.5 工具审批的暂停语义
 
-`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25`（`shared/utils/tool-call-limit-pause.ts:7`）：一次生成里，工具调用达到 25 次才会暂停要求用户确认，且暂停会冻结同一 step 里**整批**并行工具调用而不是单个——这条限制是在"普通 chat 模式"的 `orchestrateGeneration` 里实现的（`withToolCallLimitPause` 包装，`orchestration.ts:750-752`），说明 chat 与 agent 在实现上没有清晰边界，是本项目里"聊天"和"Agent"两个概念在代码层面交织最深的地方之一。
+`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25`（`shared/utils/tool-call-limit-pause.ts:7`）：一次生成里，工具调用达到 25 次才会暂停要求用户确认，且暂停会冻结同一 step 里**整批**并行工具调用而不是单个——这条限制是在"普通 chat 模式"的 `orchestrateGeneration` 里实现的（`withToolCallLimitPause` 包装，`orchestration.ts:750-752`），说明 chat 与 agent 在实现上没有清晰边界。
 
 `pauseOnToolCallLimit` 设置可**按会话覆盖或全局关闭**该确认点（`shouldPauseOnToolCallLimit`，`tool-call-limit-pause.ts:14-19`；会话字段 `SessionSettings.pauseOnToolCallLimit`，全局 `Settings.pauseOnToolCallLimit` 默认 true）；关闭时工具不再被该包装。继续按钮拆分为"继续/继续并本次不再暂停确认"（`disableToolCallLimitPauseAndContinue`，`orchestration.ts:1170-`）。暂停类审批（user_exec/file_mutation/app_action）不受该开关影响，暂停状态随消息以 `finishReason: 'tool-call-paused'` 落盘（第 6 节）。审批的界面工作流见 Chat UI 笔记；工具执行循环内部语义属于 Agent 工具类目。
 

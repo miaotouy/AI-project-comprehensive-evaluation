@@ -67,7 +67,7 @@ PDF 有两种模式，由用户设置 `stylizedPdfExport`（默认 true）切换
 
 ## 2. 范围选择、内容口径与字段过滤
 
-- TXT（两个菜单组件实现一致，`ChatMenu.svelte:64-87`）：逐条拼接 `### 角色` 标题与消息文本。文本优先取 `getOutputText` 输出中的 message 类型片段（`Messages/structuredOutput.ts:335-341`），无 output 时退回原始 content。注意这里没有做渲染端那样的 details 剥离——聊天现场 `ResponseMessage.svelte:189` 会先去除 details 再取文本——因此 content 内含 `<details type="reasoning">` 等标记时会原样进入 TXT 与纯文本 PDF。此为静态代码事实，实际消息中 reasoning 的落库形态未运行确认。
+- TXT（两个菜单组件实现一致，`ChatMenu.svelte:64-87`）：逐条拼接 `### 角色` 标题与消息文本。文本优先取 `getOutputText` 输出中的 message 类型片段（`Messages/structuredOutput.ts:335-341`），无 output 时退回原始 content。这里没有做渲染端那样的 details 剥离——聊天现场 `ResponseMessage.svelte:189` 会先去除 details 再取文本——因此 content 内含 `<details type="reasoning">` 等标记时会原样进入 TXT 与纯文本 PDF。此为静态代码事实，实际消息中 reasoning 的落库形态未运行确认。
 - JSON：`JSON.stringify([chat])` 导出完整 `ChatResponse`（id、user_id、title、chat、share_id、archived、meta、variables、folder_id 等，`backend/open_webui/models/chats.py:201-218`），无字段裁剪、无脱敏。
 - 快照分享：`SharedChats.create` 把整个会话 JSON（含 history、messages、params、system 等）复制到 shared_chat 表的内容列（`backend/open_webui/models/shared_chats.py:60-89`），不做任何内容过滤。
 - 全量导出 `GET /chats/all` 以 NDJSON 流式输出（`chats.py:988-993`）。`GET /chats/all/db` 另受 admin + `ENABLE_ADMIN_EXPORT` 门控（`chats.py:1029-1033`）。

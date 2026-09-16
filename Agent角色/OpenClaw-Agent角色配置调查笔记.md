@@ -437,7 +437,7 @@ Claw 是另一条经过 provenance 和 consent 的资产流：
 - Claw OpenClaw profile 可冻结部分 tools、groupChat mention patterns、sandbox、memory.search、heartbeat 和 humanDelay；
 - workspace 托管文件作为包内容导出，本地 avatar 可以作为 workspace sidecar；远程 avatar 不会按本地文件方式打包；
 - export 会检查 workspace、包、bootstrap、MCP 和 cron drift，避免把未确认状态分享出去；
-- add/apply plan 需要 consent plan integrity，并按 workspace、package、MCP、cron、config 和 install provenance 分阶段写入；失败时返回 partial result，而不是假装完成。
+- add/apply plan 需要 consent plan integrity，并按 workspace、package、MCP、cron、config 和 install provenance 分阶段写入；失败时返回 partial result，不报告为完成。
 
 Agent/identity/profile 的可移植子集见 `src/claws/export.ts:71-186`；漂移检查和 workspace 内容导出见 `src/claws/export.ts:311-479`；安装 mutation 契约见 `src/claws/add.ts:53-104`、`src/claws/add.ts:180-240`。这条流程没有把普通 Agent 的全部 `model`、auth secret 或任意 config unknown fields 自动变成通用角色包。
 

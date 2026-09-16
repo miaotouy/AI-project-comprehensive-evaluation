@@ -57,7 +57,7 @@ REST 客户端
 
 ## 身份、协议与状态映射
 
-profile 是配置和数据隔离单位；持久会话由 `session_key` 标识，压缩轮转通过 parent/end_reason 形成 lineage。桌面端的 UI sid 只是运行期句柄，真正权威状态在 profile 的 `state.db`。客户端重连后重新拉取 session 并重建投影。新客户端接入由 DM Pairing 授权：一次性 8 位配对码经 CLI 批准后绑定，联动平台 allowlist。REST 面身份即 HTTP 会话 id + token；ACP 面身份为 host 鉴权结果。
+profile 是配置和数据隔离单位；持久会话由 `session_key` 标识，压缩轮转通过 parent/end_reason 形成 lineage。桌面端的 UI sid 只是运行期句柄，权威状态在 profile 的 `state.db`。客户端重连后重新拉取 session 并重建投影。新客户端接入由 DM Pairing 授权：一次性 8 位配对码经 CLI 批准后绑定，联动平台 allowlist。REST 面身份即 HTTP 会话 id + token；ACP 面身份为 host 鉴权结果。
 
 ## 执行、回流与控制语义
 

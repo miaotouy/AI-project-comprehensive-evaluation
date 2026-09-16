@@ -279,7 +279,7 @@ cachedModels = data.data || [];
 - 缺少 ID 的成员仍会尝试建立列表项，点击后回传 undefined；
 - 同一个 ID的新旧对象没有版本、时间戳或来源标识，最后一次全量刷新直接替换缓存。
 
-这对标准 OpenAI `{object:'list', data:[{id,…}]}` 足够，但不适合作为跨网关模型治理层。若要补能力筛选或费用展示，应先在主进程建立规范化 schema 和错误报告，不能继续让 Renderer 猜响应形状。
+这对标准 OpenAI `{object:'list', data:[{id,…}]}` 足够，但不适合作为跨网关模型治理层；能力筛选和费用展示目前没有主进程的规范化 schema 或错误报告可用。
 
 ### 3.6 热门与收藏是旁路元数据
 
@@ -292,13 +292,13 @@ favorite model-id set
 
 它们不附着在缓存的模型目录对象上，而是在打开选择器时并行读取，再按 ID 查回当前目录对象。已经收藏但当前网关目录不存在的 ID 不会显示；切换网关后，同名 ID 会继承之前的热门和收藏状态。
 
-这适合个人快捷选择，不适合渠道级统计。要区分两个网关的同名模型，至少需要把统计键升级为 `gateway identity + model id`；若 VCP 网关以后公开 Provider ID，也应纳入稳定身份，而不是依赖可变的 owned_by 展示字段。
+这适合个人快捷选择，不适合渠道级统计：统计键只有裸模型 ID，两个网关的同名模型会合并计数。
 
 ## 4. Adapter 与协议路由
 
 ### 4.1 客户端只有一个 OpenAI-compatible Adapter 面
 
-主请求统一生成 Chat Completions 风格 payload，客户端没有按 OpenAI、Anthropic、Gemini 分别选择 SDK 或序列化器。所谓协议路由只有：
+主请求统一生成 Chat Completions 风格 payload，客户端没有按 OpenAI、Anthropic、Gemini 分别选择 SDK 或序列化器。协议路由只有：
 
 ```text
 enableVcpToolInjection = false -> /v1/chat/completions
@@ -413,7 +413,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 
 根目录 [`backup.py`](../../VCPChat/backup.py) 会无条件归档 AppData 根目录下的所有文件，然后归档若干指定子目录。附件和 TTS 缓存可以选择排除，但没有针对 `settings.json`、`.backup`、临时文件或 Key 的排除规则。
 
-因此正常情况下生成的 `VCP_Backup_<timestamp>.zip` 会包含 AppData/settings.json 设置文件，也可能包含根目录的其他设置备份；ZIP 只做 Deflate 压缩，没有密码或加密。该归档应按凭据材料保护。
+因此正常情况下生成的 `VCP_Backup_<timestamp>.zip` 会包含 AppData/settings.json 设置文件，也可能包含根目录的其他设置备份；ZIP 只做 Deflate 压缩，没有密码或加密，凭据以明文进入归档。
 
 当前源码未找到全局设置 JSON/ZIP 的同级导入恢复 UI。话题 Markdown 等内容导出不等于渠道配置导出；一键脚本主要提供文件归档，恢复依赖用户或部署侧文件操作。
 
@@ -503,9 +503,9 @@ AppData/UserData/backups/settings-<timestamp>.json
 | 最小生成测试 | 无 | 未独立验证 Chat/stream/tool endpoint |
 | 健康结果参与调度 | 无 | 无本地调度器 |
 
-## 当前快照的渠道复核
+### 9.1 渠道复核
 
-本轮对聊天内核、启动器和同步模块的改动没有新增客户端 Provider、连接 Profile 或协议 Adapter。主聊天仍将单个 VCP 网关 URL 与 Key 交给 `chatHandlers`，模型目录仍是网关返回的 ID 列表；新的 managed bootstrapper 负责安装、修复和更新运行环境，不参与模型选择、凭据解析或请求 failover。此前关于单网关、单 Key、无本地重试/熔断的结论在当前快照仍成立。
+主聊天把单个 VCP 网关 URL 与 Key 交给 `chatHandlers`，模型目录是网关返回的 ID 列表；managed bootstrapper 负责安装、修复和更新运行环境，不参与模型选择、凭据解析或请求 failover。
 
 依据：`modules/ipc/chatHandlers.js`、`modules/utils/appSettingsManager.js`、`modules/modelUsageTracker.js`、`apps/bootstrap-installer/src-tauri/src/lib.rs`、`apps/bootstrap-installer/src-tauri/src/manifest.rs`。
 
@@ -527,7 +527,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 - 设置页用标准 URL 解析 API 规范化端点，避免手工字符串拼接造成重复路径；
 - 工具注入通过独立的专用端点表达，普通兼容接口仍保持清晰；
 - 发送前清理消息内部字段，减少 UI 私有元数据意外进入模型上下文；
-- 设置保存采用临时文件、回读校验、备份和移动，配置完整性处理较扎实；
+- 设置保存采用临时文件、回读校验、备份和移动；
 - `requestId` 贯穿生成、流事件和中断接口，便于把一轮交互关联起来；
 - renderer widget 通过受控代理调用主连接，避免每个 widget API 都显式接收凭据。
 

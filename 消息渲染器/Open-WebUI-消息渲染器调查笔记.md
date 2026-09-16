@@ -25,7 +25,7 @@ Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐
 - 结构化输出：`message.output` 存在时走 `StructuredOutputRenderer`，把工具调用/reasoning/code_interpreter 归组为 detail 项与正文混排；
 - 代码执行双通道：浏览器端 Pyodide（iframe `sandbox="allow-scripts"` 隔离、opaque origin），或后端 Jupyter 引擎（`executeCode` API）；
 - 流式渲染用 rAF 节流 + token 级复用：`content` 变化时 requestAnimationFrame 合并一次解析，`done` 时立即处理并取消残留帧；`{#key id}` + `TextToken` 复用避免整棵树重建；
-- 工具/检索内容不直接进正文：引用来源经 `sources` 数组推送渲染为 Citations 列表与正文 `[n]` 内联按钮；模型输出中的 `{{HTML_FILE_ID_*}}` 等占位符由 `replaceTokens` 展开成 `<file type="html">`/`<video>` 标签。
+- 工具/检索内容按结构分别渲染，不把原始检索文本拼进正文：引用来源经 `sources` 数组推送渲染为 Citations 列表与正文 `[n]` 内联按钮；模型输出中的 `{{HTML_FILE_ID_*}}` 等占位符由 `replaceTokens` 展开成 `<file type="html">`/`<video>` 标签。
 
 ## 1. 渲染入口分发
 
@@ -77,7 +77,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 | SVG | `sanitizeSvg`（DOMPurify SVG profile） | `utils/index.ts` 1977-2011 行：`USE_PROFILES: {svg, svgFilters}`、允许 `style/foreignObject` 与 class/style/id/data-*/viewBox/href/xlink:href 属性、`SANITIZE_DOM: true` |
 | Vega | `loader.sanitize` + `loader.load` | 阻断一切外部资源，仅允许 data:/同源；`renderer: 'none'` |
 
-- 聊天内嵌 HTML token 一律走 HTMLToken（MarkdownTokens.svelte 497 行附近）；模型正文的 `<`/`>` 先经 `sanitizeResponseContent` 转义成实体（utils/index.ts 86-95 行），因此正文中的 HTML 标签多数以文本呈现，真正触发 HTML token 的形态有限（推测：与模型输出约定有关，未实测）。
+- 聊天内嵌 HTML token 一律走 HTMLToken（MarkdownTokens.svelte 497 行附近）；模型正文的 `<`/`>` 先经 `sanitizeResponseContent` 转义成实体（utils/index.ts 86-95 行），因此正文中的 HTML 标签多数以文本呈现，触发 HTML token 的形态有限（推测：与模型输出约定有关，未实测）。
 
 ## 4. 可视化与 Artifacts
 
@@ -110,7 +110,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 - `Markdown.svelte`（61-97 行）：`content` 变化时若已完成立即 `parseTokens`，否则 `requestAnimationFrame` 节流合并一次解析；完成时 `cancelAnimationFrame` 丢弃残留帧；`lastContent`/`lastParsedContent` 双缓存避免重复 lexer；
 - `MarkdownTokens.svelte`（43-54 行）：text token 经 `MarkdownInlineTokens` → `TextToken`（流式期间避免每次全量替换 DOM）；heading/paragraph/table 递归 `svelte:self` 复用 token 引用；
 - `ResponseMessage.svelte`（193-196 行）：流式期间对 message 做 `structuredClone` 快照 + content/done/output 快速比较，避免组件属性抖动导致 destroy/mount；
-- `CodeBlock.svelte`（400-402 行）：`_token` 版本跟踪，只有文本真正变化才重新 `render()`。
+- `CodeBlock.svelte`（400-402 行）：`_token` 版本跟踪，只有文本变化才重新 `render()`。
 
 ## 8. 关键文件索引
 

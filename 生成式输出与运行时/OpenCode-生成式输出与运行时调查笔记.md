@@ -93,7 +93,7 @@ OpenCode 的"生成式输出"以**真实文件系统为事实源**：模型通�
 
 - **用户编辑**：OpenCode 内部无文本编辑器写入；用户修改发生在外部编辑器/IDE，经 watcher 事件与 vcs.diff 呈现（`reviewDiffs` git 模式）。
 - **版本**：快照仓库提供**回合级**版本（write-tree 哈希），非文件提交级；`revert` 以消息为粒度：收集目标之后全部 PatchPart，按各自 hash `git checkout <hash> -- <file>` 恢复（`snapshot/index.ts:408-524`），可 `unrevert` 还原，下一次 prompt 时 `cleanup` 删除被撤销消息/Part（`revert.ts:90-134`）。
-- **快照定位变更**：快照 1f94d8a 起目标消息与撤销范围改用 `findIndex`+`slice` 定位（`revert.ts:74-75`、:106-114），不再按 id 大小比较（导入消息 id 可能非单调）。
+- **快照定位变更**：目标消息与撤销范围改用 `findIndex`+`slice` 定位（`revert.ts:74-75`、:106-114），不再按 id 大小比较（导入消息 id 可能非单调）。
 - **撤销入口**：app 有专门 revert dock（`packages/app/src/pages/session/composer/session-revert-dock.tsx`），TUI 在消息对话框内触发（`packages/tui/src/routes/session/dialog-message.tsx:27`）。
 - **接受/拒绝**：仅整条消息级 revert；**未找到** hunk 级接受/拒绝、冲突解决、CRDT 或分支表达（`revert` 是唯一撤销机制；fork 属会话级）。
 
@@ -111,7 +111,7 @@ OpenCode 的"生成式输出"以**真实文件系统为事实源**：模型通�
 - **持久化**：三类存储：
   - 消息/Part/Todo 存 SQLite（drizzle，`packages/core/src/session/sql.ts`）；
   - 文件版本存影子 git 仓库（数据目录内，跨进程会话持久，`snapshot/index.ts:71`）；
-  - 截断输出存临时目录（7 天保留，清理按文件 mtime 判定，`truncate.ts:12、54-63`，d468201 由文件名时间戳改为 stat mtime）。
+  - 截断输出存临时目录（7 天保留，清理按文件 mtime 判定，`truncate.ts:12、54-63`）。
 - **恢复**：`MessageV2.page/hydrate` 分页重载消息与 Part（`message-v2.ts:98-123、425-467`）；快照哈希落库后 diff/revert 可在重开后继续（依赖影子仓库对象存活，gc prune 7 天，`snapshot/index.ts:23、761-766`——静态推断，未实测跨重启）。
 - **分享/导出**：会话 share URL；CLI export（含对快照/Part 的脱敏，`packages/opencode/src/cli/cmd/export.ts:131-186`）、import。
 - **删除/迁移**：会话删除级联消息；快照目录清理由定时 gc 负责。

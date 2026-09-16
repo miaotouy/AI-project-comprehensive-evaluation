@@ -186,7 +186,7 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 - **开场白是实时引用而非快照**：没有类似 SillyTavern tainted 的固化机制，`firstMessage` 修改后旧聊天下一次生成即用新文本；历史消息中也不存在开场白副本，导出聊天时开场白从角色字段现取（`characters.ts:292`）。
 - **重新生成是破坏性重建**：reroll 从消息末尾弹回到最近一条用户消息后重新请求（`DefaultChatScreen.svelte:246-270`），旧回复只保存在界面内存的 `rerolls` 数组与 `prereroll.ts` 的 generationId 索引中，刷新或切换页面即丢失；多消息生成时同样只缓存当轮结果（`prereroll.ts:26-29`）。历史中没有任何 swipe/分支结构。
 - **全局 lorebook 是遗留功能**：数据与编辑入口仍在，但 UI 明示移除、运行时未消费，属于可观察的未清理边界。
-- **导入导出做了积极的方言兼容**：SillyTavern 扩展字段被内联成装饰符而非保留原结构，`@@` 语法即运行时语法；`extensions` 未知键整体保留但不保证被任何逻辑读取。
+- **导入导出兼容多种方言**：SillyTavern 扩展字段被内联成装饰符而非保留原结构，`@@` 语法即运行时语法；`extensions` 未知键整体保留但不保证被任何逻辑读取。
 - **安全边界**：`lowLevelAccess` 需导入确认、`virtualscript` 被移除、资产导入只接受白名单 chunk 且单 chunk 限 20KB（`characters.ts:101-119`）、卡数据限 5MB。
 
 ## 10. 未验证事项

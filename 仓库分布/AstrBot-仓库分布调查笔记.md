@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-AstrBot 是 Python 服务核心与 Vue 管理界面合仓的前后端项目。`astrbot/core`（107,147 行）与 `dashboard/src`（94,974 行）量级接近；Dashboard 构建产物在 Python 打包时嵌入发行包（`pyproject.toml:128-133`），形成一个部署单元，而不是两个独立产品仓库。
+AstrBot 是 Python 服务核心与 Vue 管理界面合仓的前后端项目。`astrbot/core`（107,147 行）与 `dashboard/src`（94,974 行）量级接近；Dashboard 构建产物在 Python 打包时嵌入发行包（`pyproject.toml:128-133`），两者构成一个部署单元。
 
 ## 统计与模块分布
 

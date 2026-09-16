@@ -20,7 +20,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 
 工具来源有五类：内置、自定义目录 `{tool,tools}/*.js|ts`、插件 `tool` hook、MCP 工具与 MCP 资源工具；Skill 是经 `skill` 工具按名加载的文本资源，不是工具注册来源。审批采用 allow/ask/deny 三档规则求值（`src/permission/index.ts`），执行发生在 node 进程内（shell 为普通子进程、无沙箱），结果统一截断落盘（`src/tool/truncate.ts`）。
 
-关键事实（快照 1f94d8a）：
+关键事实：
 
 - **内置工具 16+1 个**，按模型、provider、client 与实验 flag 过滤（registry.ts:226-244、286-335）。
 - **参数校验在 `Tool.wrap` 统一完成**：Effect Schema 解码失败转 `InvalidArgumentsError`，其 message 即模型可见的「重写输入」反馈（tool.ts:99-149）。
@@ -202,7 +202,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 - **重放回注**：`MessageV2.toModelMessagesEffect`（message-v2.ts:290-360）把 ToolPart 转 AI SDK `tool-<name>` part（`toolCallId/input/output/errorText/state`），未完成 part 转 `output-error`。
 - **截断**：`truncate.output`（src/tool/truncate.ts:85-141）默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）。
 - 超限时全量写入 `<xdgData>/opencode/tool-output/tool_<id>`（truncation-dir.ts），返回截断预览与提示：agent 有 `task` 权限时建议用 Task 工具委派，否则建议 Grep/Read（:129-131）。
-- 输出保留 7 天，每小时清理一次，按文件 mtime 判定过期（:12、:53-63、:143-145），不再解析文件名时间戳（d468201）。
+- 输出保留 7 天，每小时清理一次，按文件 mtime 判定过期（:12、:53-63、:143-145），不再解析文件名时间戳。
 - **附件**：工具可返回 `attachments`（tool.ts:48-53），tools.ts:112-120 补 id 后随 tool result 持久化；processor 对超大图片附件剔除并计数（processor.ts:390-411）；重放经 `toModelOutput`（message-v2.ts:161-193）转媒体 part 或独立 user 消息。
 - **UI 状态**：`message.part.updated` 驱动前端 part 渲染（详见消息渲染器笔记）；pending/running 显示 shimmer 与进度。
 

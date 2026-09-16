@@ -25,11 +25,11 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 
 从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 ChatAgent，模型选择、采样参数、上下文限制/压缩和预设消息随 Agent 配置持久化，不在当前聊天窗口临时生效。
 
-在本次十六个项目的统一调查范围内，AIO Hub 是**一体化 Agent 预设配置能力最强、编辑入口最完整**的项目。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层；AIO 则把消息配方、模型与参数、知识、工具、变量、资产和显示规则集中在同一个 Agent 对象及其编辑器中。
+在 AIO Hub 中，一体化 Agent 预设的配置与编辑集中在一个 Agent 对象及其编辑器里：消息配方、模型与参数、知识、工具、变量、资产和显示规则都在其中。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层。
 
 这里也不能把 AIO 概括为“只导入酒馆角色卡”。当前快照有独立的世界书管理器、条目编辑器、导入导出服务和进入真实请求管道的 `worldbook-processor`。它实现的是一套可编辑、可绑定 Agent/User Profile、可条件激活并注入上下文的 **SillyTavern 兼容子集**。SillyTavern 仍领先于社区资产规模、扩展/事件协议和 World Info 全语义覆盖；这是生态与兼容完整度的差距，不等于 AIO 缺少角色创作或世界书运行能力。
 
-它的会话继承也不是单一的“快照”或“全局覆盖”：开场白在会话真正开始后固化，旧消息和旧回复保持不变；后续发送、续写与重新生成则读取 Agent 当前配置，并以新分支保存结果。这一混合语义明显偏向调试效率，允许用户在同一段历史上修改配置后立即重试比较。
+它的会话继承也不是单一的“快照”或“全局覆盖”：开场白在会话真正开始后固化，旧消息和旧回复保持不变；后续发送、续写与重新生成则读取 Agent 当前配置，并以新分支保存结果。这一混合语义偏向调试效率，允许用户在同一段历史上修改配置后立即重试比较。
 
 需要区分两种对象：
 
@@ -60,7 +60,7 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 - 环境增强
 - 输出与显示
 
-编辑器已把"知识库"区拆为 **Recall 与 Knowledge 两个独立标签页**（RecallSection.vue/KnowledgeLibrarySection.vue，提交 342d42dd3）——Recall 承担上下文即时召回绑定（recallConfig.bindings），Knowledge 承担资料库访问授权（knowledgeAccess）与资料引用；旧 KnowledgeSection.vue（723 行）已删除，KnowledgeBaseItem/PlaceholderEditor 相应改名为 RecallBindingItem/RecallPlaceholderEditor（占位符编辑器改为按集合 ID 配置）。这份编辑器目录是判断"用户界面明确支持哪些设置"的主要依据；类型文件则包含导入、兼容或高级功能可能用到的字段。
+编辑器已把"知识库"区拆为 **Recall 与 Knowledge 两个独立标签页**（RecallSection.vue/KnowledgeLibrarySection.vue）——Recall 承担上下文即时召回绑定（recallConfig.bindings），Knowledge 承担资料库访问授权（knowledgeAccess）与资料引用；旧 KnowledgeSection.vue（723 行）已删除，KnowledgeBaseItem/PlaceholderEditor 相应改名为 RecallBindingItem/RecallPlaceholderEditor（占位符编辑器改为按集合 ID 配置）。这份编辑器目录是判断"用户界面明确支持哪些设置"的主要依据；类型文件则包含导入、兼容或高级功能可能用到的字段。
 
 ### 2.3 聊天侧边栏也是 Agent 配置入口
 
@@ -155,7 +155,7 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 
 ### 4.1 模型参数
 
-parameters 使用 LlmParameters，至少支持 temperature、maxTokens，默认模板还包含 topP、topK、frequencyPenalty、presencePenalty 等可选项。内置预设的取向很明显：
+parameters 使用 LlmParameters，至少支持 temperature、maxTokens，默认模板还包含 topP、topK、frequencyPenalty、presencePenalty 等可选项。内置预设的取向如下：
 
 | 预设 | temperature | 主要方向 |
 | --- | ---: | --- |
@@ -181,7 +181,7 @@ parameters 使用 LlmParameters，至少支持 temperature、maxTokens，默认�
 - regexConfig：对请求或渲染消息做正则清理、替换和宏处理；
 - defaultToolCallCollapsed：工具调用消息默认是否折叠。
 
-Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/Plan/agent-model-parameter-rules-draft.md`，提交 e2e3a825f），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案，尚未见注册到运行时参数过滤的实现。另外聊天侧栏与 Agent 编辑器对工具策略 toolCallConfig 的修改会强制二次确认（提交 f5e834e3c），防止误改自动批准配置。
+Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/Plan/agent-model-parameter-rules-draft.md`），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案，尚未见注册到运行时参数过滤的实现。另外聊天侧栏与 Agent 编辑器对工具策略 toolCallConfig 的修改会强制二次确认，防止误改自动批准配置。
 
 ### 4.3 模型参数编辑器的实际分组与语义
 
@@ -300,7 +300,7 @@ toolCallConfig 支持：
 | `convertToolRoleToUser` | 是否把 tool 角色结果转成 user 角色 |
 | `showMethodsCount` | UI 是否显示工具方法数量 |
 
-默认工具配置是关闭总开关、关闭新工具默认启用和自动批准、最大迭代 20、超时 30 秒、串行执行、VCP 协议。由此可见，创建 Agent 后不会因为存在工具注册表就自动获得全部工具；需要显式打开 Agent 配置和相应工具。
+默认工具配置是关闭总开关、关闭新工具默认启用和自动批准、最大迭代 20、超时 30 秒、串行执行、VCP 协议。创建 Agent 后不会因为存在工具注册表就自动获得全部工具，需要显式打开 Agent 配置和相应工具。
 
 ### 6.3 工具来源与边界
 
@@ -356,7 +356,7 @@ extensionConfig 提供 Agent 级扩展总开关、按扩展 ID 的开关以及�
 2. persistAgent 调用 useAgentStorage，将完整配置序列化为 agent-manager/agents/{agentId}/agent.json；
 3. 同时更新 agent-manager/agents-index.json，索引只保留列表展示所需的元数据（名称、图标、Profile/模型 ID、标签、时间等）。
 
-实际根目录由 getAppConfigDir() 决定（Tauri 的 AppData 目录，支持便携模式），所以笔记中的 agent-manager/... 是相对于应用配置目录的路径。Agent 资产也放在对应目录，配置中的 icon 等字段可以用相对文件名或 appdata://agent-manager/agents/... 引用。资产存储路径已从旧 llm-chat/agents/ 统一迁移到 agent-manager/agents/；useAgentStorage 通过版本化数据迁移（cross-module-v2，runVersionedDataMigration）补充复制旧目录、校验目录子集与迁移标记，迁移完成后经通知中心发送成功通知（提交 f852e6b2d/d12533a49/1537e29f9）；跨会话搜索的 Agent 目录也随之改为 agent-manager/agents/（会话与消息管理笔记 5.1）。
+实际根目录由 getAppConfigDir() 决定（Tauri 的 AppData 目录，支持便携模式），所以笔记中的 agent-manager/... 是相对于应用配置目录的路径。Agent 资产也放在对应目录，配置中的 icon 等字段可以用相对文件名或 appdata://agent-manager/agents/... 引用。资产存储路径已从旧 llm-chat/agents/ 统一迁移到 agent-manager/agents/；useAgentStorage 通过版本化数据迁移（cross-module-v2，runVersionedDataMigration）补充复制旧目录、校验目录子集与迁移标记，迁移完成后经通知中心发送成功通知；跨会话搜索的 Agent 目录也随之改为 agent-manager/agents/（会话与消息管理笔记 5.1）。
 
 这解释了为什么侧边栏看起来像“设置”，但内容仍属于角色配置：侧边栏只是编辑入口，持久化边界由 ChatAgent 文件决定。导出 Agent 时，parameters（包括模型参数、上下文限制、压缩和图片压缩）会随配置导出；本地实例字段 id、profileId、创建/使用时间的处理仍遵循导出格式定义。
 

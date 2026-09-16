@@ -19,7 +19,7 @@
 | Mini Program（小程序） | 主链确认 | 60+ 预设 + 自定义 webview 应用、keep-alive 池、launchpad/侧栏入口，见能力卡 1 |
 | 全局搜索 | 主链确认 | `app.search` 命令 + 联邦实体搜索 + FTS5 内容搜索（游标分页），见能力卡 2 |
 | 多模型同时对话 | 归并已有类目 | LLM 渠道笔记 §6 与 Chat UI 笔记 §7 已主链确认（@模型多选 → 并行执行 → 兄弟组展示） |
-| 翻译 | 主链确认（独特性中等） | 流式翻译 + `data-translation` part 持久化，见能力卡 3 |
+| 翻译 | 主链确认 | 流式翻译 + `data-translation` part 持久化，见能力卡 3 |
 | 文档处理 | 归并已有类目 | 附件/OCR/知识库链在会话与消息管理、对话请求与上下文笔记覆盖 |
 | Agent workspace | 归并已有类目 | Chat UI 笔记 §6.2（agent 适配器的工作区文件解析、artifact 面板）与 Agent 工具笔记覆盖 |
 
@@ -56,11 +56,11 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
      （mini_app.transient_descriptor.<appId>，所有窗口可读，不进 DB）
 ```
 
-**持续性**：预设/自定义/启停/排序落 SQLite（user_mini_app 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移由 MiniAppMigrator.ts 负责。行为细节：webview dom-ready 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab（`94d34dd0be`、`1cab3af8e6`）。
+**持续性**：预设/自定义/启停/排序落 SQLite（user_mini_app 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移由 MiniAppMigrator.ts 负责。行为细节：webview dom-ready 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab。
 
 **安全与资源边界**：webview 由 Electron 管理；小程序数量有缓存偏好（"小程序缓存数量"）；自定义应用 URL 由用户自担风险（本次未发现 URL 协议白名单校验，未验证）。
 
-**独特性判断**：这是把第三方 Web 应用作为一等对象嵌入桌面客户端的门户形态，与 AIO Hub 的"自由窗口"、DeepChat 的 MCP App 沙箱不同：无协议桥、无模型上下文回流，纯 Web 门户 + 标签管理。当前样本中唯一形成完整主链的"应用门户"能力。
+**独特性判断**：这是把第三方 Web 应用作为一等对象嵌入桌面客户端的门户形态，与 AIO Hub 的"自由窗口"、DeepChat 的 MCP App 沙箱不同：无协议桥、无模型上下文回流，纯 Web 门户 + 标签管理，形成完整主链的"应用门户"能力。
 
 **证据强度**：静态源码 + 大量组件测试（MiniApp.test.tsx、MiniAppTabsPool.test.tsx、MiniAppPage.test.tsx）；未运行 webview 实际加载。
 
@@ -111,7 +111,7 @@ GlobalSearchPopup -> GlobalSearchPanel
 
 **边界**：翻译语言目录、模型选择（走消息原 Provider 还是独立翻译模型）未展开核对；取消即丢弃（discard-on-cancel）。
 
-**独特性判断**：把译文作为消息 part 持久化、可重译覆盖的产品形态比"另开窗口翻译"完整，但翻译本身是常见功能，独特性中等——保留为辅助贡献。
+**独特性判断**：把译文作为消息 part 持久化、可重译覆盖的产品形态比"另开窗口翻译"完整，但翻译本身是常见功能，保留为辅助贡献。
 
 ## 当前候选补充
 

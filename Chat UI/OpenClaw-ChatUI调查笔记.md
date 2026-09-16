@@ -14,13 +14,13 @@
 
 ## 结论摘要
 
-OpenClaw 的聊天表面分成四个实现层：浏览器中的 Control UI、终端 TUI、共享的 SwiftUI Chat UI，以及 Android Compose Chat UI。它们都以 Gateway 会话和事件为远端事实来源，但保留各自的输入、局部状态和恢复存储，因此“同一会话可在多表面继续”与“草稿、滚动位置、临时附件不会自动成为跨平台共享状态”是两个不同层次的事实。
+OpenClaw 的聊天表面分成四个实现层：浏览器中的 Control UI、终端 TUI、共享的 SwiftUI Chat UI，以及 Android Compose Chat UI。它们都以 Gateway 会话和事件为远端事实来源，但保留各自的输入、局部状态和恢复存储：同一会话可在多表面继续，而草稿、滚动位置与临时附件不会随之跨平台共享。
 
-- **Control UI** 是功能最完整的聊天工作台。`ChatPage` 支持多 pane、分屏、可停靠辅助面板和按会话保留的 pane 现场；`ChatPane` 把消息线程、Composer、模型控制、审批/问题、后台任务、工作区和浏览器/桌面面板组合在一起（`ui/src/pages/chat/chat-page.ts:57-126`、`ui/src/pages/chat/chat-pane-layout-render.ts:49-167`）。
+- **Control UI** 的聊天工作台由 `ChatPage` 与 `ChatPane` 组装。`ChatPage` 支持多 pane、分屏、可停靠辅助面板和按会话保留的 pane 现场；`ChatPane` 把消息线程、Composer、模型控制、审批/问题、后台任务、工作区和浏览器/桌面面板组合在一起（`ui/src/pages/chat/chat-page.ts:57-126`、`ui/src/pages/chat/chat-pane-layout-render.ts:49-167`）。
 - **TUI** 是单个终端工作区，结构是 header、滚动聊天记录、状态区、footer 和多行编辑器。命令、选择器和键盘快捷键是主要入口，Gateway 连接、历史重载和运行生命周期由独立控制器协作完成（`src/tui/tui.ts:918-971`、`src/tui/tui.ts:1416-1652`）。
 - **Apple 原生 Chat UI** 由 `OpenClawChatView`、`OpenClawChatComposer` 和 `OpenClawChatViewModel` 组成。iOS 的 Chat Pro 页面使用该原生视图，并把 Dashboard 作为经过认证的 Control UI WebView 打开；共享 ViewModel 负责消息、会话、模型、问题、工具、离线 outbox 和运行恢复（`apps/ios/Sources/Design/ChatProTab.swift:191-247`、`apps/ios/Sources/Design/ChatProTab.swift:494-526`）。
 - **Android** 使用原生 `ChatScreen`，在同一页面放置 header、Agent/会话选择、消息时间线、进度与后台任务入口和 Composer；Gateway 交互与持久化 outbox 位于 `ChatController`、`ChatCommandOutbox`（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt:657-945`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt:651-730`）。
-- **发送恢复的共同原则** 是先保留用户输入，再用消息历史或带身份的运行事件确认交付。Control UI、Apple 和 Android 都把“已收到 ACK”与“已写入 canonical history”区分开；不确定的交付会停在可见的待确认/失败状态，而不是静默重发（`ui/src/pages/chat/chat-outbox-drain.ts:159-245`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+Outbox.swift:24-28`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatCommandOutbox.kt:60-73`）。
+- **发送恢复的步骤在各表面一致**：先保留用户输入，再用消息历史或带身份的运行事件确认交付。Control UI、Apple 和 Android 都把“已收到 ACK”与“已写入 canonical history”区分开；不确定的交付会停在可见的待确认/失败状态，而不是静默重发（`ui/src/pages/chat/chat-outbox-drain.ts:159-245`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+Outbox.swift:24-28`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatCommandOutbox.kt:60-73`）。
 
 ## 工作台边界与总体调用链
 
@@ -218,7 +218,7 @@ TUI 的运行协调器可以追踪多个 session run 或同一选择范围内的
 
 Android `ChatTimeline` 把普通消息、streaming assistant、pending tools、subagent activity、question、outbox/recovery、system row 和 thinking row 建模为不同的 timeline item；后台任务和 swarm 另有 sheet/card 入口（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatTimeline.kt:13-117`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt:799-805`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt:975-979`）。
 
-Agent 与模型的区分依赖 session scope 和 model catalog，而不是只在消息气泡上显示一个简短名称。Control UI、Apple 和 Android 都在发送时捕获 Agent/session identity；对于 `global` 或 bare `main` alias，后续事件和 outbox replay 还要携带或重新确认 Agent owner。
+Agent 与模型的身份由 session scope 和 model catalog 决定。Control UI、Apple 和 Android 都在发送时捕获 Agent/session identity；对于 `global` 或 bare `main` alias，后续事件和 outbox replay 还要携带或重新确认 Agent owner。
 
 ## 8. Chat UI 状态所有权与同步
 
@@ -262,7 +262,7 @@ Apple 的 transcript cache/outbox 以 Gateway identity 绑定安装内数据库�
 - **ACK 不等于持久化**：Control UI、Apple 和 Android 都保留了“请求已被 Gateway 接受，但 canonical history 尚未证明”的中间阶段；不确定发送会显示为 unconfirmed/confirming 或进入人工 retry，而不是自动重放潜在重复消息。
 - **桌面工作台与移动原生页面并存**：iOS 的主要 Chat Pro 体验使用共享原生 SwiftUI，但 session Dashboard 仍通过认证 WebView 使用 Control UI；Android 主要聊天体验是独立 Compose 实现。这些入口共享协议和部分数据语义，不共享完整 UI 组件树。
 - **分支操作受恢复状态约束**：rewind、fork、branch switch 会清理 reply/run/branch 局部状态，并在确认当前分支后恢复 Composer；存在 unresolved outbox、active run 或未完成 branch refresh 时，相关控件会隐藏或禁用。
-- **类目边界已确认**：本笔记不展开 Markdown/tool/message row 的完整装配，不把 Gateway 执行并发和 transcript 数据模型重复写成 UI 功能，也不把外部聊天渠道的客户端页面归入 OpenClaw 自有 Chat UI。
+- **类目边界已确认**：本笔记不展开 Markdown/tool/message row 的完整装配，也不把外部聊天渠道的客户端页面归入 OpenClaw 自有 Chat UI。
 
 ## 11. 未验证事项
 

@@ -16,7 +16,7 @@
 
 Cherry Studio 已将弹窗主路径迁移到内部 UI 包。该包封装 Radix Dialog，业务侧再通过模块级 popup store 和每窗口一个 PopupHost 获得命令式调用能力。Toast 也是自研单例，支持 loading 到 success 或 error 的状态衔接，并区分警告与状态消息的可访问语义。
 
-主题权威源位于 Electron 主进程，渲染进程订阅主题变化。视觉 token 在 UI 包中分层组织，从基础色板、产品语义到 Tailwind 映射均有清楚契约和校验脚本。用户可设置明暗、单一主色、字体和自定义 CSS，但没有主题市场、壁纸或主题文件导入导出。
+主题权威源位于 Electron 主进程，渲染进程订阅主题变化。视觉 token 在 UI 包中分层组织，从基础色板、产品语义到 Tailwind 映射都有契约文件与校验脚本。用户可设置明暗、单一主色、字体和自定义 CSS，但没有主题市场、壁纸或主题文件导入导出。
 
 上下文菜单可以在项目自绘菜单和系统原生菜单之间切换。弹窗焦点等细节大多由 Radix 提供，静态调查只能确认项目侧接入和覆盖项，实际键盘与多窗口表现仍需运行验证。
 
@@ -28,7 +28,7 @@ Cherry Studio 已将弹窗主路径迁移到内部 UI 包。该包封装 Radix D
 
 无 host 时（启动早期）两个弹窗入口直接 resolve 默认关闭结果并打 warn（`PopupService.ts:100-103, 124-127`），"popups are not usable on a startup path" 是代码原话。
 
-**Toast 装配。** services/toast.ts 只包一层 i18n 标签解析，真正实现在 UI 包的 toast.tsx——模块级 `createToastStore()`（`toast.tsx:70-162`）配合 useSyncExternalStore，
+**Toast 装配。** services/toast.ts 只包一层 i18n 标签解析，实现在 UI 包的 toast.tsx——模块级 `createToastStore()`（`toast.tsx:70-162`）配合 useSyncExternalStore，
 
 全应用共享 defaultToastStore（`toast.tsx:290-297` 的注释解释不按 provider 分叉的原因：分叉会导致命令入口和实际渲染 viewport 落在不同 store 上，"quickAssistant black-hole bug"）。
 
@@ -50,7 +50,7 @@ Cherry Studio 已将弹窗主路径迁移到内部 UI 包。该包封装 Radix D
 
 业务层确认弹窗（`ConfirmPopupItem.tsx:121-124`）额外用 onInteractOutside 手动挡遮罩点击（`maskClosable === false` 时 `event.preventDefault()`），是 Radix 上叠加的业务开关。
 
-**焦点管理。** DialogContent 默认交给 Radix FocusScope 处理关闭后焦点归还，但专门开了转义口子 focusOnClose（ConfirmPopupProps.focusOnClose，`packages/ui/src/services/popup/types.ts:76-90`）——原因写得很直白：Radix 默认把焦点还给"打开弹窗前聚焦的元素"，但命令菜单/Popover 里触发的弹窗触发者早已卸载，Radix 会把焦点落在过期元素或 document.body 上；
+**焦点管理。** DialogContent 默认交给 Radix FocusScope 处理关闭后焦点归还，但专门开了转义口子 focusOnClose（ConfirmPopupProps.focusOnClose，`packages/ui/src/services/popup/types.ts:76-90`）——原因见代码注释：Radix 默认把焦点还给"打开弹窗前聚焦的元素"，但命令菜单/Popover 里触发的弹窗触发者早已卸载，Radix 会把焦点落在过期元素或 document.body 上；
 
 focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`）里先阻止默认行为，再精确指定焦点落点，不用 race requestAnimationFrame。
 
@@ -58,7 +58,7 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
 ②`popup.confirm/error/info/warning` 四个 "prefab" 走 showConfirm，Promise 只解出 boolean，无 `onOk/onCancel` 回调，也没有 antd 时代的 `Modal.destroyAll/update/warn/success`（`types.ts:39-59` 注释明确列出被砍掉的 API 面）。
 
-两阶段关闭：settle() 先 resolve promise 并把 open 置为 false（播放退场动画），等待 200ms 的退场延迟（`packages/ui/src/utils/dialog.ts:5`）后才真正从 store 移除（`PopupService.ts:74-87`）。
+两阶段关闭：settle() 先 resolve promise 并把 open 置为 false（播放退场动画），等待 200ms 的退场延迟（`packages/ui/src/utils/dialog.ts:5`）后才从 store 移除（`PopupService.ts:74-87`）。
 
 **动画。** 开合动画不是 JS 补间，是 Radix `data-[state=open|closed]` 属性配合 Tailwind 动画类的纯 CSS 方案（见第 7 节）。
 
@@ -91,7 +91,7 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
 - **消息加载中**（Topic 切换/首次进入）：MessageListInitialLoading（`src/renderer/components/chat/messages/layout/MessageListLoading.tsx:6-52`）用 `@cherrystudio/ui` 的 Skeleton 拼三条假消息（一条用户气泡 + 两条助手气泡骨架），`aria-busy="true"` 标注容器，`aria-hidden="true"` 标注骨架本体。
 
-  **特意延迟 160ms**（MESSAGE_LIST_INITIAL_LOADING_DELAY_MS）才显示骨架——消息在 160ms 内加载完骨架根本不闪一下，是刻意的防闪烁设计。
+  **特意延迟 160ms**（MESSAGE_LIST_INITIAL_LOADING_DELAY_MS）才显示骨架：消息在 160ms 内加载完就不会闪一下。
 
 **Topic 列表为空。** TopicListBody 的 emptyFallback（`Topics.tsx:1662` 附近）是一段居中纯文本 t('chat.topics.empty.title')，无插图/图标；列表加载中另有一行文字提示"common.loading"（`Topics.tsx:1391-1395` 附近）。
 
@@ -206,7 +206,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 **图片有完整灯箱。** `ImageViewer.tsx` 包 `@cherrystudio/ui` 的 ImagePreviewDialog（`packages/ui/src/components/composites/image-preview/image-preview-dialog.tsx`），支持缩放/旋转/水平垂直翻转/上一张下一张（多图导航靠 activeIndex，`ImageViewer.tsx:107-155`），工具栏和右键菜单共享同一份 action 列表（复制图片、复制图片地址、下载，`ImageViewer.tsx:201-232`），右键菜单走第 2 节的统一 CommandContextMenu（:296-298）。
 
-所有操作都有 toast 反馈（成功/失败，:157-199）。"保存为图片"动作会把旋转/翻转**烘焙**进输出的 PNG（transformImageToPng，d1ffaa82ce；全屏观看交互 e22a976586）。
+所有操作都有 toast 反馈（成功/失败，:157-199）。"保存为图片"动作会把旋转/翻转**烘焙**进输出的 PNG（transformImageToPng）。
 
 **代码块复制/运行的交互反馈。** 复制按钮点击后图标临时切换成对勾（`useCopyTool.tsx:18-31,51`，useTemporaryValue hook 控制“临时态”多久后自动复原），并弹 toast（`CodeBlockView.tsx:154-164`）。复制图片按钮也有独立的临时状态。
 
@@ -214,13 +214,13 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 工具栏本身是可弹出子菜单的 CodeToolButton（`CodeToolButton.tsx`，支持 Enter/Space 键盘触发，:14-22，有 `aria-label={tool.tooltip}`）。
 
-代码查看器 wrapped 模式下超长不可断行内容（base64/URL/minified JSON）强制换行而非截断溢出（`CodeViewer.tsx:638-642` 的 min-w-0 + whitespace-pre-wrap!，205f042800）。
+代码查看器 wrapped 模式下超长不可断行内容（base64/URL/minified JSON）强制换行而非截断溢出（`CodeViewer.tsx:638-642` 的 min-w-0 + whitespace-pre-wrap!）。
 
 ### 拖放细节
 
 **Composer 附件拖入。** 拖拽经过 `useFileDragDrop.ts`（文件、文本、文件夹路径分别处理，不支持类型会 toast 提示，:122-129），视觉反馈是 2px 绿色虚线边框 + 半透明绿色蒙层（`ComposerSurface.tsx:2171-2173`，硬编码色值 `#2ecc71`，不走 CSS 变量主题色）。
 
-**Topic 拖拽排序。** 只有按"助手分组"显示时才可拖（canDragTopicItem/`dragReady = isAssistantDisplayMode && ...`，`Topics.tsx:1136-1139,797`），按"时间分组"显示时完全不可拖——有意为之的限制（时间分组顺序由时间戳决定，拖拽没有语义）。
+**Topic 拖拽排序。** 只有按"助手分组"显示时才可拖（canDragTopicItem/`dragReady = isAssistantDisplayMode && ...`，`Topics.tsx:1136-1139,797`），按"时间分组"显示时完全不可拖（该模式下顺序由时间戳决定）。
 
 助手分组可整组拖拽重排（canDragTopicGroup/handleTopicReorder 的 `payload.type === 'group'` 分支，:1150-1158,1187-1231），带乐观更新和失败回滚（setOptimisticAssistantOrderIds，失败时 toast + 回滚，:1215-1228）。
 - Session（Agent 会话）列表的独立拖拽排序未在范围内找到实现（`SessionItem.tsx` 只在右键菜单命中），如需确认建议单独检索 `src/renderer/pages/agents`。
@@ -229,7 +229,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 ### 无障碍（静态代码结论）
 
-**做得到位的地方**：
+**已具备显式语义或键盘支持的位置**：
 - ResourceList（Topic 列表、Agent Session 列表共用）实现标准 **roving tabindex + aria-activedescendant** 模式：容器 `role="listbox"`（`ResourceListVirtual.tsx:551,777`），行 `role="option"` + aria-selected（`ResourceList.tsx:388-394`），
 
   键盘 `ArrowUp/ArrowDown/Home/End/Enter` 都有对应测试覆盖并断言 aria-activedescendant 正确移动（`__tests__/ResourceList.test.tsx:622-671`）。
@@ -237,7 +237,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 - 折叠交互（用户消息折叠、Thinking 块展开/收起）用了真实 aria-expanded/aria-controls（`MainTextBlock.tsx:234-235`、`ThinkingBlock.tsx:95-96`），并且是可聚焦、可键盘触发的 `role="button"` + onKeyDown 处理 Enter/Space（`ThinkingBlock.tsx:93-105`），不是纯鼠标 div。
 - 消息操作栏**部分**按钮显式传了 aria-label：模型选择器（renderModelPickerToolbarAction，`MessageMenuBarToolbarRenderers.tsx:287`）、翻译（:311）、更多菜单弹出按钮（:355,412）。
 
-**实证的缺失**：消息操作栏最常用的一批按钮——默认渲染路径 renderDefaultToolbarAction → ActionButtonWithConfirm（`MessageMenuBarToolbarRenderers.tsx:63-126`，覆盖复制、编辑、重新生成、删除、点赞等大多数没有专属渲染函数的 action）——生成的 `<MessageActionButton>` **没有传 aria-label**（对照 :80-91 和 :103-113 两处按钮 JSX，都只有 onClick/disabled/className，无任何 aria-* 属性）。
+**缺少可访问名称的路径**：消息操作栏最常用的一批按钮——默认渲染路径 renderDefaultToolbarAction → ActionButtonWithConfirm（`MessageMenuBarToolbarRenderers.tsx:63-126`，覆盖复制、编辑、重新生成、删除、点赞等大多数没有专属渲染函数的 action）——生成的 `<MessageActionButton>` **没有传 aria-label**（对照 :80-91 和 :103-113 两处按钮 JSX，都只有 onClick/disabled/className，无任何 aria-* 属性）。
 
 可访问名称完全依赖视觉 Tooltip（`content={tooltip}`，:119-125），而 Tooltip 内容不会自动同步成 aria-label——screen reader 用户只会读到"button"没有任何描述。
 
@@ -265,13 +265,13 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 渲染层 `notificationService.send()`（`src/renderer/services/notification/NotificationService.ts:10-24`）先查三个偏好开关（assistant/backup/knowledge）再决定是否真的调 IPC 发送。
 
-**一个值得记录的空路径。** 偏好 app.notification.assistant.enabled 和对应设置项开关（`NotificationSettings.tsx:36-48`，"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用 source: 'backup' 和 source: 'update'。
+**空路径：助手回复完成通知。** 偏好 app.notification.assistant.enabled 和对应设置项开关（`NotificationSettings.tsx:36-48`，"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用 source: 'backup' 和 source: 'update'。
 
 即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩（不同于代码里自己写 TODO 承认的 update 缺口，见 `NotificationService.ts:17-20`）。
 
 **全局快捷键。** `ShortcutService.ts` 按**本地/全局分轨**注册——global 标记的仍走 globalShortcut（含失焦时的注册集），其余本地快捷键不再注册到系统，而是挂在窗口 webContents.before-input-event（含 did-attach-webview 挂上的 guest webview 输入）上按命令解析拦截（`ShortcutService.ts:123-196`），应用失焦时本地快捷键自然不生效；
 
-快捷键冲突（被其他应用占用）记录冲突集合并经 IPC 广播给渲染层展示提示（:281-303 附近）。另有标签页导航快捷键（324f26f728）。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这一个静态配置页（`ShortcutSettings.tsx`），不存在按一个快捷键呼出速查列表的入口。
+快捷键冲突（被其他应用占用）记录冲突集合并经 IPC 广播给渲染层展示提示（:281-303 附近）。另有标签页导航快捷键。**未找到独立的"快捷键帮助面板/速查表"浮层**——只有"设置 > 快捷键"这一个静态配置页（`ShortcutSettings.tsx`），不存在按一个快捷键呼出速查列表的入口。
 
 ## 8. 当前基础设施补充
 

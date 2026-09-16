@@ -32,7 +32,7 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 
 ### 能力一：会话数据生产与分享（研究数据发布候选）
 
-1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 明示“Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks”（README.md:94）；`docs/usage.md:140` 写明用于“model, prompt, tool, and evaluation research”。这不是普通导出存档，而是把会话文件格式、导出命令与外部发布工具组合成一条数据生产工作流。
+1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 明示“Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks”（README.md:94）；`docs/usage.md:140` 写明用于“model, prompt, tool, and evaluation research”。它把会话文件格式、导出命令与外部发布工具组合成一条数据生产工作流。
 2. **入口与触发者**：用户触发。交互命令 `/export`（HTML 或 JSONL 副本）与 `/share` 实现见 `interactive-mode.ts:5773-5954`（命令分发 :2895-2906）；另有 docs 指向的伴生 CLI `pi-share-hf` 批量发布。
 3. **事实对象**：JSONL 会话树文件（v3 格式，`~/.pi/agent/sessions/<编码cwd>/`）。`docs/session-format.md` 公开条目类型与消息结构，注释明言理解这些类型是解析会话与编写扩展的前提（session-format.md:41）——第三方解析器依赖此格式契约。
 4. **完整主链**：会话落盘（append-only JSONL，见会话笔记 §2）→ `/export` 生成 HTML 自包含单文件（`core/export-html/`，模板 + base64 会话数据）或 JSONL 副本 → `/share` 为 Radius artifact 导出当前分支，并额外记录 system prompt 与激活工具定义；没有 Radius provider 或有效凭据时才调用 `gh gist create --public=false` → 外部工具 `pi-share-hf` 读 JSONL 发布为 HF 数据集。仓库内链已静态确认；发布端在仓库外（`packages/coding-agent/src/modes/interactive/session-share.ts:24-151`）。

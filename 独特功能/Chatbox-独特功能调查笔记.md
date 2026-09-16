@@ -66,7 +66,7 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 
 **边界**：代理面是明文的 Bearer 注入（HTTPS 传输加密但不做二次鉴权）；无用量/配额面板；属于"伴生部署 + 客户端既有能力"的组合。README 声称"without exposing your API KEY"，成立的前提是成员信任部署方。
 
-**独特性判断**：团队共享是常见需求，但把方案以仓库内可复现部署（Caddy 反代）交付、且与客户端"免 Key 自定义 Host"直接配合，是当前样本中唯一成型的团队资源共享面。证据强度：部署配置静态确认；未运行部署。
+**独特性判断**：团队共享是常见需求，但把方案以仓库内可复现部署（Caddy 反代）交付、且与客户端"免 Key 自定义 Host"直接配合，是成型的团队资源共享面。证据强度：部署配置静态确认；未运行部署。
 
 ### 能力卡 2：图像生成工作台（Image Creator）
 
@@ -92,10 +92,10 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 
 **图像模型目录规则与记录来源**：
 
-- 图像模型目录规则：OpenAI 走 OAuth 认证时（`isUsingOAuth`）不注入 OpenAI 组的 image 模型，目录判断逻辑见 `image-model-catalog.ts` 的 `isOpenAIImageGenerationAuthSupported`（提交 `15028964`），避免 OAuth 会话无法走 DALL-E 计费路径。
-- 记录含 `source` 字段：chatbox_cli 触发的图片生成记录保存会话和工具调用来源（类型定义见 `shared/types/image-generation.ts`），任务完成后由后台任务通知回填原聊天会话，并支持从聊天内"恢复"该记录。相关实现为提交 `ecec96bd` 中的 SQLite 存储与生成动作，横跨 Agent 工具笔记 §11 的后台任务回填和消息渲染器笔记的工具卡。
+- 图像模型目录规则：OpenAI 走 OAuth 认证时（`isUsingOAuth`）不注入 OpenAI 组的 image 模型，目录判断逻辑见 `image-model-catalog.ts` 的 `isOpenAIImageGenerationAuthSupported`，避免 OAuth 会话无法走 DALL-E 计费路径。
+- 记录含 `source` 字段：chatbox_cli 触发的图片生成记录保存会话和工具调用来源（类型定义见 `shared/types/image-generation.ts`），任务完成后由后台任务通知回填原聊天会话，并支持从聊天内"恢复"该记录。相关实现为 SQLite 存储与生成动作，横跨 Agent 工具笔记 §11 的后台任务回填和消息渲染器笔记的工具卡。
 
-**独特性判断**：独立的图像工作台 + 记录持久化 + 参考图 DAG，是"创作工作站"标签的完整实现之一（与 AIO Hub 媒体工作站的比较待横向调查）；在纯聊天客户端中罕见。README 只提 DALL-E-3 一句，实际产品面更完整。
+**独特性判断**：独立的图像工作台 + 记录持久化 + 参考图 DAG，是"创作工作站"标签的完整实现之一（与 AIO Hub 媒体工作站的比较待横向调查），同类独立图像工作台在纯聊天客户端中少见。README 只提 DALL-E-3 一句，实际产品面更完整。
 
 **证据强度**：静态源码 + 组件/action 测试；未运行真实生成（计费操作）。
 
@@ -117,11 +117,11 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 
 **边界**：远端精选依赖 Chatbox 后端的 API 来源函数，属于外部服务；本地部分（自建/收藏/星标）完全在仓库内。
 
-**独特性判断**：本地 + 云混合的预设市场在样本中并不独特（LobeHub Agent Market 同型），但 README 的"Prompt Library"已演进为 Copilots 产品面，值得在横向比较中按"预设市场/提示词库"聚类对齐命名。
+**独特性判断**：本地 + 云混合的预设市场并非独有（LobeHub Agent Market 同型），但 README 的"Prompt Library"已演进为 Copilots 产品面，宜按"预设市场/提示词库"聚类对齐命名。
 
 ## 已归并到现有类目的能力（README 未列出部分）
 
-- **Agent Mode / 沙箱代码执行 / create_download 产物 / HTML artifact 预览**：生成式输出与运行时笔记（快照即当前 HEAD `f90fc31a`）已主链确认。本次不再重写，相关门控、执行、持久化、下载界面和网页发布均见该笔记。
+- **Agent Mode / 沙箱代码执行 / create_download 产物 / HTML artifact 预览**：生成式输出与运行时笔记已主链确认。本次不再重写，相关门控、执行、持久化、下载界面和网页发布均见该笔记。
 - **MCP / Skills**：Agent 工具笔记已主链确认。本次补两点产品表面：MCP 与 Skills 均以 desktop-only feature flag 存在，见 `feature-flags.ts:4-6`；内置 Skills 为 chatbox-product-info / data-analysis / frontend-design / vibedrop 四个，目录见 `src/main/skills/builtin/index.ts`。
 - **知识库 / 附件 RAG / Web Search / Document Parser**：会话与消息管理、对话请求与上下文笔记覆盖；本次只记录附件 RAG 模块与 Web Search 服务存在。
 
@@ -140,7 +140,7 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 - team-sharing 部署（Docker/Caddy）未运行，代理注入与客户端免 Key 请求的端到端行为未验证。
 - 图像生成的真实模型调用（DALL-E 等）与参考图 DAG 的实际构图行为未实测。
 - Copilots 远端 API 的可用性与分页未验证。
-- 新用户引导（/guide/）与 Chatbox AI 账号面的细节未调查（非本批范围）；新用户引导的剧本场景已重写：提交 `af40ab34` 用简历助手场景替换 Q&A 演练场景，提交 `8c2a8a7b` 向 system prompt 注入稳定场景标记，本笔记仍不展开。
+- 新用户引导（/guide/）与 Chatbox AI 账号面的细节未调查。
 - 图像生成记录 source 字段（chatbox_cli 来源）与聊天内恢复的完整运行时行为未实测。
 
 ## 关键源码索引

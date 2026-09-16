@@ -21,7 +21,7 @@ DeepChat Chat 是 main process 驱动、renderer 订阅的持久化会话系统�
 3. 一次回复的生命周期：用户消息进入后创建 `pending` assistant 占位 → 流式过程反复替换 assistant blocks → 成功结算 `sent`，异常写 `error` block 并置 `error`。
 4. `SessionTurn` 同时提供普通发送、steer、queue、retry、delete、edit、fork、manual compaction 和 tool interaction response；pending input 有独立的 queue/steer 状态，不与已完成消息混同。
 5. renderer message store 维护持久化缓存、streaming blocks、解析缓存和 IPC 增量事件；`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象；消息窗口以测量 + spacer + anchor + 二分查找实现附近消息渲染。
-6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，而非伪装成普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:575-582`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
+6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，不混入普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:575-582`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
 
 ## 产品表面与系统边界
 
@@ -70,7 +70,7 @@ ChatPage
 
 - **pending input 独立通道**：steer、queue、工具 question/permission response 是 session turn 的独立输入通道（`turn.ts:36-405`），交互 UI 不把 pending input 拼进已完成消息；失败 assistant 消息保留 `error` 状态与错误 block，可 retry/fork。另有两项 queue 语义（源码确认）：
   - `retry_required` 状态（#2137）：队列记录被释放后若未真正发送，进入 `retry_required`（持久化形态为 `blocked` + `retry_required_at` 列，`deepchatPendingInputs.ts` schema v67）；`SessionTurn` 提供恢复与重试两个操作（`turn.ts:213-244`）并暴露对应路由。
-  - 重启恢复（831b820/e41c08e）：`recoverInputsAfterRestart` 返回受影响会话与保留的 queue 输入集合；claimed 但未物化用户消息的 queue 项释放回队列，未读 steer 消息标记失败（`pendingInputs.ts:392-468`）。
+  - 重启恢复：`recoverInputsAfterRestart` 返回受影响会话与保留的 queue 输入集合；claimed 但未物化用户消息的 queue 项释放回队列，未读 steer 消息标记失败（`pendingInputs.ts:392-468`）。
 - **消息窗口化**：消息列表只渲染当前窗口内的条目（`MessageList.vue:1-65`）；窗口计算拆成两个 hook——一个以估算高度、ResizeObserver 实测、顶部/底部 spacer 与逻辑 anchor 保存滚动位置，另一个在超阈值时二分查找 viewport 附近索引；窗口同时服务历史分页与流式追加，远离 viewport 的 settled 消息仅保留估算高度（`ChatPage.vue:512-584`、`:728-826`）。
 - **双层搜索**：会话内搜索只匹配已加载的 display messages，不触发数据库查询；跨会话走 FTS5（`deepchat_search_documents` 外部内容表 + 三个同步触发器，`deepchatSearchDocuments.ts:309-335`），以 bm25 查询为主、不可用时回退 LIKE；内存 MCP 服务同时提供模型工具与设置页入口（`conversationSearchServer.ts:465-494`）。
 - **边界**：transcript 同时服务展示、搜索、Tape 和 usage/trace 等二级数据；附件、搜索结果快照与 legacy import 表的完整迁移链本次未追踪。

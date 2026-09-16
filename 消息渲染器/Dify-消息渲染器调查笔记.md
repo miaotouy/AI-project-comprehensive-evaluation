@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 的可见聊天项不是单纯的 Markdown 字符串。`useChat` 先维护 question/answer 树并在流中回填 message、conversation、task、workflow ID；Answer 组件再按字段装配 workflow process、Agent activity、文件、引用、建议问题和 sibling 导航。正文 Markdown 由动态加载的 Streamdown 包装器处理，经过预处理、raw HTML、sanitize 和 harden 管线后映射到专门块组件。
+Dify 的可见聊天项由结构化字段装配。`useChat` 先维护 question/answer 树并在流中回填 message、conversation、task、workflow ID；Answer 组件再按字段装配 workflow process、Agent activity、文件、引用、建议问题和 sibling 导航。正文 Markdown 由动态加载的 Streamdown 包装器处理，经过预处理、raw HTML、sanitize 和 harden 管线后映射到专门块组件。
 
 ## 总体渲染链路
 
@@ -52,9 +52,9 @@ Streamdown 接收 `parseIncompleteMarkdown`，使流式生成时尚未闭合的�
 
 ## 5. 内容承载、扩展与状态边界
 
-渲染层的输入不是仅有 assistant 文本。共享 chat hook 会将 SSE 的文本、reasoning、thought、文件、message end 和 workflow 事件合并到前端消息树，答案壳再按引用、过程、附件、建议问题和 workflow 状态装配内容组件。服务端持久化对象与浏览器流式 tree 的对应关系见会话专项；本篇只确认它们如何成为可见内容。
+渲染层的输入不限于 assistant 正文。共享 chat hook 会将 SSE 的文本、reasoning、thought、文件、message end 和 workflow 事件合并到前端消息树，答案壳再按引用、过程、附件、建议问题和 workflow 状态装配内容组件。服务端持久化对象与浏览器流式 tree 的对应关系见会话专项；本篇只确认它们如何成为可见内容。
 
-Markdown、代码和普通附件属于消息内容投影，不因此获得独立可持续维护的输出对象身份；workflow run、图日志与人工输入属于生成式运行时的交接。当前静态阅读未走通 HTML/URL/媒体内容的所有清洗、sandbox、下载策略或实际文件协议，不能把组件名或依赖包直接写成安全结论。也未验证虚拟化/缓存对长会话的真实性能、滚动锚定、分支切换重绘和屏幕阅读器行为。
+Markdown、代码和普通附件属于消息内容投影，本身没有独立的输出对象身份；workflow run、图日志与人工输入由生成式运行时交接。当前静态阅读未走通 HTML/URL/媒体内容的所有清洗、sandbox、下载策略或实际文件协议，不能把组件名或依赖包直接写成安全结论。也未验证虚拟化/缓存对长会话的真实性能、滚动锚定、分支切换重绘和屏幕阅读器行为。
 
 ## 未验证事项
 

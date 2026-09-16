@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。`astrbot/core/platform/sources/` 下 18 个平台适配器（Telegram、Discord、Slack、飞书/Lark、企业微信、钉钉、QQ 官方/OneBot、KOOK、LINE、Mattermost、Misskey、Satori、微信公众平台/微信 OCR 等）不是单向通知通道，而是带身份、连接、入站事件、命令、会话映射、媒体转换和出站投递的产品主入口。
+AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。`astrbot/core/platform/sources/` 下 18 个平台适配器（Telegram、Discord、Slack、飞书/Lark、企业微信、钉钉、QQ 官方/OneBot、KOOK、LINE、Mattermost、Misskey、Satori、微信公众平台/微信 OCR 等）各自承担身份、连接、入站事件、命令、会话映射、媒体转换和出站投递，是产品的交互主入口。
 
 QQ 官方适配器的本地大媒体文件改走分片上传器，并把最终失败继续向上抛给发送链；Telegram 入站音频文件会归一为 `Record` 组件。这两项扩展了平台媒体交接，未改变 UMO 到会话/Agent 的主链（qqofficial_chunked_upload.py；qqofficial_message_event.py:650-728；telegram/tg_adapter.py:585-607）。
 
-它与 DeepChat 的语义不同：AstrBot 本身就是 IM Agent 宿主，不是从 IM 远程驾驶另一个桌面客户端。正式横向比较应保留这一区别。
+它与 DeepChat 的语义不同：AstrBot 本身就是 IM Agent 宿主，不是从 IM 远程驾驶另一个桌面客户端。横向比较应保留这一区别。
 
 ## 接入角色与系统边界
 
@@ -47,7 +47,7 @@ QQ 官方适配器的本地大媒体文件改走分片上传器，并把最终�
 
 ## 身份、协议与状态映射
 
-平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定（`platform_service.py`：飞书/钉钉 app registration、QQ 与微信二维码登录），不是只有静态凭据。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键。conversation、主动任务和停止操作均使用该身份定位。平台能力由 `platform_metadata.py` 按 `support_streaming_message` / `support_proactive_message` 声明，驱动结果装饰与主动投递。
+平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定（`platform_service.py`：飞书/钉钉 app registration、QQ 与微信二维码登录）。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键。conversation、主动任务和停止操作均使用该身份定位。平台能力由 `platform_metadata.py` 按 `support_streaming_message` / `support_proactive_message` 声明，驱动结果装饰与主动投递。
 
 ## 执行、回流与控制语义
 

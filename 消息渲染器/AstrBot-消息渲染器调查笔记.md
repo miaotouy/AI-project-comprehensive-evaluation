@@ -16,7 +16,7 @@
 
 AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM 输出与插件结果先归一化为 `MessageChain`（`BaseMessageComponent` 列表），再交给各平台适配器自行转换为平台消息格式；**没有统一的转换函数**，每个适配器自实现出站/入站。组件体系源自 MIT 许可的 Lxns-Network/Naku 项目（components.py:1-22 许可证头）。
 
-关键事实（快照 a9bb8a6）：
+关键事实：
 
 - **组件体系**：组件枚举 22 种，基类提供同步/异步双轨序列化（`toDict` 与 `to_dict`），并覆写 repr 把 base64 与超长字段截断，日志与异常输出自动安全（components.py:35-110）。
 - **业务语义元协议**：`MessageChain.type` 字段（message_event_result.py:33-34）承载 `tool_call`/`reasoning`/`audio_chunk` 等业务语义，仅 WebChat 出站序列化与前端消费，其他平台忽略。
@@ -105,7 +105,7 @@ type: str | None = None             # 业务语义元协议（:33-34）
 ## 3. 事件发送入口（astr_message_event.py）
 
 - `process_buffer`（:267-278）：不支持流式的平台 fallback——按正则切句 `send` + `asyncio.sleep(1.5)` 限速；
-- `send_streaming`（:280-292）：基类仅 `asyncio.create_task(Metric.upload(...))` 上传指标 + 标记 `_has_send_oper`——**真正实现全部在平台子类**（docstring：仅 telegram、qq official 私聊支持，fallback 仅 aiocqhttp）；
+- `send_streaming`（:280-292）：基类仅 `asyncio.create_task(Metric.upload(...))` 上传指标 + 标记 `_has_send_oper`——**实现全部在平台子类**（docstring：仅 telegram、qq official 私聊支持，fallback 仅 aiocqhttp）；
 - `send_typing`/`stop_typing`（:294-304）：默认空实现，平台按需重写；
 - `set_result`（:314-341）：str 自动包 `MessageEventResult().message()`；chain=None 兜底 `[]`；
 - `stop_event`/`continue_event`/`is_stopped`（:343-365）：`_force_stopped` 与结果类型双源；

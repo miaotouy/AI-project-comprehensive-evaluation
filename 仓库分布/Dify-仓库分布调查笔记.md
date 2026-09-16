@@ -46,7 +46,7 @@ TypeScript 1,203,663 行、Python 944,117 行、JavaScript 57,556 行，前三�
 
 ## 跨平台与工程配套
 
-产品主要以 Web 服务、自托管 Docker 和 CLI 形态交付。`web` 与 `api` 是核心部署单元，`cli`、`dify-agent` 和 `dify-agent-runtime` 提供独立运行入口；`sdks` 保存 Node/PHP 等客户端。`.github/workflows`、`docker/`、`.devcontainer/` 和 `scripts/` 形成 CI、部署与开发配套边界。README 的安装路径与仓库构建配置均支持静态确认，未进行实际部署验证。
+产品主要以 Web 服务、自托管 Docker 和 CLI 形态交付。`web` 与 `api` 是核心部署单元，`cli`、`dify-agent` 和 `dify-agent-runtime` 提供独立运行入口；`sdks` 保存 Node/PHP 等客户端。`.github/workflows`、`docker/`、`.devcontainer/` 和 `scripts/` 形成 CI、部署与开发配套边界。README 的安装路径与仓库构建配置均为静态确认结果，未进行实际部署验证。
 
 ## 已确认边界与未验证事项
 

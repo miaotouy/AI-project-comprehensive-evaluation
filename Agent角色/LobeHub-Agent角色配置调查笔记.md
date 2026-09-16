@@ -14,7 +14,7 @@
 
 ## 1. 结论摘要
 
-LobeHub 的 Agent 是七个项目里配置维度最多的。单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
+LobeHub 的单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
 
 1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）、开场白（`openingMessage`/`openingQuestions`）和独立的角色档案（`profile`）；
 2. **模型偏好**：`model`、`provider` 与标准推理参数 `params`（temperature、topP、maxTokens 等）；
@@ -42,13 +42,11 @@ Agent 存在后端数据库，通过 `lambdaClient.agent` trpc 接口读写。�
 | `systemRole` | `string` | 系统提示词，必填，空字符串表示无系统提示 |
 | `title` | `string?` | 显示名称 |
 | `personalName` | `string?` | 个人名（`packages/types/src/agent/item.ts:21`），标签解析见表格下方说明 |
-| `avatar` | `string?` | Emoji 或图片 URL；服务端对 agent 配置快照也应用内建头像回退（`7aaabfc7f`，此前只在前端解析） |
+| `avatar` | `string?` | Emoji 或图片 URL；服务端对 agent 配置快照也应用内建头像回退（此前只在前端解析） |
 | `backgroundColor` | `string?` | 头像背景色 |
 | `virtual` | `boolean?` | 是否为自动生成（如从模板创建）的虚拟 Agent |
 
-`personalName` 的标签解析由 `agentDisplayName(item, fallback)` 完成（`packages/types/src/agent/displayName.ts:35-60`），`agentSecondaryDisplayName` 处理角色与个人名重复。相关提交：
-- `353f00006`：给新 Agent 生成个人名；
-- `3776063c1`：支持随机名组合与骰子按钮。
+`personalName` 的标签解析由 `agentDisplayName(item, fallback)` 完成（`packages/types/src/agent/displayName.ts:35-60`），`agentSecondaryDisplayName` 处理角色与个人名重复；新 Agent 会生成个人名，并支持随机名组合与骰子按钮。
 
 MetaData（`src/features/AgentSetting/store/initialState.ts` 中的 `meta`）包含头像、背景色、描述、标签、标题等展示字段，在 UI 的"元数据"标签页编辑；`loadingState` 为每个 meta 字段单独跟踪保存状态。
 
@@ -204,9 +202,7 @@ interface LobeAgentConfig {
 - 指定异构 Agent Provider（用于 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`）。
 - 图式编排：`enableGraphMode` 与 `graph?: AgentGraph` 一起描述节点、边、路由条件和数据契约。它们在当前快照从 `chatConfig` 迁入 `agencyConfig`，因此归属 Agent 的执行行为，而不是每个会话的偏好（`packages/types/src/agent/agencyConfig.ts:811-838`）。
 
-`agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`。相关提交：
-- `6c356bcb0`：复制 Agent 时保留 `agencyConfig`；
-- `242e3f511`：迁移接受嵌套 `config.meta` 并替换过期 profile。
+`agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`；复制 Agent 时会保留 `agencyConfig`，数据迁移接受嵌套 `config.meta` 并替换过期 profile。
 
 ## 6. 内置 Agent 方向
 

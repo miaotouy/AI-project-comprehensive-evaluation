@@ -143,7 +143,7 @@ videos: generations/videos/<uuid>_<WxH>_<ts>_raw<.mp4|.webm>         + _cover.we
 covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 ```
 
-去重：原图与缩略图各算 sha256（`image.ts:116,148`），`FileModel.create(..., insertToGlobalFiles=true)` 以 `fileHash → globalFiles.hashId` + `onConflictDoNothing` 做全局 blob 去重（`models/file.ts:86-141`），`files` 行仍各自建。**无内容级去重之外的历史合并逻辑**（同 prompt 重复生成会新建 batch）。
+去重：原图与缩略图各算 sha256（`image.ts:116,148`），`FileModel.create(..., insertToGlobalFiles=true)` 以 `fileHash → globalFiles.hashId` + `onConflictDoNothing` 做全局 blob 去重（`models/file.ts:86-141`），`files` 行仍各自建。除这层 blob 去重外没有历史合并逻辑，同 prompt 重复生成会新建 batch。
 
 **索引与来源关联**：generations 建有 `user_id/workspace_id/batch_id/file_id` 索引（`schemas/generation.ts:155-161`）。来源语义：`FileSource.ImageGeneration|VideoGeneration`（`packages/types/src/files/index.ts:17-27`）区分生成文件与普通上传；生成文件不在 `LIBRARY_HIDDEN_FILE_SOURCES` 内，因此会出现在资源库的 Images/Videos tab（`desktopRouter.shared.tsx:73-74`）。`files.metadata` 记录 generationId/宽高/路径（`async/image.ts:255-264`）；asset jsonb 同时保留 provider 原始 URL（`originalUrl`，通常短期过期）。
 
@@ -212,7 +212,7 @@ OSS 中计费/配额/完成通知为闭源扩展点：`chargeBeforeGenerate`/`ch
 
 ## 交接专页（与独特功能笔记的分工）
 
-本页承接 [LobeHub 独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)（快照同为 `3b57a07e`，其中 image/video 创作面仅一句"`(create)/image` 与 `/video` 路由族……本次不展开"）。独特功能笔记负责能力盘点与产品叙事，本页负责媒体创作类目视角：
+本页承接 [LobeHub 独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)（其中 image/video 创作面仅一句"`(create)/image` 与 `/video` 路由族……本次不展开"）。独特功能笔记负责能力盘点与产品叙事，本页负责媒体创作类目视角：
 
 - **三层事实对象与双路由执行**（§1、§2）：topic/batch/generation + asyncTask/files 的对象模型、lambda 事务提交 + async 模型调用、视频 webhook/后台轮询双完成路径——独特功能笔记未展开。
 - **客户端轮询与状态收口**（§3）：SWR 指数退避、DB 权威超时、无用户取消。

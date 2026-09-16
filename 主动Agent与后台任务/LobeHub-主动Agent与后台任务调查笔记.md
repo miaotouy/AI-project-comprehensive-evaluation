@@ -39,7 +39,12 @@ Schedule 主链如下：
 
 **触发与到期判定。** 生产中央派发器每次调用读取可派发的 schedule 任务，以 cron、时区和上次心跳时间判断是否到期，再向每项任务发布独立 QStash 消息；队列功能未启用时，直接在本进程执行 tick。该设计将“扫到期”和“跑任务”拆开，单项发布失败不会阻塞其他到期项，见 `apps/server/src/router-hono/workflows/task/handlers/scheduleDispatch.ts:28-38,44-65,101-151`。调度器自身注册频率与实际 QStash 配置属于外部接线，本次未确认。
 
-**运行状态权威。** `tasks.status` 的常用值包括 backlog、running、paused、completed、failed、canceled；自动化模式为 schedule 或 heartbeat。Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数据库重读：任务不存在、模式已改、没有表达式、处于终态或已暂停均跳过。它也在启动前检查未解决的紧急 Brief，避免 Agent 等待人工输入时继续运行，见 `apps/server/src/services/taskRunner/scheduleTick.ts:31-79`。
+**运行状态权威。** `tasks.status` 的常用值与自动化模式如下：
+
+- 任务状态：backlog、running、paused、completed、failed、canceled。
+- 自动化模式：schedule、heartbeat。
+
+Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数据库重读：任务不存在、模式已改、没有表达式、处于终态或已暂停均跳过。它也在启动前检查未解决的紧急 Brief，避免 Agent 等待人工输入时继续运行，见 `apps/server/src/services/taskRunner/scheduleTick.ts:31-79`。
 
 **并发与配额。** `TaskRunnerService` 先查已有 task topic；同一任务已有 running topic 时抛出冲突，tick 将冲突作为 `in-flight` 跳过。Schedule 的最大执行次数通过已记录的 schedule 触发 topic 计数；达到上限即写 completed，手动运行不消耗此配额，见 `apps/server/src/services/taskRunner/index.ts:118-143` 与 `scheduleTick.ts:81-130`。
 

@@ -96,13 +96,13 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 
   取消结果折叠为 'canceled' 且不弹错误（`usePaintingGeneration.ts:131-141`）。
 - **失败**：provider/SDK 错误经 `exposeAiError` 包成带序列化详情的 IpcError（`ai.ts:39-53`），renderer `runPainting` 恢复真实原因（HTTP 状态/响应体片段，`runPainting.ts:69-83`），用户面 REMOTE_ERROR 模态（`paintingGenerateError.ts`）。
-- **重启/重试**：job 明确 `recovery: 'abandon'` 且 `maxAttempts: 1`（防重启后二次提交重复计费，注释详尽，`imageGenerationJobHandler.ts:32-58`）——**生成中崩溃即丢弃，本次未找到重启恢复路径**（与 Chatbox 的 taskId 恢复语义相反）。用户侧重试即改参再次生成（无 taskId 概念）。
+- **重启/重试**：job 明确 `recovery: 'abandon'` 且 `maxAttempts: 1`（防重启后二次提交重复计费，`imageGenerationJobHandler.ts:32-58`）——**生成中崩溃即丢弃，本次未找到重启恢复路径**（与 Chatbox 的 taskId 恢复语义相反）。用户侧重试即改参再次生成（无 taskId 概念）。
 
 ## 4. 结果、历史、资产与工程持久化
 
 - **写链**：生成前先 `createPainting` 落收据行（`usePaintingGeneration.ts:76-86`，`shouldCreate` 判定新建 vs 更新）。成功后 `updatePainting` 写 `files:{output,input}`（同文件 :119-124）。`PaintingService` 随后全量替换 `painting_file_ref`（`PaintingService.ts:246-257`，FK 双级联）。v1→v2 过渡期的无效文件 id 由 `buildPaintingRefRowsFiltered` 静默过滤并记日志（同文件 :339-394）。
 - **命名/去重**：文件由 FileManager 生成 v2 FileEntry（uuid 主键），无内容级去重（本次未找到）；painting 行 orderKey 排序（`PaintingService.ts:102-145` keyset 分页 + total）。
-- **清理**：清理语义见 `docs/references/file/file-entry-cleanup.md`——`painting_file_ref` 提供保护引用；`painting` 删除经 FK 级联删 ref，随后清理 pass（`delete_when_unreferenced` + 1h grace，`:114,133`）回收孤儿文件。**材质化时机=拥有对象持久化时机**：草稿期不落库，materialize 与 painting 行 + input ref 同事务窗（`:83`）。
+- **清理**：清理语义见 `docs/references/file/file-entry-cleanup.md`——`painting_file_ref` 提供保护引用；`painting` 删除经 FK 级联删 ref，随后清理 pass（`delete_when_unreferenced` + 1h grace，`:114,133`）回收孤儿文件。草稿附件不落库，materialize 与 painting 行、input ref 落在同一事务窗口（`:83`），文件的持久化时机与拥有它的对象同步。
 - **迁移**：v2 `PaintingMigrator` 把 Redux 历史迁入 SQLite（重复 id 重写、悬空 ref 丢弃计数、`markEntriesAutoCleanup` 标记，`PaintingMigrator.ts:54-249`）。
 - **来源关联**：painting 行无 parent 列（对比 Chatbox 的 parentIds DAG）；"再次创作"只通过草稿复制/历史回选，无显式分支树。Agent 生成的结果无任何持久化关联（见第 6 节）。
 
@@ -169,7 +169,7 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 
 ## 交接专页（与独特功能笔记的分工）
 
-[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)（快照同为 `cd82f996`）覆盖 Mini Program、全局搜索、翻译与归并项（多模型对话、文档处理、Agent workspace），**未覆盖绘画页**——绘画页证据由本页与 [媒体创作横向对比](媒体创作横向对比.md) 候选样本条目承接。本页补充独特功能体系之外的内容：
+[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)覆盖 Mini Program、全局搜索、翻译与归并项（多模型对话、文档处理、Agent workspace），**未覆盖绘画页**——绘画页证据由本页与 [媒体创作横向对比](媒体创作横向对比.md) 候选样本条目承接。本页补充独特功能体系之外的内容：
 
 - 绘画工作台主链（入口/参数/执行/持久化/复用，§1-§5）与 `AiService.generateImage` 双执行路径（同步 AI SDK vs 异步 job）。
 - 工作台（painting 行 + ref）与 Agent 工具（cleanupPolicy manual 无 ref）两条产品面的持久化差异（§4、§6）。

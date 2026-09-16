@@ -32,7 +32,7 @@ Dify 将“工具来源/配置”和“单次调用”分开处理。`ToolManage
 
 内置工具以 Provider 目录、YAML 说明和实现代码组成；`ToolManager` 保有 builtin provider lock 和 hardcoded provider 映射。租户自定义 API 工具通过 `ApiToolProviderController.get_tools(tenant_id)` 从数据库读取（`custom_tool/provider.py:27-172`）。插件工具 Controller 能返回插件声明的工具（`plugin_tool/provider.py:11-72`），MCP Controller 在远端目录基础上产生 `MCPTool`（`mcp_tool/provider.py:21-145`）。
 
-workflow-as-tool 也有独立 `WorkflowTool` 与 Provider controller（`workflow_as_tool/tool.py:40`、`provider.py:45-212`）。因此 workflow 的复用不是把聊天 prompt 文本塞进工具结果，而是先保存为 tenant 下的 workflow tool provider，再以统一工具 schema 暴露。
+workflow-as-tool 也有独立 `WorkflowTool` 与 Provider controller（`workflow_as_tool/tool.py:40`、`provider.py:45-212`）。workflow 复用先保存为 tenant 下的 workflow tool provider，再以统一工具 schema 暴露。
 
 ## 2. 管理生命周期与 workflow-as-tool
 
@@ -68,7 +68,7 @@ Agent v2 的工具 builder 会先展开启用的 Provider 条目：配置指向 
 
 ## 6. 编排、授权与执行状态
 
-传统 Agent 的 thought/observation 证明工具结果不是只能停留在执行器内部；最终消息或 workflow 节点持久化仍取决于应用 mode。Agent v2 唯一已确认的可恢复人工协作是专属 deferred 工具 `ask_human`：只有配置联系人时才注入，一次 run 仅允许一个 deferred call；外层 workflow 保存 session snapshot、form ID 与 `tool_call_id`，表单提交或超时后按该 ID 回注第二次 Agent run。这不是所有工具的逐调用审批（`api/core/workflow/nodes/agent_v2/runtime_request_builder.py:833-844`、`dify-agent/src/dify_agent/layers/ask_human/layer.py:102-159`、`api/core/workflow/nodes/agent_v2/ask_human_resume.py:62-121`）。
+传统 Agent 的 thought/observation 会持久化工具结果；最终消息或 workflow 节点持久化仍取决于应用 mode。Agent v2 唯一已确认的可恢复人工协作是专属 deferred 工具 `ask_human`：只有配置联系人时才注入，一次 run 仅允许一个 deferred call；外层 workflow 保存 session snapshot、form ID 与 `tool_call_id`，表单提交或超时后按该 ID 回注第二次 Agent run。这不是所有工具的逐调用审批（`api/core/workflow/nodes/agent_v2/runtime_request_builder.py:833-844`、`dify-agent/src/dify_agent/layers/ask_human/layer.py:102-159`、`api/core/workflow/nodes/agent_v2/ask_human_resume.py:62-121`）。
 
 控制台能管理 Tool Provider 与 MCP Provider，但“管理权限”不等于每次调用的审批。CLI 工具在构建时会过滤未预授权、权限拒绝或危险未确认的配置，属于发布配置门槛；本轮没有找到 Dify Tool/MCP/API 通用的“每次调用前审批、执行端再验证批准令牌”机制。MCP headers 与 OAuth token 在服务端管理器中准备，公开聊天用户不能直接读取它们；这只是凭据边界，不是对远端工具权限效果的运行验证。
 

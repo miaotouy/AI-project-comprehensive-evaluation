@@ -16,7 +16,7 @@
 
 AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（provider）**两级配置，中间由 `ProviderManager` 组装运行时实例。数据模型上，"一个 provider 配置项 = 一个能力实例"，同一来源的多模型通过 `provider_source_id` 合并配置。这与容器型客户端（一个 Provider 通道内多模型）不同，更像"每条渠道就是一个独立实例"。
 
-五类能力子类（对话、语音识别、语音合成、Embedding、Rerank）统一抽象，`ProviderType` 枚举 5 种取值；设计上允许同一适配器被多个实例复用（OpenAI 类适配器被 Groq/XAI/OpenRouter 等十几个渠道继承）。
+五类能力子类（对话、语音识别、语音合成、Embedding、Rerank）统一抽象，`ProviderType` 枚举 5 种取值；同一适配器可被多个实例复用，OpenAI 类适配器就被 Groq、XAI、OpenRouter 等十几个渠道继承。
 
 核心事实链（详见各节）：
 
@@ -130,7 +130,7 @@ is_chunk / id / usage
 | `llm_compress_provider_id` | `""` | :138 |
 | `max_context_length` | -1（不限制轮次） | :139 |
 
-- 迁移后模型（`astrbot/core/utils/migra_helper.py:45-128` `_migra_provider_to_source_structure`）：provider 条目只剩 6 个字段，其余 key/api_base/timeout/proxy/custom_headers 全部归入 `provider_sources`。这是 v4.x 的大重构，旧 key 全部迁到 source 后 provider 变轻。
+- 迁移后模型（`astrbot/core/utils/migra_helper.py:45-128` `_migra_provider_to_source_structure`）：provider 条目只剩 6 个字段，其余 key/api_base/timeout/proxy/custom_headers 全部归入 `provider_sources`。这是 v4.x 的重构，旧 key 全部迁到 source。
 
   迁移后 provider 条目字段：
 
@@ -171,8 +171,6 @@ is_chunk / id / usage
 - `update_provider`（:869-891）：查 id 重复冲突才报错，替换 config，save_config，reload；
 - `create_provider`（:893-909）：append config → save → load → 同步内存 `providers_config`；
 - `terminate`（:911-925）：**先 cancel MCP init 后台任务**，再逐个 terminate，最后 `disable_mcp_server`。
-
-### (misc) 全部终止时 curr 兜底
 
 `reload` 后若 chat 实例列表为空则当前实例置空；若仍有实例但当前实例为空，则自动选第一个并记 info 日志——"自动选第一"是刻意行为不是异常。
 
@@ -367,7 +365,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 ### 7.2 敏感信息处理（关键事实 + 设计边界）
 
 - `key` 以数组存 `cmd_config.json` **明文**，无加密；`save_config` 不脱敏。
-- `_resolve_env_key_list` 只在 `load_provider` 且类型为 chat_completion 时执行；key 为空字符串则发空 key，导致请求必然 401——具体处不报错，直到请求时暴露。
+- `_resolve_env_key_list` 只在 `load_provider` 且类型为 chat_completion 时执行；key 为空字符串则发空 key，请求必然 401，但加载时不会报错，直到请求时才暴露。
 - Dashboard `list_providers`（config_service.py:1628-1666）把完整 key **返回给前端**（只有日志截断前 12 字符，如 openai_source.py:1086）。
 - 配置变更日志对 token/secret 字段掩码（config_service.py:333-338），且仅沙箱/computer 环境生效——**普通本地部署不脱敏**。
 

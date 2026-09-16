@@ -4,7 +4,7 @@
 >
 > 对比更新日期：2026-09-02
 >
-> 依据：Godot、RmlUi、Ultralight 官方文档，litehtml、Godot-HTML、Godot-RmlUi 项目资料，以及 AIO Hub `36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`、SillyTavern `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` 的现有调查笔记
+> 依据：Godot、RmlUi、Ultralight 官方文档，litehtml、Godot-HTML、Godot-RmlUi 项目资料，以及 AIO Hub、SillyTavern 的现有调查笔记
 >
 > 对比方法：按内容能力、流式生命周期、Godot 布局接入、输入、资源开销和不可信代码隔离统一比较；实现事实、架构推断和待原型验证项分别标注
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-在上述边界内，这套架构具有较高可行性，而且比“Godot 场景加完整 Web 工作台”更符合游戏引擎的强项。Godot 可以拥有窗口、导航、消息列表、消息壳、输入框、主题、弹窗和所有业务状态；HTML 引擎只是消息文档中的局部渲染后端。绝大多数文本不进入浏览器运行时，Ultralight View 的数量由屏幕上正在交互的 JavaScript Artifact 决定，而不是由消息数量决定。
+在上述边界内，这套架构具有较高可行性。Godot 可以拥有窗口、导航、消息列表、消息壳、输入框、主题、弹窗和所有业务状态；HTML 引擎只是消息文档中的局部渲染后端。绝大多数文本不进入浏览器运行时，Ultralight View 的数量由屏幕上正在交互的 JavaScript Artifact 决定，而不是由消息数量决定。
 
 建议把消息渲染明确分为三层：
 
@@ -24,7 +24,7 @@
 | 静态标记 | RmlUi、litehtml 或基于 Godot Control 的受控布局器 | 无脚本 HTML/CSS、角色卡样式化片段、较复杂文档布局 | JavaScript、宿主权限、完整浏览器行为 |
 | 可执行 Artifact | Ultralight View 封装成普通 Godot Control | 明确声明需要 JavaScript 的小应用、Canvas、交互图表 | 主聊天 UI、普通 Markdown、默认自动执行模型输出 |
 
-技术难点不在于“Godot 能否显示一张网页纹理”。Ultralight 官方就提供 CPU Surface 上传纹理和自定义 GPUDriver 两条游戏集成路径。真正需要提前定契约的是：三个后端共用同一份增量文档 IR；动态内容怎样把高度反馈给 Godot 列表；离屏 Artifact 怎样冻结和恢复；模型 JavaScript 怎样限制网络、文件、剪贴板和原生桥，并在死循环或内存失控时可被终止。
+Ultralight 官方提供 CPU Surface 上传纹理和自定义 GPUDriver 两条游戏集成路径，Godot 能否显示网页纹理因此不构成主要难点。需要提前定契约的是：三个后端共用同一份增量文档 IR；动态内容怎样把高度反馈给 Godot 列表；离屏 Artifact 怎样冻结和恢复；模型 JavaScript 怎样限制网络、文件、剪贴板和原生桥，并在死循环或内存失控时可被终止。
 
 桌面原型可评为高可行。生产级桌面应用在完成进程隔离、长列表和输入验证后可评为中高可行。Ultralight 当前公开许可的 Free/Pro 档只覆盖 Windows、macOS、Linux，不覆盖移动端和主机；现有两个 Godot 集成项目也都有未完成项，因此不能把同一判断直接外推到 Godot 的全部导出平台。
 
@@ -274,7 +274,7 @@ SillyTavern 说明酒馆生态确实需要兼容原始 HTML、消息级 CSS、�
 - 对真实角色卡和消息片段做 Godot 截图与浏览器参考图对照。
 - 记录字体回退、中文断行、表格、图片、选择复制和主题切换差异。
 
-选择标准不是演示页能否显示，而是目标语料中有多少内容无需降级、错误是否可见、宿主补齐交互的成本是否可控。
+选择标准应落在目标语料中有多少内容无需降级、错误是否可见、宿主补齐交互的成本是否可控。
 
 ### 阶段三：接入单个 Ultralight Artifact
 

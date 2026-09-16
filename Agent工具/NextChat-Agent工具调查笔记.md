@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-NextChat 的“Agent 工具”不是一个独立的规划器或多步 Agent runtime，而是挂在普通聊天请求上的两条工具链：
+NextChat 的“Agent 工具”是挂在普通聊天请求上的两条工具链，没有独立的规划器或多步 Agent runtime：
 
 1. **OpenAPI 插件工具**把 YAML/JSON OpenAPI 文档的 operation 转成 OpenAI 风格的 `function` schema，同时生成一个本地执行映射。模型返回原生工具调用（`tool_calls`）后，浏览器并发执行对应 HTTP operation，把助手侧调用记录与工具结果消息（`role: tool`）追加回请求，再递归发起下一轮请求。
 2. **MCP 工具**不进入原生 `tools` 数组。已连接 stdio MCP server 的工具描述被拼入 system prompt，模型按 `json:mcp:<clientId>` fenced block 输出请求；客户端正则提取并通过 MCP SDK 执行，再把结果作为带 `isMcpResponse` 标记的用户消息送回模型。

@@ -16,7 +16,7 @@
 
 Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一条 `user_provider`。内置 Provider 由 `packages/provider-registry/data/` 提供预设，启动时只增不改地 seed 到用户表；用户配置只保存相对预设的差量，读取时再按“用户差量 > Registry > 应用默认值”合并成运行时 `Provider`。
 
-这套设计的核心不是“一个 Provider ID 对应一种固定协议”，而是 **Provider 实例 + Endpoint Type + Adapter Family**：
+这套设计由 Provider 实例、Endpoint Type 和 Adapter Family 三层组成：
 
 - 同一 Provider 可以声明多个 Endpoint Type，例如 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini GenerateContent；
 - 每个 Endpoint Type 有独立 Base URL，并由 Registry 指定 `adapterFamily`；
@@ -24,13 +24,13 @@ Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一�
 - 用户可以复制一个预设，创建继承同一 `presetProviderId` 的额外实例，因此同一家服务可有多条独立渠道；
 - 模型的稳定标识包含 `providerId`，运行时不会只凭裸模型名猜测渠道。
 
-凭据管理比多数纯客户端项目完整：一条 Provider 可保存多个带 ID、标签和启停状态的 API Key，并在请求之间 round-robin；OAuth、AWS、GCP、Azure 等认证也统一进入 `authConfig`。Renderer 读取普通 Provider 时看不到 Key 或 Token，真实凭据只在 Main/Data API 内部使用。
+凭据管理上，一条 Provider 可保存多个带 ID、标签和启停状态的 API Key，并在请求之间 round-robin；OAuth、AWS、GCP、Azure 等认证也统一进入 `authConfig`。Renderer 读取普通 Provider 时看不到 Key 或 Token，真实凭据只在 Main/Data API 内部使用。
 
 但高可用能力仍然有限（用户可配置的重试/fallback 默认关闭）：
 
 - 多 Key 只是跨请求轮询，没有失败计数、Key 健康状态、429 熔断或自动恢复；
 - 普通聊天默认 `maxRetries: 0`，除非调用方显式覆盖（AI SDK 层）；
-- （`12498d68ec`）新增 **model-retry**：聊天调用入口用 ai-retry 的重试包装包住普通模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置按能力约束解析的 fallback 模型；但偏好 `chat.retry.enabled` **默认 false**，且请求级 `maxRetries: 0` 会显式关闭包装——即"默认不重试"不变，"没有跨 Provider failover"改为"**默认没有**，用户可在设置里开启同模型重试 + 模型 fallback"；
+- **model-retry**：聊天调用入口用 ai-retry 的重试包装包住普通模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置按能力约束解析的 fallback 模型；但偏好 `chat.retry.enabled` **默认 false**，且请求级 `maxRetries: 0` 会显式关闭包装。因此普通聊天默认不重试，跨 Provider failover **默认没有**，用户可在设置里开启同模型重试 + 模型 fallback；
 - 没有渠道权重、优先级、成本或延迟路由；
 - 设置页的批量健康检查会测试每个模型与每个 Key 并显示延迟，但结果不参与运行时调度。
 
@@ -215,16 +215,16 @@ API Key 独立保存在 `apiKeys` 数组中；OAuth access/refresh token、AWS a
 
 ### 3.4 备份已覆盖 SQLite
 
-当前真实接线的备份引擎是 `LegacyBackupManager`——类名 `BackupManager`，文件头仍标注 `@deprecated LEGACY v1 CODE — retained as the active compatibility backup engine while v2 backup is unfinished`；（`220dff874f` 及后续）其 direct backup 升级为 **v7 full/slim 双布局**（`LegacyBackupManager.ts:1-15,192-230,292-406`）：
+当前真实接线的备份引擎是 `LegacyBackupManager`——类名 `BackupManager`，文件头仍标注 `@deprecated LEGACY v1 CODE — retained as the active compatibility backup engine while v2 backup is unfinished`；其 direct backup 采用 **v7 full/slim 双布局**（`LegacyBackupManager.ts:1-15,192-230,292-406`）：
 
 ```text
 full 布局：Data/ + IndexedDB/ + Local Storage/ + cache.json + metadata.json
 slim 布局：Data/cherrystudio.sqlite + cache.json（可选）
 ```
 
-也就是说 **`cherrystudio.sqlite`（含 Provider、模型、聊天等全部 v2 业务数据与凭据）现在会进入真实备份**——不再只是 IndexedDB/Local Storage/Data 三件套。恢复侧把归档里的 SQLite 先复制到 work 库，再经 `src/main/data/db/restore/` 的 checkpoint + 崩溃安全 promotion 门原子替换（`LegacyBackupManager.ts:972-973,1063`），失败时保留旧库。另有配套行为：备份前对 AI stream/agent/channel 写方做 quiesce（`BACKUP_ACTIVE_WRITERS_ERROR_CODE`，`e5a0c47a59`）、跳过 LevelDB `LOCK` 等被占用文件（`691970aba0`/`848993332d`）、自动备份间隔跨重启保持（`6f9ab1befc`）。
+也就是说 **`cherrystudio.sqlite`（含 Provider、模型、聊天等全部 v2 业务数据与凭据）会进入真实备份**，full 与 slim 两种布局都包含它，不再局限于 IndexedDB/Local Storage/Data 三件套。恢复侧把归档里的 SQLite 先复制到 work 库，再经 `src/main/data/db/restore/` 的 checkpoint + 崩溃安全 promotion 门原子替换（`LegacyBackupManager.ts:972-973,1063`），失败时保留旧库。另有配套行为：备份前对 AI stream/agent/channel 写方做 quiesce（`BACKUP_ACTIVE_WRITERS_ERROR_CODE`）、跳过 LevelDB `LOCK` 等被占用文件、自动备份间隔跨重启保持。
 
-仍未改变的事实：凭据在备份文件里仍是明文 JSON 文本（备份与数据库一样无静态加密）；"备份会扩散 Provider 密钥"的风险现在真实存在，但这是产品设计使然，与 §3.3 的磁盘明文结论同源。
+备份文件与数据库一样没有静态加密，凭据在归档里仍是明文 JSON 文本，因此备份会扩散 Provider 密钥；这与 §3.3 的磁盘明文结论同源。
 
 ## 4. 多 Key 轮询
 
@@ -342,19 +342,19 @@ Registry 合并时，Provider override 可修改 capability、模态、context�
 
 这套方案的主要代价是元数据错误会同时影响 UI 与 wire protocol，影响面大于普通展示目录。项目通过 schema、catalog invariant、source-sync 和禁止手改生成 JSON 的 CI 约束降低风险；但 live upstream 参与生成，重新生成可能顺带吸收与本次改动无关的价格或能力漂移，仍需审阅生成差异。
 
-Registry 数据与路由继续演进（机制未变，仅条目/覆盖变化）：
+Registry 中的条目与路由覆盖包括：
 
-- 新增 Radeon Cloud Provider（`7b0d7a8908` 等）；
-- New API 的 embedding endpoint type（`11604e09cc`）；
-- DeepSeek V4 Flash Responses 端点（`2a4e6a6882`）；
-- Claude Opus 5/Sonnet 5 及 1M-context 变体（`bd2b5eefc6`）；
-- Ollama Gemma 4 thinking（`03d266e029`）；
-- OpenCode Go 按所服务协议路由（`bf66103a2a`）；
-- DeepSeek/OpenRouter/Dashscope 内置联网搜索与可区分的解析后模型名（`da3b5f1921`）；
-- Ollama 原生 thinking 能力探测（`d97277ee75`）；
-- Doubao Responses 注解归一化（`584f154cc6`）；
-- new-api 单主机多路由版本（`a502b21c3e`）；
-- CLI 配置经统一网关支持 detailed models（`84a33e88bc`）。
+- Radeon Cloud Provider；
+- New API 的 embedding endpoint type；
+- DeepSeek V4 Flash Responses 端点；
+- Claude Opus 5/Sonnet 5 及 1M-context 变体；
+- Ollama Gemma 4 thinking；
+- OpenCode Go 按所服务协议路由；
+- DeepSeek/OpenRouter/Dashscope 内置联网搜索与可区分的解析后模型名；
+- Ollama 原生 thinking 能力探测；
+- Doubao Responses 注解归一化；
+- new-api 单主机多路由版本；
+- CLI 配置经统一网关支持 detailed models。
 
 ## 6. 模型选择与多模型调用
 
@@ -383,7 +383,7 @@ Assistant 保存一个 `UniqueModelId` 模型 ID；无 Assistant 的 Topic 使�
 
 图片、视频、音频生成因为可能计费会被标记为生成成本风险，TTS/STT 当前不走这套探针。
 
-这些结果是设置页的即时诊断数据，不会写回 Key 池，也不会改变运行时轮询的选择。因此“检测出坏 Key”与“运行时自动避开坏 Key”是两回事。
+这些结果是设置页的即时诊断数据，不会写回 Key 池，也不会改变运行时轮询的选择。因此检测出坏 Key 不等于运行时会自动避开它。
 
 开发者模式还可对 HTTP 请求启用 Trace；普通运行时另有 Topic/Turn trace 和多模型子 Span，但没有以这些指标驱动渠道选择。
 
@@ -397,7 +397,7 @@ maxRetries: maxRetries ?? 0
 
 即 SDK 层默认不重试（`buildAgentParams.ts:583`）。调用方可以通过 `requestOptions.maxRetries` 覆盖，但 SDK 重试仍绑定已经解析完成的同一 Provider、Endpoint、Key 和模型；它不会重新执行渠道决策。
 
-**用户可配置重试/fallback（`12498d68ec`，model-retry）**：重试默认只作用于同一模型，失败后可在配置的候补模型中换兼容者接管。聊天生成入口用 ai-retry 的 `createRetryableWrap` 包住模型调用（`src/main/ai/runtime/aiSdk/retry/`），同一模型对 429/503/529 等瞬态 API 错误按策略重试；启用 fallback 时，由同目录的 `buildFallbackModels` 解析出的候补模型列表接管失败调用，解析时按能力过滤，function-calling、视觉、PDF、原生文件支持等不匹配的候补会被跳过。
+**用户可配置重试/fallback（model-retry）**：重试默认只作用于同一模型，失败后可在配置的候补模型中换兼容者接管。聊天生成入口用 ai-retry 的 `createRetryableWrap` 包住模型调用（`src/main/ai/runtime/aiSdk/retry/`），同一模型对 429/503/529 等瞬态 API 错误按策略重试；启用 fallback 时，由同目录的 `buildFallbackModels` 解析出的候补模型列表接管失败调用，解析时按能力过滤，function-calling、视觉、PDF、原生文件支持等不匹配的候补会被跳过。
 
 重试与 fallback 的开关和参数都通过偏好配置控制，集中在偏好组 `chat.retry.*` 之下：`chat.retry.enabled` 默认关闭，`chat.retry.max_attempts` 默认 3、范围 1-10，另有退避开关与 fallback 模型 ID 列表两项。相关 schema 见 `retryPolicy.ts:14-25、preferenceSchemas.ts:194-200,616-619`。请求级 `maxRetries: 0` 会显式关闭该包装；包装激活时 SDK 侧同一参数被置 0，避免两层重试叠加（`AiService.ts:565-601`）。
 

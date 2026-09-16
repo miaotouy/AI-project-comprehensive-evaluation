@@ -151,7 +151,7 @@ ConfirmDialog（重启/更新确认，:1068-1095）与 useToast（见第 3 节�
 
 三端共享同一个后端皮肤协议（`~/.hermes/skins/*.yaml`：Python 端 `hermes_cli/skin_engine.py` 解析与 resolve_skin，TS 端契约类型在 `apps/shared/src/skin.ts`——SKIN_COLOR_TOKENS 30+ 语义 token、终端口在前、GUI 从 load-bearing 少数派生；
 
-变更经 `tui_gateway/server.py` 的 skin.changed 广播），但权威源与持久化各不相同；共同哲学是“少量种子色 → 派生全部次级 token”：
+变更经 `tui_gateway/server.py` 的 skin.changed 广播），但权威源与持久化各不相同；共同做法是“少量种子色 → 派生全部次级 token”：
 
 - **桌面**（`themes/context.tsx`）：主题名（skin）与明暗模式（mode）按 **profile 分键**持久化于 localStorage（PROFILE_SKINS_KEY/PROFILE_MODES_KEY，未分配 profile 回退全局旧键 hermes-desktop-theme-v2，:29-37, 58-67），`system` 模式用 matchMedia('(prefers-color-scheme: dark)') 即时解析（resolveMode，:44-45）。
 
@@ -275,13 +275,13 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 
 **贡献注册表是应用壳的唯一组织方式。** pane/标题栏/快捷键/命令面板/路由/主题全部走同一 area 注册 API，核心与插件同权（`contrib/registry.ts`），插件崩溃由 ContribBoundary 按 slot 降级。
 
-**弹窗内浮层改投弹窗节点。** 承认 Radix 默认 body-portal 在嵌套场景下破坏焦点与 z-index，用 context 改投修复（`dialog-portal-context.ts:5-19` 注释完整记载了两种失效模式）。
+**弹窗内浮层改投弹窗节点。** 针对 Radix 默认 body-portal 在嵌套场景下破坏焦点与 z-index 的问题，用 context 改投修复（`dialog-portal-context.ts:5-19` 注释完整记载了两种失效模式）。
 
 **Toast 双栈 + 后端 notice 映射。** 重要反馈（error/warning/带 action）与例行确认（右下）分流；后端 notice 的 key 兼作 toast id 实现原地升级，CLI/TUI 的前导字形在桌面被剥离（`agent-notices.ts`）。
 
-**三端主题同哲学不同权威源。** 种子→派生 token（桌面 `--theme-*`→`--ui-*` color-mix、TUI mix 阶梯、Web palette 分层）；权威源分别为 localStorage（按 profile）、启动缓存+env、服务端 API；后端皮肤对桌面只是“播种不覆盖”、对 TUI 是每次启动的解析输入。
+**三端主题同为种子派生，权威源各不相同。** 种子→派生 token（桌面 `--theme-*`→`--ui-*` color-mix、TUI mix 阶梯、Web palette 分层）；权威源分别为 localStorage（按 profile）、启动缓存+env、服务端 API；后端皮肤对桌面只是“播种不覆盖”、对 TUI 是每次启动的解析输入。
 
-**市场主题是种子注入器而非外观镜像。** VS Code 主题数百个 workbench key 只取 ~6 个作为种子，其余全部 color-mix 派生（`vscode.ts:4-9` 注释），与“少量种子→派生全部次级 token”哲学同构；accent 单独设 WCAG AA 4.5:1 护栏，单模式主题经“明暗双变体合并”让桌面明暗切换映射真实变体（`install.ts:27-37` 注释）。
+**市场主题是种子注入器而非外观镜像。** VS Code 主题数百个 workbench key 只取 ~6 个作为种子，其余全部 color-mix 派生（`vscode.ts:4-9` 注释），与“少量种子→派生全部次级 token”的派生方式一致；accent 单独设 WCAG AA 4.5:1 护栏，单模式主题经“明暗双变体合并”让桌面明暗切换映射真实变体（`install.ts:27-37` 注释）。
 
 **用户主题与内置主题合并注册、零接线消费。** 桌面 localStorage 用户主题注册表与内置合并后供 Cmd-K/设置页/`/skin` 统一消费，内置名不可覆盖；Web 端用户主题走服务端 YAML（`~/.hermes/dashboard-themes/`）权威，与皮肤的 `~/.hermes/skins/` 是两套并行的用户主题体系。
 
@@ -291,7 +291,7 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 
 **边界。** 聊天主链（草稿/附件/流式/消息操作）在 Chat UI 笔记；消息内容渲染在消息渲染器类目；Python 核心的 UI 交点仅皮肤 YAML 与 notification.show 协议。
 
-## 当前连接与会话作用域
+### 当前连接与会话作用域
 
 桌面基础设施继续把 connection、profile 与 session 分开建模。会话 API 的作用域由 `sessionScoped` 统一生成，读取与写入由同一 profile/connection 路由承接（`apps/desktop/src/api/sessions.ts:16-31`）；事件缓存也记录这三个维度（`apps/desktop/src/store/session-states.ts:80`）。这为远端连接、profile rail 与同 ID 会话并存提供了状态边界，视觉与跨窗口交互仍未运行验证。
 

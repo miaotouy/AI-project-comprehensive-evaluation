@@ -108,7 +108,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 | `codex` | spawn `codex app-server --stdio`，私有 JSON-RPC：initialize/initialized、`thread/start`（ephemeral）、`turn/start`、`turn/completed`（`subagent-codex/wire.ts:83-374`） | 无头自动应答：命令/文件审批选 cancel 或 decline，权限给空集，`item/tool/requestUserInput` 回空答案，MCP 询答 decline | `item/completed` 中 agentMessage 的 final_answer 文本优先，commentary 丢弃 | `turn/interrupt` 尽力而为；wire.close + stdin EOF + 树终止 |
 | `dsh-sdk` | SDK client 自管 spawn `dsh-jsonrpc-agent` 子进程（subprocess seam 的例外），initialize 握手后 `session.run`，`session.event` 通知回流（`subagent-dsh-sdk/run.ts:112-206`） | 无 wire 级权限通道；子进程自带 harness 策略 | `AssistantOutputFold` 按最终 assistant 消息选文 | 无 wire 取消；本地先结算，`shutdown` 协议（1s 上限）+ EOF 宽限 + 树终止 |
 
-共同点：启动失败（握手/建会话失败）由 provider 自拥进程并回收后才 reject；发布后的失败只落结果。结果只回传最终文本，不回流 reasoning、工具事件、文件变化或结构化提问——这是与 LobeHub 统一事件模型最本质的差异。
+共同点：启动失败（握手/建会话失败）由 provider 自拥进程并回收后才 reject；发布后的失败只落结果。结果只回传最终文本，不回流 reasoning、工具事件、文件变化或结构化提问，与 LobeHub 的统一事件模型形成对照。
 
 ### 取消语义
 
@@ -136,7 +136,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 
 ## 已确认边界与未验证事项
 
-进程内可续接子 Agent 的生命周期已进一步明确：持久 child session 在进程内至多对应一个 activation；首次提交只在 inbox 接收后返回 child/message id，后续 follow-up 继续使用同一 FIFO inbox。子 Agent 可以选择向直接父 Agent 报告，`quiet` 只注入消息，`next-step` 会在父 Agent 空闲或下一步边界唤醒；运行时另以独立来源记录最终结算，避免将管理器的事实归因给子 Agent。该机制不改变进程外 ACP、Claude Code、Codex 与 dsh-sdk provider 的 one-shot 边界（`docs/subsystems/subagent.md:114-159, 191-234`）。
+进程内可续接子 Agent 的生命周期为：持久 child session 在进程内至多对应一个 activation；首次提交只在 inbox 接收后返回 child/message id，后续 follow-up 继续使用同一 FIFO inbox。子 Agent 可以选择向直接父 Agent 报告，`quiet` 只注入消息，`next-step` 会在父 Agent 空闲或下一步边界唤醒；运行时另以独立来源记录最终结算，避免将管理器的事实归因给子 Agent。该机制不改变进程外 ACP、Claude Code、Codex 与 dsh-sdk provider 的 one-shot 边界（`docs/subsystems/subagent.md:114-159, 191-234`）。
 
 - 本仓库没有 GUI 产品表面：外部执行体状态、子进程工作目录与连接状态只体现在会话日志事件、CLI 输出和 stderr 诊断中，不存在图形化的执行位置/接管入口。
 - 四条主链均为静态走通；未运行真实 Claude Code/Codex/外部 ACP 子进程，CLI 版本兼容、SDK 版本行为（Codex 协议锁定 0.147.0）与真实进程终止未验证。

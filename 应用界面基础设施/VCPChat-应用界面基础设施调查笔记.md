@@ -125,7 +125,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 - 深色/浅色通过 Electron nativeTheme.themeSource 控制（:22-38），可设 'light'/'dark'/'system'，值存入 `settings.json` 的 currentThemeMode。系统主题跟随通过监听更新事件（:41-44, :207），变更时向所有窗口广播 theme-updated IPC，渲染进程收到后切换 body.light-theme class。
 - CSS 变量约定：:root 块定义暗色主题变量，body.light-theme 块覆盖亮色变量；每个主题文件同时包含两个块，themeHandlers.handleGetThemes 可枚举所有主题及其变量名（:50-91）。主题选择器是独立 850×700 无框子窗口（`Themesmodules/themes.html`，frame: false，:169）。
-- 默认 `styles/themes.css` 已更换为"纸墨与机芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink，提交 ac27171"上架全新 vchat 默认主题（对齐官网配色）"），新增 `--chat-wallpaper-dark/light` 壁纸变量与两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机芯.css`）。切换机制（整窗口重载覆写）未变。
+- 默认 `styles/themes.css` 已更换为"纸墨与机芯"（VCP Official，深色 Industrial Core / 浅色 Editorial Ink），新增 `--chat-wallpaper-dark/light` 壁纸变量与两张默认壁纸；`styles/themes/` 现有 17 个可选主题文件（含同名 `themes纸墨与机芯.css`）。切换机制（整窗口重载覆写）未变。
 
 **首帧主题应用与防闪烁**（补充调查）：
 
@@ -169,13 +169,13 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 的 computed.minWidth / computed.maxWidth 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，:93, :98），最大宽度 fallback 600px（:57）。拖拽过程中通过 requestAnimationFrame 节流更新，拖拽时禁用元素 transition 以避免卡顿（:88）。
 
-**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是**由 settings.sidebarAvatarOnly 字段控制**（`renderer.js:1577`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。
+**Compact navigation 触发条件**：由 **settings.sidebarAvatarOnly 字段控制**（`renderer.js:1577`），窗口宽度变化不触发切换——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。
 
 点击菜单项中的 Topics 触发 leftSidebar.classList.add('compact-topics-open')，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（:451）；点击话题项后自动关闭抽屉（:439-441）。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-图片预览**不是内嵌灯箱，而是打开独立 Electron 子窗口**（`modules/image-viewer.html`）。触发点：`modules/messageRenderer.js:2613` 调用 `electronAPI.openImageViewer({ src, title, theme })`。图片查看器功能远超简单灯箱：
+图片预览**打开独立 Electron 子窗口**（`modules/image-viewer.html`），不做消息内嵌灯箱。触发点：`modules/messageRenderer.js:2613` 调用 `electronAPI.openImageViewer({ src, title, theme })`。图片查看器功能远超简单灯箱：
 
 **缩放。** Ctrl+滚轮，范围 0.05×–32×（支持极端缩小看长截图全貌）；Shift+滚轮步长更大（`ZOOM_FACTOR_FAST=1.5` vs `ZOOM_FACTOR_STEP=1.15`，`image-viewer.js:54-56`）。
 
@@ -290,9 +290,9 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **焦点管理**：确认对话框打开时确认按钮自动聚焦，通用 Modal 打开时也会聚焦自身（相关实现见 :347、:944），但无 focus trap，Tab 键可以穿透到背景。Agent/Topic 列表没有键盘导航支持，列表项无 tabindex。
 
-总体评估：核心功能控件有基础 ARIA，但主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，键盘可达性不完整，无障碍支持处于初步阶段。
+核心功能控件有基础 ARIA；主要内容区（消息列表、Agent/Topic 列表）缺乏语义标注，键盘可达性不完整。
 
-## 当前界面运行时与启动边界
+### 当前界面运行时与启动边界
 
 当前快照继续把通用 UI 的可释放资源收敛到 surface、task 与 contribution registries，并为嵌入应用、覆盖层、通知菜单和启动主题提供各自的生命周期控制器。另新增独立 Tauri bootstrapper：其职责是受管安装、环境检查、修复、更新与回滚后的桌面交接，和 Electron 主窗口的主题、弹窗、聊天状态不共享同一运行时。静态阅读只能确认状态与事件的所有权，不能证明实际窗口焦点、可访问性或升级回滚体验。
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动异步聊天框架**。一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制不靠阶段限流，而靠 UMO 粒度的 `session_lock` 串行化 LLM 请求 + 严格有序的 follow-up 队列。核心特征：UMO 事件流水线、九阶段洋葱调度、两级会话概念、上下文双层压缩。
+AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动异步聊天框架**。一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制集中在两处：UMO 粒度的 `session_lock` 串行化 LLM 请求，以及严格有序的 follow-up 队列。核心特征：UMO 事件流水线、九阶段洋葱调度、两级会话概念、上下文双层压缩。
 
 ## 产品表面与系统边界
 
@@ -56,7 +56,7 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 ## 关键能力与已确认边界
 
 1. **九阶段洋葱调度**：阶段 `process()` 返回 `AsyncGenerator` 时挂起，递归执行后续阶段，完成后回到 yield 点执行后置逻辑——LLM 请求阶段先让 Respond 发送，再回来做历史保存等收尾；单事件单流水线，无跨阶段状态泄漏。
-2. **并发控制**：同 UMO 串行化（session_lock 包裹整个 LLM 流程），跨会话天然并行；follow-up 捕获时分配序号 + `asyncio.Condition` 队首放行，避免唤醒顺序漂移。
+2. **并发控制**：同 UMO 串行化（session_lock 包裹整个 LLM 流程），跨会话可并行；follow-up 捕获时分配序号 + `asyncio.Condition` 队首放行，避免唤醒顺序漂移。
 3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
 4. **群聊**：`GroupChatContext` 每 UMO 内存环形记录最多 1000 条原始消息（含图像 caption），注入为 `<system_reminder>` 块；群历史可选持久化 700 条上限并暴露 `get_group_message_history` 工具；`unique_session` 开启后按发送者隔离会话。
 5. **边界**：RateLimit 超限 stall 阻塞而非丢弃（消息堆积），队列键为完整 `unified_msg_origin`，不同 UMO 不再共享限额队列（rate_limit_check/stage.py:57-82）；EventBus 无限队列无背压；阶段顺序硬编码于 `STAGES_ORDER`；agent 停止两态（stop_event 硬断 / agent_stop_requested 软停保历史）。

@@ -27,7 +27,7 @@ Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条
 
 ## 术语定义
 
-调查前先按项目实际含义定义概念，避免与横向对比术语混用：
+按项目实际含义定义概念，避免与横向对比术语混用：
 
 | 术语 | Risuai 中的含义 |
 |---|---|
@@ -148,7 +148,7 @@ Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust comman
 
 模型目录有三层来源：
 
-1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）。本快照新增 Gemini Flash 3.7 条目：它使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 等能力，并与 3.5/3.6 Flash 一样在 Vertex 请求中固定走 global endpoint（`model/providers/google.ts:4-17`、`process/request/google.ts:412-417`）；
+1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）。其中 Gemini Flash 3.7 条目使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 等能力，并与 3.5/3.6 Flash 一样在 Vertex 请求中固定走 global endpoint（`model/providers/google.ts:4-17`、`process/request/google.ts:412-417`）；
 2. 动态注册 `registerModelDynamic`：启动时若 `dynamicModelRegistry` 开启，分别调用 Google `v1beta/models`、Anthropic `/v1/models`、OpenAI `/v1/models`（只收 `gpt-` 前缀），以 `dynamic_<provider>_<id>` 追加到内存数组（`modellist.ts:613-770`，启动入口 `bootstrap.ts:255`）；
 3. 设置页实时拉取：OpenRouter（含价格、context、缓存价与推理价元数据，`src/ts/model/openrouter.ts:51-106`）、NanoGPT（模型与订阅目录，`src/ts/model/nanogpt.ts:162-192`）、Ollama `/api/tags`（`src/ts/model/ollama.ts:23-45`）、Horde `status/models`（模块级内存缓存，`src/ts/horde/getModels.ts:19-44`）。
 

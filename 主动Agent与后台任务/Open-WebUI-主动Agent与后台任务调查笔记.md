@@ -39,7 +39,12 @@ Open WebUI 在当前快照有一条 `主链确认` 的隔离日程运行，以�
 
 ### Automations 的定义、认领与并发
 
-`automation` 行保存 owner、可选 folder、名称、JSON data 中的 prompt/model/rrule、活跃状态以及 `last_run_at` 和 `next_run_at`；`automation_run` 则保存 run id、automation id、可选 chat id、`success` 或 `error` 与错误文本。创建和更新会计算 next run；非管理员还受 feature 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行（`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
+`automation` 与 `automation_run` 的字段分工如下：
+
+- `automation`：owner、可选 folder、名称、JSON data 中的 prompt/model/rrule、活跃状态，以及 `last_run_at` 和 `next_run_at`。
+- `automation_run`：run id、automation id、可选 chat id，以及 `success` 或 `error` 与错误文本。
+
+创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行（`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
 
 调度器每轮最多认领十个到期自动化。`claim_due` 在数据库事务中筛选 `is_active` 且 `next_run_at <= now` 的记录；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`，随后立即写入 `last_run_at` 和新的 `next_run_at`。这使多个实例不会同时执行已认领的同一到期行；轮询抖动进一步降低同时争抢概率（`models/automations.py:289-332`; `utils/automations.py:210-255`）。
 

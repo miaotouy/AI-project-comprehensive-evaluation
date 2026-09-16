@@ -68,7 +68,7 @@ LobeHub 的会话不是“agentId + topicId”二元定位，而是多维坐标 
 - 流式运行中（309 行，避免逐 token 打缓存）；
 - `useFetchMessages`/`prefetchMessages` 的写路径不重复写（310 行）。
 
-这说明本地分桶方案比服务端缓存 key 更细，两者天然不完全对齐，是需要长期小心维护的耦合点。
+这说明本地分桶 key 比服务端缓存 key 更细，两者天然不完全对齐，属于持续存在的一致性耦合点。
 
 ### 1.2 消息数据形状与树
 
@@ -99,7 +99,7 @@ LobeHub 的会话不是“agentId + topicId”二元定位，而是多维坐标 
 
 ## 2. 事实源、索引与持久化：双层 Store 架构
 
-这是本类目最关键的一点：**同一份消息数据在两个独立的 Zustand store 里各自维护一份“解析后”的展示数据，而且各自独立调用 `parse()`。**
+**同一份消息数据在两个独立的 Zustand store 里各自维护一份“解析后”的展示数据，而且各自独立调用 `parse()`。**
 
 ### 2.1 全局 ChatStore
 
@@ -145,9 +145,9 @@ messagesMap: Record<string, UIChatMessage[]>;     // parse() 之后的展示消�
   - 回调在 `ConversationArea.tsx:141` 被接成全局 `replaceMessages`——全局那边再跑一次自己的 `parse`。
 - **全局 → 局部**：靠 `StoreUpdater` 的 `useLayoutEffect`（contextKey 变化时原地重置+同步）与 `useEffect`（messages prop 变化时 121-145 行调局部 `replaceMessages`）。
 
-**这意味着同一批 `UIChatMessage[]` 在一次"发消息/工具审批/编辑"操作里，`parse()` 可能被调用两次以上**（局部 store 乐观更新一次，全局 store 落库后再一次，全局 store 再回灌局部 store 又一次）。引用稳定性靠手工补丁而非算法本身保证：
+**同一批 `UIChatMessage[]` 在一次"发消息/工具审批/编辑"操作里，`parse()` 可能被调用两次以上**（局部 store 乐观更新一次，全局 store 落库后再一次，全局 store 再回灌局部 store 又一次）。引用稳定性靠手工补丁而非算法本身保证：
 
-- 局部 store 在全部三个 parse 调用点手工包了同一个补丁函数 `stabilizeReferences`（`store/slices/data/stabilizeReferences.ts:1-15`，本质是 `@tanstack/react-query` 的 `replaceEqualDeep`），注释直言："`parse()` ... rebuilds the entire displayMessages tree on every dispatch ... That defeats memo ... pinning unchanged subtrees back to their previous reference"；
+- 局部 store 在全部三个 parse 调用点手工包了同一个补丁函数 `stabilizeReferences`（`store/slices/data/stabilizeReferences.ts:1-15`，即 `@tanstack/react-query` 的 `replaceEqualDeep`），注释直言："`parse()` ... rebuilds the entire displayMessages tree on every dispatch ... That defeats memo ... pinning unchanged subtrees back to their previous reference"；
 - **parse 本身不保证引用稳定性，稳定性是每个调用点手工"缝"上去的**；且全局 store 的两个 parse 调用点（`query.ts:257`、`internals.ts:72`）看不到这个补丁——全局 `messagesMap` 每次都是全新对象树（本次未找到直接订阅全局 `messagesMap` 渲染的 UI 组件，见未验证事项）。
 
 ### 2.4 为什么要分两层（能看出的设计动机）
@@ -205,7 +205,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
 
 ### 4.2 分支切换的数据语义
 
-局部 `switchMessageBranch`（`store/slices/data/action.ts:232-243`）只做两件事：把目标消息的 `parentId` 找出来，调用 `updateMessageMetadata(parentId, { activeBranchIndex })`。分支指示器画在**子消息**上，但激活索引存在**父消息**的 metadata 里，真正的"哪个分支是激活的"判断逻辑在 `BranchResolver`（第 1.2 节）里做，UI 只负责改一个整数。全局 ChatStore 也有一份几乎相同实现：`conversationControl.ts:313-323` 的 `switchMessageBranch` 走 `optimisticUpdateMessageMetadata`。
+局部 `switchMessageBranch`（`store/slices/data/action.ts:232-243`）只做两件事：把目标消息的 `parentId` 找出来，调用 `updateMessageMetadata(parentId, { activeBranchIndex })`。分支指示器画在**子消息**上，但激活索引存在**父消息**的 metadata 里，"哪个分支是激活的"判断逻辑在 `BranchResolver`（第 1.2 节）里做，UI 只负责改一个整数。全局 ChatStore 也有一份几乎相同实现：`conversationControl.ts:313-323` 的 `switchMessageBranch` 走 `optimisticUpdateMessageMetadata`。
 
 ### 4.3 工具审批的数据层事实（薄转发层）
 
@@ -214,7 +214,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
 - 单个方法：`approveToolCall`/`rejectToolCall`/`rejectAndContinueToolCall`/`skipToolInteraction`/`submitToolInteraction`/`cancelToolInteraction`/`submitHeteroIntervention`；
 - 批量方法：`approveAllToolCalls`/`stopPendingApproval`/`stopPendingApprovalForCard`。
 
-它们共同的固定三步：等待 `waitForPendingArgsUpdate` → 触发本地 `hooks.onToolApproved`/`onToolRejected` → **调用 `useChatStore.getState()` 上的同名方法**，把局部 `context` 传过去（例：`approveToolCall` 27-47 行）。真正的业务逻辑（Gateway/本地 client runtime 二分、乐观更新顺序、IPC/tRPC 转发异构 Agent 干预）全部在**全局** ChatStore 的 `conversationControl.ts`，属于对话请求与上下文笔记第 7 节。笼统地说"编辑/删除/分支切换/审批 action 都在 Conversation Store 中"，对审批这一项是不准确的。
+它们共同的固定三步：等待 `waitForPendingArgsUpdate` → 触发本地 `hooks.onToolApproved`/`onToolRejected` → **调用 `useChatStore.getState()` 上的同名方法**，把局部 `context` 传过去（例：`approveToolCall` 27-47 行）。业务逻辑（Gateway/本地 client runtime 二分、乐观更新顺序、IPC/tRPC 转发异构 Agent 干预）全部在**全局** ChatStore 的 `conversationControl.ts`，属于对话请求与上下文笔记第 7 节。
 
 ## 5. 列表、索引与检索
 
@@ -235,7 +235,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
 
 1. **`parse()` 双跑**（第 2 节已展开）：全局 ChatStore 与局部 ConversationStore 各自独立调用 `conversation-flow.parse()`，各维护一份展示数据，仅靠 `onMessagesChange` 回调单向同步 + `StoreUpdater` 反向同步。没有看到任何断言/测试保证两份数据在任意时刻完全一致；全局侧的 `replaceMessages`（`query.ts`）支持 `preserveWorks` 与语音占位合并，局部侧的同名方法支持 `isSameConversationContext` 防过时与 `mergeFetchedMessagesWithLocalState` 合并——两份实现各有各的补丁，是语义分叉的具体证据点，而不是纯理论风险。
 2. **引用稳定性靠手工补丁而非算法本身保证**：`stabilizeReferences`/`replaceEqualDeep` 在局部 store 的三个 parse 调用点都手动包了一层（`data/action.ts:172,210,317`），但全局 ChatStore 的两个 parse 调用点（`query.ts:257`、`internals.ts:72`）**没有**做同样处理——意味着全局 `messagesMap` 上的 React 组件如果直接订阅会有整树重渲染风险（本次没有找到直接订阅全局 `messagesMap` 渲染 UI 的路径，UI 主要读局部 store）；这也说明"parse 结果引用不稳定"是团队公认要专门绕过的已知特性。
-3. **messageMapKey 与服务端缓存 key 并非同构**：`query.ts:318-325` 的 `representableBucketKey` 防御逻辑，字面上承认 page/`group_agent` 等 scope 的本地 key 无法被服务端 `message:list` 缓存 key 表达，所以这些场景下乐观更新完全不写缓存，只能靠下一次真实网络请求纠正——这是一个已知但被绕过而非修复的不一致。
+3. **messageMapKey 与服务端缓存 key 并非同构**：`query.ts:318-325` 的 `representableBucketKey` 防御逻辑，承认 page/`group_agent` 等 scope 的本地 key 无法被服务端 `message:list` 缓存 key 表达，所以这些场景下乐观更新完全不写缓存，只能靠下一次真实网络请求纠正。
 4. **`reconcileAssistantToolLinks`**（两处独立调用：`internals.ts:65`、`query.ts:227-228`）专门用来修复“assistant.tools[] 弄丢了某条工具引用，但对应的 tool 消息行还在”的情况——`internals.ts:60-64` 注释直接写 “an optimistic updateMessage{tools} on the wrong/old assistant during a step boundary can drop the link”，说明流式生成的 step 边界上，`tools[]` 数组和独立的 tool 消息行两份数据保持同步本身就是一个容易出错、需要专门补救的地方。
 5. **多窗口/多端并发写入**：本次未覆盖多窗口与并发写入合并语义（客户端无多窗口写入入口；服务端写入合并行为未调查），未验证（不虚构）。
 
@@ -259,7 +259,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
 
 - 本地分桶 key 的 scope 远比“agentId/topicId/threadId 三元组”复杂：实际存在 main/thread/group/group_agent/page/sub_agent（别名，会被强制映射回 main）等 6 种 scope，各自有独立的字段映射和降级规则（详见第 1.1 节），且这套本地 key 与服务端 `message:list` 缓存 key 并不同构。
 - `parse()` 在全局 ChatStore 和局部 ConversationStore 两层各自独立运行：一次“发消息/审批/编辑”操作里，`parse()` 可能被调用两次以上，两边各自维护一份 `displayMessages`/`flatList`，仅靠回调同步保持一致（详见第 2 节）。
-- 会话级 store 实例**跨 topic 存活**，切换时由 `StoreUpdater` 用 `createEphemeralResetState` 原地重置（2.2 节）——这是与“按 key 重建 store”方案不同的取舍，重置清单必须与新加的 UI-only 状态字段保持同步。
+- 会话级 store 实例**跨 topic 存活**，切换时由 `StoreUpdater` 用 `createEphemeralResetState` 原地重置（2.2 节）——这是与“按 key 重建 store”方案不同的取舍，重置清单要与新加入的 UI-only 状态字段保持同步。
 - 树形数据在生产环境中会出现需要专门修复的异常状态：`doctor/diagnose.ts`、`reconcileAssistantToolLinks`、`stabilizeReferences` 都是针对已知问题的手工补丁（详见第 5、6 节）。
 - **类目边界**：本笔记只回答数据语义与持久化形状；发送任务如何读取这些数据、审批如何恢复任务属于对话请求与上下文；`conversation-flow` 的三阶段解析算法与虚拟消息生成细节、列表窗口化与滚动属于消息渲染器；Topic 侧栏、搜索面板、分支导航等界面工作流属于 Chat UI。
 

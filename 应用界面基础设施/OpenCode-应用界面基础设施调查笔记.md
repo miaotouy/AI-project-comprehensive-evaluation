@@ -252,7 +252,7 @@ settings.appearance.fontSize（默认 14，settings.tsx:200）本轮全 packages
 
 **Toast 双代并存。** v1（Kobalte）与 v2（solid-sonner）按新旧布局静态切换，共享 showToast 门面但注册表分离——说明界面基础设施正处迁移期（新布局全部 v2 化）。
 
-**主题"解析生成"而非"静态样式表"。** TUI 从终端 palette 生成 system 主题、Web 从主题 JSON 生成 CSS 变量并缓存到 localStorage——第三方/自定义主题无需预编译。
+**主题在运行时解析生成。** TUI 从终端 palette 生成 system 主题、Web 从主题 JSON 生成 CSS 变量并缓存到 localStorage，第三方/自定义主题无需预编译。
 
 **Web 主题扩展 API 未接线。** registerTheme、`loader.ts`（loadThemeFromUrl 导入等）是库级导出但无 App 内调用方，产品侧主题面就是 37 个内置 JSON + 运行时选择器；无主题市场/导入导出 UI（检索范围见第 4 节）。
 

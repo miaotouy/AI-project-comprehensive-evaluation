@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Manifold Desktop 是本组最小、平台边界最明确的仓库：原生 C++/WinUI 核心加无框架 WebView2 前端，目标仅为 Windows x64。绝大多数源码量来自 `Manifold.Core` 的头文件；这也说明按物理行统计会受到 C++ 头文件内联实现和声明风格影响。
+Manifold Desktop 是原生 C++/WinUI 核心加无框架 WebView2 前端，只面向 Windows x64。绝大多数源码量来自 `Manifold.Core` 的头文件；这也说明按物理行统计会受到 C++ 头文件内联实现和声明风格影响。
 
 ## 统计与模块分布
 
@@ -31,7 +31,7 @@ Manifold Desktop 是本组最小、平台边界最明确的仓库：原生 C++/W
 
 ## 文档、测试与平台
 
-文档只有根 README 等 2 文件、`docs` 2 文件和 `build` 1 文件。本次按统一目录/文件名规则未找到测试文件；这表示当前跟踪快照没有显式测试树，不代表外部或手工测试不存在。README 与解决方案配置均限定 Windows 10+ x64（`README.md:3-13,70-90`；`ManifoldDesktop.sln:10-30`），前端通过 WebView2 嵌入，而非跨平台浏览器发行。
+文档只有根 README 等 2 文件、`docs` 2 文件和 `build` 1 文件。本次按统一目录/文件名规则未找到测试文件；这表示当前跟踪快照没有显式测试树，不代表外部或手工测试不存在。README 与解决方案配置均限定 Windows 10+ x64（`README.md:3-13,70-90`；`ManifoldDesktop.sln:10-30`），前端通过 WebView2 嵌入。
 
 ## 关键源码索引
 

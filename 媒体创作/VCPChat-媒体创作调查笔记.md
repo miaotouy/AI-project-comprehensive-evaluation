@@ -71,7 +71,7 @@ Scriptorium 的长期状态是工程修订与文脉，不是统一的媒体生�
 
 工程本身是 Scriptorium 的主要产物和持续性单位。`CreateProject` 经过规范化与可编程内容审查后生成 VDOCX 或 VPPTX ZIP，写入 `AppData/ScriptoriumDocument/VDOCX|VPPTX`；默认同名改名，显式覆盖需要现有文件哈希。文脉还保留源码变更、渲染结果差异、作者、审批和工程内嵌快照，因此恢复是新建一条可审计记录而非删除后续历史。落盘约束见 `modules/services/scriptoriumAgentControlService.js:243-407`，文脉语义见 `ScriptoriumModules/README.md:372-425`。
 
-媒体资源使用内容寻址，工程打开时会校验资源路径、ID 和实际哈希；编辑期以受生命周期管理的 blob URL 使用，导出时才按目标格式封装。该设计支持工程内去重和来源可读性，避免把大段 Base64 写入正文。检查范围内未确认跨工程的中央媒体库、全局资源搜索索引或对位图/音视频的版本 DAG；应将这些未确认能力与工程内资源和运行期 SVG 包区分。
+媒体资源使用内容寻址，工程打开时会校验资源路径、ID 和实际哈希；编辑期以受生命周期管理的 blob URL 使用，导出时才按目标格式封装。该设计支持工程内去重和来源可读性，避免把大段 Base64 写入正文。检查范围内未确认跨工程的中央媒体库、全局资源搜索索引或对位图/音视频的版本 DAG；这三类未确认能力与工程内资源、运行期 SVG 包处于不同持久化层。
 
 ## 5. 预览、编辑、导出与复用
 
@@ -83,7 +83,7 @@ Agent 可以读取文档信息、渲染文本、目录、章节、源码、视�
 
 `ScriptoriumCollaborator` 是 VCP 分布式服务器中的 direct 插件，manifest 声明 hybridservice、direct 通信和 330 秒超时。服务按命令把读取、截图、PR、页面修改、工程创建和资产包操作交给控制服务；控制服务再与当前 Scriptorium Electron 窗口通信。工程创建可直接回传路径、文件 SHA-256、大小及可编程内容审查信息；PR 则回传审批结果。这让 Agent 结果回流到 VCP 工具协议，同时把实际写入交给窗口侧的人类协作流程，见 `plugin-manifest.json:1-16`、`ScriptoriumCollaboratorService.js:890-1003`。
 
-Scriptorium 的外部依赖是 Electron、VCP 分布式服务及浏览器渲染依赖。它不依赖 ComfyUI 才能编辑或导出工程。反过来，ComfyGen 必须依赖本地/远程 ComfyUI、VCPToolBox 的 ComfyUIGen 插件及其工作流转换器；HumanToolBox 只是通过本地文件和 IPC 管理这些外部对象。横向比较时应保持这两条依赖链分开。
+Scriptorium 的外部依赖是 Electron、VCP 分布式服务及浏览器渲染依赖。它不依赖 ComfyUI 才能编辑或导出工程。反过来，ComfyGen 必须依赖本地/远程 ComfyUI、VCPToolBox 的 ComfyUIGen 插件及其工作流转换器；HumanToolBox 只是通过本地文件和 IPC 管理这些外部对象。两条依赖链的对象与持久化层互不相同。
 
 ## 7. 权限、资源边界与失败恢复
 

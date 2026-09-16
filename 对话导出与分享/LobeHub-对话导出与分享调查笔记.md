@@ -197,7 +197,7 @@ OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopov
   - 消息重写：生成新 id、按映射重建 `parentId` 链、tools 的 id 与 plugin `toolCallId` 换新、`metadata.copied: true` 标记（`copyMessagesInDatabase.ts:32-38`）；
   - 计数口径：token/cost 数字保留，但用量报表过滤 copied 行（`copiedTranscript.ts:36-44`）；
   - 不复制：`messagesFiles`（文件关联）、translates、TTS、messageGroups（压缩组）、chunks/queries；与 SQL 版 `copyMessagesInDatabase`（覆盖全部子表，`:253-304`）口径不同，topic 复制是较轻的一份。
-- **导出四格式共用同一数据源与预览-产物一致原则**：截图预览即产物；文本与 PDF 共享 `generateMarkdown` 的同一份 content 字符串，JSON 的预览、复制与下载共用同一份 JSON 字符串（`ShareJSON/index.tsx:87`），保证预览所见即所得。
+- **导出四格式共用同一数据源与预览-产物一致原则**：截图预览即产物；文本与 PDF 共享 `generateMarkdown` 的同一份 content 字符串，JSON 的预览、复制与下载共用同一份 JSON 字符串（`ShareJSON/index.tsx:87`）。
 - **分享是实时非快照**：与"快照分享"路线相反，服务端在每次访问时以属主身份现读；`skipWorks` 是唯一的内容治理点。这也意味着源 topic 后续变化会直接反映到已分享链接。
 - **OSS/云能力分层**：RBAC 与 `usePermission` 在 OSS 是放行桩（`src/hooks/usePermission.ts:12-15`），`enableBusinessFeatures` 是硬开关；链接分享 UI 默认隐藏，服务端与路由代码齐备。导出弹窗不受开关影响。
 - 单消息分享仅助手消息（`share.tsx:16`），文本仅拼 content、无角色标题（`ShareMessageModal/ShareText/template.ts:10-14`）。

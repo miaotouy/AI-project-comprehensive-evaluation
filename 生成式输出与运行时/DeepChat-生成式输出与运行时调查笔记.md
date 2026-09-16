@@ -21,7 +21,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 3. **Agent 本机执行**：命令类工具在本机 shell 中执行（目录白名单 + 命令权限审批 + 后台会话），文件写入类工具改工作区文件，读取与检索类工具读工作区，图像生成工具产出 image 块。
 4. **Provider 图像生成**：OpenAI Codex 图像生成已接入 Provider 适配层；其结果仍作为聊天 image block 进入既有消息投影，本次未发现独立于消息的对象生命周期（`src/main/provider/openaiCodexAdapter.ts`、`src/shared/imageGenerationSettings.ts`）。
 
-**能力等级判定：`G3`（可执行 Artifact）**。HTML/React Artifact 进入带 `sandbox` 属性的 iframe 运行环境（脚本可执行、依赖经 `deepcdn://` 本地协议注入）；Agent exec 在宿主进程的子进程执行任意 shell 命令（经权限审批）。**未达 G4**：用户对 Artifact 无编辑保存通道（工作区代码视图显式只读，消息内编辑器无写回路径）；**未达 G5**：对象依附于消息文本，无独立环境级生命周期。
+**能力等级判定：`G3`（可执行 Artifact）**。HTML/React Artifact 进入带 `sandbox` 属性的 iframe 运行环境（脚本可执行、依赖经 `deepcdn://` 本地协议注入）；Agent exec 在宿主进程的子进程执行任意 shell 命令（经权限审批）。**未达 G4**：用户对 Artifact 无编辑保存通道（工作区代码视图显式只读，消息内编辑器无写回路径）；**未达 G5**：对象依附于消息文本，无独立于消息块的生命周期。
 
 ## 系统边界与完整主链路
 

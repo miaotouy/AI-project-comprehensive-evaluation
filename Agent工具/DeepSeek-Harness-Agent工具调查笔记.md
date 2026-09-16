@@ -179,7 +179,7 @@ repeat-tool-reminder 挂在 tools/post-execute：按 agent 维护连续相同调
 
 **插件自举**：tool-cordis 让模型定义与运行动态 Cordis 插件（刻意 opt-in，不在任何 shipped tree）：运行中的包可注册额外模型可见工具，工具集变化经变更请求头日志记录。
 
-**Skill**：Skill 是文本侧能力：会话级 skill 目录以 catalog 形式上下文注入（source 标记 skill-catalog），模型用 skill 工具按名加载全文，不是函数式工具注册。
+**Skill**：会话级 skill 目录以 catalog 形式上下文注入（source 标记 skill-catalog），模型用 skill 工具按名加载全文，不作为函数式工具注册。
 
 **子 Agent 与旁路**：子 agent 由 tool-subagent（两个后端分别注册）、全局控制工具组（发消息、中断、列列表）与子 agent 内注册的 report 工具构成闭环。Code Mode 是主要旁路面：code 呈现下模型直接调用只能命名 `run_code`，程序内 SDK 子调用带 parent 令牌走完整守卫管线并逐条落盘 code-dispatch 事件；该日志副本可被瀑布改写，但程序收到的值与模型可见结果不变。
 

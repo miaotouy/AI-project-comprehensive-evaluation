@@ -87,7 +87,7 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 - **服务 realm 规则**：preset 若发布服务，必须放在带 `isolate` realm 的 `cordis:group` 里（entry-local 实例）；发布进 root realm 的行在挂载时被拒、随后被 invariant 持续复查（`mount.ts:189-203, 361-367`；`invariant.ts:33-44`）。standard preset 的 plan-mode、compaction、delegation 都是这样分组的（`standard/agent.cordis.yml:104-125, 137-155, 174-233`）。
 - **子 Agent**：同进程子 agent 通过 `composeFrom` 加入父组合（不是重新 mount），因此永远和父同一代组合；再叠加子自己的 persona section、工具过滤和固定委托声明（`child-agent.ts:163-175`）。`subagent:delegation` 是 order 120 的动态上下文而非 section，保持父子 system prompt 一致（`child-agent.ts:135-139`）。
 - **知识库与记忆**：无向量知识库；等价物是 preset 可携带的 skills 目录（cordis preset 自带两个 skills）与 `agent-instructions` 注入的工作区指令。记忆即会话日志 + 压缩（standard preset 的 compaction 组），无跨会话自动记忆。
-- **工作区指令是 user 角色消息，不是 system prompt**：`dsh-agent-instructions` 按 `AGENTS.md`/`CLAUDE.md`（及 `.local` 变体）候选加载，作为带 `agent-instructions` source 的用户消息进入请求，并在文件被 read/write/edit 触碰后增量更新（`packages/context/agent-instructions/src/index.ts:322-348`；`config.ts:11-13`）。这是与 pi 最显著的分叉（见第 9 节）。
+- **工作区指令是 user 角色消息，不是 system prompt**：`dsh-agent-instructions` 按 `AGENTS.md`/`CLAUDE.md`（及 `.local` 变体）候选加载，作为带 `agent-instructions` source 的用户消息进入请求，并在文件被 read/write/edit 触碰后增量更新（`packages/context/agent-instructions/src/index.ts:322-348`；`config.ts:11-13`）。这是与 pi 的一个主要分叉（见第 9 节）。
 
 ## 6. 资产、变量、开场白与用户档案
 
@@ -114,9 +114,9 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 
 **继承点仅限 LLM 层**：harness 以 `@earendil-works/pi-ai@0.82.1` 为依赖（`pnpm-workspace.yaml:60`），`packages/llm/llm-pi-ai` 把它包装成两条 LLM 适配器之一（另一条是直连 DeepSeek API 的 `llm-deepseek`）。这是 Provider 渠道层的关系（模型目录、thinking level、多协议），与角色/提示词体系无关。本次未找到任何代码、文档或配置把 preset 与 pi 的 agent 配置（SYSTEM.md、APPEND_SYSTEM.md、`~/.pi/agent/` 设置）联系起来。
 
-按本类别横向比较维度，两项目差异：
+两个项目在这些维度上的差异：
 
-| 维度 | pi（534bcbff） | DeepSeek Harness（47f9438） |
+| 维度 | pi | DeepSeek Harness |
 | --- | --- | --- |
 | 角色实体 | 无对象；文件约定（SYSTEM.md/APPEND_SYSTEM.md/AGENTS 链/skills） | preset：目录 + `agent.cordis.yml` 插件行列表 + 可选 `preset.yml` |
 | 存储粒度 | 全局 `~/.pi/agent/` + 项目 `.pi/`，按 cwd 解析 | 配置 roots + `<dshHome>/.agent-presets`，按 preset id 解析 |

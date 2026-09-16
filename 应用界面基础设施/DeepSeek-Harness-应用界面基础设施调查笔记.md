@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合产物：一个零插件依赖的 shell 内核负责加载页与装配，全部 UI 能力以 client 插件包形式经插槽系统组合。仓库同时提供对立的 CLI/TUI 表面，Web 面通过 `dsh --profile web` 从同一套插件底座启动。
+DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合产物：一个零插件依赖的 shell 内核负责加载页与装配，全部 UI 能力以 client 插件包形式经插槽系统组合。仓库另有 CLI/TUI 表面，Web 面通过 `dsh --profile web` 从同一套插件底座启动。
 
 浏览器端没有传统的应用入口与路由：`window.__DSH_BOOT__` 清单把插件图交给 shell，shell 用自研“懒 CJS 模块表”注册各包浏览器半边，再接入 vendored Cordis Loader 的 `internal` 契约完成纤维装配，全部条目 ACTIVE 后一次性切换到真实界面。传输层上行只有 HTTP 一元 RPC，下行是两条 WebSocket 事件流，由重连状态机统一管理。
 
@@ -144,7 +144,7 @@ DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合�
 
 ## 13. 设计取舍与已确认边界
 
-**插件化界面即产品形态。** 一个 UI 功能 = 一个 client 插件包，组合走插槽而非组件树约定；跨插件值导入是构建期错误，唯一通道是插槽、store、注入面与服务。这与仓库“一切皆插件”的总纲领一致。
+**插件化界面即产品形态。** 一个 UI 功能 = 一个 client 插件包，组合走插槽而非组件树约定；跨插件值导入是构建期错误，唯一通道是插槽、store、注入面与服务。这与仓库“一切皆插件”的总体设计一致。
 
 **shell 自足规则。** 加载页与失败页零插件依赖，连快照 store 引擎都是手写信号（`client/web/src/loader-status.ts`），保证插件全挂时页面仍能解释发生了什么。
 
@@ -158,7 +158,7 @@ DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合�
 
 **Electron 是设计预期而非现状。** `host/webserver` 模块注释说明 Electron 场景会以 file:// 加载 dist 并走 IPC fetch 桥，但仓库内无任何 Electron/Tauri 代码（全仓 package.json 未命中相关依赖），Web 面目前是纯浏览器 + node:http 服务器形态。
 
-**进程级启动兜底。** CLI 侧 `app-boot` 提供 fail-loud 守卫（未处理拒绝打标退出，终端持有者可先归还终端）、patch 层动态应用（用户 patch 经 Cordis HMR 热重载）、以及 `assertEntriesActivated` 激活审计（把 pending 原因列出）；`apps/cli/src/process-shutdown.ts` 提供 5 秒优雅退出与信号升级强制退出。这些与浏览器 shell 的 settled 审计是同一思想在两端的实现。
+**进程级启动兜底。** CLI 侧 `app-boot` 提供 fail-loud 守卫（未处理拒绝打标退出，终端持有者可先归还终端）、patch 层动态应用（用户 patch 经 Cordis HMR 热重载）、以及 `assertEntriesActivated` 激活审计（把 pending 原因列出）；`apps/cli/src/process-shutdown.ts` 提供 5 秒优雅退出与信号升级强制退出。浏览器 shell 侧有对应的 settled 审计，两端都在放行前确认全部条目激活。
 
 ## 14. 未验证事项
 

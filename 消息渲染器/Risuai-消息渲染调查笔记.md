@@ -136,7 +136,7 @@ Message.data（字符串）
 6. `renderHighlightableMarkdown`：`$$...$$` 先被 `katex.renderToString` 替换（`renderMarkdown`，parser.svelte.ts:152-204，`output: 'mathml'`、`displayMode: false`），随后 markdown-it 渲染（`html: true`、`breaks`、`typographer`、引号占位符机制）；带语言标记的代码围栏由第二个 markdown-it 实例（`mdHighlight`）输出 `pre-hljs-placeholder` 占位，之后逐块按需 `import` highlight.js 语言并生成 `pre.hljs`（switch 共映射 18 种语言，未知语言转义为纯文本，`risuerror` 输出错误面板）。
 7. `trimMarkdown`（ChatBody 渲染时）：普通内容直接经 DOMPurify 清洗；含 `risu-style` 时先取得清洗后的 DOM，再只解码其中真实的样式节点并原地替换为 style。CSS 不再作为 HTML 字符串重新交给 DOMPurify，因而其中含有类似标记的文本或 SVG data URL 时不会被清洗器误删（`parser.svelte.ts:779-834,966-1003`）。
 
-两个 markdown-it 实例都 `disable(['code'])`（缩进代码块规则），正文行内代码与围栏行为由上述占位机制统一处理。引号处理值得一提：markdown-it 的 typographer 把引号替换为 PUA 字符，随后按 `customQuotes`/`blockquoteStyling` 设置决定是原样还原还是包成 `<mark risu-mark>` 引用样式。
+两个 markdown-it 实例都 `disable(['code'])`（缩进代码块规则），正文行内代码与围栏行为由上述占位机制统一处理。markdown-it 的 typographer 把引号替换为 PUA 字符，随后按 `customQuotes`/`blockquoteStyling` 设置决定是原样还原还是包成 `<mark risu-mark>` 引用样式。
 
 `risuChatParser`（parser.svelte.ts:1538-1812）是变量层，按语法元素划分能力：
 

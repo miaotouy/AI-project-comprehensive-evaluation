@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-当前快照中的 VCPMobile 是一个以聊天为主表面、以 Android 原生能力为差异层的 Tauri 应用。人类首先进入单一聊天路由；设置、日记、同步、RAG 观察和设备节点作为覆盖页接入。Rust 既承接与 VCP 服务的聊天、同步和远端日记请求，也承接在手机本地运行的数据库、文件处理、Android 插件和设备工具。因此它不是单纯的 VCPChat 皮肤，也不是独立的后端：它把远端 VCP 生态中的长期内容和服务，转换为可在一台 Android 设备上操作、同步和受控暴露的界面与执行面。
+当前快照中的 VCPMobile 是一个以聊天为主表面、以 Android 原生能力为差异层的 Tauri 应用。人类首先进入单一聊天路由；设置、日记、同步、RAG 观察和设备节点作为覆盖页接入。Rust 既承接与 VCP 服务的聊天、同步和远端日记请求，也承接在手机本地运行的数据库、文件处理、Android 插件和设备工具。因此它的角色介于聊天客户端与独立后端之间：它把远端 VCP 生态中的长期内容和服务，转换为可在一台 Android 设备上操作、同步和受控暴露的界面与执行面。
 
 本地 Git 可达历史只包含当前提交，其父历史不可用，不能依据该快照建立可靠的版本演变时间线。README 对“VCPChat 移动端进化版”和阶段里程碑的描述作为项目自述保留，不升级为历史确认。
 
@@ -33,7 +33,7 @@ README 把产品称为“Project Avatar”，主张从桌面客户端走向具�
 
 ### 提交历史与阶段变化
 
-本次无法建立。当前 HEAD 是 `cecdbe432feda57821938bba7625a272113d21c1`，其可达历史在本地表现为根提交；应在取得完整仓库历史后，再用首次引入、迁移提交和版本标签核实 README 的里程碑。当前目录和文档日期不能替代该证据。
+本次无法建立。当前 HEAD 的可达历史在本地表现为根提交；应在取得完整仓库历史后，再用首次引入、迁移提交和版本标签核实 README 的里程碑。当前目录和文档日期不能替代该证据。
 
 ## 当前产品边界
 
@@ -56,7 +56,13 @@ README 把产品称为“Project Avatar”，主张从桌面客户端走向具�
 
 ## 能力组织骨架
 
-前端按 `core` 与 `features` 分开：前者放 Store、router、composable、指令、常量和通用工具，后者按 agent、chat、diary、distributed、notification、rag、settings、sync 等用户能力聚合。根组件将低频 Feature 统一接入覆盖层，而不为每个功能添加 URL（`src/components/FeatureOverlays.vue:20-122`）。
+前端按 `core` 与 `features` 分开：`core` 放 Store、router、composable、指令、常量和通用工具；`features` 按用户能力聚合，目录包括：
+
+```text
+agent chat diary distributed notification rag settings sync
+```
+
+根组件将低频 Feature 统一接入覆盖层，而不为每个功能添加 URL（`src/components/FeatureOverlays.vue:20-122`）。
 
 Rust 入口主要注册 managed state 和 Tauri command；领域逻辑分在应用服务目录，分布式节点单列目录且声明不依赖该服务目录。这产生两个可独立理解的后端面：面向 VCP 请求/本地持久化的应用服务，和面向手机能力注册/反向执行的设备节点（`src-tauri/src/lib.rs:1-146, 230-336`；`src-tauri/src/distributed/mod.rs:1-25`）。
 

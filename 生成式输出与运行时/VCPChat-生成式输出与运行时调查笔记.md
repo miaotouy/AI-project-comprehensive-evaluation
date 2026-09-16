@@ -18,7 +18,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 **例外：Scriptorium 共笔文坊**是仓库里第一套"独立对象模型"的模型协作面——VDOCX/VPPTX 工程（`AppData/ScriptoriumDocument/`）自带文档模型、资源清单与**文脉版本历史**（人类刻点 + Agent PR 以 pending/applied/rejected/conflict/failed 状态进入同一文脉，含 changeSet 与审批回执），Agent 经 `ScriptoriumCollaborator` 插件以"源码 PR + 人工审批"方式修改对象（详见 6.2）。它仍走"唯一完整 source"的文本真相模型（源码即真相，不序列化渲染树），但补上了聊天侧没有的版本/冲突/身份语义。
 
-运行能力是项目特色：气泡内 HTML 预览（iframe srcdoc，未设置 sandbox 属性）、独立阅读窗口可执行模型内联脚本（CDN 替换为本地 vendor）、Python 双模式执行（Pyodide WASM 沙箱 / 本机 `python -u` 进程）、桌面画布常驻挂件（Shadow DOM + 脚本 IIFE 沙箱 + 能力桥：widgetFS、musicAPI、`__vcpProxyFetch`/`__vcpProxyPost`）。桌面挂件是唯一具备"独立 ID + 文件持久化 + 可重载 + 模型可远程创建/替换/查询"的完整对象链。Canvas 协同窗口提供"AI 写文件 → chokidar 检测 → 行级 diff → 接受/拒绝"的编辑协作面，但版本仅为内存内容快照。
+运行能力覆盖四类执行位置：气泡内 HTML 预览（iframe srcdoc，未设置 sandbox 属性）、独立阅读窗口可执行模型内联脚本（CDN 替换为本地 vendor）、Python 双模式执行（Pyodide WASM 沙箱 / 本机 `python -u` 进程）、桌面画布常驻挂件（Shadow DOM + 脚本 IIFE 沙箱 + 能力桥：widgetFS、musicAPI、`__vcpProxyFetch`/`__vcpProxyPost`）。桌面挂件是唯一具备"独立 ID + 文件持久化 + 可重载 + 模型可远程创建/替换/查询"的完整对象链。Canvas 协同窗口提供"AI 写文件 → chokidar 检测 → 行级 diff → 接受/拒绝"的编辑协作面，但版本仅为内存内容快照。
 
 增量生成采用"稳定前缀截断 + 整段尾部重渲染 + morphdom 差量合并"，无 AST 级 patch，未在自有代码中找到 diff-match-patch 使用（依赖虽在 package.json）。用户可编辑消息全文、重新生成回复、点击模型生成的按钮回发 `[[点击按钮:...]]`。
 
@@ -158,13 +158,13 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 - **渲染性能**：30fps 合帧、`findExplicitStablePrefix` 避免全量重解析、`renderHtmlCache`（`messageRenderer.js:1686-1752`，FNV1a 指纹，含 shouldBypassRenderHtmlCache 判定）、块级 HTML 缓存复用（`streamManager.js:568-606`）。
 - **限额**：HTML island 深度 128/256KB（`streamManager.js:44-45`）、推送块 150s 超时、代码行扫光动画最多并发 3（`:12-13`）；未找到挂件数量/进程数全局限额。
 
-## 当前 Scriptorium 协作运行时
+## 11. 当前 Scriptorium 协作运行时
 
 Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、编辑历史、来源编辑、版式、图形资源和演示文稿模块。它仍以源码为事实源，但 Agent 已可经 ScriptoriumCollaborator 查询文档与视觉上下文，并以完整 source PR 提交修订；文坊等待人类审阅后才产生 applied、rejected、conflict 或 failed 回执及文脉记录。相较消息内预览或 Canvas 文件，这是一条拥有显式对象、审阅回执和可追溯编辑记录的 G4 工作区链路；没有证据表明其具备 CRDT 或自动三方合并。
 
 依据：`ScriptoriumModules/scriptorium-document-store.js`、`scriptorium-render-coordinator.js`、`scriptorium-edit-history.js`、`scriptorium-pr-diff.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:30-31`。
 
-## 11. 测试、已确认边界与未验证事项
+## 12. 测试、已确认边界与未验证事项
 
 **测试体系**：`tests/` 顶层 7 个文件，node:test + jsdom 驱动（frontend-plugins.test.js:1-13），覆盖前端插件、Loom 控制器/适配器/管理器运行时、DeepMemo 与移动端同步适配器等（含 `test-export-inline.cjs`）；另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"）。**未找到**针对聊天渲染管线（contentPipeline/streamManager）、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试。流式最终一致性、资源回收、能力边界均无自动化覆盖。
 
@@ -177,7 +177,7 @@ Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、�
 
 **未验证事项**（未运行验证）：SSE 流实际事件时序与中断恢复；Pyodide CDN 加载与包安装行为；桌面挂件在实际桌面窗口的渲染/脚本执行；Canvas 外部变更 diff 的实际交互；CSP 与 preload 组合下模型脚本的实际可达面；多话题并发流式下的性能表现。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - `modules/renderer/streamManager.js:1624/2097/2190/1361/1906`：流式消息生命周期、块级稳定前缀渲染、桌面推送拦截
 - `modules/renderer/contentPipeline.js:408`：全量渲染流水线（保护-修正-恢复顺序协议）

@@ -14,10 +14,10 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，而不是路由或 utils/chat.py：主入口 `process_chat_payload`（2248 行）负责编排，先连接外部工具服务器（`connect_mcp_server`，2197 行），再执行单个工具（`execute_tool_call`，4969 行）、后处理结果（`process_tool_result`，871 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
+Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，不在路由或 utils/chat.py：主入口 `process_chat_payload`（2248 行）负责编排，先连接外部工具服务器（`connect_mcp_server`，2197 行），再执行单个工具（`execute_tool_call`，4969 行）、后处理结果（`process_tool_result`，871 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
 
 - 工具分三大来源，统一注册成 `tools_dict`（middleware.py 2732 行起）：本地数据库工具（`get_tools`，utils/tools.py 267 行）、内置工具（`get_builtin_tools`，520 行）、外部 MCP/OpenAPI 工具服务器（`server:*` 前缀）；每条条目含 `{tool_id, callable, spec, type}`，类型为 builtin/external/mcp，另有 `direct` 标志（前端直连执行）；
-- **内置工具是条件注入而非全量暴露**：共 54 个内置工具函数（tools/builtin.py，文件头明确警告只能经 utils/tools.py 封装使用），按 16 个类别做四重开关检查——模型 meta 的 `builtinTools` 类别开关、全局配置（`Config.get`）、模型能力（`get_model_capability`）、用户权限；
+- **内置工具按条件注入，不整批暴露**：共 54 个内置工具函数（tools/builtin.py，文件头明确警告只能经 utils/tools.py 封装使用），按 16 个类别做四重开关检查——模型 meta 的 `builtinTools` 类别开关、全局配置（`Config.get`）、模型能力（`get_model_capability`）、用户权限；
 - 请求体显式携带 `tools` 键（含 `tools: []`）时完全跳过服务端工具解析（middleware.py 2720-2723 行）；`use_builtin_tools` 判定见 2643-2649 行；
 - 工具参数校验是**白名单过滤**：`execute_tool_call` 从 `metadata['tools']` 按函数名取工具，用 spec 的 `parameters.properties` 键集过滤模型传入参数，解析失败返回错误文案；
 - 多轮工具调用循环上限 `max_tool_call_iterations`（默认 `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`）；每轮把 tool call 以 `function_call` 项加入输出、执行后加 `function_call_output` 项、再拼回消息重发；工具结果中的 base64 图片拆成 `input_image` 供 LLM 消费，前端展示则剥离，图片另附一条 user 消息；
@@ -151,7 +151,7 @@ process_chat_payload (2248)
 - `workspace/Tools.svelte`：工作区工具管理页（上传/编辑/Valves）；
 - `workspace/Models/ToolsSelector.svelte`：模型绑定工具选择器；
 - 数据来自 `getTools` API（src/lib/apis/tools/index.ts 68 行 → `GET /api/v1/tools/`）；
-- `MessageInput/Tools.svelte` **不存在**（MessageInput 目录无此文件，这是与旧版本/其他项目的差异点）。
+- `MessageInput/Tools.svelte` **不存在**（MessageInput 目录无此文件）。
 
 ## 8. 能力矩阵
 

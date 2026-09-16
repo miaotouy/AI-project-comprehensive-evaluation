@@ -20,7 +20,7 @@ VCPMobile 拥有移动端 Chat UI：固定头部、可滚动消息区、底部 C
 
 用户从 Agent/Group 侧栏选择 owner，再选择或创建 Topic；ChatView 监听当前 Topic，将其标已读并加载历史。页面由 header、消息列表和固定输入区组成，软键盘高度写入 CSS 变量，且空态可打开侧栏引导选择助手，见 `src/features/chat/ChatView.vue:88-198, 278-342`。
 
-发送动作由 InputEnhancer 发射给 history store；工作台自身只组合 Store 与滚动控制，不直接执行请求。当前主题、通知、侧栏抽屉和键盘 Insets 是外围 UI 状态，聊天主链只在需要时消费它们。
+发送动作由 InputEnhancer 发射给 history store；工作台自身只组合 Store 与滚动控制，不直接执行请求。当前主题、通知、侧栏抽屉和键盘 Insets 属外围 UI 状态，不属于聊天主链。
 
 ## 1. 会话导航、搜索与现场恢复
 

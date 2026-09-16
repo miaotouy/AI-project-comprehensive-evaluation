@@ -16,7 +16,7 @@
 
 VCPChat 达到外部执行体 `主链确认`（静态证据）：Electron 主进程在设置默认开启时启动独立的 VCPDistributedServer，使用 VCPLog URL 和 key 连接 VCPToolBox，注册本机插件 manifest；VCPToolBox 将这些能力登记为分布式工具，并以 `execute_tool` 下发调用。节点在本机 Node/Python 子进程或主进程注入 handler 中执行，随后以 `tool_result` 将结果回传（`main.js:455-481`；`VCPDistributedServer/VCPDistributedServer.js:259-357,594-667`）。
 
-关系中的执行权分层明确：VCPToolBox 保存已连接节点、可发现工具和在途请求；VCPChat 保存本机插件、Electron 窗口与本地文件/设备能力。普通模型输出中的工具文本块不会在 VCPChat 聊天 renderer 内解析执行，真正的执行调度在上游服务与本地节点之间完成。DESKTOP_PUSH 直接由 renderer 创建桌面挂件，未经过该协议，故不纳入本篇主链。
+关系中的执行权分层明确：VCPToolBox 保存已连接节点、可发现工具和在途请求；VCPChat 保存本机插件、Electron 窗口与本地文件/设备能力。普通模型输出中的工具文本块不会在 VCPChat 聊天 renderer 内解析执行，执行调度在上游服务与本地节点之间完成。DESKTOP_PUSH 直接由 renderer 创建桌面挂件，未经过该协议，故不纳入本篇主链。
 
 VCPToolBox 也提供 `/v1/human/tool`，使 VCPChat 的 HumanToolBox 等外部控制表面能够以文本工具协议发起同一插件执行路径。跨节点文件则通过请求来源 IP 找到节点，向节点发出内部 `internal_request_file`，取回 Base64 后缓存到服务端。本次未确认这些链路的端到端鉴权、真实取消、断线恢复或多节点竞争行为。
 

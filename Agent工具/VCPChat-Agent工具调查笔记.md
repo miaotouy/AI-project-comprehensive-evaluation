@@ -16,7 +16,7 @@
 
 VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistributedServer/VCPDistributedServer.js`），它以 WebSocket 分布式节点身份连接主 VCPToolBox 服务器，把本机能力（音乐控制、骰子、Canvas、Flowlock、DesktopRemote、本机文件读取、本机插件目录下的 PowerShell/PTY Shell/截图/UI 自动化等）注册为可被模型调用的工具，并在收到 `execute_tool` 消息后在本机 Node/Python 子进程中真正执行。除此之外，Electron **主进程**本身还直接托管了一条更短的模型触发链路：DESKTOP_PUSH 语法在 renderer 流式解析阶段被拦截，直接调用 `electronAPI.desktopPush` 在桌面画布创建/写入 HTML 挂件，完全不经过 VCPToolBox 的审批协议。
 
-代码中已确认的最重要发现：
+代码中已确认的关键发现：
 
 1. **VCPChat 自带的分布式节点默认开启**（`enableDistributedServer: true`，`modules/utils/appSettingsManager.js:132`），随主进程一起启动（`main.js:1097`），把本机插件目录（`VCPDistributedServer/Plugin/*`，当前 HEAD 30 个目录）中的能力注册进主 VCPToolBox 的工具目录，包括：
    - `PowerShellExecutor`、`PTYShellExecutor`：本机 shell 执行；
@@ -294,13 +294,13 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 
 依据：[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 5.2-5.3、7.3 节；[`../../VCPChat/modules/notificationRenderer.js:248-396`](../../VCPChat/modules/notificationRenderer.js)（通知卡片 DOM 构造方式）。
 
-## 当前工具边界
+## 11. 当前工具边界
 
 当前快照把 Scriptorium 协作器扩展为分布式节点的 direct 工具：它可读取文档信息、渲染文本、源码与视觉上下文，并以 `SubmitSourcePr` 提交待人工处理的完整源码修订；文档侧分别为请求和审阅设置 30 秒与 5 分钟的超时。该链路仍由服务端工具审批和文档内 PR 回执共同约束，不能与聊天文本中的普通工具展示混为一条执行路径。移动同步则继续以 VCP-CDS 的中央索引为默认数据面，保留旧本地索引回退；Wire 1.2 的 canonicalizer、错误契约和幂等入口使同步协议的约束比普通聊天历史写入更明确。
 
 依据：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:30-31`、`VCPDistributedServer/Plugin/VCPMobileSync/index.js:114-191`、`transport/routes.js:76-184`、`sync/canonical.js:178-400`。
 
-## 11. 未验证事项与后续调查缺口
+## 12. 未验证事项与后续调查缺口
 
 - **`preload/chat.js` vs `preload/utility.js` vs `preload/desktop.js` 的通道白名单差异**：三者都暴露 `loadForumConfig`，但未逐一核实每个 BrowserWindow 实际装载的是哪个 preload，以及是否存在某个窗口既能执行不受信任内容又同时拥有论坛凭据读取权限的组合。
 - **VCPLog 默认协议是 `ws://` 还是 `wss://`**：代码本身不强制升级，具体默认值取决于用户在设置里填写的 `vcpLogUrl`；未找到硬编码默认 URL 来判断典型部署是否走加密连接。

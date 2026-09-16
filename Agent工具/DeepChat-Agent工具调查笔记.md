@@ -122,7 +122,7 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 
 ## 6. 参数解析、校验与错误处理
 
-- **参数文本解析**：`ToolService.callTool` 对 Agent 工具先走 `parseAgentToolArguments`（`src/main/tool/index.ts:542-560`）：`JSON.parse` 失败后用 `jsonrepair` 修复，再失败则记录警告并返回空参数对象（:548-558）——即“解析失败降级为空参数”而不是抛错，由后续 schema 校验兜底。legacy `<function_call>` 文本的解析失败路径见 §5。
+- **参数文本解析**：`ToolService.callTool` 对 Agent 工具先走 `parseAgentToolArguments`（`src/main/tool/index.ts:542-560`）：`JSON.parse` 失败后用 `jsonrepair` 修复，再失败则记录警告并返回空参数对象（:548-558）——即解析失败时降级为空参数、不抛错，由后续 schema 校验兜底。legacy `<function_call>` 文本的解析失败路径见 §5。
 - **schema 校验**：Agent 工具的执行入口在各 handler 前用 zod `schema.safeParse(args)` 校验，主要入口包括：
   - `agentToolManager.ts:997` process 工具、`:1114` 文件工具、`:2533`/`:2586` question 等工具、`:2644` skill_run；
   - 文件读写各子命令的解析在 `agentFileSystemHandler.ts:799-1183`。

@@ -73,7 +73,7 @@ JSON 模式生成 OpenAI 风格的 `messages` 数组：开头插入一条 role �
 
 ### 4.1 share adapter：基类单实现、Provider 无关
 
-`share()` 只定义在 `ClientApi` 基类上，LLM 抽象类没有该方法（`app/client/api.ts:191-228`）。`getClientApi`（`api.ts:368-399`）只负责选择用哪个 Provider 的 LLM 客户端，因此无论当前模型是哪个 Provider，分享都走同一条 ShareGPT 管线。这是下钻后对初版笔记表述的修正：并非各 Provider 各自实现分享方法。
+`share()` 只定义在 `ClientApi` 基类上，LLM 抽象类没有该方法（`app/client/api.ts:191-228`）。`getClientApi`（`api.ts:368-399`）只负责选择用哪个 Provider 的 LLM 客户端，因此无论当前模型是哪个 Provider，分享都走同一条 ShareGPT 管线。这是下钻后对初版笔记表述的修正：分享方法只在基类实现，与各 Provider 无关。
 
 数据口径与发送细节（`api.ts:191-228`）：
 
@@ -102,11 +102,11 @@ JSON 模式生成 OpenAI 风格的 `messages` 数组：开头插入一条 role �
 
 ## 6. 设计取舍与已确认边界
 
-- 三种格式共用消息选择和上下文开关，用户能够在同一入口切换面向阅读、视觉传播和接口交换的表达。
-- 图片使用专用品牌版式，结果稳定且便于传播，但不能像 AIO Hub 那样编辑视觉配置或比较生成版本。
+- 三种格式共用消息选择和上下文开关，用户在同一入口切换文本、图片和 JSON 三种交付物。
+- 图片使用专用品牌版式，但不能像 AIO Hub 那样编辑视觉配置或比较生成版本。
 - 本地图片导出和远端 ShareGPT 是两条独立 sink；“图片预览中点击分享”发送消息内容，图片文件不会进入该链路。
 - JSON 是有意简化的 messages payload，不具备备份格式的完整性；整应用 Backup 另属会话管理与备份恢复。
-- 分享治理刻意保持单点：`share()` 单实现、无本地记录、无撤销/删除，链接生命周期完全依赖第三方 ShareGPT；CORS 问题用一次同源 rewrite 解决，服务端零鉴权。
+- 分享链路只有一处实现：`share()` 单实现、无本地记录、无撤销/删除，链接生命周期完全依赖第三方 ShareGPT；CORS 问题用一次同源 rewrite 解决，服务端零鉴权。
 - thinking 在导出端不做脱敏，与 API 发送方向的 `getMessageTextContentWithoutThinking` 形成口径差；对隐私敏感的思考内容，用户在导出前只能靠 `includeContext` 开关部分控制。
 
 ## 7. 未验证事项

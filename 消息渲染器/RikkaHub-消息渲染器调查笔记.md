@@ -106,11 +106,11 @@ Markdown 由 `org.intellij.markdown` 的 GFM 方言解析成 AST，默认走 Com
 
 ## 6. HTML 与内容承载边界
 
-消息正文不执行脚本、不内嵌 iframe，这是内容承载的确定性结论：
+消息正文不执行脚本、不内嵌 iframe：
 
 - 消息级 HTML（`HTML_BLOCK`）走 `SimpleHtmlBlock`：Jsoup 解析后仅识别段落、标题、列表、`details`、图片、`progress`、表格、`div` 等块级元素与行内加粗/斜体/下划线/链接/代码等样式，不处理 iframe 与脚本（`richtext/SimpleHtmlBlock.kt:44-71, 90-162, 335-422`）。
 - 含 HTML 的整条消息由 `MarkdownNew` 处理，同样是 Jsoup + Compose 重建，未引入浏览器内核（`MarkdownNew.kt:146-157`）。
-- 真正的 WebView 只用于 Mermaid 与 html/svg 代码预览；html/svg 预览把代码作为 HTML 或包一层容器载入（`HighlightCodeBlock.kt:474-504`）。
+- WebView 只用于 Mermaid 与 html/svg 代码预览；html/svg 预览把代码作为 HTML 或包一层容器载入（`HighlightCodeBlock.kt:474-504`）。
 - 消息操作菜单的“用 WebView 渲染”把文本 part 转成 HTML 模板并跳转到独立 WebView 路由（`ChatMessage.kt:233-247`）；模板加载 `assets/html/mark.html`，其中 marked.js、KaTeX、highlight.js、Mermaid 均从 CDN 导入，故该路径渲染依赖网络（`MarkdownWeb.kt`、`app/src/main/assets/html/mark.html:177-237`）。
 
 预览 WebView 由统一组件提供，按用途注入不同的命名 JavaScript 接口：代码块预览注入空接口集，只有页面自身脚本可运行；Mermaid 预览注入 `AndroidInterface.exportImage`，供页面把渲染出的 SVG 转 PNG 后回传宿主（`ui/components/richtext/Mermaid.kt:55-86`）。虚拟域名 `rikkahub.local` 把 `/assets/` 前缀映射到应用 assets，Mermaid 脚本随应用打包、由拦截器提供（`ui/components/webview/WebViewLocalAssets.kt:10-39`）。Mermaid 脚本随应用打包并提供，因此该路径不依赖外网；web-ui 工作台对 html/svg/markdown/mermaid 四类语言提供预览，其中 mermaid 在 iframe 内从 esm.sh 动态导入，属该端自有路径（`web-ui/app/components/workbench/workbench-host.tsx:36-128`）。

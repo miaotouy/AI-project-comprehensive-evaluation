@@ -18,7 +18,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 
 - 会话用多维坐标 `ConversationContext` 压平出的 `messageMapKey` 分桶（6+ 种 scope）；本地分桶比服务端缓存 key 更细，两者用 `representableBucketKey` 防御逻辑承认不同构。
 - 同一份消息数据在全局 ChatStore（事实源层）与会话级 ConversationStore（UI 态层）各维护一份 parse 后的展示数据，双向同步无一致性断言。
-- 一次生成 = 发送 action 构造临时消息与 operation → 分流 client agent 或 Gateway → 流式回写 → 落库；operation 是前后端任务交接的载体，审批/干预按 `#shouldUseGatewayResume` 二分（Gateway 新 op / 本地 runtime 重建 / 异构 Agent 走 IPC、tRPC）。
+- 一次生成 = 发送 action 构造临时消息与 operation → 分流 client agent 或 Gateway → 流式回写 → 落库；operation 是前后端任务交接的载体；审批/干预先用 `#shouldUseGatewayResume` 判断走 Gateway 新 operation 还是本地 runtime 重建，异构 Agent 则另走 IPC、tRPC。
 - 渲染侧由 `conversation-flow` 三阶段 parse 把消息树压成 flatList，Virtua 按 role 分派渲染；桌面端完成/审批通知联动聊天状态并深链回 Topic，Web/PWA 无系统级通知。
 
 ## 产品表面与系统边界
@@ -48,7 +48,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - `sendMessage` 与 `operationContext` 构造：`conversationLifecycle.ts:265`、`:510`
 - 会话级入口：`src/features/Conversation/store/slices/message/action/sendMessage.ts:1-106`
 - Command Bus：`processCommands`（`conversationLifecycle.ts:410-433`）；`/goal` 注入（323-328）；@mention 执行路由（353-370）；`selectRuntimeType`（398-408）
-- 语音消息：commit `a58d18130`，`ChatInput/VoiceMessage/` + `sendVoiceMessage`
+- 语音消息：`ChatInput/VoiceMessage/` + `sendVoiceMessage`
 
 ## 核心对象与状态权威
 

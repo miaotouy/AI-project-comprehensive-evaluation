@@ -20,14 +20,14 @@ AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带
 
 ## 统计与模块分布
 
-| 指标 | 数量（旧快照值） |
+| 指标 | 数量 |
 | --- | ---: |
 | Git 跟踪文件 | 3104 |
 | 可识别源码 | 2457 文件 / 740502 行 |
 | 文档 | 379 文件 / 77990 行 |
 | 测试 | 357 文件 / 63066 源码行 |
 
-统计口径与旧笔记一致：源码按扩展名识别并计入测试文件（测试单独再计一次），文档按 Markdown 计数，测试按文件名模式与测试目录识别。扩展名与识别规则如下：
+统计口径：源码按扩展名识别并计入测试文件（测试单独再计一次），文档按 Markdown 计数，测试按文件名模式与测试目录识别。扩展名与识别规则如下：
 
 ```text
 源码：.vue/.ts/.tsx/.rs/.js/.css/.scss/.html/.kt/.kts/.cs
@@ -35,21 +35,14 @@ AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带
 测试：*.test.*、*.spec.*，以及 __tests__/、tests/ 目录
 ```
 
-本次提交范围内新增约 482 个跟踪文件，主要来源包括：
-
-- 移动端 `mobile/` 的测试与组件
-- 桌面端新目录 `tests/tauri-e2e`
-- recall/knowledge-base 重构
-- llm-chat 会话持久化改造
-
 主要区域按量级依次为：
 
-| 区域 | 文件 / 源码行（旧快照） |
+| 区域 | 文件 / 源码行 |
 | --- | ---: |
-| `src/tools` | 1,482 / 448,538（1,359 / 420,929） |
-| `mobile/src` | 295 / 57,597（172 / 32,714） |
-| `src-tauri/src` | 88 / 53,904（81 / 40,794） |
-| `src/views` | 66 / 31,237（64 / 28,715） |
+| `src/tools` | 1,482 / 448,538 |
+| `mobile/src` | 295 / 57,597 |
+| `src-tauri/src` | 88 / 53,904 |
+| `src/views` | 66 / 31,237 |
 
 `packages/llm-core` 是较小但独立的发布边界，主仓 `package.json:23-26` 将其与 `mobile` 纳入 workspace。
 
@@ -59,26 +52,26 @@ TypeScript 338,193 行（46.5%，超过 Vue 成为第一大语言）、Vue 319,2
 
 文档主要位置：
 
-| 位置 | 文件数（旧快照） |
+| 位置 | 文件数 |
 | --- | ---: |
-| `src/tools` | 122（111） |
+| `src/tools` | 122 |
 | `docs/user-guide` | 128 |
-| `docs/design` | 24（18） |
-| `docs/architecture` | 18（17） |
+| `docs/design` | 24 |
+| `docs/architecture` | 18 |
 
 测试分布明显扩散，主要落在五个区域：
 
-| 区域 | 文件数（旧快照） |
+| 区域 | 文件数 |
 | --- | ---: |
-| `src/tools` | 101（44） |
-| `mobile` | 65（13） |
-| `tests/` | 97（新增，Tauri E2E 与 Recall 验收） |
+| `src/tools` | 101 |
+| `mobile` | 65 |
+| `tests/` | 97（Tauri E2E 与 Recall 验收） |
 | `src/llm-apis` | 20 |
 | `packages/llm-core` | 20 |
 
 ## 跨平台组织与边界
 
-根 `src` 与 `src-tauri` 组成 Windows、macOS、Linux 桌面应用；`mobile/` 下另有源码与 Tauri 壳组成移动入口，构建脚本明确提供 Android/iOS 命令（`package.json:50-53`）。桌面和移动端共享 workspace 与部分包，但不是同一入口的条件编译。README 的桌面发布矩阵见 `README.md:209-211`；本次未实际构建各平台。
+根 `src` 与 `src-tauri` 组成 Windows、macOS、Linux 桌面应用；`mobile/` 下另有源码与 Tauri 壳组成移动入口，构建脚本明确提供 Android/iOS 命令（`package.json:50-53`）。桌面和移动端共享 workspace 与部分包，但各自是独立入口。README 的桌面发布矩阵见 `README.md:209-211`；本次未实际构建各平台。
 
 ## 关键源码索引
 

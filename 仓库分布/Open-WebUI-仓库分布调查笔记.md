@@ -27,11 +27,11 @@ Open WebUI 是 Python 后端与 Svelte 前端合仓的 Web 应用。当前 5,059
 | 文档 | 17 文件 / 6599 行 |
 | 测试 | 3 文件 / 112 源码行 |
 
-Svelte 122,159 行（35.3%）、Python 109,779 行（31.7%）、JavaScript 77,706 行（22.5%）、TypeScript 23,960 行（6.9%）。这里 JavaScript 较多，前端并非纯 TypeScript。仓内文档主要是根 README/CHANGELOG 等文件，完整用户文档不在当前 `docs` 目录展开。
+Svelte 122,159 行（35.3%）、Python 109,779 行（31.7%）、JavaScript 77,706 行（22.5%）、TypeScript 23,960 行（6.9%）。前端以 Svelte 与 JavaScript 为主，TypeScript 占比较小。仓内文档主要是根 README/CHANGELOG 等文件，完整用户文档不在当前 `docs` 目录展开。
 
 ## 测试与跨平台边界
 
-`package.json` 和 `pyproject.toml` 声明 Vitest/Pytest 依赖与命令，但当前 Git 跟踪快照按统一规则只识别到 2 个测试文件；应解读为“仓内显式测试资产很少”，不能据此推断外部 CI 或私有测试。产品是响应式 Web/PWA，通过 pip、Docker、Kubernetes 等运行；README 所列原生桌面应用位于另一个仓库（`README.md:52,102`），本仓不含其平台代码。
+`package.json` 和 `pyproject.toml` 声明 Vitest/Pytest 依赖与命令，但当前 Git 跟踪快照按统一规则只识别到 3 个测试文件；应解读为“仓内显式测试资产很少”，不能据此推断外部 CI 或私有测试。产品是响应式 Web/PWA，通过 pip、Docker、Kubernetes 等运行；README 所列原生桌面应用位于另一个仓库（`README.md:52,102`），本仓不含其平台代码。
 
 ## 关键源码索引
 

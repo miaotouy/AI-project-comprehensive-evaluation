@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制不靠阶段限流，而靠 UMO 粒度的 `session_lock` 串行化 LLM 请求 + 严格有序的 follow-up 队列。
+AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制落在 UMO 粒度：`session_lock` 串行化同会话的 LLM 请求，同发送者的新消息进入严格有序的 follow-up 队列；阶段本身不做并发限流。
 
 - **流水线 9 阶段**（stage_order.py:3-13）：
   1. `WakingCheck`：唤醒判定与插件匹配；
@@ -159,7 +159,7 @@ _run_compression（:83-121）:
 
 RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而不同平台会话不会共用限流计数（rate_limit_check/stage.py:57-82）。cron 与后台工具唤醒主 Agent 时会保留结构化会话历史，并从当前 Provider 配置读取、校验 `max_agent_step` 后传给 runner；它们不再绕过常规的上下文截断与步数上限（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
 
-- **SessionLockManager**（session_lock.py:8-55）：外层按事件循环隔离（`WeakKeyDictionary[event_loop, manager]`，避免跨 loop 误用 asyncio.Lock）；内层 `_PerLoopSessionLockManager` 用 `defaultdict(asyncio.Lock)` 加引用计数，计数归零自动清理；单例。锁包住 `build_main_agent` 与整个 agent 运行（internal.py:220-425）——**同 UMO 串行化 LLM 请求，跨会话天然并行**。
+- **SessionLockManager**（session_lock.py:8-55）：外层按事件循环隔离（`WeakKeyDictionary[event_loop, manager]`，避免跨 loop 误用 asyncio.Lock）；内层 `_PerLoopSessionLockManager` 用 `defaultdict(asyncio.Lock)` 加引用计数，计数归零自动清理；单例。锁包住 `build_main_agent` 与整个 agent 运行（internal.py:220-425）——同 UMO 串行化 LLM 请求，跨会话互不阻塞。
 - **follow-up 严格序**（follow_up.py:16-218）：
   - 捕获条件 = 同 UMO + 同发送者 + runner 未 stop（:176-218）；
   - 捕获时即分配单调序号（`_allocate_follow_up_order` :95-104，按到达顺序而非唤醒顺序）；

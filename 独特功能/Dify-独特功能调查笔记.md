@@ -18,7 +18,7 @@
 
 知识库与可发布 RAG Pipeline 也达到静态 `主链确认`：它将文件、Notion 或网页来源转为 tenant 下可管理的知识资产，异步索引后既可被聊天应用和 workflow 检索节点消费，也可通过独立 Pipeline 维护摄取图的草稿、发布和运行记录。它不是普通“上传附件”功能，且现有目录没有能完整承接其摄取、检索和编排链的通用类目。
 
-基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace 和 Agent v2 工作区均已补到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；后二者则分别覆盖租户插件安装治理和 Agent 的版本化执行环境。它们都不是对普通聊天、单个工具调用或模型渠道的重复描述。
+基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace 和 Agent v2 工作区均已补到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；后二者则分别覆盖租户插件安装治理和 Agent 的版本化执行环境。
 
 Trigger Provider 仍只有 `入口确认`，因为外部事件已能启动异步 workflow，却尚未确认最终用户结果和投递保证；MCP 作为工具调用能力仍归并到相邻专项。Marketplace 和 Agent v2 虽已形成 Dify 侧主链，其 Plugin Daemon、Dify Agent Runtime 等外部执行域仍未运行验证。
 
@@ -46,7 +46,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **标签：协同工作流、外部应用调用、Agent 工具。证据状态：`主链确认`（静态）。**
 
-**用户目标与事实对象。** Dify 的目标不只是让用户在聊天中看见一段模型回答，而是把带输入字段、节点图和运行记录的 workflow 发布成应用能力。核心对象至少包括 application/workflow definition、单次 workflow run、node execution 和面向调用者的 task/event；当 workflow 被工具化时，还会多出 tenant 下的 workflow tool provider 配置。这些对象让同一图可作为服务 API 的调用目标，也可在受限条件下成为另一个 Agent 的可发现能力。
+**用户目标与事实对象。** Dify 的目标是把带输入字段、节点图和运行记录的 workflow 发布成应用能力；聊天里的一段模型回答只是它的一种输出形态。核心对象至少包括 application/workflow definition、单次 workflow run、node execution 和面向调用者的 task/event；当 workflow 被工具化时，还会多出 tenant 下的 workflow tool provider 配置。这些对象让同一图可作为服务 API 的调用目标，也可在受限条件下成为另一个 Agent 的可发现能力。
 
 **完整主链。** 外部程序调用 workflow API 或已发布应用提交 inputs/files 后，`AppGenerateService` 按 `AppMode.WORKFLOW` 或 advanced chat 分派给 workflow generator。生成器以 `WorkflowAppConfigManager` 取得并转换应用配置，验证输入和文件，创建运行 repository 后交给 graph engine。执行产生 workflow run、节点生命周期、文本 chunk、人工输入或完成事件；streaming 调用由 `MessageBasedAppGenerator.retrieve_events` 回收并转换为事件流，blocking 调用则走相应的最终响应转换。service API 还提供以 task ID 停止 streaming workflow 的路径。这条“调用 -> 运行对象 -> 图执行 -> 可消费事件/结果 -> 停止或日志”的主链足以确认其为可独立交付的运行单元，而非仅存在编辑画布。
 

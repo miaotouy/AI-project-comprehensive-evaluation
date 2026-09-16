@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 是当前样本中覆盖面最宽的项目，三种接入角色都有实现：
+LobeHub 在外部执行体、外部应用和外部控制/交互表面三种接入角色上都有实现：
 
 - `主链确认`：Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE 十一种本地 CLI；OpenClaw/Hermes 平台任务；Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
 - `入口确认`：Slack、Discord、Telegram、WeChat Messenger 的安装、绑定、webhook/gateway 和 outbound 已存在，逐平台完整线程往返未静态走通。
@@ -82,7 +82,7 @@ navigate / snapshot / click / fill / press / scroll / screenshot / readPage
 
 Connector 支持 OAuth2、bearer、API key 和自定义 header，凭据经 `KeyVaultsGateKeeper` 加密。工具权限为 `auto / needs_approval / disabled`；客户端只拿 manifest，服务端在调用时解密连接凭据。Composio 当前预置 24 种业务应用类型，但未逐应用运行验证。
 
-外部 CLI 的原生工具权限仍由各 runtime 承担；LobeHub 能观察、审批部分宿主注入工具和展示文件变化，不能由此推断完全统一了所有 CLI 的安全模型。凭据加密已确认（`KeyVaultsGateKeeper`），凭据刷新与失效流转机制本次未单独验证。
+外部 CLI 的原生工具权限仍由各 runtime 承担；LobeHub 能观察、审批部分宿主注入工具和展示文件变化，不能由此推断完全统一了所有 CLI 的安全模型。凭据刷新与失效流转机制本次未单独验证。
 
 ## 相邻类目交接
 

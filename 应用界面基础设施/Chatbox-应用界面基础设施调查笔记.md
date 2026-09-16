@@ -84,7 +84,7 @@ Chatbox 的界面基础设施由多套库分工组成。桌面弹窗主要使用
 
 - 默认（不传 trapFocus/closeOnEscape/closeOnClickOutside）：Mantine 默认行为，Esc 和点遮罩都能关。
 
-**`trapFocus={false}`。** 下列四个弹窗关闭焦点陷阱（git log -S 定位到提交 2930c21d，提交信息 "fix: hard to select text on ios when opening a modal"）：
+**`trapFocus={false}`。** 下列四个弹窗关闭焦点陷阱（git log -S 定位到一次提交，提交信息 "fix: hard to select text on ios when opening a modal"）：
 - `MessageEdit.tsx:244`
 - `SessionSettings.tsx:171`
 - `CopilotDetailModal.tsx:118`
@@ -116,7 +116,7 @@ Chatbox 的界面基础设施由多套库分工组成。桌面弹窗主要使用
 
   `packages/toast.ts:12-40` 的 toastError 还会先按原文展示错误，再异步翻译并用同一 id 原地替换描述——"先出现原文，几百毫秒后追加译文"。
 
-弹右上角 MUI 还是底部居中 sonner，取决于触发代码所在模块而非统一提示系统；两套 z-index 分别是 MUI 默认与硬编码 2147483647（int32 最大值）。
+弹右上角 MUI 还是底部居中 sonner，取决于触发代码所在模块而非统一提示系统；两套的 z-index 分别取 MUI 默认值与 int32 最大值。
 
 ### 加载、骨架屏与空状态（无公共组件，按场景分散）
 
@@ -220,8 +220,6 @@ Tailwind 侧在 `tailwind.config.js:41-134` 把 chatbox 色系、spacing、borde
 
 移动端：顶部/底部/工具条三段，:108-133）。copilot 级背景图由 `CopilotSettingsModal.tsx:78-86` 设置并在新会话继承（`routes/index.tsx:217`）；侧栏抽屉 paper 显式 backgroundImage: 'none'（`Sidebar.tsx:154`）。
 
-相关演进提交：96ef17d3/ed535858（背景图可配置样式与透明度本地化）、0f2fd22a/47288106（背景图挂到 app 根/抽屉层）。
-
 **首屏防闪烁链路**：`index.html:43-52`（index.ejs:63-67 同）在渲染树建立前同步读 `localStorage['initial-theme']` 并同时设置 data-theme 与 data-mantine-color-scheme 两个属性；`uiStore.ts:26` 用同一 key 初始化 realTheme；splash 屏（`index.html:54-121`）按 data-theme 深色化——三处共享同一持久化 key。
 
 **主题来源与存储**：switchTheme 在 Theme.System 时询问平台层"系统当前是否为深色"（`useAppTheme.ts:10-23`），三端判定来源：
@@ -298,9 +296,9 @@ react-virtuoso 消息列表对"新消息进入"无额外过渡动效——虚拟
 
 ## 8. 设计取舍与已确认边界
 
-**iOS 文本选中的焦点陷阱取舍。** `trapFocus={false}` 由提交 2930c21d 引入，四个弹窗（MessageEdit、SessionSettings、CopilotDetail、CopilotSettings）打开时键盘 Tab 可穿透到背景——有提交记录可查的明确取舍，同时是已记录的无障碍缺口。
+**iOS 文本选中的焦点陷阱取舍。** `trapFocus={false}` 由一次提交引入，四个弹窗（MessageEdit、SessionSettings、CopilotDetail、CopilotSettings）打开时键盘 Tab 可穿透到背景——有提交记录可查的明确取舍，同时是已记录的无障碍缺口。
 
-**登录/许可证弹窗故意禁掉一切意外关闭路径。** 三项关闭开关同时关闭，只能走内部按钮完成流程。
+**登录/许可证弹窗关掉了一切意外关闭路径。** 三项关闭开关同时关闭，只能走内部按钮完成流程。
 
 **两套 Toast 并存。** MUI Snackbar 无堆叠位移（多条同锚点会重叠），sonner 自带堆叠；选择哪套取决于触发代码所在模块。
 

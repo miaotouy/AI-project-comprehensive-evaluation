@@ -44,7 +44,7 @@ JSON 导入主链：
 ## 1. 入口、用户目标与导出源
 
 - **Markdown 导出**：唯一入口是侧栏会话列表项上的 "MD" 小按钮，初始 `opacity: 0`，鼠标进入该行才显示（`frontend/components/side-panel.js:128-141`）。入口按"会话项"逐个提供，无批量操作、无命令行、无快捷键。导出源为单个整会话（`LoadSession(id)`），目标为个人存档/文本交换。
-- **JSON 导出**：`EXPORT_SESSION` 已注册进 bridge 分发器且 handler 实现完整（分发器 `MainWindow.xaml.cpp:428`，handler `MainWindow.xaml.cpp:619-646`），但前端全部源码中搜索该消息无任何发送方；git 历史中 `-S "EXPORT_SESSION" -- frontend` 亦无匹配（自 6057749 初始上传起）。结论：源码中确实存在但从未接 UI，非"本次未找到调用"的模糊情况——是历史与现状一致的无 UI 状态。
+- **JSON 导出**：`EXPORT_SESSION` 已注册进 bridge 分发器且 handler 实现完整（分发器 `MainWindow.xaml.cpp:428`，handler `MainWindow.xaml.cpp:619-646`），但前端全部源码中搜索该消息无任何发送方；git 历史中 `-S "EXPORT_SESSION" -- frontend` 亦无匹配（自初始提交起）。结论：该消息属于无 UI 状态，不属于“本次未找到调用”的未确认情况。
 - **JSON 导入**：首页 Quick Actions 的 "Import Session" 按钮（`frontend/components/home-tab.js:88`），无会话选择、单文件导入。
 
 ## 2. 范围选择、内容口径与字段过滤
@@ -98,7 +98,7 @@ JSON 导入主链：
 
 ## 11. 设计取舍与已确认边界
 
-- 导出/导入全部由 C++ 后端执行文件对话框与 I/O，前端零文件能力，这是 WebView2 架构下的自然边界；但 UI 入口、handler 注册与数据格式之间的一致性较差，三处典型不一致：
+- 导出/导入全部由 C++ 后端执行文件对话框与 I/O，前端零文件能力，这是 WebView2 架构下的分工；但 UI 入口、handler 注册与数据格式之间存在三处典型不一致：
   - `EXPORT_SESSION`：无 UI；
   - `OPEN_FILE_DIALOG`：无前端调用；
   - `SESSION_IMPORTED`：无前端监听（导入后侧栏列表不会自动刷新，`side-panel.js:12-15` 只监听 SESSIONS_LOADED/SEARCH_RESULTS/SESSION_SAVED/SESSION_DELETED 四个事件）。

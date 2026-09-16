@@ -65,7 +65,7 @@ ChatSession
 - `stat` 统计只有字符数 `charCount` 实际累加：更新函数只执行 `charCount += content.length`，并有 TODO 注释未更新 word/chat 数（`app/store/chat.ts:799-804`）。
 - Mask 是完整副本对象（`app/store/mask.ts:9-23`），每个会话持有独立的一份；`createEmptyMask` 默认开启 `syncGlobalConfig`（`app/store/mask.ts:35-47`）。
 
-分支模型：`forkSession()` 深拷贝当前消息并为每条消息生成新 id，同时复制 Mask 与模型配置，新会话插到数组头部（`app/store/chat.ts:243-267`）——fork 是"新会话深拷贝"，不是消息树指针。消息级分支（同一位置的平行版本）与版本指针本次未找到：会话 schema 无活动指针或父指针字段，store 无对应方法（检查范围为 `app/store/chat.ts` 全文件）。
+分支模型：`forkSession()` 深拷贝当前消息并为每条消息生成新 id，同时复制 Mask 与模型配置，新会话插到数组头部（`app/store/chat.ts:243-267`）——fork 产生的是新会话，不建立消息树指针。消息级分支（同一位置的平行版本）与版本指针本次未找到：会话 schema 无活动指针或父指针字段，store 无对应方法（检查范围为 `app/store/chat.ts` 全文件）。
 
 ## 2. 事实源、索引与持久化
 

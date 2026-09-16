@@ -6,7 +6,7 @@
 >
 > 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
 >
-> 调查方式：只读源码核对（对照 `eca06251f5687a52fbcd353cb8b04f42157882d0` 至当前 HEAD 的 38 个提交与 diff 重新定位关键结论，重点覆盖浏览器协议 v3、RiverMemo、多媒体、分布式取消）；未修改被调查仓库
+> 调查方式：只读源码核对，并结合近期提交与 diff 重新定位关键结论，重点覆盖浏览器协议 v3、RiverMemo、多媒体、分布式取消；未修改被调查仓库
 >
 > 调查范围：模型可发现、请求并触发的工具，以及注册、执行、审批、安全边界与扩展入口
 >
@@ -16,7 +16,7 @@
 
 VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并托管审批状态机的服务端。核心事实：
 
-1. VCP 文本协议的解析不是简单正则，而是带模糊匹配开关（`fuzzyToolMatching`）的状态机扫描器；默认严格模式只认精确的 `<<<[TOOL_REQUEST]>>>` / `「始」...「末」`，开启模糊模式后能容忍 `{始}`、`<<[TOOL_REQUEST]>>` 等变体，这是一个可配置的“协议宽松开关”。
+1. VCP 文本协议的解析由带模糊匹配开关（`fuzzyToolMatching`）的状态机扫描器完成；默认严格模式只认精确的 `<<<[TOOL_REQUEST]>>>` / `「始」...「末」`，开启模糊模式后能容忍 `{始}`、`<<[TOOL_REQUEST]>>` 等变体，这是一个可配置的“协议宽松开关”。
 2. 审批系统是执行前的人工控制环节：审批请求依赖 `webSocketServer` 存在且当时至少有人/终端连接；超时后的默认行为是**拒绝执行**（reject，不是自动通过）。如果 `WebSocketServer` 未初始化，则在判定需要审批的那一刻直接抛错拒绝执行。审批请求通过 WebSocket **广播**给所有已认证的 `VCPLog` 客户端，任何持有同一个全局 `VCP_Key` 的客户端都可以发送 `tool_approval_response` 批准或拒绝任意请求——审批身份没有绑定发起者，也没有二次身份区分“谁有权批准”。
 3. `requiresAdmin` 不是纯声明字段：对 `stdio` 插件会被注入 `DECRYPTED_AUTH_CODE` 环境变量，插件自己必须在内部比对；对 `hybridservice`/`direct` 插件会通过 `directContext.decryptedAuthCode` 传入。两条路径都要求插件自己做比对——**主服务端本身不会因为 requiresAdmin 而拒绝调用**，实际执行权掌握在插件代码手中。已确认 `PowerShellExecutor`、`LinuxShellExecutor`、`PluginManager`、`MediaRenderer` 插件内部确实做了比对，但这是插件自律，不是框架强制。
 4. 分布式节点鉴权只有一层全局 `VCP_Key`（WebSocket 升级时校验），没有节点级别的独立密钥或证书；`register_tools` 消息可以让任意已连接的分布式节点注册新工具，但**同名工具会被跳过**（不能覆盖已存在工具），一定程度上防止了工具名冒充，但没有防止“注册一个从未存在过的、诱导性命名”的工具（如 `FileOperator2`）来钓鱼。
@@ -150,7 +150,7 @@ manifest 里没有 `parameters`/`schema` 字段声明参数类型或必需性；
 - `approveAll=true`：忽略 `approvalList`，所有工具调用一律需要审批（第 156-164 行）。
 - `approvalList` 每一项是一条规则字符串，规则解析逻辑根据后缀 `::SilentReject` 决定拒绝时是否通知 AI（`notifyAiOnReject`）（第 117-142 行）。
 - **匹配语义**是精确字符串相等，不支持通配符（`*`）：规则可以是 `ToolName`（工具级，命中所有该工具的调用）或 `ToolName:command文本`（命令级，仅当 `extractCommands()` 从参数中提取出的 `command`/`command1`/`command2`... 值与规则冒号后半部分**完全相等**时命中）（第 194-205 行）。**命中优先级**：命令级（specificity=2）优先于工具级（specificity=1）；同优先级下，`notifyAiOnReject:false`（静默拒绝）的规则优先于会通知 AI 的规则（第 174-192 行）。
-- **默认行为（无命中）**：`requiresApproval:false`，即未在名单里的工具调用默认放行，不需要审批——这是**白名单式豁免、黑名单式管控**的语义：`approvalList` 里列出的才需要审批，不在列表里的默认自动执行。这与直觉上"审批清单=需要人工批准的工具清单"一致，但需要强调：**不是 allow-list（只放行清单内工具）**，而是 deny-by-default-approve（清单外全部自动放行）。
+- **默认行为（无命中）**：`requiresApproval:false`，即未在名单里的工具调用默认放行，不需要审批——这是**白名单式豁免、黑名单式管控**的语义：`approvalList` 里列出的才需要审批，不在列表里的默认自动执行。这与直觉上"审批清单=需要人工批准的工具清单"一致，但实际语义是 deny-by-default-approve：不在清单里的工具默认放行，不限于清单内的工具。
 
 ### 5.2 状态机与广播
 
@@ -208,8 +208,8 @@ WebSocket 服务收到 `tool_approval_response` 消息时，**只要消息来自
 
 ### 6.3 执行协议实现差异
 
-- **`stdio`**：执行入口从 `Plugin.js:1472` 起使用 `child_process.spawn`，调用位置在 `:1577`，超时计算在 `:1598`。**注意 `shell: true`**——这意味着 `entryPoint.command` 字符串会经过系统 shell 解析，如果该字符串本身可控（目前是 manifest 固定值，不受运行期参数拼接），风险有限，但这是命令注入的潜在放大面，若未来任何代码路径允许拼接用户输入到 `entryPoint.command`，将直接构成 shell 注入。当前**未发现**此类拼接（command 固定来自 manifest 静态配置）。非 Windows 平台 spawn 带 `detached` 建立进程组，配合进程树强杀逻辑（见第 7 节）。
-- **`direct`**：manifest 声明 `entryPoint.script`，加载流程用 `require()` 动态加载该模块到进程内（`Plugin.js:856-871`），模块需暴露 initialize、processToolCall、shutdown 等约定方法。这意味着 direct 协议插件与主服务进程**同权限、同内存空间**运行，没有任何进程隔离。
+- **`stdio`**：执行入口从 `Plugin.js:1472` 起使用 `child_process.spawn`，调用位置在 `:1577`，超时计算在 `:1598`。**注意 `shell: true`**——`entryPoint.command` 字符串会经过系统 shell 解析，如果该字符串本身可控（目前是 manifest 固定值，不受运行期参数拼接），风险有限，但这是命令注入的潜在放大面，若未来任何代码路径允许拼接用户输入到 `entryPoint.command`，将直接构成 shell 注入。当前**未发现**此类拼接（command 固定来自 manifest 静态配置）。非 Windows 平台 spawn 带 `detached` 建立进程组，配合进程树强杀逻辑（见第 7 节）。
+- **`direct`**：manifest 声明 `entryPoint.script`，加载流程用 `require()` 动态加载该模块到进程内（`Plugin.js:856-871`），模块需暴露 initialize、processToolCall、shutdown 等约定方法。direct 协议插件与主服务进程**同权限、同内存空间**运行，没有任何进程隔离。
 - **`distributed`**：不在本地 spawn 任何进程，转发到远程节点的 WebSocket 连接（详见第 8 节）。
 
 ### 6.4 Node/Python/native 入口
@@ -222,7 +222,7 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 
 另有两类 Rust 二进制插件不把原生二进制直接作为 manifest 入口，而以 Node 包装器为入口，由包装器负责拉起原生进程：
 
-- **`CodeSearcher`**：入口命令由直接执行 exe 改为 `node CodeSearcher.js`（提交范围 `c4c4d00`→`1ae9b63c`），包装器按操作系统与架构（win32/linux/darwin 与 x64/arm64）组合在候选路径中定位原生二进制再 spawn（`Plugin/CodeSearcher/CodeSearcher.js:10-61`）。
+- **`CodeSearcher`**：入口命令由直接执行 exe 改为 `node CodeSearcher.js`，包装器按操作系统与架构（win32/linux/darwin 与 x64/arm64）组合在候选路径中定位原生二进制再 spawn（`Plugin/CodeSearcher/CodeSearcher.js:10-61`）。
 - **`DailyNoteSearcher`**：`hybridservice` 常驻模式，JS 桥在进程内启动并管理 Rust HTTP 服务，同样按操作系统与架构选择二进制，并以 instance-id 与关闭令牌做健康检查与优雅退出（`Plugin/DailyNoteSearcher/DailyNoteSearcher.js:42-87,290-345`）。
 
 主服务 spawn 子进程插件时，除插件自身的 `config.env` 外，还会按三类条件追加环境变量——运行上下文类、管理员校验类与异步回调类；合并逻辑见 `Plugin.js:1494-1566`。
@@ -268,7 +268,7 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 
 ### 8.2 节点鉴权
 
-WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服务器配置的**全局唯一** `vcpKey`（`WebSocketServer.js:230-236`）。**没有节点级别的独立密钥、证书或双向 TLS**——所有连接类型（`VCPLog`、`DistributedServer`、`ChromeControl`、`AdminPanel` 等）共用同一个 `VCP_Key`。这意味着所有连接类型共用同一个 Key：持有该 Key 的任何一方既可以注册分布式工具，也可以对审批请求作出批准/拒绝响应，也可以作为 AdminPanel 客户端连接——这是**已确认**的机制：所有 WebSocket 通道共享同一份鉴权凭据，没有按通道区分的独立密钥。
+WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服务器配置的**全局唯一** `vcpKey`（`WebSocketServer.js:230-236`）。**没有节点级别的独立密钥、证书或双向 TLS**——所有连接类型（`VCPLog`、`DistributedServer`、`ChromeControl`、`AdminPanel` 等）共用同一个 `VCP_Key`：持有该 Key 的任何一方既可以注册分布式工具，也可以对审批请求作出批准/拒绝响应，也可以作为 AdminPanel 客户端连接——这是**已确认**的机制：所有 WebSocket 通道共享同一份鉴权凭据，没有按通道区分的独立密钥。
 
 ### 8.3 节点声明工具的可信度
 
@@ -280,7 +280,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 ### 8.5 取消传播与结果归属绑定
 
-`WebSocketServer.js` 有三项分布式加固（提交 `a8e4e41d` 等）：
+`WebSocketServer.js` 有三项分布式加固：
 
 - **`tool_result` 归属绑定**：待处理请求条目携带 `serverId`，收到结果时若消息来源节点不是目标节点，则记录警告并**忽略**该消息，不完成 Promise（`WebSocketServer.js:851-869`），关闭了“任何节点都可以用同一个 requestId 完成/伪造结果”的缺口；`plugin_callback_forward` 的来源节点绑定仍未加（见第 10 节）。
 - **取消传播**：节点在 `register_tools` 时可声明 `capabilities.cancelTool: true`；`executeDistributedTool()` 超时时，若目标 socket 仍 OPEN 且节点声明了该能力，则 best-effort 发送一次 `cancel_tool` 帧（`sendCancelToolIfSupported`，`WebSocketServer.js:876-892`）。旧节点未声明能力时收不到该帧，但节点侧自己的本地 deadline/AbortController 仍独立生效——文档明确两者都是必要边界（`docs/DISTRIBUTED_ARCHITECTURE.md`）。
@@ -315,7 +315,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 ## 11. 插件清单
 
-以下为**当前 HEAD（`1ae9b63c`，`Plugin/` 目录，89 个子目录，不含 `AGENTS.md`）实际存在的 manifest** 逐一读取的结果。启用判定标准：存在 `plugin-manifest.json`（非 `.block`）。共 69 个启用、20 个禁用（`.block`）。这与 `docs/PLUGIN_ECOSYSTEM.md` 声称的"总计 79 活跃插件"**不一致**——文档统计口径把仓库内所有插件目录（含 `.block` 禁用态）都算作"活跃"，而实际当前 checkout 启用的插件数是 69，禁用（`.block`）20 个，两者之和 89 也与文档的 79 不完全对应，说明文档的插件类型分布统计（`static`~10、`service`~8 等）是历史快照，**不能作为当前启用状态的依据**，本笔记以下表格为准。其中 `ChromeBridge` 为 2.4.0（Grounded Markdown 增加正文图片/视频画面语义标注与 `get_page_image` 命令、Popup 人工 Managed 选择、agent 不再隐式控制托管运行时）、`CodeSearcher` 入口为 `node CodeSearcher.js`（Node 包装器按平台选原生二进制）、`UrlFetch` 为 0.3.0（PDF 文本解析与 50MB 上限，本地 `file://` 亦支持 .pdf）。
+以下为**当前 HEAD（`Plugin/` 目录，89 个子目录，不含 `AGENTS.md`）实际存在的 manifest** 逐一读取的结果。启用判定标准：存在 `plugin-manifest.json`（非 `.block`）。共 69 个启用、20 个禁用（`.block`）。这与 `docs/PLUGIN_ECOSYSTEM.md` 声称的"总计 79 活跃插件"**不一致**——文档统计口径把仓库内所有插件目录（含 `.block` 禁用态）都算作"活跃"，而实际当前 checkout 启用的插件数是 69，禁用（`.block`）20 个，两者之和 89 也与文档的 79 不完全对应，说明文档的插件类型分布统计（`static`~10、`service`~8 等）是历史快照，**不能作为当前启用状态的依据**，本笔记以下表格为准。其中 `ChromeBridge` 为 2.4.0（Grounded Markdown 增加正文图片/视频画面语义标注与 `get_page_image` 命令、Popup 人工 Managed 选择、agent 不再隐式控制托管运行时）、`CodeSearcher` 入口为 `node CodeSearcher.js`（Node 包装器按平台选原生二进制）、`UrlFetch` 为 0.3.0（PDF 文本解析与 50MB 上限，本地 `file://` 亦支持 .pdf）。
 
 | 插件目录 | manifest name | pluginType | 协议 | 状态 | requiresAdmin |
 |---|---|---|---|---|---|
@@ -417,7 +417,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 - **即时通讯/定时联络**：`agent_name`+`prompt` 直接发起一次对某配置好的 Agent 的调用，`timely_contact` 可延迟到未来时间点（复用通用定时机制，写入 `VCPTimedContacts/` 目录由任务调度器到点执行）。系统按 `responseFromVCP.data.model` 判断是否启用 `ReasoningToContent`，启用时会一并剥离主总线转换到正文的 `<think>`/`<thinking>` 标签块（含未闭合块），防止推理标签污染 AA 会话历史（`AgentAssistant.js:307-349,888-895`）。
 - **异步委托（`task_delegation:true`）**：AgentAssistant 内维护委派状态，`delegationMaxRounds`（默认 15 轮，来自 `config.json`）是自主循环轮数上限；循环会驱动被委托 Agent 反复推理直到自行判定完成或达到上限，`delegationTimeout` 限制单轮超时（`AgentAssistant.js:181,1016`）。达到最大轮数后**不会**报错，而是生成"达到最大轮数限制，任务尚未自动上报完成"的报告（`AgentAssistant.js:1128`）。
-- **临时工具注入（`inject_tools`）**：允许发起方为单次委托临时拼接额外工具的说明文本到被委托 Agent 的 system 提示词尾部，manifest 明确声明"不影响 Agent 的长期固定系统提示词"，但这意味着发起方（可能是另一个 AI）可以在运行时临时扩大某个 Agent 会话内可见的工具面，这是一个**未做权限限制**的能力扩展点——任何能调用 AgentAssistant 的角色都能给任意配置好的下游 Agent 临时"塞"任意已加载的工具描述，只受限于"该工具本身是否需要审批/管理员校验"这一层。
+- **临时工具注入（`inject_tools`）**：允许发起方为单次委托临时拼接额外工具的说明文本到被委托 Agent 的 system 提示词尾部，manifest 明确声明"不影响 Agent 的长期固定系统提示词"，但发起方（可能是另一个 AI）可以在运行时临时扩大某个 Agent 会话内可见的工具面，这是一个**未做权限限制**的能力扩展点——任何能调用 AgentAssistant 的角色都能给任意配置好的下游 Agent 临时"塞"任意已加载的工具描述，只受限于"该工具本身是否需要审批/管理员校验"这一层。
 - **`ScheduleManager`/`TimedTaskQuery`/`ScheduleBriefing`** 等插件提供了独立于 `AgentAssistant` 的定时任务能力，本次调查未逐一深入其后台调度实现细节（列入未验证事项）。
 
 依据：[AgentAssistant.js:181,647-711,1016-1128](../../VCPToolBox/Plugin/AgentAssistant/AgentAssistant.js)、[AgentAssistant/plugin-manifest.json:6,28](../../VCPToolBox/Plugin/AgentAssistant/plugin-manifest.json)、[toolExecutor.js:491-543](../../VCPToolBox/modules/vcpLoop/toolExecutor.js)。
@@ -434,5 +434,5 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 8. **除本笔记重点复核的插件之外的其余插件**：本次未逐一审查每个插件内部的参数校验、路径处理、命令拼接细节，其余插件的分类基于功能类别的合理推断（生成类插件通常只调用外部 API），未逐一读取全部源码。
 9. **外部抓取内容混入上下文后是否会被解析为工具调用**：未做实际端到端测试（构造包含 VCP 协议文本的网页内容，验证其被 `UrlFetch`/`FlashDeepSearch`/`BrowserSearch` 等插件抓取混入上下文后是否会被解析器当作工具调用）。`toolApprovalConfig.json` 当前 `enabled: true` 且名单含 `PowerShellExecutor`/`FileOperator` 是当前默认防护，但 `enabled` 可被关闭。
 10. **敏感环境变量的日志输出**：未逐一检查各插件的 debug 日志输出是否会打印 `DECRYPTED_AUTH_CODE`、API Key 等值。
-11. **ChromeBridge 协议 v3 与托管运行时的运行级验证**：`tests/chromeBridge/` 下有 `smoke-check.js` 及 `c4c4d00`→`1ae9b63c` 新增的 `runtime-core-test.js`、`page-runtime-handle-test.js`、`page-runtime-image-test.js`、`contenteditable-reply-editor-test.js`，但本机未运行真实 Chrome；页面观察、动作验证、进程回收的实机行为需运行验证（静态代码只确认了入口、状态与事件绑定）。
+11. **ChromeBridge 协议 v3 与托管运行时的运行级验证**：`tests/chromeBridge/` 下有 `smoke-check.js` 及新增的 `runtime-core-test.js`、`page-runtime-handle-test.js`、`page-runtime-image-test.js`、`contenteditable-reply-editor-test.js`，但本机未运行真实 Chrome；页面观察、动作验证、进程回收的实机行为需运行验证（静态代码只确认了入口、状态与事件绑定）。
 12. **`ReasoningToContent` 展示转换**：只确认了转换在转发副本上进行、不进 VCP 循环；不同上游（Gemini reasoning/Claude thinking/OpenAI reasoning）字段形态的兼容性未逐项运行验证。

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenClaw 的工具面是一次运行时构建的集合，而非固定全局表。核心编码工具、OpenClaw 控制工具、渠道工具、插件工具和可选 MCP 工具先按运行上下文构造，再叠加沙箱、会话、发送者、模型与客户端能力策略，最后交给 Agent Core。模型发出标准 `toolCall` 后，Agent Core 负责参数验证、审批前置钩子、串行或并行执行、结果事件和下一轮请求。
+OpenClaw 的工具面随运行上下文构建，没有固定的全局表。核心编码工具、OpenClaw 控制工具、渠道工具、插件工具和可选 MCP 工具先按运行上下文构造，再叠加沙箱、会话、发送者、模型与客户端能力策略，最后交给 Agent Core。模型发出标准 `toolCall` 后，Agent Core 负责参数验证、审批前置钩子、串行或并行执行、结果事件和下一轮请求。
 
 工具权限具有多层收敛特征：配置和会话策略负责目录过滤，非所有者调用者会被移除控制面工具，工具执行前仍经过 `before_tool_call` 与可信策略链。MCP 工具使用安全化名称避免冲突，并把外部结果标记为不可信网络内容。工具调用结果回注为 `toolResult` 消息；失败、拒绝、取消和未启动调用均生成可观察的结果，不以静默丢弃结束。
 
@@ -67,7 +67,7 @@ Agent Core 在批量执行前按工具名解析并验证调用；找不到工具
 
 ## 6. 审批、授权与执行边界
 
-审批不是 UI 单层行为，而是执行前策略链的一部分。`runBeforeToolCallHook` 先做循环准入、技能工作台与语音确认，再执行可信策略和插件 hook；策略可改写参数、阻断或返回 `requireApproval`（`src/agents/agent-tools.before-tool-call.policy.ts:158-220`）。审批请求由 Gateway 或嵌入式 approval broker 承载，允许一次、始终允许、拒绝和超时等决策；超时和 Gateway 不可用默认 fail-closed（`src/agents/agent-tools.before-tool-call.approval.ts:1-35,130-220`）。
+审批属于执行前策略链，不是单独的 UI 行为。`runBeforeToolCallHook` 先做循环准入、技能工作台与语音确认，再执行可信策略和插件 hook；策略可改写参数、阻断或返回 `requireApproval`（`src/agents/agent-tools.before-tool-call.policy.ts:158-220`）。审批请求由 Gateway 或嵌入式 approval broker 承载，允许一次、始终允许、拒绝和超时等决策；超时和 Gateway 不可用默认 fail-closed（`src/agents/agent-tools.before-tool-call.approval.ts:1-35,130-220`）。
 
 执行域按工具不同分布：读写编辑和 shell 运行在主机或 sandbox workspace；Gateway、消息和渠道工具经 Gateway/渠道适配器执行；MCP 经 stdio、SSE 或 streamable HTTP transport 执行（`agent-bundle-mcp-runtime.ts:77-103`）；节点、浏览器、计算机等工具需相应客户端能力。沙箱根、workspace-only/read-only、进程 scope key、超时和 safe-bin 策略在 `createCoreCodingTools` 与 `agent-tools.ts:500-640` 注入，阻止工具越过授权工作区；这些边界不等同于操作系统级隔离，实际隔离强度取决于运行配置与沙箱实现。
 

@@ -42,12 +42,12 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 - `MEDIA:<absolute-path>`：唯一由"模型/工具 → 平台"单向消费的协议。工具端生产（TTS、MCP 工具、视频生成、浏览器等工具，生产端入口见下）；平台提示词教会模型在回复中输出（`agent/prompt_builder.py:793-830`，如 WhatsApp/Telegram 平台提示"include MEDIA:/absolute/path/to/file in your response"）；消息平台拦截为原生附件（`gateway/run.py:1550-1693`：扩展锚定的媒体标记匹配器只递送带可递送扩展名的真实路径——裸 prose 中的示例串永不递送，图像生成等工具的本地文件路径字段被提取为递送目标）；递送前有安全根校验（`gateway/platforms/base.py:1180-1240`）：缓存根白名单 + 10 分钟新鲜度信任 + 系统路径/凭据子路径硬拒；桌面渲染器把该标记行改写成媒体链接再渲染为播放器（`apps/desktop/src/lib/chat-messages.ts:136-150`、`apps/desktop/src/lib/media.ts:57-59`）。
   - 生产端入口：`tools/tts_tool.py:3455/3663`、`tools/mcp_tool.py:915/967`、`tools/video_generation_tool.py`、`tools/browser_tool.py`
-  - **媒体保真加固**（相关提交，均属本协议演进）：
-    - queued resend 保留受保护的 `MEDIA:` 标记与后续跟进媒体（`1648ab3a`、`808c8570`、`a52dd17d`、`0b17b691`，失败首回合跳过附件上传但保持投递）；
-    - 容器→宿主媒体路径翻译扩展到 home/cache/进程内网关（`238351a6`、`a7dd8854`、`fe54ab4f`）；
-    - terminal-backend 的读取统一经共享媒体解析器（`f2e936da`、`9eb3ac50`）；
-    - draft 终态发送不再带 `expect_edits`（`0f227271`）。
-  - **图像后处理**：图片生成后新增 sub-2MP 默认 upscale（FAL Clarity Upscaler 链，`66ea4e68`、`137960c9`，`tools/image_generation_tool.py:11-153`，按模型 `upscale` 旗标门控）。
+  - **媒体保真加固**：
+    - queued resend 保留受保护的 `MEDIA:` 标记与后续跟进媒体（失败首回合跳过附件上传但保持投递）；
+    - 容器→宿主媒体路径翻译扩展到 home/cache/进程内网关；
+    - terminal-backend 的读取统一经共享媒体解析器；
+    - draft 终态发送不再带 `expect_edits`。
+  - **图像后处理**：图片生成后新增 sub-2MP 默认 upscale（FAL Clarity Upscaler 链，`tools/image_generation_tool.py:11-153`，按模型 `upscale` 旗标门控）。
 - `#media:`/`#preview/` Markdown href：桌面渲染器在 Markdown 链接层消费，经链接组件分发（`markdown-text.tsx:252-269`）。注意 `previewMarkdownHref()`（`preview-targets.ts:27`）在本快照中没有生产侧调用者——Preview 协议的写入端缺失，仅解析端存活（`assistant-message.tsx:84-94` 从收尾文本提取主要预览目标）。
 - 无结构化 tool part 承载 artifact。工具结果就是 JSON 字符串，桌面端用字段名正则（`KEY_HINT_RE`）从工具结果与转写中挖出文件路径/URL 填入"Artifacts"画廊页（`app/artifacts/artifact-utils.ts:20-26,202-244`）。
 
@@ -78,7 +78,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - **HTML artifact**：`<iframe sandbox="allow-scripts">` + `srcDoc`（无 allow-same-origin → 不透明源，无顶层导航/弹窗/表单外发，父应用不可达），强制浅色画布（`preview-artifact.tsx:82-108`）。依赖全部来自生成内容自身，不注入外部资源。
 - **远程 HTML data URL**（远程网关模式下把文件内容搬进桌面预览）：DOMPurify 全文档消毒 + 移除可执行与嵌入标签（script/template/iframe/object/embed）+ 去除链接与动作属性 + CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'` + 16MB 上限（`lib/local-preview.ts:83-145`）。
 - **URL 标签页**：Electron `<webview>`，专属分区 `partition=persist:hermes-preview`，`contextIsolation=yes,nodeIntegration=no,sandbox=yes`（`preview-pane.tsx:553-557`）；附 console 采集、devtools、导航/加载事件与脚本注入读页面文本（`preview-pane.tsx:324-344`）。console/devtools 按标签页登记（`preview-strip-tools.tsx`）。
-- **本地文件**：image/PDF（blob URL）/text 渲染 + 源码（Shiki 高亮）+ 工作树 diff 视图；本地 HTML 文件按源码渲染而非运行（`preview-file.tsx:664-667`）——与 artifact HTML（可运行）形成有意反差。
+- **本地文件**：image/PDF（blob URL）/text 渲染 + 源码（Shiki 高亮）+ 工作树 diff 视图；本地 HTML 文件按源码渲染而非运行（`preview-file.tsx:664-667`），只有 artifact HTML 会执行。
 - **SVG**：DOMPurify `USE_PROFILES: {svg:true, svgFilters:true}`。
 - **语言解释器**：`execute_code` 工具在 Python 子进程中运行（§7），其结果只回文本给模型，用户不可直接操作该进程的产物。
 - 不支持层级：无 Canvas/WebGL 专用运行时、无 notebook（`.ipynb` 仅可读，`tools/read_extract.py`）、无 draw.io/Excalidraw 画布（全仓未检索到 notebook 运行时或画布类实现；`prompt_builder.py:949` 仅把 Excalidraw 文件当作可发送附件）。
@@ -107,10 +107,10 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - **`terminal` 环境**：本地与远程后端（Docker/SSH/Modal/Daytona/Singularity/Vercel，`tools/environments/`）。
 - **桌面预览运行时**：webview/iframe 均为沙箱，无网络桥（HTML artifact 内脚本不能请求外部资源也不会被宿主响应）。
 - **桌面宿主桥**（`window.hermesDesktop`）：类型化窄桥——文件读写（`readDesktopFileDataUrl` 等，`lib/desktop-fs.ts`）、git、`hermes-media://` 流媒体协议、保存图像/浏览器打开/预览目标归一化（`lib/local-preview.ts:147-179`、`lib/media.ts:122-127`）。
-- **read_window_below**（`tools/read_window_tool.py`）：桌面能力桥工具——询问宿主"Hermes 窗口正下方是哪个 OS 窗口"，经 `window.read.request/respond` 阻塞桥回传序列化窗口元数据（`server.py:5870-5879` `read_window_below_callback`，30s 超时）；Windows 侧经 Electron 主进程的 get-windows 原生绑定枚举。能力演进提交：
-  - `406501fd`：引入该工具
-  - `f22ae729`、`f463a7e8`、`2cd9e177`：Windows 原生窗口枚举
-  - `04afc8d4`：桌面对应答失败给出原因
+- **read_window_below**（`tools/read_window_tool.py`）：桌面能力桥工具——询问宿主"Hermes 窗口正下方是哪个 OS 窗口"，经 `window.read.request/respond` 阻塞桥回传序列化窗口元数据（`server.py:5870-5879` `read_window_below_callback`，30s 超时）；Windows 侧经 Electron 主进程的 get-windows 原生绑定枚举。能力演进：
+  - 引入该工具
+  - Windows 原生窗口枚举
+  - 桌面对应答失败给出原因
 - 与 `read_preview`/`read_terminal` 同属"模型查询桌面环境"的能力桥族。
 - **网关媒体递送权限**：缓存根目录白名单（`~/.hermes/cache/{images,audio,videos,documents,screenshots}` 等）+ 10 分钟新鲜度信任 + `/etc`、`/root` 等系统路径与 `$HOME` 下凭据目录硬拒（`gateway/platforms/base.py:1180-1240`）；`/api/files/download` 带查询 token 鉴权。
 
@@ -129,7 +129,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
   - `session_search`：跨会话检索转写（`tools/session_search_tool.py`）；
   - `open_preview`/`focus_pane`：投影面控制；
   - **`read_window_below`**：桌面下方 OS 窗口元数据（见 §7）；
-  - **`vision_analyze` 区域缩放**：`_crop_image_region`（`tools/vision_tools.py:681`，`e166159f`）按 `region=[x1,y1,x2,y2]` 在原图像素坐标上裁剪放大细节再分析，源自 Qwen 的 zoom-image 方案。
+  - **`vision_analyze` 区域缩放**：`_crop_image_region`（`tools/vision_tools.py:681`）按 `region=[x1,y1,x2,y2]` 在原图像素坐标上裁剪放大细节再分析，源自 Qwen 的 zoom-image 方案。
 - 不可查询：artifact 注册表对模型完全不可见——没有列出 artifact、读取版本源码、选择版本的模型侧通道。模型对"自己生成的 HTML"的唯一读回途径是 `read_preview`（若该 artifact 恰好开在预览面板里）或磁盘文件（若曾落盘）。
 - 持续维护：同一会话内模型重新生成 → 同 slug 追加版本 → 已开标签页自动跟进（这是"持续维护"的最强形式，但**无需模型感知**——注册表由渲染器自动维护，模型并不知道自己在产生"版本"）；跨会话无对象身份延续（slug 不含会话外身份，重开会话即新注册表）。
 

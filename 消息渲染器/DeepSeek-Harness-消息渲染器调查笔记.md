@@ -76,7 +76,7 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 ## 6. 呈现意图词汇与工具卡片
 
 - **词汇表**：调用期 `ToolCallView` 与结果期 `ToolResultView` 是 card 判别联合（`packages/core/tools/src/presentation.ts:46`、:140）。结果期视图用 `shape`/`kind` 二次判别，wire 上出现未知取值时一律降级到 generic 路径（各卡片模型都有此分支）。
-- **卡片种类**（结果期视图按 `shape`/`kind` 二次判别）：
+- **卡片种类**：
 
 | card | 内容 | 典型来源 | client 映射 |
 |---|---|---|---|
@@ -100,7 +100,7 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 - 数学与代码的 HTML 来源可信：KaTeX 输出经 DOMParser 映射为 React 元素，词汇表限定 span/MathML/SVG（`katex.tsx:88-89`）。
 - 链接与图片目的地过白名单；行内代码的文件提及由调用方解析器决定 token 是否对应真实文件，渲染器不猜测（`render.tsx:107-115`、:243-258）。
 - `schema-form` 是设置编辑器的 schema/草稿模型层（schemastery 重水化 + 按路径不可变编辑），与消息渲染无关（`packages/client/schema-form/src/index.ts`）。
-- `agent-tool-presentation` 的 `presentAs`（native/code/both）选择的是模型可见的工具面，不是 UI 渲染——命名与"呈现"撞词，实际语义在 `packages/core/tools/src/index.ts:946-971`，特此澄清边界。
+- `agent-tool-presentation` 的 `presentAs`（native/code/both）选择的是模型可见的工具面，不是 UI 渲染——命名与"呈现"撞词，实际语义在 `packages/core/tools/src/index.ts:946-971`。
 
 ## 8. 内容交互反馈与可访问性
 

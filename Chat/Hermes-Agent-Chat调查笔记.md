@@ -23,7 +23,7 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
    - 压缩轮转生成新的 `session_key`，经 `parent_session_id` + `end_reason='compression'` 连成轮转链，跨轮转不变的标识是列表接口派生的只读字段 `_lineage_root_id`（`hermes_state.py:7464`），桌面端 pin、路由匹配都基于它。
 4. 每条消息同时是历史里的事件，也是数据库里的行；落盘用"单事务批量 + 内存 marker 去重"的原子配对契约（`run_agent.py:2010`），崩溃中途不写库，痕迹只在 `turn_marker.py` 中断标记文件，恢复会话时按标记自动重放。
 5. 子代理是真实会话：`delegate_task` 创建占 DB 行的子会话（`_delegate_from` 标记），继承同一套创建与持久化语义，删除时沿标记级联。
-6. **标题有来源与即时性**：首轮 turn 即得 derived 即时标题、后台 LLM 升级，provenance（derived < llm < user）防自动覆盖，压缩轮转携带标题不变（详见会话与消息管理笔记 §2.4）。
+6. **标题**：会话在首轮 turn prologue 即得 derived 即时标题，随后由后台 LLM 升级；provenance（derived < llm < user）防自动覆盖，压缩轮转时标题不变（详见会话与消息管理笔记 §2.4）。
 
 ## 产品表面与系统边界
 
@@ -78,7 +78,6 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 - **崩溃安全**：`_flush_messages_to_session_db_unlocked`（`run_agent.py:2010`）单事务批量 + `_db_persisted` marker 去重，失败不盖章、下轮全量重扫；`interrupted_turns.json` 是唯一中途痕迹，resume 时按标记自动重跑（attempts 防崩溃循环）。
 - **压缩触发**：无 token 级截断原语；`should_compress` 阈值由 context_length 比例算出；preflight 多 pass（至多 3 轮，要求行数减少或 token 降幅 >5%）+ idle 压缩（墙上时间门）；另有 gpt-5.6 直接 OpenAI 路由的 native 服务端压缩（`agent/native_compaction.py`）与 stable/volatile 缓存边界注册表（`agent/prompt_cache_boundary.py`），详见对话请求笔记 §3。
 - **搜索边界**：FTS 索引矩阵（unicode61/bigram/trigram + LIKE 兜底），cjk/trigram 明确跳过 `role='tool'` 行（约 90% 字节是机器噪声）；rewind 行默认隐藏、压缩归档行默认可见。
-- **标题机制**：会话在首轮 turn prologue 即得 derived 即时标题、后台 LLM 升级，provenance（derived < llm < user）防自动覆盖，压缩轮转携带标题不变（详见会话与消息管理笔记 §2.4）。
 
 ## 当前链路补充
 

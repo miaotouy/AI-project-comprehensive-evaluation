@@ -14,7 +14,7 @@
 
 ## 结论：不适用
 
-VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维 + 配置中枢**，不产出面向最终用户的聊天主界面。按 Chat UI 类目适用性门槛（项目只提供后端协议、运维面板或第三方页面增强时标记不适用），本类目对其**不适用**。以下只记录排除证据与容易被误判的疑点，全部经过源码核对：
+VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维 + 配置中枢**，不产出面向最终用户的聊天主界面。按 Chat UI 类目适用性门槛（项目只提供后端协议、运维面板或第三方页面增强时标记不适用），本类目对其**不适用**。以下只记录排除证据与容易被误判的疑点：
 
 - `server.js` 暴露的对话相关端点全部是纯 API，没有任何配套 HTML 聊天页面：
 
@@ -52,7 +52,7 @@ AdminPanel-Vue 是 Vue 3 + Pinia + vue-router 的独立 SPA（依赖版本见 `A
   ```
 - **WebSocket `/vcp-admin-panel/VCP_Key=xxx` 通道**（`WebSocketServer.js:187` 路径正则、1040-1053 `broadcastToAdminPanel`）：实时推送通道，推送内容仅限管理事件（如插件热重载通知 `{type: 'plugins-reloaded', ...}`，`Plugin.js:2291-2293`，另有 2460-2462、2525-2527 两处同类型广播），不推送任何聊天消息内容。
 
-结论：AdminPanel-Vue 里所有看起来"像"聊天的元素，拆开机制后都不是真正的用户-AI 对话通道，而是审计视图、API 代理、彩蛋装饰或论坛管理。
+结论：AdminPanel-Vue 里看起来像聊天的元素，逐个核对后都不是用户-AI 对话通道，而是审计视图、API 代理、彩蛋装饰或论坛管理。
 
 ## OpenWebUISub：第三方聊天页面的纯前端增强层
 

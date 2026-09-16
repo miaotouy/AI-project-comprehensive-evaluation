@@ -16,7 +16,7 @@
 
 OpenClaw 是单操作者私人 AI 助手：本地 Gateway 是会话、工具、事件与渠道连接的控制平面，Telegram、WhatsApp、Slack、Discord 等消息渠道承担日常终端聊天面，另有 Control UI、TUI、iOS/Android companion apps 作为自有界面。一次可见对话由两条前端入口之一发起——自有界面经 Gateway 协议 RPC，渠道消息经渠道适配与 auto-reply 管线——随后在同一个 reply run 主链上汇合：Gateway 完成准入与 ACK 后把 turn 交给脱离 RPC 生命周期的 dispatch，嵌入式 Agent 运行器从 per-agent SQLite 恢复 transcript、拼装历史与上下文并驱动 Agent Core 工具/Provider 流式循环，assistant 结果经同一 transcript 追加路径落库，再分别投影为实时 chat/agent 事件和持久 session.message 供表面显示。
 
-聊天体系有四个贯穿性分层（详见专项笔记，此处只给骨架）：**会话与消息层**把逻辑会话（sessionKey）与 transcript generation（sessionId）分离，per-agent SQLite 是消息唯一事实源，活动路径与 FTS 是可重建投影，分支、reset、rewind、fork 通过轮换 generation 保留历史；**请求与运行层**把「ACK 不等于持久化」贯彻到底，用户 turn、Agent 内存消息、live chat payload 与已提交 transcript 是四套不同频率的投影面；**显示层**由 Gateway 显示投影与各客户端 timeline 组装构成，控制消息、工具卡、thinking 与真实聊天气泡分开建模；**交付层**的导出全部固化为操作者本机文件，没有对外的分享链接或服务。
+聊天体系有四个贯穿性分层（详见专项笔记，此处只给骨架）：**会话与消息层**把逻辑会话（sessionKey）与 transcript generation（sessionId）分离，per-agent SQLite 是消息唯一事实源，活动路径与 FTS 是可重建投影，分支、reset、rewind、fork 通过轮换 generation 保留历史；**请求与运行层**区分 ACK 与持久化，用户 turn、Agent 内存消息、live chat payload 与已提交 transcript 是四套不同频率的投影面；**显示层**由 Gateway 显示投影与各客户端 timeline 组装构成，控制消息、工具卡、thinking 与聊天消息气泡分开建模；**交付层**的导出全部固化为操作者本机文件，没有对外的分享链接或服务。
 
 ## 产品表面与系统边界
 
