@@ -18,7 +18,7 @@
 
 
 <details>
-<summary><b>已收录项目清单（共 22 个）</b></summary>
+<summary><b>已收录项目清单（共 23 个）</b></summary>
 
 - [AIO-Hub](已调查能力汇总/AIO-Hub-已调查能力汇总.md) — https://github.com/miaotouy/aio-hub
 - [AstrBot](已调查能力汇总/AstrBot-已调查能力汇总.md) — https://github.com/AstrBotDevs/AstrBot
@@ -37,6 +37,7 @@
 - [OpenCode](已调查能力汇总/OpenCode-已调查能力汇总.md) — https://github.com/anomalyco/opencode
 - [OpenOcta](仓库分布/OpenOcta-仓库分布调查笔记.md) — https://github.com/openocta/openocta
 - [Pi](已调查能力汇总/Pi-已调查能力汇总.md) — https://github.com/earendil-works/pi
+- [RikkaHub](已调查能力汇总/RikkaHub-已调查能力汇总.md) — https://github.com/rikkahub/rikkahub
 - [Risuai](已调查能力汇总/Risuai-已调查能力汇总.md) — https://github.com/kwaroran/Risuai
 - [SillyTavern](已调查能力汇总/SillyTavern-已调查能力汇总.md) — https://github.com/SillyTavern/SillyTavern
 - [VCPChat](已调查能力汇总/VCPChat-已调查能力汇总.md) — https://github.com/lioensky/VCPChat
@@ -69,6 +70,7 @@
 | OpenCode | [✅](已调查能力汇总/OpenCode-已调查能力汇总.md) | [✅](仓库分布/OpenCode-仓库分布调查笔记.md) | — | [✅](会话与消息管理/OpenCode-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/OpenCode-ChatUI调查笔记.md) | [✅](消息渲染器/OpenCode-消息渲染调查笔记.md) | [✅](对话导出与分享/OpenCode-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) | [✅](Agent角色/OpenCode-Agent角色配置调查笔记.md) | [✅](Agent工具/OpenCode-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/OpenCode-外部执行体与应用协作调查笔记.md) | N/A | [✅](生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md) | N/A | [✅](应用界面基础设施/OpenCode-应用界面基础设施调查笔记.md) | [✅](独特功能/OpenCode-独特功能调查笔记.md) |
 | OpenOcta | — | [✅](仓库分布/OpenOcta-仓库分布调查笔记.md) | — | — | — | — | — | — | — | — | — | — | — | — | — | — | — |
 | Pi | [✅](已调查能力汇总/Pi-已调查能力汇总.md) | [✅](仓库分布/Pi-仓库分布调查笔记.md) | — | [✅](会话与消息管理/Pi-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/Pi-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/Pi-ChatUI调查笔记.md) | [✅](消息渲染器/Pi-消息渲染器调查笔记.md) | [✅](对话导出与分享/Pi-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/Pi-LLM渠道管理调查笔记.md) | [✅](Agent角色/Pi-Agent角色配置调查笔记.md) | [✅](Agent工具/Pi-Agent工具调查笔记.md) | N/A | N/A | [✅](生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md) | N/A | [✅](应用界面基础设施/Pi-应用界面基础设施调查笔记.md) | [✅](独特功能/Pi-独特功能调查笔记.md) |
+| RikkaHub | [✅](已调查能力汇总/RikkaHub-已调查能力汇总.md) | [✅](仓库分布/RikkaHub-仓库分布调查笔记.md) | — | [✅](会话与消息管理/RikkaHub-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/RikkaHub-ChatUI调查笔记.md) | [✅](消息渲染器/RikkaHub-消息渲染器调查笔记.md) | [✅](对话导出与分享/RikkaHub-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md) | [✅](Agent角色/RikkaHub-Agent角色配置调查笔记.md) | [✅](Agent工具/RikkaHub-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/RikkaHub-外部执行体与应用协作调查笔记.md) | [✅](检索增强与认知编排/RikkaHub-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/RikkaHub-生成式输出与运行时调查笔记.md) | [✅](媒体创作/RikkaHub-媒体创作调查笔记.md) | [✅](应用界面基础设施/RikkaHub-应用界面基础设施调查笔记.md) | [✅](独特功能/RikkaHub-独特功能调查笔记.md) |
 | Risuai | [✅](已调查能力汇总/Risuai-已调查能力汇总.md) | [✅](仓库分布/Risuai-仓库分布调查笔记.md) | — | [✅](会话与消息管理/Risuai-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/Risuai-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/Risuai-ChatUI调查笔记.md) | [✅](消息渲染器/Risuai-消息渲染调查笔记.md) | [✅](对话导出与分享/Risuai-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/Risuai-LLM渠道管理调查笔记.md) | [✅](Agent角色/Risuai-Agent角色配置调查笔记.md) | [✅](Agent工具/Risuai-Agent工具调查笔记.md) | N/A | [✅](检索增强与认知编排/Risuai-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/Risuai-生成式输出与运行时调查笔记.md) | [✅](媒体创作/Risuai-媒体创作调查笔记.md) | [✅](应用界面基础设施/Risuai-应用界面基础设施调查笔记.md) | [✅](独特功能/Risuai-独特功能调查笔记.md) |
 | SillyTavern | [✅](已调查能力汇总/SillyTavern-已调查能力汇总.md) | [✅](仓库分布/SillyTavern-仓库分布调查笔记.md) | — | [✅](会话与消息管理/SillyTavern-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/SillyTavern-ChatUI调查笔记.md) | [✅](消息渲染器/SillyTavern-消息渲染调查笔记.md) | [✅](对话导出与分享/SillyTavern-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/SillyTavern-LLM渠道管理调查笔记.md) | [✅](Agent角色/SillyTavern-Agent角色配置调查笔记.md) | [✅](Agent工具/SillyTavern-Agent工具调查笔记.md) | N/A | [✅](检索增强与认知编排/SillyTavern-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/SillyTavern-生成式输出与运行时调查笔记.md) | [✅](媒体创作/SillyTavern-媒体创作调查笔记.md) | [✅](应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md) | [✅](独特功能/SillyTavern-独特功能调查笔记.md) |
 | VCPChat | [✅](已调查能力汇总/VCPChat-已调查能力汇总.md) | [✅](仓库分布/VCPChat-仓库分布调查笔记.md) | — | [✅](会话与消息管理/VCPChat-会话与消息管理调查笔记.md) | [✅](对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) | [✅](Chat%20UI/VCPChat-ChatUI调查笔记.md) | [✅](消息渲染器/VCPChat-消息渲染器调查笔记.md) | [✅](对话导出与分享/VCPChat-对话导出与分享调查笔记.md) | [✅](LLM渠道管理/VCPChat-LLM渠道管理调查笔记.md) | [✅](Agent角色/VCPChat-Agent角色配置调查笔记.md) | [✅](Agent工具/VCPChat-Agent工具调查笔记.md) | [✅](外部执行体与应用协作/VCPChat-外部执行体与应用协作调查笔记.md) | [✅](检索增强与认知编排/VCPChat-检索增强与认知编排调查笔记.md) | [✅](生成式输出与运行时/VCPChat-生成式输出与运行时调查笔记.md) | [✅](媒体创作/VCPChat-媒体创作调查笔记.md) | [✅](应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md) | [✅](独特功能/VCPChat-独特功能调查笔记.md) |

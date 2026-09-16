@@ -1,10 +1,10 @@
 # Chat 横向对比（概览与跨类目导航）
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、RikkaHub、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-09-04
+> 对比更新日期：2026-09-15
 >
-> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；本文档只保留跨层综合结论
+> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；RikkaHub 依据本目录 2026-09-15 的 [RikkaHub-Chat 调查笔记](RikkaHub-Chat调查笔记.md)（端到端主链、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 服务复用同一 ChatService，均为静态源码确认、未运行验证）；本文档只保留跨层综合结论
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-二十一个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。样本覆盖 IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi）、服务端 Agent 会话运行时（OpenCode）、事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness）、以本机 Gateway 为控制平面、多渠道与自有界面共用同一会话主链的本地 Agent 运行时（OpenClaw），以及 Android 优先、本地 SQLite 投影远端 VCP 服务 SSE 的客户端（VCPMobile）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
+二十二个项目里，"消息构建""分支""搜索""流式持久化""中断"虽然名称相近，底层实现却分属不同层次。样本覆盖 IM 事件流水线（AstrBot）、主进程会话运行时（DeepChat）、已发布应用的服务端聊天/工作流调用面（Dify）、独立 Agent 后端（Hermes Agent）、前端直连模型（Jan、NextChat）、服务端协同聊天系统（Open WebUI）、主链尚未接通持久化的薄客户端（Manifold Desktop）、前端内存权威 + 整库增量编码落盘的无路由单页应用（Risuai）、终端本地 Agent 会话运行时（Pi）、服务端 Agent 会话运行时（OpenCode）、事件溯源驱动循环的 Agent 会话运行时（DeepSeek Harness）、以本机 Gateway 为控制平面、多渠道与自有界面共用同一会话主链的本地 Agent 运行时（OpenClaw）、原生 Android 上把消息拆成「节点 + 候选」两表、分支用选中下标表达、回合成功才整会话落库、并由内嵌 Web 服务复用同一 ChatService 的 RikkaHub，以及 Android 优先、本地 SQLite 投影远端 VCP 服务 SSE 的客户端（VCPMobile）。VCPToolBox 不提供最终用户聊天 UI，仅参与消息构建与网关编排对比。
 
 AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路径顺序等待，空闲分支可并行生成；Cherry Studio 的 Agent 聊天则把 Claude Code、Pi 与 DeepSeek Harness 收束进同一调度与持久化边界。VCPChat 的聊天视图、流投影和历史写入已拆为各自的所有者，因此也进一步说明聊天主链的生命周期与消息磁盘事实源是两层问题。
 
@@ -88,6 +88,7 @@ OpenClaw 的聊天表面分自有界面与外部消息渠道两层，但两层�
 | 前端内存权威、无路由多载体单页应用与整库增量编码存档 | Risuai | 重roll 候选不落盘；分支为整份会话副本加注释回链，非消息树；未找到消息级搜索索引 |
 | Android 优先的本地 SQLite 聊天投影与 SSE 流收口 | VCPMobile | Topic 下线性历史；终结事务维护 FTS 与渲染缓存；编辑/重生成截断后续历史；FTS 的 UI 查询与命中跳转未确认 |
 | 本机 Gateway 控制平面、多渠道与自有界面共用会话主链 | OpenClaw | per-agent SQLite 追加型 transcript 是消息唯一事实源，session key 与 generation 分离、轮换保留历史；FTS 只索引活动路径文本；渠道消息框与自有界面都不持有消息主副本；控制消息/工具卡与聊天气泡分开建模；实时事件为派生投影（静态主链确认，未运行验证） |
+| 原生 Android、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 复用同一会话主链 | RikkaHub | 消息与节点分两表、分支为节点内候选加选中下标而非消息树，没有独立分支实体；生成期只改内存、成功回合才整会话重写落库；同会话严格串行、无 steer，再次发送即排队；确认不存在定时主动运行；未找到向量检索（静态主链确认，未运行验证） |
 
 Manifold Desktop 当前更适合作为"聊天主链尚未接通持久化时会出现哪些断层"的对照样本，不宜仅凭已存在的 SessionManager API 判断会话能力已经完成。
 

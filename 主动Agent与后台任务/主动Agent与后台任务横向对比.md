@@ -1,10 +1,10 @@
 # 主动 Agent 与后台任务横向对比
 
-> 对比对象：VCPChat、VCPToolBox、Hermes Agent、Open WebUI、LobeHub、AstrBot、OpenClaw
+> 对比对象：VCPChat、VCPToolBox、Hermes Agent、Open WebUI、LobeHub、AstrBot、OpenClaw、RikkaHub
 >
-> 对比更新日期：2026-09-04
+> 对比更新日期：2026-09-15
 >
-> 依据：同目录七份基于各项目当前源码快照的单项目调查笔记
+> 依据：同目录八份基于各项目当前源码快照的单项目调查笔记（含 RikkaHub 同目录 2026-09-15 调查笔记）
 >
 > 对比方法：先按运行对象是否隔离、触发来源和结果归属划分运行形态，再比较状态权威、并发、取消、失败和恢复；不按定时器名称、模型能力或任务数量排名
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-七个样本均已确认至少一条主动运行主链，但它们的工作单元并不相同。Hermes、Open WebUI、LobeHub、VCPToolBox 与 OpenClaw 都有独立日程或任务对象；VCPChat、Hermes、AstrBot 与 OpenClaw 还能把触发重新接入既有会话；VCPToolBox、Open WebUI 与 AstrBot 另有邮件、日历或群聊等条件唤醒，OpenClaw 另有 hook/webhook 外部事件唤醒。比较时，触发脱离用户回合是共同条件，不代表各样本都有同样的耐久性、取消能力或结果可见性。
+RikkaHub 本次确认没有主动运行主链，其余七个样本均已确认至少一条，但它们的工作单元并不相同。Hermes、Open WebUI、LobeHub、VCPToolBox 与 OpenClaw 都有独立日程或任务对象；VCPChat、Hermes、AstrBot 与 OpenClaw 还能把触发重新接入既有会话；VCPToolBox、Open WebUI 与 AstrBot 另有邮件、日历或群聊等条件唤醒，OpenClaw 另有 hook/webhook 外部事件唤醒。比较时，触发脱离用户回合是共同条件，不代表各样本都有同样的耐久性、取消能力或结果可见性。
 
 隔离日程运行最适合比较持久状态与恢复。Hermes 的 cron 以 profile 文件、执行账本和认领协议隔离运行；Open WebUI 把每次 Automation 记录为运行历史并生成真实 chat 或 channel；LobeHub 将任务、task topic 和 Brief 放入 PostgreSQL；VCPToolBox 则以 JSON 任务规则和 history 汇总 Agent 派发结果；OpenClaw 以 SQLite 同时持有 cron job、run receipt、task run 与 detached subagent run，isolated/current 运行使用独立 run session，main 目标则经 heartbeat 回到主会话。AstrBot 的 cron 定义和最近状态持久化，但没有单独的运行账本，运行仍重新进入原会话。
 
@@ -58,6 +58,7 @@
 | [LobeHub](LobeHub-主动Agent与后台任务调查笔记.md) | 隔离日程运行、会话式 heartbeat | PostgreSQL task、task topic 与 Brief | 无头 Agent 的 task topic、handoff 与 Brief | 投递后重验状态；本地 heartbeat 计时器不持久化 |
 | [AstrBot](AstrBot-主动Agent与后台任务调查笔记.md) | 会话内 cron、进程内后台工作 | 数据库 cron job 的定义和最近状态；后台工具只有内存协程 | 原会话主动消息与历史；后台工具通过后续 Agent 回合交付 | cron 启动重装；后台工具无持久化、查询或恢复链 |
 | [OpenClaw](OpenClaw-主动Agent与后台任务调查笔记.md) | 隔离日程运行、会话内续作、外部事件唤醒、后台 exec 与 detached subagent | SQLite cron_jobs/run_receipts/task_runs/subagent_runs，加 session 状态与 heartbeat_outcomes；后台 exec 由进程 registry 托管 | main job 经 system event 回主会话；isolated/current 走独立 run session；结果经 announce、durable channel 或 requester settle wake 交付 | cron receipt 以 CAS/fence 恢复 stale owner 并有界 catch-up；subagent run 启动恢复；后台 exec 与进程内 wake 不跨重启恢复 |
+| [RikkaHub](RikkaHub-主动Agent与后台任务调查笔记.md) | 无主动运行主链（N/A）；仅有会话内后台生成续作与进程内串行消息队列 | 内存 ConversationSession：引用计数、Job 与待发消息队列；无持久生成状态 | 会话数据库；Web API 的 SSE；App 不在前台时的系统通知 | 无恢复：进程死亡即静默终止，两个 Service 均 START_NOT_STICKY，无补跑 |
 
 ## 调度、并发与控制
 
@@ -70,6 +71,7 @@
 | LobeHub | task topic 冲突拒绝；旧投递由数据库状态和 heartbeat token 拒绝 | paused/终态阻止下一轮 | 连续失败触发 fuse；生产投递重试和运行中中断未验证 |
 | AstrBot | APScheduler 单进程注册；未确认分布式锁 | 更新/删除/禁用阻止后续 cron | 最近错误写 job；一次性任务失败后删除；后台工作无恢复 |
 | OpenClaw | cron 默认并发上限 8；queued/running marker 防本进程重入、SQLite receipt 防跨进程重入、config revision 阻止旧定义写回；heartbeat wake 按 agent/session 合并、同 target 单活跃回合 | job disable/remove、schedule/trigger 编辑请求取消 active marker 并终止真实 controller；cron 超时向 detached Agent 建 abort controller；后台 exec 经 ProcessSupervisor.cancel 到达真实进程 | cron 连续错误按退避重试并在阈值后自动禁用；启动恢复 stale receipt、catch-up 有界补跑；detached subagent 与 channel 发送走 durable delivery/dead-letter；后台 exec 与进程内 wake 不跨重启恢复 |
+| RikkaHub | 无调度器（N/A）：无 cron、AlarmManager、JobScheduler、Worker 与广播；仅会话内消息队列按会话串行派发 | 可停止生成：暂停该会话队列并取消全部活跃 Job；前台服务超时亦触发停止 | 仅网络失败最多 3 次指数退避重试；失败暂停队列需手动恢复；无跨重启恢复 |
 
 上述“已确认的取消”不应理解为全部执行已被终止。除 Hermes cron 与 OpenClaw 的 cron/hook 取消、后台 exec 进程终止外，单项目笔记均未静态走通从控制面到已在运行的模型、工具或外部执行体的完整中断链；OpenClaw 主会话中已开始的模型回合是否被完整中断也未单独运行验证。
 
@@ -99,3 +101,4 @@
 - [LobeHub 单项目笔记](LobeHub-主动Agent与后台任务调查笔记.md)：Schedule、heartbeat、task topic 与 Brief。
 - [AstrBot 单项目笔记](AstrBot-主动Agent与后台任务调查笔记.md)：active-agent cron 与进程内后台工具。
 - [OpenClaw 单项目笔记](OpenClaw-主动Agent与后台任务调查笔记.md)：cron、heartbeat、hooks、后台 exec、detached subagent 与 durable delivery。
+- [RikkaHub 单项目笔记](RikkaHub-主动Agent与后台任务调查笔记.md)：无主动运行主链的检索依据，以及会话级后台生成、前台服务保活与通知交付。

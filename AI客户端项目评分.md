@@ -1,10 +1,10 @@
 # AI 客户端项目评分
 
-> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`SillyTavern`、`VCPChat`、`VCPToolBox`
+> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`Open WebUI`、`Pi`、`RikkaHub`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-08-13
+> 对比更新日期：2026-09-15
 >
-> 依据：各单项目调查笔记（Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布、消息渲染器等类目）及横向对比
+> 依据：各单项目调查笔记（Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布、消息渲染器等类目）及横向对比；RikkaHub 按同一 0-5 分量表补入逐项目评分，分项依据其仓库分布、会话与消息管理、消息渲染器、LLM 渠道管理、Agent 角色、Agent 工具、外部执行体与应用协作、检索增强与认知编排及上下文编译与提示词工程来源笔记，证据均为静态源码
 >
 > 对比方法：把既有调查项转换为统一的 0-5 分量表，分别计算分项分、场景加权分、证据覆盖率和风险标签；所有分数必须能够回链到调查笔记中的源码依据或明确的未验证记录
 >
@@ -179,6 +179,7 @@
 | OpenCode | 4.5/B | 4.5/B | 3.5/B | 4/B | 4/B | 4.5/B | 3/B | 4/B | 81 | N/A | 80 | 82 | 82 | 100%/B | `HOST_EXEC` `NO_ISOLATION` `SECRET_EXPOSURE` |
 | Open WebUI | 4/B | 4/B | 3.5/B | 4/B | 3.5/B | 3/B | 3/B | 4/B | 73 | 74 | 72 | 75 | 71 | 100%/B | `DUAL_TRUTH` `UNTRUSTED_MERGE` |
 | Pi | 4/B | 3.5/B | 3.5/B | 3/B | 3/B | 4.5/B | 2/B | 4/B | 68 | N/A | 65 | 68 | 71 | 100%/B | `HOST_EXEC` `NO_ISOLATION` |
+| RikkaHub | 4/B | 4/B | 3/B | 3.5/B | 4/B | 4/B | 2.5/B | 3.5/B | 73 | 73 | 72 | 73 | 73 | 100%/B | `HOST_EXEC` `FAIL_OPEN` `NO_ISOLATION` `SECRET_EXPOSURE` |
 | SillyTavern | 4/B | 3.5/B | 3/B | 4.5/B | 1.5/B | 2.5/B | 1/B | 4.5/B | 59 | 63 | 55 | 65 | 58 | 100%/B | `HOST_EXEC` `UNTRUSTED_MERGE` |
 | VCPChat | 3.5/B | 4/B | 1.5/B | 3/B | 1.5/B | 2.5/B | 0.5/B | 4.5/B | 51 | 54 | 47 | 59 | 51 | 100%/B | `HOST_EXEC` `NO_ISOLATION` `SECRET_EXPOSURE` `NO_CANCEL` |
 | VCPToolBox | N/A | N/A | 2.5/B | 3/B | 3/B | 2.5/B | 3/B | 4/B | 58 | N/A | 59 | 63 | 58 | 100%/B | `HOST_EXEC` `NO_ISOLATION` `SECRET_EXPOSURE` |
@@ -215,6 +216,7 @@ AstrBot、OpenCode 和 Pi 不以通用桌面聊天为产品边界，因此不进
 - **OpenCode**：SQLite 权威会话、SSE 事件投影、Worker Markdown、虚拟列表、配置化 Agent、AI SDK 工具循环和包级测试使 Agent 与二次开发得分突出；压缩请求改为文本序列化、会话级重试上限 5 次（指数退避带 0.25 抖动）、消息排序改时间序键；shell 无沙箱、审批无超时、凭据明文和消息全文搜索缺失仍限制安全与渠道分。
 - **Open WebUI**：服务端协同聊天、多模型分支、token 级 Svelte 渲染、连接行渠道、Workspace Model 和多来源工具形成完整 Web 平台；history JSON 与消息行双写、普通 LLM 请求无重试、仓内测试极少及外部内容注入边界限制工程与安全分。
 - **Pi**：JSONL 追加型会话树、终端安全渲染、多 Provider 包、项目文件提示词、统一 agent-loop 和高测试密度适合本地编码工作流；harness 侧新增 sqlite FTS 搜索后端与 JSONL 原子发布（torn-tail 修复），CLI 新增 `auth check`；没有 MCP、逐次审批、迭代上限、角色实体和提示词快照，bash 在宿主进程权限下执行。
+- **RikkaHub**：Room 消息节点加候选下标把分支表达为同节点备选，独立 FTS5 虚表配自定义 jieba 分词扩展承担应用内、内嵌 Web 与模型工具共用的中文检索，消息部件模型驱动 GFM 原生渲染与随包代码高亮（含回归 fixture），助手纯数据类支持会话级覆盖与两级提示词注入，工具审批状态机、32KB 结果落盘与工作区 shell 默认审批使工具链较完整，多模块 Gradle 与 193 个测试文件（约 21% 源码文件）支撑工程分；限分项是渠道侧只有三类协议、多 Key 仅做最近最少使用轮换且无健康检查与跨渠道故障转移，PRoot 工作区是用户态路径与 root 身份重映射而非内核级隔离，二维码渠道配置与备份明文携带凭据，内嵌 Web 未开启 JWT 时整组 API 与静态资源不鉴权。
 - **SillyTavern**：角色卡、World Info、swipe、Connection Profile、HTML/CSS 兼容和扩展事件构成样本中最强的角色内容生态；累计全文重渲染、整文件会话、核心测试较少、工具无逐次审批以及导入内容可注册 STscript 工具明显压低工具、安全和工程分。
 - **VCPChat**：稳定区/尾区渲染、可执行富消息、Topic/群聊和 VCP 生态把渲染与扩展能力推到很高；新增 Scriptorium 共笔文坊（VDOC/VPPTX 工程 + 文脉 PR 审批）与 Loom v1.4.0/VCP Agent WebCore（页面快照/图片/标准动作/串行指令），生态面进一步上升；单网关、宿主脚本执行、宽本机工具、明文凭据备份、单聊无本地 abort 和极少自动测试仍是安全、渠道与工程分的主要限制。
 - **VCPToolBox**：VCP 协议、语义虚拟模型、AgentAssistant、插件和分布式执行形成有特色的编排生态；它没有最终用户 Chat/渲染主链，核心仍是单上游单 Key，审批身份共用全局 Key，插件安全强度不一致且测试资产较少。ChromeBridge 2.4 增加正文图片 IMG* 语义与 `get_page_image`、Popup 人工 Managed 选择（agent 不再隐式控制托管运行时），插件进程终止跨平台化（Windows taskkill 回退、Unix 进程组 SIGKILL）。
@@ -248,6 +250,7 @@ AstrBot、OpenCode 和 Pi 不以通用桌面聊天为产品边界，因此不进
 | OpenCode | [C](会话与消息管理/OpenCode-会话与消息管理调查笔记.md) [X](对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) [R](消息渲染器/OpenCode-消息渲染调查笔记.md) [P](LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) [A](Agent角色/OpenCode-Agent角色配置调查笔记.md) [T](Agent工具/OpenCode-Agent工具调查笔记.md) [E](仓库分布/OpenCode-仓库分布调查笔记.md) |
 | Open WebUI | [C](会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) [X](对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md) [R](消息渲染器/Open-WebUI-消息渲染器调查笔记.md) [P](LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md) [A](Agent角色/Open-WebUI-Agent角色配置调查笔记.md) [T](Agent工具/Open-WebUI-Agent工具调查笔记.md) [E](仓库分布/Open-WebUI-仓库分布调查笔记.md) |
 | Pi | [C](会话与消息管理/Pi-会话与消息管理调查笔记.md) [X](对话请求与上下文/Pi-对话请求与上下文调查笔记.md) [R](消息渲染器/Pi-消息渲染器调查笔记.md) [P](LLM渠道管理/Pi-LLM渠道管理调查笔记.md) [A](Agent角色/Pi-Agent角色配置调查笔记.md) [T](Agent工具/Pi-Agent工具调查笔记.md) [E](仓库分布/Pi-仓库分布调查笔记.md) |
+| RikkaHub | [C](会话与消息管理/RikkaHub-会话与消息管理调查笔记.md) [X](对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md) [R](消息渲染器/RikkaHub-消息渲染器调查笔记.md) [P](LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md) [A](Agent角色/RikkaHub-Agent角色配置调查笔记.md) [T](Agent工具/RikkaHub-Agent工具调查笔记.md) [E](仓库分布/RikkaHub-仓库分布调查笔记.md) |
 | SillyTavern | [C](会话与消息管理/SillyTavern-会话与消息管理调查笔记.md) [X](对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md) [R](消息渲染器/SillyTavern-消息渲染调查笔记.md) [P](LLM渠道管理/SillyTavern-LLM渠道管理调查笔记.md) [A](Agent角色/SillyTavern-Agent角色配置调查笔记.md) [T](Agent工具/SillyTavern-Agent工具调查笔记.md) [E](仓库分布/SillyTavern-仓库分布调查笔记.md) |
 | VCPChat | [C](会话与消息管理/VCPChat-会话与消息管理调查笔记.md) [X](对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) [R](消息渲染器/VCPChat-消息渲染器调查笔记.md) [P](LLM渠道管理/VCPChat-LLM渠道管理调查笔记.md) [A](Agent角色/VCPChat-Agent角色配置调查笔记.md) [T](Agent工具/VCPChat-Agent工具调查笔记.md) [E](仓库分布/VCPChat-仓库分布调查笔记.md) |
 | VCPToolBox | [C](会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md) [X](对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md) [P](LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md) [A](Agent角色/VCPToolBox-Agent角色配置调查笔记.md) [T](Agent工具/VCPToolBox-Agent工具调查笔记.md) [E](仓库分布/VCPToolBox-仓库分布调查笔记.md) |

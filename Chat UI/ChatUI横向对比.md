@@ -1,10 +1,10 @@
 # Chat UI 横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、RikkaHub、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-09-04
+> 对比更新日期：2026-09-15
 >
-> 依据：本类目 21 篇单项目调查笔记（含 VCPMobile 2026-08-31 专项调查；自 `../Chat/Chat横向对比.md` 迁移；OpenClaw 依据同目录调查笔记）
+> 依据：本类目 22 篇单项目调查笔记（含 VCPMobile 2026-08-31 专项调查；自 `../Chat/Chat横向对比.md` 迁移；OpenClaw 依据同目录调查笔记；RikkaHub 依据同目录 2026-09-15 调查笔记）
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -51,6 +51,7 @@
 | Risuai | 无路由条件渲染：`App.svelte` 按七种屏幕状态分支，聊天面 = 图标栏 + 四面板侧栏（会话列表/角色配置/DevTool/快捷设置）+ ChatScreen | 发送按钮原位变停止按钮、spinner 按生成阶段分四色；全局串行、无排队，群聊/续写/触发器递归共用同一停止信号；发送前开关在侧栏快捷设置可见、作用域分层 | 会话以角色为单位挂 `chats[]` 与持久化指针 `chatPage`；生成中禁止切换角色；刷新回首页后重选角色即恢复；草稿是组件级单缓冲、跨角色共享、不持久化 |
 | Pi | 终端 TUI 全屏会话 + 命令面板、选择器、状态行 | 键盘工作流：发送、中断、shell 模式、bash 执行交互；无鼠标工作流 | 以用户任务抽象，不套用桌面布局标题；流式反馈在状态行与消息区 |
 | OpenClaw | 四个自有聊天表面：Control UI 多 pane/分屏聊天工作台 + 侧栏会话树；TUI 单终端全屏工作区；Apple 共享 SwiftUI Chat UI（iOS Chat Pro 原生，Dashboard 走认证 WebView）；Android Compose ChatScreen | Composer 多行 textarea + slash/skill/附件/dictation；TUI 命令与选择器；Apple/Android 原生 Composer + durable outbox；发送/停止、队列、审批与问题提示在各表面出现 | 表面以 Gateway 会话/事件为远端事实源但保留各自本地草稿、滚动与附件；"已收到 ACK"与"已写入 canonical history"分开，不确定交付停在 confirming/unconfirmed 而非静默重发 |
+| RikkaHub | 单 Activity + Navigation 3；聊天页 = 抽屉（窄屏模态、横屏且宽 ≥ 1100dp 永久）+ 内容；会话切换经 `clearAndNavigate` 清栈，系统返回退出应用，抽屉打开时返回键先关抽屉 | 多行 Composer（默认 5 行、可全屏）、回车发送由偏好控制；发送/长按（仅入库不生成）两支；「+」附件弹层、排队消息面板可编辑/移除/继续；生成中且输入为空时发送键变停止 | 当前聊天页只订阅本会话的生成任务/状态/队列；草稿是 VM 内存态、随会话切换销毁；工具审批、分支切换、翻译/朗读按消息状态装配；Web 端独立实现（路由跳转替代清栈、草稿按会话 id 存 zustand，无语音/朗读/翻译） |
 
 消息呈现（消息如何被看见）一列移入消息渲染器横向对比：本表只记录用户如何进入、组织、控制和操作对话。
 
