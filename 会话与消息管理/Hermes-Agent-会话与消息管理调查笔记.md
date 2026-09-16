@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Python Agent 会话运行时 run_agent.py / hermes_state、SQLite 存储、事件协议、桌面端与 TUI 前端实现），所有符号与行号在 HEAD 快照处逐一核对；行为类结论区分源码事实与静态推断
 >
@@ -296,6 +296,7 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - 导出：`session.save` 写 JSON 到 `~/.hermes/sessions/saved/`，不写 DB（3.2）。
 - 保留：归档 `archived=1` 不删数据；硬删除无回收站不可恢复；`end_session` 只标记 `ended_at/end_reason`；`/retry`/rewind 的截断行落为 `active=0` 归档（§3.4）。
 - 崩溃恢复语义见 §3.4；导入/备份恢复路径（`hermes sessions export/import`、`session_recovery.py` 等）未在本次调查范围内验证。
+- 桌面另有 Claude Code 与 Codex CLI 会话导入。发现器只读各工具的本地会话目录，先返回按仓库、时间和标题整理的预览；用户确认后把外部 turns 归一成 Hermes 消息并写入当前 profile 的 SQLite，会话 metadata 保留来源与原会话身份。外部历史被标记为不可信静态内容，不能执行其中的 tool/directive，也不导入源工具的凭据、审批或运行中状态（`hermes_cli/foreign_sessions.py:1-45,95-177,272-359`，`apps/desktop/src/app/session-import/index.tsx:20-102`）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
@@ -332,6 +333,7 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - 工具执行增量 flush 在工具杀死进程场景下的实际持久化结果未验证。
 - 崩溃恢复、多窗口并发写入、大数据量搜索需运行验证（静态代码只能确认事务、索引与写入入口）。
 - 桌面端断网中断、快速切换会话、多窗口并发等事件时序未实测。
+- Claude Code/Codex 的大批量发现、重复导入和损坏 JSONL 恢复未运行验证。
 - REST 路由挂载点（`hermes_cli/web_server.py`）除 `mount_spa` 外未逐行核对。
 - 运行行为（视觉效果、时序、性能）全部为静态推断，未运行验证。
 
@@ -343,4 +345,5 @@ DB 行是惰性创建的，后端与 TUI 各有入口：
 - session 方法：`tui_gateway/methods_session.py`——create（:14）、list（:162）、resume（:306）、undo（:2466）、delete（:972）、save（:2676）、close（:2748）、branch（:2760）、history（:2442）、title（:1022）、interrupt（:2942）、steer（:3219）、redirect（:3252）。
 - 崩溃标记：`tui_gateway/turn_marker.py`；标题：`agent/title_generator.py`（`derive_title` :250、`apply_instant_title` :474、`auto_title_session` :508）；搜索：`hermes_state_search.py` `search_messages`（:1410）、`search_sessions_by_id`（:2283）。
 - 子代理：`tools/delegate_tool.py` `_build_child_agent`（:1305）、`_delegate_from` 标记（:1679）。
+- 外部会话导入：`hermes_cli/foreign_sessions.py`、`apps/desktop/src/app/session-import/index.tsx`。
 - 桌面端数据投影：`apps/desktop/src/types/hermes.ts`（`SessionMessage` :544）、`lib/chat-messages.ts`（`ChatMessage` :13、`toChatMessages` :922）、`store/session.ts`（`mergeSessionPage` :393、`sessionPinId` :246、`lineageAliases` :307）、`use-session-list-actions.ts`（:58、:151-152、:190、:264）。

@@ -1,10 +1,10 @@
 # DeepSeek Harness 消息渲染器调查笔记
 
-> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/core/tools`、`packages/host/apiproxy`、`packages/session/session-projection`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/api/session-controller`、`packages/core/tools`、`packages/session/session-projection`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读（只读检查 git 工作树）；未运行应用、测试与快照回放
 >
@@ -14,10 +14,10 @@
 
 ## 结论摘要
 
-1. **本仓库不是聊天应用，没有传统意义上的"消息渲染器"组件**：deepseek-harness 是基于 vendored Cordis 的 agent harness，消息渲染全部发生在 Web UI 的 client 侧，实际是一条分层管线——宿主按工具声明的呈现函数计算渲染意图，随会话事件流下发；client runtime 把事件折叠成快照；ui-conversation、ui-tool、ui-primitives 三组插件负责绘制。`apps/cli` 是 `dsh` 命令行入口（配置、插件管理、浏览器别名），不承担消息渲染。
-2. **输入模型是事件流 + 宿主附带的渲染意图**：client 消费会话日志事件 `SessionEvent`；assistant 流内是 `StreamChunk` 联合（增量、块界、usage/finish 等七种，`packages/llm/llm/src/types.ts:291-303`）；`tool/call` 与 `tool/result` 事件可附带宿主计算的 `ToolEventView`（呈现意图），该意图不持久化，回放时宿主重算（`packages/host/apiproxy/src/api/events.ts:24-34`）。
+1. **消息渲染位于 Web Client 插件层**：Session Controller 传原始 durable 事件与 assistant live frames，Client 的会话对象层折叠为快照，ui-conversation、ui-tool 与 ui-primitives 绘制；Host 不计算 Web 工具卡。
+2. **输入模型是原始事件 journal**：Session Controller 的历史页与 follow opening 传输 v3 `SessionWireEvent`，工具参数、结果内容、错误和持久化 meta 原样通过；Host 不再解析工具定义或附加 `ToolEventView`。assistant 的紧凑流保存在 `assistant/message` 或 `assistant/attempt` 内，Client journal 另插入 `assistant/live-chunk` 临时项并在 durable settlement 到达时收口（`packages/api/session-controller/README.md`）。
 3. **流式链路是"逐 chunk 折叠、按帧发布、增量渲染"**：块级不可变的折叠有两处实现（`PartialAccumulator` 与 assistant Definition），可见 chunk 请求 `animation-frame` 发布、同帧合并（`notifier.ts:44-50`）；`MarkdownText` 的增量解析器只重解析尾部两块、冻结块缓存为 React 元素（`markdown/incremental.ts:75-129`）。
-4. **呈现意图是纯函数契约**：presentCall/presentResult 必须是无 I/O 的 args 纯函数，defineTool 对回放中的旧参数做软校验、失败即降级 generic（约定与实现见 `adding-a-tool.md:86`、`schema.ts:594-609`）。结果期结构化事实经 output.presentationMeta 随日志持久化，回放时由 presentResult 读回（范例 `packages/fs/tool-fs-search/src/presentation.ts`）。
+4. **工具卡在 Client 派生**：客户端从 raw call args、结果文本、失败状态与持久化 meta 生成卡片；业务包仍可注册 keyed toolview。Host-local presenter 留作其它消费者，内置 Web 不使用它（`packages/client/ui-tool/README.md:46`）。
 5. **工具卡片按 card 判别分派为六类**（完整对照见第 6 节表格），client 侧由各卡片模型派生渲染 props；另有按工具名注册的 keyed 槽位 `tool.call.toolview` 支持专属卡片（cordis_define 即此路）。
 6. **Markdown 管线是自建 mdast→React 直接渲染**：raw HTML 以字面文本输出、链接与图片只放行 http(s)/mailto、流式与收口用两套语法（流式无数学与高亮）、KaTeX 与 shiki 均无用户 HTML 注入面。
 7. **性能与列表**：增量块解析 + 冻结元素缓存 + RAF 帧合并 + 语法惰性加载；聊天列表无虚拟化（keyed 行 + 分页 + 滚动锚点），trajectory 视图是独立表面且带虚拟行。
@@ -26,22 +26,21 @@
 
 ```text
 LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
-  -> host api-proxy viewFor()：ctx.tools.get(name, scope).presentCall / presentResult
-     计算 ToolEventView（不持久化；history 路径用 backscanArgs 配对 call）
-  -> mux 流 session/event(+view) -> SessionManager.handleMuxEnvelope -> Session.acceptLiveEvent
+  -> Session Controller follow/history journal：原始 durable events + assistant live frames
+  -> Client SessionEventStream 校验连续窗口并在 settlement 时替换临时块
   -> ConversationNodeAssembler.append()：各 ConversationNodeDefinition 的 match/start/update 折叠
   -> publication 分级：immediate(microtask) 或 animation-frame(RAF) -> Notifier 重建快照
   -> ChatView 读取 chat.order，ChatNodeSeat 按 key 订阅单个节点
   -> 节点渲染器：AssistantMarkdown(MarkdownText) / ToolCallTree(GenericToolCard 或 keyed toolview)
 ```
 
-宿主侧计算入口在 `packages/host/apiproxy/src/api-proxy.ts:744-780`（`viewFor` 捕获 presenter 抛错并软降级）。client 侧事件进入窗口的路径见 `session.ts:668-703`（seq 去重与缺口修复的追加逻辑）。
+宿主侧入口已迁移到 `packages/api/session-controller`；旧 `packages/host/apiproxy` 已删除。Session Controller 明确不运行 presenter，缺口修复通过 Remote journal tail page 和 follow reopen 完成。
 
 ## 1. 消息与内容块数据模型
 
 - **事件流为唯一输入**：`Session` 维护连续事件窗口（history 装载 + live 缓冲拼接），`ConversationNodeAssembler` 把每个事件交给注册的 Definition 折叠出业务上下文（`runtime/src/client/sessions/conversation-assembler.ts:194-215`）。
 - **assistant 内容块**：`AssistantBlock` 是渲染器的最小内容单元，kind 取五值——text、reasoning、image、tool-call、other（`runtime/src/client/sessions/conversation.ts:44-73`）；流式、收口、中断三种状态共享一个按 turn:step 标识的节点（`ui-conversation/src/client/conversation-nodes/assistant.ts:244-309`）。
-- **工具块**：`ToolResultNode` 与 `RunningToolCall` 组成 `ToolCallBlock`，携带来自帧的 `callView`/`resultView` 与递归 `subCalls`；窗口截断时结果块退化为无 call 头（`conversation.ts:183-310`）。
+- **工具块**：工具 conversation node 从原始 `tool/call`、`tool/result` 与 code-dispatch 事件配对并形成递归子调用；窗口截断时结果可退化为缺调用头的通用展示。
 - **渲染节点**：`ChatNode` 的 kind 与 payload 通过 `ChatNodeDataMap` 声明合并扩展（`ui-conversation/src/client/contract/chat-nodes.ts:6-39`），`ChatNodeSeat` 按 key 订阅并路由到 keyed 槽位 `conversation.chat.node`（`chat/ChatNodeSeat.tsx:19-61`）。
 
 ## 2. 流式数据到 UI 的更新链
@@ -87,7 +86,7 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 | read | 行号 + 语法高亮窗口 + totalLines | read | ReadBlock |
 | web | 引用来源列表（kind: search）或抓取摘要（kind: fetch） | web_search、web_fetch | WebBlock |
 
-- **纯函数约束**：呈现器在实时流式与会话日志回放两处都会运行，故必须是无 I/O、不读会话状态、不用时钟/随机的 args 纯函数；会话上下文（如 cwd）由 UI 适配器补足（cookbook 明文，`adding-a-tool.md:86`）。`defineTool` 对回放中任意旧参数做软校验，不匹配返回 undefined（`schema.ts:594-609`）；宿主侧再兜一层异常捕获（`api-proxy.ts:774-780`）。
+- **纯函数约束**：Host-local presenter 仍须无 I/O、不读会话状态、不用时钟或随机，以服务非 Web 消费者；内置 Web 不调用它。Web card model 自行防御旧参数、未知工具和未知 meta，并回退 generic 展示。
 - **结果期事实经 meta 传递**：search/read/web 的结构化数据无法从模型可见文本无损恢复：工具用 `output.presentationMeta` 把结构化 JSON 写入结果事件的元数据（随日志持久化），`presentResult` 读回并防御性窄化（`presentation.ts:130-205`）。
 - **client 卡片派生**：`GenericToolCard` 依次派生行模型与五类卡片模型；行模型按工具名分类为 `ToolRowVariant`（七类行变体，`tool-call-model.ts:37-78`）并从 args 取摘要、从结果取扁平输出（`toolviews/GenericToolCard.tsx:36-77`、`tool-call-model.ts:211-240`）。各卡片模型处理 wire 上未知 card/kind 值的降级（如 `models/web-card-model.ts:39-74`）。
 - **专属工具视图**：`ToolCallTree` 经 keyed 槽位 `tool.call.toolview` 按工具名分派，未注册则回退 `GenericToolCard`（`tool/ToolCallTree.tsx:38-41`）。
@@ -118,26 +117,26 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 
 ## 10. 扩展方式与已确认边界
 
-消息模型在当前快照中仍以内容块与会话事件为唯一输入；图片作为 content block 随消息进入同一投影链，推理内容则按独立 reasoning block 保持与正文、工具卡片分离。持久化层对连续 delta 的压缩不改变客户端看到的逻辑事件序列，因此渲染器无需识别 SQLite 或 JSONL 的物理存储格式（`packages/llm/llm/src/types.ts`、`packages/core/session/src/chunk-rows.ts`、`packages/client/runtime/src/client/sessions/session.ts`）。
+消息模型仍以内容块与会话事件为输入；图片随消息进入同一投影链，推理内容按独立 reasoning block 与正文、工具卡片分离。Session Controller 只暴露 v3 逻辑事件，因此渲染器无需识别 JSONL 的物理压缩与格式代际。
 
-- 新工具卡片：工具声明 `presentCall`/`presentResult`（纯函数），需要专属外观时再注册 keyed `tool.call.toolview` 条目（ui-cordis 是完整范例）。
+- 新工具卡片：Web 侧先为原始事件定义客户端 card model；需要专属外观时注册 keyed `tool.call.toolview` 条目。Host presenter 是其它交付面的可选投影，不是 Web 前置条件。
 - 新消息节点：注册 `ConversationNodeDefinition`（match/start/update/buildViewNode）+ keyed `conversation.chat.node` 渲染器；折叠按日志 seq 确定，可确定性重放（`ui-conversation/src/client/conversation-nodes/`）。
 - 新投影：在 `SessionProjectionMap` 上声明合并 + 注册纯 init/apply/view 单元，框架负责驱动与变更通知（`packages/session/session-projection/src/index.ts:42-74`、:405-425）。
-- 已确认边界：渲染意图不落盘（同一事件在不同交付可能带不同或没有视图，回放由宿主重算）；流式期间无高亮/数学/文件提及，收口才全量渲染；聊天列表无虚拟化，超长会话渲染成本线性增长；UI 展示数据不进入会话日志（"web 层是纯展示"的仓库规则）。
+- 已确认边界：UI 展示数据不进入会话日志；结构化工具结果 meta 可持久化，但 Web 卡片由 Client 重算。流式期间无高亮/数学，收口才全量渲染；聊天列表无虚拟化，超长会话渲染成本随已加载节点增长。
 
 ## 11. 未验证事项
 
 - 视觉效果、键盘可用性、滚动手感未运行验证；jsdom 快照只能证明文本与 DOM 结构。
 - 流式帧率与长会话性能未测量（`complex-history.perf.ts` 存在但未运行）。
 - 浏览器中 shiki CSS 变量主题、KaTeX MathML 分支、懒加载图片的实际呈现未观察。
-- 会话日志回放重算视图（history 路径）与 live 路径是否完全一致未实测。
+- 会话日志回放与 live settlement 的卡片派生是否完全一致未实测。
 
 ## 12. 关键源码索引
 
 - `packages/core/tools/src/presentation.ts`：渲染意图词汇全集
-- `packages/host/apiproxy/src/api-proxy.ts:744-780`：宿主计算 ToolEventView；`api/events.ts:24-34`：wire 形态与不持久化说明
+- `packages/api/session-controller/README.md:27-35`：原始 v3 journal、assistant live frame 与 settlement
 - `packages/core/tools/src/schema.ts:594-609`：presenter 软校验包裹；`docs/cookbook/adding-a-tool.md:69-89`：呈现纯函数约定
-- `packages/client/runtime/src/client/sessions/partial.ts:23-103`：chunk 折叠；`notifier.ts:44-50`：帧合并
+- `packages/api/session-controller/src/client/sessions/`：journal、assistant stream、notifier 与 settlement
 - `packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts:244-309`：assistant 节点与发布分级
 - `packages/client/ui-primitives/src/markdown/MarkdownText.tsx:156-176` 与 `incremental.ts:75-129`：增量渲染；`render.tsx`：mdast→React 与安全边界
 - `packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx:36-77` 与 `models/*`：卡片分派与派生；`tool/ToolCallTree.tsx:38-41`：keyed toolview 槽位

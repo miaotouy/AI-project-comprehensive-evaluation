@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：Git 跟踪文件机械统计，并复核 Node 服务、浏览器前端、Electron 启动器与测试入口
 >

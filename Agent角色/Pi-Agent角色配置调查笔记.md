@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/` 的 system-prompt、resource-loader、settings-manager）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：只读源码梳理 system prompt 拼装、资源文件发现规则与设置合并；未运行交互会话
 >
@@ -122,7 +122,11 @@ Pi 没有“角色/Persona/Assistant”作为独立持久化对象。角色能�
 - 项目信任（`trust-manager.ts`）各入口对资源加载的完整影响未逐条验证。
 - skills 在 `disable-model-invocation`（`skills.ts:67-81`）等 frontmatter 开关下的完整行为未运行验证。
 
-## 11. 关键源码索引
+## 11. 实验 facet 配置边界
+
+默认 coding-agent 仍没有独立角色实体。实验 server/client 引入的是 session facet 与 TUI facet 包选择：server 可指定默认包，客户端也可为自己创建或恢复的 Session 选择包；选择随 Session 分支持久化，worker 与 presentation 分别加载相应 facet generation。它是插件服务拓扑和能力装配，不包含 Persona、头像、开场白或角色版本对象（`packages/coding-agent/src/experimental/services/README.md:21-25`、`packages/coding-agent/src/experimental/services/worker.ts:47-145`）。
+
+## 12. 关键源码索引
 
 - `packages/coding-agent/src/core/system-prompt.ts:28-162`：最终拼装
 - `packages/coding-agent/src/core/resource-loader.ts:70-89`：上下文文件候选；`118-156`：祖先链收集；`1022-1048`：SYSTEM/APPEND 发现

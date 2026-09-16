@@ -1,12 +1,12 @@
 # DeepSeek-Harness 会话与消息管理调查笔记
 
-> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/session/session-persistence`、`session-persistence-jsonl`、`session-persistence-sqlite`、`session-projection`、`session-projection-cache`、`session-checkpoint-policy`、`packages/core/agent-loop`、`packages/session-query/session-query`、`session-query-sqlite`、`packages/workspace/workspace`、`packages/core/scope`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/session/session-persistence`、`session-persistence-jsonl`、`session-format`、`session-projection`、`session-projection-cache`、`session-checkpoint-policy`、`packages/core/agent-loop`、`packages/session-query/session-query`、`session-query-sqlite`、`packages/workspace/workspace`、`packages/core/scope`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
-> 调查方式：静态源码阅读（核心 session 与 surface、持久化协调器与两个后端、checkpoint policy、投影与投影缓存、agent-loop 事件发射、session-query 及 workspace/scope/匿名身份包，配合 `docs/subsystems/session.md`、`persistence.md` 与生成目录 `docs/persistence-catalog.md` 交叉核对）；未运行测试或交互会话
+> 调查方式：静态源码阅读（核心 session 与 surface、handle 持久化契约、JSONL provider、格式迁移链、checkpoint policy、投影与投影缓存、agent-loop 事件发射、session-query 及 workspace/scope/匿名身份包，配合 `docs/subsystems/session.md`、`persistence.md` 与生成目录 `docs/persistence-catalog.md` 交叉核对）；未运行测试或交互会话
 >
 > 调查范围：会话/消息数据模型、事件类型系统与格式版本、持久化后端与崩溃恢复、消息历史派生、投影、fork/resume/transcript 的日志派生、生命周期、列表与检索、外部对象绑定；排除：模型请求的上下文拼装与适配器细节（对话请求与上下文类目）、压缩策略与标题/遥测的 LLM 生成、Chat UI 与 Web 客户端渲染
 >
@@ -14,12 +14,12 @@
 
 ## 结论摘要
 
-DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `Session` 是交互历史的单一事实源，LLM 消息历史完全从日志派生，不存在独立的消息表：
+DeepSeek-Harness 的会话仍是 append-only SessionEvent 日志，内存 Session 是交互历史的单一事实源，LLM 消息历史从日志派生，不存在独立消息表。当前实现的持久化与格式治理已经重构：
 
 - 事件类型通过 `SessionEventMap` 声明合并扩展，核心加插件共 24 个事件族（`docs/persistence-catalog.md` 逐条枚举）；只有 `user/message`、`assistant/message`、`tool/result` 三类消息事件（合称 `SurfaceEventType`）产生 LLM 消息并携带 `surfaceOp` 表面标记。
-- 格式版本 `SESSION_FORMAT_VERSION` 固定为 `0`，未发布期无兼容承诺：版本不匹配直接拒绝（带方向性提示）而非迁移；新增事件类型不 bump 版本，由信封上的 `ignorable` 标记覆盖词汇增长。
-- 持久化是同一抽象契约下的两个可互换后端：JSONL（每会话一个文件，默认 zstd 帧压缩 + packed chunk 行，原子物化、追加+fsync、torn tail 截断修复）与 SQLite（`node:sqlite`，每事件一行，WAL 事务，按 seq 定位读取）。写路径由共享协调器驱动：per-session 串行链 + 固定 200ms 写合并窗口 + `session/flush` 显式屏障 + checkpoint policy 的语义检查点。
-- 投影有两层：`session-projection` 对每个已提交事件 eager drive 注册的纯函数单元（如统计、标题），`session-projection-cache` 把单元状态按节流写进存储域（`session_projcache`），缓存只是 fold 捷径，从不权威。
+- 当前逻辑格式为 v3。格式目录把 v0、v1、v2 到 v3 的相邻迁移作为独立包注册；读取旧代时只在内存迁移，写打开才在同目录发布不可变的当前代后继文件，旧文件保持字节不变。当前版本内的未知必需事件仍 fail-closed，`ignorable` 只处理同版本词汇扩展（`packages/core/session/src/types.ts:88`；`packages/session/session-format/src/{catalog,chain}.ts`）。
+- 第一方持久化只保留 JSONL 后端，SQLite 会话后端已经移除。公共 seam 改成 handle 契约：创建或打开返回读/写句柄，追加、读取、flush 与关闭都由句柄完成；JSONL provider 自己拥有写批、单写者与 live-event 路由。跨进程写排斥由 POSIX flock 或 Windows 命名信号量提供（`packages/session/session-persistence/src/{handle,storage-contract}.ts`；`session-persistence-jsonl/src/{storage,lease}.ts`）。
+- 投影有两层：`session-projection` 对已提交事件驱动纯函数单元，`session-projection-cache` 把结果存进独立 storage domain；查询侧可用共享 observation 做冷读，缓存仍只是 fold 捷径而非权威。
 - fork、resume、transcript 都从日志流派生：fork 复制种子并记 `parentSession`/`seedLength`；resume 走 prepare→load→崩溃修复→发布；人类可读 transcript 读 append-origin 事件，而模型历史读表面（surface 会遮蔽被压缩替换的范围）。
 
 ## 系统边界与数据主链
@@ -35,8 +35,8 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
   -> 组装完成 append 'assistant/message'（sourceEventSeqs=chunkSeqs，agent.ts:381-390）
   -> 工具：append 'tool/call'（tool-calls.ts:263）；tools/execute 前再 flush；完成 append 'tool/result'（tool-calls.ts:281）
   -> finally 中 append 'step/end'（agent.ts:292）；回合结束 append 'turn/end'（agent.ts:319）
-  -> 持久化：coordinator 监听 session/event，事件入 per-session 写队列
-     （200ms 窗口后 appendBatch：JSONL 追加 zstd 帧 / SQLite 事务 INSERT，coordinator.ts:1086-1137）
+   -> 持久化：会话绑定 JSONL write handle；append 进入 provider 的串行写批
+      flush 在检查点形成耐久屏障，close 排空并释放进程内 claim 与 kernel lease
   -> 投影：SessionProjectionRegistry 同步驱动各单元（session-projection/src/index.ts:181）
      -> sessionProjectionCache 在 turn/end 与 dispose 强制 checkpoint（session-projection-cache/src/index.ts:205-230）
   -> 下次请求 deriveMessages 重新投影；崩溃后 load 做 torn tail 截断 + 合成 interrupted closers
@@ -66,44 +66,31 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
 
 - **词汇表**：`SessionEventMap`（`packages/core/session/src/types.ts:236-333`）声明 13 个核心事件；插件通过 declaration merging 追加自己的类型（compaction 三件套、hook 桥、标题、计划模式、命令生命周期等）。`docs/persistence-catalog.md` 由 `scripts/gen-persistence-catalog.ts` 生成，逐条枚举全部 24 个族及其载荷、surface 徽标与声明位置；`KNOWN_SESSION_EVENT_TYPES`（`packages/core/session/src/known-event-types.ts`）是同一生成的运行时集合。
 - **信封**：每条事件为 `type/seq/time/data` 加可选 `ignorable: true`；surface 事件额外带 `surfaceOp`/`sourceEventSeqs`（`types.ts:404-436`）。`ignorable` 缺失意味着"必须理解"：读者遇到不认识的类型且无该标记时必须拒绝重建，而不是静默跳过。
-- **版本机制**：`SESSION_FORMAT_VERSION = 0`（`types.ts:56`）。bump 判据只取决于写方能否被旧运行时正确读：header 形状、事件信封、核心事件语义、surface 机制的结构性变化才 bump；新增普通事件类型不 bump。加载时版本不匹配抛方向感知的 `SessionFormatUnsupportedError`（新日志→提示升级 harness，旧日志→声明无升级路径，`coordinator.ts:77-81`），JSONL 后端在解码任何事件行之前就从首行版本号拒绝。
-- **遗留形状归一化**：当前构建仍读取若干 pre-identity 时代的日志形状并在读路径迁移，同时拒绝已删除的词汇：
-  - 升级为当前形状：`steering/message` 转 `user/message`（注入 `legacy-message:<id>:<seq>` 身份）、`turn/start` 移除 trigger、`turn/end` 的 disposed 原因并入 aborted/legacy，error 扁平化；
-  - 直接拒绝：`request/header-delta` 事件与 `request/header` 的 `fallback` 原因。
-  - 实现见 `coordinator.ts:273-290` 与 `migrateLegacy*` 系列。
+- **版本机制**：`SESSION_FORMAT_VERSION = 3`（`packages/core/session/src/types.ts:88`）。结构性变化通过 `session-format` 的相邻迁移边处理，当前目录注册 v0→v1、v1→v2、v2→v3；新增可忽略词汇仍可在同一格式版本内用 `ignorable` 扩展。读打开迁移逻辑视图，写打开才发布 v3 后继代，更新版本、目录外版本与未知必需事件均 fail-closed。
 
 ## 4. 事实源、持久化与派生历史不变量
 
-- **三层数据**：内存事件日志是运行时权威；持久化后端是磁盘投影（两个后端都承诺"逐事件无损持久化，含 chunk，seq 连续"）；投影缓存是折叠捷径（可能过期，绝不会错误，`session-projection-cache/src/index.ts:9-13` 注释）。文档用"内存 log / durable log / cached projection"三个词分别称呼。
+- **三层数据**：内存事件日志是运行时权威；JSONL 持久化是磁盘投影；投影缓存是折叠捷径（可能过期，绝不会错误，`session-projection-cache/src/index.ts:9-13` 注释）。文档用“内存 log / durable log / cached projection”三个词分别称呼。
 - **model-visible ⟺ logged**：仓库约定"任何到达模型请求的内容必须能从会话日志重建；新的 model-visible 输入必须落成 session event"。支撑机制有三：`request/header` 事件把每次请求的完整信封（config、system、tools）以全量快照记入日志，`foldRequestHeader` 选最新快照重建请求（`packages/core/session/src/request-header.ts`），使请求成为日志的纯函数；seed/load 边界校验消息身份、`source.kind`、provider/model 存在，缺失即拒绝而非猜测（`packages/core/session/src/index.ts:253-352`）；派生历史与外部重建器共用同一 `deriveEventMessage`，不会与缓存分歧。
 - **header 与日志分离**：`SessionHeader`（version/id/createdAt/cwd/parentSession/seedLength/origin/delegationDepth/agentPreset）是存储元数据，不进事件日志、不进派生历史；`session.header` 总是存在（无 store 头时合成最小头）。
-- **持久化契约**：抽象 `SessionPersistence`（`packages/session/session-persistence/src/index.ts:84-241`）定义 `locate/create/append/prepare/load/inspect/readFrom/list/listSnapshots`，`readRaw` 默认拒绝。追加批次的首个 `seq` 必须等于存储的 next-seq（load 先持久化关闭中断回合）。
+- **持久化契约**：抽象 `SessionPersistence` 负责 `create`、`open`、`stat`、`list` 与全服务 flush；会话级读、append、flush 和 close 由 `SessionHandle` 承担。写句柄校验连续 seq，读句柄只暴露逻辑事件，不暴露物理文件工件（`packages/session/session-persistence/src/{index,handle}.ts`）。
 
-## 5. 持久化后端：JSONL 与 SQLite
+## 5. 持久化后端与格式代际
 
-两个后端实现同一 PersistenceBackend 钩子集（loadStored/readStoredRevision/appendBatch/commitRepair/list），共享持久化协调器的缓冲、串行化、修复与 dispose 编排，并过同一契约测试套件；选型是 cordis.yml 配置层面的互换，不能同时挂两个。
+第一方只提供 JSONL。每个会话目录可同时保留多个不可变格式代：v0 使用 `session.jsonl(.zstd)`，后续代使用 `session.vN.jsonl(.zstd)`；运行时选择数字最大的规范代。当前 v3 每个事件一个物理行，连续 source seq 只在存储表示中压为区间；packed assistant delta 仅由冻结的 v0/v1 codec 为历史读取保留（`packages/session/session-persistence-jsonl/README.md:53-69,100`）。
 
-| 维度 | JSONL（`session-persistence-jsonl`） | SQLite（`session-persistence-sqlite`） |
-|---|---|---|
-| 布局 | 每会话一个目录 `<root>/<projectKey(cwd)>/<encodedId>/session.jsonl(.zstd)` | 一个数据库：`sessions` 表一行 header + `events` 表一行一事件 |
-| 物理编码 | 默认 zstd 帧（header 独占一帧），连续 delta chunk 可合并为一条存储记录；可切纯文本 | 普通事件保留独立列；连续文本、推理或工具参数 delta 以 tagged packed row 合并，序列化数据在收益成立时再作 zstd 压缩 |
-| 原子性 | 首写物化用临时文件 + `link()` 发布（EEXIST 防并发覆盖）；追加失败回滚 truncate 到原长度 | append 批次与 repair 各是一个事务；`revision` 每次写入 +1 |
-| 读取 | 顺序媒体：`readFrom` 解析全文件再跳过；列表只读首行 header | 按 seq 直接 SELECT 后缀（`loadStoredFrom` 钩子），列表读 `sessions` 表 |
-| 崩溃修复 | 截断 torn 尾部到字节偏移 + 补 recovered events 与 closers | DELETE `seq >= tornFrom` + INSERT closers |
-| 产物 | `supportsRawArtifacts = true`，`readRaw` 返回逐字节原文（ZIP 导出依赖它） | `false`，无每会话独立产物 |
+迁移由 `session-format` 规划相邻链，格式目录组装当前 codec 与 v0→v1、v1→v2、v2→v3 三条边。读句柄可返回迁移后的逻辑事件而不写文件；写句柄把迁移结果编码到临时文件，经 Worker 验证和源 revision 复查后无覆盖发布当前代。源代不被改写，也没有自动降级（`packages/session/session-format/src/{catalog,chain}.ts`；`session-persistence-jsonl/src/{generation,migration-verifier}.ts`）。
 
-两种介质共用 `chunk-rows` 的无损打包格式：只合并同 block 的连续文本、推理或工具参数 delta；未知或未完全匹配的事件保持原样，读取时还原为原始事件序列。SQLite 的 `compression.ts` 负责 packed row 与 zstd 数据列的编解码，schema 和读取查询同时区分逻辑事件与物理记录（`packages/core/session/src/chunk-rows.ts`、`packages/session/session-persistence-sqlite/src/{compression,store}.ts`）。
+持久化 seam 不再拥有共享 coordinator。provider 返回 `SessionHandle`，写句柄内部串行追加并承接 live event；`flush()` 是耐久屏障，`close()` 排空后释放所有权。JSONL 在进程内做单 writer claim，并用 kernel lease 排斥其它进程；网络文件系统上的 advisory flock 可靠性仍是已声明边界（`packages/session/session-persistence/src/handle.ts`；`session-persistence-jsonl/src/{storage,lease}.ts`）。
 
-关键实现定位：JSONL 后端的 `appendBatch`/`commitRepair`/`materialize` 见 `packages/session/session-persistence-jsonl/src/index.ts:422-626`，SQLite 后端事务写入见 `packages/session/session-persistence-sqlite/src/store.ts`。
-
-惰性物化：`create` 只记意图，首个 append 才落盘，废弃会话不留文件（`coordinator.ts:645-658`）。
+惰性物化：`create` 返回写句柄，首个 append 或 flush 才要求会话成为可列出的持久对象；未物化的空白会话可随句柄关闭而消失（`packages/session/session-persistence/src/index.ts:122-175`）。
 
 ## 6. 生命周期：创建、resume、fork、销毁与恢复
 
 - **创建**：`SessionStore.create` = `prepare` + `enter` + `announce` 三步（`index.ts:830-841`），agent 工厂则把这三步折叠进自己唯一的 effect，保证循环关闭事件在 store 摘除前落定。
 - **resume**：`AgentRegistry.resume` → 工厂 `persistence.prepare(id)`（`agent-loop/src/index.ts:653-702`）。协调器的 prepare 做 revision 稳定性往返（日志在"读/查"一圈内不变才算收敛），返回独占的未发布 `SessionPreparation`；`Session.fromRestore` 以所有权转移方式校验并冻结存储对象，发布后 dispose 释放预约。有 5 项 LRU 的已备会话缓存供重复读取复用。
 - **fork**：`SessionStore.fork(source, boundary?, childId)`（`index.ts:1081-1095`）把源会话 0..boundary 前缀深拷贝为种子，子会话 header 记 `parentSession`、`seedLength` 与继承的 cwd。boundary 默认当前末事件，显式边界可以落在独立日志事件上，但落在开着的 turn 内会被拒绝（`OPEN_TURN`）而不是静默裁剪。fork 种子经 `session/created` 持久化一次。
-- **销毁**：会话随 owner fiber dispose；coordinator 对 `session/disposed` 做退休排空（flush + 释放状态，`coordinator.ts:1140-1161`），自身 dispose 先 drain 全部 live 会话再 `close` 后端。**本次未找到会话删除 API**：抽象契约、两个后端、store、协调器均无 delete 入口；workspace 的登记删除与归档只移除分组索引，日志与文件保留（`packages/workspace/workspace/README.md` 明示会话删除与目录删除是独立缺失能力）。
+- **销毁**：会话释放时，JSONL write handle 先排空 live buffer、flush，再释放 writer ownership。**本次未找到会话删除 API**：持久化 seam 与 JSONL provider 均无 delete 入口。Workspace 现已提供可逆归档集合与 Web 端 Archived sessions 恢复页，但归档只隐藏导航项，不删除会话日志（`packages/client/ui-settings-unarchive-sessions/README.md`）。
 - **崩溃恢复**：`load` 对冷会话做修复——完整中断回合不截断，而是补合成 closers（缺失工具结果错误 `TOOL_NOT_STARTED`/`TOOL_OUTCOME_UNKNOWN` 加 step/end 与 turn/end 的 interrupted 结束，`repair.ts:27`、`index.ts:302-319`），torn 尾部丢弃；interrupted 是唯一循环本身不会发出的结束原因。live 会话不做修复：open turn 的 load 直接拒绝。
 
 ## 7. 消息操作与分支语义
@@ -114,7 +101,7 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
 
 ## 8. 列表、索引与检索
 
-- 会话列表：live `SessionStore.list()` 是内存创建序快照；持久化侧 `list`/`listSnapshots` 只读元数据（JSONL 各文件首行、SQLite `sessions` 表），列表随会话数伸缩而不随日志大小，`listSnapshots` 附带不透明 revision token 供变更检测。无分页游标。
+- 会话列表：live `SessionStore.list()` 是内存创建序快照；持久化侧列表只读 JSONL 规范代的 header 与 revision，不扫描完整事件体。Session Controller 再将 header 与投影缓存合成浏览器列表；列表无分页游标。
 - **查询服务**：`session-query` 是 live-preferred 的逻辑语料层（`packages/session-query/session-query/README.md`），提供精确读取（会话、表面、事件、标题）、关系追踪与两类全文方法；事件读取方法复用核心表面折叠，把每个事件标记为 `current`/`shadowed`/`log-only` 三类。
 - 全文检索：唯一具体实现是 `session-query-sqlite`，FTS5 + `unicode61` 分词，查询按字面短语转义（MATCH 语法当数据）；跨会话结果按最强命中事件分组，返回带 snippet 的分页（不透明 branded cursor，generation 变化即失效）；索引是派生的独立数据库，TEMP 表放 live 行、持久表放已落库行，revision 对比后只增量检查新变更日志。`openAt: never` 可整体关闭搜索。
 - 标题与统计以投影单元提供：`session-stats` 折叠出 turn/step 计数与 LLM/工具耗时（`packages/session/session-stats/src/projection.ts`），标题单元折叠最新 `session/title` 事件；两者向 `SessionProjectionMap` 声明合并 key。
@@ -122,18 +109,17 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
 ## 9. 缓存、一致性与并发写入
 
 - 单进程单写者：`Session.append` 同步进内存日志、同步通知监听者（失败按监听器隔离，不改变提交结果），热路径不做 I/O（`index.ts:604-655`）。持久化在后台异步追。
-- 串行化：协调器对每个会话 id 维护一条 promise 链，同一会话的写操作永不交错（`coordinator.ts:1010-1033`）；公开方法与内部 `*Core` 分离防死锁。
-- 写合并：首个待写事件启动固定 200ms 窗口，后续事件不重置截止；到期落一个批次。`session/flush` 取消等待并 drain 到静默点（并发调用共享同一屏障，`write-behind.ts:63-72`）。后台写失败保留事件并暂停自动重试，新事件开启新窗口；显式 flush 立即重试并把失败报给 `agent/error` 与日志，不以 session event 形式越过已关闭的 turn。
+- 串行化与写批：每个 JSONL write handle 串行化 append，provider 管理 live-event 路由和写批；`flush()` 等待该句柄此前接受的事件耐久落盘，service-wide flush 汇总所有活动写句柄。跨进程的同会话写打开由 kernel lease 拒绝（`packages/session/session-persistence/src/handle.ts`；`session-persistence-jsonl/src/{storage,lease}.ts`）。
 - 检查点语义（`session-checkpoint-policy`）：模型请求流开始前、顶层工具体执行前、每个 pre-step 边界各做一次 flush 屏障（pre-step 屏障把上一步已提交的内容先落盘再进入本步请求），请求前缀先于 adapter dispatch 落盘，失败即 fail-closed（`session-checkpoint-policy/src/index.ts:63-83`）。
-- 崩溃一致性：`readStableFile` 用 stat 往返（读前后 revision 一致才返回，JSONL `index.ts:292-304`）；JSONL 物化用 `link()` 防并发覆盖（POSIX）或 Win32 专用发布路径；`commitRepair` 不必原子（文件端两步 fsync，SQLite 端单事务）。
-- 多进程：日志本身无跨进程锁；文档明确"容忍并发写者需要日志之外的 liveness 信号"。revision token 只用于检测外部变更并触发重读，不能仲裁。
+- 崩溃一致性：JSONL 规范代以校验帧检测 torn tail；格式迁移在临时文件完成，经 Worker 验证和源 revision 复查后以 no-clobber 方式发布。repair 通过普通写句柄追加合成 closers，不覆盖旧格式代。
+- 多进程：公共 seam 只保证同一 backend instance 的单写者；第一方 JSONL 另用内核 lease 做跨进程排斥。POSIX 依赖非阻塞 flock，Windows 使用按路径派生的命名信号量；NFSv3 等网络文件系统仍可能削弱 advisory flock 语义。
 
 ## 10. 迁移与导入导出
 
-- 版本策略是"拒绝"而非"迁移"：header 版本不符 → `SessionFormatUnsupportedError`；未知事件类型且非 ignorable → 同一拒绝（`coordinator.ts:1061-1066`）。SQLite 另有 `SCHEMA_VERSION` 门控整库结构。投影缓存域 `session_projcache` 自己的 `version: 3`，版本不符时整介质丢弃（缓存语义：多花一次重放，不会给错值）。
-- 读路径上的遗留形状归一化（§3）只在内存视图完成；`load` 的 repair 才会把修复合成的 closers 写回。
-- 导出：`/export` 命令经 apiproxy 以 ZIP 流式下载会话原始日志（先 flush live 会话，再 `readRaw` 读逐字节原文）；仅 JSONL 后端支持，SQLite 明确不包含导出（`packages/session-query/session-log-export/README.md`）。人类 transcript 由客户端从 append-origin 事件重建（`isAppendSurfaceEvent`，`surface.ts:51-55`），与模型历史刻意不同源：替换拷贝只服务模型，不吞掉用户已见过的对话。
-- 导入/备份恢复：**本次未找到**会话级导入 API 或备份机制（检查范围：持久化抽象与两个后端、store、agent resume 入口）。
+- 受支持的 v0→v3 历史格式经相邻迁移链恢复；更新版本、目录外版本或无法无损解释的记录仍拒绝。投影缓存使用独立 storage domain 与版本，失配时重放权威日志而不是迁移缓存。
+- 读句柄迁移旧代只返回当前逻辑视图；写打开才发布新的当前代文件。崩溃 repair 仍通过普通 append 把合成 closers 写入当前代。
+- 导出：`/export` 与会话头菜单由 session-log-export 包直接注册认证 Fetch 路由，先 flush live 会话，再从 persistence read handle 序列化当前逻辑日志。它不再依赖 raw artifact，任何满足 handle 契约的后端都可导出；ZIP 同时收集图片和通用文件（`packages/session-query/session-log-export/src/{index,archive}.ts`）。
+- 导入/备份恢复：**本次未找到**会话级导入 API 或备份机制（检查范围：持久化抽象、JSONL provider、store 与 agent resume 入口）。
 
 ## 11. 外部对象绑定
 
@@ -144,35 +130,33 @@ DeepSeek-Harness 的会话是"append-only SessionEvent 日志"，内存中的 `S
 
 ## 12. 设计取舍与已确认边界
 
-- **事件日志而非消息表**：全部对话状态可重放，投影按需派生；代价是日志只增不减，chunk 级保真使体积增长，JSONL 用 zstd 帧 + packed chunk 行缓解（`format.ts` 的 `eventLines`），SQLite 则是另一介质选项。
+- **事件日志而非消息表**：全部对话状态可重放，投影按需派生；代价是日志只增不减。当前 JSONL 用 checksummed zstd frame、source seq 区间编码和不可变格式代际控制体积与迁移风险。
 - **模型历史与 transcript 双投影**：surface 遮蔽替换范围、append-origin 事件保留人可见历史，两者同源于日志但语义刻意不同。
-- **格式版本零迁移**：未发布期接受"拒绝旧日志"而非迁移链；`ignorable` 把词汇增长与结构性变更解耦。
+- **格式迁移显式化**：当前为 v3，支持的历史变化由相邻边逐代迁移；`ignorable` 只把同版本词汇增长与结构性迁移解耦。
 - **持久化与执行解耦**：`session/event` 同步通知、持久化异步追、checkpoint policy 只卡语义边界（模型请求、顶层工具、pre-step），不在 turn 边界强刷。
 - **惰性物化**：无消息的会话不产生文件；废弃 id 不留残骸，代价是 `list` 看不到"已创建未落盘"的会话。
-- **无删除、无导入、无跨进程并发仲裁**：本次未找到对应能力，均以"append-only + revision 检测 + 目录/登记删除分离"的形态存在。
+- **无删除、无导入；跨进程只仲裁写所有权**：本次未找到会话日志删除或导入 API。JSONL 用 kernel lease 阻止同一会话并发写，但没有多写者合并协议。
 
 ## 13. 未验证事项
 
 - 未运行任何会话或持久化后端；崩溃恢复路径（torn tail 截断、interrupted closers 合成）与 resume 往返来自静态阅读。
-- 多进程并发写同一 JSONL 文件或 SQLite 库的实际行为未验证（代码只有 revision 检测与物化期的 EEXIST 防线）。
+- POSIX flock、Windows 命名信号量与网络文件系统上的跨进程写排斥未运行验证。
 - JSONL 顺序媒体下 `readFrom` 的全量解析代价、packed chunk 行的实际压缩率未实测。
 - FTS5 搜索的召回质量与 `DatabaseSync` 同步阻塞影响未运行验证。
 - `/export` ZIP 端到端、工作区启动分组、telemetry/标题的 LLM 生成链路未覆盖。
 
 ## 14. 关键源码索引
 
-- `packages/core/session/src/types.ts`：`56`（SESSION_FORMAT_VERSION）、`236-333`（SessionEventMap）、`404-436`（SessionEvent 信封）
+- `packages/core/session/src/types.ts`：`88`（SESSION_FORMAT_VERSION）、SessionEventMap 与 SessionEvent 信封
 - `packages/core/session/src/index.ts`：`425-758`（Session 类）、`604-655`（append）、`726-747`（deriveMessages）、`830-841`（create）、`866`（id 铸造）、`1081-1095`（fork）
 - `packages/core/session/src/surface.ts`：`83-114`（deriveEventMessage）、`210-318`（替换校验）、`398-460`（SurfaceManager）
 - `packages/core/session/src/repair.ts:27`（interruptedTurnClosers）
 - `packages/core/agent-loop/src/agent.ts`：`246-330`（turn）、`332-401`（step）、`407-495`（buildRequest）
 - `packages/core/agent-loop/src/tool-calls.ts:263`、`281`（tool/call、tool/result）
-- `packages/session/session-persistence/src/index.ts:84-241`（抽象 seam）
-- `packages/session/session-persistence/src/coordinator.ts`：`588`（协调器）、`645-658`（惰性创建）、`1010-1033`（串行链）、`1061-1066`（未知类型拒绝）、`1086-1137`（写路径）
-- `packages/session/session-persistence/src/write-behind.ts:45`、`63-72`（写合并与 flush 屏障）
+- `packages/session/session-persistence/src/index.ts`、`handle.ts`、`storage-contract.ts`（持久化服务与 handle 契约）
 - `packages/session/session-checkpoint-policy/src/index.ts:63-83`（检查点语义）
-- `packages/session/session-persistence-jsonl/src/index.ts`：`121`（后端）、`292-304`（revision 稳定读）、`422-444`（appendBatch/commitRepair）、`514-626`（物化）
-- `packages/session/session-persistence-sqlite/src/index.ts`：`99`（后端）、`225-238`（seek 后缀读）、`284-338`（事务写入与修复）
+- `packages/session/session-persistence-jsonl/src/{storage,handle,generation,lease}.ts`（JSONL 读写、格式代际与写租约）
+- `packages/session/session-format/src/{catalog,chain}.ts`（v0→v3 相邻迁移目录）
 - `packages/session/session-projection/src/index.ts:171-426`（投影注册表）
 - `packages/session/session-projection-cache/src/index.ts:71-300`（持久化投影缓存）、`spec.ts`（存储域声明）
 - `packages/core/agent/src/index.ts:424-430`（resume 入口）、`packages/core/agent-loop/src/index.ts:653-702`（resumeWith）

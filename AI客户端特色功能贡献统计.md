@@ -2,9 +2,9 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPToolBox`
 >
-> 对比更新日期：2026-09-15
+> 对比更新日期：2026-09-16
 >
-> 依据：各单项目调查笔记（含通用类目、十九项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)；本次把 RikkaHub 纳入统计：端侧 PRoot Linux 工作区与内嵌 Ktor 服务器多端访问分别归入执行沙箱与多表面功能族计主贡献，jieba 分词 FTS5 会话检索与二维码 Provider 配置交换计辅助贡献，助手/会话两级提示词注入与世界书兼容按上下文编译类目归并，图片生成工作台、MCP 与 OAuth、ModelRegistry 静态能力推断与消息分支不重复计数，来源为 [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md) 与 [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)
+> 依据：2026-09-16 快照的各单项目调查笔记（含通用类目、各项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)；本次把 RikkaHub 纳入统计：端侧 PRoot Linux 工作区与内嵌 Ktor 服务器多端访问分别归入执行沙箱与多表面功能族计主贡献，jieba 分词 FTS5 会话检索与二维码 Provider 配置交换计辅助贡献，助手/会话两级提示词注入与世界书兼容按上下文编译类目归并，图片生成工作台、MCP 与 OAuth、ModelRegistry 静态能力推断与消息分支不重复计数，来源为 [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md) 与 [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -102,7 +102,7 @@
 | 16 | RikkaHub | 2 | 2 | 4 | 6 | 端侧 PRoot Linux 工作区、手机即服务端的局域网多端访问、FTS5+jieba 会话检索与二维码配置交换 |
 | 17 | Risuai | 1 | 4 | 5 | 6 | 模型指令标签驱动的角色媒体、多后端结构保留翻译、批量发送流水线、实时房间共享与 Risu Hub 角色市场 |
 | 18 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
-| 19 | Personal Assistant | 0 | 0 | 0 | 0 | 外部主体显式准入与第三方扩展分发信任治理；差异化均属机制，按机制单列不并入产品分 |
+| 19 | OpenClaw | 0 | 0 | 0 | 0 | 外部主体显式准入与第三方扩展分发信任治理；差异化均属机制，按机制单列不并入产品分 |
 | 20 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
 
 排序先看产品特色点，再看主贡献数和覆盖功能族。分数相近不表示能力同质，例如 DeepChat 与 VCPChat 分别偏向可观测 Agent 会话和消息/桌面运行时，不能互相替代。
@@ -148,7 +148,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | F16 | 生成中的 steer、queue 与 pending input | DeepChat | Jan | Agent turn 未结束时仍可改变后续执行 |
 | F17 | 跨 IM 平台事件流水线、群聊唤醒与 follow-up | AstrBot | - | 核心产品单位是平台事件和 UMO，而非桌面聊天窗口 |
 | F27 | 多表面共享同一 Agent 后端与会话连续性 | Hermes Agent、OpenCode、RikkaHub | Jan | 多前端消费同一事实源；OpenCode 支持重放与所有权接管；Hermes 桌面提供 HUD 浮动聊天窗（完整 renderer + 跨窗口草稿同步）；RikkaHub 让手机进程本身充当服务端，以内嵌 Ktor CIO 加随包 React 前端在同一进程内复用宿主会话服务与 Room 数据库，经 mDNS 供局域网浏览器读写（主链确认，未运行验证） |
-| F44 | 研究数据生产与批量轨迹压缩 | Hermes Agent | Pi | Hermes 的轨迹保存、首尾保护压缩、批量运行和 Agent Trace 发布形成研究数据链；Pi 的会话 JSONL 导出与伴生 HF 发布工具为外部依赖的辅助形态 |
+| F44 | 研究数据生产与批量轨迹压缩 | Hermes Agent | Pi | Hermes 的轨迹保存、首尾保护压缩、批量运行和 Agent Trace 发布形成研究数据链；Pi 的 `/export` 与 `/share` 会话数据生产为仓库内主链确认（`/share` 产出 Radius artifact，缺凭据时回退 gist），伴生 `pi-share-hf` 的 Hugging Face 发布工具为外部依赖的辅助形态 |
 | F109 | 可移植会话档案与跨表面续作 | OpenCode | - | 导出/脱敏、文件或链接导入、分享同步以及 PR body 续作围绕同一会话档案形成交付闭环 |
 | F110 | 执行轨迹审计与回放 | DeepChat | - | Tape entries、view manifest、执行日志和 TraceDialog 将请求过程变成可检索、可审计和可回放对象 |
 | F59 | IM 渠道远程控制本地 Agent 会话 | DeepChat | - | 远端命令与本地会话绑定、执行和结果投递形成闭环；CLI 本地控制平面（token 鉴权 + 审批 broker + detached runs）以同一“多表面连续性”标签并入本族，不重复计数 |

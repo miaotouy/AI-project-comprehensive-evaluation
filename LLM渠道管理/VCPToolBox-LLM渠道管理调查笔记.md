@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：静态阅读当前 HEAD 的配置模板、主服务、管理 API、AdminPanel-Vue 前端、语义路由实现及脚本/入口文件；使用 Glob/Grep 检查 CLI、TUI、桌面端和导入导出入口；未修改被调查仓库，未运行服务验证 UI 保存和网络请求
 >
@@ -389,6 +389,7 @@ VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridg
   - 优先级按 `URL 路径前缀 (/v1/<profile>/...)` > `HTTP Header (x-bridge-profile)` > `模型名前缀 (<profile>/<model>)` > `defaultProfile` 匹配；
   - 每个 Profile 拥有独立的提示词文件、劫持模式和模型覆盖；
   - 运行时真相源为 `Plugin/VCPBridgeServer/bridge-config.json` 及 `profiles/` 目录，通过 `chokidar` 实现热加载。
+- **连通性探活端点**：代理新增 `GET /v1/models` 与 `GET /v1/:profile/models`，返回由 `defaultModel` 与 `modelMap` 键值集合构成的 OpenAI 风格模型目录（配置为空时回退一个占位模型），供客户端健康检查；`chat`/`responses`/`messages`/`beta` 前缀路径不被它拦截，继续交给下游代理路由。`debugMode` 开启时另打印路径、原始模型与命中的 Profile（`Plugin/VCPBridgeServer/bridgeserver.js:1008-1029`、`:880-887`）。
 
 #### 2. 主服务全链路接管（protocolBridge）
 - **定位**：如果不仅需要劫持提示词，还希望下游 CLI/客户端透明接入 VCP 的 RAG（RiverMemo/TagMemo）、变量系统（Tar/Sar/Var）和全量工具生态，则将客户端 Base URL 指向主服务端口（默认 `6006`）。

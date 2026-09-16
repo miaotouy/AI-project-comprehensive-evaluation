@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读源码（Read + Grep + Glob，逐文件通读，未凭猜测下结论）
 >
@@ -19,6 +19,8 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - 会话用多维坐标 `ConversationContext` 压平出的 `messageMapKey` 分桶（6+ 种 scope）；本地分桶比服务端缓存 key 更细，两者用 `representableBucketKey` 防御逻辑承认不同构。
 - 同一份消息数据在全局 ChatStore（事实源层）与会话级 ConversationStore（UI 态层）各维护一份 parse 后的展示数据，双向同步无一致性断言。
 - 一次生成 = 发送 action 构造临时消息与 operation → 分流 client agent 或 Gateway → 流式回写 → 落库；operation 是前后端任务交接的载体；审批/干预先用 `#shouldUseGatewayResume` 判断走 Gateway 新 operation 还是本地 runtime 重建，异构 Agent 则另走 IPC、tRPC。
+- 浏览器与服务端的 Agent 配置、上下文事实、工具规则和模型参数解析已抽到共享 `packages/mecha`；两端保留各自的数据采集与 transport，但不再维护两套上下文决策规则。
+- Gateway 可在实验开关下按用户/分享身份复用 WebSocket，并按 operation 订阅事件；同会话有排队输入时，服务端 Agent 会在决策点以软中断交还 turn，让输入队列继续，而不是等待长循环自然完成。
 - 渲染侧由 `conversation-flow` 三阶段 parse 把消息树压成 flatList，Virtua 按 role 分派渲染；桌面端完成/审批通知联动聊天状态并深链回 Topic，Web/PWA 无系统级通知。
 
 ## 产品表面与系统边界
@@ -74,6 +76,7 @@ LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移
 - **搜索**：Topic 走服务端 BM25（标题+消息内容）；`message.searchMessages` 端点存在但未找到前端调用，消息级定位未确认。
 - **停止/取消**：operation 状态机驱动；Gateway 审批过渡态窗口期 Stop 不真正中断（`INPUT_LOADING_OPERATION_TYPES` 注释承认，已知限制）。
 - **多会话并发**：operations 全局保存支持并行生成；群聊经 group/group_agent scope 与 subAgentId 分桶。
+- **排队续作**：客户端把“仍有排队消息”同步到顶层 Gateway operation，运行时以 `queued_message_interrupt` 收口当前 turn，再由队列派发下一条；同步失败时退回原有完成后 drain 语义。
 - **异构 Agent**：AskUser 类中断经 IPC（本地）/tRPC（远程）回送答案给阻塞中的执行。
 - **边界**：本地分桶 key 与服务端缓存 key 不同构是长期维护耦合点；通用界面基础设施不属于聊天主链，已移出。
 

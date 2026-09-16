@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/shared/chat.d.ts`、`src/renderer/src/components/message/`、`src/renderer/src/components/markdown/`、`src/renderer/src/components/artifacts/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -22,6 +22,7 @@ DeepChat 的 renderer 以结构化 assistant blocks 为主，Markdown 与 Artifa
 4. `MarkdownRenderer` 使用 markstream-vue；代码块由 stream-monaco/Monaco surface 渲染，流式与静态内容采用不同的 render batch、viewport priority 和节点虚拟化参数。静态长文可虚拟化，流式内容保持平滑输出。
 5. Artifact 类型映射到 Code、Markdown、HTML、SVG、Mermaid、React。HTML/React 使用 iframe sandbox；SVG 先交给 main process sanitizer；Mermaid 在渲染前移除危险标签、事件属性和协议，并初始化为 `securityLevel: strict`。
 6. Markstream 渲染路径使用独立的流式 diff 工作池；同时，压缩边界由 `MessageListRow` 的专用分隔行表达，不进入 assistant block 分发（`src/renderer/src/lib/markstreamLanguage.ts`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
+7. 连续的 reasoning 与 tool-call blocks 在结算后可折叠成 activity group；仍在流式的行保持逐块显示。分组只改变展示投影，不改变持久化 block 顺序。
 
 ## 调用链
 
@@ -42,6 +43,8 @@ deepchat_assistant_blocks
 `AssistantMessageBlock`（`src/shared/chat.d.ts:114-175`）以类型、内容、状态、时间戳为基础字段，附加 artifact descriptor、tool_call 参数/响应/图片预览、image data、reasoning time；`AssistantMessageExtra` 还记录工具来源、permission request、question、plan、subagent progress 和 `max_tool_calls`/`max_tokens` 跳过原因（`:189-231`）。
 
 `MessageItemAssistant.vue:40-132` 的分发顺序为：activity 组（推理/工具）、MCP app、content、reasoning/artifact-thinking、provider search、tool call、提问与一般 action、音频/视频、图片、错误。activity group 内部在 `MessageBlockActivityGroup.vue:38-55` 再分派 Think 与 ToolCall，并显示推理/工具数量和耗时。
+
+`buildAssistantRenderItems` 会把相邻的 reasoning/tool-call 块缓冲成活动组；只有一个块时保持原组件，多个块才生成稳定 group key。当前正在流式的消息行保持未分组，以便实时显示活动变化；折叠后仍保留子项的展开状态和焦点回迁。实现见 `src/renderer/src/components/message/messageActivityGroups.ts:110-211`、`MessageItemAssistant.vue:486-548`。
 
 `MessageBlockThink` 将 reasoning time 转成耗时标签并持久化折叠状态；`MessageBlockToolCall`（`:317-323` 状态映射、`:537-560` 图标）根据 block status 选择 calling/response/end/error 图标，显示 server identity、参数/响应、图片预览、diff 和 MCP App result。`exec`、`process`、subagent 等工具在运行中可自动展开，属于显示规则而非数据类型变化。
 
@@ -118,6 +121,8 @@ Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既
 ## 8. 性能、缓存与测试
 
 - **缓存策略**：`useArtifacts.ts` 有 last-parse memo（`:157-159`，流式重复解析同字符串直接返回缓存）；`MessageBlockContent` 对内容快照做比较后再同步 artifactStore（`MessageBlockContent.vue:95-143`）；Markdown 侧区分流式/静态两套 batch 参数与节点虚拟化（§3）。
+- **Artifact 解析缓存**：提取结果按 block 引用记忆，消息行重渲染时复用既有解析对象；该优化依赖不可变 block 引用契约，入口见 `src/renderer/src/composables/useArtifacts.ts`。
+- **非视觉模式**：应用启用 accessibility support 时，ChatPage 关闭消息窗口化，消息区成为可聚焦 region；折叠组和工具卡提供 `aria-expanded/aria-controls`。这是静态接线事实，屏幕阅读器实际播报顺序仍未运行验证。
 - **渲染频率**：renderer 端接收主进程 120ms 节流发出的全块快照（`chat.stream.updated`）、DB 600ms 节流落盘，均由生成侧 `echo.ts` 控制（`src/main/agent/deepchat/runtime/echo.ts:7-8`，详细链路见生成式输出与运行时笔记 §2 与 Chat 笔记 §3），本笔记不再展开。
 - **复制按钮**：工具卡的参数/响应复制用 `@dc-ui` 的 `DcCopyButton`（`MessageBlockToolCall.vue:160-202`）；整条消息复制由 `MessageItemAssistant` 的 `copyText` computed 提供，供 `MessageToolbar` 使用（`MessageItemAssistant.vue:428-450`）。
 - **测试覆盖（静态确认，未运行）**：`test/renderer/components/message/` 下 12 个组件测试（`MessageItemAssistant.test.ts`、`MessageBlockToolCall.test.ts`、`MessageBlockContent.test.ts`、`MessageBlockThink.test.ts`、`MessageBlockActivityGroup.test.ts`、`MessageBlockMedia.test.ts` 等）；Artifact 侧有 `HTMLArtifact/MarkdownArtifact/MermaidArtifact/ReactArtifact/SvgArtifact/MarkdownRenderer.test.ts` 与 `useArtifacts/useArtifactContext/useArtifactExport/useArtifactViewMode.test.ts`、`stores/sidepanelAndArtifact.test.ts`。未发现长会话/大数据量的虚拟化性能基准测试。
@@ -148,5 +153,5 @@ Artifact 预览组件共享 title、copy 和 preview 状态；artifact block 既
 - Mermaid 清洗和 strict 模式：`src/renderer/src/components/artifacts/MermaidArtifact.vue:74-136`
 - block 类型三层定义：`src/shared/chat.d.ts:114-175`、`src/shared/contracts/common.ts:516-525`、`src/renderer/src/features/chat-page/model/displayMessage.ts:125-193`
 - 消息窗口化与滚动（交接 Chat 笔记 §4）：`src/renderer/src/components/chat/MessageList.vue:1-65`、`useMessageWindow.ts`、`useMessageVirtualization.ts`
+- 活动组：`src/renderer/src/components/message/messageActivityGroups.ts:110-211`、`MessageBlockActivityGroup.vue`
 - 渲染相关测试：`test/renderer/components/message/`、`test/renderer/components/HTMLArtifact.test.ts` 等
-

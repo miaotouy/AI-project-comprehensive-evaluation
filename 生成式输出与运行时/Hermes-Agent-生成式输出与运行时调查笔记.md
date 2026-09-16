@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、MEDIA 等关键词；重点阅读 `tools/code_execution_tool.py`、`tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/desktop_ui.py`、`apps/desktop/src/store/artifacts.ts`、`apps/desktop/src/store/preview.ts`、`apps/desktop/src/app/chat/right-rail/preview-*.tsx`、`tui_gateway/server.py`、`gateway/platforms/base.py` 等；未运行应用与测试
 >
@@ -102,7 +102,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **`execute_code`（模型侧代码执行，Agent 工具类目）**：本地路径为 Unix 域套接字/TCP RPC 的子进程（`code_execution_tool.py:1397-1416`），子进程环境剥离 API 密钥（`_scrub_child_env`，1441 起），超时 300s、工具调用 ≤50、stdout 50KB（74-77 行），完整脚本经审批守卫（`check_execute_code_guard`，1307-1318）；远程后端走文件型 RPC 进入 Docker/SSH/Modal/Daytona（16-29 行）；project/strict 两模式（`_get_execution_mode`，1809 行）。白名单工具 7 个（63-71 行）：
+- **`execute_code`（模型侧代码执行，Agent 工具类目）**：当前默认是按会话身份复用的持久 Python 内核，不再每次调用都创建一次性解释器。每个 cell 重新绑定当前工具权限，变量、导入与助手函数留在会话中；子 Agent 使用委派会话 ID 隔离，关闭会话、`/new`、超时或中断会销毁对应内核。远端 Docker/SSH/Modal 后端有同构 detached kernel 注册表（`tools/code_kernel.py:412-471,477-493,655-747`，`tools/code_kernel_remote.py:106-189,315-394`）。子进程环境仍剥离 API 密钥，完整脚本经过审批守卫；白名单工具为：
   - `web_search`、`web_extract`、`read_file`、`write_file`、`search_files`、`patch`、`terminal`
 - **`terminal` 环境**：本地与远程后端（Docker/SSH/Modal/Daytona/Singularity/Vercel，`tools/environments/`）。
 - **桌面预览运行时**：webview/iframe 均为沙箱，无网络桥（HTML artifact 内脚本不能请求外部资源也不会被宿主响应）。
@@ -119,6 +119,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 - 事实源：`SessionDB`（SQLite + FTS5 会话检索，`hermes_state.py:1890`）；artifact 注册表**刻意不持久化**（"transcript is the durable copy"，`store/artifacts.ts:19-22`），重载时由卡片重新注册重建。
 - 预览标签页持久化：localStorage `hermes.desktop.previewTabs.v2`，仅 file/url 行，dataUrl 剥离、artifact/transient/HTML-dataUrl 行过滤（`store/preview.ts:137-151`）。
 - 大工具结果：超阈值结果落盘 `<tmp>/hermes-results/{tool_use_id}.txt`，上下文内换成预览 + 路径，模型 `read_file` 可取回（`tools/tool_result_storage.py:1-23`）。
+- `execute_code` 自身也有输出溢写：stdout/stderr 超过内联预算时写入结果文件并返回可继续读取的路径，防止持久内核把一次大输出完整塞回对话上下文（`tools/code_execution_tool.py:58,83-93,742`）。
 - 导出：artifact 单文件下载（按语言定扩展名，`artifact-detect.ts:181-231`）、HTML 写临时文件后交给系统浏览器（`preview-artifact.tsx:49-72`）、远程文件经 `/api/files/download` 下载（`lib/media.ts:170-187`）。无分享链接、无对象级迁移/版本删除 UI。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -137,7 +138,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 - 注册表淘汰：24 个/会话、20 版本/artifact、40 会话（`store/artifacts.ts:45-67`）。
 - 标签页：file/url 标签跨会话存活（"tabs close when you close them"）；artifact 标签在注册表清空时被关闭（`closeArtifactPreviewTabs`，`store/preview.ts:265-271`）；webview 仅在 URL 标签存在时挂载，`webview.remove()` 卸载（`preview-pane.tsx:639-647`），console/devtools 状态按标签 lazily 创建并缓存（`preview-strip-tools.tsx:11-13`）。
-- 执行资源：`execute_code` 超时/上限/临时目录 `hermes_sandbox_*`；终端后台进程与浏览器 daemon 在会话收尾时关闭（`gateway/run.py:9622`、`gateway/slash_commands.py:137`）。
+- 执行资源：`execute_code` 超时或硬中断会杀死内核并报告状态丢失；本地与远端内核均按会话回收。终端后台进程与浏览器 daemon 也在会话收尾时关闭（`tools/code_kernel.py:709-747`，`gateway/run.py:9622`、`gateway/slash_commands.py:137`）。
 - 性能手段：artifact 检测纯函数、delta 增量调用但结果有界；卡片只注册一次（哈希去重）；`AssistantMessage` 通过稳定选择子避免流式重渲染整棵消息树（`assistant-message.tsx:60-96`）。
 
 ## 11. 测试、已确认边界与未验证事项
@@ -169,6 +170,7 @@ E2E（`apps/desktop/e2e/`）覆盖启动/聊天/会话/右侧面板，未发现�
 - `read_preview` 桥在远程网关模式下的端到端延迟与超时表现；
 - 版本注册表在"压缩/恢复/分支"后的重建正确性（依赖 `session.resume` 的转写完整度）；
 - 消息平台 `MEDIA:` 递送的视觉形态（属于相邻类目，未深查）。
+- 持久内核的跨多轮状态、远端心跳恢复、输出溢写和子 Agent 隔离未做运行验证。
 
 ## 12. 关键源码索引
 

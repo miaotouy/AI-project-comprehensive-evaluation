@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`（Electron + React 桌面客户端，v2 架构）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读静态源码走读（renderer 绘画页 + main 图像生成/持久化链）；零依赖验证仅限 `node -e` 解析 JSON（package.json、`resources/data/painting-templates/catalog.json`、drizzle 迁移 snapshot）；未安装依赖、未启动应用
 >
@@ -140,6 +140,8 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 截图能力已具备选择框、标注和 OCR 主链：覆盖层采集用户选择，截图结果可作为输入内容继续进入会话。PDF 翻译使用 BabelDOC 保留版式，翻译结果会写入历史和文件管理器，资源下载过程另有进度反馈。两者分别是输入采集与文档生成/管理路径，不能据此推断通用视频、音频或画布编辑器已经存在。
 
 本次未运行 OCR 质量、BabelDOC 下载、翻译成功率或跨平台屏幕捕获。依据：`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/renderer/windows/screenshot/ScreenshotApp.tsx`、`src/main/services/PdfTranslationService.ts`、`src/renderer/pages/translate/pdf/PdfTranslationView.tsx`。
+
+图像生成的 Provider 面新增 TokenHub `/v1/wand` transport，并继续复用统一的 registry 参数、main 进程执行与 FileEntry 结果链。自动重试在图像生成入口被关闭，避免一次用户提交因通用重试机制重复计费；编辑参考图进入 provider 前会先经 Sharp 归一化，HDR 与旋转元数据由同一入口处理。依据：`src/main/ai/provider/custom/tokenhub/tokenhubTransport.ts`、`src/main/ai/AiService.ts:802`、`src/main/ai/utils/normalizeImageEditInputs.ts:1-23`。
 
 ## 9. 设计取舍、已确认边界与未验证事项
 

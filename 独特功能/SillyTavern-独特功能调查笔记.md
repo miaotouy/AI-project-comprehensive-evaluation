@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-11
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：只读盘点根目录（README 无功能清单）、`public/scripts/extensions/` 扩展注册表、`default/content/` 产品资产、`public/scripts/` 核心模块与服务端端点；未修改仓库源码
 >
@@ -102,6 +102,8 @@ README 无功能清单（README.md:1-13）。按任务要求从三个来源反�
 | regex / stable-diffusion / translate / tts / caption / token-counter / gallery / assets / attachments | 正则、出图、翻译、TTS、看图、计数、媒体库 | 分属已有类目或通用扩展，未专项调查 |
 
 **表达式中链**（`入口确认`）：`expressions/index.js` 监听消息渲染事件 → 从最后一条消息文本分类情绪（2 秒轮询，流式 10 秒）→ 按 `extension_settings.expressionOverrides` 与角色卡表达式集匹配 → 切换 `#avatar` 表情图。依赖 classify 模块或 LLM 分类提示；静态代码确认入口与状态，未运行验证。
+
+该扩展还提供宏与命令面：`lastExpression` 可按角色名返回最近使用的表情标签，`defaultExpression` 返回全局回退表情，`availableExpressions` 返回分类器可用的表情列表；`/expression-list` 增加 `custom` 参数以包含、排除或只返回自定义表情（`public/scripts/extensions/expressions/index.js:2437-2580,2649-2719`）。
 
 **连接配置主链**（`入口确认`）：`connection-manager/index.js` 录制当前连接状态为一组 slash 命令值（`DEFAULT_SETTINGS.profiles`）→ `selectedProfile` 持久化 → 切换聊天时按 profile 回放命令（含 `secret-id` 切换）。单文件 JSON 设置持久化。
 

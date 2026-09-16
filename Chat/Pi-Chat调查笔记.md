@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：只读源码梳理 AgentSession、SessionManager、agent-loop 与交互模式的事件流；未运行交互会话
 >
@@ -73,6 +73,12 @@ TUI 输入（interactive-mode.ts）
 - 未运行交互会话：流式节流、滚动、闪烁等视觉行为未实测。
 - `estimateTokens` 与真实计费的偏差未验证；压缩后模型侧多轮一致性（thinking signature、cache 语义）未实测。
 - RPC 模式（`modes/rpc/`）与 server/client 包会话通道仅从调用关系推断。
+
+## 实验性 durable 聊天表面
+
+默认产品主链仍由 coding-agent 的 JSONL v3 SessionManager 与 AgentSession 驱动。仓库另有受 `PI_EXPERIMENTAL=1` 约束的 server/client 链：server 为 durable Session 启动独立 worker，worker 持有 AgentHarness lane；客户端通过 AgentController 提交或取消操作，通过 Transcript 的 Chord 复制状态渲染稳定版 fullscreen TUI，并可经 Radius 断线重连后重新附着会话（`packages/coding-agent/src/experimental/services/README.md:12-25`、`packages/coding-agent/src/experimental/client-runtime.ts:52-177`）。
+
+该链把会话事实源扩展到 format 4 存储、branch/lane 与不可变 operation result，支持 Memory、JSONL 和 SQLite 后端；它没有替换默认 CLI 的 v3 会话文件，属于并行实验产品表面（`packages/agent/src/harness/session/types.ts:1-120`、`packages/agent/src/harness/agent-harness.ts:518-622`）。
 
 ## 关键源码索引
 

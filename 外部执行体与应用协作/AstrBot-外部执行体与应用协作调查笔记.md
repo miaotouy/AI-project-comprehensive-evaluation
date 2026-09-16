@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：静态复核平台 adapter、注册/登录绑定、统一 webhook、UMO、事件流水线和主动投递；复用 Chat、消息渲染和独特功能笔记；未连接真实 IM 平台
 >
@@ -16,7 +16,9 @@
 
 AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。`astrbot/core/platform/sources/` 下 18 个平台适配器（Telegram、Discord、Slack、飞书/Lark、企业微信、钉钉、QQ 官方/OneBot、KOOK、LINE、Mattermost、Misskey、Satori、微信公众平台/微信 OCR 等）各自承担身份、连接、入站事件、命令、会话映射、媒体转换和出站投递，是产品的交互主入口。
 
-QQ 官方适配器的本地大媒体文件改走分片上传器，并把最终失败继续向上抛给发送链；Telegram 入站音频文件会归一为 `Record` 组件。这两项扩展了平台媒体交接，未改变 UMO 到会话/Agent 的主链（qqofficial_chunked_upload.py；qqofficial_message_event.py:650-728；telegram/tg_adapter.py:585-607）。
+平台事件的群对象从“只有群 ID”扩展为可按平台能力补齐名称、头像、所有者、管理员、成员数与成员列表。基类新增异步 `get_group` 契约，Telegram、Discord、Lark、KOOK、LINE、Mattermost、Misskey、QQ 官方、Satori、Slack 与 OneBot 等适配器实现不同程度的查询；受平台权限或 API 限制时返回基本群对象，不把缺失字段伪造成空完整列表（`astrbot/core/platform/astr_message_event.py:511-520`；各平台 `*_event.py` 的 `get_group`）。
+
+Lark 私聊还会保存已知 chat ID，在按 open ID 主动发送被拒后用同一去重 UUID 回退到 chat ID；只有失败消息才重试，成功发送不重复。Telegram 论坛 topic 则进入 AstrBot 群 ID 与显示名，形成 `<chat_id>#<thread_id>` 会话边界（`astrbot/core/platform/sources/lark/lark_adapter.py:511-648`；`lark_event.py:196-281`；`telegram/tg_adapter.py:485-553`）。
 
 它与 DeepChat 的语义不同：AstrBot 本身就是 IM Agent 宿主，不是从 IM 远程驾驶另一个桌面客户端。横向比较应保留这一区别。
 
@@ -47,7 +49,7 @@ QQ 官方适配器的本地大媒体文件改走分片上传器，并把最终�
 
 ## 身份、协议与状态映射
 
-平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定（`platform_service.py`：飞书/钉钉 app registration、QQ 与微信二维码登录）。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键。conversation、主动任务和停止操作均使用该身份定位。平台能力由 `platform_metadata.py` 按 `support_streaming_message` / `support_proactive_message` 声明，驱动结果装饰与主动投递。
+平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键，Telegram topic 会把 thread ID 纳入 session ID。唤醒阶段另将事件中的群名或发送者名异步写成 UMO 自动名称，供会话管理表面显示，但不会改写身份键（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-110`）。
 
 ## 执行、回流与控制语义
 
@@ -81,4 +83,3 @@ Telegram/Discord/Slack 等使用各自 token，飞书/企业微信/钉钉等还�
 - `astrbot/core/config/default.py`
 - `astrbot/core/star/context.py`
 - `astrbot/dashboard/services/chat_service.py`
-

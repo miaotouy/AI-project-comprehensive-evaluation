@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态阅读 `src/agents`、`src/agents/tools`、MCP 运行时与 `packages/agent-core` 的工具构建、策略、适配和执行循环；未运行 Agent 或实际连接外部 MCP 服务
 >
@@ -42,6 +42,8 @@ OpenClaw 自有工具在 `src/agents/openclaw-tools.ts:92-180` 创建，工具�
 MCP 不是静态内置工具。`agent-bundle-mcp-runtime.ts:127-162` 通过 MCP `tools/list` 分页读取目录，并设置页数、条目数和字节上限；`agent-bundle-mcp-materialize.ts:429-471` 为一次运行取得目录、租约和执行闭包，再把目录投影为 Agent 工具。MCP 服务器可同时声明 resources/prompts，投影为对应的只读工具。
 
 ## 2. 工具发现、过滤与注入
+
+工具数量较大时，运行时可以把完整目录压缩为搜索控制面，而不是把全部 schema 一次性注入模型。目录保存工具 ID、名称、描述、来源、可见性和执行闭包；模型先搜索、描述，再按精确 ID 或无歧义名称调用。未知 ID 会基于名称、标签、描述和 token 重合给出最多三个候选，并明确提示下一步使用搜索、描述和调用入口；参数失败还会给出最近字段名和紧凑输入签名。目录仍绑定本次运行，清理时会释放调度、观察器和代码模式结果，不能跨运行复用执行权。实现见 `src/agents/tool-search-catalog.ts:213-372,445-535`、`src/agents/tool-search-recovery.ts:51-140`。
 
 装配后依次经过消息提供方过滤、模型提供方过滤和会话能力策略（`agent-tools.ts:918-962`）。策略来源包括全局/Agent profile、沙箱、群组会话、插件 allow/deny、发送者是否为 owner、运行时 allowlist、客户端 capabilities 与模型兼容性；非 owner 调用者还会应用 Gateway owner-only denylist（`agent-tools.ts:937-960`）。内存压缩触发的特殊运行只保留 `read` 与追加式 `write`（`agent-tools.ts:890-917`）。
 

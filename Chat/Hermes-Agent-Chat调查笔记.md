@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态阅读 Python（tui_gateway / agent / run_agent / hermes_state）与 TypeScript（apps/desktop、apps/shared、ui-tui）源码；以函数行号精确引用；未运行任何组件。
 >
@@ -82,6 +82,8 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 ## 当前链路补充
 
 桌面重连时，客户端以 session 为单位保存事件序号并补取缺口，回放帧仍进入正常事件处理链（`apps/shared/src/json-rpc-gateway.ts:110-121`、`522-523`）；会话请求同时带 profile/connection 路由（`apps/desktop/src/api/sessions.ts:16-31`）。请求侧的压缩默认改为只保留 10K--25K token 的 lean tail（`agent/context_compressor.py:869-883`）。完整的事实源、请求执行和渲染影响分别由会话与消息管理、对话请求与上下文、消息渲染器笔记继续承接。
+
+共享网关协议现在由 Python 契约目录声明。每个 client→server method、server→client request 与 event 都有 Pydantic 参数、结果或 payload 模型；未声明方法在注册时失败，未知参数键在运行时返回 4000。同一目录生成 TypeScript 类型与 OpenRPC 文件供桌面和 TUI 消费（`tui_gateway/contracts/registry.py:1-7,22-73,76-168`，`apps/shared/src/gateway-contract.generated.ts`）。这一层改变的是多前端与后端的接口事实源，不改变 SQLite 的会话事实源。
 
 ## 未验证事项
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/agent-session.ts`、`packages/coding-agent/src/core/compaction/`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/agent/src/agent.ts`、`packages/agent/src/agent-loop.ts`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`AgentSession.prompt` 主链路全量、`Agent`/`runLoop` 工具循环、compaction 模块、流式事件到 TUI 的消费点），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
 >
@@ -126,7 +126,15 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 压缩与分支摘要走独立的简单完成请求，不再强制传入 `toolChoice: "none"`，但摘要请求本身也不会附带工具目录；这避免了部分 provider 对显式工具选择的兼容问题，同时保持摘要模型不能发起本轮工具调用的边界。扩展以 `triggerTurn: false` 记录的 custom 消息，若发生在工具执行中的回合，会在该回合工具结果之后追加，保证回放给 provider 的工具调用与结果保持相邻（`packages/coding-agent/CHANGELOG.md` 的 Unreleased 修复项）。
 
-## 13. 关键源码索引
+## 13. Durable harness 请求链
+
+实验运行时把原来一次 `prompt()` 内完成的接纳与执行分开。`accept` 原子记录操作及输入，`drive` 取得或加入该 lane 的唯一 Drive，按 generation、工具放置、retry、deferred polling 和 terminal procedure 推进；`resume` 只在存在未完成操作时恢复驱动，`requestAbort` 以操作 ID 防止旧取消请求影响新操作（`packages/agent/src/harness/agent-harness.ts:518-579`、`packages/agent/src/harness/runtime/lane.ts:480-1403`）。
+
+该链的上下文从持久 transcript 和 lane 状态投影，工具结算先成为 durable outcome 再按调用顺序放入 transcript；shell 输出在源侧按行数和字节数限界，截断时尽力保存完整输出文件。它为进程重启提供恢复语义，但仅用于 AgentHarness 和实验客户端，默认 coding-agent 的 `AgentSession.prompt()` 主链仍然存在（`packages/agent/src/harness/runtime/drive/generation.ts:1-130`、`drive/tools.ts:170-478`、`packages/agent/src/harness/utils/output-capture.ts:67-110`）。
+
+稳定链的 compaction 设置支持按精确 `provider/modelId` 覆盖 reserveTokens 与 keepRecentTokens；两个字段分别回退到普通设置和内置默认值，模型切换后的下一次检查即采用新预算（`packages/coding-agent/src/core/settings-manager.ts:867-899`、`packages/coding-agent/docs/compaction.md:422-444`）。
+
+## 14. 关键源码索引
 
 - `packages/coding-agent/src/core/agent-session.ts:1116-1273`：prompt 主链路；`610-681`：事件处理与落盘；`2686-2736`：重试；`1343-1408`：steer/followUp；`1962-2053`：压缩判定
 - `packages/coding-agent/src/core/session-manager.ts:418-470`：上下文构建

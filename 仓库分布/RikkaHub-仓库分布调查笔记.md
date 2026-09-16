@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：读取 Git 索引快照、Gradle 构建脚本与版本目录、`settings.gradle.kts`、`.gitmodules`、`.github/workflows`、各子项目清单与 README/AGENTS 文档，并对照 `统计仓库.ps1` 的机械统计复核文件与行数量级；未运行任何构建或测试
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-RikkaHub 是一个面向 Android 的原生 LLM 聊天客户端，采用单个 Gradle 多模块工程组织核心代码，另有三个不进入 Gradle 的旁路子项目：React Router 前端 `web-ui`、Python/Textual 的本地化工具 `locale-tui`、Bun/TypeScript 的 SSE 轨迹录制工具 `trace-cli`。当前快照含 1380 个 Git 跟踪文件、906 个可识别源码文件 / 160600 行源码，其中 Kotlin 占文件数约 77%、行数约 82%。
+RikkaHub 是一个面向 Android 的原生 LLM 聊天客户端，采用单个 Gradle 多模块工程组织核心代码，另有三个不进入 Gradle 的旁路子项目：React Router 前端 `web-ui`、Python/Textual 的本地化工具 `locale-tui`、Bun/TypeScript 的 SSE 轨迹录制工具 `trace-cli`。当前快照含 1381 个 Git 跟踪文件、906 个可识别源码文件 / 160600 行源码，其中 Kotlin 占文件数约 77%、行数约 82%。
 
 模块边界的划分方式是「按能力域切模块，按界面与集成留在 app」：能力域模块包括 AI Provider 抽象、搜索、语音、文档解析、代码高亮、视频生成、OAuth、沙箱工作区；`app` 承载 UI、数据层、服务与嵌入式 Web 服务端，自身即占全仓源码行数的约 58.6%。仓库还跟踪了体积可观的预编译原生库、词典资源与基线画像文本，这些资产显著影响仓库体积但不计入源码行。
 
@@ -135,7 +135,7 @@ Git 跟踪的测试文件共 193 个 / 12326 源码行，测试与源码的文�
 
 ## 5. 跨平台与发布组织
 
-产品主平台是 Android。平台判定依据来自构建配置而非 README 声明：`app/build.gradle.kts` 使用 `android.application` 插件，`compileSdk = 37`、`minSdk = 26`、`targetSdk = 37`，`abiFilters` 为 `arm64-v8a` 与 `x86_64`，并启用 ABI 拆分（`splits.abi`，bundle 任务下关闭，`isUniversalApk = true`）。release 签名从 `local.properties` 读取，debug 变体通过 `applicationIdSuffix = ".debug"` 区分。库模块统一经 `build-logic` 的 `rikkahub.android.library` / `rikkahub.android.library.compose` 约定插件接入，`web` 模块以 24 为 `minSdk` 低于应用。
+产品主平台是 Android。平台判定依据来自构建配置而非 README 声明：`app/build.gradle.kts` 使用 `android.application` 插件，`compileSdk` 以 `release(37)` 加 `minorApiLevel = 2` 指定、`minSdk = 26`、`targetSdk = 37`，`abiFilters` 为 `arm64-v8a` 与 `x86_64`，并启用 ABI 拆分（`splits.abi`，bundle 任务下关闭，`isUniversalApk = true`）。release 签名从 `local.properties` 读取，debug 变体通过 `applicationIdSuffix = ".debug"` 区分。库模块统一经 `build-logic` 的 `rikkahub.android.library` / `rikkahub.android.library.compose` 约定插件接入，`web` 模块以 24 为 `minSdk` 低于应用。
 
 其他平台以「同一份 Android 代码 + 旁路工程」的方式组织：
 
@@ -194,7 +194,7 @@ Gradle 侧使用版本目录与工具链配置：`gradle/libs.versions.toml` 集
 ## 8. 未验证事项
 
 - 未运行 `./gradlew assembleDebug`、`test`、`lint` 或任何前端/CLI 构建与测试，模块行数、依赖可解析性与测试通过情况均为静态读取结果。
-- 提交历史经本地 Git 复核为 2851 个提交（含 74 个合并提交，非合并 2777），首提交时间 2025-03-11，最近 90 天 319 次；与本次提供的机械统计「主线 2723 提交、最近 90 天 324 次」存在差异，差异来源未查明（可能为统计脚本对合并提交或检索范围的定义不同）。
+- 提交历史经本地 Git 复核为 2854 个提交（含 74 个合并提交，非合并 2780），首提交时间 2025-03-11，最近 90 天 319 次；与本次提供的机械统计「主线 2723 提交、最近 90 天 324 次」存在差异，差异来源未查明（可能为统计脚本对合并提交或检索范围的定义不同）。
 - `gradle/vineflower.jar` 与根目录 `package.json`、`bun.lock` 的实际使用入口未定位。
 - `material3/material-color-utilities` 子模块内容未展开，未确认其源码是否参与实际编译。
 - `web-ui` 是否有测试、`trace-cli` 的 `traces.yml` 中 `google-interactions` 轨迹是否已产出对应夹具（`ai` 夹具目录中本次只看到四组），均未逐项核对。

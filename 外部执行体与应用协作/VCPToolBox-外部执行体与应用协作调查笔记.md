@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：静态复核 AICodeWorker、SSH/WebSocket 节点、跨节点文件、浏览器 runtime、异步回注、人类工具 API 与 MCP 客户端插件；复用 Agent 工具、运行时和独特功能笔记；未启动外部服务
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPToolBox 是对外执行资源的编排与能力供给层，已形成多条可比较的外部协作主链：AICodeWorker 调度 opencode/Antigravity CLI；WebSocket 节点与 SnowBridge 承担远端工具和文件；SSHManagerService 执行远端设备；托管浏览器暴露页面观察/控制；异步插件把长任务结果回注原会话；`/v1/human/tool` 允许外部人类客户端走统一工具审批。浏览器运行时启动前会探测配置 profile 中已存在的 DevTools 端点，复用可达的 Chrome 进程；新启动的进程也会等待端点就绪后再返回状态（`modules/browserRuntimeManager.js:483-590,656-710`）。综合达到 `主链确认`（静态证据）。
+VCPToolBox 是对外执行资源的编排与能力供给层，已形成多条可比较的外部协作主链：AICodeWorker 调度 opencode/Antigravity CLI；WebSocket 节点与 SnowBridge 承担远端工具和文件；SSHManagerService 执行远端设备；托管浏览器暴露页面观察/控制；异步插件把长任务结果回注原会话；`/v1/human/tool` 允许外部人类客户端走统一工具审批。浏览器运行时启动前会探测配置 profile 中已存在的 DevTools 端点，复用可达的 Chrome 进程；新启动的进程也会等待端点就绪后再返回状态；关闭流程已串行化，同一 Profile 不会短时并存两份 Chrome；Chrome 的 stderr 默认不再建管道，只有显式开启 `VCP_BROWSER_CHROME_VERBOSE_LOGGING` 才由父进程消费 verbose 日志（`modules/browserRuntimeManager.js:92,411-427,488-600,662-719`）。综合达到 `主链确认`（静态证据）。
 
 ## 接入角色与系统边界
 
@@ -62,7 +62,7 @@ AICodeWorker 使用 jobId 管理异步 CLI 任务。分布式节点以 WebSocket
 外部执行结果可同步返回、轮询 job、WebSocket 推送或经 `{{VCP_ASYNC_RESULT}}` 占位符回注。各接入路径的回流与取消语义如下：
 
 - 跨节点：`cancel_tool` 传播；SnowBridge 另有 `vcp_tool_status/result/cancel_ack` 帧
-- 浏览器：返回页面快照、截图和动作结果
+- 浏览器：返回页面快照、截图和动作结果；扩展侧连接改为单飞（`connectAttemptInProgress`）并把心跳句柄绑定到具体 socket 代次，迟到 socket 的 open/close 不再抢占全局连接（`Plugin/ChromeBridge/VCPChrome/background.js:272-344,475-500`）
 - SSH：按会话流返回输出
 - 人类工具 API：复用 Bearer 鉴权和审批链（鉴权在 `/v1/*` 全局中间件层）
 

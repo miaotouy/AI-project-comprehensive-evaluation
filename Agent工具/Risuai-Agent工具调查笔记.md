@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读源码梳理（`src/ts/process/mcp/`、`src/ts/process/request/`、`src/ts/plugins/`、`src/ts/process/modules.ts`、`src/ts/storage/database.svelte.ts`、`src/ts/globalApi.svelte.ts` 等），未修改被调查仓库
 >
@@ -62,7 +62,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 其中 `internal:risuai` 默认被移入 `callOnlyMCPs`：工具不注入请求、只可被调用（`mcp.ts:19-21,223-228`）；用户若把 `internal:risuai` 导入为模块则恢复注入（导入对话框本身就提供该选项，`mcp.ts:283-295`）。
 
-**插件 MCP**：v3 API 暴露 `risuai.registerMCP`（v3.svelte.ts:1125），内部要求 identifier 以 plugin: 开头并存入 `registeredCustomPluginMCPs`（pluginmcp.ts:36-54）；只有当某模块的 mcp.url 恰好是 plugin:xxx 时才会被实例化进注册表（`mcp.ts:83-90`）。插件的工具列表与执行回调是跨 iframe 的回调，实际执行发生在插件沙箱内（见维度 8）。
+**插件 MCP**：v3 API 暴露 `risuai.registerMCP`（v3.svelte.ts:1180），内部要求 identifier 以 plugin: 开头并存入 `registeredCustomPluginMCPs`（pluginmcp.ts:36-54）；只有当某模块的 mcp.url 恰好是 plugin:xxx 时才会被实例化进注册表（`mcp.ts:83-90`）。插件的工具列表与执行回调是跨 iframe 的回调，实际执行发生在插件沙箱内（见维度 8）。
 
 **Responses API 内置搜索**：`db.modelTools` 含 `'search'` 时，OpenAI Responses 请求体额外追加 `{ type: 'web_search_preview' }`（`responses.ts:332-334`）；设置开关在 `BotSettings.svelte:777-783`。这是唯一不经过 MCP 层的内置工具，且仅对 Responses 格式生效。
 
@@ -132,7 +132,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 ## 8. MCP、插件、Skill 与子 Agent
 
-插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1125-1126）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0；不过数据库里已保存的 2.1 插件仍会在启动时走旧的主线程加载分支。因而“阻止新安装”不等于清除或禁用存量插件（`plugins.svelte.ts:343-361,421-429,890-910`）。
+插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1180-1181）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0；不过数据库里已保存的 2.1 插件仍会在启动时走旧的主线程加载分支。因而“阻止新安装”不等于清除或禁用存量插件（`plugins.svelte.ts:343-361,421-429,890-910`）。
 
 未找到 Skill、子 Agent 或任务委派机制。
 
@@ -179,7 +179,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 | Google：注入、非流式循环、流式包装 | `google.ts:352-359,806-939,1069-1309` |
 | 执行端逐次审批 | `risuaccess/characters.ts:543 等`、`risuaccess/modules.ts:424 等` |
 | 模块 MCP 声明 | `src/ts/process/modules.ts:504-508` |
-| 插件 registerMCP 与沙箱 | `apiV3/v3.svelte.ts:1125-1126,1388-1406`、`apiV3/factory.ts:434-942` |
+| 插件 registerMCP 与沙箱 | `apiV3/v3.svelte.ts:1180-1181,1482-1500`、`apiV3/factory.ts:434-942` |
 | 插件数据库写入白名单 | `plugins.svelte.ts:482-507,765-794` |
 | 工具相关默认值 | `database.svelte.ts:663-664,201-202` |
 | 网络执行层 | `globalApi.svelte.ts:1713-1832` |

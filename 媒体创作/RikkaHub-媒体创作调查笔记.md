@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态源码走读；以当前快照的调用链为依据，逐层复核图片生成页、AI provider 图像接口、`videogen` 模块、`speech` 模块、Room 实体与文件管理器；未启动应用、未连接任何生成服务、未运行测试
 >

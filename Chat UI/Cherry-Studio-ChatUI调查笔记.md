@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、适配器与 hook、IPC 命令绑定、主进程桌面服务），界面视觉与键盘行为以"未运行验证"标注
 >
@@ -277,10 +277,11 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 - Agent 任务在工作台中新增悬浮进度胶囊，并提供子 Agent 流程的返回导航和更清晰的运行状态。
 - 定时任务卡片显示最近运行状态。
-- 消息菜单增加“复制为新对话”，消息页脚始终显示 token 用量。
-- Composer 支持分别配置发送、换行与 steer 快捷键，粘贴截图时携带其中的文本。
+- 消息菜单包含“复制为新对话”，多选弹窗支持全选；所有 assistant 消息采用统一编辑入口，消息页脚始终显示 token 用量。
+- Composer 支持分别配置发送、换行与 steer 快捷键，草稿以原子快照写入缓存，长文本粘贴不会再由过期快照覆盖；粘贴截图时携带其中的文本。
+- 全局搜索输入使用 IME 感知的 debounce，输入法组合过程不发中间查询；结果显示会话所有者与 workspace 上下文。相关入口见 `src/renderer/components/GlobalSearch/useImeAwareDebouncedValue.ts`、`GlobalSearchResults.tsx`。
 
-上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/frame/MessageMenuBar.tsx`、`src/renderer/components/chat/variants/AgentComposer.tsx`。
+上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`、`src/renderer/components/GlobalSearch/`。
 
 ## 11. 设计取舍与已确认边界
 

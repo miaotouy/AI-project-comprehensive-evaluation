@@ -2,9 +2,9 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、SillyTavern、VCPChat、VCPMobile、VCPToolBox、Hermes Agent、Risuai、OpenClaw、RikkaHub
 >
-> 对比更新日期：2026-09-15
+> 对比更新日期：2026-09-16
 >
-> 依据：同目录二十二份单项目调查笔记及其中记录的代码快照；OpenClaw 依据 [OpenClaw-Agent角色配置调查笔记.md](OpenClaw-Agent角色配置调查笔记.md)，RikkaHub 依据同目录 2026-09-15 [RikkaHub-Agent角色配置调查笔记.md](RikkaHub-Agent角色配置调查笔记.md)
+> 依据：本轮各项目 2026-09-16 调查笔记
 >
 > 对比方法：统一比较角色实体、存储粒度、会话绑定、提示词装配、模型参数、工具授权、知识与记忆、导入格式和历史快照；只采用单项目笔记中已有的源码结论
 >
@@ -16,28 +16,28 @@
 
 | 项目 | 笔记 | 行数 | 分支 | 代码快照 |
 | --- | --- | ---: | --- | --- |
-| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 447 | `dev` | `36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8` |
-| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 331 | `master` | `8ea8ce613a0bee4ddb48b21490afe23418277c75` |
-| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 239 | `main` | `81571269addb6bafb589a920b2883f1e1e084fd1` |
-| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 228 | `main` | `88cfe5dd2b77e63464be22968f66ebcb1d429483` |
-| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 192 | `dev` | `7f3379524da3ac629918d35682e38833ad5c203e` |
-| DeepSeek Harness | [DeepSeek-Harness-Agent角色调查笔记.md](DeepSeek-Harness-Agent角色调查笔记.md) | 165 | `master` | `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e` |
-| Dify | [Dify-Agent角色配置调查笔记.md](Dify-Agent角色配置调查笔记.md) | 83 | `main` | `a9319c86ee9468f6e1a56b3f22945a63b95c282f` |
-| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 160 | `main` | `95e96d02c58ca361a3e54cb36360ed16bc534c8a` |
-| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 255 | `canary` | `7c559cbd4d92a54289bce3a8aab96e057d0ce8c5` |
+| AIO Hub | [AIO-Hub-Agent角色配置调查笔记.md](AIO-Hub-Agent角色配置调查笔记.md) | 447 | `dev` | `e5eb0211e403d333f478e0b0a5d7603f96783be6` |
+| AstrBot | [AstrBot-Agent角色配置调查笔记.md](AstrBot-Agent角色配置调查笔记.md) | 332 | `master` | `e0aa8d386121ead06825fb6d1e423a41a3d14a83` |
+| Chatbox | [Chatbox-Agent角色配置调查笔记.md](Chatbox-Agent角色配置调查笔记.md) | 248 | `main` | `471bfd08ff5905366444c1cc00dbb75a2870166a` |
+| Cherry Studio | [Cherry-Studio-Agent角色配置调查笔记.md](Cherry-Studio-Agent角色配置调查笔记.md) | 230 | `main` | `6534fc9ecefec9c8f58c133de5539ea66bc7567f` |
+| DeepChat | [DeepChat-Agent角色配置调查笔记.md](DeepChat-Agent角色配置调查笔记.md) | 196 | `dev` | `31a6b05ab77986b3f8086d9e16c565c3251639e0` |
+| DeepSeek Harness | [DeepSeek-Harness-Agent角色调查笔记.md](DeepSeek-Harness-Agent角色调查笔记.md) | 165 | `master` | `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720` |
+| Dify | [Dify-Agent角色配置调查笔记.md](Dify-Agent角色配置调查笔记.md) | 90 | `main` | `38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe` |
+| Jan | [Jan-Agent角色配置调查笔记.md](Jan-Agent角色配置调查笔记.md) | 162 | `main` | `38491c73d12398edda45ebec366f940e83509490` |
+| LobeHub | [LobeHub-Agent角色配置调查笔记.md](LobeHub-Agent角色配置调查笔记.md) | 253 | `canary` | `52756f6904f8d4a7b5cc46142847ee6d4887c9d5` |
 | Manifold Desktop | [Manifold-Desktop-Agent角色配置调查笔记.md](Manifold-Desktop-Agent角色配置调查笔记.md) | 74 | `main` | `3d7448fb2e6053056da6d6c126e08f90b94cda4f` |
 | NextChat | [NextChat-Agent角色配置调查笔记.md](NextChat-Agent角色配置调查笔记.md) | 173 | `main` | `defdcdb55d850cd12c4c657eb83729fd66e215c0` |
-| Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 213 | `main` | `d3e8bf3405e848cfba377814d0aa7ba7290e414d` |
-| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 271 | `dev` | `c2eacd72afc4a4984564c393e15ab30011057269` |
-| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 132 | `main` | `e86823096c5bad39e1ca282ec24bc5eb9bec745b` |
-| RikkaHub | [RikkaHub-Agent角色配置调查笔记.md](RikkaHub-Agent角色配置调查笔记.md) | 346 | `master` | `8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb` |
-| SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 211 | `release` | `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8` |
-| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 162 | `main` | `89e02b778d626078be91dfbad01e5c9554c47f76` |
-| VCPMobile | [VCPMobile-Agent角色配置调查笔记.md](VCPMobile-Agent角色配置调查笔记.md) | 72 | `main` | `cecdbe432feda57821938bba7625a272113d21c1` |
-| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 263 | `main` | `e2762e4dab5c70952d88f96689fba1270624e5ef` |
-| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 237 | `main` | `791e2ae3257e211d14ca77e654dfe10ee1976a1c` |
-| Risuai | [Risuai-Agent角色配置调查笔记.md](Risuai-Agent角色配置调查笔记.md) | 221 | `main` | `e565563a288ebe4c65b6099a1645ba477d1c84b4` |
-| OpenClaw | [OpenClaw-Agent角色配置调查笔记.md](OpenClaw-Agent角色配置调查笔记.md) | 609 | `main` | `c64a640f5df5bc72537357417c54647c050cb863` |
+| Open WebUI | [Open-WebUI-Agent角色配置调查笔记.md](Open-WebUI-Agent角色配置调查笔记.md) | 215 | `main` | `0a7c15832fb30b1903753e83f81dc7d27e5b0944` |
+| OpenCode | [OpenCode-Agent角色配置调查笔记.md](OpenCode-Agent角色配置调查笔记.md) | 275 | `dev` | `e03db9bc6908f75c9334d8aa997deeaac81c0298` |
+| Pi | [Pi-Agent角色配置调查笔记.md](Pi-Agent角色配置调查笔记.md) | 136 | `main` | `b03a367a4fbc02df81bfd96702d7a12c2d79aa45` |
+| RikkaHub | [RikkaHub-Agent角色配置调查笔记.md](RikkaHub-Agent角色配置调查笔记.md) | 245 | `master` | `9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f` |
+| SillyTavern | [SillyTavern-Agent角色配置调查笔记.md](SillyTavern-Agent角色配置调查笔记.md) | 211 | `release` | `06bde939fb1e9c4c8d8641d810f0a916b5bce127` |
+| VCPChat | [VCPChat-Agent角色配置调查笔记.md](VCPChat-Agent角色配置调查笔记.md) | 168 | `main` | `429a96829da0149ff59b6758748795a2934bdc9d` |
+| VCPMobile | [VCPMobile-Agent角色配置调查笔记.md](VCPMobile-Agent角色配置调查笔记.md) | 73 | `main` | `9da3baac9fb9d610bc31be40a6dc8d6c66774890` |
+| VCPToolBox | [VCPToolBox-Agent角色配置调查笔记.md](VCPToolBox-Agent角色配置调查笔记.md) | 265 | `main` | `6a91ca5f75865a14471bceca4a5e2ccadd04f7e3` |
+| Hermes Agent | [Hermes-Agent-Agent角色配置调查笔记.md](Hermes-Agent-Agent角色配置调查笔记.md) | 234 | `main` | `682a95258ce9e877cfb607a5ada6436183efdebb` |
+| Risuai | [Risuai-Agent角色配置调查笔记.md](Risuai-Agent角色配置调查笔记.md) | 223 | `main` | `cad8595aa39620df4246f56918f0962c2aa0263a` |
+| OpenClaw | [OpenClaw-Agent角色配置调查笔记.md](OpenClaw-Agent角色配置调查笔记.md) | 609 | `main` | `541406eeb737e00907438f79cbc0d0a74f0def99` |
 
 ## 比较口径
 
@@ -69,7 +69,7 @@
 8. **分层提示词 + 独立 Profile（Hermes Agent）。** 身份文件、命名人格模板、用户手动 system 提示词与运行时注入共同叠加成 system prompt；`display.personality` 保存选中的**人格名称**并成为权威来源（空 = 无 overlay）。启动或创建 agent 时优先把命名人格渲染成文本，否则回退到用户手动提示；环境变量仍最优先，**人格代码不会写回用户手动提示字段**（v33→v34 迁移会一次性清理旧写入）。任何一层都不绑定模型或工具。角色隔离放在 Profile（独立的 HERMES_HOME 目录）这一完整容器上。修改角色只影响下一次构建或由 TUI 就地改 ephemeral，不重写既有缓存前缀。
 9. **无角色实体、文件约定型：Pi。** 角色能力由 `SYSTEM.md`（整篇替换默认提示词）、`APPEND_SYSTEM.md`（追加）、`AGENTS.md/CLAUDE.md` 祖先链（`<project_context>` 块）与 skills 文件组合，全部按会话 cwd 在启动时解析；模型/思考等级是会话级状态，默认值来自全局+项目设置。没有任何角色对象、角色 UI 或角色导入导出，system prompt 本体不随会话条目保存。
 10. **配置对象 + 内置 agent 模板：OpenCode。** Agent 是由配置构建的只读内存对象（`src/agent/agent.ts:35-56`），来源为配置文件的 agent 字段与带 frontmatter 的角色文件（mode 文件强制 primary）；持久化的只是 session 表上的 agent 名字引用，会话消息另存 agent/model 快照。角色同时拥有 prompt（缺省回退 provider 风格提示）、模型与生成参数、permission 规则和 steps 上限；内置 build/plan（primary）、general/explore（subagent）、compaction/title/summary（hidden）。修改角色配置后，新会话用新配置，既有会话的消息仍显示当时的 agent/model 快照，但继续生成使用当前配置解析的 agent 与权限。
-11. **preset 组合型：DeepSeek Harness。** 角色是 per-session 的 agent 组合：一个 preset 是存放一份 `agent.cordis.yml`（顶层插件行列表）的目录，目录名即 preset id；每个 preset 在进程内单飞挂载一次（standing mount），所有选择它的会话通过 scope 父链共享同一批工具注册、prompt section 与插件实例，会话隔离靠插件内部按 Session/Agent 键实现。system prompt 是按 scope 分层的注册表，组装时按 agent → preset standing → global 就近覆盖，section 按 order 拼接，`complete` 可整篇替换（minimal 只留 persona 一句话）。切换仅限从未开始的 blank 会话，经 `agent-preset/selected` 事件落日志，header 冻结创建时值，冷读可重建组合。模型与生成参数不属角色，preset 不绑定模型；AGENTS.md/CLAUDE.md 不进 system prompt，而是经 agent-instructions 以 user 角色消息注入请求。
+11. **preset 组合型：DeepSeek Harness。** 角色是 per-session 的 agent 组合：一个 preset 是存放一份 `agent.cordis.yml`（顶层插件行列表）的目录，目录名即 preset id；每个 preset 在进程内单飞挂载一次（standing mount），所有选择它的会话通过 scope 父链共享同一批工具注册、prompt section 与插件实例，会话隔离靠插件内部按 Session/Agent 键实现。system prompt 是按 scope 分层的注册表，组装时按 agent → preset standing → global 就近覆盖，section 按 order 拼接，`complete` 可整篇替换（minimal 只留 persona 一句话）。preset 与 blank 会话切换经 Session Controller 与 AgentPresets Remote（旧 apiproxy unary 域已删除），只限从未开始的 blank 会话，`select` 按会话串行化并再次检查 turn boundary，成功换父链后追加 `agent-preset/selected` 事件；header 冻结创建时值，projection 折叠后续选择供冷读重建组合。模型与生成参数不属角色，preset 不绑定模型；AGENTS.md/CLAUDE.md 不进 system prompt，而是经 agent-instructions 以 user 角色消息注入请求。
 
 12. **角色卡 + 全局预设（Risuai）。** 角色与群聊都是独立持久化对象，存放在单一数据库的 `characters` 数组里，以 `chaId` 标识，聊天作为 `chats[]` 元素内嵌在角色下。角色只持有提示词与内容字段，模型、采样参数、装配顺序和工具全部是全局 Database 字段，由预设成批切换，角色与聊天都不绑定预设，切换角色与切换预设互不影响。提示词按全局装配顺序或预设模板卡片拼装，角色侧只有 systemPrompt 与 replaceGlobalNote 两处占位符覆盖；开场白不落盘，按聊天级 `fmIndex` 实时取文本。lorebook 由角色、聊天与全局模块三源合并激活。历史只保存生成元数据，重生成是破坏性重建；没有持久化 swipe/候选版本，但可以复制聊天形成独立会话式分支；导入导出覆盖 Tavern V2/V3、PNG、JSON、CharX、Chub 与 Risu Hub。
 
@@ -85,7 +85,7 @@ Cherry Studio 的 Agent 运行时现覆盖 Claude Code、Pi 和 DeepSeek Harness
 
 ### DeepSeek Harness
 
-DeepSeek Harness 没有角色对象，角色是 per-session 的 agent 组合：preset 是存放一份 `agent.cordis.yml`（顶层插件行列表）的目录，目录名即 preset id。会话创建期把 preset 单飞挂载进 standing scope 并绑定父链，同一组合被所有选择它的会话共享，会话隔离靠插件内部按 Session/Agent 键实现。system prompt 是按 scope 分层的注册表，按 agent → preset → global 就近覆盖，section 按 order 拼接，complete 可整篇替换（minimal 只留 persona 一句话）。模型与生成参数不属角色，默认模型由 settings 分层提供。切换仅限未开始的 blank 会话，经 `agent-preset/selected` 落日志，冷读可重建组合；AGENTS.md/CLAUDE.md 以 user 角色消息注入请求。与 pi 的唯一交集在 LLM 层（复用 pi-ai 适配器），角色体系无继承。
+DeepSeek Harness 没有角色对象，角色是 per-session 的 agent 组合：preset 是存放一份 `agent.cordis.yml`（顶层插件行列表）的目录，目录名即 preset id。会话创建期把 preset 单飞挂载进 standing scope 并绑定父链，同一组合被所有选择它的会话共享，会话隔离靠插件内部按 Session/Agent 键实现。system prompt 是按 scope 分层的注册表，按 agent → preset → global 就近覆盖，section 按 order 拼接，complete 可整篇替换（minimal 只留 persona 一句话）。模型与生成参数不属角色，默认模型由 settings 分层提供。切换经 Session Controller 与 AgentPresets Remote、仅限未开始的 blank 会话，`agent-preset/selected` 落日志后冷读可重建组合；AGENTS.md/CLAUDE.md 以 user 角色消息注入请求。与 pi 的唯一交集在 LLM 层（复用 pi-ai 适配器），角色体系无继承。
 
 ### Risuai
 
@@ -132,7 +132,7 @@ RikkaHub 的角色实体是 Assistant，一个可整体序列化的数据类，�
 | DeepChat | descriptor id；内置 `deepchat` 受保护 | Agent row 内 JSON config；session row 单独存 `generationSettings` 等策略 | session 保存 `agent_id`、project、kind、parent 和 orchestration policy | **创建时快照 + 工具实时**：systemPrompt/生成参数在会话创建时快照进 session 行，发送不重读 descriptor（除非显式换 Agent）；工具/记忆策略按 agent_id 实时重读；descriptor 无版本字段；重新生成是破坏性替换（删源消息起全部再重发） |
 | DeepSeek Harness | preset id（目录名）；无版本字段、无 schema 校验 | 每 preset 一个目录（`agent.cordis.yml` + `preset.yml` + skills/资产）；会话 header 存 `meta.agentPreset`，JSONL/SQLite 均持久化 | 会话创建期经 setup hook 把 preset 挂载进 standing scope 并绑定父链；Web 端 blank 会话可选可切 | **创建时绑定 + 日志重建**：header 冻结创建时值，切换经 `agent-preset/selected` 事件落日志，冷读按日志重建组合；system prompt 正文不进日志；assistant 消息保留 provider/model 元数据 |
 | Dify | AppModelConfig；Agent v2 另有 roster/draft/revision | 应用 active config 与 Agent v2 版本化配置分开持久化 | 终端用户运行已发布 App；Agent v2 会话建立 generation binding | 传统应用后续调用读取 active config；Agent v2 已绑定会话固定 generation；完整 prompt 快照未确认 |
-| Jan | `Assistant.id`；默认 `jan` | 每 Assistant 一个目录和 `assistant.json` | 创建 thread 时写入 `ThreadAssistantInfo` | **嵌入快照**：name/model/instructions/tools 被复制进 thread；thread 发送读内嵌快照的 instructions/parameters，不读 Assistant 当前配置；消息本身不保存模型/参数元数据；重新生成保留旧回复为 sibling（parentId/activeRootId 版本切换） |
+| Jan | `Assistant.id`；默认 `jan` | 每 Assistant 一个目录和 `assistant.json`；独立 CLI Agent 另用项目 `.jan/agent/agent.toml` 与用户 `~/.jan/config.toml`，旧 `jan serve`/`jan launch` 一键预接链已不在命令树 | 创建 thread 时写入 `ThreadAssistantInfo` | **嵌入快照**：name/model/instructions/tools 被复制进 thread；thread 发送读内嵌快照的 instructions/parameters，不读 Assistant 当前配置；消息本身不保存模型/参数元数据；重新生成保留旧回复为 sibling（parentId/activeRootId 版本切换） |
 | LobeHub | Agent id + `LobeAgentConfig` | 后端数据库（messages/topics 表含 model/provider 列），前端 store 缓存编辑态 | 发送时按 agentId 从 DB 读当前配置（`agentService.getAgentConfigById`），会话不存配置副本 | **实时引用 + 消息模型快照**：assistant 消息与 topic 记录 model/provider；开场白不落库、空会话实时渲染；regenerate 先删旧消息再重生成（覆盖语义） |
 | Manifold Desktop | 无角色实体 | `%LOCALAPPDATA%\Manifold\settings.json` 全局单值 | 所有会话读取同一全局 system prompt | **无快照且消息不落盘**：前端 `session-store.js` 无任何引用（死模块），聊天消息仅存内存数组；`SAVE_SESSION` 只写 title；无 regenerate（Retry 仅移除错误元素） |
 | NextChat | `Mask.id` | Zustand 持久化用户 Mask；内置 Mask 来自 `/masks.json` | `newSession(mask)` 把完整 Mask 复制到 session | **完整副本**：模板修改不回写；fork 再深拷贝；全局同步开启时模型配置可继续被覆盖；开场白是固定 `BOT_HELLO` 欢迎语（渲染期注入、不入历史，与 Mask 无关）；bot 消息只快照模型名；regenerate 删除旧配对后重建 |
@@ -221,7 +221,7 @@ AIO Hub 是运行时引用的混合形态：开始对话前，开场白候选仍
 | DeepSeek Harness | preset 插件行声明工具与服务，`toolOrder` 可固定模型可见顺序；发布服务须 isolate realm；未加入组合的 agent 面对空全局层 | 无向量知识库；等价物是 preset 携带的 skills 目录与 agent-instructions 注入的工作区指令 | 记忆即会话日志 + 压缩（compaction）；无跨会话自动记忆 |
 | Dify | 传统 Agent/Agent v2 可配置内置、API、插件、MCP 与 workflow 工具 | 数据集和检索是应用配置/工作流资源，不是通用角色卡字段 | 记忆、检索和运行时效果依赖应用模式；未归纳为统一角色字段 |
 | Jan | `AssistantTool` 当前只定义 retrieval，默认关闭 | `file_ids` + retrieval 工具定义；web 持久化链路未确认 | 未提供独立长期记忆字段 |
-| LobeHub | 插件有 pinned/auto/disabled，另有 agent/chat/custom 工具模式和异构 Agent | 每 Agent 绑定知识库与文件 | `memory.enabled/effort/toolPermission` 明确区分只读与读写，另有压缩和自迭代 |
+| LobeHub | 插件有 pinned/auto/disabled，另有 agent/chat/custom 工具模式和异构 Agent；共享 Agent 的访客运行不继承创建者全部外部能力，Agent Share 会剥离文件、知识库、异构 Agent 与设备能力并按 tool grants 收窄工具 | 每 Agent 绑定知识库与文件 | `memory.enabled/effort/toolPermission` 明确区分只读与读写，另有压缩和自迭代 |
 | Manifold Desktop | 无角色级工具配置 | 无角色级知识配置 | 无角色级记忆；历史不保存 prompt/temperature |
 | NextChat | `Mask.plugin` 绑定 OpenAPI 插件 id，但无角色级权限、审批或参数范围 | 未提供 Mask 知识库字段 | 请求可注入长期记忆摘要，但单项目笔记未把记忆所有权归入 Mask |
 | Open WebUI | Model meta 绑定 tools、skills、filters、builtin tools、terminal 和能力开关，并叠加 access grants | `meta.knowledge` 引用集合/文件 | memory 是可选内置 feature；角色笔记未确认 per-model 长期记忆命名空间 |
@@ -289,10 +289,10 @@ SillyTavern 的角色卡和 AIO Hub 的 Agent 包覆盖面最接近“可分享�
 | Chatbox | Session 显示自身模型设置并保留 copilotId；消息显示 provider/模型 | 修改 Copilot 不更新既有 Session system 消息；重新生成创建 fork 分支保留旧回复 |
 | Cherry Studio | Assistant 编辑器展示 prompt、模型、参数和关联资源；消息显示作者/模型快照 | 每次请求按 `assistantId` 重读当前 Assistant；修改后既有会话下一次请求生效；重新生成保留旧回复并新建兄弟分支 |
 | DeepChat | Agent descriptor 与 session policy 都有明确状态字段 | systemPrompt/生成参数在会话创建时快照，修改 descriptor 不影响既有会话（除非显式换 Agent）；工具/记忆策略实时重读；重新生成破坏性替换 |
-| DeepSeek Harness | 网关 `agentPresets.list` 返回 id/trust/isDefault/name/description/broken；会话列表条目携带 agentPreset（取自日志）；切换经非 scoped 事件广播；Web UI 组件本次未细读 | 文件 stamp 换代后新会话用新组合，已加入会话保留旧组合；切换仅限从未开始的 blank 会话，已开始会话被 `agent-preset-locked` 拒绝；默认 preset 热重载只影响新会话，修改角色不重写既有会话历史 |
+| DeepSeek Harness | AgentPresets Remote（自旧 apiproxy unary 域迁移）返回 id/trust/isDefault/name/description/broken；会话列表条目携带 projection 得出的 agentPreset，Web 新会话 chip、会话头标签与 Settings roster 消费该值；选择在 Remote 侧按会话串行化并再次检查 turn boundary | 文件 stamp 换代后新会话用新组合，已加入会话保留旧组合；切换仅限从未开始的 blank 会话，已开始会话被 `agent-preset-locked` 拒绝；默认 preset 热重载只影响新会话，修改角色不重写既有会话历史 |
 | Dify | 作者在 Console 编辑应用或 Agent v2；公开聊天未确认通用 persona picker 或完整运行配置展示 | 传统应用运行时读 active config；Agent v2 generation binding 防止既有会话随新发布版本漂移 |
 | Jan | 设置页和 Assistant switcher；thread 内有 AssistantInfo | 既有 thread 使用嵌入快照，不自动跟随模板；消息本身不保存模型/参数元数据；重新生成保留旧回复为 sibling |
-| LobeHub | Agent 设置页覆盖人格、模型、插件、知识和 chatConfig | 发送时按 agentId 实时读 Agent 当前配置；开场白为空会话实时渲染；regenerate 删除旧消息后重生成 |
+| LobeHub | Agent 设置页覆盖人格、模型、插件、知识和 chatConfig；推理强度另接 Composer 的 `useReasoningEffortControl`，把用户级模型实例默认层与 topic 覆盖解析后并入模型选择器 | 发送时按 agentId 实时读 Agent 当前配置；开场白为空会话实时渲染；regenerate 删除旧消息后重生成 |
 | Manifold Desktop | 只能看到当前全局设置 | 修改后所有后续请求读取新全局值；聊天消息仅存内存、不落盘，历史完全无法恢复 |
 | NextChat | 当前 session 持有可编辑 Mask 和同步开关 | 模板改动不回写；当前会话改模型后关闭全局同步；开场白为固定欢迎语不入历史；regenerate 删除旧配对重建 |
 | Open WebUI | 模型选择器和 Workspace Model 编辑页；只读调用者看不到 params | 下一次请求按 model id 重新读 DB；请求参数仍可覆盖模型参数；regenerate 在 parent 下新建兄弟消息 |

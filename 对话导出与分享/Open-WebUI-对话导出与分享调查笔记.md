@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：静态源码调查（未运行应用）；追踪聊天页与侧边栏的导出/分享入口、PDF 两种生成路径、/s 分享页、后端 share 端点与 shared_chat 快照表、access_grants 权限模型、社区分享与统计导出、DataControls 的 JSON 往返；未运行浏览器与后端服务
 >

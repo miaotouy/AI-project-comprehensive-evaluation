@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：静态阅读异构 Agent、Gateway、Connector、Messenger 与 browser MCP 关键源码；复用 Agent 工具和独特功能笔记已确认链路；未运行 CLI、OAuth 或 IM 平台
 >
@@ -16,18 +16,20 @@
 
 LobeHub 在外部执行体、外部应用和外部控制/交互表面三种接入角色上都有实现：
 
-- `主链确认`：Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE 十一种本地 CLI；OpenClaw/Hermes 平台任务；Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
-- `入口确认`：Slack、Discord、Telegram、WeChat Messenger 的安装、绑定、webhook/gateway 和 outbound 已存在，逐平台完整线程往返未静态走通。
+- `主链确认`：Amp、Claude Code、CodeBuddy、Codex、Cursor、Factory Droid、Devin、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE 十三种本地执行体；OpenClaw/Hermes 平台任务；Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
+- `主链确认`：Agent Share 把 Agent 以链接开放给已登录访客聊天。访客会话与创建者会话分离，拥有主题/回合/花费上限、工具授权、模型与错误信息可见性，以及创建者是否能查看访客会话等治理字段。
+- `入口确认`：Slack、Discord、Telegram、Feishu/Lark、LINE、QQ、iMessage、WeChat 等平台的安装、绑定、webhook/gateway 和 outbound 已存在；Telegram Guest Mode、Feishu 历史读取与 WeChat 语音解码已有专门入口，但逐平台完整往返仍未运行验证。
 
-本地 CLI 之外还有两种独立传输层次：注册表另注册 `claude-code-sdk`（Claude Agent SDK 进程内 runtime）与 `codex-app-server`（stdio JSON-RPC 连接 Codex app server）两种适配器，均由 lab 开关门控。CLI 描述器与 adapter 注册表不是同一层次，因此不应把后两项混入本地 CLI 数量。
+本地执行体之外还有独立传输层次：注册表包含 `claude-code-sdk`、`cursor-acp` 与 `droid-acp`；Codex app server 由 Codex 会话传输内部选择。执行体描述器与 transport adapter 不是同一层次，因此不应把这些传输名混入本地执行体数量。见 `packages/heterogeneous-agents/src/registry.ts:20-88` 与 `src/codex/CodexThreadSession.ts:22`。
 
 ## 接入角色与系统边界
 
 | 角色 | 外部对象 | 宿主持有的状态 |
 |---|---|---|
-| 外部执行体 | 十一种本地 CLI、OpenClaw、Hermes | operation、topic、working directory、原生 session id、进程/任务和事件投影 |
+| 外部执行体 | 十三种本地执行体、OpenClaw、Hermes | operation、topic、working directory、原生 session id、进程/任务和事件投影 |
 | 外部应用 | Connector、Composio 业务账号 | connection、credential、tool catalog、scope、permission |
 | 外部控制/交互表面 | Bot 平台、Messenger、设备网关、内置浏览器 | bot binding、webhook secret、步骤/完成回调、installation、binder、线程/用户、device、browser operation |
+| 外部控制/交互表面 | Agent Share 访客页 | share、visitor topic、senderId、operation stream、工具授权与配额 |
 
 ## 完整主链
 
@@ -76,6 +78,8 @@ navigate / snapshot / click / fill / press / scroll / screenshot / readPage
 
 `agent_intervention_request/response` 允许外部 runtime 在执行中挂起并向用户提出结构化问题；取消由本地进程树终止或 gateway task 终止到达真实执行体。
 
+Agent Share 的运行由创建者账号承担模型调用，但访客身份被写入 topic 的 `senderId` 并作为 stream owner。分享门禁会剥离创建者文件与知识库、拒绝设备和异构执行体、按 `toolGrants` 限制工具，并在实际 builtin dispatch 再检查一次；访客沙箱不注入创建者 JWT。配额在创建 topic 与写入 turn 时做原子检查。见 `packages/database/src/schemas/agentShare.ts:7-59,78-103`、`apps/server/src/services/aiAgent/shareGate.ts:89-130,332-459` 与 `shareVisitorAbuseGuards.ts:48-195`。
+
 产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口；CLI 侧提供 `lh` 命令族（连接、设备、异构 Agent、bot 管理、消息与通知等子命令）控制设备、任务与 bot。外部 CLI 输出的文本、工具调用和文件变化按事件流进入宿主会话，可触发文件写盘与浏览器操作，属于不可信输入面；其信任边界取决于各 runtime 的权限模型与宿主注入工具的审批，真实提权风险未做运行评估。
 
 ## 权限、凭据与治理边界
@@ -92,7 +96,8 @@ Connector 支持 OAuth2、bearer、API key 和自定义 header，凭据经 `KeyV
 
 ## 已确认边界与未验证事项
 
-- 十一种 CLI 和两种平台任务均为静态主链确认，未逐个安装运行；`claude-code-sdk`/`codex-app-server` 传输与相应 lab 开关未运行验证。
+- 十三种本地执行体和两种平台任务均为静态主链确认，未逐个安装运行；SDK、ACP 与 app-server 传输的真实兼容性未运行验证。
+- Agent Share 的服务端访客隔离、配额与工具双门禁已静态确认；公开链接、登录跳转、并发配额、商业花费门与访客停止操作未做端到端验证。
 - Messenger 逐平台签名、附件、线程映射、审批与完整回复往返未验证；bot 平台层的微信二维码登录、队列回调与逐平台消息格式未运行验证。
 - 外部 CLI 进程退出后的会话恢复策略（重连、重放或接管）与断线语义未验证。
 - Connector 目录数量不表示每个应用和动作均可用或兼容。
@@ -108,9 +113,10 @@ Connector 支持 OAuth2、bearer、API key 和自定义 header，凭据经 `KeyV
 - `apps/desktop/src/main/controllers/GatewayConnectionCtr.ts`
 - `apps/desktop/src/main/modules/heterogeneousAgent/browserMcpTools.ts`
 - `packages/database/src/schemas/connector.ts`
+- `packages/database/src/schemas/agentShare.ts`
+- `apps/server/src/services/aiAgent/{shareGate,shareVisitorAbuseGuards}.ts`
 - `packages/const/src/composio.ts`
 - `apps/server/src/services/bot/{BotCallbackService.ts,platforms/}`
 - `apps/server/src/router-hono/agent/handlers/{messengerInstall,platformWebhook,gatewayCron,botCallback,execAgent}.ts`
 - `apps/cli/src/commands/{bot,botMessage,botMessengers,connect,device,hetero}.ts`
 - `apps/desktop/src/main/services/imessageBridgeSrv.ts`
-

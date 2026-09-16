@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：只读源码梳理；补查配置文件、Web 操作入口、CLI、TUI 和 Electron 边界；未修改目标仓库
 >
@@ -285,6 +285,8 @@ Authorization: Bearer {apiKey}
 
 然后把响应中的模型数组保存到前端 `model_list`，再按 Provider 特性筛选、分组和排序。Workers AI、Azure 等有专用探测；Claude、AI21、Vertex AI、Perplexity、Z.AI、MiniMax 等 source 不做常规 `/models` 验证，只提示“Key 已保存，请用 Test Message 验证”。
 
+两个 source 的目录拉取有专门处理：Google AI Studio 逐页拉取全部模型，逻辑抽到新模块 `src/endpoints/backends/google-models.js`；Fireworks 因上游 `/v1/models` 不可用，改从 `api.fireworks.ai/v1/accounts/fireworks/models?filter=supports_serverless=true&pageSize=200` 拉取，并把少数模型 ID 映射到带 `-fast` 后缀的路由（`src/endpoints/backends/chat-completions.js:1854-1910,1922`）。
+
 Text Completion 也按 type 使用各自的模型拉取函数，例如 Ollama、vLLM、llama.cpp、OpenRouter 和 Generic。
 
 ### 4.2 模型字段随 Provider 分散保存
@@ -388,6 +390,17 @@ Text Completion 则由后端类型决定 URL 规则、模型发现、模板能�
 - Text Completion 传 `type`、`model`、`api_server` 和 `secret-id`。
 
 这是插件、slash command 和后台功能复用 Profile 的重要接口，但调用方一次仍只提供一个 Profile ID。
+
+### 5.3 Provider 分支的当前行为
+
+适配层的 Provider 分支行为如下，仍属一请求一 Adapter 的路由：
+
+- Google AI Studio 目录改为分页拉取全部页（`fetchGoogleModels`）；其 MakerSuite 分支按上游 API 变更调整了参数；
+- Fireworks 流式请求设置会话亲和 Header 以改进缓存，并请求与解析 reasoning 字段（`public/scripts/reasoning.js:157`、`public/scripts/openai.js:2585`）；
+- OpenRouter 在用户请求时启用 logprobs 返回；
+- Pollinations 提供端点选择项，可在设置页或 `/api-url` 命令中切换，合法值由 `POLLINATIONS_ENDPOINT` 枚举限定（`public/scripts/openai.js:272`、`public/scripts/slash-commands.js:6687-6710`）；
+- NovelAI 设置迁移保留零值 temperature，不把它当作缺省值覆盖；
+- 内置模型/上下文映射表持续跟上游刷新，当前已收录 Claude Opus 5 / Sonnet 5 / Fable 系、GPT-5.6 与 `gpt-6-astra`、Gemini 3.5/3.6/3.7 Flash 系、DeepSeek V4 Flash Vision 等条目。这些是硬编码表维护，不改变本地路由结构。
 
 ## 6. 重试、故障转移和路由
 
@@ -513,6 +526,8 @@ Chat Completion 的 `getStatusOpen()` 会：
 
 日志主要是浏览器 console、服务端 console 和错误响应；没有在渠道层汇总 token、成本与延迟的内置观测面板。
 
+错误信息抽取统一走一个辅助函数：非流式请求与两种流式错误 toast 都依次尝试 Provider 错误体的 message、code、type 或字符串形式，仅在非 2xx 时才回退 HTTP statusText，从而避免上游以 HTTP 200 返回错误体时显示无意义的 "OK"（`public/scripts/openai.js:1635-1645`）。
+
 ## 9. 能力矩阵
 
 | 能力 | 当前实现 | 说明 |
@@ -582,6 +597,7 @@ Chat Completion 的 `getStatusOpen()` 会：
 - Chat 请求客户端：[`public/scripts/custom-request.js`](../../SillyTavern/public/scripts/custom-request.js)
 - Chat 后端 Adapter：[`src/endpoints/backends/chat-completions.js`](../../SillyTavern/src/endpoints/backends/chat-completions.js)
 - Text 后端 Adapter：[`src/endpoints/backends/text-completions.js`](../../SillyTavern/src/endpoints/backends/text-completions.js)
+- Google AI Studio 模型分页：[`src/endpoints/backends/google-models.js`](../../SillyTavern/src/endpoints/backends/google-models.js)
 - 追加 Header：[`src/additional-headers.js`](../../SillyTavern/src/additional-headers.js)
 - Secret 服务端：[`src/endpoints/secrets.js`](../../SillyTavern/src/endpoints/secrets.js)
 - Secret 前端：[`public/scripts/secrets.js`](../../SillyTavern/public/scripts/secrets.js)

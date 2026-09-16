@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：直接阅读当前代码快照中的 Gateway 会话 RPC、Agent SessionManager、per-agent SQLite schema/accessor、transcript 投影与搜索、生命周期和迁移模块；未运行交互会话或测试
 >
@@ -122,6 +122,8 @@ SessionManager 在运行时保留 entry map、leaf、labels 和 append cursor，
 当前回合的 in-flight run snapshot、运行中的队列和部分临时 UI 状态会与 `chat.history` 的持久化消息一起返回，但本次调查未把它们视为 transcript 事实源。`chat.history` 明确把 in-flight snapshot 作为另一个投影字段处理，见 `src/gateway/server-methods/chat-history-handler.ts:435-448`、`:490-531`。
 
 ## 3. 创建、切换、归档、删除与恢复
+
+会话现在还有独立的共享可见性与成员关系。可见性可为 shared、read-only、suggest 或 draft，允许集合由 Gateway 配置收窄；角色按 admin、owner、member、viewer 解析，draft 只允许 owner/admin 管理，incognito 会话对非所有者表现为不存在。授权每次从 canonical session metadata 与成员存储重算，并把 session generation、lifecycle revision、创建者和可见性变化视为读权限失效边界。实现见 `src/gateway/session-sharing-policy.ts:45-89,91-211,238-374`、`packages/gateway-protocol/src/schema/sessions-sharing.ts:33-97`。
 
 ### 创建与惰性物化
 

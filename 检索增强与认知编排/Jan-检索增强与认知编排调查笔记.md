@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：直接静态核对当前 Jan 的 RAG、Vector DB、Tauri 插件、线程附件与工具执行源码；未运行桌面应用、嵌入模型或检索质量评测
 >
@@ -16,7 +16,7 @@
 
 Jan 同时具有“上下文即时注入”和“工具化检索”两条附件路径。普通线程文档可按设置直接解析为文本并随用户消息送入模型；选择嵌入时，文档被解析、分块、嵌入并保存到本地 SQLite collection，随后由模型在原生 tool-calling 循环中决定是否调用 `retrieve`。项目文件固定走嵌入路径，供该项目的线程共享。前者不是检索，后者才是本笔记的主要对象（`web-app/src/lib/attachmentProcessing.ts:184-309`）。
 
-工具化路径是单次向量候选召回加模型可选的后续读块，而非项目自行实现的多阶段查询规划：模型可先列文件、按语义召回、再按文件序号读相邻块；每次工具结果会回注下一模型回合，因此模型能够自行发起多次调用，但源码没有查询改写、候选融合、reranker、结构传播或“上一轮结果自动生成下一检索式”的编排器。此结论是对工具定义和执行链的静态判断，实际调用次数与模型策略尚未运行验证。
+附件 RAG 的工具化路径是单次向量候选召回加模型可选的读块，未在该链找到查询改写、候选融合或 reranker。新 Agent 项目记忆是另一机制：在同一 vector-db 插件里使用 SQLite FTS5/BM25，以项目为作用域检索旧对话片段并注入 Agent 提示，不是附件向量检索，也不改变 RAG `retrieve` 的召回算法（`src-tauri/src/core/agent/memory.rs:1-12,36-78`、`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:925-1005`）。
 
 检索对象与索引以线程或项目为 collection 边界。候选可带文本、文件 ID、块顺序与分数，UI 会把 `retrieve` 的 JSON 结果显示为可展开的引用卡片。ANN 可用时查询交给 sqlite-vec；否则线性遍历全部候选、以余弦相似度阈值过滤并排序。两条路径的 `score` 语义并不相同：ANN 输出的是 distance，线性路径输出 cosine similarity，UI 仅以同一数值格式展示，不能把两种数值横向比较（`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:447-635`）。
 
@@ -40,7 +40,7 @@ Jan 同时具有“上下文即时注入”和“工具化检索”两条附件�
 
 ## 事实对象、摄取与索引
 
-事实对象包括待发送附件、文件记录、文本块和 collection。附件记录在前端消息/线程流程中保存其处理状态、文件 ID、大小、块数与注入模式；向量库中每个文件有 UUID、原始路径、名称、类型、大小、块数，每个块有 UUID、文本、嵌入、所属文件和从零开始的文件内顺序（`core/src/browser/extensions/vector-db.ts:9-42`、`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:300-407`）。本次未发现从对话自动抽取用户事实、摘要记忆、标签图或关系图的写回链。
+附件 RAG 的事实对象是文件、块和 collection。新增的 Agent Memory 会在运行后索引用户问题与最终回答，运行前按项目召回最多三个片段、每段截至 500 字符；它是全文检索回填而非用户事实抽取或关系图写回（`src-tauri/src/core/agent/memory.rs:1-12,36-78`）。附件数据形状见 `core/src/browser/extensions/vector-db.ts:9-42` 和 `src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:300-407`。
 
 普通线程 collection 名由 Vector DB 扩展生成为 `attachments_<threadId>`，项目 collection 为 `project_<projectId>`。文件按同一 collection 内“名称和路径都相同”拒绝重复添加。上传服务一次向 RAG 扩展提交一个文档；RAG 扩展拒绝超过配置上限的文件，再调用对应 scope 的 `ingestFile`（`extensions/rag-extension/src/index.ts:365-488`、`web-app/src/services/uploads/default.ts:15-48`）。
 
@@ -88,7 +88,7 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 与上下文即时注入可比较的是附件解析模式和最终模型可见内容；inline 文档在发送前成为消息内容，embeddings 文档则只有模型调用工具后才提供片段。与 Agent 工具类目共享的是 schema、审批和 SDK 回注循环；本笔记补充的是工具背后的 local collection、候选算法及持久化生命周期。
 
-与检索驱动认知编排不可直接比较：当前源码只提供一次向量查询和显式读块工具，没有由检索结果驱动的固定阶段、关系路径、主动记忆维护或自动查询反馈。多次工具调用是模型侧可选行为，不能静态推断为稳定的认知链。
+附件 RAG 与检索驱动的固定阶段编排不可直接比较；Agent Memory 可跨运行索引并召回对话片段，但未看到检索结果驱动的关系路径或自动查询反馈链。多次工具调用是模型侧可选行为，不能据此推断稳定的 RAG 认知阶段。
 
 ## 未验证事项
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SessionTurn/turnCoordinator 执行链、contextBuilder 与 promptAssembly、deepChatLoopRunner/process 流式管线、pending input 队列协调器、结构化日志事件面），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -23,6 +23,7 @@ DeepChat 的生成任务由 main process 编排，单会话串行、多会话各
 3. 每次新 turn 前由 compaction 服务计算压缩 intent（自动压缩），Provider 流经 `processStream` + `streamProviderAttempts`（预检、严格重试、context-pressure recovery）。
 4. 流式 assistant blocks 经 echo 节流（renderer 120ms / DB 600ms）写回 transcript；成功 `finalizeAssistantMessage(sent)`，异常 `setMessageError(error)`，半截 pending/loading block 转 error 并追加错误块。
 5. steer、queue、工具 question/permission response 是独立输入通道；queue 项 claimed 后物化为 user 消息，失败未物化则进入 `retry_required` 等待显式恢复。
+6. 当前工作区 Skills 与 Codex 用户插件上下文均在 Provider 请求前物化：前者进入 Skill 视图和工具目录，后者由受限命令 hook 产生带来源的文本贡献；Direct ACP Agent 不消费这条 hook 链。
 
 ## 系统边界与生成任务主链
 
@@ -81,6 +82,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - **候选与游标**：`buildCacheAwareContextWithMetadata`（`src/main/agent/deepchat/runtime/contextBuilder.ts:1577-1689`）从 transcript 取候选记录（:1589），`isContextHistoryRecord`（:267）过滤为 context history，从 summary cursor（`filterRecordsFromCursor` :1569-1575）开始建 history turns。
 - **重试/恢复起点**：`buildCacheAwareResumeContextWithMetadata`（:1691-1824）按 `orderSeq` 取到目标 assistant 为止的记录（:1708-1710），向前回溯其所属 user turn（:1713-1718），保留该 turn 与目标 assistant（:1724-1728）；该函数只做线性 orderSeq 过滤，没有按父子关系回溯分支（分支数据语义见会话与消息管理笔记 §1.5）。
 - **system prompt、记忆、附件与工具**：`PromptAssemblyService.build`（`src/main/agent/deepchat/runtime/promptAssemblyService.ts:62-79`）组合基础 prompt、技能与工具定义；压缩后的恢复 prompt 由 `createPostCompactionPromptAssembler`（:123-140）注入 checkpoint、memory 与 directives。记忆注入发生在每次新 user turn 的 pre-stream 阶段（`turnCoordinator.ts:766-788`）。
+- **workspace Skills 与插件上下文**：Skill 服务按会话工作目录发现项目级只读 Skills，正文经 `skillContextMaterializer` 固化到本轮视图；Codex 用户包的 context hooks 在顶层 DeepChat 会话的输入边界执行，经 `projectPluginContext` 只投影已持久化且仍获授权的 `additionalContext`。插件更新、禁用或 run 结束会撤销资格，见 `src/main/skill/index.ts:1295-1318`、`src/main/agent/deepchat/runtime/pluginContext.ts`、`deepChatLoopRunner.ts:1569-1697`。
 - **最终顺序**：`leadingMessages（system + checkpoint）→ 预算内完整 tail turns → 新 user 消息`（`contextBuilder.ts:1673-1688`）。
 
 ## 3. 预算、截断、摘要与压缩
@@ -131,6 +133,8 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 ## 9. Agent、工具、知识库与附件注入点
 
 - **工具目录**：`deepChatLoopRunner` 的 `toolCatalog`（`deepChatLoopRunner.ts:523-539`）解析 active skills 与工具目录（`resolveActiveSkillNamesForToolProfile` :511-514），subagent 场景经 `meetTaskContractToolDefinitions` 裁剪；system prompt 随技能/工具刷新（`refreshSystemPrompt` :679-698，经 `promptAssemblyService.build`）。
+- **工作区 Skill**：当前项目下五类工具目录中的 Skills 会与共享目录合并，但保持 `projectRoot` 作用域和只读属性；离开项目后不进入后续请求。
+- **用户插件 hook**：只接受受支持事件的命令型 hook，stdout 必须是匹配事件名的 JSON，且只取文本 `additionalContext`；失败进入诊断，不自动停止模型工作。安装时 Skills、MCP、hooks 分别授权，相关契约见 `src/main/plugin/userPluginPackage.ts:83-168`、`userPluginHooks.ts:445-533`。
 - **附件**：`attachmentRouter.prepare`（`pendingInputAdmissionCoordinator.ts:556-577`、`turnCoordinator.ts:497-515`），失败返回 `needs_user_action` 摘要（retry / send_without_image_content）。
 - **记忆**：pre-stream 经 `postCompactionPromptAssembler.assemble` 注入（`turnCoordinator.ts:766-788`，contributor 为 `MemoryPromptContributor`）。
 - **联网搜索**：`search` 开关进入 user content（`turnCoordinator.ts:450-454`，provider 原生搜索能力 + `searchExecution === 'provider'` 时启用）。
@@ -151,6 +155,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - Provider fallback/同 Provider 重试与 context-pressure recovery 的实测效果未验证；重试幂等性（截断后重复执行）未实测。
 - 应用退出、窗口关闭时的任务收口未运行验证。
 - 未运行测试、构建或桌面端交互；结论来自 main process 静态源码。
+- 未运行 workspace Skill 冲突覆盖、用户插件 hook 命令、更新中撤销与恢复后的首次输入；这些路径只完成静态主链核对。
 
 ## 12. 关键源码索引
 
@@ -165,3 +170,4 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - 压缩：`src/main/agent/deepchat/runtime/compactionService.ts:311-491`、`compactionRuntimeCoordinator.ts:106-291`
 - 停止：`src/main/agent/deepchat/runtime/runLifecycleCoordinator.ts:258-306`
 - 结构化日志：`src/main/logging/mainLogEvents.ts:921-982`
+- workspace Skills 与插件上下文：`src/main/skill/index.ts:1295-1318`、`src/main/plugin/userPluginHooks.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`

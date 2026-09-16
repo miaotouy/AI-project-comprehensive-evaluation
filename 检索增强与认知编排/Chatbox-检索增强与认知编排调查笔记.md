@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`348d3875c1bffa3899539e61fa960d6ccb3ccafb`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：直接静态追踪当前源码中的 Electron 主进程、renderer 工具装配、SQLite/LibSQL 持久化、单元测试与会话附件评测夹具；未启动应用、未调用模型或外部解析/Embedding/Rerank 服务
 >
@@ -62,7 +62,9 @@ Chatbox 同时实现了两个相邻但不可混同的谱系：可长期维护的
 
 恢复语义存在两套策略。知识库启动时把中断的 processing 文件改为 paused，需用户恢复；运行超过 5 分钟的 processing 项标记 failed，failed 项可以 reset 为 pending 重试。删除知识库会删文件记录和整个向量索引；删除单文件时，即使向量删除失败仍会删除文件记录，因此 SQLite 与向量索引可能遗留不一致。`src/main/knowledge-base/db.ts:240-295`、`src/main/knowledge-base/ipc-handlers.ts:207-254,529-737`。
 
-会话附件启动时把 indexing 直接标为 failed，并检查 ready 项是否缺少对应向量索引；缺失者也改为 failed。删除 pending/indexing/failed 附件先标 canceled，worker 检查到后删除其图和索引。renderer 定义了一个每 30 分钟按现存会话和消息清理孤儿、并清理已取消项的维护任务；但本次全仓库调用搜索只找到其定义，未找到初始化函数的调用，故其定时运行不能视为已确认。SQL 侧的附件、父块和子块删除是事务性的，但索引删除在事务提交后尽力执行，源码注释明确承认跨存储原子性缺口。导入备份时，桌面端会用已导入的 storage key 重建索引；创建失败则降为 inline 并产生警告，非桌面端直接降为 inline。`src/main/session-attachment-rag/db.ts:382-493,664-888`、`src/renderer/setup/session_attachment_rag_maintenance.ts:74-124`、`src/renderer/packages/backup/rehydrate.ts:7-72`。
+会话附件启动时把中断的 indexing 记录标为 failed，并检查 ready 项是否缺少向量索引；缺失者也降为 failed。失败项可由用户继续或重试：数据库把状态恢复为 pending/queued，若已完成的 Embedding checkpoint 与当前模型仍兼容，worker 从断点继续；模型变化或 checkpoint 不完整时重新建立。界面根据可恢复判定显示 Continue 或 Retry。`src/main/session-attachment-rag/db.ts:728-742`、`file-loaders.ts:149-170`、`ipc-handlers.ts:113-141`、`src/renderer/components/chat/MessageAttachmentGrid.tsx:97-122`。
+
+删除 pending/indexing/failed 附件先标 canceled，worker 检查到后删除其图和索引。renderer 定义了按现存会话和消息清理孤儿的维护任务；其长期定时运行和跨存储原子性仍未运行验证。导入备份时，桌面端会用已导入的 storage key 重建索引；创建失败则降为 inline 并产生警告，非桌面端直接降为 inline。
 
 ## 与相邻谱系的可比/不可比边界
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：静态阅读当前 Electron 主进程、预加载桥接、日记 UI、RAG Observer 及其 HTTP、IPC、WebSocket 契约；未启动客户端、未连接 VCP 网关或日志服务
 >
@@ -66,6 +66,8 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 事件卡片可显示查询、数据库名、核心标签、BM25 模式和 token、结果等服务端字段；元思考、记忆检索、日记和梦境有专门显示分支（`RAGmodules/RAG_Observer.html:2561-2659,2891-2992`）。这些字段的来源与含义由到达的事件决定。静态代码确认“可展示”，不能确认每种事件一定产生、字段完整性、结果分数的计算方法，或事件是否覆盖一次请求的全部检索阶段。
 
+召回卡片还可进入 A/B 对比模式。用户从当前内存中的两张 RAG 卡分别选为 A 轮和 B 轮；观察器对结果文本做小写、空白归一化并移除尾部 Tag 行，再计算交集、A/B 独有项和重合率，在双列弹窗中给每项标出共有或独有。这个功能比较的是已经到达客户端的两组结果，不会重新发起查询，也不比较排名位置、原始分数或服务端各阶段候选。`RAGmodules/RAG_Observer.html:2088-2314,2315-2475`
+
 工具审批是观察器中唯一可回写的认知相关交互：收到 `tool_approval_request` 后保留 requestId、工具、助手、参数和时间；用户批准或拒绝时，经 VCPlog WebSocket 发送 `tool_approval_response`，带 requestId、approved 以及最多 1000 字符的理由（`RAGmodules/RAG_Observer.html:2040-2173,3290-3353`；`RAGmodules/rag-observer-config.js:198-210`）。客户端只负责呈现和发送该协议，不决定服务端是否允许、执行何种工具或如何处理重放。
 
 ## 预算、作用域、安全、可观测与恢复
@@ -75,7 +77,7 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 | 查询预算 | 语义搜索请求固定 K=10；联想 K 和标签提升由 UI 输入；普通 VCP 请求最多 300 秒。 | K 是发送参数，服务端是否接受或追加其他限额未确认；300 秒仅见统一 VCP 客户端实现。`Memomodules/memo.js:1151-1168`、`modules/vcpClient.js:309-318`。 |
 | 作用域 | 文本搜索可选当前文件夹；语义结果及联想候选会在客户端排除 MusicDiary 和用户隐藏的文件夹。 | 隐藏是显示和本次客户端结果过滤，不是服务端授权边界；语义请求本身声明跨知识库。`Memomodules/memo.js:1106-1123,1251-1321`。 |
 | 认证与最小暴露 | 日记管理 API 用论坛 Basic 凭据；工具/聊天 API 用 Bearer key；Electron 窗口开启 context isolation。 | 日记页在 renderer 中直接用已读取的凭据访问远端；本次未验证 TLS、密钥存储加密、服务端身份校验或多租户隔离。`Memomodules/memo.js:112-129,500-520`。 |
-| 观察性 | RAG Observer 展示指定日志事件、连接状态和审批；悬浮窗可展示审批及通知。 | 观察器不存储可重放的事件日志，也不提供检索质量评测、A/B、重合率或端到端追踪证据。`RAGmodules/rag-observer-config.js:78-114,142-180`。 |
+| 观察性 | RAG Observer 展示指定日志事件、连接状态和审批；可从当前召回卡片选择 A/B 两轮并查看交集、独有项与重合率。 | 对比只使用客户端内存中的返回文本，不是检索重跑、排序质量评测或端到端追踪；事件也不持久化。`RAGmodules/RAG_Observer.html:2088-2475`。 |
 | 恢复与取消 | 日记搜索能中止本地 fetch；观察器两个 WebSocket 断开后每 3 秒尝试重连，最多 10 次；窗口叠层设置及日记 UI 偏好会写入本地设置。 | 重连不证明服务端补发丢失事件；不见运行中检索链、远端索引或待审批请求的持久化/恢复协议。`RAGmodules/rag-observer-config.js:183-258`、`modules/ipc/ragHandlers.js:61-118`。 |
 
 审批到达时，悬浮窗会临时关闭鼠标穿透，追踪未决 requestId；收到响应或提交成功后清理并在没有未决项时恢复穿透和自动隐藏（`RAGmodules/RAG_Observer.html:2176-2275`）。这是客户端防止审批卡不可操作的窗口恢复逻辑，不是审批状态在服务端的可靠交付保证。
@@ -92,6 +94,7 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 - 未获得远端 `admin_api/dailynotes`、`v1/human/tool`、聊天端点和日志服务的实现或正式协议；摄取、embedding、索引、召回、重排、元思考阶段、记忆写回和授权检查均不能从本仓库确认。
 - 未验证 LightMemo 或关联端点对 K、标签提升、跨知识库开关的接受规则、返回格式稳定性、缓存身份、超时、错误回退和删除/迁移后的索引一致性。
 - 未找到观察事件的持久化、断线补偿、序列号或去重契约；不能据重连代码推断事件不丢失，也不能确认审批请求在重启后仍可恢复。
+- A/B 对比的文本归一化与集合重合率已静态确认；未验证同一结果重复项、顺序差异和 Tag 尾行清理在真实事件数据上的解释是否符合用户预期。
 
 ## 关键源码索引
 
@@ -101,4 +104,5 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 - `Memomodules/memo-graph.js:71-154,208-252`：关联请求与候选图渲染。
 - `Memomodules/memo-workbench.js:18-96,157-280`、`modules/ipc/memoHandlers.js:11-45`：工作台状态及本地 UI 偏好持久化。
 - `RAGmodules/rag-observer-config.js:18-258`、`RAGmodules/RAG_Observer.html:2040-2275,2561-2659,3290-3353`：日志 WebSocket、事件筛选、显示、审批及恢复。
+- `RAGmodules/RAG_Observer.html:2088-2475`：召回卡片 A/B 选择、文本归一化、集合差异和双列对比。
 - `modules/ipc/ragHandlers.js:157-232,235-330,489-501`：观察器/悬浮窗的隔离窗口和审批 IPC 转发。

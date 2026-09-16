@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：基于既有对话请求与上下文调查笔记，复用其已确认的源码阅读结果；涉及 `modules/chatCompletionHandler.js`、`messageProcessor.js`、`roleDivider.js`、`Plugin.js` 及 VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的消息处理路径
 >
@@ -21,6 +21,7 @@ VCPToolBox 的上下文编译发生在单次 HTTP 请求内。客户端提交的
 - 已确认的初始请求顺序是：裁剪与若干顶层标记消费，VCPTavern 注入，逐条变量解析，多模态和其他插件预处理，检测器及 Role Divider，最后构造上游 body。插件排序由保存的优先顺序加上未列项的名称排序决定。
 - 请求层、模型循环消息层与客户端显示层各自承载不同内容。预处理后的数组进入首次上游请求；工具循环维护独立消息数组；推理字段包装和 VCP 工具信息仅改变客户端 SSE/JSON 或响应内容，不会成为模型下一轮上下文。
 - 可解释表面以首次 fetch 前的内存快照和可选 ChatLog 为主。前者只覆盖首次请求，后者默认关闭；原笔记未确认规则命中列表、变量展开差异或编辑器预览是否存在。
+- SAR 模型规则现支持正向匹配与排除匹配；Detector/SuperDetector 也从纯字符串替换扩展为可选 `/pattern/flags` 正则。两者仍处于变量展开后的消息编译阶段，不产生新的规则执行器或跨请求状态（`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`）。
 
 ## 系统边界与规则编译主链
 
@@ -47,6 +48,8 @@ VCPTavern 通过 system 消息中的 `{{VCPTavern::Preset...}}` 触发预设。�
 
 通用变量处理按单条消息进行。Agent 与 Toolbox 只允许在 system，或以 `[系统提示:]`、`[系统邀请指令:]` 开头的 user 消息中展开；一次请求至多展开一个 Agent，重名 Toolbox 至多展开一次。时间、环境、SAR、日记/知识库、动态工具及插件描述等属于同一后续占位符处理阶段（`modules/messageProcessor.js:153-248,601-871`）。
 
+SAR 规则的模型条件共有四种：精确匹配、子串匹配，以及二者对应的排除模式。排除模式在模型未命中名单时注入内容；模型列表为空时四种模式均不命中。管理页与后端使用同一组字面量，保存后的配置由文件 watcher 重新加载（`modules/sarPromptManager.js:92-128`、`AdminPanel-Vue/src/views/SarPromptEditor.vue:92-168`）。
+
 原笔记还确认三种以系统或可信系统载体为边界的插件规则：RAGDiaryPlugin 处理 system 或系统前缀 user 中的日记本/知识库占位符；VCPTimeLine 只采用首个可信载体中的一次时间线声明；ContextFoldingV2 需要 system 中的激活占位符。这些规则直接改写本次消息数组，而不是维护独立会话历史（相关实现见 `Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135-1419`、`Plugin/VCPTimeLine/VCPTimeLine.js:372-416`、`Plugin/ContextFoldingV2/ContextFoldingV2.js:164-290`）。
 
 规则对象的保存位置、schema、版本字段、启停状态以及导入导出语义，原笔记没有已确认事实。本次也不把占位符出现在消息文本中等同于其已命中或已展开。
@@ -60,7 +63,7 @@ VCPTavern 通过 system 消息中的 `{{VCPTavern::Preset...}}` 触发预设。�
 3. 执行 VCPTavern 注入；若请求使用语义路由模型，再从注入后的消息选择真实后端模型并应用相关设置。
 4. 深拷贝各消息，执行变量及可授权对象展开。
 5. 先调用配置选定的多模态处理器，再执行其余插件预处理器。
-6. 清理或还原 TransBase64+，运行 Detector/SuperDetector，最后按开关运行 Role Divider。
+6. 清理或还原 TransBase64+，运行 Detector/SuperDetector，最后按开关运行 Role Divider。Detector 字段若采用 `/pattern/flags` 形式则按正则替换；正则无效时记录警告并退回普通字符串替换，替换文本允许为空（`modules/messageProcessor.js:608-642`）。
 
 该顺序来自 `modules/chatCompletionHandler.js:809-1124`。因此，预设插入的内容能参与之后的变量解析和插件处理；裁剪发生在预设注入之前。裁剪是字符数估算，不是摘要压缩，也不保证严格 token 上限（`modules/contextManager.js:10-95`）。
 
@@ -97,6 +100,8 @@ VCP 工具结果汇总、成功或失败摘要同样只写入客户端输出。�
 `finalContextStore` 提供首次上游请求前的有限内存快照及 token 统计，最多五组；它能用于查看初始编译后的请求，但不能代表工具递归中的后续消息。启用 `CHAT_LOG_ENABLED` 后，ChatLog 会异步写入初始请求以及每轮 request、toolCalls、response；该日志默认关闭，也不构成会话持久化（`server.js:371,478-499`；流式记录点见 `modules/handlers/streamHandler.js:413-738`）。
 
 原笔记没有确认可展示规则命中、变量逐项展开、预设差异、编辑器预览或完整最终递归消息数组的专门调试界面。上述快照和日志是否在运行时完整反映异步插件及所有组合，仍需运行验证。
+
+管理面已能编辑 SAR 的四种模型匹配模式，但页面只展示配置语义，不计算或展示某次请求的实际命中 trace；它不能替代最终请求快照（`AdminPanel-Vue/src/views/SarPromptEditor.vue:92-168`）。
 
 ## 7. 失败、更新与已确认边界
 

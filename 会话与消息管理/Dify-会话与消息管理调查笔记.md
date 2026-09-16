@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态阅读 ORM 模型、会话/消息服务、service API、WebChat 历史组件、父消息回溯和异步删除任务；未连接数据库或执行迁移
 >
@@ -59,6 +59,8 @@ conversation variable 有独立服务入口（`ConversationService.get_conversat
 
 workflow run 有自身 repository、详情和归档机制，不能因结果出现在聊天里就归入 Message 的生命周期。详见 [生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)。
 
+Agent v2 Chatflow 存在一条与 Conversation ID 直接绑定的记忆作用域。带 conversation 的 Agent 节点以 conversation 作为 workspace owner，同一节点参与者跨多次 workflow run 复用 binding 和 session snapshot；纯 workflow 仍按单次 workflow run 隔离（`api/core/workflow/nodes/agent_v2/session_store.py:32-64,104-181`）。这不是把 Agent 历史复制进 Message 行，而是 Conversation 对外部 Agent workspace 的稳定引用；其清理由 Conversation 删除服务与 Agent workspace 服务交接，物理 runtime 清理仍未运行验证。
+
 ## 6. 一致性、恢复与迁移
 
 浏览器 hook 在流中维护 conversation ID、task ID 和 chat tree，完成后可重取完整消息（`chat/hooks.ts:616-765`）；数据库是刷新后的权威来源。静态代码不能证明 UI chunk 更新与持久化频率一致，也不能替代多标签并发、事务回滚、服务器重启或网络中断验证。
@@ -77,6 +79,7 @@ workflow run 有自身 repository、详情和归档机制，不能因结果出�
 - 置顶、删除、空会话清理在真实数据库、对象存储失败与多实例竞争下的事务和恢复效果。
 - 消息搜索、跨会话检索、归档、导入导出、保留期限与多端并发写入。
 - workflow 输出、Agent thought、工具结果和附件在删除会话后的级联保留关系。
+- Agent v2 conversation workspace 的跨回合记忆、版本固定和删除后物理清理效果。
 
 ## 关键源码索引
 

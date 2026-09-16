@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：静态阅读 VCPChat 分布式节点启动、连接、注册与执行回流代码，并交叉阅读 VCPToolBox 的 WebSocket 调度、文件回取和人类工具端点；复用既有 VCPChat Agent 工具与独特功能笔记；未启动 Electron、VCPToolBox 或真实节点
 >
@@ -60,6 +60,8 @@ VCPChat 在 renderer 可用后读取设置；关闭 `enableDistributedServer` �
 
 节点对 `execute_tool` 调用统一入口。一般插件由 Plugin Manager 执行；hybridservice direct 插件的对象或字符串保持原结果语义。音乐、骰子、Flowlock 和桌面控制属于显式特例：节点先取得插件结果或参数，再调用由 Electron 主进程注入的 handler，因此副作用发生在 VCPChat 的本机窗口与设备域（`VCPDistributedServer/VCPDistributedServer.js:661-762`）。既有 Agent 工具笔记已确认其他本机插件可启动 Node/Python 子进程，涵盖 shell、文件、屏幕和媒体能力；这些具体工具权限另见相邻类目。
 
+LoomController 的 direct 执行面可把多步页面动作保存为 LoomSkill。技能文件持久化在本机 LoomSkills 目录，执行任务则仅保存在节点进程内：同步模式有两分钟截止，异步模式返回 taskId 后由调用方查询；同一 Loom 应用不能并发执行两个技能，任务过期或服务重启后不可继续查询。外部宿主只看到一次工具调用及其结果，不获得可迁移的后台任务。`VCPDistributedServer/Plugin/LoomController/LoomSkillService.js:109-269`
+
 文件回流是一条专用协作链：VCPToolBox 从请求 IP 找到节点，调用 `internal_request_file`；节点只接受 `file://` URL，在其本地文件系统读取并将 Base64 与 MIME 类型作为工具结果返回。服务端将成功结果缓存成本地文件，之后以缓存 URL 继续处理（`VCPToolBox/FileFetcherServer.js:102-143,154-184`；`VCPChat/VCPDistributedServer/VCPDistributedServer.js:619-657`）。这形成外部节点提供资源、宿主保存可消费副本的双向链，而非把远端路径误当服务端本地路径。
 
 人类控制表面使用另一条入口：VCPToolBox 的 `/v1/human/tool` 解析文本工具请求，保留请求 IP 并交给 Plugin Manager。该 API 可将 VCPChat HumanToolBox 等独立应用的表单操作接入同一工具执行生态，但具体客户端的 Bearer 鉴权配置、用户身份与工具审批回合需要结合运行环境验证（`VCPToolBox/server.js:1248-1298`）。
@@ -93,6 +95,7 @@ VCPChat 在 renderer 可用后读取设置；关闭 `enableDistributedServer` �
 - `modules/utils/appSettingsManager.js:211-220`：分布式节点默认设置。
 - `VCPDistributedServer/VCPDistributedServer.js:259-357`：连接、重连与 manifest 注册。
 - `VCPDistributedServer/VCPDistributedServer.js:594-762`：工具接收、本机执行、文件读取和特例 handler。
+- `VCPDistributedServer/Plugin/LoomController/LoomSkillService.js:109-269`：持久技能与进程内执行任务的生命周期边界。
 - `VCPToolBox/WebSocketServer.js:724-746`：节点工具注册与状态映射。
 - `VCPToolBox/WebSocketServer.js:900-970`：分布式分派、超时与 pending request。
 - `VCPToolBox/FileFetcherServer.js:102-184`：跨节点文件识别、拉取与缓存。

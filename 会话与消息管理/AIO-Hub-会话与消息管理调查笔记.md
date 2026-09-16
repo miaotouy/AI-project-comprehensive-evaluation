@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -22,6 +22,7 @@ llm-chat 以"会话 = 树形消息结构 + 活动路径指针"为存储单位：
 - 会话/节点 ID 用 `Date.now()`-随机后缀拼接，不是 UUID（理论碰撞风险，未见多设备同步机制）。
 - 跨会话全文搜索**没有索引**：Rust 端每次都是目录全量扫描 + 正则预过滤 + 50 并发（`src-tauri/src/commands/llmchat_search.rs`），命中粒度只有会话级；会话内消息搜索是纯内存线性扫描当前活动路径，两套搜索能力不对等。
 - 应用崩溃/强退后，"生成中"节点在加载时会被修复（有内容 → complete，无内容 → error），修复后回写磁盘；僵死修复 watch 仍在生成节点减少时兜底。
+- 用户停止某个会话时，运行时管理器会同时清除该会话尚未执行的排队标记，并把这些节点结算为错误态，错误详情为“队列已停止”；这与已经进入网络请求的节点使用“用户手动停止”区分。展示层将两类错误都解释为已停止，而不是普通失败（`src/tools/llm-chat/stores/session/sessionRuntimeManager.ts:23-43,129-168`、`src/tools/llm-chat/utils/messageStatus.ts:89-103`）。
 
 ## 系统边界与数据主链
 
@@ -133,6 +134,8 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 `updateSession()`（`sessionLifecycleManager.ts:590-661`）是通用的会话更新入口，字段合并逻辑在 `useSessionManager.ts:241-286`（逐字段判断未传才写入，避免覆盖未传字段）。改名之外，传入新 `displayAgentId`（即切换会话绑定的 Agent）时会尝试切换开场白（`services/greetingService.ts:313-366`）：仅当会话根节点的子节点里没有非开场白节点（会话尚未真正开始）时，才把旧 Agent 的 live greeting 节点整批删除、换成新 Agent 的开场白；否则静默跳过（不报错，也不提示用户"切换未生效"）。该判定的边界风险见第 9 节潜在风险 5。
 
 切换会话 `switchSession()`（`sessionLifecycleManager.ts:732-793`）：按需加载详情（已加载则复用）、历史栈无效时重新初始化、`refreshLiveGreetingsIfNeeded` 同步未固化的开场白（Agent 开场白配置变更后，在会话真正开始前重建 live greeting 节点），再更新当前会话指针并持久化。
+
+切换动作在异步加载完成后会再次核对当前选择；较早发起但较晚返回的加载结果不得覆盖用户随后选择的会话。选择指针提交后再等待索引持久化，内容保存仍允许独立排队。这一竞态保护已有恢复测试覆盖，但快速连续切换的视觉表现未运行验证（`src/tools/llm-chat/stores/session/sessionLifecycleManager.ts:740-808`、`stores/session/__tests__/sessionLifecycleRecovery.test.ts`）。
 
 ### 3.4 恢复与保留语义
 
@@ -295,4 +298,3 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 - `src-tauri/src/commands/llm_chat_persistence.rs`（原子写/删除/回收站/tombstone）、`src-tauri/src/commands/llmchat_search.rs`（跨会话全文搜索）
 - `src/tools/llm-chat/composables/features/useAttachmentManager.ts`、`services/greetingService.ts`、`services/sessionImportExportService.ts`、`services/sillyTavernParser.ts`、`composables/features/useExportManager.ts`
 - `src/tools/llm-chat/composables/chat/useLlmSearch.ts`、`components/search/ChatSearchPanel.vue`、`composables/sidebar/useSessionsSidebarLogic.ts`
-

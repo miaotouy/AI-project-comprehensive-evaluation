@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/storage` 持久化层、`globalApi.svelte.ts` 的保存循环、`bootstrap.ts` 加载主链、`process/index.svelte.ts` 生成入口、UI 层 Chat/DefaultChatScreen/SideChatList/ChatList、冷存储、角色与聊天导入导出、多用户同步），针对必查问题逐一核对当前 HEAD 的可执行路径；本次为静态调查，未运行应用
 >
@@ -110,12 +110,13 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 3.1 冷存储（Cold Storage）归档与恢复
 
-启动时 `makeColdData()`（`coldstorage.svelte.ts:529-574`，开关 `db.coldstorage`，无插件时默认开启，`database.svelte.ts:713`）对两类对象判龄归档，每批 5 个串行处理：
+启动时 `makeColdData()`（`coldstorage.svelte.ts:575-625`，开关 `db.coldstorage`，无插件时默认开启，`database.svelte.ts:713`）先迁移旧版插件存储，再对两类对象判龄归档，每批 5 个串行处理：
 
 - **角色级**：`lastInteraction` 距今超 10 天且未归档的角色，整体写入冷存储（键为 UUID），原对象替换为只含 `image/name/chaId/chats 占位/coldstorage: id/coldStoragedChats` 的"瘦身壳"；打开角色时 `changeChar` 按壳内键读回完整对象（`characters.ts:884-893`）。
-- **会话级**：最后一条消息时间距今超 10 天、且消息数 ≥4、且未归档的会话，把 `message`、`hypaV2Data`、`hypaV3Data`、`scriptstate`、`localLore` 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`（`coldstorageData.ts:4` 定义头）；打开会话时 `preLoadChat` 读回并恢复这些字段（`coldstorage.svelte.ts:576-614`），数据缺失时替换为显式错误提示消息。
+- **会话级**：最后一条消息时间距今超 10 天、且消息数 ≥4、且未归档的会话，把 `message`、`hypaV2Data`、`hypaV3Data`、`scriptstate`、`localLore` 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`（`coldstorageData.ts:4` 定义头）；打开会话时 `preLoadChat` 读回并恢复这些字段（`coldstorage.svelte.ts:627-665`），数据缺失时替换为显式错误提示消息。
+- **插件存储迁移**：早期版本把插件级存储的值内联保存在 `db.pluginCustomStorage` 中，与上述判龄归档不同，这一步在每次启动时无条件执行。逐键写入冷存储并读回验证成功后，改在 `_coldplugin` 下记录“键到冷键”的映射并删除内联值；写入或校验失败则保留原值（`coldstorage.svelte.ts:529-573`）。插件 API 的读写删与枚举随后都按该映射间接访问冷存储，数据库内只再持久化这层映射（`v3.svelte.ts:1270-1315`）。
 
-冷存储后端按平台分派：账户远端（`/hub/account/coldstorage`）、Node 文件、Tauri `AppData/coldstorage/<key>.json`、web OPFS（`coldstorage.svelte.ts:40-197`）；值统一 JSON + fflate 压缩。写入后**先读回验证再替换原对象**（390-410、499-505）。无引用的条目由 `cleanColdStorage` 定期清理；迁移到账户模式时冷存储条目单独迁移并做资源路径重写（`autoStorage.ts:85-131`）。
+冷存储后端按平台分派：账户远端（`/hub/account/coldstorage`）、Node 文件、Tauri `AppData/coldstorage/<key>.json`、web OPFS（`coldstorage.svelte.ts:40-197`）；值统一 JSON + fflate 压缩。写入后**先读回验证再替换原对象**（390-410、499-505）。无引用的条目由 `cleanColdStorage` 定期清理；它的“在用键”清单同时收集角色持有键与插件存储映射值（`coldstorageData.ts:79-95`），插件条目因此不会被当作无引用清掉。迁移到账户模式时冷存储条目单独迁移并做资源路径重写（`autoStorage.ts:85-131`）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -255,7 +256,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 - `src/lib/Others/BookmarkList.svelte`：书签列表
 - `src/ts/gui/branches.ts`：`getChatBranches` 哈希前缀树（69-93）
 - `src/lib/Others/AlertComp.svelte`：分支弹层渲染（832-903）
-- `src/ts/process/coldstorage.svelte.ts`：读写/归档/恢复（40-614）；`coldstorageData.ts` 头常量（4）
+- `src/ts/process/coldstorage.svelte.ts`：读写/归档/恢复（40-665，插件存储迁移 529-573）；`coldstorageData.ts` 头常量（4）与在用键清单（79-95）
 - `src/ts/characters.ts`：`exportChat`/`importChat`/`exportAllChats`（192-521）；`removeChar` 软删（809-840）；`changeChar` 冷存储恢复（876-898）
 - `src/ts/characterCards.ts`：`importCharacterProcess`（52+）；`exportCharacterCard`（1245+）
 - `src/ts/storage/autoStorage.ts`：后端选择与账户迁移（12-222）

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`，关联 `packages/bundle/`、`packages/runtime-diagnostics/invariants`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/e2b/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（goal、plan、schedule、sandbox、extensions、subagent、persistence、spill）与关键 src 文件（`tool-cordis`、`cordis-host-runner` 的 sandbox/lifecycle、`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/index、`sandbox-local`、`subagent` 的 index/continuation、`native/landlock-run` 入口 C 源）；未运行任何进程或测试
 >
@@ -36,6 +36,8 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 | bundle patch-layer | 入口确认（机制） | 可安装的 profile 补丁层 npm 包 |
 | invariants 运行时不变式 | 入口确认（机制） | 每个包发布 `./invariant` 伴侣 |
 | e2b 远程执行 POC | 入口确认（暂缓） | 实验性 provider 组合；依赖外部 E2B 服务 |
+| POSIX SSH 执行世界 | 主链确认（静态） | 共享连接把 fs/subprocess/terminal/sandbox 投影到同一远端主机 |
+| 浏览器/桌面操作 provider | 入口确认（实验性） | browser-use 与 computer-use 注册表，多种 MCP/native provider |
 | feedback / attachment | 骨架 / 普通能力 | feedback 分日志备注与 sidecar 评分两种契约；attachment 是内容寻址附件存储 |
 
 ## 已确认的独特能力
@@ -94,6 +96,12 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 ## 工程与支撑机制盘点
 
 实验性 Agent Teams 已把多 Agent 协作提升为可组合的能力组：team runtime、成员与协作工具各自为插件，相关的会话事件和文档同样进入持久化目录。它仍属于实验性组合，不能据此推断存在成熟的团队管理 UI 或跨账户协作服务（`packages/experimental/agent-team/`、`docs/subsystems/agent-team.md`、`examples/headless-agent/team.cordis.snapshot.yml`）。
+
+Agent Teams 已有可选 CLI 与 Web profile，Web 插件提供 team roster、任务板和 teammate 导航；因此“没有团队管理 UI”的旧边界已不成立。它仍位于 `packages/experimental`，契约明确可变且无支持承诺（`packages/experimental/{agent-team-profile,agent-team-web-profile,client-ui-agent-team}/`）。
+
+POSIX SSH 执行世界形成新的跨能力主链：本机 Harness 通过一个 SSH helper 管理远端路径、普通进程、终端与文件效应沙箱，四个 provider 共享连接身份和生命周期。它不是外部 Agent，而是把现有工具执行域替换为远端 POSIX 主机（`packages/ssh/README.md`、`docs/subsystems/ssh.md`）。
+
+浏览器与桌面操作目前仍属实验性能力族。`browser-use` 与 `computer-use` 提供排他的命名 provider 注册表，具体后端包括 Playwright MCP、Chrome DevTools MCP、Stagehand native 与 Cua Driver；这些包存在快照与单测，但真实浏览器、桌面权限和模型效果未运行验证（`packages/browser-use/`、`packages/computer-use/`、`packages/experimental/browser-use-*`、`computer-use-*`）。
 
 以下机制已确认入口与契约，属于工程或支撑性质，不单独展开能力卡：
 

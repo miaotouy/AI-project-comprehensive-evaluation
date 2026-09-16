@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/bundle/base`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读：`packages/llm` 全部包源码与 README、agent-loop 请求路径、credentials/settings 服务与文件 provider、dsh 基座 bundle 与 examples 组合、Web Models 设置页及其远程 API、CLI reference、`docs/subsystems/llm-streaming.md` 与 `docs/config-catalog.md` 对照；未运行真实 Provider 请求，未执行测试
 >
@@ -17,12 +17,12 @@
 DeepSeek-Harness 的 LLM 渠道管理是"一个中性流式词汇 + 一个注册表 + 两个实现同一 seam 的适配器"：
 
 1. **Provider 是注册键，不是用户实体。** 抽象服务 `LlmRuntime`（`packages/llm/llm/src/index.ts:284`）持有 provider route → adapter 实例的注册表；route 是普通字符串（如 `deepseek-official`、`openai`、自建网关名），同一 adapter 实例可注册多条 route，注册与替换全有或全无且同步原子（`index.ts:338-413`）。用户没有"新建渠道"的数据表或 UI 实体，渠道的增删改全部表达为组合配置与用户 settings 文档。
-2. **双适配器验证 seam 中性。** `dsh-llm-deepseek`（直连 fetch + SSE）与 `dsh-llm-pi-ai`（经 pi-ai 库）自始一起实现同一 `StreamChunk` 协议，目的是让"中性词汇"不被单一实现带偏（Agent Note 2026-06-13-twin-llm-adapters）。直连适配器独占 `deepseek-official` route，pi-ai 适配器的目录 route 名（如 `deepseek`）与之刻意区分，一份组合可以同时挂两个 DeepSeek 路径。
+2. **双适配器继续验证 seam 中性。** `dsh-llm-deepseek` 与 `dsh-llm-pi-ai` 仍实现同一流协议；第一方 DeepSeek 适配器已不再只是 Chat Completions 路径，而是默认使用 Messages，也可在 Cordis YAML 切回 Chat Completions。两个协议共享 `deepseek-official` route、凭据、模型目录与图像策略（`packages/llm/llm-deepseek/README.md:12,48-88`）。
 3. **pi-ai 只贡献模型目录、Provider 构造与事件流。** dsh 复用 pi-ai 的 `Models` 集合、Provider/Model/Api 类型、安装目录、createProvider、streamSimple 事件词汇和思考等级工具；其余全部在 dsh 侧：凭据解析、retry policy、settings 分层、attribution 头、空闲看门狗、请求冻结、replay 状态投影、错误分类。SDK 自动重试被强制为 0，pi-ai 的凭据库/OAuth/价格元数据未被使用（详见 §9）。
 4. **配置只存凭据引用，key 永不进配置文件。** 配置携带 `apiKeyEnv`（环境变量名）这类引用，经凭据 seam 每次请求解析；托管文档是 `$DSH_HOME/.credentials.yaml`（0600 + 文件锁），继承环境 > 托管文档 > 项目/用户 .env 分层（`packages/credentials/credentials-local/src/index.ts:1-37`）。引用有值但不可用报 `INVALID_CREDENTIAL`，引用未命中报 `MISSING_CREDENTIAL`，只有完全不声明凭据的 profile 才允许 pi-ai 的 ambient 发现。
 5. **配置热生效，route 事实注册时捕获。** 两个适配器都把 `cordis.yml` 入口配置作为 base、`$DSH_HOME/settings.yaml` 用户节为覆盖层，通过 thunk 每次请求重读连接事实，settings 文件热重载即可改 baseURL、模型目录和 key，无需重启；只有注册时捕获的 retry policy 和 route 集变化时需要同步原子重注册。
-6. **模型目录是配置，不是远端刷新。** 直连适配器的模型是配置列表（默认 V4 Flash/Pro、上下文 100 万）；pi-ai 适配器以安装目录为默认，`models` 整表替换、`modelOverrides` 逐模型微调。目录是 advisory——未列出的模型 id 仍可请求；pi-ai route 的模型必须存在于配置解析出的集合，否则 `UNKNOWN_MODEL`。没有任何自动拉取模型目录的路径（README 明确"catalog never refreshes itself"）。
-7. **重试在 agent 步边界，不在 SDK。** `dsh-llm-retry` 监听 `agent/request-error` 瀑布执行 provider-owned 策略：normal 模式默认对五个可重试错误码（见 §7）重试最多 2 次（500ms → 10s 指数退避 + 10% 抖动），always 模式无上限且先问下游；一次 adapter 调用 = 一次 provider 尝试。无多 Key、无 Key 轮换、无跨渠道 failover。
+6. **模型目录仍由配置拥有。** 第一方默认目录现在含 `deepseek-flash` 与视觉实验模型，均通过同一 resolve 路径暴露文本/图像能力；未列模型仍按 text-only pass-through。pi-ai 继续以安装目录和 profile 覆盖构建目录，配置时可探测端点，但运行目录不自动刷新。
+7. **重试仍在 agent 边界，不在 SDK。** 策略仍由 route 注册事实携带；第一方 DeepSeek 当前默认 normal 策略为 5 次，具体退避与码集由 `retryPolicy` 解析，不能继续沿用旧的全局“最多 2 次”结论（`packages/llm/llm-deepseek/README.md:71`）。无多 Key、无 Key 轮换、无跨渠道 failover。
 8. **默认模型在基座 bundle。** `packages/bundle/base/cordis.patch.yml:63-67` 挂载 `agent-default-model`（`deepseek-official`/`deepseek-v4-flash`），web 与 headless 模式都在此基础上叠加；用户默认模型存于 `agent-default-model` settings 节。
 
 ## 总体调用链
@@ -134,7 +134,7 @@ usage / finish { stop | tool-calls | max-tokens | aborted | error }
 
 **适配器契约**（`docs/subsystems/llm-streaming.md`）：两种错误路径——`stream()` 抛出（传输/协议）或流内 `finish {kind:'error'|'aborted'}`（provider 带内错误）；一次适配器调用 = 一次 provider 尝试；空闲看门狗默认 5 分钟只计时在途读；context 溢出统一到 `CONTEXT_WINDOW_EXCEEDED` 码；空完成（stop 但无内容块）是 `EMPTY_RESPONSE` 错误而非成功；每个请求带 attribution 头。
 
-**直连适配器组装**：`POST {baseURL}/chat/completions`，SSE 由 eventsource-parser 定帧、`[DONE]` 哨兵终结（`llm-deepseek/src/sse.ts`），`stream_options.include_usage` 恒开。
+**第一方适配器组装**：配置 `protocol` 选择 Messages 或 Chat Completions，默认 Messages。Messages 发往 `{baseURL}/v1/messages`，Chat 发往 `/chat/completions`；两者共享 SSE 到 Harness chunk 的翻译、Files API 图像解析和请求扩展事务。Messages 另保存 native replay signatures，并支持 `systemPromptUpdate: in-history` 模型把变化后的 system 作为历史消息追加，以保留前缀缓存（`packages/llm/llm-deepseek/src/protocols/{messages,chat-completions}/`）。
 
 思考模式序列化顶层 thinking 对象加 reasoning_effort，off 不跨线上传而映射为 `thinking.type: disabled`；带工具调用的回合把历史 reasoning_content 回传、无工具回合丢弃（省 token）。usage 映射把 prompt_tokens 中的缓存命中数减回，得到不相交计数（`translate.ts:53-62`）；非 2xx 状态码分类见 `httpErrorCode`（`adapter.ts:138-149`）：
 

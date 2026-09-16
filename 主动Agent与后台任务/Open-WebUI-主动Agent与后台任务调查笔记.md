@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读核对已有独特功能笔记，并追踪 `main.py` 生命周期、Automations 的路由/模型/调度器，以及 Calendar 事件与提醒路径；未启动服务，未修改被调查仓库
 >
@@ -44,13 +44,13 @@ Open WebUI 在当前快照有一条 `主链确认` 的隔离日程运行，以�
 - `automation`：owner、可选 folder、名称、JSON data 中的 prompt/model/rrule、活跃状态，以及 `last_run_at` 和 `next_run_at`。
 - `automation_run`：run id、automation id、可选 chat id，以及 `success` 或 `error` 与错误文本。
 
-创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行（`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
+创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行；频率计算会先丢弃 DTSTART 行再解析，使锚点不干扰间隔判定（`utils/automations.py:180-196`；`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
 
 调度器每轮最多认领十个到期自动化。`claim_due` 在数据库事务中筛选 `is_active` 且 `next_run_at <= now` 的记录；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`，随后立即写入 `last_run_at` 和新的 `next_run_at`。这使多个实例不会同时执行已认领的同一到期行；轮询抖动进一步降低同时争抢概率（`models/automations.py:289-332`; `utils/automations.py:210-255`）。
 
 ### Calendar alert 的状态对象
 
-Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。`get_upcoming_events` 过滤已取消事件，以默认或每事件的 `alert_minutes` 计算窗口；负数表示不提醒。调度器对 `alerted_at` 已存在的事件跳过，成功发送后写回当前时间，因此去重状态随数据库跨重启、跨实例存留（`models/calendar.py:53-77,697-753`; `utils/automations.py:692-749`）。
+Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。`get_upcoming_events` 过滤已取消事件，以默认或每事件的 `alert_minutes` 计算窗口；负数表示不提醒。调度器对 `alerted_at` 已存在的事件跳过，成功发送后写回当前时间，因此去重状态随数据库跨重启、跨实例存留（`models/calendar.py:53-77,732`; `utils/automations.py:692-749`）。事件创建/更新的表单校验现在拒绝短于一天的重复频率（下限常量 `MIN_CALENDAR_RRULE_INTERVAL_SECONDS` 为 24 小时），超频规则返回 `CALENDAR_RRULE_TOO_FREQUENT`（`models/calendar.py:30,198-245`）；范围查询的重叠判定也补上了“开始时间已落在窗口内、结束时间晚于起点”的情形（`models/calendar.py:567-575`）。
 
 ## 执行、结果交付与状态更新
 
@@ -74,7 +74,7 @@ Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。
 
 ### Calendar alerts
 
-取消事件或将 `alert_minutes` 设为负数可阻止未来提醒；删除事件也使其不再被查询。数据库 `alerted_at` 防止同一存储事件在重启或多实例下重复发送。当前实现按原 event 记录处理提醒；重复事件的实例展开与“每个重复实例各提醒一次”的详细契约不在本轮完整验证范围内。Socket 或通用通知系统的投递失败不会被保存为可重试 alert run，因此这条链的可靠性边界止于数据库去重与 best-effort 发布。
+取消事件或将 `alert_minutes` 设为负数可阻止未来提醒；删除事件也使其不再被查询。数据库 `alerted_at` 防止同一存储事件在重启或多实例下重复发送。当前实现按原 event 记录处理提醒；实例展开会先剥掉 DTSTART 行再解析，遇到 `EXRULE` 则记警告并只返回原始事件，不做排除规则展开（`utils/calendar.py:17-76`），“每个重复实例各提醒一次”的完整契约仍未逐项验证。Socket 或通用通知系统的投递失败不会被保存为可重试 alert run，因此这条链的可靠性边界止于数据库去重与 best-effort 发布。
 
 ## 相邻类目交接与已确认边界
 
@@ -95,5 +95,5 @@ Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。
 - `backend/open_webui/main.py:392-394,465-477`：scheduler 的应用生命周期创建与关闭。
 - `backend/open_webui/models/automations.py:20-55,132-156,264-332,340-422`：Automation/AutomationRun 数据模型、启停、到期认领和运行历史。
 - `backend/open_webui/routers/automations.py:45-95,208-380,388-400`：权限/频率治理、创建更新、手动运行、删除和 run 查询。
-- `backend/open_webui/utils/automations.py:210-267,386-684,692-780`：调度循环、无头 chat/channel 执行、结果记录与 Calendar alert。
-- `backend/open_webui/models/calendar.py:53-95,660-753`、`backend/open_webui/routers/calendar.py:87-109,143-269`：事件与提醒去重状态、Scheduled Tasks 时间线投影。
+- `backend/open_webui/utils/automations.py:180-196,211-270,490-690,693-780`：rrule 频率计算、调度循环、无头 chat/channel 执行、结果记录与 Calendar alert。
+- `backend/open_webui/models/calendar.py:30,53-95,198-245,732`、`backend/open_webui/routers/calendar.py:87-109,143-269`：事件与提醒去重状态、rrule 频率下限、Scheduled Tasks 时间线投影。

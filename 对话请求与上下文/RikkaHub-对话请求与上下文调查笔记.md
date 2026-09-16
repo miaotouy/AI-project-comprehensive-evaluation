@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：以当前快照源码复核为主，沿 `ChatService` → `GenerationLoop` → Provider 解码器的可执行路径逐段阅读；文档 `docs/references/chat-generation-pipeline.md` 仅作对照，凡与实现不一致处以源码为准。未运行应用，取消效果、并发竞态与端到端行为属未验证项。
 >

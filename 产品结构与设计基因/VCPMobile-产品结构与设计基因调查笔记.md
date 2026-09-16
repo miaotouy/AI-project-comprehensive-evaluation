@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`cecdbe432feda57821938bba7625a272113d21c1`（分支：`main`）
+> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
 >
 > 调查方式：静态核对 README、顶层入口、Tauri command 注册、功能目录和可见 Git 历史；未启动 Android 应用或外部 VCP 服务
 >
@@ -16,13 +16,13 @@
 
 当前快照中的 VCPMobile 是一个以聊天为主表面、以 Android 原生能力为差异层的 Tauri 应用。人类首先进入单一聊天路由；设置、日记、同步、RAG 观察和设备节点作为覆盖页接入。Rust 既承接与 VCP 服务的聊天、同步和远端日记请求，也承接在手机本地运行的数据库、文件处理、Android 插件和设备工具。因此它的角色介于聊天客户端与独立后端之间：它把远端 VCP 生态中的长期内容和服务，转换为可在一台 Android 设备上操作、同步和受控暴露的界面与执行面。
 
-本地 Git 可达历史只包含当前提交，其父历史不可用，不能依据该快照建立可靠的版本演变时间线。README 对“VCPChat 移动端进化版”和阶段里程碑的描述作为项目自述保留，不升级为历史确认。
+当前快照的 Git 历史完整可达：628 次提交、时间跨度约 2026-03-03 至 2026-09-12，标签覆盖 `v1.0.2` 到 `v1.1.5`，因此可以用提交与标签核对 README 的阶段自述，而不再只依赖作者表述。
 
 ## 证据口径
 
 - **作者自述**：README 将项目定位为 VCPChat 的 Android 移动端进化版，并列出流式、同步、分布式节点和 Android 原生能力作为主特征（`README.md` 第 1-3 节）。
 - **当前结构确认**：根装配、路由、前端 Feature、Rust 应用服务、独立设备节点和 Android 插件目录可在此快照中直接检查。
-- **历史确认受限**：`git rev-list --max-parents=0 HEAD` 仅返回当前提交，故无法从本地可达历史确认 README 所列版本顺序、最初设计或模块首次引入时间。
+- **历史确认可用**：`git rev-list --max-parents=0 HEAD` 返回根提交且完整祖先链可达；`git log` 与标签可用于核对 README 所列版本顺序与里程碑，但仍不据此推断作者动机。
 - **跨模块归纳**：下文“设计基因”是根据多个当前模块的重复接入模式得到的调查者归纳，不代表作者意图。
 
 ## 产品起点与演变
@@ -33,17 +33,17 @@ README 把产品称为“Project Avatar”，主张从桌面客户端走向具�
 
 ### 提交历史与阶段变化
 
-本次无法建立。当前 HEAD 的可达历史在本地表现为根提交；应在取得完整仓库历史后，再用首次引入、迁移提交和版本标签核实 README 的里程碑。当前目录和文档日期不能替代该证据。
+完整历史显示项目从 2026-03 起步，经历聊天、同步、分布式节点、日记与流式渲染等阶段的持续提交，标签从 `v1.0.2` 递进到 `v1.1.5`。可用 `git log --oneline`、`git tag` 与 README 的版本说明交叉核对里程碑；本笔记只记录该历史可用于核对，而不在此逐一重建阶段时间线。
 
 ## 当前产品边界
 
 ### 主要用户与调用者
 
-主要人类用户在 Android WebView 中配置 VCP 服务、选择 Agent 并进行聊天，也可打开日记中心、同步和分布式节点页。外部 VCP 服务是两种不同关系中的调用者：其聊天/日记端点提供远端内容与模型服务；其分布式服务还能反向请求手机执行已启用工具。Android 系统通过 Tauri 插件提供权限、生命周期、键盘 Insets、通知和文件等平台能力（`src/App.vue:376-421`；`src-tauri/src/lib.rs:94-146`）。
+主要人类用户在 Android WebView 中配置 VCP 服务、选择 Agent 并进行聊天，也可打开日记中心、同步和分布式节点页。外部 VCP 服务是两种不同关系中的调用者：其聊天/日记端点提供远端内容与模型服务；其分布式服务还能反向请求手机执行已启用工具。Android 系统通过 Tauri 插件提供权限、生命周期、键盘 Insets、通知和文件等平台能力（`src/App.vue:502-540`；`src-tauri/src/lib.rs:19-200`）。
 
 ### 产品表面
 
-- **人类直接 UI**：唯一 Hash 路由是聊天；左右栏和全局覆盖页提供设置、同步、日记、RAG 观察及设备节点管理（`src/core/router/index.ts:1-11`；`src/components/FeatureOverlays.vue:20-122`）。
+- **人类直接 UI**：唯一 Hash 路由是聊天；左右栏和全局覆盖页提供设置、同步、日记、RAG 观察、设备节点管理，以及日志中心、任务中心、Agent 管理、论坛、邮箱、全局搜索、CLI 清单等（`src/core/router/index.ts:1-11`；`src/components/FeatureOverlays.vue:16-193`）。
 - **人机双入口**：聊天、附件和日记服务经 Tauri command 把 UI 请求交给 Rust；详细 Chat 链由相邻专项调查。
 - **Agent/自动化专用入口**：当前确认的分布式服务可以远程调用手机工具；它不是移动端内建 Agent 循环（`src-tauri/src/distributed/client.rs:738-1008`）。
 - **内部基础设施**：Pinia Store、Tauri managed state、SQLite/文件、同步服务和 Android 插件为 UI 与远端协议提供复用底座。
@@ -59,12 +59,13 @@ README 把产品称为“Project Avatar”，主张从桌面客户端走向具�
 前端按 `core` 与 `features` 分开：`core` 放 Store、router、composable、指令、常量和通用工具；`features` 按用户能力聚合，目录包括：
 
 ```text
-agent chat diary distributed notification rag settings sync
+agent agentmgr assistant chat cli diary distributed forum globalsearch guide
+logcenter mail notification rag settings sync taskcenter topic
 ```
 
-根组件将低频 Feature 统一接入覆盖层，而不为每个功能添加 URL（`src/components/FeatureOverlays.vue:20-122`）。
+根组件将低频 Feature 统一接入覆盖层，而不为每个功能添加 URL（`src/components/FeatureOverlays.vue:16-193`）。
 
-Rust 入口主要注册 managed state 和 Tauri command；领域逻辑分在应用服务目录，分布式节点单列目录且声明不依赖该服务目录。这产生两个可独立理解的后端面：面向 VCP 请求/本地持久化的应用服务，和面向手机能力注册/反向执行的设备节点（`src-tauri/src/lib.rs:1-146, 230-336`；`src-tauri/src/distributed/mod.rs:1-25`）。
+Rust 入口主要注册 managed state 和 Tauri command；领域逻辑分在应用服务目录，分布式节点单列目录且声明不依赖该服务目录。这产生两个可独立理解的后端面：面向 VCP 请求/本地持久化的应用服务，和面向手机能力注册/反向执行的设备节点（`src-tauri/src/lib.rs:19-200`；`src-tauri/src/distributed/mod.rs:20-130`）。
 
 ## 已确认的设计基因
 
@@ -79,9 +80,9 @@ Rust 入口主要注册 managed state 和 Tauri command；领域逻辑分在应�
 ### 基因卡 2：把手机平台能力组织为可治理的服务目录
 
 - **模式与证据类型**：`当前结构确认` + `跨模块归纳`。`build_registry` 集中注册本机工具，注册表为每项工具保存启用策略和权限元数据，连接确认后再把启用 manifest 发送给外部服务。
-- **覆盖范围**：设置开关、生命周期调和、Rust 工具注册表、Android 权限请求、WebSocket 客户端和分布式管理页共同遵循这一模式（`src/features/distributed/DistributedSettingsSection.vue:31-98`；`src-tauri/src/distributed/tools/mod.rs:1-55`；`src-tauri/src/distributed/tool_registry.rs:203-379`）。
+- **覆盖范围**：设置开关、生命周期调和、Rust 工具注册表、Android 权限请求、WebSocket 客户端和分布式管理页共同遵循这一模式（`src/features/settings/SettingsView.vue:70-80`；`src-tauri/src/distributed/tools/mod.rs:29-58`；`src-tauri/src/distributed/tool_registry.rs:199-700`）。
 - **产品作用**：手机从聊天终端变为可选择暴露能力的节点；用户可以看到连接、工具数量和开关，而服务端只应看到启用后的清单。
-- **例外与张力**：当前入站工具调用没有逐次人工批准，交互式工具 UI 仍是 skeleton；“可治理”目前主要是连接开关、工具禁用集合和 Android 系统权限，并不等于完整的请求审计或细粒度授权。
+- **例外与张力**：当前入站工具调用没有逐次人工批准，交互式工具 UI 仍是 skeleton；“可治理”目前主要是连接开关、启用白名单和 Android 系统权限，并不等于完整的请求审计或细粒度授权。
 - **专项交接**：完整连接、回流、重连和安全边界见外部协作笔记。
 
 ### 基因卡 3：移动端将非聊天工作区压入可返回的覆盖页
@@ -102,7 +103,7 @@ README 的功能说明非常广，但当前产品表面并不等价于每个保�
 
 ## 来源覆盖缺口与未验证事项
 
-- 本地可达 Git 历史不足，产品起点、README 版本表和设计动机均未做历史确认。
+- 本地 Git 历史完整可达，产品起点与 README 版本表可据提交与标签核对；本笔记未再逐一重建阶段时间线。
 - 未运行 Android，未验证物理返回、平台通知、安全区、原生权限、离线与断网恢复。
 - Chat、Agent、同步、RAG 和附件各自的完整主链需要由相邻专项补充；不能把本笔记的结构判断当作这些能力已全部调查。
 
@@ -115,7 +116,7 @@ README 的功能说明非常广，但当前产品表面并不等价于每个保�
 ## 关键依据
 
 - `README.md` 第 1-3 节：项目自述与当前功能候选。
-- `src/main.ts:1-56`、`src/App.vue:376-514`、`src/core/router/index.ts:1-11`：人类主表面和根装配。
-- `src/components/FeatureOverlays.vue:20-122`、`src/core/stores/overlay.ts:41-299`：覆盖页组织方式。
-- `src-tauri/src/lib.rs:1-146, 230-336`、`src-tauri/src/distributed/mod.rs:1-78`：后端域与 Tauri 接入边界。
+- `src/main.ts:1-62`、`src/App.vue:502-706`、`src/core/router/index.ts:1-11`：人类主表面和根装配。
+- `src/components/FeatureOverlays.vue:16-193`、`src/core/stores/overlay.ts:38-397`：覆盖页组织方式。
+- `src-tauri/src/lib.rs:19-200`、`src-tauri/src/distributed/mod.rs:20-130`：后端域与 Tauri 接入边界。
 - `docs/modules/25_日记中心远端服务.md`：远端日记事实源与写入语义。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：只读源码、CLI 指南和路由契约梳理 Provider 配置生命周期、桌面端管理入口、CLI 管理面、配置导入、模型目录和连接测试；未修改 DeepChat 仓库，也未运行桌面 UI、CLI 或真实 API 请求
 >
@@ -22,12 +22,15 @@ DeepChat 中的“渠道”主要是持久化的 `LLM_PROVIDER` 用户实例。�
 4. **导入是桌面设置页的数据迁移向导**：Provider import service 从 CC Switch、Alma、Cherry Studio、Hermes、OpenClaw 的本地数据中扫描配置，先预览和映射，再按选择创建或更新内置/自定义 Provider，并导入模型。它不是通用的 DeepChat Provider 导出/导入文件格式。
 5. **默认渠道与用户渠道的可操作范围不同**：默认 Provider 会参与初始化合并；内置 Provider 通常保留身份和协议，只允许修改凭据、启停及特定可编辑字段。自定义 Provider 可编辑 Base URL，并可从桌面端删除。CLI 还显式禁止修改内置 Provider 的 `apiType`，只允许删除自定义 Provider。
 6. **渠道请求可附加用户配置 Header**：Header 作为独立的 Provider 配置契约进入请求组装；APIMart、Synthorai 与 OpenAI Codex 图像生成均有 Provider 接线，模型目录和能力判断不能只按早期内置 Provider 集合理解（`src/main/provider/providerHeaders.ts`、`providers/apimartProvider.ts`、`openaiCodexAdapter.ts`）。
+7. **内置 OpenAI-compatible 目录继续扩展**：RunInfra 与 API Route 作为具名默认 Provider 接入通用运行时，各自拥有固定身份、默认 Base URL、网站/文档元数据和图标；它们不是用户临时 custom Provider。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
 `LLM_PROVIDER`（`src/shared/types/provider.ts:74-106`）是渠道实例的主要数据结构，包含 `id`、名称、`apiType`、API Key/OAuth token、`baseUrl`、模型集合、模型启停状态、`enable`、`custom`、网站信息和限流配置等。`provider.id + modelId` 构成运行时选择的基本身份；同名模型在不同 Provider 下可以对应不同 Base URL、凭据和能力。
 
 Provider 是持久化的配置与运行时实例，不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts:31-207`）。
+
+默认目录中，RunInfra 与 API Route 均以 OpenAI-compatible `apiType` 注册，分别使用 `https://api.runinfra.ai/v1` 与 `https://global.api-route.com/v1`。Provider ID 优先路由保留两者独立身份，协议请求仍复用通用适配器；定义与注册见 `src/main/provider/defaults.ts:35-61`、`src/main/provider/providerRegistry.ts:135,510`。
 
 一个 Provider 实例只有一个持久化 `baseUrl` 字段，本次未找到在同一个 `LLM_PROVIDER` 内维护多个 Endpoint 或 Endpoint 列表的模型。若要使用同一协议的多个地址，实际做法是创建多个 Provider 实例；它们可以共享同一 `apiType`，但各自保存自己的 URL 和凭据。
 
@@ -127,6 +130,8 @@ OpenAI Codex 和 xAI Grok OAuth 使用独立 credential store，并通过 Electr
 
 Provider 刷新模型是 Provider 级操作。Provider DB-backed Provider 在刷新时还会刷新/同步元数据；这与用户在 UI 中直接新增的 custom model 不同，后者是本地输入，不要求上游 `/models` 接口。
 
+模型发现现在会合并同一 Provider 的并发刷新请求，避免设置页或多个调用方同时触发重复上游读取；这是请求合并，不是持久缓存或跨 Provider 共享目录（`src/main/provider/baseProvider.ts`）。
+
 ## 6. Adapter、协议与请求组装
 
 `providerRegistry.ts` 将 Provider ID 优先、apiType 次之映射到 AI SDK runtime definition。definition 包含 runtime kind、behavior preset、模型来源、连通性检查、credential strategy、route strategy、embedding strategy 和默认 headers（`src/main/provider/providerRegistry.ts:50-80`、`:684-690`）。
@@ -180,6 +185,7 @@ Provider change、模型变化、限流排队/执行和 Provider DB 刷新通过
 - 未运行 CLI，未验证 DeepChat 未启动、approval pending、权限失败、超时和退出码在当前打包版本中的实际表现。
 - 未运行 TUI 或远程 Web，因为源码和 CLI 文档显示 TUI 不包含，且本次未找到独立 Web 管理服务；这不是对所有未来分支或外部集成的绝对否定。
 - 未执行真实 Provider 连接测试，未逐渠道验证 endpoint suffix、默认 headers、代理、OAuth、模型刷新、媒体和 embedding 的上游兼容性。
+- RunInfra 与 API Route 的默认身份和路由为源码确认，实际服务可用性、模型清单和地区网络行为未验证。
 - 未确认 Electron Store 的底层文件位置、SQLite 数据库加密 key、备份/同步/导出文件中的凭据处理，也未运行数据库迁移。
 - 未验证 Provider 删除时已有 session/provider 引用如何恢复，以及 Provider 实例、限流队列和正在进行请求在删除/禁用时的边界行为。
 - 未找到 Provider 复制、Provider 导出、CLI Provider 导入和 CLI Provider 导出实现；仅找到模型配置的导入/导出 route，不能把它们扩大解释为渠道配置导入/导出。
@@ -202,6 +208,7 @@ Provider change、模型变化、限流排队/执行和 Provider DB 刷新通过
 - CLI surface 权限与操作边界：`src/main/cli/surface.ts:603-670`
 - CLI V1 能力边界：`docs/guides/cli.md:1-20`、`:76-93`、`:251-257`
 - Provider registry 与实例路由：`src/main/provider/providerRegistry.ts:50-80`、`:684-690`、`src/main/provider/managers/providerInstanceManager.ts:31-207`
+- RunInfra 与 API Route 默认定义：`src/main/provider/defaults.ts:35-61`、`src/main/provider/providerRegistry.ts:135,510`
 - 连接测试：`src/main/provider/providerService.ts:18-61`、`src/main/provider/index.ts:863-930`
 - QPS 限流：`src/main/provider/managers/rateLimitManager.ts:24-190`、`:284-385`
 - 凭据与脱敏：`src/main/provider/auth/openaiCodex/credentialStore.ts:22-43`、`src/main/provider/data/settingsTable.ts:168-199`、`src/main/lib/redact.ts:4-40`

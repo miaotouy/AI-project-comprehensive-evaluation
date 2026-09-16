@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：阅读记忆存储、记忆提供方编排、会话全文检索、上下文组装、学习图及相关测试入口，静态追踪内置与外部记忆的读写路径；未启动 Hermes、SQLite 索引重建、外部记忆服务或真实模型请求
 >
@@ -59,7 +59,7 @@ MemoryProvider 是可选扩展契约，定义初始化、预取、回合同步�
 
 ### 跨会话 FTS5 召回
 
-`session_search(query=...)` 先向数据库请求最多 300 个 FTS 候选，以便在按谱系去重之前仍能找到互动会话。随后稳定地将 cron 会话排到互动会话之后，排除当前仍在活上下文中的谱系，并对已压缩或 `/new` 后离开上下文的旧内容保留可发现性。最终结果以命中锚点为中心，第一名返回约五条消息的窗口和首尾书签，较低排名可只返回锚点；调用方还可再用锚点滚动，或按会话 ID 读取。见 `tools/session_search_tool.py:42-96, 281-295, 761-950, 953-1079`。
+`session_search(query=...)` 先向数据库请求 FTS 候选，以便在按谱系去重之前仍能找到互动会话。随后稳定地将 cron 会话排到互动会话之后，排除当前仍在活上下文中的谱系，并对已压缩或 `/new` 后离开上下文的旧内容保留可发现性。查询可带 ISO 时间或相对时间的 `after`/`before` 边界，也可传 `exclude_session_ids` 按整条 lineage 排除已检查会话；无命中时结果会明确提示可用 OR 放宽词项。最终结果以命中锚点为中心，调用方可继续滚动或按会话 ID 读取（`tools/session_search_tool.py:119-187,344-393,567-624,697-782`）。
 
 这里的“重排”只包括 FTS/BM25 或可选时间排序、cron 降权、谱系去重和结果负载整形，没有跨查询的 reranker 或 LLM 判断。输出包含会话 ID、来源、模型、标题、命中角色、消息 ID、摘要片段、窗口和分页方向等可复查字段，但不把自身结果写入 `MEMORY.md`，也不主动发起下一轮检索。见 `tools/session_search_tool.py:884-950`。
 
@@ -109,4 +109,5 @@ Hermes 支持模型在同一工具循环内根据 `session_search` 结果再次�
 - 当前轮记忆注入和 API sidecar：`agent/turn_context.py:54-109, 1375-1434`
 - 会话 FTS 路由与慢查询观测：`hermes_state_search.py:1415-1487`
 - `session_search` 的候选、谱系去重、锚定读取与参数形态：`tools/session_search_tool.py:1-33, 42-96, 259-295, 761-1079, 1145-1247`
+- `session_search` 时间边界与 lineage 排除：`tools/session_search_tool.py:119-187,344-393,567-624,697-782`
 - 内置记忆和技能的可视化投影：`agent/learning_graph.py:193-245`

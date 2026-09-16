@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态核对 AppModelConfig、Prompt IDE、传统 Agent Chat、Agent v2 roster/snapshot 与请求 prompt transform；未运行模型、控制台或 Agent Runtime
 >
@@ -39,13 +39,13 @@ Agent v2：作者编辑 roster Agent / draft
 
 `AppModelConfig` 是传统应用的配置快照，App 只持有当前 active config 指针。发布会新建配置并切换指针；Console debug 可传未发布覆盖配置，但生产调用读取 active config。它可包含 prompt 类型、simple/advanced prompt、变量、数据集、模型和功能设置。细节见 `api/controllers/console/app/model_config.py` 及[独特功能](../独特功能/Dify-独特功能调查笔记.md)的 Prompt IDE 卡。
 
-Agent v2 的 roster、Agent Soul、草稿、build draft、snapshot/revision 是另一组对象。发布把可编辑配置转成不可变运行版本，已有版本可以回写为新的常规 draft；运行绑定会校验 tenant、owner、Agent、home snapshot 和 config version。这支持同一 Agent 被工作流引用并避免既有绑定自动漂移，但 Agent Runtime 的物理版本加载未运行确认。
+Agent v2 的 roster、Agent Soul、草稿、build draft、snapshot/revision 是另一组对象。发布把可编辑配置转成不可变运行版本，已有版本可以回写为新的常规 draft；运行绑定会校验 tenant、owner、Agent、home snapshot 和 config version。Chatflow 中的新节点执行会先查询 conversation 下已有参与者，并继续采用其 snapshot；roster Agent 后续发布不会让既有会话自动漂移（`api/core/workflow/nodes/agent_v2/binding_resolver.py:95-145`）。发布链还会校验 Soul 中的 Skill/File mention 是否能在配置或运行时 Skill 列表中解析，悬空引用会阻止发布（`api/services/agent/workflow_publish_service.py:177-232`）。Agent Runtime 的物理版本加载仍未运行确认。
 
 ## 2. 创建、选择与会话绑定
 
 基础应用的角色式配置由应用作者在 Console 编辑，终端用户只能向已发布应用输入 query、变量和文件；公开聊天没有确认到通用 persona picker、会话级角色副本或从角色库导入的入口。调试调用可暂时用未发布配置，属于作者工作面而非用户会话选择。
 
-Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入口。Agent App 新会话为当前 generation 创建 binding；已有 Conversation 继续使用原 binding 所指的 immutable generation。此处的稳定性来自运行绑定而不是把完整 role 文本复制进每条 Message，消息/会话的精确落盘边界仍见[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)。
+Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入口，并有独立的 Agent 资源访问规则。Agent App 新会话为当前 generation 创建 binding；已有 Conversation 继续使用原 binding 所指的 immutable generation。Chatflow 节点则把 conversation 作为 workspace owner，让同一参与者跨回合复用记忆和发布快照（`api/core/workflow/nodes/agent_v2/session_store.py:32-64`）。此处的稳定性来自运行绑定而不是把完整 role 文本复制进每条 Message，消息/会话的精确落盘边界仍见[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)。
 
 ## 3. 提示字段、模型与能力挂接
 
@@ -76,6 +76,7 @@ Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入�
 - 真实模型下 simple/advanced prompt、检索、记忆、文件和工具的最终顺序及 Provider 差异。
 - AppModelConfig 版本浏览、回滚和多人编辑冲突的 UI/服务端语义。
 - Agent v2 Runtime 的 workspace 创建、版本加载、工具环境、暂停恢复与物理清理。
+- Agent 资源访问规则、发布时 Skill/File 引用校验及 Chatflow conversation 记忆在多成员和版本更新下的实际效果。
 - DSL 的实际往返、缺失依赖和敏感字段过滤效果，以及公开聊天显示的真实运行元数据。
 
 ## 关键源码索引

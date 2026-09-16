@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：直接阅读源码（conversation_mgr、SQLite 数据层、SharedPreferences、WebChat 会话服务、schema 升级脚本与备份模块），所有行号按当前 HEAD 逐一核对
 >
@@ -107,7 +107,7 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 
 - **LLM 历史权威源**：`conversations.content`。读取统一经 `ConversationManager.get_conversation`（conversation_mgr.py:190-214），内部把 `ConversationV2` 转成 v3 时代的内存模型 `Conversation`（history 为 JSON 字符串），历史 API 零改动。
 - **当前对话指针权威源**：`preferences` 表（key=`sel_conv_id`，po.py:212-236）。内存缓存只是读穿缓存（`get_curr_conversation_id` :174-188：内存 → 表 → None，命中后回填 :187）。
-- **WebChat 显示消息权威源**：`platform_message_history`（platform_id=webchat）。列表加载经 `ChatService.get_session` 取最近 1000 条（chat_service.py:1414-1448）。
+- **WebChat 显示消息权威源**：`platform_message_history`（platform_id=webchat）。`ChatService.get_session` 现接受一基页码和 1-1000 的 page_size，返回总数与 has_more；前端默认每页 50 条并逐页向前加载（`chat_service.py:1414-1469`；`dashboard/src/composables/useMessages.ts:283-430`）。
 - **群历史权威源**：同表（platform_id=各 IM 平台）。索引 `(platform_id, user_id, id)`（po.py:262-269）。
 - **持久化时机**：对话切换/新建/删除即写 preferences（conversation_mgr.py:123、137、158、169 四处入口）；对话历史在 agent 完成后的收尾阶段整体覆写（internal.py:452-539，见请求侧笔记 §6）；WebChat 用户消息先写、bot 消息流式过程中按批写（chat_service.py:1143-1151、:897-1088）。
 - **无防抖**：`save_interval = 60`（conversation_mgr.py:25）是死代码（全仓仅定义处出现），不存在周期落盘或防抖合并。
@@ -137,7 +137,7 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
   - 可过滤消息类型、平台与排除 id/平台（:373-395）；
   - `include_history=False` 时延迟加载 content（:415-416）；
   - 多平台分页强制走全局排序索引（:417-443）。
-- **WebChat 会话列表**：`get_sessions`（chat_service.py:1382-1405）按 creator 分页 100 条/页，排除项目会话。
+- **WebChat 会话列表**：`get_sessions` 按 creator 分页并排除项目会话；单个会话的消息历史也已分页，第一页为最新记录，旧页前插时按消息 ID 去重。
 - **群历史**：`PlatformMessageHistoryManager.get`（platform_message_history_mgr.py:108-123）分页读取后反序（时间升序）；`get_group_message_history` 工具支持数量上限（≤50）、`before_id` 分页、不区分大小写的关键字搜索与发送者过滤（message_tools.py:370-393、:418-434）。
 - **无跨表全文索引**：搜索均为 SQL 层 ilike 扫描，无独立搜索索引；命中定位由 WebChat 前端在已加载消息中滚动定位（scrollToMessage，Chat.vue:1472-1480），会话数据层无消息级定位 API。
 
@@ -163,8 +163,9 @@ SharedPreferences 现在不再在启动时镜像整张 `preferences` 表：内�
 ## 8. Agent、模型、知识库与附件绑定
 
 - **Persona（角色）**：对话级绑定——`ConversationV2.persona_id`，`/new` 继承（见 §3）；同时存在**会话级覆盖**：`session_service_config` 规则（存 `preferences` 表，scope=umo）按"会话规则强制 → 对话 persona → provider 默认 persona"的优先级解析（persona_mgr.py:92-127），webchat 无 persona 时回落 `_chatui_default_`（:117-120）。
-- **模型**：**不绑定会话/对话**。请求时从 `event.get_extra("selected_model")`（WebChat 前端可选）或 provider 默认模型解析（astr_main_agent.py:1411-1412），无历史快照。
+- **模型**：**不绑定会话/对话**。请求时从 `event.get_extra("selected_model")`（WebChat 前端可选）或 provider 默认模型解析（astr_main_agent.py:1364），无历史快照。
 - **Provider/Agent 类型**：会话级规则可覆盖 provider（`provider_perf_chat_completion` 等，session_management_service.py:20-22）；`agent_runner_type` 是配置级。
+- **配置档案中的 Agent Runner**：Local runner 的默认 provider、fallback、Persona、压缩与运行参数作为 `agent_runner.config` 嵌入每份配置 profile；对话消息仍不保存这些字段的历史快照（`astrbot/core/config/agent_runner.py:9-36,172-201`）。
 - **知识库**：会话级配置（UMO 路由/规则），删除会话时经 `register_on_session_deleted` 级联清理（conversation_mgr.py:30-43 注释、:171-172）；实际检索注入发生在请求侧。
 - **附件**：消息级绑定（part 内 `attachment_id`，见 1.5），不参与上下文历史快照（历史只存引用/文件名，文件实体独立于 conversations 表）。
 

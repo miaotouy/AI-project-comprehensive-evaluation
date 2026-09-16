@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：逐文件通读源码 + 交叉核对文档
 >
@@ -63,7 +63,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 Agent 工作台的会话执行器已扩展为 Claude Code、Pi、DSH 三种运行时。它们经 `AgentSessionRuntimeService` 进入同一聊天调度与持久化边界；新增的跨会话投递服务会保存投递与结果状态，使子 Agent 的消息可在会话之外继续路由和恢复。Home Topic 的分支则仍以消息树和 active node 为事实源；从叶子消息新建分支会创建真实树分支，而非复用旧路径。
 
-普通聊天还新增“复制为新对话”消息操作；该入口由 Home 消息列表适配器交给既有 Topic 写入链处理。运行表现、跨窗口同步与异常恢复未在本次静态调查中验证。依据：`src/main/ai/agentSession/AgentSessionRuntimeService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/MessageService.ts`、`src/renderer/pages/home/messages/homeMessageListAdapter.tsx`。
+普通聊天支持“复制为新对话”、多选全选与统一 assistant 消息编辑。删除活动节点时，服务层会保留仍可达的回复并重新选择活动分支，避免把同支后续回复一并遗失。流式调度还会等 terminal 事件完成分发后才接纳 follow-up，降低尾帧与下一回合重叠；平滑流在完成时强制排空缓冲文本。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/streamManager/AiStreamManager.ts`、`src/renderer/hooks/useSmoothStream.ts`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`。
 
 ## 未验证事项
 

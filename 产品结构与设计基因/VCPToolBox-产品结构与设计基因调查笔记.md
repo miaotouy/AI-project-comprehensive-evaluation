@@ -2,9 +2,9 @@
 
 > 调查对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：静态核对当前 README、架构与记忆专项文档、请求和插件入口、Git 完整提交历史及现有 VCPToolBox/VCPChat 专项笔记；补充阅读作者讲解视频的本地 ASS 字幕，未启动服务、客户端、分布式节点或真实记忆库
 >
@@ -127,7 +127,7 @@ VCPToolBox 的主组织单位不是“会话”或“应用定义”，而是一
 
 ### 四、长期事实与派生计算资产分层
 
-**模式与证据：当前结构确认。** 日记文件、消息账本和人工配置是可编辑事实；chunk、Embedding、Vexus 索引、Tag 关系、V9 bundle 与 RiverMemo artifact 是由事实和配置生成的查询资产。摄取、后台派生、原子发布、兼容检查和按需加载将二者连接。
+**模式与证据：当前结构确认。** 日记文件、消息账本和人工配置是可编辑事实；chunk、Embedding、Vexus 索引、Tag 关系、V9 bundle 与 RiverMemo artifact 是由事实和配置生成的查询资产。摄取、后台派生、原子发布、兼容检查和按需加载将二者连接。当前 `NativeKnowledgeRuntime` 又把日记索引 registry、查询观测与 Memo artifact 收进同一个 Rust 所有权边界，JS 主要负责计划和协议适配（`KnowledgeBaseManager.js:367-385,998-1025,2031-2486`）。
 
 **产品作用与边界。** 原始事实可继续被人或 Agent 编辑，计算密集的关系和检索结构可以重建或更换代际；请求只读取已发布资产，减少热更新混代。并非所有状态都有同等恢复能力：OneRing 运行锁、进行中的工具回合、审批和部分后台队列仍有各自的内存或跨文件边界。
 
@@ -156,6 +156,10 @@ TagMemo 仍以 V9.1 传播和 V9.2 曲线读出存在，RiverMemo Topology V3 �
 ### 插件扩张不保证统一治理
 
 manifest 让大量能力进入同一目录，但权限、超时、取消、审计、配置和恢复仍随协议与插件而异。插件数量和能力跨度说明扩展性，不能据此推出统一安全沙箱、相同生产成熟度或所有插件默认启用。
+
+### 安装器已成为独立产品表面
+
+仓库内的 Rust 安装器现同时提供 TUI 与 headless 流程，覆盖环境检测、组件选择、镜像测速、Portable Git/Node/Python、下载缓存、解压、依赖安装、配置向导、进度日志和安装后校验。它仍是部署入口而非运行时能力注册单位，但已不能只视作零散脚本；其状态机与模块边界见 `vcp-installer-source/src/main.rs:304-532,579-1091`、`vcp-installer-source/src/installer/mod.rs`、`vcp-installer-source/src/runtime/mod.rs:13-282`。
 
 ## 来源覆盖缺口与未验证事项
 

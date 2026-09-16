@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态走读应用根装配、主题与配色生成、导航栈、公共组件目录、设置持久化与资源目录；未启动 Android 设备、未运行 APK，未下钻 Compose、Material3、Haze、Sonner 等依赖内部实现
 >

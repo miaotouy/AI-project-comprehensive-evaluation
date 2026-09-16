@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读核对当前快照的 Python 后端、Svelte Web 界面、TypeScript API 封装、环境变量示例、CLI 入口、变更记录和仓库文件分布；未运行服务，未修改项目源码
 >
@@ -122,7 +122,7 @@ Direct Connections 的总开关位于管理员 Connections 页面，保存为 `d
 
 ## 4. 模型目录与能力元数据
 
-OpenAI 连接默认从 `{url}/models` 拉模型；Ollama 从 `{url}/api/tags` 拉模型。连接配置提供 `model_ids` 白名单：有白名单时后端不必依赖完整上游目录，可直接或筛选出指定模型。前缀、标签、连接类型和 Provider 会注入统一模型条目。模型目录缓存由后端维护，保存连接后会清空相关缓存并重新获取模型。
+OpenAI 连接默认从 `{url}/models` 拉模型；Ollama 从 `{url}/api/tags` 拉模型。连接配置提供 `model_ids` 白名单：有白名单时后端不必依赖完整上游目录，可直接或筛选出指定模型。前缀、标签、连接类型和 Provider 会注入统一模型条目。模型目录缓存由后端维护，保存连接后会清空相关缓存并重新获取模型；基础模型目录另有一层跨进程 Redis 缓存（键 `{prefix}:models:base`，`models.base_models_cache` 开启时启用），保存/启用连接与管理端刷新都会显式删除该键，避免多 worker 各持一份过期目录（`backend/open_webui/utils/models.py:32,69-105`、`routers/openai.py:347-356`、`routers/ollama.py:321-327`）。
 
 `/models`、`/api/tags` 以及页面加载时的模型刷新只回答“有哪些模型”或更新缓存，不验证聊天生成能力。连接验证是单独的请求：OpenAI 普通连接请求 `/models`，Azure 和 Anthropic 有专用分支；Ollama 请求 `/api/version`。因此即使模型列表刷新成功，也不能据此记录为连接测试成功。
 
@@ -130,7 +130,7 @@ workspace 模型是另一层数据库实体，可以覆盖基础模型或基于�
 
 ## 5. Adapter、协议与请求组装
 
-统一聊天入口根据模型元数据选择 Pipelines、Ollama 或 OpenAI 兼容路径。OpenAI 兼容路由会根据模型条目的 `urlIdx` 取得 URL、Key 和配置，剥离 `prefix_id`，再按 Provider 和认证类型组装请求。Azure 会改写模型部署路径和 API 版本；Anthropic 使用专用 Header/模型目录处理；Responses API 可由连接配置选择。
+统一聊天入口根据模型元数据选择 Pipelines、Ollama 或 OpenAI 兼容路径。OpenAI 兼容路由会根据模型条目的 `urlIdx` 取得 URL、Key 和配置，剥离 `prefix_id`，再按 Provider 和认证类型组装请求。Azure 会改写模型部署路径和 API 版本；Anthropic 使用专用 Header/模型目录处理，其 OpenAI→Anthropic 流式适配只在工具参数拼成完整 JSON（或首字符不是 `{`）时才关闭对应 content block，防止半截参数提前收口（`backend/open_webui/utils/anthropic.py:877-887`）；Responses API 可由连接配置选择。
 
 Ollama 既提供原生 `/api/chat` 等路径，也提供 OpenAI 风格 `/v1/chat/completions`、Anthropic Messages 和 Responses 适配路径。统一聊天工具会在 Ollama 模型与 OpenAI 风格请求之间转换请求参数和响应格式。连接类型字段主要影响元数据和请求策略，不创建独立 Provider 注册表。
 
@@ -203,6 +203,7 @@ OpenAI Key 与 URL 按索引一一对应，没有在连接管理或请求路径�
 - 环境变量、默认配置和旧配置迁移：`backend/open_webui/config.py:82-89`、`:217-357`
 - 数据库配置模型、默认种子和持久化优先级：`backend/open_webui/models/config.py:99-165`、`:196-264`
 - OpenAI 配置读取、保存和模型索引：`backend/open_webui/routers/openai.py:267-305`、`:392-429`、`:529-711`
+- 基础模型目录 Redis 缓存与清缓存：`backend/open_webui/utils/models.py:32,69-105`、`routers/openai.py:347-356`、`routers/ollama.py:321-327`
 - OpenAI 连接测试：`backend/open_webui/routers/openai.py:795-880`
 - Ollama 配置读取、保存和连接测试：`backend/open_webui/routers/ollama.py:213-348`
 - Ollama 多后端模型合并：`backend/open_webui/routers/ollama.py:351-366`、`:386-451`

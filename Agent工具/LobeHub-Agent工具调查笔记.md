@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`（monorepo，重点 `apps/server`、`apps/desktop`、`packages/agent-runtime`、`packages/builtin-tools`、`packages/context-engine`、`packages/types`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读源码梳理（Read/Grep/Glob + 后台子调查代理核实内建工具清单、扩展机制、子代理编排三个子领域）；未修改 LobeHub 仓库任何文件
 >
@@ -25,6 +25,8 @@ LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准
    - 所有路径执行前都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash；
    - local-system 工具的客户端执行收敛为共享运行时入口 `packages/tool-runtime/src/LocalSystemExecutionRuntime.ts`（+cwd 注入，`pathScope` 迁入 `tool-runtime/src/pathScope.ts`）；桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`：`createSandboxEnv`/`SrtSandboxRuntime`/`installDeviceSandbox` + `src/helpers/localSandbox.ts`），`executionTarget.ts` 用 `isLocalSandboxEnabled` 判定——本地命令可在沙箱围栏内执行，也可“裸 spawn”执行（沙箱能力探测/安装/工作目录的细节见维度 13 与生成式输出笔记）。
 5. **结果回注**统一走 `truncateToolResult`（默认 25,000 字符，`lobe-agent-documents` 例外），截断附带明确的 "[Content truncated...]" 提示文本,防止模型误判内容完整。
+6. **循环终止契约**已从宿主各自推断收敛为共享 `runAgentLoop`。循环只负责停止条件与下一步上下文，服务端锁、持久化、hook、trace 和浏览器直跑仍由各宿主的 step 实现承担；统一停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、调用方步数预算和无后续上下文。见 `packages/agent-runtime/src/loop/index.ts:5-28,130-166`。
+7. **共享 Agent 访客工具面**在工具装配和实际执行两处都受门禁。分享配置只授予明确列入 `toolGrants` 的工具或 API；装配阶段裁剪可见集合，builtin dispatch 再调用分享门禁，设备、凭据、子 Agent 与未授权数据工具不会因模型猜到名字而执行。见 `apps/server/src/services/aiAgent/shareGate.ts:89-103,332-393,447-459` 与 `apps/server/src/services/toolExecution/builtin.ts:120-133`。
 
 以下各节给出精确到代码行的证据；其中 alwaysOnToolIds 只在 agent mode 生效（维度 2.1），disabled 工具在统一执行入口的 connector 权限表处拦截（维度 7.3）。
 
@@ -203,6 +205,8 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 **依据**：[interventionAudit.ts](../../lobehub/packages/builtin-tool-local-system/src/interventionAudit.ts)、[local-system manifest](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[errorClassification](../../lobehub/apps/server/src/services/toolExecution/errorClassification.ts)、[ToolsEngine utils](../../lobehub/packages/context-engine/src/engine/tools/utils.ts)。
 
 ## 5. 编排循环
+
+循环外壳现由 `runAgentLoop` 统一，宿主提供单步函数。它在第一步前就检查已终止或 parked 状态，每步完成后再统一判断；调用方的 `maxSteps` 是宿主预算，和 Agent state 内用于强制收尾的 `state.maxSteps` 分开。该抽取减少浏览器、服务端和设备对停止语义的重复实现，但不把分布式锁、队列或持久化挪进通用包。见 `packages/agent-runtime/src/loop/index.ts:30-58,87-128,130-166`。
 
 ### 5.1 迭代/步数上限
 

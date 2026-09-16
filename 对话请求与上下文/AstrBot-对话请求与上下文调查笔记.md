@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：直接阅读源码（事件总线、流水线调度、各阶段实现、并发工具、上下文管理、Agent 构建与 runner、WebChat 流式链路），行号按当前 HEAD 逐一核对
 >
@@ -31,6 +31,8 @@ AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消
 - **并发控制**：`SessionLockManager`（session_lock.py:8-55）按事件循环隔离、UMO 粒度的 `asyncio.Lock` + 引用计数自动清理，包裹整个 LLM 请求（internal.py:220）。
 - **follow-up 严格序**（process_stage/follow_up.py:1-248）：Agent 运行期间同发送者的新消息捕获为 `FollowUpTicket`，在捕获时分配单调序号，`asyncio.Condition` 只放行队首；序号状态按 UMO 维护、无残留时自动释放。
 - **上下文压缩两层**（context/manager.py:45-121）：先轮次截断（enforce_max_turns≠-1），再 token 压缩（82% 阈值触发，`TruncateByTurnsCompressor` 或 `LLMSummaryCompressor`，压缩后仍超限折半兜底）。
+- **Agent Runner 配置随 profile 生效**：Local runner 的 provider/fallback、Persona、安全模式、压缩、重试、最大步骤、工具 schema 和超时集中在 `agent_runner.config`；普通聊天、cron 与后台结果唤醒共享解析函数，避免三条链使用不同默认值（`astrbot/core/config/agent_runner.py:9-36,102-134`；`internal.py:71-145`）。
+- **当前图片在模型调用前统一准备**：入站与引用图片先本地化，再按最长边和 JPEG 质量转换；插件 hook 改写请求后会再次准备新增图片。CUA 为保持坐标一致跳过普通缩放，只对超大输入告警；不可恢复的图片会被移除，纯图片请求退化为 `[Image unavailable]`（`process_stage/method/agent_sub_stages/image_input.py:1-120`；`internal.py:229-386`）。
 
 ## 系统边界与生成任务主链
 
@@ -64,12 +66,12 @@ AstrBot 的一条入站消息经 `EventBus` 从异步队列取出，为每条消
 
 ## 2. 历史选择与上下文拼装顺序
 
-上下文在 `build_main_agent`（astr_main_agent.py:1375+）中拼装，最终载体是 `ProviderRequest`（req.contexts + req.extra_user_content_parts）：
+上下文在 `build_main_agent`（astr_main_agent.py:1545+）中拼装，最终载体是 `ProviderRequest`（req.contexts + req.extra_user_content_parts）：
 
-1. **历史**：`Conversation.content` JSON → `req.contexts`（astr_main_agent.py:1404-1405、:1536-1538），对话不存在则惰性新建（`_get_session_conv` :261-275）。
+1. **原始请求收集**：`collect_initial_request` 读取 Conversation 历史、当前文本、附件与引用，先保持原始图片语义；模型专用图片转换推迟到 InternalAgentSubStage，便于插件 hook 后再次处理（`astr_main_agent.py:1325-1532`）。
 2. **prompt 前缀**：`prompt_prefix` 先套用户输入（`_apply_prompt_prefix`，:1002 调用）。
-3. **persona**：`_ensure_persona_and_skills`（:1010 调用，定义 :499+）按会话规则/对话 persona 解析（解析顺序见会话与消息管理笔记 §8），注入 system prompt 与 begin_dialogs，并把 persona 的工具/技能装配进 `req.func_tool`。
-4. **媒体附件**：图片（压缩后路径入 `req.image_urls` + 文本占位 part）、录音、文件、视频逐组件转文件并附文本说明（:1420-1447）；回复引用消息内的媒体同样处理（:1448-1534，含 fallback 图片提取与 `max_quoted_fallback_images` 上限 :1500-1526）。
+3. **persona**：Local runner 从 profile 的 `agent_runner.config.persona` 取得默认 Persona 与安全模式，再按会话规则/对话 persona 解析，注入 system prompt、begin dialogs 与能力白名单。
+4. **媒体附件**：原始收集阶段将图片、录音、文件和视频定位为本地引用并附文本说明；图片随后由 `prepare_request_images` 按模型策略转换，引用图片复用同一准备结果（`astr_main_agent.py:1325-1532`；`image_input.py:17-120`）。
 5. **引用消息正文**：`_process_quote_message`（:1023-1033）。
 6. **系统提醒块**：群名（`group_name_display`）、当前时间（`datetime_system_prompt`）等拼成 `<system_reminder>...</system_reminder>` 注入 `extra_user_content_parts`（:960-988）。
 7. **群聊上下文**：`on_req_llm` hook 把环形缓冲中该条消息之前的原始消息拼成 `<system_reminder>...BEGIN CONTEXT...END CONTEXT...` 块追加（group_chat_context.py:160-195，详见 §9）。
@@ -102,16 +104,12 @@ _run_compression（:83-121）:
 - **截断器**（truncator.py:15-202）：保护 system 消息、保证 system 后跟 user、修复 tool_call/tool 配对（注释说明 Gemini 严格模式 :56-58）、按轮截断后丢弃最旧 N 轮，仍超限则折半。
 - **token 估算**（token_counter.py:34-78）：优先 `trusted_token_usage`；图片 765 / 音频 500 定额；中文字符 0.6、其他 0.3 估算。
 - **异常兜底**：任何压缩错误返回原消息（manager.py:79-81）。
-- **默认配置**（config/default.py:127-139）：
-  - `context_limit_reached_strategy: "llm_compress"`（压缩策略）；
-  - `max_context_length: -1`（默认不限制）；
-  - `llm_compress_keep_recent_ratio: 0.15`（摘要保留最近轮比例）。
-  注意 `internal.py:94-96` 读取该策略时的兜底默认值是 `"truncate_by_turns"`（配置键始终存在，实际生效以配置为准）。
+- **默认配置**：压缩字段属于 Agent Runner 配置档案（`astrbot/core/config/agent_runner.py:21-29`）——`overflow_strategy` 默认 `"llm_compress"`、`max_turns` 默认 -1（不限制轮次）、`keep_recent_ratio` 默认 0.15。`internal.py:74-136` 读取该档案并经 `resolve_context_compression_config` 映射回 `context_limit_reached_strategy`、`max_context_length` 等既有构建参数；策略缺失时该映射函数兜底为 `"truncate_by_turns"`。
 
 ## 4. SDK、Provider、模型与协议交接
 
-- **交接点**：`build_main_agent`（astr_main_agent.py:1375-1416）先选择 provider——无 provider 时置 LLM 错误消息并返回，否则构造 `ProviderRequest` 并填充 `req.contexts`；模型显式选择经 `event.get_extra("selected_model")` 写入 `req.model`（WebChat 前端可传），否则由 provider 实例的默认模型决定。
-- **Provider 解析**：按 UMO 路由到会话/配置绑定的 provider（`Context.get_using_provider`，`umop_config_router` 负责 UMO 到配置 profile 的路由）；fallback 链（astr_main_agent.py:1306-1338）对 `fallback_chat_models` 列表去重；图像模态不支持时切换 `_select_image_chat_provider`（:1341-1372）。
+- **交接点**：`build_main_agent`（astr_main_agent.py:1558-1586）先选择 provider——无 provider 时置 LLM 错误消息并返回，否则构造 `ProviderRequest` 并填充 `req.contexts`；模型显式选择经 `event.get_extra("selected_model")` 写入 `req.model`（WebChat 前端可传），否则由 provider 实例的默认模型决定。
+- **Provider 解析**：按 UMO 路由到会话/配置绑定的 provider；Local runner 从 `agent_runner.config.model` 读取默认 provider、fallback 与请求重试，图像模态不支持时再走图片 provider 选择分支（`provider/manager.py:218-281`；`config/agent_runner.py:9-15`；`astr_main_agent.py:1255-1322`）。
 - **协议 Adapter 接管**：`InternalAgentSubStage` 只持有 `ProviderRequest` 与 `Provider` 实例，具体协议（OpenAI 兼容/Google/Anthropic 等）由 `astrbot/core/provider` 下的 provider 实现与 `func_tool` 序列化接管；runner 把上下文、额外内容、工具与中断信号组成 `text_chat` 载荷（tool_loop_agent_runner.py:500-514 的 `_iter_llm_responses`）。
 - **第三方 runner**：`agent_runner_type` 非 local 时改用 `ThirdPartyAgentSubStage`（agent_request.py:29-34），Dify/Coze/Dashscope/DeerFlow 等路径集中在 `agent_sub_stages/third_party.py`（本次未逐行核对，见未验证事项）。
 - **会话级开关**：`AgentRequestSubStage.process` 先检查 provider enable（agent_request.py:37-41）与 `SessionServiceManager.should_process_llm_request`（:43-47，会话规则可关闭 LLM 能力）。
@@ -157,7 +155,7 @@ _run_compression（:83-121）:
 
 ## 8. 队列、多会话并发与后台生成
 
-RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而不同平台会话不会共用限流计数（rate_limit_check/stage.py:57-82）。cron 与后台工具唤醒主 Agent 时会保留结构化会话历史，并从当前 Provider 配置读取、校验 `max_agent_step` 后传给 runner；它们不再绕过常规的上下文截断与步数上限（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
+RateLimit 的等待队列以完整 `unified_msg_origin` 分桶，因而不同平台会话不会共用限流计数（rate_limit_check/stage.py:57-82）。cron 与后台工具唤醒主 Agent 时保留结构化会话历史，并从 `agent_runner.config` 读取压缩、fallback、最大步骤和工具超时，交给同一 runner（astr_agent_tool_exec.py:557-596；cron/manager.py:444-510）。
 
 - **SessionLockManager**（session_lock.py:8-55）：外层按事件循环隔离（`WeakKeyDictionary[event_loop, manager]`，避免跨 loop 误用 asyncio.Lock）；内层 `_PerLoopSessionLockManager` 用 `defaultdict(asyncio.Lock)` 加引用计数，计数归零自动清理；单例。锁包住 `build_main_agent` 与整个 agent 运行（internal.py:220-425）——同 UMO 串行化 LLM 请求，跨会话互不阻塞。
 - **follow-up 严格序**（follow_up.py:16-218）：
@@ -173,8 +171,8 @@ RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而
 ## 9. Agent、工具、知识库与附件注入点
 
 - **Agent 构建**：`build_main_agent`（internal.py:231-236 调用，apply_reset=False）产出 `MainAgentBuildResult`（含 agent runner、provider request、provider 与重置协程）；Live Mode 走 `run_live_agent`（internal.py:293-329，action_type="live" 时启用 TTS 处理）。
-- **工具目录**：persona 的 tools/skills 决定装配（`_ensure_persona_and_skills`）；会话插件过滤在构建时生效（`_plugin_tool_fix`，astr_main_agent.py:1042-1068，MCP 工具与无归属工具保留）；`OnLLMRequestEvent` hook 可拦截止步（internal.py:269-272）；api_base 黑名单拦截（internal.py:253-262，名单 :544-545）。
-- **知识库**：`_apply_kb`（astr_main_agent.py:278+）——非 agentic 模式在构建时检索注入，`kb_agentic_mode` 开启时转工具调用；会话级知识库配置在删除会话时级联清理（见会话与消息管理笔记 §8）。
+- **工具目录**：persona 的 tools/skills 决定装配（`_ensure_persona_and_skills`）；会话插件过滤在构建时生效（`_plugin_tool_fix`，astr_main_agent.py:979-1007，MCP 工具与无归属工具保留）；`OnLLMRequestEvent` hook 可拦截止步（internal.py:269-272）；api_base 黑名单拦截（internal.py:253-262，名单 :544-545）。
+- **知识库**：`_apply_kb`（astr_main_agent.py:289+）——非 agentic 模式在构建时检索注入，`kb_agentic_mode` 开启时转工具调用；会话级知识库配置在删除会话时级联清理（见会话与消息管理笔记 §8）。
 - **群聊上下文注入**（group_chat_context.py:41-239 + builtin_stars/astrbot/main.py）：
   - 记录：`on_message` handler（main.py:196-227）按 `group_icl_enable` 开关把群消息格式化为 `[昵称/时间]: 内容`，写入每 UMO 的内存环形缓冲（默认上限 1000 条，可配 `group_message_max_cnt`）；命令消息不记录（handlers_parsed_params 非空，:223）；
   - 注入：`decorate_llm_req`（on_llm_request hook，main.py:325-334）→ `on_req_llm`（group_chat_context.py:160-195）把该条消息之前的历史拼成 `<system_reminder>...--- BEGIN CONTEXT---...--- END CONTEXT ---...</system_reminder>` 追加到 `req.extra_user_content_parts`（:192-195）；
@@ -186,7 +184,7 @@ RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而
 ## 10. 退出恢复、日志与已确认边界
 
 - **退出/重启**：pipeline task 生命周期内无持久化 checkpoint；服务重启丢弃全部内存运行态（群环形缓冲、ChatRunState、follow-up 序号状态）。WebChat 运行中 run 可在前端刷新后经 `/chat/runs/{id}/stream` 快照恢复（数据语义见会话与消息管理笔记 §3），IM 平台无恢复入口。
-- **可观测性**：`event.trace` 记录 `sel_persona`（astr_main_agent.py:658-659）、`astr_agent_prepare`（internal.py:282-291）、`astr_agent_complete`（:393-397）等阶段，Dashboard TracePage 以 SSE 展示；消息日志 category=user_chat（event_bus.py:75-83）；`ProviderStat` 表按 UMO/conversation 关联用量（internal.py:548-588，/stats 命令与 StatsPage 消费）。
+- **可观测性**：`event.trace` 记录 `sel_persona`（astr_main_agent.py:681-682）、`astr_agent_prepare`（internal.py:282-291）、`astr_agent_complete`（:393-397）等阶段，Dashboard TracePage 以 SSE 展示；消息日志 category=user_chat（event_bus.py:75-83）；`ProviderStat` 表按 UMO/conversation 关联用量（internal.py:548-588，/stats 命令与 StatsPage 消费）。
 - **已确认边界**：阶段顺序硬编码于 `STAGES_ORDER`（未注册阶段抛 ValueError，scheduler.py:23-25）；RateLimit 超限默认阻塞而非丢弃；EventBus 无限队列无背压；`third_party.py`（Dify/Coze 等）路径不构建 persona 且错误文案单独解析（本次未逐行核对）。
 
 ## 11. 未验证事项
@@ -209,4 +207,4 @@ RateLimit 的等待队列已改为以完整 `unified_msg_origin` 分桶，因而
 - 上下文：`astrbot/core/agent/context/manager.py`、`truncator.py`、`token_counter.py`、`compressor.py`、`config.py`
 - Agent 构建：`astrbot/core/astr_main_agent.py`（_get_session_conv :261-275、build_main_agent :1375+）、`agent/runners/tool_loop_agent_runner.py`
 - 群上下文：`astrbot/builtin_stars/astrbot/group_chat_context.py`、`builtin_stars/astrbot/main.py`
-- 配置：`astrbot/core/config/default.py`（context_limit_reached_strategy :127、max_context_length :139、provider_ltm_settings :224-230）
+- 配置：`astrbot/core/config/default.py`（agent_runner :207-210、provider_ltm_settings :237）、`astrbot/core/config/agent_runner.py`（模型/Persona/压缩字段 :9-36）

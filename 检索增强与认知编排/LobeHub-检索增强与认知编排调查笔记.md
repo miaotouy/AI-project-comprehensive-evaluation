@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读核对个人记忆工作流、提取服务、Agent 工具装配及已有汇总、独特功能和工具笔记；未运行 Upstash、PostgreSQL、向量检索或真实模型调用
 >
@@ -15,6 +15,8 @@
 ## 结论摘要
 
 LobeHub 的 Personal Memory 同时属于“主动记忆演化”和“工具化检索”。它将用户事实分为身份、偏好、经历、活动和情境五层，支持来源追踪、向量索引、用户编辑，以及由 Agent 工具读写。会话 topic 可由用户发起或小时工作流触发提取，提取后的记忆成为后续 Agent 回合可调用的 `lobe-user-memory` 工具事实源。
+
+全文候选层现在可选 Elasticsearch。统一 `FtsSearchRepo` 覆盖 Agent、群组、Topic、消息、文件、文件夹、Page、知识库和用户记忆；Elasticsearch 只负责候选召回，产品对象始终回 PostgreSQL 按当前用户、工作区和可见性重新水化。默认仍是 PostgreSQL 搜索，启用 Elasticsearch 需要显式配置 provider、索引同步和回填。见 `packages/database/src/repositories/ftsSearch/index.ts:39-77,98-199`、`elasticsearch.ts:67-168` 与 `apps/server/src/services/ftsSearch/index.ts:30-36,99-157`。
 
 已确认的完整主链为“topic 进入受控异步工作流，先提取四类 CEPA 记忆再处理 identity，持久化后由开启记忆的 Agent 获得记忆工具；模型按需搜索、分类查询或写回，结果再参加工具循环”。这是结构化、可编辑的长期用户记忆，而非一次发送前固定注入候选文本。代码未显示检索命中自动构造下一阶段查询，因而不将其写成检索驱动认知编排。
 
@@ -48,6 +50,8 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 
 工作流在每个关键阶段使用 guard，并将不可重试错误包装为 `WorkflowNonRetryableError`，避免错误反复入队；topic 工作流全局并发上限为 25，初始投递还使用每用户并发 5 的节流。这个主链的入口、阶段和失败收口见 `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts:50-149,175-330`。
 
+启用 Elasticsearch 后，用户记忆查询和产品全文搜索可先从外部索引取得有界候选，再由 PostgreSQL 做作用域过滤与对象水化；候选提供者失败会以 `FtsSearchCandidateError` 保持可见，不静默伪装成空结果。索引同步使用 PostgreSQL projection、outbox 与按字节限制的 bulk drain，映射迁移采用物理索引 generation 与 alias。见 `packages/database/src/repositories/ftsSearch/index.ts:200-229`、`apps/server/src/services/ftsSearchSync/service.ts:201-402` 与 `packages/database/src/repositories/ftsSearchDocument/migration/`。
+
 运行时先读 Agent 级 `memory.enabled`，否则读取用户设置；解析结果作为 `globalMemoryEnabled` 传入工具装配。工具引擎在 chat mode 白名单和 agent mode 规则中都用该值控制 Memory manifest，默认值为 false。见 `apps/server/src/services/aiAgent/index.ts:3085-3116` 与 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:284-336`。
 
 ## 阶段、反馈与结果注入
@@ -78,6 +82,7 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 
 - 未运行 Upstash Workflow、PostgreSQL/HNSW、LLM 提取或语义检索，提取准确度、召回质量、延迟和小时扫描成本未验证。
 - 本次未逐读 `MemoryExtractionExecutor` 的去重、合并、删除、Embedding 和向量查询实现，未确认候选数、相似度阈值或 rerank。
+- Elasticsearch 的召回质量、索引回填时长、outbox 积压恢复、mapping generation 切换与外部集群可用性未运行验证；静态代码只能确认候选召回后回 PostgreSQL 复核作用域。
 - Agent 级、用户级开关与 read-only/read-write 权限在全部工具 API 上的实际优先级和审批行为未运行验证。
 - 并发的小时提取、用户主动提取和模型工具写回发生冲突时的合并、重试、删除恢复和来源一致性未验证。
 
@@ -89,3 +94,5 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 - `apps/server/src/services/aiAgent/index.ts:3085-3116`：Agent/用户 memory.enabled 的运行时解析。
 - `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:284-336`：chat/agent mode 下的 Memory 工具可见性门控。
 - `packages/database/src/schemas/userMemories/`：五层记忆对象、来源字段和向量索引 schema。
+- `packages/database/src/repositories/ftsSearch/`、`apps/server/src/services/ftsSearch/`：PostgreSQL/Elasticsearch 可选候选层与作用域水化。
+- `apps/server/src/services/ftsSearchSync/`、`packages/database/src/repositories/ftsSearchDocument/`：索引投影、同步与 mapping migration。

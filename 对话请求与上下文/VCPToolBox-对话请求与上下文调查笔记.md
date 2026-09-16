@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：直接阅读源码：server.js 聊天端点与 /v1/interrupt、routes/protocolBridge.js 协议归一化、modules/chatCompletionHandler.js 请求管线、contextManager.js、messageProcessor.js、roleDivider.js、vcpLoop/toolCallParser.js、handlers/streamHandler.js 与 nonStreamHandler.js、reasoningContentAdapter.js、vcpInfoHandler.js，以及 Plugin/VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的 processMessages
 >
@@ -22,6 +22,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **VCP 工具循环走纯文本标记协议**：`<<<[TOOL_REQUEST]>>>`，模型正文即调用声明，工具结果以 `<!-- VCP_TOOL_PAYLOAD -->` user 消息回送再次 POST；
 - **模型上下文与前端显示分叉**：工具循环维护独立的 `currentMessagesForLoop`，推理字段另存于日志消息，客户端看到的 SSE/JSON 与模型下一轮读取的内容不是同一份；
 - **预设占位符有按项收敛的注入边界**：VCPTavern 只对预设声明的允许名单、且标为伪系统消息的文本展开运行时占位符；其余占位符保留原文，嵌套消息对象递归处理（`Plugin/VCPTavern/VCPTavern.js:155-242,397-640`）；
+- **编译规则进一步分化**：SAR 支持精确/包含及其排除模式，Detector/SuperDetector 支持 `/pattern/flags` 正则替换；OneRing 默认把 assistant 的时间与来源标记投影为紧随其后的 user 伪系统块，而不再内联进 assistant 正文（`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`、`Plugin/OneRing/OneRing.js:518-568,1467`）；
 - **存在显式的请求级停止与重试机制**：`/v1/interrupt` 端点 + 客户端断联级联中止；上游调用有状态码重试、连接超时、语义路由候选模型回退；响应层有按 `clientIp::messageId` 的去重回放。
 
 ## 系统边界与生成任务主链
@@ -84,6 +85,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - `VCPTimeLine` 找到首个可信 system/系统前缀 user 中的时间线占位符，只接受一次声明，把时间线文本替换到该占位符，其余同名占位符清空（`Plugin/VCPTimeLine/VCPTimeLine.js:372-416`）。
 - `ContextFoldingV2` 需要 system 中的激活占位符（`{{ContextFoldingV2}}` 或 `[[ContextFoldingV2]]`，可带阈值尾缀）；它基于 assistant 历史块的深度、向量相似度和 FoldingStore，把低相关且已有摘要的 assistant 内容原地替换为摘要，未完成摘要则异步触发，开关本身从最终 system 文本删除（`Plugin/ContextFoldingV2/ContextFoldingV2.js:164-191` 激活检测、200-211 开关移除、213-226 候选与阈值、228-290 折叠循环）。
 - OneRing 会把触发器改成系统通知、按配置追加上下文/时间标记，并在数组上挂载 `__oneRingMeta`；后续产生新数组的阶段显式复制这份元数据（`Plugin/OneRing/OneRing.js:929-950` processMessages；`modules/chatCompletionHandler.js:264-279` copyArrayMetadata、1102-1106 检测器后复制、1126-1137 冻结响应元数据）。
+- OneRing 的热配置现默认采用 `system_user_block`：assistant 正文保持原样，来源与时间另放进 user 伪系统块。`inline` 仍保留给要求严格角色交替的旧模型。前者可能形成连续 user 消息，因此兼容性取舍已经从“标记放在正文哪里”变成“时间理解与角色数组约束如何权衡”（`Plugin/OneRing/OneRingConfig.json:1-8`、`Plugin/OneRing/OneRing.js:518-568,1467`）。
 
 ## 4. 流式与非流式执行
 

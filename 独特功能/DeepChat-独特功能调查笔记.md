@@ -2,19 +2,19 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖 Tape 执行日志/契约谱系、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
 >
-> 调查范围：CLI 本地控制平面是否形成产品主链；Tape 执行日志与执行契约谱系；DeepSeek 原生 web 搜索接线；IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移的既有结论不受影响；明确排除普通 Chat 底座与已被现有十类笔记完整覆盖的机制
+> 调查范围：CLI 本地控制平面、Tape 执行日志与执行契约谱系、DeepSeek 原生 web 搜索、IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移，以及 Codex 用户包与 workspace skills；明确排除普通 Chat 底座与已被现有类目完整覆盖的机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-DeepChat 的八个候选全部有实际实现，其中七项达到“主链确认”（静态证据），一项归并已有类目：
+DeepChat 的九个候选全部有实际实现，其中八项达到“主链确认”（静态证据），一项归并已有类目：
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
@@ -25,6 +25,7 @@ DeepChat 的八个候选全部有实际实现，其中七项达到“主链确�
 | Ollama 管理 | 主链确认 | OllamaManager + 专用设置页（下载/刷新/运行模型），见能力卡 5 |
 | DeepLink | 主链确认 | `deepchat://` 协议三命令（start / mcp / provider），见能力卡 6 |
 | CLI 本地控制平面 | 主链确认 | `src/main/cli/` 完整子系统：本地 HTTP RPC + token 鉴权 + 命令面（agent runs/MCP/skill/provider/settings/媒体/OCR）+ launcher 安装与审批，见能力卡 7 |
+| Codex 用户包与 workspace skills | 主链确认 | `.codex-plugin/plugin.json` 安装/审查/发布链 + 项目五类 skills 目录即时发现，见能力卡 8 |
 | ACP 作为模型 | 归并已有类目 | 已在 Agent 角色笔记 §3 与 LLM 渠道笔记 §2 主链确认，见“已归并”节 |
 
 结论：README 的 "Why Choose DeepChat" 清单与代码基本一致；"Remote-Ready Workflows"、"Tape.systems Philosophy"、"Skills That Travel"、"Integrated Ollama with comprehensive management"、"Rich DeepLink Support" 均有可走通的主链；CLI 本地控制平面为"多表面连续性"标签再添一个终端表面（能力卡 7）。README 中"配置一个搜索助手模型连接任意搜索源"的表述与当前可执行路径不符（见能力卡 4 边界）。
@@ -233,6 +234,20 @@ deepchat <command>（终端）
 
 **证据强度**：全部静态源码确认；未运行 CLI 二进制、未验证 launcher 安装与打包产物。
 
+### 能力卡 8：Codex 用户包与 workspace skills（可携带扩展包）
+
+**用户目标**：把一个经过审查的包作为 Skills、MCP 配置与上下文 hook 的组合单元安装，并让项目仓库自带的 Skills 只在该工作区生效。它把跨工具 Skill 迁移从单文件传输扩展到带来源、版本、权限选择和运行时上下文贡献的包生命周期。
+
+**事实对象与入口**：用户插件只认 `.codex-plugin/plugin.json`。来源可以是本地目录、ZIP 或无凭据的公开 HTTPS Git URL；安装前先复制到临时 snapshot，解析 manifest，并让用户分别选择 Skills、hooks 和 MCP。安装、更新、诊断与卸载界面位于 Plugins Hub，契约见 `src/shared/types/userPlugin.ts`、`src/main/plugin/userPluginSource.ts:188-299` 与 `src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`。
+
+**执行与治理**：hook 只支持 SessionStart、UserPromptSubmit、SubagentStart 三类输入边界，命令默认 5 秒超时；stdout 只接受事件名匹配的文本 `additionalContext`。调用记录写入 Tape 的 `plugin/context-hook`，失败进入诊断；禁用或更新会撤销资格并取消在途命令。Direct ACP Agent 不接收这些 hook 上下文。实现见 `src/main/plugin/userPluginPackage.ts:17,83-168`、`userPluginHooks.ts:45-141,445-533`。
+
+**工作区 Skills**：Skill 服务在当前项目根的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录即时发现条目，校验物理路径位于项目内，并把它们作为只读项目资产合并到本轮路由目录，不污染共享 Skill 缓存（`src/main/skill/index.ts:1295-1318`）。
+
+**独特性判断**：这一能力组合了包来源审查、按能力授权、运行时上下文贡献、MCP/Skill 发布和项目作用域发现，超出普通 Skill 导入或普通 MCP 配置。标签：可携带 Agent 扩展包、上下文 hook、项目级 Skill。
+
+**证据强度**：主链静态确认；未运行 Git/ZIP 安装、hook 命令、更新回滚和同名 workspace Skill 冲突。
+
 ## 已归并到现有类目的能力
 
 - **ACP 作为模型**：归并已有类目。Agent 角色笔记 §3（`agentManager.ts:54-118` 的 kind 分派）、LLM 渠道笔记 §2（`apiType: acp` 与 ACP backend 的边界）均已主链确认：ACP Agent 作为模型选择器一等条目、ACP-backed subagent 空工具目录、ACP workspace UI。本笔记不再重写。
@@ -248,7 +263,7 @@ deepchat <command>（终端）
 
 ## 对特色贡献统计的影响
 
-建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（执行轨迹审计与回放，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、Artifact。
+建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（执行轨迹审计与回放，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）、Codex 用户包与 workspace skills（可携带扩展包）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、Artifact。
 
 ## 未验证事项
 
@@ -258,6 +273,7 @@ deepchat <command>（终端）
 - Ollama pull 进度事件与并发下载的运行时行为未实测。
 - DeepLink 在三种平台的协议注册与 MCP 未就绪排队恢复未实测。
 - CLI：未运行 CLI 二进制、launcher 安装/卸载与 detached run 的终端行为；token scope 与审批的端到端流程为静态走通。
+- 用户插件：未运行公开 Git/ZIP/目录安装、hook 命令、更新回滚、诊断重试和 workspace Skill 同名覆盖。
 - 未运行构建、测试或应用本体；证据全部来自当前快照静态源码。
 
 ## 关键源码索引
@@ -274,5 +290,6 @@ deepchat <command>（终端）
 - 搜索：`src/main/mcp/inMemoryServers/{bochaSearchServer,braveSearchServer,deepResearchServer}.ts`、`src/main/mcp/settings.ts:130-151`、`src/main/desktop/browser/YoBrowserPresenter.ts`、`src/main/agent/deepchat/runtime/dispatch.ts:461-476`
 - DeepSeek 原生搜索：`src/main/provider/deepseekResponsesAdapter.ts`、`src/main/provider/aiSdk/streamAdapter.ts:254-291`、`src/main/provider/aiSdk/runtime.ts:1181-1245`、`src/renderer/src/components/message/MessageBlockSearch.vue`
 - CLI 本地控制平面：`src/main/cli/server.ts`、`src/main/cli/routes.ts`、`src/main/cli/runService.ts`、`src/main/cli/launcherService.ts`、`src/main/cli/agentTokenAuthority.ts`、`src/main/cli/policy.ts`、`src/main/approval/approvalBroker.ts`、`src/shared/contracts/localControl.ts`、`src/shared/contracts/cliCommands.ts`、`src/renderer/src/components/cli/CliApprovalDialog.vue`、`docs/guides/cli.md`
+- Codex 用户包与 workspace skills：`src/main/plugin/{userPluginSource,userPluginPackage,userPluginHooks,userPlugins}.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`、`src/main/skill/index.ts:1295-1318`、`src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`
 - Ollama：`src/main/provider/managers/ollamaManager.ts:12-81`、`src/renderer/settings/components/OllamaProviderSettingsDetail.vue`
 - DeepLink：`src/main/deeplink/index.ts:56-510`、`:666-693`（净化）

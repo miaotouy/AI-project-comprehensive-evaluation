@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：只读通读根 README、AGENTS.md、packages 结构与核心模块；由专项核验覆盖 CLI/server/TUI/Desktop/app 各面，并对关键入口（`event/sql.ts`、`sync.ts`、`acp/service.ts`、`packages/codemode`、`export.ts`）抽查；未运行应用，未修改被调查仓库
 >
@@ -105,11 +105,11 @@
 
 **入口与触发者**：`packages/opencode/src/cli/cmd/acp.ts` 启动服务；外部 ACP 宿主经协议端点调用 `packages/opencode/src/acp/service.ts` 的服务接口（`service.ts:56-61`，实现 `94-488`），覆盖初始化、会话的新建/加载/续作/分叉、模型设置、提示输入与取消。
 
-**完整主链**：宿主先握手声明能力（`service.ts:115`）→ 新建/加载/续作/分叉会话 → 提示进入既有 Session/工具/权限系统执行 → 事件回传给宿主；权限面经 `acp/permission.ts` 回调宿主确认。MCP 能力经协议广播（initialize 能力声明）。
+**完整主链**：宿主先握手声明能力（`service.ts:115`）→ 新建/加载/续作/分叉会话 → 提示进入既有 Session/工具/权限系统执行 → 事件回传给宿主；权限面经 `acp/permission.ts` 回调宿主确认。加载、续作和分叉优先恢复 backing session 持久化的 agent/model/variant，再以消息历史和目录默认值兜底；模型配置变化会向宿主推送 `config_option_update`，reasoning 块按 part ID 区分（`packages/opencode/src/acp/service.ts:917-963、1089-1152`、`acp/event.ts:120-144`）。MCP 能力经协议广播（initialize 能力声明）。
 
 **独特性判断**："LLM 渠道"是 OpenCode 消费外部模型；ACP 是反向被集成（OpenCode 作为 agent 服务被外部客户端驱动）。同一仓库同时内置 GitHub Copilot 渠道（`packages/core/src/github-copilot/`），构成"消费 Copilot + 服务 ACP"的双向互操作。
 
-**证据强度**：服务接口与实现源码为静态事实；与真实 ACP 宿主的互通未运行验证。
+**证据强度**：服务接口、配置恢复与事件映射实现及对应单元测试为静态事实；与真实 ACP 宿主的互通未运行验证。
 
 ## 已归并到现有类目的能力
 

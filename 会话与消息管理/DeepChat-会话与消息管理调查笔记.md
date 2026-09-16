@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SQLite 表定义与 transcript/pending input 数据层、turn 与路由、renderer 的 message store 与 IPC 增量层），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -23,6 +23,7 @@ DeepChat 是 main process 驱动、renderer 订阅的持久化会话系统：
 - 消息窗口按"估算测量 + spacer + anchor + 二分查找"只接收当前窗口的 `MessageListItem`，同时服务历史分页和流式追加。
 - 搜索分三层：会话内查找只匹配已加载的 display messages；跨会话历史搜索走 FTS5（触发器同步 + LIKE 回退），经 `sessionsSearchHistoryRoute` 服务 Spotlight；内存 MCP 服务器另把同一索引暴露为模型工具。
 - 上下文压缩的进行中与完成状态由消息 metadata 表达，并在启动时按持久化 marker 进行协调；它标示上下文边界，不改变普通 user/assistant 消息的三档状态模型（`src/shared/types/agent-interface.d.ts:442-445`、`createDeepChatAgentHarness.ts:575-582`）。
+- Tape message facts 现在还承担 transcript 投影重建：同一终态 record 可在正常写入或重放时走同一投影器，恢复消息表、user 内容分表、assistant blocks 与搜索文档；投影 cursor 防止重复全量重放。
 
 ## 系统边界与数据主链
 
@@ -103,6 +104,8 @@ state: pending | claimed | blocked | retry_required | consumed
 
 **重启恢复（源码确认）**：`recoverInputsAfterRestart`（`pendingInputs.ts:392-468`）收口排队与 steer 输入——claimed 且有物化 user 消息的队列项直接消费，否则释放回队列并登记；已 claimed 的 steer 输入中未读待定 user 消息置 error（`transcript.ts:366-384`）；未 claimed 的 steer 项转为队列项（:419-424）。结果交给 pump 持有（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:512-513`）。
 
+每个会话的活动 queue 项上限为 10。数据层在 admission 前以 `countActiveQueue` 计数，达到上限即拒绝继续入队；该容量不包含已经 consumed 的记录，见 `src/shared/pendingInput.ts:2`、`src/main/session/data/pendingInputs.ts:474`。
+
 pending assistant 消息的兜底恢复在 `recoverPendingMessages`（`transcript.ts:771-801`）：处于待定态的 user（非 steer）与 assistant 消息置 error，assistant 补 `common.error.sessionInterrupted` 错误块；`shouldKeepPending`（:827-840）保留带 steer receipt 的 user 消息与等待用户操作的 action 块。
 
 ### 1.5 分支与版本
@@ -120,6 +123,8 @@ updateAssistantContent(...)   :297-307（replace blocks + 保持 pending + 可�
 finalizeAssistantMessage(...) :386-401（replace blocks + updateContentAndStatus(sent) + 搜索文档 + usage + Tape）
 setMessageError(...)          :419-441（同上，status=error）
 ```
+
+终态写入与 Tape 重放共享 `TranscriptProjectionApplier`。它按消息 id 幂等 upsert 主消息行，重建 user 内容分表或 assistant blocks，并同步搜索文档；Tape 中的 message retraction event 则成批删除消息及 trace、搜索命中等 sidecar。`deepchat_transcript_projection_meta` 以 session、Tape incarnation、最大 entry id 和 projection version 保存重放游标，见 `src/main/session/data/transcriptProjection.ts`、`src/main/session/data/tables/deepchatTranscriptProjectionMeta.ts:20-87`。
 
 搜索文档与命中快照：
 
@@ -177,6 +182,7 @@ setMessageError(...)          :419-441（同上，status=error）
   - `deepchat_pending_inputs`：v17 → v43 → v46 → v67（`deepchatPendingInputs.ts:52-71`；v67 加 `retry_required_at` 并归一化旧行）
   - `new_sessions`：v11 → v15 → v16 → v20 → v21 → v44 → v59（`newSessions.ts:97-131`；v44 为 revision 前移恢复、v59 加编排策略列）
   - `deepchat_assistant_blocks` / `deepchat_search_documents`：v26 规范化重建（`deepchatAssistantBlocks.ts:104-113`、`deepchatSearchDocuments.ts:64-73`）
+  - transcript projection cursor：独立表 `deepchat_transcript_projection_meta`，当前 projection version 为 1；它不是消息 schema 版本，而是 Tape 到 transcript 派生表的重放协议版本。
 - **导入导出**：导出路由 `sessionsExportRoute`（`routes.ts:511-518`）→ `AgentSessionExportService`；启动组件清单含 `legacy_import`（`src/main/logging/mainLogEvents.ts:76`）。本次未追踪 legacy import 与导出的完整数据链。
 
 ## 8. Agent、模型、知识库与附件绑定
@@ -191,6 +197,7 @@ setMessageError(...)          :419-441（同上，status=error）
 ## 9. 设计取舍与已确认边界
 
 - transcript 同时服务展示、搜索、usage 与 Tape 等二级数据，一条消息的完成/错误路径承担全部同步更新（§2）；流式中间态只写 blocks 与 pending 状态，不重复写全量 content。
+- transcript 表是可重建投影，但 usage 统计不由投影器重放，因为 fork/import/recovery 重放 record 不代表发生了新的 Provider 调用（`transcriptProjection.ts` 的类级契约）。
 - 失败 assistant 消息保留 `error` 状态和错误块，不静默丢弃；retry/edit/delete 的尾随截断语义统一（§4）。
 - fork 是"复制到新会话"而非版本树指针，消息层不存在父子/变体字段（§1.5）。
 - queue/steer 输入独立于已完成消息持久化，claimed 未物化项进入 `retry_required` 显式等待用户处置（§1.4）。
@@ -218,3 +225,4 @@ setMessageError(...)          :419-441（同上，status=error）
 - renderer 缓存与 IPC：`src/renderer/src/stores/ui/message.ts`、`src/renderer/src/stores/ui/messageIpc.ts:92-219`
 - 显示稳定缓存：`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:367-438`
 - 升级驱动：`src/main/data/mainDatabase.ts:315-388`
+- Tape transcript 投影：`src/main/session/data/transcriptProjection.ts`、`src/main/session/data/tables/deepchatTranscriptProjectionMeta.ts`

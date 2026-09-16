@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/core/system-prompt`、`packages/core/agent-loop`、`packages/compaction/`、`packages/spill/`、`packages/context/`、`packages/interaction/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读。先读 `docs/architecture.md`、`docs/agent-lifecycle.md` 及 `docs/subsystems/` 下 session、system-prompt、compaction、spill、core 页面，再逐包核对实现（agent-loop 主循环全量、session surface/deriveMessages、compaction-basic 全量、spill-policy、context 四插件、user-questions），并对 `packages/context`、`packages/compaction`、`packages/core` 全文检索 `@earendil-works`/pi 引用；未运行任何交互会话
 >
@@ -18,7 +18,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 1. **上下文唯一来源是会话事件日志**：模型历史由 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储；"模型可见即已落盘"是不变量。上下文增量（文件指令、时间、tmux、运行时上下文）都以 `user/message` 事件落盘后再进请求。
 2. **请求组装分两半**：system prompt 与工具 schema 由 `ctx.systemPrompt.assemble()` 从插件注册的 sections/contexts/tools/variables 组装；消息历史由日志派生；两者在每步 `buildRequest` 中合并为一次 `llm/stream` 调用，请求头（config+system+tools）本身也以 `request/header` 事件落盘。
-3. **compaction 是可选能力 seam**：`compaction/start`/`summary`/`end` 三个 log-only 事件记录事务，真正的替换是一次 `surfaceOp: replace` 的 `user/message`（摘要节点）。触发分"步骤压力"与"context-overflow 恢复"两条路径，压力默认阈值为 contextWindow×0.8。
+3. **compaction 是可选能力 seam**：文本摘要与工具结果裁剪仍沿用日志化替换；图像压力另由 `compaction-image-offload` 记录 `image/offload` 选择事件，把最旧图像 occurrence 在请求投影中替换为可读取占位符后重试，避免重写 durable 消息本体（`packages/compaction/compaction-image-offload/src/{image-offload,projection}.ts`）。
 4. **spill 是另一可选能力 seam**：`tools/post-execute` 策略把超 `maxInlineBytes`（base 组合默认 50000）的纯文本工具结果落盘为会话私有文件，模型只见 head/tail 预览与读取提示。
 5. **与 pi 无代码继承**：相关包源码检索零命中，仓库唯一的 pi 关系是 LLM 适配器 `dsh-llm-pi-ai` 对 `@earendil-works/pi-ai` 库的依赖（另有补丁过的 `@earendil-works/pi-tui`）；compaction/上下文概念有对应物，但架构与实现均为独立设计。
 
@@ -40,7 +40,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
   -> 有工具调用或 next-step 新输入则下一 step；否则 agent/turn-stopping -> turn/end
 ```
 
-边界：事件日志的持久化（JSONL/SQLite 后端、`session/flush` 检查点、crash 修复）属于会话与消息管理类目；inbox 提交按钮、命令面板、Web 客户端工作流属于 Chat UI；工具执行管线细节（approval、沙箱、超时）属于 Agent 工具类目。
+边界：事件日志的 JSONL handle 持久化、格式迁移、`session/flush` 检查点与 crash 修复属于会话与消息管理类目；inbox 提交按钮、命令面板和 Web 客户端工作流属于 Chat UI；工具执行管线细节属于 Agent 工具类目。
 
 ## 1. 提交入口、任务对象与状态机
 
@@ -112,7 +112,7 @@ chunk、turn/step 边界、log-only 记录一律不投影。派生带缓存：`r
 4. 组装 `EpochHeader`（config+adapterDefaults+system+tools），与上一快照比较，变化时落盘 `request/header`（reason 为 initial/resume/change），路由容量变化时落盘 `request/context`；
 5. 最终 `GenerateOptions` 带 messages（派生历史）、`sessionId`、`signal` 交给 `preparedCall.stream()` 或 `llm/stream` 瀑布。
 
-请求头是日志状态而非内存字段，任意请求可从日志重建（`docs/subsystems/session.md#the-request-header-event`）。协议适配器在 `packages/llm`（`llm-deepseek` 直连 SSE、`llm-pi-ai` 走 pi-ai 库），属于 LLM 渠道管理类目，本次不展开。
+请求头是日志状态而非内存字段，任意请求可从日志重建。DeepSeek 第一方 adapter 现在默认走 Messages，并允许模型声明 `systemPromptUpdate: in-history`：system 变化时追加历史 system/message 而不是改写最前缀；该路由决策由 prepared model metadata 交给 agent-loop（`packages/llm/llm-deepseek/README.md:48-88`）。
 
 ## 5. 流式事件、缓冲、节流与顺序
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）。
 >
@@ -59,6 +59,8 @@ MessageInput 提交 → useChatHandler.sendMessage（会话生成中则进排队
 4. **撤销/重做不持久化**（重启清空）；崩溃残留的生成中节点在加载时按"是否有内容"自动修复为完成或错误状态（`repairInterruptedGeneratingNodes`），不再依赖僵死修复侦听器。
 5. **搜索无索引**：跨会话=Rust 目录扫描 + 正则预过滤（仅定位会话，不定位消息）；会话内=当前活动路径内存线性扫描（最多 50 条，搜索不到分支外消息）。
 6. **生成排队**：生成中提交消息进 `queuedSessionIds`，`queueReplyMode` 决定合并回复或链式追加；排队/等待节点有可见状态徽标（MessageHeader）。工具调用审批用 Promise 解析器让执行链阻塞等待，默认无限等待、可配置超时自动拒绝，支持 VCP 外部协议请求。
+7. **停止与切换竞态已收口**：会话级停止会同时中止执行节点并把未执行队列结算为“队列已停止”；会话详情异步加载完成后会复核当前选择，较早请求的晚到结果不会覆盖用户随后选择的会话（`stores/session/sessionRuntimeManager.ts:23-43,129-168`、`sessionLifecycleManager.ts:740-808`）。
+8. **纯图片请求兼容**：管道末端可为正文为空的纯图片用户消息补充请求级占位文本，默认开启但可配置关闭；原消息正文不被改写（`core/context-processors/asset-resolver.ts:229-249`）。
 
 ## 未验证事项
 

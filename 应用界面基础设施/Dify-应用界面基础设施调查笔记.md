@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态核对 Next 根布局、Console provider、Dify UI 包接入、主题 hook 和公共媒体组件；未运行浏览器或依赖库内部实现
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify Web 是 Next 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件、Provider 数据和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，没有全局自研 Portal 容器。
+Dify Web 是 Next 16.3.4、React 19.3 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，没有全局自研 Portal 容器。
 
 主题由 next-themes 管理，HTML 使用 `data-theme` 属性，默认跟随系统并禁用切换动画；根部 ToastHost 固定为五秒超时、最多三条。静态代码可确认这些 Provider、状态归属和业务调用方式，但不能确认底层 overlay 的焦点陷阱、Esc/遮罩关闭、Portal 层级、读屏、触摸和响应式视觉效果，因为未下钻依赖实现或运行浏览器。
 
@@ -22,7 +22,7 @@ Dify Web 是 Next 应用，根布局集中挂载 theme、Jotai、TanStack Query�
 
 `web/app/layout.tsx` 在根层配置 device viewport，并依次装配 Jotai、`next-themes`、Nuqs、TanStack Query hydration、服务端 i18n、ToastHost 和 TooltipProvider。系统功能在服务端预取后用 hydration boundary 交给客户端，表明全局能力中既有请求期数据，也有客户端局部状态。
 
-控制台的 `web/app/(commonLayout)/providers.tsx` 另装配事件发射器、模型/套餐 Provider context 以及 `ModalContextProvider`。公开发布页不必经过这套 Console context；因此 Console 的定价、模型、插件和开场白等命令式 Modal 不是全产品每个页面都可调用的基础设施。
+控制台的 `web/app/(commonLayout)/providers.tsx` 另装配事件发射器和 `ModalContextProvider`。模型列表、Provider feature flag、套餐与配额等状态已从旧 Provider context 迁往各自 query consumer，定价弹窗也有独立生命周期；公开发布页不必经过这套 Console context。因此 Console 的定价、模型、插件和开场白等命令式 Modal 不是全产品每个页面都可调用的基础设施。
 
 ## 1. 弹窗、浮层与菜单
 

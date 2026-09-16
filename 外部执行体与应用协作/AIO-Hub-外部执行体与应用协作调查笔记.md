@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：静态复核 `src/tools/vcp-connector/` 的分布式节点协议与工具桥接；复用 Agent 工具和独特功能笔记；未连接真实 VCPToolBox 服务端
 >
@@ -60,7 +60,7 @@ AIO Hub 通过 `src/tools/vcp-connector/` 把自身注册为 VCP 生态的分布
 
 ## 执行、回流与控制语义
 
-远端 `execute_tool` 在 AIO 本地真实执行工具、文件与模型相关工具链，结果和事件异步回传。可回传内容包括工具结果、进度帧与审批请求；取消经 `cancel_tool` 帧 best-effort 传播，并由超时与断线清理兜底。产品面（`VcpConnector.vue` 连接/监控/分布式三个 Tab、`DistributedNodePage`）展示连接状态、节点身份、暴露工具列表与桥接工具列表，接管入口即本地直接操作节点。
+远端 `execute_tool` 在 AIO 本地真实执行工具、文件与模型相关工具链，结果和事件异步回传。可回传内容包括工具结果、进度帧与审批请求；取消经 `cancel_tool` 帧 best-effort 传播，并由超时与断线清理兜底。产品面（`VcpConnector.vue` 连接/监控/分布式三个 Tab、`DistributedNodePage`）展示连接状态、节点身份、暴露工具列表与桥接工具列表，接管入口即本地直接操作节点。监控消息支持分类通知策略：总开关默认关闭，全局可选关闭/仅浮动/通知中心/同时四种输出方式，并允许对六类消息分别覆盖，设置随连接配置持久化（`types/protocol.ts` 的 `VcpNotificationMode`、`components/NotificationSettingsPage.vue`）。
 
 ## 权限、凭据与治理边界
 

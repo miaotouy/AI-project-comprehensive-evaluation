@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读复查 cron 数据模型、APScheduler 管理器、主动 Agent 唤醒与后台工具执行路径；并对照既有独特功能笔记，未修改 AstrBot 源码
 >
@@ -16,7 +16,7 @@
 
 AstrBot 的主动能力包含两种不同的运行形态，不能合并为同一种“后台任务”。第一种是持久化的 active-agent cron：任务定义与最近运行状态在 SQLite 等数据库实现中保存，启动时恢复到进程内 APScheduler，到期后用合成事件重新进入目标会话的主 Agent，并将历史和可选主动消息交付回会话。它满足本类目的完整静态主链。
 
-第二种是模型发起的后台工具或后台 handoff：调用立刻返回一个 UUID，实际协程由 `asyncio.create_task` 在当前进程中执行，完成或捕获异常后再次唤醒主 Agent 发送结果。它有运行 ID 和交付链，但当前代码未见持久化运行记录、取消 API 或重启恢复，因此只能作为进程内后台工作单元记录。群聊概率主动回复是条件唤醒，不创建独立任务对象，作为主动触发边界补充而非主链。
+第二种是模型发起的后台工具或后台 handoff：调用立刻返回一个 UUID，实际协程由 `asyncio.create_task` 在当前进程中执行，完成或捕获异常后再次唤醒主 Agent 发送结果。它有运行 ID 和交付链，但当前代码未见持久化运行记录、取消 API 或重启恢复，因此只能作为进程内后台工作单元记录。两类唤醒现都从 `agent_runner.config` 读取模型 fallback、Persona、安全模式、压缩、最大步骤和工具超时，避免主动运行与普通会话配置分叉（`astrbot/core/cron/manager.py:444-510`；`astrbot/core/astr_agent_tool_exec.py:557-596`）。
 
 ## 系统边界与主链
 
@@ -53,6 +53,8 @@ active-agent cron 主链如下：
 ## 执行、结果交付与状态更新
 
 cron 到期后，管理器从 payload 取回目标会话和 note，构造 `CronMessageEvent`。该事件保留原 `MessageSession`，其 `send` 通过原会话发送；管理器读取原会话的对话历史、加入 scheduled-task 系统提示并运行主 Agent。若存在目标投递会话，会将 `send_message_to_user` 加入工具集；最终无论是否有显式发送，都会把执行摘要与上下文持久化到对话历史，见 `astrbot/core/cron/events.py:14-64` 与 `astrbot/core/cron/manager.py:360-509`。
+
+runner 自身以 ERROR 状态结束但没有抛异常时，管理器现在会将该运行转成异常并写入 cron 的 failed/last_error，而不再误记 completed。任务列表仍只返回当前发送者拥有的任务，但同一群里存在他人任务时会附加所有权说明；编辑和删除错误也会区分 Dashboard/旧数据无创建者、同群其他成员和其他会话（`astrbot/core/cron/manager.py:505-525`；`astrbot/core/tools/cron_tools.py:207-236,297-377`）。
 
 因此 cron 是“会话内续作”而非 LobeHub 式新任务 topic：它以合成事件重新进入同一会话的主 Agent，结果归属为该会话的主动消息与对话历史；`CronJob` 只保存任务层面的最近状态、时间和最后错误。模型、工具和平台发送实现分别属于 Agent 工具与消息渠道类目。平台是否支持主动消息仍受 `support_proactive_message` 元数据和发送工具的实际平台实现约束。
 

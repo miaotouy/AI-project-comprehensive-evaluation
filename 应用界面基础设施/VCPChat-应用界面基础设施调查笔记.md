@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -16,7 +16,7 @@
 
 VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒加载，确认框提供 Promise 接口，头像裁剪另有 Canvas 实现；通知分为短时 Toast 和持久侧栏列表，没有系统 Notification 通道。
 
-主题切换会覆写整份 `themes.css` 并重新加载窗口，不是运行时 token 热替换。主窗口壁纸跟随主题文件，用户没有独立壁纸管理、主题编辑或导入导出入口。Compact 导航也由设置显式控制，不随窗口宽度自动切换。
+预置主题切换仍会覆写整份 `themes.css` 并重新加载窗口；其上又增加了外观 profile/material 运行时与外观工作室，可在当前窗口预览并保存字体、材质、明暗与背景等结构化设置。主窗口主题预置仍没有文件导入导出，Desktop 壁纸系统继续独立。Compact 导航由设置显式控制，不随窗口宽度自动切换。
 
 图片预览运行在独立 Electron 子窗口，支持缩放、绘图和 OCR，能力面比普通灯箱更大。核心控件已有部分 ARIA，但消息与侧栏区域的语义、弹窗焦点陷阱和焦点归还仍不完整。
 
@@ -135,15 +135,17 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 - 因此 body.light-theme 的施加要等"读设置 → IPC → nativeTheme 回环"这一异步往返完成；**light 模式用户首帧先以暗色 :root 渲染一帧再切换**（基于调用链的静态推断，是否肉眼可见取决于往返耗时）。`main.js:420` 注释自述："默认 system，由渲染进程启动时发送已保存偏好"。设置缺失时降级：get-current-theme IPC 查主进程（`uiManager.js:213-221`），最终兜底 'light'（:219, :167-169）。
 - 与整窗口重载的关系：主题文件切换（handleApplyTheme）`reload()` 后上述启动链路整体重跑一遍，首帧主题行为与冷启动一致，无内联主题脚本兜底。
 
-**主题选择器窗口与能力边界**（本次主题体系核对）：
+**主题选择器与外观工作室的能力边界**：
 
 - **主题选择器内容**（`Themesmodules/themes.html` + `themes.js` + `themes-module.css`）：入口有主窗口标题栏"主题商店"按钮（`main.html:37-45`）、托盘菜单（`modules/trayManager.js:33`）与 Desktop 窗口（`Desktopmodules/builtinWidgets/vchatApps.js:314`）三处。
 
-  窗口由主题卡片网格、实时预览区和"应用并刷新"按钮组成：卡片是**双栏预览**，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（关键颜色字段及实现见 `themes.js:74-119`）；下方实时预览区同构模拟侧栏/内容区（:136-219）。**无主题编辑器**：不能编辑颜色、不能新建自定义主题；
+  窗口由主题卡片网格、实时预览区和“应用并刷新”按钮组成：卡片是双栏预览，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（`Themesmodules/themes.js:74-219`）。该窗口本身仍只选择 CSS 主题预置，不编辑主题文件。
 
   `#saveThemeBtn`（:222-226）实际只是调用 applyTheme IPC 应用选中主题，变量名（"保存主题"）与按钮文案"应用并刷新"存在落差，不能据此理解为保存自定义主题。
 
-**无主题导入/导出。** 检索全仓 `*.js/*.html` 的 `customTheme/importTheme/exportTheme/saveTheme` 与主题 JSON 文件均未找到（saveTheme 仅上述按钮标识符一处）；主题就是 `styles/themes/` 下的 CSS 文件，切换机制即覆写 `themes.css`，无打包、分享、导出主题文件的能力。**本次未找到**自定义主题能力。
+**外观 profile/material 运行时。** `appearance-studio.js` 维护已提交 snapshot 与当前 draft，控件变化先提交到 appearance runtime 做窗口内预览；保存时以设置 patch 持久化，并在本地应用失败时尝试回滚持久快照。关闭脏面板会要求继续编辑、放弃或保存。它编辑的是结构化外观配置和 CSS material variables，不会生成或导入 `styles/themes/` 主题文件。`modules/ui-system/appearance-studio.js:734-794,955-1209,1359-1382`、`appearance-profile-runtime.js:1-8`
+
+**无主题文件导入/导出。** 预置仍来自 `styles/themes/` 下的 CSS；外观工作室提供运行时配置编辑，但未形成主题包导入、导出或分享格式。
 
 **主题文件结构与元数据。** 17 个文件均为纯 CSS 变量文件，实测 17/17 同时含 :root（暗色）与 body.light-theme（亮色）两个变量块；变量分六组：壁纸、基础色（bg/边框/输入框）、文字色、气泡色、UI 元素与语义色（按钮/危险/成功/通知/工具）、滚动条与 shimmer。
 
@@ -296,6 +298,8 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 当前快照继续把通用 UI 的可释放资源收敛到 surface、task 与 contribution registries，并为嵌入应用、覆盖层、通知菜单和启动主题提供各自的生命周期控制器。另新增独立 Tauri bootstrapper：其职责是受管安装、环境检查、修复、更新与回滚后的桌面交接，和 Electron 主窗口的主题、弹窗、聊天状态不共享同一运行时。静态阅读只能确认状态与事件的所有权，不能证明实际窗口焦点、可访问性或升级回滚体验。
 
+全局设置保存由 save coordinator 汇总多个保存 owner。每次操作有 operationId，持久层 revision 作为下一次 compare-and-swap 的 expectedRevision；冲突、可重试错误、保存中、脏、已保存和空闲按固定优先级合成到表单状态。关闭面板时 `flush()` 会等待各 client 的保存 hook 和进行中 promise，遇到 error/conflict 停止，而不是静默丢弃待保存状态。`modules/ui-system/settings/save-coordinator.js:54-112,129-200,246-260`
+
 依据：`modules/ui-system/surface-controller.js`、`task-handle.js`、`contribution-registry.js`、`next-shell/overlay-coordinator.js`、`apps/bootstrap-installer/src-tauri/src/lib.rs`、`process.rs`、`storage.rs`。
 
 ## 8. 设计取舍与已确认边界
@@ -311,7 +315,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 **表情包插入原始 `<img>` HTML。** 不是转义后的 Markdown 语法。
 - **Compact 导航由设置驱动**而非断点自动触发；侧栏宽度从 CSS computed 值动态读取而非代码硬编码。
 
-**主题仅能整包更换。** 无主题编辑器与导入/导出，自定义主题需手工编写或替换 `styles/themes/` 下的 CSS 文件；主窗口壁纸与主题绑定、无独立壁纸管理（Desktop 窗口壁纸系统独立于主题壁纸，支持视频/HTML 动态壁纸与远程下发）。
+**预置主题与外观配置分层。** CSS 主题预置仍整包更换且无主题文件导入/导出；外观工作室可编辑结构化 profile/material 并运行时预览。主窗口主题壁纸与预置绑定，Desktop 窗口壁纸系统则支持视频、HTML 与远程下发。
 
 ## 9. 未验证事项
 
@@ -324,6 +328,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 - `.loading-spinner-small` 无任何 CSS 定义，话题/Agent 列表加载期实际只有文字、无旋转动画——该视觉表现未运行确认，也不排除有动态注入样式覆盖。
 - 渲染进程崩溃（render-process-gone）与主窗口加载失败（did-fail-load）只打日志、无恢复 UI，崩溃后的实际行为（白屏、能否重启）未实测。
 - 主题选择器卡片/预览区的双栏配色与壁纸缩略图（sharp 生成、WallpaperThumbnailCache 缓存命中）的实际渲染表现未运行验证；Desktop 窗口壁纸系统（视频/HTML 动态壁纸、远程下发 desktop-remote-set-wallpaper）的实机表现未验证。
+- 外观工作室的回滚、revision 冲突提示、多个保存 owner 同时 flush 及关闭压力只确认状态机和测试入口，未运行 Electron 交互验证。
 
 ## 10. 关键源码索引
 
@@ -332,6 +337,8 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 - `modules/ipc/themeHandlers.js`（22-39 set-theme-mode）
 - `modules/ipc/settingsHandlers.js`（278-297 set-theme 通道）
 - `Themesmodules/themes.html` / `themes.js`（双栏预览卡片与"应用并刷新"）
+- `modules/ui-system/appearance-studio.js`、`appearance-profile-runtime.js`、`material-runtime.js`（结构化外观预览与保存）
+- `modules/ui-system/settings/save-coordinator.js`、`autosave.js`（operationId、revision 冲突、自动保存与关闭屏障）
 - `styles/themes.css`（变量 + 材质/行为规则）
 - `styles/base.css`（19 基础字号）
 - `styles/animations.css`

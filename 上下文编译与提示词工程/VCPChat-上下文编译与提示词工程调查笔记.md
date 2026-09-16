@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：仅依据 [`../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) 已确认的静态源码证据整理；不补查原笔记未展开的规则编译路径
 >
@@ -16,7 +16,7 @@
 
 VCPChat 当前可由原笔记确认的“上下文编译”证据，集中在两条路径：单聊发送前由 `chatHandlers.js` 构造请求上下文并清理未设置的采样参数；群聊先由模式策略选择发言者，再为每个 agent 基于内存中的群聊历史构建上下文。前者确认了请求构建阶段存在附加和规范化，后者确认了规则选择与 agent 请求之间的交接。
 
-原笔记没有逐行核实单聊历史选择、system prompt 拼装、变量或宏展开，也没有追到最终 Provider payload 的完整消息数组。因此不能据此声称 VCPChat 已形成一条完整、可编辑、可持久化的提示词规则链。群聊模式中的优先级、概率和排序是已确认的选择规则；它们的配置 schema、版本、导入导出和实际命中结果仍需单独验证。
+单聊现由独立的请求编排器集中完成历史筛选、附件转换、消息正则、Tavern 规则、系统提示词和模型参数组装，因此这些阶段的先后关系已可静态确认。三模式提示词仍以 Agent 配置为权威，PromptSponsor 还把模式、积木、轮换内容、仓库与预设管理暴露为受白名单约束的模型工具；它们与 Tavern 请求级注入是两套对象，不应混写为同一规则系统。`modules/chat/singleChatRequestOrchestrator.js:254-353`、`modules/services/pluginAgentOperationService.js:5-28,323-586`
 
 ## 系统边界与规则编译主链
 
@@ -33,17 +33,20 @@ VCPChat 当前可由原笔记确认的“上下文编译”证据，集中在两
   -> agent 依次发起请求
 ```
 
-单聊的已确认片段是：
+单聊编译链为：
 
 ```text
-send-to-vcp
-  -> 读取 settings.json 中的服务器地址与 API key
-  -> 清理未设置的可选采样参数
-  -> 附加 vcpchatExtensions.requestContext
-  -> fetch VCP 服务器
+过滤 isThinking 历史
+  -> 附件路径、提取文本和媒体帧转换为 content parts
+  -> 按消息轮次应用上下文正则
+  -> 仅对当前 user 消息应用 Tavern user_suffix
+  -> 展开 Agent 名称并合成 system prompt
+  -> 应用 Tavern system_suffix，再把 context_inject 插入非 system 消息
+  -> 构造模型参数并交给 send-to-vcp
+  -> 主进程执行思维链剥离、context sanitizer、参数省略与 requestContext 附加
 ```
 
-这两段分别确认了“选择规则进入 agent 上下文”和“请求构建器修改请求上下文”两个局部链路；原笔记没有证明它们共享同一规则对象或同一宏展开器。
+群聊模式和单聊编译器不共享同一规则对象。群聊模式决定本轮有哪些 Agent 参与及其顺序；单聊编译器决定一个 Agent 请求里的消息和提示词。顺序模式现可保存自定义 speakerOrder，配置中不存在的旧成员被过滤，新成员按原成员顺序稳定追加。`Groupmodules/groupchat.js:266-309`、`Groupmodules/modes/sequentialMode.js:20-36`
 
 ## 1. 规则对象、权威源与作用域
 
@@ -55,7 +58,7 @@ send-to-vcp
 
 ### 权威源与未确认部分
 
-原笔记只确认了运行时策略对象、成员配置、群聊内存历史和 `settings.json` 被这些路径读取；没有确认规则对象是否独立持久化、是否具有 schema/版本/启停字段，或是否支持导入导出。也没有确认发言模式、tag、概率和默认话题名是否由统一的可编辑规则系统管理。
+可持久化规则至少分三类：Agent 三模式提示词保存在 Agent 配置；Tavern 规则保存在独立规则库并带类型、作用域和启停状态；群聊模式设置位于群组配置的 `modeSettings`。PromptSponsor 对提示词模式和积木操作采用命令白名单，并以 requestId 对写操作做十分钟进程内幂等；它没有独立规则版本字段，也未形成通用导入导出格式。`modules/services/pluginAgentOperationService.js:134-190,323-586`
 
 因此，本笔记把上述内容称为“已确认的选择/请求变换”，不把它们进一步推断为完整的规则资产模型。
 
@@ -77,13 +80,13 @@ send-to-vcp
 
 ### 请求变换顺序
 
-原笔记确认单聊发送前会读取设置、清理未设置的采样参数并附加请求上下文，然后发起 fetch；但没有记录历史截断、变量展开、模板拼装和预算裁剪之间的完整顺序。原笔记还明确指出单聊上下文拼装顺序未逐行展开，因此这些阶段不能补写为已确认事实。
+单聊历史只过滤 `isThinking` 临时消息，没有在编排器内执行 token 截断。每条消息先生成 content parts，再应用调用方提供的文本变换；当前用户消息随后应用 user suffix。系统提示词在消息循环之后展开 Agent 名称并合成前缀、主体和追加段，再应用 system suffix；context inject 最后插入非 system 消息。预算裁剪若由 VCP 服务端执行，仍不属于当前客户端可确认范围。`modules/chat/singleChatRequestOrchestrator.js:288-353`
 
 群聊中，每个 agent 的上下文构建发生在发言者确定之后，并基于同一个内存 `groupHistory` 的当前状态。处理循环是串行的，所以前一个 agent 的新消息能够被后一个 agent 的上下文构建看到。证据为 `Groupmodules/groupchat.js:585-591`、`:611-719` 以及其 `for...of await` 调度（`:578-579`）。
 
 ## 3. 请求层编译与模型可见结果
 
-单聊请求的请求层结果可以确认到两个方面：未设置的可选采样参数会被清理，且 `vcpchatExtensions.requestContext` 会被附加到请求数据中。实际发送路径是 `modules/ipc/chatHandlers.js` 的 `send-to-vcp`，而不是仓库中另一份未被 require 的 `modules/vcpClient.js`。后者虽包含另一套请求实现和 300 秒超时，但原笔记确认它没有被 `main.js` 或其他文件引用，不能作为实际编译链证据。
+单聊请求层现在可以确认到完整 `messages` 的紧邻构建器：历史消息保留 role、name 与工具调用字段，附件可形成文本说明和 `image_url` part，system 消息置于最前，三类 Tavern 规则在 renderer 编排器内完成。主进程随后执行协议清理和 VCP 扩展附加；实际 HTTP 入口仍是 `modules/ipc/chatHandlers.js:983-1409`，不是未接线的 `modules/vcpClient.js`。
 
 群聊请求层可确认的是：发言选择结果影响哪些 agent 依次获得上下文；每个 agent 的上下文由 `contextForAgentPromises` 构建。群聊 assistant 消息还保存 agent、模型和模型来源字段，但原笔记没有确认完整请求消息数组、system prompt 内容或这些字段如何映射到最终 Provider payload。
 
@@ -97,7 +100,7 @@ send-to-vcp
 
 ## 5. 显示层投影与消息渲染器交接
 
-原笔记确认了流事件会由 `renderer.js` 分发，流式增量渲染、缓冲和合帧属于消息渲染器；但没有确认任何规则、模板、宏或占位符只作用于 Markdown、文本或 DOM 的显示投影。
+Agent 正则仍有显示投影分支：渲染规则作用于完整消息文本和 DOM 结果，不改写历史真源；同一配置中的上下文规则则由请求编排调用方变换消息文本。二者共享规则资产但消费面不同，渲染实现见消息渲染器笔记。
 
 因此，本次不能把群聊发言排序、请求上下文附加或 `finalizeStreamedMessage` 的文本选择描述为显示层规则。显示层是否存在独立规则对象、如何选择，以及其结果是否不进入请求和权威消息，均未在原笔记中确认。
 
@@ -109,7 +112,7 @@ send-to-vcp
 
 ## 7. 失败、更新与已确认边界
 
-- 单聊请求变换与群聊发言选择的静态路径已确认；单聊完整上下文顺序和规则资产管理未确认。
+- 单聊编译顺序、附件 content parts、三类 Tavern 注入和系统提示词展开已静态确认；服务端预算裁剪与最终 Provider 二次变换仍未确认。
 - 群聊的 invite_only 模式以空发言者列表结束自动选择；naturerandom 有随机概率和最终保底；这些行为是代码路径事实，实际命中分布未运行验证。
 - 单聊请求没有被原笔记确认存在客户端超时或本地 AbortController；这属于请求运行时可靠性边界，不应误写成规则编译失败处理。
 - 原笔记没有确认变量缺失、脚本错误、循环替换、规则解析失败或规则版本更新的收口语义。
@@ -117,18 +120,20 @@ send-to-vcp
 
 ## 8. 未验证事项
 
-- 单聊历史选择、system prompt 拼装、变量/宏展开、格式化和预算裁剪的顺序。
+- VCP 服务端收到请求后的预算裁剪、宏二次展开和 Provider payload 变换。
 - `requestContext` 的完整 schema、来源、字段如何进入最终 Provider payload，以及是否会影响权威消息。
 - 群聊成员配置、tag、概率和模式是否可在界面编辑、持久化、导入导出或按会话/角色覆盖。
 - 三种群聊模式的实际命中结果、随机分布，以及多条条件组合下的运行时顺序。
 - 规则对象的版本、启停、互斥、冷却和冲突合成语义。
 - 是否存在独立的显示层规则、命中预览、编译快照、差异或 trace。
 - 规则解析错误、变量缺失、脚本异步行为、循环替换和更新迁移的错误收口。
-- 附件如何进入请求体，以及重试/续写如何重建上下文；原笔记已将其列为未核实。
+- 重新生成与 FlowLock 是否在所有边界条件下完全复用单聊编排器；普通发送的附件进入请求体已确认。
 
 ## 9. 关键源码索引
 
 - `modules/ipc/chatHandlers.js:53-118,855-1270`：请求上下文附加、未设置可选模型参数清理及实际 `send-to-vcp` 请求路径。
+- `modules/chat/singleChatRequestOrchestrator.js:254-353`：单聊历史、附件、正则、Tavern 规则、系统提示词和模型参数编译顺序。
+- `modules/services/pluginAgentOperationService.js:5-28,323-586`：PromptSponsor 命令白名单、幂等写入与三模式提示词资产操作。
 - `Groupmodules/groupchat.js:22-26,477-719`：群聊模式注册、群聊上下文构建和内存 `groupHistory` 交接。
 - `Groupmodules/groupchat.js:578-591`：群聊 agent 处理的串行顺序及使用内存历史的设计取舍。
 - `Groupmodules/modes/sequentialMode.js`：全部成员按配置顺序发言。

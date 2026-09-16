@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态阅读 OpenClaw 的 embedded、CLI 与 Codex harness 路径，追踪工作区 bootstrap 文件、skills、prompt hooks、memory、context engine、compaction、模板和请求前 transform；并直接核对兄弟 Codex 仓库的模型可见上下文与 skills 约束
 >

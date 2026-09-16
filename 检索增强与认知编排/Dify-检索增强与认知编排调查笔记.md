@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：以 API 后端的 ORM、摄取任务、检索服务、工作流节点、RAG Pipeline 服务和单元/集成测试入口作静态追踪；未启动 Dify、Celery、Redis、向量库、模型或外部数据源
 >
@@ -106,6 +106,8 @@
 
 关于安全，数据模型对 Dataset、Document、Segment、元数据绑定、附件绑定、外部知识绑定和 Pipeline 均保存 tenant ID；Dataset 权限表按 Dataset、账户和 tenant 建索引（`api/models/dataset.py:913-923, 1439-1463, 1530-1558, 1722-1753, 1802-1825`）。检索可用库查询也明确按 tenant 过滤。**静态推断：** 这些字段与入口过滤按 tenant 划定工作区隔离。**未运行验证：** 未以不同角色、仅本人/部分团队权限、服务 API、外部知识端点或签名文件 URL 进行越权测试，因此不能据此断言端到端授权效果，也不能判断检索文本是否足以抵御不可信文档中的提示注入。
 
+**源码直接确认。** 知识库 Service API Key 现在可以绑定到指定 Dataset。创建 Key 时，控制台会校验 `dataset_ids` 均属于当前租户并写入绑定；请求装饰器每次读取绑定集合，已绑定 Key 只能访问 URL 中明确携带且位于集合内的 Dataset，无 Dataset ID 的列表和创建类端点也会被拒绝。没有绑定行的 Key 仍保留租户内全库访问语义，以兼容既有 Key（`api/controllers/console/datasets/datasets.py:1121-1174`；`api/controllers/service_api/wraps.py:311-360`）。这是 API 凭据的资源作用域，不会改变应用运行时按 tenant 和应用配置检索的路径；权限实际效果仍未进行多角色运行验证。
+
 ## 与相邻谱系的可比/不可比边界
 
 Dify 可以与 Open WebUI、AIO Hub 等知识资产管线比较资料来源、长期文档资产、异步索引、检索设置、引用、租户边界、发布和运行记录。它把这些对象持久化，并提供应用、Workflow 与摄取 Pipeline 三个消费/编排面。
@@ -117,6 +119,7 @@ Dify 可以与 Open WebUI、AIO Hub 等知识资产管线比较资料来源、�
 - 未运行文件、Notion、网站抓取、外部知识 API、解析器、Embedding、关键词、全文、向量库、reranker、摘要索引或多模态附件，故未验证实际召回、分数含义、引用完整性、吞吐、超时和费用。
 - 未部署 Redis/Celery，故未验证租户队列的 FIFO、公平性、TTL 过期、任务重投递、线程取消和暂停/恢复在竞争下的实际表现。
 - 未进行多租户、多角色、公开 Pipeline、服务 API 或文件签名 URL 的访问测试；本文的安全结论仅限静态过滤和字段传播。
+- 未运行单 Dataset API Key 的创建、改绑、删除和越权请求；兼容的未绑定 Key 仍拥有租户内全库访问范围。
 - 未构造含恶意指令的知识文档，也未审查 prompt 组织模板，因此不能评价检索上下文的提示注入隔离。
 - 未审查所有 Workflow 节点、插件和 Agent 工具调用路径；“未发现自动递进查询/记忆演化”仅覆盖本笔记列出的知识检索、应用 runner 和 Pipeline 主入口。
 
@@ -130,3 +133,4 @@ Dify 可以与 Open WebUI、AIO Hub 等知识资产管线比较资料来源、�
 - Workflow 结果契约与节点：`api/core/workflow/nodes/knowledge_retrieval/retrieval.py:13-83`、`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-301`
 - 普通应用注入：`api/core/app/apps/chat/app_runner.py:161-215`、`api/core/app/apps/completion/app_runner.py:118-174`
 - RAG Pipeline 草稿、发布、试跑与异步执行：`api/services/rag_pipeline/rag_pipeline.py:264-301, 361-512, 575-659`、`api/tasks/rag_pipeline/rag_pipeline_run_task.py:37-207`
+- 知识库 API Key 作用域：`api/controllers/console/datasets/datasets.py:1121-1174`、`api/controllers/service_api/wraps.py:311-360`

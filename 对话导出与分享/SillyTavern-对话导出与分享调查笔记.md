@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：静态源码局部调查；读取过去聊天列表导出按钮与点击处理器、`/api/chats/export` 服务端实现（jsonl 直读与 txt 投影）、`/api/chats/import` 与 `/api/chats/group/import` 转换器、Assistant 聊天导出/导入、消息持久化 schema（swipes/swipe_info/branch/附件引用）、群聊消息结构；检索 html2canvas/jsPDF/window.print/navigator.share 等库与 API；未运行应用
 >

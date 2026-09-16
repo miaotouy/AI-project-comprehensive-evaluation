@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/components/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：只读源码梳理组件树、Markdown 管线与事件流；未在真实终端运行
 >
@@ -117,7 +117,13 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 
 渲染器的超链接、图片和真彩色分支既可依赖环境自动探测，也可由 `terminal` 设置或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量明确覆盖。覆盖结果集中缓存于 `getCapabilities()`，Markdown 链接、图片降级文本与工具结果共用该结果（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
 
-## 13. 关键源码索引
+## 13. Fullscreen 渲染交互
+
+fullscreen transcript 仍使用完整渲染行，但搜索已缓存可搜索语料与命中结果，并对 ASCII 连续文本采用区段映射，避免为每个字符分配来源对象；可见命中区间用二分定位。界面增加可点击的前后命中按钮、离开末尾时的 jump-to-end 指示器，以及可拖动滚动条（`packages/tui/src/alt-screen-search.ts:30-193`、`packages/tui/src/tui-alt-screen.ts:496-625,1016-1116,1621-1641`）。
+
+TUI 还建立了通用鼠标事件分派与捕获，组件可处理 press、drag、release、click 和 wheel；编辑器主动放行拖选，使选区能够跨过输入区。该能力扩展了交互层，不改变消息仍按完整组件重建、聊天列表不虚拟化的结论（`packages/tui/src/tui.ts:21-59`、`packages/tui/src/tui-alt-screen.ts:771-943`、`packages/tui/src/components/editor.ts:641-642`）。
+
+## 14. 关键源码索引
 
 - `packages/tui/src/components/markdown.ts:277-369`：Markdown 渲染主流程；`146-169`：流式围栏裁剪；`454` 起：token 渲染
 - `packages/coding-agent/src/utils/syntax-highlight.ts:80-142`：hljs scope→ANSI

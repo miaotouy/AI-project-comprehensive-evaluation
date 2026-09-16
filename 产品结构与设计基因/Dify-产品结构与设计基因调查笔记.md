@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态核对 README、顶层目录、Web 路由、API 服务边界、现有 Dify 专项笔记与浅克隆可见提交；未运行服务、插件运行时或 Agent Runtime
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 是让应用作者在租户工作区定义、调试和发布 LLM 应用的平台，产品组织中心是可发布的应用定义。其控制台将 Chatbot、Agent Chat、文本生成、工作流、RAG Pipeline 与 Agent v2 的编辑面组织为不同的配置或图定义；发布后的 WebChat、Chatbot、嵌入组件、service API 与触发器再消费这些定义。最终用户看到的聊天页因此是已发布应用的调用表面，而不是模型、工具和知识库的配置中心。
+Dify 是让应用作者在租户工作区定义、调试和发布 LLM 应用的平台，产品组织中心是可发布的应用定义。其控制台将 Chatbot、Agent Chat、文本生成、工作流、RAG Pipeline 与 Agent v2 的编辑面组织为不同的配置或图定义；发布后的内置 WebChat、部署环境 WebApp、嵌入组件、service API 与触发器再消费这些定义。最终用户看到的聊天页因此是已发布应用的调用表面，而不是模型、工具和知识库的配置中心。
 
 当前最稳定的组织骨架是“租户下的可发布定义 -> 按应用模式选择运行器 -> 可寻址的消息或 workflow run”。模型、凭据、插件、工具和数据集均以租户资源方式接入定义；插件和 Agent v2 runtime 又把一部分执行责任移交给独立进程。这个模式解释了 API、嵌入页、公开聊天和异步触发器为何可复用同一应用，但不能据此推断每一种模式都有相同的会话、停止或结果语义。
 
@@ -39,6 +39,7 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 | 应用作者的 Console | App、AppModelConfig、workflow、dataset、Agent v2 draft/revision | 创建、调试、发布和治理定义；不直接代表终端用户的运行界面 |
 | 终端用户 WebChat、Chatbot、嵌入组件 | 发布应用、End User、Conversation、Message | 提交变量和文件、接收事件与答案；模型、工具和知识配置由作者预设 |
 | 业务系统 service API / SDK | 已发布 App、workflow run 或消息型调用 | 以应用 token 调用同一运行配置；调用 API 不等于可编辑定义 |
+| App Deployment 环境 | 选定应用版本、环境 WebApp/service API、文件 grant | 将发布版本部署到环境并独立配置访问点；当前环境不承接 MCP/trigger |
 | 外部事件 | 发布 workflow、trigger log、workflow run | Webhook、schedule、Plugin Trigger 可发起异步图运行；最终交付、签名与重试未运行验证 |
 | Agent / 模型 | Tool Provider、tool、workflow-as-tool | 工具和兼容的工作流可被模型发现并调用；审批、daemon 和 MCP 的执行细节见工具专项 |
 | 独立运行时 | Plugin Daemon、Dify Agent Runtime | 分别承接插件安装/调用和 Agent v2 workspace；主仓库只确认交接协议与清理意图 |
@@ -55,9 +56,9 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 
 ### 可发布定义与多调用面
 
-**模式和证据：当前结构确认。** Dify 将应用配置、workflow 或 Agent 版本作为可发布的作者资产，再允许 Web、嵌入、API 和部分事件入口消费。普通 Chat、advanced chat 与 workflow 虽共享“发布应用”的入口概念，但分别产生消息链或图运行对象。`api/services/app_generate_service.py` 与 `api/core/app/apps/` 是模式分派和专属运行器的主要交接处。
+**模式和证据：当前结构确认。** Dify 将应用配置、workflow 或 Agent 版本作为可发布的作者资产，再允许内置 Web、部署环境、嵌入、API 和部分事件入口消费。普通 Chat、advanced chat 与 workflow 虽共享“发布应用”的入口概念，但分别产生消息链或图运行对象。`api/services/app_generate_service.py` 与 `api/core/app/apps/` 是模式分派和专属运行器的主要交接处；部署环境访问点见 `web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`。
 
-**产品作用。** 作者可在一个定义上设置模型、提示词、工具、知识和表单，再向不同调用者交付；终端用户的可操作范围则被收缩为已发布输入契约。例外是控制台调试调用可带未发布覆盖配置，不能把调试面当作生产 API 的权限模型。
+**产品作用。** 作者可在一个定义上设置模型、提示词、工具、知识和表单，再向不同调用者交付；终端用户的可操作范围则被收缩为已发布输入契约。App Deployment v2 又允许把具体版本配置到部署环境，并分别暴露 WebApp 与 service API。该环境的文件访问通过短期、按 app/end-user 和 upload/resolve/produce scope 签发的 grant 交接，文件内容再使用单文件 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。这是环境执行的文件能力边界，不是终端用户可任意浏览工作区文件。例外是控制台调试调用可带未发布覆盖配置，不能把调试面当作生产 API 的权限模型。
 
 ### 图运行与消息运行并存
 
@@ -89,6 +90,7 @@ RAG Pipeline 与数据集是长期维护的知识资产，workflow run 是一次
 - 完整的产品演变、各表面首次加入时间和已废弃路线，受本地浅克隆历史限制未确认。
 - Cloud、Enterprise 与自托管版本的功能差异、权限和运营表面未运行核对。
 - Plugin Daemon、Agent Runtime、模型 Provider、外部触发器与第三方系统的端到端行为未运行验证。
+- App Deployment 环境的版本切换、访问控制、文件 grant、环境变量和凭据注入未连接 Enterprise control plane 运行验证。
 
 ## 关键依据
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：静态源码局部调查；本轮补充阅读虚拟列表窗口化（useMessageVirtualization/useMessageWindow）、历史懒加载分页（messageStore.loadOlderMessages）、Markdown 节点虚拟化、preload 剪贴板实现与相关测试；未运行 Electron 应用、未执行测试
 >
@@ -71,9 +71,9 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 - 本地化提示文案；
 - 当前消息提供的模型名和 Provider（`useMessageCapture.ts:162-175`）。
 
-`captureAndCopy()` 在拼接成功后调用 `deviceClient.copyImage(imageData)`。preload 将该动作暴露给 renderer，最终写入系统剪贴板（`composables/usePageCapture.ts:337-355`；`src/preload/index.ts:23-25`）。当前消息工具栏没有保存文件或系统分享入口，用户需要从剪贴板粘贴到目标应用。
+`captureAndCopy()` 在拼接成功后调用 `deviceClient.copyImage(imageData)`。preload 将该动作桥接到主进程剪贴板 IPC，最终写入系统剪贴板（`composables/usePageCapture.ts:337-355`；`src/preload/index.ts:8-33`）。当前消息工具栏没有保存文件或系统分享入口，用户需要从剪贴板粘贴到目标应用。
 
-剪贴板交付细节：`window.api.copyImage` 直接 `nativeImage.createFromDataURL(image)` + `clipboard.writeImage(img)`（`src/preload/index.ts:23-26`），无平台分支、无 try/catch、无返回值；Electron 内部按平台转换格式（Windows/CF_DIB、macOS/NSPasteboard、Linux/X11），未传 `scaleFactor`（默认 1）。
+剪贴板交付已移到主进程：`registerClipboardIpc` 创建 `nativeImage`，空图会抛错，合法图再写入 clipboard；preload 以 `ipcRenderer.invoke` 调用并记录异步错误（`src/main/app/clipboardIpc.ts:1-21`、`src/preload/index.ts:8-33`）。该调用仍无平台分支和返回值，截图工作流也不等待成功结果；Electron 负责平台格式转换。
 
 `captureAndCopy` 调用后无条件返回 true，不检查写入结果（`usePageCapture.ts:344-346`）；若 `writeImage` 抛错，异常沿 IPC 抛回 renderer，`captureMessage` 无 catch 分支，表现为未处理的 Promise 拒绝（`useMessageCapture.ts:160-186`）。工具栏的“复制成功”浮层在 mouseup/键盘触发时即显示（`MessageToolbar.vue:227-249`），先于实际捕获与写入完成，与实际成败无关。
 
@@ -100,7 +100,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 - 捕获过程在 finally 中恢复滚动行为，消息层另行恢复隐藏覆盖层；
 - 单段失败会停止循环；已有分段仍可能继续进入拼接，是否形成部分图片没有显式完成度标记（`usePageCapture.ts:279-291,299-320`）；
 - 最多 30 次迭代，命中上限时静默拼接已有分段，无截断错误（详见第 2 节）；
-- 剪贴板写入失败无收口：无错误检查、无重试、无用户可见失败反馈，失败表现为未处理 Promise 拒绝（见第 3 节）；
+- 剪贴板写入会拒绝空图并记录错误，但截图工作流不等待该 Promise，没有重试或专用用户失败反馈（见第 3 节）；
 - 测试覆盖：`test/renderer/composables/usePageCapture.test.ts` 只验证分段裁剪与拼接调用参数；`test/renderer/composables/useMessageCapture.test.ts` 以 mock 验证两种范围计算路径；`test/main/routes/dispatcher.test.ts:5923-5959` 验证路由接线。迭代上限、分页、剪贴板与平台行为均无测试；
 - 没有应用内图片历史、预览、版本或持久化对象。
 
@@ -118,7 +118,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 - 窗口化渲染下捕获滚动与窗口挂载/测量的时序：未挂载区域是否以占位空白进入分段、捕获中行高测量（ResizeObserver + rAF 批量）是否导致分段内容偏移；≤160 条消息时不涉及。
 - “从顶部”起点与真实会话起点的差异程度（100 条初始加载 + 每页 100 条懒加载），以及到达已加载页顶后截图是否仍继续滚动进入占位空白。
 - Markdown、代码、表格、工具卡、图片和本地附件的分段接缝与视觉保真，以及折叠块在截图中的实际呈现。
-- 剪贴板写入失败的实际表现（异常是否被 Electron 吞掉、Toast/控制台输出），以及 Windows/macOS/Linux 各平台 PNG 复制的格式兼容性差异；`clipboard.writeImage` 未传 `scaleFactor` 时高 DPI 位图尺寸。
+- 剪贴板 IPC 失败后的实际用户反馈，以及 Windows/macOS/Linux 各平台 PNG 复制的格式兼容性差异与高 DPI 位图尺寸。
 - 捕获失败后已有分段是否可能生成部分长图；本次未运行错误场景。
 
 ## 8. 关键源码索引
@@ -130,6 +130,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 - `src/main/lib/scrollCapture.ts`
 - `src/main/desktop/tab.ts`
 - `src/preload/index.ts`
+- `src/main/app/clipboardIpc.ts`、`src/shared/clipboardChannels.ts`
 - `src/renderer/src/features/chat-page/ChatPage.vue`（分页触发与窗口化接线、捕获隐藏覆盖层）
 - `src/renderer/src/features/chat-page/composables/useMessageVirtualization.ts`（消息窗口化渲染窗口）
 - `src/renderer/src/composables/message/useMessageWindow.ts`（行高估计与测量，折叠块默认高度）

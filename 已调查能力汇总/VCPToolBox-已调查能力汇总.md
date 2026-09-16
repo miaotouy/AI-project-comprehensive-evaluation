@@ -2,7 +2,7 @@
 
 > 汇总对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
-> 汇总更新日期：2026-08-28
+> 汇总更新日期：2026-09-16
 >
 > 依据：16 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
 >
@@ -131,7 +131,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 **创作工作站**
 
-- **能力十：多媒体生成与媒体插件族**：MediaRenderer 可编程渲染（HTML/SVG → 托管 Chrome 截图或确定性逐帧 + FFmpeg 编码 GIF/MP4/WebM、AI 合成代码 → Node 子进程生成 PCM16 WAV）+ 图像/视频生成插件族（15 目录，FluxGen/GPTImageGen/GeminiImageGen/QwenImageGen/DoubaoGen 等，2 个 `.block` 禁用），统一走 VCP 块协议；资源白名单（50MB/100MB/24 资源/2MB 源码/帧数/采样上限）、脚本白名单（仅 Anime.js/Three.js）、页面运行时网络全阻断、云元数据地址常禁、GenerateAudio 需 6 位验证码。证据状态：`主链确认`（含运行验证部分）。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力十、[媒体创作调查笔记](../媒体创作/VCPToolBox-媒体创作调查笔记.md)。
+- **能力十：多媒体生成与媒体插件族**：MediaRenderer 可编程渲染（HTML/SVG → 托管 Chrome 截图或确定性逐帧 + FFmpeg 编码 GIF/MP4/WebM、AI 合成代码 → Node 子进程生成 PCM16 WAV）+ 图像/视频生成插件族（15 目录，FluxGen/GPTImageGen/GeminiImageGen/QwenImageGen/DoubaoGen 等，2 个 `.block` 禁用），统一走 VCP 块协议；资源白名单（50MB/100MB/24 资源/2MB 源码/帧数/采样上限）、脚本白名单（Anime.js/Three.js/Pixi.js）、页面运行时网络全阻断、云元数据地址常禁、GenerateAudio 需 6 位验证码。证据状态：`主链确认`（含运行验证部分）。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力十、[媒体创作调查笔记](../媒体创作/VCPToolBox-媒体创作调查笔记.md)。
 
 - **能力五：六类插件协议与异步任务回注**：static/synchronous/asynchronous/service/messagePreprocessor/hybridservice 六类协议统一编排；异步长任务先返回、回调 `/plugin-callback/:pluginName/:taskId` 后经 `{{VCP_ASYNC_RESULT}}` 占位符回注，结果落盘 `VCPAsyncResults/`；回调端点存在无鉴权边界，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力五、[媒体创作调查笔记](../媒体创作/VCPToolBox-媒体创作调查笔记.md)。
 
@@ -222,7 +222,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - **静态证据为主**：全部主链为静态代码结论；记忆召回质量、梦境叙事、媒体渲染、托管浏览器进程行为、任务调度长跑、主题/无障碍/键盘运行态均未运行验证。
 - **分布式与外部执行**：分布式节点断线/重连/在途文件与取消竞争、SSH 会话中断、AICodeWorker 真实取消与工作区写入、SnowBridge 断线语义未运行验证；managed browser 的登录态、Profile 隔离、私网/云元数据防护未验证。
 - **安全边界**：`/plugin-callback` 无鉴权与 `plugin_callback_forward` 来源未绑定的实际利用面、白名单路由绕过 Bearer 的利用面、PowerShellExecutor 关键字黑名单绕过空间未做端到端验证；Docker 下 `SANDBOX_BACKEND=docker` 可用性未验证。
-- **范围说明**：较早来源主要基于提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`，仓库分布、产品结构及检索增强等近期来源已更新到 `e2762e4dab5c70952d88f96689fba1270624e5ef`；均为 `main` 分支，具体以各来源笔记元数据为准。
+- **范围说明**：较早来源主要基于提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`，仓库分布、产品结构及检索增强等近期来源已更新到 `6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`；均为 `main` 分支，具体以各来源笔记元数据为准。
 
 ## 来源笔记索引
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：静态源码走读；复核既有生成式输出与运行时笔记（同一代码快照），精读 Stable Diffusion 扩展的生成、媒体消息、重生、函数工具和 slash command 路径，并定位服务端 Stable Diffusion/ComfyUI 路由；未启动服务、未配置模型提供商或 ComfyUI、未运行测试
 >
@@ -56,7 +56,7 @@ SillyTavern 的 Stable Diffusion 扩展构成 **M1 模型生成工作站（聊�
 
 slash command 可临时覆盖 seed、宽高、steps、CFG、模型、采样器、scheduler、VAE、upscaler、高分修复和降噪等设置，并在结束后恢复原设置。消息级重生保留旧附件的标题、负向提示以及已有宽高，再生成一个新附件。`index.js:5271-5334,5384-5449`。
 
-`sendGenerationRequest` 为 extras、Horde、Automatic1111 类端点、Draw Things、NovelAI、OpenAI、ComfyUI、RunPod、Stability 等来源分派实现。前端请求应用自己的 `/api/sd/*` 端点，服务端再负责代理、模型列表和 ComfyUI workflow 文件读写/生成。具体 provider 成功率、参数兼容性及远端数据保留不由本次静态调查确认。`index.js:3317-3450`、`src/endpoints/stable-diffusion.js:385-634,2192-2193`。
+`sendGenerationRequest` 为 extras、Horde、Automatic1111 类端点、Draw Things、NovelAI、OpenAI、ComfyUI、RunPod、Stability 等来源分派实现。前端请求应用自己的 `/api/sd/*` 端点，服务端再负责代理、模型列表和 ComfyUI workflow 文件读写/生成。ComfyUI 结果提取会跳过非图片输出：按输出节点的 images 数组取第一张，缺失时回退到 gifs，两者都没有才报错（`src/endpoints/stable-diffusion.js:614-615`）；BFL 的生成与轮询端点迁到 `api.bfl.ai`，轮询请求也需带鉴权头（`src/endpoints/stable-diffusion.js:1532,1549`）。具体 provider 成功率、参数兼容性及远端数据保留不由本次静态调查确认。`index.js:3317-3450`、`src/endpoints/stable-diffusion.js:385-634,2192-2193`。
 
 ## 3. 任务状态、回调、取消与失败
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：只读源码梳理（未修改被调查仓库任何文件）；未运行仓库测试/构建，结论均以静态阅读源码为准
 >
@@ -93,7 +93,7 @@ VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistr
 | 视频/音频/图像截取与编辑（`MediaShot`） | VCPToolBox `MediaShot` 工具 | 分布式节点 Python 子进程，读写本机文件路径 | 服务端规则 | `VCPDistributedServer/Plugin/MediaShot/plugin-manifest.json` |
 | 图床/文件下载服务暴露（`DistImageServer`） | 服务类插件常驻 HTTP 路由 `/pw=<key>/files/*` | 分布式节点 Express 路由，`imageKey` 明文存于 `config.env` | 单一静态密钥比较，无速率限制 | `VCPDistributedServer/Plugin/DistImageServer/image-server.js:1-58` |
 | 手机端同步（`VCPMobileSync`）：历史/头像/Agent 配置双向同步 | 常驻 WebSocket + HTTP，`x-sync-token`/Bearer 鉴权 | 旧模式：分布式节点内嵌 sqlite 索引 + 文件系统读写 `AppData`；中央模式（`MobileSyncUseCentralIndex=true`）：消息数据面改由 VCP-CDS 提供，本地 DB 变 `:memory:`（仅附件/头像 DTO 定位） | 静态 token 比较 | `VCPDistributedServer/Plugin/VCPMobileSync/transport/routes.js:42-60`、`sync/central.js`（新增） |
-| Agent 创建/编辑/感知/操作网页应用（`LoomController` v1.4.0：CreateApp/OpenApp/CloseApp/GetAppSources/GetRuntimeSource/GetRenderedText/EditAppSources + GetPageInfo/GetPageImage/ExecuteAction/串行指令） | VCPToolBox 工具调用，`hybridservice` direct 协议 | 分布式节点 direct 模块调用注入的 `VCPLoomManager`（Electron 主进程托管，接入 VCP Agent WebCore 感知页面），读写 `AppData/LoomApps/*/loom.json + inject.css/inject.js`，WebContentsView 运行页面 | 服务端规则（工具调用侧） | `VCPDistributedServer/Plugin/LoomController/LoomControllerService.js`、`modules/loom/VCPLoomManager.js`、`modules/loom/webcore/*` |
+| Agent 创建/编辑/感知/操作网页应用（`LoomController`：LoomAPP + WebCore 页面快照/动作） | VCPToolBox 工具调用，`hybridservice` direct 协议 | 分布式节点 direct 模块调用注入的 `VCPLoomManager`；读写 `AppData/LoomApps`，WebContentsView 运行页面；LoomSkill 将多步操作以 schema-v2 文件保存并按 taskId 执行/查询 | 服务端规则（工具调用侧）；Skill 内部另有限制输入、目标、步骤数、结果大小和并发应用 | `VCPDistributedServer/Plugin/LoomController/LoomControllerService.js`、`LoomSkillService.js`、`modules/loom/VCPLoomManager.js` |
 | Agent 感知/PR 式协作编辑 Scriptorium 文档（`ScriptoriumCollaborator`：GetDocumentInfo/GetRenderedText/GetSource/SearchSource/GetVisualContext/SubmitSourcePr/CreateDocument 等） | VCPToolBox 工具调用，`hybridservice` direct 协议 | 分布式节点 direct 模块调用注入的 `ScriptoriumAgentControlService`（Electron 主进程，经 `docxHandlers` 读写 `AppData/VDOCX|VPPTX` 工程与文脉快照） | 服务端规则（工具调用侧）；文档 PR 另有前端审批回执 | `VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js`、`modules/services/scriptoriumAgentControlService.js`、`modules/ipc/docxHandlers.js` |
 | 历史对话深度回忆（`DeepMemo` v2：按 maid/关键词检索历史上下文窗口） | VCPToolBox 工具调用，`hybridservice` direct 协议 | 中央模式：`chatDataService.client.searchMemories`（VCP-CDS/Tantivy）；可选外部 rerank API；`backend:'legacy'` 回退旧链路 | 服务端规则 | `VCPDistributedServer/Plugin/DeepMemo/DeepMemoService.js` |
 | 主聊天窗口文件夹视频壁纸（`VChatDynamicWallpaper`） | **renderer 型前端插件**，不经工具目录；`listEnabledFrontendPlugins` IPC 扫描启用 | 渲染进程插件脚本（`frontend-plugin-loader.js` 注入），`vchat-wallpaper-select-directory` IPC 扫描本机视频文件夹（mp4/webm/mov/mkv/avi） | 不适用（无工具调用）；插件文件按 manifest 白名单解析 | `VCPDistributedServer/Plugin/VChatDynamicWallpaper/plugin.js`、`modules/ipc/desktopHandlers.js:2162-2196` |
@@ -298,6 +298,8 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 
 当前快照把 Scriptorium 协作器扩展为分布式节点的 direct 工具：它可读取文档信息、渲染文本、源码与视觉上下文，并以 `SubmitSourcePr` 提交待人工处理的完整源码修订；文档侧分别为请求和审阅设置 30 秒与 5 分钟的超时。该链路仍由服务端工具审批和文档内 PR 回执共同约束，不能与聊天文本中的普通工具展示混为一条执行路径。移动同步则继续以 VCP-CDS 的中央索引为默认数据面，保留旧本地索引回退；Wire 1.2 的 canonicalizer、错误契约和幂等入口使同步协议的约束比普通聊天历史写入更明确。
 
+LoomSkill 是 LoomController 内的组合执行面。CreateSkill/EditSkill 接收串行步骤，先校验声明的输入占位符，再对固定 target 做 WebCore 持久目标验证；trial 模式会试跑整条链，current 模式允许目标验证失败时保留低可靠性原始句柄并记录 warning，none 模式跳过 DOM 验证。执行时会在页面动作前完成输入替换，限制同步模式两分钟、异步任务数量与结果字节数，并以 busyApps 防止同一应用并发；任务状态只保留在进程内并按 TTL 回收，服务重启后查询不到旧 task。`VCPDistributedServer/Plugin/LoomController/LoomControllerService.js:308-395`、`LoomSkillService.js:129-269`
+
 依据：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:30-31`、`VCPDistributedServer/Plugin/VCPMobileSync/index.js:114-191`、`transport/routes.js:76-184`、`sync/canonical.js:178-400`。
 
 ## 12. 未验证事项与后续调查缺口
@@ -312,4 +314,4 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 - **DeepMemo v2 的中央/legacy 双后端行为差异**：`DeepMemoService.js` 以 `backend: 'central'` 为默认、`DeepMemoLegacyFallback` 配置项控制回退，两套检索对同一关键词的召回与排序差异未运行对比。
 - **LoomController 的能力边界**：LoomAPP 的 `request.headers` 禁止覆盖 Cookie/Host（manifest 注释声明），但"允许外部 origin 打开"（`openExternalOriginsInBrowser`）、WebContentsView 隔离导航策略（`VCPLoomManager.js` 注释声明）的具体防护只做了静态阅读，未实测。
 - **renderer 前端插件的信任面**：`listEnabledFrontendPlugins` 只校验 `frontend.script/style` 为文件名（`path.basename` 相等校验，`desktopHandlers.js:88-94`），插件本体脚本在主窗口上下文执行；启用机制（PluginManagerModules 界面）与插件可访问 `window.chatAPI` 全通道的组合影响未进一步核实。
-
+- **LoomSkill 的真实页面效果**：源码确认 schema、验证、执行和 TTL 状态机，但未运行 LoomAPP、WebCore 动作、目标跨文档代次失效或异步结果回流。

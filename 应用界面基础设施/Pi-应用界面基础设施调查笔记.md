@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -273,7 +273,13 @@ StdinBuffer 把批量输入拆成单序列（`stdin-buffer.ts`），bracketed pa
 
 终端链接、图片协议和真彩色能力除了环境探测外，也可由设置中的 `terminal` 对象或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量覆盖。设置层只接受明确的布尔值或受支持图片协议，未指定时保留自动探测；该能力决定链接、图片和色彩的投影策略，不改变消息内容或会话数据（`packages/coding-agent/src/core/settings-manager.ts:43-47,1135-1138`、`packages/tui/src/terminal-image.ts:143-170`）。
 
-## 11. 关键源码索引
+## 11. 原生平台辅助与鼠标基础设施
+
+公共 TUI 增加了按平台加载的原生辅助层。macOS、Windows 与 Linux X11 均有跟踪的 native 源码和预构建模块；剪贴板读取通过惰性 helper 打开显示连接，Windows 模块继续承担控制台输入模式，macOS 还可提供修饰键状态。该层属于本机终端增强，远程 SSH 仍按终端协议和外部命令降级（`packages/tui/src/native-platform.ts:1-93`、`packages/tui/native/`）。
+
+fullscreen 的 ScrollView 现在区分 track 与 thumb 样式，auto 滚动条在活动时短暂显示，并支持悬停、点击轨道和拖拽；通用鼠标分派允许组件声明焦点、捕获和重绘。剪贴板写入失败不再无条件显示成功，而由宿主返回具体失败文本；自动复制选区也可关闭，再由复制命令显式处理当前选区（`packages/tui/src/components/scroll-view.ts:11-122`、`packages/tui/src/tui-alt-screen.ts:285-304,1016-1116,1419-1468`、`packages/coding-agent/src/modes/interactive/interactive-mode.ts:6160-6176`）。
+
+## 12. 关键源码索引
 
 - `packages/tui/src/tui.ts`：`showOverlay`/`OverlayHandle`（`:549-642`）、`compositeOverlays`（`:1092-1151`）、渲染调度（`:765-817`）、OSC 11/颜色方案/cell size 查询（`:1207-1255`）
 - `packages/tui/src/tui-main-screen.ts`：`doRender` 差分渲染与 resize 处理（`:180-547`）、超宽行崩溃（`:447-474`）

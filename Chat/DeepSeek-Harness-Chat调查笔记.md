@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/agent-loop`、`packages/core/agent`、`packages/core/session`、`docs/architecture.md`、`docs/agent-lifecycle.md`、`docs/subsystems/core.md`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：只读静态源码阅读，并以官方文档（architecture.md 的 turn flow、agent-lifecycle.md 时序图、subsystems/core.md 的 the-agent-handle 一节）交叉核对；未运行交互会话
 >
@@ -21,7 +21,7 @@ DeepSeek Harness（dsh）是构建在 vendored Cordis 插件框架上的 agent h
 3. **事件三域**：session 事件（durable、可重放）、agent/* 事件（live、按 agent 作用域过滤）、capability 事件（策略/适配器 seam）。"模型可见 ⟺ 已记录"是硬约束。
 4. **循环控制全在插件层**：守卫（repeat-tool-reminder、timeout-policy）、审批、人类问答、命令都通过事件与工具 seam 影响循环，不改驱动本身。
 5. **取消是协作式**：`cancel(cause)` 清 inbox（除非 `keepInbox`）并 abort 当前活动；错误经 `agent/request-error` waterfall 可重试，未投递的工具调用获得合成错误结果。
-6. **headless**：`dsh --profile headless "task"` 一键运行——创建 agent、投递任务、等待静止、flush、打印最终文本并按 `turn/end` 原因退出。
+6. **headless**：`dsh --profile headless "task"` 一键运行；除最终文本外现可输出 machine-readable JSON stream，并把 reasoning progress 写到 stderr。会话启动、等待静止、flush 与退出码仍由 headless runner 所有（`packages/bundle/headless/src/{startup,json-stream}.ts`）。
 
 ## 产品表面与系统边界
 
@@ -140,7 +140,7 @@ inbox 的每个变更都先落一条 `agent/inbox/spliced`（标准化 splice �
 
 ## 专项导航
 
-本仓库的会话管理、上下文构建、消息渲染、Chat UI 等均未建立专项调查笔记（本次仅覆盖运行核心），对应模块归属如下，后续拆分专项时补充链接。
+本仓库的会话管理、上下文构建、消息渲染与 Chat UI 已建立专项笔记；本概览只保留责任边界与导航，不再重复专项实现。
 
 | 专项 | 归属模块 |
 |---|---|

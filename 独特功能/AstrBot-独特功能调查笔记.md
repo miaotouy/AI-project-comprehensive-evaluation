@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；结合 Agent 工具、Chat 等既有笔记做去重；未修改 AstrBot 仓库
 >
@@ -34,7 +34,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **用户目标**：让 Agent 在隔离环境中执行代码/shell/浏览器操作而不直接触碰宿主机，且同一会话内复用运行实例（README 明示 "session-level resource reuse"）。
 
-**入口与触发者**：触发者是模型工具调用。配置键 `provider_settings.computer_use_runtime` 决定本机、沙箱或关闭（默认 `none`），另一个配置键选择 booter，默认值为 `shipyard_neo`，可选值为 `cua`、`shipyard`、`boxlite`、`bay`；配置定义见 `core/config/default.py:173-191`。
+**入口与触发者**：触发者是模型工具调用。`provider_settings.computer_use_runtime` 决定 Local、远端 sandbox 或关闭，默认关闭；远端 sandbox 再选择 shipyard_neo、CUA 等 booter。Local 路径新增 member/admin 两套权限策略，将文件系统范围、执行权和联网权拆开配置（`astrbot/core/config/default.py:178-205`；`tools/computer_tools/util.py:88-209`）。
 
 **事实对象**：会话级 booter 实例按会话 ID 复用；实例表的类型与选择逻辑见 `astrbot/core/computer/computer_client.py:21`、`:551`。
 
@@ -42,7 +42,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 ```text
 模型调用 computer 工具（shell / python / fs / cua / browser）
-  -> _get_runtime_computer_tools 按 runtime 组装（astr_agent_tool_exec.py:189-245，
+  -> _get_runtime_computer_tools 按 runtime 组装（astr_agent_tool_exec.py:192-247，
      sandbox 8 个 + cua 3 个 + local 7 个；shipyard_neo 另 14 个技能流水线工具）
   -> get_booter -> booter 族：
       LocalBooter（core/computer/booters/local.py，本机受限执行）
@@ -62,6 +62,8 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **持续性**：会话级 booter 在会话存续期间复用；空闲回收/TTL 后下一次调用重新拉起。文件上传/下载的结果落本机临时目录。
 
+**Local 执行边界**：Linux 通过 bubblewrap、macOS 通过 Seatbelt 启动受限进程；默认清理宿主环境，按权限暴露工作区与额外根目录，并限制 CPU、内存、文件大小、打开文件数和进程数。缺少对应后端时需要隔离的配置会拒绝保存或执行；Windows 当前没有 Local 进程沙箱后端。这部分是本仓可执行的本机隔离主链，不再只是“本机受限执行”的黑名单约束（`astrbot/core/computer/process_sandbox/base.py:9-68,154-250`；`process_sandbox/__init__.py:15-42`；`dashboard/services/config_service.py:325-424`）。
+
 **独特性判断**：DeepChat 采用主进程子进程执行与权限审批的本机执行面；AstrBot 把容器或桌面环境作为一等执行域，并支持会话级复用与技能双向同步。shipyard_neo 还提供从执行历史到技能发布或回滚的流水线管理，构成完整的沙箱主链。
 
 **证据强度**：静态源码确认；booters 的远端容器行为（shipyard/cua 云镜像）依赖外部服务，未运行。
@@ -72,7 +74,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **入口与触发者**：三条并存的主动路径，触发者分别是平台事件（群消息）、时间调度（cron）、任务完成（后台工具）。
 
-主动路径现在保留结构化历史并让常规上下文截断处理；cron 与后台唤醒读取当前 `max_agent_step` 且将无效或非正值收敛为最小可用值（`astr_agent_tool_exec.py:548-596`、`cron/manager.py:444-487`）。因此这项能力仍是主动执行链，而非脱离会话上下文的独立任务系统。
+主动路径现在保留结构化历史并让常规上下文截断处理；cron 与后台唤醒读取配置档案的 `agent_runner.config.misc.max_steps`，并把非法或非正值收敛到最小可用值（`astr_agent_tool_exec.py:561-579`、`cron/manager.py:444-472`）。因此这项能力仍是主动执行链，而非脱离会话上下文的独立任务系统。
 
 **完整主链**（静态走通）：
 
@@ -93,8 +95,8 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 路径 C 后台任务唤醒：
   工具 is_background_task -> asyncio.create_task 立即返回 task_id
-    -> _wake_main_agent_for_background_result（astr_agent_tool_exec.py:509-619）
-        -> CronMessageEvent 模拟事件重建主 Agent，step_until_done(30)
+    -> _wake_main_agent_for_background_result（astr_agent_tool_exec.py:518-646）
+        -> CronMessageEvent 模拟事件重建主 Agent，step_until_done(max_steps)
         -> 强制用 send_message_to_user 交付，结果写回对话历史
    平台门控：platform_metadata.support_proactive_message（platform_metadata.py:22），
    仅支持主动消息的平台开放（wecom 需 webhook 等）
@@ -154,10 +156,10 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 - 沙箱客户端与会话实例：`astrbot/core/computer/computer_client.py:21`、`:551-669`
 - booter 族：`astrbot/core/computer/booters/{base,local,cua,shipyard,shipyard_neo,boxlite,bay_manager}.py`
 - 沙箱工具：`astrbot/core/tools/computer_tools/{shell,python,fs,cua}.py`、`shipyard_neo/{browser,neo_skills}.py`
-- 运行时工具组装：`astrbot/core/astr_agent_tool_exec.py:189-245`
+- 运行时工具组装：`astrbot/core/astr_agent_tool_exec.py:192-247`
 - 主动回复：`astrbot/builtin_stars/astrbot/group_chat_context.py:110-128`
-- cron 工具注入：`astrbot/core/astr_main_agent.py:1224`、`astrbot/core/tools/cron_tools.py:52-`
+- cron 工具注入：`astrbot/core/astr_main_agent.py:1161`、`astrbot/core/tools/cron_tools.py:52-`
 - 主动 Agent 提示词：`astrbot/core/astr_main_agent_resources.py:91/105`
-- 后台唤醒：`astrbot/core/astr_agent_tool_exec.py:509-619`
+- 后台唤醒：`astrbot/core/astr_agent_tool_exec.py:518-646`
 - 平台主动能力元数据：`astrbot/core/platform/platform_metadata.py:22`、`astrbot/core/tools/registry.py:121-181`
 - TTS/STT：`astrbot/core/pipeline/result_decorate/stage.py:46-356`、`astrbot/core/pipeline/preprocess_stage/stage.py:181`、`astrbot/core/provider/sources/*_tts*.py`

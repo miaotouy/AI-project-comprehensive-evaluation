@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：只读核对 Copilot 类型定义、Session 类型、Settings Schema、初始数据、Skills 类型及 Agent Mode 实现；未修改被调查仓库源码
 >
@@ -14,14 +14,21 @@
 
 ## 1. 结论摘要
 
-Chatbox 没有独立的"Agent 对象"，它的角色系统围绕两个对象展开：
+Chatbox 没有单独持久化的 Agent 实例，角色与长期身份由三个对象组合：
 
 - **`CopilotDetail`**（角色模板）：只存储人格信息（名称、系统提示词、头像、描述、标签）；不包含模型参数。
 - **`Session`**（对话实例）：通过 `copilotId` 与 Copilot 关联，在 `settings` 字段保存模型与采样参数；每个 Session 独立管理自己的对话历史和设置。
+- **Soul 与 Memories**：Soul 是 Work Mode 的全局人格与边界文档，Memories 是可增删的长期事实；Copilot 可启用自己的记忆空间替代全局记忆。
 
 这意味着同一个 Copilot 可以用不同模型/温度创建多个对话，两者之间没有强绑定。内置的预设 Session 展示了几种典型角色：旅游向导、社媒网红、软件开发者、翻译专家等。
 
-技能层（Skills）和 Agent Mode 决定 Copilot 在运行时能做什么：技能层是指令加工具描述的文本组合，打开该模式后模型进入工具调用循环。两者都是会话级配置，不写死在 Copilot 中。
+技能层和 Work Mode 决定运行时能力。会话第一次需要身份上下文时会冻结 Soul、Copilot overlay、Memories、工作区指令与时间信息；后续 Soul/Memory 写入默认只影响未来会话，避免同一会话的系统前缀漂移。
+
+### 1.1 Soul、记忆与冻结快照
+
+Work Mode 的系统提示前缀顺序为固定身份、Soul（其中插入 Copilot prompt）、Memories、工具说明和易变运行信息。Soul 可通过虚拟路径由文件工具读取和修改；记忆通过 `save_memory`/`delete_memory` 工具写入。快照持久化在 Session 或 thread 的 `sessionPromptContextSnapshot` 中，工作目录变化会重捕获完整快照，记忆开关或 scope 变化只重新加载记忆切片。实现见 `src/shared/agent-persona/prompt.ts:85-150`、`src/renderer/stores/session/prompt-context-snapshot.ts:89-189` 与 `src/shared/types/session.ts:429-430`。
+
+Chat Mode 不注入 Soul 身份，但可以读取同一冻结快照中的 Memories；Work Mode 不再直接使用会话 system prompt，而是将 Copilot prompt 作为 Soul 内 overlay。每个 Copilot 可启用独立记忆，scope 切换后未来会话改读对应列表。该行为由 `src/renderer/stores/session/agent-harness.ts:246-262,398-438` 与 `src/shared/types/agent-persona.ts:66-98` 定义。
 
 ## 2. 配置入口
 
@@ -190,6 +197,8 @@ Mode 可以被锁定（`locked: true`），防止用户在中途切换，锁定�
 - `message_sent`：消息发送中
 
 `agentFullAccess` 打开后，`user_exec` 和文件系统写入操作不再需要逐次审批（Work Mode）。`workingDirectories` 列出授权目录，沙箱实现在 macOS/Linux 上依赖 `@anthropic-ai/sandbox-runtime`，Windows 无 OS 级隔离。
+
+当前产品语义进一步拆为 Chat Mode 与 Work Mode。Work Mode 采用追加式单线对话，隐藏 Reply Below、新建 thread 和 thread history 等结构操作，但保留历史数据边界；Chat Mode 允许分支和 thread，却不开放消息队列与 steering。模式矩阵见 `packages/chatbox-core/src/session/mode-policy.ts:19-79`。
 
 ### 5.3 MCP 服务器
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：只读源码梳理，并核对目标仓库内的架构文档、用户指南和性能调查；未修改目标仓库
 >
@@ -97,6 +97,8 @@ LLM adapter / response callbacks
 - 错误和空响应诊断；
 - 压缩节点信息；
 - 消息级 `status` 扩展为 `generating/waiting/queued/complete/error` 五态（`types/common.ts`），消息头组件经状态映射工具转为“生成中/等待/排队/错误/异常回复”徽标（`showMessageStatus` 设置控制）；用户消息另有 `knowledgeReference` 字段（显式 Knowledge 资料引用，见 Chat UI 3.1）。
+- 助手消息还保存渠道与模型的展示快照，包括模型图标。消息头优先使用快照名称和图标，配置仍存在时才回查当前目录，因此渠道或模型随后改名、删除后，历史消息仍能显示生成时身份（`src/tools/llm-chat/types/message.ts:248-258`、`components/message/MessageHeader.vue:95-132`）。
+- 停止语义在错误态内进一步区分：错误详情为“队列已停止”或“用户手动停止”时，状态映射输出停止结果，不按普通错误呈现（`src/tools/llm-chat/utils/messageStatus.ts:89-103`）。
 
 AIO 的 UI 数据模型没有采用 Cherry Studio 的结构化 `parts[]`。正文里的 `<think>`、VCP 标记等仍由渲染器解析；provider 原生 reasoning、工具节点和附件则有独立结构。
 

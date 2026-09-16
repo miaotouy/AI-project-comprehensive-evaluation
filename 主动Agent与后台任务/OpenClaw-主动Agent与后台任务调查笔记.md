@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：只读复查 cron service、heartbeat wake/runner、Gateway hooks、后台 exec、detached subagent、task ledger、SQLite schema 和 durable channel delivery 的可执行调用链；结合对应作用域规则与同类调查笔记，未启动 Gateway 或定时器
 >
@@ -51,6 +51,10 @@ automations/cron 工具、Gateway cron.* RPC、CLI 或系统 monitor
 system event、follow-up 和 steering queue 是结果进入下一回合的传输层，不是独立持久任务。system event 队列要求显式 session key，最多保留 20 项，运行时只存在进程内；它会在 heartbeat 或下一次会话提示构造时被筛选、消费。`src/infra/system-events.ts:1-4,38-47,122-205` 明确说明该队列故意不持久化，因此只能承接已有主动运行的提示或终态，不能单独承担重启后的任务恢复。
 
 ## 触发、调度与运行对象
+
+### 持久更新运行
+
+软件更新也形成独立后台运行对象。每次更新先在共享 SQLite 的 `update_runs` 中创建 running 记录，保存触发源、目标、更新前后事实、阶段步骤、验证、修复记录和终态；步骤有数量上限，关键恢复步骤会保留。驱动进程必须显式 adopt 运行，读取或预留记录不会自动取得执行权；启动或人工修复时可识别死亡驱动、遗留无身份运行和已保存 recovery，再决定继续、恢复或标记 abandoned。该机制把候选准备、安装、验证、回滚与重启交接纳入可查询账本，而不是只依赖安装进程日志。实现见 `src/infra/update-run-ledger.ts:70-223,241-260`、`src/infra/update-run-activity.ts:82-159`、`src/infra/update-run-record.ts:86-121`。
 
 ### Automations/cron 的创建与排程
 

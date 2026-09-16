@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（Hermes Agent）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态代码阅读 + 全仓符号检索；按 `git log`/`git diff` 对提交范围做增量核对，受影响结论在 HEAD 处源码重新确认并修正行号；工作树干净，未运行程序
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：静态复核 Agent Session、Claude Code / Pi / DSH runtime 与驱动注册、工具注册、工作区链路与 IM 渠道层；复用 Agent 角色、Agent 工具和独特功能笔记；未运行各 runtime 或 IM 平台
 >
@@ -83,7 +83,11 @@ SDK 持有真实执行，宿主无法完全替代 runtime 的权限边界；宿�
 
 三种 Agent runtime 中，Pi 在应用进程内通过运行时连接和 MCP adapter 接入，DSH 通过本地 bridge 与子进程交互；两者都与 Claude Code 并列注册，使用统一审批和模型注入边界，但协议事件、工具投影及子 Agent 调用各自适配。DSH 的桥还会把委派子 Agent 的工具调用路由回根会话，避免独立子会话脱离当前控制面。
 
-这确认了协作协议的本地接入与回流路径，未验证外部模型服务、CLI 子进程或远程 MCP 服务在网络故障下的运行行为。依据：`src/main/ai/runtime/pi/PiRuntimeConnection.ts`、`src/main/ai/runtime/dsh/DshRuntimeConnection.ts`、`src/main/ai/runtime/dsh/DshBridgeServer.ts`、`src/main/ai/runtime/registerDrivers.ts`。
+运行时连接现在把本次 reasoning effort 纳入连接签名或 reconcile 条件，并为 OpenCode 保留会话头，使同一 Cherry Session 的上游会话身份稳定而不同 Session 相互隔离。后台或目标轮次还会以 `background-work`、`goal-round` 等 origin 写入运行状态，界面可区分用户回合与运行时主动回合。依据：`src/main/ai/runtime/{claudeCode/agentSessionWarmup,pi/modelInjection,dsh/modelInjection}.ts`、`src/main/ai/agentSession/agentSessionRuntimeState.ts:83-125`。
+
+这确认了协作协议的本地接入与回流路径，未验证外部模型服务、CLI 子进程或远程 MCP 服务在网络故障下的运行行为。
+
+API Gateway 还提供一个较窄的移动端配对面：桌面生成一次性短时配对码，移动设备换取只保存哈希的设备 token，随后只能经 LAN 访问 Provider 导出；生成、知识库与 MCP 路由仍被 LAN guard 拒绝。该路径满足设备身份、配对生命周期和受限双向协议，但当前只确认 Provider 配置交付，不把它写成与桌面 Agent Session 连续控制同一任务的完整主链。依据：`src/main/features/apiGateway/ApiGatewayPairing.ts:20-59`、`lanGuard.ts:5`、`routes/{pairing,providerExport}.ts`。
 
 ## 已确认边界与未验证事项
 
@@ -107,4 +111,3 @@ SDK 持有真实执行，宿主无法完全替代 runtime 的权限边界；宿�
 - `src/main/ai/channels/adapters/{feishu/FeishuAppRegistration,wechat/WeChatProtocol}.ts`
 - `src/main/ai/channels/security/{ExternalContentGuard,WorkspaceFileGuard,OutputSanitizer}.ts`
 - `src/main/ai/mcp/servers/assistant.ts`
-

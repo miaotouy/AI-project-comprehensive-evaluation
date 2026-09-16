@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 store/hooks/Rust commands 全量行级阅读）；未修改 Jan 仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Jan 的 Chat 管线是"前端直连模型服务"模式：没有后端聊天业务服务，React 前端（web-app）经 AI SDK 的 `useChat` + 自研 `CustomChatTransport` 直接发起流式请求（经 Tauri 本地 API 代理到 llama-server、mlx-server 或远程 provider）。桌面与移动端共用前端逻辑，只在持久化后端分流：桌面端每个 thread 一个目录（`thread.json` + `messages.jsonl`，整文件重写），移动端走 SQLite。
+Jan 现在有普通 Chat、桌面 Cowork 和独立 Agent CLI/TUI 三个对话表面。普通 Chat 沿用 AI SDK `useChat` + `CustomChatTransport`、thread 文件/移动 SQLite 的链；Cowork 另由前端循环持有执行权，会话存入设置后端；CLI 使用 Rust Agent 核心与项目会话。以下旧版主链只描述普通 Chat，不能推及 Cowork 或 CLI（`web-app/src/lib/coworkRunner.ts:15-25`、`web-app/src/hooks/useCoworkSessions.ts:41-52,323-348`、`src-tauri/jan-cli/src/main.rs:24-50`）。
 
 关键事实：
 
@@ -26,6 +26,8 @@ Jan 的 Chat 管线是"前端直连模型服务"模式：没有后端聊天业�
 6. **错误与恢复**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；扩容阶梯写 model.yml + 重启 router（llamacpp）或 stopModel（其他 provider），然后消费续写并在 1s 后 regenerate。
 
 ## 产品表面与系统边界
+
+Cowork 进入 `web-app/src/routes/cowork.tsx:150-191`，模型必须支持 tools，运行循环在路由卸载后仍可继续；独立 CLI 的裸 `jan` 进入 TUI，仅使用远程 Provider，不加载 GUI 或本地推理（`web-app/src/routes/cowork.tsx:439-475`、`web-app/src/lib/coworkRunner.ts:15-25`、`src-tauri/jan-cli/src/main.rs:1-5`）。
 
 - 产品表面：Tauri 桌面 GUI + Web + Android/iOS 移动端；无后端聊天业务服务，模型生成由本地 llama-server/mlx-server 或远程 provider 完成，前端直连。
 - 持久化后端分流：桌面端 Rust 命令层写 `threads/<id>/thread.json` 与 `messages.jsonl`；SQLite 仅 Android/iOS（`should_use_sqlite`，`helpers.rs:17-19`）。

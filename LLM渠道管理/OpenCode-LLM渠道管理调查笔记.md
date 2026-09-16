@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 Provider 组装、配置生命周期、各管理入口、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
 >
@@ -32,6 +32,7 @@ OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的
 - **错误归一化**：`parseAPICallError`/`parseStreamError`（provider/error.ts:102-186）识别 context_length_exceeded/insufficient_quota 等，映射为 `ContextOverflowError`/`APIError`（message-v2.ts:603-719）。
 - **浏览器不直连 provider**：OAuth 授权由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186）。
 - **prompt caching**：Anthropic/Bedrock 家族自动 `cacheControl: ephemeral`（provider/transform.ts:357-406）。
+- **Azure 增加 CLI 凭据路径**：检测到本机 `az` 时，连接入口提供 Microsoft Entra ID（Azure CLI）方法；请求前按 Azure Cognitive Services 或 Foundry scope 调 `az account get-access-token`，令牌按 scope 缓存并在到期前 60 秒刷新，再以 Bearer Header 发送（`packages/opencode/src/plugin/azure.ts:20-121`）。
 
 ## 总体调用链
 
@@ -75,6 +76,8 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 | 桌面端 | 桌面端渲染器复用 Web App 的设置页和 Provider 对话框；通过 sidecar 连接本地服务 | 未找到桌面主进程专属 Provider CRUD、复制、启停或删除逻辑；实际覆盖随 Web/sidecar 路径 | 未找到桌面专属导入/导出或连接测试 | 桌面端是部署和服务连接边界，不是另一套渠道模型；sidecar 启动后提供同一 Server API（`packages/desktop/src/renderer/index.tsx:348-435`；`packages/desktop/src/main/server.ts:57-211`） |
 
 上述表格中的“未找到”仅表示在本次检查的配置、CLI、TUI、Web、桌面端入口及其调用链中未发现对应能力，不等同于项目全局绝对不存在。
+
+Azure 是认证方法覆盖的一个特例：CLI、TUI 与 Web 都从同一插件认证目录取得可用方法；只有系统能找到 `az` 时才显示 Azure CLI 的 Entra ID 路径。该路径仍要求先由用户执行 `az login`，连接回调会先取一次 token 验证当前登录状态，并把 Azure resource name 记入 OAuth accountId 供 Provider 装配读取（`packages/opencode/src/plugin/azure.ts:20-111`、`provider/provider.ts:240-269`）。
 
 - **schema**（opencode.json 的 `provider` 字段，v1/config/config.ts:110-112；类型定义 v1/config/provider.ts:13-126）：
 
@@ -154,6 +157,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 - **请求参数**：`ProviderTransform` 输出 options/providerOptions/message/temperature/topP/topK/maxOutputTokens/schema（src/provider/transform.ts:1151-1506、464-566），按 SDK 生成 `providerOptions`（sdkKey 映射表，:42-96）。
 - **topP 默认值特判**（transform.ts:548-559）：minimax-m2/kimi-k2.5 等 0.95；deepseek-v4-flash 仅 deepseek/opencode 渠道给 0.95。
 - **Copilot 模型能力**：image/pdf 输入能力由远端 `capabilities` 探测（plugin/github-copilot/models.ts:88-94、:133），`pdf` 不是硬编码 false。
+- **Copilot/Codex 插件细节**：Copilot 请求头增加 `X-Interaction-Id`（取当前会话 ID），其自适应思考变体统一声明 `display: "summarized"`、不再仅限 opus-4.7（`packages/opencode/src/plugin/github-copilot/copilot.ts:360-364`、`models.ts:174-183`）。Codex OAuth 暴露的模型按主次版本号过滤，保留 gpt 主版本大于 5 或 5.x 次版本大于 4 的条目（`packages/opencode/src/plugin/openai/codex.ts:293-305`）。
 - **native 协议（opt-in）**：`packages/llm/src/protocols/` 下实现：
 
   ```text
@@ -169,6 +173,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
   - SAP AI Core（:570-593）；
   - Cloudflare AI Gateway：OpenAI 与 Anthropic 原生模型保留各自协议路径，其他上游改经兼容 REST 路由；Anthropic 的带连字符原生 slug 也保留原样（`packages/opencode/src/provider/provider.ts:1249-1308`）。
   - GitLab（:604-728）。
+  - Anthropic Claude 5.1+：对 Anthropic、Vertex Anthropic 与 Bedrock 的 thinking/reasoning 配置默认注入 block binding 控制，当前策略在前缀不匹配时丢弃受影响 thinking block；配置显式写 `blockBinding:false` 可退出。Mythos 5.1 排除在默认范围外（`provider/transform.ts:690-738、1417`）。
 
 ## 6. 运行时选择、绑定与路由
 
@@ -200,14 +205,14 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 
 ## 9. 设计取舍与已确认边界
 
-- **超时三类可配**：`timeout`（整体）、`headerTimeout`（响应头）、`chunkTimeout`（SSE 块间），可 `false` 关闭（v1/config/provider.ts:101-120；provider.ts:1737-1768）；OpenAI 默认 headerTimeout 300s（provider.ts:35、208）。
+- **超时三类可配**：`timeout`（整体）、`headerTimeout`（响应头）、`chunkTimeout`（SSE 块间），都可用 `false` 关闭。当前 Provider SDK 装配对后两者统一采用 300 秒默认值，SSE 读超时会同时 abort 请求、取消 reader 并吞掉取消失败的 rejection；显式值覆盖默认（`core/src/v1/config/provider.ts:101-124`、`packages/opencode/src/provider/provider.ts:1799-1833`、`core/src/aisdk.ts:34-40`）。
 - **prompt caching**：Anthropic/Bedrock 家族自动 `cacheControl: ephemeral` 注入 system + 最后 2 条消息（transform.ts:357-406）；`promptCacheKey` 按 sessionID 设置（transform.ts:1254-1267）；V2 runner 用 `session.id.slice(4)` 作 key（runner/llm.ts:204）；`options.setCacheKey` 可关。
 - **重试可能重复计费**：会话级 `Effect.retry` 重跑整个 `llm.stream` effect，同一回合首请求已计费时不会去重（静态推断；processor.ts:660-674）。
 - **凭据明文存储**：auth.json（0o600）与 credential/account 表均为明文，无加密；权限保护靠文件系统权限。
 - **浏览器不直连 provider**：OAuth 由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186、app/src/utils/server-compat.ts:408-450）。
 - **桌面隔离**：Electron 主进程 fork `sidecar.js`（utilityProcess.fork，packages/desktop/src/main/server.ts:57-184），带 password 的 Basic auth 健康检查（:186-211），设置 `OPENCODE_CLIENT=desktop`、`XDG_STATE_HOME=userDataPath`（:44-55）。
 - 渠道管理在 sidecar 内与 Web/CLI 完全同构：provider/模型/凭据无桌面差异，仅请求头 `x-opencode-client: desktop` 标识来源（llm/request.ts:193）；v2 侧车（`OPENCODE_SIDECAR_V2=1`）改为复用已存在的 CLI 守护进程（desktop/src/main/background-cli.ts:19-58，`service status/start/get password`）。
-- **opencode zen**：device code 登录（src/account/account.ts:387-453），token 存 SQLite `account` 表明文（core/account/sql.ts:6-14）；连接后从 `console.opencode.ai/api/config` 拉取 provider 配置覆盖 catalog（core/plugin/provider/opencode.ts:86-212）；无 key 时仅留免费模型（:167-177）。
+- **opencode zen**：device code 登录（src/account/account.ts:387-453），token 存 SQLite `account` 表明文（core/account/sql.ts:6-14）；连接后从 `console.opencode.ai/api/config` 拉取 provider 配置覆盖 catalog（core/plugin/provider/opencode.ts:86-212）；无 key 时仅留免费模型（:167-177）。App 桌面端在发起 opencode 授权时会给授权 URL 追加 `client_id=opencode-desktop`，供 Console 侧识别桌面设备（`packages/app/src/components/dialog-connect-provider.tsx:562-566`）。
 - **V2 上下文溢出自动压缩再试**：V2 runner 有 `compactAfterOverflow` 重跑 turn（core/src/session/runner/llm.ts:277-381），V1 无跨模型 fallback。
 
 ## 10. 未验证事项
@@ -220,6 +225,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 6. Web 设置页、TUI `/connect` 和桌面端未实际启动操作；表格中的入口、按钮状态和事件调用链是源码确认，视觉表现、权限、错误提示及跨平台行为未验证。
 7. 未验证配置文件或 Web 更新后各已存在实例何时重载，以及自定义 Provider 断开后删除凭据、写入禁用列表和目录刷新之间的实际时序。
 8. 未验证 V2 Catalog/Integration 的内部更新与删除操作是否会在后续版本通过其他未检查的适配层暴露；当前结论仅针对本快照已读入口。
+9. Azure CLI 登录、双 scope 选择和 token 刷新的真实请求未运行验证；静态代码只确认命令、缓存与 Header 注入链。
 
 ## 11. 关键源码索引
 
@@ -227,6 +233,7 @@ OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider
 - `packages/opencode/src/provider/transform.ts`：参数转换（:42-96、:1151-1506）
 - `packages/opencode/src/provider/error.ts`：错误归一化（:102-186）
 - `packages/opencode/src/auth/index.ts`：auth.json 凭据
+- `packages/opencode/src/plugin/azure.ts`：Azure API Key 与 Azure CLI/Entra ID 认证方法、scope 与 token 缓存
 - `packages/opencode/src/session/llm.ts`、`src/session/llm/native-runtime.ts`、`llm/request.ts`：请求发起与协议切换
 - `packages/opencode/src/session/retry.ts`：重试策略
 - `packages/core/src/models-dev.ts`：模型目录

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`cecdbe432feda57821938bba7625a272113d21c1`（分支：`main`）
+> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
 >
 > 调查方式：只读静态源码核对，覆盖 Agent SQLite 服务、创建/编辑界面及请求装配；未运行移动端和同步服务
 >
@@ -30,31 +30,31 @@ VCPMobile 的角色实体是 SQLite `agents` 表中的 Agent，不是短生命�
   -> VCP 请求
 ```
 
-`handle_agent_chat_message` 在每次请求时读取完整配置，先决定有效提示词，再将它交给上下文装配器；模型参数与 `agentId/topicId/agentName` 一同进入请求载荷。`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:59-139`。
+`handle_agent_chat_message` 在每次请求时读取完整配置，先决定有效提示词，再将它交给上下文装配器；模型参数与 `agentId/topicId/agentName` 一同进入请求载荷。`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:25-135`。
 
 ## 1. 数据模型、存储与删除
 
-`AgentConfig` 定义了 ID、名称、同步系统提示词、仅本机的移动系统提示词、模型、温度、上下文/输出 token 限制、流式开关和 temperature 是否入请求；读取时还派生头像主色和该 Agent 的话题列表。`src-tauri/src/vcp_modules/agent/agent_types.rs:8-51`，`src-tauri/src/vcp_modules/agent/agent_service.rs:136-191`。
+`AgentConfig` 定义了 ID、名称、同步系统提示词、仅本机的移动系统提示词、模型、温度、上下文/输出 token 限制、流式开关和 temperature 是否入请求；读取时还派生头像主色和该 Agent 的话题列表。`src-tauri/src/vcp_modules/agent/agent_types.rs:11-52`，`src-tauri/src/vcp_modules/agent/agent_service.rs:123-200`。
 
-配置通过事务 upsert 到 `agents` 表，并计算同步哈希；头像存于独立的 `avatars` 表。服务为每个 Agent 使用互斥锁与缓存代际，避免并发读写回填过期对象。删除采用软删除，并级联软删除该 Agent 的话题、消息和头像，同时清理活动生成记录。`src-tauri/src/vcp_modules/agent/agent_service.rs:328-476,479-581`。
+配置通过事务 upsert 到 `agents` 表，并计算同步哈希；头像存于独立的 `avatars` 表。服务为每个 Agent 使用互斥锁与缓存代际，避免并发读写回填过期对象。删除采用软删除，并级联软删除该 Agent 的话题、消息和头像，同时清理活动生成记录。`src-tauri/src/vcp_modules/agent/agent_service.rs:329-630`。
 
-前端可读配置接口会清空同步系统提示词；保存时服务端会从缓存或数据库补回该字段，防止移动端编辑界面将其擦除。这意味着移动端设置页实际编辑的是本机覆盖提示词，而不是完整同步提示词。`src-tauri/src/vcp_modules/agent/agent_service.rs:93-109,201-228`，`src/features/agent/AgentSettingsView.vue:279-292`。
+前端可读配置接口会清空同步系统提示词；保存时服务端会从缓存或数据库补回该字段，防止移动端编辑界面将其擦除。这意味着移动端设置页实际编辑的是本机覆盖提示词，而不是完整同步提示词。`src-tauri/src/vcp_modules/agent/agent_service.rs:96-109,203-230`，`src/features/agent/AgentSettingsView.vue:197-230`。
 
 ## 2. 创建、选择与会话绑定
 
-创建入口只要求用户填写名称。默认配置创建一个带提示词的 Agent、一个主要话题和默认模型/参数，然后在同一事务写入。创建 UI 随后选择这个 Agent、加载其话题并打开设置页。`src-tauri/src/vcp_modules/agent/agent_service.rs:584-688`，`src/features/agent/AgentsCreator.vue:16-52`。
+创建入口只要求用户填写名称。默认配置创建一个带提示词的 Agent、一个主要话题和默认模型/参数，然后在同一事务写入。创建 UI 随后选择这个 Agent、加载其话题并打开设置页。`src-tauri/src/vcp_modules/agent/agent_service.rs:631-732`，`src/features/agent/AgentsCreator.vue:18-47`。
 
-角色与对话的绑定粒度是 Agent 拥有多个话题，而不是角色快照写进每条消息。发送输入是当前会话的 `ownerId/topicId`，服务端通过 `agent_id` 获取实时配置，因此后续发送会使用更新后的配置。重新生成同样不依赖消息内快照：它先删除目标用户消息时间戳之后的全部历史，再以不追加用户消息的方式复用同一发送链，因而也会读取当前 Agent 配置。消息行本身只持久化 Agent 标识、显示名和内容元数据，没有模型、参数或提示词快照。`src/core/stores/chatHistoryStore.ts:354-398`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:53-113`，`src-tauri/src/vcp_modules/chat/topic_service.rs:623-684`。
+角色与对话的绑定粒度是 Agent 拥有多个话题，而不是角色快照写进每条消息。发送输入是当前会话的 `ownerId/topicId`，服务端通过 `agent_id` 获取实时配置，因此后续发送会使用更新后的配置。重新生成同样不依赖消息内快照：它先删除目标用户消息时间戳之后的全部历史，再以不追加用户消息的方式复用同一发送链，因而也会读取当前 Agent 配置。消息行本身只持久化 Agent 标识、显示名和内容元数据，没有模型、参数或提示词快照。`src/core/stores/chatHistoryStore.ts:661-760`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:50-160`，`src-tauri/src/vcp_modules/chat/topic_service.rs:917-1136`。
 
 ## 3. 提示词、模型与生成参数
 
-提示词优先级只有两层：`mobile_system_prompt` 优先于 `system_prompt`。有效提示词先交给 `orchestrate_chat_context`，与消息历史和 Tavern 规则共同形成请求消息；Tavern 规则的具体字段和排序属于对话上下文类目。`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:87-124`。
+提示词优先级只有两层：`mobile_system_prompt` 优先于 `system_prompt`。有效提示词先交给 `orchestrate_chat_context`，与消息历史和 Tavern 规则共同形成请求消息；Tavern 规则的具体字段和排序属于对话上下文类目。`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:95-135`。
 
-每个 Agent 可选一个网关返回的模型，并设置 token 上限、流式和 temperature；关闭 `use_temperature` 时 temperature 不会进入请求。设置界面在关闭时按变更保存，模型选择器复用全局模型目录。`src/features/agent/AgentSettingsView.vue:111-185,288-381`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:115-124`。
+每个 Agent 可选一个网关返回的模型，并设置 token 上限、流式和 temperature；关闭 `use_temperature` 时 temperature 不会进入请求。设置界面在关闭时按变更保存，模型选择器复用全局模型目录。`src/features/agent/AgentSettingsView.vue:145-230,387-424`，`src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:95-135`。
 
 ## 4. 资产、外部能力与兼容边界
 
-头像可在移动端选择、裁切并保存，随后由 Agent ID 关联；名称和模型会同步更新侧边栏的轻量列表。`src/features/agent/AgentSettingsView.vue:67-109`，`src/core/stores/assistant.ts:226-253,284-306`。
+头像可在移动端选择、裁切并保存，随后由 Agent ID 关联；名称和模型会同步更新侧边栏的轻量列表。`src/features/agent/AgentSettingsView.vue:65-145`，`src/core/stores/assistant.ts:226-306`。
 
 本次检查 Agent 配置结构和设置界面，未找到工具、MCP、Skill、知识库、长期记忆、世界书、开场白、快捷回复、变量字典或 Provider/Endpoint 字段。工具和检索可以由远端 VCP 生态提供，但并不由该 Agent 配置授权。也未找到角色导入、导出、复制、版本历史或冲突合并入口。
 

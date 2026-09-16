@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -28,7 +28,7 @@ Cherry Studio 当前生产代码把一条 LLM 渠道表示为 SQLite 中的一�
 
 但高可用能力仍然有限（用户可配置的重试/fallback 默认关闭）：
 
-- 多 Key 只是跨请求轮询，没有失败计数、Key 健康状态、429 熔断或自动恢复；
+- 多 Key 的基础选择仍是跨请求轮询，没有持久化失败计数、Key 健康状态、429 熔断或自动恢复；启用 model-retry 后，同一请求可把同一 Provider 的其他已启用 Key 解析为临时候补。
 - 普通聊天默认 `maxRetries: 0`，除非调用方显式覆盖（AI SDK 层）；
 - **model-retry**：聊天调用入口用 ai-retry 的重试包装包住普通模型，同一模型的瞬态错误（429/503/529 等）按 `chat.retry.*` 偏好重试，并可配置按能力约束解析的 fallback 模型；但偏好 `chat.retry.enabled` **默认 false**，且请求级 `maxRetries: 0` 会显式关闭包装。因此普通聊天默认不重试，跨 Provider failover **默认没有**，用户可在设置里开启同模型重试 + 模型 fallback；
 - 没有渠道权重、优先级、成本或延迟路由；
@@ -240,18 +240,19 @@ slim 布局：Data/cherrystudio.sqlite + cache.json（可选）
 
 SDK 配置构建入口每次构造配置时调用一次该方法。连接检查可传 `apiKeyOverride`，从而精确测试某一个 Key 而不受轮询影响。
 
-### 4.2 没有健康状态或同请求换 Key
+### 4.2 无持久健康状态；可选重试层支持同请求换 Key
 
-Key 条目没有错误次数、429 时间、熔断截止时间或健康分。普通请求失败后也没有调用 ProviderService 把该 Key 标坏。
+Key 条目没有错误次数、429 时间、熔断截止时间或健康分。普通请求失败后也不会调用 ProviderService 把该 Key 持久标坏。
 
-因此多 Key 的准确语义是“请求之间平均分配”，不是：
+基础轮询的准确语义仍是“请求之间平均分配”。当用户启用 `chat.retry.*` 时，`buildApiKeyFallbackModels` 会把当前 Provider 其余已启用 Key 包装为同模型候补，供同一请求在认证或限流失败后继续尝试；这是请求内临时 failover，不会改变 Key 的持久状态。解析与构建见 `src/main/ai/runtime/aiSdk/retry/resolveApiKeyFallbacks.ts:5`、`buildApiKeyFallbackModels.ts:27`，调用点见 `src/main/ai/AiService.ts:639,802`。
 
-- 当前请求 429 后换 Key；
-- 自动跳过认证失败 Key；
+它仍不是：
+
+- 持久跳过认证失败 Key；
 - 按剩余额度、延迟或价格选择 Key；
 - 熔断一段时间后自动恢复。
 
-如果一个坏 Key 与一个好 Key同时启用，请求可能按轮询节奏持续交替失败和成功。
+如果重试关闭，一个坏 Key 与一个好 Key 同时启用，请求仍可能按轮询节奏交替失败和成功；重试开启时可在当前请求内尝试其他 Key，但下一次请求仍从基础轮询状态开始。
 
 ## 5. 模型目录与同步
 
@@ -421,13 +422,19 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 
 这是一种用户确认后的配置迁移，不是远程动态配置中心。负载中的 API Key 会经过 URL/路由参数进入应用，调用方仍需考虑浏览器历史、聊天记录或日志对深链的暴露。
 
-## 10. 当前渠道与模型适配补充
+## 10. API Gateway 的移动设备配对与渠道导出
+
+API Gateway 除本机推理协议外，还提供受限的移动设备接入面。启用 LAN 后，设置页请求一次性短时配对码，移动端以 `POST /pair` 交换设备 token；成功设备持久化为配对记录，token 只保存哈希。LAN 守卫只允许配对引导与 `GET /v1/export/providers`，普通生成、知识库和 MCP 路由仍限定 loopback。Provider 导出另有 endpoint 级 token 校验，配对 token 不等同于普通网关主密钥。依据：`src/main/features/apiGateway/ApiGatewayPairing.ts:20-59`、`lanGuard.ts:5`、`routes/pairing.ts:23-35`、`routes/providerExport.ts:146`。
+
+该能力创建的是“把当前可用 Provider 配置交付给已配对移动端”的受控导出，不是 Provider Settings 的通用文件导出，也不开放远程 Provider CRUD。真实局域网发现、移动端消费和明文 HTTP 环境下的网络风险未运行验证；仓库文档明确把 LAN 暴露限制在 pairing 与 export 两条路由，见 `docs/references/api-gateway/README.md:144-152,384-426`。
+
+## 11. 当前渠道与模型适配补充
 
 Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Flash Vision Exp 的图像能力目录；同时移除了已退役的 GitHub Models 集成。Pi 与 DSH 的模型选择不直接复用普通聊天的任意 endpoint，而是经过各自兼容性和默认 Chat endpoint 解析；LM Studio 预设已补齐该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口则从 `/api/show` 读取。
 
 这些变化均在渠道解析、目录或 UI 选择层确认，第三方 endpoint 对所有组合的实际响应仍未运行验证。依据：`packages/provider-registry/src/providers/ollama.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/ai/dshModelCompatibility.ts`、`src/shared/data/presets/runtimeTransport.ts`、`src/renderer/components/ModelSelector`。
 
-## 11. 能力边界与横向比较要点
+## 12. 能力边界与横向比较要点
 
 ### 已实现
 
@@ -447,7 +454,7 @@ Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Fla
 ### 未实现或不应误判
 
 - 没有 Key 错误计数、熔断、自动恢复或配额感知；
-- 多 Key 轮询不等于当前请求内换 Key；
+- 多 Key 基础轮询不等于持久健康调度；只有启用 model-retry 时才会在当前请求内尝试同 Provider 的其他 Key；
 - SDK 层普通聊天默认不重试（`maxRetries ?? 0`）；用户可配置的 model-retry 默认关闭；
 - SDK 重试不等于重新选择 Provider；model-retry 的 fallback 是模型级、按能力过滤，不按 Key/渠道池调度；
 - 默认没有跨 Provider、跨模型自动 failover（需用户开启 `chat.retry.*`）；
@@ -459,7 +466,7 @@ Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Fla
 - SQLite 凭据没有静态加密；
 - 备份/恢复已覆盖 SQLite，但备份文件与数据库同样明文保存凭据。
 
-## 12. 关键源码索引
+## 13. 关键源码索引
 
 - Provider Registry 设计：[`docs/references/provider-model/provider-registry.md`](../../cherry-studio/docs/references/provider-model/provider-registry.md)
 - Registry 数据：[`packages/provider-registry/data/`](../../cherry-studio/packages/provider-registry/data/)
@@ -485,12 +492,13 @@ Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Fla
 - Provider CRUD Schema：[`src/shared/data/api/schemas/providers.ts`](../../cherry-studio/src/shared/data/api/schemas/providers.ts)
 - Code CLI 配置文件：[`src/shared/utils/cliConfig.ts`](../../cherry-studio/src/shared/utils/cliConfig.ts)、[`src/renderer/pages/code/cliConfig/draft.ts`](../../cherry-studio/src/renderer/pages/code/cliConfig/draft.ts)、[`src/renderer/pages/code/hooks/useConfigPanelController.ts`](../../cherry-studio/src/renderer/pages/code/hooks/useConfigPanelController.ts)
 - API Gateway 管理边界：[`src/main/features/apiGateway/utils/models.ts`](../../cherry-studio/src/main/features/apiGateway/utils/models.ts)、[`src/main/features/apiGateway/ApiGatewayService.ts`](../../cherry-studio/src/main/features/apiGateway/ApiGatewayService.ts)
+- 移动设备配对与导出：`src/main/features/apiGateway/{ApiGatewayPairing,lanGuard}.ts`、`routes/{pairing,providerExport}.ts`
 - 自定义多端点：[`src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts)
 - Deep Link 导入：[`src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts)
 - 多模型解析：[`src/main/ai/streamManager/context/modelResolution.ts`](../../cherry-studio/src/main/ai/streamManager/context/modelResolution.ts)
 - 持久会话多模型调度：[`src/main/ai/streamManager/context/PersistentChatContextProvider.ts`](../../cherry-studio/src/main/ai/streamManager/context/PersistentChatContextProvider.ts)
 
-## 13. 未验证事项
+## 14. 未验证事项
 
 1. 本次没有启动 Electron 应用，也没有向真实 Provider 发起付费或流式请求；连接检查、代理、OAuth 回调和多模型 UI 结论来自源码。
 2. 没有枚举并实测 Registry 中每个 Provider 的全部协议组合；专用 Builder 仍可能有服务商级特殊限制。

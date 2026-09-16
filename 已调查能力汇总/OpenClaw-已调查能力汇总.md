@@ -2,9 +2,9 @@
 
 > 汇总对象：`https://github.com/openclaw/openclaw`
 >
-> 汇总更新日期：2026-09-04
+> 汇总更新日期：2026-09-16
 >
-> 依据：OpenClaw 已完成的 17 份单项目调查笔记：仓库分布、会话与消息管理、对话请求与上下文、Chat UI、消息渲染器、对话导出与分享、LLM渠道管理、Agent角色配置、Agent工具、外部执行体与应用协作、主动Agent与后台任务、检索增强与认知编排、上下文编译与提示词工程、生成式输出与运行时、媒体创作、应用界面基础设施、独特功能（代码快照统一为各笔记记录的 `c64a640f5df5bc72537357417c54647c050cb863`）
+> 依据：OpenClaw 已完成的 17 份单项目调查笔记：仓库分布、会话与消息管理、对话请求与上下文、Chat UI、消息渲染器、对话导出与分享、LLM渠道管理、Agent角色配置、Agent工具、外部执行体与应用协作、主动Agent与后台任务、检索增强与认知编排、上下文编译与提示词工程、生成式输出与运行时、媒体创作、应用界面基础设施、独特功能（代码快照统一为各笔记记录的 `541406eeb737e00907438f79cbc0d0a74f0def99`）
 >
 > 汇总方法：逐一阅读全部来源笔记；按产品能力主题合并来自多个类目的同一能力，避免按来源目录重复抄写；能力说明保留各笔记的证据状态（主链确认/入口确认/本次未找到/暂缓/未运行等）与限定条件，不在汇总中补做源码调查或升级证据；来源链接为从本目录出发的相对路径
 >
@@ -14,10 +14,10 @@
 
 ## 项目概览
 
-OpenClaw 是一个以本机 Gateway 为控制平面的多渠道单操作者私人 AI 助手。Gateway 是中心状态、路由与控制平面；CLI、TUI、浏览器 Control UI、iOS/Android companion app 与消息渠道适配器主要是外部控制表面或设备节点，不各自持有主 Agent 运行时；真正执行模型请求的是与 Gateway 同机的 agent 运行器。产品形态与调用面依据见 [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
+OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gateway 是中心状态、路由与控制平面；CLI、TUI、浏览器 Control UI、iOS/Android companion app 与消息渠道适配器主要是外部控制表面或设备节点，不各自持有主 Agent 运行时；模型请求可由同机 agent 运行器、受管理 worker environment、配对节点或外部 ACP harness 承担。产品形态与调用面依据见 [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
 
 - **主要调用者与表面**：操作者通过 CLI、TUI、Control UI 和移动 companion 应用发起并管理会话；多渠道 IM（文档列出约 20 个支持渠道，为入口/文档级确认）上的消息、thread/topic 映射到 Gateway session 或 ACP binding；外部 ACP client 与第三方 Claude Code 子进程可以从相反方向桥接。
-- **仓库结构与规模**：pnpm workspace，根入口 `openclaw.mjs`。`src` 承担 Gateway、Agent、会话、工具与 CLI 主链；`extensions` 承担消息渠道、Provider 插件与可选能力；`ui` 是 Control UI；`apps` 是桌面/移动 companion；`packages` 提供共享 SDK/协议。快照约 34,147 个跟踪文件，TypeScript 约占可识别源码 91%，Swift/Kotlin 服务 companion 与平台集成。依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
+- **仓库结构与规模**：pnpm workspace，根入口 `openclaw.mjs`。`src` 承担 Gateway、Agent、会话、工具与 CLI 主链；`extensions` 承担消息渠道、Provider 插件与可选能力；`ui` 是 Control UI；`apps` 是桌面/移动 companion；`packages` 提供共享 SDK/协议。快照有 43,542 个跟踪文件、38,648 个源码文件和约 1,172 万行源码，TypeScript 约占 91%，Swift/Kotlin 服务 companion 与平台集成。依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
 - **Agent 形态**：普通用户 Agent 是配置 roster（`agents.entries.<agentId>`）与 workspace 角色文件（AGENTS.md、SOUL.md、IDENTITY.md、USER.md、BOOTSTRAP.md、MEMORY.md）的组合，按 agentId 隔离 SQLite 状态与会话目录；另有 Gateway 投影的 system agent 行与外部 ACP harness 两类边界。依据见 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md)。
 - **重要外部依赖**：模型 Provider（OpenAI、Anthropic、Google、本地 Ollama/llama.cpp/LM Studio 等）；hosted 模型目录（`catalog.openclaw.ai`，源仓库在仓库外）；ClawHub 外部注册表及其扫描/审核服务；ComfyUI 本地/云端等媒体 Provider；消息渠道平台账号与推送服务；iOS/Android 设备本地能力；ACPX 外部 harness。
 - **产品辨识点**：把"谁能接触 Agent、谁能往本机安装会改变 Agent 行为的代码"做成显式、可审计的准入与信任决策，见 [独特功能调查笔记](../独特功能/OpenClaw-独特功能调查笔记.md) 与本汇总"渠道、设备节点与外部执行体"一节。
@@ -91,6 +91,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道单操作者私�
 - **渠道 DM 与设备配对审批门（独特能力，主链确认静态）**：渠道账号的 `dmPolicy`（pairing/allowlist/open/disabled）与 allowFrom 决定陌生私聊是否放行。pairing 模式下未批准发送者收到 8 位 TTL 码（挂起请求 1 小时过期、单账号上限 3 条），消息不进 Agent；操作者经 CLI `openclaw pairing approve`、Control UI 队列或配对渠道批准后写入 allow entries，批准持久化并驱动下一次准入。设备端 setup-code/bootstrap token 配对及 scope 升级走同源的显式审批语义。该门 fail-closed、不透明码，各渠道插件共享核心决定器（以 Telegram 为例走通，其余渠道未逐一核对）。
 - **身份分层**：连接身份、Gateway session key、ACP runtime session name、渠道 thread/topic、node id 是不同层级标识，不能凭聊天标题推断相等。
 - **渠道 ACP binding**：把会话/Discord thread/Telegram topic 绑定到外部 ACP session；平台级消息编辑、线程与失败重试为入口确认、未运行验证。
+- **云与节点工作环境**：Gateway 可把 session 放置到受管理 worker environment 或配对节点，持久化 placement state、generation、environment owner epoch 与 turn claim；仓库工作区经过准备、同步、远端执行、结果暂存和本地 reconcile，冲突形成显式 workspace result。recovery/reclaim 负责重启后的环境与待结算结果，旧 claim 不能恢复执行权。
 
 ## 后台与主动任务
 
@@ -103,6 +104,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道单操作者私�
 - **后台 CLI exec**：exec 在 yield/background 后把受监管进程登记为 task run，进程由 ProcessSupervisor 托管；完成后可写 system event 并请求 heartbeat。后台进程跨 Gateway 重启可恢复性未确认（未找到跨重启重连原始 child 的 worker owner）。
 - **Detached subagent**：`sessions_spawn` 创建子 session 并登记 run，`subagent_runs` 持久化；结果可直投 requester、进 steering queue 注入下一次 turn，或经 settle wake 在所有子项结束后重入 requester。跨 restart 的 handoff 走 SQLite session delivery queue。
 - **统一 durable channel delivery**：cron/heartbeat/subagent/task 的可见结果都进入写前队列（SQLite row + producer/platform lease），发送结果分 sent/suppressed/partial_failed/failed，保留 unknown-after-send 语义，避免平台调用已开始但结果不明时盲目重发。
+- **持久更新运行**：软件更新使用 `update_runs` 账本记录触发源、目标、阶段步骤、验证、修复、终态和驱动身份；驱动必须显式 adopt，死亡驱动和遗留运行按保存的 recovery 继续或结算。它是独立运维运行形态，不与 cron/subagent 合并为通用 worker queue。
 - **本次未找到**：统一的跨进程通用 worker queue；持久性是 receipt、subagent registry、session/outbound delivery queue 分别承担的。
 
 ## 媒体生成与输出运行时
@@ -159,7 +161,8 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道单操作者私�
 - **原生应用 Export Transcript**：iOS/macOS 把当前视图消息导出为 Markdown 并经系统分享（macOS ⌘⇧E）。
 - **口径差异**：同一命令名在渠道端与 Web 端是不同实现、不同内容口径（渠道端含 system prompt 与完整工具轨迹，Web 端仅正文 Markdown）；导出都是快照，无与源会话再同步语义。
 - **内容边界**：只导出活动分支，不包含隐藏分支；轨迹导出做本地路径/secret 类清洗（尽力而为），HTML 导出刻意不脱敏；图片需以 base64 存在于 transcript 才真正内联显示（是否普遍携带未验证）。
-- **未找到**：分享稿编辑器/预览工作台、会话整图/长图导出、远端公开页/受控链接分享、导出版本历史与撤销；会话 URL 是带鉴权的内部深链，不是公开分享面。控制面导出会话（如 CLI/ACP 代理时）只见 user 行并附说明。
+- **公开会话分享**：Control UI 可在显式确认后发布世界可读 token 链接并独立撤销；公开发布绑定精确 session generation，与 shared/read-only/suggest/draft 团队可见性和成员关系分离。普通会话 URL 仍是鉴权深链。
+- **仍未找到**：分享稿编辑器/预览工作台、会话整图/长图导出和本地导出版本历史；公开链接的过期、评论、访问统计和克隆未确认。控制面导出会话（如 CLI/ACP 代理时）只见 user 行并附说明。
 
 ## 界面与独特功能
 
@@ -191,17 +194,17 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道单操作者私�
 
 - **ClawHub 分发与安装信任门（主链确认，静态，依赖外部 ClawHub 响应）**：`openclaw skills install`/`plugins install clawhub:` 等入口先取目标 release 的信任元数据，裁决为 clean 放行、blocked（恶意/拉黑/审核阻止）拒绝下载、review-required 要求 `--acknowledge-clawhub-risk` 显式确认；裁决随安装记录持久化，`update --all`/doctor 后续重新过门。聊天命令面不能代替本机确认（防经 Agent 诱骗安装）。
 - **`openclaw doctor` 诊断-修复-迁移链（入口确认，工程机制）**：检查/修复按模块族拆分，顶层 doctor 命令按只读/`--fix`/非交互/`--lint --json` 驱动；完整 check→fix→verify 回合未逐条走查，故不进入用户功能统计。
-- **暂缓项与仓库内部资产**：companion 语音/talk、Canvas/A2UI、boards/workboard、meeting-bot、fleet、projects/flows/tasks 等"新表面"本轮只到声明/入口层，未走主链；taxonomy.yaml、custodian-skills 与仓库根 `skills/` 是 QA 与维护 agent 资产，不是用户产品能力。
+- **暂缓项与仓库内部资产**：companion 语音/talk、A2UI、meeting-bot、fleet、projects/flows/tasks 等"新表面"只到声明/入口层，未走主链；Canvas 文档与 session board widget 已归入本汇总“媒体生成与输出运行时”。taxonomy.yaml、custodian-skills 与仓库根 `skills/` 是 QA 与维护 agent 资产，不是用户产品能力。
 - 渠道/设备配对审批门归并在本汇总"渠道、设备节点与外部执行体"一节。
 
 ## 证据边界与遗漏
 
 - **统一证据状态**：以上"主链确认（静态）"均来自当前代码快照的可执行调用关系复核，未运行构建、测试、Gateway、真实 Provider、真实 UI/原生设备或端到端会话。按各类目指南，未做运行验证不降低源码结构类结论；运行验证补充的是平台差异、外部依赖、时序、性能与交互质量等可观察结果。
-- **来源笔记彼此限定的差异**：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md) 撰写时把媒体创作判为"本类目不适用/未找到独立主链"，而同日完成的 [媒体创作调查笔记](../媒体创作/OpenClaw-媒体创作调查笔记.md) 已建立图片/视频/音乐生成的任务化主链确认。本汇总以媒体创作笔记为准，媒体生成能力见相应小节。
-- **"本次未找到"（限定于已读入口/范围，不作项目级绝对断言）**：通用消息就地编辑与按 id 删除 RPC；通用 sessions export/import RPC；统一跨进程后台 worker queue；独立媒体工作台/媒体历史树/跨会话资产库/媒体工程对象；board 级导入导出与模型侧 board 查询工具；分享稿编辑器、会话整图导出、远端分享链接与导出版本历史；普通 Agent 的 clone/import/export；通用规则 schema 编译器（preset/lorebook 层）；Mermaid/KaTeX 与 ACP 专用消息 renderer。
-- **本轮没有调查/暂缓**：companion 语音与 talk、Canvas/A2UI、board/workboard、meeting-bot、fleet、projects/flows/tasks 等新表面的用户主链；ClawHub 市场/扫描/审核服务（仓库外）；各渠道插件的逐平台传输实现（以核心决定器与 Telegram 为例，未逐一核对约 20 个渠道）；voice-phone 桥接等外部展示声明。
+- **媒体类目边界**：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md) 只保留外部 Provider、节点采集和远端执行边界；图片/视频/音乐生成的任务化主链以 [媒体创作调查笔记](../媒体创作/OpenClaw-媒体创作调查笔记.md) 为准。
+- **"本次未找到"（限定于已读入口/范围，不作项目级绝对断言）**：通用消息就地编辑与按 id 删除 RPC；通用 sessions export/import RPC；统一跨进程后台 worker queue；独立媒体工作台/媒体历史树/跨会话资产库/媒体工程对象；board 级导入导出与模型侧 board 查询工具；分享稿编辑器、会话整图导出与本地导出版本历史；普通 Agent 的 clone/import/export；通用规则 schema 编译器（preset/lorebook 层）；Mermaid/KaTeX 与 ACP 专用消息 renderer。
+- **本轮没有调查/暂缓**：companion 语音与 talk、A2UI、meeting-bot、fleet、projects/flows/tasks 等新表面的用户主链；ClawHub 市场/扫描/审核服务（仓库外）；各渠道插件的逐平台传输实现（以核心决定器与 Telegram 为例，未逐一核对约 20 个渠道）；voice-phone 桥接等外部展示声明。Canvas 文档与 session board widget 不在此列，其静态主链已归入“媒体生成与输出运行时”。
 - **当前证据无法确认的事项**：不同 Provider 的真实事件时序、并发容量下的端到端顺序、错误恢复与重启竞态、多客户端并发的跨表面一致性与安全对抗强度（配对传播、下载校验、prompt-injection framing）、各 UI 的实际视觉/焦点/无障碍/键盘表现、附件与媒体在真实模型请求中的字节与成本。以上均需运行或对抗验证，现有来源未覆盖。
-- **声明与实现差异记录**：命令名同名异实现（`/export-session` 渠道端 HTML vs Control UI 端 Markdown）；"share a session" URL 实为鉴权内部深链；models.json 中 apiKey 常为来源 marker 而非明文；`session_message` 与 `chat`/`agent` 事件是不同投影面；compaction 前后模型可见历史与 SQLite 完整历史是不同事实。
+- **声明与实现差异记录**：命令名同名异实现（`/export-session` 渠道端 HTML vs Control UI 端 Markdown）；普通会话 URL 是鉴权内部深链，公开分享另用 public-share token 路由；models.json 中 apiKey 常为来源 marker 而非明文；`session_message` 与 `chat`/`agent` 事件是不同投影面；compaction 前后模型可见历史与 SQLite 完整历史是不同事实。
 - **外部依赖边界**：模型 Provider、hosted catalog、ClawHub、媒体 Provider/ComfyUI、消息渠道平台、推送服务、ACPX 外部 harness、设备本地能力均在仓库外或需真实服务；无外部服务时相关门 fail-closed（如 ClawHub 来源不可达不静默降级）。
 - 运行验证补充的是特定环境下的可观察结果；测试文件存在、测试运行、黑盒验证与线上使用属不同证据层级，本汇总仅引用各来源静态确认的边界。
 

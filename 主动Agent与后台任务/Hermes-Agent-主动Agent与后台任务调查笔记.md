@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：只读核对仓库根 `AGENTS.md`、已有独特功能笔记，以及 `hermes_cli/heartbeat.py`、CLI/Gateway 驱动、`cron/jobs.py` 与 `cron/scheduler.py` 的可执行链；未启动服务，未修改被调查仓库
 >
@@ -75,6 +75,8 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 
 恢复策略偏向避免重复副作用：循环 job 预推进下次运行，进程崩溃可能漏掉一次而非重放；有限单次 job 在副作用前计入 dispatch，获得 at-most-times 语义。死 owner 的 execution 会被周期性标为 unknown 并回收；过期的一次性 claim 可释放。超过宽限仍未触发的一次性 job 会留下诊断输出后退役，而非在重启后无限补跑（`cron/jobs.py:2883-2962,2997-3022,3025-3078`; `cron/scheduler.py:7642-7671`）。
 
+循环 job 对“尚未到达模型”的网络/DNS 失败有一条窄重跑链。只有 Agent API 调用数仍为零时才在 5、15、30 分钟后重排，期间抑制中间失败通知；一旦到达模型，无论结果成功与否都会清空阶梯。一次性 job、暂停 job 和可能已经产生副作用的失败不进入该机制，`cron.retry_unreachable: false` 可关闭（`cron/unreachable_retry.py:1-17,30-52,55-125`）。
+
 ## 相邻类目交接与已确认边界
 
 - heartbeat 是会话内续作，cron 是隔离日程运行；前者不应按“持久 cron”比较，后者的结果也不会镜像为原 Gateway 会话中的普通消息。
@@ -88,6 +90,7 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 - 未验证 heartbeat 恢复后是否在所有表面自动重新注册 watch；代码可确认持久状态与 CLI/Gateway 注册路径，未覆盖跨表面切换操作。
 - 未验证 cron 的外部 delivery adapter、模型/工具审批、长时间运行时 fire claim 心跳以及多进程文件锁在真实部署中的行为。
 - 未验证 cron execution 账本的完整查询界面和保留/清理时间；已确认 job 状态与输出文件的保存链。
+- 未运行验证模型不可达重跑的真实网络分类、通知抑制和跨重启时间语义。
 
 ## 关键源码索引
 
@@ -95,3 +98,4 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 - `cli.py:12754-12818`、`gateway/run.py:21914-21974`：CLI 与 Gateway 的空闲判定、轮询和普通消息重入。
 - `cron/jobs.py:68-99,732-829,2552-2801,2883-3192,3314-3329`：profile 存储、日程解析、终态、认领及到期/catch-up 处理。
 - `cron/scheduler.py:464-495,5310-5465,6910-7126,7556-7905`：cron 工具边界、Agent/脚本执行、输出与交付、取消和线程池派发。
+- `cron/unreachable_retry.py:1-125`：零 API 调用失败的 5/15/30 分钟有限重跑阶梯。

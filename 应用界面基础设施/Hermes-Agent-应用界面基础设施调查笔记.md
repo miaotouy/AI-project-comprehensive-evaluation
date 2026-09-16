@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -295,6 +295,10 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 
 桌面基础设施继续把 connection、profile 与 session 分开建模。会话 API 的作用域由 `sessionScoped` 统一生成，读取与写入由同一 profile/connection 路由承接（`apps/desktop/src/api/sessions.ts:16-31`）；事件缓存也记录这三个维度（`apps/desktop/src/store/session-states.ts:80`）。这为远端连接、profile rail 与同 ID 会话并存提供了状态边界，视觉与跨窗口交互仍未运行验证。
 
+连接授权和浏览器秘密输入都采用后端持有状态、前端只呈现请求的模式。Connector operation 通过 server→client 请求驱动桌面卡片，授权 URL 不进入模型结果；Vault 的登录、支付卡和地址以 profile 作用域加密库保存，模型只看 opaque handle 与非秘密元数据，真实字段由后端按 origin 填入浏览器（`apps/desktop/src/store/connection-request.ts:17-54,135-181`，`agent/vault_store.py:1-16,193-293`）。这两条输入面都没有把敏感值放入通用弹窗状态或聊天转录。
+
+语音控制也收敛在 Composer 基础设施。麦克风按钮通过 fan menu 切换 STT、GPT-Live 会话和扬声器状态；全双工引擎的实时音频由独立 hook 管理，实际任务仍提交给当前 Hermes 会话（`apps/desktop/src/app/chat/composer/hooks/use-composer-voice.ts`，`use-voice-live-conversation.ts`，`voice-engine-rows.tsx`）。
+
 ## 9. 未验证事项
 
 - Radix 内部行为（Esc 关闭、focus trap、DismissableLayer、cmdk 键盘语义、Tooltip 焦点守卫的实际读屏效果）未下钻依赖源码，依赖版本为 radix-ui 1.6.7/cmdk 1.1.1。
@@ -306,12 +310,15 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 - 后端 notification.show/皮肤协议与三端消费的字段契约已静态核对，端到端实际报文未抓包验证。
 - VS Code 市场端到端链路（Gallery API 查询、VSIX 下载/解包、明暗变体合并、粘贴导入）未运行验证，`electron/vscode-marketplace.ts` 的手写 zip central-directory 解析行为未实测。
 - Web 主题的 assets.bg/hero 背景图、layoutVariant 的 cockpit/tiled 布局变体、swatchColors 与密度三档的实际渲染效果未运行验证。
+- Connector 授权弹窗、Vault 自动填充与 GPT-Live 的真实平台权限、焦点和失败恢复未运行验证。
 
 ## 10. 关键源码索引
 
 - 桌面根：`apps/desktop/src/main.tsx`、`app/contrib/controller.tsx`、`app/contrib/wiring.tsx`、`app/contrib/surfaces.tsx`、`contrib/registry.ts`、`contrib/react/boundary.tsx`
 - 桌面浮层/菜单：`components/ui/dialog.tsx`、`components/ui/dialog-portal-context.ts`、`components/ui/confirm-dialog.tsx`、`components/ui/context-menu.tsx`、`components/ui/sheet.tsx`、`components/ui/tooltip.tsx`、`app/command-palette/index.tsx`、`lib/escape-layers.ts`、`app/shell/hooks/use-overlay-routing.ts`
 - 桌面通知/反馈：`store/notifications.ts`、`components/notifications.tsx`、`store/agent-notices.ts`、`store/native-notifications.ts`、`components/error-boundary.tsx`、`components/ui/loader.tsx`、`components/ui/empty-state.tsx`、`components/page-loader.tsx`
+- 敏感输入与连接状态：`store/connection-request.ts`、`components/assistant-ui/connector-tool.tsx`、`agent/vault_store.py`、`tools/browser_vault_tool.py`
+- 语音控制：`app/chat/composer/hooks/use-composer-voice.ts`、`use-voice-live-conversation.ts`、`voice-engine-rows.tsx`、`apps/desktop/src/lib/voice-live.ts`
 - 桌面主题：`themes/context.tsx`、`themes/backend-sync.ts`、`themes/install.ts`、`electron/vscode-marketplace.ts`
 - 桌面窗口与内容交互：`components/pane-shell/tree/store.ts`、`electron/window-state.ts`、`components/chat/zoomable-image.tsx`
 - TUI：`ui-tui/src/app.tsx`、`ui-tui/src/app/overlayStore.ts`、`ui-tui/src/app/useInputHandlers.ts`、`ui-tui/src/theme.ts`

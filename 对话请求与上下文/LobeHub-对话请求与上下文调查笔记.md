@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（会话级 ConversationStore 发送 action、全局 ChatStore 的 agentRun/operation/aiAgent slices、Gateway HTTP 路由、工具审批与恢复链）+ grep 检索调用点，全部行号按当前 HEAD 逐一核对；未运行应用
 >
@@ -25,6 +25,8 @@ LobeHub 的一次生成任务从会话级 store 的发送 action 进入全局 Ch
 - **压缩**：`/compact` 由 Command Bus（`processCommands`）转为独立 `contextCompression` operation，`executeCompression` 先建服务端压缩组、再走 LLM 摘要流式回填、`finalizeCompression` 收口。
 - **完成副作用**：`runAgent.ts:250-263` 停止 loading 后同批触发桌面通知与 Topic 未读标记；审批需人工时触发角标通知并置 `waitingForHuman` 状态。
 - **退出恢复（Gateway 路径）**：topic 的 `metadata.runningOperation` 在页面加载时被 `useGatewayReconnect` 捕获，经 `reconnectToGatewayOperation` 刷新 JWT、新建 WebSocket 并回放事件，把 UI 重新挂到仍在跑的服务端任务上。
+- **共享上下文工程**：浏览器 client agent 与服务端不再各自决定 Agent 配置、上下文事实和模型参数。`packages/mecha` 提供宿主无关的配置解析、事实快照、MessagesEngine 参数构造和模型参数决策；浏览器与服务端各自只负责从本地 store 或数据库采集事实，再把冻结快照交给共享规则。见 `packages/mecha/src/index.ts:1-9`、`packages/mecha/src/contextEngineering/index.ts:8-19` 与 `src/services/chat/mecha/agentConfigResolver.ts:1-73`。
+- **Gateway 排队续作**：前端会把当前 context 是否仍有排队消息同步给运行中的服务端 operation。Agent 在下一个决策点以 `queued_message_interrupt` 结束当前 turn，交还给输入队列；这使排队消息不必等整个长工具循环自然结束。该标记只用于顶层 Gateway run，并采用 best-effort 同步。见 `src/store/chat/slices/agentRun/actions/transports/gateway/queuedMessagesFlag.ts:52-70` 与 `packages/agent-runtime/src/agents/GeneralChatAgent.ts:900,932-977`。
 - **重要边界**：本次调查主要是前端执行链；`ModelRuntime` 实现、各 provider adapter、Gateway resume 的服务端逻辑均未覆盖。
 
 ## 系统边界与生成任务主链
@@ -100,6 +102,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
   - 局部 store `useFetchMessages` 的 `onData` 有“流式期间丢弃 SWR 快照”的兜底（`data/action.ts:289-303`，避免 DB 扇出窗口内的过期 refetch 折叠流式内容）。
   - 压缩任务的流式传输：`executeCompression` 的 `fetchPresetTaskResult` 逐 chunk 更新压缩组内容（2100-2112 行）。
 - 流式增量如何从执行端回到状态层的缓冲/合并/节流/顺序保证（除上述整体快照替换外）：本次未调查完整链路，未验证。
+- Gateway 事件处理器现以内部 Promise 队列顺序消费事件，确保工具占位消息拉取、后续 chunk 与终态刷新不会相互越过；高频更新另有缓冲器。实验开关 `enableGatewayMux` 开启时，同一 gateway URL 与访问身份复用一个 `GatewayMuxClient`，owner 与不同分享访客仍使用不同连接。见 `src/store/chat/slices/agentRun/actions/transports/gateway/gatewayEventHandler.ts:393-516`、`gatewayEventBuffer.ts` 与 `muxRegistry.ts:17-66`。
 
 ## 6. 完成、异常、半截流与最终回写
 
@@ -158,7 +161,7 @@ Chat UI 发送（界面入口见 Chat UI 笔记）
 - Gateway resume 与本地 client runtime 两条审批路径在所有边界情况下是否真正行为等价，只能从代码结构上判断“两套独立实现”，未做运行时验证。
 - Provider 最终 HTTP 字段、token 截断预算算法（第 3、4 节）。
 - 普通停止的网络级取消效果（WS abort 是否传达到服务端执行循环）、regenerate 的重建请求链、队列并发竞态行为（第 7、8 节）。
-- 流式事件链的缓冲/节流/顺序实现（第 5 节，除 step_start 整体快照替换外）。
+- Gateway 之外的 client/异构流式链完整缓冲、节流与顺序实现；Gateway 的顺序队列、事件缓冲与 Mux 注册表已静态确认，但未运行压力验证。
 - 服务端 ModelRuntime、Gateway resume、压缩组创建/finalize 的服务端实现（第 4、10 节）。
 - 客户端本地 runtime 页面重载后的恢复行为（静态推断为不恢复，未验证）。
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态源码调查，未运行应用。读取 `session.save` RPC、CLI/TUI/桌面 `/save` 入口、`_save_session_log`、SessionDB 可移植性 mixin、`hermes sessions export` 全部分支、Markdown/HTML/JSONL/trace 渲染器、HF 轨迹上传、trajectory 保存与压缩工具；全文检索导入、链接分享、附件打包、剪贴板导出等关键词确认缺失面
 >
@@ -115,6 +115,7 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
   - 父链仅在父存在时恢复，否则拆离为孤立会话；
   - `last_activity_*` 字段导入时重置为 NULL；
   - 尺寸与条数受硬上限约束（`_IMPORT_MAX_*`）。
+- 每个结构化会话导出都附带文本无关的 `timings` 证据：按持久化消息时间戳给出首末时间、墙钟跨度、最大相邻间隔、角色计数、工具调用/结果数与逐消息间隔。Hermes 没有持久化独立的模型或工具秒表，因此该摘要明确标记 `complete: false`；没有时间戳时给出不可用原因。导入时该派生字段不计入内容尺寸预算，下次导出会重新计算（`hermes_state_portability.py:83-133,282-322,548-551`）。
 - **md/qmd**：无 Markdown 导入路径（本次未找到）。导出侧包含：
   - frontmatter 带 exporter 版本标记（`EXPORTER_VERSION = "hermes sessions export (md/qmd) v1"`，`session_export_md.py:18`）与 `lineage_session_ids` 血缘 id 列表；
   - SHA256 校验行与 "Export verification" 段落（`session_export_md.py:154-180`），`verify_export_file` 可复核哈希与消息数（`session_export_md.py:200-216`）；
@@ -158,6 +159,7 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 
 - 大会话防护：`hermes sessions export`（console 引擎）有 per-session 消息数 guard（`sessions.max_export_messages` 默认 20000，`console_engine.py:1432-1445`；`config_defaults.py:2840`）；Web 导出用 keyset 分页流式输出（`web_routers/sessions.py:749-774`）。
 - 导入上限：`_IMPORT_MAX_SESSIONS`、`_IMPORT_MAX_MESSAGES_PER_SESSION`、`_IMPORT_MAX_SESSION_BYTES`、`_IMPORT_MAX_TOTAL_BYTES` 四类硬限（分别约束会话数、单会话消息数、单会话字节数、总字节数），配合原子写入（`hermes_state_portability.py:395-548`）。
+- timing evidence 只从已持久化时间戳派生，不包含提示词、工具参数或结果文本；它能定位长间隔，不能区分模型计算、网络等待和工具运行各自耗时。
 - `/save` 失败只打印错误不中断会话（`cli.py:8696,8711`）；目录创建失败同样只报错返回（`methods_session.py:2704-2707`）。
 - 已有测试（运行行为未在本机复验）：
   - `/save` 写 profile 目录而非 CWD：`tests/test_tui_gateway_server.py:14186`；
@@ -190,6 +192,7 @@ Dashboard Sessions 页或 POST /api/sessions/import（web_routers/sessions.py:44
 - `cli.py`（`save_conversation`，:8679；`/save` 分发，:10407）
 - `run_agent.py`（`_save_session_log`，:2997；`_save_trajectory`，:2358）
 - `hermes_state_portability.py`（`export_session`/`export_session_lineage`/`export_all`/`import_sessions`）
+- `hermes_state_portability.py`（`_export_timings`：文本无关的导出时序证据）
 - `hermes_cli/sessions_cmd.py`（`hermes sessions export` 全分支）
 - `hermes_cli/session_export_md.py`、`hermes_cli/session_export_html.py`、`hermes_cli/session_export.py`
 - `agent/trace_upload.py`（Claude Code JSONL 构建与 HF 上传）

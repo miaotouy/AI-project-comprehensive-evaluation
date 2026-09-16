@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：只读源码核对，并结合近期提交与 diff 重新定位关键结论，重点覆盖浏览器协议 v3、RiverMemo、多媒体、分布式取消；未修改被调查仓库
 >
@@ -191,7 +191,7 @@ WebSocket 服务收到 `tool_approval_response` 消息时，**只要消息来自
 - **重载前预校验**：重载前先对全部启用清单做 JSON 解析校验，编辑中的半截 JSON 不会把正常运行的注册表破坏为部分加载状态（`Plugin.js:734-753`）。
 - **两级热更新**：变更清单先做运行时签名比较（`Plugin.js:2472` 起）：仅展示字段变化时刷新元数据（不重启任何模块，direct 常驻插件的运行字段保持内存版本）；运行字段变化时 direct 插件提示需重启、其余插件走完整重载。
 - **static 插件增量刷新**：static 插件按 entryPoint、communication、cron、configSchema 和占位符声明组成的签名判断是否需要刷新（`Plugin.js:477` 起）；新增/删除/禁用插件或 cron 变更会精确取消失效 job、清理已删除占位符，分布式占位符仍由 serverId 生命周期管理。
-- **watcher 启动时机**：文件 watcher 改为在初始化末尾显式启动（`server.js:1628-1631`），避免启动阶段文件写入触发多余重载；关机流程会关闭 watcher 并结算全部待审批项。
+- **watcher 启动时机与范围**：文件 watcher 改为在初始化末尾显式启动（`server.js:1628-1631`），避免启动阶段文件写入触发多余重载；监听范围收紧到 `Plugin/<PluginName>/` 一层，且只接受 `plugin-manifest.json`（含 `.block`）的变更，插件运行期数据目录（如托管浏览器 Profile）不再进入监听。关机流程会关闭 watcher 并结算全部待审批项（`Plugin.js:2368-2423`）。
 
 ### 6.2 六种插件类型的生命周期差异
 

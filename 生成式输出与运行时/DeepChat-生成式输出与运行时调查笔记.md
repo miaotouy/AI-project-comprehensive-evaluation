@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：静态代码调查；grep/glob 关键词检索（artifact、canvas、sandbox、iframe、mcp-app、exec、runtime、notebook、diff、patch 等），通读消息块累积器、回显通道、Artifact 解析/渲染组件、MCP App 沙箱主链与 Agent 工具管理器；未安装依赖，未运行构建、单元测试或应用
 >
@@ -20,6 +20,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 2. **MCP App 沙箱**：任何 MCP 工具若声明 `ui` 元数据与 `text/html;profile=mcp-app` 资源，其 HTML 结果可进入 `mcp-app://` 协议的双层 iframe 沙箱，通过 JSON-RPC/postMessage 桥回宿主调用工具、资源、发消息与更新模型上下文，全部能力需用户逐次同意。
 3. **Agent 本机执行**：命令类工具在本机 shell 中执行（目录白名单 + 命令权限审批 + 后台会话），文件写入类工具改工作区文件，读取与检索类工具读工作区，图像生成工具产出 image 块。
 4. **Provider 图像生成**：OpenAI Codex 图像生成已接入 Provider 适配层；其结果仍作为聊天 image block 进入既有消息投影，本次未发现独立于消息的对象生命周期（`src/main/provider/openaiCodexAdapter.ts`、`src/shared/imageGenerationSettings.ts`）。
+5. **工具图片预览缓存**：工具响应中的 base64 图片预览会在主进程规范化并尽量转存为 `imgcache://`，单次最多处理 4 个不同预览；不能缓存的预览保留原值，不改变工具结果本身。
 
 **能力等级判定：`G3`（可执行 Artifact）**。HTML/React Artifact 进入带 `sandbox` 属性的 iframe 运行环境（脚本可执行、依赖经 `deepcdn://` 本地协议注入）；Agent exec 在宿主进程的子进程执行任意 shell 命令（经权限审批）。**未达 G4**：用户对 Artifact 无编辑保存通道（工作区代码视图显式只读，消息内编辑器无写回路径）；**未达 G5**：对象依附于消息文本，无独立于消息块的生命周期。
 
@@ -105,6 +106,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - 同一 Artifact 可同时出现在消息卡片与工作区列表（列表来自对所有 assistant 消息的实时解析，`WorkspacePanel.vue:273-301`），两处共享 `artifactStore`，内容为同一内存对象，无编辑所以不存在不同步问题。
 - 视图模式：preview/code 双标签（`useWorkspaceViewerModel.ts:78-107`）；`application/vnd.ant.code` 类型强制 code 视图（`:118-124`）。
 - 文件投影（工作区）：预览路由提供 markdown/html/pdf/svg/image/text/binary 等格式的预览，其中 HTML/SVG/PDF 经 `workspace-preview://` 协议 iframe 呈现（`protocols.ts:250-299` + `workspacePreviewProtocol.ts`），与 Artifact 预览共用同一查看器。工作区管理入口在 #2138 移入侧栏：侧栏新增 workspace 注册/归档管理，项目 store 增加 `defaultChatWorkspacePath` 并与环境归档同步，原文件节点组件被移除；`WorkspacePanel` 本身的预览/查看链路不变，仅按钮换用新组件库。
+- 工作区文件还可通过上下文菜单交给系统已安装应用。主进程按平台探测候选应用并使用受控 launcher 打开目标文件，renderer 只显示可用应用列表；入口见 `src/main/workspace/openInApp/`、`src/shared/workspace/fileOpenApps.ts` 与 `src/renderer/src/components/sidepanel/WorkspaceViewer.vue:411`。
 - 桌面挂件/窗口投影：本次未找到（无 artifact 桌面挂件；浮动窗口仅用于浏览器/CUA 预览，`src/renderer/src/floating`、`src/main/desktop/floatingButton`）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -117,6 +119,7 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - **Code Artifact**：Monaco（stream-monaco）只读展示 + 复制；`CodeArtifact.vue:70-74` 未传 readOnly，可编辑与否取决于 stream-monaco 默认值（node_modules 未安装，无法核实）；**无论可不可编辑都没有写回路径**。
 - **图像生成**：`agentImageGenerationTool.ts` 走供应商图像模型，结果转为独立 image 块（`imageGenerationBlocks.ts:42-58` 把 imagePreviews 提升为 `type:'image'` 块）。
 - **图像持久化（#2094）**：生成的图片经 `src/main/platform/imageCache.ts` 落盘并以 `imgcache://` 引用出现在消息文本；MCP 工具调用时 `ToolManager` 把参数中的 `imgcache://` 引用解析回 data URL（上限 8 个引用、展开后参数 ≤32 MiB，`src/main/mcp/toolManager.ts:1206-1256`）；renderer 侧已提升为独立 image 块的图不再在 Markdown 中重复显示（经渲染器的后变换节点隐藏已物化的图像源，消息渲染器笔记 §3）。
+- **工具图片预览**：`cacheToolCallImagePreviews` 在工具结果写入 block 前处理预览列表，HTTP(S) 与既有缓存引用直接保留，base64 预览尽量落盘为缓存引用并去重，最多处理 4 个不同输入。缓存失败不会丢弃原预览；实现见 `src/main/lib/toolCallImagePreviews.ts:375-435`、`src/main/agent/deepchat/runtime/dispatch.ts:2493-2503`。
 - **MCP App**：见 §7。
 - 工作区文件 HTML 预览 iframe：`WorkspacePreviewPane.vue:189-195` 同样 `sandbox="allow-scripts allow-same-origin"`，经 `workspace-preview://` 协议由主进程流式供档（协议响应带 `X-Content-Type-Options: nosniff`，`protocols.ts:271-277`）。
 - 视频/音频/Canvas/WebGL/notebook：本次未找到（grep `notebook|Notebook` 主进程无命中，renderer 仅图标名；canvas 仅用于 CUA/浏览器 PiP 帧缓冲与图片压缩，非生成式画布；accumulator 只处理内容、推理、计划、工具调用、图像数据、用量、停止与错误等事件）。
@@ -238,6 +241,8 @@ DeepChat 有三条可区分的生成式输出机制，共享同一消息对象�
 - 执行与权限：`src/main/tool/agentTools/agentBashHandler.ts:124-186`（executeCommand）、`:293-310`（cwd）、`:409-416`（spawn）、`src/main/tool/agentTools/agentToolManager.ts:797-970`（工具定义）、`:1137-1147`（目录白名单）、`src/main/tool/permission/commandPermissionService.ts`、`agentImageGenerationTool.ts`
 - 命令 shell：`src/shared/commandShell.ts`、`src/main/agent/shared/process/commandShellPath.ts`
 - 图像持久化：`src/main/platform/imageCache.ts`、`src/main/mcp/toolManager.ts:1206-1256`
+- 工具图片预览缓存：`src/main/lib/toolCallImagePreviews.ts:375-435`、`src/main/agent/deepchat/runtime/dispatch.ts:2493-2503`
+- 工作区外部应用打开：`src/main/workspace/openInApp/`、`src/shared/workspace/fileOpenApps.ts`
 - 持久化：`src/main/session/data/tables/deepchatAssistantBlocks.ts:80-166`、`deepchatAssistantBlocks.ts:223-271`（App 模型上下文回流）
 - 回流：`src/main/agent/deepchat/runtime/contextBuilder.ts:928-938`
 - 工具调用展示：`src/renderer/src/components/message/MessageBlockToolCall.vue:543-576`（diff）、`:482-492`（自动展开）

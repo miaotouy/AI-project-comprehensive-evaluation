@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -218,7 +218,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 ### 拖放细节
 
-**Composer 附件拖入。** 拖拽经过 `useFileDragDrop.ts`（文件、文本、文件夹路径分别处理，不支持类型会 toast 提示，:122-129），视觉反馈是 2px 绿色虚线边框 + 半透明绿色蒙层（`ComposerSurface.tsx:2171-2173`，硬编码色值 `#2ecc71`，不走 CSS 变量主题色）。
+**Composer 附件拖入。** 拖拽经过 `useFileDragDrop.ts`（文件、文本、文件夹路径分别处理，不支持类型会 toast 提示），视觉反馈是绿色虚线边框与半透明蒙层，颜色已改为主题语义变量，不再使用硬编码绿色。
 
 **Topic 拖拽排序。** 只有按"助手分组"显示时才可拖（canDragTopicItem/`dragReady = isAssistantDisplayMode && ...`，`Topics.tsx:1136-1139,797`），按"时间分组"显示时完全不可拖（该模式下顺序由时间戳决定）。
 
@@ -237,11 +237,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 - 折叠交互（用户消息折叠、Thinking 块展开/收起）用了真实 aria-expanded/aria-controls（`MainTextBlock.tsx:234-235`、`ThinkingBlock.tsx:95-96`），并且是可聚焦、可键盘触发的 `role="button"` + onKeyDown 处理 Enter/Space（`ThinkingBlock.tsx:93-105`），不是纯鼠标 div。
 - 消息操作栏**部分**按钮显式传了 aria-label：模型选择器（renderModelPickerToolbarAction，`MessageMenuBarToolbarRenderers.tsx:287`）、翻译（:311）、更多菜单弹出按钮（:355,412）。
 
-**缺少可访问名称的路径**：消息操作栏最常用的一批按钮——默认渲染路径 renderDefaultToolbarAction → ActionButtonWithConfirm（`MessageMenuBarToolbarRenderers.tsx:63-126`，覆盖复制、编辑、重新生成、删除、点赞等大多数没有专属渲染函数的 action）——生成的 `<MessageActionButton>` **没有传 aria-label**（对照 :80-91 和 :103-113 两处按钮 JSX，都只有 onClick/disabled/className，无任何 aria-* 属性）。
-
-可访问名称完全依赖视觉 Tooltip（`content={tooltip}`，:119-125），而 Tooltip 内容不会自动同步成 aria-label——screen reader 用户只会读到"button"没有任何描述。
-
-不是全局性缺陷（Topic 列表 pin/delete 都传了 aria-label，`Topics.tsx:1737,1750`），而是消息操作栏这一条渲染路径的具体疏漏，覆盖面恰是使用频率最高的复制/编辑/删除等动作。
+**消息操作栏名称。** 默认与专用渲染路径都向图标按钮传入 action 的本地化标签，复制、编辑、重新生成、删除、模型选择和更多菜单均有显式 `aria-label`。静态代码可确认名称接线，读屏顺序与弹出菜单焦点仍需运行验证；见 `MessageMenuBarToolbarRenderers.tsx:83,107,292,316,367,424`。
 
 **其它**：富文本输入框（composer，基于 TipTap EditorContent）本身没有为 contentEditable 根节点设置 aria-label/`role="textbox"`——`RichEditor.tsx`、`ComposerSurface.tsx` 全文只有编辑器外围工具按钮有 aria-label（`ComposerSurface.tsx:2114-2207`），输入区域本体依赖浏览器/TipTap 默认可编辑语义。
 
@@ -287,7 +283,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 **Toast 单例不分叉。** 宁可全局共享一个 store，避免命令入口与渲染 viewport 分离（"quickAssistant black-hole bug"）。
 
-**消息操作栏缺 aria-label。** 默认渲染路径的图标按钮只靠视觉 Tooltip，读屏读到"button"无描述——覆盖面是复制/编辑/删除等高频动作。
+**消息操作栏使用 action 标签作为可访问名称。** 该机制覆盖默认与专用按钮路径；实际读屏反馈未运行验证。
 
 **"助手回复完成"通知是空开关。** 偏好与设置项存在，全仓库无 source: 'assistant' 发送调用。
 

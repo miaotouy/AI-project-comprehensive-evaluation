@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态阅读 Android/Kotlin 源码，覆盖 MCP 客户端与连接注册表、MCP OAuth 协调器与 loopback 回调服务器、workspace（PRoot rootfs）执行链、内嵌 Ktor Web 服务器与 JWT 鉴权、Workspace/Web 相关 Room 实体与设置持久化；未在设备或模拟器上运行，未执行真实 MCP 往返、OAuth 授权或 PRoot 命令。
 >

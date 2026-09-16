@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -46,6 +46,7 @@ model.chatStream()
 - 列表虚拟化、滚动位置恢复和输出跟随都在消息列表组件统一处理。
 - Markdown 默认支持 GFM、软换行、LaTeX、Shiki、Mermaid 和图片查看器。
 - 原始 HTML 不进入 Markdown DOM；HTML 代码预览放进 sandboxed iframe。
+- Work Mode 完成后默认折叠 reasoning/tool 过程时间线，但生成图片和下载文件另投影到 artifacts 区保持可见；消息用量还可显示 Provider 返回的 cached input tokens。
 
 已确认的当前问题：
 
@@ -331,6 +332,10 @@ otherwise    -> Message
 - 其他工具 -> 通用 pill + args/result/error details。
 
 暂停的工具调用进入 `StepTimelineUI`，可显示继续、停止、批准或拒绝操作；`tool_call_limit` 暂停的继续按钮为拆分按钮（继续 / 继续并本会话不再暂停确认），`pauseOnToolCallLimit` 可会话级或全局关闭。工具 payload 只作为文本放进 Mantine Code 组件，不会当 HTML 执行；通用 preview 有 8000 字符上限，错误 preview 有 1200 字符上限。超过 30000 字符的完整 tool result 在流处理阶段转存 blob，只在消息里保留 1500 字符预览。
+
+生成图片与下载文件由 `DownloadArtifactsUI` 从工具 parts 中另行汇总，显示在过程时间线之外；当 Work Mode 回复完成后，过程默认折叠，artifact 仍可直接查看。实现见 `src/renderer/components/message-parts/ToolCallPartUI.tsx:1038-1069`、`src/renderer/components/chat/Message.tsx:553,607` 与 `useProcessTimelineCollapse.ts:4-11`。
+
+消息用量展示现在区分总 token 与缓存命中的输入 token；后者来自 `usage.cachedInputTokens`，只在正数时显示 “cached” 标签。字段契约见 `src/shared/types/session.ts:349-351`，展示见 `src/renderer/components/chat/Message.tsx:475-477`。
 
 ### 图片和附件
 

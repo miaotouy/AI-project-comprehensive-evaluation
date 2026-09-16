@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态复核 Python gateway、桌面/TUI/Web JSON-RPC 客户端、ACP adapter、REST gateway 和消息平台边界；复用 Chat、Chat UI 和独特功能笔记；未运行跨客户端或 IM 平台
 >
@@ -25,6 +25,8 @@ Hermes Agent 的多表面控制与反向 Agent 接入均达到 `主链确认`（
 ## 接入角色与系统边界
 
 Hermes 自身是执行体；外部对象是桌面 renderer、Node/Ink TUI、Web dashboard、CLI/gateway、ACP 宿主、REST 客户端和消息平台 endpoint。Python backend 持有 Agent 循环、工具、SQLite session、记忆和执行状态，各客户端只保存投影与交互状态。`gateway/relay/` 的实验性 relay connector 是托管 gateway 形态，由外部 connector 拨号接入（`候选观察`）。
+
+托管应用与 MCP 连接由 `manage_connections` 统一为连接操作。工具提交目标后，后端 operation 追踪安装、启用、授权、跳过、超时与终态；桌面通过 server→client 请求展示授权，而模型只收到权威终态，不接触授权 URL。该入口只负责建立连接，断开、删除或撤销仍由用户界面或 Portal 承担（`tools/connectors/tool.py:16-70`，`tools/connectors/operation.py`，`tui_gateway/methods_connectors.py`）。
 
 ## 完整主链
 
@@ -63,6 +65,8 @@ profile 是配置和数据隔离单位；持久会话由 `session_key` 标识，
 
 JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重定向等控制操作；流式事件包括消息、推理、思考、工具与子 Agent。桌面连接采用指数退避重连，恢复后丢弃过期 runtime binding 并刷新 session；正在运行的 turn 可被新客户端收养为 adopted running turn。REST 面支持 run 级 stop 与审批回传；ACP 面提供 Cancel 与审批回调。外部应用分型中，MS Graph webhook（`msgraph_webhook.py`）是明确的业务系统事件入站样本：Graph 订阅校验握手、通知入站、CIDR 白名单与 client_state 强制。
 
+子 Agent 控制也进入共享协议面。调用方只能枚举当前会话和当前运行代际拥有的 live 子 Agent，并可读取有界 transcript tail、发送 steer 或 interrupt；结束或不属于该 transport 的子 Agent不可见（`tui_gateway/methods_subagents.py:12-89`）。这仍是 Hermes 内部委派的控制面，不把子 Agent 重新分类为外部执行体。
+
 产品表面（桌面/TUI/Web/终端）显示 profile、会话、连接状态与运行中 turn；接管入口为 session resume/steer 与 adopted running turn。来自 IM、webhook 与 REST 的内容进入同一 Agent 执行域，可触发文件、命令与平台投递副作用；审批与工具放行在 gateway 侧集中处理，不可信输入整体按外部消息处理，但逐平台消毒未验证。
 
 ## 权限、凭据与治理边界
@@ -79,6 +83,8 @@ JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重�
 
 ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 provider 且其协议允许工具调用时，外部 agent 的工具活动会回流并并入发起回合。该变化加强外部执行体与 Hermes turn 的衔接，但不表示 ACP 宿主获得 Hermes 内部会话库的直接写权限；会话数据仍由各 profile 的后端管理。
 
+桌面还能只读发现 Claude Code 与 Codex CLI 的本地会话并导入为 Hermes 静态历史。导入只迁移归一化后的消息和来源 metadata，不继承源执行体的凭据、审批、活动工具或运行状态（`hermes_cli/foreign_sessions.py:1-45,95-177`，`apps/desktop/src/app/session-import/index.tsx`）。
+
 ## 已确认边界与未验证事项
 
 - 桌面/TUI/Web/ACP/REST 共享 backend 为静态主链确认，未运行多客户端并发和接管。
@@ -93,6 +99,8 @@ ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 
 - `acp_adapter/{server,auth,permissions}.py`
 - `gateway/platforms/{api_server,msgraph_webhook}.py`
 - `gateway/{pairing.py,relay/}`
+- `tools/connectors/{tool,operation}.py`、`tui_gateway/methods_connectors.py`
+- `tui_gateway/methods_subagents.py`、`hermes_cli/foreign_sessions.py`
 - `apps/shared/src/json-rpc-gateway.ts`
 - `apps/shared/src/websocket-url.ts`
 - `apps/desktop/src/hermes.ts`
@@ -100,4 +108,3 @@ ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 
 - `ui-tui/src/gatewayClient.ts`
 - `hermes_cli/web_server.py`
 - `gateway/`
-

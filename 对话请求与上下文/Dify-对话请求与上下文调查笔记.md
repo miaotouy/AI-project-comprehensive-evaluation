@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态跟踪公开 WebChat 的 SSE 请求、service API、`AppGenerateService`、各应用生成器及流式实体；未配置模型或运行服务
 >
@@ -68,6 +68,8 @@ Chat runner 先以模板、输入、文件、query 与历史组织一次 prompt�
 
 应用生成器只承担运行模式和记录边界。模型实例由 `ModelManager.get_model_instance` 在运行时按 tenant、Provider、模型类型和模型名解析（`core/model_manager.py:906-946`）；工具与 Agent 的实际目录进入 `core/tools` 和 workflow Agent 节点。工作流模式则由图节点决定何时请求 LLM、工具或知识库。
 
+Agent App 的附件交接现在区分模型原生视觉输入与普通下载文件。请求构建器先判断所选模型是否支持视觉：支持时把上传图片转换为带 URL 或 base64、格式与 detail 的 user prompt image；否则仍按可下载文件交给 Agent Runtime（`api/core/app/apps/agent_app/runtime_request_builder.py:155-245,297-316`）。这确认图片不再只能作为通用附件文本化处理，但真实 Provider 对 URL/base64 与 detail 的接受情况仍未运行验证。
+
 因此本笔记确认“生成任务何时请求模型/工具层”，而不把 Provider 连接、凭据、负载均衡写成请求链的一部分，详见 [LLM 渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md) 与 [Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
 
 ## 4. 流式事件、前端合并与最终化
@@ -94,6 +96,7 @@ Chat runner 先以模板、输入、文件、query 与历史组织一次 prompt�
 
 - 静态主链确认覆盖公开聊天、Agent Chat、advanced chat 和 workflow 的分派与事件交接；未运行任何真实模型或 Docker 服务。
 - 传统 Chat 的消息窗口、最早消息裁剪、检索注入与 `max_tokens` 收缩已确认；摘要、Agent 记忆、advanced chat/workflow 的变量预算、工具循环与模型 fallback 仍需按具体节点继续核对。
+- Agent App 已按模型视觉能力把图片转为原生多模态输入；各 Provider 的格式兼容、图片下载和失败回退未运行。
 - 未验证连接中断、浏览器关闭、服务器重启、限流后的用户反馈、队列公平性和多端同时向同一会话发送的行为。
 - 任务停止只确认 API 与命令入口，不能代替模型请求、插件 HTTP 调用和异步 worker 的实际取消验证。
 

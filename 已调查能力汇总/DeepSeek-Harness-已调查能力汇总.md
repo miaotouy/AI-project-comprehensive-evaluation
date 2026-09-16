@@ -2,9 +2,9 @@
 
 > 汇总对象：`DeepSeek-Harness`（远端仓库 `https://github.com/deepseek-ai/deepseek-harness`，npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）
 >
-> 汇总更新日期：2026-08-27
+> 汇总更新日期：2026-09-16
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 个类目的 DeepSeek-Harness 调查笔记（完整清单见文末来源笔记索引），全部基于同一代码快照 `b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支 `master`）
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 个类目的 DeepSeek-Harness 调查笔记（完整清单见文末来源笔记索引），全部基于同一代码快照 `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支 `master`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；未做新的源码调查与跨项目横向比较
 >
@@ -46,28 +46,28 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 - **会话即 append-only 事件日志**：内存中的 `Session` 是交互历史的单一事实源，`seq` 恒等于 `log.length`；事件类型经 `SessionEventMap` 声明合并扩展，核心加插件共 24 个事件族；`SESSION_FORMAT_VERSION` 固定为 0，未知事件类型无 `ignorable` 标记即拒绝重建而非迁移；chunk 级保真落盘换取精确回放。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)。
 - **消息模型与 surface 双投影**：仅 `user/message`、`assistant/message`、`tool/result` 三类 SurfaceEventType 派生 LLM 消息；每条消息事件带 `surfaceOp` 与可选 `sourceEventSeqs`。表面分 append-origin（人可见对话）与 replacement（仅模型可见）两类，模型历史与人类 transcript 语义刻意不同。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)。
-- **持久化双后端（JSONL / SQLite）**：同一抽象契约下的两个可互换后端。JSONL 每会话一个文件，默认 zstd 帧 + packed chunk 行、原子物化、torn-tail 截断修复；SQLite 每事件一行、WAL 事务、按 seq 定位。写路径由共享协调器驱动：per-session 串行链 + 固定 200ms 写合并窗口 + `session/flush` 屏障 + checkpoint policy 的语义检查点。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)。
+- **会话格式与 JSONL 持久化**：当前逻辑格式为 v3，v0→v3 通过相邻迁移包恢复并在写打开时发布不可变后继代；第一方 SQLite 会话后端已移除。持久化改为 handle 契约，JSONL provider 拥有 live write path、flush 屏障与跨进程 kernel lease。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)。
 - **会话生命周期（create/resume/fork/崩溃恢复）**：create 为 prepare+enter+announce 三步；resume 走 prepare→load→崩溃修复→发布（有 LRU 已备会话缓存）；fork 深拷贝 0..boundary 前缀为种子并记 `parentSession`/`seedLength`；崩溃恢复对完整中断回合补合成 closers（interrupted 收口与缺失工具错误），torn 尾部丢弃。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
 - **消息操作与分支**：日志追加型且不可变，没有已落盘消息的就地编辑/删除 API；历史改写以 `surfaceOp: replace` 表达（压缩是现有消费者）；分支即 fork，UI 分支按钮传消息 seq 以该 turn 为边界分叉；未提供针对单条消息的续写或重新生成 API，见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)、[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
 - **会话列表与全文检索**：`session-query` 是 live-preferred 的逻辑语料层（精确读取、关系追踪、事件标记 current/shadowed/log-only）；全文检索唯一实现是 `session-query-sqlite`（FTS5 + unicode61 分词、带 snippet 的分页、revision 增量索引、`openAt: never` 可关闭）。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
 - **对话回合执行（turn/step、inbox、协作式取消）**：`ReactLoopAgent` 是 `Agent` 接口的唯一实现，驱动"turn 打开 → step 循环 → turn 关闭"，turn/step 边界全部是 durable 事件；所有输入经一条 inbox 投递（followup/steer 唤醒、inject 只排队不唤醒）；`cancel` 清 inbox 并 abort 当前活动，未投递的工具调用补合成错误结果保证回放自洽；`dsh --profile headless "task"` 一键运行。证据：静态源码确认。链接：[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
-- **会话导出（ZIP）与无分享**：唯一导出能力是 Web 端 Session log 下载（会话头按钮与 `/export` 斜杠命令共用下载控制器，流式 ZIP 打包持久化工件的逐字原文，含子代理后代与去重图片媒体，不写 manifest）；内容口径是全量原始日志（含被 surface 遮蔽的旧节点），不做过滤或脱敏；没有任何分享形态、无导入入口；仅 JSONL 后端支持（SQLite 部署端点 501）。证据：静态源码确认，归为 E1 数据交换。链接：[对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
+- **会话导出（ZIP）与无分享**：Web 会话头菜单与 `/export` 共用浏览器下载控制器；Host 从 persistence read handle 序列化当前逻辑日志，包含后代、去重图片和通用文件。它不再要求 raw artifact 或限定 JSONL 后端；内容仍不做会话级过滤或脱敏，且没有远端分享与用户级导入。证据：静态源码确认，归为 E1 数据交换。链接：[对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)。
 
 ### 生成与创作
 
 - **流式输出协议与折叠**：`StreamChunk` 是闭合判别联合（block-start / 三类 delta / block-end / usage / finish 七个变体），adapter 契约要求 usage 先于 finish、工具参数端到端保持原始 JSON 字符串、失败归一化为可序列化失败事实；`BlockAssembler` 是唯一折叠实现，agent-loop 先把每条 chunk 落 `assistant/chunk` 再喂折叠器，`assistant/message` 携带 usage 与 `sourceEventSeqs`。证据：静态源码确认。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)、[消息渲染器调查笔记](../消息渲染器/DeepSeek-Harness-消息渲染器调查笔记.md)。
 - **消息渲染管线（Markdown/代码/数学）**：自建 mdast→React 直接渲染管线；流式用纯 GFM（无数学与高亮）、收口全量重解析；shiki 懒加载语法、KaTeX 经 DOMParser 映射为 React 元素；raw HTML 以字面文本输出、链接与图片仅放行 http(s)/mailto；增量解析只重解析尾部两块并冻结块缓存。UI 呈现行为属运行验证范围，见末尾小节。证据：静态源码确认。链接：[消息渲染器调查笔记](../消息渲染器/DeepSeek-Harness-消息渲染器调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
-- **工具卡片渲染（六类）**：`presentCall`/`presentResult` 是无 I/O 的 args 纯函数；结果期卡片按 shape/kind 分 generic/terminal/diff/search/read/web 六类；结构化事实经 `output.presentationMeta` 随日志持久化、回放时重算；client 侧按工具名键控槽 `tool.call.toolview` 分派，未注册落 `GenericToolCard` 兜底。证据：静态源码确认。链接：[消息渲染器调查笔记](../消息渲染器/DeepSeek-Harness-消息渲染器调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
+- **工具卡片渲染**：Web 不再接收 Host 计算的 presenter 视图；浏览器从原始调用参数、结果内容、错误与持久化 meta 派生 terminal/diff/search/read/web/image 等卡片，并按工具名键控槽分派，未知工具落 GenericToolCard。证据：静态源码确认。链接：[消息渲染器调查笔记](../消息渲染器/DeepSeek-Harness-消息渲染器调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **输出对象身份与活对象**：输出对象分四类——消息（稳定 MessageId）、工具调用/结果（CallId 配对）、磁盘文件（spill、内容寻址附件）、运行实例（终端会话，仅进程内存活、不进日志）；终端 PTY 与后台 job 是模型可跨调用定向维护的活对象；能力总评 G1（富静态结果），无 G2 声明式控件、无 G3 专用运行环境，用户不能编辑模型输出对象。证据：静态源码确认。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
 - **消息反馈 sidecar**：正/负评分 + 可选 note，按 messageId 键存独立 sidecar 域、version 乐观并发；写入前对目标日志前缀执行 `session/flush` 屏障；永不改动日志本身，也不进模型上下文。Host 侧契约已存在，UI 端到端链未闭合，见末尾小节。证据：静态源码确认。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
-- **Web Chat UI（双插件树与四象限 RPC）**：浏览器运行第二条 cordis 插件树；对象层 React-free 持全部业务状态、`useSyncExternalStore` 快照喂组件；四象限 RPC（上行 HTTP POST、下行两条 WebSocket 事件流，`assistant/chunk` 即令牌流本身、无独立 delta 帧）；重连即重建（无 resume 游标）。证据：静态源码确认。链接：[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)、[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)。
-- **Composer 输入状态机与 slash 管线**：InputMachine 四阶段（plain/adjudicating/claimed/submitting），命令模式绝不从草稿文本派生，由选择路径显式建立 claim；支持 chip 引用、自管理撤销（100 条环形日志）、IME 合成保护、Ctrl+Enter 换行；slash 管线按注册顺序轮询、命令目录宿主权威；Web 无 steer 入口，见末尾小节。证据：静态源码确认。链接：[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
+- **Web Chat UI（Remote streams 与认证）**：浏览器运行第二条 Cordis 插件树；上行 Remote RPC 走 HTTP POST，下行逻辑 streams 复用 `/api/remote.mux`。launch token 只在根 GET 换签名 cookie，业务 API 全部要求认证；Session journal 用 opening snapshot、tail page 与 follow reopen 修补重连缺口。证据：静态源码确认。链接：[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)、[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)。
+- **Lexical Composer 与乐观提交**：每 Session 一个 Lexical editor，引用 chip 是原子 decorator node；普通发送先清草稿并登记 submission echo，按 rpcId 在 durable transcript、queue 或 steering 观察到后退休。运行中可按设置选择 Queue 或 Steer，通用文件走有界并发后台上传。证据：静态源码确认。链接：[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
 - **会话导航、工作区与现场恢复**：会话列表/工作区浏览器支持分组树/平铺、拖拽排序与宿主全文搜索；blank 会话复用与创建语义由宿主权威判定；Session 常驻后台吃帧，切走再切回即时渲染快照；同一 host 可服务多标签页（blank 位、会话、运行状态经帧广播对齐），草稿/当前会话无跨标签页同步，见末尾小节。证据：静态源码确认。链接：[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
 
 ### Agent 运行时与外部协作
 
 - **工具注册与执行管线**：工具是注册在内存 registry 的代码对象（ToolDefinition：模型可见 schema、强制 output 契约、execute 与可选回调），注册即 effect、返回卸载 disposer、无独立持久化实体；执行走固定管线——策略瀑布（允许/拒绝/询问）→ 单调 guard → 调度瀑布（超时等包装）→ 工具体 → 结果策略 → 内容终结与最终通知；`tool/call` 与 `tool/result` 执行前后落盘。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
-- **工具作用域与过滤**：作用域是层链而非单一目录（全局层 + 每 agent 一个 scope 层）；agent 层同名 shadow 全局，`restrict` 的 allow/deny 只过滤继承面、自身层注册不受限；Code Mode 的 `run_code` 是保留传输（native/code/both 三种呈现）。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- **工具作用域与过滤**：作用域是层链而非单一目录（全局层 + 每 agent 一个 scope 层）；agent 层同名 shadow 全局，restriction 只过滤继承面、自身层注册不受限；PTC 的 `run_code` 是保留传输，支持 native/ptc/both 三种呈现。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **capability seam 三角色**：seam = Service Definition（接口）+ Provider（实现）+ Consumer（模型工具）；工具包只拥有 schema、校验与呈现，provider 可整体替换（fs/shell/web/subagents/jobs 等映射）而模型可见 schema 不变。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 - **工具 guard 机制**：timeout-policy 是 tools/execute 包装器，把声明的超时预算变成 `TOOL_TIMEOUT` 结构化错误；repeat-tool-reminder 是 post-execute 观察者，经 additionalContexts 注入重复调用提醒，只提醒不否决。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **ACP 服务器（反向控制表面）**：自动化 ACP 服务器经 JSON-RPC stdio 把宿主 Agent 会话暴露给程序化客户端，支持建会话、发 prompt、回传已提交文本、取消与一次性权限应答；宿主审批 waterfall 对 ACP 会话转成 `session/request_permission` 一次性选项；无鉴权、无并发限制（除每会话单 in-flight prompt），安全模型依赖本地 stdio + 可信调用方。证据：主链确认（静态）。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
@@ -103,17 +103,17 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **仓库分布（结构、构建、文档、测试、平台）**
 
-- **仓库形态与规模**：单一 TypeScript monorepo（pnpm workspace、tsc -b 双编译面 + tsdown 构建、vitest 测试），46 组 226 个可独立发布的 npm 包；Git 跟踪文件 7,412 个、源码文件 2,756 个 / 590,509 行，TypeScript 占 95.5%；产品 API 脊柱集中在 `packages/core` 五包，`packages/client` 组 153,754 行为最大区域（39 个 `ui-*` 界面插件）。证据：Git 跟踪文件机械统计 + 源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
+- **仓库形态与规模**：单一 TypeScript monorepo（pnpm workspace、tsc 双编译面、tsdown、vitest），当前有 11,239 个 Git 跟踪文件、4,308 个可识别源码文件与 3,538 个文档文件；源码行按旧基线加净 diff 估算约 940,328。包组已扩到 51 个，产品 API 脊柱仍在 `packages/core`，Web、Electron、SSH、PTC、browser/computer-use 与 webhook 等边界分属独立组。证据：Git 树统计、同口径净变化与源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
 - **框架层"双持有"与 twin 实现**：Cordis 全家被 vendored 进 `vendor/`（9 包、18 项本地修改清单、产品包以 peer dependency 解析到 vendored 源码）；`@earendil-works/pi-ai` 以普通 npm 依赖被消费（消费不持有），`llm-pi-ai` 与 `llm-deepseek` 是同一 LLM 缝隙的 twin 双实现。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
-- **文档与测试体系**：docs/ 215 文件（中英双语"三件套" + 六个生成目录）、`.agents/notes` 1,386 篇双语 Agent Notes、226 包全部带 README 三件套；测试 1,772 文件 / 307,244 行，含 Web e2e、examples 快照回放与 scripts 仓库自检，门禁声明"按文件 100% 覆盖率"（覆盖率声明属运行验证项，见末尾小节）。证据：静态统计。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
+- **文档与测试体系**：当前树识别出 3,538 个文档文件与 2,170 个测试资产；README 双语配对、生成目录、Web e2e、session snapshot 回放和 scripts 门禁仍是主要组织方式。仓库声明 packages 源码按文件 100% 覆盖率，本次未运行门禁验证。证据：静态统计与仓库规范。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
 - **跨平台与发布组织**：四个对外运行面（CLI、Web GUI、进程外 JSON-RPC/Python SDK、ACP/MCP 自动化协议）；平台差异按"同缝隙多 provider 包"组织而非条件编译；`native/` 含 Landlock C 启动器与 Windows ACL C++ 探针；发布按 npm 产品族 / vendor 族 / Python wheel / Landlock 四族资产组织。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 
 **应用界面基础设施**
 
 - **双 cordis 插件树与启动链**：宿主进程一条 cordis 树、浏览器第二条 client 树；`window.__DSH_BOOT__` 清单交给 shell，自研懒 CJS 模块表 + vendored Loader 装配，全部条目 ACTIVE 后一次性翻转真实界面；插件包永不进入 vite 打包图（以运行时 bundle 到达），dev 模式拒绝裸 vite serve。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
-- **传输、连接与信任模型**：上行仅 HTTP 一元 RPC、下行两条 WebSocket 事件流（`/api/events.mux` 与 `/api/events.host`），四象限 RPC 协议（谁发起谁铸造 rpcId）；重连即重建（指数退避 500ms 起、封顶 10s、握手要求双流 open + `host.describe` 成功）；请求信任栅栏（loopback/trustedHosts 校验、sec-fetch-site 与 Origin 检查、拒绝 `--host 0.0.0.0`）。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
+- **传输、连接与信任模型**：Remote unary 调用走 HTTP POST，逻辑 streams 复用 `/api/remote.mux`；ready baseline 到达后才发布 connection generation，失败按 500ms 到 10s 持续重试。launch token 只在根 GET 换取签名 HttpOnly cookie，所有业务 RPC、WebSocket 与 feature Fetch route 均受 Host/Origin 栅栏和浏览器 session 认证。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
 - **状态所有权与 UI 基础设施**：对象层（React-free）持全部业务状态、渲染机制（web-react 桥）完成 ctx↔React 集成、表现组件纯 props 三层分工；插槽系统（slot map 声明合并、kind 四类、会话作用域）是唯一组件组合通道；store 只装视图状态；主题（light/dark/system、防首屏闪烁、语义 token 别名）、国际化（中文回退、双语注册强制）、两级错误边界、schema-form 表单引擎、模态/Toast/浮层公共组件。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
-- **协议生成与 BFF**：Typert 编译器从 TypeScript 类型图生成协议描述符与 zod 编解码器，网关据此分发 `/api` 调用，客户端无需手工维护协议代码；Typert 网关把业务服务上 `@Remote` 标记的方法暴露为规范端点；`packages/api/remotes` 是 BFF 上层；`packages/sdk` 是独立的进程外 stdio JSON-RPC 通道，与 Web 四象限协议无关。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
+- **协议生成与 BFF**：Typert 从 TypeScript 类型图生成 Remote 描述符与编解码器，API Gateway 暴露 `@Remote` 方法与 streams；Session、Workspace、Settings、Terminal 等 controller 各自拥有业务 BFF。`packages/sdk` 是独立的进程外 stdio JSON-RPC 通道。证据：静态源码确认。链接：[应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
 
 ## 已知边界与待验证事项
 
@@ -132,30 +132,30 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **未覆盖类目（笔记已声明检索范围）**
 
-- 会话级删除、导入、备份 API 未找到；日志本身无跨进程锁，revision token 只用于检测外部变更并触发重读，不能仲裁。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
+- 会话级删除、导入、备份 API 未找到；JSONL write handle 用 POSIX flock 或 Windows 命名信号量排斥同会话跨进程写，但没有多写者合并协议。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
 - 针对单条消息的续写或重新生成 API 未找到（分支以 fork 表达）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
-- 渠道管理：CLI 无渠道向导与连接测试；TUI 渠道管理页与桌面端应用未找到；渠道复制、导入导出、行级启停按钮未找到；HTTP 代理配置未找到。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
+- 渠道管理：CLI 无渠道向导与连接测试；Electron 是 Web 壳而非独立渠道管理产品；渠道复制、导入导出、行级启停按钮与 HTTP 代理配置未找到。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
 - 分享能力未找到（仅浏览器本地下载文件）；独立知识库注入机制未找到（用户知识经 AGENTS.md 指令与文件内容进入上下文）。链接：[对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
 - hooks 双桥无 per-session 项目内 hooks.json 发现（configPath 为进程级一次性读取），部分协议语义（updatedInput、systemMessage、continue:false 停轮）未生效或未实现。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 - 消息反馈 sidecar 的 UI 端到端链未闭合（Host 侧契约已存在）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 
 **共性未验证**
 
-- 全部 14 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；同一代码快照为 rc.5 状态（32 条提交的浅克隆），快照之外的历史未纳入。
+- 全部来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；结论统一对应代码快照 `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`。
 - 运行时行为待黑盒补充确认：LLM 重试与 pi-ai 错误文本分类的真实匹配度、ACP/Codex/Claude Code 真实子进程往返、goal 多轮续跑竞态、schedule 定时器唤醒与崩溃窗口、Web GUI 视觉/键盘/无障碍/流式性能、消息渲染 DOM 呈现、覆盖率门禁"按文件 100%"声明。
-- 已确认的项目边界（正文已述，此处汇总）：vm 沙箱"不是安全边界"；无冷会话调度器与外部通知通道；SQLite 部署下会话导出端点 501；导出不含 spill 文件本体；Web 端无 steer 入口、草稿/当前会话无跨标签页同步；无跨渠道高可用（多 Key/轮换/failover）。
+- 已确认的项目边界（正文已述，此处汇总）：vm 沙箱“不是安全边界”；无冷会话调度器与外部通知通道；导出不含 spill 文件本体；草稿/当前会话无跨标签页同步；无跨渠道高可用（多 Key/轮换/failover）。
 
 与特色贡献统计的衔接：goal、plan mode、schedule、self-modification 可计为产品特性，sandbox 与子代理委派策略按机制贡献单列，见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 来源笔记索引
 
-- [Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)：工具定义/注册、作用域与过滤、发现与注入、执行管线、guard、capability seam、Code Mode、UI 呈现。
+- [Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)：工具定义/注册、作用域与过滤、发现与注入、执行管线、guard、capability seam、PTC、UI 呈现。
 - [Agent 角色调查笔记](../Agent角色/DeepSeek-Harness-Agent角色调查笔记.md)：preset 角色体系、system prompt 组装、模型与生成参数、子 Agent、资产与变量、与 pi 的关系。
 - [Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)：agent loop 的 turn/step 生命周期、事件域、inbox 与唤醒、取消与错误恢复、headless 运行。
-- [Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)：Web Chat UI 双插件树、四象限 RPC、会话导航、Composer 输入状态机、设置表单、流式渲染、工具卡片、多会话与跨窗口。
+- [Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)：Web Chat UI 双插件树、Remote mux、会话导航、Lexical Composer、设置表单、流式渲染、工具卡片、多会话与跨窗口。
 - [LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)：LLM seam、twin 适配器、凭据与配置、模型目录、重试限流、默认模型、渠道管理入口覆盖、pi-ai 复用边界。
 - [仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)：仓库形态与量级、语言与运行时分工、文档/测试分布、跨平台与发布组织。
-- [会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)：事件日志数据模型、持久化双后端、生命周期、消息操作与分支、列表检索、迁移与导入导出边界。
+- [会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)：事件日志数据模型、JSONL handle 持久化、格式迁移、生命周期、消息操作与分支、列表检索及导入导出边界。
 - [外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)：进程外 subagent provider、ACP 服务器、MCP 桥、hooks 桥、执行与取消语义、权限与治理。
 - [对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)：Session log ZIP 导出、内容口径、附件/spill 处理、无分享结论、性能与失败语义。
 - [对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)：请求主链、历史派生、compaction、spill、上下文注入插件、提问能力、与 pi 无代码继承。

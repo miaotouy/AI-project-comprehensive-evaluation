@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：只读静态源码梳理；复核媒体创作横向对比、独特功能笔记与 Scriptorium、HumanToolBox ComfyUI 模块、IPC 和 Agent 插件实现；运行轻量 Node 协作者契约测试与语法检查，不启动 Electron、ComfyUI、VCPToolBox 或外部模型服务
 >

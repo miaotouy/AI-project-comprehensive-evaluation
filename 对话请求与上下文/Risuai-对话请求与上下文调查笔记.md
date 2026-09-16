@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/process/index.svelte.ts` 的 `sendChat` 全链、`request/` 各 Provider 的流式实现与工具循环、`memory/` 四个记忆引擎、`globalApi.svelte.ts` 网络层与持久化循环、`src-tauri` 的请求命令），静态追踪调用链与状态分支；未运行应用
 >

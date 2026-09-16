@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读通读根 README、后端 `backend/open_webui/routers/` 全部路由、`models/` 表模型、`utils/memory.py`、`utils/automations.py`、`tools/builtin.py`、`socket/main.py`、`socket/utils.py`、前端 `src/routes/` 路由与 `src/lib` API 客户端；未启动服务，未修改被调查仓库
 >
@@ -64,7 +64,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **完整主链**（用户消息与模型参与分两段）：
 - **用户消息**：校验成员/权限（group/dm 需成员，公告频道走 access grants）→ `Messages.insert_new_message` 落库 → 实时广播（回复同时给父消息发回复通知）→ 置顶/反应/线程/Webhook（`{token}` 匿名发布）各有独立端点；
-- **模型参与**：消息 @ 了模型或回复了模型消息时，`model_response_handler` 解析提及 → 为每个被 @ 模型创建占位消息（`meta.model_id`）→ 组装线程历史（含图片 Base64 与文件列表）→ 以频道会话标识调用完整 `CHAT_COMPLETION_HANDLER`（工具、Filters、RAG 全链路，流式经 socket 的 channel emitter 回推）→ 模型回复以模型身份落库。
+- **模型参与**：消息 @ 了模型或回复了模型消息时，`model_response_handler` 解析提及 → 为每个被 @ 模型创建占位消息（`meta.model_id`）→ 组装线程历史（含图片 Base64 与文件列表）→ 以频道会话标识调用完整 `CHAT_COMPLETION_HANDLER`（工具、Filters、RAG 全链路，流式经 socket 的 channel emitter 回推）→ 模型回复以模型身份落库。频道 emitter 现在也处理 `files` 事件：把文件登记进 `channel_file`、回填所属消息 id 并合并进消息 data.files，模型在频道里生成的图片因此作为频道附件落库（`socket/main.py:1023-1049`；`tools/builtin.py:391-398`）。
 
 **持续性**：全部状态在数据库（SQLite/PostgreSQL），多节点经 Redis socket 广播一致；`channel_member.last_read_at`/`is_active` 维护已读与在线。
 
@@ -120,9 +120,9 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **入口与触发者**：用户经 `/calendar` UI；模型经内建工具 `search_calendar_events` / `create_calendar_event` / `update_calendar_event`（`builtin.py:3965-4226`，函数调用由 Agent 工具笔记的调用循环触发）。
 
-**事实对象**：`calendar` / `calendar_event` / `calendar_event_attendee` 三张表（`models/calendar.py`）分别记录日历、事件与参与者；事件带 `rrule`（重复规则）、颜色、`meta.alert_minutes` 提醒与 RSVP 状态。
+**事实对象**：`calendar` / `calendar_event` / `calendar_event_attendee` 三张表（`models/calendar.py`）分别记录日历、事件与参与者；事件带 `rrule`（重复规则）、颜色、`meta.alert_minutes` 提醒与 RSVP 状态。创建/更新表单会拒绝短于一天的重复频率（下限 24 小时，超频返回 `CALENDAR_RRULE_TOO_FREQUENT`，`models/calendar.py:30,198-245`）。
 
-**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验日历访问授权，默认日历兜底）→ UI 按范围查询与搜索 → 提醒由调度器循环的 `_check_calendar_alerts` 轮询（`utils/automations.py:249-254`）→ 经通知系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
+**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验日历访问授权，默认日历兜底）→ UI 按范围查询与搜索 → 提醒由调度器循环的 `_check_calendar_alerts` 轮询（`utils/automations.py:693`）→ 经通知系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
 
 **持续性**：全量 DB；时区由 `tz` 参数（用户 timezone）归一。
 
@@ -195,7 +195,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 ### 能力十：多节点运行（Redis 支撑）— `入口确认`
 
-`WEBSOCKET_MANAGER='redis'` 时：`socketio.AsyncRedisManager` 做跨节点事件广播（`socket/main.py:67-82`）；`socket/utils.py` 提供三类 Redis 支撑——`RedisDict`（会话状态哈希）、`RedisLock`（SET NX/EX 分布式锁 + 续期/释放 Lua 脚本）、`YdocManager`（Yjs 文档更新列表 + 压缩 + 用户集合，跨节点协作文档）。配合 DB 层（SQLite 加密/PostgreSQL）、会话/任务在 Redis 中取消（对话请求与上下文笔记已确认）与自动化认领的原子更新，构成水平扩展基础。**注意**：这是平台运行机制，不是用户可见产品特性，按调查指南"工程机制单独标注"处理，不进入特色贡献计数。
+`WEBSOCKET_MANAGER='redis'` 时：`socketio.AsyncRedisManager` 做跨节点事件广播（`socket/main.py:67-82`）；`socket/utils.py` 提供三类 Redis 支撑——`RedisDict`（会话状态哈希，另有 HSCAN 分批读取与 HDEL 批量删除，供会话池清理使用，`socket/utils.py:113-127`）、`RedisLock`（SET NX/EX 分布式锁 + 续期/释放 Lua 脚本）、`YdocManager`（Yjs 文档更新列表 + 压缩 + 用户集合，跨节点协作文档）。配合 DB 层（SQLite 加密/PostgreSQL）、会话/任务在 Redis 中取消（对话请求与上下文笔记已确认）与自动化认领的原子更新，构成水平扩展基础。**注意**：这是平台运行机制，不是用户可见产品特性，按调查指南"工程机制单独标注"处理，不进入特色贡献计数。
 
 **证据强度**：socket 模块源码为静态事实；多节点真实部署未验证。
 

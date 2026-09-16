@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态通读当前快照的记忆、搜索、会话检索、附件转换与生成链路源码；对照仓库内 `docs/references/chat-generation-pipeline.md` 检查文档与实现一致性；未构建 APK、未运行设备、未调用任何搜索 provider 或模型
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`cecdbe432feda57821938bba7625a272113d21c1`（分支：`main`）
+> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
 >
 > 调查方式：只读静态源码核对，覆盖流式内容块解析、消息持久化和 HTML 预览组件；未运行 Tauri WebView 或测试脚本
 >
@@ -29,25 +29,25 @@ VCPMobile 的可执行生成式输出是消息内的 HTML 预览块，可定位�
   -> 用户复制、刷新、全屏预览；未回流模型
 ```
 
-内容解析器将 HTML 围栏与完整文档分别转为 `HtmlPreview`；容器级普通 HTML 则仍按 Markdown raw HTML 处理。`src-tauri/src/vcp_modules/chat/content_parser.rs:356-373,497-800`。消息服务在缓存命中时读取 blocks，未命中时从原文重新编译并通过内容哈希保护的缓存写回 SQLite。`src-tauri/src/vcp_modules/chat/message_service.rs:484-539,908-947`。
+内容解析器将 HTML 围栏与完整文档分别转为 `HtmlPreview`；容器级普通 HTML 则仍按 Markdown raw HTML 处理，入口见 `src-tauri/src/vcp_modules/chat/content_parser.rs:528-861`，构造见同文件 `:225-238`。消息服务在缓存命中时读取 blocks，未命中时从原文重新编译并通过内容哈希保护的缓存写回 SQLite，见 `src-tauri/src/vcp_modules/chat/message_service.rs:29-135,859-904,1394-1409`。
 
 ## 1. 输出协议、对象模型与持久化
 
-前端 `ContentBlock` 为 `html-preview` 定义 `content`、`highlighted_content` 和 `hash` 字段；同一消息以 `ChatMessage.id` 为稳定归属。Rust 端 `ContentBlock::html_preview` 会生成 HTML 高亮内容并参与块哈希计算。`src/core/types/chat.ts:47-85,186-212`，`src-tauri/src/vcp_modules/chat/content_parser.rs:10-116,225-278`。
+前端 `ContentBlock` 为 `html-preview` 定义 `content`、`highlighted_content` 和 `hash` 字段；同一消息以 `ChatMessage.id` 为稳定归属。Rust 端 `ContentBlock::html_preview` 会生成 HTML 高亮内容并参与块哈希计算。`src/core/types/chat.ts:102-244`，`src-tauri/src/vcp_modules/chat/content_parser.rs:10-126,225-284`。
 
-持久化保存的是消息原文与序列化后的渲染缓存。缓存会因原文内容哈希或渲染器 schema 不匹配而失效并重新编译；没有专用 artifact 表、独立生命周期状态、版本号、分享链接或导出命令。`src-tauri/src/vcp_modules/chat/message_service.rs:496-537`。
+持久化保存的是消息原文与序列化后的渲染缓存。缓存会因原文内容哈希或渲染器 schema 不匹配而失效并重新编译；没有专用 artifact 表、独立生命周期状态、版本号、分享链接或导出命令。`src-tauri/src/vcp_modules/chat/message_service.rs:1394-1409`。
 
 ## 2. 表现、执行环境与交互
 
-预览组件默认展示代码；用户切换预览后会把清洗后的 HTML 填入 iframe `srcdoc`。页面提供复制、刷新和全屏预览，主题变化会重新生成注入样式；图片点击会通过 `postMessage` 通知父页面。`src/features/chat/blocks/HtmlPreviewBlock.vue:34-163,239-300`。
+预览组件默认展示代码；用户切换预览后会把 HTML 直接填入 iframe `srcdoc`。页面提供复制、刷新和全屏预览，主题变化会重新生成注入样式；图片点击会通过 `postMessage` 通知父页面。`src/features/chat/blocks/HtmlPreviewBlock.vue:1-162,164-300`。
 
-iframe 使用无 `allow-same-origin` 的 sandbox，同时允许脚本、模态、表单；全屏版本额外允许弹出窗口。DOMPurify 先处理 HTML，但组件仍显式将 `script`、`iframe`、`canvas` 等加入允许标签列表。因此可确认这是浏览器脚本运行表面，而不是只读高亮；本次未在真实 WebView 中验证 DOMPurify 对不同 HTML、网络请求和嵌套 iframe 的最终效果。`src/features/chat/blocks/HtmlPreviewBlock.vue:58-125,226-233,289-296`。
+iframe 的 sandbox 现在只声明 `allow-scripts`，内联与全屏两处同值；它不加 `allow-same-origin`，也不再加模态、表单或弹出窗口权限。组件已不再经过 DOMPurify 清洗，源码注释明确以 iframe 的 opaque origin 与 sandbox 作为唯一边界，并保留页面里的 `<script>`；注入内容只额外加入滚动条样式与一个点击处理脚本，后者拦截 `javascript:` 链接并经 `postMessage` 上报图片点击。因此可确认这是浏览器脚本运行表面，而不是只读高亮；本次未在真实 WebView 中验证脚本、网络请求和嵌套 iframe 的最终效果。`src/features/chat/blocks/HtmlPreviewBlock.vue:73-122,224-231,289-296`。
 
 ## 3. 更新、回流与资源边界
 
-流式阶段的 Aurora 更新可携带稳定 blocks 与尾部 block，最终消息统一持久化渲染缓存；这使 HTML 块随消息刷新和重开恢复，但更新粒度仍是消息内容/块重编译，而非对独立 Artifact 的文件 diff。`src/core/types/chat.ts:136-154,214-241`。
+流式阶段的 Aurora 更新可携带稳定 blocks 与尾部 block，最终消息统一持久化渲染缓存；这使 HTML 块随消息刷新和重开恢复，但更新粒度仍是消息内容/块重编译，而非对独立 Artifact 的文件 diff。`src/core/types/chat.ts:246-322`。
 
-未找到用户直接编辑 HTML、保存为单独文件、将 iframe 状态恢复、模型读取已有 HTML 源码、按对象 ID 修改、能力桥调用 Tauri API，或不可见 iframe 的专门资源治理。组件卸载时仅清理刷新计时器并注销全屏 modal。`src/features/chat/blocks/HtmlPreviewBlock.vue:132-163`。
+未找到用户直接编辑 HTML、保存为单独文件、将 iframe 状态恢复、模型读取已有 HTML 源码、按对象 ID 修改、能力桥调用 Tauri API，或不可见 iframe 的专门资源治理。组件卸载时仅清理刷新计时器并注销全屏 modal。`src/features/chat/blocks/HtmlPreviewBlock.vue:130-161`。
 
 ## 4. 已确认边界与未验证事项
 

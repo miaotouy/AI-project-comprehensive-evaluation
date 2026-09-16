@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、zustand store、对话框与键盘处理、快捷键注册）；视觉效果、焦点顺序、键盘可用性等静态代码无法确认的项标注"未运行验证"
 >
@@ -140,7 +140,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
   - 编辑保存：Ctrl+Enter（`EditMessageDialog.tsx:75-80`）；
   - 删除/批量删除：Enter 确认、删除按钮自动聚焦（`DeleteMessageDialog.tsx:30-34,57-60`、`DeleteThreadDialog.tsx:76-80,92-96`、`DeleteAllThreadsDialog.tsx:54-58,68-72`）；重命名：自动聚焦并全选（`RenameThreadDialog.tsx:52-60`）、Enter 保存（L81-86）；
   - 搜索：快捷键打开（`KeyboardShortcuts.tsx:71-76`），↑↓/Enter 导航选择（§2）；
-  - 全局：`KeyboardShortcutsProvider`（`providers/KeyboardShortcuts.tsx`）注册切侧栏/新聊天/新项目/设置/搜索/切助手等 `PlatformShortcuts`（集中在 `lib/shortcuts.ts` 配置）；
+  - 全局：`KeyboardShortcutsProvider`（`providers/KeyboardShortcuts.tsx`）注册切侧栏/新聊天/新项目/设置/搜索/切助手等 `PlatformShortcuts`（集中在 `lib/shortcuts/` 目录配置）；
   - 输入框自动聚焦：挂载、切线程、流式结束（`ChatInput.tsx:543-570`）。
 - **消息区**：`role="log"`（`conversation.tsx:15`）。
 - **焦点顺序、可访问名称、响应式行为、无障碍验证**：未运行验证（静态代码只能确认事件绑定）。
@@ -172,6 +172,6 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 - 输入区：`web-app/src/containers/ChatInput.tsx`（附件摄取/拖放/粘贴/发送/停止/队列 chip）、`web-app/src/hooks/usePrompt.ts`。
 - 消息操作：`web-app/src/containers/MessageItem.tsx`（操作区/Continue/Regenerate/错误框/版本切换器）、`web-app/src/containers/dialogs/EditMessageDialog.tsx`、`DeleteMessageDialog.tsx`。
 - 侧栏：`web-app/src/components/left-sidebar/index.tsx`、`NavMain.tsx`、`NavChats.tsx`；`web-app/src/containers/ThreadList.tsx`；`web-app/src/containers/dialogs/SearchDialog.tsx`、`RenameThreadDialog.tsx`、`DeleteThreadDialog.tsx`、`DeleteAllThreadsDialog.tsx`。
-- 快捷键：`web-app/src/providers/KeyboardShortcuts.tsx`、`web-app/src/lib/shortcuts.ts`。
+- 快捷键：`web-app/src/providers/KeyboardShortcuts.tsx`、`web-app/src/lib/shortcuts/`。
 - 状态：`web-app/src/stores/chat-session-store.ts`、`message-queue-store.ts`、`message-errors.ts`；`web-app/src/hooks/useChatAttachments.ts`、`useAppState.ts`。
 - 附件处理：`web-app/src/lib/attachmentProcessing.ts`、`web-app/src/types/attachment.ts`。

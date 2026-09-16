@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：静态源码局部调查；本轮重点为分支消息（siblings）的最终显示、Agent 表面一致性（live 与 capture 两端组件与资料来源）与运行保真（流式/工具/富内容、32767px 边界、长图拼接）；未运行 Electron 应用或实际导出图片
 >
@@ -22,9 +22,9 @@ Cherry Studio 的对话图片导出以**离屏复刻真实消息列表**为核�
 
 名称/头像来源一致：消息头优先取发送时冻结的 `messageSnapshot`，其次取 provider 的 `assistantProfile`（`MessageHeader.tsx:43-64`）；两端的 profile 推导也一致（Home 端 `useAssistant(topic.assistantId)`，Agent 端 `activeAgent.name + getAgentAvatarFromConfiguration`）。
 
-captureMode 只通过 adapter 层面禁用交互动作，并通过 `inert`/`pointer-events-none` 屏蔽交互，不改变渲染来源。
+captureMode 只通过 adapter 层面禁用交互动作，并通过 `inert`/`pointer-events-none` 屏蔽交互，不改变渲染来源。捕获前还会把本地与远端图片预内联；远端读取受并发池、单请求超时和全阶段时间预算约束，HTTP 错误或显式非图片 MIME 会降级为占位。
 
-**运行保真**：图片内容来自持久化数据的完整快照（capture 宿主没有 streamingLayers），正在流式生成、尚未持久化的内容不会进入图片；Markdown、代码块、工具调用由同一批真实组件渲染后被 html-to-image 克隆捕获；单 Canvas 无拼接，任一维度超过 32767px（CSS 像素）即显式拒绝；DPR 相乘后实际画布尺寸可能超出该上限（推断）。捕获前后无字体/图片加载等待，远端图片在未加载完成时可能以透明占位出现（推断）。
+**运行保真**：图片内容来自持久化数据的完整快照（capture 宿主没有 streamingLayers），正在流式生成、尚未持久化的内容不会进入图片；Markdown、代码块、工具调用由同一批真实组件渲染后被 html-to-image 克隆捕获；单 Canvas 无拼接，任一维度超过 32767px（CSS 像素）即显式拒绝。DPR 相乘后实际画布尺寸仍可能先触达浏览器上限（推断）。
 
 ## 系统边界与完整主链
 
@@ -93,7 +93,7 @@ horizontal/grid 布局渲染组内全部气泡，样式来自偏好设置 `chat.
 
 Markdown、代码块、工具调用卡、reasoning 与附件由与聊天现场完全相同的 `MessageFrame`/parts 组件渲染为 DOM，再由 html-to-image 克隆捕获。
 
-克隆前没有字体就绪或图片加载等待（对比 iframe 捕获路径有显式字体内联与懒加载图片强制 eager，`utils/image.ts:402-425`），远端图片在捕获时未加载完成会以透明占位（`imagePlaceholder`）呈现（推断）。
+克隆前会先等待 `document.fonts.ready`（最长 1 秒），再处理图片资源。当前实现读取 `<img>.currentSrc`，本地文件转 Data URL；远端图片通过并发上限为 4 的抓取池处理，单源上限 10 秒、全阶段预算 20 秒，HTTP 错误或显式非图片 MIME 会使用透明占位。缺失或 `application/octet-stream` MIME 交由浏览器解码，没有独立响应大小或文件魔数校验。随后仍以 html-to-image 克隆为单 Canvas。入口与约束见 `src/renderer/utils/image.ts:49-162,299-380,1210-1247`。
 
 ## 3. 单消息图片与完整 Topic 图片
 
@@ -113,7 +113,7 @@ captureMode 的表面对 live 现场还有其他 DOM 差异（均为样式类代
 - grid 布局的卡片固定 300px 高、内容容器 `overflow-hidden`（`MessageGroup.tsx:438,459`），horizontal 布局内容容器 `max-h-[calc(100vh-350px)]` 且 `overflow-y-auto`（`MessageGroup.tsx:438,459`），而 `captureScrollable` 只展开根元素，后代裁剪容器会把长内容截断在图片内；
 - 这些布局样式由偏好设置 `chat.message.multi_model.style` 决定，capture 不强制 fold，因此用户当前的 grid/horizontal 设置会直接影响图片保真。
 
-本地图片在捕获前临时内联，降低了 Electron 本地协议无法被 `html-to-image` 读取的风险。远端图片使用 `cacheBust` 和透明占位配置；CORS 失败或未加载完成时最终是占位、遗漏还是整体失败需要运行确认。
+本地图片在捕获前临时内联，降低了 Electron 本地协议无法被 `html-to-image` 读取的风险。远端图片不再只依赖 html-to-image 自身跨域抓取，而是在捕获前经受限抓取路径预内联；验证失败会降级为占位。代理、认证图片及各站防盗链下的实际成功率仍需运行验证。
 
 本次没有找到图片导出专用的敏感信息扫描或字段开关。图片表达继承当前消息列表的可见内容；是否隐藏 system、路径、工具参数和 reasoning 由上游消息投影与 UI 配置决定。Agent 会话数据在导出前经 `withTerminalErrorFallback` 补齐错误消息（`agentMessageListAdapter.tsx:48-76`），错误/空回复消息在图片中会显示统一的 `data-error` 占位（该 adapter 逻辑同时作用于 live 与 capture）。
 
@@ -156,7 +156,7 @@ Markdown 导出现在会携带多模态图片，而非仅保留文本占位；No
 - horizontal/grid 布局下内部滚动容器的实际截断效果，以及组菜单栏（布局图标、删除/重试按钮）在成品图片中的视觉呈现（运行验证）。
 - 32767px 边界附近的错误反馈、内存占用和取消行为；DPR>1 时画布实际尺寸先于 CSS 检查撞上限的推断。
 - 流式生成进行中导出时，pending 消息在图片中的实际表达（数据层已确认无 streamingLayers）。
-- 远端图片未加载完成/CORS 失败时的最终呈现（占位、遗漏或整体失败）；`fonts.ready` 缺失对字体渲染的影响。
+- 远端图片预内联在代理、认证、防盗链、超时、超大响应及 MIME 缺失场景下的实际成功率；字体等待的一秒上限在慢字体下是否足够。
 - 历史记录面板（`AssistantHistoryRecords` 使用事件默认处理器）触发图片动作时，若对应 Topic 的 live 列表未挂载，事件无人消费是否导致请求悬空。
 - 工具调用、reasoning、附件、表格和非 HTML Artifact 的实际保真。
 - Windows/macOS/Linux 的剪贴板与保存文件结果；两条入口（聊天菜单 vs 列表菜单）产出图片的宽度差。

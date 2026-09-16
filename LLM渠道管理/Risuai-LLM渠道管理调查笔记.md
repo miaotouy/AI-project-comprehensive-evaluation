@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读源码梳理，覆盖模型目录、请求层、存储层、网络层、设置 UI、Node/Tauri 后端，并搜索 CLI/TUI 入口；未运行应用；调查时工作树干净
 >
@@ -64,7 +64,7 @@ Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条
 - Custom API 单例：模型 ID `reverse_proxy` 使用全局字段 `forceReplaceUrl`（Base URL）、`customAPIFormat`（协议格式）、`customProxyRequestModel`、`proxyKey`（`modellist.ts:558-567`）；
 - 自定义模型数组：`db.customModels` 的每条记录以 `xcustom:::<uuid>` 为 ID，携带独立 url、key、format、tokenizer、flags、params，在设置页增删改（`src/lib/Setting/Pages/Advanced/CustomModelsSettings.svelte:174-188`）。
 
-插件模型是第四类：插件调用 `addProvider` 注册回调后，自动生成 `pluginmodel:::<name>` 条目进入 `customV3ProviderMetaStore`（`src/ts/plugins/apiV3/v3.svelte.ts:679-705`）。同一 Provider 实例（如一个 OpenRouter 账号）不能创建多条独立连接，只能通过 `customModels` 或 `reverse_proxy` 条目另起；内置 Provider 条目是全局单例。
+插件模型是第四类：插件调用 `addProvider` 注册回调后，自动生成 `pluginmodel:::<name>` 条目进入 `customV3ProviderMetaStore`（`src/ts/plugins/apiV3/v3.svelte.ts:682-709`）。同一 Provider 实例（如一个 OpenRouter 账号）不能创建多条独立连接，只能通过 `customModels` 或 `reverse_proxy` 条目另起；内置 Provider 条目是全局单例。
 
 ## 2. 配置生命周期、管理入口与持久化
 
@@ -138,7 +138,7 @@ API Key 与其他秘密是 `Database` 接口上的普通字符串字段，没有
 
 Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust command `streamed_fetch` 发起，headers 以 JSON 字符串传入（`src-tauri/src/main.rs:433-567`）。Web 端请求经 hub 或自托管 Node 服务的 `/proxy2` 转发：目标 URL 放 `risu-url`，完整 headers（含 Authorization）经 `risu-header` 传入，服务端解包后原样转发上游（`server/node/server.cjs:742-821`）。也就是说 Web 运行模式下，凭据会完整经过第三方中转服务器进程。
 
-请求日志会把 headers 与 body 原样记录进内存数组 `fetchLog`（最多 20 条，`globalApi.svelte.ts:650-777`），流式请求在 `fetchNative` 中也先写入日志再返回（`globalApi.svelte.ts:1780-1791`）。日志可通过 DevTool 侧栏或设置页"Show Log"以 Markdown 展示和复制（`src/lib/Setting/Pages/Advanced/SettingsExportButtons.svelte:12-19`），因此 API Key 在日志中可见，没有脱敏。插件读取日志需先获得 `fetchLogs` 权限（`src/ts/plugins/apiV3/v3.svelte.ts:567-603`）。
+请求日志会把 headers 与 body 原样记录进内存数组 `fetchLog`（最多 20 条，`globalApi.svelte.ts:650-777`），流式请求在 `fetchNative` 中也先写入日志再返回（`globalApi.svelte.ts:1780-1791`）。日志可通过 DevTool 侧栏或设置页"Show Log"以 Markdown 展示和复制（`src/lib/Setting/Pages/Advanced/SettingsExportButtons.svelte:12-19`），因此 API Key 在日志中可见，没有脱敏。插件读取日志需先获得 `fetchLogs` 权限（`src/ts/plugins/apiV3/v3.svelte.ts:569-605`）。
 
 ### 3.4 导出与前端可见性
 

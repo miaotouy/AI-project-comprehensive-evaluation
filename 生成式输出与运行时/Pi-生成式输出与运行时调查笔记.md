@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/ai`、`packages/agent`、`packages/coding-agent`、`packages/server`、`packages/session-backends/sqlite-node` 及 `packages/tui` 使用侧；未运行任何命令或测试
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Pi 是 Agent/LLM/TUI 库集合。模型输出只有三种结构化 part——text、thinking、toolCall（外加工具结果中的 image），经统一 delta 事件协议（`AssistantMessageEvent`）归一化所有 provider。模型产出没有独立的 artifact 对象：输出对象身份由两部分构成——工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象，写盘产物凭文件路径成为工作区普通文件。更新粒度：write 全文覆盖、edit 精确文本替换（带模糊匹配）、bash 在宿主本地 shell 进程执行（无沙箱、无 iframe/WebView、无权限系统）。持久化为 append-only JSONL 会话树（entry id/parentId、分支、fork、label、compaction），resume/import/fork 后经 `buildSessionContext()` 全量恢复到 `agent.state.messages`，模型可继续维护同一会话；compaction 摘要以 `<summary>` 用户消息回流。TUI 提供 diff 预演与结果着色、mermaid 静态 ASCII 渲染、终端图片。缺失项：专用可执行环境（沙箱/容器是可选部署模式而非内置运行时）、用户对输出对象的直接编辑与接受/拒绝、跨会话活对象、CRDT 协作。能力总评 **G2（声明式交互对象）**；bash 本机执行为 Agent 工具边界内的相邻 G3 要素，但模型输出本身未进入专用运行环境，文件产物由用户自己的 Git 管理。
+Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。稳定链的模型输出仍是 text、thinking、toolCall 三种结构化 part，文件产物仍以工作区路径为身份，因此其生成式输出等级仍为 **G2（声明式交互对象）**。实验链没有引入 Artifact、画布或浏览器脚本对象，而是把会话、分支、lane、operation、工具结果和终端状态做成可恢复的持久运行状态；它提高的是执行持续性和远端投影能力，不改变输出对象等级。
 
 ## 系统边界与完整主链路
 
@@ -134,7 +134,13 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 `/share` 有主备两条路径（`packages/coding-agent/src/modes/interactive/session-share.ts:46-203`）：主路径把当前分支导出为 JSONL，追加一条 `pi.share` custom entry 保存当前 system prompt 与激活工具定义，再把该 JSONL 上传为 Radius 组织可见 artifact（`exportSessionForShare` :25-43、`tryShareViaRadius` :91-150）；只有在 Radius provider 不可用或取不到凭据时才退回 `gh gist create --public=false`（`shareViaGist` :152-203），而退回路径导出的是 HTML 而非 JSONL（`shareSession` :46-89）。一旦命中 provider 与凭据，上传失败只报错、不再退回 gist。因此分享物仍是会话投影而非带独立 ID 的输出对象，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；命令帮助文案仍写作向私密 gist 分享（`core/slash-commands.ts:27`），未反映 Radius 优先的实现。
 
-## 13. 关键源码索引
+## 13. Durable harness 的运行状态投影
+
+实验性 AgentHarness 把一次执行拆成“接受操作”和“驱动操作”两个持久边界。lane 对外提供 `accept`、`drive`、`requestAbort`、`resume` 与 `watch`；操作结果形成不可变记录，进程重启后可从存储恢复并继续驱动。该机制保存的是 transcript、工具结算、重试与 deferred polling 等运行状态，不是可由用户直接编辑的 Artifact（`packages/agent/src/harness/agent-harness.ts:518-622`、`packages/agent/src/harness/runtime/lane.ts:480-1403`）。
+
+实验客户端把 worker 所有的 lane 投影成 Transcript 服务的完整复制快照，Chord 负责增量编码、序列与缺口检测，稳定 TUI 组件负责显示。它形成同一会话的 worker/TUI 多投影，但仍没有独立输出对象、用户接受/拒绝 diff 或脚本沙箱（`packages/coding-agent/src/experimental/services/transcript-provider.ts:20-98`、`packages/coding-agent/src/experimental/services/README.md:19-25`）。
+
+## 14. 关键源码索引
 
 - 输出协议与消息类型：`packages/ai/src/types.ts:338-368`（part）、`:523-539`（AssistantMessageEvent）、`:415-430`（AssistantMessage）
 - provider 归一化入口：`packages/ai/src/api/anthropic-messages.ts:590-617`、`openai-responses-shared.ts:462-502`、`pi-messages.ts:211-237`
@@ -146,4 +152,3 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 - 回流：`packages/coding-agent/src/core/messages.ts:148-194`、`core/compaction/compaction.ts`
 - 导出与外部投影：`core/export-html/index.ts:236-316`、`modes/print-mode.ts:33-168`、`modes/rpc/rpc-types.ts:20-73`、`packages/server/src/snapshots.ts:34-63`
 - 会话存储抽象与可选后端：`packages/agent/src/harness/session/session.ts:102-294`、`packages/session-backends/sqlite-node/`
-

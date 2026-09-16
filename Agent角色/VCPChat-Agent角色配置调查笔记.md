@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读核对 agentConfigManager、agentHandlers、chatManager、settingsManager，未修改被调查仓库源码
 >
@@ -21,7 +21,7 @@
 
 VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应用户数据目录下一个以 `agentId` 命名的子目录，目录内的 `config.json` 存储所有配置字段，`regex_rules.json` 存储独立的正则处理规则，头像图片（支持 PNG/JPG/GIF/WEBP）也保存在同一目录。
 
-可配置字段有系统提示词、模型选择、温度、上下文长度限制、输出长度限制、流式输出开关，以及用于管理多线对话的话题列表。不能在 Agent 内部配置工具调用策略——工具调用由 VCP 分布式服务器负责，配置在全局或后端。
+可配置字段有系统提示词、模型选择、温度、上下文长度限制、输出长度限制、流式输出开关，以及用于管理多线对话的话题列表。不能在 Agent 内部配置工具调用策略，工具能力仍由 VCP 分布式服务器负责；但提示词资产现在可由 PromptSponsor 工具读取和修改，并通过主进程服务复用 AgentConfigManager 的锁与原子写入。
 
 ## 2. 目录与文件结构
 
@@ -102,6 +102,10 @@ VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应�
 - **消息不保存模型/参数元数据**：user/assistant 消息只含 `role/name/content/timestamp/id/attachments`（chatManager.js:1020-1027、:1395-1403，未变），history.json 原样写入（`save-chat-history`，`modules/ipc/chatHandlers.js:497-513`）；`__vcpchatTimestampMeta` 只附加在发往 VCP 的请求 payload，不落盘。
 - **重新生成 = 截断重建（覆盖语义）**：`messageContextMenu.js:655-668` slice 保留到原消息的前缀、splice 删除原消息及其后全部消息再重建；分支是 topic 级（`chatManager.js:1511-1580` 的 `handleCreateBranch` 复制前缀历史到新话题）。本快照未找到续写入口和开场白/greeting 配置（创建 topic 时 history.json 初始化为空数组，`modules/ipc/chatHandlers.js:583`）。
 
+### 3.5 模型可操作的提示词资产
+
+PromptSponsor 的 direct 服务只接受白名单命令。读取命令可查看当前模式、有效提示词、积木和仓库；写命令可切换模式、改原始或预设提示词、增删移动积木、管理轮换内容与小仓。写操作按 requestId 做进程内幂等，并通过 AgentConfigManager 更新同一份角色配置；切换模式或修改当前模式内容时同步刷新 `systemPrompt`，所以普通发送仍消费统一字段。预设文件只接受 `.md` 与 `.txt`。`modules/services/pluginAgentOperationService.js:5-28,173-190,323-586`
+
 ## 4. Tavern Rules（Tavern 规则）
 
 Tavern Rules 是**全局规则**，不写在 Agent config.json 中；通过 `window.TavernManager.getActiveRulesForScope('agent')` 获取当前作用于 agent 范围的规则列表。
@@ -149,13 +153,15 @@ VCPChat 还支持多 Agent 群组对话（`Groupmodules/groupchat.js`），群�
 
 ## 10. 当前快照的角色边界
 
-本轮改动触及 Tavern 示例配置、群组设置标记和群聊渲染，但没有引入新的 Agent 持久化实体、角色版本字段或渠道绑定模型。角色仍以本地 Agent/群组配置和 Tavern 规则共同定义；群聊界面的结构调整不改变角色字段进入聊天请求的既有责任边界。此结论来自对 `AppData/VCPChatTarven*.json`、`Groupmodules/`、`Tavernmodules/` 与角色 IPC 入口的静态核对，未运行导入或群聊场景。
+角色仍以本地 Agent/群组配置和 Tavern 规则共同定义，没有新增角色版本字段或渠道绑定模型。变化在于提示词资产获得受管的模型工具入口，单聊请求也由独立编排器统一读取这些角色字段；历史消息仍不保存角色配置快照。`modules/chat/singleChatRequestOrchestrator.js:260-353`、`modules/services/pluginAgentOperationService.js:323-586`
 
 ## 11. 主要源码依据
 
 - `VCPChat/modules/utils/agentConfigManager.js`：原子读写、锁文件机制、缓存策略、默认配置值。
 - `VCPChat/modules/ipc/agentHandlers.js`：Agent CRUD IPC 处理、头像保存、目录结构初始化、字段定义。
 - `VCPChat/modules/chatManager.js`：systemPrompt 宏替换（`{{AgentName}}`）、Tavern Rules 应用、模型参数传递、streamOutput 解析。
+- `modules/chat/singleChatRequestOrchestrator.js:254-353`：普通单聊的角色字段到最终请求消息的编译入口。
+- `modules/services/pluginAgentOperationService.js:323-586`：PromptSponsor 对角色提示词资产的受管读写。
 
 ## 12. 调查边界
 

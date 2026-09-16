@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理 agent 配置加载、选择、提示词拼装与权限叠加链路；未运行构建与交互
 >
@@ -47,6 +47,7 @@ OpenCode 的 Agent 是「从配置构建的只读内存对象」，本身不落�
 - **配置字段 `tools` 已废弃**：仅布尔表，normalize 时并入 permission（v1/config/agent.ts:62-81）；无 `"*"`、对象 map 或 "read-only" 组语法。
 - **无导入导出功能**；唯一生成路径是 `opencode agent create`（CLI，LLM 生成 markdown，cli/cmd/agent.ts）。
 - **`$ARGUMENTS` 变量只存在于命令模板**，agent 的 markdown 正文原样作为 system prompt（prompt.ts:1372-1395）。
+- **V1 进程可读取一部分 V2 配置**：配置解码前先把 V2 的 `agents`、对象/带 `#variant` 的 model、`request.body`、skills、MCP、compaction 等可表达字段降级为 V1 形状；同名 V1 字段冲突时保留 V1 值并记录诊断。V2 `permissions` 无法无损表示，当前直接拒绝并提示改用 V1 `permission` 或运行 opencode2（`packages/opencode/src/config/config.ts:188-201`、`config/v2-compat.ts:91-117`）。
 
 ## 总体生效链路
 
@@ -121,7 +122,7 @@ system = [
   ...(skills),          // sys.skills(agent)
 ]
 ```
-- `env` 内容见 src/session/system.ts:60-96（含 `<available_references>`）；skills 段 :98-110；mcp 段 :112-128。
+- `env` 内容见 src/session/system.ts:69-105（含 `<available_references>`）；skills 段 :107-119；mcp 段 :121-137。
 - 结构化输出时追加 `STRUCTURED_OUTPUT_SYSTEM_PROMPT`（prompt.ts:1271、82）。
 
 **第二段**（`LLMRequestPrep.prepare`，llm/request.ts:56-66）：
@@ -132,7 +133,7 @@ system = [
   ...(user.system ? [user.system] : []),          // prompt payload 的 system 字段
 ].join("\n")
 ```
-- provider 风格 prompt 按模型 api id 与 Provider 选择对应模板文件（`packages/opencode/src/session/system.ts:27-47`，含 anthropic、gpt、gemini、Kimi、default 等）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:27-31、prompt/meta.txt）。
+- provider 风格 prompt 按模型 api id 与 Provider 选择对应模板文件（`packages/opencode/src/session/system.ts:28-51`，含 anthropic、gpt 家族、gemini、Kimi、trinity、default 等）。GPT 家族再细分：api id 含 `gpt-6` 用 Astra 模板、含 `codex` 用 Codex 模板，其余 gpt 用 GPT 模板，gpt-4/o1/o3 走 Beast 模板（system.ts:33-41）。Meta 系模板覆盖 muse 家族：api id 含 `"muse"` 即返回 `PROMPT_META`，按 `muse-glimmer` 区分两种型号，并替换模板中的 `{{MODEL_NAME}}` 占位（system.ts:29-32、prompt/meta.txt）。
 - 拼装后触发 `experimental.chat.system.transform` 插件钩子（request.ts:69-73）；OpenAI OAuth 场景改走 `options.instructions`（request.ts:99）——真正写入 `providerOptions.instructions` 的是 agent 生成逻辑的 isOpenaiOauth 分支（agent.ts:418-433，注入经 llm.ts:316）。
 
 **指令（AGENTS.md）加载**（src/session/instruction.ts，`systemPaths` :110-153）按来源顺序：
@@ -189,6 +190,7 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）把 agent 的 system 与
   - `prompt` → `system`；`disable` → `disabled`；
   - temperature/top_p 进 `request.body`（:106-125）。
 - **frontmatter 解析**：markdown agent 文件的 YAML frontmatter 用 gray-matter 解析（core/src/config/markdown.ts:4-10）。
+- **V2→V1 读取兼容**：当前 V1 配置加载器会在 schema 解码前执行 `ConfigV2Compat.lower`。Agent 的 `system` 降为 `prompt`，`request.body` 降为 `options`，`disabled` 降为 `disable`，模型对象或 `provider/model#variant` 字符串拆为 V1 的 model/variant；V2 的 request headers、部分顶层字段和无法等价表达的设置仅记录 unsupported 诊断，不伪造语义。配置更新保留源文件中的 V2 字段，只在运行时使用降级结果（`packages/opencode/src/config/v2-compat.ts:207-226、350-405`；`config/config.ts:645-678`）。
 
 ## 8. 配置 UI 与运行时可见性
 
@@ -248,6 +250,7 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）把 agent 的 system 与
 - **默认全开**：build/plan 权限 `*:allow`，靠 ask 审批兜底；explore 等专用 agent 用全 deny + 白名单。
 - **MCP/Skill 按 agent 的过滤全部在运行时**：配置层无 per-agent 挂接字段，权限规则是唯一杠杆。
 - **V1/V2 迁移中**：V2 的 agent.model 不被 runner 读取（静态推断：模型解析只看 session.model），V2 explore 工具集与 V1 有差异，迁移未完成。
+- **兼容层是有损降级**：V1 可消费一组明确映射的 V2 字段，但 unsupported/conflict 诊断只进入日志；尤其 V2 permissions 会阻止加载，不能把兼容读取理解成两套配置完全等价。
 
 ## 11. 未验证事项
 
@@ -262,6 +265,7 @@ V2 运行时（core/src/session/runner/llm.ts:168-214）把 agent 的 system 与
 - `packages/opencode/src/agent/subagent-permissions.ts`：子 agent 权限继承
 - `packages/opencode/src/agent/prompt/`：内置 prompt 模板
 - `packages/opencode/src/config/config.ts`：配置加载与合并（:314-596）
+- `packages/opencode/src/config/v2-compat.ts`：V2 配置到 V1 运行形状的有损降级与诊断（:91-449）
 - `packages/opencode/src/config/agent.ts`：markdown agent 文件加载（:11-59）
 - `packages/opencode/src/session/prompt.ts`：模型解析（:614-689）、system 拼装（:1257-1271）
 - `packages/opencode/src/session/llm/request.ts`：最终 prompt 与参数合并（:56-128）

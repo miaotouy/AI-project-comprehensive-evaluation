@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`App.svelte` 的条件渲染工作台、`ChatScreens/` 系列组件的 Composer 与消息操作、`SideBars/Sidebar.svelte` 与 `SideChatList.svelte` 的会话导航、`process/index.svelte.ts` 的发送/流式/中止链路、`globalApi.svelte.ts` 的会话切换与保存、`hotkey.ts`、`sync/multiuser.ts`、`Mobile/` 组件），并以 grep 核对草稿持久化、消息搜索入口、停止与重试的实际调用链；本次未运行应用
 >

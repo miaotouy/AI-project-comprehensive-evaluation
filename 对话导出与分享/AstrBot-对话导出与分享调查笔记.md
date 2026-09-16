@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：静态阅读 dashboard 对话 API、服务层、OpenAPI 前端调用与全量备份导出实现；未启动 AstrBot、未发起已鉴权请求或导出文件
 >
@@ -39,7 +39,7 @@ Dashboard 选定多个会话（user_id + cid）
 
 导出请求的 schema 只接受 `conversations: list[ConversationRef]`，其中每项必须包含 `user_id` 和 `cid`，没有格式、范围或包含字段参数（`astrbot/dashboard/schemas.py:401-424`）。v1 入口要求 data scope，因此下载是一次受 Dashboard 权限保护的请求，不是匿名公开链接（`astrbot/dashboard/api/conversations.py:113-145`）。
 
-服务按请求数组顺序查询 Conversation Manager。每条成功记录的 `content` 来自将 `conversation.history` 反序列化后的对象，并附带 `cid`、`user_id`、`platform_id`、标题、`persona_id` 与时间字段。该口径保留持久化历史中已有的结构和内容，但服务不解释或筛选其中的 system、reasoning、工具、错误、附件引用或平台专有字段（`conversation_service.py:184-225`）。
+服务按请求数组顺序查询 Conversation Manager。每条成功记录的 `content` 来自将 `conversation.history` 反序列化后的对象，并附带 `cid`、`user_id`、`platform_id`、标题、`persona_id` 与时间字段。WebChat 对话自身无标题时，服务会回查对应 PlatformSession 的 display name 作为导出标题；标题查询失败只丢失该回退，不中止导出（`conversation_service.py:255-280,328-411`）。该口径保留持久化历史中已有的结构和内容，但服务不解释或筛选 system、reasoning、工具、错误、附件引用或平台专有字段。
 
 JSONL 的会话顺序即调用方提供的引用顺序；单一会话内部消息顺序由已保存的 `conversation.history` 决定，导出层不重排。AstrBot 的会话模型在本次范围内呈现为线性 history JSON，未在此导出实现中找到分支树字段或活动分支选择。
 
@@ -82,7 +82,7 @@ JSONL 的会话顺序即调用方提供的引用顺序；单一会话内部消�
 
 - `astrbot/dashboard/schemas.py:401-424`：会话引用与导出请求契约。
 - `astrbot/dashboard/api/conversations.py:63-84,113-145,287-293`：下载响应、新旧导出入口与鉴权。
-- `astrbot/dashboard/services/conversation_service.py:184-243`：持久化会话读取、JSONL 组装与部分失败处理。
+- `astrbot/dashboard/services/conversation_service.py:229-291`：持久化会话读取、WebChat 标题回退、JSONL 组装与部分失败处理。
 - `astrbot/dashboard/api/router.py:37-59`：v1 路由聚合。
 - `dashboard/src/api/v1.ts:1707-1764`：Dashboard API 封装和 Blob 响应。
 - `astrbot/core/backup/exporter.py:39-104`：与会话导出区分的全量备份范围。

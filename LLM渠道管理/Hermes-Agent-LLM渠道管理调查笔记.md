@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：全量源码静态阅读 + git 历史核查；补查 CLI、TUI、Web、Electron Desktop 的渠道管理入口；未运行程序、未发起真实请求
 >
@@ -260,6 +260,7 @@ providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定�
 | L4 | **跨渠道 fallback 链**（不同 provider/provider endpoint） | L1-L3 后仍在失败 / 明确 error | `agent/chat_completion_helpers.py:1923 try_activate_fallback` → `agent/agent_runtime_helpers.py:1459 restore_primary_runtime` 恢复主通道 |
 
 - credential pool 持久化：`write_credential_pool`（`hermes_cli/auth.py:1688`）与 `read_credential_pool`（`:1574`）；条目含 `last_status`/`quota`/`cooldown`，冷却结束后自动恢复，选择逻辑见 `_cooldown_remaining`（`agent/credential_pool.py` 约 `:729`，未逐行确认）。
+- 环境变量可直接为池提供连续编号的凭据。对注册表声明的每个基础变量，种子逻辑依次读取 `VAR_2`、`VAR_3`，直到首个缺口；OpenRouter 与通用 Provider 路径都使用同一候选生成器。秘密仍留在 `.env` 或 secret manager，`auth.json` 只持久化 `env:VAR_N` 引用并在加载时重新水化（`agent/credential_pool.py:2569-2630`）。编号必须连续，例如缺少 `_2` 时不会继续发现 `_3`。
 - 是否重复计费/重复生成：同一请求 429 时 `recover_with_credential_pool` 只换 Key 重发（同一 `api_kwargs`，不重建 messages）；`try_activate_fallback` 则重建 transport 并重新发送同一消息，通常会产生第二次调用费用，重复生成风险出现在 L4 切换之后（`chat_completion_helpers.py:1923-1990` 附近注释说明 switch 后继续同一任务）。是否重复计费取决于 Provider 撤回策略，笔记无法定论——标注为“**存在重复计费可能（推断）**”。
 - `cli.py:4546`/`agent/chat_completion_helpers` 都从 `get_fallback_chain` 读取 `fallback_model`/`fallback_providers`。
 
@@ -303,10 +304,11 @@ providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定�
 1. **声明式 Provider 标识 vs 运行时端到端组装分离**：`ProviderProfile` 只描述，不构建 client（`providers/base.py:7-9`），transport 层负责请求/应答边界；代价是 profile 无法独立决定底层 Client 行为（Gemini 通过覆盖 build_extra_body / native client 绕过）。
 2. **多 Provider ≠ 自动故障转移**：默认只有 1 个 primary；`fallback_providers` 需用户在配置中显式声明链。Provider 支持与 failover 能力两者解耦（指南 §2 提醒得到确认）。
 3. **凭据多路复用是显式策略**：多 Key 同 Provider 用 credential pool（authed_cli 的平行用户故事）；跨 Provider failover 用 fallback 链；模型级回退另用 `fallback_model`。三机制正交。
-4. **前端看不到原始 Key**：redacted 值 + reveal 限控；即使暴露也仅对 .env / OAuth 会话。
-5. **测试链路隔离**：设置页探活不触发完整 transport 集（高可探测、假阳性风险）。
-6. **Repeat 收费的可能**：跨端点 failover 会重建并重发（重复生成与计费风险存在，但具体由上游服务端判定）——推断性结论。
-7. **No channel concept**：未发现 `channel` 作为 LLM Provider 语义的关键词（检索 `hermes_cli/` `agent/` 后只有消息平台 channel）。若行业中其他项目把“一个 baseURL+key 组合”叫渠道，本项目的对应物就是**custom provider 条目 / provider_pool 条目**。
+4. **编号环境变量是最小池配置**：设置基础变量及连续的 `_2`、`_3` 即可参与轮换，无需把秘密复制进配置或 `auth.json`；首个编号缺口终止自动发现。
+5. **前端看不到原始 Key**：redacted 值 + reveal 限控；即使暴露也仅对 .env / OAuth 会话。
+6. **测试链路隔离**：设置页探活不触发完整 transport 集（高可探测、假阳性风险）。
+7. **Repeat 收费的可能**：跨端点 failover 会重建并重发（重复生成与计费风险存在，但具体由上游服务端判定）——推断性结论。
+8. **No channel concept**：未发现 `channel` 作为 LLM Provider 语义的关键词（检索 `hermes_cli/` `agent/` 后只有消息平台 channel）。若行业中其他项目把“一个 baseURL+key 组合”叫渠道，本项目的对应物就是**custom provider 条目 / provider_pool 条目**。
 
 ---
 
@@ -340,6 +342,7 @@ Provider 注册新增 pip entry-point 来源，但仍受插件启用配置约束
 | 运行时 `/model` 切换 | `hermes_cli/model_switch.py`（secret scope key 读取、歧义别名候选、`_model_sort_key` 日期拆分） |
 | fallback 链读取 | `hermes_cli/fallback_config.py:80 get_fallback_chain` / `cli.py:4546` |
 | credential pool 轮换 | `agent/agent_runtime_helpers.py:926 recover_with_credential_pool`、`:1025 _rotate_failed_credential`、`credential_pool.py:1769 select/`:2031 mark_exhausted_and_rotate` |
+| 编号环境变量种子 | `agent/credential_pool.py:2569-2630` `_env_key_var_candidates` / `_seed_from_env` |
 | credential 持久化 | `hermes_cli/auth.py:1574/1688 read/write_credential_pool`、`_save_auth_store` `:1322` |
 | .env 读写/镜像清理 | `hermes_cli/credential_lifecycle.py:213/:245`、`hermes_cli/config.py:3703 load_env / :3924 save_env_value` |
 | 桌面/Web 设置页测试端点 | `hermes_cli/web_server.py:7522 custom-endpoints POST`、`:7575 DELETE`、`:7541 activate`、`:7600 validate custom`、`:7628 validate`、`:7721 reveal` |

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：直接阅读源码，沿 Control UI、TUI、共享 Apple Chat UI、iOS 容器和 Android 原生 Chat UI 的入口、事件处理、会话操作及恢复路径进行静态调查；未运行目标界面和真实 Gateway 流程
 >
@@ -187,6 +187,8 @@ Apple outbox 的可见状态为 queued、sending、confirming、failed。ACK 只
 Android 的 `ChatCommandOutbox` 使用 Queued、Sending、Accepted、Failed；Accepted 的注释明确说明 started ACK 早于 transcript write，因此只有 history confirmation 才能退休。连接变化、delivery unconfirmed、owner changed、branch changed 和过期都会保留为用户可见的错误状态（`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatCommandOutbox.kt:14-36`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatCommandOutbox.kt:60-79`）。断线时 `ChatController.onDisconnected` 清理临时连接状态，但保留 optimistic message 和 pending run 归属，随后重新发布当前 Gateway 的 outbox（`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt:690-730`）。
 
 ## 6. 消息操作、分支与版本导航
+
+Control UI 的会话头部还提供会话协作与公开分享入口。所有者可以在允许的可见性集合中切换 shared、read-only、suggest 和 draft，增删成员，并显式确认后发布世界可读链接；撤销发布与团队可见性相互独立。界面在确认后再次核对连接、当前 session generation 与方法权限，避免路由切换期间把替代会话发布出去；公开 token 由 Gateway 返回，再按 Control UI 基址组装链接。实现见 `ui/src/pages/chat/chat-pane-sharing-actions.ts:167-380`、`src/gateway/session-sharing-policy.ts:74-89,160-211,343-374`。
 
 ### Control UI
 

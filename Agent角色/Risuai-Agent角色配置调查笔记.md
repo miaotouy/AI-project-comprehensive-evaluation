@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读核对角色与数据库类型定义、导入导出实现、发送链与提示词装配、lorebook 运行时、请求参数解析和角色配置界面；未修改被调查仓库源码，未运行应用
 >
@@ -170,7 +170,9 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 
 ## 8. 配置界面、输出契约与可见字段
 
-角色配置界面 `CharConfig.svelte`（`src/lib/SideBars/CharConfig.svelte`）按子菜单分组：基本信息、资产与表情、高级设置（bias、示例对话、作者说明、主提示词覆盖、备注覆盖、附加文本、人格与场景、默认变量、深度提示词、备选开场白、`lowLevelAccess`、`utilityBot` 等，`1057-1288`）、lorebook 编辑器、脚本（正则、trigger、背景 HTML）、TTS 与图像生成配置。
+角色配置界面 `CharConfig.svelte`（`src/lib/SideBars/CharConfig.svelte`）按子菜单分组：基本信息、资产与表情、高级设置（bias、示例对话、作者说明、主提示词覆盖、备注覆盖、附加文本、人格与场景、默认变量、深度提示词、备选开场白、`lowLevelAccess`、`utilityBot` 等，`1054-1285`）、lorebook 编辑器、脚本（正则、trigger、背景 HTML）、TTS 与图像生成配置。
+
+资产与表情组中，资产风格选择器（`prebuiltAssetStyle`，static/dynamic）只受 `newImageHandlingBeta` 门控，与 `prebuiltAssetCommand` 开关相互独立（`CharConfig.svelte:581-592`）。
 
 界面字段与运行时消费基本对应：主提示词覆盖、备注覆盖、附加文本、深度提示词、默认变量与翻译备注（`translatorNote` 的消费点在 `translator.ts:523-536`）都已确认有消费链；`personality` 与 `scenario` 在 UI 中默认隐藏（长文本或打开高级开关时显示），但运行时总是拼接进描述槽。
 
@@ -196,7 +198,7 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 - 群聊场景中 `bindedPersona`、`{{char}}` 解析与 `groupOrder` 权重算法的实际行为未验证。
 - 温度等全局参数经各 Provider 适配层进入请求体的最终映射只确认了共享层（`request.ts:458`、`shared.ts:286`），各适配器内部细节未全部核对。
 - MCP 工具在请求中的 schema 注入、执行与结果回注归 Agent 工具类目，本篇未覆盖。
-- coldstorage 的自动触发阈值与恢复流程只确认了入口（`coldstorage.svelte.ts:529/576`），未追踪完整状态机。
+- coldstorage 的自动触发阈值与恢复流程只确认了入口（`coldstorage.svelte.ts:575/627`），未追踪完整状态机。
 - 聊天级 `chat.note` 与角色 `postHistoryInstructions` 的迁移合并（`characters.ts:586-590`）在真实旧数据上的表现未验证。
 
 ## 11. 关键源码索引
@@ -217,5 +219,5 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 - `src/ts/process/lorebook.svelte.ts:75-666`：lorebook 运行时求值与分发
 - `src/ts/process/request/request.ts:435-519`：模型与参数解析（requestChatDataMain）
 - `src/ts/storage/risuSave.ts:124-263` 与 `src/ts/globalApi.svelte.ts:315-479`：持久化与自动保存
-- `src/lib/SideBars/CharConfig.svelte:1057-1288`：角色高级配置界面
+- `src/lib/SideBars/CharConfig.svelte:1054-1285`：角色高级配置界面（资产风格选择器 581-592）
 - `src/lib/ChatScreens/DefaultChatScreen.svelte:218-301` 与 `837-872`：reroll 与开场白分页

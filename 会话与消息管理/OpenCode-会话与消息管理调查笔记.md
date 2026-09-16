@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（TypeScript 服务端会话存储与事件、TUI/Web 客户端投影），核对快照 HEAD 全部符号与行号
 >

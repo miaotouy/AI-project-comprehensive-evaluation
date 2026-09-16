@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/renderer/routes/index.tsx`、`src/renderer/routes/session/$sessionId.tsx`、`src/renderer/components/session/*`、`src/renderer/stores/session/*`、`src/renderer/stores/chatStore.ts`、`src/renderer/stores/uiStore.ts`、`src/renderer/storage/SessionMetaStorage.ts`、`src/shared/session/message-forks.ts`、`src/shared/types.ts` 等），未凭空推断；不确定处标注"未核实"。
 >
@@ -16,7 +16,7 @@
 
 Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模型聊天系统，Electron 桌面 + Web 双端。核心特征：会话列表只认识 `SessionMetaRecord` 元信息，不知道 thread/fork/summary 的存在；首页是 id 固定为 `'new'` 的假会话，Session 直到发出第一条消息才创建；流式生成把 UI 立即刷新与落盘持久化拆成两条频率不同的路径——UI 缓存逐 token 更新，落盘按 2 秒节流。
 
-Agent 模式、知识库、网页浏览在架构上是同一个工具注册管线里的三个开关，共用同一套工具装配而非各自拼接 prompt。thread（同会话历史区间）、fork（消息位置平行分支）、summary（消息级压缩标记）、starred（侧栏分组）是四套互不隶属的数据结构，唯一交叉点是 move thread to conversations——把 thread 转成新顶层会话。
+Chatbox 现在明确区分 Chat Mode 与 Work Mode：前者保留 thread/fork 的结构自由，后者采用追加式单线工作流并开放消息队列、steering、Soul/Memory 与宿主工具。知识库和网页浏览仍通过同一工具注册管线注入；持久记忆也可在 Chat Mode 使用。thread、fork、summary 与 starred 仍是相互独立的数据结构。
 
 ## 产品表面与系统边界
 
@@ -70,11 +70,12 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 4. **压缩**：自动压缩在消息上打 `isSummary` 标记，由 `SummaryMessage` 专用组件渲染，提供"删除摘要、恢复原文参与上下文计算"的操作；压缩以 `CompactionPoint`（boundary+summary 消息对）落盘，在 fork 分支切换与复制会话时做完整性重映射（`shared/context/compaction-points.ts`）。
 5. **排序与归档边界**：拖拽排序仅在同一置顶分组内生效（`areSessionsInSamePinGroup` 只看 `starred`）；恢复归档会话不重置 `sortOrder`，会回到归档前位置；归档只置 `hidden`+`archivedAt`，不删除数据。
 6. **并发落盘**：每会话一个 `UpdateQueue` 串行合并写入避免并发覆盖；批量归档刻意逐个走 `updateSession` 不做性能优化（代码注释明确承认）；`MAX_TOOL_CALLS_BEFORE_CONFIRMATION = 25` 表明 chat 与 agent 在实现上无清晰边界（该确认点可按会话或全局关闭，`pauseOnToolCallLimit`）。
+7. **Work Mode 队列与 steering**：生成中输入最多排队 20 条并跨刷新保留；队列默认等当前回复结束，用户显式请求时，纯文本条目可先持久化为 `steered` 用户消息并进入当前生成后续 step。Chat Mode 不接受新队列项。详见对话请求与上下文、会话与消息管理及 Chat UI 笔记。
+8. **Soul 与 Memories**：Work Mode 的人格、Copilot overlay、长期记忆和工作区指令按会话冻结；记忆工具可写入全局或 Copilot 独立 scope，但默认只影响未来会话。详见 Agent 角色与 Agent 工具笔记。
 
 ## 未验证事项
 
-- `context-management` 包的摘要触发阈值细节未完全展开（已核实 `compaction-boundary`/`compaction-commit`/`compaction-points` 主结构，见会话与消息管理笔记 1.4）。
-- `localStorage.removeItem('new-chat')`（`routes/index.tsx:336`）未找到对应写入点，用途不明。
+- 自定义压缩提示词、按发送上下文窗口压缩至最新消息和 prompt cache 删除确认的实际长会话体验未运行验证。
 - provider 侧 token 截断策略与最终 HTTP JSON payload 字段未逐一核实。
 - IndexedDB meta store 注释提到的"捕获 VersionError 后重试"兜底未见实现。
 - UI 行为结论（视觉、键盘可用性、性能、平台行为）来自静态代码，未经运行验证。

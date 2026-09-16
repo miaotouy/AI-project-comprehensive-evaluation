@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -21,6 +21,8 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 主题由主进程设置和 Electron nativeTheme 共同持有，渲染层通过带 revision 的 IPC 快照同步。用户配置集中在明暗、字号和正文或代码字体；主色阶、圆角和密度没有用户入口，也没有主题市场、壁纸、导入导出或自定义 CSS。多窗口主题与通知链路已静态确认，视觉时序仍未运行验证。
 
 选择组原语位于 `src/dc-ui/components/choice-group/`，Provider 设置页采用分阶段编辑凭据；它们继续使用既有 renderer 到主进程的配置边界，未构成新的全局状态所有者。
+
+应用级无障碍支持现在参与聊天渲染策略：renderer 读取 Electron accessibility support 状态；启用时 ChatPage 关闭消息窗口化，并为消息区、搜索、Mentions、附件和交互面板补齐 region、listbox、live status 与可访问名称。静态代码能确认接线，不能替代真实屏幕阅读器验证。
 
 ## 系统边界与总体装配
 
@@ -288,6 +290,8 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
   MessageBlockError/ActivityGroup 折叠真实 `aria-expanded/aria-controls`；设置路由切换 aria-busy；Spotlight 结果行 data-spotlight-active 但无 aria-activedescendant 语义（自实现键盘导航，读屏联动未验证）。
 - 未核实/未见：Reka 组件（Dialog/Tooltip/DropdownMenu）内部焦点管理未下钻；useLegacyActions 默认路径下消息右键菜单不可达（键盘等效路径缺失是静态可见的，但影响未验证）；应用级 focus trap 策略未发现；prefers-reduced-motion 全局兜底存在（`style.css:930-943`：transition/animation 压到 1ms），业务组件局部覆盖未逐一核对。
 - 结论边界：以上均为静态代码观察，不构成 WCAG 合规判断。
+- `useAccessibilitySupport` 从桌面桥读取并订阅 accessibility support 状态，默认启用；ChatPage 将其传给列表窗口化开关，因此辅助技术模式下不再卸载视口外消息。入口见 `src/renderer/src/composables/useAccessibilitySupport.ts`、`src/renderer/src/features/chat-page/ChatPage.vue:428,955`。
+- Composer 的 Mention 建议采用 listbox/option、`aria-activedescendant` 与状态播报；消息活动组、工具卡、压缩分隔行和工作区计划面板使用成对的 `aria-expanded/aria-controls`。这些是关键路径语义补充，仍未覆盖全应用无障碍审计。
 
 ### 7.3 动画与过渡
 
@@ -324,6 +328,7 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 - 通知仲裁的抢占/队列/聚合在实际运行中的表现（堆叠像素、展示预算计时、progress 与 actionable 交替）未运行验证。
 - 窗口最小尺寸未设主窗口的实际拖拽表现、RTL 布局下的排版未运行验证。
 - font-list 系统字体检测在 win/mac/linux 的实际结果（字体名清洗、去重、缓存失效时机）与检测失败时的内置 fallback 列表表现未运行验证；主进程 normalizeStoredFont 白名单的边界行为（如空串、超长、非法字符）未实测。
+- 未用 NVDA、JAWS、VoiceOver 等实际运行验证 accessibility support 模式下的消息阅读顺序、焦点移动和 live region 播报。
 - 未运行构建与测试；本次所有结论为静态源码核对，依赖库内部一律标为未核实。
 
 ## 10. 关键源码索引
@@ -336,3 +341,4 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 - 响应式：`src/renderer/src/stores/ui/sidepanel.ts`、`src/renderer/src/stores/ui/sidebar.ts`、`src/renderer/src/components/sidepanel/ChatSidePanel.vue:212-235`
 - 内容交互：`src/renderer/src/components/message/MessageBlockImage.vue`、`src/renderer/src/composables/useImageActions.ts`、`src/renderer/src/components/chat/composables/useChatInputFiles.ts`、`src/renderer/src/components/chat/ChatInputBox.vue:9-11`
 - 加载与空态：`src/renderer/src/features/chat-page/ChatPage.vue:53-122`、`src/renderer/src/components/chat/ChatSessionSkeleton.vue`、`src/dc-ui/components/empty/DcEmpty.vue`、`src/dc-ui/components/skeleton/DcSkeleton.vue`
+- 非视觉模式：`src/renderer/src/composables/useAccessibilitySupport.ts`、`src/renderer/src/features/chat-page/ChatPage.vue:428,955`

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
 >
@@ -20,7 +20,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 2. **中央资产管理器（asset-manager）**：应用数据目录下的资产文件、SHA-256 去重、Rust 索引和来源追踪，构成跨工具的资产事实源（主链确认）。
 3. **LLM 请求检查器（llm-inspector）**：Rust 外部代理与前端内部钩子组成双层监控，可透视应用内所有 LLM 调用（主链确认）。
 4. **快捷动作系统（Quick Actions）**：宏模板、行级后处理、自动发送和 SillyTavern Quick Reply 导入（主链确认）。
-5. **宏系统**：实际注册 74 个内建宏（README 宣称 60+），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
+5. **宏系统**：实际注册 74 个内建宏（README 同期也已标示 74 个），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
 6. **自由窗口管理**：组件级分离窗口 + logicHook 响应式同步 + 位置记忆/可见性自愈（`主链确认`）。
 7. **Agent 私有资产**：`agent-asset://` 协议、`{{assets}}` 宏和渲染器解析链（主链确认）。
 8. **Skill 沙箱**：Rust 路径锁定、超时和多运行时探测，支持渐进式披露（主链确认，执行细节已由 Agent 工具笔记承接）。
@@ -31,7 +31,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 13. **全局 Token 基础设施（token-calculator）**：Tokenizer 资产注册表 + 多模态计费，被 llm-chat 九处以上消费，聊天 token 预算的底层支撑（`主链确认`，按机制贡献标注）。
 14. **网页蒸馏室（web-distillery）**：三层蒸馏 + Rust 反检测代理 + API 嗅探 + 站点配方 + Cookie 身份（`主链确认`）。
 15. **窗口自动化流程语言（window-automator）**：子流程函数调用 + 变量作用域 + 条件跳转 + OCR 联动，接近小型 RPA 语言（`主链确认`）。
-16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏 + aHash 去重 + 编辑距离字幕合并 + 一键注入全局 Chat（`主链确认`）。
+16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏与本地视频抽帧 + aHash 去重 + 编辑距离字幕合并 + 编辑式工作台 + 一键注入全局 Chat（`主链确认`）。
 17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
 18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
 
@@ -43,12 +43,12 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ## 介绍声明与候选盘点
 
-根 README（299 行）将产品定位为"一站式 AI 创作与开发工作站 + 专业级上下文工程引擎"，功能面非常宽。`docs/architecture/tools-architecture-overview.md`（2026-06-30 生成，39 个模块）与当前 `src/tools/` 实际 47 个 registry 文件（原 46 个基础上新增 `retrieval` 工具注册）基本一致，是本轮候选盘点的可靠索引。47 个工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas` 等；其余工具构成"工具枢纽"产品面。
+根 README（约 350 行）将产品定位为"本地优先的 AI 能力枢纽｜人类工作台与 Agent 运行时"，功能面非常宽。`docs/architecture/tools-architecture-overview.md`（2026-06-30 生成，39 个模块）与当前 `src/tools/` 实际 47 个 registry 文件（原 46 个基础上新增 `retrieval` 工具注册）基本一致，是本轮候选盘点的可靠索引。47 个工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas` 等；其余工具构成"工具枢纽"产品面。
 
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|
 | 上下文分析器 | `归并已有类目` | 对话请求与上下文笔记 9.8 已确认：以所选节点为终点重跑真实上下文管道预览 |
-| 60+ 宏与正则管道 | `主链确认` | 内建宏 74 个（macro-engine/macros/*.ts）；regex-processor 为管道处理器（priority 200），Global/Agent/User 三层合并 |
+| 内建宏与正则管道 | `主链确认` | 内建宏 74 个（macro-engine/macros/*.ts）；regex-processor 为管道处理器（priority 200），Global/Agent/User 三层合并 |
 | 快捷动作 | `主链确认` | messageInputStore.handleQuickAction 完整执行链 + quick-actions 目录持久化 |
 | Agent 私有资产 | `主链确认` | `agent-asset://` 协议 + AgentAssetsManager + `{{assets}}` 宏 + 渲染器 resolveAsset |
 | 自由窗口 | `主链确认` | useDetachable/useDetachedManager + DetachedComponentContainer + logicHook 同步 |
@@ -67,7 +67,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | Token 计算器（token-calculator） | `主链确认` | Tokenizer 资产注册表 + 多模态计费；llm-chat 9+ 处消费，机制贡献 |
 | 网页蒸馏室（web-distillery） | `主链确认` | Rust 代理剥安全头 + 反检测注入 + API 嗅探 + 配方动作序列 + Cookie 身份 |
 | 窗口自动化（window-automator） | `主链确认` | call 子流程/变量/条件跳转/OCR 联动，迷你自动化语言 |
-| 实时字幕 OCR | `主链确认` | GDI 截屏 + aHash 去重 + 编辑距离合并 + 一键注入 Chat |
+| 实时字幕 OCR | `主链确认` | GDI 截屏/本地视频抽帧 + aHash 去重 + 编辑距离合并 + 剪辑式工作台 + 一键注入 Chat |
 | 长文本翻译（translator） | `主链确认` | 递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符 |
 | 弹幕播放器（danmaku-player） | `主链确认` | 内置弹幕/字幕播放 + Win32 外部播放器透明覆盖层（虚拟时钟/鼠标穿透/Z-Order 跟随） |
 | 内容查重器（content-deduplicator） | `主链确认`（辅助） | Rust 五阶段漏斗 + 规范化匹配；fuzzy 未实现，非语义去重 |
@@ -159,7 +159,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
-**独特性判断**：README 宣称 60+，实测为 74 个；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
+**独特性判断**：内建宏 74 个（README 亦按此数标注）；三阶段管道 + 变量系统的组合在样本中接近 SillyTavern/VCP 的宏面，但以 Vue 应用内建实现。与对话请求与上下文笔记的重叠点是宏在上下文管道中的注入位置，本笔记只记宏引擎本身。
 
 **证据强度**：逐文件统计注册定义（74 个）+ 管道代码为静态事实；未运行宏展开验证。
 
@@ -205,7 +205,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：AIO Hub 作为 VCP（外部开源 AI 运行时）的桌面端观测与控制面——实时看 RAG 检索细节、元思考链、Agent 私聊预览、插件步骤状态，并把本机工具暴露给 VCP 云端 Agent。
 
-**入口**：工具页 `/vcp-connector`（`VcpConnector.vue`，连接/监控/分布式三 Tab）。消息监控走两个 WebSocket 端点（`/vcpinfo/VCP_Key=<key>`、`/VCPlog/VCP_Key=<key>`），六类广播事件（RAG_RETRIEVAL_DETAILS / META_THINKING_CHAIN / AGENT_PRIVATE_CHAT_PREVIEW / AI_MEMO_RETRIEVAL / PLUGIN_STEP_STATUS / vcp_log）以虚拟滚动消息列表 + 分类卡片展示；历史消息持久化 `messages.json`。
+**入口**：工具页 `/vcp-connector`（`VcpConnector.vue`，连接/监控/分布式三 Tab）。消息监控走两个 WebSocket 端点（`/vcpinfo/VCP_Key=<key>`、`/VCPlog/VCP_Key=<key>`），六类广播事件（RAG_RETRIEVAL_DETAILS / META_THINKING_CHAIN / AGENT_PRIVATE_CHAT_PREVIEW / AI_MEMO_RETRIEVAL / PLUGIN_STEP_STATUS / vcp_log）以虚拟滚动消息列表 + 分类卡片展示；历史消息持久化 `messages.json`。消息通知可分类配置：总开关默认关闭以避免高频 WebSocket 打扰，全局可选关闭/仅浮动/通知中心/同时四种模式，并允许对六类消息分别覆盖（`types/protocol.ts` 的 `VcpNotificationMode`、`components/NotificationSettingsPage.vue`）。
 
 **状态**：`config.json`（WS 地址/VCP Key）、`distributed-config.json`（节点名/暴露列表/自动注册开关）。分布式节点（AIO 作为节点被远端 `execute_tool` 调用，含 `internal_request_file` 强制内置）与工具桥（`VcpToolProxy` 把远端插件包装成本地 ToolRegistry）的执行细节已由 Agent 工具笔记第 7/9 节确认，本笔记不再重复。
 
@@ -254,6 +254,8 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 **事实对象**：`RepositoriesConfig`（多仓库列表）、`RepoStatus`（staged/unstaged/ahead 等）、DiffTab（original/modified）、提交草稿。
 
 **完整主链**：`refreshStatus`（Rust `git_get_repo_status`）→ `stageFiles` 乐观更新（先移前端状态，失败回滚，成功再刷真实状态）→ `loadFileDiff`（`git_get_file_diff`，二进制降级 Tab）→ AI 生成：`buildDiffPrompt` 组装暂存文件 diff 文本（二进制占位"无文本差异"）→ `generateCommitMessage`（`useGitCommitterRunner.ts:385`）：`parseModelCombo` 取 LLM Profile → `useLlmRequest.sendRequest` 流式生成（systemPrompt 可自定义，`inspectorContext: { toolName: "git-committer", purpose: "generate-commit-message" }` 接入 llm-inspector）→ 用户确认后 `executeCommit`（可 pushAfter）→ 全景模式 `stageAllRepos`/`unstageAllRepos`/`pushAllRepos` 批量操作；切换仓库可选自动 pull。
+
+**仓库级 AI 配置与并发隔离。** 提交信息生成的系统提示词可下放到仓库：仓库配置新增 systemPrompt 字段，解析时“仓库专属优先、留空继承全局”，由仓库提示词弹窗与主区编辑标签页承载；另有提交语言设置与结构化 Prompt 模板（系统规则、仓库上下文、diff 与最终任务拆成多条消息）。生成过程持有 AbortController 可中止；拉取/推送/生成/提交等工作流状态和草稿按仓库隔离，切换仓库不串台（`composables/useGitCommitterState.ts`、`composables/useGitCommitterRunner.ts`）。差异审查扩展为“更改总览”标签页，可按文件展开暂存区/工作区全部差异并一键放弃更改（已跟踪文件还原、未跟踪文件移入回收站），另有提交详情卡片、提交 diff 视图与差异导航；仓库栏支持自定义图标颜色与配色色盘。
 
 **持续性**：仓库列表与应用配置持久化；无任务历史（提交本身在 git 内）。
 
@@ -319,6 +321,8 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **完整主链**：屏幕监控定时调用 `capture_screen_rect`，由 Rust Windows GDI 抓取绝对坐标区域像素并计算 aHash；前端比较汉明距离，按高、中、低三档使用 2、4、8 的阈值，无变化则顺延当前字幕结束时间且不传 PNG，有变化才编码图像。随后复用 smart-ocr 平台识别，编辑距离相似度达到 90% 时更新原字幕，否则新建条目；文本可在编辑面板中提交，一键发送到全局 Chat 或导出 `.srt`。
 
+本地视频离线模式覆盖另一条链路：Rust `extract_video_frames` 用 FFmpeg 按间隔抽帧并上报进度，前端 `useVideoSubtitleOcr` 管理抽帧、OCR 队列与取消；界面为剪辑式工作台（监视器支持滚轮缩放、拖拽平移与八向 ROI 手柄，Konva 横向时间轴支持字幕块平移、修剪、拆分、合并、删除）。屏幕与视频两模式各自持有独立字幕 store 并用 KeepAlive 常驻，切换模式不中断另一条流水线；截图处理新增可调图像滤镜（预设加高级参数），支持按 ROI 截图、原图与滤镜结果对照和单帧试识别。
+
 **持续性**：监控配置 ConfigManager 防抖持久化；字幕时间轴在会话内（清空按钮），不落盘。
 
 **独特性判断**：普通 OCR 工具是单张/批量识别；这里是"持续监控 + 帧去重 + 字幕语义合并 + 跨窗口注入聊天"的实时链路，MonitorBox 还复用自由窗口基础设施（透明/无边框/置顶悬浮窗）。与 danmaku-player 无联动（探索确认）。
@@ -333,7 +337,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`LongTextTask`（chunks 状态机 idle/waiting/completed/error + progress）、`TranslationChannel`（profile+model+prompt）、渠道预设。
 
-**完整主链**：`useLongTextTranslator` → `recursiveSplitText` 递归分片 → `ConcurrencyLimiter` 限流并发翻译（`maxConcurrentChunks`）→ `buildLongTextPrompt`：有上一分片时注入 `<source_context>`/`<translation_context>`（仅上一分片，不重复翻译上文参考）→ `translateChunkWithRetry` 重试（429/timeout/503 等模式，最多 3 次）→ 流式 chunk 追加更新进度 → `joinTranslatedChunks` 合并；token 精确估算接入 token-calculator（`useTranslatorStore.ts:97-110`，防抖 500ms），超限风险事前预警。
+**完整主链**：`useLongTextTranslator` → `recursiveSplitText` 递归分片 → `ConcurrencyLimiter` 限流并发翻译（`maxConcurrentChunks`）→ `buildLongTextPrompt`：有上一分片时注入 `<source_context>`/`<translation_context>`（仅上一分片，不重复翻译上文参考）→ `translateChunkWithRetry` 重试（429/timeout/503 等模式，最多 3 次）→ 流式 chunk 追加更新进度 → `joinTranslatedChunks` 合并；token 精确估算接入 token-calculator（`useTranslatorStore.ts:97-110`，防抖 500ms），超限风险事前预警。生成侧还支持展示并干预模型思考：结果卡片顶部提供可折叠的“思考过程”块（`reasoningContent`），`thinkingMode`（default/disabled/minimal）按模型能力下发思考参数，`core/thinking.ts` 的 `resolveThinkingParams` 覆盖 switch/budget/effort 三类模型配置。
 
 **持续性**：渠道预设持久化；任务状态在内存。
 
@@ -453,15 +457,15 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - `src/composables/useDetachable.ts`、`useDetachedManager.ts`、`src/views/DetachedWindowContainer.vue`、`docs/guide/detached-window-system.md`
 - `src/tools/agent-manager/utils/agentAssetUtils.ts`、`components/assets/AgentAssetsManager.vue`、`src/tools/llm-chat/macro-engine/macros/assets.ts`
 - `src/tools/skill-manager/ARCHITECTURE.md`、`services/SkillManagerProxy.ts`、`src-tauri/src/commands/skill_manager.rs`
-- `src/tools/vcp-connector/ARCHITECTURE.md`、`stores/vcpConnectorStore.ts`
+- `src/tools/vcp-connector/ARCHITECTURE.md`、`stores/vcpConnectorStore.ts`、`types/protocol.ts`（VcpNotificationMode）、`components/NotificationSettingsPage.vue`
 - `src/tools/recall/ARCHITECTURE.md`、`logic/placeholderRetrieval.ts:36`（占位符即时召回）、`services/api.ts`（searchWithCache/resolvePlaceholderRetrieval）、`recall.registry.ts`（recall-basic/recall-admin 双实例）、`src-tauri/src/recall/`（retrieval_pipeline.rs/retrieval_modules.rs 检索管线，替换旧四引擎 search/）、`src-tauri/src/recall/storage/sqlite.rs`（SqliteRecallRepository）
 - `src/tools/regex-applier/core/presets.ts`、`stores/store.ts`（预设 CRUD/导入去重）、`core/engine.ts:209,279`（processText/processFiles 多预设循环）、`RegexApplier.vue`（selectedPresetIds/拖拽排序/一键处理）、`regex-applier.registry.ts:268`（Agent 面 TODO）
-- `src/tools/git-committer/composables/useGitCommitterRunner.ts:385`（generateCommitMessage 流式链）、`src/tools/git-analyzer/`（git2-rs + getFormattedAnalysis）
+- `src/tools/git-committer/composables/useGitCommitterRunner.ts:385`（generateCommitMessage 流式链）、`composables/useGitCommitterState.ts`（resolveSystemPrompt/按仓库隔离）、`components/{RepositoryPromptDialog,RepoPromptEditor,ChangesDiffView,CommitDetailPopover}.vue`、`src/tools/git-analyzer/`（git2-rs + getFormattedAnalysis）
 - `src/tools/token-calculator/token-calculator.registry.ts:341`（tokenCalculatorService）、`stores/tokenizerRegistryStore.ts:475`（无 UI 也启动）、`core/tokenCalculatorEngine.ts`（多模态计费）
 - `src/tools/web-distillery/ARCHITECTURE.md`、`core/recipe-store.ts`、`core/action-runner.ts`、`src-tauri/src/web_distillery/proxy.rs`（剥头/注入）
 - `src/tools/window-automator/types.ts`（步骤类型/子流程跳转限制）、`composables/useFlowExecutor.ts`（MAX_CALL_DEPTH）、`composables/stepExecutors.ts:416`（OCR 复用 smart-ocr）
-- `src/tools/realtime-subtitle-ocr/ARCHITECTURE.md`、`composables/useScreenMonitor.ts`（aHash/编辑距离/发送到 Chat）、`src-tauri/src/commands/window_automator.rs`（capture_screen_rect）
-- `src/tools/translator/composables/useLongTextTranslator.ts`（分片/限流/上下文继承）、`core/textSplitter.ts`
+- `src/tools/realtime-subtitle-ocr/ARCHITECTURE.md`、`composables/useScreenMonitor.ts`（aHash/编辑距离/发送到 Chat）、`composables/useVideoSubtitleOcr.ts`（本地视频抽帧与 OCR 队列）、`components/video/VideoWorkbench.vue`（剪辑式工作台/Konva 时间轴）、`src-tauri/src/commands/window_automator.rs`（capture_screen_rect）、`src-tauri/src/commands/ffmpeg_processor.rs`（extract_video_frames）
+- `src/tools/translator/composables/useLongTextTranslator.ts`（分片/限流/上下文继承）、`core/textSplitter.ts`、`core/thinking.ts`（resolveThinkingParams）
 - `src-tauri/src/commands/content_deduplicator.rs`（五阶段漏斗/规范化选项）、`src/tools/smart-ocr/platform/runner.ts`（useOcrRunner 共享层）
 - `src/tools/danmaku-player/ARCHITECTURE.md`、`composables/useVirtualClock.ts`（虚拟时钟 + 500ms 校准阈值）、`composables/useDanmakuOverlay.ts`（位置同步/裁切/Z-Order/HWND 失效自愈）、`composables/useExternalPlayer.ts`（窗口扫描/1s 状态轮询）、`core/danmakuEngine.ts`（二分查找/稳定哈希密度过滤）、`components/JassubRenderer.vue:163`（降级链）、`src-tauri/src/commands/external_player.rs`（Win32 覆盖窗口/五播放器状态读取）
 - `src/tools/ffmpeg-tools/composables/useFFmpegIntegration.ts:44`（sendToChat 回流）、`llmChatService.addAttachmentsFromPaths`

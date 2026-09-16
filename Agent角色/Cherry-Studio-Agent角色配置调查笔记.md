@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读核对 Assistant 类型定义、数据库 Schema、AssistantSettings、默认预设、系统提示词装配逻辑和 AgentSession 入口；未修改被调查仓库源码
 >
@@ -208,7 +208,9 @@ Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段�
 
 ## 8. 当前角色能力边界
 
-Agent 的运行时选项现覆盖 Claude Code、Pi 与 DSH。创建与编辑界面依据模型兼容性为每种运行时筛选可选模型，并在缺失模型上下文窗口时以 256K 作为运行时默认值；这属于 Agent 执行配置，不改变 Assistant 普通聊天的渠道实体。Prompt 也可按 Assistant 或 Agent 目标建立可见性绑定，配置对象仍由资源目录和数据服务持久化，而非在单次聊天中临时拼接。
+Agent 的运行时选项覆盖 Claude Code、Pi 与 DSH。创建与编辑界面依据模型兼容性筛选可选模型；`reasoning_effort` 已成为 Agent configuration 的持久字段，并进入运行时连接或 reconcile 判断，使同一 Agent 可按会话目标选择推理强度。清空 plan/small model tier 时服务层会持久化清除值，不再被旧配置回填。依据：`src/shared/data/api/schemas/agents.ts:54`、`src/main/ai/runtime/{claudeCode/ClaudeCodeRuntimeDriver,pi/PiRuntimeConnection,dsh/DshRuntimeConnection}.ts`。
+
+Prompt 可按 Assistant 或 Agent 目标建立可见性绑定，配置对象仍由资源目录和数据服务持久化，而非在单次聊天中临时拼接。
 
 Global Memory 的范围说明与概览文档明确了记忆的归属边界，但本次未运行验证跨会话召回的实际效果。依据：`src/shared/ai/agentRuntimeCapabilities.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/ai/dshModelCompatibility.ts`、`src/renderer/pages/settings/PromptSettings.tsx`、`src/main/data/services/PromptService.ts`、`docs/references/memory/overview.md`。
 

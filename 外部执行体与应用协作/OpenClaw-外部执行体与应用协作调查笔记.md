@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码走读；未运行真实 Gateway、多设备、ACP harness、OAuth、渠道、APNS 或外部进程
 >
@@ -20,7 +20,7 @@ OpenClaw 的 Gateway 是中心状态与控制平面。CLI、TUI、浏览器 Cont
 
 节点调用也形成主链：Gateway 向已配对的 iOS/Android 等节点发送 `node.invoke.request`，节点回传 progress/result，超时、取消、空闲超时或连接断开时走结构化失败或 cancel。Control UI、TUI 和 companion app 的真实运行行为、具体渠道适配矩阵、APNS 唤醒和真实外部进程终止本次均为**未验证**。
 
-媒体相关入口存在，但静态调查未找到独立媒体任务、资产库、创作历史、专用预览/编辑/版本/再创作 UI 以及完整的生成任务恢复链，因此媒体创作类本次**不适用单项目笔记**；相关能力仅作为入口或边界能力交接。
+媒体生成已经形成独立任务、结果托管与 Agent 回流主链，详见媒体创作专项；本笔记只保留设备采集、外部 Provider 和 Gateway 交接边界，不再据此判断媒体创作不适用。
 
 ## 接入角色与系统边界
 
@@ -102,6 +102,10 @@ Gateway node registry
 
 节点记录把 `nodeId` 与 `connId`、pairing identity 和 pairing generation 绑定。命令需经过声明 capability、allowlist、scope、插件策略和执行审批。iOS 前台专属命令还可以进入带 TTL 和每节点数量上限的 pending action，配合 APNS wake/ack 后由设备回前台拉取；这是单独的设备唤醒流程，不是普通 RPC 自动重试。
 
+### 云与节点工作环境链
+
+Gateway 还能把一次 session 放置到受管理的 worker environment 或配对节点。放置服务先持久化 session placement，并按 requested、provisioning、syncing、starting、active、draining、reconciling、reclaimed、failed 状态推进；每次转移受 generation、environment owner epoch 与 turn claim 约束。仓库工作区在远端执行前准备和同步，结果以专用 ref 暂存并回收；冲突会形成可见的 workspace result conflict，而不是静默覆盖本地文件。重启后 recovery/reclaim 路径按 placement 与 pending result 继续结算，旧 claim 不能恢复执行权。入口见 `src/gateway/worker-environments/placement-dispatch.ts:87-249`、`placement-store.ts:139-279`、`placement-record.ts:15-234`。
+
 ### `openclaw attach` 外部进程链
 
 ```text
@@ -150,14 +154,14 @@ Gateway 以 client identity、role、scope、token/password、设备签名、设
 - iOS/Android 的 camera、screen、voice 等是设备节点能力，属于外部应用协作中的执行边界；具体采集结果、媒体附件回流和平台权限弹窗本次为**入口确认/未验证**。
 - 普通 MCP server 仅提供工具发现和调用，不纳入外部执行体与应用协作主链；只有 ACPX 显式开启的 OpenClaw/plugin MCP bridge 作为外部 harness 的受治理资源入口记录。
 - 内建子 Agent、普通 Provider 和普通渠道消息处理不单独建外部执行体笔记；只有 ACP runtime、独立进程、节点或可控制的外部客户端达到身份、生命周期、双向协议、状态映射和治理条件时才纳入。
-- 媒体入口位于 `media-understanding`、TTS、附件、媒体/视频生成 provider 以及节点 camera/screen 等模块，但**未找到**独立媒体工程对象、创作历史/资产库、专用预览编辑与版本再创作、可恢复生成任务的完整工作站闭环。因此媒体创作类本项目**不适用**，不建立 OpenClaw 单项目笔记。
+- 媒体生成的任务、结果托管与 Agent 回流由[媒体创作调查笔记](../媒体创作/OpenClaw-媒体创作调查笔记.md)承接；本笔记只记录外部 Provider、节点 camera/screen 和远端工作环境的执行边界。
 
 ## 已确认边界与未验证事项
 
 - **已确认（静态）**：Gateway WebSocket 握手、认证准入、RPC/event 协议、请求取消和事件 gap 检测；TUI 的 Gateway 控制路径；节点 invoke 的请求/进度/结果/取消状态机；native ACP 反向桥接；ACPX 外部 harness 调度、session 元数据、回流和进程 lease/reaper；attach grant/revoke 与临时 MCP 配置链。
 - **入口确认**：Control UI 浏览器设备准入和 reconnect 表面；渠道 ACP binding 的多平台接入；iOS pending action/APNS wake；ACPX 普通/插件 MCP bridge 的配置入口；媒体理解、TTS、附件、媒体生成及节点媒体采集入口。
 - **未验证**：真实 Gateway 网络连接和多客户端争用；真实 TUI/Control UI/mobile 操作；iOS/Android 设备配对、前台唤醒、相机/录屏/语音执行；Discord/Telegram 等具体渠道消息、线程、附件和失败重试；真实 OAuth 与凭据刷新；Claude/Codex/Gemini/Pi 等外部 harness 的实际启动、审批、取消、session resume 和跨平台进程树终止；APNS 及外部进程回收的运行效果。
-- **未找到**：可独立管理的媒体创作任务、媒体资产库、媒体项目历史、专用编辑/预览/版本/再创作 UI，以及完整的媒体生成恢复主链。
+- **未找到**：媒体专用工程 DAG、跨会话资产库和专用版本编辑器；媒体任务与结果回流已经由媒体创作专项确认。
 - **不适用**：把普通 Provider、宿主内建子 Agent、单纯 `tools/list -> tools/call` 的 MCP server 或仅有通知/分享的入口当作本类目的外部执行体/应用协作项目。
 
 ## 关键源码索引

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：产品表面盘点（路由、设置菜单、feature flag、依赖）+ 只读源码核对 README 未列出的能力；未修改 chatbox 仓库
 >
@@ -40,6 +40,8 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 | 沙箱代码执行 | `src/main/sandbox/`（manager 1471 行、preview-server、persist-artifact） | desktop 生效 | 生成式输出笔记 |
 | 图像生成 | `/image-creator/` | 无 | 本笔记能力卡 2 |
 | Copilots | `/copilots/{index,my,featured,search}` | 无 | 本笔记能力卡 3 |
+| Soul & Memories | Work Mode Agent 面板与 Agent 设置页 | 桌面 Work Mode；Memory 可跨模式 | Agent 角色、Agent 工具笔记 |
+| Work Mode 队列与 steering | InputBox 的 QueuedMessagesBar / PendingActionBar | Work Mode | Chat UI、上下文、会话管理笔记 |
 | Web Search | `settings/web-search.tsx`（searxng 等 provider） | 无 | 上下文笔记（webBrowsing 开关） |
 | Document Parser | `settings/document-parser.tsx` | 无 | 附件/OCR 链 |
 | 新用户引导 | `/guide/`（UserTypeCards、ClaimWaitingCard） | 无 | 未调查 |
@@ -123,6 +125,7 @@ README 的 "Team Collaboration"（`README.md:188-190`，链接 `team-sharing/REA
 
 - **Agent Mode / 沙箱代码执行 / create_download 产物 / HTML artifact 预览**：生成式输出与运行时笔记已主链确认。本次不再重写，相关门控、执行、持久化、下载界面和网页发布均见该笔记。
 - **MCP / Skills**：Agent 工具笔记已主链确认。本次补两点产品表面：MCP 与 Skills 均以 desktop-only feature flag 存在，见 `feature-flags.ts:4-6`；内置 Skills 为 chatbox-product-info / data-analysis / frontend-design / vibedrop 四个，目录见 `src/main/skills/builtin/index.ts`。
+- **Soul、Memories、队列与 steering**：已形成 Work Mode 的持续身份和运行中输入工作流；Soul/Memory 的冻结快照与作用域归 Agent 角色/工具，队列与 steering 的持久化、模式策略和用户表面归 Chat UI、会话管理及上下文笔记，本页不重复计数。
 - **知识库 / 附件 RAG / Web Search / Document Parser**：会话与消息管理、对话请求与上下文笔记覆盖；本次只记录附件 RAG 模块与 Web Search 服务存在。
 
 ## 声明不符、外部依赖与暂缓项

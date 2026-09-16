@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库
 >
@@ -211,7 +211,7 @@ llm-service/key-states.json
 
 - **能力合并不再“只由远端推导”**：转换逻辑先并入当前激活的模型元数据规则能力，再用 API 显式返回的能力覆盖；API 未返回某项能力时不再写入 `false`，视觉与思考能力只有在输入模态或支持参数明确给出时才写入。
 - **路由信息随模型持久化**：远端返回的支持端点类型会写入模型 routing 字段，供执行路由的“端点类型唯一识别”分支使用（见第 4 节）。
-- 模型身份与 Embedding 空间分离，为模型目录引入 canonical ID 概念，当前主要被 knowledge-base 的向量化空间消费；桌面渠道目录仍以模型快照为主。相关实现位于 `packages/llm-core/src/model-identity/`。
+- 模型身份与 Embedding 空间分离，为模型目录引入 canonical ID 概念，当前主要被 knowledge-base 的向量化空间消费；桌面渠道目录仍以模型快照为主。相关实现位于 `packages/llm-core/src/model-identity/`，模型编辑对话框只对检测到 Embedding 能力的模型显示专属身份配置区块。
 
 ### 3.2 模型能力是运行时路由依据
 
@@ -255,7 +255,7 @@ llm-service/key-states.json
 
 内置规则按能力、Provider、模型家族、特定模型、图像/视频生成参数和图片输入限制分模块维护，汇总入口是 [`src/config/model-metadata-presets/index.ts`](../../aio-hub/src/config/model-metadata-presets/index.ts)。用户规则由 [`src/stores/modelMetadataStore.ts`](../../aio-hub/src/stores/modelMetadataStore.ts) 保存到 `model-metadata/metadata-rules.json`，并可从旧版 `localStorage` 的 `model-icon-configs` 迁移。
 
-升级时“合并内置”只按规则 ID 添加缺失项，不覆盖已有同 ID 规则。这能保留用户修改，但也意味着已落盘的旧内置规则不会自动吸收同 ID 的字段修订；需要重置或人工调整才能完全追上新版预设。
+内置目录随应用版本自动同步：加载时若当前内置目录的版本或指纹与已存快照不同，就整体替换快照，用户对某条内置规则的本地覆盖、屏蔽（suppressedBuiltinRuleIds）和自定义规则都保留；被上游删除但本地改过的规则继续作为用户规则生效，不会静默丢失。原先的目录三方差异比对与显式确认流程（含 `diff.ts` 与目录更新对话框）已移除，刷新模型配置保留为把规则写入已保存模型的显式动作（`packages/model-metadata-core/src/migration.ts` 的 syncCatalogSnapshot、`src/stores/modelMetadataStore.ts`）。
 
 ### 3.5 元数据的实际消费者
 
@@ -335,6 +335,10 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 - `record-only` → 只记录，不计数也不自动禁用；
 - `success`/`ignore` → 无操作。
 
+本地 Rust 代理自身产生的错误（请求未到达目标服务、请求非法等）单独归为探测分类 `proxy`，并被映射到 `record-only`，避免把代理故障当成上游 provider 异常而标坏 Key；判定依据是代理自产响应上的 `x-aio-proxy-origin: aiohub` 标记头（`src-tauri/src/commands/llm_proxy.rs`、`src/llm-apis/common.ts` 的 `LlmProxyError`/`isProxyGeneratedResponse`、`src/llm-apis/key-health-policy.ts:43-50`）。
+
+请求失败时，通用请求入口会先用 `decorateLlmError` 给错误消息加上 `[渠道名 · 模型名]` 前缀再抛出，尽量原地修改 Error 以保留类型和 status/code，message 只读时回退为包装错误（`packages/llm-core/src/llm-error-context.ts`）。
+
 旧的“429 立即熔断、其他错误累计 3 次熔断、成功清零”计数规则仍保留，但自动熔断现在多一个前提：**同渠道还有其他可用 Key**，且该 Profile 开启了自动禁用；最后一个可用 Key 不会因连续失败被自动熔断。设置页探测与普通请求共用同一份策略文件。
 
 ### 5.3 渠道层不重试，聊天应用层重试并重新选 Key
@@ -398,7 +402,7 @@ Provider 层的原生工具调用编解码统一到 `LlmMessage` 契约，支持
 - 响应语义校验，而不只判断 HTTP 2xx；
 - 首字节时间、总耗时、用量和响应摘要；
 - 最多 8 并发的批量模型探测（默认 3）；
-- 错误分类：认证、授权、限流、模型不可用、参数、网络、超时、Provider 等。
+- 错误分类：认证、授权、限流、模型不可用、参数、网络、本地代理、超时、Provider 等；本地代理一类在探测详情与列表中显示为“本地代理/未连接”。
 
 LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请求、响应头、流式块和错误上下文。请求分发时会把 `channelType`/`effectiveAdapterId`/`executionOperation`/`routeSource` 写入 Inspector 上下文，工具意图（`toolDiagnostics`：adapterId、requestToolCount、hasNativeTools）在能力过滤后记录、响应返回后以最终请求体解码结果覆写（`useLlmRequest.ts`、`tool-diagnostics.ts`）。它改善单渠道诊断，但结果不会进入自动渠道评分或动态路由。
 

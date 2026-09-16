@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态阅读公开 chat/chatbot 页面、带历史和嵌入式聊天组件、共享 hook 及组件测试；未运行浏览器
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 的聊天 UI 是“应用运行表面”，不是整个产品的唯一工作台。`/chat/[token]` 采用带会话历史的页面，`/chatbot/[token]` 和嵌入式 Chatbot 采用较轻入口；它们复用 `base/chat` 的发送、状态机、消息树、输入表单和事件处理。应用作者在控制台预先决定模型、工具、知识库等运行配置，公开页面只显示终端用户可填写的变量/文件，不提供通用的逐回合 Provider 管理。
+Dify 的聊天 UI 是“应用运行表面”，不是整个产品的唯一工作台。`/chat/[token]` 采用带会话历史的页面，`/chatbot/[token]` 和嵌入式 Chatbot 采用较轻入口；App Deployment v2 另有 `/environment/chat/[token]` 环境入口。它们复用 `base/chat` 的发送、状态机、消息树、输入表单和事件处理。应用作者在控制台预先决定模型、工具、知识库等运行配置，公开页面只显示终端用户可填写的变量/文件，不提供通用的逐回合 Provider 管理。
 
 ## 工作台与用户主链
 
@@ -66,6 +66,8 @@ React hook/context 负责 draft、当前 conversation ID、responding、task ID�
 
 带历史页面的侧栏负责列表和会话操作；嵌入式 Chatbot 更强调容器内的新建/切换，切换时先停止当前任务。两者共享请求 hook，但持久化、导航与发布权限并不相同。控制台调试表面与已发布 WebApp 面向不同身份和配置来源，即使可能复用组件。
 
+部署环境 WebApp 复用同一聊天基础组件，但 URL 和访问配置绑定到 environment；控制台把环境 WebApp 和环境 service API 作为独立访问点，MCP 与 trigger 在环境卡中明确显示为不支持（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`）。这证明多版本部署拥有独立的聊天入口和权限表面，不意味着不同环境间的会话、草稿或生成状态会自动同步。
+
 公开用户可见的发送前配置主要是应用定义允许填写的 inputs/files，当前代码没有把 Provider、模型、工具、知识库作为通用逐回合选择器公开给该表面。消息操作会根据消息状态显示引用、建议问题、sibling、反馈、文件或过程内容；其真实数据写入、工具语义与导出范围分别留在会话、工具和导出类目。静态组件中的 aria 标签只能证明标记存在，不能证明键盘路径、焦点恢复、移动抽屉或错误场景的实际可用性。
 
 ## 未验证事项
@@ -73,6 +75,7 @@ React hook/context 负责 draft、当前 conversation ID、responding、task ID�
 - 置顶、重命名、删除、新建在网络失败或多标签页中的回滚和同步。
 - 输入草稿是否跨刷新/会话持久化，以及附件失败和超大文件反馈。
 - workflow 后台运行、暂停恢复、停止与浏览器离开后的真实行为。
+- 部署环境 WebApp 的会话隔离、版本切换、访问控制和内置发布页之间的现场连续性。
 - 快捷键、焦点顺序、移动抽屉、无障碍和普通 DOM 长会话列表的实际性能。
 
 ## 关键源码索引

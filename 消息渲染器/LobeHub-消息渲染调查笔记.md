@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改 LobeHub 仓库
 >
@@ -128,7 +128,7 @@ UI 中通常不会显示成五个互相独立的气泡，而是转换成一个 a
 
 `src/features/Conversation/ChatList/index.tsx`
 
-ChatList 首先处理 fetch、loading、welcome、刷新失败和后台错误。列出消息时它只取：
+ChatList 首先处理 fetch、loading、welcome、刷新失败和后台错误，并通过消息深链 hook 把 URL 指向的消息换算成列表位置。列出消息时它只取：
 
 ```ts
 displayMessageIds: string[]

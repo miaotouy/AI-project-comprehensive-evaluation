@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码阅读。搜索范围包括：CLI 与 in-chat 命令注册表（`src/auto-reply/commands-registry.shared.ts`、`src/cli/program/`、`src/commands/`）中的 export/backup/import/share 子命令；`src/trajectory/` 的轨迹导出实现；Control UI（`ui/src/pages/chat/`、`ui/src/pages/sessions/`）与 TUI（`src/tui/`）的导出/分享/截图入口；官方 iOS/macOS 共享应用（`apps/shared/OpenClawKit`）的 transcript 导出；以及会话与消息持久化模型（`src/config/sessions/`、`src/agents/sessions/`）。未运行 CLI、Gateway、TUI 或 UI。
 >
@@ -14,14 +14,15 @@
 
 ## 结论摘要
 
-OpenClaw 是本地单操作者助手，本类目的能力落点分两类：把一次会话固化为**可读可传的本地交付物**，以及把会话连同运行时轨迹打成**可交给维护者的脱敏支持包**。共存在四条相互独立、无共享管线的抽取→交付路径：
+OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托管的公开会话链接。文件导出仍有四条相互独立的抽取与交付路径：
 
 - 消息会话内的 owner-only 命令 `/export-session`（别名 `/export`）把持久化 transcript 渲染成**自包含 HTML 阅读稿**并写入工作区（阅读交付，含分支树与 system prompt，离线可用）。
 - `/export-trajectory` 与 CLI `openclaw sessions export-trajectory` 把活动分支 transcript + 每轮运行的轨迹事件打成**脱敏 JSONL 支持包**，写入工作区 `.openclaw/trajectory-exports/`（数据交换/支持交付）。
 - Control UI 会话页本地执行 `/export-session`，把**当前已加载消息**下载为纯文本 Markdown 文件。
-- 官方 iOS/macOS 应用提供 “Export Transcript” 按钮（macOS 另配 ⌘⇧E），把当前视图消息导出为 Markdown 并经系统分享。
+- 官方 iOS/macOS 应用提供 “Export Transcript” 按钮，把当前视图消息导出为 Markdown 并经系统分享。
+- Control UI 的会话共享面可在显式确认后发布世界可读 token 链接，并可独立撤销；团队可见性、成员关系和公开发布是不同状态。
 
-**未找到**：独立的分享稿编辑器/预览编排工作台、会话整图/长图导出、远端公开页或受控链接分享（Gist/站内快照等）、导出版本历史与撤销。会话 URL 只是带鉴权的 Control UI 内部深链，不面向第三方。
+**未找到**：独立的分享稿编辑器/预览编排工作台、会话整图/长图导出，以及本地导出文件的版本历史。普通会话深链仍要求鉴权；公开分享使用单独的 token 路由，撤销后旧链接失效。
 
 ## 系统边界与总体调用链
 
@@ -79,11 +80,13 @@ HTML 阅读稿是本项目里唯一的富内容再渲染器，`export-html/templ
 
 ## 8. 分享载体、访问控制与撤销
 
-**未找到**任何“创建对他人可访问对象”的能力：无 Gist/公开页/受控分享链接/站内快照，因此更新、撤销、过期、克隆等远端分享语义整体不适用。交付终点都是宿主本地文件；跨人传播依赖操作者用文件、邮箱或移动系统分享把文件带出去。
+Control UI 可以把当前 session generation 发布为世界可读链接。发布动作要求 `operator.write`，界面先显示危险确认，再重新核对连接、当前 session ID 与方法权限；Gateway 将 public share 绑定到预期 session ID，避免 reset、fork 或同 key 的替代 generation 继承旧授权。重复读取可以重新得到 token，撤销后再次发布会轮换 share identity。入口见 `ui/src/pages/chat/chat-pane-sharing-actions.ts:167-279`、`src/gateway/server-methods/sessions-sharing.ts:377-430`，协议见 `packages/gateway-protocol/src/schema/sessions-sharing.ts:44-58`。
+
+公开发布与团队协作彼此独立。session visibility 控制 shared、read-only、suggest、draft 四种参与方式，成员关系决定非创建者的 member/viewer 角色；公开 token 则提供无需团队身份的只读访问。普通 Control UI 会话 URL 仍是鉴权深链，只有 public-share 路由携带公开 token。当前实现确认了发布、复制链接、撤销和重新发布；未确认过期时间、访问统计、评论、克隆或对已发布内容的独立版本快照。
 
 原生应用中存在两类系统级分享：iOS 的 transcript 先写临时目录再由 ShareLink sheet 交给其他 App（`apps/ios/Sources/Design/ChatProTab.swift:171-173,720-737`）；Android 每条消息长按提供 Copy/Share（`ACTION_SEND` 纯文本单条消息，`ChatMessageActions.kt:99-102,168-182`）。后者只分享单条消息文本，属于操作系统分享，不构成围绕对话建立的独立工作流。
 
-Control UI 的会话深链（`/chat/<agent>/<slug>-<shortId>` 等，`docs/web/urls.md`）语法上有“share a session”的措辞，但所有路由都在 Gateway 鉴权之后，需要 operator 级登录/设备配对才能打开；它服务于书签与换端续聊，不是给访客的公开页面。`packages/session-url-contract` 只描述这套 URL 语法与 `/focus` 目标，没有 guest/token 语义。
+Control UI 的普通会话深链服务于书签与换端续聊，仍位于 Gateway 鉴权之后；公开分享链接由 `packages/session-url-contract` 的 public-share 契约单独构造，不能与普通 `/chat/...` 地址混用。
 
 ## 9. 隐私、安全与内容治理
 
@@ -101,7 +104,7 @@ Control UI 的会话深链（`/chat/<agent>/<slug>-<shortId>` 等，`docs/web/ur
 
 同一命令名 `/export-session`（含 `/export` 别名）在消息渠道与 Control UI 里是两个不同实现、两种内容口径：渠道端产出含 system prompt 与完整工具轨迹的离线 HTML，Web 端只下载已加载消息的正文 Markdown。用户从不同入口触发会得到性质不同的产物，需要按入口区分，不能按命令名混为一谈。
 
-导出即快照是统一取向：轨迹包含时间戳目录、HTML 默认唯一文件名、Markdown 文件名带生成时间，都没有“与源会话联动/再同步”的语义；共享、版本与撤销不构成产品内工作流，交付后的传播完全外置到操作者。轨迹导出是调试导向（`docs/tools/trajectory.md` 明言 bundles are for support and debugging, not public posting），不是研究数据或规范化公开对话集的发布通道。
+文件导出采用快照语义：轨迹包含时间戳目录、HTML 默认唯一文件名、Markdown 文件名带生成时间，都没有“与源会话联动/再同步”的语义，也没有导出版本与撤销工作流；交付后的文件传播由操作者负责。Gateway 托管的公开 token 分享是独立路径，具有发布与撤销状态，但不把这些本地导出物变成可同步版本。轨迹导出是调试导向（`docs/tools/trajectory.md` 明言 bundles are for support and debugging, not public posting），不是研究数据或规范化公开对话集的发布通道。
 
 ## 12. 未验证事项
 
@@ -121,3 +124,4 @@ Control UI 的会话深链（`/chat/<agent>/<slug>-<shortId>` 等，`docs/web/ur
 - Control UI Markdown 导出：`ui/src/pages/chat/export.ts:10-39`；消息文本抽取：`ui/src/lib/chat/message-extract.ts:21-122`；绑定与派发：`ui/src/pages/chat/chat-pane-lifecycle.ts:444-445`、`ui/src/pages/chat/chat-commands.ts:393-396`
 - 原生应用 Export Transcript：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatTranscriptExporter.swift:6-163`；macOS 调用：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatWindowShell.swift:517-524`；iOS 调用与分享 sheet：`apps/ios/Sources/Design/ChatProTab.swift:720-737`
 - 功能说明文档：`docs/tools/trajectory.md`、`docs/tools/slash-commands.md:174-178`
+- 会话公开分享与协作权限：`src/gateway/server-methods/sessions-sharing.ts:377-430`、`src/gateway/session-sharing-policy.ts:74-89,160-211,343-374`、`ui/src/pages/chat/chat-pane-sharing-actions.ts:167-380`、`packages/gateway-protocol/src/schema/sessions-sharing.ts:33-97`

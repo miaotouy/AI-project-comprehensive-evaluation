@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：只读源码梳理，并与 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；另做插件目录全量盘点（89 个插件目录逐一核对 manifest 与入口文件），修正 3 处细节并补充 8 项新能力卡；核对 ChromeBridge 2.4（能力六正文图片语义、Popup 人工 Managed、agent 不再隐式控制托管运行时）、插件清单状态（89 目录/69 启用/20 禁用）与 Plugin.js 行号；全部为静态证据，未运行验证
 >
@@ -260,7 +260,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 **入口与触发者**：模型按各插件 manifest 说明输出 `<<<[TOOL_REQUEST]>>>` 块调用；媒体插件族包括图像生成（`FluxGen`/`GPTImageGen`/`GeminiImageGen`/`QwenImageGen`/`DoubaoGen`/`DMXDoubaoGen`/`NanoBananaGen2`/`ZImageTurboGen`/`AgnesGen`）、视频（`AgnesVideoGen`/`VideoGenerator` 为 asynchronous）、渲染与合成（`MediaRenderer`，hybridservice）。
 
 **完整主链（以 MediaRenderer 为代表）**：
-- `RenderImage`/`RenderAnimation`：模型提供 HTML/SVG 源码 → 插件在 Node 侧提取 `data:`/`file://`/HTTP(S) 资源逐跳校验（单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步），云元数据地址（169.254.169.254）始终阻断，`AllowPrivateNetworkAssets` 默认 true 允许内网但可关 → 改写为 Data URI 后交给托管 Chrome 渲染（静态图）或按确定性逻辑时间逐帧截图 + FFmpeg 编码（GIF/MP4/WebM，`window.__MEDIA_RENDERER__.setFrameRenderer(timeMs,…)` 协议）；Anime.js/Three.js 只接受 jsDelivr/unpkg/cdnjs 白名单并替换为本地内置脚本，其他远程脚本禁止执行；
+- `RenderImage`/`RenderAnimation`：模型提供 HTML/SVG 源码 → 插件在 Node 侧提取 `data:`/`file://`/HTTP(S) 资源逐跳校验（单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步），云元数据地址（169.254.169.254）始终阻断，`AllowPrivateNetworkAssets` 默认 true 允许内网但可关 → 改写为 Data URI 后交给托管 Chrome 渲染（静态图）或按确定性逻辑时间逐帧截图 + FFmpeg 编码（GIF/MP4/WebM，`window.__MEDIA_RENDERER__.setFrameRenderer(timeMs,…)` 协议）；Anime.js/Three.js/Pixi.js 只接受 jsDelivr/unpkg/cdnjs 白名单并替换为本地内置脚本，其他远程脚本禁止执行；
 - `GenerateAudio`：模型写 `function synthesize(api)` 合成代码（内置 oscillator/envelope/addNote/噪声 API，seed 确定），在独立 Node 子进程执行生成 PCM16 WAV——**强制 requireAdmin 6 位验证码**（`MediaRenderer.js:451-463 validateAdminForAudio`；验证码来源闭环见能力十七 UserAuth），总采样数上限 3000 万；
 - `GenerateCursorTheme`：模型提交一份 HTML，声明 15 个核心 SVG 光标角色；插件校验角色、热点、尺寸与动画帧数后，以绝对逻辑时间截取 32/48/64 等尺寸，静态角色写 CUR、动画角色写 ANI，并打包原 HTML、`theme.json`、预览与 Windows 安装/卸载脚本为 ZIP；
 - 产物托管到图片服务/文件服务（`ImageFileServer`），URL 回注模型；

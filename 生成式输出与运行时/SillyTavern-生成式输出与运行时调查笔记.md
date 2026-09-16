@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：静态代码审查；关键词 grep（artifact/canvas/sandbox/iframe/webview/notebook/exec/interpreter 等）定位能力边界，通读渲染管线（script.js 消息格式化与流式处理器）、正则引擎、工具调用、宏引擎、变量、媒体附件与后端持久化相关文件
 >
@@ -80,7 +80,7 @@ SillyTavern 的输出模型单一：**模型输出只有"聊天气泡文本"一�
 ## 5. 用户交互、事件与错误反馈
 
 - **消息级交互**（均为宿主固定按钮，非模型声明组件）：swipe 换版、编辑、删除、复制代码、书签、头像点击、按消息生成 SD 图、逐条提示查看、生成计时提示、推理编辑与范围隐藏/删除等，主入口见 script.js:2420-2437，扩展动作见 stable-diffusion/index.js:5039、chats.js:147。
-- **事件回传**：`eventSource` 事件总线（events.js:4-110）是扩展观察与介入输出的唯一通道，覆盖消息接收/渲染/编辑、工具调用、流式 token 等生命周期事件；`runGenerationInterceptors`（extensions.js:2015）允许扩展在生成前改写提示。quick-reply 扩展按事件自动执行用户预设命令链（extensions/quick-reply/src/AutoExecuteHandler.js:48-102）。
+- **事件回传**：`eventSource` 事件总线（events.js:4-110）是扩展观察与介入输出的主要通道，覆盖消息接收/渲染/编辑、工具调用、流式 token 等生命周期事件；`runGenerationInterceptors`（extensions.js:2015）允许扩展在生成前改写提示。另有 `MessageFormatter` 钩子，扩展可在正文进入 DOM 前于正则前后或 Markdown 转 HTML 后同步改写文本（渲染细节见消息渲染器笔记）。quick-reply 扩展按事件自动执行用户预设命令链（extensions/quick-reply/src/AutoExecuteHandler.js:48-102）。
 - **错误反馈**：工具错误、生成错误以 toast 与详情弹窗呈现（tool-calling.js:916-921、script.js:5412-5418）；正则调试器提供 diff 视图与逐步回放（regex/index.js:942-1048）。
 - **重载恢复**：交互状态（swipe 位置、播放中媒体）随消息对象/`saveMediaStates` 恢复；`mesid`、`swipeid` 属性落回 DOM（script.js:2588-2599）。未运行验证。
 
@@ -109,7 +109,7 @@ SillyTavern 的输出模型单一：**模型输出只有"聊天气泡文本"一�
 - **提示重建**：每次生成都从消息对象重建提示（openai.js:561）：正文、推理（script.js:4480-4494）、媒体标题（script.js:4450-4463）、文件附件内容（script.js:4448）、工具调用转 function message（openai.js:612-635）；推理签名仅在同 API/模型时回传（openai.js:614-621）。正则同时在提示侧与展示侧各跑一遍，同一源产生两份文本。
 - **持续维护的文本对象**：
   - 记忆摘要：`extension_settings.memory`，经 `{{summary}}` 模板注入；
-  - 变量：`{{setvar}}`/`{{getvar}}` 宏，全局变量在 settings、会话级在 `chat_metadata.variables`（variables.js:23-77）；
+  - 变量：局部与全局变量由 `setvar`/`getvar` 系列宏读写，全局变量在 settings、会话变量在 `chat_metadata.variables`（variables.js:23-77）；另有 `setvarkey`/`getvarkey` 与全局版，可按 key/index 访问对象与数组元素（`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`）；
   - World Info：激活随每轮扫描（world-info.js:4597，输入侧）。
 - **对象寻址**：模型**不能**查询对象列表或定向修改某个输出对象。工具调用是唯一的"命名操作"通道（工具名 + JSON 参数），但工具的持久状态由宿主函数自行管理，框架不提供对象句柄；聊天消息只有下标身份，swipe 文本对模型只是历史文本。记忆摘要更新是"整段覆盖旧摘要"式的文本替换，无版本。
 - 结论：无 G5 意义上的对象感知与定向维护；闭环仅存在于"文本进文本出 + 工具结果文本回流"。

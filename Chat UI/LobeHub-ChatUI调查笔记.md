@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（SPA 路由与 Agent 聊天页面、AgentSidebar Topic 列表、ChatInput 编辑器与发送区、Conversation 消息操作与审批卡片、设置页快捷键、桌面通知工具）+ grep 检索键盘/无障碍属性，全部行号按当前 HEAD 逐一核对；未运行验证
 >
@@ -74,7 +74,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 `ModeSelector` 切换 Chat/Agent 模式；Agent 模式出现执行设备、工作目录/仓库、分支或 Worktree、审批模式和上下文窗口（这些面板在 `ChatInput/ActionBar` 的 `AgentMode`/`Params` 等目录）。模型按钮切换当前 topic 模型（topic 级快照语义见会话与消息管理笔记 1.3）。
 
-推理强度预设（`ChatInput/ActionBar/Effort/`，`Controls.tsx:79-129`）来自**用户级模型实例配置**（`index.tsx:15-44` 注释：不属于 Agent 的 chatConfig——跨 Agent 跟随用户），经加载器加载。Token 用量/预算明细条（`ChatInput/ActionBar/Token/`，`useTokenBreakdown.ts:75-79,140,179-189` 按对话、历史摘要、系统角色、工具与上限等来源拆分）常驻发送区上方（非 dev 模式且占比 ≤50% 时隐藏，`TokenTag.tsx:36`）。
+推理强度已并入模型选择器，不再保留独立 `ActionBar/Effort` 控件。`useReasoningEffortControl` 负责读取有效模型、模型实例配置和当前 topic 覆盖，并把更新写回相应作用域；模型菜单把可用强度作为同一选择流程的一部分显示。见 `src/features/ChatInput/hooks/useReasoningEffortControl.ts` 与 `src/features/ChatInput/ActionBar/Model/SelectorMenu.tsx`。Token 用量/预算明细条仍按对话、历史摘要、系统角色、工具与上限等来源拆分。
 
 ## 4. 发送、排队、流式反馈与停止
 
@@ -95,6 +95,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 - 虚拟列表用 Virtua 渲染 `conversation-flow.parse()` 产出的 flat list（列表机制、`keepMounted`、索引空间转换等全部属于消息渲染器笔记）；流式消息和有文本选区的消息强制 `keepMounted`（`ChatList/components/VirtualizedList.tsx:256-290`，`useSelectionMessageIds` 注释说明回收节点会丢选区），避免 Markdown 动画重播或选区被回收。界面呈现的阅读辅助（ChatMiniMap、滚动快照、`scrollToIndex`）见第 2 节。
 - **多会话/后台生成的界面反馈**：Topic 行的运行/失败/等待人工图标、未读点与耗时（第 2 节），以及完成/审批的桌面通知（第 9 节）；“哪一条仍在运行并返回对应现场”由 operation 状态驱动这些 UI（`useOperationState` 桥接全局 op 状态到会话级 store 的 `operationState` prop，`ConversationProvider.tsx:91`）。
+- **排队输入的服务端让行**：QueueTray 不只在本地保存等待项。Gateway 顶层运行会收到是否仍有排队消息的镜像标记，并在下一决策点让出 turn；界面仍由同一 QueueTray 展示与执行“立即发送”。网络同步为 best-effort，失败时不会丢弃本地排队项。见 `src/store/chat/slices/agentRun/actions/transports/gateway/queuedMessagesFlag.ts:52-100`。
 
 ## 7. Chat UI 状态所有权与同步
 
@@ -175,7 +176,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - `src/features/ChatInput/InputEditor/index.tsx`（517-534 草稿恢复，582-601 IME/保存，617-643 键位）
 - `src/features/ChatInput/SendArea/SendButton.tsx`（12-48）、`src/features/Conversation/ChatInput/index.tsx`（237-299 状态，332-407 发送与按钮，409-430 语音）
 - `src/features/Conversation/ChatInput/QueueTray.tsx`、`sendVoiceMessage.ts`（26-44）
-- `src/features/ChatInput/ActionBar/Token/`（useTokenBreakdown.ts:75-189）、`ActionBar/Effort/`（index.tsx:15-44）
+- `src/features/ChatInput/ActionBar/Token/`（Token 预算明细）、`src/features/ChatInput/hooks/useReasoningEffortControl.ts` 与 `ActionBar/Model/SelectorMenu.tsx`（模型和推理强度合并选择）
 - `src/features/Conversation/Messages/components/MessageActionBar/index.tsx`（90-169）
 - `src/features/ChatMiniMap/`（useMinimapData.ts:19,61）、`src/features/Conversation/ChatList/utils/scrollSnapshotStore.ts`（133）
 - `src/features/Conversation/Messages/AssistantGroup/Tool/Detail/Intervention/ApprovalActions.tsx`（229-296 快捷键，325-362 radiogroup）

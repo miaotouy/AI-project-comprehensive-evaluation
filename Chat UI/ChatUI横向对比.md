@@ -2,9 +2,9 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、RikkaHub、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-09-15
+> 对比更新日期：2026-09-16
 >
-> 依据：本类目 22 篇单项目调查笔记（含 VCPMobile 2026-08-31 专项调查；自 `../Chat/Chat横向对比.md` 迁移；OpenClaw 依据同目录调查笔记；RikkaHub 依据同目录 2026-09-15 调查笔记）
+> 依据：本类目 22 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移；OpenClaw 依据同目录调查笔记；RikkaHub 依据同目录调查笔记）；代码快照与验证范围以各笔记元数据为准
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -30,8 +30,8 @@
 
 | 项目 | 主界面/导航 | 输入与生成中交互 | 关键 UI 取舍 |
 | --- | --- | --- | --- |
-| AIO Hub | 三栏工作台：Agent/参数、ChatArea、Session；支持 ChatArea/输入框分离成悬浮窗 | CodeMirror/textarea、拖入/粘贴附件、工具审批条；发送按钮可 abort | 当前消息列表是完整 DOM + `content-visibility`，依赖活动路径；历史上曾用 TanStack Virtual，后因动态高度、倒序加载闪烁和滚动定位问题于 2026-04-29 撤回 |
-| AstrBot | WebChat 与会话管理页服务于多 IM 平台后台 | 输入可触发命令建议与 Live Mode；真实入站还来自 QQ/Telegram 等平台 | Web UI 只是多平台事件系统的一个入口，不能代表群聊唤醒和平台回复的全部行为 |
+| AIO Hub | 三栏工作台：Agent/参数、ChatArea、Session；支持 ChatArea/输入框分离成悬浮窗 | CodeMirror/textarea、拖入/粘贴附件、工具审批条；发送按钮可 abort | 当前消息列表是完整 DOM + `content-visibility`，依赖活动路径；历史上曾用 TanStack Virtual，后因动态高度、倒序加载闪烁和滚动定位问题于 2026-04-29 撤回；会话切换会复核当前选择，晚到的详情加载不会把界面切回旧选择 |
+| AstrBot | WebChat 与会话管理页服务于多 IM 平台后台 | 输入可触发命令建议（Live Mode 前端组件未挂载）；历史改为分页恢复，首屏取最新 50 条、滚动近顶加载上一页并保持首条位置；聊天设置集中到独立对话框（主题/语言/流式/推理显示/快捷键/传输模式）；真实入站还来自 QQ/Telegram 等平台 | Web UI 只是多平台事件系统的一个入口，不能代表群聊唤醒和平台回复的全部行为 |
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
 | Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读；Composer 显示 DeepSeek 原生 web 搜索开关（`supportsSearch/searchExecution` 能力字段，仅官方 deepseek-v4-flash 生效） | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
@@ -39,7 +39,7 @@
 | Dify | 已发布应用的历史 WebChat、轻量 Chatbot 与嵌入式页；控制台编辑面另行隔离 | Composer 按应用 input schema 提交文本、变量和文件；可停止、重新生成、切换候选并处理 workflow 人工输入 | 公开页只呈现发布者预设的应用能力；历史页有会话导航，嵌入式页复用发送链但不具同等导航 |
 | Hermes Agent | Electron 桌面通过 WebSocket 连接无头 Python 后端 | prompt RPC、后端中断请求和前端本地定稿具有不同语义 | stored session id 与 lineage root 的匹配、压缩轮转后的身份迁移直接影响固定、恢复和流式状态 |
 | Jan | Thread 页面集中承载列表、输入、队列、分支与错误 banner | 流式中再次发送进入 `QueuedMessageChip`；编辑/删除在流式态禁用 | UI 同时仲裁 AI SDK 状态与文件/SQLite 消息，页面中枢职责较重 |
-| LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义 |
+| LobeHub | Agent Sidebar + Topic 多种分组/全量抽屉；输入编辑器是 Lexical 插件工作台 | slash/mention/文件/草稿/输入历史；发送按钮按权限和 generating 切换 | 权限、运行态、工具流程都在 UI 直接可见；Topic 双击开 tab 与单击导航有定时器语义；推理强度并入模型选择器，不再有独立 Effort 控件；发送被阻塞时 QueueTray 显示排队与「立即发送」，Gateway 侧收到排队镜像并在下一决策点让行 |
 | Manifold Desktop | WebView2 标签页聊天界面 | 新请求先停止全局旧线程；取消只能在下一次流回调检查 stop token | 多标签共享无会话 id 的广播，正常聊天状态与文件存储未接通 |
 | NextChat | 单页 Chat + 会话列表 | stop/retry/delete/pin/copy/TTS；图片和音频直接作为消息内容 | 不是虚拟列表；完整历史仍驻留 session 数组，窗口只限制渲染切片 |
 | Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
@@ -86,7 +86,7 @@
   - Risuai：分支按钮把当前会话快照复制为 idx+1 会话并追加回链注释，跳转走会话列表与回链；这是持久化的复制会话式分支，分支树弹窗只读预览、节点点击不导航；
   - VCPMobile：本次未找到分支树、版本导航或候选切换；编辑和重新生成均截断后续线性历史。
   - OpenClaw：Control UI 消息右键菜单提供 rewind/fork（活动路径中的 user message，streaming/reading 中的消息禁用），Apple/Android 长按菜单提供 Rewind from here / Fork from here；Android branch switcher 是独立 header bottom sheet，分支变化会清理旧 branch/run 局部状态并刷新历史；TUI 本次未找到独立消息级 rewind/fork 入口（范围结论，不排除扩展）。
-- **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
+- **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头，删除默认连带其前紧邻的工具调用系统消息（`/cut`、`/del` 可用 `toolcalls` 参数关闭），`/addswipe` 追加候选后原位更新消息元素而非整聊天重载；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
 - **消息操作入口（Risuai）**：操作栏分主次两层——复制/翻译/编辑/TTS/删除为主按钮，书签/分支/禁用收进弹出层，窄屏主按钮也收进弹出层；操作按钮带 `button-icon-*` class，供热键按 class 触发。
 - **消息操作入口（DeepSeek Harness）**：消息操作栏提供复制（剪贴板 + 1 秒对勾反馈）、分支与按需时钟指标（运行时长/TTFT/tok/s），插槽式扩展位供第三方动作（如 Like/Dislike）挂载；历史是追加型，未找到就地编辑与删除入口，修改以分支表达。
 - **reroll/swipe（Risuai）**：左右箭头渲染在每条消息上但动作总是作用于会话尾部；没有持久化的 swipe 候选，候选只存组件内快照栈与模块级分块缓存，切角色清空、刷新即失；首条问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。该内存候选与前述复制会话式分支是两条不同机制。
@@ -98,7 +98,8 @@
 
 - **SillyTavern**：生成中 toast 直接带停止按钮（Action Loader `STOPPABLE` 模式）；`document.body.dataset.generating` 全局状态位驱动 CSS 禁用交互；流式生成中主动隐藏 swipe 按钮。
 - **Manifold Desktop**：新请求先停止全局旧线程；取消只能在下一次流回调检查 stop token——按钮存在但停止能力受限。
-- **Open WebUI**：停止经 `stopResponse` 按 chat/task 停止，`chat:active=false` 事件驱动前端清空 taskIds 并重载。
+- **Open WebUI**：停止经 `stopResponse` 按 chat/task 停止；`chat:active=false` 事件只在事件携带的 message_id（未携带时任一消息）确实存在未完成 assistant 叶子时才清空 taskIds 并重载，随后更新已读。
+- **AIO Hub**：停止按钮除中止当前请求，还会清理该会话尚未执行的队列节点，并把「队列已停止」与「用户手动停止」作为停止结果显示，避免继续呈现为排队或普通错误。
 - **Chatbox**：生成时发送按钮变为停止按钮（`IconPlayerStopFilled`），点击 cancel 当前 generating 消息并乐观写回。
 - **Pi**：TUI 键盘停止（abort），中断后消息以 stopReason 持久化、下次恢复可见。
 - **VCPChat**：发送/中止同一按钮；单聊只通知远端，前端没有本地 abort 的完整反馈闭环。
@@ -120,6 +121,7 @@
 - **DeepSeek Harness**：关键路径键盘绑定有静态证据（无会话 Hero 以 Enter/Space 打开工作区选择器、IME 合成保护、组合框菜单 ↑↓/Enter/Esc 且焦点留在 textarea、rail 搜索等 300ms 侧栏动画完成）；焦点顺序、无障碍名称与中文输入法下 Enter 边界未运行验证。
 - **Risuai**：document 级 keydown 匹配 `DBState.db.hotkeys` 配置，动作通过点击 class 匹配按钮与鼠标走同一条路径，无修饰键热键在输入框聚焦时失效；侧栏角色/会话项用 `role="button"` + `tabindex="0"` 保证可达，但存在若干用 `svelte-ignore a11y_*` 压制告警的 div 点击控件；主输入框无自动聚焦；读屏命名与焦点顺序未运行验证。
 - **OpenClaw**：Control UI 的 Composer keydown、焦点恢复（搜索等关闭后回到触发按钮或 Composer）与窄屏禁用分屏有静态源码证据；TUI 是完整键盘主链（编辑/发送/shell/命令/选择器/工具展开/停止/退出，overlay 关闭恢复编辑器焦点）；Apple/Android 各有 semantics、focus 与 IME 处理。真实键盘、IME、VoiceOver/TalkBack、触摸与窄屏断点行为未运行验证。
+- **VCPMobile**：软键盘避让由 `useKeyboardInsets.ts` 把原生 Window Insets 事件桥接为 CSS 变量（`--vcp-safe-bottom`、`--vcp-ime-offset`）供样式回退；功能工作区以持久/懒加载覆盖页接入，路由只负责聊天主表面。焦点顺序、TalkBack 与真实软键盘动画未运行验证。
 
 **共同结论**：各项目的无障碍语义都不完整，缺口的性质不同；键盘可达性（Tab/Enter）与屏幕阅读器语义（ARIA）是两件独立的事，SillyTavern 用自研框架解决前者、放弃后者。
 

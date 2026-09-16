@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -455,6 +455,10 @@ Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`�
 
 该算法改善了播放体验，同时也增加了实现复杂度。相关常量应依据 benchmark 和用户指标持续调优，避免凭感觉频繁修改。
 
+### ECharts 代码块
+
+ECharts 语言代码块会把 JSON 解析为 option，并在专用预览中用 SVG renderer 初始化图表。流式阶段允许不完整 JSON 暂缓报错，终态解析或 `setOption` 失败则显示错误；ResizeObserver 驱动实例 resize，图表自己持有拖动与滚轮交互，不套用通用图片缩放。实现见 `src/renderer/components/Preview/EChartsPreview.tsx:15-169`，行为测试见同目录 `__tests__/EChartsPreview.test.tsx`。
+
 ## 工具渲染
 
 ### 统一投影
@@ -482,9 +486,9 @@ AskUserQuestion/approval 流程横跨消息区与输入区：awaiting approval �
 
 ## 当前渲染行为补充
 
-消息流新增内联生成图片的直接投影；Markdown 渲染保留软换行，并在流式内联代码阶段提供动画。消息页脚的 token 用量改为始终可见，定位消息后会保持 token 详情折叠。Agent 工具渲染还扩展了 DSH 的 TodoWrite、会话创建、跨会话发送与结果卡片，使持久化投递状态在消息表面有对应投影。
+消息流可直接投影内联生成图片与远端视频；`data-video` 同时接受本地 `filePath` 和远端 `url`，本地文件优先，二者都缺失时显示不支持状态。Markdown 支持 ECharts 专用预览、独立 LaTeX 环境与跨空行的 `\[...\]` 数学块，并修正单波浪号、表格词边界和混合多行公式围栏。消息页脚的 token 用量始终可见。Agent 工具渲染还覆盖诊断报告、会话创建、跨会话发送与结果卡片，使持久化投递状态在消息表面有对应投影。
 
-上述内容确认 part 到组件的装配，未以真实长会话测量虚拟列表、动画和图片加载性能。依据：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx`、`src/renderer/components/chat/messages/frame/MessageMenuBar.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionCreateTool.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionSendTool.tsx`、`src/renderer/components/chat/messages/tools/agent/SessionResultCards.tsx`。
+上述内容确认 part 到组件的装配，未以真实长会话测量虚拟列表、动画、图表或媒体加载性能。依据：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx:715,946`、`frame/MessageVideo.tsx:18-82`、`src/renderer/components/Preview/EChartsPreview.tsx:15-169`、`tools/agent/PrepareDiagnosticReportTool.tsx`。
 
 ## 性能设计总结
 

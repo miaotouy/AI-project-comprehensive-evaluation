@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、renderer store、上下文构建与压缩包、模型调用层），符号与行号对照当前 HEAD 逐一核实，未运行应用
 >
@@ -19,7 +19,7 @@ Chatbox 的一次生成任务由输入区提交开始，最终落到 `orchestrat
 - **主链**：`InputBox.handleSubmit` → `constructUserMessage` → `submitNewUserMessage`（写用户消息 + 插入 assistant 占位）→ `orchestrateGeneration` → `model.chatStream()` 逐 chunk 消费。
 - **流式更新拆成两条频率不同的路径**：每个 text-delta/reasoning-delta chunk 立刻刷新 UI 缓存（几乎逐 token），但只有"距上次落盘 ≥ 2 秒"或"chunk 是 tool-call"时才真正写 storage；流结束/出错/暂停时再无条件补一次最终落盘。
 - **Agent 模式、知识库、网页浏览三种"输入区上下文增强"共用同一个工具注册管线**，各自是管线里的一个开关，受模型能力（`isSupportToolUse(scope)`）门控。
-- **同会话生成串行化**：`submitNewUserMessage`/`generate`/`generateMoreInNewFork` 等入口被每会话的生成锁（promise 尾链）串行化；"在下方继续回复"（`generateMore`）在 chat 会话刻意绕过锁以支持并行替代回复，其消息写入由 chatStore 的 UpdateQueue 串行兜底。
+- **模式决定并发语义**：Chat Mode 在生成中继续保留停止控件，不接受新排队消息；Work Mode 可把生成中的新输入写入每会话队列，用户还可显式让纯文本队列项作为 steering 消息插入当前生成。替代回复仍可并行，只有一个生成实例能取得该会话的 steering 消费权。
 - 上下文按"消息数上限（`maxContextMessageCount`）"裁剪历史，自动压缩按 token 预算（上下文窗口 × 阈值 0.6）触发；provider 最终 payload 字段属于未核实事项。
 - 停止时生成锁保持到流真正排空；未完成的 tool-call 批收口为 error/result 态（`cancelled: true`），空内容占位消息直接删除。
 
@@ -78,6 +78,7 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 - **消息数上限**：`settings.maxContextMessageCount` 在 `buildContext` 中生效（`agent-harness.ts:253` → `builder.ts:44-46`），按"历史消息数 + 1 条当前输入"裁剪，不是 token 预算。
 - **自动压缩触发**（发送前同步检查，阻塞发送）：`messages.ts:201` 的 `runCompactionWithUIState` → `compaction.ts` 的 `needsCompaction`（`:57-125`）用 token 估算（带 react-query 缓存，`context-tokens.ts`）调 `checkOverflow`（`compaction-detector.ts:31-58`），判定为 `isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compactionThreshold`，`compactionThreshold` 默认 0.6、可全局设置；模型上下文窗口来自 provider 设置或模型注册表（`getModelContextWindowFromSettings`/`getModelContextWindowSync`），未知模型不触发。
 - **执行与提交**：`runCompactionWithStreaming`（`compaction.ts:167-263`）流式生成摘要（UI 态经 `setCompactionUIState`），摘要消息打 `isSummary: true`；boundary 取"最后一个通过上下文合格性过滤且非 summary 的消息"（`compaction-boundary.ts:12-21`），生成 `CompactionPoint` 后经 `buildCompactionCommitPatch`（`compaction-commit.ts:28`）原子提交；摘要流式期间 boundary 被删除则放弃提交（`:240-247`）。压缩契约 `compactionPoints` 随 fork/复制重映射（数据语义见会话与消息管理笔记 1.4）。
+- **自定义摘要指令**：全局 `compactionPrompt` 可在聊天设置或手动压缩弹窗编辑；执行服务优先使用本次显式 prompt，其次使用全局配置，再回退本地化默认提示。`packages/chatbox-core/src/application/context/CompactionService.ts:158`、`src/renderer/routes/settings/chat.tsx:579-586`。
 - **压缩可逆**：删除摘要消息（UI 上 SummaryMessage 的"删除摘要"操作）即恢复原文参与上下文计算，`compactionPoints` 中对应点随之清理（`chatStore.ts:803-816`）。
 - provider 侧 token 截断策略未在本次入口范围内完全核实（`packages/model-calls` 适配层职责）。
 
@@ -156,10 +157,13 @@ if (shouldPersist) {
 
 ## 8. 队列、多会话并发与后台生成
 
-- **同会话串行化**：`submitNewUserMessage`/`generate`/`generateMoreInNewFork`/`regenerateInNewFork` 都走每会话 promise 尾链（`withSessionGenerationLock`，`generation-lock.ts:8-26`）；替代回复（`generateMore` chat 分支）故意绕过锁并行运行，写入由 `UpdateQueue` 串行合并（`chatStore.ts:349-392`）。
-- **多会话并行**：锁是 per-session 的，不同会话的生成互不阻塞；本次未发现全局发送队列或后台任务管理器——多会话并发与后台生成没有独立的调度层，都是直接发起的生成任务。
+- **Work Mode 队列**：生成中提交的新输入最多排队 20 条，并写入 `localStorage['chatbox-message-queue-state']`；入队写盘失败时撤销入队并保留草稿。队列在当前生成正常结束后按顺序发送，停止、错误、模式建议或会话分支变化会暂停队列，用户可编辑、删除、清空或手动继续。实现见 `src/renderer/stores/session/message-queue.ts:16-18,53-96,304-379`。
+- **Steering**：队列项默认等待当前回复完成；用户显式点“立即发送”后，纯文本且锚定于当前会话路径的条目才会被当前生成取得。系统先把该用户消息持久化，再将其转换为模型消息注入后续 step；带附件、队列暂停或属于另一 fork 的条目不参与。实现见 `src/renderer/stores/session/steering.ts:78-154` 与 `message-queue.ts:452-552`。
+- **Chat/Work 分流**：模式策略只在 Work Mode 开放 queue 与 steering；Chat Mode 不再承诺队列，但会继续排空模式拆分前已持久化的旧队列，避免顺序倒置。策略见 `packages/chatbox-core/src/session/mode-policy.ts:19-79`，输入决策见 `src/renderer/components/InputBox/submitAction.ts:39-83`。
+- **同会话主链锁**：普通提交、生成和重新生成仍由会话级锁保护；替代回复可绕过该锁并行运行，消息写入由 UpdateQueue 串行合并。并行回复中只有一个实例可注册 steering consumer，避免重复消费队列项。
+- **多会话并行**：生成锁与消息队列都按 session 隔离，不同会话互不阻塞；图像生成等后台任务另走 chatbox_cli 回填链，不与文本消息队列共用调度器。
 - **流排空等待**：新生成在启动前会等待同会话未结算的 stream drain（`orchestration.ts:594-608`，可被自己的停止按钮中止等待），保证前一次停止的工具残留不会与新生成交错。
-- 多窗口并发写入的合并语义在会话与消息管理笔记 6 的 UpdateQueue 部分有部分覆盖。
+- 队列可跨刷新恢复，但本次未运行验证崩溃、多个窗口同时消费以及外部 Provider 长时间不结束时的实际时序。
 
 ## 9. Agent、工具、知识库与附件注入点
 

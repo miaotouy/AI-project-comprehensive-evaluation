@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读源码核对（src/lib/components/chat/Messages 组件树、src/lib/utils/marked 扩展、src/lib/utils/index.ts、Artifacts/代码执行相关）；未修改目标仓库
 >
@@ -17,7 +17,7 @@
 Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐个渲染 token」的管线，而不是 marked 官方 HTML renderer 的字符串输出。
 
 - 渲染入口 `Messages/Message.svelte` 按 `role` 与父消息模型数分发到 `UserMessage` / `ResponseMessage` / `MultiResponseMessages`，并利用浏览器原生 `content-visibility: auto` 做离屏虚拟化；
-- Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用标记 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及，并禁用单波浪线删除线；
+- Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用标记 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及与下划线（`++text++`），并禁用单波浪线删除线；
 - 代码高亮用 highlight.js（仅 github-dark 主题），只读渲染走 hljs，编辑模式改用 CodeMirror 6；Shiki 仅用于 Notebook 文件预览；
 - Math 用 KaTeX（动态加载 + mhchem），`renderToString` 失败时把源文本 HTML 实体化后输出，避免原始字符进入 `{@html}`；
 - HTML token 一律先 `DOMPurify.sanitize`（默认配置）再渲染；Mermaid/vega 生成的 SVG 再经 `sanitizeSvg` 白名单清洗；Vega loader 阻断一切外部资源；
@@ -63,6 +63,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 - `<details>` 块由 `utils/marked/extension.ts`（29-103 行）深度配对解析并捕获 `type` 属性；
 - 引用 `[1]`、`[1,2]`、`[1#suffix]` 由 `citation-extension.ts` 生成 citation token → `SourceToken` 渲染为行内按钮；
 - `:::` 冒号围栏由 `colon-fence-extension.ts` 分词，`fenceType` 拼入 class 名，内部内容重新走 blockTokens；
+- 下划线扩展此前只做 inline token 化，现已补上 renderer，输出 `<u>` 包裹解析后的 inline tokens（`src/lib/utils/marked/extension.ts:105-125`）；
 - 脚注 `[^]` 的 `<sup>` 也经 `DOMPurify.sanitize`（MarkdownInlineTokens.svelte 129-132 行）。
 
 ## 3. 代码高亮、Math 与 HTML 消毒
@@ -88,7 +89,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 
 ## 5. 结构化输出与代码执行
 
-- `structuredOutput.ts`（126-195 行）：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems`（266-333 行）产出 message/详情序列；
+- `structuredOutput.ts`：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems` 产出 message/详情序列，并新增对空/稀疏 output 槽位的处理（先补占位再写入，避免后续 spread 出 undefined part），事件流的槽位写入也改为越界时 push 而非留洞；终端文件结果不再要求 `displayed === true` 才算内联文件，实际是否在消息里渲染由结果标记或终端文件显示设置决定（`src/lib/components/chat/Messages/structuredOutput.ts:166-186,344,465-500`、`StructuredOutputRenderer.svelte:164-169`）；
 - `StructuredOutputRenderer.svelte`（43-168 行）：message → Markdown（或纯文本），详情 → `ToolCallDisplay`/`Collapsible`；
 - `CodeExecutions.svelte`（28-63 行）：`message.code_executions` → 齿轮徽章 + error/output/incomplete 状态点；`CodeExecutionModal.svelte` 显示 ERROR/OUTPUT + `result.files` 链接；
 - 执行后端分两条通道（按 `$config.code.engine` 选择）：配置为 `'jupyter'` 时走 `executeCode` API（从 stdout 抽 `data:image/png`）；否则浏览器端 `executePythonAsWorker`（CodeBlock.svelte 149-356 行，自动探测 import→依赖，60s 超时），经 Pyodide worker 沙箱运行（iframe srcdoc + `sandbox="allow-scripts"`，matplotlib 内联 base64 PNG 补丁）。

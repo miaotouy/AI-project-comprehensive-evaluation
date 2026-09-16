@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent`、`packages/agent`、`packages/telemetry`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：局部补查。通读根 README 与 `packages/coding-agent/docs/`（usage、session-format、containerization、extensions）；抽查 `interactive-mode.ts` 的 `/export`、`/share` 实现与 `packages/telemetry` 契约；与现有十类通用笔记交叉核对覆盖范围；未运行交互会话
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Pi 的五个第三批候选中有四个已被现有通用类目笔记完整覆盖（归并已有类目）：扩展系统与工具注册（Agent 工具）、终端组件树（消息渲染器）、分支会话（会话与消息管理）、容器化部署文档（Agent 工具/生成式输出）。本次补查新确认的未覆盖产品面是**会话数据生产与分享**：根 README 设有专门章节“Share your OSS coding agent sessions”（README.md:90-105），`docs/usage.md:138-141` 明确说明 `/share` 之外可用伴生工具 `badlogic/pi-share-hf` 将会话发布为 Hugging Face 数据集“用于模型、提示词、工具与评估研究”。仓库内主链（JSONL 会话树 → `/export` JSONL/HTML → `/share`）已达主链确认；/share 优先创建 Radius artifact，并在无法使用 Radius 时才回退至私密 gist。发布到 HF 数据集的一步位于仓库外（伴生仓库），属外部依赖。该能力作为**研究数据发布**分型记录，不与 Hermes 的批量轨迹生成或 OpenCode 的会话档案合并为统一分类。
+Pi 有两条达到主链确认的差异化能力。会话数据生产与分享把 JSONL 会话、HTML/JSONL 导出、Radius/Gist 分享和仓库外的 Hugging Face 发布工具连成研究数据交付链。实验性 durable 多进程会话则把持久 AgentHarness、进程隔离的 session worker、Chord 服务复制、Radius 远端连接和可热重载 facet 组合成可断线恢复的聊天表面；该链受实验开关和独立命令约束，不能视为默认 `pi` TUI 的现行实现。
 
 ## 介绍声明与候选盘点
 
@@ -26,9 +26,18 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 | 终端组件树 | 归并已有类目 | 消息渲染器笔记整篇覆盖（终端组件树 + 事件驱动全量重建 + 帧节流，`packages/tui/src/tui.ts:765-817`） |
 | 分支会话 | 归并已有类目 | 会话笔记 §1/§4 覆盖 branch/createBranchedSession/forkFrom/branchWithSummary |
 | 容器化 | 归并已有类目 | Agent 工具笔记 §5、生成式输出笔记 §11 已确认仅是部署文档（`packages/coding-agent/docs/containerization.md`），非内置运行时 |
-| 会话数据分享 | 入口确认（仓库内主链）/ 外部依赖（发布端） | 本次专项，见下 |
+| 会话数据分享 | 主链确认（仓库内）/ 外部依赖（发布端） | JSONL/HTML、Radius/Gist 与 HF 发布交接，见下 |
+| Durable 多进程会话 | 主链确认（实验入口） | AgentHarness + worker + Chord + facet + Radius，未运行验证 |
 
 ## 已确认的独特能力
+
+### 能力二：实验性 durable 多进程会话
+
+这条能力面向会话跨进程托管、断线重连和插件代际切换。AgentHarness 以 Session、branch、lane 和 operation 为事实对象，把请求接受、实际驱动、工具结算、取消、恢复与观察拆成持久操作；session worker 持有 lane，TUI 通过 `AgentController` 发起 prompt、队列、abort、resume、compaction 和导航，通过 Transcript 服务观察复制快照（`packages/agent/src/harness/agent-harness.ts:518-622`、`packages/coding-agent/src/experimental/services/agent-controller.ts:39-54`、`transcript-provider.ts:20-98`）。
+
+产品主链有两种可复查入口。`mini` 是三进程示例，首个客户端启动 detached server，每个会话由独立 worker 托管，最后一个客户端断开后 worker 被回收；正式实验命令则在 `PI_EXPERIMENTAL=1` 下启用 server/client，通过 Unix socket 或 Radius 连接，Chord 复制服务状态，facet host 支持保持服务句柄的热重载（`packages/coding-agent/src/experimental/mini/README.md:1-44`、`packages/coding-agent/src/experimental/services/README.md:19-25`）。
+
+持续性来自 format 4 会话存储及其 Memory、JSONL、SQLite 实现。JSONL 可以只读发现旧 v3 会话，并在首次非空写入时原子升级；SQLite 后端提供事务、writer lease、fork 与用量账本。该链为源码主链确认，未运行 server/client、Radius 重连或进程崩溃恢复；它属于实验入口，不计作默认 coding-agent 表面已完成迁移（`packages/agent/src/harness/session/jsonl/storage.ts:140-182`、`packages/session-backends/sqlite-node/src/sqlite/repo.ts:157-393`）。
 
 ### 能力一：会话数据生产与分享（研究数据发布候选）
 
@@ -58,7 +67,7 @@ README（README.md:13-36）自称“Pi agent harness project including our self 
 
 ## 对特色贡献统计的影响
 
-- 建议将“会话数据生产与分享”以 `入口确认`（仓库内 `/export`、`/share` 主链静态确认；发布端外部）列入对话导出与分享的研究/发布分型，暂不另建分类；若后续出现同一对象模型和消费者的多项目样本，再重新评估。
+- “会话数据生产与分享”以 `主链确认`（仓库内 `/export`、`/share` 主链；HF 发布端外部）列入对话导出与分享的研究/发布分型；“durable 多进程会话”以实验入口的主链确认列入多表面连续性候选。两者均不据此升级为新的通用顶层类目。
 
 ## 未验证事项
 

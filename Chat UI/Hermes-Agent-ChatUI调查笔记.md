@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Electron 主进程、React renderer 状态层与组件、apps/shared 连接层、TUI Ink 前端、后端事件协议），符号与行号在 HEAD 快照处逐一核对；界面视觉、焦点与键盘行为标注“未运行验证”
 >
@@ -134,6 +134,8 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - 多 profile：每个活跃 profile 一条独立二级 socket（`store/gateway.ts:30-41`），会话切换时各自维护现场（§2）。
 - 子代理（subagent）会话在数据层是真实会话（会话与消息管理笔记 §8）；其界面呈现（spawn 树等）在消息渲染器笔记。
 - 后台生成：auto-continue 与 async-delegation 路径（`server.py`，机制在对话请求与上下文笔记 §8）；后台任务完成的界面通知本次未逐项展开；cron 投递支持多投递目标（属设置/调度面，聊天工作流未展开）。
+- 子代理已有会话级实时控制面。后端只返回属于当前 live session、transport 与 generation 的 roster；选中子代理后可读取最多 16 KiB 的实时转录尾部、发送 steer 或硬中断。结束、外来或代际失效的子代理不再暴露内容。桌面把 roster 放在 Composer 上方的状态栈，TUI 提供 dock 与全高 roster（`tui_gateway/methods_subagents.py:12-89`，`apps/desktop/src/app/chat/composer/status-stack/subagent-section.tsx`，`ui-tui/src/components/agentControls.tsx`）。
+- 桌面 Composer 支持传统 STT → Hermes → TTS 与 GPT-Live 两种语音引擎。GPT-Live 前端持有麦克风和扬声器，但真实请求仍连同近期文本上下文交给当前 Hermes 会话，由 Hermes 当前模型与工具集执行；不可用时回退 STT（`apps/desktop/src/app/chat/composer/hooks/use-voice-live-conversation.ts:95-114,241-358,462`，`apps/desktop/src/lib/voice-live.ts:1-81,214-428`，`tools/voice_live.py:1-18,84-185`）。
 - 多窗口并发、同窗口多会话并行生成的行为未实测（未验证事项）。
 
 ## 8. Chat UI 状态所有权与同步
@@ -174,6 +176,7 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - 运行行为（视觉效果、时序、性能、真实 Provider 上的流式）全部为静态推断，未运行验证。
 - 键盘与无障碍（焦点顺序、Tab 遍历、可访问名称）、响应式行为、系统通知未做运行验证。
 - 排队提示、模型选择器/参数面板、后台生成（auto-continue/async-delegation）界面反馈、消息搜索弹窗与分支树视图等组件细节与界面工作流未逐项展开。
+- GPT-Live 的 WebRTC 服务、打断时序、计费与 STT 回退未运行验证；子代理 roster 的轮询、实时尾部和代际授权也只做了静态核对。
 
 ## 13. 关键源码索引
 
@@ -181,3 +184,4 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 - 共享/连接：`apps/shared/src/json-rpc-gateway.ts`（:66-72）、`websocket-url.ts`（:39）；`use-gateway-boot.ts`（重连 :56/:226）；`use-gateway-request.ts`；`store/gateway.ts`（:30-41）。
 - Electron：`electron/backend-command.ts`（:18-22）、`electron/main.ts`（backendSupportsServe :1935-1990、HUD 窗口 :8973 起）。
 - 后端边界：`hermes_cli/web_server.py`（`mount_spa` :16296、headless 分支 :16313）、`hermes_cli/main.py`（HERMES_SERVE_HEADLESS :10471-10474）。
+- 子代理控制与语音：`tui_gateway/methods_subagents.py`、`apps/desktop/src/app/chat/composer/status-stack/subagent-*.tsx`、`ui-tui/src/components/agentControls.tsx`、`apps/desktop/src/lib/voice-live.ts`、`tools/voice_live.py`。

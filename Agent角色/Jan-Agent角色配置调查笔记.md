@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`（重点 `core/src/types/assistant/assistantEntity.ts`、`extensions/assistant-extension/src/index.ts`、`core/src/types/thread/threadEntity.ts`、`web-app/src/lib/instructionTemplate.ts`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 Jan 仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Jan 的“角色”即 `Assistant` 实体：**每个助手一个目录一个 JSON 文件**（`file://assistants/<id>/assistant.json`），由 assistant-extension 负责增删改查与版本迁移（当前 v3）。默认助手 id 固定为 `jan`，`model: '*'` 表示任意模型，指令模板内置语言跟随、分步思考、“专业工具调用者”与 `{{current_date}}` 占位符。
+普通 Chat 的“角色”是 `Assistant` 文件实体，每个助手一个 JSON，由 assistant-extension 管理。独立 CLI Agent 使用项目 `.jan/agent/agent.toml` 和用户 `~/.jan/config.toml` 配置模型、工具/预算与 Provider；Cowork 的子 Agent 由单独的保存定义目录解析，未知名称退化为专注型通用 Agent。三者的角色配置和会话快照不能互相等同（`src-tauri/src/core/agent/project.rs:1-47,183-237`、`web-app/src/lib/coworkTools.ts:121-160`）。
 
 关键事实：
 
@@ -71,9 +71,9 @@ ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
 
 ### 1.2 工具、知识库与记忆（交接 Agent 工具笔记）
 
-助手侧能声明的能力只有 `retrieval` 工具（`AssistantTool`）与 `file_ids`；文档嵌入线程后前端自动 `approveToolForThread`（`$threadId.tsx:1028`）。
+普通 Chat 的 Assistant 类型中工具声明只有 `retrieval` 与 `file_ids`；文档嵌入后线程前端自动批准 RAG 工具（`core/src/types/assistant/assistantEntity.ts`、`web-app/src/routes/threads/$threadId.tsx`）。这不限制 Cowork/CLI 的原生 Agent 工具和技能。
 
-MCP/Web 搜索/RAG 工具的实际加载、注入、审批与执行链路属 Agent 工具类目，见 `../Agent工具/Jan-Agent工具调查笔记.md`，本笔记只记录助手声明这一交接点；记忆与子 Agent 机制本次未在助手层找到（见 §6）。
+MCP/Web 搜索/RAG 的加载与审批见 Agent 工具笔记。CLI Agent 的配置从项目 TOML 解析，Provider 覆盖优先于全局和桌面配置；Cowork 的 task 可在一轮中启动并行子 Agent，按 phase 串联结果，任务最终答案写到共享 blackboard。上述能力不是普通 Chat Assistant 的 `tools` 字段（`src-tauri/src/core/agent/project.rs:34-47`、`web-app/src/lib/coworkTools.ts:121-160`）。
 
 ## 2. 持久化与迁移
 
@@ -137,6 +137,8 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
 
 ## 6. 边界与未验证事项
 
+- CLI 项目 Agent、Cowork 已保存子 Agent 与普通 Chat Assistant 是三个配置边界；项目 TOML 的 CLI 专属字段在桌面前端并不自动获得同样权限（`src-tauri/src/core/agent/project.rs:126-146,294-309`）。
+
 - core 与 web 两侧 Assistant 类型不一致（web 有 parameters、无 model/tools/file_ids；迁移却写 parameters）：事实已确认，运行时影响（web 保存的 parameters 是否回流 core 并参与推理参数合并）需运行时验证。
 - `{{current_date}}` 只有这一个模板变量（事实）；没有用户变量/场景变量系统。
 - 默认助手的 `model:'*'` 与模型能力（tools/vision）的运行时解析关系未逐项核对。
@@ -157,4 +159,4 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
 - 项目新对话的助手选择：`web-app/src/routes/project/$projectId.tsx:127-135`、`web-app/src/containers/ChatInput.tsx:235-242,477-496`
 - web 侧助手 store：`web-app/src/hooks/useAssistant.ts`（store 结构 L6-20、默认助手 L30-56、初始状态 L104-111、setAssistants L192-208）、`web-app/src/providers/DataProvider.tsx:240-253`
 - 设置 UI：`web-app/src/routes/settings/assistant.tsx`、`web-app/src/containers/dialogs/AddEditAssistant.tsx`
-- 助手切换：`web-app/src/containers/AssistantsMenu.tsx`、`AssistantSwitcher.tsx`
+- 助手切换：`web-app/src/components/AssistantsMenu.tsx`、`AssistantSwitcher.tsx`

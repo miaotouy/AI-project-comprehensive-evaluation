@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`（Node 服务端 + 插件架构）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：只读源码梳理 + 尽力而为运行验证。通读 `Plugin/MediaRenderer/`（manifest、MediaRenderer.js 全文 1701 行、AudioSynthesisWorker.js、README、config.env.example），node 解析 15 个媒体插件 manifest，核对 `Plugin.js` hybridservice/asynchronous 分发、`server.js:1471` 回调端点、`modules/messageProcessor.js:827-867` 回注、`WebSocketServer.js:95-144` 分布式回调；运行验证含 `node --check`、音频 Worker 独立实测（成功与错误路径）、FFmpeg 按插件参数实测编码 GIF/MP4
 >
@@ -21,7 +21,7 @@ VCPToolBox 的媒体创作能力是**服务端媒体供给/编排层**：项目�
 3. **ImageFileServer 图床/文件服务**：`/pw=[key]/images|files/...` 静态托管全部产物，是媒体结果的持久化真源；
 4. **异步回注链**：异步视频插件（Wan2.1）后台轮询完成后回调 `/plugin-callback/:pluginName/:taskId` 端点，结果落盘为 `VCPAsyncResults/<plugin>-<taskId>.json`，后续请求经占位符注入上下文；分布式节点经 `plugin_callback_forward` 走同一条落盘链。
 
-**核心边界**：媒体事实对象是"插件调用 + 产物文件 + 可选异步 job 文件"，**不存在**任务/历史/资产记录、去重索引、版本或用户可浏览的创作历史 UI；持续性与复用依赖文件服务 URL 的再次引用。资源白名单（单资源 50MB/总 100MB/每步 24 资源/源码 2MB/帧数上限/30M 采样数）、脚本白名单（仅内置 Anime.js/Three.js）、页面运行时网络全阻断、云元数据地址常禁、音频 requireAdmin 6 位验证码构成治理契约。
+**核心边界**：媒体事实对象是"插件调用 + 产物文件 + 可选异步 job 文件"，**不存在**任务/历史/资产记录、去重索引、版本或用户可浏览的创作历史 UI；持续性与复用依赖文件服务 URL 的再次引用。资源白名单（单资源 50MB/总 100MB/每步 24 资源/源码 2MB/帧数上限/30M 采样数）、脚本白名单（内置 Anime.js/Three.js/Pixi.js）、页面运行时网络全阻断、云元数据地址常禁、音频 requireAdmin 6 位验证码构成治理契约。
 
 MediaRenderer 现增加 Windows 鼠标主题生成：模型提交一份包含角色 SVG 的 HTML，服务端要求 15 个核心角色各声明一次（`pin`、`person` 可回退至箭头），在 16--256 像素的指定档位逐个截图；静态角色编码为多尺寸 CUR，带确定性绝对时间渲染函数的角色编码为 ANI。结果写为含光标、预览、原始 HTML、安装/卸载脚本和 `theme.json` 的 ZIP，并另托管总览 PNG。它扩大了可编程媒体的交付物类型，但 ZIP 内的源文件与元数据仍只是可下载文件，不形成可查询、可版本化的媒体工程对象（`Plugin/MediaRenderer/MediaRenderer.js:1667-2058`、`CursorThemePackager.js:11-685`）。
 
@@ -81,7 +81,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - 兼容参数：`assets` JSON（资源 id 规则 `^[A-Za-z][A-Za-z0-9_-]{0,63}$`，:65）与 `sourceImage`；音频素材另有 `audioUrl`/`audioAssetId` 两个单项参数；
 - 全部由 Node 侧 `resolveAsset`（:606-638）读取/下载为 Data URI 后注入源码（:727-755），Chromium 不直接访问本地文件或任意网络；页面运行时所有未预声明网络请求被拦截（`installNetworkPolicy` :933-948，仅放行 about:blank/data:/blob:/白名单 URL）；
 - 资源上限：单资源 50MB、合计 100MB、每步不超过 24 个（:27-29,242,655,731）；HTTP 重定向逐跳复检、最多 5 跳（`downloadRemoteAsset` :565-604）；**云元数据地址常禁**（169.254.169.254、100.100.100.200、fd00:ec2::254）；私网地址默认允许、可通过 `AllowPrivateNetworkAssets=false` 关闭；URL 禁止带用户名密码（上述地址策略见 :500-505,512-514,517-533）。
-- 脚本白名单：只有 jsDelivr/unpkg/cdnjs 上路径匹配的 Anime.js/Three.js 标签会被识别，并替换为本地 `AdminPanel-Vue/vendor/` 脚本；其他外部脚本一律拒绝。`libraries` 兼容参数也只接受这两个库。白名单定义、URL 识别、标签改写与拒绝逻辑见 MediaRenderer.js:47-64,172-187,194-219,677-696。
+- 脚本白名单：只有 jsDelivr/unpkg/cdnjs 上路径匹配的 Anime.js/Three.js/Pixi.js 标签会被识别，并替换为本地 `AdminPanel-Vue/vendor/` 脚本；其他外部脚本一律拒绝。`libraries` 兼容参数只接受 anime/three/pixi 三个库（`pixijs` 等前缀别名归一到 pixi）。Pixi.js 绑到 v8（`window.PIXI`），要求异步 `app.init(...)`、停用自带 Ticker 并在逐帧回调内显式 `app.render()`，与既有的确定性逻辑时间轴一致。白名单登记、URL 识别、标签改写与拒绝逻辑见 MediaRenderer.js:80-90,247-255,286-293,768。
 
 被扫描的元素与属性全集：
 

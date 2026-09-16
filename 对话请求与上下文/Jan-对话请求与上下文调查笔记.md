@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：直接阅读源码（AI SDK useChat 包装与自定义 ChatTransport、上下文管理模块、模型工厂与 fetch 注入、线程页执行仲裁、队列 store）并逐条核对符号与行号
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Jan 的生成管线是"**前端直连模型服务**"模式：没有后端聊天业务服务，React 前端（web-app）通过 AI SDK 的 `useChat` + 自研 `CustomChatTransport` 直接发起流式请求（经 Tauri 本地 API 代理到 llama-server、mlx-server 或远程 provider）。桌面与移动端共用前端逻辑，只在持久化后端分流（数据语义见会话与消息管理笔记）。
+普通 Chat 的生成仍由前端 `useChat` + `CustomChatTransport` 发起；Cowork 则复用 transport 的模型调用，但由独立 `coworkRunner` 管理多步工具循环与预算，不调用普通 Chat 的 `useChat`。CLI/TUI 在 Rust Agent 核心执行，仅使用远程 Provider（`web-app/src/lib/coworkTransport.ts:29-48`、`web-app/src/lib/coworkRunner.ts:15-25,407-445`、`src-tauri/jan-cli/src/main.rs:1-5`）。下文普通 Chat 的 `resume:false`、扩容和队列语义不适用于另外两条链。
 
 核心链条与关键事实：
 
@@ -24,6 +24,8 @@ Jan 的生成管线是"**前端直连模型服务**"模式：没有后端聊天�
 4. **错误与恢复**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；扩容流程写 model 设置 + 重启 router（llamacpp）或 stopModel（其他 provider），消费续写 prefill 并在 1s 后 regenerate。
 
 ## 系统边界与生成任务主链
+
+Cowork 请求链：`routes/cowork.tsx` 校验所选模型支持工具、创建/恢复 session、冻结本轮工具清单，`runAgentLoop` 逐步调用 transport 并串行派发工具；结果成为 turns 与 UIMessage 历史，完成后写回持久会话。单轮上限 100 步、会话 token 上限 200000，触限后由用户选择继续；取消传播给模型、工具和子 Agent，但对已启动的 shell 进程另有取消入口。循环独立于路由组件卸载（`web-app/src/routes/cowork.tsx:439-475,605-619,689-710,1015-1102`、`web-app/src/lib/coworkBudget.ts:11-23,94-100`、`web-app/src/lib/coworkRunner.ts:101-116,420-445`）。
 
 ```text
 ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
@@ -111,7 +113,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 - **队列存储**：`message-queue-store.ts`（71 行）维护 per-thread 队列，提供入队、原子取删、移除、清空和读取操作；入队条件是流式态且处于当前线程（§1）。
 - **消费**：`status==='ready'` 且无挂起工具时自动发下一条（纯文本绕过附件，§1）；`error` 清空队列；离开线程清队列；`removeSession` 也清对应队列（`chat-session-store.ts:181`）。
 - **并发与本地缓存**：llamacpp 固定 `id_slot=0`，但以 thread_id 识别应保存或恢复的状态；worker 对换入的线程先保存被替换的 slot，再恢复目标线程状态，并以模型、预设、构建和模型文件校验其可用性（`engine/http.rs:225-280`、`engine/slots.rs:35-175`）。多窗口/多会话并发的实际排队和恢复时序未验证；不同线程仍各有独立 Chat 会话实例，`sessionData.tools` 也按线程隔离（`chat-session-store.ts:8-12`）。
-- **后台生成**：本次未发现独立的后台任务管理器（检查范围：web-app 无后台任务 store/队列；标题生成与嵌入是发送主链内的异步步骤）。
+- **后台生成**：普通 Chat 的标题生成和嵌入在发送主链内异步执行；Cowork 的 Agent 循环保存在模块级运行状态中，切出路由不自动中断，会话可继续收到子 Agent 完成通知（`web-app/src/lib/coworkRunner.ts:15-25,101-116`、`web-app/src/routes/cowork.tsx:923-941`）。
 
 ## 9. Agent、工具、知识库与附件注入点
 
@@ -134,7 +136,7 @@ ChatInput.handleSendMessage（isStreaming 时 enqueue，否则组装 onSubmit）
 - `compactMessages` 摘要削减对关键上下文的影响（未做质量实测；失败回退纯 trim 已代码确认）。
 - 停止的网络级 abort 效果、退出恢复的端到端行为（未运行验证）。
 - 远程 provider 上参数注入与 `paramsSettings` 键删除的实际效果（未运行验证）。
-- 后台生成机制未调查（未发现独立任务管理器）。
+- Cowork 切换页面与应用退出后进程级继续运行的差异未实测；CLI 项目会话跨进程恢复未运行验证。
 - 自动发下一条队列消费与工具执行循环的完整时序（未运行验证）。
 
 ## 12. 关键源码索引

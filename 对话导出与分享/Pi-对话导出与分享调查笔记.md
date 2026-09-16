@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：静态源码调查；读取 TUI 的 `/export`、`/import`、`/share`、`/copy` 处理链，`export-html` 模板（index/template.html/template.js/template.css/ansi-to-html/tool-renderer），SessionManager 树模型与 JSONL 读写，CLI `--export`、RPC `export_html`，`.pi/extensions/import-repro.ts`，`.github/workflows/issue-analysis.yml`，README 与 docs；未运行应用、浏览器、GitHub CLI 或 Hugging Face 操作
 >
@@ -18,7 +18,7 @@ Pi 的对话导出与分享围绕“会话即 JSONL 树”这一事实源展开�
 
 - **JSONL 导出（`/export x.jsonl`）是把当前分支线性化**：取 `getBranch()` 从叶子到根的路径条目，重排 `parentId` 成线性链写盘，侧枝与完整树不进入该文件；但**HTML 导出嵌入了完整树**（所有 entries + leafId），默认按当前分支渲染，查看器侧栏可浏览并切换任意分支。两种导出口径不同。
 - **HTML 是单文件自包含交付物**：CSS、应用 JS、marked.min.js、highlight.min.js 全部内联（`export-html/index.ts:143-175`），会话数据以 base64 JSON 嵌在 `<script id="session-data">` 中，图片内容块以 data: URL 渲染；无外部 CSS/JS/字体依赖，可离线打开（推断，未运行验证）。Markdown 中引用远端图片的 URL 仍保持引用，离线时该图不显示。
-- **`/share` 上传的是这份自包含 HTML**：先导出到临时文件，再 `gh gist create --public=false` 创建 secret Gist（单一 `session.html` 文件），拼出 `https://pi.dev/session/#<gistId>`。客户端只创建链接：无更新、撤销、删除、过期路径，也不记录已创建的 Gist。
+- **`/share` 有 Radius 与 Gist 两条载荷不同的路径**：有可用 Radius provider 和凭据时，上传当前分支 JSONL并追加 system prompt 与工具 schema；否则导出自包含 HTML，再由 `gh gist create --public=false` 创建 secret Gist。客户端只创建链接，无本地更新、撤销、删除或过期记录。
 - **HF 数据集发布位于仓库外**：本仓库只承担“交付物与格式 + 引导”角色。README 指引使用外部伴生工具 `badlogic/pi-share-hf` 把会话发布为 HF 数据集（示例 `badlogicgames/pi-mono`）；数据来源、提示与权限默认值由外部工具负责，本次未找到仓库内任何 HF 上传代码或隐私提示。
 - 同仓库的 CI（`issue-analysis.yml`）复用同一导出链路：把分析会话导出为 HTML+JSONL 后经 GitHub API 创建 secret Gist（`public: false`），并把链接和 `/ir` 导入指令评论到 issue 上；`.pi/extensions/import-repro.ts` 则演示了匿名 `GET api.github.com/gists/{id}` 拉回 HTML/JSONL 并转回会话的往返消费路径。
 
@@ -30,7 +30,7 @@ Pi 的对话导出与分享围绕“会话即 JSONL 树”这一事实源展开�
   ├─ /export [路径.html]（TUI）     -> exportSessionToHtml（含 systemPrompt/tools/自定义工具 HTML）
   ├─ CLI pi --export in.jsonl [out.html] -> exportFromFile（无 AgentState，不含 systemPrompt/tools）
   ├─ RPC export_html               -> 同上 exportToHtml，供远端客户端（如 pi-chat）调用
-  ├─ /share                        -> 导出 HTML -> gh gist create --public=false -> pi.dev/session/#<gistId>
+  ├─ /share                        -> Radius: 当前分支 JSONL + 环境元数据；否则 HTML -> secret Gist
   ├─ /import <path.jsonl>          -> 复制进会话目录并 SessionManager.open 续跑（往返）
   └─ /copy                         -> 最后一条助手文本进剪贴板（简单交付，无选区工作流）
 ```
@@ -50,7 +50,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 - `/export [file]`：按后缀分流，带 .jsonl 走 JSONL、否则走 HTML；无参数时默认输出 `pi-session-<会话文件basename>.html`（`export-html/index.ts:274-278`）。JSONL 无参数时生成带时间戳文件名（`agent-session.ts:3250-3253`）。目标为个人存档与人际传播。
 - `/import <path.jsonl>`：确认后复制文件到会话目录并切换运行时（`agent-session-runtime.ts:361-396`），目标为跨机恢复与接续。
-- `/share`：一键把当前会话发布为 secret Gist 并给出查看链接，目标为分享给他人查看（`interactive-mode.ts:5862-5954`）。
+- `/share`：优先把当前分支及环境元数据发布为 Radius 组织 artifact；无可用 Radius 凭据时创建 secret Gist 并给出查看链接（`modes/interactive/session-share.ts:24-203`）。
 - `/copy`：复制最后一条助手消息文本到剪贴板（`interactive-mode.ts:5956-5972`、`agent-session.ts:3291-3306`）；属于普通复制，不构成选区/格式工作流。
 - CLI `--export <in> [out]`：非交互地把任意会话文件转 HTML 后退出（`main.ts:626-638`；`args.ts:149-150, 288, 356-357`）。
 - RPC `export_html`：对外部进程/客户端暴露的导出命令（`rpc-types.ts:59`、`rpc-mode.ts:596-598`）。
@@ -99,13 +99,14 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 7. 生成历史、版本与持久化
 
-本次未找到版本历史概念：导出每次覆写/新写目标文件，无“重新生成覆盖或追加”的显式记录；分享每次创建新 Gist，已创建链接不在本地持久化（全仓未发现分享记录存储；`/share` 只 showStatus 一次）。
+本次未找到版本历史概念：导出每次覆写或新写目标文件；Radius 与 Gist 分享每次都创建新的外部对象，已创建链接不在本地持久化。客户端没有比较、恢复或更新旧分享对象的入口。
 
 ## 8. 分享载体、访问控制与撤销
 
-`/share`（`interactive-mode.ts:5862-5954`）：
+`/share` 先由 `shareSession` 选择传输路径（`modes/interactive/session-share.ts:46-203`）：
 
-- 前置检查：`gh auth status` 非零则提示先 `gh auth login`；未安装 gh 则提示安装（`5864-5873`）。
+- Radius provider 与凭据可用时，导出当前分支 JSONL，追加 `pi.share` custom entry 保存实际 system prompt 与激活工具 schema，再上传组织可见 artifact；上传失败直接报错，不回退 Gist。
+- 只有 Radius 不可用或无凭据时才检查 `gh auth status`，未安装或未登录会提示修复。
 - 导出 `session.html` 到临时目录，随后以子进程执行 `gh gist create --public=false`（`5914`）——secret Gist、单文件、无 description。
 - 从 `gh` 输出 URL 尾部截取 gistId，拼出查看链接：默认 `https://pi.dev/session/#<gistId>`，可用环境变量 `PI_SHARE_VIEWER_URL` 覆盖（`config.ts:502-508`）。文档见 `docs/environment-variables.md:88`。
 - 上传的内容是自包含 HTML（其中嵌有头部、全部条目、leafId 与 system prompt、工具定义、预渲染工具 HTML 的 base64 JSON）。“消息/标题/元数据”均以会话数据形式存在于 HTML 内，Gist 本身无标题字段。
@@ -115,7 +116,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 9. 隐私、安全与内容治理
 
-- 导出/分享**无隐私提示、无脱敏**：HTML/JSONL 原样携带 system prompt、工具定义、thinking 全文、bash 命令与输出、文件路径、read 出的文件内容、图片与自定义消息；`/share` 在创建 Gist 前没有任何内容确认或警告。API 密钥本身不进入会话文件（auth 存于 `~/.pi/agent/auth.json`），但 bash 输出等可能包含秘密的内容会原样进入交付物。
+- 导出/分享**无隐私提示、无脱敏**：HTML/JSONL 原样携带 thinking、bash 命令与输出、文件路径、read 出的文件内容、图片与自定义消息；HTML 和 Radius 载荷还可包含 system prompt 与工具定义。`/share` 在上传 Radius artifact 或创建 Gist 前都没有内容确认或警告。API 密钥本身不进入会话文件，但工具输出中的秘密会原样进入交付物。
 - 分享方向（HTML）做了输入侧硬化：marked 禁用原生 HTML 渲染（HTML 按纯文本输出）、链接/图片 scheme 白名单并剥离 C0 控制字符、href/id/mimeType/data 全部做 HTML 转义（`template.js:607-626,1557-1637`）。对应的静态断言测试为 `test/export-html-xss.test.ts`、`export-html-skill-block.test.ts`、`export-html-whitespace.test.ts`。自定义工具预渲染 HTML 直接注入 innerHTML，其安全性依赖工具渲染器自身输出（静态推断）。
 - 分享方向（Gist/查看器）的访问控制完全依赖 GitHub secret Gist 与查看器服务端；pi 客户端无任何服务端治理参与。
 
@@ -129,7 +130,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 - **同一会话、两种口径**：JSONL 导出线性化当前分支（可往返），HTML 导出嵌入完整树（保留分支与隐藏内容但不可直接导回）。文档与代码对“导出=分支”的表述仅针对 JSONL（`agent-session.ts:3243-3248` 注释）。
 - **HTML 交付物即分享稿**：自包含、零外部依赖，牺牲体积换取可离线查看与 Gist 单文件托管；代价是无导出前编辑/预览、无图片/PDF 形态。
-- **分享止于创建链接**：/share 把查看、访问控制、保留期全部交给 GitHub + pi.dev 查看器；客户端不记录、不更新、不撤销。
+- **分享止于创建链接**：Radius 路径把访问控制与保留期交给 Radius artifact 服务，回退路径交给 GitHub 与 pi.dev 查看器；客户端都不记录、不更新、不撤销。
 - **研究发布走仓库外闭环**：本仓库止步于“可移植会话格式 + README 引导”，HF 发布（`badlogic/pi-share-hf`）与数据集（`badlogicgames/pi-mono`）作为外部伴生工具存在；会话 JSONL v3 与 `docs/session-format.md` 共同构成该闭环的数据契约。
 - 隐私无护栏是有意为之还是疏漏，本次无从判断：`/share` 上传的是含完整工具输出的 HTML，而 README 鼓励公开分享 OSS 会话，两者之间没有内容检查环节。
 

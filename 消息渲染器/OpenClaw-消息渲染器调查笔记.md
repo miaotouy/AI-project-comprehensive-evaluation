@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：只读梳理 Gateway 协议、transcript 投影、Control UI、TUI、iOS 原生聊天和 Android 原生聊天的事件、状态、列表与内容渲染链；未运行构建、测试或目标设备验证
 >

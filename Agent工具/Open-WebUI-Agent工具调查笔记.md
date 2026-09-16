@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读源码核对（utils/middleware.py 工具主循环、tools/builtin.py 内置工具、utils/tools.py、routers/tools.py、utils/filter.py、functions.py、utils/mcp、utils/subagents、代码解释器）；未修改目标仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，不在路由或 utils/chat.py：主入口 `process_chat_payload`（2248 行）负责编排，先连接外部工具服务器（`connect_mcp_server`，2197 行），再执行单个工具（`execute_tool_call`，4969 行）、后处理结果（`process_tool_result`，871 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
+Open WebUI v0.11.3 的工具调用主循环位于 `utils/middleware.py`，不在路由或 utils/chat.py：主入口 `process_chat_payload`（2365 行）负责编排，先连接外部工具服务器（`connect_mcp_server`，2314 行），再执行单个工具（`execute_tool_call`，5671 行）、后处理结果（`process_tool_result`，1006 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
 
 - 工具分三大来源，统一注册成 `tools_dict`（middleware.py 2732 行起）：本地数据库工具（`get_tools`，utils/tools.py 267 行）、内置工具（`get_builtin_tools`，520 行）、外部 MCP/OpenAPI 工具服务器（`server:*` 前缀）；每条条目含 `{tool_id, callable, spec, type}`，类型为 builtin/external/mcp，另有 `direct` 标志（前端直连执行）；
 - **内置工具按条件注入，不整批暴露**：共 54 个内置工具函数（tools/builtin.py，文件头明确警告只能经 utils/tools.py 封装使用），按 16 个类别做四重开关检查——模型 meta 的 `builtinTools` 类别开关、全局配置（`Config.get`）、模型能力（`get_model_capability`）、用户权限；
@@ -25,9 +25,9 @@ Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，不在
 - 代码解释器双引擎：`code_interpreter.engine` 为 `pyodide` 时通过 `event_caller({'type': 'execute:python'})` 推送前端浏览器执行；为 `jupyter` 时调用 `execute_code_jupyter`（utils/code_interpreter.py，WebSocket 连 Jupyter kernel）；`CODE_INTERPRETER_BLOCKED_MODULES` 会注入受限 `__import__` 包装代码；
 - MCP 工具通过 `client.call_tool` 直接调用，工具名统一为 `{server_id}_{tool_spec["name"]}`；连接前做 `has_connection_access` 访问授权校验；
 - 子代理（Sub-agents）是内部 API 重入：`delegate_task`（builtin.py 1520 行）→ `utils/subagents.py: delegate`（270 行）创建独立 chat（`internal_meta` type=subagent）→ `_build_request` 伪造带 `typ: 'subagent'` token 的内部请求 → 递归调用 `CHAT_COMPLETION_HANDLER`。后台模式用信号量限流（上限 `subagents.max_concurrent`/`max_async`）；子代理内部禁用写类 memory 工具（`MUTATING_MEMORY_TOOLS`）。
-- Filter/Pipeline 是两条并行通道：本地函数插件经 `utils/filter.py` 的 `process_filter_functions`（197 行）按 inlet/stream/outlet handler 执行；远程 pipeline 服务器经 HTTP POST 到 `{url}/{filter_id}/filter/inlet|outlet`；执行顺序：Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files；
+- Filter/Pipeline 是两条并行通道：本地函数插件经 `utils/filter.py` 的 `process_filter_functions` 按 inlet/stream/outlet 与 request 四类 handler 执行；远程 pipeline 服务器经 HTTP POST 到 `{url}/{filter_id}/filter/inlet|outlet`；能力注入顺序：Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files；消息定稿前还会跑一次 Filter `request`，工具审批恢复与每轮工具调用之后也会重跑该阶段；
 - Valves 配置全部经 Fernet 加密存储（utils/valves.py），`WEBUI_SECRET_KEY` 派生密钥，`ENABLE_VALVE_ENCRYPTION` 开关；
-- 工具审批可在请求参数中选择“完整访问”或“逐次询问”。后者由服务端把首个待执行调用持久化为 pending、其余调用标为 queued；恢复请求会拒绝已结算的调用，并沿原会话参数继续执行。`ask_user` 不进入这条审批暂停链（`utils/middleware.py:3250-3428`、`utils/tool_approval.py:54-156`）。
+- 工具审批可在请求参数中选择“完整访问”或“逐次询问”。后者由服务端把首个待执行调用持久化为 pending、其余调用标为 queued；恢复请求会拒绝已结算的调用，并沿原会话参数继续执行。`ask_user` 不进入这条审批暂停链，但一轮里现在允许出现多个 ask_user 调用：只要同一轮还混有其他工具调用就判为非法，非法调用会被剔出本轮工具列表、每个各留一条错误结果，然后该轮继续执行剩余调用（`utils/ask_user.py:9-27,83-146`、`utils/middleware.py:5582-5600`；审批链见 `utils/tool_approval.py:54-156`）。
 - 前端工具 UI 在 `MessageInput/IntegrationsMenu.svelte`（集成菜单的 Tools tab），非独立 Tools.svelte；工作区管理页 `workspace/Tools.svelte` 负责上传/编辑/Valves。
 
 ## 1. 内置工具生态
@@ -78,23 +78,23 @@ Open WebUI v0.11.0 的工具调用主循环位于 `utils/middleware.py`，不在
 ## 3. 工具调用执行循环（utils/middleware.py）
 
 ```text
-process_chat_payload (2248)
-  -> payload_tools is None 时服务端解析 tool_ids（2720-2807）
-       server:mcp: 前缀 -> 逐服务器 connect_mcp_server + 注册（2757-2779, type='mcp'）
+process_chat_payload (2365)
+  -> payload_tools is None 时服务端解析 tool_ids
+       server:mcp: 前缀 -> 逐服务器 connect_mcp_server + 注册（type='mcp'）
        其余 -> get_tools
   -> 请求发给上游，模型返回 tool_calls
-  -> while tool_calls and iterations < max_tool_call_iterations（4916-5314）
-       parse_tool_params（4954，JSON 解析失败回退 ast.literal_eval）
-       execute_tool_call（4969）
-         direct 工具 -> event_caller({'type': 'execute:tool'}) 推前端执行（4983-4995）
-         普通工具 -> get_updated_tool_function 绑定 __messages__/__files__ 后 await（4997-5004）
-       delegate_task 特殊并发收集（5009-5023）
-       process_tool_result（5041-5049）+ 终端事件转发 + 引用提取（5058-5081）
-       function_call -> completed + function_call_output 回填（5092-5127）
-       引用 -> RAG 模板上下文重建（5140-5200）
-       convert_output_to_messages 拼回消息（5239-5262）
-       generate_chat_completion 再请求（5278-5283）
-  -> 迭代上限报错（5316-5323）
+  -> while tool_calls and iterations < max_tool_call_iterations（5576-6048）
+       parse_tool_params（JSON 解析失败回退 ast.literal_eval）
+       execute_tool_call（5671）
+         direct 工具 -> event_caller({'type': 'execute:tool'}) 推前端执行
+         普通工具 -> get_updated_tool_function 绑定 __messages__/__files__ 后 await
+       delegate_task 特殊并发收集
+       process_tool_result（1006）+ 终端事件转发 + 引用提取（get_citation_source_from_tool_result 390）
+       function_call -> completed + function_call_output 回填
+       引用 -> RAG 模板上下文重建
+       convert_output_to_messages 拼回消息
+       generate_chat_completion 再请求
+  -> 迭代上限报错（6036-6045）
 ```
 
 - 工具结果中的 base64 图片拆成 `input_image` 供 LLM 消费、前端展示则剥离（5106-5115、5202-5211 行），图片另附一条 user 消息（5264-5276 行）；
@@ -120,13 +120,14 @@ process_chat_payload (2248)
 ### 5.1 本地函数插件
 
 - `Function` 表（models/functions.py 19-34 行）：id / user_id / name / type / content / meta / valves / is_active / is_global；
-- 执行：`utils/filter.py` 先 `resolve_filter_pipeline`（56 行）解析活跃 filter——全局 filter + 模型 `filterIds`，`toggle` 控制活跃性，按 `Valves.priority` 排序（76-91 行）；再经 `process_filter_functions`（197 行）按 inlet/stream/outlet handler 执行；
-- Valves 注入（108-120 行）、UserValves（135-144 行）、`file_handler` 跳过文件（172-174、229-233 行）；
+- 执行：`utils/filter.py` 先 `resolve_filter_pipeline` 解析活跃 filter——全局 filter + 模型 `filterIds`，`toggle` 控制活跃性，按 `Valves.priority` 排序；再经 `process_filter_functions` 按 handler 名执行，handler 必须可调用，除 inlet/stream/outlet 外新增 `request` 类型；
+- 活跃 filter 列表与 Valves 缓存在请求作用域的 `FilterContext`（挂在 `request.state`，`get_filter_context` 惰性创建），同一请求内重复求值不再重复查库；`request` 在消息定稿前、工具审批恢复后、每轮工具调用之后各执行一次（`utils/filter.py:11-45,68-75,165-182`；`utils/middleware.py:5983-5995`）；
+- Valves 注入、UserValves、`file_handler` 跳过文件的既有分支保留；
 - 路由：`POST /sync`（routers/functions.py 162 行，批量 `replace_imports` + `load_function_module_by_id`）、`POST /create`（199 行）、Valves 系列（458-641 行）。
 
 ### 5.2 远程 Pipeline
 
-- `routers/pipelines.py`：`get_sorted_filters`（41-54 行）按 `pipeline.priority` 排序，再走 `process_pipeline_inlet_filter`（63 行）或 `process_pipeline_outlet_filter`（126 行，outlet 时模型自身 pipeline 排最前）；两者都 HTTP POST 到 `{base_url}/{filter_id}/filter/inlet|outlet`；
+- `routers/pipelines.py`：`get_sorted_filters` 按 `pipeline.priority` 排序，再走 `process_pipeline_inlet_filter` 或 `process_pipeline_outlet_filter`（outlet 时模型自身 pipeline 排最前）；两者都 HTTP POST 到 `{base_url}/{filter_id}/filter/inlet|outlet`，没有候选过滤器时直接返回原 payload，不再建 HTTP 会话（`routers/pipelines.py:63-74,129-140`）；
 - 管理路由：`GET /list`、`POST /upload`、`POST /add`、Valves 系列。
 
 ### 5.3 插件加载与 Valves
@@ -174,15 +175,15 @@ process_chat_payload (2248)
 
 ## 9. 关键源码索引
 
-- 工具调用主循环：[`utils/middleware.py`](../../open-webui/backend/open_webui/utils/middleware.py)（2248、2197、4969、871、5325-5395 行）
+- 工具调用主循环：[`utils/middleware.py`](../../open-webui/backend/open_webui/utils/middleware.py)（`process_chat_payload` 2365、`process_tool_result` 1006、`get_citation_source_from_tool_result` 390、`execute_tool_call` 5671、`DETECT_CODE_INTERPRETER` 4631）
 - 内置工具实现：[`tools/builtin.py`](../../open-webui/backend/open_webui/tools/builtin.py)
 - 审批状态、决议与恢复请求：[`utils/tool_approval.py`](../../open-webui/backend/open_webui/utils/tool_approval.py)（`resolve_tool_approval`、`build_tool_approval_resume_payload`）
 - kb_exec：[`tools/knowledge_fs.py`](../../open-webui/backend/open_webui/tools/knowledge_fs.py)（1125-1183 行）
 - 工具加载/注入：[`utils/tools.py`](../../open-webui/backend/open_webui/utils/tools.py)（267、520、943-982 行）
 - 工具 CRUD：[`routers/tools.py`](../../open-webui/backend/open_webui/routers/tools.py)
 - Tool 表：[`models/tools.py`](../../open-webui/backend/open_webui/models/tools.py)
-- 过滤器执行：[`utils/filter.py`](../../open-webui/backend/open_webui/utils/filter.py)（56、197 行）
-- 远程 pipeline：[`routers/pipelines.py`](../../open-webui/backend/open_webui/routers/pipelines.py)（63、126 行）
+- 过滤器执行：[`utils/filter.py`](../../open-webui/backend/open_webui/utils/filter.py)（`get_filter_context` 38、`resolve_filter_pipeline` 68、`process_filter_functions` 212 行）
+- 远程 pipeline：[`routers/pipelines.py`](../../open-webui/backend/open_webui/routers/pipelines.py)（63、129 行）
 - 插件加载：[`utils/plugin.py`](../../open-webui/backend/open_webui/utils/plugin.py)（27 行）
 - Valves 加密：[`utils/valves.py`](../../open-webui/backend/open_webui/utils/valves.py)
 - 子代理：[`utils/subagents.py`](../../open-webui/backend/open_webui/utils/subagents.py)（47、72、270 行）

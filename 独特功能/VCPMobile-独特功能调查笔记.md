@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`cecdbe432feda57821938bba7625a272113d21c1`（分支：`main`）
+> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
 >
 > 调查方式：以 README 建立候选，静态走读日记中心、分布式节点和相关 Tauri 服务；未运行 Android 设备、VCP 服务或语义检索
 >
@@ -34,9 +34,9 @@ README 还列举 RAG 观察器、浮动助手、多模态附件和 WebGL 背景�
 ### 能力卡 1：远端日记中心
 
 - **用户目标**：在移动端浏览、检索、编辑、创建、重命名、移动和批量管理 VCP 日记文件，而不是把日记作为聊天消息附件或本地 SQLite 记录。
-- **入口与事实对象**：右侧栏入口关闭抽屉后打开 `diaryCenter` 覆盖页，首次使用才异步加载。事实对象是远端服务持有的 folder、file、正文和内容 hash，前端 Store 仅持有当前资源、草稿、搜索请求和少量界面偏好（`src/components/layout/RightSidebar.vue:25-27, 196`；`src/components/FeatureOverlays.vue:32-122`；`src/features/diary/diaryStore.ts:84-191`）。
-- **完整主链**：用户进入日记中心 -> Store 经 Tauri command 列目录、取正文或发起文本/语义搜索 -> Rust `DiaryServiceState` 访问外部 VCP 日记 API -> 返回有类型 DTO -> 用户编辑时以基线 hash 提交 -> 服务端读前、写入、读回核验 -> Store 更新基线或保留冲突/不确定草稿。创建则经 Human Tool 请求，服务端返回实际文件 key 后打开它（`src/features/diary/diaryStore.ts:393-610, 707-857`；`src-tauri/src/vcp_modules/diary/diary_service.rs` 中 `DiaryServiceState` 与 `diary_save_note`/`diary_create_note`）。
-- **持续性与恢复**：日记正文和语义索引的权威在远端 VCP 服务，日记领域明确不写入移动端同步数据库；本机仅持久化隐藏目录、折叠目录和排序。搜索用 generation、request ID 和取消命令隔离旧结果；删除/移动后保留有限 tombstone，避免迟到响应将已移除项目重新显示（`docs/modules/25_日记中心远端服务.md` 第 1-3 节；`src/features/diary/diaryStore.ts:106-223, 333-500`）。
+- **入口与事实对象**：右侧栏入口关闭抽屉后打开 `diaryCenter` 覆盖页，首次使用才异步加载。事实对象是远端服务持有的 folder、file、正文和内容 hash，前端 Store 仅持有当前资源、草稿、搜索请求和少量界面偏好（`src/components/layout/RightSidebar.vue:41-42,320`；`src/components/FeatureOverlays.vue:16-193`；`src/features/diary/diaryStore.ts:84-260`）。
+- **完整主链**：用户进入日记中心 -> Store 经 Tauri command 列目录、取正文或发起文本/语义搜索 -> Rust `DiaryServiceState` 访问外部 VCP 日记 API -> 返回有类型 DTO -> 用户编辑时以基线 hash 提交 -> 服务端读前、写入、读回核验 -> Store 更新基线或保留冲突/不确定草稿。创建则经 Human Tool 请求，服务端返回实际文件 key 后打开它（`src/features/diary/diaryStore.ts:84-913`；`src-tauri/src/vcp_modules/diary/diary_service.rs` 中 `DiaryServiceState` 与 `diary_save_note`/`diary_create_note`）。
+- **持续性与恢复**：日记正文和语义索引的权威在远端 VCP 服务，日记领域明确不写入移动端同步数据库；本机仅持久化隐藏目录、折叠目录和排序。搜索用 generation、request ID 和取消命令隔离旧结果；删除/移动后保留有限 tombstone，避免迟到响应将已移除项目重新显示（`docs/modules/25_日记中心远端服务.md` 第 1-3 节；`src/features/diary/diaryStore.ts:106-260,300-500`）。
 - **人机关系与边界**：用户拥有编辑、强制覆盖、批量管理和创建入口；日记创建会通过 VCP 的 Human Tool 端点触发远端 DailyNote 能力。移动端不在本地执行日记语义模型，也没有确认 Agent 在此仓库中直接浏览或修改日记的独立工具链。
 - **独特性判断**：普通 Chat 的附件或记忆摘要不提供独立文件对象、显式语义检索、基线冲突处理和不确定创建收口。这里把远端长期内容作为可继续维护的移动工作区，因而符合“协同工作区/记忆演化”的候选标签。
 - **证据强度**：主链由 Vue Store、Tauri command 注册和 Rust 服务三层静态走通；真实服务器兼容、语义检索质量、冲突 UI 与 Human Tool 结果未运行验证。
@@ -44,9 +44,9 @@ README 还列举 RAG 观察器、浮动助手、多模态附件和 WebGL 背景�
 ### 能力卡 2：可治理的手机设备节点
 
 - **用户目标**：让外部 VCP 服务按需调用手机的位置、传感器、硬件状态、剪贴板或通知等本机能力。
-- **入口与事实对象**：用户在设置中启用“分布式节点”并设定设备名；本机工具注册表、禁用集合和连接状态构成主要对象，外部请求以 request ID 关联（`src/features/distributed/DistributedSettingsSection.vue:31-98`；`src-tauri/src/distributed/types.rs:81-145`）。
-- **完整主链**：启用设置 -> 后端生命周期建立到 VCP 分布式服务的 WebSocket -> 收到连接确认后上报启用工具 manifest -> 服务端下发 `execute_tool` -> 本地注册表执行 -> WebSocket 回传结果 -> 分布式页显示状态与工具数。断线以指数退避重连，工具开关变更会重新注册（`src-tauri/src/distributed/client.rs:406-528, 738-1008`；`src-tauri/src/distributed/tool_registry.rs:203-379`）。
-- **持续性与治理**：工具禁用集合以原子写入保存，读取失败时 fail closed 为全禁用；每个工具还声明 Android 权限，用户可在分布式页请求许可。连接是否开启、外部服务的实际调度和权限拒绝后的效果均未运行验证。
+- **入口与事实对象**：用户在设置中启用“分布式节点”并设定设备名；本机工具注册表、启用白名单和连接状态构成主要对象，外部请求以 request ID 关联（`src/features/settings/SettingsView.vue:70-80`；`src-tauri/src/distributed/types.rs:93-175`）。
+- **完整主链**：启用设置 -> 后端生命周期建立到 VCP 分布式服务的 WebSocket -> 收到连接确认后上报启用工具 manifest -> 服务端下发 `execute_tool` -> 本地注册表执行 -> WebSocket 回传结果 -> 分布式页显示状态与工具数。断线以指数退避重连，工具开关变更会重新注册（`src-tauri/src/distributed/client.rs:550-702,703-1118`；`src-tauri/src/distributed/tool_registry.rs:261-500`）。
+- **持续性与治理**：启用白名单以原子写入保存，配置损坏时 fail closed 为空白名单（等价全禁用）；每个工具还声明 Android 权限，用户可在分布式页请求许可。连接是否开启、外部服务的实际调度和权限拒绝后的效果均未运行验证。
 - **独特性判断**：它跨越设置 UI、Android 平台能力、远程协议、后台保活和外部 AI 服务。拆成普通“工具”或普通“同步”会遗漏“手机以可禁用能力目录参与外部系统”的完整角色；标签为“分布式多模态”。
 - **证据强度**：主链确认（静态）；完整身份、权限、远端结果消费和断网取消需要真实设备与服务端验证。详细协议、身份与安全边界见 [VCPMobile 外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPMobile-外部执行体与应用协作调查笔记.md)。
 
@@ -70,8 +70,8 @@ README 将 VCPMobile 描述为 VCPChat 的移动进化版，并将日记和分�
 
 ## 关键源码索引
 
-- `src/features/diary/diaryStore.ts:84-857`：移动端日记对象、搜索、写入与管理状态。
+- `src/features/diary/diaryStore.ts:84-913`：移动端日记对象、搜索、写入与管理状态。
 - `src-tauri/src/vcp_modules/diary/diary_service.rs`：远端 API、受保护写入与创建服务。
-- `src/components/FeatureOverlays.vue:32-122`：日记中心的覆盖页装配与首次懒加载。
-- `src-tauri/src/distributed/client.rs:406-1034`、`src-tauri/src/distributed/tool_registry.rs:203-379`：手机节点主链和工具治理。
+- `src/components/FeatureOverlays.vue:16-193`：日记中心的覆盖页装配与首次懒加载。
+- `src-tauri/src/distributed/client.rs:550-1254`、`src-tauri/src/distributed/tool_registry.rs:261-500`：手机节点主链和工具治理。
 - `docs/modules/25_日记中心远端服务.md`：仓库内日记远端契约与资源边界说明。

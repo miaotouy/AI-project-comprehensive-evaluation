@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：只读源码梳理 `packages/ai` 的 Provider/认证/模型目录与 `packages/coding-agent` 的 ModelRuntime 组合层；未运行真实 Provider 请求
 >
@@ -28,7 +28,7 @@ Pi 的 LLM 渠道管理由 `packages/ai`（协议与 Provider 实现）和 `pack
 5. **重试与故障转移分层且范围明确**：
    - SDK 层重试在 `api/*` 的 `retryProviderRequest`；
    - Assistant 消息层重试在 `retryAssistantCall`（`packages/ai/src/utils/retry.ts`）与 `coding-agent` 会话级 `auto_retry`（`core/agent-session.ts:2686`）；
-   - 未发现跨 Provider 的自动故障转移；OpenRouter/Vercel Gateway 的上游路由是把路由策略作为请求字段交给聚合服务（`types.ts:685-764`）。
+   - 常规请求仍没有客户端侧跨 Provider 自动故障转移；OpenRouter/Vercel Gateway 把路由交给聚合服务。Anthropic Messages 新增服务端 refusal fallback：仅对模型元数据允许的候选发送 `fallbacks`，响应若在输出中途切换则拒绝。
 6. **配置管理以文件和扩展为主，TUI 只覆盖认证及运行时刷新**：`models.json` 的 schema 能表达自定义 Provider、Endpoint 和模型，但 Pi 没有渠道配置编辑器；TUI 的 `/login`、`/logout`、`/model`、`/reload` 分别处理凭据、模型选择和重新加载，不能新增、复制、删除或启停 `models.json` 渠道。
 7. **可观测性以内置为主**：用量与成本由 `calculateCost` 依据模型价格表计算（`models.ts:878-898`），TUI footer 展示 token/成本；连接检测复用 `checkAuth`（仅确认凭据完整，不发起真实请求）。
 
@@ -160,7 +160,7 @@ CLI/会话层 (AgentSession)
 - 退避与上限：指数退避 `baseDelayMs * 2^(n-1)`（默认 2000ms、最多 3 次，`settings-manager.ts:818-822`），abort 归一化为 aborted 消息。
 - **会话级自动重试**：`agent-session.ts:2686-2737` 的 `_prepareRetry` 在同一预算内对最后一个 assistant 消息 `continue()` 重跑；compaction 摘要生成也用同一 `settings.retry`（`compaction/compaction.ts:557-580`）。
 - **上下文溢出处理**：溢出不是重试分支：`_isRetryableError` 对 `isContextOverflow` 返回 false（`agent-session.ts:2647`），溢出走“压缩一次并自动重试一次”（实现在 `_checkCompaction` 的 overflow 分支 :1994-2021 与 `_runAutoCompaction("overflow", willRetry)` :2058+；无独立 `_handleOverflowRecovery` 函数）。
-- **跨 Provider failover**：本次未找到。Provider 选择在会话/模型层面完成，请求失败只在同一 Provider/模型内重试；无模型 fallback 链、无 Key 轮换。
+- **跨 Provider failover**：客户端仍没有通用故障转移链。Anthropic Messages 是窄例外：`compat.allowedFallbackModels` 最多配置三个 Anthropic 服务端 refusal fallback，并携带候选的 provider、model 与成本；空数组明确关闭。请求发送 `server-side-fallback-2026-07-01` beta 与 `fallbacks`，返回替代模型时按其成本计费；如果 fallback 发生在已开始输出之后则报错，避免把两个模型的内容拼成一条消息（`packages/ai/src/types.ts:720-725`、`api/anthropic-messages.ts:176-181,596-617,1014,1170-1173`、`packages/coding-agent/src/core/model-config.ts:154-164`）。
 
 ## 8. 连接检测、日志与可观测性
 

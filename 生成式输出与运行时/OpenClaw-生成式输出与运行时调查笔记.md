@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码阅读；沿消息内容 part、Gateway 显示投影、`show_widget` 工具、Canvas 文档、Board Store/HTTP、view ticket、widget bridge 与 host RPC 复查输出对象的创建、状态、运行与回流；未启动 Gateway、未运行真实 UI/渠道场景
 >

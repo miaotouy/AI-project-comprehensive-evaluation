@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/llm`（llm、llm-retry、token-meter）、`packages/core`（session、agent-loop、tools）、`packages/session`（session-persistence 及其 jsonl/sqlite 后端、session-checkpoint-policy、session-projection）、`packages/terminal`、`packages/shell`、`packages/subprocess`、`packages/spill`、`packages/attachment`、`packages/feedback`、`packages/util/output-retention`、`packages/client`（runtime 与 ui-conversation 消费侧）及 `docs/subsystems` 的 llm-streaming.md、tools.md、persistence.md 等页面；未运行任何命令或测试
 >
@@ -22,7 +22,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 输出对象身份分四类：消息（稳定 `MessageId`）、工具调用/结果（`CallId` 配对）、磁盘文件（spill 文件、内容寻址附件）、运行实例（终端会话 `TerminalSessionId`，仅进程内存活，不进日志）。工具结果契约是"规范 JSON 值 + 纯投影渲染"：执行产生的 value 只在进程内存在，落盘的只有渲染后的内容、错误信息和展示 meta。
 
-超长文本经两级处理：shell/subprocess 保留尾窗口并给出完整流 spill 文件路径；`spill-policy` 把超过 `maxInlineBytes` 的纯文本结果整体存为会话私有文件，模型只见 head/tail 预览加定位提示。持久化为 write-behind 批量 + `session/flush` 检查点，JSONL（默认 zstd 帧，chunk 运行打包压缩）或 SQLite 行存储两种后端，含 torn-tail 修复与 interrupted turn 平衡。
+超长文本经两级处理：shell/subprocess 保留尾窗口并给出完整流 spill 文件路径；`spill-policy` 把超过 `maxInlineBytes` 的纯文本结果整体存为会话私有文件，模型只见 head/tail 预览加定位提示。持久化通过 write handle 的有界批处理与 `session/flush` 检查点完成；第一方只提供 JSONL。当前 v3 每事件一行并使用 checksummed zstd frame，旧 v0/v1 packed chunk 由历史 codec 读取，v0→v3 相邻迁移在写打开时发布不可变后继代。
 
 能力总评 **G1（富静态结果）**：文本/推理/图片与工具卡片在消息内投影，文件产物可寻址复用；终端 PTY 与后台 job 提供"模型可跨调用定向维护的活对象"（G5 的局部形态），但既不入日志也不持久化，进程终止即失。模型输出本身没有 G2 声明式控件、没有 G3 专用运行环境（本机 shell/PTY 执行属于工具执行边界）；用户不能编辑模型输出对象，无 diff 应用层与协作机制。
 
@@ -87,7 +87,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 ## 4. 表现类型、依赖与运行环境
 
-**表现层级**：text/reasoning 由客户端 Markdown 渲染（含代码高亮），image 块引用内容寻址附件；没有为模型输出提供 HTML/JS、Canvas 或脚本运行环境（本次全文检索未在输出协议中发现 artifact/canvas/notebook 类对象）。`packages/code-runtime` 与 e2b 属于 `run_code` 工具的执行环境，是工具边界而非输出运行时，本次未深入。
+**表现层级**：text/reasoning 由客户端 Markdown 渲染，image 块引用内容寻址附件；模型消息协议仍无独立 artifact/canvas/notebook 对象。Web 新增右侧文档预览（文本、代码、Markdown、HTML、PDF、图片）和持久终端表面，但它们寻址工作区文件或 Host terminal，不改变消息输出对象模型（`packages/client/ui-sidebar-documentpreview/`、`ui-sidebar-terminal/`）。PTC runtime 属 `run_code` 工具执行边界。
 
 **终端输出**：`TerminalSendResult` 携带本次发送的渲染 viewport、四种等待原因之一、会话状态与 truncated 标志（terminal/types.ts:82-91）；backend 用字节+行双上限的 `BoundedTextBuffer` 保留尾窗口（terminal-bash/session.ts:40-75），scrollback 按页读取并带行窗口与截断标记。
 
@@ -111,7 +111,7 @@ tool-terminal 的六个工具（open/send/read/signal/close/list）用内容收�
 
 ## 6. 编辑、diff、版本与协作
 
-模型是输出的唯一写者；用户不能编辑消息或工具结果，没有接受/拒绝/撤销流程。文件工具的 diff 属于工具执行边界（fs 工具把结果时 diff 放进 tool/result 的 meta 供卡片重放）。版本与协作：会话日志无迁移承诺（`SESSION_FORMAT_VERSION = 0`，只增事件类型靠 `ignorable` 标记兼容）；compaction 以表面替换表达"历史改写"，但没有对象级版本/分支（会话 fork 属会话管理类目）。反馈以版本冲突表达并发（失败码 `version-conflict` 带回当前项），不是日志内协作。
+模型是输出的唯一写者；用户不能编辑消息或工具结果，没有接受/拒绝/撤销流程。文件工具的 diff 属于工具执行边界。当前会话格式为 v3，v0→v3 由相邻迁移链恢复，`ignorable` 只承担同版本词汇扩展；compaction 以表面替换表达“历史改写”，但没有对象级版本。反馈以版本冲突表达并发，不是日志内协作。
 
 ## 7. 能力桥、执行位置与权限范围
 
@@ -121,11 +121,11 @@ tool-terminal 的六个工具（open/send/read/signal/close/list）用内容收�
 
 ## 8. 持久化、恢复、分享与导出
 
-**写入路径**：`session/event` 同步通知，持久化插件把事件克隆进每会话 write-behind 队列（固定 200ms 批窗；`session/flush` 取消等待并排空到静止，失败保留事件并暂停自动重试，write-behind.ts:22-159）。
+**写入路径**：`session/event` 同步通知后，JSONL write handle 接受事件并串行写入；append 是 best-effort 持久化，只有 handle 或 service-wide `flush` 构成耐久屏障（`packages/session/session-persistence/src/{index,handle}.ts`）。
 
 `session-checkpoint-policy` 在三个边界建立持久性屏障：模型请求分发前（llm/stream 首块前 flush）、顶层工具体执行前、下一步骤请求前（checkpoint-policy/src/index.ts:63-83）。事件 append 时即做 lossless-JSON 校验与冻结，坏事件在源点拒绝。
 
-**JSONL 后端**：每会话一个追加日志文件，默认 zstd 帧 + 校验和编码；`packChunks` 把连续同类 delta 运行打包为三个存储行类型之一（chunk-rows.ts:192-221，源码注释声称体积约 -60%），读取端无条件展开；原子发布（临时文件 + rename），torn-tail 截断修复。**SQLite 后端**：node:sqlite 同步 API，每事件一行（seq/type/time/data + surface 元数据列），SCHEMA_VERSION pragma 门控。
+**JSONL 后端**：每会话目录保留规范格式代，默认 checksummed zstd frame，也可选纯文本。当前 v3 一事件一行；旧 v0/v1 的 packed delta 只在历史 codec 中解码。读打开可只返回迁移后的逻辑视图，写打开经 Worker 验证后无覆盖发布 `session.v3.jsonl(.zstd)`，旧代不改写。第一方 SQLite 会话后端已移除（`packages/session/session-persistence-jsonl/src/{storage,generation}.ts`）。
 
 **崩溃恢复**：冷加载发现未闭合的 turn 时**不截断**，而是以合成的 `turn/end {kind:'interrupted'}` 关闭并补缺失工具错误（persistence.md §Crash recovery）；只丢弃物理 torn 的末记录。格式拒绝分两种错误类型（损坏 vs 本构建无法解释），未知必需事件不静默跳过。恢复路径：`agentLoop.resume` → 持久化 `prepare`（保留冷 Session 于有界 LRU 供复用）→ 原地校验冻结 → 发布为活 agent。分享/导出无独立能力（会话导出属会话管理，本次排除）。
 
@@ -143,7 +143,7 @@ turn/step 事件括号定义回合生命周期，abort 以合成工具结果收�
 
 ## 11. 设计取舍与已确认边界
 
-代码执行输出现可由 Python provider 承接：运行时协议把控制消息与程序标准输出分开传输，执行结果仍回到既有工具结果和会话事件模型，并未引入可独立编辑、版本化的代码 artifact。图像附件也保持为消息内容的一部分，附件服务负责内容寻址与规范化，LLM adapter 只在请求构建时解析它们（`packages/code-runtime/code-runtime-python/src/protocol.ts`、`packages/attachment/attachment-local/src/{store,normalization}.ts`）。
+PTC 代码执行可由默认 Node provider 或实验性 Python provider 承接：运行时协议把控制消息与程序标准输出分开传输，结果仍回到工具结果和会话事件模型，并未引入可独立编辑、版本化的代码 artifact。实现分别位于 `packages/ptc-runtime/ptc-runtime-node` 与 `packages/experimental/ptc-runtime-python`。
 
 - **日志即事实源**：连原始 token 级 chunk 都落日志，换取精确回放与"请求可从日志重建"的强不变量；代价是存储体积，用 zstd + chunk 打包缓解。usage 附着在 assistant/message 上而不是单独记录，保证计量与消息同生同灭。
 - **流协议闭合、词汇可合并**：StreamChunk 用闭合联合强制消费者处理新变体；ContentBlock 与 MessageSource 用可合并映射允许插件扩展。新 block 类型要求 adapter、UI、compaction、重放全链路支持（llm-streaming.md §Content blocks）。
@@ -156,7 +156,7 @@ turn/step 事件括号定义回合生命周期，abort 以合成工具结果收�
 
 **测试体系（存在，本次未运行）**：仓库以 vitest 单测 + 每文件 100% 覆盖率门禁 + 真实 API e2e（需 DEEPSEEK_API_KEY）+ keyless 快照回放分层；持久化后端共享 `runPersistenceContract` 契约套件；GUI 三层测试（数据层、渲染机制、组件）由 `test:gui` 与浏览器快照回放覆盖。流式折叠（BlockAssembler 的 delta-only/max-tokens/迟到 delta）、chunk 打包往返、torn-tail 修复、interrupted turn 平衡均有对应单测文件；全部结论基于静态阅读，未运行任何测试。
 
-**未验证事项**：任何运行时行为（流式渲染、PTY 交互与 inferred_idle 判定、zstd 压缩率、快照回放）；bash/pwsh 沙箱执行路径与 landlock 原生模块；`code-runtime`/e2b 的 run_code 执行环境；跨进程并发写同一会话（设计为单写者，未见多写者协议）；"~60% 日志体积缩减/约 56 倍 envelope 开销"等数字来自代码注释声称的真实会话测量，未实测；客户端 DOM 层视觉与节流行为。
+**未验证事项**：任何运行时行为（流式渲染、PTY 交互与 inferred_idle 判定、zstd 压缩率、快照回放）；bash/pwsh 沙箱执行路径与 landlock 原生模块；PTC Node/Python 与 e2b 的执行环境；跨进程 kernel lease；客户端 DOM 层视觉与节流行为。
 
 ## 13. 关键源码索引
 
@@ -167,6 +167,6 @@ turn/step 事件括号定义回合生命周期，abort 以合成工具结果收�
 - 工具结果契约：`packages/core/tools/src/presentation.ts`（卡片意图）、docs/subsystems/tools.md §ToolDefinition/执行管道
 - 终端与 shell 输出：`packages/terminal/terminal/src/types.ts:82-91`、`terminal-bash/src/session.ts:40-75`、`tool-terminal/src/index.ts:152-155`（finalizeContent 上限）、`packages/shell/tool-bash/src/render.ts:12-63`、`packages/subprocess/subprocess/src/types.ts:22-52`（CollectedOutput/SubprocessCollect）
 - spill/附件/保留器：`packages/spill/spill-policy/src/index.ts:94-231`、`spill-local/src/index.ts:37-63`、`packages/util/output-retention/src/index.ts:146-387`、`packages/attachment/attachment-local/src/store.ts:136-150`
-- 持久化：`packages/session/session-persistence/src/write-behind.ts:22-159`、`session-persistence-jsonl/src/index.ts:121-180`、`core/session/src/chunk-rows.ts:192-221`、`session-persistence-sqlite/src/index.ts:99-150`、`session-checkpoint-policy/src/index.ts:63-83`
+- 持久化：`packages/session/session-persistence/src/{index,handle}.ts`、`session-persistence-jsonl/src/{storage,handle,generation,lease}.ts`、`session-format/src/{catalog,chain}.ts`、`session-checkpoint-policy/src/index.ts`
 - 反馈与计量：`packages/feedback/message-feedback/src/index.ts:189-263`、`spec.ts:84-90`、`packages/llm/token-meter/src/usage-projection.ts:107-206`、`estimate.ts:26-49`
 - 客户端消费：`packages/client/runtime/src/client/sessions/session.ts:469-479`（帧处理）、`partial.ts:22`（PartialAccumulator）、`packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts:80-132`（updateChunk）

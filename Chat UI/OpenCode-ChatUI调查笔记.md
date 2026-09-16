@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Solid TUI 与 Web App 双表面组件与事件绑定、Electron 窗口层），界面行为均为静态确认，视觉效果与键盘可用性需运行验证
 >
@@ -40,6 +40,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 
 - **TUI**：消息路由是单文件大会话控制器（`routes/session/index.tsx`，2725 行），承担发送（`Prompt`，:1323-1329）、消息渲染入口、子 agent footer（:1311）、权限与提问对话框（:1299、:1305）、时间线/分支对话框（:527-561）以及 share/rename/compact 等会话命令（:500-579）；事件经 `context/sdk.tsx:82-117` 订阅，16ms 批量投递，断线按 1s→30s 指数退避。
 - **Web App**：会话页（`pages/session.tsx`）组织 timeline 与 Composer；`SessionComposerRegion`（`pages/session/composer/session-composer-region.tsx:11-168`）按需挂载提问、审批、待办、回退、追问等 dock 与 Composer 本体；新式 PromptInputV2Composer 与旧式 PromptInput 由 `newSessionDesign()` 开关选择（`pages/session.tsx:2183-2239`）。
+- 新布局的会话标签除双击改名外，还提供右键菜单中的重命名和关闭；菜单打开时暂停标签预览，关闭菜单后再进入内联编辑，避免两个浮层竞争。会话页标题编辑在失焦时保存，输入法 composing 阶段不把 Enter 当提交（`packages/app/src/components/titlebar-tab-nav.tsx:307-342`、`pages/session/timeline/message-timeline.tsx:779-792、1447-1462`）。
 - **多窗口**：SSE 事件全量广播，多个窗口各自订阅同一事件流、独立投影，无专门同步层（静态推断，见第 8 节）。
 - **桌面端（Electron）**：renderer 以源码方式复用 `@opencode-ai/app`（`desktop/src/renderer/index.tsx:3-17`），sidecar 进程内运行同一 opencode server（`main/server.ts` 的 `spawnLocalServer` :57，Basic auth 头 :197）。
 - 窗口级差异仅三处：每窗口独立 MemoryRouter 与 last-active URL 恢复（`index.tsx:85-111`）、草稿按窗口持久化到 SQLite（`main/ipc.ts:143-150` 的 draft 系列通道）、首启引导；macOS 关窗不退出进程，`activate` 时重建窗口（`main/index.ts:411-418`）。
@@ -84,6 +85,7 @@ OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**�
 ## 6. 消息操作、分支与版本导航
 
 - **Web**：用户消息底部 revert + copy；assistant text part 底部 copy + meta（agent · model · 时长 · interrupted）——组件装配见消息渲染器笔记，数据语义见会话与消息管理笔记 4。会话头部菜单：重命名/分享/导出/归档/删除。
+- **会话命名**：新布局可从标签右键菜单或会话页标题进入内联编辑；Enter/失焦保存，Esc 放弃。标题标签的关闭按钮补有可访问名称（`titlebar-tab-nav.tsx:300-340`、`message-timeline.tsx:1447-1462`）。
 - **分支**：TUI fork 对话框（routes/session/index.tsx:541-561 `DialogForkFromTimeline`）；Web 侧 fork 入口经命令（use-session-commands.tsx，`session.fork`）；数据语义（复制边界、parentID 重映射）见会话与消息管理笔记 4。
 - **审批**：`SessionPermissionDock`（`composer/session-permission-dock.tsx:8-74`）提供"拒绝/始终允许/允许一次"三种回复，统一调 `api.permission.reply`（`session-composer-state.ts:78-93`）；TUI 侧在 `routes/session/permission.tsx`（含 diff 预览 :22-88）。按钮与组件装配见消息渲染器笔记。
 - **提问**：`SessionQuestionDock`（Mark/Option 单选多选 + 自定义答案，composer/session-question-dock.tsx）；TUI `routes/session/question.tsx`。

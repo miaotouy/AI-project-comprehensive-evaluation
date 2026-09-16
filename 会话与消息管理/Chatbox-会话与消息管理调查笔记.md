@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、renderer store、IndexedDB 存储层），符号与行号对照当前 HEAD 逐一核实，未运行应用
 >
@@ -23,6 +23,7 @@ Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地�
 - 归档 = `hidden: true` + `archivedAt` 时间戳，不删除任何数据；恢复归档不会重置 `sortOrder`。
 - 消息搜索没有持久化倒排索引，按分页读取完整 Session 后逐条扫描。
 - 自动压缩触发阈值：按模型上下文窗口与 `compactionThreshold`（默认 0.6）计算 token 预算（第 1.4 节）。
+- Work Mode 的待发送用户消息不先写入 Session，而是保存在独立的本地队列；只有实际投递或 steering 前才成为持久化会话消息。队列因此是草稿与 Session 之间的第三种事实对象。
 
 ## 系统边界与数据主链
 
@@ -128,7 +129,7 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 ### 2.4 IndexedDB schema 变更策略
 
-IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStorage.ts:51-55` 注释），只允许加法式 schema 变更，理由是版本号升级会导致用户降级客户端版本后打不开数据库（`indexedDB.open(DB_NAME)` 不带 version，`:56`）；注释提到的"捕获 VersionError 后以不带 version 重试"的兜底策略在已读代码里**没有看到实现**——仍属未核实/未实现状态。
+IndexedDB session-meta 数据库不主动指定 version，只允许加法式 schema 变化；若降级客户端遇到 `VersionError`，`db-schema-guard` 会把它识别为“本地 schema 更新于当前应用”的升级墙并给出更新引导，不静默改写数据。连接还监听 `versionchange` 并关闭旧连接。实现见 `src/renderer/storage/SessionMetaStorage.ts:51-79`、`db-schema-guard.ts:18-60` 与 `storage/__tests__/indexeddb-lifecycle.test.ts`。
 
 ## 3. 创建、切换、归档、删除与恢复
 
@@ -169,6 +170,7 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 
   批量归档还会回收"meta 记录存在但完整 Session 缺失"的失效条目（`:522-529`：清 RAG 索引、批量删 meta、清理删除会话的运行时状态）。这是一个明确写在代码里的、已知的性能取舍。
 - **恢复**：`restoreSession(id)`（`chatStore.ts:535-539`）把 `hidden` 置回 false 并清掉 `archivedAt`。**不会重置 `sortOrder`**——恢复后的会话会出现在归档前的原始排序位置，不会被顶到列表最上面。这是一个容易让用户困惑的行为（恢复的会话可能"消失"在列表很靠下的位置）。
+- **归档撤销**：侧栏归档成功后始终显示带 Undo 的 toast；撤销恢复失败时保留重试入口，归档后的清理检查失败也不撤掉 Undo。用户仍可在归档页恢复或一次性删除全部归档。界面链见 `src/renderer/components/session/SessionItem.tsx:128-169` 与对应测试 `:211-289`。
 - **永久删除**：`deleteSession(id)`（`chatStore.ts:486-495`）/批量 `deleteSessions(ids)`（`:541-559`）。删除动作包含：
   1. 清理该会话的 session-attachment RAG 索引（`cleanupSessionAttachmentRagEntries`，`:459-470`，按 10 个一批并行）；
   2. 从通用 `storage` 删除完整 Session 对象（`storage.removeItem`）；
@@ -179,6 +181,8 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 删除前会先调 `confirmSessionDeletion(id)`（`chatStore.ts:440-457`）：仅桌面端、且仅当该会话在沙箱里有可下载产物（`platform.sandboxHasArtifacts`）时才弹"删除会话将永久删除这些文件"的确认框；这个确认逻辑同时被 `routes/settings/archive.tsx:136`（归档列表里的删除按钮）复用。
 
 **数据恢复**：`recoverSessionList`（`chatStore.ts:975-1033`）扫描通用 storage 全部 `session:` 前缀 key，逐个读取完整会话重建 meta 记录（排序值按首条消息时间戳），清空 meta 后全量重写——这是"meta 表损坏/丢失后从完整会话重建列表"的恢复路径。
+
+现行领域服务在恢复列表时逐条容忍无法读取的会话，并把这类条目以仅元数据的 `recoveryArchived` 记录保留下来，便于稍后修复、导出或撤销恢复；正常完整写入会清除该标记。写入协调器将恢复归档与待处理的完整会话写串行化，避免恢复动作覆盖较新的队列写入。`packages/chatbox-core/src/application/session/SessionService.ts:350-475`、`SessionWriteCoordinator.ts:118-169,266-308`。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -196,6 +200,8 @@ IndexedDB session-meta 数据库有意不做 `version` 升级（`SessionMetaStor
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
+- **队列的持久性与因果锚点**：每个队列项保存完整用户消息、入队时间和入队时最新会话消息 ID。队列状态同步写入 localStorage；投递期间条目继续保留并标记 in-flight，写入完成后才移除，刷新恢复时会清掉过期的 in-flight 与 steering 请求。若因 fork/thread 切换导致锚点不再属于当前路径，队列暂停而不盲发。`src/renderer/stores/session/message-queue.ts:20-96,196-379`。
+- **Steering 消息**：被显式提前发送的用户消息以 `steered: true` 写入 Session，再进入当前模型 step。字段契约见 `src/shared/types/session.ts:380-381`；先持久化再注入的顺序见 `src/renderer/stores/session/steering.ts:78-154`。
 - **两条写路径**：缓存更新路径（`stores/session/messages.ts:132-137`）只改 react-query 缓存，**不碰 storage**，注释写明"性能优先，不检查 session 存在性"；`persistStreamingMessage(...)`（`messages.ts:143-155`）走每会话一个的写队列（`stores/updateQueue.ts`，基于微任务的串行合并队列，写入失败会回滚内存状态并拒绝本批全部更新，`:60-73`），**真正写盘**。节流策略（2 秒定时 + tool-call 特例）属于对话请求与上下文笔记。
 - **缓存合并保护**：元数据更新路径（`chatStore.ts:395-411`）固定带 `preserveCachedGeneratingMessages: true` 选项，实际合并逻辑在 `mergeCachedGeneratingMessages`（`chatStore-cache.ts:26-79`）：磁盘上读回较旧的会话快照要写回缓存时，若某条消息在缓存里处于生成中，就保留缓存里更新的内容，不用旧内容覆盖；合并覆盖消息、各 thread 消息与分支哈希三个层级。这是为了防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容。
 - 删除生成中的消息同样走 `preserveCachedGeneratingMessages` 全量写路径（`removeMessage`，`chatStore.ts:785-835`），注释明确"合并只映射仍然存在的消息，不会复活已删除消息"。

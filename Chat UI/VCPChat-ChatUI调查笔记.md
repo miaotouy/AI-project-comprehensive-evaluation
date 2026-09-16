@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对与旧笔记刷新；原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移，核对范围覆盖 main.html、renderer.js、trayManager 等变更；通用界面盘点（弹窗库、Toast 系统、主题、动画、灯箱）见 [`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)
 >
@@ -112,6 +112,7 @@ Topic 右键可重命名、删除、标记已读；这些操作的数据变更�
 ## 7. 多会话、多模型、群聊与后台生成
 
 - 群聊界面：群组可创建并邀请 Agent 发言（第 4 节）；同一 topic 内多个 agent 的发言按调度结果呈现，调度执行在对话请求与上下文笔记 8 节。
+- 顺序模式设置可拖放成员形成 `speakerOrder`。保存前会过滤已移除成员，并把尚未列入顺序的新成员稳定追加；运行时 sequential 策略按该顺序发言，而不是固定沿用成员配置数组。`Groupmodules/groupchat.js:266-309`、`Groupmodules/modes/sequentialMode.js:20-36`
 - 语音聊天窗口（`Voicechatmodules/voicechat.html`）：独立子窗口，初始文本输入模式，点击切换按钮在文本模式和语音模式之间切换（`:55, 311-320`）。语音模式使用语音识别（browser speech API 或外部识别器），有 3 秒无语音超时（常量 `SPEECH_TIMEOUT_DURATION=3000`，:58）。关闭窗口时自动将本次对话历史保存为当前 Agent 的一个新 Topic（`:131-163`），并尝试调用话题自动总结（执行语义见对话请求与上下文笔记 3 节）。audioContext 在首次用户手势时初始化（`:14-23`），避免浏览器自动播放限制。
 - 多窗口之间的聊天状态同步（主窗口 vs 语音窗口 vs 图片查看器）未在原调查中核实。
 

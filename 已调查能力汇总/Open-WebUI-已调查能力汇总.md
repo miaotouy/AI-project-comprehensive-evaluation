@@ -1,20 +1,20 @@
 # Open WebUI 已调查能力汇总
 
-> 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `d3e8bf3405e848cfba377814d0aa7ba7290e414d` / main）
+> 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `0a7c15832fb30b1903753e83f81dc7d27e5b0944` / main）
 >
-> 汇总更新日期：2026-08-27
+> 汇总更新日期：2026-09-16
 >
 > 依据：14 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；横向对比文档不在本次汇总范围
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源，不新增源码验证
 >
-> 汇总范围：全部 13 个类目笔记的结论；仓库分布与应用界面基础设施两个工程/基建向类目单列小节，不与功能能力混排
+> 汇总范围：全部 14 个类目笔记的结论；仓库分布与应用界面基础设施两个工程/基建向类目单列小节，不与功能能力混排
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
 ## 项目概览
 
-Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteKit SPA）合仓的 Web 聊天与协作平台，不内置模型推理，上游为 openai/ollama/pipe。核心特征：会话采用「history JSON 快照 + chat_message 消息表」双写、流式推送全程走 Socket.IO、多模型并行（MoA / side-by-side）内建、54 个内置工具按条件注入、代码解释器与 Artifact 沙箱；平台面另有 Channels、Notes、Persistent Memory、Calendar、Automations、Arena/ELO 等协作与产品能力。13 份类目笔记全部为静态源码调查，结论以当前代码快照为限。
+Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteKit SPA）合仓的 Web 聊天与协作平台，不内置模型推理，上游为 openai/ollama/pipe。核心特征：会话采用「history JSON 快照 + chat_message 消息表」双写、流式推送全程走 Socket.IO、多模型并行（MoA / side-by-side）内建、54 个内置工具按条件注入、代码解释器与 Artifact 沙箱；平台面另有 Channels、Notes、Persistent Memory、Calendar、Automations、Arena/ELO 等协作与产品能力。14 份类目笔记全部为静态源码调查，结论以当前代码快照为限。
 
 ## 完成度速览
 
@@ -125,7 +125,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **能力三：Persistent Memory（跨会话记忆）— `主链确认`**：手动、工具、后台复盘三条写入通道 + 每轮请求前向量检索注入（`user-memory-{user.id}` 集合）；后台复盘每 10 轮（默认）用独立 LLM 请求决定 add/replace/move/remove，失败不阻断聊天；记忆是「用户事实 + 路径组织 + 向量检索」的服务端闭环。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
-- **能力四：Calendar（个人/共享日历 + 模型调度面）— `主链确认`**：事件提醒由后台调度器根据持久化提醒标记去重后投递 Socket 与通知；日历 CRUD 和模型工具仍是日程对象能力。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- **能力四：Calendar（个人/共享日历 + 模型调度面）— `主链确认`**：事件提醒由后台调度器根据持久化提醒标记去重后投递 Socket 与通知；创建/更新会拒绝短于一天的重复频率（下限 24 小时）；日历 CRUD 和模型工具仍是日程对象能力。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
 - **能力五：Automations（定时 prompt 自动化）— `主链确认`**：rrule 自动化由数据库原子认领，到期后无头进入完整聊天管线，结果持久化到 chat/channel 与运行记录；可停用或删除，运行中取消尚未确认。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
@@ -146,9 +146,9 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：Python 后端 + Svelte 前端合仓的 Web 应用；5,031 个 Git 跟踪文件中 3,870 个位于 `static`（总文件数主要反映静态资源规模），可识别源码 1,011 文件 / 346,049 行，集中在 `backend/open_webui`（196,710 行）与 `src/lib`（141,095 行）；仓内显式测试资产很少（仅 2 个测试文件），完整用户文档不在当前 docs 目录展开；产品经 pip、Docker、Kubernetes 运行，原生桌面应用位于独立仓库（`open-webui/desktop`），本仓不含其平台代码。来源：[仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
+- **仓库分布**：Python 后端 + Svelte 前端合仓的 Web 应用；5,061 个 Git 跟踪文件中 3,874 个位于 `static`（总文件数主要反映静态资源规模），可识别源码 1,033 文件 / 360,591 行，集中在 `backend/open_webui`（200,901 行）与 `src/lib`（151,131 行）；仓内显式测试资产很少（仅 3 个测试文件），完整用户文档不在当前 docs 目录展开；产品经 pip、Docker、Kubernetes 运行，原生桌面应用位于独立仓库（`open-webui/desktop`），本仓不含其平台代码。来源：[仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
 
-- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（53 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；另有 24 项快捷键注册表、13+16 tab 设置框架、桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
+- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（53 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；界面字号经 `--app-text-scale` 缩放，字体族另有账户级设置 `fontFamily`（写入 `--app-font-family`）；另有 24 项快捷键注册表、13+16 tab 设置框架、桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
 
 ## 已知边界与待验证事项
 
@@ -175,7 +175,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 ### 共性未验证
 
-- 13 份笔记全部为静态源码调查、未运行服务：socket 实时推送、模型在频道/笔记中的流式参与、记忆后台复盘的真实模型调用、自动化定时触发与多实例并发认领、ELO 加权查询、STT/TTS 引擎接入、LDAP/SCIM 真实接入、云文件 OAuth 流、Redis 多节点部署、PDF 实际渲染效果、/s 分享页三态端到端行为均未验证。
+- 14 份笔记全部为静态源码调查、未运行服务：socket 实时推送、模型在频道/笔记中的流式参与、记忆后台复盘的真实模型调用、自动化定时触发与多实例并发认领、ELO 加权查询、STT/TTS 引擎接入、LDAP/SCIM 真实接入、云文件 OAuth 流、Redis 多节点部署、PDF 实际渲染效果、/s 分享页三态端到端行为均未验证。
 - 多实例并发写入时 history 快照与消息表的最终一致性、Overview 消息树图超大树渲染性能、键盘焦点顺序与响应式断点行为等运行项未验证。
 - 配置导入导出与连接管理结论来自静态请求路径，实际部署中的数据库加密、备份保护与日志凭据排除未验证。
 - 长上下文压缩触发阈值下的实际行为、同一会话多标签页并发提交的队列行为未验证。
@@ -189,6 +189,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 - [LLM 渠道管理调查笔记](../LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md)
 - [仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
 - [会话与消息管理调查笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)
+- [主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)
 - [对话导出与分享调查笔记](../对话导出与分享/Open-WebUI-对话导出与分享调查笔记.md)
 - [对话请求与上下文调查笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)
 - [应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)

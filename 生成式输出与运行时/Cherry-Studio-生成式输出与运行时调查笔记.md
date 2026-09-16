@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：静态代码阅读（grep/glob 检索 + 关键实现文件通读），辅以仓库内单元测试作为行为佐证；未构建、未运行应用
 >
@@ -139,7 +139,9 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进入终态时会终止解析 worker，避免已完成或失败任务继续占用资源。PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影；除非进入上述文件或 Artifact 表面，否则在本类目中不构成独立运行对象。
 
-依据：`src/renderer/components/FilePreview/plugins/spreadsheet/SpreadsheetFilePreview.tsx`、`src/renderer/components/FilePreview/plugins/spreadsheet/worker/xlsxParser.worker.ts`、`src/main/services/PdfTranslationService.ts`、`src/main/data/services/TranslateHistoryService.ts`。
+XLSX 预览还会解析 drawing/chart XML，把 bar、line、pie、area 图表映射为 ECharts；不支持的散点等类型保留占位与原始类型名，图表锚点数量和引用单元格数均有限额。解析在 worker 内完成，ECharts 实例在组件卸载时释放。依据：`src/renderer/components/FilePreview/plugins/spreadsheet/worker/chartXmlParser.ts:281-314,522-579`、`charts/EchartsChartRenderer.ts:10-36`。
+
+PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影；除非进入上述文件或 Artifact 表面，否则在本类目中不构成独立运行对象。
 
 ## 12. 测试、已确认边界与未验证事项
 

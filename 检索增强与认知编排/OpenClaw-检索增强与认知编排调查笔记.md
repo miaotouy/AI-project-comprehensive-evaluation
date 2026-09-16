@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：直接静态阅读当前快照的 `memory-core`、`active-memory`、`memory-wiki`、可替换 `memory-lancedb` 插件、Agent prompt/工具/会话边界、Memory Host SDK、相关配置、测试和当前源码文档；沿索引摄取、查询、结果注入、写回和生命周期调用链追踪。未启动 Gateway，未调用真实 Embedding、模型、QMD 或端到端会话。
 >
@@ -86,6 +86,8 @@ manager 在启动、首次搜索、文件变化、session transcript 更新或 C
 完整重建走 shadow database：在共享 agent DB 外生成临时数据库，复制可用 embedding cache，重建配置 source，写入新的 meta，随后在 workspace lock、reindex lock 和旧 revision fence 下以短事务发布 memory-owned tables。发布前/后会检查 revision；中途失败保留旧 index 可用并设置 full-retry dirty，清理老的 shadow database/sidecar。故“force index”是可恢复的派生资产重建，不是复制或删除 canonical memory 内容。`extensions/memory-core/src/memory/manager-sync-ops.ts:501-677`、`extensions/memory-core/src/memory/manager-db.ts:139-256,258-337`。
 
 ## 查询、候选与重排主链
+
+sqlite-vec 的同步 KNN 查询已经移到有界、可由操作系统终止的 Node 子进程。父进程在生成租约内提交数据库路径、扩展路径和查询请求，限制输入、stdout/stderr 与返回行数；取消或超时会终止只读 child，并在 child 真正关闭前保留并发槽。协议错误、子进程不可用和终止超时都会显式失败，不会伪装成零命中。查询编排仍在主 memory manager 中负责代际租约、fallback、provenance enrichment 和最终重排。实现见 `extensions/memory-core/src/memory/manager-search-knn-subprocess.ts:150-249`、`manager-search-orchestration.ts:251-393,607-624`。
 
 ### `memory_search` 的入口与 corpus 选择
 

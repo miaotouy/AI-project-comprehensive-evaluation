@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`（Electron + React 桌面客户端，另含 web/移动目标）
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
-> 调查方式：静态源码走读（只读）；与独特功能笔记快照比对；npm 安装依赖后运行 vitest 图像生成相关测试文件；未修改仓库源码
+> 调查方式：静态源码走读（只读）并复核旧笔记涉及路径；既有测试结果来自旧快照，本次未重新运行测试；未修改仓库源码
 >
 > 调查范围：Image Creator 图像工作台主链（能力分型 M1 模型生成工作站 + M3 记录/资产生命周期）：入口与触发者、事实对象、参数/参考图/模型执行、任务状态机与取消/恢复/重试、记录与图片持久化、预览/复用、chatbox_cli 后台任务回填、权限与失败恢复。聊天 Agent 工具、消息渲染与上下文机制只做交接引用；Copilots、team-sharing 等其他独特功能不在本页范围
 >
@@ -21,8 +21,9 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 1. **参考图 DAG**：本地上传图先落 blob（`picture:image-creator-ref:*`），从历史记录"用作参考"时保留来源记录 id 并写入新记录的 `parentIds`；删除记录时做引用计数式 blob 清理，避免破坏 DAG（`src/renderer/routes/image-creator/index.tsx:380-382,436-441`、`src/renderer/stores/imageGenerationStore.ts:138-171`）。
 2. **取消/恢复/重试语义**：取消只中止轮询并把记录留在 `generating`，使"Resume Generation"按钮按已持久化的 `taskId` 继续取结果；重试则清空 taskId 与旧图重新发起，注释明确"retry means start fresh, not resume"（`src/renderer/stores/imageGenerationActions.ts:413-426,440-516,518-563`）。
 3. **跨重启持久化**：记录存 IndexedDB（桌面/Web）或 SQLite（移动），图片存 blob 存储；`currentGeneratingId` 仅在内存（zustand），应用重启后靠"状态 generating + taskId"驱动恢复按钮，服务端任务可被取回（`src/renderer/platform/desktop_platform.ts:363-368`、`index.tsx:589-595`）。
+4. **聊天结果投影**：聊天工具触发的生成图片被提升到消息底部 artifacts 区域，与下载文件并列，不因 Work Mode 的过程时间线完成后折叠而隐藏；远程图片加载失败可重新请求并恢复显示。`src/renderer/components/message-parts/ToolCallPartUI.tsx:1038-1069`、`src/renderer/components/chat/Message.tsx:553`、`src/renderer/routes/image-creator/-components/GeneratedImagesGallery.tsx:168-224`。
 
-运行验证：本机 npm 安装依赖成功（需 `--legacy-peer-deps`，见"运行验证"），7 个图像生成相关测试文件 37 个用例、聊天侧图像恢复 2 个文件 12 个用例全部通过。真实计费调用（外部模型与额度）未运行，标注为未验证。
+旧快照曾运行图像生成及聊天恢复相关测试并通过，当前快照未重新执行，不能据此确认现行测试结果。真实计费调用、外部模型与额度链路仍未运行验证。
 
 ## 系统边界与完整主链
 
@@ -168,10 +169,10 @@ Agent 还可读历史：`chatbox image status|history|models`（`images.ts:356-3
 ### 运行验证
 
 - 依赖安装：`npm install --no-audit --no-fund` 首次因 ERESOLVE 失败（项目用 zod ^4，`@mastra/core@0.13.2` 声明 peer zod ^3；仓库 pnpm 的 auto-install-peers 可规避，npm 不能）；加 `--legacy-peer-deps` 后成功，2808 包约 6 分钟。设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（单元测试不需要 Electron 运行时，本机缓存已有 electron 35.6.0 zip）。postinstall 的原生依赖检查因调用 pnpm（本机 corepack 签名校验故障）失败，非致命。npm 安装未应用仓库 `pnpm-workspace.yaml` 的 patchedDependencies 补丁；首次运行还发现 npm 解析出的 `@tanstack/router-plugin` 1.168.x 无法转换既有路由文件，用 `--no-save` 对齐仓库 pin 的 1.120.15 后正常（gitignored 的 `routeTree.gen.ts` 由插件生成，未污染工作树；安装产生的 package-lock.json 已删除，`git status` 干净）。
-- 测试：`npx vitest run` 相关文件 9 个全部通过——
+- 旧快照测试记录：`npx vitest run` 相关文件 9 个曾全部通过；以下结果不视为当前快照的运行确认——
   - `stores/imageGenerationActions.test.ts`（7 用例：参考图 URL/键双源、completion promise、onRecordCreated 先于计费请求、resume 终态、结构化错误码、缩略图分离、失败 item 折叠）；
   - `storage/__tests__/SQLiteImageGenerationStorage.test.ts`（3）、`packages/chatbox-cli/images.test.ts`（12）、`image-task-follow-up.test.ts`（4）、`image-model-catalog.test.ts`（6）、`routes/image-creator/-components/model-selection.test.ts`（3）、`components/chat/ImageGenerationResultGallery.test.ts`（2）、`message-parts/ToolCallPartUI.image-recovery.test.tsx`（6）、`ToolCallPartUI.command.test.tsx`（6）。
-- 未运行：真实计费生成、真实模型 manifest/异步任务接口、应用级跨重启恢复、IndexedDB/SQLite 真机持久化、参考图实际构图与视觉行为、UI 视觉效果与键盘可用性。
+- 当前快照未重新运行上述测试。真实计费生成、真实模型 manifest/异步任务接口、应用级跨重启恢复、IndexedDB/SQLite 真机持久化、参考图实际构图与视觉行为、UI 视觉效果与键盘可用性均未运行。
 
 ### 未验证事项
 

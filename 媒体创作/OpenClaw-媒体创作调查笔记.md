@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码与仓库文档走读；沿 Agent 媒体工具、媒体生成 runtime、插件能力注册、任务 registry、Gateway 媒体托管和 artifact RPC 复查入口、状态、持久化与回流关系；未运行测试、未调用外部模型或 ComfyUI、未启动 Gateway 与 Control UI
 >
@@ -116,6 +116,8 @@ Core 不负责把任意 HTML、节点图或 FFmpeg 脚本当作 OpenClaw 媒体�
 ## 3. 任务状态、异步回调与取消
 
 ### OpenClaw 任务生命周期
+
+Provider 资源现在由预检阶段取得并显式移交给已接纳任务。预检期间资源负责模型目录、认证或 Provider runtime 的一致快照；重复请求、取消或接纳失败会释放资源，只有成功进入前台执行或 detached scheduler 后才转移所有权。后台任务持续持有同一资源直到实际生成与结果持久化完成，避免任务已经排队却在执行前丢失 Provider 生命周期。实现见 `src/agents/tools/media-generate-background.ts:51-175,178-298`。
 
 session-backed 媒体调用由 `runMediaGenerationTask` 创建运行中的 CLI 任务，任务来源分别记录为 `image_generate:<provider>`、`video_generate:<provider>` 或 `music_generate:<provider>`，并保存请求会话、请求者 Agent、prompt 和 Provider。初始工具结果包含 `async: true`、`status: "started"`、`taskId`、`runId`，之后后台执行器更新“Generating ...”“Saving ...”等进度。实现见 `src/agents/tools/media-generate-background-shared.ts:205-287,306-328`、`src/agents/tools/media-generate-background.ts:27-95`。
 

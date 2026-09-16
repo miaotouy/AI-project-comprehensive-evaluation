@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：汇总现有十类单项目笔记，对十六项候选逐一走读源码主链（入口 → 状态/对象 → 执行 → 用户结果 → 持久化），核对模块注册（`main.html`、`main.js`、IPC handlers、`VCPDistributedServer` 插件目录）与近期 Git 历史；补充音频引擎专项（`rust_audio_engine` 源码 + `audio_engine` 部署产物 + `Musicmodules` + `musicHandlers.js` + MusicController 工具链）与旁路模块补查（划词小助手、主题、论坛、骰子、笔记、翻译、语音、TTS 族、RAG Observer、任务台、VchatManager、日志）；再核对 Loom v2/WebCore 升级与新增 Scriptorium 文坊子系统；本次补查受管启动、恢复、更新和图形安装器链，并运行 Bootstrap 与安装器契约测试；未运行 Electron、Tauri 或真实更新，其他结论以静态分析为主
 >
@@ -279,11 +279,11 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
   - 外置 IR 卷积（`load_ir`，64MB 上限，预置 `audio_engine/IRPreset/`，`musicHandlers.js:498-528` 列表管理）；
   - 安全：`validate_path`（`server.rs:99-189`）拒绝路径穿越、UNC、Windows 保留设备名，URL 拒绝私网/环回地址（SSRF 防护）。
 - **前端播放器主链（控制与渲染）**：选曲后经 `music-load` IPC 调引擎 `/load`（`musicHandlers.js:166-196`）→ 引擎异步解码（进度经 WS 推送）→ play/pause/seek/volume/设备选择/独占开关等控制 → 状态轮询与 50ms 频谱帧驱动 Canvas 粒子可视化（`music-visualizer.js:102`）。
-- **前端播放器主链（歌词与切歌）**：歌词支持本地 LRC 与网易云拉取，逐行滚动并附翻译（`music-lyrics.js`）；曲终预加载下一首实现 gapless（`music-player.js:223-258`，切歌事件竞争抑制见 `music-visualizer.js:130-153`）。
+- **前端播放器主链（歌词与切歌）**：歌词支持本地文件和云端候选。统一抓取器并行搜索网易云、QQ、酷狗，并为网易云/QQ 候选补查 AMLL TTML；手动候选按标题、歌手、专辑和时长评分，选中后同时保存 JSON 与 LRC。自动入口会复用候选搜索/应用 API，但底层 `createAuditedLyrics()` 读取未传入的 `target.durationMs`，存在可执行的未声明变量缺陷，不能确认自动跨源审计可完成。`modules/lyrics/lyricFetcherUnified.js:444-519,536-585`、`Musicmodules/music-lyrics.js:42-70`
 - **持续性**：播放列表/歌单/歌词/封面/引擎设置全部落盘 AppData，重启恢复；引擎随应用生命周期启停（启动预热、退出优雅关闭），播放运行状态不持久。
 - **人机与多 Agent 关系**：用户全权控制（窗口/挂件/分享）；Agent 经 MusicController 只能按曲名/歌手匹配播放列表点歌与基础控制，无曲库写权限；`agentMusicControl` 可整体关闭。README"音乐实时被 agent 听到"的实际实现是**曲目元数据注入**——每请求 system 消息注入 `[当前播放音乐：title - artist (album)]` 与播放列表（`vcpClient.js:238-284`），非音频流/频谱转发（全仓无频谱上传给 Agent 的代码）。
 - **外部依赖**：WebDAV 服务器（用户自备）；引擎纯本机，无后端依赖；`MusicController` 工具分发走 VCP 服务器但不依赖其能力。
-- **声明核对**：README §专业级音频引擎/音乐播放器多项声明与代码不符：①"DSD 256bit 硬解码"——引擎内 grep `dsd|dsf` 零命中，Symphonia 亦无 DSD 解码，`声明不符`；②"AI 歌词创作（听歌识曲生成 .lrc）"——歌词仅单源网易云拉取（`modules/lyricFetcher.js:46-62/:187`），无 Agent 听歌生成路径，`声明不符`；③"多源云端歌词库"实为单源；④README 技术栈仍写"Python 音频引擎依赖"，引擎已是 v2.0.0 全 Rust（`Cargo.toml`、`main.rs:29-30`），README 陈旧。
+- **声明核对**：README 中“DSD 256bit 硬解码”仍与当前引擎不符；“AI 歌词创作（听歌识曲生成 .lrc）”仍未找到 Agent 听音生成链。此前“多源云端歌词库”不成立的判断已失效：当前实现确有网易云、QQ、酷狗与 AMLL 四类来源，但它们是搜索、下载和质量选优，不是 AI 创作。README 仍把音频引擎描述为 Python 依赖，而当前主引擎为 Rust。
 - **独特性判断**：AIO Hub、SillyTavern 等同类没有"聊天内 Agent 可控点歌 + 桌面挂件 + WASAPI 独占 + 自研 DSP 链（FIR EQ/IR 卷积/EBU R128/SoX VHQ + 无锁音频线程）"的组合；它是 VCPChat"AI 原生桌面运行时"的又一旁路子系统。归入"创作工作站/媒体"聚类（与 ComfyGen、Loom 并列），或单列"本机媒体播放器"能力族。
 - **证据强度**：引擎（约 50 个 Rust 文件）、前端、IPC 与 Agent 工具链全部静态走通；`audio_engine/` 为编译产物，未确认与源码一致；WASAPI 独占实际生效、DSP 听感、WebDAV 播放、频谱渲染与 gapless 切歌未运行验证。
 
@@ -332,9 +332,9 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
 | 模块 | 状态 | 关键证据 | 提案建议 |
 |---|---|---|---|
 | 双语混合朗读引擎（TTS 族） | `主链确认` | `modules/SovitsTTS.js:372-424` 正则切片主/副语言 → 双模型分流（`:454-455`）→ 队列预合成 + 缓存 `AppData/tts_cache`（`:13`）；`VChatAutoTTS` 插件 MutationObserver 自动朗读（`plugin.js:94-111`） | 建议提案：语音聚类辅助/主贡献 |
-| VCPSuperDice 3D 物理骰子 | `主链确认` | `assets/dice-box` ammo.wasm 物理投掷（`Dicemodules/dice.js:81-97`）→ 结果回传 Agent（`diceHandlers.js:94-149`、`VCPDistributedServer.js:689-694`）；"十多种主题/物理施法"为 `声明不符`（仅 default 主题、无施法参数） | 辅助贡献候选 |
+| VCPSuperDice 3D 物理骰子 | `主链确认` | ammo.wasm 物理投掷后回传 Agent；当前 UI 白名单提供 9 个主题，资源树含 13 份 theme.config，并增加按主题选择碰撞/落定音色的 soundscape。物理参数仍是固定 BASE_PHYSICS，未找到打滑、黏着、磁铁等“施法”入口 | 辅助贡献候选 |
 | VCP Forum 论坛客户端 | `主链确认` | 后端 `admin_api/forum`（Basic Auth）；前端 masonry 卡片 + CSS 作用域隔离 + KaTeX 数学保护（`Forummodules/forum.js:308-414/:887-1132`） | 与 VCPToolBox 论坛跨仓库合并计数（同一事实对象） |
-| RAG Observer 信息流监听 | `主链确认` | `--rag-observer-only` 启动（`main.js:157/:558`）→ WS 连 :5890（`RAGmodules/rag-observer-config.js:22-23`）→ 透明浮层实时展示 RAG/通知 + 工具审批 approve/reject（`ragHandlers.js:157-201/:490-493`） | 辅助贡献候选 |
+| RAG Observer 信息流监听 | `主链确认` | 独立启动后经 WS 展示 RAG/通知并处理工具审批；召回卡可选 A/B 两轮，客户端按规范化结果文本显示交集、独有项和重合率（`RAGmodules/RAG_Observer.html:2088-2475`） | 辅助贡献候选 |
 | 语音聊天（Voicechat） | `主链确认` | Puppeteer 启动 headless Chrome（`modules/speechRecognizer.js:104-113`）→ `webkitSpeechRecognition`（`recognizer.html:101-105`）→ `exposeFunction` 桥接回 Electron；会话落盘为真实 Agent 话题（`voicechat.js:131-149`） | 工程方案独特，产品贡献一般；可作辅助 |
 | 笔记系统（Notes + 迷你便签） | `主链确认` | `AppData/Notemodules` 本地文件 + 网络目录挂载扫描缓存（`notesHandlers.js:26-45`）；`Win+Alt+Z` 全局便签（`main.js:1147-1149`） | 归"协同工作区"聚类（与 Canvas 并列），不单独提案 |
 | 翻译窗口 | `主链确认`（功能常规） | 渲染层直连 VCP chat completions（`Translatormodules/translator.js:277`），快/均衡/质量三档 | 不提案（通用能力） |
@@ -342,7 +342,7 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
 | Agent 任务台（Agenttaskmodules） | `入口确认` | 后端 `agent-assistant`/`task-assistant` 插件的管理 UI（`task.js:253-256`，admin_api） | 不提案（外部后端） |
 | VchatManager | `入口确认` | 独立运维应用；亮点=配置/文件系统一致性检查修复（`consistency-checker.js`） | 不提案（运维工具） |
 | VCPLog 日志中心 | `入口确认` | HTTP 轮询增量拉取（`Logmodules/log.js:219-231`），非 README 声称的 WebSocket | 不提案（WS 声明不符） |
-| lyricFetcher / weatherService / modelUsageTracker | `骨架` | 歌词=网易云单源（`lyricFetcher.js`）；天气=后端 `admin_api/weather` 卡片；用量统计=`model_usage_stats.json` | 不提案（常规小工具） |
+| lyricFetcher / weatherService / modelUsageTracker | `主链确认/缺陷/骨架` | 歌词多源搜索与手动候选主链已接线，自动审计有未声明 target 缺陷；天气为后端 `admin_api/weather` 卡片；用量统计写 `model_usage_stats.json` | 不提案（常规小工具） |
 
 ## 已归并到现有类目的能力
 
@@ -360,10 +360,10 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
 - **跨端记忆（候选 12 的记忆部分）**：README"跨端记忆"描述的是以 VCP 后端为中心的统一记忆库，VCPMobileSync 同步范围明确不含记忆（其 README 同步类型表只有 Agent/Group/Topic/Message/Attachment(不实际)/Avatar）；判定：记忆同步 `暂缓`（外部后端），消息/元数据同步 `主链确认`。
 - **Agent 自主管理 Topic 的"前端刷新"（候选 8 补充项）**：TopicSponsor 创建话题后，普通话题在侧栏的即时出现机制未找到 watcher/事件证据（前端重读 config 而非订阅）；Flowlock 话题有明确的认领轮询。该项保留为未验证，不判不存在。
 - **音频引擎"DSD 256bit 硬解码"（能力卡 13）**：引擎全量源码 grep `dsd|dsf` 零命中，Symphonia 无 DSD 解码支持；README §专业级音频引擎的 Hi-Res 声明不成立。
-- **"AI 歌词创作（听歌识曲生成 .lrc）"与"音乐实时被 agent 听到"（能力卡 13）**：歌词仅单源网易云拉取，无 Agent 听歌生成路径；Agent 得到的是曲目元数据注入（`vcpClient.js:238-284`），非音频流/频谱转发。
+- **“AI 歌词创作（听歌识曲生成 .lrc）”与“音乐实时被 agent 听到”（能力卡 13）**：当前多源歌词链是元数据搜索与候选下载，没有 Agent 听音生成；自动质量审计还有未声明 target 缺陷。Agent 得到的是曲目元数据注入，非音频流或频谱转发。
 - **TTS"流式剪枝算法 600% 加速"（README §语音朗读）**：`SovitsTest/GSVI.py`、`my_infer.py` 仅为 OpenAI 兼容 HTTP 封装，无剪枝算法代码；双语混合朗读为真，加速数字为 `声明不符`。
 - **主题系统"自然语言主题生成器"（README §强大的主题系统）**：grep `主题管理/themeGenerator/ThemeAgent` 零命中，仅手动 CSS 主题选择器可用。
-- **骰子"十多种主题"与"物理施法"（README §Vchat超级骰子插件）**：`assets/dice-box/themes/` 仅 default 一个主题；插件参数仅 notation/themecolor，无打滑/黏着/磁铁施法入口。
+- **骰子“物理施法”（README §Vchat超级骰子插件）**：多主题已实现，UI 白名单有 9 个主题，资源树有 13 份配置并带主题声景；但物理参数仍固定，未找到打滑、黏着或磁铁等施法入口。
 - **划词小助手"全域右键呼出"与"文件夹工作区模式"（能力卡 14）**：Rust 侧仅跟踪左键划选；文件夹工作区 grep 零命中。
 - **笔记"Obsidian 类云端同步"与"分享笔记到 AI 知识库"（README §笔记模块）**：实际为网络目录挂载 + 扫描缓存（`notesHandlers.js:26-45`），无同步协议；知识库分享未找到对应代码。
 - **VCPLog"通过 WebSocket 连接"（README §VCPLog 集成）**：日志中心为 HTTP 轮询（`log.js:219-231`）；WS 连接实际属于 RAG Observer。
@@ -402,7 +402,7 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
 7. TopicSponsor 普通话题的前端即时刷新机制未核实。
 8. VCP-CDS（Rust）的中央索引模式仅确认了适配层与测试存在，未核实其查询/Change Feed 的完整行为。
 9. 两个渲染器前端插件（动态壁纸、自动 TTS）仅确认注册与加载机制，插件本体 UI 行为未验证；VChatAutoTTS 的双语自动朗读触发链为源码事实，合成效果未验证。
-10. `tests/` 顶层现有 7 个文件（frontend-plugins、loom-controller、loom-electron-adapter、loom-manager-runtime、deepmemo-central-adapter、mobile-sync-central-adapter 六个测试 + test-export-inline.cjs），另有 `tests/重构中禁用脚本/` 子目录 12 个 scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"，未纳入运行）；Flowlock 等核心模块无自动化测试覆盖；音频引擎未见测试目录。
+10. `tests/` 当前跟踪 174 个文件，覆盖聊天 surface/流式终态、历史写入、Canvas 审批、LoomSkill、设置保存、歌词候选、移动同步、Scriptorium 与启动安装链等；真实 Electron 视觉、Flowlock 端到端循环和音频引擎听感仍未由这些 Node 契约替代。
 11. 受管启动与安装器未运行 Electron、Tauri、签名安装包或真实网络更新；`test:installer-contract` 的 ready 发布顺序静态断言在当前 `main.js` 失败（16/17 通过），需以修正断言后的测试和实机 handoff 结果补证。
 
 ## 关键源码索引
@@ -422,6 +422,6 @@ VCPChat 的独特功能候选密集：十六项候选中有十二项达到 `主�
 - `VCPDistributedServer/VCPDistributedServer.js:605-644`：节点侧 `internal_request_file` 文件拉取；`:656-687`：MusicController 工具注入调用；`:689-694`：SuperDice 注入调用。
 - `modules/renderer/messageContextMenu.js:211-220` + `renderer.js:2426-2564` + `modules/chatManager.js:1607-1651`：转发与附言主链。
 - `rust_audio_engine/`：`main.rs`（入口与端口 63789）、`server.rs`（HTTP 路由与路径/SSRF 防护）、`server/playback.rs`、`server/effects.rs`、`server/ws_handlers.rs`（频谱/事件 WS）、`server/webdav_handlers.rs`、`decoder.rs`（Symphonia f64 解码）、`wasapi_output.rs`（WASAPI 独占）、`player/`（audio_thread/callback/gapless/state）、`processor/`（eq/fir_eq/convolver/crossfeed/loudness/resampler/saturation/dsp_chain/lockfree_params）；`audio_engine/`：部署二进制与 `IRPreset/`；`settings.rs:257`：`AppData/audio_settings.json`。
-- `Musicmodules/`：`music.js`（窗口装配与事件）、`music-player.js`（gapless 与播放逻辑）、`music-effects.js`（EQ/响度/饱和等效果面板）、`music-visualizer.js`（WS 频谱可视化）、`music-webdav.js`（远程曲库）、`music-lyrics.js`（LRC 解析滚动）；`modules/ipc/musicHandlers.js`（引擎代理与播放列表/歌词/IR 管理）；`modules/webdavManager.js`；`modules/lyricFetcher.js`（网易云单源）；`Desktopmodules/builtinWidgets/musicWidget.js`（桌面音乐条）。
+- `Musicmodules/`：播放器、效果、频谱、WebDAV 与歌词 UI；`modules/ipc/musicHandlers.js` 负责引擎和歌词 IPC；`modules/lyrics/lyricFetcherUnified.js`、`matchScore.js` 负责多源候选、评分与自动审计（`createAuditedLyrics` 有未声明 target 缺陷）；`Desktopmodules/builtinWidgets/musicWidget.js` 为桌面音乐条。
 - 划词小助手：`modules/assistant/assistant-rust-adapter.js`（sidecar 启动与 `ASSISTANT_EVENT` 桥接）、`modules/ipc/assistantHandlers.js`（悬浮条/对话窗口/动作分发）、`rust_assistant_engine/src/`（capture/windows_event_source/uia_selection_provider/metrics）。
 - 旁路模块入口：`modules/SovitsTTS.js:372-424`（双语切片）、`WebIndexTTS2/server.js`（IndexTTS-2 云端代理）、`Dicemodules/dice.js` + `assets/dice-box`（3D 物理骰子）、`Forummodules/forum.js`（论坛渲染链）、`RAGmodules/rag-observer-config.js` + `ragHandlers.js`（信息流监听与审批浮层）、`Voicechatmodules/voicechat.js` + `modules/speechRecognizer.js`（Puppeteer 识别）、`Notemodules/notes.js`（笔记主链）、`Themesmodules/themes.js` + `themeHandlers.js`（主题选择器）、`Agenttaskmodules/task.js`（任务台）、`VchatManager/consistency-checker.js`、`Logmodules/log.js`。

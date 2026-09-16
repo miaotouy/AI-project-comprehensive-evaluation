@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Svelte 组件与 store、`Chat.svelte` 会话状态机、Overview 消息树图组件、`MessageInput` 输入区）；界面视觉、焦点与键盘可用性未运行验证
 >
@@ -80,7 +80,7 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
   | 事件 | 界面作用 |
   |---|---|
-  | `chat:active` | 有/无活动任务，false 时清 taskIds、按需重载并更新已读（975-984 行） |
+  | `chat:active` | 有/无活动任务，false 时清 taskIds；只在事件携带的 message_id（未携带时任一消息）确存在未完成 assistant 叶子时才重载，随后更新已读（`Chat.svelte:1220-1236`） |
   | `chat:message:tasks` | 任务进度（1005-1006 行） |
   | `chat:message:error` | 错误展示（1018-1019 行） |
   | `chat:tasks:cancel` | 置 response done 并走队列（987-998 行） |

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -167,9 +167,9 @@ common/Dropdown.svelte（359 行）：
 - 视觉 token：没有语义色层（无 `--primary`/`--accent` 之类，在 src 搜索 accent、primaryColor 和这两个变量均无匹配），颜色直接用 Tailwind gray-50~950 色阶；定义见 tailwind.css 的 @theme oklch（第 5-18 行，含自定义 gray-850）；
 
   明暗由 dark 变体（darkMode: 'class'）驱动；主题相关的第三方组件包括 tippy、svelte-sonner Toaster，以及 CodeMirror、KaTeX、ProseMirror 的明暗自适应（tippy 样式见 app.css 第 363-365、691-693 行）。
-- 字体：Inter + Vazirmatn（app.css 第 3-13 行，本地文件，font-display: swap），代码字体 JetBrainsMono；基础字体栈在 tailwind.css 第 41-45 行。无用户可配置的字体或字号档位设置（搜索 fontFamily 仅命中编辑器、PDF、终端等局部样式），字号只经 `--app-text-scale` 统一缩放。
-- 扩展 token：`--app-text-scale` 用于 UI 缩放（写入 html font-size，相关样式和工具分别在 app.css 第 15-24 行、text-scale.ts 第 1-7 行）；`--sidebar-width` 控制侧栏宽度，`--color-gray-*` 用于 dark/oled-dark 行内覆盖。
-- 高对比模式：html.high-contrast class 按 settings.highContrastMode 切换，设置开关见 Interface.svelte 第 436-456 行，根布局应用见第 1283-1288 行；app.css 第 848-919 行提供大量对比度修正规则，覆盖 placeholder、灰色文字、着色文本和 hover 状态，并引用 WCAG 1.4.3/1.4.11。
+- 字体：默认字体栈为 Inter + Vazirmatn（本地文件，font-display: swap），代码字体 JetBrainsMono（`src/app.css:3-13`、`src/tailwind.css:41-45`）。界面字体族可由用户覆盖：设置项 `fontFamily` 经 `--app-font-family` 变量写到根元素，入口是 Interface 设置的 Font Family 行（Default/Custom 切换加自由输入），保存时随用户设置同步，未设置或清空则移除变量回落到默认栈（`src/lib/utils/text-scale.ts:9-27`、`src/lib/components/common/InterfaceSettings.svelte:553-597`）。没有字号档位设置，字号仍只经 `--app-text-scale` 统一缩放。
+- 扩展 token：`--app-text-scale` 用于 UI 缩放（写入 html font-size，相关样式和工具分别在 app.css 第 15-24 行、text-scale.ts 第 1-27 行）；`--sidebar-width` 控制侧栏宽度，`--color-gray-*` 用于 dark/oled-dark 行内覆盖。
+- 无障碍模式：设置键仍是 `highContrastMode`，界面标签已改为 Accessibility Mode（`src/lib/components/common/InterfaceSettings.svelte:590-605`），开启后由根布局按 `html.high-contrast` class 应用（`src/routes/+layout.svelte:1361`）；`src/app.css:423-999` 提供对比度修正规则，覆盖焦点轮廓、placeholder、`.app-muted` 灰色文字、着色文本、编辑占位与 shimmer，并引用 WCAG 1.4.3/1.4.11。
 
 ### 聊天页背景图（壁纸，三级优先级）
 
@@ -202,7 +202,7 @@ common/Dropdown.svelte（359 行）：
 
 其余为 Tailwind 响应式工具类与 @container；项目启用 @tailwindcss/container-queries，落地页使用 @2xl 等容器查询变体。
 - **侧栏三态**（layout/Sidebar.svelte，桌面 1732 行）：
-  1. 桌面展开：宽度由 sidebarWidth store 控制，mousemove 拖拽调宽（:921-929,615-645），持久化到 localStorage 并写 `--sidebar-width` CSS 变量；
+  1. 桌面展开：宽度由 sidebarWidth store 控制，拖拽分隔条调宽——现在用 pointerdown 加 setPointerCapture 追踪单个指针，pointermove 改宽、pointerup/pointercancel 收尾，组件销毁时复位拖拽期的 body 文本选择锁定；宽度持久化到 localStorage 并写 `--sidebar-width` CSS 变量（`src/lib/components/layout/Sidebar.svelte:603-660`、`:884-891`）；
   2. 桌面折叠：42px 图标窄条（第 931-989 行，showSidebar=false 时）；
   3. 移动端：覆盖式抽屉 + 全屏遮罩（:892-901，md:hidden），另支持屏幕左缘滑动手势开合（:557-581，起点 x<40、滑动距离≥屏宽/8）。
 
@@ -321,5 +321,5 @@ common/Dropdown.svelte（359 行）：
 - Toast 与通知：`src/routes/+layout.svelte`（Toaster 装配）、`src/lib/components/NotificationToast.svelte`、`src/lib/components/chat/Settings/Notifications.svelte`
 - 加载与空状态：`src/lib/components/common/Loader.svelte`、`Spinner.svelte`、`Overlay.svelte`、`chat/Placeholder.svelte`、`chat/ChatPlaceholder.svelte`
 - 错误页：`src/routes/+error.svelte`、`src/routes/error/+page.svelte`
-- 主题切换：`src/lib/components/chat/Settings/General.svelte`（128-196）；token：`src/tailwind.css`、`src/app.css`（high-contrast 848-919）；缩放：`src/lib/utils/text-scale.ts`
+- 主题切换：`src/lib/components/chat/Settings/General.svelte`（128-196）；token：`src/tailwind.css`、`src/app.css`（high-contrast 423-999）；缩放与字体：`src/lib/utils/text-scale.ts`
 - 聊天背景图：`src/lib/components/chat/Chat.svelte`（3783-3801）、`chat/Settings/Interface.svelte`（664-691）、`layout/Sidebar/Folders/FolderModal.svelte`；许可字段下发：`backend/open_webui/main.py:2267`；部署级自定义 CSS：`src/app.html:35` + `static/static/custom.css`

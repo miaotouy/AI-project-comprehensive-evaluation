@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态阅读 Jetpack Compose 消息组件、Markdown/富文本渲染、自研 highlight 模块、流式合并链路与 WebView 承载路径，并对照 `web-ui/` 的 React 渲染作为同项目 Web 端参考
 >

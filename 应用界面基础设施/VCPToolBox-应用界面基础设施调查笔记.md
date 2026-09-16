@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -26,7 +26,7 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 主进程对 `/AdminPanel` 302 重定向（`server.js:837-846`）。物理解耦细节见 [`../仓库分布/VCPToolBox-仓库分布调查笔记.md`](../仓库分布/VCPToolBox-仓库分布调查笔记.md) 与 [`../Chat UI/VCPToolBox-ChatUI调查笔记.md`](<../Chat UI/VCPToolBox-ChatUI调查笔记.md>)。
 
-**前端装配。** `src/main.ts` 顺序为：创建应用与 Pinia、初始化鉴权 store、把命令式反馈总线接到模块级实现（setFeedbackSink，:20）、注册 401 自动登出监听（:21-42）、注册全局 v-lazy 指令（:45）后挂载；`App.vue` 只渲染 `router-view`。
+**前端装配。** `src/main.ts` 顺序为：创建应用与 Pinia、初始化鉴权 store、把命令式反馈总线接到模块级实现（setFeedbackSink，:20）、注册 401 自动登出监听（:21-42）、注册全局 v-lazy 指令（:45）；挂载改为异步 bootstrap——先 `await router.isReady()` 再 `app.mount('#app')`，失败只记录错误（:50-58）；`App.vue` 只渲染 `router-view`。
 
 **布局 shell。** `MainLayout.vue` 是唯一业务壳（Login 独立路由），挂载星空背景、沉浸观星面板、顶栏、侧栏、内容区、反馈宿主、通知抽屉与全局命令面板（:11-126）。
 
@@ -40,9 +40,9 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**界面栈。** Vue ^3.5.31 + Pinia ^3.0.4 + vue-router ^5.0.4 + TypeScript + Vite 8；功能性依赖为 easymde（Markdown 编辑器）、marked/marked-highlight/`highlight.js`/dompurify（渲染与消毒）、@fontsource-*（字体）、font-awesome（遗留图标）；
+**界面栈。** Vue ^3.5.31 + Pinia ^3.0.4 + vue-router 5.0.4 + TypeScript + Vite 8；功能性依赖为 easymde（Markdown 编辑器）、marked/marked-highlight/`highlight.js`/dompurify（渲染与消毒）、@fontsource-*（字体）、font-awesome（遗留图标）；
 
-无 UI 组件库、无动画库、无 i18n 库（`package.json:17-45`）。`src/vendor/three.module.js` 供 `SolarSystemBg.vue` 星空背景使用。
+无 UI 组件库、无动画库、无 i18n 库（`package.json:17-45`）。`src/vendor/three.module.js` 供 `SolarSystemBg.vue` 星空背景使用；`AdminPanel-Vue/vendor/` 另存放 Anime.js/Three.js/Pixi.js 内置脚本库，由 MediaRenderer 插件消费而非管理台页面。
 
 **公共组件层。** `src/components/ui/` 26 个手写控件（UiButton/UiInput/UiSelect/UiTextarea/UiField/UiCard/UiAlert/UiBadge/UiEmptyState/UiList/UiListItem/UiTableFrame/UiToolbar/UiIconButton/UiPageActions/UiDirtyIndicator/UiSettingsCard/UiSettingsForm/UiSettingsGroup/UiSettingsSwitchRow/UiSideConsoleNav/AppCheckbox/AppSwitch/DragHandle 等）。
 
@@ -57,7 +57,7 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 ### BaseModal：自研弹窗基座
 
-`src/components/ui/BaseModal.vue` 是页面级内容弹窗的公共底座，消费方 11 处（EmojiGallery 预览、ImageCacheEditor、ThemeEditor 导入/另存、ToolCallRecordsManager 详情、ThinkingChainsEditor、ToolboxManager、GlobalCommandPalette、rag-tuning 两个分析弹窗、DailyNotesManager/PlaceholderViewer 子弹窗等）：
+`src/components/ui/BaseModal.vue` 是页面级内容弹窗的公共底座，消费方 12 处（EmojiGallery 预览、ImageCacheEditor、ThemeEditor 导入/另存、ToolCallRecordsManager 详情、ThinkingChainsEditor、ToolboxManager、GlobalCommandPalette、PluginConfig 插件 README 阅读弹窗、rag-tuning 两个分析弹窗、DailyNotesManager/PlaceholderViewer 子弹窗等）：
 
 **Portaling。** 用 Teleport 默认挂到 body（:35），外层套过渡动画（:3-11）；面板与遮罩 attrs 通过作用域插槽交给业务层（overlay-attrs/panel-attrs/panel-ref，:61-73）。
 
@@ -213,7 +213,7 @@ LOCKED_THEME_VAR_RULES（:951-976）把以下前缀类结构 token 锁为只读"
 
 **剪贴板。** copyToClipboard（navigator.clipboard → 隐藏 textarea + execCommand('copy') 回退，`utils/ui.ts:26-62`）；消费方如通知卡片"复制原始消息"（`NotificationsDrawer.vue:71-80`）、日志复制（`useServerLogViewer.ts:150-152`，成功/失败 toast）。
 
-**Markdown/代码。** `useMarkdownRenderer.ts` 懒加载 marked + marked-highlight + highlight.js + DOMPurify，消毒配置禁 `style/script/iframe/form/input/button` 等标签与 style 属性（:6-23）；EasyMDE 仅 `DailyNotesManager.vue:149-156` 懒加载使用。
+**Markdown/代码。** `useMarkdownRenderer.ts` 懒加载 marked + marked-highlight + highlight.js + DOMPurify，消毒配置禁 `style/script/iframe/form/input/button` 等标签与 style 属性（:6-23）；代码围栏绘制改为 `renderMarkdownCodeBlock`：纯文本/未标注/未知语言、以及正文含 `<<<[TOOL_REQUEST]>>>` 等 VCP 协议标记的代码块一律转义为纯文本，不再回退 `highlightAuto`（避免协议块被误判为 XML 拆成 span），其余语言才走 highlight.js（:24-105,136-143）；EasyMDE 仅 `DailyNotesManager.vue:149-156` 懒加载使用。
 
 **虚拟滚动。** useVirtualScroll 用于笔记列表与服务器日志（`NoteList.vue:209`、`useServerLogViewer.ts:5`），属列表级工具而非全局机制。
 

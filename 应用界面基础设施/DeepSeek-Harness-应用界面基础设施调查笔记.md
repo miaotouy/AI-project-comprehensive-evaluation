@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web/`、`packages/client/`、`packages/host/`、`packages/api/`、`packages/typert/`、`packages/extensions/`、`packages/sdk/`、`packages/boot/`、`apps/cli/`、`packages/util/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -16,7 +16,7 @@
 
 DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合产物：一个零插件依赖的 shell 内核负责加载页与装配，全部 UI 能力以 client 插件包形式经插槽系统组合。仓库另有 CLI/TUI 表面，Web 面通过 `dsh --profile web` 从同一套插件底座启动。
 
-浏览器端没有传统的应用入口与路由：`window.__DSH_BOOT__` 清单把插件图交给 shell，shell 用自研“懒 CJS 模块表”注册各包浏览器半边，再接入 vendored Cordis Loader 的 `internal` 契约完成纤维装配，全部条目 ACTIVE 后一次性切换到真实界面。传输层上行只有 HTTP 一元 RPC，下行是两条 WebSocket 事件流，由重连状态机统一管理。
+浏览器端仍由启动清单和 client module table 装配插件，但 React 绑定已从旧 web-react/runtime 拆为 `client/store`、`ui-renderer` 与 `ui-session`。传输层上行是 Remote HTTP POST，下行统一为 API Gateway `/api/remote.mux` 上的逻辑 streams，由 generation-ready 握手和连续恢复状态机管理（`packages/client/README.md`；`connection/README.md`）。
 
 业务数据统一由“对象层”持有（会话事件窗口、流式累积、重连机器），表现组件只通过框架注入的 hooks 与 store 读取；Typert 编译器从 TypeScript 类型图生成协议描述符与 zod 编解码器，网关据此分发 `/api` 调用，客户端无需手工维护协议代码。
 
@@ -84,13 +84,13 @@ DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合�
 
 ## 7. 传输、连接与信任模型
 
-**载波。** `/api` 前缀统一承载一元 RPC（fetch）；下行两个事件流走 `/api/events.mux` 与 `/api/events.host` 两条 WebSocket，客户端只读、上行仍走 HTTP（`connection/src/client/web-api-client.ts`；宿主端 `websocket-downlink.ts` 明言客户端消息是协议违规）。`connection/src/api-path.ts` 是路径单一来源。
+**载波。** Remote unary 调用走 HTTP POST，逻辑 streams 复用 API Gateway 的 `/api/remote.mux` WebSocket；feature package 还可向 Connection 注册精确 Fetch route，用于会话 ZIP、文件上传等非 JSON 响应。shell-owned composition 可用 `connection.rpc.open` 提供等价逻辑 carrier，而不打开 WebSocket（`packages/client/connection/README.md:25-39`）。
 
-**重连状态机。** `ConnectionController`（`connection/src/client/connection.ts:61-169`）以 generation/attempt 私有状态循环：每代并发泵两条流，严格就绪握手要求 `host.describe` 成功、双流 `onOpen` 均到、3 秒超时兜底；之后才回调 `onConnected`（驱动会话基线重订阅）。失败后指数退避加抖动（500ms 起、10s 封顶）重连。对外状态只有 `connected | reconnecting` 两态且去重；UI 在尚无状态时视为连接中。sink 异常被隔离，业务层崩溃不拖垮泵循环。
+**重连状态机。** Gateway 的内部 `$events` logical stream 是 generation source。Host 先装增量监听，再发送 ready baseline；Connection 收到 ready 后才发布 connected generation。stream 结束、Remote 错误、非法 opening 或超时会撤销 generation，按 500ms 到 10s 的抖动退避持续重试；浏览器 offline 时暂停，online 后从首档恢复（`packages/client/connection/README.md:41-50`）。
 
-**信任栅栏。** 每个 `/api` 请求先过 isTrustedApiRequest（`api-request-trust.ts:96-123`）：Host 头必须命中 loopback 或配置的 trustedHosts（DNS rebinding 防御），sec-fetch-site 为 cross-site 时直接拒绝，带 Origin 则必须同源；trustedHosts 条目在加载期做规范化校验。--host 0.0.0.0 被 web-startup 显式拒绝（`bundle/web-app/src/startup.ts:69-71`）。栅栏定位是绑定策略而非认证层。
+**信任与认证。** Host/Origin 栅栏仍先拒绝 DNS rebinding 与 cross-site 请求；其后所有 RPC 和 WebSocket 都要求浏览器 session。进程生成随机 launch token，只允许根 GET 用它换取绑定 hostname+port 的签名 HttpOnly、SameSite=Strict cookie；签名 secret 存在 credentials owner record，默认有效 30 天。静态资源公开，业务 API 无匿名 loopback 例外（`packages/client/connection/README.md:30-46`）。
 
-**宿主 RPC 通道。** `rpc-host.ts` 提供逻辑通道注册（`handle`/`intercept`），连接行把 `/api` 挂为共享通道并合成 fetch handler；node:http 与 WHATWG fetch 之间由 `http-bridge.ts` 桥接，默认 160 MiB 请求体上限（按聚合图片上限换算）、流式回写带背压。
+**宿主 RPC 通道。** `rpc-host.ts` 提供 carrier-neutral RPC 与精确 Fetch route 注册；Web carrier 独占 `/api` HTTP bridge、浏览器认证及 Host/Origin 检查。普通 buffered route 有聚合请求体上限，显式 streaming route 以背压块绕过该聚合上限并由 feature 自己负责持久化和取消。
 
 ## 8. 前端运行时、模块系统与启动链
 
@@ -156,7 +156,7 @@ DeepSeek Harness 的 Web 界面是一个“一切皆插件”的 Cordis 组合�
 
 **文档与实现不一致（已确认）。** `cordis.patch.yml:287` 注释引用 `apps/cli/src/web.ts`，该文件在当前快照中不存在；实际的 web 参数解析在 `packages/bundle/web-app/src/startup.ts`。同文件 `:142` 的 HMR 注释称“TODO 重开共享 HMR”，但 `client-hmr` 行实际已启用且 HMR 宿主/浏览器两端实现完整，注释滞后。
 
-**Electron 是设计预期而非现状。** `host/webserver` 模块注释说明 Electron 场景会以 file:// 加载 dist 并走 IPC fetch 桥，但仓库内无任何 Electron/Tauri 代码（全仓 package.json 未命中相关依赖），Web 面目前是纯浏览器 + node:http 服务器形态。
+**桌面壳已出现。** 当前仓库已增加 Electron 应用入口及 asar runtime resolution；它复用现有 Web client 与 Host 能力，而不是另造业务 UI。桌面打包、升级和平台行为仍未运行验证。
 
 **进程级启动兜底。** CLI 侧 `app-boot` 提供 fail-loud 守卫（未处理拒绝打标退出，终端持有者可先归还终端）、patch 层动态应用（用户 patch 经 Cordis HMR 热重载）、以及 `assertEntriesActivated` 激活审计（把 pending 原因列出）；`apps/cli/src/process-shutdown.ts` 提供 5 秒优雅退出与信号升级强制退出。浏览器 shell 侧有对应的 settled 审计，两端都在放行前确认全部条目激活。
 

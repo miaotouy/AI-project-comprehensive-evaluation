@@ -2,25 +2,27 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
-> 调查方式：静态阅读 service API、Web API、SDK 目录、MCP/插件工具与触发器管理代码；补查 webhook、schedule、plugin trigger 的日志、认证、幂等、重试和结果边界；未连接外部服务
+> 调查方式：静态阅读 service API、App Deployment 环境与文件 grant、Web API、SDK 目录、MCP/插件工具与触发器管理代码；核对 webhook、schedule、plugin trigger 的日志、认证、幂等、重试和结果边界；未连接外部服务
 >
-> 调查范围：外部调用应用、平台调用外部能力、外部事件触发三条协作边界；按本类目准入门槛判断是否存在持续外部协作，不把单向 API、普通 MCP 或 webhook 误列为主链；不审计第三方协议端实现
+> 调查范围：外部调用应用、App Deployment 环境、平台调用外部能力与外部事件触发；按本类目准入门槛判断是否存在持续外部协作，不把单向 API、部署入口、普通 MCP 或 webhook 误列为主链；不审计第三方协议端实现
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Dify 有三种对外接入边界：业务系统经 service API 调用已发布应用；运行中的 Agent/workflow 经工具、插件或 MCP 调用外部能力；外部事件经 webhook、schedule 或 plugin trigger 创建异步 workflow run。它们都提供了可调查的协议与运行入口，但按本类目要求，当前代码快照中尚未确认拥有持续身份、双向回流、状态映射和接管治理的外部协作主链。不能把“支持 MCP”或“能被 webhook 触发”泛化为外部执行体协作。
+Dify 有四种对外接入边界：业务系统经 service API 调用已发布应用；App Deployment 环境运行选定版本；运行中的 Agent/workflow 经工具、插件或 MCP 调用外部能力；外部事件经 webhook、schedule 或 plugin trigger 创建异步 workflow run。它们都提供了可调查的协议与运行入口，但按本类目要求，当前代码快照中尚未确认拥有持续身份、双向回流、状态映射和接管治理的外部协作主链。不能把“支持 MCP”、部署到环境或“能被 webhook 触发”泛化为外部执行体协作。
 
 ## 1. 外部调用已发布应用
 
 service API 按应用能力提供 workflow、conversation、message、file 与 site 路由；公开 Web API 也有 workflow run/stop 入口。`/files/upload`、`/site`、`/workflows/run` 等接口共同构成应用调用面的配套资源（`controllers/service_api/app/{file,site,workflow}.py`）。workflow 运行可选择 blocking 或 SSE streaming，run/task ID 继续用于详情和停止。
 
 这些路由先验证应用 token 并解析终端用户，再进入 `AppGenerateService.generate`；调用方无法直接越过应用边界取得租户的模型或工具配置。`sdks/` 中有 Node/PHP 客户端，但本次只确认目录和 API 边界，未验证 SDK 版本覆盖或端到端兼容性。
+
+App Deployment v2 将具体发布版本部署到 environment，并为环境 WebApp 与 service API 建立独立访问点；当前前端将 MCP 和 trigger 明确标为环境不支持。环境执行所需文件不复用 Enterprise control plane 的主密钥：受信内网入口先为 app/end-user 签发短期 grant，公开文件端点再按 upload、resolve、produce scope 接收上传、远程抓取、产物写入或重新签名，内容读取使用单文件 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。这形成“外部部署控制面 -> Dify 运行文件面”的受限能力交接，但控制面身份、环境生命周期和实际部署由 Enterprise 边界持有，尚不能升级为本仓库独立掌握的外部协作主链。
 
 ## 2. 平台调用外部工具与 MCP
 
@@ -50,6 +52,7 @@ MCP 与插件表现为 Dify 主动调用外部工具的机制。已确认 MCP Pr
 
 - service API key、End User、文件上传及 run 查询的真实授权与限流。
 - SDK 请求序列化、流重连、错误兼容性和版本契约。
+- App Deployment 环境的控制面身份、版本部署、访问控制、grant TTL、文件所有权和撤销效果。
 - MCP OAuth/identity forwarding、远端失败、结果大小和网络中断。
 - trigger 的签名验证、重试、幂等、事件顺序、多实例投递，以及外部系统获取最终 workflow 输出的协议。
 - schedule 的单次失败处理、Celery 发布与数据库提交之间的崩溃窗口、plugin provider 的签名/事件 ID 契约、原始请求日志的保留和敏感数据边界。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 `astrbot/core` 与 `dashboard/src` 中 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、preview 等关键词；走通 WebChat 聊天链路（发送 → 流式生成 → 消息持久化 → 重新加载）与工具结果物化链路（执行 → 文件附件 → 工作区浏览）的实现路径；对照单元测试确认部分行为
 >
@@ -26,7 +26,7 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 - 工作区：`astrbot/core/workspace.py`（会话/项目/自定义三类根目录），`astrbot/dashboard/services/chatui_project_service.py` + `astrbot/dashboard/api/chat_projects.py`（项目与只读文件浏览 API）
 - 前端：`dashboard/src/components/chat/`（ChatMessageList、MessageList、HtmlGenUiNode、WorkspaceFilesPanel、ToolCallCard、IPythonToolBlock），`dashboard/src/composables/useMessages.ts`（SSE/WS 协议）
 
-**主链路一（HTML GenUI 预览）**：聊天页发送请求时固定带 `enable_inline_genui: true`（`dashboard/src/composables/useMessages.ts:7-13`）；后端据此注入输出协议提示词（`astr_main_agent.py:509-510`），指示模型恰好产出一个 `<html-genui>...</html-genui>` 块。模型以普通文本流式产出该块，前端在流式渲染中按自定义标签解析出 GenUI 节点，iframe 以 srcdoc 预览并按 500ms 节流整文档重建；后端把纯文本合并进消息 parts 写入消息历史，重新打开会话时前端用同一渲染管线重建预览。解析、预览与持久化入口见文末源码索引（`chatMarkdownComponents.ts`、`HtmlGenUiNode.vue`、`chat_service.py`、`useMessages.ts`）。链路各环节均有源码依据；未运行验证。
+**主链路一（HTML GenUI 预览）**：聊天页发送请求时固定带 `enable_inline_genui: true`（`dashboard/src/composables/useMessages.ts:7-17`）；后端据此注入输出协议提示词（`astr_main_agent.py:532-533`），指示模型恰好产出一个 `<html-genui>...</html-genui>` 块。模型以普通文本流式产出该块，前端在流式渲染中按自定义标签解析出 GenUI 节点，iframe 以 srcdoc 预览并按 500ms 节流整文档重建；后端把纯文本合并进消息 parts 写入消息历史，重新打开会话时前端用同一渲染管线重建预览。解析、预览与持久化入口见文末源码索引（`chatMarkdownComponents.ts`、`HtmlGenUiNode.vue`、`chat_service.py`、`useMessages.ts`）。链路各环节均有源码依据；未运行验证。
 
 **主链路二（代码执行与文件物化）**：用户请求触发模型调用执行与文件系统工具（入口 `astrbot_execute_python` 等，实现见文末源码索引），本机每次调用起独立子进程，或改走远端沙箱（`computer_client.py:551-666`）。产物经消息链由发送层转成 `[FILE]文件名|显示名` / `[IMAGE]文件名` 文本标记（`webchat_event.py:78-147`），后端把文件复制进附件目录并登记（`chat_service.py:980-1005`），前端渲染为带下载按钮的附件卡（见第 5 节）；同一文件同时落在会话/项目工作区，用户可从文件面板只读浏览、预览、下载（`WorkspaceFilesPanel.vue:325-454`、`chat_projects.py:160-206`）。
 
@@ -34,7 +34,7 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 
 ## 1. 触发方式、输出协议与对象模型
 
-**触发**：GenUI 由前端请求标志触发，而非用户命令。`enable_inline_genui` 默认 True（`astrbot/core/platform/sources/webchat/request_flags.py:4`），前端构造请求固定开启（`useMessages.ts:9`），由 `event.get_extra("enable_inline_genui")` 决定是否注入输出协议提示词（`astr_main_agent.py:509-510`）。非 WebChat 平台（QQ 等）没有该标志，也不会注入协议。
+**触发**：GenUI 由前端请求标志触发，而非用户命令。`enable_inline_genui` 默认 True（`astrbot/core/platform/sources/webchat/request_flags.py:4`），前端构造请求固定开启（`useMessages.ts:12`），由 `event.get_extra("enable_inline_genui")` 决定是否注入输出协议提示词（`astr_main_agent.py:532-533`）。非 WebChat 平台（QQ 等）没有该标志，也不会注入协议。
 
 **输出协议**：私有文本标记，无结构化 part。协议全部内容在 `CHATUI_INLINE_GENUI_SYSTEM_PROMPT`（`astr_main_agent_resources.py:61-76`）：输出恰好一个 `<html-genui>...</html-genui>` 块；开标签可带 `title` 属性；不允许 Markdown 代码围栏包裹；要求自包含 HTML/CSS/JS；修订时输出完整新块而非 diff。后端完全不解析该标记——它只是 `plain` part 的普通文本，协议解析完全发生在前端 markstream-vue 的 custom-tag 机制（`chatMarkdownComponents.ts`）。由此带来两点后果：协议开放度很低（私有标记、靠提示词约定），且"误触发/半截流"处理依赖第三方渲染库的流式解析能力（本项目未实现自己的标记解析器）。
 
@@ -70,14 +70,14 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 **代码执行**：本地与沙箱四类运行时（未发现 notebook 或 REPL 类型的持续运行对象）：
 - 本地 Python：每次调用 `python -c` 起新子进程（`booters/local.py:828-866`），无持久 kernel；`kernel_id` 参数在协议层存在（`olayer/python.py:8-19`），本地实现忽略，Neo 实现标注 Bay SDK 不支持（`booters/shipyard_neo.py:62`）。
 - 本地 Shell：每次调用起子进程；Windows 优先探测 PowerShell 7（`pwsh`）再回退到 Windows PowerShell（`booters/local.py:56-58、163-180`）。另有 managed session 承载后台/交互式进程，输出写临时日志文件增量读取（`booters/local.py:213-825`）。
-- 远端沙箱：shipyard_neo（Bay，python-default profile，可含 browser 能力）、shipyard、cua（桌面 GUI）、boxlite 等运行时；选择与生命周期见 `computer_client.py:588-666`，能力装配见文末源码索引（`astr_main_agent.py:1125-1221`）。
+- 远端沙箱：shipyard_neo（Bay，python-default profile，可含 browser 能力）、shipyard、cua（桌面 GUI）、boxlite 等运行时；选择与生命周期见 `computer_client.py:588-666`，能力装配见文末源码索引（`astr_main_agent.py:1062-1160`）。
 
 ## 5. 用户交互、事件与错误反馈
 
 - **GenUI iframe**：用户可在 iframe 内与页面交互——sandbox 属性含 `allow-scripts`、表单、弹窗、指针锁定等（完整清单见 `HtmlGenUiNode.vue:45-46`），且不含 `allow-same-origin`。**不存在** iframe → 宿主的事件回传：节点内没有 postMessage 监听、没有尺寸/状态/日志上报；`<base target="_blank">` 使链接在新标签打开（`HtmlGenUiNode.vue:157`）。交互状态在组件卸载/重载后不恢复（每次挂载新建 iframe）。
 - **工具卡片**：`ToolCallCard` 支持展开/收起、显示参数与结果、耗时计时（`ToolCallCard.vue:2-40,63-107`）；IPython 调用走 `IPythonToolBlock`（高亮代码与结果，`IPythonToolBlock.vue:5-21`）。这些是只读展示，无"继续编辑此代码并重跑"的交互。
 - **文件 part**：下载按钮（`ChatMessageList.vue:237-251`），图片点击放大（overlay，`MessageList.vue:528-536`）。
-- **错误反馈**：流错误/中止以纯文本附加到消息（`useMessages.ts:665-670,1084-1088`）；`error` 事件由服务端 `_consume_chat_run` 发布（`chat_service.py:1050-1053`）。
+- **错误反馈**：流错误/中止以纯文本附加到消息（`useMessages.ts:819-826,988-1041`）；`error` 事件由服务端 `_consume_chat_run` 发布（`chat_service.py:1050-1053`）。
 
 ## 6. 编辑、diff、版本与协作
 
@@ -90,11 +90,11 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 
 **GenUI 无能力桥**：iframe 沙箱策略不含 `allow-same-origin`（opaque origin），脚本可运行但没有任何宿主 API；与插件页面 iframe（有 `postMessage` 桥，`PluginPagePage.vue`）形成对比——生成式输出没有获得插件页面同等的桥接能力。
 
-**代码执行**：本机执行无隔离（直接子进程，仅 `_BLOCKED_COMMAND_PATTERNS` 黑名单与管理员门槛，`booters/local.py:34-53`、`computer_tools/util.py:57-71`）；沙箱执行由远端运行时隔离（Bay 容器，TTL 管理，`computer_client.py:596-624,641-665`）。文件工具权限分层明确（`fs.py:10-35` 模块头部审计注释）：成员+本地限制读写范围（工作区、temp、skills），管理员不受该模块路径限制；沙箱成员不受模块限制、依赖沙箱边界。网络/存储/模型调用等宿主动作没有面向输出的逐项授权框架——这些属于 Agent 工具调度范畴。
+**代码执行**：Local runtime 不再等同于无隔离宿主子进程。member/admin 各有文件范围、执行和联网策略；受限执行在 Linux 由 bubblewrap、macOS 由 Seatbelt 启动，清理环境变量并按策略暴露工作区、技能与临时目录，同时施加进程资源上限。Windows 没有本机进程沙箱后端，配置校验会拒绝需要隔离的策略；允许 host 文件范围或其他宽权限仍是显式高权限配置。远端 sandbox runtime 继续由 Bay/CUA 等外部环境隔离（`astrbot/core/computer/process_sandbox/base.py:9-68,154-250`；`process_sandbox/__init__.py:15-42`；`tools/computer_tools/util.py:88-209`；`dashboard/services/config_service.py:325-424`）。
 
 ## 8. 持久化、恢复、分享与导出
 
-- **GenUI**：持久化的是源文本（消息 plain part 内，含 `<html-genui>` 标签原样），`get_session` 返回历史后前端重渲染（`chat_service.py:1414-1449`；`useMessages.ts:265-273`）。恢复的是"源码 + 重建的预览 DOM"，iframe 内运行状态（定时器、表单值、脚本变量）不持久。无分享链接、无导出按钮；用户可手动复制 Source 视图文本。
+- **GenUI**：持久化的是源文本（消息 plain part 内，含 `<html-genui>` 标签原样），`get_session` 返回历史后前端重渲染（`chat_service.py:1414-1481`；`useMessages.ts:282-313`）。恢复的是"源码 + 重建的预览 DOM"，iframe 内运行状态（定时器、表单值、脚本变量）不持久。无分享链接、无导出按钮；用户可手动复制 Source 视图文本。
 - **附件**：登记表 + 磁盘副本，`attachment_id` 可寻址下载（`/files/{attachment_id}`，`dashboard/api/files.py:91-102`）；会话删除时级联删除附件文件（`chat_service.py:1226-1262`）。消息内 file part 提供下载（`ChatMessageList.vue` 的下载按钮逻辑）。
 - **工作区文件**：落盘于 `data/workspaces/`（会话、`project_<id>`、自定义路径三类根，`workspace.py:65-91,121-165`），文件本身即持久化源；项目元数据存 DB。浏览/读/下载 API 为只读（`chatui_project_service.py:176-379`、`chat_projects.py:160-206`），无用户写入口。
 - **导出**：项目工作区文件可单个下载（`chat_projects.py:184-206`）；未发现目录打包/项目级导出。
@@ -103,7 +103,7 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 
 - **GenUI**：无对象级回流。模型"感知"历史输出仅通过对话历史（assistant 消息含此前完整 `<html-genui>` 文本），修订 = 新回合整块重出（提示词约定，`astr_main_agent_resources.py:68`）。没有查询对象列表、读取对象状态、定向修改的 API。
 - **文件**：模型侧闭环完整——`astrbot_grep_tool`/`astrbot_file_read_tool` 查询读取，`astrbot_file_write_tool`/`astrbot_file_edit_tool` 定向修改（实现见文末索引 `fs.py:306-799`）。cwd 固定在会话/项目工作区（`workspace.py:191-217`，路径权限见 `computer_tools/util.py:27-45`）。这是"查询 → 读取 → 定向修改"闭环，但对象是普通磁盘文件而非生成式对象；模型用工具修改后，用户从工作区面板可看到更新。
-- **沙箱**：shipyard_neo 提供执行历史/注释/技能候选等 Neo 工具（`astr_main_agent.py:1193-1203`），用于技能生命周期，不属于通用输出对象回流。
+- **沙箱**：shipyard_neo 提供执行历史/注释/技能候选等 Neo 工具（`astr_main_agent.py:1129-1140`），用于技能生命周期，不属于通用输出对象回流。
 
 ## 10. 生命周期、资源治理与性能
 
@@ -114,8 +114,8 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 ## 11. 测试、已确认边界与未验证事项
 
 **已有测试**（静态确认，未运行）：
-- `tests/unit/test_astr_main_agent.py:813-860`：验证 `enable_inline_genui` 时注入提示词、无会话时也注入、关闭时不注入——覆盖触发与协议装配。
-- `tests/test_chat_route.py:390-423`：请求 flags 归一化透传（含 `enable_inline_genui`）。
+- `tests/unit/test_astr_main_agent.py:1105-1156`：验证 `enable_inline_genui` 时注入提示词、无会话时也注入、关闭时不注入——覆盖触发与协议装配。
+- `tests/test_chat_route.py:426-462`：请求 flags 归一化透传（含 `enable_inline_genui`）。
 - `tests/test_computer_fs_tools.py`（约 60+ 用例）：读写/编辑/搜索工具的权限边界（成员受限目录、硬链接拒绝、超大文件、图片/PDF/docx/epub 读取等）。
 - Dashboard 前端仅 5 个测试文件（`dashboard/tests/`，覆盖偏好存储、路由、输入法等基础工具），**没有**覆盖 `HtmlGenUiNode`、markstream 自定义标签、消息 part 渲染的测试。
 
@@ -136,12 +136,12 @@ AstrBot 的生成式输出目前分两类：一是 ChatUI 内联 HTML 预览（`
 ## 12. 关键源码索引
 
 - `astrbot/core/astr_main_agent_resources.py:61-76`：`<html-genui>` 输出协议提示词（触发、格式、修订约定）
-- `astrbot/core/astr_main_agent.py:509-510`：`enable_inline_genui` 注入点；`1125-1221`：沙箱工具装配
+- `astrbot/core/astr_main_agent.py:532-533`：`enable_inline_genui` 注入点；`1062-1160`：沙箱工具装配
 - `astrbot/core/platform/sources/webchat/request_flags.py:4`：GenUI 标志默认值
 - `astrbot/dashboard/services/chat_service.py`：SSE 运行状态机与消息持久化（`_consume_chat_run:897-1088`、`build_chat_stream:1090-1183`、`update_message:1621-1712`）
 - `astrbot/core/platform/sources/webchat/webchat_event.py:29-147`：`[IMAGE]/[FILE]` 物化协议
 - `astrbot/core/platform/sources/webchat/message_parts_helper.py:358-392`：附件 part 生成
-- `dashboard/src/composables/useMessages.ts:7-13,990-1160`：请求标志与流式协议处理
+- `dashboard/src/composables/useMessages.ts:7-17,1149-1470`：请求标志与流式协议处理
 - `dashboard/src/components/chat/message_list_comps/HtmlGenUiNode.vue:29-46,89-169`：iframe 预览与沙箱策略
 - `dashboard/src/components/chat/chatMarkdownComponents.ts:8-16`：custom-tag 注册
 - `astrbot/core/tools/computer_tools/fs.py:306-799`：读/写/编辑/grep 工具

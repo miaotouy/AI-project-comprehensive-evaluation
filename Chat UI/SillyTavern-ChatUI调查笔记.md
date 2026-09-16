@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：直接阅读源码（`index.html` 工作台结构与消息模板、`public/script.js` 的发送/停止/swipe/编辑事件绑定、`keyboard.js`/`a11y.js`、`action-loader.js`、`swipe-picker.js`、`welcome-screen.js`），并以 grep 核对触摸手势与 ARIA 覆盖范围
 >
@@ -80,7 +80,7 @@ SillyTavern 的聊天 UI 是"可变数组 + DOM 操作 + 扩展事件"的组合�
 
 - **操作栏**（消息模板 `index.html:7399-7427`）：直接按钮区 = 更多菜单（`extraMesButtonsHint` 展开，可被 `power_user.expand_message_actions` 固定展开）、checkpoint 旗标、编辑；更多菜单内 = 翻译、生图、朗读、Prompt 详情、隐藏/恢复、媒体列表/画廊切换、嵌入附件、Swipe Picker、建 checkpoint、建分支、复制。
 - **编辑工作流**：编辑按钮 → `messageEdit`（8180-8238，`this_edit_mes_id` 锁定、swipe 按钮隐藏）；编辑态按钮组 = 确认/复制为新消息/加 reasoning/删除/上移/下移/取消（11874-11933）；输入时可选自动保存（11800-11804）；确认后 `messageEditDone` 重渲染并保存（8337-8375）。编辑期间发送/继续被拒（1707-1711, 11587-11590）。
-- **删除工作流**：`.mes_edit_delete` 按 `power_user.confirm_message_delete` 决定是否确认，最后一条非用户消息且有多个候选时可选"只删当前 swipe"（11922-11929）；`deleteMessage`（1618-1672）。
+- **删除工作流**：`.mes_edit_delete` 按 `power_user.confirm_message_delete` 决定是否确认，最后一条非用户消息且有多个候选时可选"只删当前 swipe"（11922-11929）；`deleteMessage` 默认连带删除紧邻其前的工具调用系统消息，`/cut` 与 `/del` 可用 `toolcalls` 参数关闭（`public/script.js:1614-1700`、`public/scripts/power-user.js:2818-2890`）。
 - **swipe 切换**：左右箭头只绑定在最后一条消息（11086-11087）；`refreshSwipeButtons` 决定可见性（`public/script.js:9190-9249`：纯净问候语常驻、划到底提示重新生成、全局隐藏类三种策略）；计数历史 `.swipes-counter` 同时是打开 Swipe Picker 的入口（`swipe-picker.js:428, 437-443`，移动端长按 425-426）。
 - **越界行为**：`getOverswipeBehavior`（9163-9181）判定滑动越过末尾时的处理模式，`REGENERATE` 会触发新候选生成（10250-10260），另有循环、纯净问候语、无操作三种模式；swipe 期间 `document.body.dataset.swiping` 置位（9984），失败自动回退（`endSwipe(revert)` 10014-10031）。完整模式枚举：
 
@@ -89,6 +89,7 @@ SillyTavern 的聊天 UI 是"可变数组 + DOM 操作 + 扩展事件"的组合�
   ```
 - **Swipe Picker**（`swipe-picker.js`，全文 444 行）：`openSwipePicker`（52-410）读当前消息的候选数组与元信息渲染滚动列表，每项可跳转（双击/Go）、删除（121-233，含确认与下标重算）、复制、**从这个候选开分支**（160-174 记录分支动作，387-390 按候选 id 调 `branchChat`）——这是"以某个候选为基础开分支"的唯一 UI 入口，底层与 `/branch-create` 汇到 `bookmarks.js`。
 - **触摸手势**：`public/lib/swiped-events.js`（132 行）在 document 上监听触摸开始/移动/结束（28-30）合成左右滑动事件；`RossAscends-mods.js:908-956` 处理它们：`power_user.gestures` 开启（默认 true，`power-user.js:179`）、不在弹窗中、目标在输入区内、非编辑态时触发最后一条消息的可见 swipe 按钮点击。范围限制：只作用于最后一条消息，且要求其 swipe 按钮当前可见。
+- **`/addswipe` 原位更新**：该命令不再触发整聊天重载；追加候选后直接更新候选数据、计数与按钮（切换模式经统一 swipe 流程），消息元素身份保持不变（`public/scripts/slash-commands.js:4617-4680`）。
 
 ## 7. 多会话、多模型与后台生成
 

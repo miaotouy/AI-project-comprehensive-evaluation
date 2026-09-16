@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/tools/`、`packages/core/agent-loop/`、`packages/core/session/`、`packages/core/system-prompt/` 与各 `packages/*/tool-*` 工具包）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读；辅以仓库自带架构文档（docs/architecture.md、docs/subsystems/tools.md、docs/tool-catalog.md、docs/tool-execution-pipeline.md、docs/capability-seams.md 生成图）；未运行真实工具调用
 >
-> 调查范围：工具定义与注册、作用域与过滤、发现与注入、模型协议、参数校验、编排循环与并发、审批授权、执行边界、结果回注与 session log、guard 机制（timeout-policy、repeat-tool-reminder）、capability seam 与工具的关系、MCP 桥、Code Mode 旁路、UI 呈现纯函数；排除项：各工具包的执行细节、LLM adapter 内部映射、web UI 组件、headless/ACP 宿主侧
+> 调查范围：工具定义与注册、作用域与过滤、发现与注入、模型协议、参数校验、编排循环与并发、审批授权、执行边界、结果回注与 session log、guard 机制、capability seam、MCP 桥、PTC 旁路与 UI 呈现；排除项：各工具包的执行细节、LLM adapter 内部映射、Web UI 组件、headless/ACP 宿主侧
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -17,13 +17,13 @@
 DeepSeek-Harness 的工具系统是建立在 vendored Cordis 插件框架上的注册-执行管线，核心是 `packages/core/tools` 提供的 `ToolRuntime`（`ctx.tools`）：
 
 1. **工具是注册在内存 registry 中的代码对象**：`ToolDefinition` 由模型可见 schema 字段、强制 `output` 输出契约、`execute` 执行函数与若干可选回调（内容终结、超时声明、并发分类、UI 呈现）组成（`packages/core/tools/src/index.ts:221-288`）。注册即 effect，返回的 disposer 可卸载，无独立持久化实体。
-2. **作用域是层链而非单一目录**：全局层加每个 agent 一个 scope 层（`ScopedLayers`）；agent 层注册同名 shadow 全局，restrict 的 allow/deny 只过滤继承面，自身层注册不受限；Code Mode 的 `run_code` 是保留传输。
+2. **作用域是层链而非单一目录**：全局层加每个 agent 一个 scope 层；agent 层注册同名 shadow 全局，restrict 的 allow/deny 只过滤继承面，自身层注册不受限；PTC 模式的 `run_code` 是保留传输。
 3. **执行走固定管线**：策略瀑布（允许/拒绝/询问，询问经 `ctx.approval` seam 放行）→ 单调 guard → 围绕调度瀑布（超时等包装）→ 工具体 → 结果策略（接受/阻断/替换）→ 内容终结与最终通知。
 4. **模型可见 ⟺ 已记录**：`tool/call` 在执行前落盘、`tool/result` 落盘，`deriveMessages` 从 session log 投影模型历史；canonical 规范值只存在于执行局部，不落盘。
 5. **编排由 agent-loop 驱动**：调度器按 `executionMode` 分类（exclusive 屏障 / parallel 滚动池，默认并发 10），结果按模型顺序提交；abort 时未启动调用合成 `ABORTED_BEFORE_DISPATCH` 错误结果，保证回放有效。
 6. **capability seam 三角色与工具的关系**：seam = Service Definition（声明接口）+ Provider（实现）+ Consumer（模型工具）；工具包只拥有 schema、校验与呈现，provider 可整体替换而模型可见 schema 不变。
 7. **guard 机制**：timeout-policy 是 tools/execute 包装器，把声明的超时预算变成 `TOOL_TIMEOUT` 结构化错误；repeat-tool-reminder 是 post-execute 观察者，经 additionalContexts 注入重复调用提醒，只提醒不否决。
-8. **UI 呈现是纯函数**：`presentCall`/`presentResult` 返回带 card 标签的渲染意图（通用/终端/diff/搜索/读取/网页六类卡片），live 流式与日志回放共用，与执行完全分离。
+8. **Web 呈现已改为客户端派生**：工具定义仍可保留 Host-local 的 `presentCall`/`presentResult`，但内置 Web 客户端不再消费该视图。Client 从原始调用参数、结果内容、失败状态和持久化 meta 派生工具卡，并通过 `tool.call.toolview` 选择业务渲染器（`packages/core/tools/README.md:89`；`packages/client/ui-tool/README.md:46`）。
 
 ## 系统边界与总体调用链
 
@@ -109,7 +109,7 @@ DeepSeek-Harness 的工具系统是建立在 vendored Cordis 插件框架上的�
 
 **注入路径**：装配入口 `ctx.systemPrompt.assemble` 产出含 tools 数组的 `PromptAssembly`；loop 在 preStep 组装、buildRequest 把工具 schema 写入请求头并随 llm 请求发出（`agent.ts:230,462-490`）。`toolOrder` 配置可定顺序，缺省按字典序（`system-prompt/src/index.ts:164-178`）。
 
-**作用域过滤**：`view()` 单次层遍历解析可见集（`index.ts:1152-1193`）：继承面为全局层加祖先链，同名条目就近覆盖，restriction 以交集过滤继承面，自身层注册不受限；Code Mode 呈现时在过滤面之外追加 `run_code` 传输。
+**作用域过滤**：`view()` 单次层遍历解析可见集（`index.ts:1152-1193`）：继承面为全局层加祖先链，同名条目就近覆盖，restriction 以交集过滤继承面，自身层注册不受限；PTC 呈现时在过滤面之外追加 `run_code` 传输。
 
 **token 控制**：未找到工具级 token 预算或 schema 自动裁剪；工具描述与参数 schema 直接进请求。
 
@@ -117,7 +117,7 @@ DeepSeek-Harness 的工具系统是建立在 vendored Cordis 插件框架上的�
 
 传输结构是原生 tool-call 块（`ToolCallBlock`，`llm/src/types.ts:77-93`）：id + 工具名 + 模型产出的原始 JSON 参数字符串，落盘与传输都不改原文。模型可见 schema 是 `ToolSchema`（name/description/parameters 三字段，`types.ts:312-317`）；适配层位于 llm seam（`llm/stream` 流与 ContentBlock 词表），adapter（如 llm-deepseek）把词表映射到厂商协议，本轮未深入其内部映射。
 
-Code Mode（`index.ts:980-1001`、`code-mode.ts`）：配置 native/code/both 三种呈现——native 发送全部可见 schema；code 只发 `run_code` 并附加 `tools:sdk` 生成的 SDK 提示段（TypeScript 与 Python 渲染器）；both 两者都发。运行时的语言决定 run_code 的 schema 文案与 SDK 段。
+PTC 模式（`packages/core/tools/src/ptc.ts`）：配置 native/ptc/both 三种呈现。native 发送全部可见 schema；ptc 只发 `run_code` 与运行时语言对应的生成 SDK；both 同时提供两面。PTC 子调用进入同一工具策略、审批、调度和结果管线，内层规范值只在执行局部存在，Session 只记录配对、参数、渲染结果与结构化错误。
 
 ## 4. 参数解析、校验与错误处理
 
@@ -177,11 +177,13 @@ repeat-tool-reminder 挂在 tools/post-execute：按 agent 维护连续相同调
 
 **MCP**（`packages/mcp/mcp-client`）：每个插件实例连接一个服务器（stdio 子进程或 streamable-http 两种传输），插件激活阻塞到初始连接与工具发现完成。工具经两阶段换代同步注册——先全量取服务器工具列表并构建定义，成功后整体替换上一代注册，注册冲突回滚为零工具（`tools.ts:128-174`）。模型可见名按 `mcp__<serverName>__<rawName>` 生成，受 64 字符与字符集约束，发生改写时追加身份哈希防止不同服务器工具名碰撞（`tools.ts:96-102`）。调用时发服务器原始名；服务器返回 isError 时执行器抛错，转入常规工具错误回注。
 
+MCP 资源由独立 `mcp-resources` consumer 提供三项共享工具：列资源、列模板和按 URI 读取。工具要求显式 server 名，按调用 Agent 的 scope 解析 provider；文本和元数据进入工具结果，base64 blob 只给模型一个长度说明。没有可见 server 时，这三项 schema 和对应提示段都不出现（`packages/mcp/mcp-resources/src/{index,tools,render}.ts`）。
+
 **插件自举**：tool-cordis 让模型定义与运行动态 Cordis 插件（刻意 opt-in，不在任何 shipped tree）：运行中的包可注册额外模型可见工具，工具集变化经变更请求头日志记录。
 
 **Skill**：会话级 skill 目录以 catalog 形式上下文注入（source 标记 skill-catalog），模型用 skill 工具按名加载全文，不作为函数式工具注册。
 
-**子 Agent 与旁路**：子 agent 由 tool-subagent（两个后端分别注册）、全局控制工具组（发消息、中断、列列表）与子 agent 内注册的 report 工具构成闭环。Code Mode 是主要旁路面：code 呈现下模型直接调用只能命名 `run_code`，程序内 SDK 子调用带 parent 令牌走完整守卫管线并逐条落盘 code-dispatch 事件；该日志副本可被瀑布改写，但程序收到的值与模型可见结果不变。
+**子 Agent 与旁路**：子 agent 由 tool-subagent、全局控制工具组与子 agent 内注册的 report 工具构成闭环。PTC 是主要旁路面：ptc 呈现下模型直接调用只能命名 `run_code`，程序内 SDK 子调用带 parent 令牌走完整守卫管线并逐条落盘 code-dispatch 事件；日志副本可被瀑布改写，但程序收到的值与模型可见结果不变。
 
 ## 9. 设计取舍与已确认边界
 
@@ -194,14 +196,14 @@ repeat-tool-reminder 挂在 tools/post-execute：按 agent 维护连续相同调
 - **无工具级 token 预算，未发现显式迭代上限**：长尾终止依赖模型停止原因、结论标记与用户中断，上下文压缩兜底。
 - **文档与实现一致性**：tool-catalog 等目录为生成并启动验证（boot 各工具包读取真实 schema），工具名可配置（如 tool-subagent 的 toolName），说明文档是运行期快照而非静态抄写。
 
-Python 代码运行时现在是独立的 `code-runtime-python` provider。它以受控的文件描述符通道承载运行时协议，TypeScript 侧与随包 Python 模块分别实现同一消息格式；因此模型侧仍通过既有 `run_code` 入口发起调用，Python 进程协议和结果传输则被限制在执行 provider 内部（`packages/code-runtime/code-runtime-python/src/{index,protocol}.ts`、`py/protocol.py`）。
+Python PTC 运行时已移入实验区 `packages/experimental/ptc-runtime-python`；默认 Node provider 位于 `packages/ptc-runtime/ptc-runtime-node`。模型仍通过 `run_code` 发起调用，但旧 `packages/code-runtime/*` 定位不再成立。
 
 ## 10. 未验证事项
 
 - 未运行真实工具调用：流式 chunk、并行调度时序、timeout/abort 的实际行为均未实测。
 - MCP 端到端（连接、重连、注册冲突回滚、task-based 拒绝）未实测。
 - tool-terminal、tool-session-query、tool-lsp、schedule、plan-mode、spill-policy、tool-result-pruner 等包的执行细节未逐包深入。
-- run_code/Code Mode 运行时（code-runtime-worker-thread）未调查。
+- `run_code` 的 Node/Python PTC runtime 未做运行验证。
 - approval 的 ACP answerer、headless 模式、web UI 如何消费 ToolCallView/ToolResultView（属消息渲染器类目）未覆盖。
 - LLM adapter 内部如何把 ToolSchema 映射到厂商 tool 协议未验证。
 
@@ -209,7 +211,7 @@ Python 代码运行时现在是独立的 `code-runtime-python` provider。它以
 
 - `packages/core/tools/src/index.ts`：ToolDefinition（221-288）、注册/restrict/guard/presentAs（946-1116）、view 解析（1152-1193）、wireSchemas（980-1001）、execute 全管线（1342-1863）、serviceAsk（1689-1729）、createSuccessResult（1793-1823）
 - `packages/core/tools/src/schema.ts`：schema DSL、defineTool（545-617）、validateArgs（478）
-- `packages/core/tools/src/code-mode.ts`：run_code 传输（20、80-130）
+- `packages/core/tools/src/ptc.ts`：run_code 传输与 native/ptc/both 呈现
 - `packages/core/tools/src/presentation.ts`：card 渲染意图词汇表（15、46-140）
 - `packages/core/agent-loop/src/tool-calls.ts`：调度器（59-246）、tool/call 与 tool/result 落盘（262-289）
 - `packages/core/agent-loop/src/agent.ts`：step 循环（332-401）、buildRequest（407-495）

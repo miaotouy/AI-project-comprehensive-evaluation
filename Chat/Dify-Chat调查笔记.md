@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态阅读公开 WebChat、service API、应用生成服务、ORM 模型和共享聊天组件；未启动部署、未发送真实模型请求
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自由配置所有模型和工具的通用客户端。应用作者先在租户工作区定义并发布 chat、agent chat、advanced chat、workflow 或 completion 应用；终端用户再通过带历史的 WebChat、轻量 Chatbot、嵌入式组件或 service API 提交输入。服务端按应用模式创建或读取运行对象并派发给相应 generator，浏览器只把事件流投影为临时消息树和交互状态。
+Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自由配置所有模型和工具的通用客户端。应用作者先在租户工作区定义并发布 chat、agent chat、advanced chat、workflow 或 completion 应用；终端用户再通过内置 WebChat、部署环境 WebApp、轻量 Chatbot、嵌入式组件或 service API 提交输入。服务端按应用模式创建或读取运行对象并派发给相应 generator，浏览器只把事件流投影为临时消息树和交互状态。
 
 因此这里的聊天结论要区分公开聊天体验与应用运行平台能力两层。公开页可输入 query、变量和文件，处理会话、流、停止、重新生成、候选回答与 workflow 人工输入；模型、Provider、工具、知识和大部分运行策略仍由发布者预设。工作流也可被 API 直接运行，未必拥有普通聊天的线性历史语义。
 
@@ -25,10 +25,11 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
 | 控制台 | 工作区成员/应用作者 | 配置应用、资源、工作流与调试 | 本篇不把它等同于公开聊天 |
 | `/chat/[token]` | 已发布应用的终端用户 | 带会话历史的 WebChat | 只暴露已发布应用允许的输入，不直接管理租户资源 |
 | `/chatbot/[token]` 和嵌入式组件 | 终端用户/嵌入宿主 | 较轻的 Chatbot 运行面 | 与历史页复用发送与事件协议，但没有同等导航结构 |
+| `/environment/chat/[token]` | 部署环境的终端用户 | 运行选定环境版本的 WebApp | 当前部署环境只提供 WebApp 与 service API；MCP/trigger 卡明确标为不支持 |
 | service API/SDK | 外部业务系统 | 以 API 调用已发布应用或 workflow | 不拥有控制台草稿与配置权限 |
 | workflow API | 外部业务系统或集成 | 运行/停止 workflow | 结果为 workflow run 与事件，不可由 WebChat 行为反推完整语义 |
 
-这一区分源于页面和后端的责任边界：`web/app/(shareLayout)/` 与 `components/base/chat/` 组装终端用户输入并消费 SSE；`api/controllers/service_api/`、`AppGenerateService` 和模式专属 generator 才处理应用身份、配置、运行记录与实际执行。公开页不能从浏览器读取 Provider 凭据，也不提供逐回合任意改模型/工具的通用设置器。
+这一区分源于页面和后端的责任边界：`web/app/(shareLayout)/` 与 `components/base/chat/` 组装终端用户输入并消费 SSE；`api/controllers/service_api/`、`AppGenerateService` 和模式专属 generator 才处理应用身份、配置、运行记录与实际执行。App Deployment v2 又在发布面增加环境版本和环境级访问点，但没有改变公开页不能读取 Provider 凭据、不能逐回合任意改模型/工具的边界（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`）。
 
 ## 端到端聊天主链
 
@@ -95,6 +96,7 @@ SSE 不只传文本：前端还接收 Agent thought、文件、message/conversat
 - 未验证多标签页或多用户同时操作一条 conversation 时的合并、重复消息、置顶/删除回滚与恢复。
 - 未验证停止对模型、插件、MCP、队列 worker 和 workflow 节点的实际传播；只确认 API/hook 入口。
 - 未运行移动布局、键盘、焦点、屏幕阅读器、长会话性能、嵌入宿主跨域和浏览器通知。
+- 未运行部署环境 WebApp、版本切换、环境访问控制及其与内置发布入口的数据隔离。
 
 ## 关键源码索引
 

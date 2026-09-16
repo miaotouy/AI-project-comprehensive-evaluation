@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：静态代码调查（未运行、未构建）。重点读取 `tui_gateway/`（Python 网关与事件发射）、`ui-tui/`（Ink/React TUI 渲染链）与 `apps/desktop/src/components/assistant-ui/`（Electron 桌面渲染链），辅以 `web/src`、`apps/shared`、相关测试文件的全局搜索与局部阅读。
 >
@@ -170,6 +170,7 @@ Hermes 的消息渲染由多套前端各自完成，它们共享一个 `tui_gate
 - reasoning：`lib/reasoning.ts splitReasoning`；`thinking` 折叠（`collapsed|truncated|full`），`thinkingPreview` 截取 COT max 160。
 - 附件：TUI 无富附件（`MEDIA:` 行→文件链接）；桌面支持媒体文件下载、`llm` 会话引用、`preview` 目标（右键预览）。
 - 桌面工具行数据装配：`apps/desktop/src/lib/chat-messages.ts` 的 `storedToolMessagePart` 在会话恢复/重渲染时优先从 `toolMessage.args` 解析完整参数重建命令，`context`（80 字显示预览）作为标题侧占位——避免工具行只显示截断预览（`:860-874`）。
+- 连接操作拥有专用工具卡。`manage_connections` 的工具行绑定后端 operation id，只消费连接请求、连接更新和状态查询返回的权威快照；卡片可重试失效授权、跳过目标或 Continue 结算，结算后退化为静态逐目标摘要，不在前端自行推断连接状态（`apps/desktop/src/components/assistant-ui/connector-tool.tsx:62-124,168-220,285-339`，`apps/desktop/src/store/connection-request.ts:17-54,135-181,240-266`）。
 
 ### 7. HTML、Artifact 与安全隔离
 
@@ -199,6 +200,7 @@ Hermes 的消息渲染由多套前端各自完成，它们共享一个 `tui_gate
 
 - **TUI**：`domain/roles.ts` + `domain/messages.ts` 是注入点；新增显示词由 Python 事件名录与 `GatewayEvent` 联合确定。新增节点类型需要同时改 `turnController`（分段）、`domain/messages.ts`（持久化）、`messageLine`/`StreamingMd`（渲染）。无插件式渲染扩展模型。
 - **桌面**：组件覆盖 + `markdown-text.tsx` 的 `components`、`embeds/` 注册表（`embeds/index.ts`）、`preview-targets` 是较集中的扩展点；`@assistant-ui/react-streamdown` 提供组件替换层。
+- 外部编码 Agent 的导入转录被标记为 foreign history；Markdown 渲染器对这类历史不加载图片，也不挂载实时 transcript directives，避免导入文本获得当前会话的活能力（`apps/desktop/src/components/assistant-ui/markdown-text.tsx:463`，`hermes_cli/foreign_sessions.py:1-24`）。
 - **Web**：`components/Markdown.tsx` 是独立的富文本渲染（仅 dashboard 辅助面），不参与 PTY 主链。
 
 ## 设计取舍与已确认边界

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/preset/agent-presets`、`packages/preset/persona`、`packages/core/system-prompt`、`packages/core/agent`、`packages/core/scope`、`apps/cli/config/agent-presets`、`packages/context/agent-instructions`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：只读静态源码阅读，梳理 preset 发现/挂载/加入链路、scope 分层、system prompt 组装与会话日志记录；未运行交互会话，未执行测试
 >
@@ -27,11 +27,11 @@ DeepSeek Harness 没有传统聊天应用意义上的“角色卡”。它的角
 ## 总体生效链路
 
 ```text
-session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:2167）
-  -> ensureSession
-     resume 路径：resolveSessionPreset({header, events}) 从日志取值（api-proxy.ts:1651）
-     create 路径：composeAgent(presetId?) -> presets.resolve() 取 preset id（api-proxy.ts:1227-1248）
-  -> ctx.agents.create({ meta.agentPreset, setup })（api-proxy.ts:1669-1678）
+Session Controller Remote：session.create({ workspaceId/cwd, agentPreset? })
+  -> ApiSessionAgents.createOrAdopt：先检查 live/persisted identity 与 subagent ownership
+     resume 路径：从 Session observation 的 agentPreset projection 取已记录值
+     create 路径：composeAgent(presetId?) -> presets.resolve() 取 preset id
+  -> ctx.agents.create/resume({ meta.agentPreset, setup })
      agent 未发布时执行 setup：
        presets.mount(agentCtx, id)（preset/agent-presets/src/index.ts:275-288）
          ensureStanding：createScope(selfCtx, {agentPreset: id}) 建 standing 子树（index.ts:491-534）
@@ -51,18 +51,17 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 - **角色实体**：preset。`AgentPreset` 携带 id（目录名）、trust（`system`/`user`，从所在 root 继承）、path（composition 绝对路径）与可选 broken 原因；id 必须是 `[a-z0-9][a-z0-9-]*`，这是路径包含边界而不是风格规则（`packages/preset/agent-presets/src/preset.ts:18-41`）。无版本字段、无 schema 校验——除了一次浅形状检查（顶层必须是带 name 的插件行列表，`discovery.ts:55-76`）。
 - **composition 文件**：`agent.cordis.yml`，用 loader 自己的 YAML 方言解析（含 `!!js`），所以健康检查不会把 loader 能接受的文件判为 broken（`discovery.ts:86-106`）。目录里的 `preset.yml` 只放显示文本（name/description/order），id 与 trust 不可在此写入（`metadata.ts:10-18`）。
 - **扫描根**：roots 是配置的扫描目录（前一个 root 赢重复 id），再加上默认追加的 `<dshHome>/.agent-presets` 用户 root（`discovery.ts:41`；`index.ts:133-135`）。
-- **shipped root**：随部署内置的根是 `apps/cli/config/agent-presets/`，由 CLI 启动器在装配时以 system trust 补入（`apps/cli/src/profile-boot.ts:35, 159-166`）。内置 preset 四个：standard、minimal、code、cordis（后两个有中文显示名与 order）。
+- **shipped root**：内置预设已从 `apps/cli/config` 移入 `packages/preset/agent-presets/presets/`，由包自身发布并解析，避免 CLI 路径决定组合根。当前目录包含 standard、minimal、ptc、cordis；原 code preset 已更名为 ptc（`packages/preset/agent-presets/src/{discovery,specifier}.ts`）。
 - **默认 preset 是用户设置**：roster 插件把 `agent-presets` settings namespace 的 `default` 作为 `config.default` 之上的用户层；值按读取时解析，热重载立即影响新会话，运行中会话不受影响（`index.ts:141-146, 191-193`）。
 - **删除策略**：`remove()` 只删第一个 `user` root 下的 preset，已加入的会话保留其 standing mount；删除当前默认时清空该设置以暴露部署默认（`index.ts:400-416`）。
 
 ## 2. 创建、选择与会话绑定
 
 - **创建 = 复制**：`copy(from, id, name)` 整目录复制（composition、metadata、skills、资产），拒绝非法 id、已占用的 id、未知源；复制后收紧权限位、解引用符号链接、重写 `preset.yml`（去掉 name 与 order），且不挂载验证（`index.ts:380-393`；README Authoring 节）。
-- **绑定在会话创建期**：唯一受支持的调用点是 agent factory 的 `setup(agentCtx)` hook——agent 尚未发布时加入组合，拒绝则整个创建回滚（`index.ts:18-21`；`api-proxy.ts:1243-1246`）。网关把解析出的 id 写进会话 header（`meta.agentPreset`），JSONL 与 SQLite 两个持久化格式都保存该字段（`packages/session/session-persistence-jsonl/src/format.ts:43, 62`）。
-- **header 与日志之分**：header 记“创建时”的 preset，`resolveSessionPreset` 返回“运行中”的值（最后一条 `agent-preset/selected` 事件胜出，否则回退 header，`packages/preset/agent-presets/src/session.ts:48-54`）。会话列表、resume、fork、历史渲染全部读日志而非 header，因为 blank 期切换后历史是在新组合下产生的（`api-proxy.ts:541-551, 1649-1661`）。
-- **切换仅限 blank 会话**：`agentPreset.select` 先检查会话从未有 `turn/start`，`recompose` 通过 roster 持有的唯一 re-link 能力换父链；提交成功后才把切换事件追加进日志，再以非 scoped 的客户端事件重发该事实（`api-proxy.ts:3086-3113`；`types.ts:13`）。
-- **切换的锁定**：已开始的会话换组合被网关以 `agent-preset-locked` 拒绝，这是产品规则而非机制限制——已记录的工具调用无法用新组合重放。
-- **冷读（无 agent）**：`standingKeyFor(id)` 只确保 standing mount、不创建 agent/session/turn，让历史渲染在无实时 agent 时也能按日志中的 preset 解析注册（`index.ts:485-488`；`api-proxy.ts:1600-1615`）。
+- **绑定在会话创建期**：Session Controller 的 Agent owner 在 create/resume 前调用 `composeAgent()`，把 preset mount 放进 agent factory 的 pre-publication `setup`；挂载失败会让创建或恢复整体失败。新会话把解析后的 id 写入 header 的 `agentPreset`（`packages/api/session-controller/src/agent.ts:369-487`）。
+- **header 与投影之分**：header 记创建值，`agentPreset` projection 再折叠后续 `agent-preset/selected` 事件。Session Controller 的列表、resume 与 fork 从 observation projection 读取当前值，避免 blank 期切换后仍使用旧 header（`packages/preset/agent-presets/src/session.ts:34-44`）。
+- **切换仅限 blank 会话**：AgentPresets Remote 的 `select` 按会话串行化，队列内再次检查 turn boundary；`recompose` 成功换父链后才追加选择事件。已有或正在进行 turn 时返回 `agent-preset/locked`（`packages/preset/agent-presets/src/index.ts:703-756`）。
+- **冷读（无 agent）**：`standingKeyFor(id)` 只确保 standing mount，不创建 agent、session 或 turn，使冷读服务可按记录的 preset 解析 scoped 注册。
 
 ## 3. 提示词字段、优先级与输出契约
 
@@ -77,8 +76,8 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 ## 4. 模型、Provider 与生成参数
 
 - **preset 不绑定模型**：composition 里没有模型字段。Agent 级 `AgentOptions` 只有 provider/model/maxTokens（`packages/core/agent/src/runtime-types.ts:24-30`）。
-- **默认值**：`agent-default-model` 插件把 `provider`/`model`/可选 `reasoningEffort` 作为 settings namespace 分层提供，组合入口是 base（`packages/core/agent-default-model/src/index.ts:40-46, 64-104`）。网关每次 create/resume 用 `defaults.defaultModelSelection()` 作为 AgentOptions（`api-proxy.ts:1111-1115`）。
-- **会话级选择**：`selectionFor` 把会话选择挂在 `system-prompt/assemble`（注入变量）与 `agent/request`（改写请求路由）两个 scoped waterfall；读取优先级为“本次进程内已选 > 会话日志最近的请求 header > 默认”（`api-proxy.ts:1154-1181`）。
+- **默认值**：`agent-default-model` 插件把 provider、model 与可选 reasoning effort 作为 settings namespace 分层提供；Session Controller 的 Agent owner 在 create/resume 时据此建立 `AgentOptions`（`packages/api/session-controller/src/agent.ts:490-492`）。
+- **会话级选择**：Session Controller 将选择写为 `model/selection` 事件并通过 projection 恢复，再把选择挂到 system prompt 组装与请求路由；冷恢复不依赖进程内临时状态。
 - **子 agent 继承**：子 agent 路由继承父的 provider/model/maxTokens，除非请求显式覆盖（`child-agent.ts:68-83`）。思考等级与温度等其余采样参数不由角色持有，走 LLM 适配层。
 
 ## 5. 工具、知识库、记忆与子 Agent
@@ -102,12 +101,12 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 - **composition 是输入而非持久化目标**：挂载子树把 loader 的 `write()` 覆盖为 no-op，防止插件卸载把共享文件截断成 `[]`（`mount.ts:110-112`）。
 - **健康与降级**：broken preset（缺文件、YAML 解析失败、形状错误）留在 roster 上并带原因显示，挂载路径统一拒绝；metadata 读失败降级为无显示文本，不影响挂载（`discovery.ts:139-170`；`metadata.ts:56-64`）。
 - **未知 preset 与默认值**：`resolve()` 对不存在的 id 抛 `UnknownPresetError` 并列出可用 id；settings 里存一个暂不存在的默认值被允许（目录是活的），真正解析时才失败（`index.ts:213-221`；README Config 节）。
-- **版本与兼容**：session header 的 `agentPreset` 是可选字符串字段，JSONL/SQLite 都持久化；老日志没有该字段时按默认 preset 渲染（`api-proxy.ts:1604-1609`）。
+- **版本与兼容**：session header 的 `agentPreset` 是可选字符串字段，JSONL 格式会持久化；projection 以 header 初始化并折叠选择事件。没有该字段且没有选择事件的旧日志保留空值，由当前调用入口按部署能力处理。
 
 ## 8. 配置界面、输出契约与可见字段
 
-- **网关端点**：`agentPresets.list` 返回 id/trust/isDefault/name/description/broken，`select` 执行 blank-only 切换，另有 read/copy/remove/openDocument 作者化端点（`api-proxy.ts:3061-3129`；`packages/client/connection/README.md` 记录了浏览器侧的权限边界）。Web 端存在对应的选择与作者化 e2e 测试（`apps/web/tests/agent-preset-selection.e2e.ts`、`agent-preset-authoring.e2e.ts`），UI 组件本身本次未细读。
-- **运行时可见性**：会话列表条目携带 `agentPreset`（取自日志，`api-proxy.ts:535-551`）；切换通过非 scoped 事件广播；历史渲染用 standing key 解析工具 presenter。模型可见性来自会话选择器与 footer 类显示（Web 端），本次未确认具体组件。
+- **浏览器远程面**：preset 列表、选择与作者化已从已删除的 apiproxy unary 域迁移到 Agent Presets Remote，由 `ui-agent-preset` 消费。blank-only 切换与冷读 standing scope 规则保持；具体入口见 `packages/preset/agent-presets/src/index.ts` 与 `packages/client/ui-agent-preset/`。
+- **运行时可见性**：会话列表条目携带 projection 得出的 `agentPreset`；Web 的新会话 chip、会话头标签与 Settings roster 通过 AgentPresets Remote 消费该值。冷读服务可用 standing key 解析 scoped 能力而不恢复 Agent。
 - **历史快照语义**：header 冻结创建值 + `agent-preset/selected` 日志事件，两者足以在冷读时重建会话运行时的组合；system prompt 正文不进日志（模型可见 ⟺ 日志可重建 规则只要求组合可重建）。assistant 消息保留 provider/model 元数据（`agent-loop/src/agent.ts:373-379`）。
 
 ## 9. 与 pi 的继承与差异
@@ -159,7 +158,8 @@ session.create（Web 网关 api-proxy，packages/host/apiproxy/src/api-proxy.ts:
 - `packages/core/agent/src/model-selection.ts:39-70`：会话模型选择注入
 - `packages/core/agent-default-model/src/index.ts:64-104`：默认模型设置
 - `packages/core/scope/src/index.ts:72-82, 137-147`：scope 父链与创建
-- `packages/host/apiproxy/src/api-proxy.ts:1227-1248`：composeAgent；`1651-1678`：resume/create 绑定；`3086-3113`：切换与日志
+- `packages/api/session-controller/src/agent.ts:369-487`：composeAgent 与 create/resume 绑定
+- `packages/preset/agent-presets/src/index.ts:703-756`：Remote select、blank 锁与提交后记日志
 - `packages/subagent/subagent/src/child-agent.ts:163-175`：子 agent 加入
 - `packages/context/agent-instructions/src/index.ts:322-348`：工作区指令注入
 - `apps/cli/src/profile-boot.ts:159-166`：shipped root 注入；`apps/cli/config/agent-presets/standard/agent.cordis.yml`：内置组合示例

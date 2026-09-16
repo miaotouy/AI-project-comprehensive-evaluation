@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读源码核对（FastAPI 后端 main.py / utils/middleware.py / models 层、Socket.IO 通道、SvelteKit 前端 Chat.svelte）；未修改目标仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.0 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。聊天消息 CRUD 全部集中在 `routers/chats.py`（无独立 messages 路由）。
+Open WebUI v0.11.3 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。聊天消息 CRUD 全部集中在 `routers/chats.py`（无独立 messages 路由）。
 
 生成主链 `POST /api/chat/completions` 经 `process_chat_payload` 到上游后，多模型并行以 `asyncio.Task` fan-out（Redis 记账、跨实例取消），流式推送统一走 Socket.IO `events` 事件到用户专属房间；前端 `Chat.svelte` 按事件类型分发约 25 种消息，状态机整体内聚于该组件（约 4205 行）。
 

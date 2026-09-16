@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：只读源码调查；调查时工作区干净，结论以该快照的实际代码为准
 >
@@ -55,6 +55,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 ## 关键能力与已确认边界
 
 - 支持：三种上游协议归一化（Responses/Anthropic/Gemini）；`contextTokenLimit` 按文本字符剪枝（非 token 真值、忽略图片）；VCPTavern 预设注入；消息变量/时间/环境/SAR/日记知识库/动态工具/插件描述展开；RAGDiary/VCPTimeLine/ContextFoldingV2 等插件改写本次数组；VCP 工具循环（普通调用与 archery 分离，成功结果默认不回送模型，仅出错时递归）；多模态预处理与图片翻译；Role Divider 角色拆分。
+- OneRing 默认把 assistant 的来源时间标记拆成独立 user 伪系统块；SAR 增加按模型排除的注入模式，Detector 支持正则替换。这些变化都作用于单次请求的消息编译结果，不改变“外部前端持有会话事实源”的边界（`Plugin/OneRing/OneRingConfig.json:1-8`、`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`）。
 - 已确认边界：无会话列表、消息编辑/删除/分支或跨请求恢复；无最终用户聊天 UI；不参与前端会话状态；`docs/FRONTEND_COMPONENTS.md` 描述的原生 JS AdminPanel 已过时（当前为 AdminPanel-Vue）。
 
 ## 未验证事项

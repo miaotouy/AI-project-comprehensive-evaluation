@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：静态代码走读。grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、exec、preview、tool、message、markdown、highlight 等关键词；通读消息渲染管线（messageRenderer / contentPipeline / streamManager / contentProcessor）、阅读窗口（text-viewer）、Canvas 协同编辑器、桌面挂件与收藏链路、聊天历史持久化链路，以及 Scriptorium 文坊子系统（ScriptoriumModules + docxHandlers + ScriptoriumCollaborator 插件）。未运行应用、未发起真实模型请求。
 >
@@ -18,7 +18,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 **例外：Scriptorium 共笔文坊**是仓库里第一套"独立对象模型"的模型协作面——VDOCX/VPPTX 工程（`AppData/ScriptoriumDocument/`）自带文档模型、资源清单与**文脉版本历史**（人类刻点 + Agent PR 以 pending/applied/rejected/conflict/failed 状态进入同一文脉，含 changeSet 与审批回执），Agent 经 `ScriptoriumCollaborator` 插件以"源码 PR + 人工审批"方式修改对象（详见 6.2）。它仍走"唯一完整 source"的文本真相模型（源码即真相，不序列化渲染树），但补上了聊天侧没有的版本/冲突/身份语义。
 
-运行能力覆盖四类执行位置：气泡内 HTML 预览（iframe srcdoc，未设置 sandbox 属性）、独立阅读窗口可执行模型内联脚本（CDN 替换为本地 vendor）、Python 双模式执行（Pyodide WASM 沙箱 / 本机 `python -u` 进程）、桌面画布常驻挂件（Shadow DOM + 脚本 IIFE 沙箱 + 能力桥：widgetFS、musicAPI、`__vcpProxyFetch`/`__vcpProxyPost`）。桌面挂件是唯一具备"独立 ID + 文件持久化 + 可重载 + 模型可远程创建/替换/查询"的完整对象链。Canvas 协同窗口提供"AI 写文件 → chokidar 检测 → 行级 diff → 接受/拒绝"的编辑协作面，但版本仅为内存内容快照。
+运行能力覆盖四类执行位置：气泡内 HTML 预览、独立阅读窗口脚本、Python 双模式执行和桌面画布常驻挂件。Canvas 协同窗口除外部文件监听外，现为 Agent 编辑提案提供 requestId、原文快照、差异审阅与显式允许/拒绝；批准时复读文件并检查内容未变化，再用临时文件替换。它仍只保留内存内容历史，没有持久版本号。`modules/ipc/canvasHandlers.js:92-193`、`Canvasmodules/canvas.js:546-645`
 
 增量生成采用"稳定前缀截断 + 整段尾部重渲染 + morphdom 差量合并"，无 AST 级 patch，未在自有代码中找到 diff-match-patch 使用（依赖虽在 package.json）。用户可编辑消息全文、重新生成回复、点击模型生成的按钮回发 `[[点击按钮:...]]`。
 
@@ -112,13 +112,13 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 ## 6. 编辑、diff、版本与协作
 
 - **消息编辑**：全文文本编辑（textarea），保存写回内存历史并经防抖落盘（`middleClickHandler.js:468-595` + `messageRenderer` 编辑模式）。无选区编辑、无 diff。
-- **Canvas 协同**：这是"人机同对象编辑"链路。AI 经 FileOperator 工具写 `AppData/Canvas/`（FileOperator.js:1239、1497），chokidar 监听外部变更（canvasHandlers.js:87-109），渲染器显示变更条并打开 CodeMirror MergeView 行级 diff（Canvasmodules/canvas.js:247-308），接受=覆盖编辑器内容并自动保存（102-113），拒绝=用户内容写回文件。编辑历史是**内存内内容快照列表**（canvas.js:777-791，可点击回滚 824-844），不落盘、无版本号、无冲突/分支语义。
+- **Canvas 协同**：外部文件变更仍由 chokidar 通知并用 CodeMirror MergeView 展示。模型经 FileOperator 提交编辑时，主进程保存原文与修改后文本并等待 Canvas 窗口回执；用户可直接拒绝或打开差异后批准，批准前会确认活跃文件与原文快照均未变化，冲突则拒绝应用，成功以临时文件替换。编辑历史仍是内存内容快照，不落盘、无版本号或分支。`modules/ipc/canvasHandlers.js:92-193`、`Canvasmodules/canvas.js:546-645,1244-1306`
 - **Scriptorium 文坊（人机同对象编辑的第二条链）**：文档工程位于 `AppData/ScriptoriumDocument/VDOCX|VPPTX/`（scriptoriumAgentControlService.js:133），人类在 `ScriptoriumModules/scriptorium.html` 直接编辑渲染版式或源码。
   - 协作方式：Agent 经 `ScriptoriumCollaborator` direct 插件（ScriptoriumCollaboratorService.js）读取（GetRenderedText/GetSource/GetVisualContext 等）并提交 `SubmitSourcePr`——带唯一完整 source 的修订；主进程 docx 侧设 `AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`。人类审阅后给出回执（pending/applied/rejected/conflict/failed），应用的修订进入**文脉**（带 changeSet、工程内嵌版本快照与审批元数据，可回溯且不删后续文脉）。
   - 与 Canvas 的差异：Scriptorium 有落盘的版本对象（文脉）与冲突状态（conflict），但仍无 CRDT/合并算法，"最后写入者赢"之外的冲突交给人工裁决；PR 是"整份 source 替换"粒度，与 Canvas 的行级 diff 不同。
   - 事实源：源码是唯一真相（不序列化渲染树，`ScriptoriumModules/README.md` 明确说明），可编程页面的瞬态 DOM 不写入工程。
 - **桌面挂件源码编辑**：挂件可在 Canvas 窗口以 `desktop-widget` 上下文打开（`desktopHandlers.js:956-996`），保存后通知桌面刷新（`canvasHandlers.js:70-85` `notifyDesktopWidgetSourceSaved`）。
-- **协作冲突处理**：仅"最后写入者赢"+ 人工 diff 接受/拒绝；无 CRDT、无结构化 patch、无撤销栈（编辑器自带 CodeMirror 撤销仅限当前会话，推断）。
+- **协作冲突处理**：Canvas 的受管提案会做原文快照冲突检查并要求人工接受/拒绝；普通文件保存仍是整文件写入。无 CRDT 或结构化 patch，撤销与内容历史限当前窗口内存。
 
 ## 7. 能力桥、执行位置与权限范围
 
@@ -166,7 +166,7 @@ Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、�
 
 ## 12. 测试、已确认边界与未验证事项
 
-**测试体系**：`tests/` 顶层 7 个文件，node:test + jsdom 驱动（frontend-plugins.test.js:1-13），覆盖前端插件、Loom 控制器/适配器/管理器运行时、DeepMemo 与移动端同步适配器等（含 `test-export-inline.cjs`）；另有 `tests/重构中禁用脚本/` 子目录 12 个 Scriptorium 测试/冒烟脚本（目录名自述"重构中禁用"）。**未找到**针对聊天渲染管线（contentPipeline/streamManager）、工具结果解析、桌面推送、Canvas diff、历史保存恢复、iframe 预览的测试。流式最终一致性、资源回收、能力边界均无自动化覆盖。
+**测试体系**：`tests/` 已形成聊天内核、流式终态清理、内容管线、桌面推送、Canvas 审批、LoomSkill、移动同步、设置协调与媒体模块等多组 node:test 契约。Canvas 审批由 `tests/canvas-edit-approval.test.js` 覆盖，稳定前缀/终态清理由 stream 与 content 系列测试覆盖；真实 Electron 视觉、脚本隔离、长会话性能和资源回收效果仍需运行验证。
 
 **已确认边界**（本次调查结论）：
 - 不存在统一 Artifact/输出对象模型、无对象注册表、无模型侧跨回合对象绑定——**唯一例外是 Scriptorium 文档工程**（VDOCX/VPPTX + 文脉 PR，6.2），聊天消息/桌面挂件/Canvas 文件均无版本语义。

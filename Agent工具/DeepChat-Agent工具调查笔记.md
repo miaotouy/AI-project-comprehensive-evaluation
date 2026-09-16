@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/agent/deepchat/loop/`、`src/main/agent/deepchat/runtime/`、`src/main/tool/`、`src/main/provider/aiSdk/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：只读源码梳理（覆盖命令 shell 化、输出上限、执行契约门与二进制读取等实现）；未修改 DeepChat 仓库
 >
@@ -23,6 +23,7 @@ DeepChat 的 Agent 工具由“会话工具目录 + 统一路由服务 + 独立�
 5. 执行前经过 `ToolPermissionBroker` 和命令专用的 `CommandPermissionService`。权限请求绑定会话、server identity、配置代数、binding hash、工具名、执行 id 和参数 hash，审批请求有数量上限和超时。
 6. `exec`/`process` 使用可配置命令 shell（`posix|cmd|windows-powershell|git-bash`，#2109）；Agent 配置有输出上限字段（#2103）；工具分派前经过 Tape 执行契约门（contract lineage）；octet-stream 文本文件允许读取（#2110）。
 7. 当前请求不再直接复用整份会话目录：循环会从有效目录派生并冻结 tool-surface snapshot，按激活证据决定下一视图可见的工具；程序化工具调用也绑定该快照的执行授权，取消或结束时撤销资格（`src/main/agent/deepchat/loop/contextCoordinator.ts:904-1049`、`loopRun.ts:519-616`）。
+8. Skill 工具面可合并当前工作区发现的只读 Skills；Codex 用户包还可选择发布 Skills、MCP 配置和上下文 hook。Hook 只贡献经校验的附加上下文，不直接绕过冻结工具目录执行任意工具。
 
 ## 调用链
 
@@ -54,6 +55,8 @@ Session/Agent 配置
 - Agent policy 提供 `disabledAgentTools`、`enabledMcpServerIds`、session kind 与 subagent capability；
 - profile fingerprint 还包含 Provider/model、tool registry revision、Skill 开关和 subagent slot（`:155-193`）。
 
+工作区 Skill 由 Skill 服务按会话项目路径即时合并：扫描项目根下 `.agents/.deepchat/.claude/.codex/.cursor/skills`，只接受物理路径仍位于项目根内的条目，并将其标记为只读。它们可以进入路由卡和 `skill_run`，但不会成为共享 Skill 库中的可编辑对象；发现和作用域实现见 `src/main/skill/index.ts:1295-1318`、`:1857-1880`。
+
 对于 ACP-backed subagent session，目录解析显式返回空列表（`:136-150`）。因此 ACP 会话的工具执行能力由 ACP backend 自身承担，不能从 DeepChat 内置工具目录直接推断。
 
 ## 2. MCP 与内置工具合并
@@ -70,6 +73,8 @@ AgentToolManager 的定义集合按功能分为三组，每个定义带 `TOOL_EX
 - 文件系统与命令工具：`read`、`write`、`edit`、`glob`、`grep`、`exec`、`process`（`agentToolManager.ts:797-970`）；
 - Skills：`skill_list`/`skill_run`（`:2152` 起）；
 - question、计划、Tape、memory、图片生成、cron、subagent 与设置/浏览器工具（分散在 `:2150-2766` 与各 handler 文件）。
+
+Codex 用户包是另一种组合来源。安装器只识别 `.codex-plugin/plugin.json`，用户在安装时分别选择 Skills、MCP 与 hooks；已选择的 Skills/MCP 进入现有目录体系，命令 hook 在输入边界运行并只接受匹配事件名的文本 `additionalContext`。Hook 命令默认 5 秒超时、失败进入诊断且不会自动获得工具调用资格；实现见 `src/main/plugin/userPluginPackage.ts:83-168`、`src/main/plugin/userPluginHooks.ts:45-141`、`:445-533`。
 
 ## 3. 工具调用与权限
 
@@ -138,6 +143,7 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 ## 8. 边界与未验证事项
 
 - 工具目录缓存依赖 runtime instance 和 registry revision；本次未运行动态修改 MCP、Skill 或 Agent 配置时的并发竞态。
+- 未运行 workspace skill 同名覆盖、用户插件更新/回滚、hook 超时与安装中取消；Direct ACP Agent 不接收这些 hook 上下文。
 - `full_access`、命令白名单和文件 containment 是源码可见的权限边界；不同工具具体调用是否触发额外审批，取决于其 `preCheckToolPermission` 实现。
 - MCP server 类型包括 `stdio`、`sse`、`http`、`inmemory`（`src/shared/types/mcp.ts:96-123`），本次未启动真实 server 验证 transport、OAuth 或 MCP App 回调。
 - 原生工具和 legacy 工具最终都进入同一 LoopEngine，但各 Provider 的 capability snapshot、参数兼容和流式 finish reason 未逐一实测。
@@ -161,4 +167,5 @@ legacy 解析器 `src/main/provider/aiSdk/toolProtocol.ts:38-126` 查找完整�
 - 工具调用 UI 状态（交接点）：`src/renderer/src/components/message/MessageBlockToolCall.vue:317-323`、`:537-560`
 - MCP server/config 类型：`src/shared/types/mcp.ts:45-123`
 - 原生/legacy AI SDK 工具协议：`src/main/provider/aiSdk/runtime.ts:1178-1224`、`src/main/provider/aiSdk/toolProtocol.ts:38-150`、`src/main/provider/aiSdk/streamAdapter.ts:57-124`
-
+- workspace skills：`src/main/skill/index.ts:1295-1318`、`src/main/skill/routingCatalog.ts`
+- Codex 用户包与上下文 hooks：`src/main/plugin/userPluginPackage.ts`、`src/main/plugin/userPluginHooks.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`

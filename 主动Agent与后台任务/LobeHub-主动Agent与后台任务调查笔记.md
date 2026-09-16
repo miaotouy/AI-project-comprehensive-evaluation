@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读复查 Schedule 的 PostgreSQL schema、QStash/本地调度入口、任务运行器与生命周期回调；并对照既有独特功能笔记，未修改 LobeHub 源码
 >
@@ -46,6 +46,8 @@ Schedule 主链如下：
 
 Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数据库重读：任务不存在、模式已改、没有表达式、处于终态或已暂停均跳过。它也在启动前检查未解决的紧急 Brief，避免 Agent 等待人工输入时继续运行，见 `apps/server/src/services/taskRunner/scheduleTick.ts:31-79`。
 
+任务变更现在另写入 `task_activities` 事件日志。活动记录保存任务、用户、工作区、操作者、事件类型、变更字段、前后值与可见性，用于展示指派、状态、优先级和自动化配置的变更历史；它补充审计与通知，不替代 `tasks` 行作为当前状态权威。见 `packages/database/src/schemas/task.ts:413-455`。
+
 **并发与配额。** `TaskRunnerService` 先查已有 task topic；同一任务已有 running topic 时抛出冲突，tick 将冲突作为 `in-flight` 跳过。Schedule 的最大执行次数通过已记录的 schedule 触发 topic 计数；达到上限即写 completed，手动运行不消耗此配额，见 `apps/server/src/services/taskRunner/index.ts:118-143` 与 `scheduleTick.ts:81-130`。
 
 **Heartbeat 分型。** heartbeat 也是独立 task topic 运行，但由延迟 tick 续接而非 cron 扫描。其 tick token 与任务 context 中当前 token 不同便视为陈旧消息；同样重读模式、终态、间隔和人工等待条件。生产走 QStash 延迟 HTTP 消息，本地以 `setTimeout` 保存待执行句柄；后者仅在进程内有效，见 `apps/server/src/services/taskRunner/heartbeatTick.ts:29-104`、`apps/server/src/services/taskScheduler/impls/local.ts:13-62`。
@@ -85,3 +87,4 @@ Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数�
 - 状态重验与并发/配额：`apps/server/src/services/taskRunner/scheduleTick.ts`、`index.ts:70-303`。
 - 完成、交付、失败与状态流转：`apps/server/src/services/taskLifecycle/index.ts:140-476`。
 - heartbeat 与本地调度：`apps/server/src/services/taskRunner/heartbeatTick.ts`、`apps/server/src/services/taskScheduler/impls/local.ts`。
+- 任务活动日志：`packages/database/src/schemas/task.ts:413-455`、`src/store/task/selectors/activitySelectors.ts`。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（主进程 SQLite 数据层 `TopicService`/`MessageService`、schema 与 FTS 触发器、`docs/references/chat/message-tree.md` 文档、渲染层 DataApi 分页与搜索实现），并核对行号与符号至当前 HEAD
 >
@@ -244,7 +244,7 @@
 
 从叶子消息创建分支现在由 `MessageService` 生成真实分支，而不是把新消息错误地附着到原路径的中间节点。Agent 会话另新增持久化的跨会话投递：`AgentSessionDeliveryService` 保存待投递、执行与结果状态，`agent_session_message` 的写入链因此需要同时表示本会话消息和其他会话返回的结果。普通 Topic 树与 Agent session 的扁平消息表仍是两种不同的数据模型。
 
-本次只确认服务与迁移路径；投递在重启、多个窗口和大量待投递任务下的实际恢复顺序尚未运行验证。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/AgentSessionMessageService.ts`、`migrations/sqlite-drizzle/0010_fuzzy_korath.sql`。
+删除活动节点后，服务层会在 splice/reparent 完成后重新计算 active node，保留仍可达的回复而不是把整条后续链视为被删节点的附属品。数据库还为 message 表上的 user-model 外键增加索引，改善按模型关联与迁移检查的访问路径。投递在重启、多个窗口和大量待投递任务下的实际恢复顺序尚未运行验证。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/AgentSessionMessageService.ts`、`src/main/data/db/schemas/message.ts`。
 
 ## 10. 设计取舍与已确认边界
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/session-manager.ts`、`packages/coding-agent/src/core/agent-session.ts`、`packages/agent/src/harness/session/`、`packages/agent/src/search/`、`packages/session-backends/sqlite-node/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`SessionManager` 全文件通读、harness JSONL 后端、搜索模块、sqlite 后端包、TUI 删除入口），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
 >
@@ -153,7 +153,15 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 - 继续会话时，若既有 JSONL 文件末尾缺少换行，追加前会补齐分隔，避免后一条 entry 与前一条粘连；该恢复修正只作用于正常续写路径，不改变会话树的数据模型（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 修复项）。
 - 压缩和分支摘要不会向 provider 暴露可调用工具；若摘要在输出 token 上限处截断，结果不会写入会话。扩展还能收到带失败原因、重试状态和来源的 `session_compact_failed` 事件（`packages/coding-agent/CHANGELOG.md` 的 0.84.3 相关条目）。
 
-## 12. 关键源码索引
+## 12. Harness format 4 与后端成熟度
+
+并行的 AgentHarness 会话实现已经从接口骨架发展为 Memory、JSONL 与 SQLite 三套可互换后端。format 4 把 Session、branch 和 lane 分开，以单调 seq、事务 writes、事实寄存器、lane tip、usage ledger 与不可变 operation result 表达状态；仓库提供共享 storage/repository conformance suite 和基准（`packages/agent/src/harness/session/types.ts:1-120,500-604`、`packages/agent/src/harness/session/testing/conformance/`）。
+
+JSONL repository 能发现旧 coding-agent v3 文件并把其消息、custom 条目、compaction、名称和父会话信息投影为只读会话；首次非空提交会把有效旧内容与调用者写入一起原子发布为 v4。打开的旧 v3 会话不能直接 fork，需先升级；已关闭旧会话可流式 fork，避免把整个源文件读入内存（`packages/agent/src/harness/session/jsonl/legacy-v3.ts:470-681`、`storage.ts:140-182`、`repo.ts:286-315`）。
+
+SQLite 后端提供真实 repository/storage/session 实现，写事务使用 immediate transaction，writer lease 协调打开会话和 fork，并保存分支缓存、会话统计与用量账本。该后端已被实验 worker 使用的能力边界纳入设计，但默认 coding-agent 的 SessionManager 仍读写 v3 JSONL；两套事实源尚未合并（`packages/session-backends/sqlite-node/src/sqlite/repo.ts:157-393`、`storage.ts:49-176`）。
+
+## 13. 关键源码索引
 
 - `packages/coding-agent/src/core/session-manager.ts`：`844-854`（树模型注释）、`1015-1042`（落盘时机）、`1638-1713`（列表扫描）、`1360-1512`（分支）、`1579-1630`（forkFrom）、`231-291`（版本迁移）、`514-556`（读取）
 - `packages/coding-agent/src/core/agent-session.ts`：`610-681`（message_end 落盘）、`928-943`（工具集）、`1159-1261`（外部能力链路）、`3122-3172`（统计）

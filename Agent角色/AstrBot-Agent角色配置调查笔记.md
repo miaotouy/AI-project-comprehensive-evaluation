@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-AstrBot 的"Agent 角色"（Persona）是**纯指令 + 能力白名单**模型：一个 persona 由 `system_prompt` 文本、`begin_dialogs` 预设开场对话、工具与 Skills 白名单以及自定义错误文案组成。没有头像、语音、名字等富媒体字段（与"角色卡"类客户端不同）。运行时由 `_ensure_persona_and_skills`（astr_main_agent.py:499-664）负责，在每轮请求构造时把 persona 解析结果注入 ProviderRequest。
+AstrBot 的 Persona 仍是纯指令与能力白名单模型：一个 persona 由 system prompt、预设开场对话、工具与 Skills 白名单以及自定义错误文案组成，没有头像、语音等富媒体字段。Local Agent 的默认 Persona 引用已并入配置档案中的 `agent_runner.config.persona.persona_id`；运行时把该值映射回既有 Persona 解析与注入链，cron 和后台结果唤醒也复用同一 persona、安全模式与压缩配置（`astrbot/core/config/agent_runner.py:9-36`；`astrbot/core/pipeline/process_stage/method/agent_sub_stages/internal.py:71-145`；`astrbot/core/cron/manager.py:444-510`）。
 
 关键事实：
 
 - **存储**：v4 起存 SQLite `personas` 表（po.py:145-178，SQLModel），`persona_id` 即显示名（字符串，非 UUID）；v3 的 config.json `persona` 键已废弃，由迁移脚本改写（migra_3_to_4.py:236-276）。
-- **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:353-432）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3`，不是 DB 模型。
-- **解析优先级**（`resolve_selected_persona`，persona_mgr.py:75-127）：会话规则强制 `session_service_config.persona_id` → 对话级 persona_id → `provider_settings.default_personality` → webchat 特例 `_chatui_default_`；`"[%None]"` 哨兵显式禁用。
-- **注入位置**：persona prompt 追加到请求的 system_prompt（astr_main_agent.py:533-534）；预设对话以不保存标记插到上下文最前（:535-536），每轮重注入、不入库。
+- **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:368-431）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3`，不是 DB 模型。
+- **解析优先级**（`resolve_selected_persona`，persona_mgr.py:83-134）：会话规则强制 persona → 对话级 persona → 当前配置档案的 Agent Runner 默认 persona → WebChat 特例；`"[%None]"` 哨兵显式禁用。
+- **注入位置**：persona prompt 追加到请求的 system_prompt（astr_main_agent.py:556-557）；预设对话以不保存标记插到上下文最前（:558-559），每轮重注入、不入库。
 - **三态语义**：`tools`/`skills` 三态——None=全部、[]=禁用全部、列表=白名单；workspace Skills 不受 persona 过滤。
 - **第三方 runner 不注入 persona**：Dify/Coze/Dashscope/DeerFlow 等只解析自定义错误文案，persona 对内置 Agent 执行器专属。
 - **system 消息受压缩保护**：persona 永不被截断器丢弃（truncator.py:15-29 的 `_split_system_rest`），但计入 token 统计（token_counter.py:46-73），超长会推高总量、更早触发历史压缩。
@@ -30,16 +30,16 @@ AstrBot 的"Agent 角色"（Persona）是**纯指令 + 能力白名单**模型�
 ## 总体调用链
 
 ```text
-每轮用户消息 → astr_main_agent.build_main_agent (astr_main_agent.py:1375-1713)
-  → _decorate_llm_request (:991-1039)   [注：实际顺序见 _ensure_persona_and_skills 在各分支的调用点]
-  → _ensure_persona_and_skills (:499-664)
-      resolve_selected_persona (persona_mgr.py:75-127)   → persona_id / Personality / 强制ID / webchat特例
+每轮用户消息 → astr_main_agent.build_main_agent (astr_main_agent.py:1545-1773)
+  → _decorate_llm_request (:942-978)   [注：实际顺序见 _ensure_persona_and_skills 在各分支的调用点]
+  → _ensure_persona_and_skills (:522-689)
+      resolve_selected_persona (persona_mgr.py:83-144)   → persona_id / Personality / 强制ID / webchat特例
       persona prompt → req.system_prompt（# Persona Instructions 节）
       begin_dialogs → req.contexts[:0]
-      skills 过滤（_filter_skills_for_current_config :467-496 + workspace skills :548-575）
+      skills 过滤（_filter_skills_for_current_config :490-521 + workspace skills :566-598）
       tools 白名单 → req.func_tool（get_full_tool_set 或按名筛选）
       subagent_orchestrator 集成（handoff 工具注入 / 去重 / router_prompt）
-      trace.record("sel_persona", ...) (:657-664)
+      trace.record("sel_persona", ...) (:680-687)
   → 后续 _apply_* 分支继续追加 system_prompt（TOOL_CALL_PROMPT、workspace EXTRA_PROMPT.md 等）
   → ToolLoopAgentRunner.reset (tool_loop_agent_runner.py:207-327)
       system 消息（含 persona）→ 上下文最前；begin_dialogs 紧随其后
@@ -68,13 +68,13 @@ PersonaFolder 表（po.py:112-142）：递归层级，`parent_id` NULL=根（:13
 
 - `Personality` TypedDict（po.py:581-601）：包含 prompt、name、begin_dialogs、已废弃的 mood_imitation_dialogs、tools、skills 和 custom_error_message；
 - `DEFAULT_PERSONALITY`（persona_mgr.py:9-19）：`prompt="You are a helpful and friendly assistant."`，name=`"default"`，tools/skills=None；
-- `get_v3_persona_data`（:353-432）：
-  - 每行 DB persona 转为 dict（mood_imitation_dialogs 恒为 `[]`，:369）；
-  - `begin_dialogs` 校验：**奇数条整组丢弃并记 error**（:383-388），合法则按 user/assistant 交替生成 `{role, content, _no_save: True}`（:389-398）；
-  - 解析失败的 persona 记 error 跳过（:409-410）；
-  - `selected_default_persona`：先匹配 `name == self.default_persona`，无匹配取第一个，全空则 `DEFAULT_PERSONALITY` 并**追加进 personas_v3**（:412-418）；
-  - 同时写 `selected_default_persona`（Persona 模型，:423-430）；
-- 每次 CRUD 后重建：delete（:135）、update（:169）、move（:201）、batch sort（:274）、create（:350）。
+- `get_v3_persona_data`（:368-431）：
+  - 每行 DB persona 转为 dict（mood_imitation_dialogs 恒为 `[]`，:384）；
+  - `begin_dialogs` 校验：**奇数条整组丢弃并记 error**（:398-403），合法则按 user/assistant 交替生成 `{role, content, _no_save: True}`（:404-413）；
+  - 解析失败的 persona 记 error 跳过（:424-425）；
+  - `selected_default_persona`：先匹配 `name == self.default_persona`，无匹配取第一个，全空则 `DEFAULT_PERSONALITY` 并**追加进 personas_v3**（:427-433）；
+  - 同时写 `selected_default_persona`（Persona 模型，:438-445）；
+- 每次 CRUD 后重建：delete（:144）、update（:152）、move（:201）、batch sort（:277）、create（:330）。
 
 ### 1.3 管理 API
 
@@ -89,75 +89,75 @@ PersonaFolder 表（po.py:112-142）：递归层级，`parent_id` NULL=根（:13
 
 ## 2. 角色解析优先级
 
-### 2.1 resolve_selected_persona（persona_mgr.py:75-127）
+### 2.1 resolve_selected_persona（persona_mgr.py:83-144）
 
-返回值是四元组：所选 persona_id、Personality 或 None、强制应用的 persona_id，以及是否使用 webchat 特殊默认值（:82-91）。
+返回值是四元组：所选 persona_id、Personality 或 None、强制应用的 persona_id，以及是否使用 webchat 特殊默认值（:90-99）。
 
 ```text
-1. 读 SharedPreferences scope=umo 的 session_service_config（:92-100）
+1. 读 SharedPreferences scope=umo 的 session_service_config（:100-108）
    → persona_id = session_service_config.persona_id（会话规则强制，最高优先）
 2. 若为空：persona_id = conversation.persona_id（对话级绑定）
    - "[%None]" 哨兵 → 保持 None 不动（显式禁用）
-   - None → provider_settings.default_personality（全局默认）
-3. 在 personas_v3 中按 name 查找（:112-115）
-4. 找不到 + platform==webchat + 非 "[%None]" → persona_id="_chatui_default_"，use_webchat_special_default=True（:117-120）
+   - None → 当前配置档案的 `agent_runner.config.persona.persona_id`
+3. 在 personas_v3 中按 name 查找（:127-130）
+4. 找不到 + platform==webchat + 非 "[%None]" → persona_id="_chatui_default_"，use_webchat_special_default=True（:132-135）
 5. 返回
 ```
 
-`"[%None]"` 只对**对话级**生效（:107-108）；会话规则若直接绑定这个哨兵，persona_id 会被置为该值，后续查找（:112）失败后（非 webchat）返回空 persona，因此规则级也能禁用。
+`"[%None]"` 只对**对话级**生效（:115-116）；会话规则若直接绑定这个哨兵，persona_id 会被置为该值，后续查找（:127）失败后（非 webchat）返回空 persona，因此规则级也能禁用。
 
 ### 2.2 引用了不存在 persona 的行为
 
-- persona 为空时（:531-541）：**静默回落**——只追加 webchat 特例（若开关 `enable_default_system_prompt` 不为 False）；非 webchat 平台则完全不注入任何 persona 指令；
-- 引用不存在的 persona_id 时，解析函数返回 None（persona_mgr.py:112-121）——不报错；
+- persona 为空时（:554-564）：**静默回落**——只追加 webchat 特例（若开关 `enable_default_system_prompt` 不为 False）；非 webchat 平台则完全不注入任何 persona 指令；
+- 引用不存在的 persona_id 时，解析函数返回 None（persona_mgr.py:117-130）——不报错；
 - 删除被引用的 persona：DB 删除（:129-135），对话/规则中的引用残留不清理，运行时回落默认行为。
 
-## 3. 注入实现（_ensure_persona_and_skills，astr_main_agent.py:499-664）
+## 3. 注入实现（_ensure_persona_and_skills，astr_main_agent.py:522-687）
 
 ### 3.1 前置
 
-- 请求的 system_prompt 兜底为空串（:506-507）；
-- webchat 内联 GenUI 开关 `enable_inline_genui` 追加 `CHATUI_INLINE_GENUI_SYSTEM_PROMPT`（:509-510）；
-- `req.conversation` 为空直接 return（:512-513）——**无对话对象时不注入任何 persona/skills**。
+- 请求的 system_prompt 兜底为空串（:529-530）；
+- webchat 内联 GenUI 开关 `enable_inline_genui` 追加 `CHATUI_INLINE_GENUI_SYSTEM_PROMPT`（:532-533）；
+- `req.conversation` 为空直接 return（:535-536）——**无对话对象时不注入任何 persona/skills**。
 
 ### 3.2 persona 注入
 
 ```python
 if prompt := persona["prompt"]:
-    req.system_prompt += f"\n# Persona Instructions\n\n{prompt}\n"   # :533-534
+    req.system_prompt += f"\n# Persona Instructions\n\n{prompt}\n"   # :556-557
 if begin_dialogs := copy.deepcopy(persona.get("_begin_dialogs_processed")):
-    req.contexts[:0] = begin_dialogs                                 # :535-536
+    req.contexts[:0] = begin_dialogs                                 # :558-559
 ```
 
 - `_begin_dialogs_processed` 是 v3 缓存的已处理列表（带 role 与 `_no_save`）；deepcopy 防止污染缓存；
 - 预设对话通过 `req.contexts[:0]` 插入历史**最前**（在会话历史之前、system 之后）；
-- webchat 特例分支（:537-541）：`use_webchat_special_default and event.get_extra("enable_default_system_prompt") is not False`。
+- webchat 特例分支（:560-564）：`use_webchat_special_default and event.get_extra("enable_default_system_prompt") is not False`。
 
-### 3.3 skills 过滤（:543-575）
+### 3.3 skills 过滤（:566-598）
 
 ```text
-runtime = cfg.get("computer_use_runtime", "local")
-    # 配置默认 none（core/config/default.py:180）；键缺失时读侧回退 "local"（astr_main_agent.py:567）
+runtime = cfg.get("computer_use_runtime", "none")
+    # 配置默认 none（core/config/default.py:181）；键缺失时读侧同样回退 "none"（astr_main_agent.py:567）
 SkillManager().list_skills(active_only=True, runtime=runtime)
-_filter_skills_for_current_config（:467-496）：
+_filter_skills_for_current_config（:490-519）：
     - 非插件源 skill 直接放行
     - 插件 skill：插件未激活→剔除；插件 reserved 或 plugin_set 无限制→放行；
       否则按 plugin_set 名单过滤
-workspace skills：runtime=="local" 时 list_workspace_skills(workspace_root)（:549-554）
-persona.skills 三态（:557-567）：
+workspace skills：runtime=="local" 时 list_workspace_skills(workspace_root)（:572-577）
+persona.skills 三态（:580-590）：
     - None → 全部（不过滤）
-    - [] → skills=[]（含 workspace 清零：:563 的 and 条件决定 workspace 是否合并）
-    - [名单] → 仅保留 name 在名单内的注册 skills；workspace skills 仍按名合并（:563-567）
-注入：build_skills_prompt(skills) 追加 system_prompt（:569）
-runtime=="none" 且注入 skills 时追加"未启用 Computer Use"提示（:570-575）
+    - [] → skills=[]（含 workspace 清零：:586 的 and 条件决定 workspace 是否合并）
+    - [名单] → 仅保留 name 在名单内的注册 skills；workspace skills 仍按名合并（:586-590）
+注入：build_skills_prompt(skills) 追加 system_prompt（:592）
+runtime=="none" 且注入 skills 时追加"未启用 Computer Use"提示（:593-598）
 ```
 
-### 3.4 工具白名单（:578-594）
+### 3.4 工具白名单（:601-617）
 
 ```python
 if (persona and persona.get("tools") is None) or not persona:
     persona_toolset = tmgr.get_full_tool_set()      # 全量（含 _PermissionGuardedTool 包装）
-    移除 inactive 工具（:581-583）
+    移除 inactive 工具（:604-606）
 else:
     persona_toolset = ToolSet()
     for tool_name in persona["tools"]:
@@ -169,22 +169,22 @@ else: req.func_tool.merge(persona_toolset)          # merge 走 add_tool 去重�
 
 语义：`tools=[]` 时 persona_toolset 为空，最终 `req.func_tool` 为空集（若之前无工具）→ 模型无工具可用；`tools=None` 走全量。
 
-### 3.5 subagent_orchestrator 集成（:596-656）
+### 3.5 subagent_orchestrator 集成（:619-679）
 
-- 配置 `subagent_orchestrator.main_enable` 开启（:599）；
-- 遍历 `agents` 列表：`persona_id` 存在时用该 persona 的 tools 覆盖 agent 的 tools 声明（:610-618）；
-- `tools=None` → 全部非 HandoffTool 工具归入 assigned_tools（:619-627）；
-- 主 Agent 工具集追加所有 handoff 工具（:638-640）；
-- `remove_main_duplicate_tools`（去重开关，:643-648）：把 assigned_tools 中非 handoff 的从主 Agent 工具集移除——**子 Agent 负责的工具从主 Agent 收回**；
-- `router_system_prompt` 追加 system_prompt（:650-656）。
+- 配置 `subagent_orchestrator.main_enable` 开启（:622）；
+- 遍历 `agents` 列表：`persona_id` 存在时用该 persona 的 tools 覆盖 agent 的 tools 声明（:633-641）；
+- `tools=None` → 全部非 HandoffTool 工具归入 assigned_tools（:642-650）；
+- 主 Agent 工具集追加所有 handoff 工具（:661-663）；
+- `remove_main_duplicate_tools`（去重开关，:666-671）：把 assigned_tools 中非 handoff 的从主 Agent 工具集移除——**子 Agent 负责的工具从主 Agent 收回**；
+- `router_system_prompt` 追加 system_prompt（:673-679）。
 
 ### 3.6 追踪
 
-追踪记录（`event.trace.record`，:657-664）保存每次请求的解析结果与工具集快照，供 Trace 页查看。
+追踪记录（`event.trace.record`，:680-687）保存每次请求的解析结果与工具集快照，供 Trace 页查看。
 
 ## 4. system prompt 最终拼装顺序
 
-完成 persona 与能力处理后，`build_main_agent` 及后续分支还会追加（astr_main_agent.py:1669-1675 附近）：
+完成 persona 与能力处理后，`build_main_agent` 及后续分支还会追加（astr_main_agent.py:1700-1730 附近）：
 
 ```text
 [persona]  # Persona Instructions（+ GenUI/Safety/Live 等前置项）
@@ -192,8 +192,8 @@ skills prompt（build_skills_prompt）
 TOOL_CALL_PROMPT（默认）或 TOOL_CALL_PROMPT_SKILLS_LIKE_MODE（skills_like 模式）
 LIVE_MODE_SYSTEM_PROMPT（live_mode 时）
 LLM_SAFETY_MODE_SYSTEM_PROMPT（安全模式时）
-sandbox/local 环境提示（_build_local_mode_prompt :445-464、SANDBOX_MODE_PROMPT）
-workspace EXTRA_PROMPT.md（_apply_workspace_extra_prompt :393-428）
+sandbox/local 环境提示（_build_local_mode_prompt :459-489、SANDBOX_MODE_PROMPT）
+workspace EXTRA_PROMPT.md（_apply_workspace_extra_prompt :404-441）
 subagent router_prompt
 ```
 
@@ -206,13 +206,13 @@ subagent router_prompt
 [末尾] 本轮用户消息（prompt → extra_user_content_parts[系统提醒/知识库结果/引用] → 图片 → 音频）
 ```
 
-注：`_apply_kb`（:278-309）知识库结果与 `_append_system_reminders`（:948-988，用户 ID/群名/时间）走 `extra_user_content_parts` **用户消息侧**注入，不进 system。
+注：`_apply_kb`（:289-321）知识库结果与 `_append_system_reminders`（:899-941，用户 ID/群名/时间）走 `extra_user_content_parts` **用户消息侧**注入，不进 system。
 
 ## 5. 绑定粒度
 
 | 粒度 | 机制 | 位置 |
 |---|---|---|
-| 全局默认 | `provider_settings.default_personality`（默认 "default"，按 UMO 配置可覆盖） | config/default.py:124；persona_mgr.py:63-73 |
+| 配置档案默认 | `agent_runner.config.persona.persona_id`（默认 `default`） | `core/config/agent_runner.py:16-20`；`internal.py:71-145` |
 | 会话规则（UMO 级） | `session_service_config.persona_id` 强制覆盖 | persona_mgr.py:92-103 |
 | 对话级 | `ConversationV2.persona_id`，可随时改 | po.py:86；conversation_service.py:124-145；`/new` 继承当前 persona（builtin_commands/commands/conversation.py:239-244） |
 
@@ -221,16 +221,16 @@ subagent router_prompt
 
 ### 5.1 会话创建、消息快照与重新生成
 
-- **会话创建不写入任何初始消息**：new_session（astrbot/dashboard/services/chat_service.py:1364-1373）只建 PlatformSession 行；ConversationV2 在首条消息时惰性创建且 content=None（astrbot/core/conversation_mgr.py:207-210）。begin_dialogs 每轮以前置插入方式注入（astr_main_agent.py:535-536），消息带不保存标记（persona_mgr.py:389-398），历史保存逻辑会显式跳过它（internal.py:470-471）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
+- **会话创建不写入任何初始消息**：new_session（astrbot/dashboard/services/chat_service.py:1364-1373）只建 PlatformSession 行；ConversationV2 在首条消息时惰性创建且 content=None（astrbot/core/conversation_mgr.py:207-210）。begin_dialogs 每轮以前置插入方式注入（astr_main_agent.py:558-559），消息带不保存标记（persona_mgr.py:389-398），历史保存逻辑会显式跳过它（internal.py:470-471）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
 - **修改 begin_dialogs 后既有会话下一轮自动生效**：`personas_v3` 缓存每次 CRUD 重建（persona_mgr.py:135、169、201、274、350），每轮 `_ensure_persona_and_skills` 重新解析注入。
-- **消息对象层不保存角色/模型快照**：PlatformMessageHistory（po.py:239-269）只有 platform_id、user_id、sender、content、llm_checkpoint_id，无 persona_id、无模型名；bot 消息内容由 build_bot_history_content 生成（chat_service.py:97-113），AgentStats 只含 token/耗时（astrbot/core/agent/response.py:31-38）。当次实际模型的记录分层存放在 trace 日志和 DB provider_stat 表中，具体定位见相关实现（internal.py:282-291、578-586）；selected_model 只经请求 extra 进入 req.model（astr_main_agent.py:1411-1412），不留存。
+- **消息对象层不保存角色/模型快照**：PlatformMessageHistory（po.py:239-269）只有 platform_id、user_id、sender、content、llm_checkpoint_id，无 persona_id、无模型名；bot 消息内容由 build_bot_history_content 生成（chat_service.py:97-113），AgentStats 只含 token/耗时（astrbot/core/agent/response.py:31-38）。当次实际模型的记录分层存放在 trace 日志和 DB provider_stat 表中，具体定位见相关实现（internal.py:282-291、578-586）；selected_model 只经请求 extra 进入 req.model（astr_main_agent.py:1364），不留存。
 - **重新生成走完整主链路**：`chat.py:222-244` regenerate → `prepare_regenerate_message_payload`（chat_service.py:1721-1825，回滚历史 `history[:start]+history[end+1:]` :1799、删旧 bot 展示记录、换新 checkpoint）→ `_send_chat` → `build_chat_stream`（chat.py:94）→ 同一 Agent 构建链 → 重新解析 Persona 当前值。行为上每轮解析与 AIO Hub 的实时引用一致，但消息本身没有任何执行参数快照可查。
 
 ## 6. 自定义错误回复（persona_error_reply.py，86 行）
 
 - 核心键：`PERSONA_CUSTOM_ERROR_MESSAGE_EXTRA_KEY = "persona_custom_error_message"`（:6）；
 - `normalize_persona_custom_error_message`（:9-14）：非 str/空串 → None，去空白；
-- 写入点：`set_persona_custom_error_message_on_event`（:37-47）在 `_ensure_persona_and_skills`（astr_main_agent.py:527-529）写入事件 extra；
+- 写入点：`set_persona_custom_error_message_on_event`（:37-47）在 `_ensure_persona_and_skills`（astr_main_agent.py:550-552）写入事件 extra；
 - 消费点：
   - `astr_agent_run_util.py:326-336`：run_agent 异常时优先用自定义文案；
   - `pipeline/process_stage/method/agent_sub_stages/internal.py:432-438`：内部 runner 兜底；
@@ -244,8 +244,8 @@ subagent router_prompt
 | `default` | "You are a helpful and friendly assistant."（内存，非 DB） | persona_mgr.py:9-19 |
 | `_chatui_default_` | webchat 专用（"calm, patient friend..."，约 500 字符情感支持型设定，含"结束时加一个跟进问题"指令） | astr_main_agent_resources.py:44-59 |
 
-- `get_persona_v3_by_id`（persona_mgr.py:47-61）：None/空 → None；`"default"` → DEFAULT_PERSONALITY；否则按 name 搜索；
-- 无人格时自动补 DEFAULT_PERSONALITY（:412-418），保证 `personas_v3` 永不空。
+- `get_persona_v3_by_id`（persona_mgr.py:52-66）：None/空 → None；`"default"` → DEFAULT_PERSONALITY；否则按 name 搜索；
+- 无人格时自动补 DEFAULT_PERSONALITY（:431-433），保证 `personas_v3` 永不空。
 
 ## 8. 与上下文压缩的交互
 
@@ -293,8 +293,8 @@ PersonaManager 的移动端工具栏现在始终保留新建文件夹入口，�
 - **v3 兼容层，不是迁移清理**：运行时代价是一次冗余转换缓存，收益是 v3 插件 API（`get_persona_v3_data` 等）与 v4 并存；
 - **persona_id 即显示名**：用户可读、易管理，代价是改名人脸经 DB 更新（无独立 slug）；
 - **tools/skills 双三态**：None 语义在 WebUI 与 API 间靠 `NOT_GIVEN` 哨兵区分"未修改"与"显式置空"（persona_mgr.py:142-144）——API 设计细节；
-- **workspace skills 不过滤**：persona 白名单只管注册 skills，工作区 skill 合并进主集（:563-567）——本地优先的设计意图；
-- **subagent 工具回收**：`remove_main_duplicate_tools` 让子 Agent 抢走主 Agent 的重复工具，避免双 Agent 竞争（:643-648）。
+- **workspace skills 不过滤**：persona 白名单只管注册 skills，工作区 skill 合并进主集（:586-590）——本地优先的设计意图；
+- **subagent 工具回收**：`remove_main_duplicate_tools` 让子 Agent 抢走主 Agent 的重复工具，避免双 Agent 竞争（:666-671）。
 
 ### 10.3 静态推断的潜在问题（源码推断，未实测）
 
@@ -302,22 +302,22 @@ PersonaManager 的移动端工具栏现在始终保留新建文件夹入口，�
 2. **begin_dialogs 与轮次截断的交互**：非 system 消息先被丢，长会话开场白静默消失；
 3. **切换 persona 后旧历史仍保留**：无变更标记/清空机制，模型可能受旧人格输出风格影响；
 4. **引用不存在 persona 静默回落**：无告警日志（persona_mgr.py:112-121 无 logger），排查困难；
-5. `resolve_selected_persona` 中 `provider_settings` 实参传入的是 `cfg`（astr_main_agent.py:524），而 `cfg` 是已带 UMO 覆盖的配置——文档与实现需对照 config 层验证。
+5. `resolve_selected_persona` 的 `provider_settings` 形参为兼容保留，当前默认 Persona 会重新从 UMO 对应配置档案的 `agent_runner.config` 读取（persona_mgr.py:83-125）。
 
 ## 11. 关键文件索引
 
 | 文件 | 关键位置 |
 |---|---|
-| `astrbot/core/persona_mgr.py` | DEFAULT_PERSONALITY :9-19；get_persona_v3_by_id :47-61；resolve_selected_persona :75-127；get_v3_persona_data :353-432 |
+| `astrbot/core/persona_mgr.py` | DEFAULT_PERSONALITY :9-20；get_persona_v3_by_id :52-66；resolve_selected_persona :83-144；get_v3_persona_data :368-431 |
 | `astrbot/core/persona_error_reply.py` | 自定义错误文案整链（normalize :9-14 / set :37-47 / resolve :50-69） |
 | `astrbot/core/db/po.py` | Persona :145-178；PersonaFolder :112-142；ConversationV2 :67-109；Personality :581-601 |
-| `astrbot/core/astr_main_agent.py` | _ensure_persona_and_skills :499-664；_filter_skills_for_current_config :467-496；_apply_workspace_extra_prompt :393-428；_apply_local_env_tools :431-442；build_main_agent :1375-1713 |
+| `astrbot/core/astr_main_agent.py` | _ensure_persona_and_skills :522-689；_filter_skills_for_current_config :490-521；_apply_workspace_extra_prompt :404-441；_apply_local_env_tools :442-458；build_main_agent :1545-1773 |
 | `astrbot/core/astr_main_agent_resources.py` | CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT :44-59；CHATUI_INLINE_GENUI :61-76；LIVE_MODE :78-88；TOOL_CALL_PROMPT :25-41 |
 | `astrbot/core/agent/runners/tool_loop_agent_runner.py` | reset（system/begin_dialogs 落位）:207-327 |
 | `astrbot/core/agent/context/truncator.py` | _split_system_rest :15-29；_ensure_user_message :31-49；fix_messages :51-98 |
 | `astrbot/core/agent/context/token_counter.py` | system 计入 :46-73 |
 | `astrbot/core/db/migration/migra_3_to_4.py` | migration_persona_data :236-276 |
-| `astrbot/core/config/default.py` | default_personality :124；persona_pool :125 |
+| `astrbot/core/config/agent_runner.py` | Local runner 的 Persona 默认值与配置归一化 :9-36、:172-201 |
 | `astrbot/dashboard/services/persona_service.py`、`api/personas.py` | CRUD REST |
 | `astrbot/builtin_stars/builtin_commands/commands/conversation.py` | /new 继承 persona :239-244 |
 | UI | `views/persona/PersonaManager.vue`；`components/shared/PersonaForm.vue`；`PersonaCapabilitiesEditor.vue`；`PersonaSelector.vue`；`SessionManagementPage.vue:505-524` |

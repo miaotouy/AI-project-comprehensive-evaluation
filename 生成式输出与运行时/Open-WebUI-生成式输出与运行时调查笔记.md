@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：静态代码阅读，grep/glob 覆盖前后端关键词（artifact、code interpreter、pyodide、jupyter、iframe、notebook、embeds、files、execute），沿“生成->物化->展示->执行->编辑->保存->回流”链路逐段核对；未运行构建、服务或任何执行流程
 >
@@ -29,7 +29,7 @@ Open WebUI 的生成式输出分散在一套“消息即事实源”的模型上
 2. **Artifact 链**（模型自由文本代码块探测）：
    模型输出 ` ```html/css/js ` 或内联 `<html>/<style>/<script>` → `src/lib/utils/index.ts` 的 `getCodeBlockContents` 分组提取 → `Chat.svelte` 的 `getContents` 组装完整 HTML 文档 → 内容 store → `Artifacts.svelte` 侧栏 iframe 预览（CSP 注入 + sandbox）。关闭面板后内容仍是消息正文的一部分；重新打开聊天即重新派生。无独立持久化对象。
 
-3. **工具结果物化链**：工具执行后 `process_tool_result` 分出文件、嵌入与引用 sources 三类结果，经 `files`/`embeds` 事件分别进入 `message.files`、`message.embeds`（FullHeightIframe 渲染）与 `message.sources`（Citations），全部落库为 ChatMessage 的 JSON 列（`backend/open_webui/models/chat_messages.py:142-150`）。
+3. **工具结果物化链**：工具执行后 `process_tool_result` 分出文件、嵌入与引用 sources 三类结果，经 `files`/`embeds` 事件分别进入 `message.files`、`message.embeds`（FullHeightIframe 渲染）与 `message.sources`（Citations），全部落库为 ChatMessage 的 JSON 列（`backend/open_webui/models/chat_messages.py:142-150`）。终端文件工具（`display_file`）的结果现在无论是否传 `inline` 都会物化为文件结果，只有 `inline=true` 才带 `displayed` 标记；前端默认不在消息里内联渲染该文件块，仅当结果带 `displayed` 或用户把终端文件显示设为 inline 时渲染，其余情况由 `terminal:display_file` 事件驱动右侧 FileNav 面板（`backend/open_webui/utils/middleware.py:258-292`、`src/lib/components/chat/Messages/structuredOutput.ts:166-186`、`StructuredOutputRenderer.svelte:164-169`、`src/lib/components/chat/Chat.svelte:1144-1149`）。
 
 ## 1. 触发方式、输出协议与对象模型
 
@@ -67,7 +67,7 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
 - 代码解释器：inline——消息内代码块（`CodeBlock.svelte`）＋运行结果区（STDOUT/STDERR、RESULT、base64 图片，`CodeBlock.svelte:591-631`）；同一代码块同时是编辑器（CodeMirror，`src/lib/components/common/CodeEditor.svelte`）。
 - Artifact：sidecar——聊天右侧 Pane 面板（`ChatControls.svelte:446-447`），只读 iframe/SVG；版本切换遍历同一消息派生的多个 HTML 组（`Artifacts.svelte:137-186`）。同一对象无多同步投影：artifact 面板与消息代码块是“源与预览”关系，代码块改动不会即时同步到已打开的面板。
 - Pyodide 文件系统：sidecar——ChatControls 的 Files 标签页（`ChatControls.svelte:377-380`，选择 Terminal 时用终端 FileNav，否则用 PyodideFileNav）；执行后 `window.dispatchEvent(new Event('pyodide:files'))` 触发自动刷新（`CodeBlock.svelte:344-345`）。
-- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（`PortPreview.svelte`，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具 `display_file`/`write_file` 事件驱动面板跳转（`+layout.svelte:475-483`、`FileNav.svelte:853-902`）。
+- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（`PortPreview.svelte`，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具 `display_file`/`write_file` 事件驱动面板跳转（`+layout.svelte:475-483`）。Office 预览优先向终端服务器索要服务端渲染的 PDF（`downloadFilePreview` 请求 `/files/view?path=…&preview=true`），拿不到再回落到浏览器端 docx/pptx 渲染（`src/lib/components/chat/FileNav.svelte:868-940`、`FileNav/FilePreview.svelte`、`Messages/TerminalOutputFile.svelte:143-200`）。
 - 工具结果：inline——`message.files`（文件卡片/图片）、`message.embeds`（`FullHeightIframe`，`ResponseMessage.svelte:711-728`）、`message.sources`（Citations 组件，源文档 iframe 弹窗带 CSP）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -119,7 +119,7 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
   content / output / files / sources / embeds
   ```
 - 代码解释器输出图片：base64 → `upload_image` → files 表 + URL（`middleware.py:5415-5440`、`builtin.py:609-643`），消息里留 `![Output Image](url)`，可下载。
-- 图像生成工具：图片文件 URL 经 `Chats.add_message_files_by_id_and_message_id` 挂到消息（`builtin.py:388-405`）。
+- 图像生成工具：图片现在以完整文件对象（`id`/`url`/`name`/`content_type`）随事件回流并挂到消息，而不是只回传一个 URL（`backend/open_webui/routers/images.py:552-560`、`tools/builtin.py:388-405`）；在频道会话里调图时还会带上 `channel_id`/`message_id`，使生成图同时落到频道消息（`tools/builtin.py:391-398`、`utils/middleware.py:1773-1782`）。
 - Pyodide 文件系统：仅当 `ENABLE_PYODIDE_FILE_PERSISTENCE=true`（`backend/open_webui/env.py:1137`）时 worker 模式挂 IDBFS 到 IndexedDB 并 `syncfs` 持久化（`pyodide.worker.ts:49-73`、`96-105`）；隐藏 iframe 沙箱模式无持久化，刷新即失。默认关闭。
 - 导出/分享：Artifact 可下载单 HTML 文件（`Artifacts.svelte:82-92`）、复制；终端文件可下载（目录打包 ZIP，`FileNav.svelte:526-552`）；Pyodide 文件可下载；消息分享/导出属 Chat 类目，此处不展开。
 

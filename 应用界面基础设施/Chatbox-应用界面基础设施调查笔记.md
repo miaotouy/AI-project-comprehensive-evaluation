@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -17,6 +17,8 @@
 Chatbox 的界面基础设施由多套库分工组成。桌面弹窗主要使用 Mantine，移动端抽屉使用 vaul，部分预留组件使用 Radix；AdaptiveModal 负责按屏幕形态选择承载方式，命令式调用再由 nice-modal-react 统一入口。
 
 通知分为 MUI Snackbar 和 sonner 两套系统。主题则同时驱动 MUI、Tailwind 和 Mantine，并叠加品牌色预设、消息字号和全局或会话级背景图。项目没有主题市场、主题文件导入导出或自定义 CSS。
+
+MUI Snackbar 的 action 现已用于归档会话 Undo，失败时可替换为重试反馈；Work Mode 输入区另形成 PendingActionBar 与 QueuedMessagesBar 两个业务级状态表面。它们复用现有 Toast/Popover/Tooltip 基础设施，但状态所有权仍在会话业务层。
 
 弹窗关闭和焦点策略按场景配置，其中部分弹窗为解决 iOS 文本选择问题主动关闭焦点陷阱。错误处理由多层 Sentry ErrorBoundary 覆盖渲染树、路由和单条消息；加载、拖放和复制反馈没有形成同等统一的公共组件层。
 

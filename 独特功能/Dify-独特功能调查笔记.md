@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
-> 调查方式：静态阅读 README、应用生成器、workflow 图运行时、workflow-as-tool、知识库/RAG Pipeline、Prompt IDE、LLMOps、Agent v2、插件/MCP/触发器入口与 DSL 导入导出；未连接外部服务或运行部署
+> 调查方式：静态阅读 README、应用生成器、workflow 图运行时、workflow-as-tool、知识库/RAG Pipeline、Prompt IDE、LLMOps、Agent v2、App Deployment、插件/MCP/触发器入口与 DSL 导入导出；未连接外部服务或运行部署
 >
-> 调查范围：寻找不能由普通 Chat、工具或 Provider 单独解释的完整产品工作流；补查知识库摄取、检索与 RAG Pipeline、Prompt IDE、LLMOps、Agent v2、Marketplace 生命周期和应用 DSL 可移植性；不把常规流式聊天、单条工具调用或普通模型配置重复计为特色
+> 调查范围：寻找不能由普通 Chat、工具或 Provider 单独解释的完整产品工作流；覆盖知识库与 RAG Pipeline、Prompt IDE、LLMOps、Agent v2、Marketplace、App Deployment 和应用 DSL；不把常规流式聊天、单条工具调用或普通模型配置重复计为特色
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -18,9 +18,9 @@
 
 知识库与可发布 RAG Pipeline 也达到静态 `主链确认`：它将文件、Notion 或网页来源转为 tenant 下可管理的知识资产，异步索引后既可被聊天应用和 workflow 检索节点消费，也可通过独立 Pipeline 维护摄取图的草稿、发布和运行记录。它不是普通“上传附件”功能，且现有目录没有能完整承接其摄取、检索和编排链的通用类目。
 
-基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace 和 Agent v2 工作区均已补到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；后二者则分别覆盖租户插件安装治理和 Agent 的版本化执行环境。
+基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace 和 Agent v2 工作区均达到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；后二者则分别覆盖租户插件安装治理和 Agent 的版本化执行环境。Agent v2 的执行工作区现可选择 OpenShell 后端，Chatflow 中的 Agent 参与者按 conversation 复用记忆并固定发布快照；这些扩展了运行边界，但没有改变其依赖独立 Agent Runtime 的证据状态。
 
-Trigger Provider 仍只有 `入口确认`，因为外部事件已能启动异步 workflow，却尚未确认最终用户结果和投递保证；MCP 作为工具调用能力仍归并到相邻专项。Marketplace 和 Agent v2 虽已形成 Dify 侧主链，其 Plugin Daemon、Dify Agent Runtime 等外部执行域仍未运行验证。
+Trigger Provider 仍只有 `入口确认`，因为外部事件已能启动异步 workflow，却尚未确认最终用户结果和投递保证；App Deployment v2 也只记 `入口确认`，因为仓内已确认环境版本、环境 Web/API 访问点和短期文件 grant，真正部署控制面仍由 Enterprise 边界持有。MCP 作为工具调用能力仍归并到相邻专项。Marketplace 和 Agent v2 虽已形成 Dify 侧主链，其 Plugin Daemon、Dify Agent Runtime 等外部执行域仍未运行验证。
 
 ## 介绍声明与候选盘点
 
@@ -38,6 +38,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 | 插件 Marketplace 与受管安装 | `主链确认`（静态，Dify 侧） | 纳入一项特色能力 | 发现、策略、安装任务、升级、卸载、缓存失效与运行时发现已连通；daemon 是外部执行域 |
 | 应用/Agent DSL 导入导出 | `归并已有类目` | 作为发布链支撑 | 迁移、模板、复制与依赖检查复用同一导入链，不形成新的独立运行工作流 |
 | MCP 扩展 | `归并已有类目` | 回链 Agent 工具 | 主要事实已由工具 Provider、发现、凭据和调用边界解释 |
+| App Deployment v2 | `入口确认` | 暂不计入 | 已确认版本部署 UI、环境 WebApp/service API 与文件 grant；Enterprise control plane 的部署执行和环境生命周期不在本仓库闭环 |
 | Webhook、schedule 与 Plugin Trigger 工作流 | `入口确认` | 暂不计入 | 外部事件可校验、映射至已发布 workflow，并创建异步 run 与 trigger log；最终用户结果、签名与投递保证未确认 |
 
 ## 已确认的独特能力
@@ -100,9 +101,11 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **对象与编排。** Agent v2 将可复用 roster Agent、仅属于 workflow 的 inline Agent、普通编辑 draft、每位编辑者的 build draft 与不可变 config snapshot 区分建模。控制台支持 roster、配置、预览、版本、访问、日志与监控入口；发布把可编辑 Agent Soul 转为 snapshot/revision，已存在版本也可回写为新的正常 draft。这样同一 Agent 可被工作流引用，同时区分尚未发布的编辑态和运行所绑定的版本。
 
-**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。`AgentAppWorkspaceStore` 以 conversation 或 build draft 为 workspace owner，在 Dify Agent backend 创建 execution binding，并把 binding ID 回写到调用者；后续调用会校验 tenant、owner、Agent、home snapshot 和配置版本一致性。运行中保存 compositor session snapshot、pending form/tool ID；human-input 表单提交后由后台恢复回合并把答案持久化，断线的实时流不在恢复范围。binding/workspace 先标记 retired，提交后再请求 backend 物理清理，失败留待后续收集。这证实它已不只是“新版 Agent 配置 UI”。
+**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。Chatflow 中的 Agent v2 节点也会以 conversation 作为 workspace owner；同一节点参与者跨回合复用 binding，并继续使用初次绑定的配置快照，即使 roster Agent 后续发布新版本也不会漂移（`api/core/workflow/nodes/agent_v2/session_store.py:32-64`；`binding_resolver.py:95-145`）。运行中保存 compositor session snapshot、pending form/tool ID；human-input 表单提交后由后台恢复回合并把答案持久化。取消发生在模型已返回工具调用但工具尚未返回时，运行历史把尾部响应标记为 interrupted，使下一回合能够继续；这不代表外部工具副作用会回滚（`dify-agent/src/dify_agent/runtime/history.py:75-109`）。
 
-**边界与独特性。** 本轮没有启动独立的 Dify Agent Runtime，因此 workspace/binding 的物理创建、session 的实际恢复、工具环境和销毁幂等性仍是静态结论；服务端注释也明确承认跨系统创建成功后事务失败可能留下孤儿资源。其产品语义是“版本化 Agent 配置 + 会话/调试草稿拥有的可回收执行环境”，而不是传统 Agent 节点的单次模型工具循环。
+`AgentAppWorkspaceStore` 仍负责在 Dify Agent backend 创建 execution binding，并把 binding ID 回写给调用者；后续调用校验 tenant、owner、Agent、home snapshot 和配置版本一致性。binding/workspace 先标记 retired，提交后再请求 backend 物理清理，失败留待后续收集。Agent Runtime 的部署选择除 local、enterprise 和 E2B 外，还加入 OpenShell，配置包含 gateway、workspace、TLS/令牌、sandbox image、共享挂载、出口白名单和执行超时（`dify-agent/src/dify_agent/server/settings.py:66-105,226-263`）。这确认可选执行后端的配置与适配入口，尚未运行 OpenShell sandbox、隧道、快照和网络策略。
+
+**边界与独特性。** 本轮没有启动独立的 Dify Agent Runtime，因此 workspace/binding 的物理创建、session 的实际恢复、OpenShell/E2B/本地工具环境和销毁幂等性仍是静态结论；服务端注释也明确承认跨系统创建成功后事务失败可能留下孤儿资源。发布前会校验 Soul 中的 Skill/File 引用，拒绝未配置的引用（`api/services/agent/workflow_publish_service.py:177-232`），但这只证明定义完整性门槛，不证明对应 Skill 在运行时执行成功。其产品语义是“版本化 Agent 配置 + 会话/调试草稿拥有的可回收执行环境”，而不是传统 Agent 节点的单次模型工具循环。
 
 ### 插件 Marketplace 与受管安装生命周期
 
@@ -132,6 +135,12 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 ## 入口确认、外部依赖与暂缓项
 
+### App Deployment v2
+
+控制台可以选择应用版本并部署到 environment，环境拥有独立 WebApp 与 service API 访问点；当前界面把 MCP 和 trigger 标为该环境不支持（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`）。环境运行所需文件通过短期 grant 交接：受信 inner API 以 tenant、app、end user、scope 和 TTL 签发令牌，公开文件端点再分别处理上传、远程抓取、产物写入、文件解析和单文件内容 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。
+
+这已形成“选择版本 -> 配置环境 -> 暴露环境访问点 -> 受限文件能力”的仓内入口和协议，但环境的创建、实际部署、凭据注入、回滚和控制面身份依赖 Enterprise AppDeploy 服务。当前证据不足以确认从 Dify 控制台到外部环境完成部署并稳定运行的完整主链，因此不计入特色贡献。
+
 ### Webhook、schedule 与 Plugin Trigger 工作流
 
 Webhook 已发布入口会加载 webhook trigger、发布 workflow 和节点配置，校验请求数据后投递执行；plugin trigger 则从订阅事件找到已发布 workflow、创建触发型 End User、保留配额，再调用异步 workflow service。两条路径都会以 workflow run 和 `WorkflowTriggerLog` 保存关联、队列与完成/失败状态；schedule 是同一异步运行面的另一种事件来源（`api/controllers/trigger/webhook.py`、`api/tasks/trigger_processing_tasks.py`、`api/models/trigger.py`）。这确认了“外部事件 -> 服务端状态 -> 图运行 -> 记录”的入口和执行链，但尚不足以确认用户最终得到的结果。
@@ -150,9 +159,10 @@ Webhook 已发布入口会加载 webhook trigger、发布 workflow 和节点配�
 - 未运行 RAG Pipeline 的草稿保存、节点试跑、发布、DSL 导入导出、历史回看和数据源授权；不对解析质量、召回、费用或吞吐作结论。
 - 未运行 Prompt IDE 的真实模型、各 Provider/TTS/STT/知识能力、发布授权、多人协作冲突、版本恢复或调试会话的保留；多模型比较与生产评测的关系也未确认。
 - 未运行注解的向量检索、索引失败恢复、阈值效果、实际命中/回退，以及外部 Trace 的投递、保留、provider 可见性和成本；未找到自动调优执行器。
-- 未启动 Dify Agent Runtime 或 Plugin Daemon，因而未确认 Agent v2 的实际 workspace/session/工具/HITL 生命周期，也未确认插件安装任务、包验签、隔离、升级、失败清理和卸载的物理效果。
+- 未启动 Dify Agent Runtime、OpenShell 或 Plugin Daemon，因而未确认 Agent v2 的实际 workspace/session/工具/HITL 生命周期、OpenShell 网络与挂载边界，也未确认插件安装任务、包验签、隔离、升级、失败清理和卸载的物理效果。
 - 未运行 DSL 的 URL 拉取、版本确认、依赖检查、跨工作区导入或同工作区 secret copy；缺失数据集被静默过滤、依赖是否自动安装和导出文件的二次保管仍需运行与部署边界验证。
 - 未确认 Trigger Provider 的签名/OAuth、投递保证、最终结果回传和用户可见控制表面。
+- 未连接 Enterprise AppDeploy 控制面，未验证环境创建、版本部署/回滚、访问权限、文件 grant 撤销和环境删除。
 
 ## 关键源码索引
 

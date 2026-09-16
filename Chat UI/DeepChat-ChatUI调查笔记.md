@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（renderer 的 ChatPage 组合、ChatInputBox/ChatInputToolbar/PendingInputLane 组件、useComposerSubmit/useMessageActions/useChatSearch 等 composable、Pinia store 与 IPC 桥），静态核对控件、状态与事件绑定；视觉效果、焦点顺序、键盘可用性与系统通知未运行验证
 >
@@ -23,6 +23,7 @@ DeepChat 是 Electron 桌面 GUI，聊天工作台由 ChatPage 单一页面组�
 - 会话内查找（Cmd/Ctrl+F）与跨会话搜索（侧栏过滤 + Spotlight 历史搜索）并存，命中可定位到消息。
 - UI 状态（active session、working/error、message 缓存、streaming、pending input、草稿、plan）分散在 Pinia store 与页面局部状态，active session 按窗口绑定；键盘/焦点/响应式行为未运行验证（§11）。
 - 上下文压缩在消息列表中以状态化分隔行呈现；它明确区分正在压缩、已压缩及未生成可用摘要等状态，具体上下文与持久化语义见对话请求与上下文、会话与消息管理笔记（`MessageListRow.vue:10-24,180-187`）。
+- 非视觉工作流可通过 Electron 的 accessibility support 状态启用：ChatPage 为消息区补充可聚焦 region 与 live 状态，并在该模式下关闭消息窗口化，避免屏幕阅读器只接触当前视口窗口。
 
 ## 工作台边界与用户主链
 
@@ -62,6 +63,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - **草稿持久化**：`composerDraftPersistence.ts` 按会话键 `deepchat.composerDraft.v1.<sessionId>`（:12）把文本、附件、active skills 与 TipTap document 镜像到 localStorage（400ms 防抖 :13、:543-554）；空草稿删除、损坏视为无（:148-155、:164-168）。
 
   切换会话即时恢复（`switchComposerSession`，`useComposerSubmit.ts:669-700`），`pagehide/beforeunload` 同步 flush（:566-572）；草稿状态机（revision/fingerprint）在 `model/composerDraftState.ts`。
+- **新会话草稿**：尚未创建 session 时，草稿按 Agent 使用 `new-thread:<agentId>` 键保存；切换 Agent 不会再让其文本、附件、Skills 选择互相覆盖。状态所有者见 `src/renderer/src/stores/ui/draft.ts:33-78`。
 - **快捷输入**：slash 命令（`/compact` 手动压缩，`useComposerSubmit.ts:952-996`，命令定义 `src/renderer/src/components/chat/mentions/utils.ts:36-37`）；`@` 提及（编辑器扩展）。
 
 ## 4. Agent、模型、工具与发送前配置
@@ -79,6 +81,8 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
 - **发送路径**：`onSubmit`（`useComposerSubmit.ts:998-1047`）：生成中 → `pendingInputStore.queueInput` 入队（:1027）；空闲 → `dispatchComposerAttempt`（:826-950，发送前先插入乐观 user 消息与 pending-assistant 占位，被拒则回滚并弹附件对话框）。另有排队提交（`onQueueSubmit` :1098-1128）、steer（`onSteer` :1130-1170）与 slash 命令发送（:1049-1096）。
 - **pending lane**（`src/renderer/src/components/chat/PendingInputLane.vue`）：队列计数与 blocked 计数徽标（:13-23）；resume 按钮的显示条件为非 ACP、视图已提交、无生成中，且 `pendingInputStore.resumeAvailable` 为真（`ChatPage.vue:1299-1309`）；`retry_required` 项琥珀色标记 + 重试按钮（:208-229）；blocked 项 retry / send-without 按钮（:174-207）；拖拽排序（:53-62，阻塞/待重试/编辑中禁用）、行内编辑（:95-133）。
+
+  活动 queue 项上限为 10；UI 的可用槽位与主进程 `MAX_PENDING_INPUTS` 使用同一容量语义（`src/shared/pendingInput.ts:2`、`src/main/session/data/pendingInputs.ts:474`）。
 
   动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
 - **流式反馈**：消息列表随 IPC 增量更新（renderer message store 与 `messageIpc.ts` 的 stream 注册表，见会话与消息管理笔记 §6）；`useDisplayMessages` 用稳定 render key 把占位/流式行与落盘消息关联（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:339-355`、:367-438）；rate-limit 临时块在列表尾部内联呈现（`ephemeralRateLimitBlock`，:235-250）。
@@ -127,6 +131,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - 焦点保持：question/permission 激活时 Composer 用 `v-show + inert` 保留（`ChatPage.vue:217-221`），避免 TipTap 草稿与 IME 状态被卸载。
 - 无障碍标记：滚动区 `role="status"/aria-live`（:116-119）、删除对话框 title/description、工具栏按钮 aria-label 等静态可见。
 - 焦点顺序、响应式断点、实际键盘可用性未运行验证（§11）。
+- **非视觉模式**：`useAccessibilitySupport` 读取 Electron accessibility support 状态；开启时 ChatPage 把消息滚动区设为可聚焦 region，并通过 `disableWindowing: accessibilityEnabled` 关闭列表窗口化。Mention 建议列表使用 listbox/option、`aria-activedescendant` 与状态播报；静态接线见 `src/renderer/src/composables/useAccessibilitySupport.ts`、`ChatPage.vue:428,955`、`components/chat/composables/useChatInputMentions.ts:96-101`。
 
 ## 10. 设计取舍与已确认边界
 
@@ -155,3 +160,4 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - pending lane：`src/renderer/src/components/chat/PendingInputLane.vue`、`composables/usePendingInputActions.ts:57-143`
 - 消息动作：`src/renderer/src/features/chat-page/composables/useMessageActions.ts:67-241`
 - UI 状态 store：`src/renderer/src/stores/ui/session.ts`、`message.ts`、`pendingInput.ts`
+- 非视觉模式：`src/renderer/src/composables/useAccessibilitySupport.ts`、`src/renderer/src/features/chat-page/ChatPage.vue:428,955`

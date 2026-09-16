@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（TypeScript 服务端生成任务执行链、事件流与 TUI/Web 客户端提交路径），核对快照 HEAD 全部符号与行号
 >
@@ -57,10 +57,10 @@ App 输入（components/prompt-input/submit.ts） → api.session.prompt（{sess
 
 messages 组装（prompt.ts:1257-1286）：
 
-1. `sys.environment`（system.ts:63-99，含工作目录/git/日期/引用列表）
+1. `sys.environment`（system.ts:69-105，含工作目录/git/日期/引用列表）
 2. `instruction.system()`（AGENTS.md 等指令文件，instruction.ts:155-169）
-3. `sys.mcp`（system.ts:115-131）
-4. `sys.skills`（system.ts:101-113）
+3. `sys.mcp`（system.ts:121-137）
+4. `sys.skills`（system.ts:107-119）
 5. `MessageV2.toModelMessagesEffect` 历史转换（message-v2.ts:131-415）：user 的 text/file/compaction/subtask（:198-242）、assistant 的 text/tool/reasoning/step-start（:244-401）；工具结果媒体抽离为合成 user 消息（:382-399）；pending/running 工具以 `[Tool execution was interrupted]` 错误回注（:351-360）
 6. `LLMRequestPrep.prepare` 拼 system 头（llm/request.ts:56-206，system 合并为单条 :58-66、非 workflow 时前置 system 消息 :101-112）
 
@@ -88,6 +88,7 @@ messages 组装（prompt.ts:1257-1286）：
 ## 4. SDK、Provider、模型与协议交接
 
 - `llm.stream`（llm.ts:357-381）使用 AI SDK `streamText`（:280-353）；请求先经 `LLMRequestPrep.prepare`（llm/request.ts:56-206：system/消息/tools/参数/headers，工具按权限过滤 :208-214）。父会话 ID 只要存在即作为 `x-parent-session-id` 加入请求，包含 OpenCode 自有 Provider 路径（`packages/opencode/src/session/llm/request.ts:187-204`）。
+- Provider 交接现在还会针对 Claude 5.1+ 的 thinking block 绑定注入前缀不匹配处理：Anthropic、Vertex Anthropic 与 Bedrock 默认请求 API 丢弃无法重放的受影响 thinking block；显式 `blockBinding:false` 可退出。step-finish 若 Provider 报告发生输入转换，处理器记录 warning 以便关联 session/message/model（`packages/opencode/src/provider/transform.ts:690-738、1417`、`session/processor.ts:438-451`）。
 - **运行时选择**：默认 AI SDK 路径；`OPENCODE_EXPERIMENTAL_NATIVE_LLM` 时先试 `LLMNativeRuntime.stream`（llm.ts:226-269），不支持则回退 AI SDK（native-runtime.ts）。
 - LLM 流经 `LLMAISDK.toLLMEvents` 转统一事件（llm/ai-sdk.ts:76-286），事件类型集合为：
 
@@ -111,6 +112,7 @@ messages 组装（prompt.ts:1257-1286）：
 ## 6. 完成、异常、半截流与最终回写
 
 - **最终化**（processor.ts:435-532、:595-596）：完整 part 在 end 事件时落库（:512-532）；`step-finish` 累计 usage/cost 并写 step-finish part、按快照 diff 写 patch part、后台触发摘要（:435-484、:471-476）；`finish` 事件收口，assistant 消息的 `time.completed` 与 `finish` 字段随消息落库（runLoop 退出判定 :1111-1130）。
+- Provider 若在 step-finish 元数据中报告 Anthropic thinking block 被移除，OpenCode 只记录结构化 warning，不把该诊断写成用户可见 part；这是请求容错的可观测性信号，实际丢弃决定仍由 Provider 返回（`processor.ts:438-451`）。
 - **异常/半截流**（processor.ts:539-625）：`cleanup`（:539-597）把未完成 text/reasoning part 置终态、tool part 标 `"Tool execution aborted"` + `interrupted:true`（:577-593），重放时以 `[Tool execution was interrupted]` 错误回注（message-v2.ts:351-360）；`halt`（:599-625）归一化错误并发布 `session.error`，context overflow 在 auto compaction 开启时置 `needsCompaction` 而非直接失败（:607-618）。
 - **错误归一化**：`fromError`（message-v2.ts:606-734）映射 8 种错误类型（数据语义见会话与消息管理笔记 1）。content-filter / 结构化输出失败在 runLoop 收口为错误消息（prompt.ts:1301-1316）。
 
@@ -138,7 +140,7 @@ messages 组装（prompt.ts:1257-1286）：
 - **MCP 资源**：用户输入中的 MCP resource part 由 `resolveUserPart` 读取并转 text/file part（prompt.ts:703-783，blob 转 `data:` URL，超 10MB 或不支持类型则文本占位）；MCP 资源工具（list/read_mcp_resource 等）在 tools.ts:136-385，结果附件同样内联 data URL（:426-462）。
 - **附件**：App 端 `blobDataUrl(blob, mime)` 把图片转 data URL（submit.ts:101、:117）；服务端把 `file:` 读成 `data:` base64 的是 `resolveUserPart`（prompt.ts:808-970：text/plain 走 Read 工具 :830-907、目录 :909-947、二进制 :949-970），`resolvePromptParts`（:157-191）只做 markdown 模板解析产生 `file:` URL part；tool 结果附件同样内联（tools.ts:426-462）。存储形状（data URL 内联、无独立附件目录）见会话与消息管理笔记 8。
 - **todo 回注**：模型经 `todowrite` 工具写入，列表 JSON 作为 tool result 回注（tool/todo.ts:22-43）——回注靠工具返回值，会话历史无额外 todo 注入（静态推断）。
-- **system 注入点**：environment/skills/mcp 指令（system.ts:63-131）、AGENTS.md 指令（instruction.ts:155-169）、structured output 系统提示（prompt.ts:1271、:74-82）。
+- **system 注入点**：environment/skills/mcp 指令（system.ts:69-137）、AGENTS.md 指令（instruction.ts:155-169）、structured output 系统提示（prompt.ts:1271、:74-82）；provider 风格模板的选取规则见[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md) 3。
 
 ## 10. 退出恢复、日志与已确认边界
 

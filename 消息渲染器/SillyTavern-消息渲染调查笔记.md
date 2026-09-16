@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-07-29
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -32,6 +32,7 @@ SillyTavern 使用命令式前端流水线渲染消息：全局 chat 数组提�
 - 历史、普通新消息和流式消息最终共用同一个正文格式化函数，显示语义较一致。
 - reasoning、附件、媒体、偏置、计时和 token 数都有明确的旁路字段及 DOM 区域。
 - HTML 和 `<style>` 是受支持的消息能力；DOMPurify 负责 HTML 边界，自定义 CSS parser 负责样式作用域。
+- 正文格式化在正则之前、正则之后与 Markdown 转 HTML 之后各有一个扩展钩子阶段，钩子统一在净化前汇入同一管线（见下节扩展钩子）。
 - `CHARACTER_MESSAGE_RENDERED` / `USER_MESSAGE_RENDERED` 等事件构成扩展层的主要接入面。
 - 历史仅做截断式分页，不做消息 DOM 虚拟化。
 
@@ -192,7 +193,9 @@ interface ChatMessage {
 raw message
   -> 首条角色消息宏替换
   -> prompt bias 隐藏
+  -> beforeRegex 扩展钩子
   -> regex extension（USER_INPUT / AI_OUTPUT / REASONING 等 placement）
+  -> afterRegex 扩展钩子
   -> fixMarkdown()
   -> 可选 encode_tags：转义 < 和 >
   -> reasoning 前后缀保护
@@ -200,12 +203,19 @@ raw message
   -> align* 转 $$
   -> Showdown Markdown -> HTML
   -> 代码块换行及 &amp; 修正
+  -> afterMarkdown 扩展钩子（默认阶段）
   -> 可选移除角色名前缀
   -> <style> 编码为 <custom-style>
   -> DOMPurify.sanitize()
   -> <custom-style> 解码和 CSS 作用域改写
   -> HTML string
 ```
+
+### 扩展钩子 MessageFormatter
+
+正文格式化的扩展钩子由 `public/scripts/message-formatter.js` 提供。扩展经上下文对象取到该单例，用 addHook 注册同步钩子，并指定执行阶段与同一阶段内的优先级；默认阶段是 Markdown 转 HTML 之后（拿到 HTML 字符串），另可选正则之前与正则之后（仍是 Markdown 文本）。同名阶段内按优先级升序执行，钩子必须同步返回字符串，非字符串返回值被忽略并打印告警，抛错被捕获后不中断后续钩子。
+
+三个阶段都在 DOMPurify 之前运行，因此钩子插入的 HTML 仍随其余内容一起净化；源码注释明确不提供净化之后的阶段。正文格式化函数在对应位置依次调用这三个阶段，扩展取用入口为 `getContext().messageFormatter`（`public/scripts/message-formatter.js:118-215`、`public/scripts/st-context.js:113,246`）。
 
 ### Showdown 配置
 
@@ -279,6 +289,8 @@ reasoning 是 `message.extra.reasoning` 中的独立字段，不依靠从普通�
 - 流结束时发送 `STREAM_REASONING_DONE`。
 
 reasoning 与正文使用相同的 Markdown、regex 和 DOMPurify 管线，但 regex placement 为 `REASONING`，且跳过首条角色消息宏替换。
+
+reasoning 折叠区带有可见内容标记：仅当 reasoning 文本去空白后非空时，详情块被标记为有内容，才允许自动展开、点击折叠与进入编辑；只含空白的历史 reasoning 仍可编辑，但标题按钮按“隐藏的 reasoning”呈现，自动展开或折叠展开操作都不会打开它（`public/scripts/reasoning.js:579, 102, 1229`）。
 
 ## 媒体与文件
 
@@ -388,6 +400,7 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 | `public/global.d.ts` | `ChatMessage` 与 `extra` 的渲染字段契约 |
 | `public/scripts/chats.js` | CSS encode/decode、DOMPurify hook、媒体权限和聊天工具 |
 | `public/scripts/reasoning.js` | reasoning 状态、提取、持久化和 DOM 更新 |
+| `public/scripts/message-formatter.js` | 正文格式化的三阶段扩展钩子注册与运行 |
 | `public/scripts/streaming-display.js` | 非主聊天场景的浮层式流式显示 |
 | `public/scripts/sse-stream.js` | SSE 读取与可选 smooth streaming 节奏 |
 | `public/scripts/tool-calling.js` | 工具调用解析、执行和 `tool_invocations` 记录 |
@@ -401,18 +414,19 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 - 消息模板引用：`public/script.js:447`
 - 历史打印：`public/script.js:1475`
 - 历史批量重显：`public/script.js:1497`
-- 正文格式化：`public/script.js:1753`
+- 正文格式化：`public/script.js:1800`
+- 格式化钩子调用点：`public/script.js:1855, 1866, 1948`
 - 局部消息更新：`public/script.js:1974`
 - 媒体装配：`public/script.js:2157`
-- 代码高亮与复制：`public/script.js:2420`
-- 正文覆盖选择：`public/script.js:2464`
-- 单条消息入口：`public/script.js:2492`
-- 单条消息装配：`public/script.js:2559`
+- 代码高亮与复制：`public/script.js:2479`
+- 正文覆盖选择：`public/script.js:2523`
+- 单条消息入口：`public/script.js:2551`
+- 单条消息装配：`public/script.js:2618`
 - 主聊天流处理器：`public/script.js:3481`
 - assistant 消息写入：`public/script.js:6583`
 - CSS encode/decode：`public/scripts/chats.js:536`、`public/scripts/chats.js:551`
 - DOMPurify hook：`public/scripts/chats.js:1901`
-- reasoning DOM 更新：`public/scripts/reasoning.js:542`
+- reasoning DOM 更新：`public/scripts/reasoning.js:254`；可见内容标记（data-has-content）：`public/scripts/reasoning.js:579`
 - 消息 HTML 模板：`public/index.html:7378`
 - CSP 关闭：`src/server-main.js:104`
 

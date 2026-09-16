@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码阅读。实际覆盖 `src/agents/sessions/`（ModelRegistry 与 auth store）、`src/agents/model-auth-*`（凭据解析链）、`src/agents/provider-stream.ts` 与 `src/plugins/provider-runtime*`（provider 运行时）、`src/agents/embedded-agent-runner/`（模型解析与流执行主链）、`src/model-catalog/`（远端目录）、`src/agents/plugin-model-catalog.ts` 与 `src/agents/prepared-model-catalog*` 周边（目录持久化）、`packages/ai/` 与 `packages/llm-core/`（协议 adapter 注册与请求契约）、`src/commands/models/`（CLI）、`src/gateway/server-methods/models-probe.ts`（连接探测）、`docs/concepts/{models,model-providers,model-failover}.md` 与 `docs/auth-credential-semantics.md`。全程静态阅读，未运行构建、测试、CLI 或 Gateway。
 >

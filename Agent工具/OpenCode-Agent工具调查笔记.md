@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：只读源码静态梳理，追踪工具注册、注入、执行与回注全链路；未运行构建与工具调用
 >
@@ -27,6 +27,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 - **编排循环是 `SessionPrompt.runLoop` 无限 while**，上限为 agent 的 steps 配置，最后一轮注入 `MAX_STEPS_PROMPT`（prompt.ts:1178-1181、1281）。
 - **审批阻塞在 Deferred 上**：`Permission.ask` 发布事件等 UI 回复，reply 支持 reject/once/always（permission/index.ts:67-167）。
 - **结果截断默认 2000 行 / 50KB**，超限写入 `tool-output/` 目录并提示用 Task/Grep/Read 接力（truncate.ts:13-16、85-141）。
+- **工具起始时间只初始化一次**：工具处于 pending 时首次 metadata 更新写入 `time.start`；进入 running 后后续流式 metadata 更新保留原时间，避免长工具的耗时被最后一次日志刷新重置（`packages/opencode/src/session/tools.ts:67-79`）。
 - **TaskTool 是唯一“旁路”**：创建子会话（新 Session）执行子 agent，权限收窄继承；子会话返回 assistant 错误或末尾工具错误时，TaskTool 将其转为包含子会话 ID 的失败结果，而非把空文本当作成功（`packages/opencode/src/tool/task.ts:214-224`）。
 - **MCP 双运输**：stdio 与 StreamableHTTP/SSE，工具命名 `server_tool`，调用前全名审批（src/mcp/index.ts、catalog.ts）。
 - **Skill 不是工具注册**：系统提示列出 `<available_skills>` + `skill` 工具按名加载（system.ts:98-110、tool/skill.ts）。
@@ -198,6 +199,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 
 - **ToolPart 状态机**（schema/src/v1/session.ts:259-325）：`pending`（input/raw）→ `running`（+title/metadata/time.start）→ `completed`（+output/metadata/time.end）或 `error`（+error/metadata）。
 - **持久化**：processor 经 `ensureToolCall` 创建 pending（processor.ts:216-253），`tool-call` 事件置 running（:331-351），`tool-result`/`tool-error` 置 completed/error（:383-419）。
+- 工具执行期间调用 metadata 回调时，仅 pending→running 的首次迁移生成起始时间；running 状态的后续输出预览、标题或 metadata 刷新复用既有时间，因此 UI 时长与日志 span 不再随刷新重新起算（`session/tools.ts:67-79`）。
 - 每次更新经 `session.updatePart` 落库并发布 `message.part.updated`。
 - **重放回注**：`MessageV2.toModelMessagesEffect`（message-v2.ts:290-360）把 ToolPart 转 AI SDK `tool-<name>` part（`toolCallId/input/output/errorText/state`），未完成 part 转 `output-error`。
 - **截断**：`truncate.output`（src/tool/truncate.ts:85-141）默认 `MAX_LINES=2000`、`MAX_BYTES=50KB`（:15-16，config `tool_output.max_lines/max_bytes` 可覆盖，:75-83）。
@@ -248,6 +250,7 @@ OpenCode 的工具系统以「Effect 服务 + AI SDK 原生 tool_calls」为核�
 - **无沙箱的 shell**：以权限审批 + 外部目录检查 + 超时兜底，隔离强度依赖用户配置。
 - **执行结果统一截断落盘**：控制上下文膨胀，7 天保留策略。
 - **ToolPart 全量持久化**：中断后重放为错误而不是重执行，避免重复副作用；`providerExecuted` 标记防重复调用。
+- **工具状态计时与增量 metadata 解耦**：开始时间属于状态迁移，不属于每次进度回调；这使流式 shell 等工具的最终时长保持从首次运行开始计算。
 - **V1/V2 双轨并存**：本快照 V1 为生产主路径，V2 运行器（core/src/session/runner/）部分实现，其工具循环与权限模型（core/src/permission.ts 默认全 deny）与 V1 存在语义差异，迁移未完成。
 
 ## 10. 未验证事项

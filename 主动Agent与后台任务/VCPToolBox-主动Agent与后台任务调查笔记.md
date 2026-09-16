@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：静态走读 TaskAssistant、VCPClawMail 和 AgentDream 的 manifest、初始化、状态、调度、执行与关闭路径，并参照 VCPChat 的任务面交接；未运行 Node 服务、上游 LLM 或 ClawMail SDK
 >
@@ -33,7 +33,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 - 配置字段：启用状态、调度规则、目标 Agent、派发参数。
 - runtime 字段：running、开始/完成时间、上次结果/错误、耗时、计数和下一次运行。
 
-`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 86-170, 486-510`
+`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。写入现经单一 Promise 队列串行化，先写随机临时文件再原子 rename；写前轮转 `.bak`。主文件损坏时尝试备份，主备均不可解析则启用写盘熔断，避免默认空数据覆盖现场（`Plugin/VCPTaskAssistant/vcp-task-assistant.js:177-287,486-510`）。
 
 ### VCPClawMail：邮件条件唤醒
 
@@ -51,7 +51,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 
 | 运行形态 | 调度与并发 | 取消/失败 | 重启语义与默认状态 |
 | --- | --- | --- | --- |
-| TaskAssistant | interval 最小 10 分钟，另支持 cron、once、manual；同一任务 `running` 时跳过，超过 10 分钟会重置为卡死。目标 Agent 在单次任务中按顺序派发。 | 删除或停用会取消未来 Job；代码未向正在执行的 `wakeUpAgent` 传 AbortSignal。单个 Agent 失败可形成 partial_success，全部失败为 error；每次 interval 不论结果都会再调度。 | 启动把遗留 running 置为 false 并记错误，再按数据重建 Job；不补跑错过时间。`globalEnabled` 默认 false。 |
+| TaskAssistant | interval 最小 10 分钟，另支持 cron、once、manual；同一任务 `running` 时跳过，超过 10 分钟会重置为卡死。目标 Agent 在单次任务中按顺序派发。 | 删除或停用会取消未来 Job；代码未向正在执行的 `wakeUpAgent` 传 AbortSignal。单个 Agent 失败可形成 partial_success，全部失败为 error；每次 interval 不论结果都会再调度。全量配置若把已有任务直接改成空数组，需要显式 `forceEmpty`，否则拒绝。 | 启动把遗留 running 置为 false 并记错误，再按数据重建 Job；主文件损坏可读 `.bak`，主备同时失效时禁止继续写盘；不补跑错过时间。`globalEnabled` 默认 false。 |
 | VCPClawMail | WebSocket 优先，断线按退避定时重连；低频轮询有下限。每封子邮件有内存锁和文件去重。 | shutdown 停轮询、清重连计时器并断开 WebSocket；本次未找到已进入 AgentAssistant 的邮件处理取消传播。读取或投递错误写缓存，但已在读取前标记 processed，是否重投取决于人工/外部输入而非自动重试。 | 关闭保存缓存与去重状态，初始化加载去重状态并重连；需配置 SDK、邮箱及绑定，实时监听默认启用。 |
 | AgentDream | 每 15 分钟检查，默认 1-6 点、8 小时冷却、0.6 概率；全局单运行门与串行 Agent 减少并发。 | 关闭插件或服务可停止后续检查；本次未找到进行中 LLM 请求的任务级取消或失败自动重试。 | 保存最后成功时间避免重启立即重触发；但插件 manifest 为 `.block`，默认不加载。 |
 

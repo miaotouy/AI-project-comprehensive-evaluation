@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：只读复核仓库源码与单元测试，按 `docs/references/chat-generation-pipeline.md` 给出的管道顺序逐项对照可执行路径；规则对象的读取、绑定与消费点以 `data/datastore`、`data/model`、`data/ai/transformers`、`service/ChatService.kt`、`data/ai/GenerationLoop.kt` 为准，未运行 App
 >

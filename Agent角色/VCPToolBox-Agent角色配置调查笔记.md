@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：对照近期 diff 核对关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
 >
@@ -87,6 +87,8 @@ AgentManager 监视 `agent_map.json` 与 `Agent/` 目录的变更，检测到修
 | ThemeMaidCoco | 中（38行） | 界面/主题类，输出 CSS 和视觉风格调整 |
 
 所有内置 Agent 都在提示词中大量使用变量占位符（`{{VarXxx}}`、`[[日记本::…]]` 等），依赖 VCPToolBox 的完整运行时才能正常工作。
+
+当前模板已出现两项配置方向变化。Nova 的三个主要日记声明由 TagMemo+ 改为 RiverMemo；Hornet 改用最近六篇加 BM25 的日记声明，并通过轻量工具折叠文档取得文件与系统工具；ThemeMaidCoco 则扩展为包含文件、代码检索与 MediaRenderer 的主题制作工作流。它们仍是提示词层的能力声明，是否实际生效取决于映射文件、插件启用状态和部署路径，不能仅由模板内容推断工具已授权（`Agent/Nova.txt:4-7`、`Agent/Hornet.txt:1,56-64`、`Agent/ThemeMaidCoco.txt:1-65`）。
 
 ## 3. AgentAssistant 插件层
 

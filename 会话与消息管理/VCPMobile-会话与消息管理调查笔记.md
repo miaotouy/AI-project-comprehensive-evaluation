@@ -2,9 +2,9 @@
 
 > 调查对象：`VCPMobile`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`cecdbe432feda57821938bba7625a272113d21c1`（分支：`main`）
+> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
 >
 > 调查方式：静态阅读 Pinia store、Tauri 命令、SQLite 查询/事务与相关测试
 >
@@ -18,35 +18,35 @@ VCPMobile 的会话单位是归属于 Agent 或 Group 的 Topic，而非通用�
 
 ## 系统边界与数据主链
 
-选中 owner 时，前端优先恢复持久化的最近 Topic ID，缺失时从本地 Topic 列表取最新项；`sessionEpoch` 使慢请求无法覆盖后来的选择，见 `src/core/stores/chatSessionStore.ts:25-68, 174-227`。创建或打开 Topic 后，历史 store 用键集游标读取消息，随后把消息窗口渲染为列表；写入、删除和流终结均回到 SQLite。
+选中 owner 时，前端优先恢复持久化的最近 Topic ID，缺失时从本地 Topic 列表取最新项；`sessionEpoch` 使慢请求无法覆盖后来的选择，见 `src/core/stores/chatSessionStore.ts:15-68,220-252`。创建或打开 Topic 后，历史 store 用键集游标读取消息，随后把消息窗口渲染为列表；写入、删除和流终结均回到 SQLite。
 
 ## 1. 会话、消息与分支数据模型
 
-Topic 保存 owner ID/type、名称、创建时间、锁定、未读及消息计数；创建时按 owner 类型生成 `topic_` 或 `group_topic_` 前缀的时间型 ID，见 `src-tauri/src/vcp_modules/chat/topic_service.rs:148-188`。前端保存 `currentSelectedItem`、`currentTopicId` 与每个 owner 的最后活动 Topic；其中前两者和映射使用 Pinia 持久化，见 `src/core/stores/chatSessionStore.ts:230-252`。
+Topic 保存 owner ID/type、名称、创建时间、锁定、未读及消息计数；创建时按 owner 类型生成 `topic_` 或 `group_topic_` 前缀的时间型 ID，见 `src-tauri/src/vcp_modules/chat/topic_service.rs:190-240`。前端保存 `currentSelectedItem`、`currentTopicId` 与每个 owner 的最后活动 Topic；其中前两者和映射使用 Pinia 持久化，见 `src/core/stores/chatSessionStore.ts:23-68`。
 
-`ChatMessage` 是线性记录，包含 role、正文、名称、时间、Agent/Group 归属、附件、完成原因、预渲染 blocks 与展示 shell；流式临时字段只存在内存类型中，见 `src/core/types/chat.ts:88-157`。助手流启动时会先写入空 pending 消息和相应活动记录，终结后才改写内容及完成原因，因此崩溃恢复有可寻址的持久化锚点。
+`ChatMessage` 是线性记录，包含 role、正文、名称、时间、Agent/Group 归属、附件、完成原因、预渲染 blocks 与展示 shell；流式临时字段只存在内存类型中，见 `src/core/types/chat.ts:193-322`。助手流启动时会先写入空 pending 消息和相应活动记录，终结后才改写内容及完成原因，因此崩溃恢复有可寻址的持久化锚点。
 
 ## 2. 事实源、索引与持久化
 
-本地 SQLite 的 `topics` 与 `messages` 是会话和正文事实源。历史查询先验证 Topic 确属请求 owner，再 LEFT JOIN `render_cache`，按 `(timestamp, msg_id)` 倒序取页；前端收到后再升序显示，见 `src-tauri/src/vcp_modules/chat/message_service.rs:282-361` 与 `src/core/stores/chatHistoryStore.ts:23-40`。
+本地 SQLite 的 `topics` 与 `messages` 是会话和正文事实源。历史查询先验证 Topic 确属请求 owner，再 LEFT JOIN `render_cache`，按 `(timestamp, msg_id)` 倒序取页；前端收到后再升序显示，见 `src-tauri/src/vcp_modules/chat/message_service.rs:29-135` 与 `src/core/stores/chatHistoryStore.ts:46-65,226-350`。
 
-渲染缓存、附件关联表、FTS 表与 `active_generations` 是派生或辅助事实：终结事务会更新缓存与 FTS、删除活动行；删除或截断同步清理这些关联数据，见 `src-tauri/src/vcp_modules/chat/message_service.rs:1060-1171, 1210-1289, 1450-1530`。这表明渲染块可重建，但可恢复生成依赖活动记录尚在。
+渲染缓存、附件关联表、FTS 表与 `active_generations` 是派生或辅助事实：终结事务会更新缓存与 FTS、删除活动行；删除或截断同步清理这些关联数据，见 `src-tauri/src/vcp_modules/chat/message_service.rs:953-1236,1237-1394,1410-1545`。这表明渲染块可重建，但可恢复生成依赖活动记录尚在。
 
 ## 3. 创建、切换、删除与恢复
 
-Topic 列表按创建时间倒序读取，创建、改名、锁定、未读标记和删除均有 Tauri 命令。前端加载话题列表时按 owner 与加载代次过滤 Channel 回包，避免 A-B-A 切换的旧结果写入，见 `src/core/stores/topicListManager.ts:95-168`。当前范围内未找到置顶、归档或回收站语义。
+Topic 列表按创建时间倒序读取，创建、改名、锁定、未读标记和删除均有 Tauri 命令。前端加载话题列表时按 owner 与加载代次过滤 Channel 回包，避免 A-B-A 切换的旧结果写入，见 `src/core/stores/topicListManager.ts:60-355`。当前范围内未找到置顶、归档或回收站语义。
 
-删除 Topic 会删除其历史；删除单条消息为软删除并清理其渲染、附件和索引投影。编辑用户消息或重新生成助手消息并不生成分支，而是从指定时间截断后续记录，再把保留的用户消息作为下一轮起点，见 `src/core/stores/chatHistoryStore.ts:407-515, 538-643`。
+删除 Topic 会删除其历史；删除单条消息为软删除并清理其渲染、附件和索引投影。编辑用户消息或重新生成助手消息并不生成分支，而是从指定时间截断后续记录，再把保留的用户消息作为下一轮起点，见 `src/core/stores/chatHistoryStore.ts:661-760,896-950`。
 
 ## 4. 列表、分页、搜索与定位
 
-首次进入仅加载最新 5 条，向上翻页每次取 10 条，前端最多保留 500 条；加载旧页后按 ID 去重并排序，若窗口为保留旧页而逐出最新端，则需显式回到最新端重载，见 `src/core/stores/chatHistoryStore.ts:21-40, 292-326`。后端已维护 FTS 索引，但本次在聊天工作台中只确认到 Topic 名称和日期过滤，未找到把消息 FTS 查询接入 Chat UI 的入口。
+首次进入仅加载最新 5 条，向上翻页每次取 15 条，前端最多保留 500 条；加载旧页后按 ID 去重并排序，若窗口为保留旧页而逐出最新端，则需显式回到最新端重载，见 `src/core/stores/chatHistoryStore.ts:46-65,141-390`。后端已维护 FTS 索引，但本次在聊天工作台中只确认到 Topic 名称和日期过滤，未找到把消息 FTS 查询接入 Chat UI 的入口。
 
 ## 5. 一致性、恢复与外部绑定
 
-前端先乐观插入用户消息，随后在异步命令前冻结 `ConversationKey`；返回后仅在 key 仍有效时落入当前窗口。历史重新加载会以活动流对象替换同 ID 的数据库骨架，避免正在生成的内容被旧快照覆盖，见 `src/core/stores/chatHistoryStore.ts:180-255`。
+前端先乐观插入用户消息，随后在异步命令前冻结 `ConversationKey`；返回后仅在 key 仍有效时落入当前窗口。历史重新加载会以活动流对象替换同 ID 的数据库骨架，避免正在生成的内容被旧快照覆盖，见 `src/core/stores/chatHistoryStore.ts:141-255`。
 
-启动恢复会扫描本地活动生成记录，先向当前话题注入“重连中”对象，再由 Rust 查询磁盘缓存或 Android helper 续接；恢复结果仍经正常终结事务收口，见 `src/core/stores/chatStreamStore.ts:664-904`。Agent/Group 在 Topic 级绑定，消息上保留实际发言 Agent ID 与附件快照；模型与规则来自执行时 Agent 配置，本笔记未确认其是否另行快照。
+启动恢复会扫描本地活动生成记录，先向当前话题注入“重连中”对象，再由 Rust 查询磁盘缓存或 Android helper 续接；恢复结果仍经正常终结事务收口，见 `src/core/stores/chatStreamStore.ts:1160-1340`。Agent/Group 在 Topic 级绑定，消息上保留实际发言 Agent ID 与附件快照；模型与规则来自执行时 Agent 配置，本笔记未确认其是否另行快照。
 
 ## 设计取舍与已确认边界
 
@@ -58,8 +58,8 @@ Topic 列表按创建时间倒序读取，创建、改名、锁定、未读标�
 
 ## 关键源码索引
 
-- `src/core/stores/chatSessionStore.ts:25-68, 174-252`
-- `src/core/stores/topicListManager.ts:95-305`
-- `src-tauri/src/vcp_modules/chat/topic_service.rs:61-188`
-- `src-tauri/src/vcp_modules/chat/message_service.rs:282-361, 1060-1289, 1450-1530`
-- `src/core/stores/chatHistoryStore.ts:180-326, 407-643`
+- `src/core/stores/chatSessionStore.ts:15-68,220-252`
+- `src/core/stores/topicListManager.ts:60-355`
+- `src-tauri/src/vcp_modules/chat/topic_service.rs:67-240`
+- `src-tauri/src/vcp_modules/chat/message_service.rs:29-135,953-1394,1410-1545`
+- `src/core/stores/chatHistoryStore.ts:141-390,661-760,896-950`

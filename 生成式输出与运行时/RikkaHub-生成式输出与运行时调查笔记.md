@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态源码调查；按 artifact/canvas/代码执行/沙箱/媒体持久化等关键词检索全仓（Kotlin、TypeScript、资源 HTML）；逐条阅读消息模型、流式解码、输出转换器、消息渲染、WebView 组件、生成媒体页、videogen 模块与内嵌 Ktor 服务器路由；对照本仓库 `AGENTS.md` 与既有笔记结构；未构建、未运行应用，未连接设备
 >

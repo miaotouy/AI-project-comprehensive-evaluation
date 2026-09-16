@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -38,7 +38,7 @@ AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面�
 
 **z-index 管理。** 弹窗层级模块维护一个从 1800 开始的自增计数器，以避让 Element Plus 的默认范围；打开时递增，关闭时只有释放值正好是当前最大值才回退。多个弹窗乱序关闭时计数器不会精确回退，只涨不跌，但不影响功能（实现见 `src/composables/useDialogZIndex.ts`）。
 
-**命令式反馈。** `src/utils/customMessage.ts` 是对 ElMessage 的薄包装，强制增加 54 像素的顶部偏移（标题栏 32 像素、默认间距 16 像素和 6 像素缓冲，依据 `customMessage.ts:23-27`），解决无边框窗口下 Toast 被自绘标题栏遮挡；llm-chat 内所有业务提示都走该包装的成功、失败、警告和信息入口，未见直接调用原生 ElMessage。
+**命令式反馈。** `src/utils/customMessage.ts` 维护一个独立于 Element Plus 的顶部浮动消息队列，由全局挂载的 `src/components/common/TopMessageHost.vue` 渲染：每条消息带可暂停的倒计时与进度条，点击可按 `copyText` 复制内容，默认仍保留 54 像素顶部偏移以避开自绘标题栏（`customMessage.ts:75,169`）。llm-chat 内所有业务提示都走该队列的成功、失败、警告和信息入口，未见直接调用原生 ElMessage。
 
 **引导流程系统。** common 下的 GuidedFlow 与 upgrade 流程目录共同承担首次启动和升级引导：前者负责流程宿主及运行时状态，后者注册升级流程、版本说明面板和待处理升级恢复（宿主挂载于 `App.vue:81`）。
 
@@ -104,11 +104,11 @@ llm-chat 注册 12 个状态键，覆盖智能体、会话、收藏夹、生成�
 
 **业务级即时反馈。** customMessage（见系统边界）。llm-chat 内所有业务成功/失败提示（Token 重算、导出成功/失败、翻译等）一律走 `customMessage.success/error/warning/info`。
 
-**错误提示的分级与去重。** `src/utils/errorHandler.ts:308-371` 决定报错是否弹出及持续时间：INFO、WARNING 和 ERROR 走 customMessage，错误级别显示 5000 毫秒，其余显示 3000 毫秒，并合并相同消息（`errorHandler.ts:348`）。
+**错误提示的分级与去重。** `src/utils/errorHandler.ts:298-371` 决定报错是否弹出及持续时间：INFO、WARNING 和 ERROR 走 customMessage，错误级别显示 5000 毫秒，其余显示 3000 毫秒，并合并相同消息（`errorHandler.ts:353-357`）。错误卡片由 Vue VNode 构建（模块名、用户消息、错误详情三段），并同时生成纯文本 `copyText` 供浮动消息点击复制，不再把文本拼成 HTML 字符串。
 
-CRITICAL 不走 Toast，改用 ElNotification.error，持续时间为 0，**不自动关闭**，需手动点掉（`errorHandler.ts:362-368`）。由此形成三级反馈体系：一般级别是短暂 Toast，严重级别是常驻通知。
+CRITICAL 不走 customMessage，改用 ElNotification.error，持续时间为 0，**不自动关闭**，需手动点掉（`errorHandler.ts:370-372`）。由此形成两级反馈体系：一般级别是可暂停的顶部浮动提示，严重级别是常驻通知。
 
-**堆叠行为。** ElMessage 和 ElNotification 使用 Element Plus 的原生行为，多条消息会纵向堆叠错位，customMessage 只增加顶部偏移。**未在运行时截图验证堆叠像素细节，仅代码层面确认使用默认机制**。
+**堆叠行为。** customMessage 不再复用 ElMessage，而是自己维护消息数组并交给 TopMessageHost 逐条渲染，堆叠高度与偏移由该组件统一控制；`grouping` 命中时只累加重复次数并重置计时，不新增第二条。**未在运行时截图验证堆叠像素细节**。
 
 **独立的通知中心。** `src/components/notification/NotificationCenter.vue` 用 el-drawer（右侧滑出，`direction="rtl"`，宽 360px）实现，顶部有未读数 el-badge、搜索框（标题/内容/来源过滤）、列表区、底部"清空所有消息"（ElMessageBox.confirm 二次确认，`NotificationCenter.vue:91-103`）；
 
@@ -195,13 +195,13 @@ llm-chat 内弹窗、消息卡片等大量用 `var(--card-bg)`/`var(--border-col
 
 **① 明暗层（`useTheme.ts`）**：见上文，管 `auto/light/dark` 与系统跟随。
 
-**② 主色色阶引擎（`src/utils/themeColors.ts`，296 行）**：applyThemeColors（`themeColors.ts:198-296`）把 primary/success/warning/danger/info 五色写入 `--primary-color`、`--el-color-primary` 等 CSS 变量，并**为 Element Plus 生成全套色阶**（`--el-color-primary-light-{1..9}`，按当前明暗模式用 darkenColor/lightenColor 调整混合比例，hover 色按相反方向调整，:214-237）；
+**② 主色色阶引擎（`src/utils/themeColors.ts`，387 行）**：applyThemeColors（`themeColors.ts:289-387`）把 primary/success/warning/danger/info 五色写入 `--primary-color`、`--el-color-primary` 等 CSS 变量，并**为 Element Plus 生成全套色阶**（`--el-color-primary-light-{1..9}`，按当前明暗模式用 darkenColor/lightenColor 调整混合比例，hover 色按相反方向调整，:214-237）；
 
 色值同时缓存到 localStorage（app-theme-color/app-success-color 等键，:284-295，"以避免下次启动时的闪烁"注释原话）。
 
-另有 OKLCH 色彩空间工具（hexToOklch/oklchToHex/harmonizeColorOKLCH，:78-193）——harmonizeColorOKLCH 按明暗模式把感知亮度钳制到 0.45-0.6（亮）/0.7-0.85（暗）、彩度 0.1-0.25，用于壁纸提取主题色的安全修正。
+另有 OKLCH 色彩空间工具（hexToOklch/oklchToHex/harmonizeColorOKLCH，:78-193）——harmonizeColorOKLCH 按明暗模式把感知亮度钳制到 0.45-0.6（亮）/0.7-0.85（暗）、彩度 0.1-0.25，用于壁纸提取主题色的安全修正。自动提取结果还会再做一次语义色相避碰：avoidSemanticColorHueCollisions（:223-285）在 OKLCH 中检测主色与成功/警告/危险/信息色的色相是否落在 28° 排除带内（低于 0.04 彩度的中性色不参与），命中时只调整色相并保留原亮度与彩度，用户手动指定的主题色不经过此函数。
 
-启动链：`useRootInit.ts:47-50` 用 appSettingsStore.effectiveThemeColor（用户手选 themeColor，壁纸自动提取开启时优先用 wallpaperExtractedThemeColor，`appSettingsStore.ts:101-108`）调 applyThemeColors。
+启动链：`useRootInit.ts:47-50` 用 appSettingsStore.effectiveThemeColor（用户手选 themeColor，壁纸自动提取开启时优先用 wallpaperExtractedThemeColor，`appSettingsStore.ts:124-137`）调 applyThemeColors。有效主题色是计算属性，会按当前语义色实时重算避碰，因此用户修改成功/警告等语义色后无需重新提取壁纸。
 
 设置入口 `ThemeColorSettings.vue`（`src/views/Settings/general/ThemeColorSettings.vue`，五色取色器 + 预设色板）。
 
@@ -366,7 +366,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 ## 9. 未验证事项
 
-- ElMessage/ElNotification 堆叠像素细节未运行截图验证（仅确认走 Element Plus 默认堆叠）。
+- 顶部浮动消息的倒计时/暂停/复制/堆叠像素细节未运行截图验证（仅静态确认队列与渲染路径）；ElNotification 仍走 Element Plus 默认堆叠。
 - llm-chat 每个组件深色模式下的实际视觉效果未逐一验证（只确认变量机制存在且被使用）。
 - 无障碍结论基于静态代码搜索，未经屏幕阅读器实测，不能作为 WCAG 合规结论；el-dropdown 键盘可达性由 Element Plus 提供，未独立验证。
 - 引导流程各步骤的实际引导体验未运行验证。
@@ -384,14 +384,14 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 
 - `src/components/common/BaseDialog.vue`
 - `src/composables/useDialogZIndex.ts`
-- `src/utils/customMessage.ts`
-- `src/utils/errorHandler.ts`（290-390 行三级反馈）
+- `src/utils/customMessage.ts`、`src/components/common/TopMessageHost.vue`（顶部浮动消息队列与渲染）
+- `src/utils/errorHandler.ts`（298-372 行分级反馈与 VNode 卡片）
 - `src/components/notification/NotificationCenter.vue`
 - `src/components/GlobalProviders.vue`
 - `src/composables/useResizable.ts`
 - `src/composables/useFileDrop.ts`
 - `src/composables/useTheme.ts`
-- `src/utils/themeColors.ts`（主色色阶引擎 + OKLCH）
+- `src/utils/themeColors.ts`（主色色阶引擎 + OKLCH + 语义色相避碰:223-285）
 - `src/composables/useCssOverrides.ts`
 - `src/views/Settings/css/CssOverrideSettings.vue`
 - `src/config/css-presets.ts`

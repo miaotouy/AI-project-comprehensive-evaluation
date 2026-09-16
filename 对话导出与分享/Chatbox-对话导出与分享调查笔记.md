@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：静态源码调查（未运行应用）；通读导出弹窗、共享格式化器、HTML 服务端静态渲染、平台 exporter 接口、备份 ZIP v2 导出/导入与往返测试；未运行桌面/Web/移动端做视觉、下载与离线打开验证
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Chatbox 的对话导出是一个轻量单弹窗能力：顶部工具栏的 "Export Chat" 打开弹窗，只提供范围（当前线程 / 全部线程）与格式（Markdown / TXT / HTML）两个下拉，点击后立即生成文件并关闭，没有预览、编辑、剪贴板或版本历史。三种格式共用同一套基于消息内容分片（`contentParts`）的抽取逻辑（`src/shared/utils/chat-export.ts` 与 `src/renderer/lib/format-chat.tsx`）。内容口径完全一致：正文文本、info 信息文本、结构化工具卡（含参数与结果）、图片占位或内联都会进入导出；reasoning 思考、agent-mode-suggestion 建议与分叉分支（`messageForksHash`）本次未发现任何导出处理，直接跳过。
+Chatbox 的对话导出仍是轻量单弹窗能力，但范围已增加“导出全部分支”。Markdown/TXT 会把每个消息 fork 展开为带 Branch N/M 标题的线性线程；HTML 则保存分支数据并嵌入本地脚本，读者可在导出文件中用上一支/下一支按钮切换，重建与应用内相同的可见尾部。reasoning 与 agent-mode-suggestion 仍不进入交付物。
 
 HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套 Markdown 组件做离屏静态渲染，不快照当前界面：Shiki 同步高亮可以进入静态输出，Mermaid 等异步渲染内容在静态导出中不落地；受管图片从 IndexedDB 读 blob 内联为 base64 data URL，远程图片保持外部引用；样式依赖 Tailwind CDN 运行时、KaTeX CDN CSS 和 chatboxai.app 图标域，离线打开不完整。标题 `sessionName`、线程名与远程图片 URL 直接拼接进 HTML 且未转义。
 
@@ -41,7 +41,7 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 - 菜单经 NiceModal 的 `export-chat` 注册项（`Toolbar.tsx:45-47`，注册于 `modals/index.tsx:29`）打开 `ExportChat` 弹窗。
 - 弹窗仅两个下拉：范围（`all_threads` / `current_thread`）与格式（Markdown / TXT / HTML），默认 HTML + 全部线程（`src/renderer/modals/ExportChat.tsx:15-16,48-65`）。弹窗内固定显示警示文案 "Exports are for viewing only. Use Settings → Backup if you need a backup you can restore."（`ExportChat.tsx:43-47`），明确区分"阅读导出"与"备份"两种用户目标。
 - 点击 Export 后弹窗立即关闭、不等待导出完成（`ExportChat.tsx:23-30`）；导出函数从 chatStore 取 Session 后转交线程组装入口 `exportChat`（`src/renderer/stores/session/export.ts:5-11`）。
-- 导出源为完整 Session 对象（`src/renderer/stores/sessionHelpers.ts:947-966`）：按当前线程范围导出时只取活动线程消息；按全部线程范围导出时先把历史线程按原数组顺序放入，再把主线程（标题取线程名或会话名）追加在最后。历史线程是上下文压缩/刷新线程时归档的产物（见 `stores/session/threads.ts`），会话分叉 `messageForksHash` 不在导出范围——分叉分支本次确认不进入任何导出格式（组装处只读线程与消息数组）。
+- 导出源为完整 Session。普通范围仍按当前或全部 thread 组装；启用“全部分支”后，Markdown/TXT 使用共享层的 `expandMessageBranches` 展开每条路径，HTML 使用原始 `messageForksHash` 构建交互数据。共享组装见 `packages/chatbox-core/src/utils/chat-export.ts:47-71`，HTML 收集与控制器见 `src/renderer/lib/format-chat.tsx:169-385`。
 - 顺序：线程按 `threads` 数组顺序，消息按 `messages` 数组顺序，无排序或重排选项。
 
 ## 2. 范围选择、内容口径与字段过滤
@@ -74,7 +74,7 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 - 导出格式只有 `ExportChatFormat` 一种定义（`'Markdown' | 'TXT' | 'HTML'`，`src/shared/types.ts:20-22`）。会话级 JSON、PDF、PNG 导出本次未找到：全仓搜索 html-to-image、html2canvas、toPng、screenshot 等截图关键词均无会话导出用途命中；`package.json` 无相关依赖。
 - Markdown 输出是"带围栏的线性文档"：一级标题为会话名，每线程 `## N. 线程名`，每条消息以 `**role**:` 开头、正文包进代码围栏，结尾固定追加 Chatbox 品牌 HTML 片段（`chat-export.ts:151-158`）。TXT 是同一抽取逻辑的纯文本变体。
-- 三种格式都不可往返：无 schema、无消息 ID/时间戳/模型/分支元数据，只保留角色与内容投影，无法据此恢复 Chatbox Session。
+- 三种格式都不可往返。交互 HTML 虽携带消息 ID 和 fork 结构以便离线切换，但没有稳定导入 schema、完整 Session 设置与资源映射，不能恢复为 Chatbox 会话。
 - "备份"才是可往返的导出（ZIP v2）：`manifest.json` 声明格式与版本（`format: 'chatbox-backup'`、`formatVersion: 2`，`src/renderer/packages/backup/types.ts:4-5,65-91`），包内含会话 JSON、资源、SHA-256 校验、双向映射与统计；导入分"读取暂存 → 完整校验 → 事务提交"三阶段（见 `docs/technical/data-backup.md`，与实现一致）。`backup-roundtrip.test.ts`（890 行）用内存存储做导出→导入闭环断言。
 - 旧版单 JSON 备份仍可导入（`general.tsx:792-801` 走 `importLegacyJsonBackup`）。
 - 遗留 UI：`src/renderer/pages/SettingDialog/AdvancedSettingTab.tsx` 仍是旧的单 JSON 备份/恢复界面（含 `__exported_items` 字段），但本次全仓搜索未发现任何引用，属于死代码；活动入口是 `src/renderer/routes/settings/general.tsx` 的 `ImportExportDataSection`。

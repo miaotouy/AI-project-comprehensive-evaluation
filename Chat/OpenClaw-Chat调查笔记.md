@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：综合已完成的 OpenClaw 单项目笔记，并补读源码确认端到端主链骨架
 >
@@ -14,15 +14,15 @@
 
 ## 结论摘要
 
-OpenClaw 是单操作者私人 AI 助手：本地 Gateway 是会话、工具、事件与渠道连接的控制平面，Telegram、WhatsApp、Slack、Discord 等消息渠道承担日常终端聊天面，另有 Control UI、TUI、iOS/Android companion apps 作为自有界面。一次可见对话由两条前端入口之一发起——自有界面经 Gateway 协议 RPC，渠道消息经渠道适配与 auto-reply 管线——随后在同一个 reply run 主链上汇合：Gateway 完成准入与 ACK 后把 turn 交给脱离 RPC 生命周期的 dispatch，嵌入式 Agent 运行器从 per-agent SQLite 恢复 transcript、拼装历史与上下文并驱动 Agent Core 工具/Provider 流式循环，assistant 结果经同一 transcript 追加路径落库，再分别投影为实时 chat/agent 事件和持久 session.message 供表面显示。
+OpenClaw 以本地 Gateway 作为会话、工具、事件与渠道连接的控制平面，Telegram、WhatsApp、Slack、Discord 等消息渠道承担日常终端聊天面，另有 Control UI、TUI、iOS/Android companion apps 作为自有界面。一次可见对话由两条前端入口之一发起——自有界面经 Gateway 协议 RPC，渠道消息经渠道适配与 auto-reply 管线——随后在同一个 reply run 主链上汇合：Gateway 完成准入与 ACK 后把 turn 交给脱离 RPC 生命周期的 dispatch；常规本地路径由嵌入式 Agent 运行器从 per-agent SQLite 恢复 transcript、拼装上下文并驱动 Agent Core 工具/Provider 流式循环，配置了 worker placement 时则由 Gateway 把执行委派给受管理环境或配对节点。assistant 结果最终经 transcript 追加路径落库，再分别投影为实时 chat/agent 事件和持久 session.message 供表面显示。
 
-聊天体系有四个贯穿性分层（详见专项笔记，此处只给骨架）：**会话与消息层**把逻辑会话（sessionKey）与 transcript generation（sessionId）分离，per-agent SQLite 是消息唯一事实源，活动路径与 FTS 是可重建投影，分支、reset、rewind、fork 通过轮换 generation 保留历史；**请求与运行层**区分 ACK 与持久化，用户 turn、Agent 内存消息、live chat payload 与已提交 transcript 是四套不同频率的投影面；**显示层**由 Gateway 显示投影与各客户端 timeline 组装构成，控制消息、工具卡、thinking 与聊天消息气泡分开建模；**交付层**的导出全部固化为操作者本机文件，没有对外的分享链接或服务。
+聊天体系有四个贯穿性分层（详见专项笔记，此处只给骨架）：**会话与消息层**把逻辑会话（sessionKey）与 transcript generation（sessionId）分离，per-agent SQLite 是消息唯一事实源，活动路径与 FTS 是可重建投影，分支、reset、rewind、fork 通过轮换 generation 保留历史；**请求与运行层**区分 ACK 与持久化，用户 turn、Agent 内存消息、live chat payload 与已提交 transcript 是四套不同频率的投影面；**显示层**由 Gateway 显示投影与各客户端 timeline 组装构成，控制消息、工具卡、thinking 与聊天消息气泡分开建模；**交付层**一方面把 HTML、Markdown 和轨迹支持包固化为操作者本机文件，另一方面可把精确 session generation 发布为可撤销的公开 token 链接。
 
 ## 产品表面与系统边界
 
 - **自有聊天表面**共有四个实现层：浏览器 Control UI（功能最完整的工作台，支持多 pane 分屏与后台任务 rail，与 Gateway 同版本捆绑派发）、终端 TUI（单工作区、命令与选择器为主入口）、共享 SwiftUI Chat UI（iOS Chat Pro 原生页面，Dashboard 另走认证 WebView）、Android Compose Chat UI（独立原生实现）。四者都以 Gateway 会话与事件为远端事实源，但草稿、滚动与临时附件是本地状态，不构成跨平台共享状态。工作台结构与工作流见 [OpenClaw Chat UI 调查笔记](<../Chat UI/OpenClaw-ChatUI调查笔记.md>)。
 - **消息渠道是外部系统拥有的聊天面**。`extensions/` 下的 telegram、whatsapp、slack、discord 等渠道扩展把外部消息框中的对话映射到 Gateway 会话，只做传输、动作编码与回复投递；渠道 App 的 UI、账号与线程语义归各平台所有，OpenClaw 不拥有这些客户端的渲染面。
-- **执行边界**：浏览器、CLI、TUI 与 companion apps 都不与模型 Provider 直连，模型请求只在 Gateway 所在主机的嵌入式 Agent 运行器内发起；会话、工具、媒体、附件与渠道连接由 Gateway 与本地 SQLite 持有。真正持有 Agent runtime 的还有 ACP harness 等外部执行体，其会话语义由外部系统拥有，见 [OpenClaw 外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
+- **执行边界**：浏览器、CLI、TUI 与 companion apps 都不与模型 Provider 直连；常规模型请求由 Gateway 编排，可在同机嵌入式 Agent 运行器、受管理 worker environment 或配对节点执行。真正持有独立 Agent runtime 的还有 ACP harness 等外部执行体，其会话语义由外部系统拥有，见 [OpenClaw 外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
 - 仓库规模与模块分工（`src` 承担 Gateway/会话/工具/CLI 主链，`extensions` 为渠道与能力扩展，`ui`/`apps` 为自有表面，`packages` 为共享协议与 SDK）见 [OpenClaw 仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
 
 ## 端到端聊天主链
@@ -79,7 +79,7 @@ Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.t
 | 对话请求与上下文 | chat.send 准入与 ACK、历史恢复与上下文拼装、预算/压缩、Provider 交接与流式事件、终态回写、停止/重试/队列/并发、restart recovery | [对话请求与上下文](../对话请求与上下文/OpenClaw-对话请求与上下文调查笔记.md) |
 | Chat UI | Control UI/TUI/共享 SwiftUI/Android Compose 的工作台、会话导航、Composer 与草稿、发送反馈、消息操作、多会话与恢复 | [Chat UI](<../Chat UI/OpenClaw-ChatUI调查笔记.md>) |
 | 消息渲染器 | Gateway 显示投影、各客户端把历史与实时事件收敛为 timeline 项、文本/thinking/工具/媒体/Canvas 渲染与滚动边界 | [消息渲染器](../消息渲染器/OpenClaw-消息渲染器调查笔记.md) |
-| 对话导出与分享 | HTML 阅读稿、脱敏 JSONL 轨迹包、Control UI/iOS Markdown 导出；四路均产本机文件，无分享稿工作台与公开链接 | [对话导出与分享](../对话导出与分享/OpenClaw-对话导出与分享调查笔记.md) |
+| 对话导出与分享 | HTML 阅读稿、脱敏 JSONL 轨迹包、Control UI/iOS Markdown 导出，以及绑定精确 session generation 的可撤销公开 token 链接 | [对话导出与分享](../对话导出与分享/OpenClaw-对话导出与分享调查笔记.md) |
 | LLM 渠道管理 | 逻辑 Provider/协议 adapter/模型目录+凭据三层、会话模型引用到渠道实例的解析主链、auth profile 轮换与模型 fallback、models.probe | [LLM 渠道管理](../LLM渠道管理/OpenClaw-LLM渠道管理调查笔记.md) |
 | Agent 角色 | agents.entries 与 workspace 文件组合、路由/session key 命名空间、角色到 prompt/模型/工具/skill/subagent 授权的生效链 | [Agent 角色](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) |
 | Agent 工具 | 运行时工具面构建、策略过滤、MCP 适配、审批、Agent Core 工具循环与 toolResult 回注 | [Agent 工具](../Agent工具/OpenClaw-Agent工具调查笔记.md) |
@@ -98,7 +98,7 @@ Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.t
 - **发送与运行边界**：每会话串行、跨会话在容量内并行；queue/followup/steer/collect 覆盖运行中新消息；停止分 abort active/queued/worker 多层。发送方都把「收到 ACK」与「canonical history 已证明」区分，不确定交付停在 unconfirmed/confirming 供人工重试（对话请求与上下文、Chat UI 专项）。
 - **上下文预算与压缩**：预检诊断与真正压缩分离；context overflow、自动压缩、compaction 后 continuation 都有专门恢复路径，legacy Context Engine 只做透传包装（对话请求与上下文、上下文编译与提示词工程专项）。
 - **检索面分窄宽两条**：会话列表 search 只看 metadata；正文检索走 per-agent FTS5 `sessions.search`，只索引活动路径中 user/assistant 文本，dirty 时返回 indexing 而非旧行（会话与消息管理专项）。
-- **导出即本机快照**：HTML/轨迹包/Markdown 导出均无与源会话联动、无导出版本管理；in-chat 导出是 owner-only 且含 system prompt 等敏感材料，轨迹包是唯一做内容清洗的路径（对话导出与分享专项）。
+- **文件导出与公开分享分离**：HTML/轨迹包/Markdown 导出均无与源会话联动、无导出版本管理；in-chat 导出是 owner-only 且含 system prompt 等敏感材料，轨迹包是唯一做内容清洗的文件路径。公开分享另由 Gateway 托管 token，绑定精确 session generation，可独立撤销，并与团队可见性/成员角色分离（对话导出与分享专项）。
 - **生成式输出有独立承载面但无完整资产线**：Canvas 文档与 session board widget 有独立身份、沙箱与能力授权；无媒体/图表的编辑工程与版本对象（生成式输出与运行时、媒体创作专项）。
 - **未确认项以专项口径记录**：例如通用导出/导入 RPC、TUI 的 durable draft、可跨 window 同步的临时输入等，均在对应专项中标记为「本次未找到」而非项目级否定。
 

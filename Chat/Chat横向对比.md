@@ -2,9 +2,9 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、RikkaHub、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-09-15
+> 对比更新日期：2026-09-16
 >
-> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-08-31 专项调查）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；RikkaHub 依据本目录 2026-09-15 的 [RikkaHub-Chat 调查笔记](RikkaHub-Chat调查笔记.md)（端到端主链、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 服务复用同一 ChatService，均为静态源码确认、未运行验证）；本文档只保留跨层综合结论
+> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-09-16 调查，快照 `9da3baac`）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；RikkaHub 依据本目录 2026-09-16 的 [RikkaHub-Chat 调查笔记](RikkaHub-Chat调查笔记.md)（端到端主链、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 服务复用同一 ChatService，快照 `9a35e3f2`，均为静态源码确认、未运行验证）；本文档只保留跨层综合结论
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
@@ -36,7 +36,7 @@ AIO Hub 的排队语义已明确到“目标父节点至根路径”：同一路
 
 ### 中断/取消生成：按钮停止、任务取消和请求中止不是同一层
 
-VCPChat 仍是"同一产品两条路径不对称"证据最完整的案例。Hermes Agent 的前端本地定稿、Manifold Desktop 的回调式 stop token、Open WebUI 的跨实例任务取消分别处在不同层级。其余项目缺少同等深度证据，只能标为未验证，不能从按钮存在推断请求已被中止。逐项目中断层级见[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)，用户可见的停止入口与反馈见[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)。
+VCPChat 仍是"同一产品两条路径不对称"证据最完整的案例：群聊登记 AbortController 并有超时，单聊也有随窗口生命周期（切换话题、关闭内部窗口）的取消，但中止按钮仍只向远端发 `/v1/interrupt`，既未按 messageId 取回本地 controller，也没有客户端超时。Hermes Agent 的前端本地定稿、Manifold Desktop 的回调式 stop token、Open WebUI 的跨实例任务取消分别处在不同层级。其余项目缺少同等深度证据，只能标为未验证，不能从按钮存在推断请求已被中止。逐项目中断层级见[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)，用户可见的停止入口与反馈见[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)。
 
 ### UI 交互与呈现的跨项目结论
 
@@ -74,14 +74,14 @@ OpenClaw 的聊天表面分自有界面与外部消息渠道两层，但两层�
 | 跨 IM 平台事件流水线、群聊唤醒与 follow-up | AstrBot | 核心单位是 UMO 和异步事件，WebChat 只是一种入口 |
 | 主进程权威 transcript、Agent 输入队列与工具交互 | DeepChat | main/renderer 之间仍有 IPC revision、cursor 和事件顺序边界 |
 | CLI/TUI/桌面共用 Agent 后端、跨压缩 lineage | Hermes Agent | 会话句柄（sid）与持久 session id 必须区分，压缩轮转后按 lineage root 重锚 |
-| 本地模型、AI SDK 流式 UI 与消息版本树 | Jan | 桌面端每轮整写 JSONL，未完成回合不恢复 |
+| 本地模型、AI SDK 流式 UI 与消息版本树 | Jan | 桌面端每轮整写 JSONL，未完成回合不恢复；对话面已扩展为普通 Chat、Cowork 与独立 Agent CLI/TUI（Rust Agent 后端、可用远程 Provider 或本机模型）三个 |
 | 应用层树与分支记忆 | AIO Hub | 搜索无索引；崩溃后残留"生成中"节点已由加载路径自动修复（`repairInterruptedGeneratingNodes`），修复行为未做运行复现 |
 | 简单会话记录、归档优先于删除 | Chatbox | 恢复归档不会重排，拖拽排序仅限同分组 |
-| Agent 工具过程的可观察流程 | LobeHub | 双层 store 各自 parse；审批逻辑位于全局 store |
+| Agent 工具过程的可观察流程 | LobeHub | 双层 store 各自 parse；审批逻辑位于全局 store；Mecha 内核为 client agent 与 Gateway 共用上下文工程，Gateway Mux 按 owner 复用连接，排队消息以软中断结束当前 turn |
 | 纯客户端部署，集中保存 Mask、摘要和工具状态 | NextChat | IndexedDB/localStorage 是主存储，本地数据与同步边界需单独评估 |
 | 服务端权限、分享、多模型与跨实例任务控制 | Open WebUI | history/消息表双写，Socket.IO 事件状态组合较多 |
-| 文件级分支、检查点与社区扩展 | SillyTavern | 长聊天不虚拟化；正则按展示、prompt、存储位置分层，渲染结果可能随聊天长度变化 |
-| 多角色群聊与长期 Topic 关系 | VCPChat | 单聊没有本地 abort，可靠中止依赖远端 |
+| 文件级分支、检查点与社区扩展 | SillyTavern | 长聊天不虚拟化；正则按展示、prompt、存储位置分层，渲染结果可能随聊天长度变化；删除消息默认级联删除其前的工具调用系统消息 |
+| 多角色群聊与长期 Topic 关系 | VCPChat | 单聊有随窗口生命周期（切换话题、关闭内部窗口）的取消，但中止按钮仍只发远端 `/v1/interrupt`，无本地 controller 取回与客户端超时；FlowLock 运行 Session 不跨重启，只有 Topic 级 pending 请求能在重载后恢复 |
 | 终端本地编码 Agent、追加型树会话与工具循环 | Pi | 单会话单循环；消息编辑以分支表达；无消息级搜索索引；系统提示不随会话保存 |
 | 服务端 Agent 会话运行时、事件广播与多前端共用 | OpenCode | SQLite 权威 + SSE 投影；删除式 revert 与复制式 fork；无消息级全文搜索；Web/TUI 两套渲染栈 |
 | 事件溯源驱动循环、插件层循环控制与 headless 一键任务 | DeepSeek Harness | turn/step 边界全部是 durable 事件、可重放重建；模型可见 ⟺ 已记录；内置无 turn 预算；与 pi 无循环继承证据（仅 llm-pi-ai 适配层） |

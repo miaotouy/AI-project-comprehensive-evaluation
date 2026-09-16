@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：只读源码逐文件精读；未修改被调查仓库任何文件
 >
@@ -16,17 +16,17 @@
 
 ## 结论摘要
 
-1. **工具集按会话动态组装**：buildToolsForSession 是唯一的 ToolSet 构造点，每次调用时依据 agentMode、模型能力声明、附件、知识库、MCP 配置、codeExecution 选项等条件决定哪些工具进入模型视野。web_search 与 parse_link 是唯一独立于 agentMode 的工具。
+1. **工具集按会话动态组装**：buildToolsForSession 是统一的 ToolSet 构造点，每次调用时依据会话模式、模型能力、附件、知识库、MCP、记忆和本地执行选项决定哪些工具进入模型视野。网页搜索、知识库和持久记忆可以脱离 Work Mode 使用；宿主命令、文件写入、MCP、Skills 与图像查看属于 Work Mode 工具面。
 
-2. **Windows 无 OS 级沙箱**：@anthropic-ai/sandbox-runtime（SRT）仅在 macOS/Linux 上启动；Windows 路径明确记录"no OS isolation"，直接在主进程执行代码，边界只靠路径白名单。code_execution 和 user_exec 在 Windows 上应按宿主执行能力评估，而非沙箱容器。
+2. **命令契约分新旧两代**：新会话使用 `run_command`；macOS/Linux 先在 OS 文件沙箱执行，只有真实失败后的精确重试才可按审批策略升级到宿主，Windows 因无 OS 命令沙箱而直接按会话审批策略执行。旧会话快照继续暴露 `code_execution`/`user_exec`，保证历史工具调用可续跑。
 
 3. **list_files 工具名冲突**：知识库工具集（getToolSet）与文件系统工具集（buildFilesystemTools）都注册了 list_files，在 tools-builder.ts 的合并顺序中文件系统工具集后写入，知识库版本被静默覆盖。这是一个已确认的 bug。
 
-4. **AppActionApprovalPausedError 不可被 agentFullAccess 绕过**：full_access 仅影响 user_exec 与文件变更（write_file/edit_file）的逐次确认；chatbox_cli 工具中的计费/状态变更操作始终走该暂停路径，与 agentFullAccess 设置无关。
+4. **AppActionApprovalPausedError 不可被 agentFullAccess 绕过**：full_access 影响 run_command 的宿主审批与文件变更逐次确认；chatbox_cli 的计费/状态变更操作始终走独立暂停路径。
 
-5. **Agent 可自安装 Skill 并触发后续高权限行为**：`install_skill` 工具仅校验路径范围与 SKILL.md 格式，不校验 `SKILL.md` 正文内容；安装后自动启用；若后续 `load_skill` 返回的指令要求调用 `user_exec`，则仍需经过审批（除非 `agentFullAccess=true`），"自安装"环节本身不直接执行宿主命令；结合 `agentFullAccess=true` 时，从生成、安装、启用、加载到执行的整条链路可在无人工确认下完成。
+5. **Agent 可自安装 Skill 并触发后续命令**：`install_skill` 只校验路径、名称、大小与 SKILL.md 结构，安装后自动启用。后续命令走 run_command 的 sandbox-first/宿主升级策略；Full Access 会跳过逐次宿主审批，但应用动作审批仍保留。
 
-6. **`skills:execute-script` IPC 不走 `user_exec` 审批流**：该 IPC 调用直接在主进程启动 skill 的 `scripts/` 目录下的可执行文件，不经过 `requestUserExecApproval`，是一条独立的执行路径。但此 IPC 未暴露为 Agent ToolSet 工具，需要 renderer 代码主动调用。
+6. **工具面已收敛到 `run_command` 并加入图像与记忆工具**：模型侧命令入口使用 sandbox-first 的 `run_command`，必要时按会话审批策略升级到宿主执行；`view_image` 可读取实际图片内容，`save_memory`/`delete_memory` 管理跨会话记忆。历史 `skills:execute-script` IPC 仍不是模型工具入口。
 
 ---
 
@@ -39,12 +39,12 @@
       ↓ buildToolsForSession(model, options)  [tools-builder.ts]
           ├─ mcpController.getAvailableTools()   ← agentMode=on
           ├─ webSearchTool / parseLinkTool        ← webBrowsing=true（独立于agentMode）
-          ├─ getKBToolSet()                       ← agentMode=on + KB配置
+          ├─ getKBToolSet()                       ← KB配置 + 模型能力，独立于模式
           ├─ getSessionAttachmentRagToolSet()     ← session-retrieval附件
           ├─ fileToolSet (read_file/search_file)  ← 有inline附件 + !codeExecution
           ├─ buildCodeExecutionTools()            ← agentMode=on + codeExecution
           ├─ buildFilesystemTools()               ← agentMode=on
-          ├─ load_skill / user_exec / install_skill ← agentMode=on
+          ├─ load_skill / run_command / install_skill ← Work Mode；旧会话兼容 user_exec
           └─ chatboxCliToolSet                    ← chatbox-product-info skill已启用
   ↓ withToolCallLimitPause(tools, 25)（可按 pauseOnToolCallLimit 关闭） [orchestration.ts:750-752]
   ↓ model.chatStream(coreMessages, chatOptions)  [abstract-ai-sdk.ts]
@@ -66,8 +66,8 @@
       → IPC → main/sandbox/manager.ts → SRT(macOS/Linux) 或 裸 Node/PS/Bash(Windows)
   list_files / search_files / write_file / edit_file（绝对路径）
       → renderer判断 shouldUseSandbox() → 沙箱路径走sandbox IPC；主机绝对路径走platform.fsList/fsRead/fsWrite
-  user_exec
-      → renderer requestUserExecApproval() →（批准后）IPC → main/skills/user-exec-runner.ts
+  run_command
+      → macOS/Linux 沙箱优先；宿主重试或 Windows 执行走审批 → main/skills/user-exec-runner.ts
   MCP stdio
       → renderer IPCStdioTransport → IPC → main/mcp/ipc-stdio-transport.ts → StdioClientTransport子进程
   MCP HTTP
@@ -77,6 +77,8 @@
 ---
 
 ## 1. 工具定义与注册
+
+当前会话快照带 `agentToolContractVersion`。版本 2 使用 `run_command`，并保留文件、图像和记忆工具；版本 1 只为包含旧命令历史的会话继续装配 `code_execution` 与 `user_exec`。下文涉及这两个旧名称的命令、超时和输出结论均属于 v1 兼容契约；当前 v2 命令入口以本节新增说明和第 10.2 节为准。版本选择见 `src/renderer/stores/session/prompt-context-snapshot.ts:147-156`，装配分支见 `tools-builder.ts:340-350,470-530,584`。
 
 ### 1.1 唯一构造点
 
@@ -138,12 +140,12 @@ buildToolsForSession 中每类工具的启用条件如下（`tools-builder.ts:22
 | `web_search` | `webBrowsing && model.isSupportToolUse('web-browsing')` | 否，独立开关 |
 | `parse_link` | `webSupported && PROVIDERS_WITH_PARSE_LINK.has(provider)` | 否 |
 | MCP 工具（`mcp__*`） | `includeAgentTools`（见下） | 是 |
-| 知识库工具集 | `includeAgentTools && knowledgeBase && model.isSupportToolUse('knowledge-base')` | 是 |
+| 知识库工具集 | `knowledgeBase && model.isSupportToolUse('knowledge-base')` | 否，独立于模式 |
 | session attachment RAG 工具集 | `sessionAttachmentIds.length > 0 && model.isSupportToolUse('read-file')` | 否（但通常伴随 agentMode） |
 | `read_file`/`search_file_content`（`file.ts`） | `!codeExecution && hasInlineFileOrLink && model.isSupportToolUse('read-file')` | 否 |
 | `code_execution`/`read_file`/`create_download` | `includeAgentTools && codeExecution` | 是 |
 | `list_files`/`search_files`/`write_file`/`edit_file`（filesystem.ts） | `includeAgentTools` | 是 |
-| `load_skill`/`user_exec` | `includeAgentTools` | 是 |
+| `load_skill`/`run_command` | `includeAgentTools`；旧契约才装配 `user_exec` | 是 |
 | `install_skill` | `includeAgentTools && codeExecution` | 是 |
 | `chatbox_cli` | `includeAgentTools && enabledSkills 含 'chatbox-product-info'` | 是 |
 
@@ -247,6 +249,7 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 | `user_exec` | 120,000ms，无参数可覆盖 | `main/skills/user-exec-runner.ts:51` |
 | `skills:execute-script` | 30,000ms，硬编码 | `main/skills/ipc-handlers.ts:199` |
 | MCP 单次工具调用 | 未见显式超时设置——依赖 `@ai-sdk/mcp`/底层 transport 默认值 | 未在 Chatbox 代码中找到覆盖 |
+| `run_command`（v2） | 输入可指定，受工具层最大值约束 | `toolsets/run-command.ts:136-185` |
 
 ### 5.5 取消与中断
 
@@ -418,7 +421,8 @@ if (isWindows) {
 | `edit_file` | 精确字符串替换编辑 | 同上 | **条件式**，同上 | 依赖 `old_text` 唯一性校验，非唯一时报错而非静默替换首个匹配 |
 | `load_skill` | 加载 skill 完整指令 | renderer→main IPC | 无 | Skill 正文为外部/第三方来源的自然语言指令，加载后原样回注模型（见 8.4 节） |
 | `install_skill` | 从沙箱路径安装 skill | main（复制目录+写 source.json） | 无（只做路径/命名/大小校验，无内容审查） | 见 5、10.2 节；安装后自动启用 |
-| `user_exec` | 宿主 shell 执行任意命令 | main（裸 spawn，无沙箱） | **白名单→AI→人工三级**，`agentFullAccess` 可跳过全部三级 | 最高风险工具；Windows 上是 PowerShell 语义（见 6.1） |
+| `run_command` | 项目命令与脚本 | macOS/Linux 沙箱优先；Windows/获批重试走 main 宿主 shell | 按会话 approval mode；精确失败重试可请求宿主升级，Full Access 可跳过逐次审批 | 当前 v2 命令入口，输出正文有界且长输出可落 capture 文件 |
+| `user_exec`（v1 兼容） | 宿主 shell 执行任意命令 | main（裸 spawn） | 白名单→AI→人工三级，Full Access 可跳过 | 只为旧工具历史续跑保留 |
 | `chatbox_cli` | 受限"虚拟 CLI"（账号/设置/历史/图片生成后台任务） | renderer（`executeChatboxCli`） | **条件式**：图片生成等计费类走 `AppActionApprovalPausedError`（不可被 `agentFullAccess` 绕过） | 仅当 `chatbox-product-info` skill 已启用时注册；计费边界独立于其他审批体系 |
 | MCP 工具（`mcp__<server>__<tool>`） | 用户配置的第三方能力 | main（stdio 子进程）或直接网络（HTTP/SSE） | 无 Chatbox 层逐次审批 | 与 main 进程同权限；server 自身行为不受 Chatbox 沙箱约束 |
 
@@ -434,7 +438,7 @@ if (isWindows) {
 
 **Transport 细节**：
 - **stdio**：renderer 侧 `IPCStdioTransport`（`src/renderer/packages/mcp/ipc-stdio-transport.ts`，与 `main/mcp/ipc-stdio-transport.ts` 配套）通过 `ipcMain.handle('mcp:stdio-transport:create', ...)` 在 **main 进程**里真正 `new StdioClientTransport({command, args, env, stderr: 'pipe'})`（`main/mcp/ipc-stdio-transport.ts:48-53`）。环境变量合并：`enhanceEnv(configEnv)` 先调用 `shellEnv()`（`main/mcp/shell-env.ts`，本次未展开读取实现，但从调用方式可确认其作用是获取用户登录 shell 的完整环境变量，解决 GUI 启动的 Electron 进程 `PATH` 残缺问题），再用 `{...env, ...configEnv}` 让用户在 MCP 配置里显式设置的 `env` 覆盖 shell 环境同名变量（`ipc-stdio-transport.ts:13-22`）。stderr 单独 pipe 并用 `chardet`/`iconv-lite` 做编码探测解码，记录日志并在 transport 关闭时把累积的 stderr 文本回传给 renderer（`onclose`回调，`ipc-stdio-transport.ts:56-69`）。从 #3826 起，日志输出会剔除 `env` 中疑似密钥的字段，防止 MCP 配置里的 secrets 出现在日志中。
-- **HTTP/SSE**：renderer 侧 `createClient()`（`packages/mcp/controller.ts:12-71`）优先尝试 `StreamableHTTPClientTransport`（`requestInit: {headers: transportConfig.headers}`），失败则捕获异常并回退到 legacy SSE transport（`transport: {type: 'sse', url, headers}`）；两者都失败才把两次错误信息拼接抛出。**未见超时设置的显式覆盖**——依赖 `@modelcontextprotocol/sdk` 与底层 `fetch`/EventSource 的默认行为（**未验证**具体默认超时数值）。**未见 OAuth 流程的证据**——`MCPTransportConfig` 类型（`shared/types/mcp.ts:8-19`）只有 `headers?: Record<string,string>`，没有专门的 OAuth token 刷新字段；用户需要自行把 bearer token 放进 `headers`。
+- **HTTP/SSE 与 OAuth**：远程连接仍优先使用 Streamable HTTP 并兼容 SSE。每个自定义服务器现在可绑定 `MCPOAuthProvider`：SDK 驱动 discovery、动态客户端注册、授权码回调与 token 保存；启动恢复采用非交互模式，需要重新授权时提示用户到 MCP 设置点击 Connect。设置弹窗会在连接成功后实时显示 `tools/list` 返回的工具清单。实现见 `src/renderer/packages/mcp/controller.ts:130-172,275`、`oauth-provider.ts:19-116` 与 `src/renderer/components/settings/mcp/ConfigModal.tsx:29-129,248-249`。真实第三方授权服务器兼容性未运行验证。
 
 **内建 MCP server**：`BUILTIN_MCP_SERVERS`（`packages/mcp/builtin.ts:12-47`）硬编码 5 个由 Chatbox 官方托管的 HTTP MCP server（Fetch/Sequential Thinking/EdgeOne Pages/arXiv/Context7，域名均为 `mcp.chatboxai.app`），启用时自动带上 `x-chatbox-license` header 做许可证鉴权（`builtin.ts:49-65`）。这些内建 server 与用户自定义 MCP server 走同一个 `mcpController`，同样没有逐次审批。
 
@@ -442,7 +446,15 @@ if (isWindows) {
 
 **执行边界**：stdio MCP server 是 main 进程的子进程，与 Chatbox 应用进程同一 OS 用户权限；HTTP/SSE MCP server 是远程服务，Chatbox 不对其请求内容做额外脱敏或速率限制。两类 server 暴露的工具都在 `getAvailableTools()` 中无逐次确认地进入 `ToolSet`（见 1.4 节），工具的 `execute()` 直接转发给 MCP server 实现，行为取决于该 server 自身。
 
-### 10.2 Skills
+### 10.2 图像读取与持久记忆
+
+`view_image` 把图片文件转换为模型可见的真实图像内容，而不是只返回路径文本；支持工具结果图片的模型直接接收 image part，不支持时通过后续 user 消息注入，并对单次传输和历史保留数量设限。入口见 `src/renderer/packages/model-calls/toolsets/view-image.ts:302-488`。
+
+持久记忆工具为 `save_memory` 与 `delete_memory`。它们在模型支持工具且相应记忆开关开启时可在 Chat/Work 两种模式注册；Copilot 启用独立记忆后改写自己的 scope，不再使用全局记忆。写入只影响未来会话，当前会话继续使用冻结快照。实现见 `src/renderer/packages/model-calls/toolsets/agent-memory.ts:16-93` 与 `src/renderer/stores/session/tools-builder.ts:594-609`。
+
+`run_command` 是 v2 当前命令工具。macOS/Linux 在沙箱可用且不是 Full Access 时先执行 sandbox call；模型只有在一次真实失败后，携带相同命令、工作目录、shell 与 justification 才能请求宿主重试，harness 内部验证一次性 retry reference。Windows 或无沙箱平台直接进入会话审批策略。输出正文压到约 12000 字符，完整长输出另给 capture 文件路径。`src/renderer/packages/model-calls/toolsets/run-command.ts:103-117,136-185,240-357`。
+
+### 10.3 Skills
 
 **发现范围（四个来源，按优先级去重）**：
 1. **内置 skill**（`getBuiltinSkillsDir()` = `userData/builtin-skills`）：由 `builtin-sync.ts` 从后端 manifest 同步（`sha256(trim(body))` 内容哈希比对），首次启动前用打包内 `builtinSkills` 常量做本地种子（`ensureBuiltinSeeded()`），保证离线可用；已知内置 skill 包括 `chatbox-product-info`、`data-analysis`、`frontend-design`、`vibedrop`（`main/skills/builtin/index.ts`）。

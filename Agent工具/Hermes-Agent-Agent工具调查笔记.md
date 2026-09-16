@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：只读源码定位目录构建、工具执行链、审批与回注路径；结合仓库 AGENTS.md 与工具 docstring 核验设计意图
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Hermes 的 Agent 工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、`skills/`+`optional-skills/` 的指令文本工具、**Agent Plugins 便携包**（v1 目录包兼容层，`hermes_cli/agent_plugins.py`，把便携包的技能/MCP 组件翻译进 Hermes 运行时），以及 `toolsets.py` 的按平台工具集装配。
+Hermes 的 Agent 工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、`skills/`+`optional-skills/` 的指令文本工具、Agent Plugins 便携包，以及 `toolsets.py` 的按平台工具集装配。当前工具面还包含受账号能力门控的 `manage_connections`，用于把托管应用账号与本地 MCP 安装/授权收敛到同一连接生命周期入口（`tools/connectors/tool.py:16-43,46-125`）。
 
 整个工具链沿 `run_agent.py` → `model_tools.py` → `tools/registry.py` 三层组织，工具的定义、发现、审批、执行和回注均发生在 Python 主进程内。
 
@@ -157,7 +157,7 @@ execute_code 内部工具 → _rpc_server_loop（父进程线程）→ model_too
   → tool_error/registry.dispatch → role 返回
 ```
 
-- `execute_code` 复用 terminal 环境（`_get_or_create_env`），任务级容器/目录隔离；RPC server 运行在**父进程线程**，sandbox 脚本每次需要工具时用新行 JSON 请求；`terminal` 调用会剥离 `background/pty/notify_on_complete/watch_patterns` 参数。
+- `execute_code` 默认使用会话持久内核。内核按稳定会话身份复用，子 Agent 以委派会话 ID 加限定符隔离；会话关闭或 `/new` 时与审批状态一起回收，远端 Docker/SSH/Modal 后端也有对应的 detached kernel 注册表。每个 cell 重新绑定当前工具权限，内核线程不冻结首个 cell 的上下文；超时或中断会杀死该内核并明确报告状态丢失（`tools/code_kernel.py:412-471,477-493,655-685,709-747`，`tools/code_kernel_remote.py:106-189,315-394`）。
 - allow-list= `enabled_tools`（若传入）否则 `_last_resolved_tool_names`；所以“模型可用的工具”与“execute_code 沙箱可调用的工具”一致，但**它绕过编排层的工具名校验与审批链**（只受 allow-list 限制，不重复审批）。
 
 ### 执行位置
@@ -200,6 +200,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 ### 技能
 
 - 仓库自带 `skills/`（默认启用）+ `optional-skills/`（`hermes skills install`）；`SKILL.md` frontmatter metadata。
+- `skill_manage` 对模型只公开 `operations[]` 形态。一次调用最多 20 个操作，每项自行声明技能名；批次先快照所有受影响技能，任一失败则整体回滚。可批处理 create、patch、write_file 与 remove_file；delete 必须独占一次调用。旧平铺参数只为历史转录与待审批写入重放保留，不再进入 schema（`tools/skill_manager_tool.py:824-938`）。
 - `skills_tool.py`/`skills_hub.py`/`curator`：agent 可创建自定义技能，被 `curator` 自动归档（从不删除）。技能是文本指令而非权限沙箱。
 
 ### 子代理（`tools/delegate_tool.py`）
@@ -221,6 +222,10 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 ## 10. 当前工具面变化
 
 浏览器工具新增经用户配置同意的真实 Chromium 档案通道：`browser.use_real_profile` 默认关闭，启用后先复制默认档案，再由 Hermes 管理的 Chromium 使用复制件；配置不兼容、档案锁定或启动失败都返回错误而不回退到临时档案（`tools/browser_tool.py:1430-1454`、`1538-1706`）。终端环境也获得插件注册表（`agent/terminal_env_registry.py:54-95`），而不是把每种执行后端变为模型工具。两者都扩大了工具执行的适配面，并保留显式同意或插件装配边界。
+
+连接工具把托管 Connector 与 MCP 的安装、启用和授权合并为批量操作。桌面端由后端持有 operation 状态并阻塞到每个目标完成、跳过或超时；模型结果只拿到目标终态，不拿授权链接。该工具不能断开、删除或撤销账号，相关动作保留给用户界面或 Portal（`tools/connectors/tool.py:46-70`，`tools/connectors/operation.py`，`tui_gateway/methods_connectors.py`）。
+
+浏览器凭据库是另一条窄工具边界。profile 本地库以 Fernet 加密保存登录、支付卡与地址，工具只暴露不含秘密的句柄和元数据，密码、TOTP 种子及支付字段在服务端解析并按精确 origin 填入页面；秘密不得进入工具结果、日志或会话库。也可接入已安装并解锁的 1Password/Bitwarden（`agent/vault_store.py:1-16,193-293,297-403`，`tools/browser_vault_tool.py`）。
 
 ## 未验证事项
 
@@ -248,4 +253,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - `tools/delegate_tool.py`：`_run_single_child`（2076）、`_build_child_agent`（1305）、`tools/delegation_output_schema.py`（结构化输出）。
 - `tools/mcp_tool.py`：`register_mcp_servers`、trust-tier 门控（3909-3926）、`_make_check_fn`。
 - `tools/code_execution_tool.py`：`_rpc_server_loop`（653）。
+- `tools/code_kernel.py`、`tools/code_kernel_remote.py`：本地/远端会话持久内核与生命周期。
+- `tools/connectors/tool.py`、`tools/connectors/operation.py`：托管应用与 MCP 连接生命周期。
+- `agent/vault_store.py`、`tools/browser_vault_tool.py`：加密凭据库与模型盲填充。
 - `tools/terminal_tool.py`：`set_approval_callback`（287）；systemd 隔离见 `tools/process_registry.py`。

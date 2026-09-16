@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：静态代码审查；关键词 grep（inlay/iframe/sandbox/eval/Function/pyodide/lua/streaming/reroll 等）定位能力边界，通读生成主链（process/index.svelte.ts 的流式与最终化）、inlay 资产层（process/files/inlays.ts）、消息解析与净化管线（parser/parser.svelte.ts）、图像与语音产出（stableDiff.ts、tts.ts）、插件沙箱（plugins/ 与 apiV3/）、脚本引擎（scriptings.ts、pyworker.ts）及持久化入口（globalApi.svelte.ts、storage/、drive/）
 >
@@ -72,7 +72,7 @@ Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息�
 ## 5. 用户交互、事件与错误反馈
 
 - **消息级操作**（宿主固定按钮，非模型声明）：复制（解析后 HTML 或源文本）、编辑、删除、翻译、TTS 播放、reroll 前进/后退（`src/lib/ChatScreens/Chat.svelte:743-763`、`796-809`）。`PartialEditController.svelte` 提供块级与拖选式局部编辑/删除，保存时整段回写消息 `data`（`Chat.svelte:133-139`）。
-- **事件回传**：插件经 `addRisuChatListener('output', ...)` 观察输出（`src/ts/plugins/apiV3/v3.svelte.ts:730-733`）；自定义脚本（Lua）经 `runLuaEditTrigger` 在四种模式下改写文本；TTS 前后处理钩子由插件注册（`registerTTSPreprocessor`/`registerTTSPostprocessor`，`src/ts/process/ttsHooks.ts:29-48`），可替换音频、改 mime 或跳过播放（含超时与容错，`ttsHooks.ts:61-105`）。
+- **事件回传**：插件经 `addRisuChatListener('output', ...)` 观察输出（`src/ts/plugins/apiV3/v3.svelte.ts:733-740`）；自定义脚本（Lua）经 `runLuaEditTrigger` 在四种模式下改写文本；TTS 前后处理钩子由插件注册（`registerTTSPreprocessor`/`registerTTSPostprocessor`，`src/ts/process/ttsHooks.ts:29-48`），可替换音频、改 mime 或跳过播放（含超时与容错，`ttsHooks.ts:61-105`）。
 - **错误反馈**：生成/图片/TTS 错误以 toast 与消息内 `risuerror` 代码块呈现；`<tool_call>` 渲染为消息内卡片。
 - 流式性能模式 `strong` 下的 `renderRawStreaming` 属源码确认的入口，实际视觉效果未运行验证。
 
@@ -85,16 +85,16 @@ Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息�
 ## 7. 能力桥、执行位置与权限范围
 
 - **执行位置**：模型输出只在宿主 DOM 渲染，无脚本执行。插件系统分两代：
-  - API 3.0：隐藏 iframe + postMessage 桥，sandbox 允许 `allow-scripts`、`allow-modals`、`allow-downloads`，带 CSP；插件代码在 iframe 内经 `eval('(async () => ...)')` 运行（`src/ts/plugins/apiV3/factory.ts:296`、`771-788`、`921`）。iframe 默认隐藏，可 `showContainer` 放大为全屏 UI（`v3.svelte.ts:916-941`）。
+  - API 3.0：隐藏 iframe + postMessage 桥，sandbox 允许 `allow-scripts`、`allow-modals`、`allow-downloads`，带 CSP；插件代码在 iframe 内经 `eval('(async () => ...)')` 运行（`src/ts/plugins/apiV3/factory.ts:296`、`771-788`、`921`）。iframe 默认隐藏，可 `showContainer` 放大为全屏 UI（`v3.svelte.ts:967-994`）。
   - API 2.1：仅存量插件仍可在主线程 `new Function` 执行，先经 `checkCodeSafety` 静态改写；新的 2.1 导入已被拒绝（`src/ts/plugins/plugins.svelte.ts:343-361,890-910`）。
   插件 iframe **承载插件自身 UI 与代码，不承载模型输出**；模型文本不会注入 iframe 执行。
-- **能力桥**：插件 API 可读取 inlay、读写数据库、网络请求、注册输出监听器与 replacer；脚本引擎（Lua/Python）可调用 `generateImage` 生成图片并写入 inlay（`src/ts/process/scriptings.ts:392-404`），触发脚本有 `runImgGen` 效果（`src/ts/process/triggers.ts:1539-1557`）——这些桥接由脚本作者（用户/角色）预编译，模型本身只能通过文本标记间接驱动。v3 读取 inlay 与注册输出监听器会分别取得 inlay 或 replacer 权限，并按插件名、脚本哈希及三天周期复核；其余权限边界仍按 `getPluginPermission` 的 API 调用点决定（`v3.svelte.ts:567-625,728-750`）。
+- **能力桥**：插件 API 可读取 inlay、读写数据库、网络请求、注册输出监听器与 replacer；脚本引擎（Lua/Python）可调用 `generateImage` 生成图片并写入 inlay（`src/ts/process/scriptings.ts:392-404`），触发脚本有 `runImgGen` 效果（`src/ts/process/triggers.ts:1539-1557`）——这些桥接由脚本作者（用户/角色）预编译，模型本身只能通过文本标记间接驱动。v3 读取 inlay 与注册输出监听器会分别取得 inlay 或 replacer 权限，并按插件名、脚本哈希及三天周期复核；其余权限边界仍按 `getPluginPermission` 的 API 调用点决定（`v3.svelte.ts:569-627,733-753`）。
 - 模型输出侧无网络、存储或宿主动作能力声明：媒体引用全部解析为已存在资产，外部图片地址不加载执行（仅 img 标签可显示，且受 `hideAllImages` 控制）。
 
 ## 8. 持久化、恢复、分享与导出
 
 - **主库**：`DBState.db` -> `RisuSaveEncoder` -> `database.bin`（500ms 防抖、多备份轮换，`globalApi.svelte.ts:292-525`）；后端抽象覆盖 Tauri FS、LocalForage、Node 服务、账户存储。消息的 `data`（含 inlay 占位）、`generationInfo`、`promptInfo` 全部随主库往返。
-- **inlay 资产库**：独立 localforage 实例（IndexedDB 库名 `inlay`），与主库分离。恢复消息时占位符可解析，但资产不随 `database.bin` 备份/迁移，也不在 drive 同步范围内（`src/ts/drive/drive.ts:156-169` 只枚举主存储 keys）。冷存储归档旧聊天时同样只归档消息文本（`src/ts/process/coldstorage.svelte.ts:529`），inlay 二进制不在归档 payload 中（`coldstorageData.ts` 仅替换资源路径）。跨设备/重装后 inlay 媒体会丢失而占位保留——此为静态推断，未运行验证。
+- **inlay 资产库**：独立 localforage 实例（IndexedDB 库名 `inlay`），与主库分离。恢复消息时占位符可解析，但资产不随 `database.bin` 备份/迁移，也不在 drive 同步范围内（`src/ts/drive/drive.ts:156-169` 只枚举主存储 keys）。冷存储归档旧聊天时同样只归档消息文本（`src/ts/process/coldstorage.svelte.ts:575`），inlay 二进制不在归档 payload 中（`coldstorageData.ts` 仅替换资源路径）。跨设备/重装后 inlay 媒体会丢失而占位保留——此为静态推断，未运行验证。
 - **分享/导出**：角色卡导出/导入（.risum/.risup/.charx）不含 inlay 资产；正则脚本可导出单文件 JSON（`scripts.ts:30-39`）。聊天导出入口本次未找到（Playground 或数据管理面未逐一核对）。删除 inlay 的唯一常规入口是 PlaygroundInlayExplorer（逐项/批量），无按引用清理或孤儿回收。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -135,7 +135,7 @@ Risuai 与 SillyTavern 同为角色扮演聊天应用，输出模型以**消息�
 - `src/ts/process/scripts.ts:99`（processScriptFull 脚本管线）、`src/ts/process/scriptings.ts:52-150`、`392-404`（脚本引擎与 generateImage）
 - `src/ts/process/prereroll.ts:1-29`、`src/lib/ChatScreens/DefaultChatScreen.svelte:218-317`（reroll）
 - `src/ts/plugins/apiV3/factory.ts:296`、`771-788`、`921`（iframe 沙箱）、`src/ts/plugins/plugins.svelte.ts:903-910`（v2.1 主线程执行）
-- `src/ts/globalApi.svelte.ts:292`（saveDb）、`src/ts/drive/drive.ts:156-169`（同步范围）、`src/ts/process/coldstorage.svelte.ts:529`（冷存储）
+- `src/ts/globalApi.svelte.ts:292`（saveDb）、`src/ts/drive/drive.ts:156-169`（同步范围）、`src/ts/process/coldstorage.svelte.ts:575`（冷存储）
 - `src/lib/ChatScreens/ChatBody.svelte:249-268`（消息投影）、`Chat.svelte:129-139`（编辑）、`EmotionBox.svelte:8-13`（立绘）
 - `src/lib/Playground/PlaygroundInlayExplorer.svelte:52-79`（inlay 管理）
 - 测试：`src/ts/process/files/tests/inlays.test.ts`、`src/ts/process/ttsHooks.test.ts`、`src/ts/process/scriptings.test.ts`、`src/ts/parser/tests/`

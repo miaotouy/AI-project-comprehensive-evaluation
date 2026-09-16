@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7f3379524da3ac629918d35682e38833ad5c203e`（分支：`dev`）
+> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
 >
 > 调查方式：静态复核 ACP agent 注册表与启动生命周期、`src/main/remote/` 与 `src/main/cli/` 主链；复用独特功能、Agent 工具和对话请求笔记；未运行外部平台或 CLI 二进制
 >
@@ -14,13 +14,15 @@
 
 ## 结论摘要
 
-DeepChat 同时覆盖外部执行体与外部控制表面，三条链均达到 `主链确认`（静态证据）：ACP agent 注册表（38 个条目）提供发现、安装、校验与启动外部 Agent runtime 的完整生命周期；五类 IM endpoint 远程驾驶桌面会话；本地 CLI 通过鉴权 RPC 发起和管理 Agent run。
+DeepChat 同时覆盖外部执行体与外部控制表面，三条链均达到 `主链确认`（静态证据）：ACP agent 注册表（39 个条目）提供发现、安装、校验与启动外部 Agent runtime 的完整生命周期；五类 IM endpoint 远程驾驶桌面会话；本地 CLI 通过鉴权 RPC 发起和管理 Agent run。
 
 ACP 路径还增加了终端认证运行器和认证服务；认证属于 ACP runtime 生命周期的一部分，不由聊天 renderer 代填凭据（`src/main/agent/acp/auth/acpAuthService.ts`、`acpTerminalAuthRunner.ts`）。实际外部工具的认证交互仍未运行验证。
 
+外部生命周期有两项明确收口：ACP process manager 在应用关闭时中止等待并回收孤立子进程；Discord 与 QQBot 的 HTTP 请求带固定超时，Discord stop 会同时取消尚在等待的 reconnect backoff，避免渠道停止后延迟重连。
+
 ## 接入角色与系统边界
 
-- **外部执行体**：ACP agent 注册表。`resources/acp-registry/registry.json` 列有 38 个可发现 Agent（claude-acp、codex-acp、cursor、gemini、github-copilot-cli、devin、opencode、goose、grok-build、cline、deepagents 等），经下载、sha256 校验与依赖安装后启动；AgentManager 按 backend kind 分派，ACP 自己持有工具执行能力，DeepChat 内置工具目录对该 session 返回空。ACP 会话还可反向作为 DeepChat 自身 harness 的 LLM provider（`acpAsLlmProviderSessionControl/permission`）。
+- **外部执行体**：ACP agent 注册表。`resources/acp-registry/registry.json` 列有 39 个可发现 Agent（claude-acp、codex-acp、cursor、gemini、github-copilot-cli、devin、opencode、goose、grok-build、cline、deepagents 等），经下载、sha256 校验与依赖安装后启动；AgentManager 按 backend kind 分派，ACP 自己持有工具执行能力，DeepChat 内置工具目录对该 session 返回空。ACP 会话还可反向作为 DeepChat 自身 harness 的 LLM provider（`acpAsLlmProviderSessionControl/permission`）。
 - **IM 控制表面**：Telegram、Feishu/Lark、QQBot、Discord、WeChat iLink endpoint 绑定一个 DeepChat session。
 - **CLI 控制表面**：`deepchat` CLI 连接桌面主进程的 localhost HTTP control server。
 
@@ -56,6 +58,8 @@ ACP agent 安装与启动
 
 `RemoteEndpointBinding` 把平台 endpoint 映射到本地 session，PairCode 默认 TTL 十分钟并限制失败次数。运行时 manager 在启动时重建渠道连接；断线后的重连、重放与轮询策略属于各渠道 adapter 与 poller，本次未逐通道走通。CLI 使用 control descriptor、协议版本、token scope、run id 和 approval request；detached run 有独立生命周期。
 
+Discord gateway 的 backoff 等待可由 stop signal 提前结束；HTTP client 使用 `AbortSignal.timeout`，调用方已有 signal 时通过 `AbortSignal.any` 合并。QQBot client 使用同样的超时合并方式。实现见 `src/main/remote/channels/discord/discordGatewaySession.ts:201-256`、`discordClient.ts:252-255` 与 `qqbotClient.ts:78-81,247-250`。
+
 ACP session 与普通 DeepChat session 在能力边界上明确区分：manual compaction、pending queue resume 等只对 DeepChat runtime 可用，不能把宿主能力误推给 ACP backend。
 
 ## 执行、回流与控制语义
@@ -77,6 +81,7 @@ IM 渠道凭据保存在本地设置，endpoint 通过配对码授权；凭据�
 ## 已确认边界与未验证事项
 
 - 未运行真实 IM 平台凭据、流式分段、交互回调 TTL 和断线重连。
+- HTTP 超时与 stop 取消 backoff 为静态确认；平台 SDK 是否另有不可取消请求、网络栈实际错误分类仍未验证。
 - 未运行 CLI launcher、token/审批端到端和 detached run。
 - ACP 注册表的真实下载、校验、安装与各 backend 启动未运行验证；外部 payload 兼容性和真实取消传播未展开。
 
@@ -92,5 +97,6 @@ IM 渠道凭据保存在本地设置，endpoint 通过配对码授权；凭据�
 - `src/main/approval/approvalBroker.ts`
 - `resources/acp-registry/registry.json`
 - `src/main/agent/acp/launch/{acpLaunchSpecService,acpInitHelper}.ts`
+- `src/main/agent/acp/runtime/acpProcessManager.ts`、`src/main/agent/shared/process/childProcessRegistry.ts`
+- `src/main/remote/channels/discord/{discordClient,discordGatewaySession}.ts`、`src/main/remote/channels/qqbot/qqbotClient.ts`
 - `src/main/app/composition.ts`（`acpAsLlmProvider*`）
-

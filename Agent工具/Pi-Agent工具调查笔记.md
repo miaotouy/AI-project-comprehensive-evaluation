@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/tools/`、`core/extensions/`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e86823096c5bad39e1ca282ec24bc5eb9bec745b`（分支：`main`）
+> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
 >
 > 调查方式：只读源码梳理工具定义、注入、校验、编排循环与执行；未运行真实工具调用
 >
@@ -25,7 +25,7 @@ Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本�
 强制 required 与 additionalProperties: false
 ```
 
-`PI_EXPERIMENTAL=1` 时 read/bash/edit/write 内置工具启用 `{ type: "json_schema", strict: "prefer" }` 约束采样（`core/experimental.ts:3-10`、`tools/read.ts:222` 等）。
+read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "prefer" }` 约束采样；Provider 不支持 strict 时仍按兼容策略回退（`tools/read.ts:73-78`、`tools/bash.ts:234-239`）。
 4. **校验集中在执行前**：`prepareToolCall`（`agent-loop.ts:600-664`）用 TypeBox 校验并做值转换（`packages/ai/src/utils/validation.ts:317-349`），未知工具与校验失败都转成 isError 工具结果回注给模型，而不是中断循环。
 5. **循环由 agent-loop 驱动，无显式迭代上限**：内层 while 处理“工具调用 + steering 队列”，外层 while 排空 followUp 队列（`agent-loop.ts:155-275`）；并行工具调用并发执行、结果按序回注；`length`（输出截断）时所有工具调用统一按失败处理（`failToolCallsFromTruncatedMessage`，`agent-loop.ts:381-406`）。源码未发现 maxIterations 类上限。
 6. **审批是回调钩子，不在执行端强制**：`beforeToolCall` 返回 `block` 即拒绝执行（`agent-loop.ts:619-643`），扩展 `tool_call` 事件走同一钩子；没有按工具/风险分级的持久化审批策略。项目信任门不直接拦截 bash 执行，而是决定项目级 `.pi` 设置、资源、扩展与包是否加载（settings-manager.ts:355-356、resource-loader.ts:397-398）；只有当 shell 路径与命令前缀取自项目设置时，信任状态才间接影响 bash 的运行参数（project-trust.ts）。
@@ -125,7 +125,15 @@ Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本�
 - 扩展 `tool_call/tool_result` 钩子与 `prepareArguments` 组合路径的边界情况未逐一覆盖。
 - 容器化模式（Gondolin/Docker/OpenShell）未在本仓库代码内验证（README 指向文档）。
 
-## 11. 关键源码索引
+## 11. Durable 工具执行与注册校验
+
+AgentHarness 的工具执行先形成可恢复的调用与结果记录，再由 drive procedure 按原调用顺序放入 transcript。并行工具可先结算、后放置；进程在两者之间退出时，恢复过程读取已结算 outcome，不重复执行已完成副作用。取消、截断参数和所有工具均要求终止的批次都有单独的 durable outcome（`packages/agent/src/harness/runtime/drive/tools.ts:170-478`、`tool-placement.ts`）。
+
+内置 harness bash/read/write/edit 与稳定 coding-agent 工具分属两套装配，但共享“有限视图 + 完整输出旁路”的原则。shell 输出由执行环境在源侧限界，超限时返回截断元数据并尽力保留临时文件路径，避免跨进程传输无限增长（`packages/agent/src/harness/tools/bash.ts:45-130`、`packages/agent/src/harness/utils/output-capture.ts:67-110`）。
+
+稳定扩展加载器现在拒绝参数 schema 根节点不是 object 的工具；read/bash/edit/write 默认请求 strict-prefer JSON schema 采样，不再依赖 `PI_EXPERIMENTAL` 才启用。实际参数仍在执行前经过 TypeBox 转换与校验，因此采样约束不替代执行端校验（`packages/coding-agent/src/core/extensions/loader.ts:285-294`、`packages/coding-agent/src/core/tools/read.ts:73-78`、`bash.ts:234-239`）。
+
+## 12. 关键源码索引
 
 - `packages/agent/src/agent-loop.ts:155-275`：循环；`381-406`：截断失败；`433-554`：串/并行执行；`600-664`：prepareToolCall；`582-584`：批次终止判定
 - `packages/coding-agent/src/core/tools/index.ts:83-84`：内置工具清单；`tools/bash.ts:88-126`：本地执行后端

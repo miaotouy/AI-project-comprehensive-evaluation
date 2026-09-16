@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`a9319c86ee9468f6e1a56b3f22945a63b95c282f`（分支：`main`）
+> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
 >
 > 调查方式：静态阅读公开聊天状态 hook、答案组件、Markdown/Streamdown 管线、内容块与测试；未做浏览器性能和视觉验证
 >
@@ -44,7 +44,7 @@ Agent content 在最终文本不存在时可逐项显示 thought；reasoning pan
 
 公开聊天的列表使用普通滚动容器和完整的前端 chat tree；本轮在 `base/chat` 范围内未找到虚拟列表或窗口化入口。`useChatLayout` 在用户仍接近底部时把 scrollTop 更新到 scrollHeight；若用户向上滚动且距底部超过 100px，就停止自动跟随。新会话首项变化、输入区尺寸或窗口尺寸变化会重置或重新计算这套滚动状态，footer 的尺寸观察通过 `ResizeObserver` 与 requestAnimationFrame 合并（`chat/use-chat-layout.ts:18-174`）。因此它有避免流式内容抢走阅读位置的静态策略，但没有本次可确认的长会话窗口化机制。
 
-回答操作栏按应用配置和回答状态装配。可见正文可复制并显示成功 toast；重新生成仅在有输入面或显式允许时出现；反馈、annotation、TTS 与 prompt log 又分别要求对应 feature、回调或权限存在（`chat/answer/operation.tsx:86-443`）。这些控件的 `aria-label` 和折叠状态可以从静态组件确认，复制失败、反馈网络失败、焦点归还和移动端触发仍未运行验证。
+回答操作栏按应用配置和回答状态装配。可见正文可复制并显示成功 toast；重新生成仅在有输入面或显式允许时出现；反馈、annotation、TTS 与 prompt log 又分别要求对应 feature、回调或权限存在。反馈提交失败时对话框与本地草稿保持不变，关闭后焦点归还到仍可见的反馈按钮；仓库新增浏览器模式用例覆盖退出动画期间的草稿与焦点契约（`chat/answer/operation.tsx`；`chat/answer/__tests__/feedback-focus.browser.spec.tsx:28-146`）。这属于该操作的自动化验证，复制失败、移动端触发和完整屏幕阅读器路径仍未运行。
 
 ## 4. 流、交互与性能边界
 
@@ -60,7 +60,7 @@ Markdown、代码和普通附件属于消息内容投影，本身没有独立的
 
 - 实际 chunk 刷新频率、滚动定位、长会话内存与普通 DOM 列表的性能上限。
 - 不可信 HTML、远端媒体、插件自定义块的真实清洗/隔离效果。
-- 文件下载/预览失败、引用浮层、操作栏及 sibling 切换的键盘与移动端行为。
+- 文件下载/预览失败、引用浮层、sibling 切换和操作栏除反馈对话框外的键盘与移动端行为。
 
 ## 关键源码索引
 

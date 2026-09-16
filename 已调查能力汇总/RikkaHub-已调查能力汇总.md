@@ -2,7 +2,7 @@
 
 > 汇总对象：`https://github.com/rikkahub/rikkahub`
 >
-> 汇总更新日期：2026-09-15
+> 汇总更新日期：2026-09-16
 >
 > 依据：仓库分布及 16 篇 RikkaHub 单项目调查笔记
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-RikkaHub 是一个原生 Android 的大模型聊天客户端，采用 Kotlin 与 Jetpack Compose，按 Material 3 / Material You 组织界面，底层使用 Room 持久化、DataStore 存偏好、Koin 注入、OkHttp 联网，并以 kotlinx.serialization 序列化。仓库是单 Gradle 多模块工程（app、ai、search、speech、common、document、web、material3、workspace、videogen、oauth、highlight 及 baselineprofile），另挂 web-ui（React Router 7 + TypeScript）、locale-tui（Python）和 trace-cli（TypeScript/Bun）三个旁路子项目。快照含 1380 个跟踪文件、906 个源码文件 / 160600 行源码，其中 Kotlin 约占 82% 行数。[仓库分布调查笔记](../仓库分布/RikkaHub-仓库分布调查笔记.md)
+RikkaHub 是一个原生 Android 的大模型聊天客户端，采用 Kotlin 与 Jetpack Compose，按 Material 3 / Material You 组织界面，底层使用 Room 持久化、DataStore 存偏好、Koin 注入、OkHttp 联网，并以 kotlinx.serialization 序列化。仓库是单 Gradle 多模块工程（app、ai、search、speech、common、document、web、material3、workspace、videogen、oauth、highlight 及 baselineprofile），另挂 web-ui（React Router 7 + TypeScript）、locale-tui（Python）和 trace-cli（TypeScript/Bun）三个旁路子项目。快照含 1381 个跟踪文件、906 个源码文件 / 160600 行源码，其中 Kotlin 约占 82% 行数。[仓库分布调查笔记](../仓库分布/RikkaHub-仓库分布调查笔记.md)
 
 产品主体是一部手机上的聊天工作台：会话以助手为配置单位，可切换 OpenAI 兼容、Google（含 Vertex）与 Claude 三类供应商；聊天之外还提供内嵌 Web 服务器实现的浏览器访问、可运行 Linux 命令的 PRoot 工作区、MCP 工具接入，以及图片生成工作台。下文的“已调查能力”按主题而非来源目录组织，同一机制在多个类目出现时合并叙述。
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：只读通读 media-generator 的 ARCHITECTURE.md、registry、store、生成/任务/持久化 composable 与 buildAgentMethods，asset-manager 的 ARCHITECTURE 与 Rust `asset_manager.rs` 关键命令，llm-apis 适配器族与测试；用 `node -e` 解析 package.json/tauri.conf.json/capabilities，`node --check` 抽查两个纯 JS 文件；未运行 Tauri 应用，未修改被调查仓库
 >

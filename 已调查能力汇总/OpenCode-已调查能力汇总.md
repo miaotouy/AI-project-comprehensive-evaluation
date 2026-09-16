@@ -2,9 +2,9 @@
 
 > 汇总对象：`opencode`（远端仓库 `https://github.com/anomalyco/opencode`）
 >
-> 汇总更新日期：2026-08-27
+> 汇总更新日期：2026-09-16
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 份单项目调查笔记（代码快照均为 `c2eacd72afc4a4984564c393e15ab30011057269`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 份单项目调查笔记（代码快照均为 `e03db9bc6908f75c9334d8aa997deeaac81c0298`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
 >
@@ -38,6 +38,8 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 ### 角色与上下文
 
 - **Agent 角色配置体系**：Agent 是由配置构建的只读内存对象，本身不落库，持久化的只是 session 表上的 agent 名字引用；来源为 `opencode.json` 的 `agent` 字段与 `{agent,agents}/**/*.md`、`{mode,modes}/*.md` 角色文件（mode 强制 primary）。配置加载按十一步顺序合并（远程 well-known → 全局 → OPENCODE_CONFIG → 项目 → `.opencode/` → OPENCODE_CONFIG_CONTENT → Console/Org → 企业托管 → mode 并入 → OPENCODE_PERMISSION → 全局 tools），选择优先级为会话保存值 → default_agent → build → 列表第一个。内置 7 个 agent：build/plan（primary）、general/explore（subagent）、compaction/title/summary（primary+hidden）。`tools` 字段已废弃（仅布尔表、并入 permission）；无导入导出，唯一生成路径是 `opencode agent create`。证据状态：静态源码确认。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md)
+
+- **V2 配置的 V1 兼容读取**：V1 配置加载器在 schema 解码前把 V2 的 agents、模型选择、skills、MCP、compaction 等可表达字段降为 V1 运行形状；冲突时保留 V1 值，不能表示的字段记录诊断，V2 permissions 则明确拒绝。配置写回保留源文件中的 V2 字段，因此该能力是有损运行兼容，不是双向等价迁移。证据状态：静态源码确认。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md) 第 7、10 节
 
 - **system prompt 两段式拼装与指令加载**：第一段按 env（工作目录/平台/日期/引用）→ AGENTS.md 指令 → MCP 指令 → skills 顺序拼接，第二段由 `agent.prompt ?? provider 风格提示` 前缀后合并 user.system 与结构化输出提示；agent 自定义 prompt 完全覆盖 provider 风格模板。AGENTS.md 按全局 → 项目祖先链（AGENTS.md/CLAUDE.md，CONTEXT.md 已废弃）→ config.instructions 顺序加载，每条带来源头。指令加载与拼装链见 `src/session/instruction.ts`、`src/session/prompt.ts:1257-1271`、`src/session/llm/request.ts:56-66`。证据状态：主链确认（静态源码）。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 2 节
 
@@ -99,11 +101,13 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 - **TaskTool 子 agent 与后台任务**：TaskTool 创建子会话（新 Session）执行子 agent，权限收窄继承（父会话 deny 规则 + external_directory 规则，再强制追加 todowrite/task deny），`subagent_depth` 限制嵌套（默认 1）；子会话的 assistant 错误或末尾工具错误会被转为父任务的失败结果。`background=true` 时立即返回、完成后向父会话注入合成 user 消息。后台任务经 BackgroundJob 服务（进程内注册表，重启丢失状态）；`POST /experimental/session/:id/background` 可把阻塞会话的同步子 agent 转后台继续，TUI 快捷键 ctrl+b。证据状态：主链确认（静态证据）。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md) 第 8.3 节、[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md) 第 8 节
 
-- **外部执行体与应用协作**：OpenCode 主要不是托管其他 CLI Agent，而是把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 与 Slack 客户端暴露出去。外部客户端发现或启动 server（localhost、mDNS `opencode.local`、远程 URL），HTTP 创建/选择 session、SSE 订阅事件、prompt 写入、断线重连后 replay、必要时 steal 写所有权，cancel/revert/fork 回传服务端。身份经 HTTP 密码鉴权、sidecar 用户名密码与 CORS 白名单绑定；另有 PTY 终端 WebSocket attach（connect token + 一次性 ticket）与远程 TUI 控制接口（appendPrompt/submitPrompt/controlNext/controlResponse）。工具与文件权限由 OpenCode runtime 承担，外部宿主只经 ACP/HTTP 审批面参与放行。mDNS 与远端 workspace 路由为 `入口确认`，真实多客户端运行未实测（见末尾小节）。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenCode-外部执行体与应用协作调查笔记.md)
+- **外部执行体与应用协作**：OpenCode 主要不是托管其他 CLI Agent，而是把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 与 Slack 客户端暴露出去。外部客户端发现或启动 server（localhost、mDNS `opencode.local`、远程 URL），HTTP 创建/选择 session、SSE 订阅事件、prompt 写入、断线重连后 replay、必要时 steal 写所有权，cancel/revert/fork 回传服务端。ACP 加载、续作与分叉优先恢复 backing session 持久化的 agent/model/variant，并向宿主推送配置变化；reasoning 块按 part ID 区分。身份经 HTTP 密码鉴权、sidecar 用户名密码与 CORS 白名单绑定；另有 PTY 终端 WebSocket attach与远程 TUI 控制接口。工具与文件权限由 OpenCode runtime 承担。mDNS 与远端 workspace 路由为 `入口确认`，真实多客户端运行未实测（见末尾小节）。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenCode-外部执行体与应用协作调查笔记.md)
 
 ### 渠道与调度
 
 - **Provider 运行时组装与凭据**：Provider 是「代码注册的模型目录 + 用户凭据/配置的运行时实例」的合成体，运行时按固定顺序组装 models.dev 目录、插件 hook、config `provider` 字段、环境变量、auth.json 凭据；内置 Provider ID 11 个（opencode/anthropic/openai/google/google-vertex/github-copilot/amazon-bedrock/azure/openrouter/mistral/gitlab）。凭据存 `~/.local/share/opencode/auth.json`（0o600 明文）不写 opencode.json，另有 SQLite credential 表明文 JSON；无加密、无系统 keyring、无 UI 打码。同 provider 多 Endpoint 不支持（config provider 为单对象），多端点需注册多个自定义 provider id；无多 Key 轮询、无跨 provider failover（见末尾小节）。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 1、3 节
+
+- **Azure CLI/Entra ID 与请求容错适配**：检测到本机 `az` 时，Azure 连接目录增加 Entra ID 方法，按 Cognitive Services 或 Foundry scope 获取并缓存 token，再以 Bearer Header 发请求。Provider 的响应头与 SSE chunk 超时统一默认 300 秒且可关闭；Claude 5.1+ 的 Anthropic/Vertex/Bedrock 请求默认带 thinking block binding 容错，并记录 Provider 丢弃块的 warning。证据状态：静态源码确认；真实 Azure 登录与 Provider 行为未实测。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 2、5、9 节
 
 - **模型目录三级数据源**：模型目录来自 `https://models.opencode.ai/api.json` 拉取与缓存，三级数据源为磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络，TTL 5 分钟、每小时刷新、文件锁防并发；`OPENCODE_MODELS_URL`/`OPENCODE_DISABLE_MODELS_FETCH` 可控制。元数据含 cost（tiers）/limit/modalities/status 等，`experimental.modes` 展开为 `modelID-mode` 变体；无硬编码内置清单。证据状态：静态源码确认。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md) 第 4 节
 
@@ -139,7 +143,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI/TUI、Web、桌面端、server
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：以 `packages` 为中心的 Bun/TypeScript monorepo，同时交付 CLI/TUI、桌面、Web、server、SDK、plugin、console 与共享 UI。Git 跟踪文件 6,510 个、可识别源码 3,580 文件 / 721,582 行（TypeScript 93.5%）、文档 820 文件（主要来自文档站及其多语言副本）、测试 955 文件。源码规模最大的是核心 `packages/opencode`（762/176,788）与 `packages/app`（642/172,930），其次 `packages/core`、`console`、`ui`、`tui`、`sdk`、`session-ui`、`stats`、`llm`。CLI/TUI 通过同一核心包支持 Windows/macOS/Linux；桌面应用在 `packages/desktop`，Web UI 在 `packages/app`/`packages/web`，是独立入口共享包而非同一外壳。证据状态：Git 跟踪文件机械统计 + Bun workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/OpenCode-仓库分布调查笔记.md)
+- **仓库分布**：以 `packages` 为中心的 Bun/TypeScript monorepo，同时交付 CLI/TUI、桌面、Web、server、SDK、plugin、console 与共享 UI。Git 跟踪文件 6626 个、可识别源码 3626 文件 / 729988 行（TypeScript 93.5%）、文档 822 文件、测试 1036 文件。源码规模最大的是核心 `packages/opencode` 与 `packages/app`，其次为 `core`、`console`、`ui`、`tui`、`sdk`、`session-ui`、`stats`、`llm`。CLI/TUI 通过同一核心包支持 Windows/macOS/Linux；桌面应用在 `packages/desktop`，Web UI 在 `packages/app`/`packages/web`，是独立入口共享包而非同一外壳。证据状态：Git 跟踪文件机械统计 + Bun workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/OpenCode-仓库分布调查笔记.md)
 
 - **应用界面基础设施（双表面两套栈）**：TUI 基于 opentui + Solid（无 React/Ink），自建单栈对话框栈（single-flight replace、Esc/Ctrl+C 双键关闭、焦点归还）、单条 Toast、崩溃屏与启动加载；Web 基于 Solid + Kobalte + Tailwind CSS 4 + solid-sonner，DialogProvider 命令式弹窗栈（owner 继承 + 100ms 退场）、Toast 双代按新旧布局静态切换、通知中心（localStorage 持久化、30 天 TTL）+ 浏览器 Notification 系统通知。主题运行时解析：TUI 从终端 palette 派生 system 主题（内置 33 JSON + 插件 + 自定义文件）、Web 从 37 个内置 DesktopTheme JSON 生成 CSS 变量并缓存 localStorage、preload 脚本防首屏闪烁；库级 registerTheme/loader.ts 主题 API 存在但 App 未接线。桌面 Electron 主进程维护窗口注册表/几何恢复/原生菜单/无响应恢复；renderer 复用 `@opencode-ai/app`、sidecar 进程内运行同一 opencode server。无托盘与全局快捷键，无主题市场/壁纸/自定义 CSS，fontSize 设置暂无消费方，TUI 无上下文菜单，移动端 768px 硬断点（见末尾小节）。证据状态：静态源码核对。[应用界面基础设施调查笔记](../应用界面基础设施/OpenCode-应用界面基础设施调查笔记.md)
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-04
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态源码阅读。先以根 README、VISION.md、docs 索引与 showcase、gateway/channels/plugins/clawhub 文档、taxonomy 的 release profile 建立产品声明候选；再为核心候选按“入口 -> 状态/对象 -> 执行 -> 用户结果 -> 持久化或下一次触发”走查可执行路径：渠道 DM 准入与配对审批链（src/pairing、src/channels/message-access、Gateway RPC 与渠道插件）、ClawHub 安装信任链（src/infra、skills/plugins CLI）、doctor 修复命令族；全程未运行构建、测试、CLI、Gateway 或外部服务
 >
@@ -22,7 +22,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 | ClawHub 分发与安装信任门 | `主链确认`（静态证据） | 第三方 skill/plugin 分发安全机制，依赖外部 ClawHub 注册表 |
 | `openclaw doctor` 诊断-修复-迁移链 | `入口确认`（修复闭环未逐条走查） | 运维/工程机制，单独标注不混入用户功能统计 |
 | 多渠道 IM、设备节点、ACP/attach、主动与后台任务、媒体生成、记忆、会话消息、渲染与 Chat UI、角色/工具/Skills | `归并已有类目` | 见既有笔记回链 |
-| companion 语音/Canvas/会议/看板等项目新表面 | `暂缓` | 目录与声明层存在，主链本次未走 |
+| companion 语音/Canvas/会议/看板等项目表面 | `暂缓` | Canvas/Board 已归并生成式输出专项；语音、会议等主链仍未完整走查 |
 | taxonomy.yaml、custodian-skills、skills 根目录 | 非用户产品能力 | 仓库 QA 与维护 agent 资产 |
 
 两条主链共同刻画 OpenClaw 的产品辨识点：它把“谁能接触我的 Agent、谁能往本机装会改变 Agent 行为的代码”变成显式、可审计的准入与信任决策，而不是默认放开。前者是渠道/设备配对审批，后者是 ClawHub 安装前的发布信任判定。
@@ -148,7 +148,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 - **taxonomy.yaml、custodian-skills、根 `skills/` 不是终端用户产品能力**。`taxonomy.yaml` 明确是 “Maturity scorecard” 输入（标题、`qa/maturity-scores.yaml`、docs 的 maturity scorecard 编辑规则），描述子系统/功能/平台级别的 QA 与发行成熟度，不驱动用户可见行为；`custodian-skills/` 与根 `skills/` 是维护本仓库的 agent 规则资产。它们的存在不等于产品独特功能。
 - **ClawHub 市场、skills.sh、独立 `clawhub` CLI 位于仓库外**：本仓库持有的是安装与信任裁决主链（能力卡二）；市场数据、扫描与审核在 clawhub.ai。`clawhub` standalone CLI（发布/迁移发布物）不在本仓库内实现。
-- **companion 语音/Canvas/看板/会议等“新表面”本次只到声明与入口层**：`src/talk`、`src/canvas`、`src/boards`、`src/meeting-bot`、`extensions/canvas`、`extensions/talk-voice` 等目录与 docs（nodes 的 audio/talk/voicewake、plugins 的 google-meet/teams-meetings/zoom-meetings/workboard、taxonomy 的 canvas/voice-and-talk categories）说明存在入口与插件声明，但本次未走它们的用户主链，标 `暂缓`/介绍候选，不作为统计依据。
+- **部分“新表面”只到声明与入口层**：companion 语音/talk、A2UI、会议、fleet、projects/flows/tasks 等目录和文档说明存在入口或插件声明，但本次未走用户主链，标为暂缓或介绍候选，不作为统计依据。Canvas 文档与 session board widget 已由 [生成式输出与运行时调查笔记](../生成式输出与运行时/OpenClaw-生成式输出与运行时调查笔记.md) 走查，不再列入本专项暂缓项。
 - **`claws`（Claw 包安装/导出）命令挂在实验开关下**（CLI 注册处按 `isExperimentalClawsEnabled()` 过滤，`src/cli/argv.ts:19`）。其 add/remove/update/export 与 provenance 机制按 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) 只作为独立兼容边界记录，本次不提升为主链候选。
 - **voice-phone 桥接（Vapi 等）、实时语音、APNS 唤醒**依赖外部电话/推送服务，属展示与社区集成声明，无本仓库独立主链证据，本次不调查不计数。
 - **未找到的例外说明**：本笔记没有声称上述目录中的模块“不存在”或“无效”；只说明它们没有被本次独特功能专项走查。设备节点能力（camera/screen/voice 的节点执行域）已在外部执行体笔记内确认，不在此重复。
@@ -157,14 +157,14 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 - 两张能力卡达到 `主链确认`（静态证据）：渠道 DM/设备配对审批门、ClawHub 分发与安装信任门。二者都属于安全/接入/分发机制；按类目规则它们可以进入统计，但应与用户可见创作/协作特性区分标注，也可按“机制单列”处理，不并入一个笼统总分。
 - doctor 修复链维持 `入口确认`，作为工程/运维机制单独记录，不进入贡献统计。
-- 其余候选以“归并已有类目”收口，不新增贡献条目；companion 语音/Canvas 等暂缓项在完成专项前不进入统计。
+- 其余候选以“归并已有类目”收口，不新增贡献条目；companion 语音、A2UI 等暂缓项在完成专项前不进入统计，Canvas 文档与 session board widget 归入生成式输出专项。
 
 ## 未验证事项
 
 - 真实 Gateway 运行下的多渠道 DM 配对并发、码过期竞态、Control UI 审批队列与逐平台挑战消息送达；设备升级请求/吊销向所有节点与渠道的传播。
 - ClawHub 真实注册表响应、tarball 安装落盘、release trust 的下载校验强度、官方发布者免提示判定、`update --all` 收敛行为。
 - doctor 任一“检查-修复-验证”完整回合的运行行为与 `--fix` 对各旧状态的实际迁移效果。
-- companion 语音/talk、Canvas/A2UI、boards/workboard、meeting-bot、fleet、projects/flows/tasks 等新表面的用户主链；telegram `/pair`（device-pair 插件）、trusted-CIDR 自动放行等配置路径的真实行为。
+- companion 语音/talk、A2UI、meeting-bot、fleet、projects/flows/tasks 等新表面的用户主链；telegram `/pair`（device-pair 插件）、trusted-CIDR 自动放行等配置路径的真实行为。Canvas 文档与 session board widget 的静态主链已在生成式输出专项确认，其运行效果仍未验证。
 - 各渠道插件的 DM 门与消息渲染差异无法在静态阅读中全量覆盖；本次以核心决定器与 Telegram 为例，未逐一核对约 20 个支持渠道插件的传输端实现。
 
 ## 关键源码索引

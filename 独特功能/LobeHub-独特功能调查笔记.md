@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读盘点根 README 功能声明、SPA 路由注册表（`src/spa/router/desktopRouter.shared.tsx`）、数据库 schema（`packages/database/src/schemas/`）与后端服务/工作流（`apps/server/src/workflows-hono/`、`apps/server/src/services/taskRunner/`、`apps/server/src/services/memory/`）；补充复核异构 Agent runtime、设备网关和外部应用 Connector；未修改仓库源码
 >
@@ -22,7 +22,8 @@ LobeHub 当前 README 已把产品叙事升级为“Agents as the Unit of Work�
 | Personal Memory | `主链确认`（静态证据） | 完整主链：对话 topic → Upstash Workflow（hourly / 用户触发）→ CEPA+Identity 五层提取 → 1024 维向量入库 → 记忆工具 9 API 读写 → 记忆管理页面编辑 |
 | Agent 运营（Brief 汇报 + Work 产物 + 用量统计） | `主链确认`（Brief/Work 部分）/ `入口确认`（统计部分） | “hires, schedules, reports”中的 reports 落在 Briefs（decision/result/insight/error）+ HomeInbox 双栏 + Work 版本化产物对象；统计页为独立入口 |
 | Agent Builder | `主链确认`（静态证据） | 内置 agent-builder 角色 + `lobe-agent-builder` 工具（读模型/搜工具/装插件/改配置），冲突工具被剥离；对话式配置 Agent 的完整闭环 |
-| 异构 Agent 统一托管 | `主链确认`（静态证据） | 十一种本地 CLI（Amp、Claude Code、CodeBuddy、Codex、Cursor、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，横向比较见[外部执行体与应用协作类目](../外部执行体与应用协作/外部执行体与应用协作横向对比.md) |
+| 异构 Agent 统一托管 | `主链确认`（静态证据） | 十三种本地执行体（增加 Factory Droid 与 Devin）经 driver + stream adapter 统一为 LobeHub operation/message；OpenClaw/Hermes 作为 platform task 启动、续接、取消并通过 notify 回流，横向比较见[外部执行体与应用协作类目](../外部执行体与应用协作/外部执行体与应用协作横向对比.md) |
+| Agent Share 访客运行 | `主链确认`（静态证据） | Agent 可通过链接供已登录访客发起独立会话；分享配置限制访客主题数、每主题回合数、工具/API、模型与错误详情可见性，并在运行时隔离创建者文件、知识、设备与凭据 |
 | IM 网关（Messenger / Agent Bot） | `入口确认` | Slack/Discord/Telegram/WeChat 平台注册、OAuth 安装、webhook 入口、cron 保活；webhook → execAgent 的消息往返未逐平台验证 |
 | Workspace | `入口确认` | workspaces 表 + `/:workspaceSlug/*` 路由镜像 + 成员/预算/审计/配额设置页；共享设备池等治理面与已有 Agent 工具笔记的设备链衔接 |
 | Pages | `入口确认` | `page/[id]` + PageEditor（文档锁、多 Agent copilot）；文档对象链已在生成式输出与运行时笔记覆盖，本笔记补产品表面 |
@@ -167,7 +168,7 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 - **Agent 市场 / Community（hires 面）**：`community/` 路由族（agent/group_agent/model/provider/skill/mcp/user/org 详情与列表）、市场导入链在 Agent 角色笔记 §7 有记录；本次只做运营盘点的组成部分，不单独成卡。
 - **插件、知识库、搜索、设备工具**：全部回链 [Agent 工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)，不再重复。
 
-异构 Agent 与 Connector、Messenger、浏览器控制表面的横向样本见[外部执行体与应用协作横向对比](../外部执行体与应用协作/外部执行体与应用协作横向对比.md)。本笔记只在摘要保留状态，不重复主链细节。
+异构 Agent、Agent Share、Connector、Messenger 与浏览器控制表面的横向样本见[外部执行体与应用协作横向对比](../外部执行体与应用协作/外部执行体与应用协作横向对比.md)。Agent Share 的访客 topic 以 senderId 隔离，运行时强制 headless，并通过装配期与执行期双门禁限制数据和工具；治理字段见 `packages/database/src/schemas/agentShare.ts:7-59`，执行门禁见 `apps/server/src/services/aiAgent/shareGate.ts:89-130,332-459`。
 
 ## 声明不符、外部依赖与暂缓项
 
@@ -180,6 +181,7 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 - **IM 网关**：平台注册（slack/telegram/discord/wechat/line/imessage 渠道路由与 webhook 处理器）、OAuth 安装（`agent-hono/handlers/` 的安装与回调 handler）、`/api/agent/webhooks/:platform`（`platformWebhook.ts`）、cron 保活与外部 `MESSAGE_GATEWAY`（`gatewayCron.ts:189-197`）、验证路由 `verify-im` 均确认存在；但"用户在 IM 发消息 → 绑定 Agent 会话 → 回复回 IM"的单平台完整往返与消息持久化语义未逐一走通（bot 场景的工具设备访问策略在 Agent 工具笔记 §7.2 已有记录）。状态：`入口确认`。
 - **Workspace**：`workspaces` 表（slug/name/primaryOwnerId，`packages/database/src/schemas/workspace.ts:19`）、`/:workspaceSlug/*` 路由镜像（`desktopRouter.shared.tsx:880-1108`）、工作区设置页（成员、通知、统计、计划、账单、预算、额度、用量、服务模型、凭据、API key、OAuth 应用、审计日志、标签、存储、设备）、社区工作区详情页、共享设备池（Agent 工具笔记 §7.2）确认。另确认 API Key 能力范围列（工作区 API Key 按成员权限收敛作用域）、工作区成员可对共享内建 Agent 选择个人模型、群组权限页（`src/routes/(main)/group/permission/index.tsx`）。Workspace 是"团队级 Agent 治理与共享"的容器，成员/权限/预算主链（邀请、角色、配额执行点）未逐个验证。状态：`入口确认`。
 - **Agent 运营的 hires 面**：Agent 市场/社区、ConnectAgent 的“雇用”链路未单独走通；统计页数据聚合（usage 记录的写入与汇总）未验证。状态：`入口确认`。
+- **全文检索后端切换**：统一 FTS facade 支持 PostgreSQL 与可选 Elasticsearch。Elasticsearch 只负责候选召回，最终由 PostgreSQL 按用户、工作区与可见性水化；同步 worker、outbox、mapping generation 和 alias 构成独立部署边界。它属于跨实体检索基础设施，不单独计入特色贡献。状态：`主链确认`（静态源码）。见 `packages/database/src/repositories/ftsSearch/index.ts:39-77,98-199`、`elasticsearch.ts:67-168`。
 - **image/video 创作工作台**（`(create)/image`、`(create)/video` 路由族）为 README 之外的独立创作面，本次不展开（未验证事项）。
 
 ## 对特色贡献统计的影响
@@ -198,7 +200,7 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 - `byProject` 分组中 workingDirectory 写入 topic metadata 的来源链（异构 Agent 运行时的目录上报）；以及实体 `projects` 表与工作目录分组两套“项目”语义的关联链（见 Project 条目）。
 - Goal 循环在真实任务上的运行表现（轮次/预算触达后的 settle 行为、`sweep` 的巡检接线）——静态主链已确认但未运行验证。
 - image/video 创作工作台与 Work 对象的衔接。
-- 十一种本地 CLI 与 OpenClaw/Hermes 的运行兼容性、Windows 进程树终止、SDK/CLI runtime 切换和真实 resume 行为。
+- 十三种本地执行体与 OpenClaw/Hermes 的运行兼容性、Windows 进程树终止、SDK/ACP/CLI runtime 切换和真实 resume 行为。
 
 ## 关键源码索引
 
@@ -208,6 +210,7 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 - 运营汇报：`apps/server/src/services/taskLifecycle/index.ts`（onTopicComplete/synthesizeTopicBrief）、`packages/database/src/schemas/task.ts`（briefs）、`src/features/HomeInbox/index.tsx`、`packages/database/src/schemas/work.ts`、`src/features/Work/descriptors.tsx`、`src/features/AgentUsage/hooks.ts`。
 - Agent Builder：`packages/builtin-agents/src/agents/agent-builder/index.ts`、`packages/builtin-tool-agent-builder/src/manifest.ts`、`src/features/AgentBuilder/index.tsx`（被剥离的四组工具：`lobe-agent-management`、`lobe-group-management`、`lobe-group-agent-builder`、`lobe-agent`）。
 - IM 网关：`src/features/Messenger/index.tsx`、`apps/server/src/agent-hono/handlers/{platformWebhook,messengerInstall,messengerOAuthCallback,gatewayCron}.ts`。
+- Agent Share：`packages/database/src/schemas/agentShare.ts`、`apps/server/src/routers/lambda/agentShare.ts`、`apps/server/src/services/aiAgent/{shareGate,shareVisitorAbuseGuards}.ts`。
 - 项目分组：`packages/utils/src/client/topic.ts:161`、`src/store/chat/slices/topic/selectors.ts:203`、`src/features/AgentSidebar/Topic/utils/topicGroupMode.ts`。
 - Project 实体：`packages/database/src/schemas/project.ts`、`apps/server/src/routers/lambda/project.ts`、`apps/cli/src/commands/project.ts`、`packages/builtin-agents/src/agents/project-coordinator/index.ts`。
 - Goals：`packages/builtin-tool-goal/src/manifest.ts`、`apps/server/src/services/verify/goalLoop.ts`、`src/features/AgentGoals/`、`src/features/ChatInput/InputEditor/ActionTag/goalTag.ts`。

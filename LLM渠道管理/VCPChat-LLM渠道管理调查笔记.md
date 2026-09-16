@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -38,7 +38,7 @@ Agent config.json
 - 模型目录来自同一网关 origin 的 `/v1/models`，只缓存在主进程内存，失败时清空；
 - Agent、话题摘要和桌面 widget 可以选模型，但都继续使用同一 URL 和 Key；
 - 普通聊天、话题摘要和 widget 调用均为单次 HTTP 请求，没有自动重试、退避、换 Key、换 URL 或跨渠道故障转移；
-- `modules/vcpClient.js` 虽实现了 300 秒的超时中断，但全仓库没有任何其他模块导入它，当前实际 IPC 请求链没有接线到该模块；
+- `modules/vcpClient.js` 虽实现了 300 秒超时和按请求中断，但没有接入当前主流程；实际 IPC 请求已有 sender 生命周期 AbortController，可在窗口导航或销毁时取消，仍没有客户端超时或中止按钮到本地 controller 的映射；
 - Flowlock 最多 3 次的“重试”是失败后定时触发下一轮自动续写，不是同一 HTTP 请求的传输层重试，也不换渠道；
 - `settings.json` 直接明文保存 VCP Key，没有 DPAPI、Keychain、Electron safeStorage 等系统加密机制，也没有字段级加密；
 - 设置保存使用临时文件、JSON 回读校验、旧文件备份和原子替换，但这些机制保证写入完整性，不提供 Secret 保密性；
@@ -315,7 +315,7 @@ enableVcpToolInjection = true  -> /v1/chatvcp/completions
 
 [`modules/vcpClient.js`](../../VCPChat/modules/vcpClient.js) 另有一个统一请求模块，用 AbortController 实现 300 秒定时中断，流式清理也更完整。它同步应用了请求上下文与参数省略两处修改，但重新 grep 全仓库后，`vcpClient` 的命中仍只有该文件自身，没有 require 或 import 把它接入当前主流程。
 
-实际生产路径是 main.js 注册的 [`modules/ipc/chatHandlers.js:855-1270`](../../VCPChat/modules/ipc/chatHandlers.js) 中 `send-to-vcp` 发送入口。该入口的 HTTP 请求没有携带取消信号，所以不能把未接线模块的 300 秒超时算作当前客户端能力。
+实际生产路径是 main.js 注册的 `send-to-vcp` 入口。该入口将 SenderTaskRegistry 的 signal 传给 fetch，因此窗口导航或销毁可取消请求；中止按钮仍只请求远端 `/v1/interrupt`，且主链没有客户端超时，所以不能把未接线模块的 300 秒超时算作当前能力。`modules/ipc/chatHandlers.js:983-1012,1238-1246,1412-1457`
 
 ## 5. 多 Key、轮询、重试与熔断
 
@@ -481,7 +481,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 | 普通请求自动重试 | 无 | 单次 HTTP 请求 |
 | 未设置采样参数自动省略 | 有 | `omitUnsetOptionalModelParams`，null/空值不进请求体 |
 | Flowlock 工作流重试 | 局部有 | 最多 3 次新续写轮次 |
-| 客户端请求超时 | 当前主链无 | 300 秒实现位于未接线模块 |
+| 客户端请求超时 | 当前主链无；仅有窗口生命周期取消 | 300 秒实现位于未接线模块 |
 | 跨 URL/Provider failover | 无 | 服务端能力不归因给客户端 |
 | 权重/成本/延迟路由 | 无 | 静态选模 |
 | Secret 静态加密 | 无 | `settings.json` 明文 |
@@ -536,7 +536,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 - 单网关设计简单，但客户端没有备用地址，网关故障会成为单点；
 - 模型只用裸 ID，切换网关后使用统计和收藏可能发生命名碰撞；
 - `/models` 探测不足以验证真实生成和工具端点；
-- 普通请求缺少超时、可重试错误分类、退避和 Retry-After 处理；
+- 普通请求缺少超时、可重试错误分类、退避和 Retry-After 处理；中止按钮也不直接调用本地生命周期 controller；
 - Flowlock 的工作流重试不应被宣传为传输层可靠性；
 - 已实现但未接线的 vcpClient 模块容易让源码阅读者高估当前超时能力；
 - Key、设置备份和 ZIP 均为明文，备份扩大了凭据副本数量；

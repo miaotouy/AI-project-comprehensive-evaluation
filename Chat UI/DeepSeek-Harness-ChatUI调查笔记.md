@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/*`、`packages/host/*`、`packages/api/*`、`packages/typert/`、`packages/extensions/ui-cordis`、`packages/core/tools/src/presentation.ts`）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
 > 调查方式：静态源码阅读，并对照仓库 `.agents/notes/implemented/architecture/` 下的 GUI 系列架构决策记录（加载链、slot 系统、对象层、RPC 协议、输入状态机、工具展示归属等）逐项核实；未运行 `dsh web`，视觉效果、键盘可用性与运行行为未实测
 >
-> 调查范围：前端技术栈与目录组织、双 cordis 插件树的加载链、slot 组合模型、客户端连接与四象限 RPC 协议、会话列表/工作区/搜索与现场恢复、Composer 输入状态机与 slash 管线、发送前配置与 schema-form 设置表单、消息流式渲染、工具卡片渲染意图与键控槽分发、多会话与后台生成、UI 状态所有权；排除项：UI 视觉效果、动画时长、焦点顺序、键盘可用性、滚动与流式性能需要运行验证，未运行即明确标注；会话数据语义、生成任务执行、消息渲染组件细节归相邻类目
+> 调查范围：前端技术栈与目录组织、双 cordis 插件树的加载链、slot 组合模型、Remote mux 与会话 journal、会话列表/工作区/搜索与现场恢复、Lexical Composer 与 slash 管线、发送前配置与 schema-form 设置表单、消息流式渲染、工具卡片客户端派生、多会话与后台生成、UI 状态所有权；排除项：UI 视觉效果、动画时长、焦点顺序、键盘可用性、滚动与流式性能需要运行验证，未运行即明确标注；会话数据语义、生成任务执行、消息渲染组件细节归相邻类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -17,10 +17,10 @@
 DeepSeek Harness 的 Web Chat UI（`dsh web`）是运行在浏览器里的第二条 Cordis 插件树：宿主进程跑一条 cordis 树（agent 循环、会话、RPC 网关、webserver），浏览器里跑第二条 client cordis 树，每个 UI 能力都是一个 `dsh.client` 插件包，由宿主构建的启动图（`__DSH_BOOT__`）按需取回。主要结论：
 
 - **技术栈**：React 18 + Vite 6，但 React 只是纯投影层。业务数据住在 React-free 的"对象层"（`ConnectionController` → `SessionManager` → `Session` 三级），通过 `useSyncExternalStore` 快照喂给组件；组件不 import 框架，全部数据经 slot 系统派发的四个 props 份额到达。
-- **连接架构**：四象限 RPC（请求/响应双向、方向永不从通道推断），上行是 HTTP POST、下行是每条逻辑流一条 WebSocket（mux 全会话聚合流 + host 宿主事件流）；无协议版本号，重连即重建（无 resume 游标）。`assistant/chunk` 事件就是令牌流本身，没有独立 delta 帧。
-- **渲染机制**：`session/event` 帧进入连续事件窗口，由"会话节点装配器"（`ConversationNodeAssembler`）按注册制 Definition 折叠成业务节点；Chat 视图是"order 列表 + 按 key 订阅的座位"结构，流式增量只替换对应 key 的值，不重挂组件、不打乱兄弟节点引用。工具调用按工具名键控槽分发，`GenericToolCard` 兜底；工具在宿主侧用纯函数声明渲染意图（generic/terminal/diff + locations，结果另有 search/read/web 形态）。
+- **连接架构**：上行仍以 HTTP POST 承载 Remote 调用，但下行已经统一为 API Gateway 的 `/api/remote.mux` WebSocket 与逻辑 Remote streams；Connection 只接受带 ready baseline 的 generation。物理 carrier 丢失后重开 `$events` 与各 journal，Session journal 用 tail page 修补 seq 缺口（`packages/client/connection/README.md`、`packages/api/session-controller/README.md`）。
+- **渲染机制**：Session Controller 下发原始 v3 journal 记录与临时 assistant live frames，Client 端投影 conversation/chat/trajectory。工具卡完全由浏览器从原始事件派生，工具名键控槽分发，`GenericToolCard` 兜底；Host presenter 不再进入 Web transport。
 - **设置表单**：宿主把 schemastery 序列化 schema 经 settings 命名空间下发，浏览器端 `rehydrateSchema` 复活校验器，按路径做不可变草稿编辑，以 `settings.mutate` path ops 增量写回。
-- **主链路**：`dsh web` 起服务 → 浏览器拿 index.html + 启动图 → 两阶段启动（模块面 → 插件面）→ settled 一次性切到三栏工作台 → 选工作区创建 blank 会话 → Composer 提交（输入状态机事务）→ `session.prompt(mode:'queue')` → WebSocket 推帧 → 对象层累积 → 快照 → 行级重渲染。
+- **主链路**：`dsh web` 起服务并签发 launch token → 根 URL 用 token 换 Host-bound HttpOnly cookie → 浏览器加载启动图并装配 client 插件 → 选工作区创建 blank 会话 → Lexical Composer 乐观提交并登记 submission echo → Session Remote 接受 prompt → journal/live frame 回流 → durable 记录按 rpcId 退休 echo → 行级重渲染（`packages/client/connection/README.md:32-55`；`ui-conversation/README.md:41-59`）。
 
 ## 工作台边界与用户主链
 
@@ -31,8 +31,8 @@ dsh web（apps/cli 的 web 别名 = --profile web，装入 web-app bundle）
   -> AppFrame 三栏：sidebar | conversation | details（+ shell.overlay）
   -> 无会话 Hero：WorkspacePicker -> connectWorkspace -> 复用或创建 blank 会话 -> open()
   -> InputBar（同一实例从 inert 变 live）-> 输入状态机 -> Enter 提交事务
-     -> 命令裁决（/ @ 触发）或 defaultSink -> session.prompt({mode:'queue'})
-  -> WebSocket 下行：session/event（assistant/chunk 即令牌流）-> Session 事件窗口
+      -> 命令裁决（/ @ 触发）或 defaultSink -> session.prompt({mode:'queue'|'steer'})
+   -> Remote journal + assistant live stream -> Session 事件窗口
      -> ConversationNodeAssembler -> ChatSnapshotBuilder -> ChatView 行级更新
   -> 运行中：TurnStatus + 停止按钮 + 队列 Dock；工具行按工具名键控槽分发
   -> 会话切换：侧栏行点击，Session 常驻消费帧，现场即时恢复
@@ -70,34 +70,15 @@ apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`
 
 组件组合只有一条路：`ctx.slots.register({name, children?, store?, inject?}, Component)`——一次调用同时占用槽位、声明并授权子槽、声明 store、注入业务面（`packages/client/AGENTS.md` 规则 1-3）。组件 props 是四个自动派生的份额：运行时份额（会话作用域含 `useSession` 钩子与会话 id）、子槽渲染份额（`renderSlot`）、store 份额（只读钩子与声明动作）、inject 份额。
 
-槽名镜像组合路径，例如 `'conversation.chat.node'` 与 `'tool.call.toolview'`。对话视图是 ui-conversation 声明的列表槽条目；conversation 条目本身是 session-maybe 驻留壳——无会话到 blank 会话的过渡期保持 React 实例存活（textarea DOM 全程存活），其内部严格会话条目（头部与正文）与同样 session-maybe 的 composer 栏条目在会话出现后才填充内容。完整槽树见 `packages/client/ui-conversation/src/client/contract/slots.ts`。
+槽名镜像组合路径，例如 `'conversation.chat.node'` 与 `'tool.call.toolview'`。对话视图是 ui-conversation 声明的列表槽条目；conversation 条目本身是 session-maybe 驻留壳，无会话到 blank 会话的过渡期保持 React 实例和 Lexical editor surface 存活。完整槽树见 `packages/client/ui-conversation/src/client/contract/slots.ts`。
 
 ## 3. 客户端连接与 RPC 协议
 
-协议契约在 `packages/host/apiproxy/src/api/`（浏览器可 import，零 Node 依赖）：所有 wire 消息是四象限判别联合——`client-request`（客户端铸 rpcId，POST /api/<method>）、`server-response`（该 POST 的应答体）、`server-request`（服务端铸 rpcId，WebSocket 文本消息）、`client-response`（POST /api/respond 回填）。rpcId 纪律：谁发起谁铸造，应答只回显；业务代码永远不铸。
+业务服务以 Typert `@Remote` 声明方法和 journal streams，API Gateway 生成浏览器端命名空间。Remote unary 调用走 HTTP POST；所有逻辑 stream 复用 `/api/remote.mux` WebSocket。Gateway 的内部 `$events` 流先发 ready baseline，Connection 只有在收到 ready 后才发布新 generation，避免列表基线与增量监听之间出现窗口（`packages/client/connection/README.md:28-48`）。
 
-业务结果以 `RpcResult<T>` 的 ok/error 判别联合表达，方法不抛业务错误；传输层失败（网络、宿主不在）由载体抛异常，两层不混（`packages/host/apiproxy/src/api/rpc.ts`）。zod 双层校验（信封一次、按方法或帧类型一次），错误码由 `RpcErrorDetailsMap` 一张表驱动。
+物理连接断开会撤销当前 generation，按 500ms 到 10s 的抖动退避持续重试；浏览器 offline 时暂停，online 后从首档恢复。Host/Origin 检查与签名浏览器 cookie 保护所有 RPC、WebSocket 和 feature-owned Fetch route；launch token 只在根 GET 使用一次，随后重定向到无 token URL。
 
-载体层把平台差异收在两个可覆写点：`AbstractApiClient` 基类持全部协议不变量，传输走 `doFetch`、观察走 `onEnvelope`（实例级微任务批量缓冲，当前无消费方）。
-
-浏览器子类 `WebApiClient` 上行用全局 fetch，下行每条逻辑流开一条 WebSocket——`/api/events.mux` 只发 MuxFrame、`/api/events.host` 只发 HostFrame，每条文本消息是一个完整的服务端请求 JSON 文档；Socket 只承载宿主到浏览器的下行，不接受任何客户端应用消息（`web-api-client.ts:13-90`）。两条流生命周期独立、无跨流顺序保证，任一流结束都判整个连接代数失败。
-
-同源进程内还有不碰网络的 `InProcessApiClient`（跑真实 wire 序列化）与 `FixtureApiClient`（`?fixture` 无服务器开发、协议层假服务）。
-
-`ConnectionController`（`packages/client/connection/src/client/connection.ts:61-169`）泵两条流并管理重连：指数退避 500ms 起、翻倍封顶 10s、带抖动、无次数上限；每代连接先做严格握手——两条流 open 且 `host.describe` 成功才发布 connected。
-
-重连 = 重建：connected 触发列表刷新 + 每个已打开会话 resync（清窗口重开，用 subscribed 帧的 lastSeq 与历史尾 seq 对比、有缺口回填一次）。`assistant/chunk` 就是 session/event 帧里的令牌流，无独立 delta 帧。
-
-帧类型全集见 `packages/host/apiproxy/src/api/events.ts`：
-
-- MuxFrame（全会话聚合流）：`session/event`（会话事件，`assistant/chunk` 在其中）、`session/subscribed`、`session/queue`、`session/projection`、审批与问答的 requested/resolved 对
-- HostFrame（宿主流）：`host/session-added`、`host/session-status`、`host/workspace-*` 系列、`host/remote-event`（Typert 远程事件转发）等
-
-审批与问答的 requested 帧可应答：rpcId 在接受时铸造一次、mux 重开时原样重放；宿主侧 pending 表与 `/api/respond` 应答器已在 `api-proxy.ts:3696-3740` 实现（旧架构笔记中"respond 恒 not-pending 的 stub"状态已被此实现取代）。
-
-宿主侧 BFF：api-proxy 实现全部 unary 域，路由表按 `RpcMethodMap` 编译期锁定（`fetch/handler.ts:90-100`）；除此之外，Typert 网关（`packages/api/gateway`）把业务服务上用 `@Remote` 标记的方法暴露为规范端点——服务端用生成的调用描述符解码参数、解析接收者、调用并编码结果，客户端侧对应的 remote 命名空间服务走 connection 的共享 /api 通道；`packages/api/remotes` 是 BFF 上层，负责 agent/session 身份解析并选择应用暴露的 Remote 贡献。
-
-协议契约由 typert 从类型图生成（registry/loader/generator 三件套，`packages/typert/README.md`），业务包只声明标记。`packages/sdk/` 是另一条独立的进程外通道（stdio JSON-RPC server + TypeScript client），与 Web 的 /api 四象限协议无关。
+Session Controller 是会话 BFF。历史页与 follow opening 传 v3 原始 durable event；assistant token 通过独立 live stream 暂存，匹配的 durable settlement 到达后原子退休临时行。Client journal 先开 follow，再取 initial page，并用 tail page 修复重连或 seq 缺口（`packages/api/session-controller/README.md:27-35`）。
 
 ## 4. 会话导航、工作区与现场恢复
 
@@ -107,13 +88,13 @@ apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`
 
 全局 New Session 按钮默认取最近工作区（按最新会话更新时间排序）。启动时若无已恢复会话，自动打开最近工作区的 blank 会话（策略只结算一次）。blank 会话是"已物化但日志为空"的普通会话：侧栏只显示当前的一个（标题强制 `New Session`），首次 `prompt()` 被接受才翻转 blank 位（宿主权威、跨标签页同步），会话创建不落盘、宿主重启后蒸发（`session.ts:190-260` 的翻转与 `handleBlank`）。blank 判定、创建/复用语义见会话与消息管理类目。
 
-会话切换是"即时"的：Session 实例懒建且常驻，一旦创建就持续在后台吃帧，切走再切回直接渲染快照；切换时细节列自动关闭，滚动位置经 layout store 的 `chatScroll` 保存（会话内跨视图标签页切换恢复位置，见 ChatView 的打开逻辑）。侧栏行点击即切换当前会话（`sessions.current`），无多级目录、无归档 UI（宿主有 archived-sessions 帧与命令，本次未在 Web UI 找到归档入口）。
+会话切换是“即时”的：Session 实例懒建且常驻，一旦创建就持续消费 journal，切走再切回直接渲染快照；切换时细节列自动关闭，滚动位置经 conversation store 保存。Workspace 行可归档会话，设置页的 Archived sessions 支持搜索和逐条恢复；归档只改变导航集合，不删除日志。
 
 ## 5. Composer、草稿与输入状态机
 
-Composer 是 `conversation.composer.bar` 槽位的 InputBar：普通 textarea + 背景装饰层（chip、词法高亮、占位提示都画在 backdrop 上，textarea 字形不可见），带 IME 合成保护（合成期 Enter 只选候选不发送）、图片拖放/粘贴附件（`AttachmentRail`、`imageLimits` 投影预检）、Ctrl+Enter 换行（不走浏览器 execCommand，避免与自管理撤销分叉）。无会话时同一实例 inert 渲染（机器面缺失、`disabled` owner prop），`connectWorkspace` 返回后原地变 live——textarea DOM 全程存活。
+Composer 已换成每 Session 一个 Lexical editor。引用 chip 是携带序列化身份的原子 decorator node，slash claim 保留为带样式的 leading text；同一 Session 仍只允许一个 editable root。无会话到会话切换时 resident shell 保持挂载，草稿镜像留在 per-session Conversation store（`packages/client/ui-conversation/README.md:41-55`）。
 
-输入是纯状态机 `InputMachine`（`packages/client/ui-conversation/src/client/input/machine.ts`）：四阶段（plain / adjudicating / claimed / submitting），命令模式**绝不从草稿文本派生**，由选择路径在离散时刻显式建立 claim（监听 `draft.startsWith(token)`，退格破坏自动释放）。事件面一个事务一条，按功能分组：
+输入状态由 Lexical editor runtime 与提交控制共同维护；命令 claim 由选择路径显式建立，不从任意草稿文本反推。关键行为包括：
 
 - 编辑：草稿变更、Ctrl+Enter 换行（不走浏览器 execCommand，避免与自管理撤销分叉）
 - 跨插件重写：`begin-command` / `insert-ref` / `consume-token` 三个 scoped bail 事件，CAS 是草稿修订号相等
@@ -123,7 +104,7 @@ Composer 是 `conversation.composer.bar` 槽位的 InputBar：普通 textarea + 
 
 引用 chip：每个引用在草稿里占一个 U+FFFC，occurrence 表记录偏移/来源/剪贴板文本；视觉投影是标签、剪贴板投影是占位符展开后的纯文本、模型投影是提交时按来源的序列化器生成——草稿持久化永远存纯文本，刷新后 chip 降级为文本。skill/@subagent 引用走"纯文本引用"路线：选择直接插入字面 `/name ` `@name ` 文本，chip 视觉纯派生（`decorations.scanTextRefs` 词边界扫描），不参与命令裁决。
 
-slash 管线（ui-input-trigger）：根服务只持来源注册表（`InputTriggerSource{trigger:'/'|'@',...}`，按注册顺序轮询，第一个非 undefined 答案胜出，无声明方则落默认 sink），每会话一个 `InputTriggerController` 持权威命中、菜单 store、键盘仲裁（组合框模式：焦点留在 textarea，↑↓/Enter/Esc 拦截且都过 IME guard，唯一例外 Shift+Enter 无条件先走）。命令知识在 ui-commands：三类命令（execute 直跑 / leadingInput 回填 `/name ` 继续输参 / popupSelect 官方选择框壳），目录按 sessionId 键控缓存，命令变更帧经 `host/remote-event` 转发为软失效、`connection/reset` 硬失效重预热；宿主是命令目录唯一权威。
+slash 管线由 ui-input-trigger 管理来源注册、菜单 store 与键盘仲裁；组合框打开时焦点留在 contenteditable。命令知识在 ui-commands，目录按 sessionId 缓存并由 Remote 事件失效；宿主是命令目录权威。
 
 ## 6. 发送前配置与设置表单（schema-form）
 
@@ -137,9 +118,9 @@ API key 经 `credentials.set` 以引用形式存储（不落明文），适配�
 
 ## 7. 发送、流式渲染与生成控制
 
-提交统一走 hub 的 defaultSink：乐观清草稿后只调 `session.prompt(content, 'queue')`（Web 无 steer 入口，宿主 wire 的 steer 模式不进入本机器），失败且 live draft 仍为空才回填——用户已继续输入则绝不覆盖。prompt 的 rpcId 经 MessageSource（`'user-rpc'`）进入 `user/message` 事件，客户端用它把乐观回显升级为事件流的正式消息。
+提交统一走 conversation service：先登记 submission echo 并乐观清草稿，再按繁忙态设置调用 `session.prompt(content, 'queue'|'steer')`。空闲发送落 transcript；繁忙 Queue 显示在 QueueDock，繁忙 Steer 显示为 pending steering。prompt 的 requestId 经消息 source 或 queue occurrence 回流，客户端据此退休乐观回显；失败恢复不会覆盖用户随后输入的文本。
 
-流式渲染全链：宿主推 `session/event` 帧（`assistant/chunk` 就是令牌流，六种 StreamChunk 变体）→ Session 追加到连续事件窗口 → 装配器对每条事件跑所有 Definition 的 `match(event)`（只看当前事件、不做上下文扫描）→ assistant-step Definition 按块索引累积文本/推理/工具增量（块级不可变，见 `assistant.ts:80-120` 的 updateChunk）→ publication 返回动画帧节奏把高频增量合并到下一帧物化 → 快照构建器只替换该 key 的节点 → Notifier 微任务批量（`markDirty`）→ uSES 快照 → 只有订阅该 key 的行重渲染。
+流式渲染全链：Session Controller 的 assistant stream 产生 Client-only live entries，durable journal 产生最终事件 → 装配器按 Definition 匹配单条记录并累积 assistant 块 → publication 以动画帧节奏合并高频增量 → 快照构建器只替换对应 key → Notifier 发布 → 只有订阅该 key 的行重渲染。durable settlement 到达时一次性退休同 attempt 的 transient rows。
 
 `PartialAccumulator`（`packages/client/runtime/src/client/sessions/partial.ts:22-80`）是历史兼容层：usage/finish 判定为不可见、跳过通知。
 
@@ -161,9 +142,7 @@ ChatView（`packages/client/ui-conversation/src/client/chat/ChatView.tsx:146-427
 
 通用行的视觉分类在纯函数行模型 `toolRowModel`：按工具名映射变体（bash/read/write/edit/code/search/others），从 args 提取摘要/可打开路径/展开体，从结果节点展平输出文本，状态取 running/ok/error/stopped（`packages/client/ui-tool/src/client/tool/models/tool-call-model.ts:37-239`）。变体名到图标的映射表只覆盖第一方工具；未知工具名落到 others 行。
 
-工具侧渲染意图是设计的一部分（`packages/core/tools/src/presentation.ts:46-140`）：`ToolDefinition.presentCall` 声明 pending 态（generic / terminal / diff 三类，附类别 icon、`locations` 供编辑器"跟随"），`presentResult` 声明完成态（generic / terminal / diff / search / read / web），全部是 args 的纯函数。
-
-结构化结果（read 的行号窗口、web 的引用源、search 的命中分组）经 `output.presentationMeta` 随会话日志持久化，直播与回放路径由 `presentResult` 同样重建。详情面板是第二展示点：ui-conversation 把选中调用的内容体委托给 `'conversation.details.tool'`，ui-tool 复用卡片模型，插件缺席时回退原始结果文本。
+Host presenter 仍可服务非 Web 消费者，但 Session Controller 不解析工具定义、不运行 presenter，也不附加 UI 数据。Web 从原始 call/result、失败和持久化 `tool/result.data.meta` 派生卡片；详情面板复用同一客户端行模型，插件缺席时回退原始结果文本（`packages/api/session-controller/README.md:27-29`）。
 
 ## 9. 消息操作、队列与详情面板
 
@@ -171,7 +150,7 @@ ChatView（`packages/client/ui-conversation/src/client/chat/ChatView.tsx:146-427
 
 turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产出文件。队列项在 QueueDock 内可编辑/移除/steer。详情面板 `DetailsPanel` 随选中工具调用（`inspectCall`）打开，切换会话时自动关闭。
 
-未找到就地编辑历史消息的入口——历史是追加型，修改以分支表达；消息删除 UI 本次未找到。
+未找到就地编辑历史消息的入口；历史仍以分支表达。Workspace 行现可归档会话，设置页的 Archived sessions 支持搜索并逐条恢复；归档不等于删除日志（`packages/client/ui-settings-unarchive-sessions/README.md:28-36`）。
 
 ## 10. 多会话、子 Agent、后台与跨窗口
 
@@ -192,7 +171,7 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 
 ## 12. 键盘、焦点与关键路径可用性
 
-关键路径键盘：Hero（无会话时整个虚线卡片可用 Enter/Space 打开工作区选择器）→ 输入框输入（IME 合成保护、Ctrl+Enter 换行）→ Enter 提交 / 空格触发的 slash 裁决（Space 只认 leadingInput 命令，防止误触不可逆副作用）→ 组合框菜单 ↑↓/Enter/Esc 仲裁 → 停止按钮、队列项操作均可指针/键盘到达。焦点传播：菜单打开时焦点留在 textarea；弹层外点击关闭并返回文本区焦点；rail 搜索聚焦等待 300ms 侧栏展开动画完成（避免同步 focus 卡顿）。以上是静态代码可确认的绑定；焦点顺序、无障碍名称、实际键盘行为（尤其 IME 在中文输入法下的 Enter 边界）需运行验证（见 §14）。
+关键路径键盘：Hero 用 Enter/Space 打开工作区选择器；Lexical contenteditable 处理 IME、换行和提交；组合框菜单处理方向键、Enter 与 Esc；停止按钮和队列项操作均有键盘入口。以上仅由静态绑定确认，焦点顺序、无障碍名称和中文输入法下的实际边界仍需运行验证。
 
 ## 13. 设计取舍与已确认边界
 
@@ -201,11 +180,11 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - **模型选择器**：可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`packages/client/runtime/src/client/workspaces/service.ts`）。
 - **双 cordis 树 + 运行时插件加载**：浏览器复用宿主的 Loader 治理，模块系统自研（懒 CJS 表 + 同源外部脚本到达）；代价是 dev 每次改插件要重建 bundle + 纤维重挂，HMR 一次只重载一个插件、React 状态丢失（数据层不动）。web bundle 中 hmr 行当前默认 disabled（`cordis.patch.yml` 的 TODO）。
 - **对象层 React-free + uSES 快照**：令牌流不打乱渲染树，行级重渲染靠引用稳定；代价是自研快照/批处理机制（`markDirty` 微任务、`notifyNow` 仅用户手势直回声、`animation-frame` 流式合并）。
-- **重连即重建**：无 resume 游标，`mux` 的 `since` 是保留席位；换来的是实现简单与一致性，代价是重连会丢帧间隙（回填只补一次）。
-- **仅下行 WebSocket**：上行保留 HTTP，避免重写超时/取消/信任围栏/请求关联语义；每条逻辑流一条 socket，绕开 HTTP/1.1 六连接配额但保留双流就绪语义。
+- **重连按 generation 重建 transport、按 journal 修补业务窗口**：Connection 等 `$events` ready 后发布 generation；Session journal 再用 opening snapshot、tail page 与 follow reopen 修复缺口。业务流不再是旧式双 socket。
+- **浏览器认证独立于 Host 信任检查**：启动 token 只可在根 GET 换取签名 cookie；所有 RPC 与 WebSocket 都要求 cookie。Host/Origin 检查先于认证，用于 DNS rebinding 与 cross-site 防护（`packages/client/connection/README.md:30-46`）。
 - **一次翻转 boot**：无渐进渲染；settled 前只有 loading 页。
-- **每会话一个输入机器**，无全局 Composer 并发模型；Web 无 steer 入口（host 能力存在但机器不暴露）。
-- **工具渲染意图 = args 纯函数**，UI 展示层不进会话日志（日志只存 presentationMeta 与事件）；回放由同一函数重建。
+- **每会话一个 Lexical editor runtime**，同一会话不支持同时挂载多个 editable root；繁忙态可配置 Enter 使用 Queue 或 Steer。
+- **Web 工具展示由客户端派生**，UI 展示层不进会话日志；日志只保存原始事件与必要结果 meta。
 - 审批/问答的宿主 pending 表与应答器已实现；客户端 `PendingWait` 会 mint 应答。approval-composer 与 question-composer e2e 存在，行为未实测。
 
 ## 14. 未验证事项
@@ -221,8 +200,9 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - `apps/web/src/main.ts`（应用入口）、`apps/web/vite.config.ts`（shell 打包与 vendor 拆包）、`apps/web/tests/`（keyless 回放 e2e + snapshots）、`apps/web/stress-tests/reasoning-chunks.stress.ts`（流式压力）
 - `packages/client/web/src/boot.tsx`（两阶段启动）、`app.tsx`（renderSlot('root')）、`app-shell.ts`（渲染器安装）
 - `packages/client/ui-layout/src/client/AppFrame.tsx`（三栏）、`packages/client/ui-sidebar/src/client/SidebarRoot.tsx`（侧栏）、`packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx`（会话/工作区列表与搜索）
-- `packages/client/connection/src/client/connection.ts`（ConnectionController）、`web-api-client.ts`（WebSocket 下行）、`packages/host/apiproxy/src/api/rpc.ts`（四象限）、`api/events.ts`（帧清单）、`api/sessions.ts`（会话域契约）、`fetch/handler.ts`（unary 路由表）、`api-proxy.ts:3696-3740`（respond 应答器）
-- `packages/client/runtime/src/client/sessions/session.ts`（帧分派/操作）、`partial.ts`（chunk 累积）、`queue-mirror.ts`、`packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts`（流式 Definition）、`chat/ChatView.tsx`、`chat/ChatNodeSeat.tsx`、`skeleton/InputBar.tsx`、`input/machine.ts`（输入状态机）
+- `packages/client/connection/src/client/`、`packages/api/gateway/`（Remote mux、generation、认证与 Fetch route）
+- `packages/api/session-controller/src/client/sessions/`（journal、assistant stream、submission echo、queue 与操作）
+- `packages/client/ui-conversation/src/client/`（Lexical Composer、conversation nodes、ChatView 与输入行为）
 - `packages/client/ui-tool/src/client/tool/ToolCallTree.tsx`、`tool/models/tool-call-model.ts`、`packages/core/tools/src/presentation.ts`（渲染意图）
 - `packages/client/schema-form/src/model.ts`、`packages/client/ui-settings-models/src/client/ProviderEditor.tsx`、`packages/client/ui-settings/src/client/settings-scope.ts`
 - `packages/api/gateway/src/index.ts`（Typert 网关）、`packages/api/remotes/`（BFF）、`packages/typert/README.md`、`packages/bundle/web-app/cordis.patch.yml`（浏览器 roster）

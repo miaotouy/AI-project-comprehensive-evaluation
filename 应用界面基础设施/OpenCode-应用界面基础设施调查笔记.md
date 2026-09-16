@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -121,7 +121,7 @@ DialogAlert、DialogPrompt 与 DialogSelect 同模式：提示框是多行文本
 
 **菜单。** Kobalte 下拉与右键菜单有 v1 包装（ui/components/dropdown-menu.tsx、context-menu.tsx）与 v2 包装（ui/v2/components/menu-v2.tsx，含 Checkbox/Radio/Sub/Context 变体）；
 
-app 侧消费点如会话标签右键（session-sortable-tab.tsx:129）、首页项目右键（home-projects-view.tsx:478）；桌面应用菜单是原生 Electron 菜单（见第 7 节）。
+app 侧消费点如会话标签右键（旧标签在 session-sortable-tab.tsx:129；新标题栏标签在 `packages/app/src/components/titlebar-tab-nav.tsx:307-342`）、首页项目右键（home-projects-view.tsx:478）；桌面应用菜单是原生 Electron 菜单（见第 7 节）。新标题栏标签菜单提供重命名与关闭，菜单打开时抑制 hover 预览，关闭后再把焦点交给内联标题编辑。
 
 ## 3. 通知、加载态与错误反馈
 
@@ -149,6 +149,8 @@ app 侧消费点如会话标签右键（session-sortable-tab.tsx:129）、首页
 **TUI 启动加载。** StartupLoading（component/startup-loading.tsx）延迟 500ms 才显示，最短停留 3s（防闪烁），Spinner 提示"Loading plugins…/Finishing startup…"。
 
 **TUI 崩溃屏。** ErrorComponent（component/error-component.tsx）——主题 context 本身可能崩溃，故用按 mode 硬编码的备用调色板；提供复制报告（预填 GitHub issue URL，含 OS/终端/版本，超长栈截断）、重启与退出；堆栈区可滚动；小终端隐藏副文案/页脚。
+
+**TUI/CLI 启动错误。** 启动失败时由 `cli/error.ts` 的 `cliErrorMessage` 生成文案写入 stderr，并把退出码置 1（`packages/tui/src/app.tsx:356-363`）。远端配置请求若被 SSO/身份代理拦截，会以 HTTP 200 返回 HTML 登录页；该分支按 `content-type` 或文档头判定为认证失效，抛出 `ConfigRemoteAuthError` 并提示认证缺失或过期，附 `opencode auth login <url>` 重新认证指引（`packages/opencode/src/config/config.ts:217-220`、`packages/opencode/src/cli/error.ts:97-108`）。
 
 **Web 启动。** ConnectionGate（app.tsx:430-499）在健康检查期间显示全屏 Splash，失败进入连接错误页（1s 轮询重试 + 其他服务器切换）。
 

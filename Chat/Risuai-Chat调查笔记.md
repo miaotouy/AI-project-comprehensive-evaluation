@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读源码；通读 `src/ts/process/index.svelte.ts` 主链、存储与保存机制，grep 定位各专项入口后展开读取上下文，未运行应用
 >
@@ -72,7 +72,7 @@ Composer（DefaultChatScreen.svelte:137-216）→ 直接 push 用户 Message 到
 - **自动续写**：结果过短或未以标点结尾时递归以 continue 模式把续文拼接到上一条消息（index.svelte.ts:1885-1904）。
 - **窗口化渲染**：默认只挂载最近 30 条消息，滚动到顶追加 15 条（`src/ts/chatLoadPages.ts`）；消息 DOM 用哈希差量增删，不做虚拟化（`Chats.svelte:65-167`）。
 - **搜索**：本次未找到消息级搜索；仅见角色列表（`MobileSearch`）与模型列表的过滤搜索。
-- **冷存档**：启动时把久未使用的角色与聊天搬到 `coldstorage/` 键，按需 `preLoadChat` 取回（`process/coldstorage.svelte.ts:529,576`），作为会话管理的归档边界。
+- **冷存档**：启动时把久未使用的角色与聊天搬到 `coldstorage/` 键，按需 `preLoadChat` 取回（`process/coldstorage.svelte.ts:575,627`），作为会话管理的归档边界。
 
 ## 未验证事项
 

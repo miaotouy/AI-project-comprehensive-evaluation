@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（SPA 页面路由与 Conversation 组件、全局 ChatStore 与会话级 ConversationStore、conversation-flow 算法包、tRPC 服务端路由与数据库模型）+ grep 检索调用点，全部行号按当前 HEAD 逐一核对；未运行应用
 >
@@ -225,6 +225,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
   - 因此用户可以通过 Topic 搜索找到包含关键词的会话，但结果不会直接标出或滚动到命中的具体消息（搜索入口与结果呈现工作流见 Chat UI 笔记）。
   - 查询参数含 `excludeStatuses`/`excludeTriggers`/`includeTriggers`（`topic.ts` 模型 124-136 行、371-380 行，`includeTriggers` 优先于 `excludeTriggers`），列表查询可按状态/触发源排除（如排除已完成的自动化任务话题），`loadMoreTopics` 会把它们带到后续页。
 - **消息内容搜索端点**：`apps/server/src/routers/lambda/message.ts:526-530` 的 `message.searchMessages`（`MessageModel.queryByKeyword`，`packages/database/src/models/message.ts:1966-1977`，同样 BM25 + `sanitizeBm25Query`）。本次在 `src/` 下未找到聊天 UI 对它的调用——唯一找到的 `searchMessages` 前端调用是 `src/store/tool/slices/builtin/executors/lobe-message/trpcAdapters.ts:272-273` 调 `lambdaClient.botMessage.searchMessages`（botMessage 路由的另一变体，供内置 message 工具使用），不能把它误写成已有的前端消息定位功能。
+- **可选 Elasticsearch 候选层**：FTS facade 可切换到 Elasticsearch。搜索实体包括 Topic、消息、Agent、群组、文档、文件、知识库和用户记忆；外部索引只返回候选，消息与 Topic 模型再从 PostgreSQL 按当前作用域与权限水化，数据库仍是事实源。见 `packages/database/src/repositories/ftsSearch/elasticsearch.ts:67-168`、`packages/database/src/models/message.ts:2816`、`packages/database/src/models/topic.ts:1081` 与 `apps/server/src/services/ftsSearch/index.ts:99-157`。
 - **列表分页**：Topic 列表分页见第 3 节；消息列表的可见部分分页（`getMessages` 的 `current/pageSize` 参数在 `message.ts:347-359` 声明）由消息渲染器笔记的虚拟列表记录，本笔记不重复。
 - **索引自愈（树医生）**：`packages/conversation-flow/src/doctor/diagnose.ts` 的 `diagnoseTopic`（92-348 行）用途是 "detect and repair message trees the reader cannot fully render"，实现分两步：
   - **诊断（只读）**：真的跑一遍 `parse()`，然后 diff 出 parse 无法渲染的消息（126-127 行 `collectRenderedIds(parse(...).flatList)` + `isHidden`），再按已知缺陷形状归因（并发分叉、陈旧分支索引、孤儿 signal 轮次、segment-split、丢失内容）；
@@ -269,6 +270,7 @@ Topic 生命周期在 `src/store/chat/slices/topic/action.ts`（ChatTopicActionI
 - 消息数据库 schema 与迁移机制、导入导出/复制在服务端的具体数据语义（消息深拷贝、附件引用）、多窗口/多端并发写入合并：本次未调查，不虚构。
 - 崩溃恢复与保留语义中“异常退出后半截流的落库行为”未运行验证（发送链的清理/回滚逻辑仅静态确认）。
 - 服务端 `topicDoctorRepo.diagnose/repair` 的具体 SQL/事务实现未下钻（仅确认路由入口与前端调用链）。
+- Elasticsearch 索引回填、outbox 重放、mapping generation 切换和候选排序未运行验证；PostgreSQL 水化与权限复核入口已静态确认。
 - 多窗口/多端并发写入合并语义未验证（见第 6 节第 5 点）。
 
 ## 11. 关键源码索引

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：静态阅读源码与配套文档（`docs/technical/code-execution.md`、`windows-sandbox.md`），结合 grep/glob 关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、execute_code、create_download 等）；未运行应用、未执行测试
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Chatbox 以聊天为主，没有独立的 artifact 对象模型或专用工作区。生成式输出的主要形态是嵌入消息的工具调用结果（`MessageToolCallPart`），辅以三类可寻址结果：`create_download` 声明的持久化文件、HTML artifact 预览、图片生成记录。代码执行由 Agent Mode 门控，桌面端经 `src/main/sandbox` 在本地运行 Node/PowerShell/Bash；macOS/Linux 走 `@anthropic-ai/sandbox-runtime` OS 沙箱，Windows 无 OS 隔离。用户对产物的操作限于预览、保存导出、批准/暂停/继续工具调用；没有编辑器、diff、版本或工作区。模型侧具备"查询（read/list/search）→ 读取 → 定向修改（write/edit）"的文件维护闭环，工作目录以会话 ID 确定性定位，重启后可持续。综合判定为 **G3（可执行 Artifact）**，模型侧编辑链具备 G4 的部分特征（详见"能力等级评估"）。
+Chatbox 以聊天为主，没有独立的 artifact 对象模型或专用工作区。生成式输出的主要形态是嵌入消息的工具调用结果，辅以持久化文件、HTML 预览和图片生成记录。Work Mode 的 `run_command` 采用 sandbox-first 执行并可按审批策略升级到宿主环境，`view_image` 让模型重新读取生成或修改后的图片；生成图片与 `create_download` 文件统一投影到消息底部 artifacts 区域。用户仍没有编辑器、diff 或对象版本界面，模型侧则可围绕同一文件持续读、看、写、运行与声明下载。综合判定仍为 **G3（可执行 Artifact）**，文件维护闭环具备 G4 的部分特征。
 
 ## 系统边界与完整主链路
 
@@ -76,6 +76,7 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 - 暂停卡片提供批准/拒绝/停止（`ToolCallPartUI.tsx:1301`）；审批经 `requestUserExecApproval`/`requestFileMutationApproval` 两个入口（`tools-builder.ts:545`、`filesystem.ts:11`）。
 - artifact 模态框操作：刷新、全屏、Open in Browser（仅 previewUrl）、Publish Webpage（Vibedrop）（`src/renderer/modals/ArtifactPreview.tsx:68-87,124-168`）；移动端操作收进安全头部（避免误触），`ArtifactPreview.tsx` 布局重排为移动优先（`:1-239`）。
 - 下载卡：图片内联预览、HTML Preview、Save（导出）按钮与错误回显（`ToolCallPartUI.tsx:750-910`，`DownloadArtifactsUI:925`）。
+- 图片生成工具的结果图不再只留在步骤卡内部，而是与下载文件一起集中到消息 artifacts 区；即使 Work Mode 完成后折叠过程时间线，结果图仍保持可见。装配见 `src/renderer/components/message-parts/ToolCallPartUI.tsx:1038-1069` 与 `src/renderer/components/chat/Message.tsx:553`。
 - 无编辑器、无沙箱文件浏览器 UI（检索 `SandboxFile*`、`sandbox files` 无命中；`SandboxFileLink` 只是下载卡内链接组件，不是文件浏览器）。
 
 ## 6. 编辑、diff、版本与协作
@@ -108,6 +109,7 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 - 上下文默认保留最近若干轮的 tool-call parts（`src/shared/context/builder.ts:101-154`，`cleanToolCalls` 仅清理更早轮次）；暂停调用不注入。
 - sandboxMode 下附件以 `<SANDBOX_PATH>/<PARSED_SANDBOX_PATH>` 元数据注入而不带内容（`builder.ts:186-190`），模型通过 `read_file`/`code_execution` 主动读取。
 - 模型可查询沙箱状态（`read_file`/`list_files`/`search_files`，路径经 ripgrep 与沙箱校验），工作目录由会话 ID 确定性计算（`resolveSandboxWorkingDir`，`manager.ts:1250-1255`），重启后复用同一目录——"查询 → 读取 → 定向修改"闭环在代码路径上成立。此为静态推断，未运行验证。
+- `view_image` 把沙箱或授权路径中的图片作为模型图像内容回注，弥补仅靠文件名与文本输出无法检查视觉结果的闭环；不支持 tool-result image 的模型改用后续 user 消息注入，并限制历史图像负载。`src/renderer/packages/model-calls/toolsets/view-image.ts:302-488`。
 
 ## 10. 生命周期、资源治理与性能
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：静态源码调查；读取前端 ShareModal/SharePopover/ShareMessageModal、store/service 调用链、服务端 lambda 路由器（topic、share、message、exporter）、数据库模型与 schema（TopicModel/TopicShareModel/TopicImporterRepo）、类型定义（ExportedTopic/ImportedMessage/SharedTopicData）及路由注册；未运行应用、未访问远端分享页
 >

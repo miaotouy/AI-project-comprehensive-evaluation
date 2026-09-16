@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -26,6 +26,7 @@ AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM
 - **WebChat 半开放协议**：出站 `{"type","data",...}` + `[IMAGE]/[RECORD]/[FILE]` 前缀字符串（webchat_event.py:50-149），前端反向解析；历史记录走结构化 parts（message_parts_helper.py）。
 - **T2I 默认渲染模板可迁移**：模板管理器会以哈希识别未自定义的旧核心模板并覆盖升级；已修改的用户副本维持不动，渲染产物仍经结果装饰阶段进入既有消息链（utils/t2i/template_manager.py:16-18、91-123）。
 - **前端渲染**：`messageBlocks()` 按 think/tool_call/content 切块（useMessages.ts:1317-1359），`MarkdownRender` 流式 + `MARKDOWN_RENDER_MAX_LIVE_NODES=320` 节点上限。
+- **WebChat 历史分页进入渲染链**：后端按页返回最新到更早的显示消息，前端将旧页去重后前插，并通过加载前后首条可见消息位置差保持阅读锚点；实时流仍更新当前页中的 bot 记录（`astrbot/dashboard/services/chat_service.py:1414-1469`；`dashboard/src/composables/useMessages.ts:283-430`；`components/chat/Chat.vue:1613-1642`）。
 
 ## 总体调用链
 
@@ -221,8 +222,8 @@ TTS trigger_probability（夹在 [0,1]）
 
 | 模块 | 位置 | 内容 |
 |---|---|---|
-| `useMessages.ts` | :990-1160 `processStreamPayload` | SSE/WebSocket 双通道（TransportMode :5）；按 `msgType`/`chainType` 分派：推理进 think part、工具调用进 upsertToolCall、audio_chunk 直通；`[IMAGE]/[RECORD]/[FILE]/[VIDEO]` 前缀与 `\|` 分隔符解析（:1131-1159）；`resolvePartMedia`（:202-238）attachment_id 三级回退 |
-| `messageBlocks()` | :1317-1359 | parts 流按 think/tool_call 与 content 切块——思考折叠 + 内容块渲染基础 |
+| `useMessages.ts` | :1149-1470 `processStreamPayload` | SSE/WebSocket 双通道（TransportMode :5）；按 `msgType`/`chainType` 分派：推理进 think part、工具调用进 upsertToolCall、audio_chunk 直通；`[IMAGE]/[RECORD]/[FILE]/[VIDEO]` 前缀与 `\|` 分隔符解析（:1289-1330）；`resolvePartMedia`（:227-263）attachment_id 三级回退 |
+| `messageBlocks()` | :1478-1520 | parts 流按 think/tool_call 与 content 切块——思考折叠 + 内容块渲染基础 |
 | `MessageList.vue` | renderBlocks :355-361；media 分支 :38-187 | ReasoningBlock、MarkdownMessagePart、reply 引用、partUrl（:369-380）embedded_url→attachment_id→filename 回退 |
 | `MarkdownMessagePart.vue` / `ThreadedMarkdownMessagePart.vue` | :12/:11 | `markstream-vue` MarkdownRender（custom-html-tags + smooth-streaming），`max-live-nodes` |
 | `markdownRenderConfig.ts` | :1 | `MARKDOWN_RENDER_MAX_LIVE_NODES = 320` |

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-07-30
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：只读源码梳理（`public/scripts/tool-calling.js`、`public/script.js`、`public/scripts/openai.js`、`public/scripts/extensions.js`、`src/endpoints/extensions.js`、`src/plugin-loader.js`、`default/config.yaml` 等），未修改被调查仓库
 >
@@ -19,6 +19,7 @@
 3. 调用循环没有任何逐次审批：模型返回 tool_calls 后立即等待 action，只弹出一个可关闭的 toast，不等待用户确认。
 4. 递归上限默认值是 5（配置键 `oai_settings.tool_call_recurse_limit`，`public/scripts/openai.js:494`），但**用户可在设置面板把它调到 1～50**（`public/index.html:2021`,`2024`）；ToolManager 的递归上限还是可写的静态属性，扩展代码同样可以修改它。
 5. STscript（slash command）与 Agent 工具之间存在一条重要旁路：`/tools-register` 允许把一个 **STscript closure** 注册为模型可调用的工具 action；工具执行时相当于以当前聊天上下文执行一段任意 STscript。这条路径把"模型输出 → 工具调用 → 执行代码"和"STscript 引擎能做什么"直接串联起来，扩大了工具的实际能力边界（可读写变量、调用几乎所有 slash command、发起网络请求等），详见维度 11。
+6. 工具调用以系统消息持久化后可以被级联清理：删除助手消息时默认一并删除紧邻其前的关联工具调用消息，`/cut` 与 `/del` 命令可用 `toolcalls` 参数关闭该行为。流式响应中部分 Provider 每个分片都完整重发 `id`/`name`/`type`，合并时不再对其做字符串拼接，避免重复 ID。
 
 ## ASCII 调用链图
 
@@ -91,6 +92,7 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 3. `custom_prompt_post_processing` 必须属于 `{NONE, MERGE_TOOLS, SEMI_TOOLS, STRICT_TOOLS}`；其余后处理模式会把历史工具调用从 prompt 中强制剥除，视为不支持。
 4. 若能在 `model_list` 中找到当前模型，则按 `chat_completion_source` 走**逐 provider 的模型元数据判定**（表见下）；否则落到步骤 5 的固定支持列表。
 5. 固定支持列表包括 OpenAI、Claude、OpenRouter、Cohere、DeepSeek 等 provider（完整名称见源码中的列表）。
+6. 对于 OpenAI / Azure OpenAI 且模型名以 `gpt-6-astra` 开头的情况，`isToolCallingSupported` 直接返回 false（源码注释称该模型只通过 Responses API 支持工具调用），因此即便属于固定支持列表也不会注入工具。
 
 `canPerformToolCalls(type, settings, model)` = `isToolCallingSupported() && type ∉ {'impersonate','quiet','continue'}`。“旁白/静默生成/续写”这三种生成类型即使模型支持工具也不会触发工具调用/执行（但仍可能把 `tools` 字段带上，见下）。
 
@@ -101,7 +103,7 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 
 stealth 语义：`isStealthTool(name)` 为 true 时，`invokeFunctionTools` 把该次调用名放入 `stealthCalls` 而不放入 `invocations`；`saveFunctionToolInvocations` 只处理非 stealth 的 `invocations`，因此 stealth 工具的调用**完全不写入 chat/不持久化/不触发后续生成**（`shouldStopGeneration` 判断里 `invocationResult.stealthCalls.length` 为真也会直接中止本轮递归）。
 
-依据：`../../SillyTavern/public/scripts/tool-calling.js:608-688`、`../../SillyTavern/public/scripts/openai.js:1301-1307`、`../../SillyTavern/public/scripts/openai.js:2779-2781`
+依据：`../../SillyTavern/public/scripts/tool-calling.js:608-688`、`../../SillyTavern/public/scripts/tool-calling.js:619-625`（GPT-6 Astra 排除）、`../../SillyTavern/public/scripts/openai.js:1301-1307`、`../../SillyTavern/public/scripts/openai.js:2779-2781`
 
 ## 维度 2 附：provider 模型元数据判定表
 
@@ -136,7 +138,7 @@ ToolManager 的响应解析器和流式增量解析器共同完成归一化，�
 | Cohere（流式） | SSE `type ∈ {message-start, tool-call-start, tool-call-delta, tool-call-end}`，payload 在 `delta.message` | 走同一个 `#applyToolCallDelta` 增量合并管线 | index 取 `parsed.index ?? 0`，choiceIndex 固定为 0（不支持多 choice 并发工具调用流） |
 | DeepSeek / 其他"固定支持列表"里的 provider | 服务端统一转成 OpenAI 兼容响应形状（见 `src/endpoints/backends/chat-completions.js` 各分支） | 走 OpenAI 兼容分支 | 前端 `tool-calling.js` 不区分 DeepSeek/Moonshot/xAI 等，靠服务端预先转码成同一形状 |
 
-关键实现点：流式增量合并器对字符串字段是**追加拼接**，对象字段递归合并，空增量不会覆盖已有值。这是刻意的累积语义，但也意味着如果服务端某个分支重复发送同一个字段的完整值（而不是增量），会被错误地拼接两次；其中两个原型相关键被显式跳过以避免原型污染。
+关键实现点：流式增量合并器对字符串字段一般是**追加拼接**，对象字段递归合并，空增量不会覆盖已有值。这是刻意的累积语义，但也意味着如果服务端某个分支重复发送同一个字段的完整值（而不是增量），会被错误地拼接两次；其中两个原型相关键被显式跳过以避免原型污染。`id`、`name`、`type` 是例外：部分 Provider 在每个流式分片都完整重发这三个字段，合并器只在目标为空时写入、不做拼接，避免重复的工具调用 ID（`../../SillyTavern/public/scripts/tool-calling.js:580-590`）。
 
 依据：`../../SillyTavern/public/scripts/tool-calling.js:427-757`
 
@@ -232,7 +234,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 1. 一条新的系统消息（HTML，包含 details、summary、pre 和 code 结构；参数与结果经过解析后写入 textContent，而不是 innerHTML，因此这一步本身不引入 HTML 注入）。
 2. 消息的 `extra.tool_invocations` 结构化数组，其中含调用标识、名称、参数、结果、错误、签名和推理信息；该数组之后会被核心聊天过滤逻辑重新纳入下一轮 prompt（`public/script.js:4437`），即**工具调用记录会持续留在聊天历史里参与后续所有请求的上下文**，除非用户手动删除该系统消息或关闭函数调用开关。
 
-持久化：保存工具调用结果的流程依次把消息加入聊天、发出完成事件、加入 DOM、发出渲染事件，最后保存聊天（见消息渲染器笔记）。**工具调用结果会被写入磁盘上的聊天记录**，与普通消息同等持久化。
+持久化：保存工具调用结果的流程依次把消息加入聊天、发出完成事件、加入 DOM、发出渲染事件，最后保存聊天（见消息渲染器笔记）。**工具调用结果会被写入磁盘上的聊天记录**，与普通消息同等持久化。删除助手消息时默认级联删除紧邻其前、仅承载 `extra.tool_invocations` 的系统消息：删除入口从被删消息向前回溯连续的工具调用消息并一并 splice，删除模式预览也按该起点高亮；`/cut` 与 `/del` 命令以 `toolcalls` 参数控制是否级联（`../../SillyTavern/public/script.js:1614-1700,8195-8211`、`../../SillyTavern/public/scripts/power-user.js:2818-2890`）。
 
 上下文污染面：由于结果原样进入 prompt 且无截断或内容过滤，一个恶意或错误的工具可以把任意大小、任意内容的文本注入后续所有轮次的模型上下文，构成间接提示注入放大器。模型编造不存在的工具名时，界面先显示兜底文案，之后才在真正执行阶段报错。
 
@@ -255,6 +257,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 **浏览器扩展的 manifest 与动态加载：**
 
 - `manifest.json` 通过 `fetch('/scripts/extensions/{name}/manifest.json')` 拉取（`extensions.js:543`），字段包括 `js`/`css`/`loading_order`/`requires`/`dependencies`/`minimum_client_version`/`generate_interceptor`/`hooks`。
+- 发现阶段会剔除没有 `manifest.json` 的扩展目录：服务端 discover 端点与客户端加载清单都过滤这类文件夹（常见于手动删除残留或 Windows 上的锁定目录），避免列表、状态查询与扩展加载里出现无法加载的幽灵扩展（`src/endpoints/extensions.js:486-528`、`extensions.js:1797-1806`）。
 - `activateExtensions()` 校验 `requires`（Extras 模块子集）、`dependencies`（其他扩展未禁用）、`minimum_client_version` 后，用 `import(url)`（`url = /scripts/extensions/{name}/{manifest.js}`）动态加载 JS 入口（`extensions.js:813-819`），加载后调用生命周期 hook `activate`（若 manifest 声明了 `hooks.activate`）。
 - `generate_interceptor`：manifest 可声明一个全局函数名，`runGenerationInterceptors` 在每次生成前按 `loading_order` 排序依次调用 `globalThis[interceptorKey](chat, contextSize, abort, type)`，可修改 `chat`/中止生成（`extensions.js:2015-2038`）。这本身不是"Agent 工具"（模型不可见、不经过 tool_calls），但是另一条扩展可以无审批干预生成流程的通道，需与 Agent 工具区分开。
 
@@ -284,7 +287,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 
 这些配置共同决定的是"谁能访问这个 SillyTavern 实例、能不能通过网络打到内网"，而不是"已安装的扩展/插件能做什么"——一旦通过身份验证进入前端，Agent 工具执行链路上没有额外的按配置项收窄的权限点。
 
-依据：`../../SillyTavern/public/scripts/extensions.js:400-466`,`568-646`,`813-819`,`1698-1740`,`2015-2038`、`../../SillyTavern/src/endpoints/extensions.js:92-156`、`../../SillyTavern/src/plugin-loader.js:40-90`,`179-231`,`237-293`、`../../SillyTavern/default/config.yaml:6`,`59-70`,`154-182`,`392-394`
+依据：`../../SillyTavern/public/scripts/extensions.js:400-466`,`568-646`,`813-819`,`1698-1740`,`1797-1806`,`2015-2038`、`../../SillyTavern/src/endpoints/extensions.js:92-156`,`486-528`、`../../SillyTavern/src/plugin-loader.js:40-90`,`179-231`,`237-293`、`../../SillyTavern/default/config.yaml:6`,`59-70`,`154-182`,`392-394`
 
 ## 维度 11：STscript / slash command 与 Agent 工具的关系
 

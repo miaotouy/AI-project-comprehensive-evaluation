@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读核对 LobeAgentConfig、LobeAgentChatConfig、MetaData、AgentPlugin 类型定义及 AgentSetting store；未修改被调查仓库源码
 >
@@ -119,7 +119,7 @@ interface LobeAgentConfig {
 - 推理强度字段：`gpt5ReasoningEffort`、`grok4_3ReasoningEffort`、`deepseekV4ReasoningEffort`、`hy3ReasoningEffort`、`codexMaxReasoningEffort`、`opus47Effort`、`glm5_2ReasoningEffort` 等；
 - 模型专属字段：`gpt5_1`、`gpt5_2`、`gpt5_2Pro`、`gpt5_6`、`grok4_5`、`grok4_20`、`ring2_6`、`step3_5`、`kimiK3` 等。
 
-推理强度另有**用户级模型实例默认层**：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，按 userId+providerId+modelId 存储，由 `updateModelReasoningConfig` 维护），Composer 的 Effort 预设读取该层（`ChatInput/ActionBar/Effort/`），与 Agent 级 chatConfig 字段并存；两层的覆盖优先级本次未走通（见调查边界）。
+推理强度另有**用户级模型实例默认层**：`ai_models.config.chatConfig`（`AiModelReasoningConfig`，按 userId+providerId+modelId 存储，由 `updateModelReasoningConfig` 维护）。Composer 通过 `useReasoningEffortControl` 把该层与 topic 覆盖解析后并入模型选择器，与 Agent 级 chatConfig 字段并存；完整覆盖优先级仍需结合共享 Mecha 参数解析继续核对。
 
 **上下文与历史**
 
@@ -201,6 +201,8 @@ interface LobeAgentConfig {
 - 设备级工作目录绑定（`workingDirByDevice`）；
 - 指定异构 Agent Provider（用于 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`）。
 - 图式编排：`enableGraphMode` 与 `graph?: AgentGraph` 一起描述节点、边、路由条件和数据契约。它们在当前快照从 `chatConfig` 迁入 `agencyConfig`，因此归属 Agent 的执行行为，而不是每个会话的偏好（`packages/types/src/agent/agencyConfig.ts:811-838`）。
+
+共享 Agent 的访客运行不会继承创建者配置中的全部外部能力。服务端解析创建者 Agent 后，以 Agent Share 配置剥离文件、知识库、异构 Agent 和设备能力，并按 tool grants 收窄工具；访客 topic 另以 senderId 隔离。角色配置在此只提供被分享的基础 Agent，具体门禁属于外部执行体与 Agent 工具类目。
 
 `agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`；复制 Agent 时会保留 `agencyConfig`，数据迁移接受嵌套 `config.meta` 并替换过期 profile。
 

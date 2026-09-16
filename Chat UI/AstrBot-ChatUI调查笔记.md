@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：直接阅读源码（Dashboard 前端 Vue 组件与 composables、FastAPI 聊天接口、WebChat 平台适配器），行号按当前 HEAD 逐一核对；视觉、焦点顺序、键盘可用性等需运行确认的项标注"未运行验证"
 >
@@ -17,7 +17,8 @@
 AstrBot 主要面向外部 IM 平台（QQ/Telegram/Discord/微信），这些平台客户端的聊天界面不归 AstrBot 所有。按 Chat UI 类目适用性规则，本笔记只覆盖项目自带界面：**WebChat**（Dashboard 内嵌聊天工作台）与 **Dashboard 管理界面**。
 
 - **聊天主链**：`Chat.vue` 工作台（会话列表 + 消息区 + Composer）→ `useMessages` 以 SSE 或 WebSocket 双通道提交并消费流式事件（POST `/api/v1/chat`、`/api/v1/unified-chat/ws`）→ 事件进入 webchat 队列 → 与外部 IM 共享同一套事件总线 + 流水线（执行语义在对话请求与上下文笔记）；`scheduler.execute` 结束时以结束事件刷新 UI（scheduler.py:94-95）。
-- **现场恢复有专门路径**：刷新页面后 `loadSessionMessages` 携带 `active_runs` 快照重建运行中的 bot 消息并重连 `/chat/runs/{id}/stream`（useMessages.ts:257-313）。
+- **历史改为分页恢复**：首次只取最新 50 条，滚动接近顶部时加载上一页并保持首条可见消息的屏幕位置；页面返回 total/page/page_size/has_more，加载失败有独立重试表面。运行中的 bot 消息仍通过 active_runs 快照恢复并重连（`astrbot/dashboard/services/chat_service.py:1414-1469`；`dashboard/src/composables/useMessages.ts:283-430`；`components/chat/Chat.vue:1613-1651`）。
+- **聊天设置集中到独立对话框**：主题、语言、流式开关、推理显示、发送快捷键与 SSE/WebSocket 传输模式从 Composer 周边收拢到 `ChatSettingsDialog`；推理开关随发送、编辑续写与重生成请求传给后端（`dashboard/src/components/chat/ChatSettingsDialog.vue:1-190`；`Chat.vue:187-193,1334-1350`；`useMessages.ts:519-548,645-681`）。
 - **消息操作完整**：编辑（仅最新用户消息）、重生成（仅最新 turn）、选中文本创建侧线程（thread）、推理/引用面板——入口在 ChatMessageList，执行语义在会话与消息管理笔记 §4。
 - **Live Mode 前端当前未挂载**：`LiveMode.vue` 存在但全仓库无 import（仅 ChatInput.vue 的 `openLiveMode` 事件发射，按钮已注释），后台 `/api/v1/live-chat/ws` 与 `run_live_agent` 路径仍保留（live_chat.py:35-37；internal.py:293-329）。
 
@@ -56,7 +57,7 @@ WebChat 与外部 IM 共享同一套事件模型，WebChat 界面只负责呈现
 - **Composer**（ChatInput.vue）：单行 input + 多行 textarea 双形态，按内容自动切换与自动高度（:613-673，移动端高度上限 :632-640）；发送后清空并回焦（Chat.vue:1379、:1399）。
 - **发送快捷键**：Enter/Shift+Enter 由 `sendShortcut`（默认 enter，Chat.vue:744）决定，Ctrl/Meta+Enter 恒为发送；IME 组合输入用 `isComposingEnter` 防误发（ChatInput.vue:720-757）。
 - **命令建议**：输入以唤醒前缀开头时显示 CommandSuggestion，方向键/Enter 选中、Esc 关闭（ChatInput.vue:689-718、:775-793）。
-- **草稿**：`draft` 是组件内存 ref（Chat.vue:711、StandaloneChat.vue:258、ThreadPanel.vue:94 各持一份），**不持久化**（localStorage 仅存传输模式、provider/模型选择与项目展开状态，静态检查）；切换会话清空 replyTarget 但保留 draft 值本身（draft 未按会话分组，属全局草稿——静态推断）。
+- **草稿**：`draft` 仍是组件内存 ref，不按会话持久化；切换会话会保留当前组件实例中的文本，刷新后丢失。
 - **附件**：图片/音频/文件经媒体处理 composable 上传为附件并 staging 预览（Chat.vue:667-680）；拖放热区为整个聊天区域（useDragUpload.ts:7-47，拖入显示全区遮罩 Chat.vue:333-340），松手后与选择文件走同一上传链路（Chat.vue:682-685）；粘贴图片直接上传；录音按钮 + Ctrl+B 长按录音（ChatInput.vue:723-733）。
 - **回复引用**：消息操作触发 `replyTarget`，发送时作为 `reply` part 携带（Chat.vue:1403-1411）。
 

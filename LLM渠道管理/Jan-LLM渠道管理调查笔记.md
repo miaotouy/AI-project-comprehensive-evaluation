@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 provider/参数体系、Rust server 代理全量行级阅读）；未修改 Jan 仓库
 >
@@ -48,7 +48,7 @@ Jan 中需要区分三个层次：
 | 入口 | 查看 | 新增 | 编辑 | 复制 | 启停 | 删除 | 导入/导出 | 连接测试 |
 |---|---|---|---|---|---|---|---|---|
 | 配置文件 | `settings.json` 中可读到序列化的 `model-provider` Zustand 状态；provider secrets 不在此文件 | **未找到**稳定的手工 schema/命令 | 可手工改非 secret JSON，但不属于产品化入口，效果未验证 | 未找到 | 可改 `active`，效果未验证 | 可从 JSON 删除对象，keyring 残留处理未验证 | **未找到** provider 专用导入/导出格式或命令 | **未找到**文件级测试机制 |
-| CLI | `jan models list` 查看本地模型，不查看远程 provider 目录 | **不适用/未找到**远程渠道新增命令 | `serve`/`launch` 只接受运行时模型、端口和 API key，不编辑 provider | 未找到 | `serve` 启动/退出本地模型服务；不是 provider `active` 开关 | Ctrl+C 或进程退出停止本地服务；不是删除渠道 | **未找到**渠道导入/导出；`launch openclaw` 会写入外部 `~/.openclaw/openclaw.json` 的 `jan` provider，但这是 agent 配置联动 | **未找到**独立 provider 连接测试 |
+| CLI | `jan config list` 以 JSON 列出 `~/.jan/config.toml` 中的 provider（key 脱敏）；`jan cli models list` 列出已解析 provider 的模型 | `jan config set --provider X [--api-key --base-url --model --api-type]` 新增或改写 provider 条目 | 同左（`set` 覆盖）；`jan login` 写入 Tokamak 账号 key | 未找到 | 未找到 provider `active` 开关（启停只用于 `jan cli mcp` 的 server） | `jan config unset --provider X` | 未找到渠道导入/导出 | **未找到**独立 provider 连接测试；`jan auth status` 只校验 Tokamak 登录 |
 | TUI | **未找到 Jan 自身 TUI**；CLI 的模型/agent 选择器是交互式终端选择，不是渠道管理界面 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 |
 | Web（浏览器实现） | 默认 provider service 返回空，provider 管理依赖 Tauri；仅确认 backendStorage 在非 Tauri 下使用 localStorage | **源码未找到可用的远程 provider 数据来源** | 同上，不能据此确认浏览器模式可管理 provider | 未找到 | 未找到可执行的 provider 列表状态 | 未找到可执行的 provider 删除 | 未找到 | 未找到 |
 | Web UI（桌面 Tauri 壳内） | 设置 > Model Providers 列出 provider、模型数量、启用状态；详情页展示设置、key、模型 | `AddProviderDialog` 新增自定义远程 provider | 详情页编辑设置、Azure base URL、API key/fallback、模型元数据；无 provider 重命名 | 未找到 provider 复制入口 | 列表和详情页均有 `active` 开关；停用 llamacpp 会先停止全部模型 | 仅自定义 provider 显示删除确认；内置 provider 和 EngineManager provider 不显示删除 | provider 导入/导出未找到；llama.cpp/MLX 的**模型**有文件导入入口 | 高级 API key 面板逐 key GET `/models`，显示 200/401/403/429/网络错误 |
@@ -75,7 +75,7 @@ Web 详情页确实提供“刷新、手动新增、编辑、删除”按钮，�
 
 ### CLI 与 TUI 边界
 
-`src-tauri/src/bin/jan-cli.rs` 的命令树只有 `serve`、`launch`、`threads` 和 `models`。其中 `serve`/`launch` 通过命令行参数或交互选择器加载本地模型；不会读取或修改 Web provider 列表，也没有远程 provider 的 CRUD、key 测试、导入导出命令。`launch openclaw` 是例外性的外部配置联动：它把当前本地 Jan server 写入 `~/.openclaw/openclaw.json` 的 `models.providers.jan`，并设置默认模型，不等同于 Jan 渠道管理。仓库中未找到 Jan 自身 TUI 目录或 provider 管理 TUI；CLI 的选择器只选择 agent/model。
+独立 crate `src-tauri/jan-cli` 的命令树分为 `cli`（threads/models/agent/mcp）、`login`/`auth`、`config`（set/unset/list/path）、`plugin` 与 `update`。渠道管理落在 `jan config`：`set` 可按 `--provider` 写入 API key、base URL、模型列表与 `api_type`，`list` 输出已配置 provider 的 JSON（key 脱敏），`unset` 删除条目，全部作用于全局 `~/.jan/config.toml`；`jan cli models list` 再按解析结果列出模型。解析优先级为 CLI 参数与环境变量、项目 `.jan/agent/agent.toml` 的 `[provider]`、桌面 `settings.json`（只继承不回写）、全局 `~/.jan/config.toml`（`src-tauri/src/core/cli/providers.rs:1-16`）。CLI 不提供 provider 启停开关、独立连接测试与导入导出；`jan login`/`auth` 只处理 Tokamak 账号凭据。裸 `jan` 打开的是 Agent TUI（`src-tauri/src/core/cli/tui.rs`）而非渠道管理界面；MCP server 的增删改与启停由 `jan cli mcp` 负责。
 
 ## 1. Provider 定义与配置模型
 
@@ -308,16 +308,15 @@ ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型
 
 ## 7. 本地引擎：llamacpp-extension
 
-`extensions/llamacpp-extension/src/index.ts`（4000+ 行）：
+`extensions/llamacpp-extension/src/index.ts`（约 3,185 行）：
 
-- `get()`（L2414-2445）读 `models/<modelId>/model.yml`；
-- `resolveEmbeddingConfig`（L2451-2514）：GGUF 元数据探测 embedding → 回写 `cfg.embedding` + `embedding_check_v` 版本化缓存；embedding 模型默认补 `pooling='mean'`/`ubatch_size=2048`/`batch_size=2048`；
-- `resolveMtpLayersConfig`（L2516+）：MTP 层数探测；
-- 每模型独立读写（L2677-2684 注释：单 model.yml 损坏不影响其他）；
-- `PRESET_AFFECTING_KEYS`（L138）→ 600ms 防抖 `scheduleRouterRestart()`（L2386-2404）重启 router，`selfInflicted` 防自激；
-- 模型配置中 `quant_type: undefined` 为硬编码 TODO（L2438）。
+- 读取 `models/<modelId>/model.yml` 的模型配置；
+- `resolveEmbeddingConfig`（L1420）：GGUF 元数据探测 embedding → 回写 `cfg.embedding` 与版本化缓存；embedding 模型默认补 `pooling` 与批量参数；
+- `resolveMtpLayersConfig`（L1485）：MTP 层数探测；
+- `PRESET_AFFECTING_KEYS`（L110）集合内的设置变化会通知 worker 重新应用 preset；旧版的防抖 router 重启与 `selfInflicted` 自激保护已不存在；
+- 模型配置中 `quant_type: undefined` 为硬编码 TODO（L1397）。
 
-本轮 llama.cpp 插件不再在 Tauri 进程内直接承担引擎服务：worker 启动后握手返回端口、进程号和 API key；worker 内部 registry 按需加载模型、记录请求中的 busy 状态，并在容量已满时淘汰最近最少使用的空闲模型。固定 slot 的 KV 状态可按 thread_id 保存到磁盘，在模型、预设、llama.cpp 版本和模型文件都一致时恢复；缓存预算为零时功能关闭。进程实际生命周期、跨会话缓存命中率与淘汰时延均未运行验证（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs:288-409`、`engine/registry.rs:145-249,329-470`、`engine/http.rs:214-332`、`engine/slots.rs:35-175`）。
+引擎不再是运行机下载的后端二进制：它按编译期版本捆绑进随附 worker，扩展 `startEngine()`（L853-900）生成 preset 后由插件启动该 worker，握手返回 OS 分配的端口、pid 与 API key；worker 内部 registry 按需加载模型，并在容量已满时只淘汰空闲的最近最少使用 chat 模型（`index.ts:2297-2318` 的 `userModelsMax`/`loadedChatOrder`）。逐线程 KV 状态可按 thread_id 保存到磁盘、在身份校验通过时恢复，缓存预算（MiB）为零即关闭。进程实际生命周期、跨会话缓存命中率与淘汰时延均未运行验证（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs`、`engine/registry.rs`、`engine/http.rs`、`engine/slots.rs`）。
 
 `ModelConfig`（`src-tauri/plugins/tauri-plugin-llamacpp/guest-js/types.ts:104-116`）：
 
@@ -330,39 +329,39 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 
 ## 8. Rust server 与代理
 
-### 8.1 路由表（proxy.rs，3577 行）
+### 8.1 路由表（proxy.rs，2,740 行）
 
 | 路径 | 行为 |
 |---|---|
-| `POST /orchestrations` | `stream=true → 400`；缺 `messages` → 400（L1817-1845） |
-| `POST /chat/completions`/`/completions`/`/embeddings`/`/messages/count_tokens` | body 含 model 查路由（L2099-2102） |
-| `GET /v1/models` | 合并 local+mlx+remote 三源（L2394-2428） |
-| `GET /openapi.json` | include_str! 静态文件动态替换 host/port（L2430） |
-| Anthropic `/v1/messages` | Claude Code 场景转换（L1606-1640） |
+| `POST /orchestrations` | `stream=true` 拒绝；缺 `messages` 报错（L1119-1200） |
+| `POST /chat/completions`/`/messages/count_tokens` 等 | body 含 model 后解析上游（count_tokens 见 L1460） |
+| `GET /v1/models` | 合并本地引擎与远程 provider 模型（L1714 起） |
+| `GET /openapi.json` | include_str! 静态文件并替换 host/port（L1801） |
+| Anthropic `/v1/messages` | 转发到本地 `/v1/messages`（L1068） |
 
 ### 8.2 代理链路
 
-`proxy_request`（L1286）→ `router_upstream`（L832）按模型选上游：本地 → llama-server/mlx-server 子进程；远程 → `call_openai_chat_completions`（L1082）带 Bearer key 直连（L858/L1102）。
+`proxy_request`（L637）按模型解析上游：本地引擎走 `engine_upstream`（L575），远程 provider 走从 `core/agent/上游层` 导入的 `call_openai_chat_completions`（`src-tauri/src/core/agent/upstream.rs:768`）并带 Bearer key 直连。编排辅助（`resolve_upstream_for_model` L403、`load_assistant_config` L41、`parse_openai_messages` L65、`repair_dangling_tool_calls` L146、`collect_mcp_openai_tools` L615、`execute_mcp_tool_calls` L680）已从 `proxy.rs` 移到 `core/agent/upstream.rs`。
 
-`run_server_side_openai_orchestration`（L1136-1282）服务端编排：max_turns 默认 8、clamp 1-20，每轮 `stream:false` + `tool_choice:'auto'`，超轮次返回 422。
+`run_server_side_openai_orchestration`（`src-tauri/src/core/agent/loop.rs:1476`）服务端编排：`max_turns` 默认 8（`PROXY_DEFAULT_MAX_TURNS`，loop.rs:1528）。
 
 ### 8.3 转换器与流式转发
 
-`converters.rs`：`convertor_for`（L125-132）、`OpenAIResponsesConverter`（L150-160）、`transform_and_forward_stream`（L3223，Anthropic content_block/tool_block 索引跟踪，`[DONE]` 收尾）。
+`converters.rs`：`converter_for`（L154）按 wire 协议分派，`OpenAIResponsesConverter`（L195）、`AnthropicMessagesConverter`（L886）、`GoogleGenerateContentConverter`（L547）完成双向转换与流式转发。
 
-工具 schema 规范化（proxy.rs L56-179）：
+工具 schema 规范化已移到 `src-tauri/src/core/openai_schema.rs`（Tauri-free，与 CLI 的 agent upstream 共用）：
 
-- `LLAMACPP_BROKEN_STRING_FORMATS = ["date","time","date-time"]`（L61）：GBNF 拒绝，静默禁用 tool-call；
-- `normalize_openai_tool_parameters_schema`（L101+）：description-only 叶子补 `type:"string"`、`object` 无 properties 补空、strip 不认识的 format 与 PCRE 简写 pattern、递归进 properties/anyOf/oneOf/items/definitions（L149-179）；
-- `coerce_schema_node`（L79-91）：裸字符串 `"string"` → `{"type":"string"}`。
+- `LLAMACPP_BROKEN_STRING_FORMATS = ["date","time","date-time"]`（L14）：GBNF 拒绝，静默禁用 tool-call；
+- `normalize_openai_tool_parameters_schema`（L54）：description-only 叶子补 `type:"string"`、`object` 无 properties 补空、strip 不认识的 format 与含 PCRE 简写的 pattern，并递归进 properties/anyOf/oneOf/items/definitions；
+- `normalize_openai_tools_in_chat_body`（L146）：批量规整 chat body 中的 tools。
 
 ### 8.4 认证（真实路径）
 
-`proxy.rs` L1509-1541：非白名单路径且 `config.proxy_api_key` 非空时，校验 `Authorization: Bearer` 或 `X-Api-Key` 之一；任何匹配 `/configs` 的路径一律 404（L1543）。
+`proxy.rs:691` 起：非白名单路径且 `config.proxy_api_key` 非空时，校验 `Authorization: Bearer` 或 `X-Api-Key` 之一；包含 `/configs` 的路径直接 404（L892）。
 
 ### 8.5 服务端工具执行
 
-`execute_mcp_tool_calls`（L1015-1080）：串行执行，arguments 解析失败容错 `{}`（L1041-1042），错误统一前缀 `"ERROR: "`；三处入口均受 `enable_server_tool_execution` 门控（默认 false，proxy.rs:714/1606/2139）。
+`execute_mcp_tool_calls`（`core/agent/upstream.rs:680`）：串行执行，arguments 解析失败容错 `{}`，错误统一前缀 `"ERROR: "`；入口受配置项 `enable_server_tool_execution` 门控，默认 false（`proxy.rs:955,1497`）。
 
 ### 8.6 本地 API server 设置
 
@@ -392,12 +391,12 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 
 ### 9.2 hardware
 
-`routes/settings/hardware.tsx`：GPU/CPU 配置写 provider settings（llamacpp 的 `ngl`/`cpu_threads` 等），经 `updateProvider` 生效；后端版本/backend 变更时重置 device 选择 + 刷新 llamacpp devices + stopAllModels（`$providerName.tsx` L893-929）。
+`routes/settings/hardware.tsx`：GPU/CPU 配置写 provider settings（llamacpp 的 `ngl`/`cpu_threads` 等），经 `updateProvider` 生效；更改引擎设置后立即停止本地模型并刷新已加载模型（`$providerName.tsx:743-754`）。
 
 ## 10. 边界与未验证事项
 
 1. **SecurityConfigDialog 是孤儿死代码**：【代码确认】src-tauri 全库 grep 无 `security_*` 命令，组件无挂载点（SettingsMenu 的 privacy 页只实现 analytics 开关）。与之对比的“真实认证”在 proxy.rs 的 `proxy_api_key` 双头校验。
-2. **llama-server 鉴权强度**：【代码确认】`api_key = BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))`——密钥常量 `'JustAskNow'` 在 `extensions/llamacpp-extension/src/index.ts:429`，派生函数 `generate_api_key` 在 `src-tauri/utils/src/crypto.rs:22-30`；`RouterInfo{port, api_key, pid}` 对 webview 可见。防局域网误连、不防本地恶意进程。
+2. **llama-server 鉴权强度**：【代码确认】`api_key = BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))`——密钥常量 `'JustAskNow'` 在 `extensions/llamacpp-extension/src/index.ts:424`，派生函数 `generate_api_key` 在 `src-tauri/utils/src/crypto.rs`；worker 握手返回的 `EngineInfo{port, api_key, pid}` 对 webview 可见。防局域网误连、不防本地恶意进程。
 3. **参数链路分离**：绕过 `createCustomFetch` 的直连请求不带采样参数；`streamText` 层不感知推理参数。【代码确认】
 4. **采样参数自动重试**基于错误文本正则启发式，命中误报时静默丢参重试一次。【代码确认 + 推测影响】
 5. **`ProviderApiType` TS 类型仅 `'openai'|'anthropic'`**（`web-app/src/types/modelProviders.d.ts:62`），而 Rust 端承认 openai-responses/google 等更宽取值——TS 窄于可写 wire 值。【代码确认】
@@ -419,13 +418,13 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 | provider 状态持久化与迁移 | `web-app/src/hooks/useModelProvider.ts:50-236,325-762`、`web-app/src/lib/backendStorage.ts:22-60`、`src-tauri/src/core/app/settings_store.rs:1-14,98-119` |
 | 远程 provider 运行时注册 | `web-app/src/providers/DataProvider.tsx:38-144`、`src-tauri/src/core/server/remote_provider_commands.rs:15-195` |
 | provider 密钥持久化 | `src-tauri/src/core/server/provider_secrets.rs:1-16,163-216` |
-| Jan CLI | `src-tauri/src/bin/jan-cli.rs:55-234`、`docs/src/pages/docs/desktop/cli.mdx:42-217` |
+| Jan CLI | `src-tauri/jan-cli/src/main.rs`、`src-tauri/src/core/cli/providers.rs`、`src-tauri/src/core/cli/tui.rs`、`docs/src/pages/docs/agent/*` |
 | 远程目录 | `web-app/src/lib/remoteModelCatalog.ts` |
 | 本地 API server | `web-app/src/routes/settings/local-api-server.tsx`、`hooks/useLocalApiServer.ts` |
 | 下载 | `extensions/download-extension/src/index.ts`、`src-tauri/src/core/downloads/commands.rs` |
-| llamacpp 模型配置 | `extensions/llamacpp-extension/src/index.ts:2414-2560`、`2386-2404` |
-| 鉴权 key 派生 | 常量 `extensions/llamacpp-extension/src/index.ts:429`；函数 `src-tauri/utils/src/crypto.rs:22-30` |
-| Rust 代理 | `src-tauri/src/core/server/proxy.rs:832-1286`、`1509-1541`、`2600-2640` |
-| 服务端编排 | `src-tauri/src/core/server/proxy.rs:1136-1282` |
-| schema 规整 | `src-tauri/src/core/server/proxy.rs:56-179` |
+| llamacpp 模型配置与引擎启动 | `extensions/llamacpp-extension/src/index.ts:853-900`（startEngine）、`:1420`（resolveEmbeddingConfig）、`:1485`（resolveMtpLayersConfig）、`:110`（PRESET_AFFECTING_KEYS） |
+| 鉴权 key 派生 | 常量 `extensions/llamacpp-extension/src/index.ts:424`；函数 `src-tauri/utils/src/crypto.rs` |
+| Rust 代理 | `src-tauri/src/core/server/proxy.rs:637-720`（proxy_request/engine_upstream/白名单）、`:858-892`（proxy_api_key 校验与 /configs 404） |
+| 服务端编排与上游层 | `src-tauri/src/core/agent/loop.rs:1476`、`src-tauri/src/core/agent/upstream.rs:403,680,768` |
+| schema 规整 | `src-tauri/src/core/openai_schema.rs:14,54,146` |
 | server 命令 | `src-tauri/src/core/server/commands.rs`、`remote_provider_commands.rs`、`provider_secrets.rs` |

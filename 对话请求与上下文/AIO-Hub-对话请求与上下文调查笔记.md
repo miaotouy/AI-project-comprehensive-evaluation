@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`36fbcc6cb5bc9eb7691b3bf9d3e9bd5f3063d3d8`（分支：`dev`）
+> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令），并补充核对 ST 世界书类型、编辑/导入导出链与请求期处理器
 >
@@ -19,6 +19,7 @@
 - 上下文压缩是**非破坏性遮罩**：只压当前活动路径、摘要由独立 LLM 请求生成、原消息保留可恢复。两个自动检查点 + 手动入口；连续压缩时旧摘要作为 `previous_summary` 传入续写模板、新摘要创建后旧摘要一并隐藏。
 - 目标父节点到根的路径仍在生成时再发消息会**排队**（`skipGeneration` + `metadata.isQueued` 节点）；同一会话的其它分支可继续并行。调度器扫描持久化队列标记，在该路径空闲后按 `queueReplyMode` 合并或链式触发（触发本身还受 `autoTriggerGenerationAfterQueue` 设置控制，默认开启）。
 - 工具调用审批用 Promise resolver 挂起执行（`toolCallingStore.requestApproval` 返回 Promise，UI 审批时才 resolve）；编排循环内部语义已由 Agent 工具笔记承接。
+- 纯图片用户消息若在附件解析后没有有效文本，默认只在请求副本中补充占位文本，以兼容拒绝空文本的上游 API；原消息正文和资产不被改写。该行为可由请求设置关闭（`src/tools/llm-chat/core/context-processors/asset-resolver.ts:229-249`、`config/defaultSettings.ts:162`）。
 
 ## 系统边界与生成任务主链
 
@@ -104,7 +105,7 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 - **重新生成（regenerateFromNode）**：`useChatHandler.regenerateFromNode()`（`useChatHandler.ts:585-736`）负责取 Agent 配置，若 `options.modelId/profileId` 存在则覆盖模型并用 `filterParametersForModel` 过滤出目标模型支持的参数——这就是"切换模型重试"的执行链（UI 层"切换模型重新生成"按钮在 Chat UI 6.1）。节点语义（给同一用户消息新增兄弟助手节点）在会话管理 4.3。
 - **续写（continueGeneration）**：`useChatHandler.continueGeneration()`（`useChatHandler.ts:741-862`）：对 assistant 节点新建内容等于原内容、`isContinuation` 的兄弟节点，发送时用 `prefix: true`（`useSingleNodeExecutor.ts:241`）让支持前缀续写的 API 从 `continuationPrefix` 后继续；对 user 节点是"角色接力"（空子节点）。最终内容的前缀补回在 `finalizeNode`（第 6 节）。
-- **停止/abort**：`abortControllers: Map<string, AbortController>` 在 `sessionRuntimeManager`（数据语义在会话管理 6）。停止走 `llmChatStore.abortSending`/`abortNodeGeneration`（`llmChatStore.ts:587-604`）：先拒绝挂起的审批（`toolCallingStore.cancelBySession`），再 `sessionRuntime.abortSessionGeneration`/`abortNodeGeneration`（`sessionRuntimeManager.ts:77-122`）——`controller.abort()` 后把节点标记为"用户手动停止"（有内容 → complete，无内容 → error + `metadata.error: "用户手动停止"`），并清掉 generatingNodes/流源。网络级中断层（controller 具体接到哪个请求对象、服务端任务是否取消）本次未核实。
+- **停止/abort**：`abortControllers: Map<string, AbortController>` 在 `sessionRuntimeManager`（数据语义在会话管理 6）。停止走 `llmChatStore.abortSending`/`abortNodeGeneration`：先拒绝挂起审批，再中止正在执行的节点；有内容的半截回复结算为 complete，无内容则写入“用户手动停止”。会话级停止还会扫描未执行的排队节点，移除 `isQueued` 并写入“队列已停止”，同时清理会话排队集合，避免中止后又被调度器触发（`sessionRuntimeManager.ts:23-43,77-168`）。网络级中断是否到达上游服务仍未核实。
 
 ## 8. 队列、多会话并发与后台生成
 
@@ -121,6 +122,8 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 ### 9.1 附件发送前等待
 
 `useChatExecutor.processUserAttachments()`（`composables/chat/useChatExecutor.ts:199-212`）：等待所有附件的 `importStatus` 变成非 pending/importing（`waitForAssetsImport`，30 秒超时，`useChatExecutor.ts:171-197`），超时抛错阻断发送。附件两阶段导入的状态机在会话管理 8.3。
+
+附件解析完成后，如果用户消息只包含图片且正文为空，`asset-resolver` 默认给请求副本补一段占位文本。补位只在图片已成功解析、没有转写文本和其他媒体时发生，目的是兼容拒绝空文本的 API；设置项 `imageOnlyMessagePlaceholder` 可关闭，持久化消息正文不变（`core/context-processors/asset-resolver.ts:229-249`、`types/settings.ts:302-303`）。
 
 ### 9.2 转写注入
 

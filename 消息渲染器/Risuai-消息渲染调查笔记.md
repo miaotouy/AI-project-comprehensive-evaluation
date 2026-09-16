@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读源码梳理；对 `src/ts/parser/`、`src/ts/process/index.svelte.ts`、`src/lib/ChatScreens/` 逐文件阅读，并用全文检索交叉验证调用点；未安装依赖、未运行应用
 >

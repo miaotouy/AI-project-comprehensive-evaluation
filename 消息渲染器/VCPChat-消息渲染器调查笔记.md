@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：静态源码梳理（当前 HEAD）；只读检查，未修改目标仓库
 >
@@ -574,7 +574,7 @@ CSS scope、timer 包装和视口暂停解决的是互相干扰、性能与资�
 
 ## 11. 测试与可验证性现状
 
-`package.json` 没有测试脚本，也未发现直接覆盖主消息渲染链的自动化测试。源码中的保障主要来自：
+当前 `tests/` 已直接覆盖 content pipeline、DOM renderer、render session authority、stream coordinator/session、终态清理、动画 island、工具请求扫描和 surface owner。它们验证协议转换、迟到事件隔离与最终化契约，但主要是 Node/jsdom 级测试，不能证明真实 Electron 中的 Mermaid、Three.js、iframe 脚本、长消息性能和资源释放效果。代表入口包括 `tests/content-pipeline.test.mjs`、`chat-dom-renderer.test.mjs`、`stream-manager-terminal-cleanup.test.js` 和 `message-renderer-animation-island.test.mjs`。源码中的保障还包括：
 
 - pipeline step 的显式顺序与大量边界注释。
 - 保护映射和 role/depth/cache version 等运行时约束。

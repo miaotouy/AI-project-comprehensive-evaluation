@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：复用对话请求与上下文调查笔记已确认的源码阅读结果，覆盖 `Generate()` 主链、正则引擎、宏替换、World Info、扩展提示词、生成拦截器与 OpenAI 消息组装的已定位消费点
 >
@@ -50,6 +50,8 @@ Generate()
 | 生成拦截器 | 已注册的扩展全局函数，按 manifest 顺序 | 在主链早期调整上下文或中止生成 |
 
 角色卡字段由 `getCharacterCardFields()` 读取，description、personality、scenario、examples、system 与 jailbreak 等内容参与后续拼装；角色或群聊的 depth prompt 则作为 extension prompt 注入。原笔记确认了这些字段的读取与注入点，未覆盖其编辑、保存、导入导出和更细的角色、预设或群组选择语义（`public/script.js:4401-4427`）。
+
+宏系统支持按 key/index 存取变量：`setvarkey`/`getvarkey` 与全局版 `setglobalvarkey`/`getglobalvarkey`（含 index 别名）可对局部或全局对象、数组按元素读写，目标不存在时按 key 类型创建（`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`）。同时词法层的管道修饰符解析被临时停用，避免参数中含 `|` 的宏（如 `setvar::foo::|bar`）被误拆成过滤器语法（`public/scripts/macros/engine/MacroLexer.js:214-227`）。这些属于宏引擎自身的变量与词法变化，展开仍发生在各调用路径。
 
 World Info 的选择入口是 `getWorldInfoPrompt(chat, this_max_context, ...)`。传入内容是带名称和正文的反向聊天数组，扫描结果被分派到多个注入位置；非 dry run 时还会发出 `WORLD_INFO_ACTIVATED`。本次依据没有展开关键词、概率、白名单、冷却、同名冲突或多个条目的排序规则（`public/script.js:4564-4622`；`public/scripts/world-info.js:892-915`）。
 

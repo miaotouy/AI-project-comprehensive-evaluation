@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`d3e8bf3405e848cfba377814d0aa7ba7290e414d`（分支：`main`）
+> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
 >
 > 调查方式：只读源码核对（models/models.py 数据模型、routers/models.py、utils/models.py 模型解析、main.py 参数合并、routers/openai.py 与 ollama.py 的角色生效、前端 ModelEditor/ModelSelector）；未修改目标仓库
 >
@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.0 的「Agent 角色」载体是**自定义模型（Workspace Models）**：一个模型条目 = 上游基础模型 + system prompt + 推理参数 + 知识引用 + 工具/技能/过滤器绑定 + 访问授权。没有独立的 persona 实体。
+Open WebUI v0.11.3 的「Agent 角色」载体是**自定义模型（Workspace Models）**：一个模型条目 = 上游基础模型 + system prompt + 推理参数 + 知识引用 + 工具/技能/过滤器绑定 + 访问授权。没有独立的 persona 实体。
 
-- `Model` 表在 v0.11.0 已重构为 8 列（models/models.py 114-127 行，列名见 1.1）；旧版的 `system`、`files`、`modelfile`、`meta_categories` 独立字段已删除——system prompt 现在存于 `params.system`，知识库改为 `meta.knowledge` 引用列表，`access_control` 被独立的 `access_grants` 表取代；
+- `Model` 表在 v0.11.3 已是 8 列（models/models.py 114-127 行，列名见 1.1）；旧版的 `system`、`files`、`modelfile`、`meta_categories` 独立字段已删除——system prompt 现在存于 `params.system`，知识库改为 `meta.knowledge` 引用列表，`access_control` 被独立的 `access_grants` 表取代；
 - 自定义模型有两种形态（utils/models.py 157-242 行）：**Override（覆盖型）** 不设 `base_model_id`，沿用上游模型的同一个 id 只覆盖 name/info；**Preset（预设型）** `base_model_id` 指向上游，生成全新 id 且列表带 `preset: true`；
 - 模型 id 语法：本版本**没有** `user/modelid` 前缀，也没有旧式 `"model-id:params"` 内联参数语法；id 是用户名的 slug 化（ModelEditor.svelte 69-76 行），限长 256（routers/models.py 91-92 行），参数一律存 DB、由服务端合并应用；
 - 生效链路是**双层合并**：
@@ -81,7 +81,7 @@ Open WebUI v0.11.0 的「Agent 角色」载体是**自定义模型（Workspace M
   - 技能与过滤器：`skillIds`、`filterIds`、`defaultFilterIds`；
   - 动作与默认功能：`actionIds`、`defaultFeatureIds`；
   - 其他：`terminalId`、`knowledge`、`access_grants`；
-- 管理员页：`Settings/Models.svelte`（列表、启用/禁用、排序拖拽、Public/Shared/Private 徽章 107-123 行）；`Settings/Models/ModelDefaultsPanel.svelte` 通过 `getModelsConfig/setModelsConfig` 读写 `DEFAULT_MODEL_METADATA`/`DEFAULT_MODEL_PARAMS`（82-116 行）。
+  - 管理员页：`Settings/Models.svelte`（列表、启用/禁用、排序拖拽、Public/Shared/Private 徽章；列表加载时另并入 provider 模型目录 `getModels(token, null, true)`，以覆盖被隐藏/停用的上游条目，269-280 行）；`Settings/Models/ModelDefaultsPanel.svelte` 通过 `getModelsConfig/setModelsConfig` 读写 `DEFAULT_MODEL_METADATA`/`DEFAULT_MODEL_PARAMS`（82-116 行）。
 
 ## 3. 模型解析与生效
 
@@ -93,9 +93,11 @@ Ollama 基线查找：id.split(':')[0] 登记 + 精确 id 登记，精确优先�
   -> preset：base_model_id 非空 -> 生成新条目 preset: true，继承 owned_by/pipe/provider/loaded（187-242 行）
   -> info 中 params 一律删除（221-223 行）——列表 API 不暴露 system prompt 等敏感配置
   -> 全局默认 meta 合并（312-331 行）
-  -> action/filter 解析并附到每个模型（244-414 行）
+  -> action/filter 解析并附到每个模型（filter_ids 先排序，保证内容签名跨进程稳定）
   -> 缓存进 request.app.state.MODELS
 ```
+
+- 基础模型目录另有一层跨进程缓存：开启 `models.base_models_cache` 时先读 Redis 键 `{prefix}:models:base`，命中就直接作为 BASE_MODELS，未命中才回源并写回；refresh 会同时清本地与 Redis 缓存（`backend/open_webui/utils/models.py:32,69-105`）。OpenAI/Ollama 连接配置更新时共用同一套清缓存逻辑（`routers/openai.py:347-356`、`routers/ollama.py:321-327`）；
 
 ### 3.2 访问控制
 

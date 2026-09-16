@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：静态源码阅读 + 关键词检索（artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/exec/preview/file/tool/mcp/dalle/code execution 等）+ 读取既有单测与文档；未启动应用运行验证
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArtifact>` 私有标记协议，消息内卡片 + 右侧 Portal 预览面板，HTML iframe / React Sandpack / SVG / Mermaid 渲染，支持逐 token 流式更新与整段重生成）、**Cloud Sandbox 代码执行**（内置 `lobe-cloud-sandbox` 工具，远端沙箱执行 Python/JS/Shell，文件可导出为持久化文件对象）、**文档工作区**（Lexical 富文本编辑器 + 服务端无头编辑器，文档存数据库，带历史快照、编辑器内 diff 节点接受/拒绝、Redis 编辑锁、Page-Agent 结构化修改与模型上下文回流）。Artifact 对象本身不独立持久化（源码事实源是消息 `content` 文本列），而文档是独立持久化对象且模型可定向修改，构成 G4 级可编辑工作区。
+LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArtifact>` 私有标记协议，消息内卡片 + 右侧 Portal 预览面板，HTML iframe / React Sandpack / SVG / Mermaid 渲染，支持逐 token 流式更新与整段重生成）、**Cloud Sandbox 代码执行**（内置 `lobe-cloud-sandbox` 工具，远端沙箱执行 Python/JS/Shell，文件可导出为持久化文件对象）、**文档工作区**（Lexical 富文本编辑器 + 服务端无头编辑器，文档存数据库，带历史快照、编辑器内 diff 节点接受/拒绝、Redis 编辑锁、Page-Agent 结构化修改与模型上下文回流）。Artifact 源码仍来自消息 `content`，但 HTML Artifact 已增加发布与 revision 生命周期；普通未发布 Artifact 仍没有独立对象行。文档是独立持久化对象且模型可定向修改，构成 G4 级可编辑工作区。
 
 ## 系统边界与完整主链路
 
@@ -119,7 +119,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 ## 8. 持久化、恢复、分享与导出
 
-- Artifact：源码存消息文本（`messages.content`），恢复 = 从 DB 消息重新提取，无版本、无分享对象；SVG 可导出 PNG/SVG/复制图片（`SVG.tsx`）。文档声称 HTML 可 "Save HTML"（`docs/usage/agent/artifacts.mdx:149`），但 Artifact 内联预览关闭了复制/下载（`InlinePreview.tsx:32-34`），独立 HTML 导出按钮未找到（以代码为准）。
+- Artifact：源码存消息文本（`messages.content`），恢复仍从 DB 消息提取。HTML Artifact 可通过工作区本地文件发布链或 `lh artifact publish <file>` 打包本地依赖并发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前限制本地资源数量与总量，并拒绝未打包的本地引用。共享核心见 `packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`，CLI 入口见 `apps/cli/src/commands/artifact.ts:84-138,204-246`。具体发布后端仍由业务槽提供，OSS 自托管可见入口不等于服务可用。
 - 文档：`documents` 行（`apps/server/src/services/document/index.ts:123-216`）字段含 content、editorData、title、parentId、fileType 等，另配历史表与编辑锁；恢复 = `restoreFromHistoryId` 与历史对比（`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。文档可发布到 workspace 并参与可见性/权限（`DocumentService.setVisibility`/`publishToWorkspace`）。
 - 沙箱导出文件成为 `files` 记录（预签名 URL 下载），图片生成工具的图片以消息内渲染展示（`packages/builtin-tool-image-generation/src/client/Render/GenerateImage.tsx`），文件落库链路本次未追完。
 - 备注：`ArtifactDeploymentActions`（"保存到工作区"）目前是空桩返回 null（`src/business/client/features/ArtifactDeploymentActions.tsx:11-13`），对应 lab 开关 `enableArtifactDeployment`（`src/store/user/slices/preference/selectors/labPrefer.ts:12-14`）——Artifact 到文档/文件的落盘能力未实现。
@@ -160,7 +160,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   - 协议正则：`const/plugin.test.ts`；文档 diff 工具：`document/diff/json.test.ts`；
   - 文档服务（含锁/历史/llm_call 快照）：`apps/server/src/services/document/__tests__/`；
   - pageAgent 服务端注册；cloudSandbox 运行时与 provider：`apps/server/src/services/sandbox/__tests__/`。
-- 已确认边界：Artifact 无独立对象存储、无 diff 更新、无模型对象寻址；HTML 预览禁用复制/下载；"部署到工作区"为空桩；Notebook 工具已标记废弃（`packages/builtin-tool-notebook/src/manifest.ts:7` 标注 deprecated，不再注入 LLM 工具），Notebook Portal 仍作为 topic 文档列表存在。
+- 已确认边界：普通 Artifact 无独立对象存储、无 diff 更新、无模型对象寻址；HTML 发布通过消息 Artifact 与发布服务建立 revision，不改变普通 Artifact 的事实源。Notebook 工具已标记废弃，不再注入 LLM 工具；Notebook Portal 仍作为 topic 文档列表存在。
 - 未验证/未覆盖：桌面本地文件编辑全链路与设备网关授权细节（桌面 Local Sandbox 见第 4 节，围栏强度/安装链未运行验证）、图片生成任务的文件落库、diff 节点在 `@lobehub/editor` 内的生成时机、编辑锁与实时推送的实际运行行为、移动端表现。声称"没有 X"均限于本次检索范围（src/packages/apps 的 `*.ts/tsx`，关键词见元数据）。
 
 ## 12. 关键源码索引
@@ -181,6 +181,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 - `src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`：diff 节点接受/拒绝
 - `packages/database/src/schemas/message.ts:95-140`：消息表（Artifact 事实源）
 - `packages/builtin-tools/src/register.ts:174-352`：工具输出渲染/检查/审批/流式注册表
+- `packages/html-artifact/src/`、`apps/cli/src/commands/artifact.ts`：HTML 本地资源打包、发布与 CLI 入口
 
 ## 能力等级评估
 

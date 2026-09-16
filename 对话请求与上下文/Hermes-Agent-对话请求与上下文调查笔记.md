@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Python Agent 会话运行时 run_agent.py / agent/ 包、tui_gateway JSON-RPC 网关、桌面端与 TUI 事件消费），所有符号与行号在 HEAD 快照处逐一核对；行为类结论区分源码事实与静态推断
 >
@@ -110,6 +110,8 @@ busy 处理位于 `server.py:7598-7679`：按 display.busy_input_mode（默认 i
 
 ## 4. SDK、Provider、模型与协议交接
 
+网关的方法、请求与事件契约集中注册在 `tui_gateway/contracts/registry.py`。注册时会拒绝未声明方法；运行时以 Pydantic 校验参数和结果并拒绝未知键；生成器把同一目录输出为 TypeScript 声明与 OpenRPC。桌面/TUI 因而消费由后端模型生成的协议类型，而不是各自手写一份宽松 payload 约定（`tui_gateway/contracts/registry.py:1-7,22-73,76-168`，`scripts/gen_gateway_contracts.py`）。
+
 对话主循环位于 `agent/conversation_loop.py:1422` 起：
 
 - 先构建本轮上下文（见 §2）。每轮顶部检查中断并消耗预算，再处理 steer、清理 sidecar 和长度续接标记，前置系统提示词，规划 prompt cache，执行 API 前压缩检查，最后按需流式调用 Provider；长度标记清理位置见 :1912-1914，API 参数构建见 `agent/chat_completion_helpers.py:1330`。
@@ -183,6 +185,8 @@ WS 端对 message.delta 等高频帧做 token 合批（`ws.py:44-60`，间隔 0.
 
 上下文压缩的默认保留策略已收紧为 lean tail：保护尾部的下限与上限分别是 10,000 和 25,000 token，另保留受预算约束的近期用户消息与工具回合（`agent/context_compressor.py:869-883`）。当前实现因此不保留大段原始上下文，而是优先保留较短的可验证尾部，其余依赖压缩摘要。ACP 侧也把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中将该 provider 自身的工具工作合并回当前 turn；运行时效果仍未执行验证。
 
+批处理入口 `hermes chat -q ... --format stream-json` 把一次性对话暴露为 JSONL 协议：首帧是 system/init，随后按发生顺序输出 text、tool_use、tool_result，末帧 result 携带成功状态、用量与最终文本。它复用正常 Agent 主链，只替换输出汇聚面，适合脚本调用而不需要解析终端格式（`hermes_cli/stream_json.py:1-5,18-30,37-98`）。
+
 ## 12. 未验证事项
 
 - `display.busy_input_mode` 各模式（steer/redirect/queue）在真实 provider 上的行为未验证。
@@ -202,4 +206,5 @@ WS 端对 message.delta 等高频帧做 token 合批（`ws.py:44-60`，间隔 0.
 - 运行与中断：`run_agent.py`——`interrupt`/`clear_interrupt`/`redirect`（:3091/:3237/:3328）、`_compress_context`（:7448）、`_sync_external_memory_for_turn`（:4173）。
 - Provider 交接：`agent/chat_completion_helpers.py`（`build_api_kwargs` :1330、`InterruptedError` 抛出点 :806/:822/:1319）。
 - 崩溃标记：`tui_gateway/turn_marker.py`。
+- 协议契约与批处理输出：`tui_gateway/contracts/registry.py`、`scripts/gen_gateway_contracts.py`、`hermes_cli/stream_json.py`。
 - 桌面端：`apps/desktop/src/hermes.ts`（HermesGateway :230）；`use-prompt-actions/submit.ts`（submitParams :619）、`rewind.ts`（finalizeInterruptedMessages :122、planReload :140）、`utils.ts`（:146/:244）；`use-message-stream/index.ts`（completeAssistantMessage :538、scheduleSessionsRefresh :153、hydrate/adoptedRunningTurn :695-712）、`gateway-event.ts`；`lib/chat-messages.ts`（mergeFinalAssistantText :242）；`apps/shared/src/json-rpc-gateway.ts`、`use-gateway-request.ts`（按需重连与失败重放）。

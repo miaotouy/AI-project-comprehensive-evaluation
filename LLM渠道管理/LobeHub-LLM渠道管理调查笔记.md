@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，把模型建模为 `ai_models` 中的 `providerId + modelId` 组合。内置 Provider 目录、服务端环境变量和用户数据库配置在运行时合并；用户创建的自定义 Provider 拥有独立 ID，并通过 `settings.sdkType` 选择 OpenAI、Anthropic、Google、Bedrock、Azure、Ollama、Router 等协议适配器。
+LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，把模型建模为 `ai_models` 中的 `providerId + modelId` 组合。内置 Provider 目录、服务端环境变量和用户数据库配置在运行时合并；用户创建的自定义 Provider 拥有独立 ID，并通过 `settings.sdkType` 选择 OpenAI、Anthropic、Google、Bedrock、Azure、Ollama、Router 等协议适配器。当前目录还注册了 Meta AI 与 Unsloth Provider，运行时入口分别见 `packages/model-runtime/src/providers/meta/index.ts:12-62` 和 `providers/unsloth/index.ts:9-55`。
 
 这套实现的主要特点是：
 

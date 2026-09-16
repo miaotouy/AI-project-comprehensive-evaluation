@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：静态走读 FlowLock 状态机、TopicSponsor 话题交接和主进程认领 IPC，并核对任务台前端与 VCPToolBox TaskAssistant 的 HTTP 交接；未运行 Electron、定时触发或后端服务
 >
@@ -16,7 +16,7 @@
 
 当前代码快照中，VCPChat 确认具备一条“会话内续作”主链：FlowLock 在一条 assistant 最终消息落盘后，依据其中的控制协议为同一 Agent 安排下一次续写。运行对象是渲染进程 `FlowlockManager` 的按 Agent 索引 Session；每个 Agent 最多一个活动 Session，多个 Agent 可并行。结果回到原 Topic 的普通聊天消息，状态环和心跳动画只是该内存状态的可视化。`Flowlockmodules/flowlock.js:8-17, 69-90, 281-410`
 
-该运行对象不跨应用重启持久化。页面清理会取消定时器并清空 Session Map；因而本次未将 FlowLock 记作可在进程重启后补跑的后台队列。另一方面，TopicSponsor 可先持久化一个待认领的新话题请求，主进程再用原子状态变更交给 FlowLock；这为“跨 Topic 续作”保留了可恢复的交接请求，但不持久化已经运行的 Session。`Flowlockmodules/flowlock.js:257-278, 727-741`；`modules/ipc/chatHandlers.js:181-279`
+该运行对象不跨应用重启持久化。页面清理会取消定时器并清空 Session Map；因而 FlowLock 仍不是可在进程重启后补跑的后台队列。页面加载后的 `recoverPendingRequests()` 会枚举 TopicSponsor 预先持久化的 pending 请求，并重新认领唯一候选；这使跨 Topic 的交接请求可恢复，但不持久化已经运行的 Session。`Flowlockmodules/flowlock.js:257-315,727-741`；`modules/ipc/chatHandlers.js:181-279`
 
 任务台不是 VCPChat 自己的调度器。它以 HTTP 读取、保存和手动触发 VCPToolBox 的 TaskAssistant，并以另一组 HTTP 接口展示及取消 AgentAssistant 异步委托。因此任务规则、运行状态、历史和真正执行体的权威均在外部 VCPToolBox；本笔记只记录客户端交接。`Agenttaskmodules/task.js:619-644, 853-869, 985-1065`
 
@@ -50,7 +50,7 @@ FlowLock 的完整静态主链如下：用户可从聊天标题启动或立即�
 
 停止会清除待执行计时器并删除 Session。模型可用 Stop、Complete 或 Fail 终止，优先级为 Fail、Complete、Stop；继续请求或最终消息错误时，默认最多重试三次，达到上限后停止。这里的“取消”只覆盖尚未触发的客户端计时器和后续续写安排；本次未在 FlowLock 路径中确认它会向已在进行的 LLM HTTP 流或工具执行体发送取消。`Flowlockmodules/flowlock.js:331-359, 365-410, 483-505`
 
-重启语义分为两层。运行 Session 在页面 `cleanup()` 时消失，因而没有已运行任务的恢复或补跑；但页面加载后的 `recoverPendingRequests()` 会列出并重新认领唯一的 pending 跨 Topic 请求。请求已被 consumed 而进程在前端 Session 创建后异常退出的后续处理，本次未找到专门的结算或补偿扫描。`Flowlockmodules/flowlock.js:257-278, 727-741`
+重启语义分为两层。运行 Session 在页面 `cleanup()` 时消失，因而没有已运行任务的恢复或补跑；但页面加载后的 `recoverPendingRequests()` 会列出并重新认领唯一的 pending 跨 Topic 请求。请求已被 consumed 而进程在前端 Session 创建后异常退出的后续处理，本次未找到专门的结算或补偿扫描；恢复链只覆盖仍为 pending 的持久化交接对象。`Flowlockmodules/flowlock.js:257-315,727-741`
 
 ## 外部任务面与相邻类目交接
 
@@ -70,6 +70,7 @@ FlowLock 触发的继续写作可使用既有 Agent、模型与工具配置，�
 ## 关键源码索引
 
 - `Flowlockmodules/flowlock.js:8-505`：Session 状态机、调度、终止和重试。
+- `Flowlockmodules/flowlock.js:257-315,727-741`：pending Flowlock 请求的页面加载恢复与认领。
 - `Flowlockmodules/flowlock-protocol.js:18-26`：控制协议和受保护内容的解析入口。
 - `modules/ipc/chatHandlers.js:140-309`：跨 Topic 请求的串行认领与恢复。
 - `VCPDistributedServer/Plugin/TopicSponsor/topicsponsor.js:102-148, 344-442`：pending 请求、Topic 与历史落盘。

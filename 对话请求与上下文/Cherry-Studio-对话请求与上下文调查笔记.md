@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（渲染层提交链路、主进程 `AiStreamManager` 状态机与 `PersistentChatContextProvider` 上下文拼装、AI SDK Agent 交接、`messageRules` 消息整形与重试包装），并核对行号与符号至当前 HEAD
 >
@@ -73,7 +73,7 @@ ChatContent.onSend
 ## 3. 预算、截断、摘要与压缩
 
 - 当前源码把压缩作为**独立的持久化上下文阶段**处理：`resolveCompactedHistory` 先按分支和清理标记确定历史，再按上下文窗口决定是否生成或沿用摘要。
-- **触发与预算**：以所有模型的 `contextWindow` 最小值做窗口（`resolveMinContextWindow`，`:732`；无 `contextWindow` 的模型直接跳过压缩，`:733-736`）；估算优先用最近带真实 `contextTokens` 的 assistant 行做锚点（`:662-674`），超过 `minContextWindow * CONTEXT_COMPACT_TRIGGER_RATIO` 触发（`:737`）；保留预算为 `minContextWindow * CONTEXT_COMPACT_KEEP_BUDGET_RATIO`（`:742`，且裁剪边界 `planKeepBoundary` 只能落在 user 行上）。
+- **触发与预算**：以可供输入使用的窗口空间为基数，压缩阈值由偏好 `chat.context_settings.compress.threshold_percent` 控制，默认 80%；触发点为 `inputRoom * thresholdPercent / 100`，保留预算是触发点的 37.5%，裁剪边界仍只能落在 user 行。设置页允许跟随当前模型或指定压缩模型；关键计算见 `src/main/ai/streamManager/context/PersistentChatContextProvider.ts:977-983`，默认值见 `src/shared/data/preference/preferenceSchemas.ts:642`，比例常量见 `src/main/ai/constants.ts:12-18`。
 - **折叠执行**：把边界之前的行转成模型消息交给压缩模型（`summarizeModelMessages`，`:765-788`；输入预算按压缩模型自己的窗口算，避免 128k 聊天把 8k 压缩器撑爆，`:779-788`）。成功则 `messageService.setCompactionSummary` 持久化摘要（`:819`，`MessageService.ts:818-823`）；失败或空摘要以 `status: 'skipped'` 结算且不留时间线锚点（`:807-818,824-834`），避免"未压缩的历史"被渲染成"已压缩"标记。树结构本身不被修改，只写 `compactionSummary` 列（`:685` 注释）。
 - 每个 provider 的 token budget 算法未逐一展开；压缩触发阈值未运行验证（见第 12 节）。
 
@@ -130,7 +130,7 @@ ChatContent.onSend
 
 ## 10. 当前上下文预算与运行时补充
 
-上下文设置恢复了按最近 N 条消息取窗的限制；附件预算与路由改为先评估输入空间，并可在预算允许时读取完整附件。`fs_read` 同时受到显式门控，避免因附件扩展而无条件暴露文件读取。Agent 请求侧现按 Claude Code、Pi、DSH 三种运行时建立模型注入与流式适配；缺失 Agent 模型上下文窗口时以 256K 作为默认值。
+上下文设置支持按最近 N 条消息取窗、按 token 阈值截断，以及按窗口百分比触发压缩；压缩模型可以跟随当前模型或单独指定。附件预算与路由先评估输入空间，并可在预算允许时读取完整附件；`fs_read` 同时受到显式门控，避免因附件扩展而无条件暴露文件读取。AI SDK 的工具循环还在单次请求内部执行增量压缩，避免长工具回合只依赖发送前压缩。相关入口见 `src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/runtime/aiSdk/params/features/inLoopCompaction.ts:179-192`。
 
 这些结论来自预算、请求参数和运行时构造代码；不同 Provider 对大附件、压缩和上下文上限的实际接受行为未运行验证。依据：`src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/messages/attachmentBudget.ts`、`src/main/ai/messages/maxMessagesWindow.ts`、`src/main/ai/runtime/pi/modelInjection.ts`、`src/main/ai/runtime/dsh/modelInjection.ts`。
 

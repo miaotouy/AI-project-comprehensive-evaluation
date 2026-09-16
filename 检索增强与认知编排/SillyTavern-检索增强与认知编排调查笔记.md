@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`（分支：`release`）
+> 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
 > 调查方式：静态追踪当前核心发送链、World Info、随发行版加载的 Summarize/Vector Storage 扩展及其 HTTP 存储端点；未运行实例、Embedding 提供方或外部扩展
 >
@@ -35,6 +35,8 @@
 ### World Info
 
 **源码事实。** World Info 是每个用户 worlds 目录内的 JSON 文件，文件至少含 `entries`；服务端以清理后的文件名读写，编辑使用原子写入。条目可编辑、导入和删除；前端可将书绑定到角色、聊天、人格或全局选择。每个条目可以携带主/次关键词、常驻标记、角色和标签过滤、触发类型、概率、分组、计时效果、递归控制、内容位置及忽略预算标记。并非所有字段都在每次选择中使用，具体激活见下一节。见 `src/endpoints/worldinfo.js:17-35,71-156`、`public/scripts/world-info.js:1013-1029` 与 `public/scripts/world-info.js:4597-4796`。
+
+条目的书内顺序由 order 字段表达。编辑器提供“Apply Current Sorting”，按当前排序批量写入 order：可设起始值、步长与升序/降序，并在降序会溢出到 0 时实时提示碰撞（`public/scripts/world-info.js:2496-2610`）。重命名世界书时会同步重定向角色与 persona 的 lorebook 链接，以及当前聊天的 lore 绑定键（`public/scripts/world-info.js:4232-4270`）。
 
 ### 摘要记忆
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -18,7 +18,7 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 ## 产品表面与系统边界
 
-- **产品表面**：无最终用户 GUI。项目自带 WebChat（浏览器聊天入口）与 Dashboard（管理后台，Vue），其余全部通过 IM 平台适配器接入。
+- **产品表面**：项目自带 WebChat 浏览器聊天入口与 Vue Dashboard；其余聊天表面由外部 IM 平台客户端拥有。
 - **服务形态**：机器人框架/消息管道。按配置实例分调度器（`pipeline_scheduler_mapping` 按 conf_id 隔离），多租户各自独立 pipeline。
 - **不拥有的层级**：外部 IM 客户端界面不归项目所有；平台适配器只负责收发消息，界面呈现由各平台拥有。
 
@@ -57,9 +57,10 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 1. **九阶段洋葱调度**：阶段 `process()` 返回 `AsyncGenerator` 时挂起，递归执行后续阶段，完成后回到 yield 点执行后置逻辑——LLM 请求阶段先让 Respond 发送，再回来做历史保存等收尾；单事件单流水线，无跨阶段状态泄漏。
 2. **并发控制**：同 UMO 串行化（session_lock 包裹整个 LLM 流程），跨会话可并行；follow-up 捕获时分配序号 + `asyncio.Condition` 队首放行，避免唤醒顺序漂移。
-3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:548-596；cron/manager.py:444-487）。
+3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:557-596；cron/manager.py:444-510）。
 4. **群聊**：`GroupChatContext` 每 UMO 内存环形记录最多 1000 条原始消息（含图像 caption），注入为 `<system_reminder>` 块；群历史可选持久化 700 条上限并暴露 `get_group_message_history` 工具；`unique_session` 开启后按发送者隔离会话。
 5. **边界**：RateLimit 超限 stall 阻塞而非丢弃（消息堆积），队列键为完整 `unified_msg_origin`，不同 UMO 不再共享限额队列（rate_limit_check/stage.py:57-82）；EventBus 无限队列无背压；阶段顺序硬编码于 `STAGES_ORDER`；agent 停止两态（stop_event 硬断 / agent_stop_requested 软停保历史）。
+6. **会话可读名称**：唤醒阶段会从平台事件的群名、发送者名等元数据派生 UMO 自动名称，按 UMO 合并后台写入；多个平台适配器同时补齐群名称、头像、所有者、管理员、成员数或成员列表。该名称是会话导航元数据，不改变 UMO 标识（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-110`；`astrbot/core/platform/astr_message_event.py:511-520`）。
 
 ## 未验证事项
 

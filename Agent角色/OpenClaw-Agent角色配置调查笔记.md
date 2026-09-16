@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-03
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c64a640f5df5bc72537357417c54647c050cb863`（分支：`main`）
+> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
 >
 > 调查方式：静态阅读 Agent 配置 schema、配置解析、路由与 session key、workspace/bootstrap、system prompt、工具/Skill/memory/subagent、ACP、Gateway RPC 和 Control UI 源码，并沿入口追踪状态、持久化和可见字段
 >

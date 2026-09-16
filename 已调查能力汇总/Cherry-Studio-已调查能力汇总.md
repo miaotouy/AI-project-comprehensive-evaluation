@@ -2,9 +2,9 @@
 
 > 汇总对象：`Cherry Studio（https://github.com/CherryHQ/cherry-studio）`
 >
-> 汇总更新日期：2026-08-31
+> 汇总更新日期：2026-09-16
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 份单项目调查笔记（代码快照均为 `88cfe5dd2b77e63464be22968f66ebcb1d429483`，main 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 份单项目调查笔记（代码快照均为 `6534fc9ecefec9c8f58c133de5539ea66bc7567f`，main 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
 >
@@ -42,9 +42,9 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **系统提示词装配与上下文来源注入**：`assembleSystemPrompt` 依次做变量替换、追加延迟工具命名空间目录与引用格式契约段；四类输入组织方式不统一——文件/知识库以消息 parts 表达（知识库范围是 `data-knowledge-scope` part、清理边界是 `data-clear` part）、联网搜索是 assistant 设置布尔开关、推理强度是独立请求字段、工具是否携带由主进程按模型能力判定。证据状态：主链确认（静态源码）。[Agent 角色配置调查笔记](../Agent角色/Cherry-Studio-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 9 节
 
-- **历史选择、模型消息整形与上下文压缩**：`resolveCompactedHistory` 沿锚点取活动路径、丢弃最近 `data-clear` 标记前的记录；`toModelMessages` 统一整形（重放持久化工具输出、规范化 MCP 工具名、剔除模型不支持媒体、合并相邻同角色消息、空 assistant 补 `'...'`）。压缩以所有模型 `contextWindow` 最小值为窗口触发，成功把摘要持久化到 `compactionSummary` 列，失败以 `skipped` 结算且不留时间线锚点；树结构本身不被修改。证据状态：主链确认（静态源码）；触发阈值属运行参数，见末尾小节。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 2、3 节
+- **历史选择、模型消息整形与上下文压缩**：历史沿锚点取活动路径并应用 `data-clear` 边界；模型消息统一重放工具输出、剔除不支持媒体并合并同角色消息。压缩阈值可配置为输入空间的百分比，默认 80%，压缩模型可跟随当前模型或单独指定；长工具循环还会在请求内部执行增量压缩。摘要成功后持久化，失败以 skipped 收口且不修改消息树。证据状态：主链确认（静态源码）。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 2、3、10 节
 
-- **本地知识库的工具化检索**：知识库以 Base、条目、chunk 与 Concept 为本地资产，由后台任务摄取、检查与重建；绑定或本回合冻结的知识库范围决定 `kb_search`、`kb_read`、`kb_list` 与 `kb_manage` 是否可见。模型先搜索、再按 Concept 读取或 grep，结果经 MCP 工具回注而非自动拼接进请求；空范围不列工具且直接调用也失败。证据状态：静态源码确认。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/Cherry-Studio-检索增强与认知编排调查笔记.md)。
+- **本地知识库的工具化检索**：知识库以 Base、条目、chunk 与 Concept 为本地资产，由后台任务摄取、检查与重建；绑定范围决定搜索、读取、列出与管理工具是否可见。重新索引会重新复制或扫描原文件/目录，从数据库内容重建 Note 快照，并重新获取 URL；重取失败会标记对应根，锁内发现来源已消失则保留旧索引并跳过。结果经工具回注而非自动拼接进请求。证据状态：静态源码确认。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/Cherry-Studio-检索增强与认知编排调查笔记.md)。
 
 ### 会话与消息
 
@@ -56,7 +56,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **会话内搜索与全局搜索（双轨）**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"，流式行排除、虚拟化窗口外可定位但未加载页搜不到（分页固有限制，非 bug）；跨会话全局搜索走主进程持久化 FTS5（trigram）内容索引 + 联邦实体搜索（topic/assistant/agent/session/knowledge），`app.search` 命令打开，命中定位到消息并跳转 Topic。证据状态：主链确认（独特功能能力卡 2）。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 2.3 节、[会话与消息管理调查笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md) 第 5 节
 
-- **对话图片导出**：Topic/单消息两级 PNG 复制与保存，以"离屏复刻真实消息列表"为核心，两条捕获路径（action bus 驱动的离屏宿主 vs 事件默认处理器的 live 隐藏表面）共用同一捕获工具，html-to-image 转单张 Canvas；分支取舍在数据投影层（用户分支只留 on-path、助手按模型桶坍缩单气泡）；单 Canvas 无拼接，任一边超 32767px 显式拒绝；无分享稿编辑、无远端分享、无选区/水印/品牌条。证据状态：主链确认（静态走通）；捕获边界细节见末尾小节。[对话导出与分享调查笔记](../对话导出与分享/Cherry-Studio-对话导出与分享调查笔记.md)
+- **对话图片导出**：Topic/单消息两级 PNG 复制与保存，以离屏复刻真实消息列表为核心，html-to-image 转单张 Canvas；捕获前会限时等待字体，并用有界抓取池、单源超时和全阶段预算预内联远端图片，HTTP 错误或显式非图片 MIME 降级占位，但没有响应大小或文件魔数校验。分支取舍仍在数据投影层；单 Canvas 无拼接，任一边超 32767px 显式拒绝，无分享稿编辑或远端分享。证据状态：主链确认（静态走通）。[对话导出与分享调查笔记](../对话导出与分享/Cherry-Studio-对话导出与分享调查笔记.md)
 
 - **消息级流式翻译**：消息操作栏"翻译"经独立 IPC 启动流式翻译，成功时剥离旧 `data-translation` part 并追加新 part（记录目标/源语言），译文作为消息的一部分持久化、可重译覆盖，取消即丢弃；另有 translateHistory 表与语言目录。证据状态：主链确认（独特性中等）。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md) 能力卡 3
 
@@ -98,11 +98,11 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **任务排队与并发调度**：主进程 steer 队列（流式期间后续发送落用户行入队、回合边界让出、done 后调度续答，aborted/error 后丢弃）与渲染层 follow-up 队列（topic 空闲自动 drain）两层；发送有 `draft/persisting/opening/streaming/ready` 阶段机；`dispatchLock` 只序列化"准备+启动"窗口；渲染层组件卸载 release 视图但不拆 reader、不 abort，主进程可后台继续生成，grace-period 驱逐（默认 30 秒）。证据状态：主链确认（静态源码）；运行行为验证项见末尾小节。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 8 节、[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 5 节
 
-- **配置导入与渠道管理入口边界**：Provider deep link 导入（确认后按 ID 新建或更新端点并追加 Key）；完整 CRUD 只在桌面端设置页（查看/新增/编辑/复制/启停/删除/连接检查）；Code CLI 功能可读写外部 CLI 配置文件，但那是"把当前 Provider 注入外部 CLI"，不是 `user_provider` 的替代存储。证据状态：静态源码确认（"未找到"项按本次搜索范围表述，见末尾小节）。[LLM 渠道管理调查笔记](../LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) 第 1.4、9 节
+- **配置导入、移动配对与渠道管理边界**：Provider deep link 可确认后按 ID 新建或更新端点并追加 Key；完整 CRUD 只在桌面设置页。API Gateway 另提供一次性 LAN 配对码和端点受限的 Provider 导出，配对 token 只授权该导出，普通生成、知识库与 MCP 路由仍限 loopback；它不是通用 Provider 文件导出或远程 CRUD。Code CLI 文件仍只表达“把当前 Provider 注入外部 CLI”。证据状态：静态源码确认。[LLM 渠道管理调查笔记](../LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) 第 1.4、9、10 节
 
 ### 独特与差异化能力
 
-- **Mini Program（应用门户）**：在客户端内以独立标签页运行 60+ 预设与自定义第三方 Web 应用（webview），带 keep-alive 池与 Launchpad/侧栏入口、区域过滤、共享缓存 transient descriptor；预设行差量覆盖、自定义行全量落 SQLite。无协议桥、无模型上下文回流，纯 Web 门户 + 标签管理，是样本中唯一形成完整主链的"应用门户"能力。证据状态：主链确认。贡献统计建议：主贡献。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md) 能力卡 1、[特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+- **Mini Program（网站门户 + 本地应用包）**：预设和自定义网站继续以 webview 标签运行；`.miniapp` 包增加 manifest、独立 partition/origin、权限与网络 allowlist、安装同意、活动记录和更新审查。网站路径没有模型回流，本地包路径则具备受控宿主能力桥。证据状态：主链确认。贡献统计建议：主贡献。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md) 能力卡 1、[特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 
 - **多模型同时对话**：已归并到已有类目（LLM 渠道管理 §6 与 Chat UI §7 已主链确认，见"会话与消息"集群的"多模型并行回复"条目）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)
 
@@ -116,7 +116,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：TypeScript monorepo（98.5% TypeScript），Electron 主应用与内部共享包合仓。主进程 `src/main` 432,627 行、renderer `src/renderer` 495,622 行、`packages/ui` 80,009 行，另有 provider-registry 与 AI core 两个约 1.8 万行的内部包；测试与实现大面积共置，测试源码约占总源码 45.4%。桌面端同一 Electron 主应用覆盖 Windows/macOS/Linux（x64/arm64 分别打包），无本仓独立移动端入口；`v2-refactor-temp` 源码已清空、仅剩文档与工具。证据状态：Git 跟踪文件机械统计 + pnpm workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)
+- **仓库分布**：Electron 主应用与内部共享包合仓的 TypeScript monorepo。当前快照有 9016 个 Git 跟踪文件、7726 个可识别源码文件和 1343526 行源码；`src/main` 552819 行、`src/renderer` 585174 行、`packages/ui` 81498 行，测试文件 2404 个。桌面端覆盖 Windows、macOS、Linux，无本仓独立移动端入口；`v2-refactor-temp` 只剩 3 份 breaking-change 文档。证据状态：Git 跟踪文件机械统计 + workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)
 
 - **应用界面基础设施**：界面栈为 React + Tailwind（+ tw-animate-css），内部 UI 包 `@cherrystudio/ui` 基于 Radix 生态（无 antd/framer-motion/sonner）。弹窗主路径迁到 UI 包（Radix Dialog 封装 + 模块级 popup store + 每窗口 PopupHost，命令式调用，single-flight）；Toast 是自研单例 store（loading→success/error promise 桥接，按严重程度区分 aria 语义）；主题权威在主进程 ThemeService，视觉 token 分层契约（foundation → runtime input → 官方 Shadcn 语义 → 产品语义 → Tailwind 生成层），用户可设明暗/单主色/字体/自定义 CSS，无主题市场/壁纸/主题文件导入导出；右键菜单可在自绘与系统原生双模式间切换；错误边界分窗口/路由/消息块三层（react-error-boundary），另有崩溃遥测与 render-process-gone 自动 reload。证据状态：静态源码核对（键盘与多窗口表现需运行验证，见末尾小节）。[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 

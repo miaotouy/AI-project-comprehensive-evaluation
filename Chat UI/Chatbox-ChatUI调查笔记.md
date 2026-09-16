@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、renderer store、Electron 主进程），符号与行号对照当前 HEAD 逐一核实；静态代码只确认入口、状态与事件绑定，未运行验证
 >
@@ -20,7 +20,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 - 首页是一个"假会话"（id 固定为 `'new'`），发送前的临时状态被分散存放在三种不同的容器里；首次发送时转入真实 Session。
 - 消息区用 `react-virtuoso` 虚拟化，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不丢阅读位置；流式跟随由自研 smooth-follow 控制器接管。
 - Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换），替代回复不再以独立导航条平铺；两者与侧栏分组无关。
-- 发送/停止按钮本身没有 `aria-label`（生成态外包了一层 Tooltip 显示 "Stop"），是最直接的无障碍缺口。
+- 发送控制按模式分流：Chat Mode 生成中保留停止按钮，Work Mode 有草稿时改为排队按钮；待执行消息在输入框上方可编辑、删除、清空或请求立即发送。
 - 桌面端全局快捷键只有"显示/隐藏窗口"，托盘不显示聊天状态，系统通知 API 未接入（`new Notification(` 全仓库无匹配）。
 - 草稿按会话粒度存 localStorage：首页假会话用固定 key `'new-chat'`，真实会话用 `draft-${sessionId}`（300ms 防抖）；发送成功后清除。
 - 网页浏览开关经 uiStore 的 persist 中间件持久化（跨重启保留），知识库与 Agent 模式开关不持久化（重启丢失）。
@@ -147,6 +147,9 @@ Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工
 
 ## 5. 发送、排队、流式反馈与停止
 
+- **排队与 steering 表面**：Work Mode 生成中提交会进入 `QueuedMessagesBar`，列表最多显示 20 条并限制高度；条目保留队列位置，支持就地编辑、删除和清空。纯文本条目可点“立即发送”请求 steering，带附件条目禁用该动作；队列因停止、错误、模式建议或会话路径变化暂停时会显示原因和继续入口。`src/renderer/components/InputBox/QueuedMessagesBar.tsx:63-238,251-333`。
+- **模式化提交控件**：`getSubmitAction` 与 `getSubmitControl` 把发送、排队、继续排队和阻塞作为独立状态。Chat Mode 生成中不开放队列，Work Mode 才显示排队提示；已有旧队列时，即使当前模式不再允许新入队，也会保持顺序排空。`src/renderer/components/InputBox/submitAction.ts:39-83`。
+- **待处理动作条**：工具调用次数暂停、命令审批、文件变更与应用动作统一投影到输入框上方的 PendingActionBar，替代仅依赖滚出视野后的审批胶囊；相关装配位于 `src/renderer/components/InputBox/PendingActionBar.tsx` 与会话路由。
 - **提交顺序**：提交处理器先更新 UI 滚动状态（标记新消息并瞬间滚到底部），再经 `submitNewUserMessage` 提交；输入区提交前有禁用态合并检查（生成中、预处理中、等待审批、存在预处理错误、RAG 附件索引未就绪时弹"文档仍在索引中"确认框，`InputBox.tsx:838-848, 881-884, 1936-1967`）。
 - **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称，见 9.1）；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
 - **生成中占位**：`Message.tsx:982-991` 在生成且内容为空时渲染自定义 `Loading` 组件（`components/icons/Loading.tsx`）——手写 SVG 动画：四个圆点用 `<animate>` 标签分别做纵坐标/透明度/半径三个属性的关键帧动画（周期 1.25s），四个点依次延迟 0s/0.2s/0.4s/0.6s 开始，形成"依次跳动"的等待指示器。
@@ -190,6 +193,7 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ## 7. 多会话、多模型、群聊与后台生成
 
+- Work Mode 的队列状态按会话展示并持久化；侧栏生成指示仍只表达正在运行或完成未读，不显示队列长度。用户切回目标会话后可从 QueuedMessagesBar 管理待发送内容。
 - 多模型并行在输入区以"快速模型/Agent 配置"的形式呈现（第 4 节）；同一会话内多个"在下方继续回复"可并行生成（替代回复，执行语义见对话请求与上下文笔记 8），侧栏按会话计数显示"生成中"指示（1.2），输入框停止按钮在多个回复并发时显示 "Stop all N replies"（第 5 节）。
 - 群聊、子 Agent、后台任务的界面区分本次未调查——代码中未发现对应 UI 结构。
 

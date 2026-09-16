@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e565563a288ebe4c65b6099a1645ba477d1c84b4`（分支：`main`）
+> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
 >
 > 调查方式：只读盘点根 README、AGENTS.md 与 `src/ts`/`src/lib` 目录注册表；对 Emotion Images、插件系统、记忆、翻译、Multisend、多用户同步、Risu Hub 等候选逐项走“入口 → 状态/对象 → 执行 → 用户结果 → 持久化”主链；核对现有 Risuai 六份类目笔记的去重边界；全部为静态证据，未运行应用
 >
@@ -75,11 +75,13 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 - **v2.1**：TypeScript 代码先经 sucrase 转译（`src/ts/plugins/apiV3/transpiler.ts:1-10`），再经 acorn AST 静态检查与符号改写——命中黑名单（`eval`、`new Function`、`sessionStorage` 等，完整清单见 `src/ts/plugins/pluginSafety.ts:20-45`）即拒绝，其余全局标识符（`window`/`document`/`localStorage`/`indexedDB`）改写为安全代理（`:55-166`），随后在页面全局运行。
 - **v3.0**：每个插件一个独立 iframe，sandbox 仅放行 `allow-scripts`/`allow-modals`/`allow-downloads`，CSP 带随机 nonce 且把 `connect-src` 设为 `'none'`，iframe 内无法发起任何网络请求（`src/ts/plugins/apiV3/factory.ts:438,769-788`）。
-- **v3.0 通信面**：宿主侧 `SandboxHost` 经 postMessage RPC 处理方法分发、回调双向代理、AbortSignal 转发与 transferable 收集，`ReadableStream` 经 MessagePort 流桥跨域传输（`factory.ts:484-760`）；加载入口 `executePluginV3` 建 iframe 后执行 `host.run`（`v3.svelte.ts:1388-1406`）。
+- **v3.0 通信面**：宿主侧 `SandboxHost` 经 postMessage RPC 处理方法分发、回调双向代理、AbortSignal 转发与 transferable 收集，`ReadableStream` 经 MessagePort 流桥跨域传输（`factory.ts:484-760`）；加载入口 `executePluginV3` 建 iframe 后执行 `host.run`（`v3.svelte.ts:1482-1500`）。
 
-**API 面与钩子**：插件可注册自定义 AI Provider（`pluginV2.providers`）、消息编辑钩子（编辑输入/处理/显示/输出文本共四类，注册表见 `plugins.svelte.ts:468-480`）、请求前后替换、生成完成监听、TTS 前/后处理钩子（`src/ts/process/ttsHooks.ts`）与 MCP 模块注册（`v3.svelte.ts:15` 引用的 `registerMCPModule`）以及菜单/面板注入；DOM 访问经 SafeDocument/SafeElement 包装层（含标签白名单与 `freezed` 元素禁止访问，`src/ts/plugins/pluginSafeClass.ts`），插件存储分设备级与插件级，随存档持久化。
+**API 面与钩子**：插件可注册的能力分几类——自定义 AI Provider、消息编辑钩子（编辑输入/处理/显示/输出文本共四类，注册表见 `plugins.svelte.ts:468-480`）、请求前后替换、生成完成监听、TTS 前/后处理钩子（`src/ts/process/ttsHooks.ts`）、MCP 模块注册（`registerMCPModule`）以及菜单/面板注入。DOM 访问经 SafeDocument/SafeElement 包装层，含标签白名单与 `freezed` 元素禁止访问（`src/ts/plugins/pluginSafeClass.ts`）。
 
-**安全与资源边界**：v3 iframe 内无网络、无顶层 DOM 直连；存量 v2.1 靠静态改写兜底（校验结果按代码哈希缓存于 localStorage，`pluginSafety.ts:58-71`）。v3 的输出监听器现在复用 replacer 授权，读取 inlay 资产另设 inlay 授权；两者都是按插件名和脚本哈希记录的同意，并对 periodic 权限按三天重新确认（`v3.svelte.ts:567-625,728-750`）。插件脚本本身是用户主动导入的可信代码，更新地址强制 https（`plugins.svelte.ts:280-293`）。
+插件存储分设备级与插件级。插件级存储的值改为冷存储承载：数据库只保留“键到冷键”映射，早期内联值在启动时迁移，插件 API 的读写删与枚举都按该映射间接访问冷存储（`v3.svelte.ts:1270-1315`、`coldstorage.svelte.ts:529-573`）。v3 另新增 CBS 解析 API `parseRisuChat`，按当前角色与活动会话解析宏文本，可选 `processRegex` 继续跑 editprocess 脚本管线，该管线可触发插件处理器并改写活动会话（`v3.svelte.ts:889-931`）。
+
+**安全与资源边界**：v3 iframe 内无网络、无顶层 DOM 直连；存量 v2.1 靠静态改写兜底（校验结果按代码哈希缓存于 localStorage，`pluginSafety.ts:58-71`）。v3 的输出监听器现在复用 replacer 授权，读取 inlay 资产另设 inlay 授权；两者都是按插件名和脚本哈希记录的同意，并对 periodic 权限按三天重新确认（`v3.svelte.ts:569-627,733-753`）。插件脚本本身是用户主动导入的可信代码，更新地址强制 https（`plugins.svelte.ts:280-293`）。
 
 **独特性判断**：双层安全模型（AST 改写 + iframe 沙箱）在同一插件系统内并存，且 v3 的“结构化克隆 RPC + 流桥 + AbortSignal 转发”在样本中未见同等实现；SillyTavern 扩展（manifest + `import()` 动态加载、生成拦截器）无沙箱层，VCPChat 插件为本体注入而非隔离运行时。这既是产品生态能力，也构成独立的安全工程机制（统计时机制单列）。
 
@@ -198,7 +200,7 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 ## 关键源码索引
 
 - 情绪图：`src/ts/process/index.svelte.ts`（inlay 指令注入 567-572、`CharEmotion` 更新 1974-1983、分类请求 1991-2160）；`src/ts/process/inlayScreen.ts:7-97`；`src/ts/util.ts:279-360`（getEmotion）；`src/ts/parser/parser.svelte.ts:408,504-511`；`src/lib/SideBars/CharConfig.svelte:474-493`；`src/lib/ChatScreens/EmotionBox.svelte`。
-- 插件系统：`src/ts/plugins/plugins.svelte.ts`（importPlugin 129-428、loadPlugins 432-443、钩子注册表 468-480）；`src/ts/plugins/apiV3/factory.ts`（CSP 438、SandboxHost.run 769-926、RPC 处理 790-888）；`src/ts/plugins/apiV3/v3.svelte.ts:1374-1424`（loadV3Plugins/executePluginV3）；`src/ts/plugins/pluginSafety.ts:55-166`；`src/ts/plugins/apiV3/transpiler.ts`；`src/ts/plugins/pluginSafeClass.ts`。
+- 插件系统：`src/ts/plugins/plugins.svelte.ts`（importPlugin 129-428、loadPlugins 432-443、钩子注册表 468-480）；`src/ts/plugins/apiV3/factory.ts`（CSP 438、SandboxHost.run 769-926、RPC 处理 790-888）；`src/ts/plugins/apiV3/v3.svelte.ts:1468-1500`（loadV3Plugins/executePluginV3）；`src/ts/plugins/pluginSafety.ts:55-166`；`src/ts/plugins/apiV3/transpiler.ts`；`src/ts/plugins/pluginSafeClass.ts`。
 - 翻译：`src/ts/translator/translator.ts`（translate 39-55、runTranslator 57-119、translateMain 121-241、translateHTML 257-477）；`src/ts/translator/presets.ts`；`src/lib/ChatScreens/ChatBody.svelte:109-149`；`src/lib/ChatScreens/DefaultChatScreen.svelte:419-439`。
 - Multisend：`src/ts/process/files/multisend.ts`（sendPofile 16-109、sendPDFFile 111-138、postChatFile 196-316）；`src/ts/process/files/inlays.ts:35-81`；入口 `DefaultChatScreen.svelte:634,1003`。
 - 多用户同步：`src/ts/sync/multiuser.ts`（createMultiuserRoom 60-256、joinMultiuserRoom 262-366、peerSync 369-391、peerSafeCheck 393-429）；调用点 `index.svelte.ts:1963`；UI `SideChatList.svelte:298,410`、`PlaygroundMenu.svelte:128`。

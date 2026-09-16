@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-08-18
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`81571269addb6bafb589a920b2883f1e1e084fd1`（分支：`main`）
+> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
 >
 > 调查方式：只读检查源码、测试与仓库文档；未修改目标仓库，也未启动应用进行界面或真实网络验证
 >
@@ -56,7 +56,7 @@ SessionSettings { provider, modelId }
   -> platform request / proxy
 ```
 
-内置注册表的副作用导入顺序也决定 Provider 列表顺序。当前 `src/shared/providers/index.ts` 导入的注册项包括 Chatbox AI、OpenAI、OpenAI Responses、Gemini、Claude、DeepSeek、Qwen、MiniMax、Moonshot、SiliconFlow、OpenRouter、Ollama、LM Studio、Azure、Groq、xAI、Mistral、Perplexity、Volcengine、ChatGLM、GitHub Copilot、Bedrock 和 Vercel AI Gateway 等；精确数量以该代码快照中的注册入口为准，仓库文档中的“30+”还包含其他服务或兼容 Provider 的口径。
+内置注册表的副作用导入顺序也决定 Provider 列表顺序。当前注册项除既有 OpenAI、Claude、Gemini、Chatbox AI 与本地/兼容渠道外，还包括 OpenCode Zen、OpenCode Go、Tencent Hunyuan、Xiaomi MiMo、LongCat 和 GLM Coding Plan。OpenCode 两个网关按模型选择 Chat Completions 或 Responses API，并给请求附加 `x-opencode-session` 会话标识；其定义见 `src/shared/providers/definitions/opencode-{zen,go,shared}.ts`。精确总数以 `src/shared/providers/index.ts` 为准。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
@@ -135,6 +135,8 @@ Provider 设置 schema 支持单个 `apiKey`，没有 `apiKeys[]`、Key 权重�
 模型条目可区分 chat、embedding、rerank 和 image，并带 vision、reasoning、tool_use 等能力、上下文窗口和最大输出。models.dev 在 Provider 映射成功时对能力、上下文和最大输出进行富化，nickname 和已有类型只在缺失时补齐。价格、family、发布日期和状态存在于 registry/snapshot 层，但当前 `ProviderModelInfo` 没有完整承载这些字段，源码中也未找到基于价格的账单计算或成本路由。
 
 Provider 详情页的模型操作包括：手工新增、编辑、删除、恢复默认模型列表，以及 Fetch 远程模型列表后在弹窗中逐项加入或移除。模型列表项本身没有复制按钮；渠道级复制也未找到。连接测试成功时，若视觉或工具调用测试通过，会把对应能力追加到该模型的本地能力列表，但 models.dev 富化仍可能在运行时覆盖事实能力字段。
+
+Claude 渠道新增可配置的提示缓存时长，定义值为 5 分钟或 1 小时；运行时把该设置传入 Claude 模型并在请求消息上添加相应 cache control。设置与模型交接见 `src/shared/providers/definitions/claude.ts:108`、`definitions/models/claude.ts:136-143`。
 
 ## 5. Adapter、协议与请求组装
 

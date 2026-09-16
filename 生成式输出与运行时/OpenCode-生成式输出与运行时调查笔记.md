@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：源码静态调查，grep/glob 关键词交叉验证（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、snapshot、revert、pty、execution），并通读核心链路文件；未运行构建、测试或交互
 >
@@ -60,6 +60,7 @@ OpenCode 的"生成式输出"以**真实文件系统为事实源**：模型通�
   - `edit` 按 oldString 定位替换，含 9 种 Replacer 容错策略与相似度锚点（`edit.ts:244-737`）；
   - `apply_patch` 按 hunk 块应用（`apply_patch.ts:220-258`；底层 `packages/opencode/src/patch/index.ts:185-241` 解析 `*** Begin Patch` 标记与 add/update/delete/move hunk）。
   diff 均由 jsdiff `createTwoFilesPatch` 生成并 trim（`edit.ts:646-680`）。
+- `apply_patch` 的 UI metadata 只在真实 move 操作时包含 `movePath`；普通 add/update/delete 不再序列化空字段，文件类型、相对路径、patch 与增删行数契约不变（`packages/opencode/src/tool/apply_patch.ts:193-202`）。
 - **版本记录**：影子 git 提供三个操作入口（`packages/opencode/src/snapshot/index.ts`）：
   - `snapshot.track()`：`add → write-tree` 得到哈希（:318-347）；
   - `patch(hash)`：`git diff --cached --name-only` 出文件清单（:349-380）；

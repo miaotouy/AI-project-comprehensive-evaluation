@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：静态代码审查。用 grep/glob 检索 artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/preview/markdown/chat/stream 等关键词，通读 server.js、modules/chatCompletionHandler.js、modules/handlers/streamHandler.js 与 nonStreamHandler.js、modules/vcpLoop/toolCallParser.js 与 toolExecutor.js、vcpInfoHandler.js、Plugin.js、modules/toolCallRecordStore.js、modules/finalContextStore.js、Plugin/OneRing/OneRingDB.js、Plugin/RAGDiaryPlugin、Plugin/VCPForum/VCPForum.js、Plugin/GPTImageGen/GPTImageGen.js、Plugin/MediaRenderer、Plugin/AICodeWorker、routes/forumApi.js、routes/protocolBridge.js；对照 docs/Markdown_Output_Guideline.md、docs/FRONTEND_COMPONENTS.md、docs/PLUGIN_ECOSYSTEM.md 等文档与源码交叉核对
 >
@@ -100,7 +100,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
   托管 Chrome 的进程生命周期由 browserRuntimeManager.js:516 管理。
 - **语言解释器/CLI**：AICodeWorker 调度本机 opencode CLI（analyze/patch/write 三模式，jobId 异步任务，`Plugin/AICodeWorker/README.md:112-149`）；PowerShellExecutor（`requiresAdmin:true`，`Plugin/PowerShellExecutor/plugin-manifest.json`）、LinuxShellExecutor、SSHManagerService 提供系统命令执行。
 - **完整项目/IDE 工作区**：本次未找到（CodeSearcher 是编译好的搜索二进制，非项目工作区）。
-- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:335`、`Plugin.js:1577`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
+- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:335`、`Plugin.js:1577`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js/Pixi.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -150,7 +150,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 
 ## 11. 测试、已确认边界与未验证事项
 
-**测试覆盖**（`tests/`，node:test，共 11 个测试脚本，另含 2 个 HTML 样本）：动态工具注册表、OpenHerPersona 预处理器、占位符探索、结果去重、图床路径安全、分布式取消，以及 ChromeBridge 运行时核心/页面句柄/页面图片/内容可编辑回复四组测试（`tests/chromeBridge/` 下对应 test.js）。根 `package.json` 的 `npm test` 是占位脚本（package.json:6）。未发现针对流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析的自动化测试。
+**测试覆盖**（`tests/`，node:test）：根 `tests` 下有 26 个 `*.test.js`，另有 `tests/chromeBridge/` 的 ChromeBridge 运行时核心/页面句柄/页面图片/内容可编辑回复等测试。覆盖面包括动态工具注册表、OpenHerPersona 预处理器与观察者、占位符探索、结果去重、图床路径安全、分布式取消、AgentAssistant Flowlock、光标主题打包，以及本快照新增的大批原生检索测试（NativeKnowledgeRuntime registry、RiverMemo 联合查询计划/回退/默认模式、语义去重、日记索引原子增量、标签派生失效、RAG 日记 copy-on-write、SAR 管理器、TDB 0.8.5、时间线 RiverMemo、associativeDiscovery RiverMemo）。仍有未覆盖项：流式工具循环、日记块解析、论坛写入、MediaRenderer、协议解析无自动化测试；根 `package.json` 的 `npm test` 仍是占位脚本（package.json:6）。
 
 **本次明确未验证/未覆盖**：
 

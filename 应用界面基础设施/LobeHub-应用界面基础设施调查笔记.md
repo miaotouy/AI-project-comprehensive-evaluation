@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`7c559cbd4d92a54289bce3a8aab96e057d0ce8c5`（分支：`canary`）
+> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对，先检查应用装配与公共组件，再抽样核对业务消费方；依赖包内部行为和未经运行验证的结论单独标注
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之上。项目已经把弹窗和临时提示的主通道迁向 `@lobehub/ui/base-ui`，但旧 antd 弹窗的兼容层仍有二十余处消费，因此当前处于新旧接口并存的阶段。
+LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之上。项目已经把弹窗和临时提示的主通道迁向 `@lobehub/ui/base-ui`。旧 antd 弹窗兼容层仍有业务消费，但 `AntdStaticMethods` 的应用级装配已移除，因此当前是“主通道已迁移、局部兼容组件仍存”的状态。
 
 主题系统由不同层共同完成：next-themes 解析明暗模式，应用主题 Provider 注入颜色和动效 token，HTML 内联脚本负责首屏预着色。明暗模式存于浏览器，主色和中性色存于用户设置并镜像到 cookie。这套分工支持系统跟随、服务端首屏和桌面原生外观，但也意味着“主题”没有单一持久化源。
 
@@ -41,7 +41,7 @@ LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之�
 
 新弹窗主要通过 base-ui 的命令式接口创建。项目仍保留 `ImperativeModal`，用于把旧 antd Modal 风格的属性适配到新接口；设置、导入和插件安装等场景仍在消费这一兼容层。分享消息等较新的实现已经直接调用 base-ui。（`src/components/ImperativeModal/index.tsx:79-191`）
 
-`AntdStaticMethods` 仍会从 antd 上下文取得 modal 和 notification，但本次没有找到这些命名导出的生产调用方。旧的 antd message 通道已经移除，临时提示改由 base-ui Toast 承担。（`src/components/AntdStaticMethods/index.tsx:1-19`）
+`AntdStaticMethods` 文件仍保留从 antd 上下文取得 modal 和 notification 的兼容实现，但应用级装配已删除，也未找到生产调用方。旧 antd message 通道已经移除，临时提示由 base-ui Toast 承担；该文件不再代表当前通知主链。（`src/components/AntdStaticMethods/index.tsx:1-19`）
 
 ### 用户偏好
 
@@ -161,7 +161,7 @@ PWA 安装能力由 `pwa-install-handler` 封装。已处于 PWA 模式或浏览
 
 ## 8. 设计取舍与已确认边界
 
-- 弹窗正从旧 antd 用法迁移到 base-ui 命令式接口，兼容层仍有实际消费方。
+- 弹窗主通道已迁移到 base-ui 命令式接口；旧弹窗兼容层仍有实际消费方，AntdStaticMethods 已脱离应用装配。
 - 明暗模式与主题色分属浏览器和服务端用户设置，cookie 用于补足首屏读取。
 - 移动端是独立构建的应用表面，桌面与移动端只在部分公共组件和状态上共享实现。
 - 错误处理按整页、局部、启动和分包加载分层；通用全局错误监听与桌面 renderer 崩溃恢复本次未找到。

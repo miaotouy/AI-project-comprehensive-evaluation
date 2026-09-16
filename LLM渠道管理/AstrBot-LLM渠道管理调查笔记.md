@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8ea8ce613a0bee4ddb48b21490afe23418277c75`（分支：`master`）
+> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
 >
 > 调查方式：只读源码（provider 抽象层、实体、管理器、主要适配器、配置层、fallback 编排、Dashboard 后端、CLI、备份与桌面运行时）与仓库文档交叉梳理；未修改目标仓库
 >
-> 调查范围：Provider 数据模型与配置结构、注册机制与 42 个适配器、协议适配与统一消息格式、请求路由与 Model 绑定、错误处理与两层重试、Key 轮换、fallback 语义、配置持久化与热更新、配置文件/CLI/TUI/Web/桌面端管理入口、备份导入导出与 Dashboard/WebUI 配置面
+> 调查范围：Provider 数据模型与配置结构、注册机制与 44 个注册适配器、协议适配与统一消息格式、请求路由与 Model 绑定、错误处理与两层重试、Key 轮换、fallback 语义、配置持久化与热更新、配置文件/CLI/TUI/Web/桌面端管理入口、备份导入导出与 Dashboard/WebUI 配置面
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -22,11 +22,11 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 
 - **注册**：注册装饰器在 import 时写入两个全局容器（`provider_registry` 与 `provider_cls_map`，register.py:6-49），同名类型直接抛 `ValueError`。真正的模块 import 发生在 `ProviderManager.dynamic_import_provider`（manager.py:356-523）——type 字符串到类的 match 分派，导入失败记 critical 并跳过。
 - **加载**：`load_provider`（manager.py:597-758）先合并 source 配置、解析 `$ENV` 键（仅 chat_completion 类型）、跳过 disabled/agent_runner，再校验类继承关系后实例化，最后写 `inst_map` 与五类实例列表。
-- **路由**：`get_using_provider`（manager.py:218-281）优先级为"umo 会话偏好 → 全局默认 → 实例列表第一个"；会话偏好存 SharedPreferences（`provider_perf_<type>`，umo scope）。
+- **路由**：`get_using_provider` 仍优先使用 UMO 会话偏好；Local Agent 的默认聊天模型已移至 `agent_runner.config.model.provider_id`，为空时再回退实例列表第一个。fallback、请求重试、压缩模型和 Persona 也进入同一 Agent Runner 配置档案（`astrbot/core/provider/manager.py:45-55,247-258`；`core/config/agent_runner.py:9-36`）。
 - **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环，按 429、上下文超长、非 VLM、工具不可用、图片审核等类别分别降级，详见 4.2）。
 - **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
-- **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1348-1369）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
-- **近期渠道与元数据调整**：新增 SSYCloud 对话 Provider；模型元数据请求失败时会尝试备用端点；推理能力元数据已从 Provider 配置中分离，`reasoning_effort` 作为请求预设保存（ssycloud_source.py:7-59；utils/llm_metadata.py:38-84；astrbot/dashboard/services/config_service.py:1362-1407）。
+- **fallback 只有两个消费者**：图片模态降级（astr_main_agent.py:1291-1324）与空输出/err 回复降级（tool_loop_agent_runner.py:533-634）；普通 5xx/网络错误不走 fallback，由重试层处理。
+- **渠道与请求标识**：除 SSYCloud 外增加 MiraRouter OpenAI-compatible 适配器；Provider 请求默认携带 `astrbot/<version>` User-Agent，自定义 Header 可覆盖它。MiraRouter 额外写入 `X-APP-CODE: astrbot`（`astrbot/core/provider/headers.py:1-24`；`sources/mirarouter_source.py:1-20`）。
 - **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
 - **管理入口**：源码确认 WebUI 提供 source 与 provider 两级查看、新增、编辑、启停、删除和连接测试，非聊天能力的 provider 卡片还提供复制；配置文件和备份机制支持整体查看、导入、导出，CLI 只管理少量通用键，未找到 provider 专用 CLI/TUI；桌面端在本仓库中只是托管同一后端的外部客户端，渠道管理界面未在本仓库确认。
 - **未实现机制**：无渠道池/权重/负载均衡（`provider_pool` 与 `persona_pool` 只声明在默认配置，全仓 grep 无消费者）；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
@@ -37,7 +37,7 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 data/cmd_config.json（AstrBotConfig，dict 子类）
   ├─ provider_sources[]  键: api_key, api_base, timeout, proxy, custom_headers, key[] ...
   ├─ provider[]          键: id, provider_source_id, model, modalities, custom_extra_body, enable
-  └─ provider_settings   default_provider_id / fallback_chat_models / request_max_retries / tts·stt·emb settings
+  └─ agent_runner.config.model   provider_id / fallback_provider_ids / request_max_retries
 
 ProviderManager.__init__（读取五个配置切片，manager.py:44-49）
 core_lifecycle: ProviderManager.initialize()（manager.py:283-354）
@@ -54,7 +54,7 @@ load_provider（manager.py:597-758）
 请求时：
   get_using_provider(provider_type, umo)  （manager.py:218-281）
     1. sp.get("provider_perf_<type>", scope=umo) 命中即用
-    2. default_provider_id / stt · tts settings.provider_id（enable=false 返回 None）
+    2. chat 使用 Local Agent Runner 的 model.provider_id；stt/tts 使用各自 settings.provider_id
     3. 各类别实例列表第一个
     ；可被 event extra selected_provider 覆盖（astr_main_agent.py:_select_provider）
 
@@ -115,20 +115,20 @@ is_chunk / id / usage
 ### 1.4 配置结构与默认值
 
 - 主配置文件 `data/cmd_config.json`（`AstrBotConfig` 是 dict 子类，`astrbot/core/config/astrbot_config.py:20,31`），明文 JSON。
-- 默认值 `astrbot/core/config/default.py`：
+- 默认值分两层：来源与模型实例在 `astrbot/core/config/default.py`，请求重试、fallback、Persona 与压缩等运行参数在 Agent Runner 配置档案中，其默认值由 `astrbot/core/config/agent_runner.py` 定义并嵌入 `default.py:207-210`。
 
-| 配置项 | 默认值 | 行 |
+| 配置项 | 默认值 | 位置 |
 |---|---|---|
-| `provider_sources` / `provider` | `[]` | :100-101 |
-| `fallback_chat_models` | `[]` | :105 |
-| `request_max_retries` | 5 | :106 |
-| `default_image_caption_provider_id` | `""` | :107 |
-| `provider_pool` | `["*"]`（**无消费者**） | :109 |
-| `default_personality` | `"default"` | :124 |
-| `persona_pool` | `["*"]`（**无消费者**） | :125 |
-| `context_limit_reached_strategy` | `"llm_compress"` | :127 |
-| `llm_compress_provider_id` | `""` | :138 |
-| `max_context_length` | -1（不限制轮次） | :139 |
+| `provider_sources` / `provider` | `[]` | default.py:136-137 |
+| `provider_settings.default_image_caption_provider_id` | `""` | default.py:140 |
+| `provider_settings.provider_pool` | `["*"]`（**无消费者**） | default.py:142 |
+| `provider_settings.persona_pool` | `["*"]`（**无消费者**） | default.py:158 |
+| `agent_runner.config.model.fallback_provider_ids` | `[]` | agent_runner.py:13 |
+| `agent_runner.config.model.request_max_retries` | 5 | agent_runner.py:14 |
+| `agent_runner.config.persona.persona_id` | `"default"` | agent_runner.py:17 |
+| `agent_runner.config.compression.overflow_strategy` | `"llm_compress"` | agent_runner.py:24 |
+| `agent_runner.config.compression.max_turns` | -1（不限制轮次） | agent_runner.py:22 |
+| `agent_runner.config.compression.provider_id` | `""` | agent_runner.py:27 |
 
 - 迁移后模型（`astrbot/core/utils/migra_helper.py:45-128` `_migra_provider_to_source_structure`）：provider 条目只剩 6 个字段，其余 key/api_base/timeout/proxy/custom_headers 全部归入 `provider_sources`。这是 v4.x 的重构，旧 key 全部迁到 source。
 
@@ -219,7 +219,7 @@ WebUI 还提供系统级备份入口，可查看备份列表、异步导出、�
 - 模板补默认：缺 `type` → 当前 type_name；缺 `enable` → False；缺 `id` → type_name（:30-37）；
 - 入表后 `ProviderMetaData.id = "default"` 占位，实例化时由 load 流程用真实 id 覆盖（:38-48）。
 
-### 3.2 已注册适配器全清单（全仓 grep 确认 42 个）
+### 3.2 已注册适配器全清单（全仓静态检索确认 44 个注册点）
 
 - **Chat（12）**：
 
@@ -307,7 +307,7 @@ Embedding 基类提供批量接口 `get_embeddings_batch`（:344-412）：默认
 ```text
 umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
   ├─ 无 umo 时：
-  │    chat      -> config.provider_settings.default_provider_id -> [0]
+  │    chat      -> agent_runner.config.model.provider_id -> [0]
   │    stt/tts   -> settings.enable=false 则 return None
   │               -> settings.provider_id -> 对应列表第一个
   │    -> 其他 raise ValueError("Unknown provider type")
@@ -317,7 +317,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 ### 5.2 会话级/事件级/命令级切换
 
 - 会话偏好：`set_provider`（manager.py:146-172）写入 umo scope 的 `provider_perf_chat_completion`，经 SharedPreferences 会话读写落 SQLite。管理员可 `/provider` 切换（builtin_stars/builtin_commands/commands/provider.py:231-246）。
-- 事件级 model 覆盖：`req.model = event.get_extra("selected_model")`（astr_main_agent.py:1411-1412）→ `ProviderRequest.model` → 各适配器 `model or self.get_model()`。
+- 事件级 model 覆盖：`req.model = event.get_extra("selected_model")`（astr_main_agent.py:1364）→ `ProviderRequest.model` → 各适配器 `model or self.get_model()`。
 - WebChat/API 请求可直接 `event.get_extra("selected_provider")`（`_select_provider`，astr_main_agent.py:229-258）。
 - 会话组批量：`batch_update_service`（session_management_service.py:438-494，`sp.session_get`/`session_put` 逐会话读写）。
 
@@ -325,14 +325,14 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 
 | 用途 | 配置键 | 位置 |
 |---|---|---|
-| 图像描述 | `default_image_caption_provider_id` | default.py:107 |
-| 上下文压缩 | `llm_compress_provider_id` | default.py:138；astr_main_agent.py:1290-1303 |
+| 图像描述 | `provider_settings.default_image_caption_provider_id` | default.py:140 |
+| 上下文压缩 | `agent_runner.config.compression.provider_id` | agent_runner.py:27；internal.py:74-136 |
 | 知识库 embedding/rerank | kb 记录内 | kb_helper |
-| agent runner（dify/coze/dashscope/deerflow）| 各自独立 id | default.py:154-157 |
+| agent runner（dify/coze/dashscope/deerflow）| 各自独立 id | agent_runner.py:37-81 |
 
 ### 5.4 模型元数据（LLM_METADATAS）
 
-`astrbot/core/utils/llm_metadata.py:30-66` 从 `https://models.dev/api.json` 拉取 `LLMMetadata`（context window/模态/tool_call 能力），传给 WebUI 展示与上下文裁剪（`max_context_tokens` 运行时注入 astr_main_agent.py:1632-1642）。它是"事实字段来源"而不是"路由键"。
+`astrbot/core/utils/llm_metadata.py:30-66` 从 `https://models.dev/api.json` 拉取 `LLMMetadata`（context window/模态/tool_call 能力），传给 WebUI 展示与上下文裁剪（`max_context_tokens` 运行时注入 astr_main_agent.py:1688-1697）。它是"事实字段来源"而不是"路由键"。
 
 ## 6. 错误处理、重试与 Key 轮换
 
@@ -344,7 +344,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 408, 409, 429, 500, 502, 503, 504, 529 或 5xx
 ```
 
-`provider_settings.request_max_retries` 页面可调（default.py:106）→ text_chat 形参 `request_max_retries`。
+`agent_runner.config.model.request_max_retries` 页面可调（agent_runner.py:14）→ text_chat 形参 `request_max_retries`。
 
 **适配器内层**（OpenAI）max_retries=10 的错误分类循环（见 4.2），能识别 429/context/非 VLM/审核/工具不可用。两者叠加意味着一个 429 极端情况下最多可能尝试十几次。
 
@@ -429,7 +429,7 @@ umo 命中 provider_perf_<type>（inst_map 反查，无则回退全局）
 1. 未启动真实 LLM 调用；各厂商字符串 match 降级启发式未被线上验证。
 2. `provider_pool`/`persona_pool` 无消费者基于全仓 grep；若存在动态拼接 key 的隐式引用可能漏检。
 3. minio TTS/SST 各适配器内部的厂商参数细节未逐行展开（本文聚焦框架层）。
-4. `dynamic_import_provider` 覆盖面与 42 注册数基于 grep，个别适配器（如 `azure_tts` 的大厂参数）未读全。
+4. `dynamic_import_provider` 覆盖面与 44 个注册点基于静态检索，个别适配器（如 `azure_tts` 的厂商参数）未读全。
 5. 未运行 CLI、WebUI、备份导入导出或配置热更新的端到端流程；新增、编辑、启停、删除和测试的保存成功、生效时机及异常提示主要依据静态事件绑定和后端调用链。
 6. TUI 在本仓库中未找到；外部桌面仓库 `AstrBotDevs/AstrBot-desktop` 未拉取，桌面端逐项渠道操作覆盖、桌面端是否完整复用 WebUI 以及桌面端备份行为均未验证。
 7. 未验证非默认 `abconf_<uuid>.json` 配置档案中的 provider 是否独立初始化运行时实例，也未验证备份导入后 ProviderManager 是否无需重启即可恢复全部 provider 状态。

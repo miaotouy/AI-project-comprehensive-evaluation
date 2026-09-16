@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`791e2ae3257e211d14ca77e654dfe10ee1976a1c`（分支：`main`）
+> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
 >
 > 调查方式：只读盘点根 README 功能表、AGENTS.md 架构说明与源码（`agent/`、`tools/`、`plugins/memory/`、仓库根工具脚本）；未修改仓库源码
 >
@@ -19,7 +19,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 | 候选 | 证据状态 | 一句话结论 |
 |---|---|---|
 | 闭环学习（记忆/技能后台复习） | `主链确认`（静态证据） | 每 N 轮/每 N 次工具迭代触发一次后台 fork 复习，fork 继承主会话运行时与提示缓存，白名单只放行 memory 与 skill_manage |
-| 自动创建/改进 Skill | `主链确认`（静态证据） | `skill_manage` 六动作（create/patch/edit/delete/write_file/remove_file）+ 复杂任务（5+ 工具调用）创建指引 + curator 惰性后台维护（从不删除，只归档）+ `.usage.json` 统计 |
+| 自动创建/改进 Skill | `主链确认`（静态证据） | `skill_manage` 以最多 20 项的原子 operations 批次执行 create/patch/write_file/remove_file，失败整体回滚；delete 独占调用；curator 惰性后台维护（从不删除，只归档）+ `.usage.json` 统计 |
 | 持久记忆与用户建模 | `主链确认`（内置）/ `入口确认`（外部 provider） | 内置 MEMORY.md/USER.md 文件记忆 + MemoryProvider ABC 外部后端（honcho/mem0/supermemory 等 8 个）+ 记忆写审批门 + 每轮 prefetch/sync |
 | 研究数据工具链 | `主链确认`（保存/压缩）/ `入口确认`（批量与数据集） | 轨迹 JSONL 保存 + trajectory_compressor 保护首尾压缩中间 + batch_runner/mini_swe_runner 批量生成；数据流水线为离线工具，不进入主会话 |
 | Tool Gateway | `入口确认` | `tools/managed_tool_gateway.py` 统一路由 Nous 托管后端（firecrawl 搜索、fal-queue 图像、openai-audio TTS/转写、modal 沙箱）；外部订阅依赖 |
@@ -75,7 +75,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **主链**：
 
-1. **创建**：技能管理工具 `skill_manage` 提供创建、修补、编辑、删除、写文件与删文件六类动作（`tools/skill_manager_tool.py:1641-1676` 的 schema 描述即产品语义，动作清单见结论摘要表），设计规则把"复杂任务成功（多次工具调用）、克服错误、用户纠正的方法有效"定为创建时机，把"使用中发现问题应立即修补"定为使用中自改进的依据——创建与修补是同一工具的两个动作面。前台创建需用户确认，后台复习路径由来源标记区分（`skill_manager_tool.py:1600-1604`）；技能索引注入 system prompt volatile 段（Agent 角色笔记 §3 已覆盖），技能命令以 user 消息注入不破坏缓存。
+1. **创建与修改**：模型可见的 `skill_manage` schema 只有 `operations[]`。一次最多 20 项，每项声明技能名和 create、patch、write_file 或 remove_file 动作；执行前快照全部受影响技能，任一操作失败则整体回滚。delete 必须独占调用，旧平铺动作只为历史转录与待审批重放兼容，不再进入模型 schema（`tools/skill_manager_tool.py:824-938`）。设计规则仍把复杂任务成功、克服错误和有效的用户纠正视为创建或修补信号；前台写入需确认，后台复习由来源标记区分。
 2. **统计**：`tools/skill_usage.py` 维护技能目录下的 `.usage.json` 侧车，记录使用/查看/修补次数与最近活动时间、状态和置顶标记，技能管理动作成功时由记账函数落账（`skill_manager_tool.py:1599-1620`）。
 3. **维护**：curator 负责技能的长期维护（`agent/curator.py:1-20` 模块文档）——无 cron 守护进程，Agent 空闲且距上次运行超过 `interval_hours` 时 fork 复习体惰性执行。确定性状态机与硬性不变量：
    - 状态机 `apply_automatic_transitions`：按 `stale_after_days=30` 标记 stale、`archive_after_days=90` 归档；另有可选 LLM 整合 pass（`DEFAULT_CONSOLIDATE = False` 默认关闭）；
@@ -165,6 +165,8 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 扩展不再只作用于模型工具、记忆与消息平台。插件上下文现在可注册终端环境提供者，由 `agent/terminal_env_registry.py:54-95` 按作用域保存；这让远端或隔离执行环境仍能沿用核心终端工具，而不是新增一个核心工具。会话库管理也以 bundled Skill 的形式出现，跨 profile 会话引用被限定为只读（`skills/productivity/session-librarian/SKILL.md:98`）。这些能力保持“窄核心、边缘扩展”的既有产品边界。
 
+当前快照不包含 Collective Wisdom。该组织级技能市场曾由提交 `a6ee31f55a` 引入，随后由 `0dcadf6f41` 明确整包回退；HEAD 中没有 `hermes_wisdom/`、Wisdom 工具或对应桌面/消息平台表面。因此它属于可追溯的历史实现，不计入当前独特能力。
+
 ## 未验证事项
 
 - 复习 fork 在真实长会话中的成本与频率（默认 10 轮/10 迭代触发一次，未运行验证）。
@@ -178,7 +180,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 ## 关键源码索引
 
 - 闭环学习：`agent/turn_context.py:421/592-644/685`（记忆 nudge 触发）、`agent/turn_finalizer.py:734-760`（技能 nudge + 后台复习调度）、`agent/background_review.py`（复习 fork `spawn_background_review_thread` :1093、白名单 :935-953、提示词 :171-182、digest :123、`/refine` :1106 附近）、`agent/agent_init.py:1698-1801`（间隔默认值与配置读取）、`hermes_cli/cli_commands_mixin.py:2545`（`/refine`）。
-- Skill 生命周期：`tools/skill_manager_tool.py`（schema 语义 :1641-1676 附近；`is_background_review` 来源标记经 `tools/skill_provenance.py`）、`tools/skill_usage.py`（.usage.json）、`agent/curator.py`（惰性调度、不变量 15-20、状态文件 85-98）、`tools/skills_hub.py`。
+- Skill 生命周期：`tools/skill_manager_tool.py:824-938`（原子 operations 契约与回滚；来源标记经 `tools/skill_provenance.py`）、`tools/skill_usage.py`（.usage.json）、`agent/curator.py`（惰性调度、不变量 15-20、状态文件 85-98）、`tools/skills_hub.py`。
 - 记忆与用户建模：`agent/memory_manager.py`（MemoryManager 364、写门相关 1019-1128）、`agent/memory_provider.py:81`（ABC）、`tools/memory_tool.py:919,1138`（写审批门与 pending 应用）、`plugins/memory/honcho/`。
 - 主动 Agent（新增候选）：`hermes_cli/heartbeat.py`（会话心跳）、`hermes_cli/goals.py`（/goal 质量门）、`agent/estop.py`（紧急停止）。
 - 研究数据工具链：`agent/trajectory.py:30`（save_trajectory）、`agent/agent_runtime_helpers.py:115`（convert_to_trajectory_format）、`trajectory_compressor.py`、`batch_runner.py`、`mini_swe_runner.py`、`datagen-config-examples/`。

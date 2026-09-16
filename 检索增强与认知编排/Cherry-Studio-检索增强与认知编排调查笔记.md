@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读核对知识库服务、摄取任务、查询工具及 Agent 工具装配；参考已有能力汇总、独特功能和工具笔记；未运行 Electron、索引任务或模型请求
 >
@@ -29,7 +29,7 @@ Cherry Studio 的本地知识库属于“知识资产管线”与“工具化检
 
 知识库服务将管理、摄取、查询和 Concept 读写拆分。Base 是顶层范围；条目可被添加、删除和重新索引；索引后的内容以 chunk 支持召回，Concept 表示可按字符范围读取或 grep 的文档对象。服务还提供组织树，因此模型不必仅依赖相似度片段定位原文。接口集中在 `src/main/features/knowledge/KnowledgeService.ts:76-169`。
 
-摄取为异步任务式生命周期。初始化时注册根目录准备、文档索引、文件处理结果检查、子树删除和重新索引 handler；应用完全就绪后会恢复删除中或中断的条目。这确认了索引可恢复的任务边界，但本次未逐读切块算法、Embedding provider、混合检索权重及重排阈值。见 `src/main/features/knowledge/KnowledgeService.ts:53-74`。
+摄取为异步任务式生命周期。初始化时注册根目录准备、文档索引、文件处理结果检查、子树删除和重新索引 handler；应用完全就绪后会恢复删除中或中断的条目。重新索引不再默认复用库内旧副本：文件重新复制原文件，目录根重新扫描原目录，Note 从数据库内容重建快照，URL 重新获取。重取阶段失败会将对应根标为失败；若来源在入队后、锁内重置前消失，则跳过该根并保留现有向量与可搜索状态。来源解析与写入见 `src/main/features/knowledge/pipeline/sources/reacquire.ts:17-69`、`tasks/reindexSubtreeJobHandler.ts:55-149,219-255`、`ingestion/KnowledgeIngestionService.ts:506-538`。
 
 ## 查询、候选与重排主链
 
@@ -57,7 +57,7 @@ Agent 静态绑定的知识库，或本回合冻结的 Composer 选择
 
 作用域在本实现中有明确约束：Base id 限制在有效 scope 内，空范围 fail-closed；但内置 Assistant 的 unrestricted 是显式授权，不能和“未绑定”混同。Composer 选择只在连接创建时冻结，修改选择需要重建连接，静态绑定部分则可在再次列工具或调用时重读。
 
-恢复方面，启动恢复删除中与中断条目，重建入口也存在。查询工具接口没有传入 `AbortSignal`，源码注释明确知识服务没有取消管线；本次未确认检索超时、候选数、chunk token 预算、Embedding 缓存身份、重排、查询日志或可视化证据面。
+恢复方面，启动恢复删除中与中断条目，重建入口也存在；重建会在 mutation lock 前读取真实来源，锁内再次确认目标未进入删除态，再替换索引。取消若发生在破坏性重置前会保留旧索引；根已切到 active 状态后，调度失败或中断才由结算路径标为失败，避免永久停在处理中。查询工具接口没有传入 `AbortSignal`；本次仍未确认检索超时、候选数、chunk token 预算、Embedding 缓存身份、查询日志或质量评估。
 
 ## 与相邻谱系的可比/不可比边界
 
@@ -79,3 +79,4 @@ Agent 静态绑定的知识库，或本回合冻结的 Composer 选择
 - `src/shared/ai/builtinTools.ts:135-307`：搜索、读取、grep 与命中/Concept 结果契约。
 - `src/shared/ai/claudecode/toolRegistry.ts:285-314,410-415`：Claude Code 知识工具的范围门控与依赖关系。
 - `src/main/ai/tools/knowledgeLookup.ts`：搜索、读取、列出和管理操作的共享入口。
+- `src/main/features/knowledge/pipeline/sources/reacquire.ts`、`tasks/reindexSubtreeJobHandler.ts:55-188`：真实来源重取、锁内重置与失败收口。

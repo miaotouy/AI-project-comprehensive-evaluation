@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`6b130c72cdc40d8b3bed304d3e6a64345e3d2622`（分支：`main`）
+> 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
 > 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1`），并复核 Go 模块、Wails 启动代码、Vue UI 与部署脚本
 >
@@ -14,36 +14,40 @@
 
 ## 结论摘要
 
-OpenOcta 是面向 IT Ops 的桌面 Agent，采用 Go 后端与 Wails/Vue 控制界面。`src` 集中 Go 命令、服务和能力包，`ui` 集中前端与静态资源，`deploy` 提供 Windows/macOS 与场景部署文件。当前快照有 900 个跟踪文件、716 个源码文件 / 159,629 行源码。
+OpenOcta 是面向 IT Ops 的桌面 Agent，采用 Go 后端与 Wails/Vue 控制界面。`src` 集中 Go 命令、服务和能力包，`ui` 集中前端与静态资源，`deploy` 提供 Windows/macOS 与场景部署文件。当前快照有 908 个跟踪文件、720 个源码文件 / 159,843 行源码。
 
 ## 统计与模块分布
 
 | 指标 | 数量 |
 | --- | ---: |
-| Git 跟踪文件 | 900 |
-| 可识别源码 | 716 文件 / 159,629 行 |
-| 文档 | 70 文件 / 14,355 行 |
+| Git 跟踪文件 | 908 |
+| 可识别源码 | 720 文件 / 159,843 行 |
+| 文档 | 71 文件 / 14,366 行 |
 | 测试 | 43 文件 / 6,838 源码行 |
 
 | 区域 | 文件 / 行数 |
 | --- | ---: |
-| `ui` | 325 / 91,499 |
-| `src` | 466 / 67,527 |
-| `deploy` | 36 / 215 |
+| `ui` | 324 / 91,499 |
+| `src` | 470 / 67,681 |
+| `deploy` | 40 / 275 |
 | `docs` | 39 / 0（静态资源与非源码计数） |
 
 ## 语言、文档与测试
 
-TypeScript 71,947 行、Go 66,986 行、CSS 19,304 行；前端模板和样式占源码近半，Go 代码主要位于 `src/pkg`。文档 70 个文件中，`docs` 有 38 个，根 README 与 `src`/`deploy` 内的说明共同构成用户和部署文档。测试识别到 43 个文件，主要在 `ui`（42 个）和 `src/test`（1 个）；本次未运行测试。
+TypeScript 71,947 行、Go 67,140 行、CSS 19,304 行；前端模板和样式占源码近半，Go 代码主要位于 `src/pkg`。文档 71 个文件中，`docs` 有 38 个，根 README 与 `src`/`deploy` 内的说明共同构成用户和部署文档。测试识别到 43 个文件，主要在 `ui`（42 个）和 `src/test`（1 个）；本次未运行测试。
 
 ## 跨平台与工程配套
 
 README 声明 Windows/macOS 桌面安装，Go 单二进制嵌入 Control UI。`deploy/windows`、`deploy/macos`、`.goreleaser.yaml`、`build.sh` 和 CI 配置提供打包与发布入口；`ui` 与 Go/Wails 通过生成的绑定和启动代码连接。Linux/其他平台的实际发布能力本次未运行验证。
 
+macOS 打包在原有 gon 签名流程前增加一步：按目标架构把仓库自带的 libffi 动态库放进应用包的 Frameworks 目录，并先用同一 Developer ID 单独签名。应用启动时由 `src/pkg/macffi` 用该已签名副本覆盖第三方库运行时解压的无签名缓存，以通过 Hardened Runtime。库的来源与版本对应关系记在 `deploy/macos/libffi/ORIGIN.txt`，打包说明见 `deploy/PACKAGING.md`。
+
 ## 已确认边界与未验证事项
 
 - 统计包含 `imgs`、UI 公共资源、部署文件和知识文档；这些内容不计入源码行但计入跟踪文件与字节数。
-- 主线提交历史为浅克隆（20 次提交，历史跨度 42 天）。
+- 根 `LICENSE` 当前为 GPL-3.0 全文，而 README 的许可证徽章与 License 小节仍声明 Apache-2.0，两者在本次快照中不一致。
+- 打包版本标记在 `src/.env`、`src/embed/.env` 与 `ui/package.json` 中为 1.0.9。
+- 主线提交历史为浅克隆（24 次提交，历史跨度 65 天）。
 - 本次未运行 Wails 开发服务器、Go 构建、桌面安装器或端到端测试。
 
 ## 关键源码索引
@@ -51,4 +55,5 @@ README 声明 Windows/macOS 桌面安装，Go 单二进制嵌入 Control UI。`d
 - `src/`：Go 主程序、Agent 与 IT Ops 能力包
 - `ui/src/`：Vue 控制界面
 - `deploy/`、`.goreleaser.yaml`：平台部署与发行配置
+- `deploy/macos/build-app.sh`、`src/pkg/macffi/`：macOS libffi 打包与启动时覆盖
 - `docs/architecture.md`：架构说明

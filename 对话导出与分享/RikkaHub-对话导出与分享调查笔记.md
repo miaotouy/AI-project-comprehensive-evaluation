@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-15
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`8e304bb1cc641e4ea772869ab9fb8c5b9b71cffb`（分支：`master`）
+> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
 >
 > 调查方式：静态源码调查（未运行应用、未执行单元测试）。通读 Android 端对话导出面板与位图生成、消息复制与"选择复制"、导出序列化器与 SAF/分享钩子、备份管理器与恢复暂存、Chatbox 与 Cherry Studio 导入器、WebDAV/S3 客户端及配置模型、Provider 二维码编解码，以及 web-ui 的 Markdown 导出工具与入口；未做真机渲染、系统分享面板、相册写入与远端备份往返回显验证。
 >

@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`b150a551b8d465e31e418e1b2eaf5e79bbb7d28e`（分支：`master`）
+> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
 >
-> 调查方式：静态源码阅读，覆盖 subagent 六个 provider、MCP 客户端桥、ACP 服务器、hooks 双桥与 hook-protocol、subprocess/terminal/shell 执行世界、code-runtime、E2B、boot/cmdline 与 apps/cli 入口及示例组装；未运行任何外部 Agent、真实 CLI 或协议往返
+> 调查方式：静态源码阅读，覆盖 subagent provider、MCP 客户端桥与资源面、ACP 服务器、hooks 双桥、subprocess/terminal/shell、PTC runtime、E2B、POSIX SSH provider、boot/cmdline 与 CLI 入口；未运行任何外部 Agent、真实 CLI 或协议往返
 >
 > 调查范围：进程外 subagent provider（ACP、Claude Code、Codex、dsh-sdk）的启动/通信/取消、MCP 客户端桥、ACP 服务器反向主链、Claude Code/Codex hooks 桥、持久化终端与进程/沙箱执行边界、CLI 作为入口；排除复用宿主 runtime 的进程内 spawn/fork provider、普通 LLM Provider、Web 应用、workflow 与 lsp
 >
@@ -20,7 +20,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 - **反向控制表面（外部客户端 -> 宿主 Agent）**：`packages/acp/acp` 的自动化 ACP 服务器经 JSON-RPC stdio 把全新宿主 Agent 会话暴露给程序化客户端，支持建会话、发 prompt、回传已提交文本、取消与一次性权限应答。
 - **外部协议兼容层**：MCP 客户端桥把外部 server 工具以 `mcp__<serverName>__<rawName>` 命名注册进宿主工具表，带重连监督器；hooks 双桥在宿主扩展点上按 Claude Code/Codex 的 hooks.json 契约运行外部命令。
 
-执行世界边界由 subprocess seam（进程树生命周期、SIGTERM->SIGKILL 升级、环境凭据擦除）、sandbox 策略、持久化 PTY 终端服务、code-runtime worker 与 E2B 远程沙箱 POC 共同承担；CLI（`dsh --profile headless|web` 与 `dsh plugin`）是部署入口。四进程外 provider 共享同一套"一次性 run、永不 reject 的结果、整树静止 teardown"契约，差异集中在各自协议与权限处理上。
+执行世界边界由 subprocess seam、sandbox、PTY、PTC runtime 与多种远端 provider 共同承担。E2B 仍是 POC，但仓库已增加正式的 POSIX SSH provider 家族：共享 OpenSSH 连接与 helper，把 fs、subprocess、terminal 和 sandbox 四个现有 seam 映射到同一远端主机，而 Harness 与模型状态留在本机（`packages/ssh/{ssh,fs-ssh,subprocess-ssh,sandbox-ssh}/`）。
 
 ## 接入角色与系统边界
 
@@ -95,6 +95,8 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 
 `serverName` 是插件配置中的稳定本地命名空间（正则约束 1-32 字符）。进程内唯一性由 `activeServerNames` 按 app 根维护，重复加载即配置错误（`mcp-client/index.ts:148-161`）。桥只保存"serverName + rawName"的工具目录，不保存账号或资源状态，也没有跨重启持久连接。
 
+MCP 现在还提供资源读取面。`mcp-resources` 在调用 Agent 的 scope 内按 server 名解析 provider，注册三项共享工具用于列资源、列模板和读取 URI；资源只在调用时进入上下文，不订阅更新，二进制 blob 不直接投影为媒体（`packages/mcp/mcp-resources/src/{index,tools,render}.ts`）。
+
 ## 执行、回流与控制语义
 
 ### 四 provider 差异
@@ -130,7 +132,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 ## 相邻类目交接
 
 - 进程内 `spawn`/`fork` provider 与 continuable 子 Agent 属于 Agent 角色与多 Agent 编排类目（宿主内建），本次只在区分边界时提及。子 Agent 侧的 `report`、`send_message` 工具同理归工具编排类目。
-- `run_code` 传输、bash/pwsh 工具、terminal 六工具与 MCP 工具注册都属于 Agent 工具执行面（定义见 `core/tools/src/code-mode.ts:20`），本笔记只在"执行位置与外部边界"意义上引用它们。
+- `run_code` 传输、bash/pwsh 工具、terminal 工具与 MCP 注册都属于 Agent 工具执行面（PTC 定义见 `packages/core/tools/src/ptc.ts`），本笔记只在“执行位置与外部边界”意义上引用它们。
 - 持久化终端（terminal 服务、terminal-bash PTY 后端与 tool-terminal 六工具）是宿主内执行域，不属于外部协作；但其 owner=Agent 的归属模型与 subagent 的 parent 概念一致，可作横向比较素材。
 - CLI headless 是一次性宿主执行入口（`dsh --profile headless "task"`），web profile 是交互表面；`dsh plugin` 安装外部 bundle 是"发现/安装外部对象"的轻量样本，不构成独立主链。
 
@@ -138,7 +140,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 
 进程内可续接子 Agent 的生命周期为：持久 child session 在进程内至多对应一个 activation；首次提交只在 inbox 接收后返回 child/message id，后续 follow-up 继续使用同一 FIFO inbox。子 Agent 可以选择向直接父 Agent 报告，`quiet` 只注入消息，`next-step` 会在父 Agent 空闲或下一步边界唤醒；运行时另以独立来源记录最终结算，避免将管理器的事实归因给子 Agent。该机制不改变进程外 ACP、Claude Code、Codex 与 dsh-sdk provider 的 one-shot 边界（`docs/subsystems/subagent.md:114-159, 191-234`）。
 
-- 本仓库没有 GUI 产品表面：外部执行体状态、子进程工作目录与连接状态只体现在会话日志事件、CLI 输出和 stderr 诊断中，不存在图形化的执行位置/接管入口。
+- Web 已有子代理 lineage、Agent Teams 实验面和右侧终端等局部可视表面，但进程外 provider 的原生会话与完整工具轨迹仍不回流为统一接管对象。Electron 壳也已加入仓库；其实际平台行为未运行验证。
 - 四条主链均为静态走通；未运行真实 Claude Code/Codex/外部 ACP 子进程，CLI 版本兼容、SDK 版本行为（Codex 协议锁定 0.147.0）与真实进程终止未验证。
 - `subagent-acp` 的 test fixture 用脚本化 ACP 子进程，真实 ACP 子进程往返仅在快照层级，`TODO(acp-subagent-replay)` 表明快照覆盖未落地。
 - ACP 服务器只接受 text/resource_link prompt，image/audio 能力未声明；停止原因映射把 max-tokens 与 hook 中止都归一为 end_turn，客户端无法区分（源码注释明确该选择，未运行验证）。
@@ -160,7 +162,8 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
 - `packages/hooks/hooks-claude-code/src/index.ts`、`packages/hooks/hooks-codex/src/index.ts`
 - `packages/subprocess/subprocess/src/index.ts`、`packages/subprocess/subprocess-local/src/spawn.ts`
 - `packages/terminal/terminal/src/index.ts`、`packages/terminal/terminal-bash/src/{index,session,sanitize}.ts`、`packages/terminal/tool-terminal/src/index.ts`
-- `packages/code-runtime/code-runtime/src/index.ts`、`packages/code-runtime/code-runtime-worker-thread/src/index.ts`
+- `packages/ptc-runtime/ptc-runtime/src/index.ts`、`packages/ptc-runtime/ptc-runtime-node/src/index.ts`
+- `packages/experimental/ptc-runtime-python/src/index.ts`
 - `packages/e2b/e2b/src/index.ts`
 - `packages/boot/cmdline/src/index.ts`、`apps/cli/src/bin.ts`、`apps/cli/reference/README.md`
 - `packages/examples/acp-demo/src/bin.ts`、`examples/acp-agent/cordis.yml`、`examples/acp-agent/product-subagent-both.cordis.yml`、`examples/mcp-memory/*.cordis.yml`

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`c2eacd72afc4a4984564c393e15ab30011057269`（分支：`dev`）
+> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
 >
 > 调查方式：静态复核 server、sync、ACP、CLI/TUI/Desktop/Web 客户端与 Slack 包；复用 Chat、会话和独特功能笔记；未运行多客户端或 ACP 宿主
 >
@@ -47,11 +47,11 @@ HTTP 审批与提问
 
 ## 身份、协议与状态映射
 
-SQLite message/part 与事件序列是权威状态；`owner_id` 和 sync handler 处理多客户端写所有权。客户端本地 store 是投影。ACP session 映射到 OpenCode session，工作目录与项目状态继续由服务端持有。客户端/ACP 宿主身份经 HTTP 密码鉴权（`middleware/authorization.ts`）、sidecar 用户名密码与 CORS 白名单绑定。mDNS 在 loopback 之外提供局域网发现（`mdns.ts`，`入口确认`），云 control-plane 的账号绑定不在本仓库默认路径。
+SQLite message/part 与事件序列是权威状态；`owner_id` 和 sync handler 处理多客户端写所有权。客户端本地 store 是投影。ACP session 映射到 OpenCode session，工作目录与项目状态继续由服务端持有。加载、恢复或 fork 时，ACP 优先从 backing session 的持久化 agent/model 恢复，再回退消息历史，最后才用目录默认值；variant 与 mode 还会核验是否仍在当前目录快照中（`packages/opencode/src/acp/service.ts:1089-1152`）。客户端/ACP 宿主身份经 HTTP 密码鉴权（`middleware/authorization.ts`）、sidecar 用户名密码与 CORS 白名单绑定。mDNS 在 loopback 之外提供局域网发现（`mdns.ts`，`入口确认`），云 control-plane 的账号绑定不在本仓库默认路径。
 
 ## 执行、回流与控制语义
 
-SSE 推送消息、part、delta 和工具状态；sync 支持历史重放与 owner steal。ACP service 暴露创建、恢复、提示、权限、取消和分叉语义。HTTP 面另有三类远程入口：
+SSE 推送消息、part、delta 和工具状态；sync 支持历史重放与 owner steal。ACP service 暴露创建、恢复、提示、权限、取消和分叉语义。模型切换会保持仍适用于同一模型的 effort，切到新模型则选择其默认 variant，并主动发送 `config_option_update`；reasoning chunk 以 part ID 而非消息 ID 标识，避免同一 assistant 消息中的多个思考块混为一条。effort 的 config option 始终附带 `default` 选项，当前值本就是 `default` 时不再吸附到首个具体档位（`packages/opencode/src/acp/service.ts:412-437、917-963`、`acp/event.ts:120-144`、`acp/config-option.ts:52-73`）。HTTP 面另有三类远程入口：
 
 - 审批与提问回复通道：`permission.ts` / `question.ts`
 - PTY 终端 WebSocket attach：connect token + 一次性 ticket 鉴权
@@ -74,6 +74,7 @@ CLI `serve/attach/web`、Desktop sidecar、Web/TUI 均消费同一事实源；Sl
 ## 已确认边界与未验证事项
 
 - 未运行真实 ACP 宿主、多设备 replay/steal 或云 workspace 同步；mDNS 与远端 workspace 路由为 `入口确认`。
+- ACP 对 backing session 配置恢复、动态 config option 通知和多 reasoning part 的宿主兼容性仅有源码与测试覆盖，本次未与真实 ACP 客户端互通验证。
 - Slack 包是简化客户端，不等于完整 IM 远程控制产品。
 - control-plane 服务端和企业部署边界超出本次仓库主链复核范围。
 

@@ -2,19 +2,19 @@
 
 > 汇总对象：`https://github.com/langgenius/dify`
 >
-> 汇总更新日期：2026-08-28
+> 汇总更新日期：2026-09-16
 >
-> 依据：本轮 Chat、会话与消息、对话请求、Chat UI、消息渲染、Agent 工具、LLM 渠道、生成式输出、外部协作与独特功能调查笔记；代码快照以各来源笔记所列 `a9319c86ee9468f6e1a56b3f22945a63b95c282f` 为准
+> 依据：本轮 Chat、会话与消息、对话请求、Chat UI、消息渲染、Agent 工具、LLM 渠道、生成式输出、外部协作与独特功能调查笔记；代码快照以各来源笔记所列 `38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe` 为准
 >
 > 汇总方法：按应用发布、运行记录、公开交互、资源解析与外部接入合并来源结论；保留来源中的静态证据状态与未验证边界
 >
-> 汇总范围：应用发布、聊天与 workflow 运行、会话、公开 UI、工具、模型渠道、消息投影、输出对象、RAG/知识库、Prompt IDE、LLMOps、Agent v2、插件安装、DSL 可移植性与外部协作；文件存储、控制台 workflow 编辑器、触发器与商业托管未作全面调查
+> 汇总范围：应用发布与部署环境、聊天与 workflow 运行、会话、公开 UI、工具、模型渠道、消息投影、输出对象、RAG/知识库、Prompt IDE、LLMOps、Agent v2、插件安装、DSL 可移植性与外部协作；文件存储、控制台 workflow 编辑器、触发器与 Enterprise 控制面未作全面调查
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
 ## 项目概览
 
-Dify 的产品中心是租户工作区中**可发布的应用定义**。作者在控制台配置应用、模型、工具、知识和 workflow，终端用户或业务系统通过发布后的 WebChat/Chatbot、嵌入组件或 service API 触发它。后端再以应用模式为分界，将一次调用导向 chat、Agent Chat、advanced chat、workflow、Agent 或 completion 的专属生成器。其核心不是某一套聊天 UI，而是“定义一次，按多个调用面运行”的应用平台。
+Dify 的产品中心是租户工作区中**可发布的应用定义**。作者在控制台配置应用、模型、工具、知识和 workflow，终端用户或业务系统通过内置 WebChat/Chatbot、部署环境 WebApp、嵌入组件或 service API 触发它。后端再以应用模式为分界，将一次调用导向 chat、Agent Chat、advanced chat、workflow、Agent 或 completion 的专属生成器。其核心不是某一套聊天 UI，而是“定义一次，按多个调用面运行”的应用平台。
 
 ```text
 工作区成员配置应用与资源
@@ -88,9 +88,15 @@ Dify 将 Dataset、Document、分段、处理规则、索引状态和检索设�
 
 ### Agent v2 与受管插件生态
 
-Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。它是版本化 Agent 的执行环境，而不只是新的配置界面。
+Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；Chatflow 参与者按 conversation 复用记忆并固定初次绑定的 snapshot。后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。Runtime 现可选择 OpenShell 后端，取消时悬空的 tool call 也会标记为 interrupted，使下一回合可继续。它是版本化 Agent 的执行环境，而不只是新的配置界面。
 
 Plugin Marketplace 则由 Dify 处理权限、来源策略、下载/缓存、异步安装/升级任务、卸载后的关联清理和运行时发现；真正的包安装、记录、隔离与物理删除在独立 Plugin Daemon。两条链都已静态走通 Dify 侧，尚未启动对应外部 runtime。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
+
+### 部署环境与资源作用域
+
+App Deployment v2 在内置发布之外增加了环境版本、环境 WebApp/service API 访问点和环境级访问控制；MCP 与 trigger 当前明确不在部署环境支持范围。环境文件通过短期、按 app/end-user 与 upload/resolve/produce scope 的 grant 交接，内容下载另用单文件 token。仓内只确认 Dify 侧入口和协议，实际部署控制面属于 Enterprise 外部边界，因此仍是 `入口确认`，详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)和[产品结构与设计基因](../产品结构与设计基因/Dify-产品结构与设计基因调查笔记.md)。
+
+知识库 Service API Key 也可绑定到指定 Dataset。绑定 Key 每次请求都按集合校验；没有绑定行的既有 Key 继续拥有租户内全库范围。该能力缩小了 API 凭据作用域，但尚未做真实越权测试，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
 
 ### DSL 分发与迁移边界
 
@@ -115,7 +121,7 @@ service API、SDK、插件/MCP/触发器说明 Dify 有多个对外接入点，�
 
 本汇总只压缩静态调查结论。没有运行 Docker、真实模型、真实 Provider/MCP/插件或浏览器端到端场景，因此不对可靠性、性能、费用、权限效果、外部平台兼容或生产安全作项目级结论。存在测试目录只说明仓库有测试资产，不等于本轮运行过测试。
 
-RAG、Prompt IDE、注解回复、Agent v2 与 Dify 侧插件安装已补入主链；文件存储和引用访问、控制台 workflow 编辑器、触发器交付、外部 Trace 的实际可见性、Plugin Daemon/Agent Runtime 的物理执行和 SDK 具体协议仍未形成完整专项。对话导出与分享已补充专项，但当前只确认管理员留存 JSONL.GZ 命令，未确认终端用户分享主链。没有找到某入口也只能说明本轮调查范围内未确认，不能用作整个项目“不支持”的绝对结论。
+RAG、Prompt IDE、注解回复、Agent v2 与 Dify 侧插件安装已补入主链；App Deployment v2 只确认 Dify 侧入口与文件 grant，Enterprise control plane 未闭环。文件存储和引用访问、控制台 workflow 编辑器、触发器交付、外部 Trace 的实际可见性、Plugin Daemon/Agent Runtime/OpenShell 的物理执行和 SDK 具体协议仍未形成完整专项。对话导出与分享已补充专项，但当前只确认管理员留存 JSONL.GZ 命令，未确认终端用户分享主链。没有找到某入口也只能说明本轮调查范围内未确认，不能用作整个项目“不支持”的绝对结论。
 
 ## 来源笔记索引
 
@@ -129,6 +135,7 @@ RAG、Prompt IDE、注解回复、Agent v2 与 Dify 侧插件安装已补入主�
 - [生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)
 - [外部执行体与应用协作](../外部执行体与应用协作/Dify-外部执行体与应用协作调查笔记.md)
 - [独特功能](../独特功能/Dify-独特功能调查笔记.md)
+- [检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)
 - [产品结构与设计基因](../产品结构与设计基因/Dify-产品结构与设计基因调查笔记.md)
 - [对话导出与分享](../对话导出与分享/Dify-对话导出与分享调查笔记.md)
 - [应用界面基础设施](../应用界面基础设施/Dify-应用界面基础设施调查笔记.md)

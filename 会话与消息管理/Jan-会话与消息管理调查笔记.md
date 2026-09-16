@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`95e96d02c58ca361a3e54cb36360ed16bc534c8a`（分支：`main`）
+> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
 >
 > 调查方式：直接阅读源码（core 类型定义、React 前端 store 与服务层、conversational 扩展桥接、Rust Tauri 持久化命令、SQLite 移动端模块）并逐条核对符号与行号
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Jan 的聊天数据层是"前端直连持久化后端"模式：没有后端聊天业务服务，React 前端（web-app）通过 conversational 扩展把 Thread/Message 读写转发到 Tauri Rust 命令。桌面与移动端共用前端逻辑，只在持久化后端上分流：桌面端每个 thread 一个目录（`thread.json` + `messages.jsonl`，消息整文件重写），移动端走 SQLite（`jan.db`，JSON 文本列 + 外键级联删除）。
+普通 Chat 的 Thread/Message 经 conversational 扩展转发到 Tauri Rust，桌面用逐线程 JSON/JSONL、移动用 SQLite。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
 
 数据层关键事实（均有源码依据，正文标注位置）：
 
@@ -29,6 +29,8 @@ Jan 的聊天数据层是"前端直连持久化后端"模式：没有后端聊�
 5. **删除**：`deleteThread` 级联清理各 store、向量库集合与搜索索引；`deleteAllThreads` 保留收藏与带 project 的线程；无回收站（本次未找到软删除/回收站机制，检查范围见 §3）。
 
 ## 系统边界与数据主链
+
+Cowork 的数据链为创建 session -> 路由启动 agent run -> 循环产生 turns/工具输出 -> 同步 `messages` 与 turns -> persist。用户删除 session 时还要区分会话记录和会话沙箱，后者在 `agent-workspace/sessions/<id>`，与普通 Chat 的 thread 沙箱为同级目录；CLI 则在项目维度恢复最近或指定 ID 的 thread（`web-app/src/routes/cowork.tsx:439-451,1015-1102`、`src-tauri/plugins/tauri-plugin-agent-tools/src/workspace.rs:57-80,317-345`）。
 
 ```text
 ChatInput 发送（新建线程走 createThread，线程内走 processAndSendMessage）

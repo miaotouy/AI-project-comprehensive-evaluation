@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`89e02b778d626078be91dfbad01e5c9554c47f76`（分支：`main`）
+> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
 >
 > 调查方式：原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移；基于当前 HEAD 的静态源码核对 chatHandlers.js 行号，并补充新增的 VCP-CDS 子系统
 >
@@ -19,10 +19,10 @@ VCPChat 以 **Agent 或 AgentGroup（群组）为一级会话主体、Topic（�
 - 每个 Topic 对应磁盘上独立的 `history.json`；Agent/群组配置里的 `topics[]` 数组只存元数据（`id/name/createdAt/locked/unread/creatorSource`），消息内容全部落在 `UserData/<agentId 或 groupId>/topics/<topicId>/history.json`（第 1、2 节）。
 - 打开 Topic 的优先级为 **Flowlock 锁定 Topic > localStorage 记忆 Topic > 最新创建的 Topic（数组首位）**（3.1）。
 - 默认话题存在两条创建路径，产生的 id 格式不一致（`"default"` vs `"topic_<timestamp>"`），是历史遗留的不一致点（3.3）。
-- `history.json` 是**裸数组 + 整份覆盖写**，没有 schema 版本、增量写入或原子写保护（2.2）。
+- `history.json` 仍是裸数组和整份写入，但主进程已增加按文件串行的 HistoryMutationQueue，并用临时文件改名提交。基于最新磁盘历史的 `mutate` 可避免进程内追加丢失；完整 `replace` 仍可能用旧快照覆盖并发变化，且没有跨进程锁（2.2）。
 - 自动未读只在"话题历史尚无用户消息"时按 assistant 消息数计数，用户参与后归零；持久化标记带 `unreadSource` 来源区分，手动标记保留、Agent/TopicSponsor 旧标记在用户参与后清除（5.3）。
 - 话题内容搜索只匹配字符串型 `content`，多模态数组内容匹配不到（5.2）。
-- 群聊历史写盘在多次调用之间**没有文件锁或版本号校验**，理论上存在互相覆盖写丢消息的风险（6.1）。
+- 群聊与插件追加开始接入同一主进程历史写入权威；仍需区分基于最新历史的 mutate 和旧快照 replace，后者没有版本号校验（6.1）。
 
 ## 系统边界与数据主链
 
@@ -31,7 +31,7 @@ Agent/群组配置（topics[] 数组，仅元数据）
   -> selectItem / selectTopic 决定当前 Topic（Flowlock > localStorage > 最新创建）
   -> 消息事实源：UserData/<agentId|groupId>/topics/<topicId>/history.json（裸 JSON 数组）
   -> 读取：chatManager.js loadChatHistory / 各 IPC handler 逐文件读
-  -> 写入：chatHandlers.js、groupchat.js 各阶段 fs.writeJson 整份覆盖；渲染进程另有 1 秒防抖
+  -> 写入：主进程 HistoryMutationQueue 按文件串行，临时文件改名提交；渲染进程另有 1 秒防抖
   -> 索引：topic 列表（前端过滤 + searchTopicsByContent 内容检索 + "未读话题"置顶）、未读计数（自动计数 + unreadSource 持久化标记）
   -> 现场恢复：settings.json 的 lastOpenItemId/lastOpenTopicId + localStorage lastActiveTopic_*
 ```
@@ -69,9 +69,9 @@ Agent/群组配置（topics[] 数组，仅元数据）
 - agent：`UserData/<agentId>/topics/<topicId>/history.json`（`modules/ipc/chatHandlers.js:483`、`:505-506`）；
 - 群组：`UserData/<groupId>/topics/<topicId>/history.json`（`Groupmodules/groupchat.js:159`、`:500`、`:1770`、`:1825`）。
 
-### 2.2 裸数组、整份覆盖写、无原子写
+### 2.2 裸数组、整份写入与主进程写入队列
 
-`history.json` 本身没有 schema 版本号或额外的 wrapper，就是裸数组，`fs.writeJson(file, history, {spaces:2})` 直接整份覆盖写（例如 `modules/ipc/chatHandlers.js:506`、`Groupmodules/groupchat.js:539`），**没有增量写入或原子写保护**（未见先写临时文件再 rename 的模式）：写入过程中进程崩溃可能截断成非法 JSON，代码中未见缓解措施，本次未核实是否曾经出问题。
+`history.json` 本身没有 schema 版本号或 wrapper，仍以完整数组为提交单位。HistoryMutationQueue 以真实文件路径为 key 串行同一主进程内的操作，写入唯一临时文件后 rename 到正式路径；`mutate` 会在队列内部重读最新磁盘历史再变换，适合追加。`replace` 则保留完整替换语义，源码注释明确说明旧快照仍可能覆盖并发消息，调用方需自行做版本校验；队列也不提供跨进程锁。`modules/services/historyMutationQueue.js:30-37,53-114`
 
 ### 2.3 topics 元数据数组是会话级索引
 
@@ -195,7 +195,7 @@ Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-### 6.1 群聊写盘：单次调用内串行、多次调用之间无锁
+### 6.1 写入协调：进程内队列与旧快照边界
 
 `handleGroupChatMessage`（`Groupmodules/groupchat.js:477-1118`）内部，`agentsToRespond` 列表用**普通 `for...of` 循环 + 每次内部 `await`** 串行处理（`:579` 起，注释明确写"按顺序让选中的 Agent 发言 (严格串行处理)"，`:578`）。串行的关键在于两点：
 
@@ -204,7 +204,7 @@ Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 
 
 由于这里是严格的串行 await 循环，不存在并发 fetch，同一 topic 内两个 agent 的流式 chunk 不会交错写入同一个 messageId。
 
-但这个"串行"只保证了**单次 `handleGroupChatMessage` 调用内部**的顺序，并没有对**多次调用之间**加锁。如果用户在上一次群聊消息还在处理中（比如某个 agent 的回复还没写完）时再次发送消息，或者同时点了"邀请发言"按钮（`handleInviteAgentToSpeak` 是完全独立的另一个函数，同样在开头 `await fs.readJson(groupHistoryPath)` 读一次全量历史，逻辑与 `handleGroupChatMessage` 类似），两次调用各自持有自己的内存 `groupHistory` 快照，各自在结尾 `fs.writeJson` 整份覆盖写——**没有看到任何文件锁、互斥量或版本号校验**。理论上后写入的调用会把先写入的调用追加的内容覆盖掉（丢消息）；本次未核实是否在实际使用中触发过，验证需要构造并发场景，代码层面没有防护。
+主进程现创建共享 HistoryMutationQueue，并把普通保存、群聊处理及 TopicSponsor 插件操作接到同一文件队列。插件回复使用 `mutate`，会在队列内重读最新历史后追加；完整历史保存使用 `replace`。因此同进程写盘不会同时 rename 同一文件，但两个调用若各自持有旧的完整数组再 replace，仍可能以后提交者覆盖先前变化。源码没有跨进程锁或 compare-and-swap 版本检查。`main.js:1080-1089,1433-1448`、`modules/services/historyMutationQueue.js:93-114`
 
 ### 6.2 群聊消息的单一真源在主进程
 
@@ -249,7 +249,7 @@ assistant 消息的流式临时状态与落盘时机：
 
 ## 9. 当前快照的数据协调
 
-聊天内核新增了仓库、历史写入权威和持久化适配器的显式分层，流式协调器以 session、conversation key 与 generation 识别操作，并在 surface 脱离后停止其投影。该调整缩小了渲染层直接写历史或跨表面复用流状态的范围；它没有将 `history.json` 改为数据库事实源，也没有为普通单聊引入文件锁、事务或版本合并。VCP-CDS 与 VCPMobileSync 的中央索引仍是派生索引/同步数据面，不取代本地历史文件。
+聊天内核将仓库、历史写入权威和持久化适配器显式分层，流式协调器以 session、conversation key 与 generation 识别操作，并在 surface 脱离后停止其投影。该结构缩小了渲染层直接写历史或跨表面复用流状态的范围；它没有将 `history.json` 改为数据库事实源，也没有为完整 replace 引入事务或版本合并。VCP-CDS 与 VCPMobileSync 的中央索引仍是派生索引/同步数据面，不取代本地历史文件。
 
 依据：`renderer.js:188-195,517-599`、`modules/chat/chatHistoryMutationAuthority.js:11-91`、`chatHistoryPersistence.js:113-156`、`streamCoordinator.js:28-112`、`VCPDistributedServer/Plugin/VCPMobileSync/README.md:95-148`。
 
@@ -258,15 +258,15 @@ assistant 消息的流式临时状态与落盘时机：
 - **两级会话模型**（Agent/群组 → Topic）面向"多角色 + 长期关系"场景，并配套 Flowlock 锁定、群聊多策略调度等运行时机制（调度执行语义见对话请求与上下文笔记 8 节）。
 - **未读自动判定以"用户是否参与"为边界**：历史无用户消息时按 assistant 消息数计数，用户一发言即归零；持久化标记带 `unreadSource` 来源区分（手动标记保留、Agent/TopicSponsor 旧标记在用户参与后由前端主动清除）。
 - **话题内容搜索有盲点**：`searchTopicsByContent` 只匹配字符串型 `content`，多模态数组内容匹配不到（5.2）。
-- **`history.json` 整份覆盖写，无原子写**（临时文件+rename）保护，进程崩溃时点存在截断风险（未实际验证过是否发生过，仅代码层面推断）（2.2）。
-- **群聊历史写盘缺乏并发保护**：多次 `handleGroupChatMessage`/`handleInviteAgentToSpeak` 调用之间没有锁，理论上存在互相覆盖写丢消息的风险（6.1）。
+- **`history.json` 仍以整份数组提交**，但主进程写入已使用临时文件改名，降低半写文件风险。`replace` 没有版本校验，旧快照覆盖仍是已确认边界（2.2）。
+- **并发保护仅覆盖同进程队列**：`mutate` 可安全串行追加，完整 `replace` 与跨进程写入仍无合并保证（6.1）。
 - **默认话题 id 不一致**：`"default"` vs `"topic_<timestamp>"`（3.3）。
 - **类目边界**：本笔记只回答数据语义；停止生成的半截消息如何收口、话题自动总结请求的执行属于对话请求与上下文；消息列表渲染与滚动属于消息渲染器。
 
 ## 11. 未验证事项
 
-- 崩溃导致的 `history.json` 截断是否实际发生过（2.2）。
-- 群聊多次调用并发覆盖写是否在实际使用中触发过（6.1）。
+- 临时文件改名在 Windows、异常退出与文件占用下的实际恢复行为（2.2）。
+- 多次群聊完整 replace 或多进程同时写入时是否仍会覆盖消息（6.1）。
 - 分支数据模型、消息编辑/重试/续写的数据变更语义、Topic 删除与恢复的数据侧实现（1.3、3.4、4）。
 - 导入导出、备份恢复、跨版本迁移（7）。
 - 多窗口（主窗口/语音聊天窗口）同时写同一 Topic 的文件级并发未核实。
@@ -280,5 +280,6 @@ assistant 消息的流式临时状态与落盘时机：
 - `modules/ipc/agentHandlers.js`：`create-agent` 写 `topics: [{id:"default",...}]` `:430`
 - `Groupmodules/groupchat.js`：群聊历史路径与写盘 `:159`, `:500`, `:539`, `:950-952`, `:965-967`, `:1030-1039`, `:1062-1064`, `:1770`, `:1825`
 - `modules/renderer/streamManager.js`：`isThinking/finishReason` 写回 `:2277-2279`，`saveHistoryForContext`（群聊不落盘）`:377-396`
+- `modules/services/historyMutationQueue.js:30-114`：同文件进程内串行、临时文件改名、mutate 与 replace 语义。
 - `Flowlockmodules/flowlock.js`：Session 状态机、锁定 topic 查询 `getLockedTopicId` `:554-557`
 - `modules/services/chatDataService/*`（新增）：VCP-CDS 生命周期 `lifecycle.js`、客户端 `client.js`、外观 `index.js`；Rust 侧 `rust_chat_data_service/src/{ingest,storage,search,sync,watcher}.rs`；`main.js:679-698`（启动）、`:1050-1065`（status/reconcile IPC）

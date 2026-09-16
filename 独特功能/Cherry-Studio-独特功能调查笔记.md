@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-08-27
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`88cfe5dd2b77e63464be22968f66ebcb1d429483`（分支：`main`）
+> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
 >
 > 调查方式：只读源码梳理；结合根 README 功能声明与路由/组件盘点；未修改 cherry-studio 仓库
 >
@@ -16,7 +16,7 @@
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
-| Mini Program（小程序） | 主链确认 | 60+ 预设 + 自定义 webview 应用、keep-alive 池、launchpad/侧栏入口，见能力卡 1 |
+| Mini Program（小程序） | 主链确认 | 预设/自定义网站与可安装 `.miniapp` 本地包、权限与更新治理、keep-alive 池，见能力卡 1 |
 | 全局搜索 | 主链确认 | `app.search` 命令 + 联邦实体搜索 + FTS5 内容搜索（游标分页），见能力卡 2 |
 | 多模型同时对话 | 归并已有类目 | LLM 渠道笔记 §6 与 Chat UI 笔记 §7 已主链确认（@模型多选 → 并行执行 → 兄弟组展示） |
 | 翻译 | 主链确认 | 流式翻译 + `data-translation` part 持久化，见能力卡 3 |
@@ -31,13 +31,13 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
 
 ## 已确认的独特能力
 
-### 能力卡 1：Mini Program（小程序，嵌入 Web 应用门户）
+### 能力卡 1：Mini Program（网站门户与本地应用包）
 
-**用户目标**：在客户端内以独立标签页运行第三方 Web 应用（ChatGPT、Gemini、Claude、Perplexity、NotebookLM、Coze、Dify、n8n 等），与聊天工作区并列使用——把"桌面客户端"扩展成"Web 应用聚合门户"。
+**用户目标**：在客户端内以独立标签页运行第三方网站与本地打包应用，与聊天工作区并列使用。网站型小程序提供 Web 门户；`.miniapp` 包则把 manifest、资源、权限和版本一起安装到受管运行环境。
 
 **入口与触发者**：侧栏小程序分区（sidebarVariants.tsx 的 miniAppVariant + 收藏）、Launchpad（`MiniApp.tsx` 的 launchpad 变体）、设置页"小程序"面板。触发者始终是用户点击。
 
-**事实对象**：MiniApp 行（`src/shared/data/types/miniApp.ts:32-57`）：`appId`、`presetMiniAppId`（镜像 userProvider.presetProviderId 的继承模式）、`status`（enabled/disabled/pinned）、url、logo、`supportedRegions`（CN/Global）、自定义应用含上传 logo 与完整数据。预设来源 `PRESETS_MINI_APPS`（`src/shared/data/presets/miniApps.ts:20-522`，60+ 项，单真源，main/renderer 共用）。
+**事实对象**：MiniApp 行继续承载预设或自定义网站；安装型应用另有 installation 记录，保存版本、manifest、AI 模型绑定与包身份。`kind='app'` 的对象身份由包决定，普通编辑只能改状态与排序，不能把 URL 改出沙箱；见 `src/shared/data/types/miniApp.ts:68`、`src/main/data/services/MiniAppService.ts:56-57,87-138,275`。
 
 **完整主链**（静态走通）：
 
@@ -49,18 +49,20 @@ README 关键特色：300+ 预配置助手、多模型同时对话、文档与�
       -> openMiniAppKeepAlive 注册进全局 LRU keep-alive 池（MiniAppTabsPool）
       -> 后台标签页保持挂载（React 19 Activity keep-alive），仅活动页驱动 currentMiniAppId
   -> 关闭/隐藏：openedKeepAliveMiniApps 移除；status -> disabled（MiniApp.tsx:109-117）
-  -> 持久化：MiniAppService（main/data/services/MiniAppService.ts:101）读写 DB
-     （预设行 = 差量覆盖；自定义行 = 全量），seed 由 miniAppSeeder 保持
+  -> 持久化：MiniAppService 读写 DB
+     （预设行 = 差量覆盖；网站 = 全量；安装应用 = 行 + installation/manifest）
   -> 区域过滤：supportedRegions 与偏好 miniApps.regionFilter（'auto'|'CN'|'Global'）
   -> 临时小程序：openSmartMiniApp 发布的 transient descriptor 走共享缓存
      （mini_app.transient_descriptor.<appId>，所有窗口可读，不进 DB）
+  -> 本地包：文件拖入或 https manifest URL -> 安装预览 -> 用户勾选可选权限
+     -> 独立 partition/origin + grants -> 运行 -> 更新审查 -> 替换或卸载
 ```
 
-**持续性**：预设/自定义/启停/排序落 SQLite（user_mini_app 系列行）；keep-alive 池是窗口内内存态，重启后从 DB 重建可见列表；v2 迁移由 MiniAppMigrator.ts 负责。行为细节：webview dom-ready 后关闭加载遮罩、启动已在侧栏存在的小程序时复用既有标签页而不重复开 tab。
+**持续性**：预设、自定义网站、安装记录、权限授予、启停和排序落 SQLite；包资源由安装器管理，keep-alive 池仍是窗口内内存态。安装 UI 接受单个 `.miniapp` 文件或 https manifest，先展示描述、网络主机和权限清单；更新增加权限时必须再次确认，权限撤销与活动记录可在详情面板查看。依据：`src/renderer/pages/miniApps/InstallMiniAppPanel.tsx:36-84`、`components/MiniApp/InstallConsentDialog.tsx:149-172`、`MiniAppDetailPanel.tsx:381-418,549-560`。
 
-**安全与资源边界**：webview 由 Electron 管理；小程序数量有缓存偏好（"小程序缓存数量"）；自定义应用 URL 由用户自担风险（本次未发现 URL 协议白名单校验，未验证）。
+**安全与资源边界**：网站型 webview 与安装型应用的权限面已分开。安装包声明宿主权限与网络 allowlist，用户可拒绝可选权限；本地包使用自己的 partition、origin 和 grant 记录，更新时对身份与权限变化做审查。网站 URL 仍属于用户配置的外部页面，不因此获得安装包权限。沙箱、剪贴板、网络与 AI 桥的真实运行效果未做黑盒验证。
 
-**独特性判断**：这是把第三方 Web 应用作为一等对象嵌入桌面客户端的门户形态，与 AIO Hub 的"自由窗口"、DeepChat 的 MCP App 沙箱不同：无协议桥、无模型上下文回流，纯 Web 门户 + 标签管理，形成完整主链的"应用门户"能力。
+**独特性判断**：该能力同时包含 Web 门户与本地应用包。网站路径仍是标签化门户；安装包路径已经形成 manifest、能力授权、独立运行域和更新治理，不再能概括为“无协议桥的纯 Web 门户”。
 
 **证据强度**：静态源码 + 大量组件测试（MiniApp.test.tsx、MiniAppTabsPool.test.tsx、MiniAppPage.test.tsx）；未运行 webview 实际加载。
 
@@ -139,7 +141,7 @@ PDF 翻译已形成“选择文档 -> BabelDOC 保版式翻译 -> 写入翻译�
 ## 未验证事项
 
 - 未运行 Electron 应用：webview 加载、GlobalSearch 实际查询结果排序、翻译流式 UI 均为静态确认。
-- 小程序 keep-alive 池在大量标签下的资源回收、多窗口（分离窗口/QuickAssistant）间 transient descriptor 同步未验证。
+- 小程序 keep-alive 池在大量标签下的资源回收、多窗口间 transient descriptor 同步，以及安装包权限、网络 allowlist、升级和卸载后的运行效果未验证。
 - FTS5 与 trigram 回退在中文分词上的实际效果未实测。
 - 翻译的模型选择与语言目录完整读写链未展开。
 
@@ -149,6 +151,7 @@ PDF 翻译已形成“选择文档 -> BabelDOC 保版式翻译 -> 写入翻译�
 - 小程序数据模型：`src/shared/data/types/miniApp.ts:32-57`
 - 小程序页面与池：`src/renderer/pages/miniApps/MiniAppPage.tsx`、`src/renderer/components/MiniApp/MiniApp.tsx`、`MiniAppTabsPool.tsx`
 - 小程序服务与 seed：`src/main/data/services/MiniAppService.ts:101-365`、`src/main/data/db/seeding/seeders/miniAppSeeder.ts`
+- 小程序安装与权限：`src/renderer/pages/miniApps/InstallMiniAppPanel.tsx`、`src/renderer/components/MiniApp/{InstallConsentDialog,PermissionChecklist,MiniAppDetailPanel,UpdateReviewDialog}.tsx`
 - 全局搜索入口：`src/renderer/components/layout/AppShell.tsx:75-80`、`ShellTabBarActions.tsx:24`
 - 全局搜索面板：`src/renderer/components/GlobalSearch/GlobalSearchPanel.tsx`、`useGlobalSearchPanelData.ts:169-415`
 - 实体/内容搜索服务：`src/main/data/services/EntitySearchService.ts:40-55`、`ContentSearchService.ts:133-151`

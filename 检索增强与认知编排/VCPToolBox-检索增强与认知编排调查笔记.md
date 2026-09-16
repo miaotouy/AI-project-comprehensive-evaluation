@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-08-28
+> 调查更新日期：2026-09-16
 >
-> 代码快照：`e2762e4dab5c70952d88f96689fba1270624e5ef`（分支：`main`）
+> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
 >
 > 调查方式：直接静态追踪当前 Node.js、Rust N-API 与管理路由的可执行链；核对 Git 分支、版本提交和 RAG 演变；对照仓库内记忆/RAG 专项文档、历史知识切片及作者讲解视频的本地 ASS 字幕；补充匿名化的外部运行观察。未运行服务、Embedding 上游、SQLite 实例或管理面板。
 >
@@ -16,7 +16,7 @@
 
 **源码事实。** VCPToolBox 的长期记忆不是单一向量库。`dailynote/` 中的 Markdown/TXT 日记被切块、嵌入并写入 SQLite 与按日记本划分的 Vexus 索引；文件标签、标签向量、标签顺序和文件-标签关系又构成 TagMemo/RiverMemo 所需的结构事实。RAGDiaryPlugin 只在请求含日记、知识库或元思考占位符时处理消息，把检索结果替换回占位符所在的 system 消息或特定的虚拟 system user 消息。
 
-**源码事实。** 该快照的检索有两条结构路径。TagMemo 是对 KNN 结果的标签增强和 DTSC 测地读出；RiverMemo 是与 TagMemo 互斥的 Topology V3 路径。RiverMemo 先在限定日记本的候选上建立六路候选超集，再由 Rust/Rayon 一次完成候选投影、路径/相对拓扑、Direct Anchor、Omega 河网观测和最终排序。它的输出仍是当前 prompt 可注入的日记片段，但结果契约另携带 artifact 签名、query ID、Omega、角色和加分项。
+**源码事实。** 该快照的检索有两条结构路径。TagMemo 是对 KNN 结果的标签增强和 DTSC 测地读出；RiverMemo 是与 TagMemo 互斥的 Topology V3 路径。默认 RiverMemo 主链已把多日记 ANN、历史查询向量、BM25/文件候选、时间候选、权限作用域、候选融合、正文 hydrate、语义去重和拓扑排序收敛到 `NativeKnowledgeRuntime` 的联合查询；JS 负责构造计划与接收结果。原生 ABI 或资产不可用时是否回退由配置与调用点决定，普通占位符路径允许退回旧的 JS 候选组装加原生拓扑，而显式要求完整原生链的路径可拒绝降级。输出仍是可注入 prompt 的日记片段，并携带 artifact、query、Omega 与原生诊断（`KnowledgeBaseManager.js:2031-2486`、`RiverMemoEngine.js:220-344`、`rust-vexus-lite/src/knowledge_runtime.rs:782-1408`）。
 
 **源码事实。** 元思考不是 LLM 的逐步推理循环：它顺序检索已索引的“思维簇”，用上一阶段命中向量的均值与原查询向量加权融合，驱动下一阶段检索，并把每阶段文本拼成注入块。AgentDream 则从同一日记和向量索引形成跨时间层级的联想树，调用本地 VCP API 生成梦叙事；模型提出的合并、删除、感悟先落为 `pending_review` 日志，再由管理路由审批后写日记或删除源文件。
 
@@ -62,7 +62,7 @@
 
 **源码事实。** 调用经 VCP 工具循环进入 `PluginManager.processToolCall`，随后由 DailyNote 的常驻服务串行处理。服务会对缺失或错误的 command 按参数推断 create/update；每个请求先进入本进程 FIFO，再交给 `KnowledgeBaseManager.runExternalFileMutation`。文件系统提交是工具返回的完成边界，索引更新在知识库管理器的后台队列继续进行，因此“模型已得到创建成功结果”不等于新日记已经可被向量检索。`modules/vcpLoop/toolExecutor.js:371-374`、`Plugin.js:1131-1159,1197-1346`、`Plugin/DailyNote/dailynote.js:1573-1651`。
 
-**源码事实。** DailyNote 写入目录会清理路径成分；更新目录解析还以作者别名限制非公共目录匹配。服务关闭时停止接收新请求并等待队列排空。创建/更新后的文件监测、切块、标签提取、Embedding 与索引更新由知识库摄取管线接手；其中单个 chunk 的 Embedding 失败可被跳过。`Plugin/DailyNote/dailynote.js:80-126,175-192,1653-1691`、`modules/knowledgeBase/fileWatcher.js:20-257`、`modules/knowledgeBase/ingestionPipeline.js:100-257`。
+**源码事实。** DailyNote 写入目录会清理路径成分；更新目录解析还以作者别名限制非公共目录匹配。创建正文若显式以 `[HH:MM]` 或 `[HH:MM:SS]` 开头，文件名采用该时间前缀，正文不再另插运行时刻；未显式给出时继续使用服务器当前时间。服务关闭时停止接收新请求并等待队列排空。创建/更新后的文件监测、切块、标签提取、Embedding 与索引更新由知识库摄取管线接手；其中单个 chunk 的 Embedding 失败可被跳过（`Plugin/DailyNote/dailynote.js:609-730`、`modules/knowledgeBase/fileWatcher.js:20-257`、`modules/knowledgeBase/ingestionPipeline.js:100-257`）。
 
 **未运行验证。** 当前快照能确认 DailyNote 是启用的会话工具和默认可用的记录路径，却不能仅凭 manifest 断言每个 Agent 都带有 `{{VCPDailyNote}}`，更不能量化其相对 AgentDream 或人工管理面板的实际写入比例。
 
@@ -96,13 +96,13 @@
 
 ### RiverMemo：六路候选、拓扑排序与结构证据
 
-**源码事实。** `::RiverMemo` 使同一声明中的 TagMemo/TagMemo+ 失效，并提高初始 KNN 的提供量，使候选域至少覆盖 RiverMemo 的 `queryK` 或 `maxUnionCandidates` 配置。时间路候选不交给 RiverMemo 改写，其他语义和 BM25 候选进入 Topology V3；RiverMemo 失败、缺 artifact、错误维度或无法建立范围时抛错，不静默退回 KNN/TagMemo。`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:2665-2755, 2956-2985, 3236-3331`。
+**源码事实。** `::RiverMemo` 使同一声明中的 TagMemo/TagMemo+ 失效。默认开启原生联合查询时，RAGDiaryPlugin 把历史主题向量、文件候选、BM25 与限量时间候选编成 hybrid plan，一次交给知识运行时；成功后不再在 JS 重复执行 BM25、时间路合并或第二次 RiverMemo 排序。若原生联合查询不可用，配置允许时才回到旧的候选组装路径；显式禁用 fallback 的调用会抛错，不伪装成普通 KNN 成功（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:2968-3224`、`KnowledgeBaseManager.js:2031-2486`）。
 
-**源码事实。** RiverMemo 的候选超集定义六个来源：原查询 KNN、降噪场 KNN、局部场 KNN、迁移场 KNN、BM25 和 Direct Anchor。实现先按来源归一化、以 chunk ID 合并，按来源配额保留覆盖，再以多来源数和统一分填满上限；诊断中保存每路 offered/entered/dropped、配额及被上限丢弃的候选。`modules/tagmemoV10/candidateSuperset.js:3-256`。
+**源码事实。** RiverMemo 的结构候选仍包含原查询、降噪场、局部场、迁移场、BM25 和 Direct Anchor 等来源，但生产主链的候选获取与融合现由原生知识运行时承担。JS 只在兼容回退路径保留旧候选组装；原生结果通过诊断字段报告联合查询、hybrid plan 和各阶段数量，避免跨 N-API 边界搬运整批高维中间对象（`KnowledgeBaseManager.js:2122-2254`、`RiverMemoEngine.js:220-344,498-518`、`rust-vexus-lite/src/knowledge_runtime.rs:1174-1408`）。
 
 **源码事实。** 插件为 RiverMemo 查询执行 SQL `files.diary_name IN (...)`，把所得 file ID 作为 `allowedFileIds`；上下文标为 `explicit_sql_scope`，公共、本人、其他 Agent 公共及 provenance 不明均设为不允许，只有 authorized 标记为允许。Rust 输入亦含此 ID 集合。这个范围构建失败会中止查询。`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:3271-3324`，`RiverMemoEngine.js:261-313`。
 
-**源码事实。** 通过一次 N-API 调用，Rust 取得原生预备的降噪/局部/迁移场，完成候选投影、路径几何、相对拓扑、DSTC、Direct Anchor 与排序；Rust 侧可用 Rayon 并行。返回条目包含原始/基础分、拓扑和 anchor bonus、命中标签、角色、Omega、河网状态、候选来源；仅在 `includeTrace` 才再返回拓扑、几何和观测细节。`RiverMemoEngine.js:467-545`、`RiverMemoEngine.js:365-464`、`rust-vexus-lite/src/rivermemo_topology_v3.rs:1-14, 82-154`。
+**源码事实。** `NativeKnowledgeRuntime` 持有按日记注册的原生索引代际、查询观测和 Memo artifact。联合接口在一个 Rust 任务中完成多索引 ANN、hybrid 候选计划、hydrate、语义去重与 Topology V3 排序；旧接口仍可接收 JS 已准备候选执行拓扑排序。返回条目包含原始/基础分、拓扑和 anchor bonus、命中标签、角色、Omega、河网状态与候选来源；仅在请求 trace 时返回更细证据（`KnowledgeBaseManager.js:998-1025,2031-2486`、`RiverMemoEngine.js:220-344,407-518`、`rust-vexus-lite/src/knowledge_runtime.rs:782-1408`）。
 
 **源码事实。** Omega 只读查询侧河网，不读候选或数据库。它由活跃边相对种子数、涌现节点相对种子数、边流熵的几何均值组成；不完整观测再乘 0.5，并划分 collapsed、sparse、dense 三种 regime。`modules/tagmemoV10/riverObservability.js:34-130`。
 
@@ -147,6 +147,7 @@
 | 查询预算 | 动态 K、修饰符倍率、RiverMemo 候选并集上限、时间路配额、外部 rerank token 上限、最终 K/去重均为显式控制点；Dream 有候选数量、深层 top-3、上下文最多六轮及回忆字符上限。具体生效数值取决于未读取的运行时环境与 `rag_params.json`。 |
 | OneRing 近期事实 | 热配置默认最多补充 10 个 user/assistant block；每 Agent 默认只保留最新 100 条消息，设为非正数才不裁剪。OneRingMemo 默认覆盖 3 天、记录不足回退 30 条，输入/输出预算分别为 32,000/2,000 token。消息裁剪不同时清理 postTurns；摘要生成状态和锁不跨进程恢复。`Plugin/OneRing/OneRingConfig.json:1-10`、`Plugin/OneRing/OneRingDB.js:63-97`、`Plugin/OneRing/OneRingMemo.js:7-17,219-237`。 |
 | 缓存 | 插件有 query 与 embedding LRU/TTL 缓存，键是 JSON 参数 SHA-256；日记标签热更新会清 query cache。元思考主题向量有文件哈希磁盘缓存，元思考和 RAG 结果缓存还保存可重放的观察事件。`Plugin/RAGDiaryPlugin/CacheManager.js:6-153`，`MetaThinkingManager.js:34-103`。 |
+| 原生运行时与派生资产 | 日记索引向原生 registry 注册代际，RiverMemo 查询引用同一运行时持有的索引、观测和 artifact。新 artifact 发布后执行生命周期 prune；标签一致性重置会清 TagMemo/RiverMemo artifact 表，防止旧派生资产继续被选中。`KnowledgeBaseManager.js:998-1025,651-678`、`modules/knowledgeBase/tagConsistencyService.js:646-663`。 |
 | 可观测性 | RAG 广播检索详情，RiverMemo 元数据带 artifact/query/Omega/regime/候选统计，元思考广播阶段明细，Dream 广播生命周期事件。RiverMemo 仅在 `includeTrace` 才返回详细拓扑证据，而 RAGDiary 调用固定 `includeTrace: false`，所以正常 RAG Observer 不会取得逐候选拓扑轨迹。`RAGDiaryPlugin.js:3144-3225, 3316-3324`。 |
 | 取消与超时 | Dream 的 HTTP 请求有超时；本次追踪的 RAG、RiverMemo N-API、TagMemo 派生队列和元思考链未找到请求级取消接口。派生任务有最大尝试次数与递增退避，但不是用户取消。`AgentDream.js:283-289`，`TagMemoEngine.js:3995-4099`。 |
 | 运行恢复 | 索引、Tag 基线和 RiverMemo artifact 有启动恢复/懒载与兼容性检查；SQLite 健康状态会门控队列和派生任务。Dream 恢复的是调度时间戳和日志，内存中的 dream 对话上下文在 shutdown 时清空。`KnowledgeBaseManager.js:263-409`，`AgentDream.js:106-114, 919-956`。 |
