@@ -29,21 +29,21 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 - **Copilots 角色模板（提示词库的当代形态）**：`CopilotDetail` 只存人格信息（名称、系统提示词、头像、描述、标签），不含模型参数；Session 通过 `copilotId` 关联，模型与采样参数保存在会话自身 settings，同一个 Copilot 可配不同模型创建多个会话；本地自建、收藏、星标、编辑与备份导入导出链路完整。证据状态：`主链确认`（本地部分）。远端精选/搜索依赖 Chatbox 后端 API，细节见文末。来源：[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[独特功能调查笔记](../独特功能/Chatbox-独特功能调查笔记.md) 能力卡 3。
 - **会话级设置与消息快照**：发送、续写与重新生成时模型与温度一律从会话自身 settings 读取，全局默认仅在创建会话时固化；每条消息只快照 `aiProvider` 与模型显示名，temperature、技能启用列表与 Agent Mode 不进快照。证据状态：`主链确认`。来源：[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)。
 - **上下文拼装与自动压缩**：上下文先过滤不合格/错误消息、应用压缩点，再按 `maxContextMessageCount` 消息数上限裁剪历史（当前输入始终保留）；自动压缩按 token 预算（上下文窗口×阈值，默认 0.6）在发送前阻塞式触发，流式生成摘要、打 `isSummary` 标记并持久化压缩点，删除摘要即恢复原文参与上下文计算。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
-- **Agent 模式建议（auto 首轮）**：`auto` 模式首轮由快速分类模型决定是否注入 `agent-mode-suggestion` 消息卡，用户接受后锁定为开启态，之后按 `on` 处理。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
+- **Agent 模式建议（auto 首轮）**：`auto` 模式首轮由快速分类模型决定是否注入 `agent-mode-suggestion` 消息卡，用户接受后锁定为开启态，之后按 `on` 处理。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **Soul、Memories 与 Copilot 独立记忆**：Work Mode 将 Soul、Copilot overlay、长期记忆、工作区指令和时间信息冻结为会话快照；Chat Mode 只消费记忆、不注入 Soul。记忆工具写入全局或 Copilot scope，默认只影响未来会话。证据状态：`主链确认`。来源：[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
 
 ### 会话与消息
 
 - **local-first 单会话存储与双写**：完整 Session 对象与消息存通用 storage（IndexedDB），侧栏只认识 `SessionMetaRecord` 元信息（不含任何消息级字段），两者双写同步，每会话一个 `UpdateQueue` 串行合并，react-query 缓存是 UI 侧视图。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
-- **惰性创建会话（'new' 假会话）**：首页 id 固定为 `'new'` 的假会话，发送前临时状态分散在本地 state、`newSessionState` 专用对象与按字符串 `'new'` 作 key 的通用 map 三种容器；首条消息发出才经 `createPersistedChatSession` 迁移为真实 Session。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
-- **Thread / Fork / Summary / ForkMarker 四套消息级结构**：thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复折叠为 ForkGroup）、summary（消息级压缩标记）、forkMarker 是四套互不隶属的数据结构；唯一交叉点是"move thread to conversations"把 thread 转成新顶层会话，复制会话/挪 thread 时在新会话顶部插入指回源会话的 forkMarker。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
+- **惰性创建会话（'new' 假会话）**：首页 id 固定为 `'new'` 的假会话，发送前临时状态分散在本地 state、`newSessionState` 专用对象与按字符串 `'new'` 作 key 的通用 map 三种容器；首条消息发出才经 `createPersistedChatSession` 迁移为真实 Session。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
+- **Thread / Fork / Summary / ForkMarker 四套消息级结构**：thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复折叠为 ForkGroup）、summary（消息级压缩标记）、forkMarker 是四套互不隶属的数据结构；唯一交叉点是"move thread to conversations"把 thread 转成新顶层会话，复制会话/挪 thread 时在新会话顶部插入指回源会话的 forkMarker。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **消息渲染：结构化 contentParts**：text、reasoning、tool-call、image、info 等 part 分派给专用组件，不依赖从 Markdown 私有标记反向解析；Markdown 默认支持 GFM、软换行、LaTeX、Shiki、Mermaid、SVG 与图片查看器，原始 HTML 不进入 Markdown DOM、HTML 代码预览放进 sandboxed iframe。证据状态：`主链确认`。来源：[消息渲染调查笔记](../消息渲染器/Chatbox-消息渲染调查笔记.md)。
 - **流式更新与节流落盘**：每个可见增量只刷新 UI 缓存（几乎逐 token），落盘走每会话 `UpdateQueue`，按 2 秒节流且 tool-call 立即持久化，流结束/出错/暂停时无条件补一次最终落盘。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)。
-- **消息搜索与定位**："当前会话/全部会话"两个入口，正则匹配覆盖文本、推理、信息与工具调用状态及文件名；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30、命中上限 50），点击结果切换会话并滚动定位。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
-- **侧栏分页、排序与活动指示**：IndexedDB 游标分页（页大小 50、置顶优先）、分数索引落地排序、拖拽仅在同一置顶分组内生效；"生成中/回复完成未读"指示为内存态 zustand store，不落盘、重启即消失。证据状态：`主链确认`。来源：[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
-- **草稿与现场恢复**：草稿按会话粒度存 localStorage（首页 `'new-chat'`、真实会话 `draft-${sessionId}`，300ms 防抖），发送成功后清除；每会话滚动快照缓存最多 100 个，切换会话不丢阅读位置。证据状态：`主链确认`。来源：[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
-- **停止、重试、续写与并行替代回复**：停止时把未完成的 tool-call 批收口为 error 态并落盘；重新生成走 fork 分支而非替换原消息，工具暂停后的继续/重试以 `appendToMessage` 写回原消息；"在下方继续回复"刻意绕过会话生成锁以支持并行替代回复，写入由 UpdateQueue 串行兜底。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
-- **Work Mode 消息队列与 steering**：生成中输入最多排队 20 条并写入本地持久状态，可编辑、删除、清空和跨刷新恢复；默认顺序发送，用户显式请求时纯文本队列项可先落盘为 steered 消息，再进入当前生成后续 step。Chat Mode 不接受新队列项。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
+- **消息搜索与定位**："当前会话/全部会话"两个入口，正则匹配覆盖文本、推理、信息与工具调用状态及文件名；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30、命中上限 50），点击结果切换会话并滚动定位。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **侧栏分页、排序与活动指示**：IndexedDB 游标分页（页大小 50、置顶优先）、分数索引落地排序、拖拽仅在同一置顶分组内生效；"生成中/回复完成未读"指示为内存态 zustand store，不落盘、重启即消失。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
+- **草稿与现场恢复**：草稿按会话粒度存 localStorage（首页 `'new-chat'`、真实会话 `draft-${sessionId}`，300ms 防抖），发送成功后清除；每会话滚动快照缓存最多 100 个，切换会话不丢阅读位置。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **停止、重试、续写与并行替代回复**：停止时把未完成的 tool-call 批收口为 error 态并落盘；重新生成走 fork 分支而非替换原消息，工具暂停后的继续/重试以 `appendToMessage` 写回原消息；"在下方继续回复"刻意绕过会话生成锁以支持并行替代回复，写入由 UpdateQueue 串行兜底。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **Work Mode 消息队列与 steering**：生成中输入最多排队 20 条并写入本地持久状态，可编辑、删除、清空和跨刷新恢复；默认顺序发送，用户显式请求时纯文本队列项可先落盘为 steered 消息，再进入当前生成后续 step。Chat Mode 不接受新队列项。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 
 ### 生成与创作
 
@@ -84,7 +84,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 - **仓库分布**：pnpm workspace 仍以根应用承载 Electron、Web 与 Capacitor入口，并新增 `packages/chatbox-core`、`packages/chatbox-react` 承接可移植领域层和 React 绑定；当前 1843 个 Git 跟踪文件、1579 个 TypeScript/JavaScript 源文件，renderer 仍为最大实现区。来源：[仓库分布调查笔记](../仓库分布/Chatbox-仓库分布调查笔记.md)。
 - **应用界面基础设施**：界面栈为 React + TypeScript + Vite，Mantine 为主 UI 库，移动端抽屉用 vaul、另有预留的 Radix Dialog；AdaptiveModal 按屏幕形态在 Modal 与 Drawer 间切换，命令式弹窗统一经 nice-modal-react；通知为 MUI Snackbar（右上角）与 sonner（Settings 内部底部居中）两套并行系统；Sentry ErrorBoundary 四层包裹渲染树；主题同时驱动 MUI、Tailwind 与 Mantine 三套消费方；Overlay 栈自制"多层弹窗只有最上层响应 Esc"。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Chatbox-应用界面基础设施调查笔记.md)。
-- **桌面集成边界**：全局快捷键仅"显示/隐藏窗口"一项，托盘无聊天状态徽标，系统通知 API 未接入（全仓库无 `new Notification(` 匹配）；窗口显示事件联动聊天输入框聚焦是唯一的"桌面事件 → 聊天 UI 反应"联动。来源：[Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)。
+- **桌面集成边界**：全局快捷键仅"显示/隐藏窗口"一项，托盘无聊天状态徽标，系统通知 API 未接入（全仓库无 `new Notification(` 匹配）；窗口显示事件联动聊天输入框聚焦是唯一的"桌面事件 → 聊天 UI 反应"联动。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 
 ## 已知边界与待验证事项
 
@@ -127,7 +127,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 - [Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)：工具集装配、审批、执行位置、MCP/Skills 扩展、子 Agent 与后台任务回填
 - [Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)：Copilot 角色模型、会话设置来源、Skills/Agent Mode/MCP/知识库配置
 - [Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)：聊天概览、核心对象与状态权威、专项导航
-- [Chat UI 调查笔记](../Chat UI/Chatbox-ChatUI调查笔记.md)：工作台结构、Composer、消息操作、键盘/无障碍、桌面集成
+- [Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)：工作台结构、Composer、消息操作、键盘/无障碍、桌面集成
 - [LLM 渠道管理调查笔记](../LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md)：Provider/渠道模型、配置生命周期、凭据、重试与连接测试
 - [仓库分布调查笔记](../仓库分布/Chatbox-仓库分布调查笔记.md)：模块、语言、测试与跨平台代码组织
 - [会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)：持久化模型、生命周期、分支、索引与检索

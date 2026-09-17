@@ -140,7 +140,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 | Agent roster、路由绑定、workspace/身份/记忆边界、Skill snapshot | [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) |
 | 工具装配、MCP 投影、审批与执行域、沙箱 | [Agent 工具调查笔记](../Agent工具/OpenClaw-Agent工具调查笔记.md) |
 | 多渠道消息、群聊/线程路由与多 Agent 路由 | [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) |
-| Control UI/TUI/移动 app 聊天与流式渲染 | [Chat UI 调查笔记](../Chat UI/OpenClaw-ChatUI调查笔记.md)、[消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md) |
+| Control UI/TUI/移动 app 聊天与流式渲染 | [Chat UI 调查笔记](<../Chat UI/OpenClaw-ChatUI调查笔记.md>)、[消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md) |
 | 单操作者本地 Gateway 的“多表面控制平面”总述 | [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)（多表面连续性属产品架构，不另计数） |
 | 插件分层与插件 SDK/门面、`extensions/` 边界、memory 插件槽 | 工程架构（设计基因，排除）；用户可见半面并入能力卡二 |
 

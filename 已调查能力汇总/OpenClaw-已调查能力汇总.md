@@ -168,7 +168,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 ### 聊天表面（Chat UI）
 
-依据 [Chat UI 调查笔记](../Chat UI/OpenClaw-ChatUI调查笔记.md) 与 [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。四套表面都以 Gateway 会话与事件为远端事实来源，但各保留本地状态与恢复存储。
+依据 [Chat UI 调查笔记](<../Chat UI/OpenClaw-ChatUI调查笔记.md>) 与 [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。四套表面都以 Gateway 会话与事件为远端事实来源，但各保留本地状态与恢复存储。
 
 - **Control UI**：功能最完整的聊天工作台，支持多 pane/分屏/辅助面板与按会话保留的 pane 现场；Composer 支持 slash/skill 菜单、引用回复、附件、dictation/talk；草稿与附件分别按 Gateway owner 存浏览器 storage 与 IndexedDB；消息右键提供 reply/rewind/fork/copy；多会话经 sidebar 子树与 background task rail 呈现。
 - **TUI**：单终端工作区，命令/选择器/快捷键为主入口，流式、scrollback（默认 180 component）与 run 协调由独立控制器处理；未找到与 Control UI 对应的事件消息级 rewind/fork 入口，也未找到跨进程 durable 草稿。
@@ -215,7 +215,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)
 - [会话与消息管理调查笔记](../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md)
 - [对话请求与上下文调查笔记](../对话请求与上下文/OpenClaw-对话请求与上下文调查笔记.md)
-- [Chat UI 调查笔记](../Chat UI/OpenClaw-ChatUI调查笔记.md)
+- [Chat UI 调查笔记](<../Chat UI/OpenClaw-ChatUI调查笔记.md>)
 - [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)
 - [对话导出与分享调查笔记](../对话导出与分享/OpenClaw-对话导出与分享调查笔记.md)
 - [LLM渠道管理调查笔记](../LLM渠道管理/OpenClaw-LLM渠道管理调查笔记.md)
