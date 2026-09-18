@@ -1,10 +1,10 @@
 # AI 客户端特色功能贡献统计
 
-> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPToolBox`
+> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPMobile`、`VCPToolBox`
 >
-> 对比更新日期：2026-09-16
+> 对比更新日期：2026-09-17
 >
-> 依据：2026-09-16 快照的各单项目调查笔记（含通用类目、各项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)；本次把 RikkaHub 纳入统计：端侧 PRoot Linux 工作区与内嵌 Ktor 服务器多端访问分别归入执行沙箱与多表面功能族计主贡献，jieba 分词 FTS5 会话检索与二维码 Provider 配置交换计辅助贡献，助手/会话两级提示词注入与世界书兼容按上下文编译类目归并，图片生成工作台、MCP 与 OAuth、ModelRegistry 静态能力推断与消息分支不重复计数，来源为 [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md) 与 [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)
+> 依据：2026-09-16 快照的各单项目调查笔记（含通用类目、各项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)；本次把 RikkaHub 纳入统计：端侧 PRoot Linux 工作区与内嵌 Ktor 服务器多端访问分别归入执行沙箱与多表面功能族计主贡献，jieba 分词 FTS5 会话检索与二维码 Provider 配置交换计辅助贡献，助手/会话两级提示词注入与世界书兼容按上下文编译类目归并，图片生成工作台、MCP 与 OAuth、ModelRegistry 静态能力推断与消息分支不重复计数，来源为 [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md) 与 [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)；VCPMobile 的远端日记中心与可治理手机设备节点按两项独立产品功能族纳入，来源为 [VCPMobile 独特功能调查笔记](独特功能/VCPMobile-独特功能调查笔记.md) 与 [VCPMobile 已调查能力汇总](已调查能力汇总/VCPMobile-已调查能力汇总.md)
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-二十个项目的专项笔记共归并出 **102 个产品功能族**，另整理 **22 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
+二十一个项目的专项笔记共归并出 **104 个产品功能族**，另整理 **22 个机制贡献族**。产品族覆盖角色与长期认知、会话连续性、生成式输出、外部执行体与应用协作、Agent 运行时、模型调度及对话交付等方向。应用界面基础设施和仓库分布主要反映实现质量与工程边界，不转化为产品特色分。
 
 > 覆盖说明：全部计分项均已达到静态源码意义上的 `主链确认`，但大量能力尚未运行验证。`入口确认`、外部依赖和声明不符项不计分；默认关闭的已确认能力仍可计入，但在理由中保留边界。
 
@@ -24,7 +24,7 @@
 - **VCPToolBox** 的 RAG/记忆系统不能只按一个“高级召回”功能计量。复核后拆为两个主贡献族：TagMemo/RiverMemo 负责生成前自动召回、私人语义传播、拓扑重排与解释；VCP 元思考负责用持久链配置逐簇递归检索，并让前一阶段结果改变后一阶段查询。此外，新版正式确立了 F108 “渠道与前端劫持代理（VCPBridgeServer）” 为主贡献，使其主贡献分提升至 13 分。公开的 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 进一步证明这条链已经形成可迁移的内容资产契约：外部作者可以把“内心会议簇 + 四属性域 + 24 个原子模块”连同语义组配置打包，按 K 值组合成不同认知构型并直接部署 to VCP 的日记/RAG 目录；它是 F102 的生态证据，不作为新增项目或重复主贡献。LightMemo 的 KNN/TagMemo/RiverMemo 同候选域对照属于调优与验证机制，另入机制表；一致性预览/修复作为自动召回族的维护子链，Rust/Rayon 内核和 RAG Observer 分别归原生计算机制与辅助观察表面，不重复抬分。AIO Recall 作为后续独立产品化形态，仍在自动召回族计辅助贡献。多观点 Agent 会议同样是主贡献，Skill 目录索引作为 Skill 生命周期族的辅助贡献；全盘文件检索、Agent 邮箱、金融聚合、仓库文档 MCP 客户端与管理员认证码分别属于常规系统/服务接入、领域工具或支撑机制，不因主链闭合而抬高产品分。
 - **媒体创作类目已正式建立，但不新增统计分。** AIO Hub、VCPToolBox、Chatbox 的 F48 仍按原口径计入；[媒体创作横向对比](媒体创作/媒体创作横向对比.md)只把三者共同的任务、历史、资产和结果复用契约抽出比较，VCPChat 的 ComfyGen/Loom/Scriptorium 与 Hi-Fi 播放器保留为扩展或相邻边界。
 - **DeepChat、LobeHub、Cherry Studio、AstrBot** 分别覆盖 IM 遥控与 Skill 迁移、任务调度与个人记忆、小程序与全局搜索、Agent Sandbox 与主动式 Agent。LobeHub 的 Goals（目标闭环）与 Project（实体项目）分别为主链确认的主贡献和辅助贡献，DeepChat 的 CLI 本地控制平面归入“外部表面驾驶本地会话”主贡献族。
-- **DeepSeek Harness** 正式纳入第十八个比较对象。模型在会话中检查、定义、运行、停止和删除自身 Cordis 插件的自引用运行时，以及由会话事件日志持久化并可跨恢复、分叉和压缩一致重放的 plan mode，各形成一个主贡献族；同会话 goal 以事件溯源目标、轮次预算和连续阻塞判定补充目标闭环，session-local schedule 以“日志规则 + 可弃定时投影 + 原会话回合投递”补充定时 Agent 族，均计辅助贡献。进程沙箱、能力缝和子代理委派策略进入机制表，不重复计产品分。
+- **DeepSeek Harness** 已纳入比较对象。模型在会话中检查、定义、运行、停止和删除自身 Cordis 插件的自引用运行时，以及由会话事件日志持久化并可跨恢复、分叉和压缩一致重放的 plan mode，各形成一个主贡献族；同会话 goal 以事件溯源目标、轮次预算和连续阻塞判定补充目标闭环，session-local schedule 以“日志规则 + 可弃定时投影 + 原会话回合投递”补充定时 Agent 族，均计辅助贡献。进程沙箱、能力缝和子代理委派策略进入机制表，不重复计产品分。
 - **OpenClaw** 以两张达到主链确认的能力卡纳入，均属外部主体准入与第三方分发信任治理机制，按机制单列（M21、M22）、不进入产品功能计分：渠道 DM/设备配对审批门把静态 allowlist 升级为“请求-码-批准-白名单”的可操作审批生命周期，默认拒绝、批准持久化并驱动下一次准入；ClawHub 分发安装信任门在安装第三方 skill/plugin 前按发布信任元数据裁决，恶意发布直接拒绝、风险发布须在本机显式确认、裁决随安装记录落盘。前者依赖本机 Gateway，后者依赖仓库外 ClawHub 注册表；doctor 诊断-修复-迁移链维持入口确认亦不进入。以上均为静态源码主链确认、未运行验证，来源见[OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)。
 - **LobeHub** 的异构外部 Agent 托管统一六种 CLI、平台任务、原生会话、事件投影与取消；业务应用连接治理把账号、凭据、作用域和逐动作权限组织成 Connector 产品面。两者均为主贡献。DeepChat 与 Cherry Studio 以 ACP 安装运行时和 Claude Agent SDK 会话构成前一功能族的辅助贡献。
 - **AIO Hub** 的对话分享稿工作台把任意消息选区、独立视觉编排、实时预览、逐消息捕获拼接和多结果运行时历史组成完整交付表面；NextChat 的固定品牌模板计辅助贡献。Cherry Studio 与 DeepChat 的离屏完整列表、现场滚动截图属于成熟捕获路线，记录在类目笔记中但不因工程完整度加分。
@@ -32,6 +32,7 @@
 - **NextChat** 有 fork、隔离 Artifact 与固定模板对话分享三项辅助贡献；**Manifold Desktop** 为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
 - **Risuai** 以模型指令标签驱动的角色媒体闭环构成主贡献（Emotion Images 双路径：inlay 指令标签与独立分类请求，群聊多角色分屏）；插件系统（API v2.1/v3.0 iframe 沙箱 + CSP nonce + postMessage RPC）作为机制贡献单列；翻译（渲染链内嵌结构保留翻译、多后端与 LLM 缓存）、Multisend（按文件类型分派的批量发送流水线）、WebRTC 房间（纯 P2P 实时共享角色与聊天）与 Risu Hub（角色市场）各计辅助贡献。
 - **RikkaHub** 是样本中唯一以原生 Android 单机客户端为边界、把通常属于桌面或服务端的能力装进手机的项目。端侧 PRoot 用户态 Linux 工作区（文件区、rootfs，以及与模型工具共享同一环境的人类 PTY 终端）作为外部执行域计入 F53 主贡献；内嵌 Ktor 服务器加随包 React 前端实现的局域网多端访问复用宿主同一会话服务与 Room 数据库，计入 F27 主贡献。jieba 分词 FTS5 会话检索（同一索引同时服务应用内检索页、Web 接口与模型工具）计入 F15 辅助贡献；二维码 Provider 配置交换计入 F62 辅助贡献。助手/会话两级提示词注入与 SillyTavern 世界书兼容按上下文编译类目归并（F47/F03），图片生成工作台（F48）、ModelRegistry 静态能力推断与消息分支（F10/F11）按既有类目归并、不重复计数；定时与周期性主动运行确认不存在。
+- **VCPMobile** 以移动端维护远端 VCP 日记和把手机原生能力暴露为可治理设备工具节点形成两项主贡献。日记中心覆盖文本/语义搜索、基线 hash 冲突处理、创建与批量管理；设备节点由用户逐项启用能力目录，经持续 WebSocket 接收执行与取消请求，并把 Android 本机结果回传外部 VCP 服务。两项均为静态主链确认，远端服务兼容、真机权限和断线恢复尚未运行验证。
 
 这里的“贡献”表示：组合新产品时，现有调查会优先从哪个项目提取该能力的产品契约或实现原型。它不是代码贡献、原创权或项目整体成熟度判定，但明确的参考与演变关系会影响主、辅助贡献分配：同一技术路线不能因换名或重新产品化而重复记为多个主贡献，后继实现只有在显著改写产品契约时才可另立功能族。
 
@@ -88,7 +89,7 @@
 | 2 | VCPChat | 13 | 4 | 17 | 30 | 消息即应用、主动 Agent、桌面感知、Hi-Fi 媒体、文档共笔、记忆工作台与跨端同步 |
 | 3 | VCPToolBox | 13 | 1 | 14 | 27 | 自动联想记忆、递归检索思考链、上下文语言、托管浏览器、前端与 Prompt 劫持、Agent 社会和异步插件编排 |
 | 4 | Open WebUI | 10 | 5 | 15 | 25 | 多用户模型工作区、协作频道与文档、记忆、日历自动化和模型评估 |
-| 5 | Hermes Agent | 8 | 7 | 15 | 23 | 谱系化会话、后台任务、闭环学习、自进化 Skill、目标质量门和跨界面 Agent 后端 |
+| 5 | Hermes Agent | 9 | 6 | 15 | 24 | 谱系化会话、后台任务、闭环学习、自进化 Skill、目标质量门和跨界面 Agent 后端 |
 | 6 | LobeHub | 8 | 6 | 14 | 22 | 异构 Agent 托管、业务应用连接、Agent 调度与运营、白盒记忆、目标闭环与协作文档对象 |
 | 7 | DeepChat | 5 | 11 | 16 | 21 | 可操控 Agent turn、ACP 运行时、IM 遥控、Tape & Trace、Skill 迁移和强审批绑定 |
 | 8 | SillyTavern | 7 | 4 | 11 | 18 | 角色卡、World Info、提示词工程工作台、swipe、快捷动作和内容脚本 |
@@ -101,9 +102,10 @@
 | 15 | DeepSeek Harness | 2 | 2 | 4 | 6 | 自引用插件运行时、日志化 plan mode、同会话目标驱动与定时重入 |
 | 16 | RikkaHub | 2 | 2 | 4 | 6 | 端侧 PRoot Linux 工作区、手机即服务端的局域网多端访问、FTS5+jieba 会话检索与二维码配置交换 |
 | 17 | Risuai | 1 | 4 | 5 | 6 | 模型指令标签驱动的角色媒体、多后端结构保留翻译、批量发送流水线、实时房间共享与 Risu Hub 角色市场 |
-| 18 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
-| 19 | OpenClaw | 0 | 0 | 0 | 0 | 外部主体显式准入与第三方扩展分发信任治理；差异化均属机制，按机制单列不并入产品分 |
-| 20 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
+| 18 | VCPMobile | 2 | 0 | 2 | 4 | 远端日记知识工作区与可治理的手机设备工具节点 |
+| 19 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
+| 20 | OpenClaw | 0 | 0 | 0 | 0 | 外部主体显式准入与第三方扩展分发信任治理；差异化均属机制，按机制单列不并入产品分 |
+| 21 | Manifold Desktop | 0 | 0 | 0 | 0 | 当前作为未闭合聊天主链的下限样本 |
 
 排序先看产品特色点，再看主贡献数和覆盖功能族。分数相近不表示能力同质，例如 DeepChat 与 VCPChat 分别偏向可观测 Agent 会话和消息/桌面运行时，不能互相替代。
 
@@ -131,6 +133,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | F66 | 生成前自动召回与私人语义拓扑重排 | VCPToolBox | AIO Hub | SillyTavern 的 World Info/世界书建立了生成前条件注入范式；VCP 以日记占位符在请求前自动触发召回，再由 TagMemo/RiverMemo 完成上下文降噪、标签传播、候选拓扑读出、排序解释和作用域约束，使记忆成为每轮上下文环境而非仅供 Agent 选择的搜索工具。AIO Recall 参考 VCP 路线，以思绪集、可插拔候选模块、严格占位符、SQLite 真源和监控面形成独立产品化，计辅助贡献 |
 | F102 | 可配置的逐阶段递归检索思考链与可迁移思维簇生态 | VCPToolBox | - | `[[VCP元思考:…]]` DSL 选择持久化链与语义簇，每一阶段检索结果的平均向量会与原查询融合，生成下一阶段查询；链配置、缓存、自动选链参数和 RAG Observer 事件形成独立于单次召回的执行与观察契约。公开第三方 VCP-Disco-Elysium-Mod 将 1 个启动簇、4 个属性域、24 个原子模块和语义组配置打包为可直接放入 `dailynote/` 的内容资产，并用 K 值定义认知构型，说明该契约可被外部作者复用。当前 VCP 快照只有 default 链，文档所称 `thinktheme/*.json` 未实现，运行效果未验证 |
 | F73 | 神经云图与日记记忆工作台 | VCPChat | - | 将记忆网络、搜索、日记和可视化组织为独立用户工作台 |
+| F111 | 远端日记与个人知识工作区 | VCPMobile | - | 手机端围绕远端日记文件形成文本/语义搜索、编辑、基线冲突处理、创建、移动与批量管理闭环；事实源和语义索引仍由外部 VCP 服务持有 |
 | F82 | Agent 私有资产协议与作用域管理 | AIO Hub | - | agent-asset 协议把资产绑定 Agent，并贯通管理、宏注入和渲染 |
 | F103 | 模型指令标签驱动的角色动态媒体 | Risuai | - | 模型回复后按情绪切换角色立绘：inlay 路径由模型直接输出 `<Emotion="…">` 指令标签并经解析器换图，普通路径走独立分类请求（LLM 示例分类或嵌入相似度检索）；群聊按视图模式分屏。与 SillyTavern 表达式系统（仅 `入口确认` 且依赖外部模块）相比形成本地完整闭环 |
 | F106 | 可重放的会话级 plan mode | DeepSeek Harness | - | 规划状态以会话事件为唯一权威，可随恢复、分叉、压缩和多客户端重放；退出要求完整计划并经过用户审批，沙箱和工具审批仍由独立策略强制 |
@@ -213,6 +216,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | F62 | DeepLink 外部启动与配置协议 | - | DeepChat、RikkaHub | deepchat 协议可启动会话、安装 MCP 或配置 Provider；RikkaHub 以固定前缀加 Base64 渠道 JSON 的二维码信封在设备间交换含端点与密钥的 Provider 配置并直接导入为新实例，同属应用外载体驱动的配置入口（明文凭据、无签名、不可撤销） |
 | F74 | 托管浏览器观察、控制与验证运行时 | VCPToolBox | - | managed Chrome 具生命周期、协议、脱敏、验证和指标闭环；默认关闭。2.4 支持正文图片 IMG* 语义、`get_page_image` 和 Popup 人工 Managed 选择，agent 不隐式控制托管运行时 |
 | F78 | 跨节点文件透明获取与取消传播 | VCPToolBox | - | 来源绑定、缓存、循环保护、断线清理和 cancel_tool 形成分布式文件面 |
+| F112 | 可治理的手机设备工具节点 | VCPMobile | - | 用户逐项启用位置、传感器、硬件状态、剪贴板、通知等能力，移动端向外部 VCP 服务注册工具目录并接收执行/取消请求；连接状态、请求关联和重连均可观察 |
 | F79 | 文件事实源的 Agent 论坛与异步协作 | VCPToolBox | VCPChat | 后端以 Markdown 帖子形成可持久协作空间，VCPChat 提供隔离渲染的论坛客户端 |
 | F80 | 长任务异步回调与结果回注会话 | VCPToolBox | - | 插件先返回任务句柄，完成后把结果重新注入原会话 |
 | F84 | 多仓库 Git 工作台与 AI 提交草稿 | - | AIO Hub | diff 审查、暂存、批量仓库操作和 LLM 提交信息闭环完整，但仍是成熟开发工具的 AI 增强形态 |
@@ -248,7 +252,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | M02 | 具作用域、可复用或可恢复的工具审批策略 | DeepChat | Chatbox、Jan、Cherry Studio、Hermes Agent、LobeHub | 审批绑定会话、参数、命令、server 或持久策略 |
 | M03 | Agent 循环步数、超时、重复守卫和大结果落盘 | AstrBot | Hermes Agent、OpenCode、Cherry Studio | 限制失控循环并把长结果转成可寻址对象；Cherry Studio 普通聊天工具轮次上限默认 100 |
 | M04 | 多来源统一工具注册、过滤与校验 | OpenCode | AIO Hub、AstrBot、DeepSeek Harness、Hermes Agent、Open WebUI、Jan | 内置、Plugin、MCP、Skill 共用发现和执行边界；DeepSeek Harness 以 Service Definition、Provider、Consumer 三角色拆分模型契约与可替换实现 |
-| M05 | 跨进程、远端节点和多协议插件执行 | VCPToolBox | VCPChat、AIO Hub | 工具运行位置离开当前客户端，并由协议和节点编排 |
+| M05 | 跨进程、远端节点和多协议插件执行 | VCPToolBox | VCPChat、AIO Hub、VCPMobile | 工具运行位置离开当前客户端，并由协议和节点编排 |
 | M06 | 请求、Key、模型与 Provider 分层故障转移 | Hermes Agent | - | 失败后逐层改变目标，形成完整静态 fallback 链 |
 | M07 | Key 健康状态、冷却与当前请求换 Key | AIO Hub | AstrBot、Jan | Key 成为带失败状态和选择逻辑的资源池 |
 | M08 | 事件日志、重放与单写所有权 | OpenCode | DeepSeek Harness | OpenCode 为跨设备会话提供全序事件、断点恢复和显式写所有权；DeepSeek Harness 以 append-only 会话日志作为模型历史、请求快照和插件状态的唯一持久权威，进程内状态只保留可弃投影 |
@@ -287,11 +291,11 @@ AstrBot、DeepSeek Harness、OpenCode、Pi、VCPToolBox 本来就不以普通桌
 
 ## 与综合评分的差异
 
-现有[AI 客户端项目评分](AI客户端项目评分.md)回答“一个完整客户端是否成熟、均衡、可控”；本文回答“若拿掉大家都有的底座，这个项目还留下哪些值得组合的产品能力”。
+[AI 客户端项目评分](AI客户端项目评分.md)中的基线成熟度分回答“共同主链是否成熟、均衡、可控”；本文回答“若拿掉大家都有的底座，这个项目还留下哪些值得组合的产品能力”，并为评分文档的产品辨识度轴提供数据。
 
 | 观察角度 | 更看重什么 | 容易上升的项目 |
 |---|---|---|
-| 综合评分 | 完整性、工程、安全、恢复、常见主链 | DeepChat、Hermes Agent、Cherry Studio、LobeHub |
+| 基线成熟度评分 | 完整性、工程、安全、恢复、常见主链 | DeepChat、Hermes Agent、Cherry Studio、LobeHub |
 | 产品特色贡献 | 独特工作流、生态契约、运行时形态、产品辨识度 | AIO Hub、Hermes Agent、Open WebUI、VCP 系、SillyTavern、OpenCode、DeepSeek Harness |
 | 机制贡献 | 跨能力复用、安全、可靠性、可恢复性 | OpenCode、Hermes Agent、AIO Hub、VCP 系、DeepChat、DeepSeek Harness |
 
@@ -306,6 +310,8 @@ AstrBot、DeepSeek Harness、OpenCode、Pi、VCPToolBox 本来就不以普通桌
 - [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)
 - [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md)
 - [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)
+- [VCPMobile 独特功能调查笔记](独特功能/VCPMobile-独特功能调查笔记.md)
+- [VCPMobile 已调查能力汇总](已调查能力汇总/VCPMobile-已调查能力汇总.md)
 - [DeepSeek Harness 已调查能力汇总](已调查能力汇总/DeepSeek-Harness-已调查能力汇总.md)
 - [VCP-Disco-Elysium-Mod（公开第三方思维簇模组）](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod)
 - [Agent 角色横向对比](Agent角色/Agent角色横向对比.md)
