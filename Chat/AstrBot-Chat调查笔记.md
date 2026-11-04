@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动异步聊天框架**。一条入站消息经 `EventBus` 从异步队列取出，为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制集中在两处：UMO 粒度的 `session_lock` 串行化 LLM 请求，以及严格有序的 follow-up 队列。核心特征：UMO 事件流水线、九阶段洋葱调度、两级会话概念、上下文双层压缩。
+AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动异步聊天框架**。一条入站消息经 `EventBus` 从异步队列取出，在派发前完成会话隔离与配置档案选择，再为每条消息创建独立 asyncio 任务，交给按配置 ID 映射的 `PipelineScheduler` 按固定 9 阶段顺序处理。并发控制集中在两处：UMO 粒度的 `session_lock` 串行化 LLM 请求，以及严格有序的 follow-up 队列。核心特征：UMO 事件流水线、九阶段洋葱调度、两级会话概念、上下文双层压缩，以及跨事件索引的 trace 时间线。
 
 ## 产品表面与系统边界
 
@@ -26,24 +26,27 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 ```text
 平台适配器收到消息 → 构造 AstrMessageEvent（unified_msg_origin = platform:message_type:session_id）
-→ event_queue.put() → EventBus.dispatch 无限循环消费（每事件一 asyncio.create_task，_pending_tasks 强引用防 GC）
+→ event_queue.put() → EventBus.dispatch 无限循环消费：按原始 UMO 选择配置档案 → 应用会话隔离（unique_session）
+→ 每事件一 asyncio.create_task（_pending_tasks 持有事件强引用防 GC，trace 上下文随之绑定）
 → 按 conf 映射取 PipelineScheduler → scheduler.execute(event)
-→ 九阶段洋葱模型：WakingCheck（唤醒+handler 匹配+unique_session）→ WhitelistCheck → SessionStatusCheck
+→ 九阶段洋葱模型：WakingCheck（唤醒+handler 匹配）→ WhitelistCheck → SessionStatusCheck
    → RateLimit（超限 stall 阻塞）→ ContentSafetyCheck → PreProcess → Process（InternalAgentSubStage：
    session_lock 包裹 → build_main_agent → agent 循环；或插件 handler / 第三方 runner）
-   → ResultDecorate（@/回复前缀、T2I、TTS、分段回复、转发、安全复查）→ Respond（发送）
-→ 收尾：event.cleanup_temporary_local_files()、active_event_registry 注销、历史保存
+   → ResultDecorate（@/回复前缀、T2I、TTS、分段回复、转发、安全复查）→ Respond（发送，含可移植按钮与流式 trace）
+→ 收尾：event_context 释放事件（cleanup_temporary_local_files）、active_event_registry 注销、历史保存
 ```
+
+主动唤醒（AgentWakeupEvent）复用同一个 InternalAgentSubStage：跳过 typing 提示，其余请求钩子、provider 唤醒前缀检查与 session lock 流程与普通消息一致，并在取锁前后检查后台停止信号；回复经 Respond 阶段正常发送。
 
 ## 核心对象与状态权威
 
-- **两级会话**：会话（session）= 聊天窗口，以 `unified_msg_origin` 标识；对话（conversation）= 会话内子对话，可新建/切换/删除。
-- **持久化**：对话历史存 SQLite `conversations` 表（`ConversationV2.content` = OpenAI 格式 JSON 列表）；当前对话 ID 经 SharedPreferences `sel_conv_id`（scope=umo）持久化；内存缓存 60s 防抖。
-- **AstrMessageEvent**：事件载体，`stop_event()` 可任意点截断传播；`role` 在唤醒阶段被标记（admin 等）。
+- **两级会话**：会话（session）= 聊天窗口，以 `unified_msg_origin` 标识；对话（conversation）= 会话内子对话，可新建/切换/删除。开启 unique_session 时，群消息在进入流水线前按平台规则改写 session_id，形成按发送者隔离的会话。
+- **持久化**：对话历史存 SQLite `conversations` 表（`ConversationV2.content` = OpenAI 格式 JSON 列表）；当前对话 ID 经 SharedPreferences `sel_conv_id`（scope=umo）持久化；内存缓存 60s 防抖。另有有界的历史消息表与 trace 记录表支撑平台历史回放与消息追踪。
+- **AstrMessageEvent**：事件载体，`stop_event()` 可任意点截断传播；`role` 在唤醒阶段被标记（admin 等）；同时携带 trace 时间线与可选按钮交互对象（`is_button_interaction` / `get_button_interaction`）。
 - **并发状态**：三类并发状态互不隶属：
-  - `SessionLockManager`：按事件循环隔离、UMO 粒度 `asyncio.Lock`，引用计数自动清理；
+  - `SessionLockManager`：按事件循环隔离、UMO 粒度 `asyncio.Lock`，引用计数自动清理；取锁后会再次核对 LLM 开关与 `SessionServiceManager` 的会话策略，避免排队期间配置变更后仍发起请求；
   - follow-up 序号状态机：捕获时分配单调序号；
-  - `ActiveEventRegistry`：stop_all 硬断 vs `agent_stop_requested` 软停；软停同时经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，事件传播与历史保存仍继续，见 #9602。
+  - `ActiveEventRegistry`：stop_all 硬断 vs `agent_stop_requested` 软停；软停同时经 agent_stop 回调立即取消 runner 进行中的 LLM 请求，事件传播与历史保存仍继续，见 #9602。平台删除时 EventBus 会清理该平台的排队事件并取消在途任务。
 
 ## 专项导航
 
@@ -57,10 +60,10 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 1. **九阶段洋葱调度**：阶段 `process()` 返回 `AsyncGenerator` 时挂起，递归执行后续阶段，完成后回到 yield 点执行后置逻辑——LLM 请求阶段先让 Respond 发送，再回来做历史保存等收尾；单事件单流水线，无跨阶段状态泄漏。
 2. **并发控制**：同 UMO 串行化（session_lock 包裹整个 LLM 流程），跨会话可并行；follow-up 捕获时分配序号 + `asyncio.Condition` 队首放行，避免唤醒顺序漂移。
-3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:557-596；cron/manager.py:444-510）。
+3. **上下文压缩两层**：先轮次截断（`enforce_max_turns≠-1`），再 token 压缩（82% 阈值触发，`LLMSummaryCompressor` 或 `TruncateByTurnsCompressor`，压缩后仍超限折半兜底）；system 消息保护、tool 配对修复。主动任务和 cron 唤醒也保留结构化历史并交给同一截断路径处理（astr_agent_tool_exec.py:501-546；cron/manager.py:426-476）。
 4. **群聊**：`GroupChatContext` 每 UMO 内存环形记录最多 1000 条原始消息（含图像 caption），注入为 `<system_reminder>` 块；群历史可选持久化 700 条上限并暴露 `get_group_message_history` 工具；`unique_session` 开启后按发送者隔离会话。
 5. **边界**：RateLimit 超限 stall 阻塞而非丢弃（消息堆积），队列键为完整 `unified_msg_origin`，不同 UMO 不再共享限额队列（rate_limit_check/stage.py:57-82）；EventBus 无限队列无背压；阶段顺序硬编码于 `STAGES_ORDER`；agent 停止两态（stop_event 硬断 / agent_stop_requested 软停保历史）。
-6. **会话可读名称**：唤醒阶段会从平台事件的群名、发送者名等元数据派生 UMO 自动名称，按 UMO 合并后台写入；多个平台适配器同时补齐群名称、头像、所有者、管理员、成员数或成员列表。该名称是会话导航元数据，不改变 UMO 标识（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-110`；`astrbot/core/platform/astr_message_event.py:511-520`）。
+6. **会话可读名称**：唤醒阶段会从平台事件的群名、发送者名等元数据派生 UMO 自动名称，经有上限的缓存与单后台写者在流水线之外按 UMO 合并写入；多个平台适配器同时补齐群名称、头像、所有者、管理员、成员数或成员列表。该名称是会话导航元数据，不改变 UMO 标识（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-114`；`astrbot/core/platform/astr_message_event.py:611-635`）。
 
 ## 未验证事项
 
@@ -71,8 +74,10 @@ AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动�
 
 ## 关键源码索引
 
-- `astrbot/core/conversation_mgr.py`（对话管理，:19-443）、`astrbot/core/db/po.py`（ConversationV2 / PlatformMessageHistory）
-- `astrbot/core/event_bus.py`（事件总线）、`astrbot/core/pipeline/scheduler.py` + `stage_order.py`（洋葱调度）
-- `astrbot/core/pipeline/process_stage/method/agent_sub_stages/internal.py`（session_lock :220）、`follow_up.py`（:1-248）
+- `astrbot/core/conversation_mgr.py`（对话管理）、`astrbot/core/db/po.py`（ConversationV2 / PlatformMessageHistory / UmoAlias）
+- `astrbot/core/event_bus.py:52-140`（事件总线、会话隔离、平台停止）、`astrbot/core/pipeline/scheduler.py` + `stage_order.py`（洋葱调度）
+- `astrbot/core/pipeline/process_stage/method/agent_sub_stages/internal.py:76-320`（session_lock :184）、`follow_up.py`（:1-208）
+- `astrbot/core/platform/agent_wakeup_event.py`（唤醒事件）、`astrbot/core/astr_main_agent/builder.py:57`（主 Agent 构建）
 - `astrbot/core/utils/session_lock.py`（UMO 锁）、`astrbot/core/agent/context/manager.py`（上下文压缩）
+- `astrbot/core/utils/trace.py`、`astrbot/core/utils/trace_store.py:35`（事件 trace 与持久化）
 - `astrbot/builtin_stars/astrbot/group_chat_context.py`（群上下文）、`dashboard/src/views/ChatPage.vue`（WebChat）

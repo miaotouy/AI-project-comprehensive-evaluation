@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
-> 调查方式：直接阅读源码（`src/renderer/routes/index.tsx`、`src/renderer/routes/session/$sessionId.tsx`、`src/renderer/components/session/*`、`src/renderer/stores/session/*`、`src/renderer/stores/chatStore.ts`、`src/renderer/stores/uiStore.ts`、`src/renderer/storage/SessionMetaStorage.ts`、`src/shared/session/message-forks.ts`、`src/shared/types.ts` 等），未凭空推断；不确定处标注"未核实"。
+> 调查方式：直接阅读源码（`src/renderer/routes/index.tsx`、`src/renderer/routes/session/$sessionId.tsx`、`src/renderer/components/session/*`、`src/renderer/stores/session/*`、`src/renderer/stores/session/`、`src/renderer/stores/uiStore.ts`、`src/renderer/storage/SessionMetaStorage.ts`、`src/shared/session/message-forks.ts`、`src/shared/types.ts` 等），未凭空推断；不确定处标注"未核实"。
 >
 > 调查范围：聊天会话、消息构建、消息状态、存储、流式更新与交互机制
 >
@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模型聊天系统，Electron 桌面 + Web 双端。核心特征：会话列表只认识 `SessionMetaRecord` 元信息，不知道 thread/fork/summary 的存在；首页是 id 固定为 `'new'` 的假会话，Session 直到发出第一条消息才创建；流式生成把 UI 立即刷新与落盘持久化拆成两条频率不同的路径——UI 缓存逐 token 更新，落盘按 2 秒节流。
+Chatbox 是一个 **local-first、以单个 Session 为存储单元**的多模型聊天系统，Electron 桌面 + Web 双端。核心特征：会话列表只认识 `SessionMetaRecord` 元信息，不知道 thread/fork/summary 的存在（消息侧已改为行式消息树，权威数据是 `SessionTree` 的 thread 行与消息行）；首页是 id 固定为 `'new'` 的假会话，Session 直到发出第一条消息才创建；流式生成把 UI 立即刷新与落盘持久化拆成两条频率不同的路径——UI 缓存逐 token 更新，落盘按 2 秒节流。
 
-Chatbox 现在明确区分 Chat Mode 与 Work Mode：前者保留 thread/fork 的结构自由，后者采用追加式单线工作流并开放消息队列、steering、Soul/Memory 与宿主工具。知识库和网页浏览仍通过同一工具注册管线注入；持久记忆也可在 Chat Mode 使用。thread、fork、summary 与 starred 仍是相互独立的数据结构。
+Chatbox 现在明确区分 Chat Mode 与 Work Mode：前者保留 thread/fork 的结构自由，后者采用追加式单线工作流并开放消息队列、steering、Soul/Memory 与宿主工具。知识库和网页浏览仍通过同一工具注册管线注入；持久记忆也可在 Chat Mode 使用。thread、fork 与 summary 在落盘后都收进同一棵消息树（thread 是根到叶的路径、fork 是兄弟行与激活子节点、summary 是 `kind` 为 `summary` 的行），starred 只存在于 `session_meta`。
 
 ## 产品表面与系统边界
 
@@ -30,7 +30,7 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 
 ```text
 用户输入
- → InputBox.handleSubmit（首页为 createPersistedChatSession：把 'new' 临时会话迁移为真实 Session）
+ → InputBox.handleSubmit（首页把 'new' 临时会话迁移为真实会话：SessionService.createSession + 草稿清理）
  → sessionHelpers.constructUserMessage（图片→contentParts、文件→files、链接→links）
  → submitNewUserMessage（写入用户消息 + 插入 assistant 占位）
  → orchestrateGeneration（选择当前 session/thread 的消息历史）
@@ -38,13 +38,13 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
  → model.chatStream 流式（provider）
  → 主循环逐 chunk：updateStreamingCache 只刷 UI 缓存；距上次落盘 ≥2s 或 chunk 为 tool-call 时 persistStreamingMessage 落盘（每会话 UpdateQueue 串行合并）
  → 流结束 / 出错 / 暂停 各补一次无条件落盘
- → storage（IndexedDB）持久化
+ → 行式 SQL 持久化（session_messages / session_threads + session_meta）
 ```
 
 ## 核心对象与状态权威
 
-- **`Session`**（`shared/types.ts`）：完整会话对象，由消息数组、thread 列表、消息分支哈希与会话设置组成；权威源在 storage，react-query 缓存是 UI 侧视图。
-- **`SessionMetaRecord`/`SessionMetaSchema`**（`shared/types.ts:390-400`）：侧栏唯一认知的元信息，含置顶、隐藏、归档时间与排序序号等字段，不含任何消息级字段；权威源在 IndexedDB meta store（页大小 50，置顶记录优先游标扫描）。
+- **`SessionTree`**（`packages/chatbox-core/src/session/session-tree/types.ts`）：会话头、thread 行与消息行三段式；树形拓扑（父指针、激活子节点、兄弟序）就是权威数据，旧数组式 `Session` 由 `encode.ts`/`decode.ts` 与其互转，renderer 侧读的是窗口化投影。
+- **`SessionMetaRecord`/`SessionMetaSchema`**（`src/shared/types/session.ts`）：侧栏唯一认知的元信息，含置顶、隐藏、归档时间与排序序号等字段，不含任何消息级字段；权威源是 `session_meta` 表，桌面/Web 走 IndexedDB 实现、移动端走 SQLite 实现。
 - **`Message`**（`shared/types.ts`）：由内容部件、文件与链接组成，并带生成中标记、压缩摘要与分支标记（`isSummary`、`isForkMarker` + `forkedFromSessionId`）。
 - **`uiStore`**：持有网页浏览、知识库与 Agent 模式三个会话级开关，以及 `newSessionState`；`'new'` 假会话的待发送状态分散在本地 state、`newSessionState` 与通用 map 三处，首次发送时统一迁移。
 - **生成中的消息**：streaming cache（queryClient）→ 每会话 `UpdateQueue` → 磁盘；节流 2000ms，`mergeCachedGeneratingMessages` 保证落盘旧快照不回退生成中消息。
@@ -64,7 +64,7 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 
 ## 关键能力与已确认边界
 
-1. **分支（fork）**：重新生成或在新分支重试会产出消息级平行分支（`messageForksHash`）；`ForkNav` 在同一消息位置切换内容，替代回复可折叠进 `ForkGroup` 分支组。fork 与 thread 可叠加共存，两类分支的清理逻辑共享同一入口（`chatStore.ts:881`）。
+1. **分支（fork）**：重新生成或在新分支重试会产出消息级平行分支（`messageForksHash`）；`ForkNav` 在同一消息位置切换内容，替代回复可折叠进 `ForkGroup` 分支组。fork 与 thread 可叠加共存，两类分支的清理逻辑共享同一入口（`cleanupEmptyForkBranches`）。
 2. **搜索**：`SearchDialog` 提供"当前会话/全部会话"两个入口，按消息模型扫描（覆盖 thread 历史与文本/reasoning/tool-call 状态），点击结果切换会话并 `scrollToMessage` 定位；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30，最多 50 条命中）。
 3. **停止**：生成中消息的停止按钮调用其 `cancel()` 并以 `generating:false` 乐观写回；流结束/出错/暂停各补一次无条件落盘；停止时仍在运行的 tool-call 会被收口为 `error` 态并落盘，不再悬挂 `call` 状态。
 4. **压缩**：自动压缩在消息上打 `isSummary` 标记，由 `SummaryMessage` 专用组件渲染，提供"删除摘要、恢复原文参与上下文计算"的操作；压缩以 `CompactionPoint`（boundary+summary 消息对）落盘，在 fork 分支切换与复制会话时做完整性重映射（`shared/context/compaction-points.ts`）。
@@ -87,7 +87,9 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 - `src/renderer/components/session/SessionList.tsx`、`SessionItem.tsx`：分页列表、拖放排序、置顶/归档入口
 - `src/renderer/components/chat/MessageList.tsx`：ThreadLabel、ForkNav、消息渲染调度
 - `src/renderer/components/InputBox/InputBox.tsx`：Composer 与发送链入口
-- `src/renderer/stores/chatStore.ts`：会话 CRUD、缓存合并、归档/删除
+- `src/renderer/stores/session/`：会话 CRUD、缓存合并、归档/删除
+- `packages/chatbox-core/src/application/session/SessionService.ts`、`RowBackedSessionRepository.ts`：会话应用服务与行存储读写
+- `packages/chatbox-core/src/generation/GenerationService.ts`、`generation-flow.ts`、`stream-chunk-processor.ts`：生成编排与流式增量处理
 - `src/renderer/stores/session/orchestration.ts`、`messages.ts`：流式主循环、节流落盘、streaming cache
 - `src/renderer/storage/SessionMetaStorage.ts`：IndexedDB 分页/索引/游标
 - `src/shared/types.ts`：`Session`/`Message`/`SessionThread`/`MessageForkEntry` 等 schema

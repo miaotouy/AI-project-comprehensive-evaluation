@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/tools/`、`core/extensions/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：只读源码梳理工具定义、注入、校验、编排循环与执行；未运行真实工具调用
 >
@@ -16,7 +16,7 @@
 
 Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本地执行模型，由 `packages/agent` 的 agent-loop 统一编排：
 
-1. **工具是代码对象，没有独立的持久化实体**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls，`core/tools/index.ts:48-57`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:449-498`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。`powershell` 是 Windows 可选工具，优先调用 `pwsh.exe`，否则 Windows PowerShell；它与 bash 一样按启动用户权限执行，只是向命令加入 UTF-8 输出设置（`core/tools/powershell.ts:16-46`）。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
+1. **工具是代码对象，没有独立的持久化实体**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls，`core/tools/index.ts:48-57`）；扩展经 `registerTool` 注册 `ToolDefinition`（`extensions/types.ts:599`），描述里含 TypeBox 参数 schema、prompt snippet、渲染回调与执行函数。`powershell` 是 Windows 可选工具，优先调用 `pwsh.exe`，否则 Windows PowerShell；它与 bash 一样按启动用户权限执行，只是向命令加入 UTF-8 输出设置（`core/tools/powershell.ts:16-46`）。**本次未找到 MCP 支持**——仅工具结果图片注释提到 “MCP bridges” 字样（`utils/tool-result-images.ts:15`），无协议实现。
 2. **注入是会话级工具集 + 每轮上下文**：激活集存于 `agent.state.tools`（`agent-session.ts:928-943`），每轮 `prepareNextTurnWithContext` 把当前工具集快照注入请求上下文（`agent-session.ts:541-556`）；system prompt 的 Available tools 段只列出带一行 snippet 的工具（`system-prompt.ts:80-84`）。
 3. **协议是 Provider 原生 tool_calls**：`Context.tools` 传入 `Provider.stream`，由各 API Adapter 转成 OpenAI function calling、Anthropic tools、Google functionDeclarations 等格式（`packages/ai/src/types.ts:492-506`）。`Tool` 的 `constrainedSampling` 可要求严格 JSON schema 或 Lark/regex grammar；`constrained-sampling.ts` 提供 `makeStrictJsonSchema`，在 Provider 支持 strict 模式时把 TypeBox schema 转换为 strict 子集（`constrained-sampling.ts:29-130`），不可转换时回退，`strict: "require"` 时直接报错。strict 子集转换规则为：
 
@@ -26,7 +26,7 @@ Pi 的工具体系是“内置文件/命令工具 + 扩展注册工具”的本�
 ```
 
 read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "prefer" }` 约束采样；Provider 不支持 strict 时仍按兼容策略回退（`tools/read.ts:73-78`、`tools/bash.ts:234-239`）。
-4. **校验集中在执行前**：`prepareToolCall`（`agent-loop.ts:600-664`）用 TypeBox 校验并做值转换（`packages/ai/src/utils/validation.ts:317-349`），未知工具与校验失败都转成 isError 工具结果回注给模型，而不是中断循环。
+4. **校验集中在执行前**：`prepareToolCall`（`agent-loop.ts:718`）用 pi-schema 编译出的校验器做校验并做值转换（`packages/ai/src/utils/validation.ts`），未知工具与校验失败都转成 isError 工具结果回注给模型，而不是中断循环。
 5. **循环由 agent-loop 驱动，无显式迭代上限**：内层 while 处理“工具调用 + steering 队列”，外层 while 排空 followUp 队列（`agent-loop.ts:155-275`）；并行工具调用并发执行、结果按序回注；`length`（输出截断）时所有工具调用统一按失败处理（`failToolCallsFromTruncatedMessage`，`agent-loop.ts:381-406`）。源码未发现 maxIterations 类上限。
 6. **审批是回调钩子，不在执行端强制**：`beforeToolCall` 返回 `block` 即拒绝执行（`agent-loop.ts:619-643`），扩展 `tool_call` 事件走同一钩子；没有按工具/风险分级的持久化审批策略。项目信任门不直接拦截 bash 执行，而是决定项目级 `.pi` 设置、资源、扩展与包是否加载（settings-manager.ts:355-356、resource-loader.ts:397-398）；只有当 shell 路径与命令前缀取自项目设置时，信任状态才间接影响 bash 的运行参数（project-trust.ts）。
 7. **执行边界是本地进程**：文件工具直接操作 fs；bash 用 `spawn` 子进程、进程树终止、可选超时与输出截断（`tools/bash.ts:88-126`、`killProcessTree`）；工具可流式上报部分结果（`onUpdate`）。
@@ -50,7 +50,7 @@ read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "p
 
 ## 1. 工具定义、来源与注册
 
-- **统一接口**：`AgentTool`（`packages/agent/src/types.ts`）与扩展侧 `ToolDefinition`（`extensions/types.ts:449-498`）都是“name + description + TypeBox parameters + execute”。`ToolDefinition` 额外带：
+- **统一接口**：`AgentTool`（`packages/agent/src/types.ts`）与扩展侧 `ToolDefinition`（`extensions/types.ts:599`）都是“name + description + JSON Schema parameters + execute”。`ToolDefinition` 额外带：
   - `label`、`promptSnippet`、`promptGuidelines`、`constrainedSampling`；
   - `renderShell`、`prepareArguments`、`executionMode`、`renderCall`/`renderResult`。
 - **内置工具**：`createAllToolDefinitions`（`tools/index.ts:113-124`）构造 8 个工具；默认激活集仍是 read/bash/edit/write。`defaultTools` 可按全局或项目设置替换启动时启用的内置工具，空数组可关闭全部内置工具，同时保留扩展和 SDK 注册的自定义工具；`--tools` 仍以所有工具的严格允许名单覆盖此选择（`core/sdk.ts:259-263`、`docs/settings.md:225-243`）。
@@ -67,20 +67,19 @@ read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "p
 
 ## 3. 模型调用表示与 Provider 适配
 
-- **传输结构**：`Context.tools: Tool[]`（`packages/ai/src/types.ts:502-513`），`Tool.name/description/parameters(TypeBox)/constrainedSampling`；`ToolCall` 新增 `namespace` 字段（OpenAI Responses 动态加载/命名空间工具，`types.ts:360-368`）。
+- **传输结构**：`Context.tools: Tool[]`（`packages/ai/src/types.ts:502-513`），`Tool.name/description/parameters(JSON Schema)/constrainedSampling`；`ToolCall` 新增 `namespace` 字段（OpenAI Responses 动态加载/命名空间工具，`types.ts:360-368`）。
 - **Provider 适配**：各 API Adapter 把 Tool 转成协议格式；Anthropic 工具带 `cache_control`/strict schema 选项（`types.ts:617-671` 的 `AnthropicMessagesCompat`），OpenAI-compatible 支持 `strict` 与 grammar 工具（`types.ts:583-597`），Bedrock 有独立 `BedrockCompat`（`types.ts:673-677`）。
 - **流式工具参数**：事件流支持 `toolcall_start/delta/end`（`types.ts:523-525`），部分 Provider（z.ai `zaiToolStream`）支持流式工具调用增量。
 
 ## 4. 参数解析、校验与错误处理
 
 - **prepareArguments**：工具可先改写原始参数（兼容 shim，`extensions/types.ts:467-468`）。
-- **校验**（`validateToolArguments`，`ai/src/utils/validation.ts:317-349`）按序执行：
-  1. `normalizeOptionalNulls` 删除可选字段上的 `null`（与 strict schema 的 anyOf-null 包装配套，`validation.ts:240-271`）；
-  2. 用 TypeBox `Value.Convert` 做类型转换；
-  3. 使用缓存编译的校验器；
-  4. 非 TypeBox schema 强制转换为 JSON Schema；
-  5. 失败时抛出带路径与收到的参数的错误文本。
-- **失败语义**：`prepareToolCall` 捕获一切异常并返回 `{ kind: "immediate", result: createErrorToolResult(...), isError: true }`（`agent-loop.ts:600-664`），即校验失败/未知工具以工具错误结果回注，模型可据此修正重试，不会中断 agent。
+- **校验**（`validateToolArguments`，`ai/src/utils/validation.ts:54`）按序执行：
+  1. 工具调用自带 `argumentsError` 时直接抛错，不再尝试修复；
+  2. 参数先 `structuredClone`，避免工具改写参数时污染 transcript 里的原调用；
+  3. 交给缓存校验器 `parse()`：校验器由 pi-schema 的 `compile` 生成（`coerce: true`，模型常把数字写成字符串、把单值写成数组或把可选字段写成 `null`），对悬空 `$ref` 只拒绝该位置；任何 JSON Schema 都可以（pi-schema builders、TypeBox 或普通对象）；
+  4. 失败时抛出带点号路径与收到的参数的错误文本。
+- **失败语义**：`prepareToolCall` 捕获一切异常并返回 `{ kind: "immediate", result: createErrorToolResult(...), isError: true }`（`agent-loop.ts:718`），即校验失败/未知工具以工具错误结果回注，模型可据此修正重试，不会中断 agent。
 
 ## 5. 编排循环、并发与终止条件
 
@@ -114,7 +113,7 @@ read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "p
 
 ## 9. 设计取舍与已确认边界
 
-- **本地优先、信任分界简单**：默认“以用户权限运行”，隔离依赖容器化（README 文档给出 Gondolin/Docker/OpenShell 三种模式，见 `../../pi/README.md:38-47`），不在工具层做沙箱。
+- **本地优先、信任分界简单**：默认“以用户权限运行”，隔离依赖容器化（README 文档给出 Gondolin/Docker/OpenShell 三种模式，见 `../../pi/README.md:88-96`），不在工具层做沙箱。
 - **审批在编排层**：beforeToolCall 是唯一拦截点且由扩展实现，执行端不二次鉴权——扩展未注册该钩子时任何工具直接执行（攻击面前提是扩展代码本身可信）。
 - **无工具级预算**：token 与迭代次数都没有显式上限，长尾风险由上下文压缩与用户中断兜底。
 - **技能与工具分离**：文本注入的 skill 与函数式工具协议并存，避免强 schema 化，但模型依赖提示指引来“记得读 skill”。
@@ -127,18 +126,18 @@ read/bash/edit/write 内置工具默认启用 `{ type: "json_schema", strict: "p
 
 ## 11. Durable 工具执行与注册校验
 
-AgentHarness 的工具执行先形成可恢复的调用与结果记录，再由 drive procedure 按原调用顺序放入 transcript。并行工具可先结算、后放置；进程在两者之间退出时，恢复过程读取已结算 outcome，不重复执行已完成副作用。取消、截断参数和所有工具均要求终止的批次都有单独的 durable outcome（`packages/agent/src/harness/runtime/drive/tools.ts:170-478`、`tool-placement.ts`）。
+durable 的工具执行把每次调用记成 entry 先提交，再按原调用顺序进入 transcript；进程在调用与提交之间退出时，恢复过程读已提交结果，不重复执行已完成副作用。取消、参数截断与批次终止都有各自的记录（`packages/durable/src/harness/`、`packages/durable/src/entries.ts`）。
 
-内置 harness bash/read/write/edit 与稳定 coding-agent 工具分属两套装配，但共享“有限视图 + 完整输出旁路”的原则。shell 输出由执行环境在源侧限界，超限时返回截断元数据并尽力保留临时文件路径，避免跨进程传输无限增长（`packages/agent/src/harness/tools/bash.ts:45-130`、`packages/agent/src/harness/utils/output-capture.ts:67-110`）。
+durable 自带一套 bash/read/write/edit/image 工具（`packages/durable/src/tools/`），与 coding-agent 的工具分属两套装配，但共享“有限视图 + 完整输出旁路”的原则；shell 输出由执行环境在源侧限界，超限时返回截断元数据并尽力保留临时文件路径。另有 `packages/codemode` 提供 QuickJS 里的工具脚本运行时，其嵌套工具调用不进 LLM 上下文，只有脚本输出与返回值进入。
 
-稳定扩展加载器现在拒绝参数 schema 根节点不是 object 的工具；read/bash/edit/write 默认请求 strict-prefer JSON schema 采样，不再依赖 `PI_EXPERIMENTAL` 才启用。实际参数仍在执行前经过 TypeBox 转换与校验，因此采样约束不替代执行端校验（`packages/coding-agent/src/core/extensions/loader.ts:285-294`、`packages/coding-agent/src/core/tools/read.ts:73-78`、`bash.ts:234-239`）。
+稳定扩展加载器拒绝参数 schema 根节点不是 object 的工具；read/bash/edit/write 默认请求 strict-prefer JSON schema 采样。实际参数仍在执行前经 pi-schema 校验，因此采样约束不替代执行端校验（`packages/coding-agent/src/core/extensions/loader.ts`、`packages/coding-agent/src/core/tools/read.ts`、`packages/ai/src/utils/validation.ts:54`）。
 
 ## 12. 关键源码索引
 
-- `packages/agent/src/agent-loop.ts:155-275`：循环；`381-406`：截断失败；`433-554`：串/并行执行；`600-664`：prepareToolCall；`582-584`：批次终止判定
+- `packages/agent/src/agent-loop.ts:47`：agentLoop；`:111`：runAgentLoop；`:518`/`:540`/`:596`：工具执行与串/并行；`:718`：prepareToolCall
 - `packages/coding-agent/src/core/tools/index.ts:83-84`：内置工具清单；`tools/bash.ts:88-126`：本地执行后端
-- `packages/coding-agent/src/core/extensions/types.ts:449-498`：ToolDefinition
-- `packages/ai/src/utils/validation.ts:317-349`：参数校验
-- `packages/ai/src/types.ts:502-513`：Tool 接口；`437-454`：ToolResultMessage
-- `packages/coding-agent/src/core/agent-session.ts:928-943`：激活工具集；`541-556`：每轮注入
+- `packages/coding-agent/src/core/extensions/types.ts:599`：ToolDefinition
+- `packages/ai/src/utils/validation.ts:37`/`:54`：工具与参数校验、pi-schema 编译缓存
+- `packages/ai/src/types.ts:779`：Tool 接口；`:648`：ToolResultMessage
+- `packages/coding-agent/src/core/agent-session.ts:1562`：激活工具集；`packages/durable/src/tools/`、`packages/codemode/README.md`：durable 与脚本工具装配
 - `packages/coding-agent/src/core/system-prompt.ts:80-84`：工具可见性

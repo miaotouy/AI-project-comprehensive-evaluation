@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：只读核对 Copilot 类型定义、Session 类型、Settings Schema、初始数据、Skills 类型及 Agent Mode 实现；未修改被调查仓库源码
 >
@@ -81,8 +81,8 @@ Skills 启用列表、Agent Mode 与知识库选择属于另一组来源：Skill
 
 本节涉及的其余源码定位：
 
-- `src/renderer/stores/chatStore.ts:311-316`：创建会话时固化设置
-- `src/renderer/stores/chatStore.ts:561-573`：`mergeDefaultSessionSettings`
+- `src/renderer/stores/session/`：创建会话时固化设置
+- `src/renderer/stores/session/`：`mergeDefaultSessionSettings`
 - `src/renderer/routes/session/$sessionId.tsx:127-141`：`onSelectModel` 聊天内换模型
 
 每条消息只快照两个字段，temperature、技能启用列表与 Agent Mode 等设置不进入快照：
@@ -241,7 +241,7 @@ Chatbox 的内置示例均以会话预设的形式存在（`initial_data.ts`）�
 - `chatbox/src/renderer/packages/initial_data.ts`：内置预设 Session 示例（含角色方向）。
 - `chatbox/src/renderer/hooks/useCopilots.ts`：Copilot 列表管理、远端分页查询。
 - `chatbox/src/renderer/packages/remote.ts`：远端市场 API 交互。
-- `chatbox/src/renderer/packages/backup/`：备份导出/导入逻辑。
+- `chatbox/src/renderer/packages/chatbox-core/src/backup-v3/`：备份导出/导入逻辑。
 
 ## 9. 调查边界
 

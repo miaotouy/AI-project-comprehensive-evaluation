@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态核对 AppModelConfig、Prompt IDE、传统 Agent Chat、Agent v2 roster/snapshot 与请求 prompt transform；未运行模型、控制台或 Agent Runtime
 >
@@ -39,13 +39,13 @@ Agent v2：作者编辑 roster Agent / draft
 
 `AppModelConfig` 是传统应用的配置快照，App 只持有当前 active config 指针。发布会新建配置并切换指针；Console debug 可传未发布覆盖配置，但生产调用读取 active config。它可包含 prompt 类型、simple/advanced prompt、变量、数据集、模型和功能设置。细节见 `api/controllers/console/app/model_config.py` 及[独特功能](../独特功能/Dify-独特功能调查笔记.md)的 Prompt IDE 卡。
 
-Agent v2 的 roster、Agent Soul、草稿、build draft、snapshot/revision 是另一组对象。发布把可编辑配置转成不可变运行版本，已有版本可以回写为新的常规 draft；运行绑定会校验 tenant、owner、Agent、home snapshot 和 config version。Chatflow 中的新节点执行会先查询 conversation 下已有参与者，并继续采用其 snapshot；roster Agent 后续发布不会让既有会话自动漂移（`api/core/workflow/nodes/agent_v2/binding_resolver.py:95-145`）。发布链还会校验 Soul 中的 Skill/File mention 是否能在配置或运行时 Skill 列表中解析，悬空引用会阻止发布（`api/services/agent/workflow_publish_service.py:177-232`）。Agent Runtime 的物理版本加载仍未运行确认。
+Agent v2 的 roster、Agent Soul、草稿、build draft、snapshot/revision 是另一组对象。发布把可编辑配置转成不可变运行版本，已有版本可以回写为新的常规 draft；运行绑定会校验 tenant、owner、Agent、home snapshot 和 config version。Chatflow 中的新节点执行会先查询 conversation 下已有参与者，并继续采用其 snapshot；roster Agent 后续发布不会让既有会话自动漂移（`api/core/workflow/nodes/agent_v2/binding_resolver.py:39-70`）。发布链还会校验 Soul 中的 Skill/File mention 是否能在配置或运行时 Skill 列表中解析，悬空引用会阻止发布（`api/services/agent/workflow_publish_service.py:116-240`）。Agent Runtime 的物理版本加载仍未运行确认。
 
 ## 2. 创建、选择与会话绑定
 
 基础应用的角色式配置由应用作者在 Console 编辑，终端用户只能向已发布应用输入 query、变量和文件；公开聊天没有确认到通用 persona picker、会话级角色副本或从角色库导入的入口。调试调用可暂时用未发布配置，属于作者工作面而非用户会话选择。
 
-Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入口，并有独立的 Agent 资源访问规则。Agent App 新会话为当前 generation 创建 binding；已有 Conversation 继续使用原 binding 所指的 immutable generation。Chatflow 节点则把 conversation 作为 workspace owner，让同一参与者跨回合复用记忆和发布快照（`api/core/workflow/nodes/agent_v2/session_store.py:32-64`）。此处的稳定性来自运行绑定而不是把完整 role 文本复制进每条 Message，消息/会话的精确落盘边界仍见[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)。
+Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入口，并有独立的 Agent 资源访问规则。Agent App 新会话为当前 generation 创建 binding；已有 Conversation 继续使用原 binding 所指的 immutable generation。Chatflow 节点则把 conversation 作为 workspace owner，让同一参与者跨回合复用记忆和发布快照（`api/core/workflow/nodes/agent_v2/session_store.py:71-124`）。此处的稳定性来自运行绑定而不是把完整 role 文本复制进每条 Message，消息/会话的精确落盘边界仍见[会话与消息管理](../会话与消息管理/Dify-会话与消息管理调查笔记.md)。
 
 ## 3. 提示字段、模型与能力挂接
 
@@ -53,7 +53,7 @@ Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入�
 
 传统 Agent 的工具、策略和模型引用属于其 app config；Agent v2 的 Soul/配置则在发布后成为版本化运行输入。模型凭据由租户 Provider 配置解析，工具可来自内置、API、插件、MCP 或兼容 workflow。角色配置能够声明这些资源，并不表示它们都能成功执行或自动获得逐调用批准，详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)和[LLM渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
 
-其中包含媒体创作方向：传统 `agent-chat` 可以把 DALL-E、Stable Diffusion 或其他已安装的媒体工具编入工具列表（`README.md:108`）。仓库自带的“SVG Logo Design”推荐应用声明了 DALL-E 3 生成图片后再调用 Vectorizer 转为 SVG 的两步流程（`api/constants/recommended_apps.json:463`）。工具引擎会把 `IMAGE` / `IMAGE_LINK` 响应转为工具文件和消息输出（`api/core/tools/tool_engine.py:254-291`），因此 Agent 可以在一次会话内基于文字需求触发生成，并将结果交还给用户或后续节点。这个方向属于“Agent 驱动的媒体调用”；模板所声明的跨工具传递与真实外部工具执行尚未运行验证。
+其中包含媒体创作方向：传统 `agent-chat` 可以把 DALL-E、Stable Diffusion 或其他已安装的媒体工具编入工具列表。仓库自带的“SVG Logo Design”推荐应用声明了 DALL-E 3 生成图片后再调用 Vectorizer 转为 SVG 的两步流程，其导出数据可见 dalle 与 vectorizer 两个内置工具条目（`api/constants/recommended_apps.json:463`）。工具引擎会把图像与图像链接型响应转为工具文件和消息输出（`api/core/tools/tool_engine.py:269-330`），因此 Agent 可以在一次会话内基于文字需求触发生成，并将结果交还给用户或后续节点。这个方向属于“Agent 驱动的媒体调用”；模板所声明的跨工具传递与真实外部工具执行尚未运行验证。
 
 但它尚不能据此归入本项目笔记的独立“媒体创作”主链：本次静态检查没有找到 Dify 自身为这类结果维护的媒体专用工作台、生成任务历史、可编辑版本/分支或跨会话资产复用闭环。Dify 负责的是工具选择、调用与结果回流；实际生成、编辑、异步任务和资产生命周期仍由 DALL-E、Stable Diffusion、Vectorizer 或其他插件/外部服务承接。两种表述分别说明编排能力与产品工作站能力，不能相互替代。
 
@@ -85,6 +85,6 @@ Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入�
 - `api/controllers/console/app/model_config.py`：应用配置保存、发布与 active config 切换。
 - `api/core/app/app_config/easy_ui_based_app/prompt_template/manager.py`：应用 prompt 模板配置转换。
 - `api/core/prompt/simple_prompt_transform.py`：simple prompt、变量、上下文、历史和 query 的模型输入转换。
-- `README.md:108`、`api/constants/recommended_apps.json:463`：媒体工具清单与 SVG Logo Design 的声明式编排样例。
-- `api/core/tools/tool_engine.py:254-291`：图片及链接型工具结果转换为文件与消息输出。
+- `README.md`、`api/constants/recommended_apps.json:463`：媒体工具清单与 SVG Logo Design 的声明式编排样例。
+- `api/core/tools/tool_engine.py:269-330`：图像及图像链接型工具结果转换为文件与消息输出。
 - `web/features/agent-v2/`、`api/services/agent/composer_service.py`、`api/services/agent/workspace_service.py`：roster/draft/snapshot 与运行 binding。

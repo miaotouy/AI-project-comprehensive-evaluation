@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1` 口径），并复核 Cargo workspace、Bazel 构建、pnpm workspace、发布工作流与各运行时入口
 >
@@ -12,11 +12,11 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-最新快照（2026-11-04）：Git 跟踪文件 9780 个；可识别源码 6831 文件 / 2306255 行；文档 266 文件 / 17274 行；测试 1450 文件 / 578526 源码行。提交节奏：本地为浅克隆，first-parent 窗口仅覆盖 2026-09-08 至 2026-10-30 的 2454 次主线提交，不能代表长期节奏。
+最新快照（2026-11-04）：Git 跟踪文件 9974 个；可识别源码 6968 文件 / 2359601 行；文档 270 文件 / 17717 行；测试 1507 文件 / 595352 源码行。提交节奏：本地为浅克隆，first-parent 窗口仅覆盖 2026-09-08 至 2026-11-04 的 2665 次主线提交，不能代表长期节奏。
 
 ## 结论摘要
 
-Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Rust Cargo workspace（约 165 个成员 crate），并叠加 Bazel 构建、pnpm 工作区与多语言 SDK/打包层。仓库形态可概括为“原生 CLI/TUI 运行时 + app-server 协议面 + 跨语言 SDK 与安装器”：Rust 占可识别源码约 95.9%，Python 与 TypeScript 主要承担 SDK、脚本和由协议生成的绑定，不是应用主体。与调查中多数 Electron/TypeScript 客户端不同，它的体积和复杂度集中在原生核心、按操作系统的沙箱实现、协议契约以及为多平台发行服务的工程配套上。
+Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Rust Cargo workspace（约 166 个成员 crate），并叠加 Bazel 构建、pnpm 工作区与多语言 SDK/打包层。仓库形态可概括为“原生 CLI/TUI 运行时 + app-server 协议面 + 跨语言 SDK 与安装器”：Rust 占可识别源码约 95.9%，Python 与 TypeScript 主要承担 SDK、脚本和由协议生成的绑定，不是应用主体。与调查中多数 Electron/TypeScript 客户端不同，它的体积和复杂度集中在原生核心、按操作系统的沙箱实现、协议契约以及为多平台发行服务的工程配套上。
 
 ## 统计口径与仓库形态
 
@@ -24,13 +24,13 @@ Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Ru
 
 | 顶层目录 | 文件数 | 角色 |
 | --- | ---: | --- |
-| `codex-rs` | 9235 | Rust workspace 主体：CLI、TUI、core、app-server、沙箱、协议与各能力 crate |
+| `codex-rs` | 9425 | Rust workspace 主体：CLI、TUI、core、app-server、沙箱、协议与各能力 crate |
 | `sdk` | 125 | Python SDK、Python 运行时打包、TypeScript SDK |
 | `scripts` | 58 | 打包、安装、MCP 一致性、仓库自检等 Python/Shell 脚本 |
-| `.github` | 125 | CI、发布、策略与自动化工作流 |
-| `third_party` | 80 | v8、voice、wezterm、wine、powershell 的 Bazel 构建胶水 |
+| `.github` | 126 | CI、发布、策略与自动化工作流 |
+| `third_party` | 84 | v8、voice、wezterm、wine、powershell 的 Bazel 构建胶水 |
 | `tools` | 32 | `argument-comment-lint` 等仓库内开发工具 |
-| `patches` | 36 | Bazel 规则、rusty_v8 与 Windows 工具链补丁 |
+| `patches` | 35 | Bazel 规则、rusty_v8 与 Windows 工具链补丁 |
 | `bazel` | 28 | Bazel 平台、规则、模块与工具链定义 |
 | `codex-cli` | 9 | npm 包 `@openai/codex` 的包装与容器脚本 |
 | `docs` | 15 | 面向用户/贡献者的独立文档 |
@@ -40,62 +40,62 @@ Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Ru
 
 ## 1. 模块分布与量级
 
-源码几乎全部落在 `codex-rs`（2,234,898 行，占可识别源码 96.9%）。主要区域按物理行排序：
+源码几乎全部落在 `codex-rs`（2,287,667 行，占可识别源码 96.9%）。主要区域按物理行排序：
 
 | 区域 | 文件 / 行数 | 说明 |
 | --- | ---: | --- |
-| `codex-rs/core` | 1093 / 486161 | Agent 主循环、模型交互、会话与工具编排核心 |
-| `codex-rs/tui` | 2668 / 477863 | 终端界面；文件数被 1467 个 `.snap` 快照与动画帧夹具抬高 |
-| `codex-rs/app-server` | 386 / 209937 | 面向 IDE/客户端/SDK 的 JSON-RPC 服务端 |
-| `codex-rs/ext` | 388 / 82248 | 15 个能力扩展 crate（mcp、skills、web-search、image-generation、memories、goal 等） |
-| `codex-rs/exec-server` | 212 / 72223 | 执行服务与协议 |
-| `codex-rs/core-plugins` | 101 / 51016 | 核心插件宿主 |
-| `codex-rs/app-server-protocol` | 1160 / 45732 | 协议契约区：321 份 JSON schema + 760 份生成 TypeScript 绑定 |
-| `codex-rs/cli` | 137 / 43812 | `codex` 二进制入口与子命令 |
-| `codex-rs/rmcp-client` | 117 / 42616 | MCP 客户端 |
-| `codex-rs/thread-store` | 76 / 37195 | 会话线程持久化 |
+| `codex-rs/core` | 1162 / 504466 | Agent 主循环、模型交互、会话与工具编排核心 |
+| `codex-rs/tui` | 2691 / 486253 | 终端界面；文件数被 1467 个 `.snap` 快照与动画帧夹具抬高 |
+| `codex-rs/app-server` | 394 / 213922 | 面向 IDE/客户端/SDK 的 JSON-RPC 服务端 |
+| `codex-rs/ext` | 394 / 84908 | 18 个能力扩展 crate（mcp、skills、web-search、image-generation、memories、goal 等） |
+| `codex-rs/exec-server` | 212 / 73134 | 执行服务与协议 |
+| `codex-rs/core-plugins` | 101 / 51166 | 核心插件宿主 |
+| `codex-rs/app-server-protocol` | 1181 / 46466 | 协议契约区：326 份 JSON schema + 775 份生成 TypeScript 绑定 |
+| `codex-rs/cli` | 137 / 44277 | `codex` 二进制入口与子命令 |
+| `codex-rs/rmcp-client` | 117 / 42651 | MCP 客户端 |
+| `codex-rs/thread-store` | 78 / 38373 | 会话线程持久化 |
 | `codex-rs/network-proxy` | 77 / 35081 | 网络代理与出站控制 |
-| `codex-rs/windows-sandbox-rs` | 127 / 31305 | Windows 沙箱实现 |
-| `sdk/python` | 89 / 28645 | Python SDK（含文档、示例与测试） |
+| `codex-rs/windows-sandbox-rs` | 125 / 31039 | Windows 沙箱实现 |
+| `sdk/python` | 89 / 29067 | Python SDK（含文档、示例与测试） |
 
-Cargo workspace 的 `members` 列表有 165 项，按能力域拆得很细：既有 `core`、`tui`、`app-server` 这样的产品面，也有 `linux-sandbox`、`windows-sandbox-rs`、`mxc-sandbox`、`bwrap` 的平台沙箱，`config`、`protocol`、`app-server-protocol` 的契约层，`agent-graph-store`、`agent-identity`、`rollout`、`state` 的会话与状态层，`cloud-tasks`、`cloud-client` 的云端任务层，`code-mode`、`code-mode-host`、`code-mode-runtime` 的代码模式分层，以及大量 `utils/*` 小 crate。目录深度普遍为 1 至 2 层，模块边界基本与 crate 边界一致。
+Cargo workspace 的 `members` 列表有 166 项，按能力域拆得很细：既有 `core`、`tui`、`app-server` 这样的产品面，也有 `linux-sandbox`、`windows-sandbox-rs`、`mxc-sandbox`、`bwrap` 的平台沙箱，`config`、`protocol`、`app-server-protocol` 的契约层，`agent-graph-store`、`agent-identity`、`rollout`、`state` 的会话与状态层，`cloud-tasks`、`cloud-client` 的云端任务层，`code-mode`、`code-mode-host`、`code-mode-runtime` 的代码模式分层，以及大量 `utils/*` 小 crate。目录深度普遍为 1 至 2 层，模块边界基本与 crate 边界一致。
 
 ## 2. 语言分布与运行时分工
 
 | 语言 | 文件 | 行数 | 占可识别源码 |
 | --- | ---: | ---: | ---: |
-| Rust | 5697 | 2211615 | 95.9% |
-| Python | 199 | 64071 | 2.8% |
-| TypeScript | 784 | 11893 | 0.5% |
+| Rust | 5817 | 2263243 | 95.9% |
+| Python | 201 | 64665 | 2.7% |
+| TypeScript | 799 | 12044 | 0.5% |
 | C | 7 | 5977 | 0.3% |
-| Shell | 35 | 5272 | 0.2% |
+| Shell | 35 | 5255 | 0.2% |
 | PowerShell | 8 | 2513 | 0.1% |
 
-Rust 承担产品主体。Python 的 199 个文件里，除 SDK 与运行时打包外还有 `scripts/` 下的仓库自检、MCP 一致性、安装与打包脚本；TypeScript 的 784 个文件中有 760 个位于 `app-server-protocol/schema/typescript`，是由协议 schema 生成的类型绑定，平均行数很低，真正的应用级 TS 只有 `sdk/typescript` 的二十余个源文件。因此 TypeScript 在本仓不代表前端运行时，而是协议消费方。C 的 7 个文件来自 v8/voice 等原生构建胶水，PowerShell 集中在 Windows 安装与构建脚本。
+Rust 承担产品主体。Python 的 201 个文件里，除 SDK 与运行时打包外还有 `scripts/` 下的仓库自检、MCP 一致性、安装与打包脚本；TypeScript 的 799 个文件中有 775 个位于 `app-server-protocol/schema/typescript`，是由协议 schema 生成的类型绑定，平均行数很低，真正的应用级 TS 只有 `sdk/typescript` 的二十余个源文件。因此 TypeScript 在本仓不代表前端运行时，而是协议消费方。C 的 7 个文件来自 v8/voice 等原生构建胶水，PowerShell 集中在 Windows 安装与构建脚本。
 
 ## 3. 文档分布
 
-独立文档树很小：根 `docs/` 只有 15 份（getting-started、config、sandbox、exec、execpolicy、skills、slash_commands、authentication、install、contributing 等），说明完整文档托管在 `developers.openai.com/codex`。266 份文档文件的绝大多数位于 `codex-rs` 内，构成以代码为中心的知识分布：
+独立文档树很小：根 `docs/` 只有 15 份（getting-started、config、sandbox、exec、execpolicy、skills、slash_commands、authentication、install、contributing 等），说明完整文档托管在 `developers.openai.com/codex`。270 份文档文件的绝大多数位于 `codex-rs` 内，构成以代码为中心的知识分布：
 
-- 每个 crate 的 README 共 45 份，是最主要的实现说明来源。
+- 每个 crate 的 README 共 46 份，是最主要的实现说明来源。
 - `codex-rs/skills` 与 `codex-rs/memories` 贡献可执行技能与记忆说明，属于能力资产而非开发文档。
 - `codex-rs/tui` 的文档计数被动画帧与快照夹具放大，不能按独立主题数理解。
 - `third_party/voice` 附带运行时许可与说明。
 
 ## 4. 测试分布
 
-测试共 1450 文件 / 578,526 源码行，测试文件与源码文件比约 21.2%，测试行数约占源码的四分之一（25.1%），说明测试在仓库中占比很高。分布以 crate 内共置为主：
+测试共 1507 文件 / 595,352 源码行，测试文件与源码文件比约 21.6%，测试行数约占源码的四分之一（25.2%），说明测试在仓库中占比很高。分布以 crate 内共置为主：
 
 | 区域 | 测试文件 / 源码行 |
 | --- | ---: |
-| `codex-rs/core` | 438 / 223461 |
-| `codex-rs/app-server` | 206 / 140421 |
-| `codex-rs/tui` | 326 / 81727 |
-| `codex-rs/exec-server` | 44 / 20197 |
-| `codex-rs/ext` | 33 / 15096 |
-| `codex-rs/cli` | 50 / 13760 |
-| `codex-rs/rmcp-client` | 28 / 12108 |
-| `sdk/python` | 22 / 6690 |
+| `codex-rs/core` | 482 / 234604 |
+| `codex-rs/app-server` | 210 / 142712 |
+| `codex-rs/tui` | 328 / 83104 |
+| `codex-rs/exec-server` | 44 / 20201 |
+| `codex-rs/ext` | 34 / 15660 |
+| `codex-rs/cli` | 50 / 14156 |
+| `codex-rs/rmcp-client` | 28 / 12109 |
+| `sdk/python` | 22 / 6798 |
 
 `justfile` 的 `test` 目标统一使用 cargo nextest；`codex-rs/tui` 用 insta `.snap` 做终端渲染快照，`app-server` 与 `exec-server` 各有协议与集成测试。SDK 侧 Python 与 TypeScript 分别维护独立测试与一致性夹具。
 
@@ -103,7 +103,7 @@ Rust 承担产品主体。Python 的 199 个文件里，除 SDK 与运行时打�
 
 发行目标从工作流静态确认：macOS 的 `aarch64-apple-darwin` 与 `x86_64-apple-darwin`，Linux 的 `x86_64-unknown-linux-musl` 与 `aarch64-unknown-linux-musl`（发行物刻意采用 MUSL 静态链接），Windows 由独立的 `rust-release-windows.yml` 承载；每个目标还产出配套的 app-server 工件。安装渠道包括 `install.sh`/`install.ps1`（默认从 `releases.openai.com` 下载并回退 GitHub Releases）、npm `@openai/codex`、Homebrew cask 与 winget 打包脚本。
 
-平台差异没有做成前端探测，而是按操作系统各写沙箱 crate：Linux 用 `linux-sandbox` 与 `bwrap`（另 vendored bubblewrap），Windows 用 `windows-sandbox-rs` 与 `windows-sandbox-service`，macOS 用 `mxc-sandbox`，另由 `sandboxing`、`process-hardening`、`arg0` 统一编排。Bazel 侧为 Windows 工具链、v8 与原生依赖维护了 30 份补丁。
+平台差异没有做成前端探测，而是按操作系统各写沙箱 crate：Linux 用 `linux-sandbox` 与 `bwrap`（另 vendored bubblewrap），Windows 用 `windows-sandbox-rs` 与 `windows-sandbox-service`，macOS 用 `mxc-sandbox`，另由 `sandboxing`、`process-hardening`、`arg0` 统一编排。Bazel 侧为 Windows 工具链、v8 与原生依赖维护了一组补丁（`patches/` 共 35 个文件）。
 
 ## 6. 工程配套与结构特征
 
@@ -119,11 +119,11 @@ Rust 单 workspace 加 Bazel 双构建，适合“原生 CLI 为核心、需要�
 
 ## 8. 未验证事项
 
-未运行任何构建或测试，因此 Bazel 与 Cargo 两条构建路径的实际可复现性、发行工件内容、跨平台功能等价性均未验证。沙箱实现只做静态目录与 crate 确认，未在任一操作系统观察其运行时行为。发布矩阵与安装渠道来自工作流和 README，未实际执行发布或安装。本地为浅克隆，提交历史与主线节奏只反映 2026-09-08 至 2026-10-30 的 2454 次主线提交，不能用于评估长期更新频率。
+未运行任何构建或测试，因此 Bazel 与 Cargo 两条构建路径的实际可复现性、发行工件内容、跨平台功能等价性均未验证。沙箱实现只做静态目录与 crate 确认，未在任一操作系统观察其运行时行为。发布矩阵与安装渠道来自工作流和 README，未实际执行发布或安装。本地为浅克隆，提交历史与主线节奏只反映 2026-09-08 至 2026-11-04 的 2665 次主线提交，不能用于评估长期更新频率。
 
 ## 9. 关键源码索引
 
-- `codex-rs/Cargo.toml`：165 个成员的 workspace 清单与共享依赖
+- `codex-rs/Cargo.toml`：166 个成员的 workspace 清单与共享依赖
 - `codex-rs/cli/Cargo.toml`、`codex-rs/cli/src/main.rs`：`codex` 二进制入口
 - `codex-rs/core/`：Agent 核心运行时
 - `codex-rs/app-server-protocol/schema/`：协议 JSON schema 与生成 TypeScript 绑定

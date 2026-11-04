@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
+> 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
 > 调查方式：只读静态源码梳理；复核媒体创作横向对比、独特功能笔记与 Scriptorium、HumanToolBox ComfyUI 模块、IPC 和 Agent 插件实现；运行轻量 Node 协作者契约测试与语法检查，不启动 Electron、ComfyUI、VCPToolBox 或外部模型服务
 >
@@ -23,7 +23,7 @@ VCPChat 是媒体创作类目的扩展样本，核心不是统一的图像或视
 
 ## 系统边界与完整主链
 
-本笔记的主链从 Scriptorium 的文档或演示工程开始。用户由托盘“文坊”打开独立窗口；主进程初始化文档 IPC 与 Agent 控制服务。VDOCX 使用 Markdown-first 的混合源码和独立文档 CSS，VPPTX 的每页保存完整 HTML Scene 和共享 deck CSS。两种格式均以工程中的源文件而非渲染 DOM 为真源，资源以 SHA-256 进入 ZIP 容器，文脉保存版本、PR 与审批信息。入口与初始化见 `modules/trayManager.js:29`、`modules/ipc/desktopHandlers.js:779-781`、`main.js:1083-1092`。
+本笔记的主链从 Scriptorium 的文档或演示工程开始。用户由托盘“文坊”打开独立窗口；主进程初始化文档 IPC 与 Agent 控制服务。VDOCX 使用 Markdown-first 的混合源码和独立文档 CSS，VPPTX 的每页保存完整 HTML Scene 和共享 deck CSS。两种格式均以工程中的源文件而非渲染 DOM 为真源，资源以 SHA-256 进入 ZIP 容器，文脉保存版本、PR 与审批信息。入口与初始化见 `modules/trayManager.js:32`、`modules/ipc/desktopHandlers.js:873-875`、`main.js:1262-1271`。
 
 ```text
 人类新建/导入 VDOCX 或 VPPTX，或 Agent CreateProject
@@ -37,9 +37,9 @@ VCPChat 是媒体创作类目的扩展样本，核心不是统一的图像或视
   -> 人类批准后合并并形成新修订；拒绝、冲突、失败和超时保留相应记录
 ```
 
-Agent 直接建工程时，控制服务先让文档内核构建 ZIP，再检查结果大小不超过 100 MB、ZIP 文件头与目标路径冲突策略；默认重名，覆盖已有工程必须提供当前文件 SHA-256。实际写入经文档处理器完成，且不会替换当前窗口，除非请求打开新工程。此链路可见 `modules/services/scriptoriumAgentControlService.js:243-407`。
+Agent 直接建工程时，控制服务先让文档内核构建 ZIP，再检查结果大小不超过 100 MB、ZIP 文件头与目标路径冲突策略；默认重名，覆盖已有工程必须提供当前文件 SHA-256。实际写入经文档处理器完成，且不会替换当前窗口，除非请求打开新工程。此链路可见 `modules/services/scriptoriumAgentControlService.js:267-431`。
 
-HumanToolBox 的 ComfyUI 链则单独成立：用户从工具卡设置按钮打开配置抽屉，读取或保存后端插件的配置和工作流 JSON；导入时在 VCPChat 主进程定位 VCPToolBox 的 `WorkflowTemplateProcessor` 并转换模板。配置变化会通知工具箱渲染进程，但本仓库未见该面板提交 ComfyUI prompt、轮询任务或保存图片产物的可执行路径，故不能据此推断 VCPChat 自己拥有 ComfyUI 任务历史。入口见 `VCPHumanToolBox/renderer.js:1608-1650`，IPC 实现见 `VCPHumanToolBox/ComfyUImodules/comfyui-ipc.js:82-92,94-259`。
+HumanToolBox 的 ComfyUI 链则单独成立：用户从工具卡设置按钮打开配置抽屉，读取或保存后端插件的配置和工作流 JSON；导入时在 VCPChat 主进程定位 VCPToolBox 的 `WorkflowTemplateProcessor` 并转换模板。配置变化会通知工具箱渲染进程，但本仓库未见该面板提交 ComfyUI prompt、轮询任务或保存图片产物的可执行路径，故不能据此推断 VCPChat 自己拥有 ComfyUI 任务历史。入口见 `VCPHumanToolBox/renderer.js:1563-1605`，IPC 实现见 `VCPHumanToolBox/ComfyUImodules/comfyui-ipc.js:82-92,94-259`。
 
 ## 1. 创作入口、触发者与事实对象
 
@@ -47,7 +47,7 @@ Scriptorium 的用户入口是独立 Electron 文坊窗口，支持新建、打�
 
 工程事实对象分为四层：VDOCX 的混合正文与 document CSS、VPPTX 的完整页面 Scene 与 deck CSS、ZIP 内按 SHA-256 内容寻址的媒体/字体资源，以及记录刻点和 Agent PR 的文脉。容器至少分离 manifest、源码、文脉和资源，工程资源可记录 MIME、原始尺寸和时长；相同二进制可去重。该对象模型和容器布局在 `ScriptoriumModules/README.md:393-425` 说明，实际容器实现位于 `ScriptoriumModules/vdoc-container.js`。
 
-除工程内资源外，Scriptorium 还维护运行期样式包与 SVG 资产包。Agent 可查询、创建、整体替换或删除非内置包；内置包只读。已插入文档的 SVG 是自包含快照，删除运行期包不会破坏工程内既有实例。这使图形资产可在多作品间复用，但运行期资产包与单个工程 ZIP 并非同一持久化层，见 `VCPDistributedServer/Plugin/ScriptoriumCollaborator/plugin-manifest.json:100-147`。
+除工程内资源外，Scriptorium 还维护运行期样式包与 SVG 资产包。Agent 可查询、创建、整体替换或删除非内置包；内置包只读。已插入文档的 SVG 是自包含快照，删除运行期包不会破坏工程内既有实例。这使图形资产可在多作品间复用，但运行期资产包与单个工程 ZIP 并非同一持久化层，见 `VCPDistributedServer/Plugin/ScriptoriumCollaborator/plugin-manifest.json:110-157`。
 
 ComfyGen 的事实对象不是 VCPChat 工程：配置和模板写入由 PathResolver 找到的 VCPToolBox `Plugin/ComfyUIGen/` 目录。面板可管理连接地址、模型、尺寸、种子、提示词、LoRA 与模板；README 声明默认连接为本地 `http://localhost:8188`。这证明的是跨仓库的配置管理入口，不能证明本仓库内有生成文件、任务或资产记录，见 `VCPHumanToolBox/ComfyUImodules/README.md:5-48`。
 
@@ -61,15 +61,15 @@ ComfyUI 面板把用户参数写入外部插件配置；工作流保存前校验
 
 ## 3. 任务状态、异步回调与取消
 
-Scriptorium 的长期状态是工程修订与文脉，不是统一的媒体生成队列。Agent 对当前工程的写入会先形成 PR；其状态可为 `pending`、`applied`、`rejected`、`conflict` 或 `failed`。提交时和批准时都检查基础修订与文档身份，`requestId` 用于避免重试重复提案；超时只返回等待审批的结果，提案不会静默应用。PR 主链见 `ScriptoriumModules/README.md:308-353,372-389`，插件参数适配位于 `ScriptoriumCollaboratorService.js:784-817`。
+Scriptorium 的长期状态是工程修订与文脉，不是统一的媒体生成队列。Agent 对当前工程的写入会先形成 PR；其状态可为 `pending`、`applied`、`rejected`、`conflict` 或 `failed`。提交时和批准时都检查基础修订与文档身份，`requestId` 用于避免重试重复提案；超时只返回等待审批的结果，提案不会静默应用。PR 主链见 `ScriptoriumModules/README.md:308-353,372-389`，插件参数适配位于 `ScriptoriumCollaboratorService.js:807-840`。
 
-视觉上下文是一个短期异步动作：服务等待文档语义结果后调用 Electron `capturePage`，回传 Markdown 摘要和 data URL 图片。对演示页可请求渲染稳定等待；串行命令中某一步失败时，后续停止而此前成功的文本或图像回执保留并标为 `partial_failure`。这是 Agent 观察/回流机制，不是可恢复的媒体生成任务系统，见 `modules/services/scriptoriumAgentControlService.js:182-240` 与 `ScriptoriumCollaboratorService.js:1020-1034`。
+视觉上下文是一个短期异步动作：服务等待文档语义结果后调用 Electron `capturePage`，回传 Markdown 摘要和 data URL 图片。对演示页可请求渲染稳定等待；串行命令中某一步失败时，后续停止而此前成功的文本或图像回执保留并标为 `partial_failure`。这是 Agent 观察/回流机制，不是可恢复的媒体生成任务系统，见 `modules/services/scriptoriumAgentControlService.js:182-240` 与 `ScriptoriumCollaboratorService.js:1047-1061`。
 
 本次检查范围内未找到 Scriptorium 面向用户的“取消导出/取消渲染”或跨重启恢复未完成导出任务的机制；也未找到 ComfyGen 配置面自身的提交、进度、取消、回调和重试实现。前者不等于项目其他模块绝对不存在异步控制，后者符合其仅配置外部插件的边界。
 
 ## 4. 结果、历史、资产与工程持久化
 
-工程本身是 Scriptorium 的主要产物和持续性单位。`CreateProject` 经过规范化与可编程内容审查后生成 VDOCX 或 VPPTX ZIP，写入 `AppData/ScriptoriumDocument/VDOCX|VPPTX`；默认同名改名，显式覆盖需要现有文件哈希。文脉还保留源码变更、渲染结果差异、作者、审批和工程内嵌快照，因此恢复是新建一条可审计记录而非删除后续历史。落盘约束见 `modules/services/scriptoriumAgentControlService.js:243-407`，文脉语义见 `ScriptoriumModules/README.md:372-425`。
+工程本身是 Scriptorium 的主要产物和持续性单位。`CreateProject` 经过规范化与可编程内容审查后生成 VDOCX 或 VPPTX ZIP，写入 `AppData/ScriptoriumDocument/VDOCX|VPPTX`；默认同名改名，显式覆盖需要现有文件哈希。文脉还保留源码变更、渲染结果差异、作者、审批和工程内嵌快照，因此恢复是新建一条可审计记录而非删除后续历史。落盘约束见 `modules/services/scriptoriumAgentControlService.js:267-431`，文脉语义见 `ScriptoriumModules/README.md:372-425`。
 
 媒体资源使用内容寻址，工程打开时会校验资源路径、ID 和实际哈希；编辑期以受生命周期管理的 blob URL 使用，导出时才按目标格式封装。该设计支持工程内去重和来源可读性，避免把大段 Base64 写入正文。检查范围内未确认跨工程的中央媒体库、全局资源搜索索引或对位图/音视频的版本 DAG；这三类未确认能力与工程内资源、运行期 SVG 包处于不同持久化层。
 
@@ -81,7 +81,7 @@ Agent 可以读取文档信息、渲染文本、目录、章节、源码、视�
 
 ## 6. Agent 回流、插件与外部依赖
 
-`ScriptoriumCollaborator` 是 VCP 分布式服务器中的 direct 插件，manifest 声明 hybridservice、direct 通信和 330 秒超时。服务按命令把读取、截图、PR、页面修改、工程创建和资产包操作交给控制服务；控制服务再与当前 Scriptorium Electron 窗口通信。工程创建可直接回传路径、文件 SHA-256、大小及可编程内容审查信息；PR 则回传审批结果。这让 Agent 结果回流到 VCP 工具协议，同时把实际写入交给窗口侧的人类协作流程，见 `plugin-manifest.json:1-16`、`ScriptoriumCollaboratorService.js:890-1003`。
+`ScriptoriumCollaborator` 是 VCP 分布式服务器中的 direct 插件，manifest 声明 hybridservice、direct 通信和 330 秒超时。服务按命令把读取、截图、PR、页面修改、工程创建和资产包操作交给控制服务；控制服务再与当前 Scriptorium Electron 窗口通信。工程创建可直接回传路径、文件 SHA-256、大小及可编程内容审查信息；PR 则回传审批结果。这让 Agent 结果回流到 VCP 工具协议，同时把实际写入交给窗口侧的人类协作流程，见 `plugin-manifest.json:1-16`、`ScriptoriumCollaboratorService.js:913-1030`。
 
 Scriptorium 的外部依赖是 Electron、VCP 分布式服务及浏览器渲染依赖。它不依赖 ComfyUI 才能编辑或导出工程。反过来，ComfyGen 必须依赖本地/远程 ComfyUI、VCPToolBox 的 ComfyUIGen 插件及其工作流转换器；HumanToolBox 只是通过本地文件和 IPC 管理这些外部对象。两条依赖链的对象与持久化层互不相同。
 
@@ -110,9 +110,9 @@ Scriptorium 的内容防线包括 HTML/CSS 清理、依赖本地化、未知外�
 
 ## 9. 关键源码索引
 
-- 文坊入口与初始化：`modules/trayManager.js:29`、`modules/ipc/desktopHandlers.js:779-781`、`main.js:1083-1092`、`modules/ipc/docxHandlers.js`、`preloads/docx.js`。
+- 文坊入口与初始化：`modules/trayManager.js:32`、`modules/ipc/desktopHandlers.js:873-875`、`main.js:1262-1271`、`modules/ipc/docxHandlers.js`、`preloads/docx.js`。
 - 工程模型、容器与编辑：`ScriptoriumModules/README.md`、`vdoc-core.js`、`vdoc-container.js`、`vdoc-hybrid-compiler.js`、`scriptorium-document-store.js`、`scriptorium-flow-editor.js`、`scriptorium-deck-editor.js`、`scriptorium-export.js`。
 - 资源、运行时和文脉：`scriptorium-media.js`、`scriptorium-programmable-content.js`、`scriptorium-runtime.js`、`scriptorium-lineage-store.js`、`scriptorium-agent-port.js`。
 - Agent 协作：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/plugin-manifest.json`、`ScriptoriumCollaboratorService.js:560-1155`、`modules/services/scriptoriumAgentControlService.js:146-418`、`tests/scriptorium-collaborator.test.js`。
-- ComfyGen 配置边界：`VCPHumanToolBox/renderer.js:1608-1650`、`VCPHumanToolBox/ComfyUImodules/ComfyUI_UIManager.js`、`comfyui-ipc.js:82-356`、`PathResolver.js`、`ComfyUImodules/README.md`。
+- ComfyGen 配置边界：`VCPHumanToolBox/renderer.js:1563-1605`、`VCPHumanToolBox/ComfyUImodules/ComfyUI_UIManager.js`、`comfyui-ipc.js:82-356`、`PathResolver.js`、`ComfyUImodules/README.md`。
 - 交接依据：[`媒体创作横向对比`](媒体创作横向对比.md)、[`VCPChat 独特功能调查笔记`](../独特功能/VCPChat-独特功能调查笔记.md)。

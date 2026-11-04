@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、SillyTavern 角色卡及世界书的导入、编辑、导出与运行时处理器、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
 >
@@ -35,6 +35,13 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 
 - AgentPreset 是文件或内置资源中的模板，不包含具体 profileId、modelId。
 - ChatAgent 是用户实际使用的实例，额外保存 id、profileId、modelId、创建时间和最近使用时间。
+
+本快照把 Agent 进一步做成"可被 LLM 操作的配置对象"，并新增了子智能体配置：
+
+- **子智能体配置内嵌**：`ChatAgent` 增加 `subAgentConfig`（`src/tools/agent-manager/types/agent.ts:225,534`），声明该 Agent 能否委派子任务、可用的子智能体类型与运行时上限；`src/tools/sub-agent` 消费这份配置并提供内置子智能体，Agent 编辑器只管声明（第 6.4 节）。
+- **Agent 配置可被工具读写**：管理服务以 `agentCallable` 方法形式对外注册，字段读写带安全策略——危险字段（凭据、审批配置等）会被拒绝或二次确认，编辑路径统一经 `resolveFieldPath`/`setFieldByPath`（`services/agentManagementService.ts:109-186`）。
+- **预设结构下沉到共享包**：预设的结构化注入锚点与结构撤销算法移入 `packages/agent-preset-core/`（`injection-anchors.ts`、`structureUndo.ts`），llm-chat 的预设编辑与请求注入共用同一份实现。
+- **知识字段归一**：旧 `knowledgeBaseConfig`/`knowledgeSettings` 已移除并统一为 `knowledgeAccess`，创建与更新时会剥离遗留字段。
 
 ## 2. 配置入口与文件格式
 
@@ -181,7 +188,7 @@ parameters 使用 LlmParameters，至少支持 temperature、maxTokens，默认�
 - regexConfig：对请求或渲染消息做正则清理、替换和宏处理；
 - defaultToolCallCollapsed：工具调用消息默认是否折叠。
 
-Agent 模型参数与渠道/模型的适配规则有独立草案文档（`docs/Plan/agent-model-parameter-rules-draft.md`），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案，尚未见注册到运行时参数过滤的实现。另外聊天侧栏与 Agent 编辑器对工具策略 toolCallConfig 的修改会强制二次确认，防止误改自动批准配置。
+Agent 模型参数与渠道/模型的适配规则有独立草案文档（`src/tools/agent-manager/docs/Plan/agent-model-parameter-rules-draft.md`），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案；已落地的是共享核心的采样兼容与输出预算裁剪（见 LLM 渠道管理 2.6 与对话请求与上下文 4）。另外聊天侧栏与 Agent 编辑器对工具策略 toolCallConfig 的修改会强制二次确认，防止误改自动批准配置。
 
 ### 4.3 模型参数编辑器的实际分组与语义
 
@@ -258,7 +265,7 @@ Agent 可以关联 `worldbookIds`，并配置：
 
 ### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
-旧 knowledgeBaseConfig/knowledgeSettings 字段已从 AgentBaseConfig 移除，拆为三个字段（`agent-manager/types/agent.ts:464-470`）：
+旧 knowledgeBaseConfig/knowledgeSettings 字段已从 AgentBaseConfig 移除并归一为 `knowledgeAccess`（`src/tools/agent-manager/types/agent.ts:505-525`，创建与更新时统一剥离遗留字段），与 Recall 配置并存：
 
 - `recallConfig`：思绪（Recall）绑定——总开关 `enabled`、绑定列表 `bindings`（每条含 `recallId`/`recallName`、激活模式 `always`/`gate`/`turn`/`static`、`whenParams`、召回数量 `limit`、最低相关分数 `minScore`、检索画像 `profile`（`semantic`/`associative`）、预设 `presetId`（`algorithmic`/`comprehensive`））与自动注入位置（`autoInjectIfMacroMissing` + `autoInjectPosition`）；
 - `recallSettings`：默认预设、默认画像、`maxRecallChars` 上限、`defaultLimit`/`defaultMinScore`、结果模板、空结果文本、gate 扫描深度与缓存开关；
@@ -307,6 +314,14 @@ toolCallConfig 支持：
 工具并不只来自固定内置列表：内建 ToolRegistry、动态注册工厂、Skill、插件代理和远端 VCP 工具都可以进入同一注册表。模型只能看到标记为 agentCallable 的方法；执行器还会在实际调用前再次校验工具、方法和可调用标记。
 
 当前模型通信协议实现只有 VCP 文本协议：工具定义注入 system prompt，模型回复中输出 `<<<[TOOL_REQUEST]>>>` 块，执行结果再以工具结果消息回注。架构上 ToolCallingProtocol 留出了替换协议的接口，但 ToolCallConfig.protocol 目前没有其他可选值。
+
+### 6.4 子智能体配置（`subAgentConfig`）
+
+`ChatAgent` 内嵌 `subAgentConfig`（`types/agent.ts:225-260,534`），让 Agent 声明自己能否被当作子智能体调度：启用状态、模型绑定偏好（跟随调度方或优先自身渠道/模型）、最大嵌套调用深度（默认 1，硬上限 3，防止递归失控）、是否内置基线标识，以及是否只在子智能体侧可见。子智能体运行时、内置释出、任务生命周期与结果合成在 `src/tools/sub-agent`，本字段只保存声明；实际委派由 Agent 工具中的子智能体工具执行。这使"Agent 能不能开子任务、能不能被当子任务用"成为角色配置的一部分，跟工具开关同级。
+
+### 6.5 AI 自动审批策略（`decisionArbitration`）
+
+Agent 配置新增 `decisionArbitration`（`types/agent.ts:217`），与全局"决策渠道"分离：全局层保存审批引擎（JEV 或普通 LLM）、渠道、模型、审核超时与重试；Agent 层保存启用状态、保守灰区/激进策略、JEV 概率阈值和外部来源策略。两种引擎的裁决输出统一为 action（approve/deny/escalate）、风险等级、意图匹配与明确授权等字段；只有低风险且意图一致的批准可自动执行，激进模式下仍需明确授权。缺少上下文、上下文超过 16,000 字符、响应格式异常或判断矛盾都会升级人工。审批执行链路与配置 UI 归 Agent 工具类目，本节只记录 Agent 数据契约中的这两个字段。
 
 ## 7. 资产、变量与环境增强
 
@@ -441,6 +456,11 @@ AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元
 - `aio-hub/src/config/agent-presets/agent-config-wizard.ts`：高级字段、宏、角色卡导入和向导自身的工具审批策略。
 - `aio-hub/public/agent-presets/*/config.json|config.yaml`：内置角色的实际人格、温度和场景样本。
 - `aio-hub/docs/architecture/agent-tool-skill-integration.md`：Agent、工具调用和 Skill 的运行时分层与 VCP 调用闭环。
+- `aio-hub/docs/architecture/tool-approval-arbitration.md`：工具自动审批仲裁的执行链路、两种引擎与配置入口。
+- `aio-hub/src/tools/sub-agent/ARCHITECTURE.md`：子智能体运行时、内置释出与任务生命周期。
+- `aio-hub/src/tools/agent-manager/services/agentManagementService.ts`：Agent 配置的字段读写与安全策略（`isSecuritySensitiveAgentFieldPath`、`resolveFieldPath`）。
+- `aio-hub/packages/agent-preset-core/src/injection-anchors.ts`、`structureUndo.ts`：预设注入锚点与结构撤销的共享实现。
+- `aio-hub/src/tools/llm-chat/docs/architecture/model-parameter-system.md`：模型参数与采样兼容的系统说明。
 
 ## 12. 调查边界
 

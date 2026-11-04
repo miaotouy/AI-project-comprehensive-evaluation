@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：静态源码阅读。实际覆盖 `src/agents/sessions/`（ModelRegistry 与 auth store）、`src/agents/model-auth-*`（凭据解析链）、`src/agents/provider-stream.ts` 与 `src/plugins/provider-runtime*`（provider 运行时）、`src/agents/embedded-agent-runner/`（模型解析与流执行主链）、`src/model-catalog/`（远端目录）、`src/agents/plugin-model-catalog.ts` 与 `src/agents/prepared-model-catalog*` 周边（目录持久化）、`packages/ai/` 与 `packages/llm-core/`（协议 adapter 注册与请求契约）、`src/commands/models/`（CLI）、`src/gateway/server-methods/models-probe.ts`（连接探测）、`docs/concepts/{models,model-providers,model-failover}.md` 与 `docs/auth-credential-semantics.md`。全程静态阅读，未运行构建、测试、CLI 或 Gateway。
 >
@@ -22,12 +22,12 @@ OpenClaw 的“渠道管理”是三层结构的合成体，三层各自独立�
 
 代码快照中的核心结论：
 
-- Provider 目录事实分三层来源：author-owned 的 agent 目录 `models.json`、provider 插件 manifest 生成的 catalog（存 agent SQLite `cache_entries`，scope `plugin-model-catalog-v1`）、以及运行时插件 `registerProvider(...)` 的动态注入；目录加载与合并见 `src/agents/sessions/model-registry.ts:459-725`。
-- 协议执行实现集中在 `packages/ai`：`createApiRegistry()` 按 `api` id 维护适配器映射，`register-builtins.ts` 懒加载注册 openai/anthropic/google/mistral/azure 等协议族；自定义 Provider 可用插件注册自己的 stream 实现（`src/agents/sessions/model-registry.ts:990-1012`）。
-- 凭据进入请求的路径统一为 `ResolvedRequestAuth`（apiKey + headers）；由模型目录持 key 或经 auth profile 解析，最终注入 stream 的 `options.apiKey`/`options.headers`，链路见 `src/agents/embedded-agent-runner/stream-resolution.ts:274-324`。
-- 故障处理在同一 provider 内先做 auth profile 轮换（带 cooldown/disabled 状态、round-robin、会话 stickiness），profile 耗尽后再走模型 fallback 到 `agents.defaults.model.fallbacks`；仅当全链都是超载类错误时整链至多重试 10 次。多把 env API key 的旋转只对限流错误触发，见 `src/agents/api-key-rotation.ts:50-112`。
-- 连接检测复用 CLI 的 auth-probe 引擎并做成 Gateway 的 `models.probe` RPC（Control UI“Test connection”），会发起真实的最小模型请求，见 `src/gateway/server-methods/models-probe.ts:136-199` 与 `src/commands/models/list.probe.ts`。
-- 模型元数据可被“hosted catalog”增量刷新：默认 URL `https://catalog.openclaw.ai/models/v1/catalog.json`（源仓库 `openclaw/catalog`，不在本仓库内），TTL 6 小时，见 `src/model-catalog/remote-config.ts:3-11` 与 `src/model-catalog/remote-refresh.ts:22`。本地仓库中不存在 `catalog.json` 生成文件本身，只有生成/消费它的代码。
+- Provider 目录事实分三层来源：author-owned 的 agent 目录 `models.json`、provider 插件 manifest 生成的 catalog（存 agent SQLite `cache_entries`，scope `plugin-model-catalog-v1`）、以及运行时插件 `registerProvider(...)` 的动态注入；目录加载与合并见 `src/agents/sessions/model-registry.ts`。
+- 协议执行实现集中在 `packages/ai`：`createApiRegistry()` 按 `api` id 维护适配器映射，`register-builtins.ts` 懒加载注册 openai/anthropic/google/mistral/azure 等协议族；自定义 Provider 可用插件注册自己的 stream 实现（`src/agents/sessions/model-registry.ts`）。
+- 凭据进入请求的路径统一为 `ResolvedRequestAuth`（apiKey + headers）；由模型目录持 key 或经 auth profile 解析，最终注入 stream 的 `options.apiKey`/`options.headers`，链路见 `src/agents/embedded-agent-runner/stream-resolution.ts`。
+- 故障处理在同一 provider 内先做 auth profile 轮换（带 cooldown/disabled 状态、round-robin、会话 stickiness），profile 耗尽后再走模型 fallback 到 `agents.defaults.model.fallbacks`；仅当全链都是超载类错误时整链至多重试 10 次。多把 env API key 的旋转只对限流错误触发，见 `src/agents/api-key-rotation.ts`。
+- 连接检测复用 CLI 的 auth-probe 引擎并做成 Gateway 的 `models.probe` RPC（Control UI“Test connection”），会发起真实的最小模型请求，见 `src/gateway/server-methods/models-probe.ts` 与 `src/commands/models/list.probe.ts`。
+- 模型元数据可被“hosted catalog”增量刷新：默认 URL `https://catalog.openclaw.ai/models/v1/catalog.json`（源仓库 `openclaw/catalog`，不在本仓库内），TTL 6 小时，见 `src/model-catalog/remote-config.ts` 与 `src/model-catalog/remote-refresh.ts`。本地仓库中不存在 `catalog.json` 生成文件本身，只有生成/消费它的代码。
 
 ## 系统边界与总体调用链
 
@@ -43,12 +43,12 @@ OpenClaw 以本地 Gateway 为控制平面，模型提供商的 HTTP 调用从 G
      （embedded-agent-runner/model.ts:113-272；ModelRegistry + AuthStorage 来自
        prepared-model-runtime 快照或 agent 目录加载）
   -> prepareEmbeddedRunAuthPlan：为 provider 选出 auth profile 计划并解析出 apiKey
-     （run/auth-plan.ts；src/agents/model-auth-provider.ts:89-500 实现优先级链）
+     （run/auth-plan.ts；src/agents/model-auth-provider.ts 实现优先级链）
   -> session.agent.streamFn 组装：provider stream（插件或 transport fallback）包上
      apiKey/headers/run signal 注入层
      （run/attempt-stream-settle.ts:475-612；stream-resolution.ts:146-325）
   -> LlmRuntime.stream -> registry 按 model.api 取 adapter
-     （packages/ai/src/stream.ts:15-57；src/llm/stream.ts:75-115）
+     （packages/ai/src/stream.ts；src/llm/stream.ts）
   -> 协议 transport 把 model.baseUrl + options.apiKey/headers + 消息上下文组装为
      provider HTTP 请求（packages/ai 的 transports/* 与 providers/*）
 ```
@@ -60,32 +60,32 @@ OpenClaw 以本地 Gateway 为控制平面，模型提供商的 HTTP 调用从 G
 ### 术语与实体粒度
 
 - Provider 是字符串标识与配置命名空间，不是进程级对象。它出现在模型行的 `provider` 字段、`models.providers.<id>` 配置块与 auth profile 的 `provider:` 前缀中；provider 也是插件 ownership 的单位（官方 provider 由 `extensions/<id>` 插件声明）。
-- 同一个 Provider 名可以承载多个模型与多个凭据 profile（API key、OAuth、token），但目录中的“Endpoint 粒度”是 `provider + model.id + baseUrl`：`baseUrl` 可以写在 provider 级或 model 级（`src/agents/sessions/model-registry.ts:687-690`）。没有面向用户的“Endpoint 实例”实体，也没有多实例 Endpoint 表。
+- 同一个 Provider 名可以承载多个模型与多个凭据 profile（API key、OAuth、token），但目录中的“Endpoint 粒度”是 `provider + model.id + baseUrl`：`baseUrl` 可以写在 provider 级或 model 级（`src/agents/sessions/model-registry.ts`）。没有面向用户的“Endpoint 实例”实体，也没有多实例 Endpoint 表。
 - 跨厂商聚合入口（OpenRouter、ClawRouter、vLLM、LM Studio、自建代理等）在 OpenClaw 里就是普通 Provider：要么作为官方插件带自己的目录（docs/concepts/model-providers.md 中列出的官方 provider 插件表），要么由用户在 `models.providers` 里手写 baseUrl+apiKey+models。两种形态最终落到同一个模型目录。
 
 ### 模型运行数据契约
 
 文本模型的统一契约在 `packages/llm-core/src/types.ts`：
 
-- `KnownApi` 枚举协议家族：`openai-completions`、`mistral-conversations`、`openai-responses`、`azure-openai-responses`、`openai-chatgpt-responses`、`anthropic-messages`、`bedrock-converse-stream`、`google-generative-ai`、`google-vertex`；`Api` 允许自定义字符串（`packages/llm-core/src/types.ts:6-19`）。
-- `Model` 是带 `id`、`name`、`api`、`provider`、`baseUrl`、`reasoning`、`input`、`cost`（每百万 token 单价）、`contextWindow`、`maxTokens`、可选 `params/headers/authHeader/compat/mediaInput` 的扁平对象（`packages/llm-core/src/types.ts:657-707`）。
-- `compat` 字段按 api 类型承载协议级兼容开关（如 OpenAI Completions 的 `supportsDeveloperRole`、`thinkingFormat`、OpenRouter/vercel gateway 的路由偏好；Anthropic 的 beta header 控制；类型见同文件 477-567 与 `src/config/types.models.ts:29-112`）。
+- `KnownApi` 枚举协议家族：`openai-completions`、`mistral-conversations`、`openai-responses`、`azure-openai-responses`、`openai-chatgpt-responses`、`anthropic-messages`、`bedrock-converse-stream`、`google-generative-ai`、`google-vertex`；`Api` 允许自定义字符串（`packages/llm-core/src/types.ts`）。
+- `Model` 是带 `id`、`name`、`api`、`provider`、`baseUrl`、`reasoning`、`input`、`cost`（每百万 token 单价）、`contextWindow`、`maxTokens`、可选 `params/headers/authHeader/compat/mediaInput` 的扁平对象（`packages/llm-core/src/types.ts`）。
+- `compat` 字段按 api 类型承载协议级兼容开关（如 OpenAI Completions 的 `supportsDeveloperRole`、`thinkingFormat`、OpenRouter/vercel gateway 的路由偏好；Anthropic 的 beta header 控制；类型见同文件 477-567 与 `src/config/types.models.ts`）。
 
-配置侧 schema 与运行契约同构但字段可选（`src/config/types.models.ts:152-289`）：provider 级与 model 级都可给 `api/baseUrl/headers/params/compat`，`apiKey` 与 `headers` 使用 `SecretInput`（支持 env/文件/exec/store 引用，见下节）；另有 provider 级 `auth` 模式（`api-key`/`aws-sdk`/`oauth`/`token`）、`timeoutSeconds`、`request`（代理/TLS/认证 override）与 `localService`（本地模型服务进程管理）。
+配置侧 schema 与运行契约同构但字段可选（`src/config/types.models.ts`）：provider 级与 model 级都可给 `api/baseUrl/headers/params/compat`，`apiKey` 与 `headers` 使用 `SecretInput`（支持 env/文件/exec/store 引用，见下节）；另有 provider 级 `auth` 模式（`api-key`/`aws-sdk`/`oauth`/`token`）、`timeoutSeconds`、`request`（代理/TLS/认证 override）与 `localService`（本地模型服务进程管理）。
 
 ### Provider 插件与 setup 元数据
 
-Provider 插件通过 `openclaw.plugin.json` 声明 `providers`、`providerUsageAuthEnvVars`、`providerCatalogEntry` 与 `modelCatalog`（manifest 内置目录，如 `extensions/anthropic/openclaw.plugin.json:21-28` 声明 provider `anthropic` 并内置 `claude-*` 模型目录）。这给核心层提供了不加载插件运行时也能读的静态元数据。尚未安装的官方 provider 由进程内只读索引 `OPENCLAW_PROVIDER_INDEX` 提供预览目录（`src/model-catalog/provider-index/openclaw-provider-index.ts:14-...`），注释明确“installed plugin manifests remain authoritative; this index is a fallback”。
+Provider 插件通过 `openclaw.plugin.json` 声明 `providers`、`providerUsageAuthEnvVars`、`providerCatalogEntry` 与 `modelCatalog`（manifest 内置目录，如 `extensions/anthropic/openclaw.plugin.json` 声明 provider `anthropic` 并内置 `claude-*` 模型目录）。这给核心层提供了不加载插件运行时也能读的静态元数据。尚未安装的官方 provider 由进程内只读索引 `OPENCLAW_PROVIDER_INDEX` 提供预览目录（`src/model-catalog/provider-index/openclaw-provider-index.ts:14-...`），注释明确“installed plugin manifests remain authoritative; this index is a fallback”。
 
 ## 2. 模型目录与能力元数据
 
 ### 目录来源与合并
 
-运行时 `ModelRegistry`（`src/agents/sessions/model-registry.ts:321` 起的类）把模型合并为内存数组，来源有三：
+运行时 `ModelRegistry`（`src/agents/sessions/model-registry.ts` 起的类）把模型合并为内存数组，来源有三：
 
 1. author-owned 的根 `models.json`：默认路径 `join(agentDir, "models.json")`（`model-registry.ts:404-410`），手写、验证 schema、缺失字段用默认值补全（`parseModels` 给 `reasoning:false/input:["text"]/contextWindow:128000/maxTokens:16384/cost:0`，`model-registry.ts:672-725`）。
-2. provider 插件生成的 catalog shard：读取 agent SQLite `cache_entries` 中 scope `plugin-model-catalog-v1` 的行（`src/agents/plugin-model-catalog.ts:30-32,63-85,624-660`），每个 shard 按 `requireGeneratedCatalog` 校验并只保留本插件声明的 provider 行（`model-registry.ts:496-517`）。
-3. 动态注册：agent session extensions 的 SDK `api.registerProvider(name, config)`（`src/agents/sessions/extensions/types.ts:1377-1428`、`runner.ts:331-360`）与 `ModelRegistry.registerProvider`（`model-registry.ts:929-1052`），可携带 baseUrl/models/streamSimple/oauth/headers，是“会话内自定义 provider”的入口。
+2. provider 插件生成的 catalog shard：读取 agent SQLite `cache_entries` 中 scope `plugin-model-catalog-v1` 的行（`src/agents/plugin-model-catalog.ts`），每个 shard 按 `requireGeneratedCatalog` 校验并只保留本插件声明的 provider 行（`model-registry.ts:496-517`）。
+3. 动态注册：agent session extensions 的 SDK `api.registerProvider(name, config)`（`src/agents/sessions/extensions/types.ts`、`runner.ts:331-360`）与 `ModelRegistry.registerProvider`（`model-registry.ts:929-1052`），可携带 baseUrl/models/streamSimple/oauth/headers，是“会话内自定义 provider”的入口。
 
 合并顺序是 custom models 在前、插件 catalog 追加在后；`models.mode: "replace"` 影响配置层行为（docs/concepts/models.md），目录层始终是上述来源之和。OAuth provider 还可以在合并后改写模型行（如更新 baseUrl，`model-registry.ts:485-491`）。
 
@@ -97,7 +97,7 @@ Provider 插件通过 `openclaw.plugin.json` 声明 `providers`、`providerUsage
 
 - `models.providers.<id>` 之外的官方模型元数据默认来自插件 manifest 内置目录；可被远端 catalog 增量覆盖（只允许更新/新增已安装 provider 的模型，不提供 baseUrl 与 headers，忽略比本地 build stamp 旧的 bundle——行为见 `docs/concepts/models.md` 的“Hosted catalog updates”小节）。
 - 远端刷新代码路径：`src/model-catalog/remote-refresh.ts`（TTL `6*60*60_000` ms、启动/刷新入口与“fresh/unchanged/updated”结果）、`remote-store.ts`（SQLite 读写与跨进程写锁）、`remote-overlay.ts`（把远端行投影成目录 override）。远端默认地址在 `remote-config.ts:3-11`。
-- 本地不存在 `catalog.json`：任务背景提到的 `openclaw/catalog/models/v1/catalog.json` 属于仓库外组织仓库（公开 GitHub `openclaw/catalog`，发布到 `catalog.openclaw.ai`），本地只有拉取与消费逻辑；本仓库内名为 `catalog.json` 的是插件模型目录的“迁移前文件名”常量（`src/agents/plugin-model-catalog.ts:30`），二者不是同一文件。
+- 本地不存在 `catalog.json`：任务背景提到的 `openclaw/catalog/models/v1/catalog.json` 属于仓库外组织仓库（公开 GitHub `openclaw/catalog`，发布到 `catalog.openclaw.ai`），本地只有拉取与消费逻辑；本仓库内名为 `catalog.json` 的是插件模型目录的“迁移前文件名”常量（`src/agents/plugin-model-catalog.ts`），二者不是同一文件。
 
 ### 能力元数据的更新纪律
 
@@ -114,7 +114,7 @@ OpenClaw 模型凭据分两大类：
 
 ### 进入请求的凭据解析优先级
 
-单次 provider 请求的最终凭据由 `resolveApiKeyForProviderCore`（`src/agents/model-auth-provider.ts:89-500`）决定，顺序可概括为：
+单次 provider 请求的最终凭据由 `resolveApiKeyForProviderCore`（`src/agents/model-auth-provider.ts`）决定，顺序可概括为：
 
 1. 显式 pin 的 auth profile（会话/user 指定，`model-auth-provider.ts:134-210`）；
 2. 配置 `auth.order` / `auth.profiles` 给出的 provider 顺序（`resolveAuthProfileOrder`）；
@@ -131,7 +131,7 @@ OpenClaw 模型凭据分两大类：
 ### 脱敏边界
 
 - probe/状态路径把错误中的凭据材料做脱敏投影（如 `redactAuthProbeError`、错误桶只保留 reasonCode）；auth 错误分类成 auth/billing/rate_limit/timeout 等 bucket 而不透出原始密钥。
-- 敏感 env 名集合被用于日志与导出脱敏；工作区 dotenv 禁止注入 provider key 类变量（`src/infra/dotenv.ts:101-169` 的 blocklist，其中含 `OPENAI_API_KEYS`、`OPENCLAW_LIVE_*_KEY` 等），这类变量只接受 shell/启动环境。
+- 敏感 env 名集合被用于日志与导出脱敏；工作区 dotenv 禁止注入 provider key 类变量（`src/infra/dotenv.ts` 的 blocklist，其中含 `OPENAI_API_KEYS`、`OPENCLAW_LIVE_*_KEY` 等），这类变量只接受 shell/启动环境。
 - SecretRef 只允许静态凭据；`oauth` profile 不接受 SecretRef，OAuth 是可刷新/轮换的运行时可变状态（docs/auth-credential-semantics.md“OAuth SecretRef Policy Guard”）。本次未逐条验证各 UI 页面脱敏展示，仅有 probe RPC 处理程序与 redaction 工具可见。
 
 ### 注意：models.json 中的 marker 与真实解析时机
@@ -144,21 +144,21 @@ models.json 持久化的 `apiKey` 很多是“来源 marker”（env 变量名�
 
 协议执行实现位于 `packages/ai`：
 
-- `createApiRegistry()` 返回进程级 registry：`registerApiProvider({api, stream, streamSimple}, sourceId)` 按 api id 存储一对流式入口，`unregisterApiProviders(sourceId)` 支持按插件属主整体卸载（`packages/ai/src/api-registry.ts:76-119`）。
-- `createLlmRuntime(registry)` 暴露 `stream/complete/streamSimple/completeSimple`，它们把 `model.api` 查表后委托给 adapter（`packages/ai/src/stream.ts:15-57`）。adapter 契约要求失败编码进返回的流（error 消息带 stopReason/errorMessage），而非抛异常（`packages/llm-core/src/types.ts:204-219` 的注释契约）。
-- 内置注册在 `src/llm/stream.ts:20` 调用 `registerBuiltInApiProviders`，`register-builtins.ts:94-158` 列出八组（anthropic-messages、openai-completions、openai-responses、openai-chatgpt-responses、azure-openai-responses、google-generative-ai、google-vertex、mistral-conversations），全部懒加载（首用动态 import）。
-- 进程默认有一个惰性全局 runtime（`packages/ai/src/internal/default-runtime.ts`），但会话/嵌入运行器通常使用按 model-registry 生命周期创建的隔离 runtime（`src/agents/sessions/model-registry-runtime.ts:24-40`），并把该 runtime 通过不可枚举绑定挂在 model 上（`src/llm/model-runtime-binding.ts`），`stream` facade 解析时优先取绑定的 runtime 否则回落默认（`src/llm/stream.ts:75-77`）。
+- `createApiRegistry()` 返回进程级 registry：`registerApiProvider({api, stream, streamSimple}, sourceId)` 按 api id 存储一对流式入口，`unregisterApiProviders(sourceId)` 支持按插件属主整体卸载（`packages/ai/src/api-registry.ts`）。
+- `createLlmRuntime(registry)` 暴露 `stream/complete/streamSimple/completeSimple`，它们把 `model.api` 查表后委托给 adapter（`packages/ai/src/stream.ts`）。adapter 契约要求失败编码进返回的流（error 消息带 stopReason/errorMessage），而非抛异常（`packages/llm-core/src/types.ts` 的注释契约）。
+- 内置注册在 `src/llm/stream.ts` 调用 `registerBuiltInApiProviders`，`register-builtins.ts:94-158` 列出八组（anthropic-messages、openai-completions、openai-responses、openai-chatgpt-responses、azure-openai-responses、google-generative-ai、google-vertex、mistral-conversations），全部懒加载（首用动态 import）。
+- 进程默认有一个惰性全局 runtime（`packages/ai/src/internal/default-runtime.ts`），但会话/嵌入运行器通常使用按 model-registry 生命周期创建的隔离 runtime（`src/agents/sessions/model-registry-runtime.ts:24-40`），并把该 runtime 通过不可枚举绑定挂在 model 上（`src/llm/model-runtime-binding.ts`），`stream` facade 解析时优先取绑定的 runtime 否则回落默认（`src/llm/stream.ts`）。
 
 ### 插件如何贡献执行实现
 
-运行时会话的 provider stream 由 `registerProviderStreamForModel` 构造（`src/agents/provider-stream.ts:22-78`）：先问 provider 运行时插件（`src/plugins/provider-runtime.ts` 的 `resolveProviderStreamFn`），没有插件实现时用 `createTransportAwareStreamFnForModel` 生成传输层 fallback；然后把自定义 api 注册进所在 apiRegistry（`ensureCustomApiRegistered`）。在自定义 provider 案例中，agent session extensions SDK 的 `registerProvider(..., {streamSimple})` 直接注册该 provider 自己的流实现（`model-registry.ts:1001-1012`），模型选择无需知道 stream 是内置还是插件提供。
+运行时会话的 provider stream 由 `registerProviderStreamForModel` 构造（`src/agents/provider-stream.ts`）：先问 provider 运行时插件（`src/plugins/provider-runtime.ts` 的 `resolveProviderStreamFn`），没有插件实现时用 `createTransportAwareStreamFnForModel` 生成传输层 fallback；然后把自定义 api 注册进所在 apiRegistry（`ensureCustomApiRegistered`）。在自定义 provider 案例中，agent session extensions SDK 的 `registerProvider(..., {streamSimple})` 直接注册该 provider 自己的流实现（`model-registry.ts:1001-1012`），模型选择无需知道 stream 是内置还是插件提供。
 
 ### 请求组装边界
 
 组装分两层：
 
 - `Context`（systemPrompt/messages/tools）来自上层会话（本类别之外的“任务如何构建”，见相邻类目边界）；渠道层只负责把 context + model + options 映射成上游请求。
-- options 携带 apiKey/headers/`onPayload`（发送前改写上游 body 的钩子）/`onResponse`/transport/`cacheRetention`/`sessionId`/`promptCacheKey`/timeout/重试参数等（`packages/llm-core/src/types.ts:68-152`）。内置 provider 模块负责各自协议头与 body 细节，例如 Anthropic adapter 依据 provider 身份决定 `x-api-key`/`anthropic-version`、beta header 与 OAuth bearer（`packages/ai/src/providers/anthropic.ts`），OpenAI 家族区分 native `api.openai.com` 与代理路由的载荷整形（docs/concepts/model-providers.md 的 proxy-route shaping）。baseUrl 拼接与 debug 脱敏集中在 transports 的 URL 工具中。非 native 的 openai-completions 代理强制关闭 `developer` role 以避免 400（docs 描述 + config 层把该开关放在 compat 中）。
+- options 携带 apiKey/headers/`onPayload`（发送前改写上游 body 的钩子）/`onResponse`/transport/`cacheRetention`/`sessionId`/`promptCacheKey`/timeout/重试参数等（`packages/llm-core/src/types.ts`）。内置 provider 模块负责各自协议头与 body 细节，例如 Anthropic adapter 依据 provider 身份决定 `x-api-key`/`anthropic-version`、beta header 与 OAuth bearer（`packages/ai/src/providers/anthropic.ts`），OpenAI 家族区分 native `api.openai.com` 与代理路由的载荷整形（docs/concepts/model-providers.md 的 proxy-route shaping）。baseUrl 拼接与 debug 脱敏集中在 transports 的 URL 工具中。非 native 的 openai-completions 代理强制关闭 `developer` role 以避免 400（docs 描述 + config 层把该开关放在 compat 中）。
 
 ## 5. 运行时选择、绑定与会话路由
 
@@ -189,9 +189,9 @@ OpenClaw 把“同一模型失败”的恢复拆成四个互不混淆的层次�
 
 ### 多 Key（env 集合）
 
-多 key 的候选集来自环境变量，收集顺序（`src/agents/live-auth-keys.ts:112-167`）：`OPENCLAW_LIVE_<P>_KEY` 单 key 钉住（测试/复现时禁旋转）> `<P>_API_KEYS`（逗号/分号/空白分隔，`parseKeyList`）> `<P>_API_KEY` > `<P>_API_KEY_*` 前缀枚举 > 回退变量（如 Google 的 `GOOGLE_API_KEY`）> provider manifest 声明 env 名；对 `anthropic/google/openai` 有显式表（同文件 33-58）。候选解析后 `normalizeUniqueStringEntries` 去重。
+多 key 的候选集来自环境变量，收集顺序（`src/agents/live-auth-keys.ts`）：`OPENCLAW_LIVE_<P>_KEY` 单 key 钉住（测试/复现时禁旋转）> `<P>_API_KEYS`（逗号/分号/空白分隔，`parseKeyList`）> `<P>_API_KEY` > `<P>_API_KEY_*` 前缀枚举 > 回退变量（如 Google 的 `GOOGLE_API_KEY`）> provider manifest 声明 env 名；对 `anthropic/google/openai` 有显式表（同文件 33-58）。候选解析后 `normalizeUniqueStringEntries` 去重。
 
-旋转执行器 `executeWithApiKeyRotation`（`src/agents/api-key-rotation.ts:50-112`）：外层遍历 key、内层做同 key 瞬时重试；`shouldRetry` 命中（默认 429/rate_limit 类错误，经 `classifyFailoverSignal`）就换下一把 key 并跳过同 key 重试；非限流错误失败即止。该执行器通过插件 SDK 的 `resolveApiKeyForProvider`/`getRuntimeAuthForModel`（`src/plugin-sdk/provider-auth-runtime.ts:297-319`）暴露给 provider 插件，也在 media-understanding 运行器使用；本次未验证它是否覆盖所有内置 transport 的 SDK 内重试路径。
+旋转执行器 `executeWithApiKeyRotation`（`src/agents/api-key-rotation.ts`）：外层遍历 key、内层做同 key 瞬时重试；`shouldRetry` 命中（默认 429/rate_limit 类错误，经 `classifyFailoverSignal`）就换下一把 key 并跳过同 key 重试；非限流错误失败即止。该执行器通过插件 SDK 的 `resolveApiKeyForProvider`/`getRuntimeAuthForModel`（`src/plugin-sdk/provider-auth-runtime.ts`）暴露给 provider 插件，也在 media-understanding 运行器使用；本次未验证它是否覆盖所有内置 transport 的 SDK 内重试路径。
 
 ### 瞬时重试
 
@@ -209,7 +209,7 @@ fallback 链构建与执行在 `src/agents/model-fallback-*`（candidates/cooldo
 
 ### Probe（连接测试）
 
-存在两套易混的“probe”：`src/gateway/probe.ts` 是探测 Gateway 进程自身可达/健康；模型提供商连接测试是另一条链——CLI 的 `models status --probe` 与 `models list --probe` 走 `src/commands/models/list.probe.ts` 的 `runAuthProbes`，Control UI 的“Test connection”经 Gateway RPC `models.probe` 复用同一引擎（`src/gateway/server-methods/models-probe.ts:1-18` 注释直述“reuses the CLI auth-probe engine behind an admin-scoped RPC”）。
+存在两套易混的“probe”：`src/gateway/probe.ts` 是探测 Gateway 进程自身可达/健康；模型提供商连接测试是另一条链——CLI 的 `models status --probe` 与 `models list --probe` 走 `src/commands/models/list.probe.ts` 的 `runAuthProbes`，Control UI 的“Test connection”经 Gateway RPC `models.probe` 复用同一引擎（`src/gateway/server-methods/models-probe.ts` 注释直述“reuses the CLI auth-probe engine behind an admin-scoped RPC”）。
 
 Probe 会发起真实最小模型请求（RPC 侧约束 `PROBE_MAX_TOKENS=8`、并发 2、超时 5-60s），结果带状态桶与稳定 reasonCode（`ok/auth/rate_limit/billing/timeout/format/unknown/no_model`；`excluded_by_auth_order/missing_credential/expired/...`，语义见 `docs/auth-credential-semantics.md`）。凭据目标解析与真实运行共享同一套 auth 顺序逻辑，但 probe 不是完整 agent 运行（不会生成回复、不进会话记录）。每 provider 探测所有 eligible profile 并做汇总状态（`models-probe.ts:100-134`）。UI 侧调用由 `ui/src/pages/model-providers/` 页面与 i18n 文案（“Test connection”）佐证，本次未运行 UI。
 
@@ -260,7 +260,7 @@ provider 插件本身由 plugins 管理（enable/disable/卸载）；模型行�
 - **agent 运行器（同一进程内执行）**：真实推理入口，负责模型选择、凭据计划、adapter/transport 组装与 retry/fallback。
 - **本地模型服务**：通过 provider 插件（llama-cpp、ollama、lmstudio、vllm 等）接入；服务可以是受管启动的子进程，也可以连接用户已有服务；发现接口（如 `/v1/models`）用于目录扩充。
 - **浏览器/桌面/CLI**：都不直接向模型 provider 发推理请求；CLI 与桌面复用 Gateway 能力，UI 仅展示/编辑（models.list/models.probe/config.patch 等 RPC）。desktop sidecar 承担“把本机 Gateway 桥接给渲染器”的职责。
-- **worker inference**：Gateway 还内置面向非会话小任务的推理执行器（`src/gateway/worker-environments/inference-runtime.ts:523-639`），它复用同一套 prepared model/auth/stream 组装，说明模型解析逻辑在会话运行器与微任务推理间共享。
+- **worker inference**：Gateway 还内置面向非会话小任务的推理执行器（`src/gateway/worker-environments/inference-runtime.ts`），它复用同一套 prepared model/auth/stream 组装，说明模型解析逻辑在会话运行器与微任务推理间共享。
 
 ## 11. 未验证事项
 

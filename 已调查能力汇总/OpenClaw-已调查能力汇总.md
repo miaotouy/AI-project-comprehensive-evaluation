@@ -2,9 +2,9 @@
 
 > 汇总对象：`https://github.com/openclaw/openclaw`
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：OpenClaw 已完成的 17 份单项目调查笔记：仓库分布、会话与消息管理、对话请求与上下文、Chat UI、消息渲染器、对话导出与分享、LLM渠道管理、Agent角色配置、Agent工具、外部执行体与应用协作、主动Agent与后台任务、检索增强与认知编排、上下文编译与提示词工程、生成式输出与运行时、媒体创作、应用界面基础设施、独特功能（代码快照统一为各笔记记录的 `541406eeb737e00907438f79cbc0d0a74f0def99`）
+> 依据：OpenClaw 已完成的 17 份单项目调查笔记：仓库分布、会话与消息管理、对话请求与上下文、Chat UI、消息渲染器、对话导出与分享、LLM渠道管理、Agent角色配置、Agent工具、外部执行体与应用协作、主动Agent与后台任务、检索增强与认知编排、上下文编译与提示词工程、生成式输出与运行时、媒体创作、应用界面基础设施、独特功能（代码照照统一为各笔记记录的 `55a554e78a83af031760ef247e26d5be9e24329d`）
 >
 > 汇总方法：逐一阅读全部来源笔记；按产品能力主题合并来自多个类目的同一能力，避免按来源目录重复抄写；能力说明保留各笔记的证据状态（主链确认/入口确认/本次未找到/暂缓/未运行等）与限定条件，不在汇总中补做源码调查或升级证据；来源链接为从本目录出发的相对路径
 >
@@ -17,7 +17,7 @@
 OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gateway 是中心状态、路由与控制平面；CLI、TUI、浏览器 Control UI、iOS/Android companion app 与消息渠道适配器主要是外部控制表面或设备节点，不各自持有主 Agent 运行时；模型请求可由同机 agent 运行器、受管理 worker environment、配对节点或外部 ACP harness 承担。产品形态与调用面依据见 [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
 
 - **主要调用者与表面**：操作者通过 CLI、TUI、Control UI 和移动 companion 应用发起并管理会话；多渠道 IM（文档列出约 20 个支持渠道，为入口/文档级确认）上的消息、thread/topic 映射到 Gateway session 或 ACP binding；外部 ACP client 与第三方 Claude Code 子进程可以从相反方向桥接。
-- **仓库结构与规模**：pnpm workspace，根入口 `openclaw.mjs`。`src` 承担 Gateway、Agent、会话、工具与 CLI 主链；`extensions` 承担消息渠道、Provider 插件与可选能力；`ui` 是 Control UI；`apps` 是桌面/移动 companion；`packages` 提供共享 SDK/协议。快照有 43,542 个跟踪文件、38,648 个源码文件和约 1,172 万行源码，TypeScript 约占 91%，Swift/Kotlin 服务 companion 与平台集成。依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
+- **仓库结构与规模**：pnpm workspace，根入口 `openclaw.mjs`。`src` 承担 Gateway、Agent、会话、工具与 CLI 主链；`extensions` 承担消息渠道、Provider 插件与可选能力；`ui` 是 Control UI；`apps` 是桌面/移动 companion；`packages` 提供共享 SDK/协议。照照有 43,542 个跟踪文件、38,648 个源码文件和约 1,172 万行源码，TypeScript 约占 91%，Swift/Kotlin 服务 companion 与平台集成。依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
 - **Agent 形态**：普通用户 Agent 是配置 roster（`agents.entries.<agentId>`）与 workspace 角色文件（AGENTS.md、SOUL.md、IDENTITY.md、USER.md、BOOTSTRAP.md、MEMORY.md）的组合，按 agentId 隔离 SQLite 状态与会话目录；另有 Gateway 投影的 system agent 行与外部 ACP harness 两类边界。依据见 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md)。
 - **重要外部依赖**：模型 Provider（OpenAI、Anthropic、Google、本地 Ollama/llama.cpp/LM Studio 等）；hosted 模型目录（`catalog.openclaw.ai`，源仓库在仓库外）；ClawHub 外部注册表及其扫描/审核服务；ComfyUI 本地/云端等媒体 Provider；消息渠道平台账号与推送服务；iOS/Android 设备本地能力；ACPX 外部 harness。
 - **产品辨识点**：把"谁能接触 Agent、谁能往本机安装会改变 Agent 行为的代码"做成显式、可审计的准入与信任决策，见 [独特功能调查笔记](../独特功能/OpenClaw-独特功能调查笔记.md) 与本汇总"渠道、设备节点与外部执行体"一节。
@@ -33,7 +33,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **一致性**：SQLite 写入由 per-store writer queue 串行，事务内同步提交前重读权威行并做 expected identity/lifecycleRevision 比较；message 幂等键有唯一索引，重复请求返回原消息、payload 冲突显式报错。事件提交与活动路径/FTS 前向更新同事务；无法从新增行安全推断路径时用持久 dirty watermark 隐藏派生行，由 reconcile 完整重建（小型重建阈值约 4,000 行/4 MiB，超出转后台）。
 - **检索与分页**：会话列表支持 offset 分页、固定排序（pinned 优先再按更新时间）与 agent/归档/owner 等过滤；聊天历史按活动路径的逻辑消息序号分页，可用 messageId anchor 定位并可回退 reset archive；正文搜索走 per-agent FTS5，只索引活动路径中的 user/assistant 可读文本，索引 dirty 时返回 indexing 而不是不可靠旧行。
 - **迁移与导入**：transcript 文件协议版本 3、SQLite schema 版本 17，旧格式迁移与 `importSqliteSessionRows` 属 doctor/migration 路径；正常 runtime 写入器拒绝非 canonical key。迁移与 canonical repair 兼容旧 JSONL、旧 alias 与旧 schema。
-- **会话级绑定**：模型/provider 覆盖、工具策略、worktree/exec 目录、channel/conversation 路由、CLI/ACP harness 元数据等作为会话引用或归属快照保存；附件随消息内容或 media store 引用关联，schema 中无独立会话附件表。
+- **会话级绑定**：模型/provider 覆盖、工具策略、worktree/exec 目录、channel/conversation 路由、CLI/ACP harness 元数据等作为会话引用或归属照照保存；附件随消息内容或 media store 引用关联，schema 中无独立会话附件表。
 - **本次未找到**：面向用户的通用"就地编辑一条已落盘消息"或"按 message id 删除消息"RPC（精确 event rewrite 仅用于受保护 repair）；通用 sessions export/import RPC（导出/分享见本汇总对应小节）。
 
 ## 对话请求与上下文
@@ -52,7 +52,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 主链确认（静态，未运行构建、CLI 与 Gateway）。依据见 [LLM渠道管理调查笔记](../LLM渠道管理/OpenClaw-LLM渠道管理调查笔记.md)。
 
-- **三层渠道结构**：逻辑 Provider（`provider/model` 中的品牌身份）→ 协议与 Adapter（按 `model.api` 协议族注册的流式实现）→ 模型目录与凭据（运行时可查询、可复制的目录快照）。没有持久化的"渠道实例"对象；"解析到具体渠道"的终点是 Model 行（baseUrl/api/compat）、可用 auth 方案、stream adapter 与会话绑定 LlmRuntime 四者。
+- **三层渠道结构**：逻辑 Provider（`provider/model` 中的品牌身份）→ 协议与 Adapter（按 `model.api` 协议族注册的流式实现）→ 模型目录与凭据（运行时可查询、可复制的目录照照）。没有持久化的"渠道实例"对象；"解析到具体渠道"的终点是 Model 行（baseUrl/api/compat）、可用 auth 方案、stream adapter 与会话绑定 LlmRuntime 四者。
 - **模型目录**：来源合并为 author 的 agent `models.json`、provider 插件生成目录（agent SQLite `cache_entries`，scope `plugin-model-catalog-v1`）与运行时 `registerProvider(...)` 动态注入；hosted catalog 默认 `https://catalog.openclaw.ai/models/v1/catalog.json`（TTL 6 小时，源仓库不在本仓库内）可增量覆盖。`models.mode` 的 merge/replace 影响配置层，目录层始终是各来源之和。
 - **凭据解析**：最终凭据统一为 `ResolvedRequestAuth(apiKey + headers)`。优先级链为显式 pin 的 auth profile → `auth.order` 配置顺序 → aws-sdk → env-first 环境变量 → provider 内联 key（env/exec/SecretRef 解析）→ auth store 按序逐 profile（api_key/token/oauth）。`models.json` 持久化的是来源 marker 而非明文；OAuth 是可刷新运行时状态，不接受 SecretRef。
 - **故障转移四层**：同 key 瞬时重试、限流时 env 多 key 轮换、auth profile 轮换（各 profile 独立 cooldown/disabled，round-robin 且会话有 stickiness）、模型级 fallback 链。user pin 是严格选择不落入 fallback；configured/cron 主选可回退；仅当全链都是超载类错误时才整链最多重试 10 次。fallback 是 turn-local 的，不写回成下一轮选择。
@@ -97,7 +97,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 各类运行形态主链确认（静态，未启动 Gateway/timer/渠道）。依据见 [主动Agent与后台任务调查笔记](../主动Agent与后台任务/OpenClaw-主动Agent与后台任务调查笔记.md)。
 
-- **运行形态不是单一任务系统**：当前快照的主动运行分 cron/automations、heartbeat、hooks/webhooks、后台 CLI exec、detached subagent 五种，共享 Gateway 生命周期与结果交付设施，各自的状态 owner 不同。
+- **运行形态不是单一任务系统**：当前照照的主动运行分 cron/automations、heartbeat、hooks/webhooks、后台 CLI exec、detached subagent 五种，共享 Gateway 生命周期与结果交付设施，各自的状态 owner 不同。
 - **cron/automations（最完整的后台主链）**：Agent 用 `automations` 工具、Gateway cron RPC 或 CLI 保存 job；到期由 CronService 认领，SQLite `cron_jobs` + `cron_run_receipts` 提供 durable reservation/running fence，`task_runs` 提供客户端可见投影。支持 at/every/cron 时间排程与 on-exit、stream 触发；main job 经 system event + heartbeat 重入主会话，isolated/current 用 detached run session；默认并发上限 8，支持退避重试、连续失败告警、10 次自动禁用、启动 catch-up 与 stale receipt 恢复。
 - **heartbeat 与 wake bus**：周期 monitor 是 system-owned cron job（默认周期 30m）；hook/cron/后台 task 等进入同一 wake bus，按 agent/session 分组合并、每 target 最多一个活跃 heartbeat turn；安静/可见结果由 outcome classifier 区分，结构化结果写 `heartbeat_outcomes`，不打扰用户时不发消息。
 - **hooks/webhooks**：Gateway HTTP 层只做认证/准入与幂等，不直接执行模型；`wake` hook 投递 system event，`agent` hook 把外部事件合成一次性 cron run。HTTP replay cache 仅进程内，不承担跨重启 ledger。
@@ -159,7 +159,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **消息内 `/export-session`（/export，owner-only）**：把持久化 transcript 活动分支渲染为自包含离线 HTML 阅读稿（base64 内嵌会话数据，带分支树、thinking、工具展示与 system prompt），写入工作区；`/export-trajectory` 与 CLI `openclaw sessions export-trajectory` 输出脱敏 JSONL 支持包（schema `openclaw-trajectory` v1），写入 `.openclaw/trajectory-exports/`，供调试/支持交付。
 - **Control UI 会话页 `/export-session`**：本地执行、只把"当前已加载消息"下载为纯文本 Markdown（剥内部上下文与 thinking）。
 - **原生应用 Export Transcript**：iOS/macOS 把当前视图消息导出为 Markdown 并经系统分享（macOS ⌘⇧E）。
-- **口径差异**：同一命令名在渠道端与 Web 端是不同实现、不同内容口径（渠道端含 system prompt 与完整工具轨迹，Web 端仅正文 Markdown）；导出都是快照，无与源会话再同步语义。
+- **口径差异**：同一命令名在渠道端与 Web 端是不同实现、不同内容口径（渠道端含 system prompt 与完整工具轨迹，Web 端仅正文 Markdown）；导出都是照照，无与源会话再同步语义。
 - **内容边界**：只导出活动分支，不包含隐藏分支；轨迹导出做本地路径/secret 类清洗（尽力而为），HTML 导出刻意不脱敏；图片需以 base64 存在于 transcript 才真正内联显示（是否普遍携带未验证）。
 - **公开会话分享**：Control UI 可在显式确认后发布世界可读 token 链接并独立撤销；公开发布绑定精确 session generation，与 shared/read-only/suggest/draft 团队可见性和成员关系分离。普通会话 URL 仍是鉴权深链。
 - **仍未找到**：分享稿编辑器/预览工作台、会话整图/长图导出和本地导出版本历史；公开链接的过期、评论、访问统计和克隆未确认。控制面导出会话（如 CLI/ACP 代理时）只见 user 行并附说明。
@@ -171,7 +171,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 依据 [Chat UI 调查笔记](<../Chat UI/OpenClaw-ChatUI调查笔记.md>) 与 [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。四套表面都以 Gateway 会话与事件为远端事实来源，但各保留本地状态与恢复存储。
 
 - **Control UI**：功能最完整的聊天工作台，支持多 pane/分屏/辅助面板与按会话保留的 pane 现场；Composer 支持 slash/skill 菜单、引用回复、附件、dictation/talk；草稿与附件分别按 Gateway owner 存浏览器 storage 与 IndexedDB；消息右键提供 reply/rewind/fork/copy；多会话经 sidebar 子树与 background task rail 呈现。
-- **TUI**：单终端工作区，命令/选择器/快捷键为主入口，流式、scrollback（默认 180 component）与 run 协调由独立控制器处理；未找到与 Control UI 对应的事件消息级 rewind/fork 入口，也未找到跨进程 durable 草稿。
+- **TUI**：单终端工作区，命令/选择器/照捷键为主入口，流式、scrollback（默认 180 component）与 run 协调由独立控制器处理；未找到与 Control UI 对应的事件消息级 rewind/fork 入口，也未找到跨进程 durable 草稿。
 - **Apple 原生与 Android 原生**：iOS Chat Pro 用共享 SwiftUI 原生视图（Dashboard 经认证 WebView 打开 Control UI）；Android 是 Compose `ChatScreen`。两者的 Composer/草稿/outbox 在本地保存（Swift 内存 + ViewModel、Android Room/StateFlow）。
 - **发送与恢复共同原则**：先保留用户输入，再用历史或带身份的运行事件确认交付；"已收到 ACK"与"已写入 canonical history"分开，不确定发送停在 unconfirmed/confirming/failed 而非静默重发；三套原生表面各自 outbox 由 canonical history 退休。
 - **渲染管线**：Gateway 做显示投影（隐藏回复、预算、身份补全）；消息进入各客户端的 reducer 后由 thread builder/时间线装配为可见 turn。Control UI 用虚拟行 + 流式 Markdown 稳定前缀/尾部修复；TUI 用 pi-tui 有界 scrollback；iOS 用 ScrollView+LazyVStack、Android 用 reverse LazyColumn。渲染、滚动、富文本细节见 [消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。
@@ -199,7 +199,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 ## 证据边界与遗漏
 
-- **统一证据状态**：以上"主链确认（静态）"均来自当前代码快照的可执行调用关系复核，未运行构建、测试、Gateway、真实 Provider、真实 UI/原生设备或端到端会话。按各类目指南，未做运行验证不降低源码结构类结论；运行验证补充的是平台差异、外部依赖、时序、性能与交互质量等可观察结果。
+- **统一证据状态**：以上"主链确认（静态）"均来自当前代码照照的可执行调用关系复核，未运行构建、测试、Gateway、真实 Provider、真实 UI/原生设备或端到端会话。按各类目指南，未做运行验证不降低源码结构类结论；运行验证补充的是平台差异、外部依赖、时序、性能与交互质量等可观察结果。
 - **媒体类目边界**：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md) 只保留外部 Provider、节点采集和远端执行边界；图片/视频/音乐生成的任务化主链以 [媒体创作调查笔记](../媒体创作/OpenClaw-媒体创作调查笔记.md) 为准。
 - **"本次未找到"（限定于已读入口/范围，不作项目级绝对断言）**：通用消息就地编辑与按 id 删除 RPC；通用 sessions export/import RPC；统一跨进程后台 worker queue；独立媒体工作台/媒体历史树/跨会话资产库/媒体工程对象；board 级导入导出与模型侧 board 查询工具；分享稿编辑器、会话整图导出与本地导出版本历史；普通 Agent 的 clone/import/export；通用规则 schema 编译器（preset/lorebook 层）；Mermaid/KaTeX 与 ACP 专用消息 renderer。
 - **本轮没有调查/暂缓**：companion 语音与 talk、A2UI、meeting-bot、fleet、projects/flows/tasks 等新表面的用户主链；ClawHub 市场/扫描/审核服务（仓库外）；各渠道插件的逐平台传输实现（以核心决定器与 Telegram 为例，未逐一核对约 20 个渠道）；voice-phone 桥接等外部展示声明。Canvas 文档与 session board widget 不在此列，其静态主链已归入“媒体生成与输出运行时”。

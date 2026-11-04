@@ -2,9 +2,9 @@
 
 > 汇总对象：`Hermes-Agent`（远端仓库 `https://github.com/NousResearch/hermes-agent`，产品命令 `hermes`）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 个类目的 Hermes-Agent 调查笔记（完整清单见文末来源笔记索引），基于代码快照 `682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 个类目的 Hermes-Agent 调查笔记（完整清单见文末来源笔记索引），基于代码快照 `71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；未做新的源码调查与跨项目横向比较
 >
@@ -14,13 +14,13 @@
 
 ## 项目概览
 
-Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Python agent 核心的个人 AI 助手，README 自我定位为 "self-improving agent"，核心卖点是内置学习闭环。架构形态是混合 monorepo：Python 核心（`run_agent` / `cli` / `gateway` / `tools`）与 TypeScript 前端（Electron 桌面、Ink TUI、Web dashboard）同仓。桌面端不运行 agent，而是自 spawn 一个无头 `hermes serve` 后端进程，renderer 经 WebSocket JSON-RPC 通信；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。本次汇总覆盖 16 个类目的调查结论，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
+Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Python agent 核心的个人 AI 助手，README 自我定位为 "self-improving agent"，核心卖点是内置学习闭环。架构形态是混合 monorepo：Python 核心（`run_agent` / `cli` / `gateway` / `tools`）与 TypeScript 前端（Electron 桌面、Ink TUI、Web dashboard）同仓。桌面端不运行 agent，而是自 spawn 一个无头 `hermes serve` 后端进程，renderer 经 WebSocket JSON-RPC 通信；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。当前快照规模约 2.2 万个受版本控制文件；`agent/`、`hermes_cli/`、`gateway/`、`cron/` 都已完成模块化拆分（单文件 `hermes_state.py` 拆成约 65 个 `hermes_state_*` 模块），`plugin-catalog/` 从 99 条增长到 978 条 SHA 固定的插件清单，核心 `plugins/` 含 `computer_use`、`delegation`、`teams_pipeline`、`kanban` 等 24 个条目，终端后端为六个内建加插件后端。本次汇总覆盖 16 个类目的调查结论，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
 
 ## 完成度速览
 
 功能摘要以“主链确认”“静态源码确认”“入口确认”和“归并已有类目”区分证据成熟度。协议契约、同一能力的新增控制面和工程统计不重复计为独立产品能力；声明不符、外部依赖、已回退实现和候选观察也不混入功能能力正文，集中在文末“已知边界与待验证事项”。
 
-**证据口径**：本汇总的“主链确认/静态源码确认”表示已在当前代码快照 `682a95258ce9e877cfb607a5ada6436183efdebb` 复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。能力条目中的“默认关闭/依赖外部服务/依赖用户配置”等边界均来自来源笔记的明确表述。
+**证据口径**：本汇总的“主链确认/静态源码确认”表示已在当前代码快照 `71736c9f32597bbca9d89cede5aa136e55946b2f` 复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。能力条目中的“默认关闭/依赖外部服务/依赖用户配置”等边界均来自来源笔记的明确表述。
 
 ## 功能能力摘要
 
@@ -74,12 +74,12 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 
 - **能力一：闭环学习（后台记忆/技能复习 + /refine）**：每 N 轮 / 每 N 次工具迭代触发一次后台 fork 复习，fork 继承父会话模型配置、凭据与已缓存系统提示，命中同一提示缓存；后台复习只放行 memory 与 skill_manage 工具（线程级白名单），复习结果写 MEMORY.md / 技能目录或外部 provider；`/refine` 为用户显式触发同一 fork 的按需入口；复习失败仅捕获不抛出，best-effort。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
 - **能力二：Skill 生命周期（创建-使用中改进-curator 维护）**：`skill_manage` 对模型公开最多 20 项的原子 `operations` 批次，失败整体回滚；delete 独占调用，旧平铺动作只用于历史重放。`.usage.json` 记录使用统计；curator 惰性维护并只归档不删除。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
-- **能力三：持久记忆与用户建模**：双轨记忆——内置 `MEMORY.md` / `USER.md` 文件记忆注入 system prompt volatile 段 + `MemoryProvider` ABC 外部后端（honcho/mem0/supermemory 等 8 个，同一时刻至多激活一个）；模型写记忆可能被人审拦截（写审批门，用户 `/memory approve` 后才落盘）；跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
+- **能力三：持久记忆与用户建模**：双轨记忆——内置 `MEMORY.md` / `USER.md` 文件记忆注入 system prompt volatile 段 + `MemoryProvider` ABC 外部后端（仓库内置 byterover/retaindb，Honcho/Mem0 等经 plugin-catalog 安装，同一时刻至多激活一个）；模型写记忆可能被人审拦截（写审批门，用户 `/memory approve` 后才落盘）；跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
 - **能力四：研究数据工具链（会话轨迹生产）**：`save_trajectories` 开关（默认关闭）把每轮会话按 ShareGPT 格式追加为 JSONL（成功/失败分文件）；`trajectory_compressor.py` 保护首尾只压缩中间段并替换为摘要；配套 `batch_runner.py` / `mini_swe_runner.py` / `datagen-config-examples/` 面向轨迹数据集批量生产；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（默认私有、强制脱敏）。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
 - **跨会话检索（session_search）**：FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，已并入学习闭环描述；同时是 `_AGENT_LOOP_TOOLS` 四个 agent-level 工具之一。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 - **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令到期且空闲时作为普通用户回合注入，忙碌时合并 tick；状态持久化在会话数据库。它与创建独立会话、执行账本和交付目标的 cron 分型不同。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **目标质量门（`/goal`，候选能力）**：目标循环每次"可能完成"时用 judge 复查，并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
-- **终端后端（7 类）**：已归并到 Agent 工具类目（`tools/environments/` 下 local/ssh/docker/singularity/modal/daytona/vercel_sandbox 等，容器资源上限、execute_code 沙箱、容器风险豁免）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
+- **终端后端（6 类内建 + 插件后端）**：已归并到 Agent 工具类目（`tools/environments/` 下 local/ssh/docker/modal/daytona/vercel_sandbox，Singularity/Apptainer 由插件提供，容器资源上限、execute_code 沙箱、容器风险豁免）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **cron 定时任务**：profile 范围的 job、execution、输出与认领协议形成隔离日程运行；暂停可阻止新派发，运行期取消已进入 Agent/脚本路径。循环 job 若在零模型 API 调用阶段因网络/DNS 失败，可按 5/15/30 分钟有限重排；一次性任务或已可能产生副作用的失败不重跑。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)。
 - **verify-on-stop**：已归并到 Agent 工具类目（回合终止前对候选回复跑 run-recipe 检测与验证）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **委派 / 子 Agent、MCP、插件体系、人格系统**：已归并到 Agent 工具与 Agent 角色类目，本汇总不重写。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
@@ -127,7 +127,8 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 
 ### 共性未验证
 
-- 全部 16 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；均已对齐代码快照 `682a95258ce9e877cfb607a5ada6436183efdebb`，历史提交只用于确认当前实现的引入或回退来源。
+- 全部 16 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；均已对齐代码快照 `71736c9f32597bbca9d89cede5aa136e55946b2f`，历史提交只用于确认当前实现的引入或回退来源。
+- 本轮同步以路径级定向复核为主（模块归位、插件目录、后端数量、手工合并的插件准入），未逐行重读约 2.6 万提交范围的全部改动；前半组 7 篇由另一任务同步，行号引用统一按模块级定位。
 - 未运行验证：运行行为（视觉效果、时序、性能、真实 Provider 流式）、多客户端/多窗口并发、键盘与无障碍、FTS 实际布局、崩溃重放端到端、后台复习 fork 成本、HF 轨迹上传实际行为、VS Code 市场端到端链路。
 - 设置页连接测试与真实聊天链路走不同代码路径，测试通过不等于真实可用（已确认的工程边界）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
 - 与特色贡献统计的衔接：独特功能笔记建议新增主贡献候选（闭环学习、Skill 生命周期、研究数据工具链、会话心跳 + 目标质量门）与辅助贡献（持久记忆与用户建模），相关归并口径见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。

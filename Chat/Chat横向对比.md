@@ -2,9 +2,9 @@
 
 > 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenClaw、OpenCode、Pi、RikkaHub、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox
 >
-> 对比更新日期：2026-09-16
+> 对比更新日期：2026-11-04
 >
-> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-09-16 调查，快照 `9da3baac`）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；RikkaHub 依据本目录 2026-09-16 的 [RikkaHub-Chat 调查笔记](RikkaHub-Chat调查笔记.md)（端到端主链、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 服务复用同一 ChatService，快照 `9a35e3f2`，均为静态源码确认、未运行验证）；本文档只保留跨层综合结论
+> 依据：会话与消息管理、对话请求与上下文、Chat UI、消息渲染器四个类目的单项目调查笔记及横向对比（含 VCPMobile 2026-11-04 调查，快照 `5fa2eb09`）；OpenClaw 依据 [OpenClaw-Chat 调查笔记](OpenClaw-Chat调查笔记.md)（端到端主链、会话与消息事实源、专项交接点，均为静态源码主链确认、未运行验证）；RikkaHub 依据本目录 2026-11-04 的 [RikkaHub-Chat 调查笔记](RikkaHub-Chat调查笔记.md)（端到端主链、Room 双表节点与候选分支、回合制整会话落库、内嵌 Web 服务复用同一 ChatService，快照 `903e058b`，均为静态源码确认、未运行验证）；本文档只保留跨层综合结论
 >
 > 对比方法：本文档为导航性总览，详细表格已迁入三个新类目的横向对比；只保留能够同时解释数据层、执行层和交互层的综合结论
 >
@@ -82,7 +82,7 @@ OpenClaw 的聊天表面分自有界面与外部消息渠道两层，但两层�
 | 服务端权限、分享、多模型与跨实例任务控制 | Open WebUI | history/消息表双写，Socket.IO 事件状态组合较多 |
 | 文件级分支、检查点与社区扩展 | SillyTavern | 长聊天不虚拟化；正则按展示、prompt、存储位置分层，渲染结果可能随聊天长度变化；删除消息默认级联删除其前的工具调用系统消息 |
 | 多角色群聊与长期 Topic 关系 | VCPChat | 单聊有随窗口生命周期（切换话题、关闭内部窗口）的取消，但中止按钮仍只发远端 `/v1/interrupt`，无本地 controller 取回与客户端超时；FlowLock 运行 Session 不跨重启，只有 Topic 级 pending 请求能在重载后恢复 |
-| 终端本地编码 Agent、追加型树会话与工具循环 | Pi | 单会话单循环；消息编辑以分支表达；无消息级搜索索引；系统提示不随会话保存 |
+| 终端本地编码 Agent、追加型树会话与工具循环 | Pi | 默认链是单会话单循环：消息编辑以分支表达、无消息级搜索索引、系统提示不随会话保存；仓库另有 durable 第二栈（不可变 entry + commit + 每 phase checkpoint，四类存储后端），由 `apps/p2` 的 Web/TUI host 与每会话一个 worker 使用，消息级 FTS5 检索只在该链的搜索插件里，CLI/TUI 未接入 |
 | 服务端 Agent 会话运行时、事件广播与多前端共用 | OpenCode | SQLite 权威 + SSE 投影；删除式 revert 与复制式 fork；无消息级全文搜索；Web/TUI 两套渲染栈 |
 | 事件溯源驱动循环、插件层循环控制与 headless 一键任务 | DeepSeek Harness | turn/step 边界全部是 durable 事件、可重放重建；模型可见 ⟺ 已记录；内置无 turn 预算；与 pi 无循环继承证据（仅 llm-pi-ai 适配层） |
 | 前端内存权威、无路由多载体单页应用与整库增量编码存档 | Risuai | 重roll 候选不落盘；分支为整份会话副本加注释回链，非消息树；未找到消息级搜索索引 |

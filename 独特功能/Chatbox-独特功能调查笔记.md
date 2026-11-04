@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：产品表面盘点（路由、设置菜单、feature flag、依赖）+ 只读源码核对 README 未列出的能力；未修改 chatbox 仓库
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：只读源码核对，并结合近期提交与 diff 重新定位关键结论，重点覆盖浏览器协议 v3、RiverMemo、多媒体、分布式取消；未修改被调查仓库
 >
@@ -22,13 +22,13 @@ VCPToolBox 是 VCP 生态里唯一真正执行工具、转发分布式调用并�
 4. 分布式节点鉴权只有一层全局 `VCP_Key`（WebSocket 升级时校验），没有节点级别的独立密钥或证书；`register_tools` 消息可以让任意已连接的分布式节点注册新工具，但**同名工具会被跳过**（不能覆盖已存在工具），一定程度上防止了工具名冒充，但没有防止“注册一个从未存在过的、诱导性命名”的工具（如 `FileOperator2`）来钓鱼。
 5. Shell/命令类插件的安全边界差异巨大：`PowerShellExecutor` 只有关键字黑名单 + 关键字驱动的验证码要求，没有语法级校验，命令拼接后直接 `Invoke-Expression`，理论上存在关键字绕过空间（如变量拼接、编码回避黑名单字符串匹配）；`LinuxShellExecutor` 则有更复杂的八层校验（黑名单正则、AST 基线、沙箱后端 bubblewrap/firejail/docker、资源限制、审计日志），安全工程量级明显更高。这两个插件在同一份 manifest 字段（`requiresAdmin`）下，实际受约束程度并不对等。
 
-6. **推理内容双通道**：reasoningContentAdapter.js 让流式和非流式处理器在“回注给客户端”的副本上，把 `reasoning_content` 等字段按模型白名单（`ReasoningToContentModel`，默认示例 `kimi,claude`）改写为 `<think>` 标签正文，供不支持推理字段的前端显示；内部 VCP 循环、OneRing 入库与日记持久化仍只使用原始 `content`，两通道互不污染（`modules/handlers/streamHandler.js:172-218,332,375`）。
+6. **推理内容双通道**：reasoningContentAdapter.js 让流式和非流式处理器在“回注给客户端”的副本上，把 `reasoning_content` 等字段按模型白名单（`ReasoningToContentModel`，默认示例 `kimi,claude`）改写为 `<think>` 标签正文，供不支持推理字段的前端显示；内部 VCP 循环、OneRing 入库与日记持久化仍只使用原始 `content`，两通道互不污染（`modules/reasoningContentAdapter.js:128` 的 `buildClientVisibleContent`，由 `nonStreamHandler.js:270` 与流式处理器调用）。
 7. **工具解析的思考块剥离**：ToolCallParser 的思考块剥离逻辑支持 `<think>`/`<thinking>` 的大小写、空白、属性变体与同类嵌套；未闭合的开始标签会保守丢弃其后全部内容，未配对的结束标签只移除标签本身（`modules/vcpLoop/toolCallParser.js:22-70`）。
 8. **工具结果隐私脱敏**：`toolApprovalConfig.json` 的 `privacyProtection.enabled` 开启后，工具结果在回注 AI 前按敏感键名模式、`sk-`/`ghp_` 等高置信 token 模式和环境变量赋值行做掩码（默认关闭，`modules/toolResultPrivacyGuard.js`）。
 9. **分布式取消与结果归属绑定**：分布式执行的 pending 项绑定目标 `serverId`，`tool_result` 只接受目标节点返回；节点声明 `capabilities.cancelTool=true` 时，超时会 best-effort 发送 `cancel_tool` 帧；目标节点断线会立即 reject 其全部 pending（`WebSocketServer.js:876-1002`）。
-10. **插件热重载精细化**：manifest 变更分“元数据刷新”与“完整重载”两级——direct 常驻插件只合并展示字段、运行时变更提示需重启；static 插件按签名增量刷新并清理失效占位符与 cron；加载插件的流程串行化并增加重载前 manifest 预校验（`Plugin.js:734-786,1067-1206,2326-2412`）。
+10. **插件热重载精细化**：manifest 变更分“元数据刷新”与“完整重载”两级——direct 常驻插件只合并展示字段、运行时变更提示需重启；static 插件按签名增量刷新并清理失效占位符与 cron；加载插件的流程串行化并增加重载前 manifest 预校验。
 11. **浏览器协议 v3 与托管运行时**：ChromeBridge 使用协议 v3（Grounded Markdown Agent 视图、稳定内容 Hash、快照去重、动作验证、默认敏感 DOM 脱敏、指标），`modules/browserRuntimeManager.js` 提供扩展 staging 清单 hash 完整性校验、运行时实例 ID 与上次关闭原因；`UrlFetch` 的 managed Chrome backend 已接线但默认关闭。
-12. **插件面**：当前启用 69 个、禁用（`.block`）20 个（清单见第 11 节），含 `BrowserSearch`（复用托管 Chrome 持久化 Profile 的免 API 搜索）、`MediaRenderer`（HTML/SVG 渲染、FFmpeg 动画、程序音乐与 Windows 光标主题；光标链会校验角色、热点和帧数，再编码 CUR/ANI 与 ZIP；`requiresAdmin`）、`PlaceholderExplorer` + `PlaceholderExplorerCommand`（占位符索引/编辑/预览）。
+12. **插件面**：当前目录 96 个，启用 77 个、禁用 19 个（清单见第 11 节）。代表性插件包括复用托管 Chrome 持久化 Profile 的免 API 搜索、可编程渲染加 Windows 光标主题的 MediaRenderer（光标链会校验角色、热点和帧数再编码，且需要管理员验证码）、以及占位符索引与编辑工具。本快照新增的插件更偏向外部服务桥与协议实验：并行与 You.com 搜索、经 MCP 发布生成页面、带管理界面的模拟交易沙盒、工具链暂停语义、字幕时间轴配音、以及把记忆区内容搬运成预处理消息。
 
 ## 调用链总览
 
@@ -111,7 +111,7 @@ static 类型插件（如 `WeatherReporter`、`ScheduleBriefing`、`UserAuth`、
 - **同轮并发语义**：工具执行器用 `Promise.all` 并发所有工具调用；由于单次执行会把异常捕获并转成错误结果而不是 reject，整体并发流程不会因单个工具失败而 reject，各工具结果互相独立回注（`toolExecutor.js:370-400`）。
 - **超时**：stdio 插件默认超时 `synchronous` 60 秒、`asynchronous` 1800 秒（30 分钟），均可被 manifest 的 `communication.timeout` 覆盖（`Plugin.js:1598`）。分布式工具默认超时也是 60 秒，取自目标插件 manifest 的 `communication.timeout`（`WebSocketServer.js:913`）。
 - **重试**：**未发现**任何自动重试机制——工具调用失败后直接把错误文本回注给模型，由模型自己决定是否重新发起调用。这是明确设计（回注错误让 AI 自愈），不是缺陷。
-- **进程终止**：stdio 插件超时后调用 `_killProcessTree`（`Plugin.js:270-310`）强杀整个进程树：Windows 用 `taskkill /T /F /PID`（taskkill 失败时回退 `process.kill`），Linux/macOS 对以 `detached`（非 Windows）启动的进程组发 `process.kill(-pid, 'SIGKILL')`（进程组不存在时回退杀单进程，`Plugin.js:292-302`），防止子进程残留（`PowerShellExecutor.js` 内部也有等价的 `forceKillProcessTree`）。
+- **进程终止**：stdio 插件超时后调用 `_killProcessTree`（`_killProcessTree`，`Plugin.js:325`）强杀整个进程树：Windows 用 `taskkill /T /F /PID`（taskkill 失败时回退 `process.kill`），Linux/macOS 对以 `detached`（非 Windows）启动的进程组发 `process.kill(-pid, 'SIGKILL')`（进程组不存在时回退杀单进程，`Plugin.js:292-302`），防止子进程残留（`PowerShellExecutor.js` 内部也有等价的 `forceKillProcessTree`）。
 
 依据：[toolExecutor.js:392-400](../../VCPToolBox/modules/vcpLoop/toolExecutor.js)、[streamHandler.js:70](../../VCPToolBox/modules/handlers/streamHandler.js)、[nonStreamHandler.js:303](../../VCPToolBox/modules/handlers/nonStreamHandler.js)、[server.js:1202](../../VCPToolBox/server.js)。
 
@@ -183,15 +183,15 @@ WebSocket 服务收到 `tool_approval_response` 消息时，**只要消息来自
 
 ### 6.1 manifest 加载与生命周期
 
-插件加载流程（`Plugin.js:757` 起）扫描 `Plugin/` 下每个子目录的 `plugin-manifest.json`；缺少 `name`/`pluginType`/`entryPoint` 任一字段的 manifest 会被静默跳过（`Plugin.js:838`）。禁用插件的方式是把文件改名为 `plugin-manifest.json.block`（当前 HEAD 有 20 个插件处于此状态，见第 11 节插件清单）。
+插件加载流程扫描 `Plugin/` 下每个子目录的 manifest（`Plugin.js:796` 起），缺少 `name`、`pluginType`、`entryPoint` 任一字段的 manifest 会被静默跳过（`:893`）。消息预处理器是单独一轮发现（`:885`），全部发现结束于 `:1043`。禁用插件的方式是把目录内的 manifest 改名为 `plugin-manifest.json.block`，禁用清单由 `Plugin.js:1115` 的 `_discoverDisabledPluginManifests` 汇总（当前 HEAD 有 19 个插件处于此状态，见第 11 节插件清单）。
 
 插件生命周期变化见 `Plugin.js`：
 
-- **重载串行化**：加载流程通过 `pluginLoadPromise` 串行执行并合并“重载期间再次请求”的场景（`Plugin.js:757-786`），不再出现并发重载互相破坏插件表。
-- **重载前预校验**：重载前先对全部启用清单做 JSON 解析校验，编辑中的半截 JSON 不会把正常运行的注册表破坏为部分加载状态（`Plugin.js:734-753`）。
-- **两级热更新**：变更清单先做运行时签名比较（`Plugin.js:2472` 起）：仅展示字段变化时刷新元数据（不重启任何模块，direct 常驻插件的运行字段保持内存版本）；运行字段变化时 direct 插件提示需重启、其余插件走完整重载。
-- **static 插件增量刷新**：static 插件按 entryPoint、communication、cron、configSchema 和占位符声明组成的签名判断是否需要刷新（`Plugin.js:477` 起）；新增/删除/禁用插件或 cron 变更会精确取消失效 job、清理已删除占位符，分布式占位符仍由 serverId 生命周期管理。
-- **watcher 启动时机与范围**：文件 watcher 改为在初始化末尾显式启动（`server.js:1628-1631`），避免启动阶段文件写入触发多余重载；监听范围收紧到 `Plugin/<PluginName>/` 一层，且只接受 `plugin-manifest.json`（含 `.block`）的变更，插件运行期数据目录（如托管浏览器 Profile）不再进入监听。关机流程会关闭 watcher 并结算全部待审批项（`Plugin.js:2368-2423`）。
+- **重载串行化**：加载流程以 `pluginLoadPromise` 串行执行并合并“重载期间再次请求”的场景（`Plugin.js:815-835`），不出现并发重载互相破坏插件表。
+- **重载前预校验**：加载前先并行解析全部启用清单，任一 manifest 解析失败即抛错中止本轮（`Plugin.js:796-813`），编辑中的半截 JSON 不会把正常运行的注册表破坏为部分加载状态。
+- **两级热更新**：变更清单先做运行时签名比较（`_getManifestRuntimeSignature`，`Plugin.js:2556`；比较于 `:2600`）：仅展示字段变化时刷新元数据（不重启任何模块，direct 常驻插件的运行字段保持内存版本）；运行字段变化时 direct 插件提示需重启、其余插件走完整重载。
+- **static 插件增量刷新**：static 插件按 entryPoint、communication、cron、configSchema 和占位符声明组成的签名判断是否需要刷新（`_getStaticPluginSignature`，`Plugin.js:521` 起）；新增/删除/禁用插件或 cron 变更会精确取消失效 job、清理已删除占位符，分布式占位符仍由 serverId 生命周期管理。
+- **watcher 启动时机与范围**：文件 watcher 改为在初始化末尾显式启动（`server.js:1518`），避免启动阶段文件写入触发多余重载；监听范围收紧到 `Plugin/<PluginName>/` 一层，且只接受 `plugin-manifest.json`（含 `.block`）的变更，插件运行期数据目录（如托管浏览器 Profile）不再进入监听。关机流程会关闭 watcher 并结算全部待审批项（`shutdownAllPlugins`，`Plugin.js:726` 起）。
 
 ### 6.2 六种插件类型的生命周期差异
 
@@ -233,9 +233,19 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 
 ### 6.5 `requiresAdmin` 的实际生效点
 
-**已确认**：主框架本身对 `requiresAdmin` 只做两件事——(a) 给 stdio 插件注入 `DECRYPTED_AUTH_CODE` 环境变量（`Plugin.js:1506-1507`）；(b) 给 `hybridservice`/`direct` 插件的 `directContext` 注入 `decryptedAuthCode` 字段（`Plugin.js:1318-1327`）。**框架不会因为 `requiresAdmin:true` 而拦截调用本身**——如果插件代码忘记比对这个值，`requiresAdmin` 就形同虚设。已复核的四个 `requiresAdmin:true` 插件（`PowerShellExecutor`、`LinuxShellExecutor`、`PluginManager`、`MediaRenderer`）都在自己代码里做了比对（`MediaRenderer.js:452-458` 在启动合成子进程前强制校验 6 位管理员验证码），但这是"插件作者自律 + 现有插件确实做了"的经验事实，不是框架层面的强制保证；若安装第三方或自写的 `requiresAdmin:true` 插件但忘记校验，`requiresAdmin` 对其调用不再构成任何约束。
+**已确认**：主框架对管理员权限声明只做传递，不做拦截。它把解密后的验证码放进 stdio 插件的环境变量（`Plugin.js:1657`），也放进常驻插件的调用上下文，然后由插件自己决定是否比对。已复核的四个声明需要管理员权限的插件（PowerShell 执行器、Linux 执行器、插件管理器、媒体渲染器）都在自己代码里校验了六位验证码，媒体渲染器甚至在启动子进程前强制比对；但这是这些插件各自实现的结果，不是框架给出的保证。装上第三方或自写插件却忘记比对时，这个声明不构成任何约束。
 
-依据：[Plugin.js:1472-1632,1318-1327,1506-1507](../../VCPToolBox/Plugin.js)、[PowerShellExecutor.js](../../VCPToolBox/Plugin/PowerShellExecutor/PowerShellExecutor.js)、[PluginManager.js:35-50](../../VCPToolBox/Plugin/PluginManager/PluginManager.js)、[MediaRenderer.js:452-458](../../VCPToolBox/Plugin/MediaRenderer/MediaRenderer.js)。
+依据：[Plugin.js:1657](../../VCPToolBox/Plugin.js)、[PowerShellExecutor.js](../../VCPToolBox/Plugin/PowerShellExecutor/PowerShellExecutor.js)、[PluginManager.js:35-50](../../VCPToolBox/Plugin/PluginManager/PluginManager.js)、[MediaRenderer.js:452-458](../../VCPToolBox/Plugin/MediaRenderer/MediaRenderer.js)。
+
+### 6.6 工具结果批量协议、生命周期事件与执行桥
+
+一轮内多个工具的返回结果不再各自独立成段，而是由 `modules/toolResultBatch.js` 统一包裹成一个带时间戳的批量块，开始与结束标记共用同一时刻，因此相邻两批可以区分。角色重排器在拆分角色块之前先按批量边界扫描，避免把同一批结果切断到不同角色段；流式与非流式处理器在返回上游前还会做一次投影，把标记改写成模型可读的说明文字。
+
+工具执行过程本身会产生生命周期事件：`modules/toolLifecycleVcpInfo.js` 为每次调用构造上下文，并按开始、成功、失败、超时四个阶段广播 `TOOL_LIFECYCLE` 事件（创建与四处发射见 `Plugin.js:1458-1591`），超时阶段由上下文实际耗时改写。前端与分布式订阅者因此能观察到工具正在运行还是已失败，而不只看到最终文本。
+
+工具执行路径还可替换：`modules/pluginBridgeRegistry.js` 提供两个按优先级排序的注册表，分别用于依赖解析与执行接管，默认注册表由 `createDefaultDependencyBridgeRegistry` 构造，RAG 时间线并行等场景可注册自己的桥。
+
+manifest 另有一组非执行字段：本快照有 21 个启用插件声明了 `jev` 段，用自然语言描述自己的用途、默认命令与命令选择规则，插件管理器把这些声明收集进注册表供管理端与实验性工具选择使用；注释明确该字段是纯提示词素材，不改变运行时行为，也不影响插件加载。校验与示例规范化由根目录两个脚本承担：`validate-plugin-json.js` 只做 JSON 语法校验（脚本注释明确不检查 manifest schema 语义），`normalize-plugin-examples.js` 规范化插件示例字段并在写入前备份到 `.plugin-example-backups/`。两者都是仓库侧工具，不参与服务运行时。
 
 ## 7. 执行位置与隔离
 
@@ -243,9 +253,9 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 - **`direct`/`hybridservice` 插件**：与主服务进程同一内存空间、同一权限，本质上是主进程的一部分，没有任何隔离概念。
 - **例外——`LinuxShellExecutor`**：这是唯一实现了实际沙箱后端的插件，`config.env` 中 `SANDBOX_BACKEND` 可选 `bubblewrap`/`firejail`/`docker`/`none`（默认 `none`，即不隔离），并配置 CPU/文件大小/进程数/文件描述符/虚拟内存的 `RLIMIT_*` 资源限制（`LinuxShellExecutor/config.env:15-30`）。这是插件自带的隔离能力，不是框架统一提供的。
 - **Docker 部署**：`Dockerfile`/`docker-compose.yml` 显示整个 VCPToolBox（含所有插件）作为**单一容器**运行，`docker-compose.yml` 把整个仓库目录 bind-mount 进容器（`- .:/usr/src/app`），`Dockerfile` 里 `USER appuser` 那行是**被注释掉的**（`Dockerfile:187`，`# USER appuser`），即容器内进程默认以 root 运行。容器本身是唯一的"边界"，容器内所有插件之间没有进一步隔离；`LinuxShellExecutor` 若在容器内设 `SANDBOX_BACKEND=docker`，则涉及 docker-in-docker 或挂载 docker socket 的额外风险（**未在本次调查中验证该配置在容器化部署下是否真的可用**）。
-- **超时与僵尸进程**：`_killProcessTree()`（`Plugin.js:270-310`）及 `PowerShellExecutor.js` 里的 `forceKillProcessTree()` 均在超时后强杀整个进程树，防止子进程残留为僵尸/孤儿进程：Windows 用 `taskkill /F /T /PID`（taskkill 失败回退 `process.kill`），Linux/macOS 用 `process.kill(-pid, 'SIGKILL')` 杀进程组（进程组不存在时回退杀单进程）。通用 `executePlugin` 路径在非 Windows 平台以 `detached` spawn 建立进程组，`_killProcessTree` 即有 Unix 进程组等价物（`Plugin.js:292-302,335-340,1577-1582`）；`LinuxShellExecutor` 自身对其管理的命令仍有独立的进程生命周期管理。
+- **超时与僵尸进程**：`_killProcessTree()`（`_killProcessTree`，`Plugin.js:325`）及 `PowerShellExecutor.js` 里的 `forceKillProcessTree()` 均在超时后强杀整个进程树，防止子进程残留为僵尸/孤儿进程：Windows 用 `taskkill /F /T /PID`（taskkill 失败回退 `process.kill`），Linux/macOS 用 `process.kill(-pid, 'SIGKILL')` 杀进程组（进程组不存在时回退杀单进程）。通用 `executePlugin` 路径在非 Windows 平台以 `detached` spawn 建立进程组，`_killProcessTree` 即有 Unix 进程组等价物（`Plugin.js:405,1753-1758`）；`LinuxShellExecutor` 自身对其管理的命令仍有独立的进程生命周期管理。
 
-依据：[Plugin.js:1472-1632](../../VCPToolBox/Plugin.js)、[PowerShellExecutor.js:47-58](../../VCPToolBox/Plugin/PowerShellExecutor/PowerShellExecutor.js)、[LinuxShellExecutor/config.env](../../VCPToolBox/Plugin/LinuxShellExecutor/config.env)、[Dockerfile:187,191](../../VCPToolBox/Dockerfile)、[docker-compose.yml](../../VCPToolBox/docker-compose.yml)。
+依据：[Plugin.js:325,1753](../../VCPToolBox/Plugin.js)、[PowerShellExecutor.js:47-58](../../VCPToolBox/Plugin/PowerShellExecutor/PowerShellExecutor.js)、[LinuxShellExecutor/config.env](../../VCPToolBox/Plugin/LinuxShellExecutor/config.env)、[Dockerfile:187,191](../../VCPToolBox/Dockerfile)、[docker-compose.yml](../../VCPToolBox/docker-compose.yml)。
 
 ## 8. 分布式节点协议
 
@@ -315,7 +325,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 
 ## 11. 插件清单
 
-以下为**当前 HEAD（`Plugin/` 目录，89 个子目录，不含 `AGENTS.md`）实际存在的 manifest** 逐一读取的结果。启用判定标准：存在 `plugin-manifest.json`（非 `.block`）。共 69 个启用、20 个禁用（`.block`）。这与 `docs/PLUGIN_ECOSYSTEM.md` 声称的"总计 79 活跃插件"**不一致**——文档统计口径把仓库内所有插件目录（含 `.block` 禁用态）都算作"活跃"，而实际当前 checkout 启用的插件数是 69，禁用（`.block`）20 个，两者之和 89 也与文档的 79 不完全对应，说明文档的插件类型分布统计（`static`~10、`service`~8 等）是历史快照，**不能作为当前启用状态的依据**，本笔记以下表格为准。其中 `ChromeBridge` 为 2.4.0（Grounded Markdown 增加正文图片/视频画面语义标注与 `get_page_image` 命令、Popup 人工 Managed 选择、agent 不再隐式控制托管运行时）、`CodeSearcher` 入口为 `node CodeSearcher.js`（Node 包装器按平台选原生二进制）、`UrlFetch` 为 0.3.0（PDF 文本解析与 50MB 上限，本地 `file://` 亦支持 .pdf）。
+以下为**当前 HEAD（`Plugin/` 目录，96 个子目录）实际存在的 manifest** 逐一读取的结果。启用判定标准：目录下存在 `plugin-manifest.json`；禁用态是把同一文件改名为 `plugin-manifest.json.block`。共 77 个启用、19 个禁用，无第三种状态。这与 `docs/PLUGIN_ECOSYSTEM.md` 声称的"总计 79 活跃插件"**不一致**——文档统计口径把仓库内所有插件目录（含禁用态）都算作"活跃"，而实际当前 checkout 启用 77 个、禁用 19 个，合计 96 也与文档的 79 不对应，说明文档的插件统计是历史快照，**不能作为当前启用状态的依据**，本笔记以下表格为准。本快照新增 7 个插件目录（DeedPage、MemoryThinkingTray、MimoDubbing、ParallelSearch、VCPSleep、VTrade、YouSearch），并有一个原禁用插件转为启用。其中 `ChromeBridge` 为 2.4.0（Grounded Markdown 增加正文图片/视频画面语义标注与 `get_page_image` 命令、Popup 人工 Managed 选择、agent 不再隐式控制托管运行时）、`CodeSearcher` 入口为 `node CodeSearcher.js`（Node 包装器按平台选原生二进制）、`UrlFetch` 为 0.3.0（PDF 文本解析与 50MB 上限，本地 `file://` 亦支持 .pdf）。
 
 | 插件目录 | manifest name | pluginType | 协议 | 状态 | requiresAdmin |
 |---|---|---|---|---|---|
@@ -344,6 +354,7 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 | DailyNotePanel | DailyNotePanelRouter | service | direct | 禁用 | 否 |
 | DailyNoteSearcher | DailyNoteSearcher | hybridservice | direct | 启用 | 否 |
 | DeepWikiVCP | DeepWikiVCP | synchronous | stdio | 启用 | 否 |
+| DeedPage | DeedPage | synchronous | stdio | 启用 | 否 |
 | DigitalOracle | DigitalOracle | synchronous | stdio | 启用 | 否 |
 | DoubaoGen | DoubaoGen | synchronous | stdio | 启用 | 否 |
 | DynamicToolBridge | DynamicToolBridge | synchronous | stdio | 启用 | 否 |
@@ -363,11 +374,14 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 | LinuxShellExecutor | LinuxShellExecutor | hybridservice | direct | 启用 | **是** |
 | MagiAgent | MagiAgent | hybridservice | direct | 启用 | 否 |
 | MediaRenderer | MediaRenderer | hybridservice | direct | 启用 | **是** |
+| MemoryThinkingTray | MemoryThinkingTray | messagePreprocessor | direct | 启用 | 否 |
+| MimoDubbing | MimoDubbing | asynchronous | stdio | 启用 | 否 |
 | NCBIDatasets | NCBIDatasets | synchronous | stdio | 禁用 | 否 |
 | NanoBananaGen2 | NanoBananaGen2 | synchronous | stdio | 启用 | 否 |
 | OneRing | OneRing | messagePreprocessor | direct | 启用 | 否 |
 | OpenHerPersona | OpenHerPersona | hybridservice | direct | 启用 | 否 |
 | PaperReader | PaperReader | synchronous | stdio | 禁用 | 否 |
+| ParallelSearch | ParallelSearch | synchronous | stdio | 启用 | 否 |
 | PluginManager | PluginManager | hybridservice | direct | 启用 | **是** |
 | PluginSourceViewer | ServerPluginSourceViewer | synchronous | stdio | 启用 | 否 |
 | PlaceholderExplorer | PlaceholderExplorer | static | stdio | 启用 | 否 |
@@ -398,14 +412,17 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 | VCPForumOnline | VCPForumOnline | synchronous | stdio | 禁用 | 否 |
 | VCPForumOnlinePatrol | VCPForumOnlinePatrol | static | stdio | 禁用 | 否 |
 | VCPLog | VCPLog | service | direct | 启用 | 否 |
+| VCPSleep | VCPSleep | synchronous | stdio | 启用 | 否 |
 | VCPTaskAssistant | VCPTaskAssistant | hybridservice | direct | 启用 | 否 |
 | VCPTavern | VCPTavern | hybridservice | direct | 启用 | 否 |
 | VCPTimeLine | VCPTimeLine | hybridservice | direct | 启用 | 否 |
 | VCPToolBridge | VCPToolBridge | hybridservice | direct | 启用 | 否 |
+| VTrade | VTrade | hybridservice | direct | 启用 | 否 |
 | VSearch | VSearch | synchronous | stdio | 启用 | 否 |
 | VideoGenerator | Wan2.1VideoGen | asynchronous | stdio | 启用 | 否 |
-| WeatherInfoNow | WeatherInfoNow | static | stdio | 禁用 | 否 |
+| WeatherInfoNow | WeatherInfoNow | static | stdio | 启用 | 否 |
 | WeatherReporter | WeatherReporter | static | stdio | 启用 | 否 |
+| YouSearch | YouSearch | synchronous | stdio | 启用 | 否 |
 | ZImageGen2 | ZImageGen2 | synchronous | stdio | 禁用 | 否 |
 | ZImageTurboGen | ZImageTurboGen | synchronous | stdio | 启用 | 否 |
 

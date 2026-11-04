@@ -2,9 +2,9 @@
 
 > 汇总对象：`Chatbox`（源码仓库 `https://github.com/chatboxai/chatbox`）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：本工作区内 15 份 Chatbox 单项目调查笔记（含检索增强与认知编排），均已复核至代码快照 `471bfd08ff5905366444c1cc00dbb75a2870166a`（分支 `main`）；另参考 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：本工作区内 15 份 Chatbox 单项目调查笔记（含检索增强与认知编排），均已复核至代码快照 `d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支 `main`）；另参考 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源；未新增源码调查
 >
@@ -20,7 +20,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 多数核心能力已经以静态源码走通入口、状态、执行与结果处理，包括聊天主链、Work Mode、工具与检索、图像生成、导出和本地持久化。团队 API 共享仍停留在部署入口确认；Copilots 远端精选、真实模型计费、第三方 MCP OAuth 兼容性和 VibeDrop 发布依赖外部服务，未做运行确认。精确能力数量不再单列，避免同一能力跨多个类目重复计数。
 
-**证据口径**：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。
+**证据口径**：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。会话与消息管理、消息渲染、LLM 渠道管理、应用界面基础设施与 Chat 概览已按当前快照做机制级复核；其余类目完成元数据对齐与被引用路径的定位收口，机制细节未逐条复核。
 
 ## 功能能力摘要
 
@@ -82,7 +82,8 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：pnpm workspace 仍以根应用承载 Electron、Web 与 Capacitor入口，并新增 `packages/chatbox-core`、`packages/chatbox-react` 承接可移植领域层和 React 绑定；当前 1843 个 Git 跟踪文件、1579 个 TypeScript/JavaScript 源文件，renderer 仍为最大实现区。来源：[仓库分布调查笔记](../仓库分布/Chatbox-仓库分布调查笔记.md)。
+- **持久化模型**：消息与会话结构已改为 SQLite 行存储（`SessionTree`：会话头 + thread 行 + 消息行），会话列表元数据独立存 `session_meta`；桌面/Web 的 meta 存储走 IndexedDB、移动端走 SQLite。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
+- **仓库分布**：pnpm workspace 仍以根应用承载 Electron、Web 与 Capacitor 入口，新增 `packages/chatbox-core`、`packages/chatbox-react` 承接可移植领域层和 React 绑定；当前 2,595 个 Git 跟踪文件、2,288 个 TypeScript/JavaScript 源文件，renderer（1,159 个）仍为最大实现区。来源：[仓库分布调查笔记](../仓库分布/Chatbox-仓库分布调查笔记.md)。
 - **应用界面基础设施**：界面栈为 React + TypeScript + Vite，Mantine 为主 UI 库，移动端抽屉用 vaul、另有预留的 Radix Dialog；AdaptiveModal 按屏幕形态在 Modal 与 Drawer 间切换，命令式弹窗统一经 nice-modal-react；通知为 MUI Snackbar（右上角）与 sonner（Settings 内部底部居中）两套并行系统；Sentry ErrorBoundary 四层包裹渲染树；主题同时驱动 MUI、Tailwind 与 Mantine 三套消费方；Overlay 栈自制"多层弹窗只有最上层响应 Esc"。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Chatbox-应用界面基础设施调查笔记.md)。
 - **桌面集成边界**：全局快捷键仅"显示/隐藏窗口"一项，托盘无聊天状态徽标，系统通知 API 未接入（全仓库无 `new Notification(` 匹配）；窗口显示事件联动聊天输入框聚焦是唯一的"桌面事件 → 聊天 UI 反应"联动。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 

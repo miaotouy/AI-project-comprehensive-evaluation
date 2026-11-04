@@ -2,91 +2,109 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：静态复核 server、sync、ACP、CLI/TUI/Desktop/Web 客户端与 Slack 包；复用 Chat、会话和独特功能笔记；未运行多客户端或 ACP 宿主
+> 调查方式：静态复核服务端协议、鉴权、配对与隧道、ACP 实现、持久终端与各客户端装配；复用 Chat、会话管理、独特功能笔记；未运行多客户端或 ACP 宿主
 >
-> 调查范围：OpenCode 作为可被外部客户端和 ACP 宿主控制的 Agent runtime；排除普通 Provider 与宿主内建子 Agent
+> 调查范围：OpenCode 作为可被外部客户端与 ACP 宿主驱动的 Agent 运行时；排除普通模型 Provider、宿主内建子 Agent 与纯界面细节
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-OpenCode 是本类目的反向主样本：它把自身 runtime 通过 HTTP/SSE、ACP、CLI、TUI、Web、Desktop 和 Slack 客户端暴露给外部调用方，自身不托管其他 CLI Agent。会话、事件、所有权、重放、取消和分叉形成完整控制主链，达到 `主链确认`（静态证据）。
+OpenCode 在本类目中主要扮演"被驱动的运行时"角色：它以 HTTP + SSE 为唯一控制面，把会话创建、提示、中断、审批、回退、分叉、PTY 与事件订阅都暴露成端点；外部客户端可经配对链接接入同一服务端，也可由 ACP 宿主直接驱动。服务端持有 Agent 循环、数据库、文件工作区与工具权限，客户端只持有投影。
+
+与旧版的差异集中在接入方式：cron 式局域网发现与云控制面工作区路由已不在仓库主链，取而代之的是后台服务守护 + 一次性配对码 + 二维码/链接接入 + 可选远程隧道；服务端鉴权改为密码/配对会话令牌（HMAC 签名，30 天有效）。
 
 ## 接入角色与系统边界
 
-外部对象是 OpenCode 的客户端或 ACP 宿主；OpenCode server 持有 Agent 循环、SQLite session、文件/Git 工作区和工具权限。Desktop 通过 sidecar 启动同一 server，TUI/Web/attach 连接服务端，ACP service 将协议操作映射到 OpenCode session。外部对象还包括 PTY 终端客户端（WebSocket attach）与插件注册的远端 workspace 提供方（control-plane `WorkspaceAdapter`，`入口确认`）。
+- **被驱动方**：OpenCode 服务端（`opencode serve` 或后台服务形态）。它持有会话与事件事实源、执行链与权限判定。
+- **驱动方**：桌面 App（自带服务端生命周期）、浏览器工作台、TUI、CLI 脚本或第三方 HTTP 客户端、ACP 宿主客户端。
+- **协议面**：会话与消息端点、事件 SSE、审批与提问回复、PTY 与持久终端、会话导出导入、配对与连接、通用 RPC 通道。
+- **不在本仓库主链**：云控制面、远端 workspace 适配器、Slack 客户端、局域网 mDNS 发现（旧版形态）。
 
 ## 完整主链
 
 ```text
-外部客户端发现或启动 opencode server（localhost、mDNS 或远程 URL）
-  -> HTTP 创建/选择 session，SSE 订阅 event
-  -> prompt 写入服务端 session
-  -> OpenCode Agent 执行工具和模型循环
-  -> message/part/event 持久化并按序推送
-  -> 客户端重连后 replay；必要时 steal 写所有权
-  -> cancel/revert/fork 等控制回到服务端
+启动与连接
+  opencode serve | app 内嵌服务端 | opencode service（后台守护）
+  -> 客户端发现地址（本机默认、配对链接、远程隧道）
+  -> 配对码或密码换取会话令牌
+  -> HTTP 请求 + SSE /api/event 订阅
+
+提示与执行
+  -> POST 提示（支持 steer/queue 两种投递）
+  -> 服务端写入事件、驱动执行链
+  -> 事件与消息按序广播，客户端投影
+
+控制
+  -> interrupt（可带 resume 语义）
+  -> 审批/提问回复
+  -> revert stage/commit/clear、fork、删除
 
 ACP 宿主
-  -> acp service 创建/恢复 session
-  -> prompt / permission / cancel / fork
-  -> 映射 OpenCode 消息、工具和终态
+  -> opencode acp 启动 ACP 连接
+  -> 会话/提示/权限/取消/分叉映射到内部端点
+  -> 工具与终态回传宿主
 
-HTTP 审批与提问
-  -> permission/question handler list/reply/reject
-  -> web 客户端回传审批与结构化提问答案
-
-远端 workspace（入口确认）
-  -> control-plane 按 Target 路由 HTTP/WS 到远端 server
-  -> Fence.wait 等待 sync 完成
+终端
+  -> PTY 端点或持久终端套接字
+  -> 票据鉴权 + 输出偏移重放
 ```
 
 ## 身份、协议与状态映射
 
-SQLite message/part 与事件序列是权威状态；`owner_id` 和 sync handler 处理多客户端写所有权。客户端本地 store 是投影。ACP session 映射到 OpenCode session，工作目录与项目状态继续由服务端持有。加载、恢复或 fork 时，ACP 优先从 backing session 的持久化 agent/model 恢复，再回退消息历史，最后才用目录默认值；variant 与 mode 还会核验是否仍在当前目录快照中（`packages/opencode/src/acp/service.ts:1089-1152`）。客户端/ACP 宿主身份经 HTTP 密码鉴权（`middleware/authorization.ts`）、sidecar 用户名密码与 CORS 白名单绑定。mDNS 在 loopback 之外提供局域网发现（`mdns.ts`，`入口确认`），云 control-plane 的账号绑定不在本仓库默认路径。
+- **鉴权**：服务端可选密码；客户端以 Basic 凭据换签名会话令牌，令牌有效期 30 天，密钥由服务器密码派生，改密码即全员失效；浏览器按端口区分会话 cookie，避免同主机多实例串用（`packages/server/src/auth.ts`）。
+- **配对**：`server.pair` 生成一次性配对码（带有效期），客户端访问 `/auth/connect/:code` 建立信任并落会话；CLI `pair` 输出可扫描的链接与二维码，优先给出非回环地址（`packages/cli/src/commands/handlers/pair.ts`）。
+- **远程访问**：可选的远程隧道把本地服务端暴露到公网，首次启用需要显式同意；服务守护与隧道配置由 `service` 命令管理。
+- **状态映射**：服务端数据库与事件序列是权威状态，客户端 store 是投影；ACP 会话映射到内部会话，工作目录、模型与 Agent 配置仍由服务端持有。
+- **通用 RPC**：`/api/rpc/:rpcID/:method` 提供按服务标识与方法的调用通道，供内部服务（目标、语音、插件等）在客户端与服务端之间传递请求。
 
 ## 执行、回流与控制语义
 
-SSE 推送消息、part、delta 和工具状态；sync 支持历史重放与 owner steal。ACP service 暴露创建、恢复、提示、权限、取消和分叉语义。模型切换会保持仍适用于同一模型的 effort，切到新模型则选择其默认 variant，并主动发送 `config_option_update`；reasoning chunk 以 part ID 而非消息 ID 标识，避免同一 assistant 消息中的多个思考块混为一条。effort 的 config option 始终附带 `default` 选项，当前值本就是 `default` 时不再吸附到首个具体档位（`packages/opencode/src/acp/service.ts:412-437、917-963`、`acp/event.ts:120-144`、`acp/config-option.ts:52-73`）。HTTP 面另有三类远程入口：
-
-- 审批与提问回复通道：`permission.ts` / `question.ts`
-- PTY 终端 WebSocket attach：connect token + 一次性 ticket 鉴权
-- 远程 TUI 控制：`tui.ts`，方法 `appendPrompt`/`submitPrompt`/`controlNext`/`controlResponse`
-
-CLI `serve/attach/web`、Desktop sidecar、Web/TUI 均消费同一事实源；Slack bot 按 channel/thread 建 session，但产品面较窄；SessionShare 可生成共享 URL（`入口确认`）。
-
-产品表面（TUI/Web/Desktop）显示会话列表、连接与运行状态、工作目录和工具执行过程；接管入口为 session 列表选择与 owner steal。外部客户端提交的 prompt、replay 数据和 ACP 输入直接进入 Agent 工具循环，可触发文件、命令与浏览器副作用；本地工具权限仍由 OpenCode runtime 承担，外部宿主只经 ACP/HTTP 审批面参与放行，不可信输入的边界与本地用户一致。
+- **投递语义**：提示可立即插入当前回合（steer）或排队等待下一回合（queue）；中断可带"随后恢复"语义，重新接续会话。
+- **事件流**：SSE 广播会话、步骤、消息、工具、压缩、执行体与收件箱事件；订阅支持按类型过滤与背压控制（`packages/server/src/event-feed.ts`）。
+- **审批与提问**：审批与提问有独立的列表与回复端点，阻塞中的执行等待客户端回复；拒绝结果回流为工具错误。
+- **回退与分叉**：回退分暂存、确认、清除三阶段；分叉以边界消息重建会话。
+- **终端**：PTY 通过专用通道连接，带一次性票据；持久终端守护保存输出偏移，重连时从偏移重放并标记截断。
+- **ACP**：ACP 侧实现位于 CLI 包（`packages/cli/src/acp/`），覆盖会话、提示、权限、取消、配置项与内容映射；宿主客户端通过标准输入输出与子进程交互。
 
 ## 权限、凭据与治理边界
 
-工具与文件权限由 OpenCode runtime 承担。ACP permission 将宿主审批映射到 runtime；多客户端并发通过事件顺序和写所有权收口。网络暴露、远程 server 鉴权和云 control-plane 的完整部署边界本次未展开，不能因 localhost 默认路径推断所有部署均为本机可信。
+- 工具与文件权限由 OpenCode 执行链判定，外部宿主只能通过审批端点参与放行；不可信外部输入与本地用户输入共享同一权限边界。
+- 服务端暴露到非回环地址时依赖密码鉴权；未设置密码的实例默认只应监听本机。
+- 配对码一次性且短时有效；远程隧道需要用户显式同意后才启用。
+- 外部客户端可读取会话内容与文件接口返回的数据，因此服务端访问权等同于工作区数据访问权。
 
 ## 相邻类目交接
 
-- 会话事件源、消息和文件事实源见[Chat 笔记](../Chat/OpenCode-Chat调查笔记.md)与[会话管理笔记](../会话与消息管理/OpenCode-会话与消息管理调查笔记.md)。
-- ACP、CodeMode 和多表面连续性能力卡见[独特功能笔记](../独特功能/OpenCode-独特功能调查笔记.md)。
-- 后台 task/subagent 属 OpenCode 自身 Agent 编排，不因其独立会话就自动视为外部执行体。
+- 事件源、消息与文件事实源见 [Chat 笔记](../Chat/OpenCode-Chat调查笔记.md) 与 [会话与消息管理笔记](../会话与消息管理/OpenCode-会话与消息管理调查笔记.md)。
+- 多端连续性、配对与 GUI 插件等能力卡见 [独特功能笔记](../独特功能/OpenCode-独特功能调查笔记.md)。
+- 后台子 Agent 属内部编排，不因拥有独立会话就视为外部执行体。
 
 ## 已确认边界与未验证事项
 
-- 未运行真实 ACP 宿主、多设备 replay/steal 或云 workspace 同步；mDNS 与远端 workspace 路由为 `入口确认`。
-- ACP 对 backing session 配置恢复、动态 config option 通知和多 reasoning part 的宿主兼容性仅有源码与测试覆盖，本次未与真实 ACP 客户端互通验证。
-- Slack 包是简化客户端，不等于完整 IM 远程控制产品。
-- control-plane 服务端和企业部署边界超出本次仓库主链复核范围。
+**已确认边界：**
+
+- 本次未找到云控制面、远端 workspace 适配器、Slack 客户端与 mDNS 发现模块。
+- 服务端与客户端之间没有双向 RPC 之外的推送通道；控制语义集中在事件流与控制端点。
+- ACP 实现已从服务端包迁到 CLI 包。
+
+**未验证事项（需运行确认）：**
+
+1. 配对链接、会话令牌与远程隧道在真实网络下的完整流程。
+2. 中断/恢复与 steer/queue 在高并发多客户端下的行为。
+3. 持久终端在断线重连、偏移截断时的重放表现。
+4. ACP 与真实宿主客户端的互通与权限往返。
 
 ## 关键源码索引
 
-- `packages/opencode/src/server/server.ts`
-- `packages/opencode/src/server/mdns.ts`
-- `packages/opencode/src/server/routes/instance/httpapi/handlers/{session,event,sync,permission,question,pty,tui}.ts`
-- `packages/opencode/src/server/routes/instance/httpapi/middleware/{authorization,workspace-routing}.ts`
-- `packages/opencode/src/control-plane/{types,workspace-adapter-runtime}.ts`
-- `packages/core/src/event/sql.ts`
-- `packages/opencode/src/acp/{service,permission}.ts`
-- `packages/opencode/src/cli/cmd/{serve,attach,web,acp}.ts`
-- `packages/desktop/src/main/sidecar.ts`
-- `packages/slack/src/index.ts`
+- `packages/server/src/auth.ts`、`cors.ts`、`event-feed.ts`：鉴权、跨域与事件流
+- `packages/protocol/src/groups/{server,event,session,persistent-pty,rpc}.ts`：协议端点
+- `packages/cli/src/commands/handlers/{serve,service,pair}.ts`：启动、守护与配对
+- `packages/cli/src/services/remote-tunnel.ts`：远程隧道
+- `packages/cli/src/acp/`：ACP 实现
+- `packages/server/src/handlers/{permission,question,persistent-pty,pty-socket,session}.ts`：控制与终端
+- `packages/app/src/runtime/server/registry.tsx`：客户端服务端注册表

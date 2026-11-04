@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/*`、`packages/host/*`、`packages/api/*`、`packages/typert/`、`packages/extensions/ui-cordis`、`packages/core/tools/src/presentation.ts`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
+> 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
 > 调查方式：静态源码阅读，并对照仓库 `.agents/notes/implemented/architecture/` 下的 GUI 系列架构决策记录（加载链、slot 系统、对象层、RPC 协议、输入状态机、工具展示归属等）逐项核实；未运行 `dsh web`，视觉效果、键盘可用性与运行行为未实测
 >
@@ -16,20 +16,20 @@
 
 DeepSeek Harness 的 Web Chat UI（`dsh web`）是运行在浏览器里的第二条 Cordis 插件树：宿主进程跑一条 cordis 树（agent 循环、会话、RPC 网关、webserver），浏览器里跑第二条 client cordis 树，每个 UI 能力都是一个 `dsh.client` 插件包，由宿主构建的启动图（`__DSH_BOOT__`）按需取回。主要结论：
 
-- **技术栈**：React 18 + Vite 6，但 React 只是纯投影层。业务数据住在 React-free 的"对象层"（`ConnectionController` → `SessionManager` → `Session` 三级），通过 `useSyncExternalStore` 快照喂给组件；组件不 import 框架，全部数据经 slot 系统派发的四个 props 份额到达。
+- **技术栈**：React 18.3 + Vite 6，但 React 只是纯投影层。业务数据住在 React-free 的"对象层"（`ConnectionController` → `SessionManager` → `Session` 三级），通过 `useSyncExternalStore` 快照喂给组件；组件不 import 框架，全部数据经 slot 系统派发的四个 props 份额到达。
 - **连接架构**：上行仍以 HTTP POST 承载 Remote 调用，但下行已经统一为 API Gateway 的 `/api/remote.mux` WebSocket 与逻辑 Remote streams；Connection 只接受带 ready baseline 的 generation。物理 carrier 丢失后重开 `$events` 与各 journal，Session journal 用 tail page 修补 seq 缺口（`packages/client/connection/README.md`、`packages/api/session-controller/README.md`）。
-- **渲染机制**：Session Controller 下发原始 v3 journal 记录与临时 assistant live frames，Client 端投影 conversation/chat/trajectory。工具卡完全由浏览器从原始事件派生，工具名键控槽分发，`GenericToolCard` 兜底；Host presenter 不再进入 Web transport。
+- **渲染机制**：渲染职责已拆到 `ui-chat`（ChatView、conversation nodes、Markdown、滚动），`ui-conversation` 保留与目标平台无关的会话装配与浏览器壳（事件/视图注册表、每会话绑定、输入状态、slot、临时 composer 接管）。Session Controller 下发原始 v4 journal 记录与临时 assistant live frames，Client 端投影 conversation/chat/trajectory。工具卡完全由浏览器从原始事件派生，工具名键控槽分发，`GenericToolCard` 兜底；Host presenter 不再进入 Web transport。
 - **设置表单**：宿主把 schemastery 序列化 schema 经 settings 命名空间下发，浏览器端 `rehydrateSchema` 复活校验器，按路径做不可变草稿编辑，以 `settings.mutate` path ops 增量写回。
-- **主链路**：`dsh web` 起服务并签发 launch token → 根 URL 用 token 换 Host-bound HttpOnly cookie → 浏览器加载启动图并装配 client 插件 → 选工作区创建 blank 会话 → Lexical Composer 乐观提交并登记 submission echo → Session Remote 接受 prompt → journal/live frame 回流 → durable 记录按 rpcId 退休 echo → 行级重渲染（`packages/client/connection/README.md:32-55`；`ui-conversation/README.md:41-59`）。
+- **主链路**：`dsh web` 起服务并签发 launch token → 根 URL 用 token 换 Host-bound HttpOnly cookie → 浏览器加载启动图并装配 client 插件 → 选工作区创建 blank 会话（或复用仍为 blank 的具名会话）→ Lexical Composer 乐观提交并登记 submission echo → Session Remote 接受 prompt → journal/live frame 回流 → durable 记录按 `rpcId` 退休 echo → 行级重渲染（`packages/client/connection/README.md`；`ui-conversation/README.md`；`ui-chat/README.md`）。
 
 ## 工作台边界与用户主链
 
 ```text
 dsh web（apps/cli 的 web 别名 = --profile web，装入 web-app bundle）
   -> webserver 绑定 127.0.0.1:3080，GET / 注入 window.__DSH_BOOT__
-  -> AppWebEntry 两阶段 boot（loading 页 -> settled 一次性翻到真实 UI）
+  -> AppWebEntry 两阶段 boot（boot-page 渲染 loading 页 -> boot-client 装配插件树 -> mount.ts 经 uiRenderer 依赖挂载）
   -> AppFrame 三栏：sidebar | conversation | details（+ shell.overlay）
-  -> 无会话 Hero：WorkspacePicker -> connectWorkspace -> 复用或创建 blank 会话 -> open()
+  -> 无会话 Hero：WorkspacePicker -> connectWorkspace -> 复用仍为 blank 的具名会话或新建 blank 会话 -> open()
   -> InputBar（同一实例从 inert 变 live）-> 输入状态机 -> Enter 提交事务
       -> 命令裁决（/ @ 触发）或 defaultSink -> session.prompt({mode:'queue'|'steer'})
    -> Remote journal + assistant live stream -> Session 事件窗口
@@ -42,19 +42,19 @@ dsh web（apps/cli 的 web 别名 = --profile web，装入 web-app bundle）
 
 ## 1. 技术栈与前端目录组织
 
-apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`）只有 10 行，找到挂载点后把启动交给壳包；启动、加载、装配全在 `@deepseek-ai/dsh-client-web` 里。构建配置把 workspace 包 alias 到源码（让 CSS 走 vite 管线而非 CSS 外置的 lib 包），vendor 手工拆包只放 React-free 的重渲染库（katex、shiki、micromark 系列）——插件包**永远不进入** vite 打包图，它们以运行时 bundle 到达（`apps/web/vite.config.ts:92-160`）。开发模式下直接 `vite serve` 会被拒绝，必须有宿主注入 `__DSH_BOOT__`。
+apps/web 是一个薄 Vite 应用：入口 `main.ts` 只有十行，找到挂载点后把启动交给壳包；启动、加载、装配全在 `@deepseek-ai/dsh-client-web` 里。构建配置把 workspace 包 alias 到源码（让 CSS 走 vite 管线而非 CSS 外置的 lib 包），vendor 手工拆包只放 React-free 的重渲染库（katex、shiki、micromark 系列）——插件包**永远不进入** vite 打包图，它们以运行时 bundle 到达（`apps/web/vite.config.ts`）。开发模式下直接 `vite serve` 会被拒绝，必须有宿主注入 `__DSH_BOOT__`。
 
 `packages/client/*` 是前端本体，按到达方式分三类（`packages/client/AGENTS.md`）：
 
 | 类别 | 包 | 说明 |
 |---|---|---|
 | 纯库（壳静态打包） | ui-slots、web-react、ui-primitives、schema-form、modules | 种子进模块表，不在宿主图内 |
-| 静态到达 entry | connection、runtime、ui-theme、locale、hmr | 壳直接打包 `src/client/`，仍按图治理 |
-| fetch 到达插件包 | ui-layout、ui-sidebar、ui-conversation、ui-tool、ui-workspace、ui-settings*、ui-commands、ui-input-trigger、ui-skill、ui-subagent、ui-cordis 等 | 双入口：node 半是空 apply，`./client` 子路径是 tsdown 闭包工厂 bundle |
+| 静态到达 entry | connection、store、ui-theme、locale、hmr | 壳直接打包 `src/client/`，仍按图治理 |
+| fetch 到达插件包 | ui-layout、ui-sidebar、ui-chat、ui-conversation、ui-tool、ui-workspace、ui-settings*、ui-commands、ui-input-trigger、ui-skill、ui-subagent、ui-cordis 等 60 个 `ui-*` 包 | 双入口：node 半是空 apply，`./client` 子路径是 tsdown 闭包工厂 bundle |
 
-职责分层（`packages/client/AGENTS.md`）：对象层（runtime，React-free：连接、会话、事件窗口、快照存储引擎）、渲染机制（web-react，壳专属：slot 渲染器、uSES 桥）、展示组件（各插件包 `src/client/`，纯 props）。插件包之间禁止 value import（构建期 purity 门），协作只走 cordis 服务与 slot；跨插件消费 `/client` 只允许 type-only。
+职责分层（`packages/client/AGENTS.md`）：对象层（React-free：连接、会话、事件窗口、快照存储引擎，现集中在 `store` 与 `connection`）、渲染机制（web-react，壳专属：slot 渲染器、uSES 桥）、展示组件（各插件包 `src/client/`，纯 props）。插件包之间禁止 value import（构建期 purity 门），协作只走 cordis 服务与 slot；跨插件消费 `/client` 只允许 type-only。
 
-测试分层完整：`apps/web/tests/` 下有大量 keyless 回放 e2e（fixture 服务端 + 快照 `ui.expected.md`），`stress-tests/reasoning-chunks.stress.ts` 用 100,000 个 reasoning chunk 压浏览器响应性（文件 1-50 行）。
+测试分层完整：`apps/web/tests/` 现有约 630 个文件的 keyless 回放 e2e（fixture 服务端 + 快照 `ui.expected.md`），`stress-tests/reasoning-chunks.stress.ts` 用 100,000 个 reasoning chunk 压浏览器响应性。
 
 ## 2. 页面结构、加载链与装配
 
@@ -64,7 +64,7 @@ apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`
 
 ### 加载链与装配
 
-壳的启动是两阶段（`packages/client/web/src/boot.tsx:97-208`）：先解析宿主注入的启动图，建立客户端模块系统（懒 CJS 表：执行 bundle 只注册工厂，副作用在首次 require 时物化），渲染 loading 页并并行预取声明为立即加载的基础设施条目；随后挂载 vendored cordis Loader，把模块系统注入其内部槽（以模块 stub 与进程探针替换实现浏览器化），逐条创建图条目，`loader.await()` 后做全 ACTIVE 扫描（列出 import 失败、apply 抛错与等待缺失服务的纤维），成功即一次翻转 settled。壳只渲染 `'root'`（`packages/client/web/src/app.tsx:38-43`），app-shell 伪条目负责安装 slot 渲染器（`packages/client/web/src/app-shell.ts:35-50`）。每个 slot 条目带独立错误边界：一个插件崩了只黑一块卡片，boot 期失败则整页停在 loading 并展示失败报告。
+壳的启动是两阶段：`boot-page.ts` 先渲染 loading 页并并行预取声明为立即加载的基础设施条目；`boot-client.ts` 解析宿主注入的启动图，建立客户端模块系统（懒 CJS 表：执行 bundle 只注册工厂，副作用在首次 require 时物化），随后挂载 vendored cordis Loader，把模块系统注入其内部槽（以模块 stub 与进程探针替换实现浏览器化），逐条创建图条目，`loader.await()` 后做全 ACTIVE 扫描（列出 import 失败、apply 抛错与等待缺失服务的纤维），成功即一次性翻到真实 UI。`mount.ts` 通过依赖纤维在 `uiRenderer` 上挂载：服务就绪时装好挂载效应，服务被替换时重装——这是 `app-shell` 伪条目消失后的装配方式。每个 slot 条目带独立错误边界：一个插件崩了只黑一块卡片，boot 期失败则整页停在 loading 并展示失败报告；`boot-client.ts` 另维护一张必需的 entry 名单作为启动 fatal set。
 
 ### slot 组合模型
 
@@ -78,11 +78,15 @@ apps/web 是一个薄 Vite 应用：入口 main.ts（`apps/web/src/main.ts:6-10`
 
 物理连接断开会撤销当前 generation，按 500ms 到 10s 的抖动退避持续重试；浏览器 offline 时暂停，online 后从首档恢复。Host/Origin 检查与签名浏览器 cookie 保护所有 RPC、WebSocket 和 feature-owned Fetch route；launch token 只在根 GET 使用一次，随后重定向到无 token URL。
 
-Session Controller 是会话 BFF。历史页与 follow opening 传 v3 原始 durable event；assistant token 通过独立 live stream 暂存，匹配的 durable settlement 到达后原子退休临时行。Client journal 先开 follow，再取 initial page，并用 tail page 修复重连或 seq 缺口（`packages/api/session-controller/README.md:27-35`）。
+Session Controller 是会话 BFF。历史页与 follow opening 每个 durable 事件传一条 `SessionWireEvent`（当前格式 v4）；assistant token 边界内嵌在 `assistant/message` 或 `assistant/attempt` 的紧凑流里，Web 适配器另以 cursorless 帧把每个流成员展开为 Client-only 的 `assistant/live-chunk` 临时项，durable settlement 到达后按 attempt 的 startedAfterSeq/nextIndex 收口（`packages/api/session-controller/README.md`）。Client journal 先开 follow，再取 initial page，并用 tail page 修复重连或 seq 缺口；历史分页按“至少 50 条 append-origin 消息且跨 2 个 turn”的 turn 对齐窗口发放，turn 跳转用 `loadThrough(seq)`（`ui-conversation`/`session-controller` 的客户端适配层）。
+
+`session.create` 具名复用规则明确：仅当该会话仍为 blank、目录匹配、是请求工作区的未归档成员且无其他写者时复用，否则新建；复用与新建都按请求解析 agent preset 并先落 `agent-preset/selected`。归档会话由 `ArchivedSessionGate` 在 `agent/pre-step` 拒绝启动新步骤（含 subagent 后代），未归档即解除；运行中的工作由 agent registry、job、subagent、schedule 各自通过 workspace registry 的归档准入停掉。
 
 ## 4. 会话导航、工作区与现场恢复
 
-会话列表与工作区浏览器在 ui-workspace 的 `WorkspaceBrowser`（`sidebar.workspaces` 槽位），支持分组树/平铺两种视图、每工作区折叠到 5 行、原生拖拽排序（行悬停显示插入标记）、本地过滤 + 宿主全文搜索（`session.search`，250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询）（`packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx:29-90`）。会话行从 sessions 列表快照派生。
+会话列表与工作区浏览器在 ui-workspace 的 `WorkspaceBrowser`（`sidebar.workspaces` 槽位），支持分组树/平铺两种视图、每工作区折叠到 5 行、原生拖拽排序（行悬停显示插入标记）、本地过滤 + 宿主全文搜索（`session.search`，250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询）（`packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx`）。会话行从 sessions 列表快照派生；归档会话的恢复页从旧的独立设置页 `ui-settings-unarchive-sessions` 收进 General 设置的 Archived sessions，行内归档/恢复由 ui-workspace 承担。
+
+客户端插件面继续扩张：新增 ui-agent-team、ui-context-menu、ui-entry-customization、ui-file-actions、ui-file-drag、ui-plugin-manager、ui-plugin-market、ui-secret-mask、ui-shortcuts、shortcuts、ui-sidebar-browser、ui-settings-{account,agent-loop,session-log,shell,subagent,web-search} 以及 product-analytics；`ui-settings-session-log` 负责 General 设置里的会话日志上传开关。
 
 新会话入口统一是 `connectWorkspace(workspaceId)`：先在列表镜像里找 blank 且工作区路径与会话成员资格同时匹配的会话复用（宿主成员资格规则，绝不只按 cwd），否则调 `session.create({workspaceId})`；返回的 id 保证已在列表且 `sessions.binding(id)` 同步可解析。
 
@@ -194,15 +198,17 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - 多标签页并发、重连间隙丢帧、HMR 链（默认 disabled）未实测。
 - 审批/问答的完整交互（ApprovalPanel 接管 Composer、QuestionComposer 回答流程）未实测。
 - schema-form 只核对了模型层与使用点；ProviderEditor 的表单交互、设置保存冲突行为未实测。
+- `ui-chat` 的 process grouping/折叠显示模式、turn 导航与 `loadThrough` 的 turn 对齐窗口只在文档与源码层确认，未运行验证。
+- 归档会话门禁、blank 会话复用与 preset 解析的实际时序未运行验证。
 
 ## 15. 关键源码索引
 
 - `apps/web/src/main.ts`（应用入口）、`apps/web/vite.config.ts`（shell 打包与 vendor 拆包）、`apps/web/tests/`（keyless 回放 e2e + snapshots）、`apps/web/stress-tests/reasoning-chunks.stress.ts`（流式压力）
-- `packages/client/web/src/boot.tsx`（两阶段启动）、`app.tsx`（renderSlot('root')）、`app-shell.ts`（渲染器安装）
-- `packages/client/ui-layout/src/client/AppFrame.tsx`（三栏）、`packages/client/ui-sidebar/src/client/SidebarRoot.tsx`（侧栏）、`packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx`（会话/工作区列表与搜索）
+- `packages/client/web/src/boot-page.ts`（loading 页）、`boot-client.ts`（插件树装配与 fatal entry 名单）、`mount.ts`（经 uiRenderer 依赖挂载）
+- `packages/client/ui-layout/src/client/AppFrame.tsx`（三栏）、`packages/client/ui-sidebar/src/client/SidebarRoot.tsx`（侧栏）、`packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx`（会话/工作区列表与搜索）
 - `packages/client/connection/src/client/`、`packages/api/gateway/`（Remote mux、generation、认证与 Fetch route）
-- `packages/api/session-controller/src/client/sessions/`（journal、assistant stream、submission echo、queue 与操作）
-- `packages/client/ui-conversation/src/client/`（Lexical Composer、conversation nodes、ChatView 与输入行为）
+- `packages/api/session-controller/src/client/sessions/`（journal、live-chunk/settlement、submission echo、queue 与操作）与 `src/archived-session-gate.ts`
+- `packages/client/ui-conversation/src/client/`（会话装配、输入状态、Lexical Composer、slots）、`packages/client/ui-chat/src/client/`（ChatView、conversation-nodes、Markdown、滚动）
 - `packages/client/ui-tool/src/client/tool/ToolCallTree.tsx`、`tool/models/tool-call-model.ts`、`packages/core/tools/src/presentation.ts`（渲染意图）
 - `packages/client/schema-form/src/model.ts`、`packages/client/ui-settings-models/src/client/ProviderEditor.tsx`、`packages/client/ui-settings/src/client/settings-scope.ts`
 - `packages/api/gateway/src/index.ts`（Typert 网关）、`packages/api/remotes/`（BFF）、`packages/typert/README.md`、`packages/bundle/web-app/cordis.patch.yml`（浏览器 roster）

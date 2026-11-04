@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：直接静态阅读当前后端源码、配置与数据模型；确认仓库分支和提交，未启动服务、Embedding、向量库、外部重排器或外部知识连接
 >
@@ -30,9 +30,9 @@
 
 ## 摄取、切块与索引
 
-**源码事实。** 文件处理先从存储路径经配置的 loader 抽取文档，或采用已有文本；抽取文本写入文件记录，计算 SHA-256，并更新 `pending`、`processing`、`completed` 或 `failed` 状态。向量化失败会清除文件哈希、写入错误并发布失败事件；把已处理文件加入知识库时优先复用该文件集合中的切块，集合丢失但数据库仍有抽取文本时则用文本修复重建。`backend/open_webui/routers/retrieval.py:1857-2123`，`backend/open_webui/models/files.py:407-443`。
+**源码事实。** 文件处理先从存储路径经配置的 loader 抽取文档，或采用已有文本；抽取文本写入文件记录，计算 SHA-256，并更新 `pending`、`processing`、`completed` 或 `failed` 状态。向量化失败会清除文件哈希、写入错误并发布失败事件；把已处理文件加入知识库时优先复用该文件集合中的切块，集合丢失但数据库仍有抽取文本时则用文本修复重建。`backend/open_webui/routers/retrieval.py:1642`，`backend/open_webui/models/files.py:407-443`。
 
-保存前可先按 Markdown 标题切分并按最小目标长度合并，再按字符、tiktoken 或 Transformers 长度函数切块。默认块大小为 1000、重叠为 100；每个块保存摄取时的 Embedding 引擎和模型信息。Embedding 支持本地 sentence-transformers、OpenAI、Ollama 或 Azure OpenAI 等配置来源，可启用异步批次和并发请求；阻塞的保存过程被移到线程池，但 Embedding 调用本身可设超时。`backend/open_webui/routers/retrieval.py:1650-1819`，`backend/open_webui/config.py:958-1061`，`backend/open_webui/env.py:721-729`。
+保存前可先按 Markdown 标题切分并按最小目标长度合并，再按字符、tiktoken 或 Transformers 长度函数切块。默认块大小为 1000、重叠为 100；每个块保存摄取时的 Embedding 引擎和模型信息。Embedding 支持本地 sentence-transformers、OpenAI、Ollama 或 Azure OpenAI 等配置来源，可启用异步批次和并发请求；阻塞的保存过程被移到线程池，但 Embedding 调用本身可设超时。`backend/open_webui/routers/retrieval.py:1642-1900`，`backend/open_webui/config.py:958-1061`，`backend/open_webui/env.py:721-729`。
 
 知识库文件的加入需同时有知识库写权限和文件读权限；更新会先按文件 ID 删除旧块再重新处理，移除会删除关联和按文件 ID、哈希清理块。因而“文件记录存在”“已归入知识库”“集合内有对应块”是可恢复但不同步的三层状态，源码专门处理了文件集合丢失的修复情形。`backend/open_webui/routers/knowledge.py:1407-1673`。
 
@@ -42,9 +42,9 @@
 
 ### Legacy 自动注入
 
-**源码事实。** 当模型知识已绑定且请求声明 legacy function calling 时，中间件将模型知识追加为文件资料项，并在请求发送前由文件处理器召回。资料汇总器先对每一项做所有权、文件授权、知识库授权、文件夹授权或外部库检查；全上下文/绕过检索时直接返回文件全文，否则针对可访问集合查询。多个查询和多个集合并行执行，之后以内容哈希去重，保留较高分并按分数截取 top-k。`backend/open_webui/utils/middleware.py:2575-2615`，`backend/open_webui/retrieval/utils.py:1469-1682`，`backend/open_webui/retrieval/utils.py:697-779`。
+**源码事实。** 当模型知识已绑定且请求声明 legacy function calling 时，中间件将模型知识追加为文件资料项，并在请求发送前由文件处理器召回。资料汇总器先对每一项做所有权、文件授权、知识库授权、文件夹授权或外部库检查；全上下文/绕过检索时直接返回文件全文，否则针对可访问集合查询。多个查询和多个集合并行执行，之后以内容哈希去重，保留较高分并按分数截取 top-k。`backend/open_webui/utils/middleware.py:1789`，`backend/open_webui/retrieval/utils.py:1376-1600`，`backend/open_webui/retrieval/utils.py:697-779`。
 
-混合模式打开时，后端优先调用向量后端原生 hybrid search；不可用或失败时，取集合全部文本构建 BM25，再以加权集成融合 BM25 与向量候选，内容哈希作为去重键。随后由 CrossEncoder、ColBERT 或外部 reranker 打分；未配置 reranker 时重新计算余弦相似度。结果按重排分数阈值过滤、取 reranker top-n，再在需要时收缩到请求 k；整个混合分支失败会退回纯向量检索。`backend/open_webui/retrieval/utils.py:422-613`，`backend/open_webui/retrieval/utils.py:697-879`，`backend/open_webui/retrieval/utils.py:1731-1802`。
+混合模式打开时，后端优先调用向量后端原生 hybrid search；不可用或失败时，取集合全部文本构建 BM25，再以加权集成融合 BM25 与向量候选，内容哈希作为去重键。随后由 CrossEncoder、ColBERT 或外部 reranker 打分；未配置 reranker 时重新计算余弦相似度。结果按重排分数阈值过滤、取 reranker top-n，再在需要时收缩到请求 k；整个混合分支失败会退回纯向量检索。`backend/open_webui/retrieval/utils.py:776`，`backend/open_webui/retrieval/utils.py:697-879`，`backend/open_webui/retrieval/utils.py:1731-1802`。
 
 ### Native 工具检索
 
@@ -109,8 +109,8 @@ Embedding 模型切换时，源码对记忆维度不匹配提供即时重建；�
 - `backend/open_webui/routers/retrieval.py:1650-2123`：切块、Embedding、向量写入、文件状态与失败记录。
 - `backend/open_webui/retrieval/utils.py:422-879`：混合候选、重排、跨集合合并和纯向量回退。
 - `backend/open_webui/retrieval/utils.py:1334-1682`：资料类型解析、授权、全文/切块选择和来源结果契约。
-- `backend/open_webui/utils/middleware.py:2520-3105`：legacy 知识注入、原生内置工具和 RAG 上下文写入。
-- `backend/open_webui/utils/middleware.py:5460-5989`：原生工具循环、引用提取、上下文回注和迭代上限。
-- `backend/open_webui/tools/builtin.py:2026-2306`、`backend/open_webui/tools/knowledge_fs.py:319-530`：知识发现、文件检索与作用域检查。
-- `backend/open_webui/routers/memories.py:128-539`、`backend/open_webui/utils/memory.py:289-602`：每用户记忆向量、上下文注入、后台复盘与重建。
+- `backend/open_webui/utils/middleware.py:1789-1820`：legacy 知识注入、原生内置工具和 RAG 上下文写入。
+- `backend/open_webui/utils/middleware.py:5667`：原生工具循环、引用提取、上下文回注和迭代上限。
+- `backend/open_webui/tools/builtin.py:3307`、`backend/open_webui/tools/knowledge_fs.py:1171`：知识发现、文件检索与作用域检查。
+- `backend/open_webui/routers/memories.py:173-432`、`backend/open_webui/utils/memory.py:290`：每用户记忆向量、上下文注入、后台复盘与重建。
 - `backend/open_webui/models/knowledge.py:48-115`、`backend/open_webui/models/memories.py:15-42`：知识库与记忆的持久化对象边界。

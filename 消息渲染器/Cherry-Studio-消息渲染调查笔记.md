@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -20,7 +20,7 @@ Cherry Studio 通过一套分层的消息 UI 运行时完成消息渲染，Markd
 2. renderer 按 topic、execution 和 anchor 拆分流，用 AI SDK 的 `readUIMessageStream` 组装 `UIMessage.parts`；overlay 逻辑从 hook 抽成窗口级服务 `ExecutionStreamOverlayService` 后，组件卸载不再拆掉 reader。
 3. 当前流式快照以 overlay 形式覆盖数据库历史，持久化数据保持不变；分支草稿（awaiting-input 空叶子）以持久化行保存，不再属于渲染层临时态。
 4. 页面 adapter 将 Home、Agent 等业务能力注入统一的 `MessageListProvider`。
-5. `MessageList` 虚拟化消息组，将历史层与高频更新的 live tail 隔离。
+5. `MessageList` 虚拟化消息组，把历史组与高频更新的 live 组隔离开。
 6. `MessagePartsRenderer` 把 parts 投影为正文、思考、工具、附件、图片、视频、错误、翻译和压缩记录。
 7. 正文最终由基于 Streamdown 的静态/流式 Markdown 组件渲染。
 
@@ -39,13 +39,13 @@ HTML artifact 经受限 sandbox iframe 独立预览，与正文 Markdown 的净�
 ```text
 Main AI runtime / Persistence
   -> ai.stream.chunk / done / error IPC
-  -> TopicStreamSubscription（topic -> execution + anchor 分支）
+  -> StreamDispatchService（topic -> execution + anchor 分支）
   -> ExecutionStreamOverlayService（窗口级服务：reader、快照、rAF 批处理，按 topicId 引用计数）
-  -> useExecutionOverlay（React 绑定，useSyncExternalStore）
+  -> MessageProjectionService（chunk -> parts 投影，桌面 Home 与 Agent 共用）`n  -> useExecutionOverlay（React 绑定，useSyncExternalStore）
   -> useMessageStreamingLayers / useStableMessagePartsLayers（history + live overlay 结构共享）
   -> Home / Agent MessageList adapter
   -> MessageListProvider
-  -> MessageList（分组、虚拟列表、历史层 / live 层）
+  -> MessageList（分组、虚拟列表、历史组 / live 组）
   -> MessageGroup
   -> MessageFrame
   -> MessageContent
@@ -178,11 +178,11 @@ Cherry 在 `providerMetadata.cherry` 下存储不同 part 的扩展信息：
 
 关键文件：
 
-- `src/renderer/services/aiTransport/IpcChatTransport.ts`
-- `src/renderer/services/aiTransport/TopicStreamSubscription.ts`
-- `src/renderer/hooks/useTopicStreamSubscription.ts`
+- `src/renderer/services/aiTransport/StreamDispatchService.ts`
+- `src/renderer/services/aiTransport/MessageProjectionService.ts`
+- `src/renderer/services/aiTransport/index.ts`
 
-`TopicStreamSubscription` 为一个 topic 建立一次 IPC 监听，再按以下组合创建独立分支：
+`StreamDispatchService` 为一个 topic 建立一次 IPC 监听，再按以下组合创建独立分支：
 
 ```text
 executionId + anchorMessageId
@@ -200,7 +200,7 @@ anchor 用于区分同一 execution 中的不同 turn。同一模型 execution �
 
 ### 一次性 execution reader
 
-核心：`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`。窗口级服务——reader、快照和 rAF 批处理都集中在此，从原 `useExecutionOverlay` hook 抽出；该 hook 现在只负责 React 绑定（`useExecutionOverlay.ts:1-94`）。
+核心：`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`。窗口级服务——reader、快照和 rAF 批处理都集中在此，从原 `useExecutionOverlay` hook 抽出；该 hook 现在只负责 React 绑定（`useExecutionOverlay.ts`）。
 
 overlay 生命周期按 transport 的 `topicId` 引用计数：reader 只从仍在挂载的消费方启动，组件卸载仅释放引用、不拆 reader——路由或标签页切换期间 Main 继续生成，重挂载时同步恢复 live overlay；引用计数归零时，自然结束的 execution 立即丢弃 overlay，由落库行接管；容量 32 的 LRU 兜底清理泄漏条目，且先取消 reader，避免截断的流被误报为成功完成；`settledKeys` 墓碑防止重挂载时用陈旧集合重启已结束的 execution。
 
@@ -226,7 +226,7 @@ AI SDK 每处理一个 chunk 都会克隆整条消息。`shareSettledPartReferen
 - `historyPartsByMessageId`：数据库历史加翻译 overlay，不接收高频 execution 快照。
 - `partsByMessageId`：live execution parts 覆盖 history，用于当前可变尾部。
 
-两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。`MessageList.tsx:238-247` 依据 `firstLiveGroupIndex` 和 liveMessageIds 把同一批消息切成历史段与实时段。
+两层都进行结构共享：内容未变化时复用 part array 和 map 容器。流结束后，页面先刷新数据库，再清理 overlay，避免最终内容短暂消失或重复显示。`MessageList` 用 `firstLiveGroupIndex` 判定每个消息组是否仍属 live 段，只给 live 组传 `streamingLayers`（`MessageList.tsx:272,853-863`）。
 
 ## 列表与消息骨架
 
@@ -287,14 +287,9 @@ MessageList
 - ResizeObserver 同时处理 streaming text、折叠块和异步富内容造成的高度变化。
 - 平滑滚动用 rAF 驱动，并允许用户输入中断。
 
-### 历史层与 live 层
+### 历史组与 live 组
 
-`MessageList.tsx:112-127` 明确建立两个边界：
-
-- `MessageHistoryLayer`：memo 封闭的历史，使用 historyPartsByMessageId 层。
-- `MessageLiveLayer`：只给 mutable tail 接收逐帧 snapshot。
-
-firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而重渲染，历史区与活动区的这层隔离是性能设计的关键。
+`MessageList` 不再把历史段与 live 段拆成两个具名图层组件：每个消息组按 `index >= firstLiveGroupIndex` 得到 `isLive` 标记，只有 live 组才会收到 `streamingLayers`，历史组既不接收逐帧 snapshot 也因 memo 不重渲染。这层隔离仍是性能设计的关键。
 
 ## parts 布局投影
 
@@ -305,7 +300,7 @@ firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而
 
 ### active message
 
-`projectLiveMessageParts()`（`messagePartLayouts.ts:164`）把 active parts 投影为：
+`projectLiveMessageParts()`（`messagePartLayouts.ts:172`）把 active parts 投影为：
 
 - process：reasoning + 常规 tool history。
 - part：当前结果、交互工具或 side-channel 内容。
@@ -314,7 +309,7 @@ firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而
 
 ### completed message
 
-`projectCompletedMessageParts()`（`messagePartLayouts.ts:256`）把最终消息分成：
+`projectCompletedMessageParts()`（`messagePartLayouts.ts:303`）把最终消息分成：
 
 - `historyEntries`：推理和工具过程。
 - `resultEntries`：最终正文及相邻图片、文件、视频或错误。
@@ -335,7 +330,7 @@ firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而
 
 ## part 到组件的分派
 
-主分派函数：`MessagePartsRenderer.tsx:459`
+主分派函数：`renderPart`（`blocks/MessagePartsRenderer.tsx:718`）
 
 | part | 组件/行为 |
 |---|---|
@@ -349,9 +344,9 @@ firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而
 | `data-translation` | `TranslationBlock` |
 | `data-video` | `MessageVideo` |
 | `data-compact` | `CompactBlock` |
-| `data-compaction-anchor` | 时间线锚点；`status:'skipped'` 的折叠不渲染标记（`CompactionAnchorBlock.tsx:26-29`） |
-| `data-retry` | `RetryStatusBlock`（仅流式期间可见的瞬时状态，`MessagePartsRenderer.tsx:623-628`；`settled` 状态渲染为空） |
-| `data-conversation-reset` | `ConversationResetBlock`（`MessagePartsRenderer.tsx:544`） |
+| `data-compaction-anchor` | 时间线锚点；`status:'skipped'` 的折叠不渲染标记（`CompactionAnchorBlock.tsx`） |
+| `data-retry` | `RetryStatusBlock`（仅流式期间可见的瞬时状态，`settled` 状态渲染为空） |
+| `data-conversation-reset` | `ConversationResetBlock` |
 | `data-clear` / source/step/hidden data | 不直接渲染 |
 
 未知 part 会记录 warning 并返回 `null`，因此不会导致整个渲染流程失败。不过，如果协议新增了 part 而 UI 尚未更新，对应内容会直接消失。建议为带有可显示 payload 的未知 part 提供开发态 fallback。
@@ -360,7 +355,7 @@ firstLiveGroupIndex 之前的消息组不会因最后一条消息继续输出而
 
 ### 静态与流式双模式
 
-`src/renderer/components/chat/messages/markdown/ChatMarkdown.tsx:24`
+`src/renderer/components/chat/messages/markdown/ChatMarkdown.tsx`
 
 - 从未参与流式输出的历史内容使用 `Markdown`，即 Streamdown `mode="static"`。
 - 当前输出使用 `StreamingMarkdown`，开启 incomplete Markdown repair 和 fade-in。
@@ -488,7 +483,7 @@ AskUserQuestion/approval 流程横跨消息区与输入区：awaiting approval �
 
 消息流可直接投影内联生成图片与远端视频；`data-video` 同时接受本地 `filePath` 和远端 `url`，本地文件优先，二者都缺失时显示不支持状态。Markdown 支持 ECharts 专用预览、独立 LaTeX 环境与跨空行的 `\[...\]` 数学块，并修正单波浪号、表格词边界和混合多行公式围栏。消息页脚的 token 用量始终可见。Agent 工具渲染还覆盖诊断报告、会话创建、跨会话发送与结果卡片，使持久化投递状态在消息表面有对应投影。
 
-上述内容确认 part 到组件的装配，未以真实长会话测量虚拟列表、动画、图表或媒体加载性能。依据：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx:715,946`、`frame/MessageVideo.tsx:18-82`、`src/renderer/components/Preview/EChartsPreview.tsx:15-169`、`tools/agent/PrepareDiagnosticReportTool.tsx`。
+上述内容确认 part 到组件的装配，未以真实长会话测量虚拟列表、动画、图表或媒体加载性能。依据：`src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx`、`frame/MessageVideo.tsx:18-82`、`src/renderer/components/Preview/EChartsPreview.tsx:15-169`、`tools/agent/PrepareDiagnosticReportTool.tsx`。
 
 ## 性能设计总结
 
@@ -497,9 +492,9 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 1. IPC/快照按 animation frame 合并。
 2. 每个 execution 一次性 reader，避免跨 turn 污染；reader 生命周期按 transport topicId 引用计数，组件卸载不拆 reader（路由/标签页切换期间 Main 继续生成，重挂载同步恢复）。
 3. settled parts 恢复旧引用。
-4. history/live parts maps 结构共享。
+4. 历史与 live 两套 parts map 做结构共享。
 5. Provider 按订阅频率拆 context。
-6. MessageList 冻结历史层，只更新 live tail。
+6. MessageList 只为 live 组提供逐帧数据，历史组按 memo 跳过重渲染。
 7. part leaf 使用 React.memo 和 identity-based comparator。
 8. tool projection 使用 WeakMap。
 9. Virtua 只挂载可见消息组。
@@ -513,15 +508,15 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 静态盘点（HEAD）：
 
-- `components/chat/messages`：250 个文件，其中 84 个测试文件。
+- `components/chat/messages`：312 个文件，其中 116 个测试文件。
 - 消息组件 TSX 文件：`MessageList`、`MessageFrame`、`MessagePartsRenderer`、`MainTextBlock`、`ThinkingBlock`、`ToolBlockGroup` 等。
-- `services/aiTransport`：10 个文件，其中 4 个测试文件（含 `ExecutionStreamOverlayService.test.ts`）。
-- `packages/ui` Markdown：21 个文件，其中 6 个测试文件。
+- `services/aiTransport`：8 个文件，其中 3 个测试文件（含 `ExecutionStreamOverlayService.test.ts`）。
+- `packages/ui` Markdown：34 个文件，其中 10 个测试文件。
 
 已看到的测试覆盖包括：
 
 - useExecutionOverlay 的多 execution、seed、terminal、清理和 overlay 行为。
-- TopicStreamSubscription 与 IpcChatTransport。
+- StreamDispatchService 与 MessageProjectionService 的分流与投影。
 - live/completed part layout 投影。
 - MessagePartsRenderer 的正文、reasoning、工具和边界情况。
 - MessageVirtualList、滚动状态机、位置记忆和平滑滚动。
@@ -551,7 +546,7 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 ### 压力点
 
-- `MessagePartsRenderer.tsx` 已超过 1,400 行、约 50KB，同时承担 part 分组、投影衔接、工具缓存、展示决策和渲染分派。
+- `blocks/MessagePartsRenderer.tsx` 已达 1,900 余行，同时承担 part 分组、投影衔接、工具缓存、展示决策和渲染分派。
 - `homeMessageListAdapter.tsx` 接近业务 facade，集中处理大量动作；后续可考虑按 capability 拆分内部 hook，同时保留统一的 Provider contract。
 - agent/home/message runtime 正处于 v2 重构期，目录仍位于 shared components，而架构文档计划最终迁到 `features/chat`。
 - 未验证的 getCherryMeta 读取与共享层 readCherryMeta 并存。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库
 >
@@ -29,6 +29,10 @@ AIO Hub 把一条 LLM 渠道建模为一个 `LlmProfile`。Profile 同时持有�
 
 - **模型执行路由已落地**：请求分发先查模型按操作保存的协议/端点绑定，再尝试把远端声明的唯一端点类型映射为协议。普通渠道随后回退到 Provider 默认协议；聚合渠道则继续查渠道级默认协议、内置模型路由表和静态操作默认。仍无法解析时抛出 `UnresolvedModelRouteError`，不根据模型名静默猜测。探测结果可由用户逐模型或批量确认并写回绑定；这是**同一渠道内的模型到协议/端点路由**，不是跨渠道故障转移（`packages/llm-core/src/model-execution-routing.ts:371-449`、`src/views/Settings/llm-service/probe/route-application.ts`）。
 - **audio.cpp 成为一等本地音频渠道**：渠道预设同时声明 OpenAI 兼容 TTS 与 Whisper 风格 ASR 端点。模型带 `asr` 能力且请求提供转写输入时，通用请求入口改走 `/v1/audio/transcriptions` multipart，而不是把音频塞入 Chat 消息；桌面转写工具会先把非 WAV 输入转换为 WAV（`src/composables/useLlmRequest.ts:226-262`、`src/tools/transcription/engines/audio.engine.ts:56-305`）。
+- **凭据不再随渠道配置明文落盘**：API Key 与敏感自定义 Header 移入独立混淆文件（桌面端 `llm-service/secrets.dat`），`profiles.json` 中的 `apiKeys` 恒为空数组，加载时按 profile.id 注入内存；Key 健康状态的索引改为不可逆哈希，旧明文索引与配置在加载时迁移（第 2.6 节）。
+- **虚拟渠道**：渠道配置可以声明 `virtualChannel`（`src/types/llm-profiles.ts:518`），由共享核心 `packages/llm-core/src/virtual-channel.ts` 把一次请求展开为多个候选目标并按顺序尝试；执行侧把"哪些真实渠道参与、各尝试如何失败"封装在 `ChannelExecution` 里，重试判定由 `isChannelRetryableError` 统一（细节在第 4 节）。
+- **模型元数据支持外部来源**：除内置目录与用户规则外，还能订阅外部目录源（`src/services/modelMetadataSourceService.ts` 的适配器、拉取与自动更新，入口 `ModelMetadataSourcesDialog.vue`），把远端目录转换为规则加入本地（第 3 节）。
+- **预设模板扩到 43 个**：预设层仍只是创建渠道时的模板，不改变 Provider 类型清单；新增 OpenCode Go、Sub2API、audio.cpp、Ollama Cloud、LM Studio 等条目。
 
 ## 总体结构
 
@@ -78,6 +82,7 @@ Agent / 临时模型 / 辅助任务
 | `options` | Azure、Vertex 等 Provider 特有字段；聚合渠道还可保存按操作配置的 `routingDefaults` |
 | `toolHandling` | 渠道工具处理声明（`callConsumer`：`aio`/`upstream`；`upstreamProtocol`：`provider-native`/`vcp-text`/`transparent`/`none`；`aioDistributedExposure`），供聊天工具编排判断"本机消费还是 VCP 上游消费"（消费方见 Agent 工具笔记 §12） |
 | `networkStrategy` | `auto`、`proxy` 或 `native` |
+| `virtualChannel` | 可选虚拟渠道配置：把一次请求展开为多个候选目标并按顺序尝试（见第 4.3 节） |
 | `relaxIdCerts` / `http1Only` | Rust 网络层兼容选项 |
 
 模型没有独立于渠道的全局实体。同名模型可以存在于多条 Profile 中，唯一标识是 `profileId:modelId`。这避免了只凭模型名猜测端点；跨渠道切换时则必须同时改变 Profile。
@@ -173,23 +178,13 @@ Agent / 临时模型 / 辅助任务
 
 除上述解析式导入外，还有**原生渠道导入导出**——`src/utils/llm-profile-transfer.ts` 定义 `LlmProfileBundle` 序列化格式，导出对话框（`LlmProfileExportDialog.vue`）支持搜索、多选、单渠道/批量导出，敏感信息自动检测与脱敏（导出时可选择是否包含凭据），导入时无损保留网络策略、自定义端点等完整配置；JSON 解析器支持 New API“复制连接信息”格式（`_type: "newapi_channel_conn"` → OpenAI-Compatible 渠道候选，无效 URL 校验且密钥不进入警告日志）。
 
-### 2.6 明文配置文件
+### 2.6 凭据隔离与混淆存储
 
-`useLlmProfiles` 使用 `createConfigManager` 将全部 Profile 保存到应用配置目录下的：
+`useLlmProfiles` 把渠道配置与凭据分开保存：`llm-service/profiles.json` 只存渠道配置，API Key 与敏感自定义 Header 移入独立文件（桌面端 `llm-service/secrets.dat`，移动端 `AppData/llm_service_secrets.dat`，实现位于 `src/utils/llm-secret/`）。混淆文件使用动态盐格式 `AIOHUBVLT1.<base64 salt>.<base64 cipher>`，每次落盘的盐值不同；加载时按 `profile.id` 透明注入内存，落盘时配置文件的 `apiKeys` 恒为空数组。这是静态混淆而不是系统 Keychain 级加密：能读到应用数据目录的一方仍可解码，但通用配置文件、导出和日志里不再出现明文 Key。
 
-```text
-llm-service/profiles.json
-```
+Key 健康状态另存为 `llm-service/key-states.json`，记录的索引改为不可逆的 64 位稳定哈希（`k_` + 16 位十六进制，双段 FNV-1a 拼接），键状态文件里不再出现明文 Key。旧版本以明文 Key 作索引的状态文件在加载时迁移后立即回写；持久化前会把历史错误与上游返回中的当前明文 Key 替换为 `[redacted-key]`。首次加载时还会把旧 `profiles.json` 中残留的明文 Key 迁移进独立凭据文件（`src/utils/llm-secret/apiKeyHash.ts`、`keyStates.ts`、`profiles.ts`）。
 
-`ConfigManager.save()` 直接对对象执行 `JSON.stringify()` 并通过 Tauri FS 写文本文件，没有调用系统 Keychain、Stronghold 或字段级加密。因而 `apiKeys[]`、自定义鉴权 Header 和 Provider `options` 中的敏感值均以可读 JSON 落盘。
-
-Key 健康状态另存于：
-
-```text
-llm-service/key-states.json
-```
-
-该文件以完整 Key 字符串作为状态 Map 的键，所以即使未来只加密 `profiles.json`，当前健康状态文件仍会重复暴露凭据。日志只展示 Key 前 8 位，但配置文件不是脱敏存储。
+边界：混淆算法与盐值都在客户端代码里，安全性来自"不与配置混存 + 不写入日志/导出"，不是强加密；移动端与桌面端各自维护自己的凭据文件，两者不互相解密。
 
 ## 3. 模型目录与元数据
 
@@ -277,6 +272,10 @@ llm-service/key-states.json
 
 这项能力的项目分类边界与横向核对，已归入本类目的横向对比。
 
+### 3.7 外部元数据来源
+
+除内置目录与用户规则，模型元数据还能从外部来源订阅：`src/services/modelMetadataSourceService.ts` 提供来源适配器注册、目录拉取、更新与自动更新（`getMetadataSourceAdapters`、`fetchMetadataSourceCatalog`、`updateMetadataSource`、`runMetadataSourceAutoUpdate`），拉取结果经同一转换管线写成本地规则。配置入口是设置页的 `ModelMetadataSourcesDialog.vue`；与内置目录的差异比对、确认流程已移除，更新按来源整体应用。外部目录因此与内置规则、用户规则构成三个写入面，优先级仍按第 3.4 节的"独占/深合并"规则处理，来源本身不携带优先级。
+
 ## 4. 运行时选择与路由
 
 ### 4.1 Agent 是主聊天的默认绑定点
@@ -308,6 +307,10 @@ Agent 配置保存 `profileId` 和 `modelId`。主聊天构造请求时先从 Ag
 7. 成功或失败后按错误分类更新 Key 健康状态（见第 5 节），并把响应或异常交还调用方；聊天调用方会在应用层等待重试并重新选 Key（见第 5.3 节）。
 
 路由是确定性的，没有读取 Profile 顺序、权重、延迟、剩余额度或价格来改选渠道——模型执行路由只做**渠道内的协议/端点选择**，不跨渠道改选。
+
+### 4.3 虚拟渠道：一次请求的候选目标序列
+
+虚拟渠道把"用户看到的渠道"与"真实请求目标"分开：Profile 上的 `virtualChannel` 声明一组候选目标（渠道 + 模型），共享核心 `packages/llm-core/src/virtual-channel.ts` 定义 `VirtualChannelConfig`、`ChannelTarget`、`ChannelModel` 与 `ChannelExecution` 等结构，并把一次执行建模为按顺序尝试的 `ChannelAttempt` 集合。执行侧按候选顺序尝试，失败是否继续由 `isChannelRetryableError` 统一判定；`ChannelConfigurationError` 与 `ChannelExecutionError` 区分配置错误和执行错误。绑定关系还可以按操作维度为虚拟渠道内的真实模型分别指定，对应 `VirtualModelBindings`。它与"跨渠道自动故障转移"的区别在于：候选集合是用户在虚拟渠道里显式声明的，不是运行时按健康度、成本或延迟自动改选；细节与配置入口见 `docs/architecture/llm-execution-routing.md`。
 
 ## 5. 多 Key 轮询与熔断
 
@@ -345,7 +348,7 @@ Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后�
 
 `useLlmRequest.sendRequest` 单次调用只选一次 Key 并调用一次 Adapter；失败后分类记录健康状态并立即把错误抛给调用方，渠道层内部没有重放、退避或跨 Profile 切换。
 
-重试下放在调用方。llm-chat 主聊天链路的 `useSingleNodeExecutor.ts:245-345` 在应用层实现重试循环：`maxRetries` 默认 2（共最多 3 次尝试）、`retryInterval` 默认 3 秒、`retryMode` 默认固定间隔（可改指数，默认值见 `defaultSettings.ts:160-167`），429 还会追加 5 秒惩罚等待。每次重试重新调用 `sendRequest`，因此会重新执行 `pickKey()`：轮询下标继续推进，且已被熔断或标坏的 Key 被过滤，同渠道还有其他可用 Key 时重试就换 Key。流式模式收到首个 chunk 后失败不再重试，避免已输出内容重放；400/`INVALID_ARGUMENT` 与用户中止也不重试（`useSingleNodeExecutor.ts:296-318`）。
+重试下放在调用方。llm-chat 主聊天链路的 `useSingleNodeExecutor.ts:557-660` 在应用层实现重试循环：`maxRetries` 默认 2（共最多 3 次尝试）、`retryInterval` 默认 3 秒、`retryMode` 默认固定间隔（可改指数，默认值见 `defaultSettings.ts:160-175`），429 还会追加 5 秒惩罚等待。重试前先按"可重试状态码白名单"（`retryStatusCodes`，见 `utils/retryStatusCodes.ts`）判断：有明确状态码但不在白名单时直接放弃，2xx/504/524 始终排除，无状态码的网络/超时错误不受该限制。每次重试重新调用 `sendRequest`，因此会重新执行 `pickKey()`：轮询下标继续推进，且已被熔断或标坏的 Key 被过滤，同渠道还有其他可用 Key 时重试就换 Key。流式模式收到首个 chunk 后失败不再重试，避免已输出内容重放；400/`INVALID_ARGUMENT` 与用户中止也不重试。
 
 媒体生成与媒体会话命名还有结构化输出降级尝试（`useMediaGenAILogic.ts:170-227`），每次也重新走 Key 选择，但那是解析兜底，不是网络失败重试；翻译、话题命名、上下文压缩等辅助任务本次未发现重试循环。
 
@@ -457,6 +460,11 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - 渠道探测：[`src/views/Settings/llm-service/probe/channel-probe-service.ts`](../../aio-hub/src/views/Settings/llm-service/probe/channel-probe-service.ts)
 - 路由编辑与探测结果应用：[`src/views/Settings/llm-service/components/ModelRoutingEditor.vue`](../../aio-hub/src/views/Settings/llm-service/components/ModelRoutingEditor.vue)、[`src/views/Settings/llm-service/probe/route-application.ts`](../../aio-hub/src/views/Settings/llm-service/probe/route-application.ts)
 - 语音转写适配：[`src/llm-apis/adapters/openai/transcription.ts`](../../aio-hub/src/llm-apis/adapters/openai/transcription.ts)
+- 凭据隔离与哈希索引：[`src/utils/llm-secret/`](../../aio-hub/src/utils/llm-secret/)（`storage.ts`、`codec.ts`、`profiles.ts`、`apiKeyHash.ts`、`keyStates.ts`）
+- 虚拟渠道：[`packages/llm-core/src/virtual-channel.ts`](../../aio-hub/packages/llm-core/src/virtual-channel.ts)、路由说明 [`docs/architecture/llm-execution-routing.md`](../../aio-hub/docs/architecture/llm-execution-routing.md)
+- 外部元数据来源：[`src/services/modelMetadataSourceService.ts`](../../aio-hub/src/services/modelMetadataSourceService.ts)、`src/views/Settings/llm-service/components/ModelMetadataSourcesDialog.vue`
+- 输出预算裁剪与采样兼容：[`packages/llm-core/src/output-tokens.ts`](../../aio-hub/packages/llm-core/src/output-tokens.ts)、[`packages/llm-core/src/sampling-compatibility.ts`](../../aio-hub/packages/llm-core/src/providers/sampling-compatibility.ts)
+- DeepSeek 网页工具端点：[`src/llm-apis/adapters/deepseek/tools.ts`](../../aio-hub/src/llm-apis/adapters/deepseek/tools.ts)
 - 配置导入：[`src/utils/llm-config-import`](../../aio-hub/src/utils/llm-config-import)
 - 移动端 Profile Store：[`mobile/src/tools/llm-api/stores/llmProfiles.ts`](../../aio-hub/mobile/src/tools/llm-api/stores/llmProfiles.ts)
 - 移动端渠道设置页与编辑器：[`mobile/src/tools/llm-api/views/LlmSettingsView.vue`](../../aio-hub/mobile/src/tools/llm-api/views/LlmSettingsView.vue)、[`mobile/src/tools/llm-api/components/ProfileEditor.vue`](../../aio-hub/mobile/src/tools/llm-api/components/ProfileEditor.vue)
@@ -466,7 +474,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 ## 12. 未验证事项
 
 1. 本次未启动 Tauri 桌面端，没有实测官方 Provider、自建网关和代理模式下的 TLS/HTTP 行为。
-2. 未检查真实用户配置目录的文件 ACL；“明文落盘”基于序列化与写入实现，不等于配置文件一定对其他系统账户可读。
+2. 未检查真实用户配置目录的文件 ACL；凭据文件为客户端混淆而非系统级加密，混淆格式可被同机代码解码，实际防泄漏强度未做运行验证。
 3. 未实测 Azure 渠道的真实调用。
 4. 未启动移动端 Tauri/Android 运行态；移动端配置文件路径、保存成功、真实模型探测和平台文件权限均为源码确认或静态推断，未做设备实测。
 5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；它们不等于 LLM Chat 的 Key/渠道故障转移，本次未逐项展开。

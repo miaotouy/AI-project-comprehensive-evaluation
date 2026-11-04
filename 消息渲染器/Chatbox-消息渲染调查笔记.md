@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：只读源码梳理，未修改目标仓库
 >
@@ -19,9 +19,9 @@ Chatbox 以 `Message.contentParts` 组织消息渲染，Markdown renderer 只处
 1. 模型流由 `orchestrateGeneration()` 消费。
 2. `processStreamChunk()` 把增量转换成 `text`、`reasoning`、`tool-call`、`image` 等 part。
 3. 流式期间每个可见增量都更新 React Query session cache；每 2 秒或遇到工具调用时落盘，结束时最终落盘。
-4. 会话路由把当前会话交给 `MessageList`。
-5. `MessageList` 合并历史线程与当前线程，用 `react-virtuoso` 虚拟化，并把最后一轮用户/助手消息组合成一个列表项。
-6. 普通消息进入 `Message`，再按 part 类型分派给 Markdown、思考时间线、工具 UI、图片、提示卡等专用组件；有替代回复的消息在下方挂 `ForkGroup` 折叠分支组（`MessageList.tsx:439-451`）。
+4. 会话路由把"会话头 + transcript 窗口"交给 `MessageList`：`useSessionPresentation` 给会话头，`useSessionTranscript` 给按窗口加载的消息行与 thread 行。
+5. `MessageList` 用 `buildTranscriptRenderItems(rows, threads)` 拼出渲染项，用 `react-virtuoso` 虚拟化，并把最后一轮用户/助手消息组合成一个列表项。
+6. 每个渲染项再交给 `Message`，按 part 类型分派 Markdown、思考时间线、工具 UI、图片、提示卡等专用组件；有替代回复的消息在下方挂 `ForkGroup` 折叠分支组。
 7. 文本 part 才进入 `Markdown`；Markdown 内再分派普通文本、代码、LaTeX、Mermaid、SVG 和图片。
 
 总体链路：
@@ -30,9 +30,9 @@ Chatbox 以 `Message.contentParts` 组织消息渲染，Markdown renderer 只处
 model.chatStream()
   -> processStreamChunk()
   -> Message.contentParts
-  -> React Query session cache / periodic storage persist
+  -> transcript 行窗口（@chatbox/react query）+ 流式 cache / 节流提交
   -> /session/$sessionId
-  -> MessageList (Virtuoso)
+  -> MessageList (Virtuoso) + buildTranscriptRenderItems
   -> ForkMarkerMessage | SummaryMessage | Message (+ ForkGroup 替代回复折叠组)
   -> message timeline layout
   -> Markdown | ReasoningContentUI | StepTimelineUI | ToolCallPartUI
@@ -58,38 +58,12 @@ model.chatStream()
 
 ## 页面入口与状态来源
 
-会话页面入口是：
+会话页面入口是 `src/renderer/routes/session/$sessionId.tsx`。页面不再直接读取完整 session 对象，而是经两个投影：
 
-`src/renderer/routes/session/$sessionId.tsx`
+- `useSessionPresentation()` 取会话头（`SessionHeaderRead`）与展示摘要；
+- `useSessionTranscript()` 取按窗口加载的 transcript：`rows`（消息行）、`threads`（thread 行），以及 controller 与视口状态。
 
-页面通过 `useSession(currentSessionId)` 从 React Query 读取 session。query 使用：
-
-```ts
-queryKey: QueryKeys.ChatSession(sessionId)
-staleTime: Infinity
-```
-
-session 存在时页面直接渲染：
-
-```tsx
-<MessageList
-  ref={messageListRef}
-  key={`message-list${currentSessionId}`}
-  currentSession={currentSession}
-/>
-```
-
-`key` 绑定 session id，因此切换会话会重新创建完整的消息列表实例；这也隔离了列表内部的滚动和局部交互状态。
-
-消息列表调用 `getAllMessageList()`，该函数按顺序拼接：
-
-```text
-session.threads[*].messages
-  + session.messages
-```
-
-主视图会同时铺开当前线程和历史线程；每个线程的首条消息前由 `ThreadLabel` 标出边界。
-
+`MessageList` 的 props 因此是 `{ headerRead, transcript, className }`。`key` 仍绑定 session id，切换会话会重建整个列表实例，从而隔离滚动与局部交互状态。列表内部用 `transcript.controller` 加载更多历史窗口，首窗就绪与否由 `transcript.firstWindowReady` 暴露；视口锚点用 `SessionTranscriptViewportAnchor` 表示，换算成滚动位置由 `transcript-content-anchor.ts`、`transcript-item-scroll.ts` 负责。历史线程与当前线程的合并由 `buildTranscriptRenderItems(rows, threads)` 完成，各线程首条消息前由 `ThreadLabel` 标出边界。
 ## 消息数据模型
 
 核心定义位于：
@@ -156,7 +130,7 @@ call -> result | error | paused
 - `src/renderer/stores/session/orchestration.ts`
 - `src/renderer/stores/session/stream-chunk-processor.ts`
 - `src/renderer/stores/session/messages.ts`
-- `src/renderer/stores/chatStore.ts`
+- `packages/chatbox-react/src/query/session-query-bridge.ts`（`updateMessageCache`）
 
 ### chunk 到 part
 
@@ -189,7 +163,7 @@ call -> result | error | paused
 ```text
 普通 chunk
   -> updateStreamingCache()
-  -> chatStore.updateMessageCache()
+  -> sessionQueryBridge.updateMessageCache()
   -> React Query setQueryData()
   -> UI 立即重渲染
 
@@ -206,9 +180,7 @@ tool-call 或距上次落盘 >= 2 秒
 
 ## 列表层
 
-核心文件：
-
-`src/renderer/components/chat/MessageList.tsx`
+核心文件：`src/renderer/components/chat/MessageList.tsx`（渲染项拼装在同目录 `message-render-items.ts`，锚点换算在 `transcript-content-anchor.ts`、`transcript-item-scroll.ts`）。
 
 ### 虚拟列表
 
@@ -235,11 +207,11 @@ tool-call 或距上次落盘 >= 2 秒
 [last user, next assistant]
 ```
 
-该分组可以在新消息阶段把列表项最小高度设为视口高度的 85%（`MessageList.tsx:505-506`），使最新问题从视口上方开始、回答在同一列表项内增长；其余消息一条对应一个 Virtuoso item。分组与滚动定位的 item 索引计算已从列表组件提取为独立的 `buildMessageRenderItems()`（`components/chat/message-render-items.ts:49-77`），`scrollToMessage` 等消费方必须经它定位，避免流式期间滚到错误位置。
+该分组可以在新消息阶段把列表项最小高度按视口高度比例设成一块较高的区域，使最新问题从视口上方开始、回答在同一列表项内增长；其余消息一条对应一个 Virtuoso item。分组与滚动定位的 item 索引计算在独立的 `buildTranscriptRenderItems(rows, threads)` 里（`components/chat/message-render-items.ts`），`scrollToMessage` 等消费方必须经它定位，避免流式期间滚到错误位置。
 
 ### 特殊消息分流
 
-每条消息项进入 `renderMessageBlock()`（`MessageList.tsx:396-456`）后先分流：
+每条消息项进入 `renderMessageBlock()` 后先分流：
 
 ```text
 isForkMarker -> ForkMarkerMessage
@@ -257,16 +229,16 @@ otherwise    -> Message
 
 列表自己实现了：
 
-- 会话滚动快照恢复（最多 100 个会话的类 LRU 滚动缓存，`MessageList.tsx:61-70`）。
+- 会话滚动快照恢复（按会话 id 缓存最近若干会话的滚动位置，容量常量本次未复核）。
 - 顶部、底部、上一条 user、下一条 user 导航。
 - 桌面消息 minimap。
 - 流式输出跟随。
 
-`createSmoothFollowOutputController()` 不使用 Virtuoso 自带的输出跟随属性。它在用户位于底部时监听总高度变化，并按动画帧合并滚动请求；用户主动向上滚动后暂停跟随，滚回底部容差内时自动恢复（`smooth-follow-output.ts:28-73`）；布局收缩把暂停中的视口推到"底部"不会误恢复。移动端使用 `auto`，桌面通常使用 `smooth`，同时尊重 reduced motion。
+`createSmoothFollowOutputController()` 不使用 Virtuoso 自带的输出跟随属性。它在用户位于底部时监听总高度变化，并按动画帧合并滚动请求；用户主动向上滚动后暂停跟随，滚回底部容差内时自动恢复（`smooth-follow-output.ts`）；布局收缩把暂停中的视口推到"底部"不会误恢复。移动端使用 `auto`，桌面通常使用 `smooth`，同时尊重 reduced motion。
 
 ### Minimap 锚点
 
-列表组件只为 minimap 生成**短预览锚点**：`getMessagePreviewText()`（`message-navigation-utils.ts:22`）把每条用户消息折叠成最多 `MINIMAP_PREVIEW_MAX_LENGTH` 字符的文本前缀（图片占位符 `[image]`），并对预览相同的连续流式更新复用上一份锚点数组（稳定 identity，避免长回复流式期间 minimap 全量重算）；小屏完全跳过锚点计算。minimap 侧栏组件对大量锚点只渲染视口窗口加 overscan（`MessageMinimapRail.tsx:30-37`）。
+列表组件只为 minimap 生成**短预览锚点**：`getMessagePreviewText()`（`message-navigation-utils.ts`）把每条用户消息折叠成最多 `MINIMAP_PREVIEW_MAX_LENGTH` 字符的文本前缀（图片占位符 `[image]`），并对预览相同的连续流式更新复用上一份锚点数组（稳定 identity，避免长回复流式期间 minimap 全量重算）；小屏完全跳过锚点计算。minimap 侧栏组件对大量锚点只渲染视口窗口加 overscan（`MessageMinimapRail.tsx`）。
 
 ## 单条消息骨架
 
@@ -580,14 +552,16 @@ Git 历史显示重做代码块时删除了：
 | 职责 | 文件 |
 | --- | --- |
 | session 页面入口 | `src/renderer/routes/session/$sessionId.tsx` |
-| session React Query cache | `src/renderer/stores/chatStore.ts` |
+| transcript 行窗口投影 | `packages/chatbox-react/src/query/session-transcript-window.ts`、`session-transcript.ts` |
+| 会话头与展示摘要 | `src/renderer/hooks/useSessionPresentation.ts` |
+| 视口锚点换算 | `src/renderer/components/chat/transcript-content-anchor.ts`、`transcript-item-scroll.ts` |
 | generation orchestration | `src/renderer/stores/session/orchestration.ts` |
 | chunk -> part | `src/renderer/stores/session/stream-chunk-processor.ts` |
 | 流式 cache / persist | `src/renderer/stores/session/messages.ts` |
 | 消息 schema | `src/shared/types/session.ts` |
 | 旧消息迁移 / 文本提取 | `src/shared/utils/message.ts` |
 | 消息列表 | `src/renderer/components/chat/MessageList.tsx` |
-| 消息列表 item 分组 | `src/renderer/components/chat/message-render-items.ts` |
+| 消息列表 item 分组 | `src/renderer/components/chat/message-render-items.ts`（`buildTranscriptRenderItems`） |
 | 替代回复折叠分支组 | `src/renderer/components/chat/ForkGroup.tsx` |
 | minimap 锚点与导航 | `src/renderer/components/chat/MessageMinimapRail.tsx`、`message-navigation-utils.ts` |
 | 单条消息 | `src/renderer/components/chat/Message.tsx` |

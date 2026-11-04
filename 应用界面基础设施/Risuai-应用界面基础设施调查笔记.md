@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用根装配和公共实现入手，抽样核对业务消费方；依赖内部行为与运行表现单独标注
 >
@@ -24,9 +24,11 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 **入口。** `index.html` 只挂 `#app` 容器和 `#preloading` 静态加载层（index.html:19-37），`src/main.ts` 挂载 App 后移除预加载层，并行执行 `loadData()`（bootstrap）与 `initHotkey()`（main.ts:16-21）。
 
-**根装配。** `src/App.svelte` 是唯一根组件：先按优先级条件渲染整屏模式——法律声明页、愚人节彩蛋、加载中（`loadedStore` 为假）、自定义 GUI 编辑、首次设置欢迎页、设置页、移动端骨架，最后是桌面布局（侧栏 + ChatScreen，或角色网格）；随后在 `<main>` 尾部统一渲染各浮层宿主（App.svelte:196-281）。全部模式切换都是 Svelte 条件块，没有路由表。
+**根装配。** `src/App.svelte` 是唯一根组件：先按优先级条件渲染整屏模式——法律声明页（构建期变量或 `globalThis.__RISU_LEGAL_CONFIGURED__` 任一存在即跳过）、愚人节彩蛋、加载中（`loadedStore` 为假）、自定义 GUI 编辑、首次设置欢迎页、设置页、移动端骨架，最后是桌面布局（侧栏 + ChatScreen，或角色网格）；随后在 `<main>` 尾部统一渲染各浮层宿主。全部模式切换都是 Svelte 条件块，没有路由表。
 
-**浮层宿主清单。** 根节点尾部按固定顺序挂载全部浮层宿主（App.svelte:238-281）：全局命令类只有 AlertComp 与 PopupList 两个；其余是业务模态——Realm 系列、预设与人设列表、书签列表、HypaV3 模态与进度、插件警报、EasyPanel、PopupEditor、LoadoutModal、IrisModal、自定义侧栏配置对话框，以及常驻的保存状态图标。这些宿主由各自 store 的布尔字段或快照字段控制。
+**浮层宿主清单。** 根节点尾部按固定顺序挂载全部浮层宿主：全局命令类只有 AlertComp 与 PopupList 两个；其余是业务模态——Realm 系列、预设与人设列表、书签列表、HypaV3 模态与进度、插件警报、EasyPanel、PopupEditor、LoadoutModal、角色入场引导（`OnboardingModal`，由 `onboardingModalStore` 驱动）、IrisModal、自定义侧栏配置对话框，以及常驻的保存状态图标。这些宿主由各自 store 的布尔字段或快照字段控制。
+
+**会话保活。** “keep session alive” 选项生成的静音音频改由 `createKeepAliveAudio()` 构造并复用同一个实例，播放被系统或其它应用抢占时把状态复位，同时写入 `navigator.mediaSession` 元数据，供锁屏/媒体控制显示（`src/ts/keepAliveAudio.ts`、`App.svelte`）。
 
 **无 Provider 概念。** 项目没有全局 Provider 树；需要把子组件挂到其它 DOM 位置时用自研 Portal 工具——`Portal.svelte` 通过 `getAllContexts()` + `mount()` 把内容挂到目标节点，`LazyPortal.svelte` 额外用 IntersectionObserver 在目标可见过半后才挂载（Portal.svelte:16-22、LazyPortal.svelte:19-40）。
 

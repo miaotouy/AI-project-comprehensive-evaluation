@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-08-31
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：静态源码走读；复核既有生成式输出与运行时笔记（同一代码快照），检查 Stable Diffusion 路由、表单、持久化 store、文件上传与删除路径；未启动应用、未调用 Stability API 或上传服务、未运行测试
 >

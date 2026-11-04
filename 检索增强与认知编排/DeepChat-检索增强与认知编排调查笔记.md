@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：只读核对 Session Tape、搜索投影、召回服务与模型工具；参考已有能力汇总、独特功能和工具笔记；未运行 Electron、SQLite FTS 或真实模型回合
 >
@@ -18,7 +18,7 @@ DeepChat 在本类目有两条不同谱系的主链。Session Tape 提供工具�
 
 检索使用当前会话的有效 Tape 视图；已完成的直属子 Agent Tape 可被显式加入只读范围。搜索优先走 SQLite FTS 投影及 BM25 分数，投影不可用或不新鲜时回退到有效行搜索。搜索结果不会自动注入本轮 prompt，也未发现“命中改变固定下一阶段查询”的协议，后续行动仍由模型工具循环决定。
 
-Memory 与 Tape 不共享事实对象。Memory 行拥有生命周期、冲突、派生和遗忘 tombstone；查询 embedding 带熔断与取消，召回结果会自动进入发送前 memory contribution。后台维护可做 challenge、merge、reflection 与 persona 草稿，但维护有 LLM 调用预算，并不构成固定多阶段推理链。
+Memory 与 Tape 不共享事实对象。Memory 行拥有生命周期、冲突、派生和遗忘 tombstone；摄取侧额外维护一份投影表，让抽取按消息区间推进，派生关系可按父/子方向分页追溯并整体归档。查询 embedding 带熔断与取消，召回结果会自动进入发送前 memory contribution。后台维护可做 challenge、merge、reflection 与 persona 草稿，但维护有 LLM 调用预算，并不构成固定多阶段推理链。
 
 ## 谱系定位与系统边界
 
@@ -64,6 +64,10 @@ Memory 召回则在请求前自动执行。检索服务生成查询 embedding，
 
 对话后的候选写入会先经过去重和决策，结果可为新增、更新、替代、无操作或挑战；更新或替代要求模型返回受长度约束的合并文本。维护服务按 challenge、merge、reflection、persona 四类步骤分别计入 LLM 调用预算，并把合并、反思、替代和手工编辑记录为派生关系。服务边界见 `src/main/memory/services/writeCoordinator.ts`、`mergeService.ts`、`maintenanceService.ts` 与 `src/main/memory/core/maintenanceBudget.ts:1-53`。
 
+记忆摄取改读一份投影表而不是直接扫会话消息：`deepchat_memory_ingestion_projection` 保存 session、message、orderSeq 与 entry id 的对应关系，抽取服务按 cursor 读取当前区间并在会话被替换或失效时重建，抽取结果可携带逐条来源 entry 的证据（`src/main/memory/data/ingestionProjectionPort.ts`、`src/main/memory/core/extraction.ts`、`src/main/memory/domain/types.ts` 的 `MemoryExtractionEvidence`）。
+
+派生产物现在可追溯与可清理：谱系按父/子两个方向分页返回（`MemoryLineageCursor`/`MemoryLineagePage`），管理服务提供影响查询与“归档受影响派生记忆”两个操作，设置页以影响复核面板展示（`src/main/memory/services/managementService.ts`、`src/main/memory/routes.ts`、`MemoryImpactReview.vue`、`MemoryLineageSection.vue`）。
+
 Persona 演化生成草稿，不会直接覆盖生效人格；active/draft 状态由专门路径维护。删除使用 tombstone 保存作用域化内容哈希，防止已明确遗忘的同一事实被后续提取重新加入。该链具备受预算约束的主动记忆维护，但本次未确认无人触发时的独立调度周期。
 
 ## 作用域、预算、可观测与恢复
@@ -99,3 +103,4 @@ Memory 链可与长期用户记忆比较提取、冲突、遗忘、persona 审�
 - `src/main/memory/services/retrievalService.ts`、`src/main/memory/infra/queryEmbeddingCircuit.ts`：Memory 检索、查询 embedding、取消与熔断。
 - `src/main/memory/services/writeCoordinator.ts`、`mergeService.ts`、`maintenanceService.ts`：候选写入、合并与维护。
 - `src/main/memory/core/contributionBudget.ts`、`maintenanceBudget.ts`、`tombstone.ts`：注入预算、维护预算与精确遗忘。
+- 记忆摄取投影与谱系：`src/main/memory/data/ingestionProjectionPort.ts`、`src/main/memory/services/managementService.ts`、`src/main/memory/routes.ts`、`src/renderer/settings/components/MemoryImpactReview.vue`、`MemoryLineageSection.vue`

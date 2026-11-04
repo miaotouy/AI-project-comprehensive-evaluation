@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/ui-*`、`packages/api/session-controller`、`packages/core/tools`、`packages/session/session-projection`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
+> 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
 > 调查方式：静态源码阅读（只读检查 git 工作树）；未运行应用、测试与快照回放
 >
@@ -14,20 +14,21 @@
 
 ## 结论摘要
 
-1. **消息渲染位于 Web Client 插件层**：Session Controller 传原始 durable 事件与 assistant live frames，Client 的会话对象层折叠为快照，ui-conversation、ui-tool 与 ui-primitives 绘制；Host 不计算 Web 工具卡。
-2. **输入模型是原始事件 journal**：Session Controller 的历史页与 follow opening 传输 v3 `SessionWireEvent`，工具参数、结果内容、错误和持久化 meta 原样通过；Host 不再解析工具定义或附加 `ToolEventView`。assistant 的紧凑流保存在 `assistant/message` 或 `assistant/attempt` 内，Client journal 另插入 `assistant/live-chunk` 临时项并在 durable settlement 到达时收口（`packages/api/session-controller/README.md`）。
-3. **流式链路是"逐 chunk 折叠、按帧发布、增量渲染"**：块级不可变的折叠有两处实现（`PartialAccumulator` 与 assistant Definition），可见 chunk 请求 `animation-frame` 发布、同帧合并（`notifier.ts:44-50`）；`MarkdownText` 的增量解析器只重解析尾部两块、冻结块缓存为 React 元素（`markdown/incremental.ts:75-129`）。
-4. **工具卡在 Client 派生**：客户端从 raw call args、结果文本、失败状态与持久化 meta 生成卡片；业务包仍可注册 keyed toolview。Host-local presenter 留作其它消费者，内置 Web 不使用它（`packages/client/ui-tool/README.md:46`）。
-5. **工具卡片按 card 判别分派为六类**（完整对照见第 6 节表格），client 侧由各卡片模型派生渲染 props；另有按工具名注册的 keyed 槽位 `tool.call.toolview` 支持专属卡片（cordis_define 即此路）。
+1. **消息渲染位于 Web Client 插件层且已拆成两个包**：`ui-chat` 负责 ChatView、conversation nodes、Markdown 与滚动；`ui-conversation` 负责与目标平台无关的会话装配（事件折叠器）与浏览器壳。Session Controller 传原始 durable 事件与 assistant live frames，Client 的会话对象层折叠为快照，ui-chat、ui-tool 与 ui-primitives 绘制；Host 不计算 Web 工具卡。
+2. **输入模型是原始事件 journal（当前格式 v4）**：Session Controller 的历史页与 follow opening 传输 `SessionWireEvent`，工具参数、结果内容、错误和持久化 meta 原样通过；Host 不再解析工具定义或附加 `ToolEventView`。assistant 的紧凑流保存在 `assistant/message` 或 `assistant/attempt` 内，Web 适配器把流成员展开为 Client-only 的 `assistant/live-chunk` 临时项，durable settlement 到达时收口（`packages/api/session-controller/README.md`）。
+3. **流式链路是"逐 chunk 折叠、按帧发布、增量渲染"**：流成员以块下标累积、只替换该块的引用（`ui-conversation` 的 partial accumulator 语义），可见 chunk 请求 `animation-frame` 发布、同帧合并（`session-controller/src/client/sessions/notifier.ts`）；`MarkdownText` 的增量解析器只重解析尾部两块、冻结块缓存为 React 元素（`ui-primitives/src/markdown/incremental.ts`）。
+4. **工具卡在 Client 派生**：客户端从 raw call args、结果文本、失败状态与持久化 meta 生成卡片；业务包仍可注册 keyed toolview。Host-local presenter 留作其它消费者，内置 Web 不使用它（`packages/client/ui-tool/README.md`）。
+5. **工具卡片按 card 判别分派为六类**（完整对照见第 6 节表格），client 侧由各卡片模型派生渲染 props；另有按工具名注册的 keyed 槽位 `tool.call.toolview` 支持专属卡片。
 6. **Markdown 管线是自建 mdast→React 直接渲染**：raw HTML 以字面文本输出、链接与图片只放行 http(s)/mailto、流式与收口用两套语法（流式无数学与高亮）、KaTeX 与 shiki 均无用户 HTML 注入面。
 7. **性能与列表**：增量块解析 + 冻结元素缓存 + RAF 帧合并 + 语法惰性加载；聊天列表无虚拟化（keyed 行 + 分页 + 滚动锚点），trajectory 视图是独立表面且带虚拟行。
+8. **Turn 层新增过程折叠与导航**：conversation nodes 现在按 turn 生成 process 分组、activity 摘要、whole-Turn 折叠、turn 导航与 retry/turn-error 行；规则由 `ui-chat/src/client/conversation-nodes/README.md` 定义。
 
 ## 总体渲染链路
 
 ```text
-LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
-  -> Session Controller follow/history journal：原始 durable events + assistant live frames
-  -> Client SessionEventStream 校验连续窗口并在 settlement 时替换临时块
+LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（tool/call, tool/result）
+  -> Session Controller follow/history journal：原始 durable 事件 + assistant live frames
+  -> Client SessionEventStream 校验连续窗口并在 settlement 时替换临时块（assistant/live-chunk）
   -> ConversationNodeAssembler.append()：各 ConversationNodeDefinition 的 match/start/update 折叠
   -> publication 分级：immediate(microtask) 或 animation-frame(RAF) -> Notifier 重建快照
   -> ChatView 读取 chat.order，ChatNodeSeat 按 key 订阅单个节点
@@ -38,24 +39,24 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 
 ## 1. 消息与内容块数据模型
 
-- **事件流为唯一输入**：`Session` 维护连续事件窗口（history 装载 + live 缓冲拼接），`ConversationNodeAssembler` 把每个事件交给注册的 Definition 折叠出业务上下文（`runtime/src/client/sessions/conversation-assembler.ts:194-215`）。
-- **assistant 内容块**：`AssistantBlock` 是渲染器的最小内容单元，kind 取五值——text、reasoning、image、tool-call、other（`runtime/src/client/sessions/conversation.ts:44-73`）；流式、收口、中断三种状态共享一个按 turn:step 标识的节点（`ui-conversation/src/client/conversation-nodes/assistant.ts:244-309`）。
+- **事件流为唯一输入**：`Session` 维护连续事件窗口（history 装载 + live 缓冲拼接），`ConversationNodeAssembler` 把每个事件交给注册的 Definition 折叠出业务上下文（`ui-conversation/src/client/conversation/assembler.ts`）。
+- **assistant 内容块**：`AssistantBlock` 是渲染器的最小内容单元，kind 取五值——text、reasoning、image、tool-call、other；流式、收口、中断三种状态共享一个按 turn:step 标识的节点（`ui-chat/src/client/conversation-nodes/assistant.ts`）。
 - **工具块**：工具 conversation node 从原始 `tool/call`、`tool/result` 与 code-dispatch 事件配对并形成递归子调用；窗口截断时结果可退化为缺调用头的通用展示。
-- **渲染节点**：`ChatNode` 的 kind 与 payload 通过 `ChatNodeDataMap` 声明合并扩展（`ui-conversation/src/client/contract/chat-nodes.ts:6-39`），`ChatNodeSeat` 按 key 订阅并路由到 keyed 槽位 `conversation.chat.node`（`chat/ChatNodeSeat.tsx:19-61`）。
+- **渲染节点**：`ChatNode` 的 kind 与 payload 通过 `ChatNodeDataMap` 声明合并扩展（`ui-chat/src/client/contract/chat-nodes.ts`），`ChatNodeSeat` 按 key 订阅并路由到 keyed 槽位 `conversation.chat.node`（`ui-chat/src/client/chat/ChatNodeSeat.tsx`）。
 
 ## 2. 流式数据到 UI 的更新链
 
-- **chunk 折叠**：`PartialAccumulator` 以块下标稀疏数组累积五种可见 chunk（block-start、三种 delta、block-end），只替换该块的引用；usage/finish 不算可见变化（`runtime/src/client/sessions/partial.ts:23-103`）。assistant Definition 的 `updateChunk` 做同样的折叠，并顺带记录首可见块与首 token 时间（`assistant.ts:80-132`）。
-- **发布节流**：流式 chunk 请求 `animation-frame` 发布，`Notifier.markFrameDirty` 用 requestAnimationFrame 合并同帧多次更新（`notifier.ts:44-50`）。收口与 tool/result 事件则走 immediate 的 microtask 发布（`assistant.ts:278-283`）。
-- **增量渲染**：`MarkdownText` 流式时用增量解析器，只重解析末尾两块，冻结块缓存为 React 元素，块以源码偏移作稳定 key 保证 React 复配而非重挂载（`markdown/incremental.ts:75-129`、`markdown/MarkdownText.tsx:59-138`）。
-- **收口与中断**：`assistant/message` 以完整 content 替换折叠块并立即发布（`assistant.ts:264-272`），`streaming` 标志翻转后 `MarkdownText` 全量重解析（数学与高亮落地）；turn/step 关闭边界处若残留可见块，生成合成 seq 的 `interrupted` 节点并渲染"已停止"标记（`assistant.ts:145-181`）。
+- **chunk 折叠**：live 帧以块下标稀疏数组累积五种可见 chunk（block-start、三种 delta、block-end），只替换该块的引用；usage/finish 不算可见变化。assistant Definition 的流式更新做同样的折叠，并顺带记录首可见块与首 token 时间（`ui-chat/src/client/conversation-nodes/assistant.ts`）。
+- **发布节流**：流式 chunk 请求 `animation-frame` 发布，`Notifier.markFrameDirty` 用 requestAnimationFrame 合并同帧多次更新（`packages/api/session-controller/src/client/sessions/notifier.ts`）。收口与 tool/result 事件则走 immediate 的 microtask 发布。
+- **增量渲染**：`MarkdownText` 流式时用增量解析器，只重解析末尾两块，冻结块缓存为 React 元素，块以源码偏移作稳定 key 保证 React 复配而非重挂载（`ui-primitives/src/markdown/incremental.ts`、`markdown/MarkdownText.tsx`）。
+- **收口与中断**：`assistant/message` 以完整 content 替换折叠块并立即发布，`streaming` 标志翻转后 `MarkdownText` 全量重解析（数学与高亮落地）；turn/step 关闭边界处若残留可见块，生成合成 seq 的 `interrupted` 节点并渲染"已停止"标记。
 
 ## 3. 消息列表、窗口化与滚动
 
-- **无虚拟化**：ChatView 是稳定 keyed 的节点列表，每个 `ChatNodeSeat` 只订阅自己的节点 key，assistant 增量只替换自身行（`chat/ChatView.tsx:382-397`）。
-- **分页**：`hasMore` 与"加载更早"按钮做 prepend，加载后按 `data-chat-anchor-key` 锚点保持阅读位置（`ChatView.tsx:349-363`、:237-249）。
-- **滚动**：底部跟随阈值 24px，滚动归属用"观察顶账本"区分程序写入与读者输入（滚轮/触摸/滚动条/键盘统一处理），钉底时 ResizeObserver 跟随流式高度变化（`ChatView.tsx:264-299`、:331-341）。
-- **trajectory 是独立表面**：时间线视图用纯投影把记录折叠为可测量的虚拟行（`ui-trajectory/src/client/trajectory-virtual-rows.ts:51-83`），与聊天列表的滚动策略互不相干。
+- **无虚拟化**：ChatView 是稳定 keyed 的节点列表，每个 `ChatNodeSeat` 只订阅自己的节点 key，assistant 增量只替换自身行（`ui-chat/src/client/chat/ChatView.tsx`）。
+- **分页**：`hasMore` 与"加载更早"按钮做 prepend，加载后按 `data-chat-anchor-key` 锚点保持阅读位置；历史页按 turn 对齐窗口发放，可用 `loadThrough(seq)` 跳到指定 turn。
+- **滚动**：底部跟随阈值 24px，滚动归属用"观察顶账本"区分程序写入与读者输入（滚轮/触摸/滚动条/键盘统一处理），钉底时 ResizeObserver 跟随流式高度变化。
+- **trajectory 是独立表面**：时间线视图用纯投影把记录折叠为可测量的虚拟行（`ui-trajectory/src/client/trajectory-virtual-rows.ts`），与聊天列表的滚动策略互不相干。
 
 ## 4. 消息壳层与角色分派
 
@@ -120,8 +121,8 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 消息模型仍以内容块与会话事件为输入；图片随消息进入同一投影链，推理内容按独立 reasoning block 与正文、工具卡片分离。Session Controller 只暴露 v3 逻辑事件，因此渲染器无需识别 JSONL 的物理压缩与格式代际。
 
 - 新工具卡片：Web 侧先为原始事件定义客户端 card model；需要专属外观时注册 keyed `tool.call.toolview` 条目。Host presenter 是其它交付面的可选投影，不是 Web 前置条件。
-- 新消息节点：注册 `ConversationNodeDefinition`（match/start/update/buildViewNode）+ keyed `conversation.chat.node` 渲染器；折叠按日志 seq 确定，可确定性重放（`ui-conversation/src/client/conversation-nodes/`）。
-- 新投影：在 `SessionProjectionMap` 上声明合并 + 注册纯 init/apply/view 单元，框架负责驱动与变更通知（`packages/session/session-projection/src/index.ts:42-74`、:405-425）。
+- 新消息节点：注册 `ConversationNodeDefinition`（match/start/update/buildViewNode）+ keyed `conversation.chat.node` 渲染器；折叠按日志 seq 确定，可确定性重放（`ui-chat/src/client/conversation-nodes/`）。
+- 新投影：在 `SessionProjectionMap` 上声明合并 + 注册纯 init/apply/view 单元，框架负责驱动与变更通知（`packages/session/session-projection/src/index.ts`）。
 - 已确认边界：UI 展示数据不进入会话日志；结构化工具结果 meta 可持久化，但 Web 卡片由 Client 重算。流式期间无高亮/数学，收口才全量渲染；聊天列表无虚拟化，超长会话渲染成本随已加载节点增长。
 
 ## 11. 未验证事项
@@ -130,17 +131,19 @@ LLM 流 (assistant/chunk) 与工具事件 (tool/call, tool/result)
 - 流式帧率与长会话性能未测量（`complex-history.perf.ts` 存在但未运行）。
 - 浏览器中 shiki CSS 变量主题、KaTeX MathML 分支、懒加载图片的实际呈现未观察。
 - 会话日志回放与 live settlement 的卡片派生是否完全一致未实测。
+- 过程分组、whole-Turn 折叠、turn 导航与 display mode 的可见规则以 `conversation-nodes/README.md` 为准，未运行验证。
 
 ## 12. 关键源码索引
 
 - `packages/core/tools/src/presentation.ts`：渲染意图词汇全集
-- `packages/api/session-controller/README.md:27-35`：原始 v3 journal、assistant live frame 与 settlement
-- `packages/core/tools/src/schema.ts:594-609`：presenter 软校验包裹；`docs/cookbook/adding-a-tool.md:69-89`：呈现纯函数约定
+- `packages/api/session-controller/README.md`：v4 journal、embedded assistant stream 与 live frame settlement
+- `packages/core/tools/src/schema.ts`：presenter 软校验包裹；`docs/cookbook/adding-a-tool.md`：呈现纯函数约定
 - `packages/api/session-controller/src/client/sessions/`：journal、assistant stream、notifier 与 settlement
-- `packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts:244-309`：assistant 节点与发布分级
-- `packages/client/ui-primitives/src/markdown/MarkdownText.tsx:156-176` 与 `incremental.ts:75-129`：增量渲染；`render.tsx`：mdast→React 与安全边界
-- `packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx:36-77` 与 `models/*`：卡片分派与派生；`tool/ToolCallTree.tsx:38-41`：keyed toolview 槽位
-- `packages/extensions/ui-cordis/src/client/card-model.ts:95-161`：cordis 专属卡片
+- `packages/client/ui-chat/src/client/conversation-nodes/assistant.ts`：assistant 节点与发布分级
+- `packages/client/ui-primitives/src/markdown/MarkdownText.tsx` 与 `incremental.ts`：增量渲染；`render.tsx`：mdast→React 与安全边界
+- `packages/client/ui-tool/src/client/tool/toolviews/GenericToolCard.tsx` 与 `models/*`：卡片分派与派生；`tool/ToolCallTree.tsx`：keyed toolview 槽位
+- `packages/extensions/ui-cordis/src/client/card-model.ts`：cordis 专属卡片
 - `packages/fs/tool-fs-search/src/presentation.ts`：presentationMeta 投影与窄化范例
-- `packages/session/session-projection/src/index.ts:42-74`：投影注册契约
-- `packages/client/ui-conversation/src/client/chat/ChatView.tsx`：列表、分页与滚动锚点
+- `packages/session/session-projection/src/index.ts`：投影注册契约
+- `packages/client/ui-chat/src/client/chat/ChatView.tsx`：列表、分页与滚动锚点
+- `packages/client/ui-conversation/src/client/conversation/assembler.ts`：会话事件折叠器

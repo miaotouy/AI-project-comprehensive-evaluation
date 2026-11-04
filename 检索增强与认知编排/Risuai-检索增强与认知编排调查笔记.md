@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：直接静态阅读当前 Risuai 工作树的 TypeScript/Svelte 源码、数据结构和持久化路径；未启动应用，未实际调用摘要或 Embedding 模型
 >

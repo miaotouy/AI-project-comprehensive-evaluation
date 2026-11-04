@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：只读静态阅读当前快照的配置层、model-provider、login、codex-api、models-manager、responses-api-proxy 及 CLI/TUI/app-server 入口；沿“配置加载 → Provider 合并 → 凭据解析 → 请求组装 → 流式响应”主链追踪。未运行构建、登录或真实模型请求。
 >
@@ -19,13 +19,13 @@ Codex 没有“多 Provider 渠道面板”。它的“渠道”由三部分合�
 当前快照的关键事实：
 
 - **内置 Provider 六个**：`openai`、`amazon-bedrock`、`amazon-bedrock-runtime`、`gcp`、`ollama`、`lmstudio`（`codex-rs/model-provider-info/src/lib.rs:753-786`）。
-- **自定义 Provider 通过配置增加**，使用新的 ID；内置 ID 受保留名单保护，不能整体覆盖（`codex-rs/config/src/config_toml.rs:947-978`）。
+- **自定义 Provider 通过配置增加**，使用新的 ID；内置 ID 受保留名单保护，不能整体覆盖（`codex-rs/config/src/config_toml.rs:952-983`）。
 - **一个 Provider 只有一个 `base_url`**，没有端点数组；要接多个兼容端点，需要定义多个 Provider ID（`codex-rs/model-provider-info/src/lib.rs:145-236`）。
 - **线协议只有 Responses**。`wire_api = "chat"` 在反序列化阶段直接报错，提示改用 `responses`（`codex-rs/model-provider-info/src/lib.rs:113-142`）。
-- **凭据默认存 `$CODEX_HOME/auth.json`**，文件模式为明文 JSON；可选 keyring 或“keyring 加密 + 本地密文文件”（`codex-rs/login/src/auth/storage.rs:47-73、256-272`；`codex-rs/config/src/types.rs:136-148`）。
-- **模型目录有内置快照、远端目录和磁盘缓存三层**，缓存文件是 `models_cache.json`，默认 TTL 300 秒（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/src/manager.rs:42-43`）。
-- **本次未找到多 Key 轮换、跨 Provider failover 或持久化健康状态**；重试发生在同一 Provider 内，另有每请求一次的 Provider 级 401 凭据刷新和 WebSocket→HTTP 的传输回退（`codex-rs/core/src/client.rs:789-807、2029-2067`；流式重试见下文）。
-- **会话与 Provider 绑定**：恢复或继续一个会话时，如果当前配置的 Provider 与会话保存的 Provider 不一致，会返回结构化错误而不是静默切换（`codex-rs/app-server/src/config_manager.rs:433-451、596-610`）。
+- **凭据默认存 `$CODEX_HOME/auth.json`**，文件模式为明文 JSON；可选 keyring 或“keyring 加密 + 本地密文文件”（`codex-rs/login/src/auth/storage.rs:51-77、256-272`；`codex-rs/config/src/types.rs:136-148`）。
+- **模型目录有内置快照、远端目录和磁盘缓存三层**，缓存文件是 `models_cache.json`，默认 TTL 300 秒（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/src/manager.rs:41-42`）。
+- **本次未找到多 Key 轮换、跨 Provider failover 或持久化健康状态**；重试发生在同一 Provider 内，另有每请求一次的 Provider 级 401 凭据刷新和 WebSocket→HTTP 的传输回退（`codex-rs/core/src/client.rs:776-794、2029-2067`；流式重试见下文）。
+- **会话与 Provider 绑定**：恢复或继续一个会话时，如果当前配置的 Provider 与会话保存的 Provider 不一致，会返回结构化错误而不是静默切换（`codex-rs/app-server/src/config_manager.rs:437-455、596-610`）。
 
 ## 系统边界与总体调用链
 
@@ -43,7 +43,7 @@ CLI / TUI / app-server
   → SSE 事件流回到 core，转成会话事件与 token 用量
 ```
 
-这条链路的配置落点集中在 `codex-rs/core/src/config/mod.rs:4034-4061`：先合并 Provider 表，再按“策略强制值 → 显式覆盖 → 配置值 → 默认 openai”的顺序选择 ID，最后取出对应的 `ModelProviderInfo`。请求端由 `create_model_provider` 选择运行时实现，再通过 `to_api_provider` 生成 `ApiProvider`（`codex-rs/model-provider/src/provider.rs:431-454`；`codex-rs/model-provider-info/src/lib.rs:469-517`）。
+这条链路的配置落点集中在 `codex-rs/core/src/config/mod.rs:4059-4086`：先合并 Provider 表，再按“策略强制值 → 显式覆盖 → 配置值 → 默认 openai”的顺序选择 ID，最后取出对应的 `ModelProviderInfo`。请求端由 `create_model_provider` 选择运行时实现，再通过 `to_api_provider` 生成 `ApiProvider`（`codex-rs/model-provider/src/provider.rs:449-472`；`codex-rs/model-provider-info/src/lib.rs:469-517`）。
 
 ## 1. 渠道实体与数据模型
 
@@ -76,7 +76,7 @@ CLI / TUI / app-server
 
 ### 自定义 Provider 的边界
 
-配置里的同 ID 覆盖不是通用的。`openai` 只允许改 `model_catalog_url`，且必须是 HTTPS 的允许 ChatGPT 主机；Bedrock 只允许改端点、认证、AWS 配置和 Header；GCP 只允许改端点、认证、Header、项目、区域和凭据文件；其余新 ID 直接插入，已存在的同名项不会被覆盖（`codex-rs/model-provider-info/src/lib.rs:788-893`）。保留 ID 校验会拒绝把内置 ID 当作普通自定义 Provider 使用（`codex-rs/config/src/config_toml.rs:947-978`）。
+配置里的同 ID 覆盖不是通用的。`openai` 只允许改 `model_catalog_url`，且必须是 HTTPS 的允许 ChatGPT 主机；Bedrock 只允许改端点、认证、AWS 配置和 Header；GCP 只允许改端点、认证、Header、项目、区域和凭据文件；其余新 ID 直接插入，已存在的同名项不会被覆盖（`codex-rs/model-provider-info/src/lib.rs:788-893`）。保留 ID 校验会拒绝把内置 ID 当作普通自定义 Provider 使用（`codex-rs/config/src/config_toml.rs:952-983`）。
 
 因此，“同一 Provider 多 Endpoint”在本项目中不成立。可行的等价做法是：
 
@@ -93,13 +93,13 @@ Codex 的配置不是单个文件，而是带来源记录的分层结构。优�
 Profile 有两条路径：
 
 - 旧式 `profile` + `[profiles.<name>]`，字段定义见 `codex-rs/config/src/profile_toml.rs:18-67`；
-- V2 `--profile <name>`，加载 `$CODEX_HOME/<name>.config.toml`，作为带 profile 标记的用户层参与合并（`codex-rs/core/src/config/mod.rs:2139-2147`；`codex-rs/cli/src/main.rs:2026-2048`）。
+- V2 `--profile <name>`，加载 `$CODEX_HOME/<name>.config.toml`，作为带 profile 标记的用户层参与合并（`codex-rs/core/src/config/mod.rs:2154-2162`；`codex-rs/cli/src/main.rs:2009-2031`）。
 
-CLI 的 `-p/--profile` 只对运行时命令、`codex mcp` 和迁移命令开放，配置管理类子命令会拒绝（`codex-rs/cli/src/main.rs:1973-1998`）。
+CLI 的 `-p/--profile` 只对运行时命令、`codex mcp` 和迁移命令开放，配置管理类子命令会拒绝（`codex-rs/cli/src/main.rs:1956-1981`）。
 
 ### 默认配置与用户配置的合并
 
-Provider 表先由 `built_in_model_providers(openai_base_url)` 生成，再合并 `cfg.model_providers`。合并结果决定 `config.model_provider_id` 能否解析；解析失败会给出“Provider not found”，对旧 `ollama-chat` 则给出专门的迁移提示（`codex-rs/core/src/config/mod.rs:4034-4061`）。模型 Provider 的必填约束和保留 ID 校验在反序列化阶段执行（`codex-rs/config/src/config_toml.rs:1020-1028`）。
+Provider 表先由 `built_in_model_providers(openai_base_url)` 生成，再合并 `cfg.model_providers`。合并结果决定 `config.model_provider_id` 能否解析；解析失败会给出“Provider not found”，对旧 `ollama-chat` 则给出专门的迁移提示（`codex-rs/core/src/config/mod.rs:4059-4086`）。模型 Provider 的必填约束和保留 ID 校验在反序列化阶段执行（`codex-rs/config/src/config_toml.rs:1025-1033`）。
 
 ### 各入口的实际操作覆盖
 
@@ -108,27 +108,33 @@ Provider 表先由 `built_in_model_providers(openai_base_url)` 生成，再合�
 | 配置文件 | 直接读取 `config.toml` 与 profile 文件 | 手工编辑 `model_providers`、`model_provider`、`profiles` | 删除即移除条目；启停靠切换 `model_provider` 或换 profile，没有 Provider 级 `enabled` 字段 | 本次未找到 Provider 配置导入/导出；测试见 `codex doctor` |
 | CLI | `codex login status` 查看登录；`codex debug models` 输出模型目录 | `codex login` 写凭据；`-c` 覆盖任意配置键；`-p` 选 profile | `codex logout` 删除凭据；未找到 Provider 定义编辑、复制或启停子命令 | 未找到 Provider 配置导入/导出；`codex doctor` 提供认证与端点可达性检查 |
 | TUI | 启动引导展示登录方式；`/model` 展示模型；设置页显示部分开关 | 引导流程写认证；`/model` 持久化模型；设置项写 `oss_provider`、feature、memory 开关 | 本次未找到 Provider 的创建、编辑、复制、删除或启停界面 | 未找到导入/导出；未找到 Provider 连接测试界面 |
-| app-server / 桌面 | `config/read` 返回生效配置与层来源；`modelProvider/capabilities/read` 返回能力 | `config/value/write`、`config/batchWrite` 可按键路径写任意配置 | 未找到 Provider 专用 CRUD RPC；通用写入并不等于有专用界面 | 未找到 Provider 导入/导出或专用连接测试 RPC |
+| app-server / 桌面 | `config/read` 返回生效配置与层来源；`modelProvider/list` 返回只读的 Provider 摘要与可否编辑标记；`modelProvider/capabilities/read` 返回能力 | `config/value/write`、`config/batchWrite` 可按键路径写任意配置；`modelProvider/config/write` 按白名单字段给自定义网关、Bedrock、GCP 补丁 | 未找到 Provider 专用增删 RPC；编辑只到字段级补丁 | 未找到 Provider 导入/导出或专用连接测试 RPC；凭据恢复会发开始/完成通知 |
 | 桌面端 | 当前快照没有桌面渲染器源码 | 未找到独立渠道管理实现；`codex app` 只负责启动安装器 | 未找到 | 未找到 |
 
-CLI 的登录/登出分派在 `codex-rs/cli/src/main.rs:1659-1713`；`codex login --with-api-key` 从 stdin 读 key，`--with-access-token` 读访问令牌，默认走浏览器 OAuth，另有设备码流程（`codex-rs/cli/src/main.rs:517-557`）。
+CLI 的登录/登出分派在 `codex-rs/cli/src/main.rs:1641-1695`；`codex login --with-api-key` 从 stdin 读 key，`--with-access-token` 读访问令牌，默认走浏览器 OAuth，另有设备码流程（`codex-rs/cli/src/main.rs:516-556`）。
 
-app-server 的通用写入参数是键路径加值，支持单值和批量；TUI 目前只用它写模型、服务档位、OSS Provider、feature 和 memory 设置，没有构造 Provider 对象（`codex-rs/app-server-protocol/src/protocol/v2/config.rs:1177-1212`；`codex-rs/tui/src/config_update.rs:56-152`）。
+app-server 的通用写入参数是键路径加值，支持单值和批量；TUI 目前只用它写模型、服务档位、OSS Provider、feature 和 memory 设置，没有构造 Provider 对象（`codex-rs/app-server-protocol/src/protocol/v2/config.rs:1179-1214`；`codex-rs/tui/src/config_update.rs:56-152`）。
+
+除此之外还多了一条**只读摘要 + 字段补丁**的通道。`modelProvider/list` 返回每个 Provider 的 id、显示名、端点和设置摘要，并给出“能否在当前用户层编辑”的标记；端点若不能安全展示就返回空值，调试输出里同样脱敏。`modelProvider/config/write` 只接受自定义网关、Bedrock、GCP 三组设置里的白名单字段，未知字段直接拒绝，写入目标是用户配置层（`codex-rs/app-server-protocol/src/protocol/v2/model_provider.rs:8-71`、`:238-250`；`codex-rs/app-server/src/config_manager_service_model_providers.rs:1-40`）。凭据恢复期间客户端还会收到开始与完成两条通知，用于在界面上提示重新登录而不是直接报错。
 
 ## 3. 凭据、Header 与代理边界
 
 ### 凭据来源与优先级
 
-登录后的凭据统一表示为 `CodexAuth`，支持 API Key、ChatGPT OAuth、外部提供的 ChatGPT token、Header、Agent Identity、个人访问令牌、Bedrock Key 和 Bedrock 访问键（`codex-rs/login/src/auth/manager.rs:110-119`）。加载时的优先级是：
+登录后的凭据统一表示为 `CodexAuth`，支持 API Key、ChatGPT OAuth、外部提供的 ChatGPT token、Header、Agent Identity、个人访问令牌、Bedrock Key 和 Bedrock 访问键（`codex-rs/login/src/auth/manager.rs:111-120`）。加载时的优先级是：
 
 1. `CODEX_API_KEY` 环境变量（仅在该进程启用了这一入口时）；
 2. 内存/外部注入的临时凭据；
 3. `CODEX_ACCESS_TOKEN`，再分类为个人访问令牌或 Agent Identity JWT；
 4. 配置指定的持久化存储（文件、keyring 或自动选择）。
 
-这段顺序在 `codex-rs/login/src/auth/manager.rs:1536-1621`。`OPENAI_API_KEY` 另由登录命令和诊断读取，不作为自动请求凭据的同一入口（`codex-rs/login/src/auth/manager.rs:994-1012`）。
+这段顺序在 `codex-rs/login/src/auth/manager.rs:1591-1695`。`OPENAI_API_KEY` 另由登录命令和诊断读取，不作为自动请求凭据的同一入口（`codex-rs/login/src/auth/manager.rs:1036-1054`）。
 
-Provider 自身还有一层优先级：如果配置了 `env_key` 且环境变量非空，它先于全局认证生效；其次是 `experimental_bearer_token`；然后才判断是否需要 OpenAI 认证。若 Provider 既不要求 OpenAI 认证也没有命令式 auth，则请求不带认证头（`codex-rs/model-provider/src/auth.rs:284-308、379-391`）。命令式 auth 会为该 Provider 单独构造一个只做外部 Bearer 的认证管理器（`codex-rs/model-provider/src/auth.rs:263-281`）。
+Provider 自身还有一层优先级：如果配置了 `env_key` 且环境变量非空，它先于全局认证生效；其次是 `experimental_bearer_token`；然后才判断是否需要 OpenAI 认证。若 Provider 既不要求 OpenAI 认证也没有命令式 auth，则请求不带认证头；Bedrock 专用凭据遇到这种解析会被判为不支持的操作（`codex-rs/model-provider/src/auth.rs:296-314`、`:317-342`）。命令式 auth 会为该 Provider 单独构造一个只做外部 Bearer 的认证管理器。
+
+Agent Identity 再叠一层解析顺序：当前认证已是 Agent Identity 时直接使用；策略要求引导时向认证管理器换取 Agent Identity 凭据；引导不可用则记录告警并在本会话退回 ChatGPT bearer，而不是让整条链路失败（`codex-rs/model-provider/src/auth.rs:344-405`）。
+
+**另有两类自动化凭据。** 一类是 API workload identity：进程提供了工作负载身份令牌与联邦规则时，先把它交换成 API Key，再走常规 API Key 路径，令牌文件与上下文经环境变量传入（`codex-rs/login/src/auth/workload_identity.rs:1-40`）。另一类是运行时注册凭据：核心构建一份运行时凭据上下文供线程与第一方 API 客户端共享，它与 Provider 认证是两套对象（`codex-rs/core/src/runtime_auth.rs:1-30`）。
 
 ### 存储位置与加密
 
@@ -139,9 +145,11 @@ Provider 自身还有一层优先级：如果配置了 `env_key` 且环境变量
 | `auto` | 优先 keyring，不可用则退回文件 | 运行时选择 |
 | `ephemeral` | 仅当前进程内存 | 不落盘 |
 
-模式定义在 `codex-rs/config/src/types.rs:136-148`。文件写入逻辑见 `codex-rs/login/src/auth/storage.rs:256-272`；keyring 还分“直接存钥匙串”和“钥匙串保存文件密钥、密文写本地 secrets 文件”两种后端，Windows 默认后者，其他平台默认前者（`codex-rs/config/src/types.rs:167-183`）。
+模式定义在 `codex-rs/config/src/types.rs:136-148`。文件写入逻辑见 `codex-rs/login/src/auth/storage.rs:274-294`；keyring 还分“直接存钥匙串”和“钥匙串保存文件密钥、密文写本地 secrets 文件”两种后端，Windows 默认后者，其他平台默认前者（`codex-rs/config/src/types.rs:167-183`）。
 
-`AuthDotJson` 包含 `auth_mode`、`OPENAI_API_KEY`、OAuth token 集、最近刷新时间、Agent Identity、个人访问令牌、Bedrock 两类凭据（`codex-rs/login/src/auth/storage.rs:47-73`）。这是一个“当前账号”结构，不是多凭据列表，因此没有多 Key 池。
+落盘另有两道进程与权限保护：凭据提交通过一个稳定 sidecar 文件加锁串行化，使多个进程的写入可以按“先比较再保存”的语义排队，网络请求期间不持有该锁（`codex-rs/login/src/auth/storage_commit.rs:1-22`）；Windows 上替换凭据文件时先用目标文件自己的 DACL 创建新文件，再写入密文，避免新文件继承更宽的父目录权限（`codex-rs/login/src/auth/storage_file_windows.rs:1-26`）。
+
+`AuthDotJson` 包含 `auth_mode`、`OPENAI_API_KEY`、OAuth token 集、最近刷新时间、Agent Identity、个人访问令牌、Bedrock 两类凭据（`codex-rs/login/src/auth/storage.rs:51-77`）。这是一个“当前账号”结构，不是多凭据列表，因此没有多 Key 池。
 
 ### Header 与脱敏
 
@@ -153,11 +161,11 @@ Provider 可配置静态 Header 和“Header 名 → 环境变量名”的动态
 
 Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的顺序是“系统/PAC/WPAD → 环境变量 → 直连”；环境变量回退会按目标 scheme 读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 等同一组代理变量（`codex-rs/http-client/src/outbound_proxy.rs:100-105、381-405`）。
 
-该策略由 feature `respect_system_proxy` 控制，配置层据此选择 `HttpClientFactory` 的策略（`codex-rs/core/src/config/mod.rs:1808-1813、3191-3197`）。代理 URL 和 no-proxy 值在 `Debug` 输出中被替换为 `<redacted>`（`codex-rs/http-client/src/outbound_proxy.rs:127-158`）。
+该策略由 feature `respect_system_proxy` 控制，配置层据此选择 `HttpClientFactory` 的策略（`codex-rs/core/src/config/mod.rs:1819-1824、3191-3197`）。代理 URL 和 no-proxy 值在 `Debug` 输出中被替换为 `<redacted>`（`codex-rs/http-client/src/outbound_proxy.rs:127-158`）。
 
 ## 4. 模型目录与能力元数据
 
-模型目录不是 Provider 配置的一部分，而是独立的数据源。内置快照来自编译进二进制的 `models.json`，提供 `slug`、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型、输入模态等字段（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。本次未在这些元数据中找到价格或计费字段；`ModelInfo` 结构也没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:413-480`）。
+模型目录不是 Provider 配置的一部分，而是独立的数据源。内置快照来自编译进二进制的 `models.json`，提供 `slug`、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型、输入模态等字段（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。本次未在这些元数据中找到价格或计费字段；`ModelInfo` 结构也没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:428-497`）。
 
 远端刷新走 Provider 的 `/models` 端点：
 
@@ -166,11 +174,13 @@ Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的�
 - OpenAI 在 API Key 且未设置端点时，目录请求改走 Codex 后端，而不是公共 `/v1/models`；
 - 返回 ETag 用于条件刷新。
 
-相关实现见 `codex-rs/model-provider/src/models_endpoint.rs:50、170-204` 与 `codex-rs/models-manager/src/manager.rs:653-692`。
+相关实现见 `codex-rs/model-provider/src/models_endpoint.rs:49、170-204` 与 `codex-rs/models-manager/src/manager.rs:755-794`。
 
-磁盘缓存位于 `$CODEX_HOME/models_cache.json`，默认 TTL 300 秒；刷新失败时保留上一次成功快照，不把失败当成空目录（`codex-rs/models-manager/src/manager.rs:42-43、653-692`）。用户也可以用 `model_catalog_json` 指定一个本地 JSON 目录，启动时加载并覆盖常规目录来源（`codex-rs/core/src/config/mod.rs:2256-2283、4314`）。
+磁盘缓存位于 `$CODEX_HOME/models_cache.json`，默认 TTL 300 秒；刷新失败时保留上一次成功快照，不把失败当成空目录（`codex-rs/models-manager/src/manager.rs:41-42、653-692`）。用户也可以用 `model_catalog_json` 指定一个本地 JSON 目录，启动时加载并覆盖常规目录来源（`codex-rs/core/src/config/mod.rs:2271-2298、4314`）。
 
-模型选择规则是：显式 `model` 优先；没有显式值时从可用目录取默认模型。若开启“允许 Provider 模型回退”，请求的模型不在当前 Provider 目录中时会替换为该 Provider 的默认模型，并记录日志（`codex-rs/models-manager/src/manager.rs:886-912`；`codex-rs/core/src/session/mod.rs:800-810`）。这是同一 Provider 内的模型回退，不是 Provider 之间的故障转移。
+目录条目还带来源标记：Provider 原始响应里的模型 id 在合并前单独记录，与生效目录共用一把锁；遍历目录时据此把条目区分为“来自 Provider”还是“内置快照”，缓存文件和目录线格式都不因此改变（`codex-rs/models-manager/src/catalog.rs:27-77`）。
+
+模型选择规则是：显式 `model` 优先；没有显式值时从可用目录取默认模型。若开启“允许 Provider 模型回退”，请求的模型不在当前 Provider 目录中时会替换为该 Provider 的默认模型，并记录日志（`codex-rs/models-manager/src/manager.rs:996-1022`；`codex-rs/core/src/session/mod.rs:853-863`）。这是同一 Provider 内的模型回退，不是 Provider 之间的故障转移。
 
 ## 5. 协议、请求组装与流式传输
 
@@ -180,17 +190,17 @@ Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的�
 
 URL 与认证由 `EndpointSession` 统一处理：先由 `ApiProvider` 按 `base_url` 和路径构造请求，再在发送前调用认证提供者应用 Header；如果配置了重试策略，则在同一请求构造上重试（`codex-rs/codex-api/src/endpoint/session.rs:48-111`）。`ApiProvider` 的 Header 来自 Provider 的静态/动态 Header，`base_url` 缺省值按认证模式决定，重试参数也在这一步固化（`codex-rs/model-provider-info/src/lib.rs:469-517`）。
 
-除 HTTP SSE 外，支持 WebSocket 的 Provider 还可以走 Responses WebSocket；客户端按 Provider 能力与会话回退状态选择，失败后可回退到 HTTP（`codex-rs/core/src/client.rs:1187-1196、2029-2067`）。这属于同一协议下的传输选择，不是另一套渠道协议。
+除 HTTP SSE 外，支持 WebSocket 的 Provider 还可以走 Responses WebSocket；客户端按 Provider 能力与会话回退状态选择，失败后可回退到 HTTP（`codex-rs/core/src/client.rs:1174-1183、2029-2067`）。这属于同一协议下的传输选择，不是另一套渠道协议。
 
 Azure 没有独立 Adapter。它被识别为 Responses 兼容端点，通过自定义 `base_url` 和 `query_params` 表达部署名与 `api-version`；代码中只有 URL 识别辅助函数，没有单独的 Azure 请求体构造器（`codex-rs/codex-api/src/provider.rs:1-23`；`codex-rs/codex-api/src/endpoint/models.rs:220-248`）。
 
 ## 6. 运行时选择、会话绑定与策略
 
-运行时选择分两步：先选 Provider ID，再选模型。Provider ID 的优先级是策略强制值、会话/CLI 显式覆盖、`config.model_provider`，最后默认 `openai`（`codex-rs/core/src/config/mod.rs:4047-4050`）。模型则由 `config.model`、profile 或目录默认值决定（`codex-rs/models-manager/src/manager.rs:886-912`）。
+运行时选择分两步：先选 Provider ID，再选模型。Provider ID 的优先级是策略强制值、会话/CLI 显式覆盖、`config.model_provider`，最后默认 `openai`（`codex-rs/core/src/config/mod.rs:4072-4075`）。模型则由 `config.model`、profile 或目录默认值决定（`codex-rs/models-manager/src/manager.rs:996-1022`）。
 
 TUI 在向 app-server 发请求时会区分“显式 Provider 选择”和“让服务端解析默认值”。只有会话标志或带 profile 的用户层显式写了 `model_provider`，才会作为显式值传出（`codex-rs/tui/src/app_server_session/provider_selection.rs:8-38`）。
 
-会话是 Provider 锁定的。app-server 在恢复会话和接收新输入时会比较会话保存的 Provider 与当前配置；不一致返回 `ModelProviderMismatch`，Provider 不存在返回 `ModelProviderNotConfigured`，与组织策略冲突返回 `ModelProviderPolicyConflict`（`codex-rs/app-server/src/config_manager.rs:433-451、560-610`）。这使“切换 Provider 后继续旧会话”变成显式失败，而不是静默把历史发给另一个后端。
+会话是 Provider 锁定的。app-server 在恢复会话和接收新输入时会比较会话保存的 Provider 与当前配置；不一致返回 `ModelProviderMismatch`，Provider 不存在返回 `ModelProviderNotConfigured`，与组织策略冲突返回 `ModelProviderPolicyConflict`（`codex-rs/app-server/src/config_manager.rs:437-455、560-610`）。这使“切换 Provider 后继续旧会话”变成显式失败，而不是静默把历史发给另一个后端。
 
 本次未找到别名、语义路由、加权负载均衡或按请求动态选 Provider 的实现。`model_provider` 是单一 ID；Provider 表是普通映射，没有路由器或权重字段。
 
@@ -198,7 +208,7 @@ TUI 在向 app-server 发请求时会区分“显式 Provider 选择”和“让
 
 ### 多 Key 与健康状态
 
-凭据模型是单值：`AuthDotJson` 只有一个 API Key 字段和一组 OAuth token；`ModelProviderInfo.env_key` 也只指向一个环境变量（`codex-rs/login/src/auth/storage.rs:47-73`；`codex-rs/model-provider-info/src/lib.rs:167-168`）。本次未找到 Key 池、轮询、冷却、熔断或健康状态持久化。`codex doctor` 的检查是一次性诊断，不构成运行时健康状态。
+凭据模型是单值：`AuthDotJson` 只有一个 API Key 字段和一组 OAuth token；`ModelProviderInfo.env_key` 也只指向一个环境变量（`codex-rs/login/src/auth/storage.rs:51-77`；`codex-rs/model-provider-info/src/lib.rs:167-168`）。本次未找到 Key 池、轮询、冷却、熔断或健康状态持久化。`codex doctor` 的检查是一次性诊断，不构成运行时健康状态。
 
 ### 重试层级
 
@@ -206,23 +216,23 @@ TUI 在向 app-server 发请求时会区分“显式 Provider 选择”和“让
 |---|---|---|
 | HTTP 请求重试 | 默认重试预算 4，循环含首次尝试最多 5 次；5xx 与传输错误重试，429 在 HTTP 层不重试；指数退避基数 200ms | `codex-rs/model-provider-info/src/lib.rs:496-502、540-545`；`codex-rs/codex-client/src/retry.rs:23-47、93-107` |
 | 流式重连 | 默认最多 5 次；采样请求的连接失败另走独立连接退避（5 秒起、60 秒封顶），重连预算与请求预算分开 | `codex-rs/core/src/responses_retry.rs:23-24、32-166`；`codex-rs/model-provider-info/src/lib.rs:547-552` |
-| 401 恢复 | 遇到可恢复的 401 时尝试刷新凭据并重放当前请求；Provider 可自定义是否可恢复 | `codex-rs/core/src/client.rs:2040-2066`；`codex-rs/model-provider/src/provider.rs:188-197` |
-| 传输回退 | WebSocket 失败后关闭该会话的 WebSocket 并回退 HTTP | `codex-rs/core/src/client.rs:794-807` |
+| 401 恢复 | 遇到可恢复的 401 时尝试刷新凭据并重放当前请求；Provider 可自定义是否可恢复 | `codex-rs/core/src/client.rs:1952-1978`；`codex-rs/model-provider/src/provider.rs:188-197` |
+| 传输回退 | WebSocket 失败后关闭该会话的 WebSocket 并回退 HTTP | `codex-rs/core/src/client.rs:781-794` |
 
 Provider 配置可以分别覆盖请求重试、流重连、流空闲超时和 WebSocket 连接超时（`codex-rs/model-provider-info/src/lib.rs:208-217`）。服务端返回的 `Retry-After` 会参与等待决策，但不会扩大配置的重试上限（`codex-rs/core/src/responses_retry.rs:55-166`）。
 
 ### 故障转移边界
 
-跨 Provider failover 本次未找到。客户端持有的是单个 `SharedModelProvider`，请求失败后只会走同一 Provider 的重试/刷新路径；没有“候选 Provider 列表”或切换逻辑（`codex-rs/core/src/client.rs:2029-2078`）。会话层的 `allow_provider_model_fallback` 只影响模型选择，不改变 Provider（`codex-rs/core/src/session/mod.rs:800-810`）。因此“配了多个 Provider”不等于“运行时会自动切换”。
+跨 Provider failover 本次未找到。客户端持有的是单个 `SharedModelProvider`，请求失败后只会走同一 Provider 的重试/刷新路径；没有“候选 Provider 列表”或切换逻辑（`codex-rs/core/src/client.rs:1941-1990`）。会话层的 `allow_provider_model_fallback` 只影响模型选择，不改变 Provider（`codex-rs/core/src/session/mod.rs:853-863`）。因此“配了多个 Provider”不等于“运行时会自动切换”。
 
 ## 8. 可观测性、诊断与连接检测
 
-- **模型目录查看**：`codex debug models` 输出原始模型目录 JSON（`codex-rs/cli/src/main.rs:262-264`）。
-- **认证诊断**：`codex doctor` 的 auth 检查读取存储模式、`auth.json`、存在的认证环境变量和存储凭据类型，并给出状态与修复提示（`codex-rs/cli/src/doctor.rs:1228-1320`）。
-- **端点可达性**：doctor 构造 Provider 的 `/models` 或基础 URL，用 HEAD/GET 探测状态；这不是一次真实生成请求（`codex-rs/cli/src/doctor.rs:2690-2847`）。
+- **模型目录查看**：`codex debug models` 输出原始模型目录 JSON（`codex-rs/cli/src/main.rs:261-263`）。
+- **认证诊断**：`codex doctor` 的 auth 检查读取存储模式、`auth.json`、存在的认证环境变量和存储凭据类型，并给出状态与修复提示（`codex-rs/cli/src/doctor.rs:1229-1321`）。
+- **端点可达性**：doctor 构造 Provider 的 `/models` 或基础 URL，用 HEAD/GET 探测状态；这不是一次真实生成请求（`codex-rs/cli/src/doctor.rs:2740-2897`）。
 - **限流与额度**：响应 Header 中的 `x-codex-*` 被解析为限流快照，包括主/次窗口、重置时间、credits 余额与促销信息（`codex-rs/codex-api/src/rate_limits.rs:23-100、195-259`）。
-- **token 用量**：SSE 完成事件携带 usage，进入会话遥测与上下文预算计算（`codex-rs/core/src/client.rs:2732-2757`）。
-- **日志边界**：请求 span 的字段只列出模型 slug、线协议和传输类型，没有列出请求体（`codex-rs/core/src/client.rs:1890-1901、2087-2098`）；配置中的敏感值使用 `RedactedString` 保存。
+- **token 用量**：SSE 完成事件携带 usage，进入会话遥测与上下文预算计算（`codex-rs/core/src/client.rs:2646-2671`）。
+- **日志边界**：请求 span 的字段只列出模型 slug、线协议和传输类型，没有列出请求体（`codex-rs/core/src/client.rs:1802-1813、2087-2098`）；配置中的敏感值使用 `RedactedString` 保存。
 
 连接测试与真实请求是两条路径：doctor 的探测只验证 DNS/TCP/TLS/HTTP 可达性和 `/models` 响应状态，不会发送模型输入，也不会验证具体模型是否可用。
 

@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：只读源码静态梳理 app-server 通知到 TUI HistoryCell 的数据流、流式控制器、Markdown 写入器、缓存与终端布局；未运行 TUI，未在真实终端观察渲染结果
 >
@@ -46,7 +46,7 @@ app-server 通知（turn/item/agentMessage delta 等）
 
 ## 1. 消息与内容块数据模型
 
-app-server 的 `ThreadItemPayload` 定义了七类 item：用户消息、助手消息、计划、推理、命令执行、文件变更和 MCP 工具调用（`app-server-protocol/src/protocol/v2/item.rs:299-400`）。TUI 不直接绘制这些结构，而是把它们映射成实现 `HistoryCell` 的单元：
+app-server 的 `ThreadItemPayload` 是十九类 item 的联合：用户消息、Hook 提示、助手消息、函数调用输出、计划、推理、命令执行、文件变更、MCP 调用、动态工具调用、协作 Agent 调用、子 Agent 活动、Web 搜索、图片查看、等待、图片生成、审查模式进入与退出、上下文压缩（`app-server-protocol/src/protocol/v2/item.rs:299-496`）。TUI 不直接绘制这些结构，而是把它们映射成实现 `HistoryCell` 的单元：
 
 | 协议内容 | TUI 承载 |
 |---|---|
@@ -57,7 +57,9 @@ app-server 的 `ThreadItemPayload` 定义了七类 item：用户消息、助手�
 | 命令执行 | `ExecCell` 及变体，含命令、输出和退出状态 |
 | 文件变更 | `PatchHistoryCell`、`PatchFailureCell` |
 | MCP 工具 | `McpToolCallCell` |
-| 其他事件 | 搜索、图片生成、Hook、通知、警告等专用 cell |
+| 动态工具 / 协作 / 子 Agent | 动态工具输出 cell、协作调用 cell 与子 Agent 活动 cell，按来源线程分组 |
+| 审查模式与压缩 | 审查进入/退出提示 cell 与上下文压缩标记 cell |
+| 其他事件 | 搜索、图片生成、图片查看、Hook、通知、警告等专用 cell |
 
 `HistoryCell` trait 是渲染层的统一接口（`tui/src/history_cell/mod.rs:201-356`）。它要求提供主视图行、原始行、复制源、期望高度和 transcript 行，并允许 cell 声明自己是否有稳定的高度、是否是流式续行、是否有活动分组身份。这个设计使“消息壳”和“内容渲染”可以分开：cell 决定内容和高度，App 决定插入位置和终端 sink。
 
@@ -65,7 +67,7 @@ app-server 的 `ThreadItemPayload` 定义了七类 item：用户消息、助手�
 
 ## 2. 流式数据到 UI 的更新链
 
-增量通知进入 `ChatWidget::handle_server_notification` 后按类型分派（`tui/src/chatwidget/protocol.rs:4-240`）：
+增量通知进入 `ChatWidget::handle_server_notification` 后按类型分派（`tui/src/chatwidget/protocol.rs:4-249`）：
 
 - `AgentMessageDelta` 更新当前助手消息的流式标识并调用 `on_agent_message_delta`；
 - `PlanDelta` 进入计划流；
@@ -76,7 +78,7 @@ app-server 的 `ThreadItemPayload` 定义了七类 item：用户消息、助手�
 
 流式控制器的核心是 `StreamCore`（`tui/src/streaming/controller.rs:86-106`）。它同时维护四份状态：累积源码、已提交源码的增量渲染、可丢弃的散文预览，以及待提交的稳定行队列。`push_delta` 只提交已经出现换行的完整行段；最后一个未换行的残段留在预览或活动尾部（同文件 `:150-179`）。这条规则对表格尤其重要：未换行的半行如果提前提交，会在下一帧变成另一组列宽。
 
-稳定行进入队列后，真正写入历史由提交 tick 完成。控制器提供单行和多行两种取行方式（`tui/src/streaming/controller.rs:647-658`），tick 则来自 App 主循环中的提交动画分支（`tui/src/app/startup.rs:1640-1650`）。
+稳定行进入队列后，真正写入历史由提交 tick 完成。控制器提供单行和多行两种取行方式（`tui/src/streaming/controller.rs:647-658`），tick 则来自 App 主循环中的提交动画分支（`tui/src/app/startup.rs:1699-1709`）。
 
 节流策略在 `chunking.rs` 中给出两档：
 
@@ -85,9 +87,9 @@ app-server 的 `ThreadItemPayload` 定义了七类 item：用户消息、助手�
 | `Smooth` | 每个 tick 提交一行 | 默认状态，队列为空时回到此模式 |
 | `CatchUp` | 批量排空当前队列 | 队列深度达到 8 行，或最老行等待达到 120ms |
 
-退出 CatchUp 需要队列深度降到 2 行以下、最老行等待降到 40ms 以下，并持续 250ms；退出后还有 250ms 的再进入抑制。队列深度达到 64 行或最老行等待达到 300ms 时视为严重积压，可绕过抑制（`tui/src/streaming/chunking.rs:85-116`）。两个控制器的队列深度和最大等待时间会合并成一个决策，再执行统一的排空计划（`tui/src/streaming/commit_tick.rs:69-91`）。
+退出 CatchUp 需要队列深度降到 2 行以下、最老行等待降到 40ms 以下，并持续 250ms；退出后还有 250ms 的再进入抑制。队列深度达到 64 行或最老行等待达到 300ms 时视为严重积压，可绕过抑制（`tui/src/streaming/chunking.rs:85-116`）。两个控制器的队列深度和最大等待时间会合并成一个决策，再执行统一的排空计划（`tui/src/streaming/commit_tick.rs:71-100`）。
 
-完成收口分两步。首先取出控制器，渲染剩余源码，并把原始 Markdown 作为合并事件发给 App（`tui/src/chatwidget/streaming.rs:90-167`）。然后 App 找到尾部连续的流式助手 cell，用一个保存源码的助手 cell 替换整段（`tui/src/app/agent_message_consolidation.rs:24-90`）。如果流式文本与完成消息不一致，或者存在尚未稳定提交的尾部，会要求对终端回滚区做重排。
+完成收口分两步。首先取出控制器，渲染剩余源码，并把原始 Markdown 作为合并事件发给 App（`tui/src/chatwidget/streaming.rs:92-169`）。然后 App 找到尾部连续的流式助手 cell，用一个保存源码的助手 cell 替换整段（`tui/src/app/agent_message_consolidation.rs:24-90`）。如果流式文本与完成消息不一致，或者存在尚未稳定提交的尾部，会要求对终端回滚区做重排。
 
 ## 3. 消息列表、窗口化与滚动
 
@@ -96,9 +98,9 @@ TUI 有两条互斥的列表路径，由 `TranscriptMode::{Owned, Terminal}` 决
 - **Terminal 模式**：已提交 cell 通过转义序列写入终端原生回滚区，列表的“存储”就是终端历史；TUI 只保留 cell 引用和少量尾部状态。
 - **Owned 模式**：备用屏幕内由 `TranscriptView` 维护消息列表、滚动位置、选择和搜索状态，所有可见行由 TUI 重绘。
 
-`App` 同时持有 transcript 的 cell 列表、终端原生历史、自有视图和 overlay（`tui/src/app.rs:568-579`）。cell 列表是规范列表；插入函数先把它加入列表，再根据当前模式决定是否写入终端或延迟到自有视图（`tui/src/app/history_ui.rs:25-68`）。因此“消息列表”和“终端回滚区”不是同一份数据：前者可以被重排和重新分组，后者一旦写入就受终端历史语义约束。
+`App` 同时持有 transcript 的 cell 列表、终端原生历史、自有视图和 overlay（`tui/src/app.rs:574-586`）。cell 列表是规范列表；插入函数先把它加入列表，再根据当前模式决定是否写入终端或延迟到自有视图（`tui/src/app/history_ui.rs:25-85`）。因此“消息列表”和“终端回滚区”不是同一份数据：前者可以被重排和重新分组，后者一旦写入就受终端历史语义约束。
 
-自有视图的绘制是逐可见行循环，而不是 Web 式虚拟列表（`tui/src/transcript_view.rs:185-308`）。每帧从当前起点开始，按 cell 的布局逐行填充视口，同时记录可见行、活动分组和选择状态；布局结果按条目键和宽度缓存。滚动状态区分“跟随最新”和“阅读历史”，并处理提示头让位、搜索高亮和选择拖拽。
+自有视图的绘制是逐可见行循环，而不是 Web 式虚拟列表（`tui/src/transcript_view.rs:185-312`）。每帧从当前起点开始，按 cell 的布局逐行填充视口，同时记录可见行、活动分组和选择状态；布局结果按条目键和宽度缓存。滚动状态区分“跟随最新”和“阅读历史”，并处理提示头让位、搜索高亮和选择拖拽。
 
 历史分页由 app-server 提供：初次恢复最多 5 个 turn，单页 item 上限 100（`tui/src/app_server_session/history.rs:31-33`）。在顶部继续滚动会请求更早一页，加载期间保持阅读位置。这里没有前端 DOM 的高度测量或 `IntersectionObserver`，但同样需要处理“插入旧内容后不要跳走”的锚定问题。
 
@@ -115,7 +117,7 @@ TUI 有两条互斥的列表路径，由 `TranscriptMode::{Owned, Terminal}` 决
 
 消息壳没有统一的“头像 + 气泡 + 操作栏”结构。用户消息和助手消息的区分主要靠前缀、缩进、颜色和内容形态；操作入口在 Composer 或全局快捷键，而不是每条消息悬浮工具条。复制源由 cell 的 `copy_source` 提供，终端选择由 App 的渲染选择层处理。
 
-活动分组是这套壳层的一个特色：工具调用和推理可以折叠成一个活动条目，展开后显示细节。`HistoryCell` 通过活动身份、展开行和详情接口暴露分组语义（`tui/src/history_cell/mod.rs:259-274`）。这让长回合的工具序列不会把每个调用都铺满屏幕。
+活动分组是这套壳层的一个特色：工具调用和推理可以折叠成一个活动条目，展开后显示细节。自有 transcript 中的折叠控件按焦点显示，复制文本与全文搜索仍以源码为准，不随折叠状态变化（`tui/src/transcript_view/disclosure.rs:1-2`）。`HistoryCell` 通过活动身份、展开行和详情接口暴露分组语义（`tui/src/history_cell/mod.rs:259-274`）。这让长回合的工具序列不会把每个调用都铺满屏幕。
 
 ## 5. Markdown、代码与富文本管线
 
@@ -129,6 +131,8 @@ Markdown 渲染入口在 `render_markdown_agent_with_list_spacing`（`tui/src/ma
 6. 对本地文件链接做重定向，对 Web 链接决定是否隐藏目标地址。
 
 解析器配置在 `tui/src/markdown_render.rs:418-438`。表格始终启用 `ENABLE_TABLES`，任务列表由 `preferences.lists` 控制；数学预处理在解析前完成，避免 TeX 转义被 Markdown 先消费。渲染偏好默认全部开启：Mermaid、数学、表格和列表（`config/src/tui_rendering.rs:11-30`）。
+
+内联可视化是这条管线里唯一的跨进程内容：模型给出 `::codex-inline-vis{…}` 指令时，写入器把它重写成一个指向本地查看器的链接占位符，查看器再把片段与固定样式表、运行时代码组合成线程目录下的 HTML 文件，并用严格 CSP 关掉外部框架与对象嵌入；片段上限 2 MiB，超限或路径不合法时退回普通文本（`tui/src/inline_visualization.rs:29-33`、`tui/src/inline_visualization/viewer.rs:9-17`）。终端里看到的只是链接，真正的画面由浏览器渲染，因此终端渲染器本身仍然不执行 HTML。
 
 写入阶段的行为：
 
@@ -161,7 +165,7 @@ Markdown 渲染入口在 `render_markdown_agent_with_list_spacing`（`tui/src/ma
 
 本地文件链接和 Web 链接仍需要边界处理。渲染器会区分受信任的本地文件目标和普通链接，前者按会话工作目录缩短显示并可重定向到真实路径，后者可以隐藏冗长的目标地址。Mermaid 和数学公式只生成终端 span，不引入外部资源。内联可视化指令会被重写为终端可显示的内容；由于它依赖文件系统状态，相关的 `AgentMarkdownCell` 不走普通 Markdown 缓存。
 
-TUI 中没有 Artifact 预览窗、HTML 沙箱或脚本运行器。图片生成和图片查看有专用 cell，但是否使用终端图形协议取决于运行环境，本次未运行验证。
+TUI 中没有 Artifact 预览窗、HTML 沙箱或脚本运行器。图片生成和图片查看有专用 cell，但是否使用终端图形协议取决于运行环境，本次未运行验证。内联可视化的浏览器查看器是这条边界的唯一外延：内容被物化成带 CSP 的本地文件，由用户点击链接后在终端之外打开，终端侧不承担渲染与脚本执行。
 
 ## 8. 内容交互反馈与可访问性
 
@@ -224,17 +228,17 @@ TUI 中没有 Artifact 预览窗、HTML 沙箱或脚本运行器。图片生成�
 
 ## 12. 关键源码索引
 
-- 通知分派：`codex-rs/tui/src/chatwidget/protocol.rs:4-240`
-- 流式答案与收口：`codex-rs/tui/src/chatwidget/streaming.rs:90-167`
+- 通知分派：`codex-rs/tui/src/chatwidget/protocol.rs:4-249`
+- 流式答案与收口：`codex-rs/tui/src/chatwidget/streaming.rs:92-169`
 - 流式核心：`codex-rs/tui/src/streaming/controller.rs:86-179`、`:212-330`、`:590-658`
 - 自适应节流：`codex-rs/tui/src/streaming/chunking.rs:85-116`
-- 提交 tick：`codex-rs/tui/src/streaming/commit_tick.rs:69-91`
+- 提交 tick：`codex-rs/tui/src/streaming/commit_tick.rs:71-100`
 - 增量 Markdown 渲染：`codex-rs/tui/src/streaming/render.rs:130-245`
 - cell 接口：`codex-rs/tui/src/history_cell/mod.rs:201-356`
-- 消息 cell：`codex-rs/tui/src/history_cell/messages.rs:17`、`:392`、`:494`、`:571`、`:753`
+- 消息 cell：`codex-rs/tui/src/history_cell/messages.rs:17`、`:387`、`:489`、`:566`、`:748`
 - 完成态合并：`codex-rs/tui/src/app/agent_message_consolidation.rs:24-90`
-- 历史插入：`codex-rs/tui/src/app/history_ui.rs:25-118`
-- 自有 transcript：`codex-rs/tui/src/transcript_view.rs:185-308`
+- 历史插入：`codex-rs/tui/src/app/history_ui.rs:25-135`
+- 自有 transcript：`codex-rs/tui/src/transcript_view.rs:185-312`
 - transcript 模式：`codex-rs/tui/src/transcript_mode.rs:7-23`
 - Markdown 配置：`codex-rs/tui/src/markdown_render.rs:418-438`
 - HTML 字面输出：`codex-rs/tui/src/markdown_render.rs:941-982`
@@ -244,4 +248,6 @@ TUI 中没有 Artifact 预览窗、HTML 沙箱或脚本运行器。图片生成�
 - 渲染偏好：`codex-rs/config/src/tui_rendering.rs:11-30`
 - 渲染缓存：`codex-rs/tui/src/history_cell/markdown_render_cache.rs:9-52`
 - 历史分页：`codex-rs/tui/src/app_server_session/history.rs:31-33`
-- 协议 item：`codex-rs/app-server-protocol/src/protocol/v2/item.rs:299-400`
+- 协议 item：`codex-rs/app-server-protocol/src/protocol/v2/item.rs:299-496`
+- 内联可视化：`codex-rs/tui/src/inline_visualization.rs:29-33`、`tui/src/inline_visualization/viewer.rs:9-17`
+- 活动折叠控件：`codex-rs/tui/src/transcript_view/disclosure.rs:1-2`

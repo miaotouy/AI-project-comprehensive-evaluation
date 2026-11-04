@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、renderer store、Electron 主进程），符号与行号对照当前 HEAD 逐一核实；静态代码只确认入口、状态与事件绑定，未运行验证
 >
@@ -43,7 +43,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 
 ### 1.1 会话页的布局与滚动策略
 
-会话页（`routes/session/$sessionId.tsx`）的页面顺序固定为顶栏 → 消息列表 → 输入框，线程历史通过 `ThreadHistoryDrawer` 作为侧滑层挂载。进入会话后延迟调用一次"回到底部"滚动；发送新消息前先把消息列表标记为新消息并瞬间滚到底部（onSubmit 内，:189-201），生成期间由 smooth-follow 控制器跟随输出，用户手动向上滚动后会暂停跟随。
+会话页（`routes/session/$sessionId.tsx`）的页面顺序固定为顶栏 → 消息列表 → 输入框，线程历史通过抽屉组件（`src/renderer/components/session/`）作为侧滑层挂载。进入会话后延迟调用一次"回到底部"滚动；发送新消息前先把消息列表标记为新消息并瞬间滚到底部（onSubmit 内，:189-201），生成期间由 smooth-follow 控制器跟随输出，用户手动向上滚动后会暂停跟随。
 
 `MessageList` 使用 `react-virtuoso` 虚拟化，但关闭其内置的流式跟随，改由自研 smooth-follow 控制器接管（`MessageList.tsx:56, 478-533`）；并缓存每个 Session 的滚动快照（上限 100，:61-73），恢复时用虚拟列表的状态恢复 API 直接回到原位置（:484-492），切换会话不会把阅读位置丢掉。桌面端消息导航（上一条/下一条用户消息、"回到底部"）与移动端顶部浮条由两个组件提供（`MessageList.tsx:537-585`）。
 
@@ -251,7 +251,7 @@ const handleContextMenu = (event: MouseEvent) => {
 - `src/renderer/routes/index.tsx`（首页/临时会话）
 - `src/renderer/routes/session/$sessionId.tsx`（会话页布局与滚动）
 - `src/renderer/routes/__root.tsx`（工作台骨架：Sidebar + Outlet）
-- `src/renderer/components/session/SessionList.tsx`、`SessionItem.tsx`、`ThreadHistoryDrawer.tsx`
+- `src/renderer/components/session/SessionList.tsx`、`SessionItem.tsx`（thread 历史抽屉组件在同目录）
 - `src/renderer/components/chat/MessageList.tsx`（ThreadLabel、ForkGroup、滚动缓存、smooth-follow）
 - `src/renderer/components/InputBox/InputBox.tsx`（Composer、发送/停止、模型选择、拖拽上传）
 - `src/renderer/hooks/useScreenChange.ts`、`useShortcut.tsx`、`useKnowledgeBase.ts`、`useMessageInput.ts`

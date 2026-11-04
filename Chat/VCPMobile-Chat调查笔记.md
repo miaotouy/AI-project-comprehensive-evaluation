@@ -2,9 +2,9 @@
 
 > 调查对象：`VCPMobile`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
+> 代码快照：`5fa2eb09e4f4dfab299cbb609a8b904b3485b5a5`（分支：`main`）
 >
 > 调查方式：静态阅读 Vue/Pinia 前端、Tauri/Rust 命令、SQLite 服务与仓库内测试
 >
@@ -14,23 +14,23 @@
 
 ## 结论摘要
 
-VCPMobile 是一个 Android 优先的 Tauri 聊天客户端。它拥有聊天工作台、话题和消息的本地 SQLite 副本，以及把远端 VCP 服务 SSE 结果投射到 Vue 的执行层；模型推理、远端服务的最终可用性和 Agent 工具循环不属于该仓库。
+VCPMobile 是一个 Android 优先、同时支持 iOS 的 Tauri 聊天客户端。它拥有聊天工作台、话题和消息的本地 SQLite 副本，以及把远端 VCP 服务 SSE 结果投射到 Vue 的执行层；模型推理、远端服务的最终可用性和 Agent 工具循环不属于该仓库。语音通话、语音输入与朗读构成独立的旁路会话，共用同一份消息与流状态。
 
-聊天以 Agent 或 Group 为所有者，以其下的 Topic 作为可恢复会话。前端把选择状态、可见历史、活动流和暂存附件拆入不同 Pinia store；Rust 负责话题与消息持久化、上下文组装、请求注册及流收口。详细机制见[会话与消息管理](../会话与消息管理/VCPMobile-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/VCPMobile-对话请求与上下文调查笔记.md)、[Chat UI](../Chat%20UI/VCPMobile-ChatUI调查笔记.md)和[消息渲染器](../消息渲染器/VCPMobile-消息渲染器调查笔记.md)。
+聊天以 Agent 或 Group 为所有者，以其下的 Topic 作为可恢复会话。前端把选择状态、可见历史、活动流、暂存附件和语音状态拆入不同 Pinia store；Rust 负责话题与消息持久化、上下文组装、请求注册及流收口。详细机制见[会话与消息管理](../会话与消息管理/VCPMobile-会话与消息管理调查笔记.md)、[对话请求与上下文](../对话请求与上下文/VCPMobile-对话请求与上下文调查笔记.md)、[Chat UI](../Chat%20UI/VCPMobile-ChatUI调查笔记.md)和[消息渲染器](../消息渲染器/VCPMobile-消息渲染器调查笔记.md)。
 
 ## 产品表面与系统边界
 
-聊天表面是 Vue WebView 中的移动端工作台：`ChatView` 呈现当前话题历史，`InputEnhancer` 收集文本、语音和附件，左侧 Agent/Group 与话题列表决定会话。桌面端可经同步提供数据，但当前仓库的会话事实源是本地 SQLite，而非某个云端聊天 API；相应的跨端合并策略留在同步专项。入口与布局见 `src/features/chat/ChatView.vue:41-198`。
+聊天表面是 Vue WebView 中的移动端工作台：`ChatView` 呈现当前话题历史，`InputEnhancer` 收集文本、语音和附件，左侧 Agent/Group 与话题列表决定会话。桌面端可经同步提供数据，但当前仓库的会话事实源是本地 SQLite，而非某个云端聊天 API；相应的跨端合并策略留在同步专项。入口与布局见 `src/features/chat/ChatView.vue:236-413`。
 
-核心对象有三层：话题记录 owner、名称、未读和消息计数；消息记录角色、正文、附件、完成原因和预渲染块；活动生成记录尚未终结的助手消息。前端的 `ConversationKey` 还加入 epoch，用于阻止异步加载结果写回已切换的会话，见 `src/core/stores/chatSessionStore.ts:15-68`。
+核心对象有三层：话题记录 owner、名称、未读和消息计数；消息记录角色、正文、附件、完成原因和预渲染块；活动生成记录尚未终结的助手消息。前端的 `ConversationKey` 还加入 epoch，用于阻止异步加载结果写回已切换的会话，见 `src/core/stores/chatSessionStore.ts:15-120`。
 
 ## 端到端聊天主链
 
 1. 用户选定 Agent/Group 及其 Topic 后，ChatView 分页读入本地历史；初始页为 5 条，向上滚动再取旧消息。 
-2. Composer 调用 history store。它先把用户消息乐观加入可见列表，再通过 `append_single_message` 落库，并把同一消息与设置、Channel 传给单聊或群聊命令，见 `src/core/stores/chatHistoryStore.ts:533-560,661-760`。
-3. Rust 读取纯文本历史与附件提取文本，连同 Agent 配置拼装请求；注册以 UUID 表示的 pending 助手消息后发出 `thinking` 事件，并向 VCP 服务发起 SSE 请求，见 `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:25-160`。
-4. `chatStreamStore` 按消息 ID 维护活动对象。`aurora` 增量先合并到待提交状态，再按 animation frame 写入视图；结束事件取得最终 blocks、移除活动流并触发标题总结，见 `src/core/stores/chatStreamStore.ts:352-600`。
-5. Rust 最终化事务原子更新消息、渲染缓存、全文索引和活动生成记录，然后向前端发送终态。中断或异常退出后的 pending 行可在下次历史加载后尝试恢复，见 `src-tauri/src/vcp_modules/chat/message_service.rs:1410-1545` 与 `src/core/stores/chatStreamStore.ts:1160-1340`。
+2. Composer 调用 history store。它先把用户消息乐观加入可见列表，再通过 `append_single_message` 落库，并把同一消息与设置、Channel 传给单聊或群聊命令，见 `src/core/stores/chatHistoryStore.ts:256-330,390-530`。
+3. Rust 读取纯文本历史与附件提取文本，连同 Agent 配置拼装请求；注册以 UUID 表示的 pending 助手消息后发出 `thinking` 事件，并向 VCP 服务发起 SSE 请求，见 `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:70-160`。
+4. `chatStreamStore` 按消息 ID 维护活动对象。`aurora` 增量先合并到待提交状态，再按 animation frame 写入视图；结束事件取得最终 blocks、移除活动流并触发标题总结，见 `src/core/stores/chatStreamStore.ts:463-600`。
+5. Rust 最终化事务原子更新消息、渲染缓存、全文索引和活动生成记录，然后向前端发送终态。中断或异常退出后的 pending 行可在下次历史加载后尝试恢复，见 `src-tauri/src/vcp_modules/chat/message_service.rs:1692-1860` 与 `src/core/stores/chatStreamStore.ts:1600-1750`。
 
 ## 专项导航
 
@@ -43,18 +43,21 @@ VCPMobile 是一个 Android 优先的 Tauri 聊天客户端。它拥有聊天工
 
 ## 关键能力与已确认边界
 
-系统支持单 Agent 与群聊、消息编辑后截断重发、单消息删除、重新生成、附件发送、逐消息停止和群聊回合停止。它没有在当前聊天数据模型中呈现消息树或兄弟版本指针；重新生成会截断目标助手消息后的历史，再基于最后一条用户消息启动新的生成，见 `src/core/stores/chatHistoryStore.ts:896-950`。
+系统支持单 Agent 与群聊、消息编辑后截断重发、单消息删除、重新生成、附件发送、逐消息停止和群聊回合停止。它没有在当前聊天数据模型中呈现消息树或兄弟版本指针；重新生成会截断目标助手消息后的历史，再基于最后一条用户消息启动新的生成，见 `src/core/stores/chatHistoryStore.ts:685-760`。
 
-当前聊天表面不是无状态网关：用户消息、助手终态和渲染缓存都在本地存储。反过来，浮动助手存在一条不存数据库的暂存对话路径，代码与仓库文档均标注为未注册/退役的 dormant asset，因此不作为主聊天能力计入，见 `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:236-348`。
+当前聊天表面不是无状态网关：用户消息、助手终态和渲染缓存都在本地存储。悬浮助手在此前版本中存在过一条不存数据库的暂存对话路径，其入口页、主线程、状态 Store 与 Android 浮窗管理在当前快照中都已不存在，主聊天是唯一带持久化的会话路径。
+
+语音通话不改变消息持久化语义：它复用当前 Topic 的助手消息与流状态，把录音输入、语音活动检测、识别、生成与朗读串成一次会话，并在通话结束时回到普通 Composer（`src/features/chat/voice/voiceConversation.ts`、`src-tauri/src/vcp_modules/chat/voice_service/call.rs`）。
 
 ## 未验证事项
 
-本次未运行 Android 应用或连接 VCP 服务，因此未验证真实 SSE 兼容性、前后台切换后的恢复效果、键盘/读屏体验、群组实际发言策略与跨端同步冲突结果。
+本次未运行 Android 应用或连接 VCP 服务，因此未验证真实 SSE 兼容性、前后台切换后的恢复效果、键盘/读屏体验、群组实际发言策略、语音通话在真实设备上的采集与回声处理，以及跨端同步冲突结果。
 
 ## 关键源码索引
 
-- `src/features/chat/ChatView.vue:41-198`
-- `src/core/stores/chatHistoryStore.ts:141-390,533-560,661-760`
-- `src/core/stores/chatStreamStore.ts:352-600,1160-1340`
-- `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:25-235`
-- `src-tauri/src/vcp_modules/chat/message_service.rs:1237-1545`
+- `src/features/chat/ChatView.vue:236-413`
+- `src/core/stores/chatHistoryStore.ts:256-330,390-530,685-760`
+- `src/core/stores/chatStreamStore.ts:463-600,1600-1750`
+- `src-tauri/src/vcp_modules/agent/agent_chat_application_service.rs:70-160`
+- `src-tauri/src/vcp_modules/chat/message_service.rs:1692-1860`
+- `src/features/chat/voice/voiceConversation.ts`、`src-tauri/src/vcp_modules/chat/voice_service/mod.rs`：语音通话状态机与服务入口

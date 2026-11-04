@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -40,7 +40,9 @@ AIO-Hub 是 Vue 3 与 Element Plus 构成的 Tauri 桌面应用。公共界面�
 
 **命令式反馈。** `src/utils/customMessage.ts` 维护一个独立于 Element Plus 的顶部浮动消息队列，由全局挂载的 `src/components/common/TopMessageHost.vue` 渲染：每条消息带可暂停的倒计时与进度条，点击可按 `copyText` 复制内容，默认仍保留 54 像素顶部偏移以避开自绘标题栏（`customMessage.ts:75,169`）。llm-chat 内所有业务提示都走该队列的成功、失败、警告和信息入口，未见直接调用原生 ElMessage。
 
-**引导流程系统。** common 下的 GuidedFlow 与 upgrade 流程目录共同承担首次启动和升级引导：前者负责流程宿主及运行时状态，后者注册升级流程、版本说明面板和待处理升级恢复（宿主挂载于 `App.vue:81`）。
+**引导流程系统。** common 下的 GuidedFlow 与 upgrade 流程目录共同承担首次启动和升级引导：前者负责流程宿主及运行时状态，后者注册升级流程、版本说明面板和待处理升级恢复（宿主挂载于 `App.vue:81`）。升级与平台适配的整体设计见 `docs/architecture/upgrade-and-platform-architecture.md`，桌面入口相关能力下沉到本地 crate `src-tauri/crates/desktop-entry`。
+
+**虚拟列表布局抽象。** 侧栏类长列表不再各自手写测量逻辑：`src/composables/useMeasuredVirtualizer.ts` 提供统一的容器测量、动态行高与 overscan 计算，调用方只声明数据与行模板。布局策略与各列表的取舍记录在 `docs/architecture/virtual-list-layout.md`，Recall 监控页等界面已切换到该抽象；聊天消息列表仍走"完整 DOM + `content-visibility`"（渲染器笔记 8），两者是不同规模的列表策略。
 
 onboarding、首次使用、firstLaunch 等旧关键词无命中，引导功能以 GuidedFlow/flow 命名存在；视觉呈现与各步骤实际引导体验未运行验证。
 
@@ -395,3 +397,7 @@ pending 附件用 convertFileSrc 生成临时 URL，导入完成后改用 `asset
 - `src/composables/useCssOverrides.ts`
 - `src/views/Settings/css/CssOverrideSettings.vue`
 - `src/config/css-presets.ts`
+- `src/composables/useMeasuredVirtualizer.ts`、`src/composables/__tests__/useMeasuredVirtualizer.test.ts`（测量式虚拟列表抽象）
+- `docs/architecture/virtual-list-layout.md`、`docs/architecture/theme-system-architecture.md`、`docs/architecture/upgrade-and-platform-architecture.md`（布局/主题/升级与平台设计）
+- `src-tauri/crates/desktop-entry/`、`src/background-runtime/`（桌面入口与后台运行时协作位）
+- `docs/architecture/local-media-playback.md`（本地媒体播放边界）

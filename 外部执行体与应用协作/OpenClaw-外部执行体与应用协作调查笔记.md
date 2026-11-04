@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：静态源码走读；未运行真实 Gateway、多设备、ACP harness、OAuth、渠道、APNS 或外部进程
 >
@@ -104,7 +104,7 @@ Gateway node registry
 
 ### 云与节点工作环境链
 
-Gateway 还能把一次 session 放置到受管理的 worker environment 或配对节点。放置服务先持久化 session placement，并按 requested、provisioning、syncing、starting、active、draining、reconciling、reclaimed、failed 状态推进；每次转移受 generation、environment owner epoch 与 turn claim 约束。仓库工作区在远端执行前准备和同步，结果以专用 ref 暂存并回收；冲突会形成可见的 workspace result conflict，而不是静默覆盖本地文件。重启后 recovery/reclaim 路径按 placement 与 pending result 继续结算，旧 claim 不能恢复执行权。入口见 `src/gateway/worker-environments/placement-dispatch.ts:87-249`、`placement-store.ts:139-279`、`placement-record.ts:15-234`。
+Gateway 还能把一次 session 放置到受管理的 worker environment 或配对节点。放置服务先持久化 session placement，并按 requested、provisioning、syncing、starting、active、draining、reconciling、reclaimed、failed 状态推进；每次转移受 generation、environment owner epoch 与 turn claim 约束。仓库工作区在远端执行前准备和同步，结果以专用 ref 暂存并回收；冲突会形成可见的 workspace result conflict，而不是静默覆盖本地文件。重启后 recovery/reclaim 路径按 placement 与 pending result 继续结算，旧 claim 不能恢复执行权。入口见 `src/gateway/worker-environments/placement-dispatch.ts`、`placement-store.ts:139-279`、`placement-record.ts:15-234`。
 
 ### `openclaw attach` 外部进程链
 
@@ -166,15 +166,15 @@ Gateway 以 client identity、role、scope、token/password、设备签名、设
 
 ## 关键源码索引
 
-- Gateway 协议客户端与请求/事件生命周期：`packages/gateway-client/src/protocol-client.ts:40-120`、`:183-221`、`:390-508`
-- Gateway WebSocket 准入与请求分发：`src/gateway/server/ws-connection/message-handler.ts:273-383`、`src/gateway/server/ws-connection/authenticated-request-dispatch.ts:197-247`
-- 节点 registry、invoke、progress/result/cancel：`src/gateway/node-registry.ts:221-290`、`src/gateway/server-methods/nodes.invoke.ts:363-604`、`:608-714`、`src/gateway/server-methods/nodes.event.ts`
-- TUI Gateway chat/backend/lifecycle：`src/tui/gateway-chat.ts:191-260`、`src/tui/tui-backend.ts:180-201`、`src/tui/tui-event-handlers.ts`、`src/tui/tui-run-lifecycle.ts`
+- Gateway 协议客户端与请求/事件生命周期：`packages/gateway-client/src/protocol-client.ts`、`:183-221`、`:390-508`
+- Gateway WebSocket 准入与请求分发：`src/gateway/server/ws-connection/message-handler.ts`、`src/gateway/server/ws-connection/authenticated-request-dispatch.ts`
+- 节点 registry、invoke、progress/result/cancel：`src/gateway/node-registry.ts`、`src/gateway/server-methods/nodes.invoke.ts`、`:608-714`、`src/gateway/server-methods/nodes.event.ts`
+- TUI Gateway chat/backend/lifecycle：`src/tui/gateway-chat.ts`、`src/tui/tui-backend.ts`、`src/tui/tui-event-handlers.ts`、`src/tui/tui-run-lifecycle.ts`
 - Control UI 浏览器连接：`ui/src/api/gateway.ts`、`ui/src/api/gateway-browser-socket.ts`
 - companion app Gateway/node/camera/screen：`apps/ios/Sources/Gateway/GatewayConnectionController.swift`、`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`、`apps/ios/Sources/Capabilities/NodeCapabilityRouter.swift`、`apps/ios/Sources/Camera/CameraController.swift`、`apps/ios/Sources/Screen/ScreenRecordService.swift`；`apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt`、`GatewaySession.kt`、`node/InvokeDispatcher.kt`、`node/InvokeCommandRegistry.kt`、`node/CameraHandler.kt`
-- native ACP server/client/translator：`src/acp/server.ts:94-269`、`src/acp/client.ts:148-242`、`src/acp/translator.ts:58-214`、`src/acp/translator.session-lifecycle.ts`、`src/acp/translator.prompt-stream.ts:93-177`、`:387-440`、`src/acp/translator.session-updates.ts:46-168`
-- ACP control plane/runtime registry：`src/acp/control-plane/manager.types.ts:46-115`、`src/acp/control-plane/manager.core.ts:168-365`、`src/acp/control-plane/manager.cancel-session.ts:18-145`、`src/acp/control-plane/manager.turn-stream.ts:34-247`、`src/acp/runtime/registry.ts:54-117`、`src/acp/runtime/session-meta.ts:56-100`
-- ACPX plugin/runtime/config/process lifecycle：`extensions/acpx/index.ts:47-65`、`extensions/acpx/register.runtime.ts:117-183`、`extensions/acpx/src/service.ts:325-461`、`extensions/acpx/src/config-schema.ts:7-120`、`extensions/acpx/src/config.ts:186-274`、`extensions/acpx/src/runtime.ts:794-910`、`:967-1106`、`:1108-1168`、`:1228-1462`、`:1486-1571`、`:1624-1745`、`:1832-1875`、`extensions/acpx/src/process-lease.ts:1-18`、`:40-178`、`extensions/acpx/src/process-reaper.ts`
-- attach grant/revoke 与 CLI：`src/cli/attach-cli.ts:15-31`、`:33-184`、`src/gateway/server-methods/attach.ts:22-89`
+- native ACP server/client/translator：`src/acp/server.ts`、`src/acp/client.ts`、`src/acp/translator.ts`、`src/acp/translator.session-lifecycle.ts`、`src/acp/translator.prompt-stream.ts`、`:387-440`、`src/acp/translator.session-updates.ts`
+- ACP control plane/runtime registry：`src/acp/control-plane/manager.types.ts`、`src/acp/control-plane/manager.core.ts`、`src/acp/control-plane/manager.cancel-session.ts`、`src/acp/control-plane/manager.turn-stream.ts`、`src/acp/runtime/registry.ts`、`src/acp/runtime/session-meta.ts`
+- ACPX plugin/runtime/config/process lifecycle：`extensions/acpx/index.ts`、`extensions/acpx/register.runtime.ts`、`extensions/acpx/src/service.ts`、`extensions/acpx/src/config-schema.ts`、`extensions/acpx/src/config.ts`、`extensions/acpx/src/runtime.ts`、`:967-1106`、`:1108-1168`、`:1228-1462`、`:1486-1571`、`:1624-1745`、`:1832-1875`、`extensions/acpx/src/process-lease.ts`、`:40-178`、`extensions/acpx/src/process-reaper.ts`
+- attach grant/revoke 与 CLI：`src/cli/attach-cli.ts`、`:33-184`、`src/gateway/server-methods/attach.ts`
 - ACP 渠道/线程 binding 与 spawn：`src/auto-reply/reply/commands-acp/bindings.ts`、`src/auto-reply/reply/commands-acp/lifecycle.ts`、`src/agents/subagents/spawn/acp-spawn*.ts`、`src/agents/subagents/spawn/subagent-spawn-thread-binding.ts`；相关声明见 `docs/tools/acp-agents.md`、`docs/tools/acp-agents-setup.md`
 - 媒体边界入口：`src/media-understanding/*`、`src/media/*`、`src/tts/*`、`src/media-generation/*`、`src/video-generation/*`、`src/gateway/chat-attachments.ts`、`src/gateway/managed-image-attachments.ts`

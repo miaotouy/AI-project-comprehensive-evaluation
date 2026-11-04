@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：只读源码核对（src/lib/components/chat/Messages 组件树、src/lib/utils/marked 扩展、src/lib/utils/index.ts、Artifacts/代码执行相关）；未修改目标仓库
 >
@@ -44,7 +44,7 @@ Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐
 content (流式累加)
   -> processResponseContent（尖括号实体化、中文标点修正，utils/index.ts 86-145）
   -> replaceTokens（{{char}}/{{user}}/{{VIDEO_FILE_ID_*}}/{{HTML_FILE_ID_*}} 占位符，仅代码块外替换，utils/index.ts 56-84）
-  -> marked.lexer（Markdown.svelte:70-74）
+  -> marked.lexer（Markdown.svelte:87）
   -> MarkdownTokens.svelte 逐 token 渲染（150-583 行）
   -> 块级组件（CodeBlock / details / HTMLToken / KatexRenderer / SourceToken ...）
 ```
@@ -63,7 +63,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 - `<details>` 块由 `utils/marked/extension.ts`（29-103 行）深度配对解析并捕获 `type` 属性；
 - 引用 `[1]`、`[1,2]`、`[1#suffix]` 由 `citation-extension.ts` 生成 citation token → `SourceToken` 渲染为行内按钮；
 - `:::` 冒号围栏由 `colon-fence-extension.ts` 分词，`fenceType` 拼入 class 名，内部内容重新走 blockTokens；
-- 下划线扩展此前只做 inline token 化，现已补上 renderer，输出 `<u>` 包裹解析后的 inline tokens（`src/lib/utils/marked/extension.ts:105-125`）；
+- 下划线扩展此前只做 inline token 化，现已补上 renderer，输出 `<u>` 包裹解析后的 inline tokens（`src/lib/utils/marked/extension.ts:90`）；
 - 脚注 `[^]` 的 `<sup>` 也经 `DOMPurify.sanitize`（MarkdownInlineTokens.svelte 129-132 行）。
 
 ## 3. 代码高亮、Math 与 HTML 消毒

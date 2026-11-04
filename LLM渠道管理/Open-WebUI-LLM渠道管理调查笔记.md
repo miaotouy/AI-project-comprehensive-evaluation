@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：只读核对当前快照的 Python 后端、Svelte Web 界面、TypeScript API 封装、环境变量示例、CLI 入口、变更记录和仓库文件分布；未运行服务，未修改项目源码
 >
@@ -49,7 +49,7 @@ Open WebUI 当前把服务端 LLM 渠道表示为 OpenAI 兼容连接或 Ollama 
   -> 允许时直接请求用户填写的 OpenAI 兼容 URL
 ```
 
-管理员 Web 读取 `/openai/config`、`/ollama/config` 和 `/configs/connections`；保存连接分别调用 `/openai/config/update`、`/ollama/config/update`。后端路由使用管理员依赖保护这些服务端配置接口。实现见 `backend/open_webui/routers/openai.py:392-429`、`backend/open_webui/routers/ollama.py:288-348` 和 `backend/open_webui/routers/configs.py:139-160`。
+管理员 Web 读取 `/openai/config`、`/ollama/config` 和 `/configs/connections`；保存连接分别调用 `/openai/config/update`、`/ollama/config/update`。后端路由使用管理员依赖保护这些服务端配置接口。实现见 `backend/open_webui/routers/openai.py:468`、`backend/open_webui/routers/ollama.py:288-348` 和 `backend/open_webui/routers/configs.py:139-160`。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
@@ -59,7 +59,7 @@ OpenAI 兼容连接由三个并行数组/字典组成：URL 列表、Key 列表�
 
 每个连接配置可保存启用状态、模型白名单、模型 ID 前缀、标签、连接类型、认证类型、自定义 Header、Provider、Azure 参数、API 类型和允许透传的参数。OpenAI 可选择 Chat Completions 或 Responses API；Azure 的部署名称通过 `model_ids` 录入。字段契约见 `backend/open_webui/models/config.py:38-53`，表单组装见 `src/lib/components/AddConnectionModal.svelte:198-214`。
 
-同一类连接可以创建多个 Endpoint。OpenAI 合并同名模型时保留首次出现的连接并记录 `urlIdx`；Ollama 合并同名模型时保留所有后端索引，之后由随机选择逻辑挑选后端。分别见 `backend/open_webui/routers/openai.py:529-711` 和 `backend/open_webui/routers/ollama.py:351-366`。
+同一类连接可以创建多个 Endpoint。OpenAI 合并同名模型时保留首次出现的连接并记录 `urlIdx`；Ollama 合并同名模型时保留所有后端索引，之后由随机选择逻辑挑选后端。分别见 `backend/open_webui/routers/openai.py:587` 和 `backend/open_webui/routers/ollama.py:378`。
 
 ### 1.2 用户 Direct Connections
 
@@ -73,7 +73,7 @@ Direct Connections 只允许用户填写 OpenAI 兼容 Endpoint。每个用户�
 
 当前配置模型每个 key 使用一行数据库记录，列为 `key`、JSON `value` 和更新时间。`Config.get`/`get_many` 在持久化配置开启时先查数据库，缺失时回退默认值；`seed_defaults` 只插入不存在的默认 key。因此环境变量是种子/回退来源，数据库是运行时权威来源，而不是每次启动都覆盖数据库。见 `backend/open_webui/models/config.py:99-165`、`196-218`、`239-264`。
 
-旧版 `DATA_DIR/config.json` 会在启动迁移函数中整体写入数据库，然后重命名为 `old_config.json`。这是迁移路径，不是当前连接的文件编辑协议。见 `backend/open_webui/config.py:82-89`。
+旧版 `DATA_DIR/config.json` 会在启动迁移函数中整体写入数据库，然后重命名为 `old_config.json`。这是迁移路径，不是当前连接的文件编辑协议。见 `backend/open_webui/config.py:90`。
 
 ### 2.2 管理员 Web Connections 操作矩阵
 
@@ -200,13 +200,13 @@ OpenAI Key 与 URL 按索引一一对应，没有在连接管理或请求路径�
 
 ## 12. 关键源码索引
 
-- 环境变量、默认配置和旧配置迁移：`backend/open_webui/config.py:82-89`、`:217-357`
-- 数据库配置模型、默认种子和持久化优先级：`backend/open_webui/models/config.py:99-165`、`:196-264`
-- OpenAI 配置读取、保存和模型索引：`backend/open_webui/routers/openai.py:267-305`、`:392-429`、`:529-711`
-- 基础模型目录 Redis 缓存与清缓存：`backend/open_webui/utils/models.py:32,69-105`、`routers/openai.py:347-356`、`routers/ollama.py:321-327`
-- OpenAI 连接测试：`backend/open_webui/routers/openai.py:795-880`
-- Ollama 配置读取、保存和连接测试：`backend/open_webui/routers/ollama.py:213-348`
-- Ollama 多后端模型合并：`backend/open_webui/routers/ollama.py:351-366`、`:386-451`
+- 环境变量、默认配置和旧配置迁移：`backend/open_webui/config.py:90`、`:217-357`
+- 数据库配置模型、默认种子和持久化优先级：`backend/open_webui/models/config.py:104`
+- OpenAI 配置读取、保存和模型索引：`backend/open_webui/routers/openai.py:456`（读取）、`:468`（保存）、`:587`（模型索引）
+- 基础模型目录 Redis 缓存与清缓存：`backend/open_webui/utils/models.py:93`、`routers/openai.py`、`routers/ollama.py`
+- OpenAI 连接测试：`backend/open_webui/routers/openai.py:980`
+- Ollama 配置读取、保存和连接测试：`backend/open_webui/routers/ollama.py:274`（读取）、`:305`（保存）、`:378`（模型索引）
+- Ollama 多后端模型合并：`backend/open_webui/routers/ollama.py:378`
 - 管理员 Connections 页面：`src/lib/components/admin/Settings/Connections.svelte:54-139`、`:209-401`
 - 连接新增/编辑/验证/删除弹窗：`src/lib/components/AddConnectionModal.svelte:74-230`、`:270-788`
 - 管理员 OpenAI/Ollama 行组件：`src/lib/components/admin/Settings/Connections/OpenAIConnection.svelte`、`OllamaConnection.svelte`

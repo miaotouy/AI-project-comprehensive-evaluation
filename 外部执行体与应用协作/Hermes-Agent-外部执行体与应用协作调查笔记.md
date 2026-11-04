@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：静态复核 Python gateway、桌面/TUI/Web JSON-RPC 客户端、ACP adapter、REST gateway 和消息平台边界；复用 Chat、Chat UI 和独特功能笔记；未运行跨客户端或 IM 平台
 >
@@ -17,7 +17,7 @@
 Hermes Agent 的多表面控制与反向 Agent 接入均达到 `主链确认`（静态证据）：
 
 - 桌面、TUI 和 Web 控制面共享同一个 Python `tui_gateway`/`AIAgent` runtime、profile 数据库和 session lineage，并通过 JSON-RPC 提交、流式接收、取消和恢复任务。
-- `acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code/Zed/JetBrains 等外部宿主，覆盖会话新建、恢复、提示、分叉与取消操作。
+- `acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code/Zed/JetBrains 等外部宿主，覆盖会话新建、恢复、提示、分叉与取消操作。当前快照里该适配器已从单一 server 文件扩成一组模块：`gateway_server.py`/`gateway_commands.py`/`gateway_media.py`/`gateway_reply.py`/`gateway_session_meta.py` 承接 Hermes gateway 会话与媒体，`catalog.py`/`model_catalog.py` 提供模型目录，`elicitation.py` 处理宿主侧交互式征询，`modes.py` 声明执行模式，`edit_approval.py`/`permissions.py` 承接编辑审批。
 - REST API gateway（`api_server` 平台）提供补全、响应与运行类端点，以及会话管理与 cron 任务接口；具体路由见下方主链。
 
 消息平台 gateway 存在且平台枚举 20+（telegram/discord/whatsapp/slack/signal/mattermost/matrix/钉钉/企业微信/微信/飞书/QQ 机器人/email/sms/webhook/MS Graph 等），但本轮未逐 adapter 走通，标为 `入口确认`。
@@ -63,7 +63,7 @@ profile 是配置和数据隔离单位；持久会话由 `session_key` 标识，
 
 ## 执行、回流与控制语义
 
-JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重定向等控制操作；流式事件包括消息、推理、思考、工具与子 Agent。桌面连接采用指数退避重连，恢复后丢弃过期 runtime binding 并刷新 session；正在运行的 turn 可被新客户端收养为 adopted running turn。REST 面支持 run 级 stop 与审批回传；ACP 面提供 Cancel 与审批回调。外部应用分型中，MS Graph webhook（`msgraph_webhook.py`）是明确的业务系统事件入站样本：Graph 订阅校验握手、通知入站、CIDR 白名单与 client_state 强制。
+JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重定向等控制操作；流式事件包括消息、推理、思考、工具与子 Agent。桌面连接采用指数退避重连，恢复后丢弃过期 runtime binding 并刷新 session；正在运行的 turn 可被新客户端收养为 adopted running turn。REST 面支持 run 级 stop 与审批回传；ACP 面提供 Cancel 与审批回调。外部应用分型中，MS Graph webhook（`gateway/platforms/msgraph_webhook.py`）是明确的业务系统事件入站样本：Graph 订阅校验握手、通知入站、CIDR 白名单与 client_state 强制。消息平台侧另有 `gateway/platform_activation.py`、`gateway/platform_env.py` 承担平台启用与环境检查；`plugins/computer_use`、`plugins/delegation` 是本轮新增的插件化执行边界。
 
 子 Agent 控制也进入共享协议面。调用方只能枚举当前会话和当前运行代际拥有的 live 子 Agent，并可读取有界 transcript tail、发送 steer 或 interrupt；结束或不属于该 transport 的子 Agent不可见（`tui_gateway/methods_subagents.py:12-89`）。这仍是 Hermes 内部委派的控制面，不把子 Agent 重新分类为外部执行体。
 
@@ -83,28 +83,32 @@ JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重�
 
 ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 provider 且其协议允许工具调用时，外部 agent 的工具活动会回流并并入发起回合。该变化加强外部执行体与 Hermes turn 的衔接，但不表示 ACP 宿主获得 Hermes 内部会话库的直接写权限；会话数据仍由各 profile 的后端管理。
 
-桌面还能只读发现 Claude Code 与 Codex CLI 的本地会话并导入为 Hermes 静态历史。导入只迁移归一化后的消息和来源 metadata，不继承源执行体的凭据、审批、活动工具或运行状态（`hermes_cli/foreign_sessions.py:1-45,95-177`，`apps/desktop/src/app/session-import/index.tsx`）。
+桌面与后端的关系在快照间细化为“发现-认领-归属-健康-回收”一组 Electron 模块：`backend-discovery`/`backend-dial-claim` 负责找到或接管已有后端，`backend-ownership`/`backend-claim` 维护多窗口与多客户端的所有权，`backend-health`/`backend-recycle` 处理失活与重启。桌面仍由后端进程承载 agent 循环，renderer 只经 WebSocket JSON-RPC 通信；`apps/desktop/src/hermes.ts` 仍是 renderer 侧的薄客户端。
+
+桌面还能只读发现 Claude Code 与 Codex CLI 的本地会话并导入为 Hermes 静态历史。导入只迁移归一化后的消息和来源 metadata，不继承源执行体的凭据、审批、活动工具或运行状态（`hermes_cli/foreign_sessions.py`，`apps/desktop/src/app/session-import/index.tsx`）。
+
+跨 agent 迁移入口现在由插件提供而非核心模块：`hermes import-agent` 命令与来源清单归 `agent-importers` 插件，迁移表把旧 `claw` 命令指向它，CLI 保留同名命令与 `--sync` 语义；核心侧只保留 `hermes_cli/setup_agent_import.py` 与 `foreign_sessions.py` 的会话发现路径。
 
 ## 已确认边界与未验证事项
 
 - 桌面/TUI/Web/ACP/REST 共享 backend 为静态主链确认，未运行多客户端并发和接管。
 - gateway 消息平台的安装、endpoint 映射、线程回复和权限未逐 adapter 调查；relay connector 为实验性，标 `候选观察`。
 - 远程 OAuth ticket、断网恢复和 profile 多 socket 时序未运行验证。
+- 本轮只按笔记引用的路径核对模块归位与入口（ACP 模块拆分、import-agent 插件化、msgraph 路径），未逐函数重读适配器实现；ACP 的 elicitation、modes 与 gateway 媒体桥在真实宿主中的握手顺序未验证。
 
 ## 关键源码索引
 
 - `tui_gateway/server.py`
 - `tui_gateway/methods_prompt.py`
 - `tui_gateway/methods_session.py`
-- `acp_adapter/{server,auth,permissions}.py`
+- `acp_adapter/{server,session,gateway_server,modes,elicitation,permissions,edit_approval}.py` 与 `gateway_*.py`
 - `gateway/platforms/{api_server,msgraph_webhook}.py`
-- `gateway/{pairing.py,relay/}`
+- `gateway/{pairing.py,profile_routing.py,relay/}`
 - `tools/connectors/{tool,operation}.py`、`tui_gateway/methods_connectors.py`
 - `tui_gateway/methods_subagents.py`、`hermes_cli/foreign_sessions.py`
 - `apps/shared/src/json-rpc-gateway.ts`
 - `apps/shared/src/websocket-url.ts`
-- `apps/desktop/src/hermes.ts`
-- `apps/desktop/electron/backend-command.ts`
+- `apps/desktop/src/hermes.ts`、`apps/desktop/electron/backend-{child,spawn-env,ownership,claim,discovery,health,recycle}.ts`：桌面进程发现、启动、归属与回收后端
 - `ui-tui/src/gatewayClient.ts`
 - `hermes_cli/web_server.py`
 - `gateway/`

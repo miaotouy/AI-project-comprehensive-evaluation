@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -22,19 +22,21 @@ TUI 没有主题市场、壁纸、字体、密度或圆角设置。键盘由统�
 
 ## 系统边界与总体装配
 
-**界面栈。** `packages/tui` 是自研终端 UI 库（`packages/tui/package.json` 依赖仅两个小包），组件模型为：组件（渲染、输入处理与失效标记）+ 容器组合 + 可聚焦节点（focused 状态 + CURSOR_MARKER APC 序列定位硬件光标供 IME 使用，`packages/tui/src/tui.ts:23-79`）。
+**界面栈。** `packages/tui` 是自研终端 UI 库（`packages/tui/package.json` 运行时依赖仅三个小包：get-east-asian-width、marked、marked-cjk-friendly），组件模型为：组件（渲染、输入处理与失效标记）+ 容器组合 + 可聚焦节点（focused 状态 + CURSOR_MARKER APC 序列定位硬件光标供 IME 使用，`packages/tui/src/tui.ts:23-79`）。
 
 不采用 Ink/blessed/react 等框架。
 
-**两种渲染器。** TuiMainScreen（regular：渲染进主屏与滚动回滚，行级差分比较；`tui-main-screen.ts:180` 起 doRender）与 TuiAltScreen（fullscreen 备屏：应用自有视口与布局引擎；`tui-alt-screen.ts:159`，ViewportTUI 标记符号，`tui.ts:320`）。
+**两种渲染器。** TuiMainScreen（regular：渲染进主屏与滚动回滚，行级差分比较；`tui-main-screen.ts:127` 起，doRender 内含 compositeOverlays 调用 :273）与 TuiAltScreen（fullscreen 备屏：应用自有视口与布局引擎；`tui-alt-screen.ts:203`，ViewportTUI 标记符号，`tui.ts:1382`）。
 
-**装配。** createInteractiveTui（`interactive-mode.ts:343-355`）按 tuiMode 选择渲染器，fullscreen 时注入搜索匹配样式、链接打开与右键粘贴回调；
+**装配。** createInteractiveTui（`modes/interactive/tui-renderer.ts`，由 interactive-mode 转出）按 tuiMode 选择渲染器，fullscreen 时注入搜索匹配样式、链接打开与右键粘贴回调；
 
-InteractiveMode.init（:842 起）构建组件树（文档、待处理消息、状态、编辑器、页脚五个容器，:891-899 挂载），并构造 fullscreen 布局根（transcript 滚动视图 + dock 垂直栈，:872-890）。
+InteractiveMode.init（`interactive-mode.ts:974` 起）构建组件树（文档、待处理消息、状态、编辑器、页脚五个容器）并构造 fullscreen 布局根（transcript 滚动视图 + dock 垂直栈）。
 
-**渲染器热切换。** switchTuiMode（:791-840）在 regular/fullscreen 之间替换渲染器但保留同一组件树、焦点与渲染状态（TuiMainScreenRenderState capture/restore，:802-822）；组件持有的 TUI 引用经 createInteractiveTuiReference（:358-386）的 Proxy 跟随当前渲染器。
+**渲染器热切换。** switchTuiMode（`interactive-mode.ts:921`）在 regular/fullscreen 之间替换渲染器但保留同一组件树、焦点与渲染状态（TuiMainScreenRenderState capture/restore，:802-822）；组件持有的 TUI 引用经 createInteractiveTuiReference 的 Proxy 跟随当前渲染器。
 
 **多入口共享。** 启动选择器/首次设置/登录提示使用独立临时 TuiMainScreen（`cli/startup-ui.ts:77-85` createStartupTui），与主交互共用同一主题系统与 TuiMainScreen 类；TUI 单进程无多窗口概念。
+
+**第二个界面表面。** 仓库另有 `apps/p2`：一个以 Chord 插件搭建的自托管应用，同时提供 Web host（本地 HTTP，默认 8788 端口）与自己的 TUI host，插件覆盖会话、搜索、共享、子代理、终端、文件、设备等页面，数据默认在 `~/.pi/p2`。它是实验性原型，README 明确说明数据格式与 API 会变；其界面基础设施（React 组件、`plugins/` 与 `src/tui`）自成一套，本笔记的界面结论仍只覆盖 `packages/tui` 与 coding-agent 的交互模式。
 
 **渲染调度。** requestRender 16ms 最小帧间隔节流 + requestImmediateRender（用户输入路径避免 Windows 16ms 计时 tick，`tui.ts:765-817`）；OSC 11/颜色方案/cell size 应答在输入链最前消费（:819-951）。
 
@@ -51,9 +53,9 @@ InteractiveMode.init（:842 起）构建组件树（文档、待处理消息、�
 
 ### Overlay 栈（TUI 层公共机制）
 
-- showOverlay(component, options) 返回 OverlayHandle（hide/setHidden/focus/unfocus/isFocused），记录 preFocus 并在关闭时还原（`tui.ts:549-642`）；OverlayOptions 支持 anchor（九方位）、width/maxHeight/row/col 绝对或百分比、margin、visible 回调（每渲染帧以终端尺寸评估，:666-672）与 nonCapturing（不抢焦点）。
+- showOverlay(component, options) 返回 OverlayHandle（hide/setHidden/focus/unfocus/isFocused），记录 preFocus 并在关闭时还原（`tui.ts:758`）；OverlayOptions 支持 anchor（九方位）、width/maxHeight/row/col 绝对或百分比、margin、visible 回调（每渲染帧以终端尺寸评估，:666-672）与 nonCapturing（不抢焦点）。
 
-**合成。** compositeOverlays（`tui.ts:1092-1151`）先渲染全部可见 overlay、按 focusOrder 排序后逐行合成到底层行；工作区高度取 max(result.length, termHeight, minLinesNeeded)，注释明确排除历史高水位 maxLinesRendered 以避免终端加宽时自增强膨胀（:1124-1127）。
+**合成。** compositeOverlays（`tui.ts:1382`）先渲染全部可见 overlay、按 focusOrder 排序后逐行合成到底层行；工作区高度取 max(result.length, termHeight, minLinesNeeded)，注释明确排除历史高水位 maxLinesRendered 以避免终端加宽时自增强膨胀（:1124-1127）。
 
 **焦点。** overlay 捕获焦点后 overlayFocusRestore 进入 eligible/blocked 两态恢复（:422-521），嵌套 overlay 关闭时焦点回退到下一个可见 capturing overlay 或 preFocus 链（:567-641）；输入分发前校验聚焦 overlay 仍可见，不可见则重定向（:855-881）。
 

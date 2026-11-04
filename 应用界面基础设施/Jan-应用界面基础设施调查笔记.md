@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -26,13 +26,13 @@ Jan 使用 React、Tailwind 和 TanStack Router，桌面与移动端共享同一
 
 **框架。** React 19.0、Vite 6、Tailwind CSS 4（使用 @tailwindcss/vite 和 @theme inline 方案）、TanStack Router（文件路由，路由树自动生成）、zustand 5（含 persist 中间件）、TanStack Virtual。
 
-**公共组件层。** web-app/src/components/ui/ 下有 27 个 shadcn 风格基础组件（对话框、抽屉、菜单、浮层、提示、侧栏、通知和骨架等，依赖清单见 `package.json:29-107`）；无内部设计系统包（对比 Cherry Studio 的 @cherrystudio/ui）。
+**公共组件层。** web-app/src/components/ui/ 下有 27 个 shadcn 风格基础组件（对话框、抽屉、菜单、浮层、提示、侧栏、通知和骨架等，依赖清单见 `package.json:14` 起的 dependencies）；无内部设计系统包（对比 Cherry Studio 的 @cherrystudio/ui）。
 
 **非通用层。** `containers/`（业务容器与 40 余个对话框组件）、`hooks/`（大量 zustand store 封装）、`providers/`（全局 Provider）。
 
 ### 启动装配与 Provider 栈
 
-web-app/src/main.tsx 的启动函数（L82-106）顺序：装控制台日志转发 → 移动端 viewport 注入（禁用缩放 + safe-area padding，L14-49）→ 全局阻止浏览器默认拖放（L52-59）→ 消费工厂重置哨兵 take_pending_webdata_reset 并剪除 localStorage 标志（L71-80，
+web-app/src/main.tsx 的 `boot()`（L83-105）顺序：装控制台日志转发 → 移动端 viewport 注入（禁用缩放 + safe-area padding，L14-51）→ 全局阻止浏览器默认拖放（L53-59）→ 消费工厂重置哨兵 `take_pending_webdata_reset` 并剪除 localStorage 标志（L72-81，
 
 注释说明必须赶在任何 store 模块 import 前，因为 zustand persist 在 import 时同步水合）→ 动态 import 路由与 i18n → createRouter 渲染。
 
@@ -89,7 +89,9 @@ LogsLayout 是无侧栏的简化布局（同一文件 L88-103）。
 
 **消费方式。** 业务组件直接使用 hooks 导出的 store，快捷键和事件回调则读取 store 当前状态（如 `KeyboardShortcuts.tsx:29-34`）。
 
-ServiceHub（`services/index.ts:56-79`）提供 20 个平台服务（theme/window/events/dialog/opener/threads/messages 等），桌面/移动在 `initialize()` 动态 import 各自的 Tauri/Mobile 实现（L108-211），web 构建用 Default 实现。
+ServiceHub（`services/index.ts:58` 起的接口）提供平台服务（theme/window/events/dialog/opener/threads/messages/providers/models/assistants/updater/path/core/deeplink/projects/rag/uploads/extensions 等），桌面/移动在 `initialize()`（L113 起）动态 import 各自的 Tauri/Mobile 实现，web 构建用 Default 实现。
+
+服务总线之外另有一层扩展宿主：`web-app/src/lib/extensions/host.ts` 用 `@janhq/extension-api` 校验清单、按贡献点注册 UI 与服务，再经 `@janhq/core` 的 `createServiceRegistry` 暴露能力句柄；扩展包本体由 `@janhq/extension-runtime` 在 worker 侧执行并通过 RPC 与宿主通信，安装、开发加载与内置扩展分别由 `installed-loader`、`dev-loader`、`builtins` 三条入口进入（同目录 `contributions.ts`、`dispatcher.ts`、`http.ts`）。因此"服务"有两套句柄：平台服务在 ServiceHub，扩展贡献的能力在扩展宿主的服务注册表，二者由 `ServiceKeys` 对齐。
 
 **错误状态。** 全局错误弹窗内容由 useAppState 的 errorMessage 字段持有（`ErrorDialog.tsx:19-20`）；llamacpp 路由错误经 LlamacppOomListener 监听 Rust 事件写入该状态（oom/backend/load-progress/unload，`LlamacppOomListener.tsx:27-74`），banner 呈现归 Chat UI 笔记。
 
@@ -185,7 +187,7 @@ Skeleton 基础组件存在（`ui/skeleton.tsx`）但业务页面（Hub 之外�
     在 activeTheme 还是旧值时覆盖 isDark，useTheme.ts:30-44）
   → ServiceHub.theme().setTheme()
      → Tauri：遍历所有 WebviewWindow 调 window.setTheme（services/theme/tauri.ts:16-34）
-     → 桌面 Linux 另经 Rust set_gtk_prefer_dark 翻转 GTK HeaderBar（src-tauri/src/core/setup.rs:466-482）
+     → 桌面 Linux 另经 Rust set_gtk_prefer_dark 翻转 GTK HeaderBar（`src-tauri/src/core/setup.rs:618`）
 ```
 
 **持久化。** persist 使用 backendStorage，键名为 theme（`constants/localStorage.ts:5`），并设置 skipHydration: true；重新水合时按 activeTheme 重算 isDark，丢弃陈旧值（`useTheme.ts:63-71`）。水合由 hydrateBackendStores 先行（见装配节）。
@@ -196,9 +198,9 @@ Skeleton 基础组件存在（`ui/skeleton.tsx`）但业务页面（Hub 之外�
 
 ThemeProvider 第二个 effect（`providers/ThemeProvider.tsx:21-76`）仅在 activeTheme 为 auto 时更新 isDark：
 
-**Web/Windows/macOS。** 监听 matchMedia('(prefers-color-scheme: dark)') 事件（L33-35）；Tauri 下另订阅 theme-changed 事件，并通过 get_system_theme 初次对齐（L37-61）。Rust 侧主窗口的 `WindowEvent::ThemeChanged` 转发为 theme-changed（`setup.rs:565-583`）。
+**Web/Windows/macOS。** 监听 matchMedia('(prefers-color-scheme: dark)') 事件（L33-35）；Tauri 下另订阅 theme-changed 事件，并通过 get_system_theme 初次对齐（L37-61）。Rust 侧主窗口的 `WindowEvent::ThemeChanged` 转发为 theme-changed（`src-tauri/src/core/setup.rs` 的主题监听段）。
 
-**Linux 特例。** 注释明确 WebKitGTK 的 prefers-color-scheme 不可靠，权威改为 Rust 侧 XDG Desktop Portal 读取 + D-Bus SettingChanged 信号（`setup.rs:510-563`，KDE/GNOME 双覆盖），经 theme-changed 事件转发；get_system_theme 优先 portal、回退 `window.theme()`（`setup.rs:484-504`）。
+**Linux 特例。** 注释明确 WebKitGTK 的 prefers-color-scheme 不可靠，权威改为 Rust 侧 XDG Desktop Portal 读取 + D-Bus SettingChanged 信号（`src-tauri/src/core/setup.rs:450-480`，KDE/GNOME 双覆盖），经 theme-changed 事件转发；`get_system_theme`（`:636`）优先 portal、回退 `window.theme()`。
 
 **跨窗口。** 显式主题经 TauriThemeService 向所有窗口推送；辅助窗口创建时再挂 theme-changed 监听（`services/window/tauri.ts:173-195`）。
 
@@ -267,7 +269,7 @@ sonner 经 theme prop + `.toaster` 类混入强调色（见 §3）；Radix 浮�
 
 **窗口最小尺寸。** 本次未找到：tauri.conf.json 无 windows 段，src-tauri 全文搜索 min_inner_size/set_min_size 无命中，web-app 无 setMinSize 调用；窗口初始尺寸由 Tauri 默认值与运行时创建参数（日志窗 800×600 等）决定。
 
-**移动端。** `main.tsx:14-49` 注入禁缩放 viewport 与 safe-area padding；src-tauri 提供 iOS/Android 构建入口（`package.json:29-33`，仓库分布笔记 §5），持久化换 SQLite；界面行为未运行验证。
+**移动端。** `main.tsx:14-51` 注入禁缩放 viewport 与 safe-area padding；src-tauri 提供 iOS/Android 构建入口（见 `package.json` 构建脚本，仓库分布笔记 §5），持久化换 SQLite；界面行为未运行验证。
 
 **窗口与浮层协作。** Toast 顶部偏移避开 48px 拖拽区（§3）；右侧 Sheet 按标题栏布局增加 pt-15（§2）；WindowControls 自绘按钮仅在 Windows/Linux 渲染，Linux 上按 DE 布局左右自适应（`WindowControls.tsx:27-44`，Rust 命令与布局类型见 `setup.rs:348-461`）。
 
@@ -283,7 +285,7 @@ sonner 经 theme prop + `.toaster` 类混入强调色（见 §3）；Radix 浮�
 
 消息区粘贴图片走 navigator.clipboard.read 回退路径（`ChatInput.tsx:1672-1677`，Chat UI 笔记 §3）。
 
-**拖放。** 全局 preventDefaultFileDrop 禁止浏览器默认打开拖入文件（`main.tsx:52-59`）；Composer 文件拖入（按能力分流、输入框高亮反馈）归 Chat UI 笔记 §3；拖拽排序仅一处——MCP 服务器表单的环境变量列表用 **@dnd-kit**（core+sortable，`AddEditMCPServer.tsx:27-34`，可拖动项/排序容器/CSS.Transform），是 @dnd-kit 在 src 中的全部消费点。
+**拖放。** 全局 preventDefaultFileDrop 禁止浏览器默认打开拖入文件（`main.tsx:53-59`）；Composer 文件拖入（按能力分流、输入框高亮反馈）归 Chat UI 笔记 §3；拖拽排序仅一处——MCP 服务器表单的环境变量列表用 **@dnd-kit**（core+sortable，`AddEditMCPServer.tsx:27-34`，可拖动项/排序容器/CSS.Transform），是 @dnd-kit 在 src 中的全部消费点。
 
 **上传/附件反馈。** 文档上传（ProjectFiles）和模型导入（ImportLlamacppModelDialog/ImportMlxModelDialog）均使用 services/dialog 提供的原生文件选择器（`services/dialog/tauri.ts`），并通过通知反馈成功、失败和去重结果，同时限制大小与类型；附件摄取方式选择用全局 AttachmentIngestionDialog（§1）。附件解析偏好（inline/embeddings）的发送决策归对话请求笔记。
 
@@ -326,3 +328,4 @@ sonner 经 theme prop + `.toaster` 类混入强调色（见 §3）；Radix 浮�
 - 响应式/窗口：`web-app/src/hooks/use-mobile.ts`、`use-sidebar-resize.ts`、`useLeftPanel.ts`、`components/WindowControls.tsx`、`WindowResizeGrips.tsx`、`src-tauri/tauri.conf.json`
 - 快捷键：`web-app/src/providers/KeyboardShortcuts.tsx`、`hooks/useHotkeys.ts`、`lib/shortcuts/`、`hooks/useMessageZoom.ts`
 - 服务总线：`web-app/src/services/index.ts`、`services/dialog/`、`services/core/`
+- 扩展宿主：`web-app/src/lib/extensions/`（`host.ts`、`installed-loader.ts`、`dev-loader.ts`、`builtins.ts`、`contributions.ts`、`dispatcher.ts`）、`packages/extension-api/`、`packages/extension-runtime/`

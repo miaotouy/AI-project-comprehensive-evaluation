@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，把模型建模为 `ai_models` 中的 `providerId + modelId` 组合。内置 Provider 目录、服务端环境变量和用户数据库配置在运行时合并；用户创建的自定义 Provider 拥有独立 ID，并通过 `settings.sdkType` 选择 OpenAI、Anthropic、Google、Bedrock、Azure、Ollama、Router 等协议适配器。当前目录还注册了 Meta AI 与 Unsloth Provider，运行时入口分别见 `packages/model-runtime/src/providers/meta/index.ts:12-62` 和 `providers/unsloth/index.ts:9-55`。
+LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，把模型建模为 `ai_models` 中的 `providerId + modelId` 组合。内置 Provider 目录、服务端环境变量和用户数据库配置在运行时合并；用户创建的自定义 Provider 拥有独立 ID，并通过 `settings.sdkType` 选择 OpenAI、Anthropic、Google、Bedrock、Azure、Ollama、Router 等协议适配器。当前目录除 Meta AI 与 Unsloth 外，还注册了 Magpie（本地服务，可走 `MAGPIE_PROXY_URL`）与 TypeSafe 两个新 Provider，运行时入口分别为 `packages/model-runtime/src/providers/magpie/index.ts` 与 `providers/typesafe/index.ts`。
 
 这套实现的主要特点是：
 
@@ -24,7 +24,7 @@ LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，
 - 多 Key 没有失败计数、健康状态、熔断、冷却恢复或基于错误的主动换 Key；
 - Agent Runtime 默认对可重试错误重放 5 次，即最多 6 次 attempt，指数退避从 1 秒起、上限 30 秒；
 - 重试固定同一 Provider 与模型。是否重新随机取 Key 取决于 transport 是否重新初始化 Model Runtime，而不是健康调度；
-- 通用 `RouterRuntime` 支持一个逻辑 Provider 内按 option 顺序 fallback，option 还可切换底层 `apiType`；当前实现还允许在每次请求前对候选 option 做安全的重排，若 hook 返回非原列表的排列或抛错则忽略，避免策略 hook 自身缩小可用性（`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts:227-233`）；
+- 通用 `RouterRuntime` 支持一个逻辑 Provider 内按 option 顺序 fallback，option 还可带权重、可切换底层 `apiType`，并支持 `pinnedRoute` 固定路由与 `allowedApiTypes` 过滤；流式聊天在首个有效片段前失败时走 `runChatWithStreamFallback` 换下一个 option。当前实现还允许在每次请求前对候选 option 做安全的重排，若 hook 返回非原列表的排列或抛错则忽略，避免策略 hook 自身缩小可用性（`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts`）；
 - 但当前开源 `lobehub` Router 配置的 `routers()` 返回空数组，真实托管渠道表及排序/健康策略不在这份开源配置中，不能据此宣称普通 Provider 已有跨渠道故障转移；
 - 连接检测只对指定模型发送一次最小非流式请求，结果仅保留在当前 UI 状态，不写入调度健康表；
 - Provider 凭据以 AES-GCM 密文保存在 PostgreSQL，但 `fetchOnClient` 场景会把解密后的运行时配置下发到浏览器内存；
@@ -94,7 +94,7 @@ Agent、Topic 和 Message 都分别保存 `provider` 与 `model`。新 Topic 会
 
 ### 1.3 内置目录、环境变量与用户差量
 
-[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照（HEAD）的固定列表有 84 张卡（该文件 84 个 import），其中品牌 `lobehub` 由 `ENABLE_BUSINESS_FEATURES` 条件加入（`index.ts:145-146`），即开源默认 83、商业构建 84。
+[`packages/model-bank/src/modelProviders/index.ts`](../../lobehub/packages/model-bank/src/modelProviders/index.ts) 汇总内置 Provider 定义。当前快照（HEAD）的固定列表有 90 个 provider 导入，其中品牌 `lobehub` 由 `ENABLE_BUSINESS_FEATURES` 条件加入，即开源默认 89、商业构建 90。运行时 `providers/` 目录共 89 个实现，本次新增 `magpie` 与 `typesafe`。
 
 有效配置来自三层：
 
@@ -301,16 +301,19 @@ Model Runtime 根据内置 Provider ID 或自定义 Provider 的 SDK 类型选�
 按 Base URL pattern 匹配 router
   -> 按 model 列表匹配 router
   -> 否则取最后一个 router
+  -> 过滤 allowedApiTypes（如 raw audio 只走支持该协议的路由）
   -> 可由 sortRouterOptions() 重排 option
-  -> 顺序尝试每个 option
+  -> 顺序尝试每个 option（option 可带 weight）
        option 可覆盖 apiType，从而切换底层协议 Runtime
        成功即返回
-       不可重试请求错误立即停止
+       不可重试请求错误立即停止（routeFallback 的 shouldStopFallbackForError）
        shouldStopFallback() 可额外终止
   -> onRouteAttempt() 记录每次成功/失败与耗时
 ```
 
-它可表达一个逻辑 Provider 下的多个真实 channel，也允许 fallback 时从 OpenAI API 切到 Anthropic、Vertex AI 等不同 `apiType`。
+它可表达一个逻辑 Provider 下的多个真实 channel，也允许 fallback 时从 OpenAI API 切到 Anthropic、Vertex AI 等不同 `apiType`。路由尝试现在带身份与诊断：每次 attempt 附加 `channelWeight`/`weighted` 等信息，`routeAttempt` 缺失上下文会抛出 `RouteAttemptMissingContext` 诊断，避免静默丢路由记录；流式聊天还有独立的 `runChatWithStreamFallback`，在首个有效流片段之前失败时改走下一个 option。
+
+媒体处理新增原生或模拟两条路：`createVideo`/`handlePollVideoStatus` 走 runtime 的异步任务接口，`textToSpeech`/`transcribe` 提供 `onTextToSpeechFinal`/`onTranscribeFinal` 等结算钩子；结构化决策 `decide` 对 model-bank 中 `type: 'decision'` 的模型走原生实现，其余模型用 `generateObject` 模拟，`providerMetadata` 里的 `decisionMode` 标明实际路径。
 
 但需要严格区分“框架能力”和“当前品牌配置”。[`packages/business/model-runtime/src/router-runtime-options.ts`](../../lobehub/packages/business/model-runtime/src/router-runtime-options.ts) 中开源的 `lobehubRouterRuntimeOptions.routers()` 直接返回空数组；[`packages/model-runtime/src/providers/lobehub/index.ts`](../../lobehub/packages/model-runtime/src/providers/lobehub/index.ts) 只是把这份配置交给 Router 运行时。
 
@@ -422,7 +425,7 @@ CLI 通过已认证的 tRPC 调用服务器，Key 在服务端入库前加密。
 
 ### 9.1 Web 与 CLI 有两条检测入口
 
-Web 设置页 [`src/routes/(main)/settings/provider/features/ProviderConfig/Checker.tsx`](<../../lobehub/src/routes/(main)/settings/provider/features/ProviderConfig/Checker.tsx>) 允许选择 chat 模型，然后发送一条 `hello`。它使用常规 chatService 路径，并附带 `ConnectivityChecker` trace。
+Web 设置页 [`src/routes/(main)/settings/provider/features/ProviderConfig/Checker.tsx`](<../../lobehub/src/features/Settings/provider/features/ProviderConfig/Checker.tsx>) 允许选择 chat 模型，然后发送一条 `hello`。它使用常规 chatService 路径，并附带 `ConnectivityChecker` trace。
 
 CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](../../lobehub/apps/server/src/routers/lambda/aiProvider.ts) 中的 `checkProviderConnectivity`：
 
@@ -443,7 +446,8 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - Agent Runtime 发布 `stream_retry` 事件，UI 可显示重试进度；
 - Runtime 和 Transport 记录请求错误；
 - 连接检测带 trace 名称，可进入已有 tracing 链路；
-- Router 运行时可通过 `onRouteAttempt` 记录 option、channel ID、API type、耗时、成功和错误；
+- Router 运行时可通过 `onRouteAttempt` 记录 option、channel ID、channel 权重、API type、耗时、成功和错误；attempt 结果同时以 `routeAttempt` 元数据挂到响应与 hooks 上（`RouteAttemptIdentity`），图片解码类错误由 `routeFallback` 单独分类；
+- `decide`（结构化决策）在 `providerMetadata` 返回 `decisionMode`，可区分原生决策模型与 `generateObject` 模拟路径；TTS/转写/视频生成各有对应的 `on*Final`/`on*Error` 结算钩子；
 - 它还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata；
 - `providerDiagnostics.ts` 中的 `ProviderResponseDiagnostics` 在 provider 边界捕获原始响应事件（有界记录、超限丢弃计数，避免污染 Redis 序列化），是 provider 层新增的诊断捕获点；`signatureScope.ts` 处理签名级（reasoning 等）的状态作用域。
 
@@ -468,6 +472,9 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 | 同请求主动换 Key | 无 | 可能换 Key 只是 Runtime 重建副作用 |
 | 普通跨 Provider failover | 无 | Provider/model 固定 |
 | Router option fallback | 框架有 | 当前开源品牌路由表为空 |
+| Router option 权重 | 框架有 | option 可带 `weight`，按 attempt 记录 |
+| 流式首片前回落 | 框架有 | `runChatWithStreamFallback`，跨 option |
+| 结构化决策（decide） | 有 | 原生决策模型或 `generateObject` 模拟 |
 | 权重路由 | 未见默认实现 | 可由 Router 排序扩展注入 |
 | 成本/延迟路由 | 未见默认实现 | Model Bank 定价不参与调度 |
 | 凭据静态加密 | 有 | AES-GCM + `KEY_VAULTS_SECRET` |
@@ -505,6 +512,8 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - 通用数据导出/导入的完整 UI 入口、导入冲突提示和跨实例恢复过程未运行验证；已确认源码层导出 `key_vaults` 密文且导入不会换密钥重加密。
 - CLI `config --show --json` 的实际权限过滤、日志落盘和终端历史暴露未运行验证；源码只确认命令构造输出和服务端受限 API Key 的部分脱敏边界。
 - 删除 Provider 后既有 Agent、Topic 或 Message 中保存的 Provider 引用如何展示和恢复，本次未继续沿关联数据和运行时错误路径验证。
+- Router 的 option 权重语义（纯顺序加权还是抽签）、`pinnedRoute` 的调用方、`runChatWithStreamFallback` 与 Agent Runtime 重试的交互，本轮只做入口级确认，未运行验证。
+- 新增的 `decide`/视频/语音转写能力与既有媒体创作链的衔接不在本笔记范围，未逐项核对。
 
 ## 13. 关键源码索引
 
@@ -519,7 +528,9 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - 凭据加密：[`apps/server/src/modules/KeyVaultsEncrypt/index.ts`](../../lobehub/apps/server/src/modules/KeyVaultsEncrypt/index.ts)
 - Agent Runtime 重试：[`packages/agent-runtime/src/utils/runtimeRetry.ts`](../../lobehub/packages/agent-runtime/src/utils/runtimeRetry.ts)
 - 错误分类：[`packages/agent-runtime/src/utils/llmErrorClassifier.ts`](../../lobehub/packages/agent-runtime/src/utils/llmErrorClassifier.ts)
-- Router Runtime：[`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts`](../../lobehub/packages/model-runtime/src/core/RouterRuntime/createRuntime.ts)
+- Router Runtime：[`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts`](../../lobehub/packages/model-runtime/src/core/RouterRuntime/createRuntime.ts)、`routeAttempt.ts`、`packages/model-runtime/src/utils/routeFallback.ts`
+- 模型运行时核心：[`packages/model-runtime/src/core/ModelRuntime.ts`](../../lobehub/packages/model-runtime/src/core/ModelRuntime.ts)（hooks、`decide`、媒体能力）
+- 新 Provider：[`packages/model-runtime/src/providers/magpie/index.ts`](../../lobehub/packages/model-runtime/src/providers/magpie/index.ts)、`providers/typesafe/index.ts`
 - 品牌 Router 配置：[`packages/business/model-runtime/src/router-runtime-options.ts`](../../lobehub/packages/business/model-runtime/src/router-runtime-options.ts)
 - 连接检测 UI：[`src/features/Settings/provider/features/ProviderConfig/Checker.tsx`](<../../lobehub/src/features/Settings/provider/features/ProviderConfig/Checker.tsx>)
 - 连接检测 API：[`apps/server/src/routers/lambda/aiProvider.ts`](../../lobehub/apps/server/src/routers/lambda/aiProvider.ts)

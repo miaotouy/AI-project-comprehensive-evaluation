@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：静态代码阅读（grep/glob 检索 + 关键实现文件通读），辅以仓库内单元测试作为行为佐证；未构建、未运行应用
 >
@@ -40,7 +40,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 ```text
 用户创建/选择 agent 会话工作区（USER 自选路径 / SYSTEM 按日期+sessionId 生成）
-  -> ClaudeCodeRuntimeDriver 以 cwd=workspace.path 调 claude-agent-sdk query()
+  -> Agent runtime 驱动（claude-code 调 SDK query()，pi / pi-durable 走原生会话）以 cwd=workspace.path 执行
   -> 模型用文件工具写磁盘；REPORT_ARTIFACTS_PROMPT 提示结束时调 report_artifacts
   -> report_artifacts tool part 持久化 -> 消息内产物卡片 + 右 pane 文件树（实时 watcher）
   -> 点击文件 -> ArtifactPane 预览/编辑 -> useFileEditSession 防抖自动保存（乐观锁）
@@ -81,6 +81,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 同一对象多投影同步：chat artifact 的弹窗预览与消息内预览共用同一份 HTML 数据，通过弹窗上下文在渲染期同步（`HtmlArtifactView.tsx:706-720,822-831`）；"已同意交互预览"按 artifactId 到 HTML 的精确匹配记忆（`HtmlArtifactView.tsx:763`），HTML 内容变化即失效。agent 文件树与编辑器是同一磁盘状态的两份投影，文件树靠主进程 watcher 推送增量事件保持新鲜（见第 10 节）。
 
+预览层已拆成可移植包与应用内插件两层。PDF、DOCX、PPTX、XLSX、RTF 与图片等"与产品无关"的预览实现、工具栏、布局和超限提示进入 `packages/file-preview`，由 `filePreviewRegistry` 按文件类型注册；HTML、Markdown 与源码预览仍留在应用内，因为它们依赖宿主的沙箱、主题与编辑器能力。桌面侧通过 `Preview.tsx` 与 `previewContext.ts` 把宿主能力注入包内组件，注入面包含资源解析、选中文本与本地化，因此包本身不引用 Electron。
 ## 4. 表现类型、依赖与运行环境
 
 - **HTML artifact 分级运行**：
@@ -90,7 +91,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 - **同意判定**：`htmlArtifactRequiresUserConsent` 用 htmlparser2 静态扫描危险模式——可执行与嵌入标签（script/iframe/object/embed）、`on*` 事件属性、javascript: 与外部 URL、meta refresh、CSS url() 引用（含转义解码）（`src/renderer/utils/htmlArtifact.ts:49-106`），解析失败 fail-closed。
 - **图表**：Mermaid、Graphviz/viz-js、PlantUML 与 SVG 均以静态渲染 + shadow DOM 挂载（`src/renderer/components/Preview/` 及 `CodeBlockView/constants.ts:7`），无交互、无对象身份，留在消息渲染器类目。
 - **代码执行**：仅 `python` 语言且偏好开启时，`pyodideService.runScript` 在渲染进程的 Web Worker 内执行（`src/renderer/services/PyodideService.ts:136-188`），默认超时 60s、初始化重试 5 次、可重置；matplotlib 输出图片经 image 输出显示。主进程侧另有 Python 服务经 IPC 桥接同一 worker，供 MCP 工具 `python_execute` 调用（`src/main/services/PythonService.ts`、`src/main/ai/mcp/servers/python.ts`）。
-- **Agent 执行环境**：`ClaudeCodeRuntimeDriver` 用 Claude Agent SDK 的查询入口在会话工作区目录上运行（`src/main/ai/runtime/claudeCode/ClaudeCodeRuntimeDriver.ts:3-11,1297-1298`），是"Agent 工具/执行"类目边界，此处只作为产物的产生方记录；其 Bash 工具等调度语义不展开。
+- **Agent 执行环境**：三种 runtime 驱动都在会话工作区目录上运行——claude-code 用 Claude Agent SDK 的查询入口，pi 与 pi-durable 用原生会话，工作区路径由 `prepareAgentSessionWorkspaceDirectory` 统一准备（`src/main/ai/runtime/claudeCode/ClaudeCodeRuntimeDriver.ts:3-11,1297-1298`），是"Agent 工具/执行"类目边界，此处只作为产物的产生方记录；其 Bash 工具等调度语义不展开。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -139,7 +140,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 Artifact 面板新增 XLSX 预览：电子表格解析在 worker 中执行，进入终态时会终止解析 worker，避免已完成或失败任务继续占用资源。PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影；除非进入上述文件或 Artifact 表面，否则在本类目中不构成独立运行对象。
 
-XLSX 预览还会解析 drawing/chart XML，把 bar、line、pie、area 图表映射为 ECharts；不支持的散点等类型保留占位与原始类型名，图表锚点数量和引用单元格数均有限额。解析在 worker 内完成，ECharts 实例在组件卸载时释放。依据：`src/renderer/components/FilePreview/plugins/spreadsheet/worker/chartXmlParser.ts:281-314,522-579`、`charts/EchartsChartRenderer.ts:10-36`。
+XLSX 预览还会解析 drawing/chart XML，把 bar、line、pie、area 图表映射为 ECharts；不支持的散点等类型保留占位与原始类型名，图表锚点数量和引用单元格数均有限额。解析在 worker 内完成，ECharts 实例在组件卸载时释放。依据：`packages/file-preview/src/plugins/spreadsheet/worker/chartXmlParser.ts`、`charts/EchartsChartRenderer.ts:10-36`。
 
 PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新访问的文件对象；它保留页面布局，但并未证实用户或模型能对同一文档执行结构化增量编辑。聊天中的生成图片仍属于消息内投影；除非进入上述文件或 Artifact 表面，否则在本类目中不构成独立运行对象。
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：静态源码阅读。先以根 README、VISION.md、docs 索引与 showcase、gateway/channels/plugins/clawhub 文档、taxonomy 的 release profile 建立产品声明候选；再为核心候选按“入口 -> 状态/对象 -> 执行 -> 用户结果 -> 持久化或下一次触发”走查可执行路径：渠道 DM 准入与配对审批链（src/pairing、src/channels/message-access、Gateway RPC 与渠道插件）、ClawHub 安装信任链（src/infra、skills/plugins CLI）、doctor 修复命令族；全程未运行构建、测试、CLI、Gateway 或外部服务
 >
@@ -60,15 +60,15 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 **入口与触发者**：入口有两类。DM 侧由未知发送者在 `dmPolicy: "pairing"` 的渠道账户上发私聊消息触发（README 与 docs 均声明这是 DM 渠道的默认策略）；设备侧由新设备用 setup-code/bootstrap token 发起配对触发。两者都由远端主体（未知发送者/新设备）启动，审批动作由操作者通过 CLI、Control UI 或配对渠道完成。
 
 **事实对象**：
-- 渠道侧配置事实：每个 channel account 的 `dmPolicy` 与 `allowFrom`，可取 `pairing | allowlist | open | disabled` 四值，policy/allowFrom 各自兼容顶层与 `dm.*` 嵌套两种历史写法（`src/channels/plugins/dm-access.ts:17-76`）。
-- 审批事实：共享 SQLite 状态库中的 `channel_pairing_requests`（挂起请求与码）和 `channel_pairing_allow_entries`（已批准发送者），见 `src/state/openclaw-state-schema.sql:782-809`。
+- 渠道侧配置事实：每个 channel account 的 `dmPolicy` 与 `allowFrom`，可取 `pairing | allowlist | open | disabled` 四值，policy/allowFrom 各自兼容顶层与 `dm.*` 嵌套两种历史写法（`src/channels/plugins/dm-access.ts`）。
+- 审批事实：共享 SQLite 状态库中的 `channel_pairing_requests`（挂起请求与码）和 `channel_pairing_allow_entries`（已批准发送者），见 `src/state/openclaw-state-schema.sql`。
 - 设备事实：设备配对请求、paired devices/tokens、角色与 scopes，生命周期归 Gateway 连接层（归并在外部执行体与应用协作笔记）。
 
 **完整主链**（静态证据）：
-1. 渠道插件收到私聊消息后调用核心入口决定器 `resolveChannelMessageIngress`。决定器把配置 allowFrom（含 accessGroups 展开）与 pairing 存储的已批准表合并成两路 allowlist，按策略打分：`disabled` 直接拒；`open` 要求通配或显式命中；`allowlist` 只认配置命中；`pairing` 下只有配置命中或 pairing 存储命中才算 allow，且 pairing 存储命中在非 pairing 模式下无效。未命中且事件允许产生配对时，返回原因码 `dm_policy_pairing_required`（`src/channels/message-access/sender-gates.ts:47-117`、`src/channels/message-access/decision.ts:312-357`）。
-2. 插件侧把该原因翻译成“发码并拒绝本次消息”。以 Telegram 为例：准入封装 `authorizeInboundMessage` 对非群聊调用 `enforceTelegramDmAccess`；未获准者走 challenge 发行器，把带码回复发回聊天，函数返回 false，消息不进 Agent（`extensions/telegram/src/bot-handlers.inbound-authorization.ts:342-470`、`extensions/telegram/src/dm-access.ts:80-177`）。群聊不配对，走独立 allowlist 门。
-3. challenge 发行器通过 SDK 层 `createChannelPairingChallengeIssuer` 落到共享存储：`upsertChannelPairingRequest` 在事务内写入请求行并返回新码，重复请求复用已存在请求（`src/plugin-sdk/channel-pairing.ts:30-51`、`src/pairing/pairing-store.ts:274-339`）。码为 8 位大写无歧义字符，请求 1 小时过期，每渠道账户挂起请求上限 3 条（`src/pairing/pairing-store.ts:24-28`）。发给发送者的文案含“OpenClaw: access not configured.”、身份行、码与 `openclaw pairing approve <channel> <code>` 提示（`src/pairing/pairing-messages.ts:7-28`）。
-4. 操作者批准：CLI `openclaw pairing list/approve` 按码批准（`src/cli/pairing-cli.ts:15-190`）；Control UI 经 `channels.pairing.*` RPC 列出/批准/驳回，并可附通知、可选把该发送者提升为第一个命令 owner（`src/gateway/server-methods/channel-pairing.ts:199-401`，owner 引导在 `src/pairing/command-owner.ts`）。批准把请求从 requests 表移除并追加到 allow entries；驳回只是移除挂起请求，不构成永久拉黑。
+1. 渠道插件收到私聊消息后调用核心入口决定器 `resolveChannelMessageIngress`。决定器把配置 allowFrom（含 accessGroups 展开）与 pairing 存储的已批准表合并成两路 allowlist，按策略打分：`disabled` 直接拒；`open` 要求通配或显式命中；`allowlist` 只认配置命中；`pairing` 下只有配置命中或 pairing 存储命中才算 allow，且 pairing 存储命中在非 pairing 模式下无效。未命中且事件允许产生配对时，返回原因码 `dm_policy_pairing_required`（`src/channels/message-access/sender-gates.ts`、`src/channels/message-access/decision.ts`）。
+2. 插件侧把该原因翻译成“发码并拒绝本次消息”。以 Telegram 为例：准入封装 `authorizeInboundMessage` 对非群聊调用 `enforceTelegramDmAccess`；未获准者走 challenge 发行器，把带码回复发回聊天，函数返回 false，消息不进 Agent（`extensions/telegram/src/bot-handlers.inbound-authorization.ts`、`extensions/telegram/src/dm-access.ts`）。群聊不配对，走独立 allowlist 门。
+3. challenge 发行器通过 SDK 层 `createChannelPairingChallengeIssuer` 落到共享存储：`upsertChannelPairingRequest` 在事务内写入请求行并返回新码，重复请求复用已存在请求（`src/plugin-sdk/channel-pairing.ts`、`src/pairing/pairing-store.ts`）。码为 8 位大写无歧义字符，请求 1 小时过期，每渠道账户挂起请求上限 3 条（`src/pairing/pairing-store.ts`）。发给发送者的文案含“OpenClaw: access not configured.”、身份行、码与 `openclaw pairing approve <channel> <code>` 提示（`src/pairing/pairing-messages.ts`）。
+4. 操作者批准：CLI `openclaw pairing list/approve` 按码批准（`src/cli/pairing-cli.ts`）；Control UI 经 `channels.pairing.*` RPC 列出/批准/驳回，并可附通知、可选把该发送者提升为第一个命令 owner（`src/gateway/server-methods/channel-pairing.ts`，owner 引导在 `src/pairing/command-owner.ts`）。批准把请求从 requests 表移除并追加到 allow entries；驳回只是移除挂起请求，不构成永久拉黑。
 5. 批准后的下一次触发：同一发送者的后续消息再次进入第 1 步决定器，此时 pairing 存储命中、直接放行进入会话与 Agent 执行；结果回发到该 DM。批准只授予 DM 访问权，群聊授权、owner 权限仍是独立配置。
 
 **持续性**：请求与批准都持久化在共享 SQLite（`channel_pairing_requests` / `channel_pairing_allow_entries`），跨 Gateway 重启生效；旧版 `*-pairing.json` 与 `*-allowFrom.json` 文件由启动迁移或 `openclaw doctor --fix` 导入 SQLite 后删除。运行态只读 canonical SQLite 行，不再合并 legacy 文件（docs/channels/pairing.md 与本快照的 SQLite 写路径一致）。
@@ -96,12 +96,12 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 **入口与触发者**：用户或操作者在 CLI 执行 `openclaw skills install <ref>` / `openclaw plugins install clawhub:<package>`（skill 的 `@owner/<slug>` 与本机 `skills/` 目录、plugin 的 `clawhub:` 前缀解析在 `src/cli/skills-cli.ts` 与 `src/cli/plugins-cli.ts`）。Agent/渠道侧经 `skills`/`plugins` RPC 与 `/plugins` 聊天命令也可进入同一裁决，但聊天面无法承认 ClawHub 风险（命令会提示转本机 CLI）。更新命令复用同一门。
 
-**事实对象**：目标 release 的 ClawHub 信任描述：`scanStatus`、`moderationState`、`reasons`、`blockedFromDownload`、`pending`、`stale`，以及由此生成的裁决 `clean | blocked | review-required | review-recommended`（`src/infra/clawhub-install-trust.ts:225-238`）。安装侧对象是 workspace `skills/` 目录/共享 skills 目录与 plugin 安装记录（记录含 source/spec，如 `clawhub:demo@1.2.3`）。
+**事实对象**：目标 release 的 ClawHub 信任描述：`scanStatus`、`moderationState`、`reasons`、`blockedFromDownload`、`pending`、`stale`，以及由此生成的裁决 `clean | blocked | review-required | review-recommended`（`src/infra/clawhub-install-trust.ts`）。安装侧对象是 workspace `skills/` 目录/共享 skills 目录与 plugin 安装记录（记录含 source/spec，如 `clawhub:demo@1.2.3`）。
 
 **完整主链**（静态证据）：
-1. `openclaw plugins/skills install` 解析来源；clawhub 来源先取 release 的信任元数据（裁决前的判定面集中在 `isBlockingClawHubTrust`：`blockedFromDownload`、scanStatus=malicious、阻塞性 moderation 状态、或恶意 reason 任一命中即阻塞，`src/infra/clawhub-install-trust.ts:199-213`）。
+1. `openclaw plugins/skills install` 解析来源；clawhub 来源先取 release 的信任元数据（裁决前的判定面集中在 `isBlockingClawHubTrust`：`blockedFromDownload`、scanStatus=malicious、阻塞性 moderation 状态、或恶意 reason 任一命中即阻塞，`src/infra/clawhub-install-trust.ts`）。
 2. 裁决驱动三类出口：clean 直接放行；blocked（恶意/被拉黑/审核阻止）拒绝下载；review-required（有风险 reason 或未扫描提示）要求非交互确认 `--acknowledge-clawhub-risk`，否则以 `clawhub_risk_acknowledgement_required` 类错误中止并提示命令（同文件构建“Install cancelled; rerun with --acknowledge-clawhub-risk”文案，CLI 层对应 `src/cli/clawhub-risk-acknowledgement.ts`）。
-3. 放行后把发布物安装/更新到目标目录或插件 registry，并把裁决字段（disposition、scanStatus、moderationState、reasons、checkedAt、acknowledgedAt）随安装记录持久化（`src/infra/clawhub-install-trust.ts:240-261`）；skills-sh 这种外部分发引用不直接下载，而是让 ClawHub resolver 返回 commit 固定的 GitHub 源再装。
+3. 放行后把发布物安装/更新到目标目录或插件 registry，并把裁决字段（disposition、scanStatus、moderationState、reasons、checkedAt、acknowledgedAt）随安装记录持久化（`src/infra/clawhub-install-trust.ts`）；skills-sh 这种外部分发引用不直接下载，而是让 ClawHub resolver 返回 commit 固定的 GitHub 源再装。
 4. 信任状态进入后续生命周期：`openclaw update --all`/`plugins update` 重新过门；doctor 在发现“配置里引用的插件未安装/有信任警告”时给出带 `--acknowledge-clawhub-risk` 建议的修复指引（`src/commands/doctor/shared/missing-configured-plugin-install.ts:59-64`）。
 
 **持续性**：裁决结果随安装/更新记录持久化；不同发布形态的信任锚点不同（版本化 release 用精确 release 信任元数据）。运行证据方面，`plugins-cli.install.test.ts` 等测试断言了 source=clawhub 的记录形状、两个错误码与 risk 确认后的继续路径，但这些是测试行为，不是本调查的运行验证。
@@ -121,7 +121,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 状态：`入口确认`。不计入用户功能统计，记录为运维/自愈机制。
 
-**机制概述**：doctor 不是一个单功能体检，而是把“配置/状态旧格式迁移、损坏或陈旧安装修复、插件与渠道 schema 漂移、网关服务漂移、授权与 SecretRef 形状、端口冲突与启动诊断”等修复点摊到大量 `doctor-*` 模块（`src/commands/doctor-*.ts` 一个检查/修复一族的模块群，核心修复契约见 `src/channels/plugins/doctor-contract-api.ts`），由顶层 `doctorCommand`（`src/commands/doctor.ts:47-130`）按模式驱动：只读检查、`--fix/--repair` 修复、非交互、force、`--lint --json` 稳定机器可读输出（`src/commands/doctor-lint.ts:79`）。修复与验证被拆成 repair-sequencing 与 config-flow/finalize-config-flow 等编排（`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`）。升级链在安装/更新后调用 doctor 做 post-upgrade 探针，启动/配置失败的错误文本普遍把 `openclaw doctor` / `openclaw doctor --fix` 作为下一步动作。
+**机制概述**：doctor 不是一个单功能体检，而是把“配置/状态旧格式迁移、损坏或陈旧安装修复、插件与渠道 schema 漂移、网关服务漂移、授权与 SecretRef 形状、端口冲突与启动诊断”等修复点摊到大量 `doctor-*` 模块（`src/commands/doctor-*.ts` 一个检查/修复一族的模块群，核心修复契约见 `src/channels/plugins/doctor-contract-api.ts`），由顶层 `doctorCommand`（`src/commands/doctor.ts`）按模式驱动：只读检查、`--fix/--repair` 修复、非交互、force、`--lint --json` 稳定机器可读输出（`src/commands/doctor-lint.ts`）。修复与验证被拆成 repair-sequencing 与 config-flow/finalize-config-flow 等编排（`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`）。升级链在安装/更新后调用 doctor 做 post-upgrade 探针，启动/配置失败的错误文本普遍把 `openclaw doctor` / `openclaw doctor --fix` 作为下一步动作。
 
 本次只复核了入口与分族结构，未对任一“检查 -> 修什么 -> 怎么验证已修好”的完整回合逐条走查，因此维持 `入口确认`。doctor 与 AGENTS/VISION 的“配置兼容性由 doctor 迁移承担”绑定，是 OpenClaw 把迁移与修复前置为第一方运维面的体现。
 
@@ -149,7 +149,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 - **taxonomy.yaml、custodian-skills、根 `skills/` 不是终端用户产品能力**。`taxonomy.yaml` 明确是 “Maturity scorecard” 输入（标题、`qa/maturity-scores.yaml`、docs 的 maturity scorecard 编辑规则），描述子系统/功能/平台级别的 QA 与发行成熟度，不驱动用户可见行为；`custodian-skills/` 与根 `skills/` 是维护本仓库的 agent 规则资产。它们的存在不等于产品独特功能。
 - **ClawHub 市场、skills.sh、独立 `clawhub` CLI 位于仓库外**：本仓库持有的是安装与信任裁决主链（能力卡二）；市场数据、扫描与审核在 clawhub.ai。`clawhub` standalone CLI（发布/迁移发布物）不在本仓库内实现。
 - **部分“新表面”只到声明与入口层**：companion 语音/talk、A2UI、会议、fleet、projects/flows/tasks 等目录和文档说明存在入口或插件声明，但本次未走用户主链，标为暂缓或介绍候选，不作为统计依据。Canvas 文档与 session board widget 已由 [生成式输出与运行时调查笔记](../生成式输出与运行时/OpenClaw-生成式输出与运行时调查笔记.md) 走查，不再列入本专项暂缓项。
-- **`claws`（Claw 包安装/导出）命令挂在实验开关下**（CLI 注册处按 `isExperimentalClawsEnabled()` 过滤，`src/cli/argv.ts:19`）。其 add/remove/update/export 与 provenance 机制按 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) 只作为独立兼容边界记录，本次不提升为主链候选。
+- **`claws`（Claw 包安装/导出）命令挂在实验开关下**（CLI 注册处按 `isExperimentalClawsEnabled()` 过滤，`src/cli/argv.ts`）。其 add/remove/update/export 与 provenance 机制按 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) 只作为独立兼容边界记录，本次不提升为主链候选。
 - **voice-phone 桥接（Vapi 等）、实时语音、APNS 唤醒**依赖外部电话/推送服务，属展示与社区集成声明，无本仓库独立主链证据，本次不调查不计数。
 - **未找到的例外说明**：本笔记没有声称上述目录中的模块“不存在”或“无效”；只说明它们没有被本次独特功能专项走查。设备节点能力（camera/screen/voice 的节点执行域）已在外部执行体笔记内确认，不在此重复。
 
@@ -169,10 +169,10 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 ## 关键源码索引
 
-- 配对策略与状态：`src/channels/plugins/dm-access.ts:17-76,164-206`；`src/pairing/pairing-store.ts:24-28,274-339,404-457`；`src/state/openclaw-state-schema.sql:782-809`
-- 准入决定核心：`src/channels/message-access/sender-gates.ts:47-117`、`src/channels/message-access/decision.ts:312-357`、`src/channels/message-access/runtime.ts:187-262`
-- 审批 RPC 与 CLI：`src/gateway/server-methods/channel-pairing.ts:199-401`、`src/cli/pairing-cli.ts:15-190`、`src/pairing/pairing-messages.ts:7-28`
-- 渠道插件侧配对（以 Telegram 为例）：`extensions/telegram/src/dm-access.ts:80-177`、`extensions/telegram/src/bot-handlers.inbound-authorization.ts:342-470`；SDK 发行器与适配契约 `src/plugin-sdk/channel-pairing.ts:30-51`、`src/channels/plugins/pairing.types.ts`
-- ClawHub 信任门：`src/infra/clawhub-install-trust.ts:199-261`、`src/cli/skills-cli.ts`（risk 确认 flag 与安装接线）、`src/cli/plugins-cli.ts`、`src/cli/clawhub-risk-acknowledgement.ts`；测试侧断言记录形状与错误码见 `src/cli/plugins-cli.install.test.ts`、`src/cli/skills-cli.commands.test.ts`
-- doctor 修复链：`src/commands/doctor.ts:47-130`、`src/commands/doctor-lint.ts:79`、`src/channels/plugins/doctor-contract-api.ts`、`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`
+- 配对策略与状态：`src/channels/plugins/dm-access.ts`；`src/pairing/pairing-store.ts`；`src/state/openclaw-state-schema.sql`
+- 准入决定核心：`src/channels/message-access/sender-gates.ts`、`src/channels/message-access/decision.ts`、`src/channels/message-access/runtime.ts`
+- 审批 RPC 与 CLI：`src/gateway/server-methods/channel-pairing.ts`、`src/cli/pairing-cli.ts`、`src/pairing/pairing-messages.ts`
+- 渠道插件侧配对（以 Telegram 为例）：`extensions/telegram/src/dm-access.ts`、`extensions/telegram/src/bot-handlers.inbound-authorization.ts`；SDK 发行器与适配契约 `src/plugin-sdk/channel-pairing.ts`、`src/channels/plugins/pairing.types.ts`
+- ClawHub 信任门：`src/infra/clawhub-install-trust.ts`、`src/cli/skills-cli.ts`（risk 确认 flag 与安装接线）、`src/cli/plugins-cli.ts`、`src/cli/clawhub-risk-acknowledgement.ts`；测试侧断言记录形状与错误码见 `src/cli/plugins-cli.install.test.ts`、`src/cli/skills-cli.commands.test.ts`
+- doctor 修复链：`src/commands/doctor.ts`、`src/commands/doctor-lint.ts`、`src/channels/plugins/doctor-contract-api.ts`、`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`
 - 候选声明锚点（文档）：`docs/channels/pairing.md`、`docs/gateway/security/index.md`、`docs/clawhub/cli.md`、`docs/gateway/doctor.md`、`docs/nodes/*`；仓库内部资产声明 `taxonomy.yaml`、`docs/AGENTS.md`（maturity scorecard）

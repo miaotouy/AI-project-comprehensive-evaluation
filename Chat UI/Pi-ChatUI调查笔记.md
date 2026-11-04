@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：直接阅读源码（interactive-mode 的事件消费与键盘绑定、TUI 组件与选择器、fullscreen 导航、设置入口），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话，静态代码无法确认的视觉/焦点/键盘行为标记为未验证
 >
@@ -146,14 +146,14 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
 
 ## 14. 实验客户端与 fullscreen 交互补充
 
-默认 `pi` TUI 之外，`PI_EXPERIMENTAL=1` 可启用独立 server/client 表面。client 创建或附着 durable Session 后复用稳定版 alternate-screen renderer、编辑器、消息卡、主题与工具渲染器；prompt、队列、abort、resume、compaction 和导航经 AgentController 服务发往 session worker，Transcript 的复制状态驱动界面。Radius 断线时客户端保持重连状态并在恢复连接后重新附着上次会话（`packages/coding-agent/src/experimental/services/README.md:12-25`、`packages/coding-agent/src/experimental/client-runtime.ts:52-177`）。
+默认 `pi` TUI 之外，仓库有 `apps/p2` 应用：它的 TUI host 复用稳定版 alternate-screen renderer、编辑器、消息卡、主题与工具渲染器；会话由 p2 的 session worker 持有，页面与 TUI 通过 Chord 对象引用观察更新，worker 崩溃后重启并保留失败到重试，断线重连由 p2 的 hosts 处理（`apps/p2/src/hosts/tui.ts`、`apps/p2/src/hosts/session-workers.ts`、`packages/chord/README.md`）。
 
 稳定 fullscreen 表面增加可点击 jump-to-end 指示器、搜索前后按钮、可拖动滚动条和 Alt 加速滚轮。选区自动复制可关闭；此时复制命令优先复制当前选区，并且后端失败会显示错误而不再假报成功（`packages/coding-agent/src/modes/interactive/tui-renderer.ts:24-37`、`packages/tui/src/tui-alt-screen.ts:496-625,968-1116,1419-1468,1621-1641`）。这些交互均未在真实终端运行验证。
 
 ## 15. 关键源码索引
 
-- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`：`2873-3060`（提交入口）、`3068-3396`（事件→UI）、`4955-5093`（树导航）、`5096-5129`（会话选择器）、`4193-4231`（队列显示/取回）、`2769-2795`（Esc 语义）
-- `packages/coding-agent/src/modes/interactive/components/session-selector.ts`（会话选择器）、`session-selector-search.ts:26-114`（搜索）
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`：提交入口、事件到 UI、树导航、会话选择器、队列显示与取回、Esc 语义（按符号定位，行号随文件增长漂移）
+- `packages/coding-agent/src/modes/interactive/components/session-selector.ts`（会话选择器）、`session-selector-search.ts`（搜索）
 - `packages/coding-agent/src/core/slash-commands.ts:19-42`（命令清单）、`core/keybindings.ts:64-207`（快捷键）
 - `packages/coding-agent/src/modes/interactive/components/footer.ts`、`status-indicator.ts`（状态行）
 - `packages/coding-agent/src/modes/interactive/components/bash-execution.ts`（bash 流式）

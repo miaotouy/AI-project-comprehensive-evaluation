@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：静态复核 AICodeWorker、SSH/WebSocket 节点、跨节点文件、浏览器 runtime、异步回注、人类工具 API 与 MCP 客户端插件；复用 Agent 工具、运行时和独特功能笔记；未启动外部服务
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/shared/types/agent-interface.d.ts`、`src/main/agent/`、`src/main/session/data/tables/newSessions.ts`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -25,18 +25,19 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 
 ## 1. 配置数据模型
 
-`DeepChatAgentConfig`（`src/shared/types/agent-interface.d.ts:627-652`）的主要字段如下：
+`DeepChatAgentConfig`（`src/shared/types/agent-interface.d.ts:650-697`）的主要字段如下：
 
 | 配置组 | 字段 | 运行时含义 |
 |---|---|---|
 | 模型 | `defaultModelPreset`、`assistantModel`、`visionModel`、`imageGenerationModel` | 默认会话、助手、视觉和图片生成模型及部分生成参数 |
+| 判定模型 | `judgmentModel`（`:665`） | 可选的小模型，用于 `auto_approve` 下的工具权限复核与工具结果裁剪；为空时两条判断都跳过（语义见独特功能笔记能力卡 10） |
 | 上下文 | `defaultProjectPath`、`systemPrompt` | 默认工作目录与系统提示词 |
-| 工具策略 | `permissionMode`、`disabledAgentTools`、`toolModeOverride` | 权限模式、用户可配置 Agent 工具禁用列表与本轮工具模式覆盖 |
+| 工具策略 | `permissionMode`、`defaultToolMode`（`:671`）、`disabledAgentTools`、`toolModeOverride` | 权限模式、新建会话的默认工具模式、用户可配置 Agent 工具禁用列表与本轮工具模式覆盖 |
 | 扩展 | `enabledSkillNames`、`enabledMcpServerIds` | 允许进入工具目录的共享 Skills 与 MCP servers；workspace skills 由项目路径另行发现 |
-| 编排 | `subagentEnabled`、`subagents` | 是否允许 subagent 及其 slot 定义 |
+| 编排 | `subagentEnabled`、`subagents`、`defaultOrchestrationPolicy`（`:676`） | 是否允许 subagent、其 slot 定义与默认编排策略 |
 | 记忆/压缩 | `autoCompaction*`、`memory*` | 自动压缩阈值、保留轮数、embedding/retrieval/extraction 与注入预算 |
 | 输出限制 | `readFileAutoTruncateChars`、`toolOutputInlineChars`、`commandOutputInlineChars` | 文件读取截断与工具/命令输出内联字符上限（#2103，归一化 1,000–200,000，`src/shared/lib/agentOutputLimits.ts`，执行语义见 Agent 工具笔记 §3） |
-| persona | `personaEvolutionEnabled` | 受保护的实验性 persona 演化开关 |
+| persona | `personaEvolutionEnabled`（`:692`） | 受保护的实验性 persona 演化开关 |
 
 模型 preset 还可以覆盖温度、上下文长度、token 上限、思考预算、推理强度与 verbosity 等生成参数（`:567-580`）。`SessionAgentContextUpdate` 把生效的代理、模型、项目与权限信息写入会话运行状态（`:181-188`）。
 
@@ -47,13 +48,13 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 - `DeepChatAgentDescriptor`：`kind` 固定为 deepchat，`source` 为 builtin 或 manual，内嵌完整 `DeepChatAgentConfig`；
 - ACP descriptor：可来自手动 launch 或 registry，包含安装状态和分发信息。
 
-`DeepChatAgentRepository` 的证据链（`src/main/agent/deepchat/deepchatAgentRepository.ts:18-19`、`:153-253`）：
+`DeepChatAgentRepository` 的证据链（`src/main/agent/deepchat/deepChatAgentRepository.ts:170-296`）：
 
 1. `ensureBuiltin` 创建或恢复内置 `deepchat`，并强制其启用且不可删除（`enabled`/`protected` 均为 true）。
 2. `create` 使用 `nanoid(8)` 生成手动 Agent id，source 为 `manual`，配置经 `prepareConfigWrite` 后序列化为 JSON。
 3. `update` 合并旧配置和更新字段，再执行 `normalizeDisabledAgentTools` 与 `assertDeepChatSubagentConfigInvariant`。
 4. `delete` 仅允许非 protected、无关联 session 的 Agent，并在事务中清理 memory namespace/audit。
-5. `resolveConfig` 返回默认值与已存字段合并后的有效配置；旧的继承配置可通过 `materializeLegacyInheritedConfigs` 展开为独立 JSON（`:263-297`）。
+5. `resolveConfig` 返回默认值与已存字段合并后的有效配置；旧的继承配置可通过 `materializeLegacyInheritedConfigs` 展开为独立 JSON（`:280-310`）。
 
 `AgentSettings` 以 repository 为数据源，提供 Agent 类型、有效配置与能力判断，并为 DeepChat 补齐默认的禁用工具列表（主入口 `src/main/agent/settings.ts:458-489`，默认列表 `:125-140`）。
 
@@ -86,19 +87,19 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 3. 对 ACP-backed subagent session，`buildSystemPromptWithSkills` 直接返回 `normalizedBase`，不做任何附加拼接（systemPromptBuilder.ts:100-102）。
 4. 压缩恢复路径的 checkpoint/memory/directives 在 `PromptAssemblyService.createPostCompactionPromptAssembler`（promptAssemblyService.ts:89-106）中以独立贡献注入，不进入 system prompt 文本，与请求消息一起装配——该主题的完整上下文构建顺序见《Chat 调查笔记》§8（`contextBuilder.ts`、`promptAssemblyService.ts:59-73`），此处不再重复。
 
-`DeepChatAgentConfig` 没有独立的"人格/用户档案"提示词字段；唯一接近的概念是 `personaEvolutionEnabled`（`agent-interface.d.ts:651`），它只控制 memory 层面的 persona 草稿产出与注入（`MemoryConfigInlinePanel.vue:283-285` 为 UI 开关），不属于 system prompt 的静态角色文本。
+`DeepChatAgentConfig` 没有独立的"人格/用户档案"提示词字段；唯一接近的概念是 `personaEvolutionEnabled`（`agent-interface.d.ts:692`），它只控制 memory 层面的 persona 草稿产出与注入（`MemoryConfigInlinePanel.vue:283-285` 为 UI 开关），不属于 system prompt 的静态角色文本。
 
-项目级 Skill 是运行时作用域，不是角色配置的新字段。Skill 服务会从当前工作区的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录发现条目，校验其物理路径仍位于项目根内，并将其标记为带 `projectRoot` 的只读 Skill；提示词与工具目录针对当前会话合并这份临时目录，离开该项目后不再可见。实现见 `src/main/skill/index.ts:1295-1318`、`src/main/agent/deepchat/resources/systemPromptBuilder.ts` 与 `src/main/agent/deepchat/runtime/toolResolver.ts`。
+项目级 Skill 是运行时作用域，不是角色配置的新字段。Skill 服务会从当前工作区的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录发现条目，校验其物理路径仍位于项目根内，并将其标记为带 `projectRoot` 的只读 Skill；提示词与工具目录针对当前会话合并这份临时目录，离开该项目后不再可见。实现见 `src/main/skill/index.ts:1295-1322`、`src/main/agent/deepchat/resources/systemPromptBuilder.ts` 与 `src/main/agent/deepchat/runtime/toolResolver.ts`。
 
 ## 5. 资产、变量、开场白与用户档案
 
 按《Agent 角色配置调查指南》的"资产与变量"主题核查后，DeepChat Agent 角色**本次未找到**以下能力，检索范围与依据如下：
 
-- 开场白/欢迎语/快捷回复：`DeepChatAgentConfig` 全字段（`agent-interface.d.ts:627-652`）无此类字段；在 `src/shared` 与 `src/main` 中 grep `greeting|openingStarter|starterMessage|welcomeMessage` 无命中。
+- 开场白/欢迎语/快捷回复：`DeepChatAgentConfig` 全字段（`agent-interface.d.ts:650-697`）无此类字段；在 `src/shared` 与 `src/main` 中 grep `greeting|openingStarter|starterMessage|welcomeMessage` 无命中。
 - 欢迎页（`src/renderer/src/pages/AgentWelcomePage.vue`）是静态引导页，不是角色配置资产。
 - 用户档案/Persona 模板：配置层无 user profile 字段；`src/main/agent/shared/process/shellEnvHelper.ts` 中命中的 `userProfile` 是 shell 环境变量（Windows 用户目录），与角色人格无关。
 - 角色头像/图标：descriptor 层有 `avatar`/`icon` 展示字段（`src/renderer/src/stores/ui/agent.ts:50-54` 的 `UIAgent` 映射），但属于 UI 展示资产，不进入提示词或请求。
-- 环境变量/占位符：Agent 配置没有自己的变量插值机制；运行环境信息（provider/model/工作目录/时间）由 `systemPromptBuilder.ts` 的 `buildSystemEnvPrompt`（:234-244）在运行时动态生成，不属于用户可编辑的角色字段。
+- 环境变量/占位符：Agent 配置没有自己的变量插值机制；运行环境信息（provider/model/工作目录/时间）由 `systemPromptBuilder.ts` 的 `buildSystemEnvPromptAssembly`（:322）在运行时动态生成，不属于用户可编辑的角色字段。
 
 结论：DeepChat 的角色配置模型是"模型选择 + system prompt + 工具/权限/记忆策略"，不含开场白、快捷回复、用户档案或自定义变量等资产类字段；相关能力在项目级也未发现（检索范围覆盖 `src/shared` 与 `src/main` 的类型与实现文件）。
 
@@ -147,7 +148,7 @@ orchestration_policy (explicit | proactive)
 
 ### 7.2 消息执行元数据与重新生成语义
 
-- 每条消息保存执行元数据：`MessageMetadata`（`agent-interface.d.ts:375-404`）含 model/provider/token 统计/runId 等，但不包含温度等完整请求参数快照。
+- 每条消息保存执行元数据：`MessageMetadata`（`agent-interface.d.ts:419-448`）含 model/provider/token 统计/runId 等，但不包含温度等完整请求参数快照。
 - 持久化链路：
   - `process.ts:787-788`：运行时写 `state.metadata.provider/model`
   - `transcript.updateAssistantMetadata`（`session/data/transcript.ts:276-278`）：写入 `deepchat_messages.metadata`（`deepchatMessages.ts:42-53`）
@@ -177,14 +178,15 @@ orchestration_policy (explicit | proactive)
 - workspace skills 由项目目录即时发现且只读；本次未运行符号链接、目录同时存在同名 Skill 或项目切换时的冲突覆盖行为。
 - subagent slot 是有界的，但本次未运行多级 delegation、live delegation consent 或 ACP child session。
 - Agent descriptor 的 `protected` 防止删除内置 DeepChat；普通手动 Agent 的删除还要求没有关联 session，源码未测试并发删除与 session 创建竞争。
-- system prompt 的最终顺序（§4）来自静态读码；未运行真实请求核对各 Provider 收到的完整 prompt 文本，也未验证 `buildSystemEnvPrompt` 的环境变量展开结果。
+- system prompt 的最终顺序（§4）来自静态读码；未运行真实请求核对各 Provider 收到的完整 prompt 文本，也未验证环境信息段的运行时展开结果。
+- 新增的 `judgmentModel`、`defaultToolMode`、`defaultOrchestrationPolicy` 已确认进入配置合并与归一化路径（`deepChatAgentRepository.ts` 的 `mergeDeepChatConfig`），但它们的 UI 编辑入口、默认值与旧配置迁移未运行验证。
 - 未运行项目测试或构建；记录来自静态源码。
 
 ## 10. 关键源码索引
 
-- Agent/角色类型与配置：`src/shared/types/agent-interface.d.ts:549-683`
+- Agent/角色类型与配置：`src/shared/types/agent-interface.d.ts:650-697`（配置）、`:419-448`（消息元数据）
 - descriptor kind/source：`src/main/agent/shared/agentDescriptors.ts:4-48`
-- DeepChat Agent CRUD、规范化和内置保护：`src/main/agent/deepchat/deepchatAgentRepository.ts:18-19`、`:153-297`
+- DeepChat Agent CRUD、规范化和内置保护：`src/main/agent/deepchat/deepChatAgentRepository.ts:18-19`、`:153-297`
 - Agent 设置默认值与配置解析：`src/main/agent/settings.ts:125-140`、`:458-489`
 - 提示词拼装顺序：`src/main/agent/deepchat/runtime/promptAssemblyService.ts:59-106`、`src/main/agent/deepchat/resources/systemPromptBuilder.ts:89-274`
 - Agent 配置 UI：`src/renderer/settings/components/DeepChatAgentsSettings.vue`、`MemoryConfigInlinePanel.vue`
@@ -193,4 +195,4 @@ orchestration_policy (explicit | proactive)
 - subagent slot 和 capability：`src/shared/lib/deepchatSubagents.ts:10-31`、`:47-203`
 - session agent/project/subagent 字段：`src/main/session/data/tables/newSessions.ts:13-30`、`:51-196`
 - child tool policy：`src/main/agent/deepchat/runtime/toolResolver.ts:213-311`
-- 项目级 Skill 发现与运行时合并：`src/main/skill/index.ts:1295-1318`、`src/main/skill/routingCatalog.ts`
+- 项目级 Skill 发现与运行时合并：`src/main/skill/index.ts:1295-1322`、`src/main/skill/routingCatalog.ts`

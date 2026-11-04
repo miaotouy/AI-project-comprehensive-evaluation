@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：只读通读根 README、后端 `backend/open_webui/routers/` 全部路由、`models/` 表模型、`utils/memory.py`、`utils/automations.py`、`tools/builtin.py`、`socket/main.py`、`socket/utils.py`、前端 `src/routes/` 路由与 `src/lib` API 客户端；未启动服务，未修改被调查仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Open WebUI 在"模型/Agent/RAG/工具/代码执行"通用底座之外，提供了一套**服务端为事实源的协作与平台产品面**：Notes、Channels、Persistent Memory、Calendar、Automations、Arena/ELO、企业身份、云文件和多节点运行。本轮确认六项达到 `主链确认`（静态证据），一项 `入口确认`，两项 `入口确认`（企业身份/云文件），一项 `声明不符`（Artifact KV 按当前快照未找到后端入口）。
+Open WebUI 在"模型/Agent/RAG/工具/代码执行"通用底座之外，提供了一套**服务端为事实源的协作与平台产品面**：Notes、Channels、Persistent Memory、Calendar、Automations、Arena/ELO、外部应用平台、多标签工作台、人工提问、企业身份、云文件和多节点运行。本轮确认九项达到 `主链确认`（静态证据），一项 `入口确认`（语音/视频通话），两项 `入口确认`（企业身份/云文件），一项 `声明不符`（Artifact KV 按当前快照未找到后端入口）。
 
 1. **Channels**：实时协作频道（群组/DM/公告三类）+ 模型可被 @ 参与回复的完整主链（`主链确认`）。
 2. **Notes**：独立文档工作区 + 笔记↔隐藏聊天双向绑定 + Yjs 实时协作 + 模型工具写入（`主链确认`）。
@@ -22,13 +22,16 @@ Open WebUI 在"模型/Agent/RAG/工具/代码执行"通用底座之外，提供�
 4. **Calendar**：个人/共享日历 + 事件/参与者/RSVP + 模型函数调用面（`主链确认`）。
 5. **Automations**：rrule 定时 prompt 调度 + 后台无头执行 + 运行记录回填（`主链确认`）。
 6. **模型 Arena/ELO**：反馈驱动的 Elo 排行 + 查询加权（`主链确认`）。
-7. **语音/视频通话模式**：CallOverlay 的 STT 输入 + TTS 朗读 + 摄像头取图（`入口确认`，非 WebRTC 对端通话）。
-8. **企业身份**：LDAP/OAuth/SCIM 2.0（`入口确认`）。
-9. **云文件**：Google Drive / OneDrive picker（`入口确认`）。
-10. **多节点运行**：Redis 会话/WebSocket 管理 + 分布式锁 + Yjs 文档跨节点（`入口确认`，机制级）。
-11. **Artifact KV**：README 宣称的"built-in key-value storage API for artifacts"按当前快照未在 routers/models/utils/tools 中找到对应执行入口，标 `声明不符`（按当前快照），另见"未验证事项"。
+7. **外部应用平台（Apps）**：外部应用以 manifest 注册、被邀请进频道、经签名上下文与 scope 校验参与会话，平台向其推送消息事件（`主链确认`）。
+8. **多标签工作台（ChatTabs）**：聊天区内统一承载会话、文件、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊标签（`主链确认`）。
+9. **人工提问（ask_user）**：内置工具让模型在单轮内向用户提出 1-3 个结构化问题，前端卡片作答后继续同一轮推理（`主链确认`）。
+10. **语音/视频通话模式**：CallOverlay 的 STT 输入 + TTS 朗读 + 摄像头取图（`入口确认`，非 WebRTC 对端通话）。
+11. **企业身份**：LDAP/OAuth/SCIM 2.0（`入口确认`）。
+12. **云文件**：Google Drive / OneDrive picker（`入口确认`）。
+13. **多节点运行**：Redis 会话/WebSocket 管理 + 分布式锁 + Yjs 文档跨节点（`入口确认`，机制级）。
+14. **Artifact KV**：README 宣称的"built-in key-value storage API for artifacts"按当前快照未在 routers/models/utils/tools 中找到对应执行入口，标 `声明不符`（按当前快照），另见"未验证事项"。
 
-归并已有类目：模型/Agent（Agent 角色笔记）、工具与 MCP（Agent 工具笔记）、代码执行与 Artifact 沙箱（生成式输出与运行时笔记）、RAG/知识库、多模型对话、会话与消息双写（会话管理笔记）、上下文管道（对话请求与上下文笔记）——这些能力不再重写。
+归并已有类目：模型/Agent（Agent 角色笔记）、工具与 MCP/技能（Agent 工具笔记）、代码执行与 Artifact 沙箱（生成式输出与运行时笔记）、RAG/知识库、多模型对话、会话与消息双写（会话管理笔记）、上下文管道（对话请求与上下文笔记）——这些能力不再重写。
 
 ## 介绍声明与候选盘点
 
@@ -48,7 +51,10 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 | 语音/视频通话 | `入口确认` | CallOverlay.svelte（STT/TTS/摄像头），非点对点通话 |
 | Artifact KV | `声明不符` | 后端未找到 KV 存储 API 入口（搜索范围见下） |
 | 模型 Arena/ELO | `主链确认` | routers/evaluations.py Elo + 排行榜 + 前端 /admin/evaluations |
-| 企业身份 | `入口确认` | LDAP（auths.py:471）、OAuth、SCIM 2.0（scim.py，标注 experimental） |
+| 外部应用平台（Apps） | `主链确认` | routers/apps.py manifest 预览/创建/连接/interactions + models/apps.py app 表 + 频道成员与消息事件 |
+| 多标签工作台（ChatTabs） | `主链确认` | src/lib/components/chat/ChatTabs/ 与 tabs.ts 的 11 类标签 + terminal 客户端 |
+| 人工提问（ask_user） | `主链确认` | builtin ask_user 工具 + middleware 暂存 + AskUserCard 作答回流 |
+| 企业身份 | `入口确认` | LDAP（auths.py）、OAuth、SCIM 2.0（scim.py，标注 experimental） |
 | 云文件 | `入口确认` | Google Drive Picker（gapi）+ OneDrive picker 弹窗流 |
 | 多节点运行 | `入口确认` | WEBSOCKET_MANAGER='redis' → socketio.AsyncRedisManager + RedisDict/RedisLock + YdocManager |
 
@@ -69,6 +75,8 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 **持续性**：全部状态在数据库（SQLite/PostgreSQL），多节点经 Redis socket 广播一致；`channel_member.last_read_at`/`is_active` 维护已读与在线。
 
 **安全与资源边界**：成员制 + access grants + 频道级读写权限；Webhook 用 token 鉴权；模型回复经完整权限管线（`get_filtered_models`）。
+
+**加密频道**：频道可进入端到端加密模式，独立页面 `/channels/[id]/encrypted`，成员在进入前完成密钥协商（`src/lib/components/channel/ChannelMenu.svelte` 调用 `src/lib/encryption/client.ts` 的 `enter`/`canUseEncryption`）。加密算法以 Rust 编译为 wasm 放在前端（`crypto/encryption/` → `src/lib/encryption/vendor/`），服务端只做包中继：`socket/encryption.py` 按频道维护协商状态与在线绑定，注释明确不保存消息载荷。因此服务端可见的是成员关系、在线状态与密文包，明文只在成员浏览器内。
 
 **独特性判断**：Chat 类目只覆盖单用户聊天；Channels 是"Agent 社会 + 协同工作区"标签的完整服务端实现，且模型参与走真实聊天管线而非简单提示词拼装。
 
@@ -122,7 +130,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **事实对象**：`calendar` / `calendar_event` / `calendar_event_attendee` 三张表（`models/calendar.py`）分别记录日历、事件与参与者；事件带 `rrule`（重复规则）、颜色、`meta.alert_minutes` 提醒与 RSVP 状态。创建/更新表单会拒绝短于一天的重复频率（下限 24 小时，超频返回 `CALENDAR_RRULE_TOO_FREQUENT`，`models/calendar.py:30,198-245`）。
 
-**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验日历访问授权，默认日历兜底）→ UI 按范围查询与搜索 → 提醒由调度器循环的 `_check_calendar_alerts` 轮询（`utils/automations.py:693`）→ 经通知系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
+**完整主链**：用户/模型创建事件 → `CalendarEvents.insert_new_event`（校验日历访问授权，默认日历兜底）→ UI 按范围查询与搜索 → 提醒由调度器循环的 `_check_calendar_alerts` 轮询（`utils/automations.py:542`）→ 经通知系统推送。模型侧：`create_calendar_event` 用 `reminder_minutes` 参数映射 `alert_minutes`，无默认日历时返回错误 JSON 让模型转告用户。
 
 **持续性**：全量 DB；时区由 `tz` 参数（用户 timezone）归一。
 
@@ -139,9 +147,9 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 **事实对象**：`automation` + `automation_run` 两张表（`models/automations.py`），rrule 存 `automation.data['rrule']`。
 
 **完整主链**（调度与执行分两段）：
-- **调度**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:203`，每实例运行、轮询间隔默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务；
-- **规则边界**：带 COUNT 的 rrule 必须同时给出 DTSTART；解析器拒绝缺少该锚点的规则，避免有限次数的自动化被按无起点规则持续调度（`utils/automations.py:130-135`）。
-- **执行**：`execute_automation`（`automations.py:412`）复验所有者权限（被降权/停用即失败记录）→ 渲染 prompt 模板 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ 通知前端刷新列表 → 解析模型工具/特性/Filters（与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的无头请求调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 发布运行事件。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
+- **调度**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:68`，每实例运行、轮询间隔默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务；
+- **规则边界**：重复事件展开以事件自身 `start_at` 作为规则锚点——解析前先剥离规则串里的 DTSTART 片段，再用真实开始时间构造规则，避免规则文本与实际日程不一致；解析失败时退化为返回单条事件而不阻断查询（`utils/calendar.py:40-52`）。
+- **执行**：`execute_automation`（`automations.py:349`）复验所有者权限（被降权/停用即失败记录）→ 渲染 prompt 模板 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ 通知前端刷新列表 → 解析模型工具/特性/Filters（与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的无头请求调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 发布运行事件。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
 
 **主动性与取消**：完全后台主动；`toggle` 停用、`delete` 删除、`/{id}/run` 手动立即执行；限额系统防滥用。
 
@@ -169,7 +177,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **用户目标**：免提语音交互——按住说话转文字进聊天、模型回复语音朗读，摄像头可抓图作为消息附件。
 
-**入口**：`src/lib/components/chat/MessageInput/CallOverlay.svelte`（输入栏通话浮层）。行为链（静态确认）：浏览器媒体接口采集麦克风 → `MediaRecorder` 录制 → 转写 API（后端 `routers/audio.py`，多 STT 引擎：本地 Whisper/OpenAI/Deepgram/Azure）→ 转录文本进聊天；模型回复经 TTS（OpenAI 语音/Transformers/Kokoro WebAPI 引擎，带音频缓存）朗读；摄像头画面经 canvas 截帧作为图片内容。**注意**：README 称"voice/video calls"，实现是单用户免提模式（STT→聊天→TTS 朗读 + 摄像头取图），**不是** WebRTC 点对点通话，也无通话信令服务。
+**入口**：`src/lib/components/chat/MessageInput/CallOverlay.svelte`（输入栏通话浮层）。行为链（静态确认）：浏览器媒体接口采集麦克风 → `MediaRecorder` 录制 → 转写 API（后端 `routers/audio/`，多 STT 引擎：本地 Whisper/OpenAI/Deepgram/Azure；另提供 `/realtime` WebSocket 实时语音端点 `routers/audio/realtime.py:359`）→ 转录文本进聊天；模型回复经 TTS（OpenAI 语音/Transformers/Kokoro WebAPI 引擎，带音频缓存）朗读；摄像头画面经 canvas 截帧作为图片内容。**注意**：README 称"voice/video calls"，实现是单用户免提模式（STT→聊天→TTS 朗读 + 摄像头取图），**不是** WebRTC 点对点通话，也无通话信令服务。
 
 **独特性判断**：把语音闭环做进聊天输入层，与终端/桌面伴生应用的语音能力有交集，但属于 WebUI 本体。
 
@@ -177,7 +185,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 ### 能力八：企业身份（LDAP/OAuth/SCIM）— `入口确认`
 
-- **LDAP**：`POST /auths/ldap`（`routers/auths.py:471`）完整登录链（DN 转义、组 CN 提取用于角色映射、服务器配置在 `/auths/admin/config/ldap`）。
+- **LDAP**：`POST /auths/ldap`（`routers/auths.py:405`）完整登录链（DN 转义、组 CN 提取用于角色映射、服务器配置在 `/auths/admin/config/ldap`）。
 - **OAuth**：`/auths/admin/config/oauth` 管理多 provider；`token/exchange` 端点支持企业 OAuth 会话；`oauth_sessions` 表记录 provider 会话。
 - **SCIM 2.0**：`routers/scim.py` 实现 Users/Groups 的 SCIM 端点（`urn:ietf:params:scim:schemas:core:2.0:User/Group`、ListResponse/Error schema），文件头自述 **experimental**（可能不完全合规）；`SCIM_AUTH_PROVIDER` 控制认证来源。
 
@@ -199,6 +207,46 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **证据强度**：socket 模块源码为静态事实；多节点真实部署未验证。
 
+### 能力十一：外部应用平台（Apps）— `主链确认`
+
+**用户目标**：让外部服务以"应用"身份加入工作区和频道，与用户、模型处在同一时间线，而不是只能通过 API 调用或 webhook 单向触发。
+
+**事实对象**：`app` 表保存 id、slug、名称、属主、启用状态、配置 data 与 api_key（`models/apps.py:17`）；同文件的 `Manifest`、`Embed`、`Action`、`AppInvitation` 等模型描述应用可声明的清单、嵌入卡片与动作（`models/apps.py:45-160`）。
+
+**入口与主链**：管理员在 Apps 设置页提交 manifest（`src/lib/components/admin/Settings/Apps.svelte`），后端提供列表、manifest 预览、创建、读取、连接、删除与交互端点（`routers/apps.py:44-249`）。创建时校验回调 URL 只指向公网地址并发放 api_key；应用被邀请进频道后成为频道成员，平台把频道消息事件向其回调地址推送（`utils/apps.py:92-222`）。
+
+**回传与授权**：应用经 `/{app_id}/interactions` 回调时，需携带按该 app 签名、默认 900 秒过期的上下文 token，平台再按 scope 与频道成员关系校验（`utils/apps.py:177-300`）；通过后可发布频道回复（`generate_app_channel_reply`）。因此它同时具备入站回调鉴权和出站事件推送两个方向。
+
+**独特性判断**：Apps 把外部服务做成可邀请的一等参与者，与 Channels 打通；它是比 MCP 工具、webhook 入站更完整的双向集成面，但仍由 Open WebUI 持有消息与状态。
+
+**证据强度**：模型、路由、出站请求与 token/scope 校验均为静态事实；真实注册、事件投递重试、回调鉴权与加密凭据的端到端行为未运行验证。
+
+### 能力十二：多标签工作台（ChatTabs）— `主链确认`
+
+**用户目标**：把会话、文件、终端、浏览器、桌面画面、Artifact 预览、语音、评论与侧聊放进同一聊天区的标签体系，减少在多个窗口间切换。
+
+**事实对象**：标签状态由 `PanelTabs`（tabs、activeId、history）表达，标签种类包含 chat、files、file、terminal、browser、desktop、artifacts、preview、voice、comments、side（`src/lib/components/chat/ChatTabs/tabs.ts:5-32`）。
+
+**入口与主链**：`Chat.svelte` 持有 `terminalTabs` 实例并在主区域挂载 ChatTabs（`src/lib/components/chat/Chat.svelte:3877`、`src/lib/components/chat/Chat.svelte:5720`）；不同种类分别由 `ChatTabs/Browser.svelte`、`ChromeBrowser.svelte`、`Desktop.svelte`、`Embeds.svelte`、`FrameCanvas.svelte`、`GitBar.svelte`、`SideChat.svelte`、`UntitledFile.svelte` 等渲染，终端与文件系统经 `/api/v1/terminals` 代理（`src/lib/apis/terminal/`）。
+
+**边界**：终端、桌面画面与浏览器能力依赖外部 Terminal/桌面服务，本仓库承担 UI 编排与代理；文件预览与 Artifact 仍由消息内容派生，标签只是展示位置。
+
+**独特性判断**：把传统"右侧面板"扩展为可并行多标签的工作区，且标签种类覆盖远程终端、Git 变更与外部桌面，是聊天产品中少见的形态。
+
+**证据强度**：标签类型、状态结构与挂载位置为静态事实；外部终端/桌面连接、标签会话隔离与并发行为未运行验证。
+
+### 能力十三：人工提问（ask_user）— `主链确认`
+
+**用户目标**：让模型在推理过程中停下来向用户提出澄清或选择，而不是把假设继续写进回答。
+
+**事实对象**：内置工具 `ask_user` 接受 1 到 3 个结构化问题并返回选项（`backend/open_webui/tools/builtin.py:535`）；调用结果作为工具调用记录在消息 output 中。
+
+**主链**：模型发出工具调用后，中间件在正常派发前先暂存该调用（`backend/open_webui/utils/middleware.py:5707`）；暂存规则要求该工具单独调用、单轮只能一个（`backend/open_webui/utils/ask_user.py:8-30`）。前端以 `AskUserCard.svelte` 渲染问题与选项，用户作答后作为工具结果回填，同一轮继续生成。
+
+**边界与区别**：它不同于工具审批（审批决定"是否允许执行"，ask_user 决定"要用户提供什么信息"），也不会触发独立的多步 Agent 循环；问题数量与调用次数都有硬限制。
+
+**证据强度**：工具定义、中间件暂存与前端卡片为静态事实；作答回填后的续写时序、与流式渲染的配合未运行验证。
+
 ## 已归并到现有类目的能力
 
 | 能力 | 归并去向 |
@@ -211,6 +259,11 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 | 会话/消息双写、channel 之外的消息模型 | [`../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md`](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) |
 | 富文本渲染、Markdown、Citations | [`../消息渲染器/Open-WebUI-消息渲染器调查笔记.md`](../消息渲染器/Open-WebUI-消息渲染器调查笔记.md) |
 | LLM 渠道与 Provider 适配 | [`../LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md`](../LLM渠道管理/Open-WebUI-LLM渠道管理调查笔记.md) |
+| 技能（Skills：`@` 提及注入、创建引导与版本历史） | [`../Agent工具/Open-WebUI-Agent工具调查笔记.md`](../Agent工具/Open-WebUI-Agent工具调查笔记.md) |
+| 工作区全局搜索（`routers/search.py`，跨会话/消息/文件的权限内检索） | [`../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md`](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) |
+| 通知收件箱（`notification` 表、提醒与系统消息） | [`../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md`](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md) |
+| 资源评论（`comments` 表与频道/资源评论面） | [`../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md`](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) |
+| MFA（TOTP 与恢复码） | 并入下方企业身份能力（`入口确认`） |
 
 ## 声明不符、外部依赖与暂缓项
 
@@ -222,15 +275,19 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 ## 对特色贡献统计的影响
 
-- 主贡献候选（`主链确认`，静态证据）：Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO——6 个能力族。
-- 辅助贡献/`入口确认`：语音通话模式、企业身份（LDAP/OAuth/SCIM）、云文件入口。
+- 主贡献候选（`主链确认`，静态证据）：Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO、外部应用平台、多标签工作台、人工提问——9 个能力族。
+- 辅助贡献/`入口确认`：语音通话模式、企业身份（LDAP/OAuth/SCIM/MFA）、云文件入口。
 - 多节点运行按"工程/可靠性机制"单独标注，不进用户可见特色计数。
 - 同一工作流合并：Calendar 与 Automations 共享 `scheduler_worker_loop` 调度器与时间轴，但用户目标不同（日程管理 vs prompt 自动化），分开计数；Automations 的"运行记录上日历"不重复计数。
+- Apps 与 Channels 共用频道成员与消息模型，但 Apps 的是"外部服务参与"而非模型参与，故单独计数；技能、通知收件箱、资源评论与全局搜索归入既有类目，不重复计数。
 - Artifact KV 不计入；README 宣称而代码未接线的部分保留差异说明，不给特色加分。
 
 ## 未验证事项
 
 - 全部能力均未运行验证（未启动 open-webui 服务）：socket 实时推送、模型在频道/笔记中的流式参与、记忆后台复盘的真实模型调用、自动化定时触发与多实例并发认领、ELO 加权查询、STT/TTS 引擎接入、LDAP/SCIM 真实接入、云文件 OAuth 流、Redis 多节点部署。
+- Apps 的真实注册、出站事件投递重试、回调 token 校验与 SSRF 防护效果未运行验证。
+- ChatTabs 的外部终端/桌面连接、标签会话隔离与并发切换行为未运行验证。
+- ask_user 的作答回填后续写时序、与流式渲染和工具审批的交互未运行验证。
 - Artifact KV 的"未找到"结论基于当前快照的静态搜索；若用户基于新版文档/发行版宣称存在，需在新快照复查。
 - Calendar 重复事件（rrule）的展开与提醒推送细节未逐行核对（`get_events_by_range` 与 `_check_calendar_alerts` 行为以代码为准）。
 - Notes 的 Yjs 协作在 SQLite/PostgreSQL 双后端下的并发正确性未验证。
@@ -242,8 +299,11 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 - `backend/open_webui/routers/notes.py`（65 get_notes、308/467 note↔chat、536 update、616 access）
 - `backend/open_webui/models/channels.py`（channel/channel_member/channel_file/channel_webhook）、`models/notes.py`、`models/calendar.py`（calendar/calendar_event/calendar_event_attendee）、`models/automations.py`（automation/automation_run、282 claim_due）、`models/memories.py`、`models/feedbacks.py`
 - `backend/open_webui/utils/memory.py`（290 add_memory_context、408 review_memory_after_turn、520 _generate_memory_operations）
-- `backend/open_webui/utils/automations.py`（203 scheduler_worker_loop、412 execute_automation、267 _build_request）
-- `backend/open_webui/routers/memories.py`（127 add、274 query、391 reset）、`routers/evaluations.py`（81 _calculate_elo、216 leaderboard）、`routers/scim.py`、`routers/auths.py:471`（ldap_auth）、`routers/audio.py`（STT/TTS 引擎族）
+- `backend/open_webui/utils/automations.py`（68 scheduler_worker_loop、131 _build_request、349 execute_automation）
+- `backend/open_webui/routers/memories.py`（127 add、274 query、391 reset）、`routers/evaluations.py`（81 _calculate_elo、216 leaderboard）、`routers/scim.py`、`routers/auths.py`（ldap_auth）、`routers/audio/`（STT/TTS 引擎族）
+- `backend/open_webui/routers/apps.py`（44 列表、98 创建、203 connect、249 interactions）、`models/apps.py:17`、`utils/apps.py`（92 send_app_request、177 上下文 token、291 invocation 校验）
+- `src/lib/components/chat/ChatTabs/`、`src/lib/components/chat/ChatTabs/tabs.ts:5-32`、`src/lib/components/chat/Chat.svelte:5720`、`src/lib/apis/terminal/`
+- `backend/open_webui/tools/builtin.py:535`（ask_user）、`utils/ask_user.py`、`utils/middleware.py:5707`、`src/lib/components/chat/AskUserCard.svelte`
 - `backend/open_webui/tools/builtin.py`（663-988 记忆工具、990-1365 笔记工具、3965-4226 日历工具、3421/3471 任务清单、3537 automation 工具）
 - `backend/open_webui/socket/main.py`（67-82 Redis manager、465-698 note Yjs 事件）、`socket/utils.py`（RedisDict/RedisLock/YdocManager）
 - `src/routes/(app)/notes/`、`(app)/channels/[id]`、`(app)/calendar`、`(app)/automations/`、`(app)/admin/evaluations/`

@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
-> 调查方式：直接阅读源码（core 类型定义、React 前端 store 与服务层、conversational 扩展桥接、Rust Tauri 持久化命令、SQLite 移动端模块）并逐条核对符号与行号
+> 调查方式：直接阅读源码（core 类型定义、React 前端 store 与服务层、服务层与 core 宿主桥接、Rust Tauri 持久化命令、SQLite 移动端模块）并逐条核对符号与行号
 >
 > 调查范围：Thread/Message 数据模型、文件与 SQLite 双持久化、乐观写、列表/删除/收藏语义、分支/编辑/续写/回退的数据变更、迁移与保留策略；请求执行语义进入对话请求与上下文类目，界面工作流进入 Chat UI 类目，内容渲染进入消息渲染器类目
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-普通 Chat 的 Thread/Message 经 conversational 扩展转发到 Tauri Rust，桌面用逐线程 JSON/JSONL、移动用 SQLite。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
+普通 Chat 的 Thread/Message 经服务层直调 `@janhq/core` 暴露的 `window.core.api.*` 再到 Tauri Rust 命令，桌面用逐线程 JSON/JSONL、移动用 SQLite；旧快照里负责透传的 conversational 扩展已不在仓库，线程与消息的桥接并入 core 宿主。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
 
 数据层关键事实（均有源码依据，正文标注位置）：
 
@@ -34,7 +34,7 @@ Cowork 的数据链为创建 session -> 路由启动 agent run -> 循环产生 t
 
 ```text
 ChatInput 发送（新建线程走 createThread，线程内走 processAndSendMessage）
-  -> useThreads.createThread（ulid/TEMPORARY_CHAT_ID，title=prompt）-> services/threads -> conversational-extension
+  -> useThreads.createThread（ulid/TEMPORARY_CHAT_ID，title=prompt）-> services/threads -> window.core.api
         -> Rust create_thread（服务端 uuid 覆盖前端 id，写 thread.json）
   -> useMessages.addMessage 乐观写 -> createMessage().then 按 id 替换
         -> 桌面：Rust create_message（per-thread 锁 + 去重）-> messages.jsonl 追加
@@ -91,28 +91,28 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 
 `web-app/src/lib/messages.ts`：
 
-- `convertUIMessageToThreadMessage`（L17-133）：把 UI 消息的文本、推理、文件与工具 parts 转成 `metadata.tool_calls` 旧格式（L97-116），文件 part 按下列映射，推理内容包裹 `<think>`：
+- `convertUIMessageToThreadMessage`（L17 起）：把 UI 消息的文本、推理、文件与工具 parts 转成 `metadata.tool_calls` 旧格式（L97-116），文件 part 按下列映射，推理内容包裹 `<think>`：
 
   ```text
   image → image_url | audio → input_audio | video → input_video
   ```
 
-- `convertThreadMessageToUIMessage`（L203-373）：
+- `convertThreadMessageToUIMessage`（L255 起）：
   - `tool_call` 内容转 `tool-<name>` part（L282-301）
   - 兼容旧 `metadata.tool_calls`（L304-354）
-  - `parseReasoning`（L161-196）兼容 `<think>`/`<thought>`/`<|channel|>analysis` 三种历史包裹格式
-- `uiMessageHasMeaningfulContent`（L375-399）、`threadMessageIsEmpty`（L401-419，用于清理空 assistant 行）、`extractContentPartsFromUIMessage`（L440-531）。
+  - `parseReasoning`（L170）兼容 `<think>`/`<thought>`/`<|channel|>analysis` 三种历史包裹格式
+- `uiMessageHasMeaningfulContent`（L402）、`threadMessageIsEmpty`（L428，用于清理空 assistant 行）、`extractContentPartsFromUIMessage`（L491）。
 
 ### 1.4 分支模型：parentId 树 + activeRootId
 
 `web-app/src/lib/message-branching.ts`（256 行，全读）：
 
-- 树形链接存在消息自身的元数据字段：`parentId`（根节点为空、有字符串为父、缺省为未链接旧数据）+ `activeChildId`（父消息选择哪个子版本；缺省取最新兄弟）；`computeActivePath`（L95-117）从活跃根沿活跃子节点走出一条可见线性会话，另有分支态判定（L44-47）。
-- `backfillParentIds`（L142-145）：首次 fork 时沿当前线性路径铺平 parentId（只写需要的消息，幂等）。
-- `makeSibling`（L236-256）：新 id/时间戳、继承父节点、清 `error` 与 `activeChildId`、content 可整体替换为纯文本。
-- `planContinuation`（L217-230）：原地续写——继承被续半截消息的 `parentId` 并返回待删 id，使续写替换原半截消息而非 fork。
-- `repairDetachedAssistants`（L170-204）：修复分支线程里 assistant 回复被写成 `parentId:null`（或无父链）的"幽灵根"：重挂到其回答的 user 回合并把被挤掉的后续 user 重新链接。幂等；对未分支线程无操作。
-- 活跃根指针 `activeRootId` 存线程 `thread.json` 的元数据（`$threadId.tsx` 的写入/读取入口分别在 L1236-1256、L1259-1269），因此分支状态跨重启可恢复。旧数据（尚无 parentId 的线性线程）在首次 fork 时才回填，回填前的树完整性未验证。
+- 树形链接存在消息自身的元数据字段：`parentId`（根节点为空、有字符串为父、缺省为未链接旧数据）+ `activeChildId`（父消息选择哪个子版本；缺省取最新兄弟）；`computeActivePath`（`:98`）从活跃根沿活跃子节点走出一条可见线性会话。
+- `backfillParentIds`（`:159`）：首次 fork 时沿当前线性路径铺平 parentId（只写需要的消息，幂等）。
+- `makeSibling`（`:253`）：新 id/时间戳、继承父节点、清 `error` 与 `activeChildId`、content 可整体替换为纯文本。
+- `planContinuation`（`:234`）：原地续写——继承被续半截消息的 `parentId` 并返回待删 id，使续写替换原半截消息而非 fork。
+- `repairDetachedAssistants`（`:187`）：修复分支线程里 assistant 回复被写成 `parentId:null`（或无父链）的"幽灵根"：重挂到其回答的 user 回合并把被挤掉的后续 user 重新链接。幂等；对未分支线程无操作。
+- 活跃根指针 `activeRootId` 存线程 `thread.json` 的元数据（写读入口在 `$threadId.tsx` 的分支相关回调里），因此分支状态跨重启可恢复。旧数据（尚无 parentId 的线性线程）在首次 fork 时才回填，回填前的树完整性未验证。
 
 ## 2. 事实源、索引与持久化
 
@@ -157,46 +157,46 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
   - `db_modify_thread`：L163-184（UPDATE）
   - `db_delete_thread`：L187-201（依赖外键级联删消息）
 - 消息去重与 upsert：
-  - `db_create_message`（L229-257）：`INSERT OR IGNORE`（L248，注释说明跳过先落地的 modify upsert）
-  - `db_modify_message`（L260-291）：`INSERT ... ON CONFLICT(id) DO UPDATE SET data = excluded.data`（L279-282）
-- `db_list_messages`（L204-226）：按 `created_at ASC` 排序返回（注意与桌面文件 append 顺序的差异）。
+  - `db_create_message`（`:227` 起）：`INSERT OR IGNORE`（注释说明跳过先落地的 modify upsert）
+  - `db_modify_message`（`:258` 起）：`INSERT ... ON CONFLICT(id) DO UPDATE SET data = excluded.data`
+- `db_list_messages`（`:202`）：按 `created_at ASC` 排序返回（注意与桌面文件 append 顺序的差异）。
 - 助手三命令的移动端对应实现（L311-398）同样无 web 调用方。
 
 ### 2.4 前端乐观写与服务层
 
-`web-app/src/hooks/useMessages.ts`（96 行）提供三个消息操作：
+`web-app/src/hooks/useMessages.ts` 提供三个消息操作：
 
 - `addMessage`（L28-59）：先改内存，再 `createMessage().then` 按 id 替换（L46-55）
 - `updateMessage`（L60-80）：走 `modifyMessage`
 - `deleteMessage`（L81-92）：先删后端再过滤内存
 
-`web-app/src/hooks/useThreads.ts`（489 行）提供线程列表相关操作：
+`web-app/src/hooks/useThreads.ts` 提供线程列表相关操作：
 
 - `setThreads`（L66-103）：模型归一化——把 `llama.cpp` 归一化为 `llamacpp`，cortex 迁移时模型名取前两段按路径分隔符拼接（L71-86）
-- `getFilteredThreads`（L104-138）：Fzf 搜索（懒建索引 L118-124）
-- `toggleFavorite`（L139-158）：改 `isFavorite` + `updated=Date.now()/1000` 并持久化
-- `renameThread`（L406-428）：置 `metadata.titleSetManually=true`
+- `getFilteredThreads`（`:134`）：Fzf 搜索（懒建索引）
+- `toggleFavorite`（`:169`）：改 `isFavorite` + `updated=Date.now()/1000` 并持久化
+- `renameThread`（`:441`）：置 `metadata.titleSetManually=true`
 - `updateThread`（L464-488）：通用合并（读-改-写整线程）
 
 服务层 `web-app/src/services/threads/default.ts` 提供三个入口：
 
-- `fetchThreads`（L25-76）：读扩展并转换字段（毫秒转秒、`isFavorite` ↔ `metadata.is_favorite`、模型折叠为 `{id, provider}` 线格式）
-- `createThread`（L78-119）：把完整 assistant 对象展开写入，无助手时写 `{id:'model-only', name:'Model'}` 占位
-- `updateThread`（L121-146）：同样展开 assistant 并把模型改写为 `{id, engine}` 线格式
+- `fetchThreads`：读扩展并转换字段（毫秒转秒、`isFavorite` ↔ `metadata.is_favorite`、模型折叠为 `{id, provider}` 线格式）
+- `createThread`：把完整 assistant 对象展开写入，无助手时写 `{id:'model-only', name:'Model'}` 占位
+- `updateThread`：同样展开 assistant 并把模型改写为 `{id, engine}` 线格式
 
-链路：服务层 → `extensions/conversational-extension/src/index.ts`（`window.core.api.*` 透传）→ Tauri 命令。
+链路：服务层（`services/threads/default.ts`、`services/messages/default.ts`）→ `window.core.api.*`（core 宿主暴露的 Tauri 桥）→ Rust 命令。服务层自身只做字段映射（毫秒转秒、`isFavorite` ↔ `metadata.is_favorite`、模型折叠为 `{id, provider}` 线格式），并用 `@janhq/extension-api` 的 `Emitter` 发变更事件。
 
 ## 3. 创建、切换、归档、删除与恢复
 
 - **创建**：`useThreads.createThread`（L315-361）：id 用 `ulid()` 或 `TEMPORARY_CHAT_ID`；标题默认取首次输入（`ChatInput.tsx:488`）；可选项目元数据；创建成功回填列表并置当前线程指针。磁盘层再被 Rust uuid 覆盖（§2.2）。首次发送前的线程页现场建立见 Chat UI 笔记 §2。
-- **删除线程**：`deleteThread`（`useThreads.ts:159-182`）级联清理各 store（agent 模式、AI SDK 会话、页面状态）、向量库集合（`attachments_<threadId>`，L45-59）、服务层记录，并重建搜索索引。
+- **删除线程**：`deleteThread`（`useThreads.ts` 内）级联清理各 store（agent 模式、AI SDK 会话、页面状态）、向量库集合（`useThreads.ts:48` 向扩展宿主取 `ServiceKeys.VectorDB` 后删集合，注意它传入的已是带前缀的名字）、服务层记录，并重建搜索索引。
 - **批量删除**：
   - `deleteAllThreads`（L183-228）：保留收藏或带项目元数据的线程
   - `deleteAllThreadsByProject`（L250-285）：按项目过滤删除
   - `clearAllThreads`（L229-249）：全部清理并清空当前线程指针
   - `unstarAllThreads`（L286-305）：批量取消收藏
 - **删除消息**：Rust `delete_message` retain 整写（§2.2）；前端 `handleDeleteMessage`（`$threadId.tsx:1410-1422`）：store 删除 + 清错误 + 从 chatMessages 过滤；流式态禁用（界面侧见 Chat UI 笔记 §6）。
-- **首拉与防清空**：`web-app/src/providers/DataProvider.tsx:282-334`——fetchThreads 失败按 150ms×attempt 退避重试（上限 20 次），扩展注册事件会重新触发；**空结果不覆盖已填充的列表**；线程内消息加载合并本地乐观写（`$threadId.tsx:790-810`）。
+- **首拉与防清空**：`web-app/src/providers/DataProvider.tsx:291-330`——fetchThreads 失败按 150ms×attempt 退避重试（上限 20 次），扩展注册事件会重新触发；**空结果不覆盖已填充的列表**；线程内消息加载合并本地乐观写（`$threadId.tsx:790-810`）。
 - **载入时自愈**：`$threadId.tsx:815-835` 丢弃并删除空 assistant 行（旧 bug 产物），并对 `parentId:null` 幽灵根跑 `repairDetachedAssistants` 后回写。
 - **保留语义**：无回收站（检查范围：`threads` 模块全部命令、`useThreads` 全部删除方法、`ThreadList`/`NavChats`/对话框目录——均无软删除或回收站入口）；`deleteAllThreads` 的保留集是唯一的"批量保护"。
 - **归档**：本次未找到归档机制（core Thread 类型无 archived 字段；threads 命令无归档命令；ThreadList 菜单无归档项）——标注为未找到，非项目级否定。
@@ -218,7 +218,7 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 - **收藏**：`toggleFavorite` store 方法存在（§2.4），但本快照 **web-app 内没有 UI 调用点**（搜索 `toggleFavorite` 仅命中 store 与测试；侧栏无收藏分区）；收藏星标界面本次未找到。`deleteAllThreads` 的收藏保留逻辑仍有效。
 - **搜索**：`getFilteredThreads`（`useThreads.ts:104-138`）用 Fzf 按标题模糊搜索，索引懒建且排除 `TEMPORARY_CHAT_ID` 与无标题线程；搜索对话框的搜索记录（localStorage，上限 5）与键盘导航属于 Chat UI 笔记 §2。
 - **线程列表加载**：`ThreadList.tsx:68-98` ThreadItem 懒加载消息——磁盘为空（新线程）不覆盖乐观写；列表滚动加载策略未找到（全量渲染）。
-- **消息列表**：无分页接口——`fetchMessages`（`messages/default.ts:15-27`）全量返回；AI SDK 会话内消息全量渲染，窗口化策略在消息渲染器笔记（无窗口化/虚拟化）。
+- **消息列表**：无分页接口——`fetchMessages`（`messages/default.ts`）全量返回；AI SDK 会话内消息全量渲染，窗口化策略在消息渲染器笔记（无窗口化/虚拟化）。
 - **标题生命周期**：自动标题在完成回调后按"每 4 条 assistant 消息"的节拍触发（`TITLE_REFRESH_EVERY_N_ASSISTANT_MESSAGES=4`，`$threadId.tsx:93,589-656`），受自动标题开关与 `metadata.titleSetManually` 约束；llamacpp 下先等路由空闲（L626-642）再生成标题（≤10 词）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
@@ -231,7 +231,7 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 
 ## 7. 迁移、导入导出与保留策略
 
-- **设置迁移**：`migrateLocalStorageToBackend`（`web-app/src/lib/migrateLocalStorageSettings.ts:148-186`，由 `providers/ServiceHubProvider.tsx` 调用）：一次性把 localStorage 设置迁移到后端存储、API key/令牌入系统 keyring，后端标记防重复；**不涉及线程/消息数据**。
+- **设置迁移**：`migrateLocalStorageToBackend`（`web-app/src/lib/migrateLocalStorageSettings.ts`，由 `providers/ServiceHubProvider.tsx` 调用）：一次性把 localStorage 设置迁移到后端存储、API key/令牌入系统 keyring，后端标记防重复；**不涉及线程/消息数据**。
 - **线程数据迁移**：
   - `setThreads`：模型名归一化与 cortex 模型 id 拼接（`useThreads.ts:71-86`）
   - 消息兼容：`<think>` 旧格式解析（`messages.ts:161-196`）、`metadata.tool_calls` 旧工具格式（L304-354）、空 assistant 行清理与 parentId 为空幽灵根修复（§3）
@@ -275,7 +275,7 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 - 类型：`core/src/types/thread/threadEntity.ts`、`core/src/types/message/messageEntity.ts`、`web-app/src/types/threads.d.ts`。
 - 转换：`web-app/src/lib/messages.ts`、`web-app/src/lib/completion.ts`、`web-app/src/lib/message-branching.ts`。
 - 持久化（Rust）：`src-tauri/src/core/threads/commands.rs`、`helpers.rs`、`db.rs`、`constants.rs`、`utils.rs`。
-- 服务与扩展：`web-app/src/services/threads/default.ts`、`web-app/src/services/messages/default.ts`、`extensions/conversational-extension/src/index.ts`。
+- 服务层：`web-app/src/services/threads/default.ts`、`web-app/src/services/messages/default.ts`（均经 `window.core.api.*` 调 Rust）。
 - 前端 store：`web-app/src/hooks/useMessages.ts`、`useThreads.ts`、`useThreadManagement.ts`、`providers/DataProvider.tsx`、`lib/migrateLocalStorageSettings.ts`。
-- 线程页中枢（数据侧）：`web-app/src/routes/threads/$threadId.tsx`（分支/编辑/续写/删除仲裁 L1227-1422、载入自愈 L776-865）。
+- 线程页中枢（数据侧）：`web-app/src/routes/threads/$threadId.tsx`（分支/编辑/续写/删除仲裁与载入自愈见同文件相关回调）。
 - 列表（数据侧）：`web-app/src/containers/ThreadList.tsx`（懒加载、排序）。

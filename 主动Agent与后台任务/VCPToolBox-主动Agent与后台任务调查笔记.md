@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：静态走读 TaskAssistant、VCPClawMail 和 AgentDream 的 manifest、初始化、状态、调度、执行与关闭路径，并参照 VCPChat 的任务面交接；未运行 Node 服务、上游 LLM 或 ClawMail SDK
 >
@@ -14,11 +14,13 @@
 
 ## 结论摘要
 
-当前快照确认三种不同形态的主动运行。TaskAssistant 是持久化的后台任务队列：规则由 `task-center-data.json` 持有，node-schedule 触发后向具名 Agent 派发提示词，结果写回任务运行字段和有上限的历史。其全局开关默认关闭。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 281-484, 697-734`
+当前快照确认四种不同形态的主动运行。TaskAssistant 是持久化的后台任务队列：规则由 `task-center-data.json` 持有，node-schedule 触发后向具名 Agent 派发提示词，结果写回任务运行字段和有上限的历史。其全局开关默认关闭。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 281-484, 697-734`（文件现 936 行，段落位置未变）
 
 VCPClawMail 是条件唤醒：常驻 WebSocket 收到邮件事件后刷新邮箱缓存；若该邮箱绑定子邮箱和 Agent，插件用已处理邮件记录去重、读取正文与附件，再交给 AgentAssistant。低频轮询是 WebSocket 的后备，不是为每封公共邮箱邮件创建任务对象。`Plugin/VCPClawMail/VCPClawMail.js:1738-1786, 1847-2039, 2041-2181`
 
-AgentDream 是另一条具备独立状态和审批产物的定时运行链，但其 manifest 为 `plugin-manifest.json.block`，因此在当前仓库的加载约定下默认禁用。启用且配置梦 Agent 后，调度器才每 15 分钟按时间窗、冷却和概率串行触发。`Plugin/AgentDream/AgentDream.js:755-913, 922-957`；`Plugin/AGENTS.md:24-31`
+AgentDream 是另一条具备独立状态和审批产物的定时运行链，但其 manifest 为 `plugin-manifest.json.block`，因此在当前仓库的加载约定下默认禁用。启用且配置梦 Agent 后，调度器才每 15 分钟按时间窗、冷却和概率串行触发。`Plugin/AgentDream/AgentDream.js:767, 901-957`；`Plugin/AGENTS.md:24-31`
+
+VCPSleep 是工具侧的条件等待：模型调用后当前工具链原地挂起，直到指定时间到达才返回，单次上限 12 小时，醒来时回报服务器时区下的当前时间并交还睡前留下的提示。它与梦境有一条可选联动——管理员开启联动且 AgentDream 已启用时，睡眠期间按 AgentDream 自己的名单、时间窗、冷却与概率触发一次梦，梦的失败不延长睡眠，梦系统未启用时 VCPSleep 仍独立可用。`Plugin/VCPSleep/VCPSleep.js:1-12`、`Plugin/VCPSleep/plugin-manifest.json`、`Plugin.js:1235-1281,1490`
 
 TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant、AgentDream 直接调用聊天完成接口，这些是主动运行与 Agent 执行域的交接。任务调度器只负责何时和以什么输入唤醒 Agent；模型循环、工具权限、委托状态机及其实际取消语义属于 Agent 工具和外部执行体协调，不在本笔记重复归因。
 
@@ -45,7 +47,15 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 
 主链为：插件初始化读取并恢复上次成功梦境时间 -> 定时检查符合时间窗、冷却和概率的 Agent -> 串行 `triggerDream` -> 生成梦境叙事和待审操作 -> 写入 `dream_logs/`；成功后持久化每个 Agent 的最后梦境时间。调度运行中以单个 `isDreamingInProgress` 门阻止重叠，并在多 Agent 间等待 30 秒。`Plugin/AgentDream/AgentDream.js:53-109, 198-361, 755-913, 922-957`
 
-梦操作以 `pending_review` 记录落盘，意图由管理路由审批后影响日记和索引。插件导出的 approve/reject 函数仍返回 `not_implemented`，因此不能把它们当作可从插件工具面完成审批的链路；审批执行域在管理路由，具体路由运行未验证。`Plugin/AgentDream/AgentDream.js:467-633, 995-1001`；`Plugin/AgentDream/README.md:30-38, 99-108`
+梦操作以 `pending_review` 记录落盘，意图由管理路由审批后影响日记和索引。插件导出的 approve/reject 函数仍返回 `not_implemented`，因此不能把它们当作可从插件工具面完成审批的链路；审批执行域在管理路由，具体路由运行未验证。`Plugin/AgentDream/AgentDream.js:467-633, 1084`；`Plugin/AgentDream/README.md:30-38, 99-108`
+
+### VCPSleep：工具链内睡眠与做梦联动
+
+主链为：模型在工具请求里给出时长与可选提示 -> 插件解析时长（纯数字按秒，也接受 30s、2h、1小时30分钟等写法）并校验大于 0、不超过 12 小时 -> 工具进程 await 指定时长 -> 醒来后按服务器时区格式化当前时间，连同睡前提示一起返回。返回内容同时给出请求时长、实际时长、时区与 UTC 偏移等明细，便于调用方核对等待是否被拉长。
+
+做梦联动不在这条同步等待里：工具执行器检测到当前调用的是 VCPSleep 且带有 Agent 名时，会在睡眠开始后异步请求 AgentDream 尝试一次梦，失败只记日志、不打断睡眠，梦系统未启用或未给 Agent 名时直接跳过。因此“睡了一觉”与“做了一个梦”是两条独立链路，梦境是否发生仍由 AgentDream 的启用状态与调度条件决定。
+
+依据：[VCPSleep.js:100-167](../../VCPToolBox/Plugin/VCPSleep/VCPSleep.js)、[plugin-manifest.json](../../VCPToolBox/Plugin/VCPSleep/plugin-manifest.json)、[Plugin.js:1235-1281,1490](../../VCPToolBox/Plugin.js)。
 
 ## 调度、并发、取消与恢复
 
@@ -54,6 +64,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 | TaskAssistant | interval 最小 10 分钟，另支持 cron、once、manual；同一任务 `running` 时跳过，超过 10 分钟会重置为卡死。目标 Agent 在单次任务中按顺序派发。 | 删除或停用会取消未来 Job；代码未向正在执行的 `wakeUpAgent` 传 AbortSignal。单个 Agent 失败可形成 partial_success，全部失败为 error；每次 interval 不论结果都会再调度。全量配置若把已有任务直接改成空数组，需要显式 `forceEmpty`，否则拒绝。 | 启动把遗留 running 置为 false 并记错误，再按数据重建 Job；主文件损坏可读 `.bak`，主备同时失效时禁止继续写盘；不补跑错过时间。`globalEnabled` 默认 false。 |
 | VCPClawMail | WebSocket 优先，断线按退避定时重连；低频轮询有下限。每封子邮件有内存锁和文件去重。 | shutdown 停轮询、清重连计时器并断开 WebSocket；本次未找到已进入 AgentAssistant 的邮件处理取消传播。读取或投递错误写缓存，但已在读取前标记 processed，是否重投取决于人工/外部输入而非自动重试。 | 关闭保存缓存与去重状态，初始化加载去重状态并重连；需配置 SDK、邮箱及绑定，实时监听默认启用。 |
 | AgentDream | 每 15 分钟检查，默认 1-6 点、8 小时冷却、0.6 概率；全局单运行门与串行 Agent 减少并发。 | 关闭插件或服务可停止后续检查；本次未找到进行中 LLM 请求的任务级取消或失败自动重试。 | 保存最后成功时间避免重启立即重触发；但插件 manifest 为 `.block`，默认不加载。 |
+| VCPSleep | 同步等待，单次上限 12 小时；一个调用占用一条工具链直到醒来。做梦联动另起异步请求，不延长等待。 | 睡眠本身无中途取消入口；睡醒后照常返回，做梦失败只记日志。 | 无持久状态，等待期间重启服务会中断该次调用；插件默认启用。 |
 
 TaskAssistant 的 `once` 作业执行后自动禁用；cron 的下一次时间取自 Job，interval 则在本轮完成后重新安排。运行历史最多保留配置的数量，默认上限 200；状态更新函数当前只输出调试日志，所以管理面需要轮询而非从该插件接收实时推送。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:45-51, 512-605, 697-711`
 
@@ -65,7 +76,7 @@ TaskAssistant 的结果归属任务自身的 runtime 和 history，并不直接�
 
 VCPClawMail 的直接交付是 AgentAssistant 输入和邮件缓存/占位符。子邮箱可选异步委托；普通模式使用稳定 session ID，使邮件进入绑定 Agent 的持续上下文。邮件正文中的绕过安全、泄密、删除或未授权外部操作指令被放入提示词中的拒绝要求，但这是一段模型提示而非代码级邮箱内容隔离。附件数量在自动投递时受配置限制，具体内容解析和 Agent 实际执行未运行验证。`Plugin/VCPClawMail/VCPClawMail.js:1897-1965, 1967-2017`
 
-AgentDream 的可观察结果是梦境会话日志和待审操作，不是聊天窗口消息。其破坏性记忆修改的设计边界是管理审批；静态代码显示梦插件本身的审批导出为占位，故本次不能确认“生成 pending_review 后必能在已部署管理面结算”的端到端结果。`Plugin/AgentDream/AgentDream.js:467-633, 973-1001`
+AgentDream 的可观察结果是梦境会话日志和待审操作，不是聊天窗口消息。其破坏性记忆修改的设计边界是管理审批；静态代码显示梦插件本身的审批导出为占位，故本次不能确认“生成 pending_review 后必能在已部署管理面结算”的端到端结果。`Plugin/AgentDream/AgentDream.js:467-633, 1084`
 
 ## 未验证事项
 
@@ -73,11 +84,13 @@ AgentDream 的可观察结果是梦境会话日志和待审操作，不是聊天
 - 未走读 AgentAssistant 的执行与取消实现，故不确认派发成功是否等同于目标 Agent 已完成工作。
 - 未连接 ClawMail SDK，未验证 WebSocket、轮询、附件解析、退避重连及重复邮件下的实际投递。
 - 未启用 AgentDream；未验证梦境生成、管理路由审批、日记/索引修改和中途进程停止后的结算。
+- 未调用 VCPSleep，未验证长等待在网关、上游超时与进程重启下的实际表现，也未验证做梦联动在睡眠期间是否按预期触发。
 - 未调查各插件管理 API 的鉴权与前端可见性，除本笔记直接引用的运行对象和交接外不作安全结论。
 
 ## 关键源码索引
 
 - `Plugin/VCPTaskAssistant/vcp-task-assistant.js:177-215, 227-484, 512-614, 697-853`：任务持久化、执行、调度、状态与管理命令。
 - `Plugin/VCPClawMail/VCPClawMail.js:1738-2181, 2269-2280`：轮询、WebSocket、去重、邮件投递、初始化和关闭。
-- `Plugin/AgentDream/AgentDream.js:53-109, 198-361, 755-957, 995-1001`：梦境执行、调度状态和审批接口边界。
+- `Plugin/AgentDream/AgentDream.js:53-109, 198-361, 767-957, 1084`：梦境执行、调度状态和审批接口边界。
+- `Plugin/VCPSleep/VCPSleep.js`、`Plugin/VCPSleep/plugin-manifest.json`、`Plugin.js:1235-1281,1490`：工具链内睡眠、12 小时上限与做梦联动接线。
 - `VCPChat/Agenttaskmodules/task.js:619-670, 853-870`：VCPChat 对后端任务及异步委托的外部管理交接。

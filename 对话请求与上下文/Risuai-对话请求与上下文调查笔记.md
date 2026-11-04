@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/process/index.svelte.ts` 的 `sendChat` 全链、`request/` 各 Provider 的流式实现与工具循环、`memory/` 四个记忆引擎、`globalApi.svelte.ts` 网络层与持久化循环、`src-tauri` 的请求命令），静态追踪调用链与状态分支；未运行应用
 >
@@ -19,7 +19,7 @@
 - 预算以全局 `maxContext` 为上限：无记忆引擎时从消息数组头部整条删除；启用记忆后由所选引擎（SupaMemory / HypaMemoryV2 / HypaMemoryV3 / HanuraiMemory）各自截断或摘要，压缩不可逆；拼装后还有一次只清空可移除消息的 token 重检。
 - Provider 交接点是 `requestChatData` → `requestChatDataMain` 的 `LLMFormat` 分发（`src/ts/process/request/request.ts:484-528`），此前先做 `reformater` 角色兼容；OpenAI/Claude/Gemini 各自解析 SSE 并把**累计全文**放进 key 为 `0` 的流式块，消费端每次整段替换消息文本。
 - 流式占位消息在请求前就已写入会话（`chatId = generationId`），持久化由全局保存循环（500ms 防抖 + 全库编码写盘）持续进行，因此半截消息会随保存落盘，与"流结束才落定"的实现不同。
-- 停止只发生在本地消费层：UI 的 `AbortController` 会中止 fetch 与流 reader，但 Tauri 桌面端的 `streamed_fetch`（`src-tauri/src/main.rs:433`）没有取消命令，网络请求会继续到服务端结束或 240 秒超时。
+- 停止只发生在本地消费层：UI 的 `AbortController` 会中止 fetch 与流 reader；Tauri 桌面端另有 `cancel_streamed_fetch`（按 fetch id 命中 `STREAMED_FETCH_ABORTS` 中的 abort 句柄）与 `cancel_all_streamed_fetch`（页面重载时批量取消），但流长度不再由固定总时长截断，而是改为空闲超时——超过 `STREAMED_FETCH_IDLE_TIMEOUT_SECS` 未收到新数据即以失败结束（`src-tauri/src/main.rs`）。
 - 并发粒度是"全局单任务"：`doingChat` 锁与 UI 的 `$doingChat` 检查直接拒绝新的发送，不排队、不替换当前任务；群聊成员由 `sendChat` 内的循环按顺序串行生成。
 
 ## 系统边界与生成任务主链

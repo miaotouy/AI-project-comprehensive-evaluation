@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态核对 Next 根布局、Console provider、Dify UI 包接入、主题 hook 和公共媒体组件；未运行浏览器或依赖库内部实现
 >
@@ -14,13 +14,13 @@
 
 ## 结论摘要
 
-Dify Web 是 Next 16.3.4、React 19.3 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，没有全局自研 Portal 容器。
+Dify Web 是 Next 16.4.5、React 19.3.1 应用，根布局集中挂载 theme、Jotai、TanStack Query、国际化、URL query、Tooltip 和 Toast 等跨页面运行时；Console 又在 common layout 增加事件和命令式业务 Modal context。公共原语主要来自 `@langgenius/dify-ui`，项目自身用动态加载的业务弹窗和 feature 组件补齐配置表单，没有全局自研 Portal 容器。前端依赖在 pnpm catalog 中统一固定版本，`web/AGENTS.md` 还把 vinext 声明为默认开发与构建入口。
 
-主题由 next-themes 管理，HTML 使用 `data-theme` 属性，默认跟随系统并禁用切换动画；根部 ToastHost 固定为五秒超时、最多三条。静态代码可确认这些 Provider、状态归属和业务调用方式，但不能确认底层 overlay 的焦点陷阱、Esc/遮罩关闭、Portal 层级、读屏、触摸和响应式视觉效果，因为未下钻依赖实现或运行浏览器。
+主题由 next-themes 管理，HTML 使用 `data-theme` 属性，默认跟随系统并禁用切换动画；根部 Toast 宿主固定为五秒超时、最多三条。静态代码可确认这些 Provider、状态归属和业务调用方式，但不能确认底层 overlay 的焦点陷阱、Esc/遮罩关闭、Portal 层级、读屏、触摸和响应式视觉效果，因为未下钻依赖实现或运行浏览器。
 
 ## 系统边界与总体装配
 
-`web/app/layout.tsx` 在根层配置 device viewport，并依次装配 Jotai、`next-themes`、Nuqs、TanStack Query hydration、服务端 i18n、ToastHost 和 TooltipProvider。系统功能在服务端预取后用 hydration boundary 交给客户端，表明全局能力中既有请求期数据，也有客户端局部状态。
+`web/app/layout.tsx` 在根层配置 device viewport，并依次装配 Jotai、`next-themes`、Nuqs、TanStack Query hydration、服务端 i18n、Toast 宿主和 TooltipProvider（`web/app/layout.tsx:78-110`）。布局还按请求头解析访问错误文档，在命中时短路为错误页并跳过分析/开发工具加载，说明根层同时承担访问层兜底。系统功能在服务端预取后用 hydration boundary 交给客户端，表明全局能力中既有请求期数据，也有客户端局部状态。
 
 控制台的 `web/app/(commonLayout)/providers.tsx` 另装配事件发射器和 `ModalContextProvider`。模型列表、Provider feature flag、套餐与配额等状态已从旧 Provider context 迁往各自 query consumer，定价弹窗也有独立生命周期；公开发布页不必经过这套 Console context。因此 Console 的定价、模型、插件和开场白等命令式 Modal 不是全产品每个页面都可调用的基础设施。
 
@@ -38,7 +38,7 @@ Dify Web 是 Next 16.3.4、React 19.3 应用，根布局集中挂载 theme、Jot
 
 ## 3. 主题与视觉 token
 
-根布局将 next-themes 的属性设为 `data-theme`，默认 `system`、开启系统跟随、切换时禁用 transition，并以 `suppressHydrationWarning` 处理服务端与客户端主题差异。`web/hooks/use-theme.ts` 将系统解析结果规范为 light/dark；ThemeSwitcher 允许用户切换 system、light、dark。持久化介质属于 next-themes 的内部行为，本轮未验证，不能断言具体 localStorage key 或跨设备同步。
+根布局将 next-themes 的属性设为 `data-theme`，默认 `system`、开启系统跟随、切换时禁用 transition，并以 `suppressHydrationWarning` 处理服务端与客户端主题差异（`web/app/layout.tsx:62-76`）。`web/hooks/use-theme.ts` 将系统解析结果规范为 light/dark；主题选择器现由 Dify UI 的下拉菜单实现，提供 light、dark、system 三项并经 next-themes 写回（`web/app/components/base/theme-selector.tsx:19-60`）。持久化介质属于 next-themes 的内部行为，本轮未验证，不能断言具体 localStorage key 或跨设备同步。
 
 样式类使用 Dify UI 的语义 token，例如背景、文本、分割线和 segmented control token；`web/AGENTS.md` 也把 Dify UI primitives 与 design tokens 规定为新界面的复用契约。它说明当前 Web 的公共设计层，但不是运行时主题完整性或视觉一致性的实测结论。
 
@@ -63,9 +63,11 @@ Dify Web 是 Next 16.3.4、React 19.3 应用，根布局集中挂载 theme、Jot
 
 ## 关键源码索引
 
-- `web/app/layout.tsx`：根主题、Query、i18n、Toast 与 Tooltip 装配。
+- `web/app/layout.tsx:62-111`：根主题、Query、i18n、Toast 与 Tooltip 装配，以及访问错误兜底。
 - `web/app/(commonLayout)/providers.tsx`：Console 的事件、Provider 与 Modal context。
 - `web/context/modal-context-provider.tsx`：命令式业务 Modal 的状态、动态加载和渲染位置。
-- `web/hooks/use-theme.ts`、`web/app/components/base/theme-switcher.tsx`：主题解析与切换 UI。
+- `web/hooks/use-theme.ts`、`web/app/components/base/theme-selector.tsx`：主题解析与切换 UI。
+- `web/app/notifications/app-toaster.tsx`：根级 Toast 宿主与超时/上限配置。
+- `web/features/app-access-error/`、`web/features/system-features/bootstrap-boundary.tsx`：根层访问错误与系统功能启动边界。
 - `web/app/components/base/audio-gallery/`、`video-gallery/`、`voice-input/`、`app-icon-picker/`：公共媒体/输入组件样本。
-- `web/AGENTS.md`：Dify UI primitive、token 与 overlay 复用契约。
+- `web/AGENTS.md`：Dify UI primitive、token、overlay 与 vinext 入口约定。

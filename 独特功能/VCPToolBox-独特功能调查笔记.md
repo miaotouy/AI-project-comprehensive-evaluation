@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
-> 调查方式：只读源码梳理，并与 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；另做插件目录全量盘点（89 个插件目录逐一核对 manifest 与入口文件），修正 3 处细节并补充 8 项新能力卡；核对 ChromeBridge 2.4（能力六正文图片语义、Popup 人工 Managed、agent 不再隐式控制托管运行时）、插件清单状态（89 目录/69 启用/20 禁用）与 Plugin.js 行号；全部为静态证据，未运行验证
+> 调查方式：只读源码梳理，并与 Agent 工具、Agent 角色、LLM 渠道三份旧快照笔记交叉核对；逐个候选走通“入口 → 状态/对象 → 执行 → 结果 → 持久化”主链；另做插件目录全量盘点（96 个插件目录逐一核对 manifest 与入口文件）；核对 ChromeBridge 2.4（能力六正文图片语义、Popup 人工 Managed、agent 不再隐式控制托管运行时）与插件清单状态（96 目录/77 启用/19 禁用）；全部为静态证据，未运行验证
 >
 > 调查范围：待查清单中 VCPToolBox 的 16 项候选能力；普通 Chat 底座与已被现有通用类目完整覆盖的能力只做归并引用
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文引擎、分布式桥），本身不提供对话 UI。去除普通 Chat 与通用 Agent 底座后，本轮确认 **18 项达到 `主链确认` 的独特能力族**（其中 8 项来自插件目录盘点补充）、1 项 `入口确认`、若干归并项：
+VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文引擎、分布式桥），本身不提供对话 UI。去除普通 Chat 与通用 Agent 底座后，本轮确认 **20 项达到 `主链确认` 的独特能力族**（其中 8 项来自插件目录盘点补充）、1 项 `入口确认`、若干归并项：
 
 | 能力族 | 状态 | 标签 | 备注 |
 |---|---|---|---|
@@ -37,6 +37,8 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | DigitalOracle 金融数据聚合 | `主链确认` | — | 15 个 Provider 宏观/利率/加密/预测市场/期权；全局宏面板并发聚合 |
 | DeepWikiVCP 仓库文档 MCP 客户端 | `主链确认` | — | 全仓库唯一 MCP-over-HTTP 客户端；结构/内容/问答/Deep Research/多仓库 |
 | VCPBridgeServer 前端劫持与 Prompt 夺舍代理 | `主链确认` | 渠道与协议 | 独立透明代理（端口 3100），支持 4 种劫持模式（replace/prepend/append/merge）、模型重映射与多 Profile 动态路由 |
+| VTrade 模拟交易沙盒 | `主链确认` | 创作工作站（可插槽沙盒） | 管理界面 + AI 工具命令；行情/规则/券商/AI 工具皆可注册插槽；不连真实券商 |
+| JEV 外部决策模型编排 | `主链确认` | 记忆演化/工具治理（判断层） | 折叠筛选、语义重排、上下文裁剪、通用打分四类接入；未配置凭据即降级跳过 |
 | 人类直接调用工具 API（/v1/human/tool） | `入口确认` | 人类工具面 | 有鉴权与全审批链，VCPToolBox 内无独立产品 UI |
 | OneRing / 时间线 / ContextFolding | `归并已有类目` | — | 上下文编排，归并入“对话请求与上下文”笔记 |
 | 语义虚拟模型路由 | `归并已有类目` | — | 归并入“LLM 渠道管理”笔记；README“容灾”=模型级 fallback |
@@ -44,13 +46,13 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | AgentAssistant 多 Agent 通信 | `归并已有类目`（保留跨 Agent 长期通信局部） | Agent 社会 | 委托/即时通讯已覆盖；跨 Agent 上下文 TTL 与心跳留卡片局部 |
 | 管理面板、系统监控 | `归并已有类目` | — | 普通后台管理；占位符浏览器并入 TVS 能力卡 |
 
-关键边界：VCPToolBox 的能力高度依赖**用户配置**（`config.env`、`agent_map.json`、插件 `config.env`、`toolApprovalConfig.json`），大量机制默认关闭或默认禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`）。因此“主链确认”指的是**在默认配置或文档说明的配置下代码链路完整存在**，不代表开箱即用。盘点补充的 8 项插件同样依赖外部条件（VCPEverything 需本机 Everything HTTP 服务、VCPClawMail 需 ClawMailKey、DeepWikiVCP/DigitalOracle 需网络与上游服务），属配置可用而非默认可用。
+关键边界：VCPToolBox 的能力高度依赖**用户配置**（`config.env`、`agent_map.json`、插件 `config.env`、`toolApprovalConfig.json`），大量机制默认关闭或默认禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`）。因此“主链确认”指的是**在默认配置或文档说明的配置下代码链路完整存在**，不代表开箱即用。盘点补充的 8 项插件同样依赖外部条件（VCPEverything 需本机 Everything HTTP 服务、VCPClawMail 需 ClawMailKey、DeepWikiVCP/DigitalOracle 需网络与上游服务），属配置可用而非默认可用。JEV 判断层另需外部决策服务凭据，未配置时相关环节按实现降级，而不是改用本地模型。
 
 ## 介绍声明与候选盘点
 
 候选来源为 README（工具系统 / 记忆与认知 / 模型路由 / 变量系统 / 分布式与容灾五段旗舰声明）、`docs/FEATURE_MATRIX.md`、`docs/TECHNICAL_LITE.md`、`docs/vcp白皮书V3.md` 与插件目录盘点，共 16 项，与待查清单 VCPToolBox 段一致。逐项调查结果见下两节；其中“系统监控/管理面板”类声明（PM2 进程、资源监控、日志查看）经确认属于普通后台管理，未形成独立能力卡。
 
-插件目录全量盘点：`Plugin/` 下 89 个插件目录均持有 `plugin-manifest.json`（69 启用）或 `plugin-manifest.json.block`（20 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），已补入下节能力卡；其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
+插件目录全量盘点：`Plugin/` 下 96 个插件目录均持有 `plugin-manifest.json`（77 启用）或 `plugin-manifest.json.block`（19 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），已补入下节能力卡；本快照新增 7 个插件（DeedPage、MemoryThinkingTray、MimoDubbing、ParallelSearch、VCPSleep、VTrade、YouSearch）把能力面进一步推向外部服务桥与协议实验，其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
 
 ## 已确认的独特能力
 
@@ -493,6 +495,38 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **证据强度**：源码事实（`Plugin/VCPBridgeServer/bridgeserver.js:637-720`、`bridgeConfig.js:11-35`、`routes/admin/bridgeProfiles.js`）。
 
+### 能力二十一：VTrade 模拟交易沙盒（可插槽的虚拟盘）
+
+**用户目标**：让 AI 用用户自备的日线数据做虚拟下单、持仓记录与交易复盘，把"投资决策"变成一个可回放、可评分的沙盒，而不是接真实券商下单。
+
+**入口与触发者**：管理员界面挂在主后端的 `/admin_api/vtrade/` 下，沿用管理员认证；模型侧经插件声明的一组工具命令驱动，插件以 `hybridservice` 类型在本进程内挂载自己的 HTTP handler（`Plugin/VTrade/VTrade.js`、`Plugin/VTrade/http.cjs`）。
+
+**事实对象**：模拟账户、订单、持仓与复盘记录，以及用户提供的行情源与股票池配置；行情源、指标与信号、股票池、撮合规则、券商接口和 AI 工具都实现为可注册插槽（`Plugin/VTrade/core/slots.cjs`、`core/builtins.cjs`、`SLOTS.md`）。内置合成行情只用于离线演示。
+
+**完整主链**：管理界面或工具命令 → 插槽注册表解析当前可用的数据源与规则 → `TradeService` 在本地状态上撮合与记账（`core/service.cjs`、`core/data.cjs`、`core/boards.cjs`）→ 决策记录经评分模块形成回顾（`core/duel-score.cjs`、`core/duel-career.cjs`），复盘结果可再作为上下文交给模型。
+
+**安全与资源边界**：不连接任何真实券商，也不保证真实可成交；用户身份以本机管理员为准，插件的 maid 标记不构成身份授权；行情源缺失时退回离线合成数据。
+
+**独特性判断**：把"AI 参与交易"限制在一个自建插槽化的模拟盘里，同时保留可替换的行情与规则接口，属于同类客户端少见的可回放决策沙盒。
+
+**证据强度**：源码事实（`Plugin/VTrade/plugin-manifest.json`、`Plugin/VTrade/VTrade.js`、`Plugin/VTrade/core/`、`Plugin/VTrade/README.md`）。
+
+### 能力二十二：JEV 外部决策模型编排（检索与工具的判断层）
+
+**用户目标**：在检索候选与工具调用上引入一个"判断模型"，用第二模型做筛选、重排与裁剪，而不是把所有候选直接塞进提示词。
+
+**入口与触发者**：由环境变量驱动的四类调用点，分别位于折叠候选的第二阶段、RiverMemo 语义候选重排、请求上下文裁剪与通用打分（`modules/jevFoldFilter.js`、`modules/jevRiverReranker.js`、`modules/jevContextPruner.js`、`modules/jevScorer.js`）。配置项集中在 `config.env.example` 的 JEV 段。
+
+**事实对象**：对外部决策服务的请求与返回判断；第三方能力目录与工具调用实验配置落 `ToolConfigs/jev_third_party_catalog.json`、`ToolConfigs/jev_tool_call_exp.json`、`TVStxt/JevToolCallDecision.txt`，管理端有注册表路由读取这些文件。
+
+**完整主链**：调用方把候选集与问题描述交给 `modules/jevClient.js` → 客户端按 typesafe 或 openrouter 默认端点、多 Key 轮换、超时与有限重试发起请求 → 返回的选择/评分被调用方用来收缩候选或改序 → 结果进入该环节自己的输出（重排后的候选、裁剪后的上下文、折叠后的注入块）。
+
+**安全与资源边界**：未配置 API Key 时各调用点按实现返回不可用或跳过，不阻断检索与工具主链；决策请求会把候选文本发送到外部服务，属于超出本地推理的边界；第三方目录与实验配置是显式开关，默认关闭。
+
+**独特性判断**：把"第二模型做判断"作为可插在多个环节的通用能力，而不是只做一次重排，这在同类工具盒里少见；它也带来一条明确的外部数据出口。
+
+**证据强度**：源码事实（`modules/jevClient.js:1-120`、四个调用模块、`routes/admin/jevRegistry.js`、`config.env.example` 的 JEV 配置段）。
+
 ## 已归并到现有类目的能力
 
 | 候选 | 归并去向 | 说明 |
@@ -509,7 +543,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 |---|---|
 | 元思考 `thinktheme/*.json` 主题配置 | `docs/FEATURE_MATRIX.md` 声称存在，仓库未找到该目录/文件；实际主题配置入口是 `meta_thinking_chains.json` 的非 default 链定义，当前快照只有 default 链 → 文档声明未被实现（`声明不符`） |
 | AgentDream 插件内审批函数 | `approveDreamOperation`/`rejectDreamOperation` 返回 `not_implemented`，但管理路由 `routes/admin/dream.js` 实现了真实审批执行 → 以可执行路径为准，链完整（已在能力三记录） |
-| README“300+ 官方插件” | 实际 89 个插件目录（69 启用 + 20 禁用）→ 数量口径与文档不符（`声明不符`，不影响能力判断） |
+| README“300+ 官方插件” | 实际 96 个插件目录（77 启用 + 19 禁用）→ 数量口径与文档不符（`声明不符`，不影响能力判断） |
 | README“跨模型上下文无缝持久化” | 当前无服务端跨模型上下文持久化，历史由客户端携带 → 表述夸大（核对结论见渠道笔记） |
 | 按 Agent 隔离浏览器 Profile（maid/valet profile） | 仅存在于 `docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md` 二期设计，当前未实现 → `暂缓` |
 | VCPForumOnlinePatrol 主动巡航插件 | `.block` 禁用；主动巡航的启用路径是 TaskAssistant `forum_patrol` 任务 → 巡航能力依赖用户配置启用 |
@@ -517,12 +551,14 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 | 浏览器托管运行时 | `VCP_BROWSER_RUNTIME_ENABLED=false` 默认关闭；managed 后端为可选配置 → 开箱需用户开启 |
 | VCPClawMail 轮询间隔声明 | manifest configSchema 声称 `ClawMailPollIntervalMs` 默认 60000，代码实际以 5 分钟为下限（`MIN_FALLBACK_POLL_INTERVAL_MS`）→ 文档与代码不一致（`声明不符`，不影响能力判断） |
 | 在线论坛 VCPForumOnline | `.block` 禁用；功能比文件版 VCPForum 更全（私信/点赞/编辑/搜索/未读追踪），当前主链以文件版为准 → `暂缓` |
+| JEV 决策模型 | 需要第三方决策服务凭据（`JEV_API_KEY` 等）；未配置时折叠筛选、语义重排、上下文裁剪与打分各自降级，检索主链仍成立；启用后候选文本会发送到该外部服务 → 外部依赖 |
+| VTrade 模拟交易 | 默认启用，但行情源需用户自备（`sources.example.json` 只给框架）；内置合成行情仅用于离线演示，不代表可交易数据 → 外部数据依赖 |
 
 ## 对特色贡献统计的影响
 
 以下为建议（供主会话与特色贡献统计核对）：
 
-1. **18 个可计能力族**（均 `主链确认`、静态证据）：原 10 项（记忆语义动力学 TagMemo+RiverMemo、元思考递归推理链、AgentDream 非对话记忆整理、TVS 上下文语言（含 PlaceholderExplorer 调试面）、浏览器托管运行时、跨节点文件透明获取、TaskAssistant 任务派发、VCPForum 文件社区、多媒体创作插件族、异步任务回注产品契约）+ 插件盘点补充 8 项（LightMemo 多构型对照、VCPEverything 全盘检索、SkillBridge 技能索引、MagiAgent 会议、VCPClawMail 邮箱投递、UserAuth 认证码、DigitalOracle 金融聚合、DeepWikiVCP MCP 客户端）。
+1. **20 个可计能力族**（均 `主链确认`、静态证据）：原 10 项（记忆语义动力学 TagMemo+RiverMemo、元思考递归推理链、AgentDream 非对话记忆整理、TVS 上下文语言（含 PlaceholderExplorer 调试面）、浏览器托管运行时、跨节点文件透明获取、TaskAssistant 任务派发、VCPForum 文件社区、多媒体创作插件族、异步任务回注产品契约）+ 插件盘点补充 8 项（LightMemo 多构型对照、VCPEverything 全盘检索、SkillBridge 技能索引、MagiAgent 会议、VCPClawMail 邮箱投递、UserAuth 认证码、DigitalOracle 金融聚合、DeepWikiVCP MCP 客户端）+ VCPBridgeServer 协议代理、VTrade 模拟交易沙盒与 JEV 决策编排。
 2. **归并结论**：TVS 上下文语言与“上下文 DSL 与提示词工程”聚类下的其他项目候选做统一比较对象；记忆语义动力学与元思考应拆为两个主贡献，前者改变生成前自动召回与排序契约，后者提供持久链配置、逐簇递归检索和阶段间查询演化。LightMemo 的多构型对照只形成调优与验证机制，不再并入产品主贡献；MagiAgent 归“Agent 社会”聚类；SkillBridge 与“自进化 Skill”聚类候选（待与 Hermes Agent 等样本比较后定）。
 3. **支撑机制单独标注**：六类插件协议、Rust/Rayon 原生内核、管理 API、文件缓存等作为工程机制，不单独计入产品特性贡献；UserAuth 认证码（requireAdmin 的鉴权来源）按安全支撑机制同样标注，不单独计主贡献。
 4. **入口确认项**（人类工具 API）暂不计入；待 VCPChat 侧自动 GUI 调查完成后由主会话决定是否跨项目合并为“人类工具面”贡献。
@@ -535,17 +571,18 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 3. `/plugin-callback` 无鉴权与 `plugin_callback_forward` 来源未绑定的实际利用面未做端到端验证。
 4. 论坛帖子文件与 TagMemo 索引的联动（帖子是否确实被向量化）未追踪到索引任务的完成路径。
 5. VCPChat 与 VCPToolBox 的 `/v1/human/tool` 交接（自动 GUI 工作流）未调查（属 VCPChat 仓库）。
+6. JEV 判断层的实际筛选质量、延迟与失败降级未验证；VTrade 的撮合与评分规则只做静态阅读，未跑通一笔完整模拟交易。
 6. 各默认关闭开关在真实部署中的推荐配置组合未验证。
 7. 盘点补充项运行面未验证：LightMemo 三轨数值行为与 `_rerankDocuments` HTTP 调用细节、VCPEverything 依赖的本机 Everything HTTP 服务配置、SkillBridge 的 vcp_fold 展开端与 FileOperator "Ink 模式"命令名、MagiAgent `/MagiAgent/:id` 回调端点鉴权、VCPClawMail 真实邮箱行为（且其 listEmails/readMail/sendMail 主体与 `getDataDir()` 实际路径未逐行验证）、DeepWikiVCP 服务端 MCP 端点行为、DigitalOracle 上游库网络实现。
 8. UserAuth 在 `chatCompletionHandler.js:363-374` 的另一 code.bin 读取点用途未核实；AgentDream 审批（管理面板登录态）与 UserAuth 验证码两套授权面的边界在真实部署中的行为未验证。
 
 ## 关键源码索引
 
-- 记忆主链：`KnowledgeBaseManager.js`（search:888、prepareUnifiedMemoObservation:1196、applyTagBoostAsync:927、rerankWithRiverMemoAsync:1863）、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js`（processMessages:1135、_processSingleSystemMessage:1483、_rerankRAGCandidatesWithRiverMemo:3181）、`RiverMemoEngine.js`、`rust-vexus-lite/src/rivermemo_topology_v3.rs`（rerank:2777、compute_query_morphology:1784）、`modules/tagmemoV10/`、`docs/RIVERMEMO_TOPOLOGY_V3.md`
+- 记忆主链：`KnowledgeBaseManager.js`（search:1820、prepareUnifiedMemoObservation:1768、applyTagBoostAsync:1846、rerankWithRiverMemoAsync:2598）、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js`（`_processSingleSystemMessage`:1673、`_rerankRAGCandidatesWithRiverMemo`:3577）、`RiverMemoEngine.js`、`rust-vexus-lite/src/rivermemo_topology_v3.rs`（rerank_with_runtime:3229、compute_query_morphology:2247）、`modules/tagmemoV10/`（仅保留运行期两文件）、`docs/archive/tagmemoV10/`、`modules/knowledgeBase/memoConfig.js`、`docs/RIVERMEMO_TOPOLOGY_V3.md`
 - 元思考：`Plugin/RAGDiaryPlugin/MetaThinkingManager.js`、`meta_thinking_chains.json`、`META_THINKING_GUIDE.md`、`RAGDiaryPlugin.js:1495-1607`
 - AgentDream：`Plugin/AgentDream/AgentDream.js`（triggerDream:198、scheduler:755、approve stub:995-1001）、`routes/admin/dream.js`
-- TVS 语言：`modules/messageProcessor.js`（resolveAllVariables:146、AgentGuard:166-206、ToolboxGuard:209-248、replaceOtherVariables:601）、`modules/tvsManager.js`、`modules/agentManager.js`、`Plugin/PlaceholderExplorer/`、`routes/admin/tvs.js`、`routes/admin/placeholderExplorer.js`
-- 异步回注：`Plugin.js`（processToolCall:1164）、`server.js:1471`（plugin-callback）、`modules/messageProcessor.js:827-867`、`WebSocketServer.js:95-144`
+- TVS 语言：`modules/messageProcessor.js`（resolveAllVariables:243、AgentGuard 273、ToolboxGuard 312、replaceOtherVariables:350）、`modules/tvsManager.js`、`modules/agentManager.js`、`Plugin/PlaceholderExplorer/`、`routes/admin/tvs.js`、`routes/admin/placeholderExplorer.js`
+- 异步回注：`Plugin.js`（processToolCall:1198）、`server.js:642`（plugin-callback）、`modules/messageProcessor.js:827-867`、`WebSocketServer.js:95-144`
 - 浏览器运行时：`modules/browserRuntimeManager.js`、`Plugin/ChromeBridge/ChromeBridge.js`、`Plugin/ChromeBridge/VCPChrome/`（含 webcore/ 运行时内核）、`config.env.example`（VCP_CHROME_*）、`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md`、`tests/chromeBridge/`
 - 跨节点文件：`FileFetcherServer.js`、`WebSocketServer.js:851-985`
 - 任务派发：`Plugin/VCPTaskAssistant/vcp-task-assistant.js`、`routes/admin/taskAssistant.js`
@@ -561,3 +598,5 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 - 认证码：`Plugin/UserAuth/auth.js`、`modules/captchaDecoder.js`、`Plugin.js:140-151,1503-1512`（注入点）
 - 金融：`Plugin/DigitalOracle/digital_oracle_vcp.py`（registry:176、dashboard:638）
 - MCP：`Plugin/DeepWikiVCP/DeepWikiVCP.js`（mcpCall:125）
+- JEV 决策层：`modules/jevClient.js`、`modules/jevFoldFilter.js`、`modules/jevRiverReranker.js`、`modules/jevContextPruner.js`、`modules/jevScorer.js`、`routes/admin/jevRegistry.js`
+- 交易沙盒：`Plugin/VTrade/VTrade.js`、`Plugin/VTrade/http.cjs`、`Plugin/VTrade/core/`（service/data/slots/builtins/duel-*）

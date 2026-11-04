@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -27,6 +27,8 @@ Hermes Agent 同时维护 Electron 桌面、Ink TUI 和 Web dashboard 三套界�
 | 桌面端 | Electron 40 + React 19 + Tailwind v4 + radix-ui + nanostores | WebSocket JSON-RPC（`apps/shared`，见 Chat UI 笔记） | `apps/desktop/src/main.tsx` |
 | TUI | Node + Ink fork（`@hermes/ink`）+ nanostores | stdio 换行分隔 JSON-RPC | `ui-tui/src/entry.tsx` |
 | Web dashboard | React + react-router + `@nous-research/ui` | REST + `/api/pty` WebSocket | `web/src/main.tsx` |
+
+桌面前端在快照间大幅扩张：`apps/desktop/src/app/` 新增 `agents`、`learning`、`command-center`、`capabilities`、`gateway`、`messaging`、`profiles`、`cron`、`quick-entry`、`overlays`、`pet-overlay`/`pet-generate`、`master-detail` 等表面，`apps/desktop/src/plugins/`、`sdk/`、`i18n/`、`debug/` 成为独立目录；根装配仍是 contrib 注册表驱动（`app/contrib/`、`contrib/registry.ts`），核心与插件走同一注册 API。仓库新增 `apps/bootstrap-installer`（MSIX/安装器方向）与顶层 `pm/` 包管理器；TUI 仍为 Ink fork，Web dashboard 仍是 REST + PTY。
 
 **桌面端根装配。** Provider 顺序是错误边界、查询、国际化、主题、触觉反馈、全局 Tooltip 和路由。TooltipProvider 被提升为全应用单例，以避免拖动分栏时重复渲染；路由关闭 transition，是为了防止流式令牌更新长期挤压导航提交。（`apps/desktop/src/main.tsx:53-85`）
 
@@ -311,6 +313,7 @@ pane 树本身是重量级可拖拽布局（split/group 权重、preset：Defaul
 - VS Code 市场端到端链路（Gallery API 查询、VSIX 下载/解包、明暗变体合并、粘贴导入）未运行验证，`electron/vscode-marketplace.ts` 的手写 zip central-directory 解析行为未实测。
 - Web 主题的 assets.bg/hero 背景图、layoutVariant 的 cockpit/tiled 布局变体、swatchColors 与密度三档的实际渲染效果未运行验证。
 - Connector 授权弹窗、Vault 自动填充与 GPT-Live 的真实平台权限、焦点和失败恢复未运行验证。
+- 本轮按路径复核了装配入口、contrib 注册表与公共组件的归位，未新增对 `agents`/`learning`/`pet-*`/`command-center` 等新表面的界面调查；这些表面只确认存在，未展开交互与状态所有权。
 
 ## 10. 关键源码索引
 

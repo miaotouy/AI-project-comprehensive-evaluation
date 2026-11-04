@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：只读源码梳理（`src/ts/process/mcp/`、`src/ts/process/request/`、`src/ts/plugins/`、`src/ts/process/modules.ts`、`src/ts/storage/database.svelte.ts`、`src/ts/globalApi.svelte.ts` 等），未修改被调查仓库
 >
@@ -161,7 +161,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 7. `enabledModules` 不参与 MCP 过滤属于静态推断；模块设置页的启用开关对工具可达性无效这一点未运行确认。
 8. risuaccess 写工具的 `alertConfirm` 在流式续请求等待期间的交互（用户不点确认时循环是否挂起、有无超时）未运行验证。
 9. `fetchNative` 在 web 端 CORS 代理与桌面 Rust 端 `streamed_fetch` 的超时与重定向行为未展开。
-10. 插件权限系统（`getPluginPermission`）的完整权限清单与 `nativeFetch` 的授权范围未逐一核对。
+10. 插件权限集已可枚举（`fetchLogs`/`db`/`dbWrite`/`mainDom`/`replacer`/`provider`/`sendChat`/`inlay`，授权结果按脚本哈希在会话内缓存），但各权限在真实插件中的授予与撤销流程、`nativeFetch` 的授权范围仍未运行验证。
 
 ## 关键源码索引
 

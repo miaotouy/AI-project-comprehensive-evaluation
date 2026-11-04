@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：只读核对已有独特功能笔记，并追踪 `main.py` 生命周期、Automations 的路由/模型/调度器，以及 Calendar 事件与提醒路径；未启动服务，未修改被调查仓库
 >
@@ -44,7 +44,7 @@ Open WebUI 在当前快照有一条 `主链确认` 的隔离日程运行，以�
 - `automation`：owner、可选 folder、名称、JSON data 中的 prompt/model/rrule、活跃状态，以及 `last_run_at` 和 `next_run_at`。
 - `automation_run`：run id、automation id、可选 chat id，以及 `success` 或 `error` 与错误文本。
 
-创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行；频率计算会先丢弃 DTSTART 行再解析，使锚点不干扰间隔判定（`utils/automations.py:180-196`；`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
+创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行；频率计算会先丢弃 DTSTART 行再解析，使锚点不干扰间隔判定（`utils/recurrence.py:118-200`；`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
 
 调度器每轮最多认领十个到期自动化。`claim_due` 在数据库事务中筛选 `is_active` 且 `next_run_at <= now` 的记录；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`，随后立即写入 `last_run_at` 和新的 `next_run_at`。这使多个实例不会同时执行已认领的同一到期行；轮询抖动进一步降低同时争抢概率（`models/automations.py:289-332`; `utils/automations.py:210-255`）。
 
@@ -62,7 +62,11 @@ Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。
 
 ### Calendar alert 的交付
 
-提醒的直接交付是用户 Socket room 的 `events` payload，类型为 `calendar:alert`；payload 含 event id、标题、开始时间、距开始分钟数和地点。随后以 scheduler 为 source 发布 Calendar notification event，是否还有配置的目标通知由通用通知系统承接。即使后续 notification publish 失败，代码仅记录 debug，不会撤销已经写回的 `alerted_at`（`utils/automations.py:721-769`）。
+提醒的直接交付是用户 Socket room 的 `events` payload，类型为 `calendar:alert`；payload 含 event id、标题、开始时间、距开始分钟数和地点。随后以 scheduler 为 source 发布 Calendar notification event，是否还有配置的目标通知由通用通知系统承接。即使后续 notification publish 失败，代码仅记录 debug，不会撤销已经写回的 `alerted_at`（`utils/automations.py:542-645`）。
+
+后台任务的产出还有一条持久通道：`notification` 表保存提醒与系统消息，收件箱端点提供列表、未读数、打开事件与已读更新，另有推送目标配置（`routers/notifications.py:70-124,167-188`）。Socket 通知因此是即时面，收件箱是补看面，两者由同一批事件驱动。
+
+**执行现场扩展**：自动化可在执行前把终端工作目录切到指定路径（`_set_terminal_cwd`，`utils/automations.py:199`），并支持频道型自动化（`_execute_channel_automation`，`:247`）——即自动化结果既能落到新会话，也能落到频道消息。
 
 ## 并发、取消、失败与恢复
 
@@ -92,8 +96,8 @@ Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。
 
 ## 关键源码索引
 
-- `backend/open_webui/main.py:392-394,465-477`：scheduler 的应用生命周期创建与关闭。
-- `backend/open_webui/models/automations.py:20-55,132-156,264-332,340-422`：Automation/AutomationRun 数据模型、启停、到期认领和运行历史。
-- `backend/open_webui/routers/automations.py:45-95,208-380,388-400`：权限/频率治理、创建更新、手动运行、删除和 run 查询。
-- `backend/open_webui/utils/automations.py:180-196,211-270,490-690,693-780`：rrule 频率计算、调度循环、无头 chat/channel 执行、结果记录与 Calendar alert。
-- `backend/open_webui/models/calendar.py:30,53-95,198-245,732`、`backend/open_webui/routers/calendar.py:87-109,143-269`：事件与提醒去重状态、rrule 频率下限、Scheduled Tasks 时间线投影。
+- `backend/open_webui/main.py:449`：scheduler 的应用生命周期创建与关闭。
+- `backend/open_webui/models/automations.py:20-55`（数据模型）、`:297`（claim_due 到期认领）、`:340-422`（运行历史）。
+- `backend/open_webui/routers/automations.py:158`：权限/频率治理、创建更新、手动运行、删除和 run 查询。
+- `backend/open_webui/utils/automations.py:63`（调度循环）、`:131-160`（请求构造）、`:349`（无头执行）、`:542`（Calendar alert）；rrule 校验与频率计算在 `utils/recurrence.py:118-200`。
+- `backend/open_webui/models/calendar.py:54`、`backend/open_webui/routers/calendar.py:87`：事件与提醒去重状态、rrule 频率下限、Scheduled Tasks 时间线投影。

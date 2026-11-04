@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：只读源码静态梳理 Rust TUI 的启动循环、事件路由、Composer、会话恢复、审批与状态所有权；未运行 TUI，未在真实终端观察焦点、剪贴板和渲染效果
 >
@@ -19,7 +19,7 @@ Codex 在本仓库中自有的聊天表面是 Rust 终端 TUI，而不是 Web �
 关键事实：
 
 - **工作台是单终端窗口的垂直布局**：上方是 transcript（终端回滚区或自有全屏视图），下方是 `BottomPane` 的横幅、状态行、待审批、待发送预览和 Composer；没有可分离面板或多窗口。
-- **TUI 不是聊天服务本体**：`AppServerTarget` 支持内嵌、本地守护进程和远程三种后端（`tui/src/lib.rs:329-338`），聊天动作最终落到 `turn/start`、`turn/steer` 或 `turn/interrupt`。
+- **TUI 不是聊天服务本体**：`AppServerTarget` 支持内嵌、本地守护进程和远程三种后端（`tui/src/lib.rs:330-339`），聊天动作最终落到 `turn/start`、`turn/steer` 或 `turn/interrupt`。
 - **提交与排队分离**：任务运行时按 Enter 会尝试把新输入作为 steer 送入当前回合，按 Tab 则进入显式队列；无法 steer 的输入进入“被拒绝的 steer”队列等待后续重试。
 - **停止入口是 Esc**：`AppCommand::Interrupt` 转成 app-server 的回合中断请求，并在回合 ID 竞态时重试一次。
 - **审批是模态视图**：执行命令、权限提升、补丁应用和 MCP 询问四类请求都进入 `ApprovalOverlay`，可批准一次、按会话批准或拒绝。
@@ -34,7 +34,7 @@ Codex 在本仓库中自有的聊天表面是 Rust 终端 TUI，而不是 Web �
 
 ```text
 启动 codex
-  → App::run 建立 app-server 会话与 TUI（tui/src/app/startup.rs:232）
+  → App::run 建立 app-server 会话与 TUI（tui/src/app/startup.rs:241）
   → 选择新会话 / 恢复 / fork
   → ChatComposer 收集文本、附件、提及和斜杠命令
   → submit_user_message_with_prepared_images 生成 AppCommand::UserTurn
@@ -47,13 +47,17 @@ Codex 在本仓库中自有的聊天表面是 Rust 终端 TUI，而不是 Web �
   → 完成时把流式片段合并为可重排的 Markdown cell
 ```
 
-启动后的主循环在 `tui/src/app/startup.rs:1440-1652` 用 `select!` 同时等待应用事件、活跃 thread 事件、终端事件、app-server 事件、重连、尺寸变化和提交动画 tick。这个循环决定了 TUI 的“实时感”：终端输入和网络通知共享同一个消费循环，任何一侧阻塞都会影响另一侧的响应。
+启动后的主循环在 `tui/src/app/startup.rs:1461-1711` 用 `select!` 同时等待应用事件、活跃 thread 事件、终端事件、app-server 事件、重连、尺寸变化和提交动画 tick。这个循环决定了 TUI 的“实时感”：终端输入和网络通知共享同一个消费循环，任何一侧阻塞都会影响另一侧的响应。
 
 ## 1. 工作台结构、全屏路由与窗口边界
 
-TUI 的主画面没有侧栏或多列布局。`render_chat_widget_frame` 在自有全屏模式和内联模式下选择不同的 transcript 渲染路径，然后把底部区域交给 `ChatWidget`（`tui/src/app.rs:1253-1301`）。内联模式把已提交内容写入终端回滚区，自有模式在备用屏幕上维护可重绘的消息区。
+TUI 的主画面默认没有侧栏或多列布局。`render_chat_widget_frame` 在自有全屏模式和内联模式下选择不同的 transcript 渲染路径，然后把底部区域交给 `ChatWidget`（`tui/src/app.rs:1318-1370`）。内联模式把已提交内容写入终端回滚区，自有模式在备用屏幕上维护可重绘的消息区。
 
-`BottomPane` 负责底部区域的组合顺序（`tui/src/bottom_pane/mod.rs:2425-2574`）：
+工作区特性开启且终端宽度足够时，界面会并排显示两个会话：被显示的线程独占活动 Composer，另一侧只作为被动 transcript；左右方向键与专用快捷键在两侧之间切换焦点，也可以只隐藏侧栏（`tui/src/app/side_pane.rs:1-30`、`tui/src/app/side_focus.rs:1-30`）。该并行布局由 `tui_workspace` 特性控制，当前处于开发阶段且默认关闭（`codex-rs/features/src/lib.rs:1142-1146`）。
+
+后端选择也在这一层：新建会话可以按项目与本地身份记住首选主机，选择器会复用已连接的多个后端并在它们之间切换，而不是为每次切换重连（`tui/src/app/backend_selection.rs:80`、`:265-290`；`codex-rs/config/src/types.rs:874-880`）。
+
+`BottomPane` 负责底部区域的组合顺序（`tui/src/bottom_pane/mod.rs:2435-2585`）：
 
 - 警告视图激活时整体替换底部内容；
 - 有视图栈时显示栈顶视图，居中呈现的视图用 `ViewStack` 包裹；
@@ -71,21 +75,21 @@ TUI 的主画面没有侧栏或多列布局。`render_chat_widget_frame` 在自�
 | 审批弹窗 | 工具请求到达 | `BottomPane` 内的模态视图 |
 | Agent 总览 | `/agents`，或本地守护进程/远程后端下空 Composer 的左方向键 | 全屏命令中心 |
 
-窗口边界方面，本仓库没有可拆分的聊天窗口、悬浮窗或桌面多窗口实现。`/app` 的处理是把 `codex://threads/<thread_id>` 交给操作系统打开 Desktop 应用（`tui/src/app/history_ui.rs:287-299`）；Desktop 应用本体不在本仓库。因此“跨窗口同步草稿和 busy 状态”这类维度为 N/A，只有同一终端进程内的 thread 切换与重连恢复。
+窗口边界方面，本仓库没有可拆分的聊天窗口、悬浮窗或桌面多窗口实现。`/app` 的处理是把 `codex://threads/<thread_id>` 交给操作系统打开 Desktop 应用（`tui/src/app/history_ui.rs:304-316`）；Desktop 应用本体不在本仓库。因此“跨窗口同步草稿和 busy 状态”这类维度为 N/A，只有同一终端进程内的 thread 切换与重连恢复。
 
 ## 2. 会话导航、恢复与搜索
 
-会话导航以命令行入口和选择器为主，没有常驻侧栏。顶层的 resume 和 fork 子命令设置内部选择器标志（`tui/src/cli.rs:24-68`），选择器通过 app-server 的 `thread/list` 拉取会话，支持按当前工作目录过滤、排序、归档与取消归档，并区分恢复和 fork 两种动作（`tui/src/resume_picker.rs:1-80`）。会话内的 `/resume` 也打开同一选择器。
+会话导航以命令行入口和选择器为主，没有常驻侧栏。顶层的 resume 和 fork 子命令设置内部选择器标志（`tui/src/cli.rs:24-64`），选择器通过 app-server 的 `thread/list` 拉取会话，支持按当前工作目录过滤、排序、归档与取消归档，并区分恢复和 fork 两种动作（`tui/src/resume_picker.rs:1-82`）。会话内的 `/resume` 也打开同一选择器。
 
-运行中的切换由活跃 thread 通道控制。`ThreadEventChannel` 为每个 thread 维护发送端、接收端和缓冲存储（`tui/src/app/thread_events.rs:599-615`）；主循环只消费当前活跃 thread 的接收端，其他 thread 的通知留在缓冲区。切回某个 thread 时，`ThreadInputState` 恢复它的 Composer 和输入队列（`tui/src/chatwidget/input_restore.rs:607-725`），已有测试覆盖“选择器往返后每个 thread 的输入仍保留”的行为。
+运行中的切换由活跃 thread 通道控制。`ThreadEventChannel` 为每个 thread 维护发送端、接收端和缓冲存储（`tui/src/app/thread_events.rs:615-632`）；主循环只消费当前活跃 thread 的接收端，其他 thread 的通知留在缓冲区。切回某个 thread 时，`ThreadInputState` 恢复它的 Composer 和输入队列（`tui/src/chatwidget/input_restore.rs:633-751`），已有测试覆盖“选择器往返后每个 thread 的输入仍保留”的行为。
 
 历史加载采用分页而不是一次性读取全部会话：初次恢复取最近 5 个 turn，单页 item 上限为 100，另有扫描上限用于在渲染预算内补齐缺失项（`tui/src/app_server_session/history.rs:31-33`）。在 transcript 顶部继续向上滚动会触发更早一页的请求，加载期间保持当前位置；这属于终端视图的“反向分页”，没有 Web 端的虚拟列表和高度测量。
 
-搜索入口分两层：`F3` 在完整 transcript 中查找，`Ctrl+T` 打开 transcript overlay 后可在其中跳转；Composer 内部的 `Ctrl+R`/`Ctrl+S` 搜索的是输入历史，不是会话消息。跨会话搜索、未读计数、置顶、拖放排序和消息 minimap 在本次源码范围内未找到对应实现。
+搜索入口分两层：`F3` 在完整 transcript 中查找，`Ctrl+T` 打开 transcript overlay 后可在其中跳转；Composer 内部的 `Ctrl+R`/`Ctrl+S` 搜索的是输入历史，不是会话消息。未读状态已有实现：选择器与任务中心会标记未读会话并在查看时确认已读（`tui/src/app/agent_center/rows.rs:204-210`）；跨会话搜索、置顶、拖放排序和消息 minimap 在本次源码范围内未找到对应实现。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_pane/chat_composer.rs:1-160`）。它维护 `TextArea`、附件、弹窗路由、原子化的斜杠命令、粘贴突发检测、Vim 模式、历史召回和右键粘贴。输入类型包括：
+Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_pane/chat_composer.rs:1-162`）。它维护 `TextArea`、附件、弹窗路由、原子化的斜杠命令、粘贴突发检测、Vim 模式、历史召回和右键粘贴。输入类型包括：
 
 - 普通文本与多行编辑；
 - `@` 提及：默认列出插件、文件系统条目和技能；
@@ -97,7 +101,7 @@ Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_p
 
 草稿作用域分三层。当前 thread 的 Composer 内容、附件、队列和问题编辑器状态由 `ThreadInputState` 捕获，切换会话或重连时恢复；跨会话的输入历史是持久化的纯文本记录，能恢复任务链接和提及绑定，但不能恢复附件；仅在当前进程内的历史则保留完整文本和本地/远程图片。启动阶段还有单独的草稿泵，在会话配置完成前保持输入可用，失败时把初始消息退回 Composer。
 
-发送键位是 `Enter` 提交、`Tab` 排队（`tui/src/keymap.rs:1735-1744`）。Composer 的历史导航使用上下方向键，`Ctrl+R` 在页脚搜索并预览匹配项，`Esc` 先关闭可见的快捷键帮助，再退出编辑态或打断回合。外部编辑器由 `Ctrl+G` 打开。上述是代码绑定的入口；实际终端对组合键的保留情况需要在目标终端观察。
+发送键位是 `Enter` 提交、`Tab` 排队（`tui/src/keymap.rs:1799-1808`）。Composer 的历史导航使用上下方向键，`Ctrl+R` 在页脚搜索并预览匹配项，`Esc` 先关闭可见的快捷键帮助，再退出编辑态或打断回合。外部编辑器由 `Ctrl+G` 打开。上述是代码绑定的入口；实际终端对组合键的保留情况需要在目标终端观察。
 
 ## 4. Agent、模型、工具与发送前配置
 
@@ -122,20 +126,22 @@ Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_p
 
 ## 5. 发送、排队、流式反馈与停止
 
-提交入口是 `submit_user_message_with_prepared_images`（`tui/src/chatwidget/input_submission.rs:151-599`）。它先处理错位策略、限流恢复、待提交图片和会话未配置等前置条件，再构造用户回合命令。App 侧的统一提交路径随后在当前有活跃回合时优先 steer，否则启动新回合（`tui/src/app/thread_routing.rs:705`）。
+提交入口是 `submit_user_message_with_prepared_images`（`tui/src/chatwidget/input_submission.rs:151-599`）。它先处理错位策略、限流恢复、待提交图片和会话未配置等前置条件，再构造用户回合命令。App 侧的统一提交路径随后在当前有活跃回合时优先 steer，否则启动新回合（`tui/src/app/thread_routing.rs:729`）。
 
 排队有两套语义：
 
 - **隐式 steer**：任务运行时直接提交，输入被标记为 `PendingSteer`，尝试并入当前回合；如果 app-server 返回“当前回合不可 steer”，该输入进入 `rejected_steers_queue`，等待在可发送时重试。
 - **显式队列**：`Tab` 把输入放入 `queued_user_messages`，当前回合结束后由 `maybe_send_next_queued_input` 依次发送。
 
-底部预览会同时展示排队消息、待发送 steer 和被拒绝的 steer（`tui/src/bottom_pane/mod.rs:2480-2520`），因此用户能区分“已排队”和“正在尝试插入当前回合”两种状态。
+底部预览会同时展示排队消息、待发送 steer 和被拒绝的 steer（`tui/src/bottom_pane/mod.rs:2490-2530`），因此用户能区分“已排队”和“正在尝试插入当前回合”两种状态。
 
-停止入口是 `Esc`，绑定在 `chat.interrupt_turn`（`tui/src/keymap.rs:1720`）。处理时读取当前活跃回合 ID，向 app-server 发 `TurnInterrupt`；如果第一次因回合 ID 不匹配失败，会用错误中返回的实际回合 ID 重试一次（`tui/src/app/thread_routing.rs:715-784`）。中断失败会以警告通知回到聊天流，而不是静默丢弃。
+停止入口是 `Esc`，绑定在 `chat.interrupt_turn`（`tui/src/keymap.rs:1784`）。处理时读取当前活跃回合 ID，向 app-server 发 `TurnInterrupt`；如果第一次因回合 ID 不匹配失败，会用错误中返回的实际回合 ID 重试一次（`tui/src/app/thread_routing.rs:739-808`）。中断失败会以警告通知回到聊天流，而不是静默丢弃。
 
-生成反馈由状态行、终端标题和流式消息共同承担。回合开始设置“工作中/思考中”状态，增量到达时更新流式 cell，完成后隐藏状态指示器并把内容交给 transcript。错误通知区分“将重试”和“不再重试”：前者更新流式错误状态，后者生成错误消息并可能触发错位策略处理（`tui/src/chatwidget/protocol.rs:214-240`）。
+生成反馈由状态行、终端标题和流式消息共同承担。回合开始设置“工作中/思考中”状态，增量到达时更新流式 cell，完成后隐藏状态指示器并把内容交给 transcript。错误通知区分“将重试”和“不再重试”：前者更新流式错误状态，后者生成错误消息并可能触发错位策略处理（`tui/src/chatwidget/protocol.rs:214-249`）。
 
-审批会暂停当前工具调用并把控制权交给用户。执行审批和补丁审批在打开弹窗前会先刷新答案流（`tui/src/chatwidget/tool_requests.rs:283-334`），然后 `BottomPane` 推入 `ApprovalOverlay`。四类请求分别是执行命令、权限提升、应用补丁和 MCP elicitation（`tui/src/bottom_pane/approval_overlay.rs:75-78`）；选项由可用决策列表生成，包含批准一次、按会话批准、带策略修订的批准、拒绝和取消（同文件 `:853-930`）。权限请求另外区分“本回合授权”和“本会话授权”。
+审批会暂停当前工具调用并把控制权交给用户。执行审批和补丁审批在打开弹窗前会先刷新答案流（`tui/src/chatwidget/tool_requests.rs:284-340`），然后 `BottomPane` 推入 `ApprovalOverlay`。四类请求分别是执行命令、权限提升、应用补丁和 MCP elicitation（`tui/src/bottom_pane/approval_overlay.rs:75-78`）；选项由可用决策列表生成，包含批准一次、按会话批准、带策略修订的批准、拒绝和取消（同文件 `:860-937`）。权限请求另外区分“本回合授权”和“本会话授权”。
+
+补丁审批还有一条就地预览路径：当请求来自非当前显示的线程时，界面直接在 transcript 中渲染该补丁的预览，请用户就地做决定，而不必先切换线程（`tui/src/app/thread_routing.rs:440-470`）。
 
 ## 6. 消息操作、分支与版本导航
 
@@ -162,7 +168,9 @@ Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_p
 - `/side` 和 `/btw` 在临时 fork 中开侧对话，`Ctrl+/` 返回；
 - `F4` 在自有 transcript 中聚焦活动分组，展开工具与推理细节。
 
-多会话的返回路径依赖 `ThreadInputState` 和 thread 事件缓冲：切换前保存输入与队列，切换后恢复 Composer 和状态；运行中的回合不会因为界面切换而停止，通知在缓冲区内等待。本次未找到群聊、多模型同时回答同一问题、或一个窗口并排显示多个会话的实现。
+多会话的返回路径依赖 `ThreadInputState` 和 thread 事件缓冲：切换前保存输入与队列，切换后恢复 Composer 和状态；运行中的回合不会因为界面切换而停止，通知在缓冲区内等待。并排显示已有实现，但受 `tui_workspace` 特性与终端宽度约束：左侧（或右侧）为被动 transcript、只有被显示的线程拥有活动 Composer，方向键与专用快捷键切换焦点并可隐藏该侧（`tui/src/app/side_pane.rs:17-30`、`tui/src/app/side_focus.rs:16-24`）。群聊与“多模型同时回答同一问题”本次未找到。
+
+后台终端的展示跟着当前显示的线程走：切回某线程时，界面会向 app-server 重新拉取该线程的后台终端列表并恢复，而不是沿用上一个线程的缓存（`tui/src/app/event_dispatch.rs:1977-1990`）；任务中心的未读标记来自任务行状态，查看后确认已读（`tui/src/app/agent_center/rows.rs:204-210`）。
 
 ## 8. Chat UI 状态所有权与同步
 
@@ -175,13 +183,13 @@ UI 状态分成四层：
 | 已提交消息列表 | `App.transcript_cells` | 当前会话的渲染列表 |
 | thread、turn、item、审批请求 | app-server | 服务端会话状态，TUI 只持有投影 |
 
-`App` 同时维护 transcript 的 cell 列表、终端原生历史、自有视图和可选的 overlay（`tui/src/app.rs:568-579`）。cell 列表是渲染的规范来源；内联模式下已提交 cell 还会写入终端回滚区，自有模式下由视图维护滚动、选择和布局缓存。两种模式由 `TranscriptMode::{Owned, Terminal}` 决定，要求自有模式与备用屏幕同时启用才走 Owned（`tui/src/transcript_mode.rs:7-23`）。
+`App` 同时维护 transcript 的 cell 列表、终端原生历史、自有视图和可选的 overlay（`tui/src/app.rs:574-586`）。cell 列表是渲染的规范来源；内联模式下已提交 cell 还会写入终端回滚区，自有模式下由视图维护滚动、选择和布局缓存。两种模式由 `TranscriptMode::{Owned, Terminal}` 决定，要求自有模式与备用屏幕同时启用才走 Owned（`tui/src/transcript_mode.rs:7-23`）。
 
-重连时，App 会捕获当前输入状态，重新建立 app-server 会话，再把状态恢复到新连接；如果初始 thread 启动失败，还会把初始消息退回 Composer。服务端通知在 `ThreadEventChannel` 中缓冲，活跃 thread 的通知才进入 `ChatWidget::handle_server_notification`（`tui/src/app/thread_routing.rs:1940-1992`）。因此“界面状态”和“任务状态”不是同一份数据：界面可以切换和重放，任务状态以 app-server 为准。
+重连时，App 会捕获当前输入状态，重新建立 app-server 会话，再把状态恢复到新连接；如果初始 thread 启动失败，还会把初始消息退回 Composer。服务端通知在 `ThreadEventChannel` 中缓冲，活跃 thread 的通知才进入 `ChatWidget::handle_server_notification`（`tui/src/app/thread_routing.rs:2000-2052`）。因此“界面状态”和“任务状态”不是同一份数据：界面可以切换和重放，任务状态以 app-server 为准。
 
 ## 9. 键盘、焦点、响应式与关键路径
 
-TUI 的默认键位覆盖了从进入会话到停止生成的完整路径（`tui/src/keymap.rs:1697-1744`）：
+TUI 的默认键位覆盖了从进入会话到停止生成的完整路径（`tui/src/keymap.rs:1755-1808`）：
 
 | 动作 | 默认键位 |
 |---|---|
@@ -200,6 +208,8 @@ TUI 的默认键位覆盖了从进入会话到停止生成的完整路径（`tui
 | 调整推理强度 | `Alt+,` / `Alt+.` |
 | 编辑排队消息 | `Shift+Left` / `Alt+Up` |
 | 返回提示栈 | `Shift+Right` / `Alt+Down` |
+| 切换后端主机 | `Leader` + `b` |
+| 侧栏焦点（左、右、主 Composer、侧栏、隐藏） | `Leader` + `h`/`l`、`c`、`s`、`-` |
 
 键位可以通过 `tui.keymap.*` 覆盖，加载时会解析并检测冲突；无效绑定会报告具体路径。焦点归属由 overlay 和 `BottomPane` 的视图栈决定：transcript overlay、警告视图、审批弹窗和问题编辑器分别通过 `owns_interaction_key` 或视图栈优先消费按键，未消费的事件才回到 Composer。`Esc` 的优先级是“关闭快捷键帮助 → 编辑/回溯 → 打断回合”，因此同一按键在不同视图下语义不同。
 
@@ -224,21 +234,21 @@ TUI 的默认键位覆盖了从进入会话到停止生成的完整路径（`tui
 
 ## 12. 关键源码索引
 
-- 启动与主循环：`codex-rs/tui/src/app/startup.rs:232`、`:1440-1652`
-- TUI 事件入口与画面渲染：`codex-rs/tui/src/app.rs:863`、`:1253-1301`
-- 后端目标：`codex-rs/tui/src/lib.rs:329-338`
-- 提交与 steer：`codex-rs/tui/src/chatwidget/input_submission.rs:151-599`、`codex-rs/tui/src/app/thread_routing.rs:705`、`codex-rs/tui/src/app/user_turn_submission.rs:7`
-- 中断：`codex-rs/tui/src/app/thread_routing.rs:715-784`
-- 通知缓冲与分发：`codex-rs/tui/src/app/thread_events.rs:599-615`、`codex-rs/tui/src/app/thread_routing.rs:1940-1992`
-- 审批：`codex-rs/tui/src/chatwidget/tool_requests.rs:283-334`、`codex-rs/tui/src/bottom_pane/approval_overlay.rs:75-78`、`:853-930`
-- 底部布局：`codex-rs/tui/src/bottom_pane/mod.rs:2425-2574`
-- Composer：`codex-rs/tui/src/bottom_pane/chat_composer.rs:1-160`
-- 键位默认值：`codex-rs/tui/src/keymap.rs:1697-1744`
+- 启动与主循环：`codex-rs/tui/src/app/startup.rs:241`、`:1461-1711`
+- TUI 事件入口与画面渲染：`codex-rs/tui/src/app.rs:872`、`:1318-1370`
+- 后端目标：`codex-rs/tui/src/lib.rs:330-339`
+- 提交与 steer：`codex-rs/tui/src/chatwidget/input_submission.rs:151-599`、`codex-rs/tui/src/app/thread_routing.rs:729`、`codex-rs/tui/src/app/user_turn_submission.rs:7`
+- 中断：`codex-rs/tui/src/app/thread_routing.rs:739-808`
+- 通知缓冲与分发：`codex-rs/tui/src/app/thread_events.rs:615-632`、`codex-rs/tui/src/app/thread_routing.rs:2000-2052`
+- 审批：`codex-rs/tui/src/chatwidget/tool_requests.rs:284-340`、`codex-rs/tui/src/bottom_pane/approval_overlay.rs:75-78`、`:860-937`
+- 底部布局：`codex-rs/tui/src/bottom_pane/mod.rs:2435-2585`
+- Composer：`codex-rs/tui/src/bottom_pane/chat_composer.rs:1-162`
+- 键位默认值：`codex-rs/tui/src/keymap.rs:1755-1808`
 - 斜杠命令：`codex-rs/tui/src/slash_command.rs:12-89`
-- 会话选择器：`codex-rs/tui/src/resume_picker.rs:1-80`
+- 会话选择器：`codex-rs/tui/src/resume_picker.rs:1-82`
 - 历史分页：`codex-rs/tui/src/app_server_session/history.rs:31-33`
-- 输入状态保存与恢复：`codex-rs/tui/src/chatwidget/input_restore.rs:607-725`
+- 输入状态保存与恢复：`codex-rs/tui/src/chatwidget/input_restore.rs:633-751`
 - transcript 模式：`codex-rs/tui/src/transcript_mode.rs:7-23`
-- 桌面深链：`codex-rs/tui/src/app/history_ui.rs:287-299`
+- 桌面深链：`codex-rs/tui/src/app/history_ui.rs:304-316`
 - app-server 传输：`codex-rs/app-server/src/main.rs:42-58`
 - 非交互 exec：`codex-rs/exec/src/cli.rs:63-85`、`sdk/typescript/src/exec.ts:95`

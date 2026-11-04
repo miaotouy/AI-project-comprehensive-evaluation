@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：静态源码局部调查；本轮重点为分支消息（siblings）的最终显示、Agent 表面一致性（live 与 capture 两端组件与资料来源）与运行保真（流式/工具/富内容、32767px 边界、长图拼接）；未运行 Electron 应用或实际导出图片
 >
-> 调查范围：Topic 与单消息的 PNG 复制/保存、离屏完整列表、长内容捕获、资源内联和内容过滤、siblings 取舍、Home 与 Agent 两个消息表面的截图一致性；不覆盖 Markdown/备份导出、Notes 图片导出和远端分享
+> 调查范围：Topic 与单消息的 PNG 复制/保存、离屏完整列表、长内容捕获、资源内联和内容过滤、siblings 取舍、Home 与 Agent 两个消息表面的截图一致性，以及文本类导出目标（含多选批导出与 Markdown 图片内嵌/外置）；不覆盖备份导出和远端分享
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -16,15 +16,19 @@
 
 Cherry Studio 的对话图片导出以**离屏复刻真实消息列表**为核心，并且存在**两条捕获路径**：Topics/会话列表菜单把请求投递到 action bus，由 160ms 后挂载的专用捕获宿主（`TopicImageCaptureHost`/`AgentSessionImageCaptureHost`）分页读取完整数据，在屏幕左侧 10000px 外建立固定宽 960px、非交互的完整 `MessageList`；另一类菜单（已确认历史记录面板 `AssistantHistoryRecords`，走事件默认处理器而非 action bus）则直接触发事件，由当前挂载的 live 列表响应，在其自身隐藏的捕获表面上执行。两条路径最终都调用相同的捕获工具，使用 html-to-image 把完整滚动内容转换为单张 Canvas，然后复制 PNG 或保存 PNG。
 
-**siblings 最终显示已走通**：数据层在投影时就按 `modelId` 分桶，每个模型桶只保留一个气泡（活动成员或最新兄弟），用户分支只保留 on-path 那条（`useTopicMessages.ts:104-122`）。活动分支标记透传到列表项（`metadata.isActiveBranch`，`messageListItem.ts:58`）；组的 captureMode 下初始选中优先活动分支且跳过选中同步（`MessageGroup.tsx:106-142`），fold 布局只显示选中气泡（其余隐藏，同时被捕获过滤器排除），horizontal/grid 布局则显示组内全部气泡。
+**siblings 最终显示已走通**：数据层在投影时就按 `modelId` 分桶，每个模型桶只保留一个气泡（活动成员或最新兄弟），用户分支只保留 on-path 那条（`useTopicMessages.ts:88-118`）。活动分支标记透传到列表项（`metadata.isActiveBranch`，`components/chat/messages/utils/messageListItem.ts:59`）；组的 captureMode 下初始选中优先活动分支且跳过选中同步（`list/MessageGroup.tsx:145-173`），fold 布局只显示选中气泡（其余隐藏，同时被捕获过滤器排除），horizontal/grid 布局则显示组内全部气泡。
 
 **Agent 表面一致性成立**：live 与 capture 复用同一组件树（`MessageList → MessageGroup → MessageFrame → MessageHeader`）。
 
-名称/头像来源一致：消息头优先取发送时冻结的 `messageSnapshot`，其次取 provider 的 `assistantProfile`（`MessageHeader.tsx:43-64`）；两端的 profile 推导也一致（Home 端 `useAssistant(topic.assistantId)`，Agent 端 `activeAgent.name + getAgentAvatarFromConfiguration`）。
+名称/头像来源一致：消息头优先取发送时冻结的 `messageSnapshot`，其次取 provider 的 `assistantProfile`（`frame/MessageHeader.tsx:107-135`）；两端的 profile 推导也一致（Home 端 `useAssistant(topic.assistantId)`，Agent 端 `activeAgent.name + getAgentAvatarFromConfiguration`）。
 
 captureMode 只通过 adapter 层面禁用交互动作，并通过 `inert`/`pointer-events-none` 屏蔽交互，不改变渲染来源。捕获前还会把本地与远端图片预内联；远端读取受并发池、单请求超时和全阶段时间预算约束，HTTP 错误或显式非图片 MIME 会降级为占位。
 
 **运行保真**：图片内容来自持久化数据的完整快照（capture 宿主没有 streamingLayers），正在流式生成、尚未持久化的内容不会进入图片；Markdown、代码块、工具调用由同一批真实组件渲染后被 html-to-image 克隆捕获；单 Canvas 无拼接，任一维度超过 32767px（CSS 像素）即显式拒绝。DPR 相乘后实际画布尺寸仍可能先触达浏览器上限（推断）。
+
+**捕获串行化**：图片捕获会临时改写渲染层 DOM 并共用原生捕获生命周期，渲染层 ExportService 因此用一个 Promise 队列串行执行所有捕获调用；同时发起两次导出会排队，不会并发改写 DOM。
+
+**文本类导出**是另一条链路：消息操作栏与多选操作栏都从同一套导出目标菜单出发（Markdown、带 reasoning 的 Markdown、Word、Notion、语雀、Obsidian、Joplin、思源），各目标是否出现在菜单里由偏好 `data.export.menus.*` 控制；多选时全部选中消息按会话顺序写进同一个文件或同一篇笔记，标题取 Topic 名。
 
 ## 系统边界与完整主链
 
@@ -36,7 +40,8 @@ Topics/会话列表菜单“导出图片/复制图片”
   -> projectBranchMessagesToUI 投影消息与活动分支标记（按模型桶坍缩）
   -> 屏外 MessageImageCaptureHost + MessageList 完整渲染
   -> 隐藏捕获表面 data-topic-image-capture
-  -> captureScrollable / captureScrollableAsDataUrl
+  -> exportService.captureScrollableAsBlob / captureScrollableAsDataUrl
+     （渲染层 ExportService 串行排队后调用 utils/image 的捕获实现）
   -> 复制 PNG Blob / saveImage 保存 PNG Data URL
 
 使用事件默认处理器的菜单（如历史记录面板 `AssistantHistoryRecords`）
@@ -49,59 +54,59 @@ Topics/会话列表菜单“导出图片/复制图片”
 
 ## 1. Topic 数据抽取、分支取舍与离屏投影
 
-话题捕获以每页 200 条循环读取 `/topics/{id}/messages`（参数为 `includeSiblings: true`），收集全部分页后反转页序、展平，再经 `projectBranchMessagesToUI()` 投影并过滤不可渲染的会话消息（`pages/home/messages/TopicImageCaptureHost.tsx:24-38`）。
+话题捕获以每页 200 条循环读取 `/topics/{id}/messages`（参数为 `includeSiblings: true`），收集全部分页后反转页序、展平，再经 `projectBranchMessagesToUI()` 投影并过滤不可渲染的会话消息（`pages/home/messages/TopicImageCaptureHost.tsx:18-40`）。
 
-**分支取舍发生在数据层**。`flattenBranchMessages()` 的规则（`hooks/useTopicMessages.ts:104-122`）：
+**分支取舍发生在数据层**。`flattenBranchMessages()` 的规则（`hooks/useTopicMessages.ts:88-118`）：
 
 - 用户消息：直接只保留 `item.message`（on-path 那条），离屏用户分支全部不进入列表；
 - 助手消息：先按 `modelId` 分桶，每个桶只取一个显示成员——桶内优先活动成员，否则取 `createdAt` 最新的兄弟；再按桶首条消息时间排序。
 
 因此同一模型的重生成队列（1 个桶 N 个兄弟）在图片中只有一条气泡（活动分支或该模型桶的最新兄弟）；纯多模型组（N 个桶各 1 条）保留 N 条气泡。`isActiveBranch` 标记 = `message.id === item.message.id`。
 
-投影函数把共享消息转成 UI 消息并写入 `metadata.isActiveBranch`（`hooks/useTopicMessages.ts:305-319`），经列表项转换透传为活动分支标记（`utils/messageListItem.ts:58`）。live 聊天列表与 capture 宿主使用同一投影（`useChatRuntimeState.ts:117` 的消息即投影后的 UI 消息），因此两条捕获路径的分支口径一致。
+投影函数把共享消息转成 UI 消息并写入 `metadata.isActiveBranch`（`hooks/useTopicMessages.ts:335-355`），经列表项转换透传为活动分支标记（`components/chat/messages/utils/messageListItem.ts:59`）。live 聊天列表与 capture 宿主使用同一投影（`useChatRuntimeState.ts:117` 的消息即投影后的 UI 消息），因此两条捕获路径的分支口径一致。
 
-**DOM 层取舍（captureMode）**：`MessageGroup` 在 captureMode 下跳过选中状态重同步（`MessageGroup.tsx:114-115`），初始选中优先活动分支，其次按 fold 选中/处理中状态，最后取末条（`MessageGroup.tsx:42-51,106-109`）。
+**DOM 层取舍（captureMode）**：`MessageGroup` 在 captureMode 下跳过选中状态重同步（`list/MessageGroup.tsx:145`），初始选中优先活动分支，其次按 fold 选中/处理中状态，最后取末条（`list/MessageGroup.tsx:70-145`）。
 
-fold 布局只显示选中气泡（`MessageWrapper` 的 `[&.fold]:hidden` + `[&.fold.selected]:inline-block`，`MessageGroup.tsx:459`），未选气泡为 `display:none`，同时被捕获工具的隐藏节点过滤器排除（`utils/image.ts:190-204`）。
+fold 布局只显示选中气泡（`MessageWrapper` 的 `[&.fold]:hidden` + `[&.fold.selected]:inline-block`，`list/MessageGroup.tsx:514`），未选气泡为 `display:none`，同时被捕获工具的隐藏节点过滤器排除（`utils/image.ts:372-395`）。
 
 horizontal/grid 布局渲染组内全部气泡，样式来自偏好设置 `chat.message.multi_model.style`（`messageGroupLayout.ts:11-19`），capture 不强制 fold。
 
 `MessageImageCaptureHost` 定位在 `left:-10000px`，宽度固定 960px、容器本身高度 1px 且 overflow hidden，并用 `aria-hidden`、`inert`、`pointer-events-none` 屏蔽交互（`components/chat/messages/MessageImageCaptureHost.tsx:13-35`）。
 
-宿主内部仍挂载完整 `MessageListProvider + MessageList`。捕获对象是消息列表内部仅在动作排队期间渲染的隐藏表面：`data-topic-image-capture` 的 fixed 定位 div，逐组非虚拟化渲染全部消息分组（`MessageList.tsx:810-832`）。虚拟列表不参与捕获。
+宿主内部仍挂载完整 `MessageListProvider + MessageList`。捕获对象是消息列表内部仅在动作排队期间渲染的隐藏表面：`data-topic-image-capture` 的 fixed 定位 div，逐组非虚拟化渲染全部消息分组（`MessageList.tsx:887-899`）。虚拟列表不参与捕获。
 
 ## 2. 捕获与长图生成（运行保真）
 
 `MessageList` 收到 capture action 后等待两帧布局，再执行：
 
 - `copy`：`captureScrollable()` -> Canvas -> PNG Blob -> `copyImage`；
-- `export`：`captureScrollableAsDataUrl()` -> PNG Data URL -> `saveImage(topic.name, data)`（`components/chat/messages/MessageList.tsx:472-499,570-603`）。
+- `export`：`captureScrollableAsDataUrl()` -> PNG Data URL -> `saveImage(topic.name, data)`（`components/chat/messages/MessageList.tsx:520-575`）。
 
-`captureScrollable()` 读取元素完整 `scrollWidth/scrollHeight`，不受当前视口尺寸限制。主要边界包括（`renderer/utils/image.ts:170-244`）：
+`captureScrollable()` 读取元素完整 `scrollWidth/scrollHeight`，不受当前视口尺寸限制。主要边界包括（`src/renderer/utils/image.ts`，捕获入口 `captureScrollable` 与 `MAX_ALLOWED_DIMENSION` 常量附近）：
 
 - 总宽或总高超过 32767px 时直接返回 `dimension_too_large` 错误；判定发生在 CSS 像素层（`scrollWidth/scrollHeight`），而 `pixelRatio: window.devicePixelRatio` 会进一步放大最终画布——DPR>1 时实际画布尺寸可能先撞上浏览器 canvas 上限（推断，未运行验证）；
 - `data-html-artifact` 节点被过滤，交互 HTML Artifact 不进入图片；
 - `display:none` 和计算样式隐藏的节点被过滤（与 fold 布局的隐藏分支形成双重排除）；
 - 本地 `file://` 图片源先由 `inlineLocalImageSources()` 临时内联（经 IPC `file.read` 读文件转 Data URL），完成后恢复；
-- 背景取 CSS `--background`，像素倍率使用 `window.devicePixelRatio`；
+- 背景取 CSS 变量（聊天链路传 `CHAT_CAPTURE_BACKDROP_VARIABLE`），像素倍率使用 `window.devicePixelRatio`；
 - 高度、overflow、position 和滚动条样式只在**根元素**上被临时覆盖为完整展开状态，后代容器（如 horizontal/grid 布局的内部滚动容器）的样式未被改写；
 - 先执行一次 `htmlToImage.toCanvas()` 预热资源缓存并销毁暖机 Canvas，再正式生成。
 
-该实现生成单 Canvas 长图，**没有**分段捕获后拼接的策略；32767px 上限是显式失败边界。系统内唯一带缩放降级的捕获是 `captureScrollableIframe`（`utils/image.ts:275-470`，超过 32767px 时按比例缩小），但它只被 HTML Artifact 预览弹窗（`CodeBlockView/HtmlArtifactsPopup.tsx:155-162`）用于 Artifact 自身导出，不在对话导出链路内。
+该实现生成单 Canvas 长图，**没有**分段捕获后拼接的策略；32767px 上限是显式失败边界。系统内唯一带缩放降级的捕获是 `captureScrollableIframe*`（超过上限时按比例缩小），但它只被 HTML Artifact 预览弹窗（`CodeBlockView/HtmlArtifactsPopup.tsx`）用于 Artifact 自身导出，不在对话导出链路内。SVG 图形经光栅化导出时改成 UTF-8 安全的数据 URL 加载，避免含 `foreignObject` HTML 标签的 SVG 通过 blob URL 污染画布导致 PNG 导出失败。
 
-**动态内容口径**：capture 宿主不挂流式层（`TopicImageCaptureHost` 传入的 provider value 无 `streamingLayers`），消息列表直接用已持久化的 parts 渲染（`MessageList.tsx:785-788`），图片内容 = 分页读取时已持久化的快照；正在流式生成的消息（`status: pending`）在图片中只会呈现为当时已写入的内容（推断）。
+**动态内容口径**：capture 宿主不挂流式层（`TopicImageCaptureHost` 传入的 provider value 无 `streamingLayers`），消息列表直接用已持久化的 parts 渲染（`MessageList.tsx:770-800`），图片内容 = 分页读取时已持久化的快照；正在流式生成的消息（`status: pending`）在图片中只会呈现为当时已写入的内容（推断）。
 
 Markdown、代码块、工具调用卡、reasoning 与附件由与聊天现场完全相同的 `MessageFrame`/parts 组件渲染为 DOM，再由 html-to-image 克隆捕获。
 
-克隆前会先等待 `document.fonts.ready`（最长 1 秒），再处理图片资源。当前实现读取 `<img>.currentSrc`，本地文件转 Data URL；远端图片通过并发上限为 4 的抓取池处理，单源上限 10 秒、全阶段预算 20 秒，HTTP 错误或显式非图片 MIME 会使用透明占位。缺失或 `application/octet-stream` MIME 交由浏览器解码，没有独立响应大小或文件魔数校验。随后仍以 html-to-image 克隆为单 Canvas。入口与约束见 `src/renderer/utils/image.ts:49-162,299-380,1210-1247`。
+克隆前会先等待 `document.fonts.ready`（最长 1 秒），再处理图片资源。当前实现读取 `<img>.currentSrc`，本地文件转 Data URL；远端图片通过并发上限为 4 的抓取池处理，单源上限 10 秒、全阶段预算 20 秒，HTTP 错误或显式非图片 MIME 会使用透明占位。缺失或 `application/octet-stream` MIME 交由浏览器解码，没有独立响应大小或文件魔数校验。随后仍以 html-to-image 克隆为单 Canvas。入口与约束见 `src/renderer/utils/image.ts:64-190,357-395`。
 
 ## 3. 单消息图片与完整 Topic 图片
 
-消息操作栏的 `message.copyImage`/`message.exportImage` 直接捕获当前消息容器，保存文件名由消息标题生成；Topic 级操作则使用屏外完整列表，文件名来自 `topic.name`（`messageMenuBarActions.tsx:225-252`；`pages/home/messages/homeMessageListAdapter.tsx:918-925`）。
+消息操作栏的 `message.copyImage`/`message.exportImage` 直接捕获当前消息容器，保存文件名由消息标题生成；Topic 级操作则使用屏外完整列表，文件名来自 `topic.name`（`frame/messageMenuBarActions.tsx:288-310`；`pages/home/messages/homeMessageListAdapter.tsx`（图片动作与 provider meta））。
 
-两条捕获路径的图片宽度来源不同：离屏宿主路径的捕获表面宽度 = 宿主内虚拟列表容器的 `clientWidth`（固定 960px 宿主），聊天侧 live 路径 = 当前聊天列的实际宽度（`MessageList.tsx:501-512` 取 `scrollContainerRef.current.clientWidth` 注入捕获表面）。因此同一 Topic 从两个入口导出的图片宽度可能不同（代码层面已确认，实际像素差需运行验证）。
+两条捕获路径的图片宽度来源不同：离屏宿主路径的捕获表面宽度 = 宿主内虚拟列表容器的 `clientWidth`（固定 960px 宿主），聊天侧 live 路径 = 当前聊天列的实际宽度（`MessageList.tsx:560-575` 取 `scrollContainerRef.current.clientWidth` 注入捕获表面）。因此同一 Topic 从两个入口导出的图片宽度可能不同（代码层面已确认，实际像素差需运行验证）。
 
-两者都复用消息实际组件和主题，不提供选区、排序、布局、背景、水印或品牌条编辑。Topic 级范围是项目负责组装的完整消息投影，单消息级范围是当前消息卡；没有发现介于两者之间的任意多选图片分享稿。
+两者都复用消息实际组件和主题，不提供选区、排序、布局、背景、水印或品牌条编辑。Topic 级范围是项目负责组装的完整消息投影，单消息级范围是当前消息卡；图片类导出没有介于两者之间的任意多选形态，多选操作栏的 Export 只提供文本类目标（写进同一个文件或同一篇笔记）。
 
 ## 4. 富内容、附件与安全边界
 
@@ -109,37 +114,41 @@ Markdown、代码块、工具调用卡、reasoning 与附件由与聊天现场�
 
 captureMode 的表面对 live 现场还有其他 DOM 差异（均为样式类代码事实，实际图片效果未运行验证）：
 
-- 多模型组的**组菜单栏**（布局切换图标、fold 模式模型标签列表、删除/重试按钮）不感知 captureMode（`MessageGroup.tsx:386-400` 无条件渲染组菜单栏，组件本身无 capture 分支），会一并进入图片；Home 端 capture adapter 仍提供删除确认与重试动作（`homeMessageListAdapter.tsx:868-869`），删除按钮不受删除可用性判断限制（capture 下该动作未提供，`homeMessageListAdapter.tsx:863`），呈可用外观；
-- grid 布局的卡片固定 300px 高、内容容器 `overflow-hidden`（`MessageGroup.tsx:438,459`），horizontal 布局内容容器 `max-h-[calc(100vh-350px)]` 且 `overflow-y-auto`（`MessageGroup.tsx:438,459`），而 `captureScrollable` 只展开根元素，后代裁剪容器会把长内容截断在图片内；
+- 多模型组的**组菜单栏**（布局切换图标、fold 模式模型标签列表、删除/重试按钮）不感知 captureMode（`list/MessageGroup.tsx:411-425` 无条件渲染组菜单栏，组件本身无 capture 分支），会一并进入图片；Home 端 capture adapter 仍提供删除确认与重试动作（`homeMessageListAdapter.tsx:868-869`），删除按钮不受删除可用性判断限制（capture 下该动作未提供，`homeMessageListAdapter.tsx:863`），呈可用外观；
+- grid 布局的卡片固定 300px 高、内容容器 `overflow-hidden`（`list/MessageGroup.tsx:514`），horizontal 布局内容容器 `max-h-[calc(100vh-350px)]` 且 `overflow-y-auto`（`list/MessageGroup.tsx:514`），而 `captureScrollable` 只展开根元素，后代裁剪容器会把长内容截断在图片内；
 - 这些布局样式由偏好设置 `chat.message.multi_model.style` 决定，capture 不强制 fold，因此用户当前的 grid/horizontal 设置会直接影响图片保真。
 
 本地图片在捕获前临时内联，降低了 Electron 本地协议无法被 `html-to-image` 读取的风险。远端图片不再只依赖 html-to-image 自身跨域抓取，而是在捕获前经受限抓取路径预内联；验证失败会降级为占位。代理、认证图片及各站防盗链下的实际成功率仍需运行验证。
 
-本次没有找到图片导出专用的敏感信息扫描或字段开关。图片表达继承当前消息列表的可见内容；是否隐藏 system、路径、工具参数和 reasoning 由上游消息投影与 UI 配置决定。Agent 会话数据在导出前经 `withTerminalErrorFallback` 补齐错误消息（`agentMessageListAdapter.tsx:48-76`），错误/空回复消息在图片中会显示统一的 `data-error` 占位（该 adapter 逻辑同时作用于 live 与 capture）。
+本次没有找到图片导出专用的敏感信息扫描或字段开关。图片表达继承当前消息列表的可见内容；是否隐藏 system、路径、工具参数和 reasoning 由上游消息投影与 UI 配置决定。Agent 会话数据在导出前经 `withTerminalErrorFallback` 补齐错误消息（`agentMessageListAdapter.tsx:60-90`），错误/空回复消息在图片中会显示统一的 `data-error` 占位（该 adapter 逻辑同时作用于 live 与 capture）。
 
 ## 5. Agent 表面一致性（live 与截图端）
 
 **组件复用**：capture 端完整复用 live 的组件树（`MessageList → MessageGroup → MessageFrame → MessageHeader` 与 parts 渲染），没有独立渲染器。
 
-差异只在两层：adapter 层以 `imageActionConsumer: 'capture'` 关闭交互（无删除、无翻译、无 runtime 绑定等，`homeMessageListAdapter.tsx:106,240,863-871`；`agentMessageListAdapter.tsx:257,320-342`）。
+差异只在两层：adapter 层以 `imageActionConsumer: 'capture'` 关闭交互（无删除、无翻译、无 runtime 绑定等，`homeMessageListAdapter.tsx:86-118,340-382`；`agentMessageListAdapter.tsx:129-230`）。
 
-渲染层 `MessageGroup` 的 `captureMode` 跳过选中同步、flow 导航监听、runtime 绑定和元素注册等交互副作用（`MessageGroup.tsx:114-115,179,210,237`）；宿主的 `inert` + `pointer-events-none` 进一步屏蔽交互，但不改变表达内容。
+渲染层 `MessageGroup` 的 `captureMode` 跳过选中同步、flow 导航监听、runtime 绑定和元素注册等交互副作用（`list/MessageGroup.tsx:145-232`）；宿主的 `inert` + `pointer-events-none` 进一步屏蔽交互，但不改变表达内容。
 
-**名称/头像来源一致**：消息头显示优先级为“发送时冻结的 `messageSnapshot`（name/emoji）→ provider meta 的 `assistantProfile`”（`MessageHeader.tsx:43-64,94-109`）。
+**名称/头像来源一致**：消息头显示优先级为“发送时冻结的 `messageSnapshot`（name/emoji）→ provider meta 的 `assistantProfile`”（`frame/MessageHeader.tsx:107-135`）。
 
-Home 端 live 与 capture 都从 `useAssistant` 取助手实体（live：`Chat.tsx:82`；capture：`TopicImageCaptureHost.tsx:41`，且不加载默认模型），provider meta 记录助手名称与头像（`homeMessageListAdapter.tsx:918-925`）。
+Home 端 live 与 capture 都从 `useAssistant` 取助手实体（live：`Chat.tsx:82`；capture：`TopicImageCaptureHost.tsx:41`，且不加载默认模型），provider meta 记录助手名称与头像（`homeMessageListAdapter.tsx`（图片动作与 provider meta））。
 
 Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionImageCaptureHost.tsx:60-75`）都用同一推导 `activeAgent.name + getAgentAvatarFromConfiguration`；模型徽标同样来自消息自身的模型字段（`messageListItem.ts:29-44`），与现场一致。
 
-**不进入图片的部分**：Agent 的提示词（system prompt）与工具配置不渲染在消息列表 DOM 中，因此也不存在于图片里——"一致"的范围是名称、头像、模型与消息内容本身。Agent 会话捕获数据走独立分页接口（`getAgentSessionMessagesForExport`，`services/agentSessionExport.ts:75-99`，每页 200 条，无 siblings 概念），经 `exportViewToUIMessage` 映射后复用同一列表（`useMessageImageCaptureMessages.ts:22-25`）。
+**不进入图片的部分**：Agent 的提示词（system prompt）与工具配置不渲染在消息列表 DOM 中，因此也不存在于图片里——"一致"的范围是名称、头像、模型与消息内容本身。Agent 会话捕获数据走独立分页接口（`getAgentSessionMessagesForExport`，`services/agentSessionExport.ts:77-105`，每页 200 条，无 siblings 概念），经 `exportViewToUIMessage` 映射后复用同一列表（`components/chat/messages/hooks/useMessageImageCaptureMessages.ts`）。
 
 ## 6. 生成历史、分享与持久化
 
 每次动作即时捕获并交给剪贴板或保存 API，没有截图预览、应用内结果列表、版本比较或过时标记。生成结果不绑定 Topic 数据库，也未形成远端分享对象。复制和保存之外的系统 Share Sheet、访问控制、撤销与过期不适用。
 
-## 7. 当前导出格式补充
+## 7. 文本导出目标与多模态图片
 
-Markdown 导出现在会携带多模态图片，而非仅保留文本占位；Notion 转换也能把 Markdown alert 映射为 Notion callout。两项处理仍位于既有导出转换层，图片加载、外链可用性和目标 Notion API 的最终呈现需要运行环境验证。依据：`src/renderer/services/ExportService.ts`、`src/main/services/ExportService.ts`。
+文本类导出的目标是 Markdown、带 reasoning 的 Markdown、Word、Notion、语雀、Obsidian、Joplin、思源，以及写入 Notes 目录；菜单项按偏好 `data.export.menus.*` 逐项开关（含 `image`、`markdown`、`markdown_reason`、`docx`、`notion`、`yuque`、`joplin`、`obsidian`、`siyuan`）。单条消息与多选批量共用这些目标：多选时按会话顺序合成同一个文件或同一篇笔记，标题取 Topic 名，图片类目标仍是单条消息或整个 Topic。见 `src/renderer/components/chat/messages/hooks/useMessageMenuConfig.ts`、`services/ExportService.ts`（`exportMessagesAsMarkdown`、`exportMessagesToNotion`）。
+
+Markdown 导出会携带多模态图片：图片来自用户附件的 `FileUIPart` 与 `generate_image` 工具产物，按原文顺序与文本交错序列化，并有两种落盘模式——内联 base64 数据 URI，或写 `assets/<name>.<ext>` 相对链接加一份延迟字节写入清单。模式在导出时由图片模式选择弹窗决定，未注册选择器则中止带图导出。单张图片解析失败只跳过并计数，不中止整次导出。Notion 转换会把 Markdown alert 映射为 Notion callout。依据：`src/renderer/services/markdownImageExport.ts`、`src/renderer/services/ExportService.ts`（`buildMarkdownWithImages`、`exportImageAssets`）、`src/renderer/services/imageExportModeChooser.ts`、`src/main/services/ExportService.ts`。
+
+图片加载、外链可用性、目标 Notion API 与语雀/思源等第三方端的最终呈现需要运行环境验证；保存对话框已改为挂到调用方窗口，避免非 ASCII 文件名在旧式对话框上崩溃。
 
 ## 8. 设计取舍与已确认边界
 
@@ -160,11 +169,20 @@ Markdown 导出现在会携带多模态图片，而非仅保留文本占位；No
 - 历史记录面板（`AssistantHistoryRecords` 使用事件默认处理器）触发图片动作时，若对应 Topic 的 live 列表未挂载，事件无人消费是否导致请求悬空。
 - 工具调用、reasoning、附件、表格和非 HTML Artifact 的实际保真。
 - Windows/macOS/Linux 的剪贴板与保存文件结果；两条入口（聊天菜单 vs 列表菜单）产出图片的宽度差。
+- 多选批导出到第三方目标（Notion、语雀、Obsidian、Joplin、思源）在同一文件内的排序、图片与超长内容的实际上限未运行验证。
+- Markdown 图片的两种落盘模式（内联 base64 与 `assets/` 目录）在真实文件系统与第三方客户端中的渲染未运行验证。
 - 图片捕获相关测试虽存在，本次未执行测试或构建。
 
 ## 10. 关键源码索引
 
-新增关键入口：
+捕获与导出执行：
+
+- `src/renderer/services/ExportService.ts`（捕获队列、`captureScrollable*` 门面、Markdown/Notion/语雀/Obsidian/Joplin/思源/Notes 导出）
+- `src/renderer/utils/image.ts`（`captureScrollable`、`captureScrollableIframe*`、图片预内联、32767px 上限）
+- `src/renderer/services/markdownImageExport.ts`、`src/renderer/services/imageExportModeChooser.ts`（Markdown 图片两种模式与选择弹窗）
+- `src/main/services/ExportService.ts`（保存对话框与本地写入）
+
+消息表面与捕获宿主：
 
 - `src/renderer/components/chat/messages/list/MessageGroup.tsx`（captureMode 行为、fold 显隐、组菜单栏）
 - `src/renderer/components/chat/messages/utils/messageListItem.ts`（`isActiveBranch` 透传）
@@ -175,15 +193,12 @@ Markdown 导出现在会携带多模态图片，而非仅保留文本占位；No
 - `src/renderer/pages/agents/messages/AgentSessionImageCaptureHost.tsx`
 - `src/renderer/services/agentSessionExport.ts`（Agent 会话导出数据源）
 - `src/renderer/pages/agents/messages/agentMessageListAdapter.tsx`（`withTerminalErrorFallback`、capture 模式）
-- `src/renderer/utils/message/messageGroupLayout.ts`（多模型布局样式生效规则）
-
-既有索引保留（本轮补充了定位说明）：
-
+- `src/renderer/components/chat/messages/utils/messageGroupLayout.ts`（多模型布局样式生效规则）
 - `src/renderer/pages/home/messages/TopicImageCaptureHost.tsx`
 - `src/renderer/pages/home/messages/topicImageActionBus.ts`
 - `src/renderer/components/chat/messages/MessageImageCaptureHost.tsx`
 - `src/renderer/components/chat/messages/MessageList.tsx`（隐藏捕获表面 `data-topic-image-capture` 与双路径执行器）
 - `src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`
+- `src/renderer/components/chat/messages/hooks/useMessageMenuConfig.ts`（`data.export.menus.*` 菜单开关）
 - `src/renderer/hooks/useTopicMessages.ts`（`flattenBranchMessages` 分支坍缩规则、`projectBranchMessagesToUI`）
-- `src/renderer/utils/image.ts`（`captureScrollable`、`captureScrollableIframe`）
 - `src/renderer/components/chat/messages/__tests__/MessageList.test.tsx`

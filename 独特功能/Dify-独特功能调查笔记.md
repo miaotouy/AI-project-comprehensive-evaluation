@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态阅读 README、应用生成器、workflow 图运行时、workflow-as-tool、知识库/RAG Pipeline、Prompt IDE、LLMOps、Agent v2、App Deployment、插件/MCP/触发器入口与 DSL 导入导出；未连接外部服务或运行部署
 >
@@ -16,15 +16,15 @@
 
 本轮将“可发布的 workflow 应用及其再复用”列为 Dify 的一项 `主链确认` 特色能力：它把图定义、输入校验、运行记录、流/阻塞响应、停止与日志连接为可由终端用户和外部 API 调用的产品单元，并允许一部分 workflow 再以工具 Provider 方式被 Agent 选择。这个能力横跨应用发布、图运行、工具与外部调用，不应只记成“有 workflow 节点”或“支持工具”。
 
-知识库与可发布 RAG Pipeline 也达到静态 `主链确认`：它将文件、Notion 或网页来源转为 tenant 下可管理的知识资产，异步索引后既可被聊天应用和 workflow 检索节点消费，也可通过独立 Pipeline 维护摄取图的草稿、发布和运行记录。它不是普通“上传附件”功能，且现有目录没有能完整承接其摄取、检索和编排链的通用类目。
+知识库与可发布 RAG Pipeline 也达到静态 `主链确认`：它将文件、Notion 或网页来源转为 tenant 下可管理的知识资产，异步索引后既可被聊天应用和 workflow 检索节点消费，也可通过独立 Pipeline 维护摄取图的草稿、发布和运行记录。它不是普通“上传附件”功能，且现有目录没有能完整承接其摄取、检索和编排链的通用类目。与既有 Dataset 并行，快照中另有由部署开关放开的 KnowledgeFS 知识面：它通过固定契约对接独立部署的知识服务，并提供独立检索节点，属于仓内可确认协议、服务端实现位于仓外的能力。
 
-基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace 和 Agent v2 工作区均达到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；后二者则分别覆盖租户插件安装治理和 Agent 的版本化执行环境。Agent v2 的执行工作区现可选择 OpenShell 后端，Chatflow 中的 Agent 参与者按 conversation 复用记忆并固定发布快照；这些扩展了运行边界，但没有改变其依赖独立 Agent Runtime 的证据状态。
+基础 App 的 Prompt IDE、LLMOps 注解回复、受管插件 Marketplace、Agent v2 工作区和人机协同表单交付均达到静态 `主链确认`。前两者分别把未发布配置送入真实调试运行后发布为正式配置，以及把人工修订回答索引为下一次请求可命中的答案；插件 Marketplace 覆盖租户插件安装治理，Agent v2 覆盖版本化执行环境。Agent v2 的执行工作区可选择 OpenShell 后端，Chatflow 中的 Agent 参与者按 conversation 复用记忆并固定发布快照；这些扩展了运行边界，但没有改变其依赖独立 Agent Runtime 的证据状态。人工输入节点另有 v2 形态，可经邮件与 IM 渠道把表单发给指定收件人，并从外部回传提交结果恢复图运行。
 
 Trigger Provider 仍只有 `入口确认`，因为外部事件已能启动异步 workflow，却尚未确认最终用户结果和投递保证；App Deployment v2 也只记 `入口确认`，因为仓内已确认环境版本、环境 Web/API 访问点和短期文件 grant，真正部署控制面仍由 Enterprise 边界持有。MCP 作为工具调用能力仍归并到相邻专项。Marketplace 和 Agent v2 虽已形成 Dify 侧主链，其 Plugin Daemon、Dify Agent Runtime 等外部执行域仍未运行验证。
 
 ## 介绍声明与候选盘点
 
-README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台核心能力，并另列 Prompt IDE、LLMOps 和 Backend-as-a-Service。按本类目准入条件，本轮已调查可发布 workflow 应用与 workflow-as-tool、知识库/RAG Pipeline、基础 App Prompt IDE、LLMOps 注解回复、Agent v2 工作区和 Marketplace 安装生命周期；触发器仍保留待补边界。
+README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台核心能力，并另列 Prompt IDE、LLMOps 和 Backend-as-a-Service。按本类目准入条件，本轮已调查可发布 workflow 应用与 workflow-as-tool、知识库/RAG Pipeline 及 KnowledgeFS、基础 App Prompt IDE、LLMOps 注解回复、人机协同表单交付、Agent v2 工作区和 Marketplace 安装生命周期；触发器仍保留待补边界。
 
 普通 Chat、Agent Chat、模型 Provider 与单个工具不进入本篇：它们已有对应通用类目，或尚未组成与其他项目不可替代的独立产品工作流。知识库不再按“已有类目”排除：现有笔记目录没有 RAG/数据集专项，且 RAG Pipeline 的对象和生命周期不能由对话上下文或单个工具笔记完整解释。workflow-as-tool 与可发布 workflow 共享同一用户目标和运行对象，因此合并为一张能力卡，而不把“可执行 workflow”和“workflow 被调用”拆成两项贡献。
 
@@ -36,6 +36,8 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 | LLMOps 注解回复 | `主链确认`（静态） | 纳入一项特色能力 | 人工修订被异步索引，命中后在应用运行时短路为回答并记录命中 |
 | Agent v2 工作区 | `主链确认`（静态） | 纳入一项特色能力 | roster/草稿/发布快照与 workspace binding、会话快照、人工输入续接和退役链已连通 |
 | 插件 Marketplace 与受管安装 | `主链确认`（静态，Dify 侧） | 纳入一项特色能力 | 发现、策略、安装任务、升级、卸载、缓存失效与运行时发现已连通；daemon 是外部执行域 |
+| 人机协同表单（HITL v2） | `主链确认`（静态，Dify 侧） | 纳入一项特色能力 | 节点暂停、表单编译、邮件/IM 收件人交付、外部提交回传与恢复在仓内可确认；实际送达与外部渠道行为未运行 |
+| KnowledgeFS 知识面 | `主链确认`（静态，协议与 Dify 侧） | 并入知识库能力卡 | 开关、检索 v2 节点、契约与客户端适配在仓内；知识与存储服务位于独立仓库 |
 | 应用/Agent DSL 导入导出 | `归并已有类目` | 作为发布链支撑 | 迁移、模板、复制与依赖检查复用同一导入链，不形成新的独立运行工作流 |
 | MCP 扩展 | `归并已有类目` | 回链 Agent 工具 | 主要事实已由工具 Provider、发现、凭据和调用边界解释 |
 | App Deployment v2 | `入口确认` | 暂不计入 | 已确认版本部署 UI、环境 WebApp/service API 与文件 grant；Enterprise control plane 的部署执行和环境生命周期不在本仓库闭环 |
@@ -51,9 +53,9 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **完整主链。** 外部程序调用 workflow API 或已发布应用提交 inputs/files 后，`AppGenerateService` 按 `AppMode.WORKFLOW` 或 advanced chat 分派给 workflow generator。生成器以 `WorkflowAppConfigManager` 取得并转换应用配置，验证输入和文件，创建运行 repository 后交给 graph engine。执行产生 workflow run、节点生命周期、文本 chunk、人工输入或完成事件；streaming 调用由 `MessageBasedAppGenerator.retrieve_events` 回收并转换为事件流，blocking 调用则走相应的最终响应转换。service API 还提供以 task ID 停止 streaming workflow 的路径。这条“调用 -> 运行对象 -> 图执行 -> 可消费事件/结果 -> 停止或日志”的主链足以确认其为可独立交付的运行单元，而非仅存在编辑画布。
 
-**再复用与边界。** `api/core/tools/workflow_as_tool/` 与 `WorkflowToolsManageService` 会把符合条件的 workflow 保存为某 tenant 的工具 Provider，并在创建/更新时检查兼容性；已有实现明确排除含 human-input 节点的 workflow。这个限制很关键：workflow-as-tool 不是任意图的无条件嵌套，也不证明被调用图的人工暂停、访问控制和错误语义可自动传给 Agent。工具目录、schema 注入和 Agent 循环见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
+**再复用与边界。** `api/core/tools/workflow_as_tool/` 与 `WorkflowToolsManageService` 会把符合条件的 workflow 保存为某 tenant 的工具 Provider；注册时校验应用与 workflow 存在、名称或 app ID 不冲突，并钉住来源 workflow 的图与版本。快照中该服务不再在注册阶段排除含人工输入节点的 workflow，原先的同步检查已被移除；实际调用时工具侧以不开启人工暂停的方式运行子图，注册门槛与运行时限制因此分离（`api/core/tools/workflow_as_tool/tool.py:130-150`）。workflow 工具的执行改为由图引擎管理的子图容器：运行时向 `DifyWorkflowToolNode` 提交带来源 app/workflow 版本、输入、系统文件与调用深度的容器载荷，由引擎按容器节点运行（`api/core/workflow/workflow_tool_node.py`、`api/core/workflow/workflow_tool_container_types.py`）。人工暂停、访问控制和错误语义是否随子图自动传回调用方，仍需要运行验证。工具目录、schema 注入和 Agent 循环见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
 
-**持续性、控制与执行域。** workflow 定义和工具 Provider 是服务端持久化配置；每次调用的 run/节点事件由后端运行时与 repository 承接，公开 WebChat 仅订阅/投影事件。停止 API 同时保留旧 queue stop flag 和 GraphEngineManager 命令通道，表明实现有兼容层，但本轮未运行，不能确认停止是否到达所有节点、插件 HTTP 调用或异步 worker。执行发生在 Dify 服务端和其配置的模型/工具连接中，不在终端用户浏览器中执行图。
+**持续性、控制与执行域。** workflow 定义和工具 Provider 是服务端持久化配置；每次调用的 run/节点事件由后端运行时与 repository 承接，公开 WebChat 仅订阅/投影事件。停止 API 同时保留旧队列 stop flag 和引擎命令通道，表明实现有兼容层，但本轮未运行，不能确认停止是否到达所有节点、插件 HTTP 调用或异步 worker。执行发生在 Dify 服务端和其配置的模型/工具连接中，不在终端用户浏览器中执行图。
 
 **为什么属于独特功能。** 单看 workflow，是生成式输出/运行时；单看 API，是外部应用调用；单看 workflow-as-tool，是 Agent 工具。Dify 将这些对象安排为同一发布单元，并让其既可对人类/业务系统交付、又可有限地重新进入 Agent 目录，才形成完整产品语义。与普通“聊天里触发一个工具”相比，它拥有明确图定义、运行记录、发布调用面和二次复用方向。
 
@@ -65,13 +67,13 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **用户目标与事实对象。** Dify 把知识库作为 tenant 下可持续维护的 Dataset，而不是一次请求附带的文件。Dataset 关联 Document、分段、处理规则、索引状态与检索设置；其来源可为上传文件、Notion 页面或网页抓取。RAG Pipeline 则在 Dataset 之上维护独立的 pipeline、草稿/已发布 workflow、节点执行与 workflow run，使作者可以把数据源处理和检索配置作为可编辑、可回看的图，而不是只接受默认切块与向量化。
 
-**摄取、索引与恢复链。** 控制台数据集页面提供新建、来源、文档、命中测试、设置、访问控制和 Pipeline 路由。提交来源后，`DatasetService` 在事务中写入 Document 及其来源信息，再把新文档交给 `DocumentIndexingTaskProxy`；后台任务负责索引，并在分段可用后继续生成摘要索引。文档状态操作会在提交后再投递索引或删除任务，并以 Redis 锁/短期索引标记防止并发修改。这确认了“作者选择来源 -> Dataset/Document 持久化 -> 异步索引 -> 可管理的完成或失败状态”的服务端主链，但没有运行实际解析器、向量数据库或失败恢复。
+**摄取、索引与恢复链。** 控制台数据集页面提供新建、来源、文档、命中测试、设置、访问控制和 Pipeline 路由。提交来源后，知识库服务在事务中写入 Document 及其来源信息，再把新文档交给 `DocumentIndexingTaskProxy`；后台任务负责索引，索引执行体已从单一 IndexingRunner 拆成应用层 `DocumentIndexingService` 与 `IndexingExecutionAdapter` 的阶段适配，并在分段可用后继续生成摘要索引。文档状态操作会在提交后再投递索引或删除任务，并以 Redis 锁/短期索引标记防止并发修改（`api/services/knowledge/dataset_service.py`、`api/services/knowledge/indexing/`、`api/tasks/document_indexing_task.py`）。这确认了“作者选择来源 -> Dataset/Document 持久化 -> 异步索引 -> 可管理的完成或失败状态”的服务端主链，但没有运行实际解析器、向量数据库或失败恢复。
 
 **检索如何进入应用运行。** 已发布 chat/completion 应用的 runner 会由 `DatasetRetrieval` 按应用的 retrieval resource 取得上下文和引用文件；workflow 的 Knowledge Retrieval 节点则从变量池读取 query 或附件，调用同一检索服务，将排序后的 Source 列表作为 `result` 输出，并把 token/价格写入节点元数据。检索并非无条件拼接：节点可选择单数据集或多数据集策略，并带 metadata filter、重排序或关键词/向量权重等配置。这样，知识资产既可服务传统应用配置，也能成为图中下一节点可消费的明确输出。
 
 **RAG Pipeline 的编排和持续性。** 数据集路由另有 create-from-pipeline、Pipeline 编辑和节点试跑表面；后端为每个 Pipeline 读取或同步 draft workflow、发布 workflow、执行数据源或草稿节点，并保存 run 与 node execution 供后续读取。Pipeline DSL 还提供导入导出接口。这一链将摄取规则和检索资产从“应用配置中的一个引用”提升为带草稿、发布、试跑和运行历史的对象，因此应和普通对话上下文、文件上传或单次检索区分。
 
-**边界与证据强度。** 本轮静态确认了文件、Notion 与网页三个来源分支，但未接入任何外部授权、爬虫、解析器、向量库或 reranking 模型；不能据此判断实际解析质量、召回、费用、吞吐、删除一致性、权限效果或索引重试。外部知识库连接、服务 API 的数据集 CRUD、具体访问控制与命中测试 UI 也尚未走通。RAG Pipeline 是否应在未来形成独立稀疏类目，取决于是否在至少两个项目中确认同样的“可发布摄取图 + 知识资产生命周期”产品语义；目前保留为 Dify 的能力卡。
+**边界与证据强度。** 本轮静态确认了文件、Notion 与网页三个来源分支，但未接入任何外部授权、爬虫、解析器、向量库或 reranking 模型；不能据此判断实际解析质量、召回、费用、吞吐、删除一致性、权限效果或索引重试。外部知识库连接、服务 API 的数据集 CRUD、具体访问控制与命中测试 UI 也尚未走通。快照新增的 KnowledgeFS 知识面另需部署开关、服务地址与能力签名密钥，且其在仓内只到契约、客户端适配与检索 v2 节点为止，服务端实现不在本仓库（`api/services/knowledge_fs/feature_service.py`；`api/knowledge-fs-contract/README.md`）。RAG Pipeline 是否应在未来形成独立稀疏类目，取决于是否在至少两个项目中确认同样的“可发布摄取图 + 知识资产生命周期”产品语义；目前保留为 Dify 的能力卡。
 
 ### 基础 App Prompt IDE：编排、真运行、比较与发布
 
@@ -101,11 +103,27 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **对象与编排。** Agent v2 将可复用 roster Agent、仅属于 workflow 的 inline Agent、普通编辑 draft、每位编辑者的 build draft 与不可变 config snapshot 区分建模。控制台支持 roster、配置、预览、版本、访问、日志与监控入口；发布把可编辑 Agent Soul 转为 snapshot/revision，已存在版本也可回写为新的正常 draft。这样同一 Agent 可被工作流引用，同时区分尚未发布的编辑态和运行所绑定的版本。
 
-**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。Chatflow 中的 Agent v2 节点也会以 conversation 作为 workspace owner；同一节点参与者跨回合复用 binding，并继续使用初次绑定的配置快照，即使 roster Agent 后续发布新版本也不会漂移（`api/core/workflow/nodes/agent_v2/session_store.py:32-64`；`binding_resolver.py:95-145`）。运行中保存 compositor session snapshot、pending form/tool ID；human-input 表单提交后由后台恢复回合并把答案持久化。取消发生在模型已返回工具调用但工具尚未返回时，运行历史把尾部响应标记为 interrupted，使下一回合能够继续；这不代表外部工具副作用会回滚（`dify-agent/src/dify_agent/runtime/history.py:75-109`）。
+**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。Chatflow 中的 Agent v2 节点也会以 conversation 作为 workspace owner；同一节点参与者跨回合复用 binding，并继续使用初次绑定的配置快照，即使 roster Agent 后续发布新版本也不会漂移（`api/core/workflow/nodes/agent_v2/session_store.py:111-124`；`api/core/workflow/nodes/agent_v2/binding_resolver.py:42`）。取消发生在模型已返回工具调用但工具尚未返回时，运行历史把尾部响应标记为 `interrupted`，使下一回合能够继续；这不代表外部工具副作用会回滚（`dify-agent/src/dify_agent/layers/history.py:28-43`）。
 
-`AgentAppWorkspaceStore` 仍负责在 Dify Agent backend 创建 execution binding，并把 binding ID 回写给调用者；后续调用校验 tenant、owner、Agent、home snapshot 和配置版本一致性。binding/workspace 先标记 retired，提交后再请求 backend 物理清理，失败留待后续收集。Agent Runtime 的部署选择除 local、enterprise 和 E2B 外，还加入 OpenShell，配置包含 gateway、workspace、TLS/令牌、sandbox image、共享挂载、出口白名单和执行超时（`dify-agent/src/dify_agent/server/settings.py:66-105,226-263`）。这确认可选执行后端的配置与适配入口，尚未运行 OpenShell sandbox、隧道、快照和网络策略。
+Agent 运行时的模块构成在快照中已改写：模块注册表按名称登记 prompt、user_prompt、execution_context、runtime、shell、config、history、llm、插件工具、核心工具、knowledge、knowledge_fs 与 output，旧的 `ask_human` 能力不再注册，snapshot 中只为旧状态保留迁移入口（`dify-agent/src/dify_agent/runtime/modules.py`；`dify-agent/src/dify_agent/protocol/snapshot.py`）。因此“模型在 Agent 循环中主动向人提问并等待续接”不是现行实现，人工介入改由 workflow 的人机输入节点承担，见本节后的人机协同能力卡。
+
+`AgentAppWorkspaceStore` 仍负责在 Dify Agent backend 创建 execution binding，并把 binding ID 回写给调用者；后续调用校验 tenant、owner、Agent、home snapshot 和配置版本一致性。binding/workspace 先标记 retired，提交后再请求 backend 物理清理，失败留待后续收集。Agent Runtime 的部署选择除 local、enterprise 和 E2B 外，还加入 OpenShell，配置包含 gateway、workspace、TLS/令牌、sandbox image、共享挂载、出口白名单和执行超时（`dify-agent/src/dify_agent/server/settings.py:72-115`）。这确认可选执行后端的配置与适配入口，尚未运行 OpenShell sandbox、隧道、快照和网络策略。
 
 **边界与独特性。** 本轮没有启动独立的 Dify Agent Runtime，因此 workspace/binding 的物理创建、session 的实际恢复、OpenShell/E2B/本地工具环境和销毁幂等性仍是静态结论；服务端注释也明确承认跨系统创建成功后事务失败可能留下孤儿资源。发布前会校验 Soul 中的 Skill/File 引用，拒绝未配置的引用（`api/services/agent/workflow_publish_service.py:177-232`），但这只证明定义完整性门槛，不证明对应 Skill 在运行时执行成功。其产品语义是“版本化 Agent 配置 + 会话/调试草稿拥有的可回收执行环境”，而不是传统 Agent 节点的单次模型工具循环。
+
+### 人机协同表单的跨渠道交付与回传
+
+**标签：人工审批、外部渠道、可恢复运行。证据状态：`主链确认`（静态，Dify 侧）。**
+
+**用户目标与事实对象。** 人机输入节点让人在 workflow 中途审批或填写表单，图在节点处暂停并以表单记录保存待办；v2 在同一 `human_input` 节点类型下替换了实现，旧版本配置通过迁移适配（`api/core/workflow/node_factory.py:57`、`api/core/workflow/node_factory.py:502`）。事实对象包括节点数据与接收人、冻结的表单、交付记录、提交记录和恢复所需的暂停状态。
+
+**完整主链。** 节点运行到人机输入处编译表单并向接收人投递通知；投递服务按渠道选择邮件客户端或 IM 适配器（Slack、飞书/Lark、钉钉、企业微信、Microsoft Teams），先提交交付记录再发送并回写每次结果。收件人通过表单链接或 IM 回调提交，提交流程校验表单状态与认证契约、处理附件上传，再把结果交回工作流运行时；暂停分支由此恢复或在超时/全局过期时收口（`api/core/workflow/nodes/human_input_v2/node.py`、`api/core/workflow/nodes/human_input_v2/runtime.py`、`api/services/human_input_v2/delivery_service.py`、`api/services/human_input_v2/submission_service.py`）。
+
+**渠道与身份边界。** IM 渠道连接使用租户级凭据并以密文保存；联系人可通过绑定与同步服务与工作区成员对应，入站消息有独立的 inbox 处理、幂等记录与 webhook 运行时。邮件通道另有 OTP 验证与独立的渠道管理（`api/services/human_input_v2/im_credential_codec.py`、`api/services/human_input_v2/im_contact_sync/`、`api/services/human_input_v2/im_message_inbox/`、`api/services/human_input_v2/email_otp_service.py`）。因此“谁能收到表单、以什么身份提交、提交是否可重复”由服务端交付与绑定记录决定，而不是把表单公开给任意链接持有者。
+
+**为什么属于独特功能。** 普通聊天只能把暂停状态返回给发起请求的浏览器；这里把待办推进到外部协作渠道并回传，形成“图暂停 -> 外部渠道触达 -> 人工提交 -> 图恢复”的完整闭环。它仍属于 Dify 自有运行链，不是把执行权交给第三方执行体；具体见[外部执行体与应用协作](../外部执行体与应用协作/Dify-外部执行体与应用协作调查笔记.md)。
+
+**边界与未验证。** 未配置任何邮件或 IM 租户凭据，故未验证真实送达、重发、退信、回调验签、联系人同步时延、附件大小、权限与审计。表单超时、全局过期、并发提交与恢复幂等只有静态入口，未运行。
 
 ### 插件 Marketplace 与受管安装生命周期
 
@@ -127,7 +145,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 应用 DSL 是可发布 workflow、RAG Pipeline、Prompt IDE、Marketplace 模板和推荐应用共用的包装与迁移机制，而不是另一种可独立交付的运行单元。Console import 先校验 YAML 内容或 URL、10MB 限制和 DSL 版本，再创建目标工作区 App 或覆盖 workflow/advanced-chat 草稿；版本过新或 major 不兼容时，把绑定 tenant/account 的内容暂存 Redis 十分钟，等待确认。推荐应用和 Marketplace 模板都取得不含 secret 的 export data，再复用这条导入链；导入后还会报告缺失插件依赖。
 
-默认导出不携带 secret：workflow 环境变量留空、工具/Agent credential reference 被移除，Agent package 还会置空 credential、secret、password、token、file ID 和联系人等敏感/源工作区字段。知识库 ID 在跨租户不可解密时被过滤，触发器的 schedule/webhook/debug URL 和 plugin subscription ID 也会重置；运行时再按目标 tenant 限定检索。相反，同工作区 Copy App 为保持原子复制而显式 `include_secret=true`，会将已解密的 workflow secret 交给同权限路径导入。因此它不能被笼统描述为“安全导出”，也不能把同工作区复制等同于可分享的跨环境迁移。具体导入/导出和密钥边界见 `api/services/app_dsl_service.py:111-1057`、`api/models/workflow.py:594-708`、`api/services/agent/dsl_service.py:192-664`。
+默认导出不携带 secret：workflow 环境变量留空、工具/Agent credential reference 被移除，Agent package 还会置空 credential、secret、password、token、file ID 和联系人等敏感/源工作区字段。知识库 ID 在跨租户不可解密时被过滤，触发器的 schedule/webhook/debug URL 和 plugin subscription ID 也会重置；运行时再按目标 tenant 限定检索。相反，同工作区 Copy App 为保持原子复制而显式 `include_secret=true`，会将已解密的 workflow secret 交给同权限路径导入。因此它不能被笼统描述为“安全导出”，也不能把同工作区复制等同于可分享的跨环境迁移。具体导入/导出和密钥边界见 `api/services/app_dsl_service.py`、`api/models/workflow.py` 的 Workflow 定义部分、`api/services/agent/dsl_service.py`。
 
 ### 发布后的 WebChat、流式消息与人工输入展示
 
@@ -137,7 +155,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 ### App Deployment v2
 
-控制台可以选择应用版本并部署到 environment，环境拥有独立 WebApp 与 service API 访问点；当前界面把 MCP 和 trigger 标为该环境不支持（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`）。环境运行所需文件通过短期 grant 交接：受信 inner API 以 tenant、app、end user、scope 和 TTL 签发令牌，公开文件端点再分别处理上传、远程抓取、产物写入、文件解析和单文件内容 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。
+控制台可以选择应用版本并部署到 environment，环境拥有独立 WebApp 与 service API 访问点；当前界面把 MCP 和 trigger 标为该环境不支持（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-100`）。环境运行所需文件通过短期 grant 交接：受信 inner API 以 tenant、app、end user、scope 和 TTL 签发令牌，公开文件端点再分别处理上传、远程抓取、产物写入、文件解析和单文件内容 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。
 
 这已形成“选择版本 -> 配置环境 -> 暴露环境访问点 -> 受限文件能力”的仓内入口和协议，但环境的创建、实际部署、凭据注入、回滚和控制面身份依赖 Enterprise AppDeploy 服务。当前证据不足以确认从 Dify 控制台到外部环境完成部署并稳定运行的完整主链，因此不计入特色贡献。
 
@@ -149,7 +167,7 @@ Webhook 已发布入口会加载 webhook trigger、发布 workflow 和节点配�
 
 ## 对特色贡献统计的影响
 
-本轮建议为 Dify 记入六项主贡献：**可发布 workflow 应用及有限 workflow-as-tool 再复用**、**知识库与可发布 RAG Pipeline**、**基础 App Prompt IDE**、**LLMOps 注解回复**、**Agent v2 版本化工作区**和**插件 Marketplace 的受管安装生命周期**；均为静态 `主链确认`，其中 Marketplace 只覆盖 Dify 侧。Trigger Provider 仍不计数；MCP 与普通 Chat 均归并既有类目。该计数表达的是已贯通的用户工作流数，不是模块数、节点数或产品成熟度评分。
+本轮建议为 Dify 记入七项主贡献：**可发布 workflow 应用及有限 workflow-as-tool 再复用**、**知识库与可发布 RAG Pipeline**、**基础 App Prompt IDE**、**LLMOps 注解回复**、**Agent v2 版本化工作区**、**人机协同表单的跨渠道交付**和**插件 Marketplace 的受管安装生命周期**；均为静态 `主链确认`，其中 Marketplace 与 HITL 只覆盖 Dify 侧，KnowledgeFS 并入知识库能力卡。Trigger Provider 仍不计数；MCP 与普通 Chat 均归并既有类目。该计数表达的是已贯通的用户工作流数，不是模块数、节点数或产品成熟度评分。
 
 ## 未验证事项
 
@@ -159,25 +177,30 @@ Webhook 已发布入口会加载 webhook trigger、发布 workflow 和节点配�
 - 未运行 RAG Pipeline 的草稿保存、节点试跑、发布、DSL 导入导出、历史回看和数据源授权；不对解析质量、召回、费用或吞吐作结论。
 - 未运行 Prompt IDE 的真实模型、各 Provider/TTS/STT/知识能力、发布授权、多人协作冲突、版本恢复或调试会话的保留；多模型比较与生产评测的关系也未确认。
 - 未运行注解的向量检索、索引失败恢复、阈值效果、实际命中/回退，以及外部 Trace 的投递、保留、provider 可见性和成本；未找到自动调优执行器。
-- 未启动 Dify Agent Runtime、OpenShell 或 Plugin Daemon，因而未确认 Agent v2 的实际 workspace/session/工具/HITL 生命周期、OpenShell 网络与挂载边界，也未确认插件安装任务、包验签、隔离、升级、失败清理和卸载的物理效果。
+- 未启动 Dify Agent Runtime、OpenShell 或 Plugin Daemon，因而未确认 Agent v2 的实际 workspace/session/工具生命周期、OpenShell 网络与挂载边界，也未确认插件安装任务、包验签、隔离、升级、失败清理和卸载的物理效果。
+- 未配置邮件或 IM 渠道凭据，未验证人机协同表单的真实送达、回调验签、联系人同步、超时、并发提交与恢复幂等；Agent 运行时不再内置 ask_human 类延迟工具，其人工介入已统一到 workflow 节点侧这一点也只有静态证据。
+- 未运行 KnowledgeFS 的部署开关、签名能力、控制空间、导入与检索 v2 节点；该服务的知识与存储实现不在本仓库。
 - 未运行 DSL 的 URL 拉取、版本确认、依赖检查、跨工作区导入或同工作区 secret copy；缺失数据集被静默过滤、依赖是否自动安装和导出文件的二次保管仍需运行与部署边界验证。
 - 未确认 Trigger Provider 的签名/OAuth、投递保证、最终结果回传和用户可见控制表面。
 - 未连接 Enterprise AppDeploy 控制面，未验证环境创建、版本部署/回滚、访问权限、文件 grant 撤销和环境删除。
 
 ## 关键源码索引
 
-- `api/services/app_generate_service.py:88-318`：应用模式分派、workflow/advanced chat 事件回收。
+- `api/services/app_generate_service.py:101-360`：应用模式分派、workflow/advanced chat 事件回收与主动请求上限。
 - `api/core/app/apps/workflow/app_generator.py`、`api/core/app/apps/advanced_chat/`：应用输入、运行 repository 与图执行交接。
 - `api/core/app/apps/message_based_app_generator.py`、`api/core/app/entities/task_entities.py`：workflow 事件与消息型应用的转换契约。
-- `api/core/workflow/`、`api/core/workflow/graph_engine_manager.py`：图执行和停止命令边界。
-- `api/core/tools/workflow_as_tool/`、`api/services/tools/workflow_tools_manage_service.py`：workflow 作为工具的配置与兼容性检查。
-- `api/services/dataset_service.py:2326-2505`、`api/tasks/document_indexing_task.py`：知识来源持久化、索引任务投递和异步索引边界。
-- `api/core/rag/retrieval/dataset_retrieval.py:378-470`、`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-301`：应用与 workflow 的检索消费、节点输出和用量元数据。
+- `api/core/workflow/workflow_entry.py:119-208`、`api/services/app_task_service.py:101-160`：图执行入口、命令通道与停止/续接服务。
+- `api/core/tools/workflow_as_tool/`、`api/core/workflow/workflow_tool_node.py`、`api/services/tools/workflow_tools_manage_service.py`：workflow 作为工具的配置、来源固定与子图容器执行。
+- `api/services/knowledge/dataset_service.py`、`api/services/knowledge/indexing/`、`api/tasks/document_indexing_task.py`：知识来源持久化、索引任务投递和异步索引边界。
+- `api/core/rag/retrieval/dataset_retrieval.py:406-648`、`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-350`：应用与 workflow 的检索消费、节点输出和用量元数据。
+- `api/services/knowledge_fs/feature_service.py`、`api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py`、`api/knowledge-fs-contract/`：KnowledgeFS 开关、检索 v2 节点与外部契约。
 - `web/app/(commonLayout)/datasets/`、`api/controllers/console/datasets/rag_pipeline/rag_pipeline_workflow.py`：数据集/RAG Pipeline 的控制台路由、草稿/发布、节点试跑和运行记录接口。
-- `web/app/components/app/configuration-view/`、`api/controllers/console/app/model_config.py:77-220`、`api/core/app/apps/chat/app_generator.py:115-168`：Prompt IDE 的编辑、debug 覆盖和 active config 发布。
-- `api/services/annotation_service.py:144-358`、`api/tasks/annotation/`、`api/core/app/features/annotation_reply/annotation_reply.py:18-96`、`api/core/app/apps/advanced_chat/app_runner.py:180-350`：人工注解索引、检索命中与运行时短路回复。
-- `api/controllers/console/app/workflow_app_log.py:170-247`、`api/core/ops/ops_trace_manager.py:505-558,1512-1616`、`api/tasks/ops_trace_task.py:41-141`：workflow log 与外部 Trace 配置、队列和投递。
-- `web/features/agent-v2/`、`api/services/agent/composer_service.py:523-1016`、`api/core/app/apps/agent_app/session_store.py`、`api/services/agent/workspace_service.py`：Agent v2 的 roster/draft/snapshot 与 workspace session 生命周期。
-- `api/controllers/console/workspace/plugin.py:858,1061`、`api/core/plugin/plugin_service.py:658,1197,1246`、`api/core/plugin/impl/plugin.py:157`：Marketplace 策略、安装/卸载及 daemon 异步任务交接。
-- `api/controllers/console/app/app_import.py:74-196`、`api/services/app_dsl_service.py:111-1057`、`api/models/workflow.py:594-708`、`api/services/agent/dsl_service.py:192-664`：DSL 导入导出、版本/依赖、跨租户清理与 Agent 包脱敏。
+- `web/app/components/app/configuration-view/`、`api/controllers/console/app/model_config.py`、`api/core/app/apps/chat/app_generator.py`：Prompt IDE 的编辑、debug 覆盖和 active config 发布。
+- `api/services/annotation_service.py:13-67`、`api/services/annotation_query.py`、`api/services/annotation_command_service.py`、`api/tasks/annotation/`、`api/core/app/features/annotation_reply/annotation_reply.py:18-97`、`api/core/app/apps/advanced_chat/app_runner.py:169-330`：人工注解索引、检索命中与运行时短路回复。
+- `api/controllers/console/app/workflow_app_log.py:119-157`、`api/services/tracing/service.py`、`api/tasks/ops_trace_task.py:21-30`：workflow log 与外部 Trace 配置、队列和投递。
+- `api/core/workflow/nodes/human_input_v2/`、`api/services/human_input_v2/`、`api/core/workflow/node_factory.py:57,502`：人机输入节点 v2、表单编译、邮件/IM 交付与提交回传。
+- `web/features/agent-v2/`、`api/services/agent/composer_service.py`、`api/core/app/apps/agent_app/session_store.py`、`api/services/agent/workspace_service.py`：Agent v2 的 roster/draft/snapshot 与 workspace session 生命周期。
+- `dify-agent/src/dify_agent/runtime/modules.py`、`dify-agent/src/dify_agent/layers/history.py:28-43`：Agent 运行时模块注册与中断历史修复。
+- `api/controllers/console/workspace/plugin.py`、`api/core/plugin/plugin_service.py:1197-1290`、`api/core/plugin/impl/plugin.py:157`：Marketplace 策略、安装/卸载及 daemon 异步任务交接。
+- `api/controllers/console/app/app_import.py:1-152`、`api/services/app_dsl_service.py`、`api/services/agent/dsl_service.py`：DSL 导入导出、版本/依赖、跨租户清理与 Agent 包脱敏。
 - `api/core/trigger/`：触发器候选的订阅、验证与日志入口。

@@ -2,58 +2,66 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1` 口径），并复核 Bun workspace、应用/包清单、桌面与 CLI 发布说明
+> 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1` 口径），并复核 Bun workspace、package.json 入口与各包职责；未运行构建与测试
 >
-> 调查范围：模块、语言、文档、测试和跨平台代码组织；未运行构建与测试
+> 调查范围：模块、语言、文档、测试和跨平台代码组织；不覆盖各功能实现细节
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-最新快照（2026-09-16）：Git 跟踪文件 6626 个；可识别源码 3626 文件 / 729988 行；文档 822 文件 / 225306 行；测试 1036 文件 / 193254 源码行。主线提交节奏：历史跨度 42 天共 385 次，折算 275 次/30天，近90天 385 次（浅克隆，历史可能不完整）。
+最新快照（2026-11-04，版本 2.2.5）：Git 跟踪文件 9221 个；可识别源码 5942 文件 / 约 109 万行；文档 877 文件 / 约 25.3 万行；测试 1965 文件 / 约 38.8 万行。仓库为浅克隆：主线首提交 2026-08-04，跨度 92 天共 1771 次首个父提交，折算约 578 次/30 天，近 90 天 1738 次。
 
 ## 结论摘要
 
-OpenCode 是以 `packages` 为中心的 Bun/TypeScript monorepo，同时交付 CLI/TUI、桌面、Web、server、SDK、plugin、console 和共享 UI。源码规模最大的是核心 `packages/opencode` 与通用 app/core；文档数量大部分来自文档站及其多语言副本。
+OpenCode 是以 `packages` 为中心的 Bun/TypeScript monorepo，当前 36 个包，按「Schema → Core/Protocol → Server」分层，客户端由 Client 包生成、SDK 组合三者；另交付 CLI/TUI、Solid Web App、Electron 桌面、console 与 stats 两个站点、GUI 插件运行时和共享 UI。源码规模最大的是 `packages/app`（Web App）与 `packages/core`（运行时核心），其次是 `packages/tui`、`packages/ai`、`packages/gui-plugins`；文档大部分来自 `packages/web` 的多语言站点与 `services/www`。
 
 ## 统计与模块分布
 
 | 指标 | 数量 |
 | --- | ---: |
-| Git 跟踪文件 | 6626 |
-| 可识别源码 | 3626 文件 / 729988 行 |
-| 文档 | 822 文件 / 225306 行 |
-| 测试 | 1036 文件 / 193254 源码行 |
+| Git 跟踪文件 | 9221 |
+| 可识别源码 | 5942 文件 / 1,089,965 行 |
+| 文档 | 877 文件 / 252,824 行 |
+| 测试 | 1965 文件 / 388,300 源码行 |
 
 主要区域：
 
 | 区域 | 文件 / 行数 |
 | --- | ---: |
-| `packages/opencode` | 681 / 180,809 |
-| `packages/app` | 609 / 173,176 |
-| `packages/core` | 479 / 68,031 |
-| `packages/console` | 393 / 56,654 |
-| `packages/ui` | 330 / 45,785 |
-| `packages/tui` | 204 / 31,895 |
-| `packages/sdk` | 44 / 30,332 |
-| `packages/session-ui` | 115 / 26,679 |
-| `packages/stats` | 94 / 27,241 |
-| `packages/llm` | 105 / 20,518 |
+| `packages/app` | 940 / 222,950 |
+| `packages/core` | 937 / 205,862 |
+| `packages/tui` | 551 / 115,553 |
+| `packages/ai` | 776 / 87,593 |
+| `packages/gui-plugins` | 876 / 59,386 |
+| `packages/ui` | 1,716 / 59,038 |
+| `packages/session-ui` | 198 / 41,044 |
+| `packages/codemode` | 105 / 33,679 |
+| `packages/cli` | 216 / 26,722 |
+| `packages/console` | 215 / 25,096 |
 
-TypeScript 682,451 行（93.5%），CSS 43,125 行（5.9%）。
+TypeScript 约 102.2 万行（93.8%），CSS 47,671 行（4.4%），Rust 13,923 行（1.3%），其余 Astro、JavaScript、Shell、SQL 合计不足 1%。
+
+## 包结构与分层
+
+`packages/*` 之间的依赖方向按仓库 AGENTS 约定收口：Schema 被 Core/Protocol 依赖，Core 与 Protocol 再被 Server 依赖；Client 只依赖 Schema/Protocol，不依赖 Core/Server；SDK 组合 Client、Core 与 Server。运行时核心在 `packages/core`（会话、工具、权限、provider、MCP、插件、Skill、PTY、调度等 Effect 服务），HTTP 契约在 `packages/protocol` 与 `packages/server`，生成式能力在 `packages/ai`，界面分 `packages/app`（Solid Web App）、`packages/session-ui`（会话渲染组件）、`packages/ui`（共享 UI）与 `packages/tui`（终端界面），桌面壳在 `packages/desktop`，GUI 插件运行时在 `packages/gui-plugins`。
+
+旧快照中的聚合包已拆分或移除：`packages/opencode`（v1 主包）不再存在，其职责散入 core/cli/server；`packages/llm` 并入 `packages/ai`；`packages/docs` 并入 `packages/web`；`packages/enterprise`、`packages/slack`、`packages/containers`、`packages/storybook`、`packages/effect-sqlite-node`、`packages/sdk-next` 已移除或合并。新增 `packages/merman`、`packages/latex`、`packages/patchmark`、`packages/process-daemon`、`packages/plugins`、`packages/plugin-browser`、`packages/stories`、`packages/simulation`、`packages/posts`、`packages/theme`、`packages/util` 等。
 
 ## 文档与测试
 
-文档仍主要集中在 `packages/web` 的多语言站点内容；`specs` 和根 README 另成开发/协议材料。测试文件增至 1036 个，增长主要来自 opencode 的 V2 配置兼容 fixtures、ACP 会话恢复、Provider 适配和 TUI 生命周期覆盖；核心测试分布仍集中在 opencode、core、app、LLM 与 TUI。
+文档集中在 `packages/web`（多语言站点，562 文件 / 约 19 万行）、`services/www` 与 `packages/plugins`（插件文档）。测试 1965 文件，主要集中在 `packages/core`（396 文件）、`packages/app`（315）、`packages/ai`（518）、`packages/tui`（210）、`packages/codemode`（45）。
 
 ## 跨平台组织与边界
 
-CLI/TUI 通过同一核心包支持 Windows、macOS、Linux；桌面应用在 `packages/desktop`，Web UI 在 `packages/app`/`packages/web`，是共享包的独立入口。README 给出三桌面系统发行物（`README.md:54-82`），根脚本分别启动 desktop 与 web（`package.json:10-11`）。
+CLI/TUI 由 `packages/cli` 打包（根脚本 `dev` 直接运行 `packages/cli/src/index.ts`），TUI 是 Solid/TypeScript 实现而非独立语言栈；Web App 在 `packages/app`，桌面应用在 `packages/desktop`（Electron，renderer 复用 app 包，主进程在 `packages/desktop/src/main`）；`packages/web` 是官网/文档站，`packages/console`、`packages/stats` 是独立子站点。根 `package.json` 还注册 `dev:live`、`dev:desktop`、`dev:web`、`dev:console`、`dev:www` 等入口。
 
 ## 关键源码索引
 
-- `package.json:5-28`：Bun workspace 与应用入口
-- `packages/opencode/`、`packages/core/`：核心与协议实现
-- `packages/desktop/`、`packages/app/`、`packages/tui/`：平台入口
+- `package.json:1-60`：版本、Bun workspace 与各入口脚本
+- `AGENTS.md`：包依赖方向与 Effect 风格约定
+- `packages/core/src/`：运行时核心服务
+- `packages/app/src/`、`packages/tui/src/`、`packages/desktop/src/`：三个客户端表面
+- `packages/protocol/src/`、`packages/server/src/`、`packages/client/src/`、`packages/sdk/src/`：契约与客户端分层

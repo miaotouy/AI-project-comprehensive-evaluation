@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：逐文件通读源码 + 交叉核对文档
 >
@@ -54,14 +54,14 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 - **真树 + 指针切换**：分支是持久化树（`parentId`/`siblingsGroupId`），切分支 = `setActiveBranch` 先求目标分支最新 leaf 再改 `active_node_id`；`< i/N >` 兄弟导航与分支面板（React Flow + dagre 布局）同语义并存。
 - **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
-- **消息搜索为 DOM 搜索**：`ContentSearch.tsx` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
+- **消息搜索为 DOM 搜索**：`utils/contentSearch.ts` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
 - **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已更正。
-- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 的附件回收改由 FileManager 引用计数 + 策略化 GC 兜底（原 `TopicService.ts:316` TODO 注释已移除）。
+- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期清理由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）执行，永久删除才真正 purge；附件回收由 FileManager 引用计数 + 策略化 GC 兜底。
 
 ## 当前聊天主链补充
 
-Agent 工作台的会话执行器已扩展为 Claude Code、Pi、DSH 三种运行时。它们经 `AgentSessionRuntimeService` 进入同一聊天调度与持久化边界；新增的跨会话投递服务会保存投递与结果状态，使子 Agent 的消息可在会话之外继续路由和恢复。Home Topic 的分支则仍以消息树和 active node 为事实源；从叶子消息新建分支会创建真实树分支，而非复用旧路径。
+Agent 工作台的会话执行器按 Agent 行的 `type` 分为 Claude Code、Pi、Pi-Durable 三种运行时。它们经 `AgentSessionRuntimeService` 进入同一聊天调度与持久化边界；新增的跨会话投递服务会保存投递与结果状态，使子 Agent 的消息可在会话之外继续路由和恢复。Home Topic 的分支则仍以消息树和 active node 为事实源；从叶子消息新建分支会创建真实树分支，而非复用旧路径。
 
 普通聊天支持“复制为新对话”、多选全选与统一 assistant 消息编辑。删除活动节点时，服务层会保留仍可达的回复并重新选择活动分支，避免把同支后续回复一并遗失。流式调度还会等 terminal 事件完成分发后才接纳 follow-up，降低尾帧与下一回合重叠；平滑流在完成时强制排空缓冲文本。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/streamManager/AiStreamManager.ts`、`src/renderer/hooks/useSmoothStream.ts`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`。
 
@@ -77,8 +77,8 @@ Agent 工作台的会话执行器已扩展为 Claude Code、Pi、DSH 三种运�
 - 入口与状态：`src/renderer/pages/home/{Chat,ChatContent,useChatRuntimeState}.tsx`、`src/renderer/pages/home/hooks/useChatWriteActions.ts`、`src/renderer/hooks/useConversationTurnController.ts`
 - 适配器：`src/renderer/pages/home/messages/homeMessageListAdapter.tsx`、`src/renderer/pages/agents/messages/agentMessageListAdapter.tsx`、`src/renderer/components/chat/messages/messageListProviderBuilder.ts`
 - Composer：`src/renderer/components/composer/variants/{ChatComposer.tsx,chat/ChatConversationControls.tsx,chat/useChatMentionedModels.ts}`
-- 消息列表：`src/renderer/components/chat/messages/{MessageList,MessageListProvider,MessageVirtualList}.tsx`、`src/renderer/hooks/useTopicMessages.ts`、`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`
+- 消息列表：`src/renderer/components/chat/messages/{MessageList,MessageListProvider}.tsx`、`components/chat/messages/list/{MessageVirtualList,chatVirtualizerRuntime}.tsx`、`components/VirtualList/`、`src/renderer/hooks/useTopicMessages.ts`、`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`
 - 分支图：`src/renderer/pages/home/components/TopicBranchPanel.tsx`、`src/renderer/pages/home/hooks/useTopicBranchActions.ts`、`src/renderer/components/chat/flow/{topicMessageFlowGraph,topicMessageFlowLiveTree,topicMessageFlowLayout}.ts`、`TopicMessageFlowCanvas.tsx`
-- 搜索与渲染：`src/renderer/components/ContentSearch.tsx`、`src/renderer/pages/home/hooks/useStablePartsByMessageId.ts`
-- 主进程：`src/main/data/services/{TopicService,MessageService}.ts`、`src/main/services/TopicNamingService.ts`、`src/main/ai/streamManager/{AiStreamManager.ts,context/{dispatch,PersistentChatContextProvider,modelResolution}.ts}`、`src/main/ai/runtime/aiSdk/Agent.ts`
-- 文档：`docs/references/chat/message-tree.md`
+- 搜索与渲染：`src/renderer/utils/contentSearch.ts`、`src/main/data/services/ContentSearchService.ts`、`src/renderer/pages/home/hooks/useTopicMessagesCache.ts`（乐观缓存同步）、`src/renderer/components/chat/messages/utils/stableGroupedMessages.ts`
+- 主进程：`src/main/data/services/{TopicService,MessageService}.ts`、`src/main/services/trash/{TrashService.ts,trashPurgeJobHandler.ts}`、`src/main/services/TopicNamingService.ts`、`src/main/ai/streamManager/{AiStreamManager.ts,admission.ts,TopicMessageProjection.ts,context/PersistentChatContextProvider.ts}`、`src/main/ai/messages/messageRules.ts`、`src/main/ai/runtime/aiSdk/Agent.ts`
+- 文档：`docs/dev/references/chat/message-tree.md`

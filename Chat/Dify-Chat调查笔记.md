@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态阅读公开 WebChat、service API、应用生成服务、ORM 模型和共享聊天组件；未启动部署、未发送真实模型请求
 >
@@ -29,7 +29,7 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
 | service API/SDK | 外部业务系统 | 以 API 调用已发布应用或 workflow | 不拥有控制台草稿与配置权限 |
 | workflow API | 外部业务系统或集成 | 运行/停止 workflow | 结果为 workflow run 与事件，不可由 WebChat 行为反推完整语义 |
 
-这一区分源于页面和后端的责任边界：`web/app/(shareLayout)/` 与 `components/base/chat/` 组装终端用户输入并消费 SSE；`api/controllers/service_api/`、`AppGenerateService` 和模式专属 generator 才处理应用身份、配置、运行记录与实际执行。App Deployment v2 又在发布面增加环境版本和环境级访问点，但没有改变公开页不能读取 Provider 凭据、不能逐回合任意改模型/工具的边界（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`）。
+这一区分源于页面和后端的责任边界：`web/app/(shareLayout)/` 与 `components/base/chat/` 组装终端用户输入并消费 SSE；`api/controllers/service_api/`、`AppGenerateService` 和模式专属 generator 才处理应用身份、配置、运行记录与实际执行。App Deployment v2 又在发布面增加环境版本和环境级访问点，但没有改变公开页不能读取 Provider 凭据、不能逐回合任意改模型/工具的边界（`web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-100`）。
 
 ## 端到端聊天主链
 
@@ -45,7 +45,7 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
   -> useChat 回填 conversation/message/task/run ID，合并当前树；结束后按需重取服务端消息
 ```
 
-共享 hook 的发送体包含 query、处理后的 files、inputs、conversation ID 与 `parent_message_id`。它先向本地 chat tree 插入 question/answer 占位，所以用户在服务端分配 ID 前就能看到输入和加载状态；当数据事件带回 conversation/message/task ID 后，前端才将临时节点与服务端身份衔接。`web/app/components/base/chat/chat/hooks.ts` 是浏览器侧的主链入口，`api/services/app_generate_service.py:88-318` 是服务端分派入口。
+共享 hook 的发送体包含 query、处理后的 files、inputs、conversation ID 与 `parent_message_id`。它先向本地 chat tree 插入 question/answer 占位，所以用户在服务端分配 ID 前就能看到输入和加载状态；当数据事件带回 conversation/message/task ID 后，前端才将临时节点与服务端身份衔接。`web/app/components/base/chat/chat/hooks.ts` 是浏览器侧的主链入口，`api/services/app_generate_service.py:101-360` 是服务端分派入口。
 
 ## 核心对象与状态权威
 
@@ -101,9 +101,9 @@ SSE 不只传文本：前端还接收 Agent thought、文件、message/conversat
 ## 关键源码索引
 
 - `web/app/(shareLayout)/{chat,chatbot}/[token]/page.tsx`：发布聊天页面入口。
-- `web/app/components/base/chat/chat/hooks.ts:527-1926`：发送、流、停止、workflow 暂停与恢复状态。
+- `web/app/components/base/chat/chat/hooks.ts:561-1951`：发送、流、停止、workflow 暂停与恢复状态。
 - `web/app/components/base/chat/{chat-with-history,embedded-chatbot}/`：历史导航与嵌入式调用表面。
 - `web/service/share.ts`：浏览器的聊天 SSE 与 stop 调用。
-- `api/services/app_generate_service.py:88-318`：应用模式分派和运行响应回收。
+- `api/services/app_generate_service.py:101-360`：应用模式分派和运行响应回收。
 - `api/core/app/apps/`：消息型、Agent、advanced chat 与 workflow generator。
-- `api/models/model.py`、`api/services/{conversation_service.py,message_service.py}`：聊天数据的服务端事实源。
+- `api/models/model.py`、`api/services/conversation_query_service.py`、`api/services/message_query_service.py`：聊天数据的服务端事实源。

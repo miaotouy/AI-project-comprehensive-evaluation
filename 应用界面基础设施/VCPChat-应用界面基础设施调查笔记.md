@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
+> 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -30,12 +30,12 @@ VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒�
 
 **状态所有权清单**（补充调查核对）：
 
-- **主题**（settings.json.currentThemeMode）：权威值在主进程，由 `themeHandlers.js:22-39` 经 set-theme-mode IPC 写入并设置 nativeTheme.themeSource；读取当前主题时使用系统暗色判断（:46-48）。渲染层启动时自行读设置后经同一 IPC 触发统一广播回环，不直接改 CSS（见第 4 节首帧链路）。
-- **侧栏状态**（settings.json.sidebarWidth/notificationsSidebarWidth/sidebarAvatarOnly）：渲染进程持有并持久化。宽度在拖拽结束时写入内存设置再落盘，avatarOnly 开关同样走设置保存（`uiManager.js:143-154`、`event-listeners.js:1303-1337`）；主进程只负责文件读写，不消费这些字段。
+- **主题**（settings.json.currentThemeMode）：权威值在主进程，由 `themeHandlers.js:23-40` 经 set-theme-mode IPC 写入并设置 nativeTheme.themeSource；读取当前主题时使用系统暗色判断（:46-48）。渲染层启动时自行读设置后经同一 IPC 触发统一广播回环，不直接改 CSS（见第 4 节首帧链路）。
+- **侧栏状态**（settings.json.sidebarWidth/notificationsSidebarWidth/sidebarAvatarOnly）：渲染进程持有并持久化。宽度在拖拽结束时写入内存设置再落盘，avatarOnly 开关同样走设置保存（`uiManager.js:217-228`、`event-listeners.js:1317-1351`）；主进程只负责文件读写，不消费这些字段。
 
-**Toast/通知。** 主进程只转发 VCP 日志事件（`renderer.js:523-537` 的 onVCPLogMessage），展示状态由渲染层通知单例持有（浮动 Toast 与侧栏双通道，关键分支见 `modules/notificationRenderer.js:67,248`），无持久化、无跨窗口同步；
+**Toast/通知。** 主进程只转发 VCP 日志事件（`renderer.js:545-559` 的 onVCPLogMessage），展示状态由渲染层通知单例持有（浮动 Toast 与侧栏双通道，关键分支见 `modules/notificationRenderer.js:133,322`），无持久化、无跨窗口同步；
 
-应用内部反馈走独立的 Toast 入口（`ui-helpers.js:367-415`），不进入 VCP 通知通道。
+应用内部反馈走独立的 Toast 入口（`ui-helpers.js:485-536`），不进入 VCP 通知通道。
 
 **弹窗。** 命令式 UI 由 uiHelperFunctions 持有与销毁，无全局 store；Modal 的 DOM 生命周期（从 `<template>` 克隆到 `#modal-container`、关闭移除）由该模块管理，入口见 `ui-helpers.js:323-360, 889-977`。
 
@@ -43,15 +43,15 @@ VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒�
 
 **没有使用任何第三方 Modal 库**，全部自定义，有两套分支：
 
-- **通用 Modal**（`uiHelperFunctions.openModal/closeModal`，`modules/ui-helpers.js:323-360`）：给目标元素加/移除 active class。模型选择、正则规则和全局设置三个弹窗均走此路径。
+- **通用 Modal**（`uiHelperFunctions.openModal/closeModal`，`modules/ui-helpers.js:622-660`）：给目标元素加/移除 active class。模型选择、正则规则和全局设置三个弹窗均走此路径。
 
-  打开时聚焦 Modal（:347），但**没有焦点陷阱（focus trap）**，Tab 键可以离开 Modal 到达背景元素。Esc/遮罩点击关闭需各弹窗自行绑定：正则规则弹窗绑定了遮罩点击（:736-739），全局设置弹窗未见 Esc 监听。
-- **确认对话框**（uiHelperFunctions.showConfirmDialog，`modules/ui-helpers.js:889-977`）：返回 `Promise<boolean>`，用于删除 Agent、群组和正则规则等危险操作。
+  打开时聚焦 Modal，但**没有焦点陷阱（focus trap）**，Tab 键可以离开 Modal 到达背景元素。Esc/遮罩点击关闭需各弹窗自行绑定；Next 壳层另有统一的 `overlay-coordinator` 与 `escape-dispatcher` 处理叠加层级与 Esc 派发。
+- **确认对话框**（uiHelperFunctions.showConfirmDialog，`modules/ui-helpers.js:1222-1300`）：返回 `Promise<boolean>`，用于删除 Agent、群组和正则规则等危险操作。
 
-  动态创建 `.confirm-dialog-overlay` 附到 document.body，requestAnimationFrame 后加 visible class 触发 CSS 进场动画，确认按钮自动聚焦（:944）。支持 Esc 取消（:948）、Enter 确认（:951）和点击遮罩取消（:959-963）。`isDanger=true` 时确认按钮加 danger class（红色）。
+  动态创建 `.confirm-dialog-overlay` 附到 document.body，requestAnimationFrame 后加 visible class 触发 CSS 进场动画，确认按钮自动聚焦，并记录打开前的焦点用于关闭后归还。支持 Esc 取消、Enter 确认和点击遮罩取消。`isDanger=true` 时确认按钮加 danger class（红色）。
 
-  关闭时移除 visible class，200ms 后从 DOM 移除（:969-974）。
-- **头像裁剪器**（avatarCropperModal）：Canvas 实现，支持拖拽移动圆形裁剪框和滚轮缩放（半径范围 30-100px），`modules/ui-helpers.js:460-626`。裁剪完成后用 canvas.toBlob 生成 PNG 通过回调传出；事件监听器在关闭时逐一 removeEventListener 清理（:601-608）。
+  关闭时移除 visible class，动画结束后从 DOM 移除。
+- **头像裁剪器**（avatarCropperModal）：Canvas 实现，支持拖拽移动圆形裁剪框和滚轮缩放（半径范围 30-100px），`modules/ui-helpers.js:787-955`。裁剪完成后用 canvas.toBlob 生成 PNG 通过回调传出；事件监听器在关闭时逐一 removeEventListener 清理（:601-608）。
 
 ## 2. 弹窗、浮层与菜单
 
@@ -75,21 +75,21 @@ VCPChat 不依赖第三方 UI 组件库。通用弹窗通过 HTML template 懒�
 
 **持久侧栏列表**：列表项插入通知列表顶部，点击淡出并右滑消失（:387-394），复制按钮复制原始 JSON；tool_approval_request 项展示允许/拒绝按钮和可选理由文本框（:278-330）。
 
-uiHelperFunctions.showToastNotification（`modules/ui-helpers.js:367-415`）是面向应用内部的简化版 Toast，支持四种 type（info、success、error、warning）和自定义 duration（默认 3000ms），行为与上面的浮动通道相似。
+uiHelperFunctions.showToastNotification（`modules/ui-helpers.js:485-536`）是面向应用内部的简化版 Toast，支持四种 type（info、success、error、warning）和自定义 duration（默认 3000ms），行为与上面的浮动通道相似。
 
 **加载态（Loading）**（补充调查）：
 
-**应用启动。** 批处理启动原生启动屏 NativeSplash.exe（`main.js:660` 注释说明由批处理拉起），显示 splash.html 的"正在初始化, 请稍候..."文字和伪进度条（按 10%/30%/70%/100% 假进度推进，`splash.html:92-98, 102-110`）；主窗口 did-finish-load 时生成 `.vcp_ready` 信号文件供启动屏退场（`main.js:438-446`）。
+**应用启动。** 批处理启动原生启动屏 NativeSplash.exe（`main.js:742` 注释说明由批处理拉起），显示 splash.html 的"正在初始化, 请稍候..."文字和伪进度条（按 10%/30%/70%/100% 假进度推进，`splash.html:92-98, 102-110`）；主窗口 did-finish-load 时生成 `.vcp_ready` 信号文件供启动屏退场（`main.js:504-512`）。
 
-**Agent/群组列表加载中。** `itemListManager.js:923` 插入 `<li><div class="loading-spinner-small"></div>加载列表中...</li>`。
+**Agent/群组列表加载中。** `itemListManager.js:1119` 插入 `<li><div class="loading-spinner-small"></div>加载列表中...</li>`。
 
-**话题列表加载中。** `topicListManager.js:540` 插入 `<div class="loading-spinner-small"></div>正在加载 X 的话题...`；群组话题分支是纯文本 `<p>正在加载群组 X 的话题...</p>`（`Groupmodules/grouprenderer.js:983`）。
+**话题列表加载中。** `topicListManager.js:574` 插入 `<div class="loading-spinner-small"></div>正在加载 X 的话题...`；群组话题分支是纯文本 `<p>正在加载群组 X 的话题...</p>`（`Groupmodules/grouprenderer.js:1171`）。
 
-**聊天记录加载中。** 以 isThinking: true 的 system 消息渲染"加载聊天记录中..."（`chatManager.js:606`），内容加两个 thinking 指示类并使用三点位文本动画（`messageRenderer.js:3263-3265`；动画定义见 `styles/messageRenderer.css:111-120`）；
+**聊天记录加载中。** 以 isThinking: true 的 system 消息渲染"加载聊天记录中..."（`chatManager.js:830`），内容加两个 thinking 指示类并使用三点位文本动画（`messageRenderer.js:3772-3774`；动画定义见 `styles/messageRenderer.css:45-54`）；
 
-加载完成/失败/中途切换时 removeMessageById('loading_history')（`chatManager.js:608-637`）。
+加载完成/失败/中途切换时 removeMessageById('loading_history')（`chatManager.js:832-861`）。
 
-**聊天搜索。** 纯文本"正在努力搜索中..."（`searchManager.js:236`）。
+**聊天搜索。** 纯文本"正在努力搜索中..."（`searchManager.js:272`）。
 
 **图片查看器。** 无加载动画，图片默认隐藏，加载完成后才显示并启用工具栏（`image-viewer.html:496`、`image-viewer.js:454-458`）；加载失败时切换错误占位并隐藏工具栏（:578-584）。
 
@@ -97,31 +97,31 @@ uiHelperFunctions.showToastNotification（`modules/ui-helpers.js:367-415`）是�
 
 **空状态**（补充调查）：
 
-**Agent/群组列表为空。** `<li>没有找到Agent或群组。请创建一个。</li>`（`itemListManager.js:888`）。
+**Agent/群组列表为空。** `<li>没有找到Agent或群组。请创建一个。</li>`（`itemListManager.js:1076`）。
 
-**话题列表。** 未选择项目 → "请先在'助手与群组'列表选择一个项目以查看其相关话题。"（`topicListManager.js:527`）；无话题 → "X 还没有任何话题…点击上方的'新建…'按钮创建一个。"（:603）；配置加载失败 → 内联错误文本（:556）。
+**话题列表。** 未选择项目 → "请先在'助手与群组'列表选择一个项目以查看其相关话题。"（`topicListManager.js:558`）；无话题 → "X 还没有任何话题…点击上方的'新建…'按钮创建一个。"（:603）；配置加载失败 → 内联错误文本（:556）。
 
-**聊天区。** 无选中项目 → welcome-bubble"欢迎，请从左侧选择 AI 助手或群组，或创建新的对话。"（`chatManager.js:340`）；有项目无话题 → "请选择或创建一个话题以开始聊天。"（:599）；历史加载失败 → system 消息（:643）。
+**聊天区。** 无选中项目 → welcome-bubble"欢迎，请从左侧选择 AI 助手或群组，或创建新的对话。"（`chatManager.js:535`）；有项目无话题 → "请选择或创建一个话题以开始聊天。"（:599）；历史加载失败 → system 消息（:643）。
 
-**聊天搜索。** 输入不足 2 字符提示（`searchManager.js:227`）、无结果"未找到匹配的结果。"（:384）、错误占位（:373）。
+**聊天搜索。** 输入不足 2 字符提示（`searchManager.js:228`）、无结果"未找到匹配的结果。"（:384）、错误占位（:373）。
 
 **通知侧栏。** `#notificationsList` 为空时无专门占位（`main.html:724` 是空 `<ul>`，notificationRenderer 无空态文案）。表情包空态"没有找到可用的表情包"见第 2 节。
 
 **错误边界**（补充调查）：
 
-**渲染进程。** 在 `renderer.js`、`modules/`、`preload.js` 检索 window.onerror、addEventListener('error')、unhandledrejection——**本次未找到**任何全局错误挂载；DOMContentLoaded 初始化的大 try/catch 只 console.error（`renderer.js:1155-1157`）。
+**渲染进程。** 在 `renderer.js`、`modules/`、`preload.js` 检索 window.onerror、addEventListener('error')、unhandledrejection——**本次未找到**任何全局错误挂载；DOMContentLoaded 初始化的大 try/catch 只 console.error（`renderer.js:1262-1264`）。
 
-用户可见的错误呈现分散在各业务路径：聊天区 system 消息（`chatManager.js:643`）、列表内联错误占位（`topicListManager.js:556`、`searchManager.js:373`）、showToastNotification(..., 'error')（如 `renderer.js:1519, 1822, 2510`），无统一错误收集或上报。
+用户可见的错误呈现分散在各业务路径：聊天区 system 消息（`chatManager.js:867`）、列表内联错误占位（`topicListManager.js:675`、`searchManager.js:409`）、各渲染 owner 里的 toast 报错（`modules/renderer/` 下的 forward、attachment、tts 等模块），无统一错误收集或上报。
 
-**主进程。** `main.js:409-411` 监听 webContents 'did-fail-load'、:413-415 监听 render-process-gone，**都只 console.error，无恢复动作或用户提示**；
+**主进程。** `main.js:475-477` 监听 webContents 'did-fail-load'、:413-415 监听 render-process-gone，**都只 console.error，无恢复动作或用户提示**；
 
 未发现 uncaughtException、unresponsive、旧版 webContents.on('crashed') 监听（检索 `main.js` 与 `modules/ipc/` 无匹配）。
 
-dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/diceHandlers.js:46`、音乐引擎 `musicHandlers.js:71`、图片复制 `fileDialogHandlers.js:296-336`），不是崩溃级兜底。
+dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/diceHandlers.js:46`、音乐引擎 `musicHandlers.js:90`、图片复制 `fileDialogHandlers.js:296-336`），不是崩溃级兜底。
 
 ## 4. 主题、视觉 token 与持久化
 
-主题切换**不是 CSS 变量热替换，而是整窗口重载**：handleApplyTheme（`modules/ipc/themeHandlers.js:93-108`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后重载主窗口和主题窗口（:101、:103），窗口完整重新加载。
+主题切换**不是 CSS 变量热替换，而是整窗口重载**：handleApplyTheme（`modules/ipc/themeHandlers.js:77-92`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后重载主窗口和主题窗口（:101、:103），窗口完整重新加载。
 
 - 深色/浅色通过 Electron nativeTheme.themeSource 控制（:22-38），可设 'light'/'dark'/'system'，值存入 `settings.json` 的 currentThemeMode。系统主题跟随通过监听更新事件（:41-44, :207），变更时向所有窗口广播 theme-updated IPC，渲染进程收到后切换 body.light-theme class。
 - CSS 变量约定：:root 块定义暗色主题变量，body.light-theme 块覆盖亮色变量；每个主题文件同时包含两个块，themeHandlers.handleGetThemes 可枚举所有主题及其变量名（:50-91）。主题选择器是独立 850×700 无框子窗口（`Themesmodules/themes.html`，frame: false，:169）。
@@ -131,15 +131,15 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 - `main.html` 的 `<body>`（:31）无预置 class，页面首个样式帧使用 `styles/themes.css` 的 :root 块（暗色默认变量）。
 
-  **主题模式由渲染进程发起同步。** 渲染层先读取 settings.json，再通过 IPC 把模式交给主进程。主进程更新 nativeTheme 并写回设置，系统主题变化后广播给各窗口，渲染层最终切换 body 的 light-theme class。（`themeHandlers.js:22-44`；`uiManager.js:165-209`）
-- 因此 body.light-theme 的施加要等"读设置 → IPC → nativeTheme 回环"这一异步往返完成；**light 模式用户首帧先以暗色 :root 渲染一帧再切换**（基于调用链的静态推断，是否肉眼可见取决于往返耗时）。`main.js:420` 注释自述："默认 system，由渲染进程启动时发送已保存偏好"。设置缺失时降级：get-current-theme IPC 查主进程（`uiManager.js:213-221`），最终兜底 'light'（:219, :167-169）。
+  **主题模式由渲染进程发起同步。** 渲染层先读取 settings.json，再通过 IPC 把模式交给主进程。主进程更新 nativeTheme 并写回设置，系统主题变化后广播给各窗口，渲染层最终切换 body 的 light-theme class。（`themeHandlers.js:23-45`；`uiManager.js:239-283`）
+- 因此 body.light-theme 的施加要等"读设置 → IPC → nativeTheme 回环"这一异步往返完成；**light 模式用户首帧先以暗色 :root 渲染一帧再切换**（基于调用链的静态推断，是否肉眼可见取决于往返耗时）。`main.js:486` 注释自述："默认 system，由渲染进程启动时发送已保存偏好"。设置缺失时降级：get-current-theme IPC 查主进程（`uiManager.js:287-295`），最终兜底 'light'（:219, :167-169）。
 - 与整窗口重载的关系：主题文件切换（handleApplyTheme）`reload()` 后上述启动链路整体重跑一遍，首帧主题行为与冷启动一致，无内联主题脚本兜底。
 
 **主题选择器与外观工作室的能力边界**：
 
-- **主题选择器内容**（`Themesmodules/themes.html` + `themes.js` + `themes-module.css`）：入口有主窗口标题栏"主题商店"按钮（`main.html:37-45`）、托盘菜单（`modules/trayManager.js:33`）与 Desktop 窗口（`Desktopmodules/builtinWidgets/vchatApps.js:314`）三处。
+- **主题选择器内容**（`Themesmodules/themes.html` + `themes.js` + `themes-module.css`）：入口有主窗口标题栏"主题商店"按钮（`main.html:37-45`）、托盘菜单（`modules/trayManager.js:36`）与 Desktop 窗口（`Desktopmodules/builtinWidgets/vchatApps.js:324`）三处。
 
-  窗口由主题卡片网格、实时预览区和“应用并刷新”按钮组成：卡片是双栏预览，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（`Themesmodules/themes.js:74-219`）。该窗口本身仍只选择 CSS 主题预置，不编辑主题文件。
+  窗口由主题卡片网格、实时预览区和“应用并刷新”按钮组成：卡片是双栏预览，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（`Themesmodules/themes.js:82-227`）。该窗口本身仍只选择 CSS 主题预置，不编辑主题文件。
 
   `#saveThemeBtn`（:222-226）实际只是调用 applyTheme IPC 应用选中主题，变量名（"保存主题"）与按钮文案"应用并刷新"存在落差，不能据此理解为保存自定义主题。
 
@@ -149,35 +149,35 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **主题文件结构与元数据。** 17 个文件均为纯 CSS 变量文件，实测 17/17 同时含 :root（暗色）与 body.light-theme（亮色）两个变量块；变量分六组：壁纸、基础色（bg/边框/输入框）、文字色、气泡色、UI 元素与语义色（按钮/危险/成功/通知/工具）、滚动条与 shimmer。
 
-**无独立预览图文件**——选择器卡片与预览区的颜色全部取自主题解析结果（`themeHandlers.js:50-91`），壁纸取自 `--chat-wallpaper-*`。主题名元数据为 * Theme Name: 注释（:59），但 17 个文件中仅 3 个（themesEva/夜樱猫语/星渊雪境）声明，其余回退为文件名去掉 themes 前缀。
+**无独立预览图文件**——选择器卡片与预览区的颜色全部取自主题解析结果（`themeHandlers.js:51-75`），壁纸取自 `--chat-wallpaper-*`。主题名元数据为 * Theme Name: 注释（:59），但 17 个文件中仅 3 个（themesEva/夜樱猫语/星渊雪境）声明，其余回退为文件名去掉 themes 前缀。
 
 **壁纸机制边界。** 主窗口**无壁纸管理 UI**——`--chat-wallpaper-dark/light` 随主题文件固定（`themes.css:75-80`、`styles/base.css:29`），壁纸图片打包在 `assets/wallpaper/`（26 个文件），用户不能换图；
 
-主题选择器的壁纸预览经 get-wallpaper-thumbnail IPC（`themeHandlers.js:111-157`）用 sharp（懒加载）生成 400px JPEG 缩略图，缓存于 WallpaperThumbnailCache 目录。
+主题选择器的壁纸预览经 get-wallpaper-thumbnail IPC（`themeHandlers.js:95-141`）用 sharp（懒加载）生成 400px JPEG 缩略图，缓存于 WallpaperThumbnailCache 目录。
 
 **Desktop 窗口另有独立壁纸系统。** 它支持图片、视频和 HTML 动态壁纸，并可设置透明度、模糊、亮度、静音与播放速度。来源既可以由本地选择，也可以远程下发 URL、file 地址或内联 HTML；这套机制与聊天窗口主题壁纸相互独立。（`Desktopmodules/ui/globalSettings.js:21-31,186`）
 
-**主题模式双 IPC 通道。** 除 set-theme-mode（`themeHandlers.js:22-39`，light/dark/system）外，设置处理器（`modules/ipc/settingsHandlers.js:278-297`）另注册 set-theme（仅 light/dark，成功后手动广播主题更新）；
+**主题模式双 IPC 通道。** 除 set-theme-mode（`themeHandlers.js:23-40`，light/dark/system）外，设置处理器（`modules/ipc/settingsHandlers.js:279-298`）另注册 set-theme（仅 light/dark，成功后手动广播主题更新）；
 
-两条通道都会写 `settings.json` 的 currentThemeMode 与 `themeLastUpdated: Date.now()`（`themeHandlers.js:31`、`settingsHandlers.js:287`），后者为本次核对新确认的持久化字段。
+两条通道都会写 `settings.json` 的 currentThemeMode 与 `themeLastUpdated: Date.now()`（`themeHandlers.js:32`、`settingsHandlers.js:288`），后者为本次核对新确认的持久化字段。
 
 **主题文件可不只是变量。** 默认主题"纸墨与机芯"的 `themes.css` 还携带材质与行为规则（:147-357）：磨砂面板 backdrop-filter、气泡描边/阴影、流式脉冲动画 vcpOperationalPulse/editorialProofPulse、滚动条、:focus-visible 焦点环、prefers-reduced-motion 兜底，并声明 `color-scheme: dark/light`——整窗口重载覆写同样会切换这些规则；
 
 其余 16 个文件以变量为主、偶带少量增强规则（如 themesEva 的磨砂气泡）。即"主题文件"由"变量 + 可选材质/行为规则"组成，非纯 token 文件。
 
-**字号/密度。** 全局设置只有字体族预设（正文/代码/日记/工具四类 + 自定义 font-family，`main.html:998-1099`，含场景预览网格 `#fontScenarioPreviewGrid`），**无字号与界面密度设置**（检索"字号/字体大小/fontSize/density"未找到用户入口）；基础字号固定 `styles/base.css:19`（15px）。
+**字号/密度。** 全局设置只有字体族预设（正文/代码/日记/工具四类 + 自定义 font-family，`main.html:1019-1132`，含场景预览网格 `#fontScenarioPreviewGrid`），**无字号与界面密度设置**（检索"字号/字体大小/fontSize/density"未找到用户入口）；基础字号固定 `styles/base.css:19`（15px）。
 
 ## 5. 响应式、移动端与窗口适配
 
-**侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:48-130`。最小/最大宽度**从 CSS 的 computed.minWidth / computed.maxWidth 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，:93, :98），最大宽度 fallback 600px（:57）。拖拽过程中通过 requestAnimationFrame 节流更新，拖拽时禁用元素 transition 以避免卡顿（:88）。
+**侧栏可拖拽宽度**：调整逻辑在 `modules/uiManager.js:53-204`。最小/最大宽度**从 CSS 的 computed.minWidth / computed.maxWidth 动态读取**，代码中仅提供 180px 作为 fallback（左侧栏和右侧通知栏均为 180px，:93, :98），最大宽度 fallback 600px（:57）。拖拽过程中通过 requestAnimationFrame 节流更新，拖拽时禁用元素 transition 以避免卡顿（:88）。
 
-**Compact navigation 触发条件**：由 **settings.sidebarAvatarOnly 字段控制**（`renderer.js:1577`），窗口宽度变化不触发切换——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。
+**Compact navigation 触发条件**：由 **`settings.sidebarAvatarOnly` 字段控制**（`modules/renderer/mainChatSettingsPresentationOwner.js:84-108`），窗口宽度变化不触发切换——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单。
 
-点击菜单项中的 Topics 触发 leftSidebar.classList.add('compact-topics-open')，话题列表以抽屉形式叠加显示（`uiManager.js:382-386`）；Esc 键关闭抽屉（:451）；点击话题项后自动关闭抽屉（:439-441）。
+点击菜单项中的 Topics 触发 leftSidebar.classList.add('compact-topics-open')，话题列表以抽屉形式叠加显示（`uiManager.js:456-460`）；Esc 键关闭抽屉（:451）；点击话题项后自动关闭抽屉（:439-441）。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-图片预览**打开独立 Electron 子窗口**（`modules/image-viewer.html`），不做消息内嵌灯箱。触发点：`modules/messageRenderer.js:2613` 调用 `electronAPI.openImageViewer({ src, title, theme })`。图片查看器功能远超简单灯箱：
+图片预览**打开独立 Electron 子窗口**（`modules/image-viewer.html`），不做消息内嵌灯箱。触发点：`modules/messageRenderer.js:3101` 调用 `electronAPI.openImageViewer({ src, title, theme })`。图片查看器功能远超简单灯箱：
 
 **缩放。** Ctrl+滚轮，范围 0.05×–32×（支持极端缩小看长截图全貌）；Shift+滚轮步长更大（`ZOOM_FACTOR_FAST=1.5` vs `ZOOM_FACTOR_STEP=1.15`，`image-viewer.js:54-56`）。
 
@@ -191,7 +191,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 **GIF 支持。** GIF 以动画形式展示；
 
-未编辑（`historyStep<=0`）的 GIF 可**复制原动画**——Chromium Async Clipboard 不接受 `image/gif`，改经 image-viewer:copy-gif IPC 把原始字节写入 Electron 原生剪贴板（`modules/ipc/windowHandlers.js:155-181`，校验 GIF87a/89a 魔数、100MB 上限，macOS 用 public.gif、其余平台 `image/gif`）；
+未编辑（`historyStep<=0`）的 GIF 可**复制原动画**——Chromium Async Clipboard 不接受 `image/gif`，改经 image-viewer:copy-gif IPC 把原始字节写入 Electron 原生剪贴板（`modules/ipc/windowHandlers.js:182-208`，校验 GIF87a/89a 魔数、100MB 上限，macOS 用 public.gif、其余平台 `image/gif`）；
 
 下载时保 `.gif` 扩展名（getGifDownloadName），PNG 默认名"image.png"时改为带时间戳的 image_YYYYMMDD_HHMMSS.png（getPngDownloadName，`image-viewer.js:165-188`）。
 
@@ -205,8 +205,8 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 ### 键盘快捷键清单
 
 **全局快捷键**（Electron globalShortcut，应用窗口无焦点时也有效）：
-- Super+Alt+Z：打开便签（note-mini）窗口（`main.js:1164`）
-- Ctrl+Shift+I：打开开发者工具（`main.js:1160`；根据焦点窗口转发到 Loom 或普通开发者工具入口）
+- Super+Alt+Z：打开便签（note-mini）窗口（`main.js:1377`）
+- Ctrl+Shift+I：打开开发者工具（`main.js:1373`；根据焦点窗口转发到 Loom 或普通开发者工具入口）
 - CommandOrControl+Shift+P：划词助手浮窗（动态注册/注销，`modules/ipc/assistantHandlers.js:724`）
 
 **应用内快捷键**（`modules/event-listeners.js:1461-1523`，仅主窗口有焦点时有效）：
@@ -217,7 +217,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 - `Ctrl/Cmd+Shift+N`：新建未上锁话题（:1510-1512）
 - Shift+Enter：输入框内换行（非 Shift 的 Enter 直接发送，:443-444）
 
-**设置页面鼠标快捷操作**（`modules/settingsManager.js:604-660`）：
+**设置页面鼠标快捷操作**（`modules/settingsManager.js:681-751`）：
 - 设置 tab 内双击右键：跳回助手（Agents）页面（300ms 双击检测）
 - 设置 tab 内中键点击：跳转到话题（Topics）页面
 
@@ -236,9 +236,9 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ### 桌面集成（Electron）
 
-- **系统托盘**（`main.js:454-555`）：图标 `assets/icon.png`，tooltip "VCP AI 聊天客户端"。右键菜单：显示/隐藏主窗口、显示/隐藏信息流监听器、打开 VCP 桌面、退出。左键点击切换主窗口显隐（若主窗口已销毁则改为切换 RAG 观测窗口）。macOS 特殊处理：左键切换显隐、右键弹菜单、不设 setContextMenu 以避免左键也弹菜单（:541-552）；
+- **系统托盘**（`main.js:520-634`）：图标 `assets/icon.png`，tooltip "VCP AI 聊天客户端"。右键菜单：显示/隐藏主窗口、显示/隐藏信息流监听器、打开 VCP 桌面、退出。左键点击切换主窗口显隐（若主窗口已销毁则改为切换 RAG 观测窗口）。macOS 特殊处理：左键切换显隐、右键弹菜单、不设 setContextMenu 以避免左键也弹菜单（:541-552）；
 
-  macOS 图标 resize 16×16 并 setTemplateImage(true) 适配深浅色菜单栏（:457-465）。关闭主窗口时若桌面模式（Desktop 窗口）活跃，主窗口隐藏到托盘而非退出（`main.js:376-397`）。
+  macOS 图标 resize 16×16 并 setTemplateImage(true) 适配深浅色菜单栏（:457-465）。关闭主窗口时若桌面模式（Desktop 窗口）活跃，主窗口隐藏到托盘而非退出（`main.js:442-463`）。
 - **语音聊天窗口**（`Voicechatmodules/voicechat.html`，`voicechat.js`）：独立子窗口，初始 `inputMode='text'`，点击切换按钮（toggleInputModeBtn）在文本/语音模式切换（:55, :311-320）。
 
   语音模式用语音识别（browser speech API 或外部识别器），3 秒无语音超时（`SPEECH_TIMEOUT_DURATION=3000`，:58）。关闭窗口时自动将本次对话历史保存为当前 Agent 的新 Topic（:131-163）并尝试调用话题自动总结。audioContext 在首次用户手势时初始化（:14-23），避免自动播放限制。
@@ -277,7 +277,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 ### 无障碍现状（静态代码结论）
 
 **已有 ARIA 标注的区域**：
-- Presentation mode 切换器（`main.html:47-53`）：`role="radiogroup"` + `aria-label="聊天显示模式"`，各按钮 `role="radio"` 和 aria-checked
+- Presentation mode 切换器（`main.html:74-80`）：`role="radiogroup"` + `aria-label="聊天显示模式"`，各按钮 `role="radio"` 和 aria-checked
 - 侧栏 tabs：`role="tablist"` + `aria-label="Sidebar sections"`，tabpanel 有 aria-hidden
 - Compact navigation：`aria-label="窄侧栏导航"`，trigger 按钮有 aria-label，menu 项有 `role="menuitem"`
 - 设置区各折叠按钮：有 `aria-label="展开或收起xxx"`（`main.html:239, :374, :394` 等）
@@ -296,9 +296,23 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ### 当前界面运行时与启动边界
 
-当前快照继续把通用 UI 的可释放资源收敛到 surface、task 与 contribution registries，并为嵌入应用、覆盖层、通知菜单和启动主题提供各自的生命周期控制器。另新增独立 Tauri bootstrapper：其职责是受管安装、环境检查、修复、更新与回滚后的桌面交接，和 Electron 主窗口的主题、弹窗、聊天状态不共享同一运行时。静态阅读只能确认状态与事件的所有权，不能证明实际窗口焦点、可访问性或升级回滚体验。
+当前快照的主窗口只有一套 presentation：`main.html` 根节点静态声明 `data-ui-mode="next"`，不再存在可切换的双布局；历史 `uiMode` 设置值只做兼容归一化。壳层由 `NextShellController` 组织，下面拆成标签宿主、覆盖层协调、嵌入应用、启动台、创建、账户菜单、助手搜索与 Esc 派发等窄控制器；通用组件的 UI 内核是离线的 Web Awesome 适配层（`VCPUI`，stable/candidate 两档组件成熟度），展示页 Toast/Dialog/Loading 通过 `feedback.owner(scope)` 归属到具体生命周期。Classic 页面仅保留给尚未迁移的业务子页面。依据：`main.html:2`、`modules/ui-system/next-shell/next-shell-controller.js`、`overlay-coordinator.js`、`escape-dispatcher.js`、`docs/next-ui-current-state.md`。
+
+通用 UI 的可释放资源继续收敛到 surface、task 与 contribution registries，并为嵌入应用、覆盖层、通知菜单和启动主题提供各自的生命周期控制器。另新增独立 Tauri bootstrapper：其职责是受管安装、环境检查、修复、更新与回滚后的桌面交接，和 Electron 主窗口的主题、弹窗、聊天状态不共享同一运行时。静态阅读只能确认状态与事件的所有权，不能证明实际窗口焦点、可访问性或升级回滚体验。
 
 全局设置保存由 save coordinator 汇总多个保存 owner。每次操作有 operationId，持久层 revision 作为下一次 compare-and-swap 的 expectedRevision；冲突、可重试错误、保存中、脏、已保存和空闲按固定优先级合成到表单状态。关闭面板时 `flush()` 会等待各 client 的保存 hook 和进行中 promise，遇到 error/conflict 停止，而不是静默丢弃待保存状态。`modules/ui-system/settings/save-coordinator.js:54-112,129-200,246-260`
+
+### 渲染进程能力边界：preload 角色隔离与可选功能模块
+
+渲染进程不再通过单一 `electronAPI` 全量访问主进程能力，而是按窗口角色暴露三套受控对象：
+
+- 角色入口 `preloads/chat.js`、`utility.js`、`desktop.js` 只调一次 `exposeRole(角色)`，页面上得到 `chatAPI`/`utilityAPI`/`desktopAPI` 之一；同时保留兼容用的 `electronAPI`，其中本角色不可见的 API 是隔离桩，调用时打印“权限已隔离: 名称”。
+- API 按领域声明在 `preloads/api/*.js`（37 个领域文件），每条形如 `invoke('通道', '参数名')`；`preloads/core/registry.js` 扫描领域文件与功能目录自带的 `modules/<功能>/preloadApi.js`，做重名、角色与条目类型校验，失败直接让 preload 启动报错。
+- 使用角色 preload 的窗口必须 `sandbox: false`，`contextIsolation: true` 与 `nodeIntegration: false` 保持不变；`tests/preload-registry.test.js` 校验窗口清单。
+
+可选功能模块走 `feature.json` 清单：主进程 `modules/appFeatures.js` 按 `<AppData>/features.json` 计算启用集合，停用功能的 `preloadApi.js` 不暴露，渲染侧 `modules/renderer/appFeatures.js` 只 import 已加载功能的 `renderer` 入口。当前只有一个 feature 模块（桌宠 `modules/deskpet/`）。依据：`preloads/README.md`、`preloads/core/{define,registry,expose}.js`、`docs/app-features.md`。
+
+
 
 依据：`modules/ui-system/surface-controller.js`、`task-handle.js`、`contribution-registry.js`、`next-shell/overlay-coordinator.js`、`apps/bootstrap-installer/src-tauri/src/lib.rs`、`process.rs`、`storage.rs`。
 
@@ -332,7 +346,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ## 10. 关键源码索引
 
-- `modules/ui-helpers.js`（323-360 openModal）
+- `modules/ui-helpers.js`（622-660 openModal，1222-1300 showConfirmDialog，787-955 头像裁剪）
 - `modules/notificationRenderer.js`
 - `modules/ipc/themeHandlers.js`（22-39 set-theme-mode）
 - `modules/ipc/settingsHandlers.js`（278-297 set-theme 通道）

@@ -2,7 +2,7 @@
 
 > 汇总对象：`NextChat`（远端仓库 `https://github.com/ChatGPTNextWeb/NextChat`）
 >
-> 汇总更新日期：2026-08-18
+> 汇总更新日期：2026-11-04
 >
 > 依据：14 篇来源笔记（Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、媒体创作）
 >
@@ -93,7 +93,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **OpenAPI 插件工具链**：把 YAML/JSON OpenAPI 文档的 operation 转成 OpenAI 风格 function schema 并生成本地执行映射；模型返回 `tool_calls` 后浏览器并发执行对应 HTTP operation，结果包装 `role: tool` 消息回注并 60ms 后递归重发同一 payload；插件由当前会话 `Mask.plugin` 决定，内置插件从 `plugins.json` 加载。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §1/§2、[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §5/§9。
 
-- **MCP 工具链**：已连接 stdio MCP server 的工具目录经 `getMcpSystemPrompt` 注入 system prompt，模型按 `json:mcp:<clientId>` fenced block 文本协议输出请求，客户端正则提取并经 MCP SDK 执行，结果以 `isMcpResponse` 用户消息回注下一轮；生命周期状态为 undefined/initializing/active/paused/error；工具不受 `Mask.plugin` 过滤，由全局开关与活跃 server 决定。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §3/§4、[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §7/§9。
+- **MCP 工具链**：已连接 stdio MCP server 的工具目录经 `getMcpSystemPrompt` 注入 system prompt（调用时携带客户端 AccessStore 里的 access code），模型按 `json:mcp:<clientId>` fenced block 文本协议输出请求，客户端正则提取并经 MCP SDK 执行，结果以 `isMcpResponse` 用户消息回注下一轮；生命周期状态为 undefined/initializing/active/paused/error；工具不受 `Mask.plugin` 过滤，由全局开关与活跃 server 决定。所有 `"use server"` 入口先过 `assertMcpAuthorized`：`ENABLE_MCP` 必须开启、部署侧必须配置 `CODE`、调用方 access code 的 MD5 需命中允许集合，否则 MCP 整组不可用。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §3/§4、[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §7/§9。
 
 - **OpenAPI/MCP 工具执行模型**：OpenAPI 插件与 MCP 调用均在用户会话上下文内由客户端/服务端直接执行并回注结果，执行结果以工具状态区与消息文本展示。执行模型无统一审批、沙箱、权限策略与步数上限，文本协议脆弱性等边界细节见末尾小节。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §2.3/§5。
 
@@ -137,7 +137,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **多设备同步疑似缺陷**：`mergeWithUpdate` 的 remote 时间变量取成了 `localState.lastUpdateTime`，远端时间戳不参与比较，本地时间戳非 0 时远端状态永不胜出（静态推断疑似实现缺陷，未在 WebDAV/多设备流程复现）。证据状态：`主链确认`（含静态推断缺陷）。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §6。
 
-- **工具执行模型边界**：OpenAPI 插件 HTTP 与 MCP stdio 调用无统一审批、沙箱、权限策略或 Agent 步数上限；插件认证 token 进入客户端持久化、MCP 子进程继承整个 `process.env`；arguments 直接 `JSON.parse`、未知函数名无存在性检查；MCP 文本协议依赖正则与完整 fenced block，多调用/未闭合 block/非法 JSON 只记录错误，无结构化恢复，重发收敛依赖 60 秒请求级 abort。证据状态：`主链确认`（边界）。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §2.3/§5。
+- **工具执行模型边界**：OpenAPI 插件 HTTP 与 MCP stdio 调用无统一审批、沙箱、权限策略或 Agent 步数上限；MCP 侧的 access code 门禁只决定"谁能调用整组端点"，通过后仍按模型给出的参数直接执行；MCP access code 由客户端 AccessStore 持有并随调用传入前端可见；MCP 子进程环境由 SDK 默认变量加 server 配置组成，不再继承整个 `process.env`；插件认证 token 进入客户端持久化；arguments 直接 `JSON.parse`、未知函数名无存在性检查；MCP 文本协议依赖正则与完整 fenced block，多调用/未闭合 block/非法 JSON 只记录错误，无结构化恢复，重发收敛依赖 60 秒请求级 abort。证据状态：`主链确认`（边界）。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §2.3/§5。
 
 ### 未覆盖类目与未找到的能力
 
@@ -147,7 +147,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 ### 共性未验证
 
 - 全部结论基于静态源码；真实模型调用、SSE 断线重试、Mermaid/Artifact iframe 运行表现、Tauri 桌面行为、跨窗口/多标签同步、token 估算偏差、大数据量性能、无障碍与视觉运行态均未运行验证；各来源笔记"未验证事项"章节逐项列明。这些"未验证"仅为方法学约束，不否定已确认的源码完备性（口径见"完成度速览"）。
-- 调查日期与代码快照：各来源笔记均基于提交 `defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支 `main`）；调查更新日期为 2026-08-12 至 2026-08-18，以来源笔记元数据为准。
+- 调查日期与代码快照：各来源笔记均基于提交 `1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支 `main`）；调查更新日期为 2026-11-04，以来源笔记元数据为准。
 
 ## 来源笔记索引
 

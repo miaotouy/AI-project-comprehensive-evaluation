@@ -1,187 +1,177 @@
 # DeepSeek Harness 独特功能调查笔记
 
-> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`，关联 `packages/bundle/`、`packages/runtime-diagnostics/invariants`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/e2b/`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/boot/plugin-manager`、`packages/boot/plugin-market`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`、`packages/team/`，关联 `packages/bundle/`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/experimental/{forge,liveshare,worktree,auto-review,webhook,browser-use,computer-use}`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
+> 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
-> 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（goal、plan、schedule、sandbox、extensions、subagent、persistence、spill）与关键 src 文件（`tool-cordis`、`cordis-host-runner` 的 sandbox/lifecycle、`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/index、`sandbox-local`、`subagent` 的 index/continuation、`native/landlock-run` 入口 C 源）；未运行任何进程或测试
+> 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（goal、plan、schedule、sandbox、extensions、subagent、agent-team、forge、liveshare、persistence、spill 等）与关键 src 文件（`tool-cordis`、`cordis-host-runner` 的 inspection registry、`plugin-manager`、`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/tools、`sandbox-local`、`subagent` 的 activation/out-of-process、`team/agent-team`）；辅以 `docs/upgrade-guide/`；未运行任何进程或测试
 >
-> 调查范围：覆盖——agent harness 特有的机制集合：自引用插件运行时、进程沙箱、同会话目标驱动、plan mode 日志化状态、session-local 定时调度、多 provider 子代理能力族，以及 invariants/bundle/skill 注册表/workflow/jobs/e2b/feedback/attachment 机制盘点；排除——工具 schema、执行管线、审批与渲染细节（归 Agent 工具笔记）、agent-loop 回合执行（归 Chat 笔记）、会话持久化与压缩（归会话与消息管理、对话请求与上下文笔记）、LLM 渠道（归 LLM 渠道管理笔记）
+> 调查范围：覆盖 agent harness 特有的机制集合：只读自省 + 持久插件安装的自扩展、进程沙箱、同会话目标驱动、plan mode 日志化状态、Host 级定时任务、多 provider 子代理能力族与团队任务板，以及 plugin market/bundle/skill 注册表/workflow/jobs/forge/liveshare/worktree/auto-review/webhook/browser-use/computer-use 机制盘点；排除工具 schema、执行管线、审批与渲染细节（归 Agent 工具笔记）、agent-loop 回合执行（归 Chat 笔记）、会话持久化与压缩（归会话与消息管理、对话请求与上下文笔记）、LLM 渠道（归 LLM 渠道管理笔记）
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一组机制上。六个机制均达到主链确认（静态证据）：**自引用插件运行时**让 agent 检查自己所在 Cordis 进程的插件与服务目录，并把模型写的插件包挂载、运行、回滚进同一进程；**进程沙箱**把文件效应策略按每次调用携带，经四个平台后端 fail-closed 执行；**同会话目标驱动**把长期目标做成事件溯源状态，由轮次驱动插件在会话内自动续跑；**plan mode 日志化状态**与 **session-local 定时调度**共用"会话日志折叠出状态、进程内只留可弃投影"的模式；**多 provider 子代理**是一个委派契约下六种执行位置的子 agent 能力族。
+dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一组机制上。六个机制均达到主链确认（静态证据）：**自省式自扩展**让模型只读检查自己所在 Cordis 进程的服务与 Loader 条目，再通过持久插件管理安装 bundle 改变后续会话；**进程沙箱**把文件效应策略按每次调用携带，经平台后端 fail-closed 执行；**同会话目标驱动**把长期目标做成事件溯源状态，由轮次驱动插件在会话内自动续跑；**plan mode 日志化状态**与 **Host 级定时任务**分别把协作状态与时序任务做成"会话日志或领域存储折叠出状态、进程内只留可弃投影"；**多 provider 子代理能力族**在一个委派契约下覆盖六种执行位置，并叠加团队任务板。
 
-这些机制共享三条架构模式：一是能力缝三角（Service Definition / Provider / Consumer），新行为一律放插件扩展点而不改 agent-loop；二是会话事件日志是唯一持久权威，任何状态都从日志折叠恢复，不设平行持久对象；三是"模型可见 ⟺ 已落盘"的日志完整不变量。除六个主机制外，invariants（运行时不变式注册表）、bundle（profile patch-layer 插件包）、skill 注册表、workflow/jobs 等支撑机制另行盘点，见下文。
+这些机制共享三条架构模式：一是能力缝三角（Service Definition / Provider / Consumer），新行为一律放插件扩展点而不改 agent-loop；二是持久权威集中——会话事件日志承担会话内状态，schedule 与 team 把权威放在各自的领域存储或根会话，不设平行进程状态；三是"模型可见 ⟺ 已落盘"的日志完整不变量。除六个主机制外，plugin market/bundle、skill 注册表、workflow/jobs、forge、LiveShare、worktree、auto-review、webhook、browser/computer-use 等支撑与实验机制另行盘点。
+
+两处已确认的移除：**运行期不变式（invariants）包族整体删除**，动态插件 define/run/stop/undefine 的模型工具入口不存在；**E2B 远程沙箱包族删除**，远端执行世界改由 POSIX SSH provider 家族承担。
 
 ## 介绍声明与候选盘点
 
-根 README 只自称 everything is a plugin 的 agent harness（`README.md:5-7`），但根 `AGENTS.md` 的包清单直接点名"agent inspects/mounts its own plugins"、"plan mode as logged state"、sandbox、goal、schedule、subagent、bundle 等候选；`docs/subsystems/` 逐页描述机制语义。候选状态如下：
+根 README 仍自称 everything is a plugin 的 agent harness，根 `AGENTS.md` 的包清单点名 sandbox、goal、plan、schedule、subagent、bundle 等候选；`docs/subsystems/` 逐页描述机制语义。候选状态如下：
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
-| 自引用插件运行时 | 主链确认（静态） | 本次能力一；`demo:cordis` 演示脚本与 `examples/web-cordis` 组合 |
-| 进程沙箱 | 主链确认（静态） | 本次能力二；含 `native/` 的 Landlock C 启动器 |
+| 自省式自扩展（inspect + 插件安装） | 主链确认（静态） | 本次能力一；只读 inspect 工具加 plugin_manager/plugin_market |
+| 进程沙箱 | 主链确认（静态） | 本次能力二；含 `native/` 的 Landlock C 启动器与 Windows ACL 后端 |
 | 同会话目标驱动 | 主链确认（静态） | 本次能力三 |
 | plan mode 日志化状态 | 主链确认（静态） | 本次能力四 |
-| session-local 定时调度 | 主链确认（静态） | 本次能力五 |
-| 多 provider 子代理 | 主链确认（静态） | 本次能力六 |
-| skill provider 注册表 | 归并已有类目（工具侧）+ 机制 | skill 工具链已由 Agent 工具笔记覆盖；注册表本身是 scope 分层的中立发现机制 |
+| Host 级定时任务 | 主链确认（静态） | 本次能力五；RRULE 加 target 的 Host 任务模型 |
+| 多 provider 子代理与团队任务板 | 主链确认（静态） | 本次能力六 |
+| 动态插件定义与运行（旧 self-modification） | 已移除 | 本次未找到模型可调用的 define/run/stop/undefine；改为持久 bundle 安装 |
+| 运行期不变式 invariants | 已移除 | `packages/runtime-diagnostics/` 与 `@deepseek-ai/dsh-invariants` 不存在，仅留 v0.2.0-rc.2 迁移指南 |
+| E2B 远程执行 POC | 已移除 | `packages/e2b/` 不存在，SSH provider 家族取代 |
+| skill provider 注册表 | 归并已有类目（工具侧）+ 机制 | skill 工具链已由 Agent 工具笔记覆盖 |
 | workflow / ralph | 入口确认（机制） | 模型写的工作流脚本 + worker-thread provider；ralph 是固定 fresh-agent 策略 |
 | jobs 后台任务 | 入口确认（机制） | owner 隔离的观察/取消/完成通知协议 |
-| bundle patch-layer | 入口确认（机制） | 可安装的 profile 补丁层 npm 包 |
-| invariants 运行时不变式 | 入口确认（机制） | 每个包发布 `./invariant` 伴侣 |
-| e2b 远程执行 POC | 入口确认（暂缓） | 实验性 provider 组合；依赖外部 E2B 服务 |
-| POSIX SSH 执行世界 | 主链确认（静态） | 共享连接把 fs/subprocess/terminal/sandbox 投影到同一远端主机 |
-| 浏览器/桌面操作 provider | 入口确认（实验性） | browser-use 与 computer-use 注册表，多种 MCP/native provider |
-| feedback / attachment | 骨架 / 普通能力 | feedback 分日志备注与 sidecar 评分两种契约；attachment 是内容寻址附件存储 |
+| bundle patch-layer 与 plugin market | 主链确认（静态） | 可安装的 profile 补丁层 npm 包 + 市场索引 |
+| agent team 任务板 | 主链确认（静态） | 由实验包升为 `packages/team/` 一等包 |
+| POSIX SSH 执行世界 | 主链确认（静态） | 共享连接把 fs/subprocess/sandbox 投影到同一远端主机 |
+| forge 变更请求面 | 入口确认（机制） | 默认禁用的 seam，GitHub provider + 会话绑定 + 面板 |
+| LiveShare 会话共享 | 入口确认（机制） | 观看者 Peer 与 remote-access 裁决 |
+| webhook 入站会话 | 入口确认（机制） | 认证投递 → 规则 → 根会话 |
+| worktree 隔离工作区 | 入口确认（机制） | 独立 worktree 服务与模型工具 |
+| auto-review 逐调用审查 | 入口确认（实验） | 用当前模型判定待执行动作，放行即 Full access |
+| browser-use / computer-use | 入口确认（实验性） | 多种 MCP/native provider 注册表 |
+| feedback / attachment / deliverables | 骨架 / 普通能力 | 日志备注与评分；内容寻址附件；交付物声明 |
 
 ## 已确认的独特能力
 
-### 能力一：自引用插件运行时（self-modification）
+### 能力一：自省式自扩展（inspect + 持久插件安装）
 
-1. **用户目标与入口**：让模型在会话中直接检查自己所在运行时的插件与服务，并把模型自己写的 Cordis 插件包定义、运行、停止、删除——即"agent 修改自身运行时"。入口是七个模型工具：三组只读 inspect（list/query/self）与 define/run/stop/undefine 四个动作，全部注册在 `packages/extensions/tool-cordis/src/index.ts:41-379`；用户也可在消息中显式引用 `@<pluginId>`，pre-step 监听器会把该插件最新包上下文注入下一请求（同文件 `:381-398`）。
-2. **事实对象**：动态 Plugin/Package/Run 三层次对象。define 铸造 `dyn-<n>` 插件 id 与不可变包 id；包是"两个 JavaScript 函数体"（host 半 + browser 半），纯 JS、无 import 与 TS 变换。定义与运行只存在于进程内存：不写插件文件、不改 `cordis.yml`、重启即失、仅定义它的会话可见；另一会话的定义读作 absent 而非 forbidden（`cordis-host-runner/README.md`）。
-3. **完整主链**：inspect（只读报告）→ define（先编译预检语法、只记录不运行）→ run（host 半在 node:vm 沙箱中求值并作为子 fiber 挂到动态插件组；含 browser 半时先发 request-run 轮询，由某个页面装载后回执）→ stop/undefine（退避或删除）。沙箱构造见 `cordis-host-runner/src/sandbox.ts:129-145`，子 fiber 启动与注册冲突处理见 `lifecycle.ts:22-45`。
-4. **持续性**：定义与运行状态全是进程内存；会话日志只记 define 调用的元数据，绝不记代码。重启后卡片 id 无法解析时如实报告"定义不在"，而不是假装可运行；页面重载后要重新 run 才能取回 browser 半。
-5. **安全与信任边界**：vm 只隔离全局、明确不是安全边界（README 明言按授予 bash 的谨慎度装载）。Node 的 require/timers/fetch 被陷阱化并重定向到 `ctx.fs`、`ctx.web`、`ctx.bash` 与 Cordis 计时器（`sandbox.ts:96-108`）；`vmTimeoutMs`（默认 5000ms）只限制同步求值部分，异步体可逃逸。browser 半激活需页面同意，无页面连接时 run 挂起直到调用回合取消。
-6. **独特性判断**：Pi 的扩展系统由用户在会话外安装、OpenCode 的插件目录是构建期事实；这里是模型在运行中定义、审批、运行并回滚自身所在进程的插件，且能通过生成式 API catalog 读到仓库级服务契约（`tool-cordis/src/api-catalog.ts` 与 live service store 求交）。证据强度：静态主链确认；vm 逃逸面与浏览器端渲染行为未运行验证。
+1. **用户目标与入口**：让模型在会话中检查自己所在运行时的 API、Loader 条目与工具表，并把新的插件/bundle 装进 profile 以改变后续会话。模型面入口是 `cordis_inspect_list` 与 `cordis_inspect_query` 两个只读工具（`packages/extensions/tool-cordis/src/index.ts`），加上 `plugin_manager`（列插件与 bundle、启停、安装、移除）与 `plugin_market`（读市场索引）（`packages/boot/plugin-manager/src/tools.ts`、`plugin-market/src/tools.ts`）。
+2. **事实对象**：三个层次——运行时事实（服务/事件目录、Loader 条目及其 Config 状态、条目投影出的 JSON Schema）、插件包（package 目录、README、`lib/`）、bundle（可选补丁层包）。检查结果只读，不调用业务方法；查询从不触发副作用（`docs/tool-catalog.md` 的 tool-cordis 节）。
+3. **完整主链**：`cordis_inspect_list` 列 provider（服务/事件目录、Host Config、工具表；浏览器端 provider 需要连接页面）→ `cordis_inspect_query` 取某项 API 或某个 Loader 条目的 Config 投影 → 模型据此写插件或 MCP 配置 → 打包为 bundle → `plugin_manager` 安装进 profile → 用户重启或后续会话加载新行。安装与启停影响整个 profile，需 danger-full-access 或逐次审批。
+4. **与旧机制的差别**：本次未找到模型可调用的动态插件定义与运行入口——旧路径（`dyn-<n>` 插件 id、vm 沙箱求值、browser 半装载回执）不再出现在工具目录里。`cordis-host-runner` 仍保留 inspection registry 与生命周期工具，供宿主侧消费者使用；模型面只剩只读查询。
+5. **配置方式**：Creator 模式（cordis preset）组合 tool-cordis 与 plugin_manager；`agent-preset` 包随附四套 skill（agent-experience、cordis-plugin-development、editing-cordis-compositions、cordis-composition-reference）指导模型先读检查结果、再读包 README 与源码。
+6. **运行边界**：安装的插件是宿主进程内的真实代码，没有沙箱隔离；"只读检查"保证的是查询本身无副作用，而不是被装代码的安全性。
 
 ### 能力二：进程沙箱（sandbox）
 
-1. **用户目标**：给"同世界子进程"施加文件效应策略——bash、pwsh 与 fs 工具的进程执行受同一策略约束，而不用容器或微VM。沙箱不是用户直接操作的功能，而是能力缝：`ctx.sandbox.confine(argv, policy)` 返回替换 argv，由消费者自己 spawn（`packages/sandbox/sandbox/src/index.ts:158`）。
-2. **完整主链**：`ctx.sandboxPolicy.resolve()` 按调用解析完整策略（显式批准的 mode 覆盖 > 会话最后一条 `sandbox/mode` 日志事件 > 部署默认；workspace 根取会话不可变 cwd，按文件系统语义规范化）→ `sandbox-local` 选择并缓存后端探针结论 → confine 返回 wrapped argv 加三份分类事实（enforcement、denial 方言、runner-failure 规则）→ 消费者 spawn 返回的 argv。策略解析与后端分离见 `sandbox-policy/src/index.ts:91`、`sandbox-local/src/index.ts:316-333`。
-3. **模式与后端链**：模式三档——read-only、workspace-write、danger-full-access，只有前两档可发给 provider，danger 档直接原样 spawn、不调沙箱。后端按平台链选择：Linux 上 bwrap 优先、功能探针失败再试 Landlock；macOS 唯一候选 Seatbelt；Windows 唯一候选 ACL 受限令牌 runner（`sandbox-local/src/index.ts:159-166`）。多候选才逐个探针，单候选直接选用，但运行期拒绝仍 fail-closed。
-4. **Landlock 与 Windows 细节**：`native/landlock-run` 是静态链接 musl 的 C11 启动器，自装规则集后 exec 被包裹命令（规则集跨 execve 继承，调用进程不受限）；规则集创建失败或内核不执行时直接非零退出，绝不无沙箱放行（`native/landlock-run/packages/entry/src/main.c:1-80`）。Windows runner 为每个 workspace 建常驻写 SID 与 ACE，为每个 live session/workspace 对建随机私有 temp 目录与可撤销 ACE——崩溃残留不能授权续开会话；因进程初始化必须保留 Everyone，enforcement 如实上报 partial（`sandbox-local/src/index.ts:392-443`）。
-5. **边界与词汇**：enforcement 是上报事实（full/partial），要求绝对保证的消费者必须拒绝 partial；denial 方言按后端分别携带（bwrap 的只读文件系统文本、Landlock 的 permission denied、Seatbelt 的 operation not permitted 等），runner-failure 规则让消费者区分"沙箱坏了"与"命令被正确拒绝"。无静默无沙箱回退：选不出后端时抛 `SANDBOX_UNAVAILABLE`（`docs/subsystems/sandbox.md`）。
-6. **独特性判断**：与 AstrBot 的容器式 Agent Sandbox、OpenCode 的进程组方案不同，这是"按调用携带策略 + 多平台原生后端 + fail-closed 契约"的执行域机制，策略可以并发会话不同边界而不改动 provider 状态。证据强度：静态主链确认；bwrap/Seatbelt/Windows ACL 的真实内核行为未运行验证。
+1. **用户目标与入口**：给"同世界子进程"施加文件效应策略，档位为 read-only / workspace-write / danger-full-access；模型侧不直接调用沙箱工具，而由 permission-presets 或会话选项选择档位，bash/pwsh/fs/terminal 消费 `ctx.sandbox.confine`。
+2. **事实对象**：一次调用携带的策略对象（档位、工作区根、可写路径集合）。身份不在会话日志里，属每次调用的参数化约束。
+3. **完整主链**：permission preset 选定档位 → shell/fs 工具在 spawn 或写入前调用 `ctx.sandbox.confine` → `sandbox` seam 选后端（`sandbox-local` 内的 bwrap 优先、探针失败回退 Landlock；macOS Seatbelt；Windows 走 `sandbox-windows-acl` 的受限令牌 runner）→ 运行期拒绝 fail-closed → 结果与拒绝原因回到工具结果。
+4. **策略来源**：`sandbox-policy` 包解析工作区根与策略，`sandbox-ssh` 把同一策略应用到远端主机；选不出后端抛 `SANDBOX_UNAVAILABLE`，无静默无沙箱回退。
+5. **边界**：真实内核行为属平台运行验证项；沙箱只约束文件效应，不约束网络、进程可见性或内存。
 
 ### 能力三：同会话目标驱动循环（goal）
 
-1. **用户目标**：把一个长期完成目标从"一条消息"提升为可持久化、可续跑、有预算的会话级对象：模型在会话内自动继续工作直到目标完成、暂停或被阻塞。入口包括人类侧 `/goal` 命令（`command-goal/README.md`）与模型侧 `get_goal/create_goal/update_goal` 工具（`tool-goal/README.md`）。
-2. **事实对象与状态模型**：目标快照（objective、phase、maxGoalRounds、blockedReason）加严格递增的 revision；一切变更以 `goal/change` 会话事件落盘（整快照或 clear tombstone），严格折叠校验非法转换。激活（armed/disarmed）是分离的、从不持久化的进程内标志——决定"续跑消费者能否再开一轮"，由 `GoalService` 在 create/resume 时武装，在 disarm、session-start、插件卸载时解除（`packages/goal/goal/src/index.ts:236-242`；`docs/subsystems/goal.md`）。
-3. **完整主链**：人类回合 create（create/edit/pause/resume 要求回合内直接人类消息这一宿主证明）→ 事件落盘 → `goal-round-driver` 在 agent 完全空闲、目标 active+armed、未达轮次上限时先过持久化屏障，再保留下一轮号并构造带 goal 来源（goalId/revision/round）的 `<goal_round>` 用户消息，经 followup 入 inbox（`goal-round-driver/src/index.ts:138-205`；提示内容见 `prompt.ts:12-26`）→ `agent/pre-step` 监听器在下游监听前后双向校验预订记录（同文件 `:349-414`）→ 只有真正进入回合的 `user/message` 才递增 `roundsStarted` → 模型执行本轮，随后驱动再进下一轮。
-4. **主动性与取消**：驱动只在 idle 时保留下一轮，人类消息进入时自动让路。turn/end aborted 会取消已保留的轮并暂停目标；max-tokens 结束解除武装；flush 失败解除武装；插件卸载关闭准入并等待静止。轮次预算默认上限 256，耗尽时驱动主动 block（code `round-limit`）。
-5. **完成与阻塞的判定边界**：完成/阻塞由模型自行判定证据是否充分，运行时只提供结构：模型自报 blocked 需连续 N 轮同一条件（默认 3，`blockedAfterConsecutiveRounds`）且 reason code 固定为 `model-reported`；无独立评估器（`tool-goal/README.md` 明列为 deferred work）。
-6. **独特性判断**：与"子代理重试/后台循环"不同，它明确在同一会话内继续、不 fork 会话、不产生新 Agent，轮次是带编号消息进入同一历史；与 Ralph（fresh agent 策略）是刻意分开的两个方案。证据强度：静态主链确认；多轮续跑的竞态与真实模型行为未运行验证。
+1. **用户目标与入口**：把长期目标写成事件溯源状态，agent 在会话内自动续跑直到完成或阻塞。模型工具为 `create_goal` / `get_goal` / `update_goal`（`packages/goal/tool-goal`），另有 `/goal` 命令面（`command-goal`）。
+2. **事实对象**：`goal/change` 会话事件加严格递增 revision；激活（armed）是独立、不持久化的进程内标志。
+3. **完整主链**：模型创建目标 → `goal-round-driver` 在回合结束时判断是否需要下一轮 → 以普通回合继续（受轮次预算约束，默认上限 256）→ 完成或阻塞由模型自报，连续默认 3 轮同一阻塞条件判为 blocked → 每次变更追加事件，重启后由日志折叠恢复。
+4. **权限**：`tool-goal` 在执行时检查调用者是否为根 Agent 且处于开放回合、且本回合含人类来源输入（`packages/goal/tool-goal/src/authority.ts`），防止子 Agent 自建目标。
+5. **边界**：目标不带调度与跨会话等待；轮次预算耗尽后停在原地等用户。
 
-### 能力四：plan mode 作为日志化协作状态（plan）
+### 能力四：plan mode 作为日志化协作状态
 
-1. **用户目标**：让用户与模型在同一会话内切换"先规划、后执行"的协作模式，并保证模式状态在任何表面（resume、fork、compaction、多客户端）都一致。plan mode 是软指导：激活时把部署提供的 `plan:policy` 提示段（order 50）加入每轮请求；沙箱模式与审批策略独立强制执行、互不读写该状态（`packages/plan/plan-mode/src/index.ts:225-233`）。
-2. **状态模型**：`plan/mode` 是 log-only、整值替换的会话事件；`foldPlanMode(events, end?)` 纯折叠出前缀中最后一条值（无则 false），没有 live mirror，UI 通过 `session/event` 观察已提交翻转（同文件 `:129-138`、`:46-55`）。
-3. **完整主链**：`/plan [off|message]` 或 `set()` → 无打开回合时立即 append；回合打开时保持 pending，直到下一个被接受的 in-turn pre-step 在请求组装前 append（`set` 见 `:425-445`，pre-step append 见 `:205-222`）。选中状态只在最近请求 header 曾描述相反状态时补一条插件来源通知，避免冗余告知模型；append 失败不阻塞回合，pending 留待下次被接受的 pre-step。
-4. **退出**：`exit_plan_mode` 工具常驻注册（进/出模式只改提示段、不改请求工具目录）；要求完整 markdown 计划（# 开头），经 user-questions 缝呈现给用户审批；approve 后挂 silent pending 退出，在下一被接受 pre-step 落盘，当前工具批次内规划指导保持生效；keep-planning 作为带反馈的失败返回给模型。模式由用户或模型随时可切，无后台自动行为。
-5. **独特性判断**：模式状态是"可重放日志事实"而非 UI 状态，计划文本本身不进会话（只进审批通道）——这是把协作状态做成日志事件的示范，schedule、sandbox 模式、goal 阶段同用该模式。证据强度：静态主链确认。
+1. **用户目标与入口**：在改动前先产出计划并等待批准。入口是 plan 模式切换（UI/命令）与 `exit_plan_mode` 工具；后者要求提交完整 Markdown 计划。
+2. **事实对象**：`plan/mode` 是 log-only、整值替换的会话事件；`foldPlanMode` 纯折叠出状态，无 live mirror 对象。
+3. **完整主链**：进入 plan 模式追加事件 → 每轮请求加入 `plan:policy` 提示段（order 50），约束模型只调研不修改 → `exit_plan_mode` 提交计划并经 user-questions 缝审批 → 批准后退出模式，后续回合恢复正常权限。
+4. **边界**：沙箱与审批策略独立强制执行、互不读写该状态；plan 模式本身不是权限档位，只是提示与协作约定。
 
-### 能力五：session-local 定时调度（schedule）
+### 能力五：Host 级定时任务（schedule）
 
-1. **用户目标**：模型创建"稍后提醒/定时检查"类规则，到期以普通对话回合回到原会话。交付边界固定为 session-local：原会话必须在线，无外部通知通道、无冷会话调度器；冷会话重开时过期目标变为 overdue。
-2. **事实对象**：`schedule/change` 事件是唯一持久权威，记录三变体——after（延迟一次性）、at（绝对时刻，规范化 RFC3339 UTC）、every（固定间隔，最小 5 分钟，创建时锚定）；折叠出活动记录，timer 只是可弃投影（`docs/subsystems/schedule.md`）。管理调用先等会话持久化屏障，屏障失败返回 `persistence_uncertain` 而非猜测落库结果。
-3. **完整主链**：`schedule_create` 落事件 → `ScheduleRuntime` 折叠日志、算最早目标、arm 分段 timer（上限约 24.8 天，每次醒来重读墙钟；`packages/schedule/schedule/src/runtime.ts:178-184`）→ 到期且 agent 完全 idle 时 claim maintenance 阶段 → 构造 framing 后的用户消息经 followup 入队 → 同步入队成功后才 append dispatch 事件（`:254-306`）。投递是"普通对话回合"：无独立回执、无渲染器；入队后崩溃可能重复提醒，边界明言是尽力而为的 at-least-once。
-4. **批量与补漏**：一次性提醒逐个优先进入；多条 every 过期合并为一个批次（同 decision time）限制模型回合数；漏过的区间不枚举不重放，只投最新到期并把记录直接推进到下一个锚定目标。fork 不继承活动提醒（只折 seedLength 之后的事件），`dispatch` 一次性记录是终态 id-only 转换。
-5. **独特性判断**：提醒不是外部 cron 也不是通知推送，而是"会话日志上的规则 + 进程内定时投影 + 原会话回合投递"，重启后从日志恢复调度语义。证据强度：静态主链确认；真实 timer 唤醒与崩溃窗口行为未运行验证。
+1. **用户目标与入口**：让 agent 按时间规则自动开工。模型工具为 `schedule_create`（`title`/`prompt`/`rrule`/`target`）、`schedule_list`（分页）、`schedule_view`、`schedule_edit`（update 含 pause/resume 与改 rrule/target，delete 同工具）。
+2. **事实对象**：Host 任务 —— `schedule` 领域存储中的记录（`ScheduleRecord`），带 typed timing（After/At/Every/Daily/Weekly/Cron/RRule）、`target`（`this_session`/`new_once`/`new`）、`targetSessionId` 与 paused/ended 状态；领域存储写 version 2、读 version 1，物理布局不变。
+3. **完整主链**：`schedule_create` 经 Remote 或原生服务写记录 → timer 作为可弃投影在到期时触发 → 目标会话空闲时以普通对话回合投递 → 每次投递记录 receipt 与目标会话 id → 记录变更追加领域事件，重启后由领域存储重建。
+4. **作用范围**：任何 Host 任务都按 id 可读可改可删，不再局限于调用者自己的提醒；委派子 Agent 调用 `schedule_create` 会返回 `subagent_session` 拒绝。要限制某个 preset 不能管理他人任务，只能移除该 preset 的 tool-schedule 行。
+5. **边界**：投递是尽力而为的 at-least-once；本轮不提供外部通知通道；历史会话日志里的旧提醒需要显式重建。
 
-### 能力六：多 provider 子代理能力族（subagent）
+### 能力六：多 provider 子代理与团队任务板
 
-1. **用户目标**：让 agent 把工作委派给子 agent，且执行位置可选：同进程 spawn、同进程 fork（继承父会话已完成历史）、进程外 ACP、真实 Codex 与 Claude Code 子进程、进程外 dsh SDK 实例——六个 provider 加一个共享的进程内驱动包。`ctx.subagents` 是唯一委派契约，多 provider 并发共存（`packages/subagent/subagent/src/index.ts:369-425`）。
-2. **事实对象与持续性**：每次本地启动追加 `subagent/descriptor` 会话事件（provider 名、mode、冷恢复所需字段）；委派深度以 `SessionHeader.delegationDepth` 单调持久化，重启后子 agent 不会被重新计为顶层。可续子代理（continuable child）拥有一个持久子会话 + 至多一个进程内 Activation；冷恢复直接从持久会话重建 Agent，不重新走 provider（`continuation.ts`；`subagent/src/index.ts:212-275`）。
-3. **完整主链**：模型经 `tool-subagent` 调 start（one-shot：等结果并 dispose）或 startContinuable（立即返回持久 childId；后续经 send_message followup 唤醒，interrupt 停当前回合）→ 子代理在继承的沙箱与固定审批策略内执行 → 完成或夭折时 settled notice 回到父会话，或经 report 通道主动回传。可续路径的建立、唤醒、冷恢复与中断见 `continuation.ts:403-583`。
-4. **委派策略固定**：在委派边界快照父会话的沙箱 override，并把子代理审批钉死为 never（自动拒绝一切 ask，避免无人盯的审批挂起）；子会话注入固定 delegation-scope 声明（权限启动时固定、无法从内部扩大、超范围以报告限制结束而非重试）；这些策略以 `source: 'delegation'` 事件写入子会话日志并在任何 fork 种子之后生效，子代理从日志即可重建其有效策略（`subagent/README.md` Delegated policy 节）。
-5. **独特性判断**：与 OpenCode 子代理、LobeHub 外部 CLI 托管相比，这里是"一个契约、六种执行位置、可续会话对象"，且把策略继承做成可重放事件而不是运行时传递。证据强度：静态主链确认；ACP/Codex/Claude Code 真实子进程与跨进程冷恢复未运行验证。
+1. **用户目标与入口**：把任务委派给同进程子 Agent 或外部执行体，并让多个 Agent 在同一棵树上协作。入口是 `subagent`/`subagent_fork` 工具、控制工具（`send_message`/`interrupt_agent`/`list_agents`/`wait_agent`），以及根会话开启 Team 模式后的 `team_task_create/get/list/update`。
+2. **事实对象**：子 Agent 树（祖先、运行时归属、通信）、`subagent/descriptor` 持久描述符、激活句柄（`{ kind: 'activation', subagentId }`）、团队任务（`TeamTaskId` 形如 `task-<n>`，`TeamId` 就是根 `SessionId`）。
+3. **完整主链**：模型调用委派工具 → `startActivation` 校验能力旗标 → 本地 `prepareContinuable` 或外部 `start` → 子 Agent 运行 → 本地子 Agent 保留 durable 会话、可继续收消息；外部一次性执行只回最终文本 → 结算后向父 Agent 投递完成通知 → 控制工具读写子 Agent 的身份与 inbox → Team 模式让共享任务在同一面板按 Owner 分派与等待。
+4. **策略固定**：子 Agent 继承父的 permission roots 或钉死更严格档，委派策略以 `source: 'delegation'` 写入子会话日志可重放；spawn 用 `agentPreset` 选组合，fork 继承父的 preset。
+5. **边界**：外部后端不接受后续消息；team 任务板只协作任务分派，不共享工具循环；历史 roster 记录保留用于解码但不授予权限。
 
-## 工程与支撑机制盘点
+## 支撑与实验机制盘点
 
-实验性 Agent Teams 已把多 Agent 协作提升为可组合的能力组：team runtime、成员与协作工具各自为插件，相关的会话事件和文档同样进入持久化目录。它仍属于实验性组合，不能据此推断存在成熟的团队管理 UI 或跨账户协作服务（`packages/experimental/agent-team/`、`docs/subsystems/agent-team.md`、`examples/headless-agent/team.cordis.snapshot.yml`）。
+### plugin market 与 bundle
 
-Agent Teams 已有可选 CLI 与 Web profile，Web 插件提供 team roster、任务板和 teammate 导航；因此“没有团队管理 UI”的旧边界已不成立。它仍位于 `packages/experimental`，契约明确可变且无支持承诺（`packages/experimental/{agent-team-profile,agent-team-web-profile,client-ui-agent-team}/`）。
+`packages/boot/plugin-market` 提供市场索引读取与安装入口，`packages/util/plugin-market-index` 与 `apps/plugin-market-generator` 负责索引生成；bundle 是可安装的 profile 补丁层 npm 包（`packages/boot/app-boot` 定义 Profile 与 bundle 契约），`official-bundles` 列出一方集合。已在兼容层保留的 bundle 经验是"安装即加载组合行"，移除包只需删行。
 
-POSIX SSH 执行世界形成新的跨能力主链：本机 Harness 通过一个 SSH helper 管理远端路径、普通进程、终端与文件效应沙箱，四个 provider 共享连接身份和生命周期。它不是外部 Agent，而是把现有工具执行域替换为远端 POSIX 主机（`packages/ssh/README.md`、`docs/subsystems/ssh.md`）。
+### skill 注册表
 
-浏览器与桌面操作目前仍属实验性能力族。`browser-use` 与 `computer-use` 提供排他的命名 provider 注册表，具体后端包括 Playwright MCP、Chrome DevTools MCP、Stagehand native 与 Cua Driver；这些包存在快照与单测，但真实浏览器、桌面权限和模型效果未运行验证（`packages/browser-use/`、`packages/computer-use/`、`packages/experimental/browser-use-*`、`computer-use-*`）。
+`packages/skill/` 提供 skill seam（`skill`）、`skill-filesystem`（文件系统 provider）、`skill-office`（文档能力）与 `tool-skill`（模型面加载工具）；skill 以 catalog 形式进上下文，按名加载全文。会话内的 skill 目录由 preset 携带（`agent-preset/skills/`）。
 
-以下机制已确认入口与契约，属于工程或支撑性质，不单独展开能力卡：
+### workflow / ralph
 
-- **invariants 运行时不变式**：每个 npm 包必须发布 `./invariant` 伴侣，向 `ctx.invariants` 注册基于事件/数据关系的运行时检查（会话围栏、轮次计数、模型请求可重建性等）；可 allowlist/blocklist 与启停，安装器在专用子 fiber 运行。是"把不变量接进运行时"的可靠性机制，见 `packages/runtime-diagnostics/invariants/README.md`。
-- **bundle profile patch-layer**：npm 包 manifest 声明 `dsh.bundle.patch` 即成为 `dsh --profile` 组合的可安装补丁层；profile 是 `$DSH_HOME/profiles/<name>` 下的包目录，按 bundles 顺序叠加补丁、再叠用户 `cordis.patch.yml`（HMR 热重组）。`dsh-base` 是每个 profile 的第一层。见 `packages/boot/app-boot/README.md` Profiles 节（`README.md:36-45`）。
-- **skill provider 注册表**：`ctx.skills` 是按 scope 分层的 provider 中立注册表（本地文件、嵌入、远端均可），发现与加载分离，模型/人类双面调用策略独立。工具侧（目录消息 + skill 加载器）已由 Agent 工具笔记覆盖，注册表机制本身不单独计独特功能。
-- **workflow / ralph**：模型可提交编排脚本给 `ctx.workflowEngine`，worker-thread provider 在隔离线程执行（明确非安全边界）；`ralph` 工具是固定策略——把不可变目标交给一串全新子 agent——以普通插件演示"不改 agent-loop 也能实现编排策略"。见 `packages/workflow/README.md`、`tool-ralph/README.md`。
-- **jobs 后台任务**：owner 隔离的后台任务协议（观察、取消、等待、完成通知），`job_list/job_output/job_kill` 是模型面；见 `packages/jobs/README.md`。
-- **e2b 远程执行 POC**：实验性 provider 组合，把一个文件系统/进程执行世界放进 E2B Linux 沙箱，只实现 fs 与 subprocess 两个 OS 适配器；边界明确不移 harness 进程与模型状态，需外部 E2B 服务，标暂缓。
-- **feedback / attachment**：feedback 分两种契约（命令反馈是日志备注、消息反馈是独立 sidecar，均不进模型上下文）；attachment 是内容寻址的不可变附件存储，落 `DSH_HOME` 下。两者属普通能力，归入会话/工具既有类目。
+`workflow` seam 加 `workflow-ptc` provider（worker 线程执行模型写的工作流脚本），`tool-workflow` 是模型面入口；`ralph` 是固定策略的 fresh-agent 循环（`tool-ralph` 加 `ralph-bundle`）。
 
-## 已归并到现有类目的能力
+### jobs
 
-- **工具执行管线**：tools 注册、schema、approval、渲染、run_code 传输等细节已由 Agent 工具笔记覆盖（含 `cordis_*` 工具族与 schedule、goal、workflow、jobs、skill 的全部模型工具名与执行链），本次只补机制层。
-- **agent-loop 与回合执行**：Chat 笔记已覆盖 `ReactLoopAgent`、steer/followup、错误与取消；本文直接复用其术语（pre-step、followup、idle、maintenance、turn/end）。
-- **会话持久化与压缩**：事件日志、flush 屏障、compaction、spill 的存储细节归会话与消息管理、对话请求与上下文笔记；本文只记录"日志折叠出状态"这一模式的使用方。
-- **LLM 渠道与重试**：归 LLM 渠道管理笔记。
+`jobs` seam 加 `jobs-local`，`tool-jobs` 暴露 `job_list`/`job_output`/`job_kill`；后台 bash/PTY/子 Agent 使用同一协议，owner 隔离、完成通知与取消语义统一。子 Agent 不再经由 jobs 收集。
 
-## 声明不符、外部依赖与暂缓项
+### forge / LiveShare / worktree / webhook / auto-review
 
-- **e2b 远程执行**：依赖外部 E2B 服务与 SDK，本仓库只有适配器 POC；未运行验证，标暂缓。
-- **vm 沙箱的安全声明**：文档明言"不是安全边界"，host-realm 辅助函数可逃逸——这是项目自述的边界而非缺陷结论；逃逸的实际利用面未验证。
-- **cold-session 调度**：README 明言无冷会话调度器、无外部通知通道；若部署者期望重启后定时器仍会发通知，属于文档已声明的边界。
-- **反馈闭环**：message-feedback 的客户端 Remote aggregate 与 UI 消费方"单独所有且延后"（`packages/feedback/README.md`），Host 侧契约已存在，端到端 UI 链未闭合。
+- **forge**：默认禁用的 capability seam，GitHub provider 读变更请求，`forge-session` 把 PR/MR 绑定到会话，`client-ui-forge` 提供面板，`forge-bundle` 组合全部四件并带上 worktree 工具。
+- **LiveShare**：把单个会话共享给外部观看者，观看者请求以自身 Peer 派发并受 remote-access 策略与工作区授权约束。
+- **worktree**：独立 worktree 服务与 `create_worktree` 工具，为面板与并行任务提供隔离工作区；`generated-worktree-names` 迁移说明命名规则。
+- **webhook**：认证投递 → 程序化规则 → 普通根会话，不保存投递或完成状态。
+- **auto-review**：实验性逐调用审查——每次内层工具调用前用当前模型的 provider/model 判定待执行动作，放行以 Full access 执行，拒绝则询问用户；默认关闭，可在 Web 侧栏插件页开启。
 
-## 对特色贡献统计的影响
+### browser-use / computer-use
 
-- 六个机制按"产品特性 vs 机制贡献"分账：goal、plan mode、schedule、self-modification 属于用户/模型可感知的产品能力，可计入产品特性；sandbox 与子代理的委派策略固定属于安全与执行域机制，与 invariants 一起按机制贡献单列。
-- 横向比较对象建议为同类 harness：Pi（扩展系统/分支会话）、OpenCode（多表面/子代理/ACP）、Hermes Agent（skill 闭环）、Jan（编排端点）；"agent 修改自身运行时"保留为稀有能力卡。
+`packages/browser-use/` 与 `packages/computer-use/` 是正式 seam 包，实现分散在 `packages/experimental/browser-use-*`（Playwright、Chrome DevTools MCP、Stagehand native）与 `computer-use-*`（Cua、Cua macOS、driver MCP/native），模型工具形如 `stagehand_*`。
+
+### feedback / attachment / deliverables
+
+`feedback` 分 `message-feedback`（日志备注与 sidecar 评分两种契约）与 `command-feedback`；`attachment` 提供内容寻址附件存储与引用式读取；`deliverables` 提供 `present` 工具把已有文件登记为交付物。
+
+## 已移除或改道的机制
+
+| 机制 | 现状 | 证据 |
+|---|---|---|
+| 运行期不变式 `invariants` | 删除 | `packages/runtime-diagnostics/` 与 `@deepseek-ai/dsh-invariants` 及 `<pkg>/invariant` 子路径不存在；`docs/upgrade-guide/v0.2.0-rc.2/remove-runtime-invariants` 记录移除 |
+| 动态插件 define/run/stop/undefine | 模型面移除 | tool-cordis 只剩两个只读工具；`docs/tool-catalog.md` |
+| E2B 远端沙箱 | 删除 | `packages/e2b/` 不存在；SSH 家族取代 |
+| session-local 定时提醒 | 改道为 Host 任务 | `schedule` 领域存储 version 2，工具为 create/list/view/edit |
+| 实验性 agent-team 包 | 升为一等包 | `packages/team/{agent-team,tool-agent-team}` 与 `client-ui-agent-team` |
+| 子 Agent 后台 job 收集 | 移除 | 委派统一返回激活句柄；`job_output` 不再收集子 Agent |
+| hooks 包位置 | 迁至 experimental | `packages/experimental/{hook-protocol,hooks-claude-code,hooks-codex}` |
+
+## 设计取舍与已确认边界
+
+- **自扩展从"运行期改自己"改为"安装持久补丁"**：放弃进程内热定义插件，换取可重放、可审计、可卸载的 profile 变更；代价是模型不能即时试跑自己写的插件。
+- **权威集中在日志或领域存储**：goal/plan 在会话日志，schedule 在领域存储，team 在根会话；进程内只留可弃投影，重启即重建。
+- **沙箱策略按调用携带**：同一进程内的不同工具调用可用不同档位，代价是策略无法用进程级隔离表达。
+- **定时任务升为 Host 级**：跨会话管理与入口统一，代价是权限从"仅自己"变成"全部任务"，需要靠移除工具行来收缩。
+- **子代理统一激活契约**：外部一次性执行与本地可续会话共享一套准入、取消与归属，代价是两类的后续交互能力不同，调用方必须区分。
+- **实验面默认关闭**：forge/liveshare/webhook/auto-review/market 都需显式组合或选择，避免默认暴露网络与权限面。
+- **不变式机制退场**：以运行时不变式做防御的做法被移除，失败改由各插件自身的错误通道上报。
 
 ## 未验证事项
 
-- 六个机制均为静态主链确认，未运行：vm 逃逸面、browser 半渲染与 request-run 审批轮询的真实交互、Landlock/bwrap/Seatbelt/Windows ACL 的真实内核与权限行为、goal 多轮续跑的竞态、schedule 定时器唤醒与崩溃窗口、ACP/Codex/Claude Code 子进程与跨进程冷恢复。
-- `demo:cordis` 演示脚本（"the agent modifies its own runtime"）未执行。
-- e2b POC 未连接外部服务。
-- 未逐包核对 `verify-package-invariants` 门禁在全部工作区包上的实际通过状态（机制存在性已确认，门禁运行未验证）。
+- 未运行任何进程或测试：沙箱真实内核行为、schedule 定时投递、goal 轮次驱动、plan 审批、plugin_manager 安装与启停、team 任务板协作均为静态确认。
+- schedule 领域存储 v2 写入后的降级要求（需备份恢复）只读了迁移说明，未实测。
+- auto-review 的实际判定质量、token 成本与误放行/误拒绝风险未评估。
+- forge/liveshare/webhook 的安全裁决细节只读了子系统页。
+- browser-use/computer-use 的多 provider 选择与真实浏览器/桌面行为属运行观察项。
+- `cordis-host-runner` 保留的生命周期工具当前由哪些消费者使用（客户端插件装载、mods 桥？）未逐一确认。
 
 ## 关键源码索引
 
-### 自引用插件运行时
-
-- `packages/extensions/tool-cordis/src/index.ts:41-379`（七工具注册）、`:381-398`（@pluginId pre-step 注入）
-- `packages/extensions/cordis-host-runner/src/sandbox.ts:96-145`（Node API 陷阱与 vm 沙箱）、`:206-238`（define 预检与求值）
-- `packages/extensions/cordis-host-runner/src/lifecycle.ts:22-45`（host 半 fiber 启动）
-- `examples/web-cordis/README.md`；根 `package.json` 的 `demo:cordis` 脚本
-
-### 进程沙箱
-
-- `packages/sandbox/sandbox/src/index.ts:158`（confine 抽象）
-- `packages/sandbox/sandbox-policy/src/index.ts:91`（resolve）
-- `packages/sandbox/sandbox-local/src/index.ts:159-166`（平台链）、`:316-333`（confine）、`:392-443`（Windows ACL 授权物化）
-- `native/landlock-run/packages/entry/src/main.c:1-80`（Landlock 启动器）
-- `docs/subsystems/sandbox.md`
-
-### goal
-
-- `packages/goal/goal/src/index.ts:236-267`（disarm/create）、`fold.ts`（严格折叠）
-- `packages/goal/goal-round-driver/src/index.ts:138-205`（保留与入队）、`:349-414`（pre-step 校验）
-- `packages/goal/goal-round-driver/src/prompt.ts:12-26`（goal_round 提示）
-- `docs/subsystems/goal.md`；`packages/goal/tool-goal/README.md`（权限与阈值）
-
-### plan mode
-
-- `packages/plan/plan-mode/src/index.ts:129-138`（fold）、`:205-222`（pre-step append）、`:225-233`（提示段）、`:425-460`（set/onBoundary）
-- `docs/subsystems/plan.md`
-
-### schedule
-
-- `packages/schedule/schedule/src/domain.ts:465-647`（解码/折叠/分配 id）、`runtime.ts:77-323`（ScheduleRuntime）
-- `packages/schedule/schedule/src/tools.ts:299`（工具注册）
-- `docs/subsystems/schedule.md`
-
-### subagent
-
-- `packages/subagent/subagent/src/index.ts:369-425`（注册/start）、`continuation.ts:403-583`（可续建立/唤醒/中断）
-- `packages/subagent/subagent/src/descriptor.ts`（持久描述符）、`depth.ts`（深度）
-- `packages/subagent/subagent/README.md`（委派策略固定）
-
-### 支撑机制
-
-- `packages/runtime-diagnostics/invariants/README.md`
-- `packages/boot/app-boot/README.md:36-45`（Profiles 与 bundle 契约）
-- `packages/skill/skill/README.md`、`packages/workflow/README.md`、`packages/jobs/README.md`、`packages/e2b/README.md`、`packages/feedback/README.md`、`packages/attachment/README.md`
+- 自省与自扩展：`packages/extensions/tool-cordis/src/{index,host,providers,present}.ts`、`packages/extensions/cordis-host-runner/src/{index,inspect-registry,lifecycle,sandbox,registry}.ts`、`packages/boot/plugin-manager/src/{index,tools}.ts`、`packages/boot/plugin-market/src/{index,tools}.ts`
+- sandbox：`packages/sandbox/sandbox/src/index.ts`、`sandbox-local/src/*`、`sandbox-policy/src/*`、`sandbox-windows-acl/src/*`、`native/`（Landlock 启动器）
+- goal：`packages/goal/goal/src/*`、`goal-round-driver/src/*`、`tool-goal/src/authority.ts`、`command-goal/src/*`、`docs/subsystems/goal.md`
+- plan：`packages/plan/plan-mode/src/index.ts`（fold、pre-step append、提示段、set/onBoundary）、`docs/subsystems/plan.md`
+- schedule：`packages/schedule/schedule/src/{domain,runtime,tools}.ts`、`docs/subsystems/schedule.md`
+- subagent 与 team：`packages/subagent/subagent/src/{index,manager,out-of-process,activation,descriptor,depth}.ts`、`packages/team/agent-team/src/{types,index}.ts`、`packages/team/tool-agent-team/src/*`、`docs/subsystems/{subagent,agent-team}.md`
+- 支撑：`packages/boot/app-boot/src/index.ts`、`packages/skill/skill-filesystem/src/*`、`packages/workflow/{workflow,workflow-ptc,tool-workflow}/src/*`、`packages/jobs/{jobs,jobs-local,tool-jobs}/src/*`
+- 实验面：`packages/experimental/{forge,forge-github,forge-session,client-ui-forge}/src/*`、`liveshare/src/*`、`worktree/src/*`、`webhook/src/*`、`auto-review/src/index.ts`、`browser-use-*/src/*`、`computer-use-*/src/*`
+- 文档：`docs/subsystems/{extensions,sandbox,goal,plan,schedule,subagent,agent-team,forge,liveshare,webhook,claude-code-mods}.md`、`docs/upgrade-guide/v0.2.0-rc.2/remove-runtime-invariants`、`docs/upgrade-guide/v0.2.2-alpha.2/schedule-agent-tools`

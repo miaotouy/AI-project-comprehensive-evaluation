@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（Hermes Agent）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：静态代码阅读 + 全仓符号检索；按 `git log`/`git diff` 对提交范围做增量核对，受影响结论在 HEAD 处源码重新确认并修正行号；工作树干净，未运行程序
 >
@@ -17,7 +17,7 @@
 Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”是多个互补的提示词机制，按“身份 → 命名模板 → 全局/会话覆盖 → 运行时注入”分层叠加：
 
 1. **身份层（SOUL.md）**：`$HERMES_HOME/SOUL.md` 是代理的“主身份文件”，首次运行自动用 `DEFAULT_SOUL_MD` 种子（`hermes_cli/config.py:840-914`），进入 system prompt 的 stable 层；无文件时回退到硬编码 `DEFAULT_AGENT_IDENTITY`（`agent/prompt_builder.py:144`）。
-2. **人格模板（personalities）**：`agent.personalities` 配置是具名模板，值为纯字符串或“提示词 + 语气 + 风格”的映射；内置 14 个模板集中在**单一所有者模块**（`hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，由 CLI 默认值迁入），用户条目按名覆盖内置。
+2. **人格模板（personalities）**：`agent.personalities` 配置是具名模板，值为纯字符串或“提示词 + 语气 + 风格”的映射；内置 14 个模板集中在**单一所有者模块**（`hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，由 CLI 默认值迁入），用户条目按名覆盖内置。该模块同时接受顶层 `personalities:` 块（原始 #643 形状），`agent.personalities` 在同名冲突时优先；`NEUTRAL_PERSONALITY_NAMES` 把空串、none、default、neutral 都视为“无人格 overlay”。
 3. **全局/会话 system prompt**：
    - `display.personality` 保存**选中的名称**（空 = 无 overlay）并成为权威来源。启动/建 agent 时按“env 覆盖 → 命名人格 → 用户手动提示”的优先级取文本：env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 最优先，命名人格渲染失败时回退到 user-owned 的 `agent.system_prompt`；最终收集为 agent 的 `ephemeral_system_prompt`，在主请求路径中附加在缓存 prompt 之后，**不写入轨迹**。
    - **人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示）；v33→v34 迁移一次性清理旧 `/personality` 写入的文本并重置选择（`config_migrations.py:648-717`）。
@@ -159,7 +159,7 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 
 ## 7. 导入、导出、迁移与兼容性
 
-- **从其他代理导入**：`hermes import-agent`（`agent_import.py` 文档）导入 Claude Code（`~/.claude`）与 Codex CLI（`~/.codex`）：
+- **从其他代理导入**：`hermes import-agent`（命令与来源清单由 `agent-importers` 插件提供，旧 `claw` 拼写继续可用）导入 Claude Code（`~/.claude`）与 Codex CLI（`~/.codex`）：
   - CLAUDE.md / AGENTS.md / memories/*.md → `memories/MEMORY.md`（去重、20,000 字符上限）
   - permissions.allowBash → config `command_allowlist`；denyBash → `approvals.deny`（`claude_rule_to_command_pattern`，332-351）
   - mcpServers → `config.yaml mcp_servers`（env secret 名剥离）
@@ -212,12 +212,13 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 - gateway `/personality` 与 `channel_overrides.system_prompt` 的优先互动只推断到代码层，未运行验证。
 - 长会话在压缩重建时人格文本是否完整重放（静态推得 `invalidate_system_prompt` 会重载并重建，未实测）。
 - `profile install` 完整安装/更新流程与故障路径（大量文件操作）基于代码导览，未运行。
+- 本轮按路径复核了人格模块、SOUL/提示词组装与导入命令的归位，未逐行重读 26k 提交范围内的全部改动；行号引用改为模块级定位。
 
 ## 11. 关键源码索引
 
 - `agent/system_prompt.py`：三块组装 `build_system_prompt_parts`（152-558）、`build_system_prompt`（569）、ephemeral 不拼接与 static 前缀（483-488, 610-656）。
-- `agent/prompt_builder.py`：`load_soul_md`（2082）、`DEFAULT_AGENT_IDENTITY`（144）、`build_context_files_prompt`（2273，优先级 .hermes.md>AGENTS.md[目录链]>CLAUDE.md>.cursorrules）、`_agents_md_directory_chain`（2139）。
-- `hermes_cli/personality.py`：人格状态单一所有者（`BUILTIN_PERSONALITIES` 60-79、`render_personality_prompt` 82、`normalize_personality_name` 104、`resolve_personality` 122、`active_personality_name` 142、`persist_personality`）；`hermes_cli/config.py`（840-914 `_ensure_default_soul_md`、`resolve_ephemeral_system_prompt_from_config` 2957 附近）。
+- `agent/prompt_builder.py`：`load_soul_md`、`DEFAULT_AGENT_IDENTITY`、`build_context_files_prompt`（优先级 .hermes.md>AGENTS.md[目录链]>CLAUDE.md>.cursorrules）、`_agents_md_directory_chain`。
+- `hermes_cli/personality.py`：人格状态单一所有者（`BUILTIN_PERSONALITIES`、`render_personality_prompt`、`normalize_personality_name`、`resolve_personality`、`active_personality_name`、`persist_personality`、`NEUTRAL_PERSONALITY_NAMES`）；`hermes_cli/config.py`（`_ensure_default_soul_md`、`resolve_ephemeral_system_prompt_from_config`）。
 - `cli.py`：`/personality` 分发与 `retry_last`（8714）；`hermes_cli/cli_commands_mixin.py:1336-1410`：`/personality` 处理器（resolve_personality + persist_personality）。
 - `gateway/slash_commands.py:2494`：gateway `/personality`。
 - `gateway/config.py:543-574`：`ChannelOverride`（model/provider/system_prompt）。
@@ -230,5 +231,5 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 - `run_agent.py`：`_build_system_prompt_parts` 转发。
 - `hermes_state.py`：`_insert_session_row`（3685）、`system_prompts` 去重表与回收（2506-2517）、`_system_prompt_hash`（165）。
 - `hermes_cli/profiles.py`：`create_profile`、`export_profile`；`hermes_cli/profile_distribution.py`：manifest owned/excluded 列表（40-120）。
-- `hermes_cli/agent_import.py`：`AgentImporter`、`import_agent_command`、mapping 文档。
+- `hermes_cli/setup_agent_import.py`、`hermes_cli/foreign_sessions.py`：会话发现与静态历史导入；`hermes import-agent` 命令本体与来源清单由 `agent-importers` 插件提供（`hermes_cli/left_core_migration.py` 的迁移表把旧 `claw` 指向它）。
 - `hermes_cli/backup.py`：`hermes backup`/`import` 恢复；`hermes_cli/doctor.py`：SOUL.md 体检；`hermes_cli/web_routers/profiles.py`：SOUL.md REST；`hermes_cli/config.py`：`_expand_env_vars` 变量展开。

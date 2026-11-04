@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：只读检查源码、测试与仓库文档；未修改目标仓库，也未启动应用进行界面或真实网络验证
 >
@@ -28,7 +28,7 @@ Chatbox 把渠道拆成两层：代码注册的内置 Provider，以及由用户
 | 虚拟 CLI | 仅读取受限的普通设置；命令目录没有 Provider 管理命令 | `chatbox settings` 不读 Provider 凭据，也不支持设置修改 |
 | TUI | 本次在仓库中未找到独立 TUI 入口或渠道管理实现 | 结论范围是当前源码搜索范围，不宣称项目所有历史版本均不存在 |
 
-请求主链路是：会话保存 Provider ID 与模型 ID，`getModel()` 先查内置注册表，找不到时再查 `customProviders[]`，合并 Provider 默认设置、本地设置和共享 OAuth 凭据，富化模型元数据，解析有效凭据并创建协议模型类，最后经平台请求适配器发出请求。429 和 5xx 在同一模型实例内重试；没有客户端跨 Provider failover、Key 池或健康路由。
+请求主链路是：会话保存 Provider ID 与模型 ID，`getModel()`（共享层 `src/shared/providers`，部分调用方经 `@shared/models`）先查内置注册表，找不到时再查 `customProviders[]`，合并 Provider 默认设置、本地设置和共享 OAuth 凭据，富化模型元数据，解析有效凭据并创建协议模型类，最后经平台请求适配器发出请求。429 和 5xx 在同一模型实例内重试；没有客户端跨 Provider failover、Key 池或健康路由。
 
 ## 系统边界与总体调用链
 
@@ -50,7 +50,7 @@ SessionSettings { provider, modelId }
   -> getModel()
   -> 内置 definition 或 custom provider factory
   -> 合并默认设置、本地设置、共享 OAuth credential
-  -> 模型目录合并与 models.dev 富化
+  -> 模型目录合并与 models.dev 富化（src/shared/model-registry/）
   -> resolveEffectiveApiKey()
   -> AbstractAISDKModel / OpenAICompatible / 专用模型类
   -> platform request / proxy
@@ -93,6 +93,8 @@ SessionSettings { provider, modelId }
 | 连接测试 | 详情页先选模型，再复用 `getModel()` 和模型实例发送测试请求 | API Key/AWS 凭据满足条件时支持；OAuth 活跃时 API Key 检查按钮禁用 | 支持 |
 
 表格中的“未找到”表示本次检查的当前源码范围内没有对应入口，不等于对未检查的外部脚本或历史版本作绝对否定。
+
+设置路由另有一个 `src/renderer/routes/settings/default-models.tsx` 页面，集中选择各用途的默认模型（对话、图片、embedding、rerank、语音、文档解析等），模型选择组件已换成 `ModelSelectorV2`；模型富化经 `@/packages/model-registry` 的 `enrichModelsFromRegistry`。这次页面重写与渠道配置的保存逻辑相互独立，渠道数据模型本身没有新增渠道级字段。
 
 ### 2.2 新建渠道与已有渠道的可操作范围
 
@@ -200,6 +202,7 @@ Provider 设置页的 Check 操作要求 API Key 和至少一个模型，AWS Bed
 - JSON/深链导入：[`src/renderer/utils/provider-config.ts`](../../chatbox/src/renderer/utils/provider-config.ts)、[`src/renderer/components/settings/provider/importProviderState.ts`](../../chatbox/src/renderer/components/settings/provider/importProviderState.ts)、[`src/main/deeplinks.ts`](../../chatbox/src/main/deeplinks.ts)
 - 桌面配置文件和自动备份：[`src/main/store-node.ts`](../../chatbox/src/main/store-node.ts)、[`src/renderer/platform/desktop_platform.ts`](../../chatbox/src/renderer/platform/desktop_platform.ts)
 - Web 存储和平台边界：[`src/renderer/platform/web_platform.ts`](../../chatbox/src/renderer/platform/web_platform.ts)、[`src/renderer/platform/index.ts`](../../chatbox/src/renderer/platform/index.ts)
-- 通用备份脱敏、导出和导入：[`src/shared/utils/backup.ts`](../../chatbox/src/shared/utils/backup.ts)、[`src/renderer/routes/settings/general.tsx`](../../chatbox/src/renderer/routes/settings/general.tsx)、[`src/renderer/packages/backup/export-backup.ts`](../../chatbox/src/renderer/packages/backup/export-backup.ts)、[`src/renderer/packages/backup/import-backup.ts`](../../chatbox/src/renderer/packages/backup/import-backup.ts)
+- 通用备份脱敏、导出和导入：[`packages/chatbox-core/src/application/settings/export-projection.ts`](../../chatbox/packages/chatbox-core/src/application/settings/export-projection.ts)、[`packages/chatbox-core/src/backup-export/index.ts`](../../chatbox/packages/chatbox-core/src/backup-export/index.ts)、[`packages/chatbox-core/src/backup-import/index.ts`](../../chatbox/packages/chatbox-core/src/backup-import/index.ts)、[`packages/chatbox-core/src/backup-v3/index.ts`](../../chatbox/packages/chatbox-core/src/backup-v3/index.ts)、[`src/renderer/routes/settings/general.tsx`](../../chatbox/src/renderer/routes/settings/general.tsx)
 - 虚拟 CLI：[`docs/technical/chatbox-virtual-cli.md`](../../chatbox/docs/technical/chatbox-virtual-cli.md)、[`src/renderer/packages/chatbox-cli/catalog.ts`](../../chatbox/src/renderer/packages/chatbox-cli/catalog.ts)、[`src/renderer/packages/chatbox-cli/settings.ts`](../../chatbox/src/renderer/packages/chatbox-cli/settings.ts)
+- 默认模型页与模型注册表：[`src/renderer/routes/settings/default-models.tsx`](../../chatbox/src/renderer/routes/settings/default-models.tsx)、[`src/shared/model-registry/index.ts`](../../chatbox/src/shared/model-registry/index.ts)、[`src/renderer/packages/model-registry/index.ts`](../../chatbox/src/renderer/packages/model-registry/index.ts)
 - Provider 架构与模型目录文档：[`docs/technical/ai-providers.md`](../../chatbox/docs/technical/ai-providers.md)、[`docs/adding-new-provider.md`](../../chatbox/docs/adding-new-provider.md)

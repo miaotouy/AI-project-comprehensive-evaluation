@@ -2,9 +2,9 @@
 
 > 汇总对象：`https://github.com/langgenius/dify`
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：本轮 Chat、会话与消息、对话请求、Chat UI、消息渲染、Agent 工具、LLM 渠道、生成式输出、外部协作与独特功能调查笔记；代码快照以各来源笔记所列 `38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe` 为准
+> 依据：本轮 Chat、会话与消息、对话请求、Chat UI、消息渲染、Agent 工具、LLM 渠道、生成式输出、外部协作与独特功能调查笔记；代码快照以各来源笔记所列 `e568478f8f2b95efc189b698c2f4386a7dbe1c3e` 为准
 >
 > 汇总方法：按应用发布、运行记录、公开交互、资源解析与外部接入合并来源结论；保留来源中的静态证据状态与未验证边界
 >
@@ -52,13 +52,13 @@ UI 的状态所有权主要是 hook/context 中的 current conversation、respon
 
 Provider、模型配置、Provider 级凭据、模型级凭据和负载均衡配置由服务端 tenant 作用域管理。`ProviderManager` 读取缓存/持久化配置，`ModelManager.get_model_instance` 再按 tenant、Provider、模型类型和模型名解析可调用实例；默认实例路径不长期缓存凭据，显式启用凭据缓存时才可能取得旧配置。公开 WebChat 因此提交的是应用输入和选择引用，不是原始 API Key。
 
-候选凭据经当前 plugin validate 后按 tenant 加密保存，读取时脱敏；模型目录由已安装 Provider plugin 组装，调用时 Dify 把解密凭据与统一请求交给 Plugin Daemon，再把规整结果的 usage、延迟写进消息/工作流并投递 trace。已确认同模型多 Key 的 round-robin 与限流/授权/连接异常冷却，但不能把它写成跨 Provider failover。厂商 HTTP、连接测试真实动作、备份/日志脱敏、usage/成本精度和 trace 实际交付未运行。详见[LLM 渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
+候选凭据经当前 plugin validate 后按 tenant 加密保存，读取时脱敏；模型目录由已安装 Provider plugin 组装，调用时 Dify 把解密凭据与统一请求交给 Plugin Daemon，再把规整结果的 usage、延迟写进消息/工作流，并交由应用追踪服务聚合成 trace 分发给各 sink。已确认同模型多 Key 的 round-robin 与限流/授权/连接异常冷却，但不能把它写成跨 Provider failover。厂商 HTTP、连接测试真实动作、备份/日志脱敏、usage/成本精度和 trace 实际交付未运行。详见[LLM 渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
 
 ### 工具、MCP、插件与 workflow-as-tool
 
-Dify 的工具不是一种单一实现：内置工具、API 工具、插件工具、MCP 工具和 workflow 工具共享 Provider/Tool 管理表面，但最后进入不同的 controller、执行域和错误路径。MCP 配置及 headers/OAuth 处理在服务端管理器中完成；workflow 可以在兼容性检查后登记为 tenant 下的工具 Provider，含 human-input 节点的 workflow 被排除。传统 Agent 节点与 Agent v2 又有不同的 runtime request builder/工具交接。
+Dify 的工具不是一种单一实现：内置工具、API 工具、插件工具、MCP 工具和 workflow 工具共享 Provider/Tool 管理表面，但最后进入不同的 controller、执行域和错误路径。MCP 配置及 headers/OAuth 处理在服务端管理器中完成；workflow 可以在兼容性检查后登记为 tenant 下的工具 Provider，运行时以不开启人工暂停的方式调用工作流，因此含人工输入节点的流程无法作为工具等待外部决策。传统 Agent 节点与 Agent v2 又有不同的 runtime request builder/工具交接。
 
-传统 function-calling Agent 已确认把原生 tool calls 逐个串行执行，持久化 thought/observation 后按 `tool_call_id` 回注下一轮模型，默认/最高循环上限为 10/99。Agent v2 另在 dify-agent runtime 中循环，核心工具经内部 API 回到 Dify 做 tenant 校验后执行，插件工具则进入 daemon；`ask_human` 是可恢复的 deferred tool，不是通用逐调用审批。真实模型、Plugin Daemon/MCP、工具预算和端到端授权未运行；没有找到 Dify Tool/MCP/API 通用逐调用批准令牌。详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
+传统 function-calling Agent 已确认把原生 tool calls 逐个串行执行，持久化 thought/observation 后按 `tool_call_id` 回注下一轮模型，默认/最高循环上限为 10/99。Agent v2 另在 dify-agent runtime 中循环，核心工具经内部 API 回到 Dify 做 tenant 校验后执行，插件工具则进入 daemon；人工输入改由工作流的 human input 节点与表单投递承接，dify-agent 运行时不提供通用的逐调用审批工具。真实模型、Plugin Daemon/MCP、工具预算和端到端授权未运行；没有找到 Dify Tool/MCP/API 通用逐调用批准令牌。详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
 
 媒体创作也可作为这条 Agent 编排的一个方向：传统 `agent-chat` 能配置 DALL-E、Stable Diffusion 等媒体工具；“SVG Logo Design”模板声明了 DALL-E 3 图片生成与 Vectorizer SVG 转换的连续流程。工具结果中的图片或链接会转换为 Dify 工具文件并随消息回流，因而支持“需求 -> Agent 调用媒体工具 -> 结果交付”的会话链。不过 Dify 本体尚未确认有独立的媒体任务历史、编辑版本或资产复用工作台，不能将其写成完整的内置媒体创作平台；模板的跨工具传递和实际外部执行也尚未运行验证，详见[Agent 角色配置](../Agent角色/Dify-Agent角色配置调查笔记.md)。
 
@@ -68,11 +68,19 @@ workflow 应用把输入校验、图定义、workflow run、节点事件、流/�
 
 workflow run 是可寻址、可回读和可归档的执行记录，不是已确认的可编辑 Artifact 或持续工作区；未找到在同一 outputs 上的版本、patch 或模型回流路径。Prompt IDE、LLMOps 注解回复、Agent v2 和 Marketplace 安装也已补到静态 `主链确认`，但 Trigger Provider 仍只有 `入口确认`。真实模型、外部 callback、worker 交付与跨租户行为都没有运行验证。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)和[生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)。
 
+### 人工协同：暂停、表单与 IM 投递
+
+workflow 可以在执行中暂停为待办任务，由外部人员填写表单后恢复。节点把暂停请求交给图引擎，引擎保存运行状态；服务层负责表单结构编译与迁移、投递、提交校验和恢复执行。投递渠道包括 Web 页面以及 Slack、飞书/Lark、钉钉、企业微信和 Microsoft Teams，渠道侧通过 webhook 回流，并配合联系人绑定、入站消息收件箱和幂等记录。
+
+这条链把工作流从“自动跑完”扩展为“可等待外部决策”，与普通 webhook 的单向触发不同。表单有效期、渠道凭据加密、送达重试、身份绑定与越权提交均未运行验证，详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)与[外部执行体与应用协作](../外部执行体与应用协作/Dify-外部执行体与应用协作调查笔记.md)。
+
 ### 知识资产与 RAG Pipeline
 
 Dify 将 Dataset、Document、分段、处理规则、索引状态和检索设置作为 tenant 下可长期维护的知识资产。上传文件、Notion 页面或网页来源写入 Document 后，会通过异步任务索引；聊天/completion 应用的 runner 和 workflow 的 Knowledge Retrieval 节点都能消费检索结果，后者将来源列表作为图变量并记录用量元数据。因此知识库既不是用户本轮上传的附件，也不是只存在于某一个 Chatbot 配置中的静态提示词。
 
 数据集还可以进入独立 RAG Pipeline：控制台提供创建、编辑、节点试跑与 Pipeline 路由，后端维护草稿和已发布 workflow、运行及节点执行记录，并支持 DSL 导入导出。当前是静态 `主链确认`，未运行数据源授权、解析器、向量库、reranking 或实际召回，不能推断检索质量、吞吐、费用、删除一致性和权限效果。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
+
+知识库文件能力在快照中改为对接独立部署的 KnowledgeFS 服务：仓内保留固定接口契约、能力操作清单、契约锁文件与 CI 覆盖率检查，客户端是否启用取决于部署形态、服务地址与能力认证配置；知识检索也新增了对应的 v2 节点。服务端实现不在本仓库，故只能确认 Dify 侧启用条件、契约版本与调用入口，实际存储、一致性与配额效果未验证，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
 
 ### Prompt IDE 与配置发布
 
@@ -82,13 +90,13 @@ Dify 将 Dataset、Document、分段、处理规则、索引状态和检索设�
 
 ### LLMOps：记录、Trace 与人工注解回复
 
-生产 workflow 调用会留下可查询的 `WorkflowAppLog`，但 debug、trigger 和部分 pipeline/validation 调用不写该记录。应用还可配置外部 Trace provider，服务端加密保存配置，将 trace 批量入队并由 worker 投递。更直接影响运行结果的是注解回复：人工修订的问答异步索引后，Advanced Chat 会在图运行前检索，命中时返回人工答案、记录 hit history 并终止后续 Graph。
+生产 workflow 调用会留下可查询的 `WorkflowAppLog`，但 debug、trigger 和部分 pipeline/validation 调用不写该记录。应用还可配置外部 Trace provider，服务端加密保存配置；运行结束时由应用追踪服务把多次运行聚合成 trace，经企业遥测、Agent 追踪收集器与应用 tracing provider 等独立 sink 分发，provider 发送失败时重试的是规范化 trace 而非原始记录。更直接影响运行结果的是注解回复：人工修订的问答异步索引后，Advanced Chat 会在图运行前检索，命中时返回人工答案、记录 hit history 并终止后续 Graph。
 
 本轮未找到从日志自动生成注解，或自动调整 prompt、知识库、模型的执行器；外部 Trace 接收和索引质量均未运行。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
 
 ### Agent v2 与受管插件生态
 
-Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；Chatflow 参与者按 conversation 复用记忆并固定初次绑定的 snapshot。后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。Runtime 现可选择 OpenShell 后端，取消时悬空的 tool call 也会标记为 interrupted，使下一回合可继续。它是版本化 Agent 的执行环境，而不只是新的配置界面。
+Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；Chatflow 参与者按 conversation 复用记忆并固定初次绑定的 snapshot。后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。Runtime 后端可为 local、enterprise、e2b 或 OpenShell，取消时悬空的 tool call 也会标记为 interrupted，使下一回合可继续。它是版本化 Agent 的执行环境，而不只是新的配置界面。
 
 Plugin Marketplace 则由 Dify 处理权限、来源策略、下载/缓存、异步安装/升级任务、卸载后的关联清理和运行时发现；真正的包安装、记录、隔离与物理删除在独立 Plugin Daemon。两条链都已静态走通 Dify 侧，尚未启动对应外部 runtime。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
 
@@ -96,7 +104,7 @@ Plugin Marketplace 则由 Dify 处理权限、来源策略、下载/缓存、异
 
 App Deployment v2 在内置发布之外增加了环境版本、环境 WebApp/service API 访问点和环境级访问控制；MCP 与 trigger 当前明确不在部署环境支持范围。环境文件通过短期、按 app/end-user 与 upload/resolve/produce scope 的 grant 交接，内容下载另用单文件 token。仓内只确认 Dify 侧入口和协议，实际部署控制面属于 Enterprise 外部边界，因此仍是 `入口确认`，详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)和[产品结构与设计基因](../产品结构与设计基因/Dify-产品结构与设计基因调查笔记.md)。
 
-知识库 Service API Key 也可绑定到指定 Dataset。绑定 Key 每次请求都按集合校验；没有绑定行的既有 Key 继续拥有租户内全库范围。该能力缩小了 API 凭据作用域，但尚未做真实越权测试，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
+知识库 Service API Key 也可绑定到指定 Dataset。绑定 Key 每次请求都按集合校验；没有绑定行的既有 Key 继续拥有租户内全库范围，而只绑定 KnowledgeFS 知识空间的 Key 会被拒绝，不能借它越权访问数据集。该能力缩小了 API 凭据作用域，但尚未做真实越权测试，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
 
 ### DSL 分发与迁移边界
 
@@ -116,12 +124,13 @@ service API、SDK、插件/MCP/触发器说明 Dify 有多个对外接入点，�
 - **统一入口而非统一运行器**：生成服务集中 mode 分派、权限/限流交接与响应协调，真正上下文、记录和执行仍由专属 generator/graph runtime 持有。
 - **工作区资源晚绑定**：Provider、模型凭据、工具与外部连接先按 tenant 配置，实际运行再解析需要的引用；这隔离了公开调用者与凭据，但要求按具体应用/节点追踪“本次实际可见什么”。
 - **事件型前端投影**：公开 UI 通过 SSE 合并临时状态并以服务端回填/重取收口，支持文本之外的 thought、文件和 workflow 生命周期；断线、乱序、并发与长期性能仍需运行检验。
+- **外部能力契约化**：知识文件服务、插件运行时与 Agent 运行时都放在本仓库之外，Dify 保留契约、启用条件与状态记录；实现因此可独立演进，代价是静态调查只能确认交接面。
 
 ## 已知边界与未覆盖事项
 
 本汇总只压缩静态调查结论。没有运行 Docker、真实模型、真实 Provider/MCP/插件或浏览器端到端场景，因此不对可靠性、性能、费用、权限效果、外部平台兼容或生产安全作项目级结论。存在测试目录只说明仓库有测试资产，不等于本轮运行过测试。
 
-RAG、Prompt IDE、注解回复、Agent v2 与 Dify 侧插件安装已补入主链；App Deployment v2 只确认 Dify 侧入口与文件 grant，Enterprise control plane 未闭环。文件存储和引用访问、控制台 workflow 编辑器、触发器交付、外部 Trace 的实际可见性、Plugin Daemon/Agent Runtime/OpenShell 的物理执行和 SDK 具体协议仍未形成完整专项。对话导出与分享已补充专项，但当前只确认管理员留存 JSONL.GZ 命令，未确认终端用户分享主链。没有找到某入口也只能说明本轮调查范围内未确认，不能用作整个项目“不支持”的绝对结论。
+RAG、Prompt IDE、注解回复、Agent v2、人工协同与 Dify 侧插件安装已补入主链；App Deployment v2 只确认 Dify 侧入口与文件 grant，Enterprise control plane 未闭环。文件存储和引用访问、控制台 workflow 编辑器、触发器交付、外部 Trace 的实际可见性、Plugin Daemon/Agent Runtime/OpenShell 的物理执行和 SDK 具体协议仍未形成完整专项。KnowledgeFS 与 IM 渠道的服务端实现或送达效果不在本仓库可验证范围。对话导出与分享已补充专项，但当前只确认管理员留存 JSONL.GZ 命令，未确认终端用户分享主链。没有找到某入口也只能说明本轮调查范围内未确认，不能用作整个项目“不支持”的绝对结论。
 
 ## 来源笔记索引
 

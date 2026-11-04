@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -146,7 +146,7 @@ Code CLI 的启停语义也不同于普通 Provider。选择外部 CLI Provider 
 - **配置文件**：SQLite 可确认是持久化真源；Code CLI 文件可读、编辑和写回，支持按工具批量写入以及 Codex `auth.json` 删除。未找到面向普通 Provider 的 JSON/YAML 导入导出文件格式，也未找到文件级渠道复制或连接测试。
 - **CLI**：仓库中的 Code CLI 功能负责启动外部 Claude Code、Codex 等工具，并为其写入配置；未找到 Cherry 自身用于 Provider CRUD 的命令行入口。外部 CLI 的命令和登录界面属于外部项目，本次未调查。
 - **TUI**：本仓库未找到 TUI 组件、终端渠道管理命令或 TUI Provider CRUD 入口；结论是“本次未找到”，不是对外部 CLI TUI 能力的否定。
-- **Web**：API Gateway 是本地 HTTP 推理网关，提供 `/v1/models` 和聊天协议接口，读取已启用 Provider/模型；未找到通过 Web API 管理 `user_provider` 的 CRUD、导入导出或连接测试路由。它可以启停网关本身，但这不是渠道启停（`src/main/features/apiGateway/utils/models.ts:42-123`、`docs/references/api-gateway/README.md:80-98,213-283`）。
+- **Web**：API Gateway 是本地 HTTP 推理网关，提供 `/v1/models` 和聊天协议接口，读取已启用 Provider/模型；未找到通过 Web API 管理 `user_provider` 的 CRUD、导入导出或连接测试路由。它可以启停网关本身，但这不是渠道启停（`src/main/features/apiGateway/utils/models.ts:42-123`、`docs/dev/references/api-gateway/README.md`）。
 - **桌面端**：这是源码确认的完整渠道管理入口，覆盖查看、新增、编辑、复制、启停、删除、deep link 导入和连接检查；没有 Provider 专用导出，数据库级备份另见 §3.4。
 
 默认预设与用户配置的生命周期是 insert-only seed 加读取时合并。应用启动或 Registry 变更不会覆盖用户行；未被用户覆盖的端点、适配器和模型元数据可以随 Registry 更新。新建自定义 Provider 没有 `presetProviderId` 时只拥有用户提交的配置，复制预设则继续继承来源的 Registry 元数据。更新 Endpoint 时服务层会把等于 Registry 基线的字段投影掉，避免一次普通编辑把默认值永久冻结到用户行（`ProviderService.ts:160-200,335-378,424-445`）。
@@ -341,7 +341,7 @@ Registry 合并时，Provider override 可修改 capability、模态、context�
 - capability 决定工具调用、视觉、联网、图片/音视频工作流和模型筛选；
 - pricing 用于模型详情和用量费用展示，但不参与渠道自动路由。
 
-这套方案的主要代价是元数据错误会同时影响 UI 与 wire protocol，影响面大于普通展示目录。项目通过 schema、catalog invariant、source-sync 和禁止手改生成 JSON 的 CI 约束降低风险；但 live upstream 参与生成，重新生成可能顺带吸收与本次改动无关的价格或能力漂移，仍需审阅生成差异。
+这套方案的主要代价是元数据错误会同时影响 UI 与 wire protocol，影响面大于普通展示目录。项目通过 schema、catalog invariant、source-sync 和禁止手改生成 JSON 的 CI 约束降低风险；但 live upstream 参与生成，重新生成可能顺带吸收与本次生成目标无关的价格或能力漂移，仍需审阅生成差异。
 
 Registry 中的条目与路由覆盖包括：
 
@@ -422,17 +422,20 @@ Provider deep link 将 JSON 负载带入设置页，字段包含 ID、Key、Base
 
 这是一种用户确认后的配置迁移，不是远程动态配置中心。负载中的 API Key 会经过 URL/路由参数进入应用，调用方仍需考虑浏览器历史、聊天记录或日志对深链的暴露。
 
-## 10. API Gateway 的移动设备配对与渠道导出
+## 10. API Gateway 与远程访问的渠道交付
 
-API Gateway 除本机推理协议外，还提供受限的移动设备接入面。启用 LAN 后，设置页请求一次性短时配对码，移动端以 `POST /pair` 交换设备 token；成功设备持久化为配对记录，token 只保存哈希。LAN 守卫只允许配对引导与 `GET /v1/export/providers`，普通生成、知识库和 MCP 路由仍限定 loopback。Provider 导出另有 endpoint 级 token 校验，配对 token 不等同于普通网关主密钥。依据：`src/main/features/apiGateway/ApiGatewayPairing.ts:20-59`、`lanGuard.ts:5`、`routes/pairing.ts:23-35`、`routes/providerExport.ts:146`。
+API Gateway 仍是本机推理协议的入口，同时把局域网暴露收窄为一条升级路径：当监听地址为 `0.0.0.0` 时，只有远程访问的 WebSocket 升级请求能跨局域网，其余 HTTP 路由（生成、知识库、MCP、Provider 导出）一律要求 loopback。守卫按 socket 对端地址判断，缺失地址按 loopback 处理，因此仅进程内调用不受影响。
 
-该能力创建的是“把当前可用 Provider 配置交付给已配对移动端”的受控导出，不是 Provider Settings 的通用文件导出，也不开放远程 Provider CRUD。真实局域网发现、移动端消费和明文 HTTP 环境下的网络风险未运行验证；仓库文档明确把 LAN 暴露限制在 pairing 与 export 两条路由，见 `docs/references/api-gateway/README.md:144-152,384-426`。
+已配对设备通过远程访问服务取得两类独立授权：`agent` 能力用于驱动桌面 Agent 会话，`configuration` 能力用于拉取渠道配置。配置交付由 `configuration.export.prepare` 与 `configuration.export.read` 两个 RPC 方法完成，内容仍来自 `providerExport` 的导出载荷；配对时同时批准两类能力，之后各自独立生效。设备身份是 Ed25519 密钥文件，访问 token 只存哈希，邀请有过期时间。
 
+原先的配对码 HTTP 路由（`routes/pairing.ts`）与 `ApiGatewayPairing` 已不存在，Provider 导出现在是远程访问协议里的一个能力方法，而不是 LAN 上的独立端点。
 ## 11. 当前渠道与模型适配补充
 
-Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Flash Vision Exp 的图像能力目录；同时移除了已退役的 GitHub Models 集成。Pi 与 DSH 的模型选择不直接复用普通聊天的任意 endpoint，而是经过各自兼容性和默认 Chat endpoint 解析；LM Studio 预设已补齐该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口则从 `/api/show` 读取。
+Provider Registry 从应用内模块抽成 `packages/provider-registry` 包，预设与能力目录随包发布。渠道侧新增 QwenCloud（原 DashScope 方向改为 Qwen AI Platform 品牌）、LongCat 2.5、GPT-6.1 Terra、Kimi K3.1 Pro 等预设与模型条目，并给 DeepSeek V4 Flash 加了可关闭开关；已退役的 GitHub Models 集成被移除。Pi 与 Pi-Durable 的模型选择不直接复用普通聊天的任意 endpoint，而是经过 Pi 兼容性与默认 Chat endpoint 解析，且每次原生调用都落到内部 gateway；LM Studio 预设补齐了该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口从 `/api/show` 读取。
 
-这些变化均在渠道解析、目录或 UI 选择层确认，第三方 endpoint 对所有组合的实际响应仍未运行验证。依据：`packages/provider-registry/src/providers/ollama.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/ai/dshModelCompatibility.ts`、`src/shared/data/presets/runtimeTransport.ts`、`src/renderer/components/ModelSelector`。
+计费元数据也有独立类型：Provider 与模型可以声明按倍率或按价格两种计费模式，倍率支持按时间段切换（例如夜间折扣），未声明时用默认倍率。重排序能力进入目录：Jina 系列按端点家族区分 `jina-rerank` 适配器，OpenRouter 的 rerank 模型可被发现并通过其 Provider 走重排调用。
+
+这些变化均在渠道解析、目录或 UI 选择层确认，第三方 endpoint 对所有组合的实际响应仍未运行验证。依据：`packages/provider-registry/src/providers/{qwencloud,ollama}.ts`、`src/shared/data/types/providerBilling.ts`、`src/shared/ai/piModelCompatibility.ts`、`src/shared/data/presets/runtimeTransport.ts`、`src/main/services/remoteAccess/{RemoteConnection,RemotePairing}.ts`、`src/main/features/apiGateway/{lanGuard.ts,providerExport.ts}`。
 
 ## 12. 能力边界与横向比较要点
 
@@ -468,7 +471,7 @@ Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Fla
 
 ## 13. 关键源码索引
 
-- Provider Registry 设计：[`docs/references/provider-model/provider-registry.md`](../../cherry-studio/docs/references/provider-model/provider-registry.md)
+- Provider Registry 设计：[`docs/dev/references/provider-model/provider-registry.md`](../../cherry-studio/docs/dev/references/provider-model/provider-registry.md)
 - Registry 数据：[`packages/provider-registry/data/`](../../cherry-studio/packages/provider-registry/data/)
 - Provider 表：[`src/main/data/db/schemas/userProvider.ts`](../../cherry-studio/src/main/data/db/schemas/userProvider.ts)
 - Provider 服务与 Key 轮询：[`src/main/data/services/ProviderService.ts`](../../cherry-studio/src/main/data/services/ProviderService.ts)
@@ -492,7 +495,7 @@ Provider Registry 增加 DeepSeek V4 Pro 的 Responses 路由与 DeepSeek V4 Fla
 - Provider CRUD Schema：[`src/shared/data/api/schemas/providers.ts`](../../cherry-studio/src/shared/data/api/schemas/providers.ts)
 - Code CLI 配置文件：[`src/shared/utils/cliConfig.ts`](../../cherry-studio/src/shared/utils/cliConfig.ts)、[`src/renderer/pages/code/cliConfig/draft.ts`](../../cherry-studio/src/renderer/pages/code/cliConfig/draft.ts)、[`src/renderer/pages/code/hooks/useConfigPanelController.ts`](../../cherry-studio/src/renderer/pages/code/hooks/useConfigPanelController.ts)
 - API Gateway 管理边界：[`src/main/features/apiGateway/utils/models.ts`](../../cherry-studio/src/main/features/apiGateway/utils/models.ts)、[`src/main/features/apiGateway/ApiGatewayService.ts`](../../cherry-studio/src/main/features/apiGateway/ApiGatewayService.ts)
-- 移动设备配对与导出：`src/main/features/apiGateway/{ApiGatewayPairing,lanGuard}.ts`、`routes/{pairing,providerExport}.ts`
+- 远程访问与配置交付：`src/main/services/remoteAccess/{RemoteAccessService,RemoteConnection,RemotePairing,RemoteTokens}.ts`、`src/main/features/apiGateway/{lanGuard,providerExport}.ts`
 - 自定义多端点：[`src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/ProviderList/customProviderCreation.ts)
 - Deep Link 导入：[`src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts`](../../cherry-studio/src/renderer/pages/settings/ProviderSettings/hooks/useProviderDeepLinkImport.ts)
 - 多模型解析：[`src/main/ai/streamManager/context/modelResolution.ts`](../../cherry-studio/src/main/ai/streamManager/context/modelResolution.ts)

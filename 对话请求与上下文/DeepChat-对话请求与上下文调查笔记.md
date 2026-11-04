@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SessionTurn/turnCoordinator 执行链、contextBuilder 与 promptAssembly、deepChatLoopRunner/process 流式管线、pending input 队列协调器、结构化日志事件面），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-当前实现以 context occupancy 作为压缩判定的输入，并将压缩结果、边界原因和 Provider 用量分开记录。压缩期间会建立 checkpoint；若摘要不能收缩上下文或快照已过期，协调器拒绝继续采用该结果（`src/main/agent/deepchat/loop/contextCoordinator.ts:807-846`、`src/main/agent/deepchat/runtime/contextOccupancyCoordinator.ts`）。工具目录则在本轮请求开始时冻结为 tool-surface snapshot，避免工具激活改变已经发出的 Provider 请求（`contextCoordinator.ts:904-1049`）。
+当前实现以 context occupancy 作为压缩判定的输入，并将压缩结果、边界原因和 Provider 用量分开记录。压缩期间会建立 checkpoint；若摘要不能收缩上下文或快照已过期，协调器拒绝继续采用该结果（`src/main/agent/deepchat/loop/contextCoordinator.ts`、`src/main/agent/deepchat/runtime/contextOccupancyCoordinator.ts`）。工具目录则在本轮请求开始时冻结为 tool-surface snapshot，避免工具激活改变已经发出的 Provider 请求（`contextCoordinator.ts` 的工具面快照段）。
+
+工具结果的上下文处理是两段式：先由判定模型问“这条已结束的结果这轮还要不要”，判为不需要的整条换成短占位说明，再由既有的按大小截断处理剩余结果（`src/main/agent/deepchat/runtime/jevToolResultPruning.ts`，语义见独特功能笔记能力卡 10）。判定链路只在 Agent 配置了 `judgmentModel` 且本轮允许裁剪时启用，未配置时该段完全跳过。
 
 DeepChat 的生成任务由 main process 编排，单会话串行、多会话各自独立：
 
@@ -91,7 +93,8 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - **运行时二次防线**：`deepChatLoopRunner` 的 `coreStream`（`src/main/agent/deepchat/runtime/deepChatLoopRunner.ts:701-780`）向 provider attempt 管线提供 `preflight`（:736-743）与 `fitStrictRetry`（:744-751，严格重试前再裁剪）；context-pressure 错误由 `recoverRequestContextPressure`（:1221-）经 `compactionService.prepareForContextPressureRecovery` 生成压缩 intent 后重试。
 - **自动压缩**：每次新 user turn 前由 `compactionService.prepareForNextUserTurn`（`compactionService.ts:311-`，调用点 turnCoordinator.ts:592-608）计算 intent，恢复 turn 用 `prepareForResumeTurn`（:359-）；intent 落地 `compactionRuntimeCoordinator.apply`（:291-，压缩消息的前插/顺移见会话与消息管理笔记 §4）。摘要生成（`generateRollingSummary` :774-、`summarizeBlocks` :810-、summary prompt 构造 :965-、模型调用 :996-）。
 - **manual compaction**：`turn.compactSession`（`turn.ts:401-413`）→ `compactionRuntimeCoordinator.compact`（`compactionRuntimeCoordinator.ts:133-`），要求非 ACP、状态 idle、无 pending interactions（:147-155）。
-- 压缩摘要的存储（summaryState 的持久化位置）本次未展开（§11）。
+- **判定模型裁剪（新增前置段）**：关闭的工具结果先经 `pruneClosedToolResultsForContext`（`jevToolResultPruning.ts:602`）逐条判题，候选与状态受 token、路径数上限约束（`jevReviewState.ts:68`、`:129`）；判为不需要的结果由 `buildJevPrunedResultContent`（`:521`）替换为指回 Tape 的短占位，判为需要的保持原文。该段是纯投影：不写 Tape、纯函数返回新数组，后续按大小截断仍然生效；反馈信号见 `jevPruningFeedback.ts`，判题材料是工具输出本身，不含大小/年龄提示。
+- **压缩摘要的存储**（summaryState 的持久化位置）本次未展开（§11）。
 
 ## 4. SDK、Provider、模型与协议交接
 
@@ -156,6 +159,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - 应用退出、窗口关闭时的任务收口未运行验证。
 - 未运行测试、构建或桌面端交互；结论来自 main process 静态源码。
 - 未运行 workspace Skill 冲突覆盖、用户插件 hook 命令、更新中撤销与恢复后的首次输入；这些路径只完成静态主链核对。
+- 判定模型裁剪只做静态核对：`keepThreshold` 自述未标定，判题请求的实际开销、误删后经 Tape 恢复的体验、Provider 不可用时的降级都未运行验证。
 
 ## 12. 关键源码索引
 
@@ -164,10 +168,11 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - 任务执行链：`src/main/agent/deepchat/runtime/turnCoordinator.ts:309-956`
 - 上下文构建：`src/main/agent/deepchat/runtime/contextBuilder.ts:1577-1824`
 - prompt 组装：`src/main/agent/deepchat/runtime/promptAssemblyService.ts:62-140`
-- 循环与 provider 管线：`src/main/agent/deepchat/runtime/deepChatLoopRunner.ts:381-780`、`:1221`
-- 流式节流与终态：`src/main/agent/deepchat/runtime/echo.ts:5-77`、`dispatch.ts:2693-2735`、`process.ts:779`
+- 循环与 provider 管线：`src/main/agent/deepchat/runtime/deepChatLoopRunner.ts:381-780`
+- 流式节流与终态：`src/main/agent/deepchat/runtime/echo.ts`、`dispatch.ts`、`process.ts:779`、`runtime/output.ts`（输出 sink）
 - 队列协调：`src/main/agent/deepchat/runtime/pendingInputAdmissionCoordinator.ts:104-494`、`pendingInputPump.ts:149-566`
-- 压缩：`src/main/agent/deepchat/runtime/compactionService.ts:311-491`、`compactionRuntimeCoordinator.ts:106-291`
-- 停止：`src/main/agent/deepchat/runtime/runLifecycleCoordinator.ts:258-306`
-- 结构化日志：`src/main/logging/mainLogEvents.ts:921-982`
-- workspace Skills 与插件上下文：`src/main/skill/index.ts:1295-1318`、`src/main/plugin/userPluginHooks.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`
+- 压缩：`src/main/agent/deepchat/runtime/compactionService.ts`、`compactionRuntimeCoordinator.ts`
+- 判定模型裁剪：`src/main/agent/deepchat/runtime/jevToolResultPruning.ts:602`、`jevReviewState.ts`、`jevPruningFeedback.ts`、`reviewText.ts`
+- 停止：`src/main/agent/deepchat/runtime/runLifecycleCoordinator.ts`
+- 结构化日志：`src/main/logging/mainLogEvents.ts`
+- workspace Skills 与插件上下文：`src/main/skill/index.ts:1295-1322`、`src/main/plugin/userPluginHooks.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`

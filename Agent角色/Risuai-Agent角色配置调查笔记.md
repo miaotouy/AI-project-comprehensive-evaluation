@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：只读核对角色与数据库类型定义、导入导出实现、发送链与提示词装配、lorebook 运行时、请求参数解析和角色配置界面；未修改被调查仓库源码，未运行应用
 >
@@ -50,7 +50,9 @@ Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局�
 
 整个数据库（含角色数组与全部聊天）经 msgpackr 序列化加 gzip 压缩成一个 `.bin` 文件：Tauri 写 `database/database.bin`（AppData），Web 端写入 LocalForage 同名键，每次保存另写一个时间戳备份。
 
-增量保存由自动保存循环完成：`RisuSaveEncoder` 按块编码（root/preset/modules/loadouts/plugins/pluginStorage/characters/chat），变更追踪只标记当前选中角色与其当前聊天（`src/ts/storage/risuSave.ts:124-263`、`src/ts/globalApi.svelte.ts:315-479`）。大聊天可外置到 coldstorage（gzip 的独立 JSON 文件或账号侧远端存储，`src/ts/process/coldstorage.svelte.ts:40-80`），角色选中时再按需取回。
+增量保存由自动保存循环完成：`RisuSaveEncoder` 按块编码（root/preset/modules/loadouts/plugins/pluginStorage/characters/chat，另有不进入 `DBState` 的 `kv:<namespace>` 块），变更追踪只标记当前选中角色与其当前聊天。大聊天可外置到 coldstorage（gzip 的独立 JSON 文件或账号侧远端存储），角色选中时再按需取回。
+
+角色对象新增入场引导字段 `onboarding`（`CharacterOnboarding`）：可启用，模式为表单或 HTML 二选一，表单模式带问题列表（文本、单选、多选等题型），HTML 模式直接存一段可交互标记；对应会话侧记录 `onboardingDone`，并可选择在聊天界面显示悬浮入口再次打开（`src/ts/onboarding.ts`、`src/ts/storage/database.svelte.ts`）。
 
 字段默认值与迁移集中在两处：整个库加载走 `setDatabase`（`database.svelte.ts:30-722`），角色对象走 `characterFormatUpdate`（`src/ts/characters.ts:533-646`），后者会补齐缺失字段并把旧字段迁移（例如把旧的后置指令字段合并进当前聊天的作者注，把 lorebook 的 v1 概率字段内联成 `@@probability` 内容前缀）。这意味着一部分"角色字段"是在加载时按需补全的，数据库中允许缺省。
 

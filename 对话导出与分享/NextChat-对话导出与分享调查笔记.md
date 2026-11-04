@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-08-14
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：静态源码局部调查；读取消息导出弹窗、选择器交接、文本/JSON/图片预览、PNG 复制与下载、ShareGPT 调用入口、client adapter、next.config 重写、Service Worker 图片缓存与 Markdown 渲染管线；未运行浏览器、Tauri 客户端或远端分享服务
 >
@@ -46,13 +46,13 @@ NextChat 使用一个两步式 `MessageExporter` 统一文本、图片和 JSON �
 
 ## 2. 文本与 JSON 导出
 
-文本模式实际生成 Markdown：以会话话题为一级标题，每条消息按“用户/ChatGPT”二级标题拼接 `getMessageTextContent()`，可复制或下载为 `<topic>.md`（`exporter.tsx:618-655`）。
+文本模式实际生成 Markdown：以会话话题为一级标题，每条消息按“用户/助手”二级标题拼接 `getMessageTextContent()`，助手侧标题取自 `Locale.Export.MessageFromChatGPT`，当前文案是“AI 助手 / Message From AI Assistant”；可复制或下载为 `<topic>.md`（`exporter.tsx:618-655`）。
 
 JSON 模式生成 OpenAI 风格的 `messages` 数组：开头插入一条 role 为 system、内容为话题说明的合成消息，随后每条只保留所选消息的 role 与 content 字段。复制走压缩 JSON，下载以完整序列化输出，预览则把缩进 JSON 包进 Markdown 代码块（`exporter.tsx:657-691`）。该结构是有损投影，不对应原始 Session schema；消息 ID、日期、模型、附件和分支字段均不会进入。
 
 ## 3. 图片分享稿与 PNG 生成
 
-`ImagePreviewer` 建立专用 `.preview-body`，顶部固定显示 NextChat 品牌、仓库地址、用户与 Mask 头像、模型、消息数、话题和最后一条消息时间。正文按角色重新排版：用户行反向排列，助手与用户使用不同背景；正文经共享 Markdown 组件渲染（`exporter.tsx:409-613`；`exporter.module.scss:75-190`）。
+`ImagePreviewer` 建立专用 `.preview-body`，顶部固定显示 NextChat 品牌、仓库地址、用户与 Mask 头像、模型、消息数、话题和最后一条消息时间。品牌位使用 `nextchat-bot` 图标（PNG 与 SVG 两套），仓库地址文案为 `github.com/ChatGPTNextWeb/NextChat`（`exporter.tsx:24,519,529`）。正文按角色重新排版：用户行反向排列，助手与用户使用不同背景；正文经共享 Markdown 组件渲染（`exporter.tsx:409-613`；`exporter.module.scss:75-190`）。
 
 消息图片经 `getMessageImages` 提取，只收集 content 数组中 image_url 类型的 URL（`app/utils.ts:270-281`）；单张按宽度展示，多张进入按图片数计算尺寸的网格（`exporter.tsx:582-608`）。
 

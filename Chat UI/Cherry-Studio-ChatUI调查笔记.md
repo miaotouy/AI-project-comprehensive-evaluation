@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、适配器与 hook、IPC 命令绑定、主进程桌面服务），界面视觉与键盘行为以"未运行验证"标注
 >
@@ -280,12 +280,16 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - 消息菜单包含“复制为新对话”，多选弹窗支持全选；所有 assistant 消息采用统一编辑入口，消息页脚始终显示 token 用量。
 - Composer 支持分别配置发送、换行与 steer 快捷键，草稿以原子快照写入缓存，长文本粘贴不会再由过期快照覆盖；粘贴截图时携带其中的文本。
 - 全局搜索输入使用 IME 感知的 debounce，输入法组合过程不发中间查询；结果显示会话所有者与 workspace 上下文。相关入口见 `src/renderer/components/GlobalSearch/useImeAwareDebouncedValue.ts`、`GlobalSearchResults.tsx`。
+- 主窗口引入会话标签页：Topic、Agent 会话与文件预览都可以开成标签，新标签插在当前标签右侧，活动标签有独立视觉态；切换标签复用同一路由承载，标签标题随会话改名同步。状态由 `src/renderer/hooks/tab/` 下的 hook 持有，不进入会话数据。
+- 多选操作栏新增导出按钮，与单条消息共用同一套文本导出目标；图片类导出仍只支持单条消息或整个 Topic。分支面板的节点菜单新增"删除分支"，删除范围是所选节点到其叶子的一条路径。
+- 用户可以直接编辑并重发最后一条用户消息，重发走新的分支而不是覆盖原消息；被编辑过的已签名 reasoning 在重放时降级为普通文本。
+- 会话列表支持归档到回收站而不是立即删除，回收站条目可以恢复，超过保留期的条目由后台任务清理。
 
 上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`、`src/renderer/components/GlobalSearch/`。
 
 ## 11. 设计取舍与已确认边界
 
-- **`ChatComposer.tsx` 单文件体量大**（1908 行）：`ChatComposerInner` 一个组件本体加上闭包状态，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，在同一个函数体内用多个 ref 协调（3.3）。
+- **`ChatComposer.tsx` 单文件体量大**（约 1859 行）：`ChatComposerInner` 一个组件本体加上闭包状态，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，在同一个函数体内用多个 ref 协调（3.3）。
 - **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
 - **适配器模式的代价与收益**：能力注入（6.2）让"Home 可写、Agent 只读"不需要 if/else 分支，代价是追踪某个按钮为何出现需要跨两个 adapter 文件加能力 hook；`messageListProviderBuilder.ts` 的"只塞存在的字段"（`pickMessageLeafState` 等纯函数）保证 `actions.xxx &&` 判断语义清晰（该文件细节见消息渲染器笔记）。
 - **搜索的"数据 + DOM"双轨**（2.3）：粗匹配在已加载数据上、精确高亮在已挂载 DOM 上，虚拟化窗口外的消息可定位但无 DOM 高亮；流式行被排除、未加载页搜不到，由分页与数据匹配的组合决定，数据侧影响见会话与消息管理笔记 5。

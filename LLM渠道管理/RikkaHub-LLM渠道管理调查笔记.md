@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`9a35e3f2f1e2820e95c37deb82ef8f5e1592e06f`（分支：`master`）
+> 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
 > 调查方式：只读检查 `ai/`、`app/`、`oauth/` 模块源码与仓库文件；未修改目标仓库，未启动应用做界面或真实网络验证
 >
@@ -14,49 +14,53 @@
 
 ## 结论摘要
 
-RikkaHub 把「渠道」拆成两层：一层是可序列化的配置对象 `ProviderSetting`，另一层是无状态的运行时实现 `Provider<T>`。配置按协议只有三种子类（OpenAI、Google、Claude），序列化后写进一个单例 DataStore 的同一个字符串键；运行时按子类在 `ProviderManager` 里查到固定实现。因此一个协议类型对应一个实现类，而用户可以在同一类型下创建任意多个实例，实例彼此以 Uuid 区分。
+RikkaHub 把「渠道」拆成两层：一层是可序列化的配置对象 `ProviderSetting`，另一层是无状态的运行时实现 `Provider<T>`。配置按协议有五个子类：OpenAI、Google、Claude 三个密钥型，以及 ChatGPT、Grok 两个账号型（OAuth 凭据，不含 apiKey）；序列化后写进一个单例 DataStore 的同一个字符串键。运行时按子类在 `ProviderManager` 里查到固定实现，应用启动时一次性注册五个实现。因此一个协议类型对应一个实现类，而用户可以在同一类型下创建任意多个实例，实例彼此以 Uuid 区分。
 
 内置渠道（AiHubMix、DeepSeek、OpenRouter 等）以固定 Uuid 写死在默认列表里，读取设置时会按 Uuid 补回缺失项并刷新展示信息，所以内置项在界面上不能删除、实质上也不会真正消失。用户新建的实例使用随机 Uuid，是唯一可删除的一类。
 
-模型能力不来自远端也不来自模型卡：`ModelRegistry` 用一张静态的模型定义表，对模型 ID 做分词与打分匹配，推断输入/输出模态、工具与推理能力及上下文长度。远端 `listModels` 只刷新「有哪些模型 ID」，不刷新能力元数据。推断结果在模型加入渠道时会快照进 `Model` 对象。
+模型能力来自随包快照与运行时更新：应用启动时先装本地缓存或 assets 里的 models.dev 目录快照，再按天检查并拉取新数据，匹配时按完整 id、去重前缀后的名称与 canonical id 建索引，同一键下多条记录按多数投票合并；静态的 `ModelRegistry` 定义表作为兜底与按系列判断的依据。远端 `listModels` 只刷新「有哪些模型 ID」，不刷新能力元数据。推断结果在模型加入渠道时会快照进 `Model` 对象。
 
-请求组装完全按协议分支：OpenAI 子类内部再按 `useResponseApi` 在 Chat Completions 与 Responses 两个实现之间切换，Claude 走 Messages API，Google 子类再按 Vertex 开关与认证方式切换 URL 与凭据位置。用户自定义 Header 与自定义 Body 在最后合并，自定义 Body 递归合并进协议请求体。
+请求组装完全按协议分支：OpenAI 子类内部再按 `useResponseApi` 在 Chat Completions 与 Responses 两个实现之间切换，Claude 走 Messages API，Google 子类再按 Vertex 开关、认证方式与 `useInteractionsApi` 在三套路径间切换，ChatGPT 与 Grok 走账号鉴权并共用一套 401 刷新 token 的拦截器。用户自定义 Header 与自定义 Body 在最后合并，自定义 Body 递归合并进协议请求体。
 
-运行时选择只做「模型 ID → 所属渠道」的线性查找，没有别名、语义路由、负载均衡或跨渠道故障转移。多 Key 仅做轮询：把 Key 字段按空白与逗号拆开，用持久化的 LRU 时间戳挑一个最久未用的；单个 Key 失败不会被记录、冷却或熔断。失败重试只在应用层对 `IOException` 生效，最多 3 次，且可用全局开关关闭。
+运行时选择只做「模型 ID → 所属渠道」的线性查找，没有别名、语义路由、负载均衡或跨渠道故障转移。多 Key 仅做轮询：把 Key 字段按空白与逗号拆开，用持久化的 LRU 时间戳挑一个最久未用的；单个 Key 失败不会被记录、冷却或熔断。失败重试由请求侧策略统一注入，对 `IOException` 生效，最多 3 次，且可用全局开关关闭。
 
 ## 系统边界与总体调用链
 
-渠道配置属于 `ai/` 模块的数据层与 `app/` 模块的持久化层；协议请求属于 `ai/` 的 provider 实现；运行时选择属于 `app/` 的 `ChatService` 与 `GenerationLoop`。一次对话的主链路可概括为：
+渠道配置属于 `ai/` 模块的数据层与 `app/` 模块的持久化层；协议请求属于 `ai/` 的 provider 实现；运行时选择属于 `app/` 的 `ChatService` 与 `ChatRequestFactory`。一次对话的主链路可概括为：
 
 ```text
 Settings.providers : List<ProviderSetting>   (DataStore 单键 JSON)
   -> settings.findModelById(assistant.chatModelId ?: settings.chatModelId)
   -> model.findProvider(providers)           -- 线性扫描，命中 model.id
        └─ model.providerOverwrite 非空时改用它
-  -> ProviderManager.getProviderByType(setting)   -- 按子类取实现
+  -> ProviderManager.getProviderByType(setting)   -- 按子类取实现（五个之一）
   -> Provider.streamText / generateText
        ├─ OpenAI 子类: ChatCompletionsAPI 或 ResponseAPI (useResponseApi)
        ├─ Claude 子类: ClaudeProvider  -> /messages
-       └─ Google 子类: GoogleProvider  -> generativelanguage 或 Vertex
+       ├─ Google 子类: generateContent 或 InteractionsAPI（非 Vertex 且开关打开）或 Vertex
+       ├─ ChatGPT: ChatGPTProvider  -> 账号 OAuth
+       └─ Grok: GrokProvider  -> 账号 OAuth
   -> 逐 SSE 事件交给各协议的 StreamChunkDecoder
-  -> 通用 StreamChunk 流回到 StreamChunkHandler/UIMessage
+  -> 通用 StreamChunk 流回到 AgentLoop 的钩子与 UIMessage
 ```
 
-app 层不直接持有协议实现，只通过 `ProviderManager` 以子类为键取实现；`ProviderManager` 在构造时一次性注册三个实现，之后不再变化。这一点决定了「新增一个协议」属于改动 `ai/` 模块的编译期行为，而不是运行时注册。
+app 层不直接持有协议实现，只通过 `ProviderManager` 以子类为键取实现；`ProviderManager` 在构造时一次性注册五个实现，之后不再变化。这一点决定了「新增一个协议」属于改动 `ai/` 模块的编译期行为，而不是运行时注册。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
 ### 1.1 配置模型
 
-`ProviderSetting` 是 kotlinx 序列化的密封类，公共字段为 `id`（Uuid）、`enabled`、`name`、`models`、`balanceOption`；`builtIn`、`description`、`shortDescription` 标了 `@Transient`，属于运行时展示信息，不落盘。三个子类各自带端点与凭据字段：
+`ProviderSetting` 是 kotlinx 序列化的密封类，公共字段为 `id`（Uuid）、`enabled`、`name`、`models`、`balanceOption`；`builtIn`、`description`、`shortDescription` 标了 `@Transient`，属于运行时展示信息，不落盘。三个密钥型子类各自带端点与凭据字段，账号型子类只带凭据对象：
 
 | 子类（`@SerialName`） | 默认 baseUrl | 端点字段 | 凭据字段 | 其它字段 |
 |---|---|---|---|---|
-| `ProviderSetting.OpenAI`（`"OpenAI"`） | `https://api.openai.com/v1` | `chatCompletionsPath`、`responsesPath`、`useResponseApi` | `apiKey` | `includeHistoryReasoning` |
-| `ProviderSetting.Google`（`"google"`） | `https://generativelanguage.googleapis.com/v1beta` | `vertexAI`、`useServiceAccount`、`location`、`projectId` | `apiKey`、`serviceAccountEmail`、`privateKey` | — |
-| `ProviderSetting.Claude`（`"claude"`） | `https://api.anthropic.com/v1` | — | `apiKey` | `promptCaching`、`promptCacheTtl` |
+| `ProviderSetting.OpenAI`（`"openai"`） | `https://api.openai.com/v1` | `chatCompletionsPath`、`responsesPath`、`useResponseApi` | `apiKey` | `includeHistoryReasoning` |
+| `ProviderSetting.Google`（`"google"`） | `https://generativelanguage.googleapis.com/v1beta` | `vertexAI`、`useServiceAccount`、`useInteractionsApi`、`location`、`projectId` | `apiKey`、`serviceAccountEmail`、`privateKey` | — |
+| `ProviderSetting.Claude`（`"claude"`） | `https://api.anthropic.com/v1` | — | `apiKey` | `promptCaching`、`promptCacheTtl`（5 分钟或 1 小时） |
+| `ProviderSetting.ChatGPT`（`"chatgpt"`） | —（账号接口） | — | `credential: OAuthCredential` | 账号型，无自建端点与 Key |
+| `ProviderSetting.Grok`（`"grok"`） | —（账号接口） | — | `credential: OAuthCredential` | 账号型，无自建端点与 Key |
 
-协议类型集合写死在 `ProviderSetting.Types`，顺序为 OpenAI、Google、Claude，设置页的类型切换按钮就直接遍历它。三个子类都实现了同一组模型增删改与搬移操作，以及一个 `copyProvider`。实现事实：模型搬移的方法名是 `moveMove`（含重复前缀），模型编辑方法名为 `editModel`。
+ChatGPT 与 Grok 继承自一个 `Account` 基类，配置里只有凭据对象；请求时由账号鉴权适配器提供 Bearer token，遇到 401 先刷新一次凭据再重试。协议类型集合写死在 `ProviderSetting.Types`，设置页的类型切换按钮直接遍历它。三个密钥型子类都实现了同一组模型增删改与搬移操作，以及一个 `copyProvider`。实现事实：模型搬移的方法名是 `moveMove`（含重复前缀），模型编辑方法名为 `editModel`。
 
 `balanceOption` 包含开关、请求路径和结果 JSON 路径三部分，用于余额查询。本次只在 OpenAI 子类上看到余额查询的实际使用（详情页与 `ProviderBalanceText` 都限定为 OpenAI）。
 
@@ -123,7 +127,7 @@ Chatbox 导入器面向 Chatbox 备份 v2：校验 `manifest.json` 的格式与�
 
 ## 3. 凭据、Header 与代理边界
 
-凭据以明文存在渠道设置里。`apiKey` 直接写在 `ProviderSetting` 的 JSON 中，随 DataStore 文件落盘；私有 Key（Google 服务账号）与代理密码同样是明文字段。本次在数据层、备份层和请求层都没有找到加解密或掩码处理：写入就是 `copy(apiKey = ...)`，展示只是用密码输入框遮挡字符。
+凭据以明文存在渠道设置里。密钥型渠道的 `apiKey` 直接写在 `ProviderSetting` 的 JSON 中，账号型渠道的 OAuth 凭据对象同样随设置落盘；私有 Key（Google 服务账号）与代理密码也是明文字段。本次在数据层、备份层和请求层都没有找到对这些字段的加解密或掩码处理：写入就是 `copy(apiKey = ...)`，展示只是用密码输入框遮挡字符。
 
 凭据会出现在四个可见位置。分享/二维码把完整 JSON（含 Key）Base64 编码后展示并可通过系统分享发出；备份会把完整 `Settings` 序列化为 `settings.json` 打进 ZIP（WebDAV/S3 备份项为数据库与文件）；请求日志在开启时会记录请求头与请求体；设置页的 Key 输入框可切换明文显示。请求日志的掩码只覆盖 `Proxy-Authorization` 一个头，`Authorization` 与 `x-api-key` 不在掩码范围内。
 
@@ -135,13 +139,15 @@ Header 分三层组装。协议层负责认证与内容类型（OpenAI 用 Beare
 
 ### 4.1 目录来源
 
-模型目录有两个来源，且分工明确。远端来源是各协议的 `listModels`：OpenAI 与 Claude 请求 `baseUrl/models`，Google 请求 `models?pageSize=100` 并只保留支持 generateContent 或 embedContent 的项。远端返回只提供模型 ID 与展示名（Google 额外给 displayName 并按方法推断类型），不提供服务端能力或上下文长度。静态来源是 `ModelRegistry`，只负责能力推断。
+模型目录有两个来源，且分工明确。远端来源是各协议的 `listModels`：OpenAI 与 Claude 请求 `baseUrl/models`，Google 请求 `models?pageSize=100` 并只保留支持 generateContent 或 embedContent 的项，账号型渠道按其账号接口拉取。远端返回只提供模型 ID 与展示名（Google 额外给 displayName 并按方法推断类型），不提供服务端能力或上下文长度。能力元数据的静态来源是 `ModelRegistry`：它先接收 models.dev 目录（见 4.2），匹配不到时回退到内置的定义表。
 
 界面上模型列表在进入详情页模型页时按渠道状态拉取一次并排序，然后把结果交给模型选择器；「全选」会批量加入远端返回但本地未选的模型。本次未找到显式的「刷新模型列表」按钮，列表随渠道对象变化重新拉取。
 
-### 4.2 静态能力推断
+### 4.2 静态能力推断与 models.dev 目录
 
-`ModelRegistry` 维护一张模型定义表，每条定义由匹配器与三类元数据组成：输入模态、输出模态、能力集合，外加可选上下文长度。匹配基于把模型 ID 转成小写并切分成字母段、数字段与单字符，然后对各段序列做匹配；支持 token 序列、取反序列、正则段和精确 ID 四种形式，精确 ID 带 1000 分加权。解析时取所有定义里得分最高的一组，同分则合并；模态为空时回退为纯文本，能力取并集。定义表用 `defineGroup` 把多个定义聚合成一个逻辑组（如 `CLAUDE_SERIES`、`GEMINI_SERIES`），供请求层按系列判断。
+`ModelRegistry` 维护两套数据。第一套是从 models.dev 目录裁出的模型信息：应用启动时先装 `filesDir/models_dev/api.json` 或 assets 里的 `models_dev.json` 快照，再按一天一次的节奏带 ETag 拉取 `https://models.dev/api.json`，成功才替换缓存，并要求目录至少 100 条以防空响应覆盖；匹配时把完整 id、去前缀名称与 canonical id 都建索引，同一键下多条记录按多数投票合并（`ai/src/main/java/me/rerere/ai/registry/ModelsDevCatalog.kt`、`app/src/main/java/me/rerere/rikkahub/data/remote/ModelsDevUpdater.kt`）。
+
+第二套是内置的定义表，每条定义由匹配器与三类元数据组成：输入模态、输出模态、能力集合，外加可选上下文长度。匹配基于把模型 ID 转成小写并切分成字母段、数字段与单字符，然后对各段序列做匹配；支持 token 序列、取反序列、正则段和精确 ID 四种形式，精确 ID 带 1000 分加权。解析时取所有定义里得分最高的一组，同分则合并；模态为空时回退为纯文本，能力取并集。定义表用 `defineGroup` 把多个定义聚合成一个逻辑组（如 `CLAUDE_SERIES`、`GEMINI_SERIES`），供请求层按系列判断。
 
 推断结果在模型加入渠道那一刻被快照进 `Model`：手工新增时按输入 ID 现算并写入，从选择器添加或全选时同样现算，两个导入器也各自调用注册表补齐。因此注册表更新后，已加入的模型不会自动重算，除非重新添加模型或重新导入。界面上模型选择器展示的模态与能力标签是现算的，与已存储值可能不一致。
 
@@ -155,7 +161,7 @@ Header 分三层组装。协议层负责认证与内容类型（OpenAI 用 Beare
 
 ### 5.1 协议分支与实现归属
 
-`Provider` 接口定义 `listModels`、`generateText`、`streamText`、`getBalance`，并为 embedding 与图像生成/编辑提供默认实现（默认直接抛「不支持」）。OpenAI 子类的实现内部持有 ChatCompletions 与 Response 两个 API 对象，在两个入口按 `useResponseApi` 二选一，因此「切换协议」是渠道级开关而不是新类型。Claude 与 Google 各自只有一个实现类。`ProviderMessageUtils` 提供把消息 parts 按工具边界分组的公共逻辑，保证工具调用与其结果相邻。
+`Provider` 接口定义 `listModels`、`generateText`、`streamText`、`getBalance`，并为 embedding 与图像生成/编辑提供默认实现（默认直接抛「不支持」）。OpenAI 子类的实现内部持有 ChatCompletions 与 Response 两个 API 对象，在两个入口按 `useResponseApi` 二选一，因此「切换协议」是渠道级开关而不是新类型。Claude 与 Google 各自只有一个实现类，但 Google 在非 Vertex 且 `useInteractionsApi` 打开时改走 Interactions API，Vertex 与其余情况仍走 generateContent。ChatGPT 与 Grok 是独立实现，共用账号鉴权的请求适配。`ProviderMessageUtils` 提供把消息 parts 按工具边界分组的公共逻辑，保证工具调用与其结果相邻。
 
 ### 5.2 OpenAI 兼容（Chat Completions）
 
@@ -174,6 +180,8 @@ Claude 实现外还有一层针对 `pause_turn` 的续跑逻辑：非流式与�
 ### 5.5 Google / Vertex
 
 未开 Vertex 时请求 `generativelanguage` 的 baseUrl，认证头为 `x-goog-api-key`；开 Vertex 且用服务账号时请求 `aiplatform.googleapis.com` 的项目级路径并用服务账号换取的 Bearer token 认证；开 Vertex 但用 API Key 时请求 `aiplatform` 的通用路径并把 Key 作为 `key` 查询参数。路径按是否 Vertex 在 `models/{id}:generateContent` 与 `publishers/google/models/{id}:...` 之间切换，流式端点固定加 `alt=sse`。请求体把 system 写成 systemInstruction，消息写成 contents，工具写成 functionDeclarations 与 functionResponse，服务端工具映射为 Google 的搜索与 URL 上下文档位。服务账号 token 由独立组件用私钥签发 JWT 换取，私钥在请求时先做 JSON 反转义。
+
+非 Vertex 渠道还有一个 `useInteractionsApi` 开关：打开后非流式与流式都改走 Interactions API，其请求体与流式解码器独立；该接口目前只由 Gemini Developer API 提供，Vertex 渠道忽略此开关（`ai/src/main/java/me/rerere/ai/provider/providers/google/InteractionsAPI.kt`、`GoogleProvider.kt` 的 `usesInteractionsApi`）。
 
 ### 5.6 流式解析
 
@@ -201,7 +209,7 @@ LRU 策略按渠道 Uuid 分槽保存每个 Key 的最后使用时间，优先�
 
 ### 7.2 重试与故障转移
 
-传输层开启了连接失败重试。应用层的重试发生在 `GenerationLoop`：对 `IOException` 最多重试 3 次，退避时长为 1 秒左移重试次数（即 1s、2s、4s），是否启用由全局网络设置的开关决定（默认开启）。重试前会先检查协程是否已被取消，以避免用户主动停止生成被误判为网络抖动；非网络类异常（例如下游消息处理失败）不重试。
+传输层开启了连接失败重试。应用层的重试由请求侧策略控制：对 `IOException` 最多重试 3 次，退避时长为 1 秒左移重试次数（即 1s、2s、4s），是否启用由全局网络设置的开关决定（默认开启）。策略在构造 Agent 时注入，循环通过钩子调用；重试前会先检查协程是否已被取消，以避免用户主动停止生成被误判为网络抖动；非网络类异常（例如下游消息处理失败）不重试（`data/ai/ChatRequestFactory.kt` 的 `retryPolicy`、`ai/src/main/java/me/rerere/ai/agent/Retry.kt`）。
 
 流式重试的做法是从本次模型调用前的消息快照重新开始，并复用同一个助手消息 ID，从而覆盖当前分支而不是追加候选消息。非流式走同一套重试包装。
 
@@ -231,7 +239,7 @@ LRU 策略按渠道 Uuid 分槽保存每个 Key 的最后使用时间，优先�
 
 无跨渠道、无模型 fallback、无自动上下文长度感知裁剪。这三项在当前快照中均未实现或不构成机制：故障始终落在同一渠道，上下文长度仅作为注册表元数据存在。
 
-平台分工是单端的。渠道 CRUD、凭据与二维码都在 Android 应用内；内嵌 Web 服务只暴露助手级设置（模型选择、思考预算、内置工具、收藏模型等），不暴露渠道列表或 Key；`oauth/` 模块服务于 MCP 服务器授权，与 LLM 渠道凭据无关。仓库中未找到面向终端的 LLM 渠道管理入口。
+平台分工是单端的。渠道 CRUD、凭据、账号登录与二维码都在 Android 应用内；内嵌 Web 服务只暴露助手级设置（模型选择、思考预算、内置工具、收藏模型等），不暴露渠道列表或 Key；`oauth/` 模块提供通用的授权启动、回环回调服务器与回调前台服务，MCP 服务器授权与 ChatGPT/Grok 账号登录都复用它，账号凭据的刷新与持久化在 `data/ai/account/` 下。仓库中未找到面向终端的 LLM 渠道管理入口。
 
 ## 10. 未验证事项
 
@@ -241,32 +249,34 @@ LRU 策略按渠道 Uuid 分槽保存每个 Key 的最后使用时间，优先�
 
 以下入口的状态未确认：`ai` 模块内的自定义 SSE 事件源实现是否仍被其它模块使用（本次全仓搜索只命中其自身定义）；设置级迁移器是否触及 `providers` 字段；`ModelRegistry` 定义表与真实模型能力的覆盖差异（表内条目数量与命名以当前快照为准，未与厂商文档比对）。
 
+models.dev 目录的运行时更新与账号型渠道未运行验证：目录拉取失败或缓存损坏时的回退路径、能力快照与远端目录不一致时的展示差异、ChatGPT 与 Grok 的登录、token 刷新与 401 重试只在代码层面确认。
+
 ## 11. 关键源码索引
 
-- 渠道配置模型：`ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt:26`（密封类与三个子类）、`:241`（`Types`）
-- 模型对象与能力枚举：`ai/src/main/java/me/rerere/ai/provider/Model.kt:8`、`:41`
-- 运行时注册与分发：`ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt:12`、`:49`
-- 运行时实现接口与生成参数：`ai/src/main/java/me/rerere/ai/provider/Provider.kt:17`、`:68`
-- 静态能力推断：`ai/src/main/java/me/rerere/ai/registry/ModelRegistry.kt:596`、`:694`、`:716`
-- 匹配器与 DSL：`ai/src/main/java/me/rerere/ai/registry/ModelDsl.kt:37`、`:161`
-- 持久化与默认合并：`app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt:61`、`:188`、`:263`、`:321`、`:710`
-- 内置与推荐渠道：`app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt:19`、`RecommendedProviders.kt:17`
-- 二维码分享与解码：`app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt:89`、`:99`
-- 渠道列表页与扫码入口：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderPage.kt:92`、`:337`
-- 渠道详情页、模型管理与覆盖：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt:137`、`:385`、`:1432`
-- 渠道表单与类型转换：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt:48`、`:82`
-- 连接测试：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt:53`、`:122`
-- Chatbox 导入：`app/src/main/java/me/rerere/rikkahub/data/sync/importer/ChatboxImporter.kt:170`、`:640`
-- CherryStudio 导入：`app/src/main/java/me/rerere/rikkahub/data/sync/importer/CherryStudioProviderImporter.kt:19`、`:45`
-- OpenAI 兼容请求与流：`ai/src/main/java/me/rerere/ai/provider/providers/OpenAI/ChatCompletionsAPI.kt:93`、`:133`、`:225`
-- Responses 请求与能力：`ai/src/main/java/me/rerere/ai/provider/providers/OpenAI/ResponseAPI.kt:91`、`:209`、`:721`
-- Claude 请求与缓存：`ai/src/main/java/me/rerere/ai/provider/providers/claude/ClaudeProvider.kt:244`、`:431`、`:546`
-- Google / Vertex：`ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleProvider.kt:90`、`:100`、`:213`
-- 流式解码器：`ai/src/main/java/me/rerere/ai/provider/providers/OpenAI/ChatCompletionsStreamDecoder.kt:39`、`ai/src/main/java/me/rerere/ai/provider/stream/StreamChunkDecoder.kt:9`
-- 多 Key 轮询：`ai/src/main/java/me/rerere/ai/util/KeyRoulette.kt:8`、`:56`
-- 错误解析：`ai/src/main/java/me/rerere/ai/util/ErrorParser.kt:14`
-- Header 与会话/自定义体合并：`ai/src/main/java/me/rerere/ai/util/Request.kt:14`、`:24`、`:57`
-- 运行时选择与重试：`app/src/main/java/me/rerere/rikkahub/data/ai/GenerationLoop.kt:91`、`:404`、`:495`；`app/src/main/java/me/rerere/rikkahub/service/ChatService.kt:666`
-- 网络客户端与代理：`app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt:116`
-- 请求日志：`app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt:9`
-- 备份中的设置导出：`app/src/main/java/me/rerere/rikkahub/data/sync/BackupManager.kt:37`
+- 渠道配置模型与五个子类：`ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt`
+- 模型对象与能力枚举：`ai/src/main/java/me/rerere/ai/provider/Model.kt`
+- 运行时注册与分发：`ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt`
+- 运行时实现接口与生成参数：`ai/src/main/java/me/rerere/ai/provider/Provider.kt`
+- 模型目录与能力推断：`ai/src/main/java/me/rerere/ai/registry/ModelRegistry.kt`、`ModelsDevCatalog.kt`、`ModelDsl.kt`、`app/src/main/java/me/rerere/rikkahub/data/remote/ModelsDevUpdater.kt`
+- 持久化与默认合并：`app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt`
+- 内置与推荐渠道：`app/src/main/java/me/rerere/rikkahub/data/datastore/DefaultProviders.kt`、`RecommendedProviders.kt`
+- 二维码分享与解码：`app/src/main/java/me/rerere/rikkahub/ui/components/ui/ShareSheet.kt`
+- 渠道列表页与扫码入口：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderPage.kt`
+- 渠道详情页、模型管理与覆盖：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingProviderDetailPage.kt`
+- 渠道表单与类型转换：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConfigure.kt`
+- 连接测试：`app/src/main/java/me/rerere/rikkahub/ui/pages/setting/components/ProviderConnectionTester.kt`
+- 账号登录与凭据：`app/src/main/java/me/rerere/rikkahub/data/ai/account/`（`ChatGPTAuth.kt`、`GrokAuth.kt`、`ProviderAccountManager.kt`）、`oauth/src/main/java/me/rerere/oauth/`
+- Chatbox 导入：`app/src/main/java/me/rerere/rikkahub/data/sync/importer/ChatboxImporter.kt`
+- CherryStudio 导入：`app/src/main/java/me/rerere/rikkahub/data/sync/importer/CherryStudioProviderImporter.kt`
+- OpenAI 兼容请求与流：`ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt`、`ResponseAPI.kt`、`ChatCompletionsStreamDecoder.kt`
+- Claude 请求与缓存：`ai/src/main/java/me/rerere/ai/provider/providers/claude/ClaudeProvider.kt`
+- Google / Vertex：`ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleProvider.kt`、`InteractionsAPI.kt`
+- ChatGPT / Grok：`ai/src/main/java/me/rerere/ai/provider/providers/chatgpt/ChatGPTProvider.kt`、`grok/GrokProvider.kt`、`AccountAuth.kt`
+- 流式解码器基类：`ai/src/main/java/me/rerere/ai/provider/stream/StreamChunkDecoder.kt`
+- 多 Key 轮询：`ai/src/main/java/me/rerere/ai/util/KeyRoulette.kt`
+- 错误解析：`ai/src/main/java/me/rerere/ai/util/ErrorParser.kt`
+- Header 与会话/自定义体合并：`ai/src/main/java/me/rerere/ai/util/Request.kt`
+- 运行时选择与重试：`app/src/main/java/me/rerere/rikkahub/data/ai/ChatRequestFactory.kt`、`ai/src/main/java/me/rerere/ai/agent/Retry.kt`、`service/ChatService.kt`
+- 网络客户端与代理：`app/src/main/java/me/rerere/rikkahub/di/DataSourceModule.kt`
+- 请求日志：`app/src/main/java/me/rerere/rikkahub/data/ai/RequestLoggingInterceptor.kt`
+- 备份中的设置导出：`app/src/main/java/me/rerere/rikkahub/data/sync/BackupManager.kt`

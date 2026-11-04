@@ -2,9 +2,9 @@
 
 > 对比对象：VCPChat、VCPToolBox、Hermes Agent、Open WebUI、LobeHub、AstrBot、OpenClaw、RikkaHub
 >
-> 对比更新日期：2026-09-16
+> 对比更新日期：2026-11-04
 >
-> 依据：同目录八份基于各项目当前源码快照的单项目调查笔记（含 RikkaHub 同目录 2026-09-16 调查笔记）
+> 依据：同目录八份单项目调查笔记（均为 2026-11-04 代码快照，RikkaHub 与 OpenClaw 为此轮更新后的笔记）
 >
 > 对比方法：先按运行对象是否隔离、触发来源和结果归属划分运行形态，再比较状态权威、并发、取消、失败和恢复；不按定时器名称、模型能力或任务数量排名
 >
@@ -16,11 +16,13 @@
 
 RikkaHub 本次确认没有主动运行主链，其余七个样本均已确认至少一条，但它们的工作单元并不相同。Hermes、Open WebUI、LobeHub、VCPToolBox 与 OpenClaw 都有独立日程或任务对象；VCPChat、Hermes、AstrBot 与 OpenClaw 还能把触发重新接入既有会话；VCPToolBox、Open WebUI 与 AstrBot 另有邮件、日历或群聊等条件唤醒，OpenClaw 另有 hook/webhook 外部事件唤醒。比较时，触发脱离用户回合是共同条件，不代表各样本都有同样的耐久性、取消能力或结果可见性。
 
-隔离日程运行最适合比较持久状态与恢复。Hermes 的 cron 以 profile 文件、执行账本和认领协议隔离运行；Open WebUI 把每次 Automation 记录为运行历史并生成真实 chat 或 channel；LobeHub 将任务、task topic 和 Brief 放入 PostgreSQL；VCPToolBox 则以 JSON 任务规则和 history 汇总 Agent 派发结果；OpenClaw 以 SQLite 同时持有 cron job、run receipt、task run 与 detached subagent run，isolated/current 运行使用独立 run session，main 目标则经 heartbeat 回到主会话。AstrBot 的 cron 定义和最近状态持久化，但没有单独的运行账本，运行仍重新进入原会话。
+隔离日程运行最适合比较持久状态与恢复。Hermes 的 cron 以 profile 文件、执行账本和认领协议隔离运行；Open WebUI 把每次 Automation 记录为运行历史并生成真实 chat 或 channel；LobeHub 将任务、task topic 和 Brief 放入 PostgreSQL；VCPToolBox 则以 JSON 任务规则和 history 汇总 Agent 派发结果；OpenClaw 以 SQLite 持有 cron job、run receipt 与 detached subagent run，isolated/current 运行使用独立 run session，main 目标则经 heartbeat 回到主会话。AstrBot 的 cron 定义和最近状态持久化，但没有单独的运行账本，运行仍重新进入原会话。
 
-会话内续作强调连续性而非后台队列。VCPChat FlowLock 的运行 Session 只在渲染进程内存在，能恢复尚未认领的跨 Topic 请求，不能恢复已运行 Session。Hermes heartbeat 把下一次触发状态保存到会话数据库，但需要 CLI 或 Gateway 轮询器继续运行。OpenClaw 的 cron main 与 heartbeat 也走会话续作：main job 只把 system event 放入目标会话再请求 heartbeat，heartbeat monitor 是系统拥有的持久 cron job，触发定义与执行账本（receipt、task run、heartbeat outcome）都持久化。AstrBot cron 也以合成事件延续原消息会话，和前两者不同的是其触发定义由持久 cron job 管理。
+会话内续作强调连续性而非后台队列。VCPChat FlowLock 的运行 Session 只在渲染进程内存在，能恢复尚未认领的跨 Topic 请求，不能恢复已运行 Session。Hermes heartbeat 把下一次触发状态保存到会话数据库，但需要 CLI 或 Gateway 轮询器继续运行。OpenClaw 的 cron main 与 heartbeat 也走会话续作：main job 只把 system event 放入目标会话再请求 heartbeat，heartbeat 的调度与状态判断已收进 auto-reply 主题模块与 gateway state owner 两侧，触发定义与投递结果（run receipt、heartbeat outcome）仍然持久化。AstrBot cron 也以合成事件延续原消息会话，和前者不同的是其触发定义由持久 cron job 管理，且 cron 与后台唤醒现在共用同一套唤醒事件对象。
 
 取消语义普遍分为“阻止下一轮”与“中断当前执行”两层。七个样本都能从静态代码确认前者的至少一部分；Hermes cron 与 OpenClaw 的 cron/hook 运行取消、后台 exec 的进程终止都已追踪到取消事件进入 Agent/脚本执行或真实进程路径。其余样本对已开始的模型流、Agent 或外部工具是否被完整中断，均保留为未验证或未追踪边界。
+
+还有一种不进入后台队列的主动形态：VCPToolBox 的 VCPSleep 让当前工具链原地等待到指定时间（单次上限 12 小时），醒来后把当前时间交还给调用方；若管理员开启联动且 AgentDream 已启用，执行器会在等待期间异步请求一次梦，梦境失败不影响睡眠本身。它因此不是可独立取消的调度对象，而是挂在模型工具调用上的同步等待。
 
 ## 分型地图
 
@@ -45,19 +47,19 @@ RikkaHub 本次确认没有主动运行主链，其余七个样本均已确认�
   `- OpenClaw: hook/webhook -> 一次性 cron run 或 wake -> heartbeat/isolated run
 ```
 
-同一项目可落入多个分型。例如 Hermes 同时具有会话 heartbeat 与隔离 cron；VCPToolBox 的邮件投递不是 TaskAssistant 的任务记录；AstrBot 的后台工具有运行 ID，却没有可恢复的持久任务对象。OpenClaw 的分型差异由 sessionTarget 决定：同一份 cron 定义既可回主会话（main）也可走独立 run session（isolated/current），heartbeat monitor 本身又是系统拥有的持久 cron job。
+同一项目可落入多个分型。例如 Hermes 同时具有会话 heartbeat 与隔离 cron；VCPToolBox 的邮件投递不是 TaskAssistant 的任务记录；AstrBot 的后台工具有运行 ID，却没有可恢复的持久任务对象。OpenClaw 的分型差异由 sessionTarget 决定：同一份 cron 定义既可回主会话（main）也可走独立 run session（isolated/current），heartbeat 的调度与状态判断则分布在 auto-reply 主题模块与 gateway state owner 两处，不再是单一的 runner 文件。
 
 ## 核心比较矩阵
 
 | 项目 | 已确认主链分型 | 运行状态权威 | 执行与结果归属 | 重启或重复触发边界 |
 | --- | --- | --- | --- | --- |
 | [VCPChat](VCPChat-主动Agent与后台任务调查笔记.md) | 会话内续作 | FlowLock Session 在 renderer 内存；跨 Topic 请求落在 Topic 元数据 | 继续写作回原 Topic；任务台只代理 VCPToolBox | Session 重启丢失；pending 跨 Topic 请求可重认领 |
-| [VCPToolBox](VCPToolBox-主动Agent与后台任务调查笔记.md) | 后台工作队列、邮件条件唤醒 | TaskAssistant JSON/history；邮件去重文件；Dream 日志 | 任务 runtime/history、AgentAssistant 输入或梦境待审记录 | 任务启动重建；邮件去重可恢复；Dream 默认不加载 |
+| [VCPToolBox](VCPToolBox-主动Agent与后台任务调查笔记.md) | 后台工作队列、邮件条件唤醒、工具链内睡眠 | TaskAssistant JSON/history；邮件去重文件；Dream 日志；VCPSleep 的同步等待 | 任务 runtime/history、AgentAssistant 输入、梦境待审记录；睡眠结果回到当前工具链 | 任务启动重建；邮件去重可恢复；Dream 默认不加载；睡眠上限 12 小时，梦只是可选联动 |
 | [Hermes Agent](Hermes-Agent-主动Agent与后台任务调查笔记.md) | 会话内续作、隔离日程运行 | SessionDB heartbeat；profile job 文件、execution 与 output | 原会话消息；或独立 cron session、输出与投递 | heartbeat 需活跃 poller；cron 以认领和保守 catch-up 避免重复 |
 | [Open WebUI](Open-WebUI-主动Agent与后台任务调查笔记.md) | 隔离日程运行、条件通知 | 数据库 automation/run；calendar event 的提醒标记 | 新 chat/channel、run 历史与 Socket（频道 emitter 另有 `files` 事件）；或日历通知 | 原子认领及标记去重；执行中 task 的关闭语义未确认 |
 | [LobeHub](LobeHub-主动Agent与后台任务调查笔记.md) | 隔离日程运行、会话式 heartbeat | PostgreSQL task、task topic 与 Brief（`task_activities` 仅作变更历史，不替代当前状态） | 无头 Agent 的 task topic、handoff 与 Brief | 投递后重验状态；本地 heartbeat 计时器不持久化 |
-| [AstrBot](AstrBot-主动Agent与后台任务调查笔记.md) | 会话内 cron、进程内后台工作 | 数据库 cron job 的定义和最近状态；后台工具只有内存协程 | 原会话主动消息与历史；后台工具通过后续 Agent 回合交付 | cron 启动重装；后台工具无持久化、查询或恢复链 |
-| [OpenClaw](OpenClaw-主动Agent与后台任务调查笔记.md) | 隔离日程运行、会话内续作、外部事件唤醒、后台 exec 与 detached subagent | SQLite cron_jobs/run_receipts/task_runs/subagent_runs/update_runs，加 session 状态与 heartbeat_outcomes；后台 exec 由进程 registry 托管 | main job 经 system event 回主会话；isolated/current 走独立 run session；结果经 announce、durable channel 或 requester settle wake 交付 | cron receipt 以 CAS/fence 恢复 stale owner 并有界 catch-up；subagent run 启动恢复；后台 exec 与进程内 wake 不跨重启恢复 |
+| [AstrBot](AstrBot-主动Agent与后台任务调查笔记.md) | 会话内 cron、进程内后台工作 | 数据库 cron job 的定义和最近状态；后台工具只有内存协程；cron 与后台唤醒共用统一的唤醒事件对象 | 原会话主动消息与历史；后台工具通过后续 Agent 回合交付 | cron 启动重装，错过触发按 grace 时间补跑；后台工具无持久化、查询或恢复链 |
+| [OpenClaw](OpenClaw-主动Agent与后台任务调查笔记.md) | 隔离日程运行、会话内续作、外部事件唤醒、后台 exec 与 detached subagent | SQLite cron_jobs/run_receipts/subagent_runs/update_runs，加 session 状态与 heartbeat_outcomes；后台 exec 由进程 registry 托管；通用 task ledger 已不在 state schema 中 | main job 经 system event 回主会话；isolated/current 走独立 run session；结果经 announce、durable channel 或 requester settle wake 交付 | cron receipt 以 CAS/fence 恢复 stale owner 并有界 catch-up；subagent run 启动恢复；后台 exec 与进程内 wake 不跨重启恢复 |
 | [RikkaHub](RikkaHub-主动Agent与后台任务调查笔记.md) | 无主动运行主链（N/A）；仅有会话内后台生成续作与进程内串行消息队列 | 内存 ConversationSession：引用计数、Job 与待发消息队列；无持久生成状态 | 会话数据库；Web API 的 SSE；App 不在前台时的系统通知 | 无恢复：进程死亡即静默终止，两个 Service 均 START_NOT_STICKY，无补跑 |
 
 ## 调度、并发与控制
@@ -69,7 +71,7 @@ RikkaHub 本次确认没有主动运行主链，其余七个样本均已确认�
 | Hermes Agent | cron tick 锁、fire claim 与每 job 运行集合；heartbeat 忙碌时跳过 | heartbeat pause/clear；cron pause 和运行期 cancel event | cron 保存终态并回收失主 claim；heartbeat 不补积压 tick |
 | Open WebUI | 数据库事务认领到期 Automation；每轮限额；Calendar 提醒校验重复频率下限 24 小时、实例展开剥离 DTSTART 且不展开 EXRULE | toggle/delete 阻止后续；未找到独立的运行中取消 API | error run 持久化；未确认自动重试或 backlog 补跑 |
 | LobeHub | task topic 冲突拒绝；旧投递由数据库状态和 heartbeat token 拒绝 | paused/终态阻止下一轮 | 连续失败触发 fuse；生产投递重试和运行中中断未验证 |
-| AstrBot | APScheduler 单进程注册；未确认分布式锁；任务列表按发送者所有权过滤并附说明 | 更新/删除/禁用阻止后续 cron | runner 以 ERROR 结束但未抛异常时也写 failed/last_error；一次性任务失败后删除；后台工作无恢复 |
+| AstrBot | APScheduler 单进程注册，错过触发有 5 分钟 grace 时间；未确认分布式锁；任务列表按发送者所有权过滤并附说明 | 更新/删除/禁用阻止后续 cron | runner 以 ERROR 结束但未抛异常时也写 failed/last_error；一次性任务失败后删除；后台工作无恢复 |
 | OpenClaw | cron 默认并发上限 8；queued/running marker 防本进程重入、SQLite receipt 防跨进程重入、config revision 阻止旧定义写回；heartbeat wake 按 agent/session 合并、同 target 单活跃回合 | job disable/remove、schedule/trigger 编辑请求取消 active marker 并终止真实 controller；cron 超时向 detached Agent 建 abort controller；后台 exec 经 ProcessSupervisor.cancel 到达真实进程 | 软件更新另以 `update_runs` 账本记录 running 到终态、驱动需显式 adopt，重启按 recovery 继续或标记 abandoned；cron 连续错误按退避重试并在阈值后自动禁用；启动恢复 stale receipt、catch-up 有界补跑；detached subagent 与 channel 发送走 durable delivery/dead-letter；后台 exec 与进程内 wake 不跨重启恢复 |
 | RikkaHub | 无调度器（N/A）：无 cron、AlarmManager、JobScheduler、Worker 与广播；仅会话内消息队列按会话串行派发 | 可停止生成：暂停该会话队列并取消全部活跃 Job；前台服务超时亦触发停止 | 仅网络失败最多 3 次指数退避重试；失败暂停队列需手动恢复；无跨重启恢复 |
 
@@ -86,7 +88,7 @@ RikkaHub 本次确认没有主动运行主链，其余七个样本均已确认�
 
 - 本类目的“主链确认”均基于静态源码走读；未运行实际 cron、休眠、断线、平台消息投递、QStash、Socket 或多实例部署。
 - OpenClaw 的 cron/heartbeat/hook/exec/subagent 主链均基于静态走读，未启动真实 Gateway、Channel adapter、Provider 或 ProcessSupervisor，未验证多 Gateway 同库时 receipt owner 判断与真实长停机 catch-up。
-- OpenClaw 的任务结果面较宽：cron run history、task ledger、heartbeat outcome、subagent run、`update_runs` 更新账本与 durable channel/outbound queue 分别持久化；heartbeat_outcomes 是内部状态，不等同于已发送的用户消息。
+- OpenClaw 的任务结果面较宽：cron run history、heartbeat outcome、subagent run、`update_runs` 更新账本与 durable channel/outbound queue 分别持久化；heartbeat_outcomes 是内部状态，不等同于已发送的用户消息；通用 task ledger 在本快照已不在 state schema 中。
 - 分布式去重强度不同：Hermes 与 Open WebUI 已确认持久认领或数据库事务；LobeHub 会在执行端重验状态；AstrBot 本次未确认跨副本锁；VCPChat FlowLock 只管理单个 renderer 内存状态。
 - 任务结果的可见表面不同。Open WebUI 和 LobeHub 有独立 run/chat/topic 记录，VCPToolBox 有任务 history，Hermes 有 execution/output；VCPChat 与 AstrBot 会话续作主要借用常规消息历史。
 - 本次未将候选清单中尚未建立同等主链证据的项目写为“不支持”；其状态应继续以独特功能清单和相邻类目笔记为准。

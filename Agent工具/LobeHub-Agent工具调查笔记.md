@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`（monorepo，重点 `apps/server`、`apps/desktop`、`packages/agent-runtime`、`packages/builtin-tools`、`packages/context-engine`、`packages/types`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读源码梳理（Read/Grep/Glob + 后台子调查代理核实内建工具清单、扩展机制、子代理编排三个子领域）；未修改 LobeHub 仓库任何文件
 >
@@ -16,7 +16,7 @@
 
 LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准执行”严格拆成三条独立的判定链，且服务端与前端复用同一套上下文引擎、Agent 运行时和内建工具实现。
 
-1. **工具目录**是 `packages/builtin-tools/src/index.ts:166-399` 里一个 35 项的静态注册表（条目见维度 9），每项声明标识符、manifest、隐藏/可发现状态和动态解析入口；manifest 类型 `builtin|default|markdown|mcp|standalone` 决定 schema 来源。注册表还定义群组编排工具集，以及手动 skill 激活模式下的排除项和专属控件（`index.ts:87-97,139`）。
+1. **工具目录**是 `packages/builtin-tools/src/index.ts` 里一个 **42 项**的静态注册表（条目见维度 9），manifest 本体来自 39 个 `@lobechat/builtin-tool-*` 包（每包自带 `manifest.ts` 与 `resolveManifest`），注册表只做装配。每项声明标识符、manifest、隐藏/可发现状态和动态解析入口；manifest 类型 `builtin|default|markdown|mcp|standalone` 决定 schema 来源。注册表同时导出若干 id 集合：默认工具（`defaultToolIds`）、常驻工具（`alwaysOnToolIds`）、激活模式受控（`activationModeControlledToolIds`）、手动模式排除（`manualModeExcludeToolIds`）、chat 模式白名单（`chatModeAllowedToolIds`）、群组 supervisor 集（`groupSupervisorToolIds`）、运行时托管（`runtimeManagedToolIds`），以及分享可放行判定 `isAgentShareAllowedBuiltinIdentifier`。
 2. **注入到模型的可见集合**由 `ToolsEngine.generateTools()`（`packages/context-engine/src/engine/tools/ToolsEngine.ts`）统一裁剪，规则由启用检查器执行：先判断显式激活是否允许绕过，再做平台过滤，最后应用声明式规则表。服务端入口位于 `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts`；三种模式使用不同规则和默认工具，chat mode 强制关闭显式激活。chat mode 的图像生成必须 **pinned 才注入**；agent mode 会为 bot 会话注入消息工具，为群组注入 supervisor 编排工具，并应用 remote-device 锁定期规则（`index.ts:332-347`）。
 3. **审批**是由 `GeneralChatAgent.checkInterventionNeeded` 执行的固定顺序判定：安全黑名单的 always 规则优先且不可绕过，其后依次处理动态规则、headless 特殊放行、required 规则、静态 always、自动运行、未知 manifest、白名单和 manual 配置。批准后进入 `waiting_for_human` 状态机，待审批工具消息持久化在数据库，前端依据工具调用 chunk 和审批事件渲染卡片。
 4. **执行位置**由 `ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:82-179`）分派：
@@ -24,9 +24,9 @@ LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准
    - MCP 按 `mcpParams.type` 分三路：`cloud` 走 market/discover gateway；`stdio` 在 `deviceGateway.isConfigured && activeDeviceId` 时转发到用户设备，否则走本地 `mcpService.callTool`（服务器进程内 spawn，或桌面 Electron 主进程内 spawn）；
    - 所有路径执行前都先查 connector 权限表，`disabled` 一律硬拒绝，覆盖 MCP/market skills/Composio/qstash；
    - local-system 工具的客户端执行收敛为共享运行时入口 `packages/tool-runtime/src/LocalSystemExecutionRuntime.ts`（+cwd 注入，`pathScope` 迁入 `tool-runtime/src/pathScope.ts`）；桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`：`createSandboxEnv`/`SrtSandboxRuntime`/`installDeviceSandbox` + `src/helpers/localSandbox.ts`），`executionTarget.ts` 用 `isLocalSandboxEnabled` 判定——本地命令可在沙箱围栏内执行，也可“裸 spawn”执行（沙箱能力探测/安装/工作目录的细节见维度 13 与生成式输出笔记）。
-5. **结果回注**统一走 `truncateToolResult`（默认 25,000 字符，`lobe-agent-documents` 例外），截断附带明确的 "[Content truncated...]" 提示文本,防止模型误判内容完整。
+5. **结果回注**分两层：共享的 `truncateToolResult` 已下沉到 `packages/prompts/src/toolResult/index.ts`（默认 25,000 字符，`ARCHIVE_BYPASS_IDENTIFIERS` 里的 `lobe-agent-documents` 例外），服务端另有 `archiveToolResult` 把超长结果整体写入 topic document 虚拟文件系统（文件名取内容哈希前 32 位、写入后校验），只把窗口化片段加提示回注，并让归档内容可用同一套行号窗口分页读取。
 6. **循环终止契约**已从宿主各自推断收敛为共享 `runAgentLoop`。循环只负责停止条件与下一步上下文，服务端锁、持久化、hook、trace 和浏览器直跑仍由各宿主的 step 实现承担；统一停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、调用方步数预算和无后续上下文。见 `packages/agent-runtime/src/loop/index.ts:5-28,130-166`。
-7. **共享 Agent 访客工具面**在工具装配和实际执行两处都受门禁。分享配置只授予明确列入 `toolGrants` 的工具或 API；装配阶段裁剪可见集合，builtin dispatch 再调用分享门禁，设备、凭据、子 Agent 与未授权数据工具不会因模型猜到名字而执行。见 `apps/server/src/services/aiAgent/shareGate.ts:89-103,332-393,447-459` 与 `apps/server/src/services/toolExecution/builtin.ts:120-133`。
+7. **共享 Agent 访客工具面**在工具装配和实际执行两处都受门禁。分享配置只授予明确列入 `toolGrants` 的工具或 API；装配阶段按 `isAgentShareAllowedBuiltinIdentifier` 与 `shareToolManifest` 裁剪可见集合，builtin dispatch 再经 `grants.ts` 与运行期 `AgentRuntimeService/shareRunGate.ts` 复核，设备、凭据、子 Agent 与未授权数据工具不会因模型猜到名字而执行。
 
 以下各节给出精确到代码行的证据；其中 alwaysOnToolIds 只在 agent mode 生效（维度 2.1），disabled 工具在统一执行入口的 connector 权限表处拦截（维度 7.3）。
 
@@ -75,15 +75,15 @@ LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准
 
 ### 1.1 builtin registry 结构
 
-`packages/builtin-tools/src/index.ts:163-387` 是一个约 30 项的静态工具注册表，每项包含以下字段：
+`packages/builtin-tools/src/index.ts` 是一个 42 项的静态工具注册表（每项来自对应 `@lobechat/builtin-tool-*` 包导出的 manifest），每项包含以下字段：
 
 - `identifier`：工具标识符，如 `lobe-web-browsing`
 - `manifest`：静态工具描述
 - `resolveManifest?`：按上下文动态生成描述，例如在子代理/群组内隐藏子代理调用
 - `hidden?`：从用户界面隐藏，但仍可能被系统注入
-- `discoverable?`：是否出现在发现/市场列表；浏览器和本地系统工具按桌面环境决定（`packages/builtin-tools/src/index.ts:238,245`）
+- `discoverable?`：是否出现在发现/市场列表；浏览器和本地系统工具按桌面环境决定
 
-`LobeBuiltinTool`/`BuiltinToolManifest` 类型定义在 `packages/types/src/tool/builtin.ts:231-357`。`meta`（avatar/description/tags/title）被 hoist 到顶层供 UI/discovery/token 估算读取（`packages/builtin-tools/src/index.ts:400-406`）。
+`LobeBuiltinTool`/`BuiltinToolManifest` 类型定义在 `packages/types/src/tool/builtin.ts:231-357`。`meta`（avatar/description/tags/title）被 hoist 到顶层供 UI/discovery/token 估算读取；注册表尾部还导出安装态相关的 `defaultUninstalledBuiltinTools`。
 
 ### 1.2 manifest 类型语义差异
 
@@ -108,7 +108,7 @@ LobeHub 把“模型能看到什么工具”“工具在哪执行”“谁批准
 
 这些框架字段（`humanIntervention`/`work`）在生成模型可见 schema 时会被剥离——`ToolsEngine.convertManifestsToTools` 只读 `api.description`/`api.name`/`api.parameters`（`packages/context-engine/src/engine/tools/ToolsEngine.ts:265-274`），不会泄露给 LLM。
 
-**依据**：[builtin registry](../../lobehub/packages/builtin-tools/src/index.ts)、[manifest 类型](../../lobehub/packages/types/src/tool/manifest.ts)、[builtin 类型定义](../../lobehub/packages/types/src/tool/builtin.ts)、[plugin 类型](../../lobehub/packages/types/src/tool/plugin.ts)、[ToolNameResolver](../../lobehub/packages/context-engine/src/engine/tools/ToolNameResolver.ts)、[ToolsEngine](../../lobehub/packages/context-engine/src/engine/tools/ToolsEngine.ts)。
+**依据**：[builtin registry](../../lobehub/packages/builtin-tools/src/index.ts)、[各 builtin-tool 包](../../lobehub/packages/builtin-tool-lobe-agent/src/manifest.ts)、[manifest 类型](../../lobehub/packages/types/src/tool/manifest.ts)、[builtin 类型定义](../../lobehub/packages/types/src/tool/builtin.ts)、[plugin 类型](../../lobehub/packages/types/src/tool/plugin.ts)、[ToolNameResolver](../../lobehub/packages/context-engine/src/engine/tools/ToolNameResolver.ts)、[ToolsEngine](../../lobehub/packages/context-engine/src/engine/tools/ToolsEngine.ts)。
 
 ## 2. 工具发现与注入
 
@@ -236,7 +236,7 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 
 `userInterventionConfig.approvalMode === 'headless'` 时（后台任务/API 无 UI 场景，`apps/server/src/services/aiAgent/index.ts:1174` 默认就是 `{ approvalMode: 'headless' }`），`GeneralChatAgent`（`llm_result` phase）不会发 `request_human_approve`，而是发 `resolve_blocked_tools`（`GeneralChatAgent.ts:551-558`）。这个指令由 `resolveBlockedTools` 执行器（`packages/agent-runtime/src/executors/resolveTools.ts:78-173`）处理：把每个待批准工具直接标记为失败结果 `{ content: 'Blocked by security/privacy.', error: 'blocked_by_security_privacy', success: false }`，`pluginIntervention: { status: 'rejected', rejectedReason: 'blocked_by_security_privacy' }`，然后照常进入 `tools_batch_result` 让模型看到"这个工具被拒绝"并有机会重新规划——而不是让整个 operation 挂起等待一个不存在的人工响应。headless 下真正会被拒绝的只是"需要人工介入"的那部分工具（`toolsNeedingIntervention`），对 `dynamicPolicy`/全局审计中标记为可覆盖（非 `always`）的规则是**自动放行**而非拒绝（`GeneralChatAgent.ts:200-204, 211-215, 229-234`）——headless 不是"全部工具都拒绝"，而是"能自动放行的照常放行，必须人工的转为拒绝结果"。
 
-**依据**：[AgentRuntime.step](../../lobehub/packages/agent-runtime/src/core/runtime.ts)、[GeneralChatAgent.toLLMCall/forceFinish](../../lobehub/packages/agent-runtime/src/agents/GeneralChatAgent.ts)、[ToolResolver 的 deactivatedToolIds](../../lobehub/packages/context-engine/src/engine/tools/ToolResolver.ts)、[AgentRuntimeService 默认 maxSteps](../../lobehub/apps/server/src/services/agentRuntime/AgentRuntimeService.ts)、[resolveToolTimeout](../../lobehub/apps/server/src/modules/AgentRuntime/resolveToolTimeout.ts)、[call_tool/call_tools_batch 执行器](../../lobehub/packages/agent-runtime/src/executors/tool.ts)、[resolve_blocked_tools/resolve_aborted_tools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[callLlm 重试与中断检测](../../lobehub/packages/agent-runtime/src/executors/callLlm.ts)、[errorClassification 与 normalizeExecutionError](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[execAgent headless 默认值](../../lobehub/apps/server/src/services/aiAgent/index.ts)。
+**依据**：[AgentRuntime.step](../../lobehub/packages/agent-runtime/src/core/runtime.ts)、[GeneralChatAgent.toLLMCall/forceFinish](../../lobehub/packages/agent-runtime/src/agents/GeneralChatAgent.ts)、[ToolResolver 的 deactivatedToolIds](../../lobehub/packages/context-engine/src/engine/tools/ToolResolver.ts)、[AgentRuntimeService 默认 maxSteps](../../lobehub/apps/server/src/services/agentRuntime/AgentRuntimeService/index.ts)、[resolveToolTimeout](../../lobehub/apps/server/src/modules/AgentRuntime/resolveToolTimeout.ts)、[call_tool/call_tools_batch 执行器](../../lobehub/packages/agent-runtime/src/executors/tool.ts)、[resolve_blocked_tools/resolve_aborted_tools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[callLlm 重试与中断检测](../../lobehub/packages/agent-runtime/src/executors/callLlm.ts)、[errorClassification 与 normalizeExecutionError](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[execAgent headless 默认值](../../lobehub/apps/server/src/services/aiAgent/index.ts)。
 
 ## 6. 审批与策略（重点）
 
@@ -335,9 +335,9 @@ approve 与 reject 走两个不同的 `nextContext.phase`（`human_approved_tool
 
 ### 7.1 执行方分派条件
 
-`ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:75-172`）按 `payload.type` 分派：`'mcp'` → `executeMCPTool`，其余（含 `'builtin'`）→ `builtinToolsExecutor.execute`。这是**类型级**分派；真正的"执行在哪台机器上"由 `executeMCPTool` 内部再细分（`index.ts:174-262`）：
+`ToolExecutionService.executeTool`（`apps/server/src/services/toolExecution/index.ts:138` 起）按 `payload.type` 分派：`'mcp'` → `executeMCPTool`，其余（含 `'builtin'`）→ `builtinToolsExecutor.execute`。这是**类型级**分派；真正的"执行在哪台机器上"由 `executeMCPTool` 内部再细分（`index.ts:174-262`）：
 
-1. `mcpParams.type === 'cloud'` → `executeCloudMCPTool` → `DiscoverService.callCloudMcpEndpoint`（market/discover gateway，`index.ts:219-220, 330-345`）
+1. `mcpParams.type === 'cloud'` → `executeCloudMCPTool` → `DiscoverService.callCloudMcpEndpoint`（market/discover gateway）
 2. `mcpParams.type === 'stdio' && deviceGateway.isConfigured && context.activeDeviceId && context.userId` → `executeMcpViaDevice`（转发到用户设备，`index.ts:228-235, 270-318`）——**这是唯一的判定条件**：网关配置了 + 有一个当前活跃设备 ID + 有 userId，三者同时满足才转发到设备；不满足则退回下一步
 3. 其余（stdio 无设备网关、或 http/sse）→ `this.mcpService.callTool`（本地/服务器进程内 MCP client，`index.ts:238-242`）——服务器自身直接 spawn stdio 子进程或发 HTTP/SSE 请求
 
@@ -366,14 +366,14 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 
 ### 8.1 结果截断的配置与默认值
 
-结果截断由 `truncateToolResult` 统一处理（`apps/server/src/utils/truncateToolResult.ts:26-50`），默认上限为 25,000 字符。每个 agent 可通过 chat 配置覆盖上限；实现还会处理 UTF-16 代理对边界，避免截断 emoji 后生成非法转义（默认值与边界处理见同一文件）。上下文也可以整体跳过截断（服务端调用点见 `apps/server/src/services/toolExecution/index.ts:127-129,166`）。归档读取工具在 `ARCHIVE_BYPASS_IDENTIFIERS` 中列为例外，结果永不截断。
+结果处理分"截断"与"归档"两步。截断工具已从服务端 utils 下沉为前后端共享模块 `packages/prompts/src/toolResult/index.ts`：默认 `DEFAULT_TOOL_RESULT_MAX_LENGTH = 25,000` 字符，`sliceTextWindow` 按整行切出前段窗口，`appendTextWindowNotice` 给出展示区间与总长度，代理对边界由 `truncateSurrogateSafe` 处理。服务端在此基础上增加归档：`archiveToolResult`（`apps/server/src/services/toolExecution/archiveToolResult.ts`）把超长结果写入 topic document 虚拟文件系统，文件名取内容哈希前缀，写后做内容校验，失败时不静默丢弃；回注给模型的是截断窗口加归档位置提示，模型可再用文档读取工具按同一套行号窗口翻页。`ARCHIVE_BYPASS_IDENTIFIERS` 只列 `lobe-agent-documents`，因为它是归档内容的读取面，本身不能再被截断或归档。
 
 ### 8.2 截断后的标记
 
-截断后会在内容尾部追加明确提示（`truncateToolResult.ts:47`）：
+截断或窗口化后会在内容尾部追加共享提示（`packages/prompts/src/textWindow/index.ts` 的 `appendTextWindowNotice`）：
 
 ```text
-[Content truncated: {N} characters omitted to prevent context overflow. Original length: {M} characters]
+[Showing lines a-b of N; window truncated. Full content archived at <path>]
 ```
 
 模型能读到"内容被截断，原文多长，截了多少"，不会被误导为内容已完整。
@@ -396,11 +396,11 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 2. 持久化清洗逻辑（`callLlmFinalizer.ts:104-124`）只处理模型发出的工具调用参数，与工具返回内容无关。
 3. MCP 和自定义插件返回的内容会作为普通工具文本回注模型，未观察到统一的输出安全过滤或注入检测层。截断逻辑只限制长度；部分工具的 systemRole 文案会提醒模型工具结果中的指令不可信，但覆盖率本次未逐一确认。
 
-**依据**：[truncateToolResult](../../lobehub/apps/server/src/utils/truncateToolResult.ts)、[ToolExecutionService 截断调用点](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[HumanInterventionHandler.reject](../../lobehub/apps/server/src/services/agentRuntime/HumanInterventionHandler.ts)、[resolveBlockedTools/resolveAbortedTools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[buildBlockedToolResponse](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[callLlmFinalizer 的 sanitize](../../lobehub/packages/agent-runtime/src/executors/callLlmFinalizer.ts)。
+**依据**：[prompts/toolResult](../../lobehub/packages/prompts/src/toolResult/index.ts)、[prompts/textWindow](../../lobehub/packages/prompts/src/textWindow/index.ts)、[archiveToolResult](../../lobehub/apps/server/src/services/toolExecution/archiveToolResult.ts)、[ToolExecutionService](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[HumanInterventionHandler.reject](../../lobehub/apps/server/src/services/agentRuntime/HumanInterventionHandler.ts)、[resolveBlockedTools/resolveAbortedTools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[buildBlockedToolResponse](../../lobehub/src/libs/mcp/connectorPermissionCheck.ts)、[callLlmFinalizer 的 sanitize](../../lobehub/packages/agent-runtime/src/executors/callLlmFinalizer.ts)。
 
 ## 9. 内建工具完整清单
 
-以下清单以 `packages/builtin-tools/src/index.ts:163-387` 注册表为准；审批列按各工具 manifest 声明填写，省略时默认 never，执行位置则结合服务端运行时文件和 executors 字段判断：
+以下清单以 `packages/builtin-tools/src/index.ts` 的 42 项注册表为准（本快照新增的条目标注见本节末）；审批列按各工具 manifest 声明填写，省略时默认 never，执行位置则结合服务端运行时文件和 executors 字段判断：
 
 | identifier | 主要 api（节选） | humanIntervention 默认 | 执行位置 | agent/chat 可见性 | 风险点 |
 |---|---|---|---|---|---|
@@ -438,7 +438,8 @@ builtin 工具的 `client`/`server` 执行位置由 manifest 的 `executors?: ('
 
 **未核实项说明**：表中标注"未核实"的条目，是本次调查在时间/篇幅约束下没有逐一打开对应 `packages/builtin-tool-*/src/manifest.ts` 核对每个 api 的 `humanIntervention` 字段；已给出的 `'never'`/`'required'`/`'always'` 判定均逐条读取了源码文件并给出行号，可直接复核。`lobe-skills`/`lobe-skill-store`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation` 等因体量较大列入后续调查缺口（见维度 13）。
 
-**依据**：[builtin registry](../../lobehub/packages/builtin-tools/src/index.ts)、[browser manifest](../../lobehub/packages/builtin-tool-browser/src/manifest.ts)、[local-system manifest](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[web-browsing manifest](../../lobehub/packages/builtin-tool-web-browsing/src/manifest.ts)、[cloud-sandbox manifest](../../lobehub/packages/builtin-tool-cloud-sandbox/src/manifest.ts)、[creds manifest](../../lobehub/packages/builtin-tool-creds/src/manifest.ts)、[message manifest](../../lobehub/packages/builtin-tool-message/src/manifest.ts)、[remote-device manifest](../../lobehub/packages/builtin-tool-remote-device/src/manifest.ts)、[group-management manifest](../../lobehub/packages/builtin-tool-group-management/src/manifest.ts)、[lobe-agent manifest](../../lobehub/packages/builtin-tool-lobe-agent/src/manifest.ts)、[task manifest](../../lobehub/packages/builtin-tool-task/src/manifest.ts)、[agentManagement 服务端超时](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/agentManagement.ts)、[truncateToolResult 的归档白名单](../../lobehub/apps/server/src/utils/truncateToolResult.ts)。
+本快照相对旧快照的登记表变化：新增 `acceptance-evidence`、`auv`、`channel`、`dashboard`、`canvas`、`attachments`、`user-interaction`、`goal`/`goal-report`/`goal-supervisor`、`agent-signal` 系列、`skill-maintainer`、`brief` 等条目；旧表里的 `lobe-topic-reference` 与 `lobe-delivery-checker` 在注册表与 `packages/` 中均已找不到，说明这两项被移除或改名。工具总数由 35 项增至 42 项。
+**依据**：[builtin registry](../../lobehub/packages/builtin-tools/src/index.ts)、[browser manifest](../../lobehub/packages/builtin-tool-browser/src/manifest.ts)、[local-system manifest](../../lobehub/packages/builtin-tool-local-system/src/manifest.ts)、[web-browsing manifest](../../lobehub/packages/builtin-tool-web-browsing/src/manifest.ts)、[cloud-sandbox manifest](../../lobehub/packages/builtin-tool-cloud-sandbox/src/manifest.ts)、[creds manifest](../../lobehub/packages/builtin-tool-creds/src/manifest.ts)、[message manifest](../../lobehub/packages/builtin-tool-message/src/manifest.ts)、[remote-device manifest](../../lobehub/packages/builtin-tool-remote-device/src/manifest.ts)、[group-management manifest](../../lobehub/packages/builtin-tool-group-management/src/manifest.ts)、[lobe-agent manifest](../../lobehub/packages/builtin-tool-lobe-agent/src/manifest.ts)、[task manifest](../../lobehub/packages/builtin-tool-task/src/manifest.ts)、[agentManagement 服务端超时](../../lobehub/apps/server/src/services/toolExecution/serverRuntimes/agentManagement.ts)、[ARCHIVE_BYPASS_IDENTIFIERS](../../lobehub/packages/prompts/src/toolResult/index.ts)。
 
 ## 10. 扩展机制
 
@@ -480,7 +481,9 @@ connector 凭据表（`packages/database/src/schemas/connector.ts:59-74, 159-234
 
 ### 11.1 `callSubAgent` 的调度模型：异步 deferred，不是同步等待
 
-`LobeAgentExecutionRuntime.callSubAgent`（`apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts:151-200`）不会阻塞等待子代理跑完，而是调用 `ctx.subAgent.run({ description, instruction, timeout })` 拿到 `{ started, threadId, subOperationId, toolMessageId }` 后立即返回 `{ deferred: true, success: true, state: { status: 'pending', ... } }`（`lobeAgent.ts:174-199`）。这与 `packages/types/src/tool/builtin.ts` 里 `SubAgentCallbacks.run` 返回 `RunSubAgentResult`（同步结果）的类型注释描述的"直接跑完返回结果"语义不完全一致——**实际服务端实现是 fork 一个独立 async operation，父操作转入 `waiting_for_async_tool`，由完成回调桥接回填 tool message**（`packages/agent-runtime/src/executors/tool.ts` 里 `execution.result.deferred` 分支，`tool.ts:409-417, 636-641`）。若调用失败于"启动阶段"（`started:false`），则**不**走 deferred，直接返回普通失败结果，避免父操作永久卡在等待一个不存在的完成回调（`lobeAgent.ts:180-189` 注释明确说明这个区分的原因）。
+`LobeAgentExecutionRuntime.callSubAgent`（`apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts`）不会阻塞等待子代理跑完，而是调用 `ctx.subAgent.run({ description, instruction, timeout })` 拿到 `{ started, threadId, subOperationId, toolMessageId }` 后立即返回 `{ deferred: true, success: true, state: { status: 'pending', ... } }`（`lobeAgent.ts:174-199`）。这与 `packages/types/src/tool/builtin.ts` 里 `SubAgentCallbacks.run` 返回 `RunSubAgentResult`（同步结果）的类型注释描述的"直接跑完返回结果"语义不完全一致——**实际服务端实现是 fork 一个独立 async operation，父操作转入 `waiting_for_async_tool`，由完成回调桥接回填 tool message**（`packages/agent-runtime/src/executors/tool.ts` 里 `execution.result.deferred` 分支，`tool.ts:409-417, 636-641`）。若调用失败于"启动阶段"（`started:false`），则**不**走 deferred，直接返回普通失败结果，避免父操作永久卡在等待一个不存在的完成回调（同文件注释说明这个区分的原因）。
+
+本快照又给这条链加了两处能力：一是 `callSubAgent` 支持用 `subAgentId` 续接已有子 Agent（manifest 把这个参数描述为把 `instruction` 作为新消息发给同一子 Agent，保留其历史，可用于续跑失败任务或索取中间结果，见 `packages/builtin-tool-lobe-agent/src/manifest.ts:238-256`）；二是子 Agent 的 LLM 调用可经由 `apps/server/src/services/aiAgent/subAgentLlmRelay.ts` 的 `openSubAgentLlmRelay` / `closeSubAgentLlmRelay` 转接，后台子 Agent 的完成回填则由 `backgroundSubAgentDelivery.ts` 负责。
 
 ### 11.2 嵌套阻断的三层实现
 
@@ -547,8 +550,8 @@ connector 凭据表（`packages/database/src/schemas/connector.ts:59-74, 159-234
 4. **`inheritMessages` 参数在服务端 `callSubAgent` 路径是否真的被消费**：`lobeAgent.ts:174-178` 的 `ctx.subAgent.run()` 调用未转发这个字段（见维度 11.3），需要跟踪 `ServerSubAgentTransport`/其上游 `execSubAgent` 回调的完整实现才能确认。
 5. **`StreamableHTTPClientTransport`（`@modelcontextprotocol/sdk`）自身是否有内建 SSRF 过滤**：未审查该第三方依赖源码，只确认 LobeHub 没有额外包一层防护（见维度 4.3）。
 6. **`lobe-cloud-sandbox` 的网络隔离范围**：沙箱容器是否可以访问公网、是否有独立的出网白名单，未定位到具体沙箱运行时实现代码。
-7. **文档与代码不一致（已确认的具体一处）**：`packages/types/src/agent/chatConfig.ts:194-199` 的 `toolResultMaxLength` 字段 JSDoc 写"`@default 6000`"，但同文件 `AgentChatConfigSchema` 的 zod 定义（`chatConfig.ts:298`）实际是 `z.number().default(25000)`——与 `truncateToolResult` 的 `DEFAULT_TOOL_RESULT_MAX_LENGTH = 25_000`（`apps/server/src/utils/truncateToolResult.ts:10`）一致，说明 **JSDoc 注释过期，实际生效值是 25000 不是 6000**。
-8. **本笔记维度 9 表格中标注"未核实"的工具**（`lobe-skills`/`lobe-skill-store`/`lobe-skill-maintainer`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation`/`lobe-page-agent`/`lobe-agent-builder`/`lobe-group-agent-builder`/`lobe-agent-management`/`lobe-calculator`/`lobe-topic-reference`/`lobe-web-onboarding`/`lobe-brief`/`lobe-delivery-checker`/agent-signal 系列/`lobe-self-iteration`）：其 `humanIntervention` 逐条取值未在本次调查中逐一打开源码核对，仅确认了它们在 registry 中的存在和大致用途。
+7. **文档与代码不一致（已确认的具体一处）**：`packages/types/src/agent/chatConfig.ts:207` 的 `toolResultMaxLength` 字段 JSDoc 仍写"`@default 6000`"，但同文件 `AgentChatConfigSchema` 的 zod 定义（`chatConfig.ts:314`）是 `z.number().default(25000)`——与 `packages/prompts/src/toolResult/index.ts` 的 `DEFAULT_TOOL_RESULT_MAX_LENGTH = 25_000` 一致，说明 **JSDoc 注释过期，实际生效值是 25000 不是 6000**。
+8. **本笔记维度 9 表格中标注"未核实"的工具**（`lobe-skills`/`lobe-skill-store`/`lobe-skill-maintainer`/`lobe-knowledge-base`/`lobe-memory`/`lobe-image-generation`/`lobe-page-agent`/`lobe-agent-builder`/`lobe-group-agent-builder`/`lobe-agent-management`/`lobe-calculator`/`lobe-web-onboarding`/`lobe-brief`/`lobe-channel`/`lobe-dashboard`/`lobe-canvas`/`lobe-attachments`/`lobe-user-interaction`/`lobe-auv`/`lobe-acceptance-evidence`/agent-signal 系列/`lobe-self-iteration`）：其 `humanIntervention` 逐条取值未在本次调查中逐一打开源码核对，仅确认了它们在 registry 中的存在和大致用途。
 9. **connector 权限表 `ConnectorToolPermission` 除 `disabled` 外的其他取值**（如是否存在 `enabled`/`ask` 等中间态）及其与 `humanIntervention` 的叠加关系，未完整核实枚举全集。
 10. **Local Sandbox 的围栏强度**：`packages/device-sandbox` 的 SRT 沙箱运行时（进程/网络隔离、writable roots 策略、`srtWinStaging` 的 Windows 安装）未逐项验证；`resolveClientLocalSandbox` 与网关侧 `ToolExecutionContext.localSandbox` 的一致性（`src/helpers/localSandbox.ts:29-35` 注释明确要求两边一致，否则会出现“选了 Local Sandbox 却跑未围栏命令”）未运行验证。
 11. **`callSubAgent` 默认超时**：`apps/server/src/services/toolExecution/serverRuntimes/lobeAgent.ts:177-185` 是 `timeout` 直接透传给 `ctx.subAgent.run()`，未见 `|| 1_800_000` 式显式兜底，与 manifest“默认 30 分钟”的出入维持未核实状态。

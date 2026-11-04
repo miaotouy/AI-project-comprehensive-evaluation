@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：综合已完成的 OpenClaw 单项目笔记，并补读源码确认端到端主链骨架
 >
@@ -33,16 +33,16 @@ OpenClaw 以本地 Gateway 作为会话、工具、事件与渠道连接的控�
 输入
   ├ 自有界面（Control UI/TUI/CLI/companion）：WebSocket RPC chat.send
   └ 渠道消息（extensions/telegram 等）-> src/channels turn 生命周期
-        -> auto-reply dispatch（src/auto-reply/dispatch.ts:385,472）
-Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.ts:38-303）
+        -> auto-reply dispatch（src/auto-reply/dispatch.ts）
+Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.ts）
   -> 规范化/幂等/会话解析/附件预处理/abort 注册 -> 返回 {runId, started}
   -> detached dispatch（chat-send-agent-dispatch / reply-dispatch）
-  -> dispatchReplyFromConfig -> 构造 FollowupRun（src/auto-reply/reply/dispatch-from-config.ts:24）
+  -> dispatchReplyFromConfig -> 构造 FollowupRun（src/auto-reply/reply/dispatch-from-config.ts）
   -> runEmbeddedAgent：session lane -> global lane -> prepared runtime
   -> attempt：从 per-agent SQLite 恢复 transcript
        -> 历史清理/上下文拼装/system prompt/工具目录/预算预检
        -> AgentSession.prompt -> Agent Core loop -> Provider stream
-            （packages/agent-core/src/agent-loop.ts:226-613）
+            （packages/agent-core/src/agent-loop.ts）
        -> 工具调用/继续回合/压缩/fallback/终态恢复
   -> 输出三层回写：
        Agent Core 内存消息 -> embedded subscriber -> server-chat 投影（src/gateway/server-chat.ts）
@@ -112,13 +112,13 @@ Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.t
 
 ## 关键源码索引
 
-- `src/gateway/server-methods/chat-send-handler.ts:38-303`：chat.send 准入、ACK 与 detached dispatch 主入口
-- `src/gateway/server-methods/chat-send-admission.ts:48-563`：dedupe、会话工作准入与 abort owner
-- `src/auto-reply/dispatch.ts:385,472`、`src/auto-reply/reply/dispatch-from-config.ts:24-113`：渠道与自有表面共用的回复管线入口
+- `src/gateway/server-methods/chat-send-handler.ts`：chat.send 准入、ACK 与 detached dispatch 主入口
+- `src/gateway/server-methods/chat-send-admission.ts`：dedupe、会话工作准入与 abort owner
+- `src/auto-reply/dispatch.ts`、`src/auto-reply/reply/dispatch-from-config.ts`：渠道与自有表面共用的回复管线入口
 - `src/agents/embedded-agent-runner/run-orchestrator.ts`、`run-loop.ts`：prepared runtime、session/global lane 与 attempt 重试循环
-- `packages/agent-core/src/agent-loop.ts:226-613`：Agent 回合/工具循环与 Provider stream 交接
-- `src/gateway/server-chat.ts:652-1121`、`src/gateway/live-chat-projector.ts`：chat/agent 实时投影、节流与终态
-- `src/agents/sessions/agent-session-base.ts:346-459`、`session-manager-entries.ts:128-170`：assistant/user 消息落 transcript
+- `packages/agent-core/src/agent-loop.ts`：Agent 回合/工具循环与 Provider stream 交接
+- `src/gateway/server-chat.ts`、`src/gateway/live-chat-projector.ts`：chat/agent 实时投影、节流与终态
+- `src/agents/sessions/agent-session-base.ts`、`session-manager-entries.ts:128-170`：assistant/user 消息落 transcript
 - `src/config/sessions/session-accessor.sqlite-transcript-write.ts`、`sqlite-entry-store.ts`：SQLite 事实源写入与 session row
-- `src/gateway/chat-display-projection.core.ts:305-353`、`session-transcript-message.ts`：显示投影与单条消息边界
+- `src/gateway/chat-display-projection.core.ts`、`session-transcript-message.ts`：显示投影与单条消息边界
 - `packages/gateway-protocol/src/schema/logs-chat.ts`、`sessions.ts`：聊天协议与会话公开契约

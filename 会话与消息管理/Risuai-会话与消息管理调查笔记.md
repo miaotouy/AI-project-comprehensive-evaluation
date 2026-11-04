@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`src/ts/storage` 持久化层、`globalApi.svelte.ts` 的保存循环、`bootstrap.ts` 加载主链、`process/index.svelte.ts` 生成入口、UI 层 Chat/DefaultChatScreen/SideChatList/ChatList、冷存储、角色与聊天导入导出、多用户同步），针对必查问题逐一核对当前 HEAD 的可执行路径；本次为静态调查，未运行应用
 >
@@ -79,12 +79,13 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 文件有 4 种魔数头（`risuSave.ts:33-36, 669-716`）：旧版 msgpack 编码（`\0RISUSAVE\0` + 版本 7/8，可选 gzip 或流式压缩）与新块式容器（文本头 `"RISUSAVE\0"`）。解码器按头分派，无法识别时逐级降级尝试（含 ZIP 解压后 JSON/msgpack 回退，`decodeRisuSave` 的兜底分支）。
 
-块式容器结构（`RisuSaveEncoder`，`risuSave.ts:124-326`）：
+块式容器结构（`RisuSaveEncoder`，`risuSave.ts`）：
 
 - 每块为 `[类型字节][压缩标志][名称长度][名称][长度][数据]`，数据是 JSON 文本（可 gzip）；根块内含 `__directory` 块名清单作为**块索引**。
-- 块类型十余种，覆盖配置、角色、预设、模块、插件与插件存储等；其中决定机制边界的是三种：root（普通配置与 `__directory` 块索引的宿主）、character-with-chat（角色含全部会话）、remote（外置数据占位）。完整枚举见 `risuSave.ts:93-106`。
+- 块类型十余种，覆盖配置、角色、预设、模块、插件、插件存储与会话内 KV 等；其中决定机制边界的是四种：root（普通配置与 `__directory` 块索引的宿主）、character-with-chat（角色含全部会话）、remote（外置数据占位）、`kv:<namespace>`（保存格式内的非响应式键值块）。
 - 每个角色（含全部会话）是一个以 `chaId` 命名的块；增量保存时只重编码变化角色块与根块，再拼装整文件。
-- **remote 块**：Tauri/Node 端（`enableRemoteSaving` 开启时）角色数据不写入 bin，而写到 `remotes/<chaId>.local.bin`（Tauri AppData 或 forageStorage），bin 内只放 REMOTE 占位块；解码时按名称读回，文件缺失时尝试从 `risuSaveCache` 恢复（`risuSave.ts:378-422, 554-591`）。解码器对损坏块静默跳过，root 块损坏才抛错。
+- **kv 块**：`saveKV.ts` 提供不进入 `DBState` 的 JSON 键值存储，每个命名空间对应一个 `kv:<namespace>` 块，只有该命名空间发生变化时才重编码；值以 JSON 字符串保存在普通 `Map` 里，因此读取与写入都是同步的，也不产生响应式开销。容量分层上，大对象归冷存储而不是这里。
+- **remote 块**：Tauri/Node 端（`enableRemoteSaving` 开启时）角色数据不写入 bin，而写到 `remotes/<chaId>.local.bin`（Tauri AppData 或 forageStorage），bin 内只放 REMOTE 占位块；解码时按名称读回，文件缺失时尝试从 `risuSaveCache` 恢复。解码器对损坏块静默跳过，root 块损坏才抛错。
 
 ### 2.3 保存触发与节流
 

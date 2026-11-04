@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -20,9 +20,11 @@ Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示�
 
 图片预览、上传和拖放主要由业务页面各自实现，没有公共灯箱或统一上传层。国际化实际使用自研 composable，已声明的 vue-i18n 没有源码消费。本次也没有找到应用级 Vue 错误边界；错误反馈依赖 axios 拦截器、业务 try/catch 和 Toast。
 
-配置渲染器新增 `secret` 字段类型，编辑时可切换掩码可见性；平台管理页则重构为工作区列表加独立编辑器，并显示加载进度（ConfigItemRenderer.vue:145-150、319-325；views/PlatformPage.vue；components/platform/PlatformEditor.vue）。这些仍复用既有的配置表单、i18n 与 Toast 基础设施。
+配置渲染器新增 `secret` 字段类型，编辑时可切换掩码可见性；平台管理页则重构为工作区列表加独立编辑器，并显示加载进度（ConfigItemRenderer.vue:160-165、319-325；views/PlatformPage.vue；components/platform/PlatformEditor.vue）。这些仍复用既有的配置表单、i18n 与 Toast 基础设施。
 
-WebChat 增加专用设置对话框，将主题、语言、流式、推理显示、发送快捷键和传输方式集中到同一表面；聊天区另增加历史加载失败组件、回到底部控件和 reduced-motion 处理。这些是 Chat 专用基础设施，不改变全应用仍以 Vuetify 对话框和项目 Toast 队列为公共底座的结论（`dashboard/src/components/chat/ChatSettingsDialog.vue:1-358`；`ChatLoadError.vue:1-62`；`Chat.vue:238-380,2383-2445`）。
+WebChat 增加专用设置对话框，将主题、语言、流式、推理显示、发送快捷键和传输方式集中到同一表面；聊天区另增加历史加载失败组件、回到底部控件和 reduced-motion 处理。这些是 Chat 专用基础设施，不改变全应用仍以 Vuetify 对话框和项目 Toast 队列为公共底座的结论（`dashboard/src/components/chat/ChatSettingsDialog.vue`；`ChatLoadError.vue`；`Chat.vue`）。
+
+国际化资源从单文件字典改为按语言与功能域拆分的 JSON 包，四套语言按需异步加载；插件页面资源改用按作用域签发的路径令牌校验，v1 接口路由不走该中间件（`dashboard/src/i18n/locales/`、`i18n/composables.ts:12-37`；`astrbot/dashboard/plugin_page_auth.py:7-30`）。
 
 ## 系统边界与总体装配
 
@@ -30,7 +32,7 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 开发模式由 vite 代理到 127.0.0.1:6185（`dashboard/vite.config.ts:112-117`）。前端用 hash 路由（`src/router/index.ts:9`），服务端无需配置 history 回退。
 
-**装配链。** `index.html` → `src/main.ts`：i18n 初始化完成后创建应用，依次注册 Pinia、路由、打印、图表、Vuetify 和确认框插件；路由就绪后挂载，再执行主题同步（`main.ts:104-135`）。i18n 初始化失败也有回退挂载路径。
+**装配链。** `index.html` → `src/main.ts`：i18n 初始化完成后创建应用，依次注册 Pinia、路由、打印、图表、Vuetify 和确认框插件；路由就绪后挂载，再执行主题同步（`main.ts:78-107`）。i18n 初始化失败也有回退挂载路径。
 
 **根组件。** `App.vue` 只承载路由视图和三个全局件：WaitingForRestart、UpgradeRecoveryDialog、全局唯一 v-snackbar（消费 toast store，`App.vue:7-17`）。
 
@@ -44,7 +46,7 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 **界面栈。** Vue 3.3.4、Vuetify 3.7.11（插件全量注册组件和指令，vite-plugin-vuetify 自动导入）、Pinia 2.1.6、vue-router 4（hash）、自研 i18n；插件入口见 `plugins/vuetify.ts`。
 
-辅助库按需使用：Monaco（`@guolao/vue-monaco-editor` 和 workers 配置）、markstream-vue（顶部启用数学公式和 Mermaid）、vue3-apexcharts、vue3-print-nb、qrcode；相关装配见 `main.ts:12-50` 与 `VerticalHeader.vue:9-11`。
+辅助库按需使用：Monaco（`@guolao/vue-monaco-editor` 和 workers 配置）、markstream-vue（顶部启用数学公式和 Mermaid）、vue3-apexcharts、vue3-print-nb、qrcode；相关装配见 `main.ts:12-50` 与 `VerticalHeader.vue:11-13`。
 
 **公共组件。** `src/components/shared/` 44 个文件，大多是业务向共享组件（AstrBotConfig、BackupDialog、2FA 系列、Persona 系列等），不属于通用界面基础设施；可跨应用复用的只有 ConfirmDialog（命令式确认）、StyledMenu（菜单视觉统一）、QrCodeViewer、FileConfigItem（配置上传）、ThemeAwareMarkdownCodeBlock（按主题切换代码块渲染）。
 - **状态所有权**（见各章节详述）：
@@ -77,11 +79,11 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 **样式约定被制度化。** `ConfirmDialog.vue:4-9` 的标题类 text-h3 pa-4 pb-0 pl-6、按钮 `variant="text"/"tonal"` 与仓库 `AGENTS.md:54` 的 WebUI 对话框规范一致，且在 WaitingForRestart、FileConfigItem、BackupDialog、SidebarCustomizer 等多处对话框重复出现——这是项目层唯一显式的弹窗一致性约束。
 
-**全屏代码编辑对话框。** `AstrBotConfig.vue:364`、`AstrBotConfigV4.vue:444`、`ConfigPage.vue:88` 用 `fullscreen + transition="dialog-bottom-transition" + scrollable` 的 v-dialog 内嵌 Monaco 编辑器（`AstrBotConfigV4.vue:457-459` 按 editor_theme 传 Monaco 明暗主题）。
+**全屏代码编辑对话框。** `AstrBotConfig.vue:364`、`AstrBotConfigV4.vue:450`、`ConfigPage.vue:90` 用 `fullscreen + transition="dialog-bottom-transition" + scrollable` 的 v-dialog 内嵌 Monaco 编辑器（`AstrBotConfigV4.vue:463-465` 按 editor_theme 传 Monaco 明暗主题）。
 
 **菜单。** StyledMenu 包装 v-menu，统一毛玻璃卡片样式、菜单阴影变量和深色主题覆盖，在 VerticalHeader 功能菜单、语言/主题下拉、登录页复用；项目内另有直接使用 v-menu 的子菜单。实现见 `StyledMenu.vue`。
 
-**Overlay 浮层。** v-overlay 用途分散——图片预览 4 处、`ConfigPage.vue:183-208` 测试聊天抽屉（`location="right"` + slide-x-reverse-transition）、`AddNewPlatform.vue:818` 与 `ProviderSelector.vue:215` 的加载遮罩。无统一 Overlay Host 或 Portal 管理，均靠 Vuetify 内部 teleport 到 body。
+**Overlay 浮层。** v-overlay 用途分散——图片预览 4 处、`ConfigPage.vue:190-215` 测试聊天抽屉（`location="right"` + slide-x-reverse-transition）、`AddNewPlatform.vue` 的加载遮罩与 `ProviderSelectMenu.vue:400-421` 的全屏选择浮层。无统一 Overlay Host 或 Portal 管理，均靠 Vuetify 内部 teleport 到 body。
 
 ## 3. 通知、加载态与错误反馈
 
@@ -93,9 +95,9 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 消费入口是 `utils/toast.js` 的 useToast，提供 success、error、info、warning 四个便捷方法；业务调用 65 处，覆盖 Settings、ConsolePage、FileConfigItem、Chat、T2ITemplateEditor 等。
 
-另有页面局部 showToast 惯例（Settings.vue:844、StorageCleanupPanel.vue:82）。
+另有页面局部 showToast 惯例（Settings.vue:834、StorageCleanupPanel.vue:88）。
 
-**路由加载反馈。** `stores/routerLoading.ts` 模拟进度（50ms 步进到 90%，afterEach 收尾到 100% 延迟 300ms 隐藏），`FullLayout.vue:100-108` 渲染顶部固定 v-progress-linear（z-index 9999）。仅导航切换触发（`router/index.ts:30-34`）。
+**路由加载反馈。** `stores/routerLoading.ts` 模拟进度（50ms 步进到 90%，afterEach 收尾到 100% 延迟 300ms 隐藏），`FullLayout.vue:113-121` 渲染顶部固定 v-progress-linear（z-index 9999）。仅导航切换触发（`router/index.ts:30-34`）。
 
 **页面加载/空状态/骨架屏。** 无公共 Loading 组件。加载以 Vuetify 内联进度组件为主（grep 命中 89 处）；骨架加载器仅出现一处，见 `PersonaManager.vue:96`。
 
@@ -117,23 +119,23 @@ HTTP 层有统一拦截：对 401（非认证接口）清空 token 并跳 `/auth
 
 variables 还有 border-color、carousel-control-size 两项），**定义本身不是 CSS 变量 token 文件**；
 
-运行时权威是 Pinia customizer 的 uiTheme，经两条路径生效：FullLayout 绑定 v-app 的 theme，main.ts 对齐 Vuetify 全局主题名称，供 useTheme 消费者判断明暗（见 `FullLayout.vue:93`、`main.ts:74`）。
+运行时权威是 Pinia customizer 的 uiTheme，经两条路径生效：FullLayout 绑定 v-app 的 theme，main.ts 对齐 Vuetify 全局主题名称，供 useTheme 消费者判断明暗（见 `FullLayout.vue:106`、`main.ts:38`）。
 
 两处都写，避免只改其一导致组件读到的主题不一致（`main.ts:52-60` 注释说明这是唯一注册点，VerticalHeader/ThemeSwitcher 不再自行注册监听器）。
 
 **三态与持久化。** `config.ts` 定义 `ThemeMode = 'light'|'dark'|'system'`，`checkThemeMode()` 读取 localStorage themeMode 并迁移旧版 uiTheme 值；SET_THEME_MODE（`customizer.ts:43-49`）同时写 themeMode 与 uiTheme 两个 key。
 
-切换入口共四处：VerticalHeader、登录页和设置向导提供 light/dark/system 三选项，聊天工作台提供只在明暗间切换的按钮；前者调用 SET_THEME_MODE，后者调用 SET_UI_THEME，并同步全局主题名称（定位见 `VerticalHeader.vue:877-886`、`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`、`Chat.vue:309`、`Chat.vue:1747-1749`）。
+切换入口共四处：VerticalHeader、登录页和设置向导提供 light/dark/system 三选项，聊天工作台提供只在明暗间切换的按钮；前者调用 SET_THEME_MODE，后者调用 SET_UI_THEME，并同步全局主题名称（定位见 `VerticalHeader.vue:906-915`、`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`、`Chat.vue:338`、`Chat.vue:1747-1749`）。
 
 **system 跟随。** `config.ts:31-38` 的 resolveUiTheme 在模块加载期用 matchMedia('(prefers-color-scheme: dark)') 计算初始值；`main.ts:61-101` setupThemeSync 注册全局唯一 matchMedia change 监听器（仅 `themeMode==='system'` 时生效），系统切换即改 store + localStorage + theme.global.name。
 
 **首屏闪烁。** `index.html` 无内联主题脚本（对比常见 dark-mode 方案）；但 `config.ts` 在模块 import 期（早于 createApp）已同步解析出 uiTheme，v-app :theme 首帧即绑定正确主题名，理论上无明暗切换闪烁。
 
-存在两个次要闪变窗口（未运行验证）：① 自定义主/次色在挂载后经动态 `import('./stores/customizer')` 才应用（`main.ts:62-89`），首帧可能先渲染默认色；② setupThemeSync 对 system 模式"重新用 matchMedia 计算"是为防 SSR/构建偏差（`main.ts:65-71` 注释）。
+存在两个次要闪变窗口（未运行验证）：① 自定义主/次色在挂载后经动态 `import('./stores/customizer')` 才应用（`main.ts:26-53`），首帧可能先渲染默认色；② setupThemeSync 对 system 模式"重新用 matchMedia 计算"是为防 SSR/构建偏差（`main.ts:29-35` 注释）。
 
-**自定义强调色。** `Settings.vue:533-567` 外观分区提供主色/次色取色器（原生 `<v-text-field type="color">`，非 v-color-picker），applyThemeColors（`Settings.vue:542-553`）直接改写 vuetify.theme.themes.value 中两个 theme 对象的 `primary/secondary/darkprimary/darksecondary` 四个槽位，写入 localStorage themePrimary/themeSecondary；
+**自定义强调色。** `Settings.vue:531-565` 外观分区提供主色/次色取色器（原生 `<v-text-field type="color">`，非 v-color-picker），applyThemeColors（`Settings.vue:540-551`）直接改写 vuetify.theme.themes.value 中两个 theme 对象的 `primary/secondary/darkprimary/darksecondary` 四个槽位，写入 localStorage themePrimary/themeSecondary；
 
-`main.ts:77-89` 启动时读回应用（与 Settings.vue 为**两份重复实现**，改的是同一批槽位）；resetThemeColors（`Settings.vue:1131-1137`）删除两个 key 并还原默认色。无色阶生成、无预设色板。
+`main.ts:41-53` 启动时读回应用（与 Settings.vue 为**两份重复实现**，改的是同一批槽位）；resetThemeColors（`Settings.vue:1121-1127`）删除两个 key 并还原默认色。无色阶生成、无预设色板。
 
 **视觉 token。** SCSS 变量层（`scss/_variables.scss`：`$border-radius-root: 8px`、字体栈 `$body-font-family` Outfit/Noto Sans + CJK fallback、`$rounded`/`$typography` map、`$box-shadow`）。
 
@@ -147,9 +149,9 @@ Vuetify 把 theme 对象生成 `--v-theme-*` CSS 变量，被业务组件与 scs
 
 customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置入口（见第 8 节"声而不用"）。
 
-**第三方组件主题接入。** markstream-vue 渲染组件无主题参数，靠 CSS 类与 Vuetify 变量；`ThemeAwareMarkdownCodeBlock.vue` 按 inject 的 isDark 切换 themeRenderKey 强制重渲染（:62）；Monaco 明暗主题由配置项 editor_theme 传入（`AstrBotConfigV4.vue:457`）。
+**第三方组件主题接入。** markstream-vue 渲染组件无主题参数，靠 CSS 类与 Vuetify 变量；`ThemeAwareMarkdownCodeBlock.vue` 按 inject 的 isDark 切换 themeRenderKey 强制重渲染（:62）；Monaco 明暗主题由配置项 editor_theme 传入（`AstrBotConfigV4.vue:463`）。
 
-**字体切换。** customizer 的 fontTheme 默认 'Noto Sans SC' 只作为 v-app class（`FullLayout.vue:95`）；SET_FONT action 存在但本次未找到任何调用方（grep 仅 store 定义与 config 初始值），未确认有可用入口。
+**字体切换。** customizer 的 fontTheme 默认 'Noto Sans SC' 只作为 v-app class（`FullLayout.vue:108`）；SET_FONT action 存在但本次未找到任何调用方（grep 仅 store 定义与 config 初始值），未确认有可用入口。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -161,17 +163,17 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 工作台自身布局细节（断点折叠行为）见 [`../Chat UI/AstrBot-ChatUI调查笔记.md`](../Chat%20UI/AstrBot-ChatUI调查笔记.md) 第 1 节。
 
-**对话框与页面适配。** 更新对话框 `:width="$vuetify.display.smAndDown ? '100%' : '920'"`、xs 时 fullscreen（`VerticalHeader.vue:1385-1386`）；VerticalHeader 语言/主题分组菜单在 xs 时 `location="bottom"`（:1229、:1289）；
+**对话框与页面适配。** 更新对话框 `:width="$vuetify.display.smAndDown ? '100%' : '920'"`、xs 时 fullscreen（`VerticalHeader.vue:1371-1372`）；VerticalHeader 语言/主题分组菜单在 xs 时 `location="bottom"`（:1229、:1289）；
 
 登录页主题菜单固定 `location="bottom center"`（`LoginPage.vue:177-179`）。管理页主体为 v-container fluid 流式 + 各页自定 @media 列重排。
 
-**窗口适配。** viewport meta 禁缩放（`user-scalable=no`，见 `index.html:6`）；chat 路由时 v-main 强制 `height:100vh; overflow:hidden`（`FullLayout.vue:113-116`）。Dashboard 是浏览器页面，无窗口最小尺寸/安全区逻辑；桌面 wrapper（外部项目）的窗口行为不在本仓。
+**窗口适配。** viewport meta 禁缩放（`user-scalable=no`，见 `index.html:6`）；chat 路由时 v-main 强制 `height:100vh; overflow:hidden`（`FullLayout.vue:126-129`）。Dashboard 是浏览器页面，无窗口最小尺寸/安全区逻辑；桌面 wrapper（外部项目）的窗口行为不在本仓。
 
 **本次未找到。** PWA/service worker/manifest（grep `serviceWorker|manifest.json` 无匹配）；容器查询、ResizeObserver 驱动的自动折叠（仅 `VerticalSidebar.vue` 拖拽改宽度 200-300px 是用户手动 resize）。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-**图片预览无公共灯箱。** 4 处独立实现，均为 v-overlay + `<img>`：`ChatMessageList.vue:403-415`、`MessageList.vue:261-273`、`StandaloneChat.vue:197-204`、`MessageListDEPRECATED.vue:174-178`；
+**图片预览无公共灯箱。** 4 处独立实现，均为 v-overlay + `<img>`：`ChatMessageList.vue:439-451`、`MessageList.vue:261-273`、`StandaloneChat.vue:203-210`、`MessageListDEPRECATED.vue:174-178`；
 
 统一形态是 scrim rgba(0,0,0,0.86)、overlay 点击关闭、图片 @click.stop 阻止关闭。**无缩放/旋转/前后张导航/工具栏**；无共享组件。消息壳中哪些内容触发预览由消息渲染侧决定（[`../消息渲染器/`](../消息渲染器/) 类目范围）。
 
@@ -191,37 +193,39 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 **剪贴板。** 公共工具 `utils/clipboard.ts`——优先 navigator.clipboard.writeText（非安全上下文降级），失败回退隐藏 textarea + execCommand('copy')，并恢复原选区与焦点（:47-91）；`ThemeAwareMarkdownCodeBlock.vue:42-49` 在非安全上下文时直接走该兜底路径。
 
-copyToClipboard 还用于 API Key 复制（`Settings.vue:1028-1030`，带成功/失败 toast）等。
+copyToClipboard 还用于 API Key 复制（`Settings.vue:1018-1020`，带成功/失败 toast）等。
 
-**打印。** vue3-print-nb 全局注册为 print 指令（`main.ts:111`），具体使用点未展开。
+**打印。** vue3-print-nb 全局注册为 print 指令（`main.ts:85`），具体使用点未展开。
 
 ## 7. 扩展调查：动画、无障碍、桌面集成、国际化
 
 ### 动画与过渡
 
-无动画库（grep framer-motion 等无匹配；Vuetify 自带 JS/CSS transition 体系）。项目显式使用的：全屏对话框 dialog-bottom-transition（AstrBotConfig 系列）、抽屉 slide-x-reverse-transition（`ConfigPage.vue:187`）、Vuetify 默认 dialog/menu 过渡。
+无动画库（grep framer-motion 等无匹配；Vuetify 自带 JS/CSS transition 体系）。项目显式使用的：全屏对话框 dialog-bottom-transition（AstrBotConfig 系列）、抽屉 slide-x-reverse-transition（`ConfigPage.vue:194`）、Vuetify 默认 dialog/menu 过渡。
 
 手写 @keyframes 仅 `scss/_container.scss`（blink、bounce）与 `_override.scss`（progress-circular-rotate）。prefers-reduced-motion 仅在 `scss/layout/_sidebar.scss:234-241` 一处（侧栏 rail 过渡禁用），全应用覆盖情况未逐一确认。
 
 ### 无障碍（静态代码证据）
 
-无系统性无障碍实现迹象：图标按钮多数靠 v-tooltip 提供可见提示，显式 aria-label 只在零星处出现（Snackbar 关闭按钮 `App.vue:15`、登录页版本提示按钮 `LoginPage.vue:241`、部分 :title 属性如 `VerticalHeader.vue:1155`）。对话框/菜单的焦点管理、Esc、aria-modal 等依赖 Vuetify 内部（未核实）。未做读屏实测，全应用审计不在本次范围。
+无系统性无障碍实现迹象：图标按钮多数靠 v-tooltip 提供可见提示，显式 aria-label 只在零星处出现（Snackbar 关闭按钮 `App.vue:15`、登录页版本提示按钮 `LoginPage.vue:241`、部分 :title 属性如 `VerticalHeader.vue:1132`）。对话框/菜单的焦点管理、Esc、aria-modal 等依赖 Vuetify 内部（未核实）。未做读屏实测，全应用审计不在本次范围。
 
 ### 桌面集成（本仓仅消费侧）
 
 本仓是浏览器页面，桌面壳（托盘、系统通知、原生菜单、多窗口）由外部 AstrBot Desktop wrapper 实现，Dashboard 只通过 bridge 交互：桌面桥负责桌面状态、重启和托盘事件，更新桥负责检查和安装应用更新，类型契约见 `src/types/desktop-bridge.d.ts`。
 
-消费点：托盘“重启后端”事件、桌面模式更新对话框和重启工具；检测到桌面发布模式时更新改走桌面桥，无桥时回退后端重启接口并轮询等待（定位见 `App.vue:51-58`、`VerticalHeader.vue:294-374`、`utils/restartAstrBot.ts:31-49`）。
+消费点：托盘“重启后端”事件、桌面模式更新对话框和重启工具；检测到桌面发布模式时更新改走桌面桥，无桥时回退后端重启接口并轮询等待（定位见 `App.vue:51-58`、`VerticalHeader.vue:307-402`、`utils/restartAstrBot.ts:31-49`）。
 
 Dashboard 自身未调用浏览器 Notification API（grep new Notification 无匹配）。
 
 ### 国际化机制
 
-自研 i18n（`src/i18n/composables.ts`）：模块级 currentLocale ref + 静态 JSON 翻译（`translations.ts` 汇总 `locales/`，zh-CN/en-US/ru-RU），`useI18n()` 提供 `t()`（点路径 + `{param}` 插值，缺键返回 `[MISSING: key]`）、`useModuleI18n()` 按模块取命名空间；
+自研 i18n 仍由 `src/i18n/composables.ts` 提供：模块级 currentLocale、`t()`（点路径 + `{param}` 插值）与按模块取命名空间的 `useModuleI18n()`。
 
-setLocale 写 localStorage astrbot-locale 并 dispatchEvent('astrbot-locale-changed') 通知页面重拉插件 i18n 数据（:85-100）。
+语言资源已按语言与功能域拆成静态 JSON：`src/i18n/locales/<locale>/{core,features}/*.json`，`zh-CN`、`en-US`、`ja-JP`、`ru-RU` 四套；`locales/index.ts` 汇总并按语言生成异步 loader，`loadTranslations` 在切换语言时动态 import 该语言整包，加载失败回退 `zh-CN`（`i18n/composables.ts:12-37`）。因此新增文案按功能域进入对应 JSON，不再写进单一字典。
 
-**vue-i18n 在 `package.json:46` 声明但 src 全量 grep 无 import**（`i18n/types.ts:117-129` 的 declare module 'vue-i18n' 已注释），运行时是自研实现。`FullLayout.vue:91` 的 v-locale-provider 未绑定语言值，Vuetify 内部组件文案是否跟随切换未验证。
+setLocale 写 localStorage astrbot-locale 并 dispatchEvent('astrbot-locale-changed') 通知页面重拉插件 i18n 数据。
+
+**vue-i18n 在 `package.json` 声明但 src 全量 grep 无 import**（`i18n/types.ts` 的 declare module 'vue-i18n' 已注释），运行时是自研实现。`FullLayout.vue` 的 v-locale-provider 未绑定语言值，Vuetify 内部组件文案是否跟随切换未验证。
 
 ## 8. 设计取舍与已确认边界
 
@@ -231,13 +235,13 @@ setLocale 写 localStorage astrbot-locale 并 dispatchEvent('astrbot-locale-chan
 
 **主题双写机制。** v-app :theme（声明式）与 vuetify.theme.global.name（命令式）双通道对齐，避免 `useTheme()` 消费者读到旧值；代价是切换路径分散在 Header/登录页/设置向导/聊天工作台四处重复实现（Header 与登录页/向导的 setThemeMode 为三份相似代码，Chat.vue 的 toggleTheme 走 SET_UI_THEME 只在 light/dark 间互切）。
 
-**自定义色不走 token 而是改写 theme 对象。** applyThemeColors 直接改 Vuetify 内存 theme 定义，无 CSS 变量层；启动应用晚于首帧（动态 import），存在色值闪变窗口（未运行验证）。该逻辑在 `main.ts:77-89` 与 `Settings.vue:542-553` 重复实现两份，改的是同一批四个槽位。
+**自定义色不走 token 而是改写 theme 对象。** applyThemeColors 直接改 Vuetify 内存 theme 定义，无 CSS 变量层；启动应用晚于首帧（动态 import），存在色值闪变窗口（未运行验证）。该逻辑在 `main.ts:41-53` 与 `Settings.vue:540-551` 重复实现两份，改的是同一批四个槽位。
 
 **图片预览 4 份重复实现。** 无公共灯箱组件；MessageListDEPRECATED 为未确认存活的旧组件（同族 MessageList 与 ChatMessageList 并存）。
 
 **错误反馈无全局兜底。** 无 errorCaptured/errorHandler，渲染期错误无 UI 化；业务错误走 axios 拦截器（401/429）+ 页面 try/catch + toast 的组合。
 
-**依赖与使用不一致。** vue-i18n（未导入）、Customizer_drawer 与 SET_FONT（store 中无消费方）、inputBg（`config.ts:52` → `customizer.ts:15` → `FullLayout.vue:97` 绑定 inputWithbg class，但 scss 全库无 `.inputWithbg` 类定义、无 action、无设置 UI，class 绑定无视觉效果）为本次发现的"声而不用"项；
+**依赖与使用不一致。** vue-i18n（未导入）、Customizer_drawer 与 SET_FONT（store 中无消费方）、inputBg（`config.ts:52` → `customizer.ts:15` → `FullLayout.vue:110` 绑定 inputWithbg class，但 scss 全库无 `.inputWithbg` 类定义、无 action、无设置 UI，class 绑定无视觉效果）为本次发现的"声而不用"项；
 
 `$toast` 全局属性在 `LongTermMemory.vue` 出现（this.$toast）但 main.ts 未注册 globalProperties 的 `$toast`——该文件可能走未确认的注册路径或为无效调用，未展开验证。
 
@@ -260,5 +264,7 @@ setLocale 写 localStorage astrbot-locale 并 dispatchEvent('astrbot-locale-chan
 - 主题：`src/stores/customizer.ts`、`src/theme/LightTheme.ts`、`src/theme/DarkTheme.ts`、`src/types/themeTypes/ThemeType.ts`、`src/views/Settings.vue`（外观分区）、`src/scss/_variables.scss`、`src/scss/_override.scss`、`src/scss/components/_VScrollbar.scss`、`src/scss/components/_CodeBlockDark.scss`、`src/config.ts`
 - 内容交互：`src/components/shared/FileConfigItem.vue`、`src/components/shared/SidebarCustomizer.vue`、`src/composables/useDragUpload.ts`、`src/composables/useMediaHandling.ts`、`src/utils/clipboard.ts`、`src/components/shared/QrCodeViewer.vue`、`src/components/chat/ChatMessageList.vue`（图片预览）、`src/components/chat/MessageList.vue`
 - 状态与网络：`src/stores/auth.ts`、`src/stores/common.js`、`src/stores/chatHeader.ts`、`src/router/index.ts`、`src/api/http.ts`、`src/utils/errorUtils.js`
+- 国际化：`src/i18n/composables.ts`、`src/i18n/locales/<locale>/{core,features}/*.json`、`src/i18n/locales/index.ts`、`src/i18n/translations.ts`
+- 服务端界面支撑：`astrbot/dashboard/api/static_files.py`、`services/static_file_service.py`、`plugin_page_auth.py`、`plugin_page_bridge.js`、`asgi_runtime.py`、`services/diagnostic_service.py`、`api/generated/openapi-v1/`
 - i18n：`src/i18n/composables.ts`、`src/i18n/translations.ts`、`src/components/shared/LanguageSwitcher.vue`
 - 服务端交点：`astrbot/dashboard/services/static_file_service.py`

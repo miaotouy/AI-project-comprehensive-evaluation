@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：只读静态阅读当前快照的 memories 读写 crate、`core` 记忆与上下文注入、AGENTS.md 发现、压缩流水线、MCP 客户端与工具元数据检索；沿“会话启动 → 记忆抽取 → 全局合并 → 摘要注入 → 工具/Shell 查询 → 引用回写”追踪。未运行真实记忆流水线或模型请求。
 >
@@ -67,15 +67,15 @@ Codex 把“记忆”实现为一组可编辑的本地工件，而不是一个�
 Phase 1 的输入是 state DB 中“可抽取”的 rollout，不是工作区文件的实时扫描。筛选条件包括允许的交互式会话来源、年龄窗口、空闲时长、是否已被其他 worker 租用，以及单次启动的扫描/领取上限（`codex-rs/memories/README.md:40-63`）。实现上，它先领取任务，再按并发上限并行处理：
 
 - 领取上限默认每次启动 2 个 rollout，扫描上限 5000，租约 3600 秒，并发 8（`codex-rs/config/src/types.rs:57-62`；`codex-rs/memories/write/src/lib.rs:85-88`）。
-- 每个 rollout 被裁剪为记忆相关响应项，送入抽取模型，要求结构化输出 `raw_memory`、`rollout_summary` 和可选 `rollout_slug`（`codex-rs/memories/write/src/phase1.rs:55-84、199-250`）。
-- 输出在写入前经过 secret 脱敏（`codex-rs/memories/write/src/phase1.rs:424`）。
+- 每个 rollout 被裁剪为记忆相关响应项，送入抽取模型，要求结构化输出 `raw_memory`、`rollout_summary` 和可选 `rollout_slug`（`codex-rs/memories/write/src/phase1.rs:54-83、199-250`）。
+- 输出在写入前经过 secret 脱敏（`codex-rs/memories/write/src/phase1.rs:423`）。
 - 失败任务按退避重试，成功但无内容记为 `succeeded_no_output`（`codex-rs/memories/README.md:71-77`）。
 
-模型选择优先使用 `memories.extract_model`，否则使用当前 Provider 的 `memory_extraction_preferred_model`（`codex-rs/memories/write/src/phase1.rs:162-170`；`codex-rs/model-provider/src/provider.rs:150-155`）。
+模型选择优先使用 `memories.extract_model`，否则使用当前 Provider 的 `memory_extraction_preferred_model`（`codex-rs/memories/write/src/phase1.rs:161-169`；`codex-rs/model-provider/src/provider.rs:150-155`）。
 
 Phase 1 没有切块、Embedding 或索引构建。它把一次 rollout 压成一条结构化记忆记录；所谓“索引”只是 state DB 的行和随后生成的 Markdown 文件。
 
-另有一个指向 `memories/trace_summarize` 的一元摘要客户端，用于把原始 trace 交给服务端摘要；当前快照中除自身单测外没有调用点，实际记忆抽取仍由 Phase 1 子代理完成（`codex-rs/codex-api/src/endpoint/memories.rs:32-58`；`codex-rs/core/src/client.rs:865-912`）。
+另有一个指向 `memories/trace_summarize` 的一元摘要客户端，用于把原始 trace 交给服务端摘要；当前快照中除自身单测外没有调用点，实际记忆抽取仍由 Phase 1 子代理完成（`codex-rs/codex-api/src/endpoint/memories.rs:32-58`；`codex-rs/core/src/client.rs:852-899`）。
 
 ## 查询、候选与重排主链
 
@@ -147,12 +147,12 @@ Phase 2 是串行的全局合并，流程如下：
 
 主动维护分两条路径：
 
-- **后台流水线**：根会话首个有效回合触发 `start_memories_startup_task`，满足非 ephemeral、feature 开启、非子代理、state DB 可用等条件后，在后台依次跑 Phase 1 和 Phase 2（`codex-rs/app-server/src/request_processors/turn_processor.rs:737-749`；`codex-rs/memories/write/src/start.rs:24-100`）。
+- **后台流水线**：根会话首个有效回合触发 `start_memories_startup_task`，满足非 ephemeral、feature 开启、非子代理、state DB 可用等条件后，在后台依次跑 Phase 1 和 Phase 2（`codex-rs/app-server/src/request_processors/turn_processor.rs:742-754`；`codex-rs/memories/write/src/start.rs:24-100`）。
 - **显式用户请求**：用户要求记住、忘记或修正时，模型只能调用 `memories.add_ad_hoc_note` 写一个追加式 Markdown 笔记到 `extensions/ad_hoc/notes/`，不能直接编辑生成的记忆文件；下一次合并消费该笔记（`codex-rs/ext/memories/src/tools/ad_hoc_note.rs:50-86`；`codex-rs/ext/memories/src/local/ad_hoc_note.rs:12-17`）。
 
 写回不需要管理员审批。合并子代理本身以 `AskForApproval::Never` 运行；默认受管沙箱下依靠关闭网络、清空 MCP 和只写记忆根来限制影响面，而不是逐条审批。父会话显式关闭沙箱或自带外部隔离时，这层沙箱约束随父级权限放宽（`codex-rs/memories/write/src/phase2.rs:328-357`）。
 
-文档与实现的差异值得记录：`memories/README.md:29-38` 写的是“根会话启动时触发”，而当前可执行入口是 app-server 在首个带输入的回合成功提交后调用（`turn_processor.rs:737-749`）。两者描述的是同一后台流水线，但触发时机的精确语义以代码为准。
+文档与实现的差异值得记录：`memories/README.md:29-38` 写的是“根会话启动时触发”，而当前可执行入口是 app-server 在首个带输入的回合成功提交后调用（`turn_processor.rs:742-754`）。两者描述的是同一后台流水线，但触发时机的精确语义以代码为准。
 
 ## AGENTS.md 与确定性上下文注入
 
@@ -179,9 +179,9 @@ AGENTS.md 不属于记忆检索，但它决定了模型在每次会话中看到�
 压缩解决的是“上下文超预算”，不是“从外部资料找答案”。主链是：
 
 1. 每个回合结束后读取当前 token 状态，计算自动压缩作用域和上限（`codex-rs/core/src/session/context_window.rs:58-109`）。
-2. 达到阈值或模型仍需后续回合时，触发内联压缩；完整上下文窗口是独立硬上限（`codex-rs/core/src/session/turn.rs:616-704`）。
+2. 达到阈值或模型仍需后续回合时，触发内联压缩；完整上下文窗口是独立硬上限（`codex-rs/core/src/session/turn.rs:632-720`）。
 3. 压缩任务用 `SUMMARIZATION_PROMPT` 或配置的 `compact_prompt` 请求模型生成摘要（`codex-rs/core/src/compact.rs:117-150`）。
-4. 摘要加上固定的 `SUMMARY_PREFIX`，替换历史并保留真实用户消息；压缩项成为新的上下文边界（`codex-rs/core/src/compact.rs:403-416`）。
+4. 摘要加上固定的 `SUMMARY_PREFIX`，替换历史并保留真实用户消息；压缩项成为新的上下文边界（`codex-rs/core/src/compact.rs:404-417`）。
 5. 若 Provider 声明支持远端压缩 V2，则改走 Provider 的压缩协议；否则走本地摘要实现（`codex-rs/core/src/tasks/compact.rs:63-93`；`codex-rs/model-provider-info/src/capabilities.rs:22-32`）。
 
 这条链路不会查询 `MEMORY.md`、rollout 摘要或任何外部知识库。它产出的是当前对话的压缩摘要，与检索增强的候选生成、相关性排序无关。
@@ -204,7 +204,11 @@ MCP 资源另有两个工具面：列出资源和读取资源。它们读取 Ser
 - Cached 只允许索引访问，Indexed 同时声明索引访问，Live 允许实时网页访问；
 - 工具声明还携带内容类型、过滤器和上下文大小（`codex-rs/core/src/tools/hosted_spec.rs:14-46`）。
 
-搜索的执行和索引归属在模型后端；本仓库只组装工具声明并处理返回的搜索事件。部分 Provider 还支持独立的 `web.run` 工具面，但那同样是外部执行（`codex-rs/core/src/tools/spec_plan.rs:1661-1682`）。
+搜索的执行和索引归属在模型后端；本仓库只组装工具声明并处理返回的搜索事件。部分 Provider 还支持独立的 `web.run` 工具面，但那同样是外部执行（`codex-rs/core/src/tools/spec_plan.rs:1692-1713`）。
+
+当前快照还给搜索加了一层**提供者仲裁**：每一步只允许一个搜索提供者生效，候选是宿主 MCP 搜索、原生 Responses 搜索或不启用。同一线程里已有占用者时，另一种提供者拿不到备用名额；冲突时工具声明会被直接摘掉，避免同一步同时暴露两种搜索入口（`codex-rs/core/src/model_search.rs:28-40`、`:104-141`）。
+
+宿主可以通过配置层指定客户端搜索提供者，是否允许宿主独立授权 MCP 搜索由策略特性决定（`codex-rs/core/src/model_search.rs:182-202`）。回退事实写进响应项元数据，恢复历史时据此重建占用状态（`:147-170`）；同一回合混用两种提供者的次数单独计入遥测（`:42-70`）。
 
 ### 工具元数据检索
 

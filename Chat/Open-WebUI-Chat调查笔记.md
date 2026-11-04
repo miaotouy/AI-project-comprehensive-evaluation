@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：只读源码核对（FastAPI 后端 main.py / utils/middleware.py / models 层、Socket.IO 通道、SvelteKit 前端 Chat.svelte）；未修改目标仓库
 >
@@ -40,8 +40,8 @@ Chat.svelte submitPrompt（构造用户消息挂 history 树）→ sendMessage�
 
 ## 核心对象与状态权威
 
-- **`Chat` 表**（`models/chats.py:70-102`）：`chat` 字段即含完整 history 消息快照的 JSON，`current_message_id`/`last_read_at` 维护消息指针；`meta.internal=True` 为内部会话（子代理）。
-- **`ChatMessage` 表**（`models/chat_messages.py:128-172`）：`{chat_id}-{message_id}` 复合键，`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型列序；写入按字段覆盖，读取时把行还原为与 history 同构的字典（无行时回退旧版 JSON blob）。
+- **`Chat` 表**（`models/chats.py:182`）：`chat` 字段即含完整 history 消息快照的 JSON，`current_message_id`/`last_read_at` 维护消息指针；`meta.internal=True` 为内部会话（子代理）。
+- **`ChatMessage` 表**（`models/chat_messages.py:161`）：`{chat_id}-{message_id}` 复合键，`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型列序；写入按字段覆盖，读取时把行还原为与 history 同构的字典（无行时回退旧版 JSON blob）。
 - **双写权威划分**：前端渲染读 history 快照（O(1)）；增量同步/统计/恢复读消息表；`reconcile_messages_by_chat_id` 负责两处对齐。
 - **任务状态**：`tasks.py` 进程内 `asyncio.Task` + Redis 哈希/pubsub（`stop` 命令是跨实例协作唯一通道）。
 

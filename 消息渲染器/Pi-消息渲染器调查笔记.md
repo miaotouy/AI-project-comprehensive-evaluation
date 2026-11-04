@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/components/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：只读源码梳理组件树、Markdown 管线与事件流；未在真实终端运行
 >
@@ -16,10 +16,10 @@
 
 Pi 的“消息渲染器”是终端组件树 + 事件驱动全量重建 + 帧节流渲染：
 
-1. **输入模型是完整消息对象**：`AgentSessionEvent` 携带 `AgentMessage` 或增量事件，事件名覆盖消息生命周期、工具执行与 bash 输出三类（`message_start/update/end`、`tool_execution_*`、`bash_execution_update` 等，`core/agent-session.ts:141-183`）；`AssistantMessageEvent` 按文本/思考/工具调用细分增量事件，随 `message_update` 透传给 UI（`interactive-mode.ts:3148-3181`）。
-2. **渲染管线是“Markdown 文本 → 终端行”**：`packages/tui` 的 `Markdown` 组件用 marked 解析（自定义 strikethrough 与 LaTeX tokenizer），再经主题函数着色、ANSI 感知换行、边距/背景填充产出终端行（`packages/tui/src/components/markdown.ts:277-369`）。扩展 `MarkdownTransformer` 在解析前改写文本（如 mermaid 渲染为 Unicode 图，`components/mermaid.ts:60-88`）。
-3. **代码高亮是 highlight.js + 主题作用域映射**：`utils/syntax-highlight.ts` 把 hljs 的 `hljs-*` span 作用域映射到主题函数，输出 ANSI（`syntax-highlight.ts:80-142`）。
-4. **消息壳层按 role/类型分派**：`addMessageToChat` 按 user/assistant/bashExecution/custom/compactionSummary/branchSummary 分支建组件（`interactive-mode.ts:3456-3561`）；assistant 组件按 content 块顺序渲染 text/thinking（toolCall 块由 interactive-mode 另建 `ToolExecutionComponent`），并按 stopReason 追加截断/中止/错误状态文本（`components/assistant-message.ts:89-196`）。
+1. **输入模型是完整消息对象**：`AgentSessionEvent` 携带 `AgentMessage` 或增量事件，事件名覆盖消息生命周期、工具执行与 bash 输出三类（`message_start/update/end`、`tool_execution_*`、`bash_execution_update` 等，`core/agent-session.ts:210`）；`AssistantMessageEvent` 按文本/思考/工具调用细分增量事件，随 `message_update` 透传给 UI（`interactive-mode.ts` 的事件到 UI 分支）。
+2. **渲染管线是“Markdown 文本 → 终端行”**：`packages/tui` 的 `Markdown` 组件用 marked 解析（自定义 strikethrough 与 LaTeX tokenizer），再经主题函数着色、ANSI 感知换行、边距/背景填充产出终端行（`packages/tui/src/components/markdown.ts`）。扩展 `MarkdownTransformer` 在解析前改写文本（如 mermaid 渲染为 Unicode 图，`components/mermaid.ts:60-88`）。
+3. **代码高亮是 highlight.js + 主题作用域映射**：`utils/syntax-highlight.ts` 把 hljs 的 `hljs-*` span 作用域映射到主题函数，输出 ANSI（`utils/syntax-highlight.ts`）。
+4. **消息壳层按 role/类型分派**：`addMessageToChat` 按 user/assistant/bashExecution/custom/compactionSummary/branchSummary 分支建组件（`interactive-mode.ts:3963`）；assistant 组件按 content 块顺序渲染 text/thinking（toolCall 块由 interactive-mode 另建 `ToolExecutionComponent`），并按 stopReason 追加截断/中止/错误状态文本（`components/assistant-message.ts:31`）。
 5. **列表是普通 Container，无虚拟化**：聊天区是 `chatContainer: Container`（`interactive-mode.ts:394`），流式时在末尾追加组件、重建内容，滚动交给 TUI 主屏幕整帧渲染；`packages/tui` 提供 `ScrollView`（滚动条/动画）组件，但聊天列表未使用虚拟化。
 6. **性能策略是缓存 + 帧合并**：`Markdown` 组件按 `text + width` 缓存渲染结果（`markdown.ts:271-281`）；TUI `requestRender` 以 `MIN_RENDER_INTERVAL_MS` 合并请求（`packages/tui/src/tui.ts:765-817`）；未使用 worker/增量 AST/虚拟列表。`packages/tui/test/markdown.test.ts`（1334 行）覆盖 Markdown 管线。
 7. **安全边界**：终端渲染不产生 HTML；导出 HTML 是离线静态生成（marked + highlight.js + 模板，`core/export-html/`），工具结果渲染走 `tool-renderer.ts`。本次未发现运行时 HTML 渲染路径。
@@ -40,7 +40,7 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 ## 1. 消息与内容块数据模型
 
 - **消息**：`AgentMessage` 按角色分 user/assistant/toolResult，另有 custom/bashExecution/compactionSummary/branchSummary 等类型（`core/messages.ts:29-67`）；assistant 内容为 `(TextContent | ThinkingContent | ToolCall)[]`（`packages/ai/src/types.ts:338-368`）。
-- **事件携带**：`message_update` 携带 `assistantMessageEvent`（按 text/thinking/toolcall 细分的 delta 事件，`types.ts:523-539`），UI 不消费 delta 本身而是用携带的 `partial` 完整消息重建（`interactive-mode.ts:3148-3181`）。
+- **事件携带**：`message_update` 携带 `assistantMessageEvent`（按 text/thinking/toolcall 细分的 delta 事件，`types.ts:523-539`），UI 不消费 delta 本身而是用携带的 `partial` 完整消息重建（`interactive-mode.ts` 的事件到 UI 分支）。
 - **角色分派点**：`addMessageToChat` 的 switch 与 `message_start` 分支是唯一分派入口（interactive-mode.ts:3456-3561、:3124-3146）；`toolCall` 块在 `message_update` 时同步建 `ToolExecutionComponent`（:3153-3177）。
 
 ## 2. 流式数据到 UI 的更新链
@@ -102,7 +102,7 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 
 ## 10. 扩展方式与已确认边界
 
-- **MarkdownTransformer**：注册到扩展，按消息类型（assistant/user/assistant-thinking）与流式状态改写 Markdown 文本（`markdown-transform.ts:3-29`）；mermaid 是内置 transformer 实例（`createMermaidMarkdownTransformer`）。
+- **MarkdownTransformer**：注册到扩展，按消息类型与流式状态改写 Markdown 文本；默认只作用于 assistant/user/assistant-thinking 三类，注册时可传 `{ messageTypes }` 扩展到 custom 消息与 skill 块、分支与压缩摘要、以及 What's New/`/changelog` 等更新提示表面（`core/extensions/loader.ts:365`、`core/extensions/types.ts:1583`）；mermaid 是内置 transformer 实例，现在也会在展开的分支/压缩摘要里画图。
 - **工具渲染**：`renderCall/renderResult/renderShell` 控制工具节点的外观与壳；`executionMode` 影响编排而非渲染。
 - **主题**：`theme-controller.ts` 热切换主题（dark/light JSON，`theme/dark.json`），`MarkdownTheme` 接口是渲染器与主题的契约。
 - **已确认边界**：渲染器输入是“完整消息 + 事件”，不支持局部块级更新；无虚拟化意味着超长会话的渲染成本线性增长；终端图片能力依赖 `getCapabilities` 探测，能力不足时图片退化为不可显示。

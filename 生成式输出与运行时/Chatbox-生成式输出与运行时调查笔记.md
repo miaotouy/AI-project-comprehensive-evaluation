@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：静态阅读源码与配套文档（`docs/technical/code-execution.md`、`windows-sandbox.md`），结合 grep/glob 关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、execute_code、create_download 等）；未运行应用、未执行测试
 >
@@ -28,7 +28,7 @@ Chatbox 以聊天为主，没有独立的 artifact 对象模型或专用工作�
 4. **运行**：`code_execution` 沿渲染层提供器、IPC、主进程执行器三层落地（入口 `LocalSandboxProvider.exec` → `sandbox:exec-code` → `execCode`，定位见文末源码索引），首次调用懒初始化会话临时目录并复制上传附件（`code-execution.ts:87-156`）。
 5. **产物声明**：模型调用 `create_download`（`code-execution.ts:316`）→ `persistSandboxArtifact`（`manager.ts:1454`）把文件复制到 `userData/chatbox-sandbox/artifacts/<sessionId>/<sha1>/<basename>`，消息内保存绝对路径。
 6. **展示与交互**：消息时间线内工具卡（`src/renderer/components/message-parts/ToolCallPartUI.tsx`）与底部产物文件卡（`ToolCallPartUI.tsx:925`）提供 HTML/图片 Preview 与 Save 按钮，保存走系统保存对话框（`exportFileFromSandbox`）。下载卡内的沙箱文件链接经链接重映射组件渲染：模型幻觉出、不在沙箱允许根内的路径会被重映射或标记不可用（`sandbox-link.ts`），避免展示无效链接。
-7. **保存**：整个会话（含 tool-call parts 与 result 路径）序列化为 storage 键（`chatStore.ts:350-391`）。
+7. **保存**：整个会话（含 tool-call parts 与 result 路径）提交为行存储记录（`SessionService` + `RowBackedSessionRepository`）。
 8. **重新打开**：会话从 storage 加载；artifact 因位于 userData 持久根而继续可 Save/Preview（`manager.ts:1379` 的 `getSandboxAllowedRoots` 重启回退逻辑；`persist-artifact.test.ts:48` 验证）。
 
 未运行验证：第 3-8 步的运行时行为均为静态确认。
@@ -99,9 +99,9 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 
 ## 8. 持久化、恢复、分享与导出
 
-- 消息与工具结果随会话 JSON 持久化（`chatStore.ts:362`）；临时沙箱目录位于 `os.tmpdir()/chatbox-sandbox/<sessionId>`，启动时清理 7 天以上旧目录（`manager.ts:1582-1606`）。
-- `create_download` 产物持久化到 userData 且豁免清理（`manager.ts:1436-1505`）；删除会话时提示并删除（`chatStore.ts:439-455,481`）。
-- 导出：保存对话框复制（`manager.ts:1511-1570`）；大结果 blob 随备份重映射（`src/renderer/packages/backup/resources.ts:77-79,207-210`）。导出聊天含工具调用摘要（`src/shared/utils/chat-export.ts`）。
+- 消息与工具结果随会话行树持久化（`session_messages`）；临时沙箱目录位于 `os.tmpdir()/chatbox-sandbox/<sessionId>`，启动时清理 7 天以上旧目录（`manager.ts:1582-1606`）。
+- `create_download` 产物持久化到 userData 且豁免清理（`manager.ts:1436-1505`）；删除会话时提示并删除（`src/renderer/stores/session/crud.ts`）。
+- 导出：保存对话框复制（`manager.ts:1511-1570`）；大结果 blob 随备份重映射（`packages/chatbox-core/src/backup-export/session.ts:77-79,207-210`）。导出聊天含工具调用摘要（`packages/chatbox-core/src/backup-export/session.ts`）。
 - 重新打开后下载卡仍可用，依赖持久副本路径与 `getSandboxAllowedRoots` 的重启回退（`manager.ts:1374-1380`）。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -170,7 +170,7 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 - `src/renderer/components/message-parts/ToolCallPartUI.tsx:750-925`：下载卡与产物 UI
 - `src/renderer/modals/ArtifactPreview.tsx:1-239`：artifact 预览模态框
 - `src/renderer/stores/session/stream-chunk-processor.ts:243-298`：工具结果流式落盘
-- `src/renderer/stores/chatStore.ts:350-391,439-481`：会话持久化与删除清理
+- `src/renderer/stores/session/`：会话持久化与删除清理
 - `src/shared/types/session.ts:159-206`：MessageToolCallPart 对象模型
 - `src/shared/context/builder.ts:101-190`：工具调用回流与 sandboxMode 附件注入
 - `docs/technical/code-execution.md`、`docs/technical/windows-sandbox.md`：设计文档

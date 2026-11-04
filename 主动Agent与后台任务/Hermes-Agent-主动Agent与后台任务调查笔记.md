@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：只读核对仓库根 `AGENTS.md`、已有独特功能笔记，以及 `hermes_cli/heartbeat.py`、CLI/Gateway 驱动、`cron/jobs.py` 与 `cron/scheduler.py` 的可执行链；未启动服务，未修改被调查仓库
 >
@@ -33,7 +33,9 @@ Hermes 的 Python 核心同时服务 CLI、消息 Gateway、TUI 和桌面端。�
 
 ### Cron：隔离日程运行
 
-完整链路是：`hermes cron`、`/cron` 或 `cronjob` 保存 job -> gateway ticker 每 60 秒在 tick 锁内读取到期 job -> 预推进循环 job 的下次时间、创建执行记录并领取 fire claim -> 线程池运行 `run_one_job` -> 生成独立 cron session 或执行纯脚本 -> 输出落入 profile 的 cron output 目录并投递到 job 配置的目标 -> job 与 execution 写入终态。存储路径随 profile 的 `HERMES_HOME` 切换，避免凭据、技能和 cron job 跨 profile 混用（`cron/jobs.py:68-99,141-191`; `cron/scheduler.py:7556-7782`）。
+完整链路是：`hermes cron`、`/cron` 或 `cronjob` 保存 job -> gateway ticker 每 60 秒在 tick 锁内读取到期 job -> 预推进循环 job 的下次时间、创建执行记录并领取 fire claim -> 线程池运行 `run_one_job` -> 生成独立 cron session 或执行纯脚本 -> 输出落入 profile 的 cron output 目录并投递到 job 配置的目标 -> job 与 execution 写入终态。存储路径随 profile 的 `HERMES_HOME` 切换，避免凭据、技能和 cron job 跨 profile 混用（`cron/jobs.py`; `cron/scheduler.py`）。
+
+当前快照中 cron 已从 `jobs.py`/`scheduler.py` 两文件拆成约 45 个职责模块：调度权威与归属（`scheduler_authority.py`、`scheduler_ownership.py`、`scheduler_liveness.py`）、派发与投递（`scheduler_tick.py`、`scheduler_delivery*.py`、`delivery_queue.py`、`dispatch_hold.py`）、诊断与账本（`incidents.py`、`executions.py`、`monitor.py`、`store_health.py`）、时间语义（`occurrences.py`、`missed_runs.py`、`jobs_time.py`）以及 worktree 维护（`scheduler_worktree_maintenance.py`）等。job 存储仍是每 profile 的 `cron/jobs.json` 加跨进程文件锁，执行记录与输出目录语义未变。
 
 ## 触发、调度与运行对象
 
@@ -91,6 +93,7 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 - 未验证 cron 的外部 delivery adapter、模型/工具审批、长时间运行时 fire claim 心跳以及多进程文件锁在真实部署中的行为。
 - 未验证 cron execution 账本的完整查询界面和保留/清理时间；已确认 job 状态与输出文件的保存链。
 - 未运行验证模型不可达重跑的真实网络分类、通知抑制和跨重启时间语义。
+- 本轮按路径复核了 heartbeat 状态模型与 cron 的存储/调度模块归位，未逐行重读拆分后的 45 个 cron 模块；新增的 missed-run/ownership/delivery-room 语义只做入口确认。
 
 ## 关键源码索引
 

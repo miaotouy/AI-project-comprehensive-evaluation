@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -160,7 +160,7 @@ Electron 侧配合：主窗口 showMode: 'manual'（`src/main/core/window/window
      light/dark 分写，`product.css:10-80`）。
    - **Tailwind 适配层（生成产物）**：`theme.css` 由 pnpm theme:build（`packages/ui/scripts/build-theme-css.ts`，package.json 脚本 theme:build/theme:check）生成，用 Tailwind v4 @theme inline 把上述语义映射成 `--color-*`/`--radius-*`/`--font-*` 等工具类层（`theme.css:11-453`），文件头部标注"DO NOT EDIT DIRECTLY"。
 
-     配套约束工具：`scripts/theme-contract.ts`、`check-theme-contract.ts`、`validate-theme-contract.ts`、`migration-registry.ts` + `scripts/migrations/shadcn-v2.json`；
+     配套约束工具：`packages/ui/scripts/theme-contract.ts`、`check-theme-contract.ts`、`validate-theme-contract.ts`、`migration-registry.ts` + `scripts/migrations/shadcn-v2.json`；
 
      契约规范见 `packages/ui/docs/design-token-system.md`（v2 契约：无前缀语义是唯一公共 API、`--cs-*` 只是内部 provider、`--cs-theme-*` 是受控输入、`--app-*` 属 owner-local）、`variable-catalog.md`、`migration-plan.md`、`styles-reference.md`。
     - **消费规则**：组件只消费无前缀公共变量（bg-background/text-foreground 等工具类），不直接引用内部变量。
@@ -271,9 +271,13 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 ## 8. 当前基础设施补充
 
-截图覆盖层已经成为一项受窗口与输入法约束的应用级表面：全屏选择时工具栏会保持在可见区域，Escape 可在选择前关闭覆盖层，macOS 还保持覆盖层位于当前 Space。设置页增加聊天与工作列表位置、应用更新通知等偏好入口；这些偏好由既有设置与窗口基础设施承载，而非聊天页面私有状态。
+截图覆盖层已经成为一项受窗口与输入法约束的应用级表面：全屏选择时工具栏会保持在可见区域，Escape 可在选择前关闭覆盖层，macOS 还保持覆盖层位于当前 Space。截图结果另有 OCR 识别与复制动作，识别文字写入剪贴板或结果面板。
 
-本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。依据：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`。
+选择助手从单一浮层扩展成"选择动作 + 独立 Agent 窗口"两类表面：选择动作可绑定 Agent 并由显式 runner 执行，执行中的 Agent 窗口可以收成胶囊，macOS 上还能从窗口黄色灯收起；这些窗口共用声明式窗口尺寸与布局计算，胶囊布局与原生面板由独立模块提供。
+
+基础组件层有三处结构性替换：拖拽排序改由 `@dnd-kit/react` 承载（`packages/ui/src/components/composites/sortable/`），滚动容器统一到单一 `scroll-area` 原语以收敛应用内滚动与侧栏间距，Mermaid 图表改由 `@mermanjs/web-render` 在 worker 中渲染并从默认 Markdown 预设中懒加载，代码高亮统一到一套 Highlights 管线并对大代码预览做虚拟化。标签页方面活动会话标签有独立视觉态、新标签插入位置与标题来源都做了调整；Tooltip 在对话框内容旁改用 portal 挂载。
+
+本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。依据：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/main/services/selection/`、`packages/ui/src/components/composites/sortable/`、`packages/ui/src/components/primitives/scroll-area.tsx`、`packages/ui/src/lib/mermaid/runtime.ts`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`。
 
 ## 9. 设计取舍与已确认边界
 
@@ -316,7 +320,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 - `packages/ui/src/components/primitives/dialog.tsx`
 - `packages/ui/src/components/primitives/toast.tsx`
-- `packages/ui/src/services/popup/types.ts`
+- `src/renderer/services/popup/types.ts`
 - `src/renderer/services/popup/PopupService.ts`
 - `src/renderer/services/toast.ts`
 - `src/renderer/components/command/CommandMenus.tsx`

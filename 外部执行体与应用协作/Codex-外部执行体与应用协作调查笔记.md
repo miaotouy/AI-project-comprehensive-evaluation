@@ -4,7 +4,7 @@
 >
 > 调查更新日期：2026-11-04
 >
-> 代码快照：`c9750d7f50052b29f53def02b5cf2160ae49a3d9`（分支：`main`）
+> 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
 > 调查方式：只读源码静态梳理 app-server 协议与传输、exec-server 反向执行协议、remote control 配对与中继、Python SDK 驱动链路；未运行构建、未启动服务、未做真实网络握手
 >
@@ -46,8 +46,8 @@ app-server 是一个长驻 JSON-RPC 服务。传输由 `--listen` 指定，支�
 协议分三层：
 
 - 客户端请求：`initialize`、`thread/start`、`turn/start`、`turn/interrupt`、`thread/archive` 等。
-- 服务端通知：回合与条目的生命周期，例如 `turn/started`、`turn/completed`、`item/started`、`item/completed`（`codex-rs/app-server-protocol/src/protocol/common.rs:2038-2051`）。
-- 服务端请求：命令审批、文件变更审批、工具提问、MCP elicitation、权限申请、动态工具调用（`common.rs:1851-1900`）。
+- 服务端通知：回合与条目的生命周期，例如 `turn/started`、`turn/completed`、`item/started`、`item/completed`（`codex-rs/app-server-protocol/src/protocol/common.rs:2049-2062`）。
+- 服务端请求：命令审批、文件变更审批、工具提问、MCP elicitation、权限申请、动态工具调用（`common.rs:1861-1910`）。
 
 ### 1.2 exec-server：Codex 作为控制方
 
@@ -84,9 +84,9 @@ remote control 复用 app-server 的连接模型，但连接方向相反：app-s
   → turn/interrupt 或 thread/archive 结束
 ```
 
-初始化是硬门禁：连接未初始化时，除初始化请求外的调用直接返回未初始化错误（`codex-rs/app-server/src/message_processor.rs:1012-1014`）。线程与回合的启动分别在 `message_processor.rs:1324-1335` 与 `:1701-1710` 分发。
+初始化是硬门禁：连接未初始化时，除初始化请求外的调用直接返回未初始化错误（`codex-rs/app-server/src/message_processor.rs:1037-1039`）。线程与回合的启动分别在 `message_processor.rs:1359-1370` 与 `:1738-1747` 分发。
 
-回合开始还要经过准入控制。`TurnAdmission` 维护关闭、暂停与活跃计数；`admit` 在服务端 drain 或工作区切换期间拒绝新回合，已准入的请求会在序列化后再次检查（`codex-rs/app-server/src/turn_admission.rs:37-90`、`message_processor.rs:1028-1074`）。
+回合开始还要经过准入控制。`TurnAdmission` 维护关闭、暂停与活跃计数；`admit` 在服务端 drain 或工作区切换期间拒绝新回合，已准入的请求会在序列化后再次检查（`codex-rs/app-server/src/turn_admission.rs:37-90`、`message_processor.rs:1053-1099`）。
 
 ### 2.2 Codex 驱动外部执行体
 
@@ -120,7 +120,7 @@ remote control 复用 app-server 的连接模型，但连接方向相反：app-s
   → token 到期前刷新；认证主体变化会中断当前会话
 ```
 
-配对参数只接受两种形式之一：配对码或手动配对码。同时给出或都不给都会被拒绝（`codex-rs/app-server/src/request_processors/remote_control_processor.rs:214-226`）。客户端管理入口是列举与撤销两项（`controller.rs:248-262`）。
+配对参数只接受两种形式之一：配对码或手动配对码。同时给出或都不给都会被拒绝（`codex-rs/app-server/src/request_processors/remote_control_processor.rs:214-226`）。客户端管理入口是列举与撤销两项（`codex-rs/app-server-transport/src/transport/remote_control/controller.rs:248-262`）。
 
 ## 3. 身份、协议与状态映射
 
@@ -161,7 +161,7 @@ app-server 支持 stdio、Unix socket 与 WebSocket；exec-server 支持 stdio�
 
 ### 4.1 app-server 的服务端请求
 
-服务端请求是 app-server 与普通“只回通知”的 RPC 最大的区别。客户端必须按请求 ID 回复，否则回合会停在等待状态。当前快照中的请求类型包括（`app-server-protocol/src/protocol/common.rs:1851-1900`）：
+服务端请求是 app-server 与普通“只回通知”的 RPC 最大的区别。客户端必须按请求 ID 回复，否则回合会停在等待状态。当前快照中的请求类型包括（`app-server-protocol/src/protocol/common.rs:1861-1910`）：
 
 - `item/commandExecution/requestApproval`：命令执行审批。
 - `item/fileChange/requestApproval`：文件变更审批。
@@ -199,7 +199,7 @@ app-server 的取消是回合级的：`turn/interrupt` 让当前回合停止，�
 
 exec-server 的取消分为信号与终止两个层级：前者发送信号，后者结束进程。传输中断时环境进入 `Recovering`，由客户端尝试恢复连接并重新初始化；恢复失败则进入 `Disconnected`（`environment.rs:72-79`）。
 
-remote control 的重连由 WebSocket 状态机与 token 刷新共同驱动；认证主体变化会直接中断当前会话，而不是静默重连到旧身份（`controller.rs:160-176`）。
+remote control 的重连由 WebSocket 状态机与 token 刷新共同驱动；认证主体变化会中断当前会话而不是静默重连到旧身份：每次会话操作前后都校验认证主体，失效时以中断错误结束（`codex-rs/app-server-transport/src/transport/remote_control/controller.rs:160-176`）。
 
 ## 5. 权限、凭据与治理边界
 
@@ -216,7 +216,8 @@ exec-server 的治理重点是“执行位置”和“执行权限”都要显�
 - 连接层用 token 或 Noise 密钥证明执行体身份。
 - 每个进程请求携带沙箱意图与托管网络要求；如果要求托管网络但缺少必要参数，执行体必须 fail closed（`protocol.rs:406-410`）。
 - 文件系统操作在远端执行体上做权限检查，而不是在 Codex 本地做完再信任远端。
-- 能力发现（`capabilityRoots/discoverV1`）让 Codex 知道执行体上有哪些可用的技能与插件根，而不是假设远端布局与本地一致。
+- 能力发现（`capabilityRoots/discoverV1`）让 Codex 知道执行体上有哪些可用的技能与插件根，而不是假设远端布局与本地一致；插件根的识别认三种清单布局，即 `.codex-plugin`、`.claude-plugin` 与 `.cursor-plugin` 下的 `plugin.json`（`codex-rs/exec-server-protocol/src/protocol.rs:52-59`）。
+- 第二版能力发现在客户端侧按环境、执行会话、工作目录与沙箱维度缓存，带响应上限；可重试的失败会被记录并用来触发依赖方（MCP 投影）刷新（`codex-rs/exec-server/src/capability_discovery_v2_cache.rs:1-2`）。
 
 ### 5.3 remote control
 
@@ -224,7 +225,7 @@ remote control 有三层治理：
 
 - 启动策略：`RemoteControlPolicy::DisabledByRequirements` 时直接不可用（`remote_control/mod.rs:72-77`）。
 - 账号层：enrollment token 有到期时间并会刷新；认证主体变化会中断会话。
-- 客户端层：`clients/list` 查看已配对设备，`clients/revoke` 把撤销请求转给中继服务；本机不保存可直接放行的客户端凭据（`controller.rs:248-262`、`remote_control/mod.rs:802-809`）。
+- 客户端层：`clients/list` 查看已配对设备，`clients/revoke` 把撤销请求转给中继服务；本机不保存可直接放行的客户端凭据（`codex-rs/app-server-transport/src/transport/remote_control/controller.rs:248-262`、`remote_control/mod.rs:795-809`）。
 
 ### 5.4 与 MCP 应用连接器的区别
 
@@ -260,16 +261,16 @@ MCP 应用连接器（`codex_apps` 服务器、OAuth/EMA、应用工具目录）
 ## 关键源码索引
 
 - `codex-rs/app-server/src/main.rs:42-79`：监听地址、会话来源、remote control 开关。
-- `codex-rs/app-server/src/message_processor.rs:970-1074`、`:1324-1335`、`:1701-1710`：初始化门禁、回合准入与请求分发。
+- `codex-rs/app-server/src/message_processor.rs:995-1099`、`:1359-1370`、`:1738-1747`：初始化门禁、回合准入与请求分发。
 - `codex-rs/app-server/src/turn_admission.rs`：回合准入、暂停与 drain。
 - `codex-rs/app-server/src/connection_rpc_gate.rs`：连接级 RPC 门禁。
-- `codex-rs/app-server-protocol/src/protocol/common.rs:1851-1900`、`:2038-2051`：服务端请求与通知。
+- `codex-rs/app-server-protocol/src/protocol/common.rs:1861-1910`、`:2049-2062`：服务端请求与通知。
 - `codex-rs/app-server-transport/src/connection_auth.rs`：认证主体代际。
 - `codex-rs/app-server-transport/src/transport/remote_control/`：注册、配对、客户端管理与 WebSocket 中继。
 - `codex-rs/exec-server-protocol/src/protocol.rs:25-63`、`:376-414`、`:1245-1267`：执行体协议、进程参数与事件。
 - `codex-rs/exec-server/src/environment.rs:72-90`：环境连接状态。
 - `codex-rs/exec-server/src/environment_toml.rs:26-57`：`environments.toml` 字段。
 - `codex-rs/exec-server/src/environment_registry.rs`：执行体注册与 harness 密钥授权。
-- `codex-rs/exec-server-cli/src/command.rs:60-119`：独立执行体的传输与远端注册参数。
+- `codex-rs/exec-server-cli/src/command.rs:60-128`：独立执行体的传输与远端注册参数。
 - `sdk/python/src/openai_codex/client.py:215-256`、`:478-500`、`:650-700`：SDK 驱动 app-server。
 - `codex-rs/websocket-auth/src/lib.rs:31-65`：WebSocket 认证模式。

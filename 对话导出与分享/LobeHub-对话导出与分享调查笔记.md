@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：静态源码调查；读取前端 ShareModal/SharePopover/ShareMessageModal、store/service 调用链、服务端 lambda 路由器（topic、share、message、exporter）、数据库模型与 schema（TopicModel/TopicShareModel/TopicImporterRepo）、类型定义（ExportedTopic/ImportedMessage/SharedTopicData）及路由注册；未运行应用、未访问远端分享页
 >
@@ -27,6 +27,8 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 链接分享是实时分享而非快照：分享页每次请求都从 `topic_shares` 关联的源 topic 现读消息；`visibility` 为 `'link'` 时匿名可访问，`'private'` 时仅创建者可见；分享记录可被 `disableSharing` 删除（本次未找到客户端 UI 调用）。
 
 OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopover（链接分享入口）被该开关隐藏，导出弹窗不受影响。
+
+分享页在本次快照里已从主 Web 应用拆成独立 SPA：`apps/share`（包名 `@lobehub/share`，vite + react-router，`apps/share/src/router.tsx`），按对象分 topic/page/file/artifact 四类视图；共享外壳在 `src/business/client/features/ShareShell`。主应用 `src/routes` 下已不再注册 `/share/t/:id` 路由，分享页组件位于 `apps/share/src/features/topic/`（`SharedTopicView.tsx`、`SharedMessageList.tsx`、`SharedTopicAside/Body` 等）。
 
 工作区本地文件另出现一条不经 Topic Share 的公开交付链：HTML 预览和文件树可发起发布，收集 HTML/CSS/JS 引用的本地资源，32 KB 以下资源内联，其他资源作为静态站点 sidecar；系统拒绝遗留的本地引用，并在收集期限制为最多 64 个文件、单文件及总量各不超过 50 MB。打包后的 HTML 先写成 Artifact 消息，再交给业务发布槽生成公开地址；开源默认槽会报告发布不可用，因此“可见入口”不等于 OSS 自托管环境一定能部署站点（`src/features/Portal/LocalFile/{prepareWorkspaceHtmlPublish,publishWorkspaceHtmlArtifact,readWorkspaceAsset}.ts`）。
 
@@ -52,9 +54,10 @@ OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopov
 链接分享（远端公开页）：
   SharePopover（enableBusinessFeatures 开关）-> topic.enableSharing（建 share 记录）
     -> 复制 <origin>/share/t/<shareId>
-  -> 访客打开 /share/t/:id -> share.getSharedTopic（publicProcedure，校验 visibility）
+  -> 访客打开 /share/t/:id -> 由 apps/share 独立 SPA 承载
+    -> share.getSharedTopic（publicProcedure，校验 visibility）
     -> message.getMessages(topicShareId)（以 share 属主身份实时读源 topic 消息）
-    -> 分享页 ChatList 渲染 + 附件经 /f/:id 公开文件代理
+    -> SharedTopicView/SharedMessageList 渲染 + 附件经 /f/:id 公开文件代理
 ```
 
 ## 1. 入口、用户目标与导出源
@@ -166,10 +169,11 @@ OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopov
   - `disableSharing` 删记录后 shareId 不可解析（NOT_FOUND）；但本次未找到客户端 UI 调用它——SharePopover 只有 private/link 选择器，切回 private 即对非 owner 隐藏，记录保留；
   - workspace 模式下分享管理限创建者或 workspace owner（`assertCanManageTopicShare`，`topic.ts:98-117`），并有 `resource.shared/unshared` 审计日志（`topic.ts:125-142`）。
 - **入口开关**：配置下发链路为：OSS 常量 `ENABLE_BUSINESS_FEATURES = false`（`packages/business/const/src/index.ts:7`）→ 服务端 `getServerAuthConfig` 下发（`apps/server/src/globalConfig/getServerAuthConfig.ts:16`）→ SharePopover 仅在 `serverConfig.enableBusinessFeatures` 为真时挂载（`ShareButton/index.tsx:27,50-54`）。即：链接分享的服务端与页面代码都在本仓库，但 OSS 自托管默认从 UI 隐藏入口；云版覆盖该开关。
-- **分享页**：会话分享页 `/share/t/:id`（Web/移动端注册，Electron 不注册）：
-  - 复用 `ShareShell`，正文用 `SharedMessageList` 以 `topicShareId` 上下文拉消息（`src/routes/share/t/[id]/index.tsx:14-44`、`SharedMessageList.tsx:19-65`）；
+- **分享页**：独立 SPA `apps/share`（Web/移动端访问同一地址；Electron 是否内嵌未验证）：
+  - 入口 `apps/share/src/router.tsx`，按 `topic`/`page`/`file`/`artifact` 分路由，外壳复用 `ShareShell`；
+  - topic 分享正文用 `apps/share/src/features/topic/SharedMessageList.tsx` 以 `topicShareId` 上下文拉消息（`SharedTopicView.tsx`、`useSyncSharedTopicMeta.ts`）；
   - 禁用编辑与操作条，页脚显示免责声明（`sharePageDisclaimer`）。
-  `/share/page/:id` 是文档对象分享，不在本类目范围。
+  `/share/page/:id` 是文档对象分享，由同一 SPA 的 `SharedPageView` 承载。
 
 ## 9. 隐私、安全与内容治理
 
@@ -210,7 +214,9 @@ OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopov
 - 分享页"实时"语义的边界：源 topic 消息变更后访客看到的实际刷新行为；`findByShareIdWithAccessCheck` 中 owner 判定依赖 `ctx.userId`，匿名+private 时必然拒绝。
 - topic 复制后消息文件关联缺失的 UI 实际表现（消息内 `/f/:id` 图片仍可加载，但附件列表芯片可能缺失——静态推断）。
 - `importTopic` 对 simple 数组自动补的线性 parentId 链、以及 full 导出中未覆盖字段（如 `files`）被 `ImportedMessage` schema 静默丢弃后的实际效果。
-- 本次未覆盖：`/share/page` 文档分享、社区市场发布、整库导出 `exporter.exportData`（`apps/server/src/routers/lambda/exporter.ts:176-180`，owner-only 的 DB 级备份，属会话与消息管理类目）。
+- 本次未覆盖：社区市场发布、整库导出 `exporter.exportData`（`apps/server/src/routers/lambda/exporter.ts`，owner-only 的 DB 级备份，属会话与消息管理类目）。
+- `apps/share` 独立 SPA 的部署形态（是否与主 Web 同域、路由重写规则）、Electron 内分享页行为、以及主应用与分享应用之间的 shell 共享边界未运行验证。
+- 本轮按引用路径核对了分享入口（`topic/share.ts`、`apps/share`）与数据模型拆分（`models/topic/`、`models/message/`、`repositories/topic/`），未逐行重读导出模板与 PDF 渲染；行号引用以模块级定位为准。
 
 ## 13. 关键源码索引
 
@@ -220,10 +226,10 @@ OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopov
 - `src/features/SharePopover/index.tsx`（链接分享 UI、可见性、隐私提醒）
 - `src/routes/(main)/agent/features/Conversation/Header/ShareButton/index.tsx`（入口与 business 开关）
 - `src/features/Conversation/components/ShareMessageModal/`（单消息分享）
-- `src/store/chat/slices/topic/action.ts`（duplicateTopic 238、importTopic 256）、`src/services/topic/index.ts`
-- `apps/server/src/routers/lambda/topic.ts`（cloneTopic 345、importTopic 641、share 操作 412-458/871-894）、`apps/server/src/routers/lambda/share.ts`、`apps/server/src/routers/lambda/message.ts:347-411`
-- `apps/server/src/routers/lambda/exporter.ts`（exportPdf 182、exportData 176）
-- `packages/database/src/models/topic.ts:1086`（duplicate）、`packages/database/src/models/topicShare.ts`、`packages/database/src/repositories/topicImporter/index.ts`、`packages/database/src/schemas/topic.ts:231`
+- `src/store/chat/slices/topic/action.ts`（`duplicateTopic`/`importTopic`）、`src/services/topic/index.ts`
+- `apps/server/src/routers/lambda/topic/`（`create.ts` 的 import、`share.ts` 的 enable/update/disable）、`routers/lambda/share.ts`、`routers/lambda/message.ts`（`topicShareId` 读取）
+- `apps/server/src/routers/lambda/exporter.ts`（`exportPdf`/`exportData`）
+- `packages/database/src/repositories/topic/duplicate.ts`（topic 复制）、`packages/database/src/models/topicShare.ts`、`packages/database/src/repositories/topicImporter/index.ts`、`packages/database/src/schemas/topic.ts`（topic_shares 表）
 - `packages/database/src/utils/copyMessagesInDatabase.ts`、`copiedTranscript.ts`
-- `packages/types/src/export.ts`（ExportedTopic/ImportedMessage）、`packages/types/src/topic/topic.ts:685`（SharedTopicData）
-- `src/routes/share/t/[id]/`（分享页）、`src/app/(backend)/f/[id]/route.ts`（文件代理）、`packages/business/const/src/index.ts:7`（ENABLE_BUSINESS_FEATURES）
+- `packages/types/src/export.ts`（ExportedTopic/ImportedMessage）、`packages/types/src/topic/topic.ts`（SharedTopicData）
+- `apps/share/src/router.tsx`、`apps/share/src/features/topic/`（分享页 SPA）、`src/business/client/features/ShareShell`（共享外壳）、`src/app/(backend)/f/[id]/route.ts`（文件代理）、`packages/business/const/src/index.ts`（ENABLE_BUSINESS_FEATURES）

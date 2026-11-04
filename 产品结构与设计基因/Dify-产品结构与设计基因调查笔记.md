@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态核对 README、顶层目录、Web 路由、API 服务边界、现有 Dify 专项笔记与浅克隆可见提交；未运行服务、插件运行时或 Agent Runtime
 >
@@ -41,6 +41,7 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 | 业务系统 service API / SDK | 已发布 App、workflow run 或消息型调用 | 以应用 token 调用同一运行配置；调用 API 不等于可编辑定义 |
 | App Deployment 环境 | 选定应用版本、环境 WebApp/service API、文件 grant | 将发布版本部署到环境并独立配置访问点；当前环境不承接 MCP/trigger |
 | 外部事件 | 发布 workflow、trigger log、workflow run | Webhook、schedule、Plugin Trigger 可发起异步图运行；最终交付、签名与重试未运行验证 |
+| 人工协同 | 暂停的 workflow run、人机输入表单、IM 投递记录 | 表单可投递到 Web 或 IM 渠道，收件人提交后恢复运行；超时、权限与送达效果未运行验证 |
 | Agent / 模型 | Tool Provider、tool、workflow-as-tool | 工具和兼容的工作流可被模型发现并调用；审批、daemon 和 MCP 的执行细节见工具专项 |
 | 独立运行时 | Plugin Daemon、Dify Agent Runtime | 分别承接插件安装/调用和 Agent v2 workspace；主仓库只确认交接协议与清理意图 |
 
@@ -56,9 +57,9 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 
 ### 可发布定义与多调用面
 
-**模式和证据：当前结构确认。** Dify 将应用配置、workflow 或 Agent 版本作为可发布的作者资产，再允许内置 Web、部署环境、嵌入、API 和部分事件入口消费。普通 Chat、advanced chat 与 workflow 虽共享“发布应用”的入口概念，但分别产生消息链或图运行对象。`api/services/app_generate_service.py` 与 `api/core/app/apps/` 是模式分派和专属运行器的主要交接处；部署环境访问点见 `web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-101`。
+**模式和证据：当前结构确认。** Dify 将应用配置、workflow 或 Agent 版本作为可发布的作者资产，再允许内置 Web、部署环境、嵌入、API 和部分事件入口消费。普通 Chat、advanced chat 与 workflow 虽共享“发布应用”的入口概念，但分别产生消息链或图运行对象。`api/services/app_generate_service.py` 与 `api/core/app/apps/` 是模式分派和专属运行器的主要交接处；部署环境访问点见 `web/app/components/app/access-point/deployed-environment-access-points/index.tsx:30-100`。
 
-**产品作用。** 作者可在一个定义上设置模型、提示词、工具、知识和表单，再向不同调用者交付；终端用户的可操作范围则被收缩为已发布输入契约。App Deployment v2 又允许把具体版本配置到部署环境，并分别暴露 WebApp 与 service API。该环境的文件访问通过短期、按 app/end-user 和 upload/resolve/produce scope 签发的 grant 交接，文件内容再使用单文件 token（`api/controllers/inner_api/app/file_grants.py:1-177`；`api/controllers/files/appdeploy_files.py:1-65,121-298`）。这是环境执行的文件能力边界，不是终端用户可任意浏览工作区文件。例外是控制台调试调用可带未发布覆盖配置，不能把调试面当作生产 API 的权限模型。
+**产品作用。** 作者可在一个定义上设置模型、提示词、工具、知识和表单，再向不同调用者交付；终端用户的可操作范围则被收缩为已发布输入契约。App Deployment v2 又允许把具体版本配置到部署环境，并分别暴露 WebApp 与 service API。该环境的文件访问通过短期、按 app/end-user 和 upload/resolve/produce scope 签发的 grant 交接，文件内容再使用单文件 token（`api/controllers/inner_api/app/file_grants.py:117-205`；`api/controllers/files/appdeploy_files.py:1-298`）。这是环境执行的文件能力边界，不是终端用户可任意浏览工作区文件。例外是控制台调试调用可带未发布覆盖配置，不能把调试面当作生产 API 的权限模型。
 
 ### 图运行与消息运行并存
 
@@ -71,6 +72,12 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 **模式和证据：当前结构确认。** Plugin Marketplace 在 Dify 服务端完成租户权限、来源策略、安装任务跟踪、配置清理和工具发现，而插件包安装和实际执行交给 Plugin Daemon。Agent v2 同样把会话工作区交给独立 Agent Runtime，再由 API 保存 binding、版本和清理状态（`api/core/plugin/`、`api/services/agent/workspace_service.py`）。
 
 **产品作用和边界。** 这让平台可统一治理扩展的身份、配置和运行时可见性，却把依赖隔离、物理删除、网络行为和实际执行成功交给外部运行域。未启动两个 runtime，不能将这条静态链写成已验证的隔离、恢复或清理效果。
+
+### 契约化外置与人工回环
+
+**模式和证据：当前结构确认。** 知识库文件能力在快照中改为对接独立部署的 KnowledgeFS 服务：仓内只保留固定的接口契约、能力操作清单、契约锁文件和 CI 覆盖率检查，客户端启动需同时满足部署形态、地址与认证配置（`api/knowledge-fs-contract/README.md`、`api/services/knowledge_fs/feature_service.py:1-37`）。与此同时，人机协同节点把图运行暂停为待办表单，经 Web 或 IM 渠道投递，收件人提交后再恢复执行。这两条链都以外置服务或外部渠道为对端，Dify 自己保留运行状态与权限判断。
+
+**产品作用和张力。** 契约化外置让实现可以独立演进与替换，代价是本仓库无法静态确认实际存储、一致性和隔离效果；人工回环把工作流从纯自动执行扩展为可等待外部决策，但表单有效期、身份绑定和渠道送达都属于需要运行验证的边界。跨子系统依赖在 `api/extensions/ext_application_services.py` 这类组合根集中装配，而不是散落在控制器里，这使同一能力可被控制台、service API 和 Web 面复用。
 
 ## 张力、例外与覆盖缺口
 
@@ -91,6 +98,7 @@ RAG Pipeline 与数据集是长期维护的知识资产，workflow run 是一次
 - Cloud、Enterprise 与自托管版本的功能差异、权限和运营表面未运行核对。
 - Plugin Daemon、Agent Runtime、模型 Provider、外部触发器与第三方系统的端到端行为未运行验证。
 - App Deployment 环境的版本切换、访问控制、文件 grant、环境变量和凭据注入未连接 Enterprise control plane 运行验证。
+- KnowledgeFS 独立知识服务的服务端实现不在本仓库，其存储一致性、签名轮换与可用性未验证；IM 人工协同的渠道送达、表单过期与身份校验未运行验证。
 
 ## 关键依据
 
@@ -99,4 +107,4 @@ RAG Pipeline 与数据集是长期维护的知识资产，workflow run 是一次
 - `api/services/app_generate_service.py`、`api/core/app/apps/`：应用模式分派及专属生成器。
 - `api/core/workflow/`：图运行、节点记录和事件边界。
 - `api/core/plugin/`、`api/services/agent/workspace_service.py`：独立 Plugin/Agent runtime 的管理交接。
-- [VCP 全景技术白皮书](../../VCPToolBox/docs/vcp白皮书V3.md)、[VCP 初期上游配置](../../VCPToolBox/config.env.example)、[VCP 请求入口](../../VCPToolBox/server.js)：VCP 中间层定位及单上游请求链的跨项目对照依据。
+- [VCP 全景技术白皮书](../../VCPToolBox/knowledge/VCP百科全书/157_VCP文档_协议白皮书与设计哲学.txt)、[VCP 初期上游配置](../../VCPToolBox/config.env.example)、[VCP 请求入口](../../VCPToolBox/server.js)：VCP 中间层定位及单上游请求链的跨项目对照依据。

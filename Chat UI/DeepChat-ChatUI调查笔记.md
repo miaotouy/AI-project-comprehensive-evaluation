@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（renderer 的 ChatPage 组合、ChatInputBox/ChatInputToolbar/PendingInputLane 组件、useComposerSubmit/useMessageActions/useChatSearch 等 composable、Pinia store 与 IPC 桥），静态核对控件、状态与事件绑定；视觉效果、焦点顺序、键盘可用性与系统通知未运行验证
 >
@@ -16,12 +16,13 @@
 
 DeepChat 是 Electron 桌面 GUI，聊天工作台由 ChatPage 单一页面组合：
 
-- ChatPage（`ChatPage.vue:1-314` 模板）组合顶栏、消息列表（窗口化数据分页接口）、搜索条、Composer（TipTap 编辑器 + 工具栏 + 状态栏）、pending input lane、plan/question 浮层与附件准备对话框。
+- ChatPage 组合顶栏、消息列表（窗口化数据分页接口）、消息地图与回到底部提示、搜索条、Composer（TipTap 编辑器 + 工具栏 + 状态栏 + 引用/附件节点）、pending input lane、question/权限浮层与附件准备对话框。计划能力已移除，不再有独立计划浮层。
 - 发送中的输入不拼进已完成消息：生成中提交进入 pending lane（queue/steer/编辑/删除/重排），并提供 resume（恢复暂停队列）与 retry_required（释放后重试）动作；执行语义在对话请求与上下文笔记。
 - Composer 草稿按会话持久化到 localStorage（`composerDraftPersistence.ts`），切换会话与重启后恢复；provider 原生搜索（DeepSeek web 搜索）以开关进入发送前配置，意图按会话保存在 session store。
-- subagent session 在 ChatPage 中只读，但仍能显示消息、plan、工具状态与最终 child result。
+- subagent session 在 ChatPage 中只读，但仍能显示消息、工具状态与最终 child result。
 - 会话内查找（Cmd/Ctrl+F）与跨会话搜索（侧栏过滤 + Spotlight 历史搜索）并存，命中可定位到消息。
-- UI 状态（active session、working/error、message 缓存、streaming、pending input、草稿、plan）分散在 Pinia store 与页面局部状态，active session 按窗口绑定；键盘/焦点/响应式行为未运行验证（§11）。
+- UI 状态（active session、working/error、message 缓存、streaming、pending input、草稿、引用与附件）分散在 Pinia store 与页面局部状态，active session 按窗口绑定；键盘/焦点/响应式行为未运行验证（§11）。
+- 新增三块工作台表面：消息地图（`ChatMinimap.vue`，刻度来自 `minimapTicks.ts`，与窗口化共用布局表）、回到底部提示（`ScrollToLatestPill.vue`）、引用与附件编辑（`ReferenceChip.vue`、`ReferenceEditor.vue`、`AttachmentShelf.vue`、`AttachmentRepresentationMenu.vue`，消息侧节点为 `nodes/SessionReferenceView.vue`、`nodes/FileReferenceView.vue`）。
 - 上下文压缩在消息列表中以状态化分隔行呈现；它明确区分正在压缩、已压缩及未生成可用摘要等状态，具体上下文与持久化语义见对话请求与上下文、会话与消息管理笔记（`MessageListRow.vue:10-24,180-187`）。
 - 非视觉工作流可通过 Electron 的 accessibility support 状态启用：ChatPage 为消息区补充可聚焦 region 与 live 状态，并在该模式下关闭消息窗口化，避免屏幕阅读器只接触当前视口窗口。
 
@@ -30,12 +31,12 @@ DeepChat 是 Electron 桌面 GUI，聊天工作台由 ChatPage 单一页面组�
 ```text
 ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主）
   -> ChatPage
-     -> 消息列表（窗口化数据分页接口 -> 会话与消息管理 §5）
+     -> 消息列表（窗口化数据分页接口 -> 会话与消息管理 §5）+ 消息地图 ChatMinimap
      -> 输入框 -> ChatClient.sendMessage / steer / queue（执行 -> 对话请求与上下文）
      -> pending input lane（排队/steer/resume/retry 显示）
-     -> plan/question 浮层、只读 interaction overlay
+     -> question/权限浮层、只读 interaction overlay
      -> 会话内查找（Cmd/Ctrl+F，已加载消息 -> 会话与消息管理 §5.2）
-     -> session/message/stream/pendingInput/agentPlan Pinia store（UI 状态所有权，§8）
+     -> session/message/stream/pendingInput Pinia store（UI 状态所有权，§8）
 ```
 
 边界：消息内容与 block 渲染、滚动锚定属于消息渲染器笔记；消息窗口数据分页接口在会话与消息管理笔记 §5.1；请求执行链在对话请求与上下文笔记（`../对话请求与上下文/DeepChat-对话请求与上下文调查笔记.md`）。

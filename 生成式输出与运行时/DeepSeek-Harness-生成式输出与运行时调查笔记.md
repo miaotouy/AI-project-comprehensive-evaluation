@@ -2,171 +2,143 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支：`master`）
+> 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
-> 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/llm`（llm、llm-retry、token-meter）、`packages/core`（session、agent-loop、tools）、`packages/session`（session-persistence 及其 jsonl/sqlite 后端、session-checkpoint-policy、session-projection）、`packages/terminal`、`packages/shell`、`packages/subprocess`、`packages/spill`、`packages/attachment`、`packages/feedback`、`packages/util/output-retention`、`packages/client`（runtime 与 ui-conversation 消费侧）及 `docs/subsystems` 的 llm-streaming.md、tools.md、persistence.md 等页面；未运行任何命令或测试
+> 调查方式：静态源码阅读与全文检索，覆盖 `packages/llm`（llm、llm-retry、token-meter）、`packages/core`（session、agent-loop、tools）、`packages/session`（session-persistence 及 jsonl 后端、session-format 与 v0→v4 迁移链、session-projection、session-title、session-stats、session-telemetry、session-log-deepseek）、`packages/compaction`、`packages/attachment`、`packages/spill`、`packages/util/output-retention`、`packages/deliverables`、`packages/client`（runtime、ui-chat、ui-conversation 消费侧）及 `docs/subsystems` 对应页与 `docs/upgrade-guide`；未运行任何命令或测试
 >
-> 调查范围：流式词汇与折叠、输出事件落盘与持久化、工具结果输出契约、终端/shell/附件/spill/消息反馈/令牌计量等输出形态、客户端流式消费概览；明确排除 Chat UI 的 DOM 渲染细节、工具管道的审批与调度语义、对话请求与上下文的装配细节
+> 调查范围：流式词汇与折叠、输出事件落盘与持久化、v4 消息契约与工具结果表示、工具结果输出契约、终端/shell/附件/spill/消息反馈/交付物/令牌计量等输出形态、客户端流式消费概览；明确排除 Chat UI 的 DOM 渲染细节、工具管道的审批与调度语义、对话请求与上下文的装配细节
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志"为核心。模型输出没有独立 artifact 对象：原始形态是闭合的 `StreamChunk` 流协议（起止块、文本/推理/工具调用三类 delta、usage 与 finish 七个变体，`packages/llm/llm/src/types.ts:291-303`），adapter 契约要求 usage 先于 finish、工具参数端到端保持原始 JSON 字符串、失败归一化为可序列化的失败事实。
+DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志"为核心。模型输出没有独立 artifact 对象：原始形态是闭合的 `StreamChunk` 流协议（起止块、文本/推理/工具调用三类 delta、usage 与 finish 变体，`packages/llm/llm/src/types.ts`），adapter 契约要求 usage 先于 finish、工具参数端到端保持原始 JSON 字符串、失败归一化为可序列化的失败事实。
 
-流式折叠由唯一的 `BlockAssembler` 承担（`packages/llm/llm/src/assembler.ts:36-164`）：agent 循环把每条原始 chunk 先落日志（`assistant/chunk` 事件）再喂给折叠器，流结束后把折叠出的不可变 assistant 消息连同 usage 一起追加为 assistant/message 事件，并以 sourceEventSeqs 引用组成它的全部 chunk 事件。
+流式折叠由唯一的 `BlockAssembler` 承担（`packages/llm/llm/src/assembler.ts`）：agent 循环把每条原始 chunk 先落日志（`assistant/chunk` 事件）再喂给折叠器，流结束后把折叠出的不可变 assistant 消息连同 usage 一起追加为 `assistant/message` 事件，并以 `sourceEventSeqs` 引用组成它的全部 chunk 事件。
 
-会话日志是唯一事实源，模型历史经表面折叠派生（`deriveMessages()`），因此日志同时支撑精确回放与请求可重建。
+会话日志仍是唯一事实源，模型历史经表面折叠派生（`deriveMessages()`），日志同时支撑精确回放与请求可重建。
 
-输出对象身份分四类：消息（稳定 `MessageId`）、工具调用/结果（`CallId` 配对）、磁盘文件（spill 文件、内容寻址附件）、运行实例（终端会话 `TerminalSessionId`，仅进程内存活，不进日志）。工具结果契约是"规范 JSON 值 + 纯投影渲染"：执行产生的 value 只在进程内存在，落盘的只有渲染后的内容、错误信息和展示 meta。
+**格式 v4 改写了消息数据契约**：工具结果从"user 角色的包装块"变成 `role: 'tool'` 的消息（`toolCallId` + 直接 content 数组 + 可选 `isError`），消息来源从 `plugin` 字符串改为 `kind` 判别，插件扩展内容以 `plugin:<原名>` 命名空间化，并新增 `developer/message` 事件类型。v3 到 v4 是独立迁移包，恢复旧会话时转换但不改写已存储代（`packages/session/session-format-v3-to-v4/`）。
 
-超长文本经两级处理：shell/subprocess 保留尾窗口并给出完整流 spill 文件路径；`spill-policy` 把超过 `maxInlineBytes` 的纯文本结果整体存为会话私有文件，模型只见 head/tail 预览加定位提示。持久化通过 write handle 的有界批处理与 `session/flush` 检查点完成；第一方只提供 JSONL。当前 v3 每事件一行并使用 checksummed zstd frame，旧 v0/v1 packed chunk 由历史 codec 读取，v0→v3 相邻迁移在写打开时发布不可变后继代。
+输出对象身份分四类：消息（稳定 `MessageId`）、工具调用/结果（`CallId` 配对）、磁盘文件（spill 文件、内容寻址附件、交付物引用）、运行实例（终端会话与后台 job，仅进程内存活，不进日志）。工具结果契约是"规范 JSON 值 + 纯投影渲染"：执行产生的 value 只在进程内存在，落盘的只有渲染后的内容、错误信息和展示 meta。
 
-能力总评 **G1（富静态结果）**：文本/推理/图片与工具卡片在消息内投影，文件产物可寻址复用；终端 PTY 与后台 job 提供"模型可跨调用定向维护的活对象"（G5 的局部形态），但既不入日志也不持久化，进程终止即失。模型输出本身没有 G2 声明式控件、没有 G3 专用运行环境（本机 shell/PTY 执行属于工具执行边界）；用户不能编辑模型输出对象，无 diff 应用层与协作机制。
+超长文本经两级处理：shell/subprocess 保留尾窗口并给出完整流 spill 文件路径；`spill-policy` 把超过 `maxInlineBytes` 的纯文本结果整体存为会话私有文件，模型只见 head/tail 预览加定位提示。持久化通过 write handle 的有界批处理与 `session/flush` 检查点完成；第一方只提供 JSONL。压缩侧拆出 `compaction-basic`、`compaction-image-offload`、`compaction-tool-result-pruner` 三个策略插件。
+
+另有两条对外输出通道：`session-log-deepseek` 在启用官方 DeepSeek 请求元数据时把规范会话日志增量上传（`dsh_session_log` 请求字段加 `session-log-deepseek/delivery-accepted` 事件作为水位），`present` 工具把文件声明为交付物供客户端呈现。
+
+能力总评 **G1（富静态结果）**：文本/推理/图片与工具卡片在消息内投影，文件产物可寻址复用（附件、spill、交付物）；终端 PTY 与后台 job 提供"模型可跨调用定向维护的活对象"（G5 的局部形态），但既不入日志也不持久化，进程终止即失。模型输出本身没有 G2 声明式控件、没有 G3 专用运行环境；用户不能编辑模型输出对象，无 diff 应用层与协作机制。
 
 ## 系统边界与完整主链路
 
 边界按职责划分：
 
 - `packages/llm/llm` 定义 provider 无关的流与消息词汇并归一化所有 adapter；
-- `packages/core/session` 提供事件日志与表面派生，`packages/core/agent-loop` 是唯一循环消费者（驱动 turn/step、装配请求、执行工具），`packages/core/tools` 提供工具注册与结果契约；
-- `packages/session/*` 负责持久化、检查点与投影；
-- terminal/shell/subprocess/spill/attachment/feedback/token-meter 分别提供输出形态与治理；
-- 客户端（`packages/client`）经 RPC/SSE 帧订阅 `session/event`，在对象层重建会话视图。
+- `packages/core/session` 提供事件日志与表面派生，`packages/core/agent-loop` 是唯一循环消费者，`packages/core/tools` 提供工具注册与结果契约；
+- `packages/session/*` 负责持久化、格式与迁移链、检查点、投影缓存、标题、统计与遥测；
+- terminal/shell/subprocess/spill/attachment/compaction/deliverables/token-meter 分别提供输出形态与治理；
+- 客户端经 RPC/SSE 帧订阅 session 事件与投影帧，在对象层重建会话视图。
 
 主链路（一次模型生成从 `llm/stream` 到 `assistant/chunk` 落日志再到最终 `assistant/message`）：
 
-1. 输入：`inbox.splice` 插入用户消息并 `wakeDriver()`（agent.ts:113-120），驱动器 turn 流程追加 `turn/start`，preStep 认领消息并追加 `user/message`（surface 标记为 append，agent.ts:246-290）。
-2. 装配：buildRequest 追加 `request/header`（EpochHeader 全量快照）与 `request/context`，经 `llm.prepareCall` 绑定 adapter 注册并冻结请求（agent.ts:407-495）。
-3. 生成：循环 `for await` 消费 `llm/stream` 瀑布（adapter 抛出与迭代失败被归一化为终态 finish chunk，index.ts:843-927）；每条 chunk 先以 `assistant/chunk` 事件记录 seq，再喂给折叠器（agent.ts:347-351）。
-4. 最终化：流结束后读折叠器的装配结果与 usage，以 createAssistantMessage 冻结消息并追加 `assistant/message`（携带 usage 与引用全部 chunk 的 `sourceEventSeqs`，agent.ts:373-390）；finish 为 error/aborted 时经 `agent/request-error` 瀑布决定重试或抛错（llm-retry 负责退避与可重试码）。
-5. 工具执行：`tool/call` 记录原始参数 JSON（tool-calls.ts:262-265），调度器经 `tools/pre-execute → guards → tools/execute → tools/post-execute → finalizeContent` 后追加 `tool/result`（渲染内容 + 可选 error/meta，sourceEventSeqs 指向 call 事件，tool-calls.ts:268-289）。
-6. 收口与持久化：`step/end`、`turn/end`（结构化原因）依序追加；`session/flush` 检查点把已提交事件批量写入后端（write-behind 默认 200ms 批窗）；resume 时后端 `prepare` 恢复日志并重建内存 Session。
+1. 输入：inbox 插入用户消息并唤醒驱动器，turn 流程追加 `turn/start`，preStep 认领消息并追加 `user/message`。
+2. 装配：buildRequest 追加 `request/header`（EpochHeader 全量快照，含工具 schema）与 `request/context`，经 `llm.prepareCall` 绑定 adapter 注册并冻结请求。
+3. 生成：循环消费 `llm/stream` 瀑布（adapter 抛出与迭代失败被归一化为终态 finish chunk）；每条 chunk 先以 `assistant/chunk` 事件记录 seq，再喂给折叠器。
+4. 最终化：流结束后读折叠器的装配结果与 usage，以 createAssistantMessage 冻结消息并追加 `assistant/message`（携带 usage 与引用全部 chunk 的 `sourceEventSeqs`）；finish 为 error/aborted 时经 `agent/request-error` 瀑布决定重试或抛错（llm-retry 负责退避与可重试码）。
+5. 工具执行：`tool/call` 记录原始参数 JSON 与批次结算处落盘（`packages/core/tools/src/batch.ts:236-264`），管线经 `tools/pre-execute → guards → tools/execute → projectContent → tools/post-execute → finalizeContent` 后追加 `tool/result`（渲染内容 + 可选 error/meta，`sourceEventSeqs` 指向 call 事件）。
+6. 收口与持久化：`step/end`、`turn/end`（结构化原因）依序追加；`session/flush` 检查点把已提交事件批量写入后端（默认 200ms 批窗）；resume 时后端按格式目录与迁移链恢复日志并重建内存 Session。
 
 ## 1. 触发方式、输出协议与对象模型
 
 **触发方式**：无 artifact 类特殊标记。输出全部由用户文本、注入上下文（`agent.inject`）与模型工具调用触发；模型侧唯一的"结构"入口是工具调用（原始 arguments JSON 字符串），文本与推理块没有受控语法。
 
-**输出协议**：消息是一组 typed block，`ContentBlockMap` 可合并扩展，含文本、推理、图片、工具调用与工具结果五种（types.ts:99-110）。流协议是**闭合**判别联合（switch 以 `assertNever` 收尾，新变体必须改编译）；`index` 把各 delta 关联到块，`block-end` 携带已装配好的完整块，消费者不必自行拼接。协议容错点：delta-only provider（无块起止标记）被折叠器容忍；块已关闭后的迟到 delta 被忽略；半截工具参数以原始 JSON 片段累积，不做流式解析。
+**消息与内容块**：消息是一组 typed block，`ContentBlockMap` 可合并扩展；v4 起消息来源用 `kind` 判别，插件内容类型以 `plugin:<原名>` 前缀命名，参数、回放状态与插件内容字段不被迁移遍历（`session-format-v3-to-v4/README.md` 的 Extension data 节）。
 
-**对象模型**：`Message` 是唯一不可变消息表示（id、role、content、source，message.ts:128-138），跨送达/持久化/请求三种表示保持同一 id。assistant 消息的 source 记录 kind/model/provider 与 adapter 私有的 `replayState`（用于跨请求重放，仅同一 adapter 实例拥有历史 provider 与目标 provider 时透传，llm-streaming.md §Replay state）。source 的 kind 回答"谁产生"，可选 form 回答"这是什么信息"——六个语义值（如 snapshot 表示"后来快照覆盖先前快照"、notice 表示一次性告知）与视觉无关，完整词汇表见 message.ts:48-60。没有独立 artifact 类型；工具调用凭 `CallId` 在日志中与结果配对，文件产物凭路径寻址。
+**工具结果的 v4 表示**：`tool/result` 事件的消息为 `role: 'tool'`，`toolCallId` 与 `source.callId` 一致，content 直接是块数组，`isError` 提升为消息字段；旧的 `tool-result` 包装类型被移除。因此"工具结果投影为 user-role 消息"的旧描述已不成立，模型历史中的工具结果现在是独立角色。
 
-**事实源关系**：会话事件日志是对话事实源（`Session` 的 append-only log）；磁盘文件系统是产物事实源（spill、附件、工具写的文件）；终端会话是运行事实源（仅进程内）。三者在事件落盘时点同步，无对象级合并冲突管理。
+**消息角色**：session 事件层面有 `user/message`、`system/message`、`developer/message`、`assistant/message` 与 `tool/result` 五类消息载荷，surface 派生只保留模型可见子集（`packages/core/session/src/types.ts:317, 449`）。
 
-## 2. 增量生成、更新与最终化
+**媒体与附件**：图片以内容块引用附件；文本、JSON 与图片都可有内容寻址存储。附件读取改为引用对象语义——客户端从消息图片块里取完整引用交给 `readAttachment`，返回的 `name` 与原尺寸只属调用方展示信息，只有 id、媒体类型、字节长度与宽高会与存储对象核对；访问权由 Gateway 权限决定而非会话归属（`docs/upgrade-guide/v0.2.1-rc.3/attachment-read-access/guide.md`）。
 
-**折叠算法**：`BlockAssembler` 按 `index` 维护 partial 状态，text/reasoning delta 追加字符串、tool-call delta 追加 arguments 片段；`block-end` 的完整块是权威值且"先到先得"；`blocks()` 按首次出现顺序装配。usage 与 replayState 只在流末位生效，finish 缺省视为 stop。
+## 2. 输出事件的类型、持久化与恢复
 
-**max-tokens 收口**：finish 为 max-tokens 时丢弃所有未完成的 tool-call 块（不可安全执行，assembler.ts:134-139），文本/推理块从已累积 delta 装配。
+**事件类型**（`packages/core/session/src/types.ts`）：会话生命周期（created、title、surface 操作）、回合与步骤（turn/start、step/start、step/end、turn/end）、模型请求（request/header、request/context、request/attempt）、流式块（assistant/chunk）、消息（user、system、developer、assistant、tool/call、tool/result）、审批（approval/asked、approval/decided）、模型选择（model/selection）、以及各工具自有的领域事件。
 
-**更新粒度**：文本/推理为逐 token 注入；块边界用整块替换。没有对文本的 diff/patch 应用层。`assistant/message` 落盘后即最终化：消息被冻结、进入 surface、派生进下一次请求；compaction 是唯一的"改写"路径——以 `surfaceOp: {op:'replace'}` 的摘要 `user/message` 遮蔽旧表面节点（surface.ts:362-379）。
+**持久化**：`Session.append()` 在 store 拥有的实例上受发布门控——创建公告（`session/created` 同步派发）完成前与移除后都拒绝写入；创建监听器不能追加（`docs/upgrade-guide/v0.2.1-rc.2/session-store-writes/guide.md`）。写入经 write handle 的有界批处理与 `session/flush` 检查点；第一方后端只有 JSONL，以插件形式挂载（`session-persistence-jsonl` 导出命名函数插件，服务 API 与文件格式不变）。
 
-**失败收口**：adapter 抛出或迭代失败统一转为终态 finish chunk（`adapterFailureChunk`，index.ts:930-939）；finish error/aborted 进入 `agent/request-error` 瀑布，`llm-retry` 依据注册时捕获的不可变重试策略调度退避（可重试码、指数退避加抖动，llm-retry/src/index.ts:99+）。
+**格式与迁移**：格式版本由 `session-format-catalog` 描述，迁移边独立成包：v0→v1、v1→v2、v2→v3、v3→v4。每条边只改它声明的表示，保留源事件的时间、消息身份与其余字段，先跑前序边到 v3 再进 v4。v4 物理行复用已发布的 v2 帧加上 v4 原生准入；编码与解码不触发入向迁移，后继代以不可变文件发布，拒绝时不产生后继（`packages/session/session-format-v3-to-v4/`）。
 
-放弃重试则回合以结构化失败事实记录 error 原因（agent.ts:309-314）；空完成（`EMPTY_RESPONSE`）与上下文溢出（`CONTEXT_WINDOW_EXCEEDED`）是规范化的可重试码。
+**恢复与投影**：投影成为一等公民——`session-projection` 提供注册表与句柄，`session-projection-cache` 缓存重建结果，`session/stats`、标题与遥测都作为投影或消费者存在。实时投影帧从"一帧一个 key"改为"一帧列出该事件改动的所有 key"（`{ sessionId, seq, changes }`），并新增 `onEventChanged` 每个提交事件回调一次（`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames/guide.md`）。
 
-**中止收口**：中止的回合为未启动的调用合成错误结果（`TOOL_ABORTED_BEFORE_DISPATCH`），保证回放时调用/结果配对完整（tool-calls.ts:249-259）。
+**上传通道**：`session-log-deepseek` 在官方 API 请求元数据启用时把规范会话日志增量随请求上传，用 `session-log-deepseek/delivery-accepted` 事件维护接受水位并重试；可整体关闭（`packages/session/session-log-deepseek/README.md`）。
 
-**结果预算**：每步请求的输出上限来自 `AgentOptions.maxTokens` 或 adapter 的 `defaultMaxTokens`（`prepareCall` 物化），finish 为 max-tokens 时回合结果被 sticky 标记为 max-tokens（agent.ts:391）。
+## 3. 工具结果与结构化输出契约
 
-只有 usage 的空内容 assistant/message 依然落盘，但被 `deriveEventMessage` 跳过，不进派生历史（surface.ts:99-105）。
+**规范值不落盘**：`output.schema` 校验后的执行值只在进程内存在；`render` 与 `presentationMeta` 是纯投影，落盘的 meta 供回放复现展示。
 
-**工具结果契约**：工具声明 `output`（JSON Schema + 纯投影 `render(args, value) → ContentBlock[]` + 可选 `presentationMeta`，tools.md §ToolDefinition）。执行结果分成功（value + 内容）与失败（错误 + 内容），value 仅执行本地，持久化只保留渲染内容、错误信息与展示 meta（tool/code-dispatch 只存渲染内容）。
+**两个内容回调**：`projectContent` 在 post-execute 之前安装执行期准备好的内容，`finalizeContent` 是同步的最后一公里变换，对每个归一化结果（含绕过 post-execute 的管线失败）恰好调用一次。策略替换仍是权威来源。
 
-`finalizeContent` 是最后一道同步内容边界，注册时快照、每次结果物化前恰好调用一次（如 tool-terminal 用它把结果钳制在 256KiB 内）。工具卡片的展示意图（generic/terminal/diff/search/read/web 六种）由 `presentCall`/`presentResult` 以纯函数方式声明，UI 桥按 schema 投影，不做模型任意脚本渲染。
+**结构化输出**：工具可通过 `output` 声明任意受支持 JSON Schema，代理侧没有额外"结构化输出"工具；任务的最终结构化答复由子 Agent 的 `structured` 值承载（委派侧契约）。主对话的最终答案仍是文本/推理/图片块。
 
-## 3. 投影表面与多视图关系
+**失败表示**：工具失败以 isError 结果 + 结构化错误（消息与可选身份码）回注模型；`error` 字段与 v4 消息的 `isError` 必须一致，迁移转换器不修复矛盾（v3-to-v4 Native admission）。
 
-主投影是会话日志本身：`Session.surface` 是消息产生事件的线性序列（append 或 replace），`deriveMessages()` 增量折叠出模型历史（index.ts:726-747）。Web 客户端不读后端数据库，而是经连接帧订阅 `session/event`，以 `session/subscribed.lastSeq` 为基线做差距检测（runtime/sessions/session.ts:469-479）。
+**空结果与截断**：`finalizeContent` 可返回空内容，工具结果消息允许空 content；超长内容由 spill-policy 与 tool-result-pruner 在管线后段改写，而不是在执行函数里静默截断。
 
-客户端的对象层 `PartialAccumulator` 把 `assistant/chunk` 逐块折叠成 `AssistantBlock[]`（partial.ts:22），ui-conversation 的 conversation-node 以相同折叠维护流式状态并消费 usage 与首 token 计时（assistant.ts:80-132）。工具结果在消息内以卡片投影（terminal/diff/search/read/web 卡）；bash 前台调用的退出标记在结果渲染阶段被解析成卡片的 exit pill（tool-bash/render.ts:124-136）。
+**折叠器**：`BlockAssembler` 内部只有单次折叠，不做重试；重试粒度在 LLM 调用层（`llm-retry`），折叠不跨尝试复用。
 
-终端会话与后台 job 是宿主侧对象：终端有独立面板与增量读取，但**不进会话日志**，模型只通过工具结果文本中的会话 id 感知它们。同一对象的多视图：一条 assistant 消息同时在日志（权威）、派生历史（请求输入）、客户端折叠状态（展示）三处存在，以事件 seq 对齐；spill 文件同时存在于磁盘与模型提示中的定位行。
+**持久化边界**：只有助手最终消息、工具渲染内容、附件引用与 meta 落盘。replay 事件（`assistant/replay`、`assistant/delta`）只供 live 订阅，被排除在模型历史与请求重建之外。
 
-## 4. 表现类型、依赖与运行环境
+## 4. 输出形态与边界
 
-**表现层级**：text/reasoning 由客户端 Markdown 渲染，image 块引用内容寻址附件；模型消息协议仍无独立 artifact/canvas/notebook 对象。Web 新增右侧文档预览（文本、代码、Markdown、HTML、PDF、图片）和持久终端表面，但它们寻址工作区文件或 Host terminal，不改变消息输出对象模型（`packages/client/ui-sidebar-documentpreview/`、`ui-sidebar-terminal/`）。PTC runtime 属 `run_code` 工具执行边界。
+**流式最小单位**：assistant 内容只有文本块与推理块两种，未发现块级增量元数据。客户端重放控制器把 chunk 增量累积成临时片段，在 assistant/message 到达时换成正消息（`packages/client/runtime/src/client/sessions/partial.ts`、ui-chat 的 conversation-nodes）。
 
-**终端输出**：`TerminalSendResult` 携带本次发送的渲染 viewport、四种等待原因之一、会话状态与 truncated 标志（terminal/types.ts:82-91）；backend 用字节+行双上限的 `BoundedTextBuffer` 保留尾窗口（terminal-bash/session.ts:40-75），scrollback 按页读取并带行窗口与截断标记。
+**终端家族**：`terminal` seam 加 `terminal-bash` 后端（sanitize、session 生命周期），模型面工具在 `packages/experimental/tool-terminal`；持久 shell 由 `tool-bash-persistent`/`tool-pwsh-persistent` 提供。终端会话身份是进程内 `TerminalSessionId`，不进日志。
 
-tool-terminal 的六个工具（open/send/read/signal/close/list）用内容收口回调把单次结果钳制在 256KiB 默认上限内；后台发送转交 `ctx.jobs` 的 `pty-send` job，并带 `outputLimitBytes` 输出上限。
+**后台任务**：`jobs` seam 加 `jobs-local`；`job_output` 支持流式与最终输出两种读取；job 身份与 `JobOutcome` 承载完成、被杀与失败。job 状态本身不落会话日志。
 
-**shell 输出**：`CollectedOutput` = 内存尾窗口文本 + truncated 标志 + 完整流 spill 文件路径（subprocess/types.ts:22-29）；捕获模式 `SubprocessCollect` 提供整流 spill 文件（默认 bash 形态）或仅诊断尾（LSP 形态）。bash 结果渲染为"stdout + [stderr] 段 + 退出/超时/沙箱标记行"，截断时附完整输出定位行（tool-bash/render.ts:12-63）；非零退出是报告而非错误结果——只有基础设施失败才以错误结果呈现。
+**附件与内容寻址**：`attachment` seam 加 `attachment-local`；store 负责写入与读取引用，媒体类型与维度在写入时确定。
 
-**附件**：`ImageBlock` 携带内容寻址的 `ImageAttachmentRef`（sha256 附件 id、媒体类型、字节数与宽高，attachment/types.ts:11-24）；本地后端在 `DSH_HOME/attachments/v1` 下按内容寻址落盘（0600/0700、目录 fsync、防 symlink 种植，store.ts:136-150），读回时校验字节与引用一致。当前生产 adapter 声明 text-only 输出，图片仅出现在用户消息侧。
+**spill**：`spill` seam 加 `spill-local`、`spill-policy`；策略把超大纯文本结果整体另存并替换为预览。
 
-**spill 长文本溢出**：`SpillStore` 服务定义只承诺 `saveText`——存全文、返回定位符与检索提示，具体后端 `spill-local` 落在会话私有目录的 0600 文件里（spill/src/index.ts:45-56）。
+**交付物**：`packages/deliverables` 提供 `tool-present`、`deliverable-file-references`、`workspace-changes`。`present` 只做声明（把已有文件登记为交付物），不复制内容；引用与工作区变更投影供客户端展示。
 
-溢出策略在 `spill-policy` 插件：`tools/post-execute` 把超过 `maxInlineBytes` 的纯文本结果替换为"head/tail 预览 + 省略字节数 + 全文定位行"，并预留提示行字节预算保证替换品不超上限（spill-policy/src/index.ts:94-231）。嵌套调用跳过模型侧手臂（避免 read→spill→read 循环），其持久化日志副本改由 `tools/code-dispatch-log` 瀑布钳制；无会话/无后端/存储失败一律 best-effort 保留原文。
+**compaction**：`compaction` seam 加 `compaction-basic`、`compaction-image-offload`、`compaction-tool-result-pruner`；替换通过一次 `surfaceOp: replace` 的摘要消息完成，日志记录 compaction 事务事件。
 
-## 5. 用户交互、事件与错误反馈
+**反馈与计量**：`message-feedback`（日志备注与 sidecar 评分两种契约）与 `command-feedback`；`token-meter` 提供 usage 投影与估算，统计走 `session-stats`。
 
-用户可操作项：消息反馈（正/负评分 + 可选 note）、沙箱升级审批（bash `sandbox_permissions` + justification）、终端信号与关闭、后台 job 取消与增量读取、会话级命令（compaction/retry 等，属命令子系统）。
+**客户端消费**：会话事件与投影帧经 Gateway 的 streams 下发；Web 侧 `ui-chat` 派生对话节点（tool、turn-process、turn-tail），`ui-conversation` 提供容器与滚动，`ui-deliverables` 投影交付物。客户端不再消费宿主侧的工具 presenter 视图，而是从原始事件与 meta 自行派生卡片。
 
-反馈经 `message-feedback` 服务以 sidecar 域存储：每条 assistant 消息一个 item（按 messageId 键、version 乐观并发、以会话创建时间与 cwd 隔离生命周期），写入前先对目标日志前缀执行 `session/flush` 屏障（message-feedback/src/index.ts:205-263, 328-339）——反馈永不改动日志本身，且只接受"最终化且 append 起源"的 assistant 消息。
+## 5. 设计取舍与已确认边界
 
-错误反馈回传：错误工具结果带结构化错误码，回合以结构化原因收口，客户端以独立节点渲染 turn-error/turn-max-tokens。交互状态重载后恢复：终端/作业为运行时态，重启不恢复；消息展开/折叠等视觉状态属 Chat UI 范围，未验证。
+- **日志优先、投影派生**：所有产物都是事件，模型历史、标题、统计、工具卡都是投影；代价是每条读取路径都要携带折叠逻辑。
+- **规范值不落盘**：控制日志体积，回放无法重建中间值。
+- **v4 把工具结果升为独立角色**：贴合模型协议、去掉包装层歧义；代价是所有旧会话必须过迁移边，且依赖 user-role 工具结果的消费方需要改读。
+- **插件名命名空间化**：未知扩展不再靠约定名共存，`plugin:<原名>` 保证不同来源同名不冲突；代价是改名后旧名字符串语义变化。
+- **投影帧按事件合并**：一次事件的多 key 变更在一帧内交付，消除同 seq 多帧；代价是消费者必须遍历 `changes`。
+- **上传是可选而非默认前提**：官方 API 日志上送由事件水位驱动，可整体关闭。
+- **已确认的移除/不变项**：模型输出仍无 G2 声明式控件、无 G3 专用运行环境；终端与 job 仍不持久化；无 diff 应用层与协作编辑。
 
-## 6. 编辑、diff、版本与协作
+## 6. 未验证事项
 
-模型是输出的唯一写者；用户不能编辑消息或工具结果，没有接受/拒绝/撤销流程。文件工具的 diff 属于工具执行边界。当前会话格式为 v3，v0→v3 由相邻迁移链恢复，`ignorable` 只承担同版本词汇扩展；compaction 以表面替换表达“历史改写”，但没有对象级版本。反馈以版本冲突表达并发，不是日志内协作。
+- 未运行流式会话或持久化往返：chunk 折叠、`session/flush` 时序、迁移边的实际恢复结果均为静态确认。
+- v0→v4 各迁移边的拒绝条件与"不产生后继"行为只读了 v3→v4 文档，未逐边核对实现。
+- `session-log-deepseek` 的上传体量、失败重试与关闭后的语义未验证。
+- 投影缓存与 `onEventChanged` 的客户端消费细节只读了迁移说明。
+- 附件读取改为引用语义后的 Gateway 权限判定细节未逐行核对。
+- 交付物（present）在客户端的呈现与工作区变更投影未细读。
 
-## 7. 能力桥、执行位置与权限范围
+## 7. 关键源码索引
 
-模型输出的"执行位置"分三类：文本/图片在客户端宿主渲染（无脚本执行）；工具结果的内容由宿主按声明式卡片投影（无任意代码）；bash/pwsh 在本机或沙箱进程执行（沙箱执行属工具边界，本次未验证）。终端 PTY 在后端本地进程（terminal-bash 基于 subprocess 终端原语），信号仅限固定的五个成员（如 SIGINT、SIGTERM、SIGKILL，完整集合见 terminal/types.ts:36）且只对前台进程组。
-
-权限授予在工具层（pre-execute/approval/sandbox 策略，属工具语义，不展开）；spill 与附件存储以 0600/0700 私有文件 + 不可预测文件名保证其他本地用户不可读；bash 工具向子进程注入托管 `DSH_*` 环境事实。模型输出本身没有请求宿主能力的能力桥（无 artifact 级网络/存储授权）。
-
-## 8. 持久化、恢复、分享与导出
-
-**写入路径**：`session/event` 同步通知后，JSONL write handle 接受事件并串行写入；append 是 best-effort 持久化，只有 handle 或 service-wide `flush` 构成耐久屏障（`packages/session/session-persistence/src/{index,handle}.ts`）。
-
-`session-checkpoint-policy` 在三个边界建立持久性屏障：模型请求分发前（llm/stream 首块前 flush）、顶层工具体执行前、下一步骤请求前（checkpoint-policy/src/index.ts:63-83）。事件 append 时即做 lossless-JSON 校验与冻结，坏事件在源点拒绝。
-
-**JSONL 后端**：每会话目录保留规范格式代，默认 checksummed zstd frame，也可选纯文本。当前 v3 一事件一行；旧 v0/v1 的 packed delta 只在历史 codec 中解码。读打开可只返回迁移后的逻辑视图，写打开经 Worker 验证后无覆盖发布 `session.v3.jsonl(.zstd)`，旧代不改写。第一方 SQLite 会话后端已移除（`packages/session/session-persistence-jsonl/src/{storage,generation}.ts`）。
-
-**崩溃恢复**：冷加载发现未闭合的 turn 时**不截断**，而是以合成的 `turn/end {kind:'interrupted'}` 关闭并补缺失工具错误（persistence.md §Crash recovery）；只丢弃物理 torn 的末记录。格式拒绝分两种错误类型（损坏 vs 本构建无法解释），未知必需事件不静默跳过。恢复路径：`agentLoop.resume` → 持久化 `prepare`（保留冷 Session 于有界 LRU 供复用）→ 原地校验冻结 → 发布为活 agent。分享/导出无独立能力（会话导出属会话管理，本次排除）。
-
-## 9. 模型回流、对象感知与持续维护
-
-回流为全量派生：每次请求前 `session.deriveMessages()` 从表面重建消息数组（agent.ts:341），所以模型总是看到与日志一致的历史；compaction 用摘要替换表面段后，下一次请求自动基于摘要继续。对象感知与定向维护：模型经 `read/grep` 定位 spill 文件（检索提示明确指示 read with offset/limit 或 grep）；经终端工具按会话 id 定向发送/读取/关闭；token-meter 的上下文压力投影（provider 采样 + 表面启发式差价）与用量累计（`tokenUsage` 不相交桶，usage 先于消息落账、同步覆盖去重）为下一回合提供资源视野（usage-projection.ts:107-206）。
-
-对象身份绑定：消息 id、CallId、文件路径、终端会话 id 各自在后续回合延续；没有跨回合的 artifact 句柄。反馈 sidecar 按 messageId 关联且可被服务端/客户端查询，但不进模型上下文。
-
-## 10. 生命周期、资源治理与性能
-
-turn/step 事件括号定义回合生命周期，abort 以合成工具结果收口并保持日志配对完整；回合结束原因是可合并扩展的六值联合（completed/aborted/error/max-tokens 等，types.ts:155-177）。资源治理：终端会话按 owner agent 隔离，`terminal_close` 幂等关闭进程树，服务 dispose 时统一排空；后台 job 有输出上限与取消；write-behind 在 dispose 做最终排空。
-
-输出预算贯穿全链：请求层 maxTokens、工具结果层（保留器、spill 上限、finalizeContent）、子进程层（内存尾 + 整流 spill 上限）、终端层（viewport/scrollback 双上限）。性能手段：`TextRetainer` 只保留前缀与单块尾窗（大流不累积内存）、chunk 运行打包、表面派生增量缓存、客户端按动画帧批量通知与节流视觉更新。会话级不可见对象无冻结/卸载机制——终端/作业持续占用直至关闭或进程退出。
-
-## 11. 设计取舍与已确认边界
-
-PTC 代码执行可由默认 Node provider 或实验性 Python provider 承接：运行时协议把控制消息与程序标准输出分开传输，结果仍回到工具结果和会话事件模型，并未引入可独立编辑、版本化的代码 artifact。实现分别位于 `packages/ptc-runtime/ptc-runtime-node` 与 `packages/experimental/ptc-runtime-python`。
-
-- **日志即事实源**：连原始 token 级 chunk 都落日志，换取精确回放与"请求可从日志重建"的强不变量；代价是存储体积，用 zstd + chunk 打包缓解。usage 附着在 assistant/message 上而不是单独记录，保证计量与消息同生同灭。
-- **流协议闭合、词汇可合并**：StreamChunk 用闭合联合强制消费者处理新变体；ContentBlock 与 MessageSource 用可合并映射允许插件扩展。新 block 类型要求 adapter、UI、compaction、重放全链路支持（llm-streaming.md §Content blocks）。
-- **工具结果"值不落盘"**：canonical value 仅执行本地，持久化只留渲染内容——重放能重建展示，不能重建中间值；这是"日志可重建请求"不变量与工具内部状态解耦的边界。
-- **spill/保留策略刻意分离**：spill-policy 只决定何时溢出，TextRetainer 只回答"留了什么丢了多少"，SpillStore 只负责存储——三个包按能力缝拆分，配置缺失时策略自动退化为 no-op。
-- **终端与附件选择不同持续性**：附件内容寻址入日志引用（可跨会话复用、读回校验），终端会话则完全在日志外（模型靠结果文本中的 id 感知，进程重启即失）——两者同为"活对象"但持久性层级不同。
-- **已确认边界（检索范围：`packages/core`、`packages/llm`、`packages/terminal`、`packages/shell`、`packages/spill`、`packages/attachment`、`packages/feedback` 的 src 与 docs/subsystems 对应页面）**：未找到 artifact/canvas/notebook 输出类型、模型输出专用运行环境、输出对象编辑/接受-拒绝/diff 应用层、CRDT 协作；反馈不写日志；max-tokens 时未完成工具调用被丢弃而非补全重发（重发由模型侧在后续回合自行处理，依据：assembler 的过滤行为）。
-
-## 12. 测试体系、未验证事项
-
-**测试体系（存在，本次未运行）**：仓库以 vitest 单测 + 每文件 100% 覆盖率门禁 + 真实 API e2e（需 DEEPSEEK_API_KEY）+ keyless 快照回放分层；持久化后端共享 `runPersistenceContract` 契约套件；GUI 三层测试（数据层、渲染机制、组件）由 `test:gui` 与浏览器快照回放覆盖。流式折叠（BlockAssembler 的 delta-only/max-tokens/迟到 delta）、chunk 打包往返、torn-tail 修复、interrupted turn 平衡均有对应单测文件；全部结论基于静态阅读，未运行任何测试。
-
-**未验证事项**：任何运行时行为（流式渲染、PTY 交互与 inferred_idle 判定、zstd 压缩率、快照回放）；bash/pwsh 沙箱执行路径与 landlock 原生模块；PTC Node/Python 与 e2b 的执行环境；跨进程 kernel lease；客户端 DOM 层视觉与节流行为。
-
-## 13. 关键源码索引
-
-- 流协议与消息类型：`packages/llm/llm/src/types.ts:291-303`（StreamChunk）、`:99-110`（ContentBlockMap）、`message.ts:128-138`（Message）、`assembler.ts:36-164`（BlockAssembler）
-- 运行时流入口：`packages/llm/llm/src/index.ts:843-927`（adapterStream/stream）、`:930-939`（adapterFailureChunk）、`packages/llm/llm-retry/src/index.ts:99+`（重试策略执行）
-- 循环消费与事件落盘：`packages/core/agent-loop/src/agent.ts:332-401`（step：chunk→assembler→assistant/message）、`:407-495`（buildRequest/header）、`tool-calls.ts:249-289`（tool/call、tool/result 落盘与合成结果）
-- 会话日志与表面：`packages/core/session/src/types.ts:236-333`（SessionEventMap）、`index.ts:604-655`（append）、`surface.ts:83-114`（deriveEventMessage）、`index.ts:726-747`（deriveMessages）
-- 工具结果契约：`packages/core/tools/src/presentation.ts`（卡片意图）、docs/subsystems/tools.md §ToolDefinition/执行管道
-- 终端与 shell 输出：`packages/terminal/terminal/src/types.ts:82-91`、`terminal-bash/src/session.ts:40-75`、`tool-terminal/src/index.ts:152-155`（finalizeContent 上限）、`packages/shell/tool-bash/src/render.ts:12-63`、`packages/subprocess/subprocess/src/types.ts:22-52`（CollectedOutput/SubprocessCollect）
-- spill/附件/保留器：`packages/spill/spill-policy/src/index.ts:94-231`、`spill-local/src/index.ts:37-63`、`packages/util/output-retention/src/index.ts:146-387`、`packages/attachment/attachment-local/src/store.ts:136-150`
-- 持久化：`packages/session/session-persistence/src/{index,handle}.ts`、`session-persistence-jsonl/src/{storage,handle,generation,lease}.ts`、`session-format/src/{catalog,chain}.ts`、`session-checkpoint-policy/src/index.ts`
-- 反馈与计量：`packages/feedback/message-feedback/src/index.ts:189-263`、`spec.ts:84-90`、`packages/llm/token-meter/src/usage-projection.ts:107-206`、`estimate.ts:26-49`
-- 客户端消费：`packages/client/runtime/src/client/sessions/session.ts:469-479`（帧处理）、`partial.ts:22`（PartialAccumulator）、`packages/client/ui-conversation/src/client/conversation-nodes/assistant.ts:80-132`（updateChunk）
+- 流与消息：`packages/llm/llm/src/{types,assembler,assistant-stream,message,content}.ts`、`llm-retry/src/*`
+- 事件与表面：`packages/core/session/src/{types,surface,index}.ts`（developer/message 317、表面类型 449）
+- 工具管线落盘：`packages/core/tools/src/{pipeline,batch}.ts`（batch 236-264）、`packages/core/tools/src/contracts.ts:16-101`
+- 持久化与格式：`packages/session/session-persistence/src/{index,handle}.ts`、`session-persistence-jsonl/src/*`、`session-format/src/{catalog,chain,context}.ts`、`session-format-v{0..3}-to-v*`
+- 迁移与契约：`packages/session/session-format-v3-to-v4/src/{tool-role,sources}.ts`
+- 投影与统计：`packages/session/session-projection/src/*`、`session-projection-cache/src/*`、`session-stats/src/*`、`session-turn-outline/src/*`、`session-title*/src/*`
+- 上传：`packages/session/session-log-deepseek/src/*`
+- 输出形态：`packages/spill/spill-policy/src/index.ts`、`spill-local/src/index.ts`、`packages/util/output-retention/src/index.ts`、`packages/attachment/attachment-local/src/store.ts`、`packages/deliverables/*/src/*`
+- 压缩：`packages/compaction/compaction-basic/src/*`、`compaction-image-offload/src/*`、`compaction-tool-result-pruner/src/*`
+- 反馈与计量：`packages/feedback/message-feedback/src/index.ts`、`command-feedback/src/*`、`packages/llm/token-meter/src/{usage-projection,estimate}.ts`
+- 客户端消费：`packages/client/runtime/src/client/sessions/{session,partial}.ts`、`packages/client/ui-chat/src/client/conversation-nodes/{assistant,tool,turn-process,turn-tail}.ts`、`packages/client/ui-deliverables/src/client/*`
+- 文档：`docs/upgrade-guide/v0.2.1-rc.2/{session-store-writes,session-projection-handles}`、`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames`

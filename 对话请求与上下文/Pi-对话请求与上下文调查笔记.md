@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/agent-session.ts`、`packages/coding-agent/src/core/compaction/`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/agent/src/agent.ts`、`packages/agent/src/agent-loop.ts`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：直接阅读源码（`AgentSession.prompt` 主链路全量、`Agent`/`runLoop` 工具循环、compaction 模块、流式事件到 TUI 的消费点），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
 >
@@ -128,19 +128,20 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 13. Durable harness 请求链
 
-实验运行时把原来一次 `prompt()` 内完成的接纳与执行分开。`accept` 原子记录操作及输入，`drive` 取得或加入该 lane 的唯一 Drive，按 generation、工具放置、retry、deferred polling 和 terminal procedure 推进；`resume` 只在存在未完成操作时恢复驱动，`requestAbort` 以操作 ID 防止旧取消请求影响新操作（`packages/agent/src/harness/agent-harness.ts:518-579`、`packages/agent/src/harness/runtime/lane.ts:480-1403`）。
+durable 把一次输入拆成接纳与执行两层。`submit()` 先把输入持久化为 Submission 再开始执行，Task 按 phase 推进；run 是从一次输入到最终答案的 turn 序列，turn 是一次模型响应及其工具调用。每个 phase 结束都存 checkpoint，重启后 `resume()` 从最后一个 checkpoint 继续，等待中的任务以 phase 形式睡在存储里，不占用调用（`packages/durable/README.md` 的 Task 与 Resume 章节、`packages/durable/src/harness/scheduler.ts`）。
 
-该链的上下文从持久 transcript 和 lane 状态投影，工具结算先成为 durable outcome 再按调用顺序放入 transcript；shell 输出在源侧按行数和字节数限界，截断时尽力保存完整输出文件。它为进程重启提供恢复语义，但仅用于 AgentHarness 和实验客户端，默认 coding-agent 的 `AgentSession.prompt()` 主链仍然存在（`packages/agent/src/harness/runtime/drive/generation.ts:1-130`、`drive/tools.ts:170-478`、`packages/agent/src/harness/utils/output-capture.ts:67-110`）。
+该链的上下文从存储中的 conversation 投影，工具结果先成为已结算 entry 再按调用顺序进入 transcript；shell 输出在源侧按行数和字节数限界，截断时尽力保留完整输出文件。它为进程重启提供恢复语义，服务于 p2；默认 coding-agent 的 `AgentSession.prompt()` 主链仍然存在（`packages/durable/src/harness/context.ts`、`packages/durable/src/harness/generation.ts`、`packages/durable/src/tools/`）。
 
 稳定链的 compaction 设置支持按精确 `provider/modelId` 覆盖 reserveTokens 与 keepRecentTokens；两个字段分别回退到普通设置和内置默认值，模型切换后的下一次检查即采用新预算（`packages/coding-agent/src/core/settings-manager.ts:867-899`、`packages/coding-agent/docs/compaction.md:422-444`）。
 
 ## 14. 关键源码索引
 
-- `packages/coding-agent/src/core/agent-session.ts:1116-1273`：prompt 主链路；`610-681`：事件处理与落盘；`2686-2736`：重试；`1343-1408`：steer/followUp；`1962-2053`：压缩判定
+- `packages/coding-agent/src/core/agent-session.ts:2121`：prompt 主链路；`:1123`：事件处理与落盘；`:2322`/`:2338`：steer/followUp；`:3203`：压缩判定
 - `packages/coding-agent/src/core/session-manager.ts:418-470`：上下文构建
 - `packages/coding-agent/src/core/system-prompt.ts:28-162`：system prompt 拼装
 - `packages/coding-agent/src/core/messages.ts:148-195`：LLM 消息转换
 - `packages/coding-agent/src/core/compaction/compaction.ts:235-238`：压缩阈值；`266-306`：token 估算；`562-581`：压缩即 LLM 调用；`817-919`：compact
 - `packages/agent/src/agent.ts:347-358`、`:486-489`：单活动运行守卫；`333-345`：reset 守卫
-- `packages/agent/src/agent-loop.ts:95-275`：agentLoop；`281-372`：流式转事件
-- `packages/coding-agent/src/core/agent-session-runtime.ts:167-178`：teardownCurrent
+- `packages/agent/src/agent-loop.ts`：agentLoop；`:390`：streamAssistantResponse
+- `packages/coding-agent/src/core/agent-session-runtime.ts:167`：teardownCurrent
+- `packages/durable/src/harness/`：scheduler、generation、context、compaction（durable 请求链）

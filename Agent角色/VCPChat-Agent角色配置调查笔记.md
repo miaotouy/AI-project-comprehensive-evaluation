@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
+> 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读核对 agentConfigManager、agentHandlers、chatManager、settingsManager，未修改被调查仓库源码
 >
@@ -14,8 +14,8 @@
 
 ## 补充要点
 
-- **模型参数可留空**：设置页折叠参数段的五个数值输入（`temperature/contextTokenLimit/maxOutputTokens/top_p/top_k`）留空时存为 `null`，回填空值、解析与保存见 `modules/settingsManager.js:181-185`、`:276-282`（`parseOptionalNumberInput`）、`:323-327`。发送前由 `omitUnsetOptionalModelParams` 从请求体删除（`modules/ipc/chatHandlers.js:94-118`、`:1064`）；折叠段未设置时显示“未设置”。
-- **重新回复时附件文本重新提取**：`handleRegenerateResponse`（`modules/renderer/messageContextMenu.js:640`）在历史缓存了旧版固定 UTF-8 解码结果时，通过 `electronAPI.getTextContent` 从原始附件重新提取文本；`modules/fileManager.js:176-224` 的 `decodeTextBuffer` 提供 UTF-8/UTF-16 BOM、UTF-16 零字节启发式和 GB18030 兜底检测。
+- **模型参数可留空**：设置页折叠参数段的五个数值输入（`temperature/contextTokenLimit/maxOutputTokens/top_p/top_k`）留空时存为 `null`，回填空值、解析与保存见 `modules/settingsManager.js:220-224`、`:276-282`（`parseOptionalNumberInput`）、`:323-327`。发送前由 `omitUnsetOptionalModelParams` 从请求体删除（`modules/ipc/chatHandlers.js:123-147`、`:1064`）；折叠段未设置时显示“未设置”。
+- **重新回复时附件文本重新提取**：`handleRegenerateResponse`（`modules/renderer/messageContextMenu.js:857-887`）在历史缓存了旧版固定 UTF-8 解码结果时，通过 `electronAPI.getTextContent` 从原始附件重新提取文本；`modules/fileManager.js:357-405` 的 `decodeTextBuffer` 提供 UTF-8/UTF-16 BOM、UTF-16 零字节启发式和 GB18030 兜底检测。
 
 ## 1. 结论摘要
 
@@ -94,17 +94,17 @@ VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应�
 
 ### 3.4 发送时的配置引用与历史快照语义
 
-- **发送用缓存引用**：`chatManager.js:1081` 发送时取 `currentSelectedItem.config`，不每次读磁盘；配置刷新点只有三处：
-  - 设置页保存成功后重新拉取配置并写回（`modules/settingsManager.js:401-421`）；
-  - 加载话题列表时（`updateCurrentItemConfig`，`modules/topicListManager.js:431`）；
-  - 历史 ≥4 条触发摘要时强制重读（`attemptTopicSummarizationIfNeeded`，`chatManager.js:896-947`，`:911-912` 附近写回配置）。
-- **重新生成总是重读最新配置**：`modules/renderer/messageContextMenu.js:687` 的 `getAgentConfig` 重新读取 Agent 配置，systemPrompt/模型/参数在 :888-969 组装（:961-968 为 model/temperature/max_tokens/top_p/top_k；`handleRegenerateResponse` 在 :640，含附件文本重新提取）。
-- **消息不保存模型/参数元数据**：user/assistant 消息只含 `role/name/content/timestamp/id/attachments`（chatManager.js:1020-1027、:1395-1403，未变），history.json 原样写入（`save-chat-history`，`modules/ipc/chatHandlers.js:497-513`）；`__vcpchatTimestampMeta` 只附加在发往 VCP 的请求 payload，不落盘。
-- **重新生成 = 截断重建（覆盖语义）**：`messageContextMenu.js:655-668` slice 保留到原消息的前缀、splice 删除原消息及其后全部消息再重建；分支是 topic 级（`chatManager.js:1511-1580` 的 `handleCreateBranch` 复制前缀历史到新话题）。本快照未找到续写入口和开场白/greeting 配置（创建 topic 时 history.json 初始化为空数组，`modules/ipc/chatHandlers.js:583`）。
+- **发送用缓存引用**：`chatManager.js:1317` 发送时取 `currentSelectedItem.config`，不每次读磁盘；配置刷新点只有三处：
+  - 设置页保存成功后重新拉取配置并写回（`modules/settingsManager.js:469-489`）；
+  - 加载话题列表时（`updateCurrentItemConfig`，`modules/topicListManager.js:458`）；
+  - 历史 ≥4 条触发摘要时强制重读（`attemptTopicSummarizationIfNeeded`，`chatManager.js:1132-1183`，`:911-912` 附近写回配置）。
+- **重新生成总是重读最新配置**：`electronAPI.getAgentConfig` 在重新生成前重新读取 Agent 配置（`modules/renderer/messageContextMenu.js:949` 起），模型与参数再经 `buildModelConfig` 组装；`handleRegenerateResponse`（`:857`）负责截断、重新提取附件文本并重建消息。
+- **消息不保存模型/参数元数据**：user/assistant 消息只含 `role/name/content/timestamp/id/attachments`（chatManager.js:1020-1027、:1395-1403，未变），history.json 原样写入（`save-chat-history`，`modules/ipc/chatHandlers.js:527-543`）；`__vcpchatTimestampMeta` 只附加在发往 VCP 的请求 payload，不落盘。
+- **重新生成 = 截断重建（覆盖语义）**：`messageContextMenu.js:884-887` 先 `slice` 取得原消息前的历史前缀，再 `splice` 删除原消息及其后全部消息后重建；分支是 topic 级（`chatManager.js:1783-1853` 的 `handleCreateBranch` 复制前缀历史到新话题）。本快照未找到续写入口和开场白/greeting 配置（创建 topic 时 history.json 初始化为空数组，`modules/ipc/chatHandlers.js:613`）。
 
 ### 3.5 模型可操作的提示词资产
 
-PromptSponsor 的 direct 服务只接受白名单命令。读取命令可查看当前模式、有效提示词、积木和仓库；写命令可切换模式、改原始或预设提示词、增删移动积木、管理轮换内容与小仓。写操作按 requestId 做进程内幂等，并通过 AgentConfigManager 更新同一份角色配置；切换模式或修改当前模式内容时同步刷新 `systemPrompt`，所以普通发送仍消费统一字段。预设文件只接受 `.md` 与 `.txt`。`modules/services/pluginAgentOperationService.js:5-28,173-190,323-586`
+PromptSponsor 的 direct 服务只接受白名单命令。读取命令可查看当前模式、有效提示词、积木和仓库；写命令可切换模式、改原始或预设提示词、增删移动积木、管理轮换内容与小仓。写操作按 requestId 做进程内幂等，并通过 AgentConfigManager 更新同一份角色配置；切换模式或修改当前模式内容时同步刷新 `systemPrompt`，所以普通发送仍消费统一字段。预设文件只接受 `.md` 与 `.txt`。`modules/services/pluginAgentOperationService.js:26-49,197-214,377-640`
 
 ## 4. Tavern Rules（Tavern 规则）
 
@@ -123,7 +123,7 @@ Tavern Rules 适用于全局性的格式约束或额外提示词片段，不需�
 ## 5. 头像
 
 - 支持格式：PNG、JPG、GIF、WEBP；
-- 存储位置：`{userDataDir}/{agentId}/avatar.{ext}`；另会按 `{agentName}{ext}` 复制一份到集中的 `AppData/avatarimage/` 目录（`modules/ipc/agentHandlers.js:382-395`，与群组头像共用该目录）；
+- 存储位置：`{userDataDir}/{agentId}/avatar.{ext}`；另会按 `{agentName}{ext}` 复制一份到集中的 `AppData/avatarimage/` 目录（`modules/ipc/agentHandlers.js:556-569`，与群组头像共用该目录）；
 - 单独通过 `save-avatar` IPC 事件保存，不写入 config.json；
 - 提取主色（`needsColorExtraction: true`）用于 UI 配色。
 
@@ -153,15 +153,15 @@ VCPChat 还支持多 Agent 群组对话（`Groupmodules/groupchat.js`），群�
 
 ## 10. 当前快照的角色边界
 
-角色仍以本地 Agent/群组配置和 Tavern 规则共同定义，没有新增角色版本字段或渠道绑定模型。变化在于提示词资产获得受管的模型工具入口，单聊请求也由独立编排器统一读取这些角色字段；历史消息仍不保存角色配置快照。`modules/chat/singleChatRequestOrchestrator.js:260-353`、`modules/services/pluginAgentOperationService.js:323-586`
+角色仍以本地 Agent/群组配置和 Tavern 规则共同定义，没有新增角色版本字段或渠道绑定模型。变化在于提示词资产获得受管的模型工具入口，单聊请求也由独立编排器统一读取这些角色字段；历史消息仍不保存角色配置快照。`modules/chat/chatContextPipeline.js:319-417`、`modules/services/pluginAgentOperationService.js:377-640`
 
 ## 11. 主要源码依据
 
 - `VCPChat/modules/utils/agentConfigManager.js`：原子读写、锁文件机制、缓存策略、默认配置值。
 - `VCPChat/modules/ipc/agentHandlers.js`：Agent CRUD IPC 处理、头像保存、目录结构初始化、字段定义。
 - `VCPChat/modules/chatManager.js`：systemPrompt 宏替换（`{{AgentName}}`）、Tavern Rules 应用、模型参数传递、streamOutput 解析。
-- `modules/chat/singleChatRequestOrchestrator.js:254-353`：普通单聊的角色字段到最终请求消息的编译入口。
-- `modules/services/pluginAgentOperationService.js:323-586`：PromptSponsor 对角色提示词资产的受管读写。
+- `modules/chat/chatContextPipeline.js:319-417`：普通单聊的角色字段到最终请求消息的编译入口。
+- `modules/services/pluginAgentOperationService.js:377-640`：PromptSponsor 对角色提示词资产的受管读写。
 
 ## 12. 调查边界
 

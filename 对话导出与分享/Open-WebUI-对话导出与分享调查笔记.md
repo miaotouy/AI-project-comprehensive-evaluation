@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：静态源码调查（未运行应用）；追踪聊天页与侧边栏的导出/分享入口、PDF 两种生成路径、/s 分享页、后端 share 端点与 shared_chat 快照表、access_grants 权限模型、社区分享与统计导出、DataControls 的 JSON 往返；未运行浏览器与后端服务
 >
@@ -97,7 +97,7 @@ PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Nav
 
 - 样式模式（默认）：先以只读模式渲染隐藏的全消息容器，把克隆体挂到 body 外的离屏位置（绝对定位、固定宽 800px），并强制消息项内容可见以对抗聊天列表的渲染优化；随后 html2canvas-pro 按暗色主题、2 倍缩放整段捕获，jsPDF 按 A4 折算每页像素高，把整张 canvas 切成等高条，每条以 JPEG 格式逐页加入，暗色模式先铺黑底矩形（`Menu.svelte:138-197`）。
 - 文本模式（`stylizedPdfExport=false`）：取 TXT 文本，jsPDF 8pt `splitTextToSize` 自动换行分页。
-- 富内容保真：样式模式复用聊天现场渲染器，reasoning（`<details type="reasoning">`）、工具卡、代码高亮、数学、表格等与屏幕所见一致（无需专门降级）；文本模式全部退化为纯文本。后端另有第三套实现：`utils/pdf_generator.py` 用 fpdf2 + markdown 库做极简排版（换行直接替换为 br 标签），仅被 `/utils/pdf` 暴露。前端 `downloadChatAsPDF` 包装存在，但全仓库无调用点（grep 无结果，`src/lib/apis/utils/index.ts:98-123`）。
+- 富内容保真：样式模式复用聊天现场渲染器，reasoning（`<details type="reasoning">`）、工具卡、代码高亮、数学、表格等与屏幕所见一致（无需专门降级）；文本模式全部退化为纯文本。PDF 只在浏览器端生成，后端不再提供 PDF 生成端点（`routers/utils.py` 现仅有 gravatar、代码格式化、代码执行与数据库下载四个端点，仓库内已无 fpdf 依赖与 `pdf_generator` 模块）。笔记导出复用同一套 jsPDF + html2canvas-pro 实现（`src/lib/components/notes/utils.ts:61`）。
 - 无图片/PNG 导出、无分享图生成（对比 NextChat 的 E3 图片链，Open WebUI 本次未找到）。
 
 ## 7. 生成历史、版本与持久化
@@ -134,7 +134,7 @@ PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Nav
 
 ## 11. 设计取舍与已确认边界
 
-- 三条 PDF 实现并存（客户端样式/客户端文本/后端 fpdf2），后端那条当前无调用点，属历史/备用路径；用户可见开关只控制客户端两条。
+- PDF 只有客户端一种生成位置，按样式与文本两种模式实现；后端不再提供服务端 PDF 端点，用户可见开关只控制这两种模式。
 - 分享采用“快照 + 同 URL 覆盖”，与 `Chat.share_id` 单值绑定（一会话同时只有一个有效分享 token）；源会话变化不会实时进入分享，删除后重新分享会生成新 URL。
 - 快照只拷贝 JSON，不拷贝文件，附件可见性不随分享授权传递，是分享页对无登录访客的实质边界。
 - 导出粒度固定在"活动分支的整会话"，没有 NextChat 式的逐条选择器或选区工作流。
@@ -164,7 +164,7 @@ PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Nav
 - `backend/open_webui/models/chats.py`（`get_chat_by_share_id` 快照视图、`ChatResponse`）
 - `backend/open_webui/models/access_grants.py`（`has_anyone_access`、`has_access`）
 - `backend/open_webui/utils/access_control/__init__.py`（`filter_allowed_access_grants`）
-- `backend/open_webui/utils/pdf_generator.py` + `src/lib/apis/utils/index.ts`（后端 fpdf2 PDF，当前无调用点）
+- `src/lib/components/layout/Sidebar/ChatMenu.svelte:91` 与 `src/lib/components/notes/utils.ts:61`（客户端 PDF 生成）
 - `src/lib/apis/chats/index.ts`（`shareChatById`、`getChatByShareId`、`deleteSharedChatById`、`cloneSharedChatById`、`getSharedChatList`）
 - `src/lib/components/chat/Messages/structuredOutput.ts`（`getOutputText`）、`src/lib/utils/index.ts`（`createMessagesList`、`removeAllDetails`）
 - `src/lib/components/chat/Settings/DataControls.svelte`（全量导出/导入、Shared Chats 入口）、`src/lib/components/chat/Settings/SyncStatsModal.svelte`（社区统计同步）

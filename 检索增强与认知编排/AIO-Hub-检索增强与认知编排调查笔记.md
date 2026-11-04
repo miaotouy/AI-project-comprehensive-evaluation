@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：静态追踪当前 TypeScript、Rust/Tauri 实现、注册入口和单元测试夹具；未启动 Tauri、未调用真实 Embedding 或执行端到端检索
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-**源码事实。** 当前 AIO Hub 有两个独立检索域。Recall 是可编辑的完整思绪条目集合，既能被 Agent 工具读写，也能在聊天请求构造时由占位符被动召回并替换进消息。Knowledge 是带文件来源、分块、索引任务和 chunk 回源的本地文档资料库；它以 Agent 授权为前提，经工具调用或用户显式资料引用执行查询、续读和研究结果回注。两域各有存储和查询实现，通用 `retrievalRouter` 可在独立调用中做配额分流与 RRF，但此次沿聊天实际入口未发现把 Recall 与 Knowledge 自动混合注入的路径。
+**源码事实。** 当前 AIO Hub 有两个独立检索域。Recall 是可编辑的完整思绪条目集合，既能被 Agent 工具读写，也能在聊天请求构造时由占位符被动召回并替换进消息。Knowledge 是带文件来源、分块、索引任务和 chunk 回源的本地文档资料库；它以 Agent 授权为前提，经工具调用或用户显式资料引用执行查询、续读和研究结果回注。两域各有存储和查询实现，此外还有一个独立注册的 `retrieval` 工具把两域封装成面向 Agent 的统一检索入口，可显式选择单域或 mixed；聊天请求构造时的被动注入链仍只走 Recall 处理器或显式 Knowledge 引用，不自动做跨域混合。
 
 **谱系定位。** Recall 同时属于“相似度召回”和“上下文即时注入”：稳定预设从关键词、条目内容向量及标签共现图产生候选，融合后按优先级重排；其输出是当回合 prompt 中的格式化条目。Knowledge 是“知识资产管线”与“工具化检索”：文件摄取、FTS/BM25、按向量空间隔离的语义检索、相邻块扩展和受权读取已经落在可执行代码中。Knowledge 的 research 会按规则拆分问题、搜索和读取，并据命中或粗略冲突补充查询；它不调用 LLM 生成下一步计划或综合答案，其 conclusion 只是对证据片段的模板化排序摘要。因此不能等同于检索驱动的多阶段认知编排。
 
@@ -60,7 +60,7 @@ Knowledge 查询可指定 keyword、semantic、hybrid 或 auto。auto 在有查�
 
 后端再从已有候选沿 chunk edge 补一跳邻块，以种子分数的 0.08 作为图信号；前端 Agent 工具层会按每库原排序换算 RRF rank score，去重后可对前 topK 命中再添加前后相邻 chunk，新增项分数为种子 rank score 的一半。最终按 topK 与总字符预算截断，响应携带原始分数、rank score、BM25/向量/图信号、资料库、文档、chunk、标题、heading 和来源路径。这里的图扩展用于补足当前命中周围的证据，不涉及对下一轮问题方向的推断。见 `src-tauri/src/knowledge/repository.rs:3059-3096`、`src/tools/knowledge-base/services/application.ts:258-377`。
 
-通用 `routeRetrieval` 支持单域或 mixed 请求：mixed 并行取得 Recall 和 Knowledge 的固定配额，再以 `1/(60+域内名次)` 做 RRF 并按域名和对象 ID 打破平手。该函数是可调用服务，不能据其存在推断默认聊天路径已经启用跨域融合；此次检查的 Recall processor 与显式 Knowledge 路径均各自调用本域服务。见 `src/services/retrievalRouter.ts`。
+通用 `routeRetrieval` 支持单域或 mixed 请求：mixed 并行取得 Recall 和 Knowledge 的固定配额，再以 `1/(60+域内名次)` 做 RRF 并按域名和对象 ID 打破平手。该能力以 `retrieval` 工具注册，`search` 方法标记为 `agentCallable`，模型可显式选择 `recall`、`knowledge` 或 `mixed`，省略域时按 ID 推断；入参在注册层归一化（数组接受 JSON 数组文本或逗号分隔），涉及 Knowledge 时先经同一套资料库授权解析，再进入路由（`src/tools/retrieval/retrieval.registry.ts:80-160`）。聊天请求构造时的 Recall 处理器与显式 Knowledge 引用仍各自调用本域服务，不经过这个混合入口。
 
 ## 阶段、反馈与结果注入
 
@@ -113,18 +113,20 @@ Recall 的 Agent 工具可以新增、修改或删除条目，删除需要显式
 - 与 Lorebook 或世界书的可比处是 Recall 在发送前按 binding 与激活规则把结果放入上下文；但其条目检索可使用向量和标签共现，而不是只做字面触发。
 - Knowledge 的工具检索与研究有显式的 search/read 循环、相邻证据读取及预算终止，能够与其他工具化本地资料检索比较；研究的下一查询来自固定拆分、无命中或粗略冲突规则，不能称为模型驱动的查询规划。
 - Recall 的标签扩散和 Knowledge 的 chunk 邻接都只改变当前查询的候选集合。当前稳定链中没有以检索结果改写查询向量、生成新自然语言问题、维护跨回合图状态，故不可与 VCPToolBox 一类思维簇、关系路径和连续认知方向机制等同。
-- `retrievalRouter` 的 RRF mixed 模式是独立服务能力。是否有产品页面或 Agent 策略实际调用它、以及 RRF 对混合来源质量的影响，属于未运行和未追踪调用方的事项。
+- `retrievalRouter` 的 RRF mixed 模式通过 `retrieval` 工具的 `search` 方法向 Agent 暴露，属于"工具化检索"入口；模型是否会在真实对话中选择 mixed、混合结果的质量与配额影响均未运行验证。
 
 ## 未验证事项
 
 - 未运行 Tauri，因此未确认启动时 Recall 初始化、Knowledge 延迟初始化、IPC 参数、SQLite schema 升级、目录权限和实际文件解析是否与静态路径一致。
 - 未调用任何 Embedding 服务，未验证 Recall 默认模型身份与已存向量的匹配、Knowledge 分批重试、auto 降级、语义 fallback 或不同空间的真实召回结果。
+- 未通过 Agent 协议端到端调用 `retrieval` 工具的 mixed 模式，也未验证其配额与 RRF 结果在模型侧的实际呈现；Recall 监控日志列表改用实测高度虚拟滚动（`useMeasuredVirtualizer`），展开详情后的重排表现未运行验证。
 - 未做端到端聊天请求，未确认 Recall 注入的最终消息顺序、字符预算对 token 数的实际影响，或显式 Knowledge 工具事件如何被具体模型协议消费。
 - 未做权限对抗测试。已确认 Knowledge 的前端工具层执行时授权检查，但没有审计 Tauri command 是否可被同一桌面应用内其他前端模块直接调用，亦未验证 Recall binding 在所有 Agent 工具调用链上的约束效果。
 - 未发现项目自带离线质量集、A/B、召回率、延迟基准或生产遥测聚合。存在单元测试与合同夹具可验证结构和分支，不能证明检索质量、性能或用户可观察行为。
 
 ## 关键源码索引
 
+- `src/services/retrievalRouter.ts`、`src/tools/retrieval/retrieval.registry.ts`：跨域路由、配额与 RRF 融合，以及面向 Agent 的统一 `search` 工具入口。
 - `src/tools/llm-chat/core/context-processors/recall-processor.ts`：Recall 占位符、binding 授权和聊天上下文替换入口。
 - `src/tools/recall/services/api.ts`、`src/tools/recall/services/retrievalPipeline.ts`：Recall 门面、缓存、查询向量准备与 fallback。
 - `src-tauri/src/recall/retrieval_modules.rs`、`src-tauri/src/recall/retrieval_pipeline.rs`：两个稳定预设、候选模块、重排、编译、Runner 与 trace 契约。

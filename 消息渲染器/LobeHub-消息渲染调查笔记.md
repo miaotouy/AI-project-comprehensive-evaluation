@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读源码梳理；未修改 LobeHub 仓库
 >
@@ -19,9 +19,8 @@ LobeHub 先把数据库中的扁平消息重建成语义化的会话流，再按
 主链如下：
 
 ```text
-ChatStore 原始消息
-  -> ConversationProvider（会话级 Zustand Store）
-  -> conversation-flow.parse（重建消息树和虚拟消息）
+ChatStore 的 transcript 副本（parse 在此派生 messagesMap）
+  -> ConversationProvider（会话级 Zustand Store，单向镜像）
   -> ChatList（只消费消息 ID）
   -> virtua 虚拟列表
   -> MessageItem（按 role 分派）
@@ -67,9 +66,9 @@ Messages 目录约有 156 个非测试源文件，Markdown 约 52 个，会话�
 
 `src/features/Conversation/ConversationProvider.tsx`
 
-ConversationProvider 以此前生成的 messageMapKey 为 key，创建一个独立的 Conversation Store。Store 里主要有：
+ConversationProvider 不再以 messageMapKey 为 React key 重建 store：store 实例跨会话存活，切换时由 `StoreUpdater` 在 paint 前原地重置 UI 状态。Store 里主要有：
 
-- `dbMessages`：当前会话的原始消息。
+- `dbMessages`：当前会话的原始消息（镜像自 chat store 的副本桶）。
 - `displayMessages`：给 UI 展示的虚拟/扁平消息。
 - generation、editing、selection、scroll 等 UI 状态。
 - 处理消息编辑、删除、分支切换、工具审批等 actions。
@@ -78,13 +77,13 @@ Store 的创建逻辑在：
 
 `src/features/Conversation/store/action.ts`
 
-外部消息进入 Store 后会调用解析入口取得展示列表。后续消息变更也会再次解析，并通过引用稳定化保留深度相等节点的旧引用；相关实现见上面的 action.ts 和 stabilizeReferences.ts。
+镜像读取与引用稳定化在：
 
 `src/features/Conversation/store/slices/data/action.ts`
 
 `src/features/Conversation/store/slices/data/stabilizeReferences.ts`
 
-这解释了为什么代码同时存在全局 `ChatStore` 和局部 `ConversationStore`：全局 Store 管理多个会话和 Agent runtime，局部 Store 为当前渲染面提供更细粒度的订阅。
+解析只发生在全局 ChatStore 的 transcript 层（`src/store/chat/slices/message/transcript/lens.ts` 从副本行派生 `messagesMap`），局部 store 通过 `internal_syncChatTranscript()` 读取该结果；静态转录模式（画廊、分享快照）下才在本地直接持有解析结果。这也解释了为什么代码同时存在全局 `ChatStore` 和局部 `ConversationStore`：全局 store 持有副本与 runtime，局部 store 为当前渲染面提供更细粒度的订阅。
 
 ## 4. conversation-flow：渲染前的消息编译器
 
@@ -95,7 +94,7 @@ Store 的创建逻辑在：
 它把后端返回的扁平消息处理成三类结果：
 
 1. `messageMap`：按 ID 快速查找原消息。
-2. `contextTree`：用于上下文关系和分支导航。
+2. `displayTree`：用于上下文关系和分支导航（早期版本叫 contextTree）。
 3. `flatList`：给虚拟列表消费的展示顺序。
 
 内部大致分三步：
@@ -105,6 +104,8 @@ Indexing     建立 parent、branch、tool result 等索引
 Structuring  把扁平 parentId 关系重建成树
 Transformation 按业务规则生成虚拟消息和分组
 ```
+
+本次快照里 Transformation 阶段的改写最集中：`MessageCollector.ts` 与 `FlatListBuilder.ts` 都有大段重写（新增任务完成态、turn 边界与分组收敛规则），`ContextTreeBuilder.ts` 同步调整；另新增 `tail/index.ts`（末尾段的稳定切分）、`assistantGroupContent.ts`（答案/工作流分段）与 `utils/timestamp.ts`。三个阶段的入口签名与返回结构保持 `parse(messages, messageGroups?, options?)` 不变，流式与分页场景仍复用同一入口。
 
 `assistantGroup` 是工作流展示中的关键虚拟角色。例如下面的数据库消息：
 
@@ -175,7 +176,7 @@ MessageItem 从会话 Store 读取指定 ID 的展示消息，然后按消息角
 - Suspense：工具 Detail、Debug、编辑状态等可以懒加载。
 - MessageSelectionWrapper：多选和文本选择操作。
 - ChatItem：头像、标题、气泡、操作栏和错误附加内容。
-- 消息壳另有两类内容块：PendingRetryTurn（对应 `Messages/components/PendingRetryTurn.tsx`，提供错误卡重试入口）与 GoalWorkCard（对应 `Messages/GoalWorkCard/`，把任务 callback 卡与 goal 进度合并展示；goal 状态来自 operation 派生，见 `deriveOperationGoals.ts`）。
+- 消息壳另有两类内容块：PendingRetryTurn（对应 `Messages/components/PendingRetryTurn.tsx`，提供错误卡重试入口）与 Goal 任务卡（对应 `Messages/GoalTaskCard/`，把任务 callback 卡与 goal 进度合并展示；goal 状态来自 operation 派生，派生规则在 `packages/builtin-tools/src/operationArtifacts/goals.ts`，组件侧 hook 是 `Messages/GoalTaskCard/useOperationGoals.ts`）。
 - 助手消息里 Agent 名称旁不显示 role 标签。
 
 ## 7. User 消息：Markdown 和 Lexical 二选一
@@ -393,10 +394,9 @@ identifier + apiName
 
 ### 仍然存在的基础成本
 
-- 每次消息 dispatch 都会重新跑 conversation-flow 的解析入口。
-- 解析会重建完整树，再做结构共享恢复。
+- 每次消息 dispatch 曾都要重跑 conversation-flow 的解析入口；当前快照把解析收敛成副本层的一次派生（`transcript/lens.ts`），但一次写入仍会重建受影响桶的完整展示树，再靠结构共享恢复引用。
 - Markdown、工具 workflow 和列表滚动分别维护自己的状态机。
-- 全局 ChatStore 与局部 ConversationStore 之间需要同步。
+- 副本层（全局 ChatStore）与会话级镜像之间需要同步：镜像只读，写入先落副本再回读。
 - 工具注册表和大量内置工具会扩大前端依赖图。
 
 这些基础成本既来自代码组织，也来自产品能力叠加：多轮工具、审批、推理、多 Agent、任务、artifact、附件、分支和流式动画都共用同一条渲染链。
@@ -405,16 +405,16 @@ identifier + apiName
 
 阅读这套渲染链时，可按以下顺序定位文件：
 
-1. [ConversationArea.tsx](E:/works/git/lobehub/src/routes/(main)/agent/features/Conversation/ConversationArea.tsx)：看页面如何接入消息。
-2. [ConversationProvider.tsx](E:/works/git/lobehub/src/features/Conversation/ConversationProvider.tsx)：看会话级 Store 如何建立。
-3. [parse.ts](E:/works/git/lobehub/packages/conversation-flow/src/parse.ts)：理解为什么 UI 消息和数据库消息不同。
-4. [ChatList/index.tsx](E:/works/git/lobehub/src/features/Conversation/ChatList/index.tsx)：理解列表边界。
-5. [Messages/index.tsx](E:/works/git/lobehub/src/features/Conversation/Messages/index.tsx)：理解 role 分派。
-6. [Assistant/components/MessageContent.tsx](E:/works/git/lobehub/src/features/Conversation/Messages/Assistant/components/MessageContent.tsx)：理解普通 assistant 正文。
-7. [AssistantGroup/components/Group.tsx](E:/works/git/lobehub/src/features/Conversation/Messages/AssistantGroup/components/Group.tsx)：理解工具工作流折叠。
-8. [useChatMarkdown.tsx](E:/works/git/lobehub/src/features/Conversation/Messages/useChatMarkdown.tsx)：理解 Markdown 配置。
-9. [Markdown/plugins/index.ts](E:/works/git/lobehub/src/features/Conversation/Markdown/plugins/index.ts)：理解 Lobe 私有标签。
-10. `@lobehub/ui` 的 `src/Markdown/Markdown.tsx` 和 `src/Markdown/SyntaxMarkdown/StreamdownRender.tsx`：理解静态/流式 Markdown 的具体实现。
+1. `src/routes/(main)/agent/features/Conversation/ConversationArea.tsx`：看页面如何接入消息。
+2. `src/features/Conversation/ConversationProvider.tsx` 与 `StoreUpdater.tsx`：看会话级 store 如何建立与镜像同步。
+3. `packages/conversation-flow/src/parse.ts`：理解为什么 UI 消息和数据库消息不同。
+4. `src/features/Conversation/ChatList/index.tsx`：理解列表边界。
+5. `src/features/Conversation/Messages/index.tsx`：理解 role 分派。
+6. `src/features/Conversation/Messages/Assistant/components/MessageContent.tsx`：理解普通 assistant 正文。
+7. `src/features/Conversation/Messages/AssistantGroup/components/Group.tsx`：理解工具工作流折叠。
+8. `src/features/Conversation/Messages/useChatMarkdown.tsx`：理解 Markdown 配置。
+9. `src/features/Conversation/Markdown/plugins/index.ts`：理解 Lobe 私有标签。
+10. `@lobehub/ui` 的 `src/Markdown/Markdown.tsx` 和 `src/Markdown/SyntaxMarkdown/StreamdownRender.tsx`：理解静态/流式 Markdown 的具体实现（外部依赖包源码，不在本仓库快照内）。
 
 如果只做一个轻量聊天产品，通常只需要：
 
@@ -427,3 +427,9 @@ UI message type
 ```
 
 不需要直接复制整个 `Conversation` feature；只有要兼容 Lobe 的历史消息 parent-child 结构和 assistantGroup 语义时，才值得引入 `conversation-flow`。
+
+## 未验证事项
+
+- `@lobehub/ui` 的静态/流式 Markdown 内部实现不在本仓库快照内，`Markdown.tsx` 与 `StreamdownRender.tsx` 的具体路径以依赖包版本为准，未逐行核对。
+- Transformation 阶段本轮按引用路径确认了文件归位与新增模块，未逐行重读改写后的收集/构建算法；视觉与动画行为未运行验证。
+- 会话区新增表面（ChatItem/InterventionBar/FollowUp/WorkingSidebar 等）与消息壳的组合关系只做了入口级确认，未逐一核对每个表面的挂载条件。

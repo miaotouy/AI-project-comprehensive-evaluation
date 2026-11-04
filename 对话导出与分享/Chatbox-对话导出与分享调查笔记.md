@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：静态源码调查（未运行应用）；通读导出弹窗、共享格式化器、HTML 服务端静态渲染、平台 exporter 接口、备份 ZIP v2 导出/导入与往返测试；未运行桌面/Web/移动端做视觉、下载与离线打开验证
 >
@@ -40,13 +40,13 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 - 入口只有一处：会话顶部工具栏的 ActionMenu 菜单项 "Export Chat"（`src/renderer/components/layout/Toolbar.tsx:136-140`，窄屏布局同样存在 `:202-205`）；本次未在其他位置（消息菜单、会话列表、命令行）找到导出入口。
 - 菜单经 NiceModal 的 `export-chat` 注册项（`Toolbar.tsx:45-47`，注册于 `modals/index.tsx:29`）打开 `ExportChat` 弹窗。
 - 弹窗仅两个下拉：范围（`all_threads` / `current_thread`）与格式（Markdown / TXT / HTML），默认 HTML + 全部线程（`src/renderer/modals/ExportChat.tsx:15-16,48-65`）。弹窗内固定显示警示文案 "Exports are for viewing only. Use Settings → Backup if you need a backup you can restore."（`ExportChat.tsx:43-47`），明确区分"阅读导出"与"备份"两种用户目标。
-- 点击 Export 后弹窗立即关闭、不等待导出完成（`ExportChat.tsx:23-30`）；导出函数从 chatStore 取 Session 后转交线程组装入口 `exportChat`（`src/renderer/stores/session/export.ts:5-11`）。
-- 导出源为完整 Session。普通范围仍按当前或全部 thread 组装；启用“全部分支”后，Markdown/TXT 使用共享层的 `expandMessageBranches` 展开每条路径，HTML 使用原始 `messageForksHash` 构建交互数据。共享组装见 `packages/chatbox-core/src/utils/chat-export.ts:47-71`，HTML 收集与控制器见 `src/renderer/lib/format-chat.tsx:169-385`。
+- 点击 Export 后弹窗立即关闭、不等待导出完成（`ExportChat.tsx:23-30`）；导出函数从行存储投影取会话后转交线程组装入口 `exportChat`（`src/renderer/stores/session/export.ts:5-11`）。
+- 导出源为完整 Session。普通范围仍按当前或全部 thread 组装；启用“全部分支”后，Markdown/TXT 使用共享层的 `expandMessageBranches` 展开每条路径，HTML 使用原始 `messageForksHash` 构建交互数据。共享组装见 `packages/chatbox-core/src/backup-export/session.ts:47-71`，HTML 收集与控制器见 `src/renderer/lib/format-chat.tsx:169-385`。
 - 顺序：线程按 `threads` 数组顺序，消息按 `messages` 数组顺序，无排序或重排选项。
 
 ## 2. 范围选择、内容口径与字段过滤
 
-三种格式共用 `contentParts` 循环（`src/shared/utils/chat-export.ts:91-224`、`src/renderer/lib/format-chat.tsx:35-106`），按 part 类型处理：
+三种格式共用 `contentParts` 循环（`packages/chatbox-core/src/backup-export/session.ts:91-224`、`src/renderer/lib/format-chat.tsx:35-106`），按 part 类型处理：
 
 | part 类型 | Markdown / TXT | HTML |
 |---|---|---|
@@ -68,14 +68,14 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 - Markdown/TXT：图片为 `[image]` 占位，附件为文件名列表，正文无图片数据；文件可离线阅读，但内容不可见。
 - HTML：受管图片从 IndexedDB blob 存储读出（`storage.getBlob(storageKey)`），转成 `data:` URL 内联（`format-chat.tsx:74-89`）；读取失败时静默产出空 `src`，无降级占位。旧式 `p.url` 图片保持原始外部 URL 引用，不做代理或转码。附件仍只有文件名列表，链接不导出。
 - HTML 离线性：页面引 `https://cdn.tailwindcss.com`（运行时 JIT 生成样式，含 typography 插件）、jsdelivr KaTeX CSS 与 chatboxai.app 图标（`format-chat.tsx:107-141`），因此断网打开时布局样式、数学公式样式与图标缺失；正文文本本身随文件携带。CDN 脚本在打开文件时执行，属于加载期远端脚本依赖（安全见第 9 节）。
-- 备份 ZIP v2 才是资源级封装：`resources/` 目录收集消息图片、附件解析/原文 blob、离线工具结果、头像与背景图（`src/renderer/packages/backup/resources.ts:19-120`），且遍历范围含分叉分支（`resources.ts:88-98`），比对话导出的抽取范围更完整。
+- 备份 ZIP v2 才是资源级封装：`resources/` 目录收集消息图片、附件解析/原文 blob、离线工具结果、头像与背景图（`packages/chatbox-core/src/backup-export/session.ts:19-120`），且遍历范围含分叉分支（`resources.ts:88-98`），比对话导出的抽取范围更完整。
 
 ## 4. 格式、schema 与往返能力
 
 - 导出格式只有 `ExportChatFormat` 一种定义（`'Markdown' | 'TXT' | 'HTML'`，`src/shared/types.ts:20-22`）。会话级 JSON、PDF、PNG 导出本次未找到：全仓搜索 html-to-image、html2canvas、toPng、screenshot 等截图关键词均无会话导出用途命中；`package.json` 无相关依赖。
 - Markdown 输出是"带围栏的线性文档"：一级标题为会话名，每线程 `## N. 线程名`，每条消息以 `**role**:` 开头、正文包进代码围栏，结尾固定追加 Chatbox 品牌 HTML 片段（`chat-export.ts:151-158`）。TXT 是同一抽取逻辑的纯文本变体。
 - 三种格式都不可往返。交互 HTML 虽携带消息 ID 和 fork 结构以便离线切换，但没有稳定导入 schema、完整 Session 设置与资源映射，不能恢复为 Chatbox 会话。
-- "备份"才是可往返的导出（ZIP v2）：`manifest.json` 声明格式与版本（`format: 'chatbox-backup'`、`formatVersion: 2`，`src/renderer/packages/backup/types.ts:4-5,65-91`），包内含会话 JSON、资源、SHA-256 校验、双向映射与统计；导入分"读取暂存 → 完整校验 → 事务提交"三阶段（见 `docs/technical/data-backup.md`，与实现一致）。`backup-roundtrip.test.ts`（890 行）用内存存储做导出→导入闭环断言。
+- "备份"才是可往返的导出（ZIP v2）：`manifest.json` 声明格式与版本（`format: 'chatbox-backup'`、`formatVersion: 2`，`packages/chatbox-core/src/backup-export/types.ts:4-5,65-91`），包内含会话 JSON、资源、SHA-256 校验、双向映射与统计；导入分"读取暂存 → 完整校验 → 事务提交"三阶段（见 `docs/technical/data-backup.md`，与实现一致）。`backup-roundtrip.test.ts`（890 行）用内存存储做导出→导入闭环断言。
 - 旧版单 JSON 备份仍可导入（`general.tsx:792-801` 走 `importLegacyJsonBackup`）。
 - 遗留 UI：`src/renderer/pages/SettingDialog/AdvancedSettingTab.tsx` 仍是旧的单 JSON 备份/恢复界面（含 `__exported_items` 字段），但本次全仓搜索未发现任何引用，属于死代码；活动入口是 `src/renderer/routes/settings/general.tsx` 的 `ImportExportDataSection`。
 
@@ -113,7 +113,7 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 ## 9. 隐私、安全与内容治理
 
 - 导出内容无过滤：system 提示词、工具 args/result（含可能的敏感数据）原样进入三种格式；reasoning 恰好被跳过。
-- 备份侧有明确的密钥脱敏（`src/shared/utils/backup.ts:19-74`）：不勾选 "API KEY & License" 时移除以下凭据，license 运行时状态无论勾选与否都剔除：
+- 备份侧有明确的密钥脱敏（`packages/chatbox-core/src/application/settings/export-projection.ts:19-74`）：不勾选 "API KEY & License" 时移除以下凭据，license 运行时状态无论勾选与否都剔除：
   - 提供商凭据与搜索密钥；
   - `MinerU token`；
   - `VibeDrop 发布密钥`；
@@ -164,12 +164,12 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 - `src/renderer/modals/ExportChat.tsx`（弹窗：范围/格式下拉、警示、立即导出）
 - `src/renderer/components/layout/Toolbar.tsx`（"Export Chat" 唯一入口）
 - `src/renderer/stores/session/export.ts`、`src/renderer/stores/sessionHelpers.ts`（`exportSessionChat` / `exportChat` 主链）
-- `src/shared/utils/chat-export.ts`（Markdown/TXT 格式化、工具卡、附件名）
+- `packages/chatbox-core/src/backup-export/session.ts`（Markdown/TXT 格式化、工具卡、附件名）
 - `src/renderer/lib/format-chat.tsx`（HTML 静态渲染、图片内联、转义缺口）
 - `src/renderer/components/Markdown.tsx`、`src/renderer/components/Mermaid.tsx`（导出端共享渲染、Shiki 同步/异步、Mermaid 异步、VibeDrop 入口）
 - `src/renderer/platform/web_exporter.ts`、`src/renderer/platform/interfaces.ts`、`src/renderer/platform/desktop_platform.ts`、`src/renderer/platform/mobile_exporter.ts`、`src/renderer/platform/filter_writer.ts`（平台交付与降级）
 - `src/renderer/routes/settings/general.tsx`（备份导出/导入/Share Sheet，与导出隔离）
-- `src/renderer/packages/backup/`（types.ts 格式 v2、export-backup.ts、import-backup.ts、resources.ts、backup-roundtrip.test.ts）
+- `src/renderer/packages/chatbox-core/src/backup-v3/`（types.ts 格式 v2、export-backup.ts、import-backup.ts、resources.ts、backup-roundtrip.test.ts）
 - `src/renderer/packages/vibedrop.ts`、`src/renderer/modals/VibedropPublish.tsx`（代码块 HTML 发布边界）
 - `src/shared/utils/message.ts`（`getMessageText` 默认排除 reasoning）
 - `src/shared/types/session.ts`、`src/shared/types.ts`（contentParts/线程/导出类型 schema）

@@ -2,153 +2,129 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：只读通读根 README、AGENTS.md、packages 结构与核心模块；由专项核验覆盖 CLI/server/TUI/Desktop/app 各面，并对关键入口（`event/sql.ts`、`sync.ts`、`acp/service.ts`、`packages/codemode`、`export.ts`）抽查；未运行应用，未修改被调查仓库
+> 调查方式：只读通读根 README、包结构与核心模块；对候选功能逐一核对入口、状态、执行与持久化主链；未运行应用
 >
-> 调查范围：待查清单中 OpenCode 行——多表面会话同步、CodeMode、会话档案、ACP 服务端及潜在新候选的入口、状态、执行与持久化主链；与现有十类笔记去重
+> 调查范围：多端会话连续性与服务守护、GUI 插件体系、Code Mode、目标模式、会话档案、Artifact 托管、ACP、持久终端、语音与定时任务等候选能力的入口与主链；与既有十类笔记重复的能力只做归并说明
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-当前仓库是经过大重构的 V2 结构（`packages/core` 事件溯源会话核心、`packages/opencode` 主 CLI、`packages/codemode`、`packages/session-ui`、`packages/slack` 等 32 个包）。确认以下达到 `主链确认`（静态证据）的新候选：
+当前仓库的独特性集中在"可被外部驱动的工作台"这一形态：服务端是唯一事实源，事件以 durable 日志持久化并经 SSE 广播，客户端（Web、桌面、TUI，或第三方）通过配对与服务守护连接同一个服务端；桌面与 Web 的非外壳功能全部由 GUI 插件提供，第三方插件与内建插件使用同一套 SDK。此外有三条自成体系的执行范式：受控解释器里的 Code Mode、带判定与续跑的 Goal 模式、以及独立托管的 Artifact。
 
-1. **多表面/多设备会话连续性**（主贡献候选）：headless server + 事件溯源同步（单写者、seq 全序、`owner_id`）+ `/sync` 的重放/接管（steal），TUI、Web、Desktop、WSL、局域网（mdns `opencode.local`）与云端 workspace 共享同一批会话与进行中的任务。
-2. **CodeMode 受限 JS 编排**（主贡献候选）：模型用一小段受限 JS 编排多个 MCP 工具（无 eval 解释器、plain-data 边界、超时/输出上限、busy-loop 中断），是直接工具调用、任务分派之外的第三类执行范式。
-3. **会话档案闭环**（主贡献候选）：导出（`--sanitize` 脱敏）/ 导入 / 云端分享实时同步 / PR body 内嵌分享链接自动续作。它与 Pi 的研究数据发布、Hermes Agent 的批量轨迹生成存在交叉，但对象和消费者不同，暂不纳入统一“研究轨迹”类目。
-4. **ACP 服务端**（辅助贡献候选）：被其他 ACP 宿主客户端（Claude Code、Cursor、Gemini CLI 等）驱动，与自身 GitHub Copilot 渠道构成双向互操作。
-
-归并已有类目：build/plan/general Agent、Git 快照会话级回退（`snapshot/`+`session/revert.ts`，即统计 F24 的既有主贡献）、Skill 市场、权限规则集、Copilot/多 Provider 渠道、命令系统。
-
-## 介绍声明与候选盘点
-
-候选归属的权威表面是 packages 结构：
-- `packages/core`：事件溯源会话与事件存储；
-- `packages/opencode`：CLI 命令、server、sync、share、acp、snapshot、worktree、control-plane；
-- `packages/codemode`：受限 JS 运行时；
-- `packages/tui`/`packages/app`/`packages/desktop`/`packages/slack`：各表面。
+按证据状态盘点：
 
 | 候选 | 证据状态 | 结论 |
 |---|---|---|
-| 多表面会话连续性（事件源同步 + 所有权接管） | `主链确认` | event/sql.ts + sync.ts（start/replay/steal/history），见能力一 |
-| CodeMode 受限 JS 编排（execute 工具） | `主链确认` | packages/codemode + `tool/code-mode.ts`，见能力二 |
-| 会话档案闭环（导出/脱敏/分享/PR 续作） | `主链确认` | export.ts/import.ts/share-next.ts/pr.ts，见能力三 |
-| ACP 服务端（被外部 Agent 客户端驱动） | `主链确认` | `acp/service.ts`，见能力四 |
-| Git 快照 + 会话级撤销/回退 | `归并已有类目` | snapshot/index.ts + session/revert.ts 即统计 F24 既有主贡献（文件/Git 事实源与回滚闭环） |
-| 后台子代理 + 任务续作（background task promote） | `归并已有类目` | tool/task.ts + background-job.ts 归 Agent 工具类目（F30 子 Agent 已有 OpenCode 辅助贡献） |
-| Git worktree 隔离工作区（兼云 workspace 适配器） | `入口确认` | worktree/index.ts + control-plane/adapters/worktree.ts，支撑能力一，不单独提案 |
-| Session Review 行内评论 | `入口确认` | session-ui review 组件 + `command/template/review.txt`；评论→修改闭环未逐点核对，不单独提案 |
-| V2 事件溯源会话核心（Context Epoch/压缩 checkpoint） | `归并已有类目` | 会话消息/请求上下文类目覆盖，实现深度作为机制单独标注 |
-| Skill 市场（远程 index.json）、`agent create`、权限规则集 | `归并已有类目` | Agent 角色/工具/扩展生态类目 |
-| Copilot 渠道、多 Provider（Zen/xAI OAuth） | `归并已有类目` | LLM 渠道类目 |
+| 多端会话连续性与服务守护（事件日志 + SSE + 配对 + service 命令） | 主链确认 | 见能力一 |
+| GUI 插件体系（所有非外壳界面即插件） | 主链确认 | 见能力二 |
+| Code Mode 受限编排（`execute` 工具） | 主链确认 | 见能力三 |
+| Goal 模式（目标 + 判定 + 自动续跑） | 主链确认 | 见能力四 |
+| 会话档案（导出/导入/分享） | 主链确认 | 见能力五 |
+| Artifact 托管（静态与服务端能力 Provider） | 主链确认 | 见能力六 |
+| ACP 服务端（被外部 Agent 客户端驱动） | 主链确认 | 见能力七 |
+| 持久终端守护（PTY 进程跨连接存活与重放） | 入口确认 | 归入生成式输出与运行时类目 |
+| 语音会话（实验性模型与会话端点） | 入口确认 | 客户端为实验性入口，未展开 |
+| 定时任务（schedule 工具与端点） | 入口确认 | 与后台任务同属执行调度，未展开 |
+| Git worktree 隔离工作区 | 入口确认 | 工具与目录管理存在，支撑多工作区形态 |
+| Skill 机制、权限规则集、命令系统、多 Provider 渠道 | 归并已有类目 | 见 Agent 角色/工具/LLM 渠道笔记 |
 
-## 已确认的独特能力
+## 能力一：多端会话连续性与服务守护 — 主链确认
 
-### 能力一：多表面会话连续性（事件源同步 + 所有权接管）— `主链确认`
+**用户目标**：多个客户端（桌面、浏览器、TUI、远程机器）连同一个服务端，共享会话与正在进行的任务；客户端断线重连后按事件续播，而不是各自保存一份状态。
 
-**用户目标**：在 TUI、Web、Desktop、WSL 远程、局域网、云端 workspace 之间共享同一批会话与进行中的任务，任一表面可接管继续；断线后按事件日志重放恢复——而不是各端各存一份会话。
+**入口与触发**：`opencode serve` 启动 HTTP 服务；`opencode service start/status/stop` 管理常驻服务；客户端经配对端点建立信任并连接（`/api/pair`、配对连接端点），App 的服务端注册表可同时保存多个服务端并在其间切换。
 
-**入口与触发者**：headless 服务 `packages/opencode/src/cli/cmd/serve.ts`；各表面作为客户端挂载——TUI 远程挂载（`cli/cmd/attach.ts`，支持 fork/会话/重放参数）、Web、桌面端 worker 内嵌同一 `Server.listen`（`packages/desktop/src/main/sidecar.ts`）、Web UI 直连 WSL 内 server；局域网发现经 `server/mdns.ts`（Bonjour 发布 `opencode.local`）。各表面入口文件见文末索引。
+**事实对象**：事件表以聚合 id 与 seq 记录 durable 事件，事件序列行带 owner id（`packages/core/src/event/sql.ts`），写入时由 Bus 校验聚合、序号与所有权（`packages/core/src/bus.ts` 的提交路径）。
 
-**事实对象**：事件溯源表 `event_sequence`（`aggregate_id` 主键 + `owner_id`，`packages/core/src/event/sql.ts:4-7`）与 `event` 表（聚合标识、序号、类型与数据，唯一索引保证事件全序）；会话状态由事件投影（projector）重建。
+**主链**：客户端发起请求 → 服务端把变化写成 durable 事件并投影落库 → SSE `/api/event` 广播（`packages/server/src/event-feed.ts` 的订阅与背压控制）→ 客户端投影 store。断线后重连继续订阅；同一聚合的写入者由 owner 约束，重放时校验一致性。
 
-**完整主链**：任意表面写入事件（带 `owner_id` 单写者约束、全序 seq）→ `/sync` HTTP API（`packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts`）提供开始、重放、所有权接管（steal）与历史四个操作 → 消费端（`packages/tui/src/context/sync.tsx`）按事件重放并投影 UI → 断线重连从断点续播。本地↔云端：`control-plane/workspace.ts` 的工作区同步服务把 worktree 作为远程 workspace 适配器。Slack 面（`packages/slack`）每线程映射一个会话，参与同一事件协议。
+**持续性**：事件日志与 SQLite 持久化是唯一事实源；服务端进程可重启并由服务命令管理；客户端不持有权威状态。
 
-**持续性**：事件日志为唯一事实源，跨进程/跨设备/断线重放恢复；`owner_id` 保证同一时刻单一写者，`steal` 显式转移所有权。
+**已验证边界**：本次未找到旧版的 `/sync` 重放与所有权接管（steal）端点，取而代之的是事件流订阅、配对与服务守护；跨机器共享依赖客户端能访问服务端地址。
 
-**人机与多 Agent 关系**：用户可在任意表面接管（steal）进行中的任务；同步设计文档见 `packages/opencode/src/sync/README.md`（单写者、seq 全序、projector 重放）。
+## 能力二：GUI 插件体系 — 主链确认
 
-**独特性判断**："会话消息"类目只能解释单端会话存储；"单写者事件日志 + 跨设备重放 + 所有权接管"是会话数据层的分布式机制，构成"多表面共享同一任务与状态"（多表面连续性标签）的完整样本。
+**用户目标**：桌面与 Web 的功能（终端、审查、文件、浏览器、SSH、WSL、更新器等）与第三方扩展走同一套插件接口，可独立开发、测试与加载。
 
-**证据强度**：表结构、sync 路由、各表面接入源码为静态事实；真实多设备接管与云端同步未运行验证。
+**入口**：`packages/plugin/src/gui` 提供窗口进程 SDK，`main` 子路径提供主进程 SDK，`host` 与 `builtin` 为宿主专用；内建插件在 `packages/gui-plugins/`（终端、浏览器、审查、来源、文件、SSH、WSL、更新器等）。
 
-### 能力二：CodeMode 受限 JS 编排 — `主链确认`
+**对象与主链**：插件以 `Plugin.define` 声明能力、存储与多语言资源；窗口侧入口导出 `Plugin.Setup`，向注册表 `ctx.add(Registry, item)` 注册界面项；主进程侧通过 IPC 暴露方法、状态与事件（schema 走桥接校验）。宿主在启动时组装内建插件与第三方插件，插件间通过 contract token 互通。
 
-**用户目标**：让模型用一小段受限 JavaScript（分支/循环/并行/数据变换）编排多个 MCP 工具，替代多轮串行工具调用——在"直接工具调用"和"任务分派"之外提供"可编程编排"执行范式。
+**持续性**：插件状态分窗口内存、宿主存储与主进程状态三层；更新与安装走插件管理命令。
 
-**入口与触发者**：模型经 `packages/opencode/src/tool/code-mode.ts` 的 `execute` 工具触发；解释执行在 `packages/codemode`（独立包，内部模块见文末索引）。
+**已验证边界**：本能力覆盖"界面即插件"的结构，插件市场的安装分发细节未展开。
 
-**完整主链**：工具注册（`execute`）→ 受限解释器解析（无 eval）→ 子工具调用经权限过滤（MCP 工具目录白名单）→ 子调用审计与附件投影回会话 → 结果数据化返回。资源边界：调用次数、超时与输出字节上限，并发上限 8，busy-loop 中断，以及模型代码不直接接触宿主对象的数据边界（plain-data）。
+## 能力三：Code Mode 受限编排 — 主链确认
 
-**安全与资源边界**：执行域为受限解释器 + 预算化的工具目录与搜索；子工具调用逐条审计并记录在会话中。
+**用户目标**：模型用一小段受限程序一次编排多个工具调用，减少多轮往返。
 
-**独特性判断**："Agent 工具"可解释其暴露面，但受限 JS 解释器本身（无 eval 解释执行、超时中断、失败数据化）是独立运行时组件，非普通工具循环可覆盖；调查样本中未见同类"模型可编程工具编排"。
+**入口与主链**：工具名 `execute`（`packages/core/src/codemode/tool.ts`），程序在 `packages/codemode` 的解释器中运行；解释器只实现受控语法，程序只能调用宿主暴露的工具与扩展全局对象，无法触网、读写文件或访问进程；宿主限制执行时间、工具调用次数、输出大小与数据量；未完成工作在程序结束时被中断。
 
-**证据强度**：解释器包与工具接入源码为静态事实；真实模型生成编排代码的运行行为未验证。
+**已验证边界**：这是受控解释器而非沙箱化 JavaScript；错误以带位置的诊断返回。
 
-### 能力三：会话档案闭环（导出/脱敏/分享/PR 续作）— `主链确认`
+## 能力四：Goal 模式 — 主链确认
 
-**用户目标**：把整段会话导出为可移植 JSON（可脱敏）、从文件或 `opncd.ai/share/...` 链接导入重建、分享后实时同步，甚至在 PR body 里带分享链接供 `opencode pr` 自动导入续作——会话成为可流动的"档案对象"。
+**用户目标**：给会话设一个长期目标，模型在多次回合中朝目标推进，直到判定完成或用户暂停。
 
-**入口与触发者**：三条 CLI 路径 + Web UI：
-- 导出：`packages/opencode/src/cli/cmd/export.ts`（`--sanitize` 全字段脱敏）；
-- 导入：`cli/cmd/import.ts`（文件或分享 URL，`parseShareUrl`/`transformShareData`，消息-part 层次重建）；
-- PR 续作：`cli/cmd/pr.ts`（检出 PR + 提取 PR body 分享链接导入再续作）；
-- Web UI：`packages/app/src/utils/session-export.ts` 与 `pages/session/use-session-commands.tsx`（`command.session.export`）。
+**入口与主链**：斜杠命令 `/goal <objective> | pause | resume | clear`；目标状态存在插件存储中（active/paused/complete），RPC 提供读取与设置。插件在目标激活时注入 kickoff、提醒与续跑提示，回合结束时调用判定提示判断是否完成；即使模型停顿，只要目标活跃且有继续空间，就会自动开启下一轮；服务端进程更换后，先前进程布防的目标以暂停状态恢复而不是自行继续。
 
-**事实对象**：`Session.Info` + `SessionV1.WithParts` 消息序列化的可移植 JSON；分享服务侧 `packages/opencode/src/share/share-next.ts` 提供创建、同步、删除与读取四类操作。
+**已验证边界**：判定由模型完成，存在误判可能；目标属于会话私有存储，子会话与 fork 不继承。
 
-**完整主链**：导出（选择会话 → 序列化 → 可选脱敏 → 文件或分享）→ 导入（文件/URL → 校验与转换 → 按 part 重建会话）→ 分享（建立 → 实时同步 → 删除）→ PR 续作（检出 PR → 解析 body 分享链接 → 导入 → 继续对话）。
+## 能力五：会话档案 — 主链确认
 
-**持续性**：本地文件或分享服务均持有一份可重建的档案；导入即重建独立会话，不依赖原数据目录。
+**用户目标**：把会话导出为可分享的档案、在其他实例导入、并让分享链接持续同步。
 
-**独特性判断**："会话消息"类目不覆盖"可移植会话档案 + 实时分享同步 + PR 内嵌续作"这一完整闭环，该能力属会话交付与跨表面续作。Pi 的会话数据发布、Hermes 的批量轨迹生成与本能力事实源和消费者不同，暂不合并为统一分类。
+**入口与主链**：实验性端点 `session.export` 与 `session.import`（服务端处理器），客户端有导出命令与会话命令入口；导出包含消息与元数据，可带脱敏选项；导入按导入协议重建会话。
 
-**证据强度**：CLI 各命令与分享服务源码为静态事实；真实分享服务与 PR 续作未运行验证。
+**已验证边界**：导出不含 Artifact 与工具输出落盘文件；脱敏规则只覆盖已知敏感字段；本次未找到实时分享同步的服务端模块（会话表仅保留遗留的分享地址列）。
 
-### 能力四：ACP 服务端 — `主链确认`
+## 能力六：Artifact 托管 — 主链确认
 
-**用户目标**：让 Claude Code、Cursor、Gemini CLI 等 ACP（Agent Client Protocol）宿主把 OpenCode 当 agent 调用——new/load/resume/fork session、prompt、cancel、权限回调、MCP 能力广播。
+**用户目标**：模型产出一个可访问的小型产物（页面、图表、交互文档），用户可打开并复用。
 
-**入口与触发者**：`packages/opencode/src/cli/cmd/acp.ts` 启动服务；外部 ACP 宿主经协议端点调用 `packages/opencode/src/acp/service.ts` 的服务接口（`service.ts:56-61`，实现 `94-488`），覆盖初始化、会话的新建/加载/续作/分叉、模型设置、提示输入与取消。
+**入口与主链**：`artifact` 工具创建/读取/更新/删除 Artifact（`art_` 前缀），Artifact 是一组相对路径到文本的文件映射加入口文件；Artifact Provider 声明能力（静态、服务端代码、SQLite、Durable Objects），本地 Provider 默认可用；实验性端点列出 Provider、管理 Artifact 并提供按路径访问的视图。
 
-**完整主链**：宿主先握手声明能力（`service.ts:115`）→ 新建/加载/续作/分叉会话 → 提示进入既有 Session/工具/权限系统执行 → 事件回传给宿主；权限面经 `acp/permission.ts` 回调宿主确认。加载、续作和分叉优先恢复 backing session 持久化的 agent/model/variant，再以消息历史和目录默认值兜底；模型配置变化会向宿主推送 `config_option_update`，reasoning 块按 part ID 区分（`packages/opencode/src/acp/service.ts:917-963、1089-1152`、`acp/event.ts:120-144`）。MCP 能力经协议广播（initialize 能力声明）。
+**已验证边界**：能力面由 Provider 决定，本地默认 Provider 只做文件托管；本次未找到容器化运行环境。
 
-**独特性判断**："LLM 渠道"是 OpenCode 消费外部模型；ACP 是反向被集成（OpenCode 作为 agent 服务被外部客户端驱动）。同一仓库同时内置 GitHub Copilot 渠道（`packages/core/src/github-copilot/`），构成"消费 Copilot + 服务 ACP"的双向互操作。
+## 能力七：ACP 服务端 — 主链确认
 
-**证据强度**：服务接口、配置恢复与事件映射实现及对应单元测试为静态事实；与真实 ACP 宿主的互通未运行验证。
+**用户目标**：让其他 Agent 宿主客户端（编辑器或终端里的 ACP 客户端）驱动 OpenCode 会话。
 
-## 已归并到现有类目的能力
+**入口与主链**：`opencode acp` 命令启动 ACP 服务端（`packages/cli/src/commands/handlers/acp.ts`）；服务端把 ACP 的会话、消息、工具调用与权限请求映射到内部会话与执行链，权限请求经 ACP 协议回到宿主客户端。
 
-| 能力 | 归并去向 |
-|---|---|
-| build/plan/general Agent、`agent create` | Agent 角色类目 |
-| Git 快照 + 会话级撤销/回退（`snapshot/index.ts` track/restore/revert/diff、`session/revert.ts`、step 边界快照） | 统计 F24"文件/Git/diff 事实源与模型回读、回滚闭环"的既有 OpenCode 主贡献 |
-| 后台子代理 + 任务续作（`tool/task.ts`、`background-job.ts` promote/extend） | Agent 工具类目（F30 子 Agent） |
-| Skill 市场（`skill/discovery.ts`）、权限规则集与 question 对话框、命令系统（/init、/review、自定义命令） | Agent 工具、Chat UI 类目 |
-| GitHub Copilot 渠道、多 Provider | LLM 渠道类目 |
-| V2 事件溯源会话核心（Context Epoch、压缩 checkpoint、durable admission inbox） | 会话消息与对话请求/上下文类目；实现深度作为工程机制单独标注 |
+**已验证边界**：只核对了入口与映射层，外部宿主客户端的实际互通未运行验证。
 
-## 声明不符、外部依赖与暂缓项
+## 已归并与未展开的候选
 
-- **Session Review（`入口确认`）**：`packages/session-ui` 的 review 组件、行内评论与 `review.txt` 模板存在，但"评论→驱动修改"的端到端服务端闭环未逐点核对，本轮不提案。
-- **cloud/enterprise 面**（`packages/console`、`control-plane` 服务端侧）：本轮只核到客户端握手与同步层（sessionWarp/startWorkspaceSyncing），云端托管细节标外部服务边界，不进入本仓库特色计数。
-- **worktree 隔离工作区**：作为能力一的支撑机制记录（远程 workspace 适配器），不单独提案。
-
-## 对特色贡献统计的影响
-
-- **主贡献候选**：能力一"多表面会话连续性"（`主链确认`，静态证据）。统计 F27"TUI、Desktop、Web 共用同一 Agent 会话后端"已有 OpenCode 主贡献，其计入理由应扩充为包含事件源同步与所有权接管（steal）机制。
-- **新能力族建议**：能力二 CodeMode（受限 JS 工具编排，独立执行范式）与能力三会话档案闭环（会话交付与跨表面续作）建议作为新能力族进入重做后的统计；能力四 ACP 服务端建议计辅助贡献（反向互操作）。
-- **不重复计数**：Git 快照回退（F24 既有主贡献）、后台子代理（F30 既有辅助贡献）、Skill/权限/渠道归并项。
-- 统计表重排待[待查清单](待查清单.md)全局待办第 6 条（按"产品特性贡献"与"机制贡献"拆分重做）一并处理，本笔记仅登记建议。
+- **持久终端守护**：PTY 进程由独立守护进程持有，连接断开后仍存活并可在重连时按偏移重放输出；归入生成式输出与运行时的执行环境部分。
+- **语音**：实验性语音模型与会话端点存在，App 有语音上下文；本次未展开实时语音链。
+- **定时任务**：schedule 工具与端点支持创建、暂停、恢复任务；与后台任务同属执行调度。
+- **worktree**：工具与目录管理支持创建/列出/删除 worktree，用于隔离工作区。
+- **已归并**：Agent 角色、工具审批、LLM 渠道、消息渲染、会话档案外的会话管理细项分别属于既有类目。
 
 ## 未验证事项
 
-- 全部能力均未运行验证：多设备 steal/重放、mdns 局域网发现、云端 workspace 同步、CodeMode 真实模型编排、分享服务与 PR 续作、与真实 ACP 宿主互通。
-- Session Review 的"评论→修改"服务端闭环未逐点核对；worktree 作为云 workspace 适配器的资源回收语义未展开。
-- 事件溯源会话核心（Context Epoch/压缩 checkpoint）与现有"对话请求与上下文"笔记的交叉核对未完成，机制深度待后续标注。
+1. 多端连接在真实网络（远程机器、WSL、局域网）下的配对、重连与事件续播未实测。
+2. GUI 插件在第三方插件加载、版本兼容与主进程桥接异常时的行为未验证。
+3. Code Mode 与 Goal 模式的真实运行效果、判定准确度与限额行为未实测。
+4. Artifact 不同 Provider 的能力差异与预览隔离未验证。
+5. ACP 与外部宿主客户端的互通未实测。
+6. 导出/导入在旧版本档案与脱敏边界上的表现未验证。
 
 ## 关键源码索引
 
-- `packages/core/src/event/sql.ts`（4-23 event_sequence/event 表与 owner_id）、`packages/core/src/session/`（input.ts、store.ts、context-epoch.ts、projector.ts、compaction.ts、execution/、runner/）
-- `packages/opencode/src/server/routes/instance/httpapi/handlers/sync.ts`（34 replay、61 steal、87 start/steal/history 组合）、`packages/opencode/src/server/server.ts`、`server/mdns.ts`、`packages/opencode/src/sync/README.md`
-- `packages/opencode/src/cli/cmd/serve.ts`、`cli/cmd/attach.ts`、`cli/cmd/web.ts`、`packages/desktop/src/main/sidecar.ts`、`packages/app/src/wsl/dialog-add-server.tsx`、`packages/tui/src/context/sync.tsx`
-- `packages/opencode/src/control-plane/workspace.ts`（sessionWarp、startWorkspaceSyncing）、`control-plane/adapters/worktree.ts`、`packages/opencode/src/worktree/index.ts`
-- `packages/codemode/`（codemode.ts、tool.ts、tool-runtime.ts、tool-schema.ts）、`packages/opencode/src/tool/code-mode.ts`
-- `packages/opencode/src/cli/cmd/export.ts`（163 sanitize、222 ExportCommand）、`cli/cmd/import.ts`（28 parseShareUrl、60 transformShareData）、`cli/cmd/pr.ts`、`share/share-next.ts`、`packages/app/src/utils/session-export.ts`
-- `packages/opencode/src/acp/service.ts`（56-61 接口、94-488 实现）、`acp/permission.ts`、`cli/cmd/acp.ts`、`packages/core/src/github-copilot/`
-- `packages/opencode/src/snapshot/index.ts`、`session/revert.ts`、`session/summary.ts`、`tool/task.ts`、`core/background-job.ts`
-- `packages/session-ui/src/v2/components/session-review-v2.tsx`、`packages/opencode/src/command/template/review.txt`
+- `packages/core/src/bus.ts`、`event/sql.ts`：durable 事件与所有权
+- `packages/server/src/event-feed.ts`：SSE 事件流
+- `packages/protocol/src/groups/{event,server}.ts`：事件订阅与配对端点
+- `packages/cli/src/commands/handlers/{serve,service,pair,acp}.ts`：服务与配对入口
+- `packages/plugin/src/gui/`、`packages/gui-plugins/`：GUI 插件 SDK 与内建插件
+- `packages/codemode/`、`packages/core/src/codemode/tool.ts`：Code Mode
+- `packages/core/src/plugin/goal.ts`、`packages/schema/src/goal.ts`：Goal 模式
+- `packages/server/src/handlers/session.ts`、`packages/cli/src/commands/handlers/session/{export,import}.ts`：会话档案
+- `packages/core/src/artifact.ts`、`packages/protocol/src/groups/artifact.ts`：Artifact
+- `packages/core/src/persistent-pty/`、`packages/protocol/src/groups/persistent-pty.ts`：持久终端

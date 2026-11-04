@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态搜索聊天页、Web/API conversation 路由、留存导出服务与 DSL 导入导出；未运行浏览器、CLI、对象存储或 API
 >
@@ -29,7 +29,7 @@ flask export-app-messages --app-id ... [时间窗口]
   -> 本地输出或配置的归档对象存储
 ```
 
-命令定义在 `api/commands/retention.py:1591-1661`，服务实现为 `api/services/retention/conversation/message_export_service.py:74-190`。文件顶部明确列出了结果字段，且服务按应用和时间而非当前浏览器的活动分支取数。它应被理解为管理员可触发的应用消息留存工具，未确认有 UI 权限模型、访客访问语义或用户自助下载入口。
+命令定义在 `api/commands/retention.py:1591-1661`，服务实现为 `api/services/retention/conversation/message_export_service.py:74-205`。文件顶部明确列出了结果字段，且服务按应用和时间而非当前浏览器的活动分支取数。它应被理解为管理员可触发的应用消息留存工具，未确认有 UI 权限模型、访客访问语义或用户自助下载入口。
 
 ## 1. 终端聊天入口、范围与内容口径
 
@@ -64,7 +64,7 @@ flask export-app-messages --app-id ... [时间窗口]
 ## 关键源码索引
 
 - `api/commands/retention.py:1591-1661`：`export-app-messages` CLI 入口及参数交接。
-- `api/services/retention/conversation/message_export_service.py:1-190`：JSONL.GZ 记录格式、查询和本地/归档输出。
+- `api/services/retention/conversation/message_export_service.py:37-205`：JSONL.GZ 记录格式、查询和本地/归档输出。
 - `web/app/components/base/chat/`、`web/app/(shareLayout)/`：公开聊天/嵌入相关界面搜索范围。
 - `api/services/app_dsl_service.py`、`api/services/agent/dsl_service.py`：作者定义迁移，与消息导出区分。
 - `api/core/workflow/`：workflow run 与归档边界，非会话分享。

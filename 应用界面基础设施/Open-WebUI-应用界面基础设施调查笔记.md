@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -26,17 +26,17 @@ Toast 统一使用 svelte-sonner，并在根布局挂载唯一 Toaster。聊天�
 
 Tailwind CSS v4（src/tailwind.css 第 1 行，@theme 只扩展 gray 色阶第 6-18 行，tailwind.config.js 第 6 行将 darkMode 设为 class）；
 
-无 UI 组件库，公共层在 common 目录（53 个文件，含 Modal、ConfirmDialog、Drawer、Dropdown、Tooltip、Spinner、Loader、Image、ImagePreview、Switch、Checkbox、Select、Pagination、PanzoomContainer、PDFViewer 等）。
+无 UI 组件库，公共层在 common 目录（68 个文件，含 Modal、ConfirmDialog、Drawer、Dropdown、Tooltip、Spinner、Loader、Image、ImagePreview、Switch、Checkbox、Select、Pagination、PanzoomContainer、PDFViewer 等）。
 
 **构建与运行边界。** svelte.config.js 第 15-19 行使用 adapter-static 和 index.html fallback，根布局第 10 行关闭 SSR，因而是纯 SPA；
 
-svelte.config.js 第 20-39 行配置 SvelteKit 版本轮询（60s），版本变化时根布局的 beforeNavigate 注销 service worker 并用 location.href 硬刷新（根布局第 98-104 行）。
-- **根装配**（src/routes/+layout.svelte，1358 行）：
-  - Toast Host：`<Toaster>`（根布局第 1341-1358 行，svelte-sonner，位置为 top-right，启用 richColors 和 closeButton，主题随 `$theme` 计算）；
-  - Electron 壳侧栏 `<AppSidebar>`（仅 `$isApp` 时，:1324-1331）与社区统计弹窗 `<SyncStatsModal>`（:1337-1339，挂在根布局而非 app 布局）；
-  - 全局服务：Socket.IO 连接与事件分发（chatEventHandler 495-703、channelEventHandler 705-805）、会话过期自动登出（fetch 401 拦截 + token 定时检查，:807-887,993-1007）、桌面壳事件（desktopEventHandler 889-975）、BroadcastChannel 活跃标签页仲裁（:108-109,1076-1095）、移动端下拉刷新手势（:1011-1043）；
+svelte.config.js 第 20-39 行配置 SvelteKit 版本轮询（60s），版本变化时根布局的 beforeNavigate（第 104 行）注销 service worker 并用 location.href 硬刷新。
+- **根装配**（src/routes/+layout.svelte，1535 行）：
+  - Toast Host：`<Toaster>`（svelte-sonner，位置为 top-right，启用 richColors 和 closeButton，主题随 `$theme` 计算）；
+  - 社区统计弹窗 `<SyncStatsModal>`（import 于第 80 行，挂在根布局而非 app 布局）；Electron 壳侧栏组件已从仓库移除，桌面模式只保留 `isApp` 置位与事件通道；
+  - 全局服务：Socket.IO 连接与事件分发（`chatEventHandler` 与 `channelEventHandler`，注册于 1288-1289 行）、会话过期自动登出（fetch 401 拦截 + token 定时检查）、桌面壳事件（`desktopEventHandler` 1038-1054）、BroadcastChannel 活跃标签页仲裁（122 行起）、移动端下拉刷新手势；
   - splash 屏移除（:1232-1260）与 her 主题彩蛋进度条。
-- **(app) 布局**（src/routes/(app)/+layout.svelte）：装配 Sidebar、SettingsModal、ChangelogModal、AccountPending 和 UpdateInfoToast（第 439-452 行），并负责全局快捷键分发（第 278-367 行）与 `?settings=` URL 深链（openSettingsFromUrl，第 199-228 行）。
+- **(app) 布局**（src/routes/(app)/+layout.svelte，556 行）：装配 Sidebar、SettingsModal、ChangelogModal、AccountPending 和 UpdateInfoToast，并负责全局快捷键分发与 `?settings=` URL 深链（`openSettingsFromUrl`）。
 
 **多入口。** `/` 与 `/c/[id]` 都是 `<Chat />` 一行装配（`(app)/+page.svelte:15`）；`/auth`（登录/注册/SSO 自动跳转 + OnBoarding 欢迎页，`auth/+page.svelte:178-201,211-217`）、`/s/[id]`（分享会话，自载用户设置）、`/watch`（YouTube 重定向）、`/error`（后端缺失页）均共享同一根布局基础设施（Toaster、socket、主题）。
 - 桌面壳（Electron 原生应用在独立仓库，见仓库分布笔记）只经 window.electronAPI/window.applyTheme 全局钩子接入，本仓无实现与类型声明（`src/app.d.ts` 为空），调用处均带存在性检查（`+layout.svelte:507,1051-1073`；window.applyTheme 仅调用无定义，:1046、`General.svelte:177`）。
@@ -108,7 +108,7 @@ common/Dropdown.svelte（359 行）：
 
 ### 右键菜单
 
-全应用**没有自绘右键菜单**：在 src/lib 全部搜索 oncontextmenu 和 contextmenu 均无匹配。消息操作、侧栏项操作均走普通按钮、Dropdown 或 Modal，与 Cherry Studio 等桌面产品不同。
+消息与侧栏项的操作仍走普通按钮、Dropdown 或 Modal，没有全局自绘右键菜单；`contextmenu` 只在少数内嵌表面出现，且用途是屏蔽浏览器默认菜单而非自绘：内置浏览器与外部桌面画面（`ChatTabs/ChromeBrowser.svelte:260`、`ChatTabs/NativeDesktop.svelte:73`）、终端文件面板（`FileNav.svelte:2387`）与语音头像（`CallOverlay/VoiceAvatar.svelte:222`）。
 
 ## 3. 通知、加载态与错误反馈
 
@@ -206,7 +206,7 @@ common/Dropdown.svelte（359 行）：
   2. 桌面折叠：42px 图标窄条（第 931-989 行，showSidebar=false 时）；
   3. 移动端：覆盖式抽屉 + 全屏遮罩（:892-901，md:hidden），另支持屏幕左缘滑动手势开合（:557-581，起点 x<40、滑动距离≥屏宽/8）。
 
-**面板分栏。** 聊天工作台与右侧控制面板用 paneforge 的 PaneGroup、Pane 和 PaneResizer 拖拽，入口从 Chat.svelte 第 3805 行开始；ChatControls 宽度另存于 chatControlsSize，移动端控制面板走非侧滑路径（Chat.svelte 第 1308 行的 `$mobile` 分支）。
+**面板分栏。** 聊天工作台与右侧标签面板用 paneforge 的 PaneGroup、Pane 和 PaneResizer 拖拽，入口在 Chat.svelte；面板宽度另存于 `chatControlsSize`（`ChatTabs.svelte:1176`），移动端标签面板走非侧滑路径。
 
 **阅读宽度。** 消息区以 max-w-[58rem] 居中，widescreenMode 设置可改为 max-w-full；设置入口和两个消费点分别见 Interface.svelte 第 741-751 行、Messages/Message.svelte 第 58-60 行及 MessageInput.svelte 第 1382-1422 行。这是用户偏好而非断点策略。
 
@@ -268,8 +268,8 @@ common/Dropdown.svelte（359 行）：
 
 ### 桌面集成交点（壳在独立仓库）
 
-- 入口：window.electronAPI（app:info/app:data/token:update/window:isFocused/onEvent，`+layout.svelte:1051-1073`）；`$isApp` 时装配 AppSidebar（4.5rem 应用导航条，`app/AppSidebar.svelte`）且 `Sidebar.svelte` 加 `ml-[4.5rem]` 偏移（:894-896）；
-- 双向事件：桌面→Web desktopEvent store（page:reload/page:navigate/query/call/theme:update/models:refresh/connections:*，`+layout.svelte:889-975`）；Web→桌面 window.applyTheme（主题）与 load（导航，`AppSidebar.svelte:27-30`）；
+- 入口：window.electronAPI（app:info/app:data/token:update/window:isFocused/onEvent，`+layout.svelte:1038-1216`）；桌面模式把 `isApp` store 置位（`:1202`），本快照内已无组件读取该标志——原先的桌面导航条组件已移除，桌面壳只通过事件通道影响导航与主题；
+- 双向事件：桌面→Web 经 `desktopEventHandler` 写入 desktopEvent store（page:reload/page:navigate/query/call/theme:update/models:refresh/connections:*，`+layout.svelte:1038-1054`）；Web→桌面 window.applyTheme（主题，`:1191-1192`）与 load（导航）；
 - 本仓不含桌面壳实现（仓库分布笔记同述），electronAPI/applyTheme 无类型声明，属运行时注入钩子。
 
 ### 无障碍与动画（静态证据，运行未验证）

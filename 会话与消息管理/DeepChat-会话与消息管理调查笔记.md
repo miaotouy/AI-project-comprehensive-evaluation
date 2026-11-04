@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（main process 的 SQLite 表定义与 transcript/pending input 数据层、turn 与路由、renderer 的 message store 与 IPC 增量层），静态核对符号与行号；未运行测试、构建或桌面端交互
 >
@@ -22,7 +22,10 @@ DeepChat 是 main process 驱动、renderer 订阅的持久化会话系统：
 - 队列输入是独立的 `deepchat_pending_inputs` 状态对象（待处理/已认领/阻塞/需重试/已消费五档），与已完成消息不混同；重启恢复把 claimed 但未物化的队列项释放回队列（`retry_required` 形态）、未读 steer 消息置 error。
 - 消息窗口按"估算测量 + spacer + anchor + 二分查找"只接收当前窗口的 `MessageListItem`，同时服务历史分页和流式追加。
 - 搜索分三层：会话内查找只匹配已加载的 display messages；跨会话历史搜索走 FTS5（触发器同步 + LIKE 回退），经 `sessionsSearchHistoryRoute` 服务 Spotlight；内存 MCP 服务器另把同一索引暴露为模型工具。
-- 上下文压缩的进行中与完成状态由消息 metadata 表达，并在启动时按持久化 marker 进行协调；它标示上下文边界，不改变普通 user/assistant 消息的三档状态模型（`src/shared/types/agent-interface.d.ts:442-445`、`createDeepChatAgentHarness.ts:575-582`）。
+- 上下文压缩的进行中与完成状态由消息 metadata 表达，并在启动时按持久化 marker 进行协调；它标示上下文边界，不改变普通 user/assistant 消息的三档状态模型（`src/shared/types/agent-interface.d.ts`、`createDeepChatAgentHarness.ts`）。
+- 会话数据现在是跨设备同步的合并单元：一个 session 包包含会话行、元数据、Tape entries、消息与依赖内容，本地字段（项目目录、revision）不参与合并；删除以墓碑表达，避免旧副本复活（`src/main/sync/replica/units.ts`、`src/main/sync/replica/store.ts`，协议见独特功能笔记能力卡 9）。
+- Agent 侧新增只读的会话引用读取（`read_session`）：按 cursor 分页取另一会话的消息或搜索命中，预览 800 字符、详情 8192 字符，不写入被读会话（`src/shared/sessionReferences.ts`、`src/main/session/data/sessionReferences.ts`）。
+- 主进程把输出与状态从 session 服务中抽出为投影端口：`outputProjection.ts` 负责流式快照/终态/压缩事件的渲染层克隆，`sessionStatusProjection.ts` 负责状态与 usage 的发布；session 服务本身不再直接拼事件载荷（`src/main/session/outputProjection.ts`、`sessionStatusProjection.ts`）。
 - Tape message facts 现在还承担 transcript 投影重建：同一终态 record 可在正常写入或重放时走同一投影器，恢复消息表、user 内容分表、assistant blocks 与搜索文档；投影 cursor 防止重复全量重放。
 
 ## 系统边界与数据主链
@@ -89,7 +92,7 @@ runtime 级状态在 `deepchat_sessions`（`src/main/session/data/tables/deepcha
 
 ### 1.4 pending input 是独立状态对象
 
-队列/steer 记录定义在 `src/shared/types/agent-interface.d.ts:259-281`：`mode`（`queue`/`steer`）、state 五档状态机（取值见下）、payload、关联消息 ids、assistant id、阻塞摘要、`queueOrder` 与时间戳。
+队列/steer 记录定义在 `src/shared/types/agent-interface.d.ts:298-320`：`mode`（`queue`/`steer`）、state 五档状态机（取值见下）、payload、关联消息 ids、assistant id、阻塞摘要、`queueOrder` 与时间戳。
 
 ```text
 state: pending | claimed | blocked | retry_required | consumed
@@ -192,7 +195,7 @@ setMessageError(...)          :419-441（同上，status=error）
   - user 消息内容分表：`deepchat_user_messages`、`deepchat_user_message_files`、`deepchat_user_message_links`（`transcript.ts:986-1017`；读取时物化回 `UserMessageContent`，:875-912）
   - assistant 元数据：metadata、`deepchat_usage_stats`、`deepchat_message_traces`（`transcript.ts:679-722`、:1176-1221）
 - MCP App model context 绑定在 assistant block 的 `extra_json`（§1.3）。
-- 附件属于 `SendMessageInput.files`（`agent-interface.d.ts:250-257`），无法接受附件时返回 `needs_user_action`（执行语义见对话请求与上下文笔记 §1）。
+- 附件属于 `SendMessageInput.files`（`agent-interface.d.ts:289-296`），无法接受附件时返回 `needs_user_action`（执行语义见对话请求与上下文笔记 §1）。
 
 ## 9. 设计取舍与已确认边界
 
@@ -211,6 +214,7 @@ setMessageError(...)          :419-441（同上，status=error）
 - 消息窗口高度是估算与观测的组合，复杂 artifact/图片导致的异步高度变化未通过浏览器实测。
 - fork/delete/clear 的并发竞态、删除大会话的性能、搜索结果命中快照的完整生命周期（写入触发点与清理策略）未展开。
 - legacy import 与导出（session export）的具体数据链未展开。
+- 未运行跨设备同步的双机合并、墓碑与冲突路径（LWW 语义见独特功能笔记能力卡 9）；未验证 read_session 的游标边界、超长会话分页与被读会话删除后的行为。
 - 未运行测试、构建或桌面端交互；结论来自 main/renderer 静态源码。
 
 ## 11. 关键源码索引
@@ -226,3 +230,6 @@ setMessageError(...)          :419-441（同上，status=error）
 - 显示稳定缓存：`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:367-438`
 - 升级驱动：`src/main/data/mainDatabase.ts:315-388`
 - Tape transcript 投影：`src/main/session/data/transcriptProjection.ts`、`src/main/session/data/tables/deepchatTranscriptProjectionMeta.ts`
+- 输出与状态投影：`src/main/session/outputProjection.ts`、`sessionStatusProjection.ts`
+- 跨设备同步单元：`src/main/sync/replica/units.ts`、`store.ts`
+- 会话引用读取：`src/shared/sessionReferences.ts`、`src/main/session/data/sessionReferences.ts`

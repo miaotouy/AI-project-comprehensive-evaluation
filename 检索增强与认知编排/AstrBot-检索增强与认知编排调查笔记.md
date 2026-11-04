@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：直接阅读知识库的 Dashboard/API 服务、摄取与存储、FAISS/FTS 检索、融合与重排、Agent 请求装配和相关单元测试；未启动 AstrBot、Embedding、Rerank、FAISS 服务实例或 Dashboard
 >
@@ -20,7 +20,7 @@
 
 **源码直接确认。** 一次查询固定组合稠密和稀疏候选：各库以查询向量检索自己的 FAISS `IndexFlatL2`，同时由 SQLite FTS5 的 BM25 查询；FTS5 不可用或查询出错时退回内存 `rank_bm25`。候选按全局稠密归一化、每库稀疏归一化，以稠密 0.9、稀疏 0.1 的加权分数排序，RRF（平滑参数 60）只作同分稳定排序，按完全相同的块文本去重。若任一选中知识库存在可用 rerank provider，融合候选再用其中遇到的第一个 provider 重排；失败时保留融合顺序（`retrieval/manager.py:64-193`、`rank_fusion.py:26-205`、`sparse_retriever.py:56-182`）。
 
-**源码直接确认。** 默认的非 agentic 模式在主 Agent 构建期以当前 `req.prompt` 查询，并将来源、内容和当前分数格式化成临时用户内容 part；它不持久化进会话历史。`kb_agentic_mode=true` 时则不预取，仅把 `astr_kb_search` 加入工具集，模型可在工具循环中以短关键词或简短问题自行发起同一检索。工具结果会返回给模型，但知识库组件本身没有根据命中生成下一查询、结构路径、固定多阶段循环或自动记忆写回的实现（`astrbot/core/astr_main_agent.py:289-321,1629`、`knowledge_base_tools.py:40-142`）。
+**源码直接确认。** 默认的非 agentic 模式在主 Agent 构建期以当前 `req.prompt` 查询，并将来源、内容和当前分数格式化成临时用户内容 part；它不持久化进会话历史。`kb_agentic_mode=true` 时则不预取，仅把 `astr_kb_search` 加入工具集，模型可在工具循环中以短关键词或简短问题自行发起同一检索。工具结果会返回给模型，但知识库组件本身没有根据命中生成下一查询、结构路径、固定多阶段循环或自动记忆写回的实现（`astrbot/core/astr_main_agent/knowledge_base.py:17-53,1629`、`knowledge_base_tools.py:40-142`）。
 
 ## 谱系定位与系统边界
 
@@ -84,17 +84,17 @@ URL 清洗的请求限流器会用异步锁串行计算等待和更新时间，�
 
 稠密路径逐库调用 FAISS，要求块元数据的 `kb_id` 与当前库相等，先取两倍 `top_k_dense` 再过滤，返回每库设定数量；FAISS 的 L2 距离被映射为 `1 - distance / 2`，随后把各库结果汇总（`retrieval/manager.py:195-240`）。
 
-稀疏路径先对查询去停用词并分词；优先保证 FTS5 内容无索引缺口后以 OR 查询和 SQLite `bm25()` 取每库 `top_k_sparse`，FTS5 不可用或搜索失败时才把涉及库的所有块载入内存构建 BM25Okapi。两条路径都是按当前 query 的单轮候选生成，并无查询改写或扩展（`sparse_retriever.py:56-182`、`faiss_impl/document_storage.py:464-583`）。
+稀疏路径先对查询去停用词并分词；优先保证 FTS5 内容无索引缺口后以 OR 查询和 SQLite `bm25()` 取每库 `top_k_sparse`，FTS5 不可用或搜索失败时才把涉及库的所有块载入内存构建 BM25Okapi。两条路径都是按当前 query 的单轮候选生成，并无查询改写或扩展（`sparse_retriever.py:56-182`、`faiss_impl/document_storage.py:465-584`）。
 
 融合分数由加权求和决定，RRF 不参与主排序：稠密相似度在所有候选中 min-max 归一，BM25 分数在各知识库内部归一，再以 0.9/0.1 加权。RRF 只在融合分数相等时参与次级排序，之后保留至全局 `kb_fusion_top_k`，默认 20，并仅按块正文完全相同去重，不折叠同一文档的相邻块。融合块需能回查 `KBDocument` 与 `KnowledgeBase` 元数据才会成为最终结果（`rank_fusion.py:58-205`）。
 
-若多个库配置了不同 rerank provider，当前实现选择遍历到的第一个可用 provider 处理全部融合候选，而不会按来源库分别重排；调用异常时记录警告、直接使用融合结果。最后截断至会话 `top_k` 或全局 `kb_final_top_k`，默认 5（`retrieval/manager.py:148-193`、`config/default.py:318-321`）。
+若多个库配置了不同 rerank provider，当前实现选择遍历到的第一个可用 provider 处理全部融合候选，而不会按来源库分别重排；调用异常时记录警告、直接使用融合结果。最后截断至会话 `top_k` 或全局 `kb_final_top_k`，默认 5（`retrieval/manager.py:148-193`、`config/default.py:317-320`）。
 
 ## 阶段、反馈与结果注入
 
 `KnowledgeBaseManager.retrieve` 返回两种同源表示：供注入的文本，以及包含块 ID、文档 ID、知识库 ID/名称、文档名、块序号、正文、最终分数、字符数的结果数组。文本将每块写成“知识序号、来源、内容、相关度”的中文段落。Dashboard 手动检索接口返回结构化数组，可选生成 t-SNE 可视化；普通 Agent 注入和工具调用只消费格式化文本，因此模型看不到独立的候选类型、密集/稀疏来源、融合分数或重排理由（`kb_mgr.py:320-361`、`knowledge_base_service.py:812-851`）。
 
-非 agentic 模式只有在用户提示非空白时同步检索。`_apply_kb` 在请求装饰完成后追加 `[Related Knowledge Base Results]`，并标记这个 TextPart 为临时内容；单元测试确认它会参与当轮 assembled message，但不会写入检查点历史。该模式没有让模型决定是否检索的机会，也没有质量阈值或字符/token 预算，最终注入规模主要受块大小与最终块数控制，之后仍可能由通用上下文管理器裁剪（`astr_main_agent.py:289-321,1629`、`tests/unit/test_astr_main_agent.py:674-775`）。
+非 agentic 模式只有在用户提示非空白时同步检索。检索结果注入由 `astr_main_agent/knowledge_base.py:17` 的装配函数完成，在请求装饰完成后追加 `[Related Knowledge Base Results]`，并标记这个 TextPart 为临时内容；单元测试确认它会参与当轮 assembled message，但不会写入检查点历史。该模式没有让模型决定是否检索的机会，也没有质量阈值或字符/token 预算，最终注入规模主要受块大小与最终块数控制，之后仍可能由通用上下文管理器裁剪（`astr_main_agent/knowledge_base.py:17-53`、`tests/unit/test_astr_main_agent.py`）。
 
 agentic 模式把同一个检索函数包装为 `astr_kb_search`。工具说明要求短关键词或简短问题，空 query 返回错误；无结果则返回固定文本。工具可在模型获得前一次结果后再次调用，所以存在由模型自由决定的工具循环，但组件未维护阶段状态、候选反馈、下一查询模板或退出条件。工具发现、调用次数、超时与输出裁剪由通用 Agent 工具系统负责，不属于本知识库实现可保证的多阶段编排（`knowledge_base_tools.py:106-142`）。
 
@@ -128,11 +128,11 @@ AstrBot 可与 Dify、Open WebUI、Chatbox、AIO Knowledge 等知识资产管线
 
 ## 关键源码索引
 
-- 资产模型、SQLite 元数据与统计：`astrbot/core/knowledge_base/models.py:11-120`、`kb_db_sqlite.py:22-81,175-369`
+- 资产模型、SQLite 元数据与统计：`astrbot/core/knowledge_base/models.py:11-130`（时间戳列显式声明不带时区，避免模型升级改写既有库时间）、`kb_db_sqlite.py:22-81,175-369`
 - 生命周期与每库文件布局：`astrbot/core/knowledge_base/kb_mgr.py:24-180,282-361`、`kb_helper.py:117-210,574-719`
 - 上传、解析、分块、Embedding 与补偿：`astrbot/core/knowledge_base/kb_helper.py:211-572,721-895`、`chunking/recursive.py:30-167`、`chunking/markdown.py:63-162`、`parsers/util.py:4-17`
-- FAISS、块 SQLite、FTS5 和回退：`astrbot/core/db/vec_db/faiss_impl/vec_db.py:59-349`、`embedding_storage.py:62-186`、`document_storage.py:59-168,464-583`
+- FAISS、块 SQLite、FTS5 和回退：`astrbot/core/db/vec_db/faiss_impl/vec_db.py:59-349`、`embedding_storage.py:62-186`、`document_storage.py:60-169,464-583`
 - 稠密/稀疏候选、融合与重排：`astrbot/core/knowledge_base/retrieval/manager.py:64-283`、`sparse_retriever.py:56-182`、`rank_fusion.py:26-205`
-- 会话选库、工具和请求注入：`astrbot/core/tools/knowledge_base_tools.py:40-149`、`astrbot/core/astr_main_agent.py:289-321,1629`、`astrbot/core/config/default.py:318-321`
+- 会话选库、工具和请求注入：`astrbot/core/tools/knowledge_base_tools.py:40-149`、`astrbot/core/astr_main_agent/knowledge_base.py:17-53,1629`、`astrbot/core/config/default.py:317-320`
 - Dashboard API、后台摄取、资产查看与手动检索：`astrbot/dashboard/api/knowledge_bases.py:81-305`、`astrbot/dashboard/services/knowledge_base_service.py:134-235,347-405,537-704,812-939`
-- 已读测试与备份入口：`tests/unit/test_astr_main_agent.py:674-775`、`tests/unit/test_kb_upload_atomicity.py:132-652`、`tests/unit/test_kb_document_cleanup.py:91-199`、`astrbot/core/backup/exporter.py:40-139`
+- 已读测试与备份入口：`tests/unit/test_astr_main_agent.py:529-634`、`tests/unit/test_kb_upload_atomicity.py:132-652`、`tests/unit/test_kb_document_cleanup.py:91-199`、`astrbot/core/backup/exporter.py:40-139`

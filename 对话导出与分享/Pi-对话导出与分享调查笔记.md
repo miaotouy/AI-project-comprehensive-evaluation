@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：静态源码调查；读取 TUI 的 `/export`、`/import`、`/share`、`/copy` 处理链，`export-html` 模板（index/template.html/template.js/template.css/ansi-to-html/tool-renderer），SessionManager 树模型与 JSONL 读写，CLI `--export`、RPC `export_html`，`.pi/extensions/import-repro.ts`，`.github/workflows/issue-analysis.yml`，README 与 docs；未运行应用、浏览器、GitHub CLI 或 Hugging Face 操作
 >
@@ -103,7 +103,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 8. 分享载体、访问控制与撤销
 
-`/share` 先由 `shareSession` 选择传输路径（`modes/interactive/session-share.ts:46-203`）：
+`/share` 先由 `shareSession` 选择传输路径（`modes/interactive/session-share.ts:56-103`）：默认按 Radius → gist 回退，也可用 destination 选项强制走其中一条：
 
 - Radius provider 与凭据可用时，导出当前分支 JSONL，追加 `pi.share` custom entry 保存实际 system prompt 与激活工具 schema，再上传组织可见 artifact；上传失败直接报错，不回退 Gist。
 - 只有 Radius 不可用或无凭据时才检查 `gh auth status`，未安装或未登录会提示修复。

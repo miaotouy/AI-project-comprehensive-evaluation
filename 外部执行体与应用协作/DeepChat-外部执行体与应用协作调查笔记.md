@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：静态复核 ACP agent 注册表与启动生命周期、`src/main/remote/` 与 `src/main/cli/` 主链；复用独特功能、Agent 工具和对话请求笔记；未运行外部平台或 CLI 二进制
 >
@@ -17,6 +17,8 @@
 DeepChat 同时覆盖外部执行体与外部控制表面，三条链均达到 `主链确认`（静态证据）：ACP agent 注册表（39 个条目）提供发现、安装、校验与启动外部 Agent runtime 的完整生命周期；五类 IM endpoint 远程驾驶桌面会话；本地 CLI 通过鉴权 RPC 发起和管理 Agent run。
 
 ACP 路径还增加了终端认证运行器和认证服务；认证属于 ACP runtime 生命周期的一部分，不由聊天 renderer 代填凭据（`src/main/agent/acp/auth/acpAuthService.ts`、`acpTerminalAuthRunner.ts`）。实际外部工具的认证交互仍未运行验证。
+
+ACP 侧新增三块协议面：elicitation 桥把 agent 的结构化表单请求转成 DeepChat 的字段视图并回收答案（`acpElicitationBridge.ts`、`@shared/types/acp-elicitation`）；Lody 扩展方法承载 subagent 事件、能力声明与 usage ledger（`acpLodyExtensions.ts`、`acpExtensionState.ts`，依赖 `acp-extension-core`）；history 快照按完整有序响应暂存，只用 sha256 校验完整性、不按文本匹配合并（`acpHistory.ts`）。计划能力（`update_plan` / agent-plan 类型）已从协议投影中移除。
 
 外部生命周期有两项明确收口：ACP process manager 在应用关闭时中止等待并回收孤立子进程；Discord 与 QQBot 的 HTTP 请求带固定超时，Discord stop 会同时取消尚在等待的 reconnect backoff，避免渠道停止后延迟重连。
 

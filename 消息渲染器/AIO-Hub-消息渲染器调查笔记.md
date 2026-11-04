@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：只读源码梳理，并核对目标仓库内的架构文档、用户指南和性能调查；未修改目标仓库
 >
@@ -27,9 +27,13 @@ AIO Hub 的"消息渲染器"实际由两层组成：
 - VCP ESCAPE 围栏、坏块恢复和可关闭的仅显示侧模糊修复；
 - 正则显示规则、宏展开后的规则、Agent 资产协议；
 - 流式平滑、稳定区/待定区拆分、AST diff、Patch 节流；
+- 流式传输会话与 token 公共前缀复用，长字段按范围补丁传输；
+- 代码查看器按视口创建/销毁，长消息完成态按块级挂载回收；
 - HTML/SVG 代码块的 iframe 交互预览；
-- Agent/User Profile 级 Markdown 样式覆盖。
-- 桌面端与移动端各自提供内建的人工操作测试页；桌面测试台可直接驱动生产渲染器、模拟 Token 流和检查 AST/稳定区。
+- 生成内容主题变量别名（`--primary-text` 等映射到应用主题变量）；
+- 带原始时间戳的 VCP 工具返回批次（`tool_batch` 角色变体）与 JEV 自然语言工具调用识别；
+- Agent/User Profile 级 Markdown 样式覆盖；
+- 桌面端与移动端各自提供内建的人工操作测试页；桌面测试台可直接驱动生产渲染器、模拟 Token 流和检查 AST/稳定区；仓库另有 CommonMark 0.31.2 官方用例对照脚本（`bun run rich-text:commonmark`）。
 
 这套实现把 LLM 消息当作一种需要持续增量解释的结构化文档来处理：**流式正文与低频持久化分离**，末尾不稳定内容进入 pending 区，稳定内容保留 AST 节点身份，再把节点按类型交给专用 Vue 组件。代价是解析和状态层较复杂，HTML 执行环境、超长会话常驻成本、桌面与移动端能力差异都需要单独评估。
 
@@ -232,9 +236,9 @@ Tokenizer 对 `code`、`pre`、`script`、`style` 等采用 raw mode，避免内
 
 ### 5.2 VCP 块边界与仅显示侧恢复
 
-V2 Tokenizer 解析 VCP 参数时允许冒号后的可选空白，并按 ESCAPE、exp、普通围栏的顺序提取。共享的块边界扫描器会完整跳过 `「始ESCAPE」...「末ESCAPE」`，其中出现的工具请求起止标记只作为参数文本，不会错误中断外层工具块；如果未闭合块先遇到后续同级请求起点，则丢弃坏块并从新起点恢复扫描（`src/utils/vcpBlockBoundary.ts:29-91`、`parser/Tokenizer.ts:581-685`）。
+V2 Tokenizer 解析 VCP 参数时允许冒号后的可选空白，并按 ESCAPE、exp、普通围栏的顺序提取。共享的块边界扫描器会完整跳过 `「始ESCAPE」...「末ESCAPE」`，其中出现的工具请求起止标记只作为参数文本，不会错误中断外层工具块；如果未闭合块先遇到后续同级请求起点，则丢弃坏块并从新起点恢复扫描（`src/utils/vcpBlockBoundary.ts:44-140`、`parser/Tokenizer.ts:581-685`）。
 
-模型把 `「始ESCAPE」` 错写成由普通 `「末」` 闭合时，渲染器还有一条默认开启的模糊恢复。它只在严格解析已判定未闭合、候选结束位置唯一且剩余文本能完整收敛为 VCP 字段时修复显示，并把原始调用与“围栏格式错误 · 已修复显示”警告交给工具节点；用户可通过 `uiPreferences.vcpFuzzyModeEnabled` 关闭。该恢复不进入工具执行协议，错误调用仍不会执行（`parser/vcpFenceRecovery.ts:154-232`、`components/nodes/VcpToolNode.vue:60-75`、`llm-chat/config/defaultSettings.ts:67`）。
+模型把 `「始ESCAPE」` 错写成由普通 `「末」` 闭合时，渲染器还有一条默认开启的模糊恢复。它只在严格解析已判定未闭合、候选结束位置唯一且剩余文本能完整收敛为 VCP 字段时修复显示，并把原始调用与“围栏格式错误 · 已修复显示”警告交给工具节点；用户可通过 `uiPreferences.vcpFuzzyModeEnabled` 关闭。该恢复不进入工具执行协议，错误调用仍不会执行（`parser/vcpFenceRecovery.ts:107-340`、`components/nodes/VcpToolNode.vue:60-75`、`llm-chat/config/defaultSettings.ts:75`）。这条模糊模式还会在完整参数后按 HTML 标签、新请求起点或截断的结束标记划定显示边界，把坏请求渲染为带格式提示的工具卡片，让后续思考与正文继续正常解析。
 
 ### 5.3 稳定区与待定区
 
@@ -243,6 +247,8 @@ V2 Tokenizer 解析 VCP 参数时允许冒号后的可选空白，并按 ESCAPE�
 节点从 pending 迁移为 stable 时保留 ID，避免 Vue 将其当新节点重建，进而减少动画重播、折叠状态丢失和代码编辑器重挂载。
 
 处理器忙时不会并发解析每个 delta，而只保存最新 `pendingBuffer`；本轮完成后直接处理最新快照，中间态可丢弃。
+
+待定区解析还有一条按调用方隔离的传输通道：Worker 重建完整文本后全文分词，只返回 token 精确公共前缀之后的变化尾部，主线程恢复完整 token 数组并复用未变化对象；修订号串联尾部替换，过期缓存按解析代次隔离。流结束时若文本与分词选项精确匹配、所有修订均已确认，直接消费主线程快照，否则请求最终结果并立即分离调用方；同位置同类型 token 的大字段（`raw`/`content`/`resultContent` 达到 8,192 个 UTF-16 码元）可用范围补丁传输（`parser/tokenizerProtocol.ts:8-60`、`parser/tokenizerTokenDelta.ts`、`parser/tokenizerService.ts`）。
 
 ### 5.4 Patch 状态层
 
@@ -259,6 +265,18 @@ V2 Tokenizer 解析 VCP 参数时允许冒号后的可选空白，并按 ESCAPE�
 Patch 入队后由 rAF 按 `throttleMs` 节流（聊天默认 80ms）；flush 前合并连续的同节点文本追加，应用时沿节点索引做不可变更新，未变化分支保留引用。
 
 `useMarkdownAst` 的配置项（节流间隔、节流开关、详细日志、护栏开关）以 getter 形式传入（`MaybeRefOrGetter`），设置变更无需重建处理器即可生效；调度只走 rAF，源码中遗留的定时器句柄历史字段已删除。
+
+### 5.5 带时间戳的 VCP 工具返回批次
+
+Tokenizer 在 Markdown/HTML 解析之前识别 `VCP_TOOL_BATCH_START`/`END` 标记，按标记中的原始时间戳精确配对，兼容 `Z` 与正负时区偏移；扫描时跳过工具请求块与已闭合的单行行内代码，独立批次的识别优先级高于 Markdown 代码围栏（`src/utils/vcpToolBatch.ts:19-160`）。批次整体转换为 `vcp_role` 的 `tool_batch` 变体，正文保存在 `batchContent`，内部角色、请求与其他时间戳标记保持字面量。
+
+展示侧对闭合且完全由旧结果框与摘要组成的批次，投影为现有工具结果卡片与去重摘要；其他正文和未完成批次按纯文本展示并收起首尾协议留白。只含一个闭合批次的 USER 外壳会合并进批次容器，混合内容保留角色边界；外层角色闭合扫描跳过完整批次，缺少结束标记时持续隔离并显示未完成状态（`RichTextRenderer.vue`、`components/nodes/VcpRoleNode.vue:82-100`）。含批次的流式文档保持整体待定解析，闭合后恢复外层解析。
+
+同一 Tokenizer 还识别 `JEV` 形式的自然语言工具调用：块内没有 `tool_name` 字段、以 `JEV` 前缀键携带指令时，把 `JEV` 作为工具名展示，指令原样保存在参数对象中，不做二次解析（`parser/Tokenizer.ts:885-900`）。
+
+### 5.6 主题变量别名
+
+`RichTextRenderer` 在根容器上把常见 CSS 变量名映射到应用主题变量，供 AST 与纯 Markdown 模式中的 HTML 内容继承。别名覆盖正文色、次级文字、三级背景、边框与语义色等，随明暗模式、主题色与背景外观变化；正文元素可用同名变量覆盖（`RichTextRenderer.vue:842-870`）。
 
 ## 6. 节点渲染层
 
@@ -307,12 +325,17 @@ Pure Markdown-it 分支创建 markdown-it 时设置 `html: true`，输出直接�
 - 流式显示与持久化分流；
 - `StreamController` rAF 平滑输出，VCP 协议边界会强制 flush；
 - 稳定 AST 引用复用、pending 最新值覆盖；
+- 待定区按调用方隔离传输会话，token 公共前缀复用与长字段范围补丁，过期缓存按解析代次隔离；
+- `AstNodeRenderer` 按节点引用与渲染上下文复用子树 VNode；
 - Patch 80ms 节流和 text append 合并；
 - 浅引用状态 + 不可变路径更新；
-- CodeMirror 延迟挂载、Mermaid 动态加载；
-- 旧 HTML preview 按消息深度冻结，默认只保持最近 5 条活跃；
+- 代码查看器按视口创建与销毁：代码块进入视口外扩 600px 时创建只读编辑器，离开 2 秒后销毁并回退到源码展示、保留高度，焦点与选区保护当前交互（`CodeBlockNode.vue:381`、`nodes/code-block/CodeMirrorSourceViewer.vue`）；
+- 长消息完成态块级回收：至少 40 个顶层 AST 块的消息在视口外扩 700px 离开 300ms 后以同标签占位，短消息与流式消息不参与（`composables/useRendererBlockMounting.ts:49-113`）；
+- Mermaid 流式按 300ms 窗口提交最新值，仅末尾未完成行变化时跳过排版，等待期间保留最后成功 SVG（`components/nodes/MermaidNode.vue:765-790`）；
+- 图片列表改用 WeakMap 子树索引按不可变引用复用，保留顺序与重复项并限制十万节点访问量（`utils/astImageIndex.ts:12-60`）；
+- Mermaid 动态加载、旧 HTML preview 按消息深度冻结，默认只保持最近 5 条活跃；
 - 不可见消息冻结 Agent 样式/think rules，避免全列表配置更新；
-- 消息元素使用 `content-visibility: auto` 和 `contain-intrinsic-size: auto 500px`；
+- 消息元素使用 `content-visibility: auto`，高度占位由 `useMessageHeights` 结合段落预估与有界整行实测维护；
 - ResizeObserver 维护底部锁定；组件卸载主动释放 AST、iframe、Worker/控制器引用。
 
 ### 护栏阈值
@@ -329,7 +352,7 @@ V2 当前常量为：
 
 ### 列表策略
 
-消息列表组件对 `messages` 全量 `v-for`，只用 CSS `content-visibility` 跳过离屏绘制。设置中的 `virtualListOverscan` 只有默认值、类型和 UI，运行时没有被读取。因此列表实际为全量组件常驻加离屏绘制跳过，而非窗口化。
+消息列表组件对 `messages` 全量 `v-for`，用消息级 `content-visibility: auto` 跳过屏外渲染，并由 `vMessageSize` 指令配合段落预估与有界整行实测缓存维护占位高度（`MessageList.vue:225`、`composables/ui/useMessageHeights.ts:411-552`）。宽度、字体或布局变化时按 `layoutRevision` 重测，阅读历史时启用浏览器滚动锚定。设置中的 `virtualListOverscan` 仍只有默认值、类型和 UI，运行时没有被读取。因此列表实际为全量组件常驻加离屏绘制跳过与估高占位，而非窗口化。
 
 ## 9. 桌面端与移动端使用不同引擎
 
@@ -402,13 +425,15 @@ V2 当前常量为：
 与核心渲染器直接相关的自动测试目前包括：
 
 - `useMarkdownAst.test.ts`：同一 batch 内路径索引和 Patch 操作；
-- `parseVcpRole.test.ts`：VCP 工具结果/摘要去重；
-- `useStreamingMessageSources.test.ts`：buffer replay、delta 和 complete。
+- `parseVcpRole.test.ts`：VCP 工具结果/摘要去重、`JEV` 自然语言调用；
+- `useStreamingMessageSources.test.ts`：buffer replay、delta 和 complete；
+- `RichTextRenderer.lifecycle.test.ts`：静态/流式渲染与时间戳批次、稳定区交接等生命周期场景；
+- `tokenizerService.test.ts`：Worker 分词、传输会话与增量结果；
+- `useRendererBlockMounting.test.ts`、`useRendererLayoutState.test.ts`：块级挂载回收与布局状态；
+- `astImageIndex.test.ts`、`mermaidRuntime.test.ts`、`sanitizeMermaidSvg.test.ts`、`vcpToolBatchDisplay.test.ts`、`iframeAutoHeight.test.ts`：子树索引、Mermaid 运行时与净化、批次展示、iframe 高度。
 
 在已有人工测试台之外，以下关键链路仍未看到可在 CI 中无人值守判定结果的直接自动测试：
 
-- `RichTextRenderer` 静态、流式和结束交接；
-- V2 stable/pending 边界和异步 latest-buffer 语义；
 - 26 组预设的期望 AST/DOM/截图回归基线；
 - HTML/URL/CSS sanitizer 攻击用例；
 - iframe sandbox 与 Tauri capability 隔离；
@@ -441,6 +466,15 @@ AIO Hub 让渲染器直接理解业务协议：VCP、思考标签、资产 URL�
 | 自研 parser | `src/tools/rich-text-renderer/core/CustomParser.ts` |
 | Tokenizer | `src/tools/rich-text-renderer/parser/Tokenizer.ts` |
 | VCP 块边界与显示恢复 | `src/utils/vcpBlockBoundary.ts`、`src/tools/rich-text-renderer/parser/vcpFenceRecovery.ts` |
+| 时间戳工具返回批次 | `src/utils/vcpToolBatch.ts`、`src/tools/rich-text-renderer/utils/vcpToolBatchDisplay.ts`、`components/nodes/VcpRoleNode.vue` |
+| 分词传输协议 | `src/tools/rich-text-renderer/parser/tokenizerProtocol.ts`、`parser/tokenizerTokenDelta.ts`、`parser/tokenizerService.ts` |
+| 图片子树索引 | `src/tools/rich-text-renderer/utils/astImageIndex.ts` |
+| 块级展示回收 | `src/tools/rich-text-renderer/composables/useRendererBlockMounting.ts` |
+| 代码查看器 | `src/tools/rich-text-renderer/components/nodes/code-block/CodeMirrorSourceViewer.vue`、`codeViewerTheme.ts` |
+| Mermaid 运行时与净化 | `src/tools/rich-text-renderer/utils/mermaidRuntime.ts`、`sanitizeMermaidSvg.ts` |
+| iframe 自动高度 | `src/tools/rich-text-renderer/utils/iframeAutoHeight.ts` |
+| 流式装饰 | `src/tools/rich-text-renderer/utils/streamStardust.ts`、`streamTextTint.ts` |
+| CommonMark 对照脚本 | `scripts/rich-text/`（`bun run rich-text:commonmark`） |
 | AST/Patch 类型 | `src/tools/rich-text-renderer/types.ts` |
 | Patch store | `src/tools/rich-text-renderer/composables/useMarkdownAst.ts` |
 | 节点分派 | `src/tools/rich-text-renderer/components/AstNodeRenderer.tsx` |

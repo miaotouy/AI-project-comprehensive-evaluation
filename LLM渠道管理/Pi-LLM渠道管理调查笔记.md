@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/ai/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：只读源码梳理 `packages/ai` 的 Provider/认证/模型目录与 `packages/coding-agent` 的 ModelRuntime 组合层；未运行真实 Provider 请求
 >
-> 调查范围：Provider 与 Endpoint 实体、配置生命周期及配置文件/CLI/TUI/Web/桌面端入口、凭据边界、模型目录、协议 Adapter、运行时选路、重试与故障转移、可观测性；Web/桌面端仅检查仓库内对应包和 RPC 契约
+> 调查范围：Provider 与 Endpoint 实体、配置生命周期及配置文件/CLI/TUI/Web/桌面端入口、凭据边界、模型目录、协议 Adapter、运行时选路、重试与故障转移、可观测性；Web 端仅检查 p2 插件
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -86,7 +86,7 @@ CLI/会话层 (AgentSession)
 - **CLI**：帮助和命令分发确认 CLI 提供 `--list-models`、`pi update --models`、`pi auth check`、`auth print-api-key` 和 `auth print-bearer-token`，分别用于查看可用模型、刷新模型目录、检查凭据就绪度和显式输出凭据（`cli/args.ts:244-290`、`cli/auth-command.ts:17-45`）。本次未找到 CLI 的 Provider create/edit/copy/enable/disable/delete/import/export 命令；`--api-key` 是当前运行的临时凭据，不会写入渠道配置。`pi update --models` 只刷新目录缓存，不创建或修改 Provider。
 - **TUI**：交互命令处理器确认 `/login` 可按 Provider 选择 OAuth 或 API key，成功后调用 `ModelRuntime.login` 并同步凭据和可用性；`/logout` 只删除 `/login` 保存的凭据，明确不改环境变量和 `models.json`（`interactive-mode.ts:2955-2979,5227-5257,5635-5645,5361-5402`）。`/model` 负责查看和选择当前可用模型，触发模型目录刷新；`/reload` 重新加载扩展、资源并重新读取 `models.json`，不是渠道编辑器（`interactive-mode.ts:5683-5770`）。因此 TUI 对已有内置渠道和通过配置/扩展出现的新渠道都能做认证、登出和模型选择，但不能新增、复制、编辑 Endpoint、启停或删除渠道；删除扩展注册的 Provider 只存在于扩展 API 的 `unregisterProvider`，不是用户 TUI 操作（`core/model-runtime.ts:733-786`）。
 - **导入、导出与连接测试**：TUI/CLI 的 `/import`、`/export` 和 `--export` 针对 session JSONL/HTML，不是渠道配置（`interactive-mode.ts:5773-5829`、`cli/args.ts:288-289`）。CLI `auth check` 返回 `ready/not_ready/invalid`，可选刷新 OAuth，但 `ModelRuntime.checkAuth` 只检查凭据解析，不发真实 Provider 请求（`cli/auth-check.ts:22-52`）；本次未找到独立的真实连接测试入口。`/login` 的 OAuth/API key 登录可能访问认证服务，但它是认证流程，不应推断为通用 Endpoint 连通性测试。
-- **Web、server/client 与桌面端**：仓库内未找到 Web UI 或桌面应用目录（本次按 `*.html`、`*.tsx`、`*.jsx`、`*.vue`、`*.svelte` 检查仅见导出 HTML 模板）。`packages/server` 的 `PiServerService` 只要求宿主提供会话和模型列表/创建/打开能力，协议的模型快照包含 Provider、模型元数据和认证布尔值，但没有渠道配置 CRUD、凭据或连接测试命令（`packages/server/src/types.ts:54-60`、`packages/protocol/src/schemas.ts:47-73`）。`packages/client` 只是该会话协议的客户端。因此 Web/桌面端对渠道管理记为**未找到**，而非“不适用”；若外部宿主自行实现 UI，其行为不属于当前仓库源码可确认范围。
+- **Web 与桌面端**：仓库内有 p2 自托管 Web 应用（`apps/p2`，Chord 插件 + React），模型相关插件是 `apps/p2/plugins/models` 与 `apps/p2/plugins/login`：前者读 models.json 的免凭据快照、合成 Provider、提供模型摘要与选择，后者提供登录入口，Web 端只有 `ModelPicker.tsx` 这样的选择器，没有渠道 CRUD 页面。仓库没有原生桌面应用；旧的 `packages/server`、`packages/client`、`packages/protocol` 已随重组删除。因此 Web/桌面端对渠道管理记为**未找到编辑入口**，而非“不适用”；若外部宿主自行实现 UI，其行为不属于当前仓库源码可确认范围。
 - **凭据生命周期**：登录写入 `auth.json`，登出通过 `AuthStorage.delete` 删除指定 Provider 的存储凭据（`core/auth-storage.ts:474-483`）；运行时 key 由 `setRuntimeApiKey/removeRuntimeApiKey` 管理，不持久化（`core/model-runtime.ts:536-559`）。由此产生“已有渠道可登出”与“新建渠道不能由 TUI 删除”的差异：前者删除的是凭据记录，后者的 Provider 定义仍来自 `models.json` 或扩展。
 
 ## 3. 凭据、Header 与代理边界
@@ -190,7 +190,7 @@ CLI/会话层 (AgentSession)
 
 - 未运行真实请求，`checkAuth` 与真实链路的一致性未实测。
 - 未运行 `/login`、`/logout`、`/model`、`/reload`、`pi auth check` 或 `pi update --models`，因此文件变更后的热加载、凭据同步、模型选择器显示和目录刷新行为仍以静态代码与文档为依据。
-- 未运行或接入外部 Web/桌面宿主；server/client 的“未找到渠道管理 API”结论仅基于当前协议、服务接口和仓库文件搜索。
+- 未运行或接入外部 Web/桌面宿主；p2 的“未找到渠道编辑入口”结论仅基于其插件、Web 组件与仓库文件搜索。
 - `data/*.json` 构建期生成，本次未检查生成后的实际模型数与价格数据。
 - 代理（`httpProxy`）注入后的各 SDK 消费路径未逐层追完。
 - OAuth 各 Provider 流程（device-code/PKCE/回调）仅在 `auth/oauth/` 静态阅读，未运行。
@@ -215,6 +215,6 @@ CLI/会话层 (AgentSession)
 - `packages/coding-agent/src/cli/args.ts:244-305`：CLI 命令及选项；`cli/auth-command.ts:17-45`：auth 子命令；`cli/auth-check.ts:22-52`：凭据就绪检查
 - `packages/coding-agent/docs/models.md:1-3,92-92,132-145,300-335`：models.json 的添加、重载和已有 Provider 覆盖语义；`docs/custom-provider.md:188-217`：扩展 Provider 注销的运行时 API
 - `packages/coding-agent/src/core/remote-catalog-provider.ts:45-131`：pi.dev 目录叠加
-- `packages/server/src/types.ts:54-60`：server 服务边界；`packages/protocol/src/schemas.ts:47-73`：模型快照字段
+- `apps/p2/plugins/models/`（model-config、provider-config、models、contract）、`apps/p2/plugins/login/server.ts`、`apps/p2/src/web/ModelPicker.tsx`：p2 的模型配置与登录边界
 - `packages/coding-agent/src/core/model-resolver.ts:620-700`：初始模型选择
 - `packages/ai/src/utils/retry.ts:162-211`：消息层重试；`utils/provider-retry.ts:105-125`：SDK 层重试

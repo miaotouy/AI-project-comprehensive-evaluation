@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试
 >
@@ -81,6 +81,10 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - 画布项目有稳定 ID（`cp_{yyyyMMdd}_{shortId}`，`web-canvas/utils/id.ts:22`）、名称、模板、入口文件与创建/更新时间；项目元数据与索引分别落在 `.canvas.json` 与 `projects.json`（`web-canvas/ARCHITECTURE.md` §2）。
 - **事实源是磁盘文件 + Git**：常规编辑直接写盘，不使用内存 VFS；审批候选内容例外，只存在于瞬时覆盖层。画布打开后，store 会递归监听当前项目目录，外部编辑器的改动经合并后刷新 Git 状态并通知编辑器和预览（`canvasStore.ts:118-171`、`useCanvasStorage.ts:163-173`）。画布与聊天的衔接有两个用户侧入口：聊天输入区内置"画布控制"（`MiniCanvasControl.vue`，绑定/新建/预览/跳转管理）与输入工具栏的 web-canvas 开关（`MessageInputToolbar.vue:163-196`）；但**没有把聊天中模型生成的 HTML 一键转入画布的通道**（本次未找到此类入口，`rich-text-renderer` 中无 web-canvas 引用）。
 - 项目索引与元数据分离、索引可修复（`repairProject`，`canvasStore.ts:511`）。
+
+### 1.4 媒体输出：任务对象 + 资产对象
+
+媒体生成不走消息文本，而是"任务 + 资产"两层对象：`useMediaGenerationManager` 为每次生成建立带状态流转（排队、处理中、完成、失败/取消）、取消与超时控制的任务，任务结束后结果写入资产系统并带 `type: "generated"` 的来源元数据与衍生数据，消息附件再引用资产。协议侧由 `packages/llm-core/src/providers/openrouter-media.ts` 新增 OpenRouter 的图片、音频与视频任务三类适配器，把尺寸、比例、分辨率、质量、种子与输出编码映射到上游请求；参考图在本地保留结构化引用，由原生 transport 转成 data URL。资产与任务的绑定、工作区状态与预览表面见媒体创作笔记。
 
 ## 2. 增量生成、更新与最终化
 
@@ -166,7 +170,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - **聊天会话**：每会话一个 JSON 文件（`{appConfigDir}/llm-chat/sessions/{sessionId}.json`，`useChatStorageSeparated.ts:98-242`），另有 `sessions-index.json` 索引；保存时内容比对避免无谓写盘、防抖批量保存（:642-660）、目录扫描自愈索引（`syncIndex` :321）。恢复 = 启动加载索引 -> 按需 `loadSession`。导出/分享属 Chat 类目，本次未展开。
 - **画布项目**：物理文件 + `.canvas.json` 元数据 + `projects.json` 索引（原子写、可修复）；健康检查区分缺失、未登记、损坏三种状态（`CanvasService.performHealthCheck`）。分享/导出途径为 `openInVSCode`（`canvasStore.ts:527`）与 Git 提交本身；未找到打包导出/分享链接功能。
-- **媒体生成**：任务先进入所有媒体工作区共享、由 `maxConcurrentTasks` 限制的模块级队列，获得槽位后再发送请求；结果经 `importAssetFromBytes`/`importAssetFromPath` 进入资产系统（`useMediaGenerationManager.ts:91-111,727-756,853-886`），origin 标记 `type: "generated"`，并写衍生数据 JSON（:912 起）；消息附件引用这些 Asset，构成"生成 -> 入库 -> 可复用"链（G1 级物化）。
+- **媒体生成**：任务先进入所有媒体工作区共享、由 `maxConcurrentTasks` 限制的模块级队列，获得槽位后再发送请求；任务状态机覆盖排队、执行、取消与超时，异步任务通过任务管理器跟踪。结果经 `importAssetFromBytes`/`importAssetFromPath` 进入资产系统（`useMediaGenerationManager.ts`），origin 标记 `type: "generated"`，并写衍生数据 JSON；消息附件引用这些 Asset，构成"生成 -> 入库 -> 可复用"链（G1 级物化）。转到 VCP 分布式调用时，图片类结果以 `data:` URL 形式随工具结果回传，避免远端节点无法访问本地 asset 路径（见外部执行体笔记的分布式媒体结果一节）。
 - **HTML 预览导出**：Blob URL 新窗口打开（`HtmlInteractiveViewer.vue:636-649`），可另存为单文件；无版本概念。
 
 ## 9. 模型回流、对象感知与持续维护
@@ -184,7 +188,8 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
   - 身份绑定（三个入口）：Agent 设置页的 `canvas-bound-id`（`web-canvas.registry.ts:41-54`）；聊天输入区的 `MiniCanvasControl`（`MiniCanvasControl.vue:70-93`，把所选画布写入工具的 canvasId 设置）；隐式建画布后的 `canvas:auto-created` 自动绑定（:125-131）。
   - 身份绑定的兜底与限制：无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）；项目文件、Git 变更和错误上下文都按 canvasId 读取，但 watcher 一次只绑定 store 当前打开的画布。
 - **聊天（有限回流）**：模型侧可感知的只有上下文历史（消息文本本身）；"重新解析"与"续写"（`isContinuation`，`message.ts:385-389`）允许对已有节点继续生成。`llm-chat.registry.ts:270-532` 虽有 10 个 `agentCallable: true` 方法，但全部是**智能体管理**——agent 的列出/搜索/读取/设置、预设消息 CRUD 与查找替换（`find_replace_in_presets`）、导入导出——**不针对会话中已生成的输出消息**；本次未找到模型对会话消息对象的"列出/读取/定向修改"工具方法。
-- **媒体生成**：任务与资产结果关联（`mediaGenStore`），模型不可直接操作资产。
+- **媒体生成**：模型通过 `media-generator` 的 `generate_<model>` 方法直接发起生成，任务与资产结果关联（`mediaGenStore`），模型可读取任务状态但不可直接读改资产字节；生成参数与提示词由模型控制，结果落资产库后由消息附件或画布引用。
+- **子智能体与后台任务**：模型可以通过 `sub-agent` 工具把输出任务委派给另一个 Agent，输出物是子会话中的标准消息节点与任务快照；任务中心、伴生分栏和审批详情读取同一快照，父会话只收到结果消息。这使"输出对象"扩展到跨会话的持续任务面，其运行链路见 Agent 工具笔记第 11 节。
 
 ## 10. 生命周期、资源治理与性能
 
@@ -197,7 +202,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 11.1 验证体系（未运行）
 
-- 本轮更新前的调查未运行测试；本轮尝试按锁文件安装依赖，但本机 Bun `1.2.5` 低于仓库声明的 `1.3.11`，`bun install --frozen-lockfile` 长时间停在依赖解析阶段后被终止，针对性测试未实际启动。以下为测试文件清单：
+- 未运行测试：本机 Bun `1.2.5` 低于仓库声明的 `1.3.11`，按锁文件安装依赖停在解析阶段后终止，针对性测试未启动。以下为测试文件清单：
   - `rich-text-renderer`：`composables/__tests__/useMarkdownAst.test.ts`、`parser/block/__tests__/parseVcpRole.test.ts`；
   - `llm-chat`：`useStreamingMessageSources.test.ts`、`emptyResponseDiagnostics.test.ts`、`message-format-processors.test.ts`、`sessionManagers.test.ts`、`PipelineEngine.test.ts` 等 10 个文件；
   - `tool-calling`：`__tests__/tool-calling.test.ts`（协议解析/执行器）；另有 `web-distillery.registry.test.ts`。
@@ -266,4 +271,6 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - `src-tauri/src/commands/canvas_window.rs:45-118,160-173`：画布独立窗口创建与清理
 - `index.html:6-8` 与 `src-tauri/tauri.conf.json:15-23`：应用 CSP 与 asset 协议（实现与配置并存）
 - `src/tools/tool-calling/core/executor.ts:156-169,177-219`：安全策略与执行入口
-- `src/tools/media-generator/composables/useMediaGenerationManager.ts:853-912`：生成媒体资产入库
+- `src/tools/media-generator/composables/useMediaGenerationManager.ts`：生成任务状态机、队列与资产入库
+- `packages/llm-core/src/providers/openrouter-media.ts`：OpenRouter 图片/音频/视频任务适配器（`:19-173`）
+- `src/tools/media-generator/ARCHITECTURE.md`：媒体协议、输入工作区与资产链说明

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码（FastAPI 路由与模型层、Socket.IO 事件处理、Alembic schema 版本、前端 store）
 >
@@ -91,13 +91,16 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 
 ### 1.3 附属模型
 
-- **Folder**：`models/folders.py`（22-33 行），支持树形父子；共享文件夹经 `AccessGrant` 查 user/group/public（`user:*`）授权并取最高权限（`get_shared_folder_ids_for_user`，160-192 行）；
-- **SharedChat**：`models/shared_chats.py`（18-29 行），`id` 即分享 token，`chat` 字段是**分享时刻的 JSON 快照**（26 行），`create`/`update` 分别建快照与重新快照（61-112 行）；
-- **Tag**：`models/tags.py`（18-31 行），复合主键 `(id, user_id)`（31 行），`id` 由 name 小写下划线生成（`replace(' ', '_').lower()`，61/75/98 行）；标签本体存 `Chat.meta.tags`；
-- **频道消息**：`models/messages.py`（39-56 行），字段见下，仅服务 `channel:` 会话：
+- **Folder**：`models/folders.py:20`，支持树形父子；共享文件夹经 `AccessGrant` 查 user/group/public（`user:*`）授权并取最高权限（`get_shared_folder_ids_for_user`，162 行）；
+- **SharedChat**：`models/shared_chats.py:23`，`id` 即分享 token，`chat` 字段是**分享时刻的 JSON 快照**，`create`/`update` 分别建快照与重新快照（`create` 64 行起）；
+- **Tag**：`models/tags.py:18`，复合主键 `(id, user_id)`（31 行），`id` 由 name 小写下划线生成（`replace(' ', '_').lower()`，61/75/98 行）；标签本体存 `Chat.meta.tags`；
+- **频道消息**：`models/messages.py:37`，字段见下，仅服务 `channel:` 会话：
   ```text
   channel_id / reply_to_id / parent_id / is_pinned / content / data / meta
   ```
+- **资源评论**：`models/comments.py` 以资源（会话、笔记、频道消息等）为锚点保存线程化评论，含回复关系与提及；路由提供上下文计数、提及列表、按资源列表、创建、回复与编辑（`routers/comments.py:69-303`）。
+- **通知收件箱**：`models/notifications.py` 的 `notification` 表承载提醒与系统消息，路由提供收件箱列表、未读数、打开事件与已读状态更新（`routers/notifications.py:70-124`），另有推送目标配置（`:167-188`）。
+- **版本历史**：工具、函数、模型与技能各自维护历史表（`models/tool_history.py`、`function_history.py`、`model_history.py`、`skill_history.py`），保存编辑快照供对比与回滚；会话侧仍是 `shared_chat` 的单快照语义，两者不共用机制。
 
 ## 2. 事实源、索引与持久化
 
@@ -154,20 +157,21 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 
 ## 5. 列表、分页、搜索与定位
 
-- GET `/list`（`chats.py:220-259`）：分页 60 条/页（233-235 行），支持 `include_pinned`/`include_folders`/`sort_by`/`sort_dir` 参数；
+- GET `/list`（`routers/chats.py:262`）：分页 60 条/页，支持 `include_pinned`/`include_folders`/`sort_by`/`sort_dir` 参数；
 - `add_active_state_to_chat_list` 依据 `ACTIVE_CHAT_GAP_SECONDS` 标记活跃；
-- 未读：`POST /read`（262 行）批量置已读并返回 `folder_unread_counts`；`POST /{id}/unread`（2092 行）把 `last_read_at` 置 0；
-- 前端读消息经 socket `events:chat`（`socket/main.py:587`）更新 `last_read_at` 并向房间广播 `chat:list`；
-- 搜索：`GET /search`（846 行）→ `Chats.get_chats_by_user_id_and_search_text`（`models/chats.py:1735`）：
-  - 前缀过滤：`tag:` / `folder:` / `pinned:` / `archived:` / `shared:`（1757-1796 行）；
-  - 文本匹配：标题子串或消息内容 JSON 搜索（SQLite 用 `json_each`；PostgreSQL 走同构条件）；SQLite 连接现在注册自定义 `like` 函数（把模式转成正则、两侧 lower 折叠后全匹配）来对齐 ILIKE 语义，标题检索在两种方言下结果一致（`backend/open_webui/internal/db.py:322-363`）；
-  - 附加行为：`tag:` 前缀无结果时自动删标签（875-882 行）；命中片段 `chat_search_snippet` 随行返回（871 行）；
+- 未读：`POST /read`（303 行）批量置已读并返回 `folder_unread_counts`；`POST /{id}/unread`把 `last_read_at` 置 0；
+- 前端读消息经 socket `events:chat`（`socket/main.py:875`）更新 `last_read_at` 并向房间广播 `chat:list`；
+- 搜索：`GET /search`（884 行）→ `Chats.get_chats_by_user_id_and_search_text`（`models/chats.py:2216`）：
+  - 前缀过滤：`tag:` / `folder:` / `pinned:` / `archived:` / `shared:`；
+  - 文本匹配：标题子串或消息内容 JSON 搜索（SQLite 用 `json_each`；PostgreSQL 走同构条件）；SQLite 连接现在注册自定义 `like` 函数（把模式转成正则、两侧 lower 折叠后全匹配）来对齐 ILIKE 语义，标题检索在两种方言下结果一致（`backend/open_webui/internal/db.py:329`）；
+  - 附加行为：`tag:` 前缀无结果时自动删标签；命中片段 `chat_search_snippet` 随行返回；
 - 命中定位（跳转到具体消息）是前端行为，见 Chat UI 笔记。
+- 工作区级全局搜索另有独立入口：`GET /api/v1/search`（`routers/search.py:462`）按关键词在会话标题与消息内容中检索，SQLite 走 `json_each` 展开历史 JSON、PostgreSQL 用等价条件，命中项带标题、片段与消息 id 返回；它与会话内 `/search` 是两条实现，前者跨资源聚合、后者只列会话行。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **双写对齐是单向的**：`reconcile_messages_by_chat_id`（`models/chats.py:1042`）只把快照消息 upsert 进表，不推断删除——`POST /{id}` 的合并策略（`merge_history`，917 行）同样只合并不删，删除只能走独立端点；
-- **批量回填**：一次对齐会先筛出带 role 的消息，再交给 `ChatMessages.upsert_messages` 在一次数据库事务中写入；仍然是 best-effort 回填，失败只记录整次 chat 的告警，不改变快照为权威源的方向（`models/chats.py:1042`、`models/chat_messages.py:294`）。
+- **双写对齐是单向的**：`backfill_messages_by_chat_id`（`models/chats.py:1201`）只把快照消息 upsert 进表，不推断删除——`POST /{id}` 的合并策略（`merge_history`，1070 行）同样只合并不删，删除只能走独立端点；
+- **批量回填**：一次对齐会先筛出带 role 的消息，再交给 `ChatMessages.upsert_messages` 在一次数据库事务中写入；仍然是 best-effort 回填，失败只记录整次 chat 的告警，不改变快照为权威源的方向（`models/chats.py:1201`、`models/chat_messages.py:327`）。
 - **流式增量落库**：生成中 `update_db=True` 的事件按类型写表（`socket/main.py:1057` 起的 event emitter），事件类型到写入行为的映射如下：
   ```text
   status → status_history 追加
@@ -176,9 +180,9 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
   embeds / files → 按 replace 标志追加或覆盖
   source / citation → sources 追加
   ```
-- **并发写入无锁**：`upsert_message` 是读-改-写（226-261 行），usage 合并使用 `merge_usage` 幂等叠加；多实例并发写同一 chat 的最终一致性未做运行验证（见未验证事项）；
-- **Socket 会话身份与清理**：请求处理不再回查共享 SESSION_POOL 取用户，而是经 `get_socket_session_user` 读本 worker 的 Socket.IO 会话（`socket/main.py:314-322`）；SESSION_POOL 仍由心跳维护 last_seen_at，孤儿会话清理改为分批扫描——Redis 后端用 HSCAN 取批、HDEL 批量删（`socket/main.py:200-236`、`socket/utils.py:113-127`）；
-- **取消与清理**：删除/归档/分叉前都会 `stop_item_tasks` 或 409 拒绝，防止半截任务写回；`cleanup_task` 在任务 done 回调中注销（`tasks.py:86-100`）。
+- **并发写入无锁**：`upsert_message` 是读-改-写（300 行起），usage 合并使用 `merge_usage` 幂等叠加；多实例并发写同一 chat 的最终一致性未做运行验证（见未验证事项）；
+- **Socket 会话身份与清理**：请求处理不再回查共享 SESSION_POOL 取用户，而是经 `get_socket_session_user` 读本 worker 的 Socket.IO 会话（`socket/main.py:478`）；SESSION_POOL 仍由心跳维护 last_seen_at，孤儿会话清理改为分批扫描——Redis 后端用 HSCAN 取批、HDEL 批量删（`socket/main.py:231`、`socket/utils.py`）；
+- **取消与清理**：删除/归档/分叉前都会 `stop_item_tasks` 或 409 拒绝，防止半截任务写回；`cleanup_task` 在任务 done 回调中注销（`tasks.py:143`）。
 
 ## 7. 迁移、导入导出与保留策略
 

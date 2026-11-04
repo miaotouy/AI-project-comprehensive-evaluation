@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：静态代码审查；关键词 grep（inlay/iframe/sandbox/eval/Function/pyodide/lua/streaming/reroll 等）定位能力边界，通读生成主链（process/index.svelte.ts 的流式与最终化）、inlay 资产层（process/files/inlays.ts）、消息解析与净化管线（parser/parser.svelte.ts）、图像与语音产出（stableDiff.ts、tts.ts）、插件沙箱（plugins/ 与 apiV3/）、脚本引擎（scriptings.ts、pyworker.ts）及持久化入口（globalApi.svelte.ts、storage/、drive/）
 >

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：只读源码定位目录构建、工具执行链、审批与回注路径；结合仓库 AGENTS.md 与工具 docstring 核验设计意图
 >
@@ -45,7 +45,7 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 4. **结果回注**：`tool_result_storage.py` 维护三层持久化预算（per-tool 上限、per-turn 聚合预算、preview），超出上限的结果落盘到沙箱临时目录并用 preview + 文件引用回填；大小限制只控制上下文膨胀，不构成输出内容过滤。未发现输出侧的信任标记。
 
-执行边界：同库携带 `tools/environments/`（local/ssh/docker/modal/daytona/singularity/vercel_sandbox 等后端），容器类有 `container_cpu/memory/disk` 配置上限，本地执行无强制 sandbox。
+执行边界：同库携带 `tools/environments/`（local/ssh/docker/modal/daytona/vercel_sandbox 六个内建后端；Singularity/Apptainer 已改为插件后端），容器类有 `container_cpu/memory/disk` 配置上限，本地执行无强制 sandbox。
 
 ### 总体调用链
 
@@ -167,7 +167,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 ```
 
 - 本机 `local` backend 裸执行代码，无 sandbox 强制。
-- Docker/Modal/Daytona/Singularity/Vercel Sandbox 提供定义了资源的容器环境。
+- Docker/Modal/Daytona/Vercel Sandbox 提供定义了资源的容器环境；Singularity/Apptainer 由插件后端提供。
 - `tools/environments/` 的容器资源上限为 `container_cpu/container_memory/container_disk` 等 config 字段。
 
 ## 7. 结果回注与 UI 状态
@@ -225,6 +225,8 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 连接工具把托管 Connector 与 MCP 的安装、启用和授权合并为批量操作。桌面端由后端持有 operation 状态并阻塞到每个目标完成、跳过或超时；模型结果只拿到目标终态，不拿授权链接。该工具不能断开、删除或撤销账号，相关动作保留给用户界面或 Portal（`tools/connectors/tool.py:46-70`，`tools/connectors/operation.py`，`tui_gateway/methods_connectors.py`）。
 
+执行器在本快照中把批次进一步规格化：除单次顺序与并发两路外，新增 `execute_tool_calls_segmented`（`agent/tool_executor.py:1927`），把“并行安全段 + 顺序屏障”的分段计划显式化为独立执行入口；批次规划与结果归并逻辑另拆到 `agent/tool_call_batches.py`。工具目录本身也继续外扩：浏览器后端从单一 `tools/browser_tool.py` 拆成 `browser_session*`/`browser_launcher*` 家族，审批侧新增 `tools/approval_yolo.py`，检查点维护新增 `tools/checkpoint_maintenance.py`；插件目录 `plugin-catalog/` 的条目量已从快照前的约百条增长到近千条。
+
 浏览器凭据库是另一条窄工具边界。profile 本地库以 Fernet 加密保存登录、支付卡与地址，工具只暴露不含秘密的句柄和元数据，密码、TOTP 种子及支付字段在服务端解析并按精确 origin 填入页面；秘密不得进入工具结果、日志或会话库。也可接入已安装并解锁的 1Password/Bitwarden（`agent/vault_store.py:1-16,193-293,297-403`，`tools/browser_vault_tool.py`）。
 
 ## 未验证事项
@@ -235,6 +237,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - `.env` 密钥工具（`set-credential`/自带）是否走审批。
 - Anthropic/Bedrock/Codex adapter 对自定义 `tool_calls` 字段的处理细节。
 - 结果持久化跨进程（gateway 长期会话）大结果恢复后再取回，`read_file` 的路径代理校正。
+- 本轮按路径复核了注册表、执行器与审批链的模块归位（新增 segmented 执行入口），未逐行重读 26k 提交范围内全部工具实现；行号引用改为模块级定位。
 
 ## 关键源码索引
 
@@ -248,7 +251,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 - `tools/self_repo_guard.py`：自仓库 git 变更硬阻断。
 - `hermes_cli/plugins.py`：`register_tool`（439）、`discover_plugins`（2284）、`resolve_pre_tool_block`（2608）；`hermes_cli/agent_plugins.py`（便携包兼容层）。
 - `hermes_cli/middleware.py`：`apply_tool_request_middleware`/`run_tool_execution_middleware`。
-- `agent/tool_executor.py`：`execute_tool_calls_concurrent`（758）、`_run_agent_tool_execution_middleware`（482）、`_begin_tool_execution`（665）。
+- `agent/tool_executor.py`：`execute_tool_calls_concurrent`、`execute_tool_calls_sequential`、`execute_tool_calls_segmented`、`_run_agent_tool_execution_middleware`、`_begin_tool_execution`。
 - `agent/conversation_loop.py`：校验与恢复（6370-6439）。
 - `tools/delegate_tool.py`：`_run_single_child`（2076）、`_build_child_agent`（1305）、`tools/delegation_output_schema.py`（结构化输出）。
 - `tools/mcp_tool.py`：`register_mcp_servers`、trust-tier 门控（3909-3926）、`_make_check_fn`。

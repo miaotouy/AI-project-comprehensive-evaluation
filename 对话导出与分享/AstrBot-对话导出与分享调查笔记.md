@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：静态阅读 dashboard 对话 API、服务层、OpenAPI 前端调用与全量备份导出实现；未启动 AstrBot、未发起已鉴权请求或导出文件
 >
@@ -16,9 +16,9 @@
 
 AstrBot 在 Dashboard 提供 E1 数据交换型的批量会话导出：经 `POST /api/v1/conversations/export` 提交一组 UMO 用户标识与会话 ID，服务逐项重新读取持久化会话历史，生成一行一会话的 UTF-8 JSONL，并作为下载响应交付。导出源是 Conversation Manager 保存的 `conversation.history` JSON，不是当前聊天页面 DOM、模型请求 Payload 或平台原始消息事件；每条记录同时携带会话、平台、角色与创建/更新时间元数据（`astrbot/dashboard/services/conversation_service.py:184-243`）。
 
-此链路按会话粒度工作，不提供单消息、范围、分支或字段开关。成功项目按请求顺序写入，单项读取或 JSON 解析失败会记入内部失败列表并跳过；只要至少一项成功，接口仍返回文件，因此调用方不会在响应中取得部分失败明细。前端 API 将响应作为 Blob 接收（`dashboard/src/api/v1.ts:1759-1764`）。
+此链路按会话粒度工作，不提供单消息、范围、分支或字段开关。成功项目按请求顺序写入，单项读取或 JSON 解析失败会记入内部失败列表并跳过；只要至少一项成功，接口仍返回文件，因此调用方不会在响应中取得部分失败明细。前端 API 将响应作为 Blob 接收（`dashboard/src/api/v1.ts:1823-1828`）。
 
-本次未找到对话 JSONL 的导入、预览编辑、图片或文档排版、剪贴板交付、持久化生成历史、分享 URL、访问撤销或敏感字段过滤。仓库另有包含数据库、附件、插件和配置的全量备份 ZIP，属于迁移/备份通道，不能与面向会话交换的 JSONL 混同（`astrbot/core/backup/exporter.py:39-104`）。
+本次未找到对话 JSONL 的导入、预览编辑、图片或文档排版、剪贴板交付、持久化生成历史、分享 URL、访问撤销或敏感字段过滤。仓库另有包含数据库、附件、插件、配置、定时任务与持久化数据的全量备份 ZIP，属于迁移/备份通道，不能与面向会话交换的 JSONL 混同（`astrbot/core/backup/exporter.py:39-110`）。
 
 ## 系统边界与完整主链
 
@@ -37,7 +37,7 @@ Dashboard 选定多个会话（user_id + cid）
 
 ## 1. 入口、导出源与内容口径
 
-导出请求的 schema 只接受 `conversations: list[ConversationRef]`，其中每项必须包含 `user_id` 和 `cid`，没有格式、范围或包含字段参数（`astrbot/dashboard/schemas.py:401-424`）。v1 入口要求 data scope，因此下载是一次受 Dashboard 权限保护的请求，不是匿名公开链接（`astrbot/dashboard/api/conversations.py:113-145`）。
+导出请求的 schema 只接受 `conversations: list[ConversationRef]`，其中每项必须包含 `user_id` 和 `cid`，没有格式、范围或包含字段参数（`astrbot/dashboard/schemas.py:451-452`）。v1 入口要求 data scope，因此下载是一次受 Dashboard 权限保护的请求，不是匿名公开链接（`astrbot/dashboard/api/conversations.py:113-145`）。
 
 服务按请求数组顺序查询 Conversation Manager。每条成功记录的 `content` 来自将 `conversation.history` 反序列化后的对象，并附带 `cid`、`user_id`、`platform_id`、标题、`persona_id` 与时间字段。WebChat 对话自身无标题时，服务会回查对应 PlatformSession 的 display name 作为导出标题；标题查询失败只丢失该回退，不中止导出（`conversation_service.py:255-280,328-411`）。该口径保留持久化历史中已有的结构和内容，但服务不解释或筛选 system、reasoning、工具、错误、附件引用或平台专有字段。
 
@@ -47,7 +47,7 @@ JSONL 的会话顺序即调用方提供的引用顺序；单一会话内部消�
 
 交付物 MIME 类型为 `application/jsonl`，文件名固定前缀 `astrbot_conversations_export_` 加本地时间戳，正文由 JSON 对象以换行连接构成；服务使用 `ensure_ascii=False`，可保留 Unicode 文本而不转义为 ASCII（`conversation_service.py:19-24,213-243`）。文件没有 schema 名称、格式版本、校验和、导出请求元数据或逐行失败标记。
 
-附件是否可离线使用取决于历史内容中的既有表示。导出器没有复制附件文件、下载远端 URL、打包资源或重写本地路径的逻辑；因此 JSONL 本身是结构化文本而非自包含交付物。项目全量备份器才会处理附件、知识库多媒体、配置和插件目录，但该 ZIP 用于整体数据恢复，不是本 JSONL 的伴随资源包（`astrbot/core/backup/exporter.py:39-55`）。
+附件是否可离线使用取决于历史内容中的既有表示。导出器没有复制附件文件、下载远端 URL、打包资源或重写本地路径的逻辑；因此 JSONL 本身是结构化文本而非自包含交付物。项目全量备份器才会处理附件、知识库多媒体、配置、定时任务和插件目录，但该 ZIP 用于整体数据恢复，不是本 JSONL 的伴随资源包（`astrbot/core/backup/exporter.py:39-55`）。
 
 本次在 dashboard 对话 API、schema 和服务目录内未找到 JSONL 导入路由或消费者，故不能把该格式称为已确认的往返格式。服务的 `update_history` 允许已授权调用方写入 history，但它接收指定会话的 JSON 数据，未构成对导出 JSONL 的解析、验证和重建闭环（`conversation_service.py:159-182,332-344`）。
 
@@ -80,9 +80,9 @@ JSONL 的会话顺序即调用方提供的引用顺序；单一会话内部消�
 
 ## 7. 关键源码索引
 
-- `astrbot/dashboard/schemas.py:401-424`：会话引用与导出请求契约。
+- `astrbot/dashboard/schemas.py:451-452`：会话引用与导出请求契约。
 - `astrbot/dashboard/api/conversations.py:63-84,113-145,287-293`：下载响应、新旧导出入口与鉴权。
 - `astrbot/dashboard/services/conversation_service.py:229-291`：持久化会话读取、WebChat 标题回退、JSONL 组装与部分失败处理。
 - `astrbot/dashboard/api/router.py:37-59`：v1 路由聚合。
-- `dashboard/src/api/v1.ts:1707-1764`：Dashboard API 封装和 Blob 响应。
-- `astrbot/core/backup/exporter.py:39-104`：与会话导出区分的全量备份范围。
+- `dashboard/src/api/v1.ts:1823-1828`：Dashboard API 封装和 Blob 响应。
+- `astrbot/core/backup/exporter.py:39-110`：与会话导出区分的全量备份范围。

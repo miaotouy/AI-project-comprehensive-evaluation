@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`cad8595aa39620df4246f56918f0962c2aa0263a`（分支：`main`）
+> 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
 > 调查方式：只读盘点根 README、AGENTS.md 与 `src/ts`/`src/lib` 目录注册表；对 Emotion Images、插件系统、记忆、翻译、Multisend、多用户同步、Risu Hub 等候选逐项走“入口 → 状态/对象 → 执行 → 用户结果 → 持久化”主链；核对现有 Risuai 六份类目笔记的去重边界；全部为静态证据，未运行应用
 >

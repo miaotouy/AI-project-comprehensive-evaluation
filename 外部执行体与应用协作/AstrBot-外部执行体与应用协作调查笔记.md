@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：静态复核平台 adapter、注册/登录绑定、统一 webhook、UMO、事件流水线和主动投递；复用 Chat、消息渲染和独特功能笔记；未连接真实 IM 平台
 >
@@ -16,9 +16,11 @@
 
 AstrBot 达到外部控制与交互表面的 `主链确认`（静态证据）。`astrbot/core/platform/sources/` 下 18 个平台适配器（Telegram、Discord、Slack、飞书/Lark、企业微信、钉钉、QQ 官方/OneBot、KOOK、LINE、Mattermost、Misskey、Satori、微信公众平台/微信 OCR 等）各自承担身份、连接、入站事件、命令、会话映射、媒体转换和出站投递，是产品的交互主入口。
 
-平台事件的群对象从“只有群 ID”扩展为可按平台能力补齐名称、头像、所有者、管理员、成员数与成员列表。基类新增异步 `get_group` 契约，Telegram、Discord、Lark、KOOK、LINE、Mattermost、Misskey、QQ 官方、Satori、Slack 与 OneBot 等适配器实现不同程度的查询；受平台权限或 API 限制时返回基本群对象，不把缺失字段伪造成空完整列表（`astrbot/core/platform/astr_message_event.py:511-520`；各平台 `*_event.py` 的 `get_group`）。
+平台事件的群对象从“只有群 ID”扩展为可按平台能力补齐名称、头像、所有者、管理员、成员数与成员列表。基类新增异步 `get_group` 契约，Telegram、Discord、Lark、KOOK、LINE、Mattermost、Misskey、QQ 官方、Satori、Slack 与 OneBot 等适配器实现不同程度的查询；受平台权限或 API 限制时返回基本群对象，不把缺失字段伪造成空完整列表（`astrbot/core/platform/astr_message_event.py:611-635`；各平台 `*_event.py` 的 `get_group`）。Lark 与 QQ 官方的群详情查询另加按客户端共享的 TTL 缓存与超时，避免重复远程调用（`lark/lark_group_info.py`、`qqofficial/qqofficial_group_info.py`）。
 
-Lark 私聊还会保存已知 chat ID，在按 open ID 主动发送被拒后用同一去重 UUID 回退到 chat ID；只有失败消息才重试，成功发送不重复。Telegram 论坛 topic 则进入 AstrBot 群 ID 与显示名，形成 `<chat_id>#<thread_id>` 会话边界（`astrbot/core/platform/sources/lark/lark_adapter.py:511-648`；`lark_event.py:196-281`；`telegram/tg_adapter.py:485-553`）。
+Lark 私聊还会保存已知 chat ID，在按 open ID 主动发送被拒后用同一去重 UUID 回退到 chat ID；只有失败消息才重试，成功发送不重复。Telegram 论坛 topic 则进入 AstrBot 群 ID 与显示名，形成 `<chat_id>#<thread_id>` 会话边界（`astrbot/core/platform/sources/lark/lark_adapter.py:540-600`；`telegram/tg_adapter.py:580-680`）。
+
+出站交互组件在近期扩展到一组可移植按钮：消息链中的按钮行由各平台适配器渲染为原生按钮，点击再归一化为入站事件回到流水线。这使 IM 线程除了文字与命令之外，还能承载带业务数据的结构化回传，详见下节“外部交互回流”。
 
 它与 DeepChat 的语义不同：AstrBot 本身就是 IM Agent 宿主，不是从 IM 远程驾驶另一个桌面客户端。横向比较应保留这一区别。
 
@@ -34,8 +36,9 @@ Lark 私聊还会保存已知 chat ID，在按 open ID 主动发送被拒后用�
   -> unified_msg_origin = platform:message_type:session_id
   -> EventBus 入队并交 PipelineScheduler
   -> 唤醒、白名单、会话、限流、安全、预处理、Agent 执行
-  -> MessageChain/result_decorate 按平台能力转换
+  -> MessageChain/result_decorate 按平台能力转换（含可移植按钮行）
   -> adapter 发回原 endpoint 或主动投递目标
+  -> 按钮点击：adapter 解析回调令牌 -> ButtonInteraction 事件回到同一队列
 ```
 
 统一 webhook 路由通过 `/webhooks/platforms/{webhook_uuid}` 将请求分发给对应平台服务，另保留 legacy 与 dashboard 两处兼容别名（配置提示指向 dashboard 侧）；部分平台也支持 socket 或长连接，其中 Satori 与 aiocqhttp（OneBot v11 反向 WS）是出站 WebSocket 客户端形态，连接外部协议网关而不是被动收 webhook。
@@ -49,11 +52,19 @@ Lark 私聊还会保存已知 chat ID，在按 open ID 主动发送被拒后用�
 
 ## 身份、协议与状态映射
 
-平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键，Telegram topic 会把 thread ID 纳入 session ID。唤醒阶段另将事件中的群名或发送者名异步写成 UMO 自动名称，供会话管理表面显示，但不会改写身份键（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-110`）。
+平台配置实例有稳定 id、token/secret、连接模式和 adapter runtime；部分平台经交互式注册/登录绑定。UMO 将平台、消息类型和 session id 统一为 AstrBot 的会话与配置路由键，Telegram topic 会把 thread ID 纳入 session ID。唤醒阶段另将事件中的群名或发送者名异步写成 UMO 自动名称，供会话管理表面显示，但不会改写身份键（`astrbot/core/pipeline/waking_check/umo_auto_name.py:17-114`）。会话隔离在事件入队后、进入流水线前完成：开启 unique_session 时按平台的 `UNIQUE_SESSION_ID_BUILDERS` 规则改写群消息的 session_id，使同一群内的不同发送者成为独立会话（`astrbot/core/event_bus.py:55-130`）。
 
 ## 执行、回流与控制语义
 
 平台用户可通过普通消息、唤醒词、斜杠/注册命令与 AstrBot 交互。结果按平台限制处理 Markdown、长度、流式、附件和交互组件。主动 Agent、cron 和后台任务可向支持主动消息的平台发送结果；`request_agent_stop_all` 等停止入口按 UMO 终止当前 Agent 工作。断线语义分形态：Satori/aiocqhttp 出站连接带心跳与指数退避重连，Telegram 长轮询带恢复，webhook 形态则依赖平台重投。产品表面即 IM 线程本身，执行位置、账号和连接状态在 dashboard 平台管理页展示，接管入口是直接发言或命令。平台消息属于不可信输入，pipeline 内置限流与安全步骤后才会进入 Agent 执行，可进一步触发文件与业务账号副作用。
+
+平台实例的停用与删除也有一致性处理：删除时先终止 adapter，再让事件总线停止该平台（清掉排队事件并取消在途任务），随后按勾选的清理类别删除关联数据；中途失败会恢复 adapter 并撤销停止标记（`astrbot/dashboard/services/config_service.py:1455-1493`、`astrbot/core/event_bus.py:77-102`）。
+
+## 外部交互回流：可移植按钮
+
+消息链新增可移植按钮组件：按钮携带稳定 ID、显示文本、回调或链接动作与样式，按钮行可带整行共享的回调有效期与不支持平台上的文字回退（`astrbot/core/message/components.py:153-247`）。各平台适配器把按钮行渲染为原生按钮；QQ 官方、Telegram、飞书、钉钉、Discord、Slack、LINE、KOOK、Satori、企业微信、企业微信 AI Bot 与 WebChat 支持回调与链接两种动作，Mattermost 只支持回调（链接动作退化为普通链接），OneBot v11、Misskey、微信公众号与微信个人号退化为文字或链接，不触发回调（`docs/zh/dev/star/guides/send-message.md`）。
+
+回调数据不直接放在平台载荷里。出站时把业务数据注册到回调表并换成短令牌，令牌由载荷哈希派生，同时写入内存缓存与 SQLite 的 `button_callbacks` 表，带过期时间，重启后仍可校验（`astrbot/core/platform/button_interaction.py:24-200`）。点击回调由适配器转成统一的按钮交互事件：例如 Telegram 在 `CallbackQueryHandler` 中解析令牌、构造只含按钮交互组件的事件后交回队列（`telegram/tg_adapter.py:462-541`）。唤醒阶段会先校验令牌是否过期，再把该事件只派发给注册了按钮动作过滤器的插件 handler，其余 handler 不参与；插件用按钮动作过滤器声明自己处理的按钮 ID，并从事件读出动作 ID 与业务数据（`astrbot/core/pipeline/waking_check/stage.py:81-192`、`astrbot/core/star/register/star_handler.py:278`）。点击事件走完整流水线，因此白名单、限流与安全步骤同样生效。过期点击统一提示重新发起，不执行插件逻辑；链接动作不经过回调表。
 
 ## 权限、凭据与治理边界
 
@@ -68,6 +79,7 @@ Telegram/Discord/Slack 等使用各自 token，飞书/企业微信/钉钉等还�
 ## 已确认边界与未验证事项
 
 - 未运行真实平台登录、webhook 签名、断线重连、命令同步或限额行为。
+- 可移植按钮在各平台的原生渲染、过期提示与回退文字未在真实 IM 客户端验证；平台支持矩阵来自开发文档，与适配器代码分别核对，未逐个平台点击。
 - 多 IM 主链成立，但不据此声称能接管其他桌面应用的既有任务。
 - “支持平台数量”随 adapter 与外部 API 变化，本文不作长期兼容承诺。
 
@@ -76,6 +88,7 @@ Telegram/Discord/Slack 等使用各自 token，飞书/企业微信/钉钉等还�
 - `astrbot/core/platform/`
 - `astrbot/core/platform/sources/`
 - `astrbot/core/platform/sources/{satori/satori_adapter,aiocqhttp/aiocqhttp_platform_adapter}.py`
+- `astrbot/core/platform/button_interaction.py`、`astrbot/core/message/components.py`（按钮组件）
 - `astrbot/core/platform/platform_metadata.py`
 - `astrbot/core/platform/webhook_server.py`
 - `astrbot/dashboard/api/platform.py`

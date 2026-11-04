@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`（Node 服务端 + 插件架构）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
-> 调查方式：只读源码梳理 + 尽力而为运行验证。通读 `Plugin/MediaRenderer/`（manifest、MediaRenderer.js 全文 1701 行、AudioSynthesisWorker.js、README、config.env.example），node 解析 15 个媒体插件 manifest，核对 `Plugin.js` hybridservice/asynchronous 分发、`server.js:1471` 回调端点、`modules/messageProcessor.js:827-867` 回注、`WebSocketServer.js:95-144` 分布式回调；运行验证含 `node --check`、音频 Worker 独立实测（成功与错误路径）、FFmpeg 按插件参数实测编码 GIF/MP4
+> 调查方式：只读源码梳理 + 尽力而为运行验证。通读 `Plugin/MediaRenderer/`（manifest、MediaRenderer.js 全文 2194 行、AudioSynthesisWorker.js、README、config.env.example），node 解析 15 个媒体插件 manifest，核对 `Plugin.js` hybridservice/asynchronous 分发、`server.js:1471` 回调端点、`modules/messageProcessor.js:827-867` 回注、`WebSocketServer.js:95-144` 分布式回调；运行验证含 `node --check`、音频 Worker 独立实测（成功与错误路径）、FFmpeg 按插件参数实测编码 GIF/MP4
 >
 > 调查范围：媒体创作类目视角（M2 可编程渲染、M4 插件编排、异步回注、资源白名单治理）；通用工具协议、Agent 审批、分布式任务等机制细节归并 Agent 工具类目；外部模型真实生成与托管浏览器渲染未运行（无 node_modules、无外部 key）
 >
@@ -16,16 +16,16 @@
 
 VCPToolBox 的媒体创作能力是**服务端媒体供给/编排层**：项目本身没有最终用户媒体工作台或聊天 UI，Agent（模型）是主要创作者，通过 VCP 统一工具协议（`<<<[TOOL_REQUEST]>>>` + 中文「始」「末」边界符）调用媒体插件族。媒体主链由四类执行域构成：
 
-1. **外部图像/视频模型 API 插件**（10 个启用的同步图像插件、2 个异步视频插件、2 个 `.block` 禁用插件），结果 URL 回注模型，由模型在消息中嵌入图片/视频/音频标签展示；
+1. **外部图像/视频/配音模型 API 插件**（9 个启用的同步图像插件、2 个异步视频插件、1 个异步配音插件、2 个 `.block` 禁用插件），结果 URL 回注模型，由模型在消息中嵌入图片/视频/音频标签展示；
 2. **MediaRenderer 可编程渲染**（hybridservice/direct，`requiresAdmin`）：HTML/SVG → 托管 Chrome 截图（静态图）或确定性逐帧 + FFmpeg 编码（GIF/MP4/WebM）；AI 合成代码 → Node 子进程生成 PCM16 WAV；
 3. **ImageFileServer 图床/文件服务**：`/pw=[key]/images|files/...` 静态托管全部产物，是媒体结果的持久化真源；
-4. **异步回注链**：异步视频插件（Wan2.1）后台轮询完成后回调 `/plugin-callback/:pluginName/:taskId` 端点，结果落盘为 `VCPAsyncResults/<plugin>-<taskId>.json`，后续请求经占位符注入上下文；分布式节点经 `plugin_callback_forward` 走同一条落盘链。
+4. **异步回注链**：异步视频与配音插件（Wan2.1、MimoDubbing）后台轮询完成后回调 `/plugin-callback/:pluginName/:taskId` 端点，结果落盘为 `VCPAsyncResults/<plugin>-<taskId>.json`，后续请求经占位符注入上下文；分布式节点经 `plugin_callback_forward` 走同一条落盘链。
 
 **核心边界**：媒体事实对象是"插件调用 + 产物文件 + 可选异步 job 文件"，**不存在**任务/历史/资产记录、去重索引、版本或用户可浏览的创作历史 UI；持续性与复用依赖文件服务 URL 的再次引用。资源白名单（单资源 50MB/总 100MB/每步 24 资源/源码 2MB/帧数上限/30M 采样数）、脚本白名单（内置 Anime.js/Three.js/Pixi.js）、页面运行时网络全阻断、云元数据地址常禁、音频 requireAdmin 6 位验证码构成治理契约。
 
-MediaRenderer 现增加 Windows 鼠标主题生成：模型提交一份包含角色 SVG 的 HTML，服务端要求 15 个核心角色各声明一次（`pin`、`person` 可回退至箭头），在 16--256 像素的指定档位逐个截图；静态角色编码为多尺寸 CUR，带确定性绝对时间渲染函数的角色编码为 ANI。结果写为含光标、预览、原始 HTML、安装/卸载脚本和 `theme.json` 的 ZIP，并另托管总览 PNG。它扩大了可编程媒体的交付物类型，但 ZIP 内的源文件与元数据仍只是可下载文件，不形成可查询、可版本化的媒体工程对象（`Plugin/MediaRenderer/MediaRenderer.js:1667-2058`、`CursorThemePackager.js:11-685`）。
+MediaRenderer 现增加 Windows 鼠标主题生成：模型提交一份包含角色 SVG 的 HTML，服务端要求 15 个核心角色各声明一次（`pin`、`person` 可回退至箭头），在 16--256 像素的指定档位逐个截图；静态角色编码为多尺寸 CUR，带确定性绝对时间渲染函数的角色编码为 ANI。结果写为含光标、预览、原始 HTML、安装/卸载脚本和 `theme.json` 的 ZIP，并另托管总览 PNG。它扩大了可编程媒体的交付物类型，但 ZIP 内的源文件与元数据仍只是可下载文件，不形成可查询、可版本化的媒体工程对象（`Plugin/MediaRenderer/MediaRenderer.js:1683-2194`、`CursorThemePackager.js:11-697`）。
 
-**证据分层**：全链为源码事实；`node --check` 通过、音频 Worker 成功/失败两路径实测、FFmpeg GIF/MP4 编码实测、15 份 manifest 解析通过（运行验证）；真实渲染输出、外部模型生成、回调端到端注入、托管浏览器进程行为未验证。
+**证据分层**：全链为源码事实；`node --check` 通过、音频 Worker 成功/失败两路径实测、FFmpeg GIF/MP4 编码实测、16 份 manifest 解析通过（运行验证）；真实渲染输出、外部模型生成、回调端到端注入、托管浏览器进程行为未验证。
 
 ## 系统边界与完整主链
 
@@ -95,7 +95,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - 音频：独立 Node 子进程（`runAudioWorker` :1071-1145，无 shell、Windows taskkill 杀进程树 :1051-1069），**不依赖 FFmpeg/浏览器/第三方 npm**；
 - 图像/视频插件：外部模型 API（SiliconFlow、OpenAI 兼容渠道、Gemini 等，完整清单见下方插件族盘点表），全部以 stdio 子进程执行（`Plugin.js:1472-1583` executePlugin：spawn 入口命令、注入插件环境变量与 VCP 环境）。
 
-**图像插件族盘点（15 目录，node 解析 manifest 确认）**：
+**图像插件族盘点（16 个插件目录，node 解析 manifest 确认；MediaRenderer 因两组命令分两行列示）**：
 
 | 插件 | 类型 | 命令 | 外部依赖 |
 |---|---|---|---|
@@ -112,6 +112,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 | ComfyUIGen | **.block 禁用** | ComfyUIGenerateImage | 外部 ComfyUI（含 workflow-template-cli） |
 | AgnesVideoGen | asynchronous/stdio | submit / query / concat | Agnes Video API；concat 走本地 ffmpeg 重编码 |
 | VideoGenerator（Wan2.1VideoGen） | asynchronous/stdio（python） | submit / query | SiliconFlow Wan2.1；后台轮询+回调回注；`webSocketPush` video_generation_status |
+| MimoDubbing | asynchronous/stdio | submitSequence / submit / query | 小米 MiMo 语音大模型（DMXAPI 或官方端点）；SRT/WebVTT/JSON 时间轴 → 24kHz 单声道 WAV；本地 ffmpeg 合成 |
 | ImageFileServer | service/direct | 图片/文件静态托管 | 无（本机路径） |
 | MediaRenderer | hybridservice/direct | RenderImage / RenderAnimation / GenerateAudio | 托管 Chrome + FFmpeg + sharp/puppeteer/mime-types |
 | MediaRenderer | hybridservice/direct | GenerateCursorTheme | 托管 Chrome + sharp；编码 CUR/ANI 与 ZIP，不依赖外部模型 API |
@@ -182,7 +183,7 @@ Agent 输出 <<<[TOOL_REQUEST]>>>（含 html/svg、width/height、资源 URL）
 - 异步回注以文件为事实源（VCPAsyncResults/），配合占位符在后续请求注入——与 MagiAgent、AgentAssistant 共用同一回注机制，但回调端点无鉴权（独特功能笔记能力五已记录，本页不重复展开）。
 
 **已确认边界**：
-- 无媒体历史/资产库/去重索引/版本/工程对象；无用户媒体工作台与预览器；无任务取消与重启恢复（本次在 `Plugin/` 15 个媒体插件目录、`Plugin.js`、`server.js`、`modules/messageProcessor.js` 范围内搜索，未找到此类模块；不构成对仓库其他角落的绝对断言）。
+- 无媒体历史/资产库/去重索引/版本/工程对象；无用户媒体工作台与预览器；无任务取消与重启恢复（本次在 `Plugin/` 16 个媒体插件目录、`Plugin.js`、`server.js`、`modules/messageProcessor.js` 范围内搜索，未找到此类模块；不构成对仓库其他角落的绝对断言）。
 - VCPDistributedServer 目录不在本仓库（属 VCPChat）；本快照内的分布式回注链是 `WebSocketServer.js:871` 的 `plugin_callback_forward` 消息类型。
 - README 声明的"复用根项目 Puppeteer/Sharp/mime-types"依赖根项目安装依赖；本机未安装（见下）。
 

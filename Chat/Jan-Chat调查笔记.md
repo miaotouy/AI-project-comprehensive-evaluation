@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
 > 调查方式：只读源码梳理（前端 store/hooks/Rust commands 全量行级阅读）；未修改 Jan 仓库
 >
@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-Jan 现在有普通 Chat、桌面 Cowork 和独立 Agent CLI/TUI 三个对话表面。普通 Chat 沿用 AI SDK `useChat` + `CustomChatTransport`、thread 文件/移动 SQLite 的链；Cowork 另由前端循环持有执行权，会话存入设置后端；CLI 使用 Rust Agent 核心与项目会话。以下旧版主链只描述普通 Chat，不能推及 Cowork 或 CLI（`web-app/src/lib/coworkRunner.ts:15-25`、`web-app/src/hooks/useCoworkSessions.ts:41-52,323-348`、`src-tauri/jan-cli/src/main.rs:24-50`）。
+Jan 现在有普通 Chat、桌面 Cowork 和独立 Agent CLI/TUI 三个对话表面。普通 Chat 沿用 AI SDK `useChat` + `CustomChatTransport`、thread 文件/移动 SQLite 的链；Cowork 另由前端循环持有执行权，会话存入设置后端；CLI 使用 Rust Agent 核心与项目会话。以下旧版主链只描述普通 Chat，不能推及 Cowork 或 CLI（`web-app/src/lib/coworkRunner.ts:411` 的 `runTurn`、`web-app/src/hooks/useCoworkSessions.ts`、`src-tauri/jan-cli/src/main.rs:229` 的命令树）。
 
 关键事实：
 
-1. **三个 store 协作**：`useThreads`（线程列表/排序/搜索/增删改）、`useMessages`（乐观写 + 异步持久化）、`useChatSessions`（AI SDK 会话与流状态）；`$threadId.tsx`（1863 行）是线程页中枢，承载分支/编辑/续写/上下文扩展全部仲裁。
+1. **三个 store 协作**：`useThreads`（线程列表/排序/搜索/增删改）、`useMessages`（乐观写 + 异步持久化）、`useChatSessions`（AI SDK 会话与流状态）；`$threadId.tsx`（约 2500 行）是线程页中枢，承载分支/编辑/续写/上下文扩展全部仲裁。
 2. **流式管线**：`experimental_throttle: 50`（只节流 UI 状态）、`resume: false`（重启不恢复未完成回合）；transport 实例按 sessionId 复用；推理参数（temperature/top_k 等）不经 AI SDK 层，而是经 `createCustomFetch` 注入 HTTP body。
 3. **上下文管理在 transport 内**：`max_context_tokens>0` 时按 `auto_compact` 开关选择模型总结或纯截断；`finishReason==='length'` 且 token 消耗达到上下文 90% 时冻结部分消息并提示扩容，扩容按阶梯 `<8192→8192→32768→×1.5` 逐级提升。
 4. **分支/编辑**：`ensureBranched` + `parentId` 树 + `makeSibling` 产生新版；Continue 原地续写（`setContinueFromContent`，不 fork）；编辑消息只保留纯文本（媒体 content 丢失回退），助理编辑不重新生成；删除与编辑在流式态禁用。
@@ -37,7 +37,7 @@ Cowork 进入 `web-app/src/routes/cowork.tsx:150-191`，模型必须支持 tools
 
 ```text
 ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/摄取 → 持久化 userMessage 并写 parentId → sendMessage）
-→ useChatSDK → CustomChatTransport.sendMessages（custom-chat-transport.ts:1102-1519）
+→ useChatSDK → CustomChatTransport.sendMessages（`custom-chat-transport.ts:1382`）
    模型创建（createModelOrAbort：合并模型采样默认/线程参数/reasoning 参数；llamacpp 固定 slot 0，并以 thread_id 交给本地引擎切换 KV 状态）
    → refreshTools → 上下文管理（compact/trim）
    → 消息清洗链（coalesce / resolveOrphan / 音视频编码 / 剔除不支持的图片 part）
@@ -74,7 +74,7 @@ ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/�
 
 - **Thread 目录 + JSONL 整文件重写**（`helpers.rs:34-44`）：每次写入全量 `File::create`，长会话每轮 O(消息数) 文件 I/O；per-thread 锁串行化但无增量维护。【代码确认】
 - **`resume:false`**：不恢复未完成回合；初始消息经 `stickySessionStorage(INITIAL_MESSAGE_PREFIX + threadId)` 恢复发送。【代码确认】
-- **按线程的 KV 状态缓存**（llamacpp）：请求仍固定使用 slot 0，但 transport 同时传入 thread_id；worker 在换入其他线程前保存旧状态、再恢复同一模型和配置下的目标线程状态。模型、预设、llama.cpp 构建或模型文件变化会拒绝旧缓存；运行时命中率与多窗口并发行为未验证（`custom-chat-transport.ts:1224-1231`、`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:225-280`、`engine/slots.rs:35-175`）。
+- **按线程的 KV 状态缓存**（llamacpp）：请求仍固定使用 slot 0，但 transport 同时传入 thread_id；worker 在换入其他线程前保存旧状态、再恢复同一模型和配置下的目标线程状态。模型、预设、llama.cpp 构建或模型文件变化会拒绝旧缓存；运行时命中率与多窗口并发行为未验证（`custom-chat-transport.ts` 的 `spreadProviderOptions` 附近、`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:217-290`（`with_slot_state` 与 restore）、`engine/slots.rs`）。
 - **分支树跨重启一致性**：`activeRootId` 存 thread.json 的 metadata；`backfillParentIds` 在发送时铺平 parentId；旧数据迁移完整性未验证。【代码确认（机制）+ 未验证行为】
 - **compactMessages 退化为纯 trim**：摘要失败提示"摘要失败已退回截断"，摘要削减对关键上下文的影响未做质量实测。【代码确认 + 推测】
 - **线程内助手快照**：编辑助手只在线程内生效（快照），线程内 SamplerPopover 编辑则"快照 + canonical 镜像"双写。
@@ -92,8 +92,8 @@ ChatInput.handleSendMessage → $threadId.processAndSendMessage（附件合并/�
 
 - 前端中枢：`web-app/src/routes/threads/$threadId.tsx`（分支/编辑/续写/错误挂载）
 - 输入框/发送/队列：`web-app/src/containers/ChatInput.tsx`、`web-app/src/hooks/usePrompt.ts`、`web-app/src/stores/message-queue-store.ts`
-- transport 与上下文：`web-app/src/lib/custom-chat-transport.ts`（L1102-1519）、`web-app/src/lib/context-manager.ts`
-- 本地引擎缓存：`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:225-332`、`engine/slots.rs`
+- transport 与上下文：`web-app/src/lib/custom-chat-transport.ts`（`sendMessages :1382`）、`web-app/src/lib/context-manager.ts`
+- 本地引擎缓存：`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:217-290`、`engine/slots.rs`
 - 消息转换与分支：`web-app/src/lib/messages.ts`、`completion.ts`、`web-app/src/lib/message-branching.ts`
 - Rust 持久化：`src-tauri/src/core/threads/commands.rs`、`helpers.rs`、`db.rs`、`constants.rs`
 - 前端 store：`web-app/src/hooks/useThreads.ts`、`useMessages.ts`、`use-chat.ts`、`web-app/src/stores/chat-session-store.ts`

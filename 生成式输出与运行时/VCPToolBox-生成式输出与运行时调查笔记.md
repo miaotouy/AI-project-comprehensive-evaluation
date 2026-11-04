@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：静态代码审查。用 grep/glob 检索 artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/preview/markdown/chat/stream 等关键词，通读 server.js、modules/chatCompletionHandler.js、modules/handlers/streamHandler.js 与 nonStreamHandler.js、modules/vcpLoop/toolCallParser.js 与 toolExecutor.js、vcpInfoHandler.js、Plugin.js、modules/toolCallRecordStore.js、modules/finalContextStore.js、Plugin/OneRing/OneRingDB.js、Plugin/RAGDiaryPlugin、Plugin/VCPForum/VCPForum.js、Plugin/GPTImageGen/GPTImageGen.js、Plugin/MediaRenderer、Plugin/AICodeWorker、routes/forumApi.js、routes/protocolBridge.js；对照 docs/Markdown_Output_Guideline.md、docs/FRONTEND_COMPONENTS.md、docs/PLUGIN_ECOSYSTEM.md 等文档与源码交叉核对
 >
@@ -63,7 +63,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 - 工具调用记录：`recordId`（仅 `config/tool-call-records.config.json` 启用后落库，默认 `enabled:false`，`modules/toolCallRecordStore.js:13-36`）。
 - 论坛帖子：文件名内嵌 UID（`Plugin/VCPForum/VCPForum.js:247-294`）。
 - 日记文件：按角色/日期落盘（`Plugin/DailyNote/dailynote.js:14`）。
-- 记忆计算产物：RiverMemo/TagMemo 的 SQLite artifact 表（`modules/knowledgeBase/schemaManager.js:42-90`）。注意此处 "artifact" 指记忆计算产物（`artifact_sig`），与生成式输出无关，属术语撞名，本次按记忆系统处理、未展开。
+- 记忆计算产物：RiverMemo/TagMemo 的 SQLite artifact 表（建表迁移在 `rust-vexus-lite/src/schema.rs`，JS 侧不再保留独立的 schema 管理器）。注意此处 "artifact" 指记忆计算产物（`artifact_sig`），与生成式输出无关，属术语撞名，本次按记忆系统处理、未展开。
 - 聊天记录：`Plugin/OneRing/OneRingDB.js:23-53` 的 per-agent SQLite（messages/postTurns 表），默认每 agent 保留 100 条（`OneRingDB.js:67-97`），定位是记忆/上下文系统而非用户可见聊天存档。
 
 事实源关系：聊天时间线的事实源在前端；服务端持久化的是从聊天流旁路截取的派生物。
@@ -100,7 +100,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
   托管 Chrome 的进程生命周期由 browserRuntimeManager.js:516 管理。
 - **语言解释器/CLI**：AICodeWorker 调度本机 opencode CLI（analyze/patch/write 三模式，jobId 异步任务，`Plugin/AICodeWorker/README.md:112-149`）；PowerShellExecutor（`requiresAdmin:true`，`Plugin/PowerShellExecutor/plugin-manifest.json`）、LinuxShellExecutor、SSHManagerService 提供系统命令执行。
 - **完整项目/IDE 工作区**：本次未找到（CodeSearcher 是编译好的搜索二进制，非项目工作区）。
-- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:335`、`Plugin.js:1577`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js/Pixi.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
+- **依赖提供**：stdio 插件子进程在插件目录 cwd 下运行（`Plugin.js:390,1728`），MediaRenderer 复用根项目 puppeteer/sharp（`Plugin/MediaRenderer/README.md:49-51`），Anime.js/Three.js/Pixi.js CDN 标签被重定向到本地 vendor 文件（`Plugin/MediaRenderer/README.md:413-427`）。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -121,7 +121,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **执行位置**：本地主进程（direct/hybridservice 插件 in-process require，Plugin.js:1107）、stdio 子进程（spawn，`shell:true`，Plugin.js:335、1577）、托管 Chrome（browserRuntimeManager.js）、远端节点（WebSocket 分布式，WebSocketServer.js，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
+- **执行位置**：本地主进程（direct/hybridservice 插件 in-process 调用，`Plugin.js:1189` 起 `_executeDirectToolCallWithTimeout`）、stdio 子进程（spawn，`shell:true`，Plugin.js:390,1728、1577）、托管 Chrome（browserRuntimeManager.js）、远端节点（WebSocket 分布式，WebSocketServer.js，本次仅确认广播与审批通道，未深入节点协议）。模型任意代码不进主进程执行——`modules/` 全量检索未发现 `vm.*`/`new Function`/`eval`。
 - **能力授予**：按插件权限边界而非统一能力桥：`requiresAdmin` 插件需验证码（PowerShellExecutor、MediaRenderer GenerateAudio）；AICodeWorker 靠 `ALLOWED_PROJECT_ROOTS` 白名单 + `MAX_CONCURRENT_JOBS` 硬闸门（AICodeWorker/README.md:72-83）；图床路径受 `/pw=<key>/` 保护（server.js:859-868 白名单放行）。网络能力在普通插件内不受限（插件自行 axios/fetch，如 `Plugin/VSearch`），MediaRenderer 渲染环境例外地阻断网络。
 - **宿主动作**：shell 执行、文件读写、定时任务（`timely_contact` → `VCPTimedContacts/` 任务文件，`toolExecutor.js:333-341`、`server.js:997-1046`）、WebSocket 广播均有对应实现；工具审批（Human-in-the-loop）由 `modules/toolApprovalManager.js` 按配置规则执行。
 
@@ -136,7 +136,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 
 存在三类回流路径，均为源码确认：
 
-- **日记回流**（闭环最完整）：模型输出含 `<<<DailyNoteStart>>>` 块 → 解析并落盘（server.js:1303-1417）→ 后续请求中 RAGDiaryPlugin 检索并按 `<!-- VCP_RAG_BLOCK_START -->` 块注入上下文（RAGDiaryPlugin.js:1135），还可按新上下文刷新历史 RAG 块（chatCompletionHandler.js:531-625）。即"模型输出 → 持久化 → 再进入模型上下文"的闭环存在。
+- **日记回流**（闭环最完整）：模型经工具调用写日记（DailyNote 插件的 create/update 命令，文件提交由知识库管理器的后台队列索引）→ 后续请求中 RAGDiaryPlugin 检索并按 `<!-- VCP_RAG_BLOCK_START -->` 块注入上下文，还会按新上下文刷新历史 RAG 块（`modules/chatCompletionHandler.js:565-625` 的 `_refreshRagBlocksIfNeeded`）。早期版本由模型直接输出日记块、服务端解析落盘，这条输出块协议在当前快照已不在服务端链路中，写入统一走工具调用。
 - **工具记录回流**：`ToolCallRecordQuery` 工具允许模型查询工具调用记录（`modules/toolCallRecordStore.js:23` 配置中排除自查询）；`VCPTimeLine`、`OneRingMemo` 提供时间线/记忆读取。
 - **对象感知与定向修改**：VCPForum 支持 `ReadPost`/`ListAllPosts`/`ReplyPost` 按 UID 定向续写（`Plugin/VCPForum/VCPForum.js:349-387`）；AICodeWorker 支持 `query(jobId)` 查任务结果（`Plugin/AICodeWorker/README.md:132-136`）。但对象身份只存在于各插件的自有命名空间（UID/jobId/文件名），无统一对象注册表，模型无法"列出我的全部输出"。
 - **持续维护**：无跨回合的"同一对象继续修改"协议——每次工具调用都是新请求，靠插件自己持久化状态。
@@ -144,8 +144,8 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 ## 10. 生命周期、资源治理与性能
 
 - **请求生命周期**：`activeRequests` Map 登记请求、30 分钟超时自动清理（`server.js:142`、`server.js:353-365`）；关闭时优雅排空（DRAINING 状态拒绝新请求、中断活动请求，`server.js:144-350`）。
-- **流资源**：5 秒 SSE 心跳、90 秒 chunk 空闲判定、`[DONE]` 收尾（`streamHandler.js:241-282`）；上游 body 在中止/完成时 destroy（`streamHandler.js:289`）。
-- **进程资源**：插件子进程带超时与跨平台进程树回收（Windows `taskkill /T /F`、Unix 进程组 SIGKILL，`Plugin.js:270-310`，非 Windows 平台 spawn 带 `detached`）；MediaRenderer 每步独立浏览器上下文、页面即用即关、逐帧临时目录清理（`Plugin/MediaRenderer/README.md:326-334`）；AICodeWorker 强制 `MAX_CONCURRENT_JOBS=1`（`Plugin/AICodeWorker/README.md:81-83`）。
+- **流资源**：5 秒 SSE 心跳、90 秒 chunk 空闲判定、`[DONE]` 收尾（`modules/handlers/streamHandler.js:282` 起的心跳计时器、`:176` 的 90 秒 chunk 空闲上限、`:312` 的 `[DONE]` 收尾）。
+- **进程资源**：插件子进程带超时与跨平台进程树回收（Windows `taskkill /T /F`、Unix 进程组 SIGKILL，`Plugin.js:325`，非 Windows 平台 spawn 带 `detached`）；MediaRenderer 每步独立浏览器上下文、页面即用即关、逐帧临时目录清理（`Plugin/MediaRenderer/README.md:326-334`）；AICodeWorker 强制 `MAX_CONCURRENT_JOBS=1`（`Plugin/AICodeWorker/README.md:81-83`）。
 - **缓存/限额**：可选响应重放缓存（`chatCompletionHandler.js:56-124`，默认关）；工具调用记录保留期清理；OneRing 条数修剪；finalContext 内存滑窗 5 组。多对象/多画布限额概念本次未找到（无对象概念）。
 
 ## 11. 测试、已确认边界与未验证事项
@@ -166,7 +166,7 @@ MediaRenderer 的鼠标主题输出进一步说明这一边界：一份模型生
 - `modules/handlers/streamHandler.js:143` 流式直通与累积；`modules/handlers/streamHandler.js:441` 工具循环；`modules/handlers/nonStreamHandler.js:380` 非流式循环
 - `modules/vcpLoop/toolCallParser.js:74` `parse()`；`modules/vcpLoop/toolExecutor.js:192` `execute()`
 - `vcpInfoHandler.js:117` `streamVcpInfo`；`WebSocketServer.js:583` `broadcast`
-- `Plugin.js:335`/`Plugin.js:1577` stdio 插件 spawn；`Plugin.js:1107` direct 插件
+- `Plugin.js:390`/`Plugin.js:1728` stdio 插件 spawn；`Plugin.js:1189` direct 插件
 - `modules/toolCallRecordStore.js`、`modules/finalContextStore.js:288`、`Plugin/OneRing/OneRingDB.js:23`
 - `Plugin/VCPForum/VCPForum.js:247`、`routes/forumApi.js`、`Plugin/GPTImageGen/GPTImageGen.js:1070`、`Plugin/MediaRenderer/README.md:321`、`Plugin/AICodeWorker/README.md:53`、`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135`
 - `docs/Markdown_Output_Guideline.md`、`docs/FRONTEND_COMPONENTS.md:443`、`OpenWebUISub/`、`SillyTavernSub/`

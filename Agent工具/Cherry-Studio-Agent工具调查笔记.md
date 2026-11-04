@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
-> 调查方式：只读源码梳理（未修改被调查仓库任何文件）；未运行仓库测试/构建，结论均以静态阅读源码为准
+> 调查方式：只读源码梳理（未修改被调查仓库任何文件）；未运行仓库测试/构建，结论均以静态阅读源码为准；三种 Agent runtime 的工具注入分别核对
 >
 > 调查范围：模型可发现、请求并触发的工具，以及注册、执行、审批、安全边界与扩展入口
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Cherry Studio 存在两条彼此独立、但共享部分基础设施（MCP 运行时、命名规则、审批 UI）的 Agent 工具路径：
+Cherry Studio 存在三条彼此独立、但共享部分基础设施（MCP 运行时、命名规则、审批 UI、cherry-tools）的 Agent 工具路径：
 
 1. **普通聊天 MCP 路径**：首次出现的 MCP 运行时服务管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory MCP server；工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 的工具注册表，按 `scope.mcpToolIds` 过滤，`needsApproval`/`defer` 由 `disabledAutoApproveTools` 决定。
 2. **Claude Code Agent 路径**：`src/shared/ai/claudecode/toolRegistry.ts` 是一份声明式注册表，定义每个 SDK 原生工具和进程内 MCP 工具（cherry-tools、agent-memory、assistant、skills）的 `exposure`：`user`、`internal` 或 `disabled`。主进程组合 `disallowedTools`、`canUseTool` 和一组 `PreToolUse` hook，注入 `@anthropic-ai/claude-agent-sdk` 的 `query()`。
@@ -64,7 +64,7 @@ CLAUDE_TOOL_REGISTRY (静态声明: exposure/dependsOn/mcpServer)
 
 ## 1. 两条工具路径的分界
 
-- 普通聊天：工具来源是 mcpServerService 中处于 active 状态的 MCP server，注册进程内共享的工具注册表（`src/main/ai/tools/adapters/registry.ts`，未展开读取但被 `mcpTools.ts:11` 引用），按会话范围过滤后交给 AI SDK 的 provider 原生 tool-calling。曝光级别只有“server 是否 active”和“工具是否在禁用列表”两级，没有 internal/disabled 的静态分层概念。
+- 普通聊天：工具来源是 mcpServerService 中处于 active 状态的 MCP server，注册进程内共享的工具注册表（`src/main/ai/tools/adapters/aiSdk/registerBuiltinTools.ts` 与 `adapters/aiSdk/mcp/mcpTools.ts`），按会话范围过滤后交给 AI SDK 的 provider 原生 tool-calling。曝光级别只有“server 是否 active”和“工具是否在禁用列表”两级，没有 internal/disabled 的静态分层概念。
 - Claude Code Agent：工具来源是 `CLAUDE_TOOL_DEFS`（一份 TS 常量表）+ 该 Agent 绑定的 MCP server 列表（`agent.mcps`）。曝光级别 `user`/`internal`/`disabled` 在 `src/shared/ai/claudecode/toolRegistry.ts:27-42` 明确定义并有注释说明生效点：
   - user：出现在编辑对话框，用户可开关，写回 agent 的禁用工具设置；
   - internal：始终启用、UI 隐藏（例如 Task、AskUserQuestion、ToolSearch）；
@@ -115,7 +115,7 @@ MCP 工具 id 拆成两套：
 
 `syncMcpToolsToRegistry()`（`mcpTools.ts:114-159`）在每次相关会话构建工具集前对齐 `ToolRegistry`：列出 `isActive` 的 server → 逐个 `McpCatalogService.listTools(server.id, {includeDisabled:false})` → 注册/替换/剔除。剔除逻辑区分「server 被停用」与「本次刷新范围内工具消失」两种情况，避免瞬时连接失败导致误删已知工具集（`mcpTools.ts:148-158` 的 `refreshedNamespaces` 门控）。
 
-### 3.2 Claude Code Agent
+### 3.2 Claude Code Agent\n\n（Claude Code 的注入顺序见下条。）
 
 注入时机在 `buildClaudeCodeSessionSettings()`（`settingsBuilder.ts:258-404`）内，按固定顺序构建：cwd → env → plugins → **tool permissions**（`canUseTool`/`hooks`/`disallowedTools`/`toolPolicySnapshot`）→ systemPrompt → **mcpServers**（用户 MCP 桥 + cherry-tools + agent-memory + assistant?）→ mcpToolMetadata → allowedTools 微调 → skills 白名单。会话内热更新（无需重连）通过 `toolPolicySnapshot.update(agent)` 与 `PreToolUse` hook 联动实现——`disabledToolHook` 每次调用都重新查询 `getToolPolicySnapshot(session.id).isDisabled(toolName)`，因此中途禁用某工具会立即在下一次调用生效，不需要重建子进程连接（`settingsBuilder.ts:896-916`）。
 
@@ -129,6 +129,15 @@ MCP 工具 id 拆成两套：
 
 依据：`../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts:258-404`、`../../cherry-studio/src/main/ai/tools/adapters/aiSdk/mcp/mcpTools.ts:114-159`。
 
+### 3.3 Pi / Pi-Durable runtime
+
+Pi 路径不复用 `CLAUDE_TOOL_DEFS`：驱动只向会话提供工具清单与 Cherry 侧的能力注入，原生工具循环由 Pi 包持有。会话可用的工具由驱动导出的 `listPiAvailableTools(mcpIds)` 生成，Pi-Durable 在此基础上过滤掉自己的召回元工具后才把列表交给运行时执行。
+
+Pi 自带一组元工具：`tool_search` 按名检索工具、`tool_call` 直接调用、`codemode` 用一段代码编排多个工具调用（`PI_TOOL_EXEC_TOOL_NAME`），另有 `vcc_recall` 供上下文召回。它们都标注为元工具且自动批准，因此模型的工具发现与批量调用发生在原生侧，而不是宿主逐个工具暴露。宿主侧的注入内容是系统提示、已选 Skill 与 Cherry 选定的 MCP server（经 linked transport 接入），延迟加载的 MCP 工具仍可通过 `tool_search` 与 `codemode` 被发现，嵌套调用复用同一审批闸门。
+
+### 3.4 跨会话自主工具
+
+`cherryAutonomyTools` 这一组内置工具把"另一个 Agent 会话"当作可访问对象：`agent_list` 列出可用 Agent，`session_read` 读取指定会话的消息（topic 与会话共用统一 facade），`session_create` 新建会话并可指定 Agent 与模型。它们与普通工具一样走审批与审计，但作用域跨会话，因此比单个会话内的文件读写更容易放大误操作面。
 ## 4. 模型调用表示与解析
 
 普通聊天走 AI SDK 原生 tool-call/tool-result part（provider 层负责 function-calling 组装），Cherry 只在 MCP 工具创建入口中包一层执行和模型输出转换（`mcpTools.ts:29-66`）。
@@ -302,7 +311,7 @@ canUseTool 只是 SDK 侧的**一层**门控；禁用工具、工作区路径和
 
 ## 11. 扩展机制
 
-### 11.1 用户配置的 MCP
+### 11.1 用户配置的 MCP\n\nMCP 客户端已迁到 `@modelcontextprotocol/client` 2.x（与 `core`/`server` 2.x 同版本族，旧的 `@modelcontextprotocol/sdk` 1.32 仍在依赖里），并支持 SDK v2 的交互式请求：server 可以在调用中途向客户端发起请求，宿主按工具审批同一套通道应答，而不是把交互请求当成普通工具结果。
 
 支持四种 transport：`stdio`（`StdioClientTransport`，真实子进程）、`sse`、`streamableHttp`（均基于 Electron `net.fetch`）、以及内建 server 专用的 `InMemoryTransport`。`sse`/`streamableHttp` 之间有**单向一次性回退**：若配置为 `sse` 但服务端返回 405（表明其实是 Streamable HTTP），或反之遇到 404/405，会自动改用另一种 transport 重试一次；`401`/`403`/`5xx` 不触发回退，以免掩盖真实鉴权/服务端错误（`getTransportCandidates`/`isTransportFallbackError`，`McpRuntimeService.ts:99-117`）。OAuth 走 `McpOAuthClientProvider` + 本机临时 `CallBackServer`（5 分钟超时）完成授权码交换，token 落盘在 `feature.mcp.oauth/<md5(baseUrl)>_oauth.json`，`removeServer()` 时仅在没有其他 server 共享同一 `baseUrl` 才清理该文件（避免误删共享凭据）。
 
@@ -353,11 +362,11 @@ canUseTool 只是 SDK 侧的**一层**门控；禁用工具、工作区路径和
 
 ## 15. 当前 Agent 运行时与工具扩展
 
-Agent 会话已不再只由 Claude Code 承担。运行时注册表同时接入 Claude Code、Pi 与 DeepSeek Harness（DSH）；三者都通过统一的会话服务、模型兼容性判断和审批注册表交给界面，但各自维持独立的协议适配与工具桥。Pi 的 Code Mode 会把工具 schema 转为 TypeScript 引导模型调用；DSH 则以本地 bridge 转译其子 Agent 与 Cherry 工具调用。跨会话投递由 `AgentSessionDeliveryService` 持久化，子 Agent 的创建、发送和结果因此成为可恢复的工具结果，而不是仅存在于当前流中的临时事件。
+Agent 会话已不再只由 Claude Code 承担。运行时注册表同时接入 Claude Code、Pi 与 Pi-Durable；三者都通过统一的会话服务、模型兼容性判断和审批注册表交给界面，但各自维持独立的协议适配与工具桥。Pi 的 `codemode` 把工具 schema 转为 TypeScript 供模型编排调用，工具搜索与延迟加载在原生侧完成；Pi-Durable 复用同一套原生工具安装，同时把会话与命令收据持久化，使后台子 Agent 可跨重启继续。跨会话投递由 `AgentSessionDeliveryService` 持久化，子 Agent 的创建、发送和结果因此成为可恢复的工具结果，而不是仅存在于当前流中的临时事件。
 
 内置 MCP 还包含 `install_mcp_server` 与 `prepare_diagnostic_report`。前者把符合输入约束的服务写入 MCP 配置，仍经内建工具策略与审批链处理；后者为 Support/聊天错误生成诊断报告草稿，工具输入只接受问题描述，默认工具集合与渠道会话均可见。它们扩展的是工具目录的管理与支持面，不绕过既有注册和审批边界。依据：`src/main/ai/mcp/servers/mcpManager.ts`、`assistant.ts:247-350`、`src/main/ai/agents/builtin/builtinAgentCapabilities.ts:62-63`。
 
-工具执行的可靠性边界也有三处明确收紧：DSH 审批拒绝会把用户填写的原因回传给 Agent；MCP 工具结果中的超大图片在进入 Agent 前调用 `clampImageForModel`；filesystem MCP 与 Claude Code 路径都以 realpath/最近存在父目录拒绝逃出工作区的悬空符号链接。依据：`src/main/ai/runtime/dsh/DshBridgeServer.ts:323-324`、`src/main/ai/mcp/McpRuntimeService.ts:21`、`src/main/ai/mcp/servers/filesystem/types.ts`、`src/main/ai/runtime/claudeCode/pathContainment.ts`。
+工具执行的可靠性边界也有三处明确收紧：用户拒绝工具时填写的理由会作为审批结果回传给原生层，模型能看到"为什么被拒"；MCP 工具结果中的超大图片在进入 Agent 前调用 `clampImageForModel` 压缩；filesystem MCP 与 Claude Code 路径都以 realpath 或最近存在父目录拒绝逃出工作区的悬空符号链接。依据：`src/main/ai/mcp/McpRuntimeService.ts`、`src/main/ai/mcp/servers/filesystem/types.ts`、`src/main/ai/runtime/claudeCode/pathContainment.ts`、`src/main/ai/tools/adapters/claudeCode/cherryBuiltinApproval.ts`。
 
 ## 16. 未验证事项与后续调查缺口
 

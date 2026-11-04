@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：直接静态追踪当前源码中的 Electron 主进程、renderer 工具装配、SQLite/LibSQL 持久化、单元测试与会话附件评测夹具；未启动应用、未调用模型或外部解析/Embedding/Rerank 服务
 >

@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
-> 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/ai`、`packages/agent`、`packages/coding-agent`、`packages/server`、`packages/session-backends/sqlite-node` 及 `packages/tui` 使用侧；未运行任何命令或测试
+> 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/ai`、`packages/agent`、`packages/durable`、`packages/coding-agent`、`apps/p2` 及 `packages/tui` 使用侧；未运行任何命令或测试
 >
 > 调查范围：生成式输出的对象模型、流式协议、文件写入与 diff 机制、代码执行位置、TUI 展示、会话持久化与恢复、模型回流、生命周期与验证体系；明确排除 Chat 上下文装配、Agent 工具调度语义、消息渲染器的普通 Markdown 呈现
 >
@@ -18,7 +18,7 @@ Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。�
 
 ## 系统边界与完整主链路
 
-边界：`packages/ai`（provider 归一化与流协议）、`packages/agent`（agent 运行时 + 通用会话存储抽象）、`packages/coding-agent`（编码代理 CLI/TUI + 会话管理器 + 文件工具）、`packages/tui`（差分渲染终端组件库）。输出落盘后由用户自己的 Git/编辑器管理，Pi 不内置文件版本系统；README.md:38-46 明确"没有内置权限系统"，默认以启动用户权限运行。
+边界：`packages/ai`（provider 归一化与流协议）、`packages/agent`（agent 运行时）、`packages/durable`（持久 harness 与会话存储抽象）、`packages/coding-agent`（编码代理 CLI/TUI + 会话管理器 + 文件工具）、`packages/tui`（差分渲染终端组件库）。输出落盘后由用户自己的 Git/编辑器管理，Pi 不内置文件版本系统；README.md:38-46 明确"没有内置权限系统"，默认以启动用户权限运行。
 
 主链路（触发→生成→展示→交互→保存→重开）：
 
@@ -26,7 +26,7 @@ Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。�
 2. 生成：`streamAssistantResponse`（packages/agent/src/agent-loop.ts:281-372）消费 `AssistantMessageEvent` 流，逐事件更新 partial 消息并发出 `message_start/message_update/message_end`。
 3. 展示：TUI 订阅事件（interactive-mode.ts:3068-3129），assistant 文本进 `AssistantMessageComponent`（Markdown 实时渲染），每个 `toolCall` 建 `ToolExecutionComponent`（tool-execution.ts:13），edit 工具执行前异步计算 diff 预览（edit.ts:377-386）。
 4. 执行：agent-loop 执行工具（executeToolCalls，agent-loop.ts:411）；write/edit 直接写宿主文件系统，bash 在本机 spawn shell（bash.ts:88-150）。
-5. 保存：`message_end` 时按角色写入会话（agent-session.ts:640-657 → sessionManager.appendMessage），JSONL append 持久化（session-manager.ts:1015-1042）。
+5. 保存：`message_end` 时按角色写入会话（agent-session.ts:640-657 → sessionManager.appendMessage），JSONL append 持久化（session-manager.ts:1173）。
 6. 重新打开：`SessionManager.open()`（session-manager.ts:1530）→ `buildSessionContext()` → `agent.state.messages = existingSession.messages`（sdk.ts:363-364），模型在完整时间线上继续。另有 `/export`（HTML/JSONL）、`/import`、`/fork`、`/tree` 分支导航。
 
 ## 1. 触发方式、输出协议与对象模型
@@ -60,7 +60,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 - 主表面：终端 TUI 单聊视图（消息内嵌）。工具调用/结果以 Box 卡片呈现（tool-execution.ts:66-76），bash 另有带边框组件（components/bash-execution.ts:21-65）。
 - 无消息旁侧栏、无独立标签页/画布/桌面投影。
-- 外部投影：JSON 事件流模式（`--mode json`，print-mode.ts:108-117）、RPC 模式（stdin/stdout JSONL，rpc-types.ts:20-73）、server 模式（远程连接 + 会话快照广播，packages/server/src/snapshots.ts:34-63）。这些是"会话投影"而非"对象投影"。
+- 外部投影：JSON 事件流模式（`--mode json`，print-mode.ts:108-117）、RPC 模式（stdin/stdout JSONL，`modes/rpc/rpc-types.ts`）以及 p2 的 Chord 对象引用（Web/TUI 多投影，`apps/p2/src/hosts/`）。这些是"会话投影"而非"对象投影"。
 - 同一对象的多个同步投影：文件产物只有一个真实来源（磁盘文件）；会话在内存与 JSONL 间为单写者同步，无多实例并发同步。
 
 ## 4. 表现类型、依赖与运行环境
@@ -86,22 +86,22 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 ## 7. 能力桥、执行位置与权限范围
 
 - 执行位置：文件写与命令执行均在宿主本机进程/本机 shell（bash.ts:103-126，spawn + detached + 进程树清理 killProcessTree）。无 iframe/worker/容器内嵌运行。远端执行仅以可插拔 `operations` 接口形式存在（write.ts:25-40、edit.ts:74-92、bash.ts:56-74，注释指明 SSH 等场景），默认实现均为本机。
-- 权限：无逐操作授权。README.md:38-46 明确无内置权限系统；`trust-manager.ts` 仅是"项目目录级信任"（决定是否在某 cwd 启动，trust-manager.ts:66-94），不审批具体写文件/执行命令。能力桥为全权（进程权限即代理权限）。
+- 权限：无逐操作授权。`README.md:88-96` 明确无内置权限系统；`trust-manager.ts` 仅是"项目目录级信任"（决定是否在某 cwd 启动，trust-manager.ts:66-94），不审批具体写文件/执行命令。能力桥为全权（进程权限即代理权限）。
 - 会话信息桥：bash 工具默认注入 `PI_SESSION_ID/PI_SESSION_FILE/PI_PROVIDER/PI_MODEL/PI_REASONING_LEVEL` 环境变量（bash.ts:165-191）。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首次 assistant 消息后整文件 flush（session-manager.ts:1015-1042）。
+- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首次 assistant 消息后整文件 flush（session-manager.ts:1173）。
 - 损坏容忍与原子发布：
-  - agent 侧 JSONL 加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/agent/src/harness/session/jsonl/storage.ts:69-105`，此前为直接截断写回；torn-tail 与 fork 共用 `publishFileAtomically` :33-57）；
-  - harness 侧 fork 本次改为整文件原子发布（`storage.ts:110-118`）；
-  - coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:230-291,503-556）。
-- 恢复：`SessionManager.open`（session-manager.ts:1530-1550）、`continueRecent`（1557-1565）、CLI 会话选择器（interactive-mode.ts:5107-5134）；模型/thinking level 从会话 entry 恢复（sdk.ts:188-231）。
+  - durable 的 JSONL 存储加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/durable/src/storage/jsonl/`）；
+  - durable 的 fork 以整文件原子发布，避免把源文件整段读入内存；
+  - coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:287-341,628）。
+- 恢复：`SessionManager.open`（session-manager.ts:1777）、`continueRecent`（:1804）、CLI 会话选择器（interactive-mode.ts:5107-5134）；模型/thinking level 从会话 entry 恢复（sdk.ts:188-231）。
 - 分享导出：`/export`（HTML 或 JSONL 副本，interactive-mode.ts:5997-6013）、`/import`（agent-session-runtime.ts:361-396）、`/share`（先尝试 Radius 组织可见 artifact，无 Radius provider 或凭据时退回私密 gist，见第 12 节）。HTML 导出为自包含单文件（模板 + base64 会话数据，core/export-html/index.ts:143-175），内置工具按模板渲染、自定义工具预渲染（178-230）。
-- 独立后端：`packages/agent` 的 Session 存储抽象（SessionStorage）另有 `session-backends/sqlite-node` 实现，分两部分：
-  - 后端实现：node:sqlite 适配、迁移、物化视图与可选 FTS 搜索；
-  - search 是独立服务：与 repository 共享同一数据库，FTS 表与触发器在首次非空搜索时懒创建并一次性重建，之后由触发器同步（其 README.md:1-22 与 `sqlite/search-backend.ts`）。
-  搜索接口与 agent 侧统一为异步迭代器（`search(text, { entryTypes, limit, signal })`），且移除 SQL 中 CTE、按迭代器分页。coding-agent 当前仍使用 JSONL 路径。
+- 独立后端：durable 在 `packages/durable/src/storage/sqlite/` 提供 SQLite 实现，与 JSONL、Memory、IndexedDB 并列，分两部分：
+  - 后端实现：node:sqlite 适配、schema 与 migration；
+  - 消息级 FTS 搜索移到 p2 的搜索插件：`apps/p2/plugins/search/db.ts` 在 SQLite 上建 FTS5 虚表，`query.ts` 负责把关键词转成 MATCH 表达式。
+  coding-agent 当前仍使用 JSONL 路径；durable 的 `src/search.ts` 是工具检索（BM25），不是消息检索。
 
 ## 9. 模型回流、对象感知与持续维护
 
@@ -136,9 +136,9 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 13. Durable harness 的运行状态投影
 
-实验性 AgentHarness 把一次执行拆成“接受操作”和“驱动操作”两个持久边界。lane 对外提供 `accept`、`drive`、`requestAbort`、`resume` 与 `watch`；操作结果形成不可变记录，进程重启后可从存储恢复并继续驱动。该机制保存的是 transcript、工具结算、重试与 deferred polling 等运行状态，不是可由用户直接编辑的 Artifact（`packages/agent/src/harness/agent-harness.ts:518-622`、`packages/agent/src/harness/runtime/lane.ts:480-1403`）。
+durable harness 把一次执行拆成“接纳提交”和“按阶段驱动”两层持久边界。提交（submission）先落存储再开始执行；每个 Task 的每个 phase 结束都存 checkpoint，进程重启后 `resume()` 从最后一个 checkpoint 继续，睡着的任务不占用调用。该机制保存 transcript、工具结算、重试与尚未完成的提交等运行状态，不是可由用户直接编辑的 Artifact（`packages/durable/README.md` 的提交、任务与恢复章节、`packages/durable/src/harness/`）。
 
-实验客户端把 worker 所有的 lane 投影成 Transcript 服务的完整复制快照，Chord 负责增量编码、序列与缺口检测，稳定 TUI 组件负责显示。它形成同一会话的 worker/TUI 多投影，但仍没有独立输出对象、用户接受/拒绝 diff 或脚本沙箱（`packages/coding-agent/src/experimental/services/transcript-provider.ts:20-98`、`packages/coding-agent/src/experimental/services/README.md:19-25`）。
+p2 把 worker 持有的会话投影成页面与 TUI 可观察的 Chord 对象引用，Chord 负责跨进程的引用、增量更新与订阅；每个会话一个 worker，崩溃后重启并把失败保留到重试，插件重载时对象与文档仍存活。它形成同一会话的 Web/TUI 多投影，但仍没有独立输出对象、用户接受/拒绝 diff 或脚本沙箱（`apps/p2/src/hosts/session-workers.ts`、`packages/chord/README.md`、`apps/p2/docs/p2-notes.md`）。
 
 ## 14. 关键源码索引
 
@@ -148,7 +148,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 - 文件工具：`packages/coding-agent/src/core/tools/write.ts:194-226`、`edit.ts:308-431`、`edit-diff.ts:206-366,380-503`、`file-mutation-queue.ts:32-61`
 - 执行工具：`packages/coding-agent/src/core/tools/bash.ts:88-150,349-480`
 - TUI 展示：`modes/interactive/interactive-mode.ts:3068-3283`、`components/tool-execution.ts:13-377`、`components/bash-execution.ts:21-220`、`components/diff.ts:79-147`、`components/mermaid.ts:59-88`
-- 会话持久化与恢复：`packages/coding-agent/src/core/session-manager.ts:1015-1042,1360-1565`、`core/sdk.ts:188-231,363-374`、`core/agent-session.ts:640-657`、`core/agent-session-runtime.ts:196-224`、`packages/agent/src/harness/session/jsonl/storage.ts:33-118`（原子发布/截断与 fork）
+- 会话持久化与恢复：`packages/coding-agent/src/core/session-manager.ts:1173`（落盘）、`core/agent-session-runtime.ts:196-224`（切换会话）、`packages/durable/src/storage/jsonl/`（原子发布与 torn-tail 修复）、`packages/durable/src/session/session.ts`（commit）
 - 回流：`packages/coding-agent/src/core/messages.ts:148-194`、`core/compaction/compaction.ts`
-- 导出与外部投影：`core/export-html/index.ts:236-316`、`modes/print-mode.ts:33-168`、`modes/rpc/rpc-types.ts:20-73`、`packages/server/src/snapshots.ts:34-63`
-- 会话存储抽象与可选后端：`packages/agent/src/harness/session/session.ts:102-294`、`packages/session-backends/sqlite-node/`
+- 导出与外部投影：`core/export-html/index.ts:143-175`（自包含 HTML）、`modes/print-mode.ts`、`modes/rpc/rpc-types.ts`、`apps/p2/src/hosts/session-workers.ts`
+- 会话存储抽象与可选后端：`packages/durable/src/session/session.ts`、`packages/durable/src/storage/`（jsonl/sqlite/memory/indexeddb）

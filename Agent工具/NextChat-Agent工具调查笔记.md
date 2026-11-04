@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/store/plugin.ts`、`app/client/platforms/openai.ts`、`app/utils/chat.ts`、`app/mcp/`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 NextChat 仓库
 >
@@ -116,14 +116,16 @@ usePluginStore.getState().getAsTools(
 
 ### 3.1 初始化和工具发现
 
-- `Home` 首次挂载时读取 `getServerSideConfig().enableMcp`，开启后调用 `initializeMcpSystem`（`app/components/home.tsx:242-259`）；
-- 配置与发现：MCP 配置读自 `app/mcp/mcp_config.json`；每个 active server 经 `createClient` 建立 stdio transport，工具目录（`listTools`）存入内存 `clientsMap`（`app/mcp/actions.ts:101-161`）。
+- `Home` 首次挂载时读取 MCP 开关，开启后带上 AccessStore 里的 access code 调用 `initializeMcpSystem`（`app/components/home.tsx:242-259`、`app/mcp/actions.ts:171-192`）；
+- 配置与发现：MCP 配置读自 `app/mcp/mcp_config.json`；每个 active server 经 `createClient` 建立 stdio transport，工具目录（`listTools`）存入内存 `clientsMap`（`app/mcp/actions.ts:52-169`）。
 
-`app/mcp/client.ts:15-25` 明确把整个 `process.env` 复制进子进程环境，再叠加配置中的 `env`。这方便 CLI 型 MCP server 找到运行时依赖，但也意味着服务器配置可以接触到宿主进程环境变量。
+MCP 模块是 `"use server"` 模块，导出的函数等价于可直接被 HTTP 调用的端点，因此每个入口都先过一道授权检查：`ENABLE_MCP` 必须为 `true`，部署侧必须配置 `CODE`，调用方传入的 access code 的 MD5 需落在 `CODE` 允许集合内，否则直接抛错。配置读取与写回、子进程启动、工具枚举、工具执行都受这道门禁约束（`app/mcp/actions.ts:29-50`）。MCP 市场页从 AccessStore 取 access code 随每次调用下传，没有把授权状态留在服务端会话里（`app/components/mcp-market.tsx:46-49`）。
+
+`app/mcp/client.ts:12-31` 不再把整个 `process.env` 复制进子进程：子进程环境由 MCP SDK 的默认环境集合提供基础变量，再叠加各自 server 配置里的 `env`。CLI 型 server 仍能拿到运行时所需的默认变量，配置里声明的自定义变量照旧生效。
 
 ### 3.2 Prompt 协议和回注
 
-`getMcpSystemPrompt`（`app/store/chat.ts:205-224`）把各 client 的工具目录序列化后填入 `MCP_TOOLS_TEMPLATE`；外层再套 `MCP_SYSTEM_TEMPLATE`（模板定义见 `app/constant.ts:299-354`）。提示词要求模型输出单个 fenced block：
+`getMcpSystemPrompt`（`app/store/chat.ts:205-224`）接收 access code，把各 client 的工具目录序列化后填入 `MCP_TOOLS_TEMPLATE`；外层再套 `MCP_SYSTEM_TEMPLATE`（两个模板定义见 `app/constant.ts:299-421`）。提示词要求模型输出单个 fenced block：
 
 ```json:mcp:<clientId>
 {
@@ -135,8 +137,8 @@ usePluginStore.getState().getAsTools(
 模型输出结束后的处理链：
 
 1. 提取：`checkMcpJson` → `isMcpJson`/`extractMcpJson`，按 `json:mcp:<clientId>` 标记提取并直接解析 block 内容（`app/mcp/utils.ts:1-10`）；
-2. 执行：经 `executeMcpAction` 转到已连接的 MCP client（`app/mcp/actions.ts:336-352`）；
-3. 回注：成功结果包装成 `json:mcp-response:<clientId>` fenced block，调用 `onUserInput(..., true)` 并跳过普通输入模板（`app/store/chat.ts:826-855`、`407-434`）。
+2. 执行：模型输出被 `checkMcpJson` 捕获后，经 `executeMcpAction` 带着 access code 转到已连接的 MCP client（`app/mcp/actions.ts:379-397`）；
+3. 回注：成功结果包装成 `json:mcp-response:<clientId>` fenced block，调用 `onUserInput(..., true)` 并跳过普通输入模板（`app/store/chat.ts:828-862`）。
 
 这条链是“模型文本协议 + 客户端回注”，不是 OpenAI `tools`/`tool_calls` 协议；模型要等一条用户消息形式的结果后再继续。
 
@@ -145,18 +147,18 @@ usePluginStore.getState().getAsTools(
 - 插件定义、MCP 配置和客户端状态分开保存：插件进入 Zustand 持久化 store，MCP server 配置写回 `app/mcp/mcp_config.json`，活跃 client 只存在进程内 `clientsMap`。
 - 当前 Mask 的 `plugin` 数组决定普通插件工具集合；MCP 工具由全局 MCP 开关和当前活跃 server 决定，不受 Mask.plugin 过滤。
 - 消息对象的 `tools` 数组记录工具 id、函数名、参数、结果与 `isError` 标志；`app/components/chat.tsx:1943-1967` 据此渲染图标和函数名。
-- MCP server 生命周期状态字面量（`app/mcp/actions.ts:26-74`）：
+- MCP server 生命周期状态字面量（`app/mcp/types.ts:99-110`）：
 
 ```text
 undefined | initializing | active | paused | error
 ```
 
-对应操作：添加、暂停、恢复、移除和重启（`app/mcp/actions.ts:163-333`）。
+对应操作：添加、暂停、恢复、移除和重启，全部需要 access code（`app/mcp/actions.ts:194-377`）。
 
 ## 5. 风险、边界和未验证事项
 
-1. **缺少审批/沙箱**：插件 HTTP 请求和 MCP stdio 调用在用户会话上下文直接执行，代码中没有统一的确认弹窗、权限白名单或最小权限运行时。
-2. **凭据暴露面**：插件认证 token 会进入客户端持久化状态；MCP 子进程继承全部 `process.env`。应把 plugin schema、认证信息和 MCP 命令视为高信任配置。
+1. **缺少审批/沙箱**：插件 HTTP 请求和 MCP stdio 调用在用户会话上下文直接执行，代码中没有统一的确认弹窗、权限白名单或最小权限运行时。MCP 侧新增的 access code 校验属于部署级门禁（谁能调用整组端点），不构成逐次工具调用的审批；通过校验后的一次工具调用仍按模型给出的参数直接执行。
+2. **凭据暴露面**：插件认证 token 会进入客户端持久化状态；MCP access code 也由客户端 AccessStore 持有并随每次 server action 传入，因此能访问前端的人可以复用该 code 调用 MCP 端点。MCP 子进程环境已改为 SDK 默认变量加 server 配置，但配置里的 `env` 仍是原样传入。应把 plugin schema、认证信息和 MCP 命令视为高信任配置。
 3. **文本协议脆弱**：MCP 依赖正则和完整 fenced block，模型输出多个调用、未闭合 block 或非法 JSON 时只会记录错误，未见结构化恢复或重试。
 4. **递归请求无步数上限**：工具始终重新请求同一 payload，若模型持续调用工具，主要依赖请求 abort，而不是 Agent 状态机收敛。
 5. **兼容性范围**：本次确认了 OpenAI-compatible adapter 的原生工具路径；其他 provider adapter 是否完整支持插件工具，需要逐个检查，不能从 `ClientApi` 接口直接推断。
@@ -169,8 +171,10 @@ undefined | initializing | active | paused | error
 - OpenAI adapter 注入插件工具、收集流式 tool call：`app/client/platforms/openai.ts:186-353`
 - 工具并发执行、结果回写和递归请求：`app/utils/chat.ts:175-390`、`392-667`
 - Chat message 工具状态回调：`app/store/chat.ts:459-497`
-- MCP 初始化和配置生命周期：`app/mcp/actions.ts:101-161`、`163-385`
-- MCP stdio transport 环境变量：`app/mcp/client.ts:9-38`
-- MCP prompt 协议：`app/constant.ts:299-354`
+- MCP 授权门与初始化：`app/mcp/actions.ts:29-50`、`171-192`
+- MCP 配置与客户端生命周期：`app/mcp/actions.ts:52-169`、`194-397`
+- MCP 状态类型：`app/mcp/types.ts:99-118`
+- MCP stdio transport 环境变量：`app/mcp/client.ts:12-31`
+- MCP prompt 协议：`app/constant.ts:299-421`
 - MCP fenced JSON 提取：`app/mcp/utils.ts:1-10`
-- MCP 结果回注：`app/store/chat.ts:826-855`
+- MCP 结果回注：`app/store/chat.ts:828-862`

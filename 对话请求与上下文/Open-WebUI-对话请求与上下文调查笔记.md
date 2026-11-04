@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码（FastAPI 主入口与生成管线 `utils/middleware.py`、任务调度 `tasks.py`、Socket.IO 通道 `socket/main.py`、前端 `Chat.svelte` 发送链与事件分发）
 >
@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_completion`（1054-1794 行）→ `utils/middleware.py: process_chat_payload`（2365 行）→ 上游（openai/ollama/pipe）→ `build_chat_response_context` → 流式或非流式响应处理器。
+Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_completion`（1084 行）→ `utils/middleware.py: process_chat_payload`（2055 行）→ 上游（openai/ollama/pipe）→ `build_chat_response_context` → 流式或非流式响应处理器。
 
 - 多模型并行以 `asyncio.Task` 逐个 fan-out（`main.py:1702-1781`），仅第一个模型携带标题/标签生成任务；任务注册进 Redis（哈希 + pubsub stop 命令），实现多实例协调；
 - 流式推送统一走 Socket.IO `events` 事件（发射到 `user:{user_id}` 房间，`socket/main.py:968-995`），前端按 `data.type` 分发约 25 种消息类型；REST 只负责发起与终止任务；
-- 标题、标签、追问、记忆抽取由 `background_tasks_handler` 在后端生成结束后串行执行（`middleware.py:3194-3409`）；
+- 标题、标签、追问、记忆抽取由 `background_tasks_handler` 在后端生成结束后串行执行（`middleware.py:3543`）；
 - 停止链路：前端 `stopResponse` → `stopTasksByChatId` 或逐个 `stopTask` → Redis pubsub 广播 stop → 各实例本地 `task.cancel()`；前端把所有 response 消息标记 `done`；
 - 提交排队：前端 `chatRequestQueues` store + `processNextInQueue`（`Chat.svelte:2157-2177`）；
 - 任务系统是「asyncio + Redis 记账」而非任务队列：任务不在 worker 间迁移，Redis 仅用于跨实例取消与状态查询（`tasks.py`）。
@@ -69,20 +69,20 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 
 ## 2. 上下文来源与拼装顺序
 
-- `process_chat_payload`（`utils/middleware.py:2365` 起）：管线顺序见文件内注释（Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files），消息定稿前再追加一次 Filter `request`（`utils/middleware.py:3104-3120`）；arena 模型在入口处解析为具体子模型；
-- 持久会话的历史由后端从 DB 加载（`load_messages_from_db`，`middleware.py:2040`）：优先消息表行以保留结构化 `output`（2295-2318 行），续写时额外加载被续写 assistant 消息（2305-2315 行）；system prompt 从请求 `messages[0]` 提取后置前（2317-2318 行）；图片文件转 `image_url` content part（2320-2342 行）——即上下文的"历史部分"以数据库行/快照为准（数据侧见会话与消息管理笔记）；
+- `process_chat_payload`（`utils/middleware.py:2055` 起）：管线顺序见文件内注释（Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files），消息定稿前再追加一次 Filter `request`（`utils/middleware.py:3104-3120`）；arena 模型在入口处解析为具体子模型；
+- 持久会话的历史由后端从 DB 加载（`load_messages_from_db`，`middleware.py:1897`）：优先消息表行以保留结构化 `output`，续写时额外加载被续写 assistant 消息；system prompt 从请求 `messages[0]` 提取后置前（2317-2318 行）；图片文件转 `image_url` content part（2320-2342 行）——即上下文的"历史部分"以数据库行/快照为准（数据侧见会话与消息管理笔记）；
 - 外部能力以请求体字段注入：`tool_ids`/`skill_ids`/`terminal_id`/`tool_servers`、`filter_ids`、`files`、`variables`、`features`（请求体构造见 1.1 第 3 步）。
 
 ## 3. 预算、截断与压缩
 
 - 请求 metadata 携带 `compact_token_threshold`、`stream_delta_chunk_size`、`reasoning_tags`（1.2 第 2 步）；
-- 每次请求在 `process_chat_payload` 内调 `compact_messages_for_request`（`utils/context_compaction.py:42`）做按需压缩，超过阈值时生成 `[CONVERSATION SUMMARY]` 系统消息追加（`middleware.py:2359-2374`），失败则回退全量历史（2375-2376 行）；
+- 每次请求在 `process_chat_payload` 内调 `compact_messages_for_request`（`utils/context_compaction.py:46`）做按需压缩，超过阈值时生成 `[CONVERSATION SUMMARY]` 系统消息追加（`middleware.py:2055` 起的压缩分支），失败则回退全量历史（2375-2376 行）；
 - 手动压缩：后端 `POST /{id}/compact`（`chats.py:1251`）调 `compact_chat_branch`（`context_compaction.py:150`）写 `context_summary` 检查点并触发 `EVENTS.CHAT_COMPACTED`（数据侧见会话与消息管理笔记第 3 节）；前端入口 `handleManualCompact`（`Chat.svelte:2542-2593`，生成中拒绝）；
 - 具体 token 预算的阈值计算与裁剪算法（`context_compaction.py` 内部）本次未逐行展开；压缩触发阈值下的实际行为未运行验证。
 
 ## 4. Provider、模型与协议交接
 
-- 上游为 openai/ollama/pipe 三系；`process_chat_payload` 处理 arena 模型解析与参数归一后由 `chat_completion_handler`（`main.py:221` 导入，即 `utils/chat.py:151 generate_chat_completion`）调用真实模型；
+- 上游为 openai/ollama/pipe 三系；`process_chat_payload` 处理 arena 模型解析与参数归一后由 `chat_completion_handler`（`utils/chat.py:208 generate_chat_completion`）调用真实模型；
 - 内部重入：`app.state.CHAT_COMPLETION_HANDLER` 供子代理/定时器/自动化调用同一入口（1.2 第 11 步）；
 - Direct Connection 模式（`utils/chat.py:49-148 generate_direct_chat_completion`）：建 `{user_id}:{session_id}:{request_id}` 频道（70 行），`event_caller`（`socket/main.py:1100 get_event_call`，经 `sio.call` 驱动客户端）发 `request:chat:completion`，客户端推理结果经频道回传，服务端用 `StreamingResponse` 以 SSE 转发（86-129 行）——这是唯一保留 HTTP SSE 出口的路径，普通聊天全程走 Socket.IO；
 - Anthropic 兼容端点（`main.py:1897-1954`）：payload 双向转换后复用 `chat_completion`。
@@ -108,8 +108,8 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 按处理顺序分五步：
 
 1. 注入：`extra_params` 给管道注入事件发射器、事件调用、用户、元数据、OAuth 令牌、请求与模型等参数，另带 `__chat_id__`/`__message_id__` → 执行 Filter `request` → 生成 task_id；
-2. 标签切分：内嵌 `response_handler` 的 `tag_output_handler`（`middleware.py:4263`）按 reasoning/solution/code_interpreter 标签切分；
-3. 缓冲：`queue_pending_delta_data`（`middleware.py:4754`）按 delta_count/delta_chunk_size 聚合 delta；
+2. 标签切分：内嵌 `response_handler` 的 `tag_output_handler`（`middleware.py:4202`）按 reasoning/solution/code_interpreter 标签切分；
+3. 缓冲：`queue_pending_delta_data`（`middleware.py:4740`）按 delta_count/delta_chunk_size 聚合 delta；
 4. 工具与收尾：SSE `data:` 前缀解析、多轮工具调用（`execute_tool_call`，5671 行）、结束处 `publish_chat_finished_event`（6262 行）+ `outlet_filter_handler`（6278 行）+ `background_tasks_handler`（6279 行）；
 5. 取消包装：`stream_wrapper` 重试/取消包装（取消时 `aclose` 上游 body 并保存半截状态）。
 
@@ -159,7 +159,7 @@ Responses 事件在流式期间已累积 output item 时，即使最终 complete
 
 - 提交排队：`chatRequestQueues` store（`src/lib/stores/index.ts:107`）+ `processNextInQueue`（`Chat.svelte:2157-2177`，合并多次提交的 prompt 与文件后一次性发送）——前端按会话串行化提交，同一会话生成期间的新提交进队列；不同会话并行；后台生成由服务端任务承载，`chat:active` 事件驱动前端状态；
 - 多模型并行（MoA / side-by-side）是内建概念而非插件：一个请求 fan-out 多个任务（1.2 第 10 步），消息树用 `modelIdx` 保持列序，UI 支持逐列重新生成与合并（7）；
-- `background_tasks_handler`（`middleware.py:3194-3409`）按固定顺序执行四类任务：
+- `background_tasks_handler`（`middleware.py:3543`）按固定顺序执行四类任务：
   1. `FOLLOW_UP_GENERATION`（3251 行）：生成追问并落库/事件；
   2. `TITLE_GENERATION`（3302 行）：标题生成并发 `chat:title`；
   3. `TAGS_GENERATION`（3364 行）：标签生成并发 `chat:tags`；

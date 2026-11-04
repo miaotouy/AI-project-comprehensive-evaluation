@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读核对 LobeAgentConfig、LobeAgentChatConfig、MetaData、AgentPlugin 类型定义及 AgentSetting store；未修改被调查仓库源码
 >
@@ -19,7 +19,7 @@ LobeHub 的单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
 1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）、开场白（`openingMessage`/`openingQuestions`）和独立的角色档案（`profile`）；
 2. **模型偏好**：`model`、`provider` 与标准推理参数 `params`（temperature、topP、maxTokens 等）；
 3. **对话配置**（`chatConfig`，`LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；图式编排已转入执行配置而非此处；
-4. **外部能力**：市场插件（`plugins`）、知识库（`knowledgeBases`）、附件（`files`）、语音合成（`tts`）与异构 Agent 绑定（`agencyConfig`）。
+4. **外部能力**：市场插件（`plugins`）、知识库（`knowledgeBases`）、附件（`files`）、语音合成（`tts`）、异构 Agent 绑定（`agencyConfig`，含图式编排），以及设置面板里的连接器、图式运行时与 IM 渠道分区。
 
 与 Cherry Studio 类似，模型参数写在 Agent 内部，不在 Session 级；每个 Agent 还可以独立选择模型和 provider，比 Cherry Studio 更细粒度（支持 `provider` 字段单独覆盖）。
 
@@ -204,6 +204,7 @@ interface LobeAgentConfig {
 
 共享 Agent 的访客运行不会继承创建者配置中的全部外部能力。服务端解析创建者 Agent 后，以 Agent Share 配置剥离文件、知识库、异构 Agent 和设备能力，并按 tool grants 收窄工具；访客 topic 另以 senderId 隔离。角色配置在此只提供被分享的基础 Agent，具体门禁属于外部执行体与 Agent 工具类目。
 
+设置面板的分区也随执行侧扩张：除元数据、开场白、插件/知识库等常规页外，现另有连接器页（`src/features/AgentSetting/AgentConnectors/`）、图式运行时页（`AgentGraphRuntime`，仅在 `enableAgentGraphConfigLab` 实验开关下渲染）与渠道页（`AgentChannel/`，含飞书 owner 自动查询等辅助逻辑）。这三个分区说明 Agent 配置面已从"人格 + 模型 + 工具"扩展到"外部连接、图式执行与 IM 渠道绑定"。
 `agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`；复制 Agent 时会保留 `agencyConfig`，数据迁移接受嵌套 `config.meta` 并替换过期 profile。
 
 ## 6. 内置 Agent 方向

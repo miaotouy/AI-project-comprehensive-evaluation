@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；未修改目标仓库
 >
@@ -18,28 +18,28 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 关键事实：
 
-- **三类协议 schema 由同一 ToolSet 导出**：三个导出方法分别生成 OpenAI、Anthropic 和 Google 格式，位置为 tool.py:203-330。Google 格式包含递归转换器，处理 JSON Schema 到 Gemini 格式的兼容细节，如 list 类型、删除 additionalProperties、array 缺省 items 回退等。
-- **四路注册汇合**：内置工具由 builtin_tool 装饰器注册（registry.py:232-254），插件工具从 star_handler.py:670-724 进入，MCP 工具由 mcp_server.json 配置并经初始化入口加入，子 Agent 则使用 HandoffTool（handoff.py:8-64）。
-- **同名工具去重规则为「active 优先、同状态后覆盖」**：工具集的添加逻辑见 tool.py:91-108，查找时再由管理器反向扫描（func_tool_manager.py:399-417）。
-- **执行串行无并行**：工具处理入口（tool_loop_agent_runner.py:1089-1355）对同一响应中的多个 tool_call 按顺序逐个等待执行（:1108-1112）。
-- **工具返回 None = 结束 Agent**：本地执行器中，工具直接给用户发消息后返回空结果（astr_agent_tool_exec.py:704-722），runner 将其转换为完成状态（tool_loop_agent_runner.py:1283-1298）。后台和定时路径则从 `agent_runner.config.misc.max_steps` 读取步数并把非法或非正值收敛为至少 1，再传给同一 runner，不再固定为 30 步（astr_agent_tool_exec.py:561-579；cron/manager.py:444-472）。
+- **三类协议 schema 由同一 ToolSet 导出**：三个导出方法分别生成 OpenAI、Anthropic 和 Google 格式，位置为 tool.py:204-363。Google 格式包含递归转换器，处理 JSON Schema 到 Gemini 格式的兼容细节，如 list 类型、删除 additionalProperties、array 缺省 items 回退等。
+- **四路注册汇合**：内置工具由 builtin_tool 装饰器注册（registry.py:232-254），插件工具从 `star/register/star_handler.py:610-620` 的注册装饰器进入，MCP 工具由 mcp_server.json 配置并经初始化入口加入，子 Agent 则使用 HandoffTool（handoff.py:8-64）。
+- **同名工具去重规则为「active 优先、同状态后覆盖」**：工具集的添加逻辑见 tool.py:92-109，查找时再由管理器反向扫描（func_tool_manager.py:399-417）。
+- **执行串行无并行**：工具处理入口（tool_loop_agent_runner.py:1149-1418）对同一响应中的多个 tool_call 按顺序逐个等待执行（:1108-1112）。
+- **工具返回 None = 结束 Agent**：本地执行器中，工具直接给用户发消息后返回空结果（astr_agent_tool_exec.py:619-637），runner 将其转换为完成状态（tool_loop_agent_runner.py:1346-1361）。后台和定时路径则从 `agent_runner.config.misc.max_steps` 读取步数并把非法或非正值收敛为至少 1，再传给同一 runner，不再固定为 30 步（astr_agent_tool_exec.py:561-579；cron/manager.py:444-472）。
 - **安全分层**：非内置工具经过权限代理，按 tool_permissions 的 SharedPreferences 默认键查权限（func_tool_manager.py:214-285、:460-494）；默认 member 不限制，内置敏感工具则在自身实现内检查。
-- **五种产物级防护**：包括工具超时、结果 token 溢出落盘、重复调用提示、MAX_STEPS 截断和 skills_like 双段 requery，具体位置分别见 tool_loop_agent_runner.py:110-111、146-175、289-307、1060-1088、1395-1469。
-- **本机执行已改为角色策略与操作系统沙箱**：Local runtime 按 member/admin 分别解析文件范围、执行与联网权限；Linux 使用 bubblewrap，macOS 使用 Seatbelt，后端缺失时受限执行拒绝启动。进程沙箱另限制 CPU、内存、文件大小、打开文件数与进程数（`astrbot/core/tools/computer_tools/util.py:88-209`；`astrbot/core/computer/process_sandbox/base.py:9-68`；`process_sandbox/__init__.py:15-42`）。
-- **网页搜索包含 AnySearch**：选择 `websearch_provider=anysearch` 时注入 `web_search_anysearch`，支持普通搜索和垂直领域标签；无 Key 时允许一次匿名请求，有 Key 时沿用错误驱动轮换（`astrbot/core/tools/web_search_tools.py:49-52,1248-1448`）。
+- **五种产物级防护**：包括工具超时、结果 token 溢出落盘、重复调用提示、MAX_STEPS 截断和 skills_like 双段 requery，具体位置分别见 tool_loop_agent_runner.py:111-112、146-175、289-307、1060-1088、1395-1469。
+- **本机执行已改为角色策略与操作系统沙箱**：Local runtime 按 member/admin 分别解析文件范围、执行与联网权限；三个平台各有进程沙箱后端——Linux 用 bubblewrap、macOS 用 Seatbelt、Windows 用 AppContainer，后端缺失时受限执行拒绝启动。进程沙箱另限制 CPU、内存、文件大小、打开文件数与进程数（`astrbot/core/tools/computer_tools/util.py:93-309`；`astrbot/core/computer/process_sandbox/__init__.py:15-79`；`process_sandbox/windows.py:1-243`）。
+- **网页搜索包含 AnySearch**：选择 `websearch_provider=anysearch` 时注入 `web_search_anysearch`，支持普通搜索和垂直领域标签；无 Key 时允许一次匿名请求，有 Key 时沿用错误驱动轮换（`astrbot/core/tools/web_search_tools.py:57-60,1248-1448`）。
 - **内置工具 5 组约 26 个 + shipyard_neo 14 个**，每组带 config 规则（`BuiltinToolConfigRule`），但**规则只驱动 WebUI 展示"可用状态"，不参与运行时注入**（唯一消费方 tools_service.py:533-569）。
 - **MCP 生命周期自管理**：启动并行初始化（并发 task + `asyncio.gather`）、连接超时/启用超时双环境变量、幂等启动、同任务内清理（#9068 修复）、ModelScope 云端同步；**工具名对 LLM 侧清洗**（`[^A-Za-z0-9_-]+`→`_`），原名保留用于实际 MCP 调用（mcp_client.py:800-808，#9534）。
-- **停止即取消**：`_await_or_stop`（tool_loop_agent_runner.py:461-501）把进行中的 LLM 请求/上下文压缩与 abort 信号竞速，停止请求立即取消等待而不再等其自然返回；中断回填从长提示改为 user「Stop output.」+ assistant「Output stopped.」消息对（:116-117、1483-1516，#9602）。
+- **停止即取消**：`_await_or_stop`（tool_loop_agent_runner.py:472-512）把进行中的 LLM 请求/上下文压缩与 abort 信号竞速，停止请求立即取消等待而不再等其自然返回；中断回填从长提示改为 user「Stop output.」+ assistant「Output stopped.」消息对（:116-117、1483-1516，#9602）。
 
 ## 总体调用链
 
 ```text
-用户消息 → astr_main_agent.run_agent (astr_agent_run_util.py:115)
+用户消息 → astr_main_agent.run_agent (astr_agent_run_util.py:120)
   → 构建 ProviderRequest + ToolSet（各 _apply_* 分支：_apply_kb / _apply_web_search_tools / persona 等）
   → ToolLoopAgentRunner.reset（携带 tool_schema_mode，默认 "full"）
   → step() 循环：
       provider.text_chat(func_tool=ToolSet)  → LLMResponse.tools_call_*
-      → _handle_function_tools（tool_loop_agent_runner.py:1089-1355）
+      → _handle_function_tools（tool_loop_agent_runner.py:1149-1418）
           for 每个 tool_call（串行）：
             查工具（skills_like 模式查 raw set，否则查 req.func_tool）
             参数过滤（仅传 parameters.properties 声明过的键，:1162-1188）
@@ -61,11 +61,11 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 | 类 | 行号 | 职责 |
 |---|---|---|
-| ToolSchema | tool.py:19-37 | 工具名、描述和参数（JSON Schema）；模型校验器用 jsonschema 校验 parameters 是否符合 Draft 2020-12 元 schema（:32-37） |
-| FunctionTool | tool.py:40-74 | 可调用工具，保存 handler、模块路径、active 和后台任务标志；默认 call() 抛出 NotImplementedError（:50-74） |
-| ToolSet | tool.py:77-366 | 运行时工具集容器，负责增删查改、合并、三种协议 schema 导出和两个派生视图 |
+| ToolSchema | tool.py:20-38 | 工具名、描述和参数（JSON Schema）；模型校验器用 jsonschema 校验 parameters 是否符合 Draft 2020-12 元 schema（:32-37） |
+| FunctionTool | tool.py:41-75 | 可调用工具，保存 handler、模块路径、active 和后台任务标志；默认 call() 抛出 NotImplementedError（:50-74） |
+| ToolSet | tool.py:78-399 | 运行时工具集容器，负责增删查改、合并、三种协议 schema 导出和两个派生视图 |
 
-### 1.2 ToolSet 去重规则（add_tool，tool.py:91-108）
+### 1.2 ToolSet 去重规则（add_tool，tool.py:92-109）
 
 - 同名冲突时，只有新工具 active 或旧工具 inactive 才覆盖（:105）；
 - 结果语义：后加载的 inactive 工具不会覆盖已激活工具；MCP 工具（active 默认 True）可覆盖被禁用的内置工具。
@@ -82,7 +82,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 ### 1.4 schema 校验
 
-- 工具注册时参数 schema 即被 jsonschema.validate 校验（tool.py:32-37），非法 schema 在构造时抛错，属于注册期失败而非运行期失败。
+- 工具注册时参数 schema 即被 jsonschema.validate 校验（tool.py:33-38），非法 schema 在构造时抛错，属于注册期失败而非运行期失败。
 - spec_to_func（func_tool_manager.py:343-363）把插件声明的参数列表转成 object 类型的 properties 结构，类型在 :351 硬编码为 object。
 
 ## 2. 注册机制（四路汇合）
@@ -92,9 +92,9 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 | 来源 | 声明/入口 | 落点容器 | 特征 |
 |---|---|---|---|
 | 内置工具 | astrbot/core/tools/ 五模块的 builtin_tool | builtin_func_list（func_tool_manager.py:292，按类惰性实例化缓存） | 类定义即注册，实例由 get_builtin_tool 缓存（:419-441） |
-| 插件工具 | star 插件 tool 装饰器 → star_handler.py:670-724 | func_list（func_tool_manager.py:290） | 先移除同名项再追加，或由 spec_to_func 转换（:365-390、:678） |
+| 插件工具 | star 插件 tool 装饰器 → `star/register/star_handler.py:610-620` | func_list（func_tool_manager.py:290） | 先移除同名项再追加，或由 spec_to_func 转换（:365-390、:678） |
 | MCP 工具 | data/mcp_server.json → init_mcp_clients（func_tool_manager.py:540-642） | func_list 中的 MCPTool（:698-710） | 启动时并行初始化；供 LLM 使用的工具名清洗为 `[A-Za-z0-9_-]`，原名保留供实际调用（mcp_client.py:800-808）；重连时先清除同名项（:701-703） |
-| 子 Agent | HandoffTool（handoff.py:8-64） | func_list | 名称按 transfer_to_{agent.name} 生成（handoff.py:26），由 star_handler.py:724 追加 |
+| 子 Agent | HandoffTool（handoff.py:8-64） | func_list | 名称按 transfer_to_{agent.name} 生成（handoff.py:26），由 `star/register/star_handler.py:715` 的 llm_tool 方法追加 |
 
 ### 2.2 `builtin_tool` 装饰器与 config 规则（registry.py）
 
@@ -106,7 +106,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 ### 2.3 工具启停持久化（func_tool_manager.py:986-1043）
 
 - 停用工具会将 active 置为 false，并写入 SharedPreferences 的 inactivated_llm_tools；启用时若所属插件未激活则抛出 ValueError，再恢复 active 并移除黑名单（:986-1043）。
-- 插件侧 API 位于 star/context.py:372-383 和 :718。
+- 插件侧 API 位于 star/context.py:413-424 和 :718。
 
 ## 3. 运行时工具集构建
 
@@ -114,7 +114,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 - 新建空 ToolSet，把 func_list 中每个非内置工具包装为权限代理后加入；包装确保每次调用先经过权限检查，内置工具不包装而保留自身权限逻辑（:214-226）。
 
-### 3.2 按调用点裁剪（astr_main_agent.py 各分支）
+### 3.2 按调用点裁剪（astr_main_agent/ 各装配模块）
 
 | 分支 | 行号 | 行为 |
 |---|---|---|
@@ -123,9 +123,9 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 | `_apply_web_search_tools` | :1231-1264 | 按 `web_search` 开关决定是否注入搜索工具集（:1244） |
 | 其他 `req.func_tool = ToolSet()` 点 | :433、:636、:1068、:1131、:1226、:1600、:1615 | 按各能力开关重建工具集 |
 
-- 运行中的 ToolSet 经 ProviderRequest.func_tool（entities.py:102）传给适配器，由 OpenAI 和 Anthropic 适配器转成各自协议（openai_source.py:538-546、anthropic_source.py:501-506）；模型不支持 function calling 时自动去掉 tools 重试（openai_source.py:1158-1176）。
+- 运行中的 ToolSet 经 ProviderRequest.func_tool（entities.py:201）传给适配器，由 OpenAI 和 Anthropic 适配器转成各自协议（openai_source.py:546-554、anthropic_source.py:508-513）；模型不支持 function calling 时自动去掉 tools 重试（openai_source.py:1171-1189）。
 
-### 3.3 skills_like 模式（tool_loop_agent_runner.py:289-307）
+### 3.3 skills_like 模式（tool_loop_agent_runner.py:300-318）
 
 - tool_schema_mode 有 full 和 skills_like 两档：前者默认发送完整 schema，后者首轮只发送名称和描述以节省 token（#4681）。
 - skills_like 下，首轮请求使用 light_set，同时保存原工具集和只含参数的集合（:303-307）；执行解析走原集合（:1137-1147），第二轮再用参数集合补全参数，失败后按更强指令重试（:136-144、1395-1469）。
@@ -143,7 +143,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 - 异步生成器逐步产出结果，消息事件结果会写入事件后以空值占位；普通协程直接等待完成（:809-837）。参数不匹配时从签名生成可读错误（:771-801）。
 - 每次取结果都用 asyncio.wait_for 限时，默认使用 run_context.tool_call_timeout，后台任务为 3600 秒（:691-694、:489）。工具无返回值时直接把事件结果发送给用户，并以空值通知 runner 结束（:704-722）。
 
-### 4.3 runner 侧消费（tool_loop_agent_runner.py:1089-1355）
+### 4.3 runner 侧消费（tool_loop_agent_runner.py:1149-1418）
 
 - 逐个工具先产出 tool_call 消息链（:1118-1132，Json 含 id/name/args/ts）供 UI 展示；找不到工具时回填错误文本（:1154-1160）。
 - **参数过滤**（:1162-1188）：有 handler 时只传参数 schema 声明过的键，多余键记录 warning 后忽略；无 handler 的工具（如 MCP）使用全部参数。
@@ -172,7 +172,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 ### 5.4 后台任务唤醒主 Agent（astr_agent_tool_exec.py:518-646）
 
 - 后台结果通过 CronMessageEvent 模拟主动事件，重建主 Agent；步数来自配置档案的 `agent_runner.config.misc.max_steps`，非法或非正值经归一化收敛到可用下限（astr_agent_tool_exec.py:561-579）。
-- 系统提示要求使用 send_message_to_user 交付结果，完成后经 persist_agent_history 写回对话历史（:572-582、611-616，utils/history_saver.py:9-27）。
+- 系统提示要求使用 send_message_to_user 交付结果；后台任务完成与 cron 任务改以唤醒事件重入流水线，对话历史由处理阶段的统一写入路径落库（`astr_agent_tool_exec.py:501-546`、`internal.py:445-504`）。
 
 ## 6. 安全与限制
 
@@ -187,18 +187,18 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 | 类别 | 实现 | 位置 |
 |---|---|---|
 | 执行超时 | asyncio.wait_for（默认 tool_call_timeout，后台 3600s） | astr_agent_tool_exec.py:689-726 |
-| 结果大小 | 27.5k tokens 落盘 + 7k 预览 | tool_loop_agent_runner.py:110-111、369-441 |
+| 结果大小 | 27.5k tokens 落盘 + 7k 预览 | tool_loop_agent_runner.py:111-112、369-441 |
 | 重复调用 | 3/4/5 档提示注入 | :146-175、723-748 |
 | 步数上限 | MAX_STEPS（`agent_runner.config.misc.max_steps` 默认 30）+ MAX_STEPS_REACHED_PROMPT 拔工具强收尾 | :125、1060-1088 |
 | 用户中断 | request_stop() → abort 信号；等待逻辑立即取消进行中的 LLM/压缩请求，执行器读取同步可中断 | :461-501、1471-1476、1526-1568 |
-| 参数白名单 | 仅传声明过的参数键 | tool_loop_agent_runner.py:1162-1188 |
-| 图像引用净化 | `is_supported_image_ref` 过滤非法 image_urls | astr_agent_tool_exec.py:101-128 |
+| 参数白名单 | 仅传声明过的参数键 | tool_loop_agent_runner.py:1225-1251 |
+| 图像引用净化 | `is_supported_image_ref` 过滤非法 image_urls | astr_agent_tool_exec.py:98-125 |
 | 插件权限链路 | 插件未激活时 `activate_llm_tool` 抛错 | func_tool_manager.py:1020-1023 |
 | 后台任务隔离 | 独立 task + 独立主 Agent 实例 + 结果走 cron 事件 | astr_agent_tool_exec.py:518-646 |
 
 ### 6.3 已知边界（静态推断）
 
-- 权限黑名单持久化与插件热重载之间无联动：插件停用时 func_list 被清理，但 inactivated_llm_tools 条目残留；重启后同名插件重新注册时黑名单仍生效（star_manager.py:804-807、1916）。
+- 权限黑名单持久化与插件热重载之间无联动：插件停用时 func_list 被清理，但 inactivated_llm_tools 条目残留；重启后同名插件重新注册时黑名单仍生效（star_manager.py:807-810、1916）。
 - 每次构建完整工具集都会新建权限代理，无缓存；权限变更需下次构建工具集才生效。
 - 内置工具实例按类缓存，插件运行期修改内置工具类定义不生效（需重启）。
 
@@ -218,16 +218,16 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 | 工具 | name | 适用 runtime |
 |---|---|---|
-| `ExecuteShellTool` | `astrbot_execute_shell`（shell.py:62） | sandbox（booter 任意） |
-| `PythonTool` | `astrbot_execute_ipython`（python.py:83） | sandbox |
+| `ExecuteShellTool` | `astrbot_execute_shell`（shell.py:61） | sandbox（booter 任意） |
+| `PythonTool` | `astrbot_execute_ipython`（python.py:82） | sandbox |
 | `LocalExecuteShellTool` | （继承 ExecuteShellTool，:183） | local |
-| `ShellSessionTool` | `astrbot_shell_session`（shell.py:256） | local |
+| `ShellSessionTool` | `astrbot_shell_session`（shell.py:249） | local |
 | `LocalPythonTool` | `astrbot_execute_python`（python.py:119） | local |
 | `FileReadTool` / `FileWriteTool` / `FileEditTool` / `GrepTool` | `astrbot_file_read_tool` 等（fs.py:309、406、478、569） | sandbox + local |
-| `FileUploadTool` / `FileDownloadTool` | `astrbot_upload_file` / `astrbot_download_file`（fs.py:805、871） | sandbox |
+| `FileUploadTool` / `FileDownloadTool` | `astrbot_upload_file` / `astrbot_download_file`（fs.py:814、871） | sandbox |
 | `CuaScreenshotTool` / `CuaMouseClickTool` / `CuaKeyboardTypeTool` | `astrbot_cua_*`（cua.py:53、111、148） | sandbox + booter=cua |
 
-- runtime 选择由 astr_agent_tool_exec.py:192-247 的运行时工具组装逻辑完成，依据 provider_settings.computer_use_runtime 和 sandbox booter 选择工具；该键在配置 schema 中的默认值为 none（core/config/default.py:181），读侧缺键时同样回退为 none（astr_agent_tool_exec.py:259）。sandbox 有 8 个，cua 有 3 个，local 有 7 个。
+- runtime 选择由 astr_agent_tool_exec.py:203-258 的运行时工具组装逻辑完成，依据 provider_settings.computer_use_runtime 和 sandbox booter 选择工具；该键在配置 schema 中的默认值为 none（core/config/default.py:182），读侧缺键时同样回退为 none（astr_agent_tool_exec.py:270）。sandbox 有 8 个，cua 有 3 个，local 有 7 个。
 
 ### 7.3 shipyard_neo（computer_tools/shipyard_neo/，14 个）
 
@@ -253,7 +253,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 ## 9. 子 Agent（Handoff）
 
-- HandoffTool 的名称按 transfer_to_{agent.name} 生成，参数固定为 input、image_urls、background_task（handoff.py:8-64）。可选 provider_id 可单独指定子 Agent 模型，并优先于当前会话 provider（:34，astr_agent_tool_exec.py:344-345）。
+- HandoffTool 的名称按 transfer_to_{agent.name} 生成，参数固定为 input、image_urls、background_task（handoff.py:8-64）。可选 provider_id 可单独指定子 Agent 模型，并优先于当前会话 provider（:34，astr_agent_tool_exec.py:355-356）。
 - 构建子 Agent 工具集时，tools=None 表示全量工具，但会排除其他 HandoffTool 以防递归，并追加 runtime 电脑工具；指定列表则逐个解析（:250-306）。图片参数会与事件消息中的 Image 组件合并并净化；begin_dialogs 解析为 Message 列表，子 Agent 历史不持久化（:104-132、350-362）。
 - 后台 handoff 立即返回 task_id，完成后唤醒主 Agent（:388-477）。
 
@@ -284,7 +284,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 ### 11.2 取舍（平衡决策）
 
-- 权限代理的 handler 留空，强制走 call() 并与执行器的 MRO 检查联动（func_tool_manager.py:221-226、astr_agent_tool_exec.py:659-676）；这种隐式约定保证全路径权限检查。
+- 权限代理的 handler 留空，强制走 call() 并与执行器的 MRO 检查联动（func_tool_manager.py:221-226、astr_agent_tool_exec.py:561-578）；这种隐式约定保证全路径权限检查。
 - 内置工具权限硬编码在实现内，与通用权限表双轨并存（:217-220）。工具停用同时写入黑名单和 active 标志，保证跨重启持久（func_tool_manager.py:986-1013）。
 - MCP 重连先清除同名工具，避免热更新累积重复声明；后台任务复用 CronMessageEvent 驱动唤醒（:550-557、731-740）。
 
@@ -292,7 +292,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 
 - **串行 + 后台分离不彻底**：后台工具在 execute 内创建 task 后立即返回 task_id，主循环照常结束；同一响应中的后续工具仍串行等待，结果依赖唤醒机制兜底。
 - **权限检查只查 admin 两态**：tool_permissions 目前只有 admin/member 语义，无 per-user 白名单/黑名单维度。
-- **图片参数收集不递归**：嵌套结构中的图片 URL 不提取（astr_agent_tool_exec.py:60-78）。
+- **图片参数收集不递归**：嵌套结构中的图片 URL 不提取（astr_agent_tool_exec.py:57-75）。
 - **超时只包单次 anext**：多次 yield 的工具每次独立计时，总时长可能超过 tool_call_timeout 的 N 倍。
 - **结果上限使用估计器**（:247）：对中文或多字节文本可能低估。
 
@@ -302,9 +302,10 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 - 注册与生命周期：`astrbot/core/tools/registry.py`（builtin_tool :232-254、config 规则 :26-198、状态计算 :288-332）、`astrbot/core/provider/func_tool_manager.py`（_PermissionGuardedTool :214-285、add/remove/get :365-417、get_full_tool_set :496-515、权限 :453-494、MCP :540-773、启停 :986-1045、ModelScope :1074-1143）
 - 执行分发：`astrbot/core/astr_agent_tool_exec.py`（execute :133-190、_execute_local :647-728、call_local_llm_tool :743-837、handoff :307-477、后台唤醒 :518-646、runtime 电脑工具 :192-249）
 - 主循环：`astrbot/core/agent/runners/tool_loop_agent_runner.py`（reset/skills_like :207-327、_await_or_stop :461-501、大结果 :396-460、_handle_function_tools :1089-1355、requery :1395-1469、中断读取 :1526-1568）
-- 工具集裁剪：`astrbot/core/astr_main_agent.py`（_apply_kb :278、_ensure_persona_and_skills :580-592、_apply_web_search_tools :1231-1264）
+- 工具集裁剪与装配：`astrbot/core/astr_main_agent/`（plugins.filter_tools :53、knowledge_base.apply_knowledge_base :17、persona.apply_persona :32、computer_use.apply_computer_use :248、builder.build_main_agent :57）
+- 本机进程沙箱：`astrbot/core/computer/process_sandbox/`（后端探测 `__init__.py:15-79`、公共限制 `base.py`、bubblewrap.py、seatbelt.py、windows.py:1-243 的 AppContainer 配置与访问控制）
 - 内置工具：`astrbot/core/tools/`（web_search_tools / message_tools / knowledge_base_tools / cron_tools / computer_tools/）
-- 插件工具入口：`astrbot/core/star/star_handler.py:670-724`、`star/context.py:372-383,718`
+- 插件工具入口：`astrbot/core/star/register/star_handler.py:610-620`、`star/context.py:413-424,718`
 - MCP：`astrbot/core/agent/mcp_client.py`、`astrbot/dashboard/services/tools_service.py`（:36-120+）、`astrbot/dashboard/api/tools.py`
 - UI：`dashboard/src/components/extension/componentPanel/components/ToolTable.vue`、`McpServersSection.vue`、`components/chat/message_list_comps/ToolCallCard.vue`、`IPythonToolBlock.vue`
 - 文档：`docs/zh/use/function-calling.md`、`mcp.md`、`agent-runner.md`、`subagent.md`、`computer.md`、`context-compress.md`

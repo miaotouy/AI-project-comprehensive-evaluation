@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/home.tsx`、`app/components/exporter.tsx`、`app/client/api.ts`、`app/components/search-chat.tsx`、`next.config.mjs`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：局部补查。按代码路由反向盘点（`home.tsx` 全部路由面 + `app/api/` 全部路由 + 侧栏入口），对每个候选追源码主链并与现有十类笔记交叉核对；抽查 `exporter.tsx`/`api.ts`/`search-chat.tsx`/`next.config.mjs`；未启动应用与第三方服务
 >
@@ -30,7 +30,7 @@ README 的 Features 章节（README.md:80-93）以部署、PWA、Markdown、prom
 | `/chat`、`/new-chat` | 普通 Chat | 归并已有类目 | Chat、Chat UI、会话与消息管理 |
 | `/masks` | Mask（prompt 模板/角色） | 归并已有类目 | Agent 角色笔记（整篇）、生成式输出笔记（enableArtifacts 开关） |
 | `/plugins` | OpenAPI 插件工具 | 归并已有类目 | Agent 工具笔记 §1/§2 |
-| `/mcp-market` | MCP 市场与连接 | 归并已有类目 | Agent 工具笔记 §3、Chat UI 笔记 §1 |
+| `/mcp-market` | MCP 市场与连接；页面可用性受 `ENABLE_MCP` 与部署侧 `CODE`/access code 门禁约束 | 归并已有类目 | Agent 工具笔记 §3、Chat UI 笔记 §1 |
 | `/artifacts/:id` | Artifact 预览与 KV 分享 | 归并已有类目 | 生成式输出笔记（整篇）、消息渲染器笔记 §5 |
 | `/sd`、`/sd/new` | SD 图像生成面板 | 归并已有类目 | 生成式输出笔记 §3/§4/§8 |
 | `/search-chat` | 会话全文搜索页 | 归并已有类目（普通检索） | 见下 |

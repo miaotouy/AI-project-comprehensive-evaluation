@@ -4,7 +4,7 @@
 >
 > 对比更新日期：2026-11-04
 >
-> 依据：本类目 24 篇单项目调查笔记（自 `../Chat/Chat横向对比.md` 迁移；OpenClaw、RikkaHub、Codex、OpenOcta 依据同目录调查笔记）；Codex 快照 `c9750d7f50052b29f53def02b5cf2160ae49a3d9`、OpenOcta 快照 `0c7dac2284211facdfc813166fe648d093153bb6` 均为 2026-11-04，其余代码快照与验证范围以各笔记元数据为准
+> 依据：本类目 24 篇单项目调查笔记；各项目代码快照与验证范围以笔记元数据为准，本轮多数为 2026-11-04 快照
 >
 > 对比方法：按工作台拓扑、会话导航、Composer 与发送前配置、生成反馈与停止入口、消息操作、分支导航、搜索与现场恢复等用户工作流维度逐项对照；通用界面盘点（弹窗/Toast/主题/动画等）不进入本对比
 >
@@ -35,7 +35,7 @@
 | AIO Hub | 三栏工作台：Agent/参数、ChatArea、Session；支持 ChatArea/输入框分离成悬浮窗 | CodeMirror/textarea、拖入/粘贴附件、工具审批条；发送按钮可 abort | 当前消息列表是完整 DOM + `content-visibility`，依赖活动路径；历史上曾用 TanStack Virtual，后因动态高度、倒序加载闪烁和滚动定位问题于 2026-04-29 撤回；会话切换会复核当前选择，晚到的详情加载不会把界面切回旧选择 |
 | AstrBot | WebChat 与会话管理页服务于多 IM 平台后台 | 输入可触发命令建议（Live Mode 前端组件未挂载）；历史改为分页恢复，首屏取最新 50 条、滚动近顶加载上一页并保持首条位置；聊天设置集中到独立对话框（主题/语言/流式/推理显示/快捷键/传输模式）；真实入站还来自 QQ/Telegram 等平台 | Web UI 只是多平台事件系统的一个入口，不能代表群聊唤醒和平台回复的全部行为 |
 | Chatbox | Header + Virtuoso 消息区 + 底部 InputBox；ThreadHistoryDrawer 侧滑 | composer 承接模型/Copilot/知识库/网页浏览；停止直接 cancel 当前 generating 消息 | 虚拟列表和 smooth-follow 体验成熟；独立 SearchDialog 走 Session 数据扫描，不受 DOM 虚拟窗口限制 |
-| Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂 |
+| Cherry Studio | Home/Agent 共用 `MessageListProvider` 契约，Topic 侧栏与消息流分离 | 多模型选择可以并行生成 N 个 assistant；工具审批/异构干预走专用操作条 | 适配器复用能力强，但全局/局部 store 双 parse 让状态同步复杂；Topic 支持归档到回收站而非立即删除，回收站可恢复、超保留期由后台任务清理 |
 | DeepChat | renderer 通过 ChatPage 组合消息、pending input lane 与工具交互浮层 | steer、queue、question/permission 是独立输入通道；subagent session 只读；Composer 显示 DeepSeek 原生 web 搜索开关（`supportsSearch/searchExecution` 能力字段，仅官方 deepseek-v4-flash 生效） | 主进程是真相源，UI 通过 typed IPC 和 revision/cursor 维护投影 |
 | DeepSeek Harness | 三栏工作台（sidebar \| conversation \| details，CSS grid + 两个拖拽手柄，窄视口自动折叠侧栏）；无会话 Hero 先选工作区、复用或创建 blank 会话；侧栏行点击即切换，Session 常驻后台吃帧、切回即时恢复 | InputBar 输入状态机（plain/adjudicating/claimed/submitting）+ slash/@ 命令裁决；停止按钮 `session.cancel()`，队列 Dock 只读展示、项可编辑/移除/steer | 浏览器内第二条 Cordis 插件树，UI 能力都是按需取回的 `dsh.client` 插件包；组件不 import 框架，数据经 slot 四份额 props 与 uSES 快照到达；ChatView 按 key 订阅座位，流式增量只替换 key 值不重挂 |
 | Dify | 已发布应用的历史 WebChat、轻量 Chatbot 与嵌入式页；控制台编辑面另行隔离 | Composer 按应用 input schema 提交文本、变量和文件；可停止、重新生成、切换候选并处理 workflow 人工输入 | 公开页只呈现发布者预设的应用能力；历史页有会话导航，嵌入式页复用发送链但不具同等导航 |
@@ -47,12 +47,12 @@
 | Open WebUI | Svelte Chat 控制器 + 消息、输入、分享/标签组件 | 支持队列、停止、重新生成、继续生成、工具确认和终端事件 | `Chat.svelte` 集中处理约 25 类 Socket.IO 事件，交互完整但状态组合复杂 |
 | SillyTavern | Agent/群组/Topic 侧栏 + 中央消息 DOM + 通知/设置面板 | 发送按钮复用为中止；群聊邀请/多模式调度改变消息流 | 扩展性和可定制性最高，但长聊天没有虚拟化，重绘与旧 DOM 引用风险更明显 |
 | VCPChat | 三 tab 左侧栏 + 中央聊天 + 通知侧栏，可调宽度 | textarea + 附件预览；发送/中止同一按钮；Topic 列表渐进渲染、IntersectionObserver 计数 | 视觉模式切换成本低，但消息区仍是整段 DOM；单聊/群聊中断能力不对称；话题条目带"未读 N/未读"文字指示器（自动计数或持久化标记，用户参与即清除），搜索框完整输入"未读话题"可置顶未读话题 |
-| VCPMobile | 移动工作台：固定头部、消息区、底部 Composer 与 Agent/Group、Topic 侧栏 | 文本、相机/相册/文件、语音转文字和录音附件；生成中发送键变停止，群聊另有全局停止 | Topic 切换恢复最近项并以 epoch 隔离迟到加载；消息长按操作，列表按键集游标分页而非通用虚拟列表 |
+| VCPMobile | 移动工作台：固定头部、消息区、底部 Composer 与 Agent/Group、Topic 侧栏 | 文本、相机/相册/文件、语音转文字和录音附件；Composer 主按钮在文本发送、停止生成、停止朗读与语音通话四态间切换，群聊另有全局停止 | Topic 切换恢复最近项并以 epoch 隔离迟到加载；消息长按操作，列表按键集游标分页而非通用虚拟列表 |
 | VCPToolBox | 不提供聊天主界面；AdminPanel 是运维 SPA，OpenWebUISub 是第三方页面增强脚本 | 不承接会话输入/停止/导航 | 不能与其它聊天应用按 UI 直接排名，属于后端协议与外部前端适配层 |
-| OpenCode | 会话列表 + 虚拟化 timeline（Web）；TUI 全屏会话页 | Web 发送/中断/排队/followup dock；TUI 发送、双击 Esc 中断、shell 模式、`@` agent 提及 | 渲染核心独立成 `packages/session-ui` 包被 Web 复用；Web 与 TUI 是两套独立渲染栈，共享服务端事件协议 |
+| OpenCode | App 工作台按服务端/工作区/会话三层组织，可同时连接多个服务端、会话在标签间切换；TUI 是全屏会话页 | Web 发送/中断/排队/followup dock；TUI 发送、双击 Esc 中断、shell 模式、`@` agent 提及 | 渲染核心独立成 `packages/session-ui` 包被 Web 复用；Web 与 TUI 是两套独立渲染栈，共享服务端事件协议；Web 草稿与偏好持久化在 IndexedDB 与 localStorage，桌面端按窗口持久化，TUI 本次未找到独立草稿持久化 |
 | Risuai | 无路由条件渲染：`App.svelte` 按七种屏幕状态分支，聊天面 = 图标栏 + 四面板侧栏（会话列表/角色配置/DevTool/快捷设置）+ ChatScreen | 发送按钮原位变停止按钮、spinner 按生成阶段分四色；全局串行、无排队，群聊/续写/触发器递归共用同一停止信号；发送前开关在侧栏快捷设置可见、作用域分层 | 会话以角色为单位挂 `chats[]` 与持久化指针 `chatPage`；生成中禁止切换角色；刷新回首页后重选角色即恢复；草稿是组件级单缓冲、跨角色共享、不持久化 |
-| Pi | 终端 TUI 全屏会话 + 命令面板、选择器、状态行 | 键盘工作流：发送、中断、shell 模式、bash 执行交互；无鼠标工作流 | 以用户任务抽象，不套用桌面布局标题；流式反馈在状态行与消息区 |
-| OpenClaw | 四个自有聊天表面：Control UI 多 pane/分屏聊天工作台 + 侧栏会话树；TUI 单终端全屏工作区；Apple 共享 SwiftUI Chat UI（iOS Chat Pro 原生，Dashboard 走认证 WebView）；Android Compose ChatScreen | Composer 多行 textarea + slash/skill/附件/dictation；TUI 命令与选择器；Apple/Android 原生 Composer + durable outbox；发送/停止、队列、审批与问题提示在各表面出现 | 表面以 Gateway 会话/事件为远端事实源但保留各自本地草稿、滚动与附件；"已收到 ACK"与"已写入 canonical history"分开，不确定交付停在 confirming/unconfirmed 而非静默重发 |
+| Pi | 终端 TUI 全屏会话 + 命令面板、选择器、状态行 | 键盘主链：发送、中断、shell 模式、bash 执行交互；fullscreen 另有鼠标多击选词、可拖动滚动条与可点击 jump-to-end，多路复用器下鼠标跟踪降级 | 以用户任务抽象，不套用桌面布局标题；流式反馈在状态行与消息区 |
+| OpenClaw | 四个自有聊天表面：Control UI 多 pane/分屏聊天工作台 + 侧栏会话树；TUI 单终端全屏工作区；Apple 共享 SwiftUI Chat UI（iOS Chat Pro 原生，Dashboard 走认证 WebView）；Android Compose ChatScreen | Composer 多行 textarea + slash/skill/附件/dictation；TUI 命令与选择器；Apple/Android 原生 Composer + durable outbox；发送/停止、队列、审批与问题提示在各表面出现 | 表面以 Gateway 会话/事件为远端事实源但保留各自本地草稿、滚动与附件；"已收到 ACK"与"已写入 canonical history"分开，不确定交付停在 confirming/unconfirmed 而非静默重发；app shell 已按平台拆到 `apps/ios`、`apps/android` 与共享 `OpenClawKit`，`ui` 只保留 Web Control UI |
 | RikkaHub | 单 Activity + Navigation 3；聊天页 = 抽屉（窄屏模态、横屏且宽 ≥ 1100dp 永久）+ 内容；会话切换经 `clearAndNavigate` 清栈，系统返回退出应用，抽屉打开时返回键先关抽屉 | 多行 Composer（默认 5 行、可全屏）、回车发送由偏好控制；发送/长按（仅入库不生成）两支；「+」附件弹层、排队消息面板可编辑/移除/继续；生成中且输入为空时发送键变停止 | 当前聊天页只订阅本会话的生成任务/状态/队列；草稿是 VM 内存态、随会话切换销毁；工具审批、分支切换、翻译/朗读按消息状态装配；Web 端独立实现（路由跳转替代清栈、草稿按会话 id 存 zustand，无语音/朗读/翻译） |
 | Codex | 单终端工作台：上方 transcript（终端回滚区或自有全屏视图）+ 下方 `BottomPane`；无侧栏，`codex resume`/`fork` 子命令与 `/resume` 选择器是会话入口 | `Enter` 提交、`Tab` 排队；运行中提交默认尝试 steer，被拒后进重试队列；`Esc` 打断回合；执行、提权、补丁、MCP 四类审批走模态弹窗 | 仓库内只有终端一种聊天表面，`/app` 只把当前 thread 深链给外部 Desktop；fork 在 thread 层而非消息层，因此没有消息树与版本切换；其他 thread 事件缓冲，运行状态经 `/agents` 查看 |
 | OpenOcta | 单壳层三段式（顶栏 + 左导航 + 主区）：消息页把左导航整块换成会话侧栏；AgentSwarm 是另一个独立房间式入口 | 独立输入元素处理 Enter/Shift+Enter 与输入法组合态；生成中再发送只进客户端队列并可逐条移除；停止与「新会话」共用同一按钮位；`@` 只提及本机 CLI Agent | 单一状态宿主，但线程与输入框拆成两个自定义元素以隔离高频重绘；运行态按会话分桶、侧栏不显示运行中；三条审批通道都与聊天线程解耦，线程里既无审批消息也无待审批徽标 |

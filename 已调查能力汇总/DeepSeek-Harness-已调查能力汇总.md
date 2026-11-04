@@ -2,9 +2,9 @@
 
 > 汇总对象：`DeepSeek-Harness`（远端仓库 `https://github.com/deepseek-ai/deepseek-harness`，npm 包族 `@deepseek-ai/dsh-*`，产品命令 `dsh`）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 个类目的 DeepSeek-Harness 调查笔记（完整清单见文末来源笔记索引），全部基于同一代码快照 `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`（分支 `master`）
+> 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 个类目的 DeepSeek-Harness 调查笔记（完整清单见文末来源笔记索引），全部基于同一代码快照 `8bd073392eef6f54e921a093b95076248eb08cbb`（分支 `master`）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；未做新的源码调查与跨项目横向比较
 >
@@ -18,19 +18,20 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 ## 完成度速览
 
-- 主链确认（含静态源码确认）：51 项（功能能力 43 项 + 工程与基础设施 8 项）
-- 入口确认（机制）：3 项（workflow/ralph、jobs、bundle 与 invariants）
-- 归并已有类目：2 项（skill provider 注册表、feedback/attachment）
-- 暂缓：1 项（e2b 远程执行 POC）
+ - 主链确认（含静态源码确认）：55 项（功能能力 45 项 + 工程与基础设施 10 项）
+ - 入口确认（机制）：7 项（workflow/ralph、jobs、forge、LiveShare、webhook、worktree、auto-review）
+ - 归并已有类目：3 项（skill provider 注册表、feedback、attachment 与 deliverables）
+ - 暂缓：0 项
+- 已移除：3 项（运行时不变式 invariants、e2b 远程执行 POC、动态插件 define/run/stop/undefine）
 - 声明不符：0 项
 
-异常条目（入口确认未闭合 3、暂缓 1、未覆盖 1）共 5 项，占全部 58 项约 9%；其余条目均以主链或静态源码确认完成。异常详情集中放在文末"已知边界与待验证事项"，正文仅保留必要的非加粗指认。
+异常条目（入口确认未闭合 7、未覆盖 1）共 8 项，占全部 68 项约 12%；其余条目均以主链或静态源码确认完成。异常详情集中放在文末"已知边界与待验证事项"，正文仅保留必要的非加粗指认。
 
 证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。DeepSeek-Harness 的 agent 循环、会话日志、工具执行与 Web UI 均在本仓库内。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效；后续黑盒验证是补充观察。
 
 ## 功能能力摘要
 
-- **实验性 Agent Teams 与可续接子 Agent**：团队运行时、成员和协作工具均以插件组合，并把相关会话事件写入持久化目录；进程内持久 child session 使用单一 activation 和 FIFO inbox，父 Agent 可选择 quiet 注入或在下一步唤醒。该能力不等同于成熟的团队管理界面或跨账户协作服务。证据状态：静态源码确认。来源：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
+- **Agent Teams 与可续接子 Agent**：团队运行时已从实验包升为一等包（`packages/team/{agent-team,tool-agent-team}` 与 `client-ui-agent-team`），共享任务板以根 `SessionId` 为 `TeamId`、任务 id 形如 `task-<n>`，多 Agent 在任意深度发现合格任务 Owner 并等待；进程内持久 child session 使用统一 activation 与 FIFO inbox。证据状态：静态源码确认。来源：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 
 ### 角色与上下文
 
@@ -72,7 +73,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 - **工具 guard 机制**：timeout-policy 是 tools/execute 包装器，把声明的超时预算变成 `TOOL_TIMEOUT` 结构化错误；repeat-tool-reminder 是 post-execute 观察者，经 additionalContexts 注入重复调用提醒，只提醒不否决。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **ACP 服务器（反向控制表面）**：自动化 ACP 服务器经 JSON-RPC stdio 把宿主 Agent 会话暴露给程序化客户端，支持建会话、发 prompt、回传已提交文本、取消与一次性权限应答；宿主审批 waterfall 对 ACP 会话转成 `session/request_permission` 一次性选项；无鉴权、无并发限制（除每会话单 in-flight prompt），安全模型依赖本地 stdio + 可信调用方。证据：主链确认（静态）。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 - **MCP 工具桥**：MCP server 工具以 `mcp__<serverName>__<rawName>` 命名注册进宿主工具表；syncTools 先拉完整 tools/list 再整代注册/注销（冲突回滚、全有或全无）；带断线重连监督器与有界指数退避；只保存工具目录，无账号/凭据/资源对象、无跨重启持久连接。证据：主链确认（静态）。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
-- **hooks 双桥**：在宿主扩展点上按 Claude Code/Codex 的 hooks.json 契约运行外部命令，经 `ctx.shell` 沙箱执行；审批语义按协议最严格合并（deny > ask > allow）；每次调用写 `hook/invoked` 与 `hook/result` 事件对审计。configPath 是进程级一次性读取，无 per-session 项目内 hooks.json 发现，细节见末尾小节。证据：静态源码确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
+- **hooks 双桥与 mods 兼容层**：在宿主扩展点上按 Claude Code/Codex 的 hooks.json 契约运行外部命令，经 `ctx.shell` 沙箱执行；审批语义按协议最严格合并（deny > ask > allow）；每次调用写 `hook/invoked` 与 `hook/result` 事件对审计。新增的 Claude Code mods 桥把 mod 的 hooks 模块包成普通插件行挂载，不读 `plugin.json`/`hooks.json`，tier 一律按 user。configPath 仍是进程级一次性读取，无 per-session 项目内 hooks.json 发现，细节见末尾小节。证据：静态源码确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 - **外部执行体委派（子代理多 provider）**：四个进程外 provider（ACP、Claude Code、Codex、dsh-sdk）把外部 Agent 作为一次性执行体启动、通信、取消并回收最终文本，共享"一次性 run、永不 reject 的结果、整树静止 teardown"契约；结果只回传最终文本，不回流推理/工具事件/文件变化；取消是"本地优先、远端尽力"；子进程环境擦除凭据形状变量与 DSH_* 名。委派策略细节与六 provider 能力族见"独特与差异化能力"中"多 provider 子代理能力族"条目。证据：主链确认（静态）。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 
 ### 渠道与调度
@@ -88,16 +89,16 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 以下能力卡保留[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)的能力卡标题与证据状态。六项主机制均达主链确认（静态证据）；它们共享三条架构模式：能力缝三角、会话事件日志为唯一持久权威、日志完整不变量。
 
-- **能力一：自引用插件运行时（self-modification）**：让模型在会话中直接检查自己所在 Cordis 进程的插件与服务，并把自己写的插件包定义、运行、停止、删除（入口为七组 inspect/define/run/stop/undefine 工具与 `@<pluginId>` 引用注入）；定义与运行只存在于进程内存，重启即失、仅定义它的会话可见。vm 沙箱明确"不是安全边界"，Node 的 require/timers/fetch 被陷阱化重定向到能力 seam（项目自述边界，见末尾小节）。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- **能力一：自省式自扩展（inspect + 持久插件安装）**：模型用 `cordis_inspect_list`/`cordis_inspect_query` 只读检查自己所在 Cordis 进程的服务、事件目录、Loader 条目与工具表，再用 `plugin_manager`/`plugin_market` 把插件或 bundle 装进 profile，后续会话加载新行；旧的动态 define/run/stop/undefine 与 `@<pluginId>` 引用注入已不存在。安装的是宿主进程内真实代码，只读保证的是查询无副作用而非被装代码安全。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **能力二：进程沙箱（sandbox）**：给"同世界子进程"施加文件效应策略（read-only / workspace-write / danger-full-access 三档），策略按每次调用经 `ctx.sandbox.confine` 携带；后端按平台链选择（Linux bwrap 优先、探针失败再 Landlock；macOS Seatbelt；Windows ACL 受限令牌 runner），运行期拒绝 fail-closed；无静默无沙箱回退，选不出后端抛 `SANDBOX_UNAVAILABLE`。真实内核行为属平台运行验证项，见末尾小节。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 - **能力三：同会话目标驱动循环（goal）**：把长期目标做成事件溯源状态（`goal/change` 会话事件 + 严格递增 revision），`goal-round-driver` 在会话内自动续跑；激活（armed）是分离的、从不持久化的进程内标志；完成/阻塞由模型自报（连续 N 轮同一条件默认 3 判定 blocked）；轮次预算默认上限 256。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **能力四：plan mode 作为日志化协作状态**：`plan/mode` 是 log-only、整值替换的会话事件，`foldPlanMode` 纯折叠出状态、无 live mirror；激活时把 `plan:policy` 提示段（order 50）加入每轮请求；`exit_plan_mode` 工具要求完整 Markdown 计划并经 user-questions 缝审批；沙箱与审批策略独立强制执行、互不读写该状态。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
-- **能力五：session-local 定时调度（schedule）**：`schedule/change` 事件是唯一持久权威，timer 只是可弃投影；after（一次性延迟）/ at（绝对时刻）/ every（最小 5 分钟）三变体；到期且 agent 完全 idle 时以普通对话回合回到原会话。交付边界固定 session-local，无冷会话调度器、无外部通知通道，投递是尽力而为的 at-least-once（项目自述边界，见末尾小节）。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
-- **能力六：多 provider 子代理能力族（subagent）**：一个委派契约（`ctx.subagents`）、六种执行位置（同进程 spawn、同进程 fork、进程外 ACP、Claude Code、Codex、dsh SDK）；可续子代理拥有持久子会话 + 至多一个进程内 Activation，冷恢复直接从持久会话重建；委派策略固定（快照父沙箱 override、子代理审批钉死 never、注入 delegation-scope 声明），策略以 `source: 'delegation'` 事件写入子会话日志可重放。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- **能力五：Host 级定时任务（schedule）**：权威从会话日志改为 `schedule` 领域存储中的 Host 任务（记录写 version 2、读 version 1），timer 只是可弃投影；timing 为 typed 变体（After/At/Every/Daily/Weekly/Cron/RRule），创建时还须给 `target`（this_session/new_once/new）；模型工具为 `schedule_create`/`schedule_list`/`schedule_view`/`schedule_edit`，按 id 可管理任何 Host 任务，委派子 Agent 被拒绝。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- **能力六：多 provider 子代理能力族（subagent）**：一个委派契约（`ctx.subagents`）、六种执行位置（同进程 spawn、同进程 fork、进程外 ACP、Claude Code、Codex、dsh SDK）加实验性 OAR，全部经 `startActivation` 准入；本地子代理拥有持久子会话、可在结算后继续收消息，外部后端只执行一次并回传最终文本。委派策略固定（继承或钉死更严格 permission roots、注入 delegation-scope 声明），并以 `source: 'delegation'` 事件写入子会话日志可重放。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **skill provider 注册表**：已归并到 Agent 工具类目（工具侧）；注册表本身是 scope 分层的中立发现机制（本地文件、嵌入、远端均可），发现与加载分离。证据：归并已有类目。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **feedback / attachment**：已归并到既有类目（反馈属生成输出 sidecar，附件属内容寻址附件存储）；feedback 分命令反馈（日志备注）与消息反馈（独立 sidecar，均不进模型上下文）两种契约，附件落 `$DSH_HOME` 下。证据：归并已有类目（普通能力）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)。
 
-另有 workflow/ralph、jobs、bundle 与 invariants 等入口确认（机制）的支撑能力，以及暂缓的 e2b 远程执行 POC，见文末"已知边界与待验证事项"。
+另有 workflow/ralph、jobs、bundle 与 plugin market、forge、LiveShare、webhook、worktree、auto-review 等入口确认（机制）的支撑与实验能力，以及已移除的运行时不变式与 e2b 远程执行 POC，见文末"已知边界与待验证事项"。
 
 ## 工程与基础设施摘要
 
@@ -121,14 +122,14 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **暂缓与外部依赖**
 
-- e2b 远程执行 POC：实验性 provider 组合，只实现 fs 与 subprocess 两个 OS 适配器，依赖外部 E2B 服务，未运行验证，标暂缓。证据：入口确认（暂缓）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
+- e2b 远程执行 POC：已移除——`packages/e2b/` 不存在，远端执行世界改由 POSIX SSH provider 家族（`packages/ssh/`）承担，见[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。证据：已移除（静态确认）。
 - 进程沙箱真实内核行为（bwrap/Landlock/Seatbelt/Windows ACL 与 Windows 进程树终止）需平台运行验证；vm 逃逸面未验证。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
 
 **入口确认未闭合（支撑机制）**
 
 - workflow / ralph：模型可提交编排脚本给 `ctx.workflowEngine`，worker-thread provider 在隔离线程执行（明确非安全边界）；`ralph` 是固定 fresh-agent 策略。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - jobs 后台任务：owner 隔离的后台任务协议（观察、取消、等待、完成通知），`job_list`/`job_output`/`job_kill` 为模型面。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
-- bundle profile patch-layer 与 invariants 运行时不变式：npm 包 manifest 声明 `dsh.bundle.patch` 即成 profile 可安装补丁层（`dsh-base` 为第一层）；每个 npm 包发布 `./invariant` 伴侣向 `ctx.invariants` 注册运行时检查。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
+- bundle profile patch-layer 与 plugin market：npm 包 manifest 声明 `dsh.bundle.patch` 即成 profile 可安装补丁层（`dsh-base` 为第一层），`plugin_manager` 负责列出与安装、`plugin_market` 读市场索引，`apps/plugin-market-generator` 生成索引；此前的 `./invariant` 伴侣与 `ctx.invariants` 运行时不变式已整体移除。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 
 **未覆盖类目（笔记已声明检索范围）**
 
@@ -141,11 +142,11 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **共性未验证**
 
-- 全部来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；结论统一对应代码快照 `0d1f50007f9bca3f52b06e1c3074fa14d5fb0720`。
+- 全部来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；结论统一对应代码快照 `8bd073392eef6f54e921a093b95076248eb08cbb`。
 - 运行时行为待黑盒补充确认：LLM 重试与 pi-ai 错误文本分类的真实匹配度、ACP/Codex/Claude Code 真实子进程往返、goal 多轮续跑竞态、schedule 定时器唤醒与崩溃窗口、Web GUI 视觉/键盘/无障碍/流式性能、消息渲染 DOM 呈现、覆盖率门禁"按文件 100%"声明。
 - 已确认的项目边界（正文已述，此处汇总）：vm 沙箱“不是安全边界”；无冷会话调度器与外部通知通道；导出不含 spill 文件本体；草稿/当前会话无跨标签页同步；无跨渠道高可用（多 Key/轮换/failover）。
 
-与特色贡献统计的衔接：goal、plan mode、schedule、self-modification 可计为产品特性，sandbox 与子代理委派策略按机制贡献单列，见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
+与特色贡献统计的衔接：goal、plan mode、schedule、自扩展（inspect + 插件安装）可计为产品特性，sandbox 与子代理委派策略按机制贡献单列，见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 来源笔记索引
 
@@ -161,5 +162,5 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 - [对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)：请求主链、历史派生、compaction、spill、上下文注入插件、提问能力、与 pi 无代码继承。
 - [应用界面基础设施调查笔记](../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md)：启动加载链、前端运行时、传输连接、Typert 协议、主题国际化、信任模型。
 - [消息渲染器调查笔记](../消息渲染器/DeepSeek-Harness-消息渲染器调查笔记.md)：消息与内容块模型、流式更新链、列表滚动、Markdown/代码/数学管线、呈现意图与工具卡片、扩展机制。
-- [独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)：自引用插件运行时、进程沙箱、goal、plan mode、schedule、子代理能力族六项主机制，以及 workflow/jobs/bundle/invariants/e2b/skill 等支撑机制盘点。
+- [独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)：自省式自扩展、进程沙箱、goal、plan mode、Host 级定时任务、子代理能力族与团队任务板六项主机制，以及 workflow/jobs/bundle 与 plugin market/forge/liveshare/worktree/auto-review/skill 等支撑与实验机制盘点。
 - [生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)：流式词汇与折叠、输出事件落盘、工具结果契约、终端/shell/附件/spill/反馈/令牌计量、持久化与恢复。

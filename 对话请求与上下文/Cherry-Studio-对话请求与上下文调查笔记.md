@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：直接阅读源码（渲染层提交链路、主进程 `AiStreamManager` 状态机与 `PersistentChatContextProvider` 上下文拼装、AI SDK Agent 交接、`messageRules` 消息整形与重试包装），并核对行号与符号至当前 HEAD
 >
@@ -40,7 +40,7 @@ ChatContent.onSend
   -> runtime/provider 流式调用（HTTP payload 由 AI SDK 与 provider runtime 负责）
   -> onChunk（AiStreamManager.ts:898-995）ring buffer + 监听器扇出
   -> PersistenceListener / MessageServiceBackend 写占位消息（终态落库）
-  -> IPC chunk/done/error -> 渲染侧 TopicStreamSubscription -> readUIMessageStream（渲染侧细节见消息渲染器）
+  -> IPC chunk/done/error -> 渲染侧 StreamDispatchService -> MessageProjectionService -> readUIMessageStream（渲染侧细节见消息渲染器）
 ```
 
 边界：请求开始前读取哪些持久化对象（锚点路径、消息树）与结束后写回哪些对象（占位消息、`activeNodeId`）的数据语义在会话与消息管理（`../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md`）；Composer 按钮、发送前配置、分支按钮、停止入口等用户可见工作流在 `<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>`；流式 chunk 到可见状态前的消费、缓冲与 DOM 更新在消息渲染器（`../消息渲染器/Cherry-Studio-消息渲染调查笔记.md`）。
@@ -68,6 +68,7 @@ ChatContent.onSend
   6. 合并相邻同角色消息（`coalesceConsecutiveSameRole`，`:29-50`）；
   7. 给空 assistant 补 `'...'`（`ensureNonEmptyAssistantContent`，`:60-66`；Gemini 会拒绝空 content，见 `:52-59` 注释）。
   知识库范围与工具配置仍由请求字段/metadata 传递（`knowledgeBaseIds`/`tools`）。
+  重放阶段另有几类防御：名为空的 dynamic tool 调用、同一 id 的重复工具 part、`input` 不是对象的旧工具 part 都在重放前被丢弃，避免把历史脏数据变成非法请求。渲染层手工编辑过的已签名 thinking part 在重放时被改写成普通 `<think>` 文本块，因为签名已不可信。
 - **steer 续答**：`prepareSteerContinuation` 复用已持久化的用户行，在模型侧历史副本里给该用户消息包一层 steer system-reminder（`withSteerReminder`，`:168-180,606`），持久化行本身不动。
 
 ## 3. 预算、截断、摘要与压缩
@@ -90,13 +91,13 @@ ChatContent.onSend
   - 入队时把连续 delta 合并进尾部、超长 delta 先切分（`maxDeltaBytes=16_384`，默认配置 `:146-154` 的 `:151`），避免 delta 洪泛把自身 part 的开头 chunk 挤出导致重放不可解析；
   - 环形淘汰在有挂起审批时暂停（审批的 tool-input chunk 是重连后仍须可操作的状态，`:956`），淘汰计数记在 `droppedChunks`（`:958`）；
   - `addListener` 对迟到监听器重放缓冲（`:818-830`），`attach` 时用 `buildCompactReplay` 重建紧凑重放（`:1400`）。
-- **渲染侧交接点**：IPC 的 `ai.stream.chunk/done/error` 事件经 `TopicStreamSubscription` 按 `topic -> execution + anchor` 分流，再由 `readUIMessageStream` 组装 parts，`useExecutionOverlay` 按 `requestAnimationFrame` 合并帧提交 overlay。anchor 用于区分同一 execution 中的不同 turn；steer/continue 时 execution 可能切换 assistant row。这些细节属消息渲染器笔记（"流式消息链路"一节），本类目只记录交接契约。平滑播放（jitter buffer）在渲染侧（`useSmoothStream`），见消息渲染器笔记。
+- **渲染侧交接点**：IPC 的 `ai.stream.chunk/done/error` 事件经 `StreamDispatchService` 按 `topic -> execution + anchor` 分流，再由 `MessageProjectionService` 组装 parts（桌面 Home 与 Agent 共用同一套投影），`useExecutionOverlay` 按 `requestAnimationFrame` 合并帧提交 overlay。原先负责订阅与 IPC 传输的 `TopicStreamSubscription`、`IpcChatTransport` 两个类已不存在。anchor 用于区分同一 execution 中的不同 turn；steer/continue 时 execution 可能切换 assistant row。这些细节属消息渲染器笔记（"流式消息链路"一节），本类目只记录交接契约。平滑播放（jitter buffer）在渲染侧（`useSmoothStream`），见消息渲染器笔记。
 - **顺序保证**：terminal 事件（done/paused/error）在流式循环里按序发生，渲染侧"先刷新数据库、再清理 overlay"的交接由 `useTopicOverlayHandoffOnTerminal` 驱动（`useTopicStreamStatus.ts:99-117`），保证最终画面先可见再执行持久化交接。
 
 ## 6. 完成、异常、半截流与最终回写
 
 - **终态收敛**：`onExecutionDone`（`AiStreamManager.ts:998-1045`）/`onExecutionPaused`（`:1047-1082`）/`onExecutionError`（`:1085-1134`）是三条主要终止转换路径，经 `resolveTerminalStatus`/`computeTopicStatus`（`:1635-1660`）收敛为终态，`runTerminalLifecycle`（`:1199-1206`）处理终态广播与清理。
-- **abort 与空闲超时**：`abort()`（`:872-891`）同步把 status 置为 `aborted` 并 abort 各 execution 的 `AbortController`；空闲超时（`withIdleTimeout`，`:1512-1513`）直接 abort controller，执行循环检测到 aborted 后把 exec.status 提升为 `aborted` 并走暂停分支，使截断回复以 `paused` 而不是 `success` 持久化（`:1557-1563`）。
+- **abort 与空闲超时**：`abort()`（`:872-891`）同步把 status 置为 `aborted` 并 abort 各 execution 的 `AbortController`；空闲超时（`withIdleTimeout`）直接 abort controller，执行循环检测到 aborted 后把 exec.status 提升为 `aborted` 并走暂停分支，使截断回复以 `paused` 而不是 `success` 持久化（`:1557-1563`）。聊天回合的空闲上限取 `CHAT_STREAM_IDLE_TIMEOUT_MS`（120 分钟），请求可用 `idleTimeoutMs` 覆盖。
 - **最终化交接**：渲染侧 `PersistenceListener.onDone/onPaused/onError` 之后，`MessageServiceBackend.persistAssistant` 调 `MessageService.finalizeAssistantMessage`（`MessageService.ts:1402-1432`）把终态 parts/status/stats 写回占位行；渲染侧"流结束后页面先刷新数据库，再清理 overlay"（`useTopicStreamStatus.ts:99-117`，消息渲染器笔记"history 与 overlay 的交接"）。
 - **错误路径**：Home 侧消息流错误走 `onExecutionError` + `broadcastTopicError`；Agent 侧另有 `withTerminalErrorFallback`——agent 消息终态是 `error`/`success` 但没有可见 part 时，主动补一条 `data-error` part 防止 UI 卡在空白/转圈（`agentMessageListAdapter.tsx:48-73`，UI 侧兜底见 Chat UI 笔记 6.2）。
 - **半截流的落盘形状**：停止/超时产生的半截 assistant 消息以 `status='paused'` 持久化（执行循环 `:1557-1563` + `finalizeAssistantMessage` 接受 `paused`，`MessageService.ts:1406`）；工具审批等待中的打断由 `finalizeInterruptedParts` 在每个投影点把悬挂工具 part 终态化为 `output-error`（`AiStreamManager.ts:1054-1060` 注释）。
@@ -132,7 +133,7 @@ ChatContent.onSend
 
 上下文设置支持按最近 N 条消息取窗、按 token 阈值截断，以及按窗口百分比触发压缩；压缩模型可以跟随当前模型或单独指定。附件预算与路由先评估输入空间，并可在预算允许时读取完整附件；`fs_read` 同时受到显式门控，避免因附件扩展而无条件暴露文件读取。AI SDK 的工具循环还在单次请求内部执行增量压缩，避免长工具回合只依赖发送前压缩。相关入口见 `src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/runtime/aiSdk/params/features/inLoopCompaction.ts:179-192`。
 
-这些结论来自预算、请求参数和运行时构造代码；不同 Provider 对大附件、压缩和上下文上限的实际接受行为未运行验证。依据：`src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/messages/attachmentBudget.ts`、`src/main/ai/messages/maxMessagesWindow.ts`、`src/main/ai/runtime/pi/modelInjection.ts`、`src/main/ai/runtime/dsh/modelInjection.ts`。
+这些结论来自预算、请求参数和运行时构造代码；不同 Provider 对大附件、压缩和上下文上限的实际接受行为未运行验证。依据：`src/main/ai/contextBuild/resolveContextSettings.ts`、`src/main/ai/messages/attachmentBudget.ts`、`src/main/ai/messages/maxMessagesWindow.ts`、`src/main/ai/runtime/pi/modelInjection.ts`、`src/main/ai/runtime/piDurable/`（Pi 与 Pi-Durable 的模型注入都经由内部 gateway 绑定，DSH 运行时已移除）。
 
 ## 11. 退出恢复、日志与已确认边界
 
@@ -160,5 +161,5 @@ ChatContent.onSend
 - `src/main/ai/streamManager/context/{PersistentChatContextProvider,dispatch,modelResolution}.ts`
 - `src/main/ai/messages/messageRules.ts`（`toModelMessages` 整形管线）
 - `src/main/ai/AiService.ts`、`src/main/ai/runtime/aiSdk/retry/`（streamText、retry wrap、fallback 过滤）
-- `src/main/ai/runtime/aiSdk/Agent.ts`（`initialMessages` 转换与 SDK 交接）
+- `src/main/ai/runtime/aiSdk/Agent.ts`（`initialMessages` 转换与 SDK 交接）\n- `src/renderer/services/aiTransport/{StreamDispatchService,MessageProjectionService,ExecutionStreamOverlayService}.ts`（桌面共享的流事件分发与消息投影）
 - `src/main/data/services/MessageService.ts`（`getPathToNode`、`createUserMessageWithPlaceholders`、`finalizeAssistantMessage`，数据语义见会话与消息管理）

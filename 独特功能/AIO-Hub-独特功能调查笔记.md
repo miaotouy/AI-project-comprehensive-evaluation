@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、全部 46 个 `src/tools/*.registry.ts`、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
+> 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、`src/tools/` 下 49 个工具目录的 registry 声明、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、sub-agent、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
 >
 > 调查范围：待查清单第二批候选（上下文分析器、宏与正则管道、快捷动作、Agent 私有资产、自由窗口、媒体工作站、资产管理器、多运行时插件、Skill 沙箱、请求检查器、VCP 监控）的入口、状态、执行与持久化主链；全量扫描剩余约 37 个未走主链的工具模块，新增八张能力卡；与现有十类笔记去重
 >
@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼。去除 Chat/上下文/AST/Agent 已有覆盖后，本仓库仍独立成立的能力族有十八项，其中十六项主贡献达到主链确认（静态证据），另有 content-deduplicator 为辅助主链确认、VCP 监控为入口确认：
+AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼。去除 Chat/上下文/AST/Agent 已有覆盖后，本仓库仍独立成立的能力族有二十项，其中十八项主贡献达到主链确认（静态证据），另有 content-deduplicator 为辅助主链确认、VCP 监控为入口确认：
 
-1. **媒体工作站（media-generator）**：会话-任务双轨、全局任务池、树形分支、参数清洁与资产回流，是完整的创作工作流（主链确认）。
+1. **媒体工作站（media-generator）**：会话-任务双轨、全局任务池、树形分支、参数清洁与资产回流，是完整的创作工作流；当前快照新增输入工作区（`InputPanelHost` 承载提示词优化、快捷提示词库与执行位置，输入与附件随会话详情持久化）与 OpenRouter 图片/音频/视频协议适配（主链确认，细节在媒体创作笔记）。
 2. **中央资产管理器（asset-manager）**：应用数据目录下的资产文件、SHA-256 去重、Rust 索引和来源追踪，构成跨工具的资产事实源（主链确认）。
 3. **LLM 请求检查器（llm-inspector）**：Rust 外部代理与前端内部钩子组成双层监控，可透视应用内所有 LLM 调用（主链确认）。
 4. **快捷动作系统（Quick Actions）**：宏模板、行级后处理、自动发送和 SillyTavern Quick Reply 导入（主链确认）。
@@ -34,16 +34,18 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏与本地视频抽帧 + aHash 去重 + 编辑距离字幕合并 + 编辑式工作台 + 一键注入全局 Chat（`主链确认`）。
 17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
 18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
+19. **子智能体与后台任务中心（sub-agent + background-runtime）**：把任务委派给独立子会话的另一个 Agent，任务状态与审批由后台任务注册表维护，任务中心/伴生分栏/标题栏胶囊提供跨页面透视与叫停（`主链确认`，工具面细节在 Agent 工具笔记第 11 节）。
+20. **接入式输入区面板与指令系统**：输入区上方统一面板插槽承载工具、Knowledge、宏、会话、画布与输入设置，配合可自定义工具栏与斜杠指令，把跨功能入口收进同一容器（`主链确认`，界面工作流在 Chat UI 3.1/3.2）。
 
 辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
 
-归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。
+归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。当前快照 `src/tools/` 下有 49 个工具目录（含仅存文档、无实现的 `weather`），其中 48 个带 `ARCHITECTURE.md`；`packages/` 已从 1 个共享包扩展为 4 个 npm 工作区（`llm-core`、`model-metadata-core`、`agent-preset-core`、`tool-icons`），另有本地 Rust crate `code-formatter`、`desktop-entry`。
 
-声明不符项：README/ARCHITECTURE 中 media-generator 的 `generateMedia(prompt, type)` Agent 方法声明存在但**未实现**（占位，见 `media-generator/ARCHITECTURE.md:410`）。
+声明不符项：README/ARCHITECTURE 中 media-generator 的 `generateMedia(prompt, type)` Agent 方法声明存在但**未实现**（占位，见 `media-generator/ARCHITECTURE.md:435`），Agent 实际通过 `generate_<model>` 动态方法触发生成。
 
 ## 介绍声明与候选盘点
 
-根 README（约 350 行）将产品定位为"本地优先的 AI 能力枢纽｜人类工作台与 Agent 运行时"，功能面非常宽。`docs/architecture/tools-architecture-overview.md`（2026-06-30 生成，39 个模块）与当前 `src/tools/` 实际 47 个 registry 文件（原 46 个基础上新增 `retrieval` 工具注册）基本一致，是本轮候选盘点的可靠索引。47 个工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas` 等；其余工具构成"工具枢纽"产品面。
+根 README 将产品定位为"本地优先的 AI 能力枢纽｜人类工作台与 Agent 运行时"，功能面非常宽。`docs/architecture/tools-architecture-overview.md` 与当前 `src/tools/` 实际 49 个工具目录、48 个 registry 文件基本一致，是本轮候选盘点的可靠索引。这些工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas`、`sub-agent` 等；其余工具构成"工具枢纽"产品面。
 
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|

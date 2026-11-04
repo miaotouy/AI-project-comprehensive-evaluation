@@ -1,10 +1,10 @@
 # Jan Agent 工具调查笔记
 
-> 调查对象：`https://github.com/janhq/jan`（重点 `web-app/src/lib/custom-chat-transport.ts`、`web-app/src/hooks/useToolApproval.ts`、`web-app/src/services/mcp/tauri.ts`、`extensions/rag-extension/src/tools.ts`、`web-app/src/lib/webSearchTool.ts`）
+> 调查对象：`https://github.com/janhq/jan`（重点 `web-app/src/lib/custom-chat-transport.ts`、`web-app/src/lib/coworkTools.ts`、`src-tauri/plugins/tauri-plugin-agent-tools/`、`web-app/src/hooks/useToolApproval.ts`、`web-app/src/services/mcp/tauri.ts`、`extensions/rag-extension/src/tools.ts`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 Jan 仓库
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-工具体系按表面分为普通 Chat、Cowork 与 CLI。普通 Chat 经 AI SDK tool calling 暴露 Web/RAG/MCP 工具；Cowork 在前端显式运行多步循环，调 Rust agent-tools 插件执行文件、shell、记忆与技能工具；CLI 从同一 Rust 工具集构建项目工具目录。普通 Chat 的 MCP 执行仍在 Rust 侧，结果以 `tool-<name>` part 回流（`web-app/src/lib/agentTools.ts:28-63`、`web-app/src/lib/coworkRunner.ts:15-25`）。
+工具体系按表面分为普通 Chat、Cowork 与 CLI，三者共享同一套 Rust 工具实现但注入方式不同。普通 Chat 经 AI SDK tool calling 暴露 Web/RAG/MCP 工具；Cowork 在前端显式运行多步循环，调 `tauri-plugin-agent-tools` 执行文件、shell、记忆与技能工具；CLI 从同一套 Rust 工具构建项目工具目录。普通 Chat 的 MCP 执行仍在 Rust 侧，结果以 `tool-<name>` part 回流。外部客户端（ADK/CLI RPC 会话）走另一条工具路径：工具由客户端声明，运行时把调用派回客户端执行，Jan 只提供内置工具作为可选实现，详见[外部执行体笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)。工具 schema 以内置定义为准、由 Rust 侧统一产出（`getAgentToolSchemas`），客户端只为 `todo`/`ask`/`task`/`monitor` 这四个自派发工具转录同构 schema，因此桌面与 CLI 宣传的工具契约一致（`web-app/src/lib/agentTools.ts`、`web-app/src/lib/coworkTools.ts`）。
 
 普通 Chat 的原有工具来源有三类；下列清单不覆盖 Cowork/CLI 的内置工具：
 
@@ -32,7 +32,7 @@
 - `DropdownToolsAvailable.tsx` 显式过滤 `server === 'Jan Browser MCP'`，浏览器 MCP 工具不出现在开关列表中；
 - Web 搜索 API key 只进 OS keyring（`set_secret`/`get_secret`），绝不明文写 settings.json。
 
-Cowork 在模型有 tools capability 时冻结一次运行的工具目录，以免每步改变提示前缀；执行器按调用顺序派发，Plan mode 同时从目录移除并在派发端拒绝写文件、编辑、bash、记忆/技能写入、子任务与监视器。它通过原生工具读写文件、运行 shell、调用记忆/技能、截图，另由前端处理 todo、ask、task、monitor；普通 Chat 仅额外暴露经过沙箱检查的 bash，不等于全量 Cowork 工具（`web-app/src/lib/coworkTools.ts:19-43`、`web-app/src/lib/coworkDispatch.ts:168-188`、`web-app/src/lib/agentTools.ts:39-70`）。
+Cowork 在模型有 tools capability 时冻结一次运行的工具目录，以免每步改变提示前缀；执行器按调用顺序派发，Plan mode 既从目录里剔除破坏性工具，也在派发端拒绝调用。拒绝集合是写文件、编辑、`shell`、`skill_write`、`task` 与监视器，记忆工具只禁用写类操作（写、编辑、删除、移动），读操作仍可用。它通过原生工具读写文件、运行 shell、调用记忆/技能、截图，另由前端处理 todo、ask、task、monitor；普通 Chat 只额外暴露经过沙箱检查的 shell，不等于全量 Cowork 工具。
 
 ## 1. 工具清单
 
@@ -93,11 +93,11 @@ partialize 只持久化 `webSearchEnabled`、`searchProvider`、`endpoints` 三�
 
 ### 3.1 refreshTools
 
-`custom-chat-transport.ts` `refreshTools`（L815-977）：
+`custom-chat-transport.ts` `refreshTools`（L1056-1308），开头先取一次记忆摘要快照（`refreshMemoryDigest`），让同步构建的系统提示读到同一份快照：
 
 1. 仅 `selectedModel.capabilities.includes('tools')` 时加载（L831-834）；
 2. RAG 工具：要求线程有文档且 RAG 功能可用；文档检查（`hasDocuments`）经线程 metadata 或 VectorDBExtension 附件列表接口（L838-859），功能开关 `ragFeatureAvailable` 回退 `useAttachments.enabled`（L861-863）；
-3. MCP 工具：开启智能路由（`enableSmartToolRouting`）时按最后一条用户消息筛选相关工具（L898-933）；**路由结果冻结**——`frozenRoutedTools` 加签名缓存，防止每次请求的工具集变化破坏提示缓存（L730-735、L908-933）；另有同名校验（L943-948）；
+3. MCP 工具：开启智能路由（`enableSmartToolRouting`）时按最后一条用户消息筛选相关工具；**路由结果冻结**——`frozenRoutedTools` 加签名缓存，签名包含 server 列表与禁用集合，防止每次请求的工具集变化破坏提示缓存；另有同名校验；
 4. 轻量路由模型 `resolveRouterModel`（L979-1024，`isRouterModelSelectable` 校验）；
 5. 统一转为 JSON Schema（经 `normalizeToolInputSchema` 规整，L876-881、L950-956）；
 6. 禁用过滤：按全局禁用列表过滤，复合 key `${serverName}::${toolName}`（L823-828）。
@@ -106,7 +106,7 @@ partialize 只持久化 `webSearchEnabled`、`searchProvider`、`endpoints` 三�
 
 ### 3.2 schema 规整
 
-`normalizeToolInputSchemaValue`（custom-chat-transport.ts:213-290，注释称与 Rust 对齐）：
+`normalizeToolInputSchemaValue`（`custom-chat-transport.ts:290`，注释称与 Rust 对齐），对外入口 `normalizeToolInputSchema`（`custom-chat-transport.ts:746`）：
 
 - `{properties:{foo:"string"}}` 展开为 `{type:"string"}`（L206-211）；
 - `type:'object'` 无 `properties` 补 `{}`（L262-264）；
@@ -115,7 +115,9 @@ partialize 只持久化 `webSearchEnabled`、`searchProvider`、`endpoints` 三�
 
 ## 4. 权限与审批
 
-本节的四级审批属于普通 Chat 的 MCP 工具。Cowork 的 Plan mode 是执行端拒绝，并非靠模型遵守提示；附加项目目录在 Cowork 中以 `project_writable=true` 作为工作区根，write/edit 可以原地修改。普通 Chat 的附加目录仍只读；`useCoworkSessions.ts:46-48` 的只读注释与实际 Cowork 派发参数不一致，判断以调用链和 Rust 的 write_roots 为准（`web-app/src/lib/coworkDispatch.ts:209-227`、`src-tauri/plugins/tauri-plugin-agent-tools/src/commands.rs:685-709,2008-2057`）。CLI 的 `--safe` 审批与 `--sandbox` OS 隔离是两个独立控制，默认全局 sandbox 关闭（`src-tauri/jan-cli/src/main.rs:69-98`）。
+本节的四级审批属于普通 Chat 的 MCP 工具。Cowork 的 Plan mode 是执行端拒绝，并非靠模型遵守提示；附加项目目录在 Cowork 中以可写根身份进入工作区，write/edit 可以原地修改，普通 Chat 的附加目录仍只读。判断以调用链和 Rust 的 write_roots 为准（`web-app/src/lib/coworkDispatch.ts`、`src-tauri/plugins/tauri-plugin-agent-tools/src/commands.rs`）。
+
+只读 Agent 与写入 Agent 的根目录策略不同：只读 Agent 拿到的根集合去掉了可写位，子 Agent 各自在独立 git worktree 中工作，避免并行修改互相覆盖；沙箱内 shell 命令可以申请越出沙箱，但需要用户批准，`--safe` 只把这类升级再问一次。CLI 的 `--safe` 审批、`--sandbox` OS 隔离、`--no-sandbox` 与升级开关是相互独立的控制，默认全局 sandbox 关闭。
 
 ### 4.1 四级审批
 
@@ -168,8 +170,10 @@ useChat.sendMessage
 
 ## 6. 边界与未验证事项
 
-- MCP 的 `maxToolOutputChars` 默认 40000；Rust 对结果统一按字符截断并显式标注截断。OAuth 2.1 的 PKCE/动态注册凭据另存于 `mcp_oauth.json`；这条登录链当前由 CLI 驱动，不能直接推定桌面设置页具有完整 OAuth 交互（`src-tauri/src/core/mcp/models.rs:88-114`、`truncate.rs:39-62`、`oauth.rs:1-31`）。
+- MCP 的 `maxToolOutputChars` 默认 40000，请求级上限与设置值取较紧者，Rust 对结果统一按字符截断并显式标注截断（`src-tauri/src/core/mcp/commands.rs:395,526`、`truncate.rs:39`）。OAuth 2.1 的 PKCE/动态注册凭据另存于 `mcp_oauth.json`，授权地址还要过 allowlist 检查；这条登录链目前由 CLI 与命令层共同驱动，不能直接推定桌面设置页具有完整 OAuth 交互（`src-tauri/src/core/mcp/oauth.rs`、`commands.rs:596-654`）。
 - 未运行 Cowork 工作区写入、Shell 沙箱或 MCP OAuth 的端到端调用；普通 Chat 的审批 store 不能代表这些新表面的权限语义。
+- 子 Agent 的 git worktree 生命周期（`/new`、`/clear`、`/resume` 与崩溃后的收尾）、只读根的实际生效范围、沙箱升级审批只做了静态核对。
+- 记忆工具写入后的索引边界（有界、面向缓存稳定的摘要快照）未验证召回效果；`refreshMemoryDigest` 的缓存失效条件未展开。
 
 - `DropdownToolsAvailable.tsx` 显式过滤 `server === 'Jan Browser MCP'`——浏览器 MCP 工具在开关列表中不可见（事实）；它是否仍可被模型调用需运行时验证。
 - 未发现“JSON schema 自动生成参数表单”的机制；工具参数无 UI 表单，由模型直接填 JSON。
@@ -180,18 +184,19 @@ useChat.sendMessage
 
 ## 7. 关键源码索引
 
-- 工具加载与注入：`web-app/src/lib/custom-chat-transport.ts:815-977`
-- schema 规整：`custom-chat-transport.ts:213-290`
+- 工具加载与注入：`web-app/src/lib/custom-chat-transport.ts:1056-1308`
+- schema 规整：`custom-chat-transport.ts:290,746`
 - 禁用过滤：`custom-chat-transport.ts:823-828`
-- 工具执行入口：`custom-chat-transport.ts:1369-1389`
+- 工具执行入口：`custom-chat-transport.ts:1382`（`sendMessages`）起
 - 审批 store：`web-app/src/hooks/useToolApproval.ts`
 - 审批请求收集：`web-app/src/hooks/useToolApprovalRequests.ts`
 - 禁用列表 store：`web-app/src/hooks/useToolAvailable.ts`
 - MCP 服务：`web-app/src/services/mcp/tauri.ts`、`default.ts`
-- MCP 进程管理：`src-tauri/src/core/mcp/helpers.rs`（run_mcp_commands:62-161、start_mcp_server:318-395、传输分区:397-819、稳定性检查:720-745）
+- MCP 进程管理：`src-tauri/src/core/mcp/helpers.rs`（`run_mcp_commands:63`、`start_mcp_server:320`、传输分区与稳定性检查见同文件）
 - MCP 命令：`src-tauri/src/core/mcp/commands.rs`
 - Web 搜索：`web-app/src/lib/webSearchTool.ts`、`web-app/src/hooks/useWebSearchConfig.ts`
-- RAG 工具定义：`extensions/rag-extension/src/tools.ts`、`extensions/rag-extension/src/index.ts:110-127`
+- RAG 工具定义：`extensions/rag-extension/src/tools.ts`、`extensions/rag-extension/src/index.ts:144,180`
+- 工具执行插件：`src-tauri/plugins/tauri-plugin-agent-tools/`（`commands.rs`、`workspace.rs`、`preview.rs`）
 - 工具渲染：`web-app/src/components/ai-elements/tool.tsx`、`tool-runtime.tsx`、`WebToolWidget.tsx`、`RagToolWidget.tsx`
 - 工具描述与引用：`web-app/src/lib/toolPresentation.ts`、`citation-parser.ts`、`grounding.ts`
 - 设置 UI：`web-app/src/routes/settings/mcp-servers.tsx`、`web-app/src/routes/settings/web-search.tsx`

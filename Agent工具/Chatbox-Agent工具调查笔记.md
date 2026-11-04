@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：只读源码逐文件精读；未修改被调查仓库任何文件
 >
@@ -34,7 +34,7 @@
 
 ```text
 用户消息
-  ↓ orchestrateGeneration()  [orchestration.ts]
+  ↓ orchestrateGeneration()  [GenerationService.ts]
   ↓ prepareAgentGenerationHarness()  [agent-harness.ts]
       ↓ buildToolsForSession(model, options)  [tools-builder.ts]
           ├─ mcpController.getAvailableTools()   ← agentMode=on
@@ -46,7 +46,7 @@
           ├─ buildFilesystemTools()               ← agentMode=on
           ├─ load_skill / run_command / install_skill ← Work Mode；旧会话兼容 user_exec
           └─ chatboxCliToolSet                    ← chatbox-product-info skill已启用
-  ↓ withToolCallLimitPause(tools, 25)（可按 pauseOnToolCallLimit 关闭） [orchestration.ts:750-752]
+  ↓ withToolCallLimitPause(tools, 25)（可按 pauseOnToolCallLimit 关闭） [GenerationService.ts]
   ↓ model.chatStream(coreMessages, chatOptions)  [abstract-ai-sdk.ts]
       stopWhen: [stepCountIs(maxSteps), stopWhenPersistentToolCallPause]
   ↓ for await chunk → processStreamChunk()  [stream-chunk-processor.ts]
@@ -151,7 +151,7 @@ buildToolsForSession 中每类工具的启用条件如下（`tools-builder.ts:22
 
 includeAgentTools 要求 agentMode 为 on 且模型支持 agent 工具。注释明确指出：函数调用能力弱的模型（如 DeepSeek V3/R1）会因此拿不到任何 agent 专属工具（MCP、沙箱、skills、KB、code execution），但仍可用 web_search，判断见 `tools-builder.ts:231-232`。
 
-agentMode 的最终取值由 computeEffectiveAgentMode 决定；支持条件要求平台类型为 desktop 且模型支持 agent 工具。因此**移动/Web 平台完全不进入 agent 工具路径**，源码见 `agent-harness.ts:85-88` 与 `orchestration.ts:500`。
+agentMode 的最终取值由 computeEffectiveAgentMode 决定；支持条件要求平台类型为 desktop 且模型支持 agent 工具。因此**移动/Web 平台完全不进入 agent 工具路径**，源码见 `agent-harness.ts:85-88` 与 `GenerationService.ts`。
 
 `codeExecution` 选项本身还叠加了 Pro 校验和沙箱可用性探测：
 ```ts
@@ -164,7 +164,7 @@ if (canExecuteCode && sandboxProvider) {
 ```
 （`agent-harness.ts:216-227`）云沙箱（Mobile/Web 场景）需要 Pro 账号；本机沙箱在 Windows 上 `checkAvailability()` 恒为 `available: true`（见第 7 节），在 Linux 上依赖 `bubblewrap`/`socat` 依赖检测。
 
-**依据**：[tools-builder.ts:221-359](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[agent-harness.ts:85-88,204-227](../../chatbox/src/renderer/stores/session/agent-harness.ts)、[orchestration.ts:500-503](../../chatbox/src/renderer/stores/session/orchestration.ts)
+**依据**：[tools-builder.ts:221-359](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[agent-harness.ts:85-88,204-227](../../chatbox/src/renderer/stores/session/agent-harness.ts)、[GenerationService.ts](../../chatbox/packages/chatbox-core/src/generation/GenerationService.ts)
 
 ---
 
@@ -188,9 +188,9 @@ tool-call chunk 落地时创建 call 状态的 part；tool-result/tool-error 原
 
 ### 3.3 并行工具调用与 `stepIndex`
 
-stepIndex 区分同一响应内并行发出的调用与多轮串行 step。tool_call_limit 暂停会冻结整个批次，而审批类暂停默认只针对触发暂停的调用；递增逻辑和批次查找见 `stream-chunk-processor.ts:373-378`、`orchestration.ts:333,398-409`。
+stepIndex 区分同一响应内并行发出的调用与多轮串行 step。tool_call_limit 暂停会冻结整个批次，而审批类暂停默认只针对触发暂停的调用；递增逻辑和批次查找见 `stream-chunk-processor.ts:373-378`、`GenerationService.ts`。
 
-**依据**：[abstract-ai-sdk.ts:1-80,320-335](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[agent-harness.ts:324-331](../../chatbox/src/renderer/stores/session/agent-harness.ts)、[stream-chunk-processor.ts:92-354](../../chatbox/src/renderer/stores/session/stream-chunk-processor.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)
+**依据**：[abstract-ai-sdk.ts:1-80,320-335](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[agent-harness.ts:324-331](../../chatbox/src/renderer/stores/session/agent-harness.ts)、[stream-chunk-processor.ts:92-354](../../chatbox/packages/chatbox-core/src/generation/stream-chunk-processor.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)
 
 ---
 
@@ -230,9 +230,9 @@ AI SDK 的停止条件使用 maxSteps 或 Number.MAX_SAFE_INTEGER；**搜索全�
 
 ### 5.2 应用层工具调用计数上限
 
-应用层会给每个工具包一层计数器：跨工具累计到第 26 次调用时抛出 ToolCallLimitPausedError，触发 tool_call_limit 暂停，冻结同一 stepIndex 的整批调用，等待用户继续或停止。抛出这个暂停是为了防止无限循环消耗预算，属**里程碑式确认点**，不是执行失败；上限为 25，入口见 orchestration.ts:302,327。
+应用层会给每个工具包一层计数器：跨工具累计到第 26 次调用时抛出 ToolCallLimitPausedError，触发 tool_call_limit 暂停，冻结同一 stepIndex 的整批调用，等待用户继续或停止。抛出这个暂停是为了防止无限循环消耗预算，属**里程碑式确认点**，不是执行失败；上限为 25，入口见 GenerationService.ts。
 
-**pauseOnToolCallLimit 设置**：全局 Settings 默认开启，SessionSettings 可覆盖；关闭时不再给工具加这层计数包装，因此确认点可按会话或全局关闭。审批类暂停（user_exec/file_mutation/app_action）不受此开关影响，相关逻辑见 orchestration.ts:750-752 与 tool-call-limit-pause.ts:14-18。
+**pauseOnToolCallLimit 设置**：全局 Settings 默认开启，SessionSettings 可覆盖；关闭时不再给工具加这层计数包装，因此确认点可按会话或全局关闭。审批类暂停（user_exec/file_mutation/app_action）不受此开关影响，相关逻辑见 GenerationService.ts 与 tool-call-limit-pause.ts:14-18。
 
 ### 5.3 并发
 
@@ -253,7 +253,7 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 
 ### 5.5 取消与中断
 
-顶层 AbortController 在流开始前创建，停止按钮调用 abort；该 signal 会贯穿模型流并传给工具执行器。已确认主动检查取消信号的工具包括 code_execution、parse_link 和 user_exec：前者在取消后返回 exitCode 130，后两者分别转发信号或在批准后执行前检查一次。多数结构化文件工具未见显式检查，取消依赖底层 IPC 或沙箱执行的超时、进程终止，而非提前返回，入口见 `orchestration.ts:483-488`。
+顶层 AbortController 在流开始前创建，停止按钮调用 abort；该 signal 会贯穿模型流并传给工具执行器。已确认主动检查取消信号的工具包括 code_execution、parse_link 和 user_exec：前者在取消后返回 exitCode 130，后两者分别转发信号或在批准后执行前检查一次。多数结构化文件工具未见显式检查，取消依赖底层 IPC 或沙箱执行的超时、进程终止，而非提前返回，入口见 `GenerationService.ts`。
 
 - 运行中的命令可按 `(sessionId, toolCallId)` 精确定位并取消。user_exec 在主进程维护独立注册表，超时与取消都会终止整棵进程树；取消结果返回 `exitCode: 130 + cancelled: true`，UI 显示 "Stopped" 而不是失败。沙箱执行同样支持按调用 ID 定位，细节见 user-exec-runner.ts:48-62,198-207 与 manager.ts:874。
 - 停止生成时，仍处于 call 状态的工具调用批会被收口为 error 并落盘，不再残留悬挂调用。
@@ -264,7 +264,7 @@ AI SDK 允许模型在同一 step 内发出多个并行 tool call；Chatbox 未�
 
 暂停类“错误”会被识别为持久暂停信号，不写成模型可见的错误结果；同时停止条件会阻止 SDK 自动开始下一轮，否则暂停语义会被绕过。暂停状态写入消息 part 并持久化，用户批准或拒绝后再手动恢复工具执行，而不是重新发起模型流。具体停止条件见 `stream-chunk-processor.ts:335-341` 与 `persistent-tool-call-pause.ts:24-28`。
 
-**依据**：[abstract-ai-sdk.ts:330,764](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[types.ts:56,80](../../chatbox/src/shared/models/types.ts)、[orchestration.ts:61,289-324,483-488,610](../../chatbox/src/renderer/stores/session/orchestration.ts)、[sandbox-provider.ts:6](../../chatbox/src/shared/sandbox-provider.ts)、[code-execution.ts:87-99,195-212](../../chatbox/src/renderer/packages/model-calls/toolsets/code-execution.ts)、[manager.ts:652-666,900-935](../../chatbox/src/main/sandbox/manager.ts)、[user-exec-runner.ts:43-52](../../chatbox/src/main/skills/user-exec-runner.ts)、[ipc-handlers.ts:198-199](../../chatbox/src/main/skills/ipc-handlers.ts)、[persistent-tool-call-pause.ts](../../chatbox/src/shared/models/persistent-tool-call-pause.ts)、[stream-chunk-processor.ts:335-354](../../chatbox/src/renderer/stores/session/stream-chunk-processor.ts)
+**依据**：[abstract-ai-sdk.ts:330,764](../../chatbox/src/shared/models/abstract-ai-sdk.ts)、[types.ts:56,80](../../chatbox/src/shared/models/types.ts)、[GenerationService.ts](../../chatbox/packages/chatbox-core/src/generation/GenerationService.ts)、[sandbox-provider.ts:6](../../chatbox/src/shared/sandbox-provider.ts)、[code-execution.ts:87-99,195-212](../../chatbox/src/renderer/packages/model-calls/toolsets/code-execution.ts)、[manager.ts:652-666,900-935](../../chatbox/src/main/sandbox/manager.ts)、[user-exec-runner.ts:43-52](../../chatbox/src/main/skills/user-exec-runner.ts)、[ipc-handlers.ts:198-199](../../chatbox/src/main/skills/ipc-handlers.ts)、[persistent-tool-call-pause.ts](../../chatbox/src/shared/models/persistent-tool-call-pause.ts)、[stream-chunk-processor.ts:335-354](../../chatbox/packages/chatbox-core/src/generation/stream-chunk-processor.ts)
 
 ---
 
@@ -297,11 +297,11 @@ agentFullAccess 是会话级设置（SessionSettings.agentFullAccess），生效
 2. write_file/edit_file 在 fullAccess=true 时不请求文件变更审批，因此不会抛暂停错误（`filesystem.ts:450-457,510-519`）。
 3. 每次绕过都会记录审计埋点，无论后续执行成功与否；这不是拦截。
 
-**不可绕过的类别**：AppActionApprovalPausedError（`app-action-approval.ts:1-20`）。该类型被识别为独立的 app_action_approval 暂停，与 agentFullAccess 检查完全脱钩；代码没有在抛出它之前检查 fullAccess。已确认的触发点是 chatbox_cli 中的图片生成审批卡。**结论**：agentFullAccess 严格限定在宿主命令执行与主机文件系统写入，不覆盖 Chatbox 自身状态变更或计费操作，触发分支见 `orchestration.ts:191-202`。
+**不可绕过的类别**：AppActionApprovalPausedError（`app-action-approval.ts:1-20`）。该类型被识别为独立的 app_action_approval 暂停，与 agentFullAccess 检查完全脱钩；代码没有在抛出它之前检查 fullAccess。已确认的触发点是 chatbox_cli 中的图片生成审批卡。**结论**：agentFullAccess 严格限定在宿主命令执行与主机文件系统写入，不覆盖 Chatbox 自身状态变更或计费操作，触发分支见 `GenerationService.ts`。
 
 ### 6.4 pause/resume 的持久化
 
-暂停状态写入消息中对应工具调用 part 的 paused 状态与 pauseReason 字段，并随正常消息流程落盘，因此可以跨应用重启保持。恢复时重新构建工具集，找到匹配工具并直接执行；approved=true 只对**这一个** toolCallId 成立，同批次的其他并行调用仍需独立审批。持久化和恢复入口见 `orchestration.ts:70-81,939-1212`。
+暂停状态写入消息中对应工具调用 part 的 paused 状态与 pauseReason 字段，并随正常消息流程落盘，因此可以跨应用重启保持。恢复时重新构建工具集，找到匹配工具并直接执行；approved=true 只对**这一个** toolCallId 成立，同批次的其他并行调用仍需独立审批。持久化和恢复入口见 `GenerationService.ts`。
 
 恢复暂停的生成时会保留已完成 tool-call 的上下文：`sequenceMessages()`（`shared/utils/message.ts:162-259`）不把"只有已完成工具调用、没有正文文本"的 assistant 消息当空消息丢弃（`hasCompletedToolCalls`/`isEmptyForModelRequest`），引用拼接时也保留含工具调用的完整消息（引用会把消息拍平成文本、丢失工具历史，所以保留原消息并用占位 user turn 隔开）。即续跑时的历史选择能携带上次的工具调用记录，模型不会丢失要接续的上下文。
 
@@ -309,7 +309,7 @@ agentFullAccess 是会话级设置（SessionSettings.agentFullAccess），生效
 
 审批卡片中的 explanation 由**模型自己**生成，是模型对自己请求执行的命令做自我说明。因此它不构成独立的安全判定来源，只给用户提供上下文；是否暂停仍由代码中的白名单和 AI eligibility 规则决定，解释生成失败也不会跳过审批，详见 `command-explanation.ts`。
 
-**依据**：[user-exec-whitelist.ts全文](../../chatbox/src/renderer/packages/user-exec-whitelist.ts)、[user-exec-ai-policy.ts全文](../../chatbox/src/renderer/packages/user-exec-ai-policy.ts)、[user-exec-approval.ts全文](../../chatbox/src/renderer/packages/user-exec-approval.ts)、[app-action-approval.ts全文](../../chatbox/src/renderer/packages/app-action-approval.ts)、[filesystem.ts:220-241,403-533](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[orchestration.ts:70-216,939-1087](../../chatbox/src/renderer/stores/session/orchestration.ts)
+**依据**：[user-exec-whitelist.ts全文](../../chatbox/src/renderer/packages/user-exec-whitelist.ts)、[user-exec-ai-policy.ts全文](../../chatbox/src/renderer/packages/user-exec-ai-policy.ts)、[user-exec-approval.ts全文](../../chatbox/src/renderer/packages/user-exec-approval.ts)、[app-action-approval.ts全文](../../chatbox/src/renderer/packages/app-action-approval.ts)、[filesystem.ts:220-241,403-533](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[tools-builder.ts:485-591](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[GenerationService.ts](../../chatbox/packages/chatbox-core/src/generation/GenerationService.ts)
 
 ---
 
@@ -391,7 +391,7 @@ if (isWindows) {
 - **`web_search`/`parse_link`/知识库检索结果**：外部网页/文档内容原样拼进模型上下文，本次未发现对结果内容的注入检测或转义处理。
 - **MCP 工具结果**：内容完全由第三方 MCP server 决定，同样未发现注入检测层。
 
-**依据**：[stream-chunk-processor.ts:15-18,257-364](../../chatbox/src/renderer/stores/session/stream-chunk-processor.ts)、[code-execution.ts:11,19-23,216-314](../../chatbox/src/renderer/packages/model-calls/toolsets/code-execution.ts)、[manager.ts:777,806-863,895-935](../../chatbox/src/main/sandbox/manager.ts)、[user-exec-runner.ts:52,154-161](../../chatbox/src/main/skills/user-exec-runner.ts)、[ipc-handlers.ts:230-237](../../chatbox/src/main/skills/ipc-handlers.ts)、[web-search.ts:26-38,56-60](../../chatbox/src/renderer/packages/model-calls/toolsets/web-search.ts)、[filesystem.ts:296-401](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[file.ts:27,145-218](../../chatbox/src/renderer/packages/model-calls/toolsets/file.ts)、[ToolCallPartUI.tsx:72-73](../../chatbox/src/renderer/components/message-parts/ToolCallPartUI.tsx)、[tools-builder.ts:156-173](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[background-follow-up.ts:31-39](../../chatbox/src/renderer/packages/chatbox-cli/background-follow-up.ts)
+**依据**：[stream-chunk-processor.ts:15-18,257-364](../../chatbox/packages/chatbox-core/src/generation/stream-chunk-processor.ts)、[code-execution.ts:11,19-23,216-314](../../chatbox/src/renderer/packages/model-calls/toolsets/code-execution.ts)、[manager.ts:777,806-863,895-935](../../chatbox/src/main/sandbox/manager.ts)、[user-exec-runner.ts:52,154-161](../../chatbox/src/main/skills/user-exec-runner.ts)、[ipc-handlers.ts:230-237](../../chatbox/src/main/skills/ipc-handlers.ts)、[web-search.ts:26-38,56-60](../../chatbox/src/renderer/packages/model-calls/toolsets/web-search.ts)、[filesystem.ts:296-401](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[file.ts:27,145-218](../../chatbox/src/renderer/packages/model-calls/toolsets/file.ts)、[ToolCallPartUI.tsx:72-73](../../chatbox/src/renderer/components/message-parts/ToolCallPartUI.tsx)、[tools-builder.ts:156-173](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[background-follow-up.ts:31-39](../../chatbox/src/renderer/packages/chatbox-cli/background-follow-up.ts)
 
 ---
 

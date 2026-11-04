@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
+> 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
@@ -38,7 +38,7 @@ Agent config.json
 - 模型目录来自同一网关 origin 的 `/v1/models`，只缓存在主进程内存，失败时清空；
 - Agent、话题摘要和桌面 widget 可以选模型，但都继续使用同一 URL 和 Key；
 - 普通聊天、话题摘要和 widget 调用均为单次 HTTP 请求，没有自动重试、退避、换 Key、换 URL 或跨渠道故障转移；
-- `modules/vcpClient.js` 虽实现了 300 秒超时和按请求中断，但没有接入当前主流程；实际 IPC 请求已有 sender 生命周期 AbortController，可在窗口导航或销毁时取消，仍没有客户端超时或中止按钮到本地 controller 的映射；
+- 实际 IPC 请求已有 sender 生命周期 AbortController，可在窗口导航或销毁时取消；主发送 fetch 仍没有客户端超时，中止按钮带 5 秒远端中断超时并在失败时本地兜底取消；
 - Flowlock 最多 3 次的“重试”是失败后定时触发下一轮自动续写，不是同一 HTTP 请求的传输层重试，也不换渠道；
 - `settings.json` 直接明文保存 VCP Key，没有 DPAPI、Keychain、Electron safeStorage 等系统加密机制，也没有字段级加密；
 - 设置保存使用临时文件、JSON 回读校验、旧文件备份和原子替换，但这些机制保证写入完整性，不提供 Secret 保密性；
@@ -123,7 +123,7 @@ VCPChat 把对话请求发给 VCP 网关后，上游可以自行做模型映射�
 VCPChat 的配置生命周期分成两类，不能合并为 Provider 生命周期：
 
 1. **全局网关设置**：`main.html` 的“服务器连接”表单显示 URL、Bearer Key、日志地址、文件密码和日志 Key；`modules/global-settings-manager.js:38-106` 读取表单，`modules/ipc/settingsHandlers.js:121-148` 经主进程保存到 `AppData/settings.json`。设置保存会合并默认字段，但没有数组化的渠道记录、唯一渠道 ID 或每条渠道的启停状态。
-2. **Agent 配置**：Agent 是本地角色目录 `AppData/Agents/<agent>/config.json`，其中的 `model` 只是发给同一个网关的模型 ID。主界面可以创建、查看、编辑和删除 Agent；`modules/ipc/agentHandlers.js:248-321,408-477` 提供读写、创建和删除 IPC。该生命周期不代表创建了一个 LLM Provider。
+2. **Agent 配置**：Agent 是本地角色目录 `AppData/Agents/<agent>/config.json`，其中的 `model` 只是发给同一个网关的模型 ID。主界面可以创建、查看、编辑和删除 Agent；`modules/ipc/agentHandlers.js:421-495,582-660` 提供读写、创建和删除 IPC。该生命周期不代表创建了一个 LLM Provider。
 
 对调查指南要求的管理动作，当前源码覆盖如下。这里的“未找到”是源码检索结果，“不适用”是因为 VCPChat 没有对应的 Provider 实体；保存是否在实际运行环境成功仍属于未验证事项。
 
@@ -139,7 +139,7 @@ VCPChat 的配置生命周期分成两类，不能合并为 Provider 生命周�
 | 导出 | `backup.py` 源码确认可把 AppData 根文件和指定目录写入 ZIP | 未找到渠道导出命令 | 未找到 | 未找到 | 未找到渠道导出按钮 | 这是全量文件归档，不是 Provider 导出 |
 | 连接测试 | 未找到独立测试文件或测试命令 | 未找到 | 未找到 | 未找到 | 源码确认“刷新模型”请求 `/v1/models`；桌面 widget 的 `vcpPost()` 是实际推理代理而非测试入口 | 没有本地 Provider 级测试对象 |
 
-配置文件与界面的默认值合并也只发生在全局设置层：`appSettingsManager.js:83-156` 用默认设置补齐缺失字段，`readSettings()` 在文件不存在时返回默认对象；Agent 列表在缺少 `config.json` 时会生成内存默认配置，但正式创建 Agent 仍由 `create-agent` 写入独立目录。源码未找到将多个 Provider 默认配置合并为连接池的逻辑。
+配置文件与界面的默认值合并也只发生在全局设置层：`appSettingsManager.js:118-194` 用默认设置补齐缺失字段，`readSettings()` 在文件不存在时返回默认对象；Agent 列表在缺少 `config.json` 时会生成内存默认配置，但正式创建 Agent 仍由 `create-agent` 写入独立目录。源码未找到将多个 Provider 默认配置合并为连接池的逻辑。
 
 ## 2. Base URL、端点、Header 与凭据
 
@@ -205,7 +205,7 @@ Authorization: Bearer <vcpApiKey>
 }
 ```
 
-`modelConfig` 中未设置的采样参数（null 或空）经 `omitUnsetOptionalModelParams()` 清理后不再出现在请求体；`vcpchatExtensions` 可能只含 `requestContext`（消息时间戳绑定为空时省略该段），后者携带本轮请求与 Agent/Topic 的上下文标识；清理与构建逻辑见 `chatHandlers.js:53-118`。实际字段仍由 `modelConfig` 展开，工具注入、上下文清理和扩展对象可能继续增补内容。协议入口兼容 OpenAI Chat Completions，但不是纯粹只发 OpenAI 标准字段。
+`modelConfig` 中未设置的采样参数（null 或空）经 `omitUnsetOptionalModelParams()` 清理后不再出现在请求体；`vcpchatExtensions` 可能只含 `requestContext`（消息时间戳绑定为空时省略该段），后者携带本轮请求与 Agent/Topic 的上下文标识；清理与构建逻辑见 `chatHandlers.js:82-147`。实际字段仍由 `modelConfig` 展开，工具注入、上下文清理和扩展对象可能继续增补内容。协议入口兼容 OpenAI Chat Completions，但不是纯粹只发 OpenAI 标准字段。
 
 ### 2.4 配置文件、CLI、TUI、Web 与桌面端边界
 
@@ -215,7 +215,7 @@ Authorization: Bearer <vcpApiKey>
 
 **Web。** 本仓库没有独立的 Provider 管理 Web 服务或浏览器渠道管理页。Electron 加载 `main.html` 及各模块 HTML，`WebIndexTTS2/public` 对应的是 IndexTTS 管理页面；项目中若访问 VCP 服务端的 `admin_api`，属于论坛、任务、日志或 widget 数据功能，不是客户端本地 Provider 管理。不能因为页面使用 `fetch` 或名称中含 Web 就判定存在 Web 渠道管理入口。
 
-**桌面端。** 主 Electron renderer 的全局设置可以查看和编辑 URL、Key、摘要模型以及工具注入开关；Agent 设置可以查看和编辑模型字段，创建和删除 Agent 的入口在 `modules/ipc/agentHandlers.js`。`Desktopmodules` 是桌面画布/widget 层：`vcpProxy.js:17-51` 从主进程拿到凭据并缓存，`vcpProxy.js:94-150` 以非流式 POST 调用已经配置的 Chat endpoint。它提供的是对现有单网关的运行时代理，不提供 Provider/Endpoint CRUD、复制、启停、导入导出或测试按钮。
+**桌面端。** 主 Electron renderer 的全局设置可以查看和编辑 URL、Key、摘要模型以及工具注入开关；Agent 设置可以查看和编辑模型字段，创建和删除 Agent 的入口在 `modules/ipc/agentHandlers.js`。`Desktopmodules` 是桌面画布/widget 层：`vcpProxy.js:17-51` 从主进程拿到凭据并缓存，`vcpProxy.js:96-159` 以非流式 POST 调用已经配置的 Chat endpoint。它提供的是对现有单网关的运行时代理，不提供 Provider/Endpoint CRUD、复制、启停、导入导出或测试按钮。
 
 静态源码只能确认上述事件绑定、IPC 和文件路径；本次未启动 Electron 逐项点击验证保存后窗口刷新、错误提示、不同平台文件权限及 widget 实际请求结果。
 
@@ -311,11 +311,9 @@ enableVcpToolInjection = true  -> /v1/chatvcp/completions
 
 主 IPC handler 对流式响应读取 SSE `data:` 事件并转发给 renderer；非 2xx 会解析 JSON 或文本错误。响应处理知道消息 `requestId` 和 UI 上下文，但没有记录 Provider、实际 Key、上游重试次数或 fallback 路径。
 
-### 4.3 `vcpClient.js` 是未接线实现
+### 4.3 超时与取消只在窗口生命周期上成立
 
-[`modules/vcpClient.js`](../../VCPChat/modules/vcpClient.js) 另有一个统一请求模块，用 AbortController 实现 300 秒定时中断，流式清理也更完整。它同步应用了请求上下文与参数省略两处修改，但重新 grep 全仓库后，`vcpClient` 的命中仍只有该文件自身，没有 require 或 import 把它接入当前主流程。
-
-实际生产路径是 main.js 注册的 `send-to-vcp` 入口。该入口将 SenderTaskRegistry 的 signal 传给 fetch，因此窗口导航或销毁可取消请求；中止按钮仍只请求远端 `/v1/interrupt`，且主链没有客户端超时，所以不能把未接线模块的 300 秒超时算作当前能力。`modules/ipc/chatHandlers.js:983-1012,1238-1246,1412-1457`
+生产路径是 main.js 注册的 `send-to-vcp` 入口。该入口把 SenderTaskRegistry 的 signal 传给 fetch，因此窗口导航或销毁可以取消请求；主发送 fetch 本身没有客户端超时，长响应依赖 VCP 服务端的流式行为与前端看门狗收口。中止按钮先向远端 `/v1/interrupt` 发请求并等 5 秒，若上游未受理再本地取消流任务。`modules/ipc/chatHandlers.js:1056-1360,1561-1614`
 
 ## 5. 多 Key、轮询、重试与熔断
 
@@ -397,7 +395,7 @@ VCPChat 没有本地调度器。模型选择来自 Agent 静态配置、用户�
 3. 把旧设置复制为 `settings.json.backup`；
 4. 将临时文件移动覆盖正式文件。
 
-损坏时也会尝试从 `.backup` 恢复。这能降低崩溃或半写入导致的配置损坏，但临时文件、正式文件和备份都包含同样的明文 Secret。默认设置还包含一批与 LLM 渠道无关的数据服务、移动同步和备忘录检索字段（`appSettingsManager.js:132-141`）。
+损坏时也会尝试从 `.backup` 恢复。这能降低崩溃或半写入导致的配置损坏，但临时文件、正式文件和备份都包含同样的明文 Secret。默认设置还包含一批与 LLM 渠道无关的数据服务、移动同步和备忘录检索字段（`appSettingsManager.js:170-179`）。
 
 ### 7.3 每日备份保留的是最近 7 份，不是严格 7 天
 
@@ -460,7 +458,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 
 ### 8.4 未找到独立的连接测试入口
 
-本次搜索 `test connection`、健康检查、连接测试按钮和独立测试 IPC，未找到面向 VCP 网关的专用入口。模型选择弹窗只有刷新模型列表按钮（`main.html:1750-1760`、`modules/settingsManager.js:716-727`）；它调用 `refresh-models`，而不是最小聊天生成。桌面端的 `vcpPost()` 虽然能完成真实请求，但由 widget 脚本按需调用，不能当成设置页的连接测试。
+本次搜索 `test connection`、健康检查、连接测试按钮和独立测试 IPC，未找到面向 VCP 网关的专用入口。模型选择弹窗只有刷新模型列表按钮（`main.html:920`、`modules/settingsManager.js:1159-1162`）；它调用 `refresh-models`，而不是最小聊天生成。桌面端的 `vcpPost()` 虽然能完成真实请求，但由 widget 脚本按需调用，不能当成设置页的连接测试。
 
 ## 9. 能力矩阵
 
@@ -538,7 +536,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 - `/models` 探测不足以验证真实生成和工具端点；
 - 普通请求缺少超时、可重试错误分类、退避和 Retry-After 处理；中止按钮也不直接调用本地生命周期 controller；
 - Flowlock 的工作流重试不应被宣传为传输层可靠性；
-- 已实现但未接线的 vcpClient 模块容易让源码阅读者高估当前超时能力；
+- 单聊主发送没有客户端超时，超时能力只存在于群聊的分阶段定时器与流式看门狗；
 - Key、设置备份和 ZIP 均为明文，备份扩大了凭据副本数量；
 - ZIP 默认包含 Key，却没有显式敏感数据提示或加密；
 - 连接错误和延迟没有形成结构化指标，无法驱动自动容灾。
@@ -554,6 +552,6 @@ AppData/UserData/backups/settings-<timestamp>.json
 - 话题摘要请求：[`modules/topicSummarizer.js`](../../VCPChat/modules/topicSummarizer.js)
 - Flowlock 工作流重试：[`Flowlockmodules/flowlock.js`](../../VCPChat/Flowlockmodules/flowlock.js)
 - Flowlock 接入层：[`Flowlockmodules/flowlock-integration.js`](../../VCPChat/Flowlockmodules/flowlock-integration.js)
-- 未接线统一请求模块：[`modules/vcpClient.js`](../../VCPChat/modules/vcpClient.js)
+- 单聊发送与中断：[`modules/ipc/chatHandlers.js:1056-1360,1561-1614`](../../VCPChat/modules/ipc/chatHandlers.js)、[`modules/renderer/streamWatchdog.js`](../../VCPChat/Groupmodules/streamWatchdog.js)
 - 桌面 widget VCP 代理：[`Desktopmodules/api/vcpProxy.js`](../../VCPChat/Desktopmodules/api/vcpProxy.js)
 - 一键 ZIP 备份：[`backup.py`](../../VCPChat/backup.py)

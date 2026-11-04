@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：直接阅读源码（SPA 路由与 Agent 聊天页面、AgentSidebar Topic 列表、ChatInput 编辑器与发送区、Conversation 消息操作与审批卡片、设置页快捷键、桌面通知工具）+ grep 检索键盘/无障碍属性，全部行号按当前 HEAD 逐一核对；未运行验证
 >
@@ -22,6 +22,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - 工具审批卡片有全局键盘快捷键（1/2/↑/↓/Enter），由共享 arbiter 分发到唯一一张卡片；审批选项带 `role="radiogroup"/"radio"` 语义。无障碍覆盖是“点状”而非体系化的，消息操作栏图标按钮、Topic 行存在明确缺口。
 - 桌面端（Electron）完成/审批通知与聊天状态直接联动并深链回具体 Topic；Web/PWA 没有系统级通知，只靠未读点 UI。
 - 消息内容渲染（conversation-flow 算法、虚拟列表、Markdown）一律属于消息渲染器笔记，本文只记录工作流与界面状态。
+- 会话区在快照间扩成一套独立界面层：`src/features/Conversation/` 下新增 `ChatItem`（行容器）、`ChatList`（列表/滚动）、`ComposerDraftReceiver`/`composerDraftBus`（跨表面草稿投递）、`InterventionBar`、`FollowUp`、`WorkingSidebar`（含 `TodoProgress` 与 `Workspace`）、`AgentWelcome`、`MessageForward`、`SplitDropZone`，并保留 `Markdown`/`Messages`。这些表面共享同一个会话级 store 与单向镜像。
 
 ## 工作台边界与用户主链
 
@@ -38,7 +39,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ## 1. 页面结构、导航与多窗口
 
-- **工作台结构**：Agent 聊天页由 `ConversationArea.tsx` 组装——`ConversationProvider`（134-144 行）内是消息区（`ChatList`，158-183 行，含悬浮头间距与子 Agent 只读提示 footer）与输入区（`MainChatInput`/`HeterogeneousChatInput`，187-191 行，异构 Agent 用简化输入）；侧栏与工作台同层布局。Topic 与 Thread 并排打开由 chat portal（开/同步两个入口）与桌面端多 tab 路由（`src/spa/router/tabRouter.tsx`）承担，属于路由层能力。
+- **工作台结构**：Agent 聊天页由 `ConversationArea.tsx` 组装——`ConversationProvider` 内是消息区（`ChatList`，行渲染拆到 `ChatItem`；含悬浮头间距与子 Agent 只读提示 footer）与输入区（`MainChatInput`/`HeterogeneousChatInput`，异构 Agent 用简化输入）；另有 `InterventionBar`、`FollowUp`、`WorkingSidebar` 等侧向/底部表面；侧栏与工作台同层布局。Topic 与 Thread 并排打开由 chat portal（开/同步两个入口）与桌面端多 tab 路由（`src/spa/router/tabRouter.tsx`）承担，属于路由层能力。
 - **移动端**：`(mobile)` 路由树 + 独立 `entry.mobile.tsx` SPA，底部 TabBar；移动端 Topic 行单击直接导航（见下节），输入区有 `ChatInput/Mobile` 变体。响应式断点细节属通用盘点，不在本文。
 - **多窗口/桌面 tab**：桌面端 Electron 每 tab 挂独立 memory router（`desktopRouter.config.desktop.tsx` 注释），会话可多开；本文确认其存在，跨 tab 的草稿/busy 同步语义未验证。
 
@@ -143,8 +144,8 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 桌面通知与聊天状态的联动在代码中完整可见：`src/store/chat/utils/desktopNotification.ts`（全文件 179 行）定义了两个统一注入点：
 
-- `notifyDesktopAgentCompleted`（155-179 行）：Agent 回复完成时调用，`title` 按“话题标题 → Agent 名称 → 通用兜底”优先级解析，`body` 是把 markdown 回复剥成纯文本并截断到 256 字符（`buildNotificationBody`，93-102 行，上限常量 27 行），导航深链回具体的 agent/topic/group 会话（38-57 行，按 groupId+topicId → groupId → agentId+topicId → agentId 四级优先级拼 URL，含 workspaceSlug 前缀 29-30 行）。调用点在 `store/chat/slices/aiAgent/actions/runAgent.ts:250-253`，紧跟在“停止 loading”之后触发，同批还会调用 `markTopicUnread`（255-263 行）——**桌面通知和“Topic 未读点”是同一个完成事件驱动的两个并行副作用**（执行侧见对话请求与上下文笔记第 6 节）。
-- `notifyDesktopHumanApprovalRequired`（104-133 行）：需要人工审批工具调用时触发，标题走同一套解析逻辑，额外调用 `desktopNotificationService.setBadgeCount(1)`（121 行）在 dock/任务栏打角标，并传 `force: true, requestAttention: true`（124-126 行，前台窗口也强制弹通知、抢占用户注意力，区别于普通完成通知）。调用点 `runAgent.ts:303`（`step_start` 的 human_approval 分支），同时把 Topic 置 `waitingForHuman`（304-317 行）。
+- `notifyDesktopAgentCompleted`（155-179 行）：Agent 回复完成时调用，`title` 按“话题标题 → Agent 名称 → 通用兜底”优先级解析，`body` 是把 markdown 回复剥成纯文本并截断到 256 字符（`buildNotificationBody`，93-102 行，上限常量 27 行），导航深链回具体的 agent/topic/group 会话（38-57 行，按 groupId+topicId → groupId → agentId+topicId → agentId 四级优先级拼 URL，含 workspaceSlug 前缀 29-30 行）。调用点在 `store/chat/slices/agentRun/actions/lifecycle/buildRunLifecycle.ts`，紧跟在“停止 loading”之后触发，同批还会调用 `markTopicUnread`——**桌面通知和“Topic 未读点”是同一个完成事件驱动的两个并行副作用**（执行侧见对话请求与上下文笔记第 6 节）。
+- `notifyDesktopHumanApprovalRequired`（104-133 行）：需要人工审批工具调用时触发，标题走同一套解析逻辑，额外调用 `desktopNotificationService.setBadgeCount(1)`（121 行）在 dock/任务栏打角标，并传 `force: true, requestAttention: true`（124-126 行，前台窗口也强制弹通知、抢占用户注意力，区别于普通完成通知）。调用点在 Gateway 事件处理（`agentRun/actions/transports/gateway/gatewayEventHandler.ts`）与 client 流式执行（`transports/client/streamingExecutor.ts`）的 human_approval 分支，同时把 Topic 置 `waitingForHuman`。
 - 两者都通过 `isDesktop` 短路（108/159 行），Web/PWA 环境下直接跳过，说明这套通知目前只在 Electron 桌面端生效，**没有找到** Web Push API/Service Worker 通知的对应实现（搜索范围：`desktopNotification.ts` 与 runAgent 调用点），PWA 模式下完成/审批事件不会有系统级通知，只能靠“未读点”UI 或回到标签页查看。
 
 ## 10. 设计取舍与已确认边界
@@ -164,7 +165,8 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - 输入框文件拖入/拖出时的悬停视觉反馈样式未逐一核对（拖放视觉属通用盘点范围）。
 - 视觉效果、键盘焦点顺序、响应式行为与系统通知需要运行验证（本笔记结论主要来自静态代码）。
 - 移动端/桌面端的布局差异与断点实现属于通用盘点范围，未在本笔记展开。
-- 语音消息的录音/上传/回放全链未运行验证（MediaRecorder 兼容性、`sendVoiceMessage` 与发送链的合并行为仅静态确认）；桌面端多 tab 之间草稿/busy/active session 的同步语义未验证。
+- 语音消息的录音/上传/回放全链未运行验证（MediaRecorder 兼容性、`sendVoiceMessage` 与发送链的合并行为仅静态确认）；桌面端多 tab 之间草稿/busy/active session 的同步语义未验证；`ComposerDraftReceiver`/`composerDraftBus` 的跨表面投递时序未验证。
+- 本轮按引用路径核对了会话区、输入区与通知模块的归位（会话区新增 ChatItem/InterventionBar/FollowUp/WorkingSidebar 等表面，完成副作用移到 buildRunLifecycle），未重跑界面交互；行号引用以模块级定位为准。
 - 审批快捷键的 arbiter 分派（containment/最近注册）在“焦点不在任何卡片”时的实际命中行为未运行验证。
 
 ## 12. 关键源码索引
@@ -183,4 +185,4 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 - `packages/shared-tool-ui/src/pendingHotkeys.ts`（38-46 arbiter）
 - `src/features/Settings/hotkey/index.tsx`（1-26）、`features/Conversation.tsx`（39-44,87）
 - `src/features/CommandMenu/components/CommandFooter.tsx`（1-29）
-- `src/store/chat/utils/desktopNotification.ts`（38-179）、`src/store/chat/slices/aiAgent/actions/runAgent.ts`（250-263, 303）
+- `src/store/chat/utils/desktopNotification.ts`、`src/store/chat/slices/agentRun/actions/lifecycle/buildRunLifecycle.ts`（完成/审批通知联动）

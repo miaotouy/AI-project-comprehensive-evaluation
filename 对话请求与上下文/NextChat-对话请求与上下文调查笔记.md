@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：直接阅读源码（客户端 store 的发送与上下文拼装、Provider adapter、SSE 流式工具、MCP server actions），对引用的符号与行号逐一核对当前 HEAD；流式动画与 Markdown 渲染细节归消息渲染器类目
 >
@@ -142,7 +142,7 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 ## 9. Agent、工具、知识库与附件注入点
 
 - **插件工具**：仅 OpenAI 系 adapter 在发起请求时生成 tools 定义与本地 funcs（`usePluginStore.getAsTools(session.mask.plugin)`，`openai.ts:308-313`；`app/store/plugin.ts:209-220`），工具执行由流收尾处的 `finish()` 完成并带结果重发（§5）。非 OpenAI 系 adapter 的工具行为未逐一核实。
-- **MCP**：`isMcpEnabled` 时 `getMcpSystemPrompt` 把全部 MCP 客户端工具 JSON 注入 system prompt（`app/store/chat.ts:205-224, 558-581`）；执行走服务端 `"use server"` actions（`app/mcp/actions.ts:337-352`），客户端实例存活于 Next.js 服务端进程，配置在 `app/mcp/mcp_config.json`（`app/mcp/actions.ts:22, 142-161`）；工具结果经回注通道进入会话（§7）。
+- **MCP**：MCP 开关打开时，`getMcpSystemPrompt` 用 AccessStore 里的 access code 取全部 MCP 客户端工具并注入 system prompt（`app/store/chat.ts:205-224, 553-581`）；执行走服务端 `"use server"` actions，每个入口都要求 `ENABLE_MCP` 与部署侧 `CODE` 配置匹配的 access code（`app/mcp/actions.ts:29-50, 379-397`）。客户端实例存活于 Next.js 服务端进程，配置在 `app/mcp/mcp_config.json`（`app/mcp/actions.ts:20-21, 399-422`）。工具结果经回注通道进入会话（§7）。
 - **附件**：图片进消息 content 多模态数组（`app/store/chat.ts:420-428`）；vision 模型在 adapter 内 `preProcessImageContent` 压缩/转 base64（`openai.ts:219-227`，`app/utils/chat.ts:73-132`）；DALL-E 取最后一条消息文本作 prompt（`openai.ts:204-217`）。
 - **变量**：`{{input}}`/`{{model}}`/`{{time}}`/`{{lang}}`/`{{ServiceProvider}}`/`{{cutoff}}` 在 `fillTemplateWith` 展开（`app/store/chat.ts:161-203`）。
 - 知识库/联网：本次在请求链（`app/store/chat.ts`、`app/client/platforms/openai.ts`、MCP 注入路径）未找到独立注入点（检查范围如上）。
@@ -167,10 +167,11 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 - 提交入口与流式回调：`app/store/chat.ts:407-528`
 - 上下文拼装：`app/store/chat.ts:542-640`
 - 自动标题与摘要：`app/store/chat.ts:661-797`（触发点 `:394-405`）
-- MCP JSON 检测与回注：`app/store/chat.ts:827-856`
+- MCP JSON 检测与回注：`app/store/chat.ts:828-862`
 - 停止 controller：`app/client/controller.ts:2-37`
 - Provider 选择与 adapter 抽象：`app/client/api.ts:136-183`、`:368-399`
 - OpenAI 系请求构建与工具重发：`app/client/platforms/openai.ts:186-430`
 - SSE 流式与动画节流：`app/utils/chat.ts:392-667`
-- MCP 服务端执行：`app/mcp/actions.ts:90-99`、`:337-385`
+- MCP 服务端执行与授权门：`app/mcp/actions.ts:29-50`、`:379-397`
+- MCP 工具注入 system prompt：`app/store/chat.ts:205-224`、`:553-581`
 - 重试数据变更：`app/components/chat.tsx:1217-1271`

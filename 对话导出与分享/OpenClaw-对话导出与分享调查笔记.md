@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：静态源码阅读。搜索范围包括：CLI 与 in-chat 命令注册表（`src/auto-reply/commands-registry.shared.ts`、`src/cli/program/`、`src/commands/`）中的 export/backup/import/share 子命令；`src/trajectory/` 的轨迹导出实现；Control UI（`ui/src/pages/chat/`、`ui/src/pages/sessions/`）与 TUI（`src/tui/`）的导出/分享/截图入口；官方 iOS/macOS 共享应用（`apps/shared/OpenClawKit`）的 transcript 导出；以及会话与消息持久化模型（`src/config/sessions/`、`src/agents/sessions/`）。未运行 CLI、Gateway、TUI 或 UI。
 >
@@ -28,7 +28,7 @@ OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托�
 
 会话持久化的事实源是本地 SQLite：per-agent DB（`agents/<agentId>/agent/openclaw-agent.sqlite`）存放 transcript 行，轨迹事件也在该库（`docs/tools/trajectory.md` 说明 live capture 不再写 session-adjacent JSONL sidecar）。导出端全部只读 transcript 行与轨迹行，在**操作者宿主的工作区**生成文件；聊天消息渠道里的导出命令由 Gateway 的 auto-reply 命令处理器执行，工具与文件写入同样发生在宿主。因此导出的数据边界是该 SQLite 中已持久化的活动分支与运行轨迹，渠道聊天框里渲染出的内容不参与导出。
 
-两条 in-chat 命令都是 owner-only：处理器声明 ownerOnly 门禁，注册描述把 HTML 导出标为 “owner-only” 文件（`src/auto-reply/commands-registry.shared.ts:329-356`、`src/auto-reply/reply/commands-info.ts:279-302`），只有命令所有者（operator）能触发。这决定了导出的内容口径含 system prompt、工具 schema 与调用、轨迹等敏感材料。
+两条 in-chat 命令都是 owner-only：处理器声明 ownerOnly 门禁，注册描述把 HTML 导出标为 “owner-only” 文件（`src/auto-reply/commands-registry.shared.ts`、`src/auto-reply/reply/commands-info.ts`），只有命令所有者（operator）能触发。这决定了导出的内容口径含 system prompt、工具 schema 与调用、轨迹等敏感材料。
 
 ## 1. 入口、用户目标与导出源
 
@@ -40,9 +40,9 @@ OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托�
 | Control UI 会话 `/export-session`（/export） | 会话文本留存 | 客户端内存中当前加载的实时消息 | 浏览器下载 `<chat-<assistant>-<时间戳>.md` |
 | iOS/macOS “Export Transcript”（macOS ⌘⇧E） | 移动/桌面导出并系统分享 | 客户端 `viewModel.messages` | `.md`（macOS 存盘面板；iOS 临时文件→系统分享 sheet） |
 
-in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts:328-412`）。默认文件名为 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
+in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts`）。默认文件名为 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
 
-轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts:429-462`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts:103-194`）。in-chat 版本并不直接写盘，而是组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求走审批通道执行（`commands-export-trajectory.ts:275-304`）。
+轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts`）。in-chat 版本并不直接写盘，而是组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求走审批通道执行（`commands-export-trajectory.ts:275-304`）。
 
 ## 2. 范围选择、内容口径与字段过滤
 
@@ -50,7 +50,7 @@ HTML 导出包含持久化 activity 分支上的全部条目：user/assistant/to
 
 轨迹导出的事件口径记录在 `docs/tools/trajectory.md`：transcript 事件由活动分支重建（user/assistant 消息、工具调用与结果、compaction、model change、label、custom entries），runtime 事件覆盖 `session.started`、`trace.metadata`、`context.compiled`、`prompt.submitted`、`model.fallback_step`、`model.completed`、`trace.artifacts`、`session.ended`。会话语义上的“隐藏分支/非活动分支”在两者中都不包含——都只取当前 active leaf 的 branch。malformed transcript 行会被跳过并以警告汇总（JSON 行号）出现在回复或 manifest 中（`commands-export-session.ts:216-274`、`src/trajectory/export.ts` 的 warnings 汇总）。
 
-Control UI 与原生应用的 Markdown 导出口径窄得多：只取消息的可见正文文本。Web 端抽取会先剥内部运行时上下文、inbound 元数据与思考标签（`ui/src/lib/chat/message-extract.ts:21-58`），原生端同样走 `visibleText`，且只导出 user/assistant 行（system 直接丢弃，见 `ChatTranscriptExporter.swift:93-102`）。
+Control UI 与原生应用的 Markdown 导出口径窄得多：只取消息的可见正文文本。Web 端抽取会先剥内部运行时上下文、inbound 元数据与思考标签（`ui/src/lib/chat/message-extract.ts`），原生端同样走 `visibleText`，且只导出 user/assistant 行（system 直接丢弃，见 `ChatTranscriptExporter.swift:93-102`）。
 
 ## 3. 附件、资源与离线封装
 
@@ -62,7 +62,7 @@ Control UI 的 Markdown 导出不含任何附件（text-only）。原生应用�
 
 ## 4. 格式、schema 与往返能力
 
-HTML 导出没有外置 schema，交付物即单文件静态页；内嵌数据是 base64 的会话 JSON。`docs/refactor/database-first.md` 明确指出该命令“只写独立 HTML 视图，不再从这些行重建或下载 session JSONL”，即没有面向重新导入的 JSON 导出通道。轨迹导出则有显式契约：`traceSchema: "openclaw-trajectory"` + `schemaVersion: 1` 打在 manifest 与每个事件行（`src/trajectory/types.ts`、`docs/tools/trajectory.md:92-99`）。轨迹包是“把轨迹物化出来交出去”的方向，官方未提供把它重新导入运行时恢复会话的路径，往返能力不适用。
+HTML 导出没有外置 schema，交付物即单文件静态页；内嵌数据是 base64 的会话 JSON。`docs/refactor/database-first.md` 明确指出该命令“只写独立 HTML 视图，不再从这些行重建或下载 session JSONL”，即没有面向重新导入的 JSON 导出通道。轨迹导出则有显式契约：`traceSchema: "openclaw-trajectory"` + `schemaVersion: 1` 打在 manifest 与每个事件行（`src/trajectory/types.ts`、`docs/tools/trajectory.md`）。轨迹包是“把轨迹物化出来交出去”的方向，官方未提供把它重新导入运行时恢复会话的路径，往返能力不适用。
 
 ## 5. 分享稿编辑、编排与预览
 
@@ -80,11 +80,11 @@ HTML 阅读稿是本项目里唯一的富内容再渲染器，`export-html/templ
 
 ## 8. 分享载体、访问控制与撤销
 
-Control UI 可以把当前 session generation 发布为世界可读链接。发布动作要求 `operator.write`，界面先显示危险确认，再重新核对连接、当前 session ID 与方法权限；Gateway 将 public share 绑定到预期 session ID，避免 reset、fork 或同 key 的替代 generation 继承旧授权。重复读取可以重新得到 token，撤销后再次发布会轮换 share identity。入口见 `ui/src/pages/chat/chat-pane-sharing-actions.ts:167-279`、`src/gateway/server-methods/sessions-sharing.ts:377-430`，协议见 `packages/gateway-protocol/src/schema/sessions-sharing.ts:44-58`。
+Control UI 可以把当前 session generation 发布为世界可读链接。发布动作要求 `operator.write`，界面先显示危险确认，再重新核对连接、当前 session ID 与方法权限；Gateway 将 public share 绑定到预期 session ID，避免 reset、fork 或同 key 的替代 generation 继承旧授权。重复读取可以重新得到 token，撤销后再次发布会轮换 share identity。入口见 `ui/src/pages/chat/chat-pane-sharing-actions.ts`、`src/gateway/server-methods/sessions-sharing.ts`，协议见 `packages/gateway-protocol/src/schema/sessions-sharing.ts`。
 
 公开发布与团队协作彼此独立。session visibility 控制 shared、read-only、suggest、draft 四种参与方式，成员关系决定非创建者的 member/viewer 角色；公开 token 则提供无需团队身份的只读访问。普通 Control UI 会话 URL 仍是鉴权深链，只有 public-share 路由携带公开 token。当前实现确认了发布、复制链接、撤销和重新发布；未确认过期时间、访问统计、评论、克隆或对已发布内容的独立版本快照。
 
-原生应用中存在两类系统级分享：iOS 的 transcript 先写临时目录再由 ShareLink sheet 交给其他 App（`apps/ios/Sources/Design/ChatProTab.swift:171-173,720-737`）；Android 每条消息长按提供 Copy/Share（`ACTION_SEND` 纯文本单条消息，`ChatMessageActions.kt:99-102,168-182`）。后者只分享单条消息文本，属于操作系统分享，不构成围绕对话建立的独立工作流。
+原生应用中存在两类系统级分享：iOS 的 transcript 先写临时目录再由 ShareLink sheet 交给其他 App（`apps/ios/Sources/Design/ChatProTab.swift`）；Android 每条消息长按提供 Copy/Share（`ACTION_SEND` 纯文本单条消息，`ChatMessageActions.kt:99-102,168-182`）。后者只分享单条消息文本，属于操作系统分享，不构成围绕对话建立的独立工作流。
 
 Control UI 的普通会话深链服务于书签与换端续聊，仍位于 Gateway 鉴权之后；公开分享链接由 `packages/session-url-contract` 的 public-share 契约单独构造，不能与普通 `/chat/...` 地址混用。
 
@@ -92,11 +92,11 @@ Control UI 的普通会话深链服务于书签与换端续聊，仍位于 Gatew
 
 两条 in-chat 导出都是 owner-only，群聊场景对敏感结果另有处理：`/export-trajectory` 在群聊找不到私有 owner 路由时直接拒绝，找到则把审批与结果私有投递给 owner，群内只回简短 ACK（`commands-export-trajectory.ts:73-96`、`docs/tools/exec-approvals-advanced.md` 的敏感 owner-only 群命令规则）。审批提示明说轨迹包可含 prompt、模型消息、工具 schema 与结果、运行时事件与本地路径，并给出“按秘密对待、分享前审查”的指引（`commands-export-trajectory.ts:99-115`）。HTML 导出**不脱敏**——它含 system prompt、工具 schema 与轨迹分支，敏感性与轨迹包同级但无提示文案；回复只回路径与统计，不回正文。
 
-轨迹导出是唯一做内容清洗的路径：导出前对事件、manifest 与各 JSON/文本文件执行路径与工具载荷清洗——本地工作区路径替换为 `$WORKSPACE_DIR`，检测 home/state 路径与 secret-like 字段，连对象键名也做工具载荷清洗（`src/trajectory/export.ts:806-919`，配合 `sanitizeDiagnosticPayload`/诊断支持包清洗函数），文档另外列明会移除图片数据与已知 secret 字段并声明“redaction 是尽力而为”。HTML 模板端到端的安全性由渲染端转义而非内容清洗承担。
+轨迹导出是唯一做内容清洗的路径：导出前对事件、manifest 与各 JSON/文本文件执行路径与工具载荷清洗——本地工作区路径替换为 `$WORKSPACE_DIR`，检测 home/state 路径与 secret-like 字段，连对象键名也做工具载荷清洗（`src/trajectory/export.ts`，配合 `sanitizeDiagnosticPayload`/诊断支持包清洗函数），文档另外列明会移除图片数据与已知 secret 字段并声明“redaction 是尽力而为”。HTML 模板端到端的安全性由渲染端转义而非内容清洗承担。
 
 ## 10. 性能、失败恢复与测试
 
-轨迹导出设了明确的规模上限：会话文件 50 MiB、导出 runtime 事件 200,000、总事件 250,000（`src/trajectory/export.ts:88-91`），单事件行截断 256 KiB（`src/trajectory/paths.ts:12`），live capture 为滚动窗口 10 MiB。路径全部经 fs-safe 的 root 约束（防符号链接逃逸、目录必须落在工作区内），冲突文件名自动后缀避让、显式路径覆盖。HTML 导出未发现同样的体积上限，超大会话或内嵌大字节图片会整体进单文件，属未验证的极端场景。
+轨迹导出设了明确的规模上限：会话文件 50 MiB、导出 runtime 事件 200,000、总事件 250,000（`src/trajectory/export.ts`），单事件行截断 256 KiB（`src/trajectory/paths.ts`），live capture 为滚动窗口 10 MiB。路径全部经 fs-safe 的 root 约束（防符号链接逃逸、目录必须落在工作区内），冲突文件名自动后缀避让、显式路径覆盖。HTML 导出未发现同样的体积上限，超大会话或内嵌大字节图片会整体进单文件，属未验证的极端场景。
 
 覆盖情况：HTML 导出与模板各有测试（`commands-export-session.test.ts` 覆盖路径越界/覆盖语义/后端代理警告，`template.security.test.ts` 覆盖转义与清洗），轨迹导出有大规模单测（`src/trajectory/export.test.ts`、`command-export.ts` 的 CLI wrapper 测试），Control UI 与原生端各有导出单测（`ui/src/pages/chat/export.test.ts`、`ChatTranscriptExporterTests.swift`）。
 
@@ -116,12 +116,12 @@ Control UI 的普通会话深链服务于书签与换端续聊，仍位于 Gatew
 
 ## 关键源码索引
 
-- `/export-session` 命令定义与 owner 门禁：`src/auto-reply/commands-registry.shared.ts:329-342`、`src/auto-reply/reply/commands-info.ts:279-288`
-- 会话 HTML 导出主链：`src/auto-reply/reply/commands-export-session.ts:328-412`；写盘与路径规则：`src/auto-reply/reply/commands-export-session-file.ts:45-70`
-- 离线阅读模板：`src/auto-reply/reply/export-html/template.html`、`src/auto-reply/reply/export-html/template.js:1357-1476`；安全测试：`src/auto-reply/reply/export-html/template.security.test.ts`
-- 轨迹导出核心：`src/trajectory/export.ts:1228-1413`；CLI 命令：`src/commands/export-trajectory.ts:103-194`、`src/cli/program/register.status-health-sessions.ts:429-462`
-- in-chat `/export-trajectory`（exec 审批 + 群聊私有路由）：`src/auto-reply/reply/commands-export-trajectory.ts:52-115`
-- Control UI Markdown 导出：`ui/src/pages/chat/export.ts:10-39`；消息文本抽取：`ui/src/lib/chat/message-extract.ts:21-122`；绑定与派发：`ui/src/pages/chat/chat-pane-lifecycle.ts:444-445`、`ui/src/pages/chat/chat-commands.ts:393-396`
-- 原生应用 Export Transcript：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatTranscriptExporter.swift:6-163`；macOS 调用：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatWindowShell.swift:517-524`；iOS 调用与分享 sheet：`apps/ios/Sources/Design/ChatProTab.swift:720-737`
-- 功能说明文档：`docs/tools/trajectory.md`、`docs/tools/slash-commands.md:174-178`
-- 会话公开分享与协作权限：`src/gateway/server-methods/sessions-sharing.ts:377-430`、`src/gateway/session-sharing-policy.ts:74-89,160-211,343-374`、`ui/src/pages/chat/chat-pane-sharing-actions.ts:167-380`、`packages/gateway-protocol/src/schema/sessions-sharing.ts:33-97`
+- `/export-session` 命令定义与 owner 门禁：`src/auto-reply/commands-registry.shared.ts`、`src/auto-reply/reply/commands-info.ts`
+- 会话 HTML 导出主链：`src/auto-reply/reply/commands-export-session.ts`；写盘与路径规则：`src/auto-reply/reply/commands-export-session.ts`
+- 离线阅读模板：`src/auto-reply/reply/export-html/template.html`、`src/auto-reply/reply/export-html/template.js`；安全测试：`src/auto-reply/reply/export-html/template.security.test.ts`
+- 轨迹导出核心：`src/trajectory/export.ts`；CLI 命令：`src/commands/export-trajectory.ts`、`src/cli/program/register.status-health-sessions.ts`
+- in-chat `/export-trajectory`（exec 审批 + 群聊私有路由）：`src/auto-reply/reply/commands-export-trajectory.ts`
+- Control UI Markdown 导出：`ui/src/pages/chat/export.ts`；消息文本抽取：`ui/src/lib/chat/message-extract.ts`；绑定与派发：`ui/src/pages/chat/chat-pane-lifecycle.ts`、`ui/src/pages/chat/chat-commands.ts`
+- 原生应用 Export Transcript：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatTranscriptExporter.swift`；macOS 调用：`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatWindowShell.swift`；iOS 调用与分享 sheet：`apps/ios/Sources/Design/ChatProTab.swift`
+- 功能说明文档：`docs/tools/trajectory.md`、`docs/tools/slash-commands.md`
+- 会话公开分享与协作权限：`src/gateway/server-methods/sessions-sharing.ts`、`src/gateway/session-sharing-policy.ts`、`ui/src/pages/chat/chat-pane-sharing-actions.ts`、`packages/gateway-protocol/src/schema/sessions-sharing.ts`

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：基于既有对话请求与上下文调查笔记，复用其已确认的源码阅读结果；涉及 `modules/chatCompletionHandler.js`、`messageProcessor.js`、`roleDivider.js`、`Plugin.js` 及 VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的消息处理路径
 >
@@ -76,6 +76,12 @@ SAR 规则的模型条件共有四种：精确匹配、子串匹配，以及二�
 Role Divider 是请求层最后的已确认结构化变换之一：它可识别角色分隔标签并拆出新消息，同时保护工具请求和 DailyNote 标记块不被拆开。处理结束后，`processedMessages` 赋回 `originalBody.messages`，首次上游 body 从该对象复制构造，因而此时的预设注入、占位符替换、检索文本、折叠结果和角色拆分都属于模型可见输入（`modules/roleDivider.js:11-27,101-121,383-399`；`modules/chatCompletionHandler.js:1098-1148`）。
 
 RAGDiaryPlugin 的查询内容来自最近真实 user 与最近 assistant 的加权内容，命中后将结果替换进占位符所在消息，必要时还收集多模态附件。ContextFoldingV2 则对符合条件、已有摘要的 assistant 历史内容原地替换；未完成摘要时会异步触发。两者都说明规则结果进入本次数组，但原笔记未提供真实请求快照来确认不同插件组合下的实际展开结果。
+
+本快照的折叠与裁剪多了一层可选判断。工具描述折叠在 embedding 出候选后可由 JEV 做第二阶段筛选，原则是先保证不漏、再削减过滥，只移除候选、不新增（`modules/messageProcessor.js:642`）；上下文裁剪则在请求带 token 上限时，由 JEV 给每条可删消息打“对继续当前任务是否还有用”的概率，按概率升序删除，块与块之间并发请求，候选过多时直接退回位置规则（`modules/contextManager.js:143-163`）。两者都默认关闭，且 Key 缺失、超时或返回异常时一律保留原结果。
+
+这类判断只改变哪些内容进入本次请求，不改变消息的角色、顺序契约与持久化边界；它们属于请求层改写，与会话存储无关。
+
+依据：[messageProcessor.js:36,642](../../VCPToolBox/modules/messageProcessor.js)、[contextManager.js:143-163](../../VCPToolBox/modules/contextManager.js)、[jevScorer.js:7](../../VCPToolBox/modules/jevScorer.js)。
 
 首次 fetch 前，处理后的请求会写入 `finalContextStore`，最多保留五组并附带 token 统计摘要。这是调试快照，而非会话事实源，也不包含之后的 VCP 工具递归回合（`modules/finalContextStore.js:10-19,40-133,288-301`）。
 

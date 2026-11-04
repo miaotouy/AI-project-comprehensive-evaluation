@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：只读盘点根 README 功能表、AGENTS.md 架构说明与源码（`agent/`、`tools/`、`plugins/memory/`、仓库根工具脚本）；未修改仓库源码
 >
@@ -20,10 +20,11 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 |---|---|---|
 | 闭环学习（记忆/技能后台复习） | `主链确认`（静态证据） | 每 N 轮/每 N 次工具迭代触发一次后台 fork 复习，fork 继承主会话运行时与提示缓存，白名单只放行 memory 与 skill_manage |
 | 自动创建/改进 Skill | `主链确认`（静态证据） | `skill_manage` 以最多 20 项的原子 operations 批次执行 create/patch/write_file/remove_file，失败整体回滚；delete 独占调用；curator 惰性后台维护（从不删除，只归档）+ `.usage.json` 统计 |
-| 持久记忆与用户建模 | `主链确认`（内置）/ `入口确认`（外部 provider） | 内置 MEMORY.md/USER.md 文件记忆 + MemoryProvider ABC 外部后端（honcho/mem0/supermemory 等 8 个）+ 记忆写审批门 + 每轮 prefetch/sync |
+| 持久记忆与用户建模 | `主链确认`（内置）/ `入口确认`（外部 provider） | 内置 MEMORY.md/USER.md 文件记忆 + MemoryProvider ABC 外部后端；仓库内当前只内置 byterover 与 retaindb 两个记忆插件，Honcho、Mem0 等已迁到 plugin-catalog 按需安装 + 记忆写审批门 + 每轮 prefetch/sync |
 | 研究数据工具链 | `主链确认`（保存/压缩）/ `入口确认`（批量与数据集） | 轨迹 JSONL 保存 + trajectory_compressor 保护首尾压缩中间 + batch_runner/mini_swe_runner 批量生成；数据流水线为离线工具，不进入主会话 |
-| Tool Gateway | `入口确认` | `tools/managed_tool_gateway.py` 统一路由 Nous 托管后端（firecrawl 搜索、fal-queue 图像、openai-audio TTS/转写、modal 沙箱）；外部订阅依赖 |
-| 六/七类终端后端 | `归并已有类目` | `tools/environments/` 七个后端已在 Agent 工具笔记覆盖，本笔记只回链并记录 README 与待查清单的数字差异 |
+| Tool Gateway | `入口确认` | `tools/managed_tool_gateway.py` 统一路由 Nous 托管后端（搜索、fal-queue 图像、openai-audio TTS/转写、modal 沙箱）；外部订阅依赖 |
+| 终端后端 | `归并已有类目` | 六个内建后端（local、Docker、SSH、Modal、Daytona、Vercel Sandbox），Singularity/Apptainer 改为插件后端；细节在 Agent 工具笔记，本笔记只回链 |
+| 插件生态 | `入口确认` | `plugin-catalog/` 从约百条增长到 978 条经人工合并、按 40 位 SHA 固定的插件清单，`hermes plugins catalog/search/install` 安装；核心新增 `plugins/computer_use`、`plugins/delegation`、`teams_pipeline`、`kanban`、`config_backends` 等一等插件 |
 | 跨会话检索（session_search） | `主链确认`（静态证据） | FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，一并归入学习闭环描述 |
 
 与 VCP 系（AgentDream 叙事记忆）、LobeHub（五层白盒记忆）、Open WebUI（全局文本记忆）相比，Hermes 的记忆形态是**文件+外部后端双轨**，而最有辨识度的是**自我改进机制本身**：Agent 在后台复盘自己的对话并决定写记忆、建技能、改技能，且这一切以"prompt caching is sacred"为前提（fork 继承缓存、复习永不动主会话）。
@@ -31,12 +32,13 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 ## 系统边界
 
 - 单仓库 Python 核心（run_agent.py/cli.py/gateway/）+ TS 前端（ui-tui/apps/desktop/web）；本笔记只涉核心与工具面。
+- 插件生态在快照间成为独立产品面：`plugin-catalog/` 从 99 条增长到 978 条 YAML 清单，采用“人工合并 + 40 位 SHA 固定 + 禁止自更新代码”的准入模型，`hermes plugins catalog/search/install/update` 安装；核心 `plugins/` 现有 24 个条目，含 `computer_use`、`delegation`、`teams_pipeline`、`kanban`、`config_backends`、`context_engine` 等。外部记忆提供方（Honcho、Mem0 等）已从仓库内置 `plugins/memory/` 迁到该清单，仓库内只保留 byterover 与 retaindb。
 - 闭环学习全部发生在本地进程内（fork 是进程内对象，不是子进程），后台线程执行，结果落文件或外部 provider。
 - 与既有笔记分工：工具执行/审批链（[Agent工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)）、人格/提示词分层（[Agent角色笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)）、聊天表面（[Chat UI 笔记](../Chat%20UI/Hermes-Agent-ChatUI调查笔记.md)）。待查清单已确认 cron、委派、网关、TUI 覆盖较深，本笔记只回链不重写。
 
 ## 介绍声明与候选盘点
 
-根 README（README.md:19-31）声明：built-in learning loop（"creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, builds a deepening model of who you are"）、七类终端后端、Research-ready（"Batch trajectory generation, trajectory compression for training the next generation of tool-calling models"）、cron 自动化、委派并行、Honcho dialectic user modeling、agentskills.io 兼容。README 表格对学习闭环的描述（README.md:26）与代码实现一致。
+根 README（README.md）声明：built-in learning loop（"creates skills from experience, improves them during use, nudges itself to persist knowledge, searches its own past conversations, builds a deepening model of who you are"）、六个内建终端后端加插件后端、Research-ready（"Batch trajectory generation, trajectory compression for training the next generation of tool-calling models"）、cron 自动化、委派并行（桌面可在 Settings → Model → Subagents 选择子 Agent 的 provider/model/limits）、Honcho dialectic user modeling（作为可安装插件）、agentskills.io 兼容。
 
 ## 已确认的独特能力
 
@@ -97,17 +99,17 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 **事实对象**（双轨）：
 
 - 内置：`~/.hermes/memories/MEMORY.md`（Agent 长期记忆）与 `USER.md`（用户画像，`memory.user_profile_enabled` 开关），两者注入 system prompt volatile 段（Agent 角色笔记 §3.3 已确认注入链）；
-- 外部：`MemoryProvider` ABC（`agent/memory_provider.py:81`）定义初始化、系统提示注入、预取、回合同步、工具 schema 与工具调用处理等核心方法及若干可选生命周期钩子；`plugins/memory/` 内置 8 个 provider（honcho、mem0、supermemory、byterover、hindsight、holographic、openviking、retaindb），同一时刻至多激活一个（`memory_manager.py:6-8`），由 `memory.provider` 配置选择。
+- 外部：`MemoryProvider` ABC（`agent/memory_provider.py`）定义初始化、系统提示注入、预取、回合同步、工具 schema 与工具调用处理等核心方法及若干可选生命周期钩子；仓库内置 `plugins/memory/` 只保留 byterover 与 retaindb 两个 provider，Honcho、Mem0 等由 `plugin-catalog/` 的 SHA 固定清单按需安装，同一时刻至多激活一个，由 `memory.provider` 配置选择。
 
 **完整主链**：`MemoryManager`（`agent/memory_manager.py:364`）统一编排——每轮先把召回上下文注入提示（含流式清洗，防止外部注入文本泄漏到 UI），回合后在后台同步写回，并预取下一轮；外部 provider 的工具 schema 在受控条件下追加到工具面；琐碎输入（"hi/thanks/ok" 等）跳过网络召回（`memory_provider.py:52-78`）。
 
 **人机关系**：模型写记忆可能被人审拦截——写审批门（`tools/memory_tool.py:911`）命中时，写入先转为待审批状态，用户执行 `/memory approve` 后才落盘（`memory_tool.py:1130`）；另有审批机制覆盖后台复习的前景写入（`tools/write_approval.py`，测试 `test_background_review_toolset_restriction.py` 等验证）。
 
-**用户建模**：Honcho 是外部云服务（`plugins/memory/honcho/`），官方描述为带多轮 dialectic 推理、会话摘要、双向对等工具与持久结论的跨会话用户建模（`plugins/memory/honcho/README.md`）；经 OAuth/device code/API key 接入，`hermes memory setup honcho` 配置，其系统提示构建函数向 volatile 段追加内容（Agent 角色笔记 §3.3 已确认拼接点）。接入侧做了一组认证健壮性修复：认证过的 SDK 调用统一走 401 恢复助手，会话中途 OAuth 失效可恢复记忆且只提示一次，OAuth grant 失效时跳过记忆调用，session 初始化失败也暴露认证提示，并修正裸 "401" 数字误判——整体保证会话中途刷新 token 不中断记忆链路。
+**用户建模**：Honcho 是外部云服务，当前以 plugin-catalog 条目（`honcho.yaml`/`hermes-honcho-plugin.yaml`）安装而非仓库内置目录；官方描述为带多轮 dialectic 推理、会话摘要、双向对等工具与持久结论的跨会话用户建模；经 OAuth/device code/API key 接入，`hermes memory setup honcho` 配置，其系统提示构建函数向 volatile 段追加内容（Agent 角色笔记 §3.3 已确认拼接点）。接入侧做了一组认证健壮性修复：认证过的 SDK 调用统一走 401 恢复助手，会话中途 OAuth 失效可恢复记忆且只提示一次，OAuth grant 失效时跳过记忆调用，session 初始化失败也暴露认证提示，并修正裸 "401" 数字误判——整体保证会话中途刷新 token 不中断记忆链路。
 
 **持续性**：内置为文件；外部 provider 持久化在各自服务端；`on_session_end`/`on_pre_compress` 钩子提供会话末/压缩前提取；cron 会话 `skip_memory=True`（AGENTS.md cron 硬化不变量，防污染用户画像）。
 
-**外部依赖**：外部 provider 为 SaaS（honcho/mem0/supermemory 等），属于"仓库外商业服务"但存在本仓库接入主链（ABC + MemoryManager + setup 向导），按指南计入。
+**外部依赖**：外部 provider 为 SaaS（Honcho、Mem0 等，经 plugin-catalog 安装），属于"仓库外商业服务"但存在本仓库接入主链（ABC + MemoryManager + setup 向导），按指南计入。
 
 **独特性判断**：记忆由"文件 + 插件 ABC + 后台同步 + 写审批 + 复习闭环"组合而成，不是单一文件注入。用户建模的"deepening"由 Honcho 的 dialectic 多轮推理承担（外部）。与 LobeHub 白盒记忆（结构化五层+工具读写）相比，Hermes 是自由文本记忆 + 外部语义建模。
 
@@ -133,7 +135,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 ## 已归并到现有类目的能力
 
-- **终端后端**：`tools/environments/` 下实际可执行后端 7 类（含 base 基类与 local、ssh、docker、singularity、modal/managed_modal、daytona、vercel_sandbox 文件），已在 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §6 执行边界与第 8 节覆盖（容器资源上限、execute_code 沙箱、容器风险豁免）；README 说 "Seven terminal backends"，待查清单记"六类"，本快照按文件清单为 7 类。状态：`归并已有类目`。
+- **终端后端**：`tools/environments/` 下六类内建后端（local、ssh、docker、modal/managed_modal、daytona、vercel_sandbox），Singularity/Apptainer 由插件后端提供；README 明确 "Six built-in terminal backends ... plus plugin backends such as Singularity/Apptainer"。已在 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §6 执行边界与第 8 节覆盖（容器资源上限、execute_code 沙箱、容器风险豁免）。状态：`归并已有类目`。
 - **Tool Gateway**：`tools/managed_tool_gateway.py` 确认存在，统一路由 Nous 托管的图像生成、音频 TTS/转写与沙箱执行等后端，web 工具经 `tools/web_tools.py:236-246` 的网关路由，按 Nous Portal 订阅与 entitlements 门控（`tools/tool_backend_helpers.py`）；README 称按后端粒度而非一刀切。回链 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)（工具审批/执行链覆盖网关会话级 yolo 等）；完整凭据/订阅流未验证。状态：`入口确认`（外部订阅依赖）。
 - **cron 定时任务**：`cron/jobs.py` 与 `cron/scheduler.py` 按 AGENTS.md 硬化不变量运行——3 分钟硬中断、补跑窗口、文件锁防并发、cron 会话关闭记忆写入；按待查清单标注已有覆盖（Agent 工具笔记 cron approvals.cron_mode、委派与网关笔记），本笔记不重写。状态：`归并已有类目`。
 - **委派/子 Agent、MCP、插件体系、人格系统**：回链 Agent 工具/角色笔记。
@@ -172,6 +174,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 - 复习 fork 在真实长会话中的成本与频率（默认 10 轮/10 迭代触发一次，未运行验证）。
 - `auxiliary.background_review` 路由到不同模型时的摘要重放质量。
 - curator LLM 整合 pass（`consolidate` 默认关闭）的实际行为。
+- 本轮按路径复核了后台复习白名单、curator 调度、记忆 provider 归位与插件目录规模，未逐行重读 26k 提交范围内的实现；插件生态（978 条 catalog、24 个核心插件）只做目录级确认，未逐个安装或运行。
 - Honcho 等外部 provider 的建模质量与数据驻留；会话中途 401 恢复在真实 OAuth 到期场景的端到端行为未实测。
 - trajectory_compressor 的 tokenizer 依赖（Kimi-K2-Thinking）在无网环境的可用性。
 - 终端后端"serverless 休眠唤醒"跨会话恢复语义（外部服务行为）。

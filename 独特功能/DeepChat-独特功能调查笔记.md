@@ -2,33 +2,35 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
-> 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖 Tape 执行日志/契约谱系、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
+> 调查方式：只读源码梳理；结合根 README 功能声明、CHANGELOG 近期条目与 `src/main/` 各子系统入口核对；覆盖 Tape 执行日志/契约谱系、设备双向同步、判定模型、DeepSeek 原生搜索接线与 CLI 本地控制平面；未修改 DeepChat 仓库
 >
-> 调查范围：CLI 本地控制平面、Tape 执行日志与执行契约谱系、DeepSeek 原生 web 搜索、IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移，以及 Codex 用户包与 workspace skills；明确排除普通 Chat 底座与已被现有类目完整覆盖的机制
+> 调查范围：CLI 本地控制平面、Tape 执行日志与执行契约谱系、设备双向同步（Cloudflare Tunnel）、判定模型（System One）、DeepSeek 原生 web 搜索、IM 远程控制、Ollama 管理、DeepLink、Skill 跨工具迁移，以及 Codex 用户包与 workspace skills；明确排除普通 Chat 底座与已被现有类目完整覆盖的机制
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-DeepChat 的九个候选全部有实际实现，其中八项达到“主链确认”（静态证据），一项归并已有类目：
+DeepChat 的十一个候选里，九项达到“主链确认”（静态证据），一项归并已有类目，一项为声明不符：
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
 | IM 远程控制 | 主链确认 | `src/main/remote/` 完整子系统，5 个 IM 渠道 + 会话绑定 + 命令路由 + 投递服务，见能力卡 1 |
 | Tape & Trace | 主链确认 | `src/main/tape/` 分层子系统 + TraceDialog/Tape Trace Inspector 界面 + tape 工具，含执行日志（execution journal）与执行/任务契约（execution/task contract）谱系，见能力卡 2 |
-| Skill 跨工具迁移 | 主链确认 | `src/main/skill/sync/adapters/` 11+ 工具适配器 + 格式转换器，见能力卡 3 |
+| Skill 跨工具迁移 | 主链确认 | `src/main/skill/sync/adapters/` 11+ 工具适配器 + 格式转换器 + 独立扫描 worker，见能力卡 3 |
 | 搜索助手（web 搜索） | 主链确认（web 搜索链）/ 声明不符（"自定义搜索助手模型"） | bocha/brave/deepResearch 内存 MCP + YoBrowser 浏览工具 + DeepSeek 原生 web 搜索（`deepseek-v4-flash`，已接线）；README 声称的可配置自定义搜索引擎 UI 本次仍未找到消费方，见能力卡 4 |
 | Ollama 管理 | 主链确认 | OllamaManager + 专用设置页（下载/刷新/运行模型），见能力卡 5 |
 | DeepLink | 主链确认 | `deepchat://` 协议三命令（start / mcp / provider），见能力卡 6 |
-| CLI 本地控制平面 | 主链确认 | `src/main/cli/` 完整子系统：本地 HTTP RPC + token 鉴权 + 命令面（agent runs/MCP/skill/provider/settings/媒体/OCR）+ launcher 安装与审批，见能力卡 7 |
+| CLI 本地控制平面 | 主链确认 | `src/main/cli/` 完整子系统：本地 HTTP RPC + token 鉴权 + 命令面（agent runs/MCP/skill/provider/settings/媒体/OCR）+ launcher 安装与审批 + 作为工具的 `deepchat` CLI，见能力卡 7 |
 | Codex 用户包与 workspace skills | 主链确认 | `.codex-plugin/plugin.json` 安装/审查/发布链 + 项目五类 skills 目录即时发现，见能力卡 8 |
+| 设备双向同步 | 主链确认 | `src/main/sync/{host,peer,replica}` 主机/对端/副本三层 + Cloudflare Tunnel 连接器 + LWW 合并与墓碑，见能力卡 9 |
+| 判定模型（System One） | 主链确认 | `src/shared/jevProtocol.ts` 判题协议 + 工具权限复核与工具结果裁剪两条消费链，见能力卡 10 |
 | ACP 作为模型 | 归并已有类目 | 已在 Agent 角色笔记 §3 与 LLM 渠道笔记 §2 主链确认，见“已归并”节 |
 
-结论：README 的 "Why Choose DeepChat" 清单与代码基本一致；"Remote-Ready Workflows"、"Tape.systems Philosophy"、"Skills That Travel"、"Integrated Ollama with comprehensive management"、"Rich DeepLink Support" 均有可走通的主链；CLI 本地控制平面为"多表面连续性"标签再添一个终端表面（能力卡 7）。README 中"配置一个搜索助手模型连接任意搜索源"的表述与当前可执行路径不符（见能力卡 4 边界）。
+结论：README 的 "Why Choose DeepChat" 清单与代码基本一致；"Remote-Ready Workflows"、"Tape.systems Philosophy"、"Skills That Travel"、"Integrated Ollama with comprehensive management"、"Rich DeepLink Support" 均有可走通的主链；CLI 本地控制平面为"多表面连续性"标签再添一个终端表面（能力卡 7）。设备同步与判定模型是本次新增的两项独特能力：前者把会话/定义/记忆做成跨设备可合并单元，后者让模型在权限与裁剪两处对“工具该不该放行、结果该不该保留”做二次判断。README 中"配置一个搜索助手模型连接任意搜索源"的表述与当前可执行路径不符（见能力卡 4 边界）。
 
 ## 介绍声明与候选盘点
 
@@ -77,25 +79,26 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 **执行日志与契约谱系**（静态确认）：
 
 - **严格执行日志**（`tape/domain/executionJournal.ts` + `application/executionJournalService.ts`）：以 `execution/run_started`、`execution/dispatch_committed`、`execution/tool_outcome`、`execution/run_terminal` 四类事件记录 run 边界与工具分派，带 provenance key、canonical JSON 比对和协议版本；启动时按日志行分类恢复，crash 场景可识别未收口 run。
-- **执行契约**（`tape/domain/executionContract.ts`，上限：契约 64 KiB、工具 256、subagent 深度 1）：每次请求按工具、工作区和深度冻结 ceilings，工具服务在分派前校验；绑定 id 写入 assistant block 的 `executionContractBinding`（`src/main/tool/index.ts:329`、`:388`、`:475`；字段见 `src/shared/chat.d.ts:199`）。工具执行结果与 `providerReplayJson`（见能力卡 4）都由日志约束。
-- **任务契约与评估**（领域层与应用层的任务契约、评估服务）：delegation 子任务在冻结时继承父契约（`contract/task_frozen`），完成后按 `contract/evaluated` 事件评估；补偿或压缩造成的顺序位移也会写入 order 类型的消息替换事实（`transcript.ts:258-298`）。
+- **执行契约**（`tape/domain/executionContract.ts`，上限：契约 64 KiB、工具 256、subagent 深度 1）：每次请求按工具、工作区和深度冻结 ceilings，工具服务在分派前校验；绑定 id 写入 assistant block 的 `executionContractBinding`（`src/main/tool/index.ts:885`、`:953`、`:1065`；字段见 `src/shared/chat.d.ts:191`）。工具执行结果与 `providerReplayJson`（见能力卡 4）都由日志约束。
+- **任务契约与评估**（领域层与应用层的任务契约、评估服务）：delegation 子任务在冻结时继承父契约（`contract/task_frozen`），完成后按 `contract/evaluated` 事件评估；补偿或压缩造成的顺序位移也会写入 order 类型的消息替换事实（`tape/application/transcript.ts`）。
 
 **完整主链**（静态走通）：
 
 ```text
 消息结算（transcript.ts 完成/错误路径，同步写 Tape facts）
   -> TapeFactService.appendToolFact / factPersistence.appendMessageRecordToTape
-  -> SessionTape（入口，sessionTape.ts:81）
-  -> 视图：view manifest（确定性 hash + lineage，viewReplayService.ts:188）
+  -> SessionTape（入口，sessionTape.ts:118）
+  -> 视图：view manifest（确定性 hash + lineage，viewReplayService.ts:50 的 provenance key；
+     provider 侧视图清单由 application/providerViewManifest.ts 与 ports/capabilities.ts 承载）
   -> 用户入口：消息菜单 -> TraceDialog.vue（request / view / entries / budget 四 tab，
      展示 requestSeq、provider/model、endpoint、headers/body、manifest 完整性、
      包含/排除条目、token 预算）
-  -> 模型入口：tape_search / tape_context 工具（agentTapeTools.ts:21-110，
-     支持 linked scopes = 已 finalize 的直接子 Agent tape）
+  -> 模型入口：tape_search / tape_context 工具（agentTapeTools.ts:10 定义 server 名，
+     处理器在 :177；支持 linked scopes = 已 finalize 的直接子 Agent tape）
   -> 跨会话召回：tapeSearchProjectionStore（FTS 投影）+ recallService
 ```
 
-**持续性**：Tape entries 与 view manifests 落 SQLite；重启后可审计回放。subagent 有显式 tape lineage（lineageService.ts:313），README 与 CHANGELOG 的 "replay lineage" 描述一致。
+**持续性**：Tape entries 与 view manifests 落 SQLite；重启后可审计回放。subagent 有显式 tape lineage（`lineageService.ts:293` 的 `TapeLineageService`），README 与 CHANGELOG 的 "replay lineage" 描述一致。
 
 **边界**：本次未验证 Tape 与 compaction（压缩后 entry 保留策略）的交互、FTS 投影的更新时序；Tape view 的确定性 hash 具体算法未逐行核对；execution journal 的崩溃恢复分类（`classifyExecutionJournalRows`）有专项测试（`test/main/tape/executionJournalCrash.test.ts`），但未在本机运行。
 
@@ -113,12 +116,14 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
   -> 导入/导出：sync/formatConverter.ts 做格式归一；adapters/ 下 11+ 个工具适配器
      （claudeCode / codex / cursor / windsurf / copilot / openCode / goose /
       kiloCode / kiro / antigravity / agents）
-  -> sync/toolScanner.ts + security.ts（文件名/路径安全校验）
+  -> 外部发现：sync/toolScanner.ts 扫描各工具 Skill 目录，扫描任务跑在独立 worker
+     （scanWorker.ts + scanWorkerEntry.ts），结果由 sync/discoveries.ts 与持久化
+     ScanCache、已有 Skill 名比对，只产出新增项
   -> 会话级激活：activeSkillNames 进入工具目录（Agent 工具笔记 §1）
   -> 执行：skill_run 工具（Agent 工具笔记 §6）
 ```
 
-**边界**：适配器的双向性（导入 vs 导出）未逐一核对；格式转换的兼容面（如 Claude Code 的 SKILL.md frontmatter 变体）未运行验证。
+**边界**：适配器的双向性（导入 vs 导出）未逐一核对；格式转换的兼容面（如 Claude Code 的 SKILL.md frontmatter 变体）未运行验证；worker 扫描在超大 Skill 目录下的超时与取消行为未验证。外部发现走独立 worker，先与 ScanCache 比对再产出新增项，`skillExecutionService.ts` 按同一发现结果装配执行入口。
 
 **独特性判断**：跨工具 Skill 格式迁移是独特产品面（"Skills That Travel"），与 Hermes Agent 的"从经验生成 Skill"（自进化）是同一生态的两个方向：前者是迁移，后者是生成。标签：自进化 Skill 的传输子面。
 
@@ -129,14 +134,14 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 **完整主链**（静态走通，web 搜索部分）：
 
 ```text
-内置内存 MCP 服务器（mcp/settings.ts:130-151，DEFAULT_ENABLED 由会话装配）
+内置内存 MCP 服务器（mcp/settings.ts:123-150，DEFAULT_ENABLED 由会话装配）
   -> bochaSearchServer（bocha_web_search）/ braveSearchServer（brave_web_search）
   -> deepResearchServer（start_deep_research -> execute_single_web_search ->
      request_research_data -> submit_reflection_results -> generate_final_answer，
      反思式增量迭代，基于 deep-research-mcp 改 Bocha 与内容提取）
   -> 浏览器面：YoBrowser 工具（tool 目录 server 名 "yobrowser"，
      desktop/browser/YoBrowserPresenter.ts），模拟真人浏览搜索引擎
-  -> 结果投影：assistant block type: 'search'（dispatch.ts:461-476，
+  -> 结果投影：assistant block type: 'search'（dispatch.ts:794，
      含 engine/provider 归属与 favicon 页面），渲染层按来源高亮
   -> 自有会话搜索（conversationSearchServer，FTS5）：归并已有类目
      （会话与消息管理笔记 §2/§5.3，Chat UI 笔记 §2）
@@ -148,12 +153,12 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 Composer 搜索开关（isSearchAvailable/isSearchEnabled/toggleSearch，
   useComposerSubmit.ts:287-363，依赖 provider capability supportsSearch &&
   searchExecution === 'provider'）
-  -> SendMessageInput.search=true（agent-interface.d.ts:253）进入请求
+  -> SendMessageInput.search=true（src/shared/types/agent-interface.d.ts:850）进入请求
   -> deepseekResponsesAdapter.ts 判定（仅 deepseek provider + deepseek-v4-flash +
      官方 api.deepseek.com endpoint 才启用）
   -> OpenAI Responses 请求带 deepseek_provider_web_search 工具，
      include.rawChunks 收集 raw/source 流部件
-  -> streamAdapter.ts:254-291 投影为 providerSearch/providerUrlSource 事件
+  -> streamAdapter.ts:111-200 投影为 providerSearch/providerUrlSource 事件
      （http/https 白名单、去重、上限 100 来源）
   -> type:'search' block -> MessageBlockSearch.vue 渲染（消息渲染器笔记 §1/§2）
   -> 搜索调用以 provider_replay 信封随消息块持久化
@@ -218,9 +223,12 @@ deepchat <command>（终端）
   -> 审批：CliApprovalDialog.vue + approvalBroker.ts（与桌面共用审批 broker，
      复用 CLI 专用 approval routes 与 events）
   -> 审计：auditLog.ts 记录命令面调用；run 输出经 run 事件流返回，错误脱敏
-  -> 桌面侧：Settings 提供 launcher 管理（CliLauncherSettingsSection.vue，嵌入 CommonSettings，
-     2a31128）；会话带 SessionMetadata { source: 'cli_run' } 标记（agent-interface.d.ts:843-853）
+  -> 桌面侧：Settings 提供 launcher 管理（CliLauncherSettingsSection.vue，嵌入 CommonSettings），
+     会话带 SessionMetadata { source: 'cli_run' } 标记
+     （src/shared/types/agent-interface.d.ts:886）
 ```
+
+**Agent 侧程序化调用（新增面）**：agent 可以把 `deepchat <命令>` 当作工具执行，走 `cli/deepChatToolPort.ts` 与 `agent/deepchat/runtime/programmaticToolSurface.ts` 组成的程序化工具面：能力以 grant 形式绑定（schema 版本、capability hash、适配模式 `cli-programmatic`），执行前后校验工具面视图仍活跃/已提交，并对输入、输出、批次步数、子调用数与时长设上限；`agentCommandAccess.ts` 只在命令命中注册表且拿到 capability 时把 CLI 目录注入 PATH，否则退回非特权环境（`:66-178`）。
 
 **持续性**：launcher 安装可逆，卸载或数据重置仍保留入口；detached run 有独立生命周期与终端状态等待（#2136）；descriptor 文件供 CLI 发现宿主布局（`LOCAL_CONTROL_DESCRIPTOR_FILENAME`）。
 
@@ -240,56 +248,122 @@ deepchat <command>（终端）
 
 **事实对象与入口**：用户插件只认 `.codex-plugin/plugin.json`。来源可以是本地目录、ZIP 或无凭据的公开 HTTPS Git URL；安装前先复制到临时 snapshot，解析 manifest，并让用户分别选择 Skills、hooks 和 MCP。安装、更新、诊断与卸载界面位于 Plugins Hub，契约见 `src/shared/types/userPlugin.ts`、`src/main/plugin/userPluginSource.ts:188-299` 与 `src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`。
 
-**执行与治理**：hook 只支持 SessionStart、UserPromptSubmit、SubagentStart 三类输入边界，命令默认 5 秒超时；stdout 只接受事件名匹配的文本 `additionalContext`。调用记录写入 Tape 的 `plugin/context-hook`，失败进入诊断；禁用或更新会撤销资格并取消在途命令。Direct ACP Agent 不接收这些 hook 上下文。实现见 `src/main/plugin/userPluginPackage.ts:17,83-168`、`userPluginHooks.ts:45-141,445-533`。
+**执行与治理**：hook 只支持 SessionStart、UserPromptSubmit、SubagentStart 三类输入边界，命令默认 5 秒超时；stdout 只接受事件名匹配的文本 `additionalContext`。调用记录写入 Tape 的 `plugin/context-hook`，失败进入诊断；禁用或更新会撤销资格并取消在途命令。Direct ACP Agent 不接收这些 hook 上下文。实现见 `src/main/plugin/userPluginPackage.ts:287`（包读取）、`userPluginHooks.ts:45-152`（注册与 `accept`）与 `:376-410`（诊断与重试）。
 
-**工作区 Skills**：Skill 服务在当前项目根的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录即时发现条目，校验物理路径位于项目内，并把它们作为只读项目资产合并到本轮路由目录，不污染共享 Skill 缓存（`src/main/skill/index.ts:1295-1318`）。
+**工作区 Skills**：Skill 服务在当前项目根的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录即时发现条目，校验物理路径位于项目内，并把它们作为只读项目资产合并到本轮路由目录，不污染共享 Skill 缓存（`src/main/skill/index.ts:1295-1322`、`src/main/skill/routingCatalog.ts`）。
 
 **独特性判断**：这一能力组合了包来源审查、按能力授权、运行时上下文贡献、MCP/Skill 发布和项目作用域发现，超出普通 Skill 导入或普通 MCP 配置。标签：可携带 Agent 扩展包、上下文 hook、项目级 Skill。
 
 **证据强度**：主链静态确认；未运行 Git/ZIP 安装、hook 命令、更新回滚和同名 workspace Skill 冲突。
 
+### 能力卡 9：设备双向同步（多设备同一份工作历史）
+
+**用户目标**：在几台自己的机器之间自动延续同一份工作历史——在一台机器上聊的会话、装的 Provider/Agent/MCP 定义、调好的便携设置和记忆，换机器后继续用；与手动备份导入是两条路径。
+
+**入口与触发者**：设置 → Data 里的 Device sync，与 R2、S3 兼容存储并列（`src/renderer/settings/components/TunnelSyncSettings.vue`、`stores/tunnelSync.ts`）。连通性由 Cloudflare Tunnel 提供，它不是数据托管方；只有承担 host 角色的一端需要 cloudflared，对端可以离线编辑、等 host 回来后补齐。
+
+**事实对象与合并单元**：合并以“单元”而不是 SQLite 行为粒度，可执行白名单在 `src/main/sync/replica/units.ts:17`：一个 session 包（会话根、元数据、Tape entries、消息及其依赖内容）、单个 Agent/Provider/MCP 定义、单个便携设置键、单个 prompt 列表，以及单条记忆记录加其域墓碑。运行时句柄、挂起执行与审批、调度任务、机器路径、工具链选择、缓存、派生投影和同步凭证都不参与。
+
+**完整主链**（静态走通）：
+
+```text
+本地写入（SQLite 触发器记录 canonical 变更，排除跟踪不进入备份）
+  -> replica 层维护最新状态变更索引（src/main/sync/replica/store.ts）
+  -> 调度：相关写入后静默 15 秒成为候选，两次自动同步间隔 ≥60 秒、最多等 120 秒，
+     同一时刻只允许一个周期在飞（automatic.ts 的计时器与去抖）
+  -> peer 出站：向 host 拉取/推送不可变批次（目标 8 MiB、上限 32 MiB，
+     分片可续传、摘要校验、写授权版本与吊销检查，peer/index.ts、batches.ts）
+  -> host 端：按 LWW 比较修改时间（同时刻用设备 ID 定序），校验后原子应用批次，
+     尊重记忆域墓碑；host 再把接受的变更转发给其它配对设备（host/index.ts、snapshot.ts）
+  -> 提交后刷新受影响的会话视图、Provider/提示词缓存与设置事件
+  -> 状态经类型化事件回到设置页（忙碌/离线/错误）
+```
+
+**冲突与删除**：同一 `(kind, id)` 取修改时间较新的版本，本地真实编辑用 `max(now, previous+1)` 保证同毫秒不撞；没有字段合并、冲突选择对话框、CRDT 或整库替换。删除保留 ID 与时间戳成为墓碑，较旧的离线副本无法复活已删除单元；墓碑不做按时间回收。
+
+**边界**：设备时钟被假定正确，没有时钟同步服务或时钟偏移导致的暂停策略；附件与外部资源仍按原有备份边界处理，`deepchat_user_message_files.path` 里的绝对路径不会把文件一起带过去；host 只有一个上游，未做 mesh。首次纳入时对既有可移植数据做一次索引，缺少可信时间戳的旧记录使用确定性的零基线加设备 ID 定序。自动同步不调用手动恢复那套关库/重开与挂起全部会话流程。
+
+**独特性判断**：多数桌面客户端的“同步”是整库云备份或账号托管；这里把同步做成有合并单元的复制协议（LWW + 墓碑 + 双向批次），并让 host 同时充当转发节点。标签：多设备连续工作历史、领域单元级同步。
+
+**证据强度**：规格（`docs/features/cloudflare-tunnel-sync/spec.md`）与实现目录一致，plan 里记录了主进程/渲染层回归与本地 SQLite/HTTP/Electron 冒烟验证结果；公网隧道与 Windows/Linux 打包在外网环境下未验证（本次也未运行）。
+
+### 能力卡 10：判定模型（TypeSafe Jev，局部“系统一”判断）
+
+**用户目标**：把两类高频但很碎的判断交给一个专门的小模型，而不是让主模型或规则硬扛——自动批准模式下这条工具调用该不该放行，以及这条已经结束的工具结果这轮还需要不需要。
+
+**事实对象**：一套判题协议（`src/shared/jevProtocol.ts`）：问题分选择、评分、不适用三类，答案带用量与判决结果；模型本身通过 Provider 目录里的 Jev 类型条目访问（`src/main/provider/providers/jevProvider.ts`，默认端点 `https://api.typesafe.ai/v1/systemone`），Agent 配置里的 `judgmentModel`（providerId + modelId）决定是否启用，缺省即整条判断跳过。
+
+**完整主链**（两条消费链，静态走通）：
+
+```text
+1) 工具权限复核（仅 auto_approve 模式）
+   auto_approve 命中待审阅工具
+     -> reviewAutoApproveToolPermission（toolPermissionReviewer.ts:316）
+     -> 组装判题状态：最近 8 条消息 + 工具参数，另带注入压力问题
+     -> 判定模型回答 -> 放行 / 拒绝 / 需要用户确认
+2) 工具结果裁剪（在既有的按大小截断之前）
+   关闭的工具结果 -> collectJevPruningCandidates（jevToolResultPruning.ts:208）
+     -> 逐条问“这轮是否还需要” -> 不需要则整条替换为短占位说明
+     -> 需要的保持原文，随后仍受按大小截断约束（>阈值仍截头尾）
+```
+
+判题状态受 token 与路径数上限约束（`jevReviewState.ts:68`、`:129`），超限时按候选裁剪而不是整段丢弃。
+
+**设计取舍（源码自述）**：裁剪这条链刻意不写 Tape——Tape 是追加式执行日志与持久证据，裁剪只是“这轮给模型看什么”的投影，纯函数、返回新数组，占位说明指回 Tape 恢复路径。它还刻意不告诉判定模型结果的大小或年龄，避免把应用自己的预判喂给审阅者（权限复核曾因此出现“预设答案 + 触发注入判定”的 bug）。裁剪会让工具输出内容进入判定模型，这些内容可被读作指令而没有注入判题标准；接受的风险上限是误删一条结果、需要经 Tape 再取一次，所以判题结果只被用于删除还是保留。
+
+**边界**：`keepThreshold` 自述“来自 fast-jev-compaction 插件且未标定”，评分阈值与问题集属临时值；本次未运行判定模型的假阳/假阴评估，也未验证在无网络或 Provider 不可用时的降级路径。
+
+**独特性判断**：这是把模型判断从“主对话里再问一遍”下沉成独立协议与独立 Provider 条目，并在权限与上下文两个位置各接一条具体决策。与 Codex 的审批代理、Cursor 的自动运行策略相比，这里显式区分“该不该放行”和“该不该保留”，且把判定与执行日志隔离。标签：局部模型判断、权限复核、上下文裁剪。
+
+**证据强度**：协议、Provider 条目、两条消费链与限额均为静态源码确认；阈值标定、误判率与降级行为未运行验证。
+
 ## 已归并到现有类目的能力
 
-- **ACP 作为模型**：归并已有类目。Agent 角色笔记 §3（`agentManager.ts:54-118` 的 kind 分派）、LLM 渠道笔记 §2（`apiType: acp` 与 ACP backend 的边界）均已主链确认：ACP Agent 作为模型选择器一等条目、ACP-backed subagent 空工具目录、ACP workspace UI。本笔记不再重写。
+- **ACP 作为模型**：归并已有类目。Agent 角色笔记 §3（`agentManager.ts` 的 kind 分派）、LLM 渠道笔记 §2（`apiType: acp` 与 ACP backend 的边界）均已主链确认：ACP Agent 作为模型选择器一等条目、ACP-backed subagent 空工具目录、ACP workspace UI。本笔记不再重写。
 - **会话内/跨会话搜索**（自有数据搜索）：归并会话与消息管理笔记 §5 与 Chat UI 笔记 §2，已确认搜索入口、FTS5 和会话搜索服务。
-- **Artifact / MCP App 沙箱 / 本机 exec**：归并生成式输出与运行时笔记（主链确认 G3）。
+- **MCP App 沙箱 / 本机 exec / 历史 Artifact 兼容**：归并生成式输出与运行时笔记（G3 由 MCP App 与命令执行承担，内置 Artifact 生成与预览已退役）。
 - **cron 定时任务**：CHANGELOG 提及"定时任务 + 远程 /agent 命令"；cron 本体属 Agent 工具笔记边界，其 remote delivery 已在能力卡 1 记录交点，不重复展开。
 
 ## 声明不符、外部依赖与暂缓项
 
 - “配置搜索助手模型连接任意搜索源”：声明不符（见能力卡 4）。
 - Feishu 渠道的安装与鉴权依赖飞书开放平台应用；Weixin iLink 依赖企业微信接口；Telegram/QQBot/Discord 依赖各自 bot 平台——均为外部服务依赖，主链执行需真实凭证（暂缓运行验证）。
-- useArtifactExport（导出按钮）未接线（生成式输出笔记 §11）与 Tape 无关，不重复。
+- 设备同步的 Cloudflare 公网隧道属于外部依赖：本地回环与合成测试可走通，真实公网传输需要可用的 Cloudflare 账号与网络（plan 中同样列为未完成项）。
 
 ## 对特色贡献统计的影响
 
-建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（执行轨迹审计与回放，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）、Codex 用户包与 workspace skills（可携带扩展包）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、Artifact。
+建议进入主贡献（主链确认，静态证据）：IM 远程控制（多表面连续性）、Tape & Trace（执行轨迹审计与回放，含执行日志/契约谱系）、Skills 跨工具迁移（Skill 生态传输）、CLI 本地控制平面（多表面连续性）、Codex 用户包与 workspace skills（可携带扩展包）、设备双向同步（多设备连续工作历史）、判定模型（局部模型判断）。辅助贡献：Ollama 管理、DeepLink、web 搜索/深度研究链（含 DeepSeek 原生搜索）。归并不计数：ACP 作为模型、自有会话搜索、MCP App/exec。
 
 ## 未验证事项
 
 - 未运行任何 IM 平台真实回调/凭证；远程控制的端到端时序（流式回复在 IM 上的分段、交互回调 TTL、Feishu 卡片轮询）为静态推断。
 - Tape：压缩与 Tape 的交互、FTS 投影时序、manifest hash 算法未逐行核对；execution journal 崩溃恢复分类依赖专项测试，未本机运行。
-- Skill 适配器双向导入导出的兼容面未逐一验证。
+- Skill 适配器双向导入导出的兼容面未逐一验证；worker 扫描的取消与超时未实测。
 - Ollama pull 进度事件与并发下载的运行时行为未实测。
 - DeepLink 在三种平台的协议注册与 MCP 未就绪排队恢复未实测。
-- CLI：未运行 CLI 二进制、launcher 安装/卸载与 detached run 的终端行为；token scope 与审批的端到端流程为静态走通。
+- CLI：未运行 CLI 二进制、launcher 安装/卸载与 detached run 的终端行为；token scope、审批与程序化工具面授权的端到端流程为静态走通。
 - 用户插件：未运行公开 Git/ZIP/目录安装、hook 命令、更新回滚、诊断重试和 workspace Skill 同名覆盖。
-- 未运行构建、测试或应用本体；证据全部来自当前快照静态源码。
+- 设备同步：未运行真实 Cloudflare 隧道、双机配对与合并；LWW 在设备时钟错误下的表现、超大 session（>32 MiB 批次上限）的处置、墓碑长期累积的影响均未验证。
+- 判定模型：未运行判题请求，未评估假阳/假阴；阈值未标定，Provider 不可用时的降级未验证。
+- 未运行构建、测试或应用本体；证据全部来自当前快照静态源码（同步部分另参考仓库内规格与验证记录）。
 
 ## 关键源码索引
 
-- 远程控制入口与命令：`src/main/remote/index.ts:216-335`、`src/main/remote/conversation/commandRouter.ts:63-1078`、`src/main/remote/conversation/runner.ts:441-799`
-- 远程绑定与运行时：`src/main/remote/binding/store.ts`、`src/main/remote/runtime/manager.ts`、`src/main/remote/types.ts:58-260`（命令清单）
-- 远程文本渲染与投递：`src/main/remote/conversation/blockRenderer.ts:208-485`、`src/main/remote/delivery/service.ts`
+- 远程控制入口与命令：`src/main/remote/index.ts`、`src/main/remote/conversation/commandRouter.ts`、`src/main/remote/conversation/runner.ts`
+- 远程绑定与运行时：`src/main/remote/binding/store.ts`、`src/main/remote/runtime/manager.ts`、`src/main/remote/types.ts`（命令清单）
+- 远程文本渲染与投递：`src/main/remote/conversation/blockRenderer.ts`、`src/main/remote/delivery/service.ts`
 - 远程设置面：`src/renderer/settings/components/RemoteSettings.vue`、`CronJobsSettings.vue`（remote delivery）
 - Feishu 插件：`plugins/feishu/`（plugin.json / skills / mcp / settings）
-- Tape：`src/main/tape/application/{sessionTape,factService,recallService,lineageService,viewReplayService,reconcilerService,executionJournalService,taskContractService,taskEvaluationService}.ts`、`src/main/tape/domain/{executionJournal,executionContract,taskContract,taskEvaluation}.ts`、`src/main/tape/infrastructure/sqlite/tapeEntryStore.ts`
-- Tape UI：`src/renderer/src/components/trace/TraceDialog.vue`（:377-550 四 tab 数据）
-- Tape 工具：`src/main/tool/agentTools/agentTapeTools.ts:21-110`
-- Skill 同步：`src/main/skill/sync/formatConverter.ts`、`src/main/skill/sync/adapters/`、`src/main/skill/agentSkillImportService.ts`
-- 搜索：`src/main/mcp/inMemoryServers/{bochaSearchServer,braveSearchServer,deepResearchServer}.ts`、`src/main/mcp/settings.ts:130-151`、`src/main/desktop/browser/YoBrowserPresenter.ts`、`src/main/agent/deepchat/runtime/dispatch.ts:461-476`
-- DeepSeek 原生搜索：`src/main/provider/deepseekResponsesAdapter.ts`、`src/main/provider/aiSdk/streamAdapter.ts:254-291`、`src/main/provider/aiSdk/runtime.ts:1181-1245`、`src/renderer/src/components/message/MessageBlockSearch.vue`
-- CLI 本地控制平面：`src/main/cli/server.ts`、`src/main/cli/routes.ts`、`src/main/cli/runService.ts`、`src/main/cli/launcherService.ts`、`src/main/cli/agentTokenAuthority.ts`、`src/main/cli/policy.ts`、`src/main/approval/approvalBroker.ts`、`src/shared/contracts/localControl.ts`、`src/shared/contracts/cliCommands.ts`、`src/renderer/src/components/cli/CliApprovalDialog.vue`、`docs/guides/cli.md`
-- Codex 用户包与 workspace skills：`src/main/plugin/{userPluginSource,userPluginPackage,userPluginHooks,userPlugins}.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`、`src/main/skill/index.ts:1295-1318`、`src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`
-- Ollama：`src/main/provider/managers/ollamaManager.ts:12-81`、`src/renderer/settings/components/OllamaProviderSettingsDetail.vue`
-- DeepLink：`src/main/deeplink/index.ts:56-510`、`:666-693`（净化）
+- Tape：`src/main/tape/application/{sessionTape,factService,recallService,lineageService,viewReplayService,providerViewManifest,reconcilerService,executionJournalService,taskContractService,taskEvaluationService}.ts`、`src/main/tape/domain/{executionJournal,executionContract,taskContract,taskEvaluation}.ts`、`src/main/tape/infrastructure/sqlite/tapeEntryStore.ts`
+- Tape UI：`src/renderer/src/components/trace/TraceDialog.vue`
+- Tape 工具：`src/main/tool/agentTools/agentTapeTools.ts:10`、`:177`
+- Skill 同步：`src/main/skill/sync/formatConverter.ts`、`src/main/skill/sync/adapters/`、`src/main/skill/sync/{scanWorker,scanWorkerEntry,discoveries,toolScanner}.ts`、`src/main/skill/agentSkillImportService.ts`
+- 搜索：`src/main/mcp/inMemoryServers/{bochaSearchServer,braveSearchServer,deepResearchServer}.ts`、`src/main/mcp/settings.ts:123-150`、`src/main/desktop/browser/YoBrowserPresenter.ts`、`src/main/agent/deepchat/runtime/dispatch.ts:794`
+- DeepSeek 原生搜索：`src/main/provider/deepseekResponsesAdapter.ts`、`src/main/provider/aiSdk/streamAdapter.ts:111-200`、`src/main/provider/aiSdk/runtime.ts:1169-1249`、`src/renderer/src/components/message/MessageBlockSearch.vue`
+- CLI 本地控制平面：`src/main/cli/{server,routes,runService,launcherService,agentTokenAuthority,policy,deepChatToolPort}.ts`、`src/main/approval/approvalBroker.ts`、`src/shared/contracts/{localControl,cliCommands}.ts`、`src/renderer/src/components/cli/CliApprovalDialog.vue`、`docs/guides/cli.md`
+- 程序化工具面：`src/main/agent/deepchat/runtime/programmaticToolSurface.ts`、`src/main/agent/deepchat/runtime/programmaticExecParent.ts`、`src/main/cli/agentCommandAccess.ts`
+- 设备同步：`src/main/sync/{host,peer,replica}/`、`src/main/sync/replica/units.ts:17`、`src/main/sync/replica/automatic.ts`、`src/main/sync/settings.ts`、`src/renderer/settings/components/TunnelSyncSettings.vue`、`docs/features/cloudflare-tunnel-sync/{spec,plan}.md`
+- 判定模型：`src/shared/jevProtocol.ts`、`src/main/provider/providers/jevProvider.ts`、`src/main/agent/deepchat/runtime/{toolPermissionReviewer,jevToolResultPruning,jevReviewState,jevPermissionQuestions}.ts`、`src/shared/types/agent-interface.d.ts:665`（`judgmentModel`）
+- Codex 用户包与 workspace skills：`src/main/plugin/{userPluginSource,userPluginPackage,userPluginHooks,userPlugins}.ts`、`src/main/agent/deepchat/runtime/pluginContext.ts`、`src/main/skill/index.ts:1295-1322`、`src/main/skill/routingCatalog.ts`、`src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`
+- Ollama：`src/main/provider/managers/ollamaManager.ts`、`src/renderer/settings/components/OllamaProviderSettingsDetail.vue`
+- DeepLink：`src/main/deeplink/index.ts:56-510`、`:666-700`（净化）

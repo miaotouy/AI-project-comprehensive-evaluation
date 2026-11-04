@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码：server.js 全部 HTTP 端点（887-1554）、chatCompletionHandler.js 请求生命周期（644-1418）、finalContextStore.js、VCPTavern.js 会话键与 access_logs、toolCallRecordStore.js、WebSocketServer.js；并对 `sessionId`/`conversationId` 等关键字做了全仓搜索
 >

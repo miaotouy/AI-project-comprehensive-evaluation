@@ -1,8 +1,8 @@
 # Open WebUI 已调查能力汇总
 
-> 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `0a7c15832fb30b1903753e83f81dc7d27e5b0944` / main）
+> 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `c38885a1a737da4968f157092f304f3b5481d0bf` / main）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
 > 依据：14 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；横向对比文档不在本次汇总范围
 >
@@ -14,14 +14,14 @@
 
 ## 项目概览
 
-Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteKit SPA）合仓的 Web 聊天与协作平台，不内置模型推理，上游为 openai/ollama/pipe。核心特征：会话采用「history JSON 快照 + chat_message 消息表」双写、流式推送全程走 Socket.IO、多模型并行（MoA / side-by-side）内建、54 个内置工具按条件注入、代码解释器与 Artifact 沙箱；平台面另有 Channels、Notes、Persistent Memory、Calendar、Automations、Arena/ELO 等协作与产品能力。14 份类目笔记全部为静态源码调查，结论以当前代码快照为限。
+Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteKit SPA）合仓的 Web 聊天与协作平台，不内置模型推理，上游为 openai/ollama/pipe。核心特征：会话采用「history JSON 快照 + chat_message 消息表」双写、流式推送全程走 Socket.IO、多模型并行（MoA / side-by-side）内建、64 个内置工具按条件注入并支持延迟检索、代码解释器与 Artifact 沙箱、聊天内多标签工作台（终端/浏览器/Git/文件）；平台面另有 Channels（含端到端加密频道）、Notes、Persistent Memory、Calendar、Automations、Arena/ELO、外部应用平台（Apps）与人工提问等协作与产品能力。14 份类目笔记全部为静态源码调查，结论以当前代码快照为限。
 
 ## 完成度速览
 
-- 主链确认：6 项（Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO）
+- 主链确认：9 项（Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO、外部应用平台、多标签工作台、人工提问）
 - 入口确认：4 项（语音/视频通话模式、企业身份、云文件、多节点运行）
-- 静态源码确认：36 项（角色与上下文、会话与消息、生成与创作、Agent 运行时、渠道与调度五类标准条目）
-- 归并已有类目：8 项
+- 静态源码确认：42 项（角色与上下文、会话与消息、生成与创作、Agent 运行时、渠道与调度五类标准条目，含工具延迟检索与技能）
+- 归并已有类目：12 项（含技能、通知收件箱、资源评论、工作区全局搜索）
 - 声明不符：1 项（Artifact KV）
 - 暂缓：1 组（伴生仓库）
 
@@ -117,9 +117,9 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 ### 独特与差异化能力
 
-本小节保留独特功能笔记的能力卡标题与证据状态（沿用独特功能类目指南定义）。下列 6 项为 `主链确认`；语音/视频通话模式、企业身份、云文件、多节点运行 4 项 `入口确认` 与 Artifact KV `声明不符`、伴生仓库 `暂缓` 已移至末尾「已知边界与待验证事项」。
+本小节保留独特功能笔记的能力卡标题与证据状态（沿用独特功能类目指南定义）。下列 9 项为 `主链确认`；语音/视频通话模式、企业身份、云文件、多节点运行 4 项 `入口确认` 与 Artifact KV `声明不符`、伴生仓库 `暂缓` 已移至末尾「已知边界与待验证事项」。
 
-- **能力一：Channels（实时协作空间 + 模型参与）— `主链确认`**：群组/DM/公告三类频道 + 线程/反应/置顶/文件/Webhook 入站；模型被 `@` 或回复触发后以完整 `CHAT_COMPLETION_HANDLER` 管线参与回复，模型回复以模型身份落库。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- **能力一：Channels（实时协作空间 + 模型参与）— `主链确认`**：群组/DM/公告三类频道 + 线程/反应/置顶/文件/Webhook 入站；模型被 `@` 或回复触发后以完整 `CHAT_COMPLETION_HANDLER` 管线参与回复，模型回复以模型身份落库；频道可进入端到端加密模式，服务端只中继密文包与协商状态。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
 - **能力二：Notes（独立文档工作区）— `主链确认`**：笔记 ↔ 隐藏聊天双向绑定（`GET /notes/{id}/chat` 建立 internal 隐藏聊天，模型经 view_note/write_note/replace_note_content 工具直接改写）；Yjs 实时协作经 Redis `YdocManager` 同步；模型编辑受工具权限与聊天权限双闸。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
@@ -131,6 +131,12 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **能力六：模型 Arena / ELO 评估 — `主链确认`**：用户反馈（rating 1/-1 + 兄弟模型 + 标签）落 `feedback` 表，排行榜实时计算 Elo（初始 1000、K=32），带 query 时用 sentence-transformers 对标签做余弦相似度加权；仅 admin 可见，无缓存表。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
+- **能力七：外部应用平台（Apps）— `主链确认`**：外部服务以 manifest 注册为应用，经签名上下文 token 与 scope 校验回调 `/apps/{id}/interactions`，被邀请进频道后可接收平台消息事件并发布频道回复。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+
+- **能力八：多标签工作台（ChatTabs）— `主链确认`**：聊天区按 11 类标签并行承载会话、文件、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊，终端与浏览器经 `/api/v1/terminals` 代理外部服务。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)
+
+- **能力九：人工提问（ask_user）— `主链确认`**：内置工具让模型单轮提出 1-3 个结构化成对选项的问题，中间件暂存调用、前端卡片作答后回填继续生成；与工具审批是两条不同机制。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
+
 **归并已有类目项**：
 
 - 模型/Agent（workspace models、persona、知识库绑定）——已归并到 Agent 角色笔记。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
@@ -141,14 +147,15 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 - 会话/消息双写、channel 之外的消息模型——已归并到会话与消息管理笔记。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 - 富文本渲染、Markdown、Citations——已归并到消息渲染器笔记。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 - LLM 渠道与 Provider 适配——已归并到 LLM 渠道管理笔记。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- 技能（`@` 提及注入、创建引导与版本历史）、通知收件箱、资源评论、工作区全局搜索——已归并到 Agent 工具、主动 Agent 与后台任务、会话与消息管理笔记。
 
-独特功能笔记建议将 Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO 六项计入特色功能贡献统计（标签：协同工作区、记忆演化、主动 Agent、模型评估产品面），详见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
+独特功能笔记建议将 Channels、Notes、Persistent Memory、Calendar、Automations、模型 Arena/ELO、外部应用平台、多标签工作台、人工提问九项计入特色功能贡献统计（标签：协同工作区、记忆演化、主动 Agent、模型评估产品面），详见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：Python 后端 + Svelte 前端合仓的 Web 应用；5,061 个 Git 跟踪文件中 3,874 个位于 `static`（总文件数主要反映静态资源规模），可识别源码 1,033 文件 / 360,591 行，集中在 `backend/open_webui`（200,901 行）与 `src/lib`（151,131 行）；仓内显式测试资产很少（仅 3 个测试文件），完整用户文档不在当前 docs 目录展开；产品经 pip、Docker、Kubernetes 运行，原生桌面应用位于独立仓库（`open-webui/desktop`），本仓不含其平台代码。来源：[仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
+- **仓库分布**：Python 后端 + Svelte 前端合仓的 Web 应用；5,274 个 Git 跟踪文件中 3,874 个位于 `static`（总文件数主要反映静态资源规模），可识别源码 1,230 文件 / 424,593 行，集中在 `backend/open_webui`（218,748 行）与 `src/lib`（195,759 行），另有仓库根部的 Rust 加密组件 `crypto/encryption`；仓内显式测试资产很少（仅 2 个测试文件），完整用户文档不在当前 docs 目录展开；产品经 pip、Docker、Kubernetes 运行，原生桌面应用位于独立仓库（`open-webui/desktop`），本仓不含其平台代码。来源：[仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
 
-- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（53 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；界面字号经 `--app-text-scale` 缩放，字体族另有账户级设置 `fontFamily`（写入 `--app-font-family`）；另有 24 项快捷键注册表、13+16 tab 设置框架、桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
+- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（68 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；界面字号经 `--app-text-scale` 缩放，字体族另有账户级设置 `fontFamily`（写入 `--app-font-family`）；另有 24 项快捷键注册表、13+16 tab 设置框架；桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入，本快照已移除桌面专用侧栏组件。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
 
 ## 已知边界与待验证事项
 

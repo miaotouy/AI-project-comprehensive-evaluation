@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/`、`packages/agent/src/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`b03a367a4fbc02df81bfd96702d7a12c2d79aa45`（分支：`main`）
+> 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
 > 调查方式：只读源码梳理 AgentSession、SessionManager、agent-loop 与交互模式的事件流；未运行交互会话
 >
@@ -19,7 +19,7 @@ Pi 是命令行编码 Agent，对话能力由 `packages/coding-agent` 的 `Agent
 1. **会话是 JSONL 追加型树**：每个会话一个 `.jsonl` 文件（`~/.pi/agent/sessions/<编码cwd>/`），记录带 `id/parentId` 形成树，`leafId` 指针标识当前位置；分支只移动指针不修改历史（`core/session-manager.ts:844-854`）。
 2. **消息是分块内容模型**：`AgentMessage` 区分 user/assistant/toolResult 与 custom/bashExecution/compactionSummary/branchSummary；assistant 内容是 `text/thinking/toolCall` 块数组，流式事件逐块上报。
 3. **落盘在 message_end**：文件在第一条 assistant 消息时创建（此前仅缓存），此后逐条 append（`session-manager.ts:1015-1042`）。
-4. **主链路**：`session.prompt()`（扩展命令/钩子/skill 展开）→ `agent.prompt()` → `agentLoop` 驱动“流式生成—工具执行—结果回注”直到 `agent_end`（`agent-loop.ts:155-275`）。
+4. **主链路**：`session.prompt()`（扩展命令/钩子/skill 展开）→ `agent.prompt()` → `agentLoop` 驱动“流式生成—工具执行—结果回注”直到 `agent_end`（`packages/agent/src/agent-loop.ts:47` 的 agentLoop，内部 `runAgentLoop` :111）。
 
 ## 产品表面与系统边界
 
@@ -33,7 +33,7 @@ TUI 输入（interactive-mode.ts）
   -> AgentSession.prompt()（core/agent-session.ts:1116）
      扩展命令 / input 钩子 / skill+模板展开 / 模型认证校验 / 预压缩检查
   -> Agent.prompt()（packages/agent/src/agent.ts）
-  -> runAgentLoop（agent-loop.ts:95-118）
+  -> runAgentLoop（`packages/agent/src/agent-loop.ts:111`）
      内层：streamAssistantResponse -> 工具执行（并行/顺序）-> ToolResultMessage
      外层：steer/followUp 队列排空 -> agent_end
   -> AgentSession._handleAgentEvent（agent-session.ts:610-681）
@@ -66,7 +66,7 @@ TUI 输入（interactive-mode.ts）
   - 运行中投递：steer/followUp；
   - 会话管理：删除（trash 优先）、HTML/JSONL 导出与 gist 分享；
   - 检索：列表并发扫描（上限 10）与 fuzzy/re: 搜索、fullscreen transcript 搜索与半页/单行滚动（Chat UI 笔记 §1/§4）。
-- 已确认边界：历史是追加型，无消息就地编辑（修改以分支表达）；续写无独立入口；消息级搜索未接入 TUI/AgentSession 路径（`createScanningSessionSearch` 在 harness SDK，见会话与消息管理笔记 §5）；压缩是“重写上下文而非删历史”，旧条目保留可回溯；`custom`/`bashExecution(excludeFromContext)`/`custom_message(display=false)` 各自独立控制“是否进 LLM 上下文”与“是否可见”。
+- 已确认边界：历史是追加型，无消息就地编辑（修改以分支表达）；续写无独立入口；消息级全文检索只在 p2 的搜索插件里（SQLite FTS5），CLI/TUI 路径未接入（见会话与消息管理笔记 §5）；压缩是“重写上下文而非删历史”，旧条目保留可回溯；`custom`/`bashExecution(excludeFromContext)`/`custom_message(display=false)` 各自独立控制“是否进 LLM 上下文”与“是否可见”。
 
 ## 未验证事项
 
@@ -76,14 +76,14 @@ TUI 输入（interactive-mode.ts）
 
 ## 实验性 durable 聊天表面
 
-默认产品主链仍由 coding-agent 的 JSONL v3 SessionManager 与 AgentSession 驱动。仓库另有受 `PI_EXPERIMENTAL=1` 约束的 server/client 链：server 为 durable Session 启动独立 worker，worker 持有 AgentHarness lane；客户端通过 AgentController 提交或取消操作，通过 Transcript 的 Chord 复制状态渲染稳定版 fullscreen TUI，并可经 Radius 断线重连后重新附着会话（`packages/coding-agent/src/experimental/services/README.md:12-25`、`packages/coding-agent/src/experimental/client-runtime.ts:52-177`）。
+默认产品主链仍由 coding-agent 的 JSONL v3 SessionManager 与 AgentSession 驱动。仓库另有 durable 链：`packages/durable` 提供持久 harness（Conversation、Task、Submission），`apps/p2` 是建在 Chord 插件上的应用，Web host 与 TUI host 各一个入口，每个会话一个 fork worker，崩溃后重启并把失败保留到重试，插件覆盖会话、搜索、共享、子代理、终端等（`apps/p2/README.md`、`apps/p2/src/hosts/session-workers.ts`、`packages/durable/README.md`）。
 
-该链把会话事实源扩展到 format 4 存储、branch/lane 与不可变 operation result，支持 Memory、JSONL 和 SQLite 后端；它没有替换默认 CLI 的 v3 会话文件，属于并行实验产品表面（`packages/agent/src/harness/session/types.ts:1-120`、`packages/agent/src/harness/agent-harness.ts:518-622`）。
+该链把会话事实源扩展到不可变 entry + commit、每 phase 的 checkpoint 与四类存储后端（Memory、JSONL、SQLite、IndexedDB）；它没有替换默认 CLI 的 v3 会话文件，p2 仍自称实验性原型。
 
 ## 关键源码索引
 
-- `packages/coding-agent/src/core/agent-session.ts:1116-1273`：prompt 主链路；`:610-681` 事件处理与落盘；`:2686-2737` 自动重试
-- `packages/coding-agent/src/core/session-manager.ts:844-854`：会话树；`:1015-1042` 落盘时机；`:461-470` 上下文构建；`:1638-1713` 列表
+- `packages/coding-agent/src/core/agent-session.ts:2121`：prompt 主链路；`:1123` 事件处理与落盘
+- `packages/coding-agent/src/core/session-manager.ts:988`：会话类；`:1173` 落盘时机；`:1916`/`:1937` 列表
 - `packages/agent/src/agent-loop.ts:155-275`：工具循环；`:281-372` 流式转事件
-- `packages/coding-agent/src/core/compaction/compaction.ts:235-237`：压缩阈值；`core/system-prompt.ts:28-162`：system prompt 拼装
-- `packages/coding-agent/src/modes/interactive/interactive-mode.ts:3068-3374`：流式 UI 更新；`core/settings-manager.ts:12-34`：压缩/重试设置
+- `packages/coding-agent/src/core/compaction/compaction.ts`：压缩阈值；`core/system-prompt.ts`：system prompt 拼装
+- `packages/coding-agent/src/modes/interactive/interactive-mode.ts`：流式 UI 更新；`core/settings-manager.ts`：压缩/重试设置

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/session/turn.ts`、`src/main/session/data/`、`src/renderer/src/stores/ui/`、`src/renderer/src/features/chat-page/`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：只读源码梳理；未修改 DeepChat 仓库
 >
@@ -21,13 +21,15 @@ DeepChat Chat 是 main process 驱动、renderer 订阅的持久化会话系统�
 3. 一次回复的生命周期：用户消息进入后创建 `pending` assistant 占位 → 流式过程反复替换 assistant blocks → 成功结算 `sent`，异常写 `error` block 并置 `error`。
 4. `SessionTurn` 同时提供普通发送、steer、queue、retry、delete、edit、fork、manual compaction 和 tool interaction response；pending input 有独立的 queue/steer 状态，不与已完成消息混同。
 5. renderer message store 维护持久化缓存、streaming blocks、解析缓存和 IPC 增量事件；`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象；消息窗口以测量 + spacer + anchor + 二分查找实现附近消息渲染。
-6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，不混入普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:575-582`、`src/renderer/src/components/chat/MessageListRow.vue:10-24`）。
+6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，不混入普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts`、`src/renderer/src/components/chat/MessageListRow.vue`）。
 7. Tape 成为 transcript 的可重建事实来源：终态消息事实可经投影器重放到消息、结构化内容、blocks 与搜索文档表，并用独立 projection cursor 记录已应用的 Tape incarnation 和 entry 上界。
+8. 消息导航收紧为两件事：滚动缩略图（message map）用与窗口化同一张布局表计算刻度，跳转失败时可重试定位（`src/renderer/src/features/chat-page/model/minimapTicks.ts`、`messageJumpRetry.ts`）。计划能力（`update_plan` 工具与 `AgentProgressFloat` 浮层）已移除，会话不再有独立计划浮窗。
+9. 输入侧新增 composer 路由与文档序列化：附件、内联引用和会话引用在提交前统一走 `composerInputRouting`，输入内容的序列化与恢复由 `composerDocumentSerialization` 负责，避免草稿与提交两份结构各自演化。
 
 ## 产品表面与系统边界
 
 - 产品表面：Electron 桌面 GUI。聊天能力（会话、队列、上下文、流式、持久化、搜索）由 main process 提供，renderer 是投影层。
-- 边界：subagent session 在 ChatPage 中只读（`ChatPage.vue:428` `isReadOnlySession`，session kind 为 subagent），仍可显示消息、plan、工具状态和最终 child result；ACP runtime 的具体外部协议 payload 未在本次专题展开。
+- 边界：subagent session 在 ChatPage 中只读（`ChatPage.vue:428` `isReadOnlySession`，session kind 为 subagent），仍可显示消息、工具状态和最终 child result；ACP runtime 的具体外部协议 payload 未在本次专题展开。
 - 通用主题、弹窗库、动画等非聊天主链基础设施不在本文件范围（本文件无独立通用界面盘点章节）。
 
 ## 端到端聊天主链
@@ -56,7 +58,7 @@ ChatPage
 - `deepchat_messages`（`deepchatMessages.ts:8-54`）：消息表，保存消息标识、会话关联、序号、角色、内容、状态与 metadata 等；状态只取 `pending`、`sent`、`error` 三种，按会话与序号建索引。
 - `deepchat_assistant_blocks`（`deepchatAssistantBlocks.ts:76-115`）：`message_id + block_index` 保存结构化 block，`replaceForMessage` 一次替换保持顺序。
 - renderer 投影：message store 持有持久化缓存、流式块与修订号，游标分页见 `stores/ui/message.ts`；`useDisplayMessages`（`useDisplayMessages.ts:341-425`）按持久化 id 重建显示列表，用渲染 key 关联 pending 与最终落盘的同一消息。
-- 队列记录（`src/shared/types/agent-interface.d.ts:259-281`）：保存 payload、关联 message ids、assistant id、阻塞原因与时间戳；state 状态机取值：
+- 队列记录（`src/shared/types/agent-interface.d.ts:298-320`）：保存 payload、关联 message ids、assistant id、阻塞原因与时间戳；state 状态机取值：
   - `pending`、`claimed`、`blocked`、`retry_required`、`consumed`（触发与恢复语义见下文 queue 状态）
 
 ## 专项导航
@@ -74,7 +76,8 @@ ChatPage
   - 重启恢复：`recoverInputsAfterRestart` 返回受影响会话与保留的 queue 输入集合；claimed 但未物化用户消息的 queue 项释放回队列，未读 steer 消息标记失败（`pendingInputs.ts:392-468`）。
 - **队列容量**：每个会话最多保留 10 个活动 queue 输入，数据层按活动项计数拒绝继续入队；常量与门控见 `src/shared/pendingInput.ts:2`、`src/main/session/data/pendingInputs.ts:474`。
 - **Tape transcript 投影**：`TranscriptProjectionApplier` 把 Tape 的 message facts 以幂等 upsert/replace 写回消息表、user 内容分表、assistant blocks 和搜索文档；retraction event 则成批清理所有消息 sidecar。投影进度写入 `deepchat_transcript_projection_meta`，使启动恢复只重放 cursor 之后的 entry（`src/main/session/data/transcriptProjection.ts`、`tables/deepchatTranscriptProjectionMeta.ts:20-87`）。
-- **消息窗口化**：消息列表只渲染当前窗口内的条目（`MessageList.vue:1-65`）；窗口计算拆成两个 hook——一个以估算高度、ResizeObserver 实测、顶部/底部 spacer 与逻辑 anchor 保存滚动位置，另一个在超阈值时二分查找 viewport 附近索引；窗口同时服务历史分页与流式追加，远离 viewport 的 settled 消息仅保留估算高度（`ChatPage.vue:512-584`、`:728-826`）。
+- **消息窗口化**：消息列表只渲染当前窗口内的条目（`MessageList.vue:1-65`）；窗口计算拆成两个 hook——一个以估算高度、ResizeObserver 实测、顶部/底部 spacer 与逻辑 anchor 保存滚动位置，另一个在超阈值时二分查找 viewport 附近索引；窗口同时服务历史分页与流式追加，远离 viewport 的 settled 消息仅保留估算高度（`ChatPage.vue`、`useMessageWindow.ts`、`useMessageVirtualization.ts`）。滚动缩略图复用同一张逻辑布局表计算每条的 top/height 比例，跳转定位失败时走重试路径（`minimapTicks.ts`、`messageJumpRetry.ts`）。
+- **跨会话引用**：Agent 新增 `read_session` 工具，读取时按 cursor 分页取另一会话的消息或搜索命中，预览与详情分别有字符上限（800 / 8192），Unicode 大小写折叠在 JS 侧完成而不是依赖 SQLite `lower()`；读取结果需经调用方会话校验（`src/shared/sessionReferences.ts`、`src/main/session/data/sessionReferences.ts`、`src/main/tool/agentTools/agentToolManager.ts` 的 `read_session`）。
 - **双层搜索**：会话内搜索只匹配已加载的 display messages，不触发数据库查询；跨会话走 FTS5（`deepchat_search_documents` 外部内容表 + 三个同步触发器，`deepchatSearchDocuments.ts:309-335`），以 bm25 查询为主、不可用时回退 LIKE；内存 MCP 服务同时提供模型工具与设置页入口（`conversationSearchServer.ts:465-494`）。
 - **边界**：transcript 同时服务展示、搜索、Tape 和 usage/trace 等二级数据；附件、搜索结果快照与 legacy import 表的完整迁移链本次未追踪。
 
@@ -82,12 +85,12 @@ ChatPage
 
 - SQLite 使用 `better-sqlite3-multiple-ciphers`，但实际数据库加密配置、事务隔离和崩溃恢复未验证。
 - 流式 block 的 IPC 顺序依赖 renderer revision/cursor；未运行网络中断、快速切换 session 或重复事件场景。
-- 消息窗口高度是估算与观测的组合，复杂 artifact/图片导致的异步高度变化未通过浏览器实测。
+- 消息窗口高度是估算与观测的组合，复杂图片/富内容导致的异步高度变化未通过浏览器实测；消息地图刻度依赖布局表可用，未运行超长会话下的刻度精度与跳转重试。
 - 未运行测试、构建或桌面端交互；结论来自 main/renderer 静态源码。
 
 ## 关键源码索引
 
-- turn 操作面：`src/main/session/turn.ts:36-405`；pending input DTO：`src/shared/types/agent-interface.d.ts:259-281`
+- turn 操作面：`src/main/session/turn.ts:36-405`；pending input DTO：`src/shared/types/agent-interface.d.ts:298-320`
 - transcript 生命周期：`src/main/session/data/transcript.ts:166-381`
 - 表定义：`src/main/session/data/tables/deepchatMessages.ts:8-54`、`deepchatAssistantBlocks.ts:76-115`、`newSessions.ts:13-30`
 - Tape transcript 投影：`src/main/session/data/transcriptProjection.ts`、`src/main/session/data/tables/deepchatTranscriptProjectionMeta.ts`
@@ -96,3 +99,6 @@ ChatPage
 - ChatPage 组合与滚动恢复：`src/renderer/src/features/chat-page/ChatPage.vue:86-232`、`:512-584`、`:728-826`
 - display 稳定缓存：`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:341-425`
 - 消息列表：`src/renderer/src/components/chat/MessageList.vue:1-65`
+- 消息地图与跳转重试：`src/renderer/src/features/chat-page/model/minimapTicks.ts`、`messageJumpRetry.ts`
+- 输入路由与文档序列化：`src/renderer/src/features/chat-page/composables/useComposerInputRouting.ts`、`model/composerInputRouting.ts`、`model/composerDocumentSerialization.ts`
+- 会话引用读取：`src/shared/sessionReferences.ts`、`src/main/session/data/sessionReferences.ts`、`src/main/tool/agentTools/agentToolManager.ts`

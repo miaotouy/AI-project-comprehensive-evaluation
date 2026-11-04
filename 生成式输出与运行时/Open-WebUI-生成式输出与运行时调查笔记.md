@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：静态代码阅读，grep/glob 覆盖前后端关键词（artifact、code interpreter、pyodide、jupyter、iframe、notebook、embeds、files、execute），沿“生成->物化->展示->执行->编辑->保存->回流”链路逐段核对；未运行构建、服务或任何执行流程
 >
@@ -65,9 +65,9 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
 ## 3. 投影表面与多视图关系
 
 - 代码解释器：inline——消息内代码块（`CodeBlock.svelte`）＋运行结果区（STDOUT/STDERR、RESULT、base64 图片，`CodeBlock.svelte:591-631`）；同一代码块同时是编辑器（CodeMirror，`src/lib/components/common/CodeEditor.svelte`）。
-- Artifact：sidecar——聊天右侧 Pane 面板（`ChatControls.svelte:446-447`），只读 iframe/SVG；版本切换遍历同一消息派生的多个 HTML 组（`Artifacts.svelte:137-186`）。同一对象无多同步投影：artifact 面板与消息代码块是“源与预览”关系，代码块改动不会即时同步到已打开的面板。
-- Pyodide 文件系统：sidecar——ChatControls 的 Files 标签页（`ChatControls.svelte:377-380`，选择 Terminal 时用终端 FileNav，否则用 PyodideFileNav）；执行后 `window.dispatchEvent(new Event('pyodide:files'))` 触发自动刷新（`CodeBlock.svelte:344-345`）。
-- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（`PortPreview.svelte`，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具 `display_file`/`write_file` 事件驱动面板跳转（`+layout.svelte:475-483`）。Office 预览优先向终端服务器索要服务端渲染的 PDF（`downloadFilePreview` 请求 `/files/view?path=…&preview=true`），拿不到再回落到浏览器端 docx/pptx 渲染（`src/lib/components/chat/FileNav.svelte:868-940`、`FileNav/FilePreview.svelte`、`Messages/TerminalOutputFile.svelte:143-200`）。
+- Artifact：sidecar——聊天工作台的 artifacts 标签（`ChatTabs/tabs.ts` 的 `artifacts` 型，由 `ChatTabs.svelte` 渲染），只读 iframe/SVG；版本切换遍历同一消息派生的多个 HTML 组（`Artifacts.svelte:137-186`）。同一对象无多同步投影：artifact 面板与消息代码块是“源与预览”关系，代码块改动不会即时同步到已打开的面板。
+- Pyodide 文件系统：sidecar——工作台的 files 标签页（`ChatTabs/tabs.ts` 的 `files` 型；选择 Terminal 时用终端 FileNav，否则用 `PyodideFileNav.svelte`）；执行后 `window.dispatchEvent(new Event('pyodide:files'))` 触发自动刷新（`CodeBlock.svelte:344-345`）。
+- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（现由 `ChatTabs/Browser.svelte` 的浏览器会话承担，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具 `display_file`/`write_file` 事件驱动面板跳转（`+layout.svelte:475-483`）。Office 预览优先向终端服务器索要服务端渲染的 PDF（`downloadFilePreview` 请求 `/files/view?path=…&preview=true`），拿不到再回落到浏览器端 docx/pptx 渲染（`src/lib/components/chat/FileNav.svelte:868-940`、`FileNav/FilePreview.svelte`、`Messages/TerminalOutputFile.svelte:143-200`）。
 - 工具结果：inline——`message.files`（文件卡片/图片）、`message.embeds`（`FullHeightIframe`，`ResponseMessage.svelte:711-728`）、`message.sources`（Citations 组件，源文档 iframe 弹窗带 CSP）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -140,7 +140,7 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
 
 ## 11. 测试、已确认边界与未验证事项
 
-- 测试资产：本快照 `test/` 仅有 `test_files/image_gen/sd-empty.pt`（占位文件）；前端唯一测试 `src/lib/shortcuts.test.ts`。本次未找到针对代码解释器、Artifact、notebook、pyodide 文件系统、output 持久化恢复的自动化测试。
+- 测试资产：本快照 `test/` 仅有一个占位文件；前端唯一测试是版本对比工具 `src/lib/components/workspace/common/versionDiff.test.ts`。本次未找到针对代码解释器、Artifact、notebook、pyodide 文件系统、output 持久化恢复的自动化测试。
 - 已确认边界（源码直接可见）：
   - 代码解释器是唯一有稳定 ID + 状态 + 就地更新的输出对象；Artifact 无对象身份；
   - Artifact 面板内容总是由当前 history 派生（`Chat.svelte getContents`），关闭面板不销毁消息内容，重开聊天即重建——派生视图而非持久对象；

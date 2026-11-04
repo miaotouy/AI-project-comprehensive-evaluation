@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -41,7 +41,16 @@ MUI Snackbar 的 action 现已用于归档会话 Undo，失败时可替换为重
 
 `session/$sessionId.tsx:278,284` 另有审批胶囊与输入框两个局部边界。
 
-**设置弹窗路由套路由。** `modals/Settings.tsx:256-264` 用 createMemoryHistory + createRouter 单独起一套内存路由，外层 URL 的 `?settings=/settings/xxx` 同步进内存路由，弹窗内"页面切换"不影响浏览器地址栏；移动端（matchMedia(max-width: 640px)）则走整页路由 `routes/settings/route.tsx`（:115-131）——同一功能在不同屏幕尺寸下走完全不同的路由策略。
+**渲染端组合根。** renderer 启动链已收进 `src/renderer/app/`：`bootstrapRenderer.ts`、`runRendererStartup.ts` 负责启动阶段，`createRendererApplication.ts`、`renderer-application.ts` 组装应用服务与运行时（会话存储、生成运行时、平台适配），`native-task-protection.ts` 处理原生任务与窗口生命周期的保护。UI 组件不再各自构造服务，而是从同一组合根取依赖。
+
+**内置浏览器。** 桌面端新增内置浏览器子系统 `src/main/built-in-browser/`：`controller.ts` 管理页面会话生命周期，页面能力按 `page-run`、`page-snapshot`、`page-tracker`、`page-upload`、`page-downloads`、`page-debugger`、`page-operation`、`page-outcomes`、`extract` 拆分。它给 agent 提供可操作的页面视图（导航、快照、点击、上传、下载），并通过 main↔renderer 的视图承载呈现给用户；本次未运行验证页面加载、下载与上载的实际行为。
+
+**设置弹窗路由套路由。**'@
+R3 '- `src/renderer/index.tsx`' @'
+- `src/renderer/index.tsx`
+- `src/renderer/app/bootstrapRenderer.ts`、`runRendererStartup.ts`、`createRendererApplication.ts`、`renderer-application.ts`（渲染端组合根与启动链）
+- `src/renderer/app/native-task-protection.ts`（原生任务与窗口生命周期保护）
+- `src/main/built-in-browser/controller.ts`、`page-run.ts`、`page-snapshot.ts`、`page-tracker.ts`、`page-upload.ts`、`page-downloads.ts`、`page-debugger.ts`、`extract.ts`（内置浏览器子系统） `modals/Settings.tsx:256-264` 用 createMemoryHistory + createRouter 单独起一套内存路由，外层 URL 的 `?settings=/settings/xxx` 同步进内存路由，弹窗内"页面切换"不影响浏览器地址栏；移动端（matchMedia(max-width: 640px)）则走整页路由 `routes/settings/route.tsx`（:115-131）——同一功能在不同屏幕尺寸下走完全不同的路由策略。
 
 ## 1. 界面栈、公共组件与状态所有权
 
@@ -69,7 +78,7 @@ MUI Snackbar 的 action 现已用于归档会话 Undo，失败时可替换为重
 | 主题 | uiStore.realTheme + useAppTheme（`useAppTheme.ts:10-23`） | `localStorage['initial-theme']`（`uiStore.ts:26`） | Tailwind CSS 变量 / MUI palette / Mantine colorScheme 三套消费方，见第 4 节 |
 | 侧栏 | uiStore.showSidebar + sidebarWidth（`uiStore.ts:31,58,211`） | 仅 sidebarWidth 持久化；showSidebar 按屏幕初始化不落盘 | `routes/__root.tsx:336,348-353` 读 showSidebar 决定内容区 padding 让位；宽度经 useSidebarWidth 提供 |
 | UI 偏好（widthFull、agent 默认开关等） | uiStore（zustand persist） | ui-store（safeStorage，`uiStore.ts:232-243`） | useUIStore(selector) |
-| 会话列表/消息数据 | react-query useInfiniteQuery（`chatStore.ts:90-96,164-174`）+ 会话 store | 本地存储（localforage/IndexedDB） | useSessionList 扁平化分页结果；staleTime: Infinity 只拉一次 |
+| 会话列表/消息数据 | react-query useInfiniteQuery + 会话 store（`src/renderer/stores/session/`） | 平台存储（桌面/Web=IndexedDB，移动=SQLite 行存储） | useSessionList 扁平化分页结果；staleTime: Infinity 只拉一次 |
 | 消息列表滚动控制 | uiStore.messageListElement/messageScrolling/`messageScrollingAtTop/AtBottom`（`uiStore.ts:27-30,105-119`） | 否 | 组件把 ref/状态上报全局 store，供快捷键等外部驱动（`MessageList.tsx:189-190,344`） |
 
 ## 2. 弹窗、浮层与菜单

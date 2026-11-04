@@ -2,163 +2,143 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：源码静态调查，grep/glob 关键词交叉验证（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、snapshot、revert、pty、execution），并通读核心链路文件；未运行构建、测试或交互
+> 调查方式：源码静态调查，按关键词（artifact、snapshot、patch、diff、pty、codemode、sandbox、iframe）交叉定位并通读核心链路；未运行构建、测试或交互
 >
-> 调查范围：模型生成输出的对象模型与持久化、流式更新、文件 diff/快照版本、投影表面（app/TUI/CLI/desktop）、执行位置（shell/LSP/PTY）、revert 闭环、模型回流；明确排除：插件与 MCP 工具细节、消息渲染器的纯展示层、会话调度与代理角色、控制台/统计类投影
+> 调查范围：模型生成输出的对象模型与持久化、流式更新、文件 diff 与快照版本、投影表面、执行位置与权限、撤销闭环、模型回流、Artifact 托管与受限代码执行；工具注册、消息渲染与会话调度分别进入其他类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-OpenCode 的"生成式输出"以**真实文件系统为事实源**：模型通过结构化工具调用（write/edit/apply_patch）直接落盘文件，逐条工具调用成为带状态机的 ToolPart 写入 SQLite，回合边界用"影子 Git 仓库"（`Global.Path.data/snapshot/<project>/<hash>`）记录文件树快照哈希并生成 PatchPart。用户侧的投影分为三类：时间线内的工具卡片（含内嵌 diff）、"最近回合"审查面板（读用户消息 summary 中预计算的文件 diff）和 Git 工作区审查（vcs.diff）。撤销是**整条消息粒度**的文件回滚（revert），配合快照 diff 与恢复，无 CRDT 或选区级冲突解决。代码执行全部发生在本机进程（shell 子进程、LSP 服务器、node-pty 终端、WebSocket 重放），未找到任何隔离沙箱、Artifact 或 Notebook 运行时。模型回流通过持久化会话历史重载（tool part → tool result 消息）与 read/glob/grep 等文件读取工具完成，跨回合对象身份由稳定 PartID 与快照哈希绑定。能力等级：主体 **G4（可编辑工作区）**，并部分具备 G5 特征（真实文件作为跨会话活对象、模型可感知与定向修改），但缺少对象级托管、细粒度接受/拒绝与 CRDT；G0–G3 中的隔离可执行 Artifact 层未找到。
+OpenCode 2.x 的生成式输出仍以真实文件系统为事实源：模型通过结构化工具调用（`read`/`write`/`edit`/`patch`/`shell`）操作工作区，文件变化由快照服务记录为版本，并由步骤结束事件携带"快照 + 变更文件"落库。新增的变化有两层：
 
-## 系统边界与完整主链路
+- **Artifact 层**：模型可创建/读取/更新/删除 Artifact（`art_` 前缀），Artifact 是一组相对路径到文本的文件映射加一个入口文件，由 Artifact Provider 托管并按 URL 访问；Provider 声明自身能力（静态、服务端代码、SQLite、Durable Objects），本地 Provider 默认可用。
+- **Code Mode 运行时**：`packages/codemode` 提供一个只实现受控语法的解释器，模型写的小程序只能通过宿主暴露的工具与外界交互，不能直接触网、读写文件或调用进程 API。
 
-本类目覆盖从"模型输出"到"活对象"的链路：工具参数 → 文件系统写入/快照 → Part 持久化 → SSE 事件投影 → diff 审查 → revert → 历史回流。Chat 类目接手消息调度、中止、重试与上下文装配；消息渲染器接手 Markdown/工具卡外观；Agent 工具类目接手工具注册与审批调度。交接点：本文只记录工具结果被物化为可操作对象的机制（ToolPart、PatchPart、快照、revert），工具执行内部的任务调度（task 子代理）不展开。
+除此之外，代码执行仍在本机进程内（shell 子进程、LSP 子进程、PTY 终端、后台 job），未找到容器级隔离沙箱；撤销仍是整条消息粒度的文件回滚，配合分阶段确认。
 
-**主链路（触发 → 生成 → 展示 → 编辑 → 保存 → 重开）：**
+## 系统边界与完整主链
 
-1. 用户输入经 `SessionPrompt.prompt/loop` 进入 `SessionProcessor.create`（`packages/opencode/src/session/processor.ts:98`），在 LLM 流开始前先 `snapshot.track()` 预捕获文件树哈希（`processor.ts:102`）。
-2. `LLM.stream`（`packages/opencode/src/session/llm.ts:357`）以 AI SDK `streamText` 为主运行时（`llm.ts:280`），工具执行由 SDK 在进程内调度；事件经 `LLMAISDK.toLLMEvents` 归一化为统一事件流（`llm.ts:372-378`）。
-3. 处理器把事件落为数据库 Part（`processor.ts:424-484`）：
+本类目覆盖"模型输出 → 活对象"的链路：工具参数 → 文件写入或 Artifact 创建 → 快照与差异记录 → 消息内容落库 → SSE 投影 → diff 审查 → 回退。Chat 类目接手调度、中止与上下文装配；消息渲染器接手外观；Agent 工具类目接手注册与审批。
 
-   ```text
-   text-delta（追加文本）/ reasoning / tool（pending→running→completed/error）/ step-start / step-finish（各带快照哈希）/ patch
-   ```
+```text
+用户输入 -> 执行器单步（session/runner/step.ts）
+  -> 工具调用（core/src/tool.ts 执行，权限判定）
+       ├─ 文件类工具写工作区
+       ├─ Artifact 工具写 Artifact（core/src/artifact.ts + 本地 Provider）
+       └─ Code Mode 程序在受限解释器内调用工具
+  -> 快照（core/src/snapshot.ts capture/diff/restore）
+  -> 步骤结束事件 session.step.ended 携带 snapshot 与 files
+  -> 消息内容与事件落库（session_part / session_message）
+  -> SSE -> 客户端时间线与 diff 视图
+  -> 回退：stage -> commit/clear（core/src/session/revert.ts）
+```
 
-4. 文件工具（write/edit/apply_patch）先计算 diff 提交权限审批，再写文件、发文件系统事件、触 LSP 取诊断（`packages/opencode/src/tool/write.ts:53-101`）。
-5. step-finish 时再 `snapshot.track()`，对比前后哈希，生成 `PatchPart{hash, files}`（`processor.ts:435-470`），并把回合 diff 预计算进用户消息 summary（`packages/opencode/src/session/summary.ts:102-127`）。
-6. 服务端经 SSE `/event` 订阅（`packages/opencode/src/server/routes/instance/httpapi/groups/event.ts:14`）推送 `PartUpdated`/`PartDelta`/`Diff` 事件，app/TUI 各自投影（`packages/app/src/context/server-sdk.tsx:279`）。
-7. 用户在 app 审查面板（git 工作区 / 最近回合）或 TUI diff 查看器查看 diff；点击"撤销消息"触发 `SessionRevert.revert`，按 PatchPart 从影子仓库 checkout 恢复文件（`packages/opencode/src/session/revert.ts:38-88`）。
-8. 重新打开：会话/消息/Part 从 SQLite 重载（`packages/opencode/src/session/message-v2.ts:98-123`）；再次输入时经压缩感知重载与模型消息转换回流（`packages/opencode/src/session/prompt.ts:1092`、`message-v2.ts:131-415`）。
+## 1. 对象模型与事实源
 
-**模型继续维护闭环（查询 → 读取 → 定向修改）：** 模型在同一回合内经工具结果回流直接获得新文件状态；跨回合则通过 `read/glob/grep` 读取（`packages/opencode/src/tool/read.ts:28-36` 等），配合 `edit` 的 oldString 定位（`packages/opencode/src/tool/edit.ts:682-737`）实现定向修改。此闭环基于静态代码确认，未运行验证。
-
-## 1. 触发方式、输出协议与对象模型
-
-- **触发方式**：模型输出不是自由文本解析，而是 **AI SDK 结构化工具调用**。工具参数 schema（Effect Schema / JSON Schema）经 `ToolRegistry.tools` 过滤组装后交给 `streamText`（`packages/opencode/src/tool/registry.ts:286-335`）。
-- **参数校验与兜底**：校验失败由 `InvalidArgumentsError` 以"请重写输入"消息回喂模型（`packages/opencode/src/tool/tool.ts:24-34`）；SDK 的 `experimental_repairToolCall` 兜底（`llm.ts:296-312`）。
-- **半截流**：`tool-input-start/delta/end` 事件只保证 part 存在，最终参数在 `tool-call` 时一次性写入 `ToolStateRunning.input`（`processor.ts:331-351`）；`ToolStatePending.raw` 字段在已读代码中未见写入流式 JSON，即参数中间态不落盘（本次静态确认）。
-- **对象模型（Part）**：统一 `Part` 联合类型（`packages/schema/src/v1/session.ts:357-383`），全部带稳定 `PartID`（`prt_` 前缀单调 ID，`session.ts:23-26`）。与生成式输出直接相关的类型：
-  - `ToolPart`：`callID` + 四态状态机 `pending/running/completed/error`，completed 携带 `output/title/metadata/attachments`（`session.ts:259-325`）；metadata 中存 diff、诊断、截断标记等工具自报信息。
-  - `StepStartPart/StepFinishPart`：各自携带回合前后快照哈希（`session.ts:233-257`）。
-  - `SnapshotPart`、`PatchPart {hash, files}`：回合文件树版本与变更文件清单（`session.ts:87-100`）。
-  - `FilePart`：模型产物附件（图片/PDF/文本），带 mime、url、source（`session.ts:171-179`）。
-- **事实源**：三层。**文件系统**是模型产物的最终事实源（工具直接写盘，无中间 AST/对象层）；**SQLite**（`packages/core/src/session/sql.ts:22-99` 的 SessionTable/MessageTable/PartTable）是消息与 Part 的事实源；**影子 Git 仓库**（`Global.Path.data/snapshot/<projectID>/<Hash.fast(worktree)>`，`packages/opencode/src/snapshot/index.ts:66-73`）是文件版本事实源。三者不同步覆盖：Part 只保存 diff 文本与哈希，内容以影子仓库对象库为准；快照损坏或超期则 diff 为空（`summary.ts:98-99` 返回空数组）。
-- **能力声明**：Part 无显式能力声明；能力经权限系统在工具执行时逐项授予（见第 7 节）。
+- **消息内容**：助手内容项为文本、推理、工具三种；工具项带流式输入、运行中、完成、失败状态与结果内容（`packages/schema/src/session-message.ts`）。与生成式输出直接相关的信息都在工具项里：命令、路径、diff、诊断、退出码等。
+- **步骤边界**：步骤结束事件携带本次步骤的快照 id 与变更文件集合，步骤失败事件同样携带快照信息（`packages/schema/src/session-event.ts` 的 `session.step.ended/failed`）。
+- **三层事实源**：工作区文件是产物本体；SQLite（`session_message`/`session_part`/`blob`）是对话与附件事实源；快照仓库（`packages/core/src/snapshot.ts`，位于数据目录的影子 Git 仓库）是文件版本事实源。消息里保存的是哈希与 diff 文本，内容以快照仓库为准。
+- **Artifact**：Artifact 记录 id、Provider、标题、入口文件、访问 URL 与文件映射（`packages/schema/src/artifact.ts`）；文件内容按相对路径保存，读取与更新以整组文件为单位。
 
 ## 2. 增量生成、更新与最终化
 
-- **文本**：逐 token 追加并广播 `PartDelta`（`message.part.delta` 事件，`processor.ts:499-510`、`schema/v1/session.ts:632-641`），服务端持久化整段文本。
-- **工具参数**：不逐 token 落盘，最终完整 JSON 一次性写入（见上节）。
-- **文件修改**：三种粒度（**更新粒度轴**：工具级目标选择器为主，无 AST 节点级 patch）：
-  - `write` 全文覆盖（`write.ts:64`）；
-  - `edit` 按 oldString 定位替换，含 9 种 Replacer 容错策略与相似度锚点（`edit.ts:244-737`）；
-  - `apply_patch` 按 hunk 块应用（`apply_patch.ts:220-258`；底层 `packages/opencode/src/patch/index.ts:185-241` 解析 `*** Begin Patch` 标记与 add/update/delete/move hunk）。
-  diff 均由 jsdiff `createTwoFilesPatch` 生成并 trim（`edit.ts:646-680`）。
-- `apply_patch` 的 UI metadata 只在真实 move 操作时包含 `movePath`；普通 add/update/delete 不再序列化空字段，文件类型、相对路径、patch 与增删行数契约不变（`packages/opencode/src/tool/apply_patch.ts:193-202`）。
-- **版本记录**：影子 git 提供三个操作入口（`packages/opencode/src/snapshot/index.ts`）：
-  - `snapshot.track()`：`add → write-tree` 得到哈希（:318-347）；
-  - `patch(hash)`：`git diff --cached --name-only` 出文件清单（:349-380）；
-  - `diffFull(from,to)`：name-status/numstat + `cat-file --batch` 批量取内容生成全文件 diff（:546-759）。
-- **最终化与失败**：step-finish 收口（写完成快照、补 patch part、更新 usage 与 summary）；中断/异常走 `cleanup`（把未完成工具标 error + interrupted，`processor.ts:539-597`）与 `halt`（写 assistant 错误）。失败工具以 `ToolStateError.error` 文本回流模型（`message-v2.ts:325-348`）。
+- **文本与推理**：按 delta 事件流式推送（`session.text.delta`、`session.reasoning.delta`），步骤结束时以完整内容收口。
+- **工具参数**：先有流式输入事件（`session.tool.input.delta`），最终参数在调用事件时一次性给出；流式中间态只用于展示，不作为可执行输入。
+- **文件修改粒度**：`write` 全文覆盖、`edit` 按定位替换、`patch` 按补丁块应用；补丁解析与统计在 `packages/core/src/vcs/patch.ts`（patch 大小与上下文有上限）。
+- **快照**：`Snapshot.capture` 生成文件树版本，`diff` 生成文件差异，`restore` 按文件恢复到指定版本（`core/src/snapshot.ts` 的服务接口）。步骤结束时对比起始快照与结束快照，得到变更文件清单。
+- **最终化**：步骤结束事件收口快照、文件清单、usage 与完成原因；失败步骤记录错误与已完成部分；助手消息的 `retry`、`error`、`finish` 字段描述终止情况。
 
-## 3. 投影表面与多视图关系
+## 3. 投影表面与多视图
 
-- **消息内**（app/desktop/console 共用 session-ui）：
-  - 组件注册：`PART_MAPPING` 按 part 类型注册组件（`packages/session-ui/src/components/message-part.tsx:250`、1534+），`renderable()` 过滤隐藏工具与空文本（`message-part.tsx:711-720`）；
-  - 工具卡：edit/write/patch 以手风琴内嵌 diff（`message-part.tsx:2203-2523`），diff 来源是工具 metadata（`filediff`/`files`），经 `session-diff.ts:31-48` 的 `resolveFileDiff` 用 `@pierre/diffs` 解析渲染。
-- **侧栏审查面板**（app）：`session.tsx:703-708` 三种模式——git 工作区（`api.vcs.diff`）、分支、最近回合（读 `lastUserMessage()?.summary?.diffs`，`session.tsx:652`）。`review-tab.tsx:47` 支持 unified/split、行注释、打开文件。
-- **TUI**：`routes/session/index.tsx:1702-1782` 按工具类型渲染 Shell/Write/Edit/ApplyPatch 等卡片；独立 diff 查看器（`packages/tui/src/feature-plugins/system/diff-viewer.tsx:114-130`）支持 git/branch/last-turn 三源、split/unified、文件树与已审标记。
-- **CLI 非交互**：`run.ts` 以原始事件流输出（step_start/step_finish/tool_use/text 等，`packages/opencode/src/cli/cmd/run.ts:717-784`）。
-- **多视图同步**：同一 Part 经 SSE 事件广播到各端（`event-reducer.ts:312-318` 处理 `message.part.updated`）；patch/step-start/step-finish 三种 part 被各端 reducer **跳过不投影**（`packages/app/src/context/global-sync/event-reducer.ts:19-30`、`sync.tsx:7`），仅服务端用于版本与撤销。
-- **三份 diff 并存**：工具卡 metadata diff（当次调用）、summary.diffs（回合边界、服务端快照计算）、vcs.diff（工作区实时）——是同一文件不同时点/来源的三份投影，各自独立生成，无统一对象。
+- **消息内**：工具卡片按工具名渲染，编辑/写入/补丁类工具内嵌 diff；diff 来源是工具结果里的文件差异信息。
+- **回合级**：步骤结束事件的文件清单与快照差异用于"本轮变更"视图；App 的会话页有独立审查面板展示工作区 diff、分支 diff 与最近一轮 diff。
+- **TUI**：diff 查看器支持工作区/分支/最近回合三种来源与 unified/split 视图；工具卡片在终端内降级渲染。
+- **CLI**：非交互模式按事件流输出步骤与工具结果。
+- **多视图一致性**：所有表面消费同一持久化消息与事件流；未持久化的中间态（如流式参数）只在运行时可见。
 
-## 4. 表现类型、依赖与运行环境
+## 4. 表现类型与运行环境
 
-- **层级**：Markdown 渲染（含 worker 队列化流式渲染）、代码高亮、图片/PDF 附件（file part，图片有尺寸归一化，`processor.ts:391-411`）、行级 diff 视图。**未找到** HTML/JS 沙箱、Canvas/WebGL、语言解释器或 Notebook 运行时：在 `packages/**/*.ts` 中搜索 `artifact|canvas|notebook|webview` 仅命中桌面 webview 缩放、构建产物与代码生成器命名等无关匹配。
-- **依赖提供**：无运行时依赖注入；产物运行即真实进程（见第 7 节）。
+- **展示类型**：markdown 文本、代码高亮、图片/附件、行级 diff、终端输出、Artifact 预览（按 URL 打开）。
+- **Artifact 托管**：Provider 以能力声明区分形态——静态文件、服务端代码、SQLite 存储、Durable Objects；本地 Provider 是默认实现，接口支持 create/update/delete 并在更新后发 Artifact 事件。访问经实验性端点 `artifacts.view/*` 提供文件。
+- **Code Mode**：解释器只支持实现过的语法子集，程序可调用宿主提供的工具与扩展全局对象；宿主可限制执行时间、工具调用次数、输出大小与数据。不支持语法返回带位置的诊断，未完成的工作在程序结束时被中断。
+- **未找到**：通用 iframe/WebView 沙箱容器、Notebook 运行时、本地语言解释器集群；`patchmark` 是流式 markdown 修补库，不参与文件补丁执行。
 
-## 5. 用户交互、事件与错误反馈
+## 5. 用户交互与错误反馈
 
-- **运行状态回传**：shell 工具通过 `ctx.metadata` 流式回传输出预览与退出码（`packages/opencode/src/tool/shell.ts:475-529`），app 以 shell 子消息动画展示；超时/中止以 `<shell_metadata>` 注明（`shell.ts:561-584`）。
-- **交互式对象**：`question` 工具向用户提问，答案格式化回流模型（`packages/opencode/src/tool/question.ts:24-40`），时间线以问答卡展示（`message-part.tsx:2577+`）；`todowrite` 生成只读复选框清单（`message-part.tsx:2525-2560`）。
-- **权限交互**：工具 `ctx.ask` → Permission 服务 → 各端审批 UI → 回复；拒绝时 `PermissionV1.RejectedError` 标记并可选暂停回合（`processor.ts:200-202`）。
-- **错误反馈**：工具错误卡（`tool-error-card.tsx`）、诊断条（LSP 错误随工具输出附回）、assistant 消息级错误。重载后交互状态：工具卡展开状态本地 UI 状态；Part 状态本身从数据库恢复。
+- **运行状态**：shell、检索与子 Agent 工具通过进度事件回传实时状态；步骤结束时给出退出码、截断标记与诊断。
+- **交互式对象**：`question` 工具以表单向用户提问，`todowrite` 维护会话待办，`artifact` 工具返回可打开的产物链接。
+- **审批**：写文件、执行命令等高风险动作在调用前经权限规则集判定，需要时阻塞等待人工回复；拒绝会作为工具错误回流模型。
+- **错误**：工具错误卡片展示失败原因；assistant 消息记录终止错误与重试信息。
 
 ## 6. 编辑、diff、版本与协作
 
-- **用户编辑**：OpenCode 内部无文本编辑器写入；用户修改发生在外部编辑器/IDE，经 watcher 事件与 vcs.diff 呈现（`reviewDiffs` git 模式）。
-- **版本**：快照仓库提供**回合级**版本（write-tree 哈希），非文件提交级；`revert` 以消息为粒度：收集目标之后全部 PatchPart，按各自 hash `git checkout <hash> -- <file>` 恢复（`snapshot/index.ts:408-524`），可 `unrevert` 还原，下一次 prompt 时 `cleanup` 删除被撤销消息/Part（`revert.ts:90-134`）。
-- **快照定位变更**：目标消息与撤销范围改用 `findIndex`+`slice` 定位（`revert.ts:74-75`、:106-114），不再按 id 大小比较（导入消息 id 可能非单调）。
-- **撤销入口**：app 有专门 revert dock（`packages/app/src/pages/session/composer/session-revert-dock.tsx`），TUI 在消息对话框内触发（`packages/tui/src/routes/session/dialog-message.tsx:27`）。
-- **接受/拒绝**：仅整条消息级 revert；**未找到** hunk 级接受/拒绝、冲突解决、CRDT 或分支表达（`revert` 是唯一撤销机制；fork 属会话级）。
+- **用户编辑**：OpenCode 不内置文本编辑器；用户在外部编辑器修改，由文件监听与工作区 diff 呈现。
+- **版本粒度**：快照是步骤级文件树版本，不是文件提交历史。
+- **回退分阶段**：`POST /api/session/:id/revert/stage` 记录目标消息与文件快照，`revert/commit` 执行实际清理，`DELETE revert` 撤销暂存并恢复文件；回退按消息边界生效（`core/src/session/revert.ts`、`packages/protocol/src/groups/session.ts`）。
+- **接受/拒绝粒度**：整条消息级回退；未找到 hunk 级接受/拒绝、冲突解决或 CRDT。分支通过会话 fork 表达。
 
-## 7. 能力桥、执行位置与权限范围
+## 7. 能力桥、执行位置与权限
 
-- **文件**：本机文件系统（FSUtil），路径越界由 `assertExternalDirectoryEffect` 拦截（`packages/opencode/src/tool/external-directory.ts`），写文件需 `permission: "edit"` 审批并附 diff 预览（`write.ts:54-62`）。
-- **命令执行**：本机子进程，**无沙箱/容器/远端**。shell 工具先用 tree-sitter（bash/PowerShell WASM）解析命令、提取权限模式（`shell.ts:257-291、392-414`），再 spawn 本地 shell 执行（`shell.ts:293-310`），超时/中止 kill（`shell.ts:533-558`）。
-- **输出截断**：输出超限截断落盘并提示路径（`shell.ts:568-584`、`packages/opencode/src/tool/truncate.ts:68-73`，默认 2000 行/50KB，`truncate.ts:15-16`）。
-- **终端**：用户交互终端是独立于 shell 工具的 PTY——`node-pty`（`packages/core/src/pty/pty.node.ts:1`）进程跑在 opencode 服务器进程内，经 WebSocket `/pty/:id/connect` 连接，支持输出重放（cursor）与会话 ticket 鉴权（`packages/opencode/src/server/routes/instance/httpapi/handlers/pty.ts:163-272`）。
-- **LSP**：本地 LSP 服务器子进程（typescript/rust 等，`packages/opencode/src/lsp/server.ts`），`touchFile` 后 `waitForDiagnostics`，诊断随工具输出回流模型（`lsp.ts:344-375`）；LSP 还供 app 的 hover/定义/符号检索（`lsp.ts:377-495`）。
-- **网络/模型**：webfetch/websearch 工具；模型无自调用能力桥（task 子代理属 Agent 角色类目）。
+| 能力 | 执行位置 | 权限与边界 |
+|---|---|---|
+| 文件读写 | 服务端进程直接访问工作区 | 路径越界与敏感文件由权限规则集判定 |
+| 命令执行 | 本机子进程 | 调用前判定；命令内容做结构解析用于风险判定 |
+| 终端 | PTY（含持久化守护进程实现） | 会话级票据鉴权 |
+| LSP | 本地语言服务器子进程 | 诊断随工具结果回流 |
+| 网络 | webfetch/websearch 工具 | 权限规则集控制 |
+| Artifact | Artifact Provider（本地默认） | 实验性端点访问 |
+| Code Mode | 受控解释器 | 只能调用宿主提供的工具 |
 
-## 8. 持久化、恢复、分享与导出
+## 8. 持久化、恢复与导出
 
-- **持久化**：三类存储：
-  - 消息/Part/Todo 存 SQLite（drizzle，`packages/core/src/session/sql.ts`）；
-  - 文件版本存影子 git 仓库（数据目录内，跨进程会话持久，`snapshot/index.ts:71`）；
-  - 截断输出存临时目录（7 天保留，清理按文件 mtime 判定，`truncate.ts:12、54-63`）。
-- **恢复**：`MessageV2.page/hydrate` 分页重载消息与 Part（`message-v2.ts:98-123、425-467`）；快照哈希落库后 diff/revert 可在重开后继续（依赖影子仓库对象存活，gc prune 7 天，`snapshot/index.ts:23、761-766`——静态推断，未实测跨重启）。
-- **分享/导出**：会话 share URL；CLI export（含对快照/Part 的脱敏，`packages/opencode/src/cli/cmd/export.ts:131-186`）、import。
-- **删除/迁移**：会话删除级联消息；快照目录清理由定时 gc 负责。
+- **会话数据**：SQLite 保存消息、内容、附件与待办。
+- **文件版本**：快照仓库跨进程持久，回退与差异展示依赖其中的对象存活。
+- **附件**：按内容哈希存 blob 表，消息引用哈希。
+- **Artifact**：由 Provider 保存文件与元数据，更新发事件；本地 Provider 的数据随数据目录持久化。
+- **导出**：会话导出包含消息与元数据；Artifact 是独立对象，不在会话导出范围内。
 
-## 9. 模型回流、对象感知与持续维护
+## 9. 模型回流与对象感知
 
-- **历史回流**：每回合经压缩感知的排序重载后转成模型消息（`message-v2.ts:131-415`，`filterCompactedEffect` → `toModelMessagesEffect`），转换规则：
-  - completed/error 工具转 `tool-*` result 消息、reasoning 转思考块、错误文本转 errorText、中断工具补 `[Tool execution was interrupted]`；
-  - 快照/step/patch Part 不进上下文。
-- **对象感知**：模型不直接读 Part/快照，而是经 read/glob/grep 读文件（文件系统即对象本体）；`todowrite` 维护会话 todo 清单（`packages/opencode/src/tool/todo.ts:23-43`）；LSP 诊断随写文件回流。
-- **身份绑定**：`callID` 保证工具调用-结果配对跨回合稳定（`message-v2.ts:318-322`）；快照哈希提供回合间文件版本连续性；无"对象清单"式查询协议——模型无法枚举会话产出的对象列表，只能读工作区文件。
+- **历史回流**：每轮从会话历史重建模型消息，工具结果按状态转成结果或错误、推理转成思考内容；快照与步骤边界不进上下文。
+- **对象感知**：模型通过 `read`/`glob`/`grep` 感知工作区，通过 `artifact` 工具感知与更新已创建的产物；没有"会话产物清单"式查询协议，工作区文件仍是主要对象面。
+- **身份绑定**：工具调用 id 保证调用与结果配对；快照哈希提供跨步骤的文件版本连续性；Artifact 有稳定 id 与 URL。
 
 ## 10. 生命周期、资源治理与性能
 
-- **资源释放**：shell 子进程超时/中止强杀（`shell.ts:548-558`）；LSP 客户端随 InstanceState 释放关闭（`lsp.ts:198-202`）；PTY 会话运行态管理（`handlers/pty.ts:64-67` 仅列 running）；影子仓库定时 gc（prune 7 天，`snapshot/index.ts:761-766`）；截断文件 7 天清理。
-- **限额**：四类机制——工具输出截断（`truncate.ts:15-16`）、诊断文件数上限 `MAX_PROJECT_DIAGNOSTICS_FILES=5`（`write.ts:18`）、doom loop 检测（`processor.ts:356-380`）、压缩自动触发。不可见对象无冻结/暂停机制（本类目无长驻可视化对象）。
+- **资源释放**：shell 超时或中断时终止子进程；PTY 会话与 LSP 客户端随会话/位置生命周期关闭；后台 job 由 job 子系统管理。
+- **限额**：工具输出截断（2000 行 / 50 KiB，超限落盘）、补丁大小上限、步骤数上限、Code Mode 执行限额、上下文压缩。
+- **快照清理**：快照仓库按保留策略清理，过期版本无法再回退。
 
-## 11. 测试、已确认边界与未验证事项
-
-**测试（源码存在，本次未运行）：**
-- `packages/opencode/test/patch/patch.test.ts`（parsePatch/maybeParseApplyPatch/applyPatch 及边界）；
-- `packages/opencode/test/snapshot/snapshot.test.ts`（约 1200 行：track/patch/diff/revert、子目录、ignore 语义、非 Windows 专属用例）；
-- `test/session/revert-compact.test.ts`、`test/session/snapshot-tool-race.test.ts`、`test/server/session-diff-missing-patch.test.ts`；
-- `packages/core/test/patch.test.ts`、`test/tool-apply-patch.test.ts`；
-- app 端 e2e 时间线 fixture 与 `session-ui` 的 apply-patch-file/session-diff 单元测试。
+## 11. 已确认边界与未验证事项
 
 **已确认边界：**
-- 无 artifact/canvas/notebook/iframe/WebView 隔离运行时（搜索范围：`packages/**/*.ts` 关键词 artifact|canvas|notebook|webview，仅桌面 webview 缩放等无关命中）；无 G2 式宿主 schema 渲染注册表（question/todo 是工具结果的 UI 投影）。
-- 撤销粒度为整条消息；无 hunk 级接受/拒绝、冲突解决或 CRDT（搜索 `revert|patch` 于 `packages/opencode/src/session`、`packages/schema/src`，未找到相关机制）。
-- 工具参数流式中间态不落盘（`ToolStatePending.raw` 未见写入点）。
 
-**未验证事项（需运行确认）：** 主链与 revert 闭环的真实运行表现；跨进程重启后快照 diff/revert 的有效性（受 7 天 prune 影响）；TUI/app 各端视觉与键盘行为；desktop（Electron 外壳加载同一 web app，`packages/desktop/src/main/server.ts:57` 起本地服务器）与 WSL 场景下的投影差异；性能基准。
+- Artifact 是新增的对象层，但能力由 Provider 声明，本地默认 Provider 只提供文件托管；服务端代码与 Durable Objects 等能力属于其他 Provider。
+- Code Mode 是受限解释器而非沙箱化 JavaScript，能力面由宿主显式提供。
+- 未找到容器级隔离执行、iframe 沙箱与 Notebook 运行时。
+- 回退粒度为整条消息；未找到 hunk 级接受/拒绝或三方合并。
+
+**未验证事项（需运行确认）：**
+
+1. 快照跨进程重启后的回退与差异展示。
+2. Artifact 预览在浏览器中的实际隔离行为与不同 Provider 的能力差异。
+3. Code Mode 在真实工具组合下的限额与中断行为。
+4. PTY 持久化守护进程在断线重连后的表现。
 
 ## 12. 关键源码索引
 
-- `packages/opencode/src/session/processor.ts`：生成回合的 Part 落库、快照捕获、工具结果与最终化（102、424-484、499-510、539-597）
-- `packages/opencode/src/session/llm.ts`：AI SDK 流与工具调度（280-353、357-381）
-- `packages/opencode/src/session/message-v2.ts`：SQLite 重载与模型消息转换（98-123、131-415）
-- `packages/opencode/src/session/prompt.ts`：回合主循环与历史回流（1081-1130）
-- `packages/opencode/src/tool/{write,edit,apply_patch}.ts`：文件落盘、diff、LSP 诊断回流
-- `packages/opencode/src/patch/index.ts`：apply_patch 协议解析与应用（185-241、514-561）
-- `packages/opencode/src/snapshot/index.ts`：影子 git 快照/版本/恢复（66-73、318-380、408-524、546-759）
-- `packages/opencode/src/session/{revert,summary}.ts`：撤销闭环与回合 diff 预计算
-- `packages/schema/src/v1/session.ts`：Part/状态机对象模型（87-100、233-325、357-383）
-- `packages/session-ui/src/components/message-part.tsx`、`session-diff.ts`：各端工具卡与 diff 渲染
-- `packages/app/src/pages/session.tsx`、`review-tab.tsx`、`composer/session-revert-dock.tsx`：app 审查与撤销
-- `packages/tui/src/routes/session/index.tsx`、`feature-plugins/system/diff-viewer.tsx`：TUI 投影
-- `packages/opencode/src/server/routes/instance/httpapi/handlers/pty.ts`：终端能力桥
-- `packages/opencode/src/tool/shell.ts`、`truncate.ts`：本机执行与输出截断
+- `packages/schema/src/session-message.ts`、`session-event.ts`：内容与步骤事件契约
+- `packages/core/src/snapshot.ts`：快照捕获、差异与恢复
+- `packages/core/src/vcs/patch.ts`：补丁解析与统计
+- `packages/core/src/session/revert.ts`：分阶段回退
+- `packages/core/src/artifact.ts`、`packages/schema/src/artifact.ts`：Artifact 服务与契约
+- `packages/core/src/tool/plugin/artifact.ts`：Artifact 工具
+- `packages/codemode/README.md`、`packages/core/src/codemode/`：受限执行
+- `packages/core/src/pty/`、`persistent-pty/`：终端能力
+- `packages/protocol/src/groups/artifact.ts`：Artifact 端点
+- `packages/session-ui/src/timeline/`：diff 与产物展示组件

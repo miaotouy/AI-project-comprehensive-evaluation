@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：Git 跟踪文件机械统计，并复核 pnpm、Electron、Web、Capacitor 构建入口与主要目录
 >
@@ -12,27 +12,28 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-当前快照包含 1843 个 Git 跟踪文件、1579 个 TypeScript/JavaScript 源文件和约 280348 行源码；文档 63 个，按测试文件名与测试目录识别出 460 个测试文件。行数包含空行与注释，仅用于同口径量级观察。
+当前快照包含 2,595 个 Git 跟踪文件、2,288 个 TypeScript/JavaScript 源码文件；`docs/` 下 42 个文档文件，按测试文件名与测试目录识别出 754 个测试文件。源码行数本次未重新统计，只按文件数量级观察。
 
 ## 结论摘要
 
-Chatbox 已从根包共享 `src` 的单体形态演进为 pnpm workspace：根应用仍承载 Electron、Web 与 Capacitor 产品入口，`packages/chatbox-core` 抽取宿主无关的会话、上下文、生成和设置领域逻辑，`packages/chatbox-react` 承接 React 查询与 store 绑定。`src/renderer` 仍是最大实现区，当前约 944 个 TypeScript/JavaScript 文件、178152 行；共享包的出现使原先集中在 renderer store 的责任开始形成可移植边界。
+Chatbox 已从根包共享 `src` 的单体形态演进为 pnpm workspace：根应用仍承载 Electron、Web 与 Capacitor 产品入口，`packages/chatbox-core` 抽取宿主无关的会话、上下文、生成和设置领域逻辑，`packages/chatbox-react` 承接 React 查询与 store 绑定。`src/renderer` 仍是最大实现区（1,159 个 TS/JS 文件），`src/shared` 379 个、`src/main` 191 个；`packages/chatbox-core` 已有 412 个 TS/JS 文件，`packages/chatbox-react` 47 个、`packages/chatbox-i18n` 5 个。原先集中在 renderer store 的责任已形成可移植边界。
 
 ## 统计与模块分布
 
 | 指标 | 数量 |
 | --- | ---: |
-| Git 跟踪文件 | 1843 |
-| TypeScript/JavaScript 源码 | 1579 文件 / 280348 行 |
-| 文档 | 63 文件 |
-| 测试文件 | 460 |
+| Git 跟踪文件 | 2,595 |
+| TypeScript/JavaScript 源码 | 2,288 文件（ts 1,824、tsx 419、mjs 23、js 11、cjs 11） |
+| 文档（`docs/`） | 42 文件 |
+| 测试文件 | 754 |
 
-| 区域 | 文件 / 行数 |
+| 区域 | 文件数 |
 | --- | ---: |
-| `src/renderer` | 944 个 TS/JS 文件 / 178152 行 |
-| `src/shared` | 273 个跟踪文件 |
-| `src/main` | 150 个跟踪文件 |
-| `packages/chatbox-core`、`packages/chatbox-react` | 会话领域与 React 绑定的 workspace 包 |
+| `src/renderer` | 1,159 个 TS/JS 文件 |
+| `src/shared` | 379 个 TS/JS 文件 |
+| `src/main` | 191 个 TS/JS 文件 |
+| `packages/chatbox-core` / `chatbox-react` / `chatbox-i18n` | 412 / 47 / 5 个 TS/JS 文件 |
+| `docs/` | 42 个文档文件 |
 
 大量单元测试与实现就地放在三个 `src` 区域。
 
@@ -46,7 +47,7 @@ Electron 构建覆盖 Windows、macOS、Linux，另有独立 Web 构建和通过
 
 ## 关键源码索引
 
-- `package.json:14-64`：Electron、Web 和移动构建矩阵
+- `package.json`：Electron、Web 和移动构建矩阵
 - `pnpm-workspace.yaml:1-3`：workspace 范围
 - `packages/chatbox-core/src/`：宿主无关的会话、上下文、生成与设置领域层
 - `packages/chatbox-react/src/`：React Query 与 store 绑定

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：静态代码阅读；对 `app/` 全部 `*.ts/*.tsx`、`src-tauri/src/*.rs` 与 `docs/` 做关键词扫描（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、runtime、preview、markdown、plugin、mask、MCP、CRDT、code interpreter），并精读消息存储、Markdown 渲染、artifacts 组件、导出组件与流式工具循环实现文件；未启动应用与测试
 >

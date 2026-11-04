@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：对照近期 diff 核对关键文件（`Agent/`、`agent_map.json*`、`modules/agentManager.js`、`Plugin/AgentAssistant/`、`Plugin/AgentDream/`、`Plugin/VCPTaskAssistant/`、`Plugin/VCPTimeLine/`、`Plugin/OpenHerPersona/`、`TVStxt/`）；未修改被调查仓库源码
 >
@@ -21,7 +21,7 @@ VCPToolBox 是**服务器端的 VCP 中间层**，不是用户直接对话的客
 
 这两层可以独立使用：提示词文件层服务于变量注入管线；AgentAssistant 层服务于多 Agent 场景（AI 调用 AI、任务调度）。
 
-Agent 文件层、TaskAssistant 任务模型和 AgentDream 架构基本未变。AgentAssistant 的委托循环增加 Flowlock 协议：回复中的开始、完成、失败、停止和心跳指令由独立解析器提取，严格模式只有显式开始后才继续自主心跳，完成/失败/停止按固定优先级收口；未使用该标记的旧委托仍保留兼容循环。委托状态同时保存协议模式、下次心跳与最终报告预览（`Plugin/AgentAssistant/flowlockProtocol.js:148-182`、`AgentAssistant.js:1064-1154`）。OpenHerPersona 的状态观察和 VCPTavern 的预设占位符解析也有增量调整；AgentDream 仍处于**默认禁用**（`.block`）状态，其审批执行链确认由管理面板路由 `routes/admin/dream.js` 承担（插件内部导出的审批函数仅为未实现占位）。
+Agent 文件层与 TaskAssistant 任务模型的机制未变，但模板集合从 8 个增至 10 个：新增的 Kerr 直接把元思考与多日记本 RiverMemo 声明写进提示词，DeepSeekOfficial 是面向 DeepSeek 模型的编码助手人格；同时 Nova 从 88 行精简到 46 行、ThemeMaidCoco 扩到 233 行。AgentAssistant 的委托循环增加 Flowlock 协议：回复中的开始、完成、失败、停止和心跳指令由独立解析器提取，严格模式只有显式开始后才继续自主心跳，完成/失败/停止按固定优先级收口；未使用该标记的旧委托仍保留兼容循环。委托状态同时保存协议模式、下次心跳与最终报告预览（`Plugin/AgentAssistant/flowlockProtocol.js:148-182`、`AgentAssistant.js:1064-1154`）。OpenHerPersona 的状态观察和 VCPTavern 的预设占位符解析也有增量调整；AgentDream 仍处于**默认禁用**（`.block`）状态，其审批执行链确认由管理面板路由 `routes/admin/dream.js` 承担（插件内部导出的审批函数仅为未实现占位）。
 
 ## 2. 提示词文件层（Agent/ 目录）
 
@@ -31,14 +31,16 @@ Agent 文件层、TaskAssistant 任务模型和 AgentDream 架构基本未变。
 
 ```
 Agent/
-  Nova.txt          # 主 Agent 提示词
-  DreamNova.txt     # 梦境中的 Nova（由 AgentDream 调用）
-  Aemeath.txt       # 高规格专家型 Agent
-  Metis.txt         # 后台服务型知识管理 Agent
-  Hornet.txt        # 服务/工具集成型 Agent
-  Weiming.txt       # 知识/记忆型 Agent
-  MemoMaster.txt    # 记忆管理专家
-  ThemeMaidCoco.txt # 场景装饰/界面风格 Agent
+  Nova.txt             # 主 Agent 提示词
+  DreamNova.txt        # 梦境中的 Nova（由 AgentDream 调用）
+  Aemeath.txt          # 高规格专家型 Agent
+  Metis.txt            # 后台服务型知识管理 Agent
+  Hornet.txt           # 服务/工具集成型 Agent
+  Weiming.txt          # 知识/记忆型 Agent
+  MemoMaster.txt       # 记忆管理专家
+  ThemeMaidCoco.txt    # 场景装饰/界面风格 Agent
+  Kerr.txt             # 元思考 + 多日记本协作的任务型 Agent
+  DeepSeekOfficial.txt # 面向 DeepSeek 模型的官方适配人格（编码助手外壳）
 ```
 
 `.gitignore` 明确排除 `Agent/` 目录内的用户自定义文件，表明内置示例只是样板，实际使用时用户应覆盖或新增。当前仓库根目录只有示例文件 `agent_map.json.example`，没有真正的 `agent_map.json`。映射文件缺失时，`AgentManager.loadMap()` 只加载空映射（`modules/agentManager.js:55`），任何别名都判断为不存在，agent 嵌套占位符保持原样不展开（`agentManager.js:322-324`）。即：**默认快照下 Agent 文件层未激活，需要用户创建 `agent_map.json` 才会生效**。AgentManager 还会递归扫描该目录（含 `.md` 文件与符号链接），该结果只用于管理面板的 Agent 文件浏览，不参与占位符展开判定。
@@ -77,14 +79,16 @@ AgentManager 监视 `agent_map.json` 与 `Agent/` 目录的变更，检测到修
 
 | Agent | 规模 | 偏好方向 |
 | --- | --- | --- |
-| Nova | 中（88行） | 面向用户的 AI 女仆，多模态（图片/音频/视频），记忆日记，工具全集 |
-| Aemeath | 大（234行） | 世界最强AI助手定位，超高规格，创造力与深度兼顾 |
-| Weiming | 大（238行） | 知识/记忆型，专注 TagMemo/日记/知识整理 |
-| MemoMaster | 大（370行） | 记忆管理专家，TagMemo 系统的高阶操作 |
-| Metis | 中（92行） | 后台服务型，知识架构师，非面向用户 |
-| Hornet | 中（68行） | 工具/服务集成型，任务执行导向 |
+| Nova | 小（46行） | 面向用户的 AI 女仆，多模态（图片/音频/视频），记忆日记，工具全集 |
+| Aemeath | 大（235行） | 世界最强AI助手定位，超高规格，创造力与深度兼顾 |
+| Weiming | 大（328行） | 知识/记忆型，专注 TagMemo/日记/知识整理 |
+| MemoMaster | 大（371行） | 记忆管理专家，TagMemo 系统的高阶操作 |
+| Metis | 中（93行） | 后台服务型，知识架构师，非面向用户 |
+| Hornet | 中（63行） | 工具/服务集成型，任务执行导向 |
 | DreamNova | 小（13行） | 梦境版 Nova，由 AgentDream 系统在独立上下文中调用 |
-| ThemeMaidCoco | 中（38行） | 界面/主题类，输出 CSS 和视觉风格调整 |
+| ThemeMaidCoco | 大（233行） | 界面/主题类，输出 CSS 和视觉风格调整，含 MediaRenderer 主题工作流 |
+| Kerr | 大（382行） | 元思考 + RiverMemo 多日记本协作，面向 VCP 开发与论坛/家目录任务 |
+| DeepSeekOfficial | 大（216行） | 面向 DeepSeek 模型的官方适配人格，编码助手外壳 |
 
 所有内置 Agent 都在提示词中大量使用变量占位符（`{{VarXxx}}`、`[[日记本::…]]` 等），依赖 VCPToolBox 的完整运行时才能正常工作。
 
@@ -207,9 +211,9 @@ AgentManager 监视 `agent_map.json` 与 `Agent/` 目录的变更，检测到修
 
 `Plugin/AgentDream/` 为 Agent 提供独立的"梦境"空间，在非对话时段进行记忆回顾和整理：
 
-1. **触发**：定时检查或手动命令。定时由 `_startDreamScheduler` 每 15 分钟检查一次，时间窗默认 1-6 点、概率掷骰默认 0.6、冷却与频率默认 8 小时；手动由 `processToolCall` 的 `triggerDream` 命令触发。入梦过程独立于正常对话上下文：先由 `DreamWaveEngine.generateDreamWave()` 做记忆涟漪浪潮联想（种子 + 关联碎片），再组装 `dreampost.txt` 提示词调用 VCP API 生成叙事。叙事与记忆树持久化为 `dream_logs/*.json`；
+1. **触发**：定时检查或手动命令。定时由 `_startDreamScheduler`（`AgentDream.js:755`）每 15 分钟检查一次（`SCHEDULER_CHECK_INTERVAL_MS`），时间窗默认 1-6 点、概率掷骰默认 0.6、冷却与频率默认 8 小时；手动由 `processToolCall` 的 `triggerDream` 命令触发。入梦过程独立于正常对话上下文：先由 `DreamWaveEngine.generateDreamWave()` 做记忆涟漪浪潮联想（种子 + 关联碎片），再组装 `dreampost.txt` 提示词调用 VCP API 生成叙事。叙事与记忆树持久化为 `dream_logs/*.json`；
 2. **记忆操作**：合并、删除、创造感悟三类操作（`DiaryMerge`、`DiaryDelete`、`DreamInsight`）支持串语法批量；每次调用会先**读取源日记全文**放进操作记录供管理员审阅；
-3. **审批门控**：操作先只写入 `pending_review` 状态的 JSON 日志并广播 `AGENT_DREAM_OPERATIONS`，**实际审批执行在管理 API `routes/admin/dream.js` 完成**——`_processDreamOperation()` 对 approve 执行合并/删除/感悟，reject 只改状态；提供列表、详情、单条审批与批量审批端点。写新日记走 `DailyNoteWrite` 插件，删除源日记并同步向量库索引（`vectorDBManager.removeDocument()`）。**注意**：AgentDream 插件内部导出的 `approveDreamOperation`/`rejectDreamOperation` 只是未实现占位（`AgentDream.js:995-1001`），真正的执行权在管理面板路由；
+3. **审批门控**：操作先只写入 `pending_review` 状态的 JSON 日志并广播 `AGENT_DREAM_OPERATIONS`，**实际审批执行在管理 API `routes/admin/dream.js` 完成**——`_processDreamOperation()` 对 approve 执行合并/删除/感悟，reject 只改状态；提供列表、详情、单条审批与批量审批端点。写新日记走 `DailyNoteWrite` 插件，删除源日记并同步向量库索引（`vectorDBManager.removeDocument()`）。**注意**：AgentDream 插件内部导出的 `approveDreamOperation`/`rejectDreamOperation` 只是未实现占位（`AgentDream.js:1082-1090`），真正的执行权在管理面板路由；
 4. **默认启用状态**：当前 HEAD 中 AgentDream 仍为 `plugin-manifest.json.block`（**默认禁用**），相关配置字段见 `config.env.example`；
 5. **预算与取消**：**未找到**任何"预算"（token/次数上限）或"取消进行中梦境"的机制——调度器只在单次梦境进行中跳过下一轮触发（`_checkAndTriggerDreams` 的 in-progress 检查），梦上下文按 `contextTTLHours`（默认 4 小时）与 6 轮上限（12 条消息）裁剪；
 6. **专属提示词文件**：`Agent/DreamNova.txt`（梦中的 Nova 角色身份，13 行小文件）。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38f9d85d5a2bdb58f7fd76746a0ebb7292ab28fe`（分支：`main`）
+> 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
 > 调查方式：静态阅读公开聊天状态 hook、答案组件、Markdown/Streamdown 管线、内容块与测试；未做浏览器性能和视觉验证
 >
@@ -30,25 +30,25 @@ SSE 事件 -> useChat 更新局部 answer item
 
 ## 1. 消息壳、角色和结构化内容
 
-Answer 从 item 读取 content、citation、agent thoughts、annotation、workflow process、文件、人工输入和 sibling 信息（`chat/answer/index.tsx:67-81`）。workflow process 有独立 `WorkflowProcessItem`，文件由 `FileList` 呈现，citation 在非 responding 时出现，多个 sibling 通过 `ContentSwitch` 切换（203-305、341-393 行）。因此同一回答可同时呈现最终文本、过程、附件和引用，而不是把所有内容塞入正文。
+Answer 从 item 读取 content、citation、agent thoughts、annotation、workflow process、文件、人工输入和 sibling 信息（`web/app/components/base/chat/chat/answer/index.tsx:49-80`）。workflow process 有独立 `WorkflowProcessItem`，文件由 `FileList` 呈现，citation 在非 responding 时出现，多个 sibling 通过 `ContentSwitch` 切换（203-305、341-393 行）。因此同一回答可同时呈现最终文本、过程、附件和引用，而不是把所有内容塞入正文。
 
 Agent content 在最终文本不存在时可逐项显示 thought；reasoning panel 以可完成状态和计时包装 Markdown。工具执行的完整审批、结果协议和模型回流不由渲染器定义，见 Agent 工具笔记。
 
 ## 2. Markdown、代码与内容承载
 
-`Markdown` 先对 think tag 和 LaTex 做预处理，再动态加载 Streamdown，以避免该复杂渲染器参与 SSR（`base/markdown/index.tsx:6-58`）。`StreamdownWrapper` 以默认 GFM remark 插件及额外插件构建解析链；rehype 顺序为 raw、额外插件、带扩展 schema 的 sanitize、harden（`streamdown-wrapper.tsx:84-145,180-256`）。style 与 body 被加入禁用元素集合，调用方还可追加禁用元素。
+`Markdown` 先对 think tag 和 LaTex 做预处理，再动态加载 Streamdown，以避免该复杂渲染器参与 SSR（`web/app/components/base/markdown/index.tsx:6-58`）。`StreamdownWrapper` 以默认 GFM remark 插件及额外插件构建解析链；rehype 顺序为 raw、额外插件、带扩展 schema 的 sanitize、harden（`web/app/components/base/markdown/streamdown-wrapper.tsx:84-145,180-256`）。style 与 body 被加入禁用元素集合，调用方还可追加禁用元素。
 
 组件映射把 code、图片、音频、视频、链接、表单、thinking 等交给 `markdown-blocks/`。这确认富内容有专门承载，而非直接信任 Markdown 原文；但未进行恶意输入和 iframe/远端资源运行测试，不能据此给出完整安全结论。
 
 ## 3. 消息列表、滚动与操作反馈
 
-公开聊天的列表使用普通滚动容器和完整的前端 chat tree；本轮在 `base/chat` 范围内未找到虚拟列表或窗口化入口。`useChatLayout` 在用户仍接近底部时把 scrollTop 更新到 scrollHeight；若用户向上滚动且距底部超过 100px，就停止自动跟随。新会话首项变化、输入区尺寸或窗口尺寸变化会重置或重新计算这套滚动状态，footer 的尺寸观察通过 `ResizeObserver` 与 requestAnimationFrame 合并（`chat/use-chat-layout.ts:18-174`）。因此它有避免流式内容抢走阅读位置的静态策略，但没有本次可确认的长会话窗口化机制。
+公开聊天的列表使用普通滚动容器和完整的前端 chat tree；本轮在 `base/chat` 范围内未找到虚拟列表或窗口化入口。`useChatLayout` 在用户仍接近底部时把 scrollTop 更新到 scrollHeight；若用户向上滚动且距底部超过 100px，就停止自动跟随。新会话首项变化、输入区尺寸或窗口尺寸变化会重置或重新计算这套滚动状态，footer 的尺寸观察通过 `ResizeObserver` 与 requestAnimationFrame 合并（`web/app/components/base/chat/chat/use-chat-layout.ts:18-174`）。因此它有避免流式内容抢走阅读位置的静态策略，但没有本次可确认的长会话窗口化机制。
 
-回答操作栏按应用配置和回答状态装配。可见正文可复制并显示成功 toast；重新生成仅在有输入面或显式允许时出现；反馈、annotation、TTS 与 prompt log 又分别要求对应 feature、回调或权限存在。反馈提交失败时对话框与本地草稿保持不变，关闭后焦点归还到仍可见的反馈按钮；仓库新增浏览器模式用例覆盖退出动画期间的草稿与焦点契约（`chat/answer/operation.tsx`；`chat/answer/__tests__/feedback-focus.browser.spec.tsx:28-146`）。这属于该操作的自动化验证，复制失败、移动端触发和完整屏幕阅读器路径仍未运行。
+回答操作栏按应用配置和回答状态装配。可见正文可复制并显示成功 toast；重新生成仅在有输入面或显式允许时出现；反馈、annotation、TTS 与 prompt log 又分别要求对应 feature、回调或权限存在。反馈提交失败时对话框与本地草稿保持不变，关闭后焦点归还到仍可见的反馈按钮；仓库新增浏览器模式用例覆盖退出动画期间的草稿与焦点契约（`web/app/components/base/chat/chat/answer/operation.tsx`；`web/app/components/base/chat/chat/answer/__tests__/feedback-focus.browser.spec.tsx:28-146`）。这属于该操作的自动化验证，复制失败、移动端触发和完整屏幕阅读器路径仍未运行。
 
 ## 4. 流、交互与性能边界
 
-Streamdown 接收 `parseIncompleteMarkdown`，使流式生成时尚未闭合的标记可按专门策略解析（256 行）。引用折叠按钮有 `aria-expanded`、可访问名称和 focus-visible 状态（`chat/citation/index.tsx:73-115`）。组件与测试只能确认装配和部分交互，不证明长会话虚拟化、滚动锚定、复杂 Markdown 性能或所有键盘行为。
+Streamdown 接收 `parseIncompleteMarkdown`，使流式生成时尚未闭合的标记可按专门策略解析（256 行）。引用折叠按钮有 `aria-expanded`、可访问名称和 focus-visible 状态（`web/app/components/base/chat/chat/citation/index.tsx:73-115`）。组件与测试只能确认装配和部分交互，不证明长会话虚拟化、滚动锚定、复杂 Markdown 性能或所有键盘行为。
 
 ## 5. 内容承载、扩展与状态边界
 
@@ -64,7 +64,7 @@ Markdown、代码和普通附件属于消息内容投影，本身没有独立的
 
 ## 关键源码索引
 
-- `web/app/components/base/chat/chat/hooks.ts:616-1775`：流式状态到 answer item
+- `web/app/components/base/chat/chat/hooks.ts:675-1775`：流式状态到 answer item
 - `web/app/components/base/chat/chat/answer/index.tsx:67-393`：消息壳与结构化字段
 - `web/app/components/base/markdown/{index,streamdown-wrapper}.tsx`：预处理、解析和清洗管线
 - `web/app/components/base/markdown-blocks/`：代码、媒体、表单与思考块

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对，先检查应用装配与公共组件，再抽样核对业务消费方；依赖包内部行为和未经运行验证的结论单独标注
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之上。项目已经把弹窗和临时提示的主通道迁向 `@lobehub/ui/base-ui`。旧 antd 弹窗兼容层仍有业务消费，但 `AntdStaticMethods` 的应用级装配已移除，因此当前是“主通道已迁移、局部兼容组件仍存”的状态。
+LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之上。项目已经把弹窗和临时提示的主通道迁向 `@lobehub/ui/base-ui`。旧 antd 弹窗兼容层仍有业务消费，而 antd 静态方法装配层（`AntdStaticMethods`）在本快照已连同文件一起从仓库移除，因此当前是“主通道已迁移、仅剩局部兼容组件”的状态。
 
 主题系统由不同层共同完成：next-themes 解析明暗模式，应用主题 Provider 注入颜色和动效 token，HTML 内联脚本负责首屏预着色。明暗模式存于浏览器，主色和中性色存于用户设置并镜像到 cookie。这套分工支持系统跟随、服务端首屏和桌面原生外观，但也意味着“主题”没有单一持久化源。
 
@@ -41,7 +41,7 @@ LobeHub 的应用界面主要建立在 `@lobehub/ui`、antd-style 和 antd 之�
 
 新弹窗主要通过 base-ui 的命令式接口创建。项目仍保留 `ImperativeModal`，用于把旧 antd Modal 风格的属性适配到新接口；设置、导入和插件安装等场景仍在消费这一兼容层。分享消息等较新的实现已经直接调用 base-ui。（`src/components/ImperativeModal/index.tsx:79-191`）
 
-`AntdStaticMethods` 文件仍保留从 antd 上下文取得 modal 和 notification 的兼容实现，但应用级装配已删除，也未找到生产调用方。旧 antd message 通道已经移除，临时提示由 base-ui Toast 承担；该文件不再代表当前通知主链。（`src/components/AntdStaticMethods/index.tsx:1-19`）
+antd 静态方法层在本快照已整体移除：`src/components/AntdStaticMethods/` 在仓库中不再存在，也没有替代的应用级 modal/notification 装配；临时提示统一由 base-ui Toast 承担，命令式弹窗走 base-ui 与 `ImperativeModal` 适配层。
 
 ### 用户偏好
 
@@ -107,7 +107,7 @@ AppTheme 还保留了自定义字体族和字体 URL 的参数，但现有应用
 
 ### 设置范围
 
-当前设置页把界面字体独立为桌面端的 Font 分区，并从终端分区移出等宽字体选择；用户偏好同时驱动全局界面字体和 antd 的代码字体。`src/const/font.ts` 按当前 UI 语言把日文、韩文或繁体中文字体置于简体中文族之前，再由 `AppTheme` 注入主题。静态代码可确认偏好、系统字体列表读取和主题装配，未运行验证不同系统的枚举与实际字形回退（`src/features/Settings/appearance/features/Font/`、`src/layout/GlobalProvider/AppTheme.tsx`）。
+当前设置页把界面字体独立为桌面端的 Font 分区，并从终端分区移出等宽字体选择；用户偏好同时驱动全局界面字体和 antd 的代码字体。字体栈的拼接与去重收在 `src/features/Settings/appearance/features/Font/fontStack.ts`，并由 `FallbackFontList`/`ChatPreview` 提供回退列表编辑与预览，回退项上限为 3；原 `src/const/font.ts` 已不在仓库中，语言相关的字体优先级也随之下沉到该设置分区。静态代码可确认偏好、系统字体列表读取和主题装配，未运行验证不同系统的枚举与实际字形回退。
 
 外观设置页覆盖明暗模式、语言、动画模式、上下文菜单、主色、中性色、桌面托盘、桌面终端字体以及聊天外观。三个主题切换入口分别位于用户菜单、设置页和命令面板，最终都调用 next-themes 的 `setTheme`。
 
@@ -161,7 +161,7 @@ PWA 安装能力由 `pwa-install-handler` 封装。已处于 PWA 模式或浏览
 
 ## 8. 设计取舍与已确认边界
 
-- 弹窗主通道已迁移到 base-ui 命令式接口；旧弹窗兼容层仍有实际消费方，AntdStaticMethods 已脱离应用装配。
+- 弹窗主通道已迁移到 base-ui 命令式接口；旧弹窗兼容层仍有实际消费方，antd 静态方法层已从仓库移除。
 - 明暗模式与主题色分属浏览器和服务端用户设置，cookie 用于补足首屏读取。
 - 移动端是独立构建的应用表面，桌面与移动端只在部分公共组件和状态上共享实现。
 - 错误处理按整页、局部、启动和分包加载分层；通用全局错误监听与桌面 renderer 崩溃恢复本次未找到。
@@ -187,7 +187,8 @@ PWA 安装能力由 `pwa-install-handler` 封装。已处于 PWA 模式或浏览
 ## 10. 关键源码索引
 
 - 应用主题：`src/layout/GlobalProvider/NextThemeProvider.tsx`、`src/layout/GlobalProvider/AppTheme.tsx`、`src/hooks/useIsDark.ts`
-- 弹窗与反馈：`src/components/ImperativeModal/index.tsx`、`src/components/AntdStaticMethods/index.tsx`、`src/components/Notification/index.tsx`
+- 弹窗与反馈：`src/components/ImperativeModal/index.tsx`、`src/components/Notification/index.tsx`、`src/components/Error/remoteServerErrorToast.ts`
+- 字体设置：`src/features/Settings/appearance/features/Font/`（`fontStack.ts`、`FallbackFontList.tsx`、`ChatPreview.tsx`）
 - 错误处理：`src/utils/router.tsx`、`src/components/ErrorBoundary/index.tsx`、`src/components/BootErrorBoundary/index.tsx`、`src/initialize.ts`、`src/utils/chunkError.ts`
 - Loading 与空状态：`src/components/Skeleton/index.ts`、`src/components/AsyncError/index.tsx`、`src/features/Conversation/ChatList/components/RefreshError.tsx`
 - 移动端与 PWA：`src/routes/(mobile)/_layout/NavBar.tsx`、`src/hooks/useIsMobile.ts`、`src/hooks/usePWAInstall.ts`、`packages/const/src/layoutTokens.ts`

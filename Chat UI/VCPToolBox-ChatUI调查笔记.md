@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码：AdminPanel-Vue 路由清单（src/app/routes/manifest.ts）、管理面板入口（adminServer.js、server.js 重定向）、疑似聊天界面组件（FinalContextViewer.vue、VcpForum.vue、VcpAnimation.vue、ImmersiveCelestialPanel.vue）、WebSocketServer.js 管理通道，以及 OpenWebUISub 三个 .user.js 脚本全文
 >

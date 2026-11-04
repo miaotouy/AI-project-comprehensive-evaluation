@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`9da3baac9fb9d610bc31be40a6dc8d6c66774890`（分支：`main`）
+> 代码快照：`5fa2eb09e4f4dfab299cbb609a8b904b3485b5a5`（分支：`main`）
 >
 > 调查方式：只读静态源码核对，覆盖 VCPInfo WebSocket 监听、内存缓存、元数据提取和观察器界面；未连接 VCPInfo 服务
 >
@@ -29,19 +29,19 @@ VCPLog URL/Key 设置变更
   -> RagObserver 元数据列表 -> 按 ID 请求详情 -> 展示
 ```
 
-设置运行时重协调会用 `vcp_log_url/vcp_log_key` 初始化 VCPInfo 连接；没有这些值时监听器关闭。`src-tauri/src/vcp_modules/infra/settings_manager.rs:118-135,431-470`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:102-136`。
+设置运行时重协调会用 `vcp_log_url/vcp_log_key` 初始化 VCPInfo 连接；没有这些值时监听器关闭。`src-tauri/src/vcp_modules/infra/settings_manager.rs:37-60、settings_manager/repository.rs:1-2438`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:101-147`。
 
 ## 事实对象与结果契约
 
-移动端的事实对象不是文档片段或向量，而是远端 JSON 通知及其本地 metadata。metadata 带 ID、类型、标题、摘要、时间和“是否有详情”；完整载荷按 ID 存为 Zstd 压缩字节。`src/core/stores/ragObserver.ts:6-16,44-72`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:51-99,380-426`。
+移动端的事实对象不是文档片段或向量，而是远端 JSON 通知及其本地 metadata。metadata 带 ID、类型、标题、摘要、时间和“是否有详情”；完整载荷按 ID 存为 Zstd 压缩字节。`src/core/stores/ragObserver.ts:1-90`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:55-100,430-500`。
 
-元数据提取器识别私聊预览、元思考链、记忆回溯、DailyNote 和 Agent 梦境系列事件。例如元思考链读取阶段数、K 序列、激活分组和查询文本；记忆回溯读取日记/文件数量、模式和 TagMemo chunk 数。这些字段是远端消息的展示契约，不是 VCPMobile 对检索算法的实现证据。`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:427-750`。
+元数据提取器识别私聊预览、元思考链、记忆回溯、DailyNote 和 Agent 梦境系列事件。例如元思考链读取阶段数、K 序列、激活分组和查询文本；记忆回溯读取日记/文件数量、模式和 TagMemo chunk 数。这些字段是远端消息的展示契约，不是 VCPMobile 对检索算法的实现证据。`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:430-560`。
 
 ## 连接、缓存与可观测性
 
-监听器把 URL 改写为 `/vcpinfo` 并附加 Key，连接失败或断开会从一秒开始指数退避、最高六十秒。前台状态下才向 Vue 发事件。原始消息经 Zstd 压缩后放进内存队列，容量超过 500 时按 FIFO 同时删除 metadata 和载荷；清空操作也只清除内存。`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:34-50,137-379,380-426`。
+监听器把 URL 改写为 `/vcpinfo` 并附加 Key，连接失败或断开会从一秒开始指数退避、最高六十秒。前台状态下才向 Vue 发事件。原始消息经 Zstd 压缩后放进内存队列，容量超过 500 时按 FIFO 同时删除 metadata 和载荷；清空操作也只清除内存。`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:1-100,147-430,430-500`。
 
-观察器 store 初始读取连接状态和已有 metadata，再监听 Tauri 事件；需要详情时才按 ID 解压并 JSON 解析。界面是全局 overlay 的异步视图。`src/core/stores/ragObserver.ts:75-90,132-145`，`src/components/FeatureOverlays.vue:26-39,118-123`。
+观察器 store 初始读取连接状态和已有 metadata，再监听 Tauri 事件；需要详情时才按 ID 解压并 JSON 解析。界面是全局 overlay 的异步视图。`src/core/stores/ragObserver.ts:1-179`，`src/components/FeatureOverlays.vue:1-245`。
 
 ## 已确认边界与未验证事项
 

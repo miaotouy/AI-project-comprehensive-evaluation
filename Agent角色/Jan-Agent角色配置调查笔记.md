@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`（重点 `core/src/types/assistant/assistantEntity.ts`、`extensions/assistant-extension/src/index.ts`、`core/src/types/thread/threadEntity.ts`、`web-app/src/lib/instructionTemplate.ts`）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 Jan 仓库
 >
@@ -30,15 +30,15 @@
 
 ```text
 AssistantSwitcher / AssistantsMenu 选择助手
-  -> updateCurrentThreadAssistant（web-app/src/hooks/useThreads.ts:362-379）
+  -> updateCurrentThreadAssistant（`web-app/src/hooks/useThreads.ts:397`）
       写入线程快照 assistants: [{...assistant, model: 线程当前模型}]
-  -> $threadId.tsx:205-208 读取 thread.assistants[0]
+  -> `$threadId.tsx:449-451` 读取 thread.assistants[0]
       systemMessage = renderInstructions(threadAssistant.instructions)
   -> CustomChatTransport.sendMessages 拼接 system + 上下文
-      （web-app/src/lib/custom-chat-transport.ts:1229-1240，见 Chat 笔记 §3.2）
+      （`custom-chat-transport.ts` 的 buildSystemPrompt，见 Chat 笔记 §3.2）
 ```
 
-- 快照语义：切换助手改写线程内嵌快照，不动全局 assistant 对象；`SamplerPopover.tsx:106` 在线程内编辑参数时同样走 `updateCurrentThreadAssistant`。
+- 快照语义：切换助手改写线程内嵌快照，不动全局 assistant 对象（`AssistantsMenu.tsx:56,79`、`AssistantSwitcher.tsx` 的切换回调）；在线程内编辑采样参数时同样走 `updateCurrentThreadAssistant`。
 - 无助手（`model-only`）时 `instructions` 为空、systemMessage 为 undefined，请求不带助手指令（threads/default.ts:86-91）。
 - 生效边界：指令与推理参数走线程快照；助手的 `model:'*'` 与模型能力（tools/vision）的运行时解析关系未逐项核对（见 §6 未验证）。
 
@@ -73,17 +73,17 @@ ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
 
 普通 Chat 的 Assistant 类型中工具声明只有 `retrieval` 与 `file_ids`；文档嵌入后线程前端自动批准 RAG 工具（`core/src/types/assistant/assistantEntity.ts`、`web-app/src/routes/threads/$threadId.tsx`）。这不限制 Cowork/CLI 的原生 Agent 工具和技能。
 
-MCP/Web 搜索/RAG 的加载与审批见 Agent 工具笔记。CLI Agent 的配置从项目 TOML 解析，Provider 覆盖优先于全局和桌面配置；Cowork 的 task 可在一轮中启动并行子 Agent，按 phase 串联结果，任务最终答案写到共享 blackboard。上述能力不是普通 Chat Assistant 的 `tools` 字段（`src-tauri/src/core/agent/project.rs:34-47`、`web-app/src/lib/coworkTools.ts:121-160`）。
+MCP/Web 搜索/RAG 的加载与审批见 Agent 工具笔记。CLI Agent 的配置从项目 TOML 解析，Provider 覆盖优先于全局和桌面配置；Cowork 的 task 可在一轮中启动并行子 Agent，派发 schema 与 Rust 侧 `subagent.rs` 同源（`{subagents:[{name, task, phase?, allowed_tools?}]}`）：`name` 命中已保存的子 Agent 定义就用那套角色与工具，否则退化为通用专注型；带 `phase` 时按阶段成组串行，省略则纯并行扇出，任务最终答案写到共享 blackboard。子 Agent 的写域在 Rust 侧另有隔离（每个子 Agent 一个 git worktree），详见 Agent 工具笔记。上述能力不是普通 Chat Assistant 的 `tools` 字段（`src-tauri/src/core/agent/project.rs:34-47,92-105`、`web-app/src/lib/coworkTools.ts:121-160`）。
 
 ## 2. 持久化与迁移
 
-`extensions/assistant-extension/src/index.ts`（355 行）：
+`extensions/assistant-extension/src/index.ts`（370 行）：
 
-- 存储：每个助手一个 JSON 文件 `file://assistants/<id>/assistant.json`；`getAssistants` 空库时回退内置默认（L275-279），`createAssistant`/`deleteAssistant` 均为单文件读写（L281-303）；
-- 迁移版本文件：`file://assistants/.migration_version`（L12），`CURRENT_MIGRATION_VERSION = 3`（L11）；
-- v1：更新 assistant instructions（L98+）；
-- v2：写入 Menlo Research 指令与 `DEFAULT_PARAMETERS`（L140-209）；
-- v3：剥掉身份前缀（L212-241）：对 `V2_IDENTITY_LINE + defaultAssistant.instructions` 开头的助手重置为默认指令（L220-231）。
+- 存储：每个助手一个 JSON 文件 `file://assistants/<id>/assistant.json`；`getAssistants`（L290 起）空库时回退内置默认，`createAssistant`/`deleteAssistant` 均为单文件读写（L281-303）；
+- 迁移版本文件：`file://assistants/.migration_version`，常量 `CURRENT_MIGRATION_VERSION = 3`（同文件头部）；
+- v1：更新 assistant instructions（`migrateAssistantInstructions`，`:120` 起）；
+- v2：写入 Menlo Research 指令与 `DEFAULT_PARAMETERS`（`migrateToMenloInstructions`，`:162` 起）；
+- v3：剥掉身份前缀（`migrateStripIdentityPreamble`，`:235` 起）：对 `V2_IDENTITY_LINE + defaultAssistant.instructions` 开头的助手重置为默认指令。
 
 数据目录：`src-tauri/src/core/app/constants.rs` `JAN_DATA_DIRS_CONVERSATIONS = ["threads", "assistants"]`。
 
@@ -91,7 +91,7 @@ MCP/Web 搜索/RAG 的加载与审批见 Agent 工具笔记。CLI Agent 的配�
 
 ## 3. 默认助手
 
-`defaultAssistant`（assistant-extension index.ts:305-354）：
+`defaultAssistant`（`extensions/assistant-extension/src/index.ts` 尾部，检索工具配置在 `:350` 起）：
 
 ```text
 id: 'jan', avatar: '👋', model: '*',
@@ -101,20 +101,20 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
           settings:{ top_k:2, chunk_size:1024, chunk_overlap:64, retrieval_template } }]
 ```
 
-- web 侧 `hooks/useAssistant.ts`（209 行）也内嵌一份默认助手：id 与 core 侧相同、`parameters:{}`、较长指令模板（L30-56）、硬编码的 `created_at: 1747029866.542`（L33）。
+- web 侧 `hooks/useAssistant.ts` 也内嵌一份默认助手：id 与 core 侧相同、`parameters:{}`、较长指令模板，`created_at` 为硬编码常量。
 - localStorage 键 `defaultAssistantId`/`lastUsedAssistant`（`web-app/src/constants/localStorage.ts:23`）记录默认与最近使用——即前端有第二份默认助手表示，与 core 侧内容基本相同但分属两处定义，结构互不共享。
 
 `useAssistant` store 事实（行级核验）：
 
-- store 结构（L6-20）：`assistants/currentAssistant/loading/defaultAssistantId` + 五个 action；
-- 初始状态 `getInitialAssistantState`（L104-111）：`assistants:[defaultAssistant]`、`currentAssistant:defaultAssistant`、`defaultAssistantId:''`、`loading:true`；
-- `setAssistants`（L192-208）：从 localStorage 解析 lastUsed/default 后设定 current；`setDefaultAssistant`（L172-182）同时写 store 与 localStorage；`deleteAssistant`（L144-171）删除当前/默认时回退内置默认；
-- 加载入口：`web-app/src/providers/DataProvider.tsx` L240-253 调 `assistants().getAssistants()` 后 `setAssistants`（空数据置 null、异常保留默认）。
+- store 结构（`:6-20` 的接口声明）：`assistants/currentAssistant/loading/defaultAssistantId` + 五个 action；
+- 初始状态 `getInitialAssistantState`（`:104` 附近）：`assistants:[defaultAssistant]`、`currentAssistant:defaultAssistant`、`defaultAssistantId:''`、`loading:true`；
+- `setAssistants`（`:192`）：从 localStorage 解析 lastUsed/default 后设定 current；`setDefaultAssistant`（L172-182）同时写 store 与 localStorage；`deleteAssistant`（L144-171）删除当前/默认时回退内置默认；
+- 加载入口：`web-app/src/providers/DataProvider.tsx:249-260` 调 `assistants().getAssistants()` 后 `setAssistants`（空数据置 null、异常保留默认）。
 
 ## 4. 线程绑定与 system prompt
 
-- `$threadId.tsx` L205-208：`systemMessage = renderInstructions(threadAssistant.instructions)`；
-- `custom-chat-transport.ts` `getActiveInferenceParams`（L773-784）：线程有助手且非 `'model-only'` 时才用其参数，否则为空；
+- `$threadId.tsx:449-451`：`systemMessage = renderInstructions(threadAssistant.instructions)`；
+- `custom-chat-transport.ts:974-976` 的 `getActiveInferenceParams`：线程有助手且非 `'model-only'` 时才用其参数，否则为空；
 - `web-app/src/services/threads/default.ts` L86-91：无助手时写入 `{id:'model-only', name:'Model', model: modelPayload}`；
 - 指令模板 `lib/instructionTemplate.ts`（23 行）：仅替换 `{{current_date}}`（UTC 长月份，`formatDate`）。
 - 项目页创建首条对话时，Composer 优先按项目的 `assistantId` 选助手，再由既有 `createThread` 路径把该助手写成新线程快照；这只影响项目中新建的线程，不改写全局当前助手（`web-app/src/routes/project/$projectId.tsx:127-135`、`web-app/src/containers/ChatInput.tsx:235-242,477-496`）。
@@ -152,11 +152,11 @@ tools: [{ type:'retrieval', enabled:false, useTimeWeightedRetriever:false,
 - 存储与迁移：`extensions/assistant-extension/src/index.ts:11-95`、`98-241`、`258-303`
 - 默认助手：`extensions/assistant-extension/src/index.ts:305-354`
 - 线程助手快照：`core/src/types/thread/threadEntity.ts:29-35`
-- system prompt：`web-app/src/routes/threads/$threadId.tsx:205-208`
-- 推理参数来源：`web-app/src/lib/custom-chat-transport.ts:773-784`
+- system prompt：`web-app/src/routes/threads/$threadId.tsx:449-451`
+- 推理参数来源：`web-app/src/lib/custom-chat-transport.ts:974-976`（线程助手 id 不是 `model-only` 时取 `parameters`）
 - 指令模板：`web-app/src/lib/instructionTemplate.ts`
-- 助手切换与线程绑定：`web-app/src/containers/AssistantSwitcher.tsx:68`、`web-app/src/hooks/useThreads.ts:362-379`
+- 助手切换与线程绑定：`web-app/src/containers/AssistantSwitcher.tsx`、`web-app/src/components/AssistantsMenu.tsx:56,79`、`web-app/src/hooks/useThreads.ts:397`
 - 项目新对话的助手选择：`web-app/src/routes/project/$projectId.tsx:127-135`、`web-app/src/containers/ChatInput.tsx:235-242,477-496`
-- web 侧助手 store：`web-app/src/hooks/useAssistant.ts`（store 结构 L6-20、默认助手 L30-56、初始状态 L104-111、setAssistants L192-208）、`web-app/src/providers/DataProvider.tsx:240-253`
+- web 侧助手 store：`web-app/src/hooks/useAssistant.ts`（`useAssistant` L113、`setAssistants` L192）、`web-app/src/providers/DataProvider.tsx:249-260`
 - 设置 UI：`web-app/src/routes/settings/assistant.tsx`、`web-app/src/containers/dialogs/AddEditAssistant.tsx`
 - 助手切换：`web-app/src/components/AssistantsMenu.tsx`、`AssistantSwitcher.tsx`

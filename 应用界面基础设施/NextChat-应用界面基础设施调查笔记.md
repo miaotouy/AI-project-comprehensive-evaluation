@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-08-13
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -78,7 +78,7 @@ Home（`app/components/home.tsx:237-272`）依次执行主题、数据加载、�
 **Loading。** 全屏三圆点 SVG 加载组件（`home.tsx:34-41`）用作页面懒加载的 fallback（`home.tsx:43-83`）与首屏水合门控；`ui-lib.tsx:98-112` 另有一个等价的全屏版本。消息流式打字/预览态在 Chat UI 笔记 §5。
 
 **空状态。** 按位置分三类：
-- MCP 市场有 "No servers available" 文案（`mcp-market.tsx:463-464`），SD 页有本地化空记录文案（`sd.tsx:332`）；
+- MCP 市场有 "No servers available" 文案（`mcp-market.tsx:474`），SD 页有本地化空记录文案（`sd.tsx:332`）；
 - 会话列表无空态渲染（`chat-list.tsx:134-173` 只遍历会话，最后一条删除时 store 自动补空会话 `store/chat.ts:352-355`）；
 - 聊天窗无欢迎/空态文本（grep Welcome|EmptyChat 无匹配，检查范围 app 目录）。
 

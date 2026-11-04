@@ -1,8 +1,8 @@
 # LobeHub 已调查能力汇总
 
-> 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `52756f6904f8d4a7b5cc46142847ee6d4887c9d5` / canary）
+> 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `67aaf17da1f43f0b5c851794b796a92d3258b86b` / canary）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
 > 依据：17 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；横向对比文档不在本次汇总范围
 >
@@ -29,7 +29,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 合计 55 项。已贯通确认面（主链确认 + 静态源码确认）46 项，约 84%；其余为入口级或边界/待验证项，集中在文末"已知边界与待验证事项"，不在正文反复出现。Agent Groups / Pages 另带入口确认标记，统计时并入归并已有类目计数，避免重复。
 
-证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。来源笔记统一基于代码快照 `52756f69`，全部结论均为当前快照的实现事实。
+证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。来源笔记统一基于代码快照 `67aaf17d`，全部结论均为当前快照的实现事实。
 
 ## 功能能力摘要
 
@@ -45,7 +45,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **外部能力绑定**：插件为三态（bare string/pinned/auto/disabled），知识库、文件附件、Agent 专属 TTS 与异构 Agent 绑定（agencyConfig：设备级工作目录/异构 provider）均挂在 Agent 对象上。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
 
-- **Personal Memory 的主动维护与工具化检索**：用户事实按身份、偏好、经历、活动、情境五层持久化并建立向量索引；用户主动分析或小时工作流按层提取，开启记忆的 Agent 才会获得可搜索、分类查询和读写的 Memory 工具。检索结果在工具循环中按需回注，不是发送前固定注入或已确认的多阶段认知编排。证据状态：主链确认（静态）。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/LobeHub-检索增强与认知编排调查笔记.md)
+- **Personal Memory 的主动维护与工具化检索**：用户事实按身份、偏好、经历、活动、情境五层持久化并建立向量索引；用户主动分析或小时工作流按层提取（另有记忆合并与画像更新两条独立管线），开启记忆的 Agent 才会获得可搜索、分类查询和读写的 Memory 工具。检索结果在工具循环中按需回注，不是发送前固定注入或已确认的多阶段认知编排。证据状态：主链确认（静态）。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/LobeHub-检索增强与认知编排调查笔记.md)
 
 - **上下文拼装与发送预处理**：发送层从编辑器数据提取 skills/tools/mentions/文件引用并预加载选中工具内容（不伪造工具调用占位消息），operationContext 承载 group/thread/page 文档维度并绑定具体 conversation，user memory 有注入点。证据状态：主链确认（发送链前端侧）。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
@@ -91,19 +91,19 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **Cloud Sandbox 代码执行**：内置 lobe-cloud-sandbox 工具 13 个 API（executeCode/runCommand/文件操作与导出），远端沙箱执行 Python/JS/Shell，文件可导出为持久化文件对象并登记 work 资产；写文件/执行类工具（executeCode/writeFile/editFile/moveFiles/runCommand）标注 humanIntervention: required 逐个审批。沙箱网络隔离未运行验证，见末尾小节。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
-- **文档工作区（G4 可编辑对象）**：Lexical 富文本编辑器 + 服务端无头编辑器，documents 表 content+editorData 双格式；历史快照（saveSource 五类：autosave/manual/restore/system/llm_call）+ 历史对比 + 编辑器内 diff 节点接受/拒绝 + Redis 租约式编辑锁；模型经 Page-Agent/lobe-agent-documents 工具结构化修改同一对象（节点 ID 寻址、load rules 上下文回流），构成 G4 级可编辑工作区（能力等级 G3–G4 并存）。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
+- **文档工作区（G4 可编辑对象）**：Lexical 富文本编辑器 + 服务端 EditorRuntime（pageCollab 会话、带开关的 Yjs 房间协同），documents 表 content+editorData 双格式；历史快照（saveSource 五类：autosave/manual/restore/system/llm_call）+ 历史对比 + 编辑器内 diff 节点接受/拒绝 + Redis 租约式编辑锁；模型经 Page-Agent/lobe-agent-documents 工具结构化修改同一对象（节点 ID 寻址、load rules 上下文回流），构成 G4 级可编辑工作区（能力等级 G3–G4 并存）。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
 
 - **图像/视频创作工作台**：单一工作台按 generationTopics→generationBatches→generations 三层对象持久化每次创作，挂 asyncTasks（任务状态/超时兜底）与 files（S3 资产，globalFiles hash 去重）；lambda（事务建行、fire-and-forget 触发）/async（实际调模型）双路由，视频另有 webhook 与后台轮询双完成路径；客户端 SWR 指数退避轮询（1s 起、每 5 次翻倍、30s 封顶）；生成成功自动回写 topic 封面；Agent 经 builtin-tool-image-generation 4 API 发起生成并把结果以 markdown 图片标签回流聊天。实现完整，部分子面（用户侧取消入口、视频 Agent 工具、工作台→聊天回流、OSS 计费）未找到或为 stub，见末尾小节。证据状态：静态源码确认。来源：[媒体创作调查笔记](../媒体创作/LobeHub-媒体创作调查笔记.md)
 
 ### Agent 运行时与外部协作
 
-- **工具目录与注册**：packages/builtin-tools 是一个约 35 项的静态注册表（每项含 identifier/manifest/隐藏与可发现状态/动态解析入口），manifest 类型 builtin/default/markdown/mcp/standalone 决定 schema 来源；humanIntervention/work 等框架字段在生成模型可见 schema 时被剥离不泄露给 LLM。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
+- **工具目录与注册**：packages/builtin-tools 是一个 42 项的静态注册表，manifest 本体来自 39 个 @lobechat/builtin-tool-* 包（每项含 identifier/manifest/隐藏与可发现状态/动态解析入口），manifest 类型 builtin/default/markdown/mcp/standalone 决定 schema 来源；humanIntervention/work 等框架字段在生成模型可见 schema 时被剥离不泄露给 LLM。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **工具发现与注入**：ToolsEngine.generateTools 统一裁剪"模型能看到什么工具"，规则由 enableChecker 执行（显式激活→平台过滤→声明式规则表）；chat/agent/custom 三模式规则与默认工具不同，chat mode 强制关闭显式激活、图像生成必须 pinned 才注入，agent mode 为 bot 会话注入消息工具、为群组注入 supervisor 编排工具。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **工具审批策略**：checkInterventionNeeded 执行固定顺序九阶段判定（安全黑名单 always 优先且不可绕过→动态规则→headless 特殊放行→required→静态 always→自动运行→未知 manifest→白名单→manual）；批准后进入 waiting_for_human 状态机，待审批工具消息持久化在数据库，前端按工具调用 chunk 与审批事件渲染卡片。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
-- **工具执行位置与隔离**：ToolExecutionService.executeTool 分派：builtin 走 BuiltinToolsExecutor；MCP 按 mcpParams.type 分三路（cloud 走 market/discover gateway、stdio 在设备网关配置且在线时转发到用户设备、否则本地进程内）；所有路径执行前查 connector 权限表，disabled 一律硬拒绝；local-system 客户端执行收敛为共享运行时，桌面端另有 Local Sandbox 执行环境；结果统一 truncateToolResult（默认 25,000 字符，lobe-agent-documents 例外，截断带明确提示文本）。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
+- **工具执行位置与隔离**：ToolExecutionService.executeTool 分派：builtin 走 BuiltinToolsExecutor；MCP 按 mcpParams.type 分三路（cloud 走 market/discover gateway、stdio 在设备网关配置且在线时转发到用户设备、否则本地进程内）；所有路径执行前查 connector 权限表，disabled 一律硬拒绝；local-system 客户端执行收敛为共享运行时，桌面端另有 Local Sandbox 执行环境；结果默认按 25,000 字符截断（lobe-agent-documents 例外），超长结果另由服务端归档进 topic document 虚拟文件系统并按同一套行号窗口回注。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **内建工具清单与风险面**：30+ 项内建工具逐项核对 humanIntervention 默认值：lobe-browser（点击/填表/导航零审批）、lobe-local-system（runCommand 为 required、文件类走 pathScopeAudit dynamic）、lobe-message（updateBot/uninstallMessenger 零审批）、lobe-creds（发起第三方 OAuth 零审批）等构成风险面；lobe-cloud-sandbox 写入类 required；lobe-goal 仅 /goal 前缀触发且 always 审批；lobe-image-generation 需 pinned。部分条目字段未逐条核实，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
@@ -111,9 +111,9 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **子 Agent 与任务委派**：callSubAgent 是异步 deferred 模型（fork 独立 async operation，父操作转入 waiting_for_async_tool，完成回调回填，启动失败则直接返回失败）；嵌套阻断三层防御（manifest 层删工具/执行体自检/runtime 兜底）；isolated thread 隔离、inheritMessages 默认 false；runInClient 显式选择桌面本机/服务端执行；execSubAgents 并发上限 15、群组 broadcast 无并发上限；客户端 AbortController 级联与服务端轮询式取消存在结构性差异。inheritMessages 转发与 callSubAgent 默认超时待验证，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
-- **外部执行体统一托管（异构 Agent）**：十三种本地执行体（增加 Factory Droid 与 Devin）+ OpenClaw/Hermes 平台任务；另有 Claude SDK、Cursor ACP、Droid ACP 和 Codex app-server 等传输。统一事件模型覆盖文本、推理、工具、todo、subagent、文件变化、额度、干预与终态；浏览器 MCP 工具桥让外部 Agent 操作内置浏览器。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
+- **外部执行体统一托管（异构 Agent）**：14 种本地执行体（含 Copilot 与 DeepSeek Harness）+ 4 种 runtime 传输（Claude Code SDK、Cursor ACP、Droid ACP、DeepSeek Harness）+ OpenClaw/Hermes 平台任务，adapter、spawn、AskUser 桥、内建 MCP 与 Codex 协议生成物统一收进 `packages/heterogeneous-agents`；ACP 走共享 stdio 客户端并按请求协商权限选项。统一事件模型覆盖文本、推理、工具、todo、subagent、文件变化、额度、干预与终态；浏览器 MCP 工具桥让外部 Agent 操作内置浏览器。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
-- **Agent Share 访客运行**：Agent 可通过链接向已登录访客开放独立聊天。访客 topic 与创建者会话隔离，分享配置限制主题数、回合数、工具/API、模型和错误详情可见性；工具装配与实际执行双重门禁拒绝设备、凭据、子 Agent 及未授权数据访问。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)、[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
+- **Agent Share 访客运行**：Agent 可通过链接向已登录访客开放独立聊天。访客 topic 与创建者会话隔离，分享配置限制主题数、回合数、工具/API、模型和错误详情可见性；分享面拆成 `shareChat` 路由族与运行期 gate；工具装配与实际执行双重门禁拒绝设备、凭据、子 Agent 及未授权数据访问。证据状态：主链确认（静态）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)、[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 
 - **Connector 与业务应用**：Connector 以个人/Workspace/Agent scope 保存持久连接，支持 OAuth2/bearer/API key/自定义 header，凭据经 KeyVaultsGateKeeper 加密；工具权限为 auto/needs_approval/disabled，客户端只拿 manifest、服务端调用时解密；Composio 预置 24 种业务应用类型。逐应用可用性未验证，见末尾小节。证据状态：静态源码确认。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
@@ -147,7 +147,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **能力五：Goals——带验收计划与有界自动修复的目标闭环（主链确认）**：/goal 命令→lobe-goal.createGoal（humanIntervention: always，仅 /goal 前缀注入，模型不能自行触发）→创建任务话题并启动 goal 循环→有界自动修复/验证（goalLoop/settle/sweep）→用户验收；目标定义、预算与生命周期保存在独立的 goals 表，task 只是可选执行载体；目标图另保留拆解节点、关系、决策、Work 证据与事件。轮次与花费双上限防失控。真实任务运行表现未验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
-- **异构 Agent 统一托管（主链确认）**：十三种本地执行体与 OpenClaw/Hermes 都成为一等执行对象，经 driver + stream adapter 统一为 operation/message；完整执行链见“Agent 运行时与外部协作”小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
+- **异构 Agent 统一托管（主链确认）**：14 种本地执行体与 OpenClaw/Hermes 都成为一等执行对象，经 driver + stream adapter 统一为 operation/message；完整执行链见“Agent 运行时与外部协作”小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/LobeHub-外部执行体与应用协作调查笔记.md)
 
 **归并已有类目项**：
 
@@ -163,7 +163,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **仓库分布**：当前快照有 16,769 个 Git 跟踪文件、14,149 个可识别源码文件（2,381,054 行）、838 个文档文件和 3,750 个测试文件，TypeScript 占源码行数 98.6%。主要区域为 server、features、database、store、model-runtime、desktop 与 CLI；Mecha、HTML Artifact 和可切换全文检索成为新的共享边界。仓库支持 Web、Docker、独立 server、CLI 与 Electron 多种部署形态。来源：[仓库分布调查笔记](../仓库分布/LobeHub-仓库分布调查笔记.md)
 
-- **应用界面基础设施**：界面建立在 @lobehub/ui、antd-style 与 antd 之上，技术栈含 next-themes、motion、virtua 和 Lexical。弹窗与提示主通道已迁向 base-ui 命令式接口，ImperativeModal 等局部兼容组件仍有消费，AntdStaticMethods 已移出应用级装配。主题由明暗模式、用户色彩设置与首屏脚本共同完成；错误处理分布在路由错误屏、安全边界、启动边界与动态分包监听。移动端有独立路由树和构建产物，桌面端同步明暗模式到 nativeTheme。来源：[应用界面基础设施调查笔记](../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md)
+- **应用界面基础设施**：界面建立在 @lobehub/ui、antd-style 与 antd 之上，技术栈含 next-themes、motion、virtua 和 Lexical。弹窗与提示主通道已迁向 base-ui 命令式接口，ImperativeModal 等局部兼容组件仍有消费，antd 静态方法层（AntdStaticMethods）已从仓库移除，字体回退列表等新增设置分区进入外观配置。主题由明暗模式、用户色彩设置与首屏脚本共同完成；错误处理分布在路由错误屏、安全边界、启动边界与动态分包监听。移动端有独立路由树和构建产物，桌面端同步明暗模式到 nativeTheme。来源：[应用界面基础设施调查笔记](../应用界面基础设施/LobeHub-应用界面基础设施调查笔记.md)
 
 ## 已知边界与待验证事项
 

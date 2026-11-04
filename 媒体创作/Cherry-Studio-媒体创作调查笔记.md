@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`（Electron + React 桌面客户端，v2 架构）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6534fc9ecefec9c8f58c133de5539ea66bc7567f`（分支：`main`）
+> 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
 > 调查方式：只读静态源码走读（renderer 绘画页 + main 图像生成/持久化链）；零依赖验证仅限 `node -e` 解析 JSON（package.json、`resources/data/painting-templates/catalog.json`、drizzle 迁移 snapshot）；未安装依赖、未启动应用
 >
@@ -19,7 +19,7 @@ Cherry Studio 的媒体创作是一条**用户主导、模型能力目录驱动�
 1. **工作台面**：绘画页 `/app/paintings/*` 把每次生成写成 `painting` 行（冻结收据：provider/model/prompt，`src/main/data/db/schemas/painting.ts:16-27`）+ `painting_file_ref`（output/input 角色）+ v2 `file_entry` 文件行；参数/模式/seed 等可变表单态**不落盘**，只活在渲染进程内存草稿里，应用退出即弃（`painting.ts:5-15` 注释明示）。
 2. **Agent 面**：`generate_image` 工具（AI-SDK builtin 族 + Claude Code 内置 MCP 桥两个运行时）经 `generateImageFromPrompt` 调用同一核心。与工作台不同，它声明 `cleanupPolicy: 'manual'`，**不写 painting 行、不注册任何 ref**，结果只存在于 tool-call part 的文本结果中（`src/main/ai/tools/painting.ts:186-192` 注释 + #17169 跟踪）。待查清单疑点①确认：是同一生成核心的两条产品面。
 
-执行位置全部在 **main 进程**（renderer 只做参数清洁与编排）：普通 provider 走 AI SDK `aiCoreGenerateImage` 同步生成；ppio、dashscope 等异步 submit/poll 供应商走 `image-generation.generate` job（`src/main/ai/AiService.ts:756-758`、`src/main/ai/provider/custom/tasks/imageGenerationJobHandler.ts`，完整供应商清单见第 6 节）。异步 job **非重启持久**，崩溃即弃（`recovery: 'abandon'`，`imageGenerationJobHandler.ts:50-58`）。
+执行位置全部在 **main 进程**（renderer 只做参数清洁与编排）：普通 provider 走 AI SDK `aiCoreGenerateImage` 同步生成，本地 ComfyUI 服务器也是这条路径（transport 内部提交并轮询）；ppio、dashscope 等异步 submit/poll 供应商走 `image-generation.generate` job（`src/main/ai/AiService.ts:756-758`、`src/main/ai/provider/custom/tasks/imageGenerationJobHandler.ts`，完整供应商清单见第 6 节）。异步 job **非重启持久**，崩溃即弃（`recovery: 'abandon'`，`imageGenerationJobHandler.ts:50-58`）。
 
 待查清单疑点②：**聊天 → 绘画页有导航入口**（消息 markdown 内链经 `isKnownNavigationPath` 渲染为导航条目 `Link.tsx:56-57`、Agent 导航工具 `NavigateTool.tsx:15`、侧栏标签 `sidebar.ts:80-82`）；**绘画页 → 聊天"插入结果"直接入口本次未找到**（painting 目录无 sendToTopic/insert 调用；Artboard 工具栏只有多图切换/缩放/旋转/复位，`Artboard.tsx:548-580`）。
 
@@ -34,7 +34,7 @@ Cherry Studio 的媒体创作是一条**用户主导、模型能力目录驱动�
 | 输入/表单 | 共享 ComposerSurface 管道（聊天同款）、registry 动态参数字段、模型选择器 | `PaintingComposer.tsx:257-307`、`usePaintingModelCatalog.ts` |
 | 任务编排 | `usePaintingGenerationSubmit`（validate→materialize→generate）+ `usePaintingGeneration`（create/update 行 + AbortController + 缓存镜像） | `usePaintingGenerationSubmit.ts:68-91`、`usePaintingGeneration.ts:58-147` |
 | 执行位置 | main 进程 `AiService.generateImage`；异步供应商走 job 系统 | `AiService.ts:715-846`、`generateImageViaJob` `:860-961` |
-| 持久化 | `PaintingService`（CRUD/list/reorder）+ `FileManager.createInternalEntry` + 清理 pass | `PaintingService.ts:101-322`、`docs/references/file/file-entry-cleanup.md` |
+| 持久化 | `PaintingService`（CRUD/list/reorder）+ `FileManager.createInternalEntry` + 清理 pass | `PaintingService.ts:101-322`、`docs/dev/references/file/file-entry-cleanup.md` |
 | 历史 UI | `PaintingStrip`（缩略图条，滚动分页）+ `usePaintingHistory`（30/页 keyset） | `PaintingStrip.tsx:85-167`、`usePaintingHistory.ts:8-56` |
 | Agent 面 | `generate_image` builtin 工具 + Claude Code MCP 桥 + 审批 | `PaintingTool.ts:44-58`、`cherryBuiltinTools.ts:143`、`cherryBuiltinApproval.ts:48` |
 
@@ -102,7 +102,7 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 
 - **写链**：生成前先 `createPainting` 落收据行（`usePaintingGeneration.ts:76-86`，`shouldCreate` 判定新建 vs 更新）。成功后 `updatePainting` 写 `files:{output,input}`（同文件 :119-124）。`PaintingService` 随后全量替换 `painting_file_ref`（`PaintingService.ts:246-257`，FK 双级联）。v1→v2 过渡期的无效文件 id 由 `buildPaintingRefRowsFiltered` 静默过滤并记日志（同文件 :339-394）。
 - **命名/去重**：文件由 FileManager 生成 v2 FileEntry（uuid 主键），无内容级去重（本次未找到）；painting 行 orderKey 排序（`PaintingService.ts:102-145` keyset 分页 + total）。
-- **清理**：清理语义见 `docs/references/file/file-entry-cleanup.md`——`painting_file_ref` 提供保护引用；`painting` 删除经 FK 级联删 ref，随后清理 pass（`delete_when_unreferenced` + 1h grace，`:114,133`）回收孤儿文件。草稿附件不落库，materialize 与 painting 行、input ref 落在同一事务窗口（`:83`），文件的持久化时机与拥有它的对象同步。
+- **清理**：清理语义见 `docs/dev/references/file/file-entry-cleanup.md`——`painting_file_ref` 提供保护引用；`painting` 删除经 FK 级联删 ref，随后清理 pass（`delete_when_unreferenced` + 1h grace，`:114,133`）回收孤儿文件。草稿附件不落库，materialize 与 painting 行、input ref 落在同一事务窗口（`:83`），文件的持久化时机与拥有它的对象同步。
 - **迁移**：v2 `PaintingMigrator` 把 Redux 历史迁入 SQLite（重复 id 重写、悬空 ref 丢弃计数、`markEntriesAutoCleanup` 标记，`PaintingMigrator.ts:54-249`）。
 - **来源关联**：painting 行无 parent 列（对比 Chatbox 的 parentIds DAG）；"再次创作"只通过草稿复制/历史回选，无显式分支树。Agent 生成的结果无任何持久化关联（见第 6 节）。
 
@@ -122,7 +122,9 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 - **结果回流**：经 `paintingModelOutput` 转成一行文本（`文件名 (id)` 列表）回 tool-call part（`painting.ts:88-97`）；`cherryBuiltinApproval.ts:48` 表明 generate_image 在审批名单
 - **已有资产引用**：可传 `image_ids`（FileEntry id）做编辑参考，`painting.ts:144-153` 从 FileManager 读回 base64；但 Agent 无 painting 行读取工具（本次未找到——历史条只在绘画页 UI）
 
-**外部依赖**：无 ComfyUI/FFmpeg/自有渲染器/文件 CDN。依赖面为：模型 provider API（AI SDK，同步）+ 异步供应商 submit/poll 端点（ppio/dashscope/modelscope/dmxapi-bespoke）+ 可选 OVMS 本地图像服务（`ovms.*` IPC）+ 本地 SQLite/FileEntry 存储。`downloadImageAsBase64` 兜底下载 URL 结果（`AiService.ts:790-803`、`imageGenerationJobHandler.ts:210`）。
+**本地 ComfyUI 供应商**：ComfyUI 作为一等图像供应商接入，是 AI SDK Provider V3 的一种，适配器族标识为 `comfyui`，默认地址 `http://localhost:8188`。它走自己的节点图 HTTP API（`/prompt`、`/queue`、`/history`、`/userdata/workflows/…`），因此复用同步生成路径，由 transport 内部提交任务并轮询历史取结果，不进入异步 job 系统。模型来自用户服务器上的工作流：发现阶段读取工作流列表，提交前把 UI 格式工作流转换成 API prompt。该供应商只服务图像生成，chat 与 embedding 工厂直接抛错，避免把聊天请求打到只返回网页的服务器。
+
+**外部依赖**：无 FFmpeg/自有渲染器/文件 CDN。依赖面为：模型 provider API（AI SDK，同步）+ 异步供应商 submit/poll 端点（ppio/dashscope/modelscope/dmxapi-bespoke）+ 可选本地 ComfyUI 服务器与 OVMS 本地图像服务（`ovms.*` IPC）+ 本地 SQLite/FileEntry 存储。`downloadImageAsBase64` 兜底下载 URL 结果（`AiService.ts:790-803`、`imageGenerationJobHandler.ts:210`）。
 
 ## 7. 权限、资源边界与失败恢复
 
@@ -189,7 +191,8 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 - 模型能力目录：`hooks/usePaintingModelCatalog.ts`、`usePaintingProviderOptions.ts`、`model/utils/paintingModelOptions.ts`、`hooks/usePaintingDraftDefaults.ts`、`hooks/usePaintingTemplateCatalog.ts`
 - main 执行：`src/main/ai/AiService.ts`（runImageRequest:715、generateImage:733、generateImageViaJob:860）、`src/main/ai/utils/imageOptions.ts`、`src/main/ipc/handlers/ai.ts:150-154`
 - 异步 job：`src/main/ai/provider/custom/tasks/imageGenerationJobHandler.ts`、`jobTypes.ts`
+- 本地 ComfyUI：`src/main/ai/provider/custom/comfyui/{comfyuiProvider,comfyuiTransport,comfyuiWorkflowDiscovery,uiToApiPrompt}.ts`、`packages/provider-registry/src/providers/comfyui.ts`
 - 持久化：`src/main/data/services/PaintingService.ts`、`src/main/data/db/schemas/painting.ts`、`fileRelations.ts:92-141,214-239`、`src/main/data/migration/v2/migrators/PaintingMigrator.ts`
 - Agent 面：`src/main/ai/tools/painting.ts`、`tools/generateImageTool.ts`、`tools/adapters/aiSdk/builtin/PaintingTool.ts`、`registerBuiltinTools.ts:34`、`src/main/ai/mcp/servers/cherryBuiltinTools.ts:143`、`cherryBuiltinApproval.ts:48`、`src/renderer/components/composer/tools/definitions/generateImageTool.tsx`
-- 清理与文档：`docs/references/file/file-entry-cleanup.md`（§1、§5.1）
+- 清理与文档：`docs/dev/references/file/file-entry-cleanup.md`（§1、§5.1）
 - 偏好：`src/shared/data/preference/preferenceSchemas.ts:396`（feature.paintings.default_model_id）、`src/renderer/hooks/useModel.ts:34`

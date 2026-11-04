@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读核对个人记忆工作流、提取服务、Agent 工具装配及已有汇总、独特功能和工具笔记；未运行 Upstash、PostgreSQL、向量检索或真实模型调用
 >
@@ -18,7 +18,7 @@ LobeHub 的 Personal Memory 同时属于“主动记忆演化”和“工具化�
 
 全文候选层现在可选 Elasticsearch。统一 `FtsSearchRepo` 覆盖 Agent、群组、Topic、消息、文件、文件夹、Page、知识库和用户记忆；Elasticsearch 只负责候选召回，产品对象始终回 PostgreSQL 按当前用户、工作区和可见性重新水化。默认仍是 PostgreSQL 搜索，启用 Elasticsearch 需要显式配置 provider、索引同步和回填。见 `packages/database/src/repositories/ftsSearch/index.ts:39-77,98-199`、`elasticsearch.ts:67-168` 与 `apps/server/src/services/ftsSearch/index.ts:30-36,99-157`。
 
-已确认的完整主链为“topic 进入受控异步工作流，先提取四类 CEPA 记忆再处理 identity，持久化后由开启记忆的 Agent 获得记忆工具；模型按需搜索、分类查询或写回，结果再参加工具循环”。这是结构化、可编辑的长期用户记忆，而非一次发送前固定注入候选文本。代码未显示检索命中自动构造下一阶段查询，因而不将其写成检索驱动认知编排。
+已确认的完整主链为“topic 进入受控异步工作流，先提取四类 CEPA 记忆再处理 identity，持久化后由开启记忆的 Agent 获得记忆工具；模型按需搜索、分类查询或写回，结果再参加工具循环”。同一工作流体系里另有记忆合并（分类综合成上下文计划，可回退）与人格更新两条独立管线，后台主动维护不止提取一条路径。这是结构化、可编辑的长期用户记忆，而非一次发送前固定注入候选文本。代码未显示检索命中自动构造下一阶段查询，因而不将其写成检索驱动认知编排。
 
 ## 谱系定位与系统边界
 
@@ -31,7 +31,7 @@ LobeHub 的 Personal Memory 同时属于“主动记忆演化”和“工具化�
 
 Personal Memory 将用户事实分为五种可分别维护的对象：情境记录影响和关联，经历记录情境与学习，偏好记录行为指令和适用范围，活动记录叙述及时间地点，身份记录关系和角色。已有独特功能调查确认这些记录具有来源 message id、标签和访问计数，并由 PostgreSQL 向量索引支持语义检索；用户可在 memory 路由逐条查看和编辑。
 
-摄取不是上传文档的同步切块。`processTopicHandler` 先验证来源、总开关和用户/异步任务取消状态，调用 `MemoryExtractionExecutor.extractTopic` 处理 CEPA 四层，再单独处理 identity 层。用户主动分析会更新 async task 进度；小时任务和工作流都有取消检查。见 `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts:33-257`。
+摄取不是上传文档的同步切块。`processTopicHandler` 先验证来源、总开关和用户/异步任务取消状态，调用 `MemoryExtractionExecutor.extractTopic` 处理 CEPA 四层，再单独处理 identity 层。用户主动分析会更新 async task 进度；小时任务和工作流都有取消检查。见 `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts` 的 `processTopicHandler`。
 
 上述处理确认身份提取与其余四层是两个顺序步骤，但不表示它们构成查询反馈阶段。提取质量、Embedding 模型、合并冲突策略和各层具体 schema 的全部字段不在本次源码复核范围内。
 
@@ -48,7 +48,7 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
   -> 工具结果回注模型；写回后的记忆供后续回合与后续提取使用
 ```
 
-工作流在每个关键阶段使用 guard，并将不可重试错误包装为 `WorkflowNonRetryableError`，避免错误反复入队；topic 工作流全局并发上限为 25，初始投递还使用每用户并发 5 的节流。这个主链的入口、阶段和失败收口见 `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts:50-149,175-330`。
+工作流在每个关键阶段使用 guard，并将不可重试错误包装为 `WorkflowNonRetryableError`，避免错误反复入队；topic 工作流全局并发上限为 25，初始投递还使用每用户并发 5 的节流。这个主链的入口、阶段和失败收口见同文件 `processTopicHandler` 与 `runGuard.ts`（`checkGuard`/`ensureWorkflowStarted`：guard 命中时直接返回而不抛错，避免 Upstash 无限重投）。
 
 启用 Elasticsearch 后，用户记忆查询和产品全文搜索可先从外部索引取得有界候选，再由 PostgreSQL 做作用域过滤与对象水化；候选提供者失败会以 `FtsSearchCandidateError` 保持可见，不静默伪装成空结果。索引同步使用 PostgreSQL projection、outbox 与按字节限制的 bulk drain，映射迁移采用物理索引 generation 与 alias。见 `packages/database/src/repositories/ftsSearch/index.ts:200-229`、`apps/server/src/services/ftsSearchSync/service.ts:201-402` 与 `packages/database/src/repositories/ftsSearchDocument/migration/`。
 
@@ -64,6 +64,7 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 
 这是已确认存在后台主动维护的路径。小时工作流与用户主动分析均可触发 topic 提取；提取按层写入长期记忆，不需要模型在当前对话中显式调用写工具。与此同时，Agent 的记忆工具也提供运行时读写面，形成“后台提取 + 回合内增删改”的双写入来源。
 
+本快照在 topic 提取之外又增加两条记忆管线，它们是同一套 Upstash 工作流体系里的独立入口：一条是记忆合并（`consolidation.ts`，先按批分类、再按块综合成 context 计划，支持用 `revertRunId` 回退一次运行），服务实现与提示词在 `services/memory/userMemory/consolidation/`；另一条是人格更新（`personaUpdate.ts`，把用户画像写入任务交给 `services/memory/userMemory/persona/`）。批处理入口也扩展成用户、用户-主题、主题三层（`processUsers`/`processUserTopics`/`processTopics` 与小时任务 `hourly.ts`），并各自有独立的 webhook handler（`router-hono/webhooks/handlers/memoryExtraction.ts`、`memoryUserMemoryConsolidation.ts`、`memoryUserMemoryPersonaUpdateWriting.ts`、`memoryUserMemoryChatTopicCancel.ts`）。
 用户主动任务和小时任务都可协作取消；工作流在 CEPA 与 identity 前重复检查取消，避免在请求取消后继续执行后续层。工作流出错时对非内部 abort 采用非重试错误，用户主动任务的失败处理仍更新进度记账。静态代码确认这些恢复/失败策略，但未验证数据库事务、重试和多来源并发写入的实际一致性。
 
 ## 预算、作用域、可观测与恢复
@@ -89,10 +90,12 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 ## 关键源码索引
 
 - `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts:33-330`：按层提取、取消、失败与并发控制主链。
-- `apps/server/src/services/memory/userMemory/extract.ts:679-725`：记忆提取执行器创建与服务入口。
+- `apps/server/src/services/memory/userMemory/extract/`：提取管线（`extractTopic`、`persistExtraction`、`persistLayers`、`embeddings`、`workflow`、`runtime`、`payload`、`errors` 等）。
 - `packages/builtin-tool-memory/src/manifest.ts`：Memory 工具的搜索、分类查询与写回 API 契约。
 - `apps/server/src/services/aiAgent/index.ts:3085-3116`：Agent/用户 memory.enabled 的运行时解析。
 - `apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:284-336`：chat/agent mode 下的 Memory 工具可见性门控。
 - `packages/database/src/schemas/userMemories/`：五层记忆对象、来源字段和向量索引 schema。
 - `packages/database/src/repositories/ftsSearch/`、`apps/server/src/services/ftsSearch/`：PostgreSQL/Elasticsearch 可选候选层与作用域水化。
 - `apps/server/src/services/ftsSearchSync/`、`packages/database/src/repositories/ftsSearchDocument/`：索引投影、同步与 mapping migration。
+- `apps/server/src/router-hono/workflows/memory-user-memory/workflows/{consolidation.ts,personaUpdate.ts,runGuard.ts}`：记忆合并、人格更新与 guard 语义。
+- `apps/server/src/services/memory/userMemory/{consolidation,persona}/`：合并与画像的服务实现及提示词。

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码：server.js 聊天端点与 /v1/interrupt、routes/protocolBridge.js 协议归一化、modules/chatCompletionHandler.js 请求管线、contextManager.js、messageProcessor.js、roleDivider.js、vcpLoop/toolCallParser.js、handlers/streamHandler.js 与 nonStreamHandler.js、reasoningContentAdapter.js、vcpInfoHandler.js，以及 Plugin/VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的 processMessages
 >
@@ -97,7 +97,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 处理后的历史
   -> assistant: 模型本轮正文（含 TOOL_REQUEST 标记）
   -> 执行 Archery/普通工具
-  -> user: <!-- VCP_TOOL_PAYLOAD --> + 工具结果
+  -> user: <!-- VCP_TOOL_PAYLOAD --> + 工具结果（一轮多结果时包成带时间戳的批量块）
   -> 再次 POST /v1/chat/completions
 ```
 
@@ -105,7 +105,13 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - assistant 工具调用正文追加到循环上下文（`modules/handlers/streamHandler.js:429-439`；`nonStreamHandler.js:422-432`，均带 `enableRoleDividerInLoop` 分支）。普通工具的 `result.content` 汇总后序列化为字符串 user payload，含图片时改用多模态数组并可再次经过图片翻译（`modules/handlers/streamHandler.js:580-582`、677-688；`nonStreamHandler.js:434-444`、507-518）。
 - Archery 成功结果默认不回送模型；只有 Archery 出错且没有普通调用时，错误内容才形成 `VCP_TOOL_PAYLOAD` 触发递归（`modules/handlers/streamHandler.js:468-490` 执行、493-561 递归；`nonStreamHandler.js:327-349`、351-417）。
 - `RAGMemoRefresh` 开启时，追加工具 payload 前会刷新历史中的 `VCP_RAG_BLOCK`，查询使用最近真实 user（跳过 `VCP_TOOL_PAYLOAD`/`[系统提示:]`/`[系统邀请指令:]`），而不是工具 payload（`modules/chatCompletionHandler.js:531-625` `_refreshRagBlocksIfNeeded`，581-598 找真实 user；两个 handler 的 RAG 刷新段：`streamHandler.js:665-675`、`nonStreamHandler.js:496-505`）。
-- 循环最多由 `MaxVCPLoopStream/NonStream` 控制（`server.js:1202-1203`），默认回退 5（`streamHandler.js:70`；`nonStreamHandler.js:303`）；达到上限时流式返回 `finish_reason=length`（`streamHandler.js:741-752`），非流式把最终 choice 标为 `length`（`nonStreamHandler.js:578`）。
+- 循环最多由 `MaxVCPLoopStream/NonStream` 控制（`server.js:1202-1203`），默认回退 5（`streamHandler.js:70`；`nonStreamHandler.js:303`）；达到上限时流式返回 `finish_reason=length`（`streamHandler.js:741-752`），非流式把最终 choice 标为 `length`（`nonStreamHandler.js` 的收尾段）。
+
+**批量包裹与上游投影。** 一轮里有多个工具结果时，它们不各自独立成段，而是由 `modules/toolResultBatch.js` 合并成一个带时间戳的批量块：开始标记形如 `<<<[VCP_TOOL_BATCH_START:<时间>]>>>`，结束标记用同一时间戳闭合，外层可再套角色分隔标记，让整批以 user 角色单独成段。时间戳单调递增，既让相邻两批可区分，也避免分隔符与正文碰撞。
+
+发给上游前还有一次投影：对 assistant 或 user 消息里被完整包裹的批量块，包装标记会改写为中文提示行「工具返回批次开始／结束｜时间：…」，让模型读到的是“这一批结果产生于何时”，而不是内部标记；以 `<!-- VCP_TOOL_PAYLOAD -->` 开头的服务器自生成 payload 不参与投影。批量块内部即使出现形似协议标记的文本也不递归解析，代码注释明确这是结构识别而非来源认证。角色重排器同样先按批量边界扫描，把整批当作不可再拆的引用块处理，避免角色切分把一批结果拆散。
+
+依据：[toolResultBatch.js:33-130](../../VCPToolBox/modules/toolResultBatch.js)、[roleDivider.js:82](../../VCPToolBox/modules/roleDivider.js)、[streamHandler.js:5](../../VCPToolBox/modules/handlers/streamHandler.js)、[nonStreamHandler.js:4](../../VCPToolBox/modules/handlers/nonStreamHandler.js)。
 
 ### 4.2 推理字段、VCP 信息与日志不是同一份消息
 
@@ -133,6 +139,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **非流式收口**：把 `conversationHistoryForClient`（AI 正文 + VCP 信息块拼接）写回初始 JSON 的 `choices[0].message.content`（`nonStreamHandler.js:565-583`），`finish_reason` 按循环是否触顶置 `length/stop`。这个回写只发生在内存响应体里，不会持久化，也不回写模型上下文。
 - **上游错误代理**：流式请求上游非 200 时，服务端回 200 并把错误文本作为 SSE chunk 流给客户端（`chatCompletionHandler.js:1187-1248`），避免前端监听器终止；连接失败/重试耗尽同样以 SSE chunk 报错（1307-1333）。
 - **快照与日志**：首次请求前快照入 `finalContextStore`（1142-1148）；ChatLog 可选落盘（见 4.2）。服务端不写回任何会话/消息存储（见会话与消息管理笔记）。
+- **交互结算的提交条件**：本轮交互对 OneRing、VCPTavern 等模块的落库结算被统一到 `modules/handlers/interactionCompletion.js`，只有上游整轮有效且响应正常 finish 才提交；上游错误、客户端中断或半截流都只结算当前 pending turn，不把不完整的回合写成历史。这改变的是“什么时候算一轮完成”的判定，不改变服务端不持久化会话的边界（`modules/chatCompletionHandler.js:1214,1378,1479`）。
 
 ## 7. 消息构建边界与已确认边界
 

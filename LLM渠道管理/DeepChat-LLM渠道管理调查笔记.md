@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
-> 调查方式：只读源码、CLI 指南和路由契约梳理 Provider 配置生命周期、桌面端管理入口、CLI 管理面、配置导入、模型目录和连接测试；未修改 DeepChat 仓库，也未运行桌面 UI、CLI 或真实 API 请求
+> 调查方式：只读源码、CLI 指南和路由契约梳理 Provider 配置生命周期、模型目录聚合服务、桌面端管理入口、CLI 管理面、配置导入、模型目录和连接测试；未修改 DeepChat 仓库，也未运行桌面 UI、CLI 或真实 API 请求
 >
-> 调查范围：配置存储、默认渠道与用户渠道、桌面端和 CLI 的查看/新增/编辑/复制/启停/删除/导入/导出/连接测试、TUI/Web 边界、模型目录、凭据、协议适配、运行时选择、限流和故障处理
+> 调查范围：配置存储、默认渠道与用户渠道、模型目录聚合（provider catalog）、桌面端和 CLI 的查看/新增/编辑/复制/启停/删除/导入/导出/连接测试、TUI/Web 边界、凭据与登录模式、协议适配与路由选择、限流和故障处理
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -22,15 +22,17 @@ DeepChat 中的“渠道”主要是持久化的 `LLM_PROVIDER` 用户实例。�
 4. **导入是桌面设置页的数据迁移向导**：Provider import service 从 CC Switch、Alma、Cherry Studio、Hermes、OpenClaw 的本地数据中扫描配置，先预览和映射，再按选择创建或更新内置/自定义 Provider，并导入模型。它不是通用的 DeepChat Provider 导出/导入文件格式。
 5. **默认渠道与用户渠道的可操作范围不同**：默认 Provider 会参与初始化合并；内置 Provider 通常保留身份和协议，只允许修改凭据、启停及特定可编辑字段。自定义 Provider 可编辑 Base URL，并可从桌面端删除。CLI 还显式禁止修改内置 Provider 的 `apiType`，只允许删除自定义 Provider。
 6. **渠道请求可附加用户配置 Header**：Header 作为独立的 Provider 配置契约进入请求组装；APIMart、Synthorai 与 OpenAI Codex 图像生成均有 Provider 接线，模型目录和能力判断不能只按早期内置 Provider 集合理解（`src/main/provider/providerHeaders.ts`、`providers/apimartProvider.ts`、`openaiCodexAdapter.ts`）。
-7. **内置 OpenAI-compatible 目录继续扩展**：RunInfra 与 API Route 作为具名默认 Provider 接入通用运行时，各自拥有固定身份、默认 Base URL、网站/文档元数据和图标；它们不是用户临时 custom Provider。
+7. **内置渠道目录明显扩张**：本次新增 23 个默认 Provider，其中 TypeSafe（Jev 判定模型）与 Cloudflare（Workers AI）各有专用 provider 实现（`providers/jevProvider.ts`、`providers/workersAiProvider.ts`），其余多为 OpenAI-compatible 聚合/代理服务商（`defaults.ts`）。它们不是用户临时创建的 custom Provider。
+8. **模型目录改由主进程单一写者维护**：新增 provider catalog 服务，把远端 `/models`、Provider DB、配置、运行时、Ollama、ACP 六类来源聚合成带 revision 的快照，由主进程统一刷新并落状态；renderer 通过 `providers.catalog.get/list/refresh/ensureFresh` 只读消费，不再各自发起模型拉取（`src/main/provider/catalog/providerCatalogService.ts`）。
+9. **OpenAI 渠道有两种登录模式**：`openaiAuthMode` 可在 `api-key` 与 `chatgpt` 之间切换；后者让 `openai` 这个 Provider ID 直接路由到 Codex 后端定义，复用 openaiCodex 的 OAuth 凭据与模型目录（`providerRegistry.ts:948`）。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
-`LLM_PROVIDER`（`src/shared/types/provider.ts:74-106`）是渠道实例的主要数据结构，包含 `id`、名称、`apiType`、API Key/OAuth token、`baseUrl`、模型集合、模型启停状态、`enable`、`custom`、网站信息和限流配置等。`provider.id + modelId` 构成运行时选择的基本身份；同名模型在不同 Provider 下可以对应不同 Base URL、凭据和能力。
+`LLM_PROVIDER`（`src/shared/types/provider.ts:75-110`）是渠道实例的主要数据结构，包含 `id`、名称、`apiType`、API Key/OAuth token、`baseUrl`、模型集合、模型启停状态、`enable`、`custom`、网站信息、限流配置，以及 OpenAI 渠道的 `openaiAuthMode`（`api-key` 或 `chatgpt`）。`provider.id + modelId` 构成运行时选择的基本身份；同名模型在不同 Provider 下可以对应不同 Base URL、凭据和能力。另有 `capabilityProviderId` 表示“能力与目录继承自哪个 Provider”，让同一协议下的不同 profile 共享事实而不共享凭据。
 
-Provider 是持久化的配置与运行时实例，不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts:31-207`）。
+Provider 是持久化的配置与运行时实例，不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts`）。
 
-默认目录中，RunInfra 与 API Route 均以 OpenAI-compatible `apiType` 注册，分别使用 `https://api.runinfra.ai/v1` 与 `https://global.api-route.com/v1`。Provider ID 优先路由保留两者独立身份，协议请求仍复用通用适配器；定义与注册见 `src/main/provider/defaults.ts:35-61`、`src/main/provider/providerRegistry.ts:135,510`。
+默认目录中，既有渠道如 RunInfra 与 API Route 均以 OpenAI-compatible `apiType` 注册；API Route 的默认 Base URL 与文档元数据见 `defaults.ts:238-248`。Provider ID 优先路由保留各自独立身份，协议请求仍复用通用适配器；定义与注册见 `src/main/provider/defaults.ts`、`src/main/provider/providerRegistry.ts` 的 `resolveAiSdkProviderDefinition`（`:942-953`）。
 
 一个 Provider 实例只有一个持久化 `baseUrl` 字段，本次未找到在同一个 `LLM_PROVIDER` 内维护多个 Endpoint 或 Endpoint 列表的模型。若要使用同一协议的多个地址，实际做法是创建多个 Provider 实例；它们可以共享同一 `apiType`，但各自保存自己的 URL 和凭据。
 
@@ -47,7 +49,7 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 
 ### 2.2 默认配置与用户配置合并
 
-`ProviderSettings` 初始化时连接 settings store 和 Provider database，执行旧配置迁移、清理 deprecated Provider，并将新增默认 Provider 合并到已有配置（`src/main/provider/settings.ts:322-412`）。`getDefaultProviders` 单独返回默认渠道，用于 UI 展示默认网站、默认 Base URL 等元数据；当前用户 Provider 列表则由 `getProviders` 返回。
+`ProviderSettings` 初始化时连接 settings store 和 Provider database，执行旧配置迁移、清理 deprecated Provider，并将新增默认 Provider 合并到已有配置（`src/main/provider/settings.ts:367-470`，默认渠道来自 `DEFAULT_PROVIDERS`，新增项在 `:440` 过滤后并入）。`getDefaultProviders`（`:1434`）单独返回默认渠道，用于 UI 展示默认网站、默认 Base URL 等元数据；当前用户 Provider 列表则由 `getProviders` 返回。
 
 新增自定义 Provider 时，桌面端生成 `nanoid` ID，设置 `custom: true`，然后调用 `addProviderAtomic`。更新、添加、删除和排序都会发布 Provider change event，renderer 的 `providerStore` 收到事件后刷新列表。
 
@@ -66,7 +68,8 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 | 导入 | `providers.import.scan/apply`；无通用 DeepChat 导入文件契约 | 数据设置页的扫描、来源选择、Provider 选择、冲突预览和应用向导 | 未找到 Provider import 命令 | 不适用 | 未找到 |
 | 导出 | 仅找到模型配置 `models.exportConfigs`，未找到 Provider 导出 | 未找到 Provider 导出入口 | 未找到 Provider export 命令 | 不适用 | 未找到 |
 | 连接测试 | `providers.testConnection`，可选 modelId | “验证 API Key”打开模型检查流程；部分 Provider OAuth 成功后自动验证 | `provider test`，5 秒 CLI 公共测试超时 | 不适用 | 未找到 |
-| 模型刷新 | `providers.refreshModels`、模型目录和 custom model route | 连接页和模型页都有刷新模型入口 | CLI Provider surface 未暴露 refresh models；可用 `model list` 查看运行时模型 | 不适用 | 未找到 |
+| 模型刷新 | `providers.refreshModels` + `providers.catalog.refresh` | 连接页和模型页都有刷新模型入口；切换 OpenAI 登录模式后也会触发目录刷新 | CLI Provider surface 未暴露 refresh models；可用 `model list` 查看运行时模型 | 不适用 | 未找到 |
+| 目录快照 | `providers.catalog.get/list/ensureFresh` | 模型页与模型选择器读主进程快照（含 revision 与新鲜度） | 未暴露 | 不适用 | 未找到 |
 
 ### 2.4 已有渠道与新建渠道
 
@@ -74,18 +77,20 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 
 - 桌面端通过 `EDITABLE_BASE_URL_PROVIDER_IDS` 和 `provider.custom` 决定 Base URL 是否直接可编辑；非列表内置 Provider 默认锁定 Base URL，用户可以在 UI 中点击解锁，但本次未验证解锁后的保存行为。
 - 删除按钮只在 `provider.custom` 时渲染。底层 route 对 renderer caller 没有同样的 custom 检查，但 UI 入口没有提供内置 Provider 删除；CLI route 则明确拒绝删除内置 Provider。
-- 新增对话框只创建 custom Provider，apiType 选项包含 OpenAI、OpenAI Completions、Gemini、Anthropic、Ollama、Mistral；Ollama 可不填 API Key，并默认 Base URL 为 `http://localhost:11434`。
+- 新增流程只创建 custom Provider，apiType 选项为 OpenAI、OpenAI Completions、Gemini、Anthropic、Ollama、Mistral AI 与 System One（`jev`，即判定模型渠道）；Ollama 可不填 API Key，并默认 Base URL 为 `http://localhost:11434`。
 - 内置 Provider 可能拥有 OAuth、专用凭据、Provider DB 元数据和特殊高级设置；新建 custom Provider 不自动获得这些内置身份能力，只按所选 `apiType` 进入通用 runtime。
 
 ## 3. 配置入口的具体行为
 
 ### 3.1 桌面端
 
-Provider 设置路由是 `settings-provider`，主界面左侧按启用/禁用分组显示 Provider，支持搜索和拖拽排序。点击 Provider 后进入连接、模型、advanced 三个页签（`src/renderer/settings/components/ModelProviderSettings.vue:24-247`、`ProviderSettingsShell.vue:21-55`）。
+Provider 设置路由是 `settings-provider`，主界面左侧按启用/禁用分组显示 Provider，支持搜索和拖拽排序；新增入口改为“渠道目录”（`ProviderCatalog.vue`）：按内置渠道清单搜索、显示是否已配置，并提供“自定义渠道”入口；随后进入多阶段添加流程 `AddProviderFlow.vue`（校验连接 → 提交 → 保存 → 成功面板），不再是一次性对话框。点击 Provider 后进入连接、模型、advanced 三个页签（`src/renderer/settings/components/ModelProviderSettings.vue`、`ProviderSettingsShell.vue`）。
 
-连接页可以编辑 API Key，密码输入默认脱敏但有显示切换；自定义 Provider 可以删除；部分内置 Provider 提供 OAuth 登录组件。Base URL 的变更通常在 blur 或 Enter 时写入 `updateProviderApi`，API Key 也在 blur 时写入（`src/renderer/settings/components/ProviderApiConfig.vue:15-55`、`:120-203`、`:341-370`）。
+连接页可以编辑 API Key，密码输入默认脱敏但有显示切换；自定义 Provider 可以删除；部分内置 Provider 提供 OAuth 登录组件。Base URL 的变更通常在 blur 或 Enter 时写入 `updateProviderApi`，API Key 也在 blur 时写入（`src/renderer/settings/components/ProviderApiConfig.vue`）。
 
-模型页区分 Provider 模型和 custom model。模型可以单独启停，禁用模型需要确认；模型列表支持刷新，模型能力配置由相邻的模型配置入口维护。Provider 详情的“验证”调用 `providerStore.checkProvider`，成功后刷新该 Provider 的模型列表（`src/renderer/settings/components/ModelProviderSettingsDetail.vue:217-243`、`:361-403`）。
+**OpenAI 渠道的登录模式**：连接页为 `openai` 提供 api-key / ChatGPT 两种模式切换（`ModelProviderSettingsDetail.vue:430-450`）。切到 ChatGPT 后，`openaiAuthMode` 写入 Provider 配置并立即触发目录刷新；就绪判定要求存在 OAuth token 而不是 API Key（`providerOnboardingReadiness.ts:29`），运行时会话仍使用 `openai` 这个 Provider ID。
+
+模型页区分 Provider 模型和 custom model。模型可以单独启停，禁用模型需要确认；模型列表支持刷新，模型能力配置由相邻的模型配置入口维护。Provider 详情的“验证”调用 `providerStore.checkProvider`，成功后刷新该 Provider 的模型列表（`src/renderer/settings/components/ModelProviderSettingsDetail.vue`）。
 
 Provider import 位于数据设置页而非 Provider 详情页。向导先扫描来源，再按来源查看 Provider 预览，显示脱敏 API Key、Base URL、模型数量、目标内置/自定义类型和警告，最后应用选择并显示 created/updated/skipped/overwritten 结果。
 
@@ -116,7 +121,9 @@ CLI 不是桌面端所有操作的镜像：它不暴露 Provider import/export�
 
 普通 Provider 的 API Key、Base URL 和 Provider JSON 会写入 settings store/SQLite Provider 表；`settingsTable.ts` 的 `api_key` 列和 INSERT/UPDATE 参数显示普通 API Key 明文作为数据库字段保存。数据库依赖 `better-sqlite3-multiple-ciphers`，但本次未确认运行时数据库密钥配置以及普通 API Key 是否由数据库层加密。
 
-OpenAI Codex 和 xAI Grok OAuth 使用独立 credential store，并通过 Electron `safeStorage` 加密；不可用时存在 file storage fallback（`src/main/provider/auth/openaiCodex/credentialStore.ts:22-43` 及 xAI 对应实现）。AWS Bedrock credential 另由 settings store 的 `awsBedrockCredential` 键保存（`src/main/provider/settings.ts:962-977`）。
+OpenAI Codex 和 xAI Grok OAuth 使用独立 credential store，并通过 Electron `safeStorage` 加密；不可用时存在 file storage fallback（`src/main/provider/auth/openaiCodex/credentialStore.ts` 及 xAI 对应实现，两个 store 本次都有较大改动，新增了账号/计划类型与失效处理）。OpenAI 的 ChatGPT 登录模式复用同一份 Codex 凭据，不另建凭据类型。AWS Bedrock credential 另由 settings store 的 `awsBedrockCredential` 键保存（`src/main/provider/settings.ts`）。
+
+OAuth 配置与抽象从 `src/main/provider/oauthHelper.ts` 移入 `src/shared/types/oauth.ts`（`OAuthConfig`、`OAuthServicePort`），具体登录流程保留在 `src/main/provider/auth/index.ts`：GitHub Copilot 走 device flow，OpenAI Codex 与 xAI Grok 走各自授权窗口加本地回调服务器（监听 3000 端口），回调完成后写入 credential store。原来的通用 `OAuthHelper` 类已不存在。
 
 桌面端 API Key 输入默认是 password 类型，仅在当前表单中显示/隐藏；Provider summary、CLI 公共 DTO 和 Provider import 预览对 API Key 脱敏。导入预览使用掩码值，导入 apply 才把原始凭据写入目标 Provider。请求 trace 使用 `redact.ts` 对 authorization、api-key、token、secret、password 等字段脱敏；本次未验证导出、备份和崩溃日志是否包含普通 Provider 凭据。
 
@@ -124,19 +131,31 @@ OpenAI Codex 和 xAI Grok OAuth 使用独立 credential store，并通过 Electr
 
 ## 5. 模型目录与能力元数据
 
-模型来源至少包括三类：Provider 内置/远端模型列表、Provider DB 聚合目录和用户 custom models。`BaseLLMProvider` 负责获取、缓存和写回 Provider models；`ProviderModelHelper` 与 Provider DB loader 负责本地目录和刷新。UI 通过 `providers.listModels` 同时取得 Provider models 和 custom models。
+### 5.1 聚合服务（provider catalog）
 
-用户添加 custom model 时保存模型 ID、名称、分组和 Provider 归属，并可启停、编辑和删除。模型启停状态单独保存在 `model_status`，Provider 删除时清理相关状态和模型配置。模型配置由 `ModelConfig` 保存上下文长度、最大输出、采样参数、vision、function call、reasoning、endpoint 和媒体能力；有效配置由 Provider facts、Provider DB 和用户覆盖合并得到。
+模型目录不再由各调用方分别拉取，而是由主进程的 `ProviderCatalogService` 作为唯一写者聚合成快照（`src/main/provider/catalog/providerCatalogService.ts`）。它把六类来源合并成同一份模型列表：远端 `/models`、Provider DB、本地配置、运行时、Ollama 与 ACP；每份快照带 Provider 级 `revision`，状态取 `unknown|fresh|stale|refreshing|error` 之一，并记录来源、最后刷新原因、错误码与错误时间（类型定义 `src/shared/types/providerCatalog.ts`）。
 
-Provider 刷新模型是 Provider 级操作。Provider DB-backed Provider 在刷新时还会刷新/同步元数据；这与用户在 UI 中直接新增的 custom model 不同，后者是本地输入，不要求上游 `/models` 接口。
+刷新节奏由服务自己控制：远端目录 TTL 6 小时、运行时目录 60 秒、失败后 5 分钟重试窗口；刷新原因区分 user、stale、config、provider-db、sync、external-write、acp，返回 `ok|not-modified|failed|superseded` 四态与 added/removed/updated 差异。并发刷新同一 Provider 会被合并，旧请求被标记 superseded。
 
-模型发现现在会合并同一 Provider 的并发刷新请求，避免设置页或多个调用方同时触发重复上游读取；这是请求合并，不是持久缓存或跨 Provider 共享目录（`src/main/provider/baseProvider.ts`）。
+renderer 侧通过四条路由消费（`src/shared/contracts/routes/providers.routes.ts:403-437`）：`providers.catalog.get` 取单 Provider 快照、`providers.catalog.list` 批量取、`providers.catalog.refresh` 触发刷新、`providers.catalog.ensureFresh` 在打开设置页或切换登录模式后确保新鲜。状态另落 settings DB（`getProviderCatalogState`/`setProviderCatalogState`），所以重启后仍能区分“从未成功拉取”和“过期”。
+
+### 5.2 模型来源与用户覆盖
+
+模型来源至少包括三类：Provider 内置/远端模型列表、Provider DB 聚合目录和用户 custom models。`BaseLLMProvider` 负责获取、缓存和写回 Provider models；`ProviderModelHelper` 与 Provider DB loader 负责本地目录和刷新。
+
+用户添加 custom model 时保存模型 ID、名称、分组和 Provider 归属，并可启停、编辑和删除。模型启停状态单独保存在 `model_status`（键生成见 `modelStatusKey.ts`），Provider 删除时清理相关状态和模型配置。模型配置由 `ModelConfig` 保存上下文长度、最大输出、采样参数、vision、function call、reasoning、endpoint 和媒体能力；有效配置由 Provider facts、Provider DB 和用户覆盖合并得到。输入/输出媒体能力单独抽到 `mediaCapabilities.ts` 与 `modelCapabilities.ts`，避免把某个上游目录的图文能力错误带到只支持文本的同名模型上。
+
+`capabilityProviderId` 与 `isProviderDbBackedProvider`（`providerRegistry.ts:956-959`）共同决定某个 Provider 的目录事实来自哪里：目录属于 profile，而不是共用同一传输协议的每个 Provider。
 
 ## 6. Adapter、协议与请求组装
 
-`providerRegistry.ts` 将 Provider ID 优先、apiType 次之映射到 AI SDK runtime definition。definition 包含 runtime kind、behavior preset、模型来源、连通性检查、credential strategy、route strategy、embedding strategy 和默认 headers（`src/main/provider/providerRegistry.ts:50-80`、`:684-690`）。
+`providerRegistry.ts` 将 Provider ID 优先、apiType 次之映射到 AI SDK runtime definition。definition 包含 runtime kind、behavior preset、模型来源、连通性检查、credential strategy、route strategy、embedding strategy 和默认 headers（`src/main/provider/providerRegistry.ts`）。Provider ID 与 apiType 两个注册表并存，前者用于保留具名渠道的身份与默认元数据，后者兜底通用协议。
 
 因此，同一 OpenAI-compatible apiType 可以复用统一适配器，同时保留每个 Provider 自己的 Base URL、API Key 和模型目录。Anthropic、Gemini、OpenAI Responses、OpenAI Completions、Vertex、Bedrock、Ollama 等特殊协议在 provider factory/AI SDK provider 中组装 endpoint、headers 和协议请求体；上层 runtime 统一消息、工具、reasoning、媒体和 embedding 的调用接口。
+
+**路由选择**：`resolveProviderTransport`（`src/main/provider/providerTransport.ts`）在运行时再决定该请求实际走哪个 provider kind。`new-api` 与 `apimart` 两类 route strategy 会按模型或 route 元数据解析出 `openai-response`、`anthropic`、`gemini` 等 endpoint 类型并映射为对应 kind；`opencode-go` 策略遇到 Anthropic 兼容路由时切到 anthropic kind；其余取 definition 的 runtimeKind。该层解决同一 Provider 内部不同模型走不同协议的问题。
+
+**专用实现**：新增的 TypeSafe Jev 与 Cloudflare Workers AI 各自有 provider 实现（`providers/jevProvider.ts`、`providers/workersAiProvider.ts`），前者把 `/v1/systemone` 判题端点包装成 Provider（目录端点为其兄弟 `/v1/models`），后者走 Workers AI 的账号/网关协议。
 
 DeepSeek 官方 Responses endpoint 的原生 Web Search 是 Provider ID、模型 ID 和官方 endpoint 三重条件下的特殊 adapter 路径；它不改变 Provider 管理数据模型。ACP 的 `apiType: acp` 走 Agent backend，不是普通聊天 Provider 的通用 AI SDK endpoint。
 
@@ -175,40 +194,44 @@ Provider change、模型变化、限流排队/执行和 Provider DB 刷新通过
 - Provider 身份、模型目录/能力和请求 runtime 分层，允许多个 Provider 共享协议适配而保留独立 endpoint/key。
 - 默认 Provider 作为应用内置能力和元数据来源，用户配置作为可变状态；默认渠道不能简单等同于当前已配置渠道。
 - Provider 级 QPS 队列解决单渠道节流，但源码未显示健康权重、成本路由或多 Key 轮换。
+- 模型目录改为“主进程单一写者 + 带 revision 的快照”，把来源差异（远端、DB、运行时、Ollama、ACP）收敛在主进程；renderer 只消费快照，避免多入口并发拉取造成目录抖动。代价是目录新鲜度依赖服务端调度与 TTL，而不是调用方每次现取。
+- 同一 Provider 内可以按模型切换协议（`resolveProviderTransport`），因此“Provider 的 apiType”只决定默认路由，不是所有模型的实际协议。
 - 普通 Provider API Key 在 Provider settings/SQLite 字段中可见于 main 侧持久化对象；前端展示、CLI DTO、导入预览和 trace 使用脱敏或不返回原值。OAuth 凭据有单独 safeStorage 路径。
 - “支持导入”是桌面端从外部应用本地数据迁移的能力；本次未找到对称的 Provider export，因此不能据此推断用户可以从 DeepChat 导出完整渠道配置。
 - 底层 `providers.remove` 对 renderer caller 没有内置/custom 限制，但当前桌面删除按钮只对 custom Provider 显示；CLI 路径明确增加了内置 Provider 拒删校验。这是不同管理入口的行为差异。
 
 ## 11. 未验证事项
 
-- 未运行 Electron 设置页，未验证表单 blur 保存、Base URL 解锁、删除确认、导入应用后的刷新和错误提示在实际平台上的行为。
+- 未运行 Electron 设置页，未验证表单 blur 保存、Base URL 解锁、删除确认、新增渠道的多阶段流程、导入应用后的刷新和错误提示在实际平台上的行为。
 - 未运行 CLI，未验证 DeepChat 未启动、approval pending、权限失败、超时和退出码在当前打包版本中的实际表现。
 - 未运行 TUI 或远程 Web，因为源码和 CLI 文档显示 TUI 不包含，且本次未找到独立 Web 管理服务；这不是对所有未来分支或外部集成的绝对否定。
 - 未执行真实 Provider 连接测试，未逐渠道验证 endpoint suffix、默认 headers、代理、OAuth、模型刷新、媒体和 embedding 的上游兼容性。
-- RunInfra 与 API Route 的默认身份和路由为源码确认，实际服务可用性、模型清单和地区网络行为未验证。
+- 新增的 23 个默认渠道只核对了定义与注册，实际服务可用性、模型清单、地区网络与计费行为未验证；TypeSafe Jev 与 Cloudflare Workers AI 的专用实现未跑真实请求。
+- 未验证 OpenAI ChatGPT 登录模式的完整链路（授权窗口、回调、凭据刷新、失效后重新登录），只确认了配置字段、路由分支与就绪判定。
+- 未验证 provider catalog 的并发刷新合并、superseded 语义、TTL 过期后的实际刷新时机，以及重启后状态恢复。
 - 未确认 Electron Store 的底层文件位置、SQLite 数据库加密 key、备份/同步/导出文件中的凭据处理，也未运行数据库迁移。
 - 未验证 Provider 删除时已有 session/provider 引用如何恢复，以及 Provider 实例、限流队列和正在进行请求在删除/禁用时的边界行为。
 - 未找到 Provider 复制、Provider 导出、CLI Provider 导入和 CLI Provider 导出实现；仅找到模型配置的导入/导出 route，不能把它们扩大解释为渠道配置导入/导出。
 
 ## 12. 关键源码索引
 
-- Provider 类型与模型配置：`src/shared/types/provider.ts:74-106`、`:370-413`
-- Provider 设置初始化与默认合并：`src/main/provider/settings.ts:322-412`
-- Provider helper CRUD/排序：`src/main/provider/providerHelper.ts:154-244`
-- SQLite Provider 表 CRUD：`src/main/provider/data/settingsTable.ts:156-223`
-- Provider route contracts：`src/shared/contracts/routes/providers.routes.ts:79-124`、`:182-275`、`:429-515`
-- 桌面 Provider store：`src/renderer/src/stores/providerStore.ts:150-278`
-- 桌面 Provider 列表与新增入口：`src/renderer/settings/components/ModelProviderSettings.vue:24-247`、`:764-799`
-- 桌面连接配置与删除按钮：`src/renderer/settings/components/ProviderApiConfig.vue:15-55`、`:120-203`
-- 桌面连接测试、模型管理和删除：`src/renderer/settings/components/ModelProviderSettingsDetail.vue:217-243`、`:361-445`
-- Provider 导入数据模型与 service：`src/shared/providerImport.ts`、`src/main/provider/providerImportService.ts:48-83`、`:375-513`、`:1033-1457`
-- Provider import 桌面向导：`src/renderer/settings/components/ProviderConfigImportDialog.vue:32-417`、`:645-807`
-- CLI 命令定义：`src/cli/args.ts:234-240`、`:598-712`
-- CLI Provider 管理 route：`src/main/cli/providerModelAdminRoutes.ts:119-287`
-- CLI surface 权限与操作边界：`src/main/cli/surface.ts:603-670`
-- CLI V1 能力边界：`docs/guides/cli.md:1-20`、`:76-93`、`:251-257`
-- Provider registry 与实例路由：`src/main/provider/providerRegistry.ts:50-80`、`:684-690`、`src/main/provider/managers/providerInstanceManager.ts:31-207`
-- RunInfra 与 API Route 默认定义：`src/main/provider/defaults.ts:35-61`、`src/main/provider/providerRegistry.ts:135,510`
-- 连接测试：`src/main/provider/providerService.ts:18-61`、`src/main/provider/index.ts:863-930`
-- QPS 限流：`src/main/provider/managers/rateLimitManager.ts:24-190`、`:284-385`
-- 凭据与脱敏：`src/main/provider/auth/openaiCodex/credentialStore.ts:22-43`、`src/main/provider/data/settingsTable.ts:168-199`、`src/main/lib/redact.ts:4-40`
+- Provider 类型与模型配置：`src/shared/types/provider.ts:75-110`、`:32`（渲染层模型元数据）、`:54`（模型元数据）
+- Provider 目录聚合：`src/main/provider/catalog/providerCatalogService.ts`、`catalog/providerCatalogProjection.ts`、`src/shared/types/providerCatalog.ts`
+- Provider 设置初始化与默认合并：`src/main/provider/settings.ts:367-470`、`:1434`
+- 默认渠道定义：`src/main/provider/defaults.ts`（含 23 个新增条目与 TypeSafe/Cloudflare 模型）
+- Provider helper CRUD/排序：`src/main/provider/providerHelper.ts`
+- SQLite Provider 表 CRUD：`src/main/provider/data/settingsTable.ts`
+- Provider route contracts：`src/shared/contracts/routes/providers.routes.ts`（目录路由 `:403-437`）
+- 桌面 Provider store：`src/renderer/src/stores/providerStore.ts`
+- 桌面渠道目录与新增流程：`src/renderer/settings/components/ProviderCatalog.vue`、`AddProviderFlow.vue`
+- 桌面连接配置与登录模式：`src/renderer/settings/components/ProviderApiConfig.vue`、`ModelProviderSettingsDetail.vue:430-450`、`providerOnboardingReadiness.ts:29`
+- 模型管理：`src/renderer/settings/components/ProviderModelManager.vue`、`ProviderModelList.vue`
+- Provider 导入数据模型与 service：`src/shared/providerImport.ts`、`src/main/provider/providerImportService.ts`
+- Provider import 桌面向导：`src/renderer/settings/components/ProviderConfigImportDialog.vue`
+- CLI 命令定义：`src/cli/args.ts`、`src/main/cli/providerModelAdminRoutes.ts`、`src/main/cli/surface.ts`
+- CLI V1 能力边界：`docs/guides/cli.md`
+- Provider registry、路由选择与实例：`src/main/provider/providerRegistry.ts:942-965`、`src/main/provider/providerTransport.ts`、`src/main/provider/managers/providerInstanceManager.ts`
+- 专用 Provider 实现：`src/main/provider/providers/jevProvider.ts`、`providers/workersAiProvider.ts`
+- 连接测试：`src/main/provider/providerService.ts`、`src/main/provider/index.ts`
+- QPS 限流：`src/main/provider/managers/rateLimitManager.ts`
+- OAuth 与凭据：`src/shared/types/oauth.ts`、`src/main/provider/auth/index.ts`、`auth/openaiCodex/credentialStore.ts`、`auth/xaiGrok/credentialStore.ts`、`src/main/lib/redact.ts`

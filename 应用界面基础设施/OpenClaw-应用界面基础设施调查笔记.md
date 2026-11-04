@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`541406eeb737e00907438f79cbc0d0a74f0def99`（分支：`main`）
+> 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
 > 调查方式：静态源码阅读。以 Control UI（`ui/`）为主干，沿入口装配、公共浮层/菜单/反馈/主题/响应式组件与其状态宿主逐层下钻；辅以 `src/tui` 与 `apps/` 的框架判断与平台边界确认。未运行构建、测试或 Gateway。
 >
@@ -24,19 +24,19 @@ OpenClaw 的界面设施按“一个 Web 主表面 + 多种独立客户端”分
 
 产品表面与界面栈：`ui/` 是主要 Web 表面（package.json 依赖 Lit、Web Awesome、`@lit/context`、CodeMirror、markdown-it、panzoom、xterm/novnc/ghostty 等），vite 构建且由 Gateway 同源派发（ui/AGENTS.md 规定 Control UI 与 Gateway 一个安装一个版本、不携带版本兼容分支）。`src/tui` 是终端 TUI，走 Gateway 协议或内嵌后端。`apps/` 下 macOS/iOS/Android/Linux 是原生或 Tauri 客户端，各自实现完整 Gateway 客户端（见“平台边界”）。
 
-入口装配从 `ui/index.html` 的 `<openclaw-app>` 开始：`main.ts` 先注册 service worker（仅生产）、安装 stale-chunk 重载与丢样式表恢复，再把 `/src/app/app-host.ts` 与 `app-root.ts` 里的 `openclaw-app`/`openclaw-app-shell` 两个类定义拉入。`OpenClawApp` 构造 `ApplicationRuntime`（见 bootstrap），用 `ContextProvider` 把 `applicationContext` 提供给整棵子树，然后按连接阶段渲染四类画面之一：Gateway 未就绪时的 mascot 连接页、登录门、approval/question 聚焦文档，或带 Provider 与 Shell 的完整应用（`ui/src/app/app-root.ts:420-618`）。Provider 栈是嵌套顺序固定的一层工具提示 Provider 内包两个数据型 Hovercard Provider，再内包 `openclaw-app-shell`。
+入口装配从 `ui/index.html` 的 `<openclaw-app>` 开始：`main.ts` 先注册 service worker（仅生产）、安装 stale-chunk 重载与丢样式表恢复，再把 `/src/app/app-host.ts` 与 `app-root.ts` 里的 `openclaw-app`/`openclaw-app-shell` 两个类定义拉入。`OpenClawApp` 构造 `ApplicationRuntime`（见 bootstrap），用 `ContextProvider` 把 `applicationContext` 提供给整棵子树，然后按连接阶段渲染四类画面之一：Gateway 未就绪时的 mascot 连接页、登录门、approval/question 聚焦文档，或带 Provider 与 Shell 的完整应用（`ui/src/app/app-root.tsx`）。Provider 栈是嵌套顺序固定的一层工具提示 Provider 内包两个数据型 Hovercard Provider，再内包 `openclaw-app-shell`。
 
-`bootstrapApplication` 负责一次性装配（`ui/src/app/bootstrap.ts:278-681`）：解析 basePath/资源路径与文档模式，从持久化设置恢复偏好并清理 URL 凭据，然后创建 gateway、agents、channels、config、sessions、workboard、runtimeConfig、overlays、navigation、theme、native 桥与 web push 等能力对象，最后按启动生命周期分步启动 gateway、模型初始化重定向与应用路由。能力对象都挂在 `ApplicationContext` 上，通过 `@lit/context` 向下注入，跨窗口并不存在共享的全局单例 store——每个文档（tab/聚焦窗口）实例化一套，状态经 Gateway 协议收敛。
+`bootstrapApplication` 负责一次性装配（`ui/src/app/bootstrap.ts`）：解析 basePath/资源路径与文档模式，从持久化设置恢复偏好并清理 URL 凭据，然后创建 gateway、agents、channels、config、sessions、workboard、runtimeConfig、overlays、navigation、theme、native 桥与 web push 等能力对象，最后按启动生命周期分步启动 gateway、模型初始化重定向与应用路由。能力对象都挂在 `ApplicationContext` 上，通过 `@lit/context` 向下注入，跨窗口并不存在共享的全局单例 store——每个文档（tab/聚焦窗口）实例化一套，状态经 Gateway 协议收敛。
 
 路由是第三块公共基础设施：`@openclaw/uirouter` 路由表把数十个页面路由映射到懒加载 chunk（页面在 `ui/src/pages/` 按主题分目录），Shell 订阅路由状态以折叠 chrome、同步 document title，router outlet 在路由数据未就绪前以连接 splash 兜底。
 
 ## 弹窗、浮层与菜单
 
-Modal 的公共底层只有一个适配器：`openclaw-modal-dialog` 把 Web Awesome 的 `wa-dialog`（原生 `showModal` top-layer 对话框）包成 `openclaw-*` 元素（`ui/src/components/modal-dialog.ts:17-356`）。它提供 label/description、`manual` 模式、按 class 切换 drawer/fullscreen/viewport-edge-to-edge/palette 等外形（含 nav-drawer 移动抽屉与移动端 edge-to-edge），并在断开时主动 `dialog.close()` 归还焦点。开放期间把自己登记进 `document.openClawModalLayers` 集合（8-15 行），关闭动画后移除；`wa-hide` 冒泡被转换为可取消的 `modal-cancel` 事件供业务层拦截（310-329 行）。自动聚焦 `[autofocus]` 目标、隐藏后归还 `returnFocus`，这些是适配器自带逻辑；wa-dialog 内部对 Esc/遮罩/焦点陷阱/top layer 的表现未下钻源码，按依赖库边界记为未核实。
+Modal 的公共底层只有一个适配器：`openclaw-modal-dialog` 把 Web Awesome 的 `wa-dialog`（原生 `showModal` top-layer 对话框）包成 `openclaw-*` 元素（`ui/src/components/modal-dialog.ts`）。它提供 label/description、`manual` 模式、按 class 切换 drawer/fullscreen/viewport-edge-to-edge/palette 等外形（含 nav-drawer 移动抽屉与移动端 edge-to-edge），并在断开时主动 `dialog.close()` 归还焦点。开放期间把自己登记进 `document.openClawModalLayers` 集合（8-15 行），关闭动画后移除；`wa-hide` 冒泡被转换为可取消的 `modal-cancel` 事件供业务层拦截（310-329 行）。自动聚焦 `[autofocus]` 目标、隐藏后归还 `returnFocus`，这些是适配器自带逻辑；wa-dialog 内部对 Esc/遮罩/焦点陷阱/top layer 的表现未下钻源码，按依赖库边界记为未核实。
 
 命令式弹窗基于同一适配器：`confirm-dialog.ts` 用 Lit `render` 把 `openclaw-modal-dialog` 挂到一个临时 div，返回 Promise；提供“不再询问”跳过偏好、AbortSignal 与单飞互斥（`showConfirmDialog` 拒绝重入）。配对设备、懒加载失败等场景同样把 loading/失败态渲染进 `openclaw-modal-dialog` 内（`app-shell-view.ts:121-192`），保证分块加载失败时仍有一个带重试的对话框而不是空白。
 
-菜单没有统一注册表，主路径是 Web Awesome `wa-dropdown` + 每处控制器的组合：`web-awesome.ts` 提供公共粘合（打开时给菜单 part 补 aria 标签、关闭动画后置 inert、跟踪键盘 Tab/Esc 导致的隐藏），`dropdown-menu-controller.ts` 是每菜单的 Lit controller（打开即聚焦首项，Esc 时把焦点还给持久触发器后关闭）。`menu-surface.ts` 会把宿主元素以 `popover=manual` 提升到浏览器 top layer 再渲染内容，让瞬态菜单盖过普通层叠上下文；不支持 Popover API 时回退到文档流内渲染。少量悬浮面板（如会话菜单展开的锚定浮层）用 `<details>` + `wa-popup` 的组合，由 `anchored-overlay.ts` 统一设置 placement/翻转/边界（`ui/src/components/anchored-overlay.ts:12-33`）。tooltip 详见下一节。hovercard（会话、GitHub 链接）是 body 级浮动卡片，见 `portaled-hovercard.ts`：控制器把 `role="dialog"` 的 div append 到 body，监听 resize/scroll/visualViewport 重定位，管理“指针停留/离开再定时关闭”的转移期；无 z-index 管理，靠 DOM 追加顺序。
+菜单没有统一注册表，主路径是 Web Awesome `wa-dropdown` + 每处控制器的组合：`web-awesome.ts` 提供公共粘合（打开时给菜单 part 补 aria 标签、关闭动画后置 inert、跟踪键盘 Tab/Esc 导致的隐藏），`dropdown-menu-controller.ts` 是每菜单的 Lit controller（打开即聚焦首项，Esc 时把焦点还给持久触发器后关闭）。`menu-surface.ts` 会把宿主元素以 `popover=manual` 提升到浏览器 top layer 再渲染内容，让瞬态菜单盖过普通层叠上下文；不支持 Popover API 时回退到文档流内渲染。少量悬浮面板（如会话菜单展开的锚定浮层）用 `<details>` + `wa-popup` 的组合，由 `anchored-overlay.ts` 统一设置 placement/翻转/边界（`ui/src/components/anchored-overlay.ts`）。tooltip 详见下一节。hovercard（会话、GitHub 链接）是 body 级浮动卡片，见 `portaled-hovercard.ts`：控制器把 `role="dialog"` 的 div append 到 body，监听 resize/scroll/visualViewport 重定位，管理“指针停留/离开再定时关闭”的转移期；无 z-index 管理，靠 DOM 追加顺序。
 
 ## 通知、加载态与错误反馈
 
@@ -74,7 +74,7 @@ token 权威源在 `ui/src/styles/base.css`：`:root`（暗底默认）定义背
 
 桌面与移动 companion 不是 Control UI 的薄壳。Linux 客户端是 Tauri v2 桌面壳，负责 Bonjour 发现、CLI 安装、用嵌入式 WebView 打开所选 Gateway 的 Control UI、Quick Chat 则以 capability 白名单隔离的 child WebView 渲染 `show_widget` 文档、托盘与系统通知（`apps/linux/README.md`）。macOS 客户端是 Swift 应用，可自带本机 UI 也嵌入 Control UI WebView（Control UI 侧的 `native-*.ts` 桥与 macOS 的 WebViewJavaScriptSupport 对应）；iOS/Watch 与 Android/Wear 是完整原生聊天客户端（SwiftUI / Android 工程），经共享 `apps/shared/OpenClawKit`（网关 WebSocket 传输、协议编解码、跨平台共享聊天 UI 与字体工具）与原生能力代码连网关。这些客户端各自实现主题与通知通道，不消费 Control UI 的 token 或 store。本调查只确认平台边界与各自技术栈，未下钻任一原生 App 的界面实现（未验证项）。
 
-TUI（`src/tui`）是基于 `@earendil-works/pi-tui` 的终端界面：组件层有 chat log、markdown 消息、select list、autocomplete 等；浮层经由 pi-tui 的 overlay 机制封装成开合/焦点恢复处理器（`src/tui/tui-overlays.ts:1-29`）；主题 `src/tui/theme/theme.ts` 从 `OPENCLAW_THEME` 或 `COLORFGBG` 判定明暗并用相对亮度公式挑选文字色，与 Web 主题无共享。后端契约面向远程 Gateway 或内嵌后端，属命令行面，不共享 Control UI 设施。
+TUI（`src/tui`）是基于 `@earendil-works/pi-tui` 的终端界面：组件层有 chat log、markdown 消息、select list、autocomplete 等；浮层经由 pi-tui 的 overlay 机制封装成开合/焦点恢复处理器（`src/tui/tui-overlays.ts`）；主题 `src/tui/theme/theme.ts` 从 `OPENCLAW_THEME` 或 `COLORFGBG` 判定明暗并用相对亮度公式挑选文字色，与 Web 主题无共享。后端契约面向远程 Gateway 或内嵌后端，属命令行面，不共享 Control UI 设施。
 
 ## 设计取舍与已确认边界
 
@@ -99,7 +99,7 @@ TUI（`src/tui`）是基于 `@earendil-works/pi-tui` 的终端界面：组件层
 
 ## 关键源码索引
 
-- 应用根与文档模式分发：`ui/src/app/app-root.ts`、`ui/src/app/app-host.ts`
+- 应用根与文档模式分发：`ui/src/app/app-root.tsx`、`ui/src/app/app-host.tsx`
 - 装配与上下文：`ui/src/app/bootstrap.ts`、`ui/src/app/context.ts`
 - 弹窗适配层：`ui/src/components/modal-dialog.ts`；命令式确认：`ui/src/components/confirm-dialog.ts`
 - Toast：`ui/src/lib/toast.ts`
@@ -107,9 +107,9 @@ TUI（`src/tui`）是基于 `@earendil-works/pi-tui` 的终端界面：组件层
 - Tooltip：`ui/src/components/tooltip.ts`
 - 主题与 token：`ui/src/app/theme.ts`、`ui/src/app/theme-transition.ts`、`ui/src/styles/base.css`、`ui/index.html`
 - 偏好存储与同步：`ui/src/app/settings.ts`、`ui/src/app/server-prefs-state.ts`、`ui/src/app/server-prefs.ts`
-- 注意型状态：`ui/src/app/overlays.ts`、`ui/src/app/overlays-types.ts`、`ui/src/components/exec-approval.ts`
-- 懒加载与错误恢复：`ui/src/app/lazy-custom-element.ts`、`ui/src/app/stale-chunk-reload.ts`、`ui/src/components/lazy-view-error.ts`
-- 壳布局与响应式：`ui/src/app/app-shell-view.ts`、`ui/src/app/mobile-nav-layout.ts`、`ui/src/app/app-shell-chrome.ts`、`ui/src/styles/layout.css`
+- 注意型状态：`ui/src/app/overlays.ts`、`ui/src/app/overlays-types.ts`、`ui/src/app/exec-approval.ts`
+- 懒加载与错误恢复：`ui/src/app/lazy-custom-element.ts`、`ui/src/app/stale-chunk-reload.ts`、`ui/src/components/solid/lazy-view-error.tsx`
+- 壳布局与响应式：`ui/src/app/app-shell-view.tsx`、`ui/src/app/mobile-nav-layout.ts`、`ui/src/app/app-shell-chrome.ts`、`ui/src/styles/layout.css`
 - 公共内容交互：`ui/src/components/image-lightbox.ts`、`ui/src/components/file-preview-modal.ts`、`ui/src/components/file-kind.ts`
 - TUI：`src/tui/tui-overlays.ts`、`src/tui/theme/theme.ts`
 - 平台文档：`apps/linux/README.md`、`apps/macos/README.md`、`apps/ios/AGENTS.md`、`apps/android/README.md`

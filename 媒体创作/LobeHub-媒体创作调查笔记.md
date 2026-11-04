@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`（Next.js 16 SPA + Hono/tRPC 服务端 + Drizzle/PostgreSQL，另含 Electron 桌面目标）
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：静态源码走读（只读，未修改仓库）；与独特功能笔记快照比对（HEAD 一致）；零依赖验证仅限 `node -e` 解析 5 个 package.json（全部通过）与 `git status` 工作树核对（0 改动）；未安装依赖、未运行测试、未启动应用（Next.js 应用在无模型/无 DB/S3 环境下 dev 跑不通）
 >
@@ -19,7 +19,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 媒体创作视角下三个关键机制（独特功能笔记均未展开）：
 
 1. **三层对象 + 封面回写**：topic（LLM 生成标题、封面、workspace 可见性）→ batch（provider/model/prompt/width/height/config jsonb，即"复用设置"的来源）→ generation（seed、asset、fileId、asyncTaskId）。生成成功后若 topic 尚无封面，客户端自动把首张缩略图经 `updateTopicCover` 回写为 topic 封面（`src/store/image/slices/generationBatch/action.ts:280-292`）。
-2. **lambda/async 双路由 + 双完成路径**：`image.createImage` 在事务里建 batch+N 个 generation+N 个 asyncTask 后 fire-and-forget 触发 `asyncCaller.image.createImage`（`apps/server/src/routers/lambda/image/index.ts:215-332`），真正调模型在 async 路由（`apps/server/src/routers/async/image.ts`）；视频由 lambda 直接调 `modelRuntime.createVideo`，按 provider 返回分 webhook 等待（`src/app/(backend)/api/webhooks/video/[provider]/route.ts`，一次性 token 校验）与 `after()` 后台轮询（`apps/server/src/services/generation/videoBackgroundPolling.ts`，5s 固定间隔 × 120 次）两条路径收口。
+2. **lambda/async 双路由 + 双完成路径**：`image.createImage` 在事务里建 batch+N 个 generation+N 个 asyncTask 后 fire-and-forget 触发 `asyncCaller.image.createImage`（`apps/server/src/routers/lambda/image/index.ts:215-332`），真正调模型在 async 路由（`apps/server/src/routers/async/image.ts`）；视频由 lambda 直接调 `modelRuntime.createVideo`，按 provider 返回分 webhook 等待（`apps/server/src/router-hono/webhooks/handlers/video.ts`，一次性 token 校验）与 `after()` 后台轮询（`apps/server/src/services/generation/videoBackgroundPolling.ts`，5s 固定间隔 × 120 次）两条路径收口。
 3. **Agent 创作通道**：`builtin-tool-image-generation` 是唯一的“结果进聊天”回流：Agent 可发现图像模型与参数 schema、发起生成并查询任务状态（4 个 API，见第 6 节），`humanIntervention: 'never'`，默认在工具内等待完成，结果以 markdown 图片标签 + 专用渲染组件进消息（`packages/builtin-tool-image-generation/src/manifest.ts`、`ExecutionRuntime/index.ts:441-587`）。
 
 已确认边界：OSS 快照中计费/通知为闭源占位（`ENABLE_BUSINESS_FEATURES=false`，charge*/notify* 均为 no-op stub），工作台生成结果与聊天会话之间**未找到** sendToChat 类回流入口；`recreateImage/recreateVideo` store 动作存在但**本次未找到 UI 调用点**；`apps/server/src/routers/async/video.ts`（异步轮询变体）注册在 asyncRouter 但**本次未找到生产调用者**。全部结论为静态源码事实；真实模型调用、S3/PostgreSQL/Redis、webhook 网络行为与 UI 视觉效果未运行验证。
@@ -32,8 +32,8 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 |---|---|---|
 | 创作入口 | `/image`、`/video` 路由族（个人与 `/:workspaceSlug/*` 双形态） | `src/spa/router/desktopRouter.shared.tsx:672-711`、`src/routes/(main)/(create)/features/CreateGenerationPage.tsx:43-44` |
 | 事实对象 | `generation_topics` / `generation_batches` / `generations` 三表 + `asyncTasks` + `files` | `packages/database/src/schemas/generation.ts`、relations `:325-362` |
-| 提交/任务执行 | lambda 路由（事务建行、触发 async）；async 路由（调模型）；视频 webhook 路由（Next.js route） | `routers/lambda/{image,video,generationTopic,generationBatch,generation}/index.ts`、`routers/async/{image,video}.ts`、`src/app/(backend)/api/webhooks/video/[provider]/route.ts` |
-| 结果加工 | GenerationService（sharp 缩略图/封面）、VideoGenerationService（ffmpeg-static 元数据/截图）、FileService（S3） | `apps/server/src/services/generation/{index,video,videoBackgroundPolling,latency}.ts` |
+| 提交/任务执行 | lambda 路由（事务建行、触发 async）；async 路由（调模型）；视频 webhook 路由（Hono webhook handler） | `apps/server/src/routers/lambda/{image/index.ts,video/index.ts,generation.ts,generationBatch.ts,generationTopic.ts}`、`routers/async/{image,video}.ts`、`apps/server/src/router-hono/webhooks/handlers/video.ts` |
+| 结果加工 | GenerationService（sharp 缩略图/封面）、VideoGenerationService（ffmpeg-static 元数据/截图）、FileService（S3） | `apps/server/src/services/generation/{index,video,videoFile,videoBackgroundPolling,latency}.ts` |
 | 持久化 | PostgreSQL（Drizzle）；资产 blob 在 S3/OSS，`files.fileHash → globalFiles.hashId` 全局去重 | `packages/database/src/models/{generationTopic,generationBatch,generation,asyncTask,file}.ts` |
 | 客户端状态/轮询 | zustand 双 store（image/video 各四 slice）+ SWR 指数退避轮询 | `src/store/image/slices/*`、`src/store/video/slices/*` |
 | Agent 通道 | `builtin-tool-image-generation`（client/server 双 executor 共用同一 ExecutionRuntime） | `packages/builtin-tool-image-generation/src/`、`apps/server/src/services/toolExecution/serverRuntimes/imageGeneration.ts` |
@@ -108,7 +108,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
   4. `createAssetAndFile` 收尾
 
   ComfyUI provider 额外透传认证头下载图片（`:212-228`）。
-- **视频**：lambda `video.createVideo`（`routers/lambda/video/index.ts:81-372`）事务建 batch+generation+asyncTask（webhookToken 放 metadata，`:184-247`），随后 `modelRuntime.createVideo`（`:259-266`）。完成后按响应 `useWebhook` 分流：webhook 型等回调（`src/app/(backend)/api/webhooks/video/[provider]/route.ts`），否则 `after()` 注册 `processBackgroundVideoPolling`（`videoBackgroundPolling.ts:32-142`，5s 间隔 × 120 次 `handlePollVideoStatus`）。
+- **视频**：lambda `video.createVideo`（`routers/lambda/video/index.ts:81-372`）事务建 batch+generation+asyncTask（webhookToken 放 metadata，`:184-247`），随后 `modelRuntime.createVideo`（`:259-266`）。完成后按响应 `useWebhook` 分流：webhook 型等回调（`apps/server/src/router-hono/webhooks/handlers/video.ts`），否则 `after()` 注册 `processBackgroundVideoPolling`（`videoBackgroundPolling.ts:32-142`，5s 间隔 × 120 次 `handlePollVideoStatus`）。
 
   视频加工在 `VideoGenerationService.processVideoForGeneration`（`services/generation/video.ts:58-163`）：
   1. 下载（500MB/5min 上限，`:166-221`）
@@ -125,7 +125,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 
 **轮询策略**：SWR `refreshInterval` 动态计算——基 1s、每 5 次请求翻倍、30s 封顶，轮询出错再 ×2；终态 Success/Error 返回 0 停止（`image/.../generationBatch/action.ts:213-238`）。轮询端点 `lambda generation.getGenerationStatus` 先经 `checkTimeoutTasks` 处理超龄任务（`routers/lambda/generation.ts:65-95`、`models/asyncTask.ts:253-289`）：Pending/Processing 超时被置为 `Error(Timeout)`，即“DB 为权威”的收口。终态回写：Success 更新 generation（含 asset）并触发 topic 封面回写（`:280-292`）。
 
-**服务端超时/中止**：async image 路由内 `AbortController` + `ASYNC_TASK_TIMEOUT`（298s）定时 abort（`async/image.ts:131-133,322-334`），abort 后任务标记 Error 并走退款（OSS stub）；视频 webhook 路由对中间状态（pending）直接跳过（`webhooks/video/[provider]/route.ts:71-75`），终态幂等（`:115-122`）。
+**服务端超时/中止**：async image 路由内 `AbortController` + `ASYNC_TASK_TIMEOUT`（298s）定时 abort（`async/image.ts:131-133,322-334`），abort 后任务标记 Error 并走退款（OSS stub）；视频 webhook 处理对尚未到终态的任务直接跳过并返回成功，终态写入做幂等（`apps/server/src/router-hono/webhooks/handlers/video.ts`，token 用 `timingSafeEqual` 比对）。
 
 **取消与失败**：**本次未找到用户侧取消动作**——工作台没有 cancel 按钮/action（grep image/video store 未见 cancel 类方法；取消语义只存在于 async 路由的服务端 abort 与 SWR 停止轮询）。失败分类：`categorizeImageGenerationError`（`apps/server/src/routers/async/imageError.ts`，区分编辑图/内容审核/超时等）与 provider content policy 消息（`getProviderContentPolicyErrorMessage`）；客户端 ErrorState 按 `AsyncTaskErrorType` 翻译并支持复制错误（`GenerationItem/ErrorState.tsx:30-125`）；InvalidProviderAPIKey 在 batch 层整卡引导设置（`BatchItem.tsx:122-136` → `GenerationInvalidAPIKey`）。任务层重试入口见第 5 节。
 
@@ -224,9 +224,9 @@ OSS 中计费/配额/完成通知为闭源扩展点：`chargeBeforeGenerate`/`ch
 
 - 路由与页面：`src/spa/router/desktopRouter.shared.tsx:672-711`、`src/routes/(main)/(create)/{features,image,video}/`（CreateGenerationPage、GenerationWorkspace、GenerationFeed、GenerationLayout、PromptInput、ConfigPanel、ImageWorkspace、VideoWorkspace、_layout/Sidebar）
 - 数据库：`packages/database/src/schemas/generation.ts`、`relations.ts:325-362`、`models/{generationTopic,generationBatch,generation,asyncTask,file}.ts`、`utils/workspace.ts`
-- 服务端路由：`apps/server/src/routers/lambda/{image,generation,generationBatch,generationTopic}/index.ts`、`lambda/video/index.ts`、`routers/async/{image,video,index,caller}.ts`、`src/app/(backend)/api/webhooks/video/[provider]/route.ts`
-- 服务：`apps/server/src/services/generation/{index,video,videoBackgroundPolling,latency}.ts`、`services/toolExecution/serverRuntimes/imageGeneration.ts`、`modules/Mecha/AgentToolsEngine/index.ts:258-294`
+- 服务端路由：`apps/server/src/routers/lambda/{image/index.ts,video/index.ts,generation.ts,generationBatch.ts,generationTopic.ts}`、`lambda/video/index.ts`、`routers/async/{image,video,index,caller}.ts`、`apps/server/src/router-hono/webhooks/handlers/video.ts`
+- 服务：`apps/server/src/services/generation/{index,video,videoFile,videoBackgroundPolling,latency}.ts`、`services/toolExecution/serverRuntimes/imageGeneration.ts`、`modules/Mecha/AgentToolsEngine/index.ts:258-294`
 - 客户端 store：`src/store/image/slices/{createImage,generationBatch,generationConfig,generationTopic}/`、`src/store/video/slices/`（同构）；客户端服务 `src/services/{image,video,generation,generationBatch,generationTopic}.ts`
 - Agent 工具：`packages/builtin-tool-image-generation/src/{manifest,ExecutionRuntime,client/executor,client/Render}.ts(x)`；类型 `packages/types/src/generation/index.ts`、`files/index.ts`；参数 `packages/model-bank/src/standard-parameters/{index,video}.ts`
-- 业务占位：`packages/business-server/src/{image,video}-generation/*.ts`、`packages/business/const/src/index.ts:7`、`packages/business/config/src/server/route.ts:2`
-- 测试文件（未运行）：`apps/server/src/routers/lambda/{image,__tests__/generation,generationBatch,generationTopic,__tests__/video}.test.ts`、`routers/async/__tests__/image.test.ts`、`services/generation/{index,latency,videoBackgroundPolling,videoFile}.test.ts`、`src/store/image|video/slices/*/action|reducer|selectors|hooks*.test.ts*`、`src/routes/(main)/(create)/**/*.test.*`、`packages/builtin-tool-image-generation/src/**/*.test.ts`
+- 业务占位：`packages/business-server/src/{image,video}-generation/`（chargeBeforeGenerate / chargeAfterGenerate / notify*Completed 等）、`packages/business/const/src/index.ts:7`、`packages/business/config/src/server/route.ts:2`
+- 测试文件（未运行）：`apps/server/src/routers/lambda/{image/index.test.ts,image/utils.test.ts,video/error.test.ts}`、`routers/async/__tests__/image.test.ts`、`services/generation/{index,latency,videoBackgroundPolling,videoFile}.test.ts`、`src/store/image|video/slices/*/action|reducer|selectors|hooks*.test.ts*`、`src/routes/(main)/(create)/**/*.test.*`、`packages/builtin-tool-image-generation/src/ExecutionRuntime/index.test.ts` 等

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -19,6 +19,8 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 最完整的公共机制是通知系统。渲染层 NotificationManager 处理归一化、聚合、优先级和展示预算，主进程负责跨窗口语义路由，每个窗口再挂载 vue-sonner Host。相比之下，已导出的 DcToast 门面目前没有业务消费。
 
 主题由主进程设置和 Electron nativeTheme 共同持有，渲染层通过带 revision 的 IPC 快照同步。用户配置集中在明暗、字号和正文或代码字体；主色阶、圆角和密度没有用户入口，也没有主题市场、壁纸、导入导出或自定义 CSS。多窗口主题与通知链路已静态确认，视觉时序仍未运行验证。
+
+设置窗的控制中心结构有几处变化：渠道管理改为“渠道目录 + 多阶段新增流程”（`ProviderCatalog.vue`、`AddProviderFlow.vue`），定时任务拆成任务列表与详情面板并带投递/调度模板（`cronJobs/`、`CronJobsSettings.vue`），新增同步设置页与独立 store（`TunnelSyncSettings.vue`、`stores/tunnelSync.ts`）以及记忆影响复核/谱系视图（`MemoryImpactReview.vue`、`MemoryLineageSection.vue`）。内置 MCP 市场组件（`McpBuiltinMarket.vue`）已删除。
 
 选择组原语位于 `src/dc-ui/components/choice-group/`，Provider 设置页采用分阶段编辑凭据；它们继续使用既有 renderer 到主进程的配置边界，未构成新的全局状态所有者。
 
@@ -221,7 +223,7 @@ renderer 侧 buildFontStack（`src/renderer/src/lib/fontStack.ts:7-13`）把自�
 
 **主题市场/商店/下载与导入导出。** 无 importTheme/exportTheme、无 `theme.json`、无 `themes/` 目录（glob `**/themes/*` 无命中）。主题形态只有内置明暗三态。
 
-**壁纸/背景图设置。** wallpaper/backgroundImage 无命中；仅两处相近但不属于主题设置——悬浮按钮展开壳的本地视觉变量 `--expanded-shell-bg-image`（`FloatingButton.vue:486,539,613`，渐变背景写死在组件样式中）与 MCP artifacts 示例 HTML 的占位图（`artifactsServer.ts:252`）。
+**壁纸/背景图设置。** wallpaper/backgroundImage 无命中；仅一处相近但不属于主题设置：悬浮按钮展开壳的本地视觉变量 `--expanded-shell-bg-image`（`src/renderer/floating/FloatingButton.vue:517`、`:570`、`:644`，渐变背景写死在组件样式中）。
 
 **强调色/主色引擎。** 无 accentColor/primaryColor 设置键、无色阶生成逻辑；`--primary-*` 为静态硬编码值（见 4.2）。
 
@@ -342,3 +344,4 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 - 内容交互：`src/renderer/src/components/message/MessageBlockImage.vue`、`src/renderer/src/composables/useImageActions.ts`、`src/renderer/src/components/chat/composables/useChatInputFiles.ts`、`src/renderer/src/components/chat/ChatInputBox.vue:9-11`
 - 加载与空态：`src/renderer/src/features/chat-page/ChatPage.vue:53-122`、`src/renderer/src/components/chat/ChatSessionSkeleton.vue`、`src/dc-ui/components/empty/DcEmpty.vue`、`src/dc-ui/components/skeleton/DcSkeleton.vue`
 - 非视觉模式：`src/renderer/src/composables/useAccessibilitySupport.ts`、`src/renderer/src/features/chat-page/ChatPage.vue:428,955`
+- 设置窗控制中心：`src/renderer/settings/components/ProviderCatalog.vue`、`AddProviderFlow.vue`、`TunnelSyncSettings.vue`、`cronJobs/`、`MemoryImpactReview.vue`、`MemoryLineageSection.vue`、`ReleaseNotes.vue`、`src/renderer/settings/stores/tunnelSync.ts`

@@ -2,143 +2,123 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：直接阅读源码（Solid TUI 与 Web App 双表面组件与事件绑定、Electron 窗口层），界面行为均为静态确认，视觉效果与键盘可用性需运行验证
+> 调查方式：直接阅读源码（Web App、共享会话渲染包、TUI 与 Electron 壳层的组件与事件绑定），界面行为为静态确认，视觉效果与键盘可用性需运行验证
 >
-> 调查范围：TUI 与 Web App 双表面的工作台结构、会话导航与现场恢复、Composer 与草稿、生成反馈与停止、消息操作与审批工作流、多会话后台生成、跨窗口连续性、发送前配置可见性；会话数据语义与请求执行分别进入会话与消息管理、对话请求与上下文类目
+> 调查范围：各聊天表面的工作台结构、会话导航与现场恢复、Composer 与草稿、排队与中断、消息操作与审批问答工作流、多会话与后台生成、跨窗口与多服务端连接；消息渲染与数据语义分别进入消息渲染器、会话与消息管理类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-OpenCode 同时有 **TUI**（`packages/tui`，opentui + Solid）与 **Web App**（`packages/app`，Solid）两个聊天表面，共享同一服务端会话、SQLite 持久化与 SSE 事件流，按不同交互协议呈现同一用户主链：
+OpenCode 2.x 有三个聊天表面：Web App（`packages/app`，Solid，浏览器与 Electron 共用）、TUI（`packages/tui`，Solid 终端界面）、以及共享渲染包 `packages/session-ui`。三者共享同一套服务端会话数据与 SSE 事件流，界面差异集中在输入方式、导航结构与多服务端能力。
 
-- **TUI**：单页会话视图，键盘为第一交互协议——发送、shell 模式、自定义命令、双击 Esc 中断、命令面板切换会话。
-- **Web App**：会话页（`pages/session.tsx`）+ 虚拟化 timeline + Composer 区域，Composer 上方按需挂载提问、审批、待办、回退、追问等各类操作 dock；中断按钮直接调 `api.session.interrupt`。
-- **共享状态**：两表面都订阅同一事件流（TUI 经 `context/sdk.tsx`，Web 经 `server-sdk.tsx`），生成状态只有 `idle/retry/busy` 三态；UI 状态事实源是服务端事件流。
-- **多会话并发**：每 session 一个 Runner，同会话串行、不同会话并行；界面按会话呈现运行状态，无全局"正在生成"汇总标记。
-- **桌面端（Electron）**：renderer 复用 `@opencode-ai/app`，sidecar 进程内运行同一 opencode server；窗口级差异为草稿 SQLite 持久化与 last-active URL 恢复。
+App 已从"单会话页面"演化为工作台：顶部按服务端 / 工作区 / 会话组织，支持同时连接多个 OpenCode 服务端，会话在标签间切换；Composer 内部集成排队面板、审批与提问 dock、活动芯片等；TUI 的会话路由带 Composer 子标签（shell、子 Agent、终端），并把草稿、排队与中断都纳入键盘操作。
 
 ## 工作台边界与用户主链
 
 ```text
-进入聊天表面（TUI 会话路由 / Web 会话页）
-  -> 会话列表选择或新建（Web 侧栏分页 / 命令面板搜索；TUI 命令面板）
-  -> Composer 组织输入与发送前配置（模型/Agent 选择器 + variant）
-  -> 提交或排队（Web shouldQueue / followup dock；TUI 发送）
-  -> 观察与中断（Web 中断按钮 / TUI 双击 Esc）
-  -> 消息操作（revert、copy、审批、提问、todo）
-  -> 离开后再次进入：全量落库 + SSE 重连恢复现场（桌面端恢复 last-active URL）
+进入聊天表面
+  -> 选择服务端/工作区（App 顶部；桌面端进程内服务端或已连接守护进程）
+  -> 会话列表或新建会话（App 会话列表/首页；TUI 命令面板）
+  -> Composer 组织输入（文本、附件、引用、slash 命令、shell 模式）
+  -> 提交：steer 或 queue（服务端 inbox 语义）
+  -> 观察执行（execution 事件 -> busy/idle、重试、工具进度）
+  -> 中断（App 中断按钮 / TUI 快捷键），可带 resume 让后续输入继续
+  -> 消息操作（回退、复制、审批、提问、待办、fork）
+  -> 离开后重进：HTTP 快照 + SSE 增量恢复现场
 ```
 
-边界：消息/part 如何经 SSE 投影到 store 并渲染、操作栏组件装配属于消息渲染器（`../消息渲染器/OpenCode-消息渲染调查笔记.md`）；会话数据模型、列表查询与草稿持久化的数据语义属于会话与消息管理；发送链、中断、并发与后台任务的执行语义属于对话请求与上下文。
+边界：消息如何投影与渲染属于消息渲染器；会话/消息/回退/fork 的数据语义属于会话与消息管理；发送受理、队列、压缩与重试的执行语义属于对话请求与上下文。
 
-## 1. 页面结构、导航与多窗口
+## 1. 页面结构、导航与多服务端
 
-- **TUI**：消息路由是单文件大会话控制器（`routes/session/index.tsx`，2725 行），承担发送（`Prompt`，:1323-1329）、消息渲染入口、子 agent footer（:1311）、权限与提问对话框（:1299、:1305）、时间线/分支对话框（:527-561）以及 share/rename/compact 等会话命令（:500-579）；事件经 `context/sdk.tsx:82-117` 订阅，16ms 批量投递，断线按 1s→30s 指数退避。
-- **Web App**：会话页（`pages/session.tsx`）组织 timeline 与 Composer；`SessionComposerRegion`（`pages/session/composer/session-composer-region.tsx:11-168`）按需挂载提问、审批、待办、回退、追问等 dock 与 Composer 本体；新式 PromptInputV2Composer 与旧式 PromptInput 由 `newSessionDesign()` 开关选择（`pages/session.tsx:2183-2239`）。
-- 新布局的会话标签除双击改名外，还提供右键菜单中的重命名和关闭；菜单打开时暂停标签预览，关闭菜单后再进入内联编辑，避免两个浮层竞争。会话页标题编辑在失焦时保存，输入法 composing 阶段不把 Enter 当提交（`packages/app/src/components/titlebar-tab-nav.tsx:307-342`、`pages/session/timeline/message-timeline.tsx:779-792、1447-1462`）。
-- **多窗口**：SSE 事件全量广播，多个窗口各自订阅同一事件流、独立投影，无专门同步层（静态推断，见第 8 节）。
-- **桌面端（Electron）**：renderer 以源码方式复用 `@opencode-ai/app`（`desktop/src/renderer/index.tsx:3-17`），sidecar 进程内运行同一 opencode server（`main/server.ts` 的 `spawnLocalServer` :57，Basic auth 头 :197）。
-- 窗口级差异仅三处：每窗口独立 MemoryRouter 与 last-active URL 恢复（`index.tsx:85-111`）、草稿按窗口持久化到 SQLite（`main/ipc.ts:143-150` 的 draft 系列通道）、首启引导；macOS 关窗不退出进程，`activate` 时重建窗口（`main/index.ts:411-418`）。
+- **App 工作台**：路由与布局在 `packages/app/src/session/`（`screen.tsx`、`route.tsx`、`session-frame.tsx`、`session-layout.ts`）与 `packages/app/src/home`、`workspaces`、`servers`、`settings`、`usage`、`voice`、`new-session` 等目录；会话页由时间线、Composer 与侧栏组成。
+- **多服务端**：App 可同时连接多个 OpenCode 服务端并在其间切换，每个服务端有独立的同步状态与数据目录（`packages/app/src/runtime/server/`）；桌面端默认连接本机服务端。
+- **TUI**：`packages/tui/src/app.tsx` 组织路由；会话页在 `routes/session/index.tsx`，Composer 拆成 `routes/session/composer/`（主输入、shell、子 Agent、终端四个标签），对话框在 `component/dialog-*.tsx`（模型、Agent、会话列表、集成、工作区、MCP 等），插件化界面在 `feature-plugins/`。
+- **共享渲染**：会话时间线、消息、工具卡片、diff（pierre）、文件与来源面板集中在 `packages/session-ui/src/`，App 与 TUI 复用同一渲染层。
+- **桌面壳**：`packages/desktop/src/main`、`preload`、`renderer` 三层，主进程负责窗口、文件选择、外部链接、进程与服务端管理，渲染层加载 App 源码。
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **侧栏与首页列表（Web）**：目录同步模块按目录查询会话列表（倒序、限量参数见 `context/directory-sync.ts:124-134`），按 10 条递增分页（数据语义见会话与消息管理笔记 5）。归档成功后会同步移除当前目录列表、会话缓存和首页索引；当前会话则导航到父会话、相邻会话或新草稿，避免页面继续指向已归档对象（`packages/app/src/pages/session/session-archive.ts:31-65`、`pages/home/home-sessions-controller.tsx:217-229`）。
-- **首页入口**：打开目录时若为空目录，自动初始化 Git 后注册为项目（`pages/home/home-controller.ts:89-109`），项目行支持右键菜单（`pages/home/home-projects-view.tsx:478`）。
-- 首页最近会话按"更新时间，缺省取创建时间"降序、id 决胜排序（`pages/layout/helpers.ts:12-16` 的 `compareSessionTime`，`home-sessions-controller.tsx:257`）。
-- **命令面板**：跨目录搜索会话，只查顶层会话并限量 50 条（`app/src/components/command-palette.ts:149`，入口在 `dialog-command-palette-v2.tsx:82`）；TUI 侧会话切换同样走命令面板（`component/command-palette.tsx`、`dialog-session-list.tsx`）。
-- **现场恢复**：会话与消息全量落库（SQLite），再次进入经 SSE 订阅恢复；Web 断线 250ms 重连（server-sdk.tsx:307-308）。桌面端额外恢复 last-active URL（renderer/index.tsx:105-111）。
+- **App**：会话列表按工作区/时间排序，支持搜索与归档过滤；首页提供最近会话与项目入口；归档后会同步清理列表与缓存并导航到相邻会话。
+- **TUI**：命令面板（`component/command-palette.tsx`）与会话列表对话框（`component/dialog-session-list.tsx`）承担切换与搜索。
+- **现场恢复**：会话与消息全部落库，重进时先拉 HTTP 快照再订阅 SSE；客户端维护按服务端维度的同步状态与请求队列（`runtime/server/global-sync/`），断线自动重连。
+- **桌面端**：窗口恢复上次会话；每窗口草稿独立持久化。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- **Web**：提交逻辑集中在 `createPromptSubmit.handleSubmit`（`components/prompt-input/submit.ts:318-639`），含排队发送（`shouldQueue`，`pages/session.tsx:1754-1757` → `submit.ts:482-487`）与追问 dock（`composer/session-followup-dock.tsx`，暂存队列、编辑、补发 :8-105）。
-- Web 附件：图片经 `blobDataUrl` 转 data URL 随消息发送（`submit.ts:101, 117`）；粘贴或拖入失败以 toast 恢复（`prompt-input-v2.tsx:365-384`）。
-- **TUI**：发送在 `component/prompt/index.tsx:1092-1121`；shell 模式以 `!` 进入、Esc/backspace 退出（:1059-1070、:831-857）；自定义命令 :1071-1091。
-- TUI 光标样式可配置（`tui.json` 的 `cursor` 节点，`config/index.tsx:33-40, 90-92, 129-132`），style 取以下四值之一，并可控制闪烁：
+- **提交**：App 的 Composer 由 `packages/app/src/composer/`（编辑器、附件、命令、历史、请求构造）与 `packages/app/src/session/composer/`（会话级适配、排队、审批与 dock）组成；提交走 `composer/submit.ts`，把文本、附件、引用、模型与 delivery 组装成 prompt 请求。
+- **附件**：图片与文件在客户端先转成可上传形态，服务端受理时物化为 blob；粘贴、拖入失败会提示并保留草稿。
+- **草稿**：Web 端草稿与偏好经持久化层保存（`runtime/persistence/drafts.ts` 使用 IndexedDB 的 `opencode-drafts` 库，其余偏好走 localStorage 命名空间）；桌面端窗口级草稿由主进程 IPC 承担；TUI 侧本次未找到独立草稿持久化。
+- **快捷输入**：slash 命令在客户端解析（`composer/client-slash-command.ts`），支持客户端命令与服务端命令；shell 模式在 Composer 内切换；`@` 触发文件/Agent 提及，编辑器支持行内注释式引用（`comments.tsx`、`comment-note.ts`）。
+- **TUI 输入**：`routes/session/composer/index.tsx` 处理发送与模式切换，shell 标签展示命令输出，子 Agent 标签展示子会话进度，终端标签对接内嵌终端。
 
-  ```
-  block / underline / line / default
-  ```
-- **草稿**（三表面各自独立）：
-  - Web：文本与图片 blob 经 IndexedDB `opencode-drafts` 持久化（`utils/draft-store.ts:97-154`），会话页以草稿页签形式恢复（`layout.tsx` :94-、:173-176）；
-  - 桌面端：按窗口持久化到 SQLite（`main/ipc.ts:143-150`，库文件 `userData/drafts.sqlite` :58）；
-  - TUI：未找到草稿持久化入口，prompt 历史只在进程内记录（`component/prompt/history.tsx`）。
+## 4. 发送前配置可见性
 
-## 4. Agent、模型、工具与发送前配置
+- App 的 Composer 控件显示当前会话模型与 Agent，并可切换模型、Agent 与变体；切换会更新会话绑定并在时间线留下切换消息。
+- 本次未找到参数级（温度等）发送前编辑界面，生成参数由 Agent 的 `request` 与模型配置决定。
+- TUI 通过模型/Agent/变体对话框切换，Composer 内不内嵌选择器。
 
-- 会话级 `session.agent` 与 `session.model` 绑定（数据语义见会话与消息管理笔记 8），发送时不一致会自动调用 `setAgentModel` 更新（`packages/opencode/src/session/prompt.ts:672-689`）；发送前模型与 Agent 选择改的是提交链读取的局部当前值（`submit.ts:338-341`）。
-- **界面选择器（Web）**：`SessionComposerControls`（`composer/session-composer-controls.ts:23-50`）提供 agents 查询与模型选择；V2 Composer 还暴露 agent 与 model variant 的循环切换快捷键（`agent.cycle`、`model.variant.cycle`）以及提交/停止按钮（`components/prompt-input-v2.tsx:385-409`）。模型目录滚动时 Provider 分组标题保持可见（`packages/app/src/components/dialog-select-model.tsx:453`）。**本快照中 Composer 暴露的是当前会话已绑定的 agent/model + variant 选择，未发现参数级（temperature 等）发送前配置界面**（参数由 agent/model 配置与 provider 默认决定，见对话请求与上下文笔记 4）。
-- **TUI**：模型/Agent 切换走命令面板与对话框（component/dialog-model.tsx、dialog-agent.tsx、dialog-variant.tsx），未发现 Composer 内嵌选择器。
+## 5. 发送、排队、流式反馈与中断
 
-## 5. 发送、排队、流式反馈与停止
+- **排队**：服务端 inbox 语义（steer 插入当前轮、queue 排队）在 App 的排队面板中可见，可查看未投递条目并取消（`session/composer/queue-panel.tsx`、`queue.ts`；协议端点 `session.inbox.list`/`session.inbox.cancel`）。
+- **流式反馈**：执行事件驱动 busy/idle，assistant 内容随事件增量更新；工具调用显示流式输入与进度；重试状态以独立卡片呈现。
+- **中断**：`POST /api/session/:sessionID/interrupt` 中断当前执行，返回是否真正中断；带 `resume` 时会在中断后继续处理已排队的 steer 与下一项控制输入，而队列中的用户提示保持挂起（`packages/protocol/src/groups/session.ts:672-686`）。App 的中断按钮与 TUI 快捷键都调该端点。
+- **活动提示**：Composer 上方的活动芯片显示当前执行的活动（编辑、搜索、执行命令等），插件也可注入自己的芯片（`activity-chips.tsx`、`plugin-pills.tsx`）。
 
-- **发送**：TUI 在 `component/prompt/index.tsx:1092-1121` 经 SDK 客户端发起会话请求；Web 侧 `submit.ts` 的 `sendFollowupDraft`（:58-208）内含命令、shell 与普通发送三条路径，最终走 `api.session.prompt`（:168-199、:88-105、:491-510）。
-- **排队**：Web 侧 `shouldQueue`（pages/session.tsx:1754-1757：settings followup=queue 且 busy 且未被 question/permission 阻塞且非子会话）决定排队发送，入 followup dock 后空闲补发（:1777-1795）。
-- **流式反馈**：事件 16ms 批量 flush 到 store 后由 timeline 渲染（渲染细节见消息渲染器笔记）；重试状态由 `SessionRetry` 组件展示（timeline/message-timeline.tsx:1247，数据来自 `session_status {type:"retry",...}`，server-session.ts:970-976）。
-- **停止（Web）**：中断按钮直接调 `api.session.interrupt`（`pages/session.tsx:1820-1825`）；V2 Composer 的停止回调同样走该接口（`prompt-input-v2.tsx:403-408`、`submit.ts:275-277`）。
-- **停止（TUI）**：中断为双击 Esc（两次 5 秒内按 Esc，`component/prompt/index.tsx:392-422`；Esc 绑定于 `config/keybind.ts:97` 的 `session_interrupt`）。执行语义（abort 链与清理）见对话请求与上下文笔记 7。
+## 6. 消息操作、审批、问答与待办
 
-## 6. 消息操作、分支与版本导航
+- **消息级操作**：复制、回退、跳转与元信息（Agent、模型、耗时、是否中断）；回退分阶段执行（暂存 → 提交/撤销），界面据此展示文件差异。
+- **审批**：服务端发出权限请求后，App 在 Composer 区域挂载审批 dock，提供拒绝、允许一次、始终允许等回复；TUI 用对话框展示命令与 diff 后再回复。
+- **提问**：`question` 工具的提问会以表单形式展示，支持单选/多选与自由文本；TUI 有对应问答界面。
+- **待办**：会话 todo 以列表或面板展示，数据来自 `todowrite` 工具回注。
+- **表单**：OAuth 等流程需要输入时以服务端表单形式下发，App 与 TUI 均可渲染与取消（`session.form.*` 端点）。
 
-- **Web**：用户消息底部 revert + copy；assistant text part 底部 copy + meta（agent · model · 时长 · interrupted）——组件装配见消息渲染器笔记，数据语义见会话与消息管理笔记 4。会话头部菜单：重命名/分享/导出/归档/删除。
-- **会话命名**：新布局可从标签右键菜单或会话页标题进入内联编辑；Enter/失焦保存，Esc 放弃。标题标签的关闭按钮补有可访问名称（`titlebar-tab-nav.tsx:300-340`、`message-timeline.tsx:1447-1462`）。
-- **分支**：TUI fork 对话框（routes/session/index.tsx:541-561 `DialogForkFromTimeline`）；Web 侧 fork 入口经命令（use-session-commands.tsx，`session.fork`）；数据语义（复制边界、parentID 重映射）见会话与消息管理笔记 4。
-- **审批**：`SessionPermissionDock`（`composer/session-permission-dock.tsx:8-74`）提供"拒绝/始终允许/允许一次"三种回复，统一调 `api.permission.reply`（`session-composer-state.ts:78-93`）；TUI 侧在 `routes/session/permission.tsx`（含 diff 预览 :22-88）。按钮与组件装配见消息渲染器笔记。
-- **提问**：`SessionQuestionDock`（Mark/Option 单选多选 + 自定义答案，composer/session-question-dock.tsx）；TUI `routes/session/question.tsx`。
-- **TUI 复制**：在 tmux 会话中同时写入 OSC52 直写序列与 tmux passthrough，兼容 `set-clipboard on` 配置下的 ssh 复制（tui/src/clipboard.ts:23-28）。
-- **todo**：App 侧 `session-todo-dock.tsx` 与 todoState 状态机（`composer/session-composer-state.ts:13-22`），支持隐藏、清空、打开、关闭等视图动作（:120-176）；todo 数据写入经 `todowrite` 工具回注（执行语义见对话请求与上下文笔记 9，TodoTable 持久化见会话与消息管理笔记 2）。
+## 7. 多会话、子 Agent 与后台任务
 
-## 7. 多会话、多模型、群聊与后台生成
+- 不同会话可并行执行，界面按会话显示状态，没有全局"正在生成"汇总标记。
+- 子 Agent 以子会话运行，TUI 的 Composer 子 Agent 标签与 App 的时间线内嵌卡片展示其进度；子 Agent 完成后结果回注父会话。
+- 后台任务（如后台命令、计划任务）通过 job 与 schedule 子系统运行，完成结果以消息形式回到会话；本次未找到独立的后台任务管理页面。
 
-- **多会话并发**：每 session 一个 Runner，同会话串行、不同会话并行；界面按会话呈现运行状态（session_status per session），无全局"正在生成"汇总标记（执行语义见对话请求与上下文笔记 8）。
-- **子会话/后台生成**：子 agent 以子会话（parentID）运行，TUI 底部显示 `SubagentFooter`（`routes/session/index.tsx:1310-1312`）；"detach 同步子 agent 到后台"的端点在 `handlers/experimental.ts:159-172`（`POST /experimental/session/:id/background`），TUI 快捷键 ctrl+b（`keybind.ts:98`）；后台任务完成的界面反馈本次未找到独立返回入口（结果经合成 user 消息回注，见对话请求与上下文笔记 8）。
-- **状态机**：只有 `idle`/`retry`/`busy` 三态（`schema/src/session-status-event.ts:9-32`），没有排队、运行、暂停、完成等独立的状态字面量（执行语义见对话请求与上下文笔记 1）；Web 端 V2 事件合成 busy/idle（`server-session.ts:963-976`）。
+## 8. 状态所有权与跨窗口同步
 
-## 8. Chat UI 状态所有权与同步
+- UI 状态事实源是服务端：客户端拉取快照后用 SSE 增量投影，所有窗口与表面独立投影同一事件流。
+- App 的同步层按服务端/会话分片，带请求队列与引用计数，避免多组件重复请求（`runtime/server/request-queue.ts`、`refcount.ts`）。
+- 草稿与偏好是客户端本地状态：Web 端 IndexedDB + localStorage，桌面端按窗口持久化。
+- 多窗口之间没有额外同步层，依赖服务端事件流与本地持久化的交叉更新。
 
-- 两表面都订阅同一 SSE 事件流投影到各自 store（TUI 侧 `context/sdk.tsx:82-117` 与 `sync.tsx`；Web 侧 `server-sdk.tsx` 与 `server-session.ts`/`global-sync/event-reducer.ts`）——UI 状态事实源是服务端事件流。
-- 跨窗口：SSE 全量广播，各窗口独立投影，无专门同步层（静态推断）。
-- 草稿：Web 端 IndexedDB、桌面端按窗口 SQLite（第 3 节）；TUI 端进程内。
-- 生成状态由会话执行事件投影而来，映射见下表（`server-session.ts:963-976`；V1 事件路径为 `session.status`）：
+## 9. 键盘、焦点与响应式
 
-  | 服务端事件 | 投影状态 |
-  |---|---|
-  | `session.execution.started` | `{type: "busy"}` |
-  | `session.execution.succeeded` / `failed` / `interrupted` | `{type: "idle"}` |
-  | `session.retry.scheduled` | `{type: "retry", ...}` |
-
-## 9. 键盘、焦点、响应式与关键路径可用性
-
-- TUI：键盘为第一交互协议——发送、shell 模式、自定义命令、双击 Esc 中断（第 3、5 节）；keybind 系统可覆盖（config/keybind.ts）。
-- Web：Composer 提交/停止、agent/model variant 切换有快捷键（prompt-input-v2.tsx:413-428）；移动端会话侧栏以底部 tabs 呈现（pages/session.tsx:2245 mobileTabsBottom）。
-- Web/TUI 的无障碍与焦点顺序细节本次未展开（需运行验证）。
+- TUI 以键盘为第一交互协议：发送、模式切换、命令面板、中断、会话切换都有默认键位且可配置（`config/keybind.ts`）。
+- App 提供 Composer 提交/中断、模型与 Agent 切换等快捷键，桌面端另有窗口级菜单与快捷键。
+- 移动端形态、焦点顺序与无障碍细节本次未展开，需在目标环境观察。
 
 ## 10. 设计取舍与已确认边界
 
-- **双表面共享服务端**：TUI 与 Web 是同一会话模型的两种交互协议，界面差异主要在输入与中断方式。
-- **状态三态**：`idle`/`retry`/`busy` 语义较粗，排队与后台状态没有独立的状态字面量（数据语义见对话请求与上下文笔记 1）；Web 端排队是客户端级暂存（followup dock），V2 另有服务端 `delivery:"queue"`（对话请求与上下文笔记 8）。
-- **多窗口无专门同步层**：依赖 SSE 全量广播 + 各窗口独立投影。
-- **类目边界**：本笔记只记录用户工作流与界面状态；审批/复制的组件装配在消息渲染器笔记；revert/fork 的数据变更在会话与消息管理笔记 4。
-- **本快照未调查**：模型/Agent 参数级（temperature 等）发送前配置界面（静态推断不存在，检查范围：session-composer-controls.ts、prompt-input-v2.tsx、submit.ts 均无参数编辑控件）。
+- **共享渲染包**让 App 与 TUI 的表现层一致，代价是会话渲染必须只依赖通用能力；`session-ui` 有导入边界测试约束。
+- **多服务端**让工作台可同时管理本机与远程会话，客户端同步层因此按服务端分片。
+- **队列上移到服务端**：steer/queue 持久化在 inbox，客户端展示与取消队列条目，而不是仅在内存排队。
+- **中断可续跑**：interrupt 的 resume 语义把"停止"与"继续处理已排队输入"分开，界面只需一个按钮。
+- **边界**：本次未找到独立的后台任务管理中心、参数级生成配置界面；界面视觉效果与键盘可用性未运行验证。
 
 ## 11. 未验证事项
 
-- 视觉效果、焦点顺序、键盘可用性、响应式行为需运行验证（本笔记结论主要来自静态代码）。
-- TUI 与 Web 双表面并置运行时的同步表现未实测。
-- 后台任务完成的界面反馈入口未调查。
-- 移动端会话侧栏抽屉形态未运行验证。
+- 视觉效果、焦点顺序、无障碍与响应式行为需运行验证。
+- 多服务端并存、断线重连与多窗口并发下的界面一致性未实测。
+- TUI 的 shell/子 Agent/终端标签在真实终端环境下的交互未实测。
+- 桌面端的窗口恢复、附件选择与外部链接行为未运行验证。
 
 ## 12. 关键源码索引
 
-- `packages/tui/src/routes/session/index.tsx`：TUI 会话路由（发送、权限/提问/fork/timeline 对话框、subagent footer）
-- `packages/tui/src/component/prompt/index.tsx`：TUI 输入（发送 :1092-1121、双击 Esc :392-422、shell/自定义命令 :1059-1091）
-- `packages/tui/src/context/sdk.tsx`、`sync.tsx`：TUI 事件订阅与 store
-- `packages/app/src/pages/session.tsx`：Web 会话页（中断 :1820-1825、Composer 挂载 :2180-2241）
-- `packages/app/src/pages/session/composer/`：SessionComposerRegion 与 question/permission/todo/revert/followup dock、session-composer-state.ts
-- `packages/app/src/components/prompt-input/submit.ts`：Web 提交（sendFollowupDraft、shouldQueue、abort）
-- `packages/app/src/context/server-sdk.tsx`、`server-session.ts`：Web 事件读取循环与投影
-- `packages/desktop/src/`：Electron 窗口级差异（renderer/index.tsx、main/ipc.ts、main/server.ts、main/index.ts）
+- `packages/app/src/session/`：会话页、路由、布局、时间线控制器
+- `packages/app/src/composer/`：编辑器、附件、命令、历史、持久化
+- `packages/app/src/session/composer/`：会话级 Composer、排队面板、活动芯片
+- `packages/app/src/runtime/`：服务端同步、持久化
+- `packages/session-ui/src/`：共享时间线、消息与工具渲染
+- `packages/tui/src/app.tsx`、`routes/session/`、`component/`、`feature-plugins/`：TUI 结构
+- `packages/desktop/src/main/`、`preload/`、`renderer/`：桌面壳
+- `packages/protocol/src/groups/session.ts`：排队、中断、表单等端点

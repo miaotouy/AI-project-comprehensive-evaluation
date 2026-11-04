@@ -2,247 +2,119 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e03db9bc6908f75c9334d8aa997deeaac81c0298`（分支：`dev`）
+> 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
-> 调查方式：只读源码静态梳理 Provider 组装、配置生命周期、各管理入口、模型目录、凭据、协议适配与请求链路；未运行构建与真实请求
+> 调查方式：只读源码静态梳理 Integration/Credential/Provider 三类对象、认证方法、模型目录、协议实现与请求链路；未运行构建与真实请求
 >
-> 调查范围：Provider 实体与配置生命周期、配置文件/CLI/TUI/Web/桌面端管理入口、凭据边界、模型目录、AI SDK/native 协议适配、运行时选择与路由、多 Key/重试/故障转移、可观测性、平台边界、OAuth 流程；不覆盖 opencode zen 控制台前端
+> 调查范围：渠道与凭据数据模型、连接与认证流程、模型目录、协议适配与请求组装、运行时路由、多凭据/重试/失败转移、管理入口与可观测性；不覆盖 opencode zen 控制台前端
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-OpenCode 的 Provider 是「代码注册的模型目录 + 用户凭据/配置的运行时实例」的合成体：运行时按固定顺序组装 models.dev 目录、插件 hook、config `provider` 字段、环境变量、auth.json 凭据（`src/provider/provider.ts:1343-1668`），通过 AI SDK `streamText` 发起请求（`src/session/llm.ts:280-353`）。模型目录来自远端拉取与缓存（`core/src/models-dev.ts`），无硬编码内置清单；协议适配以 AI SDK 包（内置表 + npm 动态安装）为主路径，另有 opt-in 的 native 协议实现（`packages/llm/src/protocols/`）。
+OpenCode 2.x 把"渠道"拆成三层：Integration 是渠道定义与可用认证方法（key、OAuth、外部凭据、命令行、环境变量），Credential 是落库的认证材料（可按渠道保存多份并选出 active 一份），Provider 是运行时聚合出的可路由模型目录。凭据从旧版 `auth.json` 迁移进 SQLite `credential` 表，启动时有一次导入迁移。
 
-关键事实：
-
-- **Provider ID 11 个**（静态工厂 `schema/src/provider.ts:11-21`）：
-
-  ```text
-  opencode / anthropic / openai / google / google-vertex / github-copilot /
-  amazon-bedrock / azure / openrouter / mistral / gitlab
-  ```
-- **同 provider 多 Endpoint 不支持**：config `provider` 为单对象，`options` 无数组形态；多端点需注册多个自定义 provider id。
-- **凭据存 `~/.local/share/opencode/auth.json`（0o600 明文）**，不写 opencode.json；另 SQLite `credential` 表明文 JSON（core/src/credential/sql.ts:5-14）。**无加密、无系统 keyring、无 UI 打码**。
-- **模型目录三级数据源**：磁盘缓存 → 构建期快照（OPENCODE_MODELS_DEV）→ 网络，TTL 5 分钟、每小时刷新、文件锁防并发（models-dev.ts:160-249）。
-- **无多 Key 轮询、无跨 provider failover**；重试分三处：会话级 `Effect.retry`（processor.ts:660-674，上限 5 次、指数退避带 0.25 抖动）+ SDK 级 `maxRetries` + native 级指数退避（详见 §7）。
-- **无登录后连接测试请求**：登录流程直接写凭据结束（cli/cmd/providers.ts:480-485）。
-- **错误归一化**：`parseAPICallError`/`parseStreamError`（provider/error.ts:102-186）识别 context_length_exceeded/insufficient_quota 等，映射为 `ContextOverflowError`/`APIError`（message-v2.ts:603-719）。
-- **浏览器不直连 provider**：OAuth 授权由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186）。
-- **prompt caching**：Anthropic/Bedrock 家族自动 `cacheControl: ephemeral`（provider/transform.ts:357-406）。
-- **Azure 增加 CLI 凭据路径**：检测到本机 `az` 时，连接入口提供 Microsoft Entra ID（Azure CLI）方法；请求前按 Azure Cognitive Services 或 Foundry scope 调 `az account get-access-token`，令牌按 scope 缓存并在到期前 60 秒刷新，再以 Bearer Header 发送（`packages/opencode/src/plugin/azure.ts:20-121`）。
+模型请求不再依赖 AI SDK：`@opencode/ai` 直接实现各家协议（chat/messages/responses/images/speech/transcription 等），Core 只负责把会话上下文转成请求并消费统一 LLM 事件。模型目录仍来自远端 models.dev 快照（磁盘缓存 + 构建期快照 + 网络，5 分钟 TTL）。
 
 ## 总体调用链
 
 ```text
-运行时组装（provider.ts:1343-1668）：
-  models.dev 目录 → 插件 provider hook → config.provider 覆盖 → env key 探测
-  → auth.json API key → 插件 auth loader → 内置 custom(dep) 适配器 → 重放 config
-→ getModel/getLanguage（provider.ts:1811-1864）：parseModel → 校验存在性 → resolveSDK
-→ streamText（session/llm.ts:318）→ fullStream → LLMEvent（llm/ai-sdk.ts）
-→ usage/cost 落库（session/session.ts:338-407 → session 表 cost/tokens_*）
+渠道定义与认证方法（Integration）
+  -> 连接流程：key / OAuth attempt / 命令行 attempt / 外部凭据 / 环境变量
+  -> Credential 落库并设为 active（credential 表）
+  -> Provider 目录聚合（models.dev + 各 provider 插件）
+  -> 会话/Agent 指定模型引用（provider/model[/variant]）
+  -> session/runner/model.ts 解析 -> session/model-request.ts 组装
+  -> @opencode/ai 协议实现发起流式请求
+  -> LLM 事件 -> durable 会话事件 -> usage/cost 累加
 ```
 
-## 1. Provider、渠道与 Endpoint 数据模型
+## 1. 数据模型
 
-- `ProviderV2.ID` 为 branded string + 静态工厂（schema/src/provider.ts:8-23）；`ProviderV2.Info`：`id/integrationID/name/disabled/api(AISDK|Native)/request(headers+body)`（:52-72）。
-- 运行时 `Provider.Model` schema（provider.ts:1036-1051）含 `cost`（带 tiers）、`experimentalOver200K`、`status` 等；媒体能力收敛为 `capabilities.input/output` 布尔（:991-999），无顶层 `modalities` 字段——数组形态的 modalities 只存在于 models.dev 元数据（`ModelsDev.Model`，models-dev.ts:67-121、:92-97）。
-- **多 Endpoint**：`ConfigProviderV1.Info` 是单对象（core/src/v1/config/provider.ts:82-126），`options` 为 `Record<string, unknown>`，**无 options 数组/多端点支持**（源码确认）。唯一的动态多实例是 GitLab `discoverModels`（provider.ts:661-726，按账号发现模型）。
+- **Integration**（`packages/schema/src/integration.ts:74-100`）：id、名称、metadata、认证方法列表、连接列表。方法是带类型的联合：OAuth（表单 + 授权跳转）、命令行（可执行命令 + 轮询状态）、API Key（表单）、External（引用外部管理的凭据）、Env（环境变量名列表）。
+- **连接尝试**：OAuth 与命令行各有 attempt 对象，带创建/过期时间与 pending/complete/failed/expired 状态；OAuth 还区分自动与验证码两种模式。
+- **Credential**（`packages/schema/src/credential.ts`）：id、所属渠道、标签、值、连接器/方法 id、active 标记。值有三种形态：OAuth（refresh/access/expires/metadata）、Key（密钥字符串）、External（只存方法 id 与 metadata，密钥由外部管理）。
+- **Provider 与模型**：Provider 由目录与插件聚合得出，模型带成本、上下文与输出限额、能力、状态等元数据；模型引用形如 `provider/model`，可带变体（`provider/model/variant`）。
+- **存储**：凭据在 SQLite 的 `credential` 表（`packages/core/src/credential/sql.ts`）；旧版 `auth.json` 经数据库迁移脚本一次性导入（`packages/core/src/database/migration/` 下的 legacy credentials 迁移）。
 
-## 2. 配置生命周期、管理入口与持久化
+## 2. 连接、认证与凭据生命周期
 
-OpenCode 把“Provider 定义”和“Provider 凭据”分开管理。Provider 定义属于合并后的配置，旧版配置使用单数 `provider` 对象；凭据由 `auth.json`、环境变量或 V2 的 credential 表提供。因而界面上的“连接”通常是新增或替换凭据，不是创建一个新的 Endpoint 实例；自定义 Provider 才会同时写入配置定义和凭据。
+- **API Key**：客户端提交 key 到渠道的 key 连接端点，服务端保存为 Credential 并激活。
+- **OAuth**：服务端创建 attempt 返回授权链接与说明，客户端轮询状态；完成后写入 OAuth 凭据（含过期时间），可取消或等待过期。
+- **命令行**：部分渠道通过本地命令完成登录（如云厂商 CLI），服务端启动命令并轮询其状态。
+- **外部凭据**：只记录引用，实际密钥与续期由外部系统负责，避免把短期令牌复制进库。
+- **环境变量**：渠道可声明从哪些环境变量读取密钥，运行时探测命中即视为已连接。
+- **多凭据**：同一渠道可保存多份凭据，通过激活接口切换当前使用的一份；切换发布会话无关的凭据变更事件供客户端刷新。
+- **断开**：删除凭据或删除渠道连接；删除后 Provider 目录中该渠道的模型不再可用。
 
-### 配置文件与服务端写入
+## 3. 模型目录与能力元数据
 
-- **查看**：配置文件可直接查看；`opencode debug config` 输出当前实例解析后的配置，而不是某一个源文件的原文（`packages/opencode/src/cli/cmd/debug/config.ts:5-13`）。全局文件按 `opencode.jsonc`、`opencode.json`、`config.json` 的优先级选择写入目标，加载时三个文件仍会按顺序合并（`packages/opencode/src/config/config.ts:139-145、246-260`）。
-- **新增、编辑、复制、删除**：源码确认配置 schema 支持在 `provider` 下新增或修改 Provider 定义、模型、选项和 Header；复制没有专门命令或 API，通常只能手工复制配置对象并改 Provider ID。删除也未找到独立的 Provider 删除接口，需从配置文件移除对象；删除凭据不会删除配置定义。
-- **启停**：旧版通过 `disabled_providers` 禁用，以及 `enabled_providers` 作为允许列表限制目录；运行时和 Provider 列表都会按这两个字段过滤（`packages/opencode/src/provider/provider.ts:1388-1390`）。这属于配置层启停，不会删除凭据。V2 设计稿改用 `disabled` 与 `experimental.policies`，但当前 Web 自定义 Provider 表单仍受 `protocol() === "v1"` 限制，不能据此认定 V2 已提供同等用户入口（`specs/v2/config.md:171-206`；`packages/app/src/components/dialog-custom-provider.tsx:132-152`）。
-- **导入、导出**：本次检查未找到 Provider 配置专用的导入/导出命令。CLI 的 `export`/`import` 针对会话 JSON，不是 Provider 配置（`packages/opencode/src/cli/cmd/export.ts:222-234、287-290`；`packages/opencode/src/cli/cmd/import.ts:94-110`）。
-- **连接测试**：配置文件写入本身不发起 Provider 请求。API Key 连接流程只把 key 写入凭据存储，OAuth 流程执行授权回调；源码未找到“保存后用真实模型或探活接口验证”的通用测试请求。
+- **models.dev 快照**：`packages/core/src/models-dev.ts` 从 `https://models.opencode.ai` 拉取目录，磁盘缓存，TTL 5 分钟并按该间隔定时刷新；网络不可用时可回退到构建期快照（`models-dev/snapshot.txt`）。
+- **Provider 插件**：每个厂商在 `packages/core/src/plugin/provider/` 有对应插件，负责凭据注入、模型覆盖、请求修正与特殊目录（本地 Ollama、LM Studio、vLLM、自定义 OpenAI 兼容端点等）。
+- **能力面**：模型元数据包含成本分档、上下文/输出限额、文本/图片/音频等能力与状态；协议层据此决定请求形态。
+- **默认模型**：会话自己的模型优先，其次 Agent 绑定，最后取默认模型；Provider 列表接口返回默认与已连接信息供客户端使用。
 
-服务端暴露的是配置和凭据的基础操作，而不是 Provider CRUD：配置 API 可以读取或更新合并后的配置，凭据 API 可以设置或移除某个 Provider 的凭据；Provider API 主要列目录、返回认证方法并承载 OAuth 授权与回调（`packages/opencode/src/server/routes/instance/httpapi/handlers/config.ts:14-32`；`packages/opencode/src/server/routes/instance/httpapi/handlers/control.ts:13-25`；`packages/opencode/src/server/routes/instance/httpapi/groups/provider.ts:34-93`）。静态代码中未找到复制、导入、导出或通用连接测试端点。
+## 4. 协议适配与请求链路
 
-### 各管理入口的实际覆盖
+- **协议实现**：`packages/ai/src/providers/` 按厂商提供 `chat`/`messages`/`responses`/`images`/`decisions`/`speech`/`transcription` 等入口，底层由 `packages/ai/src/protocols/` 的具体协议编解码器实现（如 OpenAI chat/responses、Anthropic messages、Gemini、Bedrock Converse、Cohere chat 等）。
+- **统一入口**：`@opencode/ai` 暴露 `generate`、`stream`、`loop`、`compact` 等函数（`packages/ai/src/llm.ts`），Core 通过 `LLMClient` 调用并消费统一事件。
+- **请求组装**：`packages/core/src/session/model-request.ts` 把系统提示、历史、工具定义与输出上限转成协议请求；`model-transport.ts` 处理传输与错误归一。
+- **特殊适配**：prompt caching、思考/推理参数、上下文上限修正、缓存 key 等由 Provider 插件按厂商注入。
+- **usage 与成本**：`packages/core/src/session/usage.ts` 以模型成本表计算 token 费用并累加进会话统计，同时发布 usage 事件。
 
-| 入口 | 源码确认的查看与新增 | 已有渠道的编辑、复制、启停、删除 | 导入、导出与连接测试 | 已有渠道和新建渠道的差异 |
+## 5. 管理入口
+
+| 入口 | 查看 | 连接/编辑 | 断开/删除 | 备注 |
 |---|---|---|---|---|
-| 配置文件 | 直接查看源文件；在 `provider` 下手工新增或修改定义、模型、`options`、Header；可用 `opencode debug config` 查看解析结果 | 手工修改或移除配置对象；可手工复制对象；用 `disabled_providers`/`enabled_providers` 控制启停；凭据删除独立于配置删除 | 未找到 Provider 专用导入/导出；未找到保存后的通用测试请求 | 已有 Provider 可覆盖定义；新 Provider 需要新的 ID 和完整自定义配置，凭据仍另存 |
-| CLI | `opencode providers list` 查看已存凭据和命中的环境变量；`providers login` 新增或覆盖凭据；`debug config` 查看解析配置 | `providers logout` 删除凭据；重新 login 可替换凭据；未找到 Provider 定义编辑、复制或启停命令 | `export`/`import` 仅处理会话；未找到 Provider 连接测试命令 | 已有 Provider 可选择内置或插件认证方法；`Other` 只保存自定义 Provider 凭据，并明确提示仍需编辑 `opencode.json` |
-| TUI | `/connect`（`provider_connect` keybind）列出 Provider 并新增 API Key/OAuth 凭据；可显示已连接标记 | 本次未找到 TUI 中对已有渠道的编辑、复制、断开、启停或删除入口；未找到 Provider 配置导入/导出 | OAuth 授权回调是认证流程，不是独立连接测试；未找到测试请求 | 选择已有 Provider 会进入其认证方法；`Other` 只询问 Provider ID 并保存凭据，随后提示在 `opencode.json` 中配置 |
-| Web | 设置页列出已连接 Provider、来源标签和可连接 Provider；内置 Provider 支持 API Key/OAuth；V1 支持自定义表单，可新增 Provider、Base URL、模型和 Header，并可选写入 key | 已有内置渠道只有 Disconnect；自定义渠道 Disconnect 会移除凭据并加入 `disabled_providers`；自定义表单允许用同一 ID 重新连接已禁用项，但未提供已保存配置的编辑或复制界面 | 未找到 Provider 配置导入/导出；提交 API Key 直接调用连接接口并刷新目录，未发起独立模型探测请求 | 已有渠道展示来源并只能断开；新建自定义渠道可一次写配置和凭据，保存时会移除该 ID 的禁用状态（`packages/app/src/components/settings-providers.tsx:87-146、224-258`；`packages/app/src/components/dialog-custom-provider.tsx:117-166`） |
-| 桌面端 | 桌面端渲染器复用 Web App 的设置页和 Provider 对话框；通过 sidecar 连接本地服务 | 未找到桌面主进程专属 Provider CRUD、复制、启停或删除逻辑；实际覆盖随 Web/sidecar 路径 | 未找到桌面专属导入/导出或连接测试 | 桌面端是部署和服务连接边界，不是另一套渠道模型；sidecar 启动后提供同一 Server API（`packages/desktop/src/renderer/index.tsx:348-435`；`packages/desktop/src/main/server.ts:57-211`） |
+| HTTP | 渠道列表、渠道详情、凭据列表、模型列表 | 连接 key/OAuth/命令行/外部凭据，凭据创建与激活 | 删除凭据、取消授权尝试 | `packages/protocol/src/groups/{integration,credential,provider,model}.ts` |
+| App | 设置页与连接对话框列出渠道、方法与状态 | 表单连接、OAuth 等待、自定义渠道接入 | 断开与移除凭据 | `packages/app/src/providers/{catalog,connect}/`、`settings/` |
+| CLI | `auth list`、`models` | `auth login`、`auth import`、`auth export`、`auth switch` | `auth logout` | `packages/cli/src/commands/handlers/auth/`、`models.ts` |
+| TUI | 模型选择对话框显示已连接渠道 | 连接流程复用 HTTP 端点 | 本次未找到独立的 TUI 凭据管理界面 | `packages/tui/src/component/dialog-model.tsx`、`use-connected.tsx` |
+| 桌面 | 复用 App 页面 | 复用 App 连接流程 | 复用 App | Electron 只承担部署与服务连接 |
 
-上述表格中的“未找到”仅表示在本次检查的配置、CLI、TUI、Web、桌面端入口及其调用链中未发现对应能力，不等同于项目全局绝对不存在。
+## 6. 多凭据、限流、重试与失败转移
 
-Azure 是认证方法覆盖的一个特例：CLI、TUI 与 Web 都从同一插件认证目录取得可用方法；只有系统能找到 `az` 时才显示 Azure CLI 的 Entra ID 路径。该路径仍要求先由用户执行 `az login`，连接回调会先取一次 token 验证当前登录状态，并把 Azure resource name 记入 OAuth accountId 供 Provider 装配读取（`packages/opencode/src/plugin/azure.ts:20-111`、`provider/provider.ts:240-269`）。
+- **多凭据**：同一渠道可存多份并可切换活动凭据，因此"多 Key"以多凭据形式存在；未找到按请求轮询或负载均衡多凭据的实现。
+- **重试**：`packages/core/src/session/runner/retry.ts` 依据错误类型与尝试次数决定是否重试及退避，重试状态写入 assistant 消息。
+- **上下文溢出**：溢出错误触发压缩后重跑，而不是跨模型切换。
+- **失败转移**：本次未找到跨 Provider 自动切换；模型不存在直接报错并给出候选建议。
+- **限流信息**：错误归一化会保留状态码与重试提示，客户端据此显示等待。
 
-- **schema**（opencode.json 的 `provider` 字段，v1/config/config.ts:110-112；类型定义 v1/config/provider.ts:13-126）：
+## 7. 可观测性与安全边界
 
-  ```text
-  ConfigProviderV1.Info   api/name/env/id/npm/whitelist/blacklist/
-                          options(apiKey/baseURL/enterpriseUrl/setCacheKey/timeout/headerTimeout/chunkTimeout + 任意扩展)/models
-  ConfigProviderV1.Model  id/name/family/release_date/attachment/reasoning/temperature/tool_call/interleaved/
-                          cost/limit/modalities/experimental/status/provider{npm,api}/options/headers/variants
-  ```
+- **用量**：会话表保存成本与五类 token 计数，usage 事件供客户端展示。
+- **日志与脱敏**：请求日志只记渠道与模型标识；CLI 保留 `debug redact` 处理器。
+- **凭据保护**：凭据存 SQLite，文件权限与数据目录隔离是主要保护；本次未找到系统 keyring 集成。
+- **浏览器不直连模型服务**：OAuth 授权由服务端发起，浏览器只打开授权链接并等待服务端轮询结果。
 
-- **合并顺序**（config/config.ts:314-596）：
+## 8. 设计取舍与已确认边界
 
-  ```text
-  远程 well-known → 全局（config.json → opencode.json → opencode.jsonc 深度合并，:246-279；legacy TOML 迁移 :262-276）
-  → OPENCODE_CONFIG → 项目 opencode.json → .opencode/ 目录 → OPENCODE_CONFIG_CONTENT
-  → opencode zen 账户/org 远程配置 → 企业托管
-  ```
+- **三层拆分**（Integration / Credential / Provider）让"渠道可发现、凭据可切换、模型可路由"彼此独立，代价是连接状态要跨三层聚合。
+- **原生协议实现**替代 AI SDK 后，厂商差异集中在 `packages/ai/src/providers/` 与 `protocols/`，升级与排障都在仓库内完成。
+- **凭据可多份但单活**：支持多账号并存，但同一时刻每个渠道只有一份生效。
+- **边界**：本次未找到请求级多凭据负载均衡、跨渠道自动故障转移、系统级密钥库接入、保存后的通用连接测试。
 
-- **provider 合并细节**：config 项合并进 models.dev 目录（provider.ts:1424-1520）；`apiNpm` 的解析优先级（:1439-1444）：
+## 9. 未验证事项
 
-  ```text
-  model.provider.npm > provider.npm > existing > modelsDev > "@ai-sdk/openai-compatible"
-  ```
-- **登录不写 opencode.json**：只写 auth.json（cli/cmd/providers.ts:480-485）。
-- **配置写入位置**：实例配置更新写入项目目录下的 `config.json` 并与已有内容深度合并；全局配置更新写回当前全局配置文件，`.jsonc` 使用保留格式的补丁写入，并在发生变化后使缓存失效（`packages/opencode/src/config/config.ts:624-659`）。Web 设置页的 `updateConfig` 调用全局配置 API，随后使各作用域的 Provider 查询失效（`packages/app/src/context/server-sync.tsx:660-670`）。
-- **V2 生命周期边界**：V2 Core 已有运行时 Catalog 的 `provider.update/remove` 和 Integration credential 的 `connection.update/remove`，但本快照中未找到把这些 Draft/Service 操作完整暴露为 Web、CLI 或 TUI Provider 管理界面的通用入口（`packages/core/src/catalog.ts:29-59`；`packages/core/src/integration.ts:140-192`）。因此不能用 V2 内部可变数据结构推断前端已支持编辑、复制或删除 Provider。
+1. 未运行真实认证与请求：OAuth、命令行登录、外部凭据续期均未实测。
+2. 各厂商协议实现的请求头、流式解码与错误映射未逐项验证。
+3. models.dev 拉取失败时构建期快照的实际覆盖度未验证。
+4. 多凭据切换在并发会话中的时序未实测。
+5. 桌面端与 TUI 的模型选择在断连/重连场景的行为未验证。
 
-## 3. 凭据、Header 与代理边界
+## 10. 关键源码索引
 
-- **存储**：`~/.local/share/opencode/auth.json`（core/src/global.ts:11；src/auth/index.ts:10），`set/remove` 以 0o600 权限写**明文 JSON**（auth/index.ts:73-89）；`OPENCODE_AUTH_CONTENT` 可整体覆盖。
-- **三种凭据类型**（src/auth/index.ts）：`Oauth`（refresh/access/expires/accountId/enterpriseUrl，:14-21）、`Api`（key+metadata，:23-27）、`WellKnown`（key+token，:29-33）。
-- **env 边界**：config `env` 字段只声明「从哪些环境变量探测 key」（v1/config/provider.ts:85），探测在 provider.ts:1523-1533；key 不写入 opencode.json。
-- **credential 服务（V2）**：SQLite `credential` 表 `value` 明文 JSON（core/src/credential/sql.ts:5-14），`create` 先删同 integration 旧记录（credential.ts:101-118）。
-- **key 进入请求（AI SDK 路径）**：`options["apiKey"] = provider.key`（provider.ts:1720），SDK factory 构造时带入（:1773-1799），各 SDK 自行放 `Authorization: Bearer`/`x-api-key`。
-- **key 进入请求（native 路径）**：`Auth.bearer(apiKey)` 配置在 route（llm/route/auth.ts）。
-- **插件 fetch 覆盖**：github-copilot 的 `auth.loader` 替换整个 fetch，注入 `Authorization: Bearer ${info.refresh}`（plugin/github-copilot/copilot.ts:96-180）。
-- **脱敏**：native 错误路径系统脱敏（packages/llm/src/route/executor.ts:39-202，`SENSITIVE_NAME` 正则 + `<redacted>` + body 截断 16384 字节）；**未发现 UI/TUI 展示 API key 的打码**（静态推断）。
-- **导出脱敏**：仅 `opencode export --sanitize` 会对会话内容做 `[redacted:kind:id]` 替换（cli/cmd/export.ts:231-234、:289，默认导出不脱敏）。
-- **日志**：Provider 日志只记 providerID/modelID（session/llm.ts:86-93），不含 key。
-
-## 4. 模型目录与能力元数据
-
-- **拉取与缓存**（models-dev.ts）：源 `https://models.opencode.ai/api.json`（:160，`OPENCODE_MODELS_URL` 可覆盖），缓存 `cache/models.json`（:161-164），TTL 5 分钟（:165）。其余机制定位：
-  - 后台每 60 分钟刷新（:257）；
-  - 跨进程 `Flock` 文件锁防并发（:223-249）；
-  - 写盘临时文件 + rename（:204-213）；
-  - `OPENCODE_DISABLE_MODELS_FETCH` 可关闭（:222）。
-- **三级数据源**：磁盘缓存 → 构建期快照 → 网络：
-  - 构建期快照：`packages/opencode/script/generate.ts` 取数（:10-13），注入点在 `script/build.ts:195` 的 `define OPENCODE_MODELS_DEV`；
-  - 网络回退（:217-231）。
-- **元数据**：`ModelsDev.Model`（:67-121）字段：
-
-  ```text
-  id / name / family / release_date / attachment / reasoning / temperature / tool_call /
-  reasoning_options / interleaved / cost（含 tiers、context_over_200k）/ limit（context/input/output）/
-  modalities（text/audio/image/video/pdf）/ experimental.modes / status / provider{npm,api}
-  ```
-
-- **转换**：`fromModelsDevModel`（provider.ts:1212-1263）+ `fromModelsDevProvider`（:1265-1290，`experimental.modes` 展开为 `modelID-mode` 变体）。
-- **暴露**：`Provider.Service.list()`（:1671）；HTTP `GET /config/providers`（handlers/config.ts:24-30）、`GET /provider`（handlers/provider.ts:40-59，含 `default` 与 `connected`）；CLI `opencode models`（cli/cmd/models.ts:8-65）。
-- **排序优先级**：`gpt-5 > claude-sonnet-4 > big-pickle > gemini-3-pro`，latest 靠前（provider.ts:1986-1995）。
-
-## 5. Adapter、协议与请求组装
-
-- **主路径 AI SDK**：`streamText`（llm.ts:318），SDK 由 `resolveSDK` 构造（provider.ts:1673-1805）；流事件转换 `llm/ai-sdk.ts:76-286`。
-- **BUNDLED_PROVIDERS 表**（provider.ts:107-134）内置的 SDK 包：
-
-  ```text
-  @ai-sdk/amazon-bedrock / @ai-sdk/anthopic / @ai-sdk/azure / @ai-sdk/google / @ai-sdk/google-vertex /
-  @ai-sdk/openai / @ai-sdk/openai-compatible / @ai-sdk/xai / @ai-sdk/mistral / @ai-sdk/groq /
-  @ai-sdk/deepinfra / @ai-sdk/cerebras / @ai-sdk/cohere / @ai-sdk/gateway / @ai-sdk/togetherai /
-  @ai-sdk/perplexity / @ai-sdk/vercel / @ai-sdk/alibaba / @openrouter/ai-sdk-provider /
-  gitlab-ai-provider / @ai-sdk/github-copilot（映射到 core/github-copilot/copilot-provider）/ venice-ai-sdk-provider
-  ```
-- **npm 动态安装**：表外包名 `Npm.add(model.api.npm)`（provider.ts:1781-1788；core/src/npm.ts:115-137，装到 `cache/packages/<sanitized>`，Arborist reify），动态 import 后找 `create*` 导出（:1793-1799）；`file://` URL 直接 import。
-- **baseURL/Header**：baseURL 优先级 `options.baseURL > model.api.url`，支持 `${VAR}` 插值（:1698-1719）；header 合并 `options.headers + model.headers`（:1721-1725）；会话级 header `x-session-affinity`、`X-Session-Id`、`User-Agent: opencode/<ver>`（llm/request.ts:187-204）。
-- **请求参数**：`ProviderTransform` 输出 options/providerOptions/message/temperature/topP/topK/maxOutputTokens/schema（src/provider/transform.ts:1151-1506、464-566），按 SDK 生成 `providerOptions`（sdkKey 映射表，:42-96）。
-- **topP 默认值特判**（transform.ts:548-559）：minimax-m2/kimi-k2.5 等 0.95；deepseek-v4-flash 仅 deepseek/opencode 渠道给 0.95。
-- **Copilot 模型能力**：image/pdf 输入能力由远端 `capabilities` 探测（plugin/github-copilot/models.ts:88-94、:133），`pdf` 不是硬编码 false。
-- **Copilot/Codex 插件细节**：Copilot 请求头增加 `X-Interaction-Id`（取当前会话 ID），其自适应思考变体统一声明 `display: "summarized"`、不再仅限 opus-4.7（`packages/opencode/src/plugin/github-copilot/copilot.ts:360-364`、`models.ts:174-183`）。Codex OAuth 暴露的模型按主次版本号过滤，保留 gpt 主版本大于 5 或 5.x 次版本大于 4 的条目（`packages/opencode/src/plugin/openai/codex.ts:293-305`）。
-- **native 协议（opt-in）**：`packages/llm/src/protocols/` 下实现：
-
-  ```text
-  openai-chat / openai-responses / anthropic-messages / gemini / bedrock-converse / openai-compatible-chat
-  ```
-
-  Route 化四要素 protocol/endpoint/auth/framing（`llm/route/*`）；切换门在 `session/llm/native-runtime.ts:46-72`（仅 openai/opencode/anthropic 且对应 npm 包、非 OAuth）。
-- **兼容 provider**：ollama/lmstudio/deepseek 等统一走 `@ai-sdk/openai-compatible`（provider.ts:1444）；deepseek `reasoning_content` 特判（:1485-1487、transform.ts:320-352）。
-- **特殊适配**（provider.ts 内）：
-  - Azure deployment 选择（:154-160、:240-293）；
-  - Bedrock 区域前缀（:367-455）；
-  - Vertex GoogleAuth fetch（:529-543）；
-  - SAP AI Core（:570-593）；
-  - Cloudflare AI Gateway：OpenAI 与 Anthropic 原生模型保留各自协议路径，其他上游改经兼容 REST 路由；Anthropic 的带连字符原生 slug 也保留原样（`packages/opencode/src/provider/provider.ts:1249-1308`）。
-  - GitLab（:604-728）。
-  - Anthropic Claude 5.1+：对 Anthropic、Vertex Anthropic 与 Bedrock 的 thinking/reasoning 配置默认注入 block binding 控制，当前策略在前缀不匹配时丢弃受影响 thinking block；配置显式写 `blockBinding:false` 可退出。Mythos 5.1 排除在默认范围外（`provider/transform.ts:690-738、1417`）。
-
-## 6. 运行时选择、绑定与路由
-
-- **解析**：`Provider.parseModel("provider/model")`（provider.ts:1997-2003）；variant 语法 `provider/model/variant`（acp/config-option.ts:123-130）。**未发现 `@` 全局模型、`#` 本地模型、`:latest` 后缀语义**（源码确认，全仓搜索无匹配）；"latest"仅作排序权重（provider.ts:1992）。
-- **resolve 流程**：`getModel`（provider 存在性 + 模型存在性校验，:1811-1833）→ `getLanguage`（构造/缓存 SDK 与 LanguageModel，:1835-1864）。
-- **会话默认模型**：`currentModel` 按 session 表 model 字段 → 最近 user 消息携带的 model → `provider.defaultModel()`（prompt.ts:614-633）的顺序解析；`defaultModel` 按 `cfg.model` → state/model.json 最近使用 → 第一个已配置 provider 的排序首个模型（provider.ts:1947-1980）。
-- **App 端解析**：使用 server `/config/providers` 响应中的 `defaultModel {providerID, modelID}` 字段（global-sync/utils.ts:139-142），`cfg.model` 字符串仅作回退（app/src/hooks/provider-catalog.ts:28-38）。
-- **不存在模型**：抛 `ModelNotFoundError`（:1099-1113），携带 fuzzysort 建议（:1303-1330）；provider 不存在按 providerID 建议（:1814-1821）。**无静默兜底到其他 provider**。
-
-## 7. 多 Key、限流、重试与故障转移
-
-- **多 Key 轮询/负载均衡：不支持**（源码确认，无 keys 数组、无轮询代码）。
-- **限流识别（AI SDK 路径）**：错误匹配 `429|500|502|503|504|524`、`rate limit`（session/retry.ts:31-38），`retry-after`/`retry-after-ms` 头解析为延迟（:44-75）。
-- **限流识别（native 路径）**：结构化解析 OpenAI `x-ratelimit-*` 与 Anthropic `anthropic-ratelimit-*`（llm/route/executor.ts:112-148），429 区分 `RateLimitReason`/`QuotaExceededReason`（:242-251）。
-- **重试三层**：
-  - 会话级：`Effect.retry(SessionRetry.policy)`（processor.ts:660-674）：`retryable` 判定 5xx 强制可重试、context overflow 不重试、已识别的网络错误与“稍后重试/容量不足”提示也可重试，`FreeUsageLimitError`/`GoUsageLimitError` 转 upsell action（`packages/opencode/src/session/retry.ts:33-42, 77-147`）；指数退避 2s 起、带 0.25 随机抖动，attempt 超过 5 停止（retry.ts:28-31、76-81、192）。
-  - SDK 级：`maxRetries: input.retries ?? 0`（llm.ts:323）。
-  - native 级：`MAX_RETRIES=2` 指数退避带 jitter（executor.ts:35-38、345-364）。
-- **跨 provider failover：不存在**（源码确认）；`closest`（provider.ts:1866-1876）与重试无关。
-- **错误归一化**：`parseAPICallError`/`parseStreamError`（provider/error.ts:102-186）识别 `context_length_exceeded/insufficient_quota/usage_not_included/invalid_prompt/server_is_overloaded` 等 code；context overflow 文本特征 30+ 正则（llm/provider-error.ts:4-38）；映射 `ContextOverflowError`/`APIError`（message-v2.ts:603-719，ECONNRESET、ZlibError、header/stream timeout 归一为可重试 APIError）。
-
-## 8. 连接检测、日志与可观测性
-
-- **连接测试**：登录流程**无专门 validation/测试请求**（源码确认，providers.ts 登录后直接写凭据）；仅插件 prompt 字段有 `validate` 回调（provider/auth.ts:170-176）与 GitLab 登录后 `discoverModels` 真实调 API（provider.ts:661-726）。
-- **usage/cost**：`Session.getUsage` 按 `model.cost`（tiers 按 context 选档、`experimentalOver200K`）乘 token 数除 1e6 计算（session/session.ts:338-407）；投影到 session 表 `cost/tokens_{input,output,reasoning,cache_read,cache_write}`（core/src/session/sql.ts:43-48），删除消息/part 回滚 usage（projector.ts:276-311）。
-- **OTel**：`OTEL_EXPORTER_OTLP_ENDPOINT` 时启用日志与 trace 导出（core/observability/otlp.ts:50-77）；AI SDK `experimental_telemetry`（llm.ts:344-352）；`packages/stats` 消费 tokens 做聚合（stats/core/src/domain/inference.ts:32-118）。
-- **重试可见性**：`SessionStatus` 广播 `{type:"retry", attempt, message, action, next}`（processor.ts:664-672），UI 渲染倒计时卡片（packages/session-ui/src/components/session-retry.tsx:8-73）。
-- **debug**：无独立 debug 开关；`logLevel` 配置 DEBUG/INFO/WARN/ERROR（v1/config/config.ts:27-37）；`opencode debug` 相关 CLI（cli/cmd/debug/）。
-
-## 9. 设计取舍与已确认边界
-
-- **超时三类可配**：`timeout`（整体）、`headerTimeout`（响应头）、`chunkTimeout`（SSE 块间），都可用 `false` 关闭。当前 Provider SDK 装配对后两者统一采用 300 秒默认值，SSE 读超时会同时 abort 请求、取消 reader 并吞掉取消失败的 rejection；显式值覆盖默认（`core/src/v1/config/provider.ts:101-124`、`packages/opencode/src/provider/provider.ts:1799-1833`、`core/src/aisdk.ts:34-40`）。
-- **prompt caching**：Anthropic/Bedrock 家族自动 `cacheControl: ephemeral` 注入 system + 最后 2 条消息（transform.ts:357-406）；`promptCacheKey` 按 sessionID 设置（transform.ts:1254-1267）；V2 runner 用 `session.id.slice(4)` 作 key（runner/llm.ts:204）；`options.setCacheKey` 可关。
-- **重试可能重复计费**：会话级 `Effect.retry` 重跑整个 `llm.stream` effect，同一回合首请求已计费时不会去重（静态推断；processor.ts:660-674）。
-- **凭据明文存储**：auth.json（0o600）与 credential/account 表均为明文，无加密；权限保护靠文件系统权限。
-- **浏览器不直连 provider**：OAuth 由 server 端插件发起，浏览器只显示授权 URL 并等待（provider/auth.ts:163-186、app/src/utils/server-compat.ts:408-450）。
-- **桌面隔离**：Electron 主进程 fork `sidecar.js`（utilityProcess.fork，packages/desktop/src/main/server.ts:57-184），带 password 的 Basic auth 健康检查（:186-211），设置 `OPENCODE_CLIENT=desktop`、`XDG_STATE_HOME=userDataPath`（:44-55）。
-- 渠道管理在 sidecar 内与 Web/CLI 完全同构：provider/模型/凭据无桌面差异，仅请求头 `x-opencode-client: desktop` 标识来源（llm/request.ts:193）；v2 侧车（`OPENCODE_SIDECAR_V2=1`）改为复用已存在的 CLI 守护进程（desktop/src/main/background-cli.ts:19-58，`service status/start/get password`）。
-- **opencode zen**：device code 登录（src/account/account.ts:387-453），token 存 SQLite `account` 表明文（core/account/sql.ts:6-14）；连接后从 `console.opencode.ai/api/config` 拉取 provider 配置覆盖 catalog（core/plugin/provider/opencode.ts:86-212）；无 key 时仅留免费模型（:167-177）。App 桌面端在发起 opencode 授权时会给授权 URL 追加 `client_id=opencode-desktop`，供 Console 侧识别桌面设备（`packages/app/src/components/dialog-connect-provider.tsx:562-566`）。
-- **V2 上下文溢出自动压缩再试**：V2 runner 有 `compactAfterOverflow` 重跑 turn（core/src/session/runner/llm.ts:277-381），V1 无跨模型 fallback。
-
-## 10. 未验证事项
-
-1. 未运行构建与真实 API 请求；AI SDK 各包的 header/请求体组装行为未实测。
-2. npm 动态安装（Npm.add）在离线/代理环境的行为未验证。
-3. OAuth 各插件（openai/github-copilot/xai 等）的 device flow 未实测。
-4. 重试重复计费、prompt cache 命中率等运行时经济行为未实测（静态推断）。
-5. models.dev 网络拉取失败时构建期快照的实际覆盖范围未验证。
-6. Web 设置页、TUI `/connect` 和桌面端未实际启动操作；表格中的入口、按钮状态和事件调用链是源码确认，视觉表现、权限、错误提示及跨平台行为未验证。
-7. 未验证配置文件或 Web 更新后各已存在实例何时重载，以及自定义 Provider 断开后删除凭据、写入禁用列表和目录刷新之间的实际时序。
-8. 未验证 V2 Catalog/Integration 的内部更新与删除操作是否会在后续版本通过其他未检查的适配层暴露；当前结论仅针对本快照已读入口。
-9. Azure CLI 登录、双 scope 选择和 token 刷新的真实请求未运行验证；静态代码只确认命令、缓存与 Header 注入链。
-
-## 11. 关键源码索引
-
-- `packages/opencode/src/provider/provider.ts`：运行时组装（:1343-1668）、getModel/getLanguage（:1811-1864）、默认模型（:1947-2003）
-- `packages/opencode/src/provider/transform.ts`：参数转换（:42-96、:1151-1506）
-- `packages/opencode/src/provider/error.ts`：错误归一化（:102-186）
-- `packages/opencode/src/auth/index.ts`：auth.json 凭据
-- `packages/opencode/src/plugin/azure.ts`：Azure API Key 与 Azure CLI/Entra ID 认证方法、scope 与 token 缓存
-- `packages/opencode/src/session/llm.ts`、`src/session/llm/native-runtime.ts`、`llm/request.ts`：请求发起与协议切换
-- `packages/opencode/src/session/retry.ts`：重试策略
+- `packages/schema/src/integration.ts`、`credential.ts`：渠道与凭据契约
+- `packages/core/src/integration.ts`、`credential.ts`：服务实现
+- `packages/core/src/credential/sql.ts`：凭据表
+- `packages/core/src/plugin/provider/`：各厂商 Provider 插件
 - `packages/core/src/models-dev.ts`：模型目录
-- `packages/core/src/provider.ts`、`src/credential.ts`、`src/account/`：V2 凭据与账户
-- `packages/opencode/src/config/config.ts`、`src/server/routes/instance/httpapi/handlers/config.ts`：配置读取、合并与写入
-- `packages/opencode/src/server/routes/instance/httpapi/handlers/control.ts`、`groups/provider.ts`：凭据与 Provider/OAuth API
-- `packages/opencode/src/cli/cmd/providers.ts`、`src/cli/cmd/debug/config.ts`：CLI 凭据生命周期与解析配置查看
-- `packages/app/src/components/settings-providers.tsx`、`dialog-connect-provider.tsx`、`dialog-custom-provider.tsx`：Web Provider 管理入口
-- `packages/tui/src/component/dialog-provider.tsx`、`src/config/keybind.ts`：TUI `/connect` 入口
-- `packages/desktop/src/renderer/index.tsx`、`src/main/server.ts`：桌面端 Web/sidecar 边界
-- `packages/llm/src/protocols/`、`packages/llm/src/route/`：native 协议实现
-- `packages/opencode/src/cli/cmd/models.ts`：CLI 模型查看
+- `packages/ai/src/providers/`、`packages/ai/src/protocols/`：协议与厂商实现
+- `packages/ai/src/llm.ts`：统一请求入口
+- `packages/core/src/session/{model-request.ts,model-transport.ts,usage.ts}`：请求组装与用量
+- `packages/core/src/session/runner/retry.ts`：重试策略
+- `packages/protocol/src/groups/{integration,credential,provider,model}.ts`：HTTP 契约
+- `packages/app/src/providers/`：客户端连接与目录
+- `packages/cli/src/commands/handlers/auth/`：CLI 凭据管理

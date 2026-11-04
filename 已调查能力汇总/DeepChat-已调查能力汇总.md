@@ -2,32 +2,32 @@
 
 > 汇总对象：`DeepChat（https://github.com/ThinkInAIXYZ/deepchat）`
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：15 份单项目调查笔记（Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话请求与上下文、外部执行体与应用协作、对话导出与分享、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；代码快照均为 `31a6b05ab77986b3f8086d9e16c565c3251639e0`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
+> 依据：16 份单项目调查笔记（Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话请求与上下文、外部执行体与应用协作、对话导出与分享、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；代码快照均为 `3db91f876ad903b17215da94cd1a4a6398823dad`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
 > 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
 >
-> 汇总范围：覆盖上述 15 个类目中与 DeepChat 相关的已调查能力；仓库分布、应用界面基础设施的结论单列于"工程与基础设施摘要"；媒体创作等未列入来源清单的类目不在本次范围；不做跨项目横向比较
+> 汇总范围：覆盖上述 16 个类目中与 DeepChat 相关的已调查能力；仓库分布、应用界面基础设施的结论单列于"工程与基础设施摘要"；媒体创作等未列入来源清单的类目不在本次范围；不做跨项目横向比较
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
 ## 项目概览
 
-DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染层、Node + SQLite 主进程、AI SDK 出网）。聊天主链由 main process 驱动：SessionTurn 与 transcript 投影是消息工作面的事实源，Tape message facts 可重建终态 transcript；renderer 以 typed route/IPC 订阅投影。Agent 层拥有独立 loop、权限与工具目录，并接入 workspace Skills、Codex 用户包上下文 hooks、Artifact、MCP App 双层沙箱与本机 exec。外部面覆盖 ACP 外部执行体、五类 IM 远程控制与本地 CLI 控制平面；差异化能力包括 Tape & Trace、长期 Agent memory、Skill 跨工具迁移、用户插件包、web 搜索/深度研究、Ollama 管理和 DeepLink。
+DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染层、Node + SQLite 主进程、AI SDK 出网）。聊天主链由 main process 驱动：SessionTurn 与 transcript 投影是消息工作面的事实源，Tape message facts 可重建终态 transcript；renderer 以 typed route/IPC 订阅投影。Agent 层拥有独立 loop、权限与工具目录，并接入 workspace Skills、Codex 用户包上下文 hooks、MCP App 双层沙箱与本机 exec；内置 Artifact 生成与执行运行时已退役，历史消息只保留兼容渲染。外部面覆盖 ACP 外部执行体、五类 IM 远程控制与本地 CLI 控制平面；差异化能力包括 Tape & Trace、长期 Agent memory、设备双向同步、判定模型（Jev）、Skill 跨工具迁移、用户插件包、web 搜索/深度研究、Ollama 管理和 DeepLink。
 
 ## 完成度速览
 
 | 证据状态 | 条目数 |
 | --- | ---: |
-| 主链确认 | 36 |
+| 主链确认 | 38 |
 | 静态源码确认 | 3 |
 | 入口确认 | 1 |
 | 归并已有类目 | 3 |
 | 声明不符（能力子项） | 1 |
 | 暂缓 | 0 |
 
-合计 43 条能力条目（另含 1 条贡献统计建议，不计入能力）。主链确认与静态源码确认合计 39 项；异常或部分确认项为声明不符 1 条、入口确认 1 条。此外有一批"未找到/未覆盖"边界记录与共性未运行验证清单，不占能力条目，集中列于文末"已知边界与待验证事项"。
+合计 45 条能力条目（另含 1 条贡献统计建议，不计入能力）。主链确认与静态源码确认合计 41 项；异常或部分确认项为声明不符 1 条、入口确认 1 条。此外有一批"未找到/未覆盖"边界记录与共性未运行验证清单，不占能力条目，集中列于文末"已知边界与待验证事项"。
 
 证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。
 
@@ -78,7 +78,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 ### 生成与创作
 
-- **Artifact 对象（能力等级 G3）**：模型在正文输出 `<antArtifact>` XML 标记（6 种 MIME 白名单），使用规范由内置内存 MCP 服务器指令工具注入（>15 行、可复用、独立成文才用，更新复用 identifier）；renderer 解析为独立对象，消息内卡片 + 工作区侧栏预览/代码双视图；对象事实源是消息块正文原文（SQLite），无独立对象表/ID/版本，身份为 `(messageId, blockId, identifier)` 三元组；模型可复用 identifier 以新消息续写"新版"，旧版不被覆盖。能力等级判定为 G3：HTML/React Artifact 可执行、Agent exec 可在本机子进程运行，但用户无编辑/保存通道且对象依附于消息文本，未达 G4/G5。证据状态：主链确认（静态走通）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 1、6 节
+- **生成式输出（MCP App + 本机 exec 两级运行时）**：内置 Artifact 生成、预览与执行运行时已退役（`docs/architecture/remove-built-in-artifacts/spec.md`），历史消息里的 `<antArtifact>` 标记只保留解析与兼容渲染，不再有独立对象、卡片或侧栏预览。当前模型的产出通道是工作区文件与 MCP App：前者由 Agent 写文件后用浏览器/工作区视图承载，后者提供受控 iframe 运行时。能力等级判定为 G3：交互式内容可通过 MCP App 与本机子进程执行，但用户侧没有 Holistic 的编辑/保存通道。证据状态：主链确认（静态走通）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 1、6 节、[消息渲染器调查笔记](../消息渲染器/DeepChat-消息渲染器调查笔记.md) 第 4 节
 
 - **MCP App 沙箱（最完整的受控运行时）**：声明 `ui` 元数据与 `text/html;profile=mcp-app` 资源的 MCP 工具结果进入 `mcp-app://` 双层 iframe 沙箱（代理页 + 内层 sandbox iframe，动态 CSP 默认拒绝一切加载，Permissions-Policy 默认关闭摄像头/麦克风等）；JSON-RPC 2.0/postMessage 桥回宿主调工具、读资源、开外链、发消息、更新模型上下文，能力全部需用户逐次同意（2 分钟超时）；实例限额 64（窗口 32）、TTL 30 分钟，重载后实例不恢复但可从持久化 app 描述符重新 prepare。证据状态：主链确认（静态走通）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 7.1 节
 
@@ -86,7 +86,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - **图像生成与持久化**：图像生成工具走供应商图像模型，结果提升为独立 image 块（`image_data` + `image_mime_type` 列）；图片经 `imgcache://` 落盘引用，MCP 工具调用时把引用解析回 data URL（上限 8 个引用、展开 ≤32 MiB），renderer 侧已物化的图不再重复显示于 Markdown。证据状态：主链确认（静态源码）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 4 节
 
-- **工作区文件预览与 Git diff**：工作区侧栏提供 markdown/html/pdf/svg/image 等格式预览（`workspace-preview://` 协议 iframe，响应带 nosniff），HTML/SVG/PDF 与 Artifact 共用查看器；工作区 Git diff（staged/unstaged）只读展示，无应用/拒绝操作；工具响应内联 diff 由工具卡渲染。证据状态：主链确认（静态源码）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 3、6 节
+- **工作区文件预览与 Git diff**：工作区侧栏提供 markdown/html/pdf/svg/image 等格式预览（`workspace-preview://` 协议 iframe，响应带 nosniff），HTML/SVG/PDF 共用同一套查看器；工作区 Git diff（staged/unstaged）只读展示，无应用/拒绝操作；工具响应内联 diff 由工具卡渲染。证据状态：主链确认（静态源码）。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 3、6 节
 
 ### Agent 运行时与外部协作
 
@@ -110,7 +110,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - **协议适配与运行时选择**：providerRegistry 按 Provider ID 优先、apiType 次之映射到 AI SDK runtime definition；同一 OpenAI-compatible apiType 复用统一适配器，Anthropic/Gemini/Vertex/Bedrock/Ollama 等特殊协议在 factory 组装 endpoint/headers/请求体；DeepSeek 官方 Responses endpoint 的原生 Web Search 是 Provider ID + 模型 ID + 官方 endpoint 三重条件下的特殊 adapter；ACP 的 `apiType: acp` 走 Agent backend 而非通用 AI SDK endpoint。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) 第 6 节
 
-- **模型目录与能力元数据**：模型来源包括 Provider 内置/远端列表、Provider DB 聚合目录与用户 custom models；`ModelConfig` 保存上下文长度、输出上限、采样参数、vision/function call/reasoning、endpoint 与媒体能力，有效配置由 Provider facts、Provider DB 与用户覆盖合并；模型启停状态单独存 `model_status`，Provider 删除时级联清理。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) 第 5 节
+- **模型目录与能力元数据**：模型目录改由主进程 `ProviderCatalogService` 单一写者聚合为带 revision 的快照（远端 6h、运行时 60s、失败 5min 重试，来源区分 user/stale/config/provider-db/sync/external-write/acp），renderer 经 `providers.catalog.get/list/refresh/ensureFresh` 消费；来源包括 Provider 内置/远端列表、Provider DB 聚合目录与用户 custom models。`ModelConfig` 保存上下文长度、输出上限、采样参数、vision/function call/reasoning、endpoint 与媒体能力，有效配置由 Provider facts、Provider DB 与用户覆盖合并；模型启停状态单独存 `model_status`，Provider 删除时级联清理。证据状态：主链确认（静态源码）。[LLM 渠道管理调查笔记](../LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) 第 5 节
 
 - **QPS 限流、重试与故障转移边界**：`RateLimitManager` 维护 Provider 级队列按 `1/qpsLimit` 间隔释放，是限流而非健康检查；未找到基于成本/延迟/权重的负载均衡，也未找到多 API Key 轮询与 Provider 层自动跨渠道 failover（模型 fallback 由 Agent/session attempt 管线驱动）；连接测试复用真实 Provider 执行链（可带 modelId 发真实请求），CLI 公共测试再包 5 秒超时并统一脱敏错误。证据状态：主链确认（静态源码；"无 failover"为已确认边界）。[LLM 渠道管理调查笔记](../LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) 第 7、8 节
 
@@ -124,25 +124,29 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - **Codex 用户包与 workspace Skills（能力卡 8）**：用户插件以 `.codex-plugin/plugin.json` 为入口，可从目录、ZIP 或公开 HTTPS Git 源安装，并分别授权 Skills、MCP 和上下文 hooks；hook 只贡献经校验的文本上下文并留下 Tape 诊断。当前项目的 `.agents/.deepchat/.claude/.codex/.cursor/skills` 会作为只读工作区资产即时合并，不污染共享 Skill 库。证据状态：主链确认（静态走通）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 8、[Agent 工具调查笔记](../Agent工具/DeepChat-Agent工具调查笔记.md)
 
+- **设备双向同步（能力卡 9）**：主进程内建同步服务把会话、元数据、Tape entries 与依赖内容打包成同步单元，经 host/peer/replica 三层在设备间双向合并；同步单元按 LWW 合并、删除以墓碑表达，八进制约 8 MiB 批次、上限 32 MiB，host 负责转发，自动同步按 15s/60s/120s 三档节奏运行；设置页提供独立同步页与连接状态（`src/main/sync/replica/units.ts`、`src/main/sync/host`、`src/main/sync/peer`、`TunnelSyncSettings.vue`）。证据状态：主链确认（静态源码），双机实跑未验证。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 9
+
 - **搜索助手（web 搜索链，能力卡 4）**：内置内存 MCP 服务器提供 Bocha/Brave 搜索与 deepResearch 反思式深度研究，YoBrowser 浏览器工具模拟真人浏览；DeepSeek 原生 web 搜索（#2093）仅对 deepseek provider + deepseek-v4-flash + 官方 endpoint 启用，来源以 search 块渲染（http/https 白名单、去重、上限 100）。仅 README 声称的"自定义搜索助手模型"配置入口无消费方，声明不符，见末尾小节。证据状态：主链确认（web 搜索链）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 4、[消息渲染器调查笔记](../消息渲染器/DeepChat-消息渲染器调查笔记.md) 第 2 节
 
 - **Ollama 管理（能力卡 5）**：apiType 为 ollama 时嵌入专用设置页，ollamaStore 经 OllamaManager 调 ollama SDK 提供下载（pull 进度事件回渲染层）、刷新与运行模型列表，不离开应用完成本地模型管理。证据状态：主链确认（静态走通）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 5
 
 - **DeepLink（能力卡 6）**：`deepchat://` 协议三命令 start/mcp/provider——开新会话（msg/model/agent 参数）、一键安装 MCP 服务、导入 Provider；粘贴内容做危险模式扫描（script/iframe/javascript:/on*= 等），MCP 未就绪时挂起待启动后处理。证据状态：主链确认（静态走通）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 6
 
-- **CLI 本地控制平面（终端驾驶面，能力卡 7）**：`deepchat` CLI 连接本地 HTTP control server（localhost + 带 scope 的 token 鉴权），/rpc /stream /upload 三条 RPC 路径、12 组路由面 80+ 个 route，可发起前台或 detached agent run、管理 MCP/Skill/Provider/设置、OCR/转写/媒体生成并暂存工件（ArtifactSpool）；变更命令经变更守卫与审批 broker（与桌面共用）、CliAuditLog 审计，agent 命令访问按 domain/verb scope 收口；launcher 安装可逆。证据状态：主链确认（静态证据）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 7、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepChat-外部执行体与应用协作调查笔记.md)
+- **判定模型（Jev，能力卡 10）**：可选的 `judgmentModel` 把部分判断交给外部判题端点（`https://api.typesafe.ai/v1/systemone`，协议在 `src/shared/jevProtocol.ts`）：`auto_approve` 下先由判定模型复核工具权限，工具结果在进入上下文前先问“这轮还要不要”，判为不需要的整条换成指回 Tape 的占位；两条链都只读已有证据、不写 Tape，未配置判定模型时完全跳过，保留阈值尚未标定。证据状态：主链确认（静态源码）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 10、[Agent 工具调查笔记](../Agent工具/DeepChat-Agent工具调查笔记.md)
+
+- **CLI 本地控制平面（终端驾驶面，能力卡 7）**：`deepchat` CLI 连接本地 HTTP control server（localhost + 带 scope 的 token 鉴权），/rpc /stream /upload 三条 RPC 路径、12 组路由面 80+ 个 route，可发起前台或 detached agent run、管理 MCP/Skill/Provider/设置、OCR/转写/媒体生成并暂存媒体工件；变更命令经变更守卫与审批 broker（与桌面共用）、CliAuditLog 审计，agent 命令访问按 domain/verb scope 收口；launcher 安装可逆。证据状态：主链确认（静态证据）。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 能力卡 7、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepChat-外部执行体与应用协作调查笔记.md)
 
 - **ACP 作为模型**：已归并到 Agent 角色笔记 §3（kind 分派）与 LLM 渠道笔记 §2（`apiType: acp` 边界），主链确认。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 已归并节
 
 - **自有会话搜索**：已归并到会话与消息管理笔记 §5 与 Chat UI 笔记 §2（FTS5 + 会话搜索服务）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 已归并节
 
-- **Artifact / MCP App 沙箱 / 本机 exec**：已归并到生成式输出与运行时笔记（主链确认 G3，见"生成与创作"集群）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 已归并节
+- **MCP App 沙箱 / 本机 exec**：已归并到生成式输出与运行时笔记（主链确认 G3，见"生成与创作"集群）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/DeepChat-独特功能调查笔记.md) 已归并节
 
-- **特色功能贡献统计建议**：独特功能笔记建议主贡献为 IM 远程控制、Tape & Trace、Skill 跨工具迁移、CLI 本地控制平面、Codex 用户包与 workspace Skills；辅助贡献为 Ollama 管理、DeepLink、web 搜索/深度研究链；归并不计数为 ACP 作为模型、自有会话搜索、Artifact。详见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
+- **特色功能贡献统计建议**：独特功能笔记建议主贡献为 IM 远程控制、Tape & Trace、Skill 跨工具迁移、CLI 本地控制平面、Codex 用户包与 workspace Skills；辅助贡献为 Ollama 管理、DeepLink、设备双向同步、判定模型、web 搜索/深度研究链；归并不计数为 ACP 作为模型、自有会话搜索、Artifact。详见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：单包 + 多运行时合仓的 Electron/Vue 应用。Git 跟踪 4,627 文件；可识别源码 3,256 文件 / 1,044,518 行，其中 TypeScript 约 80.0%、Vue 约 11.1%；测试 1,045 文件，可识别测试源码 1,040 文件 / 440,721 行。`src/renderer` 另有 settings/floating/browser-overlay 三个入口；`plugins/cua`、`plugins/feishu` 是自包含插件单元；文档 234 文件，i18n 覆盖 23 种语言。构建矩阵覆盖 Windows/macOS/Linux 与 x64/arm64，Electron 43.6.0、Node >=24.18.0 且 <25、应用版本 1.1.2-beta.5。证据状态：Git 跟踪文件机械统计 + 构建配置复核（未运行构建）。[仓库分布调查笔记](../仓库分布/DeepChat-仓库分布调查笔记.md)
+- **仓库分布**：单包 + 多运行时合仓的 Electron/Vue 应用。Git 跟踪 4,835 文件；可识别源码 3,397 文件 / 1,088,957 行，其中 TypeScript 约 82.5%、Vue 约 9.9%；测试 1,108 文件，可识别测试源码 467,013 行。`src/renderer` 另有 settings/floating/browser-overlay 三个入口；`plugins/cua`、`plugins/feishu` 是自包含插件单元；文档 247 文件，i18n 覆盖 23 种语言，pnpm 10.34.5。构建矩阵覆盖 Windows/macOS/Linux 与 x64/arm64，Electron 43.8.3、Node >=24.22.1 且 <25、应用版本 1.1.4-beta.9。证据状态：Git 跟踪文件机械统计 + 构建配置复核（未运行构建）。[仓库分布调查笔记](../仓库分布/DeepChat-仓库分布调查笔记.md)
 
 - **应用界面基础设施**：界面栈 Vue 3 + Pinia + shadcn-vue（底层 Reka UI）+ dc-ui 业务壳 + vue-router + vue-i18n + Tailwind v4，无 Element Plus/antd/framer-motion。弹窗三类消费方式（主进程 DialogService 全局确认、页面内 DcConfirmDialog、组件内 Dialog）共享底层原语但状态所有者不同；通知是最完整的公共机制（renderer NotificationManager 归一化/聚合/仲裁/展示预算 + vue-sonner Host + 主进程 WindowNotificationRouter 跨窗口语义路由，另有独立系统通知通道）；主题由主进程 settings 与 nativeTheme 权威、renderer 订阅快照，用户配置仅明暗三态 + 字号 5 档 + 正文/代码双字体，未提供主题市场/壁纸/主色引擎/自定义 CSS/密度圆角入口（未找到，见末尾小节）；renderer 未找到应用级错误边界，错误反馈分场景下放；主聊天窗未设最小尺寸、侧栏折叠不持久化；多窗口共享同一 renderer 源，运行时状态（busy/streaming）为窗口内内存。证据状态：静态源码核对。[应用界面基础设施调查笔记](../应用界面基础设施/DeepChat-应用界面基础设施调查笔记.md)
 
@@ -165,7 +169,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - **角色资产与变量**：DeepChat 角色模型未找到开场白/欢迎语/快捷回复、用户档案/Persona 模板、自定义环境变量插值等资产类字段；descriptor 层 avatar/icon 仅作 UI 展示，不进入提示词或请求（检索范围覆盖 `src/shared` 与 `src/main`）。[Agent 角色配置调查笔记](../Agent角色/DeepChat-Agent角色配置调查笔记.md) 第 5 节
 - **渠道管理面**：未找到 Provider 复制、Provider 导出、CLI Provider 导入/导出，以及 TUI 与远程 Web 管理入口（"未找到"按本次搜索范围表述，不对未来分支或外部集成作绝对否定）。[LLM 渠道管理调查笔记](../LLM渠道管理/DeepChat-LLM渠道管理调查笔记.md) 第 2、3 节
-- **生成与创作**：Artifact 导出/另存按钮（`useArtifactExport`）未被任何组件调用；无应用内图片导出历史、无 Artifact 编辑保存通道（工作区代码视图显式只读）为已确认边界。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 5、6 节
+- **生成与创作**：内置 Artifact 的生成/预览/执行与导出通道（含 `useArtifactExport`、artifact store、组件树）已整体移除，历史消息只剩兼容渲染；无应用内图片导出历史，工作区代码视图显式只读为已确认边界。[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md) 第 5、6 节
 - **界面与交互**：后台生成（窗口外继续运行 + 返回入口）、分支树/版本导航界面未在 ChatPage 找到；多窗口 busy/streaming 同步不存在（运行时状态为窗口内内存）。[Chat UI 调查笔记](<../Chat UI/DeepChat-ChatUI调查笔记.md>) 第 7、8 节
 - **主题能力边界**：未找到主题市场/壁纸/主色引擎/自定义 CSS/密度圆角用户入口（专项核对），主题形态为内置明暗三态 + 字号 5 档 + 双字体。[应用界面基础设施调查笔记](../应用界面基础设施/DeepChat-应用界面基础设施调查笔记.md) 第 4.3 节
 - **未覆盖类目**：媒体创作类目未列入本次来源清单；对话请求与上下文已纳入来源。
@@ -175,7 +179,7 @@ DeepChat 是 Electron 桌面聊天客户端（Vue 3 + Pinia + shadcn-vue 渲染�
 
 - 全部来源笔记均基于当前代码快照，未运行 Electron 应用、构建、单元测试或真实 Provider/IM/CLI 请求；这保留了黑盒、UI 与端到端环境中的观察维度，不改变已复查的实现结论。
 - 队列/重启恢复、消息窗口化高度、FTS 中文分词与搜索命中快照生命周期、schema 迁移兼容分支、fork/delete 并发竞态、剪贴板 IPC 失败反馈与图片捕获 30 段上限后的实际长图内容未验证（会话与消息管理笔记 §10、对话导出与分享笔记）。
-- 命令 shell 各 dialect 的实际解析差异、RTK 非 posix 绕过路径、执行契约违反的运行时表现、Artifact 压缩后标签保留策略、HTML Artifact 沙箱与 CSP 组合的实际隔离强度未验证（Agent 工具笔记、生成式输出与运行时笔记）。
+- 命令 shell 各 dialect 的实际解析差异、RTK 非 posix 绕过路径、执行契约违反的运行时表现、历史 Artifact 兼容视图在真实长会话中的表现、MCP App 沙箱与 CSP 组合的实际隔离强度未验证（Agent 工具笔记、生成式输出与运行时笔记）。
 - 主题首帧闪烁、Reka 组件内部焦点管理、原生右键菜单、托盘/系统通知/全局快捷键、窗口最小尺寸拖拽表现、font-list 系统字体检测未验证（应用界面基础设施笔记 §9）。
 - IM 五渠道真实回调/凭据、CLI token/审批/launcher/detached run 端到端、ACP 注册表真实下载校验启动、Ollama 下载进度、Tape 压缩交互与 manifest hash 算法、Skill 适配器双向兼容面均为静态走通，未运行验证（独特功能笔记、外部执行体笔记）。
 

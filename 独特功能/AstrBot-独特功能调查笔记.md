@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e0aa8d386121ead06825fb6d1e423a41a3d14a83`（分支：`master`）
+> 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
 > 调查方式：只读源码与仓库文档交叉梳理；结合 Agent 工具、Chat 等既有笔记做去重；未修改 AstrBot 仓库
 >
@@ -26,7 +26,7 @@ README 四个招牌能力（`README.md:45-55`：Proactive Agent、Agentic Capabi
 
 ## 介绍声明与候选盘点
 
-README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execution of code, shell calls, and session-level resource reuse"（链接 `docs/use/astrbot-agent-sandbox.html`）；Web ChatUI 内置 agent sandbox 与 web search，并有 1000+ 社区插件。中文使用文档包含 proactive-agent 专门页面，配置文件中的提示指向 `docs.astrbot.app/use/proactive-agent.html`（`astrbot/core/config/default.py:3651`）。
+README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execution of code, shell calls, and session-level resource reuse"（链接 `docs/use/astrbot-agent-sandbox.html`）；Web ChatUI 内置 agent sandbox 与 web search，并有 1000+ 社区插件。中文使用文档包含 proactive-agent 专门页面，配置文件中的提示指向 `docs.astrbot.app/use/proactive-agent.html`（`astrbot/core/config/default.py:3721`）。
 
 ## 已确认的独特能力
 
@@ -34,7 +34,7 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 **用户目标**：让 Agent 在隔离环境中执行代码/shell/浏览器操作而不直接触碰宿主机，且同一会话内复用运行实例（README 明示 "session-level resource reuse"）。
 
-**入口与触发者**：触发者是模型工具调用。`provider_settings.computer_use_runtime` 决定 Local、远端 sandbox 或关闭，默认关闭；远端 sandbox 再选择 shipyard_neo、CUA 等 booter。Local 路径新增 member/admin 两套权限策略，将文件系统范围、执行权和联网权拆开配置（`astrbot/core/config/default.py:178-205`；`tools/computer_tools/util.py:88-209`）。
+**入口与触发者**：触发者是模型工具调用。`provider_settings.computer_use_runtime` 决定 Local、远端 sandbox 或关闭，默认关闭；远端 sandbox 再选择 shipyard_neo、CUA 等 booter。Local 路径新增 member/admin 两套权限策略，将文件系统范围、执行权和联网权拆开配置（`astrbot/core/config/default.py:178-205`；`tools/computer_tools/util.py:93-309`）。
 
 **事实对象**：会话级 booter 实例按会话 ID 复用；实例表的类型与选择逻辑见 `astrbot/core/computer/computer_client.py:21`、`:551`。
 
@@ -42,27 +42,27 @@ README 声明（`README.md:45-55`）：Agent Sandbox 提供"isolated, safe execu
 
 ```text
 模型调用 computer 工具（shell / python / fs / cua / browser）
-  -> _get_runtime_computer_tools 按 runtime 组装（astr_agent_tool_exec.py:192-247，
+  -> _get_runtime_computer_tools 按 runtime 组装（astr_agent_tool_exec.py:203-258，
      sandbox 8 个 + cua 3 个 + local 7 个；shipyard_neo 另 14 个技能流水线工具）
   -> get_booter -> booter 族：
       LocalBooter（core/computer/booters/local.py，本机受限执行）
       CuaBooter（cua.py，容器桌面 + GUI 截图/点击/键盘）
       ShipyardBooter / ShipyardNeoBooter / BoxliteBooter / BayContainerManager（远端容器）
   -> olayer 协议面（shell/python/filesystem/gui/browser Protocol）屏蔽 booter 差异
-  -> 文件进出：astrbot_upload_file / astrbot_download_file（fs.py:805/871，
+  -> 文件进出：astrbot_upload_file / astrbot_download_file（fs.py:814/871，
      本地 <-> 沙箱互传）
   -> 技能同步：_apply_skills_to_sandbox / _scan_sandbox_skills / sync_skills_to_active_sandboxes
-     （computer_client.py:456-669，SKILL.md 同步进沙箱并扫描回读；
+     （computer_client.py:457-670，SKILL.md 同步进沙箱并扫描回读；
      收集侧只同步已激活插件的 skill，未激活插件 skill 被跳过，
-     _collect_sync_skill_dirs computer_client.py:101-134）
-  -> 生命周期：CUA idle timeout 自动回收（computer_client.py:35-87）、
+     _collect_sync_skill_dirs computer_client.py:102-135）
+  -> 生命周期：CUA idle timeout 自动回收（computer_client.py:36-88）、
      shipyard TTL / max_sessions（config sandbox 段）
   -> 权限：computer_use_require_admin（默认 True）
 ```
 
 **持续性**：会话级 booter 在会话存续期间复用；空闲回收/TTL 后下一次调用重新拉起。文件上传/下载的结果落本机临时目录。
 
-**Local 执行边界**：Linux 通过 bubblewrap、macOS 通过 Seatbelt 启动受限进程；默认清理宿主环境，按权限暴露工作区与额外根目录，并限制 CPU、内存、文件大小、打开文件数和进程数。缺少对应后端时需要隔离的配置会拒绝保存或执行；Windows 当前没有 Local 进程沙箱后端。这部分是本仓可执行的本机隔离主链，不再只是“本机受限执行”的黑名单约束（`astrbot/core/computer/process_sandbox/base.py:9-68,154-250`；`process_sandbox/__init__.py:15-42`；`dashboard/services/config_service.py:325-424`）。
+**Local 执行边界**：三个平台各有进程沙箱后端——Linux 用 bubblewrap、macOS 用 Seatbelt、Windows 用 AppContainer；启动受限进程时默认清理宿主环境，按权限暴露工作区与额外根目录，并限制 CPU、内存、文件大小、打开文件数和进程数。缺少所需后端时，需要隔离的配置会拒绝保存或执行；后端探测结果由沙箱模块统一返回（`astrbot/core/computer/process_sandbox/__init__.py:15-79`；`process_sandbox/windows.py:1-243` 的 AppContainer 配置、能力 SID 与访问控制；`process_sandbox/base.py`）。这部分是本仓可执行的本机隔离主链，不再只是“本机受限执行”的黑名单约束（`dashboard/services/config_service.py:333-391`）。
 
 **独特性判断**：DeepChat 采用主进程子进程执行与权限审批的本机执行面；AstrBot 把容器或桌面环境作为一等执行域，并支持会话级复用与技能双向同步。shipyard_neo 还提供从执行历史到技能发布或回滚的流水线管理，构成完整的沙箱主链。
 
@@ -130,9 +130,11 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 
 ## 已归并到现有类目的能力
 
-- **多 IM 消息投影**：归并已有类目。README 平台清单（QQ/OneBot/Telegram/Wecom/WeChat 公众号/Feishu/DingTalk/Slack/Discord/LINE/Satori/KOOK/Misskey/Mattermost，`README.md:152-174`）与 UMO 归一、九阶段流水线、平台差异投递已由 Chat 概览笔记和 LLM 渠道笔记主链确认。本次只补充：平台元数据中的 `support_proactive_message`（`platform_metadata.py:22`）是消息投影能力与主动能力的交点，已在能力卡 2 记录。
+- **多 IM 消息投影**：归并已有类目。README 平台清单（QQ/OneBot/Telegram/Wecom/WeChat 公众号/Feishu/DingTalk/Slack/Discord/LINE/Satori/KOOK/Misskey/Mattermost，`README.md:152-175`）与 UMO 归一、九阶段流水线、平台差异投递已由 Chat 概览笔记和 LLM 渠道笔记主链确认。本次只补充：平台元数据中的 `support_proactive_message`（`platform_metadata.py:22`）是消息投影能力与主动能力的交点，已在能力卡 2 记录。
 - **1000+ 插件生态**：归并已有类目。star 插件框架的工具与命令装饰器、工具注册、插件生命周期和 WebUI 扩展已由 Agent 工具笔记 §2/§10 覆盖；"1000+" 是插件市场计数（README 徽章来自 `api.soulter.top/astrbot/plugin-num`），属外部生态事实而非本仓库可执行能力。插件安装与更新链未做新增调查。
 - **Agent 本体（工具循环、MCP、handoff 子 Agent、上下文压缩）**：Agent 工具笔记与对话请求与上下文笔记已覆盖，不重复。
+- **可移植按钮**：按钮作为独立消息部件在渲染器、投递适配器、Chat UI 与回流过滤四处贯通，属消息能力而非独立招牌能力，已在消息渲染器笔记 §1/§5、外部执行体笔记"外部交互回流"节与 Chat UI 笔记记录。
+- **事件追踪与诊断导出**：追踪快照、面板查询与日志导出归入可观测性，由 Chat 概览与对话请求与上下文笔记覆盖，归并不单列。
 
 ## 声明不符、外部依赖与暂缓项
 
@@ -156,9 +158,9 @@ Provider 面：core/provider/sources/ 下 14 个 TTS/STT 源
 - 沙箱客户端与会话实例：`astrbot/core/computer/computer_client.py:21`、`:551-669`
 - booter 族：`astrbot/core/computer/booters/{base,local,cua,shipyard,shipyard_neo,boxlite,bay_manager}.py`
 - 沙箱工具：`astrbot/core/tools/computer_tools/{shell,python,fs,cua}.py`、`shipyard_neo/{browser,neo_skills}.py`
-- 运行时工具组装：`astrbot/core/astr_agent_tool_exec.py:192-247`
+- 运行时工具组装：`astrbot/core/astr_agent_tool_exec.py:203-258`
 - 主动回复：`astrbot/builtin_stars/astrbot/group_chat_context.py:110-128`
-- cron 工具注入：`astrbot/core/astr_main_agent.py:1161`、`astrbot/core/tools/cron_tools.py:52-`
+- cron 工具注入：`astrbot/core/astr_main_agent/builder.py:121-140`、`astrbot/core/tools/cron_tools.py:52-`
 - 主动 Agent 提示词：`astrbot/core/astr_main_agent_resources.py:91/105`
 - 后台唤醒：`astrbot/core/astr_agent_tool_exec.py:518-646`
 - 平台主动能力元数据：`astrbot/core/platform/platform_metadata.py:22`、`astrbot/core/tools/registry.py:121-181`

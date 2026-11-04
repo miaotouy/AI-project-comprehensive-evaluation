@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`471bfd08ff5905366444c1cc00dbb75a2870166a`（分支：`main`）
+> 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
 > 调查方式：直接阅读源码（React 组件、renderer store、上下文构建与压缩包、模型调用层），符号与行号对照当前 HEAD 逐一核实，未运行应用
 >
@@ -79,7 +79,7 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 - **自动压缩触发**（发送前同步检查，阻塞发送）：`messages.ts:201` 的 `runCompactionWithUIState` → `compaction.ts` 的 `needsCompaction`（`:57-125`）用 token 估算（带 react-query 缓存，`context-tokens.ts`）调 `checkOverflow`（`compaction-detector.ts:31-58`），判定为 `isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compactionThreshold`，`compactionThreshold` 默认 0.6、可全局设置；模型上下文窗口来自 provider 设置或模型注册表（`getModelContextWindowFromSettings`/`getModelContextWindowSync`），未知模型不触发。
 - **执行与提交**：`runCompactionWithStreaming`（`compaction.ts:167-263`）流式生成摘要（UI 态经 `setCompactionUIState`），摘要消息打 `isSummary: true`；boundary 取"最后一个通过上下文合格性过滤且非 summary 的消息"（`compaction-boundary.ts:12-21`），生成 `CompactionPoint` 后经 `buildCompactionCommitPatch`（`compaction-commit.ts:28`）原子提交；摘要流式期间 boundary 被删除则放弃提交（`:240-247`）。压缩契约 `compactionPoints` 随 fork/复制重映射（数据语义见会话与消息管理笔记 1.4）。
 - **自定义摘要指令**：全局 `compactionPrompt` 可在聊天设置或手动压缩弹窗编辑；执行服务优先使用本次显式 prompt，其次使用全局配置，再回退本地化默认提示。`packages/chatbox-core/src/application/context/CompactionService.ts:158`、`src/renderer/routes/settings/chat.tsx:579-586`。
-- **压缩可逆**：删除摘要消息（UI 上 SummaryMessage 的"删除摘要"操作）即恢复原文参与上下文计算，`compactionPoints` 中对应点随之清理（`chatStore.ts:803-816`）。
+- **压缩可逆**：删除摘要消息（UI 上 SummaryMessage 的"删除摘要"操作）即恢复原文参与上下文计算，`compactionPoints` 中对应点随之清理（压缩提交与压缩点维护在 `@chatbox/core` 的 `SessionService`）。
 - provider 侧 token 截断策略未在本次入口范围内完全核实（`packages/model-calls` 适配层职责）。
 
 ## 4. SDK、Provider、模型与协议交接
@@ -95,8 +95,8 @@ InputBox.handleSubmit（收集文本/附件/开关状态）
 
 `stores/session/messages.ts`：
 
-- `updateStreamingCache(sessionId, message)`（`:132-137`）：只调 `chatStore.updateMessageCache`（`chatStore.ts:414-433`）经内部缓存函数直接改 react-query 缓存（`queryClient.setQueryData`），**不碰 storage**，注释里写明"性能优先，不检查 session 存在性"。
-- `persistStreamingMessage(sessionId, message, options)`（`:143-155`）：调 `chatStore.updateMessage`（`updateSessionWithMessages`，`chatStore.ts:351-392`），走每会话一个的 `UpdateQueue`（`stores/updateQueue.ts`，基于 `queueMicrotask` 的串行合并队列，避免并发 update 互相覆盖），**真正写 storage**。
+- `updateStreamingCache(sessionId, message)`（`:132-137`）：只调 `SessionQueryBridge.updateMessageCache` 经内部缓存函数直接改 react-query 缓存（`queryClient.setQueryData`），**不碰 storage**，注释里写明"性能优先，不检查 session 存在性"。
+- `persistStreamingMessage(sessionId, message, options)`（`:143-155`）：调 `updateMessage`（经 `RowBackedSessionRepository` 提交行存储），走每会话一个的 `UpdateQueue`（`stores/updateQueue.ts`，基于 `queueMicrotask` 的串行合并队列，避免并发 update 互相覆盖），**真正写 storage**。
 
 ### 5.2 节流策略：2 秒定时 + 特例立即持久化
 
@@ -132,9 +132,9 @@ if (shouldPersist) {
 
 **停止路径的流排空处理**：主循环把 chunk 读取与 abort 信号做 `Promise.race`（`orchestration.ts:788-801`），abort 后立即收口消息（不再等待仍在执行的工具 step 返回）；生成锁保持到流真正排空（`streamIterator.return()` 的 drain，`:867-893`，并注册 `registerUnsettledStreamDrain` 供后续生成入口等待），避免"停止后又冒出半个 chunk"。停止时未完成 tool-call 由 `generation-cancellation.ts` 收口（见第 7 节）。
 
-### 5.3 一处疑似死代码：`throttleWriteSessionAtom.ts`
+### 5.3 节流写入的单一实现
 
-`stores/atoms/throttleWriteSessionAtom.ts` 是疑似死代码：它实现了一整套独立的 jotai atom + `WriteQueue`（`:23-66`），`flushInterval` 同样硬编码 `2000`ms（`:28`），看起来是同一个"节流落盘"想法的另一份实现。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。该模块"创建/写入 atom"的部分（`createSessionAtom`、`WriteQueue`）因此是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
+节流写入只剩一条实现路径：`src/renderer/stores/session/messages.ts` 的 `persistStreamingMessage` 配合每会话 `UpdateQueue`（`src/renderer/stores/updateQueue.ts`），`flushInterval` 仍为 2000ms。「原先另有一套独立的 jotai atom + WriteQueue 实现，本次在仓库中未找到该文件，不再作为并行实现记录」。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。该模块"创建/写入 atom"的部分（`createSessionAtom`、`WriteQueue`）因此是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
 
 ## 6. 完成、异常、半截流与最终回写
 
@@ -142,7 +142,7 @@ if (shouldPersist) {
 - **tool-call 暂停收口**（`:896-909` 与 catch 分支 `:947-965`）：存在 `state === 'paused'` 的 tool-call part 或捕获到暂停错误时，消息以 `finishReason: 'tool-call-paused'` 落盘（`markToolCallPaused`），保留已执行部分的 contentParts。
 - **中止收口**（`:867-894`）：`persistAbortedGenerationIfNeeded` → `finishAbortedGeneration`（`generation-cancellation.ts:54-82`），`finishReason: 'canceled'`。
 - **错误收口**：`handleGenerationError`（`utils.ts:153-227`）把 `errorCode/error/errorExtra`（含 OCR 提供商、HTTP 状态码、requestId 等）写回消息并落盘（`orchestration.ts:969-975`）。
-- **落盘时不丢失"正在生成"的消息（缓存合并保护）**：`mergeCachedGeneratingMessages`（`chatStore-cache.ts:26-79`）在磁盘上较旧的 session 快照写回缓存时，若某条消息在缓存里 `generating: true`，保留缓存里更新的内容，防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容（合并覆盖的层级与数据语义见会话与消息管理笔记 6）。
+- **落盘时不丢失"正在生成"的消息（缓存合并保护）**：`mergeCachedGeneratingMessages`（`src/renderer/stores/session/:26-79`）在磁盘上较旧的 session 快照写回缓存时，若某条消息在缓存里 `generating: true`，保留缓存里更新的内容，防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容（合并覆盖的层级与数据语义见会话与消息管理笔记 6）。
 
 ## 7. 停止、重试、续写与重新生成
 
@@ -151,7 +151,7 @@ if (shouldPersist) {
   - 非空 → `finishAbortedGeneration` 收口（`cancelRunningToolCallBatch`，`:21-51`）。工具批收口规则：`user_exec`/`code_execution` 收口为 `result`（`exitCode: 130, cancelled: true`），其余工具收口为 `error`（`cancelled: true`），reasoning part 补 duration，最后 `persistMessage` 落盘。
   界面入口（停止按钮、消息内停止）见 Chat UI 笔记。
 - **重新生成/在新分支里重试**：`regenerateInNewFork`（`generation.ts:104-139`）在目标消息的上一条非 summary 消息处创建新 fork（`createNewFork`）后重新生成；fork pivot 会跳过锚定压缩摘要（`:123-130`）。`generateMoreInNewFork`（`:95-100`）先 `createNewFork` 再在分叉点下方续写。分支数据语义见会话与消息管理笔记 1.3。
-- **在下方继续回复**：`generateMore`（`generation.ts:80-93`）：picture 会话走生成锁串行，chat 会话刻意绕过锁、经 `createInactiveFork` 保存当前分支后以"替代回复"并行生成（`:63-78` 注释：消息写入由 chatStore UpdateQueue 串行化兜底）。
+- **在下方继续回复**：`generateMore`（`generation.ts:80-93`）：picture 会话走生成锁串行，chat 会话刻意绕过锁、经 `createInactiveFork` 保存当前分支后以"替代回复"并行生成（`:63-78` 注释：消息写入由每会话 UpdateQueue 串行化兜底）。
 - **工具错误重试**：`retryFromLastToolCallAfterApiError`（`orchestration.ts:1399-`）从最后可重试工具步骤继续；UI 上用户可选择重试整条消息或从最后工具步骤重试（入口见 Chat UI 笔记的消息操作）。
 - **暂停后继续**：`continuePausedToolCall`（`orchestration.ts:1157-`）与 `disableToolCallLimitPauseAndContinue`（`:1170-`，"继续并本次不再暂停确认"，把暂停的 tool-call 批恢复执行）。
 
@@ -242,8 +242,8 @@ Agent 模式（`agent-mode.ts`，`agentModeValue` 经 `computeEffectiveAgentMode
 - `src/renderer/stores/session/generation.ts`、`agent-harness.ts`、`utils.ts`（历史选择与上下文构建）
 - `src/renderer/stores/session/tools-builder.ts`（知识库/网页浏览/agent 工具统一注册）
 - `src/renderer/stores/session/generation-cancellation.ts`、`generation-lock.ts`、`generation-runtime.ts`
-- `src/renderer/stores/atoms/throttleWriteSessionAtom.ts`（疑似死代码）
-- `src/renderer/stores/chatStore-cache.ts`（`mergeCachedGeneratingMessages`）
+- `src/renderer/stores/session/messages.ts`（疑似死代码）
+- `src/renderer/stores/src/renderer/stores/session/`（`mergeCachedGeneratingMessages`）
 - `src/shared/context/builder.ts`、`compaction-points.ts`
 - `src/renderer/packages/context-management/`（`compaction-detector.ts`、`compaction.ts`、`compaction-boundary.ts`、`compaction-commit.ts`）
 - `src/shared/types/session.ts`（`ToolUseScopeSchema` 等）、`src/shared/utils/tool-call-limit-pause.ts`

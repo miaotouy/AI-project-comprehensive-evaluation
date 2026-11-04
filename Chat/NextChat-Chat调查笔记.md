@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/home.tsx`、`app/components/chat.tsx`、`app/store/chat.ts`、`app/utils/store.ts`）
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`defdcdb55d850cd12c4c657eb83729fd66e215c0`（分支：`main`）
+> 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
 > 调查方式：只读源码梳理；未修改 NextChat 仓库
 >

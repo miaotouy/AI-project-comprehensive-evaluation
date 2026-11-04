@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：静态源码调查；读取分支/会话导出、消息截图对话框、独立截图渲染器、截图生成与历史管理实现，并与既有会话管理和 Chat UI 笔记交叉核对；未运行应用或实际生成图片
 >
@@ -19,6 +19,8 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 图片工作台的辨识点是**生成结果历史**：每次手动生成都会向缩略图历史追加一项；选区或配置变化不会覆盖旧图，而是把已有结果标记为“已过时”。用户可以在多个结果之间切换、查看大图、复制、保存和删除。这是组件内存中的生成历史，没有发现写入会话、配置或文件索引的路径，不能视为跨重启持久版本。
 
 本次未找到截图模块内直接改写消息正文副本的 `contenteditable`、textarea、CodeMirror 或消息内容更新入口。当前实现中的“可编辑”仅指分享稿的选区与视觉编排，不包含独立的正文编辑器。
+
+文本导出口径随消息内文本附件扩展：Markdown 与 Raw 输出会在正文后追加格式化后的虚拟文本附件，JSON 输出携带 `virtualAttachments` 字段；导入服务会规范化这些附件，并据节点元数据恢复 VCP 工具角色。委派类消息仍使用 user 角色存储，但阅读型导出按节点来源显示实际发起 Agent 的名称，而不是统一写成“用户”。
 
 截图候选列表的来源是唯一的：`ShareScreenshotDialog` 只在 `ChatArea.vue:638-650` 实例化，消息一律来自活动路径与智能体开场白展示消息，范围不含完整树；消息菜单、树图节点菜单和导出弹窗“生成分享长图”都汇入同一个对话框。截图内容是数据驱动的独立重渲染，复用消息组件但隐藏编辑、menubar、流式指示器等现场交互元素；生成流程对消息内容没有快照冻结，运行中生成时理论上可能截到流式更新的中间态（推断）。结构化分支导出中的分支 Markdown 与分支 JSON 只产生文件，没有导入入口；可往返的是备份管线（单会话备份 JSON 与批量备份 ZIP），导出会话对话框按完整会话形状产出的 Raw JSON 也能被同一导入服务读回。
 
@@ -50,25 +52,25 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 截图对话框接收调用方传入的 `messages: ChatMessageNode[]`。默认选择最后两条；若从某条消息打开，则选择该消息及其前一条。`MessageRangePanel` 同时提供连续范围滑块、起止输入、全选/清空和逐条复选，因此最终图片不必是连续区间（`../../aio-hub/src/tools/llm-chat/components/screenshot/ShareScreenshotDialog.vue:139-156`）。
 
-调用方分支范围本轮已追踪完整（在 `src/tools/llm-chat` 全目录搜索该对话框引用）：截图对话框只有一处实例化，位于 `components/ChatArea.vue:638-650`；`ChatArea` 的消息唯一来自 `LlmChat.vue:575` 的 `currentActivePathWithPresets`，即活动路径加智能体开场白展示消息。活动路径从当前叶子节点沿父指针回溯、排除根节点，且不做启用状态过滤；预设展示消息按角色、启用状态、注入策略和模型匹配过滤后追加，并标记为预设展示；两段组装逻辑与回溯过滤的实现位置见文末索引。因此截图候选列表是“当前可见线性对话 + 最多 `displayPresetCount` 条开场白”：隐藏分支不进入，压缩隐藏节点不进入，但禁用节点和压缩摘要节点仍在候选内。
+调用方分支范围本轮已追踪完整（在 `src/tools/llm-chat` 全目录搜索该对话框引用）：截图对话框只有一处实例化，位于 `components/ChatArea.vue:682`；`ChatArea` 的消息唯一来自 `LlmChat.vue:591` 的 `currentActivePathWithPresets`（`stores/llmChatStore.ts:295`），即活动路径加智能体开场白展示消息。活动路径从当前叶子节点沿父指针回溯（`stores/session/sessionAccessManager.ts:74`）、排除根节点，且不做启用状态过滤；预设展示消息由 `chatPathUtils.ts:62` 的 `getActivePathWithPresets` 按角色、启用状态、注入策略和模型匹配过滤后追加，并标记为预设展示。因此截图候选列表是“当前可见线性对话 + 最多 `displayPresetCount` 条开场白”：隐藏分支不进入，压缩隐藏节点不进入，但禁用节点和压缩摘要节点仍在候选内。
 
-所有入口都汇入同一个对话框：消息菜单、树图节点菜单和导出弹窗的“生成分享长图”按钮，最终都调用 `ChatArea.handleScreenshot`（`ChatArea.vue:111-114`）打开截图对话框；三处入口的位置见下列清单。
+所有入口都汇入同一个对话框：消息菜单、树图节点菜单和导出弹窗的“生成分享长图”按钮，最终都调用 `ChatArea.handleScreenshot`（`ChatArea.vue:127`）打开截图对话框；三处入口的位置见下列清单。
 
-- 消息菜单：`components/message/MessageList.vue:742,818,887`
-- 树图节点菜单：`components/conversation-tree-graph/flow/components/GraphNodeMenubar.vue:407-416` → `FlowTreeGraph.vue:74`
-- 导出弹窗“生成分享长图”按钮：`components/export/ExportBranchDialog.vue:105-108,167-170`
+- 消息菜单：`components/message/MessageList.vue:669-721`（转发到 `MessageMenubar.vue:510`）
+- 树图节点菜单：`components/conversation-tree-graph/flow/components/GraphNodeMenubar.vue:419` → `FlowTreeGraph.vue:74`
+- 导出弹窗“生成分享长图”按钮：`components/export/ExportBranchDialog.vue:167-170`
 
 导出弹窗中设置的消息范围不会传递到截图对话框：截图对话框只接收焦点消息 id，并根据它初始化选区；焦点消息不在候选列表时回退为“最后两条”（`ShareScreenshotDialog.vue:139-152`）。从非活动分支的树节点发起时，候选列表仍然是当前活动路径。
 
 分支导出由 `useExportManager` 提供：
 
 - 三个独立入口分别生成阅读型 Markdown、结构化 JSON 和保留原始节点字段的 Raw JSON（`composables/features/useExportManager.ts`）：
-  - `exportBranchAsMarkdown`（`:229`）
-  - `exportBranchAsJson`（`:607`）
-  - `exportBranchAsRaw`（`:1078`）
+  - `exportBranchAsMarkdown`（`:249`）
+  - `exportBranchAsJson`（`:642`）
+  - `exportBranchAsRaw`（`:1128`）
 - 范围与内容选项可控制预设、用户档案、Agent/模型信息、Token、附件和错误；
 - 启用上下文管道后，导出宏、世界书、Recall/知识注入、变量替换与 Token 裁剪后的上下文结果，内容已经超出可见消息的简单复制；
-- `exportSessionAsMarkdownTree` 处理完整节点树，可表达不在当前活动路径上的隐藏分支（`useExportManager.ts:849`）。
+- `exportSessionAsMarkdownTree` 处理完整节点树，可表达不在当前活动路径上的隐藏分支（`useExportManager.ts:891`）。
 
 ## 2. 分享稿编辑与实时预览
 
@@ -88,40 +90,44 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 运行保真关系：渲染器用同一批消息组件按传入数据重新渲染，数据响应式来自 store（LlmChat computed → ChatArea props → 对话框 → 预览面板 → 渲染器）。因此图片与聊天现场的一致性取决于“store 数据 vs 现场 DOM 状态”的同步程度。
 
-截图模式下，编辑/重新生成/翻译按钮、菜单栏、流式指示器、gpt-image-2 部分预览和翻译控件被显式隐藏（`components/message/MessageContent.vue:1000,1163,1173-1177`；`message/ChatMessage.vue:319`；`message/ToolCallMessage.vue:1130-1133`）；工具卡展开由折叠策略接管、不接受交互（`ToolCallMessage.vue:284-289`）。
+截图模式下，编辑/重新生成/翻译按钮、菜单栏、流式指示器、gpt-image-2 部分预览和翻译控件被显式隐藏（`components/message/MessageContent.vue:973,1076,1215,1381,1453`；`message/ChatMessage.vue:303,367`；`message/ToolCallMessage.vue:306-311,1180-1203`）；工具卡展开由折叠策略接管、不接受交互（`ToolCallMessage.vue:306-311`）。
 
-流式消息内容由 `RichTextRenderer` 的 stream-source 渲染，生成中的部分内容本身会进入截图；生成流程只等待 100ms 与图片解码（`ShareScreenshotDialog.vue:227-234`；`utils/screenshotCapture.ts:109-134`），对消息内容没有快照冻结，运行中生成可能截到流式更新的中间态——这是基于静态代码的推断，未运行验证。
+流式消息内容由 `RichTextRenderer` 的 stream-source 渲染，生成中的部分内容本身会进入截图；生成流程只等待 100ms 与图片解码（`ShareScreenshotDialog.vue:228`；`utils/screenshotCapture.ts:113-134`），对消息内容没有快照冻结，运行中生成可能截到流式更新的中间态——这是基于静态代码的推断，未运行验证。
 
 ## 3. PNG 生成与资源处理
 
-用户必须手动点击“生成截图”；配置变化不会自动触发昂贵捕获。父组件等待截图 DOM 完成布局后调用 `useScreenshotGenerator.generate()`，底层默认以并发度 6 逐条截取消息槽，再按间距和留白拼接到统一 Canvas（`ShareScreenshotDialog.vue:215-275`；`utils/screenshotCapture.ts:308-397`）。
+用户必须手动点击“生成截图”；配置变化不会自动触发昂贵捕获。父组件等待截图 DOM 完成布局后调用 `useScreenshotGenerator.generate()`，底层默认以并发度 6 逐条截取消息槽，再按间距和留白拼接到统一 Canvas（`ShareScreenshotDialog.vue:220-290`；`utils/screenshotCapture.ts:323-410`）。
 
 生成器显式处理了几类离屏渲染问题：
 
 - 使用自然布局尺寸，避免预览 `transform: scale` 改变捕获尺寸；
+- 与富文本测试页共用 `src/utils/screenshotLayout.ts` 的 `createScreenshotLayoutFix`，在 `onCreateForeignObjectSvg` 阶段按源窗口 DPR 与祖先 CSS zoom 补一个同倍率容器并放大 `viewBox`，修正 foreignObject 1× 排版下胶囊/按钮尾字换行（`screenshotCapture.ts:295`）；
+- 对克隆树中的内嵌 iframe 调用 `isolateScreenshotIframeDocuments`，补充 `contain: layout paint` 与 `overflow: hidden`，让 Canvas 快照和 fixed 控件保留各自 frame 的坐标与裁剪（`screenshotCapture.ts:309`）；
 - 向克隆节点复制 CSS 变量，并强制 `content-visibility: visible`；
 - 展开代码块、表格等溢出内容并隐藏滚动条；
 - 在 Canvas 拼接阶段绘制纯色、主题或壁纸背景；
 - 通过预模糊背景和区域裁剪补偿 `foreignObject` 中不可用的 `backdrop-filter`；
 - 品牌条、水印和消息内容作为独立层进入最终画布。
 
-最终只输出 PNG：复制使用系统剪贴板，保存通过 Tauri 文件对话框写入 PNG 字节。字节转换用 `atob` 解码 Data URL，刻意避开受 CSP 限制的 `fetch(dataUrl)`（`utils/screenshotCapture.ts:960-993`）。
+最终只输出 PNG：复制使用系统剪贴板，保存通过 Tauri 文件对话框写入 PNG 字节。字节转换用 `atob` 解码 Data URL，刻意避开受 CSP 限制的 `fetch(dataUrl)`（`utils/screenshotCapture.ts:968-993`）。
 
-极长图没有尺寸防护：捕获拼接把全部消息拼到单张 Canvas，尺寸直接取总宽总高与输出倍率之积，没有任何维度上限检查、分块或分段保存（`utils/screenshotCapture.ts:391-393`）。高度只受运行平台 Canvas 上限与内存约束；宽度上限 1280 CSS px 与 3x 输出意味着最宽约 3840px，长会话下高度先触及平台上限（约 32767/65535px 级），失败表现与触发点取决于 WebView 实现。
+极长图没有尺寸防护：捕获拼接把全部消息拼到单张 Canvas，尺寸直接取总宽总高与输出倍率之积，没有任何维度上限检查、分块或分段保存（`utils/screenshotCapture.ts:402-403`）。高度只受运行平台 Canvas 上限与内存约束；宽度上限 1280 CSS px 与 3x 输出意味着最宽约 3840px，长会话下高度先触及平台上限（约 32767/65535px 级），失败表现与触发点取决于 WebView 实现。
 
-失败处理只有两层：单条消息 `drawImage` 失败被捕获后跳过继续（`screenshotCapture.ts:479-484`），大画布创建或 `toDataURL` 编码失败统一走“生成截图失败”提示，无尺寸专项提示或降级路径。另外，截图历史每一项同时在内存中持有 Canvas 与 Data URL（`ScreenshotPreviewPanel.vue:477-487`），多次生成大图会叠加占用内存。
+失败处理只有两层：单条消息 `drawImage` 失败被捕获后跳过继续（`screenshotCapture.ts:490-493`），大画布创建或 `toDataURL` 编码失败统一走“生成截图失败”提示，无尺寸专项提示或降级路径。另外，截图历史每一项同时在内存中持有 Canvas 与 Data URL（`ScreenshotPreviewPanel.vue:477-487`），多次生成大图会叠加占用内存。
 
 ## 4. 格式、schema 与往返能力
 
 结构化分支导出（Markdown/JSON/Raw JSON）经 `ExportBranchDialog` 预览后通过 `writeTextFile` 落盘，导出入口本身不提供导入（`components/export/ExportBranchDialog.vue:434-479`）。
 
-JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map（`composables/features/useExportManager.ts:607-841,1078-1130`）。
+JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map。带文本附件的消息在 JSON 中额外输出 `virtualAttachments`（标题与全文），Markdown 与 Raw 文本则把附件格式化为带标题和代码围栏的段落追加在正文后（`composables/features/useExportManager.ts:642-890,1128-1165`、`utils/virtualAttachments.ts:85-103`）。
 
-往返结论：分支 Markdown 与分支 JSON 不能回写会话，单会话备份 JSON 与批量备份 ZIP 可以。备份 JSON 用 `aiohub-chat-session` 与版本 `1.0.0` 标识，保存完整的 index/detail/tree；导入服务按 JSON 首字符分流，校验版本与 id/nodes/rootNodeId/activeLeafId 结构后交给同一套冲突策略，因此这一专用格式可往返，不应与面向阅读的 JSON 导出混同（`components/export/ExportSessionDialog.vue:102-233`、`services/sessionImportExportService.ts:85-113,157-206`）。
+结构化导出还处理消息来源：委派指令仍以 user 角色存储，但导出时用节点 `metadata.origin` 中的发起 Agent 显示名替代“用户”，Markdown、JSON 与 Raw 三条路径共用这一判定（`useExportManager.ts:75-80,125-146,438-470,985-1006`）。
 
-同一导入服务还接受顶层为 `{index, detail}` 的完整会话形状，测试用例名为 “imports the existing Raw JSON shape”；导出会话对话框的 Raw 格式正是这一形状，因此在整会话导出场景下 Raw JSON 同样可被读回。分支导出只保留从根到所选节点的节点链，而 activeLeafId 沿用整会话的值，只有该链覆盖活动叶节点时才通过校验；分支 Markdown、分支 JSON 与面向阅读的会话 JSON 均在校验处被拒（`services/sessionImportExportService.ts:199-204`、`services/__tests__/sessionImportExportService.test.ts:97-153`）。
+往返结论：分支 Markdown 与分支 JSON 不能回写会话，单会话备份 JSON 与批量备份 ZIP 可以。备份 JSON 用 `aiohub-chat-session` 与版本 `1.0.0` 标识，保存完整的 index/detail/tree；导入服务按 JSON 首字符分流，校验版本与 id/nodes/rootNodeId/activeLeafId 结构后交给同一套冲突策略，因此这一专用格式可往返，不应与面向阅读的 JSON 导出混同（`components/export/ExportSessionDialog.vue:102-233`、`services/sessionImportExportService.ts:47-48,166-205,261-317`）。
 
-批量备份走另一条管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:119-125,127-161`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`:70-117,203-257`）。
+同一导入服务还接受顶层为 `{index, detail}` 的完整会话形状，测试用例名为 “imports the existing Raw JSON shape”；导出会话对话框的 Raw 格式正是这一形状，因此在整会话导出场景下 Raw JSON 同样可被读回。分支导出只保留从根到所选节点的节点链，而 activeLeafId 沿用整会话的值，只有该链覆盖活动叶节点时才通过校验；分支 Markdown、分支 JSON 与面向阅读的会话 JSON 均在校验处被拒（`services/sessionImportExportService.ts:87-112`、`services/__tests__/sessionImportExportService.test.ts:138`）。导入时还会规范化 `virtualAttachments`，并按节点元数据恢复 VCP 工具角色（`sessionImportExportService.ts:126-135`）。
+
+批量备份走另一条管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:225-260`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`parseImportFile` 于 `:261`，`resolveConflicts` 于 `:318`）。
 
 单会话备份 JSON 与批量备份 ZIP 都保留完整树，且由同一导入服务处理；分支导出的 Raw JSON 虽同为 index/detail 形状，但只覆盖所选分支的节点链，能否读回取决于该链是否覆盖活动叶节点。
 
@@ -136,11 +142,11 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 3. 子组件观察到已生成 URL 变为空，把全部已有项标记为 `stale=true`，但不删除；
 4. 用户可以切换缩略图、查看大图、复制或保存任一旧版本，也可单删或清空历史（`ShareScreenshotDialog.vue:309-322`；`ScreenshotPreviewPanel.vue:473-540`）。
 
-历史没有进入 store、Tauri command 或持久化 service，是组件局部运行时状态（`BaseDialog` 默认 `destroyOnClose: true`，`src/components/common/BaseDialog.vue:20,147`，对话框内容在关闭时卸载，`ScreenshotPreviewPanel` 随重建，历史列表在关闭并重新打开后不保留）。
+历史没有进入 store、Tauri command 或持久化 service，是组件局部运行时状态（`BaseDialog` 默认 `destroyOnClose: true`，`src/components/common/BaseDialog.vue:20,140,154`，对话框内容在关闭时卸载，`ScreenshotPreviewPanel` 随重建，历史列表在关闭并重新打开后不保留）。
 
 ## 6. 富内容、隐私与已确认边界
 
-截图专用渲染器复用聊天消息组件，因此普通 Markdown、工具卡、头像、消息元信息和项目主题能够沿用现场表达；工具卡还可独立决定展开或收起。复杂 Artifact、远端附件、跨域图片和超长代码的最终保真没有运行验证。
+截图专用渲染器复用聊天消息组件，因此普通 Markdown、工具卡、头像、消息内文本附件卡片、消息元信息和项目主题能够沿用现场表达；工具卡还可独立决定展开或收起。复杂 Artifact、远端附件、跨域图片和超长代码的最终保真没有运行验证。
 
 截图配置提供水印、品牌和二维码，但本次未找到面向 system prompt、reasoning、密钥、文件路径或个人信息的专用脱敏扫描。是否进入图片主要取决于调用方消息集合和元素开关。结构化导出允许选择多类字段，具体默认值与敏感内容提示仍需专项运行核对。
 
@@ -175,13 +181,16 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 - `src/tools/llm-chat/components/screenshot/ScreenshotRenderer.vue`
 - `src/tools/llm-chat/composables/features/useScreenshotGenerator.ts`
 - `src/tools/llm-chat/utils/screenshotCapture.ts`
+- `src/utils/screenshotLayout.ts`（`createScreenshotLayoutFix`、`isolateScreenshotIframeDocuments`）
 - `src/tools/llm-chat/composables/features/useExportManager.ts`
+- `src/tools/llm-chat/utils/virtualAttachments.ts`（文本附件格式化与导入规范化）
+- `src/tools/llm-chat/utils/vcpMessageRole.ts`（导入时恢复 VCP 工具角色）
 - `src/tools/llm-chat/components/export/ExportBranchDialog.vue`
 - `src/tools/llm-chat/components/ChatArea.vue`（截图对话框唯一实例化点与入口汇聚）
 - `src/tools/llm-chat/LlmChat.vue`（`currentActivePathWithPresets` 传入点）
-- `src/tools/llm-chat/stores/llmChatStore.ts`（活动路径计算 `256-289`）
-- `src/tools/llm-chat/stores/session/sessionAccessManager.ts`（活动路径回溯 `74-102`）
-- `src/tools/llm-chat/utils/chatPathUtils.ts`（预设展示消息 `61-125,88-124`）
+- `src/tools/llm-chat/stores/llmChatStore.ts`（`currentActivePathWithPresets` `295`）
+- `src/tools/llm-chat/stores/session/sessionAccessManager.ts`（活动路径回溯 `74-108`）
+- `src/tools/llm-chat/utils/chatPathUtils.ts`（`getActivePathWithPresets` `62`）
 - `src/tools/llm-chat/services/sessionImportExportService.ts`（单会话备份 JSON 与备份 ZIP 往返）
 - `src/tools/llm-chat/components/sidebar/BatchManagerDialog.vue`（批量备份导入导出入口）
 - `src/components/common/BaseDialog.vue`（默认 `destroyOnClose: true`）

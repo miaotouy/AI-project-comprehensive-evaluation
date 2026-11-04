@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`e5eb0211e403d333f478e0b0a5d7603f96783be6`（分支：`dev`）
+> 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
 > 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
 >
@@ -20,6 +20,10 @@
 - 搜索分两套：侧栏跨会话搜索（Rust 后端）命中只能到会话级；会话内搜索（Ctrl+F）只扫当前活动路径消息。
 - 键盘关键路径：发送可用快捷键完成；会话切换、树图操作基本依赖鼠标；线性视图的分支切换按钮是标准 `<button>` 可 Tab 聚焦。
 - 生成完成没有系统通知、托盘没有聊天状态菜单项；桌面集成与聊天状态的联动限于应用内的跨窗口同步（8.3）。
+- 输入区上方的功能面板（输入设置、宏变量、会话列表、工具设置、Knowledge 引用、画布管理）已统一到公共插槽：`MessageInput.vue` 挂载 `InputPanelHost`，面板状态由 `useInputPanel` 在组件树内注入，同一时刻只显示一个面板；重复点击入口按设置折叠或关闭，关闭时清空插槽，折叠保留面板内部状态（3.1）。
+- 输入工具栏布局可自定义并持久化：常驻操作顺序、右侧状态项显隐/排序、快捷按钮是否按组分行都存在 `ChatSettings.uiPreferences.inputToolbar`；另有"简洁/完整"预设与旧配置兼容解析，分离输入窗通过主窗口打开布局编辑器并沿既有设置同步通道发布完整快照（3.2）。
+- 斜杠指令与快捷操作共用一套自动补全面板：输入 `/` 触发候选列表，内置系统指令（清空、导出、压缩、打开设置等）与快捷操作动态聚合，支持 CodeMirror 与原生 textarea 两种编辑器（3.2）。
+- 消息卡片拆出统计与分组脚注组件，Token/耗时/字数等元信息是否展示仍受可见性偏好控制（6.6）。
 
 ## 工作台边界与用户主链
 
@@ -93,15 +97,23 @@
 
 附件先进入输入管理器（`useChatInputManager`）的临时列表，处理完成后才随用户消息提交；转写占位符由转录管理器按当前模型能力决定是否插入。生成中会禁用流式模式切换，发送按钮转为中止。工具栏可切换流式输出、宏、附件、迷你会话、临时模型、更多工具、工具调用设置、工具栏设置、输入框展开/收起（`MessageInputToolbar.vue`）。
 
-Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用选择器（`KnowledgeReferenceControl.vue`，带可访问名称），输入区上方渲染已引用资料库 chips（`KnowledgeReferenceChips.vue`，每个引用库一个 chip，含名称/ID/可用性 tooltip、不可用红色边框、可单独移除，同样带可访问名称）；随消息提交的引用会在发送入口里先执行一次资料检索/研究工具事件（生成 tool 节点）再进入正常生成链（执行侧见对话请求与上下文 9.9；数据结构 `ChatMessageNode.knowledgeReference`）。
+工具栏布局由 `config/inputToolbar.ts` 与 `inputToolbarActions.ts` 共同描述：操作 ID 列表、状态项列表分区与排序、简洁/完整两套预设、旧配置兼容和未知 ID 跳过渲染都在这里；发送、停止和"更多"入口保持直接可达，宽度不足时按顺序把末尾操作临时收进更多菜单。布局编辑器通过 `open-toolbar-customizer` 动作在主窗口打开（分离输入窗不自己弹），保存时先持久化再发布，状态以完整快照沿 ChatSettings 通道同步。右侧状态项可分别控制续写模型、临时模型、画布状态、上下文 Token 和输入 Token 的显隐与排序，窄窗口里已开启的 Token 统计会移入更多菜单。
+
+斜杠指令在输入框中键入 `/` 触发：`services/slashCommandService.ts` 提供内置系统指令列表、按分类分组与过滤（支持拼音首字母匹配），面板与快捷操作共用候选项；执行时系统指令走各自的会话动作，快捷操作沿用宏引擎的模板处理。系统指令的范围包括清空会话、导出、压缩上下文、打开设置等（完整集合见 `getSystemCommands()`，`slashCommandService.ts:85-180`）。
+
+输入区上方是统一的功能面板插槽：`MessageInput.vue` 用 `InputPanelHost` 承载当前面板，`useInputPanel` 负责"新功能替换当前组件、折叠保留状态、关闭清空插槽"三种语义，重复点击入口时按输入设置的 `panelRepeatClickAction` 折叠或关闭（默认关闭）。面板内容默认由容器滚动；虚拟会话列表与宏选择器接管内部滚动，工具与 Knowledge 面板使用公共布局让顶部控件与底部操作常驻。已接入输入设置、宏变量、会话列表、工具设置、Knowledge 引用和画布管理。
+
+Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用选择器（`KnowledgeReferencePanel.vue`，带可访问名称），输入区上方渲染已引用资料库 chips（`KnowledgeReferenceChips.vue`，每个引用库一个 chip，含名称/ID/可用性 tooltip、不可用红色边框、可单独移除，同样带可访问名称）；随消息提交的引用会在发送入口里先执行一次资料检索/研究工具事件（生成 tool 节点）再进入正常生成链（执行侧见对话请求与上下文 9.9；数据结构 `ChatMessageNode.knowledgeReference`）。
+
+超长粘贴文本会转成消息内文本附件，在输入区以独立卡片列表展示（`VirtualTextAttachments.vue`）：标题可编辑、全文随消息保存，超过单份 16 MiB 或已达 100 份时回到正文并提示；跨工具写入入口与粘贴入口共用同一阈值设置（默认 3000 字符）。导出与请求如何携带这些附件见会话管理 7.1 与对话请求与上下文 2。
 
 ### 3.2 快捷操作（宏）
 
-输入框上方的快捷操作并非固定按钮：`MessageInputToolbar.vue:138-155` 合并聊天全局、当前 Agent、有效用户档案绑定的操作组 ID，去重后加载多个操作组。每个操作以占位符接收选区或整个输入框，通过完整宏引擎展开，还可对每一行加前后缀或执行正则替换（`messageInputStore.ts:368-437`）；结果覆盖选区/输入框，开启自动发送时延迟 50ms 发送（`messageInputStore.ts:447-451`）。操作组支持创建、复制、导入、批量导出和绑定。类型字段声明的 `QuickAction.hotkey` 目前没有实际消费方（见第 10 节）。
+输入框上方的快捷操作并非固定按钮：`MessageInputToolbar.vue` 合并聊天全局、当前 Agent、有效用户档案绑定的操作组 ID，去重后加载多个操作组。每个操作以占位符接收选区或整个输入框，通过完整宏引擎展开，还可对每一行加前后缀或执行正则替换（`messageInputStore.ts:368-437`）；结果覆盖选区/输入框，开启自动发送时延迟 50ms 发送（`messageInputStore.ts:447-451`）。操作组支持创建、复制、导入、批量导出和绑定。快捷操作同时并入斜杠指令候选列表，按组的显隐（`isEnabled !== false`）与"按组分行"偏好随输入工具栏布局一起保存。类型字段声明的 `QuickAction.hotkey` 目前仍没有实际消费方（见第 10 节）。
 
 ### 3.3 草稿状态
 
-输入草稿按会话保存（持久化到 `llm-chat-input-drafts`，`useChatInputManager.ts:68,117`），包含文本、附件、临时模型、续写模型和 Knowledge 引用（字段定义见 `useChatInputManager.ts:77-79`）；临时模型和续写模型随会话切换独立维护。当前 Agent 点击打开迷你会话列表（`MiniSessionList.vue`，虚拟列表 + 定位当前会话，:191-201）；迷你会话切换在开启同步切换 Agent 的开关（默认关闭）时会同步切换展示 Agent（`SessionsSidebar.vue:285-298`）。
+输入草稿按会话保存（持久化到 `llm-chat-input-drafts`，`useChatInputManager.ts:68,117`），包含文本、真实附件、消息内文本附件、临时模型、续写模型和 Knowledge 引用（字段定义见 `useChatInputManager.ts:77-79`）；临时模型和续写模型随会话切换独立维护。尚未发送首条消息的新会话草稿由内存对象承载（数据语义在会话管理 1.1），因此新建会话后切走再切回，开场白与输入内容都还在。当前 Agent 点击打开迷你会话列表（`MiniSessionList.vue`，虚拟列表 + 定位当前会话，:191-201）；迷你会话切换在开启同步切换 Agent 的开关（默认关闭）时会同步切换展示 Agent（`SessionsSidebar.vue:285-298`）。
 
 ### 3.4 附件交互与批量动作
 
@@ -149,6 +161,8 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 
 审批条带倒计时提示（`formatApprovalWait`，每秒刷新，`ToolCallingApprovalBar.vue:40-60`）：无过期时间时显示"等待人工审批 · 不会自动超时"，否则显示"剩余 N 秒 · 超时将自动拒绝"；超时自动拒绝来自可配置的审批超时（默认关闭，`config/defaultSettings.ts:69-70`）。工具节点审批期间显示"等待"、执行期间显示"生成中"的状态切换由编排层写节点状态（对话请求与上下文 9.5）。
 
+审批前还可以先经过**自动决策仲裁**：`src/services/decision-arbiter/` 提供规则式与 LLM 式两种判定引擎（`createDecisionArbiter`、`evaluateArbitration`，另有 `buildJevQuestionnaire` 与 `detectDangerFeatures`），在允许自动审批的配置下给出批准/拒绝结论与理由，未自动通过或判定失败时仍落到人工审批条。审批条会区分本地会话请求与带 `externalId` 的外部来源请求，并据此决定"全部允许/全部拒绝"是否可用；外部来源的具体协议归属见外部执行体笔记。仲裁的配置入口与判定细节在 Agent 工具笔记第 5 节。
+
 ## 6. 消息操作、分支与版本导航
 
 ### 6.1 消息操作栏
@@ -171,6 +185,12 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 ### 6.5 可见性设置与语义状态
 
 节点卡片的时间戳、Token 数、字符数、头像、模型信息、性能指标、自动滚动和气泡布局由全局 `uiPreferences` 控制（`types/settings.ts:125-141`）；关闭这些偏好只隐藏元信息，不改变节点内容或请求上下文。`isEnabled=false` 是语义状态，会影响节点是否参与上下文；压缩收起、过滤 active path、隐藏 HUD/小地图则是呈现状态，不能混为"节点被删除"。"查看详情"是 teleported 到 body 的独立弹层，节点右键菜单和详情弹层的位置跟随节点屏幕坐标（`useGraphNodeActions.ts:194-234`）；因此切换缩放/布局后，弹层需要重新定位，不能把它当成节点卡片的静态子元素。
+
+### 6.6 消息统计与分组脚注
+
+消息卡片组合已拆出独立组件：`MessageRow.vue` 负责单行外壳与布局（`messageRowLayout.css`），`MessageStatistics.vue` 渲染助手消息的 Token/耗时等元信息，`MessageGroupFooter.vue` 作为分组末尾脚注。统计只在角色为助手、状态为 complete、且未处于截图模式时出现，是否展示仍受可见性偏好控制（6.5）。
+
+消息操作按钮同样有可自定义的工具栏：`config/messageToolbar.ts` 与 `messageToolbarActions.ts` 描述可显示的动作集合、排序与显隐，`MessageToolbarCustomizeDialog.vue` 提供编辑入口（各动作的语义仍以 6.1 的菜单项为准）。新增动作若未在配置中登记，只存在于菜单而不进入工具栏。消息壳装配与内容渲染的其余部分在消息渲染器笔记 1.2/1.3。
 
 ## 7. 多会话、多模型与后台生成
 
@@ -238,6 +258,8 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 - **分离窗口断连的回放依赖订阅时机**（8.2）。
 - **`QuickAction.hotkey` 未落地**：类型定义声明了 `hotkey?: string`（`types/quick-action.ts:33`），但 `src/tools/llm-chat` 中没有任何读取或注册该字段的代码（搜索 `.hotkey` 无消费方）——快捷操作按钮、模板展开和自动发送可用，配置快捷键本身没有执行链。
 - **语义状态与呈现状态必须区分**（6.5）。
+- **输入区面板与工具栏布局是 UI 偏好而非会话数据**：面板可见性、折叠态只在当前输入容器内；工具栏顺序/显隐持久化在 ChatSettings，会话切换不重置。分离窗口看到的布局来自主窗口快照同步，旧版 `chat-input-settings` 的显示 Token 与分组开关只在新字段缺失时迁移。
+- **自动审批仲裁的判定结果依赖配置**：仲裁只在允许自动批准的配置下参与，且外部来源请求与本地会话请求分流处理；静态代码确认判定入口与展示描述，未实际观察"自动批准"在真实工具调用中的触发效果。
 - **会话切换无键盘路径、树图无键盘等效操作**：静态代码确认，属关键路径可用性缺口（9.1），需运行验证确认影响范围。
 
 ## 11. 未验证事项
@@ -253,8 +275,13 @@ Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用�
 - `src/tools/llm-chat/components/ChatArea.vue`（视图切换、搜索面板挂载、悬浮窗，214-216行滚动定位）
 - `src/tools/llm-chat/components/message/MessageMenubar.vue`（消息操作入口，167-186行删除确认，408-420行翻译快捷键）
 - `src/tools/llm-chat/components/message/ViewModeSwitcher.vue`、`message/MessageList.vue`（入口层面，渲染机制在渲染器笔记）
-- `src/tools/llm-chat/components/message-input/MessageInput.vue`、`MessageInputToolbar.vue`、`ToolCallingApprovalBar.vue`
-- `src/tools/llm-chat/components/message-input/KnowledgeReferenceControl.vue`、`KnowledgeReferenceChips.vue`（显式资料引用）
+- `src/tools/llm-chat/components/message-input/MessageInput.vue`、`MessageInputToolbar.vue`、`ToolCallingApprovalBar.vue`、`VirtualTextAttachments.vue`
+- `src/components/common/input-panel/InputPanelHost.vue`、`src/composables/useInputPanel.ts`（输入区面板插槽）
+- `src/tools/llm-chat/config/inputToolbar.ts`、`components/message-input/toolbar/inputToolbarActions.ts`、`ToolbarCustomizeDialog.vue`（输入工具栏布局与快捷操作分组）
+- `src/tools/llm-chat/config/messageToolbar.ts`、`components/message/messageToolbarActions.ts`、`MessageToolbarCustomizeDialog.vue`（消息工具栏自定义）
+- `src/tools/llm-chat/services/slashCommandService.ts`、`types/slash-command.ts`（斜杠指令）
+- `src/tools/llm-chat/components/message-input/KnowledgeReferencePanel.vue`、`KnowledgeReferenceChips.vue`（显式资料引用）
+- `src/services/decision-arbiter/`（自动审批仲裁：`index.ts`、`evaluator.ts`、`jevQuestionnaire.ts`、`dangerFeatures.ts`）
 - `src/tools/llm-chat/utils/messageStatus.ts`、`components/message/MessageHeader.vue`（生命周期状态徽标）
 - `src/tools/llm-chat/components/sidebar/BatchManagerDialog.vue`（会话内容搜索与高亮，154/185/362-364/417-432 行）、`SessionsSidebar.vue`（139-146 行虚拟化）、`AgentsSidebar.vue`（926 行）
 - `src/tools/llm-chat/components/search/ChatSearchPanel.vue`（52-121行线性扫描）

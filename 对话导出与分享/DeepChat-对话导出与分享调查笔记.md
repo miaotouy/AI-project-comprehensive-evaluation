@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`31a6b05ab77986b3f8086d9e16c565c3251639e0`（分支：`dev`）
+> 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
 > 调查方式：静态源码局部调查；本轮补充阅读虚拟列表窗口化（useMessageVirtualization/useMessageWindow）、历史懒加载分页（messageStore.loadOlderMessages）、Markdown 节点虚拟化、preload 剪贴板实现与相关测试；未运行 Electron 应用、未执行测试
 >
@@ -96,6 +96,8 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 
 ## 5. 可靠性、历史与持久化
 
+除截图外还有一条纯文本导出链：Nowledge Mem 导出改成走插件连接，导出前先取目标连接再加载会话，取不到就返回“选择连接”错误；提交时把该连接随 thread 一起传入，连接检测也改为插件侧的 verify，而不是读取 settings 里的静态配置（`src/main/exporter/index.ts`、`src/main/exporter/nowledgeMemClient.ts`）。用户消息文本在导出时会把会话引用的内联项拼进正文，避免导出稿丢失“引用了哪个会话”的信息（`src/main/exporter/formats/userMessageText.ts`、`@shared/sessionReferences`）。
+
 - `isCapturing` 防止同一 composable 并发截图（`usePageCapture.ts:159-161`）；
 - 捕获过程在 finally 中恢复滚动行为，消息层另行恢复隐藏覆盖层；
 - 单段失败会停止循环；已有分段仍可能继续进入拼接，是否形成部分图片没有显式完成度标记（`usePageCapture.ts:279-291,299-320`）；
@@ -109,7 +111,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 - 短按/长按在一个紧凑入口中提供“当前问答组”和“截至当前的会话长图”两种常用范围。
 - 分段捕获绕开单一超长 Canvas 的直接 DOM 转换限制，但依赖滚动期间现场稳定和每段延迟。
 - 直接捕获当前 UI 意味着图片就是现场渲染结果，同时也把折叠状态、已挂载范围和主题现场带入结果。
-- 输出只进剪贴板，交付链简短，但没有文件管理、版本比较和远端分享治理。
+- 输出只进剪贴板，交付链简短，但没有文件管理、版本比较和远端分享治理；Nowledge Mem 文本导出依赖外部插件连接，属于可选的第三方交付面，其连接状态与凭据由插件维护。
 
 ## 7. 未验证事项
 
@@ -118,6 +120,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 - 窗口化渲染下捕获滚动与窗口挂载/测量的时序：未挂载区域是否以占位空白进入分段、捕获中行高测量（ResizeObserver + rAF 批量）是否导致分段内容偏移；≤160 条消息时不涉及。
 - “从顶部”起点与真实会话起点的差异程度（100 条初始加载 + 每页 100 条懒加载），以及到达已加载页顶后截图是否仍继续滚动进入占位空白。
 - Markdown、代码、表格、工具卡、图片和本地附件的分段接缝与视觉保真，以及折叠块在截图中的实际呈现。
+- Nowledge Mem 插件的连接选择、verify 与提交在真实环境中的表现未运行验证。
 - 剪贴板 IPC 失败后的实际用户反馈，以及 Windows/macOS/Linux 各平台 PNG 复制的格式兼容性差异与高 DPI 位图尺寸。
 - 捕获失败后已有分段是否可能生成部分长图；本次未运行错误场景。
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：阅读记忆存储、记忆提供方编排、会话全文检索、上下文组装、学习图及相关测试入口，静态追踪内置与外部记忆的读写路径；未启动 Hermes、SQLite 索引重建、外部记忆服务或真实模型请求
 >
@@ -35,6 +35,8 @@
 
 系统的长期作用域是 profile。内置记忆位于 `get_hermes_home() / "memories"`，不同 profile 有各自的目录和会话数据库；外部 provider 初始化时也接收 profile 路径、会话、平台和可选用户/群组身份。MemoryManager 同时最多登记一个非内置 provider，以避免多个后端的工具 schema 和事实源冲突；内置文件存储与这个外部 provider 可并存。见 `tools/memory_tool.py:60-67`、`agent/agent_init.py:1850-1980`、`agent/memory_manager.py:403-509`。
 
+记忆宿主的实现已按职责拆成多个模块：`agent/memory_caller_scope.py` 约束调用方作用域，`agent/memory_context.py` 负责上下文拼装，`agent/memory_manager_tools.py` 承接工具面的注册与调用，`agent/memory_provider.py` 仍是外部提供方 ABC；`agent/turn_context.py` 中的 `compose_user_api_content`/`substitute_api_content`/`drop_stale_api_content` 把 sidecar 的写入、替换与过期清理集中成单一实现，避免 wire 字节与持久化内容漂移。
+
 ## 事实对象、摄取与索引
 
 ### 内置记忆对象
@@ -45,7 +47,9 @@
 
 ### 外部提供方与会话索引
 
-MemoryProvider 是可选扩展契约，定义初始化、预取、回合同步、工具暴露、会话结束、会话切换和压缩前回调。该契约不规定文档切块、Embedding、K 值、重排器或结果字段，因此 Honcho、Mem0 等 provider 可能采用不同的事实模型；本笔记不将它们的能力归结为 Hermes 核心能力。宿主对非内置预取设置 8 秒默认等待，超时跳过该轮，并将回合写回放入单线程后台队列以维持写入顺序。见 `agent/memory_provider.py:1-31, 110-247, 263-327`、`agent/memory_manager.py:410-439, 564-639, 714-770`。
+MemoryProvider 是可选扩展契约，定义初始化、预取、回合同步、工具暴露、会话结束、会话切换和压缩前回调。该契约不规定文档切块、Embedding、K 值、重排器或结果字段，因此 Honcho、Mem0 等 provider 可能采用不同的事实模型；本笔记不将它们的能力归结为 Hermes 核心能力。宿主对非内置预取设置 8 秒默认等待，超时跳过该轮，并将回合写回放入单线程后台队列以维持写入顺序。见 `agent/memory_provider.py`、`agent/memory_manager.py`。
+
+外部提供方的装配位置在快照间发生了变化：仓库内置的 `plugins/memory/` 现在只保留 byterover 与 retaindb 两个记忆插件（另有 `config_schema.py`、`query_rewrite.py`），Honcho、Mem0 等改由 `plugin-catalog/` 中 SHA 固定的清单条目按需安装，安装后仍通过同一 MemoryProvider 契约接入。因此“内置外部记忆提供方清单”不再是仓库内固定集合，而是随用户安装的插件变化。
 
 会话检索的事实源是 profile 的 SQLite `state.db` 消息与会话行。检索函数根据查询形态选择通用 FTS5、CJK bigram、trigram 或 LIKE 路由；索引重建进度可返回给 `session_search` 调用者，以避免把重建期间的稀疏结果当作完整历史。工具默认只检索 user/assistant 角色，工具输出需显式要求才纳入。见 `hermes_state_search.py:1415-1487`、`tools/session_search_tool.py:259-278, 761-813, 1145-1247`。
 
@@ -98,7 +102,8 @@ Hermes 支持模型在同一工具循环内根据 `session_search` 结果再次�
 - 未配置或调用任一外部 MemoryProvider，故未验证其数据模型、Embedding、候选数、重排、费用、写回时序、会话结束提取及数据驻留。
 - 未发起真实模型工具调用，故未验证模型是否恰当地选择 `session_search`、记忆工具或多步滚动，也未验证预取上下文对回答质量的影响。
 - 未运行内置记忆审批、文件漂移、跨 profile 读取、压缩谱系召回和进程中断路径；本文对一致性与隔离的描述仅限静态代码。
-- 本次未审查所有 provider 插件、后台复习实现和桌面学习图的 UI 交互；“未找到固定多阶段编排”仅限文中列出的宿主入口与搜索范围。
+- 未审查所有 provider 插件、后台复习实现和桌面学习图的 UI 交互；“未找到固定多阶段编排”仅限文中列出的宿主入口与搜索范围。
+- 本轮按路径复核了记忆宿主与检索模块的归位、sidecar 函数与 FTS 重建入口，未逐行重读 26k 提交范围的全部改动；行号引用以模块级定位为准，未重新计算精确行段。
 
 ## 关键源码索引
 

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`0a7c15832fb30b1903753e83f81dc7d27e5b0944`（分支：`main`）
+> 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码（Svelte 组件与 store、`Chat.svelte` 会话状态机、Overview 消息树图组件、`MessageInput` 输入区）；界面视觉、焦点与键盘可用性未运行验证
 >
@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat.svelte`（4205 行），包含发送、停止、重新生成、继续生成、MoA 合并与队列排队：
+Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat.svelte`（5754 行），包含发送、停止、重新生成、继续生成、MoA 合并与队列排队：
 
 - 聊天控制器为 `Chat.svelte`，消息列表/输入/渲染组件分离（`Messages.svelte`、`MessageInput.svelte`、`Messages/*` 系列）；
 - 无 chat_id 时（临时会话）创建 `temporary:{socket.id}` 会话 ID（`Chat.svelte:2868-2871`），响应返回真实 chat_id 后更新 store、URL `/c/{id}` 并刷新列表；
-- 提交排队走 `chatRequestQueues` store + `processNextInQueue`（2157-2177 行），同一会话的多次提交合并后串行发送；`chat:active=false` 事件驱动前端清空 taskIds 并重载；
+- 提交排队走 `chatRequestQueues` store + `processNextInQueue`（3187 行），同一会话的多次提交合并后串行发送；`chat:active=false` 事件驱动前端清空 taskIds 并重载；
 - 右侧面板的 Overview 把整个消息树渲染成只读 SvelteFlow 节点图（`Overview/View.svelte` + `Flow.svelte`），点击节点 = 切换 `history.currentId` 到该消息所在分支；
 - 消息操作（重新生成/继续/合并）与 Overview 共享同一棵 `history` 树，不创建独立视图状态。
 
@@ -38,8 +38,8 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 ## 1. 页面结构、导航与多窗口
 
 - 路由 `/c/[id]` 的页面只是 `<Chat chatIdProp={$page.params.id} />` 一行装配（`src/routes/(app)/c/[id]/+page.svelte:1-7`）；根路径 `/` 同样挂载 Chat（新会话占位）；
-- 会话控制器 `Chat.svelte`（4205 行）按职责分层挂载渲染组件：`Messages.svelte`（577 行）负责消息列表壳、`MessageInput.svelte`（2448 行）负责输入区；消息壳内部的入口分发、主渲染（流式内容/Markdown/引用/代码执行/评分）、用户消息、并排多列与结构化输出等组件的渲染实现属于消息渲染器，此处只作为工作台结构记录；
-- 右侧面板 `ChatControls.svelte`（540 行）：控制、文件、概览三个 tab（`savedTab` 记录当前选中，2 行），`showOverviewTab = hasMessages`（81 行）——只要会话有消息就提供 overview 入口（332-340 行）；左侧 `Sidebar.svelte`（1732 行）承载会话导航（见第 2 节）；
+- 会话控制器 `Chat.svelte`（5754 行）按职责分层挂载渲染组件：`Messages.svelte`（566 行）负责消息列表壳、`MessageInput.svelte`（3067 行）负责输入区；消息壳内部的入口分发、主渲染（流式内容/Markdown/引用/代码执行/评分）、用户消息、并排多列与结构化输出等组件的渲染实现属于消息渲染器，此处只作为工作台结构记录；
+- 右侧工作台 `ChatTabs.svelte`（1202 行）取代原先的三 tab 控制面板：标签种类覆盖会话、文件、文件预览、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊（`ChatTabs/tabs.ts:5-32`），会话概览改为按需打开的抽屉（`showOverview` store，`ChatTabs.svelte:792-818` 挂载 `Overview.svelte` → `Overview/View.svelte`，195 行）；左侧 `Sidebar.svelte`（2038 行）承载会话导航（见第 2 节）；
 - 多窗口：同一用户的多标签页经 Socket.IO 事件广播共享生成状态（对话请求与上下文笔记 5.3），但 `chatRequestQueues` 等前端 store 不跨窗口同步——同一会话在两个标签页同时提交的队列行为未验证；
 - 嵌入场景：`Chat.svelte` 支持 `embedded` 模式（在笔记内嵌聊天，经 `onCreateEmbeddedChat`/`onSelectEmbeddedChat` 等 prop 接入，125-137 行），草稿按 `embeddedDraftKey` 管理（525-528 行）。
 
@@ -53,7 +53,7 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- `MessageInput.svelte`（2448 行）承担输入区：文本输入 + 附件 + 语音 + 命令 + 提及：
+- `MessageInput.svelte`（3067 行）承担输入区：文本输入 + 附件 + 语音 + 命令 + 提及：
   - `@` 提及（模型/文件选择，1140-1178 行）与 `/` 命令（`CommandSuggestionList`，101 行）经 suggestions 机制插入；输入区含粘贴上传（`onPaste`）与拖放（dropzone id 见 `Chat.svelte:142`）；
   - 语音输入：麦克风按钮 + 听写快捷键（`Shortcut.TOGGLE_DICTATION`，1106-1119 行）；`speechAutoSend` 选项（1462 行）；
   - `largeTextAsFile`：大段文本自动转文件（1767 行，按设置与 Shift 键）；
@@ -68,14 +68,14 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
   params / tool_ids / skill_ids / terminal_id / tool_servers / features / variables
   ```
 
-  模型列表经 `ModelSelector.svelte`（90 行）选择，`selectedModels` 支持多选（side-by-side）；
-- 界面上的配置入口：Composer 旁的模型选择器、工具/技能/终端选择（`selectedToolIds`/`selectedSkillIds`，`Chat.svelte:3095-3117`）；参数设置由 `SettingsModal.svelte`（1281 行）承载，工具服务器与技能选择另有专门弹窗。
-- 输入菜单还允许把工具执行切换为完整访问或逐次确认。选择逐次确认时，未结算的工具调用会留在消息 output 中，待用户允许或拒绝后再恢复生成；该按钮只写入聊天参数，可信状态迁移在服务端完成（`Chat.svelte:418-469`、`MessageInput/InputMenu.svelte:56-63`）。
-- 作用域辨认：`@` 提及内联切换 `atSelectedModel`（单次会话模型覆盖，`MessageInput.svelte:1148-1151`），会话参数 `params` 在创建会话时持久化（对话请求与上下文笔记 1.1 第 4 步）。配置项在界面上的作用域标识（全局/会话/本次）未运行验证。
+  模型列表经 `ModelSelector.svelte`（95 行）选择，`selectedModels` 支持多选（side-by-side）；
+- 界面上的配置入口：Composer 旁的模型选择器、工具/技能/终端选择（`selectedToolIds`/`selectedSkillIds`，`Chat.svelte:356-357`）；参数设置由 `SettingsModal.svelte`（975 行）承载，工具服务器与技能选择另有专门弹窗。
+- 输入菜单还允许把工具执行切换为完整访问或逐次确认。选择逐次确认时，未结算的工具调用会留在消息 output 中，待用户允许或拒绝后再恢复生成；该按钮只写入聊天参数，可信状态迁移在服务端完成（`Chat.svelte:533-560`、`MessageInput/InputMenu.svelte:49-70`）。
+- 作用域辨认：`@` 提及内联切换 `atSelectedModel`（单次会话模型覆盖，`MessageInput.svelte:179`），会话参数 `params` 在创建会话时持久化（对话请求与上下文笔记 1.1 第 4 步）。配置项在界面上的作用域标识（全局/会话/本次）未运行验证。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- 提交排队：`chatRequestQueues` store（`src/lib/stores/index.ts:107`）+ `processNextInQueue`（`Chat.svelte:2157-2177`）——同一会话的多次提交在前端合并（prompt 以换行连接、文件合并）后一次性发送；
+- 提交排队：`chatRequestQueues` store（`src/lib/stores/index.ts:148`）+ `processNextInQueue`（`Chat.svelte:3187`）——同一会话的多次提交在前端合并（prompt 以换行连接、文件合并）后一次性发送；
 - 生成状态反馈经 Socket.IO 事件驱动（事件分发表见对话请求与上下文笔记 5.3），前端按事件类型更新界面：
 
   | 事件 | 界面作用 |
@@ -97,12 +97,12 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
 ### 6.1 Overview：会话消息树图
 
-聊天右侧面板 `ChatControls.svelte` 的 `overview` tab（332-340 行，`showOverviewTab = hasMessages`，81 行；370-375 行挂载）。该视图把整个消息树渲染成一张**只读节点图**，实现分三层：
+会话概览由 `ChatTabs.svelte` 的抽屉承载（有消息时才允许打开，`ChatTabs.svelte:479,792-818`）。该视图把整个消息树渲染成一张**只读节点图**，实现分三层：
 
-- **图数据构建**（`Overview/View.svelte`，190 行）：直接从 `history.messages` 遍历（`drawFlow`，64-126 行）为每条消息生成一个节点，按 `parentId` 连接平滑折线边（118 行），节点分层取父节点层级加一（80 行），同层节点用层宽计数均匀排布（74-88 行）；垂直/水平两种布局方向可切换（`Flow.svelte:59-64` 的 ControlButton）；
-- **画布**（`Overview/Flow.svelte`，67 行）：基于 `@xyflow/svelte`（SvelteFlow），默认自动适配视口、最小缩放 0.001、禁止拖拽节点与连线（32、33、41-42 行）；`Background` + `Controls` 提供缩放平移，另有 pin（固定视口，48-58 行）按钮；
-- **交互**：分支指针 `history.currentId` 变化时视图自动定位当前消息（`View.svelte:50-62`，pin 时跳过）；点击节点经 `nodeclick` 事件（`View.svelte:180-187`）触发会话控制器的 `showMessage`（`Chat.svelte:855-891`）——沿 `childrenIds` 一路走到叶子、更新分支指针并把主消息区滚动到该消息，即**点击树图节点 = 切换到该消息所在分支**；活动路径上的边以动画高亮（`View.svelte:119, 128-134`）；
-- 节点卡（`Node.svelte`，94 行）：用户/模型头像、名称、两行内容摘要（全文放 Tooltip，25-29 行），assistant 卡上还有收藏按钮（63-78 行，**仅本地切换 `message.favorite` 状态，不调 API**——刷新后恢复原状，静态推断）。
+- **图数据构建**（`Overview/View.svelte`，195 行）：直接从 `history.messages` 遍历（`drawFlow`，65 行起）为每条消息生成一个节点，按 `parentId` 连接平滑折线边，节点分层取父节点层级加一，同层节点用层宽计数均匀排布；垂直/水平两种布局方向可切换（`Flow.svelte` 的 ControlButton）；
+- **画布**（`Overview/Flow.svelte`，73 行）：基于 `@xyflow/svelte`（SvelteFlow），默认自动适配视口、最小缩放 0.001、禁止拖拽节点与连线（32、33、41-42 行）；`Background` + `Controls` 提供缩放平移，另有 pin（固定视口，48-58 行）按钮；
+- **交互**：分支指针 `history.currentId` 变化时视图自动定位当前消息（`View.svelte:51-57`，pin 时跳过）；点击节点经 `onNodeClick` 回调触发会话控制器的 `showMessage`——沿 `childrenIds` 一路走到叶子、更新分支指针并把主消息区滚动到该消息，即**点击树图节点 = 切换到该消息所在分支**；活动路径上的边以动画高亮（`View.svelte:124,133`）；
+- 节点卡（`Node.svelte`，123 行）：用户/模型头像、名称、两行内容摘要（全文放 Tooltip），assistant 卡上还有收藏按钮（**仅本地切换 `message.favorite` 状态，不调 API**——刷新后恢复原状，静态推断）。
 
 该视图是消息树的分支导航辅助，与发送链路共享同一棵 `history` 树，不创建新消息或独立视图状态。超大消息树上的渲染性能未运行验证。
 
@@ -146,9 +146,9 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
 ## 12. 关键源码索引
 
-- 前端会话状态机：[`src/lib/components/chat/Chat.svelte`](../../open-webui/src/lib/components/chat/Chat.svelte)（`chatEventHandler` 949、`processNextInQueue` 2157、`submitPrompt` 2493、`sendMessage` 2773、`sendMessageSocket` 2974、`stopResponse` 3303、`showMessage` 855）
+- 前端会话状态机：[`src/lib/components/chat/Chat.svelte`](../../open-webui/src/lib/components/chat/Chat.svelte)（`showMessage` 1249、`chatEventHandler` 1462、`processNextInQueue` 3187、`submitPrompt` 3667、`sendMessage` 4118、`stopResponse` 4681）
 - 输入区：[`src/lib/components/chat/MessageInput.svelte`](../../open-webui/src/lib/components/chat/MessageInput.svelte)
-- 右侧面板与 Overview 入口：[`src/lib/components/chat/ChatControls.svelte`](../../open-webui/src/lib/components/chat/ChatControls.svelte)（81、332-340、370-375 行）
-- Overview 消息树图：[`src/lib/components/chat/Overview/`](../../open-webui/src/lib/components/chat/Overview/)（`View.svelte` 64-126、`Flow.svelte` 28-64、`Node.svelte`）
+- 右侧工作台与 Overview 入口：[`src/lib/components/chat/ChatTabs.svelte`](../../open-webui/src/lib/components/chat/ChatTabs.svelte)（479、792-818 行）、[`ChatTabs/tabs.ts`](../../open-webui/src/lib/components/chat/ChatTabs/tabs.ts)
+- Overview 消息树图：[`src/lib/components/chat/Overview/`](../../open-webui/src/lib/components/chat/Overview/)（`View.svelte` 65-140、`Flow.svelte`、`Node.svelte`）
 - 会话侧栏与搜索：[`src/lib/components/layout/Sidebar.svelte`](../../open-webui/src/lib/components/layout/Sidebar.svelte)、[`SearchModal.svelte`](../../open-webui/src/lib/components/layout/SearchModal.svelte)
-- 前端 store：[`src/lib/stores/index.ts`](../../open-webui/src/lib/stores/index.ts)（`chatRequestQueues` 107）
+- 前端 store：[`src/lib/stores/index.ts`](../../open-webui/src/lib/stores/index.ts)（`chatRequestQueues` 148）

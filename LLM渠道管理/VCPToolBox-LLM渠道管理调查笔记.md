@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：静态阅读当前 HEAD 的配置模板、主服务、管理 API、AdminPanel-Vue 前端、语义路由实现及脚本/入口文件；使用 Glob/Grep 检查 CLI、TUI、桌面端和导入导出入口；未修改被调查仓库，未运行服务验证 UI 保存和网络请求
 >
@@ -172,6 +172,10 @@ AdminPanel-Vue 的“全局基础配置”页把环境变量解析成表单，�
 部分插件可在自己的 `Plugin/*/config.env` 保存第三方 API Key，Dynamic Tool Bridge 也可配置独立小模型 endpoint。这些配置由具体插件消费，用于搜索、图片、分类等局部任务。
 
 它们没有注册进主 Chat 的统一 Provider 池，不能被普通 `/v1/chat/completions` 请求按权重选择，也不会成为 `API_URL` 的自动备用地址。因此本篇把它们视为插件依赖，而非核心 LLM 渠道实体。
+
+本快照另有一类独立的外部决策服务端点（JEV），用于折叠筛选、上下文剪枝与语义重排。它有自己的 provider、地址、模型、多 Key 轮换与超时配置，不进入 `/v1/models` 目录，不参与语义选模与模型级 fallback，也不消耗主 Chat 的重试预算。就渠道视角而言，它是检索侧的判断服务，不是可供聊天选路的模型渠道；其中的 Key 轮换与重试语义与主链的 `ApiRetries` 是两套独立实现。
+
+依据：`config.env.example` 的 JEV 段（`JEV_PROVIDER`、`JEV_API_KEY`、`JEV_API_URL`、`JEV_MODEL`、`JEV_TIMEOUT_MS`、`JEV_MAX_RETRIES` 与三类功能开关）、`modules/jevClient.js`。
 
 ## 4. Base URL、端点、Header 与凭据
 

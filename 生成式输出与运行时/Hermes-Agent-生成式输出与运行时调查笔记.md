@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`682a95258ce9e877cfb607a5ada6436183efdebb`（分支：`main`）
+> 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
 > 调查方式：静态代码阅读为主；grep/glob 检索 artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、MEDIA 等关键词；重点阅读 `tools/code_execution_tool.py`、`tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/desktop_ui.py`、`apps/desktop/src/store/artifacts.ts`、`apps/desktop/src/store/preview.ts`、`apps/desktop/src/app/chat/right-rail/preview-*.tsx`、`tui_gateway/server.py`、`gateway/platforms/base.py` 等；未运行应用与测试
 >
@@ -104,7 +104,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 - **`execute_code`（模型侧代码执行，Agent 工具类目）**：当前默认是按会话身份复用的持久 Python 内核，不再每次调用都创建一次性解释器。每个 cell 重新绑定当前工具权限，变量、导入与助手函数留在会话中；子 Agent 使用委派会话 ID 隔离，关闭会话、`/new`、超时或中断会销毁对应内核。远端 Docker/SSH/Modal 后端有同构 detached kernel 注册表（`tools/code_kernel.py:412-471,477-493,655-747`，`tools/code_kernel_remote.py:106-189,315-394`）。子进程环境仍剥离 API 密钥，完整脚本经过审批守卫；白名单工具为：
   - `web_search`、`web_extract`、`read_file`、`write_file`、`search_files`、`patch`、`terminal`
-- **`terminal` 环境**：本地与远程后端（Docker/SSH/Modal/Daytona/Singularity/Vercel，`tools/environments/`）。
+- **`terminal` 环境**：本地与远程后端（Docker/SSH/Modal/Daytona/Vercel，`tools/environments/`；Singularity/Apptainer 为插件后端）。
 - **桌面预览运行时**：webview/iframe 均为沙箱，无网络桥（HTML artifact 内脚本不能请求外部资源也不会被宿主响应）。
 - **桌面宿主桥**（`window.hermesDesktop`）：类型化窄桥——文件读写（`readDesktopFileDataUrl` 等，`lib/desktop-fs.ts`）、git、`hermes-media://` 流媒体协议、保存图像/浏览器打开/预览目标归一化（`lib/local-preview.ts:147-179`、`lib/media.ts:122-127`）。
 - **read_window_below**（`tools/read_window_tool.py`）：桌面能力桥工具——询问宿主"Hermes 窗口正下方是哪个 OS 窗口"，经 `window.read.request/respond` 阻塞桥回传序列化窗口元数据（`server.py:5870-5879` `read_window_below_callback`，30s 超时）；Windows 侧经 Electron 主进程的 get-windows 原生绑定枚举。能力演进：
@@ -171,6 +171,7 @@ E2E（`apps/desktop/e2e/`）覆盖启动/聊天/会话/右侧面板，未发现�
 - 版本注册表在"压缩/恢复/分支"后的重建正确性（依赖 `session.resume` 的转写完整度）；
 - 消息平台 `MEDIA:` 递送的视觉形态（属于相邻类目，未深查）。
 - 持久内核的跨多轮状态、远端心跳恢复、输出溢写和子 Agent 隔离未做运行验证。
+- 本轮按路径复核了 artifact/预览模块与桌面右栏的归位（含 `chat-messages` 目录化），未逐行重读 26k 提交范围内的渲染实现；新增的桌面 `agents`/`learning`/`pet-generate` 等表面不属于本笔记主链，未展开。
 
 ## 12. 关键源码索引
 
@@ -180,7 +181,7 @@ E2E（`apps/desktop/e2e/`）覆盖启动/聊天/会话/右侧面板，未发现�
 - `apps/desktop/src/app/chat/right-rail/preview-artifact.tsx`：artifact 沙箱 iframe 与版本 UI
 - `apps/desktop/src/app/chat/right-rail/preview-pane.tsx`：URL webview 沙箱与 console/devtools
 - `apps/desktop/src/app/chat/right-rail/preview-file.tsx`：文件渲染/diff/就地编辑与冲突
-- `apps/desktop/src/lib/preview-targets.ts`、`lib/media.ts`、`lib/chat-messages.ts`：`#preview/`、`#media:`、`MEDIA:` 三协议消费端
+- `apps/desktop/src/lib/preview-targets.ts`、`lib/media.ts`、`lib/chat-messages/`：`#preview/`、`#media:`、`MEDIA:` 三协议消费端（chat-messages 已拆为目录，含 codex sidecar/interim preservation 等专门测试）
 - `apps/desktop/src/app/artifacts/artifact-utils.ts`：跨会话画廊挖掘
 - `tools/open_preview_tool.py`、`tools/read_preview_tool.py`、`tools/focus_pane_tool.py`、`tools/desktop_ui.py`、`tools/read_window_tool.py`：桌面能力桥工具
 - `tools/code_execution_tool.py`：模型侧 Python 沙箱（UDS/TCP RPC、白名单、审批）

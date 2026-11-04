@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`429a96829da0149ff59b6758748795a2934bdc9d`（分支：`main`）
+> 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
 > 调查方式：静态阅读当前 Electron 主进程、预加载桥接、日记 UI、RAG Observer 及其 HTTP、IPC、WebSocket 契约；未启动客户端、未连接 VCP 网关或日志服务
 >
@@ -22,7 +22,7 @@ VCPChat 的本体定位是 Electron 聊天客户端，而非独立的检索增�
 
 ### 进程与所有权
 
-VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服务器打造的 AI 聊天桌面客户端”（`package.json:2-6`）。主进程通过隔离的 preload 向页面暴露有限 IPC API，日记页面和观察器都不能直接取得 Node 能力；观察器窗口明确使用 `contextIsolation: true`、`nodeIntegration: false`（`modules/ipc/ragHandlers.js:244-257`）。这是客户端本地进程边界，不是 VCP 服务端的权限或数据隔离证明。
+VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服务器打造的 AI 聊天桌面客户端”（`package.json:2-6`）。主进程通过隔离的 preload 向页面暴露有限 IPC API，日记页面和观察器都不能直接取得 Node 能力；观察器窗口明确使用 `contextIsolation: true`、`nodeIntegration: false`（`modules/ipc/ragHandlers.js:245-259`）。这是客户端本地进程边界，不是 VCP 服务端的权限或数据隔离证明。
 
 客户端拥有的是本地聊天历史、配置和窗口状态，以及当前 UI 中的日记引用、文件夹可见性、搜索结果和图形位置等展示状态。日记正文、文件夹、语义搜索结果和关联候选通过远端接口取得或修改；客户端不在本链路中保存日记索引。`memo.config.json` 只保存隐藏文件夹、折叠类别与排序，位于用户数据目录（`modules/ipc/memoHandlers.js:11-45`）。
 
@@ -30,11 +30,11 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 日记页面将配置的聊天端点规整为服务基址；随后用论坛账号构造 Basic Authorization，调用 `admin_api/dailynotes` 获取文件夹、文件列表、全文、文本搜索、移动和删除（`Memomodules/memo.js:112-151,500-520`）。因此“日记/知识库”“思维簇”是客户端按文件夹名展示的对象类别：文件夹名以“簇”结尾即被归类为思维簇，而不是客户端计算出的簇（`Memomodules/memo.js:544-572`）。
 
-语义检索和联想也只是在客户端组装请求。前者向 `v1/human/tool` 发送名为 LightMemo 的工具文本，固定请求 `k: 10`、`tag_boost: 0.6` 及跨知识库开关；返回内容经文本解析后按“文件夹 + 文件名”去重为日记卡片（`Memomodules/memo.js:1138-1249,1251-1321`）。后者把源文件路径、用户选定文件夹、K 值和标签提升值 POST 到日记 API 的 `associative-discovery`，将服务端 `results` 中的路径、分数、片段和匹配标签画成客户端关系图（`Memomodules/memo-graph.js:71-154,208-252`）。代码没有给出这些端点背后的向量模型、候选数以外的检索预算、重排或图传播规则。
+语义检索和联想也只是在客户端组装请求。前者向 `v1/human/tool` 发送名为 LightMemo 的工具文本，固定请求 `k: 10`、`tag_boost: 0.6` 及跨知识库开关；返回内容经文本解析后按“文件夹 + 文件名”去重为日记卡片（`Memomodules/memo.js:1152-1263,1265-1335`）。后者把源文件路径、用户选定文件夹、K 值和标签提升值 POST 到日记 API 的 `associative-discovery`，将服务端 `results` 中的路径、分数、片段和匹配标签画成客户端关系图（`Memomodules/memo-graph.js:71-154,208-252`）。代码没有给出这些端点背后的向量模型、候选数以外的检索预算、重排或图传播规则。
 
 ## 事实对象、摄取与索引
 
-客户端可操作的日记事实是服务端返回的文件夹、日记名、预览、修改时间、正文，以及关联结果的路径、分数、片段和匹配标签。用户可打开、创建、编辑、删除、批量移动日记；创建操作将日期、作者、可选文件名/标签和正文编码为 DailyNote 工具请求后交给网关，编辑和删除则调用日记管理 API（`Memomodules/memo.js:857-968,999-1088`）。工作台保存所选日记的名称、文件夹、预览和修改时间，可将用户输入的新内容发布为另一条 DailyNote，再由用户选择保留、归档或删除原日记（`Memomodules/memo-workbench.js:18-96,157-280`）。
+客户端可操作的日记事实是服务端返回的文件夹、日记名、预览、修改时间、正文，以及关联结果的路径、分数、片段和匹配标签。用户可打开、创建、编辑、删除、批量移动日记；创建操作将日期、作者、可选文件名/标签和正文编码为 DailyNote 工具请求后交给网关，编辑和删除则调用日记管理 API（`Memomodules/memo.js:857-982,1013-1102`）。工作台保存所选日记的名称、文件夹、预览和修改时间，可将用户输入的新内容发布为另一条 DailyNote，再由用户选择保留、归档或删除原日记（`Memomodules/memo-workbench.js:18-96,157-280`）。
 
 这里的“工作台整合”是人工选取资料和人工填写新内容的 UI 流程，不是客户端自动摘要、合并或记忆写回算法。静态代码也只能确认网关收到工具文本，不能确认远端 DailyNote 如何落盘、何时入索引，或是否触发 embedding、标签派生和思维簇维护。
 
@@ -44,9 +44,9 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 ### 人工语义检索
 
-完整静态主链为：用户在日记页切换到语义级全局检索并输入关键词；页面取消上一轮搜索，向远端工具端点提交查询；客户端解析服务端原始输出中的来源、路径和片段；同一日记的多个片段在客户端合并为一张卡，优先保留较长预览；用户可继续打开全文、加入工作台或发起关联。入口、取消及结果归并见 `Memomodules/memo.js:180-220,1091-1194,1251-1321`。
+完整静态主链为：用户在日记页切换到语义级全局检索并输入关键词；页面取消上一轮搜索，向远端工具端点提交查询；客户端解析服务端原始输出中的来源、路径和片段；同一日记的多个片段在客户端合并为一张卡，优先保留较长预览；用户可继续打开全文、加入工作台或发起关联。入口、取消及结果归并见 `Memomodules/memo.js:180-220,1105-1208,1265-1335`。
 
-客户端唯一明确的结果整理是路径解析、隐藏文件夹和 MusicDiary 的本地过滤、按日记去重和预览截断，并非候选相关性重排。LightMemo 输出中的 TagMemo/RiverMemo 行被过滤出卡片预览，只说明客户端适配了服务端文本格式，不能证明其实现或执行这些机制（`Memomodules/memo.js:1251-1308`）。搜索使用 `AbortController` 取消被新查询替代的 fetch；这是一项客户端并发恢复语义，不能取消已在服务端执行的工作（`Memomodules/memo.js:1091-1096,1138-1193`）。
+客户端唯一明确的结果整理是路径解析、隐藏文件夹和 MusicDiary 的本地过滤、按日记去重和预览截断，并非候选相关性重排。LightMemo 输出中的 TagMemo/RiverMemo 行被过滤出卡片预览，只说明客户端适配了服务端文本格式，不能证明其实现或执行这些机制（`Memomodules/memo.js:1265-1322`）。搜索使用 `AbortController` 取消被新查询替代的 fetch；这是一项客户端并发恢复语义，不能取消已在服务端执行的工作（`Memomodules/memo.js:1105-1110,1152-1207`）。
 
 ### 日记联想图
 
@@ -54,33 +54,33 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 ## 网关请求、事件与结果注入
 
-普通聊天从 renderer 经 `send-to-vcp` IPC 进入主进程。请求体包含消息、模型配置、布尔流式标志和 `requestId`；如果历史消息带有客户端时间戳元数据或 agent/topic 上下文，主进程额外发送 `vcpchatExtensions`，其中时间戳绑定只带消息文本 SHA-256 哈希而非附加私有字段（`modules/ipc/chatHandlers.js:861-890,1080-1123`；`modules/vcpClient.js:41-99`）。这是 VCPChat 到网关的请求契约，服务端是否消费扩展字段及其如何检索，尚未运行确认。
+普通聊天从 renderer 经 `send-to-vcp` IPC 进入主进程。请求体包含消息、模型配置、布尔流式标志和 `requestId`；如果历史消息带有客户端时间戳元数据或 agent/topic 上下文，主进程额外发送 `vcpchatExtensions`，其中时间戳绑定只带消息文本 SHA-256 哈希而非附加私有字段（`modules/ipc/chatHandlers.js:74-153`）。这是 VCPChat 到网关的请求契约，服务端是否消费扩展字段及其如何检索，尚未运行确认。
 
-启用工具注入时，客户端把请求 URL 改为 `/v1/chatvcp/completions`；否则保留配置的 URL。请求使用 Bearer API key，消息仅保留角色、内容、名称和工具调用所需字段，附件与思考等私有 UI 元数据被剔除。默认还会从上下文去除元思考链，只有设置显式启用才保留（`modules/ipc/chatHandlers.js:943-961,1019-1069,1083-1123`）。因此元思考的观察或保留是客户端可配置的上下文卫生策略，不等于客户端产生元思考。
+启用工具注入时，客户端把请求 URL 改为 `/v1/chatvcp/completions`；否则保留配置的 URL。请求使用 Bearer API key，消息仅保留角色、内容、名称和工具调用所需字段，附件与思考等私有 UI 元数据被剔除。默认还会从上下文去除元思考链，只有设置显式启用才保留（`modules/ipc/chatHandlers.js:1016-1034,1098-1156,1170-1210`）。因此元思考的观察或保留是客户端可配置的上下文卫生策略，不等于客户端产生元思考。
 
-流式 HTTP 响应按 SSE `data:` 行解析：`[DONE]` 或流结束被转成 `vcp-stream-event` 的 `end`，JSON chunk 转成 `data`，解析和网络失败转成 `error`，并附带消息 ID、上下文及 IPC 侧生成的流操作 ID（`modules/vcpClient.js:390-497`；`modules/ipc/chatHandlers.js:861-882`）。非流式结果原样作为 JSON 返回。该契约没有定义 RAG 候选、分数或阶段必然进入聊天消息；这些细节另从日志观察通道到达时才会显示。
+流式 HTTP 响应按 SSE `data:` 行解析，统一映射为 `chat.stream.*` 事件契约：`started`/`chunk`/`final` 加 4 个终态，`normalizeChatTerminal` 把 `end`/`done`/`success`/`stop` 归一为 `completed`，`abort`/`cancel` 归一为 `cancelled`，`discard`/`stale` 归一为 `discarded`，`error`/`disconnect`/`reader-error` 归一为 `failed`；事件附带消息 ID、上下文与 IPC 侧生成的流操作 ID（`modules/chat/chatEventContract.js:7-34`；`modules/ipc/chatHandlers.js:1056-1360`）。非流式结果原样作为 JSON 返回。该契约没有定义 RAG 候选、分数或阶段必然进入聊天消息；这些细节另从日志观察通道到达时才会显示。
 
 ## RAG 与元思考观察面
 
-观察器是单独 BrowserWindow，可用 `--rag-observer-only` 在没有主聊天窗时启动（`main.js:1095-1110`；`package.json:24-27`）。它从应用设置读取日志地址和密钥，分别连接 `${vcpLogUrl}/vcpinfo/VCP_Key=...` 与可选的 `${vcpLogUrl}/VCPlog/VCP_Key=...`。前者只将 RAG 检索详情、元思考链、记忆检索、日记、私聊预览、AgentAssistant 和梦境类事件送进显示函数；后者接收日志、日记创建、工具审批、通知和错误等通知类别（`RAGmodules/rag-observer-config.js:18-119,121-180`）。事件类型是客户端筛选白名单，不是服务端事件的完整规范。
+观察器是单独 BrowserWindow，可用 `--rag-observer-only` 在没有主聊天窗时启动（`main.js:1274-1289`；`package.json:24-27`）。主进程读设置后把 `vcpLogUrl`/`vcpLogKey` 拼进窗口 URL 查询串（`modules/ipc/ragHandlers.js:278-284`），观察器从 URL 参数取这两个值（`RAGmodules/rag-observer-config.js:19-28`），分别连接 `${vcpLogUrl}/vcpinfo/VCP_Key=...` 与可选的 `${vcpLogUrl}/VCPlog/VCP_Key=...`。信息通道的事件分派在 `RAG_Observer.js:386-900`，通知通道用 `.type` 白名单集合过滤（`rag-observer-config.js:143-160`）。事件类型是客户端筛选白名单，不是服务端事件的完整规范。
 
-事件卡片可显示查询、数据库名、核心标签、BM25 模式和 token、结果等服务端字段；元思考、记忆检索、日记和梦境有专门显示分支（`RAGmodules/RAG_Observer.html:2561-2659,2891-2992`）。这些字段的来源与含义由到达的事件决定。静态代码确认“可展示”，不能确认每种事件一定产生、字段完整性、结果分数的计算方法，或事件是否覆盖一次请求的全部检索阶段。
+事件卡片可显示查询、数据库名、核心标签、BM25 模式和 token、结果等服务端字段；元思考、记忆检索、日记和梦境有专门显示分支（`RAGmodules/RAG_Observer.js:889-900` 起的分派与各 render 函数）。这些字段的来源与含义由到达的事件决定。静态代码确认“可展示”，不能确认每种事件一定产生、字段完整性、结果分数的计算方法，或事件是否覆盖一次请求的全部检索阶段。
 
-召回卡片还可进入 A/B 对比模式。用户从当前内存中的两张 RAG 卡分别选为 A 轮和 B 轮；观察器对结果文本做小写、空白归一化并移除尾部 Tag 行，再计算交集、A/B 独有项和重合率，在双列弹窗中给每项标出共有或独有。这个功能比较的是已经到达客户端的两组结果，不会重新发起查询，也不比较排名位置、原始分数或服务端各阶段候选。`RAGmodules/RAG_Observer.html:2088-2314,2315-2475`
+召回卡片还可进入 A/B 对比模式。用户从当前内存中的两张 RAG 卡分别选为 A 轮和 B 轮；观察器对结果文本做小写、空白归一化并移除尾部 Tag 行，再计算交集、A/B 独有项和重合率，在双列弹窗中给每项标出共有或独有。这个功能比较的是已经到达客户端的两组结果，不会重新发起查询，也不比较排名位置、原始分数或服务端各阶段候选。`RAGmodules/RAG_Observer.js:19-260`（比较模式状态与卡片动作）、`:141-147`（结果文本归一化）。
 
-工具审批是观察器中唯一可回写的认知相关交互：收到 `tool_approval_request` 后保留 requestId、工具、助手、参数和时间；用户批准或拒绝时，经 VCPlog WebSocket 发送 `tool_approval_response`，带 requestId、approved 以及最多 1000 字符的理由（`RAGmodules/RAG_Observer.html:2040-2173,3290-3353`；`RAGmodules/rag-observer-config.js:198-210`）。客户端只负责呈现和发送该协议，不决定服务端是否允许、执行何种工具或如何处理重放。
+工具审批是观察器中唯一可回写的认知相关交互：收到 `tool_approval_request` 后保留 requestId、工具、助手、参数和时间；用户批准或拒绝时，经 VCPlog WebSocket 发送 `tool_approval_response`，带 requestId、approved 以及最多 1000 字符的理由（`RAGmodules/RAG_Observer.js:2432-2445` 提交函数、`:346-400` 未决审批状态；发送通道在 `rag-observer-config.js` 的 VCPlog 连接上）。客户端只负责呈现和发送该协议，不决定服务端是否允许、执行何种工具或如何处理重放。
 
 ## 预算、作用域、安全、可观测与恢复
 
 | 维度 | 当前客户端证据 | 已确认边界 |
 | --- | --- | --- |
-| 查询预算 | 语义搜索请求固定 K=10；联想 K 和标签提升由 UI 输入；普通 VCP 请求最多 300 秒。 | K 是发送参数，服务端是否接受或追加其他限额未确认；300 秒仅见统一 VCP 客户端实现。`Memomodules/memo.js:1151-1168`、`modules/vcpClient.js:309-318`。 |
-| 作用域 | 文本搜索可选当前文件夹；语义结果及联想候选会在客户端排除 MusicDiary 和用户隐藏的文件夹。 | 隐藏是显示和本次客户端结果过滤，不是服务端授权边界；语义请求本身声明跨知识库。`Memomodules/memo.js:1106-1123,1251-1321`。 |
+| 查询预算 | 语义搜索请求固定 K=10；联想 K 和标签提升由 UI 输入；单聊主发送 fetch 没有客户端超时。 | K 是发送参数，服务端是否接受或追加其他限额未确认。`Memomodules/memo.js:1165-1182`、`modules/ipc/chatHandlers.js:1369`。 |
+| 作用域 | 文本搜索可选当前文件夹；语义结果及联想候选会在客户端排除 MusicDiary 和用户隐藏的文件夹。 | 隐藏是显示和本次客户端结果过滤，不是服务端授权边界；语义请求本身声明跨知识库。`Memomodules/memo.js:1120-1137,1265-1335`。 |
 | 认证与最小暴露 | 日记管理 API 用论坛 Basic 凭据；工具/聊天 API 用 Bearer key；Electron 窗口开启 context isolation。 | 日记页在 renderer 中直接用已读取的凭据访问远端；本次未验证 TLS、密钥存储加密、服务端身份校验或多租户隔离。`Memomodules/memo.js:112-129,500-520`。 |
-| 观察性 | RAG Observer 展示指定日志事件、连接状态和审批；可从当前召回卡片选择 A/B 两轮并查看交集、独有项与重合率。 | 对比只使用客户端内存中的返回文本，不是检索重跑、排序质量评测或端到端追踪；事件也不持久化。`RAGmodules/RAG_Observer.html:2088-2475`。 |
+| 观察性 | RAG Observer 展示指定日志事件、连接状态和审批；可从当前召回卡片选择 A/B 两轮并查看交集、独有项与重合率（`RAGmodules/RAG_Observer.js:19-260`）。 | 对比只使用客户端内存中的返回文本，不是检索重跑、排序质量评测或端到端追踪；事件也不持久化。`RAGmodules/RAG_Observer.js:19-260`。 |
 | 恢复与取消 | 日记搜索能中止本地 fetch；观察器两个 WebSocket 断开后每 3 秒尝试重连，最多 10 次；窗口叠层设置及日记 UI 偏好会写入本地设置。 | 重连不证明服务端补发丢失事件；不见运行中检索链、远端索引或待审批请求的持久化/恢复协议。`RAGmodules/rag-observer-config.js:183-258`、`modules/ipc/ragHandlers.js:61-118`。 |
 
-审批到达时，悬浮窗会临时关闭鼠标穿透，追踪未决 requestId；收到响应或提交成功后清理并在没有未决项时恢复穿透和自动隐藏（`RAGmodules/RAG_Observer.html:2176-2275`）。这是客户端防止审批卡不可操作的窗口恢复逻辑，不是审批状态在服务端的可靠交付保证。
+审批到达时，悬浮窗会临时关闭鼠标穿透，追踪未决 requestId；收到响应或提交成功后清理并在没有未决项时恢复穿透和自动隐藏（`RAGmodules/RAG_Observer.js:346-400,549-600,712-732`）。这是客户端防止审批卡不可操作的窗口恢复逻辑，不是审批状态在服务端的可靠交付保证。
 
 ## 与相邻谱系的可比/不可比边界
 
@@ -99,10 +99,10 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 ## 关键源码索引
 
 - `package.json:2-27`：桌面客户端定位与独立观察器启动命令。
-- `modules/ipc/chatHandlers.js:861-1123`、`modules/vcpClient.js:41-99,309-533`：网关请求、扩展字段、SSE 事件、超时和取消。
-- `Memomodules/memo.js:500-520,857-968,1091-1321`：日记 API、人工语义检索和服务端输出的客户端归并。
+- `modules/ipc/chatHandlers.js:74-153,1056-1360,1561-1614`、`modules/chat/chatEventContract.js:7-34`：网关请求、扩展字段、流事件契约与取消。
+- `Memomodules/memo.js:500-520,857-982,1105-1335`：日记 API、人工语义检索和服务端输出的客户端归并。
 - `Memomodules/memo-graph.js:71-154,208-252`：关联请求与候选图渲染。
 - `Memomodules/memo-workbench.js:18-96,157-280`、`modules/ipc/memoHandlers.js:11-45`：工作台状态及本地 UI 偏好持久化。
-- `RAGmodules/rag-observer-config.js:18-258`、`RAGmodules/RAG_Observer.html:2040-2275,2561-2659,3290-3353`：日志 WebSocket、事件筛选、显示、审批及恢复。
-- `RAGmodules/RAG_Observer.html:2088-2475`：召回卡片 A/B 选择、文本归一化、集合差异和双列对比。
-- `modules/ipc/ragHandlers.js:157-232,235-330,489-501`：观察器/悬浮窗的隔离窗口和审批 IPC 转发。
+- `RAGmodules/rag-observer-config.js:19-28,143-160,183-260`、`RAGmodules/RAG_Observer.js:346-400,857-870,2432-2445`：日志 WebSocket、事件筛选、审批及恢复。
+- `RAGmodules/RAG_Observer.js:19-260`：召回卡片 A/B 选择、文本归一化、集合差异和双列对比。
+- `modules/ipc/ragHandlers.js:157-233,236-332,491-503`：观察器/悬浮窗的隔离窗口和审批 IPC 转发。

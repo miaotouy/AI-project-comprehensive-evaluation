@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：静态源码阅读 + 关键词检索（artifact/canvas/sandbox/iframe/webview/notebook/diff/patch/execution/runtime/exec/preview/file/tool/mcp/dalle/code execution 等）+ 读取既有单测与文档；未启动应用运行验证
 >
@@ -24,7 +24,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 **主链路 B（文档工作区）：** 文档存 `documents` 表（content + editorData 双格式）。
 - 用户编辑：Lexical 编辑器内修改，前端文档 store 防抖自动保存（`src/store/document/slices/document/action.ts`、`editor/action.ts:293-374`）；服务端 `DocumentService.updateDocument` 写历史快照（`apps/server/src/services/document/index.ts:623-755`）。
-- 模型修改：Page-Agent 工具在服务端无头编辑器上做结构化修改（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:330-388`），客户端 `onAfterCall` 把服务端快照推回活编辑器（`packages/builtin-tool-page-agent/src/client/executor/index.ts:143-189`）。
+- 模型修改：Page-Agent 工具经服务端 `pageAgentRuntime` 在无头 `EditorRuntime` 上做结构化修改（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47` 起的 `factory`），执行体位于 `@lobechat/builtin-tool-page-agent/executionRuntime`；同一文档的并发写入由 `apps/server/src/services/pageCollab` 的会话（`createPageSessions`/`runPageExclusive`）串行化，客户端不再有 executor 级 `onAfterCall` 回推，改由 `src/features/PageEditor/PageAgentProvider.tsx` 把当前 `documentId` 注入 conversation context 做页级绑定。
 - 模型回流闭环：agent 文档按 load rules/position 注入系统上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`），模型通过 `lobe-agent-documents` 工具做读取与节点修改（`readDocument`/`modifyNodes`/`replaceDocumentContent` 等，`packages/builtin-tool-agent-documents/src/manifest.ts`）。
 
 **未运行验证。**
@@ -50,10 +50,10 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 ## 2. 增量生成、更新与最终化
 
 - **Artifact**：随消息正文逐 token 流式注入。Portal 内以 `isArtifactTagClosed` 判定标记是否闭合：未闭合时保持代码视图与流式动画，闭合后自动切到预览（`src/features/Portal/Artifacts/Body/index.tsx:35-40,62-68`）。更新粒度是**整段重写**：同一 `identifier` 在后续消息中由模型重发完整内容（技能指令要求复用 identifier，`content.ts:40`）；无 diff/patch。
-- **文档（模型修改）**：Page-Agent 的 `initPage`/`modifyNodes`/`replaceText` 在服务端无头编辑器上以节点操作（LiteXML insert/modify/remove）执行，导出 Lexical JSON + Markdown 后整体写回 `updateDocument`（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:240-262`；`agentDocuments/headlessEditor.ts:169-186`）。
-- **文档（最终化）**：写库成功后在 `tool_end` 事件经 `onAfterCall` 把快照同步回活编辑器并清 dirty（`packages/builtin-tool-page-agent/src/client/executor/index.ts:143-189`）；有静默失败/意外变更的不变量检测（`pageAgent.ts:62-107`）。
-- **文档（注）**：`services/document/diff/json.ts` 的 jsondiffpatch 工具（`createJsonPatch`/`applyJsonPatch`）在本快照中仅被自身单测引用，未接入生产路径；服务端历史对比只返回两份 editorData 快照（`history.ts:109-125`），视觉 diff 由客户端 `LexicalDiff` 计算。
-- **失败收口**：Page-Agent 无 documentId 时返回 `PageAgentMissingDocumentId` 失败（`packages/builtin-tool-page-agent/src/ExecutionRuntime/index.ts:72-80`）；编辑器未挂载时客户端返回 `PAGE_EDITOR_NOT_MOUNTED` 并提示改用 lobe-agent-documents（`packages/builtin-tool-page-agent/src/client/executor/index.ts:65-86`）。
+- **文档（模型修改）**：Page-Agent 的 `initPage`/`modifyNodes`/`replaceText` 在服务端无头 `EditorRuntime` 上以节点操作（LiteXML insert/modify/remove）执行，会话以 draft 打开、成功后 commit（`pageAgent.ts` 的 `buildService`；`services/agentDocuments/headlessEditor.ts` 的 `withHeadlessEditorLock`），最终写回经由 `services/pageCollab` 的 `PageWriter`（`saveSource: llm_call`）。
+- **文档（最终化）**：写库成功后由 `services/pageCollab` 的 `persistPageState` 落盘（含 `projectPageState` 投影），编辑器侧通过 page room 客户端接收变更；客户端交付物由 `packages/builtin-tool-page-agent/src/client/` 下的 `Inspector`/`Render`/`Streaming` 组件承担。
+- **文档（注）**：上一快照里仅被自身单测引用的 jsondiffpatch 工具（`document/diff/json.ts`）在本快照已从代码库中消失；服务端历史对比仍只返回两份 editorData 快照（`services/document/history.ts` 的 `compareDocumentHistoryItems`），视觉 diff 由客户端 `LexicalDiff` 计算。
+- **失败收口**：Page-Agent 无 documentId 时返回 `PageAgentMissingDocumentId` 失败（`packages/builtin-tool-page-agent/src/ExecutionRuntime/index.ts:72-80`）；编辑器侧另有 `src/features/PageEditor/Copilot/PageAgentUnavailableAlert.tsx` 在 Page Agent 不可用时提示改用 lobe-agent-documents。
 
 ## 3. 投影表面与多视图关系
 
@@ -104,7 +104,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
   自动保存有窗口合并与上限（`src/const/documentHistory.ts`）。服务端 `compareDocumentHistoryItems` 返回两份快照（`apps/server/src/services/document/history.ts:109-125`），客户端 `LexicalDiff` 渲染视觉对比（`src/features/PageEditor/History/DocumentHistoryDiff.tsx:61-114`）。
 - diff 接受/拒绝：编辑器内的 `diff` 类型节点由 `DiffAllToolbar` 一键全部接受/拒绝（`src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`）；保存路径刻意保留待审 diff 节点，仅在显式接受/拒绝时归一化（`src/store/document/slices/editor/action.ts:325-327`）。diff 节点来源在 `@lobehub/editor`（外部包），本次未深挖其生成时机；历史对比视图本身是只读的。
-- 协作：Redis 租约式编辑锁（`apps/server/src/services/document/index.ts:301-461`；`src/const/documentLock.ts`），模型写操作也走同一锁机制与用户编辑串行化（`pageAgent.ts:202-278`）；跨 tab/跨用户锁语义见 `src/features/PageEditor/usePageLockedByOther.ts`。未发现 CRDT/实时协同，锁冲突时拒绝写入并提示。
+- 协作：Redis 租约式编辑锁已抽成独立服务 `apps/server/src/services/editLock`（`EditLockService`，由 `DocumentService` 注入），模型写操作与用户编辑经同一锁串行化，跨 tab/跨用户锁语义见 `src/features/PageEditor/usePageLockedByOther.ts`。本快照新增 `apps/server/src/services/pageCollab`：以 page room 客户端（`createPageRoomClient`）、房间会话与 `fork`/`persist` 支撑协同，无头侧经 `@lobehub/editor/yjs` 的 `YjsPlugin` 接入（`pageCollab/editorYjs.ts`），整条路径由 `isPageCollabEnabled` 开关控制。即"是否已有 CRDT 协同"从上一快照的未发现变为已具备带开关的实现，实际运行行为未验证。
 
 ## 7. 能力桥、执行位置与权限范围
 
@@ -114,13 +114,13 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   executeCode / writeFile / editFile / moveFiles / runCommand
   ```
 
-- 执行位置分层：Artifact HTML/React 在浏览器 iframe/Sandpack；Cloud Sandbox 在远端沙箱（HTTP provider 桥接）；本地文件工具在桌面设备（经 device gateway，本次仅确认入口）。沙箱文件可经导出并上传流程登记为云存储文件记录（`apps/server/src/services/sandbox/service.ts:141`；`routers/tools/market.ts:690-696`），生成文件可自动登记为 work 资产（`apps/server/src/services/agentRuntime/workRegistration.ts:631-745`）。
+- 执行位置分层：Artifact HTML/React 在浏览器 iframe/Sandpack；Cloud Sandbox 在远端沙箱（HTTP provider 桥接）；本地文件工具在桌面设备（经 device gateway，本次仅确认入口）。沙箱文件可经导出并上传流程登记为云存储文件记录（`apps/server/src/services/sandbox/service.ts:141`；`routers/tools/market.ts:690-696`），生成文件可自动登记为 work 资产（`apps/server/src/services/toolExecution/workRegistration.ts` 与 `apps/server/src/services/workRegistration/`：`registerWorksForOperation`、`localRunWorkRegistration`、`shareWorkScope`）。
 - MCP/插件：本文只确认其输出扩展点（ToolUI Portal + 注册表渲染、`ToolRender.tsx`），插件发现/授权属于插件生态类目，未展开。
 
 ## 8. 持久化、恢复、分享与导出
 
 - Artifact：源码存消息文本（`messages.content`），恢复仍从 DB 消息提取。HTML Artifact 可通过工作区本地文件发布链或 `lh artifact publish <file>` 打包本地依赖并发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前限制本地资源数量与总量，并拒绝未打包的本地引用。共享核心见 `packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`，CLI 入口见 `apps/cli/src/commands/artifact.ts:84-138,204-246`。具体发布后端仍由业务槽提供，OSS 自托管可见入口不等于服务可用。
-- 文档：`documents` 行（`apps/server/src/services/document/index.ts:123-216`）字段含 content、editorData、title、parentId、fileType 等，另配历史表与编辑锁；恢复 = `restoreFromHistoryId` 与历史对比（`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。文档可发布到 workspace 并参与可见性/权限（`DocumentService.setVisibility`/`publishToWorkspace`）。
+- 文档：`documents` 行（`apps/server/src/services/document/index.ts` 的行构造与校验）字段含 content、editorData、title、parentId、fileType 等，另配历史表与编辑锁；恢复 = `restoreFromHistoryId` 与历史对比（`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。文档可发布到 workspace 并参与可见性/权限（`DocumentService.setVisibility`/`publishToWorkspace`）。
 - 沙箱导出文件成为 `files` 记录（预签名 URL 下载），图片生成工具的图片以消息内渲染展示（`packages/builtin-tool-image-generation/src/client/Render/GenerateImage.tsx`），文件落库链路本次未追完。
 - 备注：`ArtifactDeploymentActions`（"保存到工作区"）目前是空桩返回 null（`src/business/client/features/ArtifactDeploymentActions.tsx:11-13`），对应 lab 开关 `enableArtifactDeployment`（`src/store/user/slices/preference/selectors/labPrefer.ts:12-14`）——Artifact 到文档/文件的落盘能力未实现。
 
@@ -131,12 +131,12 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   - 读取：`listDocuments`、`readDocument`（XML 带节点 ID + markdown 双格式）；
   - 修改：`modifyNodes`、`replaceText`、`createDocument`、`renameDocument`、`copyDocument`、`removeDocument`；
   - 注入策略：`updateLoadRule`。
-  agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`；`packages/agent-templates/src/types.ts:4-45`）。
+  agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts` 与 `services/agentDocuments/contextPayload.ts`；`packages/agent-templates/src/types.ts:4-45`）。
 - 注入链路在 context-engine 侧实现，三个处理器各司其职：
   - `AgentDocumentInjector/shared.ts`：按 `loadPosition`/`loadRules` 注入；
   - `SystemReplaceInjector`：让动态激活文档只携带一次、用绝对日期索引；
   - `ActivationResultTrim`：避免激活结果重复进 LLM 载荷（`packages/context-engine/src/processors/ActivationResultTrim.ts`）。
-  文档写入前自动快照历史（`agentDocuments/index.ts:735-781`）；`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
+  文档写入前自动快照历史（`services/agentDocuments/index.ts` 的历史快照路径）；`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
 - 会话文件：上传文件自动同步进沙箱会话目录（`systemRole.ts:21-24`），沙箱每 topic 独立会话、过期重建（`systemRole.ts:222-227`）。
 
 ## 10. 生命周期、资源治理与性能
@@ -174,10 +174,13 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 - `src/features/Portal/router.tsx:30-52`：Portal 投影面全集
 - `packages/builtin-tool-cloud-sandbox/src/manifest.ts`：云端沙箱工具面（执行/文件/导出）
 - `apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`：沙箱 provider 桥
-- `apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:184-417`：模型结构化改文档（无头编辑器 + 锁 + 历史）
-- `packages/builtin-tool-page-agent/src/client/executor/index.ts:143-189`：服务端快照回推活编辑器
+- `apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47`：Page Agent 服务端注册（无头 `EditorRuntime` + `pageCollab` 会话 + 编辑锁）
+- `apps/server/src/services/pageCollab/`：文档会话、房间协同（Yjs）、fork 与持久化
+- `packages/builtin-tool-page-agent/src/client/`：Page Agent 的 Inspector/Render/Streaming 交付组件
+- `src/features/PageEditor/PageAgentProvider.tsx`：按 documentId 绑定页级会话
 - `apps/server/src/services/agentDocuments/index.ts:574-611,744-829`：文档上下文注入与模型 CRUD（注入决策细节见 `packages/context-engine/src/providers/AgentDocumentInjector/`，含 `SystemReplaceInjector` 与 `ActivationResultTrim` 处理器）
-- `apps/server/src/services/document/index.ts:623-755`、`services/document/history.ts:109-168`：保存、历史快照与对比（jsondiffpatch 工具 `diff/json.ts` 未接入生产路径，见第 2 节）
+- `apps/server/src/services/document/{index,history,editorData,json,writeLimit}.ts`：保存、历史快照、写入上限与 editorData 编解码
+- `apps/server/src/services/editLock/index.ts`：编辑锁服务（Redis 租约）
 - `src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`：diff 节点接受/拒绝
 - `packages/database/src/schemas/message.ts:95-140`：消息表（Artifact 事实源）
 - `packages/builtin-tools/src/register.ts:174-352`：工具输出渲染/检查/审批/流式注册表

@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`（分支：`main`）
+> 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：基于当前代码快照进行静态源码核对；从应用装配和公共实现入手，抽样核对业务消费方；依赖内部行为和运行表现单独标注
 >
@@ -22,7 +22,7 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 ## 系统边界与总体装配
 
-**托管方式。** 管理面板由独立进程 `adminServer.js`（监听 PORT+1）托管 `AdminPanel-Vue/dist` 静态产物（:237-240），非扩展名路径一律回退 `index.html`（history fallback，:242-250），`/AdminPanelLegacy` 保留旧路径兼容（:240,250）；
+**托管方式。** 管理面板由独立进程 `adminServer.js`（监听 PORT+1）托管 `AdminPanel-Vue/dist` 静态产物（:237-240），非扩展名路径一律回退 `index.html`（history fallback，:242-250），`/AdminPanelLegacy` 保留旧路径兼容（:240,250）；`dist` 是构建产物，当前快照不再随仓库提交；
 
 主进程对 `/AdminPanel` 302 重定向（`server.js:837-846`）。物理解耦细节见 [`../仓库分布/VCPToolBox-仓库分布调查笔记.md`](../仓库分布/VCPToolBox-仓库分布调查笔记.md) 与 [`../Chat UI/VCPToolBox-ChatUI调查笔记.md`](<../Chat UI/VCPToolBox-ChatUI调查笔记.md>)。
 
@@ -35,6 +35,10 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 **路由与守卫。** 40 条路由来自 `src/app/routes/manifest.ts`，除 login 外全部作为 Main 的子路由（`router/index.ts:28-51`）；beforeEach 统一做鉴权（checkAuth + 5 分钟缓存，`stores/auth.ts:20-26,43-82`），未登录跳 Login 并带安全 redirect（:69-121）；`base.ts` 把 `/AdminPanelLegacy` 路径归一化到 `/AdminPanel`（:14-40）。
 
 **页头动作机制。** `MainLayout.vue:56-63` 提供 `#page-header-actions` 容器，32 个业务页面各自 Teleport 把自己的操作按钮（保存/导入/导出等）挂进统一页头（如 `views/ThemeEditor.vue:3-31`、`views/PluginStore.vue:3`）。
+
+**插件管理页的新增面。** 插件管理页在本快照增加三个与 JEV 相关的组件：第三方能力声明管理、按命令搜索插件、展示单个插件的 JEV 声明，数据经 `src/api/jevRegistry.ts` 取自后端注册表路由。三者都是运维配置界面，用来编辑或查看声明素材，不改变工具执行链。
+
+**构建与产物边界。** 管理台源码与 vendor 随仓库提交，`dist` 由构建生成；因此仓库内看到的界面代码是源码态，运行态产物需在本机构建。
 
 **Chat UI 边界。** 按 Chat UI 类目判定，本项目不产出最终用户聊天表面（见前述 ChatUI 笔记），本笔记无聊天主链交点需要记录；Nova 气泡、沉浸观星等装饰元素属 Dashboard 业务，不纳入。
 

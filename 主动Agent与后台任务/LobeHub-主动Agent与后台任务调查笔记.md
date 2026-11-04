@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`52756f6904f8d4a7b5cc46142847ee6d4887c9d5`（分支：`canary`）
+> 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
 > 调查方式：只读复查 Schedule 的 PostgreSQL schema、QStash/本地调度入口、任务运行器与生命周期回调；并对照既有独特功能笔记，未修改 LobeHub 源码
 >
@@ -54,7 +54,7 @@ Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数�
 
 ## 执行、结果交付与状态更新
 
-执行器将任务转为无头 Agent 运行：解析或回退执行 Agent，组合任务指令与上下文，固定任务的模型快照，在 headless 审批模式调用 `AiAgentService.execAgent`，并把 topic 与 operation ID 写入 task topic 记录。任务 skill 被挂载；Brief 工具只在遗留 agent 模式挂载，默认由生命周期服务程序化合成 Brief，见 `apps/server/src/services/taskRunner/index.ts:70-279`。具体模型、工具和审批规则属于 Agent 工具类目。
+执行器将任务转为无头 Agent 运行：解析或回退执行 Agent，组合任务指令与上下文，固定任务的模型快照，在 headless 审批模式调用 `AiAgentService.execAgent`，并把 topic 与 operation ID 写入 task topic 记录。任务 skill 被挂载；Brief 工具只在遗留 agent 模式挂载，默认由生命周期服务程序化合成 Brief，见 `apps/server/src/services/taskRunner/index.ts`。服务端 `aiAgent` 服务在本次快照里拆出了 `pipeline/`（消息构建、父消息解析、steering 等阶段）、`hooks/` 与 `intervention/` 子目录，`execAgent` 的外层入口与调用方不变；具体模型、工具和审批规则属于 Agent 工具类目。
 
 完成 hook 可通过 QStash webhook 回到 `TaskLifecycleService.onTopicComplete`。成功时，topic 标为 completed，最后回复写入 handoff 内容，最佳努力生成交接摘要与用户 Brief；自动化任务回到 `scheduled` 等待下一轮，若达到 schedule 配额则写 completed。真正由 schedule tick 触发的成功还尝试发送完成通知，但该通知失败不会改变任务生命周期，见 `apps/server/src/services/taskLifecycle/index.ts:164-250,267-338`。因此交付至少落在 task topic 的运行结果和 Brief；通知是附加通道。
 
@@ -79,12 +79,14 @@ Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数�
 - 用户取消 running task 时到真实 Agent operation、模型调用或外部工具的中断是否完整传播。
 - Schedule 完成通知的具体业务实现与各客户端可见性；代码明确其失败不影响状态，但未运行投递。
 - heartbeat 在本地进程重启后是否由其他启动恢复逻辑补建；本次只确认本地 scheduler 自身为内存 `setTimeout`。
+- 服务端 `aiAgent/pipeline` 内部阶段本轮只确认目录归位，未逐段核对与任务执行链的衔接；任务执行到的具体 Agent 配置解析仍引用既有结论。
 
 ## 关键源码索引
 
-- 任务事实模型：`packages/database/src/schemas/task.ts:26-129`。
+- 任务事实模型：`packages/database/src/schemas/task.ts`。
 - Schedule 派发与执行适配器：`apps/server/src/router-hono/workflows/task/handlers/scheduleDispatch.ts`、`scheduleExecute.ts`。
-- 状态重验与并发/配额：`apps/server/src/services/taskRunner/scheduleTick.ts`、`index.ts:70-303`。
-- 完成、交付、失败与状态流转：`apps/server/src/services/taskLifecycle/index.ts:140-476`。
+- 状态重验与并发/配额：`apps/server/src/services/taskRunner/scheduleTick.ts`、`index.ts`。
+- 完成、交付、失败与状态流转：`apps/server/src/services/taskLifecycle/index.ts`。
+- 执行入口：`apps/server/src/services/aiAgent/index.ts` 与 `aiAgent/pipeline/`。
 - heartbeat 与本地调度：`apps/server/src/services/taskRunner/heartbeatTick.ts`、`apps/server/src/services/taskScheduler/impls/local.ts`。
-- 任务活动日志：`packages/database/src/schemas/task.ts:413-455`、`src/store/task/selectors/activitySelectors.ts`。
+- 任务活动日志：`packages/database/src/schemas/task.ts`、`src/store/task/selectors/activitySelectors.ts`。

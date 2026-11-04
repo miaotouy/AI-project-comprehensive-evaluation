@@ -2,9 +2,9 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
-> 代码快照：`38491c73d12398edda45ebec366f940e83509490`（分支：`main`）
+> 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
 > 调查方式：直接静态核对当前 Jan 的 RAG、Vector DB、Tauri 插件、线程附件与工具执行源码；未运行桌面应用、嵌入模型或检索质量评测
 >
@@ -16,13 +16,13 @@
 
 Jan 同时具有“上下文即时注入”和“工具化检索”两条附件路径。普通线程文档可按设置直接解析为文本并随用户消息送入模型；选择嵌入时，文档被解析、分块、嵌入并保存到本地 SQLite collection，随后由模型在原生 tool-calling 循环中决定是否调用 `retrieve`。项目文件固定走嵌入路径，供该项目的线程共享。前者不是检索，后者才是本笔记的主要对象（`web-app/src/lib/attachmentProcessing.ts:184-309`）。
 
-附件 RAG 的工具化路径是单次向量候选召回加模型可选的读块，未在该链找到查询改写、候选融合或 reranker。新 Agent 项目记忆是另一机制：在同一 vector-db 插件里使用 SQLite FTS5/BM25，以项目为作用域检索旧对话片段并注入 Agent 提示，不是附件向量检索，也不改变 RAG `retrieve` 的召回算法（`src-tauri/src/core/agent/memory.rs:1-12,36-78`、`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:925-1005`）。
+附件 RAG 的工具化路径是单次向量候选召回加模型可选的读块，未在该链找到查询改写、候选融合或 reranker。Agent 项目记忆是另一机制：在同一 vector-db 插件的 FTS5/BM25 存储里，以项目为作用域检索历史回答并注入 Agent 提示。它只索引最终回答、从不索引用户提问，召回时排除本次会话已有的回答，并且提示侧只放一份有界摘要（目录最多 50 条、摘要预算 2048 字符），因此在长会话里不会随行数线性膨胀（`src-tauri/src/core/agent/memory.rs`、`web-app/src/lib/agentTools.ts:147-160,209-223`）。
 
 检索对象与索引以线程或项目为 collection 边界。候选可带文本、文件 ID、块顺序与分数，UI 会把 `retrieve` 的 JSON 结果显示为可展开的引用卡片。ANN 可用时查询交给 sqlite-vec；否则线性遍历全部候选、以余弦相似度阈值过滤并排序。两条路径的 `score` 语义并不相同：ANN 输出的是 distance，线性路径输出 cosine similarity，UI 仅以同一数值格式展示，不能把两种数值横向比较（`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:447-635`）。
 
 ## 谱系定位与系统边界
 
-本项目横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`，但这不是独立 HTTP/RPC 服务端点：前端 RAG service 通过扩展管理器调用扩展，扩展再通过 Tauri API 调用本机 Vector DB 和文档解析插件（`core/src/browser/extensions/rag.ts:18-51`、`web-app/src/services/rag/default.ts:21-60`）。本次检查范围内未找到 RAG 对外网络端点或服务端租户层，不能据此推断不存在其他部署形态。
+本项目横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`，但这不是独立 HTTP/RPC 服务端点：前端 RAG service 通过扩展宿主调用扩展，扩展再经扩展上下文拿到的服务句柄使用本机 Vector DB 与文档解析插件。宿主服务以键注册（`assistants`、`downloads`、`llamacpp`、`mlx`、`vector-db`、`rag`），扩展之间不直接互相引用（`core/src/browser/host/services.ts:107`、`core/src/browser/host/rag.ts:62`、`web-app/src/services/rag/default.ts:10-60`）。本次检查范围内未找到 RAG 对外网络端点或服务端租户层，不能据此推断不存在其他部署形态。
 
 一条嵌入检索主链如下：
 
@@ -40,15 +40,15 @@ Jan 同时具有“上下文即时注入”和“工具化检索”两条附件�
 
 ## 事实对象、摄取与索引
 
-附件 RAG 的事实对象是文件、块和 collection。新增的 Agent Memory 会在运行后索引用户问题与最终回答，运行前按项目召回最多三个片段、每段截至 500 字符；它是全文检索回填而非用户事实抽取或关系图写回（`src-tauri/src/core/agent/memory.rs:1-12,36-78`）。附件数据形状见 `core/src/browser/extensions/vector-db.ts:9-42` 和 `src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:300-407`。
+附件 RAG 的事实对象是文件、块和 collection。Agent 记忆在运行后只索引最终回答：写入时用内容哈希作 id，重新生成或代理重发的同一段文本会覆盖原行而不是新增；运行前按项目召回最多三个片段、每段截至 500 字符，并对"补位"多取的行数设上限，避免长会话每次请求都拉回大量整行。它是全文检索回填而非用户事实抽取或关系图写回（`src-tauri/src/core/agent/memory.rs`）。附件数据形状见 `core/src/browser/host/rag.ts` 和 `src-tauri/plugins/tauri-plugin-vector-db/src/db.rs`。
 
-普通线程 collection 名由 Vector DB 扩展生成为 `attachments_<threadId>`，项目 collection 为 `project_<projectId>`。文件按同一 collection 内“名称和路径都相同”拒绝重复添加。上传服务一次向 RAG 扩展提交一个文档；RAG 扩展拒绝超过配置上限的文件，再调用对应 scope 的 `ingestFile`（`extensions/rag-extension/src/index.ts:365-488`、`web-app/src/services/uploads/default.ts:15-48`）。
+普通线程 collection 名由 Vector DB 扩展生成为 `attachments_<threadId>`，项目 collection 为 `project_<projectId>`。文件按同一 collection 内“名称和路径都相同”拒绝重复添加。上传服务一次向 RAG 扩展提交一个文档；RAG 扩展拒绝超过配置上限的文件，再调用对应 scope 的 `ingestFile`（`extensions/rag-extension/src/index.ts`、`web-app/src/services/uploads/default.ts`）。
 
-摄取先由 RAG 插件将本地文件解析为纯文本，再按字符数切块，批量调用当前嵌入引擎，创建 collection 并插入文件和块。默认块长 512 字符、重叠 64 字符，默认最大文件 100 MB；设置允许把块长设为 64--8192、重叠设为 0--1024。扩展先按嵌入模型上下文窗口估算安全字符数，随后对仍超 token 预算的块递归二分；无法读取嵌入上下文或 token 数时摄取失败，而不是继续写入可能超限的块（`extensions/vector-db-extension/src/index.ts:154-237`、`extensions/rag-extension/settings.json:32-64`）。
+解析已移到 Rust 的 `tauri-plugin-rag`：PDF、纯文本、CSV、docx、pptx、xlsx、ods 各自有解析分支，PDF 解析用 `catch_unwind` 兜住畸形文件的 panic。解析器有三层体积上限：单文件 200 MB 的兜底上限、zip 内单个条目 100 MB、整个 zip 解压后 256 MB；面向用户的限制是 1–200 MB 的 `max_file_size_mb` 设置，在前端就把文件挡掉。切块与嵌入仍在 vector-db 扩展：按字符数切块、批量调用当前嵌入引擎，先按嵌入模型上下文窗口估算安全字符数，对仍超预算的块递归二分，读不到上下文或 token 数时摄取失败而不是写入可能超限的块。默认块长 512 字符、重叠 64 字符，可在 64–8192 与 0–1024 之间调整（`src-tauri/plugins/tauri-plugin-rag/src/{parser,constants}.rs`、`extensions/vector-db-extension/src/index.ts`）。
 
-附件模式有明确分流。设置可选 auto、inline、embeddings 或 prompt；auto 在能够解析且拿到模型上下文阈值/估算 token 后，可能把较小的线程文档置为 inline。解析失败时该分支回退为 embeddings。项目文件无论设置如何均强制 embeddings；inline 内容随消息转换进模型消息，不经过 Vector DB，因此不应将所有“附件已处理”都解释为已索引（`web-app/src/lib/attachmentProcessing.ts:196-299`）。
+附件模式有明确分流。设置可选 auto、inline、embeddings 或 prompt；auto 在能够解析且拿到模型上下文阈值/估算 token 后，可能把较小的线程文档置为 inline。解析失败时该分支回退为 embeddings。项目文件无论设置如何均强制 embeddings；inline 内容随消息转换进模型消息，不经过 Vector DB，因此不应将所有“附件已处理”都解释为已索引（`web-app/src/lib/attachmentProcessing.ts:184-309`）。
 
-索引保存在 Tauri 插件管理的本地 collection SQLite 文件中。插件建表时尝试加载 sqlite-vec；不可用时仍保留普通 chunks 表并记录线性检索回退。插入会拒绝空或非有限嵌入；ANN 表因嵌入维度不匹配拒绝单块时只记录日志，普通块仍保留，之后线性检索仍可服务（`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:71-126,336-407`）。这是源码可确认的降级策略，未实际验证不同平台的 sqlite-vec 装载结果。
+索引保存在 Tauri 插件管理的本地 collection SQLite 文件中，与 Agent 记忆共用同一个数据库目录、不同 collection。插件建表时尝试加载 sqlite-vec；不可用时仍保留普通 chunks 表并记录线性检索回退。插入会拒绝空或非有限嵌入；ANN 表因嵌入维度不匹配拒绝单块时只记录日志，普通块仍保留，之后线性检索仍可服务（`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs`）。这是源码可确认的降级策略，未实际验证不同平台的 sqlite-vec 装载结果。
 
 ## 查询、候选与重排主链
 
@@ -76,11 +76,11 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 预算主要在摄取与候选层：文件大小、块长、重叠、embedding context、`top_k`、线性阈值及 ANN/linear 模式可配。没有找到 RAG 专用的总字符/token 截断、单次检索超时、最大工具回合数、并行候选预算或结果缓存。线程工具在 UI 执行器中串行并支持 AbortSignal；底层 Tauri 检索命令在本次静态范围内未见取消参数，取消能否中断已发出的 SQLite/embedding 操作尚未验证。
 
-缓存与观察面是分离的。MCP 智能路由会冻结其路由工具集以稳定 prompt cache，但 RAG 工具在该路径之外，每次 refreshTools 直接装配，不应把 MCP 路由缓存解释为 RAG 查询缓存（`web-app/src/lib/custom-chat-transport.ts:766-770,901-924`）。RAG/Vector DB 主要观察面是控制台日志、工具运行状态、查询栏和引用卡；源码未见候选全量列表、ANN/linear 决策、阈值淘汰数、embedding 耗时或质量评测面板。仓库有工具与扩展的单元测试，但本次未执行，因而不构成运行确认。
+缓存与观察面是分离的。MCP 智能路由会冻结其路由工具集以稳定 prompt cache，但 RAG 工具在该路径之外，每次 `refreshTools` 直接装配，不应把 MCP 路由缓存解释为 RAG 查询缓存（`web-app/src/lib/custom-chat-transport.ts:1056-1308`）。RAG/Vector DB 主要观察面是控制台日志、工具运行状态、查询栏和引用卡；源码未见候选全量列表、ANN/linear 决策、阈值淘汰数、embedding 耗时或质量评测面板。仓库有工具与扩展的单元测试，但本次未执行，因而不构成运行确认。
 
 文件删除会在前端先调用当前 scope 的 `deleteFile`，Rust 事务删除该文件的 chunks 与 files 行；项目文件删除走对应 project 方法（`web-app/src/containers/ChatInput.tsx:898-928`、`web-app/src/containers/ProjectFiles.tsx:546-568`、`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:410-415`）。索引 SQLite 文件可跨应用重启继续存在，这是由持久化路径和按命令重新打开 connection 的静态推断；没有读到重建、迁移、嵌入模型变更后重新嵌入或崩溃恢复流程。
 
-有一处需单列的静态组合边界：线程删除清理函数向 Vector DB extension 传入已经带 `attachments_` 前缀的 ID，而该 extension 又会追加同一前缀，得到 `attachments_attachments_<threadId>`。按两处源码的字符串组合推断，这不会删除实际线程 collection；清理失败只记录警告且线程删除继续。本次未运行验证真实删除时的遗留文件与应用版本兼容性（`web-app/src/hooks/useThreads.ts:44-59`、`extensions/vector-db-extension/src/index.ts:25-27,60-62`）。
+有一处需单列的静态组合边界：线程删除清理函数向 Vector DB extension 传入已经带 `attachments_` 前缀的 ID，而该 extension 又会追加同一前缀，得到 `attachments_attachments_<threadId>`。按两处源码的字符串组合推断，这不会删除实际线程 collection；清理失败只记录警告且线程删除继续。本次未运行验证真实删除时的遗留文件与应用版本兼容性（`web-app/src/hooks/useThreads.ts:47-50`、`extensions/vector-db-extension/src/index.ts:23-25,58-59`）。
 
 ## 与相邻谱系的可比/不可比边界
 
@@ -92,18 +92,18 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 ## 未验证事项
 
-- 未运行 parseDocument、嵌入模型、sqlite-vec 和线性回退，未确认真实支持的文件类型、跨平台 ANN 装载、延迟、召回率或分数分布。
+- 未运行 Rust 侧文档解析、嵌入模型、sqlite-vec 和线性回退，未确认各格式（尤其 docx/pptx/csv）的真实提取质量、跨平台 ANN 装载、延迟、召回率或分数分布。\n- Agent 记忆只做静态核对：回答写入是否覆盖用户提问的语义、跨项目隔离、摘要预算 2048 字符下的信息损失均未验证。
 - 未运行模型工具循环，未确认不同 provider 对三个 schema 的调用率、是否会先列文件/再读块、错误后重试次数及取消传播效果。
 - 未确认 SQLite collection 的实际数据目录、重启后的完整性、模型维度变化时已有 ANN 索引的行为，以及上述线程删除前缀组合在真实 UI 路径中的影响。
 - 未发现 RAG 专用质量评测、离线夹具、缓存命中指标或针对文档提示注入的防护；这表示本次已检查范围未找到，不等同于项目全局不存在。
 
 ## 关键源码索引
 
-- RAG 工具 schema 与执行：`extensions/rag-extension/src/tools.ts`、`extensions/rag-extension/src/index.ts:101-488`
-- 向量 collection、摄取、删除与嵌入上下文保护：`extensions/vector-db-extension/src/index.ts:21-284`
-- 本地 SQLite/ANN 与线性检索：`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs:227-635`、`src-tauri/plugins/tauri-plugin-vector-db/src/commands.rs`
+- RAG 工具 schema 与执行：`extensions/rag-extension/src/tools.ts`、`extensions/rag-extension/src/index.ts`（工具注册 `:144`、`callTool :180`）
+- 文档解析与体积上限：`src-tauri/plugins/tauri-plugin-rag/src/parser.rs`、`constants.rs`（`MAX_PARSE_FILE_SIZE`/`MAX_ZIP_ENTRY_SIZE`/`MAX_ZIP_TOTAL_SIZE`）\n- 向量 collection、切块、删除与嵌入上下文保护：`extensions/vector-db-extension/src/index.ts`
+- 本地 SQLite/ANN 与线性检索：`src-tauri/plugins/tauri-plugin-vector-db/src/db.rs`、`commands.rs`\n- 宿主服务与 RAG/Vector 契约：`core/src/browser/host/{services,rag}.ts`
 - 附件模式与发送时摄取：`web-app/src/lib/attachmentProcessing.ts:184-309`、`web-app/src/services/uploads/default.ts`
-- 工具装配与模型请求：`web-app/src/lib/custom-chat-transport.ts:851-924,1389-1427`
-- 工具执行、授权与自动续发：`web-app/src/routes/threads/$threadId.tsx:462-587,655-682,1000-1030`
+- 工具装配与模型请求：`web-app/src/lib/custom-chat-transport.ts:1056-1308`
+- 工具执行、授权与自动续发：`web-app/src/lib/agentTools.ts`（`executeAgentTool :253`）、`web-app/src/routes/threads/$threadId.tsx`（thread 级审批写入 `:1608`）
 - 结果解析与引用展示：`web-app/src/lib/citation-parser.ts`、`web-app/src/containers/message/RagToolWidget.tsx`、`web-app/src/components/Citations.tsx`
-- 删除与线程清理：`web-app/src/containers/ChatInput.tsx:898-928`、`web-app/src/containers/ProjectFiles.tsx:546-568`、`web-app/src/hooks/useThreads.ts:44-59`
+- 删除与线程清理：`web-app/src/containers/ChatInput.tsx`、`web-app/src/containers/ProjectFiles.tsx`、`web-app/src/hooks/useThreads.ts`\n- Agent 记忆：`src-tauri/src/core/agent/memory.rs`、`web-app/src/lib/agentTools.ts:128-223`

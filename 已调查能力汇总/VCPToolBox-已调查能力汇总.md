@@ -2,13 +2,13 @@
 
 > 汇总对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-04
 >
-> 依据：16 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话请求与上下文、应用界面基础设施、独特功能、生成式输出与运行时）
+> 依据：17 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话请求与上下文、上下文编译与提示词工程、应用界面基础设施、独特功能、生成式输出与运行时）
 >
 > 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；未做新的源码调查，未做跨项目横向比较
 >
-> 汇总范围：覆盖上述 15 个类目中 VCPToolBox 已调查的能力；默认关闭/默认禁用、声明不符、暂缓与归并项如实列入对应小节
+> 汇总范围：覆盖上述 17 个类目中 VCPToolBox 已调查的能力；默认关闭/默认禁用、声明不符、暂缓与归并项如实列入对应小节
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
@@ -18,20 +18,20 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 产品历史上，它从 2025-05-12 的“AI API 与工具交互”工具箱逐步扩展为插件运行时、分布式执行、管理面板和长期记忆中枢；当前 README 将整体定位提升为让 AI 持续存在的环境。RAG 是这一定位变化最集中的演进线：早期多路相似度与结构召回经浪潮 V1-V8、TagMemo V9.1/V9.2 发展到当前 RiverMemo Topology V3。历史作者自述、提交节点和当前执行边界见[产品结构与设计基因](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)与[检索增强与认知编排](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)；历史版本不替代当前源码。
 
-核心边界：不拥有会话事实源（客户端提交完整 `messages`，服务端在单次 HTTP 请求内复制、重排、展开、注入和裁剪）；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 89 个插件目录（69 启用、20 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
+核心边界：不拥有会话事实源（客户端提交完整 `messages`，服务端在单次 HTTP 请求内复制、重排、展开、注入和裁剪）；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
 
 ## 完成度速览
 
 | 证据状态 | 条目数 |
 |---|---|
-| 主链确认（静态源码贯通） | 44 |
+| 主链确认（静态源码贯通） | 46 |
 | 入口确认 | 1 |
 | 归并已有类目 | 6 |
 | 声明不符 | 4 |
 | 暂缓 | 2 |
-| 合计 | 57 |
+| 合计 | 59 |
 
-主链确认占全部 57 条记录的约 77%；声明不符与暂缓合计 6 项（约 11%）为少数局部异常，其中元思考主题配置、VCPClawMail 轮询间隔、插件数量口径 3 项同时是主链确认卡的局部细节（能力二、能力十六、插件热重载），不否定对应主链完整性。另有若干主链确认能力带默认关闭、默认禁用或外部依赖边界（AgentDream、托管浏览器、VCPEverything 等），性质是“默认未启用”而非“主链缺失”，均集中见文末“已知边界与待验证事项”。
+主链确认占全部 59 条记录的约 78%；声明不符与暂缓合计 6 项（约 10%）为少数局部异常，其中元思考主题配置、VCPClawMail 轮询间隔、插件数量口径 3 项同时是主链确认卡的局部细节（能力二、能力十六、插件热重载），不否定对应主链完整性。另有若干主链确认能力带默认关闭、默认禁用或外部依赖边界（AgentDream、托管浏览器、VCPEverything 等），性质是“默认未启用”而非“主链缺失”，均集中见文末“已知边界与待验证事项”。
 
 **证据口径**：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。代码快照与调查日期以各来源笔记为准。
 
@@ -91,7 +91,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **外部执行体接入**：AICodeWorker 以 jobId 调度 opencode/Antigravity CLI（analyze/patch/write 三模式，共用并发闸门）；SSHManagerService 按 hosts.json 连接池预热执行远端设备；DeepWikiVCP 是全仓库唯一 MCP-over-HTTP 客户端。托管浏览器与跨节点文件两条链分别见独特能力六、能力七。证据状态：`主链确认`（静态证据）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md)。
 
-- **插件热重载与插件清单**：manifest 变更分“元数据刷新”与“完整重载”两级，static 插件按签名增量刷新并清理失效占位符与 cron，加载流程串行化并带预校验；当前快照 89 个插件目录、69 启用、20 个 `.block` 禁用；数量口径与文档不符的细节见末尾小节。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
+- **插件热重载与插件清单**：manifest 变更分“元数据刷新”与“完整重载”两级，static 插件按签名增量刷新并清理失效占位符与 cron，加载流程串行化并带预校验；当前快照 96 个插件目录、77 启用、19 个 `.block` 禁用；数量口径与文档不符的细节见末尾小节。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
 
 - **执行隔离与安全边界**：stdio 插件与主进程同机同用户权限、无 OS 级沙箱，direct/hybridservice 插件即主进程一部分；唯一例外是 LinuxShellExecutor 自带可选沙箱后端（bubblewrap/firejail/docker，默认 none）与 RLIMIT 资源限制；Dockerfile 中 `USER appuser` 被注释（容器内默认 root）；Shell 类插件安全差异巨大（PowerShellExecutor 仅关键字黑名单，LinuxShellExecutor 有八层校验）；未发现 `vm.*`/`eval` 执行模型任意代码。证据状态：`主链确认`（含已确认边界）。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md)。
 
@@ -173,6 +173,10 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **能力十九：DeepWikiVCP 仓库文档 MCP 客户端**：全仓库唯一 MCP-over-HTTP 客户端，支持 DeepWiki 结构/内容/问答/Deep Research/多仓库，80K 截断防爆上下文。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力十九。
 
+- **VTrade 模拟交易沙盒（对应独特功能能力二十一）**：模拟账户、订单、持仓与决策评分，行情源、指标、股票池、撮合规则与券商接口都做成可注册插槽；管理界面挂在主后端 `/admin_api/vtrade/`，模型经工具命令驱动。不连接真实券商，行情源缺失时退回离线合成数据。证据状态：`主链确认`（静态源码）。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二十一。
+
+- **JEV 外部决策模型编排（对应独特功能能力二十二）**：在折叠候选筛选、RiverMemo 语义重排、上下文裁剪与通用打分四处调用外部决策服务，独立 provider、多 Key 轮换、超时与有限重试；失败时一律保留 embedding 原结果。插件侧另有 21 个 manifest 用 `jev` 段声明用途与命令提示，仅作声明素材。证据状态：`主链确认`（静态源码），实际效果未运行验证。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二十二、[检索增强与认知编排调查笔记](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)。
+
 **归并已有类目清单**
 
 - OneRing / 时间线 / ContextFolding：已归并到对话请求与上下文类目。
@@ -181,11 +185,11 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - AgentAssistant 多 Agent 通信（主体）：已归并到 Agent 工具/Agent 角色类目。
 - 管理面板、系统监控、日志查看：已归并到 Chat UI/运维常规类目，不形成独立能力卡。
 
-> 独特能力族的产品/机制贡献划分（18 个可计能力族、支撑机制单列、入口确认暂不计入）见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
+> 独特能力族的产品/机制贡献划分（20 个可计能力族、支撑机制单列、入口确认暂不计入）见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序合仓的多运行时插件仓库。Git 跟踪 3,010 文件，可识别源码 1,283 文件/459,871 行，文档 692 文件、测试 32 文件；两大主体为 `AdminPanel-Vue`（src 270 文件 + vendor 46 文件 + dist 320 跟踪文件）与 `Plugin`（SkillBridge 616 文件、PaperReader 81 文件），根服务源码约 20,813 行。语言占比 JavaScript 51.1%、Vue 14.9%、Rust 8.6%、CSS 6.3%；测试集中在 AdminPanel 与根 tests，未随插件数量成比例扩展；Docker CI 构建 Linux amd64/arm64；`c4c4d00`→`1ae9b63c` 集中做多系统兼容加固（进程树终止跨平台化、macOS SQLite checkpoint、Rust 搜索器按平台三元组选原生二进制）。统计为 Git 跟踪文件机械统计，未运行构建、部署与测试。来源：[仓库分布调查笔记](../仓库分布/VCPToolBox-仓库分布调查笔记.md)。
+- **仓库分布**：VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序合仓的多运行时插件仓库。Git 跟踪 3,332 文件，可识别源码 1,372 文件/546,854 行，文档 362 文件/145,336 行，测试 142 文件/27,741 行；两大主体为 `AdminPanel-Vue`（src 264 文件 + vendor 22 文件，构建产物 dist 不再跟踪）与 `Plugin`（SkillBridge 213 个源码文件），根服务源码 19 文件/16,295 行。语言占比 JavaScript 52.4%、Rust 15.6%、Vue 12.7%、TypeScript 5.2%、CSS 4.5%；测试集中在根 tests 与 AdminPanel，未随插件数量成比例扩展；Docker CI 构建 Linux amd64/arm64。统计为 Git 跟踪文件机械统计，未运行构建、部署与测试。来源：[仓库分布调查笔记](../仓库分布/VCPToolBox-仓库分布调查笔记.md)。
 
 - **应用界面基础设施**：AdminPanel-Vue 是 Vue 3 + Pinia + vue-router 单页应用，无第三方 UI 组件库、无动画库、无 i18n 库，40 条路由分 4 个导航分组。BaseModal 自研弹窗基座（Teleport、焦点陷阱、滚动锁定、Esc/遮罩关闭）；confirm/input/loading/message 经模块级 feedbackState 单例 + FeedbackHost 提供命令式接口（总线可替换）；通知中心经 WebSocket 自动重连、抽屉内嵌工具审批响应。主题完全保存在 localStorage，OKLCH token + 17 预设 + 颜色覆盖 + 自定义 CSS + 背景图，运行时变量发现、结构 token 锁定、导入导出；无系统跟随、主题市场或自动色阶生成。响应式依赖媒体查询，Dashboard 另用容器查询与列数感知；拖放分 HTML5（插件上传）与自研指针会话（排序/面板）两套；无公共图片灯箱、上传组件、应用级错误边界；无障碍静态盘点有焦点陷阱、aria-live、skip-link，命令式对话框焦点圈与 BaseModal 不一致（运行态未验证）。来源：[应用界面基础设施调查笔记](../应用界面基础设施/VCPToolBox-应用界面基础设施调查笔记.md)。
 
@@ -196,7 +200,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 ### 声明不符
 
 - **元思考主题配置（`thinktheme/*.json`）**：`docs/FEATURE_MATRIX.md` 声明主题配置位于 `thinktheme/*.json`，仓库未找到该目录；实际主题入口是 `meta_thinking_chains.json` 的非 default 链条目，当前快照只有 default 链（能力二局部异常）。
-- **README“300+ 官方插件”**：实际快照为 89 个插件目录（69 启用 + 20 个 `.block` 禁用），数量口径与文档不符（不影响插件热重载主链判断）。
+- **README“300+ 官方插件”**：实际快照为 96 个插件目录（77 启用 + 19 个 `.block` 禁用），数量口径与文档不符（不影响插件热重载主链判断）。
 - **README“跨模型上下文无缝持久化”**：无服务端跨模型上下文持久化，历史由客户端携带，表述夸大。
 - **VCPClawMail 轮询间隔**：manifest 声称默认 60000ms，代码以 5 分钟为下限（能力十六局部异常）。
 - **AgentDream 插件内审批函数**（非异常记录，不计入计数）：`approveDreamOperation`/`rejectDreamOperation` 为 not_implemented 占位，但管理路由 `routes/admin/dream.js` 实现真实审批执行，以可执行路径为准，链完整。
@@ -222,7 +226,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - **静态证据为主**：全部主链为静态代码结论；记忆召回质量、梦境叙事、媒体渲染、托管浏览器进程行为、任务调度长跑、主题/无障碍/键盘运行态均未运行验证。
 - **分布式与外部执行**：分布式节点断线/重连/在途文件与取消竞争、SSH 会话中断、AICodeWorker 真实取消与工作区写入、SnowBridge 断线语义未运行验证；managed browser 的登录态、Profile 隔离、私网/云元数据防护未验证。
 - **安全边界**：`/plugin-callback` 无鉴权与 `plugin_callback_forward` 来源未绑定的实际利用面、白名单路由绕过 Bearer 的利用面、PowerShellExecutor 关键字黑名单绕过空间未做端到端验证；Docker 下 `SANDBOX_BACKEND=docker` 可用性未验证。
-- **范围说明**：较早来源主要基于提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9`，仓库分布、产品结构及检索增强等近期来源已更新到 `6a91ca5f75865a14471bceca4a5e2ccadd04f7e3`；均为 `main` 分支，具体以各来源笔记元数据为准。
+- **范围说明**：本汇总的来源笔记已统一对齐到快照 `018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（`main` 分支），历史提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` 只在需要说明早期结构时引用。
 
 ## 来源笔记索引
 
@@ -240,5 +244,6 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 - [对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)
 - [应用界面基础设施调查笔记](../应用界面基础设施/VCPToolBox-应用界面基础设施调查笔记.md)
 - [独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md)
+- [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/VCPToolBox-上下文编译与提示词工程调查笔记.md)
 - [生成式输出与运行时调查笔记](../生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md)
 - [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
