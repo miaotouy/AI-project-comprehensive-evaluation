@@ -1,14 +1,14 @@
 # AI 客户端项目评分
 
-> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPMobile`、`VCPToolBox`
+> 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`Codex`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`OpenOcta`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPMobile`、`VCPToolBox`
 >
 > 对比更新日期：2026-09-17
 >
-> 依据：2026-09-16 快照的各单项目调查笔记（Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布、消息渲染器等类目）及横向对比，并与 2026-09-17 更新的[特色功能贡献统计](AI客户端特色功能贡献统计.md)交叉读取；当前量表已映射 17 个项目，DeepSeek Harness、OpenClaw、Risuai 与 VCPMobile 虽已有全方向或接近全方向笔记，但尚未完成同口径分项复核，因此不进入本轮成熟度排序
+> 依据：2026-09-16 快照的各单项目调查笔记（Agent 工具、Agent 角色、会话与消息管理、对话请求与上下文、Chat UI、LLM 渠道管理、仓库分布、消息渲染器等类目）及横向对比，并与 2026-11-04 更新的[特色功能贡献统计](AI客户端特色功能贡献统计.md)交叉读取；当前量表已映射 17 个项目，DeepSeek Harness、OpenClaw、Risuai、VCPMobile、Codex 与 OpenOcta 虽已有全方向或接近全方向笔记，但尚未完成同口径分项复核，因此不进入本轮成熟度排序
 >
 > 对比方法：把既有调查项转换为统一的 0-5 分量表，分别计算分项分、场景加权分、证据覆盖率和风险标签；基线成熟度与产品辨识度分轴呈现，不把特色点直接混入质量平均分；所有分数必须能够回链到调查笔记中的源码依据或明确的未验证记录
 >
-> 对比范围：本地或自托管 AI 客户端、Agent 工作台和相关中间层；成熟度表覆盖已完成量表映射的 17 个项目，特色轴覆盖特色统计中的 21 个项目；比较当前代码快照中的产品与工程机制，不比较品牌、社区热度、提交数量、商业资源和未来路线图
+> 对比范围：本地或自托管 AI 客户端、Agent 工作台和相关中间层；成熟度表覆盖已完成量表映射的 17 个项目，特色轴覆盖特色统计中的 23 个项目；比较当前代码快照中的产品与工程机制，不比较品牌、社区热度、提交数量、商业资源和未来路线图
 >
 > 文档定位：提供可复算的项目评分口径和结果载体，用于选型与架构参考；不把单一总分解释为项目的绝对质量排名，也不作为整改方案
 
@@ -232,8 +232,10 @@ AstrBot、OpenCode 和 Pi 不以通用桌面聊天为产品边界，因此不进
 
 | 项目 | 产品特色点 | 机制族数 | 当前处理 |
 |---|---:|---:|---|
+| Codex | 10 | 2 | 全方向笔记已具备，待按八维量表复核后再进入场景排序 |
 | DeepSeek Harness | 6 | 4 | 全方向笔记已具备，待按八维量表复核后再进入场景排序 |
 | OpenClaw | 0 | 2 | 零产品特色点只表示其已确认差异化目前归入准入与分发信任机制，不表示产品能力为空 |
+| OpenOcta | 8 | 1 | 全方向笔记已具备（媒体创作 N/A），待按八维量表复核后再进入场景排序 |
 | Risuai | 6 | 1 | 角色媒体、翻译、批量发送与实时共享已进入特色统计，成熟度尚未同口径映射 |
 | VCPMobile | 4 | 1 | 远端日记工作区与手机设备节点已进入特色统计，成熟度尚未同口径映射 |
 

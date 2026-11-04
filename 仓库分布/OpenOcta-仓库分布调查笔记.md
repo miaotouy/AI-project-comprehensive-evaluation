@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-04
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
-> 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1`），并复核 Go 模块、Wails 启动代码、Vue UI 与部署脚本
+> 调查方式：Git 跟踪文件机械统计（`统计仓库.ps1`），并复核 Go 模块、Wails 启动代码、Lit/TypeScript 控制界面与部署脚本
 >
 > 调查范围：模块、语言、文档、测试、桌面打包与部署组织；未运行构建与测试
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenOcta 是面向 IT Ops 的桌面 Agent，采用 Go 后端与 Wails/Vue 控制界面。`src` 集中 Go 命令、服务和能力包，`ui` 集中前端与静态资源，`deploy` 提供 Windows/macOS 与场景部署文件。当前快照有 908 个跟踪文件、720 个源码文件 / 159,843 行源码。
+OpenOcta 是面向 IT Ops 的桌面 Agent，采用 Go 后端与 Wails + Lit 控制界面。`src` 集中 Go 命令、服务和能力包，`ui` 集中前端与静态资源，`deploy` 提供 Windows/macOS 与场景部署文件。当前快照有 908 个跟踪文件、720 个源码文件 / 159,843 行源码。
 
 ## 统计与模块分布
 
@@ -34,7 +34,7 @@ OpenOcta 是面向 IT Ops 的桌面 Agent，采用 Go 后端与 Wails/Vue 控制
 
 ## 语言、文档与测试
 
-TypeScript 71,947 行、Go 67,140 行、CSS 19,304 行；前端模板和样式占源码近半，Go 代码主要位于 `src/pkg`。文档 71 个文件中，`docs` 有 38 个，根 README 与 `src`/`deploy` 内的说明共同构成用户和部署文档。测试识别到 43 个文件，主要在 `ui`（42 个）和 `src/test`（1 个）；本次未运行测试。
+TypeScript 71,947 行、Go 67,140 行、CSS 19,304 行；前端 TypeScript 与样式合计占源码过半，Go 代码主要位于 `src/pkg`。文档 71 个文件中，`docs` 有 38 个，根 README 与 `src`/`deploy` 内的说明共同构成用户和部署文档。测试识别到 43 个文件，主要在 `ui`（42 个）和 `src/test`（1 个）；本次未运行测试。
 
 ## 跨平台与工程配套
 
@@ -53,7 +53,7 @@ macOS 打包在原有 gon 签名流程前增加一步：按目标架构把仓库
 ## 关键源码索引
 
 - `src/`：Go 主程序、Agent 与 IT Ops 能力包
-- `ui/src/`：Vue 控制界面
+- `ui/src/`：Lit/TypeScript 控制界面
 - `deploy/`、`.goreleaser.yaml`：平台部署与发行配置
 - `deploy/macos/build-app.sh`、`src/pkg/macffi/`：macOS libffi 打包与启动时覆盖
 - `docs/architecture.md`：架构说明

@@ -1,10 +1,10 @@
 # LLM 渠道管理横向对比
 
-> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox、OpenClaw、RikkaHub
+> 对比对象：AIO Hub、AstrBot、Chatbox、Cherry Studio、DeepChat、DeepSeek Harness、Dify、Hermes Agent、Jan、LobeHub、Manifold Desktop、NextChat、Open WebUI、OpenCode、Pi、Risuai、SillyTavern、VCPChat、VCPMobile、VCPToolBox、OpenClaw、RikkaHub、Codex、OpenOcta
 >
-> 对比更新日期：2026-09-16
+> 对比更新日期：2026-11-04
 >
-> 依据：同目录二十二份源码调查笔记及其中记录的代码快照；OpenClaw 依据 [OpenClaw-LLM渠道管理调查笔记.md](OpenClaw-LLM渠道管理调查笔记.md)；RikkaHub 依据同目录 2026-09-16 调查笔记
+> 依据：同目录二十四份源码调查笔记及其中记录的代码快照；Codex 与 OpenOcta 依据同目录 2026-11-04 调查笔记，代码快照分别为 `c9750d7f50052b29f53def02b5cf2160ae49a3d9` 与 `0c7dac2284211facdfc813166fe648d093153bb6`（均为 `main`）；OpenClaw 依据 [OpenClaw-LLM渠道管理调查笔记.md](OpenClaw-LLM渠道管理调查笔记.md)；RikkaHub 依据同目录 2026-09-16 调查笔记
 >
 > 对比方法：统一比较渠道数据模型、配置生命周期与管理入口、协议适配、SDK 使用与请求组装、模型目录、多 Key、重试与故障转移、凭据、备份、检测和可观测性；未运行跨项目 benchmark
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-二十二个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、Dify、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPMobile 都是单网关客户端，VCPToolBox 是单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体；OpenClaw 以 Provider 名、协议注册表与模型目录/凭据快照表达渠道，同样没有用户可管理的渠道实例。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
+二十四个项目表面上都有 Provider、模型和 API Key 设置，实际承担的职责并不相同。AIO Hub、Cherry Studio、DeepChat、Dify、LobeHub 和 Open WebUI 把连接或 Provider 作为稳定实体；Chatbox、NextChat、Pi 与 OpenCode 以代码注册表加用户覆盖组织渠道；AstrBot 按“来源 + 能力实例”拆分；Jan 将远程 Provider 与本地推理引擎统一到本地 router；Hermes Agent 以声明式 Profile、端点配置和凭据池运行；SillyTavern 保存整套 Connection Profile；VCPChat 与 VCPMobile 都是单网关客户端，VCPToolBox 是单上游编排层；Risuai 把渠道摊薄到模型条目加全局设置字段，没有独立渠道实体；OpenClaw 以 Provider 名、协议注册表与模型目录/凭据快照表达渠道，同样没有用户可管理的渠道实例；Codex 把渠道写成配置文件里的 Provider 表并收敛到 Responses 单一协议，OpenOcta 用单 Endpoint 的 provider 条目表达渠道，两者也没有独立渠道实例。因而，“支持多少 Provider”不能直接代表多实例、故障转移或凭据治理能力。
 
 横向核验后的主要结论如下：
 
@@ -29,6 +29,8 @@
 - **Pi 是代码注册 Provider + 多层覆盖，不是渠道管理产品。** 39 个内置 Provider 由代码构造（`providers/all.ts`），用户配置（`models.json`）、pi.dev 远端目录和扩展注册逐层覆盖模型与凭据；每 Provider 一粒凭据（auth.json 0600 明文 + 文件锁），无多 Key；没有通用客户端侧跨 Provider failover，但 Anthropic Messages 有服务端 refusal fallback（最多三个候选，输出中途切换即报错）。重试分 SDK 层与消息层两级，同渠道内完成；OpenRouter/Vercel Gateway 的上游路由作为请求字段交给聚合服务。
 - **OpenCode 是运行时组装型渠道层。** 每个 Provider 是「models.dev 目录 + 插件 hook + config 覆盖 + env 探测 + auth.json 凭据」在进程内组装的只读记录（`src/provider/provider.ts:1343-1668`）；模型目录来自 `https://models.opencode.ai/api.json` 的 5 分钟 TTL 缓存 + 构建期快照 fallback。请求走 AI SDK 的 `streamText`（内置 Provider 表 + npm 动态安装），另有可选的 native 协议实现。单 provider 单凭据、无多 Key、无跨渠道 failover；重试三层（会话级 `Effect.retry` 上限 5 次 / SDK maxRetries / native 指数退避）都不改变目标；Anthropic/Bedrock 请求默认自动做 prompt caching，可通过 `setCacheKey` 关闭。认证方法新增 Azure CLI/Entra ID（检测到本机 `az` 时可选，按 scope 缓存并刷新 token）；Copilot 请求头增加 `X-Interaction-Id`，Codex OAuth 模型按主次版本号过滤。
 - **OpenClaw 用“逻辑 Provider + 协议注册表 + 模型目录/凭据”三层表达渠道，没有面向用户的渠道实例。** 模型引用 `provider/model` 是命名空间与品牌身份，执行实现按 `model.api` 在进程内按需注册的流式适配器注册表中选取（内置八组 lazy 注册，插件可注入 stream），运行时 `ModelRegistry` 把模型目录与凭据组织成会话解析快照；目录来源为 author-owned `models.json`、provider 插件 catalog（agent SQLite 缓存）与动态 `registerProvider`，Endpoint 粒度是 provider+model.id+baseUrl。凭据分 auth profile（SQLite auth store，带 cooldown/disabled 与 stickiness）与 SecretInput marker 两层，models.json 只存来源 marker 不落明文；同 provider 失败按同 key 瞬时重试、限流换 env key、auth profile 轮换、模型 fallback 四层收口，configured 主选的 `fallbacks` 链可跨 Provider，user pin 严格不回落。连接测试复用 CLI auth-probe 引擎并做成真实最小模型请求；没有健康感知的跨 Provider 调度闭环。
+- **Codex 是配置声明的单协议渠道层。** Provider 要么是六个内置 ID，要么是 `config.toml` 里 `model_providers` 的一条自定义定义；每条只有单 `base_url`、单凭据，线协议只接受 Responses。CLI 只负责登录与一次性配置覆盖，本次未找到 TUI 与 app-server 的 Provider 增删改界面。请求重试、流式重连与 WebSocket→HTTP 回退都在同一 Provider 内完成，另有每请求一次的 401 凭据刷新；本次未找到多 Key、持久健康状态或跨 Provider 切换。
+- **OpenOcta 是声明式单 Endpoint 渠道的样本。** 渠道是 `models.providers` 的一个键，单 `baseUrl`、单 `apiKey` 加手填模型数组，适配只有 Anthropic Messages 与 OpenAI 兼容两条路径。没有重试层、多 Key 或 `/models` 拉取；配置里声明的 fallback 与 cooldown 没有执行代码。上游凭据与配置同文件明文，配置读取接口和模型可调用的配置工具都会返回原始值。
 - **DeepSeek Harness 是 Pi 家族衍生：渠道治理全在 dsh 侧，pi-ai 只贡献模型目录、Provider 构造与事件流。** `LlmRuntime` 持有 route → adapter 实例注册表，route 只是注册键不是用户实体，注册与替换同步原子；直连适配器 `dsh-llm-deepseek`（fetch + SSE）与 pi-ai 适配器 `dsh-llm-pi-ai`（复用 `@earendil-works/pi-ai`）自始实现同一 `StreamChunk` 词汇以验证 seam 中性，凭据解析、retry policy、settings 分层与错误分类全在 dsh 侧。key 永不进配置：只存 `apiKeyEnv` 引用，经凭据 seam 每请求解析（继承环境 > `.credentials.yaml` > `.env`）；重试在 agent 步边界由 `agent/request-error` 瀑布执行，normal 默认最多 2 次；模型目录是配置，不自动刷新。
 - **Risuai 的“模型 ID 即渠道 + 全局活动设置”形态把渠道实体弱化到极限。** 渠道由模型条目加全局设置字段组合表达，多连接靠内置条目变体、`reverse_proxy` 单例、`xcustom::` 数组与插件条目；凭据全库明文，Web 请求经 `/proxy2` 中转完整经过第三方进程，请求日志原样记录含鉴权头的 headers。失败处理分同模型重试、按任务模式分离的模型 fallback 候选链与工具链重试，候选是任意模型 ID 的用户静态配置，触发条件不是健康状态。
 - **AstrBot、DeepChat 与 Open WebUI 都是服务端/主进程渠道层，但治理重点不同。** AstrBot 允许同一来源生成多个能力实例，错误驱动换 Key，并在图片能力或空输出时走显式 fallback；DeepChat 将 Provider、ModelConfig、runtime registry 与 QPS 队列分开，内置默认目录新增 RunInfra 与 API Route 两个具名 OpenAI-compatible Provider；Open WebUI 以 URL 配置行表示连接，OpenAI 模型固定到首见连接，Ollama 同名模型可随机选后端。
@@ -36,11 +38,11 @@
 - **Jan 的多 Key 与凭据边界较完整。** 主 Key 加 fallback Key 链保存在 OS keyring，401/403/429 会在当前请求换 Key；远程 Provider 与 llama.cpp/MLX 本地引擎都经本地 router 暴露为 OpenAI-compatible 路径。它不做跨 Provider failover。
 - **NextChat 与 Manifold Desktop 是轻量客户端路线。** NextChat 用 Provider 枚举、adapter、客户端 store 和 Next.js 代理组合渠道，服务端可从逗号 Key 随机选一枚但失败不换 Key；Manifold Desktop 只有每 Provider 单 Key、全局默认选择和少数 adapter，且本地 Proxy/Ollama 路径存在已确认的拼接/协议不一致。
 - **渠道配置的底层能力与管理界面覆盖经常不一致。** AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 已提供较完整的图形化生命周期；OpenCode 的配置文件能修改完整 Provider 定义，复用同一设置页的 Web 与桌面端却只能新增自定义渠道或断开已有渠道，不能从界面编辑已保存的定义；Manifold Desktop 也只能在桌面设置页修改 Ollama endpoint，兼容 Provider 的新增和编辑仍依赖手工修改配置文件。
-- **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；其余二十者都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
+- **没有一个项目实现完整的健康感知跨 Provider 高可用闭环。** Hermes Agent 已能按静态配置链跨 Provider/端点切换，AstrBot 也有特定触发条件的模型 fallback，Open WebUI 的 Ollama 可随机分摊；其余二十一个都缺少“持续健康采集 -> 动态选路 -> 失败换渠道 -> 恢复探测”的完整闭环。
 - **成本、延迟和配额数据普遍没有进入调度。** 模型定价、连接延迟、NewAPI 监控或批量检测即使存在，也主要用于展示和人工判断，不直接决定下一次请求走哪条渠道。
 - **凭据保护差异明显。** LobeHub 对数据库 Provider 凭据做 AES-GCM 加密；Jan 与 Manifold Desktop 分别使用 OS keyring 和 Windows Credential Manager。Hermes Agent 以 `.env`/`auth.json` 分层存储并在日志、UI、备份和子进程环境中脱敏，但底层文件不是密文库。其余多项目仍有明文配置或客户端持久化边界。备份是否包含 Key 必须单独核对。
 - **SDK 使用分三类：AI SDK 统一抽象、官方 SDK 直用、自研协议实现。** 凡项目级重试与 SDK 重试并存的项目都显式分权——Chatbox、Cherry Studio 与 DeepSeek Harness 关闭 SDK 内层 retry，Pi 镜像官方 SDK 判定；SDK 只承担协议层，渠道决策、Key 选择与平台传输都在 SDK 之外。
-- **不适合给二十二个项目排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
+- **不适合给二十四个项目排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
 
 AstrBot 的 SSYCloud 与 MiraRouter 接入、默认 `astrbot/<version>` User-Agent、元数据备用端点与推理强度预设，继续落在来源实例、模型目录和请求预设三层；Local Agent 的默认聊天模型改由 `agent_runner.config.model.provider_id` 解析，为空才回退实例列表；Cherry Studio 则补充了 DeepSeek V4 的路由与图像目录，并让 Pi/DeepSeek Harness 的模型选择经过独立兼容性解析。这些变化强化了“渠道目录、运行时可选模型和实际请求协议”应分开比较的口径。
 
@@ -70,8 +72,10 @@ AstrBot 的 SSYCloud 与 MiraRouter 接入、默认 `astrbot/<version>` User-Age
 | VCPToolBox | 全局上游 URL/Key | 上游或虚拟 model id | 单 Key / 不适用 | 默认 3 次总尝试 | 本地无；语义模型可换候选模型 | `.env` 明文 |
 | OpenClaw | 无渠道实体；Provider 名 + api 注册表 + ModelRegistry 目录/凭据快照 | `provider/model`（目录行含 baseUrl/api/compat） | env key 集 + 多 auth profile；限流可换 env key，profile 轮换带 cooldown/disabled | 同 key 瞬时重试；超载类错误全链整链至多重试 10 次 | 无健康调度；configured 主选可沿 `fallbacks` 换模型/Provider（静态配置，user pin 不回落） | SQLite auth store（每 Agent）+ env/SecretRef marker；models.json 无明文 key；静态加密未确认 |
 | RikkaHub | `ProviderSetting` 实例（OpenAI/Google/Claude 三个密封子类） | 模型对象 Uuid `model.id` + 所属渠道（可 `providerOverwrite`） | 渠道 Key 字段拆分做 LRU 轮询 / 当前请求不换 | 应用层 `IOException` 最多 3 次（可全局关闭） | 无 | DataStore 单键 JSON 明文，随二维码/备份/请求日志外流 |
+| Codex | 配置文件中的 Provider 定义 + 六个内置 ID | provider ID + 模型 slug（目录独立于 Provider） | 单凭据 / 不换 | HTTP 重试预算默认 4（含首发最多 5 次）+ 流式重连 5 次 + 401 刷新重放 | 无；仅同一 Provider 内 WebSocket→HTTP 回退 | `auth.json` 明文（0600），可选 keyring |
+| OpenOcta | `models.providers` 的 provider 条目 | `provider/modelId`，裸名默认 anthropic | 单 Key / 不换 | 无重试层 | 无；`fallbacks` 只有 schema | 状态目录 `openocta.json` 明文（0600） |
 
-矩阵中的“重试次数”沿用各项目自己的配置语义，不能直接横比。Chatbox 计总 attempt，LobeHub 配置 retry 次数，VCPToolBox 的 `ApiRetries` 表示总尝试数；AIO Hub 的渠道层不重试，重试在聊天应用层（默认最多 2 次、可配置间隔与模式）并重新选 Key；Pi、OpenCode、AstrBot 与 Hermes Agent 还各自叠加多层重试；Risuai 的 `requestRetrys` 是同一模型内的最多重试次数，fallback 候选链推进会整体重发请求。Hermes Agent 的静态 fallback 链是本次确认最完整的跨 Provider/端点通用链路，Risuai 的模型 fallback 候选链也能沿用户配置的模型 ID 跨 Provider 切换，但两者都不是按实时健康动态选择。
+矩阵中的“重试次数”沿用各项目自己的配置语义，不能直接横比。Chatbox 计总 attempt，LobeHub 配置 retry 次数，VCPToolBox 的 `ApiRetries` 表示总尝试数；AIO Hub 的渠道层不重试，重试在聊天应用层（默认最多 2 次、可配置间隔与模式）并重新选 Key；Pi、OpenCode、AstrBot 与 Hermes Agent 还各自叠加多层重试；Risuai 的 `requestRetrys` 是同一模型内的最多重试次数，fallback 候选链推进会整体重发请求。Hermes Agent 的静态 fallback 链是本次确认最完整的跨 Provider/端点通用链路，Risuai 的模型 fallback 候选链也能沿用户配置的模型 ID 跨 Provider 切换，但两者都不是按实时健康动态选择。Codex 的 4 是重试预算而非总尝试数，流式重连另有一套预算；OpenOcta 的矩阵值表示没有重试层，而不是重试次数为零。
 
 ## 比较口径
 
@@ -198,6 +202,8 @@ OpenClaw 的 Provider 名只是模型引用与凭据归属的品牌身份，协�
 | Risuai | 模型条目 ID + 全局字段覆盖 | 内置条目变体、`reverse_proxy` 单例、`xcustom::` 数组、插件条目 | 无独立渠道实体；同一 Provider 多连接靠条目复制与自定义条目维护 |
 | OpenClaw | Provider 名（品牌身份/命名空间）+ ModelRegistry 目录行 + auth profile；会话 pin `provider/model` | 同 provider 多模型、多凭据 profile；自定义 provider 插件或运行时 `registerProvider`；baseUrl 可写在 provider 或 model 级 | 无用户渠道实例与 Endpoint 表；删除 = 从 models.json/配置移除条目；未找到复制命令 |
 | RikkaHub | 独立实例 Uuid（内置渠道为固定 Uuid） | 新建同协议多实例；模型级 `providerOverwrite` 覆盖端点与凭据 | 内置项不可删除；未找到实例级复制；二维码与备份导入不携带模型列表 |
+| Codex | Provider ID（配置键或内置 ID） | 新增 `model_providers.<新ID>`，或用 profile 切换整组设置 | 内置 ID 受保留名单保护且只允许局部覆盖；一个 Provider 只有一个 `base_url` |
+| OpenOcta | provider 键名（模型引用前缀） | 新建同形条目；本次未找到复制入口 | 单 `baseUrl` 与单 `apiKey`；别名不参与路由 |
 
 Cherry Studio 的 `providerId` 与 `presetProviderId` 分离值得借鉴。前者保证用户实例稳定，后者保留继承关系；用户可拥有两条继承同一预设、但凭据和端点独立的渠道。AIO Hub 的 Profile 也能直接表达多实例，结构更集中。LobeHub 和 Chatbox 可以用自定义 ID 达到类似结果，但内置实例和自定义实例需要按各自规则管理。
 
@@ -230,10 +236,12 @@ VCPChat 和 VCPToolBox 则应作为另一种部署选择看待。它们预期多
 | VCPToolBox | Web 管理端与 `config.env` | 可编辑唯一全局上游和语义路由 | 无上游 Provider 实体；只能新增路由 preset/route | 无逐上游启停/删除 | 全目录备份不等于渠道导入导出；管理端可测模型目录和真实 Chat |
 | OpenClaw | Control UI（Settings → Model Providers）与 CLI（`onboard/configure`、`models` 子命令族）及配置文件 | UI 可编辑 provider apiKey（显示来源不显示明文）与 Default models/fallbacks；配置文件可完整编辑 | 可新增 provider/自定义端点；未找到复制入口（本次未找到） | provider 插件按 plugins 启停；模型行无独立启停开关，删除即移除 models.json/配置条目 | 已检查入口未找到 provider 级导入导出（本次未找到）；Test connection 经 `models.probe` 复用 CLI auth-probe 引擎，发起真实最小模型请求 |
 | RikkaHub | Android 应用渠道列表页与详情页（Pager 分「配置」「模型」两页） | 内置项可改 Key、baseUrl、开关等，类型与路径不可改；自建项可改名称、类型、端点、凭据、开关 | 可新增；未找到实例级复制 | 支持启停；删除按钮仅 `!builtIn` 时显示 | 扫码/相册导入与详情页二维码分享；Chatbox/CherryStudio 备份导入；三段式连接测试 |
+| Codex | `config.toml` 与 profile 文件；CLI 只做登录与单次覆盖 | 配置文件可完整编辑；TUI 与 app-server 没有 Provider 专用表单 | 配置文件可新增；无复制 | 删除即移除条目；没有 `enabled` 字段，靠切换 `model_provider` 或 profile | 本次未找到 Provider 导入导出；`codex doctor` 检查认证与端点可达性，不发真实生成 |
+| OpenOcta | 桌面 Control UI 与 Gateway 配置接口；配置文件为补充入口 | UI 可改显示名、baseUrl、apiKey、`api` 类型与模型表 | 可新增；本次未找到复制 | 删除即停用；本次未找到启停开关 | 本次未找到渠道级导入导出；无渠道连接测试，仅内嵌模型有测试对话 |
 
 AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 的图形入口覆盖了已有渠道编辑、新建、启停、删除和连接测试；差异主要在复制与导入导出。AstrBot 的 Dashboard 也覆盖主要生命周期，但 source、聊天模型 provider 和其他能力 provider 的复制、删除与测试规则不同，不能压成一个“全支持”。LobeHub 的 Web、桌面和 CLI 共用服务端权限与持久化边界，入口较完整，但仍没有渠道复制或专用导入导出。
 
-OpenCode 和 Manifold Desktop 展示了最明显的“底层可配置、界面不可达”。OpenCode 的 Web/桌面设置页可以创建自定义 Provider，却不能把已有 Provider 定义载回同一表单修改；Disconnect 处理凭据和禁用状态，也不等于删除配置定义。Manifold Desktop 的 `providerConfigs` 能在文件中表达多个 compatible Provider，桌面设置页却没有新增表单，也不能编辑已有 compatible endpoint。两者若只按 schema 或配置文件判断，都会高估桌面端的渠道管理能力。
+OpenCode 和 Manifold Desktop 展示了最明显的“底层可配置、界面不可达”。OpenCode 的 Web/桌面设置页可以创建自定义 Provider，却不能把已有 Provider 定义载回同一表单修改；Disconnect 处理凭据和禁用状态，也不等于删除配置定义。Manifold Desktop 的 `providerConfigs` 能在文件中表达多个 compatible Provider，桌面设置页却没有新增表单，也不能编辑已有 compatible endpoint。两者若只按 schema 或配置文件判断，都会高估桌面端的渠道管理能力。Codex 的可用面更窄：Provider 只能靠配置文件维护，CLI 负责登录，TUI 与 app-server 只写通用配置键；OpenOcta 虽有桌面表单，却没有渠道复制、启停或连接测试。
 
 NextChat、Risuai、SillyTavern、VCPChat 和 VCPToolBox 的缺项还受到数据模型影响：它们分别管理全局 Provider 槽位、模型条目、活动连接快照、单网关或单上游，并不存在可统一套用增删改查的渠道实例。横向比较应先说明实际管理对象，再评价界面是否缺少该对象已有的生命周期操作。
 
@@ -250,6 +258,8 @@ Chatbox 把内置 Provider 的 Host、Path 和模型创建逻辑收进注册表�
 VCPChat 固定发送 OpenAI 风格请求，并用独立 `/v1/chatvcp/completions` 表达工具注入。VCPToolBox 可以接收 OpenAI Chat/Responses、Anthropic 和 Gemini 请求，后几类先转换到内部 Chat 链；出站仍统一为 OpenAI-compatible Chat Completions。因此，VCPToolBox 的“入站多协议”解决客户端兼容，并不表示它能按上游 Provider 选择原生协议。
 
 Risuai 把协议适配集中在请求层：主入口按 `LLMFormat` 枚举分发到各 Adapter，OpenAI 兼容协议是主干，Custom API 通过格式切换复用 Anthropic/Gemini/Responses 等 Adapter。端点多数硬编码进模型条目，用户级 URL 字段按条目覆盖；Web 模式固定经 `/proxy2` 中转，Tauri 端经 `streamed_fetch` 发起。
+
+Codex 把这一维度压到最窄：线协议只有 Responses，Azure 也按兼容端点处理，不设独立 Adapter；WebSocket 只是同一协议下的传输选择。OpenOcta 只保留 Anthropic Messages 与 OpenAI Chat Completions 两条路径，Gemini 等协议一律落到 OpenAI 兼容分支。
 
 ### 多 Endpoint 主要解决能力分派
 
@@ -286,6 +296,8 @@ Cherry Studio 的 Endpoint Type、AIO Hub 的 `customEndpoints` 和 VCPToolBox �
 | VCPToolBox | 自研 `fetchWithRetry` | 入站协议转换与出站 payload | 重试策略、语义路由、取消级联 |
 | OpenClaw | 自研 LlmRuntime + `packages/ai` api 注册表（内置八组 lazy 注册 + 插件 stream）+ transport 层 | 协议请求体、鉴权与流式由 adapter/transport 承担 | 目录合并、凭据解析优先级、auth profile 轮换与 cooldown、env key 旋转、模型 fallback、探测与脱敏 |
 | RikkaHub | 自研三协议 provider 实现（`ai/` 模块）+ OkHttp SSE | 协议请求体、Header 与流式解析由各协议实现负责 | 多 Key 轮询、应用层重试、模型→渠道线性查找、连接测试与余额查询 |
+| Codex | 自研 `codex-api` Responses 客户端（另有 WebSocket 传输） | 请求体编码、SSE/WS 事件解析与认证 Header 注入 | Provider 合并、凭据解析、重试预算、流重连与传输回退 |
+| OpenOcta | eino-ext 的 Anthropic claude 组件与 OpenAI 组件 | 协议请求体、鉴权与流式；Eino 迭代器转成会话事件 | 引用解析、会话运行时池、上下文窗口预算；组装只传 Key、模型、baseUrl 与最大输出 |
 
 请求构造层决定协议兼容面与流式词汇的归属。自研实现并不等于协议覆盖少：SillyTavern 的 26 个 Chat Completion source 与 Risuai 的 24 个 LLMFormat 分支都是自研，覆盖面反而最宽；官方 SDK 直用者获得协议兼容与原生错误类型，却要在 SDK 之外叠加重试与 Key 逻辑；AI SDK 使用者把协议差异压缩进 provider 抽象，代价是协议行为受 SDK 版本约束。
 
@@ -307,7 +319,7 @@ SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收�
 
 ## 模型目录与元数据
 
-模型目录在二十二个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
+模型目录在二十四个项目中承担三种不同职责：发现可用模型、补充展示与能力信息、决定运行时请求行为。
 
 | 项目 | 主要来源 | 模型归属 | 元数据对运行时的作用 |
 |---|---|---|---|
@@ -332,8 +344,12 @@ SDK 依赖的固定方式影响渠道层的升级一致性。OpenCode 对未收�
 | VCPToolBox | 上游 `/v1/models` + 别名 + 虚拟模型 | 单上游 | 公开名改写和语义路由 |
 | OpenClaw | author-owned `models.json` + provider 插件 manifest/catalog（agent SQLite `cache_entries` 缓存）+ 运行时 `registerProvider` + hosted catalog 增量（默认 URL，TTL 6h，仓库内无生成文件） | Provider/模型目录行（运行时查询快照，无 Provider 实体表） | api/协议、baseUrl、params/headers/compat、cost/contextWindow 等参与 adapter/transport 组装与“有凭据可用”过滤；目录进 SQLite 缓存与 UI 快照，热路径不新鲜轮询 |
 | RikkaHub | 各协议远端拉取（`baseUrl/models`，Google 为 `models?pageSize=100`，只给 ID 与展示名）+ 静态 `ModelRegistry` 推断 | 模型对象所属渠道（`providerOverwrite` 可覆盖） | 模态、能力与内置工具随模型对象快照参与请求构造；`contextLength` 仅作元数据，未参与裁剪 |
+| Codex | 编译进二进制的目录快照 + Provider `/models` 或 `model_catalog_url` 远端 + `models_cache.json` 磁盘缓存（TTL 300 秒） | Provider + 独立目录 | 上下文窗口、自动压缩阈值与推理档位参与请求；无价格字段；刷新失败保留上一次成功快照 |
+| OpenOcta | 内置 provider 模板的默认模型 + 用户手填模型数组 + 内嵌模型 catalog | Provider | 只有 `contextWindow` 进入历史裁剪预算，`maxTokens` 传给适配器；价格与 compat 未消费；无远端拉取 |
 
 AIO Hub、Cherry Studio 和 LobeHub 都把模型稳定地放在 Provider 命名空间内，可以避免不同服务暴露同名模型时误路由。Chatbox 的运行时键同样包含 Provider。VCPChat 保存裸模型 ID，符合单网关假设；一旦用户替换网关，本地收藏或统计未必还指向原模型语义。
+
+Codex 把模型目录与 Provider 分开：模型 slug 与能力元数据来自独立目录，Provider 只决定端点和协议，因此同一模型可以在不同 Provider 下复用，代价是目录刷新、Provider 可达性和凭据状态是三套独立数据，且会话本身仍绑定到切换前的 Provider。OpenOcta 则相反，模型数组属于 provider 条目，目录新鲜度完全依赖用户手填。
 
 Cherry Studio 的 Registry 将模型本体、Provider 定义和 Provider-模型覆盖分开，适合维护别名、能力差异和端点覆盖。AIO Hub 的模型规则覆盖面较广，能力信息还会驱动请求路径。LobeHub 的 Model Bank 同时容纳能力、限制和定价，但定价目前不参与普通选路。
 
@@ -370,6 +386,8 @@ VCPToolBox 的模型层有独特用途：`ModelRedirect.json` 可把公开名映
 | VCPToolBox | 单值 | 固定 | 无 | 不适用 |
 | OpenClaw | env key 集（`<P>_API_KEYS`/单 key/前缀枚举/manifest env，去重）+ SQLite auth profiles（api_key/token/oauth，cooldown/disabled） | profile 按配置顺序>存储顺序，缺省 round-robin（OAuth>token>api_key，同 tier lastUsed 旧者优先），会话 stickiness | env key 仅限流类错误旋转；profile 冷却 30s/1m/5m 上限，billing/permanent-auth 走 disabled 长退避 | **有**：限流换 env key；profile 耗尽后进入模型 fallback |
 | RikkaHub | 渠道 `apiKey` 字段按空白与逗号拆分 | LRU（优先从未使用，否则最久未用） | 不记录健康；无冷却、熔断或恢复 | 无 |
+| Codex | 单值认证结构（一个 API Key 字段 + 一组 OAuth token） | 固定 | 同凭据重试；401 可刷新凭据后重放 | 不适用 |
+| OpenOcta | provider `apiKey` 单字符串（字面量、`$ENV` 或推导环境变量名） | 固定 | 无多 Key 结构，无冷却或熔断 | 不适用 |
 
 AIO Hub、Hermes Agent、AstrBot 和 Jan 都会让 Key 失败影响选择，但时间边界不同。AIO Hub 的渠道层失败只影响后续请求，但主聊天链路在应用层等待重试并重新选 Key，失败 Key 已熔断或标坏时重试即换 Key；AstrBot 与 Jan 可在当前请求内沿 Key 链即时重试；Hermes Agent 还会持久化 credential pool 状态、冷却并在池耗尽后推进 fallback。四者都仍需与跨 Provider 健康调度区分。
 
@@ -404,6 +422,8 @@ SillyTavern 把多 Key 当作 Secret 管理和人工切换功能。Profile 可�
 | VCPToolBox | 默认 3 次总尝试 | 500、503、429、特定 401、网络和连接/首包超时；线性退避 | 普通模型不变；语义模型可换候选 |
 | OpenClaw | 同 key 瞬时重试（分类网络/超时/5xx）；全链超载类错误整链至多重试 10 次 | 错误归一为 failover reason（rate_limit/overloaded/billing/auth 等）；profile cooldown 随失败增长；SDK 内重试等待上限可经 `OPENCLAW_SDK_RETRY_MAX_WAIT_SECONDS` 限制 | 瞬时重试不换目标；限流换 env key；profile 轮换换凭据；模型 fallback 换 model ref（可跨 Provider）；user pin 严格不回落 |
 | RikkaHub | 应用层最多 3 次（可全局关闭） | 仅 `IOException`；退避 1s/2s/4s | 不变：同渠道、同模型，Key 轮询状态不参与错误 |
+| Codex | HTTP 重试预算默认 4（含首发最多 5 次）；流式重连默认 5 次 | 5xx 与传输错误重试，429 在 HTTP 层不重试；指数退避 200ms 起，`Retry-After` 不扩大上限 | Provider/模型/凭据不变；WebSocket 失败回退 HTTP，401 刷新后重放 |
+| OpenOcta | 单次调用，无重试层 | 错误直接结束本次运行并写入会话转写 | 不改变；`fallbacks` 无执行逻辑 |
 
 Chatbox 对网络错误默认不重试，是为了避免服务端已经处理请求时发生重复计费。这个选择提醒我们：自动重试并非次数越多越好。对于非幂等生成请求，客户端在断线时通常无法确认服务端是否已经开始计费或生成；重放策略应同时考虑错误类别、是否收到响应头/首包和用户可见状态。
 
@@ -427,13 +447,13 @@ SillyTavern 可以把 OpenRouter 的 Provider order 和 `allow_fallbacks` 传给
 5. 记录每次 attempt 的渠道、错误、延迟和最终结果；
 6. 处理流式响应已经开始后的不可重放边界。
 
-AIO Hub 已覆盖第 2、3、4、6 项的一部分：错误分类与等待重试作用于同一 Profile 内的 Key，聊天链路每次重试重新选 Key，失败、冷却与恢复状态跨请求持久化，流式已输出后不再重放。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。Pi 覆盖第 2、3 项的一部分（错误分类 + 同渠道重放），另加 Anthropic 服务端 refusal fallback；没有候选池与健康状态。OpenCode 覆盖第 2、3 项的一部分（错误归一化 + 同渠道重放，V2 runner 的 context overflow 自动压缩再试属模型内行为），同样没有候选池与健康状态。Risuai 覆盖第 2、3 项的一部分：候选链按任务模式静态配置、错误与空响应后推进并完整重发请求，但没有持久健康状态。其余项目主要停留在固定目标重试或人工切换。
+AIO Hub 已覆盖第 2、3、4、6 项的一部分：错误分类与等待重试作用于同一 Profile 内的 Key，聊天链路每次重试重新选 Key，失败、冷却与恢复状态跨请求持久化，流式已输出后不再重放。LobeHub 的 Runtime 与 Router 扩展面覆盖第 2、3、5 项的部分结构，开源普通路径没有候选池。VCPToolBox 对模型候选覆盖第 2、3、5 项的一部分，渠道仍由单一上游封装。Pi 覆盖第 2、3 项的一部分（错误分类 + 同渠道重放），另加 Anthropic 服务端 refusal fallback；没有候选池与健康状态。OpenCode 覆盖第 2、3 项的一部分（错误归一化 + 同渠道重放，V2 runner 的 context overflow 自动压缩再试属模型内行为），同样没有候选池与健康状态。Codex 覆盖第 2、3 项的一部分（错误分类、同渠道重试与 401 刷新重放），WebSocket 失败只做传输回退；OpenOcta 一项也未覆盖，错误直接终止本次运行。Risuai 覆盖第 2、3 项的一部分：候选链按任务模式静态配置、错误与空响应后推进并完整重发请求，但没有持久健康状态。其余项目主要停留在固定目标重试或人工切换。
 
 Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显式配置，credential pool 有冷却状态，跨端点切换会留下运行状态；但候选不是持续健康探测形成，流开始后的重放边界也未形成通用保证。它更准确地属于“静态高可用链”，还不是完整健康调度器。AstrBot 的 fallback 只覆盖特定图片能力与空输出/错误语义，Open WebUI 的 Ollama 随机分摊则只发生在请求前。
 
 ## 路由依据：显式绑定仍是主流
 
-二十二个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 或网关模型，运行时据此调用。Dify 由应用或节点预设模型引用并在 tenant 侧解析。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
+二十四个项目的普通聊天大多采用显式绑定：用户或 Agent 先选定 Provider 或网关模型，运行时据此调用。Dify 由应用或节点预设模型引用并在 tenant 侧解析。Hermes Agent 会在错误后按预配置链推进，AstrBot 有少量按能力/空输出触发的 fallback，Open WebUI 的 Ollama 会在请求前随机选同名模型后端，Risuai 的模型 fallback 链也由用户按任务模式静态配置；这些例外仍不以实时成本、延迟和持续健康数据动态选路。
 
 | 路由依据 | 已确认项目 | 实际作用 |
 |---|---|---|
@@ -475,6 +495,8 @@ Hermes Agent 覆盖第 1、2、3、4、5 项的较大部分：fallback 候选显
 | VCPToolBox | 主/插件 `config.env` | 明文 | 已认证管理 API 可返回完整主配置原文 |
 | OpenClaw | per-agent SQLite auth store + `auth.profiles` metadata（不含 key）+ env/SecretRef；models.json 只存来源 marker | auth store 静态加密未确认；models.json 不落明文 key；OAuth 属可刷新运行时状态 | UI 显示来源不显示明文；probe/错误路径对凭据做脱敏投影 |
 | RikkaHub | DataStore Preferences 单键 `providers` JSON | 明文（含 Google 服务账号私钥与代理密码）；无加解密或掩码 | Key 输入框可切明文；二维码/备份含完整 Key；请求日志仅掩码 `Proxy-Authorization` |
+| Codex | `$CODEX_HOME/auth.json`；可选 OS keyring 或“keyring 保存文件密钥、密文写本地文件” | 默认明文 JSON（Unix 0600）；`auto` 优先 keyring | 敏感字段用 `RedactedString` 保存；`responses-api-proxy` 的 dump 脱敏 `Authorization` 与 cookie Header |
+| OpenOcta | 状态目录 `openocta.json`，与渠道配置同文件 | 明文，0600；无字段级加密 | `config.get` 返回含密钥的完整快照，模型可调用的配置工具也能读取；日志脱敏配置没有读取点 |
 
 静态加密、进程隔离和 UI 脱敏解决的是不同问题。Cherry Studio 把真实凭据留在 Main/Data API，能减少 Renderer 泄露面，但数据库文件本身仍是明文。SillyTavern 默认只向浏览器返回 Secret 的掩码和 ID，也不改变 `secrets.json` 的磁盘属性。LobeHub 保护了数据库静态数据；`fetchOnClient` 为浏览器直连而下发解密配置时，运行时暴露面又会扩大。
 
@@ -504,6 +526,8 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 | VCPToolBox | 默认归档所有 `.env` 和 JSON | 未加密 ZIP 扩大核心及插件 Secret 副本范围 |
 | OpenClaw | 单项目笔记未确认完整备份/导出链 | 配置文件与 models.json 不含明文 key；auth store 位于 per-agent SQLite，复制 Agent 目录/数据库是否携带凭据取决于迁移边界（OAuth 通常要求单独登录） |
 | RikkaHub | 备份把完整 `Settings`（含 Key）序列化为 `settings.json` 打进 ZIP | 二维码分享只剥离模型列表、不剥离 Key；备份/恢复本次未运行验证 |
+| Codex | 本次未找到凭据备份或导出机制；配置与凭据分文件 | 复制 `auth.json` 等于复制凭据；keyring 模式不随 `config.toml` 迁移 |
+| OpenOcta | 无渠道级导入导出；配置是单文件，文件级复制即迁移 | 文件含上游 `apiKey` 明文；入站 Key 的哈希与密文另存，不随配置复制 |
 
 Chatbox 是“同一项目内不同备份入口安全语义不同”的典型：用户主动导出聊天数据时默认剔除 Key，自动配置滚动备份却复制整个配置文件。SillyTavern 默认排除 Secret，降低了普通归档泄露风险，但 Profile 内的 Secret UUID 引用可能在恢复后失效。Cherry Studio 的 legacy 备份引擎（类名仍标 `@deprecated LEGACY v1 CODE`）已升级为 v7 full/slim 双布局并接入 SQLite 备份（`220dff874f`），v2 Provider 与凭据因此随备份落盘——旧"备份不复制 SQLite 数据库、Provider 配置未进入备份链"的结论已被推翻；由于 Provider 凭据是 SQLite 明文，备份文件本身的保密性成为新的边界。
 
@@ -534,6 +558,8 @@ VCPChat 的 temp、回读校验、旧文件备份和原子替换提高了配置�
 | VCPToolBox | 模型目录、真实 Chat、语义 route preview；VCPBridgeServer 透明代理另有 `GET /v1/models`、`/v1/:profile/models` 探活 | 日志 + 可选 NewAPI Monitor | 无 |
 | OpenClaw | CLI `models status/list --probe` 与 Gateway `models.probe`（Control UI Test connection）复用同一 auth-probe 引擎，发起真实最小模型请求（`PROBE_MAX_TOKENS=8`） | auth profile cooldown/usageStats、`model_fallback_decision` 结构化日志、usage/cost 随消息落库、subsystem 日志脱敏 | profile 冷却与模型 fallback 决策影响后续选择；probe 结果不直接形成动态选路 |
 | RikkaHub | 详情页三段式连接测试（非流式/流式/假工具，走真实实现与真实调用） | 请求日志、token 用量、OpenAI 余额、错误信息；未找到花费/价格/延迟聚合 | 无 |
+| Codex | `codex doctor` 的认证检查与 `/models`、基础 URL 可达性探测；`codex debug models` 打印目录 | 限流窗口与 credits 快照、token 用量、请求 span 只带模型与传输类型 | 无；doctor 是一次性诊断，不形成健康状态 |
+| OpenOcta | 无渠道级测试；只有内嵌模型的“测试对话” | `token_usage` JSONL 与 usage 聚合（provider 字段为空、cost 通常为零）、CozeLoop 默认开启并导出输入输出 | 无；上游 429 不转成冷却状态 |
 
 检测覆盖面最丰富的是 AIO Hub、Cherry Studio 和 VCPToolBox，但三者的用途不同。AIO Hub 的 Key 请求结果会进入局部状态；Cherry Studio 的逐模型、逐 Key 检测适合人工诊断；VCPToolBox 能分别验证目录、真实生成和语义路由。后两者的结果仍不改变下一次生产请求。
 
@@ -603,9 +629,17 @@ OpenAI-compatible 和 Ollama 连接逐行配置，再合并成统一模型目录
 
 Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接靠条目变体和自定义数组，不需要实体表；`customAPIFormat` 让一个 URL 切换多套协议族以复用 Adapter。代价同样直接：凭据随同步、备份与日志自然扩散，Web 模式完整经过中转进程，失败处理只有同模型重试与用户静态配置的 fallback 候选链。
 
+### Codex：配置分层与单协议客户端
+
+Codex 让同一份 TOML 既声明端点，也被系统、企业、项目和会话层覆盖，Provider 表、profile 与模型目录各自独立演进。协议收敛到 Responses 后只需维护一条请求与流式路径，WebSocket 与 HTTP 共用同一套事件处理。可复用点在于把渠道声明、认证状态与目录快照分开存放；代价是没有 Provider 管理界面、多 Key 或跨 Provider 调度，非 Responses 后端必须外加转换代理。
+
+### OpenOcta：单文件声明与薄适配层
+
+OpenOcta 把渠道压到一个 provider 条目，配置、凭据和模型清单同文件，桌面 UI 只是结构化编辑器。可复用点在于适配层足够薄：只保留 Anthropic 与 OpenAI 兼容两条路径，更多厂商交给上游网关。代价是单 Endpoint 单 Key、没有重试与故障转移；配置保存只替换内存配置，不重建已池化运行时，按运行时指纹与引擎构建顺序推断，端点或密钥变更对旧会话不生效。
+
 ## 组合式参考架构
 
-二十二个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
+二十四个项目没有提供一套完整答案，但可以组合出一条较清楚的实现路径：
 
 1. **渠道实体采用 Cherry Studio/AIO Hub 的稳定实例 ID。** Provider 预设与用户实例分离，模型身份始终包含渠道 ID。
 2. **协议选择采用 Cherry Studio 的 Endpoint Type + Adapter Family 或 LobeHub 的显式 SDK Type。** 不从 URL 猜协议，也不把多 Endpoint 宣称为容灾。
@@ -641,6 +675,8 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 | “Risuai 的 fallback 链是健康感知 failover” | 候选链按任务模式静态配置，触发条件是错误类型与空响应，推进候选会完整重发请求 |
 | “配置原子写入等于 Secret 安全” | 原子写入保护完整性；静态加密和备份控制保护保密性 |
 | “模型定价已存在，所以可以按成本路由” | 本次样本中的定价和用量数据未进入通用调度 |
+| “Codex 配了多个 Provider 就会自动切换” | 客户端只持有单个 Provider，会话还与保存的 Provider 绑定；失败只走同一 Provider 的重试、流重连与凭据刷新 |
+| “OpenOcta 配置里有 `fallbacks` 和 `cooldowns` 就有故障转移” | 两者只出现在 schema 与示例配置，模型请求路径没有读取点 |
 
 ## 选型视角
 
@@ -664,12 +700,14 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 | 服务端 Agent 运行时、多前端共用与自动模型目录 | OpenCode | 单 provider 单凭据；Web/桌面端不能编辑已有 Provider 定义；无多 Key 与跨渠道 failover；凭据明文；模型目录依赖远端拉取（可禁用） |
 | 服务端 Agent 平台、组合配置热重载与双适配器渠道层 | DeepSeek Harness | 无多 Key 与跨 Provider failover；模型目录需写配置不自动刷新；HTTP 代理配置本次未找到 |
 | 角色创作工作流、模型 ID 即选模入口与多协议 Custom API | Risuai | 无渠道实体、多 Key 与健康状态；凭据明文并随同步、备份与日志扩散；Web 端经 /proxy2 中转经过第三方进程 |
+| 终端编码 Agent、配置声明多 Provider 与 Responses 单协议 | Codex | 无渠道界面与多 Key；切换 Provider 后旧会话不能继续；凭据默认明文 |
+| 桌面 Agent、单文件配置与本地/远端模型统一入口 | OpenOcta | 单 Endpoint 单 Key、无重试与故障转移；配置保存不重建已池化运行时 |
 
 这张表描述的是实现接近度，不是产品推荐。最终选择还取决于部署位置、是否允许凭据进入客户端、是否已有聚合网关、生成请求能否安全重放，以及运维方是否真正维护健康状态。
 
 ## 横向结论
 
-二十二个项目展示了九条清晰路线：
+二十四个项目大体展示了九条清晰路线：
 
 1. AIO Hub、Cherry Studio、DeepChat、LobeHub 和 Open WebUI 在应用内建立稳定 Provider/连接实体，差别集中在实例模型、多 Key、限流、重试和凭据保护；
 2. SillyTavern 用活动设置和 Profile 服务于完整创作环境切换，渠道自动化让位于兼容性和用户控制；
@@ -681,11 +719,13 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 8. Risuai 把渠道摊薄到模型条目与全局活动设置，服务于角色创作工作流，多连接靠条目变体、全局 reverse_proxy 单例与自定义条目表达，失败处理止于同模型重试和用户静态 fallback 候选链。
 9. OpenClaw 把 Provider 做成“Provider 名 + 协议注册表 + 模型目录/凭据快照”的分层，服务于本地 Gateway 多前端与多 Agent；渠道能力止于 auth profile 轮换、configured 模型 fallback 与真实最小请求探测，没有用户渠道实例与健康感知调度闭环。
 
+Codex 与 OpenOcta 不再通过实体或覆盖层管理渠道：前者是配置分层加内置 Provider 表，并收敛到 Responses 单一协议；后者是单文件 provider 条目加两条 eino 适配器。两者都没有多 Key、健康状态或跨 Provider 切换，失败处理止于同一渠道内的重试，OpenOcta 连重试层也没有。
+
 配置管理入口形成了另一条独立比较轴。AIO Hub、Cherry Studio、DeepChat 和 Open WebUI 已在图形界面覆盖主要生命周期；OpenCode 与 Manifold Desktop 的底层配置表达力明显高于桌面设置页；其余缺项有些来自入口未暴露，有些来自项目本身没有独立渠道实体。选择产品时需要同时核对运行时能力和已有配置是否能在目标前端继续维护。
 
 如果只比较“配置多少 Provider”，会错过真正影响可靠性和安全性的边界。更有效的审查顺序是：先确定运行时实际选中的 URL、凭据、协议和模型，再跟踪错误发生后其中哪一项会改变，最后核对失败状态能否跨请求保存、何时恢复，以及这些过程是否留下可解释记录。
 
-在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，Dify 的 tenant 级凭据加密与同模型多 Key 冷却、AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体最薄的样本，VCPMobile 则是单网关移动客户端。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是二十二个项目共同未闭合的部分。
+在本次代码快照中，Hermes Agent 的静态跨端点 fallback 链最完整，Dify 的 tenant 级凭据加密与同模型多 Key 冷却、AIO Hub 的本地 Key 健康状态、Jan 的请求内 Key 链、Cherry Studio 的 Provider/Endpoint 数据模型、LobeHub 的静态加密与可观察重试、Open WebUI 的连接行模型、VCPToolBox 的模型编排和 OpenCode 的目录/凭据组装各有清晰边界。Risuai 的“模型 ID 即渠道 + 全局活动设置”形态则是渠道实体较薄的样本，OpenOcta 用单文件里的一个 provider 条目保留最小实体，VCPMobile 则是单网关移动客户端。持续健康感知的跨 Provider 调度、成本/延迟路由和一致的凭据备份恢复，仍是二十四个项目共同未闭合的部分。
 
 ## 依据与范围
 
@@ -711,5 +751,7 @@ Risuai 用一个全局 `Database` 对象同时承载配置与凭据，多连接�
 - [VCPToolBox LLM 渠道管理调查笔记](VCPToolBox-LLM渠道管理调查笔记.md)
 - [OpenClaw LLM 渠道管理调查笔记](OpenClaw-LLM渠道管理调查笔记.md)
 - [RikkaHub LLM 渠道管理调查笔记](RikkaHub-LLM渠道管理调查笔记.md)
+- [Codex LLM 渠道管理调查笔记](Codex-LLM渠道管理调查笔记.md)
+- [OpenOcta LLM 渠道管理调查笔记](OpenOcta-LLM渠道管理调查笔记.md)
 
 本文只比较上述笔记记录的代码快照，不把 README 宣称、未接线模块、框架扩展点、托管版私有配置或外部聚合网关能力直接计入当前实现。未运行真实账号下的限流、断网、重复计费、跨平台凭据读取和恢复演练；涉及这些行为的结论以源码可确认边界为限。
