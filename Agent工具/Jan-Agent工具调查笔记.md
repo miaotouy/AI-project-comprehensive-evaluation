@@ -32,7 +32,7 @@
 - `DropdownToolsAvailable.tsx` 显式过滤 `server === 'Jan Browser MCP'`，浏览器 MCP 工具不出现在开关列表中；
 - Web 搜索 API key 只进 OS keyring（`set_secret`/`get_secret`），绝不明文写 settings.json。
 
-Cowork 在模型有 tools capability 时冻结一次运行的工具目录，以免每步改变提示前缀；执行器按调用顺序派发，Plan mode 既从目录里剔除破坏性工具，也在派发端拒绝调用。拒绝集合是写文件、编辑、`shell`、`skill_write`、`task` 与监视器，记忆工具只禁用写类操作（写、编辑、删除、移动），读操作仍可用。它通过原生工具读写文件、运行 shell、调用记忆/技能、截图，另由前端处理 todo、ask、task、monitor；普通 Chat 只额外暴露经过沙箱检查的 shell，不等于全量 Cowork 工具。
+Cowork 在模型有 tools capability 时冻结一次运行的工具目录，以免每步改变提示前缀；执行器按调用顺序派发，Plan mode 既从目录里剔除破坏性工具，也在派发端拒绝调用。拒绝集合是写文件、编辑、`shell`、`skill_write`、`task` 与监视器，记忆工具只禁用写类操作（写、编辑、删除、移动），读操作仍可用。它通过原生工具读写文件、运行 shell、调用记忆/技能、截图，另由前端处理 todo、ask、task、monitor；普通 Chat 只额外暴露经过沙箱检查的 shell，上列完整工具目录仅在 Cowork 运行内可用。
 
 ## 1. 工具清单
 
@@ -170,7 +170,7 @@ useChat.sendMessage
 
 ## 6. 边界与未验证事项
 
-- MCP 的 `maxToolOutputChars` 默认 40000，请求级上限与设置值取较紧者，Rust 对结果统一按字符截断并显式标注截断（`src-tauri/src/core/mcp/commands.rs:395,526`、`truncate.rs:39`）。OAuth 2.1 的 PKCE/动态注册凭据另存于 `mcp_oauth.json`，授权地址还要过 allowlist 检查；这条登录链目前由 CLI 与命令层共同驱动，不能直接推定桌面设置页具有完整 OAuth 交互（`src-tauri/src/core/mcp/oauth.rs`、`commands.rs:596-654`）。
+- MCP 的 `maxToolOutputChars` 默认 40000，请求级上限与设置值取较紧者，Rust 对结果统一按字符截断并显式标注截断（`src-tauri/src/core/mcp/commands.rs:395,526`、`truncate.rs:39`）。OAuth 2.1 的 PKCE/动态注册凭据另存于 `mcp_oauth.json`，授权地址还要过 allowlist 检查；这条登录链目前由 CLI 与命令层共同驱动；桌面设置页是否具备完整 OAuth 交互，需在设置页入口单独核对（`src-tauri/src/core/mcp/oauth.rs`、`commands.rs:596-654`）。
 - 未运行 Cowork 工作区写入、Shell 沙箱或 MCP OAuth 的端到端调用；普通 Chat 的审批 store 不能代表这些新表面的权限语义。
 - 子 Agent 的 git worktree 生命周期（`/new`、`/clear`、`/resume` 与崩溃后的收尾）、只读根的实际生效范围、沙箱升级审批只做了静态核对。
 - 记忆工具写入后的索引边界（有界、面向缓存稳定的摘要快照）未验证召回效果；`refreshMemoryDigest` 的缓存失效条件未展开。

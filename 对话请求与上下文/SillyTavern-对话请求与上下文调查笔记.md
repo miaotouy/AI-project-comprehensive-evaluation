@@ -143,7 +143,7 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 - **退出**：`beforeunload` 中止流式但不保存（12401-12407）；流式中途消息不持久化（见 6）。
 - **可观测性**：`power_user.console_log_prompts` 打印最终 prompt（5271-5273）；itemized prompts（每次生成的完整 prompt 与分项 token 数）写入 IndexedDB（5280-5322，见会话与消息管理笔记 2.1），供消息上的 Prompt 按钮查看；`GENERATION_STARTED/STOPPED/ENDED` 事件可供扩展记录。
-- **已确认边界**：一次请求的上下文以 `finalPrompt`/`generate_data.prompt` 为准——设置面板或扩展 prompt 中存在某字段不等于本次请求携带（`GENERATE_AFTER_COMBINE_PROMPTS` 可整体替换）；文本 completion 与 OpenAI 两条拼装链在截断与注入顺序上实现完全不同；服务端只做代理，不持有会话状态。
+- **已确认边界**：一次请求的上下文以 `finalPrompt`/`generate_data.prompt` 为准——设置面板或扩展 prompt 中配置的字段只在未被整体替换时进入本次请求（`GENERATE_AFTER_COMBINE_PROMPTS` 可整体替换）；文本 completion 与 OpenAI 两条拼装链在截断与注入顺序上实现完全不同；服务端只做代理，不持有会话状态。
 
 ## 11. 未验证事项
 

@@ -27,7 +27,7 @@ OpenClaw 的 Gateway 是中心状态与控制平面。CLI、TUI、浏览器 Cont
 | 对象 | 在协作关系中的角色 | 状态与执行权归属 |
 |---|---|---|
 | Gateway | 中心服务、状态源、路由和控制平面 | 持有连接准入、Gateway session、Agent 路由、事件流、节点 registry、ACP 控制面 |
-| CLI / TUI / Control UI | 外部控制与交互表面 | 通过 Gateway WebSocket 发起 RPC、订阅事件和恢复历史；不等于独立 Agent runtime |
+| CLI / TUI / Control UI | 外部控制与交互表面 | 通过 Gateway WebSocket 发起 RPC、订阅事件和恢复历史；Agent runtime 与执行权保留在 Gateway 侧 |
 | iOS / Android companion app | 外部应用与设备节点 | 维护设备身份、节点连接和本地能力；相机、屏幕、语音等执行在设备侧 |
 | 渠道与线程 | 外部消息交互表面 | 将当前会话、Discord thread、Telegram topic 等映射到 Gateway session 或 ACP binding |
 | ACPX 外部 harness | 外部执行体 | Claude/Codex/Gemini/Pi 等 harness 持有原生 runtime、工具循环与外部 session；OpenClaw 管理适配、投影和进程租约 |
@@ -72,7 +72,7 @@ TUI 已有实际 RPC 和事件处理路径：订阅 sessions、发送和中止 c
 
 ACPX 侧保留 Gateway session key、backend、agent、runtime session name、identity、mode、runtime options、cwd、state、lastActivity 和 lastError 等元数据，并以 actor queue/runtime handle 管理并发。外部 harness 保留自己的工具循环和原生 session；`stateDir`/session store 用于保存上游 session record 和命令，以满足条件式 persistent resume。cwd、命令、session ID 等不匹配或 session 被 reset 时不会假定可以复用；oneshot turn 结束后关闭。
 
-渠道侧可以把当前会话、Discord thread 或 Telegram topic 绑定到 ACP session。绑定存在时，后续消息进入 ACP session，ACP 输出回到同一聊天表面；`cancel`、`close`、`unfocus`、过期和归档会解除或结束关系。渠道适配器的逐平台行为是**文档/入口确认，未运行验证**，不能据此宣称所有平台均具备相同回流效果。
+渠道侧可以把当前会话、Discord thread 或 Telegram topic 绑定到 ACP session。绑定存在时，后续消息进入 ACP session，ACP 输出回到同一聊天表面；`cancel`、`close`、`unfocus`、过期和归档会解除或结束关系。渠道适配器的逐平台行为是**文档/入口确认，未运行验证**；各平台是否呈现相同的回流效果，需要在对应平台上逐项观察。
 
 ### 原生 ACP 反向桥接链
 
@@ -124,7 +124,7 @@ openclaw attach
 
 Gateway client/server 使用 WebSocket `req`/`res`/`event` 帧。握手顺序为 `connect.challenge -> connect -> hello-ok`。连接参数包含 client identity/version/platform/mode/role/scope，以及 token/password 等认证信息；需要设备证明时还带设备签名。`hello-ok` 返回方法、事件、能力目录、状态快照、Control UI 插件表面、附件限制、role 和 scope，客户端据此建立可用表面。
 
-服务端在首帧检查、认证、设备证明、节点配对和 session 注册后才接受 RPC；共享认证代际变化会使旧连接失效。客户端 pending map 将请求 ID 映射到 response，事件 `seq` 用于检测缺口，重连后通过恢复/历史路径重新建立投影。连接身份、Gateway session key、ACP runtime session name、渠道 thread/topic 和 node ID 是不同层级的标识，源码中分别维护，不能只凭聊天标题推断它们相等。
+服务端在首帧检查、认证、设备证明、节点配对和 session 注册后才接受 RPC；共享认证代际变化会使旧连接失效。客户端 pending map 将请求 ID 映射到 response，事件 `seq` 用于检测缺口，重连后通过恢复/历史路径重新建立投影。连接身份、Gateway session key、ACP runtime session name、渠道 thread/topic 和 node ID 是不同层级的标识，源码中分别维护；聊天标题与这些标识的对应关系由各自的注册来源给出。
 
 ACPX 元数据将 Gateway session key 映射到外部 backend/agent 和 upstream runtime session；persistent session 还由 cwd、command、session ID、stateDir 等条件约束。进程租约在 spawn 前写入 pending lease（`rootPid=0`），wrapper 写回 PID；租约包含 `leaseId`、`gatewayInstanceId`、`sessionKey`、wrapper root/path、`rootPid`、command hash 和 state。操作结束后按身份校验回收，Gateway 启动时回收 OpenClaw-owned stale process trees/orphans。
 
@@ -150,7 +150,7 @@ Gateway 以 client identity、role、scope、token/password、设备签名、设
 
 ## 相邻类目交接
 
-- CLI、TUI、Control UI、移动 app 和渠道适配器属于外部控制/交互表面；它们对 Gateway Agent 的控制不等于各自拥有独立 Agent runtime。
+- CLI、TUI、Control UI、移动 app 和渠道适配器属于外部控制/交互表面；它们对 Gateway Agent 的控制统一经由 Gateway，Agent runtime 由 Gateway 侧持有。
 - iOS/Android 的 camera、screen、voice 等是设备节点能力，属于外部应用协作中的执行边界；具体采集结果、媒体附件回流和平台权限弹窗本次为**入口确认/未验证**。
 - 普通 MCP server 仅提供工具发现和调用，不纳入外部执行体与应用协作主链；只有 ACPX 显式开启的 OpenClaw/plugin MCP bridge 作为外部 harness 的受治理资源入口记录。
 - 内建子 Agent、普通 Provider 和普通渠道消息处理不单独建外部执行体笔记；只有 ACP runtime、独立进程、节点或可控制的外部客户端达到身份、生命周期、双向协议、状态映射和治理条件时才纳入。

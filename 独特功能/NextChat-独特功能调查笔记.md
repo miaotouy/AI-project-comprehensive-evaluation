@@ -45,7 +45,7 @@ README 的 Features 章节（README.md:80-93）以部署、PWA、Markdown、prom
 
 ## 声明不符、外部依赖与暂缓项
 
-- **会话分享（ShareGPT）**：入口为导出预览面板的 Share 按钮（`app/components/exporter.tsx:357-407`），经 `ClientApi.share`（`app/client/api.ts:191-228`）上传：Web 模式 fetch `/sharegpt`，由 `next.config.mjs:96-97` 的 rewrites 转发到 `https://sharegpt.com/api/conversations`；桌面 App 模式直连 raw URL，返回 `https://shareg.pt/<id>`。请求体在用户消息后追加固定的"Share from NextChat"溯源消息（api.ts:198-205，注释声明用于数据清洗）。特点与边界：文档/README 未提及该能力；`/sharegpt` 不是 API 路由而是构建期 rewrite，静态导出部署下不可用（推断）；链路依赖第三方平台可用性与数据策略，未运行验证。按"仓库外 SaaS 依赖"处理为**暂缓**，不进入特色统计。
+- **会话分享（ShareGPT）**：入口为导出预览面板的 Share 按钮（`app/components/exporter.tsx:357-407`），经 `ClientApi.share`（`app/client/api.ts:191-228`）上传：Web 模式 fetch `/sharegpt`，由 `next.config.mjs:96-97` 的 rewrites 转发到 `https://sharegpt.com/api/conversations`；桌面 App 模式直连 raw URL，返回 `https://shareg.pt/<id>`。请求体在用户消息后追加固定的"Share from NextChat"溯源消息（api.ts:198-205，注释声明用于数据清洗）。特点与边界：文档/README 未提及该能力；`/sharegpt` 由构建期 rewrite 承接，静态导出部署下不可用（推断）；链路依赖第三方平台可用性与数据策略，未运行验证。按"仓库外 SaaS 依赖"处理为**暂缓**，不进入特色统计。
 - README 未声明其他独特产品工作流；本次未发现“介绍声明与实现不符”的候选。
 
 ## 对特色贡献统计的影响

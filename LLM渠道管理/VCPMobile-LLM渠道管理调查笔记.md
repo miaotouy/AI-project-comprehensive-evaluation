@@ -61,7 +61,7 @@ VCPMobile 没有本地 Provider、Endpoint 或 Profile 实体。它保存一套�
 ## 5. 已确认边界与未验证事项
 
 - 渠道粒度是单全局 VCP 网关，不支持客户端侧多个 Provider/Endpoint/Profile 的 CRUD、复制、启停或负载均衡；Android 与 iOS 共用同一套设置结构。
-- `chatEndpointMode` 只是切换网关路径；不表示 VCPMobile 自己实现了工具目录或工具循环。
+- `chatEndpointMode` 只切换网关路径；工具目录与工具循环由远端 VCP 网关提供，移动端本地没有对应实现。
 - 未启动应用，也未连接真实服务，未验证 URL 拼接、SSE 兼容性、测试结论、凭据在平台备份中的可见性及服务端路由行为。
 
 ## 关键源码索引

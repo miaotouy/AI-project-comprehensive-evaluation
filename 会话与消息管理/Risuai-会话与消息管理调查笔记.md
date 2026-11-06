@@ -96,7 +96,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 2.4 加载主链
 
-`loadData`（`bootstrap.ts:55-269`）按平台分路：Tauri 用 fetch 读 AppData 下的 bin；web 走 `forageStorage.Init()`（后端选择见 6.3）。解码失败时**按时间倒序逐个尝试 dbbackup-* 备份**，全部失败才报"save file is corrupted"；账户模式先从本地读、再读远端 `database/database.bin`。加载后的插件启动前会等待一次插件存储迁移尝试；随后继续插件加载、ID 分配和冷归档等初始化，再启动保存循环。迁移异常被捕获并记录，不能据此声称迁移失败一定阻止插件运行（`bootstrap.ts:200-214,253`）。
+`loadData`（`bootstrap.ts:55-269`）按平台分路：Tauri 用 fetch 读 AppData 下的 bin；web 走 `forageStorage.Init()`（后端选择见 6.3）。解码失败时**按时间倒序逐个尝试 dbbackup-* 备份**，全部失败才报"save file is corrupted"；账户模式先从本地读、再读远端 `database/database.bin`。加载后的插件启动前会等待一次插件存储迁移尝试；随后继续插件加载、ID 分配和冷归档等初始化，再启动保存循环。迁移异常被捕获并记录，插件加载在迁移尝试之后继续（`bootstrap.ts:200-214,253`）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
@@ -115,7 +115,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 - **角色级**：`lastInteraction` 距今超 10 天且未归档的角色，整体写入冷存储（键为 UUID），原对象替换为只含 `image/name/chaId/chats 占位/coldstorage: id/coldStoragedChats` 的"瘦身壳"；打开角色时 `changeChar` 按壳内键读回完整对象（`characters.ts:884-893`）。
 - **会话级**：最后一条消息时间距今超 10 天、且消息数 ≥4、且未归档的会话，把 `message`、`hypaV2Data`、`hypaV3Data`、`scriptstate`、`localLore` 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`（`coldstorageData.ts:4` 定义头）；打开会话时 `preLoadChat` 读回并恢复这些字段（`coldstorage.svelte.ts:627-665`），数据缺失时替换为显式错误提示消息。
-- **插件存储布局**：小值 JSON 集中在一个冷索引内，大值写到独立冷条目，数据库保留 `_coldpluginIndex` 指针。默认大值阈值为 256 Ki 字符量级，索引软预算 8 Mi 字符量级，单值至多 4 Ki 时始终保留在索引；实现按 JSON 字符串长度计量，不能直接当作 UTF-8 文件字节限额（`process/pluginStorageStore.ts:34-60,372-401`）。
+- **插件存储布局**：小值 JSON 集中在一个冷索引内，大值写到独立冷条目，数据库保留 `_coldpluginIndex` 指针。默认大值阈值为 256 Ki 字符量级，索引软预算 8 Mi 字符量级，单值至多 4 Ki 时始终保留在索引；实现按 JSON 字符串长度计量，UTF-8 文件字节限额需按编码后的字节数折算（`process/pluginStorageStore.ts:34-60,372-401`）。
 - **迁移与提交**：旧内联值和旧逐键映射在加载时合并进新索引。新索引冷写成功后，才同步移动数据库指针并移除已迁移的旧副本；失败保留旧指针并安排重试。主数据库仍由独立保存循环落盘，所以插件 API 的写入完成、索引指针提交和整库存档写出是三个时点（同文件 `:225-316,433-519`）。
 - **读写与回收**：小值写入先更新内存，索引延迟批量刷新；大值先写冷条目再纳入索引，后到的同键操作可使早期写入失效。被替换条目先进入垃圾列表，后续加载时才按宽限期清理，默认普通条目一天、旧索引一小时。页面隐藏时另做 best-effort flush，不能保证强制退出已持久化（同文件 `:319-341,372-401`；`process/coldstorage.svelte.ts:684-692`）。
 

@@ -75,7 +75,9 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 
 运行期取消经组合 cancel event 传入 Agent 和脚本执行路径；Gateway 关闭可将运行记为 interrupted，失去 fire-claim 所有权的迟到结果会被丢弃，不覆写后来所有者的状态。每 job 的运行集合也阻止同一 job 在前一轮未结束时再次入池（`cron/scheduler.py:6919-6969,7097-7126,7796-7905`）。
 
-恢复需区分派发交接与已经认领：循环 job 推进下次时间时保存 pending_slot，若尚未取得 fire claim 且 owner 已死亡或过期，下次扫描恢复该时刻一次，再走正常宽限与错过策略；已认领的执行不会按此路径盲目重放。execution 的 scheduled_instant 用于抑制同一时刻再次运行（[occurrences.py](../../hermes-agent/cron/occurrences.py#L9-L103)）。有限单次任务的计次、unknown 执行和过期 claim 另有处理，副作用后崩溃仍不能视为恰好一次。
+恢复按任务是否已认领分开处理。循环 job 推进下次时间时会保存 `pending_slot`；若任务尚未取得 fire claim，且 owner 已死亡或租约过期，下次扫描会恢复这个时刻一次，再应用正常的宽限与错过策略。已认领的执行走各自的恢复规则（[occurrences.py](../../hermes-agent/cron/occurrences.py#L60-L103)）。
+
+去重按 `scheduled_instant` 检查已完成记录，抑制同一计划时刻再次运行（[occurrences.py](../../hermes-agent/cron/occurrences.py#L9-L56)）。有限单次任务的计次、unknown 执行和过期 claim 各有处理。这里确认的是派发恢复与调度去重，外部副作用恰好发生一次的保证尚未确认。
 
 循环 job 对“尚未到达模型”的网络/DNS 失败有一条窄重跑链。只有 Agent API 调用数仍为零时才在 5、15、30 分钟后重排，期间抑制中间失败通知；一旦到达模型，无论结果成功与否都会清空阶梯。一次性 job、暂停 job 和可能已经产生副作用的失败不进入该机制，`cron.retry_unreachable: false` 可关闭（`cron/unreachable_retry.py:1-17,30-52,55-125`）。
 

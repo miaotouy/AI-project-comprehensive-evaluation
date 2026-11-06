@@ -84,7 +84,7 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 | `toolresult` | `toolResult` | `name`、`text`、`isError` |
 | `a2ui` | `a2ui` | 原始 JSON |
 
-关于"树"：写消息时确实把上一行的短 id 填入 `parentId`（`chat.go:1042-1052`、`:2780-2806`、`:2890-2899`），但 `ReadTranscriptMessages` 与预览读取都不解析该字段，重建历史时按行序切片。推断：这是为兼容外部格式保留的元数据，当前活动路径只有一条，无法据此切换版本。
+关于"树"：写消息时确实把上一行的短 id 填入 `parentId`（`chat.go:1042-1052`、`:2780-2806`、`:2890-2899`），但 `ReadTranscriptMessages` 与预览读取都不解析该字段，重建历史时按行序切片。推断：这是为兼容外部格式保留的元数据；当前活动路径只有一条，版本切换不在可执行路径上。
 
 `token_usage` 与 `tool_call` 行不在消息读取的转换里，`ReadTranscriptMessages` 会尝试把它们当 `TranscriptMessage` 解析，因缺少 `role` 而被丢弃；成本统计则单独扫描（`src/pkg/session/usage.go:322-441`）。
 

@@ -55,7 +55,7 @@ VCPChat 是 VCPToolBox 的 Electron 桌面前端，主窗口由左侧 sidebar、
 
 **侧栏可拖拽宽度**：拖拽逻辑集中在 `initializeResizers()`（`modules/uiManager.js:56-171`）。最小/最大宽度优先从 CSS 计算样式读取，代码只提供 fallback：左栏 180px、通知栏 220px，最大宽度 600px；拖拽时写内联宽度并同步无障碍数值，结束后按设置项落盘（`:58-103`）。存在工作区侧栏时，右侧通知栏不放独立拖拽手柄（`:164`），右侧空间改由侧栏接管。
 
-**Compact navigation 触发条件**：不是基于窗口宽度自动触发，而是由设置项 `sidebarAvatarOnly` 控制（`modules/renderer/mainChatSettingsPresentationOwner.js:84-110`）——用户在侧栏宽度设置中主动开启后生效。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单（`main.html:224`）。菜单中的话题项给左侧栏加上抽屉展开类，话题列表以抽屉形式叠加（`modules/uiManager.js:440-454`）；Esc 关闭抽屉（`:512-514`），点击话题项后自动关闭（`:500-502`），点击抽屉外部也关闭（`:506-508`）。
+**Compact navigation 触发条件**：由设置项 `sidebarAvatarOnly` 控制（`modules/renderer/mainChatSettingsPresentationOwner.js:84-110`）——用户在侧栏宽度设置中主动开启后生效，触发源是这一设置项而非窗口宽度的响应式断点。avatar-only 模式下侧栏折叠为仅显示头像，展示 `.sidebar-compact-navigation` 悬浮菜单（`main.html:224`）。菜单中的话题项给左侧栏加上抽屉展开类，话题列表以抽屉形式叠加（`modules/uiManager.js:440-454`）；Esc 关闭抽屉（`:512-514`），点击话题项后自动关闭（`:500-502`），点击抽屉外部也关闭（`:506-508`）。
 
 ### 1.3 工作区侧栏（Workspace Side Pane）
 

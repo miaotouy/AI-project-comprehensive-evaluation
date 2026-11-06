@@ -40,7 +40,7 @@
 
 ### 1.1 工作台拓扑：一套框架，两套适配器
 
-Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架，但不是共用一个组件树，而是共用**类型契约**：框架通过 Context Provider（`MessageListProvider`，`MessageListProvider.tsx:77-87`）暴露统一的消息列表状态/动作契约（`MessageListState/Actions/Meta`，契约类型见 `types.ts:282,332` 起），Home 与 Agent 各自用独立的 hook 组装并注入实现（实现位置见下列清单）。消息列表、消息分组、消息壳等渲染组件只读这些 context，不知道自己在哪个入口下（能力注入细节见 6.2；组件装配见消息渲染器笔记"入口与页面适配"）。
+Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架；共用层是**类型契约**，两个入口各自维护独立的组件树：框架通过 Context Provider（`MessageListProvider`，`MessageListProvider.tsx:77-87`）暴露统一的消息列表状态/动作契约（`MessageListState/Actions/Meta`，契约类型见 `types.ts:282,332` 起），Home 与 Agent 各自用独立的 hook 组装并注入实现（实现位置见下列清单）。消息列表、消息分组、消息壳等渲染组件只读这些 context，不知道自己在哪个入口下（能力注入细节见 6.2；组件装配见消息渲染器笔记"入口与页面适配"）。
 
 两套适配器的实现位置：
 - Home：`useHomeMessageListProviderValue`，`src/renderer/pages/home/messages/homeMessageListAdapter.tsx:85`
@@ -172,7 +172,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **Agent 适配器**提供用户消息“编辑并重发”、兄弟分支切换与“复制为新会话”。编辑入口只对普通交互模式下、非跨会话投递的用户消息显示，并在编辑忙碌时禁用；复制依据 runtime checkpoint 判断可用性，通过 IPC 创建会话后跳转新现场，子会话另有来源返回入口。编辑会保留原分支，持久化和原生历史语义见[会话与消息管理笔记 1.3](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)。依据：[agentMessageListAdapter.tsx:412–497](../../cherry-studio/src/renderer/pages/agents/messages/agentMessageListAdapter.tsx#L412-L497)。
 - **agent 专属操作**：另多出工作区文件、工具审批、artifact 面板等入口（`respondToolApproval/openArtifactFile/openAgentToolFlow/openInExternalApp/openPath`），相对路径经 `resolveWorkspaceFilePath` 解析到 agent workspace 目录（`:123-137`）——这些是 agent 运行时才有的概念，Home 侧没有对应实现。
 - **终态兜底**：agent 侧另有 `withTerminalErrorFallback`（`:48-73`）——消息终态是 `error`/`success` 但没有可见 part 时，补一条 `data-error` part，防止 UI 卡在空白/转圈（执行侧语义见对话请求与上下文笔记 6）。
-- 总结：不是靠 if/else 判断"我是 Home 还是 Agent"，而是靠两份完全独立的 hook 各自组装一份 `MessageListActions` 对象，字段有没有由各自的业务上下文决定；旧的 `state.readonly: true` 标志机制已不存在。
+- 总结：入口差异来自两份完全独立的 hook，各自组装一份 `MessageListActions` 对象，字段有没有由各自的业务上下文决定；代码里没有 if/else 判断"我是 Home 还是 Agent"的分支；旧的 `state.readonly: true` 标志机制已不存在。
 
 **本节末尾源码列表**（各适配器注入的写操作集合）：
 
@@ -279,7 +279,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - 用户可以直接编辑并重发最后一条用户消息，重发走新的分支而不是覆盖原消息；被编辑过的已签名 reasoning 在重放时降级为普通文本。
 - 会话列表支持归档到回收站而不是立即删除，回收站条目可以恢复，超过保留期的条目由后台任务清理。
 
-上述结论确认了入口、状态来源和事件连接，不代表已经完成焦点顺序、屏幕阅读器或所有平台窗口行为的运行验证。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`、`src/renderer/components/GlobalSearch/`。
+上述结论覆盖入口、状态来源和事件连接；焦点顺序、屏幕阅读器与各平台窗口行为属于运行验证范围，本轮未执行。依据：`src/renderer/components/composer/ComposerFloatingCapsule.tsx`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/renderer/components/chat/messages/frame/messageMenuBarActions.tsx`、`src/renderer/components/chat/messages/MultiSelectActionPopup.tsx`、`src/renderer/components/GlobalSearch/`。
 
 ## 11. 设计取舍与已确认边界
 

@@ -8,7 +8,7 @@
 >
 > 调查方式：只读源码梳理（Read/Grep/Glob + 后台子调查代理核实内建工具清单、扩展机制、子代理编排三个子领域）；未修改 LobeHub 仓库任何文件
 >
-> 调查范围：只统计模型能够发现、请求并触发执行的工具（builtin / plugin / MCP / connector），不把消息渲染器、纯 UI 功能或模型供应商自身能力计入
+> 调查范围：模型能够发现、请求并触发执行的工具（builtin / plugin / MCP / connector）；消息渲染器、纯 UI 功能与模型供应商自身能力属于相邻主题
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -210,7 +210,7 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 
 ### 5.1 迭代/步数上限
 
-`AgentRuntime.step()`（`packages/agent-runtime/src/core/runtime.ts:82-262`）每步自增 `state.stepCount`，一旦 `stepCount > maxSteps` 就置 `forceFinish = true`（`runtime.ts:92-102`）——不是立刻硬停，而是允许当前已发出的工具调用跑完，下一次 `call_llm` 会通过 `buildStepToolDelta`/`ToolResolver` 的 `deactivatedToolIds: ['*']` 把工具全部摘除并注入总结提示，逼模型给出最终文本答案（`GeneralChatAgent.toLLMCall`，`packages/agent-runtime/src/agents/GeneralChatAgent.ts:389-428` 对 `state.forceFinish` 的处理；`ToolResolver.resolve`，`ToolResolver.ts:84-93`）。`finish` 的 `reason` 会标记为 `'max_steps_completed'`（`GeneralChatAgent.ts:587,595-596`）。
+`AgentRuntime.step()`（`packages/agent-runtime/src/core/runtime.ts:82-262`）每步自增 `state.stepCount`，一旦 `stepCount > maxSteps` 就置 `forceFinish = true`（`runtime.ts:92-102`）；该标志仍允许当前已发出的工具调用跑完，下一次 `call_llm` 会通过 `buildStepToolDelta`/`ToolResolver` 的 `deactivatedToolIds: ['*']` 把工具全部摘除并注入总结提示，逼模型给出最终文本答案（`GeneralChatAgent.toLLMCall`，`packages/agent-runtime/src/agents/GeneralChatAgent.ts:389-428` 对 `state.forceFinish` 的处理；`ToolResolver.resolve`，`ToolResolver.ts:84-93`）。`finish` 的 `reason` 会标记为 `'max_steps_completed'`（`GeneralChatAgent.ts:587,595-596`）。
 
 `maxSteps` 默认值 999（`apps/server/src/services/agentRuntime/AgentRuntimeService.ts:2911`：`const { maxSteps = 999, ... } = options ?? {}`），可由调用方（如 eval run）显式传入更小的值（schema 限制 `1~1000`，`apps/server/src/routers/lambda/evalRunConfig.schema.ts:66`）。
 
@@ -234,7 +234,7 @@ LobeHub **没有在工具执行前对参数做 JSON Schema 结构校验**（未�
 
 ### 5.6 headless 场景下无法等待人工的返回形态
 
-`userInterventionConfig.approvalMode === 'headless'` 时（后台任务/API 无 UI 场景，`apps/server/src/services/aiAgent/index.ts:1174` 默认就是 `{ approvalMode: 'headless' }`），`GeneralChatAgent`（`llm_result` phase）不会发 `request_human_approve`，而是发 `resolve_blocked_tools`（`GeneralChatAgent.ts:551-558`）。这个指令由 `resolveBlockedTools` 执行器（`packages/agent-runtime/src/executors/resolveTools.ts:78-173`）处理：把每个待批准工具直接标记为失败结果 `{ content: 'Blocked by security/privacy.', error: 'blocked_by_security_privacy', success: false }`，`pluginIntervention: { status: 'rejected', rejectedReason: 'blocked_by_security_privacy' }`，然后照常进入 `tools_batch_result` 让模型看到"这个工具被拒绝"并有机会重新规划——而不是让整个 operation 挂起等待一个不存在的人工响应。headless 下真正会被拒绝的只是"需要人工介入"的那部分工具（`toolsNeedingIntervention`），对 `dynamicPolicy`/全局审计中标记为可覆盖（非 `always`）的规则是**自动放行**而非拒绝（`GeneralChatAgent.ts:200-204, 211-215, 229-234`）——headless 不是"全部工具都拒绝"，而是"能自动放行的照常放行，必须人工的转为拒绝结果"。
+`userInterventionConfig.approvalMode === 'headless'` 时（后台任务/API 无 UI 场景，`apps/server/src/services/aiAgent/index.ts:1174` 默认就是 `{ approvalMode: 'headless' }`），`GeneralChatAgent`（`llm_result` phase）不发 `request_human_approve`，改发 `resolve_blocked_tools`（`GeneralChatAgent.ts:551-558`）。这个指令由 `resolveBlockedTools` 执行器（`packages/agent-runtime/src/executors/resolveTools.ts:78-173`）处理：把每个待批准工具直接标记为失败结果 `{ content: 'Blocked by security/privacy.', error: 'blocked_by_security_privacy', success: false }`，`pluginIntervention: { status: 'rejected', rejectedReason: 'blocked_by_security_privacy' }`，然后照常进入 `tools_batch_result` 让模型看到"这个工具被拒绝"并有机会重新规划，整个 operation 不会挂起等待人工响应。headless 下真正会被拒绝的只是"需要人工介入"的那部分工具（`toolsNeedingIntervention`），对 `dynamicPolicy`/全局审计中标记为可覆盖（非 `always`）的规则则**自动放行**（`GeneralChatAgent.ts:200-204, 211-215, 229-234`）——headless 的规则是"能自动放行的照常放行，必须人工介入的转为拒绝结果"。
 
 **依据**：[AgentRuntime.step](../../lobehub/packages/agent-runtime/src/core/runtime.ts)、[GeneralChatAgent.toLLMCall/forceFinish](../../lobehub/packages/agent-runtime/src/agents/GeneralChatAgent.ts)、[ToolResolver 的 deactivatedToolIds](../../lobehub/packages/context-engine/src/engine/tools/ToolResolver.ts)、[AgentRuntimeService 默认 maxSteps](../../lobehub/apps/server/src/services/agentRuntime/AgentRuntimeService/index.ts)、[resolveToolTimeout](../../lobehub/apps/server/src/modules/AgentRuntime/resolveToolTimeout.ts)、[call_tool/call_tools_batch 执行器](../../lobehub/packages/agent-runtime/src/executors/tool.ts)、[resolve_blocked_tools/resolve_aborted_tools](../../lobehub/packages/agent-runtime/src/executors/resolveTools.ts)、[callLlm 重试与中断检测](../../lobehub/packages/agent-runtime/src/executors/callLlm.ts)、[errorClassification 与 normalizeExecutionError](../../lobehub/apps/server/src/services/toolExecution/index.ts)、[execAgent headless 默认值](../../lobehub/apps/server/src/services/aiAgent/index.ts)。
 
@@ -279,7 +279,7 @@ api 级配置存在则**完全覆盖** manifest 级（不是合并/叠加，是�
 - `manual`（默认）：仅工具自身 `humanIntervention` 配置决定，命中 `'never'` 放行，其余（`'required'`/`'always'`/规则未匹配的默认 `'required'`）都要求介入
 - `allow-list`：忽略工具自身配置（除 `always`/全局审计仍然生效），只看 `"identifier/apiName"` 是否在用户白名单
 - `auto-run`：全部放行，除了 `always`（工具级或全局审计）不可绕过
-- `headless`：全部自动执行，`always` 命中的工具**不是拒绝执行，也不是等待**，而是转成 `resolve_blocked_tools` 的**失败结果**返回给模型（"security blacklist tools are skipped (not blocked)" —— `packages/types/src/tool/intervention.ts:141-142` 的类型注释原话，但代码实际行为是返回 `success:false` 的拒绝结果而非静默跳过，见 `resolveTools.ts:99-105`；这里类型注释与实现的措辞略有出入，注释说 "skipped"，实现是显式拒绝并把拒绝原因回传模型）
+- `headless`：全部自动执行，`always` 命中的工具经 `resolve_blocked_tools` 转成**失败结果**返回给模型（"security blacklist tools are skipped (not blocked)" —— `packages/types/src/tool/intervention.ts:141-142` 的类型注释原话，但代码实际行为是返回 `success:false` 的拒绝结果而非静默跳过，见 `resolveTools.ts:99-105`；这里类型注释与实现的措辞略有出入，注释说 "skipped"，实现是显式拒绝并把拒绝原因回传模型）
 
 ### 6.4 `always` 不可绕过的实现点
 

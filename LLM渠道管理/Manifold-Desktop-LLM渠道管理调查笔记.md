@@ -76,7 +76,7 @@ Manifold Desktop 的“渠道”主要是启动时放入 `ProviderRegistry` 的 
 - 内置渠道有固定显示名、协议实现、模型目录和能力标志，不能由用户在桌面设置页创建第二个同类实例。
 - Ollama 是唯一有明确 endpoint 输入框的本地渠道；保存后写入设置，但 Provider 注册只发生在启动构造阶段，因此源码未确认修改是否会在当前进程立即生效。
 - OpenAI-compatible 渠道理论上可以通过 `providerConfigs` 创建多个实例，每个 map key 成为 Provider ID；它们只能使用继承的 OpenAI-compatible 协议，名称直接使用 ID，源码未提供自定义显示名字段。
-- 已注册的任何 Provider 都能在桌面端保存或清空一个按 Provider ID 隔离的 API Key；这项凭据操作不等于新增渠道。
+- 已注册的任何 Provider 都能在桌面端保存或清空一个按 Provider ID 隔离的 API Key；这项凭据操作只写入凭据存储，渠道本身仍来自既有 Provider 注册。
 - `enabled` 只参与启动时的注册筛选。注册后没有运行时启停接口，且内置 Provider、Proxy 和 Ollama 没有对应的通用 enabled 字段。
 
 ### CLI、TUI 和 Web 边界
@@ -152,7 +152,7 @@ Provider 列表会暴露 `requiresApiKey`、流式和工具支持标志，以及
 
 - 未使用真实 API Key、Ollama、Proxy 或 OpenAI-compatible 服务发起网络请求，未测量超时、阻塞、SSE 兼容性和修改配置后的生效时机。
 - 未运行 Windows 桌面程序，因此 Providers 设置页的实际交互、Provider 列表刷新、Key 保存结果和连接校验按钮缺失的用户表现按静态源码记录。
-- 未找到独立 CLI、TUI 或 Web 管理端；这一结论基于本仓库文件结构、依赖和关键词搜索，不能外推到仓库外的发布工具或未纳入快照的脚本。
+- 未找到独立 CLI、TUI 或 Web 管理端；该结论的证据来自本仓库文件结构、依赖和关键词搜索。
 - 未验证 Windows Credential Manager 的系统级加密、跨用户可见性、备份行为和卸载清理行为。
 - 未找到 Provider 配置迁移、备份恢复和并发写入处理，是否由运行环境或发布包另行提供未确认。
 

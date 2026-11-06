@@ -56,7 +56,7 @@
 3. 请求路径必须命中 key 的允许前缀。默认允许 `ping` 和 `completion`，见 `src/pkg/apikeys/types.go:8-12` 与 `open_api.go:92-96`。
 4. `completion` 要求 `model` 字段，并检查模型白名单和月 token 预算，见 `src/pkg/gateway/http/open_api.go:145-157`。
 5. 处理器根据 API key 绑定模式生成 sessionKey。员工绑定使用 `agent:main:employee:<id>:run:open-api:<keyId>:<conversation>`；普通绑定使用 `agent:main:open-api:<keyId>:<conversation>`，见 `src/pkg/gateway/handlers/open_api_chat.go:149-162`。
-6. 处理器把模型引用和正文交给普通聊天入口；非员工绑定附带技能和 MCP 资源选择，员工绑定让员工配置接管（`open_api_chat.go:69-76,185-196`）。这些资源声明仍走聊天层的目录扫描与二次 MCP 合并，不能直接视为调用方的严格能力白名单；执行侧边界见 Agent 工具笔记。
+6. 处理器把模型引用和正文交给普通聊天入口；非员工绑定附带技能和 MCP 资源选择，员工绑定让员工配置接管（`open_api_chat.go:69-76,185-196`）。资源选择在此只表达调用方的声明范围，实际生效的工具集合仍由聊天层的目录扫描与二次 MCP 合并决定；执行侧边界见 Agent 工具笔记。
 7. 处理器注册运行 waiter 并同步等待结果，成功后返回 OpenAI 风格 completion，并记录 token 用量，见 `src/pkg/gateway/http/open_api.go:170-190` 与 `open_api_chat.go:90-138`。
 
 该入口不支持流式响应，代码在收到 `stream=true` 时直接返回 501，见 `open_api_chat.go:40-42`。调用方身份是 API key，不是终端用户；同一个 key 的同一 conversation 会复用会话。

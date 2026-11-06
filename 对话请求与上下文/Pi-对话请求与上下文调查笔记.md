@@ -57,7 +57,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 2. 历史选择与上下文拼装顺序
 
-历史先按分支与 compaction 确定范围，再应用该范围内最新的 context_edit。编辑可替换内容或从模型上下文排除条目，原始文件仍保留；恢复因此得到当前投影，不能概括为原始全文逐条回注（[buildSessionProjection](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
+历史先按分支与 compaction 确定范围，再应用该范围内最新的 context_edit。编辑可替换内容或从模型上下文排除条目，原始文件仍保留；恢复因此得到当前投影，进入模型上下文的只到投影这一层，替换与排除均在此层生效（[buildSessionProjection](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
 
 - **上下文投影**：`buildSessionContext`（`session-manager.ts:461-470`）→ `buildContextEntries`（`session-manager.ts:418-454`）：沿 leaf 回溯得到路径，路径中若含 compaction 条目，则用"compaction 摘要消息 + firstKeptEntryId 起的保留条目 + 其后所有条目"替代完整历史；`sessionEntryToContextMessages` 把 compaction/branch_summary/custom_message 条目分别投影为摘要消息（`session-manager.ts:383-408`）。普通 `custom` 条目不参与（其数据语义见会话与消息管理笔记 §1）。
 - **LLM 转换**：`convertToLlm`（`core/messages.ts:148-195`）把自定义角色转成 user 文本（bash 执行按 `excludeFromContext` 跳过、custom、摘要消息加前缀/后缀包裹），输出 `packages/ai` 的 `Message[]`。

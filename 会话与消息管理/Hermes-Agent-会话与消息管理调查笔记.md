@@ -176,7 +176,7 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 
 ### 3.5 恢复与保留语义
 
-- 崩溃恢复：规范网关保存受理账本，旧 owner 已开始的输入变 unknown 并阻塞后续输入；legacy tui_gateway 的 resume 另消费中断标记。Agent 可在工具进展与回合终结时 flush，不能概括为只在 turn 结束写库（[代际恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
+- 崩溃恢复：规范网关保存受理账本，旧 owner 已开始的输入变 unknown 并阻塞后续输入；legacy tui_gateway 的 resume 另消费中断标记。Agent 的 flush 时点包括工具进展与回合终结，turn 结束写库只覆盖后者（[代际恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
 - 压缩轮转恢复：resume 沿压缩链跳到活 tip，`get_resume_conversations` 提供模型喂入与显示两份投影；`_lineage_root_id` 提供跨轮转稳定身份（`hermes_state_local.py:381`、`hermes_state_search.py:1432`），桌面端 pin、路由匹配都基于它。
 - 保留语义：轮转与原地压缩都以 `active=0`/`compacted=1` 保留旧行，压缩归档行仍可搜索；`end_session` 只标记不删数据；硬删除无回收站。
 - `/retry`、编辑/rewind 截断均改为保留归档历史的破坏性改写：`replace_messages` 带 `active_only`/`archive_dropped` 语义（`hermes_state_messages.py:720`），旧轮次不再从消息列表蒸发、但落盘为可搜索归档行。

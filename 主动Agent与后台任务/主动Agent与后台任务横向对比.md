@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-八个样本均已确认至少一条主动运行主链，工作单元各异。RikkaHub 的回合后记忆整理符合条件唤醒：它有独立模型循环、运行状态和记忆写回，用户日程与系统级定时唤醒仍未在其已查范围找到。Hermes、Open WebUI、LobeHub、VCPToolBox 与 OpenClaw 都有独立日程或任务对象；VCPChat、Hermes、AstrBot 与 OpenClaw 还能把触发重新接入既有会话；VCPToolBox、Open WebUI 与 AstrBot 另有邮件、日历或群聊等条件唤醒，OpenClaw 另有 hook/webhook 外部事件唤醒。比较时，触发脱离用户回合是共同条件，不代表各样本都有同样的耐久性、取消能力或结果可见性。
+八个样本均已确认至少一条主动运行主链，工作单元各异。RikkaHub 的回合后记忆整理符合条件唤醒：它有独立模型循环、运行状态和记忆写回，用户日程与系统级定时唤醒仍未在其已查范围找到。Hermes、Open WebUI、LobeHub、VCPToolBox 与 OpenClaw 都有独立日程或任务对象；VCPChat、Hermes、AstrBot 与 OpenClaw 还能把触发重新接入既有会话；VCPToolBox、Open WebUI 与 AstrBot 另有邮件、日历或群聊等条件唤醒，OpenClaw 另有 hook/webhook 外部事件唤醒。比较时，触发脱离用户回合是共同条件；耐久性、取消能力与结果可见性需按各样本分别比较。
 
 隔离日程运行可比较持久认领与结果交付。Hermes 保存 profile 级执行账本，LobeHub 保存任务、运行话题和 Brief，VCPToolBox 保存任务定义与派发历史；OpenClaw 以日程 receipt 管理运行权威，另持久化日程历史。
 
@@ -24,7 +24,7 @@
 
 取消语义普遍分为“阻止下一轮”与“中断当前执行”两层。各样本都能从静态代码确认前者的至少一部分；Hermes cron 与 OpenClaw 的 cron/hook 运行取消、后台 exec 的进程终止都已追踪到取消事件进入 Agent/脚本执行或真实进程路径。其余样本对已开始的模型流、Agent 或外部工具是否被完整中断，均保留为未验证或未追踪边界。
 
-还有一种不进入后台队列的主动形态：VCPToolBox 的 VCPSleep 让当前工具链原地等待到指定时间（单次上限 12 小时），醒来后把当前时间交还给调用方；若管理员开启联动且 AgentDream 已启用，执行器会在等待期间异步请求一次梦，梦境失败不影响睡眠本身。它因此不是可独立取消的调度对象，而是挂在模型工具调用上的同步等待。
+还有一种不进入后台队列的主动形态：VCPToolBox 的 VCPSleep 让当前工具链原地等待到指定时间（单次上限 12 小时），醒来后把当前时间交还给调用方；若管理员开启联动且 AgentDream 已启用，执行器会在等待期间异步请求一次梦，梦境失败不影响睡眠本身。它因此是挂在模型工具调用上的同步等待，调度身份由外层工具调用持有。
 
 ## 分型地图
 
@@ -92,7 +92,7 @@
 
 - 本类目的“主链确认”均基于静态源码走读；未运行实际 cron、休眠、断线、平台消息投递、QStash、Socket 或多实例部署。
 - OpenClaw 的 cron/heartbeat/hook/exec/subagent 主链均基于静态走读，未启动真实 Gateway、Channel adapter、Provider 或 ProcessSupervisor，未验证多 Gateway 同库时 receipt owner 判断与真实长停机 catch-up。
-- OpenClaw 各状态 owner 分别持久化日程历史、子 Agent、更新账本与消息交付。`task_runs` 表仍作为 cron 专属历史使用，已移除的是通用 tasks RPC/注册表；媒体 operation 和后台进程的可恢复性需分别检查。内部 outcome 也不能直接视为已发送消息。
+- OpenClaw 各状态 owner 分别持久化日程历史、子 Agent、更新账本与消息交付。`task_runs` 表仍作为 cron 专属历史使用，已移除的是通用 tasks RPC/注册表；媒体 operation 和后台进程的可恢复性需分别检查。内部 outcome 与已发送消息是两份记录，前者只描述运行结果。
 - 分布式去重强度不同：Hermes 与 Open WebUI 已确认持久认领或数据库事务；LobeHub 会在执行端重验状态；AstrBot 本次未确认跨副本锁；VCPChat FlowLock 只管理单个 renderer 内存状态。
 - 任务结果的可见表面不同。Open WebUI 和 LobeHub 有独立 run/chat/topic 记录，VCPToolBox 有任务 history，Hermes 有 execution/output；VCPChat 与 AstrBot 会话续作主要借用常规消息历史。
 - 本次未将候选清单中尚未建立同等主链证据的项目写为“不支持”；其状态应继续以独特功能清单和相邻类目笔记为准。

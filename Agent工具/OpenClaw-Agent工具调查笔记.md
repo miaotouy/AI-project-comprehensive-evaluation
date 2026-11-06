@@ -71,7 +71,7 @@ Agent Core 在批量执行前按工具名解析并验证调用；找不到工具
 
 审批属于执行前策略链，不是单独的 UI 行为。`runBeforeToolCallHook` 先做循环准入、技能工作台与语音确认，再执行可信策略和插件 hook；策略可改写参数、阻断或返回 `requireApproval`（`src/agents/agent-tools.before-tool-call.policy.ts`）。审批请求由 Gateway 或嵌入式 approval broker 承载，允许一次、始终允许、拒绝和超时等决策；超时和 Gateway 不可用默认 fail-closed（`src/agents/agent-tools.before-tool-call.approval.ts`）。这条前置链已按职责拆成相邻模块：策略、审批、决策结果、运行态与状态、以及包装入口各自独立（`agent-tools.before-tool-call.policy.ts`、`.approval.ts`、`.decision.ts`、`.runtime.ts`、`.state.ts`、`.wrapper.ts`，入口为 `agent-tools.before-tool-call.ts`）。
 
-执行域按工具不同分布：读写编辑和 shell 运行在主机或 sandbox workspace；Gateway、消息和渠道工具经 Gateway/渠道适配器执行；MCP 经 stdio、SSE 或 streamable HTTP transport 执行（`agent-bundle-mcp-runtime.ts:77-103`）；节点、浏览器、计算机等工具需相应客户端能力。沙箱根、workspace-only/read-only、进程 scope key、超时和 safe-bin 策略在 `createCoreCodingTools` 与 `agent-tools.ts:500-640` 注入，阻止工具越过授权工作区；这些边界不等同于操作系统级隔离，实际隔离强度取决于运行配置与沙箱实现。
+执行域按工具不同分布：读写编辑和 shell 运行在主机或 sandbox workspace；Gateway、消息和渠道工具经 Gateway/渠道适配器执行；MCP 经 stdio、SSE 或 streamable HTTP transport 执行（`agent-bundle-mcp-runtime.ts:77-103`）；节点、浏览器、计算机等工具需相应客户端能力。沙箱根、workspace-only/read-only、进程 scope key、超时和 safe-bin 策略在 `createCoreCodingTools` 与 `agent-tools.ts:500-640` 注入，阻止工具越过授权工作区；这些边界作用在授权工作区这一层；操作系统级隔离由沙箱实现与运行配置决定。
 
 ## 7. 结果回注、执行状态与恢复
 

@@ -21,7 +21,7 @@
 - 配置身份与 workspace `IDENTITY.md` 是两个来源。配置中的 identity 字段适合保存结构化的 name、theme、emoji、avatar；workspace 文件还可包含 `creature`、`vibe` 等人类编辑字段。Control UI 展示时优先使用 Agent 配置 identity，再用 workspace identity 补缺，最后使用默认 Assistant；但本次没有在规范 system prompt renderer 中找到把配置 identity 自动转成完整人格提示的独立步骤。合并和解析见 `src/agents/identity-file.ts`、`src/gateway/assistant-identity.ts`。
 - 角色提示词主要来自三类输入：源码定义的安全/工具/运行时指导，Agent workspace 中有界读取的上下文文件，以及本次运行的 channel、session、owner、时间、模型和额外提示。`SOUL.md` 在 prompt 中被标记为 persona/tone，`USER.md` 被标记为用户偏好和 profile directives，`AGENTS.md` 的 Tools 段只指导使用方式，不能授予工具。渲染顺序和缓存边界由 `src/agents/system-prompt.ts` 控制。
 - 模型选择支持 Agent 级 primary/fallback，格式可以是单字符串，也可以是 `{ primary, fallbacks }`。Agent primary 优先于 defaults primary；别名、已配置 Provider、裸模型的唯一 Provider 推断和默认 Provider/model 在后续解析中参与决策。会话还可以持久化显式或自动 fallback 覆盖，因此“配置中的默认模型”和“当前 session 上一次实际运行模型”是不同事实。解析入口见 `src/agents/model-selection-shared.ts`，session 运行时字段见 `src/config/sessions/types.ts`。
-- 工具可用性不是由角色提示文字决定，而是由 profile、全局、Provider、Agent、group、sender、sandbox、subagent、runtime 和 inherited policy 共同过滤固定工具目录；最终有效工具列表才进入运行时和 prompt。Skill 使用类似的 Agent/default/session 过滤，但 Agent 显式 `skills` 会替换默认列表，session overlay 可以再对单项启用或禁用。相关实现见 `src/agents/conversation-tool-policy-pipeline.ts` 与 `src/skills/discovery/agent-filter.ts`。
+- 工具可用性由 profile、全局、Provider、Agent、group、sender、sandbox、subagent、runtime 和 inherited policy 共同过滤固定工具目录决定，角色提示文字仅参与使用说明；最终有效工具列表才进入运行时和 prompt。Skill 使用类似的 Agent/default/session 过滤，但 Agent 显式 `skills` 会替换默认列表，session overlay 可以再对单项启用或禁用。相关实现见 `src/agents/conversation-tool-policy-pipeline.ts` 与 `src/skills/discovery/agent-filter.ts`。
 - 普通 Agent 的 session 主要通过 `agent:<agentId>:...` key 和 Agent 所属 store 绑定，而不是在每条消息中复制完整角色配置。SessionEntry 会保存实际 provider/model、runtime/harness、session 覆盖、Skill snapshot、system prompt report 和 ACP metadata 等运行时事实；system prompt report 保存大小、hash、注入统计和工具/Skill 统计，不保存完整原始角色快照。投影见 `src/config/sessions/session-accessor.sqlite-session-row.ts`、`src/config/sessions/session-prompt-types.ts` 与 `src/config/sessions/session-system-prompt-report.ts`。
 - ACP 是外部 harness 的独立运行时边界。配置同时区分负责 OpenClaw session/storage 的 `agentId` 与外部 harness 的 `acpAgentId`；ACP-shaped session key 本身不足以证明 session 正在 ACP 中运行，必须有持久化 ACP metadata/runtime 标识。普通 Agent 的 `subagents.allowAgents` 和本地 subagent tool policy 不应与 ACP harness ID 混为一谈。
 - 本次在普通 Agent 的 CLI/Gateway 配置入口中没有找到通用的 Agent clone/import/export 命令。本次未找到 `src/claws/` 目录：与之相关的只剩渠道安装入口（`src/commands/channels/add.ts`、`add-wizard.ts`）与 Claw 包生命周期租约（`src/state/claw-package-lifecycle-lease.ts`、`claw-package-lifecycle-lease-key.ts`），portable Agent/profile/workspace 导出的实现模块本次未找到，因此不能把渠道安装入口等同于普通 Agent 的角色分享格式。
@@ -41,14 +41,14 @@
 
 ### 角色与相邻对象
 
-| 对象 | 所有者 | 在本调查中的作用 | 不等同于 |
+| 对象 | 所有者 | 在本调查中的作用 | 职责边界 |
 |---|---|---|---|
-| `agents.entries.<id>` | `openclaw.json` 及配置迁移 | Agent ID、结构化 identity、workspace、model、tools、skills、sandbox、subagents 等配置 | 一份完整运行时快照 |
-| workspace bootstrap 文件 | Agent workspace | 规则、人格、用户偏好、引导、记忆和项目上下文 | 配置 schema 字段 |
-| session key | 路由和 session store | 将一次对话/子 Agent/ACP session 放入 Agent 命名空间 | 角色定义本身 |
-| SessionEntry | Agent-scoped session store | 保存当前 session 的运行时事实、覆盖和部分 snapshot/report | 每条历史消息的完整角色快照 |
-| ACP metadata | shared state DB 的 ACP 表及 session 关联 | 证明外部 harness、backend、mode、runtime options 和生命周期 | 普通 subagent policy |
-| Claw manifest | Claw 包安装/导出流程 | 经过审查的可安装资产、workspace 文件和部分 Agent settings | 普通 Agent 通用导入导出格式 |
+| `agents.entries.<id>` | `openclaw.json` 及配置迁移 | Agent ID、结构化 identity、workspace、model、tools、skills、sandbox、subagents 等配置 | 配置来源，运行时值另由 session entry 记录 |
+| workspace bootstrap 文件 | Agent workspace | 规则、人格、用户偏好、引导、记忆和项目上下文 | 人类编辑的 prompt 上下文，与配置 schema 分开 |
+| session key | 路由和 session store | 将一次对话/子 Agent/ACP session 放入 Agent 命名空间 | 只表达归属与命名空间，角色内容另存 |
+| SessionEntry | Agent-scoped session store | 保存当前 session 的运行时事实、覆盖和部分 snapshot/report | 运行时事实与局部覆盖，角色定义留在配置侧 |
+| ACP metadata | shared state DB 的 ACP 表及 session 关联 | 证明外部 harness、backend、mode、runtime options 和生命周期 | 外部 harness 运行时边界，与普通 subagent policy 分开 |
+| Claw manifest | Claw 包安装/导出流程 | 经过审查的可安装资产、workspace 文件和部分 Agent settings | 包资产与 provenance 的安装导出边界，与普通 Agent 导入导出分开 |
 
 ## 1. 角色数据模型与存储
 
@@ -77,7 +77,7 @@ Agent ID 使用 schema 约束的 `[a-z0-9_][a-z0-9_-]{0,63}` 形式。schema 仍
 - Agent state 的默认数据库路径是 `<state-dir>/agents/<agentId>/agent/openclaw-agent.sqlite`。Agent-scoped runtime state、memory store 和部分 auth/session 边界使用 Agent ID 隔离，路径 helper 见 `src/state/openclaw-agent-db.paths.ts`。
 - Agent session/transcript 目录是 `<state-dir>/agents/<agentId>/sessions`，由 `src/config/sessions/paths.ts` 解析。session accessor 和 SQLite logical-node projection 负责把 session entry 与 transcript/store 生命周期连接起来。
 - shared state DB 仍承载全局注册和 ACP metadata 等共享事实；当前 ACP metadata 以 `acp_sessions` 表保存，key 由 Agent ID 和 store session key 共同组成，见 `src/acp/runtime/session-meta-keys.ts`。
-- Agent auth profile 并不等于角色字段。Agent directory 可以拥有 Agent-local credential store，默认 Agent 或迁移状态下还存在继承/共享 auth store 的兼容边界；创建第二个 Agent 时 CLI 只在用户确认后复制可移植 profile，OAuth 通常要求单独登录。相关创建路径见 `src/commands/agents.commands.add.ts`，敏感值不应进入角色导出或调查记录。
+- Agent auth profile 属于凭证层，与角色字段分开存放。Agent directory 可以拥有 Agent-local credential store，默认 Agent 或迁移状态下还存在继承/共享 auth store 的兼容边界；创建第二个 Agent 时 CLI 只在用户确认后复制可移植 profile，OAuth 通常要求单独登录。相关创建路径见 `src/commands/agents.commands.add.ts`，敏感值不应进入角色导出或调查记录。
 
 ### Workspace 角色文件
 
@@ -151,7 +151,7 @@ session key 以 Agent ID 作为第一层命名空间。常见形状包括：
 
 ### 原生 subagent 与 ACP binding
 
-原生 `sessions_spawn` 创建新的 Agent-scoped child session，并保存 `spawnedBy`、`completionOwnerSessionKey`、workspace/cwd、spawn depth、subagent role 和 inherited tool policy。Child session 不是把父 Agent 的完整配置复制一份，而是在目标 Agent ID 下重新解析运行时，同时继承明确允许的上下文和策略。创建与 patch 入口见 `src/agents/subagents/spawn/subagent-spawn.ts` 和 `src/agents/subagents/spawn/subagent-spawn-session-patch.ts`。
+原生 `sessions_spawn` 创建新的 Agent-scoped child session，并保存 `spawnedBy`、`completionOwnerSessionKey`、workspace/cwd、spawn depth、subagent role 和 inherited tool policy。Child session 在目标 Agent ID 下重新解析运行时，同时继承明确允许的上下文和策略；它的配置来源是目标 Agent 定义与继承规则。创建与 patch 入口见 `src/agents/subagents/spawn/subagent-spawn.ts` 和 `src/agents/subagents/spawn/subagent-spawn-session-patch.ts`。
 
 ACP configured binding 的持久标识由 channel、account、conversation 和 owning Agent 计算，形成稳定的 `agent:<agentId>:acp:binding:...` key；`agentId` 表示 OpenClaw 所属 Agent，`acpAgentId` 表示外部 harness 里的 Agent。见 `src/acp/persistent-bindings.types.ts` 与 `src/acp/persistent-bindings.types.ts`。
 
@@ -402,7 +402,7 @@ Agent 配置页的 `agents.files.*` 是 canonical workspace 文件的受限编�
 
 ### `USER.md` 与 durable user profile
 
-workspace `USER.md` 是进入 Agent Project Context 的人类编辑文件，语义是 durable user preferences/profile directives。它不等于 Gateway 的 durable user profile：后者由 shared state DB 的 `user_profiles`、email aliases、GitHub identity 和 avatar 等表/记录组成，有独立的 profile ID、merge head、display name 和 avatar revision，见 `src/state/user-profiles.ts`、`src/state/user-profiles.ts` 和 `src/state/user-profiles.ts`。
+workspace `USER.md` 是进入 Agent Project Context 的人类编辑文件，语义是 durable user preferences/profile directives。Gateway 的 durable user profile 是另一套记录：由 shared state DB 的 `user_profiles`、email aliases、GitHub identity 和 avatar 等表/记录组成，有独立的 profile ID、merge head、display name 和 avatar revision，见 `src/state/user-profiles.ts`、`src/state/user-profiles.ts` 和 `src/state/user-profiles.ts`。
 
 因此当前系统同时存在两个“用户档案”来源：Agent workspace 内的 prompt instructions，以及 Gateway authenticated/durable profile。它们的所有者、持久化位置和用途不同；本调查不把二者合并成角色字段。
 
@@ -412,7 +412,7 @@ workspace `USER.md` 是进入 Agent Project Context 的人类编辑文件，语�
 
 配置读取流程会保留原始文本、parsed object、include/env resolution facts、migration diagnostics、hash 和 runtime config snapshot；非法配置不会降级成空配置。读取、校验和 materialization 见 `src/config/io.load.ts`。
 
-schema 对 Agent entries、bindings、identity 和大部分 runtime config 使用 strict object。未知字段能否保留取决于具体 schema 和 include/migration owner，不能假定所有未来字段都会被静默透传。涉及已持久化旧结构的修复主要由 `openclaw doctor --fix` 和 legacy migration 负责；runtime 仍有少量 raw SDK compatibility 分支，但这不等同于新增通用导入格式。
+schema 对 Agent entries、bindings、identity 和大部分 runtime config 使用 strict object。未知字段能否保留取决于具体 schema 和 include/migration owner，不能假定所有未来字段都会被静默透传。涉及已持久化旧结构的修复主要由 `openclaw doctor --fix` 和 legacy migration 负责；runtime 仍有少量 raw SDK compatibility 分支，其作用限于既有 SDK 调用的兼容。
 
 ### Roster 与 main 迁移
 
@@ -511,7 +511,7 @@ UI 的工具目录来自 Gateway `tools.catalog`，实际运行值来自 `tools.
 - **能力以 policy 为准**：prompt 会列出当前可用工具，但 AGENTS/TOOLS 文本不能授予工具；多层 policy 在 runtime 过滤，subagent 和 sandbox 还有独立的收敛层。
 - **Bootstrap 的一次性和可复用性**：pending bootstrap 用特殊首轮契约完成初始化；完成 marker、continuation-skip、heartbeat/cron lightweight path 和 per-turn cache 又避免重复注入大文件。
 - **稳定 prompt 与动态 prompt 分离**：稳定 workspace/tool/安全部分在 cache boundary 前，时间、owner、channel、session 和 extra prompt 放在后面，使每轮变化不必使整段 stable prefix 失效。
-- **可观测性不等于快照**：prompt report 记录 hash、大小和来源统计，能帮助 UI/status 解释预算和注入，却不把完整 system prompt 或所有角色字段复制到 session。
+- **可观测性记录统计口径**：prompt report 记录 hash、大小和来源统计，能帮助 UI/status 解释预算和注入；完整 system prompt 与角色字段保留在 workspace 与配置中，session 只保存这份报告。
 - **ACP 身份双层建模**：OpenClaw Agent ID、外部 harness Agent ID、ACP backend 和 session metadata 分开保存，防止仅凭 key 形状或本地 subagent policy 错判运行时。
 - **安全删除和迁移**：Agent 删除先检查共享 auth、数据库 ownership、session leases 和 deletion journal，再清除 config/workspace/state；legacy roster/session 由 doctor/migration 边界处理，避免 runtime 长期叠加旧格式。
 - **普通 Agent 与 Claw 分流**：Claw export/add 面向可审查的包资产和 provenance，具有 drift/consent/install 生命周期；它不是普通 Agent 的隐藏通用导入导出接口。
@@ -528,7 +528,7 @@ UI 的工具目录来自 Gateway `tools.catalog`，实际运行值来自 `tools.
 
 - 未运行构建、Vitest、Gateway、实际渠道交互或 Control UI；文中运行行为以当前代码快照的静态调用链和类型/注释为依据。
 - 普通 Agent 是否存在未读到的独立 clone/import/export surface 未能做项目全量行为验证；已检查的 `agents` CLI/Gateway/Control UI入口未找到通用格式。Claw 的 export/add 已单独记录。
-- `agents.defaults.params`、Agent `params`、per-model `models.*.params` 与各 Provider Adapter 的最终请求参数 merge/覆盖顺序没有完整覆盖；不能据此给出温度、输出格式或其他任意 Provider 参数的统一优先级。
+- `agents.defaults.params`、Agent `params`、per-model `models.*.params` 与各 Provider Adapter 的最终请求参数 merge/覆盖顺序没有完整覆盖；温度、输出格式或其他任意 Provider 参数的统一优先级需要在补齐这层顺序后判断。
 - 没有在已读 SessionEntry/transcript/report 入口中找到每条历史消息保存完整角色快照的路径，但未对所有 transcript writer、消息 schema 和恢复实现做全量调查，因此只能标为未确认。
 - 没有在已检查 Agent schema、bootstrap、memory、Skill、MCP 和 UI 入口中找到独立 knowledge/world book 字段；外部插件或未读的产品 surface 仍可能有自己的知识资产契约。
 - Provider-specific system prompt transform 的最终字节、不同 Provider 对 `extraSystemPrompt` 的协议映射和 raw model run 的实际线上表现未做运行验证。

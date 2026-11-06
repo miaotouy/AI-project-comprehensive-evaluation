@@ -33,7 +33,7 @@ Svelte 165,882 行（39.1%）、Python 132,269 行（31.1%）、JavaScript 78,78
 
 ## 测试与跨平台边界
 
-`package.json` 和 `pyproject.toml` 声明 Vitest/Pytest 依赖与命令，但当前 Git 跟踪快照按统一规则只识别到 2 个测试文件（`src/lib/components/workspace/common/versionDiff.test.ts` 与 `test/` 下的占位资产）；应解读为“仓内显式测试资产很少”，不能据此推断外部 CI 或私有测试。产品是响应式 Web/PWA，通过 pip、Docker、Kubernetes 等运行；README 所列原生桌面应用位于另一个仓库，本仓不含其平台代码。
+`package.json` 和 `pyproject.toml` 声明 Vitest/Pytest 依赖与命令，但当前 Git 跟踪快照按统一规则只识别到 2 个测试文件（`src/lib/components/workspace/common/versionDiff.test.ts` 与 `test/` 下的占位资产）；快照内结论是“仓内显式测试资产很少”，覆盖范围限于 Git 跟踪内容，外部 CI 与私有测试另行核实。产品是响应式 Web/PWA，通过 pip、Docker、Kubernetes 等运行；README 所列原生桌面应用位于另一个仓库，本仓不含其平台代码。
 
 ## 关键源码索引
 

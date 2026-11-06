@@ -84,7 +84,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **工具审批与安全边界**：普通聊天决定持久化到消息 parts；Agent 注册表控制原生授权，后台交互卡片可另持久化为独立 assistant 行，先校验锚点并保存决定再解除等待。Claude 的首词 acceptEdits 快路径仍保留，但禁用、用户数据 SQLite 写入、全局安装与停滞等前置拒绝规则继续生效。跨运行时 required 策略覆盖 Skill/MCP 安装等工具，Pi auto 也需审批，Full Access 仅能豁免明确允许的规则；无人应答回合拒绝必需交互与再次委派。结构化文件越界触发 ask，Bash 文本路径没有通用校验，均不构成 OS 沙箱。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md) 第 7、11～13 节
 
-- **IM 渠道八平台（外部控制表面）**：discord/dingtalk/feishu/qq/slack/telegram/wechat/wecom 八平台经 `ChannelManager` 与渠道行接入，入站消息可启动 Agent Session 运行并流式回投，`/new` 等斜杠命令控制会话；协议兼容 OpenClaw 家族（Feishu 设备码注册、WeChat 双编码）；自带外部内容/工作区文件/输出消毒三层不可信输入防护；审批按当前回合与应答能力判定，无人值守时普通后台工具可放行，但 required 操作、用户输入及再次委派各有守卫；渠道关联本身不等同于免审批。系统安全提示属于文本约束。证据状态：主链确认（静态证据）；逐平台往返属运行验证项，见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
+- **IM 渠道八平台（外部控制表面）**：discord/dingtalk/feishu/qq/slack/telegram/wechat/wecom 八平台经 `ChannelManager` 与渠道行接入，入站消息可启动 Agent Session 运行并流式回投，`/new` 等斜杠命令控制会话；协议兼容 OpenClaw 家族（Feishu 设备码注册、WeChat 双编码）；自带外部内容/工作区文件/输出消毒三层不可信输入防护；审批按当前回合与应答能力判定，无人值守时普通后台工具可放行，但 required 操作、用户输入及再次委派各有守卫；渠道关联只决定入站消息归属哪条会话，工具审批仍逐次判定。系统安全提示属于文本约束。证据状态：主链确认（静态证据）；逐平台往返属运行验证项，见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
 
 - **远程访问设备（桌面 Agent 的移动端入口）**：配对邀请建立设备关系，设备身份是 Ed25519 密钥、访问 token 只存哈希；已配对设备在加密 WebSocket 上取得 `agent` 与 `configuration` 两类独立授权，前者可驱动桌面 Agent 会话，后者拉取渠道配置。网关把 LAN 暴露收窄为这一条升级路径，其他 HTTP 路由一律 loopback。证据状态：主链确认（静态证据）；真实移动端往返未运行验证。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
 

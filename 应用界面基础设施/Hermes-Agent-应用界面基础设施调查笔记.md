@@ -86,7 +86,7 @@ App（`web/src/App.tsx:371-823`）内嵌 ProfileProvider，侧栏（移动抽屉
 
   浮层成为弹窗真子节点后，焦点不出弹窗，层级共享弹窗 stacking context。
 - **ConfirmDialog**（`components/ui/confirm-dialog.tsx`）：共享确认弹窗，Enter/Space 从弹窗任意位置触发确认（onKeyDown，:99-106），内部自带 pending→done→close 节拍（done 后 600ms 自动关）、内联错误（throw 后保持打开）、dismissOnConfirm 乐观模式。
-- **覆盖层视图**（settings/command-center/agents/cron/profiles/webhooks/starmap）：不是 Modal，而是挂在 ContribWiring 尾部、由 hash 路由驱动的全尺寸视图（`wiring.tsx:1057-1119`，懒加载 Suspense）；关闭时回跳被覆盖前的路由（`use-overlay-routing.ts:33-59` 的 returnPathRef）。
+- **覆盖层视图**（settings/command-center/agents/cron/profiles/webhooks/starmap）：挂在 ContribWiring 尾部、由 hash 路由驱动的全尺寸视图（`wiring.tsx:1057-1119`，懒加载 Suspense），渲染路径独立于 Modal 组件；关闭时回跳被覆盖前的路由（`use-overlay-routing.ts:33-59` 的 returnPathRef）。
 - **命令面板 ⌘K**（`app/command-palette/index.tsx`）：Radix Dialog + 透明 overlay（保留 click-away 与焦点陷阱，无遮罩变暗，:1270-1272）+ cmdk。搜索排序是自研的（scoreItem/rankGroups，:180-241，cmdk 只当键盘/选择机制，`shouldFilter={false}`）；
 
   支持嵌套子页，Esc 或空输入时逐级回退（:1315-1323）；关闭动画由 content 的 animationend 事件驱动卸载，`EXIT_FALLBACK_MS=1000` 仅作兜底（:254,1284-1288）；行列表在打开后第二帧渲染（useDeferredValue，:280-283）。

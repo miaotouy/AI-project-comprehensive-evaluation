@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-当前代码快照中的主动运行不是单一任务系统，而是几种共享 Gateway 生命周期和结果交付设施的运行形态：
+当前代码快照中的主动运行由几种运行形态组成，它们共享 Gateway 生命周期和结果交付设施：
 
 | 运行形态 | 触发与运行对象 | 状态事实源 | 执行与结果归属 | 证据状态 |
 | --- | --- | --- | --- | --- |
@@ -24,7 +24,7 @@
 | 后台 CLI exec | Agent 的 exec 在 yield/background 后保留受监管的 process session，并返回后续控制身份 | 进程 session registry 为进程事实；session async-task 状态为任务投影；两者均受进程生命周期影响 | ProcessSupervisor 持续托管进程；完成时可写 system event 并请求 heartbeat，也可由 process poll 取回 | 主链确认（静态证据） |
 | Detached subagent | `sessions_spawn` 创建子 session 并登记 run；Gateway 接受后异步执行 | SQLite `subagent_runs` 与 session delivery queue | 子 Agent 在独立 session 运行，结果直接交付、注入 requester steering，或在所有子项结束后唤醒 requester | 主链确认（静态证据） |
 
-最持久、最完整的后台任务主链是 cron：定义、排程、运行 fence、执行结果、交付结果和恢复都由 Gateway/SQLite 共同拥有。heartbeat 的周期 monitor 实际投影为系统拥有的 cron job，但具体 Agent 回合和忙碌退避由 heartbeat wake/runner 管理。hook agent 不是另造一套 worker，而是把外部事件转换成一次性 cron run。后台 exec 的进程本身仍由进程监管器和内存 registry 托管，SQLite 任务记录主要提供客户端可见的运行投影；detached subagent 则有更完整的持久注册、结果冻结、交付和重启恢复链。
+最持久、最完整的后台任务主链是 cron：定义、排程、运行 fence、执行结果、交付结果和恢复都由 Gateway/SQLite 共同拥有。heartbeat 的周期 monitor 实际投影为系统拥有的 cron job，但具体 Agent 回合和忙碌退避由 heartbeat wake/runner 管理。hook agent 把外部事件转换成一次性 cron run，复用同一套 cron worker。后台 exec 的进程本身仍由进程监管器和内存 registry 托管，SQLite 任务记录主要提供客户端可见的运行投影；detached subagent 则有更完整的持久注册、结果冻结、交付和重启恢复链。
 
 ## 系统边界与主链
 
@@ -46,7 +46,7 @@ automations/cron 工具、Gateway cron.* RPC、CLI 或系统 monitor
 
 ### 运行形态的分界
 
-`CronJob` 的 `sessionTarget` 决定是否重新进入主会话、指定会话或 detached run session；`runsDetachedFromMainSession` 还把 script 和 skill collection review 视为需要独立 task/lifecycle 处理的运行。`main` job 不是直接调用 Agent，而是把 system event 放入目标会话，再请求 heartbeat runner；其他目标交给 detached cron runner。这个分界见 `src/cron/types.ts`、`src/cron/service/timer-execution-timeout.ts` 和 `src/cron/service/timer-execution.ts`。
+`CronJob` 的 `sessionTarget` 决定是否重新进入主会话、指定会话或 detached run session；`runsDetachedFromMainSession` 还把 script 和 skill collection review 视为需要独立 task/lifecycle 处理的运行。`main` job 把 system event 放入目标会话，再请求 heartbeat runner；其他目标交给 detached cron runner。这个分界见 `src/cron/types.ts`、`src/cron/service/timer-execution-timeout.ts` 和 `src/cron/service/timer-execution.ts`。
 
 system event、follow-up 和 steering queue 是结果进入下一回合的传输层，不是独立持久任务。system event 队列要求显式 session key，最多保留 20 项，运行时只存在进程内；它会在 heartbeat 或下一次会话提示构造时被筛选、消费。`src/infra/system-events.ts` 明确说明该队列故意不持久化，因此只能承接已有主动运行的提示或终态，不能单独承担重启后的任务恢复。
 
@@ -87,7 +87,7 @@ cron 支持以下运行触发边界：
 
 ### Heartbeat monitor 与 wake bus
 
-heartbeat 周期不是另一个散落的 timer，而是由 `heartbeat:<agentId>` declaration key 标识的 system-owned cron job。配置解析默认周期是 `30m`；按 Agent 配置、显式 heartbeat owner 或环境中的 ambient owner 生成 monitor，monitor 的 `sessionTarget` 为 `main`，`wakeMode` 为 `next-heartbeat`。Gateway convergence 会创建、更新或删除这些系统 job，系统 job 不能由普通客户端 payload 直接创建或编辑（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-config.ts`、`src/cron/heartbeat-monitor.ts`、`src/cron/types.ts`）。
+heartbeat 周期由 `heartbeat:<agentId>` declaration key 标识的 system-owned cron job 承载。配置解析默认周期是 `30m`；按 Agent 配置、显式 heartbeat owner 或环境中的 ambient owner 生成 monitor，monitor 的 `sessionTarget` 为 `main`，`wakeMode` 为 `next-heartbeat`。Gateway convergence 会创建、更新或删除这些系统 job，系统 job 不能由普通客户端 payload 直接创建或编辑（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-config.ts`、`src/cron/heartbeat-monitor.ts`、`src/cron/types.ts`）。
 
 monitor job 执行时不直接完成模型回合，而是把 scheduled wake 送入 heartbeat wake bus。hook、cron main job、后台 task、exec completion 和手动请求也可以进入同一个 bus。wake bus 以 agent/session target 分组，每个 target 同时最多一个活跃 heartbeat turn；不同 target 可并行，跨 target 的 wake fan-out 上限为 4。相同 target 的 task、scheduled、event wake 会合并，保留优先级、顺序和待处理 task；busy、preempted 和请求在途的可重试跳过会在 wake 层保留或重新排程（`src/infra/heartbeat-wake.ts`）。
 
@@ -109,7 +109,7 @@ exec 的后台化动作发生在当前工具调用内。yield timer 与进程结
 
 进程结束时，sandbox finalization 先完成，随后通过 `onSettledBeforeNotify` 把退出结果映射为 `succeeded`、`failed`、`timed_out` 或 `cancelled` 并写入 task ledger。若后台 session 尚未被 terminal poll 观察，且 `notifyOnExit` 开启，exec 会把紧凑输出写入 system event，并请求目标 heartbeat；空输出成功默认不通知，手动取消且无输出也不通知。subagent session 不走这一 heartbeat fallback，因为其结果由 process poll 和 subagent announce flow 交付（`src/agents/bash-tools.exec-runtime.ts`、`src/agents/bash-tools.exec-task-tracking.ts`）。
 
-取消入口检查后台状态、退出/finalizing 标记及 process activity 是否已结算。带 durable 句柄的进程调用该句柄的取消操作；普通进程调用 supervisor 的 manual-cancel，再记录已请求取消。真正停止还要求自己的终止原因和清理完成，不能只凭取消已请求宣告成功。依据见 [process control](<../../openclaw/src/agents/bash-process-control.ts#L24-L85>)。registry 本身在内存，durable 句柄后端的重启接管没有在本条链完整下钻，因此不从内存 registry 推导全部执行模式的恢复能力。
+取消入口检查后台状态、退出/finalizing 标记及 process activity 是否已结算。带 durable 句柄的进程调用该句柄的取消操作；普通进程调用 supervisor 的 manual-cancel，再记录已请求取消。真正停止以进程自身的终止原因和清理完成为准，取消已请求记录的是请求状态。依据见 [process control](<../../openclaw/src/agents/bash-process-control.ts#L24-L85>)。registry 本身在内存，durable 句柄后端的重启接管没有在本条链完整下钻，因此不从内存 registry 推导全部执行模式的恢复能力。
 
 ### Detached subagent 与 requester continuation
 
@@ -152,7 +152,7 @@ command payload 的默认超时为 10 分钟；script payload 默认 300 秒、�
 
 heartbeat runner 先通过 wake stage 解析 Agent、heartbeat prompt、scheduled tasks、session 和目标 delivery；然后检查忙碌与生命周期条件，创建普通或 `isolatedSession` heartbeat session。孤立 heartbeat 每次使用新的 session ID 和空 transcript，但仍从 base session 解析 last route，因此减少重复发送完整历史的成本（`src/auto-reply/heartbeat.ts`、`src/infra/gateway-state-owner-heartbeat.ts`）。
 
-模型结果经过 heartbeat outcome classifier：纯 `HEARTBEAT_OK`、短 acknowledgment 或静默结果不打扰用户；可见文本、媒体或 heartbeat response tool 的 notify=true 才进入 channel delivery。成功的结构化 heartbeat response 会写入每个 agent session 一行的 `heartbeat_outcomes`，保留 outcome、summary、priority、next check、task names、wake source/reason、run session 和 claim 信息；这份结果是内部状态，不等同于用户消息（`src/infra/heartbeat-events.ts`、`src/state/openclaw-agent-schema.sql`；outcome 表的列组成未逐列复核）。
+模型结果经过 heartbeat outcome classifier：纯 `HEARTBEAT_OK`、短 acknowledgment 或静默结果不打扰用户；可见文本、媒体或 heartbeat response tool 的 notify=true 才进入 channel delivery。成功的结构化 heartbeat response 会写入每个 agent session 一行的 `heartbeat_outcomes`，保留 outcome、summary、priority、next check、task names、wake source/reason、run session 和 claim 信息；这份结果写入内部状态，用户可见消息经 channel delivery 另行投递（`src/infra/heartbeat-events.ts`、`src/state/openclaw-agent-schema.sql`；outcome 表的列组成未逐列复核）。
 
 heartbeat channel 发送同样使用 `sendDurableMessageBatchCore`。失败通知可走 channel 或 indicator；可见发送成功后更新 `lastHeartbeatText`/`lastHeartbeatSentAt` 并清理所拥有的 pending final delivery。因无路由、channel 未就绪、重复内容或 alerts disabled 而不发送时，runner 仍返回 `ran` 或 typed `skipped`，并写 heartbeat event 说明原因（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-events.ts`）。
 

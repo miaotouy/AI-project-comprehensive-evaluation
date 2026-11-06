@@ -26,7 +26,7 @@ Dify 将“工具来源/配置”和“单次调用”分开处理。`ToolManage
   -> 结果或错误进入下一轮模型/Agent run，并投影到消息或 workflow run
 ```
 
-工具“存在于工作区”不等于“被本次 Agent 授权”：管理、目录构建和节点选择是三层责任。
+工具“存在于工作区”与“被本次 Agent 授权”是两个独立判断：管理、目录构建和节点选择是三层责任。
 
 ## 1. 工具类型与发现边界
 
@@ -44,7 +44,7 @@ workflow 工具创建 payload 包含 name、label、description、icon、paramet
 
 MCP Provider 的创建/更新/删除 payload 以 server URL、名称、身份/认证和配置为核心（`api/controllers/console/workspace/tool_providers.py:260-315`）。`MCPTool` 的远端调用入口是 `invoke_remote_mcp_tool`（`api/core/tools/mcp_tool/tool.py:311`）；服务端管理器可加密 headers、准备 OAuth token、从远端拉取工具并处理授权动作（`api/services/tools/mcp_tools_manage_service.py:79-692`）。这说明 MCP 的连接与凭据属于服务端 Provider 配置，公开对话者并不会直接得到这些 header。
 
-MCP Provider 的详情读取入口经过 `MCP_MANAGE` 资源权限检查，不能仅凭工作区成员身份读取配置。连接和认证失败会保留 HTTP 或 JSON-RPC 的状态码与消息，分别转换为 MCP 认证或连接错误，而不是统一退化成不透明的 500（`api/controllers/console/workspace/tool_providers.py:1577-1593`；`api/core/mcp/session/base_session.py:235-267`）。静态代码可确认错误契约和权限门；MCP Provider 列表仍是另一路由，本篇不把详情门控外推为所有列表数据的相同权限。真实 OAuth、SSE 和远端服务兼容仍未验证。
+MCP Provider 的详情读取入口经过 `MCP_MANAGE` 资源权限检查，该门限独立于工作区成员身份。连接和认证失败会保留 HTTP 或 JSON-RPC 的状态码与消息，分别转换为 MCP 认证或连接错误，而不是统一退化成不透明的 500（`api/controllers/console/workspace/tool_providers.py:1577-1593`；`api/core/mcp/session/base_session.py:235-267`）。静态代码可确认错误契约和权限门；MCP Provider 列表仍是另一路由，其权限门限需要按该路由另行核对。真实 OAuth、SSE 和远端服务兼容仍未验证。
 
 本次未连接 MCP 服务，未验证动态注册、OAuth 回调、身份转发、超时、SSE 读取、重连及远端工具返回如何映射为模型可见内容。
 
@@ -58,7 +58,7 @@ MCP Provider 的详情读取入口经过 `MCP_MANAGE` 资源权限检查，不�
 
 Agent v2 有独立主链。工具 builder 只展开启用配置，Provider 级全选会排除显式列出的工具、规范化 MCP ID，并拒绝跨来源重名；内置/API/workflow/MCP 进入 `dify.core.tools`，插件通常进入 `dify.plugin.tools`。dify-agent 用 Pydantic AI 的 `Agent.run` 驱动模型工具循环，单次 run 以 `UsageLimits` 的 request 上限 500、默认超时一小时约束（`dify-agent/src/dify_agent/runtime/runner.py:68-69`）。核心工具调用带内部 API key 回到 Dify 的 `/inner/api/agent/tools/invoke`，后端重验 app/tenant 后以保存的工具运行时调用 `ToolEngine.generic_invoke`，因此凭据不直接交给 Agent backend；插件工具则由 Agent backend 带已准备凭据调用 Plugin Daemon，执行边界不同（`api/core/workflow/nodes/agent_v2/dify_tools_builder.py:153`、`dify-agent/src/dify_agent/runtime/runner.py:198-401`、`api/services/agent_tool_inner_service.py:43-136`）。
 
-Agent v2 对“工具调用生成后、结果返回前取消”的历史也有明确收口：中断保存时将尾部尚无结果的 tool call 标记为 `interrupted`，让下一次 run 合成结束结果后继续接收用户输入，避免完整状态的悬空调用阻断会话（`dify-agent/src/dify_agent/layers/history.py:28-43`）。这是取消后的上下文可继续性，不表示已执行工具的副作用会被回滚。
+Agent v2 对“工具调用生成后、结果返回前取消”的历史也有明确收口：中断保存时将尾部尚无结果的 tool call 标记为 `interrupted`，让下一次 run 合成结束结果后继续接收用户输入，避免完整状态的悬空调用阻断会话（`dify-agent/src/dify_agent/layers/history.py:28-43`）。这保证的是取消后上下文仍可继续；已执行工具产生的副作用仍留在原执行环境中。
 
 ## 5. 实际目录、协议与参数边界
 
@@ -66,7 +66,7 @@ Agent v2 对“工具调用生成后、结果返回前取消”的历史也有�
 
 API 工具、插件、MCP 与 workflow 工具最终都要经过其专属 Tool/controller，因而不能假设存在一套统一的 HTTP、进程或远端协议。MCP Tool 的远端入口是 `invoke_remote_mcp_tool`。workflow 工具在注册时校验应用与 workflow 存在、名称或 app ID 冲突，并钉住来源 workflow 的版本；快照中该服务不再对含人工输入节点的 workflow 做注册期排除，这类图被调用时的暂停语义改由运行时承担（`api/services/tools/workflow_tools_manage_service.py:31-216`）。参数 schema、必填字段和类型的完整校验点、额外字段策略、模型返回错误怎样回送下一回合，本次尚未逐工具类别贯通。
 
-不过，公共执行层已有比“入口”更具体的参数和事件契约。`ToolEngine.agent_invoke` 会从 LLM 形式的参数取本次模型给出的值，通知 Agent callback 开始、结束或错误，再调用 Tool；`generic_invoke` 对 workflow 回调执行同样的开始、执行和错误交接（`api/core/tools/tool_engine.py:45-205`）。API Tool 在构造 HTTP 请求前检查必填参数，并将缺参、无效 schema 和请求构造失败转为 `ToolParameterValidationError`（`api/core/tools/custom_tool/tool.py:86-160`）。这确认了参数校验和 UI/事件投影的中间层，但不能据此说所有 Provider 都使用同一验证器。
+不过，公共执行层已有比“入口”更具体的参数和事件契约。`ToolEngine.agent_invoke` 会从 LLM 形式的参数取本次模型给出的值，通知 Agent callback 开始、结束或错误，再调用 Tool；`generic_invoke` 对 workflow 回调执行同样的开始、执行和错误交接（`api/core/tools/tool_engine.py:45-205`）。API Tool 在构造 HTTP 请求前检查必填参数，并将缺参、无效 schema 和请求构造失败转为 `ToolParameterValidationError`（`api/core/tools/custom_tool/tool.py:86-160`）。这确认了参数校验和 UI/事件投影的中间层；各 Provider 是否共用同一验证器，需按各自的执行入口逐项核对。
 
 Agent v2 的工具 builder 会先展开启用的 Provider 条目：配置指向 Provider 而未指定 tool name 时，才读取该 Provider 的可用工具并跳过显式列出的工具；随后规范化 MCP Provider ID、构造运行时 Tool，并把声明不存在或凭据校验失败转为结构化配置错误。这说明“工作区里可见的全部工具”不会无条件送入 Agent v2；本轮也已确认其 Agent runtime request 上限和内部工具回调，但没有运行模型协议或 token 预算。
 
@@ -74,7 +74,7 @@ Agent v2 的工具 builder 会先展开启用的 Provider 条目：配置指向 
 
 传统 Agent 的 thought/observation 会持久化工具结果；最终消息或 workflow 节点持久化仍取决于应用 mode。Agent v2 快照中已取消原先的 `ask_human` 延迟工具：Agent 运行时的模块注册表不再登记该能力，snapshot 只保留旧状态迁移入口，人工介入统一由 workflow 的人机输入节点承担——节点暂停运行时、保存表单与接收人、经邮件或 IM 渠道交付，提交后由图恢复（`dify-agent/src/dify_agent/runtime/modules.py`、`api/core/workflow/nodes/human_input_v2/`、`api/services/human_input_v2/`）。这意味着“Agent 在循环内向人提问”不再是逐调用审批，也不属于工具授权机制；它只是图中一个有可恢复暂停语义的节点。
 
-控制台能管理 Tool Provider 与 MCP Provider，但“管理权限”不等于每次调用的审批。CLI 工具在构建时会过滤未预授权、权限拒绝或危险未确认的配置，属于发布配置门槛；本轮没有找到 Dify Tool/MCP/API 通用的“每次调用前审批、执行端再验证批准令牌”机制。MCP headers 与 OAuth token 在服务端管理器中准备，公开聊天用户不能直接读取它们；这只是凭据边界，不是对远端工具权限效果的运行验证。
+控制台能管理 Tool Provider 与 MCP Provider，管理权限作用于配置与凭据；调用期的授权判断独立于这层管理权限。CLI 工具在构建时会过滤未预授权、权限拒绝或危险未确认的配置，属于发布配置门槛；本轮没有找到 Dify Tool/MCP/API 通用的“每次调用前审批、执行端再验证批准令牌”机制。MCP headers 与 OAuth token 在服务端管理器中准备，公开聊天用户不能直接读取它们；这只是凭据边界，不是对远端工具权限效果的运行验证。
 
 ## 已确认边界与未验证事项
 

@@ -52,7 +52,7 @@ Jan 中需要区分三个层次：
 | 配置文件 | `settings.json` 中可读到序列化的 `model-provider` Zustand 状态；provider secrets 不在此文件 | **未找到**稳定的手工 schema/命令 | 可手工改非 secret JSON，但不属于产品化入口，效果未验证 | 未找到 | 可改 `active`，效果未验证 | 可从 JSON 删除对象，keyring 残留处理未验证 | **未找到** provider 专用导入/导出格式或命令 | **未找到**文件级测试机制 |
 | CLI | `jan config list` 以 JSON 列出 `~/.jan/config.toml` 中的 provider（key 脱敏）；`jan cli models list` 列出已解析 provider 的模型 | `jan config set --provider X [--api-key --base-url --model --api-type]` 新增或改写 provider 条目 | 同左（`set` 覆盖）；`jan login` 写入 Tokamak 账号 key | 未找到 | 未找到 provider `active` 开关（启停只用于 `jan cli mcp` 的 server） | `jan config unset --provider X` | 未找到渠道导入/导出 | **未找到**独立 provider 连接测试；`jan auth status` 只校验 Tokamak 登录 |
 | TUI | **未找到 Jan 自身 TUI**；CLI 的模型/agent 选择器是交互式终端选择，不是渠道管理界面 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 | 未找到 |
-| Web（浏览器实现） | 默认 provider service 返回空，provider 管理依赖 Tauri；仅确认 backendStorage 在非 Tauri 下使用 localStorage | **源码未找到可用的远程 provider 数据来源** | 同上，不能据此确认浏览器模式可管理 provider | 未找到 | 未找到可执行的 provider 列表状态 | 未找到可执行的 provider 删除 | 未找到 | 未找到 |
+| Web（浏览器实现） | 默认 provider service 返回空，provider 管理依赖 Tauri；仅确认 backendStorage 在非 Tauri 下使用 localStorage | **源码未找到可用的远程 provider 数据来源** | 同上，浏览器模式的 provider 管理能力尚未确认 | 未找到 | 未找到可执行的 provider 列表状态 | 未找到可执行的 provider 删除 | 未找到 | 未找到 |
 | Web UI（桌面 Tauri 壳内） | 设置 > Model Providers 列出 provider、模型数量、启用状态；详情页展示设置、key、模型 | `AddProviderDialog` 新增自定义远程 provider | 详情页编辑设置、Azure base URL、API key/fallback、模型元数据；无 provider 重命名 | 未找到 provider 复制入口 | 列表和详情页均有 `active` 开关；停用 llamacpp 会先停止全部模型 | 仅自定义 provider 显示删除确认；内置 provider 和 EngineManager provider 不显示删除 | provider 导入/导出未找到；llama.cpp/MLX 的**模型**有文件导入入口 | 高级 API key 面板逐 key GET `/models`，显示 200/401/403/429/网络错误 |
 
 ### 新建渠道与已有渠道的差异
@@ -69,7 +69,7 @@ Jan 中需要区分三个层次：
 
 桌面端的 provider Zustand 状态以 `model-provider` 命名空间写入 `<jan_data>/settings.json`；Rust 设置存储保存的是扁平 JSON 对象中一个序列化的 store blob，并以 500ms 防抖、原子替换方式写盘（`src-tauri/src/core/app/settings_store.rs:1-14,25-27,111-119`）。`useModelProvider` 的 `partialize` 在写入前清空 `api_key`、fallback 和设置数组中的 secret 值，因此配置文件不是完整渠道备份。
 
-恢复时 `TauriProvidersService.getProviders()` 重新生成内置 provider 和引擎 provider，`setProviders` 将它们与已有状态按 provider 名合并；已保存的自定义 provider 不会由引擎服务返回，但会保留在 Zustand 状态中。内置/引擎设置的元数据以新拉取版本为准，用户值按条件保留；迁移函数当前版本为 21，包含 base URL、协议类型和旧 provider/model 字段迁移（`web-app/src/hooks/useModelProvider.ts:846` 附近的 migrate 配置）。因此“已有渠道”不是从单独 provider 配置文件恢复，而是由默认注册项、引擎注册项和持久化用户状态合并得到。
+恢复时 `TauriProvidersService.getProviders()` 重新生成内置 provider 和引擎 provider，`setProviders` 将它们与已有状态按 provider 名合并；已保存的自定义 provider 不会由引擎服务返回，但会保留在 Zustand 状态中。内置/引擎设置的元数据以新拉取版本为准，用户值按条件保留；迁移函数当前版本为 21，包含 base URL、协议类型和旧 provider/model 字段迁移（`web-app/src/hooks/useModelProvider.ts:846` 附近的 migrate 配置）。因此“已有渠道”由默认注册项、引擎注册项和持久化用户状态三者合并得到，恢复过程不读单独的 provider 配置文件。
 
 ### 渠道操作与模型操作的边界
 

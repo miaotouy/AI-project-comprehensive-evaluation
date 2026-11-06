@@ -27,7 +27,7 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 
 在 AIO Hub 中，一体化 Agent 预设的配置与编辑集中在一个 Agent 对象及其编辑器里：消息配方、模型与参数、知识、工具、变量、资产和显示规则都在其中。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层。
 
-这里也不能把 AIO 概括为“只导入酒馆角色卡”。当前快照有独立的世界书管理器、条目编辑器、导入导出服务和进入真实请求管道的 `worldbook-processor`。它实现的是一套可编辑、可绑定 Agent/User Profile、可条件激活并注入上下文的 **SillyTavern 兼容子集**。SillyTavern 仍领先于社区资产规模、扩展/事件协议和 World Info 全语义覆盖；这是生态与兼容完整度的差距，不等于 AIO 缺少角色创作或世界书运行能力。
+AIO 对酒馆角色卡的处理覆盖导入、编辑与运行时注入：当前快照有独立的世界书管理器、条目编辑器、导入导出服务和进入真实请求管道的 `worldbook-processor`。它实现的是一套可编辑、可绑定 Agent/User Profile、可条件激活并注入上下文的 **SillyTavern 兼容子集**。SillyTavern 仍领先于社区资产规模、扩展/事件协议和 World Info 全语义覆盖；差距落在生态与兼容完整度上，角色创作与世界书运行能力在 AIO 侧已经具备。
 
 它的会话继承也不是单一的“快照”或“全局覆盖”：开场白在会话真正开始后固化，旧消息和旧回复保持不变；后续发送、续写与重新生成则读取 Agent 当前配置，并以新分支保存结果。这一混合语义偏向调试效率，允许用户在同一段历史上修改配置后立即重试比较。
 
@@ -172,7 +172,7 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 - 预设消息可独立复制或以 JSON/YAML 导入导出；普通消息使用 v2 的分组/消息包，包含组合正文时升级 v3 并声明所需结构特性，兼容导出可只保留当前编译文本；
 - 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，不把来源字段直接摊到主编辑器中。
 
-消息编辑器有保存与保留编辑快捷键，也提供保存后关闭。受保护草稿退出时可选择继续编辑、保存或丢弃；保存失败会保留草稿并显示原因。对于已有消息，聊天侧栏接入专门的保存回调：先比较内存原消息，再重读磁盘比较修订内容，合并其余并发字段后持久化。它保护单条消息编辑的过期覆盖；完整 Agent 弹窗先更新本地表单，仍需外层保存，不能据此推导所有角色字段都有跨窗口事务（[草稿与保存:639–779](<../../aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue#L639-L779>)、[角色消息提交:539–602](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L539-L602>)）。
+消息编辑器有保存与保留编辑快捷键，也提供保存后关闭。受保护草稿退出时可选择继续编辑、保存或丢弃；保存失败会保留草稿并显示原因。对于已有消息，聊天侧栏接入专门的保存回调：先比较内存原消息，再重读磁盘比较修订内容，合并其余并发字段后持久化。它保护单条消息编辑的过期覆盖；完整 Agent 弹窗先更新本地表单，仍需外层保存，其余角色字段的跨窗口事务由各自的保存路径分别处理，需另行检查（[草稿与保存:639–779](<../../aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue#L639-L779>)、[角色消息提交:539–602](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L539-L602>)）。
 
 ## 4. 模型与输出偏好
 
@@ -278,9 +278,9 @@ Agent 可以关联 `worldbookIds`，并配置：
 | 可编辑且运行时生效 | 主/次关键词、正则关键词、selective 逻辑、constant、概率、扫描深度、大小写与全词匹配、角色名/名称/标签过滤、递归激活、`preventRecursion`、延迟递归层级、包含组与加权选择、group override，以及严格 `depth` 注入 |
 | 运行时生效，但当前编辑器未提供完整控件 | `sticky`、`cooldown`、`delay`；类型与处理器已消费，详情编辑器未找到对应操作项 |
 | 可保存或部分可编辑，但未确认被运行时消费 | `automationId`、trigger filtering、`excludeRecursion`、`ignoreBudget`、`useGroupScoring`、vectorized 状态；`Outlet` 可编辑/导出并保留在共享数据中，但未找到按 `outletName` 继续消费的注入链 |
-| 降级映射或兼容边界 | Before/After Char、AN、EM 等锚点会映射到 AIO 的消息结构，不能视为酒馆原位置语义的逐项复刻；酒馆扩展事件、脚本协议和全部 World Info 字段也没有形成等价运行时 |
+| 降级映射或兼容边界 | Before/After Char、AN、EM 等锚点会映射到 AIO 的消息结构，语义落在 AIO 自身的位置模型上；酒馆扩展事件、脚本协议和全部 World Info 字段本次未找到等价运行时 |
 
-还有几个 UI/类型差异需要保留：`characterFilter.tags` 在类型和运行时存在，当前编辑器只绑定 `names`；`useProbability` 会被运行时检查，但 UI 主要暴露概率值。导入归一化当前读取 `key`/`keysecondary`，导出则使用常见 ST 的 `keys`/`secondary_keys`，`character_filter` 的 snake_case 归一化也未见完整覆盖。它们需要用真实 V2/V3 样本做往返验证，目前只能记为兼容风险，不能据此断言所有导入都会失败。
+还有几个 UI/类型差异需要保留：`characterFilter.tags` 在类型和运行时存在，当前编辑器只绑定 `names`；`useProbability` 会被运行时检查，但 UI 主要暴露概率值。导入归一化当前读取 `key`/`keysecondary`，导出则使用常见 ST 的 `keys`/`secondary_keys`，`character_filter` 的 snake_case 归一化也未见完整覆盖。它们需要用真实 V2/V3 样本做往返验证，目前只能记为兼容风险。
 
 ### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
@@ -354,11 +354,11 @@ toolCallConfig 支持：
 | 当前 Agent | 启用状态、灰区/激进模式、JEV 风险/意图/置信阈值、外部来源是否可自动批准 | 跟随角色文件；JEV 阈值在该引擎下显示，普通 LLM 使用离散风险与授权评估 |
 | 全局审批模块 | JEV/普通 LLM 引擎、模型引用、超时、重试与普通 LLM 补充审批规则 | 独立的审批渠道文件；切换引擎会清空模型引用，并设置对应默认模型名/超时 |
 
-灰区模式跳过安全策略强制审批的自动仲裁，激进模式允许这类请求进入更严格判断。自动批准、自动拒绝与升级人工的执行规则见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)，角色配置中的阈值不能视为独立权限屏障（[策略与默认值:136–187](<../../aio-hub/src/services/decision-arbiter/types.ts#L136-L187>)、[全局持久化:32–68](<../../aio-hub/src/services/decision-arbiter/channelConfig.ts#L32-L68>)）。
+灰区模式跳过安全策略强制审批的自动仲裁，激进模式允许这类请求进入更严格判断。自动批准、自动拒绝与升级人工的执行规则见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)，角色配置中的阈值只作为仲裁输入，独立权限屏障由决策仲裁层承担（[策略与默认值:136–187](<../../aio-hub/src/services/decision-arbiter/types.ts#L136-L187>)、[全局持久化:32–68](<../../aio-hub/src/services/decision-arbiter/channelConfig.ts#L32-L68>)）。
 
 **开关状态的接线差异。** 页面用“仲裁对象存在”表示开关开启，打开时复制默认对象；默认对象中的 `enabled` 却为 false。执行端检查该字段，因此仅创建默认对象仍不会触发模型仲裁。修改模式或阈值也未在该页同步把它设为 true；外部配置或工具写入显式启用值时，才满足执行端开关条件。该差异来自当前静态接线，实际交互表现尚未运行验证（[UI 开关:120–132](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/ToolCallingSection.vue#L120-L132>)、[默认对象:154–163](<../../aio-hub/src/services/decision-arbiter/types.ts#L154-L163>)、[执行检查:209–225](<../../aio-hub/src/services/decision-arbiter/index.ts#L209-L225>)）。
 
-**工具辅助编辑的安全策略。** 管理工具给 `toolCallConfig` 前缀的字段写入标记为需审批，注释描述为不可被自动批准绕过的本地确认；实际激进仲裁仍可处理强制审批请求，最终结果依赖仲裁配置与判断。普通用户的角色保存路径直接提交表单，这个工具安全钩子不等于所有编辑页面都会额外弹确认（[字段策略:103–130](<../../aio-hub/src/tools/agent-manager/services/agentManagementService.ts#L103-L130>)、[仲裁强制审批处理:250–255](<../../aio-hub/src/services/decision-arbiter/index.ts#L250-L255>)、[表单保存:329–391](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue#L329-L391>)）。
+**工具辅助编辑的安全策略。** 管理工具给 `toolCallConfig` 前缀的字段写入标记为需审批，注释描述为不可被自动批准绕过的本地确认；实际激进仲裁仍可处理强制审批请求，最终结果依赖仲裁配置与判断。普通用户的角色保存路径直接提交表单，这个工具安全钩子的作用范围限于管理工具的字段写入路径（[字段策略:103–130](<../../aio-hub/src/tools/agent-manager/services/agentManagementService.ts#L103-L130>)、[仲裁强制审批处理:250–255](<../../aio-hub/src/services/decision-arbiter/index.ts#L250-L255>)、[表单保存:329–391](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue#L329-L391>)）。
 
 ## 7. 资产、变量与环境增强
 
@@ -389,7 +389,7 @@ virtualTimeConfig 可设置虚拟基准时间、现实基准时间和 timeScale�
 
 ### 7.5 扩展与快捷操作
 
-extensionConfig 提供 Agent 级扩展总开关、按扩展 ID 的开关以及新扩展默认状态；quickActionSetIds 关联快捷操作组。它们是环境/交互能力的入口，不等于某个具体工具已经被批准。
+extensionConfig 提供 Agent 级扩展总开关、按扩展 ID 的开关以及新扩展默认状态；quickActionSetIds 关联快捷操作组。它们是环境/交互能力的入口，具体工具是否可用另由工具级配置与仲裁决定。
 
 ## 8. 内置角色的方向画像
 

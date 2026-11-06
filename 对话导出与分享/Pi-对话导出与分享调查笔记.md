@@ -130,7 +130,7 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 - **同一会话、两种口径**：JSONL 导出线性化当前分支（可往返），HTML 导出嵌入完整树（保留分支与隐藏内容但不可直接导回）。文档与代码对“导出=分支”的表述仅针对 JSONL（`agent-session.ts:3243-3248` 注释）。
 - **HTML 交付物即分享稿**：自包含、零外部依赖，牺牲体积换取可离线查看与 Gist 单文件托管；代价是无导出前编辑/预览、无图片/PDF 形态。
-- **分享止于创建链接**：Radius 路径把访问控制与保留期交给 Radius artifact 服务，回退路径交给 GitHub 与 pi.dev 查看器；客户端都不记录、不更新、不撤销。
+- **分享止于创建链接**：Radius 路径把访问控制与保留期交给 Radius artifact 服务，回退路径交给 GitHub 与 pi.dev 查看器；客户端的职责止于发起创建与取回链接，后续的保留与撤销由对应服务承担。
 - **研究发布走仓库外闭环**：本仓库止步于“可移植会话格式 + README 引导”，HF 发布（`badlogic/pi-share-hf`）与数据集（`badlogicgames/pi-mono`）作为外部伴生工具存在；会话 JSONL v3 与 `docs/session-format.md` 共同构成该闭环的数据契约。
 - 隐私无护栏是有意为之还是疏漏，本次无从判断：`/share` 上传的是含完整工具输出的 HTML，而 README 鼓励公开分享 OSS 会话，两者之间没有内容检查环节。
 

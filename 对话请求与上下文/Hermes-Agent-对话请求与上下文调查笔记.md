@@ -26,7 +26,7 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 
 常规桌面本地连接经 gateway ensure 取得规范 owner。其 prompt.submit 要求稳定 submission_id/input_id，授权后把输入及不可变附件写入受理账本，再安排执行；回执确认已受理，不等价于已完成。相同主体、会话、请求 id 的原样重试返回既有回执，payload 变化报 admission_conflict；排队上限为每会话 32 条（[入口](../../hermes-agent/gateway/session_controls.py#L753-L833)、[受理事务](../../hermes-agent/hermes_state_runtime.py#L130-L177)）。
 
-规范 owner 重启将旧代际 started 输入转为 unknown，后续输入暂停等待明确恢复决策；不自动重跑可能已经产生副作用的输入（[recover_session_inputs](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。下面的 methods_prompt、prompt_turn、busy 模式与中断标记细节对应 legacy tui_gateway 桥，不能直接套用为规范网关的恢复契约。
+规范 owner 重启将旧代际 started 输入转为 unknown，后续输入暂停等待明确恢复决策；不自动重跑可能已经产生副作用的输入（[recover_session_inputs](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。下面的 methods_prompt、prompt_turn、busy 模式与中断标记细节对应 legacy tui_gateway 桥，其恢复契约只在 legacy 桥内成立；规范网关的恢复按上文的 unknown 状态与明确恢复决策处理。
 
 一次发送的事件序列：
 

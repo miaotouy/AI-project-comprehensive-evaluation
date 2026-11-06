@@ -48,7 +48,7 @@ config.env
 - 可选 NewAPI Monitor 能显示请求、token、quota、RPM/TPM，但数据来自外部 NewAPI 管理 API，不参与 VCP 路由；
 - 项目没有可供用户创建的本地 Provider/Endpoint 实体，因此 Provider 级新增、复制、启停、删除、导入和导出不适用；相关“渠道管理”只能通过编辑单个全局上游配置或修改模型路由配置完成；
 - Web 管理端的新增、复制、删除和启停，针对的是 `SemanticModelRouter.json` 中的 preset/route，不是上游 Provider；全局 `config.env` 只有原文查看和覆盖保存，没有 Provider 列表生命周期；
-- CLI、TUI 和独立桌面端的专门渠道管理入口本次未找到。`commander` 仅被脚本级语义分类器使用，不能据此认定项目提供渠道 CLI；桌面端也未找到 Electron、Tauri 或其他桌面壳；
+- CLI、TUI 和独立桌面端的专门渠道管理入口本次未找到。`commander` 只用于脚本级语义分类器；桌面端同样未找到 Electron、Tauri 或其他桌面壳；
 - `/v1/models`、管理端模型列表接口、管理端 Chat 代理和语义匹配预览是不同层次的检查：前两者检查模型目录/上游可达性，Chat 代理可复用真实 VCP 生成链，语义预览只计算路由计划，不发真实推理请求；
 - **安全边界风险**：白名单图像/Embedding 路由在通用 Bearer 鉴权之前挂载，命中请求会直接使用上游 `API_Key` 转发，绕过 VCP 对外 `Key` 校验。
 
@@ -127,7 +127,7 @@ AdminPanel-Vue 的“全局基础配置”页把环境变量解析成表单，�
 | Web 管理端 | `AdminPanel-Vue` 的全局配置页和语义路由页 | 仅语义 preset/route 支持这些操作；全局上游无 Provider CRUD | 未找到导入/导出按钮或 API | `/admin_api/ai/models`、`ai/chat`、`ai/chatvcp`，另有语义预览 | `routes/admin/config.js`、`routes/admin/semanticRouter.js`、`routes/admin/aiChat.js`、对应 Vue 页面 |
 | 桌面端 | 未找到独立桌面应用 | 不适用 | 未找到 | 不适用 | 未找到 Electron、Tauri、桌面主进程或桌面打包入口；项目是 Node 服务加浏览器管理前端 |
 
-这里的“未找到”仅表示本次对当前仓库源码和入口的检查结果；不能据此断言外部 NewAPI/One API 或用户自行编写的脚本不存在这些能力。
+这里的“未找到”仅表示本次对当前仓库源码和入口的检查结果。
 
 特殊白名单路径：
 
@@ -165,7 +165,7 @@ AdminPanel-Vue 的“全局基础配置”页把环境变量解析成表单，�
 - `API_Key`：VCP 访问上游模型 API 的凭据；
 - `NEWAPI_MONITOR_ACCESS_TOKEN`：管理面板读取 NewAPI 用量数据的管理令牌。
 
-它们分别保护客户端入口、上游推理出口和外部监控接口。VCP 客户端 Bearer Key 不是上游 Provider Key，多枚用途不同的 Key 也不等于“同一渠道支持多 Key 轮询”。
+它们分别保护客户端入口、上游推理出口和外部监控接口。VCP 客户端 Bearer Key 只作用于客户端入口，上游 Provider 凭据是 `API_Key`；多枚用途不同的 Key 分属三个调用面；同一渠道的多 Key 轮询需要另有轮换机制，本次在渠道配置与路由代码中未见对应实现。
 
 ### 3.3 插件专用端点不是核心渠道池
 
@@ -242,7 +242,7 @@ app.use(specialModelRouter)
 
 没有本地持久化目录、定时刷新、ETag、分页合并或按 Provider 分组。每次客户端请求都会访问同一个上游目录。
 
-当上游返回非 2xx 或 JSON 无法解析时，只要存在语义虚拟模型，代码会返回 HTTP 200 和仅含虚拟模型的列表。这是“目录可选择性 fallback”，不代表任一真实模型可推理。网络异常则直接返回 500。
+当上游返回非 2xx 或 JSON 无法解析时，只要存在语义虚拟模型，代码会返回 HTTP 200 和仅含虚拟模型的列表。这是“目录可选择性 fallback”，作用范围限于模型目录响应：条目的可推理状态由上游实际请求决定。网络异常则直接返回 500。
 
 ### 5.2 ModelRedirect 是静态一对一别名
 
@@ -270,7 +270,7 @@ app.use(specialModelRouter)
 - `autoModelName`，默认 `VCPModelAuto`；
 - 非默认 preset 的公开名，如 `VCPModelLiterature`。
 
-这些条目的 `owned_by` 是 `vcp-semantic-router`。它们不是上游真实模型，而是本地选择器入口；客户端选择后，Chat handler 才把它解析为真实模型 ID。
+这些条目的 `owned_by` 是 `vcp-semantic-router`，在目录中作为本地选择器入口出现，名称对应本地选择器而非上游模型；客户端选择后，Chat handler 才把它解析为真实模型 ID。
 
 配置支持文件监听和 250ms 防抖热加载。管理 API 也能校验、写入并立即触发配置重载。
 
@@ -439,7 +439,7 @@ VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridg
   -> 去重
 ```
 
-若首选路由的 `failoverPool` 为 false，不会把其他语义命中路由加入链，但仍会追加默认模型与显式回退模型。因此该标志为 false 不是“完全禁止 fallback”，而是“不进入路由互备池”。
+若首选路由的 `failoverPool` 为 false，其他语义命中路由不会加入链，但链尾仍会追加默认模型与显式回退模型。因此该标志为 false 的语义是“不进入路由互备池”。
 
 ### 7.3 fallback 是模型级，不是 Provider 实体级
 

@@ -343,9 +343,9 @@ Skill 是指令文本与支持文件，其内容可引导模型使用会话已�
 
 外部渠道的内容约束与实际执行权限分层处理：入站内容先由渠道处理链标记与消毒；执行时按工具曝光、运行时权限模式和当前应答能力判定。此处聚焦执行审批，渠道内容包装的具体模板与逐平台往返留在外部协作调查范围。
 
-系统提示提供模型侧内容约束；执行端仍由实时工具曝光、前置守卫和审批决定是否允许调用。渠道会话的实际权限还取决于当前回合是否有人应答、工具是否标为 required/delegation、权限模式和已挂载 server，不能只凭系统提示或自动允许名单判断。网页搜索和抓取的自动允许选择与安装、委派和文件写入的审批分别记录。
+系统提示提供模型侧内容约束；执行端仍由实时工具曝光、前置守卫和审批决定是否允许调用。渠道会话的实际权限由当前回合是否有人应答、工具是否标为 required/delegation、权限模式和已挂载 server 共同决定；系统提示与自动允许名单是这条判定里的两层输入。网页搜索和抓取的自动允许选择与安装、委派和文件写入的审批分别记录。
 
-**渠道审批按当前回合判断**：是否无人值守取自运行时交互状态，渠道关联本身不等于免审批。渠道或定时 headless 回合可自动通过一般后台请求；需要用户作答的工具、required 安装/变更工具和显式 ask 规则仍受守卫约束。没有应答者时拒绝这些交互；Full Access 可豁免标为 lift 的 required 工具，仍受不可豁免规则约束。有人交互的同一渠道关联 Session 则保留正常审批。依据：[settingsBuilder.ts:530–598](../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts#L530-L598)、[guardRules.ts:198–233](../../cherry-studio/src/main/ai/runtime/claudeCode/guardRules.ts#L198-L233)。
+**渠道审批按当前回合判断**：是否无人值守取自运行时交互状态，渠道关联只决定入口归属，免审批资格仍按当前回合判定。渠道或定时 headless 回合可自动通过一般后台请求；需要用户作答的工具、required 安装/变更工具和显式 ask 规则仍受守卫约束。没有应答者时拒绝这些交互；Full Access 可豁免标为 lift 的 required 工具，仍受不可豁免规则约束。有人交互的同一渠道关联 Session 则保留正常审批。依据：[settingsBuilder.ts:530–598](../../cherry-studio/src/main/ai/runtime/claudeCode/settingsBuilder.ts#L530-L598)、[guardRules.ts:198–233](../../cherry-studio/src/main/ai/runtime/claudeCode/guardRules.ts#L198-L233)。
 
 网页搜索与抓取依然属于显式自动批准的只读工具，模型看到的外部内容需依赖提示与上下文不可信输入标记共同约束；这项选择不取消文件、命令、安装与委派各自的执行端规则。新增跨会话创建/发送采用 delegation 策略：交互会话按权限模式批准，无人值守回合拒绝再次委派。依据：[builtinToolPolicyRegistry.ts:85–118](../../cherry-studio/src/main/ai/toolApproval/builtinToolPolicyRegistry.ts#L85-L118)、[builtinToolPolicy.ts:19–26](../../cherry-studio/src/main/ai/toolApproval/builtinToolPolicy.ts#L19-L26)。
 

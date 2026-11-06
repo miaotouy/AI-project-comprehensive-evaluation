@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文不是单一字符串，而是 `text / reasoning / file / tool-*` 部件数组（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE` 仅 TEXT/FILE/REASONING 三种，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
+Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文以 `text / reasoning / file / tool-*` 部件数组承载，渲染层的输入是这类部件而非整条消息的单一字符串（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE` 仅 TEXT/FILE/REASONING 三种，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
 
 Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, restrictChatLinks, harden]`**（插件常量见 §2.1 代码块）；其中 `restrictChatLinks` 是仓库自己的插件，用于约束聊天正文里的链接。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
 

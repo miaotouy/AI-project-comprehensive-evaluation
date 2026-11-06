@@ -31,7 +31,7 @@ Manifold Desktop 是原生 C++/WinUI 核心加无框架 WebView2 前端，只面
 
 ## 文档、测试与平台
 
-文档只有根 README 等 2 文件、`docs` 2 文件和 `build` 1 文件。本次按统一目录/文件名规则未找到测试文件；这表示当前跟踪快照没有显式测试树，不代表外部或手工测试不存在。README 与解决方案配置均限定 Windows 10+ x64（`README.md:3-13,70-90`；`ManifoldDesktop.sln:10-30`），前端通过 WebView2 嵌入。
+文档只有根 README 等 2 文件、`docs` 2 文件和 `build` 1 文件。本次按统一目录/文件名规则未找到测试文件，当前跟踪快照没有显式测试树；仓库外的手工测试或外部测试流程不在该规则的检查范围内。README 与解决方案配置均限定 Windows 10+ x64（`README.md:3-13,70-90`；`ManifoldDesktop.sln:10-30`），前端通过 WebView2 嵌入。
 
 ## 关键源码索引
 

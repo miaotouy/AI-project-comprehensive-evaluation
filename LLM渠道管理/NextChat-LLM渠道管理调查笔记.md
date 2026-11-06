@@ -8,7 +8,7 @@
 >
 > 调查方式：只读源码梳理；检查配置、Provider/模型状态、设置页、同步导入导出、Web 代理、Tauri 桌面入口，并搜索 CLI/TUI 入口；未修改 NextChat 仓库
 >
-> 调查范围：LLM Provider、Endpoint、凭据、模型目录、配置生命周期、Web 代理与 App/export 直连；不把模型配置当作渠道实体，也不把 TTS、图片生成和聊天记录导出当作普通 LLM 渠道
+> 调查范围：LLM Provider、Endpoint、凭据、模型目录、配置生命周期、Web 代理与 App/export 直连；模型配置按固定 Provider 的配置槽位处理，TTS、图片生成和聊天记录导出归入各自独立的话题
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -49,7 +49,7 @@ NextChat 当前没有数据库化或列表化的“渠道实例”。渠道是�
 | Provider | 代码注册项和协议选择项 | 否，不能由用户创建新的 Provider |
 | Endpoint | Access store 中某个 Provider 的 URL 字段 | 否，每个 Provider 当前只有一份字段 |
 | 凭据 | Provider 对应的 key、secret、version 等字段 | 否，挂在全局 Access store |
-| 模型 | `model` 与 `providerName` 组合的会话引用 | 否，不代表渠道实例 |
+| 模型 | `model` 与 `providerName` 组合的会话引用 | 否，仅作为会话引用 |
 | Profile/渠道档案 | 未找到对应数据结构 | 未实现 |
 
 同一 Provider 可以通过用户编辑 URL 指向一个自定义服务，但源码没有第二份配置、名称、ID、排序或独立启用状态。因此“已有渠道”和“新建渠道”没有两套生命周期，只有预置的 Provider 配置槽位。
@@ -72,7 +72,7 @@ Web 设置页的入口位于 `app/components/settings.tsx:1818-1916`。当服务
 
 | 操作 | 源码确认的行为 | 边界 |
 |---|---|---|
-| 查看 | 按当前 Provider 显示 URL、key、版本或 secret 字段 | 只显示一个全局配置槽位；密码输入控件不等于存储加密 |
+| 查看 | 按当前 Provider 显示 URL、key、版本或 secret 字段 | 只显示一个全局配置槽位；密码输入控件只影响输入显示，凭据以明文写入 IndexedDB 或 localStorage |
 | 新增 | 未找到新增渠道按钮或实例创建流程 | 可打开“自定义配置”并填写固定 Provider 的字段，但这是编辑槽位，不是新增实体 |
 | 编辑 | `accessStore.update` 直接更新 Provider 字段；可切换 Provider | 不支持给同一 Provider 保存多个 Endpoint |
 | 复制 | 未找到渠道复制入口 | 设置页中的复制图标用于 Prompt 等其他对象，不是渠道复制 |
@@ -82,7 +82,7 @@ Web 设置页的入口位于 `app/components/settings.tsx:1818-1916`。当服务
 | 导出 | SyncItems 的 Export 序列化多个本地 store 为 `Backup-*.json` | 包含 Access 状态，未见凭据脱敏或排除 |
 | 连接测试 | 未找到普通 LLM Provider 的统一测试按钮 | 设置页 Check 测试云同步配置；用量按钮不是健康状态记录 |
 
-Provider 选择器列出 `Object.entries(ServiceProvider)`，切换后只改变当前编辑区域；各 Provider 的字段组件按条件渲染（`app/components/settings.tsx:1826-1867`）。源码可以确认控件和事件绑定，不能据此确认实际保存成功后的跨浏览器或跨平台表现。
+Provider 选择器列出 `Object.entries(ServiceProvider)`，切换后只改变当前编辑区域；各 Provider 的字段组件按条件渲染（`app/components/settings.tsx:1826-1867`）。源码确认的是控件与事件绑定；实际保存成功后的跨浏览器与跨平台表现属于运行验证范围。
 
 ### 2.3 App/export 与桌面端
 
@@ -152,7 +152,7 @@ Web 与 App/export 的边界如下：
 
 服务端环境变量中的逗号分隔 key 在读取时随机选取一个。源码未找到轮询计数、失败冷却、限流桶、熔断、健康状态持久化或按 Provider 统计；随机选 key 也不是基于健康度的轮换。
 
-本次检查 `app/client`、`app/api` 和 `app/store` 的请求入口，未找到通用的跨 Provider failover 或模型 fallback。客户端存在 AbortController/请求超时，工具调用存在同一 Provider 内的后续请求，但这些不等同于渠道切换。失败是否产生重复计费取决于上游和具体调用重发路径，本次未做网络实测。
+本次检查 `app/client`、`app/api` 和 `app/store` 的请求入口，未找到通用的跨 Provider failover 或模型 fallback。客户端存在 AbortController/请求超时，工具调用存在同一 Provider 内的后续请求，两者都在 Provider 内部生效；跨 Provider 的渠道切换需要另一条路径。失败是否产生重复计费取决于上游和具体调用重发路径，本次未做网络实测。
 
 ## 8. 连接检测、日志与可观测性
 
@@ -171,7 +171,7 @@ Web 与 App/export 的边界如下：
 2. `useCustomConfig` 采用“默认服务端/代理配置”和“用户字段”二选一的全局开关；它不是多渠道启停系统。
 3. 将 Access、Config、Chat 等状态统一备份便于迁移整个客户端，但导出范围包含凭据，且导入是全局状态合并，不是渠道级导入。
 4. Web 代理与 App/export 直连是构建模式差异。Web 代理可隐藏服务端 key；App/export 需要在客户端持有用户凭据或直接访问自定义 endpoint。
-5. Stability 虽在 Provider 枚举和设置页中出现，但执行的是图片生成链路；不能据此把图片 API 当普通对话渠道比较。
+5. Stability 虽在 Provider 枚举和设置页中出现，但执行的是图片生成链路，其比较对象是图片生成入口。
 
 ## 10. 未验证事项
 

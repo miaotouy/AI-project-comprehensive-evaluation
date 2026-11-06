@@ -73,13 +73,13 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **RAG Pipeline 的编排和持续性。** 数据集路由另有 create-from-pipeline、Pipeline 编辑和节点试跑表面；后端为每个 Pipeline 读取或同步 draft workflow、发布 workflow、执行数据源或草稿节点，并保存 run 与 node execution 供后续读取。Pipeline DSL 还提供导入导出接口。这一链将摄取规则和检索资产从“应用配置中的一个引用”提升为带草稿、发布、试跑和运行历史的对象，因此应和普通对话上下文、文件上传或单次检索区分。
 
-**边界与证据强度。** 本轮静态确认了文件、Notion 与网页三个来源分支，但未接入任何外部授权、爬虫、解析器、向量库或 reranking 模型；不能据此判断实际解析质量、召回、费用、吞吐、删除一致性、权限效果或索引重试。外部知识库连接、服务 API 的数据集 CRUD、具体访问控制与命中测试 UI 也尚未走通。快照新增的 KnowledgeFS 知识面另需部署开关、服务地址与能力签名密钥，且其在仓内只到契约、客户端适配与检索 v2 节点为止，服务端实现不在本仓库（`api/services/knowledge_fs/feature_service.py`；`api/knowledge-fs-contract/README.md`）。RAG Pipeline 是否应在未来形成独立稀疏类目，取决于是否在至少两个项目中确认同样的“可发布摄取图 + 知识资产生命周期”产品语义；目前保留为 Dify 的能力卡。
+**边界与证据强度。** 本轮静态确认了文件、Notion 与网页三个来源分支，但未接入任何外部授权、爬虫、解析器、向量库或 reranking 模型；实际解析质量、召回、费用、吞吐、删除一致性、权限效果与索引重试均属运行验证范围。外部知识库连接、服务 API 的数据集 CRUD、具体访问控制与命中测试 UI 也尚未走通。快照新增的 KnowledgeFS 知识面另需部署开关、服务地址与能力签名密钥，且其在仓内只到契约、客户端适配与检索 v2 节点为止，服务端实现不在本仓库（`api/services/knowledge_fs/feature_service.py`；`api/knowledge-fs-contract/README.md`）。RAG Pipeline 是否应在未来形成独立稀疏类目，取决于是否在至少两个项目中确认同样的“可发布摄取图 + 知识资产生命周期”产品语义；目前保留为 Dify 的能力卡。
 
 ### 基础 App Prompt IDE：编排、真运行、比较与发布
 
 **标签：上下文语言、应用编排、模型比较。证据状态：`主链确认`（静态）。**
 
-**用户目标与事实对象。** 对基础 Chatbot/文本生成应用，Prompt IDE 让作者在同一控制台编辑提示词、变量、上下文数据集、外部数据、模型参数和部分多媒体/文件功能，并立即查看这些配置实际运行后的回答。这里的事实对象是编辑中的配置与已发布的 `AppModelConfig`；后者保存 prompt 类型、simple/advanced prompt、变量、数据集和功能设置，应用本身只持有当前 active config 指针。它因此不同于“给模型填一段 system prompt”，但也不等同于有完整实验管理系统。
+**用户目标与事实对象。** 对基础 Chatbot/文本生成应用，Prompt IDE 让作者在同一控制台编辑提示词、变量、上下文数据集、外部数据、模型参数和部分多媒体/文件功能，并立即查看这些配置实际运行后的回答。这里的事实对象是编辑中的配置与已发布的 `AppModelConfig`；后者保存 prompt 类型、simple/advanced prompt、变量、数据集和功能设置，应用本身只持有当前 active config 指针。它的职责范围是单个应用的配置编排、真实调试与发布，比“给模型填一段 system prompt”多出变量、上下文数据集和功能开关；实验记录、统一评分与版本比较由其他系统承担。
 
 **编辑到真实调试。** configuration 页面将配置编辑器、Debug 和发布控制放在一个应用工作面；advanced prompt 编辑器还可插入变量、history/query、context dataset 与外部数据等块。单模型调试把当前未发布的完整配置作为覆盖参数发送到 chat 或 completion 运行入口，服务端只对 `DEBUGGER` 调用接受该覆盖配置，随后照常转换为 AppConfig、组织 prompt/上下文并调用模型。因而页面右侧不是 mock preview，编辑中的内容会进入真实运行时，但本轮没有接入任何模型。
 
@@ -103,7 +103,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **对象与编排。** Agent v2 将可复用 roster Agent、仅属于 workflow 的 inline Agent、普通编辑 draft、每位编辑者的 build draft 与不可变 config snapshot 区分建模。控制台支持 roster、配置、预览、版本、访问、日志与监控入口；发布把可编辑 Agent Soul 转为 snapshot/revision，已存在版本也可回写为新的正常 draft。这样同一 Agent 可被工作流引用，同时区分尚未发布的编辑态和运行所绑定的版本。
 
-**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。Chatflow 中的 Agent v2 节点也会以 conversation 作为 workspace owner；同一节点参与者跨回合复用 binding，并继续使用初次绑定的配置快照，即使 roster Agent 后续发布新版本也不会漂移（`api/core/workflow/nodes/agent_v2/session_store.py:111-124`；`api/core/workflow/nodes/agent_v2/binding_resolver.py:42`）。取消发生在模型已返回工具调用但工具尚未返回时，运行历史把尾部响应标记为 `interrupted`，使下一回合能够继续；这不代表外部工具副作用会回滚（`dify-agent/src/dify_agent/layers/history.py:28-43`）。
+**运行、续接与清理。** Agent App 生成器在新会话为当前 generation 建立 binding，已有会话则按 binding 固定到原有 immutable generation。Chatflow 中的 Agent v2 节点也会以 conversation 作为 workspace owner；同一节点参与者跨回合复用 binding，并继续使用初次绑定的配置快照，即使 roster Agent 后续发布新版本也不会漂移（`api/core/workflow/nodes/agent_v2/session_store.py:111-124`；`api/core/workflow/nodes/agent_v2/binding_resolver.py:42`）。取消发生在模型已返回工具调用但工具尚未返回时，运行历史把尾部响应标记为 `interrupted`，使下一回合能够继续；中断只改写运行历史的状态，已经发生的外部工具副作用保持原样（`dify-agent/src/dify_agent/layers/history.py:28-43`）。
 
 Agent 运行时的模块构成在快照中已改写：模块注册表按名称登记 prompt、user_prompt、execution_context、runtime、shell、config、history、llm、插件工具、核心工具、knowledge、knowledge_fs 与 output，旧的 `ask_human` 能力不再注册，snapshot 中只为旧状态保留迁移入口（`dify-agent/src/dify_agent/runtime/modules.py`；`dify-agent/src/dify_agent/protocol/snapshot.py`）。因此“模型在 Agent 循环中主动向人提问并等待续接”不是现行实现，人工介入改由 workflow 的人机输入节点承担，见本节后的人机协同能力卡。
 

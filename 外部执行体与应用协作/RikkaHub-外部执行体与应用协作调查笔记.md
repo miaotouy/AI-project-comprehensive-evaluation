@@ -116,7 +116,7 @@ Web 端能发送与编辑消息、重生成、切换分支、设标题、移动/
 
 本地无可复用 client_id 且服务器支持动态注册时先注册客户端，授权页经 Custom Tabs 打开（`oauth/src/main/java/me/rerere/oauth/OAuthAuthorizationLauncher.kt`）。令牌在临近过期 60 秒内按 serverId 串行刷新，失败则沿用旧配置而不中断（`McpOAuthCoordinator.kt`）。令牌与客户端密钥随设置持久化；`McpOAuthState` 的 `toString` 已脱敏，但存储未加密（`McpConfig.kt`）。
 
-**MCP 请求头**。用户 headers 原样附加；OAuth 已启用且已有访问令牌、用户又未自备 Authorization 头时注入 `Authorization: Bearer <token>`（`McpSessionRegistry.kt`），所以凭据作用域是"每台服务器一份"，不代表个人、Agent 或团队身份。
+**MCP 请求头**。用户 headers 原样附加；OAuth 已启用且已有访问令牌、用户又未自备 Authorization 头时注入 `Authorization: Bearer <token>`（`McpSessionRegistry.kt`），所以凭据作用域是"每台服务器一份"，按服务器配置存储，而不是按个人、Agent 或团队划分。
 
 **MCP 动作审批**。MCP 工具的审批需求随工具配置持久化，并成为宿主工具的审批标志（`McpConfig.kt`）；待审状态的生成、批准或拒绝后的结果回注属宿主通用工具机制，见文末交接。Web 端审批入口同样经 REST 回到同一个 `ChatService.handleToolApproval`。
 

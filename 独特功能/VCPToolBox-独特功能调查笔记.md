@@ -46,7 +46,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | AgentAssistant 多 Agent 通信 | `归并已有类目`（保留跨 Agent 长期通信局部） | Agent 社会 | 委托/即时通讯已覆盖；跨 Agent 上下文 TTL 与心跳留卡片局部 |
 | 管理面板、系统监控 | `归并已有类目` | — | 普通后台管理；占位符浏览器并入 TVS 能力卡 |
 
-关键边界：VCPToolBox 的能力高度依赖**用户配置**（`config.env`、`agent_map.json`、插件 `config.env`、`toolApprovalConfig.json`），大量机制默认关闭或默认禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`）。因此“主链确认”指的是**在默认配置或文档说明的配置下代码链路完整存在**，不代表开箱即用。盘点补充的 8 项插件同样依赖外部条件（VCPEverything 需本机 Everything HTTP 服务、VCPClawMail 需 ClawMailKey、DeepWikiVCP/DigitalOracle 需网络与上游服务），属配置可用而非默认可用。JEV 判断层另需外部决策服务凭据，未配置时相关环节按实现降级，而不是改用本地模型。
+关键边界：VCPToolBox 的能力高度依赖**用户配置**（`config.env`、`agent_map.json`、插件 `config.env`、`toolApprovalConfig.json`），大量机制默认关闭或默认禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`）。因此“主链确认”指的是**在默认配置或文档说明的配置下代码链路完整存在**，实际可用性取决于上述配置。盘点补充的 8 项插件同样依赖外部条件（VCPEverything 需本机 Everything HTTP 服务、VCPClawMail 需 ClawMailKey、DeepWikiVCP/DigitalOracle 需网络与上游服务），属配置可用而非默认可用。JEV 判断层另需外部决策服务凭据，未配置时相关环节按实现降级，而不是改用本地模型。
 
 ## 介绍声明与候选盘点
 
@@ -552,7 +552,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 | VCPClawMail 轮询间隔声明 | manifest configSchema 声称 `ClawMailPollIntervalMs` 默认 60000，代码实际以 5 分钟为下限（`MIN_FALLBACK_POLL_INTERVAL_MS`）→ 文档与代码不一致（`声明不符`，不影响能力判断） |
 | 在线论坛 VCPForumOnline | `.block` 禁用；功能比文件版 VCPForum 更全（私信/点赞/编辑/搜索/未读追踪），当前主链以文件版为准 → `暂缓` |
 | JEV 决策模型 | 需要第三方决策服务凭据（`JEV_API_KEY` 等）；未配置时折叠筛选、语义重排、上下文裁剪与打分各自降级，检索主链仍成立；启用后候选文本会发送到该外部服务 → 外部依赖 |
-| VTrade 模拟交易 | 默认启用，但行情源需用户自备（`sources.example.json` 只给框架）；内置合成行情仅用于离线演示，不代表可交易数据 → 外部数据依赖 |
+| VTrade 模拟交易 | 默认启用，但行情源需用户自备（`sources.example.json` 只给框架）；内置合成行情仅用于离线演示，可交易数据需接入外部行情源 → 外部数据依赖 |
 
 ## 对特色贡献统计的影响
 

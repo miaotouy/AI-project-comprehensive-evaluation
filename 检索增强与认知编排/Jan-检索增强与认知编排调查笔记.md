@@ -22,7 +22,7 @@ Jan 同时具有“上下文即时注入”和“工具化检索”两条附件�
 
 ## 谱系定位与系统边界
 
-本项目横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`，但这不是独立 HTTP/RPC 服务端点：前端 RAG service 通过扩展宿主调用扩展，扩展再经扩展上下文拿到的服务句柄使用本机 Vector DB 与文档解析插件。宿主服务以键注册（`assistants`、`downloads`、`llamacpp`、`mlx`、`vector-db`、`rag`），扩展之间不直接互相引用（`core/src/browser/host/services.ts:107`、`core/src/browser/host/rag.ts:62`、`web-app/src/services/rag/default.ts:10-60`）。本次检查范围内未找到 RAG 对外网络端点或服务端租户层，不能据此推断不存在其他部署形态。
+本项目横跨两个谱系：小文档内联属于上下文即时注入；嵌入后的 thread/project 附件属于工具化检索和本地相似度召回。RAG 扩展把三个工具标为内部 server `rag-internal`；该 server 在扩展宿主内就地执行，没有独立的 HTTP/RPC 服务端点：前端 RAG service 通过扩展宿主调用扩展，扩展再经扩展上下文拿到的服务句柄使用本机 Vector DB 与文档解析插件。宿主服务以键注册（`assistants`、`downloads`、`llamacpp`、`mlx`、`vector-db`、`rag`），扩展之间不直接互相引用（`core/src/browser/host/services.ts:107`、`core/src/browser/host/rag.ts:62`、`web-app/src/services/rag/default.ts:10-60`）。本次检查范围覆盖到本机扩展宿主这一层，未找到 RAG 对外网络端点或服务端租户层；其他部署形态不在本次证据范围内。
 
 一条嵌入检索主链如下：
 
@@ -70,7 +70,7 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 ## 作用域、审批、预算、缓存、观察与恢复
 
-作用域由调用所在线程决定：非项目线程检索该 thread collection；项目线程的 RAG 调用固定为 project scope，检索项目 collection。模型参数中的 scope/thread ID 在 service 层会被覆盖或补入当前上下文，避免模型任意指定别的 collection；`file_ids` 只能进一步缩小当前 collection 内候选。这里没有看到多用户、ACL 或内容隔离策略，因而本地桌面单用户 scope 不能等同于服务端授权边界（`web-app/src/routes/threads/$threadId.tsx:520-531`、`web-app/src/services/rag/default.ts:37-53`）。
+作用域由调用所在线程决定：非项目线程检索该 thread collection；项目线程的 RAG 调用固定为 project scope，检索项目 collection。模型参数中的 scope/thread ID 在 service 层会被覆盖或补入当前上下文，避免模型任意指定别的 collection；`file_ids` 只能进一步缩小当前 collection 内候选。这里没有看到多用户、ACL 或内容隔离策略；本地桌面单用户 scope 只承担检索范围划分，服务端授权边界属于另一层（`web-app/src/routes/threads/$threadId.tsx:520-531`、`web-app/src/services/rag/default.ts:37-53`）。
 
 审批有两处。RAG 工具在实际执行分支中被认定为内置工具，始终自动允许；文档成功嵌入后，线程流程还把全部 RAG tool name 写入持久化的 thread 级 approval store。后一个写入对该执行分支并非必要条件，但会与通用审批状态保持一致。外部 MCP 的一次、线程、server、全局授权不应套用为 RAG 文件访问审批（`web-app/src/routes/threads/$threadId.tsx:491-531,1020-1029`、`web-app/src/hooks/useToolApproval.ts:6-89`）。检索内容作为工具结果直接交给模型；本次检查范围未找到对文档内不可信指令的隔离或检测层。
 
@@ -88,14 +88,14 @@ RAG 扩展返回的是 `MCPToolCallResult`：成功时 `content` 只有一项 te
 
 与上下文即时注入可比较的是附件解析模式和最终模型可见内容；inline 文档在发送前成为消息内容，embeddings 文档则只有模型调用工具后才提供片段。与 Agent 工具类目共享的是 schema、审批和 SDK 回注循环；本笔记补充的是工具背后的 local collection、候选算法及持久化生命周期。
 
-附件 RAG 与检索驱动的固定阶段编排不可直接比较；Agent Memory 可跨运行索引并召回对话片段，但未看到检索结果驱动的关系路径或自动查询反馈链。多次工具调用是模型侧可选行为，不能据此推断稳定的 RAG 认知阶段。
+附件 RAG 与检索驱动的固定阶段编排不可直接比较；Agent Memory 可跨运行索引并召回对话片段，但未看到检索结果驱动的关系路径或自动查询反馈链。多次工具调用是模型侧可选行为；稳定的 RAG 认知阶段以固定阶段编排为前提。
 
 ## 未验证事项
 
 - 未运行 Rust 侧文档解析、嵌入模型、sqlite-vec 和线性回退，未确认各格式（尤其 docx/pptx/csv）的真实提取质量、跨平台 ANN 装载、延迟、召回率或分数分布。\n- Agent 记忆只做静态核对：回答写入是否覆盖用户提问的语义、跨项目隔离、摘要预算 2048 字符下的信息损失均未验证。
 - 未运行模型工具循环，未确认不同 provider 对三个 schema 的调用率、是否会先列文件/再读块、错误后重试次数及取消传播效果。
 - 未确认 SQLite collection 的实际数据目录、重启后的完整性、模型维度变化时已有 ANN 索引的行为，以及上述线程删除前缀组合在真实 UI 路径中的影响。
-- 未发现 RAG 专用质量评测、离线夹具、缓存命中指标或针对文档提示注入的防护；这表示本次已检查范围未找到，不等同于项目全局不存在。
+- 本次已检查范围内未发现 RAG 专用质量评测、离线夹具、缓存命中指标或针对文档提示注入的防护。
 
 ## 关键源码索引
 

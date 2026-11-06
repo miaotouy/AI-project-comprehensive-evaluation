@@ -204,7 +204,7 @@ MessageItem 从会话 Store 读取指定 ID 的展示消息，然后按消息角
 - refer topic
 - local file tag
 
-这条路径不是 Markdown 解析，而是直接从 Lexical 的 serialized editor state 恢复节点树。
+这条路径跳过 Markdown 解析，直接从 Lexical 的 serialized editor state 恢复节点树。
 
 另外，用户消息可以同时挂载 page selection、图片、视频、音频和文件列表。音频播放器位于独立 feature `src/features/AudioPlayer/`，`Messages/User/components/` 下保留 `AudioFileListViewer.tsx` 做附件列表。
 

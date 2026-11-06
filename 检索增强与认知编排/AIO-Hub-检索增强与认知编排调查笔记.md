@@ -16,13 +16,13 @@
 
 **源码事实。** 当前 AIO Hub 有两个独立检索域。Recall 是可编辑的完整思绪条目集合，既能被 Agent 工具读写，也能在聊天请求构造时由占位符被动召回并替换进消息。Knowledge 是带文件来源、分块、索引任务和 chunk 回源的本地文档资料库；它以 Agent 授权为前提，经工具调用或用户显式资料引用执行查询、续读和研究结果回注。两域各有存储和查询实现，此外还有一个独立注册的 `retrieval` 工具把两域封装成面向 Agent 的统一检索入口，可显式选择单域或 mixed；聊天请求构造时的被动注入链仍只走 Recall 处理器或显式 Knowledge 引用，不自动做跨域混合。
 
-**谱系定位。** Recall 同时属于“相似度召回”和“上下文即时注入”：稳定预设从关键词、条目内容向量及标签共现图产生候选，融合后按优先级重排；其输出是当回合 prompt 中的格式化条目。Knowledge 是“知识资产管线”与“工具化检索”：文件摄取、FTS/BM25、按向量空间隔离的语义检索、相邻块扩展和受权读取已经落在可执行代码中。Knowledge 的 research 会按规则拆分问题、搜索和读取，并据命中或粗略冲突补充查询；它不调用 LLM 生成下一步计划或综合答案，其 conclusion 只是对证据片段的模板化排序摘要。因此不能等同于检索驱动的多阶段认知编排。
+**谱系定位。** Recall 同时属于“相似度召回”和“上下文即时注入”：稳定预设从关键词、条目内容向量及标签共现图产生候选，融合后按优先级重排；其输出是当回合 prompt 中的格式化条目。Knowledge 是“知识资产管线”与“工具化检索”：文件摄取、FTS/BM25、按向量空间隔离的语义检索、相邻块扩展和受权读取已经落在可执行代码中。Knowledge 的 research 会按规则拆分问题、搜索和读取，并据命中或粗略冲突补充查询；下一步计划由规则产生，其 conclusion 只是对证据片段的模板化排序摘要。这一形态属于检索工具链与规则化研究，认知编排的规划环节由 LLM 承担。
 
 **证据状态。** 本文“源码事实”均可由当前快照中的实现复查；“静态推断”只描述代码在成功依赖、配置和调用条件下的预期。真实模型向量质量、Tauri IPC、文件系统异常、监控界面、缓存命中率与权限在真实 Agent 运行时的效果均未运行确认。
 
 ## 谱系定位与系统边界
 
-Recall 后端在应用启动时建立 SQLite repository 并恢复内存读模型，前端通过 `services/api.ts` 调用其门面。一个集合包含完整 Markdown 条目、带权标签、启用标记、优先级、内容哈希与资产引用；检索返回条目、集合名、分数、匹配类型、高亮和信号。它不将条目自动切块，也不保存外部文档来源。条目可以由界面和 `recall-basic`/`recall-admin` Agent 工具创建、更新、批量改元数据、删除及可选向量化；写入后的向量是否已经与内容同步取决于调用方是否请求自动向量化或另行索引。见 `src-tauri/src/recall/core.rs`、`src/tools/recall/actions/agentActions.ts`。
+Recall 后端在应用启动时建立 SQLite repository 并恢复内存读模型，前端通过 `services/api.ts` 调用其门面。一个集合包含完整 Markdown 条目、带权标签、启用标记、优先级、内容哈希与资产引用；检索返回条目、集合名、分数、匹配类型、高亮和信号。条目以完整 Markdown 保存，切块与外部文档来源记录由 Knowledge 域承担。条目可以由界面和 `recall-basic`/`recall-admin` Agent 工具创建、更新、批量改元数据、删除及可选向量化；写入后的向量是否已经与内容同步取决于调用方是否请求自动向量化或另行索引。见 `src-tauri/src/recall/core.rs`、`src/tools/recall/actions/agentActions.ts`。
 
 Knowledge 的持久对象是资料库、文件或目录来源、来源文件、可领取的摄取任务、文档、chunk、FTS 索引、向量记录和 chunk 边。资料库清单在 `knowledge_meta.db`，每个资料库另有 SQLite 文件；文档保存来源路径、校验和、解析器版本和版本号，chunk 保存标题、heading 与字符偏移，因此工具结果可回溯来源。其配置只支持定长分块，默认目标为 1000 字符、重叠 120 字符；关键词索引强制开启，语义和图边可按资料库配置启用。见 `src-tauri/src/knowledge/types.rs:133-283`、`src-tauri/src/knowledge/repository.rs:42-130`。
 
@@ -32,7 +32,7 @@ Recall 和 Knowledge 的“图”含义不同。Recall 的图是由同一条目�
 
 ### Recall：条目写入及派生向量
 
-Recall 的 SQLite 真源分为主数据与向量库；启动初始化后从两库恢复集合、倒排索引、向量矩阵和按模型隔离的标签池。新增或更新条目先持久化内容及内容哈希，再由前端 `IndexingOrchestrator` 调用当前默认 Embedding 配置，并把条目向量写回后端；标签向量也单独同步，标签池索引可重建。向量加载和标签池以模型身份区分，空、维度不一致或非有限向量在余弦计算中降为零，避免异常值进入排序。该条链确认的是实现顺序，不表示任何条目必然已向量化。见 `src/tools/recall/logic/orchestrator.ts`、`src/tools/recall/actions/agentActions.ts:130-265`、`src-tauri/src/recall/ops.rs`、`src-tauri/src/recall/utils.rs`。
+Recall 的 SQLite 真源分为主数据与向量库；启动初始化后从两库恢复集合、倒排索引、向量矩阵和按模型隔离的标签池。新增或更新条目先持久化内容及内容哈希，再由前端 `IndexingOrchestrator` 调用当前默认 Embedding 配置，并把条目向量写回后端；标签向量也单独同步，标签池索引可重建。向量加载和标签池以模型身份区分，空、维度不一致或非有限向量在余弦计算中降为零，避免异常值进入排序。该条链确认的是实现顺序；条目实际是否带有向量，取决于写入时取用的默认 Embedding 配置与调用结果。见 `src/tools/recall/logic/orchestrator.ts`、`src/tools/recall/actions/agentActions.ts:130-265`、`src-tauri/src/recall/ops.rs`、`src-tauri/src/recall/utils.rs`。
 
 Recall 导出只保留集合源数据和引用资产，不保留向量、标签池或内存索引，导入后需重建派生数据。旧 `.aio-kb` 与旧文件目录可迁移到 Recall，也可在用户确认下把旧条目的标题和 Markdown 转为 Knowledge 文档；后一路径不转换旧标签、优先级、启用状态、条目关联和附件。迁移以源指纹、确认和提交状态保护中断续跑，验证失败不会清理源目录。见 `src/tools/recall/ARCHITECTURE.md:144-170` 与 `src-tauri/src/recall/storage/legacy_import.rs`；这部分以架构说明补充实现检查，未实际迁移验证。
 
@@ -42,7 +42,7 @@ Recall 导出只保留集合源数据和引用资产，不保留向量、标签�
 
 语义索引不在摄取事务中完成。队列处理完有导入的文档后，前端按 batch 调用 Embedding；首批生成向量空间描述符，后续批次并发数受运行配置限制，每批写入后端。空间描述符含模型规范身份、维度、查询/文档 task type、编码和适配器版本；查询时会拒绝与现有空间身份或维度不一致的路由。向量化失败时，文档与关键词索引仍已保存，调用结果只返回“稍后补齐”的警告。静态推断：这使关键词检索成为语义索引不可用时的可用资料入口。见 `src/tools/knowledge-base/services/service.ts:531-683`。
 
-队列任务有 pending、processing、retry、failed、completed、cancelled 状态。过期 lease 被下一次领取动作恢复为 retry 或 failed；可取消未领取任务，可手动把失败任务重置为 pending。文档更新前会保存旧的语义 fallback chunk；查询同一空间时排除新文档的旧向量而回查保留快照，避免新正文与旧向量直接混配。此恢复保护只覆盖代码所示的下一次领取、更新和查询，不代表应用崩溃时所有前端 worker 都能自动恢复。见 `src-tauri/src/knowledge/repository.rs:488-760,763-980,2990-3046`。
+队列任务有 pending、processing、retry、failed、completed、cancelled 状态。过期 lease 被下一次领取动作恢复为 retry 或 failed；可取消未领取任务，可手动把失败任务重置为 pending。文档更新前会保存旧的语义 fallback chunk；查询同一空间时排除新文档的旧向量而回查保留快照，避免新正文与旧向量直接混配。此恢复保护的生效范围限于代码所示的下一次领取、更新和查询路径；应用崩溃时前端 worker 能否自动恢复需另行验证。见 `src-tauri/src/knowledge/repository.rs:488-760,763-980,2990-3046`。
 
 ## 查询、候选与重排主链
 
@@ -70,7 +70,7 @@ Knowledge 查询可指定 keyword、semantic、hybrid 或 auto。auto 在有查�
 
 Recall 占位符还有 always、turn、gate 与 static 模式。turn 以用户轮次整除判定，gate 在最近指定深度的消息里查字面关键词，static 可按条目 ID 或 `all` 读取已启用条目。语义结果在格式化前按最大字符数逐条累加，超过预算即停止，不会截断单条内容；异常时返回配置的空文本或错误文本并记录日志，因此一次检索失败不会直接使上下文处理器抛出。输出模板默认包含集合名、条目 key、完整内容和两位小数分数。见 `src/tools/recall/logic/placeholderRetrieval.ts`、`src/tools/recall/core/retrievalPolicy.ts`。
 
-这一路径的作用域是 Agent 配置中的 binding，不是按用户、租户或文档来源的后端访问控制；Recall Agent 工具本身从 workspace 解析集合名称，所读代码中未见将工具调用绑定到该 Agent 可访问集合的同等校验。静态推断：Recall 更适合作为同一桌面工作区内由 Agent 配置约束的记忆域，不能据此声称具有多租户隔离。
+这一路径的作用域是 Agent 配置中的 binding，访问控制落在 Agent 配置层；Recall Agent 工具本身从 workspace 解析集合名称，所读代码中未见将工具调用绑定到该 Agent 可访问集合的同等校验。静态推断：Recall 更适合作为同一桌面工作区内由 Agent 配置约束的记忆域，其隔离粒度停留在 Agent 级。
 
 ### Knowledge 的工具结果与规则化研究
 
@@ -94,7 +94,7 @@ Knowledge 的结果契约使调用记录可显示来源：工具元数据保留 
 | --- | --- | --- |
 | 查询与结果预算 | 预设候选预算 80，最终条目上限 1-100；占位符可额外施加条目数、阈值和字符总量 | 工具 search 的 topK 为 1-50、字符总量为 1000-50000；read 强制字符上限，研究另有限制轮次、调用数、证据字符和超时 |
 | Embedding 与降级 | 仅综合预设需要默认 Embedding 模型；请求级不能覆盖模型，准备失败可显式退到关键词预设 | 分批次数、并发、重试和间隔来自运行配置；auto 允许每个向量空间组降到关键词，显式语义策略失败 |
-| 缓存 | 进程内 LRU 风格结果缓存，容量默认 200；键含规范化双查询、集合/标签、权重、limit、阈值、预设、配置哈希、模型身份、资产代际和算法版本 | 本次阅读范围未找到查询结果缓存；向量、FTS、语义 fallback 和摄取任务属于持久索引/恢复数据，不等同于查询缓存 |
+| 缓存 | 进程内 LRU 风格结果缓存，容量默认 200；键含规范化双查询、集合/标签、权重、limit、阈值、预设、配置哈希、模型身份、资产代际和算法版本 | 本次阅读范围未找到查询结果缓存；向量、FTS、语义 fallback 和摄取任务属于持久索引与恢复数据，与查询缓存分处不同层 |
 | 访问边界 | 被动注入限制到启用的 Agent binding；本次未见在 Recall 工具操作上同级的 Agent allowlist | `knowledgeAccess` 控制启用、allowlist、全库搜索、续读与研究，并在执行时重验资料库可用性 |
 | 观察面 | Rust 发送 `recall-monitor`，RAG payload 可含耗时、命中数、预设、运行结果、trace 与结构化错误 | 工具/研究返回 trace、降级理由、来源和进度对象；本次未找到对应的后端全局监控事件 |
 | 恢复 | SQLite 是真源；向量和标签索引可从持久数据重载或重建，导出不携带派生索引 | 每库 SQLite 保存任务和 lease；下次 claim 恢复过期 lease，文件变更以 checksum/parser version 防止旧解析结果提交 |

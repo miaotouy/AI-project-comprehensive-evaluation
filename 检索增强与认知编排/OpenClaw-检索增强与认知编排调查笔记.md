@@ -22,10 +22,10 @@
 | 知识资产管线 | **主链确认，源码事实** | `memory-wiki` 把来源、实体、概念、综合页、报告、claims/evidence 和关系编译成可维护的 Wiki vault；内置记忆则把工作区文件、额外路径和可选会话转成按 agent 存储的 SQLite 派生索引。 |
 | 工具化检索 | **主链确认，源码事实** | Agent 可调用 `memory_search` 后再用 `memory_get` 精读；Wiki 另提供 `wiki_search`/`wiki_get`/维护工具；Active Memory 的子 Agent 只获准使用配置的记忆工具。 |
 | 上下文即时注入 | **主链确认，源码事实** | `MEMORY.md`/`USER.md` 在 Bootstrap 阶段按资格和预算注入；Active Memory 先做触发词召回，再可把摘要作为 `before_prompt_build` 的隐藏前缀；`memory-wiki` 可注入受预算限制的 compiled digest。 |
-| 检索驱动认知编排 | **部分实现，源码事实 + 静态推断** | Active Memory 能按召回意图和首层结果决定是否启动一次阻塞的记忆子 Agent，并由该子 Agent 选择记忆工具；但当前没有确认 VCPToolBox 式固定多阶段查询向量反馈、关系路径传播到下一查询或由检索命中自动生成下一自然语言问题的内置协议。Wiki 的 claims/关系、相邻文件和固定研究能力也不等于该谱系。 |
+| 检索驱动认知编排 | **部分实现，源码事实 + 静态推断** | Active Memory 能按召回意图和首层结果决定是否启动一次阻塞的记忆子 Agent，并由该子 Agent 选择记忆工具；VCPToolBox 式固定多阶段查询向量反馈、关系路径传播到下一查询或由检索命中自动生成下一自然语言问题的内置协议，在本次 memory-core 与 Active Memory 源码核查中未找到。Wiki 的 claims/关系、相邻文件和固定研究能力服务于知识组织与查询面，编排职责集中在 Active Memory。 |
 | 主动记忆演化 | **主链确认，源码事实** | `memory-core` 默认注册受 cron 管理的 light → REM → deep dreaming：先收集和评分短期召回，再由确定性门控和有界 consolidation 子 Agent 维护 `MEMORY.md`，并把摘要/前像写入审阅面。 |
 
-**总体判断。** OpenClaw 的中心设计不是一个外置知识库，而是“可编辑 Markdown 事实源 + 每 agent SQLite 派生索引 + 受权限控制的工具召回 + 发送前即时注入 + 后台记忆晋级”。内置检索的最终输出通常仍是当前回合的候选片段或精确文件区段；认知编排只在 Active Memory 的“主 Agent → 记忆子 Agent → 记忆工具 → 有界摘要”路径中部分出现，不能因为存在第二个模型回合就写成已实现的多阶段推理 RAG。
+**总体判断。** OpenClaw 的中心设计是“可编辑 Markdown 事实源 + 每 agent SQLite 派生索引 + 受权限控制的工具召回 + 发送前即时注入 + 后台记忆晋级”，事实源与索引都在本地工作区生成，没有独立的外置知识库。内置检索的最终输出通常仍是当前回合的候选片段或精确文件区段；认知编排只在 Active Memory 的“主 Agent → 记忆子 Agent → 记忆工具 → 有界摘要”路径中部分出现，其中的第二个模型回合用于产出有界摘要，多阶段推理 RAG 尚无对应内置协议。
 
 **当前快照的重要边界。** QMD memory backend 已移除，配置迁移代码只负责把旧 QMD 路径/会话设置迁移到内置 `memory.search.extraPaths`、session source 和相关设置；当前内置后端是唯一内置 memory engine。QMD 的 learned cross-encoder rerank、HyDE 和零 key GGUF 路径不属于当前 builtin 实现。`docs/concepts/memory-qmd.md:9-14`、`docs/concepts/memory-builtin.md`、`src/commands/doctor/shared/legacy-config-migrations.runtime.retired-memory-qmd.ts`。
 
@@ -100,7 +100,7 @@ memory-core 工具执行时，普通 memory 查询与已注册的 Wiki corpus su
 - `corpus=wiki` 只访问 Wiki supplement；
 - `corpus=all` 合并两类结果，并为两个 corpus 各留出初始配额。
 
-各 backend 先保持自己的 ranked stream；最终按 score head merge，`all` 模式用近似均衡的 per-corpus cap，再填充余量。Wiki 不是 memory-core manager 的内部表，而是通过 `registerMemoryCorpusSupplement` 接入的独立事实域。`extensions/memory-core/src/tools.ts`、`extensions/memory-core/src/memory-corpus.ts`。
+各 backend 先保持自己的 ranked stream；最终按 score head merge，`all` 模式用近似均衡的 per-corpus cap，再填充余量。Wiki 通过 `registerMemoryCorpusSupplement` 接入，是独立于 memory-core manager 内部表的事实域。`extensions/memory-core/src/tools.ts`、`extensions/memory-core/src/memory-corpus.ts`。
 
 ### 内置候选生成
 
@@ -112,7 +112,7 @@ manager 的 `search` 主链先规范化 query，必要时同步空 index 或 dir
 2. **向量路。** query 以 `inputType: "query"` 请求 Embedding；sqlite-vec 可用时以 KNN overfetch，候选倍数为 8，单次 K 上限为 4096；KNN 受 model/source filter 后若可能漏掉合规行，则扩大窗口或退回有界的分批 cosine 扫描。sqlite-vec 不可用时仍可使用进程内 cosine，逐批让出 event loop 并响应 AbortSignal。`extensions/memory-core/src/memory/manager-search.ts`。
 3. **混合合并。** vector 与 keyword 以 chunk id 去重，保留两路 component scores；正文命中优先于 path-only score，multimodal 只有向量信号。混合 content score 进入时效衰减、importance multiplier、project ranking 和 MMR。`extensions/memory-core/src/memory/hybrid.ts`、`extensions/memory-core/src/memory/manager-search-orchestration.ts`。
 
-这是一种相似度/关键词候选管线，不是 learned cross-encoder rerank。当前 MMR 是本地 Jaccard/text similarity 的确定性多样性排序，默认 lambda 0.7；它只重新排列候选，不调用模型、不改变阈值，也不制造下一阶段 query。重要性为 1-10 时乘以 0.75 + N×0.05，NULL 保持中性；默认开启的时效衰减只针对带日期的 `memory/YYYY-MM-DD*.md`，根 `MEMORY.md`、`USER.md` 和其他 evergreen path 不衰减，默认 half-life 30 days。`extensions/memory-core/src/memory/mmr.ts`、`extensions/memory-core/src/memory/importance.ts`、`extensions/memory-core/src/memory/temporal-decay.ts`。
+这是一种相似度/关键词候选管线，不含 learned cross-encoder rerank。当前 MMR 是本地 Jaccard/text similarity 的确定性多样性排序，默认 lambda 0.7；它只重新排列已有候选，模型调用、候选阈值与下一阶段 query 都在该步骤之外。重要性为 1-10 时乘以 0.75 + N×0.05，NULL 保持中性；默认开启的时效衰减只针对带日期的 `memory/YYYY-MM-DD*.md`，根 `MEMORY.md`、`USER.md` 和其他 evergreen path 不衰减，默认 half-life 30 days。`extensions/memory-core/src/memory/mmr.ts`、`extensions/memory-core/src/memory/importance.ts`、`extensions/memory-core/src/memory/temporal-decay.ts`。
 
 ### 项目亲和度与去重
 
@@ -172,7 +172,7 @@ Wiki 还有可选的 compiled digest prompt：最多 4 个高信号页面，每�
 
 会话 transcript 的 provenance 按消息来源分类：owner user message、owner turn 的 assistant-derived 内容、system/internal message、外部/不明来源分别进入闭合集合 `owner`/`agent`/`system`/`untrusted`。工具输出、network-sourced result 或非 owner participant 可使后续 assistant 消息 turn tainted。自动 session ingestion 只从 interactive live corpus 提取 bounded snippets 到 `memory/.dreams/session-corpus/<day>.txt`；cron、heartbeat、subagent、dream narrative、system-only 内容和 foreign archive 不进入可晋级的 canonical dreaming candidate，foreign JSONL 即使自带 ownership fields 也被强制标成 untrusted。`packages/memory-host-sdk/src/host/session-provenance.ts:4-24`、`extensions/memory-core/src/session-ingestion.ts`、`extensions/memory-core/src/memory/manager-session-sync-state.ts`。
 
-每次 `memory_search` 成功得到 memory hits 时，若 dreaming 开启，工具会异步把 query、hit、score 和时间写入短期 recall store；这一写回不阻塞工具结果，并成为后续 dreaming 的 ranking evidence。短期状态本身保留在 plugin state，含 retention、seen hashes、phase signals 和 promotion markers，不等于将工具结果自动写成长期事实。`extensions/memory-core/src/tools.ts`、`extensions/memory-core/src/short-term-promotion-record.ts`、`extensions/memory-core/src/short-term-promotion-store.ts`。
+每次 `memory_search` 成功得到 memory hits 时，若 dreaming 开启，工具会异步把 query、hit、score 和时间写入短期 recall store；这一写回不阻塞工具结果，并成为后续 dreaming 的 ranking evidence。短期状态本身保留在 plugin state，含 retention、seen hashes、phase signals 和 promotion markers；工具结果转为长期事实需要后续 dreaming 的晋级步骤。`extensions/memory-core/src/tools.ts`、`extensions/memory-core/src/short-term-promotion-record.ts`、`extensions/memory-core/src/short-term-promotion-store.ts`。
 
 ### Dreaming：主动记忆演化
 
@@ -277,7 +277,7 @@ memory-core 的 session ingestion checkpoint、seen message hashes、short-term 
 - 未启动 Gateway 或真实 user-facing persistent chat，未确认当前配置下 `before_prompt_build`、memory-core prompt builder、Active Memory hidden prefix、Wiki prompt preparation 与 context engine 的最终顺序和模型所见字节。
 - 未调用真实 Embedding provider、sqlite-vec、FTS5、batch API、local llama.cpp、provider fallback 或实际模型，未验证召回质量、混合分数与真实 token/延迟/成本。
 - 未建立真实 Markdown、extraPaths、CJK/trigram、multimodal、session transcript 和跨 reset/delete archive corpus，未验证 watcher、line map、source hash、partial vector rows 与 force rebuild 的端到端结果。
-- 未进行 session visibility、DM scope、same-agent-private、sandbox、cross-agent、shared workspace、Wiki global/agent scope 的权限对抗测试；代码中的 fail-closed 分支不等于已运行证明。
+- 未进行 session visibility、DM scope、same-agent-private、sandbox、cross-agent、shared workspace、Wiki global/agent scope 的权限对抗测试；fail-closed 分支的结论来自代码阅读，权限边界的实际运行表现尚未覆盖。
 - 未验证 network tool result 的全链路 taint declaration coverage，也未验证任意第三方 memory plugin 的结果 framing 能否阻止模型把 recalled text 当指令。
 - 未验证 `memory_search corpus=all` 同时有 memory、wiki、sessions 时的真实候选平衡、重复结果、warning/error 展示和模型后续工具选择。
 - 未运行 Active Memory 的 lane-1 strong hit、escalate、always、off、timeout partial、circuit breaker、terminal unavailable、provider missing、CLI-backend recall 和 transcript cleanup 场景。

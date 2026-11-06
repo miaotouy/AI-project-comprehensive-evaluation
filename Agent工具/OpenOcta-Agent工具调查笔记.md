@@ -79,7 +79,7 @@ MCP 工具进入运行时有两条路径：上下文回调提供的工具，以�
 
 中间件配置中 `minToolSearchTools` 为 1，`enableToolSearch` 默认为 true，见 `src/pkg/agent/eino/context_middleware.go:30-36` 与同文件 `98-112`。因此只要动态工具数量达到 1，检索开关就为真，基础工具列表为空，全部工具交给 toolsearch 中间件，见 `src/pkg/agent/eino/engine.go:91-109`。
 
-这意味着模型看到的不是一次性注入的完整工具目录，而是由中间件按需暴露的检索结果。目录规模和 token 控制由该中间件负责，`chat.send` 只提供候选工具集合。
+这意味着模型看到的检索结果由中间件按需暴露，工具按需检索，而不是一次性注入完整工具目录。目录规模和 token 控制由该中间件负责，`chat.send` 只提供候选工具集合。
 
 ### 请求级过滤
 

@@ -32,7 +32,7 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 
 组件层 = src/shadcn（shadcn-vue 原始组件，底层 Reka UI reka-ui@^2.10.1）+ src/dc-ui（业务公共壳：DcButton、DcConfirmDialog、DcEmpty、DcSkeleton、DcSheetPanel、StatusPill、InlineError 等）+ 业务组件目录。无 Element Plus/antd/Naive；
 
-无 framer-motion。package.json 依赖确认 Reka UI、vue-sonner、@vueuse/core、@iconify/vue、vue-virtual-scroller、vuedraggable、tippy.js 等在列，但**依赖清单不等于使用证据**，下文的库使用均有源码接入点。
+无 framer-motion。package.json 依赖确认 Reka UI、vue-sonner、@vueuse/core、@iconify/vue、vue-virtual-scroller、vuedraggable、tippy.js 等在列；这份清单只反映依赖声明，下文的库使用均给出源码接入点。
 - **渲染入口装配**（`src/renderer/src/main.ts:14-44`）：`bootstrap()` 先 await createRendererI18n 并把 document.documentElement.dir 设为 rtl/auto（:20），随后才 createApp + Pinia + PiniaColada（staleTime: 30_000、gcTime: 300_000，注释说明 renderer 数据走 IPC、保持热缓存，:27-33）+ router + i18n，mount('#app') 后再 setTimeout 预载图标（:39-43）。
 
   **挂载前没有主题内联脚本**（见第 4 节）。

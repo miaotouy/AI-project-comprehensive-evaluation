@@ -65,8 +65,8 @@
 
 1. **策略层完整但默认放行面大：LobeHub。** 人工审批状态机 `humanIntervention` 是七个项目里设计最完整的：支持四种模式，API 级规则可覆盖 manifest 级规则，`always` 不会被 auto-run 绕过；但绝大多数内建工具根本不声明该字段，未声明即默认 `never` 自动执行。凭证、浏览器、消息与代理管理四类插件——`lobe-creds` 的凭证保存与注入、`lobe-browser` 的八个 API、`lobe-message` 约 30 个 API（含 `deleteBot`）、`lobe-agent-management` 的 `callAgent`/`installPlugin`——均零声明。
 2. **策略层有硬边界，但平台与语义有盲点：Chatbox、Cherry Studio、DeepChat。** 三者都有逐次审批或权限 broker。Chatbox 让计费与应用状态变更类操作不受 `agentFullAccess` 放行；DeepChat 将审批绑定到会话、服务器身份、配置代数、binding hash、execution id 与参数 hash，并设 pending 上限和超时；Cherry Studio 则在 renderer、主进程和 Claude SDK hook 之间串联审批。各自边界分别是 Windows 无 OS 隔离、`acceptEdits` 首词白名单，以及 DeepChat 各工具实际 preflight 与 MCP transport 尚未运行核验。Chatbox 的工具定义仍由 renderer 的 toolsets 组装，而 MCP 工具准备、schema 校验、记忆工具与旧版回退已下沉到宿主无关的 `packages/chatbox-core` 领域层，“工具宿主无关化”因此只完成了一半。
-3. **当前以 VCP 联动，但三者的架构角色不同：AIO Hub、VCPChat、VCPToolBox。** 三者都参与 VCP 文本协议链路，协议两端的解析语义、审批超时方向和鉴权粒度并不一致。AIO 还需要单独评价：它把模型通信表示抽成了 `ToolCallingProtocol`，工具元数据、审批和执行语义没有写死为 VCP；目前只实现并注册了 VCP，不能据此把其工具系统的设计范围归结为"VCP 客户端"。`sub-agent` 提供子会话委派工具：它把任务派给拥有独立子会话的另一个 Agent，可查询状态与活动、追加消息或取消。后台模式仍在主 WebView 执行，追加消息沿同一车道等待并持久化，不自动发起下一轮；审批链在静态规则与人工等待之间插入 `ApprovalArbiter`，强制审批也可能由激进仲裁批准。
-4. **远端调度的移动设备节点：VCPMobile。** 设备端注册用户显式启用的 14 项工具（4 项一次性，含新增 `VCPMobileCLI`；10 项流式/快照），启用集合以白名单持久化，收到主服务 WebSocket `execute_tool` 后在 Tauri/Rust 与 Android 插件桥执行并回传 `tool_result`。其本地聊天请求不会从该注册表注入工具目录，也不解析或续写本地 LLM `tool_calls`；没有本地循环不等于没有工具执行。CLI 侧新增技能目录与技能导入模块，把本机 CLI 能力经 `VCPMobileCLI` 工具投影给节点，启用白名单仍由用户显式控制。
+3. **当前以 VCP 联动，但三者的架构角色不同：AIO Hub、VCPChat、VCPToolBox。** 三者都参与 VCP 文本协议链路，协议两端的解析语义、审批超时方向和鉴权粒度并不一致。AIO 还需要单独评价：它把模型通信表示抽成了 `ToolCallingProtocol`，工具元数据、审批和执行语义没有写死为 VCP；工具系统的设计范围由这层协议抽象界定，当前只实现并注册了 VCP。`sub-agent` 提供子会话委派工具：它把任务派给拥有独立子会话的另一个 Agent，可查询状态与活动、追加消息或取消。后台模式仍在主 WebView 执行，追加消息沿同一车道等待并持久化，不自动发起下一轮；审批链在静态规则与人工等待之间插入 `ApprovalArbiter`，强制审批也可能由激进仲裁批准。
+4. **远端调度的移动设备节点：VCPMobile。** 设备端注册用户显式启用的 14 项工具（4 项一次性，含新增 `VCPMobileCLI`；10 项流式/快照），启用集合以白名单持久化，收到主服务 WebSocket `execute_tool` 后在 Tauri/Rust 与 Android 插件桥执行并回传 `tool_result`。其本地聊天请求不会从该注册表注入工具目录，也不解析或续写本地 LLM `tool_calls`；本地的执行面只承接远端 `execute_tool` 调度，循环由主服务持有。CLI 侧新增技能目录与技能导入模块，把本机 CLI 能力经 `VCPMobileCLI` 工具投影给节点，启用白名单仍由用户显式控制。
 5. **无逐次审批，信任边界在安装与内容导入：SillyTavern。** 扩展 action 与宿主同权；`/tools-register` 还允许角色卡、World Info 或 Quick Reply 提供工具定义，因此导入内容也可能改变工具面。
 6. **执行端与策略端分离、内置 execute_code 沙箱 RPC 旁路的 Python 后端：Hermes。** 工具集中注册表与 `_AGENT_LOOP_TOOLS` 双入口，`resolve_pre_tool_block` 为各分发点唯一审批门（fail-closed），但 `_should_skip_container_guards` 只豁免容器且 `has_host_access=False` 的环境；`execute_code` 的沙箱子进程经 `_rpc_server_loop` 回调父进程线程的 `handle_function_call`，在那里执行已允许的子工具；当 allow-list 与主会话工具面一致时，工具侧不重复走编排层审批。结果持久化有 200K/1500 字符双预算，无内容过滤。批次执行本轮细分为三路：单调用顺序、并发与分段；分段入口把“并行安全段 + 顺序屏障”显式规划出来，批次规划与结果归并另拆到独立模块，三种路径共用同一 fail-closed 审批门。
 7. **扩展式工具与多执行域：Pi。** coding-agent 装配基础工具、MCP、codemode 与工具搜索；暴露模式控制直接、延迟、脚本内可见或隐藏，执行再检查目录。审批依靠扩展钩子，基础工具继承用户权限，脚本运行于 QuickJS worker。durable 先提交 intent，未结算的不安全调用转 interrupted，只有旧今均安全才重跑，恢复保证需与恰好一次副作用区分。
@@ -79,7 +79,7 @@
 
 14. **运行上下文装配 + 多层策略收敛的本地运行时：OpenClaw。** 工具目录每次运行按上下文重建，核心编码工具、OpenClaw 控制工具、渠道/插件工具与可选 MCP 目录汇入同一 Agent Core 契约；发现后经消息方、模型能力、会话/沙箱/发送者策略与 allow/deny 多层过滤，子 Agent 只继承父运行最终授权后的 allowlist，而非重信原始配置。执行分布在主机/sandbox 与本地 Gateway 适配器、MCP transport；审批是执行前策略链（循环准入→可信策略→插件 hook）的一环，允许一次/始终允许/拒绝/超时，超时与无审批面默认阻断（fail-closed）。该链路已拆成 before-tool-call 六个协作模块（decision/approval/policy/runtime/state/diagnostics），另有 wrapper 与 trusted-approval 路径，插件 hook 的返回结果还经独立结果类型归一。
 
-15. **工具目录每轮现算、审批在编排层的 Android 运行时：RikkaHub。** 工具协议是自定义轻量数据类，参数 schema 只有对象形态且结构校验全部下放给各工具；总装入口按记忆、搜索、本地、会话、工作区、Skill、MCP 的固定顺序在每次生成时现算目录，不持久化缓存。工具结果不创建工具角色消息，而是内联写回触发它的助手消息，序列化时再按工具边界拆成工具调用与结果。审批是编排层状态机（自动、待定、批准、拒绝、代答），拒绝与代答由框架合成结果，因此审批通过不等于执行端重新鉴权；循环默认上限 256 步、同轮串行。截断的判断条件是文本超过 32KB 且当前工具集含工作区 shell 工具，而不是按输出类型。MCP 工具统一以 `mcp__{serverName}__{toolName}` 命名，服务名有字符白名单，非法名会让整次生成失败。
+15. **工具目录每轮现算、审批在编排层的 Android 运行时：RikkaHub。** 工具协议是自定义轻量数据类，参数 schema 只有对象形态且结构校验全部下放给各工具；总装入口按记忆、搜索、本地、会话、工作区、Skill、MCP 的固定顺序在每次生成时现算目录，不持久化缓存。工具结果不创建工具角色消息，而是内联写回触发它的助手消息，序列化时再按工具边界拆成工具调用与结果。审批是编排层状态机（自动、待定、批准、拒绝、代答），拒绝与代答由框架合成结果，因此审批结论只覆盖是否允许本次调用，执行端鉴权由工具实现自行承担；循环默认上限 256 步、同轮串行。截断的判断条件是文本超过 32KB 且当前工具集含工作区 shell 工具，而不是按输出类型。MCP 工具统一以 `mcp__{serverName}__{toolName}` 命名，服务名有字符白名单，非法名会让整次生成失败。
 
 16. **注册表 + 暴露级别分层的编码 Agent：Codex。** 模型可见目录每个 step 重建一次：内置分组、MCP、扩展、动态工具与托管工具汇入同一注册表，再按六档暴露级别决定直接可见、可被工具搜索发现、仅 Code Mode 可用或完全隐藏。隐藏工具仍留在注册表里可被内部调度，而托管工具不进入注册表、由模型提供方执行，本地审批与沙箱管不到它。执行统一收口在 `dispatch_any_with_state`，需要新决议时先跑权限 hook，再选人工或 Guardian；普通 MCP 仍有策略/记忆免审分支，实际权限另受沙箱限制；并发按工具声明分读写锁，结果按调用顺序回注，没有固定迭代上限。工具搜索的提供方也不再固定：每个 step 由搜索仲裁决定本次用原生搜索还是 MCP 搜索工具，落败一方从目录移除；线程内的搜索预留约束提供方归属，同一提供方可以共享预留；仅因原生搜索已占据线程而无法取得 MCP 归属时才跳过。同源调用是否并行仍由工具能力和调度器决定。
 
@@ -113,7 +113,7 @@
 | VCPMobile | 用户显式启用后向主服务注册的 14 项设备工具（4 项一次性 + 10 项流式），启用集合为白名单；本地聊天不注入该目录 | Tauri/Rust 进程与 Android 插件桥，由远端主服务的 `execute_tool` 调度 | 启用是前置授权；执行时仅复核已启用和名称存在，无逐次本机审批 | 持节点 WebSocket Key 的远端请求可调度已启用设备能力；服务端审批语义不在本仓库范围 |
 | VCPToolBox | 插件 manifest 描述 + 上下文占位符 | Node/Python/native 子进程、分布式节点 | 命中规则才审批，超时拒绝 | 审批响应无身份校验，任何持全局 Key 的连接可批准任意请求 |
 | OpenClaw | 按运行上下文装配、再经多层策略过滤的一次性工具目录（核心编码/OpenClaw 控制/渠道/插件/MCP，可选 Tool Search） | 主机或 sandbox workspace；Gateway/消息/渠道经本地 Gateway 适配；MCP 走 stdio/SSE/HTTP transport；节点/浏览器/计算机类需客户端能力 | 命中 `requireApproval` 才询问（允许一次/始终允许/拒绝/超时）；未命中自动执行，逐工具默认审批面未逐项核验 | 沙箱/workspace 边界非 OS 级隔离（取决于运行配置与沙箱实现，静态主链确认）；审批 UI、超时实际表现与真实 MCP 连接未运行验证 |
-| RikkaHub | 每轮现算的七来源工具集（记忆、搜索、本地、会话、工作区、Skill、MCP）；按模型 TOOL 能力把原生 tools 字段写入请求 | Android 应用进程内：本地计算直接执行、系统集成经 Android API、工作区经 PRoot 沙箱调 `/bin/bash -l -c` | 工具自带审批判定，默认仅工作区 shell、`ask_user` 与日历创建需审批，可写安全区外写/编辑强制审批 | 审批在编排层，通过审批不等于执行端二次鉴权；工作区 shell 默认需审批但可被配置覆盖；非法 MCP 服务名让整次生成失败 |
+| RikkaHub | 每轮现算的七来源工具集（记忆、搜索、本地、会话、工作区、Skill、MCP）；按模型 TOOL 能力把原生 tools 字段写入请求 | Android 应用进程内：本地计算直接执行、系统集成经 Android API、工作区经 PRoot 沙箱调 `/bin/bash -l -c` | 工具自带审批判定，默认仅工作区 shell、`ask_user` 与日历创建需审批，可写安全区外写/编辑强制审批 | 审批由编排层判定，执行端鉴权由各工具自行承担；工作区 shell 默认需审批但可被配置覆盖；非法 MCP 服务名让整次生成失败 |
 | Codex | 每个 step 重建的目录，按暴露级别分层：直接可见、仅工具搜索可发现、仅 Code Mode 可用、隐藏；托管搜索与 MCP 搜索按 step 仲裁择一；MCP 与应用工具按命名空间与模型能力裁剪 | 会话绑定的执行环境（本地或远端）；命令走子进程；MCP 按服务器配置在指定执行环境启动 | 未确认默认档位（审批策略有 UnlessTrusted、OnRequest、Granular、Never 四档）；Granular 再分五类；无注解的 MCP 工具默认按可能有害处理 | 托管工具（web 搜索、图像生成）不进注册表、由模型提供方执行，不受本地审批与沙箱约束 |
 | OpenOcta | toolsearch 中间件按需暴露的工具；候选来自 DeepAgent 内置、gateway_config、browser、MCP、local_agent、蜂群与知识库检索，联网工具编译期关闭 | Gateway 宿主进程（shell 为当前用户 cmd/sh 子进程）；MCP 服务器进程；外部 CLI Agent 进程 | 否；审批队列需显式开启，且只覆盖 `execute` | 无 OS 沙箱且 `execute` 在进程当前目录运行；命令策略只落实 deny，allow 与 ask 未接入执行路径；local_agent 与 MCP 不经审批 |
 
@@ -153,7 +153,7 @@ Jan 的工具面由 Web 搜索、RAG 与 MCP 三类组成，只有模型声明 t
 
 ### LobeHub
 
-LobeHub 将工具可见性、执行位置和人工审批拆成独立链路。builtin、connector 和 MCP 工具可在 server、cloud gateway、用户设备或桌面本地运行；`humanIntervention` 支持多种模式，API 级规则覆盖 manifest 级规则，`always` 不会被 auto-run 绕过。机制完整不等于默认严格：多数内建工具未声明该字段，未声明即 `never` 自动执行，子 Agent 的 `headless` 路径还会跳过人工审批。循环外壳现由共享 `runAgentLoop` 统一，宿主只提供单步函数，停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、步数预算与无后续上下文；共享 Agent 的访客工具面在装配和实际执行两处都受门禁，只有 `toolGrants` 明确列入的工具或 API 才可用。
+LobeHub 将工具可见性、执行位置和人工审批拆成独立链路。builtin、connector 和 MCP 工具可在 server、cloud gateway、用户设备或桌面本地运行；`humanIntervention` 支持多种模式，API 级规则覆盖 manifest 级规则，`always` 不会被 auto-run 绕过。机制完整，默认放行面却很大：多数内建工具未声明该字段，未声明即 `never` 自动执行，子 Agent 的 `headless` 路径还会跳过人工审批。循环外壳现由共享 `runAgentLoop` 统一，宿主只提供单步函数，停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、步数预算与无后续上下文；共享 Agent 的访客工具面在装配和实际执行两处都受门禁，只有 `toolGrants` 明确列入的工具或 API 才可用。
 
 ### Manifold Desktop
 
@@ -199,13 +199,13 @@ VCPToolBox 负责文本工具解析、插件执行与分布式转发，工具审
 
 ### OpenClaw
 
-OpenClaw 的工具面按运行上下文装配而非固定全局表：核心编码工具、OpenClaw 控制工具、渠道工具、插件工具与可选 MCP 目录汇入同一 Agent Core 契约（`toolCall` → `toolResult`），Provider 协议差异由流适配层承担。装配后经消息方、模型能力、会话/沙箱/发送者策略与 allow/deny 多层过滤（非 owner 会被移除控制面工具，内存压缩运行只留 read 与追加式 write），子 Agent 只继承父运行最终授权后的 allowlist。执行域按工具分布：读写编辑与 shell 在主机或 sandbox workspace，Gateway/消息/渠道经本地 Gateway 适配，MCP 走 stdio/SSE/HTTP transport，节点/屏幕/计算机类要求客户端能力。审批是执行前策略链（循环准入→可信策略→插件 hook）的一环，允许一次/始终允许/拒绝/超时，超时与 Gateway 不可用默认阻断；该链路已拆成 before-tool-call 六个协作模块（decision、approval、policy、runtime、state、diagnostics）与 wrapper、trusted-approval 路径，插件 hook 结果经独立类型归一。批次默认并行、逐工具可声明串行，结果以 `toolResult` 顺序回注，未启动/被跳过/拒绝/失败/取消均有可观察结果。MCP 连接以 session 级租约管理并限制目录预算，外部结果被显式标记为不可信网络内容；上述策略边界不等同于 OS 级隔离，实际隔离强度取决于运行配置与沙箱实现。
+OpenClaw 的工具面按运行上下文装配而非固定全局表：核心编码工具、OpenClaw 控制工具、渠道工具、插件工具与可选 MCP 目录汇入同一 Agent Core 契约（`toolCall` → `toolResult`），Provider 协议差异由流适配层承担。装配后经消息方、模型能力、会话/沙箱/发送者策略与 allow/deny 多层过滤（非 owner 会被移除控制面工具，内存压缩运行只留 read 与追加式 write），子 Agent 只继承父运行最终授权后的 allowlist。执行域按工具分布：读写编辑与 shell 在主机或 sandbox workspace，Gateway/消息/渠道经本地 Gateway 适配，MCP 走 stdio/SSE/HTTP transport，节点/屏幕/计算机类要求客户端能力。审批是执行前策略链（循环准入→可信策略→插件 hook）的一环，允许一次/始终允许/拒绝/超时，超时与 Gateway 不可用默认阻断；该链路已拆成 before-tool-call 六个协作模块（decision、approval、policy、runtime、state、diagnostics）与 wrapper、trusted-approval 路径，插件 hook 结果经独立类型归一。批次默认并行、逐工具可声明串行，结果以 `toolResult` 顺序回注，未启动/被跳过/拒绝/失败/取消均有可观察结果。MCP 连接以 session 级租约管理并限制目录预算，外部结果被显式标记为不可信网络内容；上述策略边界运行在工具调用链内，OS 级隔离强度取决于运行配置与沙箱实现。
 
 ### RikkaHub
 
 RikkaHub 的工具体系由 `ai` 模块定义协议、`app` 模块组装工具、`workspace` 模块提供执行环境，关键差异集中在审批位置、目录构建时机与结果表示三处。工具协议是自定义轻量数据类，由名称、描述、参数 schema 提供器、systemPrompt 生成器、审批判定器和挂起执行器组成；schema 只有对象一种形态，细节由各工具手工拼出，框架不校验参数结构。工具目录在每次生成请求时现算：总装入口按记忆、搜索、本地、会话、工作区、Skill、MCP 的固定顺序累积，来源启用条件分别绑定助手开关、工作区 shell 的 READY 状态和 MCP 订阅，不持久化缓存。工具以 provider 原生 tools 字段注入，且仅当模型能力声明 TOOL 且列表非空时才写入。
 
-调用解析只做一次：把参数文本解析为 JSON 元素，空白按空对象处理，失败抛错；结构、必填与类型校验全部下放给各工具，因此错误风格不统一。审批是编排层状态机，状态为自动、待定、批准、拒绝、代答：命中工具自带的审批判定即置待定并中断本轮，用户动作后恢复；拒绝与代答由框架直接合成结果，不进入工具实现，所以审批通过不等于执行端重新鉴权。执行结果内联写回触发它的助手消息 parts 而不新建工具角色消息，仅在协议序列化时按工具边界重组为工具调用与随后的工具结果消息。循环默认最多 256 步，同轮工具顺序执行，终止靠无待执行工具、审批挂起或协程取消。
+调用解析只做一次：把参数文本解析为 JSON 元素，空白按空对象处理，失败抛错；结构、必填与类型校验全部下放给各工具，因此错误风格不统一。审批是编排层状态机，状态为自动、待定、批准、拒绝、代答：命中工具自带的审批判定即置待定并中断本轮，用户动作后恢复；拒绝与代答由框架直接合成结果，不进入工具实现，所以审批结论只覆盖是否允许本次调用，执行端鉴权由工具实现自行承担。执行结果内联写回触发它的助手消息 parts 而不新建工具角色消息，仅在协议序列化时按工具边界重组为工具调用与随后的工具结果消息。循环默认最多 256 步，同轮工具顺序执行，终止靠无待执行工具、审批挂起或协程取消。
 
 输出截断的条件是文本超过 32KB 且当前工具集含工作区 shell 工具，而非按输出类型判断：全文落盘、消息只留 4KB 预览并附读取指令。MCP 工具统一命名为 `mcp__{serverName}__{toolName}`，服务名有字符白名单，非法名会让整次生成失败。执行环境分本地进程、系统集成与 PRoot 沙箱三类，工作区 shell 默认需审批但该默认可被配置覆盖。本次未找到子 Agent 或工具内再起生成循环的实现。
 
@@ -418,7 +418,7 @@ AIO Hub 的路径策略按操作覆盖范围区分：文件工具收集五类路
 | DeepChat | 单项目笔记未确认统一截断值 | `tool_calls` 字段 + `role: 'tool'` 回注（含 `tool_call_id`），经 contextBuilder 进入下一轮 | 未确认 |
 | DeepSeek Harness | spill 默认约 12500 估算 Token，合算文本/图像；缺存储或恢复地址保留原内容并告警 | v4 tool/result 投影为 tool 角色；模型见预算内有序 head/tail 与恢复路径，完整内容保存到会话私有文件 | 无通用工具结果缓存保证 |
 | Hermes Agent | per-tool 上限（默认 100K）+ per-turn 聚合预算（200K）+ preview 1.5K，三层持久化落盘回填 | `<persisted-output>` 标记 + 文件引用 | 无 |
-| Jan | 工具卡 UI 600 字符折叠不等于模型侧截断；模型侧统一上限未确认 | `tool-<name>` part、elapsed/progress/citation | 未确认 |
+| Jan | 工具卡 UI 600 字符折叠只影响展示，模型侧统一上限未确认 | `tool-<name>` part、elapsed/progress/citation | 未确认 |
 | LobeHub | 默认 25000 字符，可按 agent 覆盖 | 追加明确的截断字符数提示，全文归档到 VFS 并告知取回路径 | 无 |
 | Manifold Desktop | 不适用：无结果回注 | 只显示 tool call | 不适用 |
 | NextChat | 未确认统一结果截断 | OpenAPI 用 `role: tool`；MCP 用 `isMcpResponse` 用户消息 | 无 |
@@ -434,7 +434,9 @@ AIO Hub 的路径策略按操作覆盖范围区分：文件工具收集五类路
 | Codex | 按模型信息的字节或 token 截断策略，并预留序列化开销 | FunctionCallOutput、CustomToolCallOutput 与 ToolSearchOutput；失败结果带 `success: false` | 无 |
 | OpenOcta | 聊天层无统一上限，长度控制交给上下文压缩 | transcript 的 `role: toolResult` 加附件块，缺结果的调用补占位 | 无 |
 
-结果预算、隐私脱敏与信任标记承担不同职责：OpenClaw 的 MCP 结果有不可信标记，Hermes 的预算存储层未确认统一标记，VCPToolBox 有可选隐私掩码；这些都不能从截断值推导。Manifold Desktop 未接执行回注，不参与这一维度。Hermes Agent、AstrBot、Dify、LobeHub、OpenCode 和 Pi 都有落盘/预览或消息文件回流方案，其中 LobeHub 与 OpenCode 的截断提示对模型后续取回动作说明最明确；Open WebUI 还把部分搜索/文件结果转成引用来源，但这些都不等于隔离不可信内容。
+截断长度控制结果体积，隐私脱敏与信任标记则要看各自的处理代码。OpenClaw 的 MCP 结果带有不可信标记，Hermes 的预算存储层未确认统一标记，VCPToolBox 有可选隐私掩码。Manifold Desktop 未接执行回注，不参与这一维度。
+
+Hermes Agent、AstrBot、Dify、LobeHub、OpenCode 和 Pi 都有落盘、预览或消息文件回流方案，其中 LobeHub 与 OpenCode 的截断提示最明确地说明了模型如何取回完整结果；Open WebUI 还把部分搜索或文件结果转成引用来源。这些方案说明结果如何呈现和取回，不可信内容的隔离情况需按各自的信任策略确认。
 
 ## 基础审计框架
 
@@ -484,7 +486,7 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 已确认三条真正由**模型输出**触发的旁路：VCPChat 的 `DESKTOP_PUSH`（模型输出特定标记即在 renderer 侧被拦截并在桌面画布执行 HTML+JS，无审批无白名单）、AIO Hub 的 `data-filter` `customScript`（Agent 路径已隔离——`parseFilterOptions()` 对 custom 操作符或含 `customScript` 的条件直接返回错误，`new Function()` 只保留在用户手动操作的 DataFilter.vue 界面路径，模型生成的 VCP 参数不再能触发任意 JS）、Hermes 的 `execute_code` 沙箱 RPC（沙箱内代码经 `_rpc_server_loop` 在父进程线程回调 `handle_function_call`，给定 allow-list 后执行已允许工具，不重复走编排层审批门；该清单与主会话工具面一致）。VCPToolBox 的 `/plugin-callback/:pluginName/:taskId` 是另一类：无鉴权的外部 HTTP 入口，可伪造异步任务结果注入下一轮上下文，触发方是网络对端而非模型。
 
-审计时不要只看工具目录和审批配置，要搜"模型输出能触发的所有代码路径"——但也要反向区分：**入向协议义务不等于模型可用的旁路**，详见审计项 ⑧。
+审计时不要只看工具目录和审批配置，要搜"模型输出能触发的所有代码路径"——但也要反向区分：**入向协议义务与模型可用的旁路属于两类路径**，详见审计项 ⑧。
 
 ### 6. 工具目录是否有命名冲突检测
 
@@ -500,9 +502,9 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 ### 8. 区分"协议义务"与"模型可达的工具"
 
-一个能力出现在某处工具清单里，不等于本端模型能发现和调用它。**AIO Hub 的 `internal_request_file` 是这条审计项的正例**：它只声明在 `BUILTIN_VCP_TOOLS`（AIO 作为分布式节点注册时上报的 manifest）中，不进 `toolRegistryManager`，因此 AIO 内的模型既看不到也调不动它；VCPToolBox 侧收到 `register_tools` 后又把它从 `externalTools` 里显式过滤掉，远端模型的工具列表里同样没有它。它纯粹是为满足 VCP 分布式契约而实现的**入向**协议义务。
+一个能力出现在某处工具清单里，本端模型只能发现和调用进入本端工具目录的条目。**AIO Hub 的 `internal_request_file` 是这条审计项的正例**：它只声明在 `BUILTIN_VCP_TOOLS`（AIO 作为分布式节点注册时上报的 manifest）中，不进 `toolRegistryManager`，因此 AIO 内的模型既看不到也调不动它；VCPToolBox 侧收到 `register_tools` 后又把它从 `externalTools` 里显式过滤掉，远端模型的工具列表里同样没有它。它纯粹是为满足 VCP 分布式契约而实现的**入向**协议义务。
 
-它的实际触发方也不是"模型调用某个工具"，而是 VCPToolBox 的透明文件拉取：当某个**非分布式**插件的参数里出现 `file://` 字符串时，`Plugin.js:947-977` 会拦截并调用 `FileFetcherServer.resolveFileUrl`，后者按 `findServerByIp(requestIp)` 定位到发起方节点，再向该节点发出 `internal_request_file` 请求（`FileFetcherServer.js:118`）。所以模型对它只有**间接影响**：在别的工具参数里写一个 `file://` 路径，读取范围则被限定在发起该次调用的那个节点上。
+模型不会主动调用它；实际触发方是 VCPToolBox 的透明文件拉取：当某个**非分布式**插件的参数里出现 `file://` 字符串时，`Plugin.js:947-977` 会拦截并调用 `FileFetcherServer.resolveFileUrl`，后者按 `findServerByIp(requestIp)` 定位到发起方节点，再向该节点发出 `internal_request_file` 请求（`FileFetcherServer.js:118`）。所以模型对它只有**间接影响**：在别的工具参数里写一个 `file://` 路径，读取范围则被限定在发起该次调用的那个节点上。
 
 `internal_request_file` 跳过的是节点侧的暴露名单校验（`vcpNodeProtocol.ts` 的 294 行早退，绕过 341-380 行的清单检查）；分布式入向调用本身没有逐次人工审批门。它不再是无限制读取：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL（拒绝凭据/端口/查询/片段，拒绝 UNC 与远程主机路径），读取改走 aio-file-operator 的 Rust 加固命令（`inspectFileForExternalTransfer`/`readFileForExternalTransfer`）——白名单内直读、审批区需用户审批、Rust 侧复校验沙箱/规则/文件大小、60 秒速率窗口与审计日志，沙箱外目录会被 Rust 侧拦截。VCPChat 侧同一机制同样成立（`VCPDistributedServer.js:599-640`），这是协议要求两端实现的能力。
 

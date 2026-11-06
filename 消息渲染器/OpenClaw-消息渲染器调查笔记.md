@@ -198,7 +198,7 @@ Android 先用 `ChatTimelineItem` 把持久消息、streaming assistant、pendin
 
 ### Control UI Markdown
 
-Control UI 的解析器是 `markdown-it`，开启 HTML 识别、换行、linkify、strikethrough、task list、details、tables、assistant transcript role marker、session link 和 file link。HTML 识别的目的主要是让自定义 rule 把原始 HTML 转为可显示的安全文本或受控 details，不代表普通 Markdown 获得任意 HTML 执行面。解析器配置和 scheme rule 见 `ui/src/components/markdown-parser.ts`。
+Control UI 的解析器是 `markdown-it`，开启 HTML 识别、换行、linkify、strikethrough、task list、details、tables、assistant transcript role marker、session link 和 file link。HTML 识别的目的主要是让自定义 rule 把原始 HTML 转为可显示的安全文本或受控 details，普通 Markdown 由此获得的仍是文本与受控渲染能力。解析器配置和 scheme rule 见 `ui/src/components/markdown-parser.ts`。
 
 普通消息的主要顺序是：
 
@@ -280,7 +280,7 @@ Canvas assistant message preview 会通过 tool-card 或 message 组件进入 wi
 
 Control UI 的普通 Markdown 允许 markdown-it 识别 raw HTML，但 raw HTML renderer 会转义内容；最终 DOMPurify 只保留显式的普通文本/结构化标签白名单，不保留 iframe、script、style。代码块里的 HTML 仍是代码文本或受控 block-art 文本。`unsafeHTML` 只接收经过 parser 和 DOMPurify 的字符串，见 `ui/src/components/markdown-parser.ts`、`ui/src/components/markdown.ts`。
 
-iOS 和 Android 原生 Markdown 都把 HTML 作为文字或结构扫描输入，不把它当作可执行网页。两端的 Canvas widget 另走 WebKit/WebView；因此“普通 Markdown 中的 HTML”与“模型请求生成的 widget preview”是两个不同承载面。
+iOS 和 Android 原生 Markdown 都把 HTML 作为文字或结构扫描输入，按纯文本与结构处理。两端的 Canvas widget 另走 WebKit/WebView；因此“普通 Markdown 中的 HTML”与“模型请求生成的 widget preview”是两个不同承载面。
 
 ### Canvas HTML iframe
 
@@ -339,7 +339,7 @@ TUI 用 180 个 component 的 bounded scrollback、200 个 stream assembler run 
 - iOS 身份与 transport：`apps/ios/Tests/IOSGatewayChatTransportTests.swift`，以及共享 chat UI 的 Markdown、媒体和 typography 相关测试。
 - Android 解码与 Markdown：`apps/android/app/src/test/java/ai/openclaw/app/chat/ChatMessageContentParsingTest.kt`、`ChatControllerMessageIdentityTest.kt`、`apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatMarkdownTest.kt`。
 
-上述文件证明项目为这些边界提供了回归测试入口，但本次没有运行测试、性能基准、构建或浏览器/原生视觉检查，不能据此推出长会话运行时性能。
+上述文件证明项目为这些边界提供了回归测试入口；本次没有运行测试、性能基准、构建或浏览器/原生视觉检查，长会话运行时性能属于运行验证范围。
 
 ## 10. 扩展方式与已确认边界
 
@@ -361,7 +361,7 @@ TUI 用 180 个 component 的 bounded scrollback、200 个 stream assembler run 
 - Gateway 负责显示安全、消息身份、序号、预算和 session/run 路由；客户端负责角色壳、布局、Markdown、滚动和平台交互。
 - Control UI 与 TUI 共享 session identity/replay reducer，但不共享 HTML 或终端渲染器。
 - iOS 与 Android 共享协议语义，不共享 Control UI 的 DOM renderer；二者各自维护 native content parser、media loader、widget host 和 scroll policy。
-- `chat` 的实时文本不等于持久 transcript；终态之后仍需等待 `session.message` 或 history reconciliation 才能获得 durable identity。
+- `chat` 的实时文本仅用于即时显示，持久 transcript 以 `session.message` 或 history reconciliation 为准；终态之后仍需等待这些事件才能获得 durable identity。
 - 普通 Markdown 是受限富文本；Canvas HTML 和 MCP App 是带 sandbox/bridge/CSP/TLS 约束的独立 widget surface。
 - 独立 Artifact 的执行与持久化不属于普通消息 renderer；聊天表面只负责显示其 preview 或受控交接点。
 

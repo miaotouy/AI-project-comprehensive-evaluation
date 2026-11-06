@@ -39,7 +39,7 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
    同一机制的边界：`enabled_tools`/`enabled_toolsets` 过滤只发生在 `get_tool_definitions`（发现阶段），注册表 `dispatch` 不按会话复验工具名归属；子代理/delegate 路径的工具集归属依赖各 agent 实例的 `valid_tool_names`（未完全证实，见未验证事项）。
 
-3. **“前端确认框”不等于执行端鉴权。** CLI 交互审批（`prompt_dangerous_approval`）只是 `check_dangerous_command` 的一环，且 `HERMES_YOLO_MODE` 冻结或会话 yolo 开启时整个审批门可被跳过（approval.py: 3290-3291）。真正的执行端是 `tools/registry.py: dispatch`，其 handler 只收到校验过的参数，不重新核对审批标记。
+3. **前端确认框与执行端鉴权的分工。** CLI 交互审批（`prompt_dangerous_approval`）只是 `check_dangerous_command` 的一环，且 `HERMES_YOLO_MODE` 冻结或会话 yolo 开启时整个审批门可被跳过（approval.py: 3290-3291）。真正的执行端是 `tools/registry.py: dispatch`，其 handler 只收到校验过的参数，不重新核对审批标记。
 
    另：`execute_code` 沙箱的 `_rpc_server_loop`（code_execution_tool.py: 649）直接调用 `model_tools.handle_function_call` 执行已授权子工具（allow-list 由 `enabled_tools`/`_last_resolved_tool_names` 提供，执行危险命令不另走审批门），是一条独立于编排层的工具调用旁路（详见第 8 节）。
 

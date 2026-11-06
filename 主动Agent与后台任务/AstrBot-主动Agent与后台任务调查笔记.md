@@ -42,9 +42,9 @@ active-agent cron 主链如下：
 
 ## 触发、调度与运行对象
 
-**创建与权限范围。** 启用 `provider_settings.proactive_capability.add_cron_tools` 后，主 Agent 获得 `future_task`。它可创建循环 cron 或一次性 `run_at`，创建 payload 时保存当前统一消息会话、发送者、指令 note 和来源，见 `astrbot/core/tools/cron_tools.py:105-199`。编辑只允许任务创建者；删除允许创建者或 AstrBot 管理员；列表在私聊中只返回本人任务并提示同会话还有他人任务，在群聊中则返回该群全部任务并标注创建者（`cron_tools.py:200-398`）。这提供的是会话/发送者范围的控制，不等同于通用的任务权限系统。
+**创建与权限范围。** 启用 `provider_settings.proactive_capability.add_cron_tools` 后，主 Agent 获得 `future_task`。它可创建循环 cron 或一次性 `run_at`，创建 payload 时保存当前统一消息会话、发送者、指令 note 和来源，见 `astrbot/core/tools/cron_tools.py:105-199`。编辑只允许任务创建者；删除允许创建者或 AstrBot 管理员；列表在私聊中只返回本人任务并提示同会话还有他人任务，在群聊中则返回该群全部任务并标注创建者（`cron_tools.py:200-398`）。这套控制的作用域限于会话与发送者，鉴权依据是创建者与管理员身份。
 
-**调度与权威状态。** `CronJobManager.start` 仅将 enabled 且 persistent 的数据库任务恢复至 APScheduler；调度器将五段 cron 或日期 trigger 注册为 `_run_job`，并把下次运行时间异步写回数据库。运行时先重读 job，禁用项不运行，随后写 `running`、`last_run_at` 和清空旧错误；finally 按任务类型写 `dispatched`、`completed`、`failed` 或 `cancelled`，同时记录错误和下次时间。active-agent 任务只负责把唤醒事件入队，所以该行的 `dispatched` 表示“已派发”，不表示 Agent 回合成功结束（`astrbot/core/cron/manager.py:128-142,310-415,426-473`）。数据库是工作定义和最近派发状态的权威，但“当前正在运行”的执行体没有单独持久化 run 对象，Agent 回合结果落在会话历史与 trace，而非 job 行。
+**调度与权威状态。** `CronJobManager.start` 仅将 enabled 且 persistent 的数据库任务恢复至 APScheduler；调度器将五段 cron 或日期 trigger 注册为 `_run_job`，并把下次运行时间异步写回数据库。运行时先重读 job，禁用项不运行，随后写 `running`、`last_run_at` 和清空旧错误；finally 按任务类型写 `dispatched`、`completed`、`failed` 或 `cancelled`，同时记录错误和下次时间。active-agent 任务只负责把唤醒事件入队，所以该行的 `dispatched` 记的是入队动作本身（`astrbot/core/cron/manager.py:128-142,310-415,426-473`）。数据库是工作定义和最近派发状态的权威，但“当前正在运行”的执行体没有单独持久化 run 对象，Agent 回合结果落在会话历史与 trace，而非 job 行。
 
 **一次性与重启。** `run_once` 使用日期 trigger，派发后即删除 job；只有运行被取消时才保留，见 `astrbot/core/cron/manager.py:391-409`。循环任务继续保留。核心生命周期在启动时创建 CronJobManager 并异步调用其 `start`，停止时关闭 scheduler；这确认了持久任务会在应用启动时被重装，但未确认宕机期间错过的 cron 是否补跑，见 `astrbot/core/core_lifecycle.py:254-271,325-328,410-411`。
 

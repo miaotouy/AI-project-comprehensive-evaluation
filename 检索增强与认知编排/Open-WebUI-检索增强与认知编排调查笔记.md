@@ -24,7 +24,7 @@
 
 **源码事实。** 知识库记录名称、描述、所有者、元数据和访问授权；文件以独立记录保存原始路径、抽取内容、哈希和元数据，通过关联表归入知识库，也可置于知识库目录树。文件的抽取文本仍落在主数据库，向量集合保存其切块、向量和包含 `file_id`、来源名、哈希、Embedding 配置等的元数据；删除知识库会清理本地集合和知识库元数据，文件是否同时保留取决于配置。`backend/open_webui/models/knowledge.py:48-115`，`backend/open_webui/models/files.py:18-48`，`backend/open_webui/routers/knowledge.py:1593-1768`。
 
-资料项并非只限知识库。检索汇总器可处理临时文本、文件、知识库、笔记、聊天、URL、网页结果和有权限的项目文件夹；全文模式直接取抽取文本，切块模式才进入向量集合。外部知识库不是本机再摄取的文件集合，而是以知识库元数据连接 Qdrant、Milvus 或 pgvector，查询时生成向量并把外部返回归一为同一文档/元数据/分数契约。`backend/open_webui/retrieval/utils.py:1334-1682`，`backend/open_webui/retrieval/external.py:89-379`。
+资料项并非只限知识库。检索汇总器可处理临时文本、文件、知识库、笔记、聊天、URL、网页结果和有权限的项目文件夹；全文模式直接取抽取文本，切块模式才进入向量集合。外部知识库以知识库元数据连接 Qdrant、Milvus 或 pgvector，查询时生成向量并把外部返回归一为同一文档/元数据/分数契约；本机再摄取产生的文件集合走独立的本地集合链路。`backend/open_webui/retrieval/utils.py:1334-1682`，`backend/open_webui/retrieval/external.py:89-379`。
 
 **静态推断。** 此处的“认知编排”主要体现为模型可多次挑选工具、文件和查询，而不是服务端维护的检索状态机：混合检索的输出仍是当前请求的片段列表；工具循环只是把模型上轮工具调用结果回送给模型。检索结果不带阶段号、路径评分或下一阶段查询计划。本次以 `backend/open_webui/retrieval/`、`tools/builtin.py`、`tools/knowledge_fs.py` 和中间件工具循环为搜索范围，未找到这些对象。
 

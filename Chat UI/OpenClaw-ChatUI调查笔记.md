@@ -116,7 +116,7 @@ TUI `CustomEditor` 基于 pi-tui 的多行 editor，额外接入 Alt+Enter、Alt
 
 提交时按顺序区分空文本、以 `!` 开头的单行 local shell、单行 slash command 和普通消息；普通消息可以在 Windows Git Bash 或指定终端环境下使用短 burst window 把快速到达的多行粘贴重新组合成一个提交（`src/tui/tui-submit.ts`、`src/tui/tui-submit.ts`、`src/tui/tui-submit.ts`）。编辑器还保护“trim 后会变成可执行 bang line”的文本，避免历史回填或提交清理意外改变用户意图（`src/tui/components/custom-editor.ts`）。
 
-本次检查的 TUI 输入路径没有找到跨进程 durable Composer draft 存储；编辑器文本、输入历史和 pending submit 属于当前 TUI 进程状态。TUI 会记住最后 session key，但这不等同于保存未发送的编辑器草稿，具体运行行为仍需实测。
+本次检查的 TUI 输入路径没有找到跨进程 durable Composer draft 存储；编辑器文本、输入历史和 pending submit 属于当前 TUI 进程状态。TUI 会记住最后 session key，该 key 只恢复会话位置，未发送的编辑器草稿随进程结束消失，具体运行行为仍需实测。
 
 ### Apple 与 Android
 
@@ -152,7 +152,7 @@ Android ChatScreen 暴露 thinking 选择、模型 bottom sheet、模型收藏/�
 
 工具审批和问题提示分别在各表面的 Composer/overlay/timeline 中出现：Control UI 将 inline approval、question prompt、tool stream 和 background task 作为 ChatPane props；TUI 的 plugin approval controller 按当前 Agent/session 过滤、排序和过期审批，使用 overlay selector 提供 allow-once、allow-always、deny 等选择（`ui/src/pages/chat/chat-pane-render.ts`、`ui/src/pages/chat/chat-view.tsx`、`src/tui/tui-plugin-approvals.ts`）。
 
-本次在已检查的 Control UI Composer 控制文件中没有找到 temperature 等通用参数的直接编辑控件。该结论只适用于这些入口的静态检查，不代表 Gateway 或 Agent 配置层没有相应参数。
+本次在已检查的 Control UI Composer 控制文件中没有找到 temperature 等通用参数的直接编辑控件。该结论的覆盖范围是这些入口的静态检查；Gateway 或 Agent 配置层是否提供对应参数，本次未检查。
 
 ## 5. 发送、排队、流式反馈与停止
 
@@ -202,7 +202,7 @@ Control UI 的 transcript 对每个 pane 维护 search state、reply target、�
 
 ### TUI、Apple 与 Android
 
-本次在 TUI 的 `TUI_COMMAND_ROWS` 和已检查的 command handler 中确认了 session、model、agent、queue、stop、new、reset、abort 等命令，但没有找到与 Control UI 右键消息菜单对应的独立消息级 rewind/fork 入口。TUI 的 session action 重点是切换、历史重建、运行终态和 session metadata；不能据此断言项目其他 TUI 扩展不存在消息操作（`src/tui/commands.ts`、`src/tui/tui-command-handlers.ts`）。
+本次在 TUI 的 `TUI_COMMAND_ROWS` 和已检查的 command handler 中确认了 session、model、agent、queue、stop、new、reset、abort 等命令，但没有找到与 Control UI 右键消息菜单对应的独立消息级 rewind/fork 入口。TUI 的 session action 重点是切换、历史重建、运行终态和 session metadata（`src/tui/commands.ts`、`src/tui/tui-command-handlers.ts`）。
 
 共享 Apple Chat UI 的长按/菜单入口支持 Listen、Copy、Select text、Share、Reply；对带稳定 transcript entry ID 的 user message，还支持 Rewind to here 和 Fork from here（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatMessageViews.swift`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionActions.swift`）。ViewModel 在 rewind 后接收 Gateway 返回的 editor text/attachments，刷新历史和 branch；fork 后切换到新 session 并恢复 editor 内容（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionActions.swift`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionActions.swift`）。
 
@@ -214,7 +214,7 @@ Android 通过消息长按菜单提供 Listen、Copy、Select text、Share、Rep
 
 Control UI 的多会话能力主要表现为 split panes、sidebar 子会话树和 background task rail。每个 pane 有自己的 session key、ChatState、Composer scope、tool stream 和 scroll state；sidebar row 同时投影当前 session、child session、active run IDs、unread、outbox attention 和 observer digest，因此切换 pane 后仍可从列表看到其他会话是否运行或失败（`ui/src/pages/chat/chat-view.tsx`、`ui/src/components/app-sidebar-session-navigation-logic.ts`）。
 
-ChatPane layout 还可把 workspace、background task、observer/detail、companion 和 browser/desktop 面板嵌入或停靠到辅助区域。后台任务并非伪装成当前消息流，而是由单独 rail/detail slot 展示，当前 session 的 observer digest 和 active run ID 作为其关联身份（`ui/src/pages/chat/chat-pane-layout-render.ts`）。
+ChatPane layout 还可把 workspace、background task、observer/detail、companion 和 browser/desktop 面板嵌入或停靠到辅助区域。后台任务由单独的 rail/detail slot 展示，与当前消息流分开，当前 session 的 observer digest 和 active run ID 作为其关联身份（`ui/src/pages/chat/chat-pane-layout-render.ts`）。
 
 TUI 的运行协调器可以追踪多个 session run 或同一选择范围内的并发运行。当前 active run 结束后，如果仍有最近的可提升 run，就把它提升为状态栏和 watchdog 的 owner；事件处理还按 selected session、run ID 和本地 provisional run 过滤迟到事件（`src/tui/tui-run-lifecycle.ts`、`src/tui/tui-event-handlers.ts`）。本次未找到 TUI 中等价于 Control UI split pane 的同时可见多会话布局，主要入口仍是 session picker 切换。
 
@@ -263,10 +263,10 @@ Apple 的 transcript cache/outbox 以 Gateway identity 绑定安装内数据库�
 
 - **Gateway 事件作为共同事实源，表面各自投影**：Control UI、TUI、Apple 和 Android 不共享同一个前端状态容器，而是各自把 Gateway snapshot/event/history 归并成适合本表面的状态。这使 TUI、Web、native Composer 可以独立演进，也要求每个表面重复处理 run identity、历史迟到和断线恢复。
 - **身份优先于便捷 alias**：`main`、`global`、Agent 前缀和 routing contract 会参与 history、draft、outbox 和 event matching。代码选择在 owner 不明确时等待、分桶或停泊，而不是按当前默认 Agent 猜测，这直接影响多 Agent 和重连后的恢复行为（`ui/src/lib/chat/outbox-store.ts`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel.swift`）。
-- **ACK 不等于持久化**：Control UI、Apple 和 Android 都保留了“请求已被 Gateway 接受，但 canonical history 尚未证明”的中间阶段；不确定发送会显示为 unconfirmed/confirming 或进入人工 retry，而不是自动重放潜在重复消息。
+- **ACK 与持久化的阶段划分**：Control UI、Apple 和 Android 都保留了“请求已被 Gateway 接受，但 canonical history 尚未证明”的中间阶段；不确定发送会显示为 unconfirmed/confirming 或进入人工 retry，而不是自动重放潜在重复消息。
 - **桌面工作台与移动原生页面并存**：iOS 的主要 Chat Pro 体验使用共享原生 SwiftUI，但 session Dashboard 仍通过认证 WebView 使用 Control UI；Android 主要聊天体验是独立 Compose 实现。这些入口共享协议和部分数据语义，不共享完整 UI 组件树。
 - **分支操作受恢复状态约束**：rewind、fork、branch switch 会清理 reply/run/branch 局部状态，并在确认当前分支后恢复 Composer；存在 unresolved outbox、active run 或未完成 branch refresh 时，相关控件会隐藏或禁用。
-- **类目边界已确认**：本笔记不展开 Markdown/tool/message row 的完整装配，也不把外部聊天渠道的客户端页面归入 OpenClaw 自有 Chat UI。
+- **类目边界已确认**：本笔记覆盖 OpenClaw 自有 Chat UI 的会话、Composer、发送与状态投影；Markdown/tool/message row 的完整装配属于消息渲染类目，外部聊天渠道的客户端页面属于各渠道自身的界面。
 
 ## 11. 未验证事项
 

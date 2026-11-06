@@ -82,7 +82,7 @@ Agent App 的附件交接现在区分模型原生视觉输入与普通下载文�
 
 ## 5. 停止、重试、续写与并发
 
-前端 `handleStop` 立即将本地 responding 状态设为 false，再在有 task ID 且非暂停状态时调用 stop API；restart 会清空本地树、建议问题和 task ID，并先走同一停止路径（`web/app/components/base/chat/chat/hooks.ts:561-610`）。这说明按钮反馈早于服务端确认，不能据此断言底层模型或工具已结束。消息级重新生成使用父消息 ID（`web/app/components/base/chat/chat-with-history/chat-wrapper.tsx:220`），实际是否复用完整旧上下文由后端生成器决定。
+前端 `handleStop` 立即将本地 responding 状态设为 false，再在有 task ID 且非暂停状态时调用 stop API；restart 会清空本地树、建议问题和 task ID，并先走同一停止路径（`web/app/components/base/chat/chat/hooks.ts:561-610`）。这说明按钮反馈早于服务端确认；底层模型或工具是否已结束，需看服务端任务状态。消息级重新生成使用父消息 ID（`web/app/components/base/chat/chat-with-history/chat-wrapper.tsx:220`），实际是否复用完整旧上下文由后端生成器决定。
 
 工作流的 stop 端点只声明支持 streaming；它经应用任务服务终止任务，该服务同时写入旧的任务 stop flag，并向图引擎命令通道发送中止命令（`api/controllers/service_api/app/workflow.py:551-600`、`api/services/app_task_service.py:130-250`、`api/core/app/apps/execution_coordinator.py:33-60`）。快照中原先的 `GraphEngineManager` 已不存在，图引擎与命令通道由外部 `graphon` 包提供，因此“双通道”是旧 Redis 标记与新引擎命令通道的并存，而不是两套本地管理器。未验证二者的竞争、队列持久化或 worker 崩溃后恢复。普通 chat/Agent 的 queue、同会话串行化和跨会话并行策略也未在本次单独审计。
 

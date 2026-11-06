@@ -119,13 +119,13 @@ Agent / 临时模型 / 辅助任务
 | 入口 | 源码确认的能力 | 边界与证据状态 |
 |---|---|---|
 | 配置文件 | 文件内容是包含 `profiles` 数组的 JSON；启动时加载、规范化旧字段并保存。直接编辑文件可以改变渠道的全部持久化字段，包含启停、模型、端点、Header 和凭据。桌面端还会从旧 `localStorage` 迁移一次。 | **源码确认**配置读写和迁移；配置文件没有单独的“复制/测试/删除”命令，直接改 JSON 属于手工配置，不是应用提供的管理工作流。桌面端文件为 `llm-service/profiles.json`，移动端为 `llm_profiles.json`，不是同一文件。 |
-| CLI | 根 `package.json` 的脚本是构建、检查、测试、文档和 Tauri 启动等开发命令；本次在根脚本、`scripts/` 和渠道相关源码中未找到读取/新增/编辑/复制/启停/删除/导入/导出/连接测试 Profile 的 CLI 命令。 | **本次未找到**渠道管理 CLI；不能据此断言仓库未来版本或外部脚本不存在。`scripts/version.ts` 等 `process.argv` 使用属于构建/版本脚本，不是渠道管理入口。 |
+| CLI | 根 `package.json` 的脚本是构建、检查、测试、文档和 Tauri 启动等开发命令；本次在根脚本、`scripts/` 和渠道相关源码中未找到读取/新增/编辑/复制/启停/删除/导入/导出/连接测试 Profile 的 CLI 命令。 | **本次未找到**渠道管理 CLI。`scripts/version.ts` 等 `process.argv` 使用属于构建/版本脚本，不是渠道管理入口。 |
 | TUI | 未找到 Ink、Blessed 或其他终端 UI 渠道列表/编辑器，也未找到 Profile 专用 TUI 命令。 | **本次未找到** TUI 渠道管理入口。 |
 | Web | 代码使用 Vue 页面，但其桌面管理页依赖 Tauri 文件对话框和 Tauri FS 插件导出；未找到独立 Web 服务、HTTP 配置 API 或浏览器部署版的渠道管理页。 | **静态推断**当前 `src/` 页面属于桌面 Tauri WebView，不应把它概括为可远程访问的 Web 管理端；未启动浏览器或 Tauri 验证实际可达性。 |
 | 桌面端 | 完整支持查看、新建、编辑、启停、删除、排序、配置导入、渠道包导出、模型列表获取、模型/Key/能力探测，以及模型级和批量协议路由绑定。侧边栏显示名称、渠道类型和模型数，编辑器显示当前 Profile 的完整配置。 | **源码确认**入口和事件绑定见 `src/views/Settings/llm-service/LlmServiceSettings.vue`、`components/ModelRoutingEditor.vue` 与 `BatchRouteBindingDialog.vue`；保存成功、文件对话框和真实请求结果本次未运行验证。 |
 | 移动端 | 独立设置页支持查看、新建、预设创建、编辑、显式保存、启停、删除、请求头/端点/模型编辑、模型列表获取和模型/批量探测。 | **源码确认** UI 和 Store 事件绑定见 `mobile/src/tools/llm-api/views/LlmSettingsView.vue:31-100,115-179`、`mobile/src/tools/llm-api/components/ProfileEditor.vue:106-149,346-665`；本次未找到移动端渠道包导入、导出或复制入口。 |
 
-配置文件层和 UI 层的“删除”语义也不同：桌面端删除调用 Profile Store 的 `deleteProfile` 后保存整个列表；移动端删除同时把选中 ID 指向列表首项或清空。两端都没有发现删除关联 Agent、会话历史或 Key 健康状态的级联清理代码；历史消息保留实际渠道快照的行为仍由聊天链路负责，不能推断删除会清理历史引用（`src/composables/useLlmProfiles.ts:212-232`、`mobile/src/tools/llm-api/stores/llmProfiles.ts:106-112`）。
+配置文件层和 UI 层的“删除”语义也不同：桌面端删除调用 Profile Store 的 `deleteProfile` 后保存整个列表；移动端删除同时把选中 ID 指向列表首项或清空。两端都没有发现删除关联 Agent、会话历史或 Key 健康状态的级联清理代码；历史消息保留实际渠道快照的行为由聊天链路负责，删除动作作用于渠道配置本身，对历史引用的影响需在聊天链路另行核对（`src/composables/useLlmProfiles.ts:212-232`、`mobile/src/tools/llm-api/stores/llmProfiles.ts:106-112`）。
 
 ### 2.2 已有渠道与新建渠道的操作差异
 
@@ -145,7 +145,7 @@ Agent / 临时模型 / 辅助任务
 
 启停都是 Profile 级 `enabled` 字段，不是 Key 或单模型状态。桌面端普通请求会检查该字段，但设置页探测可以对当前编辑中的禁用渠道发起探测；移动端卡片开关直接调用 `updateProfile`。两端都没有发现“暂停后删除凭据”或“停用后禁止查看/编辑”的逻辑，已有渠道停用后仍可打开和修改。
 
-连接测试不是一个单一的健康字段，而是设置页的独立探测路径。桌面端“检查模型列表”调用 `channel-probe-service` 的 `model-list` 探测；模型编辑区可按模型、端点、流式模式和媒体成本确认执行推理探测，也可批量探测；Key 管理器可指定某个 Key 和模型测试，并把结果反馈给 Key 健康状态。探测若确认某个模型只有一种可用协议，可生成路由应用候选，由用户选择后写入模型绑定；模型列表返回的端点声明也可形成批量绑定候选。探测结果不会未经确认自动改变生产路由（`src/views/Settings/llm-service/probe/route-application.ts:1-58`、`components/ModelProbeDialog.vue:129-157,589-604`）。移动端编辑器提供模型列表获取、模型探测和批量探测，但本次未找到桌面端这套路由应用 UI。探测结果包含分类、耗时和响应摘要，不能据此推断真实聊天请求一定成功。
+连接测试是设置页的独立探测路径，覆盖模型列表、推理与 Key 三类探测，结果分别落在探测明细和 Key 健康状态两处，两处各自独立记录。桌面端“检查模型列表”调用 `channel-probe-service` 的 `model-list` 探测；模型编辑区可按模型、端点、流式模式和媒体成本确认执行推理探测，也可批量探测；Key 管理器可指定某个 Key 和模型测试，并把结果反馈给 Key 健康状态。探测若确认某个模型只有一种可用协议，可生成路由应用候选，由用户选择后写入模型绑定；模型列表返回的端点声明也可形成批量绑定候选。探测结果不会未经确认自动改变生产路由（`src/views/Settings/llm-service/probe/route-application.ts:1-58`、`components/ModelProbeDialog.vue:129-157,589-604`）。移动端编辑器提供模型列表获取、模型探测和批量探测，但本次未找到桌面端这套路由应用 UI。探测结果包含分类、耗时和响应摘要，反映单次探测请求的返回；真实聊天请求的成败需另行运行验证。
 
 ### 2.4 桌面端创建与编辑
 
@@ -235,7 +235,7 @@ Key 健康状态另存为 `llm-service/key-states.json`，记录的索引改为�
 
 远端 `/models` 结果经 [`src/llm-apis/model-fetcher.ts`](../../aio-hub/src/llm-apis/model-fetcher.ts) 转换时，会直接写入上下文、最大输出、输入/输出模态、支持参数和价格；能力对象合并时先附当前激活规则能力，再用 API 显式返回的 `vision`/`thinking` 覆盖（API 未返回时不写 `false`）。工具调用、文档、媒体生成等更细能力仍主要依赖预设规则或人工编辑。
 
-另一套是 [`src/types/model-metadata.ts`](../../aio-hub/src/types/model-metadata.ts) 定义的 `ModelMetadataRule`。规则属性是开放对象，内置支持图标、Tokenizer、分组、能力、上下文、价格、描述、推荐用途、版本、发布日期、特性和媒体生成参数。它不是另一张模型目录，而是对任意 Provider/模型 ID 应用的声明式补丁层。
+另一套是 [`src/types/model-metadata.ts`](../../aio-hub/src/types/model-metadata.ts) 定义的 `ModelMetadataRule`。规则属性是开放对象，内置支持图标、Tokenizer、分组、能力、上下文、价格、描述、推荐用途、版本、发布日期、特性和媒体生成参数。它是对任意 Provider/模型 ID 生效的声明式补丁层，在模型目录之上补充元数据。
 
 ### 3.4 规则匹配与覆盖顺序
 
@@ -438,7 +438,7 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 - `auto` 网络策略不是自动择优；
 - 模型列表请求固定走代理；
 - 设置页可见 Provider 与运行时 Adapter 的单一注册源约束已通过 `defineAdapters<Record<LlmProviderType, LlmAdapter>>` 建立。
-- 未找到面向渠道管理的 CLI、TUI、独立 Web 服务或 HTTP 配置 API；这表示本次调查范围内没有这些管理入口，不等于外部脚本或未来版本绝对不存在。
+- 未找到面向渠道管理的 CLI、TUI、独立 Web 服务或 HTTP 配置 API；本节结论的检查范围限于仓库内脚本与源码。
 
 ## 11. 关键源码索引
 
@@ -477,5 +477,5 @@ LLM Inspector 可在统一请求/Transport 入口关联 `requestId`，捕获请�
 2. 未检查真实用户配置目录的文件 ACL；凭据文件为客户端混淆而非系统级加密，混淆格式可被同机代码解码，实际防泄漏强度未做运行验证。
 3. 未实测 Azure 渠道的真实调用。
 4. 未启动移动端 Tauri/Android 运行态；移动端配置文件路径、保存成功、真实模型探测和平台文件权限均为源码确认或静态推断，未做设备实测。
-5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；它们不等于 LLM Chat 的 Key/渠道故障转移，本次未逐项展开。
+5. Suno、MiniMax 等异步媒体任务自身可能有任务轮询重试；这类重试作用于媒体任务内部，LLM Chat 的 Key/渠道故障转移属于另一条链路，本次未逐项展开。
 6. 未运行桌面端或移动端 UI，因此桌面文件选择器、导出文件实际内容、导入后的提示/错误、移动端弹窗保存和探测结果展示均未验证；Web、CLI、TUI 的“未找到”结论也未覆盖仓库外部脚本或未来构建产物。

@@ -63,7 +63,7 @@ Gateway chat.send 准入与 ACK（src/gateway/server-methods/chat-send-handler.t
 | 对象 | 语义与权威位置 |
 |---|---|
 | 逻辑会话（session key 寻址）与 transcript window（session id/generation） | `session_nodes.entry_json` 是逻辑记录事实源，`session_windows` 拥有 transcript generation；两者在 per-agent SQLite 中，`agents/<agentId>/agent/openclaw-agent.sqlite` |
-| 消息与控制 entry | transcript 内带 id、parentId、时间戳的追加型事件；标准 message 外还有 compaction、reset、model_change、label、custom 等控制 entry，不等于聊天气泡 |
+| 消息与控制 entry | transcript 内带 id、parentId、时间戳的追加型事件；标准 message 外还有 compaction、reset、model_change、label、custom 等控制 entry，用于承载会话状态与元数据，不进入聊天气泡渲染 |
 | 活动路径与 FTS | 从 transcript 事件派生的可重建投影，非另一份消息主库；dirty 时由 reconcile 自愈 |
 | 运行身份 | 一次发送在 Gateway（idempotencyKey/clientRunId）、reply operation、Agent Core（runId/activeRun）、session lifecycle row、chat event state 各有一层身份与状态，彼此通过 owner claim/lifecycle generation 关联 |
 | 模型与凭据 | 运行时 ModelRegistry 目录快照是「有哪些模型、谁发凭据」的单一来源；会话保存 provider/model 引用，进程生命周期绑定不进入序列化形状 |

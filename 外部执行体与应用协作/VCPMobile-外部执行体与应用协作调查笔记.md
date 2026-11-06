@@ -8,7 +8,7 @@
 >
 > 调查方式：静态走读分布式节点协议、工具注册表、设置与 Android 权限入口；未连接 VCP 分布式服务或调用真实设备权限
 >
-> 调查范围：手机作为外部可执行设备节点的连接、调用、回流与治理；不把普通模型 Provider、聊天请求或单次文件上传计入协作链
+> 调查范围：手机作为外部可执行设备节点的连接、调用、回流与治理；协作链的统计范围限于节点与设备执行，普通模型 Provider、聊天请求和单次文件上传归入其他类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -45,7 +45,7 @@ VCPMobile 满足本类目的“外部控制与交互表面”准入：它以配�
 
 协议的入站类型解析 `connection_ack`、`execute_tool` 与 `cancel_tool`；出站包含注册工具、静态占位符更新和工具结果。请求关联键是服务端提供的 `requestId`，连接代次防止旧会话 ACK 覆盖新状态（`src-tauri/src/distributed/types.rs:18-260`；`src-tauri/src/distributed/client.rs:1298-1340`）。外部请求不绑定 Chat topic；其中 CLI 适配器用稳定远端身份派生会话 ID，并以身份与请求 ID 派生持久化操作键，转交本机 job 运行时，支持幂等重放和轮询。此会话用于 shell/job 身份隔离，未接入聊天历史。见 [CLI 身份适配](../../VCPMobile/src-tauri/src/distributed/tools/vcp_mobile_cli.rs#L84-L144)。本次检查节点与 CLI 入口未找到外部账号安装或 OAuth 刷新。
 
-工具清单来自本地注册表。当前快照注册设备信息、通知、剪贴板、`VCPMobileCLI`，以及电量、CPU/GPU、内存、网络、存储、位置、运动、环境传感器和设备状态摘要等项目；manifest 只发送处于启用状态的工具（`src-tauri/src/distributed/tools/mod.rs:29-63`；`src-tauri/src/distributed/tool_registry.rs:468-520`）。README 中“14 项”与当前 `build_registry` 中可见注册调用一致，共四项一次性工具与十项流式工具，且不将未接线的交互式相机工具计入。
+工具清单来自本地注册表。当前快照注册设备信息、通知、剪贴板、`VCPMobileCLI`，以及电量、CPU/GPU、内存、网络、存储、位置、运动、环境传感器和设备状态摘要等项目；manifest 只发送处于启用状态的工具（`src-tauri/src/distributed/tools/mod.rs:29-63`；`src-tauri/src/distributed/tool_registry.rs:468-520`）。README 中“14 项”与当前 `build_registry` 中可见注册调用一致，共四项一次性工具与十项流式工具，未接线的交互式相机工具在计数之外。
 
 ## 执行、回流与控制语义
 
@@ -73,7 +73,7 @@ VCPMobile 满足本类目的“外部控制与交互表面”准入：它以配�
 
 - 未连接真实服务，未确认服务端实现、请求鉴权、工具结果消费、断线恢复和 Android 权限行为。
 - 检查分布式客户端、设置页面及 CLI 适配后，未找到外部 Agent runtime、OAuth 安装、外部业务资源模型或逐次审批。CLI 有远端身份到本地 session/operation/job 的映射；它不拥有远端 Agent 的任务循环。`cancel_tool` 已解析且 CLI 可按稳定操作键找到 job 发出取消，但远端发送时机与真实进程效果未运行验证。
-- `ToolInteractionOverlay` 是未接线的未来交互入口，不能视为相机、生物识别或人工接管已可用。
+- `ToolInteractionOverlay` 是尚未接线的未来交互入口；相机、生物识别和人工接管当前都停在该入口，尚无可用实现。
 
 ## 关键源码索引
 

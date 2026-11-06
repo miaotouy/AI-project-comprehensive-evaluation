@@ -23,7 +23,7 @@ AIO Hub 的 Agent 工具系统按层拆分。`tool-calling` 将工具能力、�
 3. **工具能力也有多条接入路径。** 内建 registry、动态 `ToolRegistryFactory`、只注入环境信息的 `AgentExtension`、JS/Sidecar/Native 插件代理，以及把远端 manifest 包装成本地 registry 的 `VcpToolProxy`，最后都汇入同一发现和执行链。因而“目前只做了 VCP”准确地说只适用于**模型调用协议实现**，不适用于整个工具来源与扩展体系。
 4. **审批状态机是 Promise-based 单例 store，不做持久化。** `useToolCallingStore` 用内存数组 + `resolve` 回调管理待批准请求；应用重启或页面刷新会丢失所有 pending 状态（异步任务另有磁盘持久化，见下）。自动批准的匹配粒度到"工具级"和"方法级"，方法级优先于工具级。审批支持可配置超时（默认无限等待，开启后按秒级配置自动拒绝）与 AbortSignal/会话清理取消，见第 6 节。
 5. **`aio-file-operator` 的路径沙箱已加固**：路径校验改为先经 Rust 命令把目标及规则路径解析成**真实路径**（防符号链接逃逸、处理 Windows 扩展前缀），再做目录包含关系判断（修复前缀碰撞）；Rust 侧另新增一组外部传输专用命令，为 VCP 文件读取提供二次沙箱/规则/大小校验与审计日志（见第 7/9 节）。普通强制读写命令本身仍不做路径限制，前端校验仍是主要边界。
-6. **VCP 分布式节点是双向对等契约，已与 VCPToolBox 当前源码核实一致。** AIO 既能作为客户端拉取远端 manifest 并代理执行，也能作为节点被远端 `execute_tool` 调用本机标记为可调用或可分布暴露的方法。`internal_request_file` **不是 AIO 内可用的工具**，而是为满足 VCP 分布式契约实现的入向协议义务：它不在注册表里登记，本机模型无法发现或调用，只能由已连接的 VCP 主服务器通过 `execute_tool` 触发。它读取 `file://` 路径转 Base64 回传，但已接入 aio-file-operator 沙箱/审批区与 Rust 侧复校验（见第 9 节），并非无限制读取。
+6. **VCP 分布式节点是双向对等契约，已与 VCPToolBox 当前源码核实一致。** AIO 既能作为客户端拉取远端 manifest 并代理执行，也能作为节点被远端 `execute_tool` 调用本机标记为可调用或可分布暴露的方法。`internal_request_file` 承担的是为满足 VCP 分布式契约而实现的入向协议义务：它不在注册表里登记，本机模型无法发现或调用，只能由已连接的 VCP 主服务器通过 `execute_tool` 触发。它读取 `file://` 路径转 Base64 回传，但已接入 aio-file-operator 沙箱/审批区与 Rust 侧复校验（见第 9 节），并非无限制读取。
 7. **子智能体已成为可调用工具。** `sub-agent` 工具提供 `ask`、`get_task_status`、`get_task_activity`、`send_task_message`、`cancel_task` 等方法，把任务委派给拥有独立子会话的另一个 Agent，并由 `BackgroundTaskRegistry` 维护任务状态与可观测性（第 11 节）。这与此前"只能编辑其他 Agent 配置、不能调用"的结论相反。
 8. **审批链新增自动仲裁层。** 静态自动批准之后、人工审批之前，注入的 `ApprovalArbiter` 会先给出 approve/deny/escalate 判定并留下审计快照；只有 escalate 或判定失败才落到人工审批条，仲裁引擎分 JEV 与普通 LLM 两种，配置分全局与 Agent 两层（第 6 节）。
 
@@ -102,7 +102,7 @@ VCP 分布式节点（可选，仅当 Agent 使用的 Profile baseUrl 与 vcp-co
 - `{{tool_context}}` 宏对应 `getAgentContexts()`，**不缓存**，每次都并发调用所有已启用工具/扩展的 `getExtraPromptContext()`（`discovery.ts:445`），用 `<context_provider id="toolId">` 包裹拼接。
 - `{{tool_usage}}` 宏对应协议使用说明，是静态字符串（`vcp-protocol.ts:314`），无缓存但本身开销可忽略。
 
-三个宏的位置通常由作者预设决定；实际有效正文缺少三个宏且允许自动补位时，组装器才补入工具说明。启用上下文缓存优化且存在安全历史落点时，自动工具定义/用法留在前部 system 消息，运行环境改放尾部附近的 user 参考块；否则合并补位到历史前。显式宏不会被自动迁移。此机制改善前缀稳定性，当前聊天主链未找到主动生成 `cache_control` 断点的路径；Gemini 适配器存在低层缓存引用透传也不能等同本工具目录已创建显式缓存（`core/context-processors/injection-assembler.ts:261-379`；`core/context-utils/runtime-context.ts`）。
+三个宏的位置通常由作者预设决定；实际有效正文缺少三个宏且允许自动补位时，组装器才补入工具说明。启用上下文缓存优化且存在安全历史落点时，自动工具定义/用法留在前部 system 消息，运行环境改放尾部附近的 user 参考块；否则合并补位到历史前。显式宏不会被自动迁移。此机制改善前缀稳定性，当前聊天主链未找到主动生成 `cache_control` 断点的路径；Gemini 适配器的低层缓存引用透传发生在适配器内部，与本工具目录是否创建显式缓存分属两层（`core/context-processors/injection-assembler.ts:261-379`；`core/context-utils/runtime-context.ts`）。
 
 过滤/开关集中在发现阶段生效：工具级由 `resolveToolEnabled()` 判断（`discovery.ts:82`，`toolToggles[toolId]` 优先于 `defaultToolEnabled`），方法级在 `generatePrompt()` 内联过滤（`discovery.ts:322`，仅 `methodToggles[toolId_methodName] !== false` 保留）。
 
@@ -121,9 +121,9 @@ VCP 分布式的 `includeToolIds` 参数可以无视 `config.enabled` 强制包�
 | `parseToolRequests()` | 把模型输出转换成 `ParsedToolRequest[]` | 只负责表示到内部对象的转换 |
 | `formatToolResults()` | 把统一执行结果转换成下一轮上下文 | 否 |
 
-解析后的注册表校验、`agentCallable` 复核、安全策略、人工审批、超时和真实方法调用仍由协议外的 parser/executor/engine 链处理。这使 AIO 可以增加另一种文本协议，同时复用现有工具目录与执行策略。接口接收 `finalText: string`，工具定义与结果同样返回字符串，因此它目前是**多种文本协议的抽象**；若要直接接入模型 API 的结构化 `tool_calls`，还需扩展该接口及聊天消息编排链，不能视为现成能力。
+解析后的注册表校验、`agentCallable` 复核、安全策略、人工审批、超时和真实方法调用仍由协议外的 parser/executor/engine 链处理。这使 AIO 可以增加另一种文本协议，同时复用现有工具目录与执行策略。接口接收 `finalText: string`，工具定义与结果同样返回字符串，因此它目前是**多种文本协议的抽象**；若要直接接入模型 API 的结构化 `tool_calls`，还需扩展该接口及聊天消息编排链。
 
-目前这项扩展只完成了接口和路由骨架：协议注册表里只有 `vcp`，`useToolCalling.resolveProtocol()` 对任何输入都回退到同一个 `VcpToolCallingProtocol`，Agent 配置里的协议类型也被收窄为 `"vcp"`。下面记录的只是当前 VCP 实现的行为，不能据此把 AIO 的整体工具架构等同于 VCP。
+目前这项扩展只完成了接口和路由骨架：协议注册表里只有 `vcp`，`useToolCalling.resolveProtocol()` 对任何输入都回退到同一个 `VcpToolCallingProtocol`，Agent 配置里的协议类型也被收窄为 `"vcp"`。下面记录的只是 VCP 实现这一层的行为；AIO 的整体工具架构按协议抽象组织，VCP 是当前已实现并注册的一种文本协议。
 
 ### 3.1. VCP 文本块语法
 
@@ -186,7 +186,7 @@ Agent 配置编辑也实现了安全策略钩子：设置 `toolCallConfig` 或�
 - **可取消**：`ToolContext` 携带 `requestId`/`agent`/`signal`，可取消工具监听 `context.signal` 释放底层资源（IPC/文件扫描），避免外层 Promise 结束后资源空转；该约束记录在 `tool-calling/ARCHITECTURE.md` 第 10 节，分布式调用还支持 `cancel_tool` 帧与断线批量终止（声明 `capabilities.cancelTool`）。
 - **取消**：审批结果三态 `approved`/`rejected`/其他，执行器只把显式 `approved` 判为通过（`executor.ts:264-266`），未显式通过（含 `undefined`）一律走拒绝回调 + `denied` 路径。
 - **“静默”语义**：代码搜索仍未找到 `silent_cancelled` 字面值的实现——`tool-calling/ARCHITECTURE.md:326` 仍写“支持 approved、rejected 和 silent_cancelled”，但 `ToolApprovalResult` 类型只有 `"approved" | "rejected"`，**文档与代码不一致依然存在**。真正的“静默”是 `toolNode.metadata.isSilent`（UI 上“静默执行”开关）：它控制工具执行完成后是否继续下一轮迭代（静默或全被拒则停止），不是审批阶段的取消状态。
-- **流式期间的工具事件**：工具调用检测发生在**单次 LLM 请求完整结束之后**（`responseContent = response.content`，`useToolCallOrchestrator.ts:183`），不是在流式过程中逐 token 解析；因此模型输出到一半时不会触发工具调用，必须等本轮 assistant 消息流式结束。但渲染层（`rich-text-renderer`）会在流式过程中就把未闭合的 `TOOL_REQUEST` 块渲染成"执行中"状态的 `VcpToolNode`（纯 UI 反馈，不代表真实已执行）。
+- **流式期间的工具事件**：编排器在单次 LLM 请求完整结束后检测工具调用，这次请求中的调用要等消息流式结束后才能触发（`useToolCallOrchestrator.ts:183`）。渲染器会先把尚未闭合的 `TOOL_REQUEST` 显示为“执行中”卡片；该标签由文本解析生成，实际执行结果以工具消息中的状态记录为准。
 - **速率限制**：`rateLimitEnabled`/`rateLimitInterval` 控制多轮迭代之间的强制等待（`useToolCallOrchestrator.ts:129-157`），按"上一次请求开始"或"上一次流结束"两种基准计算延迟，用于避免 API 速率限制被触发。
 
 **依据**：[`llm-chat/composables/chat/useToolCallOrchestrator.ts`](../../aio-hub/src/tools/llm-chat/composables/chat/useToolCallOrchestrator.ts)、[`tool-calling/core/executor.ts`](../../aio-hub/src/tools/tool-calling/core/executor.ts)、[`tool-calling/types/index.ts`](../../aio-hub/src/tools/tool-calling/types/index.ts)、[`agent-manager/types/agent.ts`](../../aio-hub/src/tools/agent-manager/types/agent.ts)、[`llm-chat/components/message-input/ToolCallingApprovalBar.vue`](../../aio-hub/src/tools/llm-chat/components/message-input/ToolCallingApprovalBar.vue)。
@@ -213,7 +213,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 **审批状态不持久化**：待批准请求只存在于内存，应用重启或页面刷新即丢失；只有异步任务通过任务存储写盘（`persistImmediately()`/`persistDebounced()`），应用重启后 `markRunningTasksAsInterrupted()` 会把重启前处于 running/pending 的任务标记为 `interrupted`（`task-manager.ts:461-485`）。
 
-静态自动批准只在全局 auto 模式与工具/方法匹配时生效；安全策略的 block 先行拒绝，approve 则跳过静态放行进入审批链。文件操作和 Agent 工具配置编辑都实现了这一钩子。这里的“强制审批”表示静态规则不能直接放行，后续仍可能经过自动仲裁，不能概括为任何场景都必须手点确认（`tool-calling/core/executor.ts:229-285`）。
+静态自动批准只在全局 auto 模式与工具/方法匹配时生效；安全策略的 block 先行拒绝，approve 则跳过静态放行进入审批链。文件操作和 Agent 工具配置编辑都实现了这一钩子。这里的“强制审批”表示静态规则不能直接放行，后续仍可能经过自动仲裁；必须手点确认只出现在未命中自动仲裁的场景（`tool-calling/core/executor.ts:229-285`）。
 
 无人值守场景：VCP 分布式渠道下，本地 `tool-calling` 编排被跳过（`useToolCallOrchestrator.ts:187`），审批改由 VCP 节点协议处理（本机作为节点被远端调用时），或交给 VCPToolBox 服务端自己的 `toolApprovalManager`（`approveAll`/`approvalList` 配置，支持 `::SilentReject` 后缀实现“拒绝但不通知 AI”）——**这部分无人值守策略实际发生在 VCPToolBox 侧，不在 AIO Hub 本身**，AIO 只是转发/展示审批 UI。
 
@@ -231,7 +231,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 - **文件类**：`aio-file-operator` 走 Tauri 的 `read_text_file_force`/`write_text_file_force`/`delete_file_to_trash` 等命令（`file_operations.rs`）。这些 Rust 命令本身不做路径策略限制，安全边界在前端 `security.ts` 的白名单/黑名单判断（第 4、9 节详述）：校验前先经 Rust 命令把目标与规则路径解析成真实路径（含符号链接），再做 `isPathWithinRoot` 边界比较。
 - **外部传输专用命令**：`inspect_file_for_external_transfer`/`read_file_for_external_transfer` 是唯一在 Rust 侧再次校验沙箱/规则/大小的读取命令，专供 VCP 外部文件传输，不暴露给 Agent 工具（见第 9 节）。
-- **子进程类**：FFmpeg 和 Skill 由 Rust 子进程执行。Skill 使用参数数组、以技能目录为工作目录，脚本入口做存在性和词法前缀检查；此处未先 canonicalize，不能据此认定是真实路径隔离。执行进程继承宿主权限，没有 OS 文件/网络沙箱；超时包装结束等待，但本路径未设置 kill_on_drop，也未跟踪并终止子进程树，不能把“超时返回”解释为进程已被杀死（`skill_manager.rs:565-635`）。本次只描述边界，不构造绕过或运行危险脚本。
+- **子进程类**：FFmpeg 和 Skill 由 Rust 子进程执行。Skill 使用参数数组、以技能目录为工作目录，脚本入口做存在性和词法前缀检查；此处未先 canonicalize，路径隔离强度以词法前缀检查为限。执行进程继承宿主权限，没有 OS 文件/网络沙箱；超时包装结束等待，但本路径未设置 kill_on_drop，也未跟踪并终止子进程树，不能把“超时返回”解释为进程已被杀死（`skill_manager.rs:565-635`）。本次只描述边界，不构造绕过或运行危险脚本。
 - **平台差异（Windows）**：`ffmpeg_processor.rs` 用 `#[cfg(target_os = "windows")]` 单独设置 `CREATE_NO_WINDOW`；`skill_manager.rs` 通过公共工具函数统一隐藏子进程窗口。
 - **脚本运行时解析**：优先用户显式命令，缺省 JavaScript/TypeScript 取 Bun 再 Node；Python 在 Windows 优先 python，其它平台优先 python3；Shell 按 bash、sh 探测；PowerShell 在 Windows 优先 powershell，其它平台优先 pwsh。探测不负责安装依赖，候选均不可用仍会在进程启动时报错（`skill_manager.rs:459-527`）。
 - **`file://` 解析（VCP 内置工具）**：`internal_request_file` 已收紧：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL，拒绝凭据/端口/查询参数/片段，拒绝 UNC 与远程主机路径（`vcpNodeProtocol.ts`）；读取改走 `inspectFileForExternalTransfer` → `readFileForExternalTransfer`（aio-file-operator 的 Rust 加固命令），在审批区要求用户审批、Rust 侧重新校验沙箱/规则/文件大小并写审计日志，另有 60 秒速率窗口（`EXTERNAL_FILE_RATE_WINDOW_MS`）。
@@ -247,7 +247,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 - `denied`：审批拒绝或安全策略死区拦截，`result` 为固定提示文案（`"工具调用被拒绝：用户未授权"` 或策略自定义的 `blockMessage`）。
 - `error`：方法抛异常、超时、工具/方法不存在、`agentCallable` 校验失败，`result` 为异常的 `message` 或错误描述字符串。
-- `success`：包括异步任务提交成功（`result` 是 `{ type: "async_task", taskId, message }` 的 JSON 字符串，不代表任务真正完成）。
+- `success`：包括异步任务提交成功（`result` 是 `{ type: "async_task", taskId, message }` 的 JSON 字符串，语义是任务已提交，最终结果需按 `taskId` 另查）。
 
 **没有截断机制**：结果格式化（VCP 协议实现，`vcp-protocol.ts:403-423`）直接把工具返回值原文拼进汇总文本块，**不限制长度**。工具返回超大字符串（如 `directory-tree` 扫描大目录、`dir-search` 全文搜索）会整段回注下一轮请求，可能撑爆上下文窗口或触发 API 报错；是否截断完全取决于各工具自己（如 `dir-search` 有 `maxDisplayFiles`/`maxMatchesPerFile` 参数做结果层面截断，但那是工具自愿实现，不是框架强制）。
 
@@ -296,7 +296,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 文件读取等方法可返回结构化本地媒体引用，和文本结果一起交给聊天层；引用进入工具消息后，在后续请求中转换为多模态附件，执行器自身不把媒体二进制塞进结果字符串。分布式节点则需要进一步物化：识别返回值中的 localMedia，经独立外传文件规则/审批重新读取，确认 MIME 仍为图片、音频或视频，再生成带 MIME 的 data URL 内容；本地发送许可不会自动变成外传许可（`vcp-connector/services/vcpNodeProtocol.ts:469-520`）。
 
-服务端消费顶层 content，混合批次因此按调用顺序平铺文本与媒体。该回传依赖现有连接和外传边界，未知媒体类型或中止信号会结算错误，不把本地路径直接交给远端当作可读取文件（同文件 `:545-600`）。
+服务端消费顶层 content，混合批次因此按调用顺序平铺文本与媒体。该回传依赖现有连接和外传边界，未知媒体类型或中止信号会结算错误，回传内容是随顶层 content 内联发送的文本或媒体载荷，本地路径在本机解析（同文件 `:545-600`）。
 
 ## 10. 扩展机制
 
@@ -332,7 +332,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 它取代了此前"只有 Agent 配置编辑、没有 Agent 调用"的能力空白：
 
 - **双轨数据**：子会话的聊天数据仍是标准 `ChatSessionDetail`，由 llm-chat 写入；任务调度、状态机与进度由 `BackgroundTaskRegistry` 独立维护（`src/services/background-tasks/registry.ts`），并通过 `approvalBridge.ts` 把子会话的待审批请求关联回任务。
-- **后台归属**：background 模式在主 WebView 里启动不阻塞父调用的异步链，显式指定 detached 子会话发送，不切换主会话；同一子会话的 Promise 车道串行生成，繁忙时新任务状态为 queued。独立 background-runtime 的 dispatch 当前只实现 ping/getInfo，未承接子Agent runner，不能据此断言关闭主窗口后继续执行（`sub-agent.registry.ts:1020-1141`；`src/background-runtime/main.ts:27-49`）。
+- **后台归属**：background 模式在主 WebView 里启动不阻塞父调用的异步链，显式指定 detached 子会话发送，不切换主会话；同一子会话的 Promise 车道串行生成，繁忙时新任务状态为 queued。独立 background-runtime 的 dispatch 当前只实现 ping/getInfo，未承接子Agent runner；关闭主窗口后能否继续执行，属于运行验证范围（`sub-agent.registry.ts:1020-1141`；`src/background-runtime/main.ts:27-49`）。
 - **追加与取消**：追加指导先校验任务归属，等待同一执行车道后重新读取子会话，把消息挂在当时叶子并保存，返回 append_only；兼容 delivery 字段没有产生安全点消费或自动下一轮的保证。独立 deliveryQueue 有队列、执行链和通知的数据模型，但本方法不走其消费 runner。取消通过 registry 订阅中止子会话并清待审批；终态取消幂等（`sub-agent.registry.ts:1304-1342,1426-1519,1552-1600`）。
 - **审批闭环**：子任务的工具调用仍走统一审批入口，后台任务承接人工审批与仲裁状态回放；`BackgroundTaskApprovalBridge` 用子会话 + 执行车道解析 `taskId`，无法唯一确定时不强行关联。
 - **目标、模型和深度**：入口按需释出内置基线，目标必须开启允许被调用。允许同 ID 分身但受传递的委派深度上限控制；模型解析按 prefer_self/inherit_caller 选择单一绑定组，所选不可用即报错，没有跨组自动回退（`sub-agent.registry.ts:715-762`；`services/subAgentModelResolver.ts:19-30`）。
@@ -374,7 +374,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 工具调用在 UI 上有**两条独立渲染路径**（与 [`../消息渲染器/AIO-Hub-消息渲染器调查笔记.md`](../消息渲染器/AIO-Hub-消息渲染器调查笔记.md) 第 1.2、7 节结论一致）：
 
 1. **`ToolCallMessage.vue`**：独立的 `role: "tool"` 消息节点，由 `useToolCallOrchestrator` 创建，展示审批状态、参数、结果、异步任务进度条。这是“真实执行记录”的权威展示，其内容（`toolCalls[].status`）来自 `executor.ts` 的真实执行结果，**不能被模型输出文本伪造**——它读取的是 `ChatMessageNode.metadata.toolCalls`，这个字段只在 `useToolCallOrchestrator.ts` 内部由代码赋值，普通 LLM 输出文本无法写入消息的 `metadata` 字段。
-2. **`VcpToolNode`（渲染器 AST 节点）**：`rich-text-renderer` 的 Tokenizer 只要在任意消息正文（包括 assistant/user/工具结果回填的文本）里检测到 `<<<[TOOL_REQUEST]>>>` 或 `[[VCP调用结果信息汇总: ...]]` 字面文本，就会渲染出一个看起来像“工具调用卡片”的 UI 组件——包括状态图标（成功/失败）、参数列表、“成功”/“失败”标签。这是**纯文本模式匹配触发的展示效果，不代表任何真实执行**。
+2. **`VcpToolNode`（渲染器 AST 节点）**：渲染器会扫描消息正文，包括用户消息、助手消息和工具回填文本；发现 `<<<[TOOL_REQUEST]>>>` 或 `[[VCP调用结果信息汇总: ...]]` 时，就生成带参数、状态图标和成功或失败标签的工具卡片。卡片样式与标签由正文文本匹配生成，真实执行结果由上面的工具消息记录。
 
 **结果文本触发工具卡片渲染的路径**：如果某个工具的返回结果（如 `web-distillery` 抓取的网页内容、`recall` 检索出的历史条目内容）里恰好包含形如：
 ```

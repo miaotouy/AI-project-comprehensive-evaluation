@@ -16,7 +16,7 @@
 
 OpenCode 同时维护两套原生界面：TUI 基于 opentui 与 Solid，Web/桌面共用 App 包。Web 侧已形成工作台结构：顶部按服务端、工作区与会话组织，支持同时连接多个 OpenCode 服务端，界面基础件下移到 `packages/ui` 的领域目录（overlays、feedback、forms、layout、navigation、typography、motion、theme 等），会话与消息渲染单独在 `packages/session-ui`。
 
-主题系统分两套：Web 由 `packages/ui/theme` 在运行时把主题 token 注入 CSS 变量；TUI 的主题解析与旧主题迁移下沉到新包 `packages/theme`。桌面端是 Electron 壳：主进程负责窗口、菜单、深链、文件选择、插件与存储桥、原生外观细节，渲染层直接加载 App 源码。桌面更新器由内建 GUI 插件提供，不能仅凭桌面壳目录判断其缺失；托盘与全局快捷键本次未找到。
+主题系统分两套：Web 由 `packages/ui/theme` 在运行时把主题 token 注入 CSS 变量；TUI 的主题解析与旧主题迁移下沉到新包 `packages/theme`。桌面端是 Electron 壳：主进程负责窗口、菜单、深链、文件选择、插件与存储桥、原生外观细节，渲染层直接加载 App 源码。桌面更新器由内建 GUI 插件提供；托盘与全局快捷键本次未找到。
 
 ## 系统边界与总体装配
 

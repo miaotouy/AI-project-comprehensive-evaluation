@@ -96,7 +96,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - **判定模型裁剪（新增前置段）**：关闭的工具结果先经 `pruneClosedToolResultsForContext`（`jevToolResultPruning.ts:602`）逐条判题，候选与状态受 token、路径数上限约束（`jevReviewState.ts:68`、`:129`）；判为不需要的结果由 `buildJevPrunedResultContent`（`:521`）替换为指回 Tape 的短占位，判为需要的保持原文。该段是纯投影：不写 Tape、纯函数返回新数组，后续按大小截断仍然生效；反馈信号见 `jevPruningFeedback.ts`，判题材料是工具输出本身，不含大小/年龄提示。
 - **摘要持久化与失败边界**：摘要状态同时落入会话表和 Tape 重建 anchor，写入时在同一事务中比较旧摘要、cursor 与更新时间，过期结果不能覆盖当前状态。读取优先从最新 Tape anchor 重建，无 anchor 才回退会话表（`src/main/session/data/settings.ts:244-310`）。
 
-  摘要调用失败、返回空内容或结果不够小时，仍可提交 boundary-only anchor：cursor 前移，保留旧摘要，更新时间置空，并记录未摘要区间。已生成但过大的摘要被拒绝采用，不等于整个压缩边界回滚；取消请求则抛出中止，不推进该结果（`compactionService.ts:629-745`）。启动时先协调压缩 marker，再恢复其余 pending 消息（`createDeepChatAgentHarness.ts:495-518`）。
+  摘要调用失败、返回空内容或结果不够小时，仍可提交 boundary-only anchor：cursor 前移，保留旧摘要，更新时间置空，并记录未摘要区间。已生成但过大的摘要被拒绝采用时，压缩边界停在已推进的位置；取消请求则抛出中止，不推进该结果（`compactionService.ts:629-745`）。启动时先协调压缩 marker，再恢复其余 pending 消息（`createDeepChatAgentHarness.ts:495-518`）。
 
 ## 4. SDK、Provider、模型与协议交接
 

@@ -181,7 +181,7 @@ is_chunk / id / usage
 
 #### 配置文件入口
 
-**源码确认**主配置文件是 `data/cmd_config.json`，其中 `provider_sources` 与 `provider` 是普通 JSON 数组；`AstrBotConfig` 启动时读取并把缺失字段递归补入默认值，保存时采用临时文件、`fsync`、`os.replace` 和 revision 去重（`astrbot/core/config/astrbot_config.py:31-113,232-323`）。**静态推断**直接编辑配置文件可以表达查看、新增、编辑、启停和删除已有或新建渠道；复制没有独立字段或命令，实际只能由用户复制 JSON 条目并改写唯一 `id`，导入/导出也不是 provider 专用格式，而是整体备份 ZIP 中的 `config/cmd_config.json`。备份导出读取该文件原文，导入以 replace 模式覆盖现有配置，并在覆盖前写出 `.bak`（`astrbot/core/backup/exporter.py:160-167`；`astrbot/core/backup/importer.py:456-475`）。
+**源码确认**主配置文件是 `data/cmd_config.json`，其中 `provider_sources` 与 `provider` 是普通 JSON 数组；`AstrBotConfig` 启动时读取并把缺失字段递归补入默认值，保存时采用临时文件、`fsync`、`os.replace` 和 revision 去重（`astrbot/core/config/astrbot_config.py:31-113,232-323`）。**静态推断**直接编辑配置文件可以表达查看、新增、编辑、启停和删除已有或新建渠道；复制没有独立字段或命令，实际只能由用户复制 JSON 条目并改写唯一 `id`；导入/导出的载体是整体备份 ZIP 中的 `config/cmd_config.json`，渠道条目随全量配置一起进出。备份导出读取该文件原文，导入以 replace 模式覆盖现有配置，并在覆盖前写出 `.bak`（`astrbot/core/backup/exporter.py:160-167`；`astrbot/core/backup/importer.py:456-475`）。
 
 配置文件本身没有连接测试动作；修改后由下一次启动读取，或由运行中的 WebUI 保存流程触发热更新。配置文件也不提供独立的“启用/停用”操作，启停表现为修改 provider 条目的 `enable` 布尔值。默认配置与用户配置的关系是启动时以 `DEFAULT_CONFIG` 初始化，再把文件内容合并进 `AstrBotConfig`，不是把每个 provider 与一个独立的默认 provider 实例合并；source 与 provider 的字段合并只发生在命中 `provider_source_id` 的运行时解析阶段（`astrbot/core/config/astrbot_config.py:46-113`；`astrbot/core/provider/manager.py:525-546`）。
 
@@ -189,11 +189,11 @@ is_chunk / id / usage
 
 CLI 源码直接确认只有 `astrbot conf get/set` 这组常用配置命令。可读写的白名单是时区、日志等级、Dashboard 端口/用户名/密码和回调地址，不包括 `provider_sources`、`provider` 或 provider 设置；所以 CLI 能查看/编辑少量系统配置，但不能新增、复制、启停、删除、导入、导出或测试渠道（`astrbot/cli/commands/cmd_conf.py:70-78,157-240`，仓库文档 `docs/zh/use/cli.md:87-112`）。其保存路径是直接写 `data/cmd_config.json`，且使用的是 CLI 自己的 JSON 写入函数，不是 `AstrBotConfig.save_config` 的原子写路径（`cmd_conf.py:81-110`）。
 
-本次检查的 CLI 命令注册、依赖和源码目录中**未找到** Textual、prompt-toolkit、curses 等 TUI 框架或 provider 管理命令。因此 TUI 对上述渠道操作的结论是**未找到**，不能据此断言项目所有发行形态都绝对没有其他外置 TUI；本仓库快照中没有可复查入口。
+本次检查的 CLI 命令注册、依赖和源码目录中**未找到** Textual、prompt-toolkit、curses 等 TUI 框架或 provider 管理命令，TUI 对上述渠道操作的结论为**未找到**；本仓库快照中没有可复查入口。
 
 #### Web / Dashboard
 
-WebUI 是当前源码确认最完整的渠道管理入口。`/api/v1/providers/schema` 返回注册适配器模板、现有 provider/source 和模型元数据；source 端点支持列表、按 ID 查看、新增/更新、重命名时迁移关联 provider、删除，以及在 source 下列出和新增模型 provider。provider 端点支持列表、查看（可选 merged 配置）、新增、编辑、删除、启停和测试（`astrbot/dashboard/api/providers.py:90-183,251-365,383-414`）。这些接口要求 provider scope，旧的 `/api/config/provider*` 与 `/api/config/provider_sources*` 路径仍作为兼容别名存在；它们复用同一 `ProviderConfigService`，不代表另一套生命周期。
+WebUI 是当前源码确认最完整的渠道管理入口。`/api/v1/providers/schema` 返回注册适配器模板、现有 provider/source 和模型元数据；source 端点支持列表、按 ID 查看、新增/更新、重命名时迁移关联 provider、删除，以及在 source 下列出和新增模型 provider。provider 端点支持列表、查看（可选 merged 配置）、新增、编辑、删除、启停和测试（`astrbot/dashboard/api/providers.py:90-183,251-365,383-414`）。这些接口要求 provider scope，旧的 `/api/config/provider*` 与 `/api/config/provider_sources*` 路径仍作为兼容别名存在；两条路径复用同一 `ProviderConfigService`，渠道生命周期只有一套。
 
 聊天能力的新建流程与已有渠道不同：页面先从适配器模板创建 source，source 只在保存时写入服务端；保存后可以调用 source 的模型列表接口，或手动输入模型，再为每个模型创建一个独立 provider，默认 ID 是 `<source_id>/<model>`，默认启用并依据模型元数据填入 modalities、上下文长度和 reasoning（`dashboard/src/composables/useProviderSources.ts:447-472,498-577,580-640`）。已有聊天 source 可以编辑共享字段、删除 source、拉取模型；已有模型 provider 可以编辑、启停、测试和删除，但当前聊天 source 工作台没有复制 provider 的独立按钮。删除 source 会级联删除其下模型，删除模型只删除该模型实例。source 新建的未保存项可在前端状态中直接移除，不会请求后端；已保存项才调用删除 API。
 
@@ -207,7 +207,7 @@ WebUI 还提供系统级备份入口，可查看备份列表、异步导出、�
 
 #### 桌面端
 
-源码和仓库文档直接确认，桌面端客户端位于独立仓库 `AstrBotDevs/AstrBot-desktop`，本仓库的 `desktop_runtime.py` 只负责识别桌面托管后端、会话密钥和重启提示；它没有另一套 provider CRUD（`astrbot/core/desktop_runtime.py:5-60`；`docs/zh/deploy/astrbot/desktop.md:1-9`）。因此本仓库能确认的桌面端行为是：桌面客户端托管同一个后端，渠道管理能力是否完整暴露取决于外部桌面仓库对 WebUI/API 的封装；桌面端查看、新增、编辑、复制、启停、删除、导入、导出和连接测试的逐项覆盖在本次调查中均为**未验证**，不能仅凭“桌面端提供图形化配置”文档推断。
+源码和仓库文档直接确认，桌面端客户端位于独立仓库 `AstrBotDevs/AstrBot-desktop`，本仓库的 `desktop_runtime.py` 只负责识别桌面托管后端、会话密钥和重启提示；它没有另一套 provider CRUD（`astrbot/core/desktop_runtime.py:5-60`；`docs/zh/deploy/astrbot/desktop.md:1-9`）。因此本仓库能确认的桌面端行为是：桌面客户端托管同一个后端，渠道管理能力是否完整暴露取决于外部桌面仓库对 WebUI/API 的封装；桌面端查看、新增、编辑、复制、启停、删除、导入、导出和连接测试的逐项覆盖在本次调查中均为**未验证**；仓库文档中“桌面端提供图形化配置”的说明停留在入口层，逐项行为需在外部桌面仓库核对。
 
 按配置对象归纳，WebUI 对已有 provider 的可操作范围是查看、编辑、启停、删除、测试，非聊天类型另有复制；聊天类型已有 source 还可拉取模型，已有 source 下模型可编辑、启停、删除，但不能在当前页面复制。新建渠道在模板或表单提交前只能编辑本地草稿；source 保存后才可拉取模型，provider 保存并加载成功后才可启停、删除或测试。配置文件和整体备份可以复制或搬运完整 JSON，但不会自动生成新的 provider ID，也没有渠道级连接测试或选择性导入。
 

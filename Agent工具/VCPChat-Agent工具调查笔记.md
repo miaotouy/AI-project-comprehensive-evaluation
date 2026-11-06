@@ -102,7 +102,7 @@ VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistr
 | DesktopRemote 本地测试后门路由 `/pw=<file_key>/desktop-remote-test` | HTTP POST（仅限 loopback） | 分布式节点直接调用 `handleDesktopRemoteControl` | `isLoopbackAddress` + `file_key` 明文比较，无速率限制 | `VCPDistributedServer/VCPDistributedServer.js:182-258` |
 | 剪贴板读取（图片/文本） | 渲染层 UI 触发（非模型直接触发） | 主进程 `clipboard` API | 不适用——**未确认**模型可主动触发此路径，暂列为需进一步核实 | `preloads/api/files.js:12-15` |
 
-DeepMemo 的运行时后端由插件 `config.env` 的 `DeepMemoBackend=central` 决定（`DeepMemoService.js:215-223` 的 `normalizeConfig`），`backend: 'legacy'` 时回退旧链路。settings 默认值里的 `DeepMemoUseCentralSearch: false`（`appSettingsManager.js:176`）并未被 DeepMemoService 读取（grep 全仓库该键仅出现在 appSettingsManager 与 rust README 中），不能据此推断默认关闭中央检索。
+DeepMemo 的运行时后端由插件 `config.env` 的 `DeepMemoBackend=central` 决定（`DeepMemoService.js:215-223` 的 `normalizeConfig`），`backend: 'legacy'` 时回退旧链路。settings 默认值里的 `DeepMemoUseCentralSearch: false`（`appSettingsManager.js:176`）并未被 DeepMemoService 读取（grep 全仓库该键仅出现在 appSettingsManager 与 rust README 中）；中央检索的启用状态由 `DeepMemoBackend=central` 决定。
 
 VCPMobileSync 的中央索引模式（`MobileSyncUseCentralIndex=true`）下，`delete_notify` 需携带上下文或走删除推送（`sync/central.js`）。
 
@@ -266,7 +266,7 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 - 轮询 `/admin_api/agent-assistant/delegations` 每 5 秒一次（`task.js:669`）显示异步委托任务的实时进度、最近回复预览、最终报告预览。
 - 提供"立即执行任务"（`triggerTaskDirect`）、"取消委托"（`cancelDelegation`）两个写操作入口。
 
-客户端侧真正自主运行的"类子 Agent"循环只有 Flowlock（见第 5 节）——它不是任务委派系统的一部分，而是聊天窗口内由模型自身控制协议触发的续写循环，编排边界完全在 renderer 进程内，没有独立进程或独立生命周期管理（页面刷新会清空所有 session，仅能通过 `recoverPendingRequests()` 恢复由 TopicSponsor 服务端插件创建的 pending Flowlock 话题请求）。
+客户端侧真正自主运行的"类子 Agent"循环只有 Flowlock（见第 5 节）——它运行在聊天窗口内，由模型自身控制协议触发续写，编排边界完全在 renderer 进程内，与任务委派系统分属两条链路，没有独立进程或独立生命周期管理（页面刷新会清空所有 session，仅能通过 `recoverPendingRequests()` 恢复由 TopicSponsor 服务端插件创建的 pending Flowlock 话题请求）。
 
 依据：[`../../VCPChat/Agenttaskmodules/task.js:121-145`](../../VCPChat/Agenttaskmodules/task.js)（初始化与轮询启动）、[`../../VCPChat/Agenttaskmodules/task.js:634-670`](../../VCPChat/Agenttaskmodules/task.js)（状态/委托轮询）、[`../../VCPChat/Flowlockmodules/flowlock.js:266-286`](../../VCPChat/Flowlockmodules/flowlock.js)（`recoverPendingRequests`）。
 

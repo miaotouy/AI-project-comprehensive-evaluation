@@ -73,13 +73,13 @@ Topic 交付物仅为 UTF-8 `.md` 文件。主进程清理文件名中的 Window
 
 ## 4. 单消息图片分享与富内容保真
 
-阅读模式是单消息的独立重渲染面。右键菜单不会截取现有气泡，而是用当前会话定位参数调用 `getOriginalMessageContent`；主进程从对应 `UserData/<owner>/topics/<topic>/history.json` 找到同 ID 消息并返回 `message.content`。查看器接收字符串或 `{text}` 的文本，重新进行 Markdown 与富内容处理。入口和数据查询分别见 `modules/renderer/messageContextMenu.js:398-437`、`modules/ipc/chatHandlers.js:876-907`。
+阅读模式是单消息的独立重渲染面。右键菜单用当前会话定位参数调用 `getOriginalMessageContent`，不截取现有气泡；主进程从对应 `UserData/<owner>/topics/<topic>/history.json` 找到同 ID 消息并返回 `message.content`。查看器接收字符串或 `{text}` 的文本，重新进行 Markdown 与富内容处理。入口和数据查询分别见 `modules/renderer/messageContextMenu.js:398-437`、`modules/ipc/chatHandlers.js:876-907`。
 
-查看器的“截图分享”调用 `domToBlob`，失败时降级为 `domToCanvas`，捕获对象固定为 text viewer 的内容容器 `mainContentDiv`。它按最长边将像素规模限制在 14,000，优先以 DPR 或 2 倍缩放生成 PNG data URL；长内容不是主聊天视口截图，而是该单条消息重排后的完整滚动内容截图。见 `modules/text-viewer.js:2174-2295`。
+查看器的“截图分享”调用 `domToBlob`，失败时降级为 `domToCanvas`，捕获对象固定为 text viewer 的内容容器 `mainContentDiv`。它按最长边将像素规模限制在 14,000，优先以 DPR 或 2 倍缩放生成 PNG data URL；长内容按该单条消息重排后的完整滚动内容成像，与主聊天视口的截图范围分开。见 `modules/text-viewer.js:2174-2295`。
 
 生成的 PNG 通过主进程短期内存 token 交给图片查看器，避免 URL 长度截断；token 正常消费后删除，兜底保留期为十分钟。图片查看器可把 PNG 复制到剪贴板，或将原图与标注画布合成为 PNG 后触发下载。该交付物不在本地形成应用管理的版本记录。见 `modules/ipc/windowHandlers.js:19-31,158-267`、`modules/image-viewer.js:623-700`。
 
-富内容保真只可确认“查看器另行解析后再截图”，不能等同于聊天气泡像素级复刻。查看器拥有自己的 Markdown/后处理代码；原消息 content 为多模态数组时，阅读模式只接受字符串或 `{text}`，会传入空文本。脚本、外部资源、复杂工具卡和长图的实际渲染结果尚未运行验证。
+富内容保真的结论限于“查看器另行解析后再截图”，与聊天气泡像素级复刻属于两套渲染结果。查看器拥有自己的 Markdown/后处理代码；原消息 content 为多模态数组时，阅读模式只接受字符串或 `{text}`，会传入空文本。脚本、外部资源、复杂工具卡和长图的实际渲染结果尚未运行验证。
 
 ## 5. 分享稿编辑、版本与远端传播
 

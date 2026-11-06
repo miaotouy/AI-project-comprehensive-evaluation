@@ -31,7 +31,7 @@ RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后�
 | 历史会话消息 | 模型按需调用工具；另有用户检索页与 HTTP API | FTS5 全文索引 + 单字/NEAR 查询构造 | 相似度/关键词召回（关键词路径） |
 | 文档/图片附件 | 发送前管道 | 解析或 OCR 为纯文本内联为消息 | 上下文即时注入 |
 
-边界上有两点。其一，会话检索的事实源是本地应用数据库与本地索引表，不涉及远端知识库或租户；单机单用户是唯一的部署形态。其二，网页搜索只是发起外部 HTTP 请求并把结果交回模型，项目自身不保存搜索索引、不缓存网页正文，也不维护搜索历史（`data/ai/tools/SearchTools.kt`）。
+边界上有两点。其一，会话检索的事实源是本地应用数据库与本地索引表，作用范围限于单机单用户的本地库。其二，网页搜索的职责限于发起外部 HTTP 请求并把结果交回模型，每次调用的结果直接进入当轮上下文；索引、正文缓存与搜索历史这三类状态在项目内都没有对应存储（`data/ai/tools/SearchTools.kt`）。
 
 一条与检索相关的端到端主链如下；工具注册顺序、附件转文本与输入变换器链的完整细节分属 Agent 工具与上下文两侧笔记：
 
@@ -83,7 +83,7 @@ RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后�
 
 ### 网页搜索：单一 provider、provider 自带 schema
 
-搜索工具集最多两个成员：`search_web` 始终按当前所选 provider 装配，`scrape_web` 仅在该 provider 的抓取 schema 非空时追加（`data/ai/tools/SearchTools.kt`）。工具的参数 schema 不是项目自定义的中立协议，而是直接向 provider 适配器索取，因此不同 provider 暴露给模型的字段不同：Exa 提供搜索类型与发布日/域名/时效过滤，Perplexity 提供 maxTokens，本地 Bing 与 SearXNG 只暴露最少的查询字段（`search/src/main/java/me/rerere/search/ExaSearchService.kt`、同目录 `SearchService.kt`）。
+搜索工具集最多两个成员：`search_web` 始终按当前所选 provider 装配，`scrape_web` 仅在该 provider 的抓取 schema 非空时追加（`data/ai/tools/SearchTools.kt`）。工具的参数 schema 直接向 provider 适配器索取，因此不同 provider 暴露给模型的字段不同：Exa 提供搜索类型与发布日/域名/时效过滤，Perplexity 提供 maxTokens，本地 Bing 与 SearXNG 只暴露最少的查询字段（`search/src/main/java/me/rerere/search/ExaSearchService.kt`、同目录 `SearchService.kt`）。
 
 provider 集合由 sealed class 的 20 个选项与一个 `when` 分派表定义，没有插件注册机制或优先级链：所有 provider 平级，用户在设置中选中一个后，搜索工具就固定用它。当前选项为：
 
@@ -120,11 +120,11 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 检索工具与其他工具共用同一条生成循环：每步先让模型生成，再执行本步的工具调用，结果写回同一 assistant 消息后进入下一步。调用时机、审批状态机与结果回注契约属于[Agent工具笔记](../Agent工具/RikkaHub-Agent工具调查笔记.md)的范围。
 
-系统侧没有检索编排：不统计阶段数、不检测重复查询、不缓存结果、不因空结果自动换词；唯一预算机制是按会话是否具备 shell 能力生效的工具输出截断。因此“多轮检索”是模型可选行为，代码中没有把它固化成认知链，截断细节见 Agent 工具笔记（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`）。
+系统侧没有检索编排：阶段计数、重复查询检测、结果缓存和空结果换词都没有对应实现，是否追加一轮检索由模型自行判断；唯一预算机制是按会话是否具备 shell 能力生效的工具输出截断。因此“多轮检索”是模型可选行为，代码中没有把它固化成认知链，截断细节见 Agent 工具笔记（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`）。
 
 ### 记忆段在上下文中的位置与时机
 
-记忆不是工具结果，而是 system message 的一部分：构造上下文时先写系统提示，再追加记忆段，最后追加各工具的系统提示。记忆段的格式是“当前记忆”标题、核心文件全文与一份文件目录；目录每行给出路径、一行描述、别名与更新时间，模型据此决定是否调用 `memory_read` 读取某个文件（`data/ai/ChatRequestFactory.kt`、`data/ai/prompts/MemoryPrompts.kt`）。
+记忆段随 system message 注入，与工具结果分属不同通道：构造上下文时先写系统提示，再追加记忆段，最后追加各工具的系统提示。记忆段的格式是“当前记忆”标题、核心文件全文与一份文件目录；目录每行给出路径、一行描述、别名与更新时间，模型据此决定是否调用 `memory_read` 读取某个文件（`data/ai/ChatRequestFactory.kt`、`data/ai/prompts/MemoryPrompts.kt`）。
 
 这种“目录常驻 + 内容按需”的设计取代了早期的全量注入：注入体积只随文件数增长，正文读取由模型显式触发；系统提示同时要求画像与偏好两份文件已可直接使用、不必重读。记忆以外还有若干发送前注入层（时间提醒、Lorebook 触发注入、占位符替换、模板渲染等），属于检索结果的消费侧：Lorebook 条目按扫描深度匹配上下文并支持四种注入位置，其位置、优先级与变换器顺序见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
 
@@ -167,7 +167,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 - 未运行模型工具循环，未确认模型对 `search_web`／`conversation_search`／`memory_read` 的实际调用率、是否会连续换词搜索、空结果后的行为，以及输出截断的触发频率。
 - 未验证后台整理在真实使用中的触发时序、抽取质量与版本冲突频率；`MemoryContentGuard` 的拦截规则覆盖范围未逐条核对。
 - 未确认 `conversation_search` 实际不按助手过滤是否被 UI 或产品层面有意接受，以及目录注入随文件增长对请求体积的影响；本笔记只记录代码路径。
-- “无向量检索/RAG”的检索依据是：全仓库 Kotlin 源码中嵌入生成仅出现在 `ai` 模块的接口与 OpenAI／Google provider 实现，`ModelType.EMBEDDING` 只用于模型分类与 UI 标签，未发现调用 `generateEmbedding` 或建立/查询本地向量索引的代码；这表示本次已检查范围内未找到，不等同于全局不存在其他形态（原生层、Web 前端或未读模块）。
+- “无向量检索/RAG”的检索依据是：全仓库 Kotlin 源码中嵌入生成仅出现在 `ai` 模块的接口与 OpenAI／Google provider 实现，`ModelType.EMBEDDING` 只用于模型分类与 UI 标签，未发现调用 `generateEmbedding` 或建立/查询本地向量索引的代码；该结论的覆盖范围是本次已检查的全仓库 Kotlin 源码，原生层、Web 前端与未读模块未纳入。
 - 仓库文档 `docs/references/chat-generation-pipeline.md` 与实现存在命名与顺序偏差：文档称的 `GenerationHandler` 一类命名与实际类名不一致，且工具顺序由 `ChatToolFactory` 统一装配；本笔记以可执行路径为准。
 
 ## 关键源码索引

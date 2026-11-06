@@ -46,7 +46,7 @@ VCPChat 启动且 enableDistributedServer 为真
   -> VCPToolBox 解除 pending request，结果回到原工具调用链
 ```
 
-节点断开时，VCPToolBox 取消该节点的工具登记，并 reject 该节点所有在途请求；发起端超时也会删除 pending 项并尝试向支持的节点发送取消命令（`VCPToolBox/WebSocketServer.js:506-514,900-970`）。这证明服务端拥有任务等待状态，但不等同于已确认本机子进程一定被终止。
+节点断开时，VCPToolBox 取消该节点的工具登记，并 reject 该节点所有在途请求；发起端超时也会删除 pending 项并尝试向支持的节点发送取消命令（`VCPToolBox/WebSocketServer.js:506-514,900-970`）。服务端侧的等待状态由此确认；这条证据只覆盖服务端状态，本机子进程是否随之终止需另行检查。
 
 ## 身份、协议与状态映射
 

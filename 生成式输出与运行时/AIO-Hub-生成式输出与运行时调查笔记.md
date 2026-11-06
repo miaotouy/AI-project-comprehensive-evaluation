@@ -71,7 +71,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 1.2 工具输出：文本结果节点 + 物理副作用
 
 - `tool-calling` 通过 `ToolCallingProtocol` 把工具元数据、调用请求和执行结果与模型通信表示隔开：接口负责工具定义生成、使用说明生成、请求解析和结果格式化；解析后的统一请求仍由协议外的发现、校验、审批、执行与循环引擎处理（职责链入口 `core/protocols/base.ts`，其余见文末源码索引）。因此增加另一种**文本协议**可以复用现有工具目录与执行策略，但当前不是运行期可注册的协议市场，也没有直接覆盖模型 API 的结构化 `tool_calls`。
-- 当前快照只在协议注册表 `SUPPORTED_PROTOCOLS` 登记 `vcp` 一种；`resolveProtocol()` 对现有配置一律路由到 `VcpToolCallingProtocol`，配置字段 `ToolCallConfig.protocol` 也收窄为该值。以下 VCP 标记语法是当前实现事实，不能据此把 AIO 的整体工具架构等同于 VCP。
+- 当前快照只在协议注册表 `SUPPORTED_PROTOCOLS` 登记 `vcp` 一种；`resolveProtocol()` 对现有配置一律路由到 `VcpToolCallingProtocol`，配置字段 `ToolCallConfig.protocol` 也收窄为该值。以下 VCP 标记语法属于当前唯一注册协议的具体实现；工具系统的设计范围由 `ToolCallingProtocol` 抽象界定。
 - 当前 VCP 实现由模型自由文本中的 `<<<[TOOL_REQUEST]>>> ... <<<[END_TOOL_REQUEST]>>>` 标记触发（`src/tools/tool-calling/core/protocols/vcp-protocol.ts`），只有标准请求块执行；转义请求标记用于参数内字面文本，还原后不再展开额外调用。服务端工具批次先被遮蔽，避免结果里的示例被二次执行（`vcp-protocol.ts:358-427`）。
 - 执行结果经 `formatCycleResults` 委托当前协议序列化为文本，写入 role 为 `"tool"` 的消息节点（`useToolCallOrchestrator.ts:325-345`），节点 `metadata.toolCalls[]` 记录每个请求的 requestId/工具名/状态/耗时/原始参数。**结果不物化为独立对象**；若工具本身有物理副作用（如画布写文件），结果对象身份在文件侧。
 - 工具节点可被"重新解析"（`reparseAndOrchestrate`，`useToolCallOrchestrator.ts:449`），即对已有内容重新走工具调用检测与执行，属于后续回合重入入口。

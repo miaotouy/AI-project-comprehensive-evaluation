@@ -121,7 +121,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
 ## 4. 主题、视觉 token 与持久化
 
-主题切换**不是 CSS 变量热替换，而是整窗口重载**：handleApplyTheme（`modules/ipc/themeHandlers.js:77-92`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后重载主窗口和主题窗口（:101、:103），窗口完整重新加载。
+主题切换**通过整窗口重载生效**：handleApplyTheme（`modules/ipc/themeHandlers.js:77-92`）将选中的主题 CSS 文件（`styles/themes/themesXxx.css`）整体覆写到 `styles/themes.css`，然后重载主窗口和主题窗口（:101、:103），窗口完整重新加载；CSS 变量随新样式表在新窗口里重新求值，运行期不做变量热替换。
 
 - 深色/浅色通过 Electron nativeTheme.themeSource 控制（:22-38），可设 'light'/'dark'/'system'，值存入 `settings.json` 的 currentThemeMode。系统主题跟随通过监听更新事件（:41-44, :207），变更时向所有窗口广播 theme-updated IPC，渲染进程收到后切换 body.light-theme class。
 - CSS 变量约定：:root 块定义暗色主题变量，body.light-theme 块覆盖亮色变量；每个主题文件同时包含两个块，themeHandlers.handleGetThemes 可枚举所有主题及其变量名（:50-91）。主题选择器是独立 850×700 无框子窗口（`Themesmodules/themes.html`，frame: false，:169）。
@@ -141,7 +141,7 @@ dialog.showErrorBox 只用于具体功能失败（骰子服务 `modules/ipc/dice
 
   窗口由主题卡片网格、实时预览区和“应用并刷新”按钮组成：卡片是双栏预览，左半使用暗色变量和暗色壁纸，右半使用亮色变量和亮色壁纸（`Themesmodules/themes.js:82-227`）。该窗口本身仍只选择 CSS 主题预置，不编辑主题文件。
 
-  `#saveThemeBtn`（:222-226）实际只是调用 applyTheme IPC 应用选中主题，变量名（"保存主题"）与按钮文案"应用并刷新"存在落差，不能据此理解为保存自定义主题。
+  `#saveThemeBtn`（:222-226）承担的动作是经 applyTheme IPC 应用选中主题；变量名（"保存主题"）与按钮文案"应用并刷新"存在落差。
 
 **外观 profile/material 运行时。** `appearance-studio.js` 维护已提交 snapshot 与当前 draft，控件变化先提交到 appearance runtime 做窗口内预览；保存时以设置 patch 持久化，并在本地应用失败时尝试回滚持久快照。关闭脏面板会要求继续编辑、放弃或保存。它编辑的是结构化外观配置和 CSS material variables，不会生成或导入 `styles/themes/` 主题文件。`modules/ui-system/appearance-studio.js:734-794,955-1209,1359-1382`、`appearance-profile-runtime.js:1-8`
 

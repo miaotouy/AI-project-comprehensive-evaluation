@@ -52,7 +52,7 @@ Calendar 提醒窗口
 
 ### Calendar alerts
 
-事件保存开始时间、重复规则、取消标记与提醒分钟数；负数关闭提醒。重复频率校验下限为 24 小时。查询提醒窗口后，处理器会锁定并重读数据库事件，校验事件仍存在、未取消、开始时间未变，且 `alerted_at` 不等于本次开始时间（[`models/calendar.py`](../../open-webui/backend/open_webui/models/calendar.py)、[`utils/automations.py:542-593`](../../open-webui/backend/open_webui/utils/automations.py#L542-L593)）。
+事件保存开始时间、重复规则、取消标记与提醒分钟数；负数关闭提醒。重复频率校验下限为 24 小时。查询提醒窗口后，处理器会锁定并重读数据库事件，校验事件仍存在、未取消、开始时间未变，且 `alerted_at` 尚未记录本次开始时间（[`models/calendar.py`](../../open-webui/backend/open_webui/models/calendar.py)、[`utils/automations.py:542-593`](../../open-webui/backend/open_webui/utils/automations.py#L542-L593)）。
 
 去重标记保存的是事件开始时间，改期后允许再次提醒；它没有表达每个重复实例的独立 alert run。重复实例展开、特殊排除规则与每实例提醒的完整关系尚未逐项确认。
 

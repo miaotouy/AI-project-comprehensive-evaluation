@@ -50,7 +50,7 @@ VCPChat 有三个设计点：
 
 主窗口在 `renderer.js` 中创建独立的 Marked 实例，并把它与 DOM、历史引用、设置引用和 Electron API 一并注入消息渲染器的初始化入口。`messageRenderer.js` 再把所需能力下传给内容处理器、流管理器和上下文菜单等子模块。
 
-这是一种手工依赖注入：模块并不拥有聊天状态，而是通过形如 `{ get, set }` 的 ref 读取当前会话历史、当前选中项、当前话题和全局设置。因此同一套消息渲染器能够被主聊天和语音聊天用不同状态源初始化。
+这是一种手工依赖注入：模块通过形如 `{ get, set }` 的 ref 读取当前会话历史、当前选中项、当前话题和全局设置，聊天状态的所有权留在调用方。因此同一套消息渲染器能够被主聊天和语音聊天用不同状态源初始化。
 
 ### 1.2 共用与非共用表面
 
@@ -193,7 +193,7 @@ renderMessage(message)
 - assistant 文本经 `processAssistantScopedHtmlContent()` 提取 `<style>`、改写 CSS selector，并处理需要 scope 的结构化 HTML。
 - 然后才计算消息深度并应用 Agent 配置中的前端正则。
 
-这说明 CSS scope 不属于 Marked 插件，而是更早发生的 assistant 内容变换；前端正则也不是 Markdown AST 插件，而是完整字符串上的规则系统。
+这说明 CSS scope 发生在 Marked 之前的 assistant 内容变换阶段；前端正则作用于完整字符串，独立于 Markdown AST。
 
 ### 4.3 Markdown 前处理的顺序协议
 
@@ -233,7 +233,7 @@ renderMessage(message)
 - HTML 标签被视为硬边界，不能跨两个元素配对美元符号。
 - 被认可的 `$...$` 会转换为 `\(...\)`，再交给 DOM 后的 KaTeX auto-render。
 
-Marked 完成后，LaTeX 占位符以一次正则扫描恢复。这里保护的目标不是隐藏内容，而是防止 Markdown 把反斜杠、下划线等 TeX 语法改写。
+Marked 完成后，LaTeX 占位符以一次正则扫描恢复。占位符保护的是 TeX 语法本身：防止 Markdown 把反斜杠、下划线等标记改写掉。
 
 ### 4.5 思维链是独立隔离渲染域
 
@@ -418,7 +418,7 @@ JSON parse error chunk 会被丢弃。有效文本先经过 Desktop Push 拦截�
 
 启用平滑流式时，较长 chunk 会按中文连续段、英文数字段、标点和空白拆成小语义单位，每个单位最多约 10 个字符。队列越深，每帧消费越多；消息已最终化但队列未清空时会加速追平，避免最后剩余内容一次跳出。
 
-所有活动消息共用一个 requestAnimationFrame 循环，并限制为约 30 FPS。即使关闭平滑播放，也不是每个网络 chunk 立刻独立改 DOM，而是标脏后由全局帧循环合并更新。
+所有活动消息共用一个 requestAnimationFrame 循环，并限制为约 30 FPS。即使关闭平滑播放，网络 chunk 仍先标脏，由全局帧循环合并更新。
 
 ### 6.4 稳定前缀与可变尾部
 
@@ -500,7 +500,7 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 
 可执行脚本中的外部依赖经动态 script 加载，常见 CDN 地址改写到本地 vendor。内联脚本包在 IIFE 中，将 DOM 查询、动画帧和定时器替换成消息所有者提供的接口；这些接口便于暂停和清理，脚本仍处在聊天页面上下文。依据：[脚本包装与执行](../../VCPChat/modules/renderer/animation.js#L505-L555)。
 
-Pixi Application 也绑定到消息并先冻结，再按热区竞争启动配额。当前聊天根最多保留三个已启动 Pixi 气泡，历史初载消息最多启动一个；满额时先淘汰最老的离屏实例，若全在热区则抑制新实例。离屏暂停 ticker 保留配额，消息移除时销毁实例并释放配额。因此资源限额针对 Pixi 气泡，不能推断为所有脚本或 WebGL 实例的通用限额。依据：[配额判定](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473)、[启动抑制](../../VCPChat/modules/renderer/visibilityOptimizer.js#L682-L702)、[消息清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
+Pixi Application 也绑定到消息并先冻结，再按热区竞争启动配额。当前聊天根最多保留三个已启动 Pixi 气泡，历史初载消息最多启动一个；满额时先淘汰最老的离屏实例，若全在热区则抑制新实例。离屏暂停 ticker 保留配额，消息移除时销毁实例并释放配额。因此该资源限额只作用于 Pixi 气泡，其他脚本或 WebGL 实例的配额不在本次证据范围内。依据：[配额判定](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473)、[启动抑制](../../VCPChat/modules/renderer/visibilityOptimizer.js#L682-L702)、[消息清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
 
 脚本内的 `document.querySelector/querySelectorAll/getElementById/getElementsByTagName` 被包装为"当前消息容器优先、document 回退"（`animation.js:282-360`）：同页面多条消息包含相同 id 或 `data-vdoc-island` 时，脚本默认命中自己消息内的节点而非页面第一份副本；对 script 标签的查询例外地保留全局行为并追加 `virtualCurrentScript`，以兼容依赖当前脚本引用的库代码。这是消息脚本 DOM 隔离的补充手段，不是新的隔离边界——脚本仍运行在聊天 renderer 的页面上下文。
 

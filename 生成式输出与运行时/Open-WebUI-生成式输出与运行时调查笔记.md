@@ -154,7 +154,7 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
   - `message.code_executions` 字段的后端写入路径（前端有渲染组件，本次未找到写入方）；
   - notebook 编辑/执行结果是否持久化回 .ipynb 文件；
   - 模型经 `execute:python` RPC 在无浏览器活动会话（后台标签）时的可用性（代码有 session 校验与超时提示，未运行确认）。
-- 能力等级（横向对比口径，不表示产品成熟度）：**G3（可执行 Artifact：Pyodide/Jupyter 代码执行、HTML 沙箱预览、工具结果物化）为主体，部分 G4（代码块与 notebook 单元编辑保存、文件编辑回写，但无 diff/版本/接受拒绝）与部分 G5（模型可读写沙箱文件系统、同一输出项就地更新并回流，但仅会话级、无对象查询协议、默认不跨会话持久化）**。各轴单列：
+- 能力等级（横向对比口径，按输出深度分级）：**G3（可执行 Artifact：Pyodide/Jupyter 代码执行、HTML 沙箱预览、工具结果物化）为主体，部分 G4（代码块与 notebook 单元编辑保存、文件编辑回写，但无 diff/版本/接受拒绝）与部分 G5（模型可读写沙箱文件系统、同一输出项就地更新并回流，但仅会话级、无对象查询协议、默认不跨会话持久化）**。各轴单列：
   - 协议开放度：私有 XML 标记 + 代码块探测（低开放）；
   - 更新粒度：整块+就地字段（低）；
   - 投影表面：inline + sidecar（无 canvas/desktop）；

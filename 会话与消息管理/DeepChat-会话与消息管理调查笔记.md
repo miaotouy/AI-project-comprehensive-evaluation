@@ -187,7 +187,7 @@ setMessageError(...)          :419-441（同上，status=error）
   - `deepchat_pending_inputs`：v17 → v43 → v46 → v67（`deepchatPendingInputs.ts:52-71`；v67 加 `retry_required_at` 并归一化旧行）
   - `new_sessions`：v11 → v15 → v16 → v20 → v21 → v44 → v59（`newSessions.ts:97-131`；v44 为 revision 前移恢复、v59 加编排策略列）
   - `deepchat_assistant_blocks` / `deepchat_search_documents`：v26 规范化重建（`deepchatAssistantBlocks.ts:104-113`、`deepchatSearchDocuments.ts:64-73`）
-  - transcript projection cursor：独立表 `deepchat_transcript_projection_meta`，当前 projection version 为 1；它不是消息 schema 版本，而是 Tape 到 transcript 派生表的重放协议版本。
+  - transcript projection cursor：独立表 `deepchat_transcript_projection_meta`，当前 projection version 为 1；该版本号标识 Tape 到 transcript 派生表的重放协议，与消息 schema 版本各自独立演进。
 - **导入导出**：导出路由 `sessionsExportRoute`（`routes.ts:511-518`）→ `AgentSessionExportService`；启动组件清单含 `legacy_import`（`src/main/logging/mainLogEvents.ts:76`）。本次未追踪 legacy import 与导出的完整数据链。
 
 ## 8. Agent、模型、知识库与附件绑定
@@ -202,7 +202,7 @@ setMessageError(...)          :419-441（同上，status=error）
 ## 9. 设计取舍与已确认边界
 
 - transcript 同时服务展示、搜索、usage 与 Tape 等二级数据，一条消息的完成/错误路径承担全部同步更新（§2）；流式中间态只写 blocks 与 pending 状态，不重复写全量 content。
-- transcript 表是可重建投影，但 usage 统计不由投影器重放，因为 fork/import/recovery 重放 record 不代表发生了新的 Provider 调用（`transcriptProjection.ts` 的类级契约）。
+- transcript 表是可重建投影，但 usage 统计不由投影器重放，因为 fork/import/recovery 重放 record 只重放历史记录，不触发新的 Provider 调用（`transcriptProjection.ts` 的类级契约）。
 - 失败 assistant 消息保留 `error` 状态和错误块，不静默丢弃；retry/edit/delete 的尾随截断语义统一（§4）。
 - fork 是"复制到新会话"而非版本树指针，消息层不存在父子/变体字段（§1.5）。
 - queue/steer 输入独立于已完成消息持久化，claimed 未物化项进入 `retry_required` 显式等待用户处置（§1.4）。

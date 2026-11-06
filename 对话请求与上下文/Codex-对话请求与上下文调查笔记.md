@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Codex 的一次生成由 `turn/start` RPC 进入 app-server，转换为核心的 `Op::TurnInput`；核心在 `turn_input::handle` 一处判定“开始新 turn、并入当前 turn、或拒绝”，之后由常规任务循环驱动。上下文不是拼成一条 system prompt 后直接发请求，而是先在历史中追加一组**世界状态（world state）片段**，再归一化为 Responses API 输入，最后组装工具、base instructions 与输出 schema。
+Codex 的一次生成由 `turn/start` RPC 进入 app-server，转换为核心的 `Op::TurnInput`；核心在 `turn_input::handle` 一处判定“开始新 turn、并入当前 turn、或拒绝”，之后由常规任务循环驱动。上下文以历史片段承载，而非拼成一条 system prompt 后直接发请求：先在历史中追加一组**世界状态（world state）片段**，再归一化为 Responses API 输入，最后组装工具、base instructions 与输出 schema。
 
 关键事实：
 
@@ -49,7 +49,7 @@ turn/start（app-server turn_processor.rs:546-772）
 
 **任务对象**：`ActiveTurn` 持有当前任务、含取消令牌与待处理输入的轮次状态，以及取消句柄；任务由 `spawn_task`/`start_task` 一类入口挂到活动轮上（`codex-rs/core/src/tasks/mod.rs:276-303`、`codex-rs/core/src/state/turn.rs`）。轮次上下文的 id 直接沿用提交 id，root turn 与子 turn 通过根轮 id 关联（`codex-rs/protocol/src/protocol.rs:2443-2466`）。
 
-**状态机是隐式的**：没有 `running/queued` 枚举，状态由“是否存在 ActiveTurn 及其 task 字段”表达；对外只暴露 `TurnInputSubmission` 四态与一组拒绝原因。第四态 `Accepted` 表示核心已把一条 Agent 跟进排入投递队列，此时既不隐含新 turn，也不表示接收方已经开始处理（`codex-rs/protocol/src/turn_input.rs:249-266`）。拒绝原因覆盖了并发与模式约束（`codex-rs/protocol/src/turn_input.rs:294-326`）：
+**状态机是隐式的**：没有 `running/queued` 枚举，状态由“是否存在 ActiveTurn 及其 task 字段”表达；对外只暴露 `TurnInputSubmission` 四态与一组拒绝原因。第四态 `Accepted` 记录的是核心已把一条 Agent 跟进排入投递队列；新 turn 的产生与接收方的实际处理由后续投递环节决定（`codex-rs/protocol/src/turn_input.rs:249-266`）。拒绝原因覆盖了并发与模式约束（`codex-rs/protocol/src/turn_input.rs:294-326`）：
 
 ```text
 Superseded / ServerDraining / NotIdle / PendingTriggerTurn / PlanMode /

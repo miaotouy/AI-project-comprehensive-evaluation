@@ -65,7 +65,7 @@ VCPChat 是 Electron 主应用、众多按功能命名的前端目录、多个 R
 
 ## 跨平台组织与边界
 
-Electron builder 声明 macOS、Windows、Linux 目标（`package.json:182-262`），构建前的 sidecar 编译现在同时包含聊天数据服务、语音输入引擎与工程索引器（`package.json:28`）。CI 侧有六个工作流，其中 Rust assistant engine 构建覆盖三平台（`.github/workflows/rust_assistant_engine_build.yml:21-107`），另有移动同步、side pane 端到端与安装器工作流（`.github/workflows/mobile_sync.yml`、`side_pane_e2e.yml`、`side_pane_windows.yml`、`vcpchat-installer.yml`）。同时，README 和部分工具具有 Windows 专属行为，因此“有三平台构建配置”不等于所有附属能力平台等价；本次未运行确认。
+Electron builder 声明 macOS、Windows、Linux 目标（`package.json:182-262`），构建前的 sidecar 编译现在同时包含聊天数据服务、语音输入引擎与工程索引器（`package.json:28`）。CI 侧有六个工作流，其中 Rust assistant engine 构建覆盖三平台（`.github/workflows/rust_assistant_engine_build.yml:21-107`），另有移动同步、side pane 端到端与安装器工作流（`.github/workflows/mobile_sync.yml`、`side_pane_e2e.yml`、`side_pane_windows.yml`、`vcpchat-installer.yml`）。同时，README 和部分工具具有 Windows 专属行为，因此三平台构建配置覆盖构建与产物目标；附属能力的平台支持范围各有差异，本次未运行确认。
 
 ## 关键源码索引
 

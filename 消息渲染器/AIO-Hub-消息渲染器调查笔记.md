@@ -104,13 +104,13 @@ Agent/User Profile 显示规则会先经过来源合并、角色/深度过滤和
 
 思考标签闭合采用规范化和有限模糊匹配，闭合状态变化即使文本指纹未变也需更新思考节点。VCP 的 ESCAPE 内容会整体跳过，参数里的示例结束标记不应中断外块；坏块遇后续同级起点可恢复扫描。仅显示侧的模糊围栏恢复有单独开关，接受启发式边界需要剩余字段能完整收敛，保留原文及诊断，不改变真正工具执行解析。证据见[共享块边界](<../../aio-hub/src/utils/vcpBlockBoundary.ts>)与[显示恢复器](<../../aio-hub/src/tools/rich-text-renderer/parser/vcpFenceRecovery.ts#L54-L125>)。
 
-V2 护栏约束缓冲、解析时长和停滞次数，开关可配置。当前单次解析和迭代时长上限分别是 1,000,000ms 与 6,000,000ms，缓冲约 50MB、边界停滞 10,000 次；这些是失控保护，不能视为低延迟保证。[护栏定义与调用](<../../aio-hub/src/tools/rich-text-renderer/core/StreamProcessorV2.ts#L594-L650>)可复查。
+V2 护栏约束缓冲、解析时长和停滞次数，开关可配置。当前单次解析和迭代时长上限分别是 1,000,000ms 与 6,000,000ms，缓冲约 50MB、边界停滞 10,000 次；这些阈值界定失控上限，延迟表现需在目标环境单独测量。[护栏定义与调用](<../../aio-hub/src/tools/rich-text-renderer/core/StreamProcessorV2.ts#L594-L650>)可复查。
 
 ## 4. 阅读区、回收与滚动
 
 ### 4.1 保留行壳，按阅读区显示正文
 
-列表仍对所有活动路径消息建立行壳，使用 content-visibility 和行高缓存控制离屏绘制；行高结合段落预估及有界整行实测，布局修订时重新测量。[行高管理](<../../aio-hub/src/tools/llm-chat/composables/ui/useMessageHeights.ts>)不等同于 TanStack 消息窗口化。
+列表仍对所有活动路径消息建立行壳，使用 content-visibility 和行高缓存控制离屏绘制；行高结合段落预估及有界整行实测，布局修订时重新测量。回收只作用于正文层，行壳始终保留；TanStack 消息窗口化按可视区挂载行，两者属于不同的行管理模型。相关实现见[行高管理](<../../aio-hub/src/tools/llm-chat/composables/ui/useMessageHeights.ts>)。
 
 [阅读区](<../../aio-hub/src/tools/llm-chat/composables/ui/useMessageReadingArea.ts#L18-L89>)以视口上下各 600px 为预热区，从有序行壳二分定位开始范围，并保留最后一行。正文向这里登记；选区或焦点保护可扩大显示范围。静态离屏正文尚未首次显示时可延迟 parser 初始化，已有显示树离开阅读区 300ms 后可卸载，只保留几何、源文本和已拥有的解析状态。[显示控制](<../../aio-hub/src/tools/rich-text-renderer/composables/useRendererDisplay.ts#L89-L165>)与[延迟解析入口](<../../aio-hub/src/tools/rich-text-renderer/RichTextRenderer.vue#L552-L625>)共同确定此行为。
 
@@ -176,7 +176,7 @@ VCP 正文中的角色/工具返回批次仍能变为 AST。完整批次识别�
 
 ## 7. 流式装饰与动画生命周期
 
-[聊天设置](<../../aio-hub/src/tools/llm-chat/components/settings/settingsConfig.ts#L705-L729>)提供流式文字效果，Agent 可选择继承或覆盖；截图强制关闭装饰。统一[设置映射](<../../aio-hub/src/tools/llm-chat/utils/richTextRendererSettings.ts#L22-L50>)把最终值传到正文、推理和译文渲染器，不能仅凭菜单项判断传播成功。
+[聊天设置](<../../aio-hub/src/tools/llm-chat/components/settings/settingsConfig.ts#L705-L729>)提供流式文字效果，Agent 可选择继承或覆盖；截图强制关闭装饰。统一[设置映射](<../../aio-hub/src/tools/llm-chat/utils/richTextRendererSettings.ts#L22-L50>)把最终值传到正文、推理和译文渲染器，传播是否在运行时全程生效属于运行验证范围。
 
 装饰不改写存储正文，也不通过包裹每个字符实现。控制器观察追加文字，为新增原生 Text 范围着色，并在独立 Canvas 绘制扫光和粒子；CSS Highlight 不受支持时原生字形着色降级。重解析或重挂载的旧文字不应全部重播，任务有待处理文本、粒子与范围数量上限。实现见[装饰控制器](<../../aio-hub/src/tools/rich-text-renderer/utils/streamStardust.ts#L41-L150>)与[原生文字着色](<../../aio-hub/src/tools/rich-text-renderer/utils/streamTextTint.ts#L22-L125>)。
 
@@ -208,7 +208,7 @@ VCP 正文中的角色/工具返回批次仍能变为 AST。完整批次识别�
 
 - 新旧布局、紧凑分组、变量弹窗、工具巨型正文与提问定位的真实阅读体验。
 - 回收后折叠/源码/预览/选区恢复、复杂嵌入保护、跨窗口重连的端到端表现。
-- 长会话内存、首屏解析、Worker 高频传输、滚动抖动和装饰帧率；静态阈值不代表性能达标。
+- 长会话内存、首屏解析、Worker 高频传输、滚动抖动和装饰帧率；目标帧率与内存预算需在真实会话中测量。
 - HTML/CSS/URL 过滤、iframe sandbox/CSP 与 Tauri capabilities 的完整安全验证。
 - 平台媒体、剪贴板、键盘和读屏行为；移动端与桌面端特定语法兼容性。
 

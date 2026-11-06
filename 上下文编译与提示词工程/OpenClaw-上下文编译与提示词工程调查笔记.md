@@ -20,7 +20,7 @@ OpenClaw 在本次检查范围内具备独立的运行时上下文编译能力�
 - skills 是 OpenClaw 中实现最完整的一类规则对象：加载器合并多个有优先级的根目录，过滤后生成有硬上限的 `<available_skills>` 目录；目录只放元数据，完整正文按需读取。显式 `$skill` 引用走另一条有限的请求前展开路径（`src/skills/loading/workspace-skill-loader.ts`；`src/skills/loading/workspace-skill-prompt.ts`）。
 - prompt 模板与 slash command 提供文件型输入预处理。模板可从 agent、项目、显式路径和扩展资源加载，参数替换是单次展开；embedded 运行器接收上层准备好的资源，SDK session 在输入阶段展开模板（`src/agents/sessions/prompt-templates.ts`；`src/agents/sessions/agent-session-prompting.ts`）。
 - 插件 hooks、memory 与 context engine 能在不同阶段追加或替换模型上下文，也能影响工具面；各自有独立的 authority、超时和降级策略（`src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts`；`src/agents/embedded-agent-runner/run/attempt-history.ts`）。
-- 最终结果分为模型请求、权威会话和诊断投影三条去向。模型专用的 prepend context 不等于可见 transcript，`systemPromptReport` 和 `/context` 也不等于最终 Provider payload（`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts`；`src/auto-reply/reply/commands-context-report.ts`）。
+- 最终结果分为模型请求、权威会话和诊断投影三条去向。模型专用的 prepend context 只进入模型请求，与可见 transcript 分属两条去向；`systemPromptReport` 与 `/context` 属于诊断投影，最终 Provider payload 由运行器另行组装（`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts`；`src/auto-reply/reply/commands-context-report.ts`）。
 
 ## 系统边界与规则编译主链
 
@@ -135,7 +135,7 @@ memory prompt section 只在 `promptMode=full` 且当前 runtime 允许时构建
 
 active-memory 的请求前选择有更细条件：必须有当前 turn 的 tool authority，memory tools 必须仍被 allowlist 允许，session/agent/渠道类型和 private destination 必须符合配置；lane 1 对 curated trigger 做 lexical-only 预筛，强命中最多注入三个短片段；需要回顾过去且 lane 1 不足时，lane 2 才启动受预算、超时和 authority 约束的 recall subagent。失败、超时、session disabled、无 private recall 能力或 authority 关闭时返回空结果，通常只记录 status/diagnostic，不阻断主回复（`extensions/active-memory/trigger-recall.ts`；`extensions/active-memory/index.ts`）。
 
-memory-lancedb 的 auto-recall 是可选的独立 `before_prompt_build` 实现：只有 `autoRecall`、`memory_recall` 工具 authority、有效 agent 和长度足够的 prompt 同时满足时才查询；embedding/search 共用 15 秒 deadline，embedding timeout 会触发 agent 级 cooldown，成功结果最多三条，包装为“历史 context” prepend，而不是改写原始 user prompt（`extensions/memory-lancedb/auto-recall.ts`）。它与 memory-core 的能力注册和 active-memory 选择是不同插件路径，不能仅凭都有 recall 名称推断二者同时生效。
+memory-lancedb 的 auto-recall 是可选的独立 `before_prompt_build` 实现：只有 `autoRecall`、`memory_recall` 工具 authority、有效 agent 和长度足够的 prompt 同时满足时才查询；embedding/search 共用 15 秒 deadline，embedding timeout 会触发 agent 级 cooldown，成功结果最多三条，包装为“历史 context” prepend，而不是改写原始 user prompt（`extensions/memory-lancedb/auto-recall.ts`）。它与 memory-core 的能力注册和 active-memory 选择是不同插件路径，二者是否同时生效取决于各自的启用条件。
 
 ### 历史、context engine 与当前 prompt
 

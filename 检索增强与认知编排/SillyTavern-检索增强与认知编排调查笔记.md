@@ -48,9 +48,9 @@
 
 **源码事实。** Vector Storage 对聊天消息使用内容哈希作标识，可选先摘要，再按递归分隔符切成消息块；新消息写入索引，已从聊天删除的哈希会删除。索引项的元数据只有哈希、文本和原消息/块索引。服务端将索引落在当前用户的 vectors 目录，路径按 Embedding source、collection ID 和模型名分层，因此不同 source/model 不共用索引。后端使用 Vectra `LocalIndex` 做 top-K：metadata 会按相似度阈值过滤，但返回的 hashes 未过滤；聊天扩展消费 hashes，故聊天重排实际只受 top-K 限制。模型不会取得分数。见 `public/scripts/extensions/vectors/index.js:440-543` 与 `src/endpoints/vectors.js:300-392`。
 
-**源码事实。** Data Bank 不是另一个由向量服务管理的资料表。它是三种附件清单的合并视图：全局设置、当前聊天元数据、当前角色的设置；附件记录 URL、大小、名称和创建时间，可被禁用。文件本体在用户 files 目录。向量扩展首次需要时按文件 URL 哈希建 collection，读取文件、按阈值选择整篇或分块入库；文件删除事件会清除该文件索引。见 `public/scripts/chats.js:1723-1786`、`src/endpoints/files.js:28-100` 与 `public/scripts/extensions/vectors/index.js:640-766,2085-2093`。
+**源码事实。** Data Bank 把三处附件清单合并成一个视图：全局设置、当前聊天元数据、当前角色的设置；附件记录 URL、大小、名称和创建时间，可被禁用。文件本体在用户 files 目录。向量扩展首次需要时按文件 URL 哈希建 collection，读取文件、按阈值选择整篇或分块入库；文件删除事件会清除该文件索引。见 `public/scripts/chats.js:1723-1786`、`src/endpoints/files.js:28-100` 与 `public/scripts/extensions/vectors/index.js:640-766,2085-2093`。
 
-**源码事实。** 向量扩展还可索引已选 World Info 中带 `vectorized` 标记的条目，或在“all”开关下索引全部有内容条目；collection 以书名哈希区分。这个功能召回条目后发出强制激活事件，仍由核心 World Info 负责最后的过滤、预算和文本落点，不能等同于直接把向量结果注入。见 `public/scripts/extensions/vectors/index.js:1623-1726`。
+**源码事实。** 向量扩展还可索引已选 World Info 中带 `vectorized` 标记的条目，或在“all”开关下索引全部有内容条目；collection 以书名哈希区分。这个功能召回条目后发出强制激活事件，仍由核心 World Info 负责最后的过滤、预算和文本落点，向量结果只作为候选条目进入这条链路。见 `public/scripts/extensions/vectors/index.js:1623-1726`。
 
 ## 发送时激活、候选、预算与注入
 
@@ -76,9 +76,9 @@
 
 **源码事实。** 服务器私有路由在向量、World Info 和文件路由之前安装用户数据中间件。未启用账号时所有请求使用默认用户目录；启用账号后从 session 取得用户并改用该用户目录。因此 World Info、文件和 Vectra 索引的磁盘位置以用户为边界，向量 collection 不能通过常规路由跨用户访问。Data Bank 的“全局”只指同一用户的全局设置，不是服务器所有用户共享的资料库。见 `src/server-startup.js:140-184`、`src/users.js:955-1018` 与 `src/endpoints/vectors.js:470-605`。
 
-**源码事实。** 默认配置不监听外网，IP 白名单启用且只允许回环地址；账号、基本认证、CORS 代理、私有地址白名单默认关闭。若改为监听模式，启动安全检查要求启用白名单、基本认证或用户账号，否则会退出，除非明确覆盖。这个结论描述默认配置和启动检查，不代表部署后的反向代理、CORS、账号密码或第三方 Embedding 服务一定安全。见 `default/config.yaml:3-10,58-107,154-182` 与 `src/users.js:149-196`。
+**源码事实。** 默认配置不监听外网，IP 白名单启用且只允许回环地址；账号、基本认证、CORS 代理、私有地址白名单默认关闭。若改为监听模式，启动安全检查要求启用白名单、基本认证或用户账号，否则会退出，除非明确覆盖。以上覆盖默认配置与启动检查；部署后的反向代理、CORS、账号口令与第三方 Embedding 服务的实际暴露面由部署侧决定。见 `default/config.yaml:3-10,58-107,154-182` 与 `src/users.js:149-196`。
 
-**静态推断。** 本次读取的路径将附件和 Lorebook 内容作为待嵌入及待注入的普通文本，没有发现对其内容进行“可信知识”标记、提示注入隔离或检索结果授权判定的专用层。选择远程 Embedding source 时，待索引文本和查询文本会经服务器转交该 source；应将资料内容的外发边界理解为所选 provider 与部署配置共同决定，而不是由向量索引自动隔离。检查范围为 `src/endpoints/vectors.js`、Vector Storage 和文件路由，未审计每个 provider 的传输、保留策略或网络部署。
+**静态推断。** 本次读取的路径将附件和 Lorebook 内容作为待嵌入及待注入的普通文本，没有发现对其内容进行“可信知识”标记、提示注入隔离或检索结果授权判定的专用层。选择远程 Embedding source 时，待索引文本和查询文本会经服务器转交该 source；应将资料内容的外发边界理解为由所选 provider 与部署配置共同决定。检查范围为 `src/endpoints/vectors.js`、Vector Storage 和文件路由，未审计每个 provider 的传输、保留策略或网络部署。
 
 ### 可观测、失败与恢复
 

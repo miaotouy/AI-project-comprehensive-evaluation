@@ -345,7 +345,7 @@ if (isWindows) {
 - `allowWrite`：`[workDir, ...TASK_SANDBOX_EXTRA_WRITE_PATHS, ...临时目录(os.tmpdir()+'/tmp'及其symlink解析形式), ...用户授权目录的字面与canonical两种形式]`。
 - `denyWrite`：`TASK_SANDBOX_DENY_WRITE_PATHS`（如 `.env`、`.git` 等敏感名）+ 针对每个用户授权目录动态生成的绝对 deny 规则（`${base}/${name}` 与 `${base}/**/${name}`），因为 sandbox-runtime 对裸相对模式默认相对 main 进程 cwd 解析，不会自动覆盖用户授权目录，需要显式锚定。
 - `denyRead`：`TASK_SANDBOX_DENY_READ_PATHS = ['~/.ssh', '~/.gnupg', '~/.aws', '~/.config/gh']`（`shared/task-sandbox.ts:1`）——只覆盖常见密钥/凭据目录，属白名单式最小防护而非默认拒绝；`TASK_SANDBOX_DENY_WRITE_PATHS = ['.env', '.env.local', '.env.production']`（同文件:3）同理只挡常见环境变量文件名。
-- 网络：故意不设置 allowedDomains（代码注释警告 `allowedDomains: ['*']` 不是通配符而是字面匹配），效果是生成 `(allow network*)`，即**默认放行全部网络访问**。因此 code_execution 在 macOS/Linux 上文件系统受限，但网络不受限。
+- 网络：故意不设置 allowedDomains（代码注释指出 `allowedDomains: ['*']` 按字面匹配处理，覆盖不到全部域名），效果是生成 `(allow network*)`，即**默认放行全部网络访问**。因此 code_execution 在 macOS/Linux 上文件系统受限，但网络不受限。
 
 ### 7.4 会话隔离与跨会话访问
 

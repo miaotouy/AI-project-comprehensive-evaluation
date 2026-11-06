@@ -20,13 +20,13 @@
 
 **源码事实。** 元思考不是 LLM 的逐步推理循环：它顺序检索已索引的“思维簇”，用上一阶段命中向量的均值与原查询向量加权融合，驱动下一阶段检索，并把每阶段文本拼成注入块。AgentDream 则从同一日记和向量索引形成跨时间层级的联想树，调用本地 VCP API 生成梦叙事；模型提出的合并、删除、感悟先落为 `pending_review` 日志，再由管理路由审批后写日记或删除源文件。
 
-**源码事实。** 主要的会话内日记写入入口不是 AgentDream，而是启用的 DailyNote 常驻工具服务。它对模型暴露创建和更新日记命令；请求按单进程 FIFO 执行，文件提交后即可返回，而 KnowledgeBaseManager 在后台协调 SQLite/Rust 索引更新。AgentDream 的 manifest 处于 `.block` 禁用态，并且它在缺少自己的 `config.env` 时主动休眠，故不能从当前默认文件状态把 Dream 作为默认对话记录来源。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin/DailyNote/dailynote.js:41-49,1573-1684`、`Plugin/AgentDream/plugin-manifest.json.block:1-48`、`Plugin/AgentDream/AgentDream.js:119-135`。
+**源码事实。** 主要的会话内日记写入入口是启用的 DailyNote 常驻工具服务。它对模型暴露创建和更新日记命令；请求按单进程 FIFO 执行，文件提交后即可返回，而 KnowledgeBaseManager 在后台协调 SQLite/Rust 索引更新。AgentDream 的 manifest 处于 `.block` 禁用态，并且它在缺少自己的 `config.env` 时主动休眠，因此在当前默认文件状态下承担常规对话记录职责的是 DailyNote。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin/DailyNote/dailynote.js:41-49,1573-1684`、`Plugin/AgentDream/plugin-manifest.json.block:1-48`、`Plugin/AgentDream/AgentDream.js:119-135`。
 
 **源码事实。** OneRing 补充的是另一类短期事实源，而不参与日记向量检索。顶层 system 提示词含 `[[OneRing::Agent::Frontend]]` 时，预处理器按 Agent 分库维护 user/assistant 消息的时间、来源前端和来源对象；随后 OneRingMemo 可将该账本中近期记录压缩为文本，替换顶层 system 中的 `[[OneRingMemo::Agent]]`。当前提交的 manifest 默认 `ONERING_RECORD_ONLY=true`，因此默认路径是同步同端 post、补来源尾标及异步写入 AI 最终回复，不进行跨端上下文补充；显式关闭该配置后才进入补齐分支。`Plugin/OneRing/OneRing.js:937-958,960-1073,3059-3143`、`Plugin/OneRing/OneRingMemo.js:190-237`、`Plugin/OneRing/plugin-manifest.json:37-51`。
 
-**匿名化运行观察。** 在一份外部部署中，会话内主动或指导式 DailyNote 写入是日记的主要来源；这与源码中启用的会话工具和异步索引衔接相符。Dream 的写入比例较低，但除合并、删除或压缩已有日记之外，它还会混入梦境专属的叙事和联想内容。该观察只描述该部署，不能外推为所有 VCPToolBox 安装的默认比例、调用频率或内容质量。
+**匿名化运行观察。** 在一份外部部署中，会话内主动或指导式 DailyNote 写入是日记的主要来源；这与源码中启用的会话工具和异步索引衔接相符。Dream 的写入比例较低，但除合并、删除或压缩已有日记之外，它还会混入梦境专属的叙事和联想内容。该观察的覆盖范围限于这份部署；其他 VCPToolBox 安装的默认比例、调用频率和内容质量需要各自的运行样本才能确认。
 
-**匿名化目录快照。** 一份外部部署的日记目录同时包含日常/知识资产、公共资料、技术归档、思维簇和按 Agent 命名的梦目录。该快照确认部署中确有独立梦目录与思维簇事实源，不能仅凭路径名、文件数或体积推断任一目录的内容质量、每篇来源、索引完成状态或写入比例。
+**匿名化目录快照。** 一份外部部署的日记目录同时包含日常/知识资产、公共资料、技术归档、思维簇和按 Agent 命名的梦目录。该快照确认部署中确有独立梦目录与思维簇事实源；各目录的内容质量、每篇来源、索引完成状态与写入比例由目录内容承载，路径名、文件数和体积只反映命名与规模。
 
 **静态推断。** 因此它属于“检索驱动认知编排”及具有会话内主动记录和独立梦境维护的谱系，而非只有相似度召回的知识库 RAG。当前仓库的 `.block` 文件说明 Dream 在此代码快照的默认发现状态为禁用，但匿名化运行观察表明某个外部部署已通过本快照以外的启用/配置状态实际使用该链；二者不能互相替代。算法质量、延迟、跨 Agent 隔离效果和后台维护收益同样未作独立运行测量。
 
@@ -38,7 +38,7 @@
 
 **源码事实。** TagMemo 的派生资产以标签共现、标签间相似度、残差等为输入；RiverMemo 另有 `rivermemo_artifacts` 表，保存来源 V9 artifact、模型/配置/数据库/来源代际、压缩 JSON payload、校验和、状态、节点边数和发布时间。当前生产说明明确将完整图、CSR 和 provenance 交给 Rust 的 `VexusIndex.memoRuntime` 持有，而不是由 Node 中的旧 Map 构建。`rust-vexus-lite/src/schema.rs`、`KnowledgeBaseManager.js:336-371`。
 
-**源码事实。** 思维簇不是从对话临时产生的对象，而是可检索的日记本/索引名。当前版本的 `meta_thinking_chains.json` 只定义一条 `default` 链，依次为“前思维簇、逻辑推理簇、反思簇、结果辩证簇、陈词总结梳理簇”，K 序列为 2、1、1、1、1。`Plugin/RAGDiaryPlugin/meta_thinking_chains.json:1-16`。
+**源码事实。** 思维簇是可检索的日记本/索引名，内容取自持久化的日记目录。当前版本的 `meta_thinking_chains.json` 只定义一条 `default` 链，依次为“前思维簇、逻辑推理簇、反思簇、结果辩证簇、陈词总结梳理簇”，K 序列为 2、1、1、1、1。`Plugin/RAGDiaryPlugin/meta_thinking_chains.json:1-16`。
 
 **匿名化运行观察。** 提供的目录快照包含与该 default 链同名的五个目录。这说明在该部署快照时五个阶段都已有可作为日记本索引来源的文件；是否所有文件都已通过 watcher 摄取、每阶段实际命中了哪些条目及其效果，仍需索引状态和运行追踪确认。
 
@@ -48,7 +48,7 @@
 
 **源码事实。** 启动时文件观察器可全量扫描日记根目录中的 `.md`、`.txt`，跳过配置的文件夹、前后缀及若干系统目录；运行期优先使用 Rust watcher，拿不到则走 chokidar。add/change 进入固定收集窗口，unlink 进入独立删除批次；不稳定文件会延后重试，稳定事件带 generation 时会丢弃同一路径的旧事件。`modules/knowledgeBase/fileWatcher.js`、`modules/knowledgeBase/ingestionPipeline.js`。
 
-**源码事实。** 摄取批次按第一层目录分为日记本，读取时二次 stat 防止把写入中的快照入库；按内容切块、抽取标签，复用可用的旧向量或批量调用外部 Embedding API。随后在 SQLite 事务中更新文件、chunk、tag 和关联，并更新各日记本索引。Embedding 失败位置以空值跳过，因此“文件被监测到”不等于“每个分块均已向量化”。`modules/knowledgeBase/ingestionPipeline.js`。
+**源码事实。** 摄取批次按第一层目录分为日记本，读取时二次 stat 防止把写入中的快照入库；按内容切块、抽取标签，复用可用的旧向量或批量调用外部 Embedding API。随后在 SQLite 事务中更新文件、chunk、tag 和关联，并更新各日记本索引。Embedding 失败位置以空值跳过，因此“文件被监测到”只说明文件已进入索引流程，各分块是否已完成向量化取决于该次 Embedding 调用的结果。`modules/knowledgeBase/ingestionPipeline.js`。
 
 **源码事实。** 全局 Tag 索引可从持久化双槽基线恢复后回放 SQLite 差分；没有兼容基线才从 `tags` 恢复。日记索引按需载入，闲置默认两小时可卸载。RiverMemo 冷启动仅读 SQLite artifact 清单，兼容清单命中时由 Rust 在首个查询懒加载并原子发布；不命中会在 System Ready 后排入原生 bootstrap。`KnowledgeBaseManager.js` 的索引恢复与冷启动段。
 
@@ -60,11 +60,11 @@
 
 **源码事实。** DailyNote 是已启用的 direct `hybridservice`，声明 `create` 与 `update` 两个 invocation command。插件管理器会把声明的工具描述生成为 `{{VCPDailyNote}}`；只有 Agent 的系统提示词实际包含该占位符时，模型才会收到这些调用说明。创建要求作者、日期和完整正文，可显式指定目录和标签；更新以最少 15 字符的旧文本定位替换内容。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin.js:1060-1087`。
 
-**源码事实。** 调用经 VCP 工具循环进入 `PluginManager.processToolCall`，随后由 DailyNote 的常驻服务串行处理。服务会对缺失或错误的 command 按参数推断 create/update；每个请求先进入本进程 FIFO，再交给 `KnowledgeBaseManager.runExternalFileMutation`。文件系统提交是工具返回的完成边界，索引更新在知识库管理器的后台队列继续进行，因此“模型已得到创建成功结果”不等于新日记已经可被向量检索。`modules/vcpLoop/toolExecutor.js:371-374`、`Plugin.js:1131-1159,1197-1346`、`Plugin/DailyNote/dailynote.js:1573-1651`。
+**源码事实。** 调用经 VCP 工具循环进入 `PluginManager.processToolCall`，随后由 DailyNote 的常驻服务串行处理。服务会对缺失或错误的 command 按参数推断 create/update；每个请求先进入本进程 FIFO，再交给 `KnowledgeBaseManager.runExternalFileMutation`。文件系统提交是工具返回的完成边界，索引更新在知识库管理器的后台队列继续进行，因此“模型已得到创建成功结果”只代表文件已写入，新日记要等后台索引完成才可被向量检索。`modules/vcpLoop/toolExecutor.js:371-374`、`Plugin.js:1131-1159,1197-1346`、`Plugin/DailyNote/dailynote.js:1573-1651`。
 
 **源码事实。** DailyNote 写入目录会清理路径成分；更新目录解析还以作者别名限制非公共目录匹配。创建正文若显式以 `[HH:MM]` 或 `[HH:MM:SS]` 开头，文件名采用该时间前缀，正文不再另插运行时刻；未显式给出时继续使用服务器当前时间。服务关闭时停止接收新请求并等待队列排空。创建/更新后的文件监测、切块、标签提取、Embedding 与索引更新由知识库摄取管线接手；其中单个 chunk 的 Embedding 失败可被跳过（`Plugin/DailyNote/dailynote.js:609-730`、`modules/knowledgeBase/fileWatcher.js:20-257`、`modules/knowledgeBase/ingestionPipeline.js`）。
 
-**未运行验证。** 当前快照能确认 DailyNote 是启用的会话工具和默认可用的记录路径，却不能仅凭 manifest 断言每个 Agent 都带有 `{{VCPDailyNote}}`，更不能量化其相对 AgentDream 或人工管理面板的实际写入比例。
+**未运行验证。** 当前快照能确认 DailyNote 是启用的会话工具和默认可用的记录路径；每个 Agent 是否带有 `{{VCPDailyNote}}` 要看各自的提示词内容，其相对 AgentDream 或人工管理面板的实际写入比例属于运行统计范围。
 
 ### OneRing：跨端近期事实与摘要注入
 
@@ -132,7 +132,7 @@
 
 **匿名化运行观察。** 一份启用 Dream 的外部部署中，产物会在日记联想之外混入梦境专属内容，呈现为独立的梦境叙事，而不是对既有日记作机械合并或摘要。这与源码分离“梦树召回 -> 独立 Agent prompt -> dream narrative -> 待审批操作”的步骤相容，但未运行复现，不能将叙事质量、梦境感或内容来源比例量化为通用结论。
 
-**匿名化目录快照。** 快照中存在多个按 Agent 命名的梦目录。它与外部观察到的低比例 Dream 写入并不矛盾：文件数反映保留的文件集合，不能直接作为全部日记写入事件或来源占比的分母。目录命名属于部署约定，不应由此推断源码中的 Agent 边界过滤一定无歧义。
+**匿名化目录快照。** 快照中存在多个按 Agent 命名的梦目录。它与外部观察到的低比例 Dream 写入并不矛盾：文件数统计的是保留下来的文件集合，日记写入事件的总量与来源占比需按写入记录单独统计。目录命名属于部署约定；Agent 边界过滤是否无歧义，取决于过滤实现里目录名与署名的具体判据。
 
 **源码事实。** AgentDream 工具操作只会把 merge、delete、insight 记录为 `pending_review`。管理端批准 merge 时先经 `DailyNote` 创建合并日记再逐一删除源文件；批准 delete 时删除目标文件；批准 insight 时经 `DailyNote` 创建梦感悟。删除后尝试从向量库移除文档，失败被忽略；操作结果和审批时间写回日志。拒绝只更新日志状态。`Plugin/AgentDream/AgentDream.js:466-637`，`routes/admin/dream.js:34-164`。
 
@@ -175,13 +175,13 @@ OneRing 可与发送前的聊天摘要、跨端历史补齐和近期上下文注
 
 **作者自述。** 本次提供的字幕《【浪潮v9】向统一语义场的山顶攀登而去。》把 V1-V8 回顾为逐层增加 Tag、上下文、传播和测地线的经验路径，把 V9 解释为将原先独立计算统一到一个数学场，把 V9.1 解释为不再直接把 Tag 传播路线等同于测地线，而是在多层语义地图上计算候选路径。视频还报告：V9 相对旧 V8 的中央候选约提升 30%、边缘候选提升更明显；将三项工程修复下放给 V8 后，修复版 V8 与 V9 只差约 0.2%。视频 `00:01:01-00:14:43`。
 
-**交叉确认与边界。** 2026-07-14 的 V9.1 正式发布说明记录了相同消融结果，并将测试口径限定为 1,500 组次；它明确认为 V8.3 的结构传播方向有效，主要折损来自状态一致性、噪声和派生资产管理，而不是把全部收益归给单一新方程。视频末尾仍把“统一坐标与运动”作为 V10 展望；当前 RiverMemo 已把 V9 源场与河网继续映射为双尺度场、候选曲线、相对拓扑、Omega 和 Direct Anchor 排序。这里能确认的是历史意图与工程实现连续，不能据此把物理类比写成已经独立证明的语言学或认知科学结论。`docs/TAGMEMO_V9_1正式版更新说明_2026-07-14.md:1-147`、`docs/RIVERMEMO_TOPOLOGY_V3.md:93-202`。
+**交叉确认与边界。** 2026-07-14 的 V9.1 正式发布说明记录了相同消融结果，并将测试口径限定为 1,500 组次；它明确认为 V8.3 的结构传播方向有效，主要折损来自状态一致性、噪声和派生资产管理，而不是把全部收益归给单一新方程。视频末尾仍把“统一坐标与运动”作为 V10 展望；当前 RiverMemo 已把 V9 源场与河网继续映射为双尺度场、候选曲线、相对拓扑、Omega 和 Direct Anchor 排序。这里确认的是历史意图与工程实现的连续；物理类比属于工程建模表述，其语言学或认知科学依据需要独立证明。`docs/TAGMEMO_V9_1正式版更新说明_2026-07-14.md:1-147`、`docs/RIVERMEMO_TOPOLOGY_V3.md:93-202`。
 
 当前行为仍以本笔记前文追踪的源码为准：TagMemo 保留 V9.1 传播与 V9.2 曲线读出；RiverMemo 是与 TagMemo 互斥的 Topology V3 查询路径，并复用 V9 查询观测。本快照把 V10 的实验分支整体归档、把生产参数收敛为单一契约文件，可视为这一演进线从试验期转入固定实现的收口动作。视频中的“V9.2”是该历史阶段的曲线读出/工程化表述，不是当前整个 VCPToolBox 产品版本。更完整的产品演变与设计作用见[产品结构与设计基因调查笔记](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)。
 
 ## 与仓库内部文档的对照
 
-内部文档自身说明，文档索引生成于 2026-02-13，且代码快速迭代时应以源码为准；当前代码快照晚于该索引。此次以当前实现路径作为事实依据，将内部文档分为近期专项文档、通用上手文档和历史知识切片三类，而不将它们视作同一版本的规格。`docs/DOCUMENTATION_INDEX.md:3-5,196-200`。
+内部文档自身说明，文档索引生成于 2026-02-13，且代码快速迭代时应以源码为准；当前代码快照晚于该索引。此次以当前实现路径作为事实依据，将内部文档分为近期专项文档、通用上手文档和历史知识切片三类，三类的时效性与适用范围分别判断。`docs/DOCUMENTATION_INDEX.md:3-5,196-200`。
 
 | 主题 | 内部文档的当前表述 | 与当前代码快照的对照 |
 | --- | --- | --- |
@@ -190,7 +190,7 @@ OneRing 可与发送前的聊天摘要、跨端历史补齐和近期上下文注
 | RiverMemo | 2026-08-04 的 Topology V3 文档明确说明 JS 只准备 V9 观测和双场、一次提交 N-API，Rust/Rayon 完成候选超集、路径、相对拓扑、Omega、Direct Anchor 与排序；它也明确 RiverMemo 不会把未完成的 V9 观测伪装成普通 KNN 回退。 | 与本笔记的六路候选、`allowedFileIds` 授权域、单次 N-API/Rayon 和失败即抛错的结论一致。本笔记额外记录了 RAGDiary 调用固定关闭详细 trace，故普通 Observer 得不到逐候选拓扑轨迹这一实际观察面边界。`docs/RIVERMEMO_TOPOLOGY_V3.md:1-12,136-185,990-1044`。 |
 | 元思考 | 通用记忆文档把元思考描述为思维簇的分阶段检索，并保留指定主题或 Auto 的占位符语法。较早知识切片还将其表述为“递归思维链”或“每阶段输出成为下一阶段输入”。 | 当前实现确实用前一阶段命中向量的均值与原查询融合，作为下一阶段的检索向量；但不追加模型调用，也不证明模型进行了逐步推理。当前配置只有 default 链，Auto 没有其他可选主题。故“递归”在这里可确认的是查询向量反馈，不是 LLM 推理或自我进化。`docs/VCP记忆管理系统.md:399-413`、`knowledge/VCP知识/03_VCP元思考系统.txt:3-21`。 |
 | AgentDream | 当前通用记忆文档正确标为可选启用，要求检查 `.block` manifest 和插件配置；根目录 `AgentDream.md` 则仍引用有效 manifest、`DailyNoteWrite` 与旧命令名，并称梦结束会直接写入完整梦内容。历史知识切片还把它描述为“暂时下线重构”。 | 当前仓库中 manifest 的确为 `.block`，配置缺失时模块休眠。源码确认梦叙事先写日志，merge/delete/insight 仅作为待审批提案；实际审批写回经现行 DailyNote。因而根目录文档与历史切片分别保留了旧流程和旧状态，不能替代当前实现。是否存在部署专门配置的自动梦日志持久化，仍需运行验证。`docs/VCP记忆管理系统.md:845-871`、`AgentDream.md:50-59,141-161`。 |
-| `Agent/` 角色提示词 | Nova、微明、爱弥斯与 DreamNova 模板把元思考和按角色/公共日记本的检索占位符直接写入系统提示词；其中 Nova、微明和 MemoMaster 使用 TagMemo/TagMemo+，Nova、微明还组合 AIMemo。MemoMaster 另规定以 DailyNoteManager、LightMemo 和 DailyNote 对日记做整理、关联与受限写回；Metis 模板用于阅读、编辑和归档思维簇。 | 这说明仓库自带角色模板把“自动注入 + 显式维护工具”作为预期使用方式，但其实际采用的是 TagMemo 链，而非 RiverMemo：本次检查的八个 `Agent/*.txt` 未发现 `RiverMemo`。其中 `RyanThink` 等主题名也不在当前 `meta_thinking_chains.json` 的唯一 default 配置内；是否被运行时配置扩展、是否仍被解析，不能只凭模板确认。当前仅有 `agent_map.json.example`，没有实际映射文件，故不能断言任一模板会在此部署加载。`Agent/Nova.txt:2-8`、`Agent/Weiming.txt:1-7`、`Agent/Aemeath.txt:168-217`、`Agent/DreamNova.txt:1-13`、`Agent/MemoMaster.txt:7-29,120-157,223-266`、`Agent/Metis.txt:41-91`、`agent_map.json.example:1-9`。 |
+| `Agent/` 角色提示词 | Nova、微明、爱弥斯与 DreamNova 模板把元思考和按角色/公共日记本的检索占位符直接写入系统提示词；其中 Nova、微明和 MemoMaster 使用 TagMemo/TagMemo+，Nova、微明还组合 AIMemo。MemoMaster 另规定以 DailyNoteManager、LightMemo 和 DailyNote 对日记做整理、关联与受限写回；Metis 模板用于阅读、编辑和归档思维簇。 | 这说明仓库自带角色模板把“自动注入 + 显式维护工具”作为预期使用方式，但其实际采用的是 TagMemo 链，而非 RiverMemo：本次检查的八个 `Agent/*.txt` 未发现 `RiverMemo`。其中 `RyanThink` 等主题名也不在当前 `meta_thinking_chains.json` 的唯一 default 配置内；是否被运行时配置扩展、是否仍被解析，需要在运行时配置中核对。当前仅有 `agent_map.json.example`，没有实际映射文件，故任一模板是否在此部署加载以实际映射为准。`Agent/Nova.txt:2-8`、`Agent/Weiming.txt:1-7`、`Agent/Aemeath.txt:168-217`、`Agent/DreamNova.txt:1-13`、`Agent/MemoMaster.txt:7-29,120-157,223-266`、`Agent/Metis.txt:41-91`、`agent_map.json.example:1-9`。 |
 
 **文档对照结论。** 较新的专项文档可用于解释当前术语和设计意图，尤其是 TagMemo V9 与 RiverMemo Topology V3；涉及实际启用状态、插件名称、默认链配置、写回时机、回退行为、权限作用域和可观测字段时，仓库内文档存在时间差，仍以当前源码快照为准。历史知识切片可说明项目曾使用的概念和名称，但不作为当前功能可达性或效果的证据。
 
@@ -204,7 +204,7 @@ OneRing 可与发送前的聊天摘要、跨端历史补齐和近期上下文注
 - 未调用 Embedding、外部 reranker 或 Dream 模型，未验证失败重试、超时、部分向量缺失和输出质量。
 - 未启动 OneRing，未验证 chokidar 热加载、WAL 并发、异步 Only 落库与响应 hook 的完成顺序、前端时间戳绑定格式，以及最终上下文快照中的尾标/伪 system user 块显示。
 - 未审计配置合并对 `ONERING_RECORD_ONLY` manifest 默认值的实际注入，也未验证自动 Memo 生成所需的本机 Key、模型和周期配置；不能由静态默认值推断任一部署必然只记录或必然生成摘要。
-- 未验证 Agent 名在上游配置中的约束以及数据库文件名的路径安全；本笔记只确认 OneRing 使用 Agent 名划分 SQLite 文件，不将其视为已验证的多租户或文件沙箱隔离。
+- 未验证 Agent 名在上游配置中的约束以及数据库文件名的路径安全；本笔记的确认范围限于 OneRing 使用 Agent 名划分 SQLite 文件，多租户隔离与文件沙箱需另行验证。
 - 未进行认证会话或恶意/异常 dream 日志测试；Dream 路由的路径处理结论仅是静态代码推断，不能替代实际部署配置和访问路径验证。
 - 未验证各 Agent 的目录和署名约定能否满足实际隔离要求，也未验证公共无署名日记的预期归属。
 - 未配置 JEV 凭据，未验证折叠筛选、语义重排、上下文裁剪与打分的实际效果、延迟与失败降级路径；本次只确认调用链与配置项存在。

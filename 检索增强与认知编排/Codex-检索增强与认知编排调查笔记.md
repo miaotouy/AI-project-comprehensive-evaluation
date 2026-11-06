@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-Codex 的检索相关能力不是向量 RAG，而是“文件化记忆 + 模型驱动的工具/Shell 查询 + 启动时后台记忆演化”。当前快照中：
+Codex 的检索相关能力由“文件化记忆 + 模型驱动的工具/Shell 查询 + 启动时后台记忆演化”三部分构成，全程不依赖向量 RAG。当前快照中：
 
 - **没有 Embedding、向量库或本地语义索引**。对 `embedding`、`vector store`、`faiss`、`lance`、`qdrant`、`bm25`、`rerank` 等关键词的全仓检索，只命中 `tool_search` 对“延迟加载的工具元数据”做的 BM25，没有命中知识语料索引（`codex-rs/core/src/tools/handlers/tool_search.rs:14-17`）。
 - **记忆事实源是 `$CODEX_HOME/memories` 或 `memories_v2` 下的 Markdown 工件**（原始 rollout 事件另存为 `$CODEX_HOME/sessions` 下的 JSONL，由摘要文件引用），不是数据库中的向量块；目录由配置 `memories.version` 选择（`codex-rs/protocol/src/memory_version.rs:17-22`）。
 - **写入是主动的**：根会话启动后的首个有效回合会触发后台 Phase 1 逐 rollout 抽取，再执行 Phase 2 全局合并；合并由一个受限子代理完成（`codex-rs/memories/write/src/start.rs:24-100`；`codex-rs/memories/write/src/phase2.rs:81-207`）。
 - **读取是工具化或 Shell 化的**：默认注入压缩后的 `memory_summary.md`，模型再通过 `memories.search/read/list` 或普通 Shell 命令访问 `MEMORY.md`、`rollout_summaries/` 和 `skills/`（`codex-rs/ext/memories/src/extension.rs:56-104、137-161`；`codex-rs/ext/memories/templates/memories/read_path.md:19-49`）。
 - **检索本身是子串匹配，没有打分、候选融合或重排**；结果按路径和行号排序，最多 200 条，用游标翻页（`codex-rs/ext/memories/src/local/search.rs:17-88`）。
-- **AGENTS.md 是确定性上下文注入**，不是检索：按项目根到当前目录逐级拼接，受 32 KiB 默认预算限制（`codex-rs/core/src/agents_md.rs:1-18、68-116`；`codex-rs/config/src/config_toml.rs:77`）。
+- **AGENTS.md 属于确定性上下文注入**，走独立于检索链路的注入通道：按项目根到当前目录逐级拼接，受 32 KiB 默认预算限制（`codex-rs/core/src/agents_md.rs:1-18、68-116`；`codex-rs/config/src/config_toml.rs:77`）。
 - **上下文压缩是预算管理**，会生成摘要并替换历史，但不查询外部知识（`codex-rs/core/src/compact.rs:117-150、403-416`）。
 
 谱系定位如下：
@@ -172,11 +172,11 @@ AGENTS.md 不属于记忆检索，但它决定了模型在每次会话中看到�
 - 线程级额外指令另有 10,000 估算 token 上限（`codex-rs/core/src/agents_md_manager.rs:187-196`）。
 - 最终内容转成 user 角色的上下文片段；当内容变化时，以“替换此前所有 AGENTS.md 指令”的提示重新注入，而不是重复追加（`codex-rs/core/src/agents_md.rs:473-486`；`codex-rs/core/src/context/world_state/agents_md.rs:11-80`）。
 
-因此 AGENTS.md 是规则注入层，不产生候选、不检索历史、也不维护记忆。
+因此 AGENTS.md 只做规则注入：候选生成、历史检索和记忆维护分别由检索链路与 memory 工具链承担。
 
 ## 上下文压缩：相邻但不同的问题
 
-压缩解决的是“上下文超预算”，不是“从外部资料找答案”。主链是：
+压缩处理的是“上下文超预算”，与“从外部资料找答案”属于两类问题。主链是：
 
 1. 每个回合结束后读取当前 token 状态，计算自动压缩作用域和上限（`codex-rs/core/src/session/context_window.rs:58-109`）。
 2. 达到阈值或模型仍需后续回合时，触发内联压缩；完整上下文窗口是独立硬上限（`codex-rs/core/src/session/turn.rs:632-720`）。

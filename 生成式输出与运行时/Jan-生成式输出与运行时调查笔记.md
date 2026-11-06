@@ -36,7 +36,7 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 ## 1. 触发方式、输出协议与对象模型
 
 - 触发方式：HTML/SVG artifact 完全由模型自由文本中的围栏触发，无用户命令、无结构化 part、无工具调用参与。识别正则 `ARTIFACT_RE` 匹配 html/svg 两种围栏及裸 `<svg>…</svg>` 标签，其余语言围栏（js、py 等）原样留在 Markdown 流中（web-app/src/lib/utils.ts:72-121）。防误触发靠两点：一是要求围栏体是孤立的 SVG，二是流式中不拆段，未闭合围栏不会在 token 中途被抽出（web-app/src/containers/RenderMarkdown.tsx:258-264）。协议处理的是正则文本，无转义与嵌套概念——嵌套围栏不会被该正则识别，直接留在正文。
-- 普通 Chat 围栏没有独立对象；Cowork Artifact 由 write/edit 与 shell 输出的工具轨迹派生，新建且扩展名允许的交付文件收为卡片，修改已有文件进入差异面板。文件位于会话沙箱或附加目录，卡片的出现不等于额外复制一份独立文件对象（`web-app/src/lib/coworkArtifacts.ts:107-201`、`web-app/src/lib/coworkDiffs.ts`）。
+- 普通 Chat 围栏没有独立对象；Cowork Artifact 由 write/edit 与 shell 输出的工具轨迹派生，新建且扩展名允许的交付文件收为卡片，修改已有文件进入差异面板。文件位于会话沙箱或附加目录，卡片引用的是该文件本体（`web-app/src/lib/coworkArtifacts.ts:107-201`、`web-app/src/lib/coworkDiffs.ts`）。
 - 消息对象本身有完整身份：稳定 ID、所属线程、角色、状态、创建时间与元数据（元数据承载 `parentId` 分支、`stopped` 标记等）（web-app/src/routes/threads/$threadId.tsx:397-411），但那是 Chat/消息层身份，不属于输出对象。
 
 ## 2. 增量生成、更新与最终化
@@ -59,9 +59,9 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 ## 5. 用户交互、事件与错误反馈
 
 - 模型页面的按钮、表单与 JS 状态在 iframe 内运行。公共壳注入的 shim 可向父窗口发送异常、加载失败及 CSP 拦截报告，inspector 可发送元素 pin/clear 消息；脚本发送与宿主消费需要分开判断。普通 Chat 的 `HtmlArtifact` 仅组装 iframe，没有 message 监听或框选状态，因此这些报告不会在卡片形成错误反馈或模型回流（[HtmlArtifact.tsx:26–48、114–121](../../jan/web-app/src/components/HtmlArtifact.tsx#L26-L48)、[htmlSandbox.ts:56–65](../../jan/web-app/src/lib/htmlSandbox.ts#L56-L65)）。
-- Cowork 的 srcdoc 预览按 iframe 的 contentWindow 过滤报告、去重并限量显示错误提示，本次读取的组件未消费 pin/clear。live URL 分支没有该 frame ref，srcdoc 的错误反馈不能直接推广到它（[CoworkPreviewPanel.tsx:250–319](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx#L250-L319)）。
+- Cowork 的 srcdoc 预览按 iframe 的 contentWindow 过滤报告、去重并限量显示错误提示，本次读取的组件未消费 pin/clear。live URL 分支没有该 frame ref，上述错误反馈的过滤、去重与限量提示只作用于 srcdoc 预览这一支（[CoworkPreviewPanel.tsx:250–319](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx#L250-L319)）。
 - 交互状态不恢复：切到 Code 视图即卸载 iframe，切回重建全新文档；应用重载后从文本重建。预览高度用 CSS 的 resize-y 样式可拖拽，属浏览器原生行为，不持久化。
-- 工具结果（Web 搜索/抓取、RAG、MCP）以只读卡片展示：搜索条/地址栏样式的工具条，配结果链接行、引用卡片与文本片段（`web-app/src/containers/message/WebToolWidget.tsx:58` 起；`RagToolWidget.tsx:25` 起）。可点击打开外部链接，但不可操作、不可编辑、不可保存为对象——停在"工具结果的展示"边界，未物化。
+- 工具结果（Web 搜索/抓取、RAG、MCP）以只读卡片展示：搜索条/地址栏样式的工具条，配结果链接行、引用卡片与文本片段（`web-app/src/containers/message/WebToolWidget.tsx:58` 起；`RagToolWidget.tsx:25` 起）。可点击打开外部链接，卡片承担工具结果的只读展示，结果本身未物化为可编辑对象。
 
 ## 6. 编辑、diff、版本与协作
 

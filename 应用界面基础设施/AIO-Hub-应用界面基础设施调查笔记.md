@@ -35,7 +35,7 @@ AIO Hub 是 Vue 3、Element Plus 和 Tauri 组成的桌面应用。其界面基�
 
 [全局 Provider](<../../aio-hub/src/components/GlobalProviders.vue#L17-L139>)在每个 WebView 装配运行期单例与查看器；媒体和模型弹窗按需导入/挂载。[主布局](<../../aio-hub/src/views/MainLayout.vue#L176-L229>)承载应用壳和工具缓存，伴生宿主留在布局层，切换聊天工具页后仍保留后台任务同步。引导流程宿主由[App](<../../aio-hub/src/App.vue>)挂载；激活引导时主布局给背景容器加 inert 和 aria-hidden，限制背景交互。
 
-分离工具窗和分离组件窗是独立 WebView，共享源码组件不等于共享 JavaScript 单例。聊天跨窗状态、通知、窗口尺寸和设置文件分别有不同通道，见第 7 节。
+分离工具窗和分离组件窗是独立 WebView，各自拥有独立的 JavaScript 运行时，共享源码组件的单例状态按窗口分别实例化。聊天跨窗状态、通知、窗口尺寸和设置文件分别有不同通道，见第 7 节。
 
 ## 1. 应用导航与工作区生命周期
 
@@ -71,7 +71,7 @@ AIO Hub 是 Vue 3、Element Plus 和 Tauri 组成的桌面应用。其界面基�
 
 [RichCodeEditor](<../../aio-hub/src/components/common/RichCodeEditor.vue#L128-L207>)封装 CodeMirror 和 Monaco，按编辑器类型或 diff 模式才加载 Monaco；有独立加载中、失败和重试表面。统一语言、主题、只读、换行和布局接口供消息数据、CSS、正则及文本差异等编辑消费。
 
-diff 模式分别维护 original/modified 输入与更新事件。组件挂载后直接订阅两侧 Monaco model 的内容变化，把用户编辑回传父级；这使父级复制、保存或交换两侧时获取当前显示文本。监听器在重挂载/销毁时释放。[双侧监听](<../../aio-hub/src/components/common/RichCodeEditor.vue#L351-L374>)是数据契约，不能只凭编辑器可输入推定外层状态已更新。
+diff 模式分别维护 original/modified 输入与更新事件。组件挂载后直接订阅两侧 Monaco model 的内容变化，把用户编辑回传父级；这使父级复制、保存或交换两侧时获取当前显示文本。监听器在重挂载/销毁时释放。[双侧监听](<../../aio-hub/src/components/common/RichCodeEditor.vue#L351-L374>)是数据契约，外层状态的更新以内容变化事件的回传为准。
 
 聊天内的材料编辑、Agent 模型/上下文页签和实发请求诊断工作区属于业务入口，见[Chat UI 笔记](<../Chat UI/AIO-Hub-ChatUI调查笔记.md>)；画布编辑和版本管理的生命周期见[生成式输出与运行时笔记](<../生成式输出与运行时/AIO-Hub-生成式输出与运行时调查笔记.md>)。
 
@@ -87,7 +87,7 @@ diff 模式分别维护 original/modified 输入与更新事件。组件挂载�
 
 [焦点管理器](<../../aio-hub/src/composables/useOverlayFocus.ts#L44-L141>)保存打开时触发元素，DOM 更新后聚焦 autofocus 元素或弹层根；只在最上层处理 Tab 边界回环，过滤禁用、隐藏和 inert 控件。关闭/卸载时，若焦点仍属于关闭表面，则归还仍存在的入口或上一层弹窗；用户已主动移到其他控件时保留新选择。
 
-Esc 额外要求当前弹窗是最上层、按键来自其内部、此前未被处理，且允许关闭按钮，随后阻止冒泡。嵌套弹窗因此不会一次 Escape 全部关闭。这里确认的是公共绑定；第三方浮层、Teleported 子弹层与读屏实际焦点行为仍需运行测试，不能据此声明完整无障碍合规。
+Esc 额外要求当前弹窗是最上层、按键来自其内部、此前未被处理，且允许关闭按钮，随后阻止冒泡。嵌套弹窗因此不会一次 Escape 全部关闭。这里确认的是公共绑定；第三方浮层、Teleported 子弹层与读屏实际焦点行为仍需运行测试，完整无障碍合规属于另行审计的范围。
 
 ### 3.3 层级与菜单
 
@@ -109,7 +109,7 @@ Esc 额外要求当前弹窗是最上层、按键来自其内部、此前未被�
 
 [通知 store](<../../aio-hub/src/stores/notification.ts#L20-L80>)保存列表、未读与通知中心显隐，列表落 localStorage 并监听 storage 更新；[通知中心](<../../aio-hub/src/components/notification/NotificationCenter.vue>)提供搜索、分页、标记已读、清空确认、Markdown 详情，以及按可选路径返回业务。版本说明与升级引导也从此进入。
 
-后台子 Agent 使用标题栏胶囊、任务中心、派遣卡片和伴生视图，不要求先进入持久通知中心。标题栏订阅任务注册表并把事件合并刷新，点击进入子会话或任务中心。完整用户路径见[Chat UI 笔记](<../Chat UI/AIO-Hub-ChatUI调查笔记.md#L129-L135>)。当前在桌面前后端对通知插件、发送通知和请求窗口注意力 API 的检查中，未找到生成完成接操作系统通知的链路；此边界不等于后台任务没有应用内反馈。
+后台子 Agent 使用标题栏胶囊、任务中心、派遣卡片和伴生视图，不要求先进入持久通知中心。标题栏订阅任务注册表并把事件合并刷新，点击进入子会话或任务中心。完整用户路径见[Chat UI 笔记](<../Chat UI/AIO-Hub-ChatUI调查笔记.md#L129-L135>)。当前在桌面前后端对通知插件、发送通知和请求窗口注意力 API 的检查中，未找到生成完成接操作系统通知的链路；后台任务的完成反馈走上述应用内通道。
 
 ### 4.3 加载、空态与错误边界
 
@@ -129,7 +129,7 @@ Esc 额外要求当前弹窗是最上层、按键来自其内部、此前未被�
 
 [明暗状态](<../../aio-hub/src/composables/useTheme.ts#L19-L87>)由共享 composable 管理，切换通过应用设置 store 保存；[应用设置](<../../aio-hub/src/stores/appSettingsStore.ts#L25-L70>)以 300ms 防抖写文件，也提供需要后端立即读取时的即时保存。设置文件路径由[应用设置管理器](<../../aio-hub/src/utils/appSettings.ts#L418-L433>)配置，应用持久化统一从应用配置目录解析。
 
-[色阶引擎](<../../aio-hub/src/utils/themeColors.ts>)生成应用变量和 Element Plus 色阶，并缓存部分颜色到浏览器存储供启动使用。壁纸主色经 OKLCH 明度/彩度修正，自动提取色还避让成功、警告等语义色相；手选主色不经过自动避碰。颜色修正是实现规则，不能直接当作已验证对比度结论。
+[色阶引擎](<../../aio-hub/src/utils/themeColors.ts>)生成应用变量和 Element Plus 色阶，并缓存部分颜色到浏览器存储供启动使用。壁纸主色经 OKLCH 明度/彩度修正，自动提取色还避让成功、警告等语义色相；手选主色不经过自动避碰。颜色修正是实现规则；对比度结论需按修正后的前景与背景组合在实际渲染中测量。
 
 ### 5.2 外观、壁纸与原生窗口
 
@@ -163,13 +163,13 @@ iframe 预览通过[主题桥接](<../../aio-hub/src/composables/useIframeTheme.
 |---|---|
 | 应用主题、工具可见性、导航模式、CSS 等 | 应用设置 store / 应用配置文件；窗口启动时自行加载 |
 | 已打开工具、最近使用与主页固定项 | 工具 store / localStorage；打开列表用于路径恢复与缓存集合 |
-| 页面本地表单、滚动及子面板 | 组件与 KeepAlive；关闭标签可销毁，重启不等于恢复组件实例 |
+| 页面本地表单、滚动及子面板 | 组件与 KeepAlive；关闭标签可销毁，重启后组件实例重新创建 |
 | 公共浮层焦点、层级、顶部消息队列 | 当前 WebView 的模块状态，未见跨窗口浮层队列 |
 | 通知 | 通知 store / localStorage；storage 事件重新加载 |
 | 聊天运行态和动作 | WindowSyncBus、状态同步引擎与操作代理；流式正文有专门增量事件 |
 | 窗口位置、尺寸、最大化 | Rust 窗口配置模块 / 窗口配置文件 |
 
-[窗口总线](<../../aio-hub/src/composables/useWindowSyncBus.ts>)包含握手、心跳、全量/增量状态、初始批量状态和操作请求/响应；操作有超时，重连有防抖。协议存在不能直接证明断连和高并发下无丢失，聊天专用消费见[聊天同步](<../../aio-hub/src/tools/llm-chat/composables/chat/useLlmChatSync.ts>)。
+[窗口总线](<../../aio-hub/src/composables/useWindowSyncBus.ts>)包含握手、心跳、全量/增量状态、初始批量状态和操作请求/响应；操作有超时，重连有防抖。协议的静态契约止于消息格式与超时设置；断连和高并发下是否丢消息，取决于心跳、重连与增量状态的实际到达时序，需在运行中观察。聊天专用消费见[聊天同步](<../../aio-hub/src/tools/llm-chat/composables/chat/useLlmChatSync.ts>)。
 
 主题 composable 还发 DOM CustomEvent，但本次搜索该事件未找到订阅者；它不构成跨 WebView 主题同步。应用设置未见通用文件监听广播，不能把多个窗口共享同一配置文件写成运行期实时同步。
 

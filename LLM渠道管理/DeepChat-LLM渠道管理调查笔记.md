@@ -196,12 +196,12 @@ Provider change、模型变化、限流排队/执行和 Provider DB 刷新通过
 ## 10. 设计取舍与已确认边界
 
 - Provider 身份、模型目录/能力和请求 runtime 分层，允许多个 Provider 共享协议适配而保留独立 endpoint/key。
-- 默认 Provider 作为应用内置能力和元数据来源，用户配置作为可变状态；默认渠道不能简单等同于当前已配置渠道。
+- 默认 Provider 作为应用内置能力和元数据来源，用户配置作为可变状态；默认渠道描述内置能力与元数据来源，当前生效渠道以用户配置为准。
 - Provider 级 QPS 队列解决单渠道节流，但源码未显示健康权重、成本路由或多 Key 轮换。
 - 模型目录改为“主进程单一写者 + 带 revision 的快照”，把来源差异（远端、DB、运行时、Ollama、ACP）收敛在主进程；renderer 只消费快照，避免多入口并发拉取造成目录抖动。代价是目录新鲜度依赖服务端调度与 TTL，而不是调用方每次现取。
 - 同一 Provider 内可以按模型切换协议（`resolveProviderTransport`），因此“Provider 的 apiType”只决定默认路由，不是所有模型的实际协议。
 - 普通 Provider API Key 在 Provider settings/SQLite 字段中可见于 main 侧持久化对象；前端展示、CLI DTO、导入预览和 trace 使用脱敏或不返回原值。OAuth 凭据有单独 safeStorage 路径。
-- “支持导入”是桌面端从外部应用本地数据迁移的能力；本次未找到对称的 Provider export，因此不能据此推断用户可以从 DeepChat 导出完整渠道配置。
+- “支持导入”是桌面端从外部应用本地数据迁移的能力；本次未找到对称的 Provider export，当前证据只覆盖导入方向。
 - 底层 `providers.remove` 对 renderer caller 没有内置/custom 限制，但当前桌面删除按钮只对 custom Provider 显示；CLI 路径明确增加了内置 Provider 拒删校验。这是不同管理入口的行为差异。
 
 ## 11. 未验证事项

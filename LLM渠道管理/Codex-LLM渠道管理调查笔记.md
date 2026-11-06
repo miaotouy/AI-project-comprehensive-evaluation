@@ -88,7 +88,7 @@ CLI / TUI / app-server
 
 ### 配置分层与文件
 
-Codex 的配置不是单个文件，而是带来源记录的分层结构。优先级从低到高为：打包默认、MDM、系统、企业托管、用户、用户 profile、项目 `.codex`、会话覆盖、旧版托管配置（`codex-rs/config/src/config_layer_source.rs:39-62`）。用户配置文件名是 `config.toml`，位于 `$CODEX_HOME`（`codex-rs/config/src/lib.rs:57`）。
+Codex 的配置是带来源记录的分层结构，以下多层来源按优先级合并，单个文件只对应其中一层。优先级从低到高为：打包默认、MDM、系统、企业托管、用户、用户 profile、项目 `.codex`、会话覆盖、旧版托管配置（`codex-rs/config/src/config_layer_source.rs:39-62`）。用户配置文件名是 `config.toml`，位于 `$CODEX_HOME`（`codex-rs/config/src/lib.rs:57`）。
 
 Profile 有两条路径：
 
@@ -165,7 +165,7 @@ Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的�
 
 ## 4. 模型目录与能力元数据
 
-模型目录不是 Provider 配置的一部分，而是独立的数据源。内置快照来自编译进二进制的 `models.json`，提供 `slug`、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型、输入模态等字段（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。本次未在这些元数据中找到价格或计费字段；`ModelInfo` 结构也没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:428-497`）。
+模型目录是独立于 Provider 配置的数据源。内置快照来自编译进二进制的 `models.json`，提供 `slug`、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型、输入模态等字段（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。本次未在这些元数据中找到价格或计费字段；`ModelInfo` 结构也没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:428-497`）。
 
 远端刷新走 Provider 的 `/models` 端点：
 
@@ -176,7 +176,7 @@ Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的�
 
 相关实现见 `codex-rs/model-provider/src/models_endpoint.rs:49、170-204` 与 `codex-rs/models-manager/src/manager.rs:755-794`。
 
-磁盘缓存位于 `$CODEX_HOME/models_cache.json`，默认 TTL 300 秒；刷新失败时保留上一次成功快照，不把失败当成空目录（`codex-rs/models-manager/src/manager.rs:41-42、653-692`）。用户也可以用 `model_catalog_json` 指定一个本地 JSON 目录，启动时加载并覆盖常规目录来源（`codex-rs/core/src/config/mod.rs:2271-2298、4314`）。
+磁盘缓存位于 `$CODEX_HOME/models_cache.json`，默认 TTL 300 秒；刷新失败时沿用上一次成功快照，缓存内容保持不变，失败不会被当成空目录（`codex-rs/models-manager/src/manager.rs:41-42、653-692`）。用户也可以用 `model_catalog_json` 指定一个本地 JSON 目录，启动时加载并覆盖常规目录来源（`codex-rs/core/src/config/mod.rs:2271-2298、4314`）。
 
 目录条目还带来源标记：Provider 原始响应里的模型 id 在合并前单独记录，与生效目录共用一把锁；遍历目录时据此把条目区分为“来自 Provider”还是“内置快照”，缓存文件和目录线格式都不因此改变（`codex-rs/models-manager/src/catalog.rs:27-77`）。
 
@@ -223,7 +223,7 @@ Provider 配置可以分别覆盖请求重试、流重连、流空闲超时和 W
 
 ### 故障转移边界
 
-跨 Provider failover 本次未找到。客户端持有的是单个 `SharedModelProvider`，请求失败后只会走同一 Provider 的重试/刷新路径；没有“候选 Provider 列表”或切换逻辑（`codex-rs/core/src/client.rs:1941-1990`）。会话层的 `allow_provider_model_fallback` 只影响模型选择，不改变 Provider（`codex-rs/core/src/session/mod.rs:853-863`）。因此“配了多个 Provider”不等于“运行时会自动切换”。
+跨 Provider failover 本次未找到。客户端持有的是单个 `SharedModelProvider`，请求失败后只会走同一 Provider 的重试/刷新路径；没有“候选 Provider 列表”或切换逻辑（`codex-rs/core/src/client.rs:1941-1990`）。会话层的 `allow_provider_model_fallback` 只影响模型选择，不改变 Provider（`codex-rs/core/src/session/mod.rs:853-863`）。因此多 Provider 配置只决定可选范围，运行时请求始终落在当前选定的那个 Provider 上。
 
 ## 8. 可观测性、诊断与连接检测
 

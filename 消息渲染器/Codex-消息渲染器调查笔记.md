@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Codex 的消息渲染器不是 DOM 或组件树，而是“app-server 事件 → `HistoryCell` → ratatui 行”的终端管线。渲染输入是协议层的 thread、turn、item 与增量通知；输出是带超链接元数据的逻辑行，最终写入终端回滚区或自有备用屏幕缓冲。
+Codex 的消息渲染器是“app-server 事件 → `HistoryCell` → ratatui 行”的终端管线，不经 DOM 或组件树。渲染输入是协议层的 thread、turn、item 与增量通知；输出是带超链接元数据的逻辑行，最终写入终端回滚区或自有备用屏幕缓冲。
 
 关键事实：
 
@@ -147,7 +147,7 @@ Markdown 渲染入口在 `render_markdown_agent_with_list_spacing`（`tui/src/ma
 
 ## 6. 工具、reasoning、附件与自定义节点
 
-工具内容不是一种通用 JSON 卡片，而是按工具类型选择 cell：
+工具内容按工具类型选择 cell，没有通用 JSON 卡片这一层：
 
 - 命令执行显示命令行、输出流和退出状态，流式输出通过 `CommandExecutionOutputDelta` 追加；
 - 文件变更显示补丁 diff，失败时使用 `PatchFailureCell`；

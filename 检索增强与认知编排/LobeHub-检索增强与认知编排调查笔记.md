@@ -18,7 +18,7 @@ LobeHub 的 Personal Memory 同时属于“主动记忆演化”和“工具化�
 
 全文候选层现在可选 Elasticsearch。统一 `FtsSearchRepo` 覆盖 Agent、群组、Topic、消息、文件、文件夹、Page、知识库和用户记忆；Elasticsearch 只负责候选召回，产品对象始终回 PostgreSQL 按当前用户、工作区和可见性重新水化。默认仍是 PostgreSQL 搜索，启用 Elasticsearch 需要显式配置 provider、索引同步和回填。见 `packages/database/src/repositories/ftsSearch/index.ts:39-77,98-199`、`elasticsearch.ts:67-168` 与 `apps/server/src/services/ftsSearch/index.ts:30-36,99-157`。
 
-已确认的完整主链为“topic 进入受控异步工作流，先提取四类 CEPA 记忆再处理 identity，持久化后由开启记忆的 Agent 获得记忆工具；模型按需搜索、分类查询或写回，结果再参加工具循环”。同一工作流体系里另有记忆合并（分类综合成上下文计划，可回退）与人格更新两条独立管线，后台主动维护不止提取一条路径。这是结构化、可编辑的长期用户记忆，而非一次发送前固定注入候选文本。代码未显示检索命中自动构造下一阶段查询，因而不将其写成检索驱动认知编排。
+已确认的完整主链为“topic 进入受控异步工作流，先提取四类 CEPA 记忆再处理 identity，持久化后由开启记忆的 Agent 获得记忆工具；模型按需搜索、分类查询或写回，结果再参加工具循环”。同一工作流体系里另有记忆合并（分类综合成上下文计划，可回退）与人格更新两条独立管线，后台主动维护不止提取一条路径。这是结构化、可编辑的长期用户记忆，由记忆工具在模型需要时检索或写回。代码未显示检索命中自动构造下一阶段查询，本节按工具化检索记录这条链路，检索驱动认知编排这一分类暂缺证据。
 
 ## 谱系定位与系统边界
 
@@ -33,7 +33,7 @@ Personal Memory 将用户事实分为五种可分别维护的对象：情境记�
 
 摄取不是上传文档的同步切块。`processTopicHandler` 先验证来源、总开关和用户/异步任务取消状态，调用 `MemoryExtractionExecutor.extractTopic` 处理 CEPA 四层，再单独处理 identity 层。用户主动分析会更新 async task 进度；小时任务和工作流都有取消检查。见 `apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts` 的 `processTopicHandler`。
 
-上述处理确认身份提取与其余四层是两个顺序步骤，但不表示它们构成查询反馈阶段。提取质量、Embedding 模型、合并冲突策略和各层具体 schema 的全部字段不在本次源码复核范围内。
+上述处理确认身份提取与其余四层是两个顺序步骤，两步同属摄取阶段。提取质量、Embedding 模型、合并冲突策略和各层具体 schema 的全部字段不在本次源码复核范围内。
 
 ## 查询、候选与重排主链
 

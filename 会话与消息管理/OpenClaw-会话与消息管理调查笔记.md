@@ -312,10 +312,10 @@ Agent store 的当前 schema 版本是 40，并拆出多组特性版本常量（
 ## 10. 未验证事项
 
 1. 未运行真实 Gateway、Control UI 或多窗口场景，因此 session change 事件乱序、客户端 delta merge、断线重连和 in-flight snapshot 恢复行为仍是静态推断。
-2. 未进行崩溃、进程中断、SQLite worker 失败或 archive publish 中途退出测试；代码提供 generation、archive pending row 和 reconcile 路径，但不能仅凭静态阅读证明所有故障序列都能恢复。
+2. 未进行崩溃、进程中断、SQLite worker 失败或 archive publish 中途退出测试；代码提供 generation、archive pending row 和 reconcile 路径，各故障序列的实际恢复效果属于运行验证范围。
 3. 未对大规模 session list、长 transcript、FTS reconcile、archive worker 和跨 agent fork 做性能或并发基准。
 4. 未完整运行 legacy `sessions.json`/旧 transcript 到当前 per-agent SQLite 的 doctor migration；已确认内部 import 与 canonical repair 入口，但没有验证真实旧数据集合的端到端迁移结果。
-5. 未找到通用 sessions export/import RPC，但本次未覆盖所有 CLI、插件和相邻导出类目，不能据此断言项目完全不存在其他交换入口。
+5. 通用 sessions export/import RPC 在已读的源码入口中未找到；本次没有逐一覆盖所有 CLI、插件和相邻导出类目。
 6. 未确认 session-level knowledge-base 绑定是否由某个未读插件或外部 catalog owner 保存；已检查 canonical agent schema、session types 和 memory index 相关表，当前只能记录“本次未找到”。
 7. 未运行附件经过 media store、transcript rewrite、rewind/fork 和历史分页后的完整 round trip；当前结论只来自媒体规范化、受限读取和 schema 代码。
 8. 未验证损坏 JSON、未知 event、旧 alias 与重复 logical node 在所有 runtime 读取路径中的最终用户可见行为；codec 和 doctor path 的容错/拒绝边界已静态确认。

@@ -65,7 +65,7 @@ ChatSession
 - `stat` 统计只有字符数 `charCount` 实际累加：更新函数只执行 `charCount += content.length`，并有 TODO 注释未更新 word/chat 数（`app/store/chat.ts:799-804`）。
 - Mask 是完整副本对象（`app/store/mask.ts:9-23`），每个会话持有独立的一份；`createEmptyMask` 默认开启 `syncGlobalConfig`（`app/store/mask.ts:35-47`）。
 
-分支模型：fork 先创建空会话，再复制标题、逐条展开消息并重新生成消息 id；Mask 与模型配置也分别展开复制。摘要、摘要位置、上下文清除位置与统计沿用空会话默认值，因此没有复制完整会话状态。复制本身是浅层的，多模态内容、工具数组与 Mask 的 context/plugin 等嵌套值并未递归克隆；不能据此承诺所有嵌套编辑彼此隔离。新会话插入列表头部，不建立消息树指针。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)、[空会话默认值](../../NextChat/app/store/chat.ts#L104-L120)。
+分支模型：fork 先创建空会话，再复制标题、逐条展开消息并重新生成消息 id；Mask 与模型配置也分别展开复制。摘要、摘要位置、上下文清除位置与统计沿用空会话默认值，因此没有复制完整会话状态。复制本身是浅层的，覆盖不到多模态内容、工具数组与 Mask 的 context/plugin 等嵌套值；嵌套编辑之间的隔离需要逐项确认。新会话插入列表头部，不建立消息树指针。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)、[空会话默认值](../../NextChat/app/store/chat.ts#L104-L120)。
 
 ## 2. 事实源、索引与持久化
 

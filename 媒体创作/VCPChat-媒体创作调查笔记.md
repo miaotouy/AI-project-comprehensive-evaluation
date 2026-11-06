@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-VCPChat 是媒体创作类目的扩展样本，核心不是统一的图像或视频生成工作台，而是两个对象和执行域不同的创作面。
+VCPChat 是媒体创作类目的扩展样本，由两个对象和执行域不同的创作面组成，区别于统一的图像或视频生成工作台。
 
 - **Scriptorium** 是本仓库内可确认的 M3 资产与工程工作区，且具有 M5 Agent 驱动创作的协作通道。它将 VDOCX 连续流文稿和 VPPTX 演示保存为可继续编辑的工程，保存真源、内容寻址资源与文脉；人类可编辑、预览、导入和导出，Agent 可读取语义、源码和截图，但写入以带署名、修订号和人工回执的 PR 为界。
 - **HumanToolBox ComfyUI 面板** 是 ComfyUIGen 的人类配置面，能保存连接、参数和工作流模板，并将 ComfyUI API JSON 转换为后端插件使用的模板。VCPChat 不在此链中调用 ComfyUI 生成图片或保存生成历史；配置文件和模板由外部 VCPToolBox 插件目录持有，真实生成仍依赖另行运行的 ComfyUI 与后端插件。
@@ -39,7 +39,7 @@ VCPChat 是媒体创作类目的扩展样本，核心不是统一的图像或视
 
 Agent 直接建工程时，控制服务先让文档内核构建 ZIP，再检查结果大小不超过 100 MB、ZIP 文件头与目标路径冲突策略；默认重名，覆盖已有工程必须提供当前文件 SHA-256。实际写入经文档处理器完成，且不会替换当前窗口，除非请求打开新工程。此链路可见 `modules/services/scriptoriumAgentControlService.js:267-431`。
 
-HumanToolBox 的 ComfyUI 链则单独成立：用户从工具卡设置按钮打开配置抽屉，读取或保存后端插件的配置和工作流 JSON；导入时在 VCPChat 主进程定位 VCPToolBox 的 `WorkflowTemplateProcessor` 并转换模板。配置变化会通知工具箱渲染进程，但本仓库未见该面板提交 ComfyUI prompt、轮询任务或保存图片产物的可执行路径，故不能据此推断 VCPChat 自己拥有 ComfyUI 任务历史。入口见 `VCPHumanToolBox/renderer.js:1563-1605`，IPC 实现见 `VCPHumanToolBox/ComfyUImodules/comfyui-ipc.js:82-92,94-259`。
+HumanToolBox 的 ComfyUI 链则单独成立：用户从工具卡设置按钮打开配置抽屉，读取或保存后端插件的配置和工作流 JSON；导入时在 VCPChat 主进程定位 VCPToolBox 的 `WorkflowTemplateProcessor` 并转换模板。配置变化会通知工具箱渲染进程，但本仓库未见该面板提交 ComfyUI prompt、轮询任务或保存图片产物的可执行路径；ComfyUI 任务历史在 VCPChat 侧本次检查范围内无对应实现。入口见 `VCPHumanToolBox/renderer.js:1563-1605`，IPC 实现见 `VCPHumanToolBox/ComfyUImodules/comfyui-ipc.js:82-92,94-259`。
 
 ## 1. 创作入口、触发者与事实对象
 
@@ -65,7 +65,7 @@ Scriptorium 的长期状态是工程修订与文脉，不是统一的媒体生�
 
 视觉上下文是一个短期异步动作：服务等待文档语义结果后调用 Electron `capturePage`，回传 Markdown 摘要和 data URL 图片。对演示页可请求渲染稳定等待；串行命令中某一步失败时，后续停止而此前成功的文本或图像回执保留并标为 `partial_failure`。这是 Agent 观察/回流机制，不是可恢复的媒体生成任务系统，见 `modules/services/scriptoriumAgentControlService.js:182-240` 与 `ScriptoriumCollaboratorService.js:1047-1061`。
 
-本次检查范围内未找到 Scriptorium 面向用户的“取消导出/取消渲染”或跨重启恢复未完成导出任务的机制；也未找到 ComfyGen 配置面自身的提交、进度、取消、回调和重试实现。前者不等于项目其他模块绝对不存在异步控制，后者符合其仅配置外部插件的边界。
+本次检查范围内未找到 Scriptorium 面向用户的“取消导出/取消渲染”或跨重启恢复未完成导出任务的机制；也未找到 ComfyGen 配置面自身的提交、进度、取消、回调和重试实现。前者的证据范围限于 Scriptorium 的导出与渲染入口，其他模块的异步控制本次未覆盖；后者符合其仅配置外部插件的边界。
 
 ## 4. 结果、历史、资产与工程持久化
 

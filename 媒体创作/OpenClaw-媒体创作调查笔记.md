@@ -81,7 +81,7 @@
 | managed outgoing media record | `attachmentId`、sessionKey、messageId、retentionClass、媒体类型、尺寸/时长/文件信息 | 将可见回复中的媒体与消息和会话绑定，并为 Artifact 下载提供受控访问 |
 | transcript artifact | session transcript 中的媒体 block、Artifact ID、task/run provenance、下载模式 | 客户端和 Gateway 的读取投影，不是独立媒体编辑工程 |
 
-媒体任务没有独立的通用任务表：本次快照未找到任务注册表模块与任务 SQLite store，任务状态由会话 async-task 投影与媒体任务状态模块承担，状态词与终态语义需按这两个模块核对（`src/agents/media-generation-task-status.ts`、`src/agents/session-async-task-status.ts`）。媒体生命周期在创建任务时传入任务类型、Provider、prompt 和请求者身份；完整参数更多保留在即时工具结果、最终媒体详情和 transcript 投影中，因此单个任务状态不能等同于一棵完整的媒体创作历史树。
+媒体任务没有独立的通用任务表：本次快照未找到任务注册表模块与任务 SQLite store，任务状态由会话 async-task 投影与媒体任务状态模块承担，状态词与终态语义需按这两个模块核对（`src/agents/media-generation-task-status.ts`、`src/agents/session-async-task-status.ts`）。媒体生命周期在创建任务时传入任务类型、Provider、prompt 和请求者身份；完整参数更多保留在即时工具结果、最终媒体详情和 transcript 投影中，因此单个任务状态描述一次 session-backed 生成的生命周期，完整的媒体创作历史树需要由多次任务与 transcript 投影汇总得到。
 
 本次在图片、视频、音乐生成模块、媒体任务模块、Gateway managed media 和 Artifact RPC 范围内**未找到**独立的媒体历史树、版本对象、项目对象、跨会话资产库或媒体工程 DAG。Comfy 的 workflow JSON、`promptId` 和输出节点 ID 是 Provider 配置或一次 Provider 结果的元数据，不是 OpenClaw 媒体工程身份，见 `extensions/comfy/workflow-runtime.ts`。
 

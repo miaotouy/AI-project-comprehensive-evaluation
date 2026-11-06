@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍是 `pi` TUI、print/json 与 RPC；默认会话事实源仍是 coding-agent 的 JSONL v3 树。仓库另有独立的 durable 产品链：`packages/durable` 的持久 harness（Conversation、Task、Submission，不可变 entry + commit，Memory/JSONL/SQLite/IndexedDB 后端）与 `apps/p2` 自托管应用（Chord 插件、Web host + TUI host、每会话一个 worker、崩溃后重启并重试）。p2 自称实验性原型，不能外推为默认 TUI 已迁移。全部来源笔记仍为静态调查，未运行应用、测试或真实模型请求。
+Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍是 `pi` TUI、print/json 与 RPC；默认会话事实源仍是 coding-agent 的 JSONL v3 树。仓库另有独立的 durable 产品链：`packages/durable` 的持久 harness（Conversation、Task、Submission，不可变 entry + commit，Memory/JSONL/SQLite/IndexedDB 后端）与 `apps/p2` 自托管应用（Chord 插件、Web host + TUI host、每会话一个 worker、崩溃后重启并重试）。p2 自称实验性原型，与 `pi` TUI 并行存在；durable 架构尚未迁移进默认 TUI 路径。全部来源笔记仍为静态调查，未运行应用、测试或真实模型请求。
 
 ## 完成度速览
 
@@ -54,7 +54,7 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 - **生成任务主链与输入处理**：`AgentSession.prompt()` 依次执行扩展命令、input 钩子、`/skill:name` 展开、`/template` 模板展开、流式中入队（steer/followUp）、模型与认证校验、预压缩检查、user 消息组装、`before_agent_start` 扩展事件，再进 `Agent.prompt()` → `runAgentLoop`；无独立"任务记录"对象，运行状态在 Agent/AgentSession 内，事件是唯一对外通道。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
-- **流式协议与对象模型（能力等级 G2）**：模型输出只有 text/thinking/toolCall 三种结构化 part（外加工具结果中的 image），经统一 `AssistantMessageEvent` delta 事件归一化所有 provider；工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象（G2），写盘产物凭文件路径成为工作区普通文件。`toolcall_delta` 携带原始 JSON 片段即时解析，输出 token 截断时所有未完成工具调用统一标记错误回注；thinking 被过滤时保留 `thinkingSignature`。聊天对象维持 G2；模型工具脚本另可进入 codemode 的 QuickJS worker，经统一钩子调用工具，不能概括为全仓没有脚本运行环境。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **流式协议与对象模型（能力等级 G2）**：模型输出只有 text/thinking/toolCall 三种结构化 part（外加工具结果中的 image），经统一 `AssistantMessageEvent` delta 事件归一化所有 provider；工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象（G2），写盘产物凭文件路径成为工作区普通文件。`toolcall_delta` 携带原始 JSON 片段即时解析，输出 token 截断时所有未完成工具调用统一标记错误回注；thinking 被过滤时保留 `thinkingSignature`。聊天对象维持 G2；模型工具脚本另可进入 codemode 的 QuickJS worker，经统一钩子调用工具，脚本运行环境限于这条 codemode 路径。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
 - **文件写入与 diff**：write 全文覆盖（自动建父目录）、edit 精确文本替换（每处 oldText 必须唯一、模糊匹配、保留未改动行原始字节）、bash 在宿主本机 shell 子进程执行（spawn + 进程树终止 + 可选超时 + 输出截断落临时文件）；edit 工具在 TUI 先显示 diff 预览再显示最终 diff，`details.patch` 存标准 unified patch；同文件并发写按 realpath 串行化。模型是文件唯一修改者，无接受/拒绝 diff、无撤销、无 CRDT；基础文件/命令工具无内建操作系统隔离，codemode 另有 QuickJS VM 资源边界；容器化部署效果未运行验证。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 

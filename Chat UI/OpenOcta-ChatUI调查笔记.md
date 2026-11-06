@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenOcta 的聊天表面不是 IM 式群聊，而是一个「任务会话工作台」：左侧会话侧栏、中间 Agent 线程、底部 Composer，全部由 Lit 3 Web Components 在单一壳层内拼装。前端实际技术栈是 Lit + `marked` + DOMPurify + A2UI 组件库，源码里仍保留上游 `openclaw` 命名（元素名 `openclaw-app`、包名 `openclaw-control-ui`），但产品面已按 IT Ops 任务改造：会话快捷指令来自场景模板、每次发送可提交本次 Skill/MCP 选择、会话可从历史里「提炼 Skill」、另有面向多 Agent 协作的 AgentSwarm 房间表面。
+OpenOcta 的聊天表面是一个「任务会话工作台」，区别于 IM 式群聊：左侧会话侧栏、中间 Agent 线程、底部 Composer，全部由 Lit 3 Web Components 在单一壳层内拼装。前端实际技术栈是 Lit + `marked` + DOMPurify + A2UI 组件库，源码里仍保留上游 `openclaw` 命名（元素名 `openclaw-app`、包名 `openclaw-control-ui`），但产品面已按 IT Ops 任务改造：会话快捷指令来自场景模板、每次发送可提交本次 Skill/MCP 选择、会话可从历史里「提炼 Skill」、另有面向多 Agent 协作的 AgentSwarm 房间表面。
 
 关键实现事实：
 

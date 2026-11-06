@@ -87,7 +87,7 @@
 
 **用户目标**：模型产出一个可访问的小型产物（页面、图表、交互文档），用户可打开并复用。
 
-**入口与主链**：启用 `experimental.artifacts` 后，模型通过四个 Artifact 工具创建、读取、替换更新与删除对象；对象保存稳定 id、相对文件映射、入口与 URL。管理端点可按会话列出对象，本地 Provider 保存静态文件并作为默认选择，Provider 可声明额外能力。该功能默认关闭，能力枚举中的服务端代码和存储类型不能直接视为本地 Provider 能力（[启用与默认选择](../../opencode/packages/core/src/artifact.ts#L222-L303)、[工具注册](../../opencode/packages/core/src/tool/plugin/artifact.ts#L64-L141)）。
+**入口与主链**：启用 `experimental.artifacts` 后，模型通过四个 Artifact 工具创建、读取、替换更新与删除对象；对象保存稳定 id、相对文件映射、入口与 URL。管理端点可按会话列出对象，本地 Provider 保存静态文件并作为默认选择，Provider 可声明额外能力。该功能默认关闭；能力枚举中的服务端代码和存储类型对应服务端 Provider，本地 Provider 的能力范围限于静态文件托管（[启用与默认选择](../../opencode/packages/core/src/artifact.ts#L222-L303)、[工具注册](../../opencode/packages/core/src/tool/plugin/artifact.ts#L64-L141)）。
 
 **已验证边界**：能力面由 Provider 决定，本地默认 Provider 只做文件托管；本次未找到容器化运行环境。
 

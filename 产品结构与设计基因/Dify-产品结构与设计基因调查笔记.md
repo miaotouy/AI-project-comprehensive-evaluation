@@ -16,13 +16,13 @@
 
 Dify 是让应用作者在租户工作区定义、调试和发布 LLM 应用的平台，产品组织中心是可发布的应用定义。其控制台将 Chatbot、Agent Chat、文本生成、工作流、RAG Pipeline 与 Agent v2 的编辑面组织为不同的配置或图定义；发布后的内置 WebChat、部署环境 WebApp、嵌入组件、service API 与触发器再消费这些定义。最终用户看到的聊天页因此是已发布应用的调用表面，而不是模型、工具和知识库的配置中心。
 
-当前最稳定的组织骨架是“租户下的可发布定义 -> 按应用模式选择运行器 -> 可寻址的消息或 workflow run”。模型、凭据、插件、工具和数据集均以租户资源方式接入定义；插件和 Agent v2 runtime 又把一部分执行责任移交给独立进程。这个模式解释了 API、嵌入页、公开聊天和异步触发器为何可复用同一应用，但不能据此推断每一种模式都有相同的会话、停止或结果语义。
+当前最稳定的组织骨架是“租户下的可发布定义 -> 按应用模式选择运行器 -> 可寻址的消息或 workflow run”。模型、凭据、插件、工具和数据集均以租户资源方式接入定义；插件和 Agent v2 runtime 又把一部分执行责任移交给独立进程。这个模式解释了 API、嵌入页、公开聊天和异步触发器为何可复用同一应用；会话、停止与结果语义按应用模式分别实现，跨模式复用时需逐项核对。
 
 ## 证据口径与产品演变
 
 README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模型接入、Prompt IDE、RAG Pipeline、Agent、LLMOps 和 Backend-as-a-Service 并列为核心功能（`README.md` 的 “Key features”）。这是当前作者自述；控制台路由、API 应用模式分派和发布后 Web 入口共同构成当前结构确认。
 
-本地仓库是浅克隆，`git log --reverse` 无法提供项目早期提交和主要阶段的可靠时间线。因此本篇只记录当前结构，不能声称某个产品表面先于另一个出现。Agent v2、RAG Pipeline 与 Plugin Daemon 的独立目录或服务边界仅可证明它们在当前快照中是独立能力域，不是其历史加入顺序。
+本地仓库是浅克隆，`git log --reverse` 无法提供项目早期提交和主要阶段的可靠时间线。因此本篇只记录当前结构，产品表面的先后顺序在本地快照中不可考。Agent v2、RAG Pipeline 与 Plugin Daemon 的独立目录或服务边界只说明它们在当前快照中是独立能力域；历史加入顺序需另行取证。
 
 ## 与 VCP 早期中间层形态的结构相似
 
@@ -38,7 +38,7 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 |---|---|---|
 | 应用作者的 Console | App、AppModelConfig、workflow、dataset、Agent v2 draft/revision | 创建、调试、发布和治理定义；不直接代表终端用户的运行界面 |
 | 终端用户 WebChat、Chatbot、嵌入组件 | 发布应用、End User、Conversation、Message | 提交变量和文件、接收事件与答案；模型、工具和知识配置由作者预设 |
-| 业务系统 service API / SDK | 已发布 App、workflow run 或消息型调用 | 以应用 token 调用同一运行配置；调用 API 不等于可编辑定义 |
+| 业务系统 service API / SDK | 已发布 App、workflow run 或消息型调用 | 以应用 token 调用同一运行配置；定义编辑仅在 Console 侧提供 |
 | App Deployment 环境 | 选定应用版本、环境 WebApp/service API、文件 grant | 将发布版本部署到环境并独立配置访问点；当前环境不承接 MCP/trigger |
 | 外部事件 | 发布 workflow、trigger log、workflow run | Webhook、schedule、Plugin Trigger 可发起异步图运行；最终交付、签名与重试未运行验证 |
 | 人工协同 | 暂停的 workflow run、人机输入表单、IM 投递记录 | 表单可投递到 Web 或 IM 渠道，收件人提交后恢复运行；超时、权限与送达效果未运行验证 |
@@ -65,7 +65,7 @@ README 将 Dify 定位为开源 LLM 应用开发平台，并把 Workflow、模�
 
 **模式和证据：当前结构确认。** 工作流具有独立 workflow run、node execution、变量与事件流，消息型应用则以 conversation/message 和父消息链组织历史。advanced chat 会把这两层连接起来，但不会抹平对象差异；`api/core/workflow/`、`api/core/app/apps/message_based_app_generator.py` 和 workflow app generator 分别保留运行记录与消息投影。
 
-**产品作用和张力。** 这使图运行可被 API、日志、节点详情和归档消费，也让工作流输出能够回到聊天。它不意味着所有工作流天然拥有线性历史、同样的重新生成语义或可编辑 Artifact；这些能力必须按应用模式确认。
+**产品作用和张力。** 这使图运行可被 API、日志、节点详情和归档消费，也让工作流输出能够回到聊天。线性历史、重新生成语义与可编辑 Artifact 按应用模式分别提供，需要逐模式确认。
 
 ### 受管扩展与执行域外移
 

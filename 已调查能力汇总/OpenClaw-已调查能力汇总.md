@@ -71,7 +71,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **模型与覆盖**：Agent 支持 primary/fallback 两种形状；Agent primary 优先于 defaults；会话 pin（`modelOverrideSource:"user"`）严格、自动 fallback 记 auto 并周期 re-probe 原主选。配置默认模型、session 覆盖与"最近一次实际运行模型"是不同事实。
 - **路由与 session key**：`bindings[]` 把 channel/account/peer/guild/team/role 条件映射到 Agent，结果同时是路由所有权与 session 命名空间；session key 以 agentId 为第一层命名空间，显式 Agent 与 session key 不一致会被拒绝。
 - **原生 subagent 与 ACP**：subagent 目标须同时满足 allowlist 与已配置 Agent registry，child 保存 role、spawn depth、父 session 与继承工具策略；ACP binding 有独立的 `acpAgentId` 与持久 metadata，ACP-shaped key 本身不足以证明运行在 ACP。
-- **Gateway/UI 可见面（入口确认）**：`agents.list/update`、identity、files、workspace 预览等 RPC 面向 operator 客户端做收窄投影；Agents 页面不是所有字段的通用表单。普通 Agent 无通用 clone/import/export；Claw 包安装/导出是独立的 provenance + consent 资产流（实验开关下），不等于通用角色分享格式。
+- **Gateway/UI 可见面（入口确认）**：`agents.list/update`、identity、files、workspace 预览等 RPC 面向 operator 客户端做收窄投影；Agents 页面只覆盖字段子集的管理表单。普通 Agent 无通用 clone/import/export；Claw 包安装/导出是独立的 provenance + consent 资产流（实验开关下），其载荷按包资产定义。
 
 ### 工具面
 
@@ -116,7 +116,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **工具与目录**：Agent 可调用三个专用媒体工具 `image_generate`/`video_generate`/`music_generate`，由媒体 Provider registry 与插件 manifest 提供能力目录（官方/第三方 Provider 及 ComfyUI 覆盖多模态）；工具是否出现由插件启用、Provider 能力、认证与策略决定。支持图片编辑/多图参考、文生/图生/视频变换、歌词/时长/参考音频等参数，并按 Provider 能力归一化。
 - **异步任务与回流**：媒体执行状态归进程内 operation owner，taskId 与 runId 对应同一次生成；满足 requester transcript 条件才脱离前台。Provider 结果先保存，再向原会话提交完成事件；持久 session queue 接管完成投递。生成成功与投递确认分开，未确认可带 blocked 终态；普通终态保留 2 分钟、blocked 7 天，均受当前进程 generation 约束。
 - **结果托管与 Artifact**：生成文件经 media store、managed outgoing media 记录与 transcript 绑定；`artifacts.list/get/download` 按 session/run 解析范围并提供短期 ticket。媒体清理依赖 transcript 引用或 transient 超时。
-- **关键边界**：本次未找到独立媒体工作台页面、媒体历史树、版本对象、跨会话资产库或媒体工程对象；参考素材的"带图再生成"是 Provider 生成模式而非对 Artifact 的编辑；没有通用 tasks.cancel 或统一 Provider 撤销句柄；接纳前可中止请求，接纳后工作独立运行。完成投递可持久化不等于 Provider 生成作业可跨重启接管。
+- **关键边界**：本次未找到独立媒体工作台页面、媒体历史树、版本对象、跨会话资产库或媒体工程对象；参考素材的"带图再生成"是 Provider 生成模式而非对 Artifact 的编辑；没有通用 tasks.cancel 或统一 Provider 撤销句柄；接纳前可中止请求，接纳后工作独立运行。完成投递结果可以持久化保存；Provider 生成作业归属进程内 operation owner，重启后由新一轮运行重新发起。
 
 ### 生成式输出与 Widget/Canvas 运行时
 
@@ -137,7 +137,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **事实源与索引**：源为根 MEMORY.md、USER.md、`memory/` 下 Markdown 与显式 extraPaths（可选 session transcript corpus）；派生资产在 agent `openclaw-agent.sqlite`（source/chunks/FTS5/可选 sqlite-vec/embedding cache/provenance 等表）。切块默认约 400 token、80 overlap；Embedding provider 默认 openai，可配多种本地/远程；provider/model/source 等参与 index identity，变化后旧向量索引判 mismatched 而非静默复用。
 - **检索主链**：`memory_search` 关键词（FTS5/BM25）+ 向量（KNN 或进程内 cosine）+ 混合合并，再按时效/importance/project affinity/MMR 重排；默认返回 ≤6 条、minScore 0.35。结果是带 path/line/score/provenance 的候选，不是 learned cross-encoder rerank。
 - **工具化检索与即时注入**：模型可 `memory_search` 后 `memory_get` 精读；Bootstrap 阶段按 provenance/预算注入 MEMORY.md/USER.md；项目记忆块最多 48 条 curated 候选；Wiki（memory-wiki）把来源编译成 entity/concept/synthesis 页面并支持 `wiki_search/wiki_get` 与受预算的 digest 注入。
-- **Active Memory（检索驱动编排的部分实现）**：Lane 1 是无模型的 lexical trigger 即时召回（≤3 条 hidden 前缀）；Lane 2 只在 recall intent 且 Lane 1 无 strong hit 时启动受限记忆子 Agent 返回摘要。当前未确认命中向量反馈、关系路径递进或多阶段自然语言 query planner，故不把一次额外 subagent turn 等同于固定多阶段认知链。
+- **Active Memory（检索驱动编排的部分实现）**：Lane 1 是无模型的 lexical trigger 即时召回（≤3 条 hidden 前缀）；Lane 2 只在 recall intent 且 Lane 1 无 strong hit 时启动受限记忆子 Agent 返回摘要。当前未确认命中向量反馈、关系路径递进或多阶段自然语言 query planner；可确认的编排形态是一次额外 subagent turn 加有界摘要，固定多阶段认知链属于尚未确认的部分。
 - **主动记忆演化（dreaming）**：memory-core 默认注册受 cron 管理的 light→REM→deep 后台 sweep；deep gate 通过后由有界 consolidation 子 Agent 按 operation 契约维护 MEMORY.md（preimage + hash fence + append-only fallback），DREAMS.md 是审阅面。untrusted/system 内容不能靠高 recall 晋级。
 - **权限与不可信内容**：provenance 是 SQLite 关闭元数据；自动注入与晋级在分数前先过资格门；搜索对显式 provider 不可用保持 visible unavailable，不伪装成零命中。
 
@@ -148,7 +148,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 - **skills**：是规则对象最完整实现。多优先级根目录合并、同名按来源覆盖，产出有硬上限的 `<available_skills>` 目录（只放元数据，正文按需读取）；显式 `$skill` 引用走另一条请求前展开路径。模型可见性与运行时可用性两套面，`disable-model-invocation` 只从正常目录隐藏、授权引用仍可调。Skill Workshop 提供待审写入与 apply。
 - **prompt 模板与 slash 资源**：模板从 agent `prompts/`、项目 `.openclaw/prompts/` 与显式路径加载，参数替换单次展开、无递归；`command-dispatch: tool` 的 skill 命令可绕过模型直投工具。
 - **插件 hooks 与 context engine**：`before_prompt_build`、`agent_turn_prepare` 等 hook 可替换/追加系统提示词并影响工具面，但普通 hook 不自动获得工具执行授权；context engine 槽只选一个 engine，默认 legacy 透传消息并委托内置 compaction，非 legacy 可实现 assemble/compact/afterTurn 等并自带 quarantine/fallback。
-- **模型可见结果与权威 transcript 分界**：prompt-only（skills 目录、hook context、多数 system prompt addition）、runtime carrier（hidden custom message，display:false）与 durable lifecycle（用户原文、compaction summary、skill snapshot、memory flush）三类变换分开；`systemPromptReport` 与 `/context` 是诊断投影，不等于最终 Provider payload。
+- **模型可见结果与权威 transcript 分界**：prompt-only（skills 目录、hook context、多数 system prompt addition）、runtime carrier（hidden custom message，display:false）与 durable lifecycle（用户原文、compaction summary、skill snapshot、memory flush）三类变换分开；`systemPromptReport` 与 `/context` 是诊断投影，与最终 Provider payload 分开维护。
 - **compaction 与 memory flush**：compaction 是输入历史的明确重写边界（summary + 近期 tail 进模型，完整历史仍在 SQLite）；compaction 前可运行 silent memory maintenance turn 把未写事实追加到当天记忆文件。
 - **本次未找到**：统一的"规则 schema + 命中器 + 统一编译"层（preset/lorebook/宏式引擎）；各规则来源各有 owner 与错误边界。
 

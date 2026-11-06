@@ -88,7 +88,7 @@ NewChat 页面
 
 `useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”顺序合并；会话保存顶层 Mask 对象而非仅 id，模型配置单独合并复制；context/plugin 等嵌套数组在创建时没有递归克隆。后续界面编辑直接修改会话中的 Mask。
 
-fork 为消息重分配 id，并分别展开复制 Mask 与模型配置，但嵌套的 context、plugin 和消息内容数组在这一步仍可能共享引用；摘要与上下文清除位置也没有继承。分叉有独立的顶层角色参数，不能等同于完整深克隆。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)。
+fork 为消息重分配 id，并分别展开复制 Mask 与模型配置，但嵌套的 context、plugin 和消息内容数组在这一步仍可能共享引用；摘要与上下文清除位置也没有继承。分叉在顶层角色参数上独立，实际执行的是浅层复制。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)。
 
 ## 4. Context prompt 编辑和发送
 
@@ -118,7 +118,7 @@ system prompt（可选，含 MCP 工具目录）
 
 请求会按 `max_tokens` 估算 token，从尾部向前选择可发送消息。`clearContextIndex` 作为下界，能让用户清除后续请求使用的上下文，但它不会删除 `session.messages` 中的历史记录。
 
-`hideContext` 的唯一读取点是 `app/components/chat.tsx:1333-1335`：渲染窗口为 true 时不把 context 放入可视消息列表。源码中 `getMessagesWithMemory` 仍然无条件复制 `session.mask.context`，因此“隐藏”不等于“不发送”。
+`hideContext` 的唯一读取点是 `app/components/chat.tsx:1333-1335`：渲染窗口为 true 时不把 context 放入可视消息列表。源码中 `getMessagesWithMemory` 仍然无条件复制 `session.mask.context`，因此该开关只作用于可视列表，“隐藏”的 context 仍会随请求发送。
 
 ## 5. 全局配置同步和角色局部化
 
@@ -157,7 +157,7 @@ Mask 页面导出时只导出 `builtin === false` 的 Mask JSON；导入支持�
 3. **插件与角色耦合**：`Mask.plugin` 直接决定可用工具，但没有按角色声明权限、审批或参数范围。
 4. **导入信任边界宽**：JSON 导入几乎不校验字段，恶意/过大的 context、模型配置和插件 id 可以进入持久化状态。
 5. **内置资源异步加载**：`/masks.json` 获取失败时回退为空内置列表；本次未启动前端验证加载失败、URL 分享和跨版本迁移表现。
-6. 源码统计到的内置角色按 `cn/tw/en` 文件分组维护，具体条目数量随构建内容变化；本文不把数量当作稳定 API。
+6. 源码统计到的内置角色按 `cn/tw/en` 文件分组维护，具体条目数量随构建内容变化，统计值只对应本次构建。
 
 ## 8. 关键源码索引
 

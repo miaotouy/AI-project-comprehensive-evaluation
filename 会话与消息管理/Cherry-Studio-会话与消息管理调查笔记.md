@@ -15,9 +15,9 @@
 ## 结论摘要
 
 - **普通聊天以 Topic 为单位，Agent 以独立 Session 为单位**；两侧分表存储在 SQLite，均有活动路径与父节点消息树，Agent 还保存原生上下文绑定与 fork checkpoint（见 1.3）。
-- **消息不是线性数组，而是 adjacency-list 树**（`message.parentId` 自引用外键，`ON DELETE CASCADE`），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护；`docs/dev/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与当前代码一致（虚拟根、awaiting-input 分支、删除语义、consumer contract 均与实现对应）。
+- **消息按 adjacency-list 树存储**（`message.parentId` 自引用外键，`ON DELETE CASCADE`），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护；`docs/dev/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与当前代码一致（虚拟根、awaiting-input 分支、删除语义、consumer contract 均与实现对应）。
 - 新建 Topic 的同一写事务里就会创建一条虚拟根消息（`createRootMessageTx`），不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
-- **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
+- **"切换分支"只移动 `activeNodeId` 指针**，把它指向目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
 - 分支草稿是**持久化空叶子**：`POST /messages/:id/branches` 落一条空的 successful user 行（`reserveBranch`），等待输入状态由结构派生（`isBlankUserTurn`），不依赖渲染层假节点；只有流式增量仍是不落库的纯前端 overlay。
 - **搜索分两条路**：会话内搜索是"已加载数据粗匹配 + 已挂载 DOM 精确 Range"混合（`MessageListSearch` 支持虚拟化窗口外的消息定位）；跨会话全局搜索走**持久化 FTS5 全文索引**（`message_fts` 外部内容表 + `searchableText` 触发器维护），不是 DOM 搜索。
 - **崩溃恢复有明确机制**：主进程启动时把上次崩溃遗留的 `pending` assistant 行统一翻为 `error`（boot reconcile），避免 UI 永久停留在"思考中"。
@@ -48,7 +48,7 @@
 - `orderKey`：全局 fractional-indexing 排序键。
 
 - 置顶不在 topic 表上：v2 迁移已移除 `isPinned`/`pinnedOrder`，置顶改为多态 `pin` 表（`entityType='topic'`，唯一约束 `UNIQUE(entityType, entityId)`），由 `PinService` 维护（`src/main/data/services/PinService.ts:51-89`）；列表按"置顶段 + 普通段"两段分页（见 5 节）。
-- "空 Topic 判定"不是字段，而是运行时按消息条数判定（见 3.4）。
+- "空 Topic 判定"由运行时按消息条数计算，topic 表上没有对应字段（见 3.4）。
 
 **"是否为第一轮对话"的唯一权威判据是 `rootId`**：`getBranchMessages`/`getTree` 每页响应都携带虚拟根 id，`message.parentId === rootId` 即第一轮（`MessageService.ts`）；`docs/dev/references/chat/message-tree.md:116-122` 显式警告不要用"parent 不在已加载列表里"或 v1 遗留的 `askId` 去猜。
 
@@ -149,7 +149,7 @@ Agent Session 与普通 Topic 分表存储，不能把 Topic 的所有操作套�
 
 ### 3.4 空 Topic 判定：运行时按消息条数
 
-不是 topic 表上的字段，而是运行时判定：`ChatContent.tsx:208` 用 `!isHistoryLoading && runtime.messages.length === 0` 判断，为真时叠加 `ConversationGreeting` 欢迎层。因为虚拟根永不出现在读取接口的返回列表里（见 1.2），"空 Topic"= 除虚拟根外没有任何内容消息，跟 topic 行本身是否存在虚拟根无关（虚拟根总是存在）。
+空 Topic 由运行时判定，topic 表上没有对应字段：`ChatContent.tsx:208` 用 `!isHistoryLoading && runtime.messages.length === 0` 判断，为真时叠加 `ConversationGreeting` 欢迎层。因为虚拟根永不出现在读取接口的返回列表里（见 1.2），"空 Topic"= 除虚拟根外没有任何内容消息，跟 topic 行本身是否存在虚拟根无关（虚拟根总是存在）。
 
 ### 3.5 切换与恢复
 

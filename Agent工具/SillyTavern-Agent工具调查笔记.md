@@ -202,7 +202,7 @@ const canPerformToolCalls = !dryRun && ToolManager.canPerformToolCalls(type) && 
 - `oai_settings.function_calling`（总开关，打开则该会话所有已注册工具默认可用）。
 - 每个工具自己的注册条件（例如 SD 扩展在 `extension_settings.sd.function_tool` 为 false 时直接注销工具），这是**开发者/用户在扩展设置里预先决定“是否让模型看到这个工具”**，而不是运行时逐次审批。
 
-`stealth` 工具的效果不是"跳过审批"而是"跳过展示与持久化并阻断该轮的后续生成"，其本质仍是无审批自动执行。
+`stealth` 工具改变的是展示与持久化：调用不进入界面与历史，并阻断该轮的后续生成；执行本身仍是自动执行，没有审批环节。
 
 SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一步骤上：一旦扩展注册了工具且用户打开了函数调用开关，模型对该工具的每一次调用都会立即执行，没有运行期二次拦截。
 

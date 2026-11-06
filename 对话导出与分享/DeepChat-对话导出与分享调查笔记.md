@@ -42,7 +42,7 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 这两种范围都依赖当前 DOM。`getTargetRect` 在 `captureArea` 开始时只求值一次（`composables/usePageCapture.ts:179`），后续分段位置完全基于这一次的矩形快照，捕获过程中目标消息被虚拟列表卸载不影响位置计算。
 
-“从顶部”的起点是容器内第一个已挂载 `[data-message-id]`（`useMessageCapture.ts:129-134`），它并不等于会话第一条消息，受两层约束：
+“从顶部”的起点是容器内第一个已挂载 `[data-message-id]`（`useMessageCapture.ts:129-134`），即当前 DOM 中最早的一条已挂载消息；它与会话第一条消息的差距由两层机制决定：
 
 - 历史懒加载：会话打开只恢复约 100 条消息（`ChatPage.vue:437`）；更早历史以 100 条/页游标分页，仅在用户滚动到顶部时经 `loadOlderMessagesAtTop` 加载。捕获的程序化滚动不会触发分页：滚动监听要求用户手势意图（`hadUpwardPaginationIntent`）才可能加载，非用户滚动被视口通知直接判定为 native 而跳过，无手势意图时也会早退（`ChatPage.vue:684-692`；`useChatScrollController.ts:244-263`）。因此长会话的“从顶部”截图覆盖的是已加载页的最早消息，而非会话真实起点。
 - 消息窗口化：已加载消息超过 `MESSAGE_WINDOWING_THRESHOLD = 160` 条时启用窗口化渲染（`ChatPage.vue:438`），只挂载视口 ±2400px overscan 范围内的行，其余区域用前后 spacer 占位（`ChatPage.vue:86-107`；`MessageList.vue:5-36`；`useMessageVirtualization.ts:81-125`）。捕获滚动时窗口随滚动监听的 rAF 指标同步移动，但没有代码在捕获前强制窗口已就位，未挂载区域的占位空白是否进入分段取决于滚动与挂载的时序（运行行为未验证）。≤160 条时全部挂载，无占位空白问题。

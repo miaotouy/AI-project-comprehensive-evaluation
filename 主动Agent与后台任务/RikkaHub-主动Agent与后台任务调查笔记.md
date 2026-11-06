@@ -85,7 +85,7 @@ Web API 是唯一"不由本机界面发起"的生成入口，其 Ktor 服务与�
 
 AndroidManifest 中也没有 receiver 声明、没有 `RECEIVE_BOOT_COMPLETED` 权限；服务均返回 `START_NOT_STICKY`。
 
-WorkManager 仍处于"已集成但未接线"的状态：依赖在 `app/build.gradle.kts` 声明，Manifest 移除了 `WorkManagerInitializer` 的默认初始化子节点，`RikkaHubApp.onCreate` 启动 Koin 时调用 `workManagerFactory()`。这套组合通常用于 Worker 依赖注入，但快照中不存在任何 Worker 实现或工作请求，只能结论为预置的初始化接缝；此为"本次未找到"，不等于项目永不具备该能力。
+WorkManager 仍处于"已集成但未接线"的状态：依赖在 `app/build.gradle.kts` 声明，Manifest 移除了 `WorkManagerInitializer` 的默认初始化子节点，`RikkaHubApp.onCreate` 启动 Koin 时调用 `workManagerFactory()`。这套组合通常用于 Worker 依赖注入，而按上述范围检索全仓 Kotlin 源码未找到任何 Worker 实现或工作请求，因此本次调查把它判为预置的初始化接缝。
 
 ### 记忆整理：回合后的条件唤醒
 

@@ -71,7 +71,7 @@ Cargo workspace 的 `members` 列表有 166 项，按能力域拆得很细：既
 | Shell | 35 | 5255 | 0.2% |
 | PowerShell | 8 | 2513 | 0.1% |
 
-Rust 承担产品主体。Python 的 201 个文件里，除 SDK 与运行时打包外还有 `scripts/` 下的仓库自检、MCP 一致性、安装与打包脚本；TypeScript 的 799 个文件中有 775 个位于 `app-server-protocol/schema/typescript`，是由协议 schema 生成的类型绑定，平均行数很低，真正的应用级 TS 只有 `sdk/typescript` 的二十余个源文件。因此 TypeScript 在本仓不代表前端运行时，而是协议消费方。C 的 7 个文件来自 v8/voice 等原生构建胶水，PowerShell 集中在 Windows 安装与构建脚本。
+Rust 承担产品主体。Python 的 201 个文件里，除 SDK 与运行时打包外还有 `scripts/` 下的仓库自检、MCP 一致性、安装与打包脚本；TypeScript 的 799 个文件中有 775 个位于 `app-server-protocol/schema/typescript`，是由协议 schema 生成的类型绑定，平均行数很低，真正的应用级 TS 只有 `sdk/typescript` 的二十余个源文件。因此 TypeScript 在本仓承担协议消费方的角色，本仓不含前端运行时。C 的 7 个文件来自 v8/voice 等原生构建胶水，PowerShell 集中在 Windows 安装与构建脚本。
 
 ## 3. 文档分布
 
@@ -115,7 +115,7 @@ Rust 承担产品主体。Python 的 201 个文件里，除 SDK 与运行时打�
 
 Rust 单 workspace 加 Bazel 双构建，适合“原生 CLI 为核心、需要跨平台发行与可复现构建”的产品定位：开发态用 Cargo/nextest 迭代，发行态用 Bazel 统一原生依赖与目标平台。app-server 作为唯一协议面，使 CLI、TUI、IDE 扩展、Python/TypeScript SDK 消费同一套请求/通知定义，代价是协议 schema 与生成绑定成为需要持续同步的契约。按操作系统分写沙箱而非抽象成单一接口，能直接使用各平台原生机制，也意味着每新增一个平台都要补一整套沙箱与加固实现。
 
-本仓不包含图形桌面应用与编辑器扩展本体（README 指向 IDE 安装页与 Codex App 页面），也不包含云端 Agent；这些属于本仓之外的发行面。README 所述平台支持与工作流中的发行矩阵只代表构建配置存在，不代表各平台功能等价。
+图形桌面应用、编辑器扩展与云端 Agent 属于本仓之外的发行面（README 指向 IDE 安装页与 Codex App 页面）。README 所述平台支持与工作流中的发行矩阵只反映构建配置存在，各平台的可用功能以对应发行渠道为准。
 
 ## 8. 未验证事项
 

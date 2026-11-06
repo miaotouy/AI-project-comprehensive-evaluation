@@ -38,7 +38,7 @@ Agent content 在最终文本不存在时可逐项显示 thought；reasoning pan
 
 `Markdown` 先对 think tag 和 LaTex 做预处理，再动态加载 Streamdown，以避免该复杂渲染器参与 SSR（`web/app/components/base/markdown/index.tsx:6-58`）。`StreamdownWrapper` 以默认 GFM remark 插件及额外插件构建解析链；rehype 顺序为 raw、额外插件、带扩展 schema 的 sanitize、harden（`web/app/components/base/markdown/streamdown-wrapper.tsx:84-145,180-256`）。style 与 body 被加入禁用元素集合，调用方还可追加禁用元素。
 
-组件映射把 code、图片、音频、视频、链接、表单、thinking 等交给 `markdown-blocks/`。这确认富内容有专门承载，而非直接信任 Markdown 原文；但未进行恶意输入和 iframe/远端资源运行测试，不能据此给出完整安全结论。
+组件映射把 code、图片、音频、视频、链接、表单、thinking 等交给 `markdown-blocks/`。这确认富内容有专门承载，而非直接信任 Markdown 原文；恶意输入与 iframe/远端资源的实际表现未经运行测试，属运行验证范围。
 
 ## 3. 消息列表、滚动与操作反馈
 

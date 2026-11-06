@@ -56,7 +56,7 @@ Agent 静态绑定的知识库，或本回合冻结的 Composer 选择
 
 查询由模型驱动：模型可在收到搜索结果后继续读 Concept、换词搜索或结束回合。当前代码没有发现组件内部把前一批命中向量、分数或摘要变成下一阶段查询的固定协议，因此不能将该路径归为检索驱动认知编排。
 
-结果通过 MCP 工具结果回注模型，不是由知识组件主动拼接进所有请求。普通聊天与 Claude Code 的外层工具循环和审批机制不同；`kb_manage` 的写操作在 Claude Code 路径依赖逐次权限提示，AI SDK 路径由 `needsApproval` 处理。这是工具调用控制面，不表示查询结果已经过内容安全净化。见 `src/main/ai/mcp/servers/cherryKnowledgeTools.ts:1-22`。
+结果通过 MCP 工具结果回注模型，不是由知识组件主动拼接进所有请求。普通聊天与 Claude Code 的外层工具循环和审批机制不同；`kb_manage` 的写操作在 Claude Code 路径依赖逐次权限提示，AI SDK 路径由 `needsApproval` 处理。这是工具调用控制面，负责调用与审批；查询结果的内容安全净化需另行确认。见 `src/main/ai/mcp/servers/cherryKnowledgeTools.ts:1-22`。
 
 ## 作用域、预算、可观测与恢复
 
@@ -68,7 +68,7 @@ Agent 静态绑定的知识库，或本回合冻结的 Composer 选择
 
 可与 Chatbox、Jan、Open WebUI 等模型工具化资料检索比较“绑定范围、search/read 两段协议、工具循环和结果预算”。它也可与知识资产管线比较摄取恢复和文档维护。
 
-不可将其与发送前 Lorebook 或 VCPToolBox 思维簇等同：本链不自动注入候选，也未确认检索结果形成固定的后续查询方向。外部 `difyKnowledge` MCP、会话全局搜索和网页搜索未纳入本次范围，不能据此推断其检索策略。
+本链与发送前 Lorebook、VCPToolBox 思维簇分属不同机制：候选由模型通过工具循环按需查询获得，检索结果是否形成固定的后续查询方向本次未确认。外部 `difyKnowledge` MCP、会话全局搜索和网页搜索未纳入本次范围，其检索策略本次未调查。
 
 ## 未验证事项
 

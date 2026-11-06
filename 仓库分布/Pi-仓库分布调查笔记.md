@@ -50,7 +50,7 @@ TypeScript/TSX 共 599,852 行（TS 587,532 + TSX 12,320），约占可识别源
 
 平台形态是 Node/Bun 可运行的 CLI/TUI、库，以及 p2 提供的自托管 Web 界面，没有原生桌面或移动 GUI。`apps/p2` 通过 `node --import ./src/source.ts src/hosts/server.ts` 启动本地 HTTP 服务（默认 8788 端口），代码分 hosts、plugins、voice-server 等目录，数据默认落在 `~/.pi/p2`；其 README 明确标注为实验性原型，数据格式与 API 随时变化。
 
-根 workspace 覆盖 `packages/*` 与 `apps/*`，并显式列出示例依赖目录；构建脚本按 telemetry → schema → chord → tui → codemode → mcp → ai → durable → env → agent → coding-agent 的顺序串联，说明包之间存在单向依赖层。coding-agent 的 sandbox/container 文档包含 Linux 隔离方案，但那是可选执行边界，不表示产品只支持 Linux。
+根 workspace 覆盖 `packages/*` 与 `apps/*`，并显式列出示例依赖目录；构建脚本按 telemetry → schema → chord → tui → codemode → mcp → ai → durable → env → agent → coding-agent 的顺序串联，说明包之间存在单向依赖层。coding-agent 的 sandbox/container 文档包含 Linux 隔离方案，该方案只是可选执行边界中的一种。
 
 ## 关键源码索引
 

@@ -8,7 +8,7 @@
 >
 > 调查方式：只读核对 Session Tape、搜索投影、召回服务与模型工具；参考已有能力汇总、独特功能和工具笔记；未运行 Electron、SQLite FTS 或真实模型回合
 >
-> 调查范围：DeepChat 会话 Tape 的可检索轨迹、子 Agent 范围和工具化召回，以及 Agent memory 的检索、写回和维护链；不把普通聊天 FTS、网页搜索或上下文压缩本身当作 RAG
+> 调查范围：DeepChat 会话 Tape 的可检索轨迹、子 Agent 范围和工具化召回，以及 Agent memory 的检索、写回和维护链；RAG 范围限定在这两条链路，普通聊天 FTS、网页搜索与上下文压缩另作相邻能力记录
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -56,7 +56,7 @@ DeepChat Agent 当前回合拥有 agent-tape 工具
 
 第二阶段 `tape_context` 接受最多 20 个 entry id，在目标条目前后选取窗口；默认每条证据 2 KiB、总计 16 KiB，调用方最多可提高至每条 8 KiB、总计 64 KiB。返回值保留 summary、refs、证据文本、字节数和截断标记，使模型可区分检索概览与展开后的证据。见 `src/main/tool/agentTools/agentTapeTools.ts:54-107,249-262` 与 `src/main/tape/application/recallService.ts:187-300`。
 
-这是一条由模型控制的 search-then-read 工具链。上一阶段结果提供下一次工具调用的 entry id，但系统没有自动依据分数、向量或结构状态生成新的查询，也没有确认增加额外 LLM 回合的固定计划器。因此它不属于检索驱动认知编排；Tape 本身的记录、压缩和审计也不等于主动记忆演化。
+这是一条由模型控制的 search-then-read 工具链。上一阶段结果提供下一次工具调用的 entry id，但系统没有自动依据分数、向量或结构状态生成新的查询，也没有确认增加额外 LLM 回合的固定计划器。因此认知编排的主体停在模型自身；Tape 的记录、压缩和审计属于轨迹留存，主动记忆演化由 memory 链路承担。
 
 Memory 召回则在请求前自动执行。检索服务生成查询 embedding，结合向量与派生索引选出可召回行；query embedding circuit 会在连续失败后短路，并响应取消信号，避免已取消请求继续消耗 embedding 工作。注入器把 persona、working 和 query recall 分配到硬 token 预算，受限时优先保证各 lane 的最小片段，再按优先级扩展，见 `src/main/memory/infra/queryEmbeddingCircuit.ts`、`src/main/memory/services/retrievalService.ts`、`src/main/memory/core/contributionBudget.ts:41-165`。
 

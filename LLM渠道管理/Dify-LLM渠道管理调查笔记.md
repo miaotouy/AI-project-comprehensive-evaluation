@@ -38,17 +38,17 @@ ProviderCredential 以 `(tenant_id, provider_name)` 区分，ProviderModelCreden
 
 ## 2. 运行时实例与凭据缓存
 
-ModelManager 的默认 `enable_credentials_cache=False`；默认每次 `get_model_instance` 都从当前 Provider 配置读取凭据。若显式打开缓存，键为 `(tenant_id, provider, model_type, model)`，配置变更后可能得到过期凭据，代码注释建议 manager 不跨请求或 workflow run 长期复用（`api/core/model_manager.py:826-848`、`api/core/model_manager.py:945`）。这是“配置保存后何时生效”的关键边界：默认路径倾向于按运行解析，不等同于所有长驻组件立刻刷新。
+ModelManager 的默认 `enable_credentials_cache=False`；默认每次 `get_model_instance` 都从当前 Provider 配置读取凭据。若显式打开缓存，键为 `(tenant_id, provider, model_type, model)`，配置变更后可能得到过期凭据，代码注释建议 manager 不跨请求或 workflow run 长期复用（`api/core/model_manager.py:826-848`、`api/core/model_manager.py:945`）。这是“配置保存后何时生效”的关键边界：默认路径按每次运行解析，长驻组件持有实例时，刷新时机取决于该实例的生命周期，需按组件确认。
 
 模型目录不是主仓库硬编码的 OpenAI/Anthropic 表。服务组装会按 tenant/user 创建 `PluginModelAssembly`，由 Plugin Service 发现已安装的 model-provider 并按其 schema 构建 LLM、embedding、rerank、STT、moderation 和 TTS wrapper。`ModelManager.get_model_instance` 取得 tenant bundle、检查 system model access 后构造 ModelInstance；调用 `invoke_llm` 时，plugin runtime 将 plugin ID、解密 credentials、messages、parameters、tools、stop、stream 和可选 app ID 交给 daemon 的 `dispatch/llm/invoke`，流/非流结果再规整为统一结果（`api/core/plugin/impl/model_runtime_factory.py:53-142`、`api/core/plugin/impl/model_runtime.py:107-410`、`api/core/plugin/impl/model.py:33-220`）。
 
-因此可确认 Dify 到 Plugin Daemon 的调用边界，却不能从主仓库断言厂商的 Base URL/Header、兼容字段、真正的 HTTP 请求、上游重试或插件内部脱敏。连接验证也走另一个 `validate_provider_credentials`/`validate_model_credentials` RPC，不等同于 `llm/invoke` 的正式生成请求；验证成功不能单独证明聊天可用、余额充足或正式运行参数兼容。
+因此可确认的是 Dify 到 Plugin Daemon 的调用边界；厂商的 Base URL/Header、兼容字段、真正的 HTTP 请求、上游重试与插件内部脱敏都在主仓库证据之外。连接验证走另一个 `validate_provider_credentials`/`validate_model_credentials` RPC，与 `llm/invoke` 的正式生成请求分属两条路径；验证成功的结论停在凭据校验这一层，聊天可用、余额充足与正式运行参数兼容需要各自的证据。
 
 ## 3. 多 Key、限流与失败处理
 
-当模型有 load balancing manager 时，`_round_robin_invoke` 循环取得下一份配置。只对 `InvokeRateLimitError` 冷却 60 秒、对授权或连接错误冷却 10 秒后换下一 credential；其他异常立即上抛（`api/core/model_manager.py:430-480`）。这确认多凭据选择既不是纯静态轮转，也不只发生在控制台保存时。
+当模型有 load balancing manager 时，`_round_robin_invoke` 循环取得下一份配置。只对 `InvokeRateLimitError` 冷却 60 秒、对授权或连接错误冷却 10 秒后换下一 credential；其他异常立即上抛（`api/core/model_manager.py:430-480`）。这确认多凭据选择在运行时按错误类型触发轮换，控制台保存只负责配置入口。
 
-该路径只能证明本模型实例的凭据级调度。它不等同于跨 Provider fallback，也不能证明冷却状态跨进程持久化。workflow generator 的另一条专用路径最多重试一次连接/503/限流等 transient 异常，永久授权和 bad request 不重试，且注释承认重试可能额外消耗 quota；它也不能外推为全平台的重试或不重复计费保证。
+该路径的覆盖范围是本模型实例的凭据级调度，跨 Provider fallback 不在其内；冷却状态能否跨进程持久化尚未确认。workflow generator 的另一条专用路径最多重试一次连接/503/限流等 transient 异常，永久授权和 bad request 不重试，且注释承认重试可能额外消耗 quota；重试与计费结论的适用范围限于该专用路径，全平台口径需要另行确认。
 
 ## 4. 凭据边界与可观测性
 

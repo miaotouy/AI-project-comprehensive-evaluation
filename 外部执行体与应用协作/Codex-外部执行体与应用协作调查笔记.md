@@ -183,7 +183,7 @@ SDK 没有另起一套协议，因此 app-server 的能力边界就是 SDK 的�
 
 进程输出是带序号的增量通知。`process/output` 携带进程句柄、序号、流类型与字节块；`process/exited` 携带退出码与沙箱拒绝标记；`process/closed` 表示句柄关闭（`exec-server-protocol/src/protocol.rs:1245-1267`）。序号让客户端可以检测丢包与乱序。
 
-文件系统不是一次性 RPC，而是句柄式分块读写：
+文件系统采用句柄式分块读写，而非一次性 RPC，分三个阶段：
 
 - 打开：`fs/open` 返回句柄。
 - 传输：`fs/readBlock` 与 `fs/writeBlock`。

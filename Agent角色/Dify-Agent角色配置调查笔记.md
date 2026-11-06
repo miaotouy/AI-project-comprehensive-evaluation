@@ -55,19 +55,19 @@ Agent v2 提供 roster、配置、预览、版本、访问、日志和监控入�
 
 基础 Prompt IDE 可编辑预提示词、变量、上下文数据集、外部数据、模型参数和部分文件/多媒体功能。simple prompt transform 先解析用户变量与特殊 context/query/history 占位，再根据 chat 或 completion 模型形成消息或字符串；因此“角色文本”并非独立字段，更不是不经模型适配直接传递的固定 system prompt。
 
-传统 Agent 的工具、策略和模型引用属于其 app config；Agent v2 的 Soul/配置则在发布后成为版本化运行输入。模型凭据由租户 Provider 配置解析，工具可来自内置、API、插件、MCP 或兼容 workflow。角色配置能够声明这些资源，并不表示它们都能成功执行或自动获得逐调用批准，详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)和[LLM渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
+传统 Agent 的工具、策略和模型引用属于其 app config；Agent v2 的 Soul/配置则在发布后成为版本化运行输入。模型凭据由租户 Provider 配置解析，工具可来自内置、API、插件、MCP 或兼容 workflow。角色配置只负责声明这些资源；它们能否成功执行、是否逐调用走审批，分别由工具实现与审批层决定，详见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)和[LLM渠道管理](../LLM渠道管理/Dify-LLM渠道管理调查笔记.md)。
 
 其中包含媒体创作方向：传统 `agent-chat` 可以把 DALL-E、Stable Diffusion 或其他已安装的媒体工具编入工具列表。仓库自带的“SVG Logo Design”推荐应用声明了 DALL-E 3 生成图片后再调用 Vectorizer 转为 SVG 的两步流程，其导出数据可见 dalle 与 vectorizer 两个内置工具条目（`api/constants/recommended_apps.json:463`）。工具引擎会把图像与图像链接型响应转为工具文件和消息输出（`api/core/tools/tool_engine.py:269-330`），因此 Agent 可以在一次会话内基于文字需求触发生成，并将结果交还给用户或后续节点。这个方向属于“Agent 驱动的媒体调用”；模板所声明的跨工具传递与真实外部工具执行尚未运行验证。
 
-但它尚不能据此归入本项目笔记的独立“媒体创作”主链：本次静态检查没有找到 Dify 自身为这类结果维护的媒体专用工作台、生成任务历史、可编辑版本/分支或跨会话资产复用闭环。Dify 负责的是工具选择、调用与结果回流；实际生成、编辑、异步任务和资产生命周期仍由 DALL-E、Stable Diffusion、Vectorizer 或其他插件/外部服务承接。两种表述分别说明编排能力与产品工作站能力，不能相互替代。
+它的定位是“Agent 驱动的媒体调用”这一层：本次静态检查没有找到 Dify 自身为这类结果维护的媒体专用工作台、生成任务历史、可编辑版本/分支或跨会话资产复用闭环。Dify 负责的是工具选择、调用与结果回流；实际生成、编辑、异步任务和资产生命周期仍由 DALL-E、Stable Diffusion、Vectorizer 或其他插件/外部服务承接。两种表述分别说明编排能力与产品工作站能力，不能相互替代。
 
 开场白、建议问题、输入变量和应用图标是发布应用的可见配置，不是可独立复用的角色资产。用户档案、世界书、角色头像库、会话级人格覆盖和角色卡格式导入在本次范围内未找到。
 
 ## 4. 导入导出、可见性与历史语义
 
-应用 DSL 和 Agent DSL 可以迁移定义，但其目标是应用/Agent 配置，而非聊天角色卡互换。跨租户导出会清理 credential、secret、token、文件 ID 等敏感或源工作区数据；同工作区 copy 的 secret 规则不同，不能一概称作安全角色分享。未知字段的解析、兼容与实际生效仍需按 DSL 路径验证。
+应用 DSL 和 Agent DSL 可以迁移定义，但其目标是应用/Agent 配置，而非聊天角色卡互换。跨租户导出会清理 credential、secret、token、文件 ID 等敏感或源工作区数据；同工作区 copy 的 secret 规则不同。用作角色分享时，凭据处理取决于上述两套 secret 规则。未知字段的解析、兼容与实际生效仍需按 DSL 路径验证。
 
-公开聊天可见的是应用名称、开场白、变量和对话输出，未确认其显示“实际 prompt、版本化 Agent、模型、工具授权和局部覆盖”的完整运行信息。历史语义也分两类：传统应用的后续调用通常读取当前 active config，Agent v2 已绑定会话固定到创建时 generation。两者均不能仅凭 UI 文案推断为完整可复现的 prompt 快照。
+公开聊天可见的是应用名称、开场白、变量和对话输出，未确认其显示“实际 prompt、版本化 Agent、模型、工具授权和局部覆盖”的完整运行信息。历史语义也分两类：传统应用的后续调用通常读取当前 active config，Agent v2 已绑定会话固定到创建时 generation。两者能否构成完整可复现的 prompt 快照，取决于 UI 文案之外的运行信息。
 
 ## 设计取舍与已确认边界
 

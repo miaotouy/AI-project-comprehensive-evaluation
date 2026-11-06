@@ -93,7 +93,7 @@ AICodeWorker 的取消、SSH 会话中断与断线竞争语义未运行验证。
 
 ## 已确认边界与未验证事项
 
-- 多条链均为插件或后端能力，不代表存在统一前端连接管理体验。
+- 多条链均为插件或后端能力，连接管理分散在各插件的自有入口。
 - AICodeWorker 的 opencode/Antigravity 版本兼容、真实取消与工作区写入未运行验证；SSH 会话与 SnowBridge 断线语义未验证。
 - managed browser 默认关闭；登录态、Profile 隔离、私网/云元数据防护和真实页面安全行为未验证。
 - WebSocket 节点断线、重连、在途文件与取消竞争未运行验证。

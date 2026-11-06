@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-LobeHub 的会话不是“agentId + topicId”二元定位，而是多维坐标 `ConversationContext` 压平出的 `messageMapKey` 分桶：
+LobeHub 的会话由多维坐标 `ConversationContext` 压平出的 `messageMapKey` 分桶定位，与 agentId 加 topicId 的二元定位属于不同粒度：
 
 - 每个会话桶（`messageMapKey`）的消息由全局 ChatStore 的 transcript 层独占写入：原始行与解析后的展示列表都只在该层落盘，并经 `@/libs/replica` 做本地持久化副本；会话级 ConversationStore 是它的**单向镜像**，通过 `internal_syncChatTranscript()` 读取同一桶，写入则先转发回 chat store。
 - 镜像有两种来源：默认订阅 chat store 的桶引用变化（`StoreUpdater` 的 `useChatStore.subscribe`）；传入静态 `messages` 时（画廊、分享快照）本地 store 自行持有，标记 `transcriptSource='static'`，既不订阅也不回写。
@@ -42,7 +42,7 @@ LobeHub 的会话不是“agentId + topicId”二元定位，而是多维坐标 
 
 ### 1.1 会话定位：ConversationContext 与 messageMapKey
 
-聊天页面不是"agentId + topicId"二元定位，而是一套多维坐标 `ConversationContext`（定义于 `packages/types/src/conversation.ts:121-`），字段包括：
+聊天页面由一套多维坐标 `ConversationContext` 定位（定义于 `packages/types/src/conversation.ts:121-`），`agentId` 与 `topicId` 只是其中两个维度，完整字段包括：
 
 - 会话定位：`agentId`、`topicId`、`threadId`、`groupId?`、`scope?`；
 - 子 Agent/文档维度：`subAgentId?`、`documentId?`、`agentDocumentId?`、`isolatedTopic?`、`isSubAgent?`；

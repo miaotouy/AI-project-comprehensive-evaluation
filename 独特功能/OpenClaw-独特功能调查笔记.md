@@ -121,7 +121,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 状态：`入口确认`。不计入用户功能统计，记录为运维/自愈机制。
 
-**机制概述**：doctor 不是一个单功能体检，而是把“配置/状态旧格式迁移、损坏或陈旧安装修复、插件与渠道 schema 漂移、网关服务漂移、授权与 SecretRef 形状、端口冲突与启动诊断”等修复点摊到大量 `doctor-*` 模块（`src/commands/doctor-*.ts` 一个检查/修复一族的模块群，核心修复契约见 `src/channels/plugins/doctor-contract-api.ts`），由顶层 `doctorCommand`（`src/commands/doctor.ts`）按模式驱动：只读检查、`--fix/--repair` 修复、非交互、force、`--lint --json` 稳定机器可读输出（`src/commands/doctor-lint.ts`）。修复与验证被拆成 repair-sequencing 与 config-flow/finalize-config-flow 等编排（`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`）。升级链在安装/更新后调用 doctor 做 post-upgrade 探针，启动/配置失败的错误文本普遍把 `openclaw doctor` / `openclaw doctor --fix` 作为下一步动作。
+**机制概述**：doctor 把“配置/状态旧格式迁移、损坏或陈旧安装修复、插件与渠道 schema 漂移、网关服务漂移、授权与 SecretRef 形状、端口冲突与启动诊断”等修复点摊到大量 `doctor-*` 模块（`src/commands/doctor-*.ts` 一个检查/修复一族的模块群，核心修复契约见 `src/channels/plugins/doctor-contract-api.ts`），由顶层 `doctorCommand`（`src/commands/doctor.ts`）按模式驱动：只读检查、`--fix/--repair` 修复、非交互、force、`--lint --json` 稳定机器可读输出（`src/commands/doctor-lint.ts`）。修复与验证被拆成 repair-sequencing 与 config-flow/finalize-config-flow 等编排（`src/commands/doctor/repair-sequencing.ts`、`src/commands/doctor/finalize-config-flow.ts`）。升级链在安装/更新后调用 doctor 做 post-upgrade 探针，启动/配置失败的错误文本普遍把 `openclaw doctor` / `openclaw doctor --fix` 作为下一步动作。
 
 本次只复核了入口与分族结构，未对任一“检查 -> 修什么 -> 怎么验证已修好”的完整回合逐条走查，因此维持 `入口确认`。doctor 与 AGENTS/VISION 的“配置兼容性由 doctor 迁移承担”绑定，是 OpenClaw 把迁移与修复前置为第一方运维面的体现。
 
@@ -146,7 +146,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道个人 AI 助手�
 
 ## 声明不符、外部依赖与暂缓项
 
-- **taxonomy.yaml、custodian-skills、根 `skills/` 不是终端用户产品能力**。`taxonomy.yaml` 明确是 “Maturity scorecard” 输入（标题、`qa/maturity-scores.yaml`、docs 的 maturity scorecard 编辑规则），描述子系统/功能/平台级别的 QA 与发行成熟度，不驱动用户可见行为；`custodian-skills/` 与根 `skills/` 是维护本仓库的 agent 规则资产。它们的存在不等于产品独特功能。
+- **taxonomy.yaml、custodian-skills、根 `skills/` 属维护侧资产**。`taxonomy.yaml` 明确是 “Maturity scorecard” 输入（标题、`qa/maturity-scores.yaml`、docs 的 maturity scorecard 编辑规则），描述子系统/功能/平台级别的 QA 与发行成熟度，不驱动用户可见行为；`custodian-skills/` 与根 `skills/` 是维护本仓库的 agent 规则资产。这些资产的作用域是仓库维护与成熟度评分。
 - **ClawHub 市场、skills.sh、独立 `clawhub` CLI 位于仓库外**：本仓库持有的是安装与信任裁决主链（能力卡二）；市场数据、扫描与审核在 clawhub.ai。`clawhub` standalone CLI（发布/迁移发布物）不在本仓库内实现。
 - **部分“新表面”只到声明与入口层**：companion 语音/talk、A2UI、会议、fleet、projects/flows/tasks 等目录和文档说明存在入口或插件声明，但本次未走用户主链，标为暂缓或介绍候选，不作为统计依据。Canvas 文档与 session board widget 已由 [生成式输出与运行时调查笔记](../生成式输出与运行时/OpenClaw-生成式输出与运行时调查笔记.md) 走查，不再列入本专项暂缓项。
 - **`claws`（Claw 包安装/导出）命令挂在实验开关下**（CLI 注册处按 `isExperimentalClawsEnabled()` 过滤，`src/cli/argv.ts`）。其 add/remove/update/export 与 provenance 机制按 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md) 只作为独立兼容边界记录，本次不提升为主链候选。

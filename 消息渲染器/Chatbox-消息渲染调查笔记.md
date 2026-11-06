@@ -277,7 +277,7 @@ otherwise    -> Message
 | `msg.error` | `MessageErrTips` |
 | `msg.status` | `MessageStatuses` / `PreparingToolCallStatus` |
 
-文本在关闭 Markdown 时并非 `dangerouslySetInnerHTML`，而是普通 React text node，并通过 `whitespace-pre-line` 保留换行。
+关闭 Markdown 时，文本以普通 React text node 渲染并经 `whitespace-pre-line` 保留换行，未经 `dangerouslySetInnerHTML`。
 
 ### 思考、工具与正文时间线
 
@@ -287,7 +287,7 @@ otherwise    -> Message
 - 最后一个步骤之后的正文/图片被视为最终答案，保持普通消息正文样式。
 - 连续思考、工具调用和中间正文会合并为一个步骤组。
 
-特殊兼容：非流式、恰好 `[text, reasoning]` 两个 part 时保持旧展示顺序，不把正文归入过程时间线。
+特殊兼容：非流式、恰好 `[text, reasoning]` 两个 part 时保持旧展示顺序，正文按普通消息正文展示，未并入步骤时间线。
 
 完成后的多步骤过程可以整体折叠。折叠时只显示最后一个步骤之后的答案区域；如果消息恰好终止在步骤上，则保留最后一步，避免折叠后整条消息为空。
 
@@ -364,7 +364,7 @@ raw text
 
 ### 流式文字淡入
 
-Markdown 开启时，新增文本不是在 Markdown 外简单包 span，而是在 Markdown 解析后的 HAST 中按 source offset 包装：
+Markdown 开启时，新增文本在 Markdown 解析后的 HAST 节点上按 source offset 包装，未在 Markdown 外简单包 span：
 
 - 只处理单调追加的 suffix。
 - 最近 350 ms 的新增 segment 保持独立动画。
@@ -428,7 +428,7 @@ target="_blank" rel="noreferrer"
 - `src/renderer/components/Artifact.tsx`
 - `src/renderer/modals/ArtifactPreview.tsx`
 
-HTML 代码块的手动预览不是在消息 DOM 内执行，而是打开 `artifact-preview` modal。原始 HTML 通过 `postMessage(..., '*')` 发送给：
+HTML 代码块的手动预览打开 `artifact-preview` modal，与消息 DOM 分离。原始 HTML 通过 `postMessage(..., '*')` 发送给：
 
 ```text
 https://artifact-preview.chatboxai.app/preview

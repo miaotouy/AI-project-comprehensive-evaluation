@@ -157,7 +157,7 @@ Tauri 集成点全部是官方插件：单实例、更新器（passive 安装模
 
 **全局错误边界存在。** Risuai 用 window error/unhandledrejection 钩子把异常汇入错误模态（见第 3 节）。
 
-**未接线组件。** LiteMain.svelte 与 3DLoader.svelte 未被引用，按静态推断为遗留或测试入口，不代表存在对应能力。
+**未接线组件。** LiteMain.svelte 与 3DLoader.svelte 未被引用，按静态推断为遗留或测试入口，其存在不构成对应能力的证据。
 
 ## 9. 未验证事项
 
@@ -166,7 +166,7 @@ Tauri 集成点全部是官方插件：单实例、更新器（passive 安装模
 - 主题首帧从静态 Dracula 默认色切换到用户主题的可见闪变窗口未实测。
 - `btn.focus()` 空引用、LiteMain/3DLoader 未接线、键盘 a11y 状态均为静态推断，未运行注入验证。
 - 多语言覆盖的完整性、设置项 condition 的全部触发组合、vite:preloadError 与存档损坏回退路径未运行验证。
-- 设置关键词字段的搜索消费点本次未找到，不能据此断言搜索功能不存在。
+- 本次未找到设置关键词字段的搜索消费点。
 
 ## 10. 关键源码索引
 

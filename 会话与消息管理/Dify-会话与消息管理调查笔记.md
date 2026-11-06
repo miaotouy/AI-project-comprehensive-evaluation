@@ -39,7 +39,7 @@ Conversation 表示某终端用户在某应用下的会话状态，Message 为�
 
 会话列表由会话查询服务提供，消息历史由消息查询服务提供；两者都返回基于最后 ID 的 infinite-scroll 类型，公开路径因此不需要一次传输全部历史（`api/services/conversation_query_service.py:110`、`api/services/message_query_service.py:83`）。会话改名由独立改名服务承担，变量读取走变量查询服务，变量更新走变量命令服务（`api/extensions/ext_application_services.py:316-340`；`api/services/conversation_variable_query.py:47`、`api/services/conversation_variable_command_service.py:37`）。
 
-创建时机在运行链，而非仅由侧栏新建按钮决定。消息型生成器的共同记录初始化入口负责建立 conversation 与 user message；Chat/Agent worker 会在实际执行前重新按 ID 取得 conversation 与 message，而不是信任初始化时持有的对象（`api/core/app/apps/message_based_app_generator.py:120-320`）。前端“新建会话”可只是清空当前选择和输入，不能据此认为数据库已插入空 Conversation。
+创建时机在运行链，而非仅由侧栏新建按钮决定。消息型生成器的共同记录初始化入口负责建立 conversation 与 user message；Chat/Agent worker 会在实际执行前重新按 ID 取得 conversation 与 message，而不是信任初始化时持有的对象（`api/core/app/apps/message_based_app_generator.py:120-320`）。前端“新建会话”可只是清空当前选择和输入；空 Conversation 的落库由消息型生成器的记录初始化入口负责。
 
 ## 3. 生命周期、列表与用户操作
 
@@ -57,15 +57,15 @@ Conversation 表示某终端用户在某应用下的会话状态，Message 为�
 
 ## 5. 变量、附件与外部对象绑定
 
-conversation variable 是随 conversation 保存的运行变量，不等于浏览器输入表单；读取和更新分别由变量查询与变量命令服务承接，service API 也有对应路由。请求包含 inputs/files，文件先由应用上传配置转换，消息再关联实际附件。模型、工具、知识库和 workflow 配置主要来自应用配置或运行实体；本次未确认是否完整快照到每个 Message。
+conversation variable 是随 conversation 保存的运行变量，与浏览器输入表单分属不同来源；读取和更新分别由变量查询与变量命令服务承接，service API 也有对应路由。请求包含 inputs/files，文件先由应用上传配置转换，消息再关联实际附件。模型、工具、知识库和 workflow 配置主要来自应用配置或运行实体；本次未确认是否完整快照到每个 Message。
 
 workflow run 有自身 repository、详情和归档机制，不能因结果出现在聊天里就归入 Message 的生命周期。详见 [生成式输出与运行时](../生成式输出与运行时/Dify-生成式输出与运行时调查笔记.md)。
 
-Agent v2 Chatflow 存在一条与 Conversation ID 直接绑定的记忆作用域。带 conversation 的 Agent 节点以 conversation 作为 workspace owner，同一节点参与者跨多次 workflow run 复用 binding 和 session snapshot；纯 workflow 仍按单次 workflow run 隔离（`api/core/workflow/nodes/agent_v2/session_store.py:71-124`、`api/core/workflow/nodes/agent_v2/session_store.py:192-247`）。这不是把 Agent 历史复制进 Message 行，而是 Conversation 对外部 Agent workspace 的稳定引用；其清理由 Conversation 删除服务与 Agent workspace 服务交接，物理 runtime 清理仍未运行验证。
+Agent v2 Chatflow 存在一条与 Conversation ID 直接绑定的记忆作用域。带 conversation 的 Agent 节点以 conversation 作为 workspace owner，同一节点参与者跨多次 workflow run 复用 binding 和 session snapshot；纯 workflow 仍按单次 workflow run 隔离（`api/core/workflow/nodes/agent_v2/session_store.py:71-124`、`api/core/workflow/nodes/agent_v2/session_store.py:192-247`）。Conversation 通过这条 ID 引用外部 Agent workspace，Agent 历史留在 workspace 侧，Message 行记录会话消息本身；其清理由 Conversation 删除服务与 Agent workspace 服务交接，物理 runtime 清理仍未运行验证。
 
 ## 6. 人机输入表单与消息的边界
 
-人机输入 v2 的表单不再只是一个挂在消息上的状态：它有独立的表单、收件人、交付记录与上传令牌表，并提供独立的 Web 路由与 IM webhook 入口（`api/controllers/web/human_input_v2.py`、`api/controllers/web/human_input_v2_im_webhook.py`）。因此表单提交不是“给会话补一条消息”，而是一次带表单状态校验的外部提交，由工作流暂停分支消费；会话删除时才按 conversation ID 级联清理这些行。这使“对话记录”和“待办表单”成为两套生命周期，不能互相推断。
+人机输入 v2 的表单状态落在独立数据表中：它有独立的表单、收件人、交付记录与上传令牌表，并提供独立的 Web 路由与 IM webhook 入口（`api/controllers/web/human_input_v2.py`、`api/controllers/web/human_input_v2_im_webhook.py`）。因此表单提交是一次带表单状态校验的外部提交，由工作流暂停分支消费，与消息写入走两条路径；会话删除时才按 conversation ID 级联清理这些行。这使“对话记录”和“待办表单”形成两套生命周期。
 
 ## 7. 一致性、恢复与迁移
 

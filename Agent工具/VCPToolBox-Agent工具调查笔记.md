@@ -249,7 +249,7 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 
 JEV 是工具执行器识别的虚拟工具名。模型仍输出普通 VCP 工具块，参数中的表达式交给规划器，按配置目录、工具选择和参数规则展开成一个或多个真实插件调用，再递归进入同一执行链。它没有独立插件进程；展开结果会沿用调用上下文和审批约束（`modules/vcpLoop/toolExecutor.js:198-231`；`modules/jevToolCallExp.js:278-343`）。
 
-第三方插件的 manifest `jev` 段会被注册表校验，合格声明供规划器选命令并构造参数；存在歧义时可请求外部决策模型，未配置或失败时按声明的默认值回退，无法确定则返回规划错误。声明错误只影响 JEV 注册，不阻止普通插件加载。因此“纯提示词素材”只描述声明本身没有执行代码，不能据此认定运行时不消费这些字段（`modules/jevThirdPartyRegistry.js:3-26`；`modules/jevToolCallExp.js:991-1055`）。
+第三方插件的 manifest `jev` 段会被注册表校验，合格声明供规划器选命令并构造参数；存在歧义时可请求外部决策模型，未配置或失败时按声明的默认值回退，无法确定则返回规划错误。声明错误只影响 JEV 注册，不阻止普通插件加载。因此“纯提示词素材”只描述声明本身没有执行代码，而这些按声明展开的工具字段在运行时由规划器消费（`modules/jevThirdPartyRegistry.js:3-26`；`modules/jevToolCallExp.js:991-1055`）。
 
 展开调用继承发起者、工具口令和调用级投递元数据。真实插件进入 `processToolCall` 后逐个执行审批判定，审批超时仍拒绝；一次虚拟调用展开多项时由执行器汇总成功或部分失败结果（`modules/jevToolCallExp.js:957-979`；`Plugin.js:1346-1393`）。外部决策模型的实际选择效果未运行验证。
 
@@ -259,7 +259,7 @@ JEV 是工具执行器识别的虚拟工具名。模型仍输出普通 VCP 工�
 
 VCPSleep 是同步 stdio 插件，子进程用定时器等待后返回醒来时间和 tips，单次时长大于零且至多 12 小时；manifest 超时为 43,500,000 毫秒，给最长等待留出五分钟余量。它占住当前工具等待链，不会创建持久化调度任务（`Plugin/VCPSleep/VCPSleep.js:101-169`；`Plugin/VCPSleep/plugin-manifest.json:8-16`）。
 
-已读执行链没有把请求的 AbortSignal 传给同步 stdio 子进程：客户端中止能结束响应和阻止后续回灌，睡眠进程仍依赖自身定时器或插件超时结束。通用超时会强杀进程树；direct 插件超时的独立 AbortController 不能据此推导为 VCPSleep 也可随聊天中断取消（`Plugin.js:1190-1215,1728-1766`；`modules/vcpLoop/toolExecutor.js:431-434`）。可选做梦联动与睡眠计时并行，且要求启用 AgentDream；做梦失败不延长睡眠（`Plugin.js:1235-1283`）。
+已读执行链没有把请求的 AbortSignal 传给同步 stdio 子进程：客户端中止能结束响应和阻止后续回灌，睡眠进程仍依赖自身定时器或插件超时结束。通用超时会强杀进程树；direct 插件超时走独立的 AbortController，VCPSleep 的结束由自身定时器或插件超时决定（`Plugin.js:1190-1215,1728-1766`；`modules/vcpLoop/toolExecutor.js:431-434`）。可选做梦联动与睡眠计时并行，且要求启用 AgentDream；做梦失败不延长睡眠（`Plugin.js:1235-1283`）。
 
 ## 7. 执行位置与隔离
 

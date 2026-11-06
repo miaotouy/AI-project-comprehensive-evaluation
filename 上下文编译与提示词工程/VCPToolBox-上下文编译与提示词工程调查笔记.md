@@ -52,7 +52,7 @@ SAR 规则的模型条件共有四种：精确匹配、子串匹配，以及二�
 
 原笔记还确认三种以系统或可信系统载体为边界的插件规则：RAGDiaryPlugin 处理 system 或系统前缀 user 中的日记本/知识库占位符；VCPTimeLine 只采用首个可信载体中的一次时间线声明；ContextFoldingV2 需要 system 中的激活占位符。这些规则直接改写本次消息数组，而不是维护独立会话历史（相关实现见 `Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135-1419`、`Plugin/VCPTimeLine/VCPTimeLine.js:372-416`、`Plugin/ContextFoldingV2/ContextFoldingV2.js:164-290`）。
 
-规则对象的保存位置、schema、版本字段、启停状态以及导入导出语义，原笔记没有已确认事实。本次也不把占位符出现在消息文本中等同于其已命中或已展开。
+规则对象的保存位置、schema、版本字段、启停状态以及导入导出语义，原笔记没有已确认事实。占位符出现在消息文本中只说明该文本带有标记；是否命中或展开取决于它所在的载体以及后续插件处理阶段。
 
 ### 记忆思维托盘：先搬运，再由后续插件消费
 
@@ -70,7 +70,7 @@ OneRing 主流程未触发时保留原数组，避免无故删去托盘产生的
 2. 消费连续顶层 system 中的 `[[VCPToolUse=Forbidden]]`，并识别 TransBase64 标记以决定后续多模态处理。
 3. 执行 VCPTavern 注入；若请求使用语义路由模型，再从注入后的消息选择真实后端模型并应用相关设置。
 4. 深拷贝各消息，执行变量及可授权对象展开。
-5. VCPTavern 已优先执行，其余阶段按保存顺序遍历，捕获在静态文本注入之前，托盘在记忆检索之前。多模态处理器只在媒体条件满足时运行，不能概括为所有插件之前固定执行。完整顺序见下方流程。
+5. VCPTavern 已优先执行，其余阶段按保存顺序遍历，捕获在静态文本注入之前，托盘在记忆检索之前。多模态处理器只在媒体条件满足时运行，位置固定在静态文本注入之后、记忆托盘之前。完整顺序见下方流程。
 6. 清理或还原 TransBase64+，运行 Detector/SuperDetector，最后按开关运行 Role Divider。Detector 字段若采用 `/pattern/flags` 形式则按正则替换；正则无效时记录警告并退回普通字符串替换，替换文本允许为空（`modules/messageProcessor.js:608-642`）。
 
 ```text
@@ -113,7 +113,7 @@ RAGDiaryPlugin 的查询内容来自最近真实 user 与最近 assistant 的加
 
 VCP 工具结果汇总、成功或失败摘要同样只写入客户端输出。模型下一轮接收的是独立的 `VCP_TOOL_PAYLOAD`，而不是 `vcpInfoHandler.streamVcpInfo()` 生成的显示文本；关闭 `SHOW_VCP_OUTPUT` 时，`mark_history` 仍可强制显示单次调用（`modules/vcpInfoHandler.js:96-153`；`modules/handlers/streamHandler.js:594-663`）。
 
-因此，推理包装与 VCP 信息属于已确认的显示层投影，不应据此推断它们改写了权威请求消息或模型递归历史。原笔记未覆盖客户端 Markdown、DOM 渲染或这些投影在具体前端的展示实现。
+因此，推理包装与 VCP 信息属于已确认的显示层投影；权威请求消息与模型递归历史由单独保存的推理字段和 `VCP_TOOL_PAYLOAD` 承载。原笔记未覆盖客户端 Markdown、DOM 渲染或这些投影在具体前端的展示实现。
 
 ## 6. 调试、预览与可解释性
 

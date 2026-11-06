@@ -25,7 +25,7 @@ LobeHub 把 LLM 渠道建模为 PostgreSQL 中的一条 `ai_providers` 记录，
 - Agent Runtime 默认对可重试错误重放 5 次，即最多 6 次 attempt，指数退避从 1 秒起、上限 30 秒；
 - 重试固定同一 Provider 与模型。是否重新随机取 Key 取决于 transport 是否重新初始化 Model Runtime，而不是健康调度；
 - 通用 `RouterRuntime` 支持一个逻辑 Provider 内按 option 顺序 fallback，option 还可带权重、可切换底层 `apiType`，并支持 `pinnedRoute` 固定路由与 `allowedApiTypes` 过滤；流式聊天在首个有效片段前失败时走 `runChatWithStreamFallback` 换下一个 option。当前实现还允许在每次请求前对候选 option 做安全的重排，若 hook 返回非原列表的排列或抛错则忽略，避免策略 hook 自身缩小可用性（`packages/model-runtime/src/core/RouterRuntime/createRuntime.ts`）；
-- 但当前开源 `lobehub` Router 配置的 `routers()` 返回空数组，真实托管渠道表及排序/健康策略不在这份开源配置中，不能据此宣称普通 Provider 已有跨渠道故障转移；
+- 但当前开源 `lobehub` Router 配置的 `routers()` 返回空数组，真实托管渠道表及排序/健康策略不在这份开源配置中；普通 Provider 是否具备跨渠道故障转移，需按部署时的 Router 配置核对；
 - 连接检测只对指定模型发送一次最小非流式请求，结果仅保留在当前 UI 状态，不写入调度健康表；
 - Provider 凭据以 AES-GCM 密文保存在 PostgreSQL，但 `fetchOnClient` 场景会把解密后的运行时配置下发到浏览器内存；
 - 全量数据导出包含 `aiProviders` 和 `aiModels`，导出的 Provider 凭据仍是数据库密文。跨实例恢复必须保持同一个 `KEY_VAULTS_SECRET`，否则不能正常解密。
@@ -110,9 +110,9 @@ Agent、Topic 和 Message 都分别保存 `provider` 与 `model`。新 Topic 会
 
 ### 2.1 配置文件与数据库生命周期
 
-LobeHub 的持久化渠道不是一个用户直接编辑的 Provider 配置文件，而是作用域内的 `ai_providers` 数据库行及其关联的 `ai_models` 行。内置 Provider 目录和服务端环境变量只参与运行时合并：环境变量可以为内置 Provider 提供默认 Key、Base URL 或模型列表，不能因此推断存在一个可导入的本地渠道文件。针对配置文件、`providers.json`、YAML/TOML Provider 清单的本次源码搜索未找到面向用户的渠道文件格式，因此该能力标记为**本次未找到**，不是项目级绝对不存在。
+LobeHub 的持久化渠道是作用域内的 `ai_providers` 数据库行及其关联的 `ai_models` 行，渠道的增删改查经设置页直接写入数据库，不经过可手工编辑的 Provider 配置文件。内置 Provider 目录和服务端环境变量只参与运行时合并：环境变量可以为内置 Provider 提供默认 Key、Base URL 或模型列表，渠道数据本身仍落在上述两张表中。针对配置文件、`providers.json`、YAML/TOML Provider 清单的本次源码搜索未找到面向用户的渠道文件格式，因此该能力标记为**本次未找到**。
 
-通用 PostgreSQL 数据导出会把 `aiProviders` 与 `aiModels` 纳入导出数据，导入器对 Provider 采用保留 ID、冲突跳过策略，并按 Provider 关系导入模型。这是数据库级备份/恢复入口，不能等同于“查看或编辑配置文件”：导出内容仍带有 `key_vaults` 密文，导入也不会将密文解密后用新主密钥重加密。相关实现见 `packages/database/src/repositories/dataExporter/index.ts:24-35`、`packages/database/src/repositories/dataImporter/index.ts:49-80`。
+通用 PostgreSQL 数据导出会把 `aiProviders` 与 `aiModels` 纳入导出数据，导入器对 Provider 采用保留 ID、冲突跳过策略，并按 Provider 关系导入模型。这是数据库级备份/恢复入口，导出内容仍带有 `key_vaults` 密文，导入也不会将密文解密后用新主密钥重加密；渠道配置的逐项查看与编辑由 Web 设置页承担（见 2.2）。相关实现见 `packages/database/src/repositories/dataExporter/index.ts:24-35`、`packages/database/src/repositories/dataImporter/index.ts:49-80`。
 
 ### 2.2 Web 设置页的渠道操作
 
@@ -174,7 +174,7 @@ Header 和端点规则主要由各 Provider Runtime 或 OpenAI-compatible factor
 
 自定义 Provider 创建时需要独立 ID、名称和 Base URL，可选 API Key，并通过 `sdkType` 选择适配器。类型层 `AiProviderSDKEnum` 仍保留 14 种（`anthropic, azure, azureai, bedrock, cloudflare, comfyui, google, huggingface, ollama, openai, qwen, replicate, router, volcengine`，`packages/model-bank/src/types/aiProvider.ts`），但**自定义 Provider 创建界面已收敛为其中的 9 个选项**（`src/features/Settings/provider/features/customProviderSdkOptions.ts:3-13`）——`azureai`/`bedrock`/`huggingface`/`replicate`/`comfyui` 在类型与 API 层仍可写，只是不再出现在 UI 选项中。
 
-运行时不是根据 URL 猜协议，而是按 Provider 元数据中的 SDK Type 选择 Model Runtime。相同 OpenAI 兼容协议可以对应多个不同 Provider ID，各自保存 Base URL、Key、模型目录和开关。
+运行时按 Provider 元数据中的 SDK Type 选择 Model Runtime：适配器与消息格式由 SDK Type 决定，Base URL 只决定请求端点，运行时不会根据 URL 反推协议。相同 OpenAI 兼容协议可以对应多个不同 Provider ID，各自保存 Base URL、Key、模型目录和开关。
 
 ### 3.3 浏览器直连与服务端代理
 
@@ -202,11 +202,11 @@ Header 和端点规则主要由各 Provider Runtime 或 OpenAI-compatible factor
 
 Model Bank 的 fallback 用于补充模型能力、上下文、定价等元数据。它不会在推理失败时把请求送到另一个 Provider。
 
-### 4.2 请求前匹配不等于失败切换
+### 4.2 请求前匹配与失败切换的职责边界
 
 [`packages/database/src/repositories/aiInfra/index.ts`](../../lobehub/packages/database/src/repositories/aiInfra/index.ts) 的 `tryMatchingProviderFrom()` 可按首选 Provider、fallback Provider、拥有目标模型的 Provider 依次解析渠道。目前主要用于 Memory/Persona 等后台服务。
 
-该逻辑发生在请求发出前，目的是为内部任务找到一个可用的 Provider。选定后若请求失败，并不会再次运行这段逻辑去换渠道。因此应称为“Provider 预解析”，不能称为运行时 failover。
+该逻辑发生在请求发出前，目的是为内部任务找到一个可用的 Provider。选定后若请求失败，不会再次运行这段逻辑去换渠道。因此这里描述的是“Provider 预解析”语义：负责请求发出前的渠道选择，请求失败后的换渠道不在这一机制内。
 
 ### 4.3 Model Bank 的字段范围
 
@@ -224,7 +224,7 @@ Model Bank 的 fallback 用于补充模型能力、上下文、定价等元数�
 
 新价格结构支持 fixed、tiered、lookup 三种策略，单位可为百万 token、百万字符、图片、视频、像素、秒，并分别描述文本、音频、图片、视频和缓存读写。它能表达“按分辨率查价”或“超过阈值后分段计价”，不限于单一 token 单价。
 
-同一类型模块还定义了 benchmark rating，包括 intelligence、speed、price、agentic、writing 和 design 的 0-100 归一化分数及来源日期；但评分不是内置模型卡类型或 `ai_models` 的字段，而是商业层通过 `useBusinessModelRating()` 按 Provider/模型另行注入。它只用于详情和比较界面，不进入普通请求路由，也不构成基于质量的自动选模器。
+同一类型模块还定义了 benchmark rating，包括 intelligence、speed、price、agentic、writing 和 design 的 0-100 归一化分数及来源日期；评分属于商业层数据，由 `useBusinessModelRating()` 按 Provider/模型另行注入，内置模型卡类型与 `ai_models` 的字段清单中都没有评分项。它只用于详情和比较界面，不进入普通请求路由，也不构成基于质量的自动选模器。
 
 ### 4.4 四种来源的字段完整度不同
 
@@ -451,7 +451,7 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 - 它还把最近 route attempt 元数据附到品牌 Provider 的请求 metadata；
 - `providerDiagnostics.ts` 中的 `ProviderResponseDiagnostics` 在 provider 边界捕获原始响应事件（有界记录、超限丢弃计数，避免污染 Redis 序列化），是 provider 层新增的诊断捕获点；`signatureScope.ts` 处理签名级（reasoning 等）的状态作用域。
 
-但这些信号默认没有形成普通 Provider 的健康调度闭环。观测到失败不等于后续请求会降低该渠道权重或熔断。
+但这些信号默认没有形成普通 Provider 的健康调度闭环：失败会被记录，渠道权重与熔断状态不随这些信号变化。
 
 ## 10. 能力矩阵
 
@@ -508,7 +508,7 @@ CLI 的 `provider test` 调用 [`apps/server/src/routers/lambda/aiProvider.ts`](
 ## 12. 未验证事项
 
 - Web 设置页、CLI 和桌面端均未在本次调查中启动并实际操作；权限、网络代理、表单保存时序、错误提示和打包桌面行为未验证。静态代码只能确认入口、状态和事件绑定。
-- 未在本次检查范围内找到 Provider 专用配置文件格式、TUI 管理界面、Provider 专用 Web/CLI/桌面导入导出和渠道复制功能；不能据此排除未纳入搜索范围的商业包、部署脚本或外部运维工具。
+- 未在本次检查范围内找到 Provider 专用配置文件格式、TUI 管理界面、Provider 专用 Web/CLI/桌面导入导出和渠道复制功能。
 - 通用数据导出/导入的完整 UI 入口、导入冲突提示和跨实例恢复过程未运行验证；已确认源码层导出 `key_vaults` 密文且导入不会换密钥重加密。
 - CLI `config --show --json` 的实际权限过滤、日志落盘和终端历史暴露未运行验证；源码只确认命令构造输出和服务端受限 API Key 的部分脱敏边界。
 - 删除 Provider 后既有 Agent、Topic 或 Message 中保存的 Provider 引用如何展示和恢复，本次未继续沿关联数据和运行时错误路径验证。

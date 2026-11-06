@@ -139,7 +139,7 @@ Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`pa
 
 ## 8. 当前创作与文档处理补充
 
-截图能力已具备选择框、标注和 OCR 主链：覆盖层采集用户选择，截图结果可作为输入内容继续进入会话。PDF 翻译使用 BabelDOC 保留版式，翻译结果会写入历史和文件管理器，资源下载过程另有进度反馈。两者分别是输入采集与文档生成/管理路径，不能据此推断通用视频、音频或画布编辑器已经存在。
+截图能力已具备选择框、标注和 OCR 主链：覆盖层采集用户选择，截图结果可作为输入内容继续进入会话。PDF 翻译使用 BabelDOC 保留版式，翻译结果会写入历史和文件管理器，资源下载过程另有进度反馈。两者分别是输入采集与文档生成/管理路径，本次确认的媒体能力即这两条；通用视频、音频或画布编辑器存在与否需另行核查。
 
 本次未运行 OCR 质量、BabelDOC 下载、翻译成功率或跨平台屏幕捕获。依据：`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/renderer/windows/screenshot/ScreenshotApp.tsx`、`src/main/services/PdfTranslationService.ts`、`src/renderer/pages/translate/pdf/PdfTranslationView.tsx`。
 

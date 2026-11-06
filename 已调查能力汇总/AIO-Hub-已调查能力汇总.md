@@ -18,7 +18,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 更稳定的产品结构是"统一框架下的可扩展能力枢纽"：轻量工具页、复合工作台和 Chat、媒体、Recall 等系统级工作区共用工具注册、导航、窗口、设置及本地数据基础设施。人类 UI、内部服务、Agent、插件/Skill 和外部 VCP 节点是并列入口；Agent 已经深度接入部分能力，但不是全部工具的默认调用者，也不是产品形成的起点。产品演变和该判断的证据见[产品结构与设计基因调查笔记](../产品结构与设计基因/AIO-Hub-产品结构与设计基因调查笔记.md)。
 
-会话、Agent、媒体资产、画布和多种工具配置主要以本地文件或 SQLite 为事实源；LLM 推理、部分媒体生成、网页目标和 VCP 节点依赖用户配置的远程模型或外部环境。因此这里的"本地优先"描述数据所有权与本地工作区，不表示全部能力离线。Agent 工具总开关默认关闭，新工具默认不启用、不自动批准；工具审批默认无限等待，可配置超时自动拒绝；当前模型通信协议只有 VCP 一种实现。
+会话、Agent、媒体资产、画布和多种工具配置主要以本地文件或 SQLite 为事实源；LLM 推理、部分媒体生成、网页目标和 VCP 节点依赖用户配置的远程模型或外部环境。因此这里的"本地优先"描述数据所有权与本地工作区，各项能力能否离线取决于其依赖的模型与环境。Agent 工具总开关默认关闭，新工具默认不启用、不自动批准；工具审批默认无限等待，可配置超时自动拒绝；当前模型通信协议只有 VCP 一种实现。
 
 ## 产品结构与入口地图
 
@@ -28,7 +28,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 |---|---|---|---|
 | 人类直接操作 | 轻量工具页、复合工作台、Chat、媒体与管理器 | 正则预设、Git、窗口自动化、字幕 OCR、翻译、弹幕播放器、Chat、媒体生成 | 不要求存在 Agent facade；没有 Agent 接口不降低已经确认的人类主链 |
 | Agent/模型 | Tool Calling、上下文管道、动态媒体方法、Skill | 文件与目录、Knowledge/Recall、网页蒸馏、媒体生成、web-canvas | 只消费显式暴露且通过运行时过滤的子集，默认还受总开关与审批控制 |
-| 内部服务 | registry service、共享 store、资产/Token/OCR 平台 | 中央资产、Token 计算、smart-ocr、跨工具回流 | 被其他模块消费不等于面向 Agent，也可能只有调试工具页 |
+| 内部服务 | registry service、共享 store、资产/Token/OCR 平台 | 中央资产、Token 计算、smart-ocr、跨工具回流 | 被其他模块消费只说明存在内部调用方；面向 Agent 的能力需按具体注册项确认，其中一部分可能只有调试工具页 |
 | 插件与 Skill | JS/Native/Sidecar 代理、Agent Skills | 动态 ToolRegistry、脚本执行与资源按需读取 | 插件安装和目录分发生命周期尚未完整验证 |
 | 外部节点与其他设备 | VCP 双向节点、独立移动端 workspace | 远端工具代理、节点执行、Companion 构想 | VCP 依赖外部服务端；桌面 Companion 主链和移动端运行态未调查 |
 
@@ -47,7 +47,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 **证据口径**：`主链确认/静态源码确认`表示来源笔记已在当前快照复查从主要入口到状态、执行、可见结果及必要持久化或后续动作的实现路径。这是对该版本实现的确认，不因尚未进行黑盒运行而降为不可信结论。构建、测试、真实模型调用、Tauri 窗口与端到端操作用于补充运行环境中的平台差异、时序、交互质量、性能、安全性及外部依赖表现；本轮未运行这些项目。产品主链、自动化测试证据、实际运行和外部环境验证是相互补充的维度。
 
-正文能力条目以已确认事实为主体，入口类型在有助于理解产品边界时直接标出；局部异常和未验证事项集中在文末。某个子系统记录的问题较多，可能源于该专项调查更深，不能据此生成项目级可靠性排名。
+正文能力条目以已确认事实为主体，入口类型在有助于理解产品边界时直接标出；局部异常和未验证事项集中在文末。某个子系统记录的问题较多，可能源于该专项调查更深；条目数反映的是各专项调查覆盖的深度，项目级可靠性比较需要另一套口径。
 
 ## 功能能力摘要
 
@@ -119,7 +119,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 - **能力扩展与 Agent 投影路径**：内建 registry、动态 `ToolRegistryFactory`、`AgentExtension`、JS/Sidecar/Native 插件代理、远端 manifest 包装的 `VcpToolProxy` 汇入共享能力运行时；其中满足元数据与配置条件的方法再投影为 Agent 目录。"目前只做了 VCP"只适用于模型通信协议，不适用于工具来源、UI 工具或内部服务体系。证据状态：`主链确认`。来源：[产品结构与设计基因调查笔记](../产品结构与设计基因/AIO-Hub-产品结构与设计基因调查笔记.md)、[Agent 工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md)。
 
-- **异步任务框架与子 Agent 委派**：异步工具方法提交后返回任务 ID，重启将未完成工具任务标为 interrupted；子 Agent 任务有独立快照与启动失效处理。媒体池另将未完成项转为 error，三者状态与恢复不能混为一套。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md)、[媒体创作调查笔记](../媒体创作/AIO-Hub-媒体创作调查笔记.md)。
+- **异步任务框架与子 Agent 委派**：异步工具方法提交后返回任务 ID，重启将未完成工具任务标为 interrupted；子 Agent 任务有独立快照与启动失效处理。媒体池另将未完成项转为 error，三者的状态字面量与恢复路径各自独立。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md)、[媒体创作调查笔记](../媒体创作/AIO-Hub-媒体创作调查笔记.md)。
 
 - **aio-file-operator 路径策略**：安全检查覆盖五类路径字段与多路径输入，先经 Rust 解析真实路径并检查目录包含关系，目录操作另有递归预检；执行层与外部传输各有复核入口。普通强制读写命令的直接调用权限仍需独立理解，不能将应用策略等同于系统级进程隔离。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md)。
 
@@ -185,7 +185,7 @@ AIO-Hub 是以 Vue/TypeScript 为主体、Rust/Tauri 提供桌面能力的多功
 
 - **弹幕播放器与外部播放器覆盖层（danmaku-player）**：用户可使用内置播放器加载 ASS/B 站 JSON/XML 弹幕及 10 种字幕格式，也可让 Win32 透明覆盖层跟随外部播放器，通过虚拟时钟对时、HWND 跟随和鼠标穿透叠显弹幕。入口：`人类媒体工具`；无 Agent 方法、无后台常驻，外部覆盖仅 Windows。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/AIO-Hub-独特功能调查笔记.md)。
 
-- **其他人类工具与第二梯队入口**：embedding-playground、media-info-reader、user-profile-manager、text-diff、api-tester、config-converter、data-filter、dir-search、directory-janitor、git-analyzer、color-picker 已确认人类 UI、数据服务或 Agent 接入中的一种或多种入口，但尚未统一走完整主链，证据状态为 `入口确认`。code-formatter、json-formatter、symlink-mover、system-pulse、service-monitor、wallpaper-detector 等轻量工具经扫描未发现额外的跨工具、Agent 或后台面；这表示它们主要按自身工具目标工作，不表示功能不存在或因缺少 Agent 接口而未完成。来源：[独特功能调查笔记](../独特功能/AIO-Hub-独特功能调查笔记.md) 第二梯队小节、[产品结构与设计基因调查笔记](../产品结构与设计基因/AIO-Hub-产品结构与设计基因调查笔记.md) 来源覆盖缺口。
+- **其他人类工具与第二梯队入口**：embedding-playground、media-info-reader、user-profile-manager、text-diff、api-tester、config-converter、data-filter、dir-search、directory-janitor、git-analyzer、color-picker 已确认人类 UI、数据服务或 Agent 接入中的一种或多种入口，但尚未统一走完整主链，证据状态为 `入口确认`。code-formatter、json-formatter、symlink-mover、system-pulse、service-monitor、wallpaper-detector 等轻量工具经扫描未发现额外的跨工具、Agent 或后台面；这表示它们主要按自身工具目标工作，功能完成度以各自工具页的实际实现衡量。来源：[独特功能调查笔记](../独特功能/AIO-Hub-独特功能调查笔记.md) 第二梯队小节、[产品结构与设计基因调查笔记](../产品结构与设计基因/AIO-Hub-产品结构与设计基因调查笔记.md) 来源覆盖缺口。
 
 > 能力族的产品/机制贡献划分（主贡献 16 族、辅助贡献、机制贡献单列）见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 

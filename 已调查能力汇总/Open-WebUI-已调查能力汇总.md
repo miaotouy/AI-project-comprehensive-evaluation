@@ -161,7 +161,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 ### 声明不符
 
-- **Artifact KV（`声明不符`，按当前快照）**：README 宣称的「built-in key-value storage API for artifacts」在 routers/models/utils/tools 中未找到对应执行入口，语义最接近的是 channel 消息 / calendar / note 的 data 字段与聊天任务清单，不能据此计数；结论基于当前快照静态搜索，需在新快照复查。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- **Artifact KV（`声明不符`，按当前快照）**：README 宣称的「built-in key-value storage API for artifacts」在 routers/models/utils/tools 中未找到对应执行入口，语义最接近的是 channel 消息 / calendar / note 的 data 字段与聊天任务清单，该条声明归入「声明不符」，尚未形成可计数的能力条目；结论基于当前快照静态搜索，需在新快照复查。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
 ### 暂缓与外部依赖
 

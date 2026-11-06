@@ -42,7 +42,7 @@ OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托�
 
 in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts`）。默认文件名为 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
 
-轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts`）。in-chat 版本并不直接写盘，而是组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求走审批通道执行（`commands-export-trajectory.ts:275-304`）。
+轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts`）。in-chat 版本把导出交给审批通道执行：它组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求，落盘发生在该命令获批执行之后（`commands-export-trajectory.ts:275-304`）。
 
 ## 2. 范围选择、内容口径与字段过滤
 

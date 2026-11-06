@@ -59,7 +59,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 ### 会话与消息
 
-- **会话定位与分桶（messageMapKey）**：会话不是"agentId+topicId"二元定位，而是多维坐标 ConversationContext 压平的 messageMapKey 分桶（main/thread/group/group_agent/page 等 scope）；本地分桶比服务端缓存 key 更细（多 documentId/subAgentId 维度），query.ts 用 representableBucketKey 防御两者不同构。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/LobeHub-Chat调查笔记.md)
+- **会话定位与分桶（messageMapKey）**：会话由多维坐标 ConversationContext 压平的 messageMapKey 分桶定位（main/thread/group/group_agent/page 等 scope）；本地分桶比服务端缓存 key 更细（多 documentId/subAgentId 维度），query.ts 用 representableBucketKey 防御两者不同构。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/LobeHub-Chat调查笔记.md)
 
 - **双层 Zustand store 架构**：全局 ChatStore 独占写入消息转写副本并派生展示列表，经本地副本层持久化；会话级 ConversationStore 订阅并单向镜像同一桶，局部写动作先转发回全局。主聊天 Provider 省略消息数组参数；显式传数组仅用于静态转录，关闭同步。store 实例跨 topic 存活，切换时原地重置 UI-only 状态。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[消息渲染调查笔记](../消息渲染器/LobeHub-消息渲染调查笔记.md)
 

@@ -8,7 +8,7 @@
 >
 > 调查方式：只读静态源码核对，覆盖 VCPInfo WebSocket 监听、内存缓存、元数据提取和观察器界面；未连接 VCPInfo 服务
 >
-> 调查范围：移动端对远端检索/记忆/思维活动的可观察性；不把远端事件的语义当成移动端本地索引、查询或记忆写回实现
+> 调查范围：移动端对远端检索/记忆/思维活动的可观察性；记录范围止于远端事件与展示元数据，本地索引、查询与记忆写回实现不在本次覆盖内
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -33,7 +33,7 @@ VCPLog URL/Key 设置变更
 
 ## 事实对象与结果契约
 
-移动端的事实对象不是文档片段或向量，而是远端 JSON 通知及其本地 metadata。metadata 带 ID、类型、标题、摘要、时间和“是否有详情”；完整载荷按 ID 存为 Zstd 压缩字节。`src/core/stores/ragObserver.ts:1-90`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:55-100,430-500`。
+移动端的事实对象是远端 JSON 通知及其本地 metadata，而非文档片段或向量。metadata 带 ID、类型、标题、摘要、时间和“是否有详情”；完整载荷按 ID 存为 Zstd 压缩字节。`src/core/stores/ragObserver.ts:1-90`，`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:55-100,430-500`。
 
 元数据提取器识别私聊预览、元思考链、记忆回溯、DailyNote 和 Agent 梦境系列事件。例如元思考链读取阶段数、K 序列、激活分组和查询文本；记忆回溯读取日记/文件数量、模式和 TagMemo chunk 数。这些字段是远端消息的展示契约，不是 VCPMobile 对检索算法的实现证据。`src-tauri/src/vcp_modules/infra/vcp_info_service.rs:430-560`。
 

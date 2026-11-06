@@ -52,7 +52,7 @@ Android 端是三条链路的行为主体；web-ui 是 React 前端（构建产�
 | Lorebook/注入 JSON | 扩展页导出按钮 | 单个实体 | 文件或 JSON 分享 |
 | 全量备份 | 侧边栏 → 备份页 | 设置 + 数据库 + 文件 | 文件 / WebDAV / S3 |
 
-对话导出的唯一入口是聊天列表的多选态。消息操作面板的「分享」并不直接分享单条消息，而是把 `selecting` 置真并选中从会话开头到该条消息的全部节点，因此它实际是“截取到此处”的整段导出（`ui/pages/chat/ChatList.kt`）；确认按钮汇总被选节点后打开导出面板（`ConversationExport.kt`）。
+对话导出的唯一入口是聊天列表的多选态。消息操作面板的「分享」把 `selecting` 置真，并选中从会话开头到该条消息的全部节点，因此它承担“截取到此处”的整段导出（`ui/pages/chat/ChatList.kt`）；确认按钮汇总被选节点后打开导出面板（`ConversationExport.kt`）。
 
 备份页由侧边栏进入，路由为 `Screen.Backup`（`ChatDrawer.kt`），分本地导入导出、WebDAV、S3、备份提醒四个标签页（`backup/BackupPage.kt`）。
 

@@ -56,7 +56,7 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 普通聊天从 renderer 经 `send-to-vcp` IPC 进入主进程。请求体包含消息、模型配置、布尔流式标志和 `requestId`；如果历史消息带有客户端时间戳元数据或 agent/topic 上下文，主进程额外发送 `vcpchatExtensions`，其中时间戳绑定只带消息文本 SHA-256 哈希而非附加私有字段（`modules/ipc/chatHandlers.js:74-153`）。这是 VCPChat 到网关的请求契约，服务端是否消费扩展字段及其如何检索，尚未运行确认。
 
-启用工具注入时，客户端把请求 URL 改为 `/v1/chatvcp/completions`；否则保留配置的 URL。请求使用 Bearer API key，消息仅保留角色、内容、名称和工具调用所需字段，附件与思考等私有 UI 元数据被剔除。默认还会从上下文去除元思考链，只有设置显式启用才保留（`modules/ipc/chatHandlers.js:1016-1034,1098-1156,1170-1210`）。因此元思考的观察或保留是客户端可配置的上下文卫生策略，不等于客户端产生元思考。
+启用工具注入时，客户端把请求 URL 改为 `/v1/chatvcp/completions`；否则保留配置的 URL。请求使用 Bearer API key，消息仅保留角色、内容、名称和工具调用所需字段，附件与思考等私有 UI 元数据被剔除。默认还会从上下文去除元思考链，只有设置显式启用才保留（`modules/ipc/chatHandlers.js:1016-1034,1098-1156,1170-1210`）。因此元思考的观察与保留属于客户端可配置的上下文卫生策略，作用范围限于发往网关的上下文；元思考链本身由远端 VCP 服务产生，客户端只负责观察、筛选与展示。
 
 流式 HTTP 响应按 SSE `data:` 行解析，统一映射为 `chat.stream.*` 事件契约：`started`/`chunk`/`final` 加 4 个终态，`normalizeChatTerminal` 把 `end`/`done`/`success`/`stop` 归一为 `completed`，`abort`/`cancel` 归一为 `cancelled`，`discard`/`stale` 归一为 `discarded`，`error`/`disconnect`/`reader-error` 归一为 `failed`；事件附带消息 ID、上下文与 IPC 侧生成的流操作 ID（`modules/chat/chatEventContract.js:7-34`；`modules/ipc/chatHandlers.js:1056-1360`）。非流式结果原样作为 JSON 返回。该契约没有定义 RAG 候选、分数或阶段必然进入聊天消息；这些细节另从日志观察通道到达时才会显示。
 

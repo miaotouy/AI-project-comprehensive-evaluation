@@ -384,7 +384,7 @@ Assistant 保存一个 `UniqueModelId` 模型 ID；无 Assistant 的 Topic 使�
 
 图片、视频、音频生成因为可能计费会被标记为生成成本风险，TTS/STT 当前不走这套探针。
 
-这些结果是设置页的即时诊断数据，不会写回 Key 池，也不会改变运行时轮询的选择。因此检测出坏 Key 不等于运行时会自动避开它。
+这些结果是设置页的即时诊断数据，只保留在诊断视图，不会写回 Key 池，也不会改变运行时轮询的选择。运行时的 Key 选择仍由既有轮询策略决定，诊断出的坏 Key 只在诊断结果中可见。
 
 开发者模式还可对 HTTP 请求启用 Trace；普通运行时另有 Topic/Turn trace 和多模型子 Span，但没有以这些指标驱动渠道选择。
 
@@ -408,7 +408,7 @@ maxRetries: maxRetries ?? 0
 - "没有跨 Provider、跨模型自动 failover"改为：**默认没有**，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；
 - 重试与 fallback 不改变 Key 轮询、渠道权重、成本/延迟路由等缺失项。
 
-Claude Code Agent Runtime 会接收其 SDK 的 `api_retry` 事件并向 UI 报告 attempt、delay 和错误类别。这属于外部 Agent Runtime 的重试机制，不能外推为普通聊天默认重试。
+Claude Code Agent Runtime 会接收其 SDK 的 `api_retry` 事件并向 UI 报告 attempt、delay 和错误类别。这属于外部 Agent Runtime 自带的重试机制，作用范围限于该 Runtime 的调用链；普通聊天的重试由 `chat.retry.*` 配置决定。
 
 异步图片/视频任务的轮询、OAuth 401 强制刷新，以及模型列表请求的容错也都有各自用途；它们均不是跨 Provider 推理 failover。
 
@@ -457,13 +457,13 @@ Provider Registry 从应用内模块抽成 `packages/provider-registry` 包，�
 ### 未实现或不应误判
 
 - 没有 Key 错误计数、熔断、自动恢复或配额感知；
-- 多 Key 基础轮询不等于持久健康调度；只有启用 model-retry 时才会在当前请求内尝试同 Provider 的其他 Key；
+- 多 Key 基础轮询在请求之间轮换 Key，失败计数与健康状态不持久化；只有启用 model-retry 时才会在当前请求内尝试同 Provider 的其他 Key；
 - SDK 层普通聊天默认不重试（`maxRetries ?? 0`）；用户可配置的 model-retry 默认关闭；
-- SDK 重试不等于重新选择 Provider；model-retry 的 fallback 是模型级、按能力过滤，不按 Key/渠道池调度；
+- SDK 重试沿用已解析完成的 Provider、Endpoint、Key 和模型，渠道决策只发生一次；model-retry 的 fallback 是模型级、按能力过滤，Key/渠道池调度不在其范围内；
 - 默认没有跨 Provider、跨模型自动 failover（需用户开启 `chat.retry.*`）；
 - 没有渠道权重、优先级、成本或延迟路由；
 - 多 Endpoint 是协议路由，不是容灾路由；
-- 模型目录 fallback 不等于推理请求 fallback；
+- 模型目录 fallback 只决定可选模型清单，推理请求失败后的切换由 model-retry 负责；
 - `@模型` 是并行显式调用，不是错误后的候补链；
 - 健康检查结果不进入运行时调度；
 - SQLite 凭据没有静态加密；
@@ -507,8 +507,8 @@ Provider Registry 从应用内模块抽成 `packages/provider-registry` 包，�
 2. 没有枚举并实测 Registry 中每个 Provider 的全部协议组合；专用 Builder 仍可能有服务商级特殊限制。
 3. 没有检查操作系统对 Electron `userData` 目录施加的账户级 ACL；“明文”结论只指应用没有额外静态加密。
 4. 备份/恢复管线已接线（v7 full/slim 布局 + checkpoint/promotion 恢复门，见 §3.4），但恢复的端到端行为（quiesce 失败、损坏归档、promotion 失败回退）未运行验证；本笔记只描述静态确认的调用路径。
-5. CherryIN、AiHubMix 等服务端可能在客户端不可见的位置做模型或上游容灾；本仓库客户端只把它们视为一个 Provider 实例，不能据此推断服务端内部没有 failover。
+5. CherryIN、AiHubMix 等服务端可能在客户端不可见的位置做模型或上游容灾；本仓库客户端只把它们视为一个 Provider 实例，服务端内部的 failover 行为在本次证据范围之外。
 6. 本次未启动桌面端，未实测 Provider 列表的右键菜单、编辑抽屉、复制流程、删除确认、启停排序、deep link 弹窗确认和保存后的缓存刷新；相关结论是源码确认的入口与事件绑定，实际视觉和平台行为未验证。
 7. 本次未实际读写 Claude、Codex、OpenCode、Gemini、Qwen、Kimi 或 Pi 的用户配置文件；Code CLI 文件的 target 白名单、草稿构建、写入前校验和 Main 侧写入边界来自源码，外部 CLI 是否按各自版本接受生成内容未验证。
 8. “未找到 Cherry 自身 CLI/TUI Provider CRUD”和“未找到 Web Provider CRUD/导出/连接测试路由”来自本次对 `package.json`、`src/main`、`src/renderer`、`src/shared` 及 API Gateway 路由的静态搜索；未运行打包产物或外部 CLI，不能排除运行时动态加载或仓库外组件提供入口。
-9. SQLite 级备份包含 Provider 凭据的结论已由备份实现静态确认，但本次未运行导出、恢复、损坏归档和跨版本迁移；因此不能据此确认每一种用户可见备份设置的界面提示和最终归档内容。
+9. SQLite 级备份包含 Provider 凭据的结论已由备份实现静态确认，但本次未运行导出、恢复、损坏归档和跨版本迁移；每一种用户可见备份设置的界面提示和最终归档内容仍属运行验证范围。

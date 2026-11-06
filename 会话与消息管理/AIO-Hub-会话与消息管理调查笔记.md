@@ -288,10 +288,10 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 ### 8.1 Agent 绑定：创建时强绑定 vs 消息级快照
 
 - 创建会话时必须传入 `agentId`，若在 agent store 中找不到对应 Agent 会直接抛错（`useSessionManager.ts:110-119`），不允许创建"无主"会话。
-- `displayAgentId` 在创建时被设为该 `agentId`，但这个字段的语义并不是"会话永久绑定的 Agent"，而是**"当前活跃路径上最新一条助手消息使用的 agentId"**（类型定义里的注释，`types/session.ts:33-36`）。证据：每次生成/撤销/重做后，会从活动路径末端向上遍历，找到第一个带 agentId 快照的助手消息并覆盖该字段（`useSessionManager.ts:62-95`）。也就是说，**同一个会话里可以有多条消息使用不同的 Agent 生成**，该字段只是给列表展示用的、跟随当前分支实时变化的快照。
+- `displayAgentId` 在创建时被设为该 `agentId`，此后它随活跃路径变化，记录的是**"当前活跃路径上最新一条助手消息使用的 agentId"**，创建时的取值只作初始值（类型定义里的注释，`types/session.ts:33-36`）。证据：每次生成/撤销/重做后，会从活动路径末端向上遍历，找到第一个带 agentId 快照的助手消息并覆盖该字段（`useSessionManager.ts:62-95`）。也就是说，**同一个会话里可以有多条消息使用不同的 Agent 生成**，该字段只是给列表展示用的、跟随当前分支实时变化的快照。
 - 消息节点保存生成时快照：`metadata.agentId`/`agentName`/`agentIcon`/`agentDisplayName` 及 `modelIcon`（发送入口在发消息前写入，`useChatHandler.ts:395-415`、`:715-735`、`:900-920`），UI 上历史消息仍显示生成时用的 Agent 头像/名字，模型图标优先读当前渠道配置、缺失才回退快照。
 
-结论：Agent 与会话的关系不是"创建时写死、之后不可变"的强绑定，而是"消息级快照 + 会话级实时展示指针"的组合，可以随时更换，且更换本身不影响历史消息已经记录的生成上下文。切换 Agent 的界面入口（`useLlmChatUiState().selectAgent`）在 Chat UI 4.1。
+结论：Agent 与会话的关系是"消息级快照 + 会话级实时展示指针"的组合，创建时传入的 `agentId` 只作初始值，之后可随时更换且无需重建会话；更换本身也不影响历史消息已经记录的生成上下文。切换 Agent 的界面入口（`useLlmChatUiState().selectAgent`）在 Chat UI 4.1。
 
 ### 8.2 切换 Agent 的开场白替换条件
 

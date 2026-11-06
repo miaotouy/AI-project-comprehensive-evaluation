@@ -43,7 +43,7 @@
 
 **入口与任务对象**：没有独立的“任务 ID”实体。会话状态由 `ConversationSession` 承载，本链只用到其中几样任务态：权威会话内存态、生成状态提示、当前生成 Job、回复消息 id 与生成开始时间（`state`、`processingStatus`、`generationJob`、`replyMessageId`、`generationStartedAt`）。会话对象由会话管理器惰性创建，初始值只是一条带 id 与助手 id 的占位会话，真正的历史在初始化时经 `ConversationStore` 从数据库载入（`service/ConversationSession.kt`、`service/ConversationSessionManager.kt`）；消息节点、分支与占位会话的数据语义归[会话与消息管理笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
 
-**发送即入队**：`sendMessage()` 先判空，再把输入封装成队列项入队并立即触发调度。队列语义在 `MessageQueue` 中：`takeNext()` 跳过处于编辑占位的项，暂停时返回空，`pause()` 把所有等待中的回复以异常结束（`service/MessageQueue.kt`）。因此“再次发送”不是 steer 或替换，而是排队等待本轮结束。
+**发送即入队**：`sendMessage()` 先判空，再把输入封装成队列项入队并立即触发调度。队列语义在 `MessageQueue` 中：`takeNext()` 跳过处于编辑占位的项，暂停时返回空，`pause()` 把所有等待中的回复以异常结束（`service/MessageQueue.kt`）。因此“再次发送”进入队列，等待本轮结束后再调度。
 
 **任务状态初始化**：`launchGenerationJob()` 用惰性启动创建 Job，`keepAliveInBackground` 为真时先申请前台服务保活，任务体结束后释放（`service/ChatService.kt`）；前台服务、通知与后台悬浮窗的语义归[主动 Agent 与后台任务笔记](../主动Agent与后台任务/RikkaHub-主动Agent与后台任务调查笔记.md)。Job 完成回调里比较并清空当前 Job、触发 `onGenerationFinished`——回调会暂停队列、把有未决审批工具的语音等待者置错，并驱动队尾消息调度。
 

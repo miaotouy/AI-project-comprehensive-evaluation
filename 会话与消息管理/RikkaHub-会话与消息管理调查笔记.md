@@ -21,7 +21,7 @@ RikkaHub 是原生 Android 应用（Kotlin + Compose + Room + DataStore + Koin�
 - **会话带固定配置**：`config` 列保存会话级的模型、推理强度、联网搜索、内置搜索、MCP、工作区与技能选择，首次打开时从助手快照，之后与会话一起迁移（`data/db/entity/ConversationEntity.kt`、`data/model/ConversationConfig.kt`）。
 - **写入是「内存领先、回合结束落库」**：用户消息在生成开始前落库，助手回复在整回合成功结束时一次落库，生成期间只改内存 `StateFlow`；取消或失败也走统一的收尾保存，避免内存进度丢失（`service/ChatService.kt`）。请求执行、任务状态机与流式处理见[对话请求与上下文笔记](../对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md)。
 - **分支切换 = 改 `select_index`**：编辑用户消息与重新生成助手回复都是给同一节点追加候选并选中，只有用户消息的「重新生成」是截断其后节点（`ChatService.kt`、`Conversation.kt` 的 `updateCurrentMessages`）。
-- **上下文压缩改用检查点插入**：压缩不是替换整段历史，而是把旧消息摘要成一条带 `isContextCheckpoint` 标记的合成用户消息插进节点序列，原消息保留，后续请求从最后一个检查点开始取上下文（`data/model/Conversation.kt` 的 `insertContextCheckpoint`/`lastContextTokens`）。
+- **上下文压缩改用检查点插入**：压缩把旧消息摘要成一条带 `isContextCheckpoint` 标记的合成用户消息插进节点序列，原消息保留，后续请求从最后一个检查点开始取上下文（`data/model/Conversation.kt` 的 `insertContextCheckpoint`/`lastContextTokens`）。
 - **消息全文检索是独立 FTS5 虚表**：`message_fts` 使用 FTS5 的 `simple` 分词扩展，英文与数字走 `simple_query`（含拼音与前缀），中文按单字切分后用 NEAR 组合；索引按会话增量维护，另用 `message_fts_rowid` 普通表避免按会话删除时全表扫描；列表分页用 Paging3、标题搜索用 `LIKE`，与全文检索是三套不同查询，而助手侧的 `recent_chats` / `conversation_search` 复用同一仓库与 FTS 索引（`data/db/fts/MessageFtsManager.kt`、`ConversationDAO.kt`、`data/ai/tools/ConversationTools.kt`）。
 
 ## 系统边界与数据主链

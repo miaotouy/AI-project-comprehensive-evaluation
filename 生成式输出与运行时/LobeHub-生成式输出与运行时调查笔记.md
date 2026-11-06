@@ -119,7 +119,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 ## 8. 持久化、恢复、分享与导出
 
-- Artifact：源码存消息文本（`messages.content`），恢复仍从 DB 消息提取。HTML Artifact 可通过工作区本地文件发布链或 `lh artifact publish <file>` 打包本地依赖并发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前限制本地资源数量与总量，并拒绝未打包的本地引用。共享核心见 `packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`，CLI 入口见 `apps/cli/src/commands/artifact.ts:84-138,204-246`。具体发布后端仍由业务槽提供，OSS 自托管可见入口不等于服务可用。
+- Artifact：源码存消息文本（`messages.content`），恢复仍从 DB 消息提取。HTML Artifact 可通过工作区本地文件发布链或 `lh artifact publish <file>` 打包本地依赖并发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前限制本地资源数量与总量，并拒绝未打包的本地引用。共享核心见 `packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`，CLI 入口见 `apps/cli/src/commands/artifact.ts:84-138,204-246`。具体发布后端仍由业务槽提供；OSS 自托管环境可见的是发布入口，服务可用性取决于所配置的后端实现。
 - 文档：`documents` 行（`apps/server/src/services/document/index.ts` 的行构造与校验）字段含 content、editorData、title、parentId、fileType 等，另配历史表与编辑锁；恢复 = `restoreFromHistoryId` 与历史对比（`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。文档可发布到 workspace 并参与可见性/权限（`DocumentService.setVisibility`/`publishToWorkspace`）。
 - 沙箱导出文件成为 `files` 记录（预签名 URL 下载），图片生成工具的图片以消息内渲染展示（`packages/builtin-tool-image-generation/src/client/Render/GenerateImage.tsx`），文件落库链路本次未追完。
 - 备注：`ArtifactDeploymentActions`（"保存到工作区"）目前是空桩返回 null（`src/business/client/features/ArtifactDeploymentActions.tsx:11-13`），对应 lab 开关 `enableArtifactDeployment`（`src/store/user/slices/preference/selectors/labPrefer.ts:12-14`）——Artifact 到文档/文件的落盘能力未实现。

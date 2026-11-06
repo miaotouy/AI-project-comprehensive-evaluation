@@ -97,7 +97,7 @@ JSON 模式生成 OpenAI 风格的 `messages` 数组：开头插入一条 role �
 - Mermaid：`PreCode` 检测语言为 mermaid 的代码块后异步转 SVG（`markdown.tsx:28-72,83-100`）。PNG 导出若渲染已完成，SVG 会进入截图；但 ShareGPT 分享稿在挂载时同步抓取内部 HTML（`exporter.tsx:264-287`），与 mermaid 的异步渲染和 Markdown 组件的动态加载存在竞态，抓到的助手 HTML 可能只含未渲染的原始代码块——静态推断，需运行验证。
 - 代码折叠：代码块组件初始为折叠态，超过 400px 的代码块默认折叠并出现“显示更多”按钮（`markdown.tsx:176-229`），`enableCodeFold` 默认开启（mask 与全局配置双开关）。图片导出没有关闭折叠的路径，长代码块在 PNG 中可能呈现 400px 截断态——静态推断，需运行验证。
 - RenderExport 内容口径（ShareGPT 侧）：用户消息只取纯文本（多模态数组只渲染第一个文本片段，用户图片不进入分享 payload）；助手消息取内部 HTML（含已渲染的数学、代码高亮、audio/video 元素与可能的图片）。远端清洗与脚本安全完全交给 ShareGPT 服务端。
-- JSON 是训练/接口风格的简化结构，`content` 原样取值（多模态时为数组），不保留消息 ID、日期、模型、tools 等字段，不能据此恢复 NextChat Session。
+- JSON 是训练/接口风格的简化结构，`content` 原样取值（多模态时为数组），不保留消息 ID、日期、模型、tools 等字段；NextChat Session 的恢复依赖这些字段，JSON 交付物覆盖的是消息正文。
 - 隐私边界：`includeContext` 默认开启，Mask context 会一并进入四种交付物；无密钥或个人信息扫描；图片文件名直接使用 `${topic}.png`，Tauri 对话框和浏览器对非法文件名的实际处理未运行验证。
 
 ## 6. 设计取舍与已确认边界

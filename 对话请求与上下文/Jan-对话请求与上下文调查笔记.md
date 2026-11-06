@@ -27,7 +27,7 @@
 
 Cowork 先校验所选模型支持工具并占用该 session 的运行句柄，再冻结本次工具目录，由前端循环逐步调用 transport、串行派发工具；完成或异常收尾都把显示 turns 与模型 UIMessage 历史提交到会话 store。不同 session 有独立句柄，同一 session 正在运行时拒绝再次启动（[cowork.tsx:447–489](../../jan/web-app/src/routes/cowork.tsx#L447-L489)、[cowork.tsx:1029–1052](../../jan/web-app/src/routes/cowork.tsx#L1029-L1052)）。
 
-预算以一次用户请求为单位：最多 100 个模型步骤，token 花费上限 200000，每次 `runRequest` 都从零开始；命名为 `MAX_SESSION_TOKENS` 的常量并不表示整个持久会话累计限额。步骤花费计算新生成 token 与提示增长，避免把每步重放的上下文重复计费（[coworkBudget.ts:10–23、46–88](../../jan/web-app/src/lib/coworkBudget.ts#L10-L88)、[cowork.tsx:682–689](../../jan/web-app/src/routes/cowork.tsx#L682-L689)）。取消传播给模型、工具与子 Agent，已启动的 shell 另有取消入口；运行句柄位于组件之外，离开路由不自动中断。
+预算以一次用户请求为单位：最多 100 个模型步骤，token 花费上限 200000，每次 `runRequest` 都从零开始；命名为 `MAX_SESSION_TOKENS` 的常量约束的是单次请求内的 token 花费。步骤花费计算新生成 token 与提示增长，避免把每步重放的上下文重复计费（[coworkBudget.ts:10–23、46–88](../../jan/web-app/src/lib/coworkBudget.ts#L10-L88)、[cowork.tsx:682–689](../../jan/web-app/src/routes/cowork.tsx#L682-L689)）。取消传播给模型、工具与子 Agent，已启动的 shell 另有取消入口；运行句柄位于组件之外，离开路由不自动中断。
 
 队列也按 Cowork session 归属：正常完成才自动发送下一条，即使用户已切到另一 session，仍采用原 session 的模型和技能上下文；出错清空，停止或预算触限则保留可见队列。手动 `/compact` 只改写模型重放的 `messages`，保留用户阅读的 turns，因而之后编辑或删除需要按同一用户提问对齐两份历史（[cowork.tsx:1054–1117](../../jan/web-app/src/routes/cowork.tsx#L1054-L1117)、[useCoworkSessions.ts:272–295](../../jan/web-app/src/hooks/useCoworkSessions.ts#L272-L295)）。
 

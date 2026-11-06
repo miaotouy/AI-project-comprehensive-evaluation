@@ -64,7 +64,7 @@ DeepChat 的角色是持久化 Agent descriptor 加上运行时 session policy�
 
 `resolveSessionHandle` 根据会话的 `agentId` 打开对应 handle（`:107-118`）；取消生成、清理 runtime、transfer 和 subagent facet 均复用相同分派。
 
-因此，ACP 是独立的 Agent backend/协议路径。它可以出现在 Provider 目录中，但不能仅凭 `apiType` 把 ACP 视为普通 LLM provider；DeepChat 运行时会在工具解析时对 ACP-backed subagent 返回空工具目录。
+因此，ACP 是独立的 Agent backend/协议路径。它可以出现在 Provider 目录中；区分 ACP 与普通 LLM provider 要看 backend 分派，`apiType` 只覆盖 Provider 目录这一层。DeepChat 运行时会在工具解析时对 ACP-backed subagent 返回空工具目录。
 
 ## 4. 提示词字段与最终拼装顺序
 

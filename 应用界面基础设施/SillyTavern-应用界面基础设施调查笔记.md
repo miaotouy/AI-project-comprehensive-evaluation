@@ -266,7 +266,7 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 - aria-* 属性几乎不存在：`index.html` grep aria- 仅 1 处命中（装饰图标 `aria-hidden="true"`，`index.html:5733`）；全部 `public/scripts/*.js` 只有 3 个文件各 1 处 `role=`，且都是把业务数据值（prompt 的 role 字段）写进 HTML 属性，不是无障碍语义——实质上没有专门为读屏设计的 aria-label/aria-describedby/`role="button"`（全文 grep 的确定性结果）。
 - 绝大多数"按钮"是 `<div>`/`<i>` 图标：`index.html` 有 245 处 `.menu_button` 相关 `<div>`，而非原生 `<button>`。
 
-**补偿机制。** keyboard.js 维护约 30 类可交互选择器。MutationObserver 会给新出现的匹配元素补 `tabindex="0"`，全局 Enter 处理再找到最近的可交互祖先并触发点击。这使大量非原生控件获得基本键盘路径，但不等于具备完整语义。（`public/scripts/keyboard.js:2-234`）
+**补偿机制。** keyboard.js 维护约 30 类可交互选择器。MutationObserver 会给新出现的匹配元素补 `tabindex="0"`，全局 Enter 处理再找到最近的可交互祖先并触发点击。这使大量非原生控件获得基本键盘路径；读屏所需的完整语义仍取决于 role 与 aria 属性，此处缺失。（`public/scripts/keyboard.js:2-234`）
 
 这套系统解决 Tab 可达与 Enter 触发，但没解决读屏"怎么念这个按钮"——`<div tabindex="0">` 无 role/aria-label 时读屏通常跳过或只读文字内容。
 - title 属性大量存在（595 处）但不能替代 ARIA；手写 tabindex 只有 3 处（switch_input_type_icon 设 -1 刻意排除、mes_impersonate 设 0），其余靠 `keyboard.js` 运行时动态加。

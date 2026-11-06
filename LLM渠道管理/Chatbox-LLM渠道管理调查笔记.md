@@ -92,7 +92,7 @@ SessionSettings { provider, modelId }
 | 导出 | Provider 页面未找到单渠道导出；通用 Data Backup 可选择 Settings，将完整设置作为 ZIP 条目导出 | 只能随整个设置导出 | 只能随整个设置导出 |
 | 连接测试 | 详情页先选模型，再复用 `getModel()` 和模型实例发送测试请求 | API Key/AWS 凭据满足条件时支持；OAuth 活跃时 API Key 检查按钮禁用 | 支持 |
 
-表格中的“未找到”表示本次检查的当前源码范围内没有对应入口，不等于对未检查的外部脚本或历史版本作绝对否定。
+表格中的“未找到”只覆盖本次检查的当前源码范围，外部脚本与历史版本需另行检查。
 
 设置路由另有一个 `src/renderer/routes/settings/default-models.tsx` 页面，集中选择各用途的默认模型（对话、图片、embedding、rerank、语音、文档解析等），模型选择组件已换成 `ModelSelectorV2`；模型富化经 `@/packages/model-registry` 的 `enrichModelsFromRegistry`。这次页面重写与渠道配置的保存逻辑相互独立，渠道数据模型本身没有新增渠道级字段。
 
@@ -102,7 +102,7 @@ SessionSettings { provider, modelId }
 
 已有渠道的导入行为有覆盖差异：导入 ID 已存在的内置 Provider 时只更新 `providers[id]`；导入 ID 已存在的自定义 Provider 时更新其基础信息并写入对应设置；全新自定义 ID 会同时追加 `customProviders[]` 和 `providers[id]`。导入的模型按 `modelId` 去重，且导入弹窗显示覆盖警告。
 
-手工新建支持 Gemini 兼容模式，但当前 `provider-config.ts` 的导入 schema 只接受 `openai`、`openai-responses` 和 `anthropic` 三种自定义类型。本次静态代码确认了手工创建面与 JSON/深链导入面的协议覆盖不一致；这不是运行时 Gemini 模型类不存在，而是导入格式校验未覆盖该类型。
+手工新建支持 Gemini 兼容模式，但当前 `provider-config.ts` 的导入 schema 只接受 `openai`、`openai-responses` 和 `anthropic` 三种自定义类型。本次静态代码确认了手工创建面与 JSON/深链导入面的协议覆盖不一致；运行时 Gemini 模型类照常可用，覆盖缺口出在导入格式校验。
 
 ### 2.3 配置文件、导入、导出与恢复
 
@@ -122,7 +122,7 @@ Web 同样使用该通用备份页面，但导出结果通过浏览器下载或 
 
 ## 3. 凭据、Header 与代理边界
 
-Provider 设置 schema 支持单个 `apiKey`，没有 `apiKeys[]`、Key 权重或健康状态；OAuth credential 保存 access token、refresh token 和过期时间；Azure 使用 endpoint、deployment 和 API version 字段，Bedrock 使用 access key、secret key、session token 和 region。API Key 表单使用密码输入，OAuth 登录状态显示为已登录，但这属于 UI 脱敏/隐藏，不代表存储加密。
+Provider 设置 schema 支持单个 `apiKey`，没有 `apiKeys[]`、Key 权重或健康状态；OAuth credential 保存 access token、refresh token 和过期时间；Azure 使用 endpoint、deployment 和 API version 字段，Bedrock 使用 access key、secret key、session token 和 region。API Key 表单使用密码输入，OAuth 登录状态显示为已登录，两者都属于 UI 脱敏与隐藏，存储层按普通设置字段写入。
 
 桌面端 API Key、OAuth token、Azure/AWS 字段最终作为普通 JSON 字段进入 Electron Store 的 `config.json`。OAuth 刷新成功后会写回设置；OpenAI 与 OpenAI Responses 可以共享 OAuth credential，但各自的 `activeAuthMode` 独立。Web 和 mobile 的 OAuth 请求解析会回退 API Key，OAuth IPC 和 callback/device-code 流程限定在 desktop。
 
@@ -172,7 +172,7 @@ Provider 设置页的 Check 操作要求 API Key 和至少一个模型，AWS Bed
 
 测试结果在弹窗中区分文本、视觉和工具调用；视觉或工具测试成功时会把能力追加到模型本地配置。源码确认测试复用模型创建和请求链路，但未运行验证各协议的实际 HTTP 请求、计费行为、流式处理或 OAuth 回调。
 
-模型目录 Fetch 不是连接测试：它刷新 models.dev（若有映射）并合并模型目录，可能只执行列表请求，不代表聊天 POST 成功。请求错误会通过模型错误归一化和 UI 状态回调显示；本次未找到 Provider 管理页上的按渠道请求日志、成本统计、延迟面板或健康历史。应用有通用日志和设置导出能力，但不应据此推断存在专用 Provider 可观测性。
+模型目录 Fetch 走目录刷新链路：它刷新 models.dev（若有映射）并合并模型目录，可能只执行列表请求，聊天 POST 的成败需由连接测试另行验证。请求错误会通过模型错误归一化和 UI 状态回调显示；本次未找到 Provider 管理页上的按渠道请求日志、成本统计、延迟面板或健康历史。应用有通用日志和设置导出能力；Provider 层面的可观测性需看按渠道请求日志、成本统计、延迟面板或健康历史，本次未找到对应入口。
 
 ## 9. 设计取舍与已确认边界
 
@@ -188,9 +188,9 @@ Provider 设置页的 Check 操作要求 API Key 和至少一个模型，AWS Bed
 1. 未启动桌面、Web 或移动端，未实测设置页保存、删除后的引用行为、浏览器 IndexedDB、CORS、下载、Web Share、代理和 OAuth 回调。
 2. 未对任一实际 Provider 执行真实 API 调用，因此无法确认不同服务商的 Host/Path 归一化、错误映射、计费和流式细节。
 3. 未找到独立 TUI；该结论仅覆盖当前仓库源码、package scripts、虚拟 CLI 命令目录和相关命名搜索范围。
-4. 未找到 Provider 复制、渠道级启停、渠道级导出和通用自定义 Header 的当前入口；通用设置备份能整体携带渠道配置，但不等同于这些单渠道操作。
+4. 未找到 Provider 复制、渠道级启停、渠道级导出和通用自定义 Header 的当前入口；通用设置备份能整体携带渠道配置，作用粒度停留在整包层面。
 5. Electron Store 未配置应用层 `encryptionKey`；本次未检查操作系统对 userData 目录的账户 ACL、磁盘加密或备份文件访问权限。
-6. Chatbox AI 服务端的供应商冗余、限流、额度和故障转移不在本仓库中；客户端的单一 Provider 表示不能推断服务端内部没有容灾。
+6. Chatbox AI 服务端的供应商冗余、限流、额度和故障转移不在本仓库中；客户端的单一 Provider 表示只反映客户端配置形状，服务端容灾无法由本仓库代码确认。
 
 ## 11. 关键源码索引
 

@@ -117,7 +117,7 @@ Connection Profile 的“新建”读取当前 `cc` 或 `tc` 模式下由命令�
 
 OpenAI 设置页的 preset 具有独立于 Profile 的文件生命周期：保存/更新通过 `/api/presets/save`，删除通过 `/api/presets/delete`，恢复内置默认 preset 通过 `/api/presets/restore`。`Save As` 是复制当前 preset 内容并以新名称保存，rename 实现为先保存新名称再删除旧名称（`public/scripts/preset-manager.js:441-517, 774-836`）。
 
-OpenAI preset 导入读取本地 JSON；如果发现代理、自定义 URL、Header/Body 等敏感连接字段，会先让用户选择移除或按原样导入。导出也会提示是否移除这些字段，并另有选项删除连接数据。这里的“敏感字段”仍属于普通 preset JSON，不等于 Secret Manager 的 Key；源码未显示 preset 导入会自动写入 Secret Manager（`public/scripts/openai.js:4661-4742, 4744-4785`）。
+OpenAI preset 导入读取本地 JSON；如果发现代理、自定义 URL、Header/Body 等敏感连接字段，会先让用户选择移除或按原样导入。导出也会提示是否移除这些字段，并另有选项删除连接数据。这里的“敏感字段”仍属于普通 preset JSON，凭据由 Secret Manager 的 Key 单独保存；源码未显示 preset 导入会自动写入 Secret Manager（`public/scripts/openai.js:4661-4742, 4744-4785`）。
 
 ## 1. 渠道数据模型
 
@@ -399,7 +399,7 @@ Text Completion 则由后端类型决定 URL 规则、模型发现、模板能�
 - Fireworks 流式请求设置会话亲和 Header 以改进缓存，并请求与解析 reasoning 字段（`public/scripts/reasoning.js:157`、`public/scripts/openai.js:2585`）；
 - OpenRouter 在用户请求时启用 logprobs 返回；
 - Pollinations 提供端点选择项，可在设置页或 `/api-url` 命令中切换，合法值由 `POLLINATIONS_ENDPOINT` 枚举限定（`public/scripts/openai.js:272`、`public/scripts/slash-commands.js:6687-6710`）；
-- NovelAI 设置迁移保留零值 temperature，不把它当作缺省值覆盖；
+- NovelAI 设置迁移保留零值 temperature，零值作为显式取值迁移，缺省填充只作用于缺失字段；
 - 内置模型/上下文映射表持续跟上游刷新，当前已收录 Claude Opus 5 / Sonnet 5 / Fable 系、GPT-5.6 与 `gpt-6-astra`、Gemini 3.5/3.6/3.7 Flash 系、DeepSeek V4 Flash Vision 等条目。这些是硬编码表维护，不改变本地路由结构。
 
 ## 6. 重试、故障转移和路由

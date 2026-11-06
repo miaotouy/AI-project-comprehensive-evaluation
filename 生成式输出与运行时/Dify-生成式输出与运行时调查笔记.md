@@ -33,7 +33,7 @@ service API 将 response mode 定义为 blocking 或 streaming，默认 blocking
 
 ## 1. 输入、配置与运行记录初始化
 
-`WorkflowAppGenerator.generate` 先在文件访问作用域内处理 files（`api/core/app/apps/workflow/app_generator.py:176-194`），再由 `WorkflowAppConfigManager` 取得应用配置（195 行起），以变量定义准备用户输入。service API 对文件类型的校验强于部分内部调用，说明输入边界依赖 invoke source，不能只凭调试画布推断公开 API 的接受范围。
+`WorkflowAppGenerator.generate` 先在文件访问作用域内处理 files（`api/core/app/apps/workflow/app_generator.py:176-194`），再由 `WorkflowAppConfigManager` 取得应用配置（195 行起），以变量定义准备用户输入。service API 对文件类型的校验强于部分内部调用，说明输入边界依赖 invoke source；公开 API 的接受范围需按 service API 路径核对。
 
 生成器依次决定触发来源：调试为 `DEBUGGING`，应用运行为 `APP_RUN`（256-258 行），然后创建 workflow execution 与 node execution repository（259-280 行）。单节点/单循环调试也会建带 DEBUGGING 来源的 repository（468-620 行）。运行记录可以区分公开应用执行与控制台调试；本次未确认所有日志表面是否展示该来源。
 
@@ -41,7 +41,7 @@ service API 将 response mode 定义为 blocking 或 streaming，默认 blocking
 
 `WorkflowAppGenerator._generate` 把 app、workflow、user、运行实体、两个 repository、streaming、variable loader、root node、layers 与 graph state 交给下层生成 worker（339 行起、627 行起）。`WorkflowEntry` 是图入口，其 `run` 产出引擎事件（`api/core/workflow/workflow_entry.py:119-208`），配置开启时可叠加 observability layer（193 行起）；图引擎本体与节点基类由外部 `graphon` 包提供，本仓库保留入口、layers 与节点实现。终态的内部 node outputs 经公开 contract 投影后写回 WorkflowRun；这解释了为什么最终 API 输出和各节点的完整过程数据不是同一个 JSON 对象。
 
-图变量包括公开输入、文件、应用变量、节点输出和 runtime state，不等同于聊天 history。LLM、Agent、工具、知识库和人工输入可作为节点参与，但节点 schema、顺序和错误策略由 DSL 决定；本次不把某个节点的行为推广为所有 workflow。
+图变量包括公开输入、文件、应用变量、节点输出和 runtime state，属于图运行的数据契约；聊天 history 由会话消息单独保存。LLM、Agent、工具、知识库和人工输入可作为节点参与，节点 schema、顺序和错误策略由 DSL 决定，各节点的行为按自身类型定义。
 
 ## 3. 输出、流事件与暂停
 
@@ -59,7 +59,7 @@ workflow/advanced chat 的流式调用会从 workflow run ID 使用 `MessageBase
 
 service API 可按 workflow run ID 取得详情（`api/controllers/service_api/app/workflow.py:231-286`），控制台的 run/节点列表和详情要求 app 管理权限，`WorkflowRunService` 再按 tenant/app/run ID 查询 run、count 和节点 trace（`api/controllers/console/app/workflow_run.py:142-368`、`api/services/workflow_run_service.py:54-260`）。消息日志中的 `workflow_run_id` 会打开同一 run detail 与 node-execution 路径；控制台 workflow log 也显示状态、耗时和 token。这确认 outputs 不只在原始 SSE 中短暂存在，后续可由 run ID 回读并在多个日志面投影。
 
-节点执行的 inputs、outputs 与 process data 可以直接留在数据库，也可以通过 offload 记录转存到 UploadFile/对象存储；读取 detail 时依该引用回载完整内容。这样做是因为节点开始与完成要分别保存 inputs/outputs，不能等待完成后合并而牺牲运行中可观察性（`api/models/workflow.py:784-1316`）。它是执行审计的容量设计，不意味着用户获得可编辑文件工作区。
+节点执行的 inputs、outputs 与 process data 可以直接留在数据库，也可以通过 offload 记录转存到 UploadFile/对象存储；读取 detail 时依该引用回载完整内容。这样做是因为节点开始与完成要分别保存 inputs/outputs，不能等待完成后合并而牺牲运行中可观察性（`api/models/workflow.py:784-1316`）。它是执行审计的容量设计：offload 只改变 detail 的存储位置，记录按引用回载，用户侧入口是查询与日志。
 
 归档在控制台有独立入口：先列出月度 archive bundle，再创建或复用 download task；任务由 Redis 状态和 Celery 准备过程驱动，状态可为 pending、processing、ready 或 failed，完成后控制器才重定向至预签名下载 URL（`api/controllers/console/workflow_run_archive.py:110-225`、`api/services/retention/workflow_run/archive_download_task.py:19-95`）。准备任务把归档 bundle 整理为面向用户的 CSV ZIP，bundle 索引避免请求时直接枚举对象存储。
 
@@ -69,7 +69,7 @@ service API 可按 workflow run ID 取得详情（`api/controllers/service_api/a
 
 Dify 在本类目中可确认两层不同对象：消息中的 Markdown、代码和附件属于 G0/G1 内容投影；workflow definition 所产生的 workflow run、node execution、变量与事件流则是具稳定 ID、独立查询和归档面的运行记录。后者可被公开聊天或 API 消费，并能经历文本 chunk、节点开始/结束、暂停、人工输入、失败/完成和停止。公开页只是其中一个投影面；blocking API、消息/控制台日志、节点详情和归档下载可消费同一运行层的不同结果形态。
 
-这不等于 Dify 已确认提供了 HTML/JS Artifact 沙箱、可编辑文档画布、持续桌面活对象或“模型读取对象源码后定向维护”的完整闭环。本笔记的结论应收敛为**可寻址工作流执行记录**，而非泛称生成式 Artifact 或工作区：run 可以被查询、日志化和归档，却没有在本轮发现可在同一 run outputs 上编辑、版本化、接收 patch 或由模型再次定位维护的产品路径。已发布图的编辑/版本语义属于控制台 workflow 与 DSL 专项，不能由 run 的稳定 ID 推断。
+本次证据覆盖的是**可寻址工作流执行记录**这一层：HTML/JS Artifact 沙箱、可编辑文档画布、持续桌面活对象，以及“模型读取对象源码后定向维护”的完整闭环，都在本次证据范围之外。run 可以被查询、日志化和归档，却没有在本轮发现可在同一 run outputs 上编辑、版本化、接收 patch 或由模型再次定位维护的产品路径。已发布图的编辑/版本语义属于控制台 workflow 与 DSL 专项，不能由 run 的稳定 ID 推断。
 
 ## 7. 已确认边界与未验证事项
 

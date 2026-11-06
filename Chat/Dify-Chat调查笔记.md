@@ -22,7 +22,7 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
 
 | 表面 | 主要用户 | 已确认用途 | 边界 |
 | --- | --- | --- | --- |
-| 控制台 | 工作区成员/应用作者 | 配置应用、资源、工作流与调试 | 本篇不把它等同于公开聊天 |
+| 控制台 | 工作区成员/应用作者 | 配置应用、资源、工作流与调试 | 配置与调试面，与公开聊天分离 |
 | `/chat/[token]` | 已发布应用的终端用户 | 带会话历史的 WebChat | 只暴露已发布应用允许的输入，不直接管理租户资源 |
 | `/chatbot/[token]` 和嵌入式组件 | 终端用户/嵌入宿主 | 较轻的 Chatbot 运行面 | 与历史页复用发送与事件协议，但没有同等导航结构 |
 | `/environment/chat/[token]` | 部署环境的终端用户 | 运行选定环境版本的 WebApp | 当前部署环境只提供 WebApp 与 service API；MCP/trigger 卡明确标为不支持 |
@@ -49,11 +49,11 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
 
 ## 核心对象与状态权威
 
-| 对象/状态 | 主要所有者 | 在 Chat 中的作用 | 不能据此推断的内容 |
+| 对象/状态 | 主要所有者 | 在 Chat 中的作用 | 本行结论的适用范围 |
 | --- | --- | --- | --- |
-| Application 与 app mode | API 数据与应用配置层 | 决定可调用能力及 generator | 前端 URL token 不是全部配置 |
-| Conversation、Message、MessageChain | API 数据库模型与服务 | 历史、分页、父引用和可恢复消息 | 浏览器数组不是持久化事实源 |
-| task ID、workflow run、node events | 应用运行/工作流运行时 | 流、停止、暂停和过程反馈 | 不等同普通 message 的线性状态 |
+| Application 与 app mode | API 数据与应用配置层 | 决定可调用能力及 generator | 前端 URL token 只覆盖部分配置 |
+| Conversation、Message、MessageChain | API 数据库模型与服务 | 历史、分页、父引用和可恢复消息 | 浏览器数组承载展示，持久化事实源在 API 数据库 |
+| task ID、workflow run、node events | 应用运行/工作流运行时 | 流、停止、暂停和过程反馈 | task 与 run 事件有独立状态机，普通 message 的线性状态不足以描述 |
 | chat tree、responding、当前 ID、订阅 | React hook/context | 流式显示、局部交互与 URL/会话切换 | 刷新、并发和崩溃恢复尚未运行验证 |
 
 `Conversation`、`Message`、`MessageChain` 及文件、feedback、annotation 等关联对象位于 `api/models/model.py`。会话和消息服务按 application 与 user 限定读取，表明 conversation ID 不是跨应用或跨用户的通用访问令牌。首次发送才可能在服务端初始化 Conversation/Message；公开页的“新建”首先是清理当前 UI 选择和输入，不能单靠按钮认定数据库已经插入空会话。
@@ -80,7 +80,7 @@ Dify 的 Chat 是“已发布应用的调用表面”，而非一个由用户自
 
 ### 会话与候选回答
 
-历史页面提供会话列表、创建、选择、置顶、取消置顶、删除和重命名入口；发送请求中的 `parent_message_id` 与 hook 的 sibling 切换证明当前聊天需要表达父回答和同级候选。现有证据只足以确认“父引用参与重试/候选切换”的链路，不将其扩展成任意消息编辑、完整树可视化或全局版本控制的结论。
+历史页面提供会话列表、创建、选择、置顶、取消置顶、删除和重命名入口；发送请求中的 `parent_message_id` 与 hook 的 sibling 切换证明当前聊天需要表达父回答和同级候选。现有证据覆盖到“父引用参与重试/候选切换”的链路；任意消息编辑、完整树可视化与全局版本控制属于更外层能力，本轮未覆盖。
 
 ### 流、停止、重新生成与暂停
 

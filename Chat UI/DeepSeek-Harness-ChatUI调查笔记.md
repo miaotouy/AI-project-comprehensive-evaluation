@@ -150,7 +150,7 @@ ChatView（`packages/client/ui-conversation/src/client/chat/ChatView.tsx:146-427
 
 通用行的视觉分类在纯函数行模型 `toolRowModel`：按工具名映射变体（bash/read/write/edit/code/search/others），从 args 提取摘要/可打开路径/展开体，从结果节点展平输出文本，状态取 running/ok/error/stopped（`packages/client/ui-tool/src/client/tool/models/tool-call-model.ts:37-239`）。变体名到图标的映射表只覆盖第一方工具；未知工具名落到 others 行。
 
-Host presenter 仍可服务非 Web 消费者，但 Session Controller 不解析工具定义、不运行 presenter，也不附加 UI 数据。Web 从原始 call/result、失败和持久化 `tool/result.data.meta` 派生卡片；详情面板复用同一客户端行模型，插件缺席时回退原始结果文本（`packages/api/session-controller/README.md:27-29`）。
+Host presenter 仍可服务非 Web 消费者；Session Controller 只传递原始 call/result，工具定义解析、presenter 执行与 UI 数据附加都由 Web 一侧完成。Web 从原始 call/result、失败和持久化 `tool/result.data.meta` 派生卡片；详情面板复用同一客户端行模型，插件缺席时回退原始结果文本（`packages/api/session-controller/README.md:27-29`）。
 
 ## 9. 消息操作、队列与详情面板
 
@@ -158,7 +158,7 @@ Host presenter 仍可服务非 Web 消费者，但 Session Controller 不解析�
 
 turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产出文件。队列项在 QueueDock 内可编辑/移除/steer。详情面板 `DetailsPanel` 随选中工具调用（`inspectCall`）打开，切换会话时自动关闭。
 
-未找到就地编辑历史消息的入口；历史仍以分支表达。Workspace 行现可归档会话，设置页的 Archived sessions 支持搜索并逐条恢复；归档不等于删除日志（`packages/client/ui-settings-unarchive-sessions/README.md:28-36`）。
+未找到就地编辑历史消息的入口；历史仍以分支表达。Workspace 行现可归档会话，设置页的 Archived sessions 支持搜索并逐条恢复；归档只改变会话的可见状态，日志保持原样（`packages/client/ui-settings-unarchive-sessions/README.md:28-36`）。
 
 ## 10. 多会话、子 Agent、后台与跨窗口
 

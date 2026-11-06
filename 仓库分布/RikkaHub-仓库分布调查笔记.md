@@ -189,7 +189,7 @@ Gradle 侧使用版本目录与工具链配置：`gradle/libs.versions.toml` 集
 - 开发工具链没有被抽象进 Gradle：`tools/i18n`、`tools/trace` 各自维护独立清单与锁文件，与 Android 构建解耦，代价是需要各自的 Bun 运行时。`web-ui` 虽然独立维护 `package.json` 与 `pnpm-lock.yaml`，但被 `web` 模块以进程调用方式纳入 Android 构建。
 - 测试策略偏向「离线夹具回放」：`ai` 的流式解码以仓库内快照为期望值，`terminal`、`document` 以纯 JVM 单测覆盖解析与缓冲边界，网络与渲染不在单元测试范围内。
 - 子模块被移除后，仓库不再依赖 `git submodule` 拉取资源，`material3` 与 `web-ui` 都以源码/清单形式内置，CI 不再需要递归拉取子模块。
-- 文档数量（116）包含 92 个代理技能文件与 2 个基线画像文本，不能直接当作架构文档量；面向人的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
+- 文档数量（116）由 92 个代理技能文件与 2 个基线画像文本占主要部分；面向人的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
 
 ## 8. 未验证事项
 

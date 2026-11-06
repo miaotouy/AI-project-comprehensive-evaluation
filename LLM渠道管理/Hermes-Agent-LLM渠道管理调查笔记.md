@@ -276,7 +276,7 @@ providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定�
   - `POST /api/providers/custom-endpoints/validate`：对用户输入 base_url + 可选 key 探 `GET {base_url}/models`，可返回该 endpoint 模型列表。
   - `_probe_apikey_provider`（`hermes_cli/doctor_connectivity.py`）对已配置 API-key provider 逐查询 `/models`（部分 provider `supports_health_check=False` 跳过）。
   - **`hermes doctor --live`**（`hermes_cli/doctor_live.py`）：opt-in 的真实网络探针，逐个（顺序、每项 ~10s 超时）请求**元数据端点**——firecrawl 用量、fal 模型列表、openai/groq /models、elevenlabs voices——只读、失败隔离、未配置后端跳过（`doctor_live.py` 模块不变量）。与设置页探活同属"非真实聊天链路"，但覆盖的是**外部托管后端**而非 Provider 端点。
-- **结论**：设置页测试使用独立请求路径，只验证 endpoint 可达 + 单模型 URL 探活；**不经过真实 resolver、不经过 credential pool、不经过 fallback 链**。真实聊天还可能失败于 transport 组装 / 认证头注入 / 模型名不匹配等。因此不能从“设置页测试通过”推断真实聊天一定可用（指南事项 3 已确认成立）。
+- **结论**：设置页测试使用独立请求路径，只验证 endpoint 可达 + 单模型 URL 探活，路径上跳过真实 resolver、credential pool 和 fallback 链。真实聊天还可能失败于 transport 组装 / 认证头注入 / 模型名不匹配等。因此“设置页测试通过”只说明该测试路径可用，真实聊天可用性需按完整链路单独确认（指南事项 3 已确认成立）。
 
 ### 8.2 日志与错误
 
@@ -292,7 +292,7 @@ providers.<name>: （v12+）与 legacy custom_providers: [...]         # 自定�
 ## 9. 平台边界（桌面 / Web / 服务端 / 本地模型服务）
 
 - Electron 桌面（apps/desktop）：`apps/desktop/AGENTS.md` 是 scoped 架构说明；渲染层通过 `@hermes/shared` 的 JsonRpcGatewayClient + WS 与 `tui_gateway` 后端通信。Providers Settings 通过 Desktop API bridge 调用 REST；Custom endpoints 表单是当前唯一找到的端点 CRUD UI。
-- **Web dashboard（web/）**：`EnvPage` 展示 `GET /api/env`（redacted），支持 `.env` key 的新增/替换/清除/ reveal；OAuth 卡片调用 `/api/providers/oauth`。模型页使用 `/api/model/options`。本次未找到 Web Dashboard 的 Custom endpoints 页面或调用 `/api/providers/custom-endpoints` 的代码，因此服务端路由存在不等于 Web UI 可达。
+- **Web dashboard（web/）**：`EnvPage` 展示 `GET /api/env`（redacted），支持 `.env` key 的新增/替换/清除/ reveal；OAuth 卡片调用 `/api/providers/oauth`。模型页使用 `/api/model/options`。本次未找到 Web Dashboard 的 Custom endpoints 页面或调用 `/api/providers/custom-endpoints` 的代码，因此服务端路由与 Web UI 可达性需分别确认。
 - **TUI（ui-tui + tui_gateway）**：`modelPicker.tsx` 调用 `model.options` 展示全 Provider 目录；未认证的 API-key Provider 可在选择器内输入 key，由 `model.save_key` 写入 `.env`；Ctrl+D 通过 `model.disconnect` 清除认证。它操作的是已有 Provider 的认证和模型选择，不创建/编辑/删除 `providers.<name>` 端点。
 - **服务端（gateway）**：`gateway/run.py` 用 `resolve_runtime_provider`；multiplex profile 时 `set_secret_scope`。
 - **本地模型服务**（Ollama / LM Studio）：`model.provider=custom` + `base_url`（本机）；key 可选（`no-key-required`），custom provider 配置 `api_key` 或在 custom provider 配置 `extra_headers`。

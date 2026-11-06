@@ -8,7 +8,7 @@
 >
 > 调查方式：基于当前 HEAD 的静态源码核对；只读源码梳理；未修改目标仓库；调查时无未提交修改
 >
-> 调查范围：配置文件、CLI/TUI/Web/桌面端管理入口，LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与连接检测；不把 Agent 管理、VCPToolBox 服务端或一般聊天 UI 当作本地 Provider 管理
+> 调查范围：配置文件、CLI/TUI/Web/桌面端管理入口，LLM 渠道数据模型、协议适配、模型目录、凭据、重试、备份与连接检测；Agent 管理、VCPToolBox 服务端与一般聊天 UI 属于相邻主题
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -123,7 +123,7 @@ VCPChat 把对话请求发给 VCP 网关后，上游可以自行做模型映射�
 VCPChat 的配置生命周期分成两类，不能合并为 Provider 生命周期：
 
 1. **全局网关设置**：`main.html` 的“服务器连接”表单显示 URL、Bearer Key、日志地址、文件密码和日志 Key；`modules/global-settings-manager.js:38-106` 读取表单，`modules/ipc/settingsHandlers.js:121-148` 经主进程保存到 `AppData/settings.json`。设置保存会合并默认字段，但没有数组化的渠道记录、唯一渠道 ID 或每条渠道的启停状态。
-2. **Agent 配置**：Agent 是本地角色目录 `AppData/Agents/<agent>/config.json`，其中的 `model` 只是发给同一个网关的模型 ID。主界面可以创建、查看、编辑和删除 Agent；`modules/ipc/agentHandlers.js:421-495,582-660` 提供读写、创建和删除 IPC。该生命周期不代表创建了一个 LLM Provider。
+2. **Agent 配置**：Agent 是本地角色目录 `AppData/Agents/<agent>/config.json`，其中的 `model` 只是发给同一个网关的模型 ID。主界面可以创建、查看、编辑和删除 Agent；`modules/ipc/agentHandlers.js:421-495,582-660` 提供读写、创建和删除 IPC。该生命周期作用于 Agent 目录本身，与 LLM Provider 的增删改无关。
 
 对调查指南要求的管理动作，当前源码覆盖如下。这里的“未找到”是源码检索结果，“不适用”是因为 VCPChat 没有对应的 Provider 实体；保存是否在实际运行环境成功仍属于未验证事项。
 
@@ -370,7 +370,7 @@ VCPChat 没有本地调度器。模型选择来自 Agent 静态配置、用户�
 - 上下文长度与任务需求的动态匹配；
 - Provider 地域和合规策略。
 
-模型使用统计文件只有调用次数，不能据此计算 token 成本或质量，也没有被请求路径用作自动选模依据。
+模型使用统计文件只有调用次数；token 成本与质量需另行采集，该文件也没有被请求路径用作自动选模依据。
 
 ## 7. 凭据存储、导入与备份
 
@@ -413,7 +413,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 
 因此正常情况下生成的 `VCP_Backup_<timestamp>.zip` 会包含 AppData/settings.json 设置文件，也可能包含根目录的其他设置备份；ZIP 只做 Deflate 压缩，没有密码或加密，凭据以明文进入归档。
 
-当前源码未找到全局设置 JSON/ZIP 的同级导入恢复 UI。话题 Markdown 等内容导出不等于渠道配置导出；一键脚本主要提供文件归档，恢复依赖用户或部署侧文件操作。
+当前源码未找到全局设置 JSON/ZIP 的同级导入恢复 UI。话题 Markdown 等内容导出只覆盖对话内容，渠道配置导出需要包含 `AppData/settings.json` 的归档；一键脚本主要提供文件归档，恢复依赖用户或部署侧文件操作。
 
 ## 8. 连接测试与可观测性
 
@@ -509,7 +509,7 @@ AppData/UserData/backups/settings-<timestamp>.json
 
 ## 10. 未验证事项
 
-以下事项不是源码缺失结论，而是本次采用静态调查、没有启动应用或实际服务端的范围边界：
+以下事项属于本次静态调查的范围边界，记录的是验证方式的缺口：调查没有启动应用，也没有连接实际服务端，源码本身的结论仍按前文证据等级成立。
 
 - 未运行 Electron 验证全局设置保存、URL 自动补全、模型刷新失败提示和设置重载后的实际行为。
 - 未连接可用 VCP 网关，未验证 `/v1/models` 的真实响应形状、Key 权限、模型 ID 是否可推理，以及工具注入端点的服务端行为。

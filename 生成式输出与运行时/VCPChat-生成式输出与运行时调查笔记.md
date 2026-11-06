@@ -96,7 +96,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
   - 阅读窗口：模型内联脚本在**查看器窗口主 DOM** 执行（text-viewer.js:931-1043），CDN 的 three.js/anime.js 替换为本地 vendor（882-924），脚本可访问 `viewerAPI`（含 Python 执行等，text-viewer.js:1211-1234）。
   - three.js 预览：代码块检测 `THREE.` 与语言标记（text-viewer.js:1575-1579），注入本地 vendor 后在 iframe 内运行（1683-1711）。
 - **语言进程**：
-  - Python 双模式：沙箱模式使用 Pyodide WASM，本地模式经 IPC 启动本机 `python -u`，将代码写入 stdin，累计 stdout/stderr 后一次返回。该 handler 没有超时、进程取消或输出截断；源码虽给 spawn 传入 10MB 的 maxBuffer，但没有按输出大小检查或终止的路径，不能据此确认输出配额。依据：[本机执行 handler](../../VCPChat/main.js#L2073-L2109)。
+  - Python 双模式：沙箱模式使用 Pyodide WASM，本地模式经 IPC 启动本机 `python -u`，将代码写入 stdin，累计 stdout/stderr 后一次返回。该 handler 没有超时、进程取消或输出截断；源码虽给 spawn 传入 10MB 的 maxBuffer，但没有按输出大小检查或终止的路径，输出配额尚未确认。依据：[本机执行 handler](../../VCPChat/main.js#L2073-L2109)。
   - Canvas 窗口的运行按钮调用同一 Python IPC，结果区展示输出与错误。依据：[Canvas 运行入口](../../VCPChat/Canvasmodules/canvas.js#L1076-L1090)。
 - **桌面挂件**：Shadow DOM 隔离（widgetManager.js:70-93），脚本包装为 IIFE 沙箱并注入宿主 API（widgetManager.js:500-625），本地/同源 script 被 fetch 后包裹执行，CDN 脚本透传不包装（640-692）。依赖提供：挂件通过 `widgetFS.loadFile` 读取收藏目录附加文件（app.js/style.css 等），CDN 库直连。
 

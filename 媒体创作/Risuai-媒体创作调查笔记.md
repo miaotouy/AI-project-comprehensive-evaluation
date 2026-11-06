@@ -46,17 +46,17 @@ Risuai 的媒体创作主链为 **M1 模型生成工作站（聊天嵌入式）+
 
 聊天输出是主入口：最终化阶段调用 `runInlayScreen`，其识别 `<ImgGen>` 与 `{{ImgGen}}` 标记，先写入生成中占位，再异步生成、存入 inlay 并替换成 UUID 引用。模型只能通过文本标记间接提出生成意图；宿主负责实际调用与落库。`src/ts/process/inlayScreen.ts:7-49`、`src/ts/process/index.svelte.ts:1775-1816`。
 
-用户还有 Playground 图像生成表单，可填写正负提示词并调用同一生成器。该组件把返回 data URI 放入局部 `img` 状态用于预览；本次未见其调用 `writeInlayImage`，所以不把它视作持久化资产链。脚本和触发器也能主动生成后写入 inlay，但其授权和调度属于 Agent 工具/角色脚本交接面。`PlaygroundImageGen.svelte:1-44`、`src/ts/process/scriptings.ts:392-404`。
+用户还有 Playground 图像生成表单，可填写正负提示词并调用同一生成器。该组件把返回 data URI 放入局部 `img` 状态用于预览；本次未见其调用 `writeInlayImage`，结果停留在组件内预览状态，未进入 inlay 资产链。脚本和触发器也能主动生成后写入 inlay，但其授权和调度属于 Agent 工具/角色脚本交接面。`PlaygroundImageGen.svelte:1-44`、`src/ts/process/scriptings.ts:392-404`。
 
 `InlayAsset` 是唯一的媒体资产对象，类型覆盖 image、video、audio、signature，键为 UUID。图片写入时记录 PNG Blob、名称、宽高和类型；音视频上传也可直接建 inlay 记录。消息只保存文本占位，二者没有反向关系字段。`src/ts/process/files/inlays.ts:8-16,30-80,83-125`。
 
 ## 2. 参数、素材与模型执行
 
-图像生成器从当前数据库读取 provider 和配置。WebUI 路径提交宽高、随机 seed、steps、CFG、正负提示词、采样器、高分修复等字段；NovelAI 路径同时支持模型、分辨率、采样器、reference/vibe/character 图像等参数。它们是已有设置面提供的参数，本页不将 provider 管理细节展开。`src/ts/process/stableDiff.ts:64-122,134-253`。
+图像生成器从当前数据库读取 provider 和配置。WebUI 路径提交宽高、随机 seed、steps、CFG、正负提示词、采样器、高分修复等字段；NovelAI 路径同时支持模型、分辨率、采样器、reference/vibe/character 图像等参数。它们是已有设置面提供的参数；本节覆盖生成参数与调用链，provider 管理由设置面承担。`src/ts/process/stableDiff.ts:64-122,134-253`。
 
 `stableDiff` 还能先调用子模型把聊天文本整理为视觉提示词，再交给 `generateAIImage`。对于 inlay 模式，生成器返回 data URI 而不直接落库；只有后续 inlay screen、脚本或触发器调用写入函数时，结果才取得资产身份。这个分离避免生成器耦合存储，却使单独调用者必须明确决定是否保存。`src/ts/process/stableDiff.ts:12-62,93-115`。
 
-inlay 图片写入通过 canvas 解码并统一输出 PNG；超过 1024 x 1024 总像素时等比缩小。该限额只约束写入 inlay 的图片，不代表外部生成器的请求分辨率上限。`src/ts/process/files/inlays.ts:83-125`。
+inlay 图片写入通过 canvas 解码并统一输出 PNG；超过 1024 x 1024 总像素时等比缩小。该限额只作用于写入 inlay 的图片，外部生成器的请求分辨率按各自配置提交。`src/ts/process/files/inlays.ts:83-125`。
 
 ## 3. 任务状态、失败、取消与恢复
 

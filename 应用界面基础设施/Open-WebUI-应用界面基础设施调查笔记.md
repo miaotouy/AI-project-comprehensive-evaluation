@@ -309,7 +309,7 @@ common/Dropdown.svelte（359 行）：
 - 后端通知事件（CHAT_FINISHED/CHAT_FAILED 等）到 webhook 目标的完整派发链未追查。
 - 主题跨设备同步、`?settings=` 深链在 SPA 导航中的表现、Safari 虚拟化例外的实际修复效果未实测。
 - 聊天背景图的暗色渐变遮罩对图片可读性的实际效果、RTL 方向下各消息组件的布局表现未运行验证；her 主题"无独立样式定义"基于 src 内 html.her/`.her` 选择器 Grep（仅命中 `app.html`）的静态推断。
-- 图片压缩（imageCompression）处理实现未追查；alpinejs 依赖无源码接入点（本次未找到，不能据此断言构建产物中不存在）。
+- 图片压缩（imageCompression）处理实现未追查；alpinejs 依赖在本次源码检查范围内未找到接入点。
 
 ## 10. 关键源码索引
 

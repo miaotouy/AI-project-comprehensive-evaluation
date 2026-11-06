@@ -66,7 +66,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 ### 渠道与调度
 
 - **LLM 渠道与 Provider 管理**：无"LLM 渠道"实体——Provider 是声明式 `ProviderProfile` 标识 + 凭据注册表，用户实例化的是 `providers:` / `custom_providers:` 端点（base_url + key_env/api_key + extra_headers），"渠道"等价于"Provider 标识 + 一个 base_url + 一份凭据"的组合；模型目录为静态表 + 远端拉取 + 用户输入三层；协议适配集中在 `agent/transports/` 按 api_mode 注册分发（OpenAI 兼容 / Anthropic / Responses / Bedrock）；运行时由 `resolve_runtime_provider` 产出运行时 dict；管理入口不对称——Desktop 自定义端点页是全 CRUD，CLI/TUI/Web 主要管理凭据、模型选择或整个 Profile，未找到同等端点 CRUD 页面。证据：静态源码阅读确认（未运行）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
-- **重试、Key 轮换与故障转移**：四层机制——SDK 内建重试 → 应用层重试 → 同 Provider 多 Key 的 credential pool 轮换 → 跨渠道 fallback 链 → 会话层恢复主通道。连续编号的环境变量 `KEY_2`、`KEY_3` 可直接播种池，秘密留在环境或 secret manager，`auth.json` 只存引用；首个编号缺口终止发现。fallback 重发存在重复计费可能（推断），设置页探活仍不等于真实聊天可用。证据：静态源码阅读确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
+- **重试、Key 轮换与故障转移**：四层机制——SDK 内建重试 → 应用层重试 → 同 Provider 多 Key 的 credential pool 轮换 → 跨渠道 fallback 链 → 会话层恢复主通道。连续编号的环境变量 `KEY_2`、`KEY_3` 可直接播种池，秘密留在环境或 secret manager，`auth.json` 只存引用；首个编号缺口终止发现。fallback 重发存在重复计费可能（推断）；设置页探活验证的是凭据与端点连通，聊天可用性由请求链决定。证据：静态源码阅读确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
 
 ### 独特与差异化能力
 
@@ -130,7 +130,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - 全部 16 篇来源笔记均为静态源码阅读，未运行应用、测试或真实模型请求；均已对齐代码快照 `71736c9f32597bbca9d89cede5aa136e55946b2f`，历史提交只用于确认当前实现的引入或回退来源。
 - 本轮同步以路径级定向复核为主（模块归位、插件目录、后端数量、手工合并的插件准入），未逐行重读约 2.6 万提交范围的全部改动；前半组 7 篇由另一任务同步，行号引用统一按模块级定位。
 - 未运行验证：运行行为（视觉效果、时序、性能、真实 Provider 流式）、多客户端/多窗口并发、键盘与无障碍、FTS 实际布局、崩溃重放端到端、后台复习 fork 成本、HF 轨迹上传实际行为、VS Code 市场端到端链路。
-- 设置页连接测试与真实聊天链路走不同代码路径，测试通过不等于真实可用（已确认的工程边界）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
+- 设置页连接测试与真实聊天链路走不同代码路径，测试覆盖的是连通性，真实可用性由聊天链路决定（已确认的工程边界）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
 - 与特色贡献统计的衔接：独特功能笔记建议新增主贡献候选（闭环学习、Skill 生命周期、研究数据工具链、会话心跳 + 目标质量门）与辅助贡献（持久记忆与用户建模），相关归并口径见[特色功能贡献统计](../AI客户端特色功能贡献统计.md)。
 
 ## 来源笔记索引

@@ -132,7 +132,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 ## 8. MCP、插件、Skill 与子 Agent
 
-插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1180-1181）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0；不过数据库里已保存的 2.1 插件仍会在启动时走旧的主线程加载分支。因而“阻止新安装”不等于清除或禁用存量插件（`plugins.svelte.ts:343-361,421-429,890-910`）。
+插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1180-1181）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0，因此版本校验的覆盖范围限于导入动作；数据库里已保存的 2.1 插件不受该校验约束，启动时仍走旧的主线程加载分支（`plugins.svelte.ts:343-361,421-429,890-910`）。
 
 ### v3 宿主 API 的权限判定
 
@@ -140,7 +140,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 权限缓存按“脚本哈希 + 权限”隔离，允许和拒绝均缓存于当前页面会话；持久授权也采用这个键，相同脚本即使改名仍可共享授权。周期权限在没有会话缓存时才检查三天时间戳，所以持续打开同一页面不会每三天强制重弹；时间戳另按插件名和权限保存。未知权限直接拒绝（`apiV3/pluginPermissionCache.ts:17-39`；`apiV3/v3.svelte.ts:587-653`）。
 
-读取 inlay 另需对应授权；网络宿主 API 的已读分支没有调用权限请求，只做域名黑名单检查，并对敏感请求头记录警告后转交旧网络实现。因此 iframe 内直接连接受 CSP 限制，不能概括为插件经宿主桥也无法联网（`apiV3/v3.svelte.ts:684-715,805-811`）。
+读取 inlay 另需对应授权；网络宿主 API 的已读分支没有调用权限请求，只做域名黑名单检查，并对敏感请求头记录警告后转交旧网络实现。因此 CSP 限制作用于 iframe 内的直接连接，插件经宿主桥的联网请求由这条宿主路径处理（`apiV3/v3.svelte.ts:684-715,805-811`）。
 
 模块文件导入还有独立限制：二进制和 JSON 路径都会删除导入对象的 MCP 配置。低级权限被拒绝时，二进制模块清掉开关后仍返回模块，JSON 模块路径则直接停止导入；两条路径不能统一描述为拒绝整项导入（`process/modules.ts:252-257,298-318`）。
 

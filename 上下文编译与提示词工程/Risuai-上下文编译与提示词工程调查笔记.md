@@ -67,7 +67,7 @@ lorebook 的位置决定去向：未指定位置的条目进入 lorebook 桶；b
 
 ## 4. 消息生命周期变换与交接
 
-输入消息进入本轮上下文前，角色房的用户输入先经过 editinput；选中的历史消息在编译时再经过 editprocess。这两处处理的结果影响本轮上下文，但原笔记没有确认它们是否回写原有权威消息，因此本专题只记录其请求前交接，不将其视为已确认的持久化改写（`src/lib/ChatScreens/DefaultChatScreen.svelte:144-216`；`src/ts/process/index.svelte.ts:900-1053`）。
+输入消息进入本轮上下文前，角色房的用户输入先经过 editinput；选中的历史消息在编译时再经过 editprocess。这两处处理的结果影响本轮上下文，但原笔记没有确认它们是否回写原有权威消息，因此本专题只记录其请求前交接，对原有权威消息的持久化改写属未确认部分（`src/lib/ChatScreens/DefaultChatScreen.svelte:144-216`；`src/ts/process/index.svelte.ts:900-1053`）。
 
 请求开始前已经创建空的流式占位消息。每个流式块提供累计全文，消费端经 editoutput 后整体替换该消息的 data；因此 editoutput 的已确认结果是生成期间的消息写回。流结束后，output 触发脚本、inlay 屏幕、插件 chatOutput 监听与可选 TTS 顺序执行。output 脚本还能触发整轮重发，但原笔记未追踪其是否直接改写当前消息或具体重发时的规则再编译组合（`src/ts/process/index.svelte.ts:1591-1793`）。
 
@@ -81,7 +81,7 @@ inlayViewScreen 的 emotion 与 imggen 指令在请求编译时会进入 postEve
 
 ## 6. 调试、预览与可解释性
 
-DevTool/快捷键提供 preview 模式，原笔记将其作为核对 `requestChatData` 实际收到数组的手段。该表面适合检查模板顺序、规则注入和请求前数组，而不能只凭编辑器配置判断实际携带内容（`src/ts/process/index.svelte.ts:654-708, 1273-1437`）。
+DevTool/快捷键提供 preview 模式，原笔记将其作为核对 `requestChatData` 实际收到数组的手段。该表面适合检查模板顺序、规则注入和请求前数组；实际携带内容以这里显示的请求前数组为准，编辑器配置反映的是编辑态（`src/ts/process/index.svelte.ts:654-708, 1273-1437`）。
 
 请求日志通过 `addFetchLog` 带 chatId，可在 DevTool 查看；`chatProcessStage` 和 `doingChat` 提供生成阶段与忙碌状态，源码中散落的 `console.log` 还会输出完整 prompt 与记忆数据。这些是已确认的可观察入口。预览的实时性、是否展示 request 触发脚本和 reformater 之后的结果，以及日志的脱敏和保留策略，本次未验证（`src/ts/globalApi.svelte.ts:681, 1713`；`src/ts/process/index.svelte.ts:1530-1545`）。
 
@@ -89,7 +89,7 @@ DevTool/快捷键提供 preview 模式，原笔记将其作为核对 `requestCha
 
 请求前 Lua `editRequest`、request 触发脚本与插件请求替换都可能处在重试或回退模型循环中；原笔记确认 request 触发脚本是每次尝试前执行，但没有记录脚本错误、变量缺失、循环替换或解析失败如何收口。start 脚本可用 `stopSending` 停止发送，这与 UI 中止是不同层级（`src/ts/process/index.svelte.ts:888-898`；`src/ts/process/request/request.ts:217-272`）。
 
-已确认的边界是：普通固定系统提示、历史截断、记忆摘要、工具循环和 Provider 协议虽参与最终请求，却不都属于可编辑规则的编译语义。本笔记仅记录它们与规则结果的交接。原笔记未调查规则版本更新、迁移和导入导出，不能据此判断兼容策略。
+已确认的边界是：普通固定系统提示、历史截断、记忆摘要、工具循环和 Provider 协议虽参与最终请求，却不都属于可编辑规则的编译语义。本笔记仅记录它们与规则结果的交接。原笔记未调查规则版本更新、迁移和导入导出。
 
 ## 8. 未验证事项
 

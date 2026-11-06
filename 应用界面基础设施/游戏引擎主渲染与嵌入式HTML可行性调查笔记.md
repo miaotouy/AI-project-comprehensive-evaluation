@@ -144,7 +144,7 @@ Godot 原生实现“近似 HTML/CSS 效果”是合理路线。聊天 Markdown 
 
 RmlUi 与 litehtml 解决的是不同问题。若产品愿意定义一个可控的 HTML-like 方言，RmlUi 的宿主渲染接口更贴近游戏 UI。若需要兼容大量已经存在的静态 HTML/CSS 片段，litehtml 的输入模型更自然。首个原型应只选其中一个；渲染路由保留 adapter 接口即可，不宜一开始同时承担两套字体、资源、选择和 CSS 差异。
 
-### 3.2 静态不等于可信
+### 3.2 静态后端的攻击面与资源策略
 
 无 JavaScript 的 HTML/CSS 仍可能加载远端图片、使用 `@import`、创建表单或 iframe、覆盖大面积界面、构造超大布局并消耗 CPU/内存。静态后端之前仍需要结构化清洗和资源策略：
 
@@ -173,7 +173,7 @@ Ultralight Renderer singleton
   -> Godot input translated back to View events
 ```
 
-现有 [Godot-HTML](https://github.com/Decapitated/Godot-HTML) 已证明 Godot 4.3+ GDExtension、Ultralight 1.4、鼠标键盘输入和 JavaScript/GDScript 互操作可以接通。其项目清单仍把 GPU 加速 View、RenderTarget/ImageSource 和远端页面对 C++ bridge 的隔离列为未完成项，因此它更适合作为原型基础和实现参考，尚不能直接视为完整生产组件。
+现有 [Godot-HTML](https://github.com/Decapitated/Godot-HTML) 已证明 Godot 4.3+ GDExtension、Ultralight 1.4、鼠标键盘输入和 JavaScript/GDScript 互操作可以接通。其项目清单仍把 GPU 加速 View、RenderTarget/ImageSource 和远端页面对 C++ bridge 的隔离列为未完成项，因此它目前适合作为原型基础和实现参考，这些能力补齐后才构成完整生产组件。
 
 ### 4.2 尺寸握手
 
@@ -248,7 +248,7 @@ AIO Hub 对本方案最有价值的是消息渲染器的生命周期经验：
 - HTML 预览等待内容稳定、回传高度和错误，并按消息深度冻结旧实例。
 - 测试台使用真实流源和生产渲染器观察节点状态、复杂混排和样式逃逸。
 
-这些机制可以迁移成语言无关的 MessageDocument 与 renderer lifecycle。Vue AST renderer、CodeMirror 和 iframe 则不需要进入 Godot。AIO 当前活动 HTML 使用允许 scripts、same-origin、forms、popups 和 modals 的 iframe，宿主 CSP 关闭，不能直接充当本方案的不可信 JavaScript 安全基线。
+这些机制可以迁移成语言无关的 MessageDocument 与 renderer lifecycle。Vue AST renderer、CodeMirror 和 iframe 则不需要进入 Godot。AIO 当前活动 HTML 使用允许 scripts、same-origin、forms、popups 和 modals 的 iframe，宿主 CSP 关闭，这组配置面向 AIO 自身许可的 HTML 内容；本方案的不可信 JavaScript 安全基线需另行确定沙箱边界与 CSP 策略。
 
 ### 6.2 SillyTavern
 
@@ -300,7 +300,7 @@ SillyTavern 说明酒馆生态确实需要兼容原始 HTML、消息级 CSS、�
 |---|---|---|
 | Godot RichTextLabel | BBCode、图片、表格、选择、滚动跟随、线程化处理等 | HTML/CSS 需转换；复杂消息列表仍需自行做生命周期管理 |
 | Godot TextEdit | IME、选区、剪贴板、虚拟键盘等公开接口 | 只能证明 Godot 主输入具备接入面，目标平台体验仍需运行验证 |
-| RmlUi | MIT；宿主实现 RenderInterface，消费顶点、索引、纹理和绘制命令；提供 IME 接入说明 | 语法和 CSS 兼容不等于浏览器；Godot-RmlUi 的字体、编辑器和部分平台支持仍未完成 |
+| RmlUi | MIT；宿主实现 RenderInterface，消费顶点、索引、纹理和绘制命令；提供 IME 接入说明 | 语法与 CSS 按 RML/RCSS 子集实现，浏览器级 CSS 特性由 Ultralight 一类完整内核承担；Godot-RmlUi 的字体、编辑器和部分平台支持仍未完成 |
 | litehtml | New BSD；HTML/CSS 布局库，无 JavaScript，宿主实现 document_container | 没有现成的完整 Godot 产品层；绘制、资源和交互工作量由宿主承担 |
 | Ultralight | CPU Surface 和 GPUDriver 两条游戏接入路径，支持 HTML/CSS/JS 与原生互操作 | 许可、平台、输入、安全和性能均需按 SDK 档位验证 |
 | Godot-HTML | Godot 4.3+、Ultralight 1.4 GDExtension；已有基本显示、输入和互操作 | GPU View、Godot RenderTarget/ImageSource、远端页面 bridge 隔离仍列为待办 |

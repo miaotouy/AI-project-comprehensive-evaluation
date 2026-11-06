@@ -52,7 +52,7 @@ AdminPanel-Vue 是 Vue 3 + Pinia + vue-router 的独立 SPA（依赖版本见 `A
   ```
 - **WebSocket `/vcp-admin-panel/VCP_Key=xxx` 通道**（`WebSocketServer.js:187` 路径正则、1040-1053 `broadcastToAdminPanel`）：实时推送通道，推送内容仅限管理事件（如插件热重载通知 `{type: 'plugins-reloaded', ...}`，`Plugin.js:2291-2293`，另有 2460-2462、2525-2527 两处同类型广播），不推送任何聊天消息内容。
 
-结论：AdminPanel-Vue 里看起来像聊天的元素，逐个核对后都不是用户-AI 对话通道，而是审计视图、API 代理、彩蛋装饰或论坛管理。
+结论：AdminPanel-Vue 里看起来像聊天的元素，逐个核对后分别属于审计视图、API 代理、彩蛋装饰与论坛管理，没有一条承载用户-AI 对话；它们服务于管理面板自身的运维与展示职责。
 
 ## OpenWebUISub：第三方聊天页面的纯前端增强层
 

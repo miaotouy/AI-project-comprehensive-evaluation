@@ -84,7 +84,7 @@ JSON-RPC 覆盖提示、工具审批、中断、恢复、分叉、转向与重�
 
 ## 当前执行体交接
 
-ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 provider 且其协议允许工具调用时，外部 agent 的工具活动会回流并并入发起回合。该变化加强外部执行体与 Hermes turn 的衔接，但不表示 ACP 宿主获得 Hermes 内部会话库的直接写权限；会话数据仍由各 profile 的后端管理。
+ACP 多客户端已改为复用同一 OpenAI bridge；当外部 agent 被当作 provider 且其协议允许工具调用时，外部 agent 的工具活动会回流并并入发起回合。该变化加强外部执行体与 Hermes turn 的衔接；会话库的读写仍归各 profile 的后端，ACP 宿主经 bridge 接入。
 
 桌面与后端的关系在快照间细化为“发现-认领-归属-健康-回收”一组 Electron 模块：`backend-discovery`/`backend-dial-claim` 负责找到或接管已有后端，`backend-ownership`/`backend-claim` 维护多窗口与多客户端的所有权，`backend-health`/`backend-recycle` 处理失活与重启。桌面仍由后端进程承载 agent 循环，renderer 只经 WebSocket JSON-RPC 通信；`apps/desktop/src/hermes.ts` 仍是 renderer 侧的薄客户端。
 

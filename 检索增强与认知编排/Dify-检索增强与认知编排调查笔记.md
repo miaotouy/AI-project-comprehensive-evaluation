@@ -37,13 +37,13 @@
 | 检索驱动认知编排 | 未发现内建递进查询、关系图路径或自动反馈循环。用户可在工作流图中显式连出后续节点。 | 静态推断 |
 | 主动记忆写回 | 本次范围内未发现从会话自动抽取、合并或审批知识记忆的路径。文档摄取与摘要索引不是会话记忆维护。 | 静态推断 |
 
-本笔记的“RAG Pipeline”限定为知识库摄取/索引的 Pipeline，不将所有 Dify Workflow 都归入 RAG。外部知识库也可作为 Dataset provider：本地 Dify 索引与外部端点返回的内容经过不同分支，但都被整理为统一来源结果（`api/core/rag/retrieval/dataset_retrieval.py:406-648`）。
+本笔记的“RAG Pipeline”只覆盖知识库摄取/索引的 Pipeline；workflow 图中的其他节点按工作流本身归类，RAG 分类止于知识摄取与索引这一层。外部知识库也可作为 Dataset provider：本地 Dify 索引与外部端点返回的内容经过不同分支，但都被整理为统一来源结果（`api/core/rag/retrieval/dataset_retrieval.py:406-648`）。
 
 ## 事实对象、摄取与索引
 
 ### 持久化对象与可维护性
 
-**源码直接确认。** Dataset 有 `tenant_id`，并持有索引技术、Embedding 提供方/模型、关键词数、检索模型 JSON、摘要设置、运行模式、Pipeline 关联、分段结构和多模态开关。其默认检索设置是语义检索、关闭 rerank、`top_k=2`；检索服务的另一默认值为 `top_k=4`，因此实际默认值取决于消费入口和是否已保存 Dataset 配置，不能简单视为全局常量（`api/models/dataset.py:150-301`；`api/core/rag/datasource/retrieval_service.py:271-302`）。
+**源码直接确认。** Dataset 有 `tenant_id`，并持有索引技术、Embedding 提供方/模型、关键词数、检索模型 JSON、摘要设置、运行模式、Pipeline 关联、分段结构和多模态开关。其默认检索设置是语义检索、关闭 rerank、`top_k=2`；检索服务的另一默认值为 `top_k=4`，因此实际默认值取决于消费入口和是否已保存 Dataset 配置，属入口级取值（`api/models/dataset.py:150-301`；`api/core/rag/datasource/retrieval_service.py:271-302`）。
 
 **源码直接确认。** Document 保存来源类型及来源信息、处理规则、文件关联、解析/清洗/切分/完成时间、token、索引耗时、暂停/错误/启用/归档状态、文档形态和元数据。可见来源枚举为上传文件、Notion 导入、网站抓取；状态对控制台另映射为排队、索引中、可用、停用、归档或错误（`api/models/dataset.py:374-553`）。DocumentSegment 保存原文、词数、token、索引节点 ID/哈希、问答答案、关键词、分段状态、命中次数及父子分段关联；父子模式用 ChildChunk 记录子块（`api/models/dataset.py:554-647`）。因此文档、普通分段、子块、元数据和启用/归档状态均是数据库层面的可编辑或可删除资产，而不是只存在于 prompt 的临时片段。
 
@@ -51,7 +51,7 @@
 
 ### 摄取、索引和状态生命周期
 
-**源码直接确认。** 索引任务代理把普通任务放到 `document_indexing` 租户隔离队列，再调用 normal 或 priority Celery task；队列已有运行标记时把任务推入 Redis 等待列表，否则设置等待标记并直投。每个任务结束后按 `TENANT_ISOLATED_TASK_CONCURRENCY` 拉取下一批；普通和优先任务分别使用 `dataset`、`priority_dataset` 队列（`api/services/document_indexing_proxy/document_indexing_task_proxy.py:8-13`；`api/services/document_indexing_proxy/batch_indexing_base.py:14-78`；`api/tasks/document_indexing_task.py:205-272`）。这表明“同租户隔离”是排队/并发治理语义，并不等于以该队列替代数据库层的权限过滤。
+**源码直接确认。** 索引任务代理把普通任务放到 `document_indexing` 租户隔离队列，再调用 normal 或 priority Celery task；队列已有运行标记时把任务推入 Redis 等待列表，否则设置等待标记并直投。每个任务结束后按 `TENANT_ISOLATED_TASK_CONCURRENCY` 拉取下一批；普通和优先任务分别使用 `dataset`、`priority_dataset` 队列（`api/services/document_indexing_proxy/document_indexing_task_proxy.py:8-13`；`api/services/document_indexing_proxy/batch_indexing_base.py:14-78`；`api/tasks/document_indexing_task.py:205-272`）。这表明“同租户隔离”作用于排队与并发治理，数据库层的权限过滤仍由查询侧承担。
 
 **源码直接确认。** 执行任务先检查订阅批上传数与向量空间额度，失败会将本批文档标为错误；随后短事务写入 `parsing` 和开始时间，再在无此前状态锁的会话中执行索引。索引应用服务按“extract -> transform -> 保存分段 -> load”推进：抽取后置为 `splitting`，保存分段后置为 `indexing`，关键词线程或最多十个哈希分组的向量工作线程完成后置为 `completed`，并记录总 token 和索引耗时；异常写入 `error`、错误文本和停止时间（`api/tasks/document_indexing_task.py:51-204`；`api/services/knowledge/indexing/execution.py:77-160`；`api/services/knowledge/indexing/adapters/execution.py:148-208`）。高质量模式取得该租户的 Embedding 模型；经济型模式生成关键词表，父子模式另保存子块。
 
@@ -107,7 +107,7 @@
 | 观测 | OpenTelemetry trace span 覆盖检索与检索服务；应用 trace manager 接收检索文档和耗时；查询审计、命中计数、文档错误/时延、节点/工作流执行均可持久化。 | 追踪后端、采样、控制台展示和敏感内容脱敏策略未验证。 |
 | 恢复 | 暂停/恢复、重试、分阶段恢复和删除后清理均有任务入口；Pipeline 执行使用暂存文件，finally 删除。 | 服务崩溃发生在数据库提交、向量写入和暂存文件删除之间时的精确恢复语义未运行验证。 |
 
-关于安全，数据模型对 Dataset、Document、Segment、元数据绑定、附件绑定、外部知识绑定和 Pipeline 均保存 tenant ID；Dataset 权限表按 Dataset、账户和 tenant 建索引（`api/models/dataset.py:823-847`、`api/models/dataset.py:967-1018`、`api/models/dataset.py:1154-1179`、`api/models/dataset.py:1081-1129`）。检索可用库查询也明确按 tenant 过滤。**静态推断：** 这些字段与入口过滤按 tenant 划定工作区隔离。**未运行验证：** 未以不同角色、仅本人/部分团队权限、服务 API、外部知识端点或签名文件 URL 进行越权测试，因此不能据此断言端到端授权效果，也不能判断检索文本是否足以抵御不可信文档中的提示注入。
+关于安全，数据模型对 Dataset、Document、Segment、元数据绑定、附件绑定、外部知识绑定和 Pipeline 均保存 tenant ID；Dataset 权限表按 Dataset、账户和 tenant 建索引（`api/models/dataset.py:823-847`、`api/models/dataset.py:967-1018`、`api/models/dataset.py:1154-1179`、`api/models/dataset.py:1081-1129`）。检索可用库查询也明确按 tenant 过滤。**静态推断：** 这些字段与入口过滤按 tenant 划定工作区隔离。**未运行验证：** 未以不同角色、仅本人/部分团队权限、服务 API、外部知识端点或签名文件 URL 进行越权测试；端到端授权效果，以及检索文本对不可信文档中提示注入的抵御能力，均属运行验证范围。
 
 **源码直接确认。** 知识库 Service API Key 可以绑定到指定 Dataset，也可以绑定 KnowledgeFS 空间。创建 Key 时控制台接收 `dataset_ids` 与 `knowledge_space_ids` 两组绑定；请求装饰器每次都按绑定行计算作用域，已绑定 Key 只能访问 URL 中明确携带且位于集合内的 Dataset，无 Dataset ID 的列表和创建类端点也会被拒绝。没有绑定行的 Key 仍保留租户内全库访问语义，以兼容既有 Key；只绑定 KnowledgeFS 空间的 Key 没有可达的旧 Dataset，会被拒绝（`api/controllers/console/datasets/datasets.py:271`、`api/controllers/console/datasets/datasets.py:785-800`；`api/controllers/service_api/wraps.py:332-400`）。
 

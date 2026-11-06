@@ -18,7 +18,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 产品历史上，它从 2025-05-12 的“AI API 与工具交互”工具箱逐步扩展为插件运行时、分布式执行、管理面板和长期记忆中枢；当前 README 将整体定位提升为让 AI 持续存在的环境。RAG 是这一定位变化最集中的演进线：早期多路相似度与结构召回经浪潮 V1-V8、TagMemo V9.1/V9.2 发展到当前 RiverMemo Topology V3。历史作者自述、提交节点和当前执行边界见[产品结构与设计基因](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)与[检索增强与认知编排](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)；历史版本不替代当前源码。
 
-核心边界：客户端提交完整历史并持有会话导航，服务端按请求编排消息；OneRing 另有按 Agent 持久化的插件历史；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
+核心边界：客户端提交完整历史并持有会话导航，服务端按请求编排消息；OneRing 另有按 Agent 持久化的插件历史；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在；开箱可用还需补齐上述配置项。
 
 ## 完成度速览
 
@@ -209,7 +209,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **按 Agent 隔离浏览器 Profile（maid/valet）**：仅存在于二期设计文档，当前未实现（`暂缓`），当前仍是 global 单 Profile。
 - **VCPForumOnline 在线论坛**：`.block` 禁用，功能比文件版更全（私信/点赞/编辑/搜索/未读追踪），当前主链以文件版 VCPForum 为准（`暂缓`）。
-- **默认关闭/禁用机制**：AgentDream（`.block` 默认禁用）、托管浏览器（`VCP_BROWSER_RUNTIME_ENABLED=false`）、ReasoningToContent、privacyProtection、TaskAssistant（`globalEnabled=false`）、ModelRedirect.json（本快照不存在）等默认关闭项在真实部署中的推荐配置组合未验证；主链在默认或文档配置下代码完整，不代表开箱即用。
+- **默认关闭/禁用机制**：AgentDream（`.block` 默认禁用）、托管浏览器（`VCP_BROWSER_RUNTIME_ENABLED=false`）、ReasoningToContent、privacyProtection、TaskAssistant（`globalEnabled=false`）、ModelRedirect.json（本快照不存在）等默认关闭项在真实部署中的推荐配置组合未验证；主链在默认或文档配置下代码完整，开箱可用还需补齐这些默认关闭项。
 - **外部依赖**：VCPEverything 需本机 Everything HTTP 服务；VCPClawMail 需 ClawMailKey（manifest required）；DeepWikiVCP/DigitalOracle 需网络与上游服务；TagMemo/元思考/LightMemo 的 Embedding 依赖上游 API。均属配置可用而非默认可用。
 
 ### 入口确认未闭合

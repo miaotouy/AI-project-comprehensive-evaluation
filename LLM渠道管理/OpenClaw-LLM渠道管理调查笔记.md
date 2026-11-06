@@ -101,7 +101,7 @@ Provider 插件通过 `openclaw.plugin.json` 声明 `providers`、`providerUsage
 
 ### 能力元数据的更新纪律
 
-由于目录会进 SQLite 缓存与 UI 快照，仓库 AGENTS.md 规定 provider 模型变更后须等待 `openclaw/catalog` 的 catalog.json 刷新并派发 catalog 发布工作流——因此“改 manifest 模型”不等于“立刻全局生效”：Gateway/插件元数据是进程稳定快照，热路径不做 freshness-poll（仓库根 AGENTS.md“Hot paths”条）。
+由于目录会进 SQLite 缓存与 UI 快照，仓库 AGENTS.md 规定 provider 模型变更后须等待 `openclaw/catalog` 的 catalog.json 刷新并派发 catalog 发布工作流——因此 manifest 模型变更的生效路径是等待 catalog 刷新与发布：Gateway/插件元数据是进程稳定快照，热路径不做 freshness-poll（仓库根 AGENTS.md“Hot paths”条）。
 
 ## 3. 凭据、Header 与代理边界
 
@@ -249,7 +249,7 @@ provider 插件本身由 plugins 管理（enable/disable/卸载）；模型行�
 
 - **目录可序列化、运行时进程稳定**：模型行是数据，LlmRuntime 是弱绑定；目录进 SQLite 缓存与 UI 快照，热路径不新鲜轮询，模型元数据更新要等 catalog 发布/重启。代价是“改了 manifest 模型立刻生效”不成立。
 - **凭据与模型配置分层**：auth profile（含 OAuth、token 生命周期）由 auth store 管理；models.json 里只放来源 marker。运行时解析统一收敛在 `resolveApiKeyForProviderCore`，规避了分散取 key。
-- **“支持多 Provider”不等于自动 failover**：fallback 有严格的源语义（user pin 严格、configured 可回退），auth rotation 只在一个 provider 内进行、并有 cooldown/billing 禁用，避免静默换凭据。
+- **多 Provider 配置不带来自动切换**：fallback 有严格的源语义（user pin 严格、configured 可回退），auth rotation 只在一个 provider 内进行、并有 cooldown/billing 禁用，避免静默换凭据。
 - **Provider 名不是协议名**：同一 provider 可配不同 `api`（如 Anthropic-compatible 端点用 `anthropic-messages`），同一协议可被多个 provider 使用；注册键是 `api` 而非品牌，便于代理/自托管接入，但也意味着“API 兼容”能力要靠 `compat` 元数据逐开关声明。
 - **本地模型服务被纳入 provider 配置**：`models.providers.<id>.localService`（command/healthUrl/空闲停）在配置层描述“由本进程启动并轮询就绪的本地推理进程”，实际消费方是 provider 插件（本次未跟踪插件内实现）；自托管 OpenAI 兼容端点需按来源显式信任（docs/concepts/model-providers.md 的 network opt-in），体现本地 vs hosted 的边界。
 - **凭据相关“本次未找到”的条目**：在工作区/项目内导入导出 provider 配置的专用入口、把 API key 写进模型目录展示层的路径、桌面端独立 provider CRUD。这些只基于本次读过的入口声明不存在，不能作项目级绝对结论。

@@ -91,7 +91,7 @@ rollout 的落盘位置与形态分三条规则：
 - **归档与压缩**：归档把文件重命名到 codex home 下的 `archived_sessions`，文件名不变、不再保留年/月/日层级、不重写内容（`thread-store/src/local/archive_thread.rs:80-118`）；超过 7 天的文件压缩成 `.jsonl.zst`，读取端对两种表示透明（`rollout/src/compression.rs:26,63,370-371`）。
 - **注释滞后**：`recorder.rs:79` 的示例仍是旧的扁平路径，与按日期分目录的实现不一致，应以 `:1727-1734` 为准。
 
-每行是一个带时间戳的信封，内部条目使用扁平序列化（`codex-rs/history/src/lib.rs:388-394`）。条目类型包括会话元数据、模型可见的响应项、压缩记录、turn 上下文、token 用量、世界状态、保留上下文、事件消息与实时消息（`history/src/lib.rs:228-249`）。其中 `EventMsg` 是 UI/生命周期事件，不等同于模型历史。
+每行是一个带时间戳的信封，内部条目使用扁平序列化（`codex-rs/history/src/lib.rs:388-394`）。条目类型包括会话元数据、模型可见的响应项、压缩记录、turn 上下文、token 用量、世界状态、保留上下文、事件消息与实时消息（`history/src/lib.rs:228-249`）。其中 `EventMsg` 只服务 UI 与生命周期，模型历史由响应项等条目承载。
 
 落盘不是“全量录制”。写入策略按条目类型取舍（`rollout/src/policy.rs:22-51`）：
 
@@ -132,7 +132,7 @@ app-server 把线程历史拆成三个读取方法：`thread/read` 取线程与�
 
 ## 7. 附件与外部资源
 
-导出不解包、不内联、不复制附件。用户图片只保留编号标签；MCP 返回的图片、音频、嵌入资源分别降级为占位文本或 URI（第 2 节）。工具生成的图片由图片生成扩展保存在 codex home 的 `generated_images/<session>/<call_id>.png`（`codex-rs/ext/image-generation/src/artifact.rs:5-65`）；Markdown 导出把它当作一条活动记录，写入调用 ID、状态、改写后的提示词与保存路径，而不是嵌入图片（`tui/src/thread_transcript/other_items.rs:63-83`）。
+导出物只记录附件引用：用户图片保留编号标签，MCP 返回的图片、音频、嵌入资源分别降级为占位文本或 URI（第 2 节），附件字节留在原处。工具生成的图片由图片生成扩展保存在 codex home 的 `generated_images/<session>/<call_id>.png`（`codex-rs/ext/image-generation/src/artifact.rs:5-65`）；Markdown 导出把它当作一条活动记录，写入调用 ID、状态、改写后的提示词与保存路径，图片文件留在生成目录（`tui/src/thread_transcript/other_items.rs:63-83`）。
 
 因此 Markdown 文件与 rollout 都不是自包含档案：换机器后图片、MCP 资源、diff 之外的仓库状态都无法从导出物恢复。
 
