@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：只读核对 Agent 类型定义、预设消息与消息组编辑器、开场白状态机、上下文与重新生成链路、SillyTavern 角色卡及世界书的导入、编辑、导出与运行时处理器、默认模板、内置预设和 Agent/工具/Skill 架构文档，并结合作者对会话实时引用设计目的的说明；未修改被调查仓库源码
+> 调查方式：静态追踪 Agent 类型、编辑器、预设组合编译、存储与请求交接，核对开场白、角色卡、世界书与实时引用机制。未启动应用或执行交互测试
 >
 > 调查范围：Agent/角色能配置什么、实际拥有什么能力、内置角色偏好的方向，以及预设如何导入和运行
 >
@@ -23,7 +23,7 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 
 因此，AIO Hub 的“角色”可以同时是普通助手、固定人格、专家工作流、世界模拟器或带工具的 Agent。角色气质主要由预设消息和示例对话决定；工具、知识库和虚拟时间等字段则决定它在运行时能做什么。
 
-从产品界面看，聊天侧边栏的“参数”页也是 Agent 编辑器的一部分：它编辑的是当前 ChatAgent，模型选择、采样参数、上下文限制/压缩和预设消息随 Agent 配置持久化，不在当前聊天窗口临时生效。
+聊天侧边栏的“参数”页也是 Agent 配置入口：它编辑当前 ChatAgent，模型选择、采样参数、上下文限制/压缩和预设消息随角色持久化，后续其它会话引用同一角色时也会读取这些配置。
 
 在 AIO Hub 中，一体化 Agent 预设的配置与编辑集中在一个 Agent 对象及其编辑器里：消息配方、模型与参数、知识、工具、变量、资产和显示规则都在其中。这里评价的是“一个 Agent 内能表达什么，以及用户能否在同一编辑流程里理解和切换”，不是社区资产数量。SillyTavern 的角色卡生态和兼容格式更成熟，但角色卡、推理 Preset、Prompt Manager、Advanced Formatting、World Info 和扩展字段分属不同层。
 
@@ -36,12 +36,15 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 - AgentPreset 是文件或内置资源中的模板，不包含具体 profileId、modelId。
 - ChatAgent 是用户实际使用的实例，额外保存 id、profileId、modelId、创建时间和最近使用时间。
 
-本快照把 Agent 进一步做成"可被 LLM 操作的配置对象"，并新增了子智能体配置：
+当前角色配置的几个关键机制是：
 
-- **子智能体配置内嵌**：`ChatAgent` 增加 `subAgentConfig`（`src/tools/agent-manager/types/agent.ts:225,534`），声明该 Agent 能否委派子任务、可用的子智能体类型与运行时上限；`src/tools/sub-agent` 消费这份配置并提供内置子智能体，Agent 编辑器只管声明（第 6.4 节）。
-- **Agent 配置可被工具读写**：管理服务以 `agentCallable` 方法形式对外注册，字段读写带安全策略——危险字段（凭据、审批配置等）会被拒绝或二次确认，编辑路径统一经 `resolveFieldPath`/`setFieldByPath`（`services/agentManagementService.ts:109-186`）。
-- **预设结构下沉到共享包**：预设的结构化注入锚点与结构撤销算法移入 `packages/agent-preset-core/`（`injection-anchors.ts`、`structureUndo.ts`），llm-chat 的预设编辑与请求注入共用同一份实现。
-- **知识字段归一**：旧 `knowledgeBaseConfig`/`knowledgeSettings` 已移除并统一为 `knowledgeAccess`，创建与更新时会剥离遗留字段。
+- **预设正文可组合**：一条消息可保存多个片段，每片段有可选择的正文版本，按顺序拼成一条模型消息。消息组控制“选哪条消息”，片段版本控制“这条消息由哪些正文组成”，两层身份独立（第 3 节）。
+- **配置入口按作用域拆分**：完整编辑器把模型参数与上下文分为独立页面；聊天侧栏直接修改当前 Agent，完整编辑弹窗则先维护草稿。审批模型虽显示在角色编辑页中，保存作用域是全局（第 2、6 节）。
+- **子智能体声明与调用授权分开**：`subAgentConfig` 声明当前 Agent 是否允许被调用、使用哪组模型绑定和嵌套深度；调用方是否能派发还受其工具配置约束（第 6.4 节）。
+- **Agent 可由工具辅助编辑**：管理服务对 `toolCallConfig` 前缀的字段写入标记为需审批，最终是否交给人工还受仲裁模式约束。普通用户的编辑器保存采用另一条入口（第 6.5 节）。
+- **知识访问与召回分开**：`knowledgeAccess` 授权资料访问，Recall 配置承担自动召回；创建与更新时剥离遗留知识字段。
+
+总体链路为：编辑器或参数侧栏修改 Agent → 独立角色文件与列表索引持久化 → 后续请求读取当前角色 → 校验消息组、编译当前片段版本 → 交给宏、附件和上下文注入管道。历史生成消息保留既有内容，角色配方通常实时引用。
 
 ## 2. 配置入口与文件格式
 
@@ -56,18 +59,21 @@ AIO Hub 的 Agent 是一个可保存、可切换的对话配置集合。它把�
 
 ### 2.2 编辑器实际分组
 
-编辑器配置文件 `components/agent-editor/agentEditConfig.ts` 将配置分成：
+完整编辑器将配置分成十一页，页面归属也决定设置搜索如何定位目标：
 
-- 基础设定
-- 角色设定
-- 功能扩展
-- 会话变量
-- 知识库
-- 工具调用
-- 环境增强
-- 输出与显示
+| 页面 | 主要内容 |
+|---|---|
+| 基础设定、角色设定 | 身份与配置版本、用户档案、快捷操作、世界书、开场白与预设消息 |
+| 模型参数 | 选择模型、采样、高级/自定义参数、模型特殊能力与安全设置 |
+| 上下文 | 历史限制、压缩、后处理、缓存优化和图片压缩 |
+| 功能扩展、会话变量 | 资产、虚拟时间、子智能体声明，以及变量定义 |
+| 思绪、知识库 | Recall 召回绑定与 Knowledge 访问授权，各自独立 |
+| 工具调用、环境增强 | 工具与审批策略、上下文扩展 |
+| 输出与显示 | 分支发送、工具折叠、流式特效、媒体音量、正则、思考块与视觉指南 |
 
-编辑器已把"知识库"区拆为 **Recall 与 Knowledge 两个独立标签页**（RecallSection.vue/KnowledgeLibrarySection.vue）——Recall 承担上下文即时召回绑定（recallConfig.bindings），Knowledge 承担资料库访问授权（knowledgeAccess）与资料引用；旧 KnowledgeSection.vue（723 行）已删除，KnowledgeBaseItem/PlaceholderEditor 相应改名为 RecallBindingItem/RecallPlaceholderEditor（占位符编辑器改为按集合 ID 配置）。这份编辑器目录是判断"用户界面明确支持哪些设置"的主要依据；类型文件则包含导入、兼容或高级功能可能用到的字段。
+模型与上下文两页复用同一参数组件，按分组只展示本页设置。搜索项也会按当前模型能力过滤，选中后切换页面并滚动、高亮对应控件；模型专属选项的可见性由渠道支持信息和所选模型共同决定（[导航配置:48–245](<../../aio-hub/src/tools/agent-manager/components/agent-editor/agentEditConfig.ts#L48-L245>)、[模型配置页:58–91](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/ModelConfigSection.vue#L58-L91>)、[搜索与定位:156–234](<../../aio-hub/src/tools/agent-manager/components/agent-editor/AgentEditor.vue#L156-L234>)）。
+
+完整弹窗先把 Agent 配置复制到表单，保存时发出包含预设、模型参数、工具与子智能体等字段的更新。它与侧栏直接更新角色的方式有时间边界差异；资产物理文件变化另会触发静默保存（[弹窗保存:329–395](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue#L329-L395>)、[资产变更绑定:344–354](<../../aio-hub/src/tools/agent-manager/components/agent-editor/AgentEditor.vue#L344-L354>)）。
 
 ### 2.3 聊天侧边栏也是 Agent 配置入口
 
@@ -77,7 +83,7 @@ LLM Chat 的右侧栏（LeftSidebar.vue，组件类名为 right-sidebar）有“
 - 预设消息树（紧凑版 AgentPresetEditor）；
 - ModelParametersEditor 中按模型能力筛选出的生成参数、上下文管理、上下文压缩、后处理、图片压缩、安全设置和思考/联网等特殊参数。
 
-这里不是仅对当前会话生效的临时覆盖层。ParametersSidebar 的双向绑定 setter 调用 agentStore.updateAgent，并立即持久化。因此从侧边栏改动的模型选择、参数和预设消息都会进入当前 Agent 的持久化配置；重新打开 Agent 或重启应用后仍会保留。侧边栏页签本身的激活状态属于 UI 状态，由 useLlmChatUiState 管理，不属于 Agent 配置。
+侧栏改动写入当前 Agent，作用域跨越当前会话。模型、参数和消息列表的双向绑定直接调用角色更新，内存随即生效，再进入按 Agent 排队的异步文件写入；新入口还可从磁盘刷新当前 Agent。已有单条消息保存另走修订比对路径，保存成功后才采纳落盘状态，避免用过期编辑覆盖其它位置的新选择。页签激活状态仍属于 UI，不写入角色文件（[侧栏绑定与刷新:64–155](<../../aio-hub/src/tools/llm-chat/components/sidebar/ParametersSidebar.vue#L64-L155>)、[消息保存:539–602](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L539-L602>)）。
 
 需要特别区分“模型选择”和“模型定义”：侧边栏的模型选择只写 Agent 的 profileId、modelId；旁边的“编辑模型配置”按钮修改的是所选 LLM Profile 中的模型元数据，随后由 useLlmProfiles().saveProfile 写回 LLM 配置文件，不会把整个模型定义复制进 Agent。
 
@@ -89,7 +95,7 @@ LLM Chat 的右侧栏（LeftSidebar.vue，组件类名为 right-sidebar）有“
 
 | 字段 | 作用 |
 | --- | --- |
-| `name` | 稳定 ID，也用于宏替换的一部分 |
+| `name` | 内部名称，也用于宏替换；实例稳定标识另有 `id` |
 | `displayName` | UI 显示名，可与内部 ID 不同 |
 | `description` | 角色/助手简介 |
 | `icon` | Emoji、图标路径或相对文件名 |
@@ -143,9 +149,19 @@ presetGroups 可以把若干消息做成复选组（checkbox）或单选组（ra
 - **紧凑入口**：聊天侧边栏使用 AgentPresetEditor 的 compact 模式，直接显示每组的单选/多选类型、已启用数/总数和组开关，不必进入完整 Agent 管理页；
 - **成员管理**：消息可在卡片上加入、移动或脱离组；删除组时可以选择“仅解散组”或“连同组内消息彻底删除”。
 
-实现上，injection-assembler 最终仍只按每条消息的 isEnabled 过滤，并不直接读取 presetGroups.enabled。正常 UI 路径会由 applyPresetGroupEnabledState() 把组状态投影到消息状态，因此组开关会真实影响送模上下文；但手工编辑或外部导入若构造出“组已禁用、成员仍启用”的不一致配置，运行时以成员状态为准，本次未找到请求前的再次归一化。
+组状态在编辑、保存、导入与送模几个边界分别处理。编辑器关组时记住原启用成员，开组时恢复；角色保存会协调单选成员，选中新项时让同组其它成员失效。请求前再次按组校验：禁用组覆盖成员开关，启用的单选组若同时存在多条启用消息会报配置错误，避免双重注入。因此，外部写入造成的组/成员不一致也受到送模边界约束（[编辑器组状态:37–62](<../../aio-hub/src/tools/agent-manager/components/assets/presetGroupState.ts#L37-L62>)、[共享归一化:192–219](<../../aio-hub/packages/agent-preset-core/src/index.ts#L192-L219>)、[请求入口:216–258](<../../aio-hub/src/tools/llm-chat/core/context-processors/injection-assembler.ts#L216-L258>)）。
 
-### 3.4 预设编辑器的配置与交互密度
+### 3.4 组合消息：片段与正文版本
+
+组合消息在同一个预设节点内保存正文结构，而普通消息直接保存文本。每个片段具有稳定 ID、启停状态和一组正文版本；每片段最多选中一个版本，也可以留空。版本序号只用于界面展示，持久化选择依据 ID；这些版本属于正文备选项，与基础设定中的配置版本、消息组中的消息选择各有独立语义（[共享结构:1–31](<../../aio-hub/packages/agent-preset-core/src/index.ts#L1-L31>)）。
+
+用户可直接新建组合消息，把普通正文转为初始片段，或选中一段正文提取可变片段。片段可排序、启停和增加/复制版本，编译预览按原样、换行或空行连接当前所选文本；转换回普通消息会先警告，再将当前选择展平，保存后丢弃其它版本。普通正文的选区落在宏内部时会扩展到完整宏，并要求确认（[消息转换:669–743](<../../aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue#L669-L743>)、[组合编辑器:43–110](<../../aio-hub/src/tools/agent-manager/components/editors/PresetCompositionEditor.vue#L43-L110>)）。
+
+单选消息组还有“转换为组合消息”入口：从组内文本提议共用前后缀和差异版本，由用户选择沿用哪条消息的角色、注入、匹配与附件设置。转换后将组合节点放在第一个成员位置、删除其它成员与原组；若原成员已经是组合消息，其内部备选版本只按当前正文展平。原消息变化会阻止套用转换；转换撤销仅在转换后没有其它修改时恢复本地快照（[转换预览:25–128](<../../aio-hub/src/tools/agent-manager/components/assets/PresetCompositionConversion.vue#L25-L128>)、[转换与撤销:604–651](<../../aio-hub/src/tools/agent-manager/components/assets/AgentPresetEditor.vue#L604-L651>)）。
+
+送模先校验组状态，再按模型匹配筛选，随后编译组合正文，之后才检测工具宏、展开宏和解析附件。只有启用片段的当前版本参与拼接，未选版本留在角色配置中，不进入本次提示词；运行时另带来源片段/版本标识用于结构化编辑。结构错误会抛出配置异常，编译预览不会静默改写保存的原结构（[编译与物化:155–190](<../../aio-hub/packages/agent-preset-core/src/index.ts#L155-L190>)、[送模交接:218–254](<../../aio-hub/src/tools/llm-chat/core/context-processors/injection-assembler.ts#L218-L254>)）。
+
+### 3.5 预设编辑器与保存边界
 
 AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把高阶字段组织成了可操作流程：
 
@@ -153,10 +169,10 @@ AIO 的预设能力不只体现在数据字段数量，还体现在编辑器把�
 - 单条消息可设置显示名称、`system/user/assistant` 角色、所属消息组、模型/渠道匹配和四种注入策略；
 - 内容编辑使用 Monaco，并提供编辑、宏处理后纯文本预览和 Markdown/富文本渲染预览三种模式；
 - 工具栏可插入宏、会话变量和 Recall/知识库占位符（占位符编辑器为 RecallPlaceholderEditor，按集合 ID 配置），也能为消息选择 Agent 私有资产附件；
-- 预设消息本身可独立复制或导入导出为 JSON/YAML；v2 格式同时保存 `groups` 与 `messages`，不必导出整个 Agent；
+- 预设消息可独立复制或以 JSON/YAML 导入导出；普通消息使用 v2 的分组/消息包，包含组合正文时升级 v3 并声明所需结构特性，兼容导出可只保留当前编译文本；
 - 导入 SillyTavern Prompt Preset 时先解析 system、injection 和 unordered prompt，再由选择对话框确认写入，不把来源字段直接摊到主编辑器中。
 
-这解释了 AIO 与 SillyTavern 的体验差异：酒馆的 Prompt Manager 也支持拖拽、逐条开关、角色、相对/深度注入、注入顺序和 generation trigger，表达力并不弱；但它还同时暴露 `marker`、`system_prompt`、`forbid_overrides`、extension source 等内部语义，并与角色卡和采样 Preset 分离。AIO 的字段同样很多，但大部分被包装成消息、组、匹配规则和注入策略四类直接可见对象，用户更容易理解“当前到底启用了哪套上下文”。
+消息编辑器有保存与保留编辑快捷键，也提供保存后关闭。受保护草稿退出时可选择继续编辑、保存或丢弃；保存失败会保留草稿并显示原因。对于已有消息，聊天侧栏接入专门的保存回调：先比较内存原消息，再重读磁盘比较修订内容，合并其余并发字段后持久化。它保护单条消息编辑的过期覆盖；完整 Agent 弹窗先更新本地表单，仍需外层保存，不能据此推导所有角色字段都有跨窗口事务（[草稿与保存:639–779](<../../aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue#L639-L779>)、[角色消息提交:539–602](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L539-L602>)）。
 
 ## 4. 模型与输出偏好
 
@@ -188,11 +204,11 @@ parameters 使用 LlmParameters，至少支持 temperature、maxTokens，默认�
 - regexConfig：对请求或渲染消息做正则清理、替换和宏处理；
 - defaultToolCallCollapsed：工具调用消息默认是否折叠。
 
-Agent 模型参数与渠道/模型的适配规则有独立草案文档（`src/tools/agent-manager/docs/Plan/agent-model-parameter-rules-draft.md`），讨论按模型能力裁剪/映射 Agent 参数与渠道元数据的规则，目前是设计草案；已落地的是共享核心的采样兼容与输出预算裁剪（见 LLM 渠道管理 2.6 与对话请求与上下文 4）。另外聊天侧栏与 Agent 编辑器对工具策略 toolCallConfig 的修改会强制二次确认，防止误改自动批准配置。
+参数界面已按所选模型及其支持元数据裁剪可见项。采样兼容与输出预算在请求侧另有规范化，角色参数是否显示、是否启用及最终如何发送需要分层判断；详细协议映射见[LLM 渠道管理](<../LLM渠道管理/AIO-Hub-LLM渠道管理调查笔记.md>)。工具配置的字段审批保护用于 Agent 经工具修改权限的路径，普通用户编辑保存及仲裁模式的边界见第 6.5 节。
 
 ### 4.3 模型参数编辑器的实际分组与语义
 
-侧边栏和 Agent 编辑器共用 `ModelParametersEditor`，界面根据 Profile 类型和模型 `capabilities` 动态过滤可见字段。分组如下：
+侧边栏和完整编辑器共用参数组件，但展示方式不同：侧栏保留折叠分组，完整编辑器将模型与上下文分为两页。两者复用模型上下文解析，读取渠道类型、模型 ID、能力、Token 上限与支持特性来决定可编辑范围。分组如下（[分组与可见性:25–115](<../../aio-hub/src/tools/agent-manager/components/parameters/parameterEditorConfig.ts#L25-L115>)）：
 
 | UI 分组 | 主要字段 | 说明 |
 | --- | --- | --- |
@@ -201,7 +217,8 @@ Agent 模型参数与渠道/模型的适配规则有独立草案文档（`src/to
 | 上下文管理 | `contextManagement.enabled`、`maxContextTokens`、`retainedCharacters` | 发送前截断过长历史；这是截断上限，不是摘要压缩 |
 | 上下文压缩 | `contextCompression` | 见下节 |
 | 上下文后处理 | `contextPostProcessing.rules` | 合并 system、合并连续角色、角色交替等管道规则 |
-| 图片压缩 | `imageCompression` | 发送多模态图片前缩放/转 JPEG 或 WebP |
+| 上下文缓存优化 | `contextCacheOptimization` | 为自动注入等动态内容配置复用时间窗口，执行细节见请求上下文笔记 |
+| 图片压缩 | `imageCompression` | 发送多模态图片前缩放，可保留原格式或转 JPEG/WebP |
 | 特殊功能 | `webSearchEnabled`、`thinkingEnabled`、`thinkingBudget`、`reasoningEffort`、`includeThoughts` | 联网和不同模型的思考配置，按能力显示 |
 | Provider 专属 | `safetySettings` 等 | 例如 Gemini 安全阈值 |
 
@@ -217,17 +234,19 @@ Agent 模型参数与渠道/模型的适配规则有独立草案文档（`src/to
 | `autoTrigger` | `true` | 是否在发送前自动检查并压缩 |
 | `triggerMode` | `token` | 按 Token、消息条数或 `both` 触发 |
 | `tokenThreshold` | `80000` | Token 触发阈值 |
-| `countThreshold` | `50` | 消息条数触发阈值 |
-| `minHistoryCount` | `15` | 允许压缩前至少要有的历史消息数 |
-| `protectRecentCount` | `10` | 永不纳入本次压缩的最近消息数 |
-| `compressCount` | `20` | 每次取最旧的多少条合并成摘要 |
+| `countUnit` | `message` | 按消息条数计数，可切为 `user-turn` 用户回合 |
+| `countThreshold` | `50` | 按当前计数单位计算的触发阈值 |
+| `minHistoryCount` | `15` | 允许压缩前至少积累的单位数 |
+| `protectRecentCount` | `10` | 本次压缩保护的最近单位数 |
+| `compressCount` | `20` | 每次取最旧的多少个单位合并成摘要 |
+| `countsByUnit` | 未设置 | 分别记忆两种计数方式的数量配置 |
 | `summaryRole` | `system` | 摘要节点插入时使用的消息角色 |
 | `summaryModel` | 未设置 | 可指定独立的摘要模型；缺省使用当前 Agent 模型 |
 | `summaryTemperature` | `0.3` | 摘要生成随机性 |
 | `summaryMaxTokens` | `4096` | 摘要输出上限 |
 | `summaryPrompt` / `continueSummaryPrompt` | 空字符串 | 首次摘要/在既有摘要上续写的模板；空值使用内置模板 |
 
-压缩是非破坏性的：摘要节点隐藏原消息参与请求，但原始消息仍保存在会话数据中。保存 Agent 时，如果提示词为空或等于内置模板，存储层会主动剥离这两个字段，运行时再回退到内置模板，避免每个 `agent.json` 重复保存大段默认提示词。
+计数方式不仅改变阈值含义，也影响保护范围和每次压缩范围；旧配置缺少计数单位时沿用消息条数。字段与默认值见[压缩类型:384–445](<../../aio-hub/src/tools/llm-chat/types/llm.ts#L384-L445>)。压缩保留原消息，以摘要节点改变后续请求的有效历史；执行与分支语义见[请求上下文笔记](<../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md>)。保存 Agent 时，空值或等于内置模板的摘要提示词会被剥离，运行时再回退默认模板。
 
 ### 4.5 视觉化输出
 
@@ -265,14 +284,17 @@ Agent 可以关联 `worldbookIds`，并配置：
 
 ### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
-旧 knowledgeBaseConfig/knowledgeSettings 字段已从 AgentBaseConfig 移除并归一为 `knowledgeAccess`（`src/tools/agent-manager/types/agent.ts:505-525`，创建与更新时统一剥离遗留字段），与 Recall 配置并存：
+思绪页配置 Recall 自动召回，知识库页配置资料访问授权。两者都可跟随角色保存，授权资料库本身不会触发自动检索或目录注入。角色更新会剥离遗留知识字段，避免旧参数混入新访问模型。
 
-- `recallConfig`：思绪（Recall）绑定——总开关 `enabled`、绑定列表 `bindings`（每条含 `recallId`/`recallName`、激活模式 `always`/`gate`/`turn`/`static`、`whenParams`、召回数量 `limit`、最低相关分数 `minScore`、检索画像 `profile`（`semantic`/`associative`）、预设 `presetId`（`algorithmic`/`comprehensive`））与自动注入位置（`autoInjectIfMacroMissing` + `autoInjectPosition`）；
-- `recallSettings`：默认预设、默认画像、`maxRecallChars` 上限、`defaultLimit`/`defaultMinScore`、结果模板、空结果文本、gate 扫描深度与缓存开关；
-- `knowledgeAccess`：Knowledge 资料库的**访问权限**（授权库 ID 等）——类型注释明确"授权不会触发自动检索或目录注入"，与 Recall 的自动召回是两条独立链路；
-- recallMigrationIssues：旧配置版本化迁移留下的可恢复诊断（RecallMigrationIssue）。
+| 配置 | 保存和执行交接 |
+|---|---|
+| `recallConfig` | 总开关、集合绑定、展示分组与缺少宏时的自动注入位置。集合 ID 是运行时目标，集合名仅供展示 |
+| 每项 Recall 绑定 | 选择常驻、门控、回合或静态激活方式，配置数量/分数阈值与检索预设；产品级预设有算法型和综合型，旧画像字段作为迁移输入保留 |
+| `recallSettings` | 默认检索设置、总字符预算、结果/空结果模板、门控扫描深度与缓存偏好 |
+| `knowledgeAccess` | 授权当前角色可访问哪些 Knowledge 资料库，访问与自动召回分离 |
+| 迁移诊断 | 保留旧配置无法直接映射的字段和值，供编辑与恢复流程查看 |
 
-占位符协议同步迁移：知识库通过 `{{recall}}` 宏或 `【recall::...】` 占位符显式触发（严格参数协议，见对话请求与上下文笔记 9.6）；旧 `{{kb}}`/`【kb::...】` 占位符在管道中被识别为"已废弃"并告警、不再执行检索。`{{kb}}` 宏已从宏注册表移除，新增 `{{recall}}`/`{{recall_list}}`（宏总数 72 → 74，见独特功能笔记能力五）。
+Recall 的正文入口为 `{{recall}}` 宏或 `【recall::...】` 占位符；旧知识占位符只作废弃识别和告警。绑定字段见[Recall 类型:95–150](<../../aio-hub/src/tools/agent-manager/types/agent.ts#L95-L150>)，检索和注入过程见[请求上下文笔记](<../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md>)。
 
 ## 6. 工具调用与可执行能力
 
@@ -317,11 +339,26 @@ toolCallConfig 支持：
 
 ### 6.4 子智能体配置（`subAgentConfig`）
 
-`ChatAgent` 内嵌 `subAgentConfig`（`types/agent.ts:225-260,534`），让 Agent 声明自己能否被当作子智能体调度：启用状态、模型绑定偏好（跟随调度方或优先自身渠道/模型）、最大嵌套调用深度（默认 1，硬上限 3，防止递归失控）、是否内置基线标识，以及是否只在子智能体侧可见。子智能体运行时、内置释出、任务生命周期与结果合成在 `src/tools/sub-agent`，本字段只保存声明；实际委派由 Agent 工具中的子智能体工具执行。这使"Agent 能不能开子任务、能不能被当子任务用"成为角色配置的一部分，跟工具开关同级。
+功能扩展页的“允许被调用”控制当前 Agent 是否可作为后台协作目标，默认关闭。开启后，可选择跟随父会话模型或使用自身模型，设置 1–3 层最大派发深度（缺省 1），并选择是否仅子智能体侧可见。后者隐藏主聊天列表中的专项角色，智能体管理与子任务目标仍可访问；内置基线标识独立保存（[配置声明:220–263](<../../aio-hub/src/tools/agent-manager/types/agent.ts#L220-L263>)、[编辑入口:268–309](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/CapabilitiesSection.vue#L268-L309>)）。
 
-### 6.5 AI 自动审批策略（`decisionArbitration`）
+这些字段声明“谁可被调用、被调用时如何绑定”；调用方能否派发还取决于其工具启用和方法权限。深度限制由子任务执行端读取并夹在全局上限内。角色配置和工具能力共同形成授权边界，单独勾选目标角色的“允许被调用”不会给调用方增加工具（[子任务列表过滤:533–549](<../../aio-hub/src/tools/sub-agent/sub-agent.registry.ts#L533-L549>)、[深度检查:280–304](<../../aio-hub/src/tools/sub-agent/sub-agent.registry.ts#L280-L304>)）。
 
-Agent 配置新增 `decisionArbitration`（`types/agent.ts:217`），与全局"决策渠道"分离：全局层保存审批引擎（JEV 或普通 LLM）、渠道、模型、审核超时与重试；Agent 层保存启用状态、保守灰区/激进策略、JEV 概率阈值和外部来源策略。两种引擎的裁决输出统一为 action（approve/deny/escalate）、风险等级、意图匹配与明确授权等字段；只有低风险且意图一致的批准可自动执行，激进模式下仍需明确授权。缺少上下文、上下文超过 16,000 字符、响应格式异常或判断矛盾都会升级人工。审批执行链路与配置 UI 归 Agent 工具类目，本节只记录 Agent 数据契约中的这两个字段。
+模型偏好采用显式分支：跟随模式读取父请求的渠道/模型，自身模式读取目标 Agent 的引用，选定的一组必须存在于启用渠道和模型列表中。UI 提示“自身失效自动回退父模型”，当前解析器实际直接报错；渠道内部的故障转移由渠道管理承担，与两组绑定之间的回退不同（[模型解析:14–32](<../../aio-hub/src/tools/sub-agent/services/subAgentModelResolver.ts#L14-L32>)、[提示文案:282–289](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/CapabilitiesSection.vue#L282-L289>)）。执行生命周期见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)。
+
+### 6.5 AI 自动审批：角色策略与全局模型
+
+工具调用页分“工具配置”和“AI 自动审批”两个子页，工具总开关控制这一区域。角色级策略实际保存在 `toolCallConfig.decisionArbitration` 内，随角色保存；全局审批模型组件虽嵌在同页，却独立保存并立即供所有启用仲裁的角色使用。只取消角色弹窗不会撤回已保存的全局模型配置（[工具页:523–641](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/ToolCallingSection.vue#L523-L641>)、[全局模型保存:85–115](<../../aio-hub/src/tools/tool-calling/components/ApprovalModelSettings.vue#L85-L115>)）。
+
+| 配置所有者 | 保存内容 | 作用域与界面 |
+|---|---|---|
+| 当前 Agent | 启用状态、灰区/激进模式、JEV 风险/意图/置信阈值、外部来源是否可自动批准 | 跟随角色文件；JEV 阈值在该引擎下显示，普通 LLM 使用离散风险与授权评估 |
+| 全局审批模块 | JEV/普通 LLM 引擎、模型引用、超时、重试与普通 LLM 补充审批规则 | 独立的审批渠道文件；切换引擎会清空模型引用，并设置对应默认模型名/超时 |
+
+灰区模式跳过安全策略强制审批的自动仲裁，激进模式允许这类请求进入更严格判断。自动批准、自动拒绝与升级人工的执行规则见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)，角色配置中的阈值不能视为独立权限屏障（[策略与默认值:136–187](<../../aio-hub/src/services/decision-arbiter/types.ts#L136-L187>)、[全局持久化:32–68](<../../aio-hub/src/services/decision-arbiter/channelConfig.ts#L32-L68>)）。
+
+**开关状态的接线差异。** 页面用“仲裁对象存在”表示开关开启，打开时复制默认对象；默认对象中的 `enabled` 却为 false。执行端检查该字段，因此仅创建默认对象仍不会触发模型仲裁。修改模式或阈值也未在该页同步把它设为 true；外部配置或工具写入显式启用值时，才满足执行端开关条件。该差异来自当前静态接线，实际交互表现尚未运行验证（[UI 开关:120–132](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/ToolCallingSection.vue#L120-L132>)、[默认对象:154–163](<../../aio-hub/src/services/decision-arbiter/types.ts#L154-L163>)、[执行检查:209–225](<../../aio-hub/src/services/decision-arbiter/index.ts#L209-L225>)）。
+
+**工具辅助编辑的安全策略。** 管理工具给 `toolCallConfig` 前缀的字段写入标记为需审批，注释描述为不可被自动批准绕过的本地确认；实际激进仲裁仍可处理强制审批请求，最终结果依赖仲裁配置与判断。普通用户的角色保存路径直接提交表单，这个工具安全钩子不等于所有编辑页面都会额外弹确认（[字段策略:103–130](<../../aio-hub/src/tools/agent-manager/services/agentManagementService.ts#L103-L130>)、[仲裁强制审批处理:250–255](<../../aio-hub/src/services/decision-arbiter/index.ts#L250-L255>)、[表单保存:329–391](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue#L329-L391>)）。
 
 ## 7. 资产、变量与环境增强
 
@@ -334,17 +371,23 @@ assetGroups 和 assets 允许为一个 Agent 管理图片、音频、视频和�
 - `description`、`group`、`usage`（`inline` / `background`）；
 - 音视频 `autoplay`、`loop`、`muted`、封面和样式选项。
 
-预设消息可用 presetAttachments 引用这些资产，也可在内容中使用 agent-asset://{group}/{id}.{ext}。资产随 Agent 导入导出，可选择放入 ZIP/文件夹或 PNG 内嵌包。
+预设消息可用附件引用这些资产，也可在内容中使用 `agent-asset://{group}/{id}.{ext}`。资产随 Agent 导入导出，可选择放入 ZIP/文件夹或 PNG 内嵌包。
 
-### 7.2 会话变量
+资产管理器支持缩略图引用、单项及批量描述生成；描述写回当前资产元数据，用于后续引用和提示词说明。描述请求读取独立转写配置中的媒体模型，按媒体能力校验，与 Agent 的对话模型选择分开。生成结果仅在资产身份和原描述仍与任务快照相符时合入编辑草稿，用户同时手改描述会使旧结果跳过；物理文件增删另走资产变更保存路径（[描述绑定:101–167](<../../aio-hub/src/tools/agent-manager/services/agentAssetDescriptionService.ts#L101-L167>)、[结果合入:635–653](<../../aio-hub/src/tools/agent-manager/components/assets/useAgentAssetsManager.ts#L635-L653>)）。
+
+### 7.2 输出样式的角色覆盖
+
+输出与显示页可为角色选择流式文字特效，默认跟随全局；另有工具卡默认折叠、媒体音量和视觉输出指南。角色文件保存样式偏好，渲染端仍受全局动画开关和系统减少动态效果偏好约束。它们影响显示方式，工具权限和模型能力由各自配置负责（[角色特效入口:58–77](<../../aio-hub/src/tools/agent-manager/components/agent-editor/sections/OutputDisplaySection.vue#L58-L77>)）。
+
+### 7.3 会话变量
 
 variableConfig 用于定义会话变量及其约束；配置向导说明可通过 `{{getvar::path}}` 和 `{{setvar::path::op::value}}` 读取、更新。它适合保存角色扮演中的状态、任务进度或用户偏好，但变量的具体 schema 由 sessionVariable.ts 定义，不应把它当作模型长期记忆。
 
-### 7.3 虚拟时间线
+### 7.4 虚拟时间线
 
 virtualTimeConfig 可设置虚拟基准时间、现实基准时间和 timeScale。启用后，{{time}}、{{date}}、{{datetime}}、{{shichen}} 等宏按虚拟时间计算。艾尔德拉大陆预设将虚拟时间设为圣历 1024 年，并把流速设置为现实的 2 倍，用于驱动世界模拟中的昼夜、商店和事件节奏。
 
-### 7.4 扩展与快捷操作
+### 7.5 扩展与快捷操作
 
 extensionConfig 提供 Agent 级扩展总开关、按扩展 ID 的开关以及新扩展默认状态；quickActionSetIds 关联快捷操作组。它们是环境/交互能力的入口，不等于某个具体工具已经被批准。
 
@@ -365,11 +408,13 @@ extensionConfig 提供 Agent 级扩展总开关、按扩展 ID 的开关以及�
 
 ### 9.1 本地持久化链路
 
-用户创建或修改的 Agent 采用分离式文件存储，不是只放在 Pinia 内存或聊天会话里：
+用户创建或修改的 Agent 采用分离式文件存储，内存状态通过以下路径写入角色文件：
 
-1. agentStore.updateAgent 修改内存中的 ChatAgent；
-2. persistAgent 调用 useAgentStorage，将完整配置序列化为 agent-manager/agents/{agentId}/agent.json；
-3. 同时更新 agent-manager/agents-index.json，索引只保留列表展示所需的元数据（名称、图标、Profile/模型 ID、标签、时间等）。
+1. 普通角色更新先修改内存状态，再按角色 ID 串行排队写入；写入前协调单选消息组，落盘时读取最新内存快照；
+2. 存储层将角色配置写入 `agent-manager/agents/{agentId}/agent.json`，并维护 `agent-manager/agents-index.json` 中的列表展示元数据；
+3. 已有单条预设编辑使用可等待的专用保存路径，比较内存与磁盘修订后先落盘再合入最新状态，冲突会明确报错并留住编辑草稿。
+
+前两步的普通保存返回时，文件写入可能仍在队列中，不能把侧栏的成功提示等同于磁盘写入完成；单消息专用路径的可等待性也未扩展为所有角色字段的事务保证（[普通更新:315–340](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L315-L340>)、[排队持久化:698–719](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts#L698-L719>)）。
 
 实际根目录由 getAppConfigDir() 决定（Tauri 的 AppData 目录，支持便携模式），所以笔记中的 agent-manager/... 是相对于应用配置目录的路径。Agent 资产也放在对应目录，配置中的 icon 等字段可以用相对文件名或 appdata://agent-manager/agents/... 引用。资产存储路径已从旧 llm-chat/agents/ 统一迁移到 agent-manager/agents/；useAgentStorage 通过版本化数据迁移（cross-module-v2，runVersionedDataMigration）补充复制旧目录、校验目录子集与迁移标记，迁移完成后经通知中心发送成功通知；跨会话搜索的 Agent 目录也随之改为 agent-manager/agents/（会话与消息管理笔记 5.1）。
 
@@ -387,6 +432,8 @@ Agent 导出结构 AIO_Agent_Export 会剥离本地实例字段（id、profileId
 - Agent 资产；
 - 关联世界书，选择独立文件或内嵌内容；
 - ZIP、文件夹、单文件或带数据的 PNG 包。
+
+包含组合正文的 Agent 导出采用外层 v2 并声明 `preset-composition-v1`，普通 Agent 包仍为 v1。独立预设包则分别使用 v3/v2，两者的外层格式版本有独立意义。导入会校验组合结构，清空持久化的编译正文，并规范组状态；兼容展平导出只保留当前选择的文本，重导入无法恢复其它版本（[Agent 导出:166–183](<../../aio-hub/src/tools/agent-manager/services/agentExportService.ts#L166-L183>)、[独立预设导出:80–105](<../../aio-hub/src/tools/agent-manager/components/assets/usePresetImportExport.ts#L80-L105>)、[Agent 导入:61–71](<../../aio-hub/src/tools/agent-manager/services/agentImportService.ts#L61-L71>)）。
 
 配置向导还说明了 SillyTavern 角色卡的兼容路径：可导入 JSON/PNG 角色卡、嵌入式 Character Book、Context Preset 和 Regex Scripts，并映射为 AIO Hub 的预设消息、世界书和正则配置。世界书并非导入后静态存档，独立管理器可继续编辑和导出，受支持字段会由 worldbook-processor 在后续请求中激活和注入。导入后的模型选择仍需在 AIO Hub 实例侧解决，不应假定来源角色卡携带的模型 ID 在本地存在；未被 AIO 运行时消费的扩展字段即使得到保留，也不会自动获得酒馆中的行为。
 
@@ -424,44 +471,18 @@ AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元
 
 ## 11. 主要源码依据
 
-- `aio-hub/src/tools/agent-manager/types/agent.ts`：Agent、预设、消息、资产、知识库、工具调用、扩展配置类型。
-- `aio-hub/src/tools/llm-chat/components/sidebar/LeftSidebar.vue`：聊天侧边栏的“智能体/参数”页签入口。
-- `aio-hub/src/tools/llm-chat/components/sidebar/ParametersSidebar.vue`：侧边栏模型选择、预设消息和 Agent 参数的双向绑定；参数修改直接调用 `agentStore.updateAgent`。
-- `aio-hub/src/tools/agent-manager/components/parameters/ModelParametersEditor.vue`：基础/高级参数、上下文管理、压缩、后处理、图片压缩和模型能力过滤。
-- `aio-hub/src/tools/llm-chat/types/llm.ts`：`LlmParameters`、`ContextCompressionConfig`、默认压缩配置及默认提示词剥离逻辑。
-- `aio-hub/src/tools/llm-chat/types/message.ts`：消息节点、注入策略、模型匹配和预设附件引用。
-- `aio-hub/src/tools/agent-manager/components/assets/AgentPresetEditor.vue`：完整/紧凑预设编辑器、拖拽、批量管理、独立导入导出和侧边栏消息组开关。
-- `aio-hub/src/tools/agent-manager/components/assets/PresetGroupPanel.vue`：消息组创建、单选/多选、组级启停、成员管理和删除语义。
-- `aio-hub/src/tools/agent-manager/components/assets/presetGroupState.ts`：组开关向成员 `isEnabled` 的状态投影与恢复。
-- `aio-hub/src/tools/agent-manager/components/assets/usePresetImportExport.ts`：预设消息 v1/v2 JSON/YAML 格式及 SillyTavern Prompt Preset 导入。
-- `aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue`：角色、组、模型匹配、注入策略、宏/变量/知识库/附件和三态预览。
-- `aio-hub/src/tools/llm-chat/core/context-processors/injection-assembler.ts`：按消息 `isEnabled`、模型匹配和注入策略构建最终上下文。
-- `aio-hub/src/tools/llm-chat/services/greetingService.ts`：开场白实例化、live 同步、Agent 切换和首次发送后的固化状态机。
-- `aio-hub/src/tools/llm-chat/composables/session/useSessionManager.ts`：创建会话时插入全部开场白分支。
-- `aio-hub/src/tools/llm-chat/stores/session/sessionLifecycleManager.ts`：切换会话时刷新尚未固化的开场白。
-- `aio-hub/src/tools/llm-chat/composables/chat/useChatHandler.ts`：发送、重新生成和续写时读取当前 Agent 配置；首次发送前固化开场白。
-- `aio-hub/src/tools/llm-chat/composables/chat/useChatExecutor.ts`：将当前 Agent 与参数片段合并为当次 `executionAgent`。
-- `aio-hub/src/tools/llm-chat/composables/chat/useSingleNodeExecutor.ts`：记录当次实际请求参数快照。
-- `aio-hub/src/tools/llm-chat/composables/session/useNodeManager.ts`：重新生成复用同一用户节点并创建助手兄弟分支。
-- `aio-hub/src/tools/agent-manager/config/defaultAgentTemplate.ts`：新建 Agent 默认身份和模型参数。
-- `aio-hub/src/tools/st-worldbook-manager/types/worldbook.ts`：世界书、条目、位置、过滤、递归与兼容字段类型。
-- `aio-hub/src/tools/st-worldbook-manager/components/WorldbookDetail.vue`：世界书详情与条目编辑面；可据此区分类型支持和 UI 控件覆盖。
-- `aio-hub/src/tools/st-worldbook-manager/services/worldbookImportService.ts`：JSON、`.lorebook`、PNG 角色卡与 AIO Bundle 导入、字段归一化。
-- `aio-hub/src/tools/st-worldbook-manager/services/worldbookExportService.ts`：AIO/ST 格式导出与字段映射。
-- `aio-hub/src/tools/llm-chat/core/context-processors/worldbook-processor.ts`：世界书合并、扫描、条件激活、递归、组选择与上下文注入主链。
-- `aio-hub/src/tools/agent-manager/stores/agentStore.ts`：Agent 更新与持久化调用链。
-- `aio-hub/src/tools/agent-manager/composables/storage/useAgentStorage.ts`：`agent.json`、索引文件和 AppData 路径。
-- `aio-hub/src/tools/agent-manager/components/agent-editor/agentEditConfig.ts`：编辑器实际配置分组。
-- `aio-hub/src/config/agent-presets/README.md`：JSON/YAML 预设格式、资产路径和基本示例。
-- `aio-hub/src/config/agent-presets/agent-config-wizard.ts`：高级字段、宏、角色卡导入和向导自身的工具审批策略。
-- `aio-hub/public/agent-presets/*/config.json|config.yaml`：内置角色的实际人格、温度和场景样本。
-- `aio-hub/docs/architecture/agent-tool-skill-integration.md`：Agent、工具调用和 Skill 的运行时分层与 VCP 调用闭环。
-- `aio-hub/docs/architecture/tool-approval-arbitration.md`：工具自动审批仲裁的执行链路、两种引擎与配置入口。
-- `aio-hub/src/tools/sub-agent/ARCHITECTURE.md`：子智能体运行时、内置释出与任务生命周期。
-- `aio-hub/src/tools/agent-manager/services/agentManagementService.ts`：Agent 配置的字段读写与安全策略（`isSecuritySensitiveAgentFieldPath`、`resolveFieldPath`）。
-- `aio-hub/packages/agent-preset-core/src/injection-anchors.ts`、`structureUndo.ts`：预设注入锚点与结构撤销的共享实现。
-- `aio-hub/src/tools/llm-chat/docs/architecture/model-parameter-system.md`：模型参数与采样兼容的系统说明。
+- [Agent 类型](<../../aio-hub/src/tools/agent-manager/types/agent.ts>)：角色字段、子智能体、工具策略与资产契约。
+- [完整编辑器](<../../aio-hub/src/tools/agent-manager/components/agent-editor/AgentEditor.vue>)、[编辑弹窗](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue>)、[聊天参数侧栏](<../../aio-hub/src/tools/llm-chat/components/sidebar/ParametersSidebar.vue>)：草稿编辑、角色提交与直接绑定。
+- [预设列表编辑器](<../../aio-hub/src/tools/agent-manager/components/assets/AgentPresetEditor.vue>)、[消息编辑器](<../../aio-hub/src/tools/agent-manager/components/editors/PresetMessageEditor.vue>)、[组合正文编辑器](<../../aio-hub/src/tools/agent-manager/components/editors/PresetCompositionEditor.vue>)：分组、片段版本、转换、预览与草稿保护。
+- [预设共享核心](<../../aio-hub/packages/agent-preset-core/src/index.ts>)、[结构撤销](<../../aio-hub/packages/agent-preset-core/src/structureUndo.ts>)：校验、编译、来源映射、宏边界和撤销。
+- [角色存储](<../../aio-hub/src/tools/agent-manager/stores/agentStore.ts>)、[文件存储](<../../aio-hub/src/tools/agent-manager/composables/storage/useAgentStorage.ts>)：串行写入、单消息修订比较与列表索引。
+- [Agent 导入](<../../aio-hub/src/tools/agent-manager/services/agentImportService.ts>)、[Agent 导出](<../../aio-hub/src/tools/agent-manager/services/agentExportService.ts>)、[预设导入导出](<../../aio-hub/src/tools/agent-manager/components/assets/usePresetImportExport.ts>)：外层格式、结构特性与兼容展平。
+- [注入组装器](<../../aio-hub/src/tools/llm-chat/core/context-processors/injection-assembler.ts>)、[开场白服务](<../../aio-hub/src/tools/llm-chat/services/greetingService.ts>)、[发送入口](<../../aio-hub/src/tools/llm-chat/composables/chat/useChatHandler.ts>)、[执行配置合并](<../../aio-hub/src/tools/llm-chat/composables/chat/useChatExecutor.ts>)：角色配置进入会话与请求的交接。
+- [世界书类型](<../../aio-hub/src/tools/st-worldbook-manager/types/worldbook.ts>)、[详情编辑](<../../aio-hub/src/tools/st-worldbook-manager/components/WorldbookDetail.vue>)、[运行处理器](<../../aio-hub/src/tools/llm-chat/core/context-processors/worldbook-processor.ts>)：兼容字段、UI 覆盖与激活注入。
+- [配置向导](<../../aio-hub/src/config/agent-presets/agent-config-wizard.ts>)、[内置预设目录](<../../aio-hub/public/agent-presets/>)：角色模板与场景样本。
 
 ## 12. 调查边界
 
-本篇关注“配置模型与角色能力”，没有把具体工具 registry 的每一个方法当作 Agent 配置字段逐项展开；工具的本地执行位置、文件权限和分布式 VCP 风险应以 [AIO-Hub-Agent工具调查笔记](../Agent工具/AIO-Hub-Agent工具调查笔记.md) 为准。内置预设也没有为每个 Agent 配置完整的工具清单，因此不能从角色名称推断它一定拥有某项工具能力。SillyTavern 兼容结论来自静态类型、编辑器和处理器核对，尚未使用一组真实 V2/V3 角色卡与世界书完成导入、编辑、运行、导出、再导入的往返测试。
+角色配置、工具执行和渲染效果分属不同层。本篇追踪到配置持久化与送模交接，工具执行、文件权限和分布式 VCP 边界见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)；内置角色名称只能说明预设意图，实际能力由本地绑定决定。
+
+尚未运行验证的事项包括：组合消息跨窗口同时编辑及磁盘冲突、转换与撤销往返、快捷键和退出保护、资产批量描述与缩略图、审批开关实际界面表现、子智能体失效模型绑定，以及真实 V2/V3 角色卡与世界书的导入—编辑—执行—导出往返。代码可确认入口、字段、校验和事件交接，显示质量与平台行为仍需在 Tauri 环境观察。

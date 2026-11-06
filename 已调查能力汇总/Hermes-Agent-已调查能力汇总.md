@@ -2,11 +2,11 @@
 
 > 汇总对象：`Hermes-Agent`（远端仓库 `https://github.com/NousResearch/hermes-agent`，产品命令 `hermes`）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 个类目的 Hermes-Agent 调查笔记（完整清单见文末来源笔记索引），基于代码快照 `71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；未做新的源码调查与跨项目横向比较
+> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态并链接来源；定向源码复核覆盖规范桌面 owner、输入受理与重启、cron 交接恢复与投递、预览工具生产消费链，其余沿用来源证据；未运行应用与模型请求
 >
 > 汇总范围：上述 16 个类目的既有调查结论；仓库分布与应用界面基础设施两个工程向类目单列于"工程与基础设施摘要"小节；排除跨项目横向比较、评分与排序
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Python agent 核心的个人 AI 助手，README 自我定位为 "self-improving agent"，核心卖点是内置学习闭环。架构形态是混合 monorepo：Python 核心（`run_agent` / `cli` / `gateway` / `tools`）与 TypeScript 前端（Electron 桌面、Ink TUI、Web dashboard）同仓。桌面端不运行 agent，而是自 spawn 一个无头 `hermes serve` 后端进程，renderer 经 WebSocket JSON-RPC 通信；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。当前快照规模约 2.2 万个受版本控制文件；`agent/`、`hermes_cli/`、`gateway/`、`cron/` 都已完成模块化拆分（单文件 `hermes_state.py` 拆成约 65 个 `hermes_state_*` 模块），`plugin-catalog/` 从 99 条增长到 978 条 SHA 固定的插件清单，核心 `plugins/` 含 `computer_use`、`delegation`、`teams_pipeline`、`kanban` 等 24 个条目，终端后端为六个内建加插件后端。本次汇总覆盖 16 个类目的调查结论，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
+Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Python agent 核心的个人 AI 助手，README 自我定位为 "self-improving agent"，核心卖点是内置学习闭环。架构形态是混合 monorepo：Python 核心（`run_agent` / `cli` / `gateway` / `tools`）与 TypeScript 前端（Electron 桌面、Ink TUI、Web dashboard）同仓。桌面通过 gateway ensure 附着或启动规范本地 owner，renderer 经私有端点和 WebSocket JSON-RPC 通信，关闭桌面只断开 viewer；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。当前快照规模约 2.2 万个受版本控制文件；`agent/`、`hermes_cli/`、`gateway/`、`cron/` 都已完成模块化拆分（单文件 `hermes_state.py` 拆成约 65 个 `hermes_state_*` 模块），`plugin-catalog/` 从 99 条增长到 978 条 SHA 固定的插件清单，核心 `plugins/` 含 `computer_use`、`delegation`、`teams_pipeline`、`kanban` 等 24 个条目，终端后端为六个内建加插件后端。本次汇总覆盖 16 个类目的调查结论，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
 
 ## 完成度速览
 
@@ -38,8 +38,8 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 ### 会话与消息
 
 - **状态权威与双 ID 身份**：后端 SQLite `state.db` 是唯一事实源；进程内 UI 句柄 `sid` 与持久 `session_key` 分离；压缩轮转经 `parent_session_id` + `end_reason='compression'` 连成轮转链，跨轮转不变的稳定标识是派生只读字段 `_lineage_root_id`，桌面端 pin、路由匹配、草稿作用域都键在它上。证据：主链确认（静态）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
-- **会话生命周期与崩溃恢复**：DB 行惰性落行（首次真实 turn 才建行，空草稿不留痕）；resume 沿压缩链跳活 tip，close 只标记 `ended_at/end_reason` 不删数据，归档 `archived=1` 软隐藏，硬删除无回收站；崩溃痕迹只在 `interrupted_turns.json` 中断标记文件，resume 时按标记自动重放且 attempts 防循环；子代理是真实会话（`_delegate_from` 标记，删除时沿标记级联）。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
-- **消息数据模型与持久化**：`messages` 表一行一条消息，字段含 role / content / tool_calls / reasoning / `active`（软删）/ `compacted`（压缩归档仍可搜索）/ `display_kind` / `api_content`（发 API 的字节保真 sidecar，恢复时原样返回）；落盘用"单事务批量 + 内存 marker 去重"的原子配对契约，崩溃中途不写库；工具执行增量 flush 应对工具杀死进程场景。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
+- **会话生命周期与崩溃恢复**：DB 行惰性落行（首次真实 turn 才建行，空草稿不留痕）；resume 沿压缩链跳活 tip，close 只标记 `ended_at/end_reason` 不删数据，归档 `archived=1` 软隐藏，硬删除无回收站；规范网关的输入先持久受理，相同身份与 payload 重试返回原回执，变更 payload 报冲突；owner 重启将已开始输入变 unknown 并暂停后续队列，legacy tui_gateway 另有中断标记恢复；子代理是真实会话（`_delegate_from` 标记，删除时沿标记级联）。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
+- **消息数据模型与持久化**：`messages` 表一行一条消息，字段含 role / content / tool_calls / reasoning / `active`（软删）/ `compacted`（压缩归档仍可搜索）/ `display_kind` / `api_content`（发 API 的字节保真 sidecar，恢复时原样返回）；落盘用"单事务批量 + 内存 marker 去重"的原子配对契约，提交与工具进展均可留下持久记录，增量 flush 应对工具杀死进程场景。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 - **编辑、重试、续写与分支**：编辑通过"截断 + 重发"实现（截断提交要求显式 `confirm_truncate`，无单消息原地编辑或删除 RPC）；重试三套实现共享"截断到最后一个真实 user turn 后重发"语义；续写无独立命令，就是普通 prompt 文本 "continue"；分支 `session.branch` 建新 session_key + `_branched_from` 标记、标题加 `#N`；截断重发带归档语义，旧轮次落盘为可搜索归档行。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
 - **标题机制（两段式 + 带来源）**：会话首个 turn 的 prologue 即得 derived 即时标题（确定性派生、无模型调用），后台线程用小模型升级为 llm 标题；标题带 provenance（derived < llm < user），`set_auto_title` 单事务 compare-and-swap 防自动覆盖，用户 `/title` 永不被覆盖；压缩轮转携带标题与 provenance 不变。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 - **列表、分页与搜索**：会话列表 `list_sessions_rich` 单查询完成预览、置顶回填、按压缩链 tip 最近活跃排序与逻辑去重；REST 分页 limit/offset、侧栏分 profile 分片翻页；消息搜索走 FTS 四路矩阵（unicode61 基表 / CJK bigram / trigram / LIKE 兜底），trigram 明确跳过 `role='tool'` 行（约 90% 字节为机器噪声）；`session_search` 跨会话检索带谱系去重与锚定窗口。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
@@ -47,7 +47,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 
 ### 生成与创作
 
-- **生成式输出与 Artifact（能力等级 G3）**：桌面渲染器对模型流式文本中的代码围栏做后验启发式检测（html/svg/代码四类体积与行数门槛、散文排除与语言黑名单防误触发），围栏收尾后注册为 artifact 卡片；HTML 在 `<iframe sandbox="allow-scripts">` 中运行、URL 在沙箱 webview 中运行，带版本化注册表（内存-only，以聊天记录为事实源）；模型回流部分存在（read_preview / read_terminal / read_file）。artifact 不可被模型寻址、不可用户编辑，无 notebook / 画布 / 白板，细节见末尾小节。证据：主链确认（静态走通）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
+- **生成式输出与 Artifact（能力等级 G3）**：桌面渲染器对模型流式文本中的代码围栏做后验启发式检测（html/svg/代码四类体积与行数门槛、散文排除与语言黑名单防误触发），围栏收尾后注册为 artifact 卡片；HTML 在 `<iframe sandbox="allow-scripts">` 中运行、URL 在沙箱 webview 中运行，带版本化注册表（内存-only，以聊天记录为事实源）；模型通过 desktop_preview 的 open/close/read 动作操作并读取会话作用域的预览，另可读取终端与磁盘文件。artifact 不可被模型寻址、不可用户编辑，无 notebook / 画布 / 白板，细节见末尾小节。证据：主链确认（静态走通）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
 - **MEDIA: 媒体输出协议**：`MEDIA:<absolute-path>` 纯文本标签是唯一"模型/工具 → 平台"单向消费的协议，消息平台拦截为原生附件，递送前有安全根校验（缓存根白名单 + 10 分钟新鲜度信任 + 系统路径/凭据子路径硬拒）；桌面渲染器把该标记行改写为媒体链接并渲染播放器；配套图像 sub-2MP 默认 upscale 后处理。证据：静态源码确认（未运行）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
 - **消息渲染体系**：四套渲染面共享同一 `tui_gateway` 后端——TUI 自研 `markdown.tsx` 行状态机（无第三方 Markdown 依赖）、桌面 Streamdown + Shiki + KaTeX、Web 极简辅助渲染、经典 CLI/gateway 仅记录边界；流式走"先缓冲、后分段"模型（`message.delta` 累积 → streaming 状态对象 → `message.complete` 定稿去重）；列表层 TUI 自定义虚拟化 vs 桌面渲染预算 + `content-visibility`；链接协议白名单、iframe sandbox 隔离、`dangerouslySetInnerHTML` 仅用于 3 处 SVG 片段与 artifact 预览。证据：静态源码阅读确认（DOM/视觉未运行验证）。链接：[消息渲染器调查笔记](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
 - **Composer 与输入（草稿、附件、发送配置）**：草稿按会话持久化（localStorage 上限 50 条、仅文本、跨窗口 storage 事件同步、压缩轮转时随 tip 迁移、附件仅内存不落盘）；拖放附件按来源分流（应用内路径 → 内联 `@file:` ref、OS 文件 → 附件管线、目录 → `@folder:`、图片 → base64 缩略图）；斜杠命令为客户端侧编目与派发管线；发送走 `prompt.submit` 带 1800s 超时、busy 门控、storedId/runtimeId 配对校验与 session 切换 drift 守卫。证据：静态源码阅读确认（未运行）。链接：[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
@@ -60,7 +60,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - **审批、持久代码内核与执行边界**：CLI 交互审批是危险命令检查的一环，YOLO 模式可绕过整个审批门；`execute_code` 按稳定会话身份复用本地或远端 Python 内核，每个 cell 重新绑定当前工具权限，子 Agent 独立，超时/中断/会话关闭销毁内核。大输出溢写到文件；本地后端仍是本机进程和临时目录，容器类后端另有资源上限。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
 - **MCP、插件、Skill 与便携包扩展**：插件经 `discover_plugins` 副作用注册并提供五类 hooks，`resolve_pre_tool_block` 是每个工具分发点的单一安全入口（任何错误 fail-closed）；MCP server 注册为 `mcp-<name>` toolset、动态 `tools/list_changed` 触发 nuke-and-repave、trust-tier 门控分 full/untrusted 两档；Skill 是文本指令而非权限沙箱；Agent Plugins 便携包把便携包的技能 / MCP 组件翻译进 Hermes 运行时。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
 - **子代理委派与实时控制**：`delegate_task` 创建占 DB 行的子会话，session/terminal 独立并支持结构化输出；当前会话还可按运行代际枚举 live roster、读取有界 transcript tail、steer 或 interrupt。结束、外来或代际失效的子 Agent 不暴露内容。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
-- **外部执行体与控制面（多表面）**：桌面、TUI 和 Web 控制面共享同一个 Python `tui_gateway` / `AIAgent` runtime、profile 数据库与 session lineage，经 JSON-RPC 提交、流式接收、取消和恢复任务；`acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code / Zed / JetBrains 等外部宿主；REST API gateway 提供补全、响应与运行类端点（`/v1/chat/completions`、`/v1/responses`、`/v1/runs` + SSE 订阅）及会话管理与 cron 接口；新客户端接入经 DM Pairing 一次性配对码授权，正在运行的 turn 可被新客户端收养为 adopted running turn。消息平台 gateway 20+ 平台为入口确认，逐 adapter 细节见末尾小节。证据：主链确认（静态）/ 消息平台为入口确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Hermes-Agent-外部执行体与应用协作调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
+- **外部执行体与控制面（多表面）**：桌面、TUI 与 Web 复用 Python Agent、profile 数据库与 lineage；常规桌面本地路径连接规范网关，legacy tui_gateway 桥另保留原控制协议，方法名相同也需区分受理与恢复契约；`acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code / Zed / JetBrains 等外部宿主；REST API gateway 提供补全、响应与运行类端点（`/v1/chat/completions`、`/v1/responses`、`/v1/runs` + SSE 订阅）及会话管理与 cron 接口；新客户端接入经 DM Pairing 一次性配对码授权，正在运行的 turn 可被新客户端收养为 adopted running turn。消息平台 gateway 20+ 平台为入口确认，逐 adapter 细节见末尾小节。证据：主链确认（静态）/ 消息平台为入口确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Hermes-Agent-外部执行体与应用协作调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
 - **Connector 与 Vault 边界**：`manage_connections` 统一托管应用和 MCP 的安装、启用与授权，模型只收到后端 operation 终态，不接触授权链接；profile 本地 Vault 用 Fernet 保存登录、支付卡与地址，模型只见 opaque handle 和非秘密元数据，真实字段在服务端按 origin 填入浏览器。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Hermes-Agent-应用界面基础设施调查笔记.md)。
 
 ### 渠道与调度
@@ -80,7 +80,7 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 - **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令到期且空闲时作为普通用户回合注入，忙碌时合并 tick；状态持久化在会话数据库。它与创建独立会话、执行账本和交付目标的 cron 分型不同。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **目标质量门（`/goal`，候选能力）**：目标循环每次"可能完成"时用 judge 复查，并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **终端后端（6 类内建 + 插件后端）**：已归并到 Agent 工具类目（`tools/environments/` 下 local/ssh/docker/modal/daytona/vercel_sandbox，Singularity/Apptainer 由插件提供，容器资源上限、execute_code 沙箱、容器风险豁免）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
-- **cron 定时任务**：profile 范围的 job、execution、输出与认领协议形成隔离日程运行；暂停可阻止新派发，运行期取消已进入 Agent/脚本路径。循环 job 若在零模型 API 调用阶段因网络/DNS 失败，可按 5/15/30 分钟有限重排；一次性任务或已可能产生副作用的失败不重跑。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)。
+- **cron 定时任务**：profile 范围的 job、execution、输出与认领协议形成隔离日程运行；预推进后尚未取得 fire claim 的 pending_slot 可恢复一次，已认领运行避免盲目重放。headless tick 无 ready 网关时保留到期 Agent job、拒绝隐式启动 daemon。成功交付可按目标与开关镜像或播种为可继续会话，执行会话仍独立；暂停阻止新派发，取消进入 Agent/脚本路径。循环 job 若在零模型 API 调用阶段因网络/DNS 失败，可按 5/15/30 分钟有限重排；一次性任务或已可能产生副作用的失败不重跑。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)。
 - **verify-on-stop**：已归并到 Agent 工具类目（回合终止前对候选回复跑 run-recipe 检测与验证）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **委派 / 子 Agent、MCP、插件体系、人格系统**：已归并到 Agent 工具与 Agent 角色类目，本汇总不重写。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 

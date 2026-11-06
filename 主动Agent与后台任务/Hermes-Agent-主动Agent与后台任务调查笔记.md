@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -75,13 +75,14 @@ Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，�
 
 运行期取消经组合 cancel event 传入 Agent 和脚本执行路径；Gateway 关闭可将运行记为 interrupted，失去 fire-claim 所有权的迟到结果会被丢弃，不覆写后来所有者的状态。每 job 的运行集合也阻止同一 job 在前一轮未结束时再次入池（`cron/scheduler.py:6919-6969,7097-7126,7796-7905`）。
 
-恢复策略偏向避免重复副作用：循环 job 预推进下次运行，进程崩溃可能漏掉一次而非重放；有限单次 job 在副作用前计入 dispatch，获得 at-most-times 语义。死 owner 的 execution 会被周期性标为 unknown 并回收；过期的一次性 claim 可释放。超过宽限仍未触发的一次性 job 会留下诊断输出后退役，而非在重启后无限补跑（`cron/jobs.py:2883-2962,2997-3022,3025-3078`; `cron/scheduler.py:7642-7671`）。
+恢复需区分派发交接与已经认领：循环 job 推进下次时间时保存 pending_slot，若尚未取得 fire claim 且 owner 已死亡或过期，下次扫描恢复该时刻一次，再走正常宽限与错过策略；已认领的执行不会按此路径盲目重放。execution 的 scheduled_instant 用于抑制同一时刻再次运行（[occurrences.py](../../hermes-agent/cron/occurrences.py#L9-L103)）。有限单次任务的计次、unknown 执行和过期 claim 另有处理，副作用后崩溃仍不能视为恰好一次。
 
 循环 job 对“尚未到达模型”的网络/DNS 失败有一条窄重跑链。只有 Agent API 调用数仍为零时才在 5、15、30 分钟后重排，期间抑制中间失败通知；一旦到达模型，无论结果成功与否都会清空阶梯。一次性 job、暂停 job 和可能已经产生副作用的失败不进入该机制，`cron.retry_unreachable: false` 可关闭（`cron/unreachable_retry.py:1-17,30-52,55-125`）。
 
 ## 相邻类目交接与已确认边界
 
-- heartbeat 是会话内续作，cron 是隔离日程运行；前者不应按“持久 cron”比较，后者的结果也不会镜像为原 Gateway 会话中的普通消息。
+- heartbeat 是会话内续作，cron 拥有独立执行会话；cron 交付可在满足条件时镜像或播种到后续可继续对话的目标。一般镜像默认关闭，按 job/global 开关与目标来源决策；in_channel 续聊表面的播种独立于镜像开关，在成功发送后写入带标签的 user turn，保护角色交替（[镜像条件](../../hermes-agent/cron/scheduler_delivery.py#L90-L154)、[成功发送后播种](../../hermes-agent/cron/scheduler_delivery.py#L1404-L1450)）。
+- 外部调度器的 headless tick 只在发现 ready 网关时派发 Agent job；网关缺席或仍在启动时跳过，保留到期时刻并记录 last_fire_error，避免每次 tick 启动无人管理的 daemon。纯脚本任务继续走自身路径，交互式 cron run 不受这一 headless 限制（[scheduler_gateway_gate.py](../../hermes-agent/cron/scheduler_gateway_gate.py#L1-L14)、[执行过滤](../../hermes-agent/cron/scheduler_gateway_gate.py#L66-L83)）。
 - cron 的独立 session、消息落库和恢复浏览与 [会话与消息管理笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md) 交接；模型工具、脚本、审批和投递适配与 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) 交接。
 - 计数触发的后台记忆/技能复习具备后台线程和文件结果，但其核心对象是记忆与技能演化；本笔记不把它重复列作用户可管理的 cron job，详见独特功能笔记。
 - 本次未把 curator、Kanban dispatcher、后台 delegation 或终端完成通知展开为本类别主链，尽管仓库中存在相关机制；它们需要独立核对各自任务身份、终态和恢复契约。

@@ -2,11 +2,11 @@
 
 > 汇总对象：`opencode`（远端仓库 `https://github.com/anomalyco/opencode`）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 14 份单项目调查笔记（代码快照均为 `7864a941527ad54e415d5875c98e038c5fc25697`，dev 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述并逐条链接来源；未进行新的源码调查
+> 汇总方法：按来源笔记合并能力并保留证据边界；定向复核范围覆盖执行恢复、工具授权与 Code Mode、Web/TUI 与桌面更新、Artifact/HTML 预览、会话导出导入。其余主题沿用来源的静态调查结论，未做全仓行为验证
 >
 > 汇总范围：覆盖上述 14 个类目中与 OpenCode 相关的已调查能力；仓库分布与应用界面基础设施单列于"工程与基础设施摘要"；不做跨项目横向比较
 >
@@ -16,13 +16,13 @@
 
 OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面端、服务端、SDK、客户端库、插件与内建 GUI 插件。2.x 已收敛为单一架构：Schema 定义契约，Core 承担会话与执行，Protocol 用 Effect `HttpApi` 声明端点，Server 实现处理器并通过 SSE 广播事件，客户端由协议生成，SDK 在进程内直接运行服务端路由。会话持久化只有一套 Drizzle/SQLite v2 模型（会话、消息、内容、收件箱、指令、blob），不再有 v1 双轨。
 
-模型请求不再经 AI SDK：`packages/ai` 提供原生协议实现，执行器以步骤（step）为单位运行，工具调用、结果回流与压缩都在服务端完成。界面层分三套：TUI（opentui + Solid）、Web App（Solid + Kobalte + Tailwind，TUI 与 Web 共用 `packages/session-ui` 渲染层）、桌面 Electron 薄壳复用 App；非外壳功能全部是 GUI 插件。生成式输出以真实文件系统为事实源，回合边界用快照服务记录文件版本，撤销按消息粒度分阶段执行；此外新增 Artifact 托管与 Code Mode 受限执行两条独立产物通道。
+模型请求不再经 AI SDK：`packages/ai` 提供原生协议实现，执行器以步骤（step）为单位运行，工具调用、结果回流与压缩都在服务端完成。界面层分三套：TUI（opentui + Solid）、Web App（Solid + Kobalte + Tailwind，Web/桌面使用 `packages/session-ui`，TUI 独立终端渲染）、桌面 Electron 薄壳复用 App；非外壳功能全部是 GUI 插件。生成式输出以真实文件系统为事实源，回合边界用快照服务记录文件版本，撤销按消息粒度分阶段执行；此外新增 Artifact 托管与 Code Mode 受限执行两条独立产物通道。
 
 ## 功能能力摘要
 
 ### 角色与上下文
 
-- **Agent 角色配置体系**：Agent 是由配置与插件构建的只读内存对象，会话只保存 agent 名字引用；来源包括配置文件、角色 Markdown 文件（`{agent,agents}/**/*.md` 与 `{mode,modes}/*.md`，后者强制 primary）与插件；默认基线为 `*` allow、`.env` ask。内置 general/explore/compaction/title/summary 等 agent，plan 插件限制编辑。选择优先级为会话值 → `build` → 列表第一个；配置加载与插件装配顺序见笔记。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md)
+- **Agent 角色配置体系**：Agent 是由配置与插件构建的只读内存对象，会话只保存 agent 名字引用；来源包括配置文件、角色 Markdown 文件（`{agent,agents}/**/*.md` 与 `{mode,modes}/*.md`，后者强制 primary）与插件；默认基线为 `*` allow、`.env` ask。内置 general/explore/compaction/title/summary 等 agent，plan 插件限制编辑。选择优先级为显式/会话值 → 配置默认 Agent → build → 首个可选条目；配置加载与插件装配顺序见笔记。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md)
 
 - **system prompt 与指令加载**：第一段按环境（目录、平台、日期）→ 指令文件 → MCP 指令 → 技能顺序拼装，第二段由 agent 自定义提示或 provider 风格提示前缀后合并用户 system 与结构化输出提示；指令文件按全局 → 项目祖先链 → 配置追加顺序加载，每条带来源头。[Agent 角色配置调查笔记](../Agent角色/OpenCode-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md)
 
@@ -62,15 +62,15 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面
 
 - **工具调用驱动的文件工作区**：模型通过 read/write/edit/patch/shell 等工具操作真实工作区；快照服务在步骤前后捕获文件树版本、生成差异并可恢复，步骤结束事件携带快照与变更文件。模型跨回合通过读取工具感知文件，通过定位替换做定向修改。能力主体仍在"可编辑工作区"，未找到容器级隔离执行。[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md)
 
-- **Artifact 托管**：模型用 `artifact` 工具创建/更新/删除产物（文件映射 + 入口 + URL），Provider 声明静态、服务端代码、SQLite、Durable Objects 等能力，本地 Provider 默认可用；另有实验性端点管理 Provider 与按路径访问产物。[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md)
+- **Artifact 托管**：模型用 `artifact` 工具创建/更新/删除产物（文件映射 + 入口 + URL），需显式启用实验性 artifacts；本地默认 Provider 只托管静态文件，其他能力由 Provider 实现决定；另有实验性端点管理 Provider 与按路径访问产物。[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md)
 
-- **Code Mode**：`execute` 工具让模型在受限解释器中编写程序编排多个工具；解释器只实现受控语法，能力面由宿主显式提供，宿主限制执行时间、调用次数、输出与数据量。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md)
+- **Code Mode**：execute 工具让模型以受限程序编排工具，另提供按 webfetch 动作授权的 fetch；独立检查入口不提供网络。宿主限制执行时间、调用次数、输出与数据量，直接文件、进程与包访问不可用。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md)
 
 ### Agent 运行时与外部协作
 
 - **工具系统**：工具以 `schema/src/tool.ts` 的 `Tool.Info` 定义（名称、输入、描述、执行、输出、选项），插件形态实现位于 `core/src/tool/plugin/`，覆盖文件、检索、shell、编辑、补丁、提问、技能、子 Agent、待办、网络访问、Artifact、调度等；另可接 MCP 工具与 MCP 资源工具。工具由插件运行时装配，插件侧可增删工具并挂前后钩子。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)
 
-- **权限与执行边界**：权限规则集按请求与工具求值，支持 allow/ask/deny；需要确认的调用阻塞等待人工回复，拒绝结果作为工具错误回流；命令执行前对命令文本做结构解析用于风险判定。工具执行全部在本机进程内（子进程、语言服务、终端、后台任务），未找到沙箱隔离。输出按 2000 行 / 50 KiB 截断并把全文落盘。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md)
+- **权限与执行边界**：目录过滤与执行授权分开，工具叶子策略按资源判断，必要时等待用户；无人值守时待审批动作复评为允许或拒绝。命令在本机子进程执行，未找到容器级隔离；Code Mode 为独立受限解释器，HTML 文件预览另有 sandbox iframe。Session runner 对结果做 2000 行 / 50 KiB 通用截断，超限全文落盘。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/OpenCode-生成式输出与运行时调查笔记.md)
 
 - **结果回流与重放**：工具调用与其结果通过稳定调用 id 配对；完成与失败内容在下一轮重建模型消息时分别转为结果或错误内容；被中断的调用不重放执行。[Agent 工具调查笔记](../Agent工具/OpenCode-Agent工具调查笔记.md)
 
@@ -94,7 +94,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面
 
 - **可观测性与用量**：用量与开销按价格分层累计到会话；追踪与日志可导出；重试与运行状态经事件广播到界面。[LLM 渠道管理调查笔记](../LLM渠道管理/OpenCode-LLM渠道管理调查笔记.md)
 
-- **并发与调度**：每会话一个运行协调器，同会话串行、跨会话并行；收件箱与投递语义控制排队；后台任务完成回注父会话。[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md)
+- **并发与调度**：当前进程按会话合并唤醒与恢复、跨会话并行；执行 claim 是重启恢复标记，成功/失败/用户中断时释放，关闭或死亡时保留。自动恢复有持久次数上限并具有至少一次语义，无法保证外部副作用仅执行一次；收件箱在安全步骤和空闲边界分别投递 steer/queue。[对话请求与上下文调查笔记](../对话请求与上下文/OpenCode-对话请求与上下文调查笔记.md)
 
 ### 独特与差异化能力
 
@@ -106,7 +106,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面
 
 - **Goal 模式** — `主链确认`：`/goal` 命令为会话设置目标，目标存于插件存储；激活时注入开场、提醒与续跑提示，回合结束由模型判定是否完成，可自动开启下一轮；服务端进程更换后先前目标以暂停恢复。[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力四
 
-- **会话档案** — `主链确认`：整会话导出为结构化 JSON（可选脱敏），支持从文件或 URL 导入重建；导入保留 id 与顺序、拒绝重复 id、按当前实例重写位置。远端分享与 PR 续作在当前快照未找到。[对话导出与分享调查笔记](../对话导出与分享/OpenCode-对话导出与分享调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力五
+- **会话档案** — `主链确认`：CLI 导出已收口消息并可选脱敏，App 分页导出普通消息、未加同一过滤；导入会过滤未收口消息，支持从文件或 URL 重建；导入保留 id 与顺序、拒绝重复 id、按当前实例重写位置。远端分享与 PR 续作在当前快照未找到。[对话导出与分享调查笔记](../对话导出与分享/OpenCode-对话导出与分享调查笔记.md)、[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力五
 
 - **Artifact 托管** — `主链确认`：见"生成与创作"条目。[独特功能调查笔记](../独特功能/OpenCode-独特功能调查笔记.md) 能力六
 
@@ -118,7 +118,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面
 
 - **仓库分布**：Bun/TypeScript monorepo，Git 跟踪 9221 文件；可识别源码 5942 文件 / 1,089,965 行（TypeScript 93.8%），文档 877 文件，测试 1965 文件。规模最大的目录为 app、core、tui、ai、gui-plugins 与 ui；原 `packages/opencode` 已拆分为 core + cli + server，`llm` 更名为 `ai`，`docs` 并入 web，新增 session-ui、codemode、theme、patchmark、latex、merman、process-daemon、gui-plugins 等包。[仓库分布调查笔记](../仓库分布/OpenCode-仓库分布调查笔记.md)
 
-- **应用界面基础设施**：TUI 为 opentui + Solid，自建键位映射、对话框栈、Toast 与提示历史；Web App 分基础外壳（主题、语言、错误边界、查询、弹窗栈）、应用外壳（服务端注册表、设置、标签、命令、项目图标、语音）与业务层；组件库按领域拆分到 overlays、feedback、forms、layout、navigation、typography、motion、theme 等目录。主题分两套：Web 注入 CSS 变量，TUI 从终端调色板派生，主题解析与旧主题迁移下沉到 `packages/theme`。通知由 App 协调器统一分发为通知列表、Toast 与提示音；App 内置 60 余种语言。桌面 Electron 主进程负责窗口、菜单、深链、文件与插件桥、原生外观、诊断；未找到托盘、全局快捷键与自动更新。[应用界面基础设施调查笔记](../应用界面基础设施/OpenCode-应用界面基础设施调查笔记.md)
+- **应用界面基础设施**：TUI 为 opentui + Solid，自建键位映射、对话框栈、Toast 与提示历史；Web App 分基础外壳（主题、语言、错误边界、查询、弹窗栈）、应用外壳（服务端注册表、设置、标签、命令、项目图标、语音）与业务层；组件库按领域拆分到 overlays、feedback、forms、layout、navigation、typography、motion、theme 等目录。主题分两套：Web 注入 CSS 变量，TUI 从终端调色板派生，主题解析与旧主题迁移下沉到 `packages/theme`。通知由 App 协调器统一分发为通知列表、Toast 与提示音；App 内置 60 余种语言。桌面 Electron 主进程负责窗口、菜单、深链、文件与插件桥、原生外观、诊断；打包桌面版经 GUI 更新插件定时检查、下载暂存并支持安装重启；托盘与全局快捷键本次未找到。[应用界面基础设施调查笔记](../应用界面基础设施/OpenCode-应用界面基础设施调查笔记.md)
 
 ## 已知边界与待验证事项
 
@@ -128,7 +128,7 @@ OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面
 - 工具执行在本机进程内，无容器或沙箱隔离；只对命令文本做风险解析，风险最终由权限规则集与人工审批收口。
 - 生成式输出无 hunk 级接受/拒绝与冲突解决；回退按消息粒度，分支通过会话 fork 表达。
 - 渠道侧无跨 provider 失败转移、无请求级多 Key 轮询；凭据明文保存。
-- 界面侧无主题市场、壁纸与用户自定义 CSS；桌面无托盘、全局快捷键与自动更新。
+- 主题可由 GUI 插件注册进入选择器；独立主题市场、壁纸、自定义 CSS 编辑入口、托盘与全局快捷键本次未找到，桌面更新插件已有实现。
 - 分享链接与 PR 续作在当前快照未找到；会话档案只剩 JSON 导出导入。
 
 ### 未验证事项

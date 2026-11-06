@@ -2,7 +2,7 @@
 
 > 调查对象：`VCPMobile`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`5fa2eb09e4f4dfab299cbb609a8b904b3485b5a5`（分支：`main`）
 >
@@ -24,19 +24,19 @@ VCPMobile 拥有移动端 Chat UI：固定头部、可滚动消息区、底部 C
 
 ## 1. 会话导航、搜索与现场恢复
 
-Topic 列表可按标题或格式化日期过滤；它支持新建、删除、改名、锁定、置顶与未读标记。选择 owner 时优先恢复持久化的最近活动 Topic，否则回退到该 owner 的 Topic 列表首项；选择变更增加 epoch，使正在返回的旧列表无法污染新现场，见 `src/core/stores/topicListManager.ts:62-260` 和 `src/core/stores/chatSessionStore.ts:40-120`。话题列表数据本身由 Rust 话题服务提供，前端不再经过独立本地服务进程。
+Topic 列表可按标题或格式化日期过滤；它支持新建、删除、改名、锁定、置顶与未读标记。选择 owner 时把最近活动 Topic 提示与当前排序交给 Rust；后端验证 owner/Topic 仍存在后选定目标，缺少有效提示时按话题排序取首项。导航与通话共享 Rust 侧仲裁，通话中切换会话会返回提示；页面代次和导航序号使旧 WebView 或迟到请求无法重获焦点。见 [会话 Store](../../VCPMobile/src/core/stores/chatSessionStore.ts#L145-L235)、[导航服务](../../VCPMobile/src-tauri/src/vcp_modules/chat/chat_navigation.rs#L130-L220)。
 
-消息阅读的“现场恢复”以历史窗口、滚动锚点和活动流对象为主；窗口与锚点由会话 Store 的 acceptedWindow 与 windowRevision 表达。未找到跨会话消息搜索面板、分支树或版本导航 UI；底层 FTS 索引是否有其他页面入口超出本次已确认范围。
+Agent 侧栏搜索按钮打开独立全局消息搜索页。用户可按全部、owner 或 Topic 搜索，并筛选发言 Agent、角色和时间；本地搜索结果显示摘要和高亮。点击结果携消息 ID 请求导航，后端确认消息仍存在且导航获准后，才关闭搜索页并投影锚点前后的消息窗口；目标消失或通话中则保留页面并提示。见 [侧栏入口](../../VCPMobile/src/components/layout/AgentSidebar.vue#L70-L96)、[搜索跳转](../../VCPMobile/src/features/globalsearch/GlobalSearchView.vue#L277-L301)。本次在消息模型和聊天菜单内仍未找到分支树或版本导航。
 
 ## 2. Composer、草稿、附件与快捷输入
 
 Composer 是单个 textarea，可输入文本，支持粘贴处理、相机、相册、文件、语音输入与语音通话。语音输入由 Tauri 插件采集、Rust 语音服务完成语音活动检测与识别，结果回到 Composer；通话模式下发送按钮变为语音控制入口。附件在独立 store 暂存并显示横向预览，未完成上传时发送按钮禁用；外部 Android 分享意图会先选择 Agent、创建新 Topic，再把文本/文件预填到 Composer，见 `src/features/chat/InputEnhancer.vue:179-330,534-811` 和 `src/features/chat/ChatView.vue:95-110`。
 
-草稿是组件内输入状态，不按 Topic 持久化；外部分享预填是 session store 中的一次性状态。Ctrl/Cmd+Enter 可发送或停止，移动端实际软键盘与焦点效果尚未运行验证。
+普通草稿是组件内输入状态，不按 Topic 持久化；外部分享草稿由独立 share Store 持有，发送时走其提交路径，见 [发送分流](../../VCPMobile/src/features/chat/InputEnhancer.vue#L267-L285)。Ctrl/Cmd+Enter 可发送或停止，移动端实际软键盘与焦点效果尚未运行验证。
 
 ## 3. 发送、流式反馈与停止
 
-发送按钮在有内容或生成中显示，生成中变为停止图标。它会对当前活动流集合逐条调用停止；群聊另有全局停止组件。消息区依据流 store 的活动 ID 启停跟随滚动，进入其他 Topic 后，非当前流可转换为未读提醒，见 `src/features/chat/InputEnhancer.vue:267-330,534-811` 与 `src/core/stores/chatStreamStore.ts:84-172`。
+主按钮依据草稿、生成和朗读状态选择发送或停止；JEV 群聊持续回合中有新草稿且未编辑旧消息时，可继续追加消息。停止时单聊逐个中断当前活动消息，群聊直接调用按 Topic 停止整轮；无生成而有气泡朗读时停止朗读。见 [输入动作](../../VCPMobile/src/features/chat/InputEnhancer.vue#L289-L339)。非当前 Topic 的回复仍可触发未读提醒，历史锚点或固定窗口则保留阅读区，不因回复到达自动切回尾部，见 [可见消息投影](../../VCPMobile/src/core/stores/chatWindow.ts#L90-L108)。
 
 静态代码可确认停止控件最终调到 Rust 的中断命令，但不能证明网络层已经在所有 Android 状态下停止，具体终结语义见[对话请求与上下文](../对话请求与上下文/VCPMobile-对话请求与上下文调查笔记.md)。
 
@@ -48,7 +48,7 @@ Composer 是单个 textarea，可输入文本，支持粘贴处理、相机、�
 
 ## 5. UI 状态所有权与边界
 
-当前 owner、Topic 和最近 Topic 映射由持久化的 session store 保存；历史窗口、载入状态和编辑重发目标由 history store 保存；活动流由 stream store 保存；附件暂存由 attachment store 保存；语音通话与朗读状态由独立的 voice 状态与 store 保存。这个拆分使切换会话时可清空历史窗口而保留全局流恢复能力，详见[会话与消息管理](../会话与消息管理/VCPMobile-会话与消息管理调查笔记.md)。
+当前 owner、Topic 与获准窗口来自 Rust 焦点，session store 保存其投影及持久化冷提示；history store 组合窗口读取与编辑重发意图；活动流和暂存附件各有独立 Store。语音通话与朗读的业务快照由 Rust 持有，前端 voice Store 消费快照并发出控制意图，见 [通话快照投影](../../VCPMobile/src/features/chat/voice/voiceCallStore.ts#L84-L105)。这个拆分使切换会话时可清空历史窗口而保留全局流恢复能力，详见[会话与消息管理](../会话与消息管理/VCPMobile-会话与消息管理调查笔记.md)。
 
 ## 未验证事项
 

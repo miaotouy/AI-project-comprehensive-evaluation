@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
@@ -39,7 +39,11 @@ Agent v2：作者编辑 roster Agent / draft
 
 `AppModelConfig` 是传统应用的配置快照，App 只持有当前 active config 指针。发布会新建配置并切换指针；Console debug 可传未发布覆盖配置，但生产调用读取 active config。它可包含 prompt 类型、simple/advanced prompt、变量、数据集、模型和功能设置。细节见 `api/controllers/console/app/model_config.py` 及[独特功能](../独特功能/Dify-独特功能调查笔记.md)的 Prompt IDE 卡。
 
-Agent v2 的 roster、Agent Soul、草稿、build draft、snapshot/revision 是另一组对象。发布把可编辑配置转成不可变运行版本，已有版本可以回写为新的常规 draft；运行绑定会校验 tenant、owner、Agent、home snapshot 和 config version。Chatflow 中的新节点执行会先查询 conversation 下已有参与者，并继续采用其 snapshot；roster Agent 后续发布不会让既有会话自动漂移（`api/core/workflow/nodes/agent_v2/binding_resolver.py:39-70`）。发布链还会校验 Soul 中的 Skill/File mention 是否能在配置或运行时 Skill 列表中解析，悬空引用会阻止发布（`api/services/agent/workflow_publish_service.py:116-240`）。Agent Runtime 的物理版本加载仍未运行确认。
+Agent v2 的 roster Agent 拥有 Soul 配置、常规草稿、build draft 和发布 snapshot/revision。发布产生不可变运行版本，历史版本可回写为新的常规草稿；运行绑定校验 tenant、owner、Agent、Home 快照与配置版本。Chatflow 新节点执行先查同一 conversation 的参与者并继续使用其 snapshot；roster Agent 后续发布不会使已有参与者自动漂移。该稳定性仍以 Agent 可用且未归档、版本属于同一 tenant/Agent 为前提（[绑定解析](../../dify/api/core/workflow/nodes/agent_v2/binding_resolver.py#L79-L145)）。Workflow 发布还校验 Soul 中的 Skill/File mention 能否解析，悬空引用会阻止发布（[发布校验](../../dify/api/services/agent/workflow_publish_service.py#L116-L240)）。
+
+配置页的可编辑状态由 composer store 持有，同步 hook 以五秒防抖保存常规草稿。点击发布前重新查询引用该 Agent 的工作流，有引用时进入影响确认；失败时保留当前草稿。发布命令检查当前发布权限、模型、工具可用性及知识配置，串行完成草稿保存再调用发布 API，随后刷新版本与访问状态。保存失败会停止显式发布；发布期间产生的后续编辑仍可保持 dirty 并继续自动保存（[发布栏](../../dify/web/features/agent-v2/agent-detail/configure/components/orchestrate/publish-bar/index.tsx#L154-L198)、[保存与发布](../../dify/web/features/agent-v2/agent-detail/configure/use-agent-configure-sync.ts#L148-L225)）。
+
+服务端发布入口另有 Agent 发布/版本权限检查；服务层校验知识绑定与 Home 快照，创建版本后切换 active snapshot、更新草稿基准并发布 Skill 绑定。首次发布还打开应用的站点与 API；后续更新不重复把用户关闭的访问开关打开。影响确认属于前端交互，服务端实际落盘依据这些权限和配置校验。Agent Runtime 的物理版本加载仍未运行确认（[发布入口](../../dify/api/controllers/console/agent/roster.py#L850-L884)、[发布持久化](../../dify/api/services/agent/composer_service.py#L710-L802)）。
 
 ## 2. 创建、选择与会话绑定
 

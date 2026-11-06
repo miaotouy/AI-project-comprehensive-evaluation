@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
@@ -126,7 +126,9 @@ character_book:
 
 ## 5. 别名与快速回复
 
-角色卡本身不包含 Regex Scripts 或 Quick Reply 规则，这些属于 SillyTavern 的 Persona/Extension 层。但导入 AIO Hub 时，`regex_scripts` 可以映射为 AIO Hub 的 `regexConfig` 字段（参见 AIO Hub 调查笔记的 § 9 导入说明）。
+角色卡可以在扩展字段中携带角色专属 Regex Scripts；扩展引擎同时读取全局、当前预设与当前角色三类规则。角色规则存于 `data.extensions.regex_scripts`，写回也走角色扩展字段；实际处理正文或提示词时只读取已获允许的规则，角色允许列表按 avatar 标识，因此“卡内携带规则”和“当前获准生效”需分别判断。见 [规则读取与保存](../../SillyTavern/public/scripts/extensions/regex/engine.js#L108-L168)、[执行过滤](../../SillyTavern/public/scripts/extensions/regex/engine.js#L334-L375)。
+
+World Info 激活还能触发 Quick Reply 自动化：扫描结果发出激活事件，Quick Reply 在自身启用、未被防递归栈阻止时，按条目的 `automationId` 匹配全局、聊天和角色配置中已加载的回复集，逐条执行。匹配关系来自 Quick Reply 配置，世界书条目本身只携自动化标识，不能把任意世界书内容直接视为已授权脚本。见 [事件接入](../../SillyTavern/public/scripts/extensions/quick-reply/index.js#L299-L302)、[自动执行条件](../../SillyTavern/public/scripts/extensions/quick-reply/src/AutoExecuteHandler.js#L16-L31)、[标识匹配](../../SillyTavern/public/scripts/extensions/quick-reply/src/AutoExecuteHandler.js#L85-L102)。
 
 ## 6. 文件格式与存储
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenCode 2.x 有三个聊天表面：Web App（`packages/app`，Solid，浏览器与 Electron 共用）、TUI（`packages/tui`，Solid 终端界面）、以及共享渲染包 `packages/session-ui`。三者共享同一套服务端会话数据与 SSE 事件流，界面差异集中在输入方式、导航结构与多服务端能力。
+OpenCode 2.x 的聊天表面包括浏览器、复用 Web App 的 Electron 桌面端，以及独立终端 TUI。各端读取同一服务端会话数据与 SSE 事件；Web/桌面的消息组件下沉到 `packages/session-ui`，TUI 则以 opentui 组件独立渲染，该包本身不构成第三个客户端。
 
 App 已从"单会话页面"演化为工作台：顶部按服务端 / 工作区 / 会话组织，支持同时连接多个 OpenCode 服务端，会话在标签间切换；Composer 内部集成排队面板、审批与提问 dock、活动芯片等；TUI 的会话路由带 Composer 子标签（shell、子 Agent、终端），并把草稿、排队与中断都纳入键盘操作。
 
@@ -39,7 +39,7 @@ App 已从"单会话页面"演化为工作台：顶部按服务端 / 工作区 /
 - **App 工作台**：路由与布局在 `packages/app/src/session/`（`screen.tsx`、`route.tsx`、`session-frame.tsx`、`session-layout.ts`）与 `packages/app/src/home`、`workspaces`、`servers`、`settings`、`usage`、`voice`、`new-session` 等目录；会话页由时间线、Composer 与侧栏组成。
 - **多服务端**：App 可同时连接多个 OpenCode 服务端并在其间切换，每个服务端有独立的同步状态与数据目录（`packages/app/src/runtime/server/`）；桌面端默认连接本机服务端。
 - **TUI**：`packages/tui/src/app.tsx` 组织路由；会话页在 `routes/session/index.tsx`，Composer 拆成 `routes/session/composer/`（主输入、shell、子 Agent、终端四个标签），对话框在 `component/dialog-*.tsx`（模型、Agent、会话列表、集成、工作区、MCP 等），插件化界面在 `feature-plugins/`。
-- **共享渲染**：会话时间线、消息、工具卡片、diff（pierre）、文件与来源面板集中在 `packages/session-ui/src/`，App 与 TUI 复用同一渲染层。
+- **渲染边界**：App 时间线调用 session-ui 的行投影与消息组件；TUI 的分组、工具和正文组件留在终端包，终端 markdown 与 Web DOM/Worker 管线分开维护（[App 消费入口](../../opencode/packages/app/src/session/timeline/message-timeline.tsx#L20-L22)、[TUI 消费入口](../../opencode/packages/tui/src/routes/session/index.tsx#L105-L134)）。
 - **桌面壳**：`packages/desktop/src/main`、`preload`、`renderer` 三层，主进程负责窗口、文件选择、外部链接、进程与服务端管理，渲染层加载 App 源码。
 
 ## 2. 会话列表、搜索与现场恢复
@@ -99,7 +99,7 @@ App 已从"单会话页面"演化为工作台：顶部按服务端 / 工作区 /
 
 ## 10. 设计取舍与已确认边界
 
-- **共享渲染包**让 App 与 TUI 的表现层一致，代价是会话渲染必须只依赖通用能力；`session-ui` 有导入边界测试约束。
+- **数据共享、渲染分端**：Web 与桌面共享 session-ui，TUI 以终端原语实现自己的表现层；同一消息与事件协议维持各端数据语义的一致。
 - **多服务端**让工作台可同时管理本机与远程会话，客户端同步层因此按服务端分片。
 - **队列上移到服务端**：steer/queue 持久化在 inbox，客户端展示与取消队列条目，而不是仅在内存排队。
 - **中断可续跑**：interrupt 的 resume 语义把"停止"与"继续处理已排队输入"分开，界面只需一个按钮。

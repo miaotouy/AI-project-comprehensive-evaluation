@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenCode 2.x 把消息渲染集中到 `packages/session-ui`：App 与 TUI 共用时间线行模型、消息内容组件、工具渲染器与 markdown 管线，App 只额外提供虚拟列表、滚动管理与数据装载。渲染输入不再是扁平的 part 数组，而是带类型的消息对象（`SessionMessage.Info`）及其内嵌内容数组（文本、推理、工具）。
+OpenCode 2.x 的 Web/桌面消息渲染由 `packages/session-ui` 提供，App 补充虚拟列表、滚动与数据装载；TUI 使用独立的终端行分组、消息与 markdown 组件。两套表现层读取同一带类型消息模型及助手内容数组。Web 的消费入口为 [message-timeline.tsx](../../opencode/packages/app/src/session/timeline/message-timeline.tsx#L20-L22)，终端组件装配见 [TUI 会话页](../../opencode/packages/tui/src/routes/session/index.tsx#L105-L134)。
 
 流式更新分两层：服务端 durable 事件先投影到客户端消息存储，再由时间线投影（`timeline/projection.ts`）生成行模型；文本正文另走节流渲染（24ms 步进）与按块的 markdown 增量更新。markdown 管线为「marked 切块 → Web Worker 解析与高亮 → DOMPurify 清洗 → 把 HTML 解析成节点树后用 Solid 渲染根按 key 增量更新」，代码高亮改用 `@pierre/highlights`，并新增 Mermaid 渲染。
 
@@ -73,7 +73,7 @@ durable 事件（session.text.delta / tool.* / step.*）
 - **用户消息**：文本、引用、附件与操作栏（复制、回退、编辑）。
 - **助手消息**：按内容数组顺序渲染，最后一个非空文本项显示元信息（Agent、模型、耗时、是否中断）。
 - **推理内容**：默认折叠为摘要行，展开后按 markdown 渲染。
-- **操作栏与头部菜单**：会话头部提供重命名、分享、导出、归档、删除等命令；消息级提供复制与回退。
+- **操作栏与头部菜单**：会话头部提供重命名、导出、归档、删除等命令；消息级提供复制与回退。
 
 ## 5. Markdown 与代码高亮管线
 
@@ -98,7 +98,7 @@ durable 事件（session.text.delta / tool.* / step.*）
 - 非代码块 HTML 一律经 DOMPurify 清洗后才进入 DOM。
 - 链接统一加 `target="_blank"` 与 `rel="noopener noreferrer"`；图片协议走清洗器的 URI 白名单。
 - Mermaid 渲染输出 SVG，仍经过外壳清洗与样式约束。
-- 本次未找到 iframe 或任意 HTML artifact 渲染入口。
+- 文件插件另有 HTML/PDF 专用预览入口，超出普通消息 markdown 的清洗管线。HTML 经 Blob URL 放入 iframe，sandbox 允许脚本、弹窗、表单和模态框，未授予同源权限；PDF 使用浏览器查看器（[artifact-view.tsx](../../opencode/packages/gui-plugins/src/file/artifact-view.tsx#L624-L638)）。托管 Artifact 的 HTTP 文件响应另设 CSP `sandbox allow-scripts`（[视图处理器](../../opencode/packages/server/src/handlers/artifact.ts#L210-L224)）。
 
 ## 8. 交互反馈与可访问性
 

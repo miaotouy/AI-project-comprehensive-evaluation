@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
@@ -245,7 +245,21 @@ Python 插件在 manifest 中通过入口类型声明语言，执行方式与 No
 
 工具执行路径还可替换：`modules/pluginBridgeRegistry.js` 提供两个按优先级排序的注册表，分别用于依赖解析与执行接管，默认注册表由 `createDefaultDependencyBridgeRegistry` 构造，RAG 时间线并行等场景可注册自己的桥。
 
-manifest 另有一组非执行字段：本快照有 21 个启用插件声明了 `jev` 段，用自然语言描述自己的用途、默认命令与命令选择规则，插件管理器把这些声明收集进注册表供管理端与实验性工具选择使用；注释明确该字段是纯提示词素材，不改变运行时行为，也不影响插件加载。校验与示例规范化由根目录两个脚本承担：`validate-plugin-json.js` 只做 JSON 语法校验（脚本注释明确不检查 manifest schema 语义），`normalize-plugin-examples.js` 规范化插件示例字段并在写入前备份到 `.plugin-example-backups/`。两者都是仓库侧工具，不参与服务运行时。
+### 6.7 JEV 虚拟调用与第三方声明消费
+
+JEV 是工具执行器识别的虚拟工具名。模型仍输出普通 VCP 工具块，参数中的表达式交给规划器，按配置目录、工具选择和参数规则展开成一个或多个真实插件调用，再递归进入同一执行链。它没有独立插件进程；展开结果会沿用调用上下文和审批约束（`modules/vcpLoop/toolExecutor.js:198-231`；`modules/jevToolCallExp.js:278-343`）。
+
+第三方插件的 manifest `jev` 段会被注册表校验，合格声明供规划器选命令并构造参数；存在歧义时可请求外部决策模型，未配置或失败时按声明的默认值回退，无法确定则返回规划错误。声明错误只影响 JEV 注册，不阻止普通插件加载。因此“纯提示词素材”只描述声明本身没有执行代码，不能据此认定运行时不消费这些字段（`modules/jevThirdPartyRegistry.js:3-26`；`modules/jevToolCallExp.js:991-1055`）。
+
+展开调用继承发起者、工具口令和调用级投递元数据。真实插件进入 `processToolCall` 后逐个执行审批判定，审批超时仍拒绝；一次虚拟调用展开多项时由执行器汇总成功或部分失败结果（`modules/jevToolCallExp.js:957-979`；`Plugin.js:1346-1393`）。外部决策模型的实际选择效果未运行验证。
+
+仓库侧校验与示例规范化另由两个脚本承担：`validate-plugin-json.js` 只做 JSON 语法校验；`normalize-plugin-examples.js` 规范化示例并备份。两者与运行时 JEV 注册和规划路径分离。
+
+### 6.8 VCPSleep 的等待与取消边界
+
+VCPSleep 是同步 stdio 插件，子进程用定时器等待后返回醒来时间和 tips，单次时长大于零且至多 12 小时；manifest 超时为 43,500,000 毫秒，给最长等待留出五分钟余量。它占住当前工具等待链，不会创建持久化调度任务（`Plugin/VCPSleep/VCPSleep.js:101-169`；`Plugin/VCPSleep/plugin-manifest.json:8-16`）。
+
+已读执行链没有把请求的 AbortSignal 传给同步 stdio 子进程：客户端中止能结束响应和阻止后续回灌，睡眠进程仍依赖自身定时器或插件超时结束。通用超时会强杀进程树；direct 插件超时的独立 AbortController 不能据此推导为 VCPSleep 也可随聊天中断取消（`Plugin.js:1190-1215,1728-1766`；`modules/vcpLoop/toolExecutor.js:431-434`）。可选做梦联动与睡眠计时并行，且要求启用 AgentDream；做梦失败不延长睡眠（`Plugin.js:1235-1283`）。
 
 ## 7. 执行位置与隔离
 
@@ -318,7 +332,9 @@ WebSocket 升级请求时校验 URL 路径里的 `VCP_Key` 参数是否等于服
 - **结果格式**：`ToolExecutor._formatResult()`（`toolExecutor.js:448-473`）优先识别 `result.data.content`/`result.content` 形式的富内容数组（`[{type:'text', text:...}]`），否则把对象 `JSON.stringify(result, null, 2)` 或直接转字符串，包装为统一的 `{type:'text', text}` 内容块回注给 LLM。**未发现**任何长度截断逻辑在 `ToolExecutor` 层——工具返回多长的文本就原样拼回对话上下文，可能导致单次工具调用输出把上下文窗口占满（VCPToolBox 在框架层没有结果截断保护，是否截断取决于各插件自身实现）。回注前经 `_sanitizeToolResultForAi` 可选隐私脱敏（见 5.5）。
 - **推理内容不进入工具循环**：`reasoning_content`/`reasoning`/`thinking` 等字段在 `streamHandler` 的 `appendDelta`（`streamHandler.js:158-170`）与 `nonStreamHandler` 的 `extractVisibleContent`（`nonStreamHandler.js:272-276`）中都只写入日志字段 `message.reasoning_content`，`collectedContentThisTurn`/`currentAIContentForLoop` 始终只累计正文 `content`。`ReasoningToContentEnabled` 的客户端展示转换在独立的 `transformParsedDataForClient` 副本上进行（`streamHandler.js:172-218`，调用于 `:332`/`:375`），转换结果只影响转发给客户端的 SSE，不进入 VCP 循环、OneRing 入库或日记。
 - **错误形态**：同步执行错误统一包装为 `throw new Error(JSON.stringify({plugin_error: message, ...}))` 字符串化 JSON，上层 catch 后再 `JSON.parse` 尝试还原结构化错误对象（`server.js:1279-1284`）；解析失败则退化为 `{error:'Internal Server Error', details: error.message}`。
-- **异步插件回调注入路径**：`asynchronous` 类型插件的后续结果通过 **无鉴权** 的 `POST /plugin-callback/:pluginName/:taskId` 端点回传（`server.js:1460-1504`，该路径在 Bearer 鉴权中间件里被显式豁免，`server.js:870-872`）。服务器收到请求后：(1) 直接把 `req.body` 原样写入 `VCPAsyncResults/${pluginName}-${taskId}.json` 文件；(2) 若该插件 manifest 声明了 `webSocketPush.enabled`，则把回调内容原样广播给对应 WebSocket 客户端类型。**未做任何签名、来源校验或 taskId 随机性强度检查**——`taskId` 由插件自身生成（多数用 `crypto.randomUUID()`，如 `PowerShellExecutor.js` 的后台任务 ID），只要调用方获知 `pluginName`+`taskId`，就可以用自定义内容覆盖该任务的"结果"，进而通过 `{{VCP_ASYNC_RESULT::Plugin::id}}` 占位符把该内容注入到下一轮系统提示词/对话历史中（`modules/messageProcessor.js:828-867` 直接读取该 JSON 文件内容拼入回复文本，不做二次校验）。这是**已确认**的机制：该端点对回调内容不做签名或来源校验。
+- **异步回调接收**：异步插件通过 `POST /plugin-callback/:pluginName/:taskId` 回传结果，路径显式豁免 Bearer 检查。服务器先写结果文件，再检查插件是否存在；写失败后仍可继续广播，插件缺失则返回 404。没有签名、来源或任务归属验证（`server.js:875-878,1359-1402`）。
+- **回调结果消费**：插件自行生成任务 ID。获知插件名和任务 ID 的调用方可覆盖对应 JSON 结果；下一次请求中的异步结果占位符会读取该文件并拼入文本。插件声明启用推送时，同一回调正文还会广播给指定客户端类型（`modules/messageProcessor.js:828-867`；`server.js:1387-1402`）。
+- **路径防护范围**：路径安全辅助模块已接入若干管理路由，但当前回调路由仍直接拼接参数和结果文件名。其他路由的路径校验不能扩展为此端点已有相同保障（`server.js:1368-1372`）。
 - **分布式插件回调转发**：`handleDistributedPluginCallback()`（`WebSocketServer.js:95-144`）走 WebSocket `plugin_callback_forward` 消息类型，同样只检查 `pluginName`/`taskId` 字段是否存在，不做任何来源节点与任务归属的绑定校验——任何已连接的分布式节点都可以为**不属于自己**的 `taskId` 发送 `plugin_callback_forward` 消息，只要获知目标 taskId。
 
 依据：[toolExecutor.js:448-473](../../VCPToolBox/modules/vcpLoop/toolExecutor.js)、[server.js:870-872,1460-1504](../../VCPToolBox/server.js)、[messageProcessor.js:828-867](../../VCPToolBox/modules/messageProcessor.js)、[WebSocketServer.js:95-144](../../VCPToolBox/WebSocketServer.js)。

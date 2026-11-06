@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
 > 调查方式：静态阅读 Jetpack Compose 消息组件、Markdown/富文本渲染（外部 BetterText 库与主题插槽）、流式合并链路与 WebView 承载路径，并对照 `web-ui/` 的 React 渲染作为同项目 Web 端参考
 >
-> 调查范围：`UIMessagePart` 各类型到可见组件的映射、Markdown/代码/数学/Mermaid 渲染、流式合并与增量展示、reasoning/工具卡/附件/翻译的展示，以及自研高亮引擎的入口与语言覆盖；不覆盖网络协议解析、持久化 schema、Composer 与导出语义
+> 调查范围：`UIMessagePart` 各类型到可见组件的映射、Markdown/代码/数学/Mermaid 渲染、流式合并与增量展示、reasoning/工具卡/附件/翻译的展示，以及 BetterText 高亮接入边界；不覆盖网络协议解析、持久化 schema、Composer 与导出语义
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -92,7 +92,9 @@ Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应
 
 ## 5. 工具、reasoning、附件与自定义节点
 
-**思考块与时间线。** `groupMessageParts()` 把连续的 `Reasoning`、`Tool`、`ServerTool` 归入同一 `ThinkingBlock`，遇到其他类型则结束当前思考块并生成内容块，索引取原 parts 下标（`ChatMessageCot.kt`）。思考块用通用 `ChainOfThought` 渲染：步骤多于阈值时折叠只显示末尾若干步，顶部按钮展开全部，背景绘制时间线竖线，步骤分受控/非受控两种（`ui/ChainOfThought.kt`）。仅含推理的思考块会使用自适应宽度（`ChatMessage.kt`）。
+**思考块与时间线。** 连续的推理、本地工具与服务端工具部件聚成一个思考块，遇到正文或附件就结束当前分组，索引保持原始部件下标（`ChatMessageCot.kt` 的分组函数）。通用时间线默认折叠前面的步骤、显示末尾若干步，顶部按钮可展开全部；仅含推理时使用自适应宽度。
+
+**待审批步骤的可见性。** 有工具等待用户动作时，折叠可见范围扩展至最早待审批步骤及其后的全部步骤，使批准、拒绝或问答入口始终可见；动作仍交给服务更新审批状态并恢复 Agent 循环。见 [ChatMessage 的折叠条件](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessage.kt#L341-L380)。
 
 **推理展示。** 推理步骤按 `createdAt` 记忆状态，含折叠/预览/展开三态；流式期间若开启显示思考内容，自动进入“预览”态并滚到底部，用渐变遮罩把高度限制在约 100dp（`ChatMessageReasoning.kt, 96-118`）。生成结束后按 `autoCloseThinking` 决定收起或保持展开并显示耗时（`:136-168`），标题优先取推理文本中最后一整行加粗文本（`utils/MarkdownUtils.kt`）。
 
@@ -122,7 +124,7 @@ WebView 的沙箱姿态（脚本默认开启、无 CSP 与来源白名单）与�
 - **代码块操作**：复制原始代码、按语言映射扩展名后导出文件、html/svg 内联预览切换与新窗口预览、超长折叠（阈值 10 行）、行号与自动换行组合（`HighlightCodeBlock.kt, 353-472`）。
 - **表格操作**：复制 Markdown 原文与导出 CSV（`Markdown.kt`）。
 - **工具审批反馈**：`onToolApproval`/`onToolAnswer` 回调由消息链路上抛，工具卡依据返回的审批状态重渲染；拒绝原因内联显示为错误色文本（`ChatMessageTools.kt`）。
-- **流式结束选择**：生成结束后才包裹 `SelectionContainer`，避免流式期选择工具栏并发问题（`ChatMessage.kt`、`ChatMessageReasoning.kt`）。
+- **流式期间选择**：正文与推理使用 BetterText 的选择容器，生成中同样可选择；代码块通过公共包装并入外层选择范围，避免嵌套容器抢走选区。见 [SelectableContent](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/components/richtext/SelectableContent.kt#L10-L25)、[推理内容](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/components/message/ChatMessageReasoning.kt#L174-L189)。工具栏与持续更新并发时的实际体验未验证。
 - **触感反馈**：开启时，流式期间对 parts 变化做 50ms debounce 后触发键盘触感（`ChatMessage.kt`）。
 
 ## 8. 性能、缓存与测试

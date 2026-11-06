@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -235,7 +235,7 @@ PDF 翻译的媒体处理细节归入媒体创作笔记，不重复计入普通 
 
 - **多模型同时对话**：归并已有类目。LLM 渠道笔记 §6（@模型解析与并行语义、siblings group、steer/临时聊天只取第一个）与 Chat UI 笔记 §7 已主链确认，本笔记不重写。
 - **文档处理**：附件（图片/Office/PDF）、OCR、长文粘贴、知识库检索链分别由会话与消息管理、对话请求与上下文、Agent 工具笔记覆盖；README 的 WebDAV 属外部服务，未在本次范围。
-- **Agent workspace**：Chat UI 笔记 §6.2 已确认 agent 消息适配器把相对路径解析到 agent workspace 目录、只读消息、artifact 文件打开与工具审批；Agent 工具笔记覆盖 Claude Code Agent 路径与 MCP 路径。
+- **Agent workspace**：归并[生成式输出与运行时笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)的文件标签、共享编辑草稿、冲突处理与文档/行评论引用回流；[Chat UI 笔记 §6.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)另覆盖 Agent 消息编辑重发、分支导航和复制会话入口。
 - **消息级会话内搜索**（DOM 高亮）：Chat UI 笔记 §2.3，与全局搜索区分。
 
 ## 声明不符、外部依赖与暂缓项

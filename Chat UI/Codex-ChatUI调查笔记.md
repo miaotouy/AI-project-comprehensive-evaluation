@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openai/codex`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
@@ -141,7 +141,9 @@ Composer 是一个完整的状态机而不是简单文本框（`tui/src/bottom_p
 
 审批会暂停当前工具调用并把控制权交给用户。执行审批和补丁审批在打开弹窗前会先刷新答案流（`tui/src/chatwidget/tool_requests.rs:284-340`），然后 `BottomPane` 推入 `ApprovalOverlay`。四类请求分别是执行命令、权限提升、应用补丁和 MCP elicitation（`tui/src/bottom_pane/approval_overlay.rs:75-78`）；选项由可用决策列表生成，包含批准一次、按会话批准、带策略修订的批准、拒绝和取消（同文件 `:860-937`）。权限请求另外区分“本回合授权”和“本会话授权”。
 
-补丁审批还有一条就地预览路径：当请求来自非当前显示的线程时，界面直接在 transcript 中渲染该补丁的预览，请用户就地做决定，而不必先切换线程（`tui/src/app/thread_routing.rs:440-470`）。
+后台补丁审批有带线程标签的就地预览。请求本身只给出项标识，界面先从对应线程的事件缓存按 turn/item 找回文件变更，再把相同内容交给预览与审批页。只有带线程标签且变更非空时才追加预览；恢复不到变更时仍保留审批请求，但不画空预览（[内容恢复](../../codex/codex-rs/tui/src/app/file_change_approvals.rs#L10-L45)、[预览条件](../../codex/codex-rs/tui/src/app/thread_routing.rs#L334-L351)）。
+
+该自动转呈只扫描具有 side-parent 待处理状态的非活跃线程，当前正显示侧对话时会暂缓；不能理解为任意后台线程的补丁都会立刻插入当前 transcript。转呈后先补预览再入审批队列，用户决定仍按原 thread/item 找到待回复 RPC，回给发起线程，无需把审批归属改成当前显示线程（[扫描与转呈](../../codex/codex-rs/tui/src/app/thread_routing.rs#L437-L521)、[按线程回传](../../codex/codex-rs/tui/src/app/app_server_requests.rs#L332-L346)）。
 
 ## 6. 消息操作、分支与版本导航
 

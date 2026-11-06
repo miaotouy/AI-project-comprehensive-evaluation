@@ -2,11 +2,11 @@
 
 > 汇总对象：`VCPToolBox`（远端仓库 `https://github.com/lioensky/VCPToolBox`）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：17 篇来源笔记（产品结构与设计基因、检索增强与认知编排、Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话请求与上下文、上下文编译与提示词工程、应用界面基础设施、独特功能、生成式输出与运行时）
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；未做新的源码调查，未做跨项目横向比较
+> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；结合工具规划、同步等待、回调、预处理与 OneRing 持久化定向源码核对，未做跨项目横向比较
 >
 > 汇总范围：覆盖上述 17 个类目中 VCPToolBox 已调查的能力；默认关闭/默认禁用、声明不符、暂缓与归并项如实列入对应小节
 >
@@ -18,7 +18,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 产品历史上，它从 2025-05-12 的“AI API 与工具交互”工具箱逐步扩展为插件运行时、分布式执行、管理面板和长期记忆中枢；当前 README 将整体定位提升为让 AI 持续存在的环境。RAG 是这一定位变化最集中的演进线：早期多路相似度与结构召回经浪潮 V1-V8、TagMemo V9.1/V9.2 发展到当前 RiverMemo Topology V3。历史作者自述、提交节点和当前执行边界见[产品结构与设计基因](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)与[检索增强与认知编排](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)；历史版本不替代当前源码。
 
-核心边界：不拥有会话事实源（客户端提交完整 `messages`，服务端在单次 HTTP 请求内复制、重排、展开、注入和裁剪）；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
+核心边界：客户端提交完整历史并持有会话导航，服务端按请求编排消息；OneRing 另有按 Agent 持久化的插件历史；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在，不代表开箱即用。
 
 ## 完成度速览
 
@@ -47,11 +47,11 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **AgentAssistant 多 Agent 身份配置与委派（主体）**：每个命名 Agent 定义身份、模型、温度、提示词等；支持即时通讯、`timely_contact` 定时联络与异步委托（`delegationMaxRounds` 默认 15 轮上限），`inject_tools` 可临时拼接工具说明到被委托 Agent 提示词尾部（未做权限限制）。主体已归并到 Agent 工具/Agent 角色类目，跨 Agent 长期通信局部见独特能力十一。证据状态：`归并已有类目`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
 
-- **VCPTavern 预设注入与会话时间变量**：从 system 消息查找 `{{VCPTavern::Preset...}}` 触发器，按 embed/relative/depth 策略注入预设，可解析 `{{LastChatTime}}`/`{{TimeSinceLastChat}}` 会话时间变量（唯一“会话键”持久化是 `access_logs.json` 时间戳）。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
+- **VCPTavern 预设注入与会话时间变量**：从 system 消息查找预设触发器，按嵌入、相对位置或深度注入；会话时间变量来自该插件的访问时间文件，最终交互正常完成后提交访问记录。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
-- **上下文编排（OneRing / VCPTimeLine / ContextFoldingV2）**：已确认数组元数据（`__oneRingMeta`）、时间线占位符替换与基于摘要的折叠替换，均以预处理器改写本次消息数组实现，属上下文编排而非独立会话存储。已归并到对话请求与上下文类目。证据状态：`归并已有类目`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 归并说明。
+- **上下文编排（OneRing / VCPTimeLine / ContextFoldingV2）**：预处理器可挂载来源元数据、替换时间线占位符与折叠历史。OneRing 还按 Agent 持久化消息与回合状态；主流程无触发器时保留原数组，独立 Memo 占位符收尾仍可执行。上下文编排已归并到对话请求与上下文类目，持久化边界见会话专题。证据状态：`归并已有类目`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 归并说明。
 
-- **上下文裁剪、多模态预处理与预处理器顺序**：`contextTokenLimit` 按文本字符数估算裁剪（非 token 真值、忽略图片）；多模态预处理器（`MultiModalProcessor`/`ImageProcessor`）与其余 messagePreprocessors 按 `preprocessor_order.json` 顺序执行（未列出插件按名称排序追加）；RAGDiaryPlugin 只处理 system/系统前缀 user 中的日记占位符。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
+- **上下文裁剪、托盘与预处理顺序**：请求按字符估算裁剪；捕获预处理先于静态插件文本注入，随后按序执行媒体处理、MemoryThinkingTray、RAG 与时间线。托盘只搬运 system 中的完整记忆区到指定深度的伪系统 user 块，默认末条消息之前；标记错误时整轮搬运回滚，可选缓存断点默认关闭。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)。
 
 - **Role Divider 角色拆分**：按开关运行，识别 `<<<[ROLE_DIVIDE_SYSTEM/ASSISTANT/USER]>>>` 标签拆出新消息，并保护工具请求与日记标记块不被拆开。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md)。
 
@@ -59,9 +59,9 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ### 会话与消息
 
-- **请求级消息编排（无会话事实源边界）**：不拥有会话事实源，无会话对象、会话列表、消息 CRUD、编辑/删除/分支、搜索或导入导出；输入单位是请求体 `messages[]`，会话 ID、历史数组与最终展示状态由外部前端负责，服务端重启不保留会话状态。证据状态：`主链确认`（边界记录，非能力缺失）。来源：[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/VCPToolBox-Chat调查笔记.md)。
+- **请求级消息编排与插件历史**：客户端持有会话导航、草稿和分支，按请求提交完整历史；已读通用聊天入口未找到会话 CRUD。OneRing 被触发后可保存 SQLite 消息及回合状态，支持响应原地更新和按配置补充历史，数据库可跨重启保留。证据状态：`主链确认`（边界记录，非能力缺失）。来源：[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/VCPToolBox-Chat调查笔记.md)。
 
-- **审计与调试存储盘点**：`finalContextStore`（内存最多 5 组滑窗快照）、ChatLog（可选审计文件，默认关闭）、`tool-call-records.sqlite3`（工具调用审计台账，默认关闭）、VCPTavern `access_logs.json`（会话键时间戳）均为审计/调试性质，不是会话持久化。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
+- **存储职责分离**：内存请求快照、可选 ChatLog 和工具调用台账用于审计调试；VCPTavern 保存会话键时间戳。OneRing 的消息表与回合表则承担插件历史记录，最终 AI 回复需上游整轮有效且 HTTP finish 后异步写入，失败只中止当前 pending 回合，预处理阶段已记录的历史不整体回滚。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
 - **请求级停止与响应去重**：`/v1/interrupt` 按 `requestId`/`messageId` 在 `activeRequests` 注册表中置中止标志并级联 `AbortController`，客户端断联触发同一中止链；`ResponseReplayCache` 按 `clientIp::messageId` 做响应回放去重（默认关）。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
@@ -175,7 +175,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **VTrade 模拟交易沙盒（对应独特功能能力二十一）**：模拟账户、订单、持仓与决策评分，行情源、指标、股票池、撮合规则与券商接口都做成可注册插槽；管理界面挂在主后端 `/admin_api/vtrade/`，模型经工具命令驱动。不连接真实券商，行情源缺失时退回离线合成数据。证据状态：`主链确认`（静态源码）。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二十一。
 
-- **JEV 外部决策模型编排（对应独特功能能力二十二）**：在折叠候选筛选、RiverMemo 语义重排、上下文裁剪与通用打分四处调用外部决策服务，独立 provider、多 Key 轮换、超时与有限重试；失败时一律保留 embedding 原结果。插件侧另有 21 个 manifest 用 `jev` 段声明用途与命令提示，仅作声明素材。证据状态：`主链确认`（静态源码），实际效果未运行验证。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二十二、[检索增强与认知编排调查笔记](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)。
+- **JEV 外部决策模型编排（对应独特功能能力二十二）**：在折叠候选筛选、RiverMemo 语义重排、上下文裁剪与通用打分四处调用外部决策服务，独立 provider、多 Key 轮换、超时与有限重试；失败时一律保留 embedding 原结果。JEV 虚拟工具另可消费配置目录与合格的 manifest 声明，把表达式展开为真实插件调用，再逐项进入原工具执行与审批链；声明校验失败不影响普通插件加载。证据状态：`主链确认`（静态源码），实际效果未运行验证。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力二十二、[检索增强与认知编排调查笔记](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)、[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md) 第 6.7 节。
 
 **归并已有类目清单**
 

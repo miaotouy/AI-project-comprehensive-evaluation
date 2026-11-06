@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openai/codex`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
@@ -94,9 +94,13 @@ MCP 工具由 MCP 绑定统一追加，随后单独做暴露策略（`spec_plan.
 
 托管工具（例如 web 搜索、图像生成）不进入注册表，而是作为 `hosted_specs` 直接拼进模型可见列表，由模型提供方执行（`spec_plan.rs:200-209`、`:373`）。因此它们不受本地审批与沙箱链路约束，属于模型侧旁路。
 
-网页搜索是需要跨来源仲裁的托管能力：同一次检索既可以由模型提供方的原生搜索执行，也可以交给 MCP 搜索工具。每个 step 由搜索解析逻辑选出其中一个提供方，并把宿主下发的搜索模式与本地配置取交集后收窄（`core/src/model_search.rs:303-347`）。选定后落败一方会从目录里移除——原生搜索生效或搜索被禁用时删掉 MCP 的模型搜索工具，没有原生模式时删掉托管的 `web.run`（`spec_plan.rs:176-198`）。
+网页搜索有原生搜索与 MCP 搜索等执行来源，提供方在每个 step 解析。宿主 MCP 搜索的访问模式通常由宿主策略与本地配置取交集；开启 `HostedSearchPolicy` 且本地模式为 Disabled 时，可以采用宿主模式，但仍须通过受管配置约束（[访问策略](<../../codex/codex-rs/core/src/model_search.rs#L250-L299>)、[提供方选择](<../../codex/codex-rs/core/src/model_search.rs#L303-L430>)）。
 
-线程内同一时刻只允许一个搜索所有者，搜索预留机制裁决归属，后到的 MCP 搜索调用直接得到跳过结果，不会并发执行（`model_search.rs:78-141`、`mcp_tool_call.rs:488-522`）。
+目录构建按选择结果收窄搜索入口：原生搜索生效或搜索被禁用时，移除 MCP 模型搜索工具；没有原生模式时，移除独立的 `web.run` 工具，并不生成原生托管搜索声明。宿主 MCP 的发现结果与线程所有者状态还决定能否走原生回退（[目录过滤](<../../codex/codex-rs/core/src/tools/spec_plan.rs#L176-L209>)、[发现与回退条件](<../../codex/codex-rs/core/src/model_search.rs#L404-L444>)）。
+
+搜索所有者按**提供方**仲裁：同一线程已有预留时，同提供方的并发调用共享该预留，另一提供方申请才会失败。搜索调用准入会在线程状态中保留所有者；若只是为原生回退临时预留、尚无搜索调用将其固定，最后一个临时持有者随调用或采样请求结束时释放占位（[SearchOwner](<../../codex/codex-rs/core/src/model_search.rs#L78-L145>)）。这项仲裁本身不串行化或去重同提供方的搜索，实际工具并行仍受第 5.2 节的调度规则约束。
+
+MCP 跳过路径只覆盖宿主管理的模型搜索工具：该 step 选择宿主 MCP 搜索、但线程已被原生搜索占用时，调用返回“该线程正在使用原生搜索”，且不会到达 MCP 对端或取得 MCP attribution。原生回退一侧也会检查同一预留，冲突时移除托管搜索声明，独立网页工具则返回可回注错误（[MCP 调用门](<../../codex/codex-rs/core/src/mcp_tool_call.rs#L491-L522>)、[原生回退预留](<../../codex/codex-rs/core/src/model_search.rs#L104-L141>)、[独立网页工具入口](<../../codex/codex-rs/core/src/tools/handlers/extension_tools.rs#L67-L78>)）。
 
 ## 2. 工具发现、过滤与暴露
 
@@ -219,7 +223,11 @@ MCP 工具是否要审批，先看服务器或工具的审批模式（`core/src/
 
 也就是说，没有注解的 MCP 工具默认按“可能有害”处理。
 
-审批模式并不只由服务器配置决定：宿主可以对某个连接请求更严格的模式，最终模式取两者交集，当 `auto` 与 `writes` 互不可比时收敛为 `prompt`（`codex-rs/config/src/mcp_types.rs:42-50`）。由插件选择建立的 MCP 注册只允许单次批准，不提供持久批准（`mcp_tool_call.rs:1300-1305`）。
+审批模式还会叠加宿主对连接的更严格要求；`auto` 与 `writes` 互不可比时收敛为 `prompt`（`codex-rs/config/src/mcp_types.rs:42-50`）。普通模式下，权限配置允许自动批准、工具模式/注解免审批或命中会话记忆时，可提前进入执行分支；只有确实需要新决定时才进入第 6.1 节的权限 hook 和人工/Guardian 复核。严格自动复核会跳过这些免审与会话记忆捷径，不能把中央审批入口的 hook 顺序泛化成每次 MCP 调用必经流程（[MCP 审批准入](../../codex/codex-rs/core/src/mcp_tool_call.rs#L1634-L1737)）。
+
+由插件选择建立的 MCP 注册关闭持久批准选项，会话记忆仍按工具身份与审批模式计算；普通服务器在满足策略与提问特性时可提供持久批准。记忆键只在 `auto` 模式下建立；应用服务器还要求存在 connector 身份。键包含服务器、插件/连接身份和工具名，不含本次参数；`prompt` 和 `writes` 下的记忆型决定会归一化为单次批准（[记忆条件](../../codex/codex-rs/core/src/mcp_tool_call.rs#L1922-L1950)、[决定归一化](../../codex/codex-rs/core/src/mcp_tool_call.rs#L2438-L2451)）。
+
+持久批准尝试写入用户配置，成功后重载该层并记入会话缓存；写入失败会记录错误并退为会话记忆，仍允许当前已批准调用。拒绝、超时和取消会产生跳过结果，获批或免审才交给准备好的 MCP 调用执行（[决定与执行分派](../../codex/codex-rs/core/src/mcp_tool_call.rs#L280-L413)、[记忆与持久化](../../codex/codex-rs/core/src/mcp_tool_call.rs#L2465-L2529)）。
 
 ### 6.3 执行边界
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
@@ -129,6 +129,8 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 `tools/i18n` 是开发侧工具而非应用组成：负责读写各模块 `strings.xml`、批量补译与死键扫描，不参与 APK 构建；仓库另有两个同级的开发脚本目录，`tools/models-dev` 生成模型目录快照，`tools/trace` 处理链路追踪数据。翻译质量与键覆盖完整性不在本笔记范围。
 
 ### 7.2 设置与偏好基础设施
+
+设置首屏还有平台权限反馈：Android API 37 及以上且本地网络权限未授予时，在列表顶部插入提示卡；点击通过公共权限状态发起系统申请，低版本不创建该权限状态，已授予时卡片消失。它是用户点击驱动的权限入口，未验证系统弹窗与拒绝后的真机表现。见 [SettingPage](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingPage.kt#L160-L164)、[LocalNetworkPermissionCard](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/components/ui/permission/LocalNetworkPermissionCard.kt#L27-L49)。
 
 设置页是两级结构。首屏 `SettingPage` 用 `CardGroup` 分组，放通用设置、偏好入口、助手、扩展等，并内联未配置提供商警告卡与启动次数达到后的赞助提示；偏好二级页 `SettingPreferencesPage` 并列五个子页入口：主题、通知、通用、界面、网络，各子页再各自组织表单。媒体 Provider、语音等能力各有独立的设置页与详情页，从首屏或偏好页进入（`ui/pages/setting/SettingMediaPage.kt`、`SettingMediaProviderDetailPage.kt`、`SettingSpeechPage.kt`）。
 

@@ -2,11 +2,11 @@
 
 > 汇总对象：`Open WebUI`（远端仓库 `https://github.com/open-webui/open-webui`，单仓，代码快照 `c38885a1a737da4968f157092f304f3b5481d0bf` / main）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：14 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时；横向对比文档不在本次汇总范围
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源，不新增源码验证
+> 汇总方法：按来源笔记聚类去重；UI 草稿/标签恢复、工具审批与延迟检索、请求压缩与消息持久化、自动化交付的结论另有旧新源码定向复核，其余沿用来源证据范围
 >
 > 汇总范围：全部 14 个类目笔记的结论；仓库分布与应用界面基础设施两个工程/基建向类目单列小节，不与功能能力混排
 >
@@ -31,7 +31,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 ## 功能能力摘要
 
-- **服务端工具审批与代码解释器**：聊天参数可选择完整访问或逐次确认；逐次确认时服务端持久化首个待执行调用并使其余调用排队，用户决议后沿原会话参数恢复。代码解释器则按 legacy XML 标签或原生 function-calling 两条入口受功能开关、模型能力和用户权限共同门控。证据状态：静态源码确认。来源：[Agent工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Open-WebUI-生成式输出与运行时调查笔记.md)。
+- **服务端工具审批与代码解释器**：持久聊天的审批决议与执行认领在事务内结算，调用与恢复参数快照保存在消息 output/meta；人工提问共用暂停与 resolve 基础设施，以答案工具结果继续生成。切为完整访问会保存用户默认及会话配置，并恢复待审批工具；临时聊天另走在线回调。代码解释器的两种入口与引擎门控详见来源。证据状态：静态源码确认。来源：[Agent工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Open-WebUI-生成式输出与运行时调查笔记.md)。
 
 ### 角色与上下文
 
@@ -43,7 +43,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **上下文来源与拼装管线**：`process_chat_payload` 按固定顺序执行外部能力注入（Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files）；持久会话历史由后端从 DB 加载（优先消息表行以保留结构化 output，续写时额外加载被续写消息），图片文件转 `image_url` content part。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)
 
-- **上下文压缩**：请求携带 `compact_token_threshold`，`process_chat_payload` 内按需压缩、超过阈值生成 `[CONVERSATION SUMMARY]` 系统消息追加，失败回退全量历史；手动压缩经 `POST /{id}/compact` 写 `context_summary` 检查点并发事件。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)
+- **上下文压缩**：预算以最近 provider 用量加增量估算为主，按用户轮次或完整工具批次保留近期上下文；普通 native 请求在最终组装后摘要，Filter/审批恢复等路径提前压缩。自动压缩支持消息级检查点及工具 output 内检查点，手动压缩保存到当前节点；原消息树保留。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)
 
 - **知识注入双模式**：legacy 模式把模型 `meta.knowledge` 展开成 files 做 RAG；native FC 模式走内置工具 `query_knowledge_files`；`get_attached_knowledge` 汇总模型、聊天、笔记三处知识。证据状态：静态源码确认。来源：[Agent 角色配置调查笔记](../Agent角色/Open-WebUI-Agent角色配置调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
@@ -53,7 +53,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **消息树数据模型**：消息以 `{chat_id}-{message_id}` 复合键存储，`parentId`/`childrenIds` 构成消息树、`modelIdx` 保留多模型列序；编辑/删除粒度到单条消息，删除消息的孙节点重挂到父节点；会话更新用 `merge_history` 只合并不推断删除。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)
 
-- **会话 CRUD 与生命周期**：聊天消息的增删改查全部集中在 `routers/chats.py`（无独立 messages 路由）；提供建会话、分叉（fork 建新会话）、克隆、归档、压缩、标签、未读、导入导出等端点；`meta.internal=True` 的内部会话（如子代理）不出现在普通列表。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)
+- **会话 CRUD 与生命周期**：常规 CRUD、分叉、克隆、归档、压缩、标签、未读与导入导出位于 chats 路由，工具决议另由主入口的消息 resolve 端点处理；内部会话不出现在普通列表。重新生成新增助手兄弟节点，续写复用原节点。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)
 
 - **列表、分页、搜索与未读**：会话列表 60 条/页分页，支持 pinned/folders/三种排序；搜索支持 `tag:`/`folder:`/`pinned:`/`archived:`/`shared:` 前缀过滤与标题/消息内容全文匹配（SQLite 用 `json_each`）；未读排序由 `ChatMessage.done=False` 子查询加 `last_read_at` 差值计算。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)
 
@@ -67,7 +67,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **后台任务**：`background_tasks_handler` 在生成结束后串行执行四类任务——追问建议、标题生成、标签生成、记忆抽取；outlet 过滤器已内联执行（`POST /api/chat/completed` 标记 Deprecated）。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)
 
-- **Chat UI 工作台**：会话状态机整体内聚在 `Chat.svelte`（约 4205 行）；右侧面板 Overview 把整个消息树渲染为只读 SvelteFlow 节点图，点击节点切换 `history.currentId` 分支指针；Composer 输入区支持 `@` 提及、`/` 命令、语音听写、粘贴/拖放上传与 `largeTextAsFile`；支持 embedded 内嵌聊天模式。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)
+- **Chat UI 工作台与恢复**：聊天控制器承接消息树与多标签工作台，Overview 抽屉导航分支；正文、已上传非图片附件与能力选择按会话键保存在当前标签页 sessionStorage，500ms 防抖、正文须少于 5000 字符。工作台只持久保存侧边/全宽布局偏好，标签列表在内存；临时聊天另有 Socket 重连与流快照恢复路径。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)
 
 - **对话导出与分享**：两条独立主链——本地下载（JSON / TXT / PDF 样式化与纯文本双模式，PDF 由 html2canvas-pro + jsPDF 客户端生成）与站内链接分享（`/s/{share_id}` 快照页，private/public/open 三态由 `access_grants` 决定，open 允许匿名）；社区分享是纯前端 `postMessage` 交接给 openwebui.com；全量 JSON 导出可经 DataControls 导入往返。证据状态：静态源码确认。来源：[对话导出与分享调查笔记](../对话导出与分享/Open-WebUI-对话导出与分享调查笔记.md)
 
@@ -93,9 +93,9 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **工具生态与注册**：工具统一注册成 `tools_dict`，三大来源——本地数据库工具（`get_tools`）、内置工具（`get_builtin_tools`）、外部 MCP/OpenAPI 工具服务器（`server:*` 前缀）；请求体显式携带 `tools` 键时完全跳过服务端解析；数据库工具按 `AccessGrants` 做访问授权。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
-- **内置工具条件注入**：54 个内置工具按 16 个类别做四重开关检查——模型 meta 的 `builtinTools` 类别开关、全局配置、模型能力、用户权限，非全量暴露；另有 `kb_exec` 类 shell 命令工具把知识库当文件系统，受 `ENABLE_KB_EXEC` 控制。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
+- **内置工具与延迟目录**：64 个内置工具按类别、全局配置、模型能力和用户权限条件注入；延迟工具按单个 schema 长度筛选，将精简目录放入系统提示。检索只返回定义，不扩充 provider tools；模型通过 `call_tool` 包装目标调用，再进入原审批和执行路径。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
-- **工具调用执行循环**：主循环在 `utils/middleware.py`（非路由层）——解析参数 → 执行（direct 工具推前端、普通工具绑定 `__messages__`/`__files__` 后 await）→ 处理结果 → 引用提取 → RAG 模板重写上下文 → 重新请求模型；参数校验是白名单过滤，多轮循环上限 `max_tool_call_iterations`；仅 6 类工具的结果提取引用来源。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
+- **工具调用执行循环**：主循环在 `utils/middleware.py`（非路由层）——解析参数 → 执行（direct 工具推前端、普通工具绑定 `__messages__`/`__files__` 后 await）→ 处理结果 → 引用提取 → RAG 模板重写上下文 → 重新请求模型；参数校验是白名单过滤，多轮循环上限 `max_tool_call_iterations`；仅四类知识/文件工具在该函数中提取引用来源，网页搜索另发来源事件。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
 - **MCP 与外部工具服务器**：`connect_mcp_server` 做连接级访问授权、鉴权头组装（bearer/session/oauth）、streamablehttp + OAuth 建连后拉取工具清单；工具名统一 `{server_id}_{tool}`；MCP 客户端默认 `verify=False`；OpenAPI 服务器经 `execute_tool_server` HTTP 调用，函数名前缀防冲突。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
@@ -125,9 +125,9 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **能力三：Persistent Memory（跨会话记忆）— `主链确认`**：手动、工具、后台复盘三条写入通道 + 每轮请求前向量检索注入（`user-memory-{user.id}` 集合）；后台复盘每 10 轮（默认）用独立 LLM 请求决定 add/replace/move/remove，失败不阻断聊天；记忆是「用户事实 + 路径组织 + 向量检索」的服务端闭环。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
-- **能力四：Calendar（个人/共享日历 + 模型调度面）— `主链确认`**：事件提醒由后台调度器根据持久化提醒标记去重后投递 Socket 与通知；创建/更新会拒绝短于一天的重复频率（下限 24 小时）；日历 CRUD 和模型工具仍是日程对象能力。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- **能力四：Calendar（个人/共享日历 + 模型调度面）— `主链确认`**：按事件开始时间去重，在同事务中保存提醒标记与收件箱通知，提交后再投递事件与 Socket；改期可再次提醒。创建/更新会拒绝短于一天的重复频率；日历 CRUD 和模型工具仍是日程对象能力。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
-- **能力五：Automations（定时 prompt 自动化）— `主链确认`**：rrule 自动化由数据库原子认领，到期后无头进入完整聊天管线，结果持久化到 chat/channel 与运行记录；可停用或删除，运行中取消尚未确认。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
+- **能力五：Automations（定时 prompt 自动化）— `主链确认`**：到期认领时按 owner 时区推进下次时间，执行时复验账号活跃与权限。持久 chat 等待生成并复验消息 done/error 后写终态；频道目标返回后直接写 success，终态确认边界不同。停用控制未来调度，未找到运行级独立取消 API；PostgreSQL 使用跳锁认领，其它方言并发需验证。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
 - **能力六：模型 Arena / ELO 评估 — `主链确认`**：用户反馈（rating 1/-1 + 兄弟模型 + 标签）落 `feedback` 表，排行榜实时计算 Elo（初始 1000、K=32），带 query 时用 sentence-transformers 对标签做余弦相似度加权；仅 admin 可见，无缓存表。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)
 
@@ -135,7 +135,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **能力八：多标签工作台（ChatTabs）— `主链确认`**：聊天区按 11 类标签并行承载会话、文件、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊，终端与浏览器经 `/api/v1/terminals` 代理外部服务。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Open-WebUI-ChatUI调查笔记.md>)
 
-- **能力九：人工提问（ask_user）— `主链确认`**：内置工具让模型单轮提出 1-3 个结构化成对选项的问题，中间件暂存调用、前端卡片作答后回填继续生成；与工具审批是两条不同机制。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
+- **能力九：人工提问（ask_user）— `主链确认`**：每次 1–3 题、每题 2–3 个选项，当前调用批次只允许一个独立提问；未设整个生成回合的累计提问次数。持久聊天共用工具审批的暂停/恢复基础设施，答案作为工具结果回填继续生成，临时聊天走在线回调。来源：[独特功能调查笔记](../独特功能/Open-WebUI-独特功能调查笔记.md)、[Agent工具调查笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)
 
 **归并已有类目项**：
 

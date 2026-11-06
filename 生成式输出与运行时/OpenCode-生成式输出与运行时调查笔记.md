@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -16,8 +16,8 @@
 
 OpenCode 2.x 的生成式输出仍以真实文件系统为事实源：模型通过结构化工具调用（`read`/`write`/`edit`/`patch`/`shell`）操作工作区，文件变化由快照服务记录为版本，并由步骤结束事件携带"快照 + 变更文件"落库。新增的变化有两层：
 
-- **Artifact 层**：模型可创建/读取/更新/删除 Artifact（`art_` 前缀），Artifact 是一组相对路径到文本的文件映射加一个入口文件，由 Artifact Provider 托管并按 URL 访问；Provider 声明自身能力（静态、服务端代码、SQLite、Durable Objects），本地 Provider 默认可用。
-- **Code Mode 运行时**：`packages/codemode` 提供一个只实现受控语法的解释器，模型写的小程序只能通过宿主暴露的工具与外界交互，不能直接触网、读写文件或调用进程 API。
+- **Artifact 层**：模型可创建/读取/更新/删除 Artifact（`art_` 前缀），Artifact 是一组相对路径到文本的文件映射加一个入口文件，由 Artifact Provider 托管并按 URL 访问；需显式启用 experimental.artifacts，本地默认 Provider 托管静态文件，额外能力由具体 Provider 实现与装配决定（[开关与选择](../../opencode/packages/core/src/artifact.ts#L222-L303)）。
+- **Code Mode 运行时**：`packages/codemode` 提供一个只实现受控语法的解释器，模型程序通过宿主工具与受 webfetch 权限约束的 fetch 访问外界；直接文件和进程 API 不可用，独立检查入口也不提供 fetch（[模型入口](../../opencode/packages/core/src/codemode/tool.ts#L74-L81)）。
 
 除此之外，代码执行仍在本机进程内（shell 子进程、LSP 子进程、PTY 终端、后台 job），未找到容器级隔离沙箱；撤销仍是整条消息粒度的文件回滚，配合分阶段确认。
 
@@ -64,9 +64,9 @@ OpenCode 2.x 的生成式输出仍以真实文件系统为事实源：模型通�
 ## 4. 表现类型与运行环境
 
 - **展示类型**：markdown 文本、代码高亮、图片/附件、行级 diff、终端输出、Artifact 预览（按 URL 打开）。
-- **Artifact 托管**：Provider 以能力声明区分形态——静态文件、服务端代码、SQLite 存储、Durable Objects；本地 Provider 是默认实现，接口支持 create/update/delete 并在更新后发 Artifact 事件。访问经实验性端点 `artifacts.view/*` 提供文件。
-- **Code Mode**：解释器只支持实现过的语法子集，程序可调用宿主提供的工具与扩展全局对象；宿主可限制执行时间、工具调用次数、输出大小与数据。不支持语法返回带位置的诊断，未完成的工作在程序结束时被中断。
-- **未找到**：通用 iframe/WebView 沙箱容器、Notebook 运行时、本地语言解释器集群；`patchmark` 是流式 markdown 修补库，不参与文件补丁执行。
+- **Artifact 托管**：需显式启用 `experimental.artifacts`，否则管理接口与工具关闭。本地 Provider 是静态文件托管默认实现；其他 Provider 可以声明服务端代码或存储等能力，声明枚举本身无法证明这些后端已装配（[启用与 Provider 选择](../../opencode/packages/core/src/artifact.ts#L222-L303)）。模型通过 create/read/update/delete 四个 Artifact 工具维护同一 id，HTTP 端点另支持按会话列出对象。
+- **Code Mode**：解释器接受受控语法，模型入口提供工具与受权限约束的 fetch 扩展；宿主限制时间、调用次数、输出与数据。不支持语法返回诊断，程序结束时中断未完成工作（[Code Mode 工具](../../opencode/packages/core/src/codemode/tool.ts#L74-L81)）。
+- **HTML/PDF 预览**：文件插件按文件类型进入专用预览，HTML 的 Blob URL 在 iframe 中运行，允许脚本、弹窗、表单与模态框，未授予同源权限；PDF 使用浏览器查看器。它与托管 Artifact 的 URL 对象是两个入口，后者的 HTTP 响应另外设置 CSP `sandbox allow-scripts`（[文件预览](../../opencode/packages/gui-plugins/src/file/artifact-view.tsx#L624-L638)、[托管视图](../../opencode/packages/server/src/handlers/artifact.ts#L210-L224)）。Notebook 与语言解释器集群本次未找到。
 
 ## 5. 用户交互与错误反馈
 
@@ -105,7 +105,7 @@ OpenCode 2.x 的生成式输出仍以真实文件系统为事实源：模型通�
 ## 9. 模型回流与对象感知
 
 - **历史回流**：每轮从会话历史重建模型消息，工具结果按状态转成结果或错误、推理转成思考内容；快照与步骤边界不进上下文。
-- **对象感知**：模型通过 `read`/`glob`/`grep` 感知工作区，通过 `artifact` 工具感知与更新已创建的产物；没有"会话产物清单"式查询协议，工作区文件仍是主要对象面。
+- **对象感知**：模型通过文件工具感知工作区，通过 Artifact 的读取与更新工具维护已知 id；实验性 HTTP list 另提供按会话/Provider 筛选，四个内建模型工具中没有对应清单工具，需区分模型目录与 HTTP 管理面（[Artifact.list](../../opencode/packages/core/src/artifact.ts#L322-L331)）。
 - **身份绑定**：工具调用 id 保证调用与结果配对；快照哈希提供跨步骤的文件版本连续性；Artifact 有稳定 id 与 URL。
 
 ## 10. 生命周期、资源治理与性能
@@ -118,9 +118,9 @@ OpenCode 2.x 的生成式输出仍以真实文件系统为事实源：模型通�
 
 **已确认边界：**
 
-- Artifact 是新增的对象层，但能力由 Provider 声明，本地默认 Provider 只提供文件托管；服务端代码与 Durable Objects 等能力属于其他 Provider。
+- Artifact 由显式实验开关启用；本地默认 Provider 只托管静态文件，服务端代码与 Durable Objects 等仅是 Provider 可声明的能力类型，本次未核实相应后端装配。
 - Code Mode 是受限解释器而非沙箱化 JavaScript，能力面由宿主显式提供。
-- 未找到容器级隔离执行、iframe 沙箱与 Notebook 运行时。
+- 文件插件提供带 sandbox 的 HTML iframe 预览；命令执行仍在本机子进程，容器级隔离与 Notebook 运行时本次未找到。
 - 回退粒度为整条消息；未找到 hunk 级接受/拒绝或三方合并。
 
 **未验证事项（需运行确认）：**

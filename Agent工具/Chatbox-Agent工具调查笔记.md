@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
@@ -20,7 +20,7 @@
 
 2. **命令契约分新旧两代**：新会话使用 `run_command`；macOS/Linux 先在 OS 文件沙箱执行，只有真实失败后的精确重试才可按审批策略升级到宿主，Windows 因无 OS 命令沙箱而直接按会话审批策略执行。旧会话快照继续暴露 `code_execution`/`user_exec`，保证历史工具调用可续跑。
 
-3. **list_files 工具名冲突**：知识库工具集（getToolSet）与文件系统工具集（buildFilesystemTools）都注册了 list_files，在 tools-builder.ts 的合并顺序中文件系统工具集后写入，知识库版本被静默覆盖。这是一个已确认的 bug。
+3. **知识库与文件工具有独立路由**：知识库统一暴露 `knowledge_base`，通过命令字段选择检索、分块读取或列举；文件系统保留 `list_files`。上传附件和沙箱文件共享一个 `read_file` 入口，按虚拟路径分派。MCP 收集阶段遇到规范化名称碰撞会抛错。
 
 4. **AppActionApprovalPausedError 不可被 agentFullAccess 绕过**：full_access 影响 run_command 的宿主审批与文件变更逐次确认；chatbox_cli 的计费/状态变更操作始终走独立暂停路径。
 
@@ -41,7 +41,7 @@
           ├─ webSearchTool / parseLinkTool        ← webBrowsing=true（独立于agentMode）
           ├─ getKBToolSet()                       ← KB配置 + 模型能力，独立于模式
           ├─ getSessionAttachmentRagToolSet()     ← session-retrieval附件
-          ├─ fileToolSet (read_file/search_file)  ← 有inline附件 + !codeExecution
+          ├─ fileToolSet (read_file/search_file)  ← inline附件或历史长工具结果，可委托沙箱读取器
           ├─ buildCodeExecutionTools()            ← agentMode=on + codeExecution
           ├─ buildFilesystemTools()               ← agentMode=on
           ├─ load_skill / run_command / install_skill ← Work Mode；旧会话兼容 user_exec
@@ -82,30 +82,19 @@
 
 ### 1.1 唯一构造点
 
-buildToolsForSession 是整个应用唯一装配 AI SDK ToolSet 的函数，返回工具和 instructions。它按顺序合并多个来源的工具集（普通对象展开），没有专门的命名空间隔离或冲突检测机制——后写入的键会覆盖同名先写入的键。
+桌面 renderer 生成主链由 `buildToolsForSession` 组装 AI SDK 工具及其说明，移动端另有专用装配路径。通用装配器按顺序展开多个工具对象，重复键以后写入者为准；MCP 子目录另有碰撞检查。
 
-```ts
-tools = { ...tools, ...kbToolSet.tools }          // tools-builder.ts:309
-tools = { ...tools, ...sessionAttachmentRagToolSet.tools }  // :313
-tools = { ...tools, ...fileToolSet.tools }        // :317
-tools = { ...tools, ...codeExecToolSet.tools }    // :321
-...
-tools = { ...tools, ...filesystemToolSet.tools }  // :332
-```
+工具集按 MCP、网页、知识库/附件检索、执行文件工具、上传附件、命令、图像、浏览器、文件系统及 Skills 等条件逐步合并；通用装配器仍使用普通对象展开。MCP 自身的名称碰撞检测在其收集器内完成。见 `src/renderer/stores/session/tools-builder.ts:436-581`。
 
-### 1.2 已确认的工具名冲突：list_files
+### 1.2 知识库命令与文件读取路由
 
-- `src/renderer/packages/model-calls/toolsets/knowledge-base.ts:224` 定义 list_files（列出知识库文件，分页）。
-- `src/renderer/packages/model-calls/toolsets/filesystem.ts:297-339` 也定义 list_files（列目录）。
-- 合并顺序中知识库工具集先写入，文件系统工具集后写入并覆盖，具体顺序见 `tools-builder.ts:309-332`。
+知识库使用单一工具 `knowledge_base`，其命令枚举为 search、read、list；注册返回值只包含这个键。文件系统的目录列举仍使用 `list_files`，二者可同时进入 Work Mode 工具集。检索结果附文件索引状态，读取会注明已完成或尚未完成的分块范围，帮助模型处理部分索引文档。见 `src/shared/tools/knowledge-base.ts:1-10`、`src/renderer/packages/model-calls/toolsets/knowledge-base.ts:64-107,197-225`。
 
-当 knowledgeBase 与 agentMode=on 同时成立时（kbSupported 为真），知识库版本会被文件系统版本静默覆盖，模型永远拿不到“列出知识库文件”的能力，只能拿到“列目录”。系统提示词仍会保留知识库工具集的说明，造成“提示词声称的工具”与“实际可调用的工具”不一致——这是模型侧的隐性行为缺陷，而不是安全问题。相关拼接逻辑见 tools-builder.ts:270-332；
-
-read_file 也有类似的双重定义：一个面向用户上传的大文件，一个面向沙箱文件；但二者互斥出现。needFileToolSet 要求 !codeExecution，因此不会同时注册，不构成冲突，判断见 tools-builder.ts:239。
+附件读取也能与沙箱文件读取共存。装配器先建立代码执行文件工具，再调用附件工具构造器并传入原有读取器；附件虚拟路径只访问本会话已登记的附件或长工具结果，其余路径委托原读取器。启用条件已允许存在代码执行选项。见 `src/renderer/stores/session/tools-builder.ts:355-356,461-494`、`src/renderer/packages/model-calls/toolsets/file.ts:106-145`。
 
 ### 1.3 Schema 来源
 
-所有内建工具的 inputSchema 都用 AI SDK 的 jsonSchema 直接手写 JSON Schema 字面量（未使用 zod 转换层），例如 user_exec 的 schema 只有一个 command 字段，见 tools-builder.ts:500-510。MCP 工具的 schema 来自 @ai-sdk/mcp 的 client.tools，即 MCP server 自身声明的 schema，Chatbox 不做二次校验或收紧。
+知识库、附件和浏览器等内建工具通过 `validatedToolSchema` 绑定参数校验。MCP 工具使用服务端声明的 schema，同时由 `mcpToolSchema` 投影出本地支持的结构约束；本地校验类型、必填字段和数量/长度等范围，复杂组合、引用、正则与格式语义交由服务端处理，并报告委托校验提示。见 `packages/chatbox-core/src/mcp/mcp-tool-schema.ts:5-102` 与 `src/renderer/packages/model-calls/toolsets/knowledge-base.ts:197-225`。
 
 ### 1.4 MCP 工具命名与冲突处理
 
@@ -121,15 +110,23 @@ function normalizeToolName(serverName: string, toolName: string) {
   return `mcp__${toolName}`
 }
 ```
-（`mcp/controller.ts:237-245`）
+（`packages/chatbox-core/src/mcp/controller.ts:717-724`）
 
-即工具名统一带 mcp__<server>__<tool> 前缀。但当 serverName 包含非 [A-Za-z0-9_-] 字符（例如中文名、emoji）时，前缀退化为 mcp__<tool>，**丢失 server 归属信息**。如果两个 server 都用了特殊字符名称且导出同名工具，就会在收集过程中互相覆盖，因为这里是直接对象赋值而无冲突检测。这是一个已确认但触发条件较窄的问题，源码见 `mcp/controller.ts:209-245`。
+常规工具名带服务器名前缀；服务器名称含中文或 emoji 等字符时，名称退化为 `mcp__<tool>`，仍会丢失服务器归属信息。收集器在写入前检查重复键，碰撞时抛出 `MCP tool name collision`，因此该场景会使工具集构造失败。实现已迁入 `packages/chatbox-core/src/mcp/controller.ts:680-724`；renderer 的同名文件只负责注入平台依赖。
 
-MCP 工具的 execute 被统一包一层 try/catch：调用失败不会抛出到 AI SDK 层，而是返回 `{isError: true, content: [...]}` 结构，避免脏 Error 对象写入对话历史导致下次请求本地校验失败（AI_InvalidPromptError）。实现见 `mcp/controller.ts:217-229`。
+MCP 工具的 execute 被统一包一层 try/catch：调用失败不会抛出到 AI SDK 层，而是返回 `{isError: true, content: [...]}` 结构，避免脏 Error 对象写入对话历史导致下次请求本地校验失败（AI_InvalidPromptError）。实现见 `packages/chatbox-core/src/mcp/controller.ts:689-705`。
 
 **依据**：[tools-builder.ts:291-359](../../chatbox/src/renderer/stores/session/tools-builder.ts)、[knowledge-base.ts:154-190,219-229](../../chatbox/src/renderer/packages/model-calls/toolsets/knowledge-base.ts)、[filesystem.ts:296-339](../../chatbox/src/renderer/packages/model-calls/toolsets/filesystem.ts)、[mcp/controller.ts:209-245](../../chatbox/src/renderer/packages/mcp/controller.ts)
 
 ---
+
+### 1.5 桌面内置浏览器与上传审批
+
+Work Mode 可注册 `browser`，前提是平台提供会话级浏览器实例；截图还要求视觉模型与图像结果管线。工具可读取渲染文本、列举交互控件、运行页面脚本、上传文件及截图。页面驻留在会话侧面板，用户可直接登录或操作，后续工具结果报告用户交互与已完成操作，供模型接续当前页面。见 `src/renderer/stores/session/tools-builder.ts:552-569`、`src/renderer/packages/model-calls/toolsets/built-in-browser.ts:189-203,222-228`。
+
+页面脚本持有最近结果的页面身份，返回已知或未知的执行结算；未知操作随后通过结果事件回报。上传按规范化路径检查会话工作目录和已授予目录，范围外文件需应用动作审批；审批绑定文件版本，Full Access 可跳过这项上传确认。图像生成等计费审批仍采用自己的强制路径。见同文件 `:278-309,313-368`。
+
+主进程用 Electron 原生网页视图保存页面与登录态，并拒绝相机、麦克风、定位及通知等网页权限。浏览器可访问本地地址，页面脚本与已登录网页操作具有真实站点副作用；不能把桌面命令沙箱的隔离结论套用于这条路径。见 `src/main/built-in-browser/controller.ts:118-179`。
 
 ## 2. 工具发现与注入：条件判定
 
@@ -142,16 +139,16 @@ buildToolsForSession 中每类工具的启用条件如下（`tools-builder.ts:22
 | MCP 工具（`mcp__*`） | `includeAgentTools`（见下） | 是 |
 | 知识库工具集 | `knowledgeBase && model.isSupportToolUse('knowledge-base')` | 否，独立于模式 |
 | session attachment RAG 工具集 | `sessionAttachmentIds.length > 0 && model.isSupportToolUse('read-file')` | 否（但通常伴随 agentMode） |
-| `read_file`/`search_file_content`（`file.ts`） | `!codeExecution && hasInlineFileOrLink && model.isSupportToolUse('read-file')` | 否 |
-| `code_execution`/`read_file`/`create_download` | `includeAgentTools && codeExecution` | 是 |
+| `read_file`/`search_file_content`（`file.ts`） | 附件或历史长工具结果存在，且模型支持文件读取 | 否 |
+| `read_file`/`create_download`；v1 或命令不可用时附加 `code_execution` | `includeAgentTools && codeExecution` | 是 |
 | `list_files`/`search_files`/`write_file`/`edit_file`（filesystem.ts） | `includeAgentTools` | 是 |
 | `load_skill`/`run_command` | `includeAgentTools`；旧契约才装配 `user_exec` | 是 |
 | `install_skill` | `includeAgentTools && codeExecution` | 是 |
 | `chatbox_cli` | `includeAgentTools && enabledSkills 含 'chatbox-product-info'` | 是 |
 
-includeAgentTools 要求 agentMode 为 on 且模型支持 agent 工具。注释明确指出：函数调用能力弱的模型（如 DeepSeek V3/R1）会因此拿不到任何 agent 专属工具（MCP、沙箱、skills、KB、code execution），但仍可用 web_search，判断见 `tools-builder.ts:231-232`。
+includeAgentTools 要求 agentMode 为 on 且模型支持 agent 工具。注释明确指出：函数调用能力弱的模型（如 DeepSeek V3/R1）会因此拿不到任何 agent 专属工具（MCP、沙箱、Skills 与命令），但仍可用 web_search，判断见 `tools-builder.ts:231-232`。
 
-agentMode 的最终取值由 computeEffectiveAgentMode 决定；支持条件要求平台类型为 desktop 且模型支持 agent 工具。因此**移动/Web 平台完全不进入 agent 工具路径**，源码见 `agent-harness.ts:85-88` 与 `GenerationService.ts`。
+桌面主链由模型工具能力和会话模式决定是否装配 Agent 工具。移动端另有 Capacitor Work Mode 路由：开启模式且模型支持工具时，构造移动执行工具并注入移动 MCP、Web 与图像工具；不能由桌面主链的支持判定推导移动端完全无工具。见 `src/renderer/adapters/CurrentGenerationService.ts:117-129`；移动宿主的具体权限与实机执行未在本节展开。
 
 `codeExecution` 选项本身还叠加了 Pro 校验和沙箱可用性探测：
 ```ts
@@ -297,7 +294,7 @@ agentFullAccess 是会话级设置（SessionSettings.agentFullAccess），生效
 2. write_file/edit_file 在 fullAccess=true 时不请求文件变更审批，因此不会抛暂停错误（`filesystem.ts:450-457,510-519`）。
 3. 每次绕过都会记录审计埋点，无论后续执行成功与否；这不是拦截。
 
-**不可绕过的类别**：AppActionApprovalPausedError（`app-action-approval.ts:1-20`）。该类型被识别为独立的 app_action_approval 暂停，与 agentFullAccess 检查完全脱钩；代码没有在抛出它之前检查 fullAccess。已确认的触发点是 chatbox_cli 中的图片生成审批卡。**结论**：agentFullAccess 严格限定在宿主命令执行与主机文件系统写入，不覆盖 Chatbox 自身状态变更或计费操作，触发分支见 `GenerationService.ts`。
+**不可绕过的类别**：AppActionApprovalPausedError（`app-action-approval.ts:1-20`）。该类型被识别为独立的 app_action_approval 暂停，与 agentFullAccess 检查完全脱钩；代码没有在抛出它之前检查 fullAccess。已确认的触发点是 chatbox_cli 中的图片生成审批卡。**结论**：Full Access 可跳过宿主命令、文件变更和浏览器范围外上传的相应确认；图片生成等计费应用动作仍要求结构化审批，见 `src/renderer/packages/chatbox-cli/images.ts:347-502` 与第 1.5 节。
 
 ### 6.4 pause/resume 的持久化
 
@@ -403,10 +400,7 @@ if (isWindows) {
 | --- | --- | --- | --- | --- |
 | `web_search` | 网页搜索 | renderer（`webSearchExecutor`→远程 API） | 无 | 外部网络请求；结果 URL 经 `sanitize-url`（渲染层） |
 | `parse_link` | 抓取指定 URL 正文 | renderer（`remote.parseUserLinkPro/Free` 或第三方 provider） | 无 | SSRF 面：URL 完全由模型/用户提供，无域名白名单校验 |
-| `query_knowledge_base` | 知识库语义检索 | renderer→`platform.getKnowledgeBaseController()` | 无 | 无（只读用户自己的知识库） |
-| `get_files_meta` | 知识库文件元数据 | renderer | 无 | 无 |
-| `read_file_chunks` | 读知识库文档分片 | renderer | 无 | 无 |
-| `list_files`（知识库版本，**被覆盖**） | 列知识库文件（分页） | renderer | 无 | 见 1.2，实际被 filesystem 版本覆盖，模型不可达 |
+| `knowledge_base` | 按命令检索、读取分块或列举知识库文件 | renderer→知识库 controller | 无 | 以会话绑定的知识库 ID 为范围，见 1.2 |
 | `list_session_attachments` | 列出大附件状态 | renderer | 无 | 无 |
 | `query_session_attachment` | 大附件语义检索 | renderer | 无 | 无 |
 | `read_session_attachment_parents` | 读附件父级文本块 | renderer | 无 | 无 |
@@ -415,12 +409,13 @@ if (isWindows) {
 | `code_execution` | 沙箱内跑 Node/PowerShell/Bash | main（sandbox） | 无（沙箱内执行，靠 SRT/无隔离边界代替审批） | **Windows 无 OS 隔离**；macOS/Linux 沙箱默认放行全部网络 |
 | `read_file`（沙箱版本，`code-execution.ts`） | 读沙箱内或主机绝对路径文件 | main（sandbox）/ renderer→`platform.fsRead` | 无（读操作不触发审批，即便是主机绝对路径） | **只读越权**：读主机任意路径不需要用户确认，只要模型能猜到/构造路径 |
 | `create_download` | 把沙箱文件标记为可下载 | main（sandbox `persistArtifact`） | 无 | 路径校验见 7.4；`display_name` 明确未用于磁盘路径，防止路径注入 |
-| `list_files`（filesystem 版本，实际生效） | 列目录（沙箱或主机） | renderer / main | 无（列目录不触发审批） | 主机绝对路径列目录不需确认 |
+| `list_files`（filesystem） | 列目录（沙箱或主机） | renderer / main | 无（列目录不触发审批） | 主机绝对路径列目录不需确认 |
 | `search_files` | 内容搜索（沙箱或主机） | renderer / main（ripgrep） | 无 | 同上 |
 | `write_file` | 写文件（沙箱直写，主机需批） | renderer→sandbox 或 `platform.fsWrite` | **条件式**：主机路径需 `FileMutationApprovalPausedError`，除非 `agentFullAccess` | 见 6.2 |
 | `edit_file` | 精确字符串替换编辑 | 同上 | **条件式**，同上 | 依赖 `old_text` 唯一性校验，非唯一时报错而非静默替换首个匹配 |
 | `load_skill` | 加载 skill 完整指令 | renderer→main IPC | 无 | Skill 正文为外部/第三方来源的自然语言指令，加载后原样回注模型（见 8.4 节） |
 | `install_skill` | 从沙箱路径安装 skill | main（复制目录+写 source.json） | 无（只做路径/命名/大小校验，无内容审查） | 见 5、10.2 节；安装后自动启用 |
+| `browser` | 网页读取、交互、脚本、上传与视觉截图 | renderer→main 原生网页视图 | 范围外上传条件式确认；Full Access 可跳过上传确认 | 持有登录态，可产生真实网页副作用，见 1.5 |
 | `run_command` | 项目命令与脚本 | macOS/Linux 沙箱优先；Windows/获批重试走 main 宿主 shell | 按会话 approval mode；精确失败重试可请求宿主升级，Full Access 可跳过逐次审批 | 当前 v2 命令入口，输出正文有界且长输出可落 capture 文件 |
 | `user_exec`（v1 兼容） | 宿主 shell 执行任意命令 | main（裸 spawn） | 白名单→AI→人工三级，Full Access 可跳过 | 只为旧工具历史续跑保留 |
 | `chatbox_cli` | 受限"虚拟 CLI"（账号/设置/历史/图片生成后台任务） | renderer（`executeChatboxCli`） | **条件式**：图片生成等计费类走 `AppActionApprovalPausedError`（不可被 `agentFullAccess` 绕过） | 仅当 `chatbox-product-info` skill 已启用时注册；计费边界独立于其他审批体系 |

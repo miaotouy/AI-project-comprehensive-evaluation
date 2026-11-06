@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -19,10 +19,10 @@ DeepChat 是 main process 驱动、renderer 订阅的持久化会话系统：
 - 会话事实源分两张表：`new_sessions` 承载会话身份与结构（标题、项目目录、置顶、草稿、子会话、编排策略等），`deepchat_sessions` 承载生成相关运行时状态（provider/模型/权限/生成设置）；id 由 main process 用 nanoid 生成（`src/main/agent/shared/appSessionService.ts:71`）。
 - `deepchat_messages` 保存 user/assistant 消息的顺序、内容、状态（仅 `pending`/`sent`/`error` 三档）和 metadata；assistant 的结构化 blocks 另存于 `deepchat_assistant_blocks`，流式更新时两表分别写入（blocks 表落内容，消息表状态不变）。
 - 消息事实源是 main process 的 SQLite；renderer message store 维护持久化缓存、解析缓存与 IPC 增量，`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象。
-- 队列输入是独立的 `deepchat_pending_inputs` 状态对象（待处理/已认领/阻塞/需重试/已消费五档），与已完成消息不混同；重启恢复把 claimed 但未物化的队列项释放回队列（`retry_required` 形态）、未读 steer 消息置 error。
+- 队列输入是独立的 `deepchat_pending_inputs` 状态对象（待处理/已认领/阻塞/需重试/已消费五档）。重启时 claimed 且未物化的项回到 pending 并加 restart hold，等待 resume；运行失败后释放的项进入 retry_required，等待逐项 retry，两条恢复路径分开处理。
 - 消息窗口按"估算测量 + spacer + anchor + 二分查找"只接收当前窗口的 `MessageListItem`，同时服务历史分页和流式追加。
 - 搜索分三层：会话内查找只匹配已加载的 display messages；跨会话历史搜索走 FTS5（触发器同步 + LIKE 回退），经 `sessionsSearchHistoryRoute` 服务 Spotlight；内存 MCP 服务器另把同一索引暴露为模型工具。
-- 上下文压缩的进行中与完成状态由消息 metadata 表达，并在启动时按持久化 marker 进行协调；它标示上下文边界，不改变普通 user/assistant 消息的三档状态模型（`src/shared/types/agent-interface.d.ts`、`createDeepChatAgentHarness.ts`）。
+- 上下文压缩状态由消息 metadata 表达，摘要和 cursor 同时写会话表与 Tape anchor；读取优先重建自最新 anchor，CAS 事务防止过期结果覆盖，启动时协调 marker。boundary-only anchor 可以标记尚无新摘要的上下文边界，普通消息仍沿用三档状态（`src/main/session/data/settings.ts:244-310`、`createDeepChatAgentHarness.ts:495-518`）。
 - 会话数据现在是跨设备同步的合并单元：一个 session 包包含会话行、元数据、Tape entries、消息与依赖内容，本地字段（项目目录、revision）不参与合并；删除以墓碑表达，避免旧副本复活（`src/main/sync/replica/units.ts`、`src/main/sync/replica/store.ts`，协议见独特功能笔记能力卡 9）。
 - Agent 侧新增只读的会话引用读取（`read_session`）：按 cursor 分页取另一会话的消息或搜索命中，预览 800 字符、详情 8192 字符，不写入被读会话（`src/shared/sessionReferences.ts`、`src/main/session/data/sessionReferences.ts`）。
 - 主进程把输出与状态从 session 服务中抽出为投影端口：`outputProjection.ts` 负责流式快照/终态/压缩事件的渲染层克隆，`sessionStatusProjection.ts` 负责状态与 usage 的发布；session 服务本身不再直接拼事件载荷（`src/main/session/outputProjection.ts`、`sessionStatusProjection.ts`）。
@@ -105,7 +105,9 @@ state: pending | claimed | blocked | retry_required | consumed
 - 进入：把 claimed 队列项置 `blocked` + `retry_required_at`，并清空关联 message ids（:352-354）；
 - 退出：回到 `pending`（:356-372）。
 
-**重启恢复（源码确认）**：`recoverInputsAfterRestart`（`pendingInputs.ts:392-468`）收口排队与 steer 输入——claimed 且有物化 user 消息的队列项直接消费，否则释放回队列并登记；已 claimed 的 steer 输入中未读待定 user 消息置 error（`transcript.ts:366-384`）；未 claimed 的 steer 项转为队列项（:419-424）。结果交给 pump 持有（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:512-513`）。
+**重启恢复（源码确认）**：claimed 队列项已有物化 user 消息则消费，否则释放为 pending 并登记 restart hold；其他 pending/blocked 队列项也登记 hold，已有 retry_required 项保持逐项重试语义。hold 交给 pump 后不会自动 drain，用户 resume 与逐项 retry 是两种独立动作（`pendingInputs.ts:429-460`、`pendingInputStore.ts:353-374`）。
+
+steer 恢复按是否已注入、是否有消息记录分别收口：已接受但尚未完成的 delivery 标记 unknown；blocked steer 转 queue 并进入 hold，其余未读消息经 transcript 结算（`pendingInputs.ts:456-499`）。启动装配把恢复集合交给 pump，再协调压缩 marker 与剩余 pending 消息（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:495-518`）。
 
 每个会话的活动 queue 项上限为 10。数据层在 admission 前以 `countActiveQueue` 计数，达到上限即拒绝继续入队；该容量不包含已经 consumed 的记录，见 `src/shared/pendingInput.ts:2`、`src/main/session/data/pendingInputs.ts:474`。
 
@@ -150,7 +152,7 @@ setMessageError(...)          :419-441（同上，status=error）
 - **重试**：`turn.retryMessage`（`turn.ts:333-375`）：以目标消息向上取最近 user 消息作为起点准备重试（`transcriptMutations.ts:43-66`），发送前（:68-73）执行 `deleteFromOrderSeq` 截断——**retry 是破坏性截断**，从源 user 消息起删除其后全部消息（`transcript.ts:597-617`），同步清理 blocks、结构化表、搜索文档、执行轨迹与搜索命中，并写 Tape 撤销记录。
 - **删除消息**：`turn.deleteMessage`（`turn.ts:377-381`）先取消运行再走事务层删除（:75-83）——同样从目标消息截断，且要求没有进行中的 pending 输入。
 - **编辑**：`turn.editUserMessage`（`turn.ts:383-390`）→ 事务层 `editUserMessage`（`transcriptMutations.ts:85-106`）：只允许 user 消息，**原地更新**该消息内容并同步 user 结构化表与搜索文档（`transcript.ts:522-563`），不物理删除尾随消息；界面流程随后自动触发 retry 完成截断（见 Chat UI 笔记 §6）。这是源码确认的"编辑改原对象、截断由 retry 承担"的语义。
-- **续写**：本次在 turn 操作面未找到独立的"续写"执行链；ChatPage 的 continue 动作复用 `retryMessage`（见对话请求与上下文笔记 §7）。
+- **续写**：ChatPage 的 continue 动作通过普通发送入口追加用户指令，保留已有消息，不触发 retry 的历史截断（`src/renderer/src/features/chat-page/composables/useMessageActions.ts:286-304`）。
 - **分支**：见 §1.5（复制到新会话，非版本指针）。
 - **失败保留**：失败 assistant 消息保留 `error` 状态与 error block（`buildTerminalErrorBlocks`，`transcript.ts:44-70`），不静默丢弃；用户可经 retry/fork 再生成。
 - **压缩消息**：compaction 生成专门的 assistant 消息（`createCompactionMessage`，:239-246）：content 为固定文案、metadata 带 `messageType:'compaction'` 与摘要时间戳；另有前插变体（:248-268）可把压缩消息插到指定位置并顺移排序号。
@@ -175,7 +177,7 @@ setMessageError(...)          :419-441（同上，status=error）
 - **流式一致性与 IPC 顺序**：生成侧快照节流为 renderer 120ms / DB 600ms（`src/main/agent/deepchat/runtime/echo.ts:5-6`）；终态事件 `chat.stream.completed`/`failed` 由 dispatch 的 finalize 入口发布（`src/main/agent/deepchat/runtime/dispatch.ts:2693-2735`）。
 - renderer 的 IPC 绑定（`src/renderer/src/stores/ui/messageIpc.ts`）按 (sessionId, requestId) 维护请求注册表：`settleStream`（:127-163）在终态后把流状态折叠进持久化记录并重载消息页（同一消息不换 DOM 节点）；增量记录合入缓存（:213-219）；流式快照以"generation + 时间戳"拒绝过期/乱序（:92-113）。
 - `useDisplayMessages`（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts`）的 `displayMessages` computed（:367-438）：先按持久化标识重建显示列表，流式记录未进入有序列表时临时插入，再用稳定的 render key（:339-355）把占位与最终落盘的同一消息关联，减少 DOM 替换；转换缓存保证 settled 对象稳定（:95-162）。
-- **多窗口**：active session 按 webContentsId 绑定（`desktop/sessionBinding.ts:14`）；renderer session IPC 定向更新按 webContentsId 过滤（`src/renderer/src/stores/ui/sessionIpc.ts:29-35`）。消息/流式缓存是窗口内内存态，本次未找到跨窗口广播 busy/streaming 的实现。
+- **多窗口**：窗口分别持有消息与流式缓存，主进程负责事件分发。已知本地会话的完整流定向给绑定窗口；无绑定窗口时保留广播回退。其他窗口收到每会话约 1 秒节流的 activity 信号，终态立即发出；非活动会话的最近视图缓存据此失效（`src/main/events/sessionEventRouter.ts:78-95,160-179`、`src/renderer/src/stores/ui/messageIpc.ts:230-245`）。会话状态另经版本事件进入 session store（`src/renderer/src/features/chat-session/store.ts:462-465`）。
 - 未运行网络中断、快速切换 session 或重复事件场景的实测（§10）。
 
 ## 7. schema 版本、导入导出与保留策略

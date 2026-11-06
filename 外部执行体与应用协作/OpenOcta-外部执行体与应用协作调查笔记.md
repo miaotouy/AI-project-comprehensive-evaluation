@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -16,7 +16,7 @@
 
 - 按本类目准入标准，OpenOcta 当前有三条可静态走通的协作主链：IM 渠道入站控制宿主 Agent、OpenAPI 第三方应用调用宿主 Agent、Hooks webhook 触发宿主 Agent。三者都最终汇入 `chat.send`，共享同一 Agent 运行时。
 - 宿主调用外部执行体的主链是 `local_agent` 工具。它可以探测本机安装的 CLI Agent、执行单个任务或并行执行多个任务，并回传合并后的文本输出。判定为“入口确认”：发起和执行路径清楚，但没有外部会话映射、流式回传、取消到真实执行体的完整语义，也没有审批。
-- 外部应用接入以 OpenAPI 为主。API key 绑定路径白名单、模型白名单、月 token 限额和数字员工绑定；非员工绑定时还可以按 key 过滤技能与 MCP，员工绑定则复用员工自身配置。请求同步等待 Agent 完成后返回 OpenAI 风格响应。判定为“主链确认”。
+- 外部应用接入以 OpenAPI 为主。API key 绑定路径白名单、模型白名单、月 token 限额和数字员工绑定；非员工绑定可提交技能与 MCP 资源选择，员工绑定复用员工配置；选择仍受聊天层二次合并和目录扫描边界约束。请求同步等待 Agent 完成后返回 OpenAI 风格响应。判定为“主链确认”。
 - IM 渠道覆盖钉钉、飞书、QQ、企业微信和微信。入站消息经 `hooksAgentSink` 转为 `HooksAgent` 调用，再进入 `chat.send`；回复通过通道运行时回发。判定为“主链确认”，但真实平台连接、重连和媒体消息未运行验证。
 - MCP 只作为工具接入层存在：宿主作为客户端连接 stdio 或 HTTP 服务并把工具桥接给模型。判定为“入口确认”，不具备账号、业务资源和动作级权限模型，不作为完整外部应用协作主链。
 - A2A 只暴露 `/.well-known/agent.json` 的 GET/HEAD AgentCard。检查 `src/pkg/gateway/http` 的路由注册和 `src/pkg/a2a` 包后，本次未找到 JSON-RPC 任务接收、任务状态查询或消息发送入口。ACP 客户端和服务端都是 stub，插件接口没有外部加载路径。三者判定为“候选观察”或“不纳入”。
@@ -56,7 +56,7 @@
 3. 请求路径必须命中 key 的允许前缀。默认允许 `ping` 和 `completion`，见 `src/pkg/apikeys/types.go:8-12` 与 `open_api.go:92-96`。
 4. `completion` 要求 `model` 字段，并检查模型白名单和月 token 预算，见 `src/pkg/gateway/http/open_api.go:145-157`。
 5. 处理器根据 API key 绑定模式生成 sessionKey。员工绑定使用 `agent:main:employee:<id>:run:open-api:<keyId>:<conversation>`；普通绑定使用 `agent:main:open-api:<keyId>:<conversation>`，见 `src/pkg/gateway/handlers/open_api_chat.go:149-162`。
-6. 处理器把模型引用和消息正文交给 `chat.send`；非员工绑定还会带上技能与 MCP 过滤资源，员工绑定则返回空资源让员工配置生效，见 `open_api_chat.go:69-76` 与 `185-196`。
+6. 处理器把模型引用和正文交给普通聊天入口；非员工绑定附带技能和 MCP 资源选择，员工绑定让员工配置接管（`open_api_chat.go:69-76,185-196`）。这些资源声明仍走聊天层的目录扫描与二次 MCP 合并，不能直接视为调用方的严格能力白名单；执行侧边界见 Agent 工具笔记。
 7. 处理器注册运行 waiter 并同步等待结果，成功后返回 OpenAI 风格 completion，并记录 token 用量，见 `src/pkg/gateway/http/open_api.go:170-190` 与 `open_api_chat.go:90-138`。
 
 该入口不支持流式响应，代码在收到 `stream=true` 时直接返回 501，见 `open_api_chat.go:40-42`。调用方身份是 API key，不是终端用户；同一个 key 的同一 conversation 会复用会话。

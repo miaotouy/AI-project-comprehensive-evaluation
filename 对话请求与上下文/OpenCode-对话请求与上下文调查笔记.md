@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -18,7 +18,7 @@
 
 关键事实：
 
-- **输入有两条投递语义**：`steer` 插入当前轮，`queue` 在轮结束后作为下一轮输入；两者都持久化在 inbox，执行器按 seq 消费，并发布 `session.inbox.*` 事件。
+- **输入先持久受理，再择机投递**：默认 steer，在安全步骤边界插入；queue 只在空闲边界进入，每次推进一个条目后重新判断。steer 中的压缩可前置到首个位置切换之前，其余保持入队顺序，因此并非全局 FIFO。投递事件在同一事务内消费 inbox 并形成可见消息（[inbox.ts 的 promote/pendingSteers](../../opencode/packages/core/src/session/inbox.ts#L562-L625)）。
 - **上下文按"指令 + 历史 + 工具"三段拼装**：系统提示来自 `packages/core/src/session/runner/prompt/system.txt` 与指令系统（项目/全局 AGENTS 文件、内置指令，`packages/core/src/instructions/`），历史来自 `SessionContext`/`SessionHistory`（按压缩边界裁剪），工具定义由 Tool 服务按权限规则集生成快照。
 - **压缩支持自动、溢出与手动三种触发**：`SessionCompaction` 依据剩余窗口与保留余量决定是否压缩，支持后台预计算摘要、本地摘要与 provider 原生窗口（`native.messages`）两种形态；压缩期间会话行标记压缩时间并产生 compaction 消息（running/completed/failed）。
 - **重试在下层策略中判定**：`runner/retry.ts` 依据 AI 错误与状态判定是否重试并给出退避延迟，重试状态写入 assistant 消息的 `retry` 字段；没有独立的重试端点，用户侧"重试"是再次提交。
@@ -37,7 +37,7 @@ Composer 提交（packages/app/src/composer/submit.ts）
        -> SessionModelRequest 构造请求（session/model-request.ts:106 baseTranscript）
        -> LLMClient 流式调用（packages/ai/src/llm.ts、loop.ts）
        -> SessionStep 消费 LLM 事件（runner/step.ts:65）：session.text.delta / reasoning.delta / tool.input.delta
-       -> Tool 服务执行工具（core/src/tool.ts，含权限判定与 Code Mode）
+       -> Tool 快照分派工具（叶子策略授权，含 Code Mode）
        -> 步骤收口（session.step.ended）-> 下一轮或 idle
   -> durable 事件落库（projector）与 SSE 广播（server/src/event-feed.ts）
 ```
@@ -48,7 +48,7 @@ Composer 提交（packages/app/src/composer/submit.ts）
 
 - **客户端提交**：App 的 `createComposerSubmit`（`packages/app/src/composer/submit.ts`）把 text、文件附件、上下文项、模型选择、delivery 组装为 prompt 请求；slash 命令在客户端先行解析（`composer/client-slash-command.ts`），命令类请求走 `session.command`，shell 模式走 `session.shell`。
 - **服务端受理**：`POST /api/session/:id/prompt`（`packages/protocol/src/groups/session.ts:337`）→ `SessionPrompt.prepare` 生成 inbox 条目；`POST /api/session/:id/command`、`/shell`、`/synthetic`、`/compact` 分别对应命令、shell、注入消息与手动压缩。
-- **执行对象**：每个会话同时只有一个执行者；执行认领是会话表上的租约（`time_suspended`/`resume_attempts`），认领失败则保持空闲。执行器 `drain` 会处理"位置切换/需要重载"等返回（`DrainResult.Complete/Moved/Reloaded`），必要时在新位置继续。
+- **执行对象**：全局执行服务在当前进程内按会话协调，同会话显式恢复会加入已有执行，提示唤醒可合并，不同会话可并行。runner、工具和模型解析绑定工作位置；位置切换或重载后重新选取该位置的服务。数据库执行 claim 记录忙碌期的恢复意图，不提供分布式租约、跨进程互斥或副作用恰好一次保证（[execution.ts](../../opencode/packages/core/src/session/execution.ts#L73-L146)）。
 - **状态表达**：`session.execution.started/succeeded/failed/interrupted` 事件标记执行生命周期，`idle` 消息标记一轮结束（带 succeeded/failed/interrupted 结果），不设独立的 busy/retry 三态事件。
 - **并发**：不同会话可并行执行；同会话输入经 inbox 串行化，`steer` 语义让用户在生成中追加指导而不打断当前步骤。
 
@@ -86,7 +86,7 @@ Composer 提交（packages/app/src/composer/submit.ts）
 
 - **重试**：`runner/retry.ts` 的策略输入是 AI 错误与重试次数，输出是否重试与延迟；`model-retry.ts` 处理模型层面的可重试错误；重试状态在 assistant 消息上可见，客户端据此展示等待。
 - **中断**：取消执行会把进行中的工具与步骤标记为 aborted（"Tool execution interrupted"/"Step interrupted"），并发布 `session.execution.interrupted`；未完成的 assistant 消息保持可识别状态。
-- **恢复**：执行中断后会话行的租约与 `resume_attempts` 支持重启续跑；`execution/restart.ts` 负责重建执行。
+- **恢复**：成功、失败和用户主动中断释放执行 claim；服务关闭中断及进程死亡保留它。启动恢复扫描顶层会话的遗留 claim，并在续跑前持久增加次数，默认每次执行最多自动恢复 10 次，超额终结。恢复具有至少一次语义，崩溃前已发生的外部副作用可能重复；托管服务的前任进程退出与注册锁承担进程交接约束（[restart.ts](../../opencode/packages/core/src/session/execution/restart.ts#L24-L83)）。
 - **无独立重试端点**：重试由执行器内部完成，用户重发是新的输入。
 
 ## 7. 设计取舍与已确认边界

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/gregorik/Manifold-Desktop`
 >
-> 调查更新日期：2026-08-12
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3d7448fb2e6053056da6d6c126e08f90b94cda4f`（分支：`main`）
 >
@@ -58,7 +58,7 @@ input-bar.js doSend（读取输入、清空 textarea）
 
 - **Provider 解析**：`HandleChatSend` 经 `ProviderRegistry::GetProvider` 查找，未找到即回 `CHAT_ERROR`（`MainWindow.xaml.cpp:764-768`）；Provider 在窗口构造时注册（Gemini/OpenAI/Anthropic/Proxy/Ollama/OpenAI-compat，`:129-155`）。
 - **参数交接（多个前端字段在后端不消费）**：
-  - `req.temperature` 取 `m_currentSettings.temperature`（`MainWindow.xaml.cpp:775`），前端 payload 中的 `temperature` 字段无人读取——前端发送值不生效（settings-store 的前端副本才是实际参数来源）；
+  - `req.temperature` 取 `m_currentSettings.temperature`（`MainWindow.xaml.cpp:775`），前端 payload 中的 `temperature` 字段无人读取——前端发送值不生效（实际来源为已保存到宿主的全局设置）；
   - `req.tools` 只来自 MCP 注入（`:786-789`），前端 `tools` 字段（`provider-api.js:11`）同样无人消费；
   - 设置里的 `streamResponses` 开关在发送路径无读取点（grep 仅命中 settings-store/settings-panel/SettingsManager），界面开关不改变行为。
 - **协议映射**：OpenAI 系 `BuildRequestBody` 把 system prompt 作为首条 system 消息、role 直传、parts 转内容数组、工具转 function schema（`OpenAIProvider.cpp:20-86`）；Gemini `BuildRequestBody` 把 role 映射 `assistant→model`、system prompt 放 `systemInstruction`、温度放 `generationConfig`、工具转 `functionDeclarations`（`GeminiProvider.cpp:16-88`）。网络层统一走 `HttpClient::StreamPost`（`HttpClient.cpp:93-155`，WinHTTP + SSE 行解析在各 Provider 内）。

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -30,7 +30,11 @@
 
 ## 系统边界与数据主链
 
-Cowork 的数据链为创建 session -> 路由启动 agent run -> 循环产生 turns/工具输出 -> 同步 `messages` 与 turns -> persist。用户删除 session 时还要区分会话记录和会话沙箱，后者在 `agent-workspace/sessions/<id>`，与普通 Chat 的 thread 沙箱为同级目录；CLI 则在项目维度恢复最近或指定 ID 的 thread（`web-app/src/routes/cowork.tsx:439-451,1015-1102`、`src-tauri/plugins/tauri-plugin-agent-tools/src/workspace.rs:57-80,317-345`）。
+Cowork 的数据链是创建 session → 占用该 session 运行句柄 → 流式 turns 暂存在运行 store → 正常、停止或错误收尾时统一提交 turns、模型 `messages`、子 Agent 结果与用量 → 经 backendStorage 持久化。模型与工作目录属于会话，子 Agent 结果按 runId 合并，后续没有派发子 Agent 的回合不会清掉旧结果。v0 旧 history 无法表达工具调用，version 1 迁移从 turns 重建模型消息并保留旧字段（[cowork.tsx:1029–1046](../../jan/web-app/src/routes/cowork.tsx#L1029-L1046)、[useCoworkSessions.ts:233–253](../../jan/web-app/src/hooks/useCoworkSessions.ts#L233-L253)、[useCoworkSessions.ts:323–352](../../jan/web-app/src/hooks/useCoworkSessions.ts#L323-L352)）。
+
+Cowork 的显示记录与模型历史允许分化：`/compact` 只压缩后者；编辑、重试和删除较早提问会按“第几个真实用户问题”同步截断两份数组，跳过仅用于子 Agent/监视器通知的系统 ping，原地改写后续历史，保留提问的媒体与文件附件，但不保存普通 Chat 式兄弟版本，也不回滚这些工具已经更改的工作区文件。最后一次提问重试保留问题、移除其后 Agent 产出（[useCoworkSessions.ts:114–141、255–295](../../jan/web-app/src/hooks/useCoworkSessions.ts#L114-L141)、[cowork.tsx:1080–1117](../../jan/web-app/src/routes/cowork.tsx#L1080-L1117)）。
+
+删除会话记录和删除文件沙箱是两层动作；沙箱位于 `agent-workspace/sessions/<id>`，与普通 Chat 的 thread 沙箱为同级目录。CLI 项目线程又使用另一条恢复链，以上 Cowork 的设置存储与消息截断语义不适用于 CLI（`src-tauri/plugins/tauri-plugin-agent-tools/src/workspace.rs:57-80,317-345`）。
 
 ```text
 ChatInput 发送（新建线程走 createThread，线程内走 processAndSendMessage）

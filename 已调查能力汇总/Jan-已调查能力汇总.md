@@ -2,11 +2,11 @@
 
 > 汇总对象：`Jan（https://github.com/janhq/jan）`
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：14 个类目笔记——Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；代码快照 `12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题归并重复能力，保留证据状态并链接来源；未新增源码调查
+> 汇总方法：阅读各来源笔记并按主题归并；结合旧新源码增量，静态复核扩展安装与执行域、RPC 客户端工具、Cowork 请求与会话、普通 Chat 编辑分支、HTML 预览反馈五条链，保留各自证据边界
 >
 > 汇总范围：覆盖上述 14 类目；`仓库分布`、`应用界面基础设施` 结论单列工程小节；不做跨项目横向比较
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多表面，无后端聊天业务服务，React 前端（web-app）经 AI SDK 访问本地 llama.cpp worker / mlx-server 或远程 provider。工程形态为 Yarn workspaces monorepo，能力由 6 个扩展包提供、由可运行时安装的 worker 隔离运行时承载，契约与 SDK 抽在 `packages/`、对外协议 schema 放 `protocol/`。已调查 14 个类目，功能主体为聊天、工具、角色、渠道与本地推理服务，区别于一般 Chat UI 的独特面在于“随附推理引擎的 worker 托管 + 服务端 MCP 编排 + Jan Agent CLI/TUI + Agent 运行时对外协议族 + 可运行时安装的隔离扩展”。
+Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多表面，无后端聊天业务服务，React 前端（web-app）经 AI SDK 访问本地 llama.cpp worker / mlx-server 或远程 provider。工程形态为 Yarn workspaces monorepo，内置能力拆为 6 个宿主进程扩展包，第三方扩展可运行时安装并在 worker 隔离执行，契约与 SDK 抽在 `packages/`、对外协议 schema 放 `protocol/`。已调查 14 个类目，功能主体为聊天、工具、角色、渠道与本地推理服务，区别于一般 Chat UI 的独特面在于“随附推理引擎的 worker 托管 + 服务端 MCP 编排 + Jan Agent CLI/TUI + Agent 运行时对外协议族 + 可运行时安装的隔离扩展”。
 
 ## 完成度速览
 
@@ -51,11 +51,14 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 - **现场恢复**：待发送初始消息经 `sessionStorage`（键 `initial-message-<threadId>`）恢复；活跃分支经线程 metadata 的 `activeRootId` 重建；`resume:false` 不恢复未完成回合。【代码确认】[Chat UI 调查笔记](<../Chat UI/Jan-ChatUI调查笔记.md>)
 - **缓存一致性**：per-thread 锁串行化同一线程消息写；桌面 create 去重 + modify upsert、SQLite `INSERT OR IGNORE`/`ON CONFLICT DO UPDATE` 双层防重复。【代码确认】[会话与消息管理调查笔记](../会话与消息管理/Jan-会话与消息管理调查笔记.md)
 
+- **Cowork 独立会话**：显示 turns 与模型 UIMessage 历史分别保存到设置后端；`/compact` 只压缩后者，编辑/删除提问同步截断两份历史，不保留兄弟版本，也不回滚已修改文件。子 Agent 结果按 runId 合并，旧版 history 从 turns 迁移。[会话与消息管理调查笔记](../会话与消息管理/Jan-会话与消息管理调查笔记.md)
+- **Cowork 运行与预算**：不同 session 可并行，同一 session 一次只占一个句柄；100 步、200000 token 均是单次用户请求限额。正常完成续发原 session 队列，错误清队列，停止或预算触限保留；离开路由不自动取消运行。[对话请求与上下文调查笔记](../对话请求与上下文/Jan-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Jan-ChatUI调查笔记.md>)
+
 ### 生成与创作
 
 - **流式生成管线**：前端直连模型服务——AI SDK `useChat` + 自研 `CustomChatTransport`，`experimental_throttle:50` 只节流 UI 状态、`resume:false`；推理参数不经 AI SDK 层，由 `createCustomFetch` 注入 HTTP body；流式事件链含工具执行循环、用量收集与 metadata 回写。【代码确认】[对话请求与上下文调查笔记](../对话请求与上下文/Jan-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Jan-Chat调查笔记.md)
 - **消息渲染**：React 组件 + AI SDK parts 结构化模型，正文按 `part.type` 分派；Markdown 以 Jan fork 的 streamdown 为核心（remark GFM/数学 + rehype KaTeX/harden 消毒）；流式期间有 `useDeferredValue` 合并 token、推迟 Shiki 高亮、memo 比较器等优化；引用经 `citation-parser` + grounding 句子级余弦校验。消息列表全量渲染、无窗口化。【代码确认】[消息渲染器调查笔记](../消息渲染器/Jan-消息渲染器调查笔记.md)
-- **HTML/SVG Artifact 沙箱预览**：`归并已有类目`（消息渲染器 / 生成式输出与运行时）。设置项 `renderHtmlArtifacts` 默认关闭，把 html/svg 围栏从消息文本拆出，在严格 CSP + sandbox 不透明源 iframe 中运行，默认禁网、无 postMessage 宿主通道；渲染期从消息文本推导，无独立对象身份。【归并已有类目】[生成式输出与运行时调查笔记](../生成式输出与运行时/Jan-生成式输出与运行时调查笔记.md)
+- **HTML/SVG Artifact 沙箱预览**：设置默认关闭，从消息围栏派生严格 CSP 与不透明源 iframe，默认禁网。公共壳有错误/框选消息发送脚本，普通 Chat 卡片未消费；Cowork 的 srcdoc 面板只消费错误提示，未接模型回流。围栏无独立对象身份，Cowork 文件则可由工具读取和定向修改。【归并已有类目】[生成式输出与运行时调查笔记](../生成式输出与运行时/Jan-生成式输出与运行时调查笔记.md)
 - **输出生命周期与能力等级**：模型输出以消息正文为主承载（主体 G1 富静态结果），HTML artifact 提供沙箱运行环境（G3 窄实现）；工具结果（Web 搜索/RAG/MCP）以只读卡片展示。[生成式输出与运行时调查笔记](../生成式输出与运行时/Jan-生成式输出与运行时调查笔记.md)
 - **消息操作与版本导航**：编辑（纯文本替换、流式态禁用、Ctrl+Enter 保存）、删除、复制、Continue（仅末条且 `metadata.stopped`，原地续写）、Regenerate（仅末条，生成兄弟版本）、版本 `< n/m >` 切换器渲染在消息项操作区。【代码确认】[Chat UI 调查笔记](<../Chat UI/Jan-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Jan-会话与消息管理调查笔记.md)
 
@@ -92,8 +95,8 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 - **能力三：Jan Agent CLI/TUI — `主链确认`**：独立 crate 的裸 `jan` 打开终端 Agent 控制台，`jan cli agent run` 非交互运行项目 Agent，`jan cli models/threads/mcp` 管理模型、线程与 MCP server，`jan config` 管理 `~/.jan/config.toml` 的 Provider 凭据；Provider 解析优先级为 CLI 参数/环境变量、项目 `agent.toml`、桌面 `settings.json`（只继承）、全局 `config.toml`；仅用远程 Provider，不含本地推理与 GUI 依赖。旧 `jan serve` / `jan launch claude|openclaw` 已不在命令树中。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
 - **能力四：MCP 智能工具路由 — `主链确认`**：用独立小模型对用户意图做工具级路由选择，LLM 不可用时降级关键词分类（七类 fallbackReason），路由决策与降级原因写入遥测；路由结果冻结（签名 + 缓存）以保持提示缓存稳定；为 Agent 工具类目的增强形态，不单独计主贡献。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Jan-Agent工具调查笔记.md)
 - **归并已有类目项**：本地 OpenAI/Anthropic 兼容 API 服务与按 `model_id` 的静态路由 → 归并 LLM 渠道与生成式输出与运行时类目；双本地运行时（llamacpp + MLX）→ 归并能力一的运行时管理面与运行时类目；Hub 模型市场/量化分档/模型下载 → 归并运行时类目；HTML/SVG Artifact 围栏预览 → 归并消息渲染器类目；RAG 附件检索与 `web_search`/`web_fetch` → 归并 Agent 工具类目；Assistant/Agent、自动标题、首次运行向导、OS keyring → 归并角色/会话/设置类目；Agent 项目记忆（FTS5/BM25、只索引最终回答、有界摘要）→ 归并检索增强；子 Agent 独立 git worktree 与 shell 沙箱升级审批 → 归并 Agent 工具；外发请求 provenance 摘要与 OTel → 归并 LLM 渠道/运行时；Cowork 产物卡与预览面 → 归并生成式输出与运行时。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md) `归并已有类目`
-- **能力五：Agent 运行时对外协议族 — `主链确认`**：会话级 LF 分隔 JSON-RPC 让外部客户端声明自己的 host tool 并由运行时派回执行（`initialize`/`session.start`/`session.tools.set`/`turn.start`/`tool.respond`/`turn.steer` 序列），协议由 `protocol/schema.json` 与 `rpc-schema.json` 固定并生成 `packages/adk` 与 `adk/python` 两套客户端；同一内核另有实验性 ACP stdio 入口，反向的 `jan mcp serve` 把只读内置工具作为 MCP server 交给别的 Agent。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
-- **能力六：可运行时安装的 worker 隔离扩展 — `主链确认`**：扩展以 npm 包形式在运行时安装，宿主用 `@janhq/extension-api` 校验清单、API 版本与权限，扩展本体跑在 worker 里经 RPC 使用宿主能力（`@janhq/extension-runtime` 的握手/句柄/端点），贡献点（设置项、服务、引擎）注册进 UI 与服务注册表；旧版的固定目录加载与 localStorage 扩展设置已迁移到宿主设置存储。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)Artifact、Hub 下载、RAG、web_search 不重复计数；统计表重排待待查清单全局待办处理。详见 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)
+- **能力五：Agent 运行时对外协议族 — `主链确认`**：外部客户端启动 `jan cli agent rpc`，通过 stdio 驱动 Jan 的 Agent，并声明、执行自己的 host tool；方法名采用斜杠分隔，握手需 initialize 请求与 initialized 通知。进程可持有多 session，同时只跑一个回合；session/resume 仅查询进程内状态，非临时会话在成功完成后可写项目线程。同一内核另有实验性 ACP 入口，反向的 `jan mcp serve` 提供受限工具。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
+- **能力六：可运行时安装的 worker 隔离扩展 — `主链确认`**：Installed/Catalog 界面先暂存包，再展示首次权限或升级权限差异，确认后安装并串行重载；第三方扩展在 worker 中按稳定 API 与授权调用宿主。六个内置包则在宿主进程直接激活并可用内部服务，限额不同。安全模式只停止已安装扩展，短期反复崩溃的扩展本次应用会话内禁用。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
 
 ## 工程与基础设施摘要
 
@@ -103,7 +106,7 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 - **语言与运行时分工**：TypeScript 46.3%、Rust 53.2%（主体是并入 `src-tauri/src/core/` 的 Agent 核心与 CLI/TUI，`tui.rs` 单文件约 5.4 万行；服务端代理 `proxy.rs` 约 3.1 千行）、Swift 0.5%（`mlx-server` 仅 macOS）、Python 用于 autoqa 与 `adk/python`；llamacpp 引擎不入库，构建期经 `src-tauri/build-utils/` 预编译并打包进随附 worker。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **文档与测试分布**：文档 217 文件/27,124 行（docs 为 Nextra 文档站）；测试 490 文件/102,904 行（vitest 为主、共置 `__tests__`，含 `e2e/` 的 WebdriverIO 用例，Rust 用内嵌 `tests.rs` 不计入口径）。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
 - **跨平台与发布组织**：桌面覆盖 Windows/macOS/Linux，Tauri 提供 iOS/Android 构建入口（`--features mobile`，移动端 SQLite 持久化）；`.github/workflows` 42 个 workflow 覆盖 CI/发布/文档站/npm 发布/autoqa，并有独立的 CLI 构建模板（`template-cli-build-*`）；扁平化打包在 flatpak 目录。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
-- **扩展机制与 ServiceHub 契约**：运行时扩展宿主在 `web-app/src/lib/extensions/`（安装/开发/内置三条 loader + 贡献点 store + 调度器），扩展包本体跑在 worker 里、只能经 `@janhq/extension-api` 与 RPC 句柄使用宿主能力；平台服务走 ServiceHub（近 20 个服务），扩展贡献的服务走 `ServiceKeys` 注册表，二者对齐。仓库内扩展为 6 个包（llamacpp/mlx/assistant/rag/vector-db/download；旧的 conversational 已并入 assistant）。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)
+- **扩展机制与 ServiceHub 契约**：内置包在宿主进程激活，安装及开发来源在 worker 中经 RPC 调用受控 API；两者共享贡献注册与 dispatcher，内部服务权限和运行限额不同。平台服务走 ServiceHub，扩展贡献的服务走 `ServiceKeys` 注册表。仓库内扩展为 6 个包（llamacpp/mlx/assistant/rag/vector-db/download）；线程与消息桥接已并入 core 宿主。[仓库分布调查笔记](../仓库分布/Jan-仓库分布调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
 - **界面栈与公共组件**：React 19 + Vite 6 + Tailwind 4 + TanStack Router（文件路由）+ zustand 5 + TanStack Virtual；`components/ui` 下 27 个 shadcn 风格 Radix 封装，Toast 用 sonner，移动抽屉用 vaul，无内部设计系统包。[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
 - **应用装配与 Provider 栈**：ServiceHubProvider（水合设置 store）与 ExtensionProvider（加载扩展，20s 看门狗）两层"就绪才渲染"；辅助窗口（日志/系统监控/API 日志）复用同一 bundle 与路由树，按 webview label 跳过扩展加载；桌面窗口由 Rust 侧运行时创建。[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)
 - **状态所有权与持久化基座**：公共界面状态几乎全部为模块级 zustand 单例（组件树之外）；`backendStorage` 实现 StateStorage 接口，桌面落盘 `<jan_data>/settings.json`（Rust 500ms 防抖原子写，供 jan-cli 等进程外消费者可读），Web 构建退化为 localStorage，要求 skipHydration + 显式水合。[应用界面基础设施调查笔记](../应用界面基础设施/Jan-应用界面基础设施调查笔记.md)

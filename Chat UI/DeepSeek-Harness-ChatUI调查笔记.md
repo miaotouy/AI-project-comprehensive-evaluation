@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web`、`packages/client/*`、`packages/host/*`、`packages/api/*`、`packages/typert/`、`packages/extensions/ui-cordis`、`packages/core/tools/src/presentation.ts`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -64,7 +64,11 @@ apps/web 是一个薄 Vite 应用：入口 `main.ts` 只有十行，找到挂载
 
 ### 加载链与装配
 
-壳的启动是两阶段：`boot-page.ts` 先渲染 loading 页并并行预取声明为立即加载的基础设施条目；`boot-client.ts` 解析宿主注入的启动图，建立客户端模块系统（懒 CJS 表：执行 bundle 只注册工厂，副作用在首次 require 时物化），随后挂载 vendored cordis Loader，把模块系统注入其内部槽（以模块 stub 与进程探针替换实现浏览器化），逐条创建图条目，`loader.await()` 后做全 ACTIVE 扫描（列出 import 失败、apply 抛错与等待缺失服务的纤维），成功即一次性翻到真实 UI。`mount.ts` 通过依赖纤维在 `uiRenderer` 上挂载：服务就绪时装好挂载效应，服务被替换时重装——这是 `app-shell` 伪条目消失后的装配方式。每个 slot 条目带独立错误边界：一个插件崩了只黑一块卡片，boot 期失败则整页停在 loading 并展示失败报告；`boot-client.ts` 另维护一张必需的 entry 名单作为启动 fatal set。
+壳先显示加载页并预取基础设施，再由宿主清单创建浏览器插件树。懒 CJS 模块表先登记工厂，首次 require 才物化插件；Loader 等待本轮装配静止后，检查导入、激活失败与等待服务的条目（`packages/client/web/src/boot-client.ts:57-78`）。
+
+启动审核区分必需与可选条目。模块系统、Session 控制、renderer、布局、聊天和侧栏等在清单中出现时必须激活，否则启动拒绝并报告所有异常；其他失败条目只告警，已激活兄弟仍可进入界面。可选插件若恰好提供必需项依赖的服务，其失败也会间接阻止启动（`boot-client.ts:15-33,96-134`）。这与运行期 slot 条目的渲染错误边界是两个层次。
+
+挂载由 `mount.ts` 对 renderer 服务建立依赖效应；服务替换时重装。静态源码确认装配与失败分流，真实浏览器的加载页切换和插件故障表现未运行验证。
 
 ### slot 组合模型
 
@@ -161,7 +165,7 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - 多会话并行是常态：所有会话共享一条 mux 流，Session 常驻后台消费帧，侧栏行带运行标记（running 来自 `host/session-status`），可同时多会话在跑；Web 端没有 Pi 那样的并发/队列选择器——新会话即新 blank 会话，发送在每会话各自 Composer 内。
 - 子 agent 会话在侧栏以 catalog 形式列出（`session.list` 快照按 parentId 过滤），子会话可进入阅读（one-shot 只读、不可恢复发送），父会话侧展示运行/中断标记；子会话自身是独立 sessionId 的普通会话，切换进子会话即切换当前会话。
 - 后台任务：`session/jobs` 帧 + ui-jobs 在会话头部列出（jobsBySession 镜像）。
-- 跨窗口：同一 host 进程可服务多个标签页（每标签页独立的双流连接），blank 位、会话增删、运行状态经帧广播跨标签页对齐；未找到草稿或当前会话的跨标签页同步机制（刷新即回落到宿主权威列表）。
+- 跨窗口：同一 host 进程可服务多个标签页（每标签页独立建立一条 mux 连接），blank 位、会话增删、运行状态经帧广播跨标签页对齐；未找到草稿或当前会话的跨标签页同步机制（刷新即回落到宿主权威列表）。
 
 ## 11. UI 状态所有权与同步
 
@@ -182,7 +186,7 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - **对象层承接恢复**：工作台以会话对象层承接现场恢复。
 - **Web 组合覆盖的场景**：冷启动空白会话、长历史分页、会话引用、等待用户提问的路由；测试夹具把"以问题表面为准、不依赖底层运行状态"这一选择写成可回放断言（`apps/web/tests/{cold-blank-session,complex-history,built-boot}.ts`）。
 - **模型选择器**：可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`packages/client/runtime/src/client/workspaces/service.ts`）。
-- **双 cordis 树 + 运行时插件加载**：浏览器复用宿主的 Loader 治理，模块系统自研（懒 CJS 表 + 同源外部脚本到达）；代价是 dev 每次改插件要重建 bundle + 纤维重挂，HMR 一次只重载一个插件、React 状态丢失（数据层不动）。web bundle 中 hmr 行当前默认 disabled（`cordis.patch.yml` 的 TODO）。
+- **双 Cordis 树与运行时插件加载**：浏览器复用宿主 Loader 治理，模块使用懒 CJS 表与同源外部脚本。HMR 仅在开发组合装配，插件需先重建 bundle，再由接收器重挂；React 局部状态随重挂丢失，对象数据层保留。生产组合不装配开发 HMR（`cordis.patch.yml`）。
 - **对象层 React-free + uSES 快照**：令牌流不打乱渲染树，行级重渲染靠引用稳定；代价是自研快照/批处理机制（`markDirty` 微任务、`notifyNow` 仅用户手势直回声、`animation-frame` 流式合并）。
 - **重连按 generation 重建 transport、按 journal 修补业务窗口**：Connection 等 `$events` ready 后发布 generation；Session journal 再用 opening snapshot、tail page 与 follow reopen 修复缺口。业务流不再是旧式双 socket。
 - **浏览器认证独立于 Host 信任检查**：启动 token 只可在根 GET 换取签名 cookie；所有 RPC 与 WebSocket 都要求 cookie。Host/Origin 检查先于认证，用于 DNS rebinding 与 cross-site 防护（`packages/client/connection/README.md:30-46`）。
@@ -195,7 +199,7 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 
 - 未运行 `dsh web`：视觉效果、动画、CSS 主题、焦点顺序、键盘可用性、IME 行为、滚动与流式性能均未实测（静态代码只确认入口、状态与事件绑定）。
 - 流式期间的行级重渲染、100,000 chunk 压力场景只看到测试声明，未观测实际帧率。
-- 多标签页并发、重连间隙丢帧、HMR 链（默认 disabled）未实测。
+- 多标签页并发、重连间隙丢帧、开发组合的 HMR 重建与重挂链未实测。
 - 审批/问答的完整交互（ApprovalPanel 接管 Composer、QuestionComposer 回答流程）未实测。
 - schema-form 只核对了模型层与使用点；ProviderEditor 的表单交互、设置保存冲突行为未实测。
 - `ui-chat` 的 process grouping/折叠显示模式、turn 导航与 `loadThrough` 的 turn 对齐窗口只在文档与源码层确认，未运行验证。

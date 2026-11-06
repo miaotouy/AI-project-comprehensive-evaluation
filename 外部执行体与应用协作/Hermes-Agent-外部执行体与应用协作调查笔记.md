@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -16,7 +16,7 @@
 
 Hermes Agent 的多表面控制与反向 Agent 接入均达到 `主链确认`（静态证据）：
 
-- 桌面、TUI 和 Web 控制面共享同一个 Python `tui_gateway`/`AIAgent` runtime、profile 数据库和 session lineage，并通过 JSON-RPC 提交、流式接收、取消和恢复任务。
+- 桌面、TUI 与 Web 复用 Python Agent 核心和 profile 数据库；规范网关与 legacy tui_gateway 桥分别提供控制协议。常规桌面本地路径连接规范 owner，旧桥的 RPC 名与恢复行为需按其实际入口解释。
 - `acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code/Zed/JetBrains 等外部宿主，覆盖会话新建、恢复、提示、分叉与取消操作。当前快照里该适配器已从单一 server 文件扩成一组模块：`gateway_server.py`/`gateway_commands.py`/`gateway_media.py`/`gateway_reply.py`/`gateway_session_meta.py` 承接 Hermes gateway 会话与媒体，`catalog.py`/`model_catalog.py` 提供模型目录，`elicitation.py` 处理宿主侧交互式征询，`modes.py` 声明执行模式，`edit_approval.py`/`permissions.py` 承接编辑审批。
 - REST API gateway（`api_server` 平台）提供补全、响应与运行类端点，以及会话管理与 cron 任务接口；具体路由见下方主链。
 
@@ -31,12 +31,13 @@ Hermes 自身是执行体；外部对象是桌面 renderer、Node/Ink TUI、Web 
 ## 完整主链
 
 ```text
-Desktop
-  -> spawn hermes serve --host 127.0.0.1 --port 0
-  -> WebSocket JSON-RPC prompt.submit
-  -> tui_gateway 启动 AIAgent.run_conversation
-  -> message.delta/tool.*/message.complete 事件回 renderer
-  -> session.interrupt/resume/branch/steer/redirect 控制后端
+Desktop（常规本地）
+  -> hermes gateway ensure --json，附着或启动规范 owner
+  -> 私有原生端点与一次性拨号 ticket
+  -> prompt.submit，稳定请求 id 持久受理后返回回执
+  -> 规范会话 FIFO → Agent 执行与事件投影
+  -> 代际绑定的控制、查询与恢复；关闭 viewer 不终止 owner
+legacy tui_gateway 另保留 serve/stdio 方法与事件桥
 
 TUI
   -> JSON-RPC over stdio
@@ -56,6 +57,8 @@ REST 客户端
   -> /v1/runs 创建 run 并 SSE 订阅事件，approval/stop 回传
   -> /api/sessions CRUD/fork/chat、/api/jobs cron 管理
 ```
+
+规范桌面本地启动的实际消费见 [main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)，输入受理见 [session_authority.py](../../hermes-agent/gateway/session_authority.py#L694-L760)。旧 discovery/serve 模块的存在不能证明常规桌面仍拥有独立后端子进程。
 
 ## 身份、协议与状态映射
 

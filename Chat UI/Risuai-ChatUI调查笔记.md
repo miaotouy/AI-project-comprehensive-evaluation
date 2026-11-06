@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
@@ -18,7 +18,7 @@
 - **会话以角色为单位组织**：每个角色下挂 `chats[]` 数组与当前指针 `chatPage`；切换角色时若正在生成会被 `changeChar` 拒绝；刷新后总是回到首页（`selectedCharID` 初始为 -1），"恢复现场"= 重新点角色图标，聊天指针随角色数据持久化。
 - **草稿是单一共享缓冲**：`DefaultChatScreen.svelte` 组件级状态，不按会话区分、不持久化，切角色/切会话不丢输入，刷新即失。
 - **生成全程串行、无排队 UI**：`doingChat` 全局锁在发送时置位，发送按钮原位替换为停止按钮；停止 = `AbortController.abort()`，经 fetch signal 取消流，半截回复保留在内存与消息流中；群聊、自动续写、触发器重发都是带同一信号递归的顺序执行。
-- **reroll/swipe 是内存快照机制而非持久化候选**：左右箭头渲染在每条消息上但总是作用于会话尾部；候选存于组件内快照栈与模块级分块缓存，刷新即失；只有首条消息的问候语轮换（`fmIndex`）与会话级字段（书签、建议消息）是持久化的。
+- **reroll/swipe 是内存快照机制而非持久化候选**：左右箭头渲染在每条消息上但总是作用于会话尾部；候选存于组件内快照栈与生成候选文本表，刷新即失；选中的正文会写回消息并随保存落盘，问候语轮换另保存索引。
 - **跨窗口/跨设备**：同源多标签页用 BroadcastChannel 做保存冲突检测（冲突后提示并整页重载）；WebRTC 多用户房间同步聊天数据并互斥生成权限，UI 状态（草稿、滚动、生成）不做同步。
 
 ## 工作台边界与用户主链
@@ -96,7 +96,8 @@
 - **分支**：分支按钮把当前会话快照复制到 idx+1（名称自动编号，可选放进新文件夹），末尾追加一条 `{{specialcomment::branchedfrom::…}}` 注释消息并切换到新会话；点击该注释链接通过 `changeChatTo` + `foldChatToMessage` 跳回源会话并折叠到分支点（`Chat.svelte:830-865`、`globalApi.svelte.ts:2390-2408`），折叠态下消息区只渲染到该消息，底部出现"加载更多"按钮恢复全量。
 - **分支树视图**：会话列表底部按钮打开 `AlertComp` 的 branches 弹窗，`gui/branches.ts` 按消息内容哈希求共同前缀把全部会话画成一棵连接线树，节点 hover 预览消息文本；**节点点击只切换预览、不能导航**（静态代码确认 onclick 仅设置 `branchHover`），实际跳转仍走会话列表与回链注释。
 - **书签**：消息书签按钮弹输入框命名（默认取后半段文本），书签列表弹窗（`BookmarkList.svelte`）展开预览、改名、删除，跳转通过 `ScrollToMessageStore` 触发 `scrollToMessage`（临时扩页、等待图片、滚动并加蓝色 ring 高亮）。
-- **reroll/swipe**：左右箭头渲染在每条消息上（`Chats.svelte` 挂载时统一传 `rerollIcon:'dynamic'`），但动作总是作用于**会话尾部**：reroll 在无新候选时弹出尾部角色消息重新生成，完成后把新消息段快照推入组件内快照栈（切角色时清空，切会话不重置——快照与具体会话的对应关系未做校验，属静态观察）；同时按 `generationId` 在 `process/prereroll.ts` 模块级缓存流式分块，支持生成过程中的逐块回退。候选栈与分块缓存都在内存中，刷新即失。首条消息的问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。
+- **reroll/swipe 操作**：每条消息可显示左右箭头，但动作作用于会话尾部。没有新候选时截去尾部角色回复重新生成，再把新增消息段快照存入组件栈；该栈在切角色时清空，切会话时未校验归属。首条虚拟消息另用持久化索引轮换开场白（`DefaultChatScreen.svelte:219-319`）。
+- **候选与持久化**：生成 ID 对应的文本表只保存流式末帧的候选全文，不保存每个时间片，无法逐片倒放。文本表与消息段快照均为内存态；选中的正文已经写回消息，可随保存循环落盘（`process/index.svelte.ts:1702-1704,1759`）。
 - **翻译与生成信息**：翻译按钮切换 `translated` 显示态，LLM 翻译可编辑缓存文本；缓存被编辑后以渲染版本号触发 `ChatBody` 重新解析，翻译为空字符串也被视为有效缓存结果。重新翻译、切换原文/翻译与两种编辑态在加载或编辑中禁用；生成信息按钮弹出该消息的请求明细（`Chat.svelte:89-276,427-546,844-872`、`ChatBody.svelte:66-174,255`）。
 
 ## 7. 多会话、多模型与后台生成
@@ -105,6 +106,7 @@
 - **群聊**：发送时按角色活跃度/talkness 排序（或 `orderByOrder` 固定顺序）逐个成员顺序调用 `sendChat(chatProcessIndex)` 递归，全部完成后整个发送链结束；**没有成员级排队序号 UI**。聊天菜单的"自动模式"（`runAutoMode`，仅群聊可见）用 while 循环连续发送直到关闭或角色被切换。
 - **自动续写与触发器重发**：回复 token 不足（`autoContinueMinTokens`）或结尾无标点时自动追加"继续"，触发器 `sendAIprompt` 后整体重发——都是同一 `sendChat` 内的顺序递归，共用停止信号。
 - **多用户房间**（`sync/multiuser.ts`）：会话列表菜单"创建房间"或聊天菜单入口启动 PeerJS WebRTC 房间，侧栏显示房间号与主机/访客身份；`peerSync` 把当前聊天同步给各端，`peerSafeCheck` 在生成前互斥（不通过则 `peerRevertChat` 回滚并报错）；房间内消息带发送者用户名、删除按钮被隐藏。这是聊天数据的实时同步，不涉及 UI 状态。
+- **消息表单交互**：带表单触发属性的正文可向角色与模块 Lua 回调提交字段，重复字段保留为数组；结果回写当前会话后重绘对应消息。所有正文 submit 都阻止浏览器默认导航，群聊不执行此交互。该表面与 Composer 发送、Onboarding 入场表单分别接线，详见[消息渲染器](../消息渲染器/Risuai-消息渲染调查笔记.md)第 8 节。
 - **插件扩展点**：`additionalChatMenu` 渲染进聊天菜单、`chatPanelStore` 渲染在 Composer 上方的面板区、`additionalFloatingActionButtons` 固定悬浮在右上角——都是 Chat UI 的接入点，具体能力属插件系统。
 
 ## 8. Chat UI 状态所有权与同步
@@ -113,7 +115,7 @@
 |---|---|---|
 | 草稿文本 `messageInput` | `DefaultChatScreen` 组件 `$state` | 会话内共享单缓冲，切角色/会话保留，刷新即失 |
 | reroll 快照栈 | `DefaultChatScreen` 局部变量 | 切角色清空，不持久化 |
-| reroll 分块缓存 | `prereroll.ts` 模块级 Map | 进程内存，刷新即失 |
+| reroll 生成候选文本表 | `prereroll.ts` 模块级对象 | 进程内存，刷新即失；选中正文随消息保存 |
 | `doingChat`/`chatProcessStage` | `process/index.svelte.ts:92-94` | 会话内，刷新即失 |
 | 活跃角色 `selectedCharID` | writable store | 启动固定 -1，不持久化 |
 | 活跃会话 `chatPage` | 角色数据（DB） | 持久化，随角色保存 |
@@ -142,7 +144,7 @@
 - **reroll 是内存撤销而非版本库**：候选只在会话内可回退；首条问候语与消息候选的持久化语义不对称（前者 `fmIndex` 落库，后者不落库）。分支复制会话是唯一把"另一版本"固化的方式。
 - **分支树视图只读**：树形预览可见，但节点不可点击导航，跳转入口分散在回链注释与会话列表。
 - **搜索能力集中在角色名**：角色网格/移动端有名称搜索，会话与消息内容搜索无 UI 入口；消息定位靠书签跳转与折叠回链。
-- **停止即中断且保留半截**：与"失败重试"解耦——没有重试按钮，错误后用户自行再发或 reroll；停止后消息保留在内存，刷新即失，与 SillyTavern 同类的"停止后回滚"语义不同（本项目是保留）。
+- **停止即中断且保留半截**：与失败重试分开；中止后的半截正文留在消息数组，可随保存循环持久化。候选缓存刷新丢失的边界不能套用到已经回写的消息正文。
 - **并发策略是全局互斥**：不做队列、不做后台，多路需求靠 WebRTC 房间的互斥检查兜底；群聊顺序生成共享一个停止信号，反馈上只有单一 spinner，无成员级进度。
 - 本笔记未盘点全项目 Modal、Alert 类型、主题 token、动画参数与响应式断点，仅在聊天主链交点处（停止 spinner、分支树弹窗、书签跳转、保存冲突提示）记录其行为。
 
@@ -163,7 +165,7 @@
 - `src/lib/ChatScreens/Chats.svelte`：增量挂载与自动滚动（65-227）
 - `src/lib/ChatScreens/ChatScreen.svelte`：主题布局与立绘
 - `src/ts/process/index.svelte.ts`：`doingChat`/`chatProcessStage`（92-94）；`sendChat`（99-2208，流式 1591-1757，错误 159-210）
-- `src/ts/process/prereroll.ts`（全文 29 行）：流式分块缓存
+- `src/ts/process/prereroll.ts`（全文 29 行）：生成候选文本与当前索引
 - `src/ts/process/files/multisend.ts`：`postChatFile`（196）
 - `src/ts/globalApi.svelte.ts`：`saveDb`（292-471）；`foldChatToMessage`/`changeChatTo`（2390-2429）；`chatFoldedState`（2341-2388）
 - `src/ts/characters.ts`：`changeChar` 守卫（876-898）

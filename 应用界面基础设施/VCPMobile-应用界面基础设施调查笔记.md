@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`5fa2eb09e4f4dfab299cbb609a8b904b3485b5a5`（分支：`main`）
 >
@@ -53,6 +53,14 @@ Android 的标准 safe-area 值若为零，键盘 Insets 组合式函数会监�
 ## iOS 适配与配置来源
 
 iOS 端有三条独立适配：窗口几何由 `useIOSWindowGeometry.ts` 与 `windowGeometry.ts` 维护，WebView 从后台恢复时由 `useWebViewResume.ts` 重绘布局与壁纸；系统分享入口经 `shareStore` 与 `gen/apple/VCPShare` 扩展接入；设置字段的默认值、元数据与界面渲染参数由 `core/config/generated/` 生成，前端只消费生成结果。`src/core/composables/useIOSWindowGeometry.ts:1-240`、`useWebViewResume.ts:1-209`、`src/core/stores/shareStore.ts:27-210`、`src/core/config/generated/metadata.ts`。
+
+## 配置编辑、备份与恢复
+
+连接设置页提供配置备份入口。编辑会话拥有草稿与基线；导入前先等待在途保存结束并锁定页面操作，再通过移动平台文件选择器取得暂存文件，由 Rust 解析后立即释放暂存。导出从已提交的 SQLite 快照和各偏好所有者读取数据，未把页面草稿当成权威配置。见 [连接设置页](../../VCPMobile/src/features/settings/pages/ConnectionSettingsPage.vue#L49-L104)、[备份选择与导入](../../VCPMobile/src/features/settings/useConfigBackup.ts#L511-L575)。
+
+导入的数据库部分在同一写事务中处理全局配置域、Agent/Group 专属设置、常用模型与 Tarven 规则；校验或版本冲突返回结构化结果，成功提交后才发布配置快照并调度连接等副作用。主题、话题置顶、日记排版等浏览器偏好随后交给各自 Store 恢复，因此整份备份的数据库与界面偏好并非一个跨存储原子事务。见 [事务所有者](../../VCPMobile/src-tauri/src/vcp_modules/infra/settings_manager/repository.rs#L176-L359)、[分域恢复](../../VCPMobile/src/features/settings/useConfigBackup.ts#L268-L314)。
+
+尚未同步到本机的 Agent/Group 设置会被暂存并提示，待实体同步后由用户恢复；导入后刷新实体列表只更新当前会话的显示信息，不能凭备份强制切换 Rust 权威焦点。语音复刻参考音频不随配置备份迁移，需要在本机确认样本。此链只确认静态接线，未实际导入文件、观察连接重建或跨设备兼容。
 
 ## 设计取舍与已确认边界
 

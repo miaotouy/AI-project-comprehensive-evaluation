@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenOcta 的聊天表面不是 IM 式群聊，而是一个「任务会话工作台」：左侧会话侧栏、中间 Agent 线程、底部 Composer，全部由 Lit 3 Web Components 在单一壳层内拼装。前端实际技术栈是 Lit + `marked` + DOMPurify + A2UI 组件库，源码里仍保留上游 `openclaw` 命名（元素名 `openclaw-app`、包名 `openclaw-control-ui`），但产品面已按 IT Ops 任务改造：会话快捷指令来自场景模板、每次发送可限定本次可用的 Skill/MCP、会话可从历史里「提炼 Skill」、另有面向多 Agent 协作的 AgentSwarm 房间表面。
+OpenOcta 的聊天表面不是 IM 式群聊，而是一个「任务会话工作台」：左侧会话侧栏、中间 Agent 线程、底部 Composer，全部由 Lit 3 Web Components 在单一壳层内拼装。前端实际技术栈是 Lit + `marked` + DOMPurify + A2UI 组件库，源码里仍保留上游 `openclaw` 命名（元素名 `openclaw-app`、包名 `openclaw-control-ui`），但产品面已按 IT Ops 任务改造：会话快捷指令来自场景模板、每次发送可提交本次 Skill/MCP 选择、会话可从历史里「提炼 Skill」、另有面向多 Agent 协作的 AgentSwarm 房间表面。
 
 关键实现事实：
 
@@ -96,7 +96,7 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 「全部资源」弹层是发送前最关键的配置面，作用域是「本次发送」：
 
 - 未显式配置时默认全部 Skill/MCP 可用，联网搜索默认开启（`ui/src/ui/chat/chat-resources.ts:3-16`、`views/chat.ts:610-612`）。
-- 勾选后按 Skill 键与 MCP 服务名限定本次可用集合，弹层内可搜索、按来源分组、一键恢复默认（`views/chat.ts:577-759`）。
+- 弹层可按技能键与 MCP 服务名选择、搜索和分组；前端把选择作为本次资源声明提交。后端会重新补入部分全局 MCP，技能也由目录再次扫描，因此该 UI 选择不能独立保证最终能力集合（`views/chat.ts:577-759`、`src/pkg/gateway/handlers/chat_runtime_pool.go:55-77`）。
 - 该对象随 `chat.send` 的 `resources` 字段一起发出（`chat-resources.ts:18-25`、`controllers/chat.ts:432-434`），不构成会话级持久设置。
 
 推理过程是否显示由两个条件同时决定：设置项 `chatShowThinking`（默认开启）与当前会话行的推理等级未关闭（`views/chat.ts:861-862`、`app-render.ts:557`）。本次在 UI 内未找到修改推理等级或该设置项的控件：聊天工具条里的思考开关变量只被声明、未参与渲染，样式表中对应的切换按钮类名也没有任何标记使用（`app-render.helpers.ts:40-116`、`ui/src/styles/chat/layout.css:24-67`）。
@@ -128,7 +128,7 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 停止入口与「新会话」共用同一个按钮位：可中止时显示「停止」，否则显示「新会话」（`views/chat.ts:1223-1247`）。点击后以会话键和 runId 发出 `chat.abort`，并先本地清空以避免事件迟到导致界面卡在进行中（`controllers/chat.ts:472-493`）。没有全局快捷键触发停止，只能点按钮或在输入框发送 `stop` 类文本。
 
-失败与断线反馈：发送请求抛错时会在历史里追加一条以 Error 开头的助手消息（`controllers/chat.ts:438-468`）；run 级错误则清空状态并依赖历史重载（`app-gateway.ts:292-304`）；WebSocket 重连成功时直接丢弃断线前遗留的 run 状态，避免把孤儿 run 显示成进行中（`app-gateway.ts:165-180`）。
+发送失败会追加错误助手消息，run 级错误依赖历史重载。重连握手清空当前宿主字段里的 run、阶段和流式文本，但没有清空按会话保存的运行态映射。后台会话若错过终态，切回时仍可能恢复旧快照；因此重连只对当前字段做局部清理，跨会话孤儿状态的完整清理链本次未找到（`ui/src/ui/app-gateway.ts:165-180`、`ui/src/ui/chat/chat-session-runs.ts:35-59,149-157`）。
 
 ## 6. 消息操作、审批与返回路径
 
@@ -196,7 +196,7 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 ## 10. 设计取舍与已确认边界
 
 - **单一状态宿主 + 两个隔离元素**：消息线程与输入框都是独立自定义元素，用属性与自定义事件交互，目的是把高频输入与长列表渲染解耦（`views/chat.ts:928-952`、`1094-1109`）。
-- **运行态本地分桶，不依赖服务端会话状态**：界面判断「是否在生成」只看本地 runId 与终止集合，服务端并不下发统一的会话状态字段（`chat-session-runs.ts:160-180`）。断线重连时选择直接丢弃现场而不是重放。
+- **运行态本地分桶，不依赖服务端会话状态**：界面判断「是否在生成」只看本地 runId 与终止集合，服务端并不下发统一的会话状态字段（`chat-session-runs.ts:160-180`）。断线重连只清当前宿主运行字段，后台会话快照仍可能保留；没有 journal 重放恢复。
 - **排队、草稿、资源限定都不持久化**：这三者都是操作现场而非会话属性，切会话或刷新即消失；相对地，模型选择的「默认」项让用户不必为每次会话显式绑定模型。
 - **审批与聊天解耦**：审批有三处入口、两种 RPC（`exec.approval.resolve` 与 `approvals.*`），聊天线程里既没有审批消息也没有待审批徽标。
 - **AgentSwarm 是并行产品面而非聊天扩展**：它有自己的房间、成员、RPC 与中止粒度，消息渲染复用 Markdown 管线但不复用 `openocta-chat-thread`。

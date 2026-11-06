@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
@@ -23,7 +23,14 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 - 发送控制按模式分流：Chat Mode 生成中保留停止按钮，Work Mode 有草稿时改为排队按钮；待执行消息在输入框上方可编辑、删除、清空或请求立即发送。
 - 桌面端全局快捷键只有"显示/隐藏窗口"，托盘不显示聊天状态，系统通知 API 未接入（`new Notification(` 全仓库无匹配）。
 - 草稿按会话粒度存 localStorage：首页假会话用固定 key `'new-chat'`，真实会话用 `draft-${sessionId}`（300ms 防抖）；发送成功后清除。
-- 网页浏览开关经 uiStore 的 persist 中间件持久化（跨重启保留），知识库与 Agent 模式开关不持久化（重启丢失）。
+- 网页浏览开关与知识库绑定随 uiStore 持久化；正式会话的 Agent 模式写入会话设置，新会话默认模式还记住用户上次选择。首页尚未提交的临时对象与旧 Agent 模式 map 仍为内存态。
+- 会话设置、历史和内置浏览器集中在会话侧面板；小屏改用底部 sheet。桌面浏览器页由主进程原生视图承载，用户可接管登录、点击与输入，模型操作同一页面。
+
+## 会话侧面板与浏览器接管
+
+正式会话页在宽屏挂载会话侧面板，小屏挂载 sheet。设置编辑直接写当前会话头，系统提示通过独立写入口保存；关闭面板时输入字段卸载并应用编辑。面板同时承载线程历史和网页标签，用户可切换、打开或关闭网页。见 `src/renderer/routes/session/$sessionId.tsx:331-334`、`src/renderer/components/session/SessionSidePanel.tsx:40-83`。
+
+桌面网页由主进程原生视图覆盖在占位区域上，用户可在同一页面登录、点击或输入。菜单/弹窗覆盖网页时，renderer 隐藏原生页并显示静态截图；覆盖层退出后恢复原页，保持站点状态。工具端可继续读取和操作该页，页面交互状态会回报给模型。见 `src/renderer/components/chat/BuiltInBrowserPanel.tsx:103-175`；工具与上传审批见 [Agent 工具笔记 1.5](../Agent工具/Chatbox-Agent工具调查笔记.md#15-桌面内置浏览器与上传审批)。这些入口与状态均为静态确认，原生视图遮挡、触控与键盘表现未实机验证。
 
 ## 工作台边界与用户主链
 
@@ -143,7 +150,7 @@ const [session, setSession] = useState<Session>({
 
 Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工作目录"（`stores/recentDirectoriesStore.ts` 支撑）；Agent 按钮按上下文显示能力提示气泡；小屏下 Agent 模式用状态图标呈现；网页搜索/知识库能力与 Work Mode 能力控件独立门控（网页搜索、知识库不受该门控影响）。技能补全弹窗的指令列表经 Portal + Floating UI 跟随锚点、不遮挡输入框（`InputBox.tsx:1413-1457`）。当 Agent 模式为自动且是首轮用户消息时，生成前会先做 Agent 模式建议（分类器模型判断），建议以消息内卡片呈现、可接受/拒绝（执行语义见对话请求与上下文笔记 9.6）。
 
-网页浏览开关的默认值规则：如果该会话没有显式设置过，ChatboxAI provider 默认开、其他 provider 默认关（`InputBox.tsx:259-267`）；这些开关最终以工具注册的方式进入请求（执行语义见对话请求与上下文笔记 9）。开关本身经 uiStore persist 持久化，重启保留；知识库与 Agent 模式开关不持久化（会话与消息管理笔记 8）。
+网页浏览开关的默认值规则：如果该会话没有显式设置过，ChatboxAI provider 默认开、其他 provider 默认关（`InputBox.tsx:259-267`）；这些开关最终以工具注册的方式进入请求（执行语义见对话请求与上下文笔记 9）。网页浏览和知识库 map 均进入 uiStore 的持久化字段；正式会话 Agent 模式写入会话头，旧模式 map 只作回退。新会话还会继承用户上次显式选择的 Work Mode，现有会话缺失模式时保持默认 Chat Mode。见 `src/renderer/stores/uiStore.ts:419-436`、`src/renderer/stores/session/agent-mode.ts:21-54,162-201`。
 
 ## 5. 发送、排队、流式反馈与停止
 

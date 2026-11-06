@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
-> 调查方式：基于既有对话请求与上下文调查笔记，复用其已确认的源码阅读结果；涉及 `modules/chatCompletionHandler.js`、`messageProcessor.js`、`roleDivider.js`、`Plugin.js` 及 VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的消息处理路径
+> 调查方式：只读源码核对可排序预处理管线、MemoryThinkingTray 和 OneRing 未触发分支；其余变量、预设和角色拆分沿用既有源码阅读结果
 >
 > 调查范围：单次聊天请求中预设、占位符与消息预处理器的选择、展开、排序及其请求层、消息层和客户端显示层去向；不覆盖规则编辑器、持久化 schema、导入导出和运行时交互验证
 >
@@ -25,7 +25,7 @@ VCPToolBox 的上下文编译发生在单次 HTTP 请求内。客户端提交的
 
 ## 系统边界与规则编译主链
 
-本专题将可编辑或配置驱动、且会改变消息数组、上游输入或客户端消息投影的预设、占位符和预处理器视为规则编译对象。普通客户端历史提交、上游调用、工具执行和会话持久化留在相邻专题：VCPToolBox 不拥有跨请求会话消息存储，外部客户端需自行保存并重新提交历史。
+本专题将可编辑或配置驱动、且会改变消息数组、上游输入或客户端消息投影的预设、占位符和预处理器视为规则编译对象。外部客户端持有会话导航和提交历史；OneRing 另可按 Agent 持久化消息及回合状态，其写入与恢复边界见[会话与消息管理](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
 ```text
 客户端 messages
@@ -54,6 +54,14 @@ SAR 规则的模型条件共有四种：精确匹配、子串匹配，以及二�
 
 规则对象的保存位置、schema、版本字段、启停状态以及导入导出语义，原笔记没有已确认事实。本次也不把占位符出现在消息文本中等同于其已命中或已展开。
 
+### 记忆思维托盘：先搬运，再由后续插件消费
+
+MemoryThinkingTray 只从显式 system 消息提取完整的记忆思维区，把多个区块合并为 `[系统提示:]` 前缀的 user 消息，并从原 system 内容移除对应文本。普通 user/assistant 中同名标记不会被提升。深度默认 1，表示末条消息之前；0 表示末尾，超长深度止于连续 system 前缀之后，且会回退插入点以免切断原生工具调用与结果序列（`Plugin/MemoryThinkingTray/MemoryThinkingTray.js:119-160`）。
+
+托盘自己不检索、不展开占位符。它位于 RAG 与时间线之前，搬运后文本仍可由后续受信载体规则消费。任一 system 托盘标记缺失、乱序或嵌套时，本轮所有搬运整体回滚为原数组；可选缓存断点默认关闭，开启后只给插入点前最近的 user/assistant 文本加 ephemeral 标记，上游是否支持另行决定（同文件 `:18-46,74-107,137-160`）。
+
+OneRing 主流程未触发时保留原数组，避免无故删去托盘产生的伪系统 user 块；但独立 OneRingMemo 收尾仍可消费自己的占位符（`Plugin/OneRing/OneRing.js:955-998`）。
+
 ## 2. 选择条件、优先级与编译顺序
 
 初始请求的固定阶段顺序如下：
@@ -62,10 +70,16 @@ SAR 规则的模型条件共有四种：精确匹配、子串匹配，以及二�
 2. 消费连续顶层 system 中的 `[[VCPToolUse=Forbidden]]`，并识别 TransBase64 标记以决定后续多模态处理。
 3. 执行 VCPTavern 注入；若请求使用语义路由模型，再从注入后的消息选择真实后端模型并应用相关设置。
 4. 深拷贝各消息，执行变量及可授权对象展开。
-5. 先调用配置选定的多模态处理器，再执行其余插件预处理器。
+5. VCPTavern 已优先执行，其余阶段按保存顺序遍历，捕获在静态文本注入之前，托盘在记忆检索之前。多模态处理器只在媒体条件满足时运行，不能概括为所有插件之前固定执行。完整顺序见下方流程。
 6. 清理或还原 TransBase64+，运行 Detector/SuperDetector，最后按开关运行 Role Divider。Detector 字段若采用 `/pattern/flags` 形式则按正则替换；正则无效时记录警告并退回普通字符串替换，替换文本允许为空（`modules/messageProcessor.js:608-642`）。
 
-该顺序来自 `modules/chatCompletionHandler.js:809-1124`。因此，预设插入的内容能参与之后的变量解析和插件处理；裁剪发生在预设注入之前。裁剪是字符数估算，不是摘要压缩，也不保证严格 token 上限（`modules/contextManager.js:10-95`）。
+```text
+VCPTavern → CapturePreprocessor → 静态插件占位符注入
+  → 选定多模态处理器 → MemoryThinkingTray → RAGDiaryPlugin
+  → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2
+```
+
+保存顺序见 `preprocessor_order.json:1-12`，实际调度见 `modules/chatCompletionHandler.js:1083-1124`。因此，预设插入的内容能参与之后的变量解析和插件处理；裁剪发生在预设注入之前。裁剪是字符数估算，不是摘要压缩，也不保证严格 token 上限（`modules/contextManager.js:10-95`）。
 
 多个插件的先后由 `preprocessor_order.json` 的已知顺序优先，未列插件再按名称排序追加。当前保存的已知顺序为 VCPTavern、ImageProcessor、RAGDiaryPlugin、VCPTimeLine、OpenHerPersona、OneRing、ContextFoldingV2；这一规则由 `Plugin.js:881-904` 应用。原笔记仅能确认未列插件的静态排序规则，不能确认各安装环境实际注册的完整集合。
 

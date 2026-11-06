@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/tui/`、`packages/coding-agent/src/modes/interactive/`、`packages/coding-agent/src/core/`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
-> 调查方式：直接阅读源码（interactive-mode 的事件消费与键盘绑定、TUI 组件与选择器、fullscreen 导航、设置入口），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话，静态代码无法确认的视觉/焦点/键盘行为标记为未验证
+> 调查方式：只读源码与版本差异，定向跟踪运行中投递与 Esc/退出键盘绑定；其余界面机制采用文中来源范围，未运行交互会话，视觉、焦点与平台键盘表现待观察
 >
 > 调查范围：TUI 工作台结构、输入区与命令面板、会话选择器与搜索、树导航、fullscreen 视图、状态行与流式反馈、运行中投递（steer/followUp）的界面、bash 执行交互、退出工作流、UI 状态所有权；会话持久化与请求执行分别进入会话与消息管理、对话请求与上下文类目
 >
@@ -19,7 +19,7 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
 - 输入区是底部多行 editor，支持 autocomplete（fuzzy/文件/`/` 命令）、大量快捷键（Ctrl+P 模型循环、Ctrl+G 外部编辑器、Alt+Enter 排队等）。
 - 会话导航靠选择器：`/resume`（内嵌搜索框：fuzzy/短语/正则）、`/tree`（树形导航 + label 书签）、`/session`（统计）。
 - 状态行与专用状态指示器（工作、重试、压缩、分支摘要、空闲五类）反馈生成状态，OSC 9;4 终端进度条可配置。
-- 运行中可投递 steer（打断）/followUp（排队），`queue_update` 事件驱动待处理列表显示。
+- 运行中可投递 steer（回合边界转向）/followUp（排队），`queue_update` 事件驱动待处理列表显示。
 - `!` 前缀直跑 bash 并流式显示输出；`/quit`、Ctrl+D（空编辑器）退出。
 - fullscreen 视图：Ctrl+Shift+F transcript 搜索（Enter/Ctrl+G 下一个、Shift+Enter/Ctrl+Shift+G 上一个、Esc 关闭）、半页/单行滚动（默认未绑定按键）、鼠标多击选词/选行、Windows 下右键粘贴；退出 fullscreen 时按设置打印 transcript 或恢复屏幕只提示 resume。
 
@@ -32,7 +32,7 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
   -> 生成中：footer 状态 + status indicator + 流式组件（渲染 -> 消息渲染器）
      -> steer/followUp 投递（执行 -> 对话请求与上下文）
   -> 会话操作：/fork /tree /compact /export /import /share /copy /clone /session
-  -> 退出：/quit、Ctrl+D，或空编辑器双击 Esc（doubleEscapeAction: fork|tree|none）
+  -> 退出：/quit、空编辑器 Ctrl+D；空编辑器双击 Esc 按设置打开 fork/tree 选择器或无动作
 ```
 
 边界：会话/消息数据语义与列表扫描属于会话与消息管理（`../会话与消息管理/Pi-会话与消息管理调查笔记.md`）；prompt 输入处理、压缩与重试执行属于对话请求与上下文（`../对话请求与上下文/Pi-对话请求与上下文调查笔记.md`）；组件渲染与滚动属于消息渲染器（`../消息渲染器/Pi-消息渲染器调查笔记.md`）。
@@ -97,7 +97,7 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
 
 ## 6. 运行中投递与键盘工作流
 
-- **steer/followUp**：运行中提交时走"打断"语义的投递（`prompt(..., { streamingBehavior: "steer" })`，`interactive-mode.ts:3040-3047`），Alt+Enter 直接投递 followUp（`core/keybindings.ts:103-106`）；`queue_update` 事件驱动待处理列表显示（`interactive-mode.ts:4193-4210`，以"Steering: …"或"Follow-up: …"行展示并提示 Alt+Up 取回）；Alt+Up 把排队消息取回编辑器（:4212-4231）。执行语义见对话请求与上下文笔记 §8。
+- **steer/followUp**：运行中普通提交进入 steer 队列，在当前助手与工具批次结束后转向，入队本身不会中止在途调用（[Agent 队列](../../pi/packages/agent/src/agent.ts#L307-L351)、[批次后消费](../../pi/packages/agent/src/agent-loop.ts#L267-L315)），Alt+Enter 直接投递 followUp（`core/keybindings.ts:103-106`）；`queue_update` 事件驱动待处理列表显示（`interactive-mode.ts:4193-4210`，以"Steering: …"或"Follow-up: …"行展示并提示 Alt+Up 取回）；Alt+Up 把排队消息取回编辑器（:4212-4231）。执行语义见对话请求与上下文笔记 §8。
 - **Esc 语义**（`interactive-mode.ts:2769-2795`）：流式中 → 取回排队消息并 abort；bash 运行中 → 取消 bash；bash 模式 → 清空；编辑器为空时双击 Esc（500ms 窗口）→ 按 `doubleEscapeAction`（取值 fork/tree/none，`settings-manager.ts:1197-1199`）打开对应选择器。
 - **中止**：自动重试期间 Esc 中止重试（`interactive-mode.ts:3342-3353`）；压缩期间 Esc 中止压缩（:3294-3299）；分支摘要期间 Esc 中止摘要（:5026-5028）。`AgentSession.abort()` 的中断语义见对话请求与上下文笔记 §6。
 - **退出**：`/quit`、空编辑器 Ctrl+D（`interactive-mode.ts:3766-3769`）、Ctrl+C 清空编辑器（`core/keybindings.ts:67`）；shutdown 停止 TUI 后打印 resume 命令（`interactive-mode.ts:3778-3817`）。

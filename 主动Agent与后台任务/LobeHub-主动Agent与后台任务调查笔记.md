@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
@@ -60,7 +60,9 @@ Schedule tick 不信任已投递消息，而是按任务 ID 和创建者从数�
 
 ## 并发、取消、失败与恢复
 
-**暂停、取消和修改。** 任务状态是对后续自动化的控制面。已发出的 Schedule 消息在 tick 时重新核验数据库，paused 与终态直接跳过，模式变更也跳过；heartbeat 额外以 token 防止旧延迟消息复活。这确认了“停止后不再启动新一轮”的语义。任务 UI/API 到实际 Agent operation 的中断链本次没有逐段复查，不能据此断言取消会终止已经 running 的执行体。
+**暂停、归档、删除和修改。** 投递抵达后重新核验数据库，已进回收站的任务查询为不存在，归档、暂停、终态或模式变更均跳过；heartbeat 另用 token 拒绝旧消息。归档与软删除因此也控制后续自动化，而非只隐藏列表。见 [schedule tick 的过滤](../../lobehub/apps/server/src/services/taskRunner/scheduleTick.ts#L46-L75)、[heartbeat tick](../../lobehub/apps/server/src/services/taskRunner/heartbeatTick.ts)。
+
+**批量动作与撤销。** 任务列表可批量修改状态、指派、优先级、归档或删除，前端先覆盖已加载列表，再以服务端逐项结果确认或回滚，并提供撤销。删除入口会先请求中断关联运行，在行锁及状态条件保护下，将任务和关联 topic 一起移入回收站；恢复通过回收站服务带回这些对象。普通字段撤销只在当前值仍等于原动作写入值时适用，后续修改会报告 conflict；原先 running 的状态回退为 paused，撤销不会复活已经中断的运行。见 [批量动作入口](../../lobehub/src/features/AgentTasks/AgentTaskList/selection/useTaskBatchActions.ts)、[任务删除服务](../../lobehub/apps/server/src/services/task/index.ts#L353-L436)、[撤销服务](../../lobehub/apps/server/src/services/task/batchRevert.ts#L21-L39)。实际进程/模型中断及竞态表现未运行验证。
 
 **失败与重试。** 启动阶段失败时，自动化任务恢复为 `scheduled` 并保存错误，非自动化任务暂停。完成回调收到错误时，运行 topic 标为 failed 且创建 urgent error Brief；schedule 的连续失败会累加到任务 context，未达到 failure fuse 时保持 scheduled 以待下个正常 cron 时点，达到阈值才暂停。该机制不是立即、密集的队列重试，见 `apps/server/src/services/taskRunner/index.ts:280-303` 与 `apps/server/src/services/taskLifecycle/index.ts:390-476`。
 

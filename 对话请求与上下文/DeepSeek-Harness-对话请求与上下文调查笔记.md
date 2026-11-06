@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/core/system-prompt`、`packages/core/agent-loop`、`packages/core/tools`、`packages/compaction/`、`packages/spill/`、`packages/context/`、`packages/interaction/`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -19,7 +19,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 1. **上下文唯一来源是会话事件日志**：模型历史由 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储；"模型可见即已落盘"是不变量。表面事件有五类：`system/message`、`developer/message`、`user/message`、`assistant/message`、`tool/result`。上下文增量（文件指令、时间、tmux、运行时上下文）都以 `user/message` 事件落盘后再进请求。
 2. **请求组装分两半，且 system prompt 已表面化**：工具 schema 由 `ctx.systemPrompt.assemble()` 从插件注册的 sections/contexts/tools/variables 组装，但 system prompt 本身以 `system/message` 表面节点记录（空文本清除、可路由在历史追加、其余路由归并到首节点）；消息历史由日志派生。两者在每步 `buildRequest` 中合并为一次 `llm/stream` 调用，请求头（config+工具，不含 system）本身也以 `request/header` 事件落盘。
 3. **compaction 是可选能力 seam**：文本摘要与工具结果裁剪仍沿用日志化替换；图像压力另由 `compaction-image-offload` 记录 `image/offload` 选择事件，把最旧图像 occurrence 在请求投影中替换为可读取占位符后重试，避免重写 durable 消息本体（`packages/compaction/compaction-image-offload/src/{image-offload,projection}.ts`）。
-4. **spill 是另一可选能力 seam**：`tools/post-execute` 策略把超 `maxInlineBytes` 的纯文本工具结果落盘为会话私有文件，模型只见 head/tail 预览与读取提示。
+4. **spill 是另一可选能力 seam**：结果留存按估算 token 计算文本和图像成本，省略提示也占预算；模型见有序 head/tail 及恢复地址，完整文本与图像读取路径存为会话私有文件。缺定价、恢复路径或存储时保留原内容并告警（`packages/spill/spill-policy/src/index.ts:49-151`）。
 5. **工具调度已下沉为执行器 seam**：循环把原始批次与并发上限交给 `ctx.tools.execute()`，由 `tool-executor-native` 或 `tool-executor-ptc` 负责分发、并行、取消与调用记录；agent-loop 不再自带工具池实现。
 6. **与 pi 无代码继承**：相关包源码检索零命中，仓库唯一的 pi 关系是 LLM 适配器 `dsh-llm-pi-ai` 对 `@earendil-works/pi-ai@^1.3.0` 库的依赖（另有补丁过的 `@earendil-works/pi-tui` 与 `pi-telemetry`）；compaction/上下文概念有对应物，但架构与实现均为独立设计。
 
@@ -96,7 +96,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 区域选择是头锚定的（从 surface 头到保留尾部为止），绝不在 tool-call/result 对之间切割（`toolPairingBalancedBefore`/`After`）。
 
-**汇总调用**：压缩本身是一次 `ctx.llm.stream()` 调用：以 `request/header` 里的 system+tools+区域消息为前缀、compaction 指令为最后一个 user 消息，以复用 KV cache（`summarizer.ts:121-182`）。默认 summarization 目标 = 显式配置 > 最近路由 > agent options。
+**汇总调用**：压缩调用以重放得到的区域消息和工具 schema 为前缀，末尾追加压缩指令，以复用 KV cache；system 由区域消息提供，请求头只提供工具与调用配置（`summarizer.ts:120-163`）。默认 summarization 目标 = 显式配置 > 最近路由 > agent options。
 
 **输出契约**：必须满足 compacted-summary 标签包裹的固定 Markdown 结构，且摘要定价必须小于被遮蔽内容（`framedSummaryTokenCount < shadowedTokenCount`），否则压缩失败。
 
@@ -108,16 +108,16 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 ## 4. SDK、Provider、模型与协议交接
 
-`buildRequest`（`agent-loop/src/agent.ts:656`）按以下顺序组装一次冻结请求：
+请求准备、表面准入与冻结按以下顺序交接（`agent-loop/src/agent.ts:452-479,612-743`）：
 
-1. 首个请求的配置来自 agent options，之后从日志折叠的 `request/header` 提出提案（剥离 adapter 标记为默认的字段）；
+1. 步骤开始前固定会话模型选择；首个请求取 Agent 输出控制，之后从最近请求头恢复控制项提案，但剥离其中的路由和 effort，统一以已固定的选择覆盖；
 2. `agent/request` 瀑布只调整控制项（不可改 provider/model/effort）；
 3. `llm.prepareCall` 解析 exact-model 默认值并绑定适配器；
-4. 组装 `EpochHeader`（config+adapterDefaults+tools），与上一快照比较，变化时落盘 `request/header`（reason 为 initial/resume/change/series）；路由容量或 `systemPromptUpdate` 变化时落盘 `request/context`；
-5. 按 prepared call 的能力协调 `system/message` 表面节点，随后逐条落盘本步的 `user/message`；
+4. 按适配器能力协调 system 表面节点，准入本步上下文消息；
+5. 组装请求头快照并按首次、变化或系列边界追加，容量或 system 更新模式变化时另记请求上下文；随后从已准入的表面派生消息并冻结；
 6. 最终 `GenerateOptions` 带 messages（派生历史）、`sessionId`、`signal` 交给 `preparedCall.stream()` 或 `llm/stream` 瀑布。
 
-请求头是日志状态而非内存字段，任意请求可从日志重建；system prompt 是表面事件而非请求头字段。DeepSeek 第一方 adapter 现在只有 Messages 一条协议，并支持模型声明 `systemPromptUpdate: in-history`：system 变化时在对应回合追加历史 system 快照而不是改写最前缀，未声明的模型用最新快照作顶层 system；该路由决策由 prepared model metadata 交给 agent-loop（`packages/llm/llm-deepseek/README.md`）。工具定义变更则经 `developer/message` 投影为 `tool_addition`/`tool_removal` 块。
+请求路由与 effort 只能在步骤准备前通过 Agent 模型选择接口改变；请求瀑布若越过这一边界会抛错（`packages/core/agent-loop/src/agent.ts:612-650`）。请求头是日志状态，首次、变化或系列边界追加，其他请求复用最近快照；system prompt 独立保存在表面消息中（`agent.ts:656-743`）。DeepSeek 第一方 adapter 现在只有 Messages 一条协议，并支持模型声明 `systemPromptUpdate: in-history`：system 变化时在对应回合追加历史 system 快照而不是改写最前缀，未声明的模型用最新快照作顶层 system；该路由决策由 prepared model metadata 交给 agent-loop（`packages/llm/llm-deepseek/README.md`）。工具定义变更则经 `developer/message` 投影为 `tool_addition`/`tool_removal` 块。
 
 ## 5. 流式事件、缓冲、节流与顺序
 

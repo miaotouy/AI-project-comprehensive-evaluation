@@ -2,13 +2,13 @@
 
 > 汇总对象：`NextChat`（远端仓库 `https://github.com/ChatGPTNextWeb/NextChat`）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：14 篇来源笔记（Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、媒体创作）
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；未做新的源码调查，未做跨项目横向比较
+> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源笔记；定向核对 MCP 授权与执行、会话复制、图片输入、Artifact 预览和发布生命周期
 >
-> 汇总范围：覆盖上述 14 个类目中 NextChat 已调查的能力；无未覆盖类目，暂缓项（ShareGPT 第三方依赖）如实列入"已知边界与待验证事项"
+> 汇总范围：覆盖上述 14 个类目中 NextChat 已调查的能力；覆盖与边界按来源笔记保留，暂缓项（ShareGPT 第三方依赖）如实列入"已知边界与待验证事项"
 >
 > 文档定位：按项目检索已调查能力摘要，不作为横向比较或整改依据
 
@@ -45,7 +45,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **长对话两级压缩与自动标题**：短期窗口（历史条数与 token 预算）+ 长期摘要（`memoryPrompt`，阈值默认 1000 词，按模型系选择摘要模型）；首次达到 50 个估算词自动生成标题；摘要/标题失败只记日志，原始消息从不删除。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §3。
 
-- **输入模板变量展开**：普通输入经 `fillTemplateWith` 展开 `{{input}}`、`{{model}}`、`{{time}}`、`{{lang}}`、`{{ServiceProvider}}`、`{{cutoff}}` 六个变量，缺 `{{input}}` 自动追加；MCP 回注消息跳过模板。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §1/§9。
+- **输入模板变量展开**：纯文本输入按模型配置展开输入模板（输入、模型、时间、语言、渠道与知识截止时间）；缺输入占位符时自动追加。带图片时改用原始输入加图片部件，覆盖先前模板结果；MCP 回注也跳过模板。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §1/§9。
 
 - **上下文组装范围**：请求上下文固定由 system、记忆摘要、Mask context、短期历史与新消息组装，不包含用户档案或知识库内容。本次未找到档案/知识库字段或注入点（未覆盖边界见末尾小节）。证据状态：`本次未找到`（能力边界，非缺陷）。来源：[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §2/§9、[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §8。
 
@@ -53,7 +53,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **会话数据模型与持久化**：`ChatSession[]` 内存数组为权威源，IndexedDB 为持久化副本（异常回退 localStorage）；消息是会话内线性数组，无消息树、无版本指针；Chat store persist 版本 3.3，带分版本 migrate；掩码、提示词、插件等各独立 store 各自持久化。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §1/§2/§7、[Chat 调查笔记](../Chat/NextChat-Chat调查笔记.md)。
 
-- **会话 CRUD、fork 与排序**：新建/删除（删除提供 5 秒撤销 toast 并自动补回空会话）/移动排序均作用于数组与持久化 store；`forkSession` 深拷贝整个会话为新会话。本次未找到置顶/归档能力（未覆盖项见末尾小节）。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §3、[Chat UI 调查笔记](<../Chat UI/NextChat-ChatUI调查笔记.md>) §2。
+- **会话 CRUD、fork 与排序**：新建/删除（删除提供 5 秒撤销 toast 并自动补回空会话）/移动排序均作用于数组与持久化 store；fork 新建会话、复制标题与消息并重分配消息 id，摘要和清除上下文位置重置；Mask/消息的嵌套数组未递归克隆。本次未找到置顶/归档能力（未覆盖项见末尾小节）。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §3、[Chat UI 调查笔记](<../Chat UI/NextChat-ChatUI调查笔记.md>) §2。
 
 - **消息编辑/删除/重试/置顶**：全部为对会话消息数组的就地变更——编辑改写内容、删除按 id 过滤、置顶 push 进 `mask.context` 参与后续请求；重试=删除原 user 与配对 assistant 后重发（新消息节点）。无独立"续写/继续生成"与回退版本机制（未覆盖项见末尾小节）。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §4、[Chat UI 调查笔记](<../Chat UI/NextChat-ChatUI调查笔记.md>) §6。
 
@@ -75,11 +75,11 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **流式文本动画与 thinking 转换**：SSE 文本进 `remainText`，`requestAnimationFrame` 每帧按剩余比例（约 1/60，下限 1）刷入 UI，连接关闭后一次性收尾；`reasoning_content` 或 ` thinking` 标签被转成 Markdown 引用行，无独立 reasoning 数据结构，复制、导出与后续上下文都当作普通 Markdown。证据状态：`主链确认`。来源：[消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md) §4、[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §5。
 
-- **HTML Artifact 预览**：模型自由文本探测（html 语言或 doctype/svg/xml 前缀，600ms 防抖），经 `srcDoc` 注入沙箱 iframe（sandbox 仅 `allow-forms allow-modals allow-scripts`、无 `allow-same-origin`）运行完整 HTML 页面，支持重载、全屏、下载单文件；受全局 `enableArtifacts` 与 `mask.enableArtifacts` 双开关控制；iframe 高度经 postMessage 回传，随机 frame id 匹配、未校验 e.origin。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) 主链、[消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md) §3.3/§5。
+- **HTML Artifact 预览**：模型自由文本探测（html 语言或 doctype/svg/xml 前缀，600ms 防抖），经 `srcDoc` 注入沙箱 iframe（sandbox 仅 `allow-forms allow-modals allow-scripts`、无 `allow-same-origin`）运行完整 HTML 页面，支持重载、全屏、下载单文件；全局开启且会话未显式关闭时显示；高度回传比较 frame id，标题在比较前更新，注入脚本不发标题，消息均未校验 origin/source。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) 主链、[消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md) §3.3/§5。
 
-- **Artifact 分享与独立路由**：POST HTML 全文到 `/api/artifacts`，服务端以 md5 为 key 写入 Cloudflare KV（可选 TTL），分享链接 `#/artifacts/<md5>` 经独立路由 `/artifacts/:id` 取回并用同一 iframe 重开。依赖 `CLOUDFLARE_*` 环境变量，静态导出或未配置时不可用（推断，细节见末尾小节）。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) §8、[消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md) §5.2。
+- **Artifact 分享与独立路由**：POST HTML 全文到 `/api/artifacts`，服务端以 md5 为 key 写入 Cloudflare KV（可选 TTL），分享链接 `#/artifacts/<md5>` 经独立路由 `/artifacts/:id` 取回并用同一 iframe 重开。删除原消息不撤销该 KV 副本；未设置有效 TTL 时存取路由没有指定过期时间。依赖 `CLOUDFLARE_*` 环境变量，静态导出或未配置时不可用（推断，细节见末尾小节）。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) §8、[消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md) §5.2。
 
-- **生成式输出对象模型**：模型输出统一落为消息文本并由 Markdown/HTML 渲染，无独立输出对象类型，消息文本是唯一事实源；能力等级判定为 G0 主体 + 部分 G3 预览。无编辑/diff/patch/版本/CRDT，无 notebook、code interpreter、canvas/WebGL 输出对象（未覆盖边界见末尾小节）。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) §1/§6/§11。
+- **生成式输出对象模型**：模型输出统一落为消息文本并由 Markdown/HTML 渲染，无独立输出对象类型，消息文本是唯一事实源；能力等级判定为 G0 主体 + 部分 G3 预览。可编辑消息全文，但预览无对象级编辑/diff/patch/版本/CRDT，无 notebook、code interpreter、canvas/WebGL 输出对象（未覆盖边界见末尾小节）。证据状态：`主链确认`。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) §1/§6/§11。
 
 - **图片生成（DALL-E 3 与 SD）**：DALL-E 3 在 OpenAI 系 adapter 内改走 images API、结果以 `image_url` 存入消息；SD 是独立 `/sd` 页面画廊，持久化的 `draw` 任务记录保存模型、参数、UUID、运行/成功/失败状态及结果 URL，支持预览、复制提示词、按原参数重试和删除，走 Stability API（Provider 枚举中同名的 Stability 走图片链路而非对话渠道）。两者均为 G1 级可查看/复用内容，无对象生命周期、聊天回流或 Agent 历史读取路径。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md) §4/§9、[生成式输出与运行时调查笔记](../生成式输出与运行时/NextChat-生成式输出与运行时调查笔记.md) §4、[媒体创作调查笔记](../媒体创作/NextChat-媒体创作调查笔记.md)、[独特功能调查笔记](../独特功能/NextChat-独特功能调查笔记.md)。
 
@@ -137,7 +137,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 
 - **多设备同步疑似缺陷**：`mergeWithUpdate` 的 remote 时间变量取成了 `localState.lastUpdateTime`，远端时间戳不参与比较，本地时间戳非 0 时远端状态永不胜出（静态推断疑似实现缺陷，未在 WebDAV/多设备流程复现）。证据状态：`主链确认`（含静态推断缺陷）。来源：[会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md) §6。
 
-- **工具执行模型边界**：OpenAPI 插件 HTTP 与 MCP stdio 调用无统一审批、沙箱、权限策略或 Agent 步数上限；MCP 侧的 access code 门禁只决定"谁能调用整组端点"，通过后仍按模型给出的参数直接执行；MCP access code 由客户端 AccessStore 持有并随调用传入前端可见；MCP 子进程环境由 SDK 默认变量加 server 配置组成，不再继承整个 `process.env`；插件认证 token 进入客户端持久化；arguments 直接 `JSON.parse`、未知函数名无存在性检查；MCP 文本协议依赖正则与完整 fenced block，多调用/未闭合 block/非法 JSON 只记录错误，无结构化恢复，重发收敛依赖 60 秒请求级 abort。证据状态：`主链确认`（边界）。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §2.3/§5。
+- **工具执行模型边界**：OpenAPI 插件 HTTP 与 MCP stdio 调用无统一审批、沙箱、权限策略或 Agent 步数上限；MCP 侧的 access code 门禁只决定"谁能调用整组端点"，通过后仍按模型给出的参数直接执行；MCP access code 由客户端 AccessStore 持有并随调用传入前端可见；MCP 子进程环境由 SDK 默认变量加 server 配置组成，不整体复制宿主环境；插件认证 token 进入客户端持久化；arguments 直接 `JSON.parse`、未知函数名无存在性检查；MCP 文本协议依赖正则与完整 fenced block，多调用/未闭合 block/非法 JSON 只记录错误，无结构化恢复，重发收敛依赖 60 秒请求级 abort。证据状态：`主链确认`（边界）。来源：[Agent 工具调查笔记](../Agent工具/NextChat-Agent工具调查笔记.md) §2.3/§5。
 
 ### 未覆盖类目与未找到的能力
 
@@ -147,7 +147,7 @@ NextChat 是 Next.js 单页 Web 聊天客户端（Next.js 14 + React + Zustand +
 ### 共性未验证
 
 - 全部结论基于静态源码；真实模型调用、SSE 断线重试、Mermaid/Artifact iframe 运行表现、Tauri 桌面行为、跨窗口/多标签同步、token 估算偏差、大数据量性能、无障碍与视觉运行态均未运行验证；各来源笔记"未验证事项"章节逐项列明。这些"未验证"仅为方法学约束，不否定已确认的源码完备性（口径见"完成度速览"）。
-- 调查日期与代码快照：各来源笔记均基于提交 `1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支 `main`）；调查更新日期为 2026-11-04，以来源笔记元数据为准。
+- 调查日期与代码快照：各来源笔记均基于提交 `1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支 `main`）；各篇调查日期以各自元数据为准。
 
 ## 来源笔记索引
 

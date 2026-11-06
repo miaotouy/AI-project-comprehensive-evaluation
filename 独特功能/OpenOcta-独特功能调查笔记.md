@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -17,7 +17,7 @@
 OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环」的一组工作流：
 
 - 无人值守运行：Cron 任务与 `/hooks/alert`、`/hooks/agent` 等外部触发，让 Agent 在无人对话时启动一轮分析，并把结果写回会话、运行日志或 IM/Webhook。
-- 命令策略与审批：按 allow/ask/deny 规则评估复合命令，敏感工具在执行前可中断等待人工批准。
+- 命令校验与审批：本机执行链把 deny 规则转成遗留校验器；开启审批后，每次 `execute` 调用都可在执行前中断等待批准。完整的 allow/ask/deny 分段求值器尚未接入这条链路。
 - 数字员工：把「人设 + Skill 白名单 + 专属 MCP」打包成模板，会话与定时任务都能绑定。
 - Knowledge Vault：本地 Obsidian 兼容的 Markdown 知识库，带全文/向量混合索引、文件树、双链图谱与 `memory_search` 工具。
 - Agent Swarm：房间式多 Agent 协作，成员可再拆子 Agent，用户可单独指挥任意成员，拓扑与历史可恢复。
@@ -73,13 +73,19 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 | 用户目标 | 让 Agent 能执行运维命令，同时把高风险动作限制为需人工确认或直接拒绝 |
 | 入口与触发者 | 配置中的命令策略；Agent 调用 `execute` 工具时由运行时拦截；Security 页的审批列表 |
 | 事实对象 | 策略规则（命令/片段、allow/ask/deny、禁用参数、密钥模式）与 `ApprovalRecord`（pending/approved/denied、白名单 TTL） |
-| 执行与结果 | 命令先过策略与遗留校验器；开启审批时，`execute` 在真正执行前触发 Eino 中断，恢复时带批准结果 |
+| 执行与结果 | deny 规则进入遗留命令校验器；开启审批时，每次 `execute` 在真正执行前触发 Eino 中断，恢复时带批准结果 |
 | 持续性 | 审批记录与白名单以 JSON 原子写入 `agents/approvals/approvals.json`，进程重启可恢复 |
-| 证据强度 | 后端执行链与持久化确认；用户界面闭环未接通 |
+| 证据强度 | 本机校验链、工具级中断与队列持久化确认；完整策略求值及用户界面闭环未接通 |
 
-**策略求值。** 复合命令按 `&&`、`||`、`;` 拆段，逐段匹配规则并取最严格结果；显式 allow 可以覆盖遗留 validator 的 deny（`src/pkg/agent/runtime/command_policy.go:103-179`）。求值结果被转换成遗留 validator，在文件系统后端的 `execute` 调用前执行（`src/pkg/agent/runtime/runtime.go:104-114`、`src/pkg/agent/eino/localbackend/backend.go:28-53`）。
+**本机校验链。** 运行时先解析配置，再通过 `ToLegacyValidator` 复制 deny 规则、禁用参数、长度及密钥模式字段，交给后端执行前校验；allow、ask 与默认策略未被复制。转换过程处理的是规则配置，未调用完整命令求值器（[runtime.go:104–114](<../../openocta/src/pkg/agent/runtime/runtime.go#L104-L114>)、[command_policy.go:307–326](<../../openocta/src/pkg/agent/runtime/command_policy.go#L307-L326>)）。
 
-**中断与恢复。** 审批开启时，引擎在工具链上追加一个只拦截 `execute` 的中间件；首次调用不执行工具，而是发出带工具名与原始参数的 `StatefulInterrupt`，恢复后若 `approved` 为真才用暂存参数执行，否则把拒绝原因作为工具结果返回（`src/pkg/agent/eino/approval_middleware.go:31-123`）。Gateway 侧把中断广播成 `state: "interrupted"` 的聊天事件，并提供 `chat.resume` 接收 `approved`、`reason` 与上下文（`src/pkg/gateway/handlers/chat.go:3231-3254`、`:3677-3719`）。
+遗留校验器以整条命令字符串的首个空白分词取文件名来匹配禁用命令，随后检查整串片段与后续分词中的禁用参数；它还检查长度和控制字符，密钥模式虽被复制，却未在该函数使用。代码注释声称默认阻止 shell 元字符，对应检查实际已注释。因此，仅以命令名设置 deny 时，复合命令后段的同名程序不会被首词检查覆盖，整串片段或参数规则仍可能另行拦截（[command_validation.go:15–74](<../../openocta/src/pkg/agent/runtime/command_validation.go#L15-L74>)）。
+
+**完整求值器的接线边界。** `EvaluateCommandAccess` 的实现按分隔符拆段、逐段取最严格结果；单段依次检查 deny、allow、ask，再回退默认策略，deny 的匹配优先于 allow。检索范围为全部 Go 源码，调用仅来自包装方法与测试，当前 Eino 执行链没有使用它；这些分段语义也未进入遗留校验器（[command_policy.go:157–242](<../../openocta/src/pkg/agent/runtime/command_policy.go#L157-L242>)）。
+
+**中断与恢复。** 审批开关启用后，引擎按工具名拦截每次 `execute` 调用，首次调用发出携带原始参数的 `StatefulInterrupt`；此处没有命令规则判断，allow 与 ask 未参与审批选择。恢复时有明确批准结果则用暂存参数执行，有拒绝结果则返回拒绝文本（[engine.go:100–102](<../../openocta/src/pkg/agent/eino/engine.go#L100-L102>)、[approval_middleware.go:45–123](<../../openocta/src/pkg/agent/eino/approval_middleware.go#L45-L123>)）。
+
+Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运行时另将三组命令规则写入 SDK 兼容权限文件，当前 Eino 中间件未读取该文件（[chat.go:3231–3254、3677–3719](<../../openocta/src/pkg/gateway/handlers/chat.go#L3231-L3254>)、[runtime.go:151–159、392–450](<../../openocta/src/pkg/agent/runtime/runtime.go#L151-L159>)）。
 
 **队列管理。** `ApprovalQueue` 把记录与按会话的到期白名单落盘，支持批准、拒绝、等待（条件变量）与白名单续期（`src/pkg/security/approval.go:66-273`）。Gateway 暴露 `approvals.list/approve/deny/whitelistSession`，并按配置的 `timeoutSeconds` 计算过期状态（`src/pkg/gateway/handlers/approvals.go:36-60`、`:157-199`）。
 
@@ -217,7 +223,8 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 
 - **L4 Evolution 写入未接线。** `Store.Add/Replace/Remove` 提供带字符预算的增删改，但除测试外没有调用方；运行时只在创建时读取并注入快照，`SnapshotForSession` 也固定传空 session ID（`src/pkg/agent/evolution/store.go:41-44`、`:147-238`、`src/pkg/agent/runtime/runtime.go:180-186`）。README 的「L4 autonomous evolution」在当前快照中只能确认到「读取并注入」。
 - **`session_search` 不存在。** 系统提示与知识库文档都要求使用它，但工具注册只有 `memory_search`（`src/pkg/agent/runtime/knowledge.go:41-46`、`docs/knowledge-vault.md:5`）。
-- **Exec 审批前端空转。** 审批浮层与事件监听存在，后端 `exec.approval.*` 为未实现桩，也没有事件生产者（见能力卡 2）。
+- **命令策略接线。** 配置含 allow/ask/deny 与默认动作，完整分段求值器存在但只有包装方法与测试引用；本机执行实际使用 deny 转换后的首词/片段/参数校验。审批启用后按工具名统一拦截，未消费 ask/allow（见能力卡 2）。
+- **Exec 审批前端接线。** 审批浮层与事件监听存在，后端 `exec.approval.*` 为未实现桩，也没有事件生产者（见能力卡 2）。
 - **Skill 数量声明。** README 的「766+ Skills」依赖安装包与官网市场；本仓库没有附带任何 `SKILL.md`，`src/bundled` 为空目录，因此无法用仓库快照核对数量。
 - **数字员工市场。** 条目来自远端服务，安装逻辑与文件格式不在本仓库；离线环境下只能使用自建员工。
 - **IM 渠道。** 各渠道实现位于仓库内，但账号登录、二维码、Webhook 回调可达性依赖外部平台；本次未运行验证。
@@ -244,6 +251,7 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 - 未验证 Knowledge Vault 的向量检索质量、中文分词效果、大 Vault 的全量重建耗时与图谱规模上限。
 - 未验证 Swarm 的并发上限、流式事件顺序、失败成员的级联状态与前端拓扑在大树下的表现。
 - 未验证 A2UI 在不同模型输出下的兼容性，以及模型是否可能自发输出可交互组件。
+- 完整求值器未进入生产链、遗留校验只按整条首词匹配命令名，以及审批按工具名统一拦截，均来自静态调用链；未实际执行复合命令或联调规则与审批。
 - 未验证审批中断在真实运行中能否被前端恢复；本笔记只确认了后端接口与事件字段。
 
 ## 关键源码索引
@@ -251,7 +259,8 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 - 定时任务：`src/pkg/cron/service.go:146-179`、`:272-391`、`:440-496`；`src/pkg/cron/types.go:5-71`；`src/pkg/gateway/handlers/cron.go:102-179`、`:503-546`
 - 告警与 Hook：`src/pkg/gateway/http/hooks.go:29-105`、`:284-392`
 - 投递：`src/pkg/gateway/handlers/cron_delivery.go:42-199`；`src/pkg/gateway/handlers/chat.go:1072-1103`、`:1165-1239`
-- 审批：`src/pkg/agent/runtime/command_policy.go:103-179`；`src/pkg/agent/eino/approval_middleware.go:31-123`；`src/pkg/security/approval.go:66-273`；`src/pkg/gateway/handlers/approvals.go:157-340`
+- 命令校验：[runtime.go:104–114](<../../openocta/src/pkg/agent/runtime/runtime.go#L104-L114>)、[command_policy.go:307–326](<../../openocta/src/pkg/agent/runtime/command_policy.go#L307-L326>)、[command_validation.go:15–74](<../../openocta/src/pkg/agent/runtime/command_validation.go#L15-L74>)
+- 审批：[approval_middleware.go:31–123](<../../openocta/src/pkg/agent/eino/approval_middleware.go#L31-L123>)、[approval.go:66–273](<../../openocta/src/pkg/security/approval.go#L66-L273>)、[approvals.go:157–340](<../../openocta/src/pkg/gateway/handlers/approvals.go#L157-L340>)
 - 数字员工：`src/pkg/employees/model.go:7-46`；`src/pkg/gateway/handlers/employees.go:30-199`；`src/pkg/gateway/handlers/chat.go:1399-1419`、`:2212-2219`
 - 知识库：`src/pkg/agent/eino/knowledge_tools.go:20-55`；`src/pkg/agent/knowledge/engine.go:34-97`；`src/pkg/gateway/handlers/vault.go:558-660`；`src/pkg/agent/runtime/knowledge.go:13-46`
 - 蜂群：`src/pkg/swarm/orchestrator.go:52-255`；`src/pkg/swarm/store.go:24-117`；`src/pkg/swarm/limits.go:4-11`；`src/pkg/gateway/handlers/swarm_tools.go:17-133`

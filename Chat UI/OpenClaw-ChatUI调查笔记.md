@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
@@ -85,6 +85,8 @@ TUI 的 `/session` 和 `/sessions` 打开有限的 recent session 选择器。�
 Android 的独立 Threads 页面提供 Recent、Current、Archived 过滤，文本搜索、Newest/Oldest 排序和 Compact/Detailed 布局；聊天页本身还提供轻量 session switcher，完整搜索进入 Threads 页面（`apps/android/app/src/main/java/ai/openclaw/app/ui/SessionsScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
 
 ### 新建、切换和恢复
+
+Control UI 新建页提供 normal、draft、incognito 互斥的可见性模式。incognito 开关在提交中、等待 placement 或服务端能力不允许时禁用，并就近展示说明；启用时退休原持久草稿，创建参数携带 incognito。创建完成后导航到明确的新 key，历史过期则用 Composer replacement 展示“新建隐私会话”动作，重新检查 sessions.create 权限后创建新目标，不向失效 key 静默重发。入口与动作见 [可见性控件](<../../openclaw/ui/src/pages/new-session/incognito-control-view.tsx>)、[草稿退休](<../../openclaw/ui/src/pages/new-session/draft-persistence.ts#L130-L148>)、[过期会话动作](<../../openclaw/ui/src/pages/chat/chat-pane-session-creation.ts#L164-L184>)。服务端内存 actor 和关闭后的保留边界见 [会话与消息管理](<../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md>)；下面的浏览器 durable 草稿说明适用于可持久化会话。
 
 - Control UI 的侧栏选择先计算 session 的 preferred face 和 navigation target，再通过 navigation handoff 提交；route loader 负责把短 ID、slug、Agent scope 和 draft/focus 参数解析成 canonical route（`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/pages/chat/route-loader.ts`）。
 - TUI 通过 `/new`、`/reset`、`/session` 和选择器完成新建、重置与切换。切换会递增历史加载 generation，只有仍属于当前 session、当前 generation 和当前 Agent 的异步结果才能重建 ChatLog（`src/tui/tui-session-actions.ts`、`src/tui/tui-session-actions.ts`）。

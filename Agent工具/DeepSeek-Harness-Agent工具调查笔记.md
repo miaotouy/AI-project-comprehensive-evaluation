@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/tools/`、`packages/core/tool-executor-native/`、`packages/core/tool-executor-ptc/`、`packages/core/agent-loop/`、`packages/core/system-prompt/` 与各 `packages/*/tool-*`、`packages/*/mcp-*` 包）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -44,7 +44,7 @@
         batch 结算：session.append('tool/call' …) → session.append('tool/result' …)
         additionalContexts → 注入下一 step 的 inbox（FIFO）
   → 无更多 tool-call 或结果带 concludesTurn → step/end → turn/end
-  → 下一请求 deriveMessages 从日志投影（tool/result 投影为 user-role 工具结果消息）
+  → 下一请求 deriveMessages 从日志投影（tool/result 是独立 tool 角色消息）
 ```
 
 调度与落盘都从 agent-loop 移出：本地调度器位于 `packages/core/tools/src/batch.ts:50`，`tool/call` 与 `tool/result` 的追加同在该文件 `:236-264`；执行期间若 step 失败，agent-loop 用 `ToolCallRecovery` 补写已结算但未落盘的结果（`agent.ts:360-390`）。
@@ -181,9 +181,9 @@ repeat-tool-reminder 挂在 `tools/post-execute`：按 agent 维护连续相同�
 
 **持久化**：durable `tool/result` 只保存模型可见消息、结构化错误身份与 meta——规范值明确不落盘。批次结算处同时负责两条事件的表面标记（`batch.ts:236-264`），会话不变式要求结果必须对应本 step 先落盘的 `tool/call`。
 
-**模型历史**：`deriveMessages` 从有序 surface 投影模型历史，surface 只含 user/message、assistant/message、tool/result 三类事件（`packages/core/session/src/index.ts`）。工具结果消息是 user 角色、内容为单个 tool-result 块、source 携带 callId——"模型可见 ⟺ 已记录"不变式的落点。
+**模型历史**：有序表面包含 system、developer、user、assistant 与 tool 五类消息。工具结果直接以 tool 角色承载 content 块，调用身份随消息保存；批次结算把结果消息和来源 call 事件一起追加，下一请求从同一日志派生（`packages/core/tools/src/batch.ts:243-264`、`packages/core/session/src/surface.ts:129-146`）。
 
-**附加上下文与长度控制**：工具体内 `deferContext` 与 post-execute 决策附带的 additionalContexts 在该执行自身结果到达 loop 之后按 FIFO 注入下一步（`docs/subsystems/tools.md` 执行章节）。超长结果由 base bundle 的 spill-policy（默认 50KB 内联上限）与 `tool-result-pruner` 在 post-execute/compaction 阶段改写；PTC 子调用的日志副本另由 `tools/ptc-dispatch-log` 钳制。
+**附加上下文与长度控制**：工具附加上下文在结果到达 loop 后按 FIFO 注入下一步。结果留存由 spill 策略按估算 token 约束，基座预算为 12,500 token；文本和图像可混合保留，省略提示也计入预算，图像保持整块且不重排。缺少图像定价或恢复存储时保留原内容并告警，不能把该策略理解为无条件硬上限（`packages/spill/spill-policy/src/index.ts:49-151`、`packages/bundle/base/cordis.patch.yml:425`）。PTC 子调用的日志副本走独立分发日志钩子，规范程序值保持完整。
 
 **恢复**：session log 是 append-only 日志，重启可重建历史；进行中的工具执行不持久化，进程退出后不恢复执行现场。
 
@@ -210,7 +210,7 @@ MCP 资源由独立 `mcp-resources` consumer 提供三项共享工具：列资�
 - **参数不可改写**：策略层不支持改写参数，保证历史、审计、UI 与执行四方一致。
 - **单调 guard + 失败关闭的审批**：guard 只能拒绝；审批通道缺失或不可答时默认拒绝。
 - **呈现与执行分离，且呈现词汇只作参考**：呈现函数是 args/result 的纯函数，live 与回放共用；内置 Web 客户端按自己的渲染器派生卡片，工具作者声明的卡片意图不是渲染契约。
-- **无工具级 token 预算，未发现显式迭代上限**：长尾终止依赖模型停止原因、结论标记与用户中断，上下文压缩兜底。
+- **结果留存预算与循环终止分开**：spill 策略约束模型可见结果副本的 token 预算，执行局部规范值不裁剪；显式迭代上限本次未展开，长尾终止仍受模型停止原因、结论标记、用户中断与上下文压力处理影响。
 
 ## 10. 未验证事项
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
@@ -488,7 +488,7 @@ HTML 在 VCPChat 中有三种承载形式，渲染方式不同：
 | fenced HTML 代码块的预览 | 动态 iframe `srcdoc` | 用户点击预览，具有 iframe 生命周期和消息通信 |
 | 工具结果中的 HTML | 收紧后的工具结果 Markdown | 代码围栏外的原始 HTML 被封装或转义 |
 
-第一种是"消息即页面片段"，第二种是"代码工件预览"，第三种是"外部数据展示"。
+第一种是“消息即页面片段”，第二种是“代码工件预览”，第三种是“外部数据展示”。代码预览 iframe 只配置 `sandbox="allow-scripts"`，没有同源权限；尺寸消息需匹配来源窗口与 frameId，并被限制到 100–12000px。关闭预览时移除监听器、清空并销毁 iframe。这个边界只覆盖代码预览，正文原始 HTML 脚本仍有另一条主页面执行路径。依据：[预览生命周期](../../VCPChat/modules/renderer/contentProcessor.js#L817-L924)。
 
 ### CSS scope
 
@@ -496,7 +496,11 @@ assistant 文本含结构化 HTML、`<style>` 或内联样式时，消息获得�
 
 ### 脚本执行
 
-`animation.processAnimationsInContent()` 会收集消息中的 `<script>`：外部脚本通过动态 script 元素加载；内联脚本被重新执行；常见 Three.js、Anime.js CDN URL 会改写到本地 vendor 文件；动画帧与定时器回调被包装成可登记、可暂停的版本；`document.write/open/close` 被拦截；Anime.js 实例、Three.js renderer 和动画句柄登记到所属消息，用于资源回收。
+消息正文的原始 HTML 动画岛可在聊天主文档执行脚本；代码围栏、行内代码、HTML 预览容器和工具数据卡则属于只展示域，扫描器会跳过其中的 script，避免把示例代码或工具回执重新提升为宿主脚本。依据：[可执行域筛选](../../VCPChat/modules/renderer/animation.js#L292-L327)。
+
+可执行脚本中的外部依赖经动态 script 加载，常见 CDN 地址改写到本地 vendor。内联脚本包在 IIFE 中，将 DOM 查询、动画帧和定时器替换成消息所有者提供的接口；这些接口便于暂停和清理，脚本仍处在聊天页面上下文。依据：[脚本包装与执行](../../VCPChat/modules/renderer/animation.js#L505-L555)。
+
+Pixi Application 也绑定到消息并先冻结，再按热区竞争启动配额。当前聊天根最多保留三个已启动 Pixi 气泡，历史初载消息最多启动一个；满额时先淘汰最老的离屏实例，若全在热区则抑制新实例。离屏暂停 ticker 保留配额，消息移除时销毁实例并释放配额。因此资源限额针对 Pixi 气泡，不能推断为所有脚本或 WebGL 实例的通用限额。依据：[配额判定](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473)、[启动抑制](../../VCPChat/modules/renderer/visibilityOptimizer.js#L682-L702)、[消息清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
 
 脚本内的 `document.querySelector/querySelectorAll/getElementById/getElementsByTagName` 被包装为"当前消息容器优先、document 回退"（`animation.js:282-360`）：同页面多条消息包含相同 id 或 `data-vdoc-island` 时，脚本默认命中自己消息内的节点而非页面第一份副本；对 script 标签的查询例外地保留全局行为并追加 `virtualCurrentScript`，以兼容依赖当前脚本引用的库代码。这是消息脚本 DOM 隔离的补充手段，不是新的隔离边界——脚本仍运行在聊天 renderer 的页面上下文。
 

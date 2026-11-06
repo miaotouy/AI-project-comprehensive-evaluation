@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
 > 调查方式：静态源码走读 + 检索，未运行构建与测试
 >
-> 调查范围：`chat.send` 的任务对象与状态机、转录历史加载与请求拼装顺序、模型与渠道交接、流式事件到 WebSocket 的映射、完成/异常/取消的回写、停止与审批续跑、同会话串行与跨会话并发、技能/MCP/知识库/附件注入点、退出与日志；会话 schema、界面交互与工具执行内部语义留给相邻类目
+> 调查范围：`chat.send` 的任务对象与状态机、转录历史加载与请求拼装顺序、模型与渠道交接、流式事件到 WebSocket 的映射、完成/异常/取消的回写、停止与审批续跑、同键等待/驱逐/抢占与跨会话并发、技能/MCP/知识库/附件注入点、退出与日志；会话 schema、界面交互与工具执行内部语义留给相邻类目
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -18,9 +18,9 @@
 
 关键事实：
 
-- 上下文不是"内存中的会话对象"，而是每轮从 JSONL 转录重新水化；历史转换失败时整轮请求仍可继续，只是没有历史（`src/pkg/gateway/handlers/chat.go:2427-2452`）。
+- 模型历史每轮从 JSONL 转录水化，Gateway 的历史开关只控制上层预加载；下层在消息为空且转录路径存在时仍会读取，当前纯文本输入已先落盘，并另有 Prompt 回退（[chat.go:1980、2420–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L1980>)、[event_bridge.go:20–46、77–83](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20>)）。读取出错且没有可用历史时，下层会返回错误。
 - 拼装顺序是固定的：运行时创建时构造系统提示与工具，随后每轮加载历史、合并当前输入，最后统一做工具轮修复（`src/pkg/agent/eino/event_bridge.go:20-47`、`tool_call_arguments.go:52-61`）。
-- 同一会话键的请求是串行的，新消息默认"抢占"当前回合（在工具调用后生效）；不同会话并行，没找到全局并发上限（`src/pkg/agent/eino/session_turn_loop.go:221-249`、`src/pkg/agent/runtime/pool.go:57-139`）。
+- 池条目互斥通常让同键请求等待，但等待超时会先删除映射、延后关闭旧 Runtime；旧 run 尚未结束时，新请求可以创建同键的新 Runtime。抢占标记只作用于实际接收它的 TurnLoop，跨 Runtime 没有停止旧 run 的作用（[chat.go:1915–1935、3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915>)、[pool.go:193–209、237–247](<../../openocta/src/pkg/agent/runtime/pool.go#L193>)）。不同会话可并行，本次未找到全局并发上限。
 - 取消有两层：`ctx` 超时/取消让流循环退出，TurnLoop 的 `StopImmediate` 立即终止 agent；两者都由 `chat.abort` 或 `/stop` 触发（`chat.go:3258-3279`、`:3458-3515`）。
 - 没有重试与重新生成。失败后用户重发就是新 `runId`；`chat.resume` 只用于工具审批中断后继续，不用于重放（`chat.go:3678-3840`）。
 
@@ -62,10 +62,12 @@ WS chat.send（health.go:206-215 注册）
 
 1. 系统提示：运行时创建时按"覆盖优先，否则内置模板"决定；内置模板包含身份、工具、命令执行约束、安全、工作区，再追加技能段、知识库段与进化提示（`src/pkg/agent/runtime/runtime.go:70-102`、`system_prompt.go:92-155`）。
 2. 每轮覆盖：数字员工清单里的提示词，加上本地代理场景提示，作为 `SystemPromptOverrides` 直接替换系统提示而不是追加（`chat.go:2212-2226`）。
-3. 历史消息：从当前会话转录读取，按角色白名单与最大条数裁剪后转成模型消息（`chat.go:2427-2452`、`transcript_history.go:103-121`）。
-4. 当前输入：文本与附件块。
+3. 历史消息：Gateway 在历史开关启用时预加载当前转录，按角色与最大条数转换；若未得到消息，Eino 层还会按请求内的转录路径读取（[chat.go:2427–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L2427-L2452>)、[event_bridge.go:20–46](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20-L46>)）。
+4. 当前输入：通常已经包含在转录历史中，附件再按内容块合并；没有可用历史且未返回读取错误时，直接由请求的文本和内容块构建用户消息。
 
-第 4 段有一个易误读的细节：用户消息在调用模型前已经写进转录，所以历史加载通常会包含它；`mergeCurrentRequestIntoHistory` 只在存在内容块时才动手，把附件块并入最后一条用户消息，避免重复一条文本（`event_bridge.go:49-74`）。纯文本消息因此不会重复，带附件时会"补齐"最后一条。
+当前输入有持久化和请求字段两份来源。Gateway 在启动模型前已追加用户文本，同时构造带 Prompt、附件块与转录路径的请求。纯文本且历史非空时，合并函数直接使用历史，因此通常从刚追加的用户行取得当前文本；没有历史时则回退 Prompt。附件会合并进最后一条用户消息或追加新用户消息（[chat.go:1980–1991、2420–2426](<../../openocta/src/pkg/gateway/handlers/chat.go#L1980-L1991>)、[event_bridge.go:49–87](<../../openocta/src/pkg/agent/eino/event_bridge.go#L49-L87>)）。
+
+**历史开关的作用层级。** 关闭 `session.sessionHistory.enabled` 或 `loadFromTranscript` 只跳过 Gateway 预加载，也跳过把角色和条数限制写入请求；请求仍带转录路径。下层只看消息列表是否为空与路径是否非空，继续读该文件，不再读取开关。正常转录含刚追加的当前输入，因此该路径保留当前文本，同时仍带入历史；使用零值加载选项时采用默认角色、不设条数上限。历史关闭配置在这条链路中无法保证最终模型输入排除历史（[transcript_history.go:26–59、103–120](<../../openocta/src/pkg/agent/eino/transcript_history.go#L26-L59>)、[event_bridge.go:20–46](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20-L46>)）。
 
 历史转模型消息做三件事：角色过滤（默认 user/assistant/toolResult）、按 `MaxMessages` 取尾部、重排工具轮。重排是为了修补"工具结果先于 assistant 工具调用行落盘"的乱序，同时给被中断的工具调用补占位结果（`transcript_history.go:131-172`、`tool_call_arguments.go:65-112`）。这是读侧修补，不改磁盘。
 
@@ -168,13 +170,15 @@ runId 与会话键不匹配时只记警告仍允许停止，理由写在注释�
 
 ## 8. 队列、多会话并发与后台生成
 
-并发模型是"每会话一把锁 + 每 run 一个 goroutine"：
+运行时池按会话键缓存条目，每个 run 另有 goroutine；互斥范围是具体池条目，映射被驱逐后可出现同键的新旧条目。
 
-- 池条目按会话键建，条目互斥锁在运行期间持有，同一键的第二个请求会阻塞在 `Acquire`，直到前一个释放（`src/pkg/agent/runtime/pool.go:73-105`）。
-- 发送入口在 `Acquire` 之前先探测在飞状态并等待可用；等待分两段，各 5 秒，仍占用就清出池条目再试，失败返回"会话运行时仍忙"（`chat.go:3182-3209`）。
-- 没找到全局并发上限或队列：不同会话各自建 Runtime，数量随活跃会话增长。
+1. 发送入口先探测同键在飞任务。命中时记录 `preempt=true` 并先等待池可用，这个分支未调用旧 run 的中止控制器；未命中时才走另一分支调用整会话中止函数，再等池（[chat.go:1915–1935](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915-L1935>)）。
+2. 首次等待使用 30 秒常量；超时后驱逐映射，再给当前映射最多 5 秒的可用性检查，仍忙才返回错误。第二段并未等待原条目关闭：映射已经删除时，可用性检查会直接成功（[chat.go:43](<../../openocta/src/pkg/gateway/handlers/chat.go#L43>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182-L3208>)）。
+3. 驱逐先从池里删除映射，再尝试关闭。旧条目仍被运行持锁时，关闭工作转入 goroutine，等待旧锁释放后才执行 Runtime 清理；驱逐本身未取消旧 run。新请求可在映射空缺期间建新的 Runtime，两个条目的锁互不约束（[pool.go:167–181、193–209](<../../openocta/src/pkg/agent/runtime/pool.go#L167-L209>)、[pool.go:237–261](<../../openocta/src/pkg/agent/runtime/pool.go#L237-L261>)）。
 
-再次发送的语义是"抢占"而不是排队。检测到同键有在飞任务时，新一轮以 `preempt=true` 推入 TurnLoop，Eino 在工具调用之后的安全点中断上一轮；若走的是旧路径，则直接取消上一轮再等池（`chat.go:1915-1935`、`session_turn_loop.go:221-249`）。
+抢占只在同一个 TurnLoop 内有作用：收到标记时，Push 使用工具调用之后的抢占点。Gateway 在推入新消息前已经等待池，因此旧 run 若自然结束，新消息才取得原 Runtime；若等待超时而创建新 Runtime，标记被交给新实例的 TurnLoop，无法中断旧实例。由这些控制流可推断：旧 run 持续超过等待窗口时，同键新旧 run 可能同时执行，并写入同一转录或检查点；具体交错与后果尚未运行验证（[runtime.go:255–260、304–315](<../../openocta/src/pkg/agent/runtime/runtime.go#L255-L260>)、[session_turn_loop.go:221–248](<../../openocta/src/pkg/agent/eino/session_turn_loop.go#L221-L248>)）。
+
+本次未找到全局并发上限或统一队列；不同会话各自建 Runtime，数量随活跃会话增长。
 
 后台生成没有独立调度器：cron 与渠道消息复用同一 `chat.send`，只是会话键不同；cron 的会话条目在模型调用前先建好，运行结束写结果文件（`chat.go:1787-1795`、`:2986-2991`）。
 
@@ -185,8 +189,8 @@ runId 与会话键不匹配时只记警告仍允许停止，理由写在注释�
 | 能力 | 注入点 | 备注 |
 | --- | --- | --- |
 | 内置工具 | `tools.DefaultToolsWithInvoker` 加本地代理工具 | 每次新建 Runtime 时构建 |
-| MCP 工具 | 配置合并 + 请求级 `resources.mcpServers` 过滤 | 同时建 Eino 侧 MCP 管理器 |
-| 技能 | 技能目录 + 请求级 `skillKeys` 过滤 | 中间件把技能说明注入系统提示 |
+| MCP 工具 | 员工覆盖、请求筛选、再次合并全局服务 | 非空筛选结果会补回全局项，详见工具笔记 |
+| 技能 | 先筛候选，再把单个目录交给中间件 | 目录扫描集合与候选名单分开，详见角色笔记 |
 | 知识库 | `memory_search` 工具与知识库提示段 | 只覆盖 Vault 文档，不含会话历史 |
 | 浏览器 | 按配置注册，运行时按工具名标记 | 收尾时按 runId 关闭 |
 | 子代理 / swarm | 开关打开时追加 swarm 工具 | 与会话键命名空间联动 |
@@ -209,28 +213,29 @@ Checkpoint 存在 `<stateDir>/checkpoints/<id>.cp`，写入用临时文件加改
 已确认的边界：
 
 - 系统提示覆盖是替换而非拼接，员工提示会把内置安全段一起换掉（`runtime.go:72-86`）。
-- 纯文本回合的"当前输入"依赖先落盘再水化，若历史加载被配置关闭，这一轮就只剩历史没有新输入（`chat.go:2428-2452`）。
+- 历史开关只限制 Gateway 预加载，下层仍可按请求路径重读历史。当前纯文本已先写转录且保存在 Prompt 中；正常加载和无历史回退都保留当前输入，实际边界是历史关闭配置未贯穿到最终模型消息装配。读取错误且无可用消息时，下层返回错误（[chat.go:1980、2420–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L2420-L2452>)、[event_bridge.go:20–46、77–83](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20-L46>)）。
 - 上下文摘要写在运行时的独立转录文件，不回流到会话 JSONL，因此换设备或重开会话看不到摘要痕迹。
 - 工具结果先入队再补写的顺序修正只覆盖 `tool_use` 轮；其他半截情况依赖读侧修补。
 
 ## 11. 未验证事项
 
-1. 抢占在"工具执行中"与"模型流式中"两种时机的实际中断点未实测；代码只声明在工具调用后生效。
-2. 等待池的两段 5 秒加上清池重试在高并发下的表现未验证。
-3. `stopReason` 在多次 `message_stop` 间的覆盖顺序未做运行验证；代码只保证每轮取当前事件的值。
-4. 讯飞图片理解路由的实际协议差异未验证。
-5. 摘要中间件与大上下文模型组合时的阈值行为未实测。
-6. 附件较大时转录体积、`chat.history` 读取耗时与 32MB 单行上限的相互作用未实测。
-7. 审批中断后客户端刷新页面再 `chat.resume` 是否仍能命中检查点未验证。
+1. 同一 TurnLoop 接收抢占时设置了工具调用后生效的选项；Gateway 等池后能否遇到仍在运行的同一 TurnLoop、以及实际中断时机未实测。新 Runtime 无法凭该标记停止旧 Runtime，这一作用域来自静态链路。
+2. 首次 30 秒等待、驱逐映射与最多 5 秒重查后的新旧 run 重叠时长、转录/检查点写入交错、客户端事件合并均未运行验证。
+3. 关闭历史后下层重读及默认角色/无限条数加载的实际请求形状未抓包；当前输入保留与历史开关作用域依据字段传递及装配分支确认。
+4. `stopReason` 在多次 `message_stop` 间的覆盖顺序未做运行验证；代码只保证每轮取当前事件的值。
+5. 讯飞图片理解路由的实际协议差异未验证。
+6. 摘要中间件与大上下文模型组合时的阈值行为未实测。
+7. 附件较大时转录体积、`chat.history` 读取耗时与 32MB 单行上限的相互作用未实测。
+8. 审批中断后客户端刷新页面再 `chat.resume` 是否仍能命中检查点未验证。
 
 ## 12. 关键源码索引
 
 - `src/pkg/gateway/handlers/chat.go`：`ChatSendHandler`（`:1730-3177`）、流式状态映射（`:2644-2964`）、停止与恢复（`:3258-3530`、`:3678-3840`）
 - `src/pkg/gateway/handlers/chat_runtime_pool.go`：运行指纹与 MCP 合并
 - `src/pkg/agent/runtime/runtime.go`：运行时装配、RunStreamTurn、中止与清理
-- `src/pkg/agent/runtime/pool.go`：会话级串行与等待
-- `src/pkg/agent/eino/session_turn_loop.go`：TurnLoop、抢占、中断与恢复
-- `src/pkg/agent/eino/event_bridge.go`：消息拼装与事件转换
+- [pool.go:57–139、152–261](<../../openocta/src/pkg/agent/runtime/pool.go#L152-L261>)：条目互斥、等待、驱逐映射与延后关闭
+- [session_turn_loop.go:221–248](<../../openocta/src/pkg/agent/eino/session_turn_loop.go#L221-L248>)：TurnLoop 内抢占选项；同文件另含中断与恢复
+- [event_bridge.go:20–83](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20-L83>)：下层历史重读、当前输入合并与 Prompt 回退
 - `src/pkg/agent/eino/transcript_history.go`、`tool_call_arguments.go`：历史转换与工具轮修复
 - `src/pkg/agent/eino/context_middleware.go`：预算、截断、摘要
 - `src/pkg/agent/eino/model_factory.go`：Provider/模型/协议适配

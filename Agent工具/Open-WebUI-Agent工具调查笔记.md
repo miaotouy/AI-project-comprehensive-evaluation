@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
@@ -14,12 +14,12 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.3 的工具调用主循环位于 `utils/middleware.py`，不在路由或 utils/chat.py：主入口 `process_chat_payload`（2055 行）负责编排，先连接外部工具服务器（`connect_mcp_server` 在 `utils/tools.py:201`，由中间件 2696 行调用），再执行单个工具（`execute_tool_call`，3092 行）、后处理结果（`process_tool_result`，729 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
+Open WebUI 当前快照的工具调用主循环位于 `utils/middleware.py`，不在路由或 utils/chat.py：主入口 `process_chat_payload`（2055 行）负责编排，先连接外部工具服务器（`connect_mcp_server` 在 `utils/tools.py:201`，由中间件 2696 行调用），再执行单个工具（`execute_tool_call`，3092 行）、后处理结果（`process_tool_result`，729 行），随后重新请求模型进入下一轮。各步骤详细链路见第 3 节代码块。
 
 - 工具分三大来源，统一注册成 `tools_dict`（middleware.py 2684-2775 行）：本地数据库工具（`get_tools`，utils/tools.py 365 行）、内置工具（`get_builtin_tools`，626 行）、外部 MCP/OpenAPI 工具服务器（`server:*` 前缀）；每条条目含 `{tool_id, callable, spec, type}`，类型为 builtin/external/mcp，另有 `direct` 标志（前端直连执行）；
 - **内置工具按条件注入，不整批暴露**：共 64 个内置工具函数（tools/builtin.py，文件头明确警告只能经 utils/tools.py 封装使用），按 18 个类别做四重开关检查——模型 meta 的 `builtinTools` 类别开关、全局配置（`Config.get`）、模型能力（`get_model_capability`）、用户权限；
 - 请求体显式携带 `tools` 键（含 `tools: []`）时以该键为工具来源、跳过服务端数据库工具解析（middleware.py 2096、2507、2901 行）；`use_builtin_tools` 判定见 2110 行；
-- 工具参数校验是**白名单过滤**：`execute_tool_call` 从 `metadata['tools']` 按函数名取工具，用 spec 的 `parameters.properties` 键集过滤模型传入参数，解析失败返回错误文案；
+- 工具参数先做 JSON 解析，失败尝试 Python 字面量解析，并要求根值为对象。除 MCP 交给远端校验外，其余工具按 schema 属性白名单过滤多余参数；包装函数还进行少量标量类型转换。这些步骤不构成通用完整 JSON Schema 校验（[`utils/middleware.py:3092-3132`](../../open-webui/backend/open_webui/utils/middleware.py#L3092-L3132)、[`utils/tools.py:286-326`](../../open-webui/backend/open_webui/utils/tools.py#L286-L326)）；
 - 多轮工具调用循环上限 `max_tool_call_iterations`（默认 `CHAT_RESPONSE_MAX_TOOL_CALL_ITERATIONS`）；每轮把 tool call 以 `function_call` 项加入输出、执行后加 `function_call_output` 项、再拼回消息重发；工具结果中的 base64 图片拆成 `input_image` 供 LLM 消费，前端展示则剥离，图片另附一条 user 消息；
 - 仅四类知识/文件工具的结果经 `get_citation_source_from_tool_result` 转成引用来源（`view_knowledge_file`、`view_file`、`query_knowledge_files`、`query_chat_files`，middleware.py 457-600 行），再经 `event_emitter({'type': 'source'})` 发前端，并按 RAG 模板重写上下文注入（先恢复 pre-RAG 消息防重复）；网页检索结果的来源事件另由搜索链路发布，不走该函数；
 - 代码解释器双引擎：`code_interpreter.engine` 为 `pyodide` 时通过 `event_caller({'type': 'execute:python'})` 推送前端浏览器执行；为 `jupyter` 时调用 `execute_code_jupyter`（utils/code_interpreter.py，WebSocket 连 Jupyter kernel）；`CODE_INTERPRETER_BLOCKED_MODULES` 会注入受限 `__import__` 包装代码；
@@ -27,7 +27,8 @@ Open WebUI v0.11.3 的工具调用主循环位于 `utils/middleware.py`，不在
 - 子代理（Sub-agents）是内部 API 重入：`delegate_task`（builtin.py 1774 行）→ `utils/subagents.py: delegate`（296 行）创建独立 chat（`internal_meta` type=subagent）→ `_build_request` 伪造带 `typ: 'subagent'` token 的内部请求 → 递归调用 `CHAT_COMPLETION_HANDLER`。后台模式用信号量限流（上限 `subagents.max_concurrent`/`max_async`）；子代理内部禁用写类 memory 工具（`MUTATING_MEMORY_TOOLS`）。
 - Filter/Pipeline 是两条并行通道：本地函数插件经 `utils/filter.py` 的 `process_filter_functions` 按 inlet/stream/outlet 与 request 四类 handler 执行；远程 pipeline 服务器经 HTTP POST 到 `{url}/{filter_id}/filter/inlet|outlet`；能力注入顺序：Pipeline Inlet → Filter Inlet → Chat Memory → Web Search → Image Gen → Code Interpreter → Tools Function Calling → Files；消息定稿前还会跑一次 Filter `request`，工具审批恢复与每轮工具调用之后也会重跑该阶段；
 - Valves 配置全部经 Fernet 加密存储（utils/valves.py），`WEBUI_SECRET_KEY` 派生密钥，`ENABLE_VALVE_ENCRYPTION` 开关；
-- 工具审批可在请求参数中选择“完整访问”或“逐次询问”。后者由服务端把首个待执行调用持久化为 pending、其余调用标为 queued；恢复请求会拒绝已结算的调用，并沿原会话参数继续执行。`ask_user` 不进入这条审批暂停链：它必须是本轮唯一工具调用、且每轮只能有一个，混入其他工具或重复调用都判为非法——非法调用会被剔出本轮工具列表、各自留一条错误结果，然后该轮继续执行剩余调用（`utils/ask_user.py:9-27,90-160`、`utils/middleware.py:5707-5730`；审批链见 `utils/tool_approval.py`）。
+- 工具审批可选择完整访问或逐次询问。持久聊天的逐次询问把首个调用置为 pending、其余置为 queued，并保存恢复所需参数；决议和实际执行认领在服务端事务内完成，已批准或已结算调用返回冲突。人工提问的语义是收集答案，持久聊天中与审批共用暂停落库和 resolve 端点；答案回填为工具结果后继续模型生成，完整访问也不会代答。临时聊天则使用在线 Socket 回调，普通工具必须收到严格的 true 才视为批准（[`utils/middleware.py:3134-3150,3188-3393`](../../open-webui/backend/open_webui/utils/middleware.py#L3134-L3393)、[`utils/tool_approval.py:67-185`](../../open-webui/backend/open_webui/utils/tool_approval.py#L67-L185)）。
+- `ask_user` 要求当前批次仅有一个调用，问题数为 1–3、每题 2–3 个选项；该校验读取当前批次，没有累计整个生成回合的提问次数。非法调用各自写入错误结果后从执行列表剔除，其他工具仍继续；问题卡的作答与超时经 answer 动作结算（[`utils/ask_user.py:9-81,85-151`](../../open-webui/backend/open_webui/utils/ask_user.py#L9-L151)、[`utils/middleware.py:5707-5730`](../../open-webui/backend/open_webui/utils/middleware.py#L5707-L5730)）。
 - 前端工具 UI 在 `MessageInput/IntegrationsMenu.svelte`（集成菜单的 Tools tab），非独立 Tools.svelte；工作区管理页 `workspace/Tools.svelte` 负责上传/编辑/Valves。
 
 ## 1. 内置工具生态
@@ -57,7 +58,13 @@ Open WebUI v0.11.3 的工具调用主循环位于 `utils/middleware.py`，不在
 
 另有一个特殊工具 `kb_exec`（[`tools/knowledge_fs.py`](../../open-webui/backend/open_webui/tools/knowledge_fs.py) 1171-1234 行）：把知识库当“文件系统”的类 shell 命令工具，支持 `ls/tree/cat/head/tail/sed/grep/find/wc/stat` 及管道。匹配预算由 `match_budget`（43 行）限制，输出超过 `KB_EXEC_MAX_OUTPUT_CHARS` 会被截断；是否注入它由 `ENABLE_KB_EXEC` 决定（关闭时改用传统组合工具）。
 
-工具过多时，服务端不做全量暴露：一部分工具被标记为延迟加载，只把精简清单写进系统提示，模型用 `search_tools`(4025) 按需检索后再解析回真实工具调用（`utils/tool_search.py:41-160`）。这层与“按类别注入”正交——先决定候选集，再决定候选集中哪些立刻可见。
+### 延迟目录与两阶段调用
+
+延迟目录按单个 schema 的序列化字符长度判定，并非工具数量阈值。启用工具检索后，服务端从已授权候选集中选出超过阈值、未命中常驻名称模式的工具；内置工具是否参与另有开关。候选名称若与检索器或分派器保留名称冲突，则本请求跳过延迟机制。被延迟的 schema 从上游 tools 数组移除，名称与最多 100 字符描述写入系统提示（[`utils/tool_search.py:25-131`](../../open-webui/backend/open_webui/utils/tool_search.py#L25-L131)、[`utils/middleware.py:2898-2904`](../../open-webui/backend/open_webui/utils/middleware.py#L2898-L2904)）。
+
+模型先用 `search_tools` 获取完整定义，再用 `call_tool` 包装目标名称及 JSON 字符串参数执行。检索结果作为普通工具结果返回，**不会动态扩充上游 tools 数组**。排序先处理精确名称，再用 BM25 与词项重叠分数；默认返回 5 项、最多 20 项（[`tools/builtin.py:4025-4049`](../../open-webui/backend/open_webui/tools/builtin.py#L4025-L4049)、[`utils/tool_search.py:179-220`](../../open-webui/backend/open_webui/utils/tool_search.py#L179-L220)）。
+
+分派器在审批与人工提问检查前解包为真实工具调用，同时保留 `provider_function` 供协议历史重放。它校验包装字段、目标可用性和参数对象，执行仍经过目标工具的原有审批与执行域；这里没有“必须先检索成功”的授权状态，授权候选集才是执行边界（[`utils/tool_search.py:134-164`](../../open-webui/backend/open_webui/utils/tool_search.py#L134-L164)、[`utils/middleware.py:5672-5705`](../../open-webui/backend/open_webui/utils/middleware.py#L5672-L5705)）。
 
 ## 2. 工具注册与加载
 

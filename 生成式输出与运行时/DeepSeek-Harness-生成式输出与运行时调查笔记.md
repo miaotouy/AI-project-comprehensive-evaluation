@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -16,7 +16,7 @@
 
 DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志"为核心。模型输出没有独立 artifact 对象：原始形态是闭合的 `StreamChunk` 流协议（起止块、文本/推理/工具调用三类 delta、usage 与 finish 变体，`packages/llm/llm/src/types.ts`），adapter 契约要求 usage 先于 finish、工具参数端到端保持原始 JSON 字符串、失败归一化为可序列化的失败事实。
 
-流式折叠由唯一的 `BlockAssembler` 承担（`packages/llm/llm/src/assembler.ts`）：agent 循环把每条原始 chunk 先落日志（`assistant/chunk` 事件）再喂给折叠器，流结束后把折叠出的不可变 assistant 消息连同 usage 一起追加为 `assistant/message` 事件，并以 `sourceEventSeqs` 引用组成它的全部 chunk 事件。
+流式折叠由 BlockAssembler 承担。实时 chunk 只作为临时 assistant stream 帧发布；尝试收口时，把紧凑原始流与 usage 内嵌进 assistant 消息。未产生表面消息的失败、重试或取消尝试另记 `assistant/attempt`，从而每次尝试都有耐久收口，重放无需独立 chunk 事件（`packages/core/agent-loop/src/agent.ts:482-582`）。
 
 会话日志仍是唯一事实源，模型历史经表面折叠派生（`deriveMessages()`），日志同时支撑精确回放与请求可重建。
 
@@ -24,7 +24,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 输出对象身份分四类：消息（稳定 `MessageId`）、工具调用/结果（`CallId` 配对）、磁盘文件（spill 文件、内容寻址附件、交付物引用）、运行实例（终端会话与后台 job，仅进程内存活，不进日志）。工具结果契约是"规范 JSON 值 + 纯投影渲染"：执行产生的 value 只在进程内存在，落盘的只有渲染后的内容、错误信息和展示 meta。
 
-超长文本经两级处理：shell/subprocess 保留尾窗口并给出完整流 spill 文件路径；`spill-policy` 把超过 `maxInlineBytes` 的纯文本结果整体存为会话私有文件，模型只见 head/tail 预览加定位提示。持久化通过 write handle 的有界批处理与 `session/flush` 检查点完成；第一方只提供 JSONL。压缩侧拆出 `compaction-basic`、`compaction-image-offload`、`compaction-tool-result-pruner` 三个策略插件。
+输出留存分执行流与结果副本两层：shell/subprocess 保留尾窗口及完整流地址；spill 策略按估算 token 计算文本和图像，保留有序 head/tail 及读取提示，完整文本和图像可读取路径另存为会话私有文件。持久化通过 write handle 的有界批处理与 `session/flush` 检查点完成；第一方只提供 JSONL。压缩侧拆出 `compaction-basic`、`compaction-image-offload`、`compaction-tool-result-pruner` 三个策略插件。
 
 另有两条对外输出通道：`session-log-deepseek` 在启用官方 DeepSeek 请求元数据时把规范会话日志增量上传（`dsh_session_log` 请求字段加 `session-log-deepseek/delivery-accepted` 事件作为水位），`present` 工具把文件声明为交付物供客户端呈现。
 
@@ -38,14 +38,14 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 - `packages/core/session` 提供事件日志与表面派生，`packages/core/agent-loop` 是唯一循环消费者，`packages/core/tools` 提供工具注册与结果契约；
 - `packages/session/*` 负责持久化、格式与迁移链、检查点、投影缓存、标题、统计与遥测；
 - terminal/shell/subprocess/spill/attachment/compaction/deliverables/token-meter 分别提供输出形态与治理；
-- 客户端经 RPC/SSE 帧订阅 session 事件与投影帧，在对象层重建会话视图。
+- 客户端经 Remote mux 订阅 journal、投影与临时流帧，在对象层重建会话视图。
 
-主链路（一次模型生成从 `llm/stream` 到 `assistant/chunk` 落日志再到最终 `assistant/message`）：
+主链路（模型流实时发布，尝试结束后耐久收口）：
 
 1. 输入：inbox 插入用户消息并唤醒驱动器，turn 流程追加 `turn/start`，preStep 认领消息并追加 `user/message`。
 2. 装配：buildRequest 追加 `request/header`（EpochHeader 全量快照，含工具 schema）与 `request/context`，经 `llm.prepareCall` 绑定 adapter 注册并冻结请求。
-3. 生成：循环消费 `llm/stream` 瀑布（adapter 抛出与迭代失败被归一化为终态 finish chunk）；每条 chunk 先以 `assistant/chunk` 事件记录 seq，再喂给折叠器。
-4. 最终化：流结束后读折叠器的装配结果与 usage，以 createAssistantMessage 冻结消息并追加 `assistant/message`（携带 usage 与引用全部 chunk 的 `sourceEventSeqs`）；finish 为 error/aborted 时经 `agent/request-error` 瀑布决定重试或抛错（llm-retry 负责退避与可重试码）。
+3. 生成：循环消费模型流并折叠，实时发布 start/chunk/end 帧；adapter 与迭代错误归一化为终态失败事实。
+4. 最终化：有表面输出时追加 assistant 消息，其他尝试记 assistant/attempt，两者均内嵌紧凑流；错误交给请求错误瀑布决定重试或抛错（`packages/core/agent-loop/src/agent.ts:482-582`）。
 5. 工具执行：`tool/call` 记录原始参数 JSON 与批次结算处落盘（`packages/core/tools/src/batch.ts:236-264`），管线经 `tools/pre-execute → guards → tools/execute → projectContent → tools/post-execute → finalizeContent` 后追加 `tool/result`（渲染内容 + 可选 error/meta，`sourceEventSeqs` 指向 call 事件）。
 6. 收口与持久化：`step/end`、`turn/end`（结构化原因）依序追加；`session/flush` 检查点把已提交事件批量写入后端（默认 200ms 批窗）；resume 时后端按格式目录与迁移链恢复日志并重建内存 Session。
 
@@ -63,7 +63,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 ## 2. 输出事件的类型、持久化与恢复
 
-**事件类型**（`packages/core/session/src/types.ts`）：会话生命周期（created、title、surface 操作）、回合与步骤（turn/start、step/start、step/end、turn/end）、模型请求（request/header、request/context、request/attempt）、流式块（assistant/chunk）、消息（user、system、developer、assistant、tool/call、tool/result）、审批（approval/asked、approval/decided）、模型选择（model/selection）、以及各工具自有的领域事件。
+**事件类型**（`packages/core/session/src/types.ts`）：会话生命周期（created、title、surface 操作）、回合与步骤（turn/start、step/start、step/end、turn/end）、模型请求（request/header、request/context）、未产生表面消息的尝试（assistant/attempt）、消息（user、system、developer、assistant、tool/call、tool/result）、审批（approval/asked、approval/decided）、模型选择（model/selection）、以及各工具自有的领域事件。
 
 **持久化**：`Session.append()` 在 store 拥有的实例上受发布门控——创建公告（`session/created` 同步派发）完成前与移除后都拒绝写入；创建监听器不能追加（`docs/upgrade-guide/v0.2.1-rc.2/session-store-writes/guide.md`）。写入经 write handle 的有界批处理与 `session/flush` 检查点；第一方后端只有 JSONL，以插件形式挂载（`session-persistence-jsonl` 导出命名函数插件，服务 API 与文件格式不变）。
 
@@ -87,7 +87,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **折叠器**：`BlockAssembler` 内部只有单次折叠，不做重试；重试粒度在 LLM 调用层（`llm-retry`），折叠不跨尝试复用。
 
-**持久化边界**：只有助手最终消息、工具渲染内容、附件引用与 meta 落盘。replay 事件（`assistant/replay`、`assistant/delta`）只供 live 订阅，被排除在模型历史与请求重建之外。
+**持久化边界**：assistant 消息或 attempt 内嵌原始流，工具渲染内容、附件引用与展示 meta 随结果落盘；live assistant 帧属于进程内瞬时状态，不作为独立日志事件。未产生表面消息的 attempt 可供审计回放，但不会派生模型历史（`packages/core/session/src/surface.ts:129-150`）。
 
 ## 4. 输出形态与边界
 
@@ -99,7 +99,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **附件与内容寻址**：`attachment` seam 加 `attachment-local`；store 负责写入与读取引用，媒体类型与维度在写入时确定。
 
-**spill**：`spill` seam 加 `spill-local`、`spill-policy`；策略把超大纯文本结果整体另存并替换为预览。
+**spill**：策略在其他 post-execute 决策接受后，对文本及图像副本计算 token 成本，基座预算为 12,500。恢复提示也计预算，图像不可拆分或重排；缺少定价、可读图像路径或存储会告警并保留原内容。read 工具避开结果二次 spill，PTC 的规范程序值不变，日志副本另经 dispatch 钩子处理（`packages/spill/spill-policy/src/index.ts:91-155`、`packages/bundle/base/cordis.patch.yml:425`）。
 
 **交付物**：`packages/deliverables` 提供 `tool-present`、`deliverable-file-references`、`workspace-changes`。`present` 只做声明（把已有文件登记为交付物），不复制内容；引用与工作区变更投影供客户端展示。
 

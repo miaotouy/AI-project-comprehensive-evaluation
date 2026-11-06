@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/core/session`、`packages/session/*`、`packages/core/agent-loop`、`packages/session-query/*`、`packages/workspace/*`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -89,7 +89,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 - **创建**：`SessionStore.create` = `prepare` + `enter` + `announce` 三步，append 在 `session/created` 完成前被拒绝（`index.ts:1127` 起）。agent 工厂把三步折叠进自己的唯一 effect，保证循环关闭事件在 store 摘除前落定。
 - **resume**：`AgentLoop.resume`（`packages/core/agent-loop/src/index.ts:752`）经 `resumeWith` 用会话写句柄读取存储日志，先算出并追加 `interruptedTurnClosers`（缺失工具错误、未闭合 step 结束、合成 `turn/end { kind: 'interrupted' }`），再交给 store prepare 发布。持久化侧没有 prepared-session 缓存，冷读缓存归 session-query。
-- **fork**：`SessionStore.fork(source, boundary?, childSessionId?)`（`index.ts:1403`）把源会话到 inclusive 边界的前缀深拷贝为种子，子会话 header 记 `isSeeded: true`、精确 `inheritedEventCount` 与继承的 cwd，但不写 `parentSession`（普通 fork 已不再以此表达血缘）。种子在 cut 处带 `session/end-seed { inherited: true }` 标记，仍开放的源回合以 `forked` 原因收口；边界落在开着的 turn 内会被拒绝而不是静默裁剪。
+- **fork**：`SessionStore.fork(source, boundary?, childSessionId?)`（`index.ts:1403`）把源会话到 inclusive 边界的前缀深拷贝为种子，子会话 header 记 `isSeeded: true`、精确 `inheritedEventCount` 与继承的 cwd，但不写 `parentSession`（普通 fork 已不再以此表达血缘）。种子在 cut 处带 `session/end-seed { inherited: true }` 标记，仍开放的源回合以 `forked` 原因收口；有效事件边界可位于开放回合内，种子构造负责补齐 fork 收口事件（`index.ts:1403-1454`）。
 - **销毁**：会话释放时，JSONL write handle 先排空 live buffer、flush，再释放 writer ownership。**本次未找到会话删除 API**：持久化 seam 与 JSONL provider 均无 delete 入口。归档由 workspace registry 持有（`archivedSessionIds`），Session Controller 用 `archived-session-gate` 阻止归档会话继续执行步骤，Web 设置页的 Archived sessions 负责恢复；归档只隐藏导航项，不删除会话日志。
 - **崩溃恢复**：持久化不截断、不修复完整中断回合，只丢弃 torn 物理尾部（JSONL 会部分解码被截断帧并重写完整记录）；修复是读者的职责，由 resume 通过写句柄追加合成 closers。`interrupted` 是唯一循环本身不会发出的结束原因，`forked` 只由 fork 种子构造发出。
 

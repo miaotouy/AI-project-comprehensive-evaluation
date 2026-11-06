@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/gregorik/Manifold-Desktop`
 >
-> 调查更新日期：2026-08-10
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3d7448fb2e6053056da6d6c126e08f90b94cda4f`（分支：`main`）
 >
@@ -94,11 +94,11 @@ Manifold Desktop 是接入真实模型推理的多 Provider 聊天客户端（C+
   - Markdown 导出已接线（`side-panel.js:136` → `HandleExportMarkdown`，`MainWindow.xaml.cpp:679-722`）；
   - JSON 导入已接线（`home-tab.js:88` → `HandleImportSession`，`MainWindow.xaml.cpp:648-677`）；
   - JSON 导出 handler 存在（`HandleExportSession`，`MainWindow.xaml.cpp:619-646`）但前端无调用方。
-- **恢复**：`LOAD_SESSION → SESSION_DATA → renderMessage` 可展示磁盘上已存在的会话（`chat-tab.js:100-114`），但这只在会话文件由外部生成时才可观测（本快照内部无写路径）。
+- **恢复**：`LOAD_SESSION → SESSION_DATA → renderMessage` 可展示磁盘上已存在的会话（`chat-tab.js:100-114`），磁盘文件也可由应用导入或重命名路径生成；正常聊天没有保存调用。见 `MainWindow.xaml.cpp:528-534,648-677`。
 
 ## 9. 模型回流、对象感知与持续维护
 
-**未找到对象级回流**。模型不可查询输出列表、不可读取输出源码、不可观察运行状态。唯一进入模型上下文的途径是前端把 `messages` 数组随 `CHAT_SEND` 重发（`app.js:96-121`），而该数组不含已生成的助手回复（`chat-tab.js:127-129`），因此同一会话内模型也无法延续自己的上一轮输出（静态推断）。会话对象身份绑定不存在——每次聊天都从空数组起步，无"定位既有对象继续修改"机制。
+**对象级回流**：已检查聊天消息数组、发送入口与流式结束处理，未找到独立输出列表、输出源码读取或运行状态查询。新标签从空数组开始，随后用户消息持续累积；加载已有磁盘会话时会装入其中的历史消息。新生成的 assistant 回复只更新 DOM，没有追加进数组，因此下一轮保留用户历史、缺少本次生成的助手回复。见 `frontend/components/chat-tab.js:22-59,61-85,100-128`、`frontend/app.js:109-122`。
 
 ## 10. 生命周期、资源治理与性能
 

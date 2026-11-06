@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -19,6 +19,8 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 协议与渲染栈具备声明式交互对象（能力谱系 G2）的完整组件，但**当前快照的生产端只发文本表面**：`AssistantTextStream` 固定生成 Column + Text 结构，富组件（按钮、输入框等）有渲染与事件回传路径，却本次未找到由模型或工具提交 components 的入口。因此实际投影更接近 G0/G1（格式化文本与可查看文件）。G3（隔离执行的 Artifact）与 G4（可编辑工作区）本次未找到；执行发生在本机进程，没有容器、WebView 或 iframe 沙箱运行时。
 
 事实源分三处：会话 JSONL 转录保存助手消息与 A2UI 内容块，工作区文件保存工具真正写盘的结果，检查点文件保存可恢复的运行状态。三者不互相覆盖：转录里的 A2UI data model 是展示侧事实源，模型历史则只从 text/thinking/toolcall 三类内容块重建。
+
+本机命令执行采用 deny 规则转换后的遗留校验器：命令名检查只取整条字符串的首词，片段与禁用参数另行匹配；完整的 allow/ask/deny 分段求值器没有生产调用。开启审批时另按工具名统一中断 `execute`，规则中的 ask/allow 不参与选择哪些调用需要审批（见第 7 节）。
 
 ## 系统边界与完整主链路
 
@@ -123,11 +125,19 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 **执行位置是本机进程。** Eino DeepAgent 使用本地文件系统后端，`Execute` / `ExecuteStreaming` 直接拉起子进程：Windows 走 `cmd.exe /c`，并隐藏控制台窗口（`src/pkg/agent/eino/localbackend/shell_windows.go:22-33`、`:29-31`）；非 Windows 委托给 eino-ext 的本地后端（`shell_unix.go:12-26`）。未找到容器、虚拟机、WebView、iframe 或远端沙箱作为执行环境；`runtime.Options.EnableSandbox` 字段存在但未被运行时读取（`src/pkg/agent/runtime/runtime.go:206`，全仓库检索仅赋值处）。
 
-**三道互不相同的门。**
+**命令校验、中断审批与兼容文件分属不同路径。**
 
-1. **命令策略**：按 shell 分段求值，单段 deny 即整条 deny，ask 与 allow 取最严结果（`src/pkg/agent/runtime/command_policy.go:157-195`），结果注入后端作为 `ValidateCommand`（`runtime.go:104-114`、`engine.go:76-78`）。
-2. **Eino 中断审批**：当 `security.approvalQueue.enabled` 为真时，对 `execute` 工具注册审批中间件，首次调用即 `StatefulInterrupt`，恢复时依据 `Approved` 放行或返回拒绝文本（`engine.go:100-102`、`src/pkg/agent/eino/approval_middleware.go:50-85`）。恢复入口是 `chat.resume`，网关把它转成 `TurnApproval` 后重放流（`chat.go:3677-3837`）。
-3. **审批队列文件**：配置启用时会把 allow/ask/deny 写成 `workspace/.claude/settings.json` 形态的权限文件（`runtime.go:392-451`），属于外部 Agent 后端的兼容通道，不在本机 shell 执行链上生效。
+| 路径 | 条件与行为 | 实现边界 |
+|---|---|---|
+| 本机执行前校验 | 策略启用时，把 deny 规则与通用校验字段转换为遗留配置，注入文件系统后端 | 不消费 allow、ask 与默认策略，也不调用完整分段求值器 |
+| Eino 中断审批 | 审批开关启用时，每次首次调用 `execute` 均触发 `StatefulInterrupt`，带批准结果恢复后继续或返回拒绝文本 | 依据工具名决定是否审批，未按命令规则筛出 ask，也未用 allow 跳过审批 |
+| SDK 兼容权限文件 | 审批队列配置启用时，把规则写成工作区下的 Claude 权限设置文件 | 当前本机 Eino 校验与审批中间件未读取该文件 |
+
+本机校验的规则转换只复制 deny、禁用参数、长度和密钥模式等字段；实际校验按整条命令首词匹配禁用命令，再对整串匹配片段、对后续分词匹配禁用参数，并检查长度和控制字符。密钥模式未在校验函数使用，阻止 shell 元字符的注释所对应的检查已注释。复合命令后段的命令名因此不在首词匹配范围，片段或参数规则仍可能命中（[runtime.go:104–114](<../../openocta/src/pkg/agent/runtime/runtime.go#L104-L114>)、[command_policy.go:307–326](<../../openocta/src/pkg/agent/runtime/command_policy.go#L307-L326>)、[command_validation.go:15–74](<../../openocta/src/pkg/agent/runtime/command_validation.go#L15-L74>)）。
+
+完整求值器 `EvaluateCommandAccess` 的实现包含分段后取最严格结果，单段按 deny、allow、ask、默认策略的顺序匹配；全部 Go 源码中只找到包装方法与测试引用。这套求值结果没有被注入后端；实际注入的是上述遗留校验回调（[command_policy.go:157–242](<../../openocta/src/pkg/agent/runtime/command_policy.go#L157-L242>)、[engine.go:76–78](<../../openocta/src/pkg/agent/eino/engine.go#L76-L78>)）。
+
+审批中间件按工具名拦截，恢复入口是 `chat.resume`；运行时另将三组规则写入 SDK 兼容文件，两条链路各自消费不同状态（[engine.go:100–102](<../../openocta/src/pkg/agent/eino/engine.go#L100-L102>)、[approval_middleware.go:45–85](<../../openocta/src/pkg/agent/eino/approval_middleware.go#L45-L85>)、[runtime.go:151–159、392–450](<../../openocta/src/pkg/agent/runtime/runtime.go#L151-L159>)）。
 
 **UI 侧审批入口与后端不闭环（静态事实）。** 聊天页有一个 `exec.approval.requested` 驱动的居中确认卡（`ui/src/ui/views/exec-approval.ts:25-89`），决议经 `exec.approval.resolve` 发送（`ui/src/ui/app.ts:976-994`）；但该事件的广播名单里只有事件名（`src/pkg/gateway/ws/hub.go:109-112`），仓库内没有生产者，`exec.approval.request` 与 `exec.approval.resolve` 的处理函数分别是"未实现"和直接回 `ok` 的桩（`src/pkg/gateway/handlers/exec_approvals.go:41-48`、`handlers/stubs.go:93-97`）。另一条 `approvals.list` / `approve` 通道面向 `security.ApprovalQueue`（`handlers/approvals.go:157-284`），但执行链没有调用 `Request` 写入记录（检索范围：`src/**/*.go` 中 `GetApprovalQueue`、`NewApprovalQueue`、`q.Approve` 的全部引用）。同时，中断事件以 `chat` 事件的 `state: "interrupted"` 下发（`chat.go:3240-3250`），而前端事件联合类型与处理函数都没有这一分支，也没有 `chat.resume` 的调用方（检索范围：`ui/src` 全量）。结果是：审批相关的数据结构与 UI 都在，端到端路径在本次快照中没有接通；实际可见的批准方式仍是模型在对话里询问、用户回"确认"。
 
@@ -171,9 +181,10 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 - 没有对象级 ID、版本、diff、接受/拒绝或沙箱执行；只有会话消息、工具结果与工作区文件。
 - A2UI 生产端只有文本包装，富组件的生产者本次未找到。
-- 审批的 UI 通道与后端实现未接通，实际批准靠对话文本。
+- 本机命令名校验只匹配整条命令首词；完整分段求值器没有生产调用，allow、ask 与默认策略未进入遗留校验路径。审批开关启用后统一拦截 `execute`，和规则求值分开。
+- 审批的 UI 通道与后端实现未接通，对话文本确认与 Eino 中断批准是两条不同路径。
 
-**未验证事项。** 富交互组件的实际渲染效果（当前无生产者可供触发）、`iframe` 载入 data URL 时的脚本与同源行为、A2UI 文本表面在超长回复下的流式性能、`chat.resume` 恢复后的界面表现、Windows 与 macOS 下 shell 输出的实际差异。
+**未验证事项。** 富交互组件的实际渲染效果（当前无生产者可供触发）、`iframe` 载入 data URL 时的脚本与同源行为、A2UI 文本表面在超长回复下的流式性能、`chat.resume` 恢复后的界面表现、Windows 与 macOS 下 shell 输出的实际差异。未实际执行复合命令，也未联调命令规则与审批中断；上述接线与匹配范围来自静态调用链。
 
 ## 关键源码索引
 
@@ -181,7 +192,8 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 - `src/pkg/agent/eino/event_bridge.go`、`a2ui_emit.go`：模型增量到 A2UI 事件的桥接
 - `src/pkg/gateway/handlers/chat.go`：广播、落库、A2UI 动作、`chat.resume`、cron 结果
 - `src/pkg/gateway/handlers/exec_approvals.go`、`stubs.go`、`approvals.go`：审批 RPC 与队列
-- `src/pkg/agent/eino/approval_middleware.go`、`localbackend/`：执行与中断审批
+- [runtime.go:104–114](<../../openocta/src/pkg/agent/runtime/runtime.go#L104-L114>)、[command_policy.go:307–326](<../../openocta/src/pkg/agent/runtime/command_policy.go#L307-L326>)、[command_validation.go:15–74](<../../openocta/src/pkg/agent/runtime/command_validation.go#L15-L74>)：实际命令校验链
+- [approval_middleware.go:45–123](<../../openocta/src/pkg/agent/eino/approval_middleware.go#L45-L123>)、[shell_windows.go:35–85](<../../openocta/src/pkg/agent/eino/localbackend/shell_windows.go#L35-L85>)：工具名中断与本机执行
 - `src/pkg/agent/tools/deliverable_files.go`：工具输出到附件块
 - `src/pkg/agent/eino/transcript_history.go`：转录到模型历史
 - `ui/src/ui/chat/a2ui-bridge.ts`、`grouped-render.ts`、`components/chat-a2ui-panel.ts`：前端渲染与重放

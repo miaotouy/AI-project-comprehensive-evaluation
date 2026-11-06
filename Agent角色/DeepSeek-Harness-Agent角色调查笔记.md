@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/preset/agent-preset`、`packages/preset/agent-preset-registry`、`packages/preset/persona`、`packages/core/system-prompt`、`packages/core/agent`、`packages/core/scope`、`packages/bundle/web-app/presets/`、`packages/context/agent-instructions`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -44,7 +44,8 @@ Session Controller Remote：session.create({ workspaceId/cwd, agentPreset? })
        systemPrompt.assemble(assembleContextFor(agent))
          层链解析 agent scope -> preset scope -> 全局（system-prompt/index.ts:620-700）
        renderPrompt(assembly)（system-prompt/index.ts:296）
-  -> llm 请求 { system, tools, history }
+  -> system/message 表面协调 + 工具/配置头快照
+      deriveMessages() -> 冻结请求 { messages, tools, provider, model }
 ```
 
 子 agent 有两条路径：显式 `agentPreset` 时 `presets.mount(childCtx, id)` 挂一个独立 preset；未指定时 `composeFrom(childCtx, parent.ctx)` 加入父的当前代组合（`packages/subagent/subagent/src/child-agent.ts:179-201`）。恢复出的历史子会话没有保存 preset 时退回宿主组合。

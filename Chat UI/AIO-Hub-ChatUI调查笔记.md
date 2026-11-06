@@ -2,290 +2,166 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
+> 调查方式：只读核对源码、两源码快照差异与现有测试；追踪组件入口、状态、事件和持久化，未启动应用或服务
 >
-> 调查范围：工作台结构、会话导航与搜索工作流、Composer 与草稿、发送前配置、生成反馈、消息操作与分支导航、树图视图、多会话与分离窗口、键盘关键路径、桌面集成交点；会话数据语义、请求执行与内容渲染分别进入会话与消息管理、对话请求与上下文、消息渲染器类目
+> 调查范围：桌面聊天工作台、会话导航、输入与草稿、配置入口、生成控制、消息编辑、阅读导航、后台任务与伴生视图、分离窗口；移动端聊天整体布局未展开，消息绘制和应用级设置框架分别由相邻类目承接
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-- 聊天工作台是 `LlmChat.vue` 装配的三栏布局（Agent 侧栏 / ChatArea / 会话侧栏），标题栏与输入框都可分离成悬浮窗口（`useDetachable` + `useWindowSyncBus` 同步），"分离"是 UI 视图拆分，不会创建新的 Session 或消息副本。
-- 消息区有线性（linear）与树图（force-graph，Vue Flow）两种视图，共用同一份节点数据；树图双击节点只切活动分支，不改变会话存储结构。
-- 会话侧栏用 TanStack Virtual 只挂载可见项（固定预估行高 71px、overscan 10）；消息列表**不虚拟化**，全量 DOM + 浏览器 `content-visibility` 裁剪（机制细节在消息渲染器笔记 8）。
-- 搜索分两套：侧栏跨会话搜索（Rust 后端）命中只能到会话级；会话内搜索（Ctrl+F）只扫当前活动路径消息。
-- 键盘关键路径：发送可用快捷键完成；会话切换、树图操作基本依赖鼠标；线性视图的分支切换按钮是标准 `<button>` 可 Tab 聚焦。
-- 生成完成没有系统通知、托盘没有聊天状态菜单项；桌面集成与聊天状态的联动限于应用内的跨窗口同步（8.3）。
-- 输入区上方的功能面板（输入设置、宏变量、会话列表、工具设置、Knowledge 引用、画布管理）已统一到公共插槽：`MessageInput.vue` 挂载 `InputPanelHost`，面板状态由 `useInputPanel` 在组件树内注入，同一时刻只显示一个面板；重复点击入口按设置折叠或关闭，关闭时清空插槽，折叠保留面板内部状态（3.1）。
-- 输入工具栏布局可自定义并持久化：常驻操作顺序、右侧状态项显隐/排序、快捷按钮是否按组分行都存在 `ChatSettings.uiPreferences.inputToolbar`；另有"简洁/完整"预设与旧配置兼容解析，分离输入窗通过主窗口打开布局编辑器并沿既有设置同步通道发布完整快照（3.2）。
-- 斜杠指令与快捷操作共用一套自动补全面板：输入 `/` 触发候选列表，内置系统指令（清空、导出、压缩、打开设置等）与快捷操作动态聚合，支持 CodeMirror 与原生 textarea 两种编辑器（3.2）。
-- 消息卡片拆出统计与分组脚注组件，Token/耗时/字数等元信息是否展示仍受可见性偏好控制（6.6）。
+- 桌面聊天以 Agent/参数侧栏、中央聊天区、会话侧栏组成工作台；中央区可分离，输入框也可独立成窗。子 Agent 另有只读伴生栏和画中画，能在保留主会话选中态的同时观察子会话。
+- 线性阅读支持卡片、气泡、连续紧凑三种布局；紧凑模式按身份连续性合并展示，提供按用户提问定位的导航点，消息节点和分支身份仍独立保存。树图是同一消息树的另一种投影。
+- 会话列表使用动态测量虚拟列表。消息区保留所有活动路径行壳，富文本正文另有阅读区延迟解析、显示树回收与恢复，不能概括为“全部正文 DOM 常驻”。
+- 输入功能面板、输入工具栏与消息工具栏均可配置。文本材料支持输入前编辑、消息发送后直接编辑或保存到新分支；草稿已按会话存入应用文件，新会话的身份草稿也可独立恢复。
+- 会话项具有 Tab、Enter/Space 和 Shift+F10/菜单键绑定；树图的拖拽、嫁接仍以鼠标为主。代码可确认这些路径，实际焦点顺序与键盘体验尚未实测。
+- 后台任务拥有标题栏胶囊、任务中心、派遣卡片和返回派遣位置的入口。当前未在桌面源码中找到生成完成接系统通知的链路，不能据此忽略已有的应用内后台任务可观察性。
 
 ## 工作台边界与用户主链
 
 ```text
-进入 LlmChat 工作台（三栏 + 可选分离窗口）
-  -> 侧栏选择/新建会话（虚拟化列表、筛选、收藏夹、批量清理）
-  -> MessageInput 组织输入（编辑器、附件、快捷操作、临时模型、Knowledge 引用）
-  -> 发送 -> 占位气泡出现 -> 发送按钮变中止；生成中再发消息进入排队
-  -> 工具调用暂停时 ToolCallingApprovalBar 等待审批（可配置超时倒计时）
-  -> 消息操作：分支、重试/续写、翻译、导出、截图、上下文分析（MessageMenubar）
-  -> 线性/树图视图切换；会话内搜索定位消息（ChatSearchPanel -> scrollToMessageId）
-  -> 切换会话：草稿、悬浮窗、流缓冲由 UI 状态层独立维护（现场恢复）
+进入聊天 -> 加载渠道、Agent、会话索引与草稿
+  -> 恢复选择或进入新会话草稿
+  -> 输入正文/附件/文本材料，选择模型与配置
+  -> 发送前确认有效模型，必要时打开模型选择器
+  -> 生成/排队/审批/压缩任务反馈 -> 停止或继续
+  -> 编辑、保存到分支、版本切换、搜索、提问导航与树图
+  -> 主会话与子任务伴生视图之间观察/跳转
+  -> 切换工具或会话，再恢复各层拥有的现场
 ```
 
-边界：会话数据语义在 [`../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md`](../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md)；提交后的执行链（上下文拼装、流式节流、排队、审批暂停）在 [`../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md`](../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md)；消息壳装配、富文本与列表绘制的实现在 [`../消息渲染器/AIO-Hub-消息渲染器调查笔记.md`](../消息渲染器/AIO-Hub-消息渲染器调查笔记.md)。本笔记只记录与聊天主链的交点：弹窗/Toast/主题/动画等通用组件只在其影响聊天可用性时提及，不做全仓库盘点。
+会话树与数据变更语义见[会话与消息管理笔记](<../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md>)；请求、压缩与仲裁执行见[对话请求与上下文笔记](<../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md>)；列表、内容块与承载边界见[消息渲染器笔记](<../消息渲染器/AIO-Hub-消息渲染器调查笔记.md>)；应用级导航和设置框架见[应用界面基础设施笔记](<../应用界面基础设施/AIO-Hub-应用界面基础设施调查笔记.md>)。
 
-## 1. 页面结构、导航与多窗口
+## 1. 页面结构、聊天入口与多种表面
 
-### 1.1 三栏工作台
+### 1.1 三栏工作台与首次发送
 
-`LlmChat.vue` 装配左侧 Agent 列表/参数面板、中央聊天区和右侧会话侧栏；组件关系和弹窗层在仓库文档 `docs/architecture/llm-chat-ui-structure.md` 已明确列出。`ChatArea.vue` 同时挂载消息区、输入区、搜索面板、上下文分析器以及工具审批条。
+[聊天根组件](<../../aio-hub/src/tools/llm-chat/LlmChat.vue#L138-L213>)先加载模型渠道，再加载 Agent、用户档案和会话等核心数据，随后准备聊天入口。中央区保留消息区和输入区的完整框架；恢复索引期间显示恢复横幅，可取消恢复、打开损坏文件目录、导出诊断或确认删除隔离文件。
 
-- **会话索引恢复横幅**：会话索引状态不是 ready 时，工作台顶部渲染恢复横幅（`LlmChat.vue:457-507`）：恢复中显示"正在后台恢复会话索引"与扫描/失败计数，损坏时显示"会话索引需要恢复"。横幅提供取消恢复、打开损坏会话目录、导出损坏诊断 JSON、删除已隔离文件（`ElMessageBox` 二次确认）等入口，处理器集中在 `LlmChat.vue:321-372`。
-- **分离窗口不再自行加载会话**：分离窗口初始化不再调用会话加载入口，会话状态由消费器经 WindowSyncBus 提供，且分离窗口不得触发任何 llm-chat 持久化路径（`LlmChat.vue:179-213` 的注释明确说明）。
+首次进入只尝试恢复已有配置，无有效模型时不会立即弹出选择器。真正发送时才请求选择模型；取消选择则不提交，选择成功后可更新 Agent 模型、建立默认 Agent，并进入新会话草稿。发送准备状态用于阻止重复准备；索引恢复尚未 ready 时中央输入仍禁用。入口见[发送处理](<../../aio-hub/src/tools/llm-chat/LlmChat.vue#L245-L277>)与[聊天入口准备器](<../../aio-hub/src/tools/llm-chat/composables/ui/useChatEntryPreparation.ts#L29-L78>)。
 
-### 1.2 可分离窗口
+### 1.2 分离窗口和伴生窗口的区别
 
-标题栏拖拽调用 `useDetachable`，输入框也能独立成悬浮窗口；分离组件集合变化后，主 ChatArea 会隐藏重复输入框，并通过 `useWindowSyncBus` 同步主窗口与分离窗口的生成状态（`chat:streaming-delta` 广播，见 8.2；相关逻辑在 `ChatArea.vue:186-236`）。这里的"分离"是 UI 视图拆分，不会创建新的 Session 或消息副本。
+聊天区和输入区通过分离机制成为独立 WebView；同一输入框分离后，原聊天区隐藏重复输入表面。分离视图沿同步总线消费状态，写动作由主窗口代理，视图分离本身不创建新会话。装配和输入隐藏条件见[ChatArea](<../../aio-hub/src/tools/llm-chat/components/ChatArea.vue#L196-L252>)。
 
-### 1.3 线性与树图两种消息视图
+伴生视图面向后台子任务：它按指定子会话 ID 加载活动路径，不改变主会话选择。空间充足时注入中央区右侧槽位，为聊天正文结构性让位；空间不足或用户选择画中画时改用浮动面板。中央宿主需至少容纳 480px 聊天区和 360px 伴生栏，伴生宽度默认 420px，可在 360–720px 内调整并写入本地偏好。几何与偏好见[伴生停靠状态](<../../aio-hub/src/tools/llm-chat/composables/ui/useChatCompanionDock.ts#L19-L42>)，两种表面的实际切换见[伴生视图](<../../aio-hub/src/tools/sub-agent/components/CompanionSessionSheet.vue#L72-L115>)。
 
-`MessageList.vue` 默认只渲染活动路径回溯得到的消息（由 `activeLeafId` 决定）；消息卡片由消息头、内容、操作栏、分支选择器等组件组合装配（组件装配与内容渲染在消息渲染器笔记 1.2/1.3）。`ViewModeSwitcher.vue:53-55` 通过 UI 状态层在 linear（对话视图）和 force-graph（高级树图视图）之间切换。树图使用独立的节点组件、连线、节点菜单和详情弹窗，属于同一 Session 的另一种投影，**不改变 `activeLeafId`**——树图内双击节点会调用 `store.switchBranch(nodeId)` 把活动分支切到该节点（`useFlowTreeGraph.ts:657-666`），这是数据语义上的分支切换，不是独立的树图副本。
+### 1.3 线性、紧凑阅读与树图
 
-### 1.4 树图视图的交互与状态
+线性视图中，卡片和气泡为逐节点展示；连续紧凑模式让连续的相同助手身份及其所属工具结果共用身份头，连续用户输入也可合组。压缩、预设、开场白和 Knowledge 引用形成边界。合组要求父子连续，并比较 Agent、模型和来源身份，属于展示投影，不可用作执行轮次计数。[分组规则](<../../aio-hub/src/tools/llm-chat/utils/messagePresentation.ts#L26-L140>)与[行装配](<../../aio-hub/src/tools/llm-chat/components/message/MessageRow.vue#L137-L170>)保留各节点原有 ID、操作和状态。
 
-依据 `FlowTreeGraph.vue` 及 graph 目录下的物理模拟、子树拖拽、连线预览、节点动作等 composable（数据层的树不变量在会话管理 4.5）：
+树图和线性视图共享会话节点；切换视图只换投影，双击树图节点会进一步调用分支切换，改变活动叶子。树图提供动态树状、物理引力和静态布局、缩放/定位、小地图、操作历史、节点详情、启用禁用、重试、分支与删除。节点单点拖动、修饰键拖子树、连线移动和嫁接都有合法性判断，拒绝根节点、自连或后代循环；这些路径主要集中在[树图编排](<../../aio-hub/src/tools/llm-chat/components/conversation-tree-graph/flow/composables/useFlowTreeGraph.ts>)和[树图宿主](<../../aio-hub/src/tools/llm-chat/components/conversation-tree-graph/flow/FlowTreeGraph.vue>)。布局性能和拖动观感未运行验证。
 
-- 视图缩放范围 0.2–4（`FlowTreeGraph.vue:28-29`），支持 fit view、定位当前激活节点、背景网格/小地图/控制器/HUD 开关、工具栏折叠、撤销/重做、操作历史、视图设置和开发者 debug overlay（`FlowTreeGraph.vue:102-138` 等）。布局有三种：动态树状、物理引力、静态树状（`useFlowTreeGraph.ts:150` 的布局模式）；循环布局和重置布局均是可见按钮，操作历史仅运行时有效。static 模式不进入拖拽物理布局，physics 模式松手后可能回弹（`useGraphSubtreeDrag.ts:177`）。
-- 节点上的"查看详情"按钮（`GraphNodeMenubar.vue:256-260`）才会打开详情弹层，弹层位置跟随节点屏幕坐标；节点操作栏提供：复制、创建分支（仅 user/assistant/tool）、重新生成、指定模型重新生成、启用/禁用、删除（二次确认，`GraphNodeMenubar.vue:386-404`），以及"更多"菜单（续写消息、上下文分析、导出分支、重新计算 Token、重新解析工具、数据编辑，`GraphNodeMenubar.vue:263-324`）。右键菜单（`useGraphNodeActions.ts:58-110`）提供"设为当前分支、启用/禁用、剪掉这个分支"。
-- 拖拽节点默认移动单点；按修饰键可拖整棵子树，从节点连线到另一节点可移动节点，用另一修饰键则嫁接整棵子树（默认都是 Alt，`config/defaultSettings.ts:133-134`；检测在 `useGraphSubtreeDrag.ts:69-73` 与 `useGraphConnectionPreview.ts:103-107`）。系统拒绝自连、根节点、后代循环、预设节点和同父节点（合法性检查见 `useGraphConnectionPreview.ts:60-90`）。
-- 压缩节点标题可展开/收起，收起只改变可见拓扑投影，不删除消息。节点以当前分支激活、禁用、压缩、连线有效/无效等状态区分；debug 层额外显示 id、深度、速度、尺寸和固定坐标（`useGraphD3Simulation.ts`）。
+## 2. 会话列表、搜索与恢复
 
-## 2. 会话列表、搜索与现场恢复
+### 2.1 同一会话项服务两处入口
 
-### 2.1 会话侧栏：虚拟化与筛选
+会话侧栏使用公共动态测量虚拟列表，71px 是初始估高，实际行高由 DOM 测量更新；搜索摘要和菜单等内容不再依靠固定高度假设。[列表配置](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L124-L146>)与[行测量挂载](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L375-L408>)共同确认这一点。输入区迷你会话列表复用相同会话项和操作对话框，只采用较紧凑的样式。
 
-`SessionsSidebar.vue` 接入 TanStack Virtual：固定预估行高 71px、overscan 10 项，模板用 translateY 定位每一行（`SessionsSidebar.vue:139-146,501-535`）。搜索支持精确/AND/OR 三种匹配模式（数据扫描语义在会话管理 5），并可按 Agent、时间、收藏和生成状态筛选（`FilterPanel.vue`）；菜单动作包括新建、重命名、AI 自动命名（force 模式）、收藏夹移动、导出、打开数据目录和批量清理（空会话批量清理的数据语义在会话管理 3.2）。列表项的生成状态来自节点集合而不是 Session 布尔值（`useTopicNamer.ts:54`），因此多个会话可以同时显示生成中。
+会话项可点击或经 Enter/Space 激活；右键、Shift+F10 和菜单键打开同一操作菜单，全局只保留一个已打开的会话菜单。菜单除重命名、自动命名、收藏、导出和打开目录外，还提供“从文件重新加载”；生成中禁用重新加载，动作进入公共会话操作处理器。详见[会话项](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionItem.vue#L60-L98>)、[键盘与右键绑定](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionItem.vue#L129-L145>)、[重新加载处理](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionActionDialogs.vue#L179-L230>)。
 
-批量管理弹窗（`BatchManagerDialog.vue`）提供**会话内容搜索与高亮**：复用 `useLlmSearch`（范围限定会话、300ms 防抖），命中片段用 `<mark class="search-highlight">` 高亮，输入 ≥2 字符进入搜索模式，命中行按匹配详情前 2 条渲染摘要（各环节实现行号见关键源码索引）。
+尚无历史会话时，侧栏明确区分“当前是新会话草稿”和可创建新会话的空态；草稿不会被当成已落入历史列表的会话。[空态条件](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L358-L373>)可直接复查。
 
-### 2.2 Agent 侧栏虚拟化
+### 2.2 两套搜索与提问导航
 
-`AgentsSidebar.vue` 同样接入虚拟列表，但改用动态测量真实高度（`virtualizer.measureElement`，`AgentsSidebar.vue:926`）——因为智能体卡片高度可能因描述文字长度不同而不固定，不能只靠初始预估（预估 65px，`AgentsSidebar.vue:345`）。
+- 跨会话搜索通过 Rust 流式搜索命令返回命中会话和摘要，支持精确、AND、OR，以及 Agent、时间、收藏等筛选；点击结果进入会话，当前侧栏路径未提供直接定位某条命中消息的动作。入口见[搜索封装](<../../aio-hub/src/tools/llm-chat/composables/chat/useLlmSearch.ts>)。
+- 会话内 Ctrl+F 打开搜索面板，扫描当前活动路径的正文及推理内容；焦点在 CodeMirror 内时交给编辑器搜索。结果支持角色筛选、上下键和 Enter，随后按消息 ID 定位行壳。入口与定位见[ChatArea](<../../aio-hub/src/tools/llm-chat/components/ChatArea.vue>)、[搜索面板](<../../aio-hub/src/tools/llm-chat/components/search/ChatSearchPanel.vue>)。
+- 紧凑模式把阅读导航改为“上/下一个提问”和提问点列，主聊天用户及人工干预来源进入提问集合，预设和工具消息不成为提问点；必要时保留开场导航点。按钮带提问摘要及当前步骤标记，点击实际发送锚点节点 ID。见[导航投影](<../../aio-hub/src/tools/llm-chat/utils/messagePresentation.ts#L173-L197>)与[导航器](<../../aio-hub/src/tools/llm-chat/components/message/MessageNavigator.vue#L149-L225>)。
 
-### 2.3 搜索入口与定位工作流
+### 2.3 现场恢复按层处理
 
-- **侧栏跨会话搜索**：前端 `useLlmSearch` 封装 Tauri 命令 `search_llm_data_stream`（300ms 防抖、精确/全部/任一匹配模式；后端全量扫描数据侧在会话管理 5.1）；命中后只能定位到会话本身，**无法直接跳到会话内的具体消息**。
-- **会话内消息搜索**：Ctrl+F 打开 `ChatSearchPanel.vue`（键盘拦截在 `ChatArea.vue:394-407`，焦点在 CodeMirror 内时不拦截，交给编辑器自己的搜索），纯内存线性扫描当前活动路径消息（内容 + 推理内容，最多 50 条，数据语义在会话管理 5.2）；选中结果后按消息 ID 找到对应 DOM 节点平滑滚动过去（`MessageList.vue:325-339`）。
+会话切换更换选中会话和活动路径；输入管理器另存每个会话草稿，不依赖当前消息 DOM。工具页被 KeepAlive 停用时，消息列表保存阅读锚点并停止测量观察器；恢复时重新计算阅读范围和行高，继续按消息相对视口的位置恢复。详情晚到结果也会复核当前选择，避免快速切换时回跳旧会话。相关实现见[列表停用与激活](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue#L92-L112>)、[滚动锚点](<../../aio-hub/src/tools/llm-chat/composables/ui/useMessageScrollAnchor.ts>)与[会话生命周期管理](<../../aio-hub/src/tools/llm-chat/stores/session/sessionLifecycleManager.ts>)。
 
-  `content-visibility: auto` 只跳过屏外内容的渲染工作，不会从 DOM 中删除节点，因此不会妨碍该查询；限制在于搜索范围只有当前活动路径，不在当前分支路径上的节点既不会被搜索，也没有对应的消息 DOM。搜索面板自身支持角色筛选（user/assistant）与上下键 + Enter 键盘导航（`ChatSearchPanel.vue:130-149,220-243`）。
+搜索词、树图运行期历史和面板内部状态各有生命周期；本次未确认存在跨重启恢复全部这些现场的统一快照。
 
-### 2.4 切换时的现场恢复
+## 3. Composer、面板与草稿
 
-会话切换只改变当前活动路径；输入草稿（含临时模型、续写模型、Knowledge 引用）、悬浮窗（detachedComponents）和消息流缓冲仍由 UI 状态层独立维护（8.1）。会话内搜索面板与跨会话搜索结果不会跨会话保留（本次未在代码中发现按会话保存搜索词/结果的逻辑，未核实恢复行为）。异步加载详情完成后会复核当前选择，因此用户快速连续选择多个会话时，先发请求的晚到结果不会把界面切回旧选择；该约束已有 store 恢复测试，真实列表连点时的焦点与过渡表现未运行验证（`stores/session/sessionLifecycleManager.ts:740-808`）。
+### 3.1 编辑器、快捷操作与功能面板
 
-## 3. Composer、草稿、附件与快捷输入
+输入区支持 CodeMirror 和 textarea，发送键可配置；附件选择、粘贴和文件拖入进入同一输入管理器。输入框可拖高度、双击复位，分离模式另有原生窗口宽度调整手柄。工具栏提供临时模型、续写模型、附件、会话和 Knowledge 等入口；正文编辑器各自实现发送及斜杠补全，见[CodeMirror 输入](<../../aio-hub/src/tools/llm-chat/components/message-input/ChatCodeMirrorEditor.vue>)与[textarea 输入](<../../aio-hub/src/tools/llm-chat/components/message-input/ChatTextareaEditor.vue>)。
 
-### 3.1 输入编辑器与发送约定
+斜杠候选聚合系统指令和当前有效快捷操作组，支持拼音检索；系统动作进入会话操作，快捷操作则运行宏模板、选区替换或自动发送。三层操作组来自聊天全局、Agent 和有效用户档案。候选及执行入口见[斜杠服务](<../../aio-hub/src/tools/llm-chat/services/slashCommandService.ts>)。类型中虽有快捷键字段，本次在聊天域仍未找到注册该字段的消费链，不能把按钮快捷操作等同于已启用任意自定义热键。
 
-`MessageInput.vue` 支持 CodeMirror/textarea 两种编辑器，发送键可配置，默认 Ctrl+Enter，也可用 Enter、Shift+Enter 或 Ctrl/Cmd+Enter 发送（`ChatCodeMirrorEditor.vue:293-303`、`ChatTextareaEditor.vue:224-232`）；输入区高度可拖拽、双击复位，支持附件预览、文件拖入和剪贴板粘贴。
+输入框上方由公共插槽承载输入设置、宏、会话、工具调用、Knowledge 和画布等面板。同一时刻一个面板；折叠保留内部状态，关闭清空组件；重复点击按偏好选择折叠或关闭。面板可声明最大内容高度，部分面板自行管理虚拟列表滚动。见[面板宿主](<../../aio-hub/src/components/common/input-panel/InputPanelHost.vue>)与[面板状态](<../../aio-hub/src/composables/useInputPanel.ts>)。
 
-附件先进入输入管理器（`useChatInputManager`）的临时列表，处理完成后才随用户消息提交；转写占位符由转录管理器按当前模型能力决定是否插入。生成中会禁用流式模式切换，发送按钮转为中止。工具栏可切换流式输出、宏、附件、迷你会话、临时模型、更多工具、工具调用设置、工具栏设置、输入框展开/收起（`MessageInputToolbar.vue`）。
+### 3.2 两类工具栏的自定义
 
-工具栏布局由 `config/inputToolbar.ts` 与 `inputToolbarActions.ts` 共同描述：操作 ID 列表、状态项列表分区与排序、简洁/完整两套预设、旧配置兼容和未知 ID 跳过渲染都在这里；发送、停止和"更多"入口保持直接可达，宽度不足时按顺序把末尾操作临时收进更多菜单。布局编辑器通过 `open-toolbar-customizer` 动作在主窗口打开（分离输入窗不自己弹），保存时先持久化再发布，状态以完整快照沿 ChatSettings 通道同步。右侧状态项可分别控制续写模型、临时模型、画布状态、上下文 Token 和输入 Token 的显隐与排序，窄窗口里已开启的 Token 统计会移入更多菜单。
+输入工具栏可排列常驻动作、快捷操作组和右侧状态项，提供简洁/完整预设；窄宽度把末尾动作和部分统计临时收进“更多”。编辑器从主窗口打开，设置保存后发布完整快照供分离输入窗同步。配置与动作分派分别见[输入工具栏配置](<../../aio-hub/src/tools/llm-chat/config/inputToolbar.ts>)及[工具栏实现](<../../aio-hub/src/tools/llm-chat/components/message-input/MessageInputToolbar.vue>)。
 
-斜杠指令在输入框中键入 `/` 触发：`services/slashCommandService.ts` 提供内置系统指令列表、按分类分组与过滤（支持拼音首字母匹配），面板与快捷操作共用候选项；执行时系统指令走各自的会话动作，快捷操作沿用宏引擎的模板处理。系统指令的范围包括清空会话、导出、压缩上下文、打开设置等（完整集合见 `getSystemCommands()`，`slashCommandService.ts:85-180`）。
+消息操作栏另有独立的排序/显隐偏好，动作由固定配置表映射，新增动作需要同时登记可定制 ID 和实际动作。聊天布局与两个工具栏偏好均属于 ChatSettings，非某条消息的内容字段；见[消息工具栏配置](<../../aio-hub/src/tools/llm-chat/config/messageToolbar.ts>)与[自定义弹窗](<../../aio-hub/src/tools/llm-chat/components/message/MessageToolbarCustomizeDialog.vue>)。
 
-输入区上方是统一的功能面板插槽：`MessageInput.vue` 用 `InputPanelHost` 承载当前面板，`useInputPanel` 负责"新功能替换当前组件、折叠保留状态、关闭清空插槽"三种语义，重复点击入口时按输入设置的 `panelRepeatClickAction` 折叠或关闭（默认关闭）。面板内容默认由容器滚动；虚拟会话列表与宏选择器接管内部滚动，工具与 Knowledge 面板使用公共布局让顶部控件与底部操作常驻。已接入输入设置、宏变量、会话列表、工具设置、Knowledge 引用和画布管理。
+### 3.3 草稿持久化与文本材料
 
-Composer 提供**显式 Knowledge 资料引用**入口——工具栏的引用选择器（`KnowledgeReferencePanel.vue`，带可访问名称），输入区上方渲染已引用资料库 chips（`KnowledgeReferenceChips.vue`，每个引用库一个 chip，含名称/ID/可用性 tooltip、不可用红色边框、可单独移除，同样带可访问名称）；随消息提交的引用会在发送入口里先执行一次资料检索/研究工具事件（生成 tool 节点）再进入正常生成链（执行侧见对话请求与上下文 9.9；数据结构 `ChatMessageNode.knowledgeReference`）。
+输入管理器按会话 ID 保存正文、附件、文本材料、Knowledge 引用、临时与续写模型，另有全局草稿剪贴板及保存状态。桌面持久化写入应用配置下 `llm-chat/input-drafts.json`，旧浏览器键仅用于迁移；写入队列冻结快照，避免先发写入的晚到结果覆盖新状态。字段与作用域见[输入管理器](<../../aio-hub/src/tools/llm-chat/composables/input/useChatInputManager.ts#L77-L146>)，文件读写见[草稿存储](<../../aio-hub/src/tools/llm-chat/composables/storage/useChatInputDraftStorage.ts>)。
 
-超长粘贴文本会转成消息内文本附件，在输入区以独立卡片列表展示（`VirtualTextAttachments.vue`）：标题可编辑、全文随消息保存，超过单份 16 MiB 或已达 100 份时回到正文并提示；跨工具写入入口与粘贴入口共用同一阈值设置（默认 3000 字符）。导出与请求如何携带这些附件见会话管理 7.1 与对话请求与上下文 2。
+未发送首条消息的新会话另把身份、根节点 ID 和参数覆盖保存到 `llm-chat/new-session-draft.json`；输入仍通过同一会话 ID 关联草稿。恢复时重建空根，首条真实消息提交后再进入普通历史会话生命周期。[新会话草稿存储](<../../aio-hub/src/tools/llm-chat/composables/storage/useNewSessionDraftStorage.ts#L22-L99>)确认了文件恢复路径。
 
-### 3.2 快捷操作（宏）
+长文本粘贴及跨工具发送可转为消息内文本附件；输入区把文件与文本材料统一计数和排列，卡片提供新建、编辑、回填正文等入口。历史消息也能编辑文本材料或保存到新分支：会话生成中拒绝修改，保存前核对原材料内容与标题，冲突时提示重新打开；只读伴生表面只可预览。入口见[文本材料组件](<../../aio-hub/src/tools/llm-chat/components/VirtualTextAttachments.vue>)，写入与冲突判断见[正文适配层](<../../aio-hub/src/tools/llm-chat/components/message/MessageContent.vue#L169-L208>)。长图切片、转写和材料如何进入请求由请求笔记说明。
 
-输入框上方的快捷操作并非固定按钮：`MessageInputToolbar.vue` 合并聊天全局、当前 Agent、有效用户档案绑定的操作组 ID，去重后加载多个操作组。每个操作以占位符接收选区或整个输入框，通过完整宏引擎展开，还可对每一行加前后缀或执行正则替换（`messageInputStore.ts:368-437`）；结果覆盖选区/输入框，开启自动发送时延迟 50ms 发送（`messageInputStore.ts:447-451`）。操作组支持创建、复制、导入、批量导出和绑定。快捷操作同时并入斜杠指令候选列表，按组的显隐（`isEnabled !== false`）与"按组分行"偏好随输入工具栏布局一起保存。类型字段声明的 `QuickAction.hotkey` 目前仍没有实际消费方（见第 10 节）。
+## 4. 发送前配置与诊断工作区
 
-### 3.3 草稿状态
+Agent 选择、标题栏模型选择、输入临时模型、续写模型是不同作用域。历史消息显示生成时 Agent/渠道/模型快照；切换当前 Agent 影响后续发送，已有真实对话不会因此重建开场白。Agent 编辑器提供“模型参数”和“上下文”两个页签，共用同一参数草稿；上下文页含限制、压缩、后处理及自动动静分离配置。实际编辑与保存见[Agent 编辑弹窗](<../../aio-hub/src/tools/agent-manager/components/management/EditAgentDialog.vue#L341-L413>)，参数面板见[模型参数编辑器](<../../aio-hub/src/tools/agent-manager/components/parameters/ModelParametersEditor.vue#L502-L677>)。配置对执行的影响以请求笔记为准。
 
-输入草稿按会话保存（持久化到 `llm-chat-input-drafts`，`useChatInputManager.ts:68,117`），包含文本、真实附件、消息内文本附件、临时模型、续写模型和 Knowledge 引用（字段定义见 `useChatInputManager.ts:77-79`）；临时模型和续写模型随会话切换独立维护。尚未发送首条消息的新会话草稿由内存对象承载（数据语义在会话管理 1.1），因此新建会话后切走再切回，开场白与输入内容都还在。当前 Agent 点击打开迷你会话列表（`MiniSessionList.vue`，虚拟列表 + 定位当前会话，:191-201）；迷你会话切换在开启同步切换 Agent 的开关（默认关闭）时会同步切换展示 Agent（`SessionsSidebar.vue:285-298`）。
+上下文分析器有六个视图：结构化、原始请求、内容分析、变化与缓存、宏调试、变量状态。前三者等预览内容由当前目标重建；“变化与缓存”读取真实发送记录，二者证据来源不同。[分析器装配](<../../aio-hub/src/tools/llm-chat/components/context-analyzer/ContextAnalyzerDialog.vue#L28-L70>)及[预览调用](<../../aio-hub/src/tools/llm-chat/components/context-analyzer/ContextAnalyzerDialog.vue#L159-L189>)可复查。当前预览链使用预览上下文，缺少转写时不启动后台转写，详见请求笔记。
 
-### 3.4 附件交互与批量动作
+变化与缓存页是独立诊断工作区：可选本次请求、对照基准、前次重试，自动关联当前消息，提示跨分支比较；展示公共前缀、首个变化块、配置变化、来源、组装步骤、缓存读写和明细。记录摘要和保存去敏文本预览分别有开关，支持刷新与清空当前会话记录；明细按需展开。上游用量区分实报、部分上报和未报，文本相同或前缀稳定只说明可比较的输入结构，实际缓存量仍看上游。入口与开关见[诊断页顶部](<../../aio-hub/src/tools/llm-chat/components/context-analyzer/ChangesAndCacheView.vue#L1-L172>)，用量状态见[实报分派](<../../aio-hub/src/tools/llm-chat/components/context-analyzer/ChangesAndCacheView.vue#L768-L831>)。
 
-附件卡片（`AttachmentCard.vue`）提供"加载失败"与"导入失败"两种失败态及导入中间态图标；输入区侧提供单项重试/取消，以及"一键转写未转写、智能转写、强制重新转写、停止全部"等批量动作（转写执行语义在对话请求与上下文 9.2）。附件两阶段导入的状态机在会话管理 8.3；导入完成后图片引用改用 `asset://` 协议（渲染在渲染器笔记 1.3）。拖入文件失败的反馈与恢复路径本次未单独核实（静态代码只确认了拖入事件绑定与 loading 状态）。
+## 5. 生成反馈、排队、压缩与审批
 
-## 4. Agent、模型、工具与发送前配置
+发送进入生成后，输入按钮提供停止入口，消息头显示等待、生成、排队、错误或异常回复；手动停止和队列停止有独立展示映射。对生成中的目标父路径继续发送，先创建排队消息，其他空闲分支仍可独立生成。停止既可针对会话，也有消息级停止动作；真正取消及队列语义见请求笔记。显示状态以[状态映射](<../../aio-hub/src/tools/llm-chat/utils/messageStatus.ts>)和[消息操作分派](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue#L673-L739>)为证。
 
-### 4.1 Agent 选择与切换
+上下文压缩单独显示为会话级任务条，位于消息列表末尾，含消息数、运行/取消/失败状态和可展开解释。取消按钮直接调用当前视图会话的取消压缩动作；只读表面隐藏取消，截图隐藏任务条。它不是普通“助手正在回复”气泡，任务完成后的摘要节点另有压缩消息展示。见[任务条组件](<../../aio-hub/src/tools/llm-chat/components/message/ContextCompressionTask.vue#L20-L61>)与[列表接线](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue#L829-L837>)。
 
-`useLlmChatUiState().selectAgent(agentId, options?)`（`composables/ui/useLlmChatUiState.ts:198-230`）是切换"当前选中 Agent"的入口——不传 options（用户在侧栏主动点选 Agent）时，如果当前有活跃会话，会同步把当前会话的展示 Agent 改成它，即"选中 Agent"和"把当前会话的展示 Agent 改成它"是同一个动作。一旦会话已经产生过真实对话，切换 Agent 不会重建开场白，只是单纯改变"接下来发消息用哪个 Agent"；历史消息仍显示生成时记录的 Agent 快照（数据语义在会话管理 8.1）。
+工具审批条提供逐项允许/拒绝、批量处理和静默执行。批量动作基于当前可见请求集合，以兼容本地聊天与外部来源不同的会话标识。倒计时在配置了过期时间时提示自动拒绝，否则显示持续等待；自动仲裁只在其配置和来源条件满足时执行，未得出可自动执行结论时仍保留人工入口。UI 状态和事件见[审批条](<../../aio-hub/src/tools/llm-chat/components/message-input/ToolCallingApprovalBar.vue>)，仲裁执行边界见[Agent 工具笔记](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)。
 
-### 4.2 模型选择
+## 6. 消息操作、编辑、分支与交付
 
-标题栏模型在 `showModelSelector` 开启时可直接换模型（`ChatAreaHeader.vue:174-186`）；临时模型选择保存在当前会话草稿状态（3.3）。"切换模型重新生成"/"选择模型续写"走消息操作栏（6.1），执行链在对话请求与上下文 7。
+消息菜单按节点角色、生成状态、只读与截图模式装配复制、翻译、停止、编辑、重试、续写、分支、导出、截图、上下文分析和高级数据编辑；删除有二次确认。兄弟版本选择只换活动路径，编辑保存或“保存到分支”才进入数据写动作。操作装配见[消息菜单](<../../aio-hub/src/tools/llm-chat/components/message/MessageMenubar.vue>)，对应 store 接线见[列表动作表](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue#L673-L739>)。
 
-### 4.3 压缩配置与手动压缩入口
+高级 JSON 编辑器打开时复制目标节点并聚焦编辑器；保存要求合法对象及文本正文，分支保存还要求原节点有父节点。普通保存更新节点，分支保存调用创建编辑分支入口，成功后给出不同反馈。[高级编辑器](<../../aio-hub/src/tools/llm-chat/components/message/MessageDataEditor.vue#L103-L211>)说明了两种保存路径。树图入口也携带明确的会话作用域，避免目标被当前会话选择隐式替换。
 
-压缩配置面板位于 Agent 参数编辑器的 `ContextCompressionConfigPanel.vue`（配置语义在对话请求与上下文附录 A.1）。输入框"更多"菜单的"压缩上下文"调用手动压缩入口（`MessageInputToolbar.vue:124-129` 在当前 Agent 没有启用压缩时禁用该菜单项）。手动调用跳过自动开关与阈值判断，但仍受"最近 N 条保护区"约束（候选不足时返回"没有可压缩的消息"）。
+分支导出可选择 Markdown、结构化 JSON、Raw 等格式及消息范围；整会话导出保留隐藏分支。截图另起渲染表面，选择范围、卡片/气泡/紧凑布局、宽度、背景、品牌条和元信息，截图模式隐藏操作后生成 PNG，可复制或保存。交互入口见[导出对话框](<../../aio-hub/src/tools/llm-chat/components/export/ExportBranchDialog.vue>)与[截图对话框](<../../aio-hub/src/tools/llm-chat/components/screenshot/ShareScreenshotDialog.vue>)；交付数据语义留给导出及会话专项。
 
-### 4.4 管道配置入口
+## 7. 多会话与后台任务的可观察性
 
-`PipelineConfig.vue` 提供上下文管道处理器的开关、排序和恢复默认入口（启用状态与顺序持久化在 `llm-chat/pipeline-settings.json`；处理器顺序语义在对话请求与上下文 2）。
+普通多会话生成以节点运行集合和列表状态区分。后台子 Agent 进一步提供三层入口：主消息中的派遣卡片，子会话伴生视图，以及全局任务中心。标题栏活动胶囊订阅任务注册表，展示活动任务数和最近摘要，悬浮列表最多五条；点击有子会话的任务直接打开伴生视图，没有子会话则定位任务中心。返回派遣入口可切回父会话并定位对应卡片。见[标题栏任务装配](<../../aio-hub/src/components/TitleBar.vue#L193-L279>)。
 
-## 5. 发送、排队、流式反馈与停止
+伴生视图通过子会话 ID 读取完整活动路径并显示执行流；只读契约由列表显式作用域、下传 readonly 和写操作代理共同约束。只有“打开完整会话”才切换主会话选择；加载失败可重试或进入完整会话，任务变更按 350ms 合并刷新。见[伴生状态与加载](<../../aio-hub/src/tools/sub-agent/composables/useCompanionSession.ts#L61-L161>)、[跳转和刷新](<../../aio-hub/src/tools/sub-agent/components/CompanionSessionSheet.vue#L152-L181>)与[列表只读代理](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue#L153-L173>)。
 
-### 5.1 发送/停止与占位气泡
+上述是应用内可观察性。检查桌面前后端目录中的通知插件、发送通知和请求窗口注意力 API，当前未找到生成完成接系统通知的实现证据；普通后台会话也未找到专门的完成通知返回入口。系统托盘保留应用显示、隐藏、前端重启、清配置和退出等动作，未见聊天状态动态项。
 
-生成中发送按钮转为中止（`MessageInputToolbar.vue:511-555`，停止按钮与发送按钮都有 title 提示，空输入且无附件时禁用）。三种"再生成"操作（重新生成、切换模型重试、续写）创建的新节点在完成前先注册为生成中并更新活动叶子，保证 UI 能立刻看到"正在生成"的占位气泡（执行顺序在对话请求与上下文 1；占位气泡的渲染在渲染器笔记）。停止按钮除了中止正在执行的请求，还会清理该会话未执行的队列节点；消息头将“队列已停止”和“用户手动停止”显示为停止结果，避免继续呈现为排队或普通错误（`stores/session/sessionRuntimeManager.ts:23-43,129-168`、`utils/messageStatus.ts:89-103`）。
-
-### 5.2 排队反馈
-
-会话中某条目标父节点路径仍在生成时再发消息，消息节点会被创建并持久化但不触发请求（`metadata.isQueued = true`、`status: "queued"`）；同一会话其它分支不因此阻塞。调度器在对应路径空闲后按 `queueReplyMode` 合并或链式触发（执行语义在对话请求与上下文 8）。排队/等待状态的界面呈现：`utils/messageStatus.ts:33-103` 把节点状态映射为展示状态，`MessageHeader.vue` 在偏好开关开启（默认 true，`config/defaultSettings.ts:33`）时于消息头渲染对应徽标（图标 + 文案 + tooltip 详情，生成中带旋转动画，截图模式隐藏；`MessageHeader.vue:325-350`）。映射如下：
-
-- `queued` → "排队"；旧数据 `pending` 兼容识别为 queued
-- `waiting` → "等待中"
-- `generating` → "生成中"
-- `error` → "错误"
-- 空响应诊断 → "异常回复"
-
-### 5.3 工具审批条
-
-三点流式指示器在 `waiting` 与 `generating` 两个阶段都显示，只依赖消息生命周期状态和错误标记，不再依赖可能异步同步的 `generatingNodes` 集合；渲染器流源仍使用后者判断真实生成任务。这个拆分避免首字到达、状态从等待中切换为生成中时指示器短暂消失（`MessageContent.vue:263-300,1173-1180`）。
-
-工具调用暂停时，`ToolCallingApprovalBar.vue` 在输入区上方提供允许/拒绝/全部允许/全部拒绝/静默执行等动作（`ToolCallingApprovalBar.vue:154-172,187-220`）。"全部允许/全部拒绝"按钮特意不按会话 ID 精确匹配，而是基于 UI 当前渲染出来的可见请求 ID 列表——因为 VCP 广播来的审批请求会话 ID 是 `vcp-${maid}` 格式，跟本地 llm-chat 会话 ID 体系不是一套（`ToolCallingApprovalBar.vue:145-153` 注释里专门解释了这个原因；审批状态语义在对话请求与上下文 9.5）。
-
-审批条带倒计时提示（`formatApprovalWait`，每秒刷新，`ToolCallingApprovalBar.vue:40-60`）：无过期时间时显示"等待人工审批 · 不会自动超时"，否则显示"剩余 N 秒 · 超时将自动拒绝"；超时自动拒绝来自可配置的审批超时（默认关闭，`config/defaultSettings.ts:69-70`）。工具节点审批期间显示"等待"、执行期间显示"生成中"的状态切换由编排层写节点状态（对话请求与上下文 9.5）。
-
-审批前还可以先经过**自动决策仲裁**：`src/services/decision-arbiter/` 提供规则式与 LLM 式两种判定引擎（`createDecisionArbiter`、`evaluateArbitration`，另有 `buildJevQuestionnaire` 与 `detectDangerFeatures`），在允许自动审批的配置下给出批准/拒绝结论与理由，未自动通过或判定失败时仍落到人工审批条。审批条会区分本地会话请求与带 `externalId` 的外部来源请求，并据此决定"全部允许/全部拒绝"是否可用；外部来源的具体协议归属见外部执行体笔记。仲裁的配置入口与判定细节在 Agent 工具笔记第 5 节。
-
-## 6. 消息操作、分支与版本导航
-
-### 6.1 消息操作栏
-
-`MessageMenubar.vue` 实际提供：版本导航（上一/下一分支与位置指示）、变量快照、续写、选择模型续写、上下文分析、导出分支、消息截图、重算 Token、重新解析工具、数据编辑、翻译、复制、停止生成、编辑、创建分支、重新生成、指定模型重新生成、启用/禁用节点和删除确认等（`MessageMenubar.vue:423-604` 及更多菜单 509-607）。翻译按钮支持按住 Shift/Ctrl/Alt 直接使用默认目标语言（`MessageMenubar.vue:408-420`；翻译执行在对话请求与上下文 9.7，结果字段在会话管理 1.3）。硬删除由 `ElMessageBox` 二次确认（`MessageMenubar.vue:167-186`，通过危险样式标记危险操作），删除后代分支的语义与会话管理 4.4 的树操作一致。操作栏的组件装配与渲染属消息渲染器类目。
-
-### 6.2 分支导航 UI
-
-`BranchSelector`（消息卡片组合的一部分）与操作栏的上一/下一分支按钮承担兄弟版本切换，`n/total` 显示当前位置（`MessageMenubar.vue:426-477`）；导航算法（循环切换、`lastSelectedChildId` 记忆、叶子定位）在会话管理 4.1。线性视图下的这些按钮是标准 `<button>`，可 Tab 聚焦（9.1）。
-
-### 6.3 上下文分析器入口
-
-消息菜单"上下文分析"打开 `ContextAnalyzerDialog.vue`，提供五个视图：结构化视图、原始请求、内容分析、宏调试、变量状态（`ContextAnalyzerDialog.vue:37-60`）；最终 Token 统计对管道产出的每条消息重新计算。它复用真实请求的整条管道且可能触发缺失的转写任务（执行侧细节与副作用在对话请求与上下文 9.8）。
-
-### 6.4 导出与截图工作流
-
-- 导出：`ExportBranchDialog.vue`（BaseDialog 封装，宽 1000px、高 80vh，`ExportBranchDialog.vue:18-22`）提供分支导出（Markdown/结构化 JSON/Raw JSON、消息范围与内容选项、可选"使用上下文管道处理"，`ExportBranchDialog.vue:74-88,180-191`）与整会话导出（树状 Markdown / 完整节点树 JSON/Raw，保留隐藏分支）；格式与范围的数据语义在会话管理 7.1。
-- 消息截图："创建消息截图"使用独立的渲染器重新渲染所选消息范围，再由截图工具分段捕获并拼成长画布（不是直接截当前窗口可见区域）。用户可选卡片/气泡布局、480-1280px 渲染宽度、输出倍数、主题/纯色/壁纸背景、消息间距与留白、水印、顶部/底部品牌条、工具调用展开策略以及是否显示时间、Token 和字数（`ShareScreenshotDialog.vue:178-184` 等）；交互按钮和编辑入口在截图模式下被隐藏；结果统一输出 PNG，可复制到剪贴板或通过 Tauri 保存对话框写入文件（`useScreenshotGenerator.ts:123-140`）。
-
-### 6.5 可见性设置与语义状态
-
-节点卡片的时间戳、Token 数、字符数、头像、模型信息、性能指标、自动滚动和气泡布局由全局 `uiPreferences` 控制（`types/settings.ts:125-141`）；关闭这些偏好只隐藏元信息，不改变节点内容或请求上下文。`isEnabled=false` 是语义状态，会影响节点是否参与上下文；压缩收起、过滤 active path、隐藏 HUD/小地图则是呈现状态，不能混为"节点被删除"。"查看详情"是 teleported 到 body 的独立弹层，节点右键菜单和详情弹层的位置跟随节点屏幕坐标（`useGraphNodeActions.ts:194-234`）；因此切换缩放/布局后，弹层需要重新定位，不能把它当成节点卡片的静态子元素。
-
-### 6.6 消息统计与分组脚注
-
-消息卡片组合已拆出独立组件：`MessageRow.vue` 负责单行外壳与布局（`messageRowLayout.css`），`MessageStatistics.vue` 渲染助手消息的 Token/耗时等元信息，`MessageGroupFooter.vue` 作为分组末尾脚注。统计只在角色为助手、状态为 complete、且未处于截图模式时出现，是否展示仍受可见性偏好控制（6.5）。
-
-消息操作按钮同样有可自定义的工具栏：`config/messageToolbar.ts` 与 `messageToolbarActions.ts` 描述可显示的动作集合、排序与显隐，`MessageToolbarCustomizeDialog.vue` 提供编辑入口（各动作的语义仍以 6.1 的菜单项为准）。新增动作若未在配置中登记，只存在于菜单而不进入工具栏。消息壳装配与内容渲染的其余部分在消息渲染器笔记 1.2/1.3。
-
-## 7. 多会话、多模型与后台生成
-
-- 多会话可同时生成：列表项的生成状态来自节点集合（`generatingNodes`）而非 Session 布尔值（2.1；数据语义在会话管理 6）。
-- 同会话生成中再发消息进入排队（5.2）；多模型并行、群聊、子 Agent 等场景的界面区分本次调查未覆盖。
-- 后台会话生成完成没有专门的返回入口或系统通知（8.3）。
-
-## 8. Chat UI 状态所有权与同步
-
-### 8.1 UI 状态层
-
-`useLlmChatUiState.ts`（`composables/ui/`）持有视图模式、当前选中 Agent、侧栏折叠与宽度等 UI 状态，持久化到 `llm-chat/ui-state.json`（300ms 防抖，`useLlmChatUiState.ts:89-98`）。输入草稿（按会话保存）、悬浮窗和消息流缓冲由 UI 状态层独立维护，与会话对象本身分离——会话切换只改变活动路径，不重置这些局部状态（2.4）。
-
-### 8.2 跨窗口同步与断连边界
-
-主窗口与分离窗口经 `useWindowSyncBus` 同步生成状态（`chat:streaming-delta` 广播，RAF 节流；执行侧在对话请求与上下文 5）。窗口类型按路径判定（`/detached-component/` 与 detached-tool，`useWindowSyncBus.ts:103-116`）；分离窗口的会话写操作经 `executeOrProxy` 转发主窗口（数据语义在会话管理 2.1）。已确认边界：若窗口关闭/断连，流缓冲仍在主进程内存中，用户看到的最后一段内容能否在重连后完整回放取决于订阅时机（渲染侧的重放机制在消息渲染器笔记 2.1）。
-
-### 8.3 桌面集成交点
-
-- 系统托盘（`src-tauri/src/tray.rs:39-60`）菜单包含"显示主窗口、隐藏主窗口、重启前端、清除窗口配置、退出"，**没有聊天生成状态相关的动态菜单项**。
-- 项目中没有找到系统通知相关 API 的使用（搜索 `tauri-plugin-notification`、`sendNotification`、`request_user_attention`、`UserAttentionType`，检查范围：`src/` 与 `src-tauri/` 全目录搜索）——没有 Windows Toast、标题栏闪烁或任务栏提醒的实现证据。
-- 生成完成只驱动 `generatingNodes`、消息卡片状态和 `useWindowSyncBus` 的跨窗口同步，没有触发系统通知、托盘图标变化或标题栏提醒；应用处于后台时，不会主动提示某个会话已生成完成。
-
-## 9. 键盘、焦点、响应式与关键路径可用性
-
-（结论来自静态代码；视觉效果与焦点顺序需运行验证，未实测。）
-
-### 9.1 关键路径键盘
-
-- **发送消息**：可以。两个编辑器都支持 `Ctrl/Cmd+Enter` 或 `Enter` 发送（可配置 `sendKey`，见 3.1），不依赖鼠标点击发送按钮。
-- **切换会话**：不可以。会话列表项是绑定点击事件的可点击 `div`（`SessionItem.vue:92`），没有 `tabindex`、`role="option"` 或 `role="listbox"`，也没有方向键或 Ctrl+Tab 的会话切换绑定；div 默认不可聚焦，列表项不在 Tab 焦点序列里，纯键盘用户无法直接切换会话。
-- **查看分支**：部分可行。操作栏上一分支/下一分支按钮是标准 `<button>` 元素（可被 Tab 聚焦、可用 Enter/Space 激活，`MessageMenubar.vue:428-476`）；树图视图画布本身可聚焦（`tabindex="0"`，`FlowTreeGraph.vue:22`），但内部的节点选择、右键菜单操作、连线嫁接等均是鼠标驱动的交互（拖拽、右键、双击），**没有找到等效的键盘操作路径**，聚焦后也没有发现方向键选中/切换节点的绑定。
-- 结论：发送消息具备键盘路径，会话切换和树图操作基本依赖鼠标；线性视图下的分支切换按钮可通过 Tab 聚焦。该结论来自静态代码搜索，未经屏幕阅读器实测，不能作为正式的 WCAG 合规结论。
-
-### 9.2 可访问名称现状
-
-`llm-chat` 目录下找到的主动语义化 ARIA 标注包括：
-
-- 批量管理会话列表的表格语义（`role="table"` + `aria-label`，行元素 `role="row"`，`BatchManagerDialog.vue:81`）；
-- Knowledge 引用控件与引用 chips 的多处 `aria-label`；
-- 消息头状态徽标的 `aria-label`（`MessageHeader.vue:339`）；
-- `ChatTextareaEditor.vue:324` 一处技术性 `aria-hidden`。
-
-消息操作栏、发送/中止按钮、节点图菜单普遍使用"图标按钮 + title 属性"或 `el-tooltip`（发送/停止按钮只有 title 文案，`MessageInputToolbar.vue:516,539`）。title 对屏幕阅读器的支持取决于浏览器和辅助技术组合，不能替代明确的可访问名称。
-
-### 9.3 响应式
-
-三栏布局没有媒体查询或容器宽度自动折叠（`LlmChat.vue` 模板与样式中未发现媒体查询）：侧栏显示由用户手动控制并持久化（折叠状态存在 `llm-chat/ui-state.json`），窗口变窄时不会自动收起侧栏，三栏会一起被压缩。侧栏宽度可通过拖拽在 200-600px 范围内调整（`useResizable`，`LlmChat.vue:100-114`），但这是手动操作，不属于响应式自适应。弹窗内部有断点（如收藏夹管理在 720px 切单列、会话设置有两级高度断点）——这类弹窗断点不改变聊天主链布局，仅记录存在。
-
-### 9.4 运行验证要求
-
-视觉反馈、焦点顺序、键盘可用性、响应式行为和系统通知均需运行验证；本笔记结论主要来自静态代码。
-
-## 10. 设计取舍与已确认边界
-
-- **消息列表不再虚拟化**（当前方案的渲染机制在消息渲染器笔记 8，撤回历史留在这里）：Git 历史表明消息列表并非一直采用当前方案：
-  - 2025-11-02 首次在 `MessageList.vue` 接入 TanStack Virtual（初版固定预估行高 200、overscan 5、只挂载可见消息、绝对定位加 translateY）；
-  - 此后多轮提交持续处理动态高度与滚动定位问题；
-  - 2026-04-29 撤回改用原生 DOM，提交说明将原因归结为聊天消息高度动态、倒序加载闪烁、估算不准和初始化复杂；在该项目"几百条消息"的目标规模下，作者实测会话切换由 3–5 秒降至 500ms 内（**该性能数字来自提交说明，笔记未独立复测**）；
-  - 撤回后滚动和导航都改为基于真实 DOM（触底滚动、按消息 ID 查询并读取位置定位，`MessageList.vue:325-385`）；
-  - 后续提交又处理了生产构建中 `content-visibility` 被优化器移除的问题。
-
-  旧方案是列表虚拟化（屏外消息组件不挂载）；当前方案是"完整 DOM + 浏览器渲染裁剪"，所有活动路径消息仍在 DOM 中。
-- **线性视图与树图共用同一份节点数据**；树图的交互路径已做静态代码核实，大规模节点树的布局性能未做运行时压测（仓库 `docs/Plan/tree-graph-performance-investigation.md` 记录的是性能计划，不能据此得出性能结论）。
-- **分离窗口断连的回放依赖订阅时机**（8.2）。
-- **`QuickAction.hotkey` 未落地**：类型定义声明了 `hotkey?: string`（`types/quick-action.ts:33`），但 `src/tools/llm-chat` 中没有任何读取或注册该字段的代码（搜索 `.hotkey` 无消费方）——快捷操作按钮、模板展开和自动发送可用，配置快捷键本身没有执行链。
-- **语义状态与呈现状态必须区分**（6.5）。
-- **输入区面板与工具栏布局是 UI 偏好而非会话数据**：面板可见性、折叠态只在当前输入容器内；工具栏顺序/显隐持久化在 ChatSettings，会话切换不重置。分离窗口看到的布局来自主窗口快照同步，旧版 `chat-input-settings` 的显示 Token 与分组开关只在新字段缺失时迁移。
-- **自动审批仲裁的判定结果依赖配置**：仲裁只在允许自动批准的配置下参与，且外部来源请求与本地会话请求分流处理；静态代码确认判定入口与展示描述，未实际观察"自动批准"在真实工具调用中的触发效果。
-- **会话切换无键盘路径、树图无键盘等效操作**：静态代码确认，属关键路径可用性缺口（9.1），需运行验证确认影响范围。
-
-## 11. 未验证事项
-
-- 视觉效果、焦点顺序、键盘可用性、响应式行为、系统通知需要运行验证（静态代码只能确认入口、状态与事件绑定）。
-- 树图大规模节点布局性能未压测。
-- 分离窗口断连后流缓冲重放的实际观感未验证（8.2）。
-- 会话切换键盘缺失、树图无键盘路径、会话搜索面板跨会话不保留等结论来自静态代码搜索，未经运行时可用性测试。
-
-## 12. 关键源码索引
-
-- `src/tools/llm-chat/LlmChat.vue`（顶层装配、窗口类型初始化分支、恢复横幅，321-372/457-507行）
-- `src/tools/llm-chat/components/ChatArea.vue`（视图切换、搜索面板挂载、悬浮窗，214-216行滚动定位）
-- `src/tools/llm-chat/components/message/MessageMenubar.vue`（消息操作入口，167-186行删除确认，408-420行翻译快捷键）
-- `src/tools/llm-chat/components/message/ViewModeSwitcher.vue`、`message/MessageList.vue`（入口层面，渲染机制在渲染器笔记）
-- `src/tools/llm-chat/components/message-input/MessageInput.vue`、`MessageInputToolbar.vue`、`ToolCallingApprovalBar.vue`、`VirtualTextAttachments.vue`
-- `src/components/common/input-panel/InputPanelHost.vue`、`src/composables/useInputPanel.ts`（输入区面板插槽）
-- `src/tools/llm-chat/config/inputToolbar.ts`、`components/message-input/toolbar/inputToolbarActions.ts`、`ToolbarCustomizeDialog.vue`（输入工具栏布局与快捷操作分组）
-- `src/tools/llm-chat/config/messageToolbar.ts`、`components/message/messageToolbarActions.ts`、`MessageToolbarCustomizeDialog.vue`（消息工具栏自定义）
-- `src/tools/llm-chat/services/slashCommandService.ts`、`types/slash-command.ts`（斜杠指令）
-- `src/tools/llm-chat/components/message-input/KnowledgeReferencePanel.vue`、`KnowledgeReferenceChips.vue`（显式资料引用）
-- `src/services/decision-arbiter/`（自动审批仲裁：`index.ts`、`evaluator.ts`、`jevQuestionnaire.ts`、`dangerFeatures.ts`）
-- `src/tools/llm-chat/utils/messageStatus.ts`、`components/message/MessageHeader.vue`（生命周期状态徽标）
-- `src/tools/llm-chat/components/sidebar/BatchManagerDialog.vue`（会话内容搜索与高亮，154/185/362-364/417-432 行）、`SessionsSidebar.vue`（139-146 行虚拟化）、`AgentsSidebar.vue`（926 行）
-- `src/tools/llm-chat/components/search/ChatSearchPanel.vue`（52-121行线性扫描）
-- `src/tools/llm-chat/components/conversation-tree-graph/flow/`（`FlowTreeGraph.vue`、`useFlowTreeGraph.ts`、`useGraphD3Simulation.ts`、`useGraphSubtreeDrag.ts`、`useGraphConnectionPreview.ts`、`useGraphNodeActions.ts`、`GraphNodeMenubar.vue`）
-- `src/tools/llm-chat/composables/ui/useLlmChatUiState.ts`（198-230行 selectAgent）、`composables/input/useChatInputManager.ts`
-- `src/tools/llm-chat/components/context-analyzer/ContextAnalyzerDialog.vue`、`components/export/ExportBranchDialog.vue`、`components/screenshot/ShareScreenshotDialog.vue`
-- `src-tauri/src/tray.rs`（托盘）
+## 8. UI 状态所有权与同步
+
+| 状态 | 所有者和恢复方式 |
+|---|---|
+| 当前会话、消息树、活动叶子、生成与压缩任务 | 聊天 store 与会话管理层；UI 以明确会话 ID 消费 |
+| 侧栏折叠/宽度、选中 Agent、视图模式、参数分组展开 | UI 单例，配置文件 `llm-chat/ui-state.json`，300ms 防抖 |
+| 正文、附件、文本材料、临时/续写模型、引用、草稿剪贴板 | 输入单例，按会话记录；应用文件持久化，并走输入状态同步 |
+| 输入/消息工具栏布局与消息外观 | ChatSettings；主窗口保存后向分离窗口发布 |
+| 当前输入功能面板及折叠 | 当前输入容器提供的面板状态；关闭销毁，折叠保留 |
+| 阅读锚点、富文本折叠/代码查看现场 | 当前列表与渲染器运行期状态，按停用/恢复交接 |
+| 伴生任务目标和显示模式 | 伴生单例运行期状态；栏宽另存 localStorage |
+
+文件偏好定义见[聊天 UI 状态](<../../aio-hub/src/tools/llm-chat/composables/ui/useLlmChatUiState.ts#L66-L101>)。跨窗口总线提供初始状态、增量、操作代理与流式 delta，输入同步带版本及本地变更时间，避免迟到初始状态覆盖首轮输入。高频正文流源和低频节点字段是不同通道，流源位于前端窗口内存，不能描述为 Rust 主进程保留全部可重放正文。详见[聊天同步](<../../aio-hub/src/tools/llm-chat/composables/chat/useLlmChatSync.ts>)与[流接收服务](<../../aio-hub/src/tools/llm-chat/services/chatStreamReceiver.ts>)；断连后的最终恢复体验未实测。
+
+## 9. 键盘、焦点、响应式与验证边界
+
+- 发送有编辑器快捷键；已挂载的会话项可 Tab 聚焦并以 Enter/Space 选择，菜单可用 Shift+F10/菜单键打开。虚拟列表仅挂载可见项，这些绑定本身不足以证明全部历史会话可无障碍遍历。
+- 线性分支按钮、提问导航、工具卡展开和压缩任务按钮有键盘可聚焦元素；公共对话框接入焦点进入、Tab 边界回环、最上层 Esc 和关闭归还，细节见基础设施笔记。
+- 树图节点拖拽、连线和嫁接，本次在已读交互入口中未找到完整键盘等效路径；画布可聚焦不等于这些操作已键盘化。
+- 左右业务侧栏仍由用户手动折叠和拖宽；中央伴生栏另按可用宽度自动切为画中画，工具栏有溢出收纳。不能用“三栏无媒体查询”否定这些局部适配。
+
+本轮未运行 Tauri、浏览器或服务。视觉层级、窄窗可用性、焦点实际顺序、读屏、拖拽、多窗口重连、系统托盘与长会话性能都需要目标运行态观察；源码与现有测试仅用于确认事件、条件和状态路径。本笔记不据静态标签作 WCAG 合规判断。
+
+## 10. 关键源码索引
+
+- [LlmChat](<../../aio-hub/src/tools/llm-chat/LlmChat.vue>)：入口准备、三栏、恢复与发送。
+- [ChatArea](<../../aio-hub/src/tools/llm-chat/components/ChatArea.vue>)：搜索、视图、输入、停靠槽位。
+- [MessageList](<../../aio-hub/src/tools/llm-chat/components/message/MessageList.vue>)：会话作用域、动作表、提问导航与任务条。
+- [输入管理器](<../../aio-hub/src/tools/llm-chat/composables/input/useChatInputManager.ts>)：会话草稿与跨窗口输入同步。
+- [伴生视图](<../../aio-hub/src/tools/sub-agent/components/CompanionSessionSheet.vue>)：只读双表面、任务刷新和完整会话跳转。
+- [变化与缓存页](<../../aio-hub/src/tools/llm-chat/components/context-analyzer/ChangesAndCacheView.vue>)：实发请求诊断工作区。

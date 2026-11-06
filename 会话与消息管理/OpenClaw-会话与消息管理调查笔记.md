@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
@@ -57,7 +57,16 @@ OpenClaw 当前的会话存储是“逻辑会话节点 + 可轮换 transcript ge
 
 `sessionKey` 负责逻辑寻址，`sessionId` 负责 transcript generation 身份。对直接会话，非 global 的消息上下文通常归并到所选 agent 的 main bucket；group/channel 会保留独立的 agent-namespaced key；显式 `SessionKey` 经过兼容规范化。global scope 直接使用 `global`。实现见 `src/config/sessions/session-key.ts`。
 
-默认 agent session 目录位于 state 目录下的 `agents/<agentId>/sessions`。`sessions.json` 仍由路径和兼容代码识别，但当前主要 session/transcript 访问通过 agent SQLite；incognito key 则强制解析到独立的 incognito SQLite 路径，不能因为传入了 durable store path 而落回文件存储。实现见 `src/config/sessions/paths.ts`、`:324-365` 和 `src/config/sessions/session-store-path.ts`。
+默认 agent session 目录位于 state 目录下的 `agents/<agentId>/sessions`。兼容路径仍识别旧 sessions.json，持久会话由数据库 owner 访问；incognito 则由 session actor 的 memory backend 持有，没有对应 SQLite 数据库或 worker。旧的路径名称仍可作为作用域标识，不能据名称推断数据落盘。依据见 [memory owner](<../../openclaw/src/config/sessions/session-actor-memory.ts#L59-L69>) 与 [storage acquisition](<../../openclaw/src/config/sessions/session-actor-storage-acquisition.ts>)。
+
+incognito 的完整主链分为四步：
+
+1. Web 新建界面把可见性设置为 incognito，提交创建请求；Gateway 检查 web-only key、新会话身份及 durable key 冲突，再选定 Agent 和目标。来源见 [创建目标准入](<../../openclaw/src/gateway/session-create-target.ts#L78-L173>)。
+2. 显式创建以 create 权限获取 memory actor。后续读取只 acquireExisting，缺失对象不会因查询而创建；入口在异步链上保留已选 actor，子操作消费同一 storage binding。
+3. memory owner 串行接纳状态与 transcript 操作，保留 generation、版本、幂等结果和历史 window；数据库模式和内存模式共享业务契约，内存对象始终以 actor 状态为权威，不被驱逐到磁盘。来源见 [memory backend](<../../openclaw/src/config/sessions/session-actor-memory.ts>)。
+4. 删除或到期回收以预期 sessionId 关闭精确会话并结束相关传输；owner 关闭会清空内存。进程退出后没有持久 transcript 可供恢复。到期观察器按已提交 actor 元数据调度，元数据编辑不续期，失败回收会重试。来源见 [incognito lifetime](<../../openclaw/src/gateway/session-incognito-lifetime.ts>)。
+
+incognito 排除在持久会话发现和常驻 durable roster 之外，授权的按 key 读取可以消费 actor 内存事实。这解释了“能够在当前运行期继续读取”与“重启后恢复历史”两种不同的保留语义。实际关闭竞态与浏览器重连没有运行验证。
 
 会话 entry 的 session ID 是 opaque identity。Agent SessionManager 的新 session 使用 UUIDv7，见 `src/agents/sessions/session-manager-id.ts:4-5`；Gateway 的 fork、rewind、checkpoint、recovery 等不同 owner 还会在各自的事务中生成新的 UUID，因此不应把所有 session ID 概括成同一种生成函数。entry ID 默认是经过冲突检查的 8 位随机 UUID 前缀，连续碰撞 100 次后退回完整 UUID，见 `src/agents/sessions/session-manager-id.ts:8-17`。
 
@@ -315,7 +324,8 @@ Agent store 的当前 schema 版本是 40，并拆出多组特性版本常量（
 
 - `src/config/sessions/session-key.ts`：消息上下文到逻辑 session key 的 derivation 与 agent namespacing
 - `src/config/sessions/paths.ts`、`src/config/sessions/session-store-path.ts`：agent session 目录、legacy sessions.json 路径与 incognito store 选择
-- `src/state/openclaw-agent-schema.sql`、`src/state/openclaw-schema-versions.ts`、`src/state/openclaw-agent-db-contract.ts`：agent store canonical schema、schema 版本 40 与特性版本常量\n- `docs/reference/database-engines.md`、`docs/gateway/postgresql.md`：SQLite/PostgreSQL 双引擎、五类 store family 与混用边界
+- `src/state/openclaw-agent-schema.sql`、`src/state/openclaw-schema-versions.ts`、`src/state/openclaw-agent-db-contract.ts`：agent store canonical schema、schema 版本 40 与特性版本常量
+- `docs/reference/database-engines.md`、`docs/gateway/postgresql.md`：SQLite/PostgreSQL 双引擎、五类 store family 与混用边界
 - `src/config/sessions/session-accessor.ts`：storage-neutral session/transcript accessor barrel 与公开入口
 - `src/config/sessions/session-accessor.sqlite-entry-store.ts`：session_nodes 事实源、promoted projection、alias/rehome 和缓存失效
 - `src/config/sessions/session-accessor.sqlite-transcript-store.ts`、`session-accessor.sqlite-transcript-write.ts`：event/message append、rewrite、transaction 和 writer fence

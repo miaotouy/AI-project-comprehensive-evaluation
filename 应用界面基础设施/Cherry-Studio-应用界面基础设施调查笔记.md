@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -257,13 +257,9 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 **托盘。** `TrayService.ts` 在 mac 上根据 nativeTheme.shouldUseDarkColors 切换亮/暗两套托盘图标（:29）；点击托盘图标行为受偏好 feature.quick_assistant.click_tray_to_show 控制——开则唤起 QuickAssistant 悬浮窗，关则唤起主窗口（:61-71）；托盘本身不显示未读消息数/流式状态角标（未检索到 setBadgeCount/flashFrame/setOverlayIcon 调用）。
 
-**系统通知。** NotificationService（主进程，`src/main/services/NotificationService.ts`）用 Electron 原生 Notification API，点击通知会 `showMainWindow()` 并广播 notification.clicked（:14-17）。
+**会话通知通道。** 主进程通知服务直接订阅生成完成与工具审批事件，构造会话级导航目标；有聚焦完整窗口时只发送应用内通知，没有时按助手通知偏好发送 Electron 系统通知。前台主/分离窗口都挂载通知消费组件，当前标签已是目标会话时抑制 toast；其它 toast 和系统通知点击后经会话导航服务回到目标。业务触发条件见[Chat UI 笔记 8.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)。依据：[NotificationService.ts:49–160](../../cherry-studio/src/main/services/NotificationService.ts#L49-L160)、[ConversationNotificationRuntime.tsx](../../cherry-studio/src/renderer/components/ConversationNotificationRuntime.tsx)。
 
-渲染层 `notificationService.send()`（`src/renderer/services/notification/NotificationService.ts:10-24`）先查三个偏好开关（assistant/backup/knowledge）再决定是否真的调 IPC 发送。
-
-**空路径：助手回复完成通知。** 偏好 app.notification.assistant.enabled 和对应设置项开关（`NotificationSettings.tsx:36-48`，"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `notificationService.send({..., source: 'assistant'})` 调用**——实际发通知的三处调用点（`BackupService.ts` 七处、`useAppUpdateHandler.ts` 一处）分别用 source: 'backup' 和 source: 'update'。
-
-即"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，是个用户能看到、能勾选、但不会生效的空挂钩（不同于代码里自己写 TODO 承认的 update 缺口，见 `NotificationService.ts:17-20`）。
+**平台状态清理。** 系统通知类别偏好包含助手、备份、知识库、更新与小程序；全部关闭时主动清 macOS Dock 计数。该行为与托盘未读角标分开，真实操作系统授权、通知投递及焦点回归未运行验证。
 
 **全局快捷键。** `ShortcutService.ts` 按**本地/全局分轨**注册——global 标记的仍走 globalShortcut（含失焦时的注册集），其余本地快捷键不再注册到系统，而是挂在窗口 webContents.before-input-event（含 did-attach-webview 挂上的 guest webview 输入）上按命令解析拦截（`ShortcutService.ts:123-196`），应用失焦时本地快捷键自然不生效；
 
@@ -289,7 +285,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 **消息操作栏使用 action 标签作为可访问名称。** 该机制覆盖默认与专用按钮路径；实际读屏反馈未运行验证。
 
-**"助手回复完成"通知是空开关。** 偏好与设置项存在，全仓库无 source: 'assistant' 发送调用。
+**会话通知在主进程统一分流。** 完成与审批事件共用导航目标；聚焦窗口内使用 toast，失焦后才依据偏好发送系统通知，避免同一事件双重提示。
 
 **拖拽排序仅在助手分组模式可用。** 时间分组语义上不可拖。
 

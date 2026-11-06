@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openai/codex`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
@@ -111,7 +111,9 @@ archived / archived_at / git_sha / git_branch / git_origin_url
 
 - **创建**：入口先解析模型、cwd、权限、动态工具、环境与 `history_mode`，再交给线程管理器启动会话；`ephemeral: true` 的线程不落盘（`codex-rs/app-server/src/request_processors/thread_processor.rs:1249`、`codex-rs/core/src/thread_manager.rs:1198`、`codex-rs/app-server-protocol/src/protocol/v2/thread.rs:114-116`）。
 - **恢复**：`thread/resume` 按线程读取 rollout，构造 `InitialHistory::Resumed`（`codex-rs/history/src/lib.rs:406-412`）；核心再用 `reconstruct_rollout` 把记录回放成运行期历史，处理压缩检查点与窗口（`codex-rs/core/src/session/rollout_reconstruction.rs:191-284`）。`InitialHistory` 另有 `New`、`Cleared`、`Forked` 三态。
-- **恢复的账号门**：本地线程在创建时记录 ChatGPT 身份，恢复或附加时若当前账号与创建者不同，直接拒绝并要求用原账号登录；API key 等无法比对账号的认证方式不受此限（`codex-rs/app-server/src/request_processors/thread_resume_account.rs:1-45`）。
+- **恢复的账号门**：账号检查受 `cli_resume_account_check` 特性控制，当前默认关闭；启用后也只适用于客户端名为 `codex-tui` 或 `codex_exec` 的请求。检查还要求线程已有 rollout 路径、至少记录一个创建者身份字段，并且当前使用 ChatGPT 认证；其余场景直接通过这项检查（[特性默认值](<../../codex/codex-rs/features/src/lib.rs#L1129-L1133>)、[账号检查条件与结果](<../../codex/codex-rs/app-server/src/request_processors/thread_resume_account.rs#L18-L45>)）。
+
+  满足条件时，任一已记录的创建者用户或账号/工作区 ID 与当前身份不匹配，都会拒绝并要求登录原账号。冷恢复与附加到已运行线程均调用该检查；由请求直接提供历史的恢复走另一分支（[冷恢复入口](<../../codex/codex-rs/app-server/src/request_processors/thread_processor.rs#L4025-L4054>)、[运行中线程入口](<../../codex/codex-rs/app-server/src/request_processors/thread_processor.rs#L4696-L4702>)）。
 - **归档**：把 rollout 文件移动到 `archived_sessions` 目录，并在同一次加锁流程里更新 SQLite 的归档标记；支持批量归档与解档（`codex-rs/thread-store/src/local/archive_thread.rs:15-79`）。列表默认只返回未归档线程（`codex-rs/app-server-protocol/src/protocol/v2/thread.rs:1463-1466`）。
 - **删除**：先做“存在附属线程则拒绝”的检查，再在生命周期锁与写锁下删除该线程的全部 rollout 文件，最后删 SQLite 行与名称索引；文件先于行删除，使失败可重试（`codex-rs/thread-store/src/local/delete_thread.rs:1-10`、`:25-45`）。
 - **组织**：线程可归入 section（独立持久化的分组，可排序）与 project；这两者与置顶标记都是 SQLite 元数据，不写入 rollout（`codex-rs/thread-store/src/local/move_thread_to_section.rs`、`codex-rs/state/migrations/0045_threads_section.sql`、`codex-rs/state/migrations/0043_threads_is_pinned.sql`）。跨分组移动走 `thread/section/move`，成功后向所有已连接客户端广播带线程 id 与目标分组的事件，使多窗口看到同一分组状态（`codex-rs/app-server-protocol/src/protocol/common.rs:708-712`、`codex-rs/app-server/src/request_processors/thread_processor.rs:825-845`）。
@@ -131,7 +133,9 @@ archived / archived_at / git_sha / git_branch / git_origin_url
 
 **线程列表**：`thread/list` 的游标是不透明串，内部是“时间戳 + 线程 id”，用于在扫描或 SQL 排序中稳定续页；文件系统分页也改用同一二元比较，创建时间相同的线程不会在续页时被跳过（`codex-rs/rollout/src/recorder.rs:1351-1360`）。支持按创建时间、更新时间、最近活跃排序，以及 provider、来源、归档、section、project、cwd、父线程关系过滤。文件扫描版实现有硬上限：最多扫描 10000 个文件，并返回 `reached_scan_cap` 提示继续翻页（`codex-rs/rollout/src/list.rs:49-58`、`:168-195`、`codex-rs/app-server-protocol/src/protocol/v2/thread.rs:1432-1507`）。
 
-**本地历史按账号隔离**：新建线程在会话头写入 `account_scoped` 标记，列表只保留与当前 ChatGPT 身份匹配的线程；标记之前的旧线程仍对同一安装共享，回退过的旧文件会追到原 rollout 读取创建者（`codex-rs/thread-store/src/local_history_account.rs:11-60`、`codex-rs/rollout/src/recorder.rs:108-118`）。
+**本地历史可按账号筛选**：新建本地线程把 `account_scoped` 写为 true；列表和搜索是否应用账号筛选，由请求的 `current_account_only` 决定，两个接口都默认 false。仅在该选项为 true、使用本地线程存储且当前认证不是 API key 时，app-server 才构造身份过滤器（[列表参数](<../../codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L1429-L1432>)、[搜索参数](<../../codex/codex-rs/app-server-protocol/src/protocol/v2/thread.rs#L1520-L1523>)、[过滤器入口](<../../codex/codex-rs/app-server/src/request_processors/thread_processor.rs#L6006-L6019>)）。
+
+筛选时逐个比对线程已记录的创建者 ID；未标记为账号范围的旧线程仍共享，未记录身份的字段不形成限制。若旧版回退文件丢失了标记，会追到原 rollout 读取；缺失路径、头部不可读或线程 ID 不匹配则不纳入结果。这是发现结果的过滤，恢复/附加的账号门使用第 3 节的独立条件（[匹配与兼容逻辑](<../../codex/codex-rs/thread-store/src/local_history_account.rs#L18-L65>)、[创建时标记](<../../codex/codex-rs/thread-store/src/local/create_thread.rs#L42-L46>)）。
 
 **轮次与项分页**：Paginated 线程通过 `thread/turns/list` 与 `thread/items/list` 直接读两张投影表，游标绑定投影序号，并额外返回反向游标供反向水合（`codex-rs/app-server-protocol/src/protocol/v2/thread.rs:472-529`、`codex-rs/thread-store/src/local/thread_history/segment_paging.rs:45-345`）。
 

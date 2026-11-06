@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -51,7 +51,7 @@ OpenOcta 的“渠道”是配置文件 `models.providers` 下的一个 provider
 | 模型 | provider 内的 `models[]` 条目，含 id、显示名、上下文与输出上限、价格、模态 | 是，同一 provider 下多个 | `schema.go:487-498` |
 | 内嵌模型 provider | 运行时自动维护的两个固定键：对话与向量 | 否，由进程状态生成 | `src/pkg/embeddedmodels/provider_config.go:12-22` |
 
-用户 provider 的能力字段中，实际进入请求的只有端点、密钥和协议类型三项，其余字段只存在于配置结构里。
+Provider 级请求选项实际消费端点、密钥和协议类型；模型级还读取模型 ID 与最大输出 token 数，后者进入 claude 或 openai 客户端配置。其余声明字段须逐项区分，最大输出限制确有消费路径（`src/pkg/agent/eino/model_factory.go:125-153,188-208`）。
 
 - **provider 级声明未消费**：自定义 Header、密钥前缀、鉴权方式、鉴权 Header 开关、环境变量映射。
 - **模型级声明未消费**：模型自己的 Header，以及兼容性开关（例如最大输出字段名）。

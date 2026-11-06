@@ -2,13 +2,13 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：只读通读根 README、`docs/architecture/tools-architecture-overview.md`、`src/tools/` 下 49 个工具目录的 registry 声明、目标模块 ARCHITECTURE 文档与关键实现（media-generator、asset-manager、llm-inspector、vcp-connector、sub-agent、skill-manager、macro-engine、quick-action、useDetachedManager、Rust `asset_manager.rs`、recall、regex-applier、git-committer、token-calculator、web-distillery、window-automator、realtime-subtitle-ocr、translator、content-deduplicator、smart-ocr、st-worldbook-manager 及 worldbook-processor）；未运行 Tauri 应用，未修改被调查仓库
+> 调查方式：结合源码快照差异，只读复核子Agent委派、执行车道、消息追加、任务恢复、Skill脚本与上下文诊断的入口/状态/执行/结果；其它能力沿用已列静态源码依据，未逐项重新运行；未修改源码或启动应用
 >
-> 调查范围：待查清单第二批候选（上下文分析器、宏与正则管道、快捷动作、Agent 私有资产、自由窗口、媒体工作站、资产管理器、多运行时插件、Skill 沙箱、请求检查器、VCP 监控）的入口、状态、执行与持久化主链；全量扫描剩余约 37 个未走主链的工具模块，新增八张能力卡；与现有十类笔记去重
+> 调查范围：特色工作流的用户目标、入口、状态、执行、持久化与回流；重点为子Agent任务协作和Skill包执行边界，上下文诊断、预设编译和动静分离归并相邻类目；UI与媒体创作的细部由独立笔记承接
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
@@ -23,7 +23,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 5. **宏系统**：实际注册 74 个内建宏（README 同期也已标示 74 个），采用 PRE_PROCESS/SUBSTITUTE/POST_PROCESS 三阶段管道（主链确认，与上下文类目交界）。
 6. **自由窗口管理**：组件级分离窗口 + logicHook 响应式同步 + 位置记忆/可见性自愈（`主链确认`）。
 7. **Agent 私有资产**：`agent-asset://` 协议、`{{assets}}` 宏和渲染器解析链（主链确认）。
-8. **Skill 沙箱**：Rust 路径锁定、超时和多运行时探测，支持渐进式披露（主链确认，执行细节已由 Agent 工具笔记承接）。
+8. **Skill 包与脚本执行**：模型按需读取指令与资源、通过 Rust 启动本机多语言脚本。脚本入口校验和超时等待已接入，执行继承宿主权限，无法据此认定 OS 沙箱或超时强制杀进程（主链确认，边界见 Agent 工具笔记）。
 9. **VCP 监控与双向桥接（vcp-connector）**：observer 消息监控、分布式节点和工具桥（入口确认；节点与桥接已由 Agent 工具笔记承接）。
 10. **Recall 思绪集**：从旧 knowledge 拆分出的"上下文即时召回"领域，采用检索管线、双 Agent 工具实例和严格占位符协议，定位为世界书的 RAG 进阶优化版（主链确认）。
 11. **正则预设堆叠工作台（regex-applier）**：预设 CRUD + 多预设按顺序叠加应用 + 一键处理，补齐正则工具类"预设复用与堆叠预设"缺口（`主链确认`）。
@@ -34,7 +34,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 16. **实时字幕 OCR（realtime-subtitle-ocr）**：GDI 截屏与本地视频抽帧 + aHash 去重 + 编辑距离字幕合并 + 编辑式工作台 + 一键注入全局 Chat（`主链确认`）。
 17. **长文本分片翻译（translator）**：递归分片 + 并发限流 + 上一分片上下文继承，上限 100 万字符（`主链确认`）。
 18. **弹幕播放器（danmaku-player）**：内置播放器（ASS/B 站 JSON/XML 弹幕 + 10 种字幕格式 + JASSUB 高保真渲染）与外部播放器透明覆盖层（Win32 窗口同步 + 虚拟时钟 + 鼠标穿透）双路径（`主链确认`）。
-19. **子智能体与后台任务中心（sub-agent + background-runtime）**：把任务委派给独立子会话的另一个 Agent，任务状态与审批由后台任务注册表维护，任务中心/伴生分栏/标题栏胶囊提供跨页面透视与叫停（`主链确认`，工具面细节在 Agent 工具笔记第 11 节）。
+19. **子智能体与后台任务中心**：同步等待或异步返回句柄的委派、独立子会话、同子会话串行车道、状态/审批透视、追加指导与叫停形成组合工作流（主链确认）。后台链仍属于主 WebView，独立 background-runtime 尚未承接 Agent runner，关主窗口后的持续执行无接线证据。
 20. **接入式输入区面板与指令系统**：输入区上方统一面板插槽承载工具、Knowledge、宏、会话、画布与输入设置，配合可自定义工具栏与斜杠指令，把跨功能入口收进同一容器（`主链确认`，界面工作流在 Chat UI 3.1/3.2）。
 
 辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
@@ -57,7 +57,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 媒体工作站 | `主链确认` | media-generator 双轨架构，本次走通完整主链 |
 | 资产管理器 | `主链确认` | Rust `import_asset_from_bytes` SHA-256 去重 + `assets.jsonl` 索引 |
 | 多运行时插件 | `入口确认` | JS/Native/Sidecar 三类（plugins/README + plugin-manager）；Agent 工具面已由 Agent 工具笔记承接 |
-| Skill 沙箱 | `主链确认` | Rust skill_manager.rs 路径锁定/超时/多运行时探测；渐进式披露 |
+| Skill 包与脚本执行 | `主链确认` | 指令/资源渐进披露与多运行时启动；入口校验与超时等待，不作进程沙箱认定 |
 | 请求检查器 | `主链确认` | llm-inspector 双层监控，内部钩子注入 fetchWithTimeout |
 | VCP 监控 | `入口确认` | vcp-connector observer 六类事件监控面板；节点/桥接已由 Agent 工具笔记承接 |
 
@@ -193,13 +193,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **证据强度**：协议解析（agentAssetUtils）、宏、渲染器三处源码 + 文档为静态事实；未运行验证 LLM 实际引用。
 
-### 能力八：Skill 沙箱（skill-manager）— `主链确认`（执行细节由 Agent 工具笔记承接）
+### 能力八：Skill 包与脚本执行（skill-manager）— `主链确认`（执行细节由 Agent 工具笔记承接）
 
-**用户目标**：按 Agent Skills 规范安装、管理、执行 Skill 包，模型按需激活（渐进式披露），脚本在本机沙箱执行。
+**用户目标**：安装、管理和执行 Skill 包，模型先发现摘要，再按需读取完整指令与资源，以减少常驻提示词体积；脚本由本机运行时执行。
 
-**完整主链**：`SkillBridgeFactory` 启动注册为 ToolRegistryFactory → `SkillLoader.scanAll`（Rust 并行扫描 `{appDataDir}/skills/` + 内置目录，YAML frontmatter 解析）→ `SkillManagerProxy`（id `skill:system`）动态生成 `activate_<name>` 方法 + `skill_run_script/skill_read_file/skill_list_dir` → LLM 调用激活 → Rust `skill_manager.rs` 执行：脚本路径必须位于 `scripts/` 子目录（防 `../` 穿越）、`current_dir` 锁定 Skill 根目录、运行时按 `bun → node → python` 探测（README 宣称"多种运行时"）、默认 60 秒超时。渐进式披露三级：元数据摘要 → 完整指令 → 资源文件按需读取（`ARCHITECTURE.md:110-120`）。安装来源支持本地/Git/URL。
+**完整主链**：工厂扫描应用技能目录和内置目录，解析 frontmatter 后把每个技能的激活入口和通用资源/脚本方法注册进统一工具目录。模型先看摘要，激活取完整指令，资源按需读取；脚本请求交给 Rust 选择相应语言运行时，参数以数组传入，工作目录设为技能根，收集 stdout、stderr、退出码和耗时返回（`skill-manager/services/SkillManagerProxy.ts`；`src-tauri/src/commands/skill_manager.rs:459-644`）。安装来源与包生命周期仍包含本地、Git、URL 及卸载/热加载面，具体交换未运行。
 
-**独特性判断**：Rust 侧强制路径沙箱 + 渐进式披露是 Agent 工具笔记已确认的边界；本笔记补全 Skill 包生命周期面（安装/卸载/热加载）。
+**执行边界**：脚本入口仅检查存在性与词法前缀，本段未先解析真实路径；工作目录也不限制脚本访问其它文件或网络。默认 60 秒限制包住等待，未找到本执行路径的进程树强制终止。多运行时按语言和平台候选选择，不能写成跨语言统一回退链。能力特点是包管理与渐进披露，不以“强隔离沙箱”计特色，执行事实详见[Agent 工具](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)。
 
 **证据强度**：ARCHITECTURE + Rust 命令 + Agent 工具笔记交叉印证；未实际运行脚本。
 
@@ -392,9 +392,20 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - **入口确认（第二梯队，未走完整主链）**：`embedding-playground`（A/B 对比/1:N 排行/多模型竞技场 + 百分位阈值校准 + RAG 检索模拟，无 Agent 暴露）；`media-info-reader`（EXIF/WebUI/PNG 三层 + AioBundle 解析，`readImageMetadata` agentCallable）；`user-profile-manager`（richTextStyleOptions/regexConfig/worldbookIds/quickActionSetIds 跨工具配置中枢，被 llm-chat 消费）；`text-diff`（Monaco diff + 拖文件自动分左右 + `generatePatch` agentCallable 生成 unified diff）；`api-tester`（REST/GraphQL/LLM 预设 + `{{variable}}` 模板变量 + SSE 渲染 + 请求档案恢复）；`config-converter`（6 格式 N×N 互转 + 有损转换警告 + 批量模式）；`data-filter`（深层路径/多键 OR/自定义 JS 条件，Agent `applyFilter` 输出 Markdown 报表）；`dir-search`（Rust 并行流式搜索 + GBK 回退 + 单项替换 preserveCase + 文件整理，Agent 搜索替换）；`directory-janitor`（Agent 可远程触发的扫描+回收站清理，删除能力下放给 Agent）；`git-analyzer`（git2-rs 原生 + 流式加载 + Agent `getFormattedAnalysis` 20 参数报告）；`color-picker`（三算法并行 + Dexie 历史 + EyeDropper 回退，图片走资产库）。
 - **确认无隐藏特性（全量扫描结论）**：`code-formatter`（纯 Prettier 静态/动态混合插件加载，不调 LLM）；`json-formatter`（无 AI 修复，sortKeys 为半成品设置）；`component-tester`（内部开发调试工具）；`symlink-mover`（双模式 + 历史日志，无跨工具面）；`system-pulse`（技术扎实的推送式仪表盘但仅页面挂载启停、无后台常驻/Agent/被引用）；`service-monitor`（只读 API 文档浏览器，无实时监听）；`wallpaper-detector`（跨平台探测但仅手动刷新）；`regex-applier` 的 Agent 面（methods 为 TODO）。
 
+### 能力二十：可观测的子智能体委派工作流 — `主链确认`
+
+**目标与入口**：父 Agent 把独立任务交给已允许被调用的目标，可等待完整结果，也可用 background 模式先拿任务与子会话句柄继续自己的回合；用户从任务中心、胶囊或伴生会话观察同一任务。它把工具、会话、人工干预和审批汇成一个工作流，工具内部契约集中见[Agent 工具第 11 节](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)，界面入口见[Chat UI](<../Chat UI/AIO-Hub-ChatUI调查笔记.md>)。
+
+**事实对象与执行**：会话保存真实对话，任务快照保存状态、执行车道、当前操作、最近活动和审批审计，conversation 索引负责复用同段子对话。background 模式创建不切换主选择的子会话，再在主 WebView 启动异步发送；同一子会话按车道串行，繁忙时任务先排队。目标可为同 ID 分身，但委派深度随上下文传递并检查上限。模型按自身或调用方绑定严格二选一，不因所选失效就改用另一组（`sub-agent/sub-agent.registry.ts:715-762,1020-1141`；`services/subAgentModelResolver.ts`）。
+
+**人机干预与持续性**：查看/追加/取消按创建者或父任务链校验；人工入口无模型 actor ID 时可操作。追加消息等当前车道结束再挂到子会话最新叶子，保存后返回 append_only，不自动启动下一轮。取消经订阅中止子会话和审批，已终态返回幂等结果。任务快照重启后把未完成项结算为 interrupted/stale，保留消息与定位，未自动恢复推理（`sub-agent.registry.ts:1304-1600`；`services/background-tasks/registry.ts:737-807`）。
+
+**证据边界**：独立 background-runtime 只响应 ping/getInfo，未连接子Agent执行器；“后台”说明当前窗口里父调用不等待与页面无关的异步链，不能推成关主窗口仍存活的进程托管。deliveryQueue 的队列/通知结构已存在，当前追加方法未把它变成安全点 steer 或自动续轮。真实取消、关闭窗口和恢复交互未运行验证。
+
 ### 归并说明：上下文分析器与正则管道
 
-- **上下文分析器**：对话请求与上下文笔记 9.8 已确认（复用真实管道预览、五视图界面在 Chat UI 6.3），标 `归并已有类目`，不重复计数。
+- **上下文分析器**：按当前配置重建的预览与有限实发快照并列。预览不启动转写；实发记录关联适配后请求投影、来源/宏/变换和上游 usage，支持请求变化与缓存诊断。记录有容量和文本可见性边界，本地公共前缀估算与 Provider 缓存报告分开。归并[对话请求与上下文](<../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md>)，不额外计数。
+- **预设组合与动静分离**：组合片段选择、动态历史锚点与工具链保护进入共享编译核心；自动工具运行环境/Recall 可移动到安全尾部，预设时间宏可冻结显示窗口，以稳定请求前缀。作者显式宏保留布局，未找到主链自动创建 cache_control 断点。归并[上下文编译与提示词工程](<../上下文编译与提示词工程/AIO-Hub-上下文编译与提示词工程调查笔记.md>)。
 - **正则处理管道**：管道内 `regex-processor`（`core/context-processors/regex-processor.ts:100`，priority 200）按角色与深度过滤规则，Global/Agent/User 三层配置合并（`resolveRawRules`），发送前清洗（如隐藏思维链）；渲染前转换（"自定义标签渲染"）在消息渲染器笔记的格式阶段。该能力是"上下文 DSL"聚类成员，与宏系统同族，但注入点与数据模型（`ChatRegexRule`）已由上下文类目完整解释，本次仅补三层合并细节，标 `归并已有类目` + 宏系统独立计数。
 - **ST 世界书管理器与运行时**：`st-worldbook-manager` 已确认本地持久化、详情编辑、JSON/`.lorebook` 与角色卡 PNG/AIO Bundle 导入、ST/AIO 导出、Agent/User Profile 绑定和跨窗口同步；`worldbook-processor` 会在真实请求中执行关键词/正则、selective、概率、扫描深度、过滤、递归、包含组、加权选择与位置注入。标 `归并已有类目（主链确认）`，由 Agent 角色笔记和上下文笔记承接，特色统计的 F03 已给 AIO 辅助贡献，故本篇不新增分数。兼容度要按“格式、编辑、运行、生态协议”四层判断：部分 ST 字段只有保存/编辑而没有消费链，部分锚点降级映射，`sticky/cooldown/delay` 则是运行时已支持而编辑器缺控件。
 
@@ -408,7 +419,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 | 世界书管理/编辑/导入导出与运行时注入 | 同上 9.2/9.6 + [`../Agent角色/AIO-Hub-Agent角色配置调查笔记.md`](../Agent角色/AIO-Hub-Agent角色配置调查笔记.md) 5.1（`st-worldbook-manager` 与 `worldbook-processor` 主链确认；ST 兼容为可执行子集，与 recall 语义召回不同层） |
 | 知识库占位符注入点 | 同上 9.6 + 上下文编译边界研究（`knowledge-processor` 已删除，由 `recall-processor` 解析 `【recall::...】` 占位符调用 `resolvePlaceholderRetrieval`；注入点归上下文类目，Recall 领域本体由本笔记能力十承接） |
 | 工具调用基础设施（含插件注册为 ToolRegistry、VCP 协议、异步任务） | [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md) |
-| Skill 工具执行细节（路径锁定/超时） | 同上第 4/7/9 节 |
+| Skill 工具执行细节（入口校验/超时等待/宿主权限） | 同上第 4/7/9 节 |
 | VCP 分布式节点与工具桥 | 同上第 7/9 节 |
 | web-distillery 的 Agent 调用面（quickFetch/smartExtract）与网络权限边界 | 同上第 4/7 节（产品面：反检测代理/API 嗅探/配方/身份由本笔记能力十四承接） |
 | aio-file-operator 安全模型（白名单/死区/审批区）与 ffmpeg 子进程边界 | 同上第 4/9 节 + 生成式输出与运行时笔记 |
@@ -432,7 +443,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 按调查指南"只有 `主链确认` 才能作为主贡献/辅助贡献进入特色统计"：
 
-- 主贡献候选（能力族，不拆小工具）：媒体工作站、资产管理器、LLM 请求检查器、快捷动作、宏系统、自由窗口、Agent 私有资产、Skill 沙箱、Recall 思绪集、Git 工作台与 AI 提交信息、正则预设堆叠工作台、网页蒸馏室、窗口自动化流程语言、实时字幕 OCR、长文本分片翻译、弹幕播放器与外部播放器覆盖层——16 个能力族达到 `主链确认`（静态证据）。
+- 主贡献候选（能力族，不拆小工具）：媒体工作站、资产管理器、LLM 请求检查器、快捷动作、宏系统、自由窗口、Agent 私有资产、Skill 包与脚本执行、Recall 思绪集、Git 工作台与 AI 提交信息、正则预设堆叠工作台、网页蒸馏室、窗口自动化流程语言、实时字幕 OCR、长文本分片翻译、弹幕播放器与外部播放器覆盖层——16 个能力族达到 `主链确认`（静态证据）。
 - 辅助贡献：VCP 监控面板（`入口确认`）、多运行时插件（`入口确认`）、内容查重器（`主链确认`但属工程机制辅助，建议单列）。
 - 机制贡献单独标注（不参与产品总分）：token-calculator（全局 Token 基础设施）、smart-ocr 平台层（OCR 引擎复用面）、ffmpeg-tools 跨工具回流链、资产管理器 Rust 索引、llm-inspector 流式节流。
 - 同一工作流合并计数：宏系统与正则管道同属"上下文 DSL"聚类，但管道正则已归并上下文类目，仅宏系统独立计数；快捷动作依赖宏引擎但不并入宏系统；正则预设堆叠工作台（regex-applier）与上下文管道 regex-processor 用户目标不同（用户工具 vs 请求清洗），独立计数；recall 与 worldbook 注入同属"上下文即时注入"族但事实对象与引擎不同（语义条目+向量引擎 vs 世界书文档+规则匹配），按能力族独立计数。

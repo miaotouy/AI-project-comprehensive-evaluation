@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。会话单位是 Topic（SQLite），消息是 adjacency-list 树（`message.parentId` 自引用外键），"切换分支"是 `active_node_id` 指针重定向而非重排树。
+Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Agent（代理会话）两个入口共用同一套"会话壳 + Composer + 消息列表"框架，但共享的是 `MessageListProvider` 类型契约而非组件树（适配器模式）。普通聊天以 Topic、Agent 以独立 Session 为单位，两侧消息分表保存父节点树与活动路径；Agent 还把产品分支绑定到原生运行时历史。切换分支移动活动指针，编辑重发可以保留旧兄弟路径。
 
 一次回复由渲染层构建请求，经 IPC `ai.stream.open` 交给主进程 `AiStreamManager` 并行执行；多模型同时回复由 N 个独立 execution 并行执行，共享 `siblingsGroupId` 做展示分组。渲染层把"数据库历史"与"未落库的流式 overlay"合并成同一段消息列表渲染。
 
 ## 产品表面与系统边界
 
 - 产品表面：Electron 桌面 GUI。renderer 为 React + SWR（仓库明确不引入全局状态库），main 为 Node + SQLite + IPC；模型生成由外部 Provider 经 AI SDK 完成。
-- Home 与 Agent 共用 `MessageListProviderValue` 契约：Home 适配器（`homeMessageListAdapter.tsx`）注入全套写操作，Agent 适配器（`agentMessageListAdapter.tsx`）只读，另有工具审批、工作区文件、terminal error 兜底等 agent 特有 action。
+- Home 与 Agent 共用消息列表契约，各自注入业务能力。Agent 也有用户消息编辑重发、兄弟分支切换与 checkpoint 复制会话，另带工具审批、工作区文件与终态兜底；详见[Chat UI 笔记 6.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)及[会话管理笔记 1.3](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)。
 - 边界：知识库范围与附件编码为消息 parts，联网搜索走 assistant 设置开关，推理强度走独立请求字段——四类 token 组织方式并不统一；工具是否启用由主进程侧模型能力判定。
 
 ## 端到端聊天主链
@@ -56,7 +56,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
 - **消息搜索为 DOM 搜索**：`utils/contentSearch.ts` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
-- **已确认缺口**："助手回复完成"系统通知开关无任何 `source:'assistant'` 调用点（空挂钩）；`message-tree.md` 的 Flow canvas "forward reference" 过时说明已更正。
+- **完成与审批通知**：主进程订阅会话事件，聚焦时发送应用内 toast、失焦时按偏好发送系统通知，点击能返回对应会话；详见[Chat UI 笔记 8.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)。
 - **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期清理由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）执行，永久删除才真正 purge；附件回收由 FileManager 引用计数 + 策略化 GC 兜底。
 
 ## 当前聊天主链补充

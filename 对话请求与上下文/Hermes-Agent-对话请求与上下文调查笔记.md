@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -14,13 +14,19 @@
 
 ## 结论摘要
 
-Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agent 核心的个人 AI 助手。桌面端不运行 agent，而是自 spawn 一个无头 hermes serve 后端进程，renderer 通过 WebSocket 发起 prompt.submit 等 JSON-RPC 调用，后端在独立线程运行对话主循环，把增量文本以 message.delta、终态以 message.complete 事件推回 UI。
+Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agent 核心的个人 AI 助手。常规桌面本地连接通过 gateway ensure 取得规范 owner，renderer 经 WebSocket JSON-RPC 提交并观察输入回执与生成事件；网关的生命期独立于桌面窗口。legacy tui_gateway 桥仍承接另一组调用，正文分别说明两种执行与恢复契约。
 
 主链路：composer → prompt.submit（WS）→ 参数契约校验与 busy 门控（`tui_gateway/methods_prompt.py`）→ 回合执行（`tui_gateway/prompt_turn.py` 的 `_run_prompt_submit`，记录 turn marker、注册流式回调、启动运行线程）→ 对话主循环（`agent/conversation_loop.py:1802` 的 `run_conversation`，组装上下文、循环调用 Provider，每个增量经流式回调回发）→ 收尾持久化 → message.complete（含 status/text/usage）。桌面端增量文本进入自适应节流队列，完成事件合并终态并触发会话列表刷新。
 
 本次快照的结构变化集中在四处：方法契约集中到 `tui_gateway/contracts/*.py` 并以 Pydantic 校验；`tui_gateway/server.py` 从约万行收缩到 1,705 行的 facade，prompt 执行、busy 处理、自动续跑、历史与压缩衔接分别落入 `prompt_turn.py`、`session_auto_continue.py`、`session_history.py`、`session_compression.py`；中断/重定向原语抽到 `agent/interrupt_control.py`；截断参数从"用户轮序号"改为优先使用持久化行 id 或消息 id。
 
 ## 系统边界与生成任务主链
+
+### 规范网关与 legacy 桥的执行边界
+
+常规桌面本地连接经 gateway ensure 取得规范 owner。其 prompt.submit 要求稳定 submission_id/input_id，授权后把输入及不可变附件写入受理账本，再安排执行；回执确认已受理，不等价于已完成。相同主体、会话、请求 id 的原样重试返回既有回执，payload 变化报 admission_conflict；排队上限为每会话 32 条（[入口](../../hermes-agent/gateway/session_controls.py#L753-L833)、[受理事务](../../hermes-agent/hermes_state_runtime.py#L130-L177)）。
+
+规范 owner 重启将旧代际 started 输入转为 unknown，后续输入暂停等待明确恢复决策；不自动重跑可能已经产生副作用的输入（[recover_session_inputs](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。下面的 methods_prompt、prompt_turn、busy 模式与中断标记细节对应 legacy tui_gateway 桥，不能直接套用为规范网关的恢复契约。
 
 一次发送的事件序列：
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -44,9 +44,9 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 ## 1. 页面结构、导航与多窗口
 
 - **应用壳**：`ChatMainApp.vue` 组合应用栏、侧栏、Spotlight 搜索浮层、路由视图与通知宿主（`src/renderer/src/App.vue:2`）；聊天工作台是路由页 ChatPage。
-- **ChatPage 布局**（`src/renderer/src/features/chat-page/ChatPage.vue:1-314`）：顶栏（标题内联重命名、项目名、子会话返回父级，`ChatTopBar.vue:52-58`）；消息滚动区（历史加载指示/错误重试、`MessageList`）；只读 interaction 区；Composer 区（`PendingInputLane`、plan/question 浮层——可合并面板或单独呈现、`ChatInputBox`、`ChatStatusBar`）；附件准备对话框 ×2（composer 发送与 retry 各一）；删除确认对话框。
+- **ChatPage 布局**（`src/renderer/src/features/chat-page/ChatPage.vue:1-314`）：顶栏（标题内联重命名、项目名、子会话返回父级，`ChatTopBar.vue:52-58`）；消息滚动区（历史加载指示/错误重试、`MessageList`）；只读 interaction 区；Composer 区（`PendingInputLane`、工具交互 dock、`ChatInputBox`、`ChatStatusBar`）；附件准备对话框 ×2（composer 发送与 retry 各一）；删除确认对话框。
 - **subagent 只读**：`isReadOnlySession` computed（:428，`sessionKind === 'subagent'`），只读时隐藏 Composer（:139）并显示 `ChatToolInteractionOverlay`（:124-136）。
-- **多窗口**：active session 按 webContentsId 绑定、IPC 定向更新按 webContentsId 过滤（`src/main/desktop/sessionBinding.ts:13-64`、`src/renderer/src/stores/ui/sessionIpc.ts:29-35`）。草稿经 localStorage 跨窗口共享，但 busy/streaming 等运行时状态为窗口内内存，本次未找到跨窗口同步机制（数据侧结论见会话与消息管理笔记 §5；检查范围：renderer stores 与 sessionIpc）。
+- **多窗口**：活动会话按 webContentsId 绑定，激活事件只由目标窗口处理。完整流式内容定向发给绑定该会话的窗口，其余窗口通过轻量 activity 信号使最近会话缓存失效；会话状态另经带版本事件同步。窗口内仍各自持有消息缓存和草稿镜像（`src/main/events/sessionEventRouter.ts:78-95,160-179`、`src/renderer/src/stores/ui/messageIpc.ts:230-245`）。
 
 ## 2. 会话列表、搜索与现场恢复
 
@@ -85,7 +85,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
   活动 queue 项上限为 10；UI 的可用槽位与主进程 `MAX_PENDING_INPUTS` 使用同一容量语义（`src/shared/pendingInput.ts:2`、`src/main/session/data/pendingInputs.ts:474`）。
 
-  动作 `onPendingInputResume/Retry/Steer/Resolve` 在 `usePendingInputActions.ts:57-143`（resume :77-96、retry :98-117）。
+  resume 对应重启后被 hold 的 pending 队列；逐项 retry 对应运行失败后释放的 retry_required 项，两个按钮不会互相替代。动作绑定见 `usePendingInputActions.ts:57-143`，主进程条件见 `pendingInputAdmissionCoordinator.ts:433-494`。
 - **流式反馈**：消息列表随 IPC 增量更新（renderer message store 与 `messageIpc.ts` 的 stream 注册表，见会话与消息管理笔记 §6）；`useDisplayMessages` 用稳定 render key 把占位/流式行与落盘消息关联（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:339-355`、:367-438）；rate-limit 临时块在列表尾部内联呈现（`ephemeralRateLimitBlock`，:235-250）。
 - **停止**：`onStop`（`ChatPage.vue:1346-1374`）→ `chatClient.stopStream`（失败 toast），停止中状态 `stoppingSessionIds` 防重入；执行层 abort 链见对话请求与上下文笔记 §7。
 
@@ -97,7 +97,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - **delete**：`onMessageDelete`（:167-170）打开 `DcConfirmDialog` 确认（`ChatPage.vue:302-312`），确认后 `confirmMessageDelete`（:172-200）调用 `deleteMessage` 并重载会话（执行语义：从目标消息起截断，对话请求与上下文笔记 §7）。
 - **edit**：`onMessageEditSave`（:212-225）调用 `editUserMessage` 后**自动跟随 retry**（编辑即重发的工作流）。
 - **fork**：`onMessageFork`（:227-237）创建 forked 会话后自动切换并刷新列表（数据语义：复制到新会话，会话与消息管理笔记 §1.5）。
-- **continue**：`onMessageContinue`（:239-241）复用 retry（非阻塞式）；本次未找到独立"续写"入口。
+- **continue**：续写动作向当前会话追加一条本地化的用户指令，再进入普通发送链，保留原 assistant 历史；它和重试的破坏性截断具有不同语义。只读、阻塞性交互及同会话重复操作会阻止提交（`useMessageActions.ts:286-304`）。
 - **manual compaction**：`/compact` slash 命令（`useComposerSubmit.ts:952-996`），ACP 会话不可用、生成中不触发。
 - **trace**：`onMessageTrace`（`ChatPage.vue:1376-1378`）打开 `TraceDialog`（:281）。
 - 只读（subagent）会话下上述动作全部跳过（各函数首行 `isReadOnlySession` 检查）；分支树/版本导航界面（兄弟版本列表等）本次未在 ChatPage 找到（检查范围：ChatPage 模板与 useMessageActions）。
@@ -106,7 +106,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 
 - 多会话靠侧栏列表 + 单页面切换；同一会话串行（队列 lane），steer 打断当前 turn（工具栏 steer 按钮 + lane 内 steer 动作）。
 - 多模型：会话级模型切换器（§4）；发送前对不支持音频/视觉的模型做能力过滤与提示（`useComposerSubmit.ts:399-418` 音频过滤；视觉能力判定 `ChatPage.vue:1145-1154` `composerSupportsVision`）。
-- 子 Agent：subagent session 只读呈现（§1），plan 浮层与 question 面板在父会话以浮层显示（`ChatPage.vue:166-209`）；工具审批的待处理浮层由 `useToolInteraction`（:1102-1115）驱动。
+- 子 Agent：subagent session 只读呈现（§1）；父会话的 question、审批等待处理交互进入统一交互 dock，独立 plan 浮层未接入当前 ChatPage（`ChatPage.vue:168-227`）。
 - 后台生成（窗口外继续运行 + 返回入口）：本次未找到独立界面机制（检查范围：ChatPage、WindowSideBar、通知宿主）。
 
 ## 8. Chat UI 状态所有权与同步
@@ -122,7 +122,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
   - 状态字段：`items`、`resumeAvailable`、`loading`、`resumingSessionId`、`retryingItemId`；
   - 路由：`listPendingInputs` 返回 `{ items, resumeAvailable }`（`src/main/session/routes.ts:247-259`）。
 - **草稿**：feature 内 `composerDraftState` + localStorage（§3）。
-- **plan**：`agentPlanStore`（`ChatPage.vue:406` 实例化，导入 :350）按会话存 plan 快照与折叠状态，plan 浮层生命周期 `usePlanFloatLifecycle`（:1117-1131）。
+- **交互浮层**：当前挂载 `ChatInteractionDock`，消费待处理工具交互与 ACP elicitation；它和回到底部提示位于输入区上方。模板仍留有 plan/question 的历史注释，但当前脚本没有独立 plan store 接线（`ChatPage.vue:203-227`）。
 - **切换会话**：清 pendingInput（:993）、切换草稿（:976）、清搜索状态（:977）、重置 display 缓存（:978）、保存/恢复测量快照（:970-972、:984-988）、清其他会话流式状态（:989）；恢复 epoch 贯穿所有异步写（§2）。
 - **重启恢复**：草稿从 localStorage 恢复；重启后 held 队列项经 `resumeAvailable` 呈现 resume 按钮（§5）。
 
@@ -148,7 +148,7 @@ ChatMainApp（应用壳：WindowSideBar + RouterView + Spotlight + 通知宿主�
 - 视觉效果、动画、焦点顺序、键盘可用性与响应式行为未运行验证；本次未运行测试、构建或桌面端交互，结论来自 renderer 静态源码（静态代码只能确认控件与事件绑定）。
 - 系统通知（完成/错误通知）的实际呈现与点击返回行为未运行验证。
 - Spotlight 搜索弹窗的交互细节（结果列表、分组）静态确认入口，未运行。
-- 多窗口 busy/streaming 同步不存在（未找到实现），未验证真实多窗口行为。
+- 多窗口的定向流、轻量 activity 与状态版本链已静态确认；真实多窗口切换、断连和重新绑定时序未运行验证。
 - 消息操作按钮在 `MessageListRow` 中的可见/禁用规则属消息渲染器装配，未在本笔记展开验证。
 
 ## 12. 关键源码索引

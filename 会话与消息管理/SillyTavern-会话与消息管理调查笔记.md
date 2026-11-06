@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
@@ -157,7 +157,7 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 2. 保存后向触发消息 `extra.branches` **数组**追加分支文件名（233-241），可一条消息开多个分支；
 3. `branchChat` 保存成功后**必定跳转**（`openGroupChat`/`openCharacterChat`，462-466），与 checkpoint 不跳转形成对照。
 
-新建分支与 checkpoint 都会在新文件的头元数据里生成新的 `integrity` slug（`public/scripts/bookmarks.js:201,284`），使子文件与父聊天在并发覆写校验上相互独立，不再沿用父聊天的完整性标识。
+新建分支与 checkpoint 都会在新文件的头元数据里生成新的 `integrity` slug（`public/scripts/bookmarks.js:201,284`），使子文件与父聊天有独立文件身份；这不提供子文件每次保存的版本递增或同文件并发冲突检测。
 
 两者都不支持"合并回主线"：回到主聊天只能靠 `/checkpoint-exit`（`backToMainChat`，bookmarks.js:312-326）依赖 `chat_metadata.main_chat` 手动切文件，没有树状导航。分支/checkpoint 全部入口（旗标、Swipe Picker、`/branch-create`、`/checkpoint-create` 等 slash command）最终汇到 `createBranch`/`createNewBookmark`。
 
@@ -171,7 +171,7 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 ## 6. 缓存、一致性、多窗口与并发写入
 
 - **防抖与串行**：`saveChatConditional` 用 `isChatSaving` 互斥（9354-9363）；`saveChatDebounced` 1000ms 防抖且带 chid/group 变更守卫（7308-7317）；`swipe()` 开始时 `cancelDebouncedChatSave()` 防过期写入覆盖 swipe_id（9932-9933）。
-- **跨窗口/多端**：无实时同步。保护机制是服务端 integrity 比对 + 前端 `OVERWRITE` 强制覆盖流程（`public/script.js:7394-7416`，群聊同款 `group-chats.js:644-669`）。两个标签页各自持有自己的 `chat_metadata.integrity`（加载时缺失才生成），后保存者若文件已被对方改写则被拒。该校验还覆盖"非空但首行无法解析为头对象"的文件（损坏或截断、含 BOM 时先剥离）：此时不视为通过，而是返回需要 explicit overwrite 确认，避免静默覆盖损坏文件（`src/endpoints/chats.js:337-365`）。
+- **跨窗口/多端**：本次检查聊天保存与加载入口未发现实时同步。服务端比对文件头与请求中的 `integrity` slug，不匹配时进入手输 `OVERWRITE` 的覆盖流程；它还会拒绝非空但无法解析头对象的文件。该标识在缺失时生成，普通保存直接沿用，branch/checkpoint 才另发新标识。两个标签页加载同一正常文件会取得相同 slug，先后正常保存不会因内容变化而冲突，因此这属于文件身份/完整性检查，不能当作逐次版本号或覆盖所有同文件并发写入的乐观锁。见 [服务端比对](../../SillyTavern/src/endpoints/chats.js#L337-L369)、[写入条件](../../SillyTavern/src/endpoints/chats.js#L532-L542)、[前端保存与覆盖入口](../../SillyTavern/public/script.js#L7395-L7475)。
 - **加载期间的写保护**：`openCharacterChat` 等待 `!isChatSaving` 才清空（7686）；`selectCharacterById` 在保存中拒绝切换（878-881）。
 - **流式临时状态**：流式生成把文本逐 token 写内存 `chat[messageId].mes`（`StreamingProcessor.onProgressStreaming`，3624），只有流结束才 `saveChatConditional`（3756）；中途停止/错误不落盘半截消息。`beforeunload` 只 `onStopStreaming()` 不做保存（12401-12407）。
 - **IndexedDB 一致性**：itemized prompts 在 `clearChat` 时先存后清（1599-1600），`deleteItemizedPromptForMessage` 负责下标移位（`itemized-prompts.js:389-398`），与消息删除同点调用。
@@ -204,7 +204,7 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 ## 9. 设计取舍与已确认边界
 
 - **整份读写、无分页、无索引**：文件一次性读入内存和 DOM，长聊天读写/渲染成本线性增长；checkpoint 定位靠全数组扫描；消息 ID 靠数组下标，删除后需全局 `updateViewMessageIds` 维护 DOM 一致性。
-- **integrity 防并发覆写**：以"弹窗手输 OVERWRITE"换取多标签页/多设备数据安全，交互代价高；跨窗口实时同步不存在。
+- **完整性标识与覆盖确认**：标识不一致或文件头损坏时要求显式覆盖；相同标识下的旧窗口保存仍可能覆盖新内容，本轮未实测多标签页竞争。
 - **checkpoint/branch 不对称**：单值覆盖 vs 数组追加，是有意的数据设计差异（4.1/4.2）。
 - **群聊与单聊的"重新生成"是两套机制**：
   - 单聊：swipe 保留候选（`swipes` 数组）；

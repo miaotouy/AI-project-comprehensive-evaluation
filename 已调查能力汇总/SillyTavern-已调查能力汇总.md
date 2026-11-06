@@ -2,7 +2,7 @@
 
 > 汇总对象：`SillyTavern`
 >
-> 汇总更新日期：2026-09-16
+> 汇总更新日期：2026-11-05
 >
 > 依据：Agent工具、Agent角色、Chat、Chat UI、LLM渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排、媒体创作共 15 份 SillyTavern 调查笔记（代码快照均为 `06bde939`，分支 `release`）
 >
@@ -37,13 +37,13 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 + Node 服务�
 
 - **角色卡格式体系（V1/V2/V3）**：角色即遵循 Tavern Card 规范的角色卡，提示词分描述/人格/场景/示例/系统提示/历史后指令等多个语义字段，`extensions` 为开放扩展点，`character_book` 可内嵌世界书；支持 PNG（tEXt 嵌入）/JSON/CharX/BYAF 导入与 V1 自动升级。来源 [Agent 角色配置调查笔记](../Agent角色/SillyTavern-Agent角色配置调查笔记.md)。
 - **开场白生命周期**：`first_mes` 与 `alternate_greetings` 在创建会话时实例化为消息与 swipes，首次生成后 `tainted` 固化、不再跟随角色卡修改，备选以 swipe 呈现且无"重新选择 greeting" UI。来源 [Agent 角色配置调查笔记](../Agent角色/SillyTavern-Agent角色配置调查笔记.md)。
-- **World Info（世界书）**：按关键词/次级词/constant/selective 触发、支持递归扫描与 position/depth 注入，与角色卡 `character_book` 共享结构；条目激活可经 `automationId` 触发 Quick Reply，形成"内容驱动代码执行"的旁路。来源 [Agent 角色配置调查笔记](../Agent角色/SillyTavern-Agent角色配置调查笔记.md)。
+- **World Info（世界书）**：按关键词/次级词/constant/selective 触发、支持递归扫描与 position/depth 注入，与角色卡 `character_book` 共享结构；条目激活可经 `automationId` 匹配已配置的 Quick Reply 集；自动化受扩展启用和防递归状态控制。角色卡还可携专属正则，角色允许列表决定其是否参与处理。来源 [Agent 角色配置调查笔记](../Agent角色/SillyTavern-Agent角色配置调查笔记.md)。
 - **User Persona**：独立于角色卡的运行时用户设定（名称与描述注入提示词），同一角色卡可配合不同 Persona 使用，不写入角色卡。来源 [Agent 角色配置调查笔记](../Agent角色/SillyTavern-Agent角色配置调查笔记.md)。
 - **记忆与作者注释（浮层提示注入）**：memory 扩展以静默生成产出摘要文本并经 `{{summary}}` 模板注入；作者注释（Author's Note）是独立的 floating-prompt 模块（`2_floating_prompt`），支持间隔/深度/位置/角色参数并经 `/note` 命令读写、随 `chat_metadata` 持久化。来源 [对话请求与上下文调查笔记](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)、[独特功能调查笔记](../独特功能/SillyTavern-独特功能调查笔记.md)。
 
 ### 会话与消息
 
-- **聊天会话存储模型**：运行时事实源是内存 `chat: ChatMessage[]` 与 `chat_metadata`，经整份序列化写入 JSONL 文件（单人/群聊两套目录布局），加载一次整读、无分页无索引；保存带 `integrity` 防并发覆写检查，冲突需手输 `OVERWRITE`。来源 [Chat 调查笔记](../Chat/SillyTavern-Chat调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)。
+- **聊天会话存储模型**：运行时事实源是内存 `chat: ChatMessage[]` 与 `chat_metadata`，经整份序列化写入 JSONL 文件（单人/群聊两套目录布局），加载一次整读、无分页无索引；保存比对稳定 `integrity` 文件身份，标识不符或头损坏时需手输 `OVERWRITE`；同标识的两个旧窗口仍可先后覆盖，未构成逐次版本乐观锁。来源 [Chat 调查笔记](../Chat/SillyTavern-Chat调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)。
 - **Swipe 候选版本机制**：`mes`/`swipe_id`/`swipes`/`swipe_info` 四字段并行表达消息多版本，`ensureSwipes` 惰性补齐老文件，双向同步职责分离；越界行为有四档模式（REGENERATE/LOOP/PRISTINE_GREETING/NONE），Swipe Picker 是唯一"从候选开分支"的 UI 入口。来源 [会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)。
 - **Checkpoint 与 Branch**：两者共用"截断另存为新文件"底层；checkpoint 不跳转、`extra.bookmark_link` 单值覆盖；branch 必定跳转、`extra.branches` 数组追加并支持连同指定 swipe 截断；回到主聊天只能靠 `/checkpoint-exit` 手动切文件，无树状导航。来源 [会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)。
 - **聊天 CRUD、列表与搜索**：新建/重命名/删除/恢复走服务端聊天端点，最近聊天列表扫描三处目录按 mtime 排序，搜索在单个角色的聊天目录或单个群组范围内按词过滤；跨角色全局搜索未覆盖，见末尾小节。来源 [会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)。
@@ -57,7 +57,7 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 + Node 服务�
 - **生成主链 Generate()**：`sendTextareaMessage` → `Generate` → 历史筛选（隐藏消息排除、工具调用例外）→ 逐条正则/附件/标题处理 → 角色字段与系统提示 → World Info 注入 → 生成 interceptors → 按 API 分支拼装 → token 预算裁剪 → 流式/非流式请求 → 收口落盘；slash command 可在生成函数最前面整体劫持短路。来源 [对话请求与上下文调查笔记](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)。
 - **消息渲染与富文本管线**：`messageFormatting()` 依次执行宏替换、正则、Markdown（Showdown）、DOMPurify 净化与 `<custom-style>` 作用域改写；正文格式化另有 `MessageFormatter` 三阶段扩展钩子（正则前后与 Markdown 转 HTML 后，均在净化前）；`extra.display_text` 提供"源文本 ↔ 显示投影"双视图，reasoning 与媒体走独立旁路 DOM；历史渲染是截断式分页（默认 100 条）而非虚拟列表。来源 [消息渲染调查笔记](../消息渲染器/SillyTavern-消息渲染调查笔记.md)。
 - **流式渲染与反馈**：主聊天走 `StreamingProcessor`（默认 30 FPS 节流，每帧对累计全文整段重渲），流式收尾才补代码高亮与事件；`streaming-display.js` 是脱离主聊天的独立浮层（仅 `/profile-genstream` 使用）；生成反馈另有 Action Loader 的 STOPPABLE toast 与 `body[data-generating]` 全局状态位。来源 [消息渲染调查笔记](../消息渲染器/SillyTavern-消息渲染调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)。
-- **Agent 工具（函数调用）**：ToolManager 维护浏览器侧工具注册表，模型可发现并触发已注册工具，`tool_choice` 固定 `'auto'`，内置工具仅 Stable Diffusion 的 GenerateImage 一个，`/tools-register` 可把任意 STscript closure 注册为模型可调用的工具；调用循环无逐次审批、参数无 JSON Schema 校验且执行在浏览器主线程、无沙箱隔离；删除助手消息时默认连带清理其前的工具调用消息（`/cut`、`/del` 可用 `toolcalls` 关闭），相关边界见末尾小节。来源 [Agent 工具调查笔记](../Agent工具/SillyTavern-Agent工具调查笔记.md)。
+- **Agent 工具（函数调用）**：ToolManager 维护浏览器侧工具注册表，模型可发现并触发已注册工具，`tool_choice` 固定 `'auto'`，内置工具仅 Stable Diffusion 的 GenerateImage 一个，`/tools-register` 可把任意 STscript closure 注册为模型可调用的工具；调用循环无逐次审批、参数无 JSON Schema 校验且执行在浏览器主线程、无沙箱隔离；删除助手消息时默认连带清理其前的工具调用消息（`/cut`、`/del` 可用 `toolcalls` 关闭），普通工具的参数解析或执行错误会形成带错误标记的调用记录，保存后回注模型并可继续生成，stealth 另走终止语义；相关边界见末尾小节。来源 [Agent 工具调查笔记](../Agent工具/SillyTavern-Agent工具调查笔记.md)。
 - **输出对象模型与运行环境边界**：模型输出只有"聊天气泡文本"一种对象形态，`extra` 是开放元数据袋，支持 Markdown + 受限 HTML/CSS（DOMPurify 净化）与代码高亮；artifact/canvas/notebook/沙箱等输出运行环境不存在，也无对模型文本的代码执行，见末尾小节。来源 [生成式输出与运行时调查笔记](../生成式输出与运行时/SillyTavern-生成式输出与运行时调查笔记.md)。
 - **Stable Diffusion 聊天绑定创作**：画笔菜单、消息级画笔、`/imagine` 和可选 `GenerateImage` 工具共用生成链，结果写入本地媒体文件并作为聊天消息的 `extra.media` 附件保存；消息级重生可追加媒体候选，工具调用可把 URL 回注模型。媒体历史依附聊天消息，不是独立任务或资产库。来源：[媒体创作调查笔记](../媒体创作/SillyTavern-媒体创作调查笔记.md)。
 - **停止、重试、续写与重新生成**：停止走 `stopGeneration`（保留下半截内存消息、abort 网络），重新生成单聊删尾新建、群聊按 `gen_id` 删尾，续写为纯文本追加；统一自动重试与 `/retry` 命令不存在，见末尾小节。来源 [对话请求与上下文调查笔记](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)。

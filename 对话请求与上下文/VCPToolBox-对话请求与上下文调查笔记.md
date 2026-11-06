@@ -2,19 +2,19 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
 > 调查方式：直接阅读源码：server.js 聊天端点与 /v1/interrupt、routes/protocolBridge.js 协议归一化、modules/chatCompletionHandler.js 请求管线、contextManager.js、messageProcessor.js、roleDivider.js、vcpLoop/toolCallParser.js、handlers/streamHandler.js 与 nonStreamHandler.js、reasoningContentAdapter.js、vcpInfoHandler.js，以及 Plugin/VCPTavern、RAGDiaryPlugin、VCPTimeLine、ContextFoldingV2、OneRing 的 processMessages
 >
-> 调查范围：一次请求内"客户端历史 → 最终上游 messages → 工具递归 messages"的完整编排：入口归一化、上下文裁剪、预处理器、VCP 工具循环、推理字段分叉、停止与重试；会话事实源不归 VCPToolBox 所有（见会话与消息管理笔记）
+> 调查范围：一次请求内"客户端历史 → 最终上游 messages → 工具递归 messages"的完整编排：入口归一化、上下文裁剪、预处理器、VCP 工具循环、推理字段分叉、停止与重试；客户端会话与 OneRing 插件消息持久化的边界见会话与消息管理笔记
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终上游 messages → 工具递归 messages"编排能力；它不拥有会话列表、消息编辑/删除/分支或跨请求恢复（数据边界见会话与消息管理笔记）。本次重新核实的主要结论：
+VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终上游 messages → 工具递归 messages"编排能力；客户端持有会话导航与分支，OneRing 可另行保存插件消息历史并支持重试更新（数据边界见[会话与消息管理](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)）。本次重新核实的主要结论：
 
 - **入口归一化**：OpenAI Chat / Chatvcp / Responses / Anthropic / Gemini 五种协议收敛到同一条主链（`/v1/chat/completions`，`server.js:1217`）；
 - **编排是"原地改写消息数组"**：`ChatCompletionHandler.handle()` 对入站 body 原地处理，复制、重排、展开、注入和裁剪，最终把处理后的消息写回 `originalBody.messages`（`modules/chatCompletionHandler.js:1124`）；
@@ -67,11 +67,15 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 4. 优先执行 `VCPTavern`。触发器 `{{VCPTavern::Preset...}}` 只从 system 查找（`Plugin/VCPTavern/VCPTavern.js:239-250`），触发器本身及其他消息中的同名残留会被删除（291-310）；预设按 embed → relative → depth 注入，relative/depth 可插入新的消息对象，并可解析 `{{LastChatTime}}`/`{{TimeSinceLastChat}}` 会话时间变量（`Plugin/VCPTavern/VCPTavern.js:419-580` 注入、314-388 时间追踪）。
 5. 若请求模型是语义路由模型，使用 Tavern 注入后的消息选出真实后端模型，再应用模型重定向和思维开关（`modules/chatCompletionHandler.js:911-947`；语义路由实现见 `modules/semanticModelRouter.js`）。
 6. 逐条深拷贝消息并执行变量解析（972-1021）。只有 `system`，或以 `[系统提示:]` / `[系统邀请指令:]` 开头的 user，才有权限展开 Agent/Toolbox（`modules/messageProcessor.js:153`）；整个请求只展开一个 Agent，同名 Toolbox 只展开一次（166-206、208-248）。随后处理时间、环境、SAR、日记/知识库、动态工具、插件描述等其他占位符（`modules/messageProcessor.js:601-871`，SAR 注入 606-674，动态工具与 VCPAllTools 803-812）。
-7. 按配置调用多模态预处理器（`MultiModalProcessor` 优先，否则 `ImageProcessor`），再遍历其余插件 messagePreprocessors（`modules/chatCompletionHandler.js:1023-1061`）。预处理器注册顺序以 `preprocessor_order.json` 中的已知顺序优先，未列出的插件按名称排序追加（`Plugin.js:881-904`，`Array.sort()` 在 899）。当前保存顺序（`preprocessor_order.json`）：
+7. 除已优先执行的 VCPTavern 外，按保存的预处理顺序遍历真实插件与静态注入虚拟阶段。多模态处理器优先选择 MultiModalProcessor，否则选择 ImageProcessor，且仅在媒体条件满足时执行。当前顺序为：
 
-   - VCPTavern → ImageProcessor → RAGDiaryPlugin → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2
+   ```text
+   VCPTavern → CapturePreprocessor → $StaticPlaceholderInjection
+     → ImageProcessor（或选定的 MultiModalProcessor）→ MemoryThinkingTray
+     → RAGDiaryPlugin → VCPTimeLine → OpenHerPersona → OneRing → ContextFoldingV2
+   ```
 
-   因此插件可能修改原消息内容、插入消息，或仅挂载数组元数据。
+   捕获阶段在动态文本注入之前，托盘在检索和时间线之前；插件可改写内容、插入消息或挂载元数据。执行位置见 `modules/chatCompletionHandler.js:1083-1124`，保存顺序见 `preprocessor_order.json:1-12`。
 8. 后置处理分两步：
    - **检测器**：执行 Detector/SuperDetector（`modules/messageProcessor.js:575-599` 的 `applyDetectorsToMessages`）；
    - **Role Divider**：按开关运行（`modules/chatCompletionHandler.js:1109-1121`，skipCount=1 跳过首条），识别 `<<<[ROLE_DIVIDE_SYSTEM/ASSISTANT/USER]>>>` 标签拆出新消息，并保护 `TOOL_REQUEST` 与 DailyNote 标记块不被拆开（`modules/roleDivider.js:11-27` 标签、101-121 保护块、383-399 process）。
@@ -79,7 +83,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 
 ## 3. 预算、截断与压缩：RAG、时间线与折叠在消息中的实际形态
 
-这些能力不是独立的"会话消息表"，而是预处理器对本次数组的改写：
+以下路径直接改写本次请求数组；其中 OneRing 另有 SQLite 消息和回合持久化，详见[会话与消息管理](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)：
 
 - `RAGDiaryPlugin` 只处理 system 或虚拟 system user（以 `[系统xxx]` 开头）中的日记本/知识库占位符（`Plugin/RAGDiaryPlugin/RAGDiaryPlugin.js:1135` 入口、1168-1215 载体识别、1217-1220 无占位符早退）；查询向量来自最近真实 user 与最近 assistant 的加权内容（1222-1240），命中召回后替换占位符，必要时收集多模态附件（1367-1403 替换循环、1405-1419 附件）。
 - `VCPTimeLine` 找到首个可信 system/系统前缀 user 中的时间线占位符，只接受一次声明，把时间线文本替换到该占位符，其余同名占位符清空（`Plugin/VCPTimeLine/VCPTimeLine.js:372-416`）。
@@ -138,12 +142,12 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **流式收口**：正常结束时回发 `finish_reason=stop` chunk + `[DONE]`（`streamHandler.js:442-461`）；SSE 转发带 5 秒幽灵心跳（242-250）与 90 秒 chunk 空闲超时保护（252-282，超时回发"[上游响应超时，流已中断]"并强制结束）；abort 时直接销毁上游 body 并结束（285-291）。
 - **非流式收口**：把 `conversationHistoryForClient`（AI 正文 + VCP 信息块拼接）写回初始 JSON 的 `choices[0].message.content`（`nonStreamHandler.js:565-583`），`finish_reason` 按循环是否触顶置 `length/stop`。这个回写只发生在内存响应体里，不会持久化，也不回写模型上下文。
 - **上游错误代理**：流式请求上游非 200 时，服务端回 200 并把错误文本作为 SSE chunk 流给客户端（`chatCompletionHandler.js:1187-1248`），避免前端监听器终止；连接失败/重试耗尽同样以 SSE chunk 报错（1307-1333）。
-- **快照与日志**：首次请求前快照入 `finalContextStore`（1142-1148）；ChatLog 可选落盘（见 4.2）。服务端不写回任何会话/消息存储（见会话与消息管理笔记）。
-- **交互结算的提交条件**：本轮交互对 OneRing、VCPTavern 等模块的落库结算被统一到 `modules/handlers/interactionCompletion.js`，只有上游整轮有效且响应正常 finish 才提交；上游错误、客户端中断或半截流都只结算当前 pending turn，不把不完整的回合写成历史。这改变的是“什么时候算一轮完成”的判定，不改变服务端不持久化会话的边界（`modules/chatCompletionHandler.js:1214,1378,1479`）。
+- **快照与日志**：首次请求前快照入 `finalContextStore`（1142-1148）；ChatLog 可选落盘（见 4.2）。OneRing 的消息持久化由下述交互结算路径另行处理。
+- **交互结算的提交条件**：OneRing 的最终 AI 回复及 VCPTavern 访问记录只有在上游整轮有效、HTTP 响应正常 finish 后才异步提交；上游错误、客户端中断或半截流会将当前 pending 回合结算为 aborted。OneRing 在预处理阶段还可记录请求携带的历史，因此该提交条件不覆盖所有数据库操作，也不构成整轮事务回滚（`modules/handlers/interactionCompletion.js:3-60`；`Plugin/OneRing/OneRing.js:1047-1092,3077-3088`）。插件的持久化消息边界见[会话与消息管理](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
 ## 7. 消息构建边界与已确认边界
 
-- 已确认：VCPToolBox 在单次 HTTP 请求内拥有完整的"请求历史 → 最终上游 messages → 工具递归 messages"编排能力；不拥有会话列表、消息编辑/删除/分支或跨请求恢复。`finalContextStore` 是调试快照，ChatLog 是可选审计文件，均不是前端会话存储。外部 VCPChat、OpenWebUI 或其他客户端必须自行保存并在下一次请求中重新提交历史。
+- 已确认：VCPToolBox 在单次 HTTP 请求内拥有完整的"请求历史 → 最终上游 messages → 工具递归 messages"编排能力；客户端会话导航与分支外置，OneRing 则可持久化插件消息与回合状态。`finalContextStore` 是调试快照，ChatLog 是可选审计文件。外部 VCPChat、OpenWebUI 或其他客户端必须自行保存并在下一次请求中重新提交历史。
 - 上游事实源：最终请求体以 `finalUpstreamBody = { ...originalBody, stream: willStreamResponse }` 为准（`chatCompletionHandler.js:1139-1140`），其中 messages 已是处理后的数组；工具递归轮的请求体是 `{ ...originalBody, messages: currentMessagesForLoop, stream: true }`（`streamHandler.js:539`、709）。
 - 与 Agent/工具的边界：Agent 人格与工具权限的配置面在 AdminPanel-Vue（Agent & 内容分组），但管理面板不参与单条聊天消息的收发；工具执行、审批、循环内部语义见 `../Agent工具` 类目笔记。
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-- **会话单位是 Topic**（`src/shared/data/types/topic.ts`），存储在 SQLite，由 `TopicService`（`src/main/data/services/TopicService.ts`）管理 CRUD。
+- **普通聊天以 Topic 为单位，Agent 以独立 Session 为单位**；两侧分表存储在 SQLite，均有活动路径与父节点消息树，Agent 还保存原生上下文绑定与 fork checkpoint（见 1.3）。
 - **消息不是线性数组，而是 adjacency-list 树**（`message.parentId` 自引用外键，`ON DELETE CASCADE`），由 `MessageService`（`src/main/data/services/MessageService.ts`）维护；`docs/dev/references/chat/message-tree.md` 是这棵树的权威文档——本次核实文档与当前代码一致（虚拟根、awaiting-input 分支、删除语义、consumer contract 均与实现对应）。
 - 新建 Topic 的同一写事务里就会创建一条虚拟根消息（`createRootMessageTx`），不存在"没有根消息的 Topic"这种中间态；"空 Topic"是运行时按消息条数判定的，与虚拟根是否存在无关。
 - **"切换分支"不是重排树**，而是把 `activeNodeId` 指针指到目标分支的叶子；前端看到的"当前分支的完整对话"每次从 `activeNodeId` 反向 walk 到根（`getPathRowsToNodeTx`，虚拟根被排除）。
@@ -73,6 +73,14 @@
   - `delete()`对虚拟根直接抛 `INVALID_OPERATION`；非 cascade 删除先把子节点 reparent 到祖父节点再删本节点（`reparentChildrenTx` 会给被移动的兄弟组重分配组号，避免与目标父节点下既有组碰撞）；首轮消息可正常删除（子节点挂回虚拟根）。
   - `deleteReplyGroup`只删同组 assistant 兄弟并把各组直接子节点 reparent 到共享用户消息下；组内任一回复 `pending` 时拒绝删除。
   - `clearTopicMessages`清空一个 topic 的所有内容消息，但保留虚拟根并清 `activeNodeId`。
+
+### 1.3 Agent Session：独立消息树与原生上下文
+
+Agent Session 与普通 Topic 分表存储，不能把 Topic 的所有操作套用到 Agent。Agent 消息表也有父节点与每会话唯一虚拟根，Session 行持有活动节点；选中兄弟消息时向下取该分支最新叶子并更新指针。消息另存原生上下文绑定、输入 ID、恢复令牌与运行时 checkpoint，用于让产品消息路径对应到各 runtime 的历史。依据：[agentSessionMessage.ts:12–69](../../cherry-studio/src/main/data/db/schemas/agentSessionMessage.ts#L12-L69)、[AgentSessionMessageService.ts:478–518](../../cherry-studio/src/main/data/services/AgentSessionMessageService.ts#L478-L518)。
+
+用户消息的“编辑并重发”保留旧分支：主进程校验目标仍在活动路径、属于普通交互输入，并以历史快照版本拒绝过期提交；运行中、后台活动、审批或关闭未完成时拒绝编辑。编辑操作关闭原连接，发布对应原生历史，再把活动指针选回被编辑输入的前驱，在同一 Session 新建兄弟用户消息与 assistant 占位，然后启动生成。它与直接改写已存消息正文的保存操作有不同语义。依据：[AgentSessionRuntimeService.ts:387–440](../../cherry-studio/src/main/ai/agentSession/AgentSessionRuntimeService.ts#L387-L440)、[AgentSessionMessageService.ts:520–564](../../cherry-studio/src/main/data/services/AgentSessionMessageService.ts#L520-L564)、[AgentChatContextProvider.ts:328–361](../../cherry-studio/src/main/ai/streamManager/context/AgentChatContextProvider.ts#L328-L361)。
+
+“复制为新会话”另外创建 Session：按选中消息的 checkpoint 调用 runtime fork，复制工作区文件与原生历史后才事务发布子会话及消息前缀。相同源会话/锚点的并发 fork 共用在途操作；临时资源有恢复与清理记录。检查范围覆盖 fork 的准备、原生发布与数据库提交，未实际运行跨 runtime 恢复或复制大工作区。依据：[AgentSessionForkOperations.ts:37–57,200–300](../../cherry-studio/src/main/ai/agentSession/fork/AgentSessionForkOperations.ts#L37-L57)。
 
 ## 2. 事实源、索引与持久化
 
@@ -243,11 +251,11 @@
   - 知识库范围：`data-knowledge-scope` part，访问器见 `uiParts.ts:348`（`withKnowledgeScopePart`、`getKnowledgeBaseIdsFromParts`）；
   - "清理上下文"边界：`data-clear` part（`createClearContextPart`/`hasClearContextPart`），消息渲染时携带 `isContextBoundary`（`MessageService.ts`）。
 - **多模型**：`siblingsGroupId` 与 `modelId` 是消息级绑定字段（读侧按 `(siblingsGroupId, modelId)` 分桶，见 4.2）；"这次用哪些模型"本身是请求参数，不持久化在 topic 行（发送前配置见 Chat UI 笔记第 4 节）；assistant 头像/身份以 `messageSnapshot` 快照在回复行上（`PersistentChatContextProvider.ts:101-114` 构建，删除助手后 header 仍可渲染）。
-- **Agent 会话**：Agent 侧以 session 为数据单元，会话消息是独立的扁平表（`agent_session_message`，`docs/dev/references/chat/message-tree.md:8-9` 明确其不适用树模型），不在本笔记覆盖范围内；Home 侧 Topic 与 Agent 侧 session 的差异在能力注入层而非消息壳（Home/Agent 适配器见 Chat UI 笔记 6.2）。
+- **Agent 会话**：Agent 侧以 Session 为数据单元，拥有独立消息树和原生上下文绑定；运行时分支与新会话 fork 的交接见 1.3。Home/Agent 共用消息列表契约，各自适配器注入不同的编辑和分支操作（[Chat UI 笔记 6.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)）。
 
 ## 9. 当前持久化语义补充
 
-从叶子消息创建分支现在由 `MessageService` 生成真实分支，而不是把新消息错误地附着到原路径的中间节点。Agent 会话另新增持久化的跨会话投递：`AgentSessionDeliveryService` 保存待投递、执行与结果状态，`agent_session_message` 的写入链因此需要同时表示本会话消息和其他会话返回的结果。普通 Topic 树与 Agent session 的扁平消息表仍是两种不同的数据模型。
+从叶子消息创建分支现在由 `MessageService` 生成真实分支，而不是把新消息错误地附着到原路径的中间节点。Agent 会话另新增持久化的跨会话投递：`AgentSessionDeliveryService` 保存待投递、执行与结果状态，`agent_session_message` 的写入链因此需要同时表示本会话消息和其他会话返回的结果。普通 Topic 与 Agent Session 都有消息树，但分表存储；Agent 另需维护运行时 checkpoint 与原生历史绑定（1.3）。
 
 删除活动节点后，服务层会在 splice/reparent 完成后重新计算 active node，保留仍可达的回复而不是把整条后续链视为被删节点的附属品。数据库还为 message 表上的 user-model 外键增加索引，改善按模型关联与迁移检查的访问路径。投递在重启、多个窗口和大量待投递任务下的实际恢复顺序尚未运行验证。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/AgentSessionMessageService.ts`、`src/main/data/db/schemas/message.ts`。
 
@@ -285,4 +293,5 @@
 - `src/renderer/hooks/useExecutionOverlay.ts`、`src/renderer/services/aiTransport/ExecutionStreamOverlayService.ts`（live overlay）
 - `src/renderer/components/chat/messages/list/MessageListSearch.tsx`、`messageSearch.ts`、`src/renderer/utils/contentSearch.ts`（会话内搜索）
 - `src/renderer/pages/home/hooks/useTopicBranchActions.ts`（分支预留/删除守卫入口）
-- `src/main/services/file/internal/entryCleanup.ts`、`orphanSweep.ts`（附件 GC）\n- `src/main/services/trash/{TrashService,trashPurgeJobHandler}.ts`（回收站与保留期清理）
+- `src/main/services/file/internal/entryCleanup.ts`、`orphanSweep.ts`（附件 GC）
+- `src/main/services/trash/{TrashService,trashPurgeJobHandler}.ts`（回收站与保留期清理）

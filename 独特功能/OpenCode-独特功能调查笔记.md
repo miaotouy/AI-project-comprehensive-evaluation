@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -63,7 +63,7 @@
 
 **用户目标**：模型用一小段受限程序一次编排多个工具调用，减少多轮往返。
 
-**入口与主链**：工具名 `execute`（`packages/core/src/codemode/tool.ts`），程序在 `packages/codemode` 的解释器中运行；解释器只实现受控语法，程序只能调用宿主暴露的工具与扩展全局对象，无法触网、读写文件或访问进程；宿主限制执行时间、工具调用次数、输出大小与数据量；未完成工作在程序结束时被中断。
+**入口与主链**：execute 工具在受限解释器中运行模型程序，宿主提供工具目录及 fetch 扩展，直接文件、进程、包导入与计时器不可用。fetch 按 webfetch 动作审批，初始 URL 禁止 file 协议，重定向逐跳核对拒绝规则，并限制请求时间与跳数。独立检查入口不提供 fetch；程序结束时中断未完成工作（[模型入口](../../opencode/packages/core/src/codemode/tool.ts#L74-L81)、[fetch 策略](../../opencode/packages/core/src/codemode/fetch.ts#L17-L82)）。
 
 **已验证边界**：这是受控解释器而非沙箱化 JavaScript；错误以带位置的诊断返回。
 
@@ -87,7 +87,7 @@
 
 **用户目标**：模型产出一个可访问的小型产物（页面、图表、交互文档），用户可打开并复用。
 
-**入口与主链**：`artifact` 工具创建/读取/更新/删除 Artifact（`art_` 前缀），Artifact 是一组相对路径到文本的文件映射加入口文件；Artifact Provider 声明能力（静态、服务端代码、SQLite、Durable Objects），本地 Provider 默认可用；实验性端点列出 Provider、管理 Artifact 并提供按路径访问的视图。
+**入口与主链**：启用 `experimental.artifacts` 后，模型通过四个 Artifact 工具创建、读取、替换更新与删除对象；对象保存稳定 id、相对文件映射、入口与 URL。管理端点可按会话列出对象，本地 Provider 保存静态文件并作为默认选择，Provider 可声明额外能力。该功能默认关闭，能力枚举中的服务端代码和存储类型不能直接视为本地 Provider 能力（[启用与默认选择](../../opencode/packages/core/src/artifact.ts#L222-L303)、[工具注册](../../opencode/packages/core/src/tool/plugin/artifact.ts#L64-L141)）。
 
 **已验证边界**：能力面由 Provider 决定，本地默认 Provider 只做文件托管；本次未找到容器化运行环境。
 

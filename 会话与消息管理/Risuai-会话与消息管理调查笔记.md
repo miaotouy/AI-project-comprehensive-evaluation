@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
@@ -14,13 +14,13 @@
 
 ## 结论摘要
 
-Risuai 的会话与消息没有独立持久化单位，而是**整库单文件（.bin）+ 内存响应式状态**的模型：
+Risuai 的会话和消息内嵌于角色数据，主存档采用块编码并由前端响应式状态驱动保存；remote 角色、冷归档和资源库另有外置后端：
 
 - 角色（含群聊）对象内嵌 `chats: Chat[]` 数组，`chatPage` 下标即"当前会话指针"（`database.svelte.ts:1817-1839`，`character.chats`）；会话 `id` 为 UUID，由启动时的 `assignIds` 补齐与去重（`bootstrap.ts:645-671`）。
 - 消息是**线性数组中的扁平对象**：`role: 'user'|'char'`、`data`、`saying`（说话角色 chaId）、`chatId`、`time`、`generationInfo`/`promptInfo` 快照、`disabled`（含 'allBefore' 语义）、`isComment`（`database.svelte.ts:1848-1860`）；无 swipe/版本字段。
-- 运行时与持久化事实源都是 `DBState.db` 这一个响应式内存对象：`saveDb()`（`globalApi.svelte.ts:292-486`）用 `$effect` 快照监听变化，500ms 防抖后由 `RisuSaveEncoder` 做**块级增量编码**（root 块 + 每角色一块），整库重写为 `database/database.bin`，并每次保存都额外写一份 `dbbackup-<ts>.bin`（保留 20 份）。加载失败时按时间倒序尝试备份。
+- 运行时与持久化事实源都是 `DBState.db` 这一个响应式内存对象：`saveDb()`（`globalApi.svelte.ts:292-486`）用 `$effect` 快照监听变化，500ms 防抖后由 `RisuSaveEncoder` 做**块级增量编码**（root 块 + 每角色一块），重新拼装主存档 `database/database.bin`，外置角色和冷数据由其中的引用连接，并每次保存都额外写一份 `dbbackup-<ts>.bin`（保留 20 份）。加载失败时按时间倒序尝试备份。
 - 分支 = **复制整个会话对象并截断**，再在尾部插入一条 `isComment` 的 `branchedfrom` 特殊注释消息作为回链；父会话不记录子分支。分支导航视图由 `getChatBranches` 对消息内容哈希做前缀树**实时计算**，不依赖持久化元数据（`gui/branches.ts:69-93`）。
-- Reroll（重生成）是**纯内存候选机制**：候选文本挂在 `process/prereroll.ts` 的 `Map<generationId, string[]>` 上，切换时原地替换最后一条消息的 `data`，候选不落盘；没有候选时则物理删除尾部 char 消息后重新生成。
+- Reroll（重生成）是**纯内存候选机制**：候选文本挂在 `process/prereroll.ts` 按生成 ID 索引的模块级对象上，切换时原地替换最后一条消息的 `data`，候选不落盘；没有候选时则物理删除尾部 char 消息后重新生成。
 - 冷存储（Cold Storage）是自动归档机制：角色 10 天未交互或会话 10 天无新消息（且 ≥4 条）时，把消息等数据外置到 Tauri 文件/OPFS/账户远端，原地留下带 `COLDSTORAGE` 头的占位消息，打开时惰性恢复（`process/coldstorage.svelte.ts`）。
 - 本次未找到会话/消息内容搜索能力（检查范围见第 5 节）；多窗口一致性靠 `BroadcastChannel` 互斥让后到标签页刷新，无落盘合并（见第 6 节）。
 
@@ -61,7 +61,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 - 生成快照：`generationInfo`（模型、`generationId`、输入输出 token 数、`maxContext`、各阶段耗时的 `stageTiming`）、`promptInfo`（`promptName`、`promptToggles`、`promptText`，仅 `db.promptInfoInsideChat` 开启时写入，web 端被强制为 false，`database.svelte.ts:696-699`）。
 - 时间与标识：`time`（Date.now 毫秒）、`chatId`（UUID，发送时对缺失的旧消息惰性补齐，`process/index.svelte.ts:256-259`；书签添加时也会补，`Chat.svelte:287-290`）。
 
-`generationId` 是**本次生成回合的标识**，同时写入消息 `generationInfo` 与内存 reroll 候选表，是两者关联的键（见 4.2）。没有 swipe 数组、没有消息级版本历史、没有消息级附件字段（附件内容经 inlay 语法进 `data`，资源存 `assets/`）。
+`generationId` 是**本次生成回合的标识**，同时写入消息 `generationInfo` 与内存 reroll 候选表，是两者关联的键（见 4.2）。没有 swipe 数组、没有消息级版本历史、没有消息级附件字段（附件内容经 inlay 语法进 `data`，inlay 资源存独立 localforage 实例；角色资产另走 assets 路径）。
 
 ### 1.3 首条消息的虚拟化
 
@@ -96,7 +96,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 2.4 加载主链
 
-`loadData`（`bootstrap.ts:55-269`）按平台分路：Tauri 用 fetch 读 AppData 下的 bin；web 走 `forageStorage.Init()`（后端选择见 6.3）。解码失败时**按时间倒序逐个尝试 dbbackup-* 备份**，全部失败才报"save file is corrupted"；账户模式先从本地读、再读远端 `database/database.bin`。加载后依次执行格式迁移、ID 分配、冷存储归档、插件加载、启动 `saveDb()`。
+`loadData`（`bootstrap.ts:55-269`）按平台分路：Tauri 用 fetch 读 AppData 下的 bin；web 走 `forageStorage.Init()`（后端选择见 6.3）。解码失败时**按时间倒序逐个尝试 dbbackup-* 备份**，全部失败才报"save file is corrupted"；账户模式先从本地读、再读远端 `database/database.bin`。加载后的插件启动前会等待一次插件存储迁移尝试；随后继续插件加载、ID 分配和冷归档等初始化，再启动保存循环。迁移异常被捕获并记录，不能据此声称迁移失败一定阻止插件运行（`bootstrap.ts:200-214,253`）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
@@ -111,13 +111,15 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 3.1 冷存储（Cold Storage）归档与恢复
 
-启动时 `makeColdData()`（`coldstorage.svelte.ts:575-625`，开关 `db.coldstorage`，无插件时默认开启，`database.svelte.ts:713`）先迁移旧版插件存储，再对两类对象判龄归档，每批 5 个串行处理：
+启动时先尝试迁移插件存储，再加载插件；后续 `makeColdData()` 会启动插件存储的后台加载，这一步不受冷归档开关控制。角色和会话判龄归档仍由该开关控制，每批至多 5 项并行、批次顺序等待（`bootstrap.ts:200-214,253`；`process/coldstorage.svelte.ts:560-614`）：
 
 - **角色级**：`lastInteraction` 距今超 10 天且未归档的角色，整体写入冷存储（键为 UUID），原对象替换为只含 `image/name/chaId/chats 占位/coldstorage: id/coldStoragedChats` 的"瘦身壳"；打开角色时 `changeChar` 按壳内键读回完整对象（`characters.ts:884-893`）。
 - **会话级**：最后一条消息时间距今超 10 天、且消息数 ≥4、且未归档的会话，把 `message`、`hypaV2Data`、`hypaV3Data`、`scriptstate`、`localLore` 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`（`coldstorageData.ts:4` 定义头）；打开会话时 `preLoadChat` 读回并恢复这些字段（`coldstorage.svelte.ts:627-665`），数据缺失时替换为显式错误提示消息。
-- **插件存储迁移**：早期版本把插件级存储的值内联保存在 `db.pluginCustomStorage` 中，与上述判龄归档不同，这一步在每次启动时无条件执行。逐键写入冷存储并读回验证成功后，改在 `_coldplugin` 下记录“键到冷键”的映射并删除内联值；写入或校验失败则保留原值（`coldstorage.svelte.ts:529-573`）。插件 API 的读写删与枚举随后都按该映射间接访问冷存储，数据库内只再持久化这层映射（`v3.svelte.ts:1270-1315`）。
+- **插件存储布局**：小值 JSON 集中在一个冷索引内，大值写到独立冷条目，数据库保留 `_coldpluginIndex` 指针。默认大值阈值为 256 Ki 字符量级，索引软预算 8 Mi 字符量级，单值至多 4 Ki 时始终保留在索引；实现按 JSON 字符串长度计量，不能直接当作 UTF-8 文件字节限额（`process/pluginStorageStore.ts:34-60,372-401`）。
+- **迁移与提交**：旧内联值和旧逐键映射在加载时合并进新索引。新索引冷写成功后，才同步移动数据库指针并移除已迁移的旧副本；失败保留旧指针并安排重试。主数据库仍由独立保存循环落盘，所以插件 API 的写入完成、索引指针提交和整库存档写出是三个时点（同文件 `:225-316,433-519`）。
+- **读写与回收**：小值写入先更新内存，索引延迟批量刷新；大值先写冷条目再纳入索引，后到的同键操作可使早期写入失效。被替换条目先进入垃圾列表，后续加载时才按宽限期清理，默认普通条目一天、旧索引一小时。页面隐藏时另做 best-effort flush，不能保证强制退出已持久化（同文件 `:319-341,372-401`；`process/coldstorage.svelte.ts:684-692`）。
 
-冷存储后端按平台分派：账户远端（`/hub/account/coldstorage`）、Node 文件、Tauri `AppData/coldstorage/<key>.json`、web OPFS（`coldstorage.svelte.ts:40-197`）；值统一 JSON + fflate 压缩。写入后**先读回验证再替换原对象**（390-410、499-505）。无引用的条目由 `cleanColdStorage` 定期清理；它的“在用键”清单同时收集角色持有键与插件存储映射值（`coldstorageData.ts:79-95`），插件条目因此不会被当作无引用清掉。迁移到账户模式时冷存储条目单独迁移并做资源路径重写（`autoStorage.ts:85-131`）。
+冷存储后端按平台分派：账户远端（`/hub/account/coldstorage`）、Node 文件、Tauri `AppData/coldstorage/<key>.json`、web OPFS（`coldstorage.svelte.ts:40-197`）；值统一 JSON + fflate 压缩。写入后**先读回验证再替换原对象**（390-410、499-505）。无引用的条目由 `cleanColdStorage` 定期清理；它的保护清单另合并插件索引、大值及待回收条目；备份遍历也收集索引引用，避免把当前使用项当作孤儿清除（`process/coldstorage.svelte.ts:253,325,345-359`）。迁移到账户模式时冷存储条目单独迁移并做资源路径重写（`autoStorage.ts:85-131`）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -133,9 +135,9 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 4.2 Reroll：内存候选机制
 
-- **候选来源**：流式结束时 `addRerolls(generationId, Object.values(lastResponseChunk))`（`process/index.svelte.ts:1759`，chunk 内容是累积全文）；非流式 multiline 时，多个 choices 中第一个成为消息、其余进入候选（1864-1866）。`genTime > 1` 且模型为 gpt 且非续写时请求层才启用多候选（`request/request.ts:464`、`openAI/requests.ts:851-869`）。
-- **切换**：`reroll()` 先用最后一条消息的 `generationInfo.generationId` 查 `Prereroll`，命中则**原地替换该消息 `data`**；否则回退到组件内 `rerolls: Message[][]` 数组（每次生成结束的尾部消息快照）替换数组尾部；两者皆空时物理 `pop` 尾部 char 消息（同一 `saying` 最多删 2 条，直到 user 消息）并重新生成（`DefaultChatScreen.svelte:218-271`）。`unReroll` 是反向流程（273-301）。
-- **持久化边界**：候选表（`prereroll.ts` 模块级 Map）与组件内 `rerolls` 都是内存态，重启即失；切换后写入消息数组的版本随 saveDb 落盘，未选中的候选**不持久化**。这与 SillyTavern 的 swipes 数组字段形成对照。
+- **候选来源**：流式结束时只把最后一帧的候选全文集合存入表，并未保存每个时间片；OpenAI 多生成路径按 choice index 分别累计文本。因此候选切换不具有逐流片回退语义（`process/index.svelte.ts:1702-1704,1759`；`request/openAI/requests.ts:1036-1052`）。非流式 multiline 时，第一个文本进入消息，多项文本进入候选表（1864-1866）。`genTime > 1` 且模型为 gpt 且非续写时请求层才启用多候选（`request/request.ts:464`、`openAI/requests.ts:851-869`）。
+- **切换**：先按最后一条消息的生成 ID 查询文本候选，命中就原地替换正文；否则使用组件内的尾部消息段快照。没有可切换候选时截去尾部回复并重新生成；删除在遇到第二条同一说话者消息或 user 消息时停止。反向切换沿同样两层缓存回退（`DefaultChatScreen.svelte:219-301`）。
+- **持久化边界**：候选表（`prereroll.ts` 模块级对象）与组件内 `rerolls` 都是内存态，重启即失；切换后写入消息数组的版本随 saveDb 落盘，未选中的候选**不持久化**。这与 SillyTavern 的 swipes 数组字段形成对照。
 - 首次消息（虚拟首条）的"reroll"按钮语义不同：切换 `fmIndex` 选择不同开场白（`DefaultChatScreen.svelte:845-870`）。
 
 ### 4.3 分支：复制会话 + 注释回链
@@ -227,7 +229,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 - **reroll 不持久化**：候选仅存内存，重启丢失；与"复制会话做分支"形成两种互斥的回退手段——回退到旧版本只能靠分支/复制会话，不能靠消息内版本切换。
 - **分支不对称**：子分支只在自身保存 `branchedfrom` 回链注释，父会话无子列表；分支视图靠内容哈希前缀树实时计算，文本编辑会改变树形，branchedfrom 的回链关系不参与树构建，但注释消息的 `data` 仍按文本哈希入树。多分支的导航依赖"跳回源会话"单向链路。
 - **多窗口不合并**：BroadcastChannel 互斥让后到标签页刷新，无字段级冲突解决；多用户实时同步是会话级整对象覆盖，无写冲突检测以外的保护（`peerSafeCheck` 只检查是否正在生成）。
-- **保留策略分层**：消息编辑删除无 undo（无事件日志）；会话删除即物理移除；角色删除有 3 天垃圾桶期；会话/角色过期走冷存储（10 天）而非删除；冷存储只受 `db.coldstorage` 开关控制，默认随是否装插件变化。
+- **保留策略分层**：消息编辑删除无 undo（无事件日志）；会话删除即物理移除；角色删除有 3 天垃圾桶期；会话/角色过期走冷存储（10 天）而非删除；判龄归档受冷归档开关控制，插件冷存储独立加载。
 - **加密边界**：`database.bin` 本身**不加密**（AGENTS.md 所称"加密支持"实际落在备份 `.risudat`、角色加密卡、`.risup` 预设、翻译预设等处）；`cipherChat` 是接口中的遗留字段，全代码库仅一处定义与一处置 false 的赋值（`database.svelte.ts:821`、`openAI/requests.ts:348`），无功能实现。
 - **流式中止的语义**：中止后已写入的半截 char 消息保留在数组中（数据层不删除），`removeIncompleteResponse` 只影响输出文本的标点截断，不产生"完成标记"字段。
 

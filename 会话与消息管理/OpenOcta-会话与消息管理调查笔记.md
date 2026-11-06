@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openocta/openocta`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`0c7dac2284211facdfc813166fe648d093153bb6`（分支：`main`）
 >
@@ -20,6 +20,7 @@ OpenOcta 没有数据库。会话的事实源是两层文件：每个 agent 一�
 
 - 消息是线性追加日志，不是树。每条消息行确实写了 `parentId`，但读取路径从不使用它，只按文件顺序取最后 N 条（`src/pkg/session/transcript.go:258-309`）。
 - 写入粒度是"回合/片段"：用户消息在请求前追加一次；assistant 内容在每次 `message_stop` 追加一行；工具结果单独作为 `toolResult` 行追加（`src/pkg/gateway/handlers/chat.go:2780-2806`、`:2890-2899`）。
+- 消息追加没有会话级文件锁。池条目锁仅约束同一个 Runtime；超时驱逐先删映射、再等待旧锁释放后关闭，期间同键新旧 run 可能并行并追加同一转录（[pool.go:193–209、237–247](<../../openocta/src/pkg/agent/runtime/pool.go#L193>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182>)）。
 - 同一份 JSONL 还承载 `token_usage` 与 `tool_call` 旁路行，由 Eino 全局回调写入，只服务成本与工具统计，不参与上下文（`src/pkg/agent/eino/usage_callback.go:207-262`）。
 - 无消息级编辑、删除、重试、重新生成与分支能力：本次在 `src/pkg/gateway/handlers`、`src/pkg/session`、`ui/src/ui` 检索 edit/delete/retry/regenerate/fork/branch，未找到对应入口（`apiKeys.regenerate` 是密钥接口，不相关）。
 - `/new`、`/reset` 的语义是换一个新 sessionId 与新 JSONL 文件，旧文件留在磁盘上；"压缩"只是按行数保留尾部并归档原文件，不做摘要（`chat.go:1661-1727`、`sessions.go:880-1052`）。
@@ -142,9 +143,11 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 
 ## 7. 缓存、一致性、并发写入
 
-索引层没有锁：`updateSessionStore` 是读—改—写，两次并发修改会以"后写覆盖先写"收场。推断：高频场景（多个渠道加界面同时 touch）可能丢更新，但单个会话的消息本身不受影响，因为消息走的是追加写。
+索引层没有锁：`updateSessionStore` 是读—改—写。按实现结构推断，多个渠道与界面同时 touch 或修改索引时可能后写覆盖先写。转录使用追加写，和索引覆盖是两条独立路径；追加写本身未提供会话级事务或消息顺序保证。
 
-消息层的并发保护来自运行时池，而不是文件锁。同一会话键的 Runtime 由池条目互斥持有，一次只跑一个回合；跨会话可并行（`src/pkg/agent/runtime/pool.go:57-139`、`:152-190`）。池按"运行指纹"失效重建，指纹包含工作区、agent、员工、模型、MCP 键、技能键与系统提示版本（`src/pkg/gateway/handlers/chat_runtime_pool.go:15-46`）。
+池条目锁仅约束同一个 Runtime 的运行期。发送入口发现同键在飞任务时，先等池最多 30 秒，超时便驱逐映射，随后再检查最多 5 秒；此分支未先取消旧 run。驱逐只立即删除映射，旧条目持锁时要等运行结束释放锁后才关闭，因此新 Runtime 可在旧 run 仍运行时建立。跨会话可以并行，同键也存在新旧条目重叠的路径（[chat.go:1915–1935、3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915-L1935>)、[pool.go:193–209、237–261](<../../openocta/src/pkg/agent/runtime/pool.go#L193-L209>)）。
+
+抢占标记作用于接收请求的 TurnLoop；驱逐后交给新 Runtime 的标记无法停止旧 Runtime。由此推断，同键新旧 run 可能向同一 JSONL 追加消息，交错顺序及同检查点 ID 的写入结果需运行验证。池还会按运行指纹失效重建：指纹包含工作区、agent、员工、模型、MCP 键、技能键与系统提示版本；指纹变化同样移除旧映射并延后关闭忙条目（[session_turn_loop.go:221–248](<../../openocta/src/pkg/agent/eino/session_turn_loop.go#L221-L248>)、[pool.go:85–100](<../../openocta/src/pkg/agent/runtime/pool.go#L85-L100>)、[chat_runtime_pool.go:15–46](<../../openocta/src/pkg/gateway/handlers/chat_runtime_pool.go#L15-L46>)）。
 
 运行态明确不持久化：`runId`、中止控制器、池条目、事件序号都在进程内存里（`chat.go:239-251`）。进程退出后这些状态消失，文件里保留的只有已追加的消息。
 
@@ -171,12 +174,13 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 - 文件即数据库：索引与转录分离，索引可重建（缺条目时按键派生 ID），但没有索引自愈过程；条目丢失会让同一段对话换一个文件名。
 - 追加日志优先：写入简单、崩溃后最多丢最后一行；代价是没有原位编辑、分支与版本切换。
 - 会话键承担路由：一个键同时决定存储位置、agent、运行时池分片与前端订阅；键格式变化会同时影响这四层。
+- 池互斥属于条目级控制。驱逐会立即移除映射、延后关闭忙条目，同键新旧运行可能重叠；追加转录和同 ID 检查点没有因此获得全局串行保证。
 - 删除与归档语义不一致：删除接口的 `archived` 字段实际是永久删除，真正的归档只在压缩时产生。
 - 压缩是行级截断而非语义摘要：模型侧上下文压缩另有机制（见对话请求与上下文笔记），两者不共享状态。
 
 ## 11. 未验证事项
 
-1. 并发 `sessions.patch` / touch 的实际丢失范围未做运行验证；结论基于读—改—写实现推断。
+1. 并发 `sessions.patch` / touch 的实际丢失范围未做运行验证；结论基于读—改—写实现推断。同键旧 run 超过首次 30 秒等待、驱逐后新 run 启动的重叠时长，以及转录追加顺序、检查点覆盖和最终索引快照尚未运行验证。
 2. 压缩把消息切成半截后，模型对首条残缺消息的处理未实测。
 3. 转录单行超过 32MB 时的界面表现（整行丢弃）未实测。
 4. 多窗口同时打开同一会话、以及 WebSocket 重连后 `chat.history` 与本地流的合并未验证。
@@ -190,6 +194,7 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 - `src/pkg/session/preview.go`、`src/pkg/session/usage.go`：尾部预览与成本汇总
 - `src/pkg/gateway/handlers/sessions.go`：sessions.* 全量入口、键解析、列表与压缩
 - `src/pkg/gateway/handlers/chat.go`：`chat.history`、`chat.send` 的落盘点、`chat.inject`、`/new`
+- [pool.go:57–139、193–261](<../../openocta/src/pkg/agent/runtime/pool.go#L193-L261>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182-L3208>)：条目互斥、超时驱逐与延后关闭
 - `src/pkg/agent/eino/transcript_history.go`：转录转模型消息与工具轮次序修正
 - `src/pkg/agent/tools/sessions.go`：`SessionIDFromSessionKey`
 - `src/pkg/gateway/ws/hub.go:74-112`：会话与聊天方法/事件清单

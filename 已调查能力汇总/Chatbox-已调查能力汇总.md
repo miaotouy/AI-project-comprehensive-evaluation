@@ -2,11 +2,11 @@
 
 > 汇总对象：`Chatbox`（源码仓库 `https://github.com/chatboxai/chatbox`）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：本工作区内 15 份 Chatbox 单项目调查笔记（含检索增强与认知编排），均已复核至代码快照 `d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支 `main`）；另参考 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源；未新增源码调查
+> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题合并重复能力，保留证据状态标记并链接来源；高风险会话、工具、侧面板与图像任务结论另以当前源码主链核实
 >
 > 汇总范围：覆盖上述 15 个类目笔记中 Chatbox 的全部已调查能力；仓库分布与应用界面基础设施类目结论放入“工程与基础设施摘要”；不做跨项目横向比较，不重新下判断
 >
@@ -34,21 +34,21 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 ### 会话与消息
 
-- **local-first 单会话存储与双写**：完整 Session 对象与消息存通用 storage（IndexedDB），侧栏只认识 `SessionMetaRecord` 元信息（不含任何消息级字段），两者双写同步，每会话一个 `UpdateQueue` 串行合并，react-query 缓存是 UI 侧视图。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
+- **local-first 消息树与列表投影**：权威数据由会话头、线程行与消息行组成，旧完整 Session 为兼容投影；侧栏只消费独立 meta。桌面/Web 的行与 meta 均为 IndexedDB，移动端为 SQLite，领域服务和行提交队列负责写入。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
 - **惰性创建会话（'new' 假会话）**：首页 id 固定为 `'new'` 的假会话，发送前临时状态分散在本地 state、`newSessionState` 专用对象与按字符串 `'new'` 作 key 的通用 map 三种容器；首条消息发出才经 `createPersistedChatSession` 迁移为真实 Session。证据状态：`主链确认`。来源：[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
-- **Thread / Fork / Summary / ForkMarker 四套消息级结构**：thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复折叠为 ForkGroup）、summary（消息级压缩标记）、forkMarker 是四套互不隶属的数据结构；唯一交叉点是"move thread to conversations"把 thread 转成新顶层会话，复制会话/挪 thread 时在新会话顶部插入指回源会话的 forkMarker。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **Thread / Fork / Summary 与来源导航**：线程路径、兄弟分支和摘要都映射进同一消息树，创建、切换、编辑重发和删除经领域结构命令提交；来源标记承接复制会话或线程独立后的导航。Work Mode 的结构操作受模式策略约束。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **消息渲染：结构化 contentParts**：text、reasoning、tool-call、image、info 等 part 分派给专用组件，不依赖从 Markdown 私有标记反向解析；Markdown 默认支持 GFM、软换行、LaTeX、Shiki、Mermaid、SVG 与图片查看器，原始 HTML 不进入 Markdown DOM、HTML 代码预览放进 sandboxed iframe。证据状态：`主链确认`。来源：[消息渲染调查笔记](../消息渲染器/Chatbox-消息渲染调查笔记.md)。
-- **流式更新与节流落盘**：每个可见增量只刷新 UI 缓存（几乎逐 token），落盘走每会话 `UpdateQueue`，按 2 秒节流且 tool-call 立即持久化，流结束/出错/暂停时无条件补一次最终落盘。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)。
-- **消息搜索与定位**："当前会话/全部会话"两个入口，正则匹配覆盖文本、推理、信息与工具调用状态及文件名；无持久化倒排索引，跨会话按 IndexedDB 分页逐条扫描（每页 30、命中上限 50），点击结果切换会话并滚动定位。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **流式更新与节流落盘**：每个可见增量只刷新 UI 缓存（几乎逐 token），落盘经流式写协调器和领域行提交队列，按 2 秒节流且 tool-call 立即持久化，流结束/出错/暂停时无条件补一次最终落盘。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)。
+- **消息搜索与定位**：当前会话与跨会话入口读取领域搜索候选窗口，扫描消息文本、推理与工具信息后定位会话和消息；无持久化倒排索引。分页和结果上限详见对应实现，未将旧快照数值视为当前结论。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **侧栏分页、排序与活动指示**：IndexedDB 游标分页（页大小 50、置顶优先）、分数索引落地排序、拖拽仅在同一置顶分组内生效；"生成中/回复完成未读"指示为内存态 zustand store，不落盘、重启即消失。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
 - **草稿与现场恢复**：草稿按会话粒度存 localStorage（首页 `'new-chat'`、真实会话 `draft-${sessionId}`，300ms 防抖），发送成功后清除；每会话滚动快照缓存最多 100 个，切换会话不丢阅读位置。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
-- **停止、重试、续写与并行替代回复**：停止时把未完成的 tool-call 批收口为 error 态并落盘；重新生成走 fork 分支而非替换原消息，工具暂停后的继续/重试以 `appendToMessage` 写回原消息；"在下方继续回复"刻意绕过会话生成锁以支持并行替代回复，写入由 UpdateQueue 串行兜底。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **停止、重试、续写与并行替代回复**：停止时把未完成的 tool-call 批收口为 error 态并落盘；重新生成走 fork 分支而非替换原消息，工具暂停后的继续/重试以 `appendToMessage` 写回原消息；"在下方继续回复"刻意绕过会话生成锁以支持并行替代回复，写入由领域行提交队列串行处理。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **Work Mode 消息队列与 steering**：生成中输入最多排队 20 条并写入本地持久状态，可编辑、删除、清空和跨刷新恢复；默认顺序发送，用户显式请求时纯文本队列项可先落盘为 steered 消息，再进入当前生成后续 step。Chat Mode 不接受新队列项。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 
 ### 生成与创作
 
-- **图像生成工作台（Image Creator）**：独立 `/image-creator/` 工作台，能力分型为 M1 模型生成工作站 + M3 记录/资产生命周期；单一事实对象 `ImageGeneration` 记录（prompt、模型、参数、参考图键、结果图键、状态、错误与来源）配套 blob 图片存储；按 provider 分双执行路径（ChatboxAI 服务端异步任务 + 2 秒轮询 / 其余 provider 走 `model.paint` 直连），统一折叠为 pending/generating/done/error 本地四态；取消=停止监视、恢复需已持久化 `taskId`、重试=全新发起；参考图 DAG 用 `parentIds` 保留多父迭代关系并以引用计数式 blob 清理防误删。证据状态：`主链确认`（独特功能能力卡 2；媒体创作笔记另有 37 个图像相关单测通过）。真实计费生成需外部模型与计费环境，未运行验证，见文末。来源：[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)、[独特功能调查笔记](../独特功能/Chatbox-独特功能调查笔记.md)。
-- **沙箱代码执行与可寻址产物（G3）**：桌面端 Agent Mode 门控 `code_execution`，macOS/Linux 走 `@anthropic-ai/sandbox-runtime` OS 沙箱，Windows 无 OS 隔离直接执行；`create_download` 把文件持久化到 userData，下载卡可预览/保存，重启后仍可用；综合等级判定为 G3（可执行 Artifact），模型侧 read/list/search/write/edit 文件维护闭环具备 G4 部分特征。证据状态：`主链确认`（静态源码贯通）。运行时链路未运行验证，见文末。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Chatbox-生成式输出与运行时调查笔记.md)。
+- **图像生成工作台（Image Creator）**：独立工作台和聊天 CLI 共享核心图像服务，记录含参数、结果、来源与父记录关系；ChatboxAI 走异步提交与轮询，其他 Provider 走直接生成。取消中止本地执行或监视，已提交任务身份优先保存；恢复监视原任务，重试重新提交。服务还提供启动清算和前后台暂停 API，renderer 调用点未找到。首次任务身份落盘失败时保留内存保护并阻止重复提交。记录按平台落 IndexedDB/SQLite，参考图关系与 blob 引用清理由服务管理。证据状态：`主链确认`，当前快照未执行测试或真实计费调用。来源：[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)、[独特功能调查笔记](../独特功能/Chatbox-独特功能调查笔记.md)。
+- **沙箱代码执行与可寻址产物（G3）**：桌面 Work Mode 当前使用 run_command，旧 code_execution 作为兼容/不可用回退入口，macOS/Linux 走 `@anthropic-ai/sandbox-runtime` OS 沙箱，Windows 无 OS 隔离直接执行；`create_download` 把文件持久化到 userData，下载卡可预览/保存，重启后仍可用；综合等级判定为 G3（可执行 Artifact），模型侧 read/list/search/write/edit 文件维护闭环具备 G4 部分特征。证据状态：`主链确认`（静态源码贯通）。运行时链路未运行验证，见文末。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Chatbox-生成式输出与运行时调查笔记.md)。
 - **HTML artifact 预览与 VibeDrop 网页发布**：HTML 代码块经 sandboxed iframe 预览（本地 preview server 或远端 `artifact-preview.chatboxai.app` 宿主）；可发布为 VibeDrop 静态页（需登录 Chatbox 账号签发 per-user key，`unlisted`/`public` 两档可见性），发布对象限于聊天内可渲染的代码块 HTML，会话本身不进入该链路。证据状态：预览为 `主链确认`；VibeDrop 发布为入口级确认，真实发布链路未运行验证，见文末。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Chatbox-生成式输出与运行时调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Chatbox-对话导出与分享调查笔记.md)。
 - **对话导出（Markdown / TXT / HTML）**：顶部工具栏的轻量弹窗提供线程范围、全部分支与格式选择，无预览、编辑或版本历史。Markdown/TXT 将 fork 展开为线性 Branch N/M，HTML 保存 fork 结构并嵌入可离线操作的分支导航；reasoning 与 agent-mode-suggestion 仍不导出。证据状态：`主链确认`。来源：[对话导出与分享调查笔记](../对话导出与分享/Chatbox-对话导出与分享调查笔记.md)。
 - **备份 ZIP v2（可往返恢复）**：设置页整库备份：manifest 声明格式与版本、resources/ 资源级封装（覆盖分叉分支与消息资源）、SHA-256 校验、密钥脱敏；导入分"读取暂存→完整校验→事务提交"三阶段，兼容旧版单 JSON 备份；与阅读性对话导出在格式、抽取范围与资源策略上完全分离。证据状态：`主链确认`（含 890 行往返测试）。来源：[对话导出与分享调查笔记](../对话导出与分享/Chatbox-对话导出与分享调查笔记.md)。
@@ -56,12 +56,16 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 ### Agent 运行时与外部协作
 
 - **工具集按会话动态组装**：`buildToolsForSession` 按会话模式、模型能力、附件、知识库、MCP、记忆和本地执行设置组装工具。Work Mode 提供 run_command、文件、Skills、MCP 与 view_image；网页搜索、知识库和持久记忆可独立于 Work Mode 使用。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
-- **工具审批与安全边界**：user_exec 走白名单→AI→人工三级审批、文件写入（write_file/edit_file）条件式审批、chatbox_cli 的计费/状态变更走 app_action 审批且不可被 agentFullAccess 绕过；暂停状态随会话持久化、重启后经继续/重试路径在原消息内恢复。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
+- **工具审批与安全边界**：当前 run_command 采用沙箱优先与精确失败重试升级策略，旧 user_exec 保留分级审批兼容路径；文件变更条件式确认，chatbox_cli 计费/状态变更走强制应用动作审批。暂停状态随会话持久化，并在原消息中继续或重试。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
 - **Agent Mode 与文件维护闭环**：agentMode 三态（on/auto/off）可锁定，工作目录按会话 ID 确定性定位、重启复用；模型可经 read/list/search/write/edit 维护文件，write/edit 要求唯一匹配否则报错；`agentFullAccess` 打开后 user_exec 与文件写入免逐次审批。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Chatbox-生成式输出与运行时调查笔记.md)。
 - **MCP 扩展**：用户可配置 stdio 与 HTTP/SSE server；远程自定义服务器支持 OAuth discovery、动态客户端注册、授权回调和 token 保存，设置页 Connect 后显示实时工具清单。MCP 工具仍无 Chatbox 层逐次审批。证据状态：`主链确认`（真实第三方 OAuth 服务未运行验证）。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
 - **Skills 系统**：四个来源（内置同步、`userData/skills`、`~/.claude/skills`、`~/.agents/skills`）先到先得去重；`install_skill` 仅校验路径范围/命名/大小、不校验 SKILL.md 正文语义，安装后自动启用。证据状态：`主链确认`。`skills:execute-script` IPC 已实现但当前未被任何工具或 UI 调用，见文末。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)。
 - **知识库、附件 RAG 与 Web Search**：长期知识库与会话大附件都以工具化检索回注模型；附件采用子块召回、可选 rerank、父块去重与按需扩读，失败索引可按 checkpoint 兼容性继续或重试。它不构成自动多阶段认知编排。证据状态：`主链确认`。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/Chatbox-检索增强与认知编排调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)。
 - **后台任务回填（非子 Agent）**：chatbox_cli 触发图片生成等后台任务，完成后把结果作为新 user 消息回填原会话并触发同一 agent 继续对话，回填消息带防注入声明；未发现 agent-as-tool 或嵌套 agent 调用，与"派生新 agent 实例"是不同机制。证据状态：`主链确认`（未发现子 Agent 的结论基于全仓库关键词搜索）。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)、[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)。
+
+- **会话侧面板与内置浏览器**：宽屏侧面板与小屏 sheet 承载会话设置/历史，桌面浏览器提供共享页面的用户接管和模型操作。工具支持文本读取、控件快照、页面脚本、上传和视觉截图；范围外上传需要绑定文件版本的确认，Full Access 可跳过该上传确认。证据状态：`主链确认`（原生视图与平台交互未实机验证）。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
+- **知识库工具与参数校验**：知识库统一为按命令分派的 knowledge_base，与文件系统列举互不覆盖；附件读取与沙箱读取按虚拟路径分派。MCP 名称碰撞会阻止工具集构造，参数经本地结构校验，复杂 schema 语义由服务端校验。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
+- **会话开关持久化与移动工作入口**：知识库和网页浏览 map 均持久化，正式会话模式落会话设置；移动端有独立 Capacitor Work Mode 工具路由，可注入移动 MCP、网页与图像工具，详细宿主行为未实机验证。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)。
 
 ### 渠道与调度
 
@@ -70,7 +74,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 - **新增内置渠道与缓存参数**：注册表包含 OpenCode Zen/Go、Tencent Hunyuan、Xiaomi MiMo、LongCat 和 GLM Coding Plan；OpenCode 请求携带会话标识，Claude 可选 5 分钟或 1 小时提示缓存。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md)。
 - **凭据、重试与连接测试**：支持单 API Key、OAuth、Azure、Bedrock 凭据，无 Key 池/轮询/熔断/健康路由；429 与 5xx 在同一模型实例内指数退避重试（最多 5 次），网络错误默认不自动重试，无跨 Provider/模型/Key failover；连接测试复用真实 `getModel()` 链路依次测文本、视觉与工具调用。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md)。
 - **虚拟 CLI（chatbox_cli）**：应用内受控命令面而非独立终端程序，命令域仅 account/settings/chats/image；只读受限设置、无 Provider 管理命令；模型可经 `chatbox image generate` 触发图像生成后台任务并带计费类审批。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Chatbox-LLM渠道管理调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Chatbox-Agent工具调查笔记.md)、[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)。
-- **会话生成串行化与并发**：同会话主链生成任务被每会话生成锁（promise 尾链）串行化，前一个任务完成才执行下一个；"在下方继续回复"刻意绕过锁以支持并行替代回复，消息写入由 UpdateQueue 串行兜底；图像生成另有全应用单任务闸门。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)。
+- **会话生成串行化与并发**：同会话主链生成任务被每会话生成锁（promise 尾链）串行化，前一个任务完成才执行下一个；"在下方继续回复"刻意绕过锁以支持并行替代回复，消息写入由领域行提交队列串行处理；图像生成另有全应用单任务闸门。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[媒体创作调查笔记](../媒体创作/Chatbox-媒体创作调查笔记.md)。
 
 ### 独特与差异化能力
 
@@ -82,7 +86,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 ## 工程与基础设施摘要
 
-- **持久化模型**：消息与会话结构已改为 SQLite 行存储（`SessionTree`：会话头 + thread 行 + 消息行），会话列表元数据独立存 `session_meta`；桌面/Web 的 meta 存储走 IndexedDB、移动端走 SQLite。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
+- **持久化模型**：会话头、线程行与消息行构成权威消息树，meta 独立；桌面/Web 的行与 meta 均走 IndexedDB，移动端均走 SQLite。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
 - **仓库分布**：pnpm workspace 仍以根应用承载 Electron、Web 与 Capacitor 入口，新增 `packages/chatbox-core`、`packages/chatbox-react` 承接可移植领域层和 React 绑定；当前 2,595 个 Git 跟踪文件、2,288 个 TypeScript/JavaScript 源文件，renderer（1,159 个）仍为最大实现区。来源：[仓库分布调查笔记](../仓库分布/Chatbox-仓库分布调查笔记.md)。
 - **应用界面基础设施**：界面栈为 React + TypeScript + Vite，Mantine 为主 UI 库，移动端抽屉用 vaul、另有预留的 Radix Dialog；AdaptiveModal 按屏幕形态在 Modal 与 Drawer 间切换，命令式弹窗统一经 nice-modal-react；通知为 MUI Snackbar（右上角）与 sonner（Settings 内部底部居中）两套并行系统；Sentry ErrorBoundary 四层包裹渲染树；主题同时驱动 MUI、Tailwind 与 Mantine 三套消费方；Overlay 栈自制"多层弹窗只有最上层响应 Esc"。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Chatbox-应用界面基础设施调查笔记.md)。
 - **桌面集成边界**：全局快捷键仅"显示/隐藏窗口"一项，托盘无聊天状态徽标，系统通知 API 未接入（全仓库无 `new Notification(` 匹配）；窗口显示事件联动聊天输入框聚焦是唯一的"桌面事件 → 聊天 UI 反应"联动。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
@@ -113,7 +117,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 ### 共性未验证（方法学口径下的运行验证缺口）
 
-- 各笔记普遍未运行真实 Provider 调用与计费生成、UI 视觉与键盘可用性、桌面/移动/浏览器平台行为；多数结论来自静态代码，图像生成与导出相关仅有部分单测运行通过。
+- 各笔记普遍未运行真实 Provider 调用与计费生成、UI 视觉与键盘可用性、桌面/移动/浏览器平台行为；多数结论来自静态代码，图像生成相关仅保留旧快照单测记录，当前快照未重跑。
 - provider 侧 token 截断与最终 HTTP payload 字段（`packages/model-calls` 适配层职责）未逐一核实。
 - MCP HTTP/SSE transport 默认超时数值未确认；`main/mcp/shell-env.ts` 实现未逐行读取。
 - Windows 无 OS 沙箱的实际影响未验证（`TASK_SANDBOX_DENY_READ_PATHS` 仅 macOS/Linux 分支生效，`~/.ssh` 等拒绝规则在 Windows 上不生效）。

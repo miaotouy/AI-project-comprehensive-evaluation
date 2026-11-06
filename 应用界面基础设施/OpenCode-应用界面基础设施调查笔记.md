@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -16,7 +16,7 @@
 
 OpenCode 同时维护两套原生界面：TUI 基于 opentui 与 Solid，Web/桌面共用 App 包。Web 侧已形成工作台结构：顶部按服务端、工作区与会话组织，支持同时连接多个 OpenCode 服务端，界面基础件下移到 `packages/ui` 的领域目录（overlays、feedback、forms、layout、navigation、typography、motion、theme 等），会话与消息渲染单独在 `packages/session-ui`。
 
-主题系统分两套：Web 由 `packages/ui/theme` 在运行时把主题 token 注入 CSS 变量；TUI 的主题解析与旧主题迁移下沉到新包 `packages/theme`。桌面端是 Electron 壳：主进程负责窗口、菜单、深链、文件选择、插件与存储桥、原生外观细节，渲染层直接加载 App 源码。本次未找到托盘、全局快捷键与自动更新实现。
+主题系统分两套：Web 由 `packages/ui/theme` 在运行时把主题 token 注入 CSS 变量；TUI 的主题解析与旧主题迁移下沉到新包 `packages/theme`。桌面端是 Electron 壳：主进程负责窗口、菜单、深链、文件选择、插件与存储桥、原生外观细节，渲染层直接加载 App 源码。桌面更新器由内建 GUI 插件提供，不能仅凭桌面壳目录判断其缺失；托盘与全局快捷键本次未找到。
 
 ## 系统边界与总体装配
 
@@ -34,13 +34,13 @@ OpenCode 同时维护两套原生界面：TUI 基于 opentui 与 Solid，Web/桌
 
 ### 桌面（`packages/desktop`）
 
-主进程拆为生命周期（初始化、环境、深链、引导、关闭）、窗口与 IPC、原生菜单、文件与外部链接策略、桥接处理器（文件、菜单、插件、存储、窗口）、诊断与日志。渲染层复用 App，preload 暴露受控接口。主进程未见托盘、全局快捷键与自动更新模块。
+主进程拆为生命周期（初始化、环境、深链、引导、关闭）、窗口与 IPC、原生菜单、文件与外部链接策略、桥接处理器（文件、菜单、插件、存储、窗口）、诊断与日志。渲染层复用 App，preload 暴露受控接口。更新实现经 GUI 插件主进程入口装配，桌面壳只提供宿主与重启交接。打包桌面版加载 electron-updater，启动时及每 10 分钟检查更新，可下载暂存并由用户安装/重启；Web 入口只提供版本说明等界面，安装能力限桌面（[updater/main.ts](../../opencode/packages/gui-plugins/src/updater/main.ts#L13-L58)、[轮询](../../opencode/packages/gui-plugins/src/updater/machine.ts#L239-L253)、[平台适配](../../opencode/packages/gui-plugins/src/updater/platform.ts#L16-L63)）。
 
 ## 1. 界面栈与公共组件
 
 - **TUI 栈**：opentui（core/solid/keymap）+ Solid；自建键位映射、对话框栈、单条 Toast 与提示历史。
 - **Web 栈**：Solid + Kobalte 原语 + Tailwind CSS；组件库按领域拆分——`components`（基础组件）、`overlays`（弹窗、菜单、popover）、`forms`（表单控件）、`feedback`（Toast、空状态、进度）、`data-display`（表格、列表）、`layout`、`navigation`、`typography`、`icons`、`motion`、`theme`、`i18n`、`hooks`、`storybook`。
-- **共享渲染**：`packages/session-ui` 提供时间线、消息、工具与 markdown 渲染，App 与 TUI 复用。
+- **渲染分工**：session-ui 提供 Web/桌面时间线与 markdown 组件；TUI 使用自己包内的行分组、消息与 opentui markdown 原语（[两端装配边界](../消息渲染器/OpenCode-消息渲染调查笔记.md#结论摘要)）。
 - **状态所有权**：弹窗栈在 DialogProvider 的 context 中；Toast 由 `ui/feedback/toast` 统一；主题与语言各自 Provider；服务端连接与数据在 `runtime/server` 的注册表内；标签、布局偏好与会话草稿分别由 App 的 shell 与持久化层管理。
 
 ## 2. 弹窗、浮层与命令
@@ -53,7 +53,7 @@ OpenCode 同时维护两套原生界面：TUI 基于 opentui 与 Solid，Web/桌
 ## 3. 反馈、通知与错误
 
 - **Toast**：单条/短列表，支持动作按钮与自动消失；业务方统一从 ui 包调用。
-- **更新提示**：TUI 有更新通知 Provider；Web/桌面在设置页展示版本与更新入口。
+- **更新提示**：TUI 有独立更新通知；GUI 更新插件在桌面设置、标题栏与应用菜单提供检查/安装入口，Web 只保留版本说明等内容。
 - **错误页**：全局错误边界渲染错误页并提供重试；服务端不可用时显示连接错误面板而不是空白页。
 - **通知**：App 的通知协调器统一分发会话完成等事件，产出界面通知列表、Toast 与提示音，并支持点击跳转到对应会话标签；设置页可关闭或调整。
 - **多语言**：App 内置 60 余个语言资源，UI 包的组件文案经 i18n 桥接，桌面端也有独立的本地化资源。
@@ -101,7 +101,7 @@ OpenCode 同时维护两套原生界面：TUI 基于 opentui 与 Solid，Web/桌
 - **组件库领域化**让基础件与业务组件分离，Storybook 与动效参数便于统一验证。
 - **主题分两套**：Web 走 CSS 变量，TUI 走终端调色板，共享的只是主题语义与迁移工具。
 - **桌面是薄壳**：不复制 UI，只补窗口、菜单、文件、深链与平台外观。
-- **边界**：未找到托盘、全局快捷键、自动更新、主题市场与用户自定义 CSS。
+- **边界**：打包桌面版有更新链；主题插件可注册颜色主题进入选择器（[PluginThemes](../../opencode/packages/app/src/runtime/plugin/render.tsx#L110-L141)）。独立主题市场、托盘、全局快捷键与用户自定义 CSS 编辑入口本次未找到。
 
 ## 9. 未验证事项
 

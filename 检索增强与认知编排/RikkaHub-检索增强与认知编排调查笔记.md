@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
@@ -18,7 +18,7 @@ RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后�
 
 本次全仓库 Kotlin 源码范围内未找到可用的向量检索或 RAG 管线：`ai` 模块声明了嵌入生成接口与嵌入模型类型，但应用层没有调用方；附件、记忆和会话都不做分块、嵌入或相似度召回。会话检索与网页搜索都只有一次候选生成，没有 reranker、融合或查询改写；模型可连续多次调用工具，但系统侧没有阶段状态或终止策略（`ai/src/main/java/me/rerere/ai/provider/Provider.kt`、见“未验证事项”中的检索依据）。
 
-与上一快照相比有三处结构性变化：记忆从单表文本行变成带版本与元数据的 Markdown 文件库，并增加了后台整理（“做梦”）与按需读取；会话全文索引去掉了 jieba 词典，改为单字切分、按片段拼 NEAR 查询，并用 `libsimple.so` 提供拼音与前缀匹配；搜索 provider 扩到 20 个，新增 Bocha、Grok、RikkaHub 与 DeepSeek 等选项。
+记忆文件带版本与元数据，可后台整理与按需读取；会话全文索引采用单字切分、按片段拼 NEAR 查询，原生扩展提供拼音与前缀匹配；搜索目录有 20 个 provider，包含 Bocha、Grok、RikkaHub 与 DeepSeek 等选项。
 
 ## 谱系定位与系统边界
 
@@ -62,8 +62,11 @@ RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后�
 
 整理由 `MemoryConsolidationScheduler` 驱动，在轮次结束后登记待整理轮数，触发条件包括空闲计时到点（默认 2 分钟）、累计轮数达到上限（默认 6 轮）、应用切到后台、用户离开当前会话，以及应用启动时的 `resumePending()`；用户手动整理则先处理全部待整理对话再整体清理记忆库。整理时会构造一个独立的模型调用：读取当前记忆库，给出新近完成的对话轮次，让模型按 [stated] 与时效规则抽取事实，再用记忆工具写回（`data/ai/MemoryConsolidationScheduler.kt`、`MemoryConsolidator.kt`、`prompts/MemoryPrompts.kt`）。
 
+整理模型可在设置页独立选择并配置推理强度。运行时优先使用具备工具能力的专用记忆模型，再尝试具备工具能力的快速模型，最后回退当前会话模型（缺会话时取助手/全局聊天模型）；最后一级沿用快速模型的推理强度，返回的模型副本清空供应商内置工具集合，实际整理工具由后续 Agent 请求提供。见 [模型选择](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/ai/MemoryConsolidator.kt#L294-L305)、[设置入口](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/pages/setting/SettingModelPage.kt#L220-L240)。
+
 约束与边界：
 
+- 自动整理受助手的 `autoConsolidateMemory` 开关控制，默认开启；关闭后待整理内容仍可供手动整理，但不会由空闲、切后台或离开会话触发。见 [调度入口](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/ai/MemoryConsolidationScheduler.kt#L137-L175)。
 - 按记忆库串行，运行锁是进程内 Mutex；自动整理一次只处理一批，剩余交给定时器。
 - 自动整理失败不自动重试，避免模型持续出错时反复调用；待整理内容保留到下一轮对话结束或用户手动触发。
 - 分叉出来的对话复制过来的轮次由原对话负责整理，不会重复整理（`onConversationForked`）。
@@ -135,7 +138,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 记忆写回有两条路径。模型在对话中调用六个记忆工具（`memory_read`、`memory_write`、`memory_str_replace`、`memory_append`、`memory_delete`、`memory_list`），工具默认无需审批；写入前要求先读并带上版本，冲突时以返回的最新内容合并后重试。另一条是后台整理，按上节规则在轮次结束后抽取事实并写回（`data/ai/tools/MemoryTools.kt`、`MemoryConsolidationScheduler.kt`）。
 
-主动记忆演化在当前快照中已从“无”变为“有”：后台复盘、跨会话合并与去重都在整理提示词里成文，整理由用户活动派生而不是独立日程（触发条件见上文）。它仍不是审批闭环：整理写入直接落库，系统侧没有逐条人工审核或回滚入口；冲突处理依赖版本号与模型重试。
+后台记忆演化包含复盘与合并：后台复盘、跨会话合并与去重都在整理提示词里成文，整理由用户活动派生而不是独立日程（触发条件见上文）。它仍不是审批闭环：整理写入直接落库，系统侧没有逐条人工审核或回滚入口；冲突处理依赖版本号与模型重试。
 
 ## 预算、作用域、可观测与恢复
 

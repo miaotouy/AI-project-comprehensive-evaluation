@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`（Next.js 16 SPA + Hono/tRPC 服务端 + Drizzle/PostgreSQL，另含 Electron 桌面目标）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
@@ -18,7 +18,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 
 媒体创作视角下三个关键机制（独特功能笔记均未展开）：
 
-1. **三层对象 + 封面回写**：topic（LLM 生成标题、封面、workspace 可见性）→ batch（provider/model/prompt/width/height/config jsonb，即"复用设置"的来源）→ generation（seed、asset、fileId、asyncTaskId）。生成成功后若 topic 尚无封面，客户端自动把首张缩略图经 `updateTopicCover` 回写为 topic 封面（`src/store/image/slices/generationBatch/action.ts:280-292`）。
+1. **三层对象 + 服务端封面收口**：主题组织批次，批次保存模型与输入设置，单项生成关联结果资产、文件和异步任务。服务端成功路径在标记任务成功前，用缩略图填补空主题封面；并发批次通过数据库的空值条件更新只保留一个胜出封面，未使用的上传会清理。客户端即使退出轮询，成功路径仍可落封面。见 [GenerationService.ensureTopicCover](../../lobehub/apps/server/src/services/generation/index.ts#L330-L378)、[条件更新](../../lobehub/packages/database/src/models/generationTopic.ts#L115-L130)。
 2. **lambda/async 双路由 + 双完成路径**：`image.createImage` 在事务里建 batch+N 个 generation+N 个 asyncTask 后 fire-and-forget 触发 `asyncCaller.image.createImage`（`apps/server/src/routers/lambda/image/index.ts:215-332`），真正调模型在 async 路由（`apps/server/src/routers/async/image.ts`）；视频由 lambda 直接调 `modelRuntime.createVideo`，按 provider 返回分 webhook 等待（`apps/server/src/router-hono/webhooks/handlers/video.ts`，一次性 token 校验）与 `after()` 后台轮询（`apps/server/src/services/generation/videoBackgroundPolling.ts`，5s 固定间隔 × 120 次）两条路径收口。
 3. **Agent 创作通道**：`builtin-tool-image-generation` 是唯一的“结果进聊天”回流：Agent 可发现图像模型与参数 schema、发起生成并查询任务状态（4 个 API，见第 6 节），`humanIntervention: 'never'`，默认在工具内等待完成，结果以 markdown 图片标签 + 专用渲染组件进消息（`packages/builtin-tool-image-generation/src/manifest.ts`、`ExecutionRuntime/index.ts:441-587`）。
 
@@ -63,7 +63,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
        -> 成功：VideoGenerationService.processVideoForGeneration（下载<=500MB/5min -> ffmpeg 元数据 + 0.1s 截图 -> cover/thumb webp -> S3）
        -> createAssetAndFile（url/coverUrl/thumbnailUrl/duration/width/height）-> Success
   -> 客户端：GenerationFeed 逐 generation SWR 轮询 getGenerationStatus（1s 起、每 5 次翻倍、30s 封顶、错误×2）
-       -> 终态 Success 时回写 generation.asset、必要时回写 topic 封面；Error 显示分类错误
+       -> 终态 Success 时更新本地资产并刷新服务端主题封面；Error 显示分类错误
   -> 复用：BatchItem 的 reuseSettings（回填配置，image 剔除 seed）/ copyPrompt / deleteBatch；
        GenerationItem 的 download / copySeed（模型支持则 reuseSeed 直接应用）/ delete / copyError；
        topic 列表（grid/list）切换历史、删除、publishToWorkspace / makePrivate（creator-only）
@@ -123,7 +123,7 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 
 **客户端状态机**：`GenerationItem`（`image/features/GenerationFeed/GenerationItem/index.tsx:22-148`）按 `generation.task.status` 三态渲染 Success/Error/Loading；视频 batch 单 generation，同样三态（`video/features/GenerationFeed/BatchItem.tsx:79-88,201-230`）。每 generation 以 `useCheckGenerationStatus` 发起 SWR 轮询，参数为任务与主题定位信息及轮询开关（`src/store/image/slices/generationBatch/action.ts:193-301`；视频同构 `src/store/video/slices/generationBatch/action.ts:146-240`）。
 
-**轮询策略**：SWR `refreshInterval` 动态计算——基 1s、每 5 次请求翻倍、30s 封顶，轮询出错再 ×2；终态 Success/Error 返回 0 停止（`image/.../generationBatch/action.ts:213-238`）。轮询端点 `lambda generation.getGenerationStatus` 先经 `checkTimeoutTasks` 处理超龄任务（`routers/lambda/generation.ts:65-95`、`models/asyncTask.ts:253-289`）：Pending/Processing 超时被置为 `Error(Timeout)`，即“DB 为权威”的收口。终态回写：Success 更新 generation（含 asset）并触发 topic 封面回写（`:280-292`）。
+**轮询策略**：客户端 SWR 按请求次数指数退避，成功或失败后停止；状态端点会把超龄的待处理/处理中任务结算为超时错误。成功时客户端更新本地资产并刷新批次；本地主题仍无封面时只刷新主题列表，封面写入由服务端成功路径承担。图像异步路由、视频后台轮询与 webhook 均在任务成功前调用同一封面服务。见 [客户端终态处理](../../lobehub/src/store/image/slices/generationBatch/action.ts#L220-L252)、[图像成功路径](../../lobehub/apps/server/src/routers/async/image.ts#L273-L282)、[视频成功路径](../../lobehub/apps/server/src/services/generation/videoBackgroundPolling.ts#L121-L143)。
 
 **服务端超时/中止**：async image 路由内 `AbortController` + `ASYNC_TASK_TIMEOUT`（298s）定时 abort（`async/image.ts:131-133,322-334`），abort 后任务标记 Error 并走退款（OSS stub）；视频 webhook 处理对尚未到终态的任务直接跳过并返回成功，终态写入做幂等（`apps/server/src/router-hono/webhooks/handlers/video.ts`，token 用 `timingSafeEqual` 比对）。
 
@@ -156,8 +156,8 @@ covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 - **预览**：batch 内 `Image.PreviewGroup` 网格 + 每张 `GenerationItem`（`BatchItem.tsx:148-159`）；视频 `VideoSuccessItem` 播放（静态代码确认组件存在，实际播放未运行验证）。
 - **导出**：图片 `useDownloadImage`（文件名 `<prompt前30字符>_<时间戳>.<ext>`，`GenerationItem/index.tsx:50-63`）；视频 `downloadFile`（`:132-146`）。
 - **重试/再生成**：UI 实装的是 batch 级 `reuseSettings`（image `BatchItem.tsx:100-106` 剔除 seed 后回填配置，video `BatchItem.tsx:110-120` 逐参数回填）与 `copyPrompt`。generation 级提供 `copySeed`（模型支持 seed 时 `reuseSeed` 直接应用，否则复制剪贴板，`GenerationItem/index.tsx:65-87`）。`recreateImage`/`recreateVideo` store 动作（删除原 batch 后用 `batch.config` 原参数重建，`src/store/image/slices/createImage/action.ts:115-152`、`src/store/video/slices/createVideo/action.ts:134-164`）**本次未找到 UI 调用点**（全 src grep 仅命中定义与测试）。
-- **编辑**：无像素级编辑/局部重绘（本次未找到）；"继续创作"的等价物是修改 prompt/参考图/参数后重新生成，或用主题封面/历史批次继续。
-- **分支**：无显式分支 UI；每次生成新建 batch（同一 topic 内线性追加），删除 batch 后 reuseSettings 可重建近似批次，但不保留 parent 关系（与 Chatbox 的 parentIds DAG 不同，本次未找到 generation 级父子字段）。
+- **视频对话式编辑**：支持该能力的模型、成功结果与结果中的交互句柄共同决定是否显示编辑入口。选中旧结果后，输入区暂存原草稿、继承可用生成设置并接受编辑指令；提交携带前次生成 id，成功提交或取消编辑后恢复原草稿。见 [BatchItem 编辑入口](../../lobehub/src/routes/%28main%29/%28create%29/video/features/GenerationFeed/BatchItem.tsx#L94-L107)、[提交与草稿恢复](../../lobehub/src/store/video/slices/createVideo/action.ts#L152-L174)。
+- **版本关系**：服务端核验来源在相同主题、provider 和模型下且有交互句柄后，传前次交互标识调用编辑；结果资产保留 `previousGenerationId` 与交互标识，界面据此显示版本与来源。批次仍追加到时间线，但视频编辑已有来源链，不能概括为所有生成都无父子字段。见 [来源校验](../../lobehub/apps/server/src/routers/lambda/video/index.ts#L277-L325)、[结果资产写入](../../lobehub/apps/server/src/services/generation/videoBackgroundPolling.ts#L108-L130)。像素级局部绘制入口未在已读工作台中确认。
 - **再次引用**：参考图可以从本地上传，也可复用历史（`ReferenceImages` 展示 batch.config 里的参考图，`image/features/GenerationFeed/ReferenceImages.tsx`；复用即 reuseSettings 回填）；结果文件进资源库 tab（第 4 节）；topic 封面被 Sidebar 引用展示。
 
 ## 6. Agent 回流、插件与外部依赖
@@ -199,7 +199,7 @@ OSS 中计费/配额/完成通知为闭源扩展点：`chargeBeforeGenerate`/`ch
 - **video 双完成路径按 provider 能力分流**：webhook 型（如 Volcengine 注释）走回调，polling 型（如 OpenAI Sora 注释）走服务端后台轮询；客户端统一只认 asyncTask 状态，不感知具体路径。
 - **客户端轮询与服务端收口分离**：客户端退避轮询只读状态，超时/错误判定在服务端（checkTimeoutTasks、abort、120 次上限），刷新/重启后以 DB 为权威恢复。
 - **OSS 的计费/通知面全部留 stub**：`ENABLE_BUSINESS_FEATURES=false` 时预扣、结算、免费配额、完成通知都不发生；付费工作区行为（error batch 额度拦截、cooldown、退款）只能从路由器调用点与类型推断，无实现可查。
-- **本次未找到**：工作台→聊天会话的回流动作（sendToChat 类，grep `sendToChat|toChat|sendGeneration|generationToChat` 全 src 无命中，notify 钩子为空）；用户侧任务取消入口；recreateImage/recreateVideo 的 UI 调用点；视频 Agent 工具；generation 级父子分支关系；工作台结果与 Work 对象（独特功能笔记未验证项"image/video 创作工作台与 Work 对象的衔接"——生成结果走 files/asset 体系，`work`/`work_versions` 未见到生成来源的写入点）的关联；async/video.ts 的生产调用者。
+- **本次未找到**：工作台→聊天会话的回流动作（sendToChat 类，grep `sendToChat|toChat|sendGeneration|generationToChat` 全 src 无命中，notify 钩子为空）；用户侧任务取消入口；recreateImage/recreateVideo 的 UI 调用点；视频 Agent 工具；通用图像分支编辑；工作台结果与 Work 对象（独特功能笔记未验证项"image/video 创作工作台与 Work 对象的衔接"——生成结果走 files/asset 体系，`work`/`work_versions` 未见到生成来源的写入点）的关联；async/video.ts 的生产调用者。
 
 ### 未验证事项
 

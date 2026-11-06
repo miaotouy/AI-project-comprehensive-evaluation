@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Electron 桌面/约 20 个消息平台）的混合 monorepo。生成式输出没有统一的类型化对象协议，而是三种松散约定并行：`MEDIA:<path>` 纯文本标签（消息平台附件、桌面媒体附件）、Preview 形式的 Markdown 链接（桌面预览目标，本快照中只有解析端、没有生产端）、以及桌面渲染器对代码围栏的后验启发式"物化"（artifact card + 版本化注册表）。真正的持久对象是**文件**（模型用 write_file/patch/terminal 落盘、经 `MEDIA:` 或预览面展示），artifact 注册表只存在于桌面渲染器内存中、以聊天记录为事实源、不可被模型寻址。桌面端具备一个完整的主链：HTML/Python 代码围栏 → 流式检测 → artifact 卡片 → 右侧栏预览标签页（HTML 在 `iframe sandbox="allow-scripts"` 中运行、URL 在沙箱 webview 中运行）→ 版本切换/复制/下载/浏览器打开 → 会话恢复时从消息记录重建注册表。模型回流通道存在但不完整：预览读取与终端读取工具可读取桌面面板内容，文件读取工具回流磁盘文件，但 artifact 对象列表与版本不可被模型查询。无 notebook、无画布、无白板。能力等级定为 **G3**（桌面可执行 HTML Artifact + 沙箱预览 + 版本化持久展示），在"文件"这一对象类别上有部分 G4 特征（用户可在预览面板内就地编辑并保存、冲突检测、diff 视图、git 审查面板），但 artifact 对象本身不可用户编辑、模型也不可查询，未达 G5。
+Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Electron 桌面/约 20 个消息平台）的混合 monorepo。生成式输出没有统一的类型化对象协议，而是三种松散约定并行：`MEDIA:<path>` 纯文本标签（消息平台附件、桌面媒体附件）、Preview 形式的 Markdown 链接（旧链接约定）与 desktop_preview 工具的结构化打开/关闭事件、以及桌面渲染器对代码围栏的后验启发式"物化"（artifact card + 版本化注册表）。真正的持久对象是**文件**（模型用 write_file/patch/terminal 落盘、经 `MEDIA:` 或预览面展示），artifact 注册表只存在于桌面渲染器内存中、以聊天记录为事实源、不可被模型寻址。桌面端具备一个完整的主链：HTML/Python 代码围栏 → 流式检测 → artifact 卡片 → 右侧栏预览标签页（HTML 在 `iframe sandbox="allow-scripts"` 中运行、URL 在沙箱 webview 中运行）→ 版本切换/复制/下载/浏览器打开 → 会话恢复时从消息记录重建注册表。模型回流通道存在但不完整：预览读取与终端读取工具可读取桌面面板内容，文件读取工具回流磁盘文件，但 artifact 对象列表与版本不可被模型查询。无 notebook、无画布、无白板。能力等级定为 **G3**（桌面可执行 HTML Artifact + 沙箱预览 + 版本化持久展示），在"文件"这一对象类别上有部分 G4 特征（用户可在预览面板内就地编辑并保存、冲突检测、diff 视图、git 审查面板），但 artifact 对象本身不可用户编辑、模型也不可查询，未达 G5。
 
 ## 系统边界与完整主链路
 
@@ -48,7 +48,8 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
     - terminal-backend 的读取统一经共享媒体解析器；
     - draft 终态发送不再带 `expect_edits`。
   - **图像后处理**：图片生成后新增 sub-2MP 默认 upscale（FAL Clarity Upscaler 链，`tools/image_generation_tool.py:11-153`，按模型 `upscale` 旗标门控）。
-- `#media:`/`#preview/` Markdown href：桌面渲染器在 Markdown 链接层消费，经链接组件分发（`markdown-text.tsx:252-269`）。注意 `previewMarkdownHref()`（`preview-targets.ts:27`）在本快照中没有生产侧调用者——Preview 协议的写入端缺失，仅解析端存活（`assistant-message.tsx:84-94` 从收尾文本提取主要预览目标）。
+- `#media:`/`#preview/` href 是消息链接消费约定，不能据其辅助生成函数的调用情况推断预览工具缺失。模型实际使用 desktop_preview：open/close 经结构化 preview.open/close 事件驱动 UI，read 经 Agent 回调读取面板；工具属于 desktop_ui，会话来源决定可用性（[工具 schema 与注册](../../hermes-agent/tools/preview_tool.py#L26-L78)）。
+- 打开请求经 URL/本地路径归一化后发出事件，拒绝目录；桌面只响应当前窗口屏幕上可见会话的请求，再按 owner/profile 路由预览，后台隐藏会话不会抢开面板（[生产端](../../hermes-agent/tools/open_preview_tool.py#L70-L89)、[消费端](../../hermes-agent/apps/desktop/src/app/session/hooks/use-preview-routing.ts#L97-L132)）。
 - 无结构化 tool part 承载 artifact。工具结果就是 JSON 字符串，桌面端用字段名正则（`KEY_HINT_RE`）从工具结果与转写中挖出文件路径/URL 填入"Artifacts"画廊页（`app/artifacts/artifact-utils.ts:20-26,202-244`）。
 
 **对象模型**：桌面 artifact 的稳定身份是 `(sessionId, slug)`，slug = `kind:language:title`（`artifact-detect.ts:159-167`）；记录含创建/更新时间、类型、语言、标题与版本数组，版本以 FNV-1a 内容哈希去重（`store/artifacts.ts:24-41,115-179`）。无"创建者"字段（creator 即会话），无状态机（只有版本序列），无能力声明。事实源层级：**聊天记录（state.db）> 渲染器内存注册表 > 预览标签页（只持引用）**。注册表限额：每会话 24 个、每 artifact 20 版本、共 40 会话，超限按 updatedAt 淘汰（`store/artifacts.ts:45-67`）。
@@ -85,7 +86,7 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 
 ## 5. 用户交互、事件与错误反馈
 
-- 打开预览是**用户点击驱动**的硬约束："a background stream never steals the pane"（`artifact-card.tsx:37-39`）；agent 侧 `open_preview` 工具只对"在屏会话"生效且路由到所属窗口（`desktop_ui.py:32-40` 经 `HERMES_UI_SESSION_ID` 路由，`use-preview-routing.ts:60-93`）。
+- artifact 卡片由用户点击打开；模型也可通过 desktop_preview 的 open 动作请求预览，仅对所属窗口在屏会话生效，隐藏后台流不会抢开面板（[消费门控](../../hermes-agent/apps/desktop/src/app/session/hooks/use-preview-routing.ts#L97-L132)）。
 - artifact 标签页内：版本前后步进、跳最新、复制内容、下载文件、系统浏览器打开、RENDERED/SOURCE 切换（`preview-artifact.tsx:200-261`）。
 - URL 标签页内：刷新、devtools、console、monitor（`preview-pane.tsx:289-307`）；`preview.restart` RPC 在网关侧拉起一个"临时预览重启 agent"（只启用 terminal/file 工具集、跳过 memory、蒸馏最近 24 条消息为上下文，`tui_gateway/server.py:5987-6110`）来修复挂了的前端服务，进度经 `preview.restart.progress` 回传。
 - 本地文件标签页内：就地编辑器（`e` 键进入）、保存、磁盘内容变化冲突检测 + 强制覆盖横幅、修改点指示（`preview-file.tsx:793-908`）。
@@ -125,10 +126,10 @@ Hermes Agent 是 Python Agent 核心 + 多端表面（CLI/TUI/Web 仪表盘/Elec
 ## 9. 模型回流、对象感知与持续维护
 
 - 可查询：
-  - `read_preview`：当前预览标签页正文（`tools/read_preview_tool.py`，返回 `{kind,url,title,text,…}`，file 标签只回身份、"artifact tab points back at the conversation"）；
+  - `desktop_preview(action="read")`：读取当前预览，底层保留 read_preview 回调，文件标签只回身份并提示读磁盘文件（[统一工具入口](../../hermes-agent/tools/preview_tool.py#L43-L68)）；
   - `read_terminal`、`read_file`：终端输出与任何已写文件；
   - `session_search`：跨会话检索转写（`tools/session_search_tool.py`）；
-  - `open_preview`/`focus_pane`：投影面控制；
+  - desktop_preview 的 open/close 动作：控制当前会话拥有的投影面；
   - **`read_window_below`**：桌面下方 OS 窗口元数据（见 §7）；
   - **`vision_analyze` 区域缩放**：`_crop_image_region`（`tools/vision_tools.py:681`）按 `region=[x1,y1,x2,y2]` 在原图像素坐标上裁剪放大细节再分析，源自 Qwen 的 zoom-image 方案。
 - 不可查询：artifact 注册表对模型完全不可见——没有列出 artifact、读取版本源码、选择版本的模型侧通道。模型对"自己生成的 HTML"的唯一读回途径是 `read_preview`（若该 artifact 恰好开在预览面板里）或磁盘文件（若曾落盘）。
@@ -160,7 +161,7 @@ E2E（`apps/desktop/e2e/`）覆盖启动/聊天/会话/右侧面板，未发现�
 
 **已确认边界**：
 - artifact 是纯渲染器启发式对象，无协议、无模型寻址、不可用户编辑（源码直接确认，`store/artifacts.ts` 注释）。
-- `[Preview: …](#preview/…)` 协议只有消费端，本快照无生产端调用者（`previewMarkdownHref` 无调用点）。
+- 旧 Markdown Preview href 辅助函数未找到生产侧调用者；模型主动打开、关闭与读取预览使用已接入的 desktop_preview 工具事件/回调链（§1），两种入口需分开判断。
 - 本地 HTML 文件只显示源码、artifact HTML 才执行（`preview-file.tsx:664-667`）。
 - 无 notebook/画布/白板运行时（检索范围：全仓 `*.py`/`*.ts`/`*.tsx` 内 jupyter/notebook/draw.io/excalidraw/whiteboard，排除 node_modules/网站/技能目录；仅发现 `.ipynb` 读取与图标/文档提及）。
 

@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`（重点 `packages/coding-agent/src/core/agent-session.ts`、`packages/coding-agent/src/core/compaction/`、`packages/coding-agent/src/core/system-prompt.ts`、`packages/agent/src/agent.ts`、`packages/agent/src/agent-loop.ts`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
-> 调查方式：直接阅读源码（`AgentSession.prompt` 主链路全量、`Agent`/`runLoop` 工具循环、compaction 模块、流式事件到 TUI 的消费点），逐项核实并修正此前笔记中的符号引用与行号；未运行交互会话
+> 调查方式：只读源码与版本差异，定向跟踪会话投影、事件落盘、steer 消费边界及 durable 工具重放；其余请求与压缩机制采用文中来源范围，未运行交互会话
 >
 > 调查范围：发送主链路（prompt 输入处理）、上下文投影与 system prompt 组装、token 估算与自动压缩、agentLoop 工具循环、流式事件链、abort/重试/steer/followUp；会话持久化与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -20,7 +20,7 @@ Pi 的生成任务由 `AgentSession.prompt()` 编排、`Agent`/`agentLoop` 执�
 2. 上下文沿 leaf 经 parent 链回溯构建；compaction/branch_summary 被投影为摘要消息，普通 custom 条目不参与；system prompt 由工具列表、项目上下文文件、skills、自定义提示组装。
 3. 自动压缩基于 token 估算与 `contextWindow - reserveTokens` 阈值；溢出走"压缩并自动重试一次"。
 4. 流式事件链：`streamAssistantResponse` 把细粒度 delta 转成 `message_start/update/end`，UI 全量重建（DOM 侧归消息渲染器）。
-5. 并发粒度是单会话单 agent 循环：steer（打断）与 followUp（排队）是运行中投递通道；abort 后以 `stopReason: "aborted"` 落盘。
+5. 并发粒度是单会话单 agent 循环：steer（回合边界转向）与 followUp（排队）是运行中投递通道；abort 后以 `stopReason: "aborted"` 落盘。
 
 ## 系统边界与生成任务主链
 
@@ -57,6 +57,8 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 2. 历史选择与上下文拼装顺序
 
+历史先按分支与 compaction 确定范围，再应用该范围内最新的 context_edit。编辑可替换内容或从模型上下文排除条目，原始文件仍保留；恢复因此得到当前投影，不能概括为原始全文逐条回注（[buildSessionProjection](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
+
 - **上下文投影**：`buildSessionContext`（`session-manager.ts:461-470`）→ `buildContextEntries`（`session-manager.ts:418-454`）：沿 leaf 回溯得到路径，路径中若含 compaction 条目，则用"compaction 摘要消息 + firstKeptEntryId 起的保留条目 + 其后所有条目"替代完整历史；`sessionEntryToContextMessages` 把 compaction/branch_summary/custom_message 条目分别投影为摘要消息（`session-manager.ts:383-408`）。普通 `custom` 条目不参与（其数据语义见会话与消息管理笔记 §1）。
 - **LLM 转换**：`convertToLlm`（`core/messages.ts:148-195`）把自定义角色转成 user 文本（bash 执行按 `excludeFromContext` 跳过、custom、摘要消息加前缀/后缀包裹），输出 `packages/ai` 的 `Message[]`。
 - **system prompt**：`buildSystemPrompt`（`core/system-prompt.ts:28-162`）：自定义 prompt（`customPrompt`，来自 `.pi/system-prompt.md` 等）替换默认模板，追加 `appendSystemPrompt`、`<project_context>` 文件、skills 区块、cwd；默认模板含工具列表（带一行 snippet 的工具才显示，:82-84）、guidelines（含按工具集推导的提示，:97-119）、Pi 自身文档指引（:121-138）。拼装参数由 `_rebuildSystemPrompt` 汇总（`agent-session.ts:1023-1057`）。
@@ -84,7 +86,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 6. 完成、异常、半截流与最终回写
 
-- **落盘**：`AgentSession._handleAgentEvent` 对 user/assistant/toolResult 消息调用 `sessionManager.appendMessage`（`core/agent-session.ts:640-657`）；文件在第一条 assistant 消息落盘时创建（`_persist`，落盘时机见会话与消息管理笔记 §2）。
+- **落盘**：`AgentSession._handleAgentEvent` 对 user/assistant/toolResult 消息调用 `sessionManager.appendMessage`（`core/agent-session.ts:640-657`）；文件在首条 user 或 assistant 消息落盘时创建，首轮无回复也保留用户输入（[事件落盘](../../pi/packages/coding-agent/src/core/agent-session.ts#L1170-L1190)、[创建判定](../../pi/packages/coding-agent/src/core/session-manager.ts#L1161-L1189)）。
 - **中断语义**：`AgentSession.abort()`（`agent-session.ts:1550-1554`）中止当前 agent 运行与工具；中断后 assistant 消息以 `stopReason: "aborted"` 持久化（`agent.ts:511-527` 的 `handleRunFailure` 构造 failureMessage；`agent-loop.ts:196-200` 提前结束分支），下次 `/resume` 恢复该消息（恢复语义见会话与消息管理笔记 §3）。
 - 完成/错误：`stopReason` 还区分 stop/length/toolUse/error；length 截断时整批工具调用不执行、以错误结果回注（`failToolCallsFromTruncatedMessage`，`agent-loop.ts:381-406`）；错误消息触发自动重试判定（§7）。
 
@@ -97,8 +99,8 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 8. 队列、多会话并发与后台生成
 
-- **并发粒度是单会话单 agent 循环**：运行中可投递 steer（打断）与 followUp（排队）消息（`agent-session.ts:1343-1408`，`_queueSteer` :1379-1391、`_queueFollowUp` :1396-1408）；`Agent` 侧队列模式 `all`/`one-at-a-time`，默认 one-at-a-time（`agent.ts:125-159`、`:231-232`）；`agent_settled` 事件通知 UI 进入空闲（`agent-session.ts:596-604`）。无多会话并行 UI。
-- `followUp` 队列在 agent 自然结束前排空（`agent-loop.ts:262-272`）；steer 在每次内层循环末尾轮询注入（`agent-loop.ts:167`、`:259`）。
+- **并发粒度是单会话单 agent 循环**：运行中可投递 steer（回合边界转向）与 followUp（排队）消息（`agent-session.ts:1343-1408`，`_queueSteer` :1379-1391、`_queueFollowUp` :1396-1408）；`Agent` 侧队列模式 `all`/`one-at-a-time`，默认 one-at-a-time（`agent.ts:125-159`、`:231-232`）；`agent_settled` 事件通知 UI 进入空闲（`agent-session.ts:596-604`）。无多会话并行 UI。
+- `followUp` 队列在 agent 自然结束前排空（`agent-loop.ts:262-272`）；steer 在当前助手及工具批次结束后、下次请求前被消费，准备阶段也会补查；它自身只入队，不 abort 已在执行的模型流或工具（[队列入口与 abort](../../pi/packages/agent/src/agent.ts#L307-L351)、[循环边界](../../pi/packages/agent/src/agent-loop.ts#L267-L315)）。
 - 队列 UI 显示由 `queue_update` 事件驱动（`agent-session.ts:569-575`，`_steeringMessages`/`_followUpMessages` 追踪 :319-324；界面见 Chat UI 笔记 §5）。
 
 ## 9. Agent、工具、知识库与附件注入点
@@ -130,7 +132,7 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 durable 把一次输入拆成接纳与执行两层。`submit()` 先把输入持久化为 Submission 再开始执行，Task 按 phase 推进；run 是从一次输入到最终答案的 turn 序列，turn 是一次模型响应及其工具调用。每个 phase 结束都存 checkpoint，重启后 `resume()` 从最后一个 checkpoint 继续，等待中的任务以 phase 形式睡在存储里，不占用调用（`packages/durable/README.md` 的 Task 与 Resume 章节、`packages/durable/src/harness/scheduler.ts`）。
 
-该链的上下文从存储中的 conversation 投影，工具结果先成为已结算 entry 再按调用顺序进入 transcript；shell 输出在源侧按行数和字节数限界，截断时尽力保留完整输出文件。它为进程重启提供恢复语义，服务于 p2；默认 coding-agent 的 `AgentSession.prompt()` 主链仍然存在（`packages/durable/src/harness/context.ts`、`packages/durable/src/harness/generation.ts`、`packages/durable/src/tools/`）。
+该链的上下文从存储中的 conversation 投影，工具结果先成为已结算 entry 再按调用顺序进入 transcript；shell 输出在源侧按行数和字节数限界，截断时尽力保留完整输出文件。它为进程重启提供恢复语义，服务于 p2。工具调用另在执行前提交 intent；重启只在存储与当前声明同时为 replay-safe 时重跑，默认 unsafe 的未完成调用结算 interrupted 并提示可能已部分运行，已提交结果复用。这是显式重放策略，无法推导为外部副作用恰好一次（[ToolTask](../../pi/packages/durable/src/harness/tool.ts#L177-L227)）。默认 coding-agent 的 `AgentSession.prompt()` 主链仍然存在（`packages/durable/src/harness/context.ts`、`packages/durable/src/harness/generation.ts`、`packages/durable/src/tools/`）。
 
 稳定链的 compaction 设置支持按精确 `provider/modelId` 覆盖 reserveTokens 与 keepRecentTokens；两个字段分别回退到普通设置和内置默认值，模型切换后的下一次检查即采用新预算（`packages/coding-agent/src/core/settings-manager.ts:867-899`、`packages/coding-agent/docs/compaction.md:422-444`）。
 

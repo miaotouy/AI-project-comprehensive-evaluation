@@ -2,102 +2,98 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
-> 调查方式：只读核对已有独特功能笔记，并追踪 `main.py` 生命周期、Automations 的路由/模型/调度器，以及 Calendar 事件与提醒路径；未启动服务，未修改被调查仓库
+> 调查方式：只读对照旧新源码，追踪应用生命周期、自动化路由/模型/调度器、聊天完成交接与 Calendar 提醒事务；未启动服务
 >
-> 调查范围：Automations 的 rrule 无头运行与 Calendar 事件提醒；覆盖状态权威、执行、结果交付、启停/删除、失败与重启去重。普通日历 CRUD、模型工具参数和通用聊天执行细节仅作交接说明
+> 调查范围：Automations 的 rrule 无头运行与 Calendar 提醒，覆盖定义、认领、执行、交付、终态、启停及去重；普通日历 CRUD 与完整工具执行细节仅作交接
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
 ## 结论摘要
 
-Open WebUI 在当前快照有一条 `主链确认` 的隔离日程运行，以及一条 `主链确认` 的条件通知链。
-
 | 运行形态 | 触发与运行对象 | 状态权威 | 执行与交付 | 证据状态 |
-| --- | --- | --- | --- | --- |
-| 隔离日程运行：Automations | 用户保存的 prompt、model、rrule 自动化；到期后认领 | `automation` 为定义与下次运行事实源，`automation_run` 为每次终态 | 创建真实 chat 或 channel 消息，再无头进入完整聊天管线；Socket、运行记录和 chat/channel 是结果归属 | `主链确认` |
-| 条件唤醒：Calendar alerts | 事件进入提醒窗口，且尚未记录 alerted | `calendar_event` 与 `meta.alerted_at` | 向用户 Socket 房间发 alert，并发布通知事件 | `主链确认` |
+|---|---|---|---|---|
+| 隔离日程运行：Automations | 用户保存的 prompt、模型与 rrule；到期认领或手动触发 | automation 保存定义与下次时间；automation_run 保存 success/error 终态 | 新建 chat 或频道消息，再进入聊天管线；运行记录与 Socket 提供返回入口 | 主链确认，静态证据 |
+| 条件通知：Calendar alerts | 事件进入提醒窗口且该开始时间尚未提醒 | calendar_event 与 meta.alerted_at；notification 保存收件箱交付 | 同事务记录提醒标记与收件箱，提交后发通用事件与 Socket | 主链确认，静态证据 |
 
-两条链由应用启动的同一个 async scheduler 驱动，但运行对象不同。Automations 是有独立 run 历史和聊天产物的 Agent 工作单元；Calendar 本身不是 Agent job，只有事件提醒构成符合本类目的后台条件唤醒。日历中的 “Scheduled Tasks” 只是把 Automation 的未来计划和历史运行投影到时间轴，不建立第二套调度状态。
+两条链共享 scheduler，但 Calendar 没有独立 Agent run；日历中的 Scheduled Tasks 也只是自动化计划与历史的时间轴投影。调度器还处理一次性聊天 timer，其独立运行语义留在工具调查范围，本篇未展开。
 
 ## 系统边界与主链
 
-应用 lifespan 在启动时创建 `scheduler_worker_loop` task，关闭时直接 cancel 该 task。调度器在每实例运行，分别受 `automations.enable` 与 `calendar.enable` 配置门控；其调度轮询默认十秒并加入随机抖动。聊天模型、工具、Filters、RAG 和消息保存仍使用既有聊天管线，本笔记只记录后台调用如何取得身份及如何把结果交接回该管线（`backend/open_webui/main.py:392-394,465-477`; `backend/open_webui/utils/automations.py:210-267`）。
+应用 lifespan 创建 scheduler task，关闭时 cancel；每实例运行同一循环。timer 默认每秒检查，Automations 与 Calendar 默认每十秒加 0–2 秒抖动检查，各有功能开关。调度器认领后以独立 asyncio task 执行自动化（[`main.py`](../../open-webui/backend/open_webui/main.py) 的 lifespan、[`utils/automations.py:54-125`](../../open-webui/backend/open_webui/utils/automations.py#L54-L125)）。
 
-### Automations：从规则到独立聊天
+```text
+自动化 UI/工具创建定义
+  -> 权限、rrule、频率及数量校验
+  -> automation 保存 next_run_at
+  -> claim_due 认领并推进下次时间
+  -> 复验 owner、签发短期 token
+  -> 创建 chat 或频道消息 -> 完整聊天处理器
+  -> automation_run、Socket 与通知事件
 
-完整链路是：用户提交自动化定义 -> 路由校验权限、rrule、频率及数量 -> `automation` 行保存下次时间 -> scheduler 原子认领到期行并立即重算下次时间 -> `execute_automation` 复验 owner 权限、生成短期 owner token -> 创建真实 chat 或 channel 消息 -> 调用完整 `CHAT_COMPLETION_HANDLER` -> 写入 `automation_run`，以 Socket 和事件通知结果。该链最终的可观察产物是可打开的 chat 或频道消息，而不是仅有 worker 日志（`routers/automations.py:208-238`; `models/automations.py:289-332`; `utils/automations.py:489-684,772-780`）。
+Calendar 提醒窗口
+  -> 事务内重读事件并查去重标记
+  -> 同事务写提醒标记与 notification
+  -> commit -> 通知变化/通用事件 -> 即时 Socket alert
+```
 
-### Calendar alerts：从事件窗口到通知
-
-完整链路是：用户或模型创建/更新事件并保存 `meta.alert_minutes` -> scheduler 搜索当前提醒窗口内且未取消的事件 -> 检查 `meta.alerted_at` 去重 -> 向用户房间发 `calendar:alert` -> 将该字段写回事件 -> 发布通用 Calendar notification event。事件本身和提醒去重标记都在数据库，因此没有另建的 alert queue 或 run 历史表（`models/calendar.py:53-95,660-753`; `utils/automations.py:692-769`）。
-
-## 触发、调度与运行对象
-
-### Automations 的定义、认领与并发
-
-`automation` 与 `automation_run` 的字段分工如下：
-
-- `automation`：owner、可选 folder、名称、JSON data 中的 prompt/model/rrule、活跃状态，以及 `last_run_at` 和 `next_run_at`。
-- `automation_run`：run id、automation id、可选 chat id，以及 `success` 或 `error` 与错误文本。
-
-创建和更新会计算 next run；非管理员还受 `features.automations` 权限、最大数量和最小间隔约束。有限次数的 rrule 必须有 DTSTART 锚点，避免不完整规则无限运行；频率计算会先丢弃 DTSTART 行再解析，使锚点不干扰间隔判定（`utils/recurrence.py:118-200`；`models/automations.py:20-55,132-156,225-278`; `routers/automations.py:45-95,208-230`）。
-
-调度器每轮最多认领十个到期自动化。`claim_due` 在数据库事务中筛选 `is_active` 且 `next_run_at <= now` 的记录；PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`，随后立即写入 `last_run_at` 和新的 `next_run_at`。这使多个实例不会同时执行已认领的同一到期行；轮询抖动进一步降低同时争抢概率（`models/automations.py:289-332`; `utils/automations.py:210-255`）。
-
-### Calendar alert 的状态对象
-
-Calendar event 保存开始时间、可选 rrule、取消标记和可写 meta。`get_upcoming_events` 过滤已取消事件，以默认或每事件的 `alert_minutes` 计算窗口；负数表示不提醒。调度器对 `alerted_at` 已存在的事件跳过，成功发送后写回当前时间，因此去重状态随数据库跨重启、跨实例存留（`models/calendar.py:53-77,732`; `utils/automations.py:692-749`）。事件创建/更新的表单校验现在拒绝短于一天的重复频率（下限常量 `MIN_CALENDAR_RRULE_INTERVAL_SECONDS` 为 24 小时），超频规则返回 `CALENDAR_RRULE_TOO_FREQUENT`（`models/calendar.py:30,198-245`）；范围查询的重叠判定也补上了“开始时间已落在窗口内、结束时间晚于起点”的情形（`models/calendar.py:567-575`）。
-
-## 执行、结果交付与状态更新
-
-### Automations 的执行域
-
-执行前，worker 重新读取 owner，并拒绝已删除、降权或失去 `features.automations` 权限的 owner；拒绝也写 error run 并发布失败事件。正常情况下，prompt 经模板渲染，worker 为该 owner 创建短期 bearer token，用来在无头请求中保留 owner 身份。默认目标会新建真实 chat：先保存 user 和空 assistant 占位消息及 `meta.automation_id`，再以 automation session id 调用完整聊天处理器。频道目标同样先插入用户与模型消息，再进入 channel 聊天处理器（`utils/automations.py:489-540,547-650`; `utils/automations.py:386-486`）。
-
-成功时结果属于新 chat、频道模型消息和 `automation_run.chat_id` 三处可识别对象；worker 对 owner Socket room 发送 `automation:result`，同时发布完成事件。异常被捕获为最多 4000 字符的 error run、失败事件和失败通知，而不是让 scheduler loop 退出（`utils/automations.py:652-684,772-780`）。运行列表路由可按 automation 查询这些持久记录，Calendar 路由又把历史 run 投影为 Scheduled Tasks 时间线中的虚拟事件（`routers/automations.py:388-400`; `routers/calendar.py:195-269`）。
-
-### Calendar alert 的交付
-
-提醒的直接交付是用户 Socket room 的 `events` payload，类型为 `calendar:alert`；payload 含 event id、标题、开始时间、距开始分钟数和地点。随后以 scheduler 为 source 发布 Calendar notification event，是否还有配置的目标通知由通用通知系统承接。即使后续 notification publish 失败，代码仅记录 debug，不会撤销已经写回的 `alerted_at`（`utils/automations.py:542-645`）。
-
-后台任务的产出还有一条持久通道：`notification` 表保存提醒与系统消息，收件箱端点提供列表、未读数、打开事件与已读更新，另有推送目标配置（`routers/notifications.py:70-124,167-188`）。Socket 通知因此是即时面，收件箱是补看面，两者由同一批事件驱动。
-
-**执行现场扩展**：自动化可在执行前把终端工作目录切到指定路径（`_set_terminal_cwd`，`utils/automations.py:199`），并支持频道型自动化（`_execute_channel_automation`，`:247`）——即自动化结果既能落到新会话，也能落到频道消息。
-
-## 并发、取消、失败与恢复
+## 触发、认领与状态权威
 
 ### Automations
 
-用户可 toggle，使 `is_active` 翻转且停用时将 `next_run_at` 清空；update 可重写规则和下次时间，delete 会先删除历史 `automation_run` 再删除定义。手动 `/run` 只用 `asyncio.create_task` 发起相同执行函数，不另建 run 的 queued/running 状态，因此本次静态调查未找到对“已经在执行的一次运行”的单独取消 API 或持久 running 状态（`models/automations.py:264-287`; `routers/automations.py:306-380`）。
+定义包含 owner、可选 folder、名称、JSON 中的 prompt/model/rrule、活跃状态及上次/下次时间；run 只有运行 id、自动化 id、可选 chat id、终态与错误文本，没有 queued/running 持久状态。创建、更新、启停、手动运行与历史查询入口位于 [`routers/automations.py`](../../open-webui/backend/open_webui/routers/automations.py)。
 
-认领时立即推进下次时间，重启后不会因同一个到期点反复认领；但应用关闭只 cancel scheduler task，当前已经由 `asyncio.create_task(execute_automation(...))` 启动的执行体的精确取消/等待语义未在本轮逐步验证。若执行抛出异常，run 会落 error；本次未找到自动重试或补跑 backlog 的实现证据，不能据此断言不存在于未读的基础设施层。
+非管理员受功能权限、最大数量与最小间隔约束。有限次数规则要求 DTSTART，规则计算统一进入 recurrence 工具；到期认领批量读取 owner 时区重算下一次时间，求值超时则跳过该行。每轮最多十项，PostgreSQL 使用 `FOR UPDATE SKIP LOCKED`；其它方言走普通事务读写，跨实例单次执行保证需结合方言验证，不能仅从调度抖动推断（[`models/automations.py:297-348`](../../open-webui/backend/open_webui/models/automations.py#L297-L348)、[`utils/recurrence.py`](../../open-webui/backend/open_webui/utils/recurrence.py)）。
+
+认领在执行前就推进 last/next 时间，因此运行失败后仍按下一次规则触发。本次在调度循环中未找到失败自动重试或逐个补跑停机期间所有到期点的逻辑。
 
 ### Calendar alerts
 
-取消事件或将 `alert_minutes` 设为负数可阻止未来提醒；删除事件也使其不再被查询。数据库 `alerted_at` 防止同一存储事件在重启或多实例下重复发送。当前实现按原 event 记录处理提醒；实例展开会先剥掉 DTSTART 行再解析，遇到 `EXRULE` 则记警告并只返回原始事件，不做排除规则展开（`utils/calendar.py:17-76`），“每个重复实例各提醒一次”的完整契约仍未逐项验证。Socket 或通用通知系统的投递失败不会被保存为可重试 alert run，因此这条链的可靠性边界止于数据库去重与 best-effort 发布。
+事件保存开始时间、重复规则、取消标记与提醒分钟数；负数关闭提醒。重复频率校验下限为 24 小时。查询提醒窗口后，处理器会锁定并重读数据库事件，校验事件仍存在、未取消、开始时间未变，且 `alerted_at` 不等于本次开始时间（[`models/calendar.py`](../../open-webui/backend/open_webui/models/calendar.py)、[`utils/automations.py:542-593`](../../open-webui/backend/open_webui/utils/automations.py#L542-L593)）。
 
-## 相邻类目交接与已确认边界
+去重标记保存的是事件开始时间，改期后允许再次提醒；它没有表达每个重复实例的独立 alert run。重复实例展开、特殊排除规则与每实例提醒的完整关系尚未逐项确认。
 
-- Automations 创建真实聊天并进入标准聊天处理器；会话、消息和 streaming 的内部持久化属于 [会话与消息管理笔记](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md) 与 [对话请求与上下文笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)。
-- 无头自动化的模型工具、Filter、RAG 与终端配置沿用聊天管线；工具权限和调用机制属于 [Agent 工具笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md)。
-- Calendar CRUD、共享访问、RSVP 和模型管理日历的工具面是日程对象能力；本笔记仅纳入由 scheduler 驱动、向用户交付的提醒链。
-- Persistent Memory 的每回合后台复盘在独特功能笔记已确认，但该对象是用户记忆写入，不在此重复计为 automation run。
+## 执行、权限与结果交付
 
-## 未验证事项
+### 自动化进入聊天管线
 
-- 未启动 Open WebUI，未验证实际 rrule 触发、数据库方言下的并发认领、Socket 推送、聊天流式结果或 channel 目标的端到端交付。
-- 未验证进程关闭时已启动 automation task 的取消和最终 run 记录，也未验证多实例部署中 scheduler 与数据库事务的实际时序。
-- 未对完整聊天管线中的工具审批、外部模型调用和终端服务进行运行验证；这里只确认无头请求携带 owner token 并调用该管线。
-- Calendar 重复事件的提醒实例语义、通用通知系统的外部目标重试，以及 alert 发送失败后的恢复行为未验证。
+执行时重新读取 owner，要求角色仍为 user/admin 且保留自动化权限，再检查 Auths 账号活跃性；短期 token 带 automation 类型与账号 session stamp。模型目录为空时先加载。模型默认工具、过滤器、终端与允许的联网/图像能力由服务端解析；聊天目标还按“用户设置 → 界面默认 → 全局开关”继承记忆偏好。需要浏览器的代码解释器特性未被默认开启（[`utils/automations.py:163-196,349-495`](../../open-webui/backend/open_webui/utils/automations.py#L163-L495)）。
+
+| 目标 | 执行与终态边界 |
+|---|---|
+| 持久 chat | 先创建用户消息和助手占位，再调用聊天处理器；主入口等待已注册的生成任务完成，执行器再读助手消息，要求无 error 且 done 才写 success。异常、未完成和取消写 error，并保留已创建 chat 的回链 |
+| channel | 复验频道功能/权限，走频道消息创建入口保存两条消息，再调用聊天处理器；返回后即写 success。主入口的等待条件仅覆盖持久 chat，此分支缺少同样的消息 done/error 复验，success 表示派发成功的边界更宽 |
+
+证据：[`utils/automations.py:247-346`](../../open-webui/backend/open_webui/utils/automations.py#L247-L346)、[`utils/automations.py:497-536`](../../open-webui/backend/open_webui/utils/automations.py#L497-L536)、[`main.py:1858-1866`](../../open-webui/backend/open_webui/main.py#L1858-L1866)。普通 chat 与频道终态差异属于静态调用路径事实；具体后台执行时序尚未运行验证。
+
+成功时发布 automation:result 与完成事件，run 可由自动化历史查询并投影到日历时间轴；失败记录与失败通知由 run 模型插入路径承接。notification 收件箱保存可补看的通知，即时 Socket 则承接在线反馈（[`models/automations.py:354-427`](../../open-webui/backend/open_webui/models/automations.py#L354-L427)、[`routers/notifications.py`](../../open-webui/backend/open_webui/routers/notifications.py)）。
+
+代码中另有 `_set_terminal_cwd` 辅助函数，但本次在本文件的自动化执行路径未找到调用点，故不把它记为已经接线的执行前切目录行为（[`utils/automations.py:199-244`](../../open-webui/backend/open_webui/utils/automations.py#L199-L244)）。
+
+### Calendar 的事务性交付
+
+处理器按“事件 id + 开始时间”构造稳定通知 id，把收件箱消费与 alerted_at 更新放在同一数据库事务。提交后依次发布收件箱变化、通用事件，最后才发送即时 calendar:alert；后续发布失败不会回滚已提交的收件箱与标记。因此数据库内交付与在线通知是不同可靠性边界（[`utils/automations.py:582-630`](../../open-webui/backend/open_webui/utils/automations.py#L582-L630)）。
+
+## 并发、取消、失败与恢复
+
+用户可停用定义、修改规则或删除自动化；手动 run 用独立 asyncio task 调相同执行器，没有另建 queued/running 行。停用只影响未来认领，当前已启动执行没有在自动化路由中找到单独取消入口。生成 task 可以通过聊天任务系统停止；持久 chat 的取消最终进入 error run，执行器随后重抛取消（[`routers/automations.py`](../../open-webui/backend/open_webui/routers/automations.py)、[`utils/automations.py:531-536`](../../open-webui/backend/open_webui/utils/automations.py#L531-L536)）。
+
+应用关闭时取消 scheduler；已派发自动化任务的统一等待/清算机制，本次在 lifespan 和 scheduler 交接中未找到。认领后进程中断可能留下“下次时间已推进、当前 run 尚未写入”的间隔，精确重启行为需要运行观察。
+
+Calendar 取消事件、关闭提醒或删除事件会阻止未来查询；去重标记与收件箱跨进程保存。提醒发送失败没有单独的可重试 alert run，PostgreSQL 行锁与 SQLite 等方言下的并发行为需分别验证。
+
+## 相邻类目与未验证事项
+
+- 自动化创建的聊天与消息属于[会话与消息管理](../会话与消息管理/Open-WebUI-会话与消息管理调查笔记.md)，生成/取消与审批恢复属于[对话请求与上下文](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md)，工具域属于[Agent 工具](../Agent工具/Open-WebUI-Agent工具调查笔记.md)。
+- Calendar CRUD、共享、RSVP 与模型管理日程属于日程对象能力；Persistent Memory 复盘属于记忆写入，不重复计为 automation run。
+- 本篇为非穷尽静态复核，未运行模型、Socket、真实日程、外部终端、数据库并发与进程中断场景；真实触发时刻、消息时序、外部推送及重复事件实例提醒仍需在目标环境观察。
 
 ## 关键源码索引
 
-- `backend/open_webui/main.py:449`：scheduler 的应用生命周期创建与关闭。
-- `backend/open_webui/models/automations.py:20-55`（数据模型）、`:297`（claim_due 到期认领）、`:340-422`（运行历史）。
-- `backend/open_webui/routers/automations.py:158`：权限/频率治理、创建更新、手动运行、删除和 run 查询。
-- `backend/open_webui/utils/automations.py:63`（调度循环）、`:131-160`（请求构造）、`:349`（无头执行）、`:542`（Calendar alert）；rrule 校验与频率计算在 `utils/recurrence.py:118-200`。
-- `backend/open_webui/models/calendar.py:54`、`backend/open_webui/routers/calendar.py:87`：事件与提醒去重状态、rrule 频率下限、Scheduled Tasks 时间线投影。
+- [scheduler 与执行器](../../open-webui/backend/open_webui/utils/automations.py)：调度、owner token、chat/channel 交接、提醒事务。
+- [自动化模型](../../open-webui/backend/open_webui/models/automations.py)：定义、认领、运行记录与失败通知。
+- [自动化路由](../../open-webui/backend/open_webui/routers/automations.py)：创建、规则预览、启停、手动执行与历史。
+- [聊天主入口](../../open-webui/backend/open_webui/main.py#L1858-L1866)：自动化持久 chat 等待生成结束。

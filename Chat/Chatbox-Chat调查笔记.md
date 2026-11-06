@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/chatboxai/chatbox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`d17455c5ca8fd3ff44385c6d4d2118599e4c970f`（分支：`main`）
 >
@@ -22,7 +22,7 @@ Chatbox 现在明确区分 Chat Mode 与 Work Mode：前者保留 thread/fork �
 
 Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊天工作台固定为 `Header → MessageList → InputBox` 三段式：消息列表是 react-virtuoso 虚拟列表（缓存每会话滚动快照），移动端一级导航是左侧滑出的 `SwipeableDrawer`（没有底部 Tab Bar），桌面端侧栏常驻挤压布局。侧栏会话项带"生成中/回复完成未读"指示（状态存于内存 zustand store，不落盘、不进入 `SessionMetaRecord`）。
 
-数据完全 local-first：完整 Session 对象与消息存于通用 storage（IndexedDB），侧栏元信息存于独立的 IndexedDB meta store（游标分页、置顶优先），react-query 缓存是 UI 侧视图，两者靠每会话 `UpdateQueue` 串行合并保持最终一致。
+数据保持 local-first：会话头、线程行与消息行组成权威消息树，侧栏元信息另存 meta，旧完整 Session 为兼容投影。桌面/Web 的行与 meta 均走 IndexedDB，移动端均走 SQLite；领域服务和行提交队列处理写入，react-query 承载 UI 视图。平台工厂见 `src/renderer/platform/{desktop_platform,web_platform,mobile_platform}.ts`，详见会话与消息管理笔记 2。
 
 外部系统边界：模型请求由 `packages/model-calls` 的 API 适配层组装并发出，provider 侧 token 截断与最终 HTTP payload 字段不在本次概览范围；Agent 角色/工具、知识库等能力分属 Agent 专项与渠道管理类目；消息渲染（Markdown、结构化 part、虚拟列表）由独立的消息渲染器笔记承接。
 
@@ -36,9 +36,9 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
  → orchestrateGeneration（选择当前 session/thread 的消息历史）
  → prepareAgentGenerationHarness / buildToolsForSession（按模型 isSupportToolUse 注册 agent/知识库/网页浏览工具）
  → model.chatStream 流式（provider）
- → 主循环逐 chunk：updateStreamingCache 只刷 UI 缓存；距上次落盘 ≥2s 或 chunk 为 tool-call 时 persistStreamingMessage 落盘（每会话 UpdateQueue 串行合并）
+ → 主循环逐 chunk：updateStreamingCache 只刷 UI 缓存；距上次落盘 ≥2s 或 chunk 为 tool-call 时 persistStreamingMessage 落盘（流式写协调器与领域行提交队列串行处理）
  → 流结束 / 出错 / 暂停 各补一次无条件落盘
- → 行式 SQL 持久化（session_messages / session_threads + session_meta）
+ → 平台行存储持久化（桌面/Web IndexedDB，移动 SQLite；消息树与 meta 分离）
 ```
 
 ## 核心对象与状态权威
@@ -46,8 +46,8 @@ Chatbox 提供 Electron 桌面端与 Web 网页端两个产品表面，核心聊
 - **`SessionTree`**（`packages/chatbox-core/src/session/session-tree/types.ts`）：会话头、thread 行与消息行三段式；树形拓扑（父指针、激活子节点、兄弟序）就是权威数据，旧数组式 `Session` 由 `encode.ts`/`decode.ts` 与其互转，renderer 侧读的是窗口化投影。
 - **`SessionMetaRecord`/`SessionMetaSchema`**（`src/shared/types/session.ts`）：侧栏唯一认知的元信息，含置顶、隐藏、归档时间与排序序号等字段，不含任何消息级字段；权威源是 `session_meta` 表，桌面/Web 走 IndexedDB 实现、移动端走 SQLite 实现。
 - **`Message`**（`shared/types.ts`）：由内容部件、文件与链接组成，并带生成中标记、压缩摘要与分支标记（`isSummary`、`isForkMarker` + `forkedFromSessionId`）。
-- **`uiStore`**：持有网页浏览、知识库与 Agent 模式三个会话级开关，以及 `newSessionState`；`'new'` 假会话的待发送状态分散在本地 state、`newSessionState` 与通用 map 三处，首次发送时统一迁移。
-- **生成中的消息**：streaming cache（queryClient）→ 每会话 `UpdateQueue` → 磁盘；节流 2000ms，`mergeCachedGeneratingMessages` 保证落盘旧快照不回退生成中消息。
+- **`uiStore`**：持久化网页浏览与知识库绑定，并保留模式默认值与新会话临时状态；正式 Agent 模式落会话设置。`'new'` 假会话的待发送状态分散在本地 state、`newSessionState` 与通用 map 三处，首次发送时统一迁移。
+- **生成中的消息**：UI 缓存更新与落盘分离，流式写协调器按消息身份安排检查点和最终写入，再经会话领域服务提交行存储；终态写入覆盖未完成检查点。见 `src/renderer/stores/session/messages.ts:181-236`。
 
 ## 专项导航
 

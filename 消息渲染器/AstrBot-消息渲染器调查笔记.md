@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
@@ -19,7 +19,7 @@ AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM
 关键事实：
 
 - **组件体系**：组件枚举 24 种，基类提供同步/异步双轨序列化（`toDict` 与 `to_dict`），并覆写 repr 把 base64 与超长字段截断，日志与异常输出自动安全（components.py:94-131）。
-- **可移植按钮**：消息链新增 `Button`、`ActionRow` 与入站 `ButtonInteraction`；出站由各平台渲染为原生按钮，回调令牌与过期时间经独立注册表持久化，点击回到流水线后只派发给声明了按钮动作过滤器的插件（components.py:153-269；`platform/button_interaction.py`）。
+- **可移植按钮**：消息链提供按钮、按钮行与入站交互组件；平台按能力转换。回调登记保存动作、JSON 数据与到期时间，令牌是这三者序列化结果的摘要；点击回到流水线后只派发给声明了按钮动作过滤器的插件。登记内容没有用户或会话绑定，令牌解析与过期检查只确认登记有效性，插件动作的用户权限仍由处理器过滤器和业务检查承担（`astrbot/core/platform/button_interaction.py:47-140`；`pipeline/waking_check/stage.py:81-91,184-211`）。
 - **业务语义元协议**：`MessageChain.type` 字段（message_event_result.py:33-34）承载 `tool_call`/`reasoning`/`audio_chunk` 等业务语义，仅 WebChat 出站序列化与前端消费，其他平台忽略。
 - **装饰阶段做链重写**（result_decorate/stage.py:126-447）：集中完成思考内容注入、TTS 文本转音频、文本转图、超长转发和 @/Reply 前缀五类重写，细节见 §4.1 表格。
 - **RespondStage 分段发送**（respond/stage.py:194-409）：校验组件有效性与重复文本、提取 Reply/At 为“头”、Record 强制单独发、间隔随机防风控、流式直通并记录 trace 概要，细节见 §4.2。
@@ -230,6 +230,8 @@ TTS trigger_probability（夹在 [0,1]）
 - 出站/存储：`message_chain_to_storage_message_parts`（:460-585）链→parts（附件落库）。
 
 ### 8.3 前端（dashboard）
+
+按钮行组件只接受 HTTP(S) 外链，回调点击原样上抛登记令牌；组件没有单次消费或本地过期禁用状态。回调是否过期由服务端唤醒检查重新判断，过期时发送提示并停止该事件。有效登记可被多次解析，是否只执行一次需要插件自行维护业务状态（`dashboard/src/components/chat/ButtonActionRow.vue:4-23,54-101`；`astrbot/core/platform/button_interaction.py:92-140`；`pipeline/waking_check/stage.py:81-91`）。
 
 | 模块 | 位置 | 内容 |
 |---|---|---|

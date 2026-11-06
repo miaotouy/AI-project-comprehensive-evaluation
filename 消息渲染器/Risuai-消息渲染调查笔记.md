@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
@@ -163,8 +163,8 @@ Chat 的 `displaya` 以 `visualize: true` 调用它，使 `{{file::}}` 这类函
 DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 
 - `uponSanitizeElement`：iframe 只放行 `https://www.youtube.com/embed/` 前缀；img 在 `hideAllImages` 开启时替换为 `/none.webp` 占位（含 style 里 background-image 的清理），否则补 `loading="lazy"`/`decoding="async"`。
-- `uponSanitizeAttribute`：class 逐个加 `x-risu-` 前缀（`hljs`、`x-risu-` 开头的例外）；href 只允许 `http://`/`https://` 并加 `target="_blank"`，其余置空；`IMG/SOURCE/VIDEO/AUDIO/STYLE` 的 `blob:` src 通过 `forceKeepAttr` 保留（inlay 依赖）。
-- `ADD_TAGS`/`ADD_ATTR` 白名单：style、risu-style、iframe、MathML 系列（KaTeX 的 annotation/semantics/mrow 等），以及 risu-ctrl/risu-btn/risu-trigger/risu-mark/risu-id/x-hl-lang/x-hl-text 等自定义属性。
+- `uponSanitizeAttribute`：class 逐个加 `x-risu-` 前缀（`hljs`、`x-risu-` 开头的例外）；href 只允许 `http://`/`https://` 并加 `target="_blank"`，其余置空；`IMG/SOURCE/VIDEO/AUDIO/STYLE` 的 `blob:` 与 `asset:` src 通过 `forceKeepAttr` 保留（inlay 依赖）。
+- HTML 清洗保留样式、受限 iframe、MathML 和交互属性，其中 `risu-form` 允许普通消息保留表单触发键；直接绑定聊天变量的两个属性只在独立 Onboarding 清洗配置放行，普通聊天消息不使用这套扩展配置（`parser/parser.svelte.ts:779-788`）。
 
 消息内 `<style>` 走特殊路径（parser.svelte.ts:930-1003）：内容先以 hex 编码躲过 HTML 清洗，随后由 `decodeStyleContent` 用 `@adobe/css-tools` 解析 CSS，选择器加 `.chattext ` 前缀、class 加 `x-risu-` 前缀，再把所得 CSS 放进已清洗 DOM 的真实 style 节点。这与 SillyTavern 的 custom-style 思路同类：样式留在主文档，隔离靠选择器前缀而非 Shadow DOM。解析失败时按 `returnCSSError` 设置回显错误文本或丢弃；`@import` 规则只有 data: 开头才被保留，且被清空为 `data:,`。为避免样式标签提早闭合，恢复前会转义 CSS 内的 `</style` 序列。
 
@@ -178,7 +178,8 @@ DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 
 - 复制：`Chat.svelte:511-741` 支持富文本复制——重新 `ParseMarkdown` 后用 DOMParser 拆 DOM，把引用/段落/强调按主题变量内联成样式，图片经 fetch + canvas 重编码为 data URL，再以 `ClipboardItem` 同时写 `text/plain` 与 `text/html`；成功弹 `alertNormal(language.copied)`，异常降级为 `writeText` 纯文本并显示行内状态。代码块复制走右键菜单（`observer.svelte.ts:10-54`：复制全文 / 按 `x-hl-lang` 扩展名下载文件）。
 - 编辑：整段编辑切换 textarea；块级编辑（`PartialEditController.svelte`）在悬停块上追加编辑/删除按钮，拖选文本也可直接编辑；保存时把选中 HTML 转纯文本，经 `findAllOriginalRangesFromText` 的 exact/anchor/fuzzy/bigram 四级匹配定位原文区间（`src/ts/parser/partialEdit.ts:326-619`），`replaceRange` 替换后回写 `message.data` 并重新渲染，匹配失败弹窗提示。
-- 消息内按钮：`[risu-btn]`/`[risu-trigger]` 元素点击后运行 `runLuaButtonTrigger` 或手动触发器，结果可整体替换会话并自增 `ReloadChatPointer` 重渲染（`Chat.svelte:231-271`）。
+- **消息内按钮**：消息容器捕获点击，从目标向上查找交互属性；手动触发器优先，否则进入 Lua 按钮交互。返回结果可替换当前会话并更新该消息的重渲染计数，群聊在入口直接返回（`Chat.svelte:306-345`）。
+- **消息内表单**：容器捕获 submit 并统一阻止页面默认提交；只有带 `risu-form` 的表单且当前角色非群聊时，才收集 FormData、传给 Lua 表单交互。重复字段保留为数组，提交按钮也纳入数据；回调收到触发键及包含 data 的 JSON 元信息，可修改聊天并触发重绘。表单不会直接把字段当成聊天发送请求（`Chat.svelte:348-385,1184-1185`；`process/scriptings.ts:1121-1126,1489-1513`）。
 - 翻译：按钮切换已翻译/原文，LLM 翻译有加载旋转占位与"重新翻译/编辑翻译"入口（`ChatBody.svelte:109-149`）；翻译可在 HTML 格式化前或后进行，后者的路径会重新执行代码高亮（`postTranslationParse`）。
 - 状态反馈：删除确认、书签命名弹窗、TTS 按钮、分支创建，均通过既有 alert 系统；`clickToEdit` 设置下单击正文直接进入编辑模式。
 

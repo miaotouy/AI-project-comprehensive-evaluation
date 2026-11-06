@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
@@ -206,7 +206,7 @@ Control UI 的解析器是 `markdown-it`，开启 HTML 识别、换行、linkify
 2. 按 140,000 字符截断；超过 40,000 字符的非 document 正文走 escaped plain-text fallback。
 3. 由 markdown-it 生成 HTML，代码块由 highlight.js core 的有限语言注册表处理。
 4. 由 DOMPurify 按显式 tag/attribute 白名单清洗。
-5. Lit 通过 `unsafeHTML` 插入已经清洗的结果。
+5. Solid 视图将清洗后的结果绑定到原生 DOM 的 innerHTML。公共 [MarkdownHtml](<../../openclaw/ui/src/components/solid/markdown-html.tsx#L13-L22>) 将唯一 HTML sink 与共享清洗入口连接；流式块仍由各自内容 owner 管理。
 
 这些步骤现已分散到一组 `markdown-*` 兄弟模块：解析在 `markdown-parser.ts`，清洗与白名单在 `markdown-sanitizer.ts`，代码块与高亮在 `markdown-code-blocks.ts`、`markdown-code-highlight.ts`（重活由 `markdown-code-highlight.worker.ts` 承担），内容装配与 block owner 在 `markdown.ts`、`markdown-blocks-owner.ts`，聊天内的渲染壳在 `ui/src/pages/chat/components/chat-message-markdown.*`。允许的普通 Markdown tag 不包含 iframe、script 或 style；链接协议仍限制为 http、https、mailto，host-local markdown file 的 href 被移除，外链补 target 与 rel，见 `ui/src/components/markdown-sanitizer.ts`。
 

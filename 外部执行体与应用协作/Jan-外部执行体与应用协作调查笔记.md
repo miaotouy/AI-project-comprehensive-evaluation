@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -40,11 +40,11 @@ POST /orchestrations（需开启服务端工具执行）
   -> Jan 进程执行 MCP 工具并回注结果
   -> 循环至完成，返回聚合响应（暂不支持流式）
 
-外接运行时（客户端 -> jan stdio JSON-RPC）
-initialize -> session.start -> session.tools.set（声明 host tool）
-  -> turn.start -> 模型调用 -> tool 调用派回客户端 -> tool.respond
-  -> turn.steer 可在回合中途追加输入
-  -> 记录以事件流回传，终止于 outcome
+外接运行时（客户端启动 jan cli agent rpc -> stdio JSON-RPC）
+initialize -> initialized 通知 -> session/start -> session/tools/set（声明 host tool）
+  -> turn/start -> 模型调用 -> tool 调用派回客户端 -> tool/respond
+  -> turn/steer 可在回合中途追加输入
+  -> 记录以事件流回传，终止通知为 turn/completed
 
 工具提供（其他 Agent -> jan）
 jan mcp serve --project <root> [--allow-write] [--allow-exec]
@@ -56,7 +56,13 @@ jan mcp serve --project <root> [--allow-write] [--allow-exec]
 
 orchestration 仍是请求级任务：`proxy.rs` 的 `/orchestrations` 路由与 assistant 加载路径中未找到独立持久 orchestration 实体，响应由一次请求聚合成。
 
-RPC 会话有明确身份与会话状态：连接级 `initialize` 之后按 session id 建立会话，工具集与模型都可在会话内替换，回合级输入可 steer。协议常量与事件类型来自 Agent 内核的事件模块，schema 以 `protocol/schema.json` 与 `protocol/rpc-schema.json` 落盘，并有一致性测试约束 Rust 实现与 schema 不漂移；ADK 的 JavaScript 版本由 schema 生成，运行时从发布清单安装并做版本钉住。
+外部客户端通过 `jan cli agent rpc` 启动服务，完成 `initialize` 请求与 `initialized` 通知后才可创建会话。一个进程有多条可寻址会话，但全局仅一个 active turn；运行中更换该会话的工具或模型被拒绝，回合输入则可通过 steer 追加。入口、握手与并发门控见 [main.rs:1179](../../jan/src-tauri/jan-cli/src/main.rs#L1179)、[rpc.rs:488–616](../../jan/src-tauri/src/core/cli/rpc.rs#L488-L616)、[rpc.rs:749–790](../../jan/src-tauri/src/core/cli/rpc.rs#L749-L790)。
+
+RPC 的 `session/resume` 只查询本进程内的会话表；成功完成且非 ephemeral 才把历史写成项目线程，并没有把这个方法实现为跨进程读取旧会话。ephemeral 同时禁止项目记忆写入（[rpc.rs:459–473](../../jan/src-tauri/src/core/cli/rpc.rs#L459-L473)、[rpc.rs:569–581](../../jan/src-tauri/src/core/cli/rpc.rs#L569-L581)、[rpc.rs:704–708](../../jan/src-tauri/src/core/cli/rpc.rs#L704-L708)）。
+
+进程断开或用户 interrupt 会释放待回答的 host tool 请求，客户端迟到的重复结果得到 not_pending 错误（[rpc.rs:673–692](../../jan/src-tauri/src/core/cli/rpc.rs#L673-L692)、[rpc.rs:793–801](../../jan/src-tauri/src/core/cli/rpc.rs#L793-L801)）。
+
+协议 schema 与事件类型由 Agent 内核维护，JavaScript ADK 与独立 Python ADK 提供客户端。schema、生成与安装器说明协议契约和分发方式；真实客户端兼容性仍需运行验证。
 
 CLI 的用户配置在 `~/.jan/config.toml`，项目覆盖在 `.jan/agent/agent.toml`；项目会话可由 `jan -c` / `--resume` 恢复，也可存为兼容桌面的 thread。
 
@@ -64,7 +70,7 @@ CLI 的用户配置在 `~/.jan/config.toml`，项目覆盖在 `.jan/agent/agent.
 
 orchestration 的结果经 HTTP 返回，`stream=true` 当前不支持；它更接近"一次请求换一次聚合结果"，进行中取消与多客户端隔离未确认。
 
-RPC 面的回流是双向的：模型产生的 host tool 调用不落在 Jan 进程，而是按客户端在 `session.tools.set` 里声明的能力派回客户端，等待 `tool.respond` 后再继续；未知或未声明的工具调用由运行时拒绝。会话内还可 steer、切换模型、替换工具集，这些操作都在同一 stdio 会话里完成。
+RPC 面的回流是双向的：模型产生的 host tool 调用不落在 Jan 进程，而是按客户端在 `session/tools/set` 里声明的能力派回客户端，等待 `tool/respond` 后再继续；未知或未声明的工具调用由运行时拒绝。会话内还可 steer、切换模型、替换工具集，这些操作都在同一 stdio 会话里完成。
 
 桌面 Cowork 又不同：工具事件与会话由前端循环拥有，Jan 后端只提供工具能力，不应把它与 HTTP 编排或 RPC 会话的回流路径混同。
 

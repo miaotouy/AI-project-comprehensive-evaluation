@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
-> 调查方式：直接阅读源码（客户端 Zustand store、持久化封装、IndexedDB/localStorage 存储适配器、合并与同步模块），对正文引用的符号与行号逐一核对当前 HEAD
+> 调查方式：直接阅读源码（客户端 Zustand store、持久化封装、IndexedDB/localStorage 存储适配器、合并与同步模块），以关键调用点核对当前实现，未运行应用
 >
 > 调查范围：ChatSession/ChatMessage 数据模型、Zustand persist 持久化与 schema 迁移、会话 CRUD 与 fork 语义、消息编辑/删除/重试/置顶的数据变更、消息分页数据接口、跨会话全文搜索、本地/远端合并与导入导出、外部对象绑定粒度、异常恢复语义；请求执行与界面工作流分别归入对话请求与上下文、Chat UI 类目
 >
@@ -17,7 +17,7 @@
 NextChat 是"Zustand 持久化会话 + 单页消息窗口"的纯客户端 Web 应用，没有服务端 conversation runtime：
 
 - `useChatStore` 以 `ChatSession[]` 保存会话、消息、Mask 副本、记忆摘要与上下文截断索引；内存数组是权威源，IndexedDB 是持久化副本，异常时回退 localStorage（persist key `chat-next-web-store`，版本 3.3）。
-- 消息是会话内线性数组，无消息树、无版本指针；"分支"只有 `forkSession` 一种——深拷贝整个会话为新会话。
+- 消息是会话内线性数组，无消息树、无版本指针；"分支"只有 `forkSession` 一种——复制标题与消息为新会话，摘要等运行上下文重置。
 - 会话操作（新建/删除/fork/移动/重置）都作用于数组与持久化 store；删除提供 5 秒撤销 toast 并自动补回空会话；本次未找到置顶/归档能力。
 - 消息编辑、删除、置顶、重试都是对会话消息数组与上下文预置消息的就地变更：编辑改写文本内容、删除按 id 过滤、置顶并入上下文预置消息、重试删除原用户与助手消息对后重新发送。
 - 消息窗口是 `CHAT_PAGE_SIZE = 15` 的分页接口（`app/components/chat.tsx` 内数据切片，DOM 侧见消息渲染器笔记）；跨会话搜索是客户端全量扫描，无索引。
@@ -65,7 +65,7 @@ ChatSession
 - `stat` 统计只有字符数 `charCount` 实际累加：更新函数只执行 `charCount += content.length`，并有 TODO 注释未更新 word/chat 数（`app/store/chat.ts:799-804`）。
 - Mask 是完整副本对象（`app/store/mask.ts:9-23`），每个会话持有独立的一份；`createEmptyMask` 默认开启 `syncGlobalConfig`（`app/store/mask.ts:35-47`）。
 
-分支模型：`forkSession()` 深拷贝当前消息并为每条消息生成新 id，同时复制 Mask 与模型配置，新会话插到数组头部（`app/store/chat.ts:243-267`）——fork 产生的是新会话，不建立消息树指针。消息级分支（同一位置的平行版本）与版本指针本次未找到：会话 schema 无活动指针或父指针字段，store 无对应方法（检查范围为 `app/store/chat.ts` 全文件）。
+分支模型：fork 先创建空会话，再复制标题、逐条展开消息并重新生成消息 id；Mask 与模型配置也分别展开复制。摘要、摘要位置、上下文清除位置与统计沿用空会话默认值，因此没有复制完整会话状态。复制本身是浅层的，多模态内容、工具数组与 Mask 的 context/plugin 等嵌套值并未递归克隆；不能据此承诺所有嵌套编辑彼此隔离。新会话插入列表头部，不建立消息树指针。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)、[空会话默认值](../../NextChat/app/store/chat.ts#L104-L120)。
 
 ## 2. 事实源、索引与持久化
 
@@ -109,7 +109,7 @@ Chat store 的 persist 配置位于 `app/store/chat.ts:861-930`：存储键为 `
 - **删除**：`session.messages.filter(m => m.id !== msgId)` 就地过滤（`app/components/chat.tsx:1205-1211`）。
 - **重试（onResend）**：先删除原 user 消息及其配对的 assistant 消息，再用相同文本与图片重新走 `onUserInput`，生成新消息节点（`app/components/chat.tsx:1217-1271`）——是"删对重发"，不修改原对象（执行语义见对话请求与上下文笔记 §7）。
 - **置顶（pin）**：把整条消息 push 进 `session.mask.context`（`app/components/chat.tsx:1273-1284`）——置顶消息会作为 context 进入后续请求（见对话请求与上下文笔记 §2），并带 toast 提供跳转到会话配置的入口。
-- **fork**：深拷贝为新会话（§1），不修改原会话（`app/store/chat.ts:243-267`）。
+- **fork**：创建复制消息的新会话（§1），顶层对象分开，嵌套引用并未递归隔离（`app/store/chat.ts:243-267`）。
 - **clearContextIndex**：把发送起点抬高，在不删除 UI 历史的情况下停止发送更早消息与摘要（数据语义；截断执行见对话请求与上下文笔记 §2）。重置为 `undefined` 恢复（`app/store/chat.ts:545`；界面上的重置控件见 `app/components/chat.tsx:382-402, 661-674`）。
 - 续写/回退：本次未找到独立的"继续生成"或"回退到某版本"机制（检查范围 `app/store/chat.ts` 方法集与 `app/components/chat.tsx` 消息操作清单）。
 

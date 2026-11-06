@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -91,7 +91,9 @@ LogsLayout 是无侧栏的简化布局（同一文件 L88-103）。
 
 ServiceHub（`services/index.ts:58` 起的接口）提供平台服务（theme/window/events/dialog/opener/threads/messages/providers/models/assistants/updater/path/core/deeplink/projects/rag/uploads/extensions 等），桌面/移动在 `initialize()`（L113 起）动态 import 各自的 Tauri/Mobile 实现，web 构建用 Default 实现。
 
-服务总线之外另有一层扩展宿主：`web-app/src/lib/extensions/host.ts` 用 `@janhq/extension-api` 校验清单、按贡献点注册 UI 与服务，再经 `@janhq/core` 的 `createServiceRegistry` 暴露能力句柄；扩展包本体由 `@janhq/extension-runtime` 在 worker 侧执行并通过 RPC 与宿主通信，安装、开发加载与内置扩展分别由 `installed-loader`、`dev-loader`、`builtins` 三条入口进入（同目录 `contributions.ts`、`dispatcher.ts`、`http.ts`）。因此"服务"有两套句柄：平台服务在 ServiceHub，扩展贡献的能力在扩展宿主的服务注册表，二者由 `ServiceKeys` 对齐。
+服务总线之外另有扩展宿主。内置扩展由宿主进程直接加载模块并调用 `activate(ctx)`；第三方安装包和开发目录的扩展才在 worker 中经 RPC 使用受控 API。两条路径共享贡献点与权限 dispatcher，内置扩展还可取得文件、引擎等内部服务，其限额也不同（[builtins.ts:9–27](../../jan/web-app/src/lib/extensions/builtins.ts#L9-L27)、[host.ts:260–324](../../jan/web-app/src/lib/extensions/host.ts#L260-L324)、[host.ts:564–600](../../jan/web-app/src/lib/extensions/host.ts#L564-L600)）。平台服务在 ServiceHub，扩展贡献的能力在扩展宿主的服务注册表，二者由 `ServiceKeys` 对齐。
+
+扩展设置界面以 Installed/Catalog 页签展示内置、安装和开发三类来源；安装前暂存包并展示权限同意框，升级时展示权限差异。变更成功后按扩展串行重载并释放旧贡献；安全模式只停止已安装扩展，内置与开发来源不受该开关影响。完整安装与故障生命周期见[独特功能笔记的能力六](../独特功能/Jan-独特功能调查笔记.md)，入口见 [扩展设置页:107–169](../../jan/web-app/src/routes/settings/extensions/index.tsx#L107-L169)、[useStagedInstall:51–95](../../jan/web-app/src/containers/extensions/useStagedInstall.tsx#L51-L95)。
 
 **错误状态。** 全局错误弹窗内容由 useAppState 的 errorMessage 字段持有（`ErrorDialog.tsx:19-20`）；llamacpp 路由错误经 LlamacppOomListener 监听 Rust 事件写入该状态（oom/backend/load-progress/unload，`LlamacppOomListener.tsx:27-74`），banner 呈现归 Chat UI 笔记。
 

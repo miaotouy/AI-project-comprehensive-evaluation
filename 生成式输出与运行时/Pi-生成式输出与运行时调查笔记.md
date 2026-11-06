@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/earendil-works/pi`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）
 >
-> 调查方式：静态源码阅读与全文检索（grep/glob），覆盖 `packages/ai`、`packages/agent`、`packages/durable`、`packages/coding-agent`、`apps/p2` 及 `packages/tui` 使用侧；未运行任何命令或测试
+> 调查方式：只读源码与版本差异，定向跟踪 codemode 内建装配、QuickJS worker、嵌套工具回注、会话投影及 durable 重放；其余输出机制采用文中来源范围，未运行应用、工具调用或测试
 >
 > 调查范围：生成式输出的对象模型、流式协议、文件写入与 diff 机制、代码执行位置、TUI 展示、会话持久化与恢复、模型回流、生命周期与验证体系；明确排除 Chat 上下文装配、Agent 工具调度语义、消息渲染器的普通 Markdown 呈现
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。稳定链的模型输出仍是 text、thinking、toolCall 三种结构化 part，文件产物仍以工作区路径为身份，因此其生成式输出等级仍为 **G2（声明式交互对象）**。实验链没有引入 Artifact、画布或浏览器脚本对象，而是把会话、分支、lane、operation、工具结果和终端状态做成可恢复的持久运行状态；它提高的是执行持续性和远端投影能力，不改变输出对象等级。
+Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。稳定链的模型输出仍是 text、thinking、toolCall 三种结构化 part，文件产物仍以工作区路径为身份，因此其生成式输出等级仍为 **G2（声明式交互对象）**。durable 使用 Conversation、Submission 与 Task 保存运行状态；coding-agent 另已接入可激活的 codemode QuickJS 脚本工具。工具脚本具有受控执行环境，聊天展示与路径文件仍维持 G2 对象分型，二者应分开比较（[内建装配](../../pi/packages/coding-agent/src/extensions/index.ts#L7-L14)）。
 
 ## 系统边界与完整主链路
 
@@ -67,7 +67,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 - 静态：Markdown（含代码高亮）、mermaid 经 `grok-mermaid` 渲染为终端 ASCII 图（components/mermaid.ts:59-88，宽度超限或流式中模式关闭时回退原文）、终端图片（kitty/iTerm/六块，tool-execution.ts:330-353，kitty 下非 PNG 会转码）。
 - 声明式组件：工具渲染器（`renderCall`/`renderResult`，extensions/types.ts）由宿主按 schema 渲染，不执行模型任意脚本——属 G2 层。
-- 无 HTML/CSS/JS、Canvas/WebGL、语言解释器或完整项目运行环境；本次未在 `packages/coding-agent/src` 全文检索到 iframe/webview 代码。容器化仅为部署文档（packages/coding-agent/docs/containerization.md，README.md:42-46 的 Gondolin micro-VM、Docker、OpenShell 三种模式），非运行时内置能力。
+- TUI 消息内未接入浏览器 HTML/Canvas 运行表面。模型可用 codemode 在 QuickJS worker 中写异步 JavaScript，间接调用已授权工具；VM 无直接 Node、文件、网络或计时器 API，嵌套工具仍有其本地/远端执行权限。注册默认不激活，MCP 发现可按配置激活；VM heap 上限 256 MiB，每进程默认允许两个脚本 worker，候位至多 60 秒（[资源边界](../../pi/packages/coding-agent/src/extensions/codemode/execute.ts#L49-L69)）（[工具语义](../../pi/packages/coding-agent/src/extensions/codemode/tool.ts#L1-L21)、[实际执行](../../pi/packages/coding-agent/src/extensions/codemode/execute.ts#L519-L604)）。容器化仅为部署文档（packages/coding-agent/docs/containerization.md，README.md:42-46 的 Gondolin micro-VM、Docker、OpenShell 三种模式），非运行时内置能力。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -85,13 +85,13 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 7. 能力桥、执行位置与权限范围
 
-- 执行位置：文件写与命令执行均在宿主本机进程/本机 shell（bash.ts:103-126，spawn + detached + 进程树清理 killProcessTree）。无 iframe/worker/容器内嵌运行。远端执行仅以可插拔 `operations` 接口形式存在（write.ts:25-40、edit.ts:74-92、bash.ts:56-74，注释指明 SSH 等场景），默认实现均为本机。
+- 执行位置：文件写与命令执行均在宿主本机进程/本机 shell（bash.ts:103-126，spawn + detached + 进程树清理 killProcessTree）。基础文件/命令工具本身不在 VM 内运行；codemode 的 QuickJS worker 是独立工具执行路径（§4）。基础工具远端后端以可插拔 `operations` 接口形式提供（write.ts:25-40、edit.ts:74-92、bash.ts:56-74，注释指明 SSH 等场景），默认实现均为本机。
 - 权限：无逐操作授权。`README.md:88-96` 明确无内置权限系统；`trust-manager.ts` 仅是"项目目录级信任"（决定是否在某 cwd 启动，trust-manager.ts:66-94），不审批具体写文件/执行命令。能力桥为全权（进程权限即代理权限）。
 - 会话信息桥：bash 工具默认注入 `PI_SESSION_ID/PI_SESSION_FILE/PI_PROVIDER/PI_MODEL/PI_REASONING_LEVEL` 环境变量（bash.ts:165-191）。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首次 assistant 消息后整文件 flush（session-manager.ts:1173）。
+- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首条 user 或 assistant 消息即触发整文件 flush，此后追加，纯启动设置留内存（[实现](../../pi/packages/coding-agent/src/core/session-manager.ts#L1161-L1189)）。
 - 损坏容忍与原子发布：
   - durable 的 JSONL 存储加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/durable/src/storage/jsonl/`）；
   - durable 的 fork 以整文件原子发布，避免把源文件整段读入内存；
@@ -105,7 +105,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 9. 模型回流、对象感知与持续维护
 
-- 全量回流：resume 时 `agent.state.messages = existingSession.messages`（sdk.ts:363-364），模型看到完整历史，后续回合继续在同一会话文件追加。
+- 当前投影回流：resume 时 `agent.state.messages = existingSession.messages`（sdk.ts:363-364），模型看到按分支、压缩与 context_edit 计算的当前投影，原始条目仍保留，后续回合继续追加（[投影](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
 - 对象感知与定向修改：模型通过 `read/find/grep/ls` 工具查询工作区，通过 `edit/write` 按路径定向修改（工具描述要求 oldText 唯一，edit-diff.ts:268-277 强制唯一性）。对象身份=文件路径；绑定到后续回合的是"会话 + 文件路径"，没有 artifact ID 之类的稳定对象句柄。
 - 摘要回流：compaction 后旧消息被 `<summary>` 用户消息替换（messages.ts:11-17,176-183）；分支切换时 branch_summary 注入（19-24,170-175）；bash 执行可用 `!!` 排除出上下文（148-161）。
 - 扩展注入：`custom_message` entry 可带内容进上下文（session-manager.ts:135-141,1171-1189），`custom` entry 仅存扩展状态不进上下文（98-108）。
@@ -125,8 +125,8 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 **已确认边界（检索范围：`packages/coding-agent/src`、`packages/agent/src`、`packages/ai/src` 全文 grep `iframe|webview|sandbox|notebook|artifact|canvas|CRDT|undo|approval|permission` 等）**：
 
 - 未找到：iframe/WebView/notebook/画布/桌面投影；模型输出对象级编辑与接受/拒绝；文件写入撤销（仅编辑器输入区有 undo）；逐操作权限审批。
-- 沙箱/容器仅存在于部署文档，非内置运行时。
-- 用户消息本体可被编辑的入口为外部编辑器（针对输入框），与会话内已生成消息无关。
+- 基础 shell/文件工具未内建操作系统隔离；codemode 有 QuickJS VM 与 worker 资源限制，嵌套工具仍使用各自执行权限。容器化部署的真实隔离效果未验证。
+- 输入框可使用外部编辑器；会话中 context_edit 可以追加记录替换模型可见内容，保留原始消息，相关分支投影见会话笔记 §4。
 
 **未验证事项**：TUI 视觉行为（diff 着色、展开/折叠、滚动）需运行验证；流式编辑预览在长文件/高并发下的表现未运行；HTML 导出的浏览器端渲染行为未运行；sqlite 后端与 coding-agent 的集成路径未运行（README 仅描述 agent-core 用法）。
 
@@ -136,9 +136,11 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 13. Durable harness 的运行状态投影
 
+工具结果已提交时重开复用；执行 intent 已提交而结果未提交时，默认 unsafe 调用结算为可能已部分运行的 interrupted，只有旧 intent 与当前工具都声明 safe 才重跑。phase checkpoint 提供恢复位置，外部副作用仍须按重放策略判断（[ToolTask](../../pi/packages/durable/src/harness/tool.ts#L177-L227)）。
+
 durable harness 把一次执行拆成“接纳提交”和“按阶段驱动”两层持久边界。提交（submission）先落存储再开始执行；每个 Task 的每个 phase 结束都存 checkpoint，进程重启后 `resume()` 从最后一个 checkpoint 继续，睡着的任务不占用调用。该机制保存 transcript、工具结算、重试与尚未完成的提交等运行状态，不是可由用户直接编辑的 Artifact（`packages/durable/README.md` 的提交、任务与恢复章节、`packages/durable/src/harness/`）。
 
-p2 把 worker 持有的会话投影成页面与 TUI 可观察的 Chord 对象引用，Chord 负责跨进程的引用、增量更新与订阅；每个会话一个 worker，崩溃后重启并把失败保留到重试，插件重载时对象与文档仍存活。它形成同一会话的 Web/TUI 多投影，但仍没有独立输出对象、用户接受/拒绝 diff 或脚本沙箱（`apps/p2/src/hosts/session-workers.ts`、`packages/chord/README.md`、`apps/p2/docs/p2-notes.md`）。
+p2 把 worker 持有的会话投影成页面与 TUI 可观察的 Chord 对象引用，Chord 负责跨进程的引用、增量更新与订阅；每个会话一个 worker，崩溃后重启并把失败保留到重试，插件重载时对象与文档仍存活。它形成同一会话的 Web/TUI 多投影；模型工具脚本的 QuickJS 沙箱属于 codemode 链，不能据聊天对象分型概括为全仓无脚本沙箱（`apps/p2/src/hosts/session-workers.ts`、`packages/chord/README.md`、`apps/p2/docs/p2-notes.md`）。
 
 ## 14. 关键源码索引
 

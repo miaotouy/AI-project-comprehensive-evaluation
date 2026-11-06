@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
@@ -60,7 +60,7 @@ job 行只保存任务层面的派发状态、时间与最后错误；Agent 回�
 
 ## 进程内后台工具任务
 
-标记 `is_background_task` 的普通 FunctionTool，或带 `background_task` 的 handoff，会在模型回合内生成 UUID 后立即返回“已提交”。随后 `asyncio.create_task` 在当前事件循环执行工具或子 Agent，任务与所属事件登记到活跃事件注册表并按 UMO 持有到完成；后台执行使用 3600 秒工具超时。完成时收集文本结果，异常转为错误文本，再经 `wake_main_agent` 以 `source="background_task"` 唤醒主 Agent，提示中包含 task_id、工具名、参数、结果与 note，并携带共享停止信号，见 `astrbot/core/astr_agent_tool_exec.py:165-193,399-546`。被唤醒的 Agent 走普通流水线并取得原会话历史，被提示用 `send_message_to_user` 直接交付；若 Agent 没有发送，结果只留在会话历史，代码中没有专门告警。
+标记 `is_background_task` 的普通 FunctionTool，或带 `background_task` 的 handoff，会在模型回合内生成 UUID 后立即返回“已提交”。随后 `asyncio.create_task` 在当前事件循环执行工具或子 Agent，任务与所属事件登记到活跃事件注册表并按 UMO 持有到完成；后台执行使用 3600 秒工具超时。完成时收集文本结果，异常转为错误文本，再经 `wake_main_agent` 以 `source="background_task"` 唤醒主 Agent，提示中包含 task_id、工具名、参数、结果与 note，并携带共享停止信号，见 `astrbot/core/astr_agent_tool_exec.py:165-193,399-546`。被唤醒的 Agent 走普通流水线并取得原会话历史，普通文本回复也会经过 Respond 阶段投递；提示只把 `send_message_to_user` 列为发送图片、文件等产物的工具，并未要求所有结果都通过工具交付。实际发送由唤醒事件转给目标平台，只有发送成功才记账（`astrbot/core/astr_main_agent_resources.py:117-128`；`platform/agent_wakeup_event.py:93-129`）。
 
 运行身份仍是返回文本加内存中的 coroutine 与注册表条目。检查范围覆盖 `astrbot/` 下 background 与 cancel 相关实现：没有按 task ID 查询状态、持久化、队列认领或重启恢复的路径；取消能力来自会话级停止信号（下节）。进程退出或事件循环取消时，不能从已读代码推断会有可靠的用户终态交付。
 

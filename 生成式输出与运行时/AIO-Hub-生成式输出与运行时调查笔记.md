@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：静态代码阅读。对 `src/tools/llm-chat`、`src/tools/rich-text-renderer`、`src/tools/web-canvas`、`src/tools/tool-calling`、`src/tools/media-generator` 等目录做关键词检索（artifact、canvas、sandbox、iframe、webview、notebook、diff、patch、execution、preview、stream、CSP 等）并精读关键实现文件；对照工具自带 ARCHITECTURE.md；抽查 Rust 命令与 Tauri 配置；未运行构建、未启动应用、未运行测试
+> 调查方式：对照源码快照差异，只读复核画布路径/Git适配与测试、VCP分段/媒体结果、子Agent任务边界和移动HTML分支；原有画布候选预览、CSP与回流链保留就近依据；未运行构建、应用或测试
 >
 > 调查范围：模型输出从"消息文本/工具结果"到"可展示、可运行、可编辑、可持久化、可回流对象"的完整链路；覆盖聊天消息物化、HTML 代码块沙箱、web-canvas 工作区、媒体生成资产入库、工具调用结果节点、执行位置与 CSP、持久化与回流；普通 Markdown 渲染细节、Chat 发送/中止/分支语义、工具注册与审批调度本身（仅记录交接点）排除在外；移动端只做概览
 >
@@ -17,7 +17,7 @@
 AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保持为“消息树节点上的纯文本字符串”，在展示时由 `RichTextRenderer` 动态解释为 Markdown、Mermaid、KaTeX 和 HTML 沙箱；工作区层则提供 web-canvas，一个以磁盘文件为事实源、Git 为版本追踪的 Agent 协作工作区。模型可以查询、读取、修改和提交文件，独立预览窗口捕获的运行时错误也会同步回主窗口并进入后续 Agent 上下文。静态代码已经贯通“修改 -> 预览 -> 报错 -> 回流 -> 再修改”，但真实窗口、网络和 Tauri WebView 行为仍未运行验证。
 
 - **聊天输出对象模型**：消息节点（`ChatMessageNode`）有稳定 ID、来源、角色、状态与丰富元数据，但内容只是一段 `content: string`，不存在独立的 Artifact 对象；HTML 代码块在展示时进入 iframe 沙箱（`HtmlInteractiveViewer`）成为可运行预览，属"展示时物化"，无独立生命周期。
-- **web-canvas**：`{appDataDir}/canvases/projects/{id}/` 下的物理项目、`.canvas.json` 元数据和独立 Git 仓库构成持久对象。Monaco 编辑以 500ms 防抖写盘；审批前的 Agent 写入或 diff 先重放到不落盘的内存覆盖层，批准后才正式写盘一次，拒绝只移除候选层，不改变已有工作区。预览 iframe 会内联候选 HTML/CSS/JS，并同步显示（`CanvasAgentService.ts:358-415`、`useCanvasPreview.ts:39-87`）。
+- **web-canvas**：由 `getAppConfigDir()` 解析的 `canvases/projects/{id}/` 下的物理项目、`.canvas.json` 元数据和独立 Git 仓库构成持久对象。Monaco 编辑以 500ms 防抖写盘；审批前的 Agent 写入或 diff 先重放到不落盘的内存覆盖层，批准后才正式写盘一次，拒绝只移除候选层，不改变已有工作区。预览 iframe 会内联候选 HTML/CSS/JS，并同步显示（`CanvasAgentService.ts:358-415`、`useCanvasPreview.ts:39-87`）。
 - **工具结果**：工具调用先经过 `ToolCallingProtocol` 表示层；当前快照的协议注册表只登记 VCP 一种实现，所以实际使用 VCP 文本标记 `<<<[TOOL_REQUEST]>>>`。解析执行后，结果被格式化为文本写入"tool 角色"消息节点内容，随会话 JSON 持久化；结果本身不物化为独立对象，但 web-canvas 的文件操作结果会直接落到物理文件。当前 VCP 是实现范围，不是工具系统的架构上限。
 - **持久化**：聊天会话按会话独立 JSON 文件存储；画布为物理文件 + Git；媒体生成结果通过 `importAssetFromBytes` 进入资产管理系统并带生成来源元数据。
 - **执行位置**：生成代码在 Tauri WebView 的 iframe 中执行；无远端沙箱、容器或独立语言进程。聊天 HTML 与 canvas 预览分别注入自己的 CSP。canvas iframe 只授予 `allow-scripts`，形成 opaque origin，宿主还校验 `event.source` 与 `origin === "null"`；其 CSP 仍允许 HTTP(S)、WebSocket、外部 frame 和 asset 资源，能力边界见第 7 节。
@@ -72,7 +72,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - `tool-calling` 通过 `ToolCallingProtocol` 把工具元数据、调用请求和执行结果与模型通信表示隔开：接口负责工具定义生成、使用说明生成、请求解析和结果格式化；解析后的统一请求仍由协议外的发现、校验、审批、执行与循环引擎处理（职责链入口 `core/protocols/base.ts`，其余见文末源码索引）。因此增加另一种**文本协议**可以复用现有工具目录与执行策略，但当前不是运行期可注册的协议市场，也没有直接覆盖模型 API 的结构化 `tool_calls`。
 - 当前快照只在协议注册表 `SUPPORTED_PROTOCOLS` 登记 `vcp` 一种；`resolveProtocol()` 对现有配置一律路由到 `VcpToolCallingProtocol`，配置字段 `ToolCallConfig.protocol` 也收窄为该值。以下 VCP 标记语法是当前实现事实，不能据此把 AIO 的整体工具架构等同于 VCP。
-- 当前 VCP 实现由模型自由文本中的 `<<<[TOOL_REQUEST]>>> ... <<<[END_TOOL_REQUEST]>>>` 标记触发（`src/tools/tool-calling/core/protocols/vcp-protocol.ts`），支持 `TOOL_REQUEST_ESCAPE` 嵌套与转义。
+- 当前 VCP 实现由模型自由文本中的 `<<<[TOOL_REQUEST]>>> ... <<<[END_TOOL_REQUEST]>>>` 标记触发（`src/tools/tool-calling/core/protocols/vcp-protocol.ts`），只有标准请求块执行；转义请求标记用于参数内字面文本，还原后不再展开额外调用。服务端工具批次先被遮蔽，避免结果里的示例被二次执行（`vcp-protocol.ts:358-427`）。
 - 执行结果经 `formatCycleResults` 委托当前协议序列化为文本，写入 role 为 `"tool"` 的消息节点（`useToolCallOrchestrator.ts:325-345`），节点 `metadata.toolCalls[]` 记录每个请求的 requestId/工具名/状态/耗时/原始参数。**结果不物化为独立对象**；若工具本身有物理副作用（如画布写文件），结果对象身份在文件侧。
 - 工具节点可被"重新解析"（`reparseAndOrchestrate`，`useToolCallOrchestrator.ts:449`），即对已有内容重新走工具调用检测与执行，属于后续回合重入入口。
 
@@ -94,6 +94,12 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 - 渲染器内部是**整段文本重解析 + patch**：V2 自研解析器维护"稳定区/待定区"，稳定区复用已有 AST，待定区每次重解析，经 diff 生成 patch（`core/StreamProcessorV2.ts`）。不是按 AST 节点增量生成，也不是外部 diff/patch 协议。
 - 最终化：请求完成调用 `completeAndDisposeStreamingMessageSource`（`useChatResponseHandler.ts:503`）；失败走 `handleNodeError`（:647），错误写入节点 `metadata.error` 并在 UI 显示可复制错误条；空响应写入 `emptyResponseDiagnostic` 诊断。
 - 网络层流式节流与 VCP 块冲刷由 `core/StreamController.ts` 处理（`rich-text-renderer/ARCHITECTURE.md` §3.4），保证协议块不被平滑拆碎。
+
+### 2.1.1 服务端分段响应与本地媒体结果
+
+服务端 VCP 交互可把同一网络响应拆为独立助手/工具树节点，执行器串接段落、切换流源、重挂排队后代，并在元数据保存共同请求 ID 和各段状态；历史里的工具批次依然有正文解析路径。文本之外，本地工具媒体引用作为消息字段保存，后续请求经附件管道转为多模态；分布式回传时另按外传规则重新读取并物化为 data URL，避免远端尝试访问本机路径（`useSingleNodeExecutor.ts:337-470`；`vcp-connector/services/vcpNodeProtocol.ts:469-520`）。
+
+这些产物各有稳定消息/资产引用，没有升级为通用 Artifact 工作区；实发请求快照独立关联其多个节点。消息和快照持续性见[会话与消息管理](<../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md>)，实际请求编排见[对话请求与上下文](<../对话请求与上下文/AIO-Hub-对话请求与上下文调查笔记.md>)。
 
 ### 2.2 画布更新
 
@@ -137,7 +143,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 | CSP meta | 默认 `default-src 'self' 'unsafe-inline' ...`，允许外部脚本时放宽为 `*`（:320-327） |
 | CDN 本地化 | `cdnLocalizer.ts` 把 jsdelivr/cdnjs/unpkg 等替换为本地 `public/libs` |
 - **依赖提供**：本地 CDN 资源本地化 + `asset://`/`agent-asset://` 本地资产协议；无语言解释器、无 Python/Node 进程执行。
-- **移动端**：`mobile/src/tools/rich-text-renderer/RichTextRenderer.vue` 是 `marked` 的简单渲染器，HTML 块直接 `v-html`，无沙箱、无 iframe 预览、无 Mermaid/KaTeX（概览结论，未逐行核对其余工具）。
+- **移动端**：独立渲染器基于 marked，HTML token 进入 pre 插值转义显示；有独立公式、Mermaid、VCP 和媒体组件，流式更新约 80ms 合并。当前检查入口未提供桌面 HTML iframe 运行预览，HTML 字面显示、结构化图表与任意脚本执行分别走不同边界（`mobile/src/tools/rich-text-renderer/RichTextRenderer.vue:1-11,44-65,513-515`）。
 
 ## 5. 用户交互、事件与错误反馈
 
@@ -153,7 +159,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 - **聊天消息编辑**：全文覆盖式编辑（`useBranchManager.editMessage`，`useBranchManager.ts:108-156`），仅限 user/assistant 角色；"保存到分支"复制内容到兄弟节点形成分支（:162-209）。无选区编辑、无结构化 patch、无撤销栈持久化（`useChatStorageSeparated.ts:199-204` 明确移除 history 字段）。版本表达依赖消息树分支语义，属于 Chat 类目，此处只记交接点。
 - **画布编辑**：用户与 Agent 修改同一组磁盘文件；Agent 用 Search/Replace diff（含 fuzzy 降级与置信度反馈，`CanvasAgentService.ts:168-190`），用户用 Monaco 全量覆盖，当前画布的外部文件变化由递归 watcher 接入刷新。未发现 CRDT 或基于 revision 的冲突检测，因此并发写入仍以最后写入者为准。
-- **版本**：Git 提交/回退/丢弃走 canvas store（`canvasStore.ts:402,457`）；服务层封装 Git 的初始化、暂存、提交、历史、检出与状态矩阵等操作（`GitInternalService.ts:149-234`）。**本次未找到**画布 UI 中的提交历史查看器或 diff 视图组件（`gitLog` 仅存在于服务层，未被组件调用）。Agent 侧的 `commit_changes`/`discard_changes` 是版本操作入口。
+- **版本与 Git 适配**：提交、丢弃经 store 调用 isomorphic-git，服务层已有初始化、暂存、提交、历史、检出和状态矩阵。Tauri IPC 的字符串错误会包装成可写 Error 并保留 cause/code，避免 Git 内部补写错误属性时再次失败；lstat 读取真实类型，符号链接读写仍为简化实现。专项测试覆盖空目录初始提交、历史、修改状态和检出恢复，并检查权限错误可诊断（`GitInternalService.ts:47-151`；`__tests__/GitInternalService.test.ts:102-129`）。检查画布组件和调用点后仍未找到提交历史查看器/文件 diff UI；服务层能力与界面开放分别判断。
 - **接受/拒绝**：工具调用审批 UI 在 `ToolCallMessage.vue`（awaiting_approval 状态展示）。画布写入和 diff 在审批前只登记 mutation，并把候选结果放入内存覆盖层供预览；批准后正式方法写盘一次，拒绝只移除该请求的候选层，不回退 Git HEAD。覆盖层不持久化，也不构成可跨重启恢复的事务日志（`CanvasAgentService.ts:299-415`、`canvasStore.ts:580-632`）。
 
 ## 7. 能力桥、执行位置与权限范围
@@ -189,11 +195,11 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
   - 身份绑定的兜底与限制：无绑定/无激活画布时 `ensureActiveCanvas` 隐式创建（`canvasStore.ts:218-236`）；项目文件、Git 变更和错误上下文都按 canvasId 读取，但 watcher 一次只绑定 store 当前打开的画布。
 - **聊天（有限回流）**：模型侧可感知的只有上下文历史（消息文本本身）；"重新解析"与"续写"（`isContinuation`，`message.ts:385-389`）允许对已有节点继续生成。`llm-chat.registry.ts:270-532` 虽有 10 个 `agentCallable: true` 方法，但全部是**智能体管理**——agent 的列出/搜索/读取/设置、预设消息 CRUD 与查找替换（`find_replace_in_presets`）、导入导出——**不针对会话中已生成的输出消息**；本次未找到模型对会话消息对象的"列出/读取/定向修改"工具方法。
 - **媒体生成**：模型通过 `media-generator` 的 `generate_<model>` 方法直接发起生成，任务与资产结果关联（`mediaGenStore`），模型可读取任务状态但不可直接读改资产字节；生成参数与提示词由模型控制，结果落资产库后由消息附件或画布引用。
-- **子智能体与后台任务**：模型可以通过 `sub-agent` 工具把输出任务委派给另一个 Agent，输出物是子会话中的标准消息节点与任务快照；任务中心、伴生分栏和审批详情读取同一快照，父会话只收到结果消息。这使"输出对象"扩展到跨会话的持续任务面，其运行链路见 Agent 工具笔记第 11 节。
+- **子智能体任务**：委派结果落标准子会话消息和独立任务快照。同步模式等待回复，后台模式先返回句柄，任务中心和伴生分栏读快照及子会话；实际生成仍在主 WebView 异步链，同子会话车道串行。恢复快照把未完成项结算为 interrupted，不自动续推理；独立 background-runtime 尚未托管该执行链。工具契约见[Agent 工具](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)，不据此提升为跨进程持续维护级别。
 
 ## 10. 生命周期、资源治理与性能
 
-- **不可见对象**：聊天消息级 `content-visibility: auto` 跳过离屏渲染（`MessageList.vue`）。HTML 预览按消息深度冻结（`MessageContent.vue:846-856` 的 `shouldFreeze` 判定）：冻结时显示占位并停止 iframe，弹窗打开时内嵌预览冻结避免双份运行（`CodeBlockNode.vue:76-103`）。视口外消息另有冻结渲染配置（`MessageContent.vue:804-831`）。
+- **不可见对象**：活动路径消息维持轻量行壳，阅读区外的显示树可回收，接近视口后再恢复；草稿、编辑和锚定等状态有独立保留条件。HTML 预览另外按消息深度冻结，弹窗打开时冻结内嵌预览以避免双份运行。显示树与 AST 的释放/恢复边界见[消息渲染器](<../消息渲染器/AIO-Hub-消息渲染器调查笔记.md>)，不以 content-visibility 概括整套资源治理。
 - **释放**：HTML 沙箱卸载时清空 srcdoc/src（`HtmlInteractiveViewer.vue:596-603`）；流源完成即 dispose（`useStreamingMessageSources.ts:131`）；`useMarkdownAst.dispose` + 各节点组件取消异步/释放 Blob URL（`rich-text-renderer/ARCHITECTURE.md` §3.7）；错误列表限额（iframe 200 条、画布 `maxRuntimeErrors` 默认 10）；预览刷新防抖 300ms / 编辑写盘防抖 500ms。
 - **限额**：流式渲染安全护栏（`safetyGuardEnabled`，超限降级停止 patch）；patch 队列上限 1000；token 限制与上下文压缩属 Chat 类目。
 - **长时间会话/多画布**：画布窗口注册表（`canvas_window.rs:32-33`）与关闭清理（:160-173）保证窗口生命周期登记；未发现对多画布并发 Agent 会话的显式配额。
@@ -202,12 +208,12 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 
 ### 11.1 验证体系（未运行）
 
-- 未运行测试：本机 Bun `1.2.5` 低于仓库声明的 `1.3.11`，按锁文件安装依赖停在解析阶段后终止，针对性测试未启动。以下为测试文件清单：
+- 本篇采用静态复查，未安装依赖、运行测试或启动应用。以下仅列已读测试的契约范围，不声明通过：
   - `rich-text-renderer`：`composables/__tests__/useMarkdownAst.test.ts`、`parser/block/__tests__/parseVcpRole.test.ts`；
   - `llm-chat`：`useStreamingMessageSources.test.ts`、`emptyResponseDiagnostics.test.ts`、`message-format-processors.test.ts`、`sessionManagers.test.ts`、`PipelineEngine.test.ts` 等 10 个文件；
   - `tool-calling`：`__tests__/tool-calling.test.ts`（协议解析/执行器）；另有 `web-distillery.registry.test.ts`。
   - `web-canvas`：`__tests__/web-canvas.test.ts` 覆盖路径校验、审批候选覆盖层、HTML/CSS/JS 内联、拒绝语义、批量审批与单次正式执行。
-- 当前专项单测未覆盖真实 Tauri 窗口、文件 watcher、WebView CSP、跨窗口错误同步、Git 适配层和保存/恢复端到端行为；这些仍需运行验证。
+- Git 适配另有专项测试模拟 IPC 文件系统，覆盖初始提交、状态/历史和检出恢复；真实 Tauri 窗口、文件 watcher、WebView CSP、跨窗口错误同步和保存/恢复端到端仍待运行验证。
 
 ### 11.2 已确认边界（静态）
 
@@ -242,7 +248,7 @@ AIO Hub 的生成式输出呈现**双层结构**：聊天层把模型输出保�
 ### 12.2 扩展调查：移动端（概览）
 
 - `mobile/src/tools/llm-chat` 有会话、分支、流式执行与持久化（`stores/llmChatStore.ts:117` persistSession），结构与桌面同源但规模小得多。
-- `mobile/src/tools/rich-text-renderer/RichTextRenderer.vue` 基于 `marked`，HTML 块 `v-html` 直出，无沙箱、无 iframe、无图表预览；生成式输出停留在 G0–G1 级。
+- 移动渲染器基于 marked，HTML 原文进入 pre 转义显示，另有公式、Mermaid、VCP 与媒体节点组件；本次入口检查未见桌面 HTML 代码 iframe 运行时。图表展示与任意 HTML 执行分开判断，渲染细节见[消息渲染器](<../消息渲染器/AIO-Hub-消息渲染器调查笔记.md>)。
 - 未逐文件核对移动端其余工具（`agent-manager`、`llm-api`、`log-manager`、`ui-tester`），是否含其他输出运行时未知。
 
 ## 关键源码索引

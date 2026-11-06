@@ -80,7 +80,7 @@ Dify 将 Dataset、Document、分段、处理规则、索引状态和检索设�
 
 数据集还可以进入独立 RAG Pipeline：控制台提供创建、编辑、节点试跑与 Pipeline 路由，后端维护草稿和已发布 workflow、运行及节点执行记录，并支持 DSL 导入导出。当前是静态 `主链确认`，未运行数据源授权、解析器、向量库、reranking 或实际召回，不能推断检索质量、吞吐、费用、删除一致性和权限效果。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
 
-知识库文件能力在快照中改为对接独立部署的 KnowledgeFS 服务：仓内保留固定接口契约、能力操作清单、契约锁文件与 CI 覆盖率检查，客户端是否启用取决于部署形态、服务地址与能力认证配置；知识检索也新增了对应的 v2 节点。服务端实现不在本仓库，故只能确认 Dify 侧启用条件、契约版本与调用入口，实际存储、一致性与配额效果未验证，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
+KnowledgeFS 是与既有 Dataset 并行的知识面，由独立部署的知识服务承接存储，仓内保留固定接口契约与能力认证。启用始终要求总开关，同时满足云端/企业版或社区开发条件。对应的检索 v2 节点已静态追到配置、文本/图片输入、Workflow 空间绑定、并发召回、候选融合、重排和引用输出；文本重排不可用会使节点失败，纯图片查询使用空间分数。有条件的空检索质量捕获负责观察，尚未形成自动查询改写或知识写回。外部服务的实际召回、存储一致性与配额效果未验证，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
 
 ### Prompt IDE 与配置发布
 
@@ -96,7 +96,9 @@ Dify 将 Dataset、Document、分段、处理规则、索引状态和检索设�
 
 ### Agent v2 与受管插件生态
 
-Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；Chatflow 参与者按 conversation 复用记忆并固定初次绑定的 snapshot。后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。Runtime 后端可为 local、enterprise、e2b 或 OpenShell，取消时悬空的 tool call 也会标记为 interrupted，使下一回合可继续。它是版本化 Agent 的执行环境，而不只是新的配置界面。
+Agent v2 将 roster Agent、workflow inline Agent、编辑 draft、build draft 和不可变发布 snapshot 区分建模。配置页先保存草稿再发布，有工作流引用时要求前端影响确认；服务端独立检查发布权限与知识/Home 绑定，创建 snapshot 后切换 active 指针，首次发布才自动打开站点与 API。
+
+会话或 build draft 拥有 execution workspace binding，运行时保存 session snapshot 和待处理表单/工具状态；Chatflow 参与者按 conversation 复用记忆并固定初次绑定的 snapshot。后续请求校验 binding 的 tenant、owner 和配置 generation，退役后再请求 Agent Runtime 做物理清理。Runtime 后端可为 local、enterprise、e2b 或 OpenShell，取消时悬空的 tool call 也会标记为 interrupted，使下一回合可继续。它是版本化 Agent 的执行环境，而不只是新的配置界面。
 
 Plugin Marketplace 则由 Dify 处理权限、来源策略、下载/缓存、异步安装/升级任务、卸载后的关联清理和运行时发现；真正的包安装、记录、隔离与物理删除在独立 Plugin Daemon。两条链都已静态走通 Dify 侧，尚未启动对应外部 runtime。详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)。
 
@@ -104,7 +106,7 @@ Plugin Marketplace 则由 Dify 处理权限、来源策略、下载/缓存、异
 
 App Deployment v2 在内置发布之外增加了环境版本、环境 WebApp/service API 访问点和环境级访问控制；MCP 与 trigger 当前明确不在部署环境支持范围。环境文件通过短期、按 app/end-user 与 upload/resolve/produce scope 的 grant 交接，内容下载另用单文件 token。仓内只确认 Dify 侧入口和协议，实际部署控制面属于 Enterprise 外部边界，因此仍是 `入口确认`，详见[独特功能](../独特功能/Dify-独特功能调查笔记.md)和[产品结构与设计基因](../产品结构与设计基因/Dify-产品结构与设计基因调查笔记.md)。
 
-知识库 Service API Key 也可绑定到指定 Dataset。绑定 Key 每次请求都按集合校验；没有绑定行的既有 Key 继续拥有租户内全库范围，而只绑定 KnowledgeFS 知识空间的 Key 会被拒绝，不能借它越权访问数据集。该能力缩小了 API 凭据作用域，但尚未做真实越权测试，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
+知识库 Service API Key 可绑定指定 Dataset 或 KnowledgeFS 空间，每次请求重读作用域；没有绑定行的既有 Key 保留租户内全库范围。绑定 Key 访问旧 Dataset 接口时必须携带授权的 Dataset ID，仅绑定 KnowledgeFS 的 Key 会被旧接口拒绝。资源访问令牌则使用另一套显式资源关联，允许集合接口列出授权且启用的知识库；撤销入口会删除整个令牌和全部关联。两套凭据的集合访问语义不同，真实越权与撤销竞争尚未运行，详见[检索增强与认知编排](../检索增强与认知编排/Dify-检索增强与认知编排调查笔记.md)。
 
 ### DSL 分发与迁移边界
 

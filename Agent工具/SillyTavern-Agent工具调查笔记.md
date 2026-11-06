@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/SillyTavern/SillyTavern`
 >
-> 调查更新日期：2026-09-16
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`06bde939fb1e9c4c8d8641d810f0a916b5bce127`（分支：`release`）
 >
@@ -157,7 +157,7 @@ static #parseParameters(parameters) {
 ```
 
 - 空字符串 → `{}`。
-- 字符串 → JSON.parse，解析失败会抛出 SyntaxError，被调用入口捕获并包装为错误结果写回聊天消息（`error: true`），**不会中断整轮生成**，除非这是唯一一次调用且消息为空（见维度 5 的 shouldStopGeneration）。
+- 字符串参数经 JSON.parse，解析失败在调用入口包装为 Error；普通工具仍形成带 `error: true` 的调用记录并写回聊天，模型可继续消费错误结果。单次失败且正文为空并不会自动停止，因为错误调用本身已计入 invocation；stealth 调用则走不落盘、终止递归的独立语义。见 [错误归约](../../SillyTavern/public/scripts/tool-calling.js#L816-L839)、[后续生成判定](../../SillyTavern/public/script.js#L5541-L5558)。
 - 已是对象（Claude/Cohere 某些路径）→ 直接使用，同样不做 schema 一致性检查。
 
 模型完全可以返回缺少 `required` 字段、类型不匹配、或包含 schema 未声明的额外字段的参数；这些校验责任被完全下放给各工具自己的 `action` 函数（如 SD 插件里手写的 `if (!args.prompt) throw ...`）。畸形/超范围参数的唯一"防线"是 JSON 语法本身是否合法，而不是内容是否合规。

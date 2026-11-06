@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：只读源码通读（`tool-calling`、`vcp-connector`、各工具 registry、Rust 侧 Tauri command、Tauri capability 配置），并结合 `VCPToolBox` 当前工作树源码核实协议契约；未修改被调查仓库任何文件
+> 调查方式：对照源码快照差异，只读复核VCP执行解析、文件与Agent字段策略、审批仲裁、Skill进程、子Agent派遣/追加/取消/恢复和媒体回传；既有跨仓协议结论保留其来源，未重新运行外部服务器，未修改源码或启动应用
 >
 > 调查范围：模型可发现、请求并触发的工具，以及注册、执行、审批、安全边界与扩展入口
 >
@@ -63,7 +63,7 @@ VCP 分布式节点（可选，仅当 Agent 使用的 Profile baseUrl 与 vcp-co
 `ToolRegistry` 是工具的统一接口，定义在 `../../aio-hub/src/services/types.ts:167`，除标识用的 `id` 外还声明了以下可选能力字段：
 
 - `getMetadata()`（可选但强烈推荐）：向发现/执行层提供方法元数据；
-- `checkSecurityPolicy?`：路径沙箱等安全策略判断（仅 `aio-file-operator` 实现，见第 4/6 节）；
+- `checkSecurityPolicy?`：路径沙箱等安全策略判断（文件操作与 Agent 配置编辑均有实现，见第 4/6 节）；
 - `onToolCallPreview?`/`onToolCallDiscarded?`：执行前预览与拒绝回调；
 - `settingsSchema?`：UI 配置模式，其中带默认值的项会进入执行参数（见第 4 节）；
 - `runMode?`：执行模式声明。
@@ -102,7 +102,7 @@ VCP 分布式节点（可选，仅当 Agent 使用的 Profile baseUrl 与 vcp-co
 - `{{tool_context}}` 宏对应 `getAgentContexts()`，**不缓存**，每次都并发调用所有已启用工具/扩展的 `getExtraPromptContext()`（`discovery.ts:445`），用 `<context_provider id="toolId">` 包裹拼接。
 - `{{tool_usage}}` 宏对应协议使用说明，是静态字符串（`vcp-protocol.ts:314`），无缓存但本身开销可忽略。
 
-三个宏在 `macro-engine/macros/tools.ts` 注册（priority 分别为 95/92/90），拼装位置由 Agent 的 preset message 决定；三个宏都缺失且开启 `toolCallConfig.autoInjectIfMacroMissing` 时，`injection-assembler.ts:378` 会在消息历史锚点前插入一条固定系统消息兜底注入（`injection-assembler.ts:391`）。**没有发现显式 Prompt Cache（如 Anthropic `cache_control` 或结构化 cache breakpoint）机制**：`{{tools}}` 与 `{{tool_context}}` 分离更多是为了让“工具定义”部分在同一 Agent 配置下字符串完全稳定，以便模型侧/网关侧对相同前缀做隐式缓存。
+三个宏的位置通常由作者预设决定；实际有效正文缺少三个宏且允许自动补位时，组装器才补入工具说明。启用上下文缓存优化且存在安全历史落点时，自动工具定义/用法留在前部 system 消息，运行环境改放尾部附近的 user 参考块；否则合并补位到历史前。显式宏不会被自动迁移。此机制改善前缀稳定性，当前聊天主链未找到主动生成 `cache_control` 断点的路径；Gemini 适配器存在低层缓存引用透传也不能等同本工具目录已创建显式缓存（`core/context-processors/injection-assembler.ts:261-379`；`core/context-utils/runtime-context.ts`）。
 
 过滤/开关集中在发现阶段生效：工具级由 `resolveToolEnabled()` 判断（`discovery.ts:82`，`toolToggles[toolId]` 优先于 `defaultToolEnabled`），方法级在 `generatePrompt()` 内联过滤（`discovery.ts:322`，仅 `methodToggles[toolId_methodName] !== false` 保留）。
 
@@ -129,7 +129,7 @@ VCP 分布式的 `includeToolIds` 参数可以无视 `config.enabled` 强制包�
 
 协议实现集中在 `../../aio-hub/src/tools/tool-calling/core/protocols/vcp-protocol.ts`。语法要点：
 
-- 三组标记：`<<<[TOOL_DEFINITION]>>>`/`<<<[END_TOOL_DEFINITION]>>>`（工具定义，注入 Prompt）、`<<<[TOOL_REQUEST]>>>`/`<<<[END_TOOL_REQUEST]>>>`（调用请求）、`<<<[TOOL_REQUEST_ESCAPE]>>>`/`<<<[END_TOOL_REQUEST_ESCAPE]>>>`（块级转义，用于嵌套调用）。
+- 工具定义标记用于 Prompt；只有标准 `TOOL_REQUEST`/`END_TOOL_REQUEST` 块具备执行入口。`TOOL_REQUEST_ESCAPE` 仅供参数内引用请求字面量，参数提取后还原，不产生另一条执行请求（`vcp-protocol.ts:327-370`）。
 - 参数编码 `key:「始」value「末」`，还支持 `「始ESCAPE」...「末ESCAPE」` 和 `「始exp」...「末exp」` 两种转义变体，解析优先级 `ESCAPE/exp > 标准`（`vcp-protocol.ts:32-36`）：先扫描转义变体并记录匹配区间，再把这些区间在原文中"掏空"（替换为等长空格）后才跑标准正则，避免转义内容里的普通 `「始」「末」` 被二次误匹配（`vcp-protocol.ts:132-141`）。
 - 批量调用：`command1`/`path1`、`command2`/`path2`… 数字后缀键会被识别为分组参数，一个 `TOOL_REQUEST` 块拆分为多个 `ParsedToolRequest`（`vcp-protocol.ts:200-268`）。`tool_name`、`request_id` 不参与分组。
 
@@ -138,7 +138,7 @@ VCP 分布式的 `includeToolIds` 参数可以无视 `config.enabled` 强制包�
 | 场景 | 行为 | 源码位置 |
 |---|---|---|
 | Markdown code fence / inline code 包含示例 TOOL_REQUEST | 复合正则 `scanner` 优先匹配 fence/inline code 整体跳过，避免解析伪请求 | `vcp-protocol.ts:356` |
-| 坏块后又出现 TOOL_REQUEST | 边界扫描器把后续标准或转义请求起点视为恢复点：丢弃被中断的坏块，把扫描位置移到新起点后继续；两个请求不会被合并 | `vcp-protocol.ts:373-397`、`src/utils/vcpBlockBoundary.ts:44-91` |
+| 坏块后又出现标准 TOOL_REQUEST | 丢弃被后续标准请求中断的坏块，从新起点继续；转义请求标记不作为独立恢复/执行入口。这是结构恢复，不修复损坏参数后执行 | `vcp-protocol.ts:380-408` |
 | 参数值本身含协议分隔符或请求标记 | 用 `「始ESCAPE」...「末ESCAPE」` 包裹参数值；边界扫描会跳过完整 ESCAPE 区域，其中的请求标记不会中断外层块。冒号后允许可选空白 | `vcp-protocol.ts:32-37,116-141`、`src/utils/vcpBlockBoundary.ts:29-81` |
 | 流式截断（末尾缺 `END_TOOL_REQUEST`，且没有后续恢复起点） | 记录 warning 并停止扫描，返回此前已解析的请求列表，不抛异常 | `vcp-protocol.ts:399-407` |
 | 参数缺少闭合 `「末」` | `RE_VCP_PENDING` 捕获未闭合的键值，仍尝试提取到 value，但在 `validation.errors` 里记录“未正确闭合” | `vcp-protocol.ts:166-172` |
@@ -168,7 +168,9 @@ mergedArgs = { ...schemaDefaults, ...agentPreset, ...cleanArgs }
 ```
 其中"配置默认值"来自工具 `settingsSchema` 中带 `defaultValue` 的项（按 `modelPath` 映射），与 `MethodParameter.defaultValue` 是**两套不同的默认值来源**——前者是 UI 配置默认值、真正被合并进执行参数，后者只是方法参数文档里的声明，容易混淆；"Agent 预设"来自 `config.toolSettings[toolId]`（Agent 级，UI 上通过 Agent 设置面板配置）；"实参"是剔除 `command` 字段后的 LLM 参数，优先级最高。
 
-`aio-file-operator` 的每个方法都以 `args.path` 为校验入口（`checkSecurityPolicy()` 只读取该字段）。ARCHITECTURE.md 明确写了“如方法有多个路径参数需扩展 checkSecurityPolicy，避免只校验 args.path”——这是**一个已知但未处理的扩展面缺口**：未来若新增“复制/移动”类需要两个路径参数的方法，第二个路径字段不会被沙箱校验。
+文件策略收集五类路径参数，逐一解析真实路径并求值；任一路径 block 则整体拒绝，有 approve 则整体要求审批。复制、移动和删除还调用 Rust `inspect_file_operation` 检查目录/递归操作，检查失败直接阻断。复制/移动已有模型可调用方法，源和目标共同决定整次操作的审批或拒绝结果（`aio-file-operator/utils/security.ts:258-313`；`aio-file-operator.registry.ts:269-309,440-461`）。
+
+Agent 配置编辑也实现了安全策略钩子：设置 `toolCallConfig` 或其点路径子项返回强制审批，注册表把它交给统一执行器；该路径可编辑，但不能用当前静态自动批准配置静默修改。是否可自动仲裁通过还受仲裁模式影响，见第 6 节（`agent-manager/services/agentManagementService.ts:103-130`；`llm-chat/llm-chat.registry.ts:271-272`）。
 
 `ffmpeg-tools`、`skill-manager`（`skill_run_script` 的 `args` 直接拼进命令行参数）等命令类工具**没有 shell 元字符过滤**，安全性依赖 Rust 侧 `tokio::process::Command` 数组式传参、不经 shell 解释，因此不存在传统 shell 注入路径；`skill_run_script` 的 `args` 先按引号感知分词再放入参数数组（`skill_manager.rs:556-576`），仍是“进程参数传入”而非命令字符串拼接——可以传任意参数，但不能靠分号/管道逃出目标程序。
 
@@ -211,11 +213,15 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 **审批状态不持久化**：待批准请求只存在于内存，应用重启或页面刷新即丢失；只有异步任务通过任务存储写盘（`persistImmediately()`/`persistDebounced()`），应用重启后 `markRunningTasksAsInterrupted()` 会把重启前处于 running/pending 的任务标记为 `interrupted`（`task-manager.ts:461-485`）。
 
-绕过开关：`mode: "auto"` 配合工具/方法级自动批准即可完全无人值守；`aio-file-operator` 的“审批区”规则里 `type: "approve"` 标注“不被自动批准绕过”（`checkSecurityPolicy()` 返回强制审批，不受 `mode: "auto"` 影响）——但 block（死区）与 approve（审批区）规则都只作用于 `aio-file-operator` 自身，其它工具没有类似的强制策略钩子（`checkSecurityPolicy` 是可选接口，`../../aio-hub/src/tools` 下只有它一处实现）。
+静态自动批准只在全局 auto 模式与工具/方法匹配时生效；安全策略的 block 先行拒绝，approve 则跳过静态放行进入审批链。文件操作和 Agent 工具配置编辑都实现了这一钩子。这里的“强制审批”表示静态规则不能直接放行，后续仍可能经过自动仲裁，不能概括为任何场景都必须手点确认（`tool-calling/core/executor.ts:229-285`）。
 
 无人值守场景：VCP 分布式渠道下，本地 `tool-calling` 编排被跳过（`useToolCallOrchestrator.ts:187`），审批改由 VCP 节点协议处理（本机作为节点被远端调用时），或交给 VCPToolBox 服务端自己的 `toolApprovalManager`（`approveAll`/`approvalList` 配置，支持 `::SilentReject` 后缀实现“拒绝但不通知 AI”）——**这部分无人值守策略实际发生在 VCPToolBox 侧，不在 AIO Hub 本身**，AIO 只是转发/展示审批 UI。
 
-**AI 自动审批仲裁**：静态自动批准之后、人工审批之前新增一层仲裁。`toolCallingStore.requestApproval()` 通过注入的 `ApprovalArbiter`（`setApprovalArbiter`，`stores/toolCallingStore.ts:92-97`）先做自动判定，结果包含 approve/deny/escalate 三态与审计信息（`audit.arbiter`）；批准时直接结算请求，escalate 或判定失败才真正等待人工，仲裁快照随请求记录保留供 UI 回放。仲裁器实现在 `src/services/decision-arbiter/`，两种引擎（JEV 问答与普通 LLM）与失败规则见架构文档 `docs/architecture/tool-approval-arbitration.md`；配置分全局决策渠道与 Agent 策略两层（Agent 侧字段 `decisionArbitration`，见 Agent 角色笔记 6.5）。前台审批条、消息卡片与后台任务详情按仲裁引擎区分展示，共享的批准/拒绝语义不变。
+**AI 自动审批仲裁**：需要进入审批链的请求，按目标 Agent 的仲裁 enabled 开关决定是否调用已注入仲裁器，未启用直接人工等待。仅有配置对象并不足以启用：运行时门禁读取其 enabled 字段，配置编辑器对象存在性开关与这一值应分别核实。静态危险特征、重复升级、渠道缺失、并发上限或无效模型均升级人工；保守模式对强制审批直接转人工，激进模式才允许继续评估。普通 LLM 引擎要严格解析裁决，低风险且符合意图才可能批准，外部来源默认需人工，强制审批还要求明确授权；JEV 引擎按问卷/阈值求值。故强制审批不受静态白名单绕过，但激进仲裁仍是一条可自动批准路径（`decision-arbiter/index.ts:209-278`；`llmApproval.ts:172-193`）。
+
+审批 store 调用注入的仲裁器，批准时直接结算，升级或判定失败时才等待人工；拒绝同样有独立结果，审计快照随请求保留。注入入口见 `stores/toolCallingStore.ts:92-97`，引擎实现位于 `src/services/decision-arbiter/`。
+
+决策渠道与模型归全局配置，Agent 保存仲裁策略；两者的编辑与启用边界见角色笔记第 6.5 节。前台审批条、消息卡片和后台任务详情按引擎区分呈现，共享批准与拒绝语义。
 
 **依据**：[`llm-chat/stores/toolCallingStore.ts`](../../aio-hub/src/tools/llm-chat/stores/toolCallingStore.ts)、[`src/services/decision-arbiter/`](../../aio-hub/src/services/decision-arbiter/)、[`docs/architecture/tool-approval-arbitration.md`](../../aio-hub/docs/architecture/tool-approval-arbitration.md)、[`tool-calling/core/executor.ts`](../../aio-hub/src/tools/tool-calling/core/executor.ts)、[`agent-manager/types/agent.ts`](../../aio-hub/src/tools/agent-manager/types/agent.ts)、[`tool-calling/core/async-task/task-manager.ts`](../../aio-hub/src/tools/tool-calling/core/async-task/task-manager.ts)、[`aio-file-operator/utils/security.ts`](../../aio-hub/src/tools/aio-file-operator/utils/security.ts)、[`vcp-connector/services/vcpNodeProtocol.ts`](../../aio-hub/src/tools/vcp-connector/services/vcpNodeProtocol.ts)、VCPToolBox [`modules/toolApprovalManager.js`](../../VCPToolBox/modules/toolApprovalManager.js)（用于协议核实，未修改）。
 
@@ -225,16 +231,9 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 - **文件类**：`aio-file-operator` 走 Tauri 的 `read_text_file_force`/`write_text_file_force`/`delete_file_to_trash` 等命令（`file_operations.rs`）。这些 Rust 命令本身不做路径策略限制，安全边界在前端 `security.ts` 的白名单/黑名单判断（第 4、9 节详述）：校验前先经 Rust 命令把目标与规则路径解析成真实路径（含符号链接），再做 `isPathWithinRoot` 边界比较。
 - **外部传输专用命令**：`inspect_file_for_external_transfer`/`read_file_for_external_transfer` 是唯一在 Rust 侧再次校验沙箱/规则/大小的读取命令，专供 VCP 外部文件传输，不暴露给 Agent 工具（见第 9 节）。
-- **子进程类**：`ffmpeg-tools` 用 Rust 标准子进程 API + 数组式参数执行（不经 shell），Windows 下设 `CREATE_NO_WINDOW` 隐藏窗口（`ffmpeg_processor.rs:449-453`）；`skill-manager` 的 `run_skill_script` 同样用数组式参数，工作目录限定在 skill 的 `base_path`，并校验脚本路径必须位于该目录的 `scripts/` 子目录下防止穿越（`skill_manager.rs:542-544`）——这是 **Rust 侧显式路径穿越防护**。
+- **子进程类**：FFmpeg 和 Skill 由 Rust 子进程执行。Skill 使用参数数组、以技能目录为工作目录，脚本入口做存在性和词法前缀检查；此处未先 canonicalize，不能据此认定是真实路径隔离。执行进程继承宿主权限，没有 OS 文件/网络沙箱；超时包装结束等待，但本路径未设置 kill_on_drop，也未跟踪并终止子进程树，不能把“超时返回”解释为进程已被杀死（`skill_manager.rs:565-635`）。本次只描述边界，不构造绕过或运行危险脚本。
 - **平台差异（Windows）**：`ffmpeg_processor.rs` 用 `#[cfg(target_os = "windows")]` 单独设置 `CREATE_NO_WINDOW`；`skill_manager.rs` 通过公共工具函数统一隐藏子进程窗口。
-- **脚本运行时解析**（`resolve_runtime()`）按扩展名选运行时：
-  ```
-  .ps1      -> powershell -File
-  .sh/.bash -> 用户配置的 shell（Windows 默认仍是 bash，未装则 spawn 失败）
-  .js/.ts   -> bun（缺省则 node）
-  .py       -> python
-  ```
-  **Windows 下 `bash`/`sh` 类脚本不保证有可用运行时**，属已知平台断层，需用户在 `runtimeSettings` 里显式配置 WSL/Git Bash 路径。
+- **脚本运行时解析**：优先用户显式命令，缺省 JavaScript/TypeScript 取 Bun 再 Node；Python 在 Windows 优先 python，其它平台优先 python3；Shell 按 bash、sh 探测；PowerShell 在 Windows 优先 powershell，其它平台优先 pwsh。探测不负责安装依赖，候选均不可用仍会在进程启动时报错（`skill_manager.rs:459-527`）。
 - **`file://` 解析（VCP 内置工具）**：`internal_request_file` 已收紧：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL，拒绝凭据/端口/查询参数/片段，拒绝 UNC 与远程主机路径（`vcpNodeProtocol.ts`）；读取改走 `inspectFileForExternalTransfer` → `readFileForExternalTransfer`（aio-file-operator 的 Rust 加固命令），在审批区要求用户审批、Rust 侧重新校验沙箱/规则/文件大小并写审计日志，另有 60 秒速率窗口（`EXTERNAL_FILE_RATE_WINDOW_MS`）。
 - **`appdata://` 资产映射**：`media-generator` 等工具在资产路径拼接里使用该 scheme（`buildAgentMethods.ts:600-603`），最终由 Tauri asset protocol 或应用自己的资产解析服务映射到 `$APPDATA` 下的真实路径。
 - **Capability 权限范围**：`opener:allow-open-path` 显式限制在 `$APPDATA/**` 与 `$DOWNLOAD/**`（`capabilities/default.json:11-18`），但这只管“用系统程序打开文件”，**不管 `read_file_as_base64`/`invoke` 类命令的读取范围**（这些命令走 `fs:allow-read-file` 权限，capability 配置为 `{"path": "**"}`，即无限制）。
@@ -264,7 +263,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 | 工具 ID | 方法 | 用途 | 执行位置 | 需审批（默认 manual 模式下） | 边界说明 |
 |---|---|---|---|---|---|
-| `aio-file-operator` | `read_file`/`write_file`/`append_file`/`delete_file`/`list_directory`/`apply_diff`/`create_directory`/`path_exists` | 本地文件读写、目录操作、Diff 修改 | 前端 + Tauri `file_operations.rs`（普通 force 命令无 Rust 侧路径限制；专用外部传输命令在 Rust 侧复校验） | 是（受 `checkSecurityPolicy` 白名单/死区/审批区三态影响） | 沙箱已加固——前端经 `resolve_path_for_security` 解析真实路径（符号链接）后按 `isPathWithinRoot` 边界判断，白名单/规则路径同样解析；`delete_file` 走回收站尚可恢复；多路径方法缺失时校验面仍有缺口（`checkSecurityPolicy` 仍只读 `args.path`） |
+| `aio-file-operator` | `read_file`/`write_file`/`append_file`/`delete_file`/`copy_file`/`move_file`/`list_directory`/`apply_diff`/`create_directory`/`path_exists` | 本地文件读写、目录操作、Diff 修改 | 前端 + Tauri `file_operations.rs`（普通 force 命令无 Rust 侧路径限制；专用外部传输命令在 Rust 侧复校验） | 是（受 `checkSecurityPolicy` 白名单/死区/审批区三态影响） | 沙箱已加固——前端经 `resolve_path_for_security` 解析真实路径（符号链接）后按 `isPathWithinRoot` 边界判断，白名单/规则路径同样解析；`delete_file` 走回收站尚可恢复；复制/移动的源和目标均校验，目录操作另有 Rust 递归检查 |
 | `retrieval` | `search`（Recall/Knowledge/mixed 模式主动检索） | 按 Agent 授权主动检索内容 | 前端 + Recall/Knowledge 检索服务 | 是 | 与 `recall-basic` 的占位符即时召回不同，这是显式检索工具（参数规范化后按授权集合过滤） |
 | `directory-tree` | `generateTree` | 生成目录树（过滤/深度/大小统计） | 前端 + Tauri | 是 | 无路径沙箱，可枚举任意可达目录结构（只读，非破坏性） |
 | `dir-search` | `searchDirectory`/`replaceInDirectory` | 全文搜索/正则批量替换文件内容 | 前端 + Tauri（流式 batch 事件） | 是 | Agent 搜索路径带硬资源限制——`maxDepth` 默认 5（上限 20）、最多扫描 50,000 个文件/2GB、30 秒截止、结果上限 10,000、上下文行上限 20（`actions.ts` 的 `AGENT_*` 常量），并绑定 `dir_search_cancel` 取消生命周期（AbortSignal→Rust 取消）；`replaceInDirectory` 直接改磁盘文件且**不可撤销**（方法描述里自己标注了"⚠️ 此操作会直接修改磁盘文件，不可撤销"），无路径沙箱 |
@@ -278,20 +277,26 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 | `media-info-reader` | `readImageMetadata` | 提取 AI 生图/角色卡元数据 | 前端（`@tauri-apps/plugin-fs` 读文件） | 是 | 无路径沙箱，只读 |
 | `media-generator` | `generate_<model_id>`（动态，每个可用模型一个） | 调用配置好的图片/视频/语音/音乐生成模型 | 前端 + 远程模型 API（走用户配置的 LLM Profile） | 是（`isFast` 模型走 sync 立即返回，其余走 async 任务） | 生成资源消耗真实 API 额度；`prompt` 完全由 LLM 控制，无内容过滤 |
 | `web-distillery` | `quickFetch`/`smartExtract` | 网页内容抽取（HTTP 直取 / 真实浏览器渲染） | 前端 + Tauri HTTP fetch 或内嵌浏览器实例 | 是 | `url` 参数无域名/协议白名单，可对任意地址发起请求（`http:allow-fetch` 权限本身放开 `http://**`/`https://**` 及局域网 IP 正则） |
-| `web-canvas` | `read_canvas_file`/`apply_canvas_diff`/`write_canvas_file`/`commit_changes`/`discard_changes`/`list_canvas_files`/`create_canvas`/`clear_runtime_errors`（`open_window` 显式 `agentCallable:false`） | Agent 协作画布：多文件读写、Git 提交/丢弃、HTML 预览 | 前端 + 本地 Git 仓库（`GitInternalService`）+ iframe 预览 | 是（`apply_canvas_diff`/`write_canvas_file` 走 `onToolCallPreview` 内存覆盖层：审批前不写物理文件，批准后才执行；拒绝只移除候选层，不用 Git checkout 覆盖已有未提交修改） | 写入的内容会被渲染为可执行 HTML/JS（iframe `allow-scripts allow-same-origin`，见消息渲染器笔记 7.3） |
+| `web-canvas` | `read_canvas_file`/`apply_canvas_diff`/`write_canvas_file`/`commit_changes`/`discard_changes`/`list_canvas_files`/`create_canvas`/`clear_runtime_errors`（`open_window` 显式 `agentCallable:false`） | Agent 协作画布：多文件读写、Git 提交/丢弃、HTML 预览 | 前端 + 本地 Git 仓库（`GitInternalService`）+ iframe 预览 | 是（`apply_canvas_diff`/`write_canvas_file` 走 `onToolCallPreview` 内存覆盖层：审批前不写物理文件，批准后才执行；拒绝只移除候选层，不用 Git checkout 覆盖已有未提交修改） | 画布预览可执行 HTML/JS；iframe 仅 allow-scripts，使用 opaque origin 并校验消息来源，CSP 仍保留网络访问，边界见生成式输出与运行时第 7 节 |
 | `recall`（`recall-basic`/`recall-admin`） | `searchEntries`/`upsertEntry`/`updateEntryContent`；`listRecallCollections`/`listEntriesMetadata`/`batchUpdateMetadata`/`deleteEntry` | 结构化知识库/记忆的检索与管理 | 前端 + 本地存储/向量库 | 是（`deleteEntry` 要求显式 `confirm` 参数） | `recall-admin` 可批量改元数据、删除条目；模型自己写入的条目后续又会被当作检索结果召回 |
-| `skill:system`（`SkillManagerProxy`） | `skill_run_script`/`skill_read_file`/`skill_list_dir`；`activate_<skillName>`（动态） | 执行已安装 Skill 的私有脚本 / 读取资源 / 激活技能说明 | 前端 + Tauri 子进程（`run_skill_script`，限定 `scripts/` 子目录 + 路径穿越校验） | 是 | `skill_run_script` 本质是**受限的任意脚本执行**（js/ts/py/sh/ps1），影响取决于已安装 Skill 的来源信任度；env 变量可被 Skill 配置注入 |
+| `skill:system`（`SkillManagerProxy`） | `skill_run_script`/`skill_read_file`/`skill_list_dir`；`activate_<skillName>`（动态） | 执行已安装 Skill 的私有脚本 / 读取资源 / 激活技能说明 | 前端 + Rust 启动本机脚本进程（入口存在性/词法前缀校验，非 OS 沙箱） | 是 | `skill_run_script` 本质是**受限的任意脚本执行**（js/ts/py/sh/ps1），影响取决于已安装 Skill 的来源信任度；env 变量可被 Skill 配置注入 |
 | `git-committer` | 无 `agentCallable` 方法 | 纯 UI 工具，不对 Agent 暴露 | — | — | 不适用（消息渲染器笔记范围外的 UI 功能，已用 grep 确认无 `agentCallable: true`） |
 | `symlink-mover` | 无 `agentCallable` 方法 | 纯 UI 工具 | — | — | 不适用 |
 | `window-automator` | 无 `agentCallable` 方法（`runMode: "any"` 但未见 `getMetadata`） | 窗口自动化（点击/取色/截图/OCR），仅供人工在 UI 中编排动作流 | — | — | 不适用（未发现 Agent 可调用接口，属于纯 UI 功能，未列入 Agent 工具范围） |
 | `llm-chat`（主实例） | 无 `agentCallable` 方法（`addContentToInput` 等是给其它工具跨模块调用的编程接口，非 LLM 直接可调用） | 输入框/附件/会话编程接口 | 前端 | — | 不计入 Agent 工具（`getMetadata()` 未定义，`services/executor.ts` 的 `execute()` 可被其他工具内部调用，但不出现在 VCP Prompt 里） |
-| `llm-chat-agent-mgmt`（`llm-chat.registry.ts` 中的 `agentManagement` 实例） | `list_agents`/`search_agents`/`read_agent_config`/`export_agent_as_text`/`set_agent_field`/`find_replace_in_presets`/`add_preset_message`/`delete_preset_message`/`move_preset_message`/`import_agent_from_text` | 让 Agent 自己管理/编辑其他 Agent（或自身）的配置、预设消息 | 前端 + 本地 Agent 配置文件持久化 | 是 | **自我修改能力**：`set_agent_field` 有 `FIELD_BLACKLIST`（`id`/`createdAt`/`lastUsedAt`/`avatarHistory`）保护，但 `toolCallConfig`/`presetMessages`/`extensionConfig` 等敏感字段不在黑名单内，Agent 理论上可以通过工具调用**修改自己的工具调用权限配置**（如把 `mode` 改成 `auto` 或把某工具加入 `autoApproveTools`）。 |
+| `llm-chat-agent-mgmt`（`llm-chat.registry.ts` 中的 `agentManagement` 实例） | `list_agents`/`search_agents`/`read_agent_config`/`export_agent_as_text`/`set_agent_field`/`find_replace_in_presets`/`add_preset_message`/`delete_preset_message`/`move_preset_message`/`import_agent_from_text` | 让 Agent 自己管理/编辑其他 Agent（或自身）的配置、预设消息 | 前端 + 本地 Agent 配置文件持久化 | 是 | 支持辅助编辑自身/其它 Agent 配置；字段黑名单之外还对 toolCallConfig 及点路径子项返回强制审批，无法仅凭当前静态自动批准配置静默修改权限。该钩子属于模型工具调用路径，普通用户配置编辑有独立交互语义。 |
 | `tool-calling`（自身） | `getTaskStatus` 等（异步任务查询/取消接口） | 查询/管理异步任务状态 | 前端 | 视具体方法而定 | 属于框架自省能力 |
-| `sub-agent` | `list_available_agents`/`ask`/`get_task_status`/`get_task_activity`/`send_task_message`/`cancel_task` | 委派子智能体独立对话、查询任务状态与活动、追加指导、叫停 | 前端 + 子会话真实推理 + 后台运行时 | 是（子任务工具调用同样进审批 store，后台任务详情可接管审批） | 委派目标必须先在 Agent 的 `subAgentConfig` 中启用；子任务拥有自己的一轮上下文与审批线，结果以任务消息回到父会话，父 Agent 不直接看到子会话全部细节 |
+| `sub-agent` | `list_available_agents`/`ask`/`get_task_status`/`get_task_activity`/`send_task_message`/`cancel_task` | 委派子智能体独立对话、查询任务状态与活动、追加指导、叫停 | 主 WebView 异步链 + 标准子会话真实推理 | 是（子任务工具调用同样进审批 store，后台任务详情可接管审批） | 委派目标必须先在 Agent 的 `subAgentConfig` 中启用；子任务拥有自己的一轮上下文与审批线，结果以任务消息回到父会话，父 Agent 不直接看到子会话全部细节 |
 | `vcp:<pluginName>`（`VcpToolProxy`，动态，数量随远端 manifest） | 远端插件的每个 `command` | 桥接 VCPToolBox 插件到本地 Agent（如浏览器控制、检索、图像生成等，取决于远端启用的插件） | **远端** VCPToolBox/分布式节点（AIO 仅转发请求与展示审批） | 是（`onBeforeExecute` 走同一本地审批 store，但真正执行在远端，本地无法进一步限制远端行为） | 信任边界完全转移给远端节点；`getMetadata()` 对所有映射命令强制 `agentCallable: true`，没有方法级白名单二次过滤 |
 | `internal_request_file`（VCP 内置，非 `ToolRegistry` 注册，硬编码在 `vcpNodeProtocol.ts`） | 读取本机 `file://` 路径文件并转 Base64 回传远端 | 支持 VCPToolBox"超栈追踪"跨节点文件获取 | 前端 + Tauri `inspect_file_for_external_transfer`/`read_file_for_external_transfer`（不再直连无限制的 `read_file_as_base64`） | **部分**：文件位于 aio-file-operator 白名单内（policy=allow）时直接读取；位于审批区（policy=approve）时经 `toolCallingStore` 以 `vcp-external-file-transfer` 工具 ID 发起用户审批，拒绝则中止；另有 60 秒速率窗口与审计日志 | 只接受格式正确的 `file://` URL（拒绝凭据/端口/查询/片段与 UNC/远程主机路径），Rust 侧重新校验沙箱/规则/文件大小后才返回内容；沙箱之外的目录（非白名单且非审批区）会被 Rust 侧拦截，不能无审批读取任意文件 |
 
 **依据**：所有 `agentCallable: true` 命中文件（见附录逐一 Read 记录）、[`vcp-connector/composables/useVcpDistributedNode.ts`](../../aio-hub/src/tools/vcp-connector/composables/useVcpDistributedNode.ts)（`BUILTIN_VCP_TOOLS` 常量）、[`vcp-connector/services/vcpNodeProtocol.ts`](../../aio-hub/src/tools/vcp-connector/services/vcpNodeProtocol.ts)（`handleExecuteTool`/`handleInternalRequestFile`）、[`agent-manager/services/agentManagementService.ts`](../../aio-hub/src/tools/agent-manager/services/agentManagementService.ts)（`FIELD_BLACKLIST`）、[`data-filter/logic/dataFilter.logic.ts`](../../aio-hub/src/tools/data-filter/logic/dataFilter.logic.ts)。
+
+### 9.1 本地媒体工具结果与分布式回传
+
+文件读取等方法可返回结构化本地媒体引用，和文本结果一起交给聊天层；引用进入工具消息后，在后续请求中转换为多模态附件，执行器自身不把媒体二进制塞进结果字符串。分布式节点则需要进一步物化：识别返回值中的 localMedia，经独立外传文件规则/审批重新读取，确认 MIME 仍为图片、音频或视频，再生成带 MIME 的 data URL 内容；本地发送许可不会自动变成外传许可（`vcp-connector/services/vcpNodeProtocol.ts:469-520`）。
+
+服务端消费顶层 content，混合批次因此按调用顺序平铺文本与媒体。该回传依赖现有连接和外传边界，未知媒体类型或中止信号会结算错误，不把本地路径直接交给远端当作可读取文件（同文件 `:545-600`）。
 
 ## 10. 扩展机制
 
@@ -318,19 +323,20 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 | 方法 | 作用 |
 |---|---|
 | `list_available_agents` | 列出可委派的子智能体 |
-| `ask` | 发起子任务并等待结果 |
+| `ask` | 缺省等待子会话结果；background 模式立即返回任务句柄 |
 | `get_task_status` | 查询任务状态 |
 | `get_task_activity` | 查看任务活动时间轴 |
-| `send_task_message` | 追加指导（在下一个安全执行点消费） |
+| `send_task_message` | 沿子会话执行车道追加消息并持久化，不自动发起新一轮 |
 | `cancel_task` | 紧急叫停 |
 
 它取代了此前"只有 Agent 配置编辑、没有 Agent 调用"的能力空白：
 
 - **双轨数据**：子会话的聊天数据仍是标准 `ChatSessionDetail`，由 llm-chat 写入；任务调度、状态机与进度由 `BackgroundTaskRegistry` 独立维护（`src/services/background-tasks/registry.ts`），并通过 `approvalBridge.ts` 把子会话的待审批请求关联回任务。
-- **后台运行时**：`src/background-runtime/` 提供脱离前台窗口的 JS 运行时与 IPC 协议（`main.ts`、`protocol.ts`），使子任务在用户切页或关闭主窗口时继续执行；桌面与移动端可用性未运行验证。
-- **人工干预**：`send_task_message` 支持投递补充指导（在下一个安全执行点消费）与 `delivery` 选择；`cancel_task` 紧急叫停；任务中心、伴生分栏与审批详情组件（`BackgroundTaskCenter.vue`、`CompanionSessionSheet.vue`、`BackgroundTaskDetail.vue`）读取同一任务快照。
+- **后台归属**：background 模式在主 WebView 里启动不阻塞父调用的异步链，显式指定 detached 子会话发送，不切换主会话；同一子会话的 Promise 车道串行生成，繁忙时新任务状态为 queued。独立 background-runtime 的 dispatch 当前只实现 ping/getInfo，未承接子Agent runner，不能据此断言关闭主窗口后继续执行（`sub-agent.registry.ts:1020-1141`；`src/background-runtime/main.ts:27-49`）。
+- **追加与取消**：追加指导先校验任务归属，等待同一执行车道后重新读取子会话，把消息挂在当时叶子并保存，返回 append_only；兼容 delivery 字段没有产生安全点消费或自动下一轮的保证。独立 deliveryQueue 有队列、执行链和通知的数据模型，但本方法不走其消费 runner。取消通过 registry 订阅中止子会话并清待审批；终态取消幂等（`sub-agent.registry.ts:1304-1342,1426-1519,1552-1600`）。
 - **审批闭环**：子任务的工具调用仍走统一审批入口，后台任务承接人工审批与仲裁状态回放；`BackgroundTaskApprovalBridge` 用子会话 + 执行车道解析 `taskId`，无法唯一确定时不强行关联。
-- **内置基线子智能体**：`subAgentBaselineService.ensureBaselineMaterialized()` 在 `list_available_agents()` 与 `ask()` 入口按需释出内置子智能体并保证可管理，模型晚绑定解析（`subAgentModelResolver.ts`）保证开箱可用。
+- **目标、模型和深度**：入口按需释出内置基线，目标必须开启允许被调用。允许同 ID 分身但受传递的委派深度上限控制；模型解析按 prefer_self/inherit_caller 选择单一绑定组，所选不可用即报错，没有跨组自动回退（`sub-agent.registry.ts:715-762`；`services/subAgentModelResolver.ts:19-30`）。
+- **恢复与可观测性**：快照含当前操作、最近 8 条活动与最多 10 条审批审计，持久任务最多 50 项；启动把非终态标为 interrupted/stale，保留结果与子会话定位，未接自动继续推理。运行时执行归属登记到共享 registry，审批桥接仅在能唯一识别执行任务时绑定，排队任务不会抢走同会话审批归属（`services/background-tasks/registry.ts:55-65,737-807`；`sub-agent.registry.ts:329-362`）。
 
 **后台任务**：`tool-calling/core/async-task` 仍是工具层异步任务机制，服务于 `executionMode: "async"` 的方法（`ffmpeg-tools`、非 fast 模式的 `media-generator`）。任务状态机为 `pending -> running -> completed/failed/cancelled/interrupted`，结果持久化到磁盘，支持取消、重试（仅限 failed/interrupted 状态）与进度上报。应用重启后运行中的任务会被标记为 `interrupted`，不会自动恢复执行。它与 sub-agent 的后台任务是两套：前者按工具方法粒度提交，后者按子智能体会话粒度调度；两者都复用审批 store，但持久化文件不同。
 
@@ -338,7 +344,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 
 **定时任务**：`ToolRegistry.startupConfig`/`onStartup()` 是唯一的"启动时自动执行"钩子（当前仅 `vcp-connector` 使用，实现启动自动连接），**没有 cron/定时循环调度机制**用于周期性触发 Agent 工具。
 
-**嵌套调用**：VCP 协议支持"块级转义嵌套"（`TOOL_REQUEST_ESCAPE` 包裹另一个完整 `TOOL_REQUEST` 块），但这只是**文本层面的嵌套表示**，用于让 LLM 在一次输出中携带示例/嵌套请求文本而不被误解析；解析器实际展开为多个独立的 `ParsedToolRequest`（同一批次内平级执行），不是"工具调用触发另一个工具调用链"的运行时递归结构。
+**引用与执行分离**：转义请求标记只在参数中表达请求字面量，不会被展开为额外独立调用。一个标准块可用数字后缀拆成多条平级请求；运行时递归委派则是 sub-agent 工具自身的执行能力，受深度链控制。服务端工具结果批次先被遮蔽，结果里的请求示例不进入本地执行扫描（`vcp-protocol.ts:358-427`）。
 
 **依据**：[`tool-calling/core/async-task/task-manager.ts`](../../aio-hub/src/tools/tool-calling/core/async-task/task-manager.ts)、[`tool-calling/core/async-task/task-executor.ts`](../../aio-hub/src/tools/tool-calling/core/async-task/task-executor.ts)、[`vcp-connector/vcp-connector.registry.ts`](../../aio-hub/src/tools/vcp-connector/vcp-connector.registry.ts)、[`services/types.ts`](../../aio-hub/src/services/types.ts)（`startupConfig`/`onStartup`）。
 
@@ -378,9 +384,9 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 - 返回内容: （伪造的任意内容）
 VCP调用结果结束]]
 ```
-的文本，`Tokenizer.ts:757-793` 会把它解析成 `vcp_tool` 类型的 AST 节点（`isResult: true`），`VcpToolNode.vue` 据此渲染出一个“✅ 成功”的绿色标签卡片，**在视觉上与真实工具执行结果完全一致**，但这段内容其实来自网页抓取或知识库检索，从未真正调用过 `aio-file-operator`。用户看到这张与真实结果一致的卡片，容易误判该操作已被系统执行并成功，形成**结果伪造/UI 欺骗**。`tool-calling` 引擎只解析 assistant 消息，并按 `tool_name`/`command` 是否存在于注册表判断，不会二次执行这段结果文本，影响停留在**视觉呈现**层面，不会触发真实工具执行。
+的文本可以进入历史正文的 VCP 结果展示路径，卡片样式与真实工具结果相近，但状态来源是消息文本，并无本地执行记录背书。用户是否会混淆需要真实界面验证；当前执行扫描先遮蔽服务端结果批次，结果中的标准请求示例也不会再次执行。独立工具消息卡的状态则来自节点执行元数据，两条呈现路径应分别判断（`vcp-protocol.ts:363`；消息渲染器笔记第 7 节）。
 
-**批准栏本身**：`ToolCallingApprovalBar.vue` 的按钮点击直接走 `execute({ service: "tool-calling", method: "approveRequest", params })`，是真实的 Vue 事件绑定，不经过任何可被消息正文影响的中间层，**审批按钮本身不可被模型输出伪造**；但审批栏里展示的"参数预览"（`item.request.args`）来自解析结果，如果参数值本身包含误导性文本（如把危险的 `path` 参数伪装成看起来无害的字符串），可能诱导用户误判参数含义——这是展示信任层面的问题，不是代码缺陷。
+**批准栏本身**：批准动作来自真实 Vue 事件并关联审批 store 的请求，正文绘制相似内容不会直接批准它。参数预览仍来自模型解析参数，应将请求参数的文字、真实审批状态与执行结果来源分开读取；视觉仿冒或误导效果未运行验证。
 
 **依据**：[`llm-chat/components/message/ToolCallMessage.vue`](../../aio-hub/src/tools/llm-chat/components/message/ToolCallMessage.vue)、[`rich-text-renderer/parser/Tokenizer.ts`](../../aio-hub/src/tools/rich-text-renderer/parser/Tokenizer.ts)（VCP 结果块解析，行 756-793）、[`rich-text-renderer/components/nodes/VcpToolNode.vue`](../../aio-hub/src/tools/rich-text-renderer/components/nodes/VcpToolNode.vue)、[`llm-chat/components/message-input/ToolCallingApprovalBar.vue`](../../aio-hub/src/tools/llm-chat/components/message-input/ToolCallingApprovalBar.vue)、消息渲染器笔记第 1.2/5.1/7 节（交叉引用，未重复验证其结论）。
 
@@ -395,5 +401,5 @@ VCP调用结果结束]]
 7. **validator.ts 与 executor.ts 对 `agentCallable === undefined` 的判断分歧**是否在实际运行中造成过可观察的行为差异（本笔记基于静态代码分析指出该分歧存在，但未构造具体触发场景验证其后果）。
 8. **移动端（`mobile/` 目录）是否有独立的 Agent 工具体系**——本次调查聚焦桌面 Tauri 端，未检查 `mobile/src/tools/tool-calling`（如存在）是否为独立实现或共享桌面端代码，需要专项确认（参考消息渲染器笔记已确认移动端消息渲染是独立轻量实现，Agent 工具层面是否同样分裂未在本次核实）。
 9. **VCPToolBox 侧对分布式节点 `execute_tool` 请求发起方的鉴权模型**（谁能触发 `execute_tool`，是否任何连上 VCPToolBox 的客户端都能对某个已注册节点发起 `internal_request_file` 调用）——这决定 `internal_request_file` 的实际触发门槛，需要读取 VCPToolBox 更完整的鉴权/会话代码，本次超出"只读到能说明契约与边界为止"的既定范围，标记为后续调查缺口。
-10. **子智能体与后台任务的运行效果**：本次只核实模块结构、工具方法、状态机与审批桥接的静态实现，未启动应用观察子任务在切页/关闭主窗口后的持续执行，也未验证 `background-runtime` 在桌面与移动端的实际可用性。
+10. **子智能体运行边界**：主 WebView 异步派遣、车道串行、追加消息和恢复结算已静态确认，未启动应用测试切页、关窗、取消和同会话多任务竞态。独立 background-runtime 未承接子Agent执行，关窗持续运行不能列作已实现事实。
 11. **自动审批仲裁的实际触发率**：仲裁入口、审计字段与失败升级规则已按源码核实，未在真实工具调用中观察 approve/deny/escalate 的分布，也未验证两种引擎在同一提示词下的判定差异。

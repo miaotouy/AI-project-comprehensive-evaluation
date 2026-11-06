@@ -2,11 +2,11 @@
 
 > 汇总对象：`LobeHub`（远端仓库 `https://github.com/lobehub/lobehub`，monorepo，代码快照 `67aaf17da1f43f0b5c851794b796a92d3258b86b` / canary）
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：17 份来源笔记，覆盖 Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、主动Agent与后台任务、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排；横向对比文档不在本次汇总范围
 >
-> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源笔记，不新增源码验证
+> 汇总方法：阅读各来源笔记的结论摘要与关键章节，按功能主题聚类合并重复能力，保留证据状态并链接来源笔记，按来源保留证据边界，并定向核对发送区、转写镜像、媒体完成与编辑、任务回收链
 >
 > 汇总范围：全部 15 个类目笔记的结论；仓库分布与应用界面基础设施两个工程/基建向类目单列小节，不与功能能力混排
 >
@@ -29,7 +29,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 合计 55 项。已贯通确认面（主链确认 + 静态源码确认）46 项，约 84%；其余为入口级或边界/待验证项，集中在文末"已知边界与待验证事项"，不在正文反复出现。Agent Groups / Pages 另带入口确认标记，统计时并入归并已有类目计数，避免重复。
 
-证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。来源笔记统一基于代码快照 `67aaf17d`，全部结论均为当前快照的实现事实。
+证据口径：本汇总的“主链确认/静态源码确认”表示已在当前代码快照复查入口、状态、执行与结果处理构成的实现路径。“未运行验证”只保留需要在目标环境观察的 UI、端到端、时序与外部依赖表现，不使实现结论失效。来源笔记统一基于代码快照 `67aaf17d`，各项按来源保留实现事实、结构推断与未覆盖边界；本文件的聚合统计不能代替逐链复查。
 
 ## 功能能力摘要
 
@@ -61,7 +61,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **会话定位与分桶（messageMapKey）**：会话不是"agentId+topicId"二元定位，而是多维坐标 ConversationContext 压平的 messageMapKey 分桶（main/thread/group/group_agent/page 等 scope）；本地分桶比服务端缓存 key 更细（多 documentId/subAgentId 维度），query.ts 用 representableBucketKey 防御两者不同构。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/LobeHub-Chat调查笔记.md)
 
-- **双层 Zustand store 架构**：同一份消息数据在全局 ChatStore（事实源层）与会话级 ConversationStore（UI 态层）各维护一份 parse 后展示数据，各自独立调用 parse()，靠 onMessagesChange 单向回调 + StoreUpdater 反向同步；store 实例跨 topic 存活，切换时原地重置 UI-only 状态。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[消息渲染调查笔记](../消息渲染器/LobeHub-消息渲染调查笔记.md)
+- **双层 Zustand store 架构**：全局 ChatStore 独占写入消息转写副本并派生展示列表，经本地副本层持久化；会话级 ConversationStore 订阅并单向镜像同一桶，局部写动作先转发回全局。主聊天 Provider 省略消息数组参数；显式传数组仅用于静态转录，关闭同步。store 实例跨 topic 存活，切换时原地重置 UI-only 状态。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)、[消息渲染调查笔记](../消息渲染器/LobeHub-消息渲染调查笔记.md)
 
 - **消息数据形状与树重建**：消息是带 parentId/threadId/groupId 的扁平数组，渲染前经 conversation-flow.parse 重建树（压缩组 parentId 重定向、孤儿兜底、dual-form 新旧链接形态兼容）；分支激活指针存在父消息 metadata.activeBranchIndex，BranchResolver 解析；工具调用与结果是独立持久化消息行，删除组消息需连带收集工具结果行。证据状态：静态源码确认。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)
 
@@ -79,7 +79,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **退出恢复（Gateway 重连）**：topic.metadata.runningOperation 在页面加载时被 useGatewayReconnect 捕获，刷新 JWT、新建 WebSocket 并回放事件，把 UI 重新挂到仍在跑的服务端任务。证据状态：静态源码确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/LobeHub-对话请求与上下文调查笔记.md)
 
-- **Chat 界面交互工作台**：Topic 侧栏（单击/双击 250ms 定时器区分导航与开 tab、拖拽引用、未读点、运行/失败/等待人工图标、草稿提示）+ Lexical Composer 工作台（草稿按会话恢复、输入历史按 user×agent、IME 组合态、mention/slash/action tag、语音消息，以及功能开关控制的实时听写）+ 发送前配置（Token 明细、推理强度预设、模型切换）+ 发送/停止同一交互位与排队托盘 + 消息操作与分支导航 + 审批卡片全局快捷键（1/2/↑/↓/Enter，radiogroup 语义）+ 桌面通知深链回 Topic。UI 行为与跨 tab 同步等未验证项见末尾小节。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
+- **Chat 界面交互工作台**：Topic 侧栏（单击/双击 250ms 定时器区分导航与开 tab、拖拽引用、未读点、运行/失败/等待人工图标、草稿提示）+ Lexical Composer 工作台（草稿按会话恢复、输入历史按 user×agent、IME 组合态、mention/slash/action tag、语音消息，以及功能开关控制的实时听写）+ 发送前配置（Token 明细、推理强度预设、模型切换）+ 生成中保留停止、允许排队且有后续内容时并排发送与停止，以及排队托盘 + 消息操作与分支导航 + 审批卡片全局快捷键（1/2/↑/↓/Enter，radiogroup 语义）+ 桌面通知深链回 Topic。UI 行为与跨 tab 同步等未验证项见末尾小节。证据状态：静态源码确认。来源：[Chat UI 调查笔记](<../Chat UI/LobeHub-ChatUI调查笔记.md>)
 
 - **对话导出与分享**：把站内复制/导入/转发（cloneTopic/importTopic/forwardTopic，数据库内完成、无交付文件）与四格式导出（截图 snapdom / 文本 Markdown / PDF 服务端 pdfkit / JSON simple+full）与链接分享（topic_shares 表 + /share/t/:id 公开页）明确分成两个面；分享页实时读源 topic 消息而非快照；JSON full 与 importTopic 构成可往返导入链（非无损：不导入文件关联/翻译/TTS/压缩组）。OSS 默认隐藏链接分享入口，见末尾小节。证据状态：静态源码确认。来源：[对话导出与分享调查笔记](../对话导出与分享/LobeHub-对话导出与分享调查笔记.md)
 
@@ -93,7 +93,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **文档工作区（G4 可编辑对象）**：Lexical 富文本编辑器 + 服务端 EditorRuntime（pageCollab 会话、带开关的 Yjs 房间协同），documents 表 content+editorData 双格式；历史快照（saveSource 五类：autosave/manual/restore/system/llm_call）+ 历史对比 + 编辑器内 diff 节点接受/拒绝 + Redis 租约式编辑锁；模型经 Page-Agent/lobe-agent-documents 工具结构化修改同一对象（节点 ID 寻址、load rules 上下文回流），构成 G4 级可编辑工作区（能力等级 G3–G4 并存）。证据状态：静态源码确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/LobeHub-生成式输出与运行时调查笔记.md)
 
-- **图像/视频创作工作台**：单一工作台按 generationTopics→generationBatches→generations 三层对象持久化每次创作，挂 asyncTasks（任务状态/超时兜底）与 files（S3 资产，globalFiles hash 去重）；lambda（事务建行、fire-and-forget 触发）/async（实际调模型）双路由，视频另有 webhook 与后台轮询双完成路径；客户端 SWR 指数退避轮询（1s 起、每 5 次翻倍、30s 封顶）；生成成功自动回写 topic 封面；Agent 经 builtin-tool-image-generation 4 API 发起生成并把结果以 markdown 图片标签回流聊天。实现完整，部分子面（用户侧取消入口、视频 Agent 工具、工作台→聊天回流、OSS 计费）未找到或为 stub，见末尾小节。证据状态：静态源码确认。来源：[媒体创作调查笔记](../媒体创作/LobeHub-媒体创作调查笔记.md)
+- **图像/视频创作工作台**：单一工作台按 generationTopics→generationBatches→generations 三层对象持久化每次创作，挂 asyncTasks（任务状态/超时兜底）与 files（S3 资产，globalFiles hash 去重）；lambda（事务建行、fire-and-forget 触发）/async（实际调模型）双路由，视频另有 webhook 与后台轮询双完成路径；客户端 SWR 指数退避轮询（1s 起、每 5 次翻倍、30s 封顶）；服务端在成功收口前以条件更新填补空主题封面，客户端只刷新；视频对话式编辑核验同主题/模型/渠道及交互句柄，结果保存来源生成 id 并展示版本；Agent 经 builtin-tool-image-generation 4 API 发起生成并把结果以 markdown 图片标签回流聊天。实现完整，部分子面（用户侧取消入口、视频 Agent 工具、工作台→聊天回流、OSS 计费）未找到或为 stub，见末尾小节。证据状态：静态源码确认。来源：[媒体创作调查笔记](../媒体创作/LobeHub-媒体创作调查笔记.md)
 
 ### Agent 运行时与外部协作
 
@@ -137,7 +137,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 本小节保留独特功能笔记的能力卡标题与证据状态（沿用独特功能类目指南定义）。
 
-- **能力一：Schedule——任务调度与自动化（主链确认）**：任务、task topic 与 Brief 构成持久化的隔离日程运行；执行端重验状态，未解决 urgent Brief 会阻止下一轮，heartbeat 另以延迟 tick 续接。任务变更同时写入活动事件日志以供历史和通知使用，但当前状态仍以 tasks 行为权威。生产 QStash 与运行中中断仍未验证。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/LobeHub-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
+- **能力一：Schedule——任务调度与自动化（主链确认）**：任务、task topic 与 Brief 构成持久化的隔离日程运行；执行端重验状态，未解决 urgent Brief 会阻止下一轮，heartbeat 另以延迟 tick 续接。任务变更另写活动日志，当前状态仍以 tasks 行为权威。归档与回收站过滤阻止隐身任务启动；列表批量动作支持逐项反馈、乐观更新与撤销，任务和关联 topic 可一起恢复，已中断运行不会因状态撤销自动复活。生产 QStash 与运行中中断仍未验证。来源：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/LobeHub-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **能力二：Personal Memory——白盒个人记忆（主链确认）**：完整主链：对话 topic→Upstash Workflow（hourly/用户触发）→CEPA+Identity 五层提取→1024 维向量入库（HNSW）→lobe-user-memory 工具 9 API 读写→记忆管理页面逐条编辑；五层（身份/偏好/经历/活动/情境）+ 版本化合并策略 + 来源追踪 + 用户逐条编辑的对象模型在本样本中无对应实现；记忆工具同时是 Agent 可写面（read-only/read-write 权限）。hourly 扫描资源消耗与提取质量未运行验证，见末尾小节。来源：[独特功能调查笔记](../独特功能/LobeHub-独特功能调查笔记.md)
 
@@ -186,7 +186,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 ### 未覆盖类目与未找到项
 
-- **媒体创作**：用户侧取消入口、视频 Agent 工具、工作台→聊天回流入口（sendToChat 类）、recreateImage/recreateVideo 的 UI 调用点均未找到；generation 级父子分支关系未找到；确认无 generation→Work 关联；未找到 (mobile) 侧 image/video 路由。来源：[媒体创作调查笔记](../媒体创作/LobeHub-媒体创作调查笔记.md)
+- **媒体创作**：用户侧取消入口、视频 Agent 工具、工作台→聊天回流入口（sendToChat 类）、recreateImage/recreateVideo 的 UI 调用点均未找到；视频编辑已有来源生成关系，通用图像分支编辑未确认；确认无 generation→Work 关联；未找到 (mobile) 侧 image/video 路由。来源：[媒体创作调查笔记](../媒体创作/LobeHub-媒体创作调查笔记.md)
 - **LLM 渠道管理**：面向用户的 Provider 配置文件、复制渠道、Provider 专用 Web 导入/导出、CLI 的复制/导入导出/TUI 均未找到（本次未找到，非项目级绝对不存在）；连接检测结果不写入调度健康表。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/LobeHub-LLM渠道管理调查笔记.md)
 - **会话与消息**：message.searchMessages 端点存在但未找到聊天 UI 调用；doctor/diagnose 补丁的自动应用路径未读（仅 TopicDoctorModal 人工触发）；全局 messagesMap 是否被 operation 状态选择器之外组件直接订阅未完全排查；多端并发写入合并未覆盖。来源：[会话与消息管理调查笔记](../会话与消息管理/LobeHub-会话与消息管理调查笔记.md)
 - **Agent 角色**：fewShots 消费链未确认（src 与 agent-runtime 零命中，服务端仅配置/评估侧读取）；params 子字段以 model-bank 文档为准未展开；用户级与 Agent 级推理配置覆盖优先级未走通；记忆检索内部机制未覆盖。来源：[Agent 角色配置调查笔记](../Agent角色/LobeHub-Agent角色配置调查笔记.md)
@@ -200,7 +200,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 以下均属方法学约束："未运行验证"仅指未进行黑盒运行、UI 或端到端操作，不否定上述静态源码确认的代码完备性。
 
 - 真实模型调用（各 provider 的 chat/createImage/createVideo）、S3 上传下载、PostgreSQL 事务与 webhook 网络往返。
-- 十三种本地执行体与 OpenClaw/Hermes 的安装运行、Windows 进程树终止、SDK/ACP/CLI runtime 切换和真实 resume 行为；进程退出后的会话恢复策略与断线语义。
+- 十四种本地执行体与 OpenClaw/Hermes 的安装运行、Windows 进程树终止、SDK/ACP/CLI runtime 切换和真实 resume 行为；进程退出后的会话恢复策略与断线语义。
 - Messenger 逐平台签名、附件、线程映射、审批与完整回复往返；微信二维码登录、队列回调与逐平台消息格式；浏览器 MCP 真实登录态、页面安全提示与取消。
 - 两套审批恢复路径（Gateway vs 本地 client runtime）的行为等价性。
 - UI 行为、键盘可用性、动画、移动端适配与性能；跨 tab 草稿/busy 同步语义；桌面 renderer 崩溃后的白屏/重启/恢复行为。

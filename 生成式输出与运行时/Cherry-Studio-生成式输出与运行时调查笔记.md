@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Cherry Studio 的输出对象分两条主链。(1) 聊天内 HTML Artifact：模型以 Markdown 文本或裸 HTML 形式输出，前端用内容探测（`classifyHtmlArtifactSource`）把输出识别为完整文档或片段两类——片段恒进无脚本 iframe，完整文档经用户同意后进入独立沙箱 webview（专用隔离分区，主进程强制沙箱与上下文隔离、无 preload，网络请求受 DNS 级 SSRF 防护）；对象可编辑并以整段重写的方式保存回消息正文，可下载、外部打开、PNG 截图。(2) Agent 工作区：Claude Code SDK 以会话工作区路径为本机执行目录，产物即磁盘文件，`report_artifacts` 工具调用作为声明投影到消息卡片与右侧面板（实时文件树 + 文件预览 + 编辑器防抖自动保存 + 写时冲突检测），用户编辑后的磁盘文件在下一回合被模型经文件工具自然回流。Python 代码块可经 Pyodide Web Worker 执行（另有 MCP `python_execute` 工具）。
+Cherry Studio 的输出对象分两条主链。(1) 聊天内 HTML Artifact：模型以 Markdown 文本或裸 HTML 形式输出，前端用内容探测（`classifyHtmlArtifactSource`）把输出识别为完整文档或片段两类——片段恒进无脚本 iframe，完整文档经用户同意后进入独立沙箱 webview（专用隔离分区，主进程强制沙箱与上下文隔离、无 preload，网络请求受 DNS 级 SSRF 防护）；对象可编辑并以整段重写的方式保存回消息正文，可下载、外部打开、PNG 截图。(2) Agent 工作区：Claude Code SDK 以会话工作区路径为本机执行目录，产物即磁盘文件，`report_artifacts` 工具调用作为声明投影到消息卡片与右侧面板（实时文件树 + 文件预览 + 编辑器防抖自动保存 + 写时冲突检测），用户修改可由后续文件读取回流，也可从文档选区、文本行评论或浏览器批注显式插入 Composer，作为下一条用户输入的目标引用。Python 代码块可经 Pyodide Web Worker 执行（另有 MCP `python_execute` 工具）。
 
 chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Markdown 位置派生的临时 ID）；agent 文件的真相源是磁盘而非消息。能力等级：**G3 + G4**（见"设计取舍与能力定级"）。
 
@@ -103,12 +103,9 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 6. 编辑、diff、版本与协作
 
 - **chat 内代码块/artifact**：CodeEditor 可编辑（偏好 `chat.code.editor.enabled`，默认 false；流式中禁编辑），保存即全量覆盖消息文本；无 diff、无接受/拒绝、无撤销。
-- **agent 工作区文件**（`useFileEditSession`，`src/renderer/hooks/useFileEditSession.ts`，VS Code TextFileEditorModel 形态）：
-  - 防抖 800ms 自动保存；写循环串行化（单模型单 in-flight，`useFileEditSession.ts:248-260`）；
-  - 乐观锁 `file.write_if_unchanged`（expectedVersion），STALE_VERSION 时读盘验证：内容相同则采纳、仅元数据变动则 rebase 重试（上限 3 次）、真冲突则暂停自动保存并弹"重载/保留草稿"对话框（`useFileEditSession.ts:170-241, 762-771`）；
-  - watcher 事件从不覆盖脏草稿；编码/BOM/CRLF 保留（`fileTextSnapshot`）；离开脏编辑有确认（`AgentRightPane.tsx:414-456`）。
-  - 用户与模型对同一文件无结构化合并：模型写盘、用户编辑自动保存，冲突时用户侧检出版本冲突并选择重载或保留草稿。
-- 无 CRDT、无分支、无对象级版本历史（文件系统版本由 `FileVersion`(mtime/size) 提供比较基础，无历史栈）。
+- **Agent 工作区文本编辑**：`useFileEditSession` 是共享文件编辑管理器的 React 租约入口；按 owner/文件定位复用草稿，同一时刻只有绑定租约可写。文件标签页与面板可见性变化释放绑定时会冲刷脏草稿；关闭自动保存只关闭输入后的 800ms 定时保存，离开面板仍会保存。无视图持有但保存失败的草稿留在管理器清单，用户可重试或丢弃。依据：[FileEditSessionManager.ts:76–183](../../cherry-studio/src/renderer/services/fileEdit/FileEditSessionManager.ts#L76-L183)、[AgentRightPane.tsx:1070–1086](../../cherry-studio/src/renderer/pages/agents/components/AgentRightPane/AgentRightPane.tsx#L1070-L1086)。
+- **冲突处理**：写入经文件编辑 IPC 携带版本与内容哈希基线，队列串行执行；版本冲突时重读，若只是元数据变化则采纳新基线重试，真正内容变化会暂停保存并保留本地草稿。watcher 对脏草稿只置冲突，不覆盖内容；用户可重载或选择保留本地内容。编码、BOM 与换行信息随磁盘快照保留。依据：[FileEditSessionManager.ts:320–469](../../cherry-studio/src/renderer/services/fileEdit/FileEditSessionManager.ts#L320-L469)。
+- 用户和模型协作仍基于同一磁盘文件，本次检查的文本编辑链没有三方合并、CRDT 或文件对象历史栈；会话消息分支另见[会话与消息管理笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)。
 
 ## 7. 能力桥、执行位置与权限范围
 
@@ -127,14 +124,15 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 - **chat 内 artifact**：编辑后的文本回到消息行，下回合作为历史上下文进入模型——回流通道是"会话历史重入"，不是对象查询。模型无法列出/定位具体 artifact（无 ID 协议），也无法对其定向 patch；每回合输出新 HTML 即新"副本"。
 - **agent 工作区**：闭环存在且是"磁盘态"回流——模型用文件工具（Read/Glob/Edit/Write）直接感知磁盘当前状态（含用户编辑），`report_artifacts` 声明在会话中重复调用即可更新交付物列表（右 pane 按 path 去重，`agentRightPaneProjection.ts:474-503`）；会话支持跨回合续跑（恢复令牌、转向与后台任务，`AgentRuntimeConnection`/`AgentSessionRuntimeService`），对象身份绑定在"路径+会话工作区"而非对象 ID。
-- 产物卡片点击 → 右 pane 打开文件（`AgentRightPane.tsx:294-320`）→ 用户编辑 → 模型下回合读到 → 形成"查询->读取->定向修改"的自然闭环。
+- **显式引用回流**：文件面板可把文件/目录加入上下文；Office/PDF 选区和文本行评论可作为引用芯片插入当前会话 Composer。事件按 topicId 与当前活动输入层过滤，避免同时挂载的 Composer 吞入别的会话引用。文档引用保留结构锚点、摘录、文件大小与整数毫秒时间戳；行评论保留路径、行范围、原文及用户评论。发送时芯片的提示文本进入用户消息，形成比“下回合模型主动读盘”更明确的目标交接。依据：[AgentRightPane.tsx:1122–1165](../../cherry-studio/src/renderer/pages/agents/components/AgentRightPane/AgentRightPane.tsx#L1122-L1165)、[useComposerSelectionReferenceInsertion.ts:22–42](../../cherry-studio/src/renderer/components/composer/variants/shared/useComposerSelectionReferenceInsertion.ts#L22-L42)。
+- 文档选区序列化为 `selection-ref` 围栏内的 JSON，锚点分别采用表格范围、段落、页面或幻灯片坐标；文本行评论则输出 Markdown 路径、原文围栏与评论。它们是输入文本契约，由模型或 Skill 继续解释，不是宿主对 Office 文件直接执行的结构化编辑命令。浏览器元素批注另走注释芯片，包含页面定位与评论，同样经用户下一次发送回流。依据：[selectionReferenceToken.ts:17–65](../../cherry-studio/src/renderer/components/composer/selectionReferenceToken.ts#L17-L65)、[selectionReference.ts:18–55](../../cherry-studio/src/renderer/types/selectionReference.ts#L18-L55)、[AgentRightPane.tsx:1199–1217](../../cherry-studio/src/renderer/pages/agents/components/AgentRightPane/AgentRightPane.tsx#L1199-L1217)。
 
 ## 10. 生命周期、资源治理与性能
 
 - 文件树：主进程先做初始扫描，再由 watcher 事件增量更新（含背压处理），共享 watcher 去重，缺失根目录可等待其出现（`src/main/services/file/tree/builder.ts:19-20,212-218,225-227` 及 `DirectoryTreeManager.ts`）；渲染端镜像按事件增删改。tree IPC 采用 `file.tree.create/activate/dispose` 三阶段握手（关闭"快照到流"交付间隙——consumer 创建后先挂起、变更在主进程排队，activate 成功才放行，被拒绝则重取快照，最多 3 次），渲染侧相应改为请求式调用，并给懒加载 watcher 加 10 秒 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`）吸收 `<Activity>` 标签切换。
 - webview：分区会话随应用生命周期注册/释放（`setupHtmlArtifactPreviewSession` 的 `registerDisposable`）；`did-attach-webview` 拦截导航；未发现按可见性冻结/卸载 artifact 预览的机制（iframe 一直挂载，仅流式节拍降低重建频率）。
 - Pyodide：单例 worker，终止时拒绝所有挂起请求；超时清理；模块状态跨次执行保留（可 reset）。
-- 限额：HTML 文件预览与文件编辑均限 2MB（`HtmlFilePreview.tsx:21-22`、`useFileEditSession.ts:21`）；artifact 预览高度上限为视口 72%（`HtmlArtifactView.tsx:54`）；长会话（agent）有 compaction/上下文用量管理，属 Agent 类目不展开。
+- 编辑会话资源在无租约、无脏草稿或错误时才可回收；保留的失败草稿属于当前渲染进程内存状态，本次未确认跨窗口或应用重启恢复。文件编辑资源上限与二进制判断在主进程文件编辑服务处理；HTML 预览另有类型插件自己的大小限制。长会话的压缩与上下文用量属请求类目。依据：[FileEditSessionManager.ts:95–126,488–507](../../cherry-studio/src/renderer/services/fileEdit/FileEditSessionManager.ts#L95-L126)、[useFileEditSession.ts](../../cherry-studio/src/renderer/hooks/useFileEditSession.ts)。
 
 ## 11. 当前输出对象补充
 

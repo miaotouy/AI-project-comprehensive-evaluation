@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -45,7 +45,8 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 - **工作台拓扑**：左侧栏 `LeftSidebar`（shadcn Sidebar，floating 变体、offcanvas 折叠）——导航区（新建聊天/搜索/项目入口，`NavMain.tsx:171-251`）+ 线程列表 + 项目列表；主区 = 顶栏（模型下拉）+ 消息区（吸附底部滚动，`role="log"` 无障碍角色，`components/ai-elements/conversation.tsx`）+ 底部 `ChatInput`（`$threadId.tsx`）。
 - **首页新聊天**：`routes/index.tsx`——无会话状态下的大输入框（无提交处理器时创建线程并导航，`ChatInput.tsx`）；无可用 provider 时显示 `SetupScreen`。
 - **临时对话**：`temporary-chat` 线程（查询参数进入），消息不落盘（数据侧在会话笔记 §1.1）。
-- **Cowork 表面**：除线程页外另有一条工作台式聊天面（`web-app/src/routes/cowork.tsx`），进入前先要求模型支持工具，界面由会话列表、回合时间线与右侧产物预览组成；它不复用线程页的分支/版本导航，队列与停止也由各自的运行循环管理（执行侧见对话请求与上下文笔记 §系统边界，产物面板见生成式输出与运行时笔记）。- **多窗口**：聊天状态无跨窗口同步机制（本次未找到；检查范围：web-app chat stores 与 `services/window` 调用点——window 服务仅用于主题/扩展窗口）；多窗口并发的界面行为未运行验证。侧栏在窄屏下的抽屉化行为由 shadcn Sidebar 提供，未运行验证。
+- **Cowork 表面**：除线程页外另有工作台式聊天面，要求模型支持工具，由会话列表、回合时间线与右侧产物预览组成。用户可编辑、重试或删除较早提问，操作截断该提问之后的记录再继续，和线程页的兄弟版本导航不同；`/compact` 保留显示时间线，只压缩模型重放历史。队列在正常完成后续发，停止或预算触限时保留，出错才清空（[cowork.tsx:1054–1117](../../jan/web-app/src/routes/cowork.tsx#L1054-L1117)、[cowork.tsx:1360–1412](../../jan/web-app/src/routes/cowork.tsx#L1360-L1412)）。执行与存储详见相邻请求/会话笔记。
+- **多窗口**：聊天状态跨窗口同步本次未找到，检查范围为 web-app chat stores 与 window 服务调用点；多窗口并发行为未运行验证。侧栏的窄屏抽屉由 shadcn Sidebar 提供，视觉与焦点行为未运行验证。
 
 ## 2. 会话列表、搜索与现场恢复
 
@@ -110,7 +111,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 - **多线程并行**：每个线程独立 AI SDK 会话（`chat-session-store.ts` 按 sessionId 保存 Chat + transport）；侧栏运行中线程显示 Loader2 图标（§2）+ 消息区流式标记区分"哪条在跑"；banner 错误按线程隔离回读（`$threadId.tsx`）。
 - **临时对话**：`temporary-chat` 线程独立运行标记（agent 模式状态按线程键控，`ChatInput.tsx`）。
-- **群聊、子 Agent、后台任务**：本次未发现相关界面（搜索范围：web-app 容器与路由）——标注为未找到。
+- **子 Agent 与后台任务**：普通线程页未找到群聊或子 Agent 管理工作流；Cowork 则有子 Agent 派发/结果时间线、待回答提问与后台运行态。切换会话不终止原 session 的运行，正常完成的队列消息仍回到原 session；运行状态按 session id 区分，不能把普通 Chat 的搜索边界推广到整个 web-app（[cowork.tsx:767–812](../../jan/web-app/src/routes/cowork.tsx#L767-L812)、[cowork.tsx:1029–1070](../../jan/web-app/src/routes/cowork.tsx#L1029-L1070)）。
 - **多窗口/多会话并发**打到同一 llama-server 的行为未验证（推测项，对话请求笔记 §8）。
 
 ## 8. Chat UI 状态所有权与同步

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/llm/`，关联 `packages/credentials/`、`packages/settings/`、`packages/core/agent-loop`、`packages/core/agent`、`packages/bundle/base`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -33,7 +33,7 @@ DeepSeek-Harness 的 LLM 渠道管理是"一个中性流式词汇 + 一个注册
 ```text
 dsh-agent-loop (packages/core/agent-loop/src/agent.ts step/buildRequest)
   ├─ 从 session.requestHeader() 恢复 call config（仅同 route 且非 adapter 默认的 effort）
-  ├─ agent/request 瀑布（model-selection 注入当前 Provider/Model 选择，只调整控制项）
+  ├─ 步骤前固定 AgentModel 选择 → agent/request 瀑布仅调整控制项
   ├─ llm.prepareCall(config)：resolveModelInfo → 校验 effort、materialize 默认 maxTokens/effort → 绑定注册快照
   ├─ session 记录 request/header（含 adapterDefaults 标记）与 request/context
   ├─ 协调 system/message 表面节点（不再写进请求头）
@@ -186,15 +186,15 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 
 **模型来源**：新 Agent 的默认选择来自 `agent-default-model` 服务（`packages/core/agent-default-model/src/index.ts`）：组合入口配置（base bundle 中为 `deepseek-official`/`deepseek-v4-flash`）+ 同名 settings 节（provider、model、可选 reasoningEffort），Models 页通过 `saveSelection` 写入；消费端在 Agent 创建时读取 `currentSelection()`。
 
-**选择注入**：`installModelSelection`（`packages/core/agent/src/model-selection.ts:39-75`）把可变选择耦合到两条瀑布：`system-prompt/assemble` 时快照选择并注入 `{{provider}}`/`{{model}}` 变量，`agent/request` 时覆盖请求 config 的 provider/model/effort——并发切换在下一个 step 生效，不劈开正在组装的两面。
+**选择与生效**：会话模型选择通过独立事件持久化，投影优先取待生效选择，再取最近实际请求，最后回退 Agent 选项。每步准备前固定 Provider、模型与 effort；模型变更时，pre-step 还会追加模型切换说明供后续历史重建（`packages/core/agent/src/model-selection.ts:72-120,157-170`）。
 
-**请求构建**：`buildRequest`（`packages/core/agent-loop/src/agent.ts:656`）先恢复持久化 request/header 中的 config（仅当 route 相同且该 effort 非 adapter 默认时才恢复），再走 `agent/request` 瀑布（只调整控制项，不改 provider/model/effort 选择），然后 `llm.prepareCall(config)`：一次精确模型解析，不支持的 effort 在 provider I/O 前拒绝，adapter 默认的输出上限与 effort 被 materialize 并标记（`adapterDefaults`）。
+**请求准备**：先从最近请求头恢复输出控制项，移除其中的路由与 effort，再以本步固定选择覆盖。请求瀑布只能改控制项，若改变已固定路由或 effort，循环会抛错并要求在步骤准备前调用模型选择接口。适配器随后做精确模型解析并物化默认输出上限与 effort（`packages/core/agent-loop/src/agent.ts:612-650`）。
 
 返回的 `PreparedLlmCall` 把 config、retry policy、context 与注册快照绑定为一次性句柄（复用或改字段报 `INVALID_PREPARED_CALL`；`llm/src/index.ts:779-814`）。随后 request/header 与 request/context 落日志，请求被 `markAgentLoopRequest` 加 `deepFreeze`（监听者只读）。
 
 **瀑布与归一化**：`llm/stream` 瀑布可短路或包装任意请求（`index.ts:913-927`）；最终 `adapterStream` 把选择、迭代器构造与迭代的失败统一归一化为流内终态 `finish {kind:'error'|'aborted'}`（`index.ts:843-900`），中间件与消费者自己的失败保持抛出。
 
-**路由依据**：显式 provider + model，无别名、无语义路由、无负载均衡。`agent/request` 的其他消费者本次只确认了 model-selection；session-title、compaction 等辅助调用同走 seam 但携带 `purpose` 标记。
+**路由依据**：显式 provider + model，无别名、无语义路由、无负载均衡。会话模型选择由 AgentModel 所有，辅助的标题、压缩调用同走 LLM seam，但携带用途标记。
 
 ## 7. 多 Key、限流、重试与故障转移
 
@@ -211,9 +211,9 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 
 **执行位置**：`dsh-llm-retry`（`packages/llm/llm-retry/src/index.ts:99-226`）监听 agent-loop 的 `agent/request-error` 瀑布，携带失败 `LlmFailure`、该次调用的不可变策略与回合信号。normal 模式先查可重试码集，再按 (provider、策略键、回合、步) 从会话日志续接重试计数；provider 请求的 `providerRetryAfterMs` 不超过 `maxDelayMs` 时直接采用，超限时 normal 模式放弃、always 模式用本地退避。
 
-等待开始前先落 `llm/retry` 事件（调度事实），等待完成再落 `llm/retry-started`，随后返回重试决定让 loop 关掉失败回合、开新回合重放同一请求。取消与插件销毁中止在途退避并排空活跃恢复。**重试边界是 agent 回合**：直连 `ctx.llm.stream()` 的调用者保持单次尝试，因为裸流无法在 durable 层切分已发出的 chunk。
+等待前后分别记录重试调度与开始事件，返回重试决定后，循环在同一开放 turn/step 内重新发起请求；失败尝试已经通过 assistant/attempt 收口，不需要关闭旧 turn 再开启新 turn（`packages/core/agent-loop/src/agent.ts:541-563`）。取消与插件销毁中止在途退避；直接调用 LLM 裸流的辅助消费者仍保持单次尝试。
 
-**重复计费边界**：每次重试都是新的 provider 请求，可能重复输入计费（README 注明 normal 有限、always 无上限）。失败回合不提交 assistant 消息与工具副作用；`EMPTY_RESPONSE` 因"没有产生任何持久内容"而被默认视为安全重试。
+**重复计费边界**：每次重试都是新的 provider 请求，可能重复输入计费（README 注明 normal 有限、always 无上限）。失败尝试记录 attempt 审计事实，不提交模型可见 assistant 消息或执行该尝试的工具调用；空响应属于默认可重试错误码。
 
 **故障转移**：无模型 fallback、无跨 Provider failover。切换 provider/model 属于配置或会话级动作，不在失败路径内发生。与 Pi 一致，OpenRouter 类上游路由能力在这里不存在（本仓库没有 OpenRouter 适配器或路由参数透传）。
 
@@ -243,7 +243,7 @@ pi-ai 版本 `^1.3.0`（`packages/llm/llm-pi-ai/package.json`，lock 解析为 1
 | 凭据解析、`CredentialRef`、key 校验与注入 | **dsh** | key 只以 `apiKey` 流选项进入 pi-ai，`Models` 无凭据库 |
 | 认证与 OAuth 流程 | 未复用 | pi-ai 从已存储 OAuth 凭据解析，dsh 无存储与登录流，OAuth-only route 不可用（目录隐去） |
 | 价格/成本元数据 | 未复用 | replay 构造时清零，无消费者 |
-| SDK 自动重试 | 未复用 | `maxRetries` 强制 0，重试全部在 agent 回合边界 |
+| SDK 自动重试 | 未复用 | `maxRetries` 强制 0，重试全部在 agent 请求尝试边界 |
 | 协议全集 | 部分复用 | 白名单只开 openai-completions/openai-responses/anthropic-messages（`provider.ts:47-51`）；Bedrock/Vertex/Azure/Codex 等目录 route 仍经其原生 Provider 可达，但不可显式声明 |
 | 思考格式探测 | 部分复用 | `compat.thinkingFormat`/`supportsReasoningEffort` 两个开关暴露给配置，其余 compat 面保持 pi-ai 的 URL 自动探测 |
 | 事件/错误语义 | 部分复用 | pi-ai 错误被压平成文本（上游限制），dsh 做文本分类而非读 code/cause |
@@ -256,7 +256,7 @@ pi-ai 版本 `^1.3.0`（`packages/llm/llm-pi-ai/package.json`，lock 解析为 1
 - **route 键即注册项**：没有用户渠道实体与实例管理，多账号/多网关靠多 route 键或多 profile 表达；pi-ai 一个实例可挂任意多 route，第一方传输由两个认证插件各注册一条 route（`deepseek-official` 与 `deepseek-account`）。
 - **凭据引用而非存储**：配置永不落 key，换来"改 key 即热生效、配置可共享"；代价是每次请求一次 seam 解析，且 key 值只存在于进程内存与托管文档。
 - **dormant 挂载 + settings 驱动注册**：组合决定"哪些适配器存在"，settings 文档决定"哪些 provider 运行"（基座 bundle 对 pi-ai 采用零 profile 休眠挂载）；route 集与 retry policy 是注册级事实，变化时同步原子 replace。
-- **一次调用一次尝试**：SDK 重试被禁用，重试闭环全部在 agent 回合边界（durable `llm/retry` 事件可重建），避免"流已发出部分 chunk 后不可重放"的边界。
+- **一次调用一次尝试**：SDK 重试被禁用，重试闭环全部在 agent 请求尝试边界（durable `llm/retry` 事件可重建），避免"流已发出部分 chunk 后不可重放"的边界。
 - **目录即配置**：模型目录来自 pi-ai 安装目录 + settings，无远端刷新；新模型上线必须写配置，换取确定性（与 Pi 的"构建期 + 远端叠加"策略相反）。
 - **无跨渠道高可用**：无多 Key、无健康调度、无模型 fallback、无跨 Provider failover；`RATE_LIMIT`/`SERVER` 只在同一 route 内重试。
 - **平台边界**：llm seam、凭据与 settings 全部在服务端进程；浏览器经 remote API（settings/credentials/llm 域）读写，Models 页负责把 key 写入托管文档、把 profile 写入 settings 节。`web-search-deepseek` 是独立搜索 provider（Anthropic-compatible `/messages` 端点、同一 `DEEPSEEK_API_KEY` 凭据、单独 baseURL 覆盖），不属于 LLM 渠道 seam，但复用同一凭据存储。
@@ -272,7 +272,7 @@ pi-ai 版本 `^1.3.0`（`packages/llm/llm-pi-ai/package.json`，lock 解析为 1
 - TUI 只确认 CLI 文档存在 `tui` profile 的启动示例；在当前仓库源码、依赖和应用入口中未找到渠道管理 TUI，不能据此推断该 profile 的完整组成或仓库外实现。
 - 桌面端为 `apps/desktop` 的 Electron 壳（与 `apps/desktop-host` 配合）；渠道管理的桌面专属 UI 与打包行为本轮未逐项核对。
 - 遥测（`session-telemetry-otel`）是否覆盖 LLM 请求路径未追完。
-- `agent/request` 瀑布的消费者清单未穷举（除 model-selection 与 agent-loop 自身外）。
+- 请求瀑布的控制项消费者清单未穷举；会话模型选择的所有权与越界拒绝已沿当前执行路径确认。
 - 会话恢复（resume）时 `requestHeader` 恢复的具体行为仅在 `buildRequest` 静态阅读，未跑重放。
 
 ## 12. 关键源码索引

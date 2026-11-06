@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -37,7 +37,7 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 - **Session**（`packages/core/src/session/sql.ts:28-84`）：项目/工作区/父会话/fork 来源与边界、slug、目录与子路径、标题、版本、分享地址、摘要与 diff 统计、成本与五类 token 计数、回退状态、权限规则集、agent 与 model、忙碌/空闲/查看/压缩/归档时间戳，以及重启续跑用的 `time_suspended`/`resume_attempts`。
 - **Message**（`session_message`，`sql.ts:86-105`）：按 `session_id + seq` 唯一有序，`type` 与 `data` 分离存储；分页索引覆盖创建时间与 id。
 - **assistant 内容**（`session_part`，`sql.ts:107-128`）：以 `message_id + ordinal` 为主键保存 text/reasoning/tool 条目，读取时批量拼回消息体（`history.ts:92-126`），因此内容既可整体重放也可按键读取。
-- **Inbox**（`session_inbox`，`sql.ts:130-151`）：记录待投递或排队的用户输入，delivery 取值 `steer`/`queue`，带 enqueued seq。
+- **Inbox**：只保存未投递条目，投递事务消费 inbox 并创建可见消息。同会话、同类型重用用户/合成输入 id 时首次受理胜出，重试中的内容、metadata 与投递方式被忽略；已投递后仍可从消息投影识别，跨会话或跨类型复用报冲突（[reconcile/admit](../../opencode/packages/core/src/session/inbox.ts#L125-L223)）。
 - **附件**（`blob`/`blob_ref`，`sql.ts:185-215`）：附件按内容哈希去重存入 blob 表，运行时用 `media:` 引用按需取字节，不再把 data URL 内联进消息历史。
 - **ID**：`ses_` 使用降序编码（新会话排序在前），`msg_` 使用升序编码；编码主体是时间戳×0x1000 加进程内计数器，再补随机 base62（`packages/schema/src/identifier.ts:1-29`、`session-id.ts`、`session-message.ts:21-31`）。消息 id 可由事件 id 派生（`evt_` 前缀替换为 `msg_`）。
 
@@ -46,7 +46,7 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 - **SQLite 唯一事实源**：会话库位于应用数据目录，启动时执行迁移；迁移文件在 `packages/core/src/database/migration/`。
 - **事件清单**：会话级事件覆盖 `session.created/renamed/archived/unarchived/moved/viewed/permissions/metadata.updated/forked/deleted`；消息与执行事件覆盖 `session.message.content.updated`、`session.step.started/streamed/ended/failed`、`session.text.*`、`session.reasoning.*`、`session.tool.*`、`session.shell.*`、`session.compaction.*`、`session.execution.*`、`session.inbox.*`、`session.usage.*`、`session.instructions.updated`（`packages/schema/src/session-event.ts`）。
 - **投影与顺序**：投影器是全局节点（`projector.ts` 的 `makeGlobalNode`），按事件 `created` 与 seq 生成消息体与 part 行；`message-updater.ts` 负责把单个事件应用为 assistant 消息增量（文本、推理、工具状态、快照、重试）。事件顺序即持久化顺序。
-- **认证与恢复**：执行认领是会话行上的租约（`time_suspended` 与 `resume_attempts`）；`session.execution.interrupted` 事件与重启续跑逻辑见 `packages/core/src/session/execution/restart.ts`。
+- **执行恢复标记**：会话行的 `time_suspended` 记录执行 claim，`resume_attempts` 保存该忙碌期的自动恢复次数。执行开始时写入，成功、失败或用户中断时释放，关闭中断与进程死亡则保留；它承担重启恢复记录，不承担集群租约或跨进程执行互斥（[execution.ts](../../opencode/packages/core/src/session/execution.ts#L73-L143)、[store.ts](../../opencode/packages/core/src/session/store.ts#L68-L91)）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
@@ -77,8 +77,8 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 
 - 事件即写入：消息与 part 的更新与广播绑定在同一事件流，投影器顺序消费，避免写路径与广播路径分叉。
 - 多客户端：SSE 全量广播，每个窗口独立投影；客户端本地还有按 server 维度的同步队列与 eviction（`packages/app/src/runtime/server/global-sync/`）。
-- 并发：同一会话的输入经 inbox 串行化（steer 插入当前轮，queue 排队），执行认领保证同一会话只有一个执行者；不同会话可并行。
-- 崩溃恢复：执行中断留下 `interrupted` 状态与未完成消息，重启后可继续或由用户清理。
+- 并发：当前进程的运行协调器按会话合并唤醒与恢复请求，不同会话可并行；inbox 把受理与执行解耦，steer 在安全步骤边界投递，queue 在空闲边界一次推进一个。待投递条目可取消或调整投递方式。
+- 崩溃恢复：遗留执行 claim 让启动恢复找到未结束的顶层会话，续跑次数持久记录，默认超过 10 次会终结；已执行的外部副作用可能重复。用户主动停止释放 claim，不会仅因停止事件在下次启动自动重启（[restart.ts](../../opencode/packages/core/src/session/execution/restart.ts#L24-L63)）。
 
 ## 7. 迁移、导入导出与保留策略
 

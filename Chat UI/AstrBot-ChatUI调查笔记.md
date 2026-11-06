@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
-> 调查方式：直接阅读源码（Dashboard 前端 Vue 组件与 composables、FastAPI 聊天接口、WebChat 平台适配器），行号按当前 HEAD 逐一核对；视觉、焦点顺序、键盘可用性等需运行确认的项标注"未运行验证"
+> 调查方式：只读源码与历史快照差异交叉定位；重点核实消息历史分页、编辑与重生成的线程级联、可移植按钮的前后端接线；视觉、焦点顺序、键盘可用性未运行验证
 >
 > 调查范围：项目自带的 WebChat（/chat 与 /chatbox 两个入口）与 Dashboard 管理界面（对话管理、会话规则、追踪、统计）；QQ、Telegram 等外部 IM 客户端的界面不归项目所有，不在本笔记范围；弹窗/Toast/主题/动画等通用 UI 盘点按 Chat UI 类目过滤规则不纳入正文
 >
@@ -50,7 +50,7 @@ WebChat 与外部 IM 共享同一套事件模型，WebChat 界面只负责呈现
 ## 2. 会话列表、搜索与现场恢复
 
 - **会话列表**：ProjectList 展示 `chatApi.listSessions` 返回的会话行（useSessions.ts:34-48），支持新建（创建后绑定所选配置 profile 并跳转路由）、删除、批量删除（按失败项判定当前会话是否被删）、重命名（对话框）等操作。会话可归入项目（`ChatUIProject`）分组，项目展开时懒加载会话（Chat.vue:1391-1421），项目内会话可独立编辑标题/删除（:1271-1285）。
-- **搜索**：会话数据层搜索在管理页（对话管理页 conversationApi 的 ilike 搜索，见会话与消息管理笔记 §5）；WebChat 工作台内本次未找到会话搜索框（静态检查 Chat.vue 模板）。
+- **搜索与列表覆盖范围**：会话数据层搜索在管理页（对话管理页 conversationApi 的 ilike 搜索，见会话与消息管理笔记 §5）；WebChat 工作台内本次未找到会话搜索框。普通会话侧栏读取的后端入口固定取最新 100 行、排除项目会话并丢弃总数；它与消息历史的向前翻页是不同链路，未发现该列表入口的续页控件（`astrbot/dashboard/services/chat_service.py:1571-1594`；`dashboard/src/components/chat/Chat.vue` 会话列表模板）。
 - **标题**：首条消息自动取前 40 字作为标题只更新前端内存对象（Chat.vue:1684-1708），不调用持久化 API；持久化标题仅发生在用户手动重命名（:1215-1247 → `chatApi.updateSession`）。
 - **现场恢复**：`loadSessionMessages`（useMessages.ts:267-293）加载历史 + 线程 + 运行中任务快照；`restoreNextActiveRun`（:285-313）把运行中 run 的快照插回消息列表（占位加载态）并启动恢复流（:679-764，5 次指数退避重连，收到结束事件才停）。滚动锚定：距底 80px 内吸底（Chat.vue:1979-1997），流式更新时吸底滚动（:808-812）。
 
@@ -88,7 +88,7 @@ WebChat 与外部 IM 共享同一套事件模型，WebChat 界面只负责呈现
 - **重生成**：RegenerateMenu 可选择模型后重生成（Chat.vue:1792-1806 → useMessages.ts:497-569，SSE 重连并替换 bot 占位）。
 - **侧线程（分支）**：选中 bot 消息文本弹出"在 Thread 中提问"浮钮（Chat.vue:515-533、:1549-1578）→ `chatApi.createThread`（:1580-1614）→ ThreadPanel 内继续对话/删除线程（:1616-1665）；ThreadNode 把线程入口挂到消息上。
 - **推理与引用**：reasoning 折叠块与 ReasoningSidebar（`openReasoningPanel` :1636-1647）、引用 RefsSidebar（:1625-1634），面板互斥（打开其一关闭其他）。
-- **版本导航**：无版本树/版本切换 UI（数据层也无版本保留，见会话与消息管理笔记 §4）；"分支"只有线程一种形态。
+- **版本导航与线程保留**：当前消息操作未提供版本树或旧回答切换入口。编辑最新用户消息会删除其后显示消息，重生成会删除旧 bot 记录；两条服务路径还会清除这些被删记录所关联的侧线程及其独立会话。因此侧线程在创建后可独立对话，但仍受父消息删除级联约束（`astrbot/dashboard/services/chat_service.py:1925-1944,2037-2053`）。
 - **删除**：会话删除带确认对话框（`askForConfirmation`，Chat.vue:1488-1499）；线程删除同样确认（:1649-1665）。
 
 ## 7. 多会话、多模型、群聊与后台生成

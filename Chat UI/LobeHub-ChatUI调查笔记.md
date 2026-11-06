@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
-> 调查方式：直接阅读源码（SPA 路由与 Agent 聊天页面、AgentSidebar Topic 列表、ChatInput 编辑器与发送区、Conversation 消息操作与审批卡片、设置页快捷键、桌面通知工具）+ grep 检索键盘/无障碍属性，全部行号按当前 HEAD 逐一核对；未运行验证
+> 调查方式：直接阅读源码（SPA 路由与 Agent 聊天页面、AgentSidebar Topic 列表、ChatInput 编辑器与发送区、Conversation 消息操作与审批卡片、设置页快捷键、桌面通知工具）+ grep 检索键盘/无障碍属性，关键结论以当前源码接线为依据；未运行验证
 >
 > 调查范围：会话导航与现场恢复、Composer 与草稿、发送前配置、生成反馈与停止、消息操作、阅读辅助、UI 状态所有权、键盘与关键路径可用性、桌面通知；通用 UI 盘点（弹窗库、Toast、主题、断点、动画、拖放、i18n、PWA）不纳入本文
 >
@@ -18,11 +18,11 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 - Topic 列表：单击/双击 250ms 定时器区分导航与开新 tab、拖拽引用到输入框、右键菜单、悬浮元数据卡、未读点、失败/运行/等待人工图标与运行耗时、草稿提示；Topic·Thread 并排（`ConversationArea` 的 portal 支持）与桌面端多 tab 由路由层承担。
 - 输入区是一个可扩展工作台：草稿按会话（messageMapKey）自动恢复、输入历史按 user×agent scope、IME 组合态、文件粘贴/拖入、Markdown 输入预览、`@` mention（Fuse 模糊检索）、`/` slash action（编辑器插件实现）、goal tag chip、语音消息（MediaRecorder 录制上传后走常规发送链并 `preserveComposer`）。当前快照另有受功能开关控制的实时听写：浏览器采集音频后以 AudioWorklet 转为单声道 16 kHz PCM 帧，前端取得短期会话令牌并建立受校验的 WSS 连接，将识别的中间和最终文本写回编辑器；音频授权、AudioWorklet/WSS 不可用和协议错误都有可区分的失败状态（`src/features/ChatInput/Dictation/`）。发送前配置区有 Token 用量明细与推理强度预设（模型实例级配置，跨 Agent 生效）。
-- 发送/停止按钮是同一个交互位，`generating` 状态由 operation 驱动（经 ConversationStore 桥接全局 ChatStore 的 op 状态）；只读/无权限时提前置灰并给出 tooltip 原因；发送被阻塞时还会弹出队列托盘（QueueTray）提示排队与“立即发送”。
+- 生成期间持续保留停止按钮；输入区已有后续内容且宿主允许排队时，发送按钮与停止按钮并排，点击发送或按 Enter 都可提交后续消息。状态由 operation 经 ConversationStore 下发；只读/无权限时禁用发送并解释原因，队列托盘展示待发内容与“立即发送”。见 [发送区条件](../../lobehub/src/features/Conversation/ChatInput/utils.ts#L145-L161)、[按钮渲染](../../lobehub/src/features/ChatInput/SendArea/SendButton.tsx#L36-L66)。
 - 工具审批卡片有全局键盘快捷键（1/2/↑/↓/Enter），由共享 arbiter 分发到唯一一张卡片；审批选项带 `role="radiogroup"/"radio"` 语义。无障碍覆盖是“点状”而非体系化的，消息操作栏图标按钮、Topic 行存在明确缺口。
 - 桌面端（Electron）完成/审批通知与聊天状态直接联动并深链回具体 Topic；Web/PWA 没有系统级通知，只靠未读点 UI。
 - 消息内容渲染（conversation-flow 算法、虚拟列表、Markdown）一律属于消息渲染器笔记，本文只记录工作流与界面状态。
-- 会话区在快照间扩成一套独立界面层：`src/features/Conversation/` 下新增 `ChatItem`（行容器）、`ChatList`（列表/滚动）、`ComposerDraftReceiver`/`composerDraftBus`（跨表面草稿投递）、`InterventionBar`、`FollowUp`、`WorkingSidebar`（含 `TodoProgress` 与 `Workspace`）、`AgentWelcome`、`MessageForward`、`SplitDropZone`，并保留 `Markdown`/`Messages`。这些表面共享同一个会话级 store 与单向镜像。
+- 会话区封装行容器、消息列表、输入草稿投递、人工干预、跟进建议与工作侧栏等可组合表面，共享同一会话级 store 与消息镜像。主要组装入口见 [ConversationArea](../../lobehub/src/routes/%28main%29/agent/features/Conversation/ConversationArea.tsx)。
 
 ## 工作台边界与用户主链
 
@@ -30,7 +30,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 进入 Topic（路由参数 -> useAgentContext -> ConversationProvider，界面入口 ConversationArea.tsx:134-144）
   -> Topic 侧栏：切换 / 双击开 tab / 拖拽引用 / 未读点 / 运行态反馈 / 草稿提示 / 搜索抽屉（会话导航）
   -> Lexical 编辑器：草稿恢复 / 历史 / mention / slash / goal chip / 文件粘贴 / 语音消息（发送前配置：Agent、模型、执行设备、审批模式、Token 明细、推理强度）
-  -> 发送按钮（生成中变停止；排队时 QueueTray）-> 流式输出（ChatMiniMap、滚动快照、keepMounted 由渲染器笔记覆盖）
+  -> 发送区（生成中保留停止，后续内容可并排发送；排队时 QueueTray）-> 流式输出（ChatMiniMap、滚动快照、keepMounted 由渲染器笔记覆盖）
   -> 消息操作：编辑/复制/重试/删除/分支/审批/翻译/TTS（错误卡重试见 PendingRetryTurn）
   -> 离开 / 再次进入：滚动快照与草稿恢复现场
 ```
@@ -79,8 +79,8 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ## 4. 发送、排队、流式反馈与停止
 
-- **发送/停止按钮**（`src/features/ChatInput/SendArea/SendButton.tsx:12-48`）：生成/禁用状态读自 ChatInput store 的 `sendButtonProps`（17 行），`handleSendButton`/`handleStop`（18 行）——普通状态点击发送，生成状态切换为停止动作；只读权限（`usePermission('create_content')`，23 行）与 Agent 资源 view-only（27-29 行）会把按钮置灰，外面套 `<Tooltip title={reason}>`（45-46 行）把“为什么不能发送”用无障碍可读文案暴露出来。
-- **状态来源**：按钮属性在 `src/features/Conversation/ChatInput/index.tsx:399-407` 组装——生成态由状态选择器按 `isInputVisiblyLoading` 计算（237、290-294 行），停止动作接 `stopGenerating`；禁用态（298-299 行）由输入空/上传中/`disableQueue && 输入加载中`/宿主只读决定。该状态是 operation 状态选择器（`INPUT_LOADING_OPERATION_TYPES`，见对话请求与上下文笔记第 1 节），**按钮状态并非根据 DOM 中最后一条消息猜测**。发送处理器（`handleSend`，332-397 行）在触发时重新校验（上传中/队列阻塞/内容为空则不发），有定时发送时先提交定时任务（372-376 行）。
+- **发送/停止按钮**：空闲时显示发送；生成时始终保留停止，已有后续输入且允许排队时在旁边显示发送。发送权限由工作区内容创建权限与资源可用性共同决定，拒绝时 tooltip 给出原因；停止保留自己的回调。见 [SendButton](../../lobehub/src/features/ChatInput/SendArea/SendButton.tsx#L17-L66)。
+- **状态与提交**：会话级 hook 读取 operation 可见加载态，再结合输入是否为空与宿主是否禁用队列派生按钮；生成中的后续发送仍进入原有发送链，由队列规则安排执行。触发时重读文件与上下文选择，上传未完成、宿主只读或禁用队列且运行阻塞时不提交。执行环境预检拒绝时保留草稿；定时发送仅在日程持久化成功后清空编辑器。见 [UI 状态推导](../../lobehub/src/features/Conversation/ChatInput/useConversationChatInputUiState.ts#L34-L46)、[发送入口](../../lobehub/src/features/Conversation/ChatInput/index.tsx#L342-L425)。
 - **排队反馈**：发送被阻塞操作类型（`QUEUE_BLOCKING_OPERATION_TYPES`）阻塞时 `enqueueMessage`（执行侧见对话请求与上下文笔记第 8 节），输入区上方出现 `QueueTray`（463 行；`queuedMessageCount` 266-268 行）展示排队条目与“立即发送”（取消排队中阻塞 op），另有运行状态短语、进度与目标武装状态等悬浮托盘（464-468 行）。
 - **发送错误**：`InputCompletionErrorAlert` 与 sendMessageErrorMsg Alert（440-449 行）就地显示失败原因，编辑内容由执行链恢复（见对话请求与上下文笔记第 6 节）。
 - **权限边界**：发送按钮的置灰只在 UI 侧提前反映，最终权限仍由服务端校验（第 10 节）。`MessageFromUrl`（`?message=` 参数）在 Topic 转移回填（`AgentTransferMigration`）占位期挂起，回填完成后自动发送（`ConversationArea.tsx:208-216`）。

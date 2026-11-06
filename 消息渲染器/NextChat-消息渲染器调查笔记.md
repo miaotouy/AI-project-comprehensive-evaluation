@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/components/markdown.tsx`、`app/components/chat.tsx`、`app/utils/chat.ts`、`app/components/artifacts.tsx`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
@@ -167,7 +167,7 @@ OpenAI adapter 读取 `delta.reasoning_content`（`app/client/platforms/openai.t
 sandbox="allow-forms allow-modals allow-scripts"
 ```
 
-没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。组件通过注入的 `ResizeObserver` 脚本以 `parent.postMessage(..., '*')` 向父窗口发送高度和 title（`app/components/artifacts.tsx:81-87`）；父窗口在 `message` listener 中只按 frame id 匹配，未校验 `e.origin`/`e.source`，随机 frame id 用于降低误收概率（`app/components/artifacts.tsx:50-62`）。该 iframe 路径没有独立 CSP 或请求 allowlist。
+没有 `allow-same-origin`，模型生成页面不能以父页面同源身份访问 cookie/localStorage。注入的 ResizeObserver 向父窗口发送 frame id 与高度；标题没有由该脚本发送。父窗口对高度比较 frame id，对 title 却在比较前直接更新，两个字段都未核验事件来源。见 [监听器与注入脚本](../../NextChat/app/components/artifacts.tsx#L50-L87)。该 iframe 路径没有独立 CSP 或请求 allowlist。
 
 ### 5.2 分享和 Cloudflare KV
 

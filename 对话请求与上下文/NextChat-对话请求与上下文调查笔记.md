@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
-> 调查方式：直接阅读源码（客户端 store 的发送与上下文拼装、Provider adapter、SSE 流式工具、MCP server actions），对引用的符号与行号逐一核对当前 HEAD；流式动画与 Markdown 渲染细节归消息渲染器类目
+> 调查方式：直接阅读源码（客户端 store 的发送与上下文拼装、Provider adapter、SSE 流式工具、MCP server actions），沿提交、上下文与工具接线核对当前实现；流式动画与 Markdown 渲染细节归消息渲染器类目
 >
 > 调查范围：客户端提交入口 onUserInput、上下文拼装顺序、token 预算与两级压缩、Provider 交接、SSE 流式事件链、完成/异常/半截流收口、停止/重试/续写、队列与并发、插件/MCP/附件注入点、退出恢复与可观测性；会话数据语义与界面工作流分别归入会话与消息管理、Chat UI 类目
 >
@@ -48,8 +48,8 @@ Chat 输入 -> doSubmit（chat.tsx:1105-1124）
 `onUserInput(content, attachImages?, isMcpResponse?)`（`app/store/chat.ts:407-528`）执行以下步骤：
 
 1. 读取当前会话的 `session.mask.modelConfig`（`app/store/chat.ts:412-413`）。
-2. 普通输入经 `fillTemplateWith` 展开 `{{input}}`、`{{model}}`、`{{time}}`、`{{lang}}`、`{{ServiceProvider}}`、`{{cutoff}}` 六个模板变量；模板缺 `{{input}}` 时自动追加；输入以模板开头时去重（`app/store/chat.ts:161-203`）。MCP response 跳过模板（`app/store/chat.ts:416-418`）。
-3. 图片附件与文本合并为 `text + image_url` 多模态数组（`app/store/chat.ts:420-428`）。
+2. 纯文本输入经 `fillTemplateWith` 展开 `{{input}}`、`{{model}}`、`{{time}}`、`{{lang}}`、`{{ServiceProvider}}`、`{{cutoff}}` 六个模板变量；模板缺 `{{input}}` 时自动追加；输入以模板开头时去重（`app/store/chat.ts:161-203`）。MCP response 跳过模板（`app/store/chat.ts:416-418`）。
+3. 带图片时，数组中的文本取原始输入，重新覆盖前一步模板结果，再追加图片部件；因此文本-only 输入应用模板，带图片输入不保留该模板展开。MCP 回注也跳过模板。见 [输入分支](../../NextChat/app/store/chat.ts#L415-L427)。
 4. 用 `createMessage` 创建 user 消息与 `streaming: true` 的 assistant 占位（`app/store/chat.ts:430-440`）。
 5. 调用 `getMessagesWithMemory()`，把历史与新 user 消息组成 `sendMessages`（`app/store/chat.ts:443-444`）。
 6. 先写入 user/assistant 两条消息（`app/store/chat.ts:448-457`），再从 `getClientApi(modelConfig.providerName)` 调用 `api.llm.chat`（`app/store/chat.ts:459-527`）。

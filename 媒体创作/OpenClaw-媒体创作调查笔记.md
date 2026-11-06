@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
-> 调查方式：静态源码与仓库文档走读；沿 Agent 媒体工具、媒体生成 runtime、插件能力注册、任务 registry、Gateway 媒体托管和 artifact RPC 复查入口、状态、持久化与回流关系；未运行测试、未调用外部模型或 ComfyUI、未启动 Gateway 与 Control UI
+> 调查方式：静态源码与仓库文档走读；沿 Agent 媒体工具、媒体生成 runtime、插件能力注册、进程内 operation owner、Gateway 媒体托管和 artifact RPC 复查入口、状态、持久化与回流关系；未运行测试、未调用外部模型或 ComfyUI、未启动 Gateway 与 Control UI
 >
 > 调查范围：图片、视频、音乐生成工具及其插件能力目录、参数与参考素材、异步任务、失败/取消/恢复、生成结果托管、Artifact 查询和 Agent 回流；媒体理解、TTS、相机/录屏节点、播放器与普通附件只作边界样本，不作为媒体创作主链；不调查具体 Provider 的真实生成质量、计费服务和客户端视觉效果
 >
@@ -21,9 +21,9 @@
 | 检查项 | 结论 | 依据与边界 |
 |---|---|---|
 | 媒体专用入口、插件族、模型目录 | 已确认 | 三个专用生成工具；图片/视频/音乐 Provider registry；`action: "list"` 返回 Provider、模型、模式和能力；插件 manifest 声明能力合同 |
-| 独立任务、历史、资产或工程身份 | 部分确认 | `task_runs` 为独立任务事实源，结果还有 `attachmentId`、Artifact ID 和托管媒体记录；本次未找到独立媒体历史树、资产库、版本对象或媒体工程对象 |
+| 独立任务、历史、资产或工程身份 | 部分确认 | 进程内媒体 operation 拥有任务身份，结果另有 attachmentId、Artifact ID 和托管媒体记录；本次未找到独立媒体历史树、资产库、版本对象或媒体工程对象 |
 | 参数与参考素材 | 已确认 | 图片编辑、多图参考；视频文生视频、图生视频、视频变换和角色提示；音乐的歌词、时长、格式和参考图；Provider 能力决定归一化或拒绝 |
-| 异步状态、回调、取消、失败、恢复 | 已确认但强度不一 | 任务状态、Provider 内部轮询、超时、失败和完成回流齐全；取消主要是任务层投影，未见统一 Provider 任务撤销；重启后的媒体任务没有在本次范围内确认可重新接管 |
+| 异步状态、回调、取消、失败、恢复 | 已确认但强度不一 | 任务状态、Provider 内部轮询、超时、失败和完成回流齐全；接纳前支持请求中止，接纳后按后台工作生命周期完成，未见统一任务或 Provider 撤销入口；重启后的媒体任务没有在本次范围内确认可重新接管 |
 | 预览、编辑、重试、复用 | 部分确认 | Control UI 和 Artifact RPC 可预览、下载、取缩略图；参考素材可再次作为输入，失败可重新调用；未找到媒体专用编辑器、分支树或 `retry`/`edit existing artifact` action |
 | Agent 回流 | 已确认 | 完成事件携带结构化附件和回复指令，唤醒原会话的 Agent 生成可见回复；必要时有直接媒体回退路径的文档与实现支撑 |
 
@@ -119,7 +119,7 @@ Core 不负责把任意 HTML、节点图或 FFmpeg 脚本当作 OpenClaw 媒体�
 
 Provider 资源现在由预检阶段取得并显式移交给已接纳任务。预检期间资源负责模型目录、认证或 Provider runtime 的一致快照；重复请求、取消或接纳失败会释放资源，只有成功进入前台执行或 detached scheduler 后才转移所有权。后台任务持续持有同一资源直到实际生成与结果持久化完成，避免任务已经排队却在执行前丢失 Provider 生命周期。实现见 `src/agents/tools/media-generate-background.ts`。
 
-session-backed 媒体调用由 `runMediaGenerationTask` 创建运行中的 CLI 任务，任务来源分别记录为 `image_generate:<provider>`、`video_generate:<provider>` 或 `music_generate:<provider>`，并保存请求会话、请求者 Agent、prompt 和 Provider。初始工具结果包含 `async: true`、`status: "started"`、`taskId`、`runId`，之后后台执行器更新“Generating ...”“Saving ...”等进度。实现见 `src/agents/tools/media-generate-background-shared.ts`、`src/agents/tools/media-generate-background.ts`。
+session-backed 媒体调用先创建进程拥有的媒体 operation，记录请求会话、请求者 Agent、prompt、来源 Provider 与运行身份；同一 runId 同时充当 taskId。来源名称区分图片、视频和音乐工具。operation 保存在内存 Map 中；具有可保留 requester transcript 且符合脱离条件的任务才移交后台 scheduler，其他路径在前台执行。后台工具结果包含异步启动状态和任务身份，之后执行器更新生成与保存进度。入口见 [任务准入](<../../openclaw/src/agents/tools/media-generate-background-shared.ts#L225-L332>)、[执行调度](<../../openclaw/src/agents/tools/media-generate-background.ts>)。
 
 媒体完成不是简单的“Provider 返回即任务完成”。成功后台作业先把任务进度改为 `Generated media; delivering completion`，再尝试唤醒请求会话；只有完成事件处理结束后才把任务写成 `succeeded`。失败路径先尝试把错误送回原会话，再记录 `failed`；完成投递未确认时保留 `blocked` 终态语义，避免任务在用户尚未收到媒体时显示为普通成功。该顺序见 `src/agents/tools/media-generate-background-shared.ts` 与完成投递模块 `src/agents/tools/media-generate-background-completion.ts`。
 
@@ -140,7 +140,7 @@ OpenClaw 有两类“回调”需要区分：
 - **请求中止。** 参考素材加载和任务接纳前会检查 `AbortSignal`；源码注释明确，任务一旦接纳，生成的付费工作独立于请求者信号，见 `src/agents/tools/image-generate-tool.ts`、`src/agents/tools/video-generate-tool.ts`、`src/agents/tools/music-generate-tool.ts`。
 - **任务取消。** 通用任务取消 RPC（`tasks.cancel`）与 `src/tasks/` 任务注册表在本次快照中均未找到，媒体任务没有统一的任务级取消入口；可用的中止路径是会话/tool abort 与运行中止，见 `src/agents/tools/media-generate-background.ts`、`src/agents/media-generation-task-status.ts`。图片、视频、音乐 Provider 请求合同没有统一取消句柄，因此即便插件自身支持取消，也需按 Provider 实现核对，不能从公共合同推断。
 - **失败。** Provider 错误、空结果、空 buffer、不可投递视频、参考素材不符合能力、超时和响应超过大小上限都会进入候选失败或任务失败；fallback 会保留每次尝试的诊断。视频轮询还区分未知/过期任务、终态失败和超时，见 `src/video-generation/dashscope-compatible.ts`、`src/image-generation/runtime.ts`、`src/video-generation/runtime.ts`。
-- **运行时恢复。** 媒体后台任务的状态由会话 async-task 投影与媒体任务状态模块表达（`src/agents/session-async-task-status.ts`、`src/agents/media-generation-task-status.ts`），本次未找到通用任务注册表（`src/tasks/` 已不存在）、固定保留期或 `lost` 标记逻辑，也未找到媒体任务在 Gateway 重启后继续轮询或重新接管 Provider 远端 Job 的实现。因此当前证据只支持“任务状态随会话/运行存在”，不支持“任务跨重启可恢复”。
+- **运行时恢复。** 执行状态由进程级媒体 operation Map 和当前 run lifecycle generation 约束，查询时会清理旧 generation。普通终态保留 2 分钟，带 blocked 结果的终态保留 7 天；这是当前进程内的保留策略。完成投递由 durable session queue 接管，与 Provider 计算是否仍在运行分开。已读调度、状态 owner 和 completion 路径没有重启后接管 Provider Job 的执行链，不能由队列可持久化推断生成工作可跨重启继续。依据见 [状态 owner 与清理](<../../openclaw/src/agents/media-generation-activity.ts#L8-L62>)、[后台完成处理](<../../openclaw/src/agents/tools/media-generate-background-shared.ts#L410-L568>)。
 
 ## 4. 结果、历史、资产与工程持久化
 
@@ -152,13 +152,13 @@ OpenClaw 有两类“回调”需要区分：
 
 可见回复到达 Gateway 后，`createManagedOutgoingMediaBlocks` 会把图片、音频或视频存进 `media/outgoing/originals`，写入 managed outgoing media record，并生成带类型的 `artifact_managed_image_*` 或 `artifact_managed_media_*` ID。记录保存 session、可选 message、retention class、MIME、大小、图像尺寸和文件名；有 message 时从 transient 提升为 history。实现见 `src/gateway/managed-image-attachments.ts`、`src/gateway/managed-image-record-store.ts`。
 
-`artifacts.list`、`artifacts.get`、`artifacts.download` 默认扫描 session transcript，并可以用 sessionKey、runId 或 taskId 解析范围；task 查询会先读取任务的 requester session 和 Agent 归属，再只返回带相同任务 provenance 的 transcript 媒体。managed media 下载会再次检查 session、Agent、transcript 关联和文件存在性，返回短期 ticket URL，见 `src/gateway/server-methods/artifacts.ts`、`src/gateway/server-methods/artifacts-session-resolution.ts`。
+Artifact 查询从授权的 session transcript 中读取媒体；会话范围由显式 sessionKey 或 runId 解析，当前协议没有 taskId 查询参数。runId 先解析到原会话与 Agent，显式 sessionKey 则按所选 Agent 解析，再取得会话共享权限和目标身份；managed media 下载继续检查 transcript 关联、访问范围与文件，返回短期 ticket。依据见 [查询协议](<../../openclaw/packages/gateway-protocol/src/schema/artifacts.ts>)、[会话解析](<../../openclaw/src/gateway/server-methods/artifacts-session-resolution.ts#L59-L89>) 与 [Artifact RPC](<../../openclaw/src/gateway/server-methods/artifacts.ts>)。
 
 因此这里有“会话托管的媒体 Artifact”，但没有“跨会话可浏览的媒体资产库”。Artifact ID 的稳定性服务于 transcript 和客户端下载；它不是可编辑的媒体项目 ID。managed record 的清理也依赖 message/transcript 仍然引用该附件，或 transient 的时间与活跃任务条件，见 `src/gateway/managed-image-attachments.ts`。
 
 ### 历史、命名、去重与工程
 
-- **任务历史：部分确认。** `task_runs` 保存一次任务的 prompt、状态、时间和投递信息，并可由 `tasks.list/get` 查询；媒体任务的完整生成参数主要在工具结果和 transcript 中，没有独立的 generation history 表。
+- **任务历史：运行期状态与持久结果分离。** 媒体工具的 status/list 从进程内 operation owner 读取受会话和 Agent 范围约束的状态；已读实现没有 task_runs 或 tasks.list/get 通用任务历史。生成参数与完成结果由工具结果、transcript 和媒体文件保留；短期 operation 身份不能替代长期 generation history。依据见 [媒体状态构建](<../../openclaw/src/agents/media-generation-task-status.ts>)、[状态 owner](<../../openclaw/src/agents/media-generation-activity.ts>)。
 - **文件命名：已确认。** media store 用 UUID 作为安全身份，filename 只是显示和扩展名提示；同一内容没有本次可见的内容 hash 资产去重。
 - **请求去重：已确认但不是资产去重。** media request key 将 prompt、Provider/model、参考输入和主要参数稳定序列化；同一会话中活动任务或短时间内相同成功请求会触发 duplicate guard，区别请求可以并行启动，见 `src/agents/media-generation-task-status-shared.ts`。这防止重复调用，不建立可导航的版本关系。
 - **历史树/分支：未找到。** 通用 session transcript 有自己的会话和消息历史语义，但在本次媒体生成范围内没有媒体结果之间的 parent、version、branch 或 generation graph 字段。

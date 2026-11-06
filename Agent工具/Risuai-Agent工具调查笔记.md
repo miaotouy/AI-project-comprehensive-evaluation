@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
@@ -134,11 +134,21 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 插件系统（v3 API）与工具面的接口是 `registerMCP`/`unregisterMCP`（v3.svelte.ts:1180-1181）。插件沙箱为 iframe srcdoc + CSP + postMessage RPC 桥（`SandboxHost`，factory.ts:434-942），宿主侧 API 经 `makeRisuaiAPIV3` 白名单暴露；插件的工具列表与执行回调都在沙箱内运行。新导入路径已拒绝 API 2.0 与 2.1，只接受 3.0；不过数据库里已保存的 2.1 插件仍会在启动时走旧的主线程加载分支。因而“阻止新安装”不等于清除或禁用存量插件（`plugins.svelte.ts:343-361,421-429,890-910`）。
 
-未找到 Skill、子 Agent 或任务委派机制。
+### v3 宿主 API 的权限判定
+
+数据库写权限与读权限分开。角色、聊天和数据库几个公开 setter 通过共同的写权限包装器，用户拒绝时跳过回调并返回空值；自定义 Provider 则在实际调用时申请自己的权限，拒绝返回失败结果，不执行插件回调。该保护不能扩大为所有状态修改 API 都统一受写权限约束，主题和参数等另有直接入口（`apiV3/v3.svelte.ts:674-679,718-736,789-828,927-1000`）。
+
+权限缓存按“脚本哈希 + 权限”隔离，允许和拒绝均缓存于当前页面会话；持久授权也采用这个键，相同脚本即使改名仍可共享授权。周期权限在没有会话缓存时才检查三天时间戳，所以持续打开同一页面不会每三天强制重弹；时间戳另按插件名和权限保存。未知权限直接拒绝（`apiV3/pluginPermissionCache.ts:17-39`；`apiV3/v3.svelte.ts:587-653`）。
+
+读取 inlay 另需对应授权；网络宿主 API 的已读分支没有调用权限请求，只做域名黑名单检查，并对敏感请求头记录警告后转交旧网络实现。因此 iframe 内直接连接受 CSP 限制，不能概括为插件经宿主桥也无法联网（`apiV3/v3.svelte.ts:684-715,805-811`）。
+
+模块文件导入还有独立限制：二进制和 JSON 路径都会删除导入对象的 MCP 配置。低级权限被拒绝时，二进制模块清掉开关后仍返回模块，JSON 模块路径则直接停止导入；两条路径不能统一描述为拒绝整项导入（`process/modules.ts:252-257,298-318`）。
+
+已读工具主链中未找到 Skill、子 Agent 或任务委派机制。
 
 **旁路能力（静态分析）**：
 
-- 插件可经 `setDatabaseLite`/`setDatabase` 写入 db.modules（allowedDbKeys 含 modules/enabledModules，plugins.svelte.ts:482-507,765-794），因此插件能在自身被启用后把 mcp.url = 'plugin:xxx' 的模块写进数据库，把自己注册的工具注入后续全部请求——绕开手动导入模块这一步，但仍以用户安装并启用该插件为前提。
+- v3 插件写入模块数据库前须通过 `dbWrite` 授权。获得授权后，可把带插件 MCP URL 的模块写入数据库，并让注册的工具在后续请求可达；单独注册 MCP 回调不自动创建模块。Lite 写入明确剥除插件列表字段，完整数据库写入则另走插件安装确认，不能据模块写入能力推导为任意无确认安装（`apiV3/v3.svelte.ts:674-679,789-802`；`plugins.svelte.ts:751-797`）。
 - internal:aiaccess 的 `runLLM` 让模型可嵌套驱动完整生成链路（含再次注入全部工具），是工具面内唯一可自我放大的路径。
 - Lua 触发器与请求 replacer 能改写请求消息内容，属于"影响请求"而非"注册工具"的旁路，不在工具目录的校验路径上。
 
@@ -161,7 +171,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 7. `enabledModules` 不参与 MCP 过滤属于静态推断；模块设置页的启用开关对工具可达性无效这一点未运行确认。
 8. risuaccess 写工具的 `alertConfirm` 在流式续请求等待期间的交互（用户不点确认时循环是否挂起、有无超时）未运行验证。
 9. `fetchNative` 在 web 端 CORS 代理与桌面 Rust 端 `streamed_fetch` 的超时与重定向行为未展开。
-10. 插件权限集已可枚举（`fetchLogs`/`db`/`dbWrite`/`mainDom`/`replacer`/`provider`/`sendChat`/`inlay`，授权结果按脚本哈希在会话内缓存），但各权限在真实插件中的授予与撤销流程、`nativeFetch` 的授权范围仍未运行验证。
+10. 权限拒绝与调用接线已由宿主 API 确认；弹窗呈现、跨页面授权恢复与撤销操作未运行验证。网络桥的已读入口未调用权限确认，实际平台代理和请求限制另需目标环境观察。
 
 ## 关键源码索引
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
@@ -14,7 +14,9 @@
 
 ## 结论摘要
 
-RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承载人格提示词、模型生成参数、上下文上限、工具与记忆开关、正则替换、注入绑定与聊天页外观。它不是模板或模型包装，而是被整体存进全局设置的一份配置快照，由助手决定除 Provider 凭据之外几乎全部运行时行为；会话落库时还会从助手拍一份 `ConversationConfig`，把模型、推理强度、联网/内置搜索、MCP、工作区与技能固定在会话上，之后的切换与助手改动只影响新会话。
+RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承载人格提示词、模型生成参数、上下文上限、工具与记忆开关、正则替换、注入绑定与聊天页外观，整体存入全局设置。
+
+会话落库时从助手取得部分配置快照：模型、推理强度、两种搜索、MCP、工作区与技能存入 `ConversationConfig`，注入绑定另随会话保存。聊天页之后可继续修改这份会话配置，只影响当前会话；系统提示词、采样参数、本地工具、记忆与外观等其余字段仍在每轮读取助手当前值，助手修改会影响已有会话的后续请求。见 [会话覆盖与写回分流](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L41-L120)、[请求消费](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/ai/ChatRequestFactory.kt#L97-L119)。
 
 配置存储位置是 Preferences DataStore 的单个 JSON 键，而不是 Room 表：所有助手构成一个列表，序列化后写入 `assistants`，当前选中的助手另用一个键保存其 UUID。Role 配置随设置备份整体迁移，没有独立的助手仓储层。
 
@@ -24,7 +26,7 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 
 ## 总体生效链路
 
-1. 会话首次打开时会话初始化把全局选中助手改写为该会话的助手；发送消息时按会话 `assistantId` 取助手（取不到回退全局选中值），用户输入先过该助手的用户侧正则，模型按 `chatModelId` 解析并在为空时回退全局默认模型（`ChatService.kt`、`458-462`、`662-667`）。
+1. 打开会话会同步全局选中助手；生成时按会话归属读取助手，再叠加会话固定字段。模型优先解析会话配置，未固定或固定模型已失效时回退助手/全局聊天模型；用户输入使用解析后助手的正则。见 [会话视角解析](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L94-L119)。
 2. 工具集按助手的能力开关组合成一份工具表，装配入口见 `ChatToolFactory.kt`；工具的发现、schema 注入与执行归 [Agent 工具调查笔记](../Agent工具/RikkaHub-Agent工具调查笔记.md)。
 3. 请求装配把助手的 systemPrompt（或被会话覆盖的版本）、记忆段与工具提示拼成首条合成 system 消息，再截断历史并套用输入转换器链，随后由助手字段决定采样参数、由输出转换器链处理回复；装配在 `ChatRequestFactory` 中完成，循环本体是 `ai` 模块的 `AgentLoop`，装配顺序与变换器链归 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)（`data/ai/ChatRequestFactory.kt`）。
 
@@ -38,7 +40,7 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 |---|---|---|
 | 身份与展示 | `id`、`name`、`avatar`、`useAssistantAvatar`、`tags` | id 随机 UUID；avatar 为 Dummy/Emoji/Image；tags 是 Tag id 列表 |
 | 人格提示词 | `systemPrompt`、`messageTemplate`、`presetMessages` | 空串、`{{ message }}`、空列表 |
-| 显式覆盖开关 | `allowConversationSystemPrompt`、`allowConversationPromptInjection` | 均默认 false |
+| 系统提示覆盖开关 | `allowConversationSystemPrompt` | 默认 false；注入绑定随会话配置保存，无独立许可开关 |
 | 模型与采样 | `chatModelId`、`temperature`、`topP`、`maxTokens`、`reasoningLevel`、`streamOutput` | 模型 id 为 null 表示用全局默认；温度/topP/maxTokens 为 null 表示交给模型默认；推理等级默认 AUTO；流式默认 true |
 | 上下文 | `contextMessageLimit` | 0 表示不限制，正数表示保留的消息条数 |
 | 注入与扩展 | `modeInjectionIds`、`lorebookIds`、`enabledSkills`、`enableTimeReminder`、`timeReminderIntervalMinutes` | 空集合/空集合、true 的注入自动启用、间隔默认 60 分钟 |
@@ -49,10 +51,9 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 
 ### 1.2 助手内嵌的类型
 
-同一文件还定义了四类与助手强相关、但不属于 `Assistant` 字段的类型：
+同一文件还定义了三组与助手关联、但独立存储的类型：
 
 - `QuickMessage`：id、标题、内容；实际存储在全局设置里，助手只保存 id 集合（`Assistant.kt`）。
-- `AssistantMemory`：内存对象，id 为整型、内容为文本；实际持久化在 Room，助手只持有开关（`Assistant.kt`）。
 - `AssistantRegex`：查找正则、替换串、影响范围集合、是否仅视觉生效（`Assistant.kt`）。
 - `PromptInjection` 密封类、`ModeInjection`/`RegexInjection` 子类与 `Lorebook`：助手只保存 id 绑定，规则对象本身与注入管线归 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)（`Assistant.kt`）。
 
@@ -93,11 +94,11 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 - 打开一个会话：`initializeConversation` 会把全局选中助手改写为该会话的助手，因此“当前助手”会随最近打开的会话漂移（`ChatService.kt`）。
 - 显式迁移会话：会话级操作改写 `assistantId`，同时清空 `folderId`，因为文件夹是助手内分组，跨助手后不可见（`ChatVM.kt`）。
 
-由于每条消息在生成前才重新读取助手，修改助手配置会立即作用于该会话的下一次请求，属于“运行时引用”语义，没有版本化或冻结；正在运行的生成协程已在启动时取得助手与模型对象，本轮不受后续切换影响（`ChatService.kt`）。
+每轮解析同时使用助手引用与会话局部快照：提示词、采样参数、本地工具和记忆等未固定字段在下一轮反映助手修改；模型、推理、搜索和工具接入等已固定字段继续读取会话值，除非用户修改会话配置或引用失效。正在生成的协程使用启动时取得的对象。见 [ConversationConfig 解析与失效回退](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L94-L140)。
 
 ### 2.4 复制与删除
 
-复制助手会生成新 UUID、名称追加 ` (Clone)`，并把 Image 头像替换为 Dummy 以避免共用本地文件，背景原样保留（`AssistantVM.kt`）。删除助手会先删除其头像与背景文件，再移除助手记录，随后删除该助手的记忆与全部会话（`AssistantVM.kt`）。内置助手不显示删除入口（`AssistantPage.kt`）。
+复制助手会生成新 UUID、名称追加 ` (Clone)`，图片头像改用默认头像、背景保留；可选把原助手 id 下的记忆文件记录复制到新 id。删除时清理头像/背景、移除助手，再按该助手 id 删除记忆记录和会话；全局记忆使用另一共享 id，这个删除调用不清空全局库。见 [AssistantVM](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/pages/assistant/AssistantVM.kt#L40-L80)、[记忆作用域](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/repository/MemoryRepository.kt#L160-L162)。内置助手不显示删除入口（`AssistantPage.kt`）。
 
 ## 3. 提示词字段与覆盖开关
 
@@ -121,20 +122,15 @@ systemPrompt 的占位变量在发送前被替换；变量集合与写法规则�
 
 ### 3.5 会话级覆盖与优先级
 
-两个布尔字段决定会话能否覆盖助手配置：
+系统提示词覆盖单独受 `allowConversationSystemPrompt` 控制：开启且会话有自定义系统提示时整体替换助手提示，否则使用助手值，消费位置为 `ChatRequestFactory.buildStep`。
 
-| 字段 | 作用 | 生效位置 |
-|---|---|---|
-| `allowConversationSystemPrompt` | 允许会话用 `customSystemPrompt` 整体替换助手系统提示词 | `data/ai/ChatRequestFactory.kt` |
-| `allowConversationPromptInjection` | 允许会话用自己的 mode/lorebook id 集合替换助手的绑定 | `PromptInjectionTransformer.kt` |
-
-优先级可概括为：会话显式覆盖（在开关允许时）> 助手字段 > 全局设置默认。`allowConversationPromptInjection` 为假时，会话的注入 id 集合即使存在也不参与；Web 端在写入会话注入前会校验该开关，未开启则拒绝（`web/routes/ConversationRoutes.kt`）。
+注入绑定随会话配置固定，当前助手数据类没有独立的注入覆盖许可字段。会话已绑定配置时，请求读取会话自己的模式注入与 Lorebook 集合；聊天页修改也写当前会话，悬空资源 id 在解析时过滤。未绑定的新会话先读取助手默认绑定，绑定时还会保留旧会话已有的非空集合。见 [ConversationConfig.withConversation/getAssistantOf/bindConfig](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L50-L140)。
 
 ## 4. 模型、Provider 与生成参数
 
 助手绑定的模型是 `chatModelId`，为 null 时回退全局 `chatModelId`（`PreferencesStore.kt`）；助手只保存模型 UUID，凭据与 baseUrl 归 Provider 所有，Provider 的导入、合并与去重见 [LLM 渠道管理调查笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
-采样参数直接进入 `TextGenerationParams`（`data/ai/ChatRequestFactory.kt`）：temperature、topP、maxTokens、reasoningLevel 均取自助手，`customHeaders` 与 `customBody` 分别是助手自定义项在前、模型自定义项在后的合并列表，因此覆盖顺序是助手 > 模型 > 协议默认。`streamOutput` 决定走流式还是整段返回，`reasoningLevel` 默认 AUTO，界面用专门的按钮调整（`AssistantBasicPage.kt`）。
+请求参数读取会话视角的助手：温度、topP、maxTokens 使用助手当前值，推理强度受会话固定配置覆盖（`data/ai/ChatRequestFactory.kt`、`data/model/ConversationConfig.kt`）；`customHeaders` 与 `customBody` 分别是助手自定义项在前、模型自定义项在后的合并列表，因此覆盖顺序是助手 > 模型 > 协议默认。`streamOutput` 决定走流式还是整段返回，`reasoningLevel` 默认 AUTO，界面用专门的按钮调整（`AssistantBasicPage.kt`）。
 
 温度与 topP 的取舍设计是“null 即不发送”：为 null 时不会出现在请求参数里，界面用开关表达启用与否；温度允许 0–2，topP 允许 0–1，越界被拒绝而不是截断（`AssistantBasicPage.kt`）。`customHeaders` 与 `customBodies` 的编辑界面在请求页，与模型的同名字段合并后发送（`AssistantRequestPage.kt`）。
 
@@ -142,7 +138,7 @@ systemPrompt 的占位变量在发送前被替换；变量集合与写法规则�
 
 ### 5.1 开关字段与消费结论
 
-各能力都由助手上的一个字段开关控制，为假（或空集合）时对应工具或上下文段不出现；下表只给助手侧结论，机制细节按“归属”列：
+各能力由解析后的助手开关控制；搜索、工作区、技能与 MCP 优先使用会话固定值，其余读取助手当前值。下表记录助手侧字段及消费边界，机制细节按“归属”列：
 
 | 能力 | 助手字段与取值 | 助手侧结论 | 机制归属 |
 |---|---|---|---|
@@ -209,14 +205,18 @@ Chatbox 备份导入的是会话：所有会话挂到当前选中助手下，并
 
 ## 8. 配置界面与可见字段
 
-助手详情页把配置拆成基础、提示词、扩展、记忆、请求、MCP、本地工具七个子页，各页字段与 1.1 的分类一一对应（`AssistantDetailPage.kt`）：基础页放身份字段、工作区、模型与采样参数、上下文上限和外观，提示词页另有可点击的变量标签与 messageTemplate 实时预览，扩展页把快捷消息、模式注入、Lorebook、Skill 分成四页。聊天页的两个助手侧只读状态是联网开关与当前模型，都从全局选中助手推导，会话级覆盖入口受助手开关控制（`ChatVM.kt`、`ChatList.kt`）。助手列表页提供搜索、标签过滤、拖拽排序、复制与删除，排序结果写回 `settings.assistants` 顺序（`AssistantPage.kt`）。
+助手详情按基础、提示词、扩展、记忆、请求、MCP、本地工具七个子页组织。基础页放身份、工作区、模型与采样、上下文上限和外观；提示词页提供变量标签与消息模板预览；扩展页再分快捷消息、模式注入、Lorebook、Skill 四页（`AssistantDetailPage.kt`）。
+
+聊天页把设置流与当前会话组合成会话视角的助手、模型。模型和联网可从聊天页修改，写入助手默认或当前会话由是否已有配置快照决定，见 [ChatVM](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt#L181-L205)。
+
+助手列表提供搜索、标签过滤、拖拽排序、复制与删除，排序写回设置中的助手列表顺序（`AssistantPage.kt`）。
 
 ## 9. 设计取舍与已确认边界
 
 - 助手是纯数据对象：没有类方法，行为全部由外部服务读取字段后执行；配置以整体 JSON 存储而非关系表，使字段演进只需迁移函数，代价是每次读取都要做一遍去重与引用清理。
 - “null 表示不设值”的约定让界面可以区分“启用并填写”与“交给模型默认”，避免把禁用状态伪装成具体数值。
-- 助手与会话是弱引用关系：会话保存 id，不保存配置快照，因此修改助手会追溯影响历史会话的下一次请求，历史消息本身不受影响。
-- 全局选中助手与会话绑定助手会互相影响：打开会话会改写全局选中值，而 MCP 工具可用性读取全局选中值，两者在“打开 A 会话但全局选中仍为 B”的间隙里可能不一致。
+- 会话保存助手引用与局部配置快照。模型、工具接入及注入绑定按会话覆盖，其余助手字段继续动态读取；历史消息本身不随助手修改而重写。
+- 全局选中助手负责新会话默认值；既有会话请求经会话视角解析，MCP 过滤使用解析后的助手实例，不直接用全局选择值，见 [ChatRequestFactory.createContext](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/ai/ChatRequestFactory.kt#L97-L119)。
 - 内置助手读时补齐，删除不是持久性的，`DEFAULT_ASSISTANTS_IDS` 同时被界面用于隐藏删除入口。
 
 ## 10. 未验证事项

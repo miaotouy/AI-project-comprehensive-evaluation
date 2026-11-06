@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lobehub/lobehub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`67aaf17da1f43f0b5c851794b796a92d3258b86b`（分支：`canary`）
 >
-> 调查方式：直接阅读源码（SPA 页面路由与 Conversation 组件、全局 ChatStore 与会话级 ConversationStore、conversation-flow 算法包、tRPC 服务端路由与数据库模型）+ grep 检索调用点，全部行号按当前 HEAD 逐一核对；未运行应用
+> 调查方式：直接阅读源码（SPA 页面路由与 Conversation 组件、全局 ChatStore 与会话级 ConversationStore、conversation-flow 算法包、tRPC 服务端路由与数据库模型）+ grep 检索调用点，关键结论以当前源码接线为依据；未运行应用
 >
 > 调查范围：会话定位与消息分桶 key、双层 Store 事实源与同步、消息数据形状与树、Topic 生命周期 CRUD 与分页、消息 CRUD 与分支数据语义、Topic 与消息检索、导入导出与树修复；数据库 schema 迁移脚本、多端并发写入合并未覆盖
 >
@@ -115,7 +115,7 @@ messagePagingMap: Record<string, TranscriptPaging>; // 每桶的页游标与加�
 - 定稿：`internal_settleTranscript` 在 agent run 结束时持久化转写（包括已无视图显示的会话），流式中间态只留内存；
 - 修补式替换：`query.ts` 的 `replaceMessages` 仍负责 preserveWorks（中期 refetch 保留 Work 芯片）、语音占位合并与 `reconcileAssistantToolLinks`，但最终写的是副本层条目。
 
-`src/routes/(main)/agent/features/Conversation/ConversationArea.tsx` 从全局 store 读 `dbMessagesMap[chatKey]` 作为 `messages` prop 传给会话级 Provider；它不再提供 `onMessagesChange` 回调。
+主聊天页向会话 Provider 传入上下文、操作状态与行为 hooks，**省略 `messages` prop**，由 Provider 内的镜像层订阅全局消息桶。显式传消息数组会被解释为静态转录并关闭同步，不能用这条路径解释实时聊天。见 [ConversationArea 的 Provider 接线](../../lobehub/src/routes/%28main%29/agent/features/Conversation/ConversationArea.tsx#L142-L148)、[StoreUpdater 来源判断与订阅](../../lobehub/src/features/Conversation/StoreUpdater.tsx#L83-L109)。
 
 ### 2.2 会话级 ConversationStore：单向镜像
 

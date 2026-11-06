@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令）
+> 调查方式：对照源码快照差异，只读复核草稿恢复、消息分支、文件重载、实发快照与压缩/子任务运行态；既有存储主链按就近源码依据保留，未运行应用、测试或崩溃恢复实验
 >
 > 调查范围：会话/消息/分支的数据模型、事实源与持久化、生命周期、消息操作与分支语义、列表索引与检索（数据侧）、缓存与一致性、迁移导入导出、外部对象绑定、恢复与保留语义；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -23,7 +23,7 @@ llm-chat 以"会话 = 树形消息结构 + 活动路径指针"为存储单位：
 - 跨会话全文搜索**没有索引**：Rust 端每次都是目录全量扫描 + 正则预过滤 + 50 并发（`src-tauri/src/commands/llmchat_search.rs`），命中粒度只有会话级；会话内消息搜索是纯内存线性扫描当前活动路径，两套搜索能力不对等。
 - 应用崩溃/强退后，"生成中"节点在加载时会被修复（有内容 → complete，无内容 → error），修复后回写磁盘；僵死修复 watch 仍在生成节点减少时兜底。
 - 用户停止某个会话时，运行时管理器会同时清除该会话尚未执行的排队标记，并把这些节点结算为错误态，错误详情为“队列已停止”；这与已经进入网络请求的节点使用“用户手动停止”区分。展示层将两类错误都解释为已停止，而不是普通失败（`src/tools/llm-chat/stores/session/sessionRuntimeManager.ts:23-43,129-168`、`src/tools/llm-chat/utils/messageStatus.ts:89-103`）。
-- 会话本身也可以先以**内存草稿**存在：点击新建后在内存中复用索引与详情结构，开场白、输入草稿与跨窗口状态照常工作，首条消息进入发送流程时才提升为正式会话并写入索引与详情文件；历史版本已经持久化的空会话保持原状（`types/session.ts:112-121`、`stores/session/sessionLifecycleManager.ts`）。
+- 新会话先以未提升草稿存在：完整树在内存，身份、根 ID 与参数覆盖保存到独立草稿文件；输入另存。恢复时重建根节点并按当前角色重新生成开场白，首条消息发送时才写入正式索引与详情文件。它尚未进入历史列表，仍具有跨重启可恢复的数据身份（`composables/storage/useNewSessionDraftStorage.ts:22-100`；`sessionLifecycleManager.ts:844-894`）。
 - 节点生命周期状态已规范为 `waiting`/`generating`/`queued`/`complete`/`error`：请求发出后、收到首个有效流式内容前呈现为等待中；排队节点除运行时集合外还保留持久化标记，调度器会扫描这些标记恢复未执行的排队。消息内文本附件以 `virtualAttachments` 存在节点上（`types/message.ts:163`），草稿与消息各持独立快照。
 
 ## 系统边界与数据主链
@@ -61,7 +61,11 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 - `history`/`historyIndex`：撤销/重做栈，数据结构在 `types/history.ts`，Delta 型条目记录 create/delete/update/relation/active_leaf_change 五类变更；
 - `agentUsage?`：按 agentId 记录的使用计数，供列表与统计展示。
 
-`ChatSessionDraft`（`types/session.ts:112-121`）是尚未发送首条消息的新会话草稿：复用正式会话的索引与详情结构，开场白、输入草稿、消息预览与跨窗口同步都能正常工作，但稳定身份与配置独立保存，提升前不进入历史列表。首条消息进入发送流程时草稿提升为正式会话并写入索引与详情文件；历史版本已经落盘的空会话保持原状。
+新会话草稿复用正式索引与详情结构，提升前不进入历史列表。独立的 `llm-chat/new-session-draft.json` 保存索引、根 ID 与参数覆盖，恢复时构建空根和空撤销栈；角色与用户档案加载后，再按当前角色生成开场白（`useNewSessionDraftStorage.ts:22-100`；`sessionLifecycleManager.ts:844-894`）。
+
+输入文本、真实附件引用和虚拟文本附件则按会话身份关联，保存到 `llm-chat/input-drafts.json`，与上述会话身份草稿分别恢复（`useChatInputDraftStorage.ts:4-28`）。
+
+两个草稿存储都在排队写入时深拷贝快照并串行提交，清除排在已有保存之后，避免提升后旧写让草稿复活。启动若发现同 ID 已在正式索引中，则沿用该 ID 恢复正式会话并清理草稿身份记录；它处理的是正式写入和选择提交之间退出的窗口。真实崩溃恢复及多窗口竞争未运行验证。
 
 会话单位只有 Session 一个概念。在 `src/tools/llm-chat` 的 types、stores、composables 中未找到 Thread/Topic/Conversation 等其他会话单位定义；`useTopicNamer` 的"主题命名"只是给会话生成 `name` 标题（`generateSessionTopic`，入口在 `sessionLifecycleManager.ts:956-1011`），不引入新的会话对象。
 
@@ -181,7 +185,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 三种"再生成"路径底层都由 `useNodeManager` 提供节点级操作，`useChatHandler` 负责组装参数与调用执行链（执行链在对话请求与上下文 7）：
 
-- **重新生成**：`useNodeManager.createRegenerateBranch(session, targetNodeId)`（`composables/session/useNodeManager.ts:221-312`）。如果目标是用户消息，直接以它为父节点新建一个空的 assistant 节点（新的回复分支）；如果目标是助手消息，先找到它的父节点（必须是 user 消息，否则拒绝），然后同样在这个父节点下新建一个空 assistant 节点——也就是"重试"在树上表现为给同一个用户消息新增一个兄弟助手节点，原来的回复完整保留、只是不再是 `activeLeafId`。
+- **重新生成**：用户或工具消息直接作为新助手的父节点；助手消息则沿用实际直接父节点创建兄弟助手，无须父节点为用户角色。这样工具段后重试仍保留此前的完整上下文，不会回退到更早用户消息。新节点初态为 waiting，原回复保留（`composables/session/useNodeManager.ts:228-310`）。
 - **续写**：`useNodeManager.createContinuationBranch()`（`useNodeManager.ts:319-384`）区分两种情况：对 assistant 节点续写，新建一个内容**等于原内容**、带 `isContinuation` 标记并记录 `continuationPrefix` 的兄弟节点（发送请求时用前缀模式，让支持前缀续写的 API 从这段内容后继续）；对 user 节点续写，则是"角色接力"——新建一个空的子节点。写回最终内容时（`useChatResponseHandler.ts:490-501`），如果标记为续写且返回内容未包含原前缀，会手动把前缀拼回去，防止模型漏复述前缀导致内容断裂。
 - **编辑**：`useBranchManager.editMessage()`（`useBranchManager.ts:108-156`）是原地修改：直接覆盖节点 `content`（及可选附件），只允许 user/assistant 角色，不创建新节点；编辑前的状态由撤销栈的 `NODE_EDIT` 条目承接。
 
@@ -194,6 +198,14 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 ### 4.5 树图嫁接的树不变量
 
 树图视图的连线/嫁接操作（工作流见 Chat UI 1.4）在预览层拒绝自连、`preset-` 前缀节点、根节点、后代循环和同父节点（`useGraphConnectionPreview.ts:60-90`）；通过预检后按修饰键调用数据层的整棵子树移动或单点移动（子节点交旧父收养，`useNodeManager.ts:876-986、992-1077`），数据层同样拒绝根节点、自挂与循环。
+
+### 4.6 文本附件编辑与分支快照
+
+虚拟文本附件把标题和全文保存于消息节点，编辑草稿与历史消息各持独立副本。创建消息分支时重新分配附件 ID，避免新旧分支共享可编辑对象；历史编辑需把附件变化连同正文提交，Token 统计和后续摘要会读取更新后的全文。单份 16 MiB、最多 100 份的规范化校验也用于导入/同步，超限或无效对象直接报错（`utils/virtualAttachments.ts:26-70`；`composables/session/useBranchManager.ts:201-204`）。
+
+### 4.7 从文件重载
+
+`reloadSession` 由主窗口执行或代理，拒绝未落正式文件的草稿、正在生成或有持久化排队标记的会话。读取绕过内存缓存；读完再次核对空闲状态与读取前内存快照，期间发生变化就拒绝替换。成功后替换索引/详情，保留当前收藏位置，清空撤销与运行态、清检索缓存，只更新列表索引，不用内存正文覆盖外部编辑后的文件（`stores/session/sessionLifecycleManager.ts:970-1041`）。
 
 ## 5. 列表、索引与检索（数据侧）
 
@@ -226,6 +238,22 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 - **运行态追踪是会话粒度的**：`sessionRuntimeManager.ts` 用两个全局响应式集合追踪生成态——正在生成的节点 ID 集合与中止控制器表。生成判定通过遍历该会话所有节点、检查是否有节点 ID 落在集合里实现（`sessionRuntimeManager.ts:38-49`），不是简单的会话级布尔标记，因此天然支持"多个会话同时生成"而不互相影响。
 - **索引与详情的一致性靠统一写入口维持**：所有会话修改经 manager 层，写盘时同步更新索引项并标记两个槽位为脏（`useChatStorageSeparated.ts:350-377`）；revision 递增校验在 Rust 侧拒绝旧写；索引数值漂移由后台修复兜底（2.3）。
 - **流式期间的节点 content 写入与跨窗口同步**属于执行层（对话请求与上下文 5）；分离窗口的同步总线与断连边界在 Chat UI 8.2。多进程/多端并发写入的合并策略本次未调查（未见相关机制，见第 10 节）：单进程内由协调器分槽 + Rust 进程锁保证串行，跨进程场景（如同时开两个应用实例）只有文件锁与 revision 防线，未发现合并/冲突 UI。
+
+### 6.1 服务端响应分段与工具原角色
+
+一条服务端 VCP 网络响应可落成连续助手/工具节点。各段共享请求 ID 并记录响应角色、状态和结束原因；追加段时把排队子树迁到新段之后，使活动路径仍等待同一生成任务。节点内容、元数据与普通消息同样随会话 JSON 保存，快照关联多个响应节点，不以节点数等同网络请求数（`composables/chat/useSingleNodeExecutor.ts:337-470`）。旧历史通过 VCP 元数据规范化恢复工具角色。请求副本可将工具转为 user，但原角色留在 `_historyRole` 供编译定位，权威树的角色不因此改变（`core/context-processors/session-loader.ts:295-344`）。
+
+### 6.2 实发请求快照的独立事实源
+
+诊断记录保存到应用配置目录下 `llm-chat/request-snapshots/{sessionId}.json`，与正式会话详情分开。默认记录开、文本预览关；捕获的是协议适配后的请求投影、来源/宏/变换与路由、usage 和结算状态，不保存请求 headers/URL。它只描述有限次真实尝试，不替代消息树和可恢复会话（`services/requestSnapshots.ts:20-101`；`requestSnapshotRecorder.ts:80-115`）。
+
+仓库按会话串行保存，最多保留 10 次尝试、单尝试 1 MiB、单会话 4 MiB；超量依次移除文本预览、来源与变换、消息明细，最后只留摘要，必要时淘汰旧尝试。重复保存同 attempt ID 替换原记录，逻辑 request ID 下的重试有递增索引。清空时递增 epoch，删除会话时置删除标记，迟到记录因此不能复活已清数据；桌面写入沿原子写命令的专用 kind 与 revision 校验，纯浏览器只存在内存（`requestSnapshotRepository.ts:6-61,76-168`）。
+
+### 6.3 压缩与子任务运行态的恢复边界
+
+压缩进行中只登记在会话运行时 Map，不提前创建摘要节点；取消/失败可以保留显示状态，成功或无需压缩则移除任务。摘要和 Token 计算完成并通过取消检查后，才一次性插入正式摘要及重挂子节点，随后保存会话。应用重启可恢复已提交摘要，不能从运行态 Map 恢复未完成摘要请求（`session/sessionRuntimeManager.ts:63-151`；`composables/features/useContextCompressor.ts:280-416`）。
+
+子Agent任务的快照与子会话也分离保存。快照恢复将非终态标为 interrupted/stale，保留子会话和定位引用，未发现自动重新发起推理的恢复链。消息投递队列另有持久模型，但当前公开追加方法只追加消息、不触发下一轮；详细工具契约见[Agent 工具](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)。
 
 ## 7. 迁移、导入导出与保留策略
 

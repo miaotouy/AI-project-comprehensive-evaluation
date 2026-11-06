@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
@@ -19,7 +19,7 @@ VCPChat 的单聊请求由渲染侧统一组装器编成消息后，经 `send-to
 - **单聊中止按钮已接上本地兜底**：`interrupt-vcp-request` 给远端 `/v1/interrupt` 请求加了 5 秒超时；上游拒绝或超时后，`finally` 分支用 `vcpStreamTasks.cancel(..., 'interrupt-local-fallback')` 关掉本次流的本地读取，因此按钮不再只依赖远端停流。上游正常受理时仍由上游发送终态（第 7 节）。`modules/ipc/chatHandlers.js:1561-1614`
 - **主发送 fetch 仍无客户端超时**：`send-to-vcp` 只绑 sender 生命周期 signal，窗口存活且远端挂死时该请求会一直等待。`modules/ipc/chatHandlers.js:1369,1544-1560`
 - 群聊超时改为分阶段弹性：等待响应头 120 秒、块间空闲 62 秒；工具审批挂起期间看门狗只续期不熔断。`Groupmodules/groupchat.js:1247-1362`、`Groupmodules/streamWatchdog.js:1-40`
-- 流事件现在有显式契约：7 个事件名、4 种终态（completed/failed/cancelled/discarded），只有 `completed` 标记为 durable。终态由 `mainChatStreamConsumer` 统一投影与落盘，落盘失败会留下 `unsaved` 状态而不是静默丢弃。`modules/chat/chatEventContract.js:7-18`、`modules/renderer/mainChatStreamConsumer.js:35-128`
+- 流事件有七个名称和四种终态。契约只将 `completed` 标记为 durable，但实际写入判断允许失败与取消的部分结果落库，只有 discarded 跳过；该标记不能当作持久化白名单。终态先完成投影、释放发送状态，再提交历史；保存失败留下 `unsaved` 状态。依据：[事件声明](../../VCPChat/modules/chat/chatEventContract.js#L10-L18)、[实际持久化条件](../../VCPChat/modules/chat/streamCoordinator.js#L164-L189)、[终态消费](../../VCPChat/modules/renderer/mainChatStreamConsumer.js#L79-L125)。
 - 话题自动总结的超时保护仍不对称：单聊 `topicSummarizer.js` 无超时，群聊 `topicTitleManager.js` 有明确 20 秒超时（第 3 节）。
 - 群聊在同一 `handleGroupChatMessage` 调用内部严格串行（杜绝 chunk 交错），但多次调用之间无锁，写盘并发风险的数据语义见会话与消息管理笔记 6.1（第 8 节）。
 
@@ -71,7 +71,15 @@ mainChatSendOwner 发送/中止按钮
 
 ### 3.3 上下文压缩检查点
 
-单聊发送历史现在可从压缩检查点起截取：检查点是带 `contextCompaction.kind/version/checkpoint` 元数据的 user 消息，`effectiveContextHistory` 从最近一个检查点开始取，检查点之前的历史不发送，UI 历史仍完整保留；发送前主进程剥离检查点元数据。压缩本身由 `contextCompactionService` 生成，续接与保真分别由 `contextCompactionContinuity`、`contextCompactionFidelity` 提供证据边界。`modules/chat/contextCompactionState.js:6-25`、`modules/ipc/chatHandlers.js:122-128`
+压缩为单聊专用的旁路请求，需显式启用并配置压缩模型。入口包括手动压缩、发送前自动检查和 FlowLock 续写前检查。发送前阈值是 Agent 上下文上限的 85%；本地估算按非 ASCII 字符 1、其余字符 0.3 累加，并包含有效历史的 JSON、系统提示词与待发送文本。这是近似估算，未使用模型 tokenizer，也未覆盖随后读取的附件正文与所有后置注入。仅有一条检查点时跳过自动再压缩，避免无限压缩同一摘要。依据：[压缩预算判断](../../VCPChat/modules/chat/contextCompactionService.js#L6-L22)、[发送前入口](../../VCPChat/modules/chatManager.js#L1640-L1657)。
+
+流中另有一次工具返回边界检查：消费到独立行 `<<<[END_ROLE_DIVIDE_USER]>>>` 后，用已接收回复重新估算；达到上下文上限时暂停 FlowLock，经普通中止通道结束当前生成，先保存半截回复，再读取历史并压缩。成功后仅在原话题仍可见且没有 FlowLock 锁定时自动接续。它按工具返回边界触发，并非逐 token 强制预算。依据：[边界消费](../../VCPChat/modules/renderer/mainChatStreamConsumer.js#L51-L61)、[中止、压缩与接续](../../VCPChat/modules/chatManager.js#L45-L136)。
+
+压缩请求把最近检查点及其后新增历史作为独立消息发送；历史 system/developer 角色降为带原角色说明的 user 数据，日记由宿主提取并保留最新版本。请求固定非流式，并把 `/chatvcp/completions` 改为 `/chat/completions`，避免历史工具请求进入执行入口。检查点接受非空文本或纯文本 parts；标识符保真和未决项连续性审计只形成元数据与警告，不阻止落库，模型输出也无需严格匹配 XML 标签。依据：[压缩请求](../../VCPChat/modules/chat/contextCompactionService.js#L24-L57)、[消息与检查点构建](../../VCPChat/modules/chat/contextCompactionPrompts.js#L66-L152)、[正文校验](../../VCPChat/modules/chat/contextCompactionState.js#L197-L207)。
+
+运行状态按话题保存在内存 Map，默认 180 秒超时；中止会立即 abort 本地请求，同时尽力调用远端中断。提交前先比较当前完整历史与启动快照，历史变化即拒绝结果；进入持久化交接后不再接受取消。成功是在历史末尾追加带版本元数据的 user 检查点，旧消息仍完整保留。后续请求从最新有效检查点起读取，其后的新增消息自然跟随；本实现没有额外保留固定尾部窗口。检查点元数据在主进程发送前剥离。
+
+FlowLock 在压缩时暂停心跳并保留锁，只有持久化成功才按 Session 身份与 generation 恢复；取消、超时或失败后保持挂起。依据：[取消与提交](../../VCPChat/modules/chat/contextCompactionService.js#L75-L168)、[有效历史选择](../../VCPChat/modules/chat/contextCompactionState.js#L6-L25)、[心流暂停租约](../../VCPChat/Flowlockmodules/flowlock.js#L490-L520)。
 
 总结结果写入 `topics[]` 元数据的数据语义见会话与消息管理笔记 2.3。
 

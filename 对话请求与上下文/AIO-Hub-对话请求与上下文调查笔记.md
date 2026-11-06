@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/miaotouy/aio-hub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`03cf4b6e028d0e23d5447a7c0cd7678aab07af3f`（分支：`dev`）
 >
-> 调查方式：直接阅读源码（Vue 组件、composable、store、Rust 后端命令），并补充核对 ST 世界书类型、编辑/导入导出链与请求期处理器
+> 调查方式：对照源码快照差异，只读复核预设组装、实发捕获、预览、媒体附件、VCP分段和会话级压缩执行；既有世界书与其它主链保留就近静态依据；未运行模型请求或应用
 >
 > 调查范围：生成任务的提交入口、上下文拼装管道、预算与压缩、流式消费与节流落盘、完成与回写、停止/重试/续写执行链、队列与并发、外部能力注入点；会话数据语义与界面工作流分别进入会话与消息管理、Chat UI 类目
 >
@@ -55,7 +55,7 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 发送给模型的内容由历史选择与管道拼装共同决定：
 
-- **历史选择**：`getBranchHistory`（`core/context-processors/session-loader.ts:149-215`）两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID，第二遍跳过这些原消息而保留摘要节点（压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user（`convertToolRoleToUser`）；仅保留"无 toolCallsRequested 的最终回答"的 reasoningContent；可选把旧消息 HTML 转 Markdown 以省 token。
+- **历史选择**：`getBranchHistory`（`core/context-processors/session-loader.ts:149-215`）两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID，第二遍跳过这些原消息而保留摘要节点（压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user（`convertToolRoleToUser`）；保留工具调用中间助手节点的 reasoningContent，普通最终回答则去掉；服务端分段调用通过同请求的工具子节点识别中间助手；可选把旧消息 HTML 转 Markdown 以省 token。
 - **上下文管道**：`contextPipelineStore.ts:49-219` 注册并按 `priority` 排序执行 11 个处理器（`sortedAndEnabledProcessors`，`contextPipelineStore.ts:114-118`）。当前默认顺序：
   1. 会话加载（100）；
   2. 异步任务结果（110）；
@@ -77,7 +77,7 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 - **配置模型**：压缩是 **Agent 级配置**（`LlmParameters.contextCompression`），生效优先级"调用参数 > 当前选中 Agent 的配置 > 默认值"（`useContextCompressor.getEffectiveConfig()`，`useContextCompressor.ts:424-460`）；当前实现已移除 Session 级压缩配置（附录 A.1）。
 - **计数单位**：保护区与单次压缩量可按"消息条数"或"用户回合"计数（`countUnit`），用户回合把该用户消息之后的助手回复与工具结果合并计为一条，原生工具调用和 VCP 拆分消息都按同一规则归并；两种单位各自记忆数量设置，默认按消息条数（`useContextCompressor.ts:125-180`、`types/llm.ts:388-426`）。
 - **触发入口**：两个自动检查点——`sendMessage()` 创建新用户消息前（`useChatHandler.ts:465-480`）、`useSingleNodeExecutor.execute()` 助手节点完成后（`useSingleNodeExecutor.ts:690-700`，工具循环中的单节点执行也经过后者）；外加输入框"更多"菜单的 `manualCompress()` 手动入口（`useContextCompressor.ts:501-509`）。两处自动检查点都捕获压缩错误，摘要请求失败不会阻断正常聊天。
-- **关键不变量**：只处理当前 `activeLeafId` 所在路径；不跨分支压缩隐藏分支；**不删除旧消息**（非破坏性遮罩，可逆：禁用压缩节点让原消息重新进入上下文，删除走会话管理 4.4 的特殊重挂逻辑）。
+- **任务与路径**：压缩是按会话登记的独立异步任务，同一会话重复触发复用运行中的 Promise；发送前先等待既有压缩，再按提交的父节点路径检查，手动入口默认取活动叶子。完成后的自动检查不再阻塞已完成的回复。只遮罩目标路径，不删除旧消息；禁用压缩节点可让原消息重新进入上下文。取消贯通任务控制器与摘要请求，并在 Token 计算后、改树前再次检查（`session/sessionRuntimeManager.ts:63-151`；`useContextCompressor.ts:455-505`）。
 - **已确认边界**：连续压缩的"增量摘要滚动合并"已接入执行路径（`executeCompression()` 会把本次压缩范围之前最近的已启用摘要节点作为 `previousSummary` 传入续写模板，新摘要创建后旧摘要一并隐藏，`useContextCompressor.ts:580-640`；仓库文档 `src/tools/llm-chat/docs/architecture/context-compression.md` 已同步，文档与实现一致）。仍存在的边界：后台会话自动压缩可能读取前台会话/Agent 的配置与 Token 统计（状态依赖错位）。两者详情见附录 A.3/A.4。
 
 ## 4. SDK、Provider、模型与协议交接
@@ -91,7 +91,17 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 - 独立端点：DeepSeek 网页工具（搜索/抓取）走 `src/llm-apis/adapters/deepseek/tools.ts` 的独立调用，复用渠道连接与传输层但独立于 Chat Completions 消息协议，详情见 Agent 工具笔记。
 - 翻译：独立请求的模型选择优先级见 9.7。
 
+### 4.1 预设编译与缓存友好的请求排列
+
+预设先按组启停与模型匹配筛选，组合正文按片段选中版本物化，再做宏展开和注入；动态历史锚点共用不可变历史坐标，并避开工具调用/结果保护区间。开启上下文缓存优化后，自动工具定义/用法保持在前部，自动运行环境与自动 Recall 尽量放到靠近尾部的安全参考块；手写宏和显式 Recall 仍保留原布局。日期时间预设宏可按显示窗口冻结，减少高频变化。请求最终仍经过预算、格式化和附件解析，缓存命中需由真实上游 usage 验证（`core/context-processors/injection-assembler.ts:216-379`；`core/context-utils/runtime-context.ts`）。规则细节见[上下文编译与提示词工程](<../上下文编译与提示词工程/AIO-Hub-上下文编译与提示词工程调查笔记.md>)。
+
 ## 5. 流式事件、缓冲、节流与顺序
+
+### 5.1 服务端 VCP 分段与本地工具循环的边界
+
+同一次网络响应可以包含多段助手/工具输出。执行器按段索引分配节点：第一段复用占位节点，后续段结束前一段后追加为子节点，并迁移排队子树，让排队路径继续依赖当前生成标记。每段保存同一请求 ID、角色、响应 ID、结束原因与工具状态，流缓冲随活动段切换；最终用一份请求快照关联全部响应节点（`useSingleNodeExecutor.ts:337-470`）。
+
+服务端工具结果区段由流层识别，并在本地调用解析前被遮蔽；标准工具请求才进入本地执行。该分段与本地“执行工具后再发网络请求”的编排是不同主链，不能用一张助手节点代表整个服务端响应，也不能把服务端返回的工具文本再次当成本地请求执行。解析约束见[Agent 工具](<../Agent工具/AIO-Hub-Agent工具调查笔记.md>)。
 
 流式正文和持久化更新分离的具体机制在 `composables/chat/useStreamingMessageSources.ts` + `useChatResponseHandler.ts`（渲染侧的显示交接见消息渲染器笔记 2 节，这里记录执行与落盘侧）：
 
@@ -142,11 +152,19 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 - **smart（默认）**：模型原生不支持该模态时才使用转写；较老的附件超过 `forceTranscriptionAfter`（默认 10 条，`config/defaultSettings.ts:117`）后可强制转写；已有转写且 `smartPrioritizeTranscription` 为真（默认 true）时优先发文本（`useTranscriptionManager.ts:465-507`）。
 - **always**：始终使用转写（`useTranscriptionManager.ts:424`）。
 
-发送和上下文预览都会在执行管道前调用 `ensureTranscriptions()` 等待必要任务（`useChatHandler.ts:442-499` 与 `useSingleNodeExecutor.ts:174-227`），管道中的 `transcription-processor`（priority 250）再把 `【file::assetId】` 占位符或附件替换为转写文本/文本提取结果。附件卡片的单项重试/取消与批量转写动作是界面工作流（Chat UI 3.4）。
+实际发送在执行管道前调用 `ensureTranscriptions()` 等待必要任务，管道中的转写处理器再把文件占位符或附件替换为已有转写/文本提取结果。上下文预览只沿管道读取已有结果，不启动或等待缺失转写；统计用途还延后媒体二进制解析并标记估算（`useSingleNodeExecutor.ts:234-278`；`useChatExecutor.ts:423-438`）。附件卡片的单项重试/取消与批量转写属于界面工作流。
 
 ### 9.3 图片压缩
 
 与上下文摘要无关，是 Agent 参数 `imageCompression` 控制的发送前二进制处理。管道最后的 `asset-resolver.ts`（priority 10000）先按模型 `maxImageDimension` 做安全缩放（`asset-resolver.ts:46-57`），再按用户配置执行最大边限制、保持原格式或转为 JPEG/WebP，并可设置 0.1-1.0 的有损质量（默认 0.85，`asset-resolver.ts:70-81`）；失败时保留当前图片继续发送。处理发生在请求用的图片 buffer 上，没有改写资产管理器中保存的原文件。
+
+### 9.3.1 长图切片、虚拟文本与本地媒体
+
+长图切分在图片缩放/编码前执行，按请求设置和原图尺寸生成切片计划，再逐片走同一图片处理链。它只改变此次请求的图片 part，原资产保持不变；任一切片失败整组回退原图，避免发出残缺切片。不可变资产最多缓存 64 份计划，可变本地文件只在请求内复用；统计预览只取缓存计划或估计，不主动解码长图（`core/context-utils/image-slicing.ts:66-144,209-289`；`asset-resolver.ts:238-249`）。
+
+长文本粘贴和跨工具发送可生成节点内的虚拟文本附件，不必先创建资产文件。会话加载把它转为管道附件，文本处理阶段和 Token/摘要/可读导出使用相同围栏包装；默认转换阈值 3000 字符，单份最多 16 MiB、最多 100 份，运行时导入/同步数据经过规范化校验。文本附件自己的长反引号围栏会决定包装围栏长度，以保留原文本边界（`utils/virtualAttachments.ts:5-89`；`session-loader.ts:330-342`）。
+
+工具返回的本地媒体引用与资产附件分别保存，但在会话加载时同样投影为请求附件。若工具消息携带媒体或属于服务端 VCP 工具段，即使通用 tool→user 开关关闭也会转为用户消息以承载多模态；原角色留在内部历史标识，供动态锚点和 Recall 识别，最终适配器不应把这些内部字段视为模型内容（`session-loader.ts:295-344`）。
 
 ### 9.4 会话变量注入
 
@@ -162,7 +180,7 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
   - **VCP 兼容**：`externalId` 用于兼容 VCP（通过 WebSocket 连接的外部协议）广播过来的审批请求——这类请求的 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套，审批条 UI 因此不按 sessionId 精确匹配（见 Chat UI 5.3）。
 - **编排层**：`composables/chat/useToolCallOrchestrator.ts` 的 `orchestrate()`（`useToolCallOrchestrator.ts:73-470`）驱动"LLM 生成 → 检测工具请求 → 等待审批 → 执行 → 把结果拼回上下文 → 再请求"循环。每一轮先用 `parseToolRequests()` 检测响应文本中的工具调用（VCP 或其他协议），检测到后创建一个 `role: "tool"` 的节点，`metadata.toolCalls` 初始状态为 `"awaiting_approval"`；随后 `processCycle()` 调用 `requestApproval()` 等待审批。`processCycle()` 来自 `@/tools/tool-calling`——其内部解析/校验/执行/结果格式化的细节已由 [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md)（同代码快照）承接。循环上限由 `toolCallConfig.maxIterations` 控制（默认 5，`:111`）。
 
-审批开关的另一层是**自动决策仲裁**：配置允许时，审批请求可先交给 `src/services/decision-arbiter/` 的仲裁器判定自动批准/拒绝（两种引擎，规则式与 LLM 式），用户仍可在超时或拒绝路径接管；外部来源（VCP 节点、文件传输）的请求带独立来源标记，不与应用内会话混用。仲裁细节与配置入口在 Agent 工具笔记第 5 节，本笔记只记"审批点位于队列与执行之间"这一交接位置。
+审批开关的另一层是**自动决策仲裁**：配置允许时，审批请求可先交给 `src/services/decision-arbiter/` 的仲裁器判定自动批准/拒绝（JEV 问卷评估与普通 LLM 两种引擎）；自动批准/拒绝直接结算，只有升级人工或仲裁失败进入人工等待，人工审批超时会拒绝；外部来源（VCP 节点、文件传输）的请求带独立来源标记，不与应用内会话混用。仲裁细节与配置入口在 Agent 工具笔记第 6 节，本笔记只记"审批点位于队列与执行之间"这一交接位置。
 
 ### 9.6 外部能力注入概览（已确认入口，未逐分支展开）
 
@@ -177,9 +195,13 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
 
 `composables/chat/useTranslation.ts` 是纯粹的"调用 LLM 翻译一段文本"的工具函数（`translateText`，`useTranslation.ts:37-127`），不感知消息树结构。模型选择优先级：配置的翻译专用模型 → 全局默认模型 → 报错要求用户手动选择。翻译使用的 Prompt 支持 `{targetLang}`/`{text}`/`{thinkTags}` 占位符替换，`{thinkTags}` 会展开成当前生效的思考标签列表（例如 `<think>...</think>`），确保翻译时提示模型保留 XML 标签结构不翻译标签本身（`useTranslation.ts:76-97`）。翻译结果存消息 `metadata.translation`（字段语义在会话管理 1.3），界面入口与快捷交互在 Chat UI 6.1。
 
-### 9.8 上下文分析器：复用真实管道预览
+### 9.8 上下文分析器：预览与有限实发证据
 
-消息菜单的"上下文分析"不是静态读取已有统计，而是以所选节点为路径终点重新调用 `getLlmContextForPreview()`（`useChatHandler.ts:924-993` → `useChatExecutor.getContextForPreview`，`useChatExecutor.ts:284-508`），尽量复用真实请求的 Agent、用户档案、世界书、附件和整条管道；最终 Token 统计会对管道产出的每条消息重新计算（`useChatExecutor.ts:465-483`）。副作用：预览构建在发现附件时会调用 `ensureTranscriptions()`（`useChatExecutor.ts:412-458`），因此打开上下文分析器可能发起或等待缺失的转写任务，它并非严格只读的调试窗口（五视图界面见 Chat UI 6.3）。
+分析器区分当前构建预览与历史实发记录。预览以所选节点为终点，选择节点历史模型或待发送临时模型、当前 Agent 配置和用户档案，重跑管道并统计 Token；不启动转写，统计模式延后媒体读取。变量处理器仍可写与历史节点共享的元数据，因此不将预览描述为完全无副作用（`useChatExecutor.ts:306-497`；`session-loader.ts:330-344`；`variable-processor.ts:180-195`）。
+
+实发记录由单节点执行器在管道内采集来源/宏/处理器变换，并把记录器接到请求适配后的 `requestCapture`。同一个逻辑请求可有多个网络尝试；每次以独立 attempt ID 记录最终消息投影、逻辑/实际路由、完成/失败/取消状态与关联节点。只保存请求体投影和来源映射，URL 与 headers 不进入捕获；本地估计 usage 与 Provider 报告分开。默认开启记录、关闭文本预览，并受容量上限裁剪，故它是有限诊断证据而非完整流量归档（`services/requestSnapshotRecorder.ts:23-137`；`services/requestSnapshots.ts:20-29`）。
+
+缓存/变化分析比较这些实发快照；公共前缀属于本地估算，实际缓存读写以 Provider usage 为证据。预览与某个过去请求可能因配置、路由、异步结果变化而不同。持久化、清空和迟到写入处理见[会话与消息管理](<../会话与消息管理/AIO-Hub-会话与消息管理调查笔记.md>)，预设编译与动静分离见[上下文编译与提示词工程](<../上下文编译与提示词工程/AIO-Hub-上下文编译与提示词工程调查笔记.md>)。
 
 ### 9.9 显式 Knowledge 资料引用
 
@@ -233,13 +255,21 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 
 自动判断先检查 `enabled` 和 `autoTrigger`，再检查 `minHistoryCount`（`checkAndCompress`，`useContextCompressor.ts:493-509`）。`triggerMode` 支持 `token`、`count`、`both`；`both` 是 Token 或消息数任一超限即触发（OR），比较符是严格的 `>`，等于阈值时不会触发（`shouldCompress`，`useContextCompressor.ts:94-120`）。Token 优先使用 `llmChatStore.contextStats.totalTokenCount`，统计未就绪才回退为路径节点 `metadata.tokenCount` 之和（`calculateContextStats`，`useContextCompressor.ts:125-180`）。代码里有两个自动检查点：`useChatHandler.sendMessage()` 在创建新用户消息前调用一次，保证本轮请求可以使用刚生成的摘要；`useSingleNodeExecutor.execute()` 在助手节点完成后又调用一次，工具循环中的单节点执行也会经过后一个检查点。两处都捕获压缩错误，因此摘要请求失败不会阻断正常聊天。
 
-输入框"更多"菜单的"压缩上下文"调用 `messageInputStore.handleCompressContext()` → `manualCompress()`（`useContextCompressor.ts:501-509`）。菜单会在当前 Agent 没有启用压缩时禁用；手动调用跳过自动开关与阈值判断，但仍受"最近 N 条保护区"约束，候选消息数不多于 `protectRecentCount` 时返回"没有可压缩的消息"。`manualCompress()` 本身不再检查 `enabled`，未启用时点不到它只是菜单禁用的结果。
+输入框“更多”菜单提供手动压缩，角色未启用压缩时入口禁用。底层共享入口同样检查 `enabled`，所以直接调用也受总开关约束；手动模式只跳过自动触发开关和阈值（`useContextCompressor.ts:455-509`）。
+
+手动压缩仍保留最近消息保护区；候选数不多于 `protectRecentCount` 时，返回“没有可压缩的消息”，不发出摘要请求。
 
 ### A.2 压缩范围、树结构与可逆性
 
-压缩只处理当前 `activeLeafId` 所在路径。执行时先收集所有**已启用**压缩节点的 `compressedNodeIds`，剔除已经被遮罩的消息，再从候选集中排除 `system` 角色和压缩节点（`executeCompression`，`useContextCompressor.ts:519-536`）；保留末尾 `protectRecentCount` 条，从最早的可压缩消息起最多取 `compressCount` 条（`useContextCompressor.ts:538-568`）。因此它不会删除旧消息，也不会跨分支压缩隐藏分支。
+压缩沿调用方传入的目标路径处理，未传时使用活动叶子；发送前检查显式传入该次发送父节点。它只在该路径内选取消息，隐藏分支保持原状。
 
-摘要由一次独立 LLM 请求生成。模型选择顺序是：显式 `summaryModel` → 当前选中 Agent 的模型 → 聊天全局默认模型 → 第一个已启用 Profile 的第一个模型（`generateSummary`，`useContextCompressor.ts:201-249`）；请求使用单条 `user` 消息，并应用独立的 `summaryTemperature` 和 `summaryMaxTokens`（`useContextCompressor.ts:251-267`）。摘要成功后，`compressNodes()`（`useContextCompressor.ts:283-415`）创建带 `metadata.isCompressionNode=true` 的普通树节点，将其插在该批最后一条被压缩消息之后，并把该消息原有的子节点整体转挂到摘要节点下（删除/重挂语义在会话管理 4.4）。元数据记录被遮罩 ID、原消息/Token 数、触发配置和时间；如果被遮罩消息含 provider `reasoningArtifacts`，压缩节点会标成 `reasoningStateStatus: "broken"` 并写入警告，因为后续请求不会再回放这些隐藏消息的 reasoning 状态（`useContextCompressor.ts:309-339`，字段语义在会话管理 1.3）。
+候选筛选先去掉已启用摘要遮罩的消息，再排除系统消息和摘要节点。保留末尾保护区后，从最早的剩余消息起按配置数量取一批；旧消息继续保留在树中（`useContextCompressor.ts:519-568`）。
+
+摘要由一次独立 LLM 请求生成。模型优先显式摘要配置，其次目标路径最近助手的请求绑定（优先保留虚拟渠道请求引用），最后回退当前 Agent；缺少有效绑定则报错。请求使用单条用户消息和独立摘要采样/输出预算（`useContextCompressor.ts:64-88,244-269,589-612`）。
+
+成功后创建标记为压缩节点的普通树节点，插在该批最后一条被压缩消息后，把该消息原有子节点整体转挂到摘要下。元数据记录被遮罩 ID、原消息/Token 数、配置和时间，原树消息继续保留（`useContextCompressor.ts:280-416`）。
+
+被遮罩消息若带 Provider 推理回放 artifact，摘要节点会标记 `reasoningStateStatus: "broken"` 并写警告：后续请求无法再回放已隐藏消息的推理状态（同文件 `:309-339`）。
 
 请求上下文由 `session-loader.ts:105-153` 两遍回溯构建（第 2 节）。因此"压缩"准确说是**非破坏性上下文遮罩**。`CompressionMessage.vue` 允许用户直接编辑摘要、切换摘要角色、启用/禁用和删除；禁用压缩节点会让原消息重新进入上下文，删除则走会话管理 4.4 的特殊重挂逻辑。原消息一直存在于会话 JSON 和树图里，线性消息列表只是用半透明样式标记其已被压缩状态（渲染在渲染器笔记 1.2）。
 
@@ -257,7 +287,7 @@ Composer 的 Knowledge 引用（`knowledgeReference`，UI 在 Chat UI 3.1）随�
 
 ### A.4 后台压缩的状态依赖错位
 
-另一个边界来自全局 UI 状态：有效压缩配置、摘要模型和摘要节点精确 Token 计算都读取 `currentAgentId`（`getEffectiveConfig`，`useContextCompressor.ts:424-460`），并没有根据目标会话的历史节点或传入的 `sessionIndex/detail` 解析 Agent；`calculateContextStats()` 又优先读取 `llmChatStore.contextStats`，而该统计在 `llmChatStore.ts:911` 明确绑定的是 `currentSession/currentSessionDetail`（`useChatContextStats` 直接读传入的当前会话 ref）。前台当前会话通常不会出错，但多会话并行生成、生成期间切换 Agent/会话时，后台会话理论上可能套用前台当前 Agent 的配置/摘要模型，甚至用前台会话的 Token 总数判断自己是否达到压缩阈值。状态依赖错位由代码可以确认，实际误压缩结果仍标为**潜在风险，未做多会话运行时复现**。
+有效压缩配置仍从当前选中 Agent 合并，触发用 Token 总数又优先读取当前会话的全局统计；目标后台会话并行生成时，配置和阈值统计存在前台状态依赖。摘要模型与摘要 Token 计算则已优先使用目标路径最近助手绑定，缺少绑定时才回退 Agent，故不能把模型错位概括为必然行为。多会话误触发结果未运行复现（`useContextCompressor.ts:158-174,424-449,589-628`）。
 
 ### A.5 计数单位与压缩范围
 

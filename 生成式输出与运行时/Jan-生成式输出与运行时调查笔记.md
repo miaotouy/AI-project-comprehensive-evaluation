@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -28,7 +28,7 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 2. 生成：文本 delta 流式进入消息 parts；生成结束回调 `onFinish` 把完成的消息转为 `ThreadMessage`（content 数组含 text/file/reasoning 等）写入后端（web-app/src/routes/threads/$threadId.tsx:293-460）。
 3. 保存：Rust 把消息写入 `threads/<threadId>/messages.jsonl`（`src-tauri/src/core/threads/commands.rs:159` 起；mod.rs 说明单线程串行写保证一致性）。事实源就是这份 JSONL 消息文件，文件中不存在 artifact 对象。
 4. 展示/运行：消息渲染器渲染文本 part；若设置开启且非流式，拆段逻辑（`splitHtmlArtifacts`）把 html/svg 围栏拆出，html 段交给 `HtmlArtifact`（代码/预览双页签，预览为沙箱 iframe），svg 段以禁脚本静态预览渲染（`web-app/src/containers/RenderMarkdown.tsx:335-355`、`web-app/src/lib/utils.ts:72-121`、`web-app/src/components/HtmlArtifact.tsx`）。
-5. 交互：页签切换；iframe 内模型脚本可运行但与宿主零通道。
+5. 交互：页签切换，iframe 内模型脚本可运行；公共壳会发送错误/框选消息，但普通 Chat 卡片没有对应消费，详见第 5 节。
 6. 重新打开：读回 JSONL，把消息对象转回 AI SDK 的 `UIMessage`（`web-app/src/lib/messages.ts:255`），再走同一渲染链按消息文本重新推导 artifact。链路闭合，但闭合的是"文本渲染"，不是对象恢复。
 
 普通 Chat 的围栏 artifact 无文件读取与定向修改；Cowork 可通过 read/find/grep 查找已有文件，再经 edit/write 对同一工作区文件修改。文件路径充当对象定位键，工具执行结果进入后续模型回合（`web-app/src/lib/agentTools.ts:39-56`、`web-app/src/lib/coworkRunner.ts:571-590`）。
@@ -53,12 +53,13 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 ## 4. 表现类型、依赖与运行环境
 
 - 表现层级：静态 Markdown（GFM、KaTeX、Streamdown 代码块、Mermaid 图）覆盖 G0 至 G1 静态层；HTML artifact 是唯一动态层——模型 HTML/CSS/JS 在 iframe 中执行（`sandbox="allow-scripts"`，无 `allow-same-origin` → 不透明源，`referrerPolicy="no-referrer"`）（`web-app/src/components/HtmlArtifact.tsx:118-122`）。
-- 依赖提供：iframe 用 `srcDoc` 内联，文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装：CSP meta 置于最前，再注入内存存储 shim 与元素检查器脚本，然后才是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档——禁脚本（SVG 静态，无 `script-src`）、默认可脚本禁网（内联与 blob 脚本、data/blob 媒体、blob worker，`connect-src` 为 none）、`allowNetwork` 时放宽到 `https:`；`allowNetwork` 在产品代码中不传入，仅测试使用。预览还会统计无法在沙箱内解析的相对资源并显示提示条（`lib/htmlSandbox.ts:4-60`、`HtmlArtifact.tsx:38-44`、`lib/htmlAssets.ts`）。SVG 段复用同一组件但传 `allowScripts={false}`：sandbox 为空、CSP 不声明 `script-src`，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
+- 依赖提供：iframe 用 `srcDoc` 内联，文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装：CSP meta 置于最前，再注入内存存储 shim 与元素检查器脚本，然后才是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档——禁脚本（SVG 静态，无 `script-src`）、默认可脚本禁网（内联与 blob 脚本、data/blob 媒体、blob worker，`connect-src` 为 none）、`allowNetwork` 时放宽到 `https:`；普通 Chat 的 `HtmlArtifact` 调用点未传 `allowNetwork`，Cowork 独立预览面板则有自己的网络开关。预览还会统计无法在沙箱内解析的相对资源并显示提示条（`lib/htmlSandbox.ts:4-60`、`HtmlArtifact.tsx:38-44`、`lib/htmlAssets.ts`）。SVG 段复用同一组件但传 `allowScripts={false}`：sandbox 为空、CSP 不声明 `script-src`，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
 - 产品文案与实现一致：设置页说明"HTML runs the model-generated page in a sandboxed frame that executes its own scripts but cannot access Jan, your files, or the network"（web-app/src/locales/en/settings.json:99）。该功能标注为实验性，默认关闭（web-app/src/hooks/useInterfaceSettings.ts:186）。
 
 ## 5. 用户交互、事件与错误反馈
 
-- artifact 内交互：页签切换（Code/Preview）；iframe 内模型页面自身的按钮、表单、JS 状态可操作（运行期由浏览器承担）。iframe 与宿主之间由两个注入脚本建立单向通道：preview shim 把未捕获异常、未处理的 Promise 拒绝、加载失败的资源与 CSP 拦截的请求以 `{source:'jan-preview-shim', type:'error', ...}` 上报父窗口；preview inspector 在悬停/点击时把元素框选与标签以 `pin`/`clear` 上报（`lib/previewShim.ts:1-17`、`lib/previewInspector.ts:1-15`）。没有尺寸或运行状态回传；Mermaid 渲染失败有独立错误组件（`web-app/src/containers/RenderMarkdown.tsx:409-410`，属于渲染器层）。
+- 模型页面的按钮、表单与 JS 状态在 iframe 内运行。公共壳注入的 shim 可向父窗口发送异常、加载失败及 CSP 拦截报告，inspector 可发送元素 pin/clear 消息；脚本发送与宿主消费需要分开判断。普通 Chat 的 `HtmlArtifact` 仅组装 iframe，没有 message 监听或框选状态，因此这些报告不会在卡片形成错误反馈或模型回流（[HtmlArtifact.tsx:26–48、114–121](../../jan/web-app/src/components/HtmlArtifact.tsx#L26-L48)、[htmlSandbox.ts:56–65](../../jan/web-app/src/lib/htmlSandbox.ts#L56-L65)）。
+- Cowork 的 srcdoc 预览按 iframe 的 contentWindow 过滤报告、去重并限量显示错误提示，本次读取的组件未消费 pin/clear。live URL 分支没有该 frame ref，srcdoc 的错误反馈不能直接推广到它（[CoworkPreviewPanel.tsx:250–319](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx#L250-L319)）。
 - 交互状态不恢复：切到 Code 视图即卸载 iframe，切回重建全新文档；应用重载后从文本重建。预览高度用 CSS 的 resize-y 样式可拖拽，属浏览器原生行为，不持久化。
 - 工具结果（Web 搜索/抓取、RAG、MCP）以只读卡片展示：搜索条/地址栏样式的工具条，配结果链接行、引用卡片与文本片段（`web-app/src/containers/message/WebToolWidget.tsx:58` 起；`RagToolWidget.tsx:25` 起）。可点击打开外部链接，但不可操作、不可编辑、不可保存为对象——停在"工具结果的展示"边界，未物化。
 
@@ -82,8 +83,8 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 
 ## 9. 模型回流、对象感知与持续维护
 
-- 普通 Chat 只通过围栏文本回流；Cowork 可在后续工具回合读取、修改同一路径的文件，工具结果进入模型历史。预览 shim 与元素检查器对普通 Chat artifact 与 Cowork 预览面板共用（同一 `buildSrcDoc`），因此两者都有脚本错误与元素框选的 `postMessage` 上报；但这类上报不构成“对象可查询、可定向修改”的闭环（`web-app/src/lib/htmlSandbox.ts:46-65`）。
-- 对象感知：无对象列表查询、无源码读取接口、无运行状态观察。对象身份不绑定到后续回合：每次"修改"都是整条消息重新生成或续写，无法定位单个 artifact。因此闭环（查询→读取→定向修改）**未实现**；持续维护只以"转录文本继续对话"的弱形式存在（Continue 重放部分文本、Regenerate 重新生成），这是 Chat 类目行为而非输出对象维护。
+- 普通 Chat 通过围栏源文本继续对话；Cowork 则可在后续工具回合读取、修改同一路径的文件，工具结果进入模型历史。公共预览壳中的上报脚本并未接入模型请求；错误提示只有 Cowork 的 srcdoc 面板消费，元素框选在本次检查的两个宿主组件中均未找到消费点（检查范围：[HtmlArtifact.tsx](../../jan/web-app/src/components/HtmlArtifact.tsx)、[CoworkPreviewPanel.tsx](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx)）。
+- 普通 Chat 围栏的对象感知：本次检查的消息渲染和 transport 中未找到 artifact 对象列表、独立源码读取或运行状态观察接口。对象身份不绑定到后续回合：每次"修改"都是整条消息重新生成或续写，无法定位单个 artifact。因此闭环（查询→读取→定向修改）**未实现**；持续维护只以"转录文本继续对话"的弱形式存在（Continue 重放部分文本、Regenerate 重新生成），这是 Chat 类目行为而非输出对象维护。
 
 ## 10. 生命周期、资源治理与性能
 

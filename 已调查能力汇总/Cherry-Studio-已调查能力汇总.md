@@ -2,11 +2,11 @@
 
 > 汇总对象：`Cherry Studio（https://github.com/CherryHQ/cherry-studio）`
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、外部执行体与应用协作、媒体创作、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时、检索增强与认知编排共 16 份单项目调查笔记（代码快照均为 `e2fd716e569c73c1baa4ac226b6b0607792cdb9d`，main 分支）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
-> 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查
+> 汇总方法：阅读各来源笔记摘要与关键章节，合并重复能力并逐条链接；对 Agent 编辑/分支、工作区引用与编辑、工具审批/后台交互、会话通知及 DSH 执行域定向复核源码，其余沿用来源证据
 >
 > 汇总范围：覆盖上述 16 个类目中与 Cherry Studio 相关的全部已调查能力；仓库分布、应用界面基础设施的结论单列于"工程与基础设施摘要"；不做跨项目横向比较，不填写其他项目的能力空格
 >
@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、Node + SQLite 主进程、AI SDK 出网），TypeScript monorepo。产品表面分 Home（普通会话）与 Agent（Claude Code、Pi、Pi-Durable 三类运行时会话）两个入口，共用同一套"会话壳 + Composer + 消息列表"框架，以适配器注入差异。会话单位是 Topic，消息是 adjacency-list 树；一次生成由渲染层构建请求、主进程 `AiStreamManager` 集中编排；Agent 侧的运行时拥有各自协议适配与工具桥，但复用会话服务、模型兼容性判断和审批注册表。工作台之外还有三层协作面：八平台 IM 渠道、远程访问设备（经加密 WebSocket 使用桌面 Agent）以及十余个受管 Code CLI（写入 Provider 配置并在本机终端拉起）。核心数据与运行状态都在主进程（SQLite + 状态机），渲染层以 SWR 缓存投影 + 流式 overlay 呈现。
+Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、Node + SQLite 主进程、AI SDK 出网），TypeScript monorepo。产品表面分 Home（普通会话）与 Agent（Claude Code、Pi、Pi-Durable 三类运行时会话）两个入口，共用同一套"会话壳 + Composer + 消息列表"框架，以适配器注入差异。普通聊天以 Topic 为单位，Agent 以 Session 为单位，两侧消息分表保存父节点树与活动路径；一次生成由渲染层构建请求、主进程 `AiStreamManager` 集中编排；Agent 侧的运行时拥有各自协议适配与工具桥，但复用会话服务、模型兼容性判断和审批注册表。工作台之外还有三层协作面：八平台 IM 渠道、远程访问设备（经加密 WebSocket 使用桌面 Agent）以及十余个受管 Code CLI/Web 执行体（常规终端启动与 DSH 专用 Web 子进程分流）。核心数据与运行状态都在主进程（SQLite + 状态机），渲染层以 SWR 缓存投影 + 流式 overlay 呈现。
 
 ## 完成度速览
 
@@ -48,7 +48,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 ### 会话与消息
 
-- **会话与消息数据模型（Topic + 消息树 + 分支语义）**：会话单位 Topic 存 SQLite；消息是 adjacency-list 树（`parentId` 自引用外键 + `siblingsGroupId` 兄弟组），虚拟根由 CHECK 约束与唯一索引强制（每 topic 恰一根）；"切分支"是把 `activeNodeId` 指针重定向到目标分支叶子，不重排树，前端每次从指针反向 walk 到根；分支草稿是持久化的空 user 叶子（`reserveBranch`/`fill-reserved`），不再有渲染层假节点。删除语义收敛为"splice 保留可达历史"（首轮可删、多模型组删除只删兄弟回复），分支面板可按"节点到叶子的一条路径"删除分支；删除 Topic 默认进回收站（`deletedAt`）并按保留期清理，附件经 `chat_message_file_ref` 引用计数 + FileManager 策略化回收。证据状态：静态源码确认（`message-tree.md` 文档与实现一致）。[会话与消息管理调查笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Cherry-Studio-Chat调查笔记.md)
+- **会话与消息数据模型（Topic / Agent Session）**：两侧分表存 SQLite，均用父节点树和活动指针选择会话路径。Agent 编辑重发保留旧兄弟分支，复制会话则按原生 checkpoint 克隆历史与工作区；主进程检查忙碌状态及历史版本。普通 Topic 的空分支草稿也持久化，删除会保留可达后续消息，分支面板可按节点到叶子的一条路径删除。Topic 默认进回收站，附件经引用计数与策略回收。证据状态：静态源码确认。[会话与消息管理调查笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Cherry-Studio-Chat调查笔记.md)
 
 - **多模型并行回复**：Composer 里 @模型 多选 → 主进程在同一事务建 1 条用户消息 + N 条 assistant 占位（共享 `siblingsGroupId`），随后 N 个 execution 真并行各自流式写各自占位行，读侧按兄弟组横向/网格展示，顶部有 `< i/N >` 兄弟导航。这是"同一问题并行比较显式选择的模型"，不是失败后候补链；steer 续答与临时聊天只取第一个模型。证据状态：主链确认（静态源码）；独特功能类目标记为"归并已有类目"。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 8 节、[LLM 渠道管理调查笔记](../LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) 第 6 节、[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 7 节
 
@@ -72,7 +72,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **聊天内 HTML Artifact**：模型以 Markdown 文本或裸 HTML 输出，前端内容探测分类 document/fragment——片段恒进无脚本 iframe（严格 CSP），完整文档经用户同意后进入独立沙箱 webview（主进程强制沙箱/上下文隔离、DNS 级 SSRF 防护、无 IPC 桥）；对象可整段重写保存回消息正文，可下载/外部打开/PNG 截图。无独立 part 类型与对象 ID（身份为按 Markdown 位置派生的临时 ID），回流靠"会话历史重入"。证据状态：主链确认（静态走通），能力等级 G3。[生成式输出与运行时调查笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)
 
-- **Agent 工作区文件（G4 可编辑工作区）**：三种 Agent runtime 都以会话工作区为执行目录，产物即磁盘文件；`report_artifacts` 工具声明作为投影到消息卡片与右侧面板（实时文件树 watcher + 文件预览 + 防抖自动保存 + 乐观锁写时冲突检测），用户编辑后的磁盘文件在下一回合被模型经文件工具自然回流；无 CRDT、无对象级版本历史。证据状态：主链确认（静态走通），能力等级 G4。[生成式输出与运行时调查笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)
+- **Agent 工作区文件（G4 可编辑工作区）**：三种运行时以工作区为执行目录，产物在磁盘上，交付声明投影到消息卡片和文件面板。共享编辑会话保留脏草稿，写入检查内容基线；关闭自动保存仍在离开面板时冲刷。文档结构选区、文本行评论和浏览器批注可显式插入 Composer，随下一条用户消息回流，由模型或 Skill 解释引用。所查文本链无 CRDT 或对象级历史栈。证据状态：主链确认（静态源码），能力等级 G4。[生成式输出与运行时调查笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)
 
 - **Python 代码执行**：代码块"运行"仅对 python 生效，偏好默认关闭；开启后经 Pyodide Web Worker（渲染进程内、Wasm 沙箱）执行，结果文本/图片显示在代码块状态栏、不持久化；主进程侧另有 Python 服务经 IPC 桥接同一 worker 供 MCP `python_execute` 工具调用，该调用链跨越六层，执行沙箱边界落在 Wasm + Web Worker。证据状态：静态源码确认（入口/状态/事件绑定）；Worker 桥接细节见末尾小节。[生成式输出与运行时调查笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 
@@ -82,13 +82,13 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **Agent 工具体系（三条路径）**：普通聊天 MCP 路径（`McpRuntimeService` 管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory server，工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 工具表，按 `scope.mcpToolIds` 过滤）与 Claude Code Agent 路径（声明式 `toolRegistry.ts` 定义每个 SDK 原生工具与进程内 MCP 工具的 `exposure`：user/internal/disabled）各自独立，共享 MCP 运行时与审批 UI。Pi 路径不复用该注册表：驱动只提供工具清单，Pi 自带 `tool_search`/`tool_call`/`codemode`/`vcc_recall` 元工具在原生侧完成工具发现与批量编排，MCP 工具经 linked transport 接入并共用审批闸门；MCP 客户端已迁到 2.x SDK 并支持 server 侧交互请求。进程内 MCP（cherry-tools/agent-memory/assistant/skills）在主进程直接函数调用；执行域全部落在 Electron 主进程，Bash 等原生工具无通用命令沙箱；工具 id 双轨制（legacy 名称型 + AI SDK catalog 哈希型）消除碰撞面。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
-- **工具审批与安全边界**：普通聊天 MCP 走 AI SDK 原生 approval 状态机、决定持久化到消息 parts；Claude Code 走内存 `toolApprovalRegistry` 快路径（IPC 方法名共享、主进程分发不同）。权限模式优先级：MCP server 级强制提示 > bypassPermissions > acceptEdits > 默认安全工具 > prompt；always allow 仅 MCP 路径可持久化，Claude Code 原生工具每次调用都要逐次审批。路径校验 `workspacePathHook` 只覆盖六个结构化字段、Bash 命令文本不校验（源码注释确认刻意为之）；模型无法伪造真正可点击的审批卡片，但可在正文输出形似审批的文本造成社会工程学混淆。证据状态：代码已确认（静态源码）；待验证项见末尾小节。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md) 第 7、12、14 节
+- **工具审批与安全边界**：普通聊天决定持久化到消息 parts；Agent 注册表控制原生授权，后台交互卡片可另持久化为独立 assistant 行，先校验锚点并保存决定再解除等待。Claude 的首词 acceptEdits 快路径仍保留，但禁用、用户数据 SQLite 写入、全局安装与停滞等前置拒绝规则继续生效。跨运行时 required 策略覆盖 Skill/MCP 安装等工具，Pi auto 也需审批，Full Access 仅能豁免明确允许的规则；无人应答回合拒绝必需交互与再次委派。结构化文件越界触发 ask，Bash 文本路径没有通用校验，均不构成 OS 沙箱。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md) 第 7、11～13 节
 
-- **IM 渠道八平台（外部控制表面）**：discord/dingtalk/feishu/qq/slack/telegram/wechat/wecom 八平台经 `ChannelManager` 与渠道行接入，入站消息可启动 Agent Session 运行并流式回投，`/new` 等斜杠命令控制会话；协议兼容 OpenClaw 家族（Feishu 设备码注册、WeChat 双编码）；自带外部内容/工作区文件/输出消毒三层不可信输入防护；渠道会话在审批闸门里按 background agent 处理（常规工具父 turn 结束后自动放行），系统安全提示只是软性文本约束。证据状态：主链确认（静态证据）；逐平台往返属运行验证项，见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
+- **IM 渠道八平台（外部控制表面）**：discord/dingtalk/feishu/qq/slack/telegram/wechat/wecom 八平台经 `ChannelManager` 与渠道行接入，入站消息可启动 Agent Session 运行并流式回投，`/new` 等斜杠命令控制会话；协议兼容 OpenClaw 家族（Feishu 设备码注册、WeChat 双编码）；自带外部内容/工作区文件/输出消毒三层不可信输入防护；审批按当前回合与应答能力判定，无人值守时普通后台工具可放行，但 required 操作、用户输入及再次委派各有守卫；渠道关联本身不等同于免审批。系统安全提示属于文本约束。证据状态：主链确认（静态证据）；逐平台往返属运行验证项，见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
 
 - **远程访问设备（桌面 Agent 的移动端入口）**：配对邀请建立设备关系，设备身份是 Ed25519 密钥、访问 token 只存哈希；已配对设备在加密 WebSocket 上取得 `agent` 与 `configuration` 两类独立授权，前者可驱动桌面 Agent 会话，后者拉取渠道配置。网关把 LAN 暴露收窄为这一条升级路径，其他 HTTP 路由一律 loopback。证据状态：主链确认（静态证据）；真实移动端往返未运行验证。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
 
-- **受管 Code CLI（把外部 CLI 当执行体）**：十余个外部 Code CLI 预设（含 DeepSeek Harness）可由 Cherry 写入 Provider 配置、在应用内托管启动与停止并展示状态，与外部 CLI 自身的交互界面分工明确；这条路径产生的会话不进入 Agent Session 消息流。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
+- **受管 Code CLI/Web 执行体**：通用 CLI 由 Cherry 写配置并在外部终端启动；DSH 经专门 IPC 启动本机 Web 子进程、验证 loopback URL 后在小程序标签打开，具有启动互斥、超时、失败回滚及进程树停止。DSH 可选 gateway 或 direct，后者会投影 Provider 凭据；它不属于三种 Agent runtime，会话不进入 Agent Session 消息流。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)
 - **宿主自身作为工具面（assistant MCP）**：Cherry 把宿主暴露给外部 runtime——`assistant` MCP 提供页面导航（路由白名单）、产品信息、创建 Agent、应用设置等工具；仅在本地 Cherry Assistant 会话注入（外部渠道会话不注入）；`diagnose` 可读本机日志/源码/配置，被刻意排除在自动批准之外。证据状态：主链确认（静态证据）。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
 ### 渠道与调度
@@ -113,7 +113,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **Agent workspace**：已归并到已有类目（Chat UI §6.2 与 Agent 工具笔记覆盖，见"生成与创作"集群的"Agent 工作区文件"条目）。证据状态：归并已有类目。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md)
 
-- **桌面集成与通知**：托盘按系统明暗切换图标、点击行为可配置（唤起 QuickAssistant 或主窗口），系统通知经 Electron 原生 API、点击唤起主窗口，快捷键本地/全局分轨注册；已确认边界：托盘无未读/流式角标，Agent Session 列表无拖拽排序。证据状态：静态源码确认（空挂钩，见末尾小节）。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 8.2 节、[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
+- **桌面集成与通知**：普通聊天和 Agent 完成、工具待审批已接入主进程通知服务；聚焦完整窗口用应用内 toast，目标会话已活动时抑制，失焦后才按助手通知开关发系统通知，点击可回到对应会话。托盘明暗图标与点击行为、快捷键本地/全局分轨保持独立；所查入口中托盘无未读/流式角标，Agent Session 列表无拖拽排序。证据状态：静态源码确认。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 8.2 节、[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 
 - **无障碍与键盘路径**：Topic/Session 列表有完整 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮带 `aria-label`；会话内搜索/输入历史/变量遍历等键盘主链已确认。已确认边界：Composer 输入区本体无可访问名称、分支树图键盘导航未核实（见末尾小节）。证据状态：静态源码确认；视觉与读屏表现属运行验证项，见末尾小节。[Chat UI 调查笔记](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>) 第 9 节
 
@@ -152,7 +152,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 ### 未覆盖类目
 
 - 本工作区无其他 Cherry-Studio 类目来源笔记；横向对比文档未纳入本次汇总。全部 16 份来源笔记均存在、结论摘要均可识别。
-- 各来源笔记明确"本次未找到"的项（按搜索范围表述，不构成项目级绝对结论）：绘画页无像素编辑、分支/版本、任务中心、"绘画→聊天插入"入口（媒体创作）；"助手回复完成"通知开关无 `source:'assistant'` 触发点（空挂钩）、无快捷键速查浮层、Agent Session 列表无拖拽排序（Chat UI）；Provider 专用 JSON/YAML 导入导出、Cherry 自身 CLI/TUI/Web 渠道 CRUD（LLM 渠道管理）；渲染进程无全局 window.onerror/unhandledrejection 兜底、HTML artifact 预览 webview 崩溃处理未找到（应用界面基础设施）；chat 主界面右 pane 无 artifact 面板、agent 会话消息中的代码块不可编辑、mindmap/思维导图组件未找到（生成式输出与运行时）；Composer 输入区本体无可访问名称、分支树图键盘导航未核实（Chat UI 无障碍）。
+- 各来源笔记明确"本次未找到"的项（按搜索范围表述，不构成项目级绝对结论）：绘画页无像素编辑、分支/版本、任务中心、"绘画→聊天插入"入口（媒体创作）；无快捷键速查浮层、Agent Session 列表无拖拽排序（Chat UI）；Provider 专用 JSON/YAML 导入导出、Cherry 自身 CLI/TUI/Web 渠道 CRUD（LLM 渠道管理）；渲染进程无全局 window.onerror/unhandledrejection 兜底、HTML artifact 预览 webview 崩溃处理未找到（应用界面基础设施）；chat 主界面右 pane 无 artifact 面板、agent 会话消息中的代码块不可编辑、mindmap/思维导图组件未找到（生成式输出与运行时）；Composer 输入区本体无可访问名称、分支树图键盘导航未核实（Chat UI 无障碍）。
 - 各笔记超出范围项：媒体创作笔记不覆盖 Mini Program webview 与全局搜索/翻译；生成式输出笔记不覆盖已移除的 v2-refactor-temp 阶段代码、MiniApp webview（persist:webview 分区）、知识库文件处理 artifact、MCP 工具调度；LLM 渠道管理笔记不覆盖外部 CLI 自身交互界面与 API Gateway 管理路由；应用界面基础设施笔记不覆盖聊天业务主链；消息渲染器笔记的未知 part 无开发态 fallback（扩展建议）。
 
 ### 共性未验证

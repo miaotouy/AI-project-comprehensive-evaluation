@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
@@ -148,10 +148,10 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **完整主链**（调度与执行分两段）：
 - **调度**：创建时校验限额（`automations.max_count`、`min_interval`，admin 豁免）→ `scheduler_worker_loop`（`utils/automations.py:68`，每实例运行、轮询间隔默认 10s + 随机抖动防多实例抢跑）→ `Automations.claim_due(now_ns, limit=10)` 原子认领到期任务；
-- **规则边界**：重复事件展开以事件自身 `start_at` 作为规则锚点——解析前先剥离规则串里的 DTSTART 片段，再用真实开始时间构造规则，避免规则文本与实际日程不一致；解析失败时退化为返回单条事件而不阻断查询（`utils/calendar.py:40-52`）。
+- **规则边界**：自动化规则通过 recurrence 工具计算下次时间，认领时采用 owner 时区；PostgreSQL 以行锁跳过其他实例已认领的行，其它方言的并发保证需单独验证。Calendar 的重复事件展开另属日程对象实现（[`models/automations.py:297-348`](../../open-webui/backend/open_webui/models/automations.py#L297-L348)）。
 - **执行**：`execute_automation`（`automations.py:349`）复验所有者权限（被降权/停用即失败记录）→ 渲染 prompt 模板 → 创建真实聊天（`meta.automation_id`，用户/助手消息占位）→ 通知前端刷新列表 → 解析模型工具/特性/Filters（与前端 Chat.svelte 同源逻辑）→ 带所有者 token 的无头请求调用完整 chat completion 管线 → 运行结果写 `automation_run`（含 chat 回链）→ 发布运行事件。运行记录出现在日历（runs 与 Calendar 共用时间轴）与 `/automations/{id}/runs`。
 
-**主动性与取消**：完全后台主动；`toggle` 停用、`delete` 删除、`/{id}/run` 手动立即执行；限额系统防滥用。
+**主动性、终态与取消**：支持停用、删除和手动立即运行；停用影响未来调度。持久 chat 目标等待生成任务后复验消息完成状态，再写 success；频道目标未做同等完成复验。执行时还检查 owner 账号活跃与 session stamp。自动化路由未找到运行级独立取消 API，聊天任务取消可被持久 chat 执行器记为 error run。终端切目录辅助函数在本仓库后端仅找到定义，未找到调用点。详见[主动 Agent 与后台任务笔记](../主动Agent与后台任务/Open-WebUI-主动Agent与后台任务调查笔记.md)。
 
 **独特性判断**："调度 + 无头执行 + 真实聊天产物 + 运行历史"四件套同时存在且结果归属自动化所有者，是"主动 Agent"聚类（对照 VCP FlowLock、Hermes cron）中用户可管理度突出的实现。
 
@@ -243,7 +243,7 @@ README 功能清单（约 30 条）密度高，其中待查清单第二批明确
 
 **主链**：模型发出工具调用后，中间件在正常派发前先暂存该调用（`backend/open_webui/utils/middleware.py:5707`）；暂存规则要求该工具单独调用、单轮只能一个（`backend/open_webui/utils/ask_user.py:8-30`）。前端以 `AskUserCard.svelte` 渲染问题与选项，用户作答后作为工具结果回填，同一轮继续生成。
 
-**边界与区别**：它不同于工具审批（审批决定"是否允许执行"，ask_user 决定"要用户提供什么信息"），也不会触发独立的多步 Agent 循环；问题数量与调用次数都有硬限制。
+**边界与区别**：工具审批决定是否执行，人工提问收集信息；持久聊天中两者共用暂停落库与 resolve 端点，完整访问也不会自动代答。限制作用于当前工具调用批次：须单独调用且每批一个；代码未累计整个生成回合的提问次数。每次提问含 1–3 题，每题 2–3 个选项（[`utils/ask_user.py:9-81`](../../open-webui/backend/open_webui/utils/ask_user.py#L9-L81)、[`utils/tool_approval.py:119-170`](../../open-webui/backend/open_webui/utils/tool_approval.py#L119-L170)）。
 
 **证据强度**：工具定义、中间件暂存与前端卡片为静态事实；作答回填后的续写时序、与流式渲染的配合未运行验证。
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -46,7 +46,7 @@ Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对�
   | `mode` | `subagent`/`primary`/`all` |
   | `hidden` | 是否在选择器中隐藏 |
   | `color` | 界面着色 |
-  | `steps` | 单轮最大工具步骤数 |
+  | `steps` | 新用户输入投递后允许的逻辑模型步骤额度，含禁用工具的收束步骤 |
   | `permissions` | 权限规则集 |
 
 - **默认值**：`Agent.Info.default(id)` 生成"全允许 + 读取 `.env` 需询问 + `.env.example` 允许"的基线（`agent.ts:36-55`）。
@@ -86,7 +86,7 @@ Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对�
 
 - Agent 的 `request` 字段把 provider 请求的 settings、headers、body 透传给模型请求，因此温度、top_p 等生成参数写在 body 里而非独立字段。
 - `model` 支持引用 `provider/model` 与变体；解析结果与请求参数合并后交给 AI 层。
-- `steps` 控制单轮工具回合上限，超出后注入收束提示（`runner/max-steps.ts`）。
+- `steps` 按逻辑模型调用计数，而非工具调用次数；达到上限的步骤注入收束提示并禁用工具，新用户输入投递时重置额度（[runner/llm.ts](../../opencode/packages/core/src/session/runner/llm.ts#L200-L271)、[执行兜底](../../opencode/packages/core/src/session/runner/step.ts#L95-L97)）。
 
 ## 7. 内置 Agent
 

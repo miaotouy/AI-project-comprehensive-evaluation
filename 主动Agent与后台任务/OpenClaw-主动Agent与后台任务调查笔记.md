@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openclaw/openclaw`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`55a554e78a83af031760ef247e26d5be9e24329d`（分支：`main`）
 >
@@ -21,7 +21,7 @@
 | 持久隔离日程运行：automations/cron | 用户或 Agent 通过 `automations` 工具、Gateway RPC 或 CLI 保存 job；到期后由 `CronService` 认领一次运行 | SQLite `cron_jobs` 加 job 状态与 `cron_run_receipts` | `main` 目标进入 heartbeat/主会话；`isolated` 或 `current` 使用 detached cron run session；可执行 Agent、command 或 script | 主链确认（静态证据） |
 | 条件唤醒：heartbeat | 系统拥有的 `heartbeat:<agentId>` monitor job 或 hook、事件、后台任务等 wake 请求 | monitor job 与 agent session 的持久字段；最近结构化结果在 agent DB 的 `heartbeat_outcomes` | 重新进入配置 Agent 的 heartbeat 回合，可静默、发消息或写入内部结果 | 主链确认（静态证据） |
 | 外部事件：hooks/webhooks | Gateway HTTP hook 认证后产生 wake，或合成一次性 Agent cron job | HTTP 层只有进程内幂等缓存；实际运行沿用 cron receipt、task ledger 和 session 状态 | wake 注入 heartbeat；agent hook 进入隔离 Agent runner，同一 session 串行 | 主链确认（静态证据） |
-| 后台 CLI exec | Agent 的 exec 在 yield/background 后把受监管的进程 session 登记为 task run | 进程 session registry 为进程事实；session async-task 状态为任务投影；两者均受进程生命周期影响 | ProcessSupervisor 持续托管进程；完成时可写 system event 并请求 heartbeat，也可由 process poll 取回 | 主链确认（静态证据） |
+| 后台 CLI exec | Agent 的 exec 在 yield/background 后保留受监管的 process session，并返回后续控制身份 | 进程 session registry 为进程事实；session async-task 状态为任务投影；两者均受进程生命周期影响 | ProcessSupervisor 持续托管进程；完成时可写 system event 并请求 heartbeat，也可由 process poll 取回 | 主链确认（静态证据） |
 | Detached subagent | `sessions_spawn` 创建子 session 并登记 run；Gateway 接受后异步执行 | SQLite `subagent_runs` 与 session delivery queue | 子 Agent 在独立 session 运行，结果直接交付、注入 requester steering，或在所有子项结束后唤醒 requester | 主链确认（静态证据） |
 
 最持久、最完整的后台任务主链是 cron：定义、排程、运行 fence、执行结果、交付结果和恢复都由 Gateway/SQLite 共同拥有。heartbeat 的周期 monitor 实际投影为系统拥有的 cron job，但具体 Agent 回合和忙碌退避由 heartbeat wake/runner 管理。hook agent 不是另造一套 worker，而是把外部事件转换成一次性 cron run。后台 exec 的进程本身仍由进程监管器和内存 registry 托管，SQLite 任务记录主要提供客户端可见的运行投影；detached subagent 则有更完整的持久注册、结果冻结、交付和重启恢复链。
@@ -66,10 +66,10 @@ Agent 面向的工具名是 `automations`。它提供 scheduler status/list/get/
 | --- | --- | --- |
 | `cron_jobs` | job owner、schedule、session target、payload、delivery 及最近运行字段 | 定义和最近状态的权威行 |
 | `cron_run_receipts` | receipt、job、config revision、owner pid/start time、running/terminal status | 一次运行的 durable fence 和执行事实 |
-| `task_runs` | runtime、task kind、run id、状态、错误、进度和终态摘要 | 客户端任务列表与运行投影 |
+| `task_runs` | cron 运行的状态、错误、终态摘要与运行详情 | 由 cron history owner 读写的日程历史；与已移除的通用 tasks RPC 分开，媒体和 exec 不据此建立通用任务行 |
 | `cron_job_runtime_authorities` / `cron_job_scratch` | 工具运行权威与脚本/trigger scratch | 与 job 配置分离的运行时状态 |
 
-表结构和 active receipt 的唯一 job 约束见 `src/state/openclaw-state-schema.sql`。receipt store 将生命周期分为 queued reservation、active running、settling 和 terminal；非终态 receipt 必须由当前 owner 持有，或能被其他 Gateway 进程判断为 stale 后恢复，见 `src/cron/store/run-receipt-store.ts`。
+cron history 仍借用 task_runs 表名，但写入明确限定 runtime=cron，历史记录不授权执行或 receipt 接管，见 [recordCronRunInDatabase](<../../openclaw/src/cron/store/run-history.kernel.ts#L180-L233>)。表结构和 active receipt 的唯一 job 约束见 `src/state/openclaw-state-schema.sql`。receipt store 将生命周期分为 queued reservation、active running、settling 和 terminal；非终态 receipt 必须由当前 owner 持有，或能被其他 Gateway 进程判断为 stale 后恢复，见 `src/cron/store/run-receipt-store.ts`。
 
 调度器不会只依赖内存 timer 判断一次运行是否已经发生。到期候选先从持久 `nextRunAtMs` 读取，之后在 SQLite 写入 receipt 和 queued marker；激活时再次比较 marker、配置 revision 和 job 当前状态。并发 mutation、删除、禁用或重排会使旧 reservation 被 fence 或 terminalize，避免旧 snapshot 在新 job 上写回结果（`src/cron/active-jobs.ts`、`src/cron/execution-context-admission.ts`、`src/cron/service/ops-mutations.ts`）。
 
@@ -105,11 +105,11 @@ hook run 完成后，如果要求 delivery 但 run 没有自行交付，dispatch
 
 ### 后台 CLI exec
 
-exec 的 continuation 选项是 Agent 回合中的后台化动作，不等同于 cron。`yieldMs` 到期或 `background=true` 时，exec pipeline 先将 ProcessSession 标为 backgrounded，再创建 `runtime="cli"`、`taskKind="exec"` 的 task run；如果进程在 yield timer 之前已经结束，则不登记后台 task。原始进程由 `ProcessSupervisor` 托管，内存 registry 保存 running/finished session、有限输出、PID、退出码和 notify-on-exit 状态（`src/agents/bash-tools.exec-run.ts`、`src/agents/bash-tools.exec-task-tracking.ts`、`src/agents/bash-process-registry.ts`）。
+exec 的后台化动作发生在当前工具调用内。yield timer 与进程结束竞争：未结束、未中止且未 finalizing 时，把 ProcessSession 标为 backgrounded，停止本次工具的流式更新并返回 process session 身份；更早结束则返回前台结果。当前链路没有创建 runtime=cli 的通用 task row。进程与输出保留由 ProcessSupervisor、process activity 和 registry 协作。依据见 [exec yield](<../../openclaw/src/agents/bash-tools.exec-run.ts#L665-L716>)、[进程 registry](<../../openclaw/src/agents/bash-process-registry.ts>)。
 
 进程结束时，sandbox finalization 先完成，随后通过 `onSettledBeforeNotify` 把退出结果映射为 `succeeded`、`failed`、`timed_out` 或 `cancelled` 并写入 task ledger。若后台 session 尚未被 terminal poll 观察，且 `notifyOnExit` 开启，exec 会把紧凑输出写入 system event，并请求目标 heartbeat；空输出成功默认不通知，手动取消且无输出也不通知。subagent session 不走这一 heartbeat fallback，因为其结果由 process poll 和 subagent announce flow 交付（`src/agents/bash-tools.exec-runtime.ts`、`src/agents/bash-tools.exec-task-tracking.ts`）。
 
-取消必须到达真实进程：后台 process control 检查 session 仍为 backgrounded、未退出且未 finalizing，再调用 `ProcessSupervisor.cancel(..., "manual-cancel")`。exec task ledger 的持久记录和进程 registry 都是 Gateway 进程内能力；本次未在该路径找到一个可跨 Gateway 重启重新连接原始 CLI child 的持久 worker owner，所以 task 记录能保留终态投影，但不能单独证明原进程在重启后仍可恢复（`src/agents/bash-process-control.ts`、`src/agents/bash-process-registry.ts`）。
+取消入口检查后台状态、退出/finalizing 标记及 process activity 是否已结算。带 durable 句柄的进程调用该句柄的取消操作；普通进程调用 supervisor 的 manual-cancel，再记录已请求取消。真正停止还要求自己的终止原因和清理完成，不能只凭取消已请求宣告成功。依据见 [process control](<../../openclaw/src/agents/bash-process-control.ts#L24-L85>)。registry 本身在内存，durable 句柄后端的重启接管没有在本条链完整下钻，因此不从内存 registry 推导全部执行模式的恢复能力。
 
 ### Detached subagent 与 requester continuation
 
@@ -142,7 +142,7 @@ main job 的 payload 实际上只能形成 system event 文本。它写入目标
 
 最终 job state 保存最近运行时间、状态、错误、持续时间、连续错误/跳过次数、下一次运行、delivery status/error 和 failure notification delivery；run history/task ledger 另存本次运行的 session、model、provider、usage、diagnostics 和摘要（`src/cron/types.ts`）。
 
-隔离 Agent 的 finalize 顺序是：读取模型/usage/diagnostics，更新 session runtime model、context token 和 CLI binding，持久化 session entry；解析 payload 是否有可交付文本或结构化结果；按 delivery plan 发送；最后由 cron service 在 receipt-owned transaction 中把结果应用到 authoritative job row、更新 task ledger、发出 finished event，并计算下一次运行。一次性 run 的 detached session 可在交付后清理，persistent session 则保留 session 生命周期（`src/cron/isolated-agent/run-finalize.ts`、`src/cron/isolated-agent/run.ts`）。
+隔离 Agent 的 finalize 顺序是：读取模型/usage/diagnostics，更新 session runtime model、context token 和 CLI binding，持久化 session entry；解析 payload 是否有可交付文本或结构化结果；按 delivery plan 发送；最后由 cron service 在 receipt-owned transaction 中把结果应用到 authoritative job row、写入 cron history、发出 finished event，并计算下一次运行。一次性 run 的 detached session 可在交付后清理，persistent session 则保留 session 生命周期（`src/cron/isolated-agent/run-finalize.ts`、`src/cron/isolated-agent/run.ts`）。
 
 cron delivery 支持 `none`、`announce` 和 `webhook`。announce 会解析 channel、target、account、thread 和 session route，使用 durable message sender；current session 的交付还要求最终 transcript commit，不能只因平台发送成功就把 run 标为已完成。primary webhook 在执行结果 settled 后发送 finished-run event；webhook delivery 自身也受同一 run abort/receipt current 检查保护（`src/cron/types.ts`、`src/cron/delivery.ts`、`src/cron/service/timer-job-runner.ts`）。
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
@@ -23,7 +23,7 @@ AstrBot 的 Persona 仍是纯指令与能力白名单模型：一个 persona 由
 - **解析优先级**（`resolve_selected_persona`，persona_mgr.py:123-207）：会话规则强制 persona → 对话级 persona → 当前配置档案的 Agent Runner 默认 persona → WebChat 特例；`"[%None]"` 哨兵显式禁用。
 - **注入位置**：persona 提示以 `<persona_instructions>` 块追加到请求的 system_prompt（`astr_main_agent/persona.py:76-79`）；预设对话以不保存标记插到上下文最前（:80-81），每轮重注入、不入库；技能提示另用 `<skills_instructions>` 块包裹（:118-128）。
 - **构建顺序**：`build_main_agent` 依次执行请求准备、persona、子 Agent、系统提醒、工作区指令、知识库、联网、安全指令与 Computer Use 注入（`astr_main_agent/builder.py:86-121`）。
-- **三态语义**：`tools`/`skills` 三态——None=全部、[]=禁用全部、列表=白名单；workspace Skills 不受 persona 过滤。
+- **三态语义有作用域**：Persona 的 tools 三态只控制该阶段取得的注册工具；空列表不会阻止后续装配联网、Computer Use、cron 和主动投递工具。Skills 空列表会一并排除工作区技能；非空名单只筛选注册技能，工作区技能随后按名合并（`astrbot/core/astr_main_agent/persona.py:106-148`；`builder.py:93-133`）。
 - **第三方 runner 不注入 persona**：Dify/Coze/Dashscope/DeerFlow 等只解析自定义错误文案，persona 对内置 Agent 执行器专属。
 - **system 消息受压缩保护**：persona 永不被截断器丢弃（truncator.py:15-29 的 `_split_system_rest`），但计入 token 统计（token_counter.py:56-83），超长会推高总量、更早触发历史压缩。
 - **内置角色两个**：内存 `DEFAULT_PERSONALITY`（persona_mgr.py:20-30）与 webchat 专用 `CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT`（astr_main_agent_resources.py:50-67）。
@@ -171,7 +171,9 @@ if not req.func_tool: req.func_tool = persona_toolset
 else: req.func_tool.merge(persona_toolset)          # merge 走 add_tool 去重规则
 ```
 
-语义：`tools=[]` 时 persona_toolset 为空，最终 `req.func_tool` 为空集（若之前无工具）→ 模型无工具可用；`tools=None` 走全量。
+这一阶段的空名单只生成空的 Persona 工具集。已有请求工具保留，随后 builder 还可按配置注入知识库、联网、Computer Use、cron、群历史与主动投递工具，所以不能从 `tools=[]` 推出最终模型请求无工具（`astrbot/core/astr_main_agent/builder.py:93-133`）。
+
+全量分支通过工具管理器取得权限代理，非空名单分支则直接取原工具对象；执行器没有统一补包权限代理的步骤。由 Persona 明确列出的非内置工具因此未进入通用权限表检查，工具或插件自身的权限判断仍可生效。该边界来自装配路径差异，未做实际越权运行测试（`astrbot/core/provider/func_tool_manager.py:399-417,496-513`；`astr_agent_tool_exec.py:561-602`）。
 
 ### 3.5 子 Agent 集成（subagent.apply_subagents）
 
@@ -292,7 +294,7 @@ PersonaManager 的移动端工具栏现在始终保留新建文件夹入口，�
 - **v3 兼容层，不是迁移清理**：运行时代价是一次冗余转换缓存，收益是 v3 插件 API（`get_persona_v3_data` 等）与 v4 并存；
 - **persona_id 即显示名**：用户可读、易管理，代价是改名人脸经 DB 更新（无独立 slug）；
 - **tools/skills 双三态**：None 语义在 WebUI 与 API 间靠 `NOT_GIVEN` 哨兵区分"未修改"与"显式置空"（persona_mgr.py:205-207）——API 设计细节；
-- **workspace skills 不过滤**：persona 白名单只管注册 skills，工作区 skill 合并进主集（:586-590）——本地优先的设计意图；
+- **工作区技能的例外规则**：非空 Persona 名单只筛选注册技能，工作区技能随后按名称合并；显式空名单会阻止工作区技能加入（`astrbot/core/astr_main_agent/persona.py:106-117`）。
 - **subagent 工具回收**：`remove_main_duplicate_tools` 让子 Agent 抢走主 Agent 的重复工具，避免双 Agent 竞争（:666-671）。
 
 ### 10.3 静态推断的潜在问题（源码推断，未实测）

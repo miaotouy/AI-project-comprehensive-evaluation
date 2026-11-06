@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
@@ -64,13 +64,13 @@ Composer 是底部输入区。文本区默认最多 5 行高度，可展开为�
 
 发送前可配置项集中在 Composer 底部一行与「+」弹层：
 
-- 模型：模型选择按钮打开模型列表弹层，选择结果写回当前助手的 `chatModelId`，见 `ChatInput.kt`、`ChatVM.kt`。
-- 助手：当前助手由设置中的 `assistantId` 决定；抽屉底部助手选择器切换后进入对应会话，见 `ChatDrawer.kt`。
-- 联网搜索：搜索按钮在「关闭 / 本地 / 内置」之间切换；本地模式改助手的 `enableWebSearch`，内置模式在模型工具集合里增删搜索工具，见 `ChatPage.kt`。
-- 推理等级：仅当当前模型具备推理能力时展示按钮，写入助手 `reasoningLevel`，见 `ChatInput.kt`。
-- 「+」弹层内还有工作区绑定与工作目录、MCP 选择器、扩展（快捷消息/提示词注入/技能）计数入口、上下文压缩，见 `FilesPicker.kt`。
+- 模型：模型按钮打开列表弹层；搜索按空格拆词，全部关键词需各自命中模型 ID 或显示名的子串，忽略大小写且不限顺序。选择经 `ChatVM.setChatModel` 交给会话服务，见 [模型筛选](../../rikkahub/ai/src/main/java/me/rerere/ai/provider/Model.kt#L24-L37)。
+- 助手：抽屉底部选择器切换全局选中助手；已打开会话的运行配置由会话归属及其覆盖值决定，见 `ChatDrawer.kt`。
+- 联网搜索：入口在「+」弹层，可选择关闭、外部搜索或模型内置搜索；事件交给 `updateChatSearch`，见 `FilesPicker.kt`、`ChatVM.kt`。
+- 推理等级：具备推理能力的模型显示调整入口，经助手更新回调交给会话服务，见 `ChatInput.kt`。
+- 「+」弹层还包含工作区与工作目录、MCP、扩展及上下文压缩；主面板可纵向滚动以适应矮屏，见 `FilesPicker.kt`。
 
-可见性与写回位置提示了作用域：助手级配置写回助手对象，模型级工具开关写回提供方下的模型定义（`ChatPage.kt`）；字段来源与请求组装见[Agent角色配置](../Agent角色/RikkaHub-Agent角色配置调查笔记.md)。
+控件写入作用域随会话阶段变化。新会话未绑定配置时修改助手默认值，内置搜索修改模型工具开关；会话绑定配置后，模型、推理、两种搜索、MCP、工作区、技能及注入绑定只更新当前会话，其余助手字段仍写回助手设置。下一轮请求使用会话视角的助手与模型，见 [会话配置分流](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L50-L120)、[服务写入](../../rikkahub/app/src/main/java/me/rerere/rikkahub/service/ChatService.kt#L874-L961)；角色侧细节见[Agent角色配置](../Agent角色/RikkaHub-Agent角色配置调查笔记.md)。
 
 工具审批入口在消息内：待审批工具卡在折叠步骤右侧给出「拒绝/批准」按钮，拒绝会先弹原因输入框；交互式提问工具 `ask_user` 走独立渲染，支持单选/多选/文本并汇总成答案提交（`ChatMessageTools.kt`、`:257-436`）。界面只负责收集结果并回调 `ChatVM.handleToolApproval`，见 `ChatVM.kt`；审批语义与执行校验见[Agent工具](../Agent工具/RikkaHub-Agent工具调查笔记.md)。
 
@@ -80,7 +80,7 @@ Composer 是底部输入区。文本区默认最多 5 行高度，可展开为�
 
 发送路径分两支：编辑态提交编辑，否则提交新消息，随后请求列表滚到底部（`ChatPage.kt`）。停止入口最终落到聊天服务的停止方法（`ChatVM.kt`），排队、暂停与恢复的判定和持久化见[对话请求与上下文](../对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md)。流式期间界面保持常亮，见 `ChatInput.kt`。
 
-消息区的加载态是列表末尾的一项：显示兔子加载动画与可选的 `processingStatus` 文本（`ChatList.kt`）。消息文本在 `loading` 时禁用文本选择容器，以避免流式重渲染与选择工具栏的并发问题，生成结束再启用（`ChatMessage.kt`）。
+消息区的加载态是列表末尾的一项：显示兔子加载动画与可选处理状态文本（`ChatList.kt`）。正文与推理在生成中同样可长按选择，采用 BetterText 的选择容器并与代码块共享选区；实现与未验证的并发交互见[消息渲染器](../消息渲染器/RikkaHub-消息渲染器调查笔记.md)。
 
 错误以底部浮层卡片展示，可逐条消除或全部清除（`ChatList.kt`）；生成完成后可选自动朗读最后一条助手消息（`TTSAutoPlay.kt`）。流式内容的绘制与滚动锚定见[消息渲染器](../消息渲染器/RikkaHub-消息渲染器调查笔记.md)。
 

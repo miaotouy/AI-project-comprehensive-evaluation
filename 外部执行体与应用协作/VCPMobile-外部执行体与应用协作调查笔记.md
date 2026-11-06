@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/MRiecy/VCPMobile`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`5fa2eb09e4f4dfab299cbb609a8b904b3485b5a5`（分支：`main`）
 >
@@ -43,7 +43,7 @@ VCPMobile 满足本类目的“外部控制与交互表面”准入：它以配�
 
 ## 身份、协议与状态映射
 
-协议的入站类型解析 `connection_ack`、`execute_tool` 与 `cancel_tool`；出站包含注册工具、静态占位符更新和工具结果。请求关联键是服务端提供的 `requestId`，连接代次防止旧会话 ACK 覆盖新状态（`src-tauri/src/distributed/types.rs:18-260`；`src-tauri/src/distributed/client.rs:1298-1340`）。前端只维护节点连接状态，不把外部请求映射到 Chat topic、会话、任务或工作区；本次检查范围内也没有外部账号安装、OAuth 刷新或资源目录。
+协议的入站类型解析 `connection_ack`、`execute_tool` 与 `cancel_tool`；出站包含注册工具、静态占位符更新和工具结果。请求关联键是服务端提供的 `requestId`，连接代次防止旧会话 ACK 覆盖新状态（`src-tauri/src/distributed/types.rs:18-260`；`src-tauri/src/distributed/client.rs:1298-1340`）。外部请求不绑定 Chat topic；其中 CLI 适配器用稳定远端身份派生会话 ID，并以身份与请求 ID 派生持久化操作键，转交本机 job 运行时，支持幂等重放和轮询。此会话用于 shell/job 身份隔离，未接入聊天历史。见 [CLI 身份适配](../../VCPMobile/src-tauri/src/distributed/tools/vcp_mobile_cli.rs#L84-L144)。本次检查节点与 CLI 入口未找到外部账号安装或 OAuth 刷新。
 
 工具清单来自本地注册表。当前快照注册设备信息、通知、剪贴板、`VCPMobileCLI`，以及电量、CPU/GPU、内存、网络、存储、位置、运动、环境传感器和设备状态摘要等项目；manifest 只发送处于启用状态的工具（`src-tauri/src/distributed/tools/mod.rs:29-63`；`src-tauri/src/distributed/tool_registry.rs:468-520`）。README 中“14 项”与当前 `build_registry` 中可见注册调用一致，共四项一次性工具与十项流式工具，且不将未接线的交互式相机工具计入。
 
@@ -72,7 +72,7 @@ VCPMobile 满足本类目的“外部控制与交互表面”准入：它以配�
 ## 已确认边界与未验证事项
 
 - 未连接真实服务，未确认服务端实现、请求鉴权、工具结果消费、断线恢复和 Android 权限行为。
-- 未发现外部 Agent runtime、OAuth 安装、外部业务应用资源模型、会话映射或当前工具逐次审批；`cancel_tool` 已解析，但服务端发送时机与效果未验证；搜索范围为 `src-tauri/src/distributed/`、分布式设置/页面与协议类型，不能外推为整个 VCP 生态不存在。
+- 检查分布式客户端、设置页面及 CLI 适配后，未找到外部 Agent runtime、OAuth 安装、外部业务资源模型或逐次审批。CLI 有远端身份到本地 session/operation/job 的映射；它不拥有远端 Agent 的任务循环。`cancel_tool` 已解析且 CLI 可按稳定操作键找到 job 发出取消，但远端发送时机与真实进程效果未运行验证。
 - `ToolInteractionOverlay` 是未接线的未来交互入口，不能视为相机、生物识别或人工接管已可用。
 
 ## 关键源码索引

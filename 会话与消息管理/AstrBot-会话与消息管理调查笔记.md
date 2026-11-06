@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/AstrBotDevs/AstrBot`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`f926af99ec5f8bd85b64413f8bfad55da76ef73b`（分支：`master`）
 >
-> 调查方式：直接阅读源码（conversation_mgr、SQLite 数据层、SharedPreferences、WebChat 会话服务、schema 升级脚本与备份模块），所有行号按当前 HEAD 逐一核对
+> 调查方式：只读源码与历史快照差异交叉定位；重点核实 WebChat 会话列表与消息分页、checkpoint 编辑重生成及侧线程删除级联；持久化与迁移结论以所列源码为依据，未启动服务
 >
 > 调查范围：两级会话概念、会话标识、对话持久化与 ConversationManager、WebChat 会话行/线程/消息编辑、群历史持久化、schema 升级与备份；事件调度、流水线与并发执行进入对话请求与上下文，界面进入 Chat UI
 >
@@ -143,7 +143,7 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
   - 可过滤消息类型、平台与排除 id/平台；
   - `include_history=False` 时延迟加载 content；
   - 多平台分页强制走全局排序索引。
-- **WebChat 会话列表**：`get_sessions` 按 creator 分页并排除项目会话（chat_service.py:1571-1602）；单个会话的消息历史也已分页，第一页为最新记录，旧页前插时按消息 ID 去重。
+- **WebChat 会话列表与历史采用不同分页口径**：会话列表入口按 creator 查询、排除项目会话，但固定取第 1 页的 100 行后只返回列表，当前工作台没有从该入口继续翻页的参数。单个会话的消息历史则接受页码和页大小，第一页包含最新记录；前端每页取 50 条，旧页前插时按消息 ID 去重（`astrbot/dashboard/services/chat_service.py:1571-1594,1603-1678`；`dashboard/src/composables/useMessages.ts:292-438`）。
 - **群历史**：`PlatformMessageHistoryManager.get`（platform_message_history_mgr.py:108-123）分页读取后反序（时间升序）；`get_group_message_history` 工具支持数量上限（≤50）、`before_id` 分页、不区分大小写的关键字搜索与发送者过滤（message_tools.py:370-393、:418-434）。
 - **无跨表全文索引**：搜索均为 SQL 层 ilike 扫描，无独立搜索索引；命中定位由 WebChat 前端在已加载消息中滚动定位（scrollToMessage，Chat.vue:1472-1480），会话数据层无消息级定位 API。
 

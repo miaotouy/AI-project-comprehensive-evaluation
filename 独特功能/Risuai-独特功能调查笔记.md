@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/kwaroran/Risuai`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`39f1ac1472d0ef6907ee933c4cf25182ee2aec9f`（分支：`main`）
 >
@@ -79,9 +79,13 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 **API 面与钩子**：插件可注册的能力分几类——自定义 AI Provider、消息编辑钩子（编辑输入/处理/显示/输出文本共四类，注册表见 `plugins.svelte.ts:468-480`）、请求前后替换、生成完成监听、TTS 前/后处理钩子（`src/ts/process/ttsHooks.ts`）、MCP 模块注册（`registerMCPModule`）以及菜单/面板注入。DOM 访问经 SafeDocument/SafeElement 包装层，含标签白名单与 `freezed` 元素禁止访问（`src/ts/plugins/pluginSafeClass.ts`）。
 
-插件存储分设备级与插件级。插件级存储的值改为冷存储承载：数据库只保留“键到冷键”映射，早期内联值在启动时迁移，插件 API 的读写删与枚举都按该映射间接访问冷存储（`v3.svelte.ts:1270-1315`、`coldstorage.svelte.ts:529-573`）。v3 另新增 CBS 解析 API `parseRisuChat`，按当前角色与活动会话解析宏文本，可选 `processRegex` 继续跑 editprocess 脚本管线，该管线可触发插件处理器并改写活动会话（`v3.svelte.ts:889-931`）。
+插件存储分设备级与随存档引用的冷存储。后者把小值 JSON 放进统一索引，大值外置为独立冷条目，数据库只保存索引指针；成功写出新索引后才移动指针，旧内联布局和逐键映射在加载时迁移。已安装插件在启动时等待迁移尝试结束后再加载，迁移异常被记录后仍继续启动。普通读写等待存储加载；小值写入返回只表示内存接收，索引批量提交和主数据库保存具有后续时序（`process/pluginStorageStore.ts:345-401,433-499`；`bootstrap.ts:200-214`）。
 
-**安全与资源边界**：v3 iframe 内无网络、无顶层 DOM 直连；存量 v2.1 靠静态改写兜底（校验结果按代码哈希缓存于 localStorage，`pluginSafety.ts:58-71`）。v3 的输出监听器现在复用 replacer 授权，读取 inlay 资产另设 inlay 授权；两者都是按插件名和脚本哈希记录的同意，并对 periodic 权限按三天重新确认（`v3.svelte.ts:569-627,733-753`）。插件脚本本身是用户主动导入的可信代码，更新地址强制 https（`plugins.svelte.ts:280-293`）。
+v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继续进入 editprocess 脚本管线；冷存储的迁移、垃圾回收和落盘边界见[会话与消息管理](../会话与消息管理/Risuai-会话与消息管理调查笔记.md)，权限执行边界见[Agent 工具](../Agent工具/Risuai-Agent工具调查笔记.md)。
+
+**安全与资源边界**：v3 iframe 的直接网络连接和顶层 DOM 访问受限，但宿主网络桥仍可发请求，不能推导为插件整体无网络。存量 v2.1 靠静态改写兜底。v3 的数据库 setter、Provider 调用和 inlay 读取分别接入独立权限，拒绝时不执行受保护回调；该机制不覆盖所有宿主 API。
+
+授权按脚本哈希与权限缓存，相同脚本改名不形成新隔离域。周期权限仅在会话缓存未命中时检查三天授权时间，当前页面的同意或拒绝均可直接复用；持久键与按插件名保存的周期时间戳须分别理解（`apiV3/pluginPermissionCache.ts:26-39`；`apiV3/v3.svelte.ts:611-653`）。插件更新地址强制 HTTPS，真实插件运行与授权撤销未运行验证。
 
 **独特性判断**：双层安全模型（AST 改写 + iframe 沙箱）在同一插件系统内并存，且 v3 的“结构化克隆 RPC + 流桥 + AbortSignal 转发”在样本中未见同等实现；SillyTavern 扩展（manifest + `import()` 动态加载、生成拦截器）无沙箱层，VCPChat 插件为本体注入而非隔离运行时。这既是产品生态能力，也构成独立的安全工程机制（统计时机制单列）。
 

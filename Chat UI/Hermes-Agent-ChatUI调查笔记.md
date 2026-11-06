@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + React，本次观察界面）、TUI（Node/Ink）、web dashboard（PTY 嵌入 TUI）。三者的后端是同一个 agent 核心（网关层在 `tui_gateway/server.py` 与它的 `session_*`/`prompt_turn.py` 兄弟模块中）；桌面端不自带 agent 进程，界面状态全部来自后端 WebSocket JSON-RPC（执行语义见对话请求与上下文笔记 §1）。本次快照把后端收敛为“每宿主机恰好一个 `hermes serve` 多路复用全部 profile”：桌面先发现并 attach 宿主已有后端，宿主没有后端时才 spawn 自己的（`apps/desktop/electron/backend-discovery.ts` 的模块说明）。
+Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + React，本次观察界面）、TUI（Node/Ink）、web dashboard（PTY 嵌入 TUI）。三者复用 Python Agent 核心，规范网关与 legacy tui_gateway 桥分别承担控制协议；桌面端不自带 agent 进程，界面状态全部来自后端 WebSocket JSON-RPC（执行语义见对话请求与上下文笔记 §1）。常规本地连接先调用 `hermes gateway ensure --json`，由网关生命周期层附着或启动规范 owner；桌面只持有端点与 viewer 连接，关闭或切换桌面不拥有终止网关的权力。一个 owner 可服务多个 profile，各 home 的归属仍由运行时发现与锁协调（[实际启动消费](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)、[端点判定](../../hermes-agent/apps/desktop/electron/local-gateway.ts#L219-L254)）。
 
 桌面端的关键工作流特征：
 
@@ -36,10 +36,10 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 | TUI（`hermes --tui`，Node/Ink） | Node 前端进程 → stdio → 后端 | 换行分隔 JSON-RPC over stdio |
 | gateway / CLI | 同进程 | 直接调用 |
 
-桌面端后端进程的启动参数与 serve 探测链：
-- spawn 参数为 `serve --host 127.0.0.1 --port 0`（断言在 `apps/desktop/electron/source-backend.test.ts` 的 `SERVE_ARGS`；hermes 命令解析兜底在 `electron/windows-hermes-path.ts`）。
-- 宿主机级发现与 attach（`apps/desktop/electron/backend-discovery.ts`）：后端在 socket 绑定后把 `spawn-ledger.json` 记录写入 machine-root（`hermes_cli/process_identity.py` 的 `register_self`，由 `web_server.py` 调用，detail 含 host/port/profile），未加门禁的 loopback 后端还在 `GET /` 上暴露 session token；账本只用于发现，记录本身不作为可用后端证据，HTTP 探针与 token 握手才是判定边界。旧的 `backendSupportsServe`/`backend-command.ts` 探测回退链本次已不在代码中；子进程树杀在 `electron/backend-child.ts`（Windows `forceKillProcessTree`、POSIX 进程组 `process.kill(-pid)`）。
-- headless 分支设置 `HERMES_SERVE_HEADLESS=1`（`hermes_cli/main.py:2529`，同一处还会在复用 shell 时清掉继承值），`mount_spa()` 据此只挂 JSON-RPC/WS/API 面（`hermes_cli/web_server.py:630,864`）。
+桌面端本地连接链：
+- 主连接与 profile 池均经 gateway ensure 返回规范端点；ready 判定、旧 owner 重启和拒绝原因由协议处理。端点描述不含公共 dashboard token，原生连接使用一次性私有 ticket。
+- 常规启动没有接入旧的 spawn-ledger attach 回调，也不会独立启动 serve 子 owner；保留的发现模块注释不足以说明当前主路径（[main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)）。
+- SSH、URL 与 Cloud 保留远端连接意图，远端失败不会转为启动本地 owner。legacy serve 的 headless SPA 分支仍是独立路径，需与规范本地网关区分。
 
 桌面连接生命周期：
 
@@ -182,7 +182,7 @@ Hermes-Agent 是 Agent 框架，聊天表面有三套：桌面端（Electron + R
 
 - 桌面端：`apps/desktop/src/hermes.ts`（`HermesGateway`、`listAllProfileSessions`、sidebar 批量拉取）；`store/session.ts`（`mergeSessionPage`、`sessionPinId`、`lineageAliases`、`$busy`/`$awaitingResponse` 等状态原子、`$unreadFinishedSessionIds`）；`app/session/hooks/use-session-state-cache.ts`、`app/session/hooks/use-session-list-actions.ts`（`sessionsToKeep`、`refreshSessions`、`loadMoreSessions`）、`app/session/hooks/use-prompt-actions/`（`index.ts` 的 `submitText`、`submit.ts` 的提交参数与超时、`rewind.ts` 的 `finalizeInterruptedMessages`/`planReload`、`utils.ts` 的会话未找到 resume 与 busy 重试原语）、`app/session/hooks/use-message-stream/index.ts`（`completeAssistantMessage`、`scheduleSessionsRefresh`、hydrate/adopted turn）、`gateway-event`（compacting 状态）；`lib/chat-messages/index.ts`（`ChatMessage`、`toChatMessages`）；`components/assistant-ui/thread/user-message.tsx`（编辑入口）；`app/chat/hooks/use-file-drop-zone.ts`、`app/chat/hooks/use-composer-actions.ts`（`partitionDroppedFiles`、`attachImagePath`）；`app/chat/sidebar/virtual-session-list.tsx`；`store/session-pin-sync.ts`；`store/layout.ts`（pin 存储键、`$sidebarGrouping`/`$sidebarOrdering`）；以及 `store/hud.ts`、`store/windows.ts`、`store/sidebar-sort.ts`、`store/session-dot-state.ts`、`store/composer.ts`（草稿持久化）、`lib/draft-title.ts`。
 - 共享/连接：`apps/shared/src/json-rpc-gateway.ts`、`apps/shared/src/websocket-url.ts`；`app/gateway/hooks/use-gateway-boot.ts`（重连退避）、`app/gateway/hooks/use-gateway-request.ts`；`store/gateway.ts`。
-- Electron：`electron/backend-discovery.ts`（宿主机级 attach/spawn 决策）、`electron/source-backend.ts`（SERVE_ARGS）、`electron/backend-child.ts`（子进程树杀）、`electron/windows-hermes-path.ts`（命令解析）、`electron/hud-*.ts`（HUD 窗口模块族）。
+- Electron：[main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913) 与 [local-gateway.ts](../../hermes-agent/apps/desktop/electron/local-gateway.ts#L219-L254)：规范本地 owner 的附着与端点判定；HUD 窗口模块独立于该连接链。
 - 后端边界：`hermes_cli/web_server.py`（`mount_spa` 与 headless 分支）、`hermes_cli/main.py`（`HERMES_SERVE_HEADLESS`）。
 - 子代理控制与语音：`tui_gateway/methods_subagents.py`、`apps/desktop/src/app/chat/composer/status-stack/subagent-*.tsx`、`ui-tui/src/components/agentControls.tsx`、`apps/desktop/src/lib/voice-live.ts`、`tools/voice_live.py`。
 

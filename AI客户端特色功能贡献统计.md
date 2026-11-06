@@ -2,9 +2,9 @@
 
 > 对比对象：`AIO Hub`、`AstrBot`、`Chatbox`、`Cherry Studio`、`Codex`、`DeepChat`、`DeepSeek Harness`、`Hermes Agent`、`Jan`、`LobeHub`、`Manifold Desktop`、`NextChat`、`OpenCode`、`OpenClaw`、`OpenOcta`、`Open WebUI`、`Pi`、`RikkaHub`、`Risuai`、`SillyTavern`、`VCPChat`、`VCPMobile`、`VCPToolBox`
 >
-> 对比更新日期：2026-11-04
+> 对比更新日期：2026-11-05
 >
-> 依据：2026-09-16 快照的各单项目调查笔记（含通用类目、各项目独特功能调查笔记、“已调查能力汇总”“外部执行体与应用协作”和“对话导出与分享”类目）及横向对比；本次把 DeepSeek Harness 的全方向调查与能力汇总正式纳入统计，并复核其自引用插件运行时、日志化 plan mode、同会话 goal、session-local schedule、进程沙箱和多 Provider 子代理链；此前对 VCPToolBox、VCPChat、公开第三方模组 [VCP-Disco-Elysium-Mod](https://github.com/biyuqingtan-lab/VCP-Disco-Elysium-Mod) 及 AIO Recall 演变关系的专项依据继续沿用，深化程度仍以当前源码主链为依据；本次把 OpenClaw 纳入统计：渠道 DM/设备配对审批门与 ClawHub 分发安装信任门达到主链确认（静态证据），按外部准入与分发信任两类机制单列（M21、M22），doctor 修复链仅入口确认不进入，来源为 [OpenClaw 独特功能调查笔记](独特功能/OpenClaw-独特功能调查笔记.md)；本次把 RikkaHub 纳入统计：端侧 PRoot Linux 工作区与内嵌 Ktor 服务器多端访问分别归入执行沙箱与多表面功能族计主贡献，jieba 分词 FTS5 会话检索与二维码 Provider 配置交换计辅助贡献，助手/会话两级提示词注入与世界书兼容按上下文编译类目归并，图片生成工作台、MCP 与 OAuth、ModelRegistry 静态能力推断与消息分支不重复计数，来源为 [RikkaHub 独特功能调查笔记](独特功能/RikkaHub-独特功能调查笔记.md) 与 [RikkaHub 已调查能力汇总](已调查能力汇总/RikkaHub-已调查能力汇总.md)；VCPMobile 的远端日记中心与可治理手机设备节点按两项独立产品功能族纳入，来源为 [VCPMobile 独特功能调查笔记](独特功能/VCPMobile-独特功能调查笔记.md) 与 [VCPMobile 已调查能力汇总](已调查能力汇总/VCPMobile-已调查能力汇总.md)；本次把 Codex 与 OpenOcta 纳入统计：Codex 的 `AGENTS.md` 层级指令、app-server 与终端编码闭环按 F06/F27/F36 计主贡献，`codex exec` 续接 F113，`apply_patch` 与实验性代码模式按 F24/F43 计辅助，沙箱与审批进 M09/M02，云端任务计 0；OpenOcta 的定时/告警运行与房间式 Swarm 按 F09/F30 计主贡献，数字员工、Knowledge Vault、IM 回派与经验提炼按 F04/F65/F59/F64 计辅助，审批进 M02、A2UI 计 0；来源为 [Codex 独特功能调查笔记](独特功能/Codex-独特功能调查笔记.md) 与 [OpenOcta 独特功能调查笔记](独特功能/OpenOcta-独特功能调查笔记.md)
+> 依据：各项目独特功能、通用专项与已调查能力汇总中的静态源码证据；具体来源及快照按各单篇记录。功能族按完整产品契约归并，工程、安全和可靠性机制另表记录；外部生态材料只补充已确认主链的可迁移性证据。
 >
 > 对比方法：先排除通用聊天底座，再把已达到 `主链确认` 的能力按用户目标和已知演变关系合并为互不重复的产品功能族；经产品辨识度闸门后，主贡献计 2 点、辅助贡献计 1 点，工程、安全和可靠性机制另表记录且不参与计分
 >
@@ -31,7 +31,7 @@
 - **Hermes Agent** 的会话心跳和目标质量门均达到主链确认。心跳作为“当前会话定时重入”的实现形态并入 F09，不在同一项目重复计分；目标质量门在 DeepSeek Harness 纳入后具备可比较对象，作为 F96 的辅助贡献计分。
 - **NextChat** 有 fork、隔离 Artifact 与固定模板对话分享三项辅助贡献；**Manifold Desktop** 为 0 分，原因是当前主链未闭合，而非笔记覆盖不足。
 - **Risuai** 以模型指令标签驱动的角色媒体闭环构成主贡献（Emotion Images 双路径：inlay 指令标签与独立分类请求，群聊多角色分屏）；插件系统（API v2.1/v3.0 iframe 沙箱 + CSP nonce + postMessage RPC）作为机制贡献单列；翻译（渲染链内嵌结构保留翻译、多后端与 LLM 缓存）、Multisend（按文件类型分派的批量发送流水线）、WebRTC 房间（纯 P2P 实时共享角色与聊天）与 Risu Hub（角色市场）各计辅助贡献。
-- **RikkaHub** 是样本中唯一以原生 Android 单机客户端为边界、把通常属于桌面或服务端的能力装进手机的项目。端侧 PRoot 用户态 Linux 工作区（文件区、rootfs，以及与模型工具共享同一环境的人类 PTY 终端）作为外部执行域计入 F53 主贡献；内嵌 Ktor 服务器加随包 React 前端实现的局域网多端访问复用宿主同一会话服务与 Room 数据库，计入 F27 主贡献。jieba 分词 FTS5 会话检索（同一索引同时服务应用内检索页、Web 接口与模型工具）计入 F15 辅助贡献；二维码 Provider 配置交换计入 F62 辅助贡献。助手/会话两级提示词注入与 SillyTavern 世界书兼容按上下文编译类目归并（F47/F03），图片生成工作台（F48）、ModelRegistry 静态能力推断与消息分支（F10/F11）按既有类目归并、不重复计数；定时与周期性主动运行确认不存在。
+- **RikkaHub** 是样本中唯一以原生 Android 单机客户端为边界、把通常属于桌面或服务端的能力装进手机的项目。端侧 PRoot 用户态 Linux 工作区（文件区、rootfs，以及与模型工具共享同一环境的人类 PTY 终端）作为外部执行域计入 F53 主贡献；内嵌 Ktor 服务器加随包 React 前端实现的局域网多端访问复用宿主同一会话服务与 Room 数据库，计入 F27 主贡献。单字/NEAR 与拼音前缀 FTS5 会话检索（同一索引同时服务应用内检索页、Web 接口与模型工具）计入 F15 辅助贡献；二维码 Provider 配置交换计入 F62 辅助贡献。助手/会话两级提示词注入与 SillyTavern 世界书兼容按上下文编译类目归并（F47/F03），图片生成工作台（F48）、ModelRegistry 静态能力推断与消息分支（F10/F11）按既有类目归并、不重复计数；后台记忆整理按空闲或轮数条件唤醒，用户定时任务与系统级调度尚未确认。
 - **VCPMobile** 以移动端维护远端 VCP 日记和把手机原生能力暴露为可治理设备工具节点形成两项主贡献。日记中心覆盖文本/语义搜索、基线 hash 冲突处理、创建与批量管理；设备节点由用户逐项启用能力目录，经持续 WebSocket 接收执行与取消请求，并把 Android 本机结果回传外部 VCP 服务。两项均为静态主链确认，远端服务兼容、真机权限和断线恢复尚未运行验证。
 - **Codex** 把终端原生编码 Agent 的执行约束和外部驱动面做成产品。`AGENTS.md` 层级指令、app-server 与终端编码闭环分别进入 F06、F27、F36 主贡献；`codex exec` 以 JSONL 事件、结构化最终输出和 resume/fork 补齐“外部进程驱动 + 机器可读结果”的非交互形态（F113 为本次新增，理由见明细）。`apply_patch` 因缺少 Git 快照回退只计 F24 辅助，代码模式因实验且默认关闭只计 F43 辅助；OS 沙箱、分层审批与 Starlark 策略按安全机制单列 M09、M02，云端任务因执行环境、认证与 best-of-N 在仓库外计 0。
 - **OpenOcta** 的差异在“Agent 进入运维闭环”，不在聊天界面。定时任务、`/hooks/alert` 外部触发与 IM/Webhook 结果投递使其成为 F09 的无人值守形态主贡献；房间式 Agent Swarm 以成员树、独立会话、配额和持久历史补充 F30 主贡献。数字员工、Knowledge Vault、五渠道 IM 回派与会话提炼 SKILL.md 在既有族中分别只能计 F04、F65、F59、F64 辅助，因为各自已有更强的首要实现；命令审批因前端闭环未接通、A2UI 因只确认文本承载，均不计产品分。
@@ -104,7 +104,7 @@
 | 15 | OpenOcta | 2 | 4 | 6 | 8 | 无人值守运维闭环、房间式 Agent 树、数字员工、本地知识库与 IM 回派 |
 | 16 | Chatbox | 1 | 5 | 6 | 7 | 图像工作站与多项高级能力的稳健辅助实现 |
 | 17 | DeepSeek Harness | 2 | 2 | 4 | 6 | 自引用插件运行时、日志化 plan mode、同会话目标驱动与定时重入 |
-| 18 | RikkaHub | 2 | 2 | 4 | 6 | 端侧 PRoot Linux 工作区、手机即服务端的局域网多端访问、FTS5+jieba 会话检索与二维码配置交换 |
+| 18 | RikkaHub | 2 | 2 | 4 | 6 | 端侧 PRoot Linux 工作区、手机即服务端的局域网多端访问、FTS5 会话检索与二维码配置交换 |
 | 19 | Risuai | 1 | 4 | 5 | 6 | 模型指令标签驱动的角色媒体、多后端结构保留翻译、批量发送流水线、实时房间共享与 Risu Hub 角色市场 |
 | 20 | VCPMobile | 2 | 0 | 2 | 4 | 远端日记知识工作区与可治理的手机设备工具节点 |
 | 21 | NextChat | 0 | 3 | 3 | 3 | 轻量 fork、opaque-origin Artifact 与固定模板对话分享 |
@@ -151,7 +151,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | F12 | 多模型并行回复与并排比较 | Open WebUI | Cherry Studio、LobeHub | 同一请求生成多列或兄弟结果并提供专门投影 |
 | F13 | 会话 fork、checkpoint 与 lineage | Hermes Agent、Pi | SillyTavern、DeepChat、NextChat、Open WebUI、OpenCode | 从历史点派生新会话并保留来源关系 |
 | F14 | 压缩后仍可追溯原会话谱系 | Hermes Agent | Pi | compaction 产生新节点但不抹掉原 transcript 的寻址关系；gpt-5.6 直连 OpenAI 路由使用 native 服务端压缩，本地 compaction-as-fork 作为回退 |
-| F15 | 跨会话消息全文检索并直达具体消息 | DeepChat | Chatbox、RikkaHub | 搜索结果落到 message id，而非只打开会话；RikkaHub 以独立 FTS5 虚表配套自定义 jieba 分词扩展与随包词典实现中文关键词检索，同一索引同时服务应用内检索页、内嵌 Web 接口与模型工具（辅助） |
+| F15 | 跨会话消息全文检索并直达具体消息 | DeepChat | Chatbox、RikkaHub | 搜索结果落到 message id，而非只打开会话；RikkaHub 以 FTS5、单字/NEAR 查询与拼音前缀扩展实现中文关键词检索，同一索引同时服务应用内检索页、内嵌 Web 接口与模型工具（辅助） |
 | F16 | 生成中的 steer、queue 与 pending input | DeepChat | Jan | Agent turn 未结束时仍可改变后续执行 |
 | F17 | 跨 IM 平台事件流水线、群聊唤醒与 follow-up | AstrBot | - | 核心产品单位是平台事件和 UMO，而非桌面聊天窗口 |
 | F27 | 多表面共享同一 Agent 后端与会话连续性 | Hermes Agent、OpenCode、RikkaHub、Codex | Jan | 多前端消费同一事实源；OpenCode 支持重放与所有权接管；Hermes 桌面提供 HUD 浮动聊天窗（完整 renderer + 跨窗口草稿同步）；RikkaHub 让手机进程本身充当服务端，以内嵌 Ktor CIO 加随包 React 前端在同一进程内复用宿主会话服务与 Room 数据库，经 mDNS 供局域网浏览器读写（主链确认，未运行验证）；Codex 的 app-server 以 JSON-RPC 暴露线程生命周期、分页历史、审批回调、动态工具、daemon 与 TypeScript/Python SDK，CLI 自身也复用该内核 |
@@ -170,7 +170,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | F18 | 可执行消息小应用与消息运行时 SDK | VCPChat | AIO Hub | VCPChat 提供主消息 DOM 脚本与较完整宿主运行时治理；AIO 的 HTML/SVG 代码块可在 iframe 中执行 JavaScript、表单和 Canvas 小应用，Action Button 还能发送消息、插入文本或复制内容。AIO 已具备 iframe 型“消息即应用”，但宿主 SDK 与生命周期深度不足以并列主贡献 |
 | F19 | 可持久、可查询、可替换的桌面挂件活对象 | VCPChat | - | 挂件有独立 ID、文件和能力桥，跨越单条消息生命周期 |
 | F21 | 声明式 conversation-flow 与工具过程投影 | LobeHub | DeepChat、Cherry Studio | Agent 中间过程被编译成可操作流程 |
-| F22 | 严格隔离的 HTML/SVG Artifact 预览 | Jan | NextChat、Chatbox、DeepChat、Open WebUI | 生成页面在独立运行域投影，不获得宿主同源权限 |
+| F22 | 严格隔离的 HTML/SVG Artifact 预览 | Jan | NextChat、Chatbox、DeepChat（MCP App 相邻运行域）、Open WebUI | 生成页面在独立运行域投影，不获得宿主同源权限；DeepChat 的依据是独立协议源的 MCP App 双层沙箱，资源来自 MCP 工具声明，历史正文 Artifact 只显示标题、原文与复制（[来源](<生成式输出与运行时/DeepChat-生成式输出与运行时调查笔记.md#71-mcp-app-沙箱最完整的受控运行时>)） |
 | F23 | 带文件树、编辑器、冲突检测和自动保存的 Agent workspace | Cherry Studio | AIO Hub、Hermes Agent | 用户直接维护模型生成的项目文件 |
 | F24 | 文件/Git/diff 事实源与模型回读、回滚闭环 | OpenCode | LobeHub、AIO Hub、Pi、Hermes Agent、Chatbox、Codex | 模型下一轮继续操作同一工作区对象；Codex 以 `apply_patch` 专用补丁语法完成上下文定位、整批提交和失败增量回报，但没有 OpenCode 式的 Git 快照回退 |
 | F25 | 文档对象级 diff、编辑锁与 Page-Agent | LobeHub | - | 文档有独立事实源、节点级修改和接受/拒绝流程 |
@@ -276,7 +276,7 @@ Manifold Desktop 与 OpenClaw 同为 0 产品分但成因不同：前者是聊�
 | M21 | 外部消息发送者与设备接入的显式准入审批门 | OpenClaw | - | 把渠道 allowlist 与设备接入升级为带请求、一次性码、过期与挂起上限、显式批准/驳回的审批工作流；批准持久化进白名单并驱动下一次准入，默认 fail-closed，为多消息渠道与设备配对提供统一的可审计接入决策（静态主链确认，未运行验证） |
 | M22 | 第三方扩展分发的发布信任裁决与落盘留痕 | OpenClaw | - | 安装链在下载前按 ClawHub 发布元数据裁决为 clean/blocked/review-required：恶意发布直接拒绝、风险发布须在本机显式确认，裁决字段随安装记录持久化、更新时重新过门；聊天命令面不能代替本机确认。依赖仓库外 ClawHub 注册表（静态主链确认，未运行验证） |
 
-明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约。VCPChat DeepMemo 2.0 已闭合“可信 Agent/Topic 上下文 → 中央聊天历史搜索 → 窗口扩展/可选精排 → 回注”的主动会话回忆链，但其产品契约仍属于常规历史 RAG 工具；这里把它记入 VCP RAG 能力地图，不另立特色族。VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。DeepSeek Harness 的 ACP 服务器、MCP 工具桥、通用子 Agent 能力和进程沙箱分别属于既有互操作能力或机制贡献，不因 Provider 数量和主链闭合另加产品分；仅达到入口确认的 workflow/jobs、bundle patch-layer、运行时 invariants 和 e2b POC 也不计入。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。OpenClaw 的 doctor 诊断-修复-迁移链维持入口确认（完整修复闭环未逐条走查），其渠道准入与分发信任门按机制单列（M21、M22），同样不进入产品计分。Codex 的平台沙箱与分层审批按机制单列（M09、M02）；云端任务因执行环境、认证与 best-of-N 都在仓库外，仅客户端提交、轮询与 apply 路径可见，按外部依赖计 0；本快照未找到 MCP 服务端入口，不按“双向 MCP”计数。OpenOcta 的命令审批与 A2UI 均计 0：前者后端有策略求值、中断与队列持久化，但 `exec.approval.*` 为未实现桩、UI 未调用 `chat.resume`、审批队列写入方不在本仓库；后者只确认文本回复被编码为 A2UI 文本组件并可回流动作，未找到模型主动生成可交互组件的调用链。OpenOcta 的 L4 记忆写入未接线与 `session_search` 缺失同样不计。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
+明确不计分：AIO Hub 的内容查重器属于性能/工程增强；VCPChat 的普通笔记、翻译窗、语音聊天和运维面未形成足够不同的产品契约。VCPChat DeepMemo 2.0 已闭合“可信 Agent/Topic 上下文 → 中央聊天历史搜索 → 窗口扩展/可选精排 → 回注”的主动会话回忆链，但其产品契约仍属于常规历史 RAG 工具；这里把它记入 VCP RAG 能力地图，不另立特色族。VCPToolBox 的 VCPEverything、VCPClawMail、DigitalOracle、DeepWikiVCP 与 UserAuth 分别属于常规本机检索/邮箱接入、领域数据聚合、单一 MCP 客户端和安全支撑机制。DeepSeek Harness 的 ACP 服务器、MCP 工具桥、通用子 Agent 能力和进程沙箱分别属于既有互操作能力或机制贡献，不因 Provider 数量和主链闭合另加产品分；仅达到入口确认的 workflow/jobs、bundle patch-layer、运行时 invariants 和 e2b POC 也不计入。Pi 的 sqlite FTS 搜索后端（harness 侧、未接入 TUI/AgentSession 路径）、Pi `auth check`（运维机制）、opencode 压缩文本序列化与重试上限（工程细节）、Hermes 紧急停止 `hermes pause/resume`（安全机制）同样不计分。OpenClaw 的 doctor 诊断-修复-迁移链维持入口确认（完整修复闭环未逐条走查），其渠道准入与分发信任门按机制单列（M21、M22），同样不进入产品计分。Codex 的平台沙箱与分层审批按机制单列（M09、M02）；云端任务因执行环境、认证与 best-of-N 都在仓库外，仅客户端提交、轮询与 apply 路径可见，按外部依赖计 0；本快照未找到 MCP 服务端入口，不按“双向 MCP”计数。OpenOcta 的命令审批与 A2UI 均计 0：前者实际执行仅接 deny 遗留校验与 execute 统一审批中断，完整分段策略求值未接线；审批队列可持久化，但 `exec.approval.*` 为未实现桩、UI 未调用 `chat.resume`、审批队列写入方不在本仓库；后者只确认文本回复被编码为 A2UI 文本组件并可回流动作，未找到模型主动生成可交互组件的调用链。OpenOcta 的 L4 记忆写入未接线与 `session_search` 缺失同样不计。它们的实现完整度仍记录在单项目笔记中，但不转化为特色点。
 
 ## 如何解读结果
 

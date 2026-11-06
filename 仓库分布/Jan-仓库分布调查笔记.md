@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -147,7 +147,7 @@ Rust 侧另有以 `tests.rs` 内嵌模块为主的单元测试（如 `src-tauri/
 
 ## 7. 设计取舍与已确认边界
 
-- **扩展即独立包，并可运行时安装**：模型引擎（llamacpp/mlx）、RAG、向量库、下载、助手均拆为 `extensions/*` 包，由 `web-app/src/lib/extensions/` 的宿主按清单加载；扩展只能看见 `@janhq/extension-api` 声明的能力与贡献点，运行在 worker 里经 RPC 使用宿主服务。代价是多了一层版本化契约与隔离边界。
+- **内置包与可安装扩展有不同执行域**：模型引擎、RAG、向量库、下载、助手拆为六个内置包，在宿主进程内直接激活；第三方安装包和开发扩展才在 worker 中经版本化 RPC 使用受控 API。二者共用清单与贡献点注册，但内置包可取得内部文件和引擎服务，不能把第三方 worker 的隔离范围推广到全部内置包（[builtins.ts:9–27](../../jan/web-app/src/lib/extensions/builtins.ts#L9-L27)、[host.ts:564–600](../../jan/web-app/src/lib/extensions/host.ts#L564-L600)）。
 - **Rust 单一内核，多表面复用**：Agent 核心、CLI/TUI 与对外 RPC/ACP 入口都在 `src-tauri/src/core/`，桌面、`jan` 二进制与外部 SDK 共用同一实现，产物差异只在编译目标与入口。
 - **引擎二进制不入库**：mlx-server/ 收录 Swift 源码，llamacpp 引擎由 `src-tauri/build-utils/` 的预编译/staging 脚本在构建期获取并打包进随附 worker，仓库体积不随引擎增长。
 - **生成/第三方代码影响**：无大型 vendored 源码，语言占比不受其扰动；`packages/adk` 的 RPC 类型由 schema 生成，体量小；docs/ 站点资产（578 个非文档文件）计入跟踪文件数但不计入语言与文档行数口径。

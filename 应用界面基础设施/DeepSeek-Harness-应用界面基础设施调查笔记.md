@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `apps/web/`、`apps/desktop/`、`packages/client/`、`packages/host/`、`packages/api/`、`packages/typert/`、`packages/extensions/`、`packages/sdk/`、`packages/boot/`、`apps/cli/`、`packages/util/`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
@@ -58,7 +58,7 @@ DeepSeek Harness 的 Web 界面是一个"一切皆插件"的 Cordis 组合产物
 
 ## 3. 加载链、运行时与模块系统
 
-- **shell 内核**（`packages/client/web`）：零插件依赖，负责加载页、启动清单（`seed.ts`）、注入应用、拖拽区域与 loader 状态；`boot-page.ts` 渲染加载页，`boot-client.ts` 启动浏览器端。
+- **shell 内核**（`packages/client/web`）：负责加载页、启动清单、注入应用、拖拽区域与 Loader 状态。启动审核只把必需条目的未激活视为致命错误；可选条目导入或激活失败会统一告警，活跃兄弟继续运行。若失败项导致必需项等待缺失服务，仍拒绝启动（`src/boot-client.ts:15-33,96-134`）。
 - **client module table**（`client/modules`，`ctx.clientModules`/`ctx.modules`）：把可加载的浏览器插件模块映射到 URL，支持按需与并行装载；宿主侧 `extensions/cordis-client-runner` 提供客户端插件仓库与清单。
 - **HMR**：`client/hmr` 消费开发期重载协议（SSE），`boot/hmr` 提供宿主侧；仅在开发构建生效，`DSH` 发布构建不装载。
 - **文件上传**（`client/file-upload`）：原始 Blob 与字节流请求体在页面线程之外发送，避免大图阻塞渲染。

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
@@ -75,10 +75,17 @@ Open WebUI 的生成主链路：`POST /api/chat/completions` → `main.py: chat_
 
 ## 3. 预算、截断与压缩
 
-- 请求 metadata 携带 `compact_token_threshold`、`stream_delta_chunk_size`、`reasoning_tags`（1.2 第 2 步）；
-- 每次请求在 `process_chat_payload` 内调 `compact_messages_for_request`（`utils/context_compaction.py:46`）做按需压缩，超过阈值时生成 `[CONVERSATION SUMMARY]` 系统消息追加（`middleware.py:2055` 起的压缩分支），失败则回退全量历史（2375-2376 行）；
-- 手动压缩：后端 `POST /{id}/compact`（`chats.py:1251`）调 `compact_chat_branch`（`context_compaction.py:150`）写 `context_summary` 检查点并触发 `EVENTS.CHAT_COMPACTED`（数据侧见会话与消息管理笔记第 3 节）；前端入口 `handleManualCompact`（`Chat.svelte:2542-2593`，生成中拒绝）；
-- 具体 token 预算的阈值计算与裁剪算法（`context_compaction.py` 内部）本次未逐行展开；压缩触发阈值下的实际行为未运行验证。
+压缩受服务端开关控制；有效阈值取请求正整数覆盖值与服务端上限的较小值。预算优先使用最近一条消息的 provider 用量加后续消息估算；无用量时按字符约四比一估算，图片按固定开销计入。保留比例限制在 10%–50%，默认 40%，先按消息数取目标再对齐用户轮次；工具循环中改为对齐完整调用/结果批次，避免切断协议配对（[`utils/context_compaction.py:224-260,372-400`](../../open-webui/backend/open_webui/utils/context_compaction.py#L224-L400)）。
+
+请求处理有两个时点：存在 Filter、Pipeline、审批恢复或 legacy 工具模式时，在能力注入前压缩，使这些处理器读取压缩历史；普通 native 请求先应用已有检查点，再在最终请求已组装后生成摘要，便于同模型摘要请求复用原提示缓存。相同模型且保留边界可唯一定位时，摘要请求复放完整出站消息并追加摘要指令；无法取得摘要时改走独立摘要请求。摘要以 `[CONVERSATION SUMMARY]` 系统消息进入后续请求；压缩异常保留当前历史（[`utils/middleware.py:2184-2225`](../../open-webui/backend/open_webui/utils/middleware.py#L2184-L2225)、[`utils/middleware.py:3001-3044`](../../open-webui/backend/open_webui/utils/middleware.py#L3001-L3044)、[`utils/context_compaction.py:403-532`](../../open-webui/backend/open_webui/utils/context_compaction.py#L403-L532)）。
+
+| 压缩入口 | 持久化检查点与恢复 |
+|---|---|
+| 请求前自动压缩 | 保留段从 user 消息开始且属于持久聊天时，把摘要写到首条保留消息的 `contextSummary`；读取最新检查点时只送该节点以后的路径 |
+| 工具循环内压缩 | 每轮工具结果回注后再次检查预算，在 assistant output 中写 `open_webui:context_compaction` 标记，保存摘要与首个保留调用的 call id；恢复时裁剪到该调用批次，并移除仅供内部使用的标记 |
+| 手动压缩 | `POST /{id}/compact` 检查活动任务后调用 `compact_chat_branch`，摘要当前分支中最后一条以外的消息，把检查点写到当前节点；原历史仍保留 |
+
+证据：[`utils/context_compaction.py:122-172,175-221,326-369`](../../open-webui/backend/open_webui/utils/context_compaction.py#L122-L369)、[`utils/middleware.py:6006-6084`](../../open-webui/backend/open_webui/utils/middleware.py#L6006-L6084)。摘要质量、缓存命中和长上下文实际开销未运行验证。
 
 ## 4. Provider、模型与协议交接
 
@@ -170,7 +177,7 @@ Responses 事件在流式期间已累积 output item 时，即使最终 complete
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- 工具/技能/终端：`tool_ids`/`skill_ids`/`terminal_id`/`tool_servers` 从请求体进入（1.1 第 3 步），`tool_servers` 在服务端按权限过滤（1.2 第 1 步）；
+- 工具/技能/终端从请求体进入，工具服务器受服务端权限过滤。native 模式在候选目录构建后应用延迟工具机制；工具 schema 可从 provider tools 中移除，检索返回定义后通过分派器调用，目录细节见[Agent 工具笔记](../Agent工具/Open-WebUI-Agent工具调查笔记.md#延迟目录与两阶段调用)。
 - 多轮工具调用在流式响应处理器内执行（`execute_tool_call`，`middleware.py:5671`；迭代上限与循环条件在 `middleware.py:5552-5577`），工具交互事件（`notification`/`confirmation`/`execute`/`input`）经 Socket.IO 送达前端（5.3）；工具结果以 OR `output` 项回写（数据侧见会话与消息管理笔记第 8 节）；审批恢复只对带 `assistant_message_id` 的续写/恢复请求生效，其他路径新建消息 id 时不做待执行调用回收（`middleware.py:3238-3245`）；
 - 子代理结果回填：finally 阶段 `process_pending_internal_messages`（1.2 第 9 步）；
 - 记忆抽取：`review_memory_after_turn`（8）；
@@ -180,7 +187,7 @@ Responses 事件在流式期间已累积 output item 时，即使最终 complete
 ## 10. 退出恢复、日志与已确认边界
 
 - `chat:active=false` 在无活动任务时发出（1.2 第 9 步），前端据此清 taskIds、按需重载并更新已读（5.3）；
-- 临时会话（`temporary:`）的任务随 socket 会话存活，应用退出即丢失（`utils/chat_id.py:15-20` 定义非落库前缀）；
+- 临时聊天使用非落库 id，但任务恢复另有服务端登记与流快照：Socket 重连后前端调用 resume 端点重新绑定会话并补齐内存消息输出；持久会话则查询任务后按需重载数据库消息。该路径支持断线重连，浏览器完整刷新与服务器重启后的恢复保证未确认（[`main.py:2164-2179`](../../open-webui/backend/open_webui/main.py#L2164-L2179)、[`Chat.svelte:1895-1933`](../../open-webui/src/lib/components/chat/Chat.svelte#L1895-L1933)）。
 - 已确认边界：`POST /api/chat/completed`（`main.py:1976`）docstring 明确标注 Deprecated（1978-1979 行）——outlet 过滤器已内联，该端点仅兼容外部集成；
 - 日志与可观测性：任务以 `task_id` 关联，Redis 哈希/集合可查询（`tasks.py:68-73`）；`GET /api/tasks`、`GET /api/tasks/chat/{chat_id}`（`main.py:2023-2029`）提供查询入口；错误消息写入 `chat_message.error`（1.2 第 8 步）。
 

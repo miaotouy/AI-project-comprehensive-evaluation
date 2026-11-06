@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
@@ -49,7 +49,7 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
   - `Sidebar.svelte` 承载列表、文件夹（`Sidebar/Folders.svelte`）、置顶模型/笔记、搜索入口（`SearchModal`，903-910 行）；移动端侧栏是覆盖式抽屉（892-901 行），关闭时收进 42px 窄条（931-989 行）；侧栏可拖拽调宽（921-929 行）；
   - `SearchModal.svelte`（布局组件）提供跨会话搜索，支持按标签、文件夹、置顶、归档、共享等前缀过滤（277 行）、标题内联重命名（146-168 行）、删除/归档操作；结果点击跳转会话 URL；
   - 新会话创建后前端更新 store + URL `/c/{id}` + 刷新列表（发送链数据侧见对话请求与上下文笔记 1.1）；
-- 现场恢复：再次进入 `/c/{id}` 时由服务端 `GET /{id}` 返回 history 快照，`Chat.svelte` 装载并恢复 `history.currentId`（分支指针）、消息列表与面板状态；生成中的半截消息以 `done=false` 呈现。恢复的完整行为（滚动位置等）未运行验证。
+- 现场恢复：再次进入会话由服务端返回 history 快照，恢复当前分支与消息列表；标签面板与草稿有各自状态范围（见第 3、8 节），不随 history 一并持久保存。重连查询活动任务，已无活动任务的未完成消息可在加载时本地结算为 done，待回答的人工提问保留；滚动与视觉恢复未运行验证（[`Chat.svelte:3053-3107`](../../open-webui/src/lib/components/chat/Chat.svelte#L3053-L3107)）。
 
 ## 3. Composer、草稿、附件与快捷输入
 
@@ -57,7 +57,8 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
   - `@` 提及（模型/文件选择，1140-1178 行）与 `/` 命令（`CommandSuggestionList`，101 行）经 suggestions 机制插入；输入区含粘贴上传（`onPaste`）与拖放（dropzone id 见 `Chat.svelte:142`）；
   - 语音输入：麦克风按钮 + 听写快捷键（`Shortcut.TOGGLE_DICTATION`，1106-1119 行）；`speechAutoSend` 选项（1462 行）；
   - `largeTextAsFile`：大段文本自动转文件（1767 行，按设置与 Shift 键）；
-- 草稿粒度：输入内容 `prompt` 状态在 `Chat.svelte`（386 行）随组件实例保存——切换会话（同一控制器内会话 id 变化）时是否保留输入未深入核对；嵌入草稿按 `embeddedDraftKey` 恢复（525-528 行）。跨窗口/跨设备草稿同步本次未找到（检查范围：Chat.svelte 与 stores 中无草稿持久化入口）；
+- 草稿按浏览器标签页中的会话键保存到 sessionStorage：新会话用 `chat-input`，已有会话用带会话 id 的键；编辑回调默认 500ms 防抖，发送时清除对应键。保存内容包括正文、已上传的非图片附件，以及工具、技能、过滤器和部分能力选择；正文达到 5000 字符时清除缓存，浏览器 File 实例和图片附件不进入该草稿（[`Chat.svelte:4977-5035`](../../open-webui/src/lib/components/chat/Chat.svelte#L4977-L5035)、[`Chat.svelte:5531-5545`](../../open-webui/src/lib/components/chat/Chat.svelte#L5531-L5545)）。
+- 加载持久会话时读取对应键并恢复输入，再应用模型默认配置；新会话也读取通用键，模型默认选择可能覆盖草稿中的能力选择。临时会话模式跳过恢复；旧草稿中的审批模式被忽略，防止恢复输入时修改审批设置或自动批准工具。嵌入笔记聊天另有草稿键。sessionStorage 只提供当前标签页生命周期内的恢复，未发现账户级跨设备草稿同步（[`Chat.svelte:847-869`](../../open-webui/src/lib/components/chat/Chat.svelte#L847-L869)、[`Chat.svelte:2798-2804`](../../open-webui/src/lib/components/chat/Chat.svelte#L2798-L2804)、[`Chat.svelte:3103-3107`](../../open-webui/src/lib/components/chat/Chat.svelte#L3103-L3107)）；
 - 发送快捷键（Enter 发送、Shift+Enter 换行）与焦点管理在 `MessageInput.svelte` 的 `onKeyDown`（1101-1125 行）与 `chat-input` 元素 focus 调用（`Chat.svelte:2533-2534`）；实际焦点顺序与键盘走查未运行验证。
 
 ## 4. Agent、模型、工具与发送前配置
@@ -70,7 +71,8 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
   模型列表经 `ModelSelector.svelte`（95 行）选择，`selectedModels` 支持多选（side-by-side）；
 - 界面上的配置入口：Composer 旁的模型选择器、工具/技能/终端选择（`selectedToolIds`/`selectedSkillIds`，`Chat.svelte:356-357`）；参数设置由 `SettingsModal.svelte`（975 行）承载，工具服务器与技能选择另有专门弹窗。
-- 输入菜单还允许把工具执行切换为完整访问或逐次确认。选择逐次确认时，未结算的工具调用会留在消息 output 中，待用户允许或拒绝后再恢复生成；该按钮只写入聊天参数，可信状态迁移在服务端完成（`Chat.svelte:533-560`、`MessageInput/InputMenu.svelte:49-70`）。
+- 输入菜单允许在完整访问与逐次确认之间切换。该动作同时保存会话参数与用户默认参数；切为完整访问时，还会批准最近一条属于当前用户的待审批工具并恢复执行，人工提问不参与自动批准。服务端负责校验消息归属与已结算状态（[`Chat.svelte:532-605`](../../open-webui/src/lib/components/chat/Chat.svelte#L532-L605)）。
+- 人工提问从当前分支的 assistant output 恢复为输入区问题卡；作答、拒绝和超时都调用消息 resolve API，再把返回 task id 接回当前生成状态。持久聊天与工具审批共用恢复基础设施，交互目标分别为收集信息与允许执行；临时聊天通过在线回调交互（[`Chat.svelte:624-703`](../../open-webui/src/lib/components/chat/Chat.svelte#L624-L703)、[`main.py:1883-1906`](../../open-webui/backend/open_webui/main.py#L1883-L1906)）。
 - 作用域辨认：`@` 提及内联切换 `atSelectedModel`（单次会话模型覆盖，`MessageInput.svelte:179`），会话参数 `params` 在创建会话时持久化（对话请求与上下文笔记 1.1 第 4 步）。配置项在界面上的作用域标识（全局/会话/本次）未运行验证。
 
 ## 5. 发送、排队、流式反馈与停止
@@ -121,8 +123,9 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
   currentId / taskIds / generating / prompt / params / chatFiles
   ```
 - 生成状态以服务端广播为准：`chat:active=false` 时前端清空 taskIds、按需重载（975-984 行）——静态代码确认事件绑定，未运行验证实际重载时机；
-- 多窗口/多端同步：Socket.IO 事件广播使其他标签页收到生成事件，但本地 store（队列、prompt 草稿、侧栏展开状态）不跨窗口同步；桌面/移动端连续性（PWA 等）未调查；
-- 状态恢复边界：临时会话（`temporary:`）状态纯客户端，刷新即失；持久会话由服务端快照恢复（第 2 节）。
+- 多窗口/多端同步：Socket.IO 事件广播使其他标签页收到生成事件；队列属于前端 store，草稿属于 sessionStorage，均没有账户级同步。桌面/移动端连续性（PWA 等）未调查；
+- 标签工作台的打开列表、活动标签和最近激活历史在组件内存，关闭活动标签回到最近使用项；既有聊天 id 切换时重置，首次空 id 取得真实 id 时保留现场。只有侧边/全宽布局偏好写入 localStorage。文件编辑器在路由离开前逐个询问未保存修改，因此面板恢复应与聊天历史恢复区分（[`ChatTabs/tabs.ts:46-89`](../../open-webui/src/lib/components/chat/ChatTabs/tabs.ts#L46-L89)、[`ChatTabs.svelte:625-635,695-714`](../../open-webui/src/lib/components/chat/ChatTabs.svelte#L625-L714)）；
+- Socket 重连时，临时聊天调用 resume API 重新绑定会话并取回 task id 与服务端流快照，用于补齐仍在内存的消息树；它没有聊天数据库持久化保证。持久聊天则查询活动任务，必要时重新加载服务端快照。浏览器刷新后重建全部临时消息的能力未确认（[`Chat.svelte:1895-1933`](../../open-webui/src/lib/components/chat/Chat.svelte#L1895-L1933)、[`main.py:2164-2179`](../../open-webui/backend/open_webui/main.py#L2164-L2179)）。
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -18,7 +18,7 @@
 - **写入者已收敛为单写者**：经典 CLI 不再直接持有写句柄。`hermes_cli/gateway_session_store.py` 把 `HermesCLI._session_db` 换成"只读 `state.db` 读取器 + gateway 动词"：读走只读连接，写走 `session.create`/`session.resume`/`session.mutate`/`session.detach`，尚未上 gateway 的写入直接抛 `GatewayClientError`（模块 docstring）。
 - **身份有两层**：进程内 UI 句柄 `sid`（8 位 hex，`tui_gateway/methods_session.py`）与持久化 `session_key`（时间戳 + 6 位 hex，`tui_gateway/session_registry.py` 的 `_new_session_key`，响应里叫 `stored_session_id`）；压缩轮转生成新 key，经 `parent_session_id` + `end_reason='compression'` 连链，跨轮转稳定标识是派生字段 `_lineage_root_id`。
 - **子会话有四类**：分支（`_branched_from`）、压缩续链（父 `end_reason='compression'`）、子代理（`_delegate_from`）、以及本快照新增的重置（`_reset_from`）。重置在列表里作为独立会话可见，但仍保留 `parent_session_id` 以维持血缘（`hermes_state_common.py:228-247`）。
-- **每条消息同时是历史里的事件与数据库里的行**。关系表一行一条消息，`active`/`compacted` 分别表示软删与压缩归档；落盘走"单事务批量 + 内存 marker 去重"，崩溃中途只在 `desktop/interrupted_turns.json` 留标记，恢复会话时按标记自动重放。
+- **消息持久化与执行受理分层**。关系表一行一条消息，软状态区分活动和压缩归档；Agent 增量 flush 使用内存 marker 去重。规范网关另持久化输入受理与执行代际：同主体、目标会话、请求 id 的相同 payload 返回原回执，变更 payload 报冲突；owner 重启把已开始的旧代际工作结算为 unknown，阻塞后续队列，避免自动重复副作用（[受理事务](../../hermes-agent/hermes_state_runtime.py#L130-L177)、[恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
 - **写区段按 session_id 串行**：`gateway/turn_lease.py` 的回合租约把"[载入历史 → 运行 → flush]"整段锁在解析后的 session_id 上，路由键多对一（第二次 /resume、委派钉住、topic tip 走查）时防止两份 flush 交叉；等待超时 fail-closed。
 - **惰性落行**：DB 行首次真实 turn 才创建，空草稿不留行；子代理首轮落行时写 `_delegate_from` 标记，删除时沿标记级联，分支/压缩子会话则"孤儿化不删"。
 - **标题两段式 + 带来源**：首个 turn 的 prologue 内派生即时标题（无模型调用），随后后台线程用小模型升级；来源按 derived < llm < user 排序做单事务比较-交换，用户 `/title` 永不被覆盖，压缩轮转携带标题不变。
@@ -37,10 +37,13 @@
   -> append_messages_batch（hermes_state_messages.py，支持分块事务）
   -> session.resume / session.history / session.list 等 RPC 读取
   -> 压缩轮转生成新 session_key（parent_session_id + end_reason='compression' 连链）
-  -> 崩溃时中断标记 desktop/interrupted_turns.json，resume 时自动重放
+  -> 规范输入账本：重启后已开始输入变 unknown，后续队列暂停等待明确处置
+  -> legacy tui_gateway 另有 desktop/interrupted_turns.json 恢复路径
 ```
 
 边界：上下文拼装、Provider 调用、流式事件、压缩触发与中断属于对话请求与上下文（`../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md`）；会话侧栏、消息操作等界面工作流属于 Chat UI；消息内容与列表渲染属于消息渲染器类目，本笔记只记录数据形状与数据分页接口。
+
+以下 sid、legacy 方法与中断标记细节按 tui_gateway 桥解释；规范网关另外拥有 profile/会话授权引用、输入受理账本与执行代际，恢复边界见摘要。静态复核覆盖两者入口差异，未穷尽所有客户端迁移分支。
 
 ## 1. 会话、消息与分支数据模型
 
@@ -173,7 +176,7 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 
 ### 3.5 恢复与保留语义
 
-- 崩溃恢复：SQLite 只在 turn 结束写，`interrupted_turns.json` 是唯一中途痕迹；`session.resume` 时按标记自动重放，attempts 计数防崩溃循环。
+- 崩溃恢复：规范网关保存受理账本，旧 owner 已开始的输入变 unknown 并阻塞后续输入；legacy tui_gateway 的 resume 另消费中断标记。Agent 可在工具进展与回合终结时 flush，不能概括为只在 turn 结束写库（[代际恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
 - 压缩轮转恢复：resume 沿压缩链跳到活 tip，`get_resume_conversations` 提供模型喂入与显示两份投影；`_lineage_root_id` 提供跨轮转稳定身份（`hermes_state_local.py:381`、`hermes_state_search.py:1432`），桌面端 pin、路由匹配都基于它。
 - 保留语义：轮转与原地压缩都以 `active=0`/`compacted=1` 保留旧行，压缩归档行仍可搜索；`end_session` 只标记不删数据；硬删除无回收站。
 - `/retry`、编辑/rewind 截断均改为保留归档历史的破坏性改写：`replace_messages` 带 `active_only`/`archive_dropped` 语义（`hermes_state_messages.py:720`），旧轮次不再从消息列表蒸发、但落盘为可搜索归档行。

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
@@ -92,12 +92,12 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 - **静态/声明式**：Markdown（marked，`marked.setOptions({sanitize:false})`，text-viewer.js:1071-1081），同窗口内另有语法高亮（hljs）、Mermaid、draw.io 图与 KaTeX 渲染（1559-1561、1483-1505、1507-1541、1768-1783）；工具结果卡/思维链卡由宿主按字段 schema 渲染（messageRenderer.js:2043-2176，大内容二级截断 + 懒加载展开，2117-2138）。
 - **浏览器脚本**：
-  - 气泡内 HTML 预览：iframe `srcdoc`，**未设置 sandbox 属性**（contentProcessor.js:729-736），iframe 内脚本可经 `window.parent.postMessage` 上报高度（758-791）；关闭时销毁为 `about:blank`（696-704）。安全性质（推断）：srcdoc iframe 同源继承主窗口 preload 环境。
+  - 气泡内 HTML 代码预览：点击后创建 srcdoc iframe，仅授予 `sandbox="allow-scripts"`，未授予同源权限，并设置 no-referrer。预览脚本通过 postMessage 上报高度；宿主同时检查来源窗口、消息类型与 frameId，将高度限制在 100–12000px。返回代码视图或清理消息时移除监听器、清空 srcdoc、导航到 about:blank 并移除 iframe。该边界与直接进入主 DOM 的原始 HTML 动画岛不同。依据：[预览创建、通信与销毁](../../VCPChat/modules/renderer/contentProcessor.js#L817-L924)。
   - 阅读窗口：模型内联脚本在**查看器窗口主 DOM** 执行（text-viewer.js:931-1043），CDN 的 three.js/anime.js 替换为本地 vendor（882-924），脚本可访问 `viewerAPI`（含 Python 执行等，text-viewer.js:1211-1234）。
   - three.js 预览：代码块检测 `THREE.` 与语言标记（text-viewer.js:1575-1579），注入本地 vendor 后在 iframe 内运行（1683-1711）。
 - **语言进程**：
-  - Python 双模式（text-viewer.js:1239-1248）：沙箱模式用 Pyodide WASM（`vendor/pyodide.js` + CDN pyodide v0.25.1，`# requires:` 注释声明包，1087-1154）；本地模式经 IPC 启动本机 `python -u` 进程（main.js:1185-1221），无沙箱、无超时、10MB 缓冲区，ANSI 剥离后展示（text-viewer.js:1251-1255）。
-  - Canvas 窗口的 Python 运行按钮同样走本机 python（Canvasmodules/canvas.js:641-654）。
+  - Python 双模式：沙箱模式使用 Pyodide WASM，本地模式经 IPC 启动本机 `python -u`，将代码写入 stdin，累计 stdout/stderr 后一次返回。该 handler 没有超时、进程取消或输出截断；源码虽给 spawn 传入 10MB 的 maxBuffer，但没有按输出大小检查或终止的路径，不能据此确认输出配额。依据：[本机执行 handler](../../VCPChat/main.js#L2073-L2109)。
+  - Canvas 窗口的运行按钮调用同一 Python IPC，结果区展示输出与错误。依据：[Canvas 运行入口](../../VCPChat/Canvasmodules/canvas.js#L1076-L1090)。
 - **桌面挂件**：Shadow DOM 隔离（widgetManager.js:70-93），脚本包装为 IIFE 沙箱并注入宿主 API（widgetManager.js:500-625），本地/同源 script 被 fetch 后包裹执行，CDN 脚本透传不包装（640-692）。依赖提供：挂件通过 `widgetFS.loadFile` 读取收藏目录附加文件（app.js/style.css 等），CDN 库直连。
 
 ## 5. 用户交互、事件与错误反馈
@@ -122,13 +122,13 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 ## 7. 能力桥、执行位置与权限范围
 
-执行位置汇总（前节已述）：宿主 DOM（阅读窗口/桌面窗口/Canvas 窗口）、气泡内同源 iframe（无 sandbox 属性）、Pyodide WASM（沙箱内）、本机 python 进程（完全无沙箱）、VCPDistributedServer 本地服务（插件工具，Agent 工具类目边界）。
+执行位置包括宿主 DOM、不同权限的预览 iframe、Pyodide WASM、本机 Python 进程及分布式插件服务。气泡代码预览使用无同源权限的 iframe；阅读窗口代码预览与直接进入页面的脚本权限不同，具体配置见第 4 节。
 
 能力桥（生成对象→宿主动作）：
 
 - **挂件沙箱注入 API**（widgetManager.js:500-625）：`widgetFS`（文件读写，限制在收藏目录，带文件名安全校验与核心文件保护，desktopHandlers.js:1070-1080）、`musicAPI`（播放控制）、`__vcpProxyFetch`（admin API Basic Auth 代理，vcpProxy.js:60-73）、`__vcpProxyPost`（OpenAI 兼容模型调用，vcpProxy.js:94-151——挂件可再调模型，形成模型-挂件环）。
 - **阅读窗口**：`viewerAPI.executePythonCode`（本机进程执行）、`openNotesWithContent`（写入笔记）、`openImageViewer`（截图展示）。模型内联脚本因此可获得与窗口同等的桥能力（安全边界弱，静态确认事实）。
-- **气泡 iframe**：仅 `postMessage('vcp-html-resize')` 单向通信（`contentProcessor.js:823-835`）；无沙箱属性和主窗口 preload 环境的叠加意味着 iframe 内脚本可访问聊天 API（推断，未验证具体可达面）。
+- **气泡代码预览**：宿主提供的消息桥只处理尺寸上报，并验证来源与 frameId；iframe 未获得同源权限，本次未找到向它注入聊天或本机执行 API 的路径。正文主 DOM 动画岛另按页面脚本权限运行。依据：[预览权限与尺寸消息](../../VCPChat/modules/renderer/contentProcessor.js#L859-L924)。
 - **桌面远程控制**（模型→桌面，由 Rust/服务端经 IPC 注入 VCPDistributedServer.js:57）：这是模型查询/修改活对象的受控通道，提供：
   - `SetWallpaper`：写 `AppData/DesktopData/ai_wallpaper_*.html`（desktopRemoteHandlers.js:287-356）；
   - `CreateWidget`：写 widget 目录 app.js/widget.html（621-622）；
@@ -152,7 +152,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 ## 10. 生命周期、资源治理与性能
 
-- **消息内资源**：`visibilityOptimizer`（visibilityOptimizer.js:41-884）用 IntersectionObserver 热区检测，离屏消息暂停 rAF/Element.animate/Three.js 实例与媒体，并缓存高度（`containIntrinsicSize`，与 Pretext 文本测量引擎集成，见 `PRETEXT_INTEGRATION.md`）；`cleanupMessageDomResources`（messageRenderer.js:2318）与 `cleanupPreviewsInContent`（contentProcessor.js:1321）释放 iframe、事件监听器与动画。
+- **消息内资源**：可见性所有者按消息登记动画、媒体、定时器和图形实例，离屏时冻结，移除消息时撤销观察并清理资源。Pixi 单独实行按聊天根的已启动气泡配额：通常最多三个，历史初载最多一个；满额先淘汰离屏旧实例，热区内不能取得配额的新实例被销毁并标记抑制。详情见[消息渲染器笔记](../消息渲染器/VCPChat-消息渲染器调查笔记.md#脚本执行)；依据：[Pixi 配额](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473)、[资源清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
 - **流式 transient**：预缓冲上限、桌面推送 interval 与 150s 空闲超时（`desktopPushConsumer.js:42-43`）、页面卸载全局清理（`streamManager.js:336-345`）、消息终态清理推送状态（`streamManager.js:1736-1738`）。
 - **桌面窗口**：`visibilityFreezer`（`Desktopmodules/core/visibilityFreezer.js:154-183`，冻结壁纸 iframe/视频）；挂件删除带 450ms fallback（`widgetManager.js:10-12`）；z-index 管理、拖动限位。
 - **渲染性能**：30fps 合帧、`findExplicitStablePrefix` 避免全量重解析、`renderHtmlCache`（`messageRenderer.js:1838-1904`，FNV1a 指纹，含 shouldBypassRenderHtmlCache 判定）、块级 HTML 缓存复用（`streamManager.js:634-653`）。
@@ -170,8 +170,8 @@ Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、�
 
 **已确认边界**（本次调查结论）：
 - 不存在统一 Artifact/输出对象模型、无对象注册表、无模型侧跨回合对象绑定——**唯一例外是 Scriptorium 文档工程**（VDOCX/VPPTX + 文脉 PR，6.2），聊天消息/桌面挂件/Canvas 文件均无版本语义。
-- 气泡内 HTML 预览 iframe 未设 sandbox 属性（`contentProcessor.js:773-780`）；阅读窗口内联脚本在窗口主 DOM 执行（`text-viewer.js:1104-1150`）——均为静态代码确认的架构事实，其安全影响未评估。
-- 本机 Python 执行（`main.js:1398-1434`）无沙箱/超时/资源限制。
+- HTML 的执行边界按表面区分：气泡代码预览只授予脚本权限；阅读窗口的 HTML/three.js 代码预览还授予同源、弹窗、下载等权限；直接写入阅读窗口正文的内联脚本则在查看器主 DOM 执行。三者不能共享同一种沙箱判断。依据：[气泡预览](../../VCPChat/modules/renderer/contentProcessor.js#L859-L866)、[阅读窗口脚本](../../VCPChat/modules/text-viewer.js#L1059-L1179)、[阅读窗口代码预览](../../VCPChat/modules/text-viewer.js#L1757-L1783)。
+- 本机 Python 执行没有专用沙箱、超时或输出截断，权限随宿主进程；详见[执行 handler](../../VCPChat/main.js#L2073-L2109)。
 - 桌面挂件脚本沙箱对 CDN 脚本透传（`widgetManager.js:768-776`），沙箱 IIFE 内注入宿主桥（widgetFS/musicAPI/vcpProxy）。
 - 消息 DOM 是派生投影，history.json 为事实源；流式期间存在"源码前缀 + 块 HTML 缓存 + 预览 DOM"三份状态，切换视图时以块 HTML 恢复（`streamManager.js:568-606`）。
 

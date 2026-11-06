@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/store/plugin.ts`、`app/client/platforms/openai.ts`、`app/utils/chat.ts`、`app/mcp/`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
@@ -19,7 +19,7 @@ NextChat 的“Agent 工具”是挂在普通聊天请求上的两条工具链�
 1. **OpenAPI 插件工具**把 YAML/JSON OpenAPI 文档的 operation 转成 OpenAI 风格的 `function` schema，同时生成一个本地执行映射。模型返回原生工具调用（`tool_calls`）后，浏览器并发执行对应 HTTP operation，把助手侧调用记录与工具结果消息（`role: tool`）追加回请求，再递归发起下一轮请求。
 2. **MCP 工具**不进入原生 `tools` 数组。已连接 stdio MCP server 的工具描述被拼入 system prompt，模型按 `json:mcp:<clientId>` fenced block 输出请求；客户端正则提取并通过 MCP SDK 执行，再把结果作为带 `isMcpResponse` 标记的用户消息送回模型。
 3. 插件选择存放在当前会话的 `Mask.plugin` 中，只有当前会话选中的插件才会通过 `getAsTools` 注入。内置插件在插件 store hydration 时从 `public/plugins.json` 加载，用户插件和内置插件使用同一套 OpenAPI 转换路径。
-4. 工具执行完全在客户端/桌面端请求上下文内，没有统一的审批、沙箱、权限策略或 Agent 步数上限。插件 endpoint、认证位置和 token 均可由用户配置；MCP stdio 子进程继承整个 `process.env`，因此执行边界很宽。
+4. 插件 HTTP 请求由浏览器/桌面请求链执行，MCP 则通过 Next.js server action 在服务端进程管理 stdio 子进程。MCP 要求功能开启、部署配置访问码且请求携带有效访问码；子进程只组合 SDK 默认环境与服务器配置环境。门禁控制整组端点访问，工具调用本身无逐次审批、统一沙箱或 Agent 步数上限。见 [授权检查](../../NextChat/app/mcp/actions.ts#L26-L49)、[子进程环境](../../NextChat/app/mcp/client.ts#L12-L31)。
 
 ## ASCII 调用链图
 
@@ -121,7 +121,7 @@ usePluginStore.getState().getAsTools(
 
 MCP 模块是 `"use server"` 模块，导出的函数等价于可直接被 HTTP 调用的端点，因此每个入口都先过一道授权检查：`ENABLE_MCP` 必须为 `true`，部署侧必须配置 `CODE`，调用方传入的 access code 的 MD5 需落在 `CODE` 允许集合内，否则直接抛错。配置读取与写回、子进程启动、工具枚举、工具执行都受这道门禁约束（`app/mcp/actions.ts:29-50`）。MCP 市场页从 AccessStore 取 access code 随每次调用下传，没有把授权状态留在服务端会话里（`app/components/mcp-market.tsx:46-49`）。
 
-`app/mcp/client.ts:12-31` 不再把整个 `process.env` 复制进子进程：子进程环境由 MCP SDK 的默认环境集合提供基础变量，再叠加各自 server 配置里的 `env`。CLI 型 server 仍能拿到运行时所需的默认变量，配置里声明的自定义变量照旧生效。
+MCP stdio 子进程采用 [getMcpChildEnvironment](../../NextChat/app/mcp/client.ts#L12-L31)：子进程环境由 MCP SDK 的默认环境集合提供基础变量，再叠加各自 server 配置里的 `env`。CLI 型 server 仍能拿到运行时所需的默认变量，配置里声明的自定义变量照旧生效。
 
 ### 3.2 Prompt 协议和回注
 
@@ -158,7 +158,7 @@ undefined | initializing | active | paused | error
 ## 5. 风险、边界和未验证事项
 
 1. **缺少审批/沙箱**：插件 HTTP 请求和 MCP stdio 调用在用户会话上下文直接执行，代码中没有统一的确认弹窗、权限白名单或最小权限运行时。MCP 侧新增的 access code 校验属于部署级门禁（谁能调用整组端点），不构成逐次工具调用的审批；通过校验后的一次工具调用仍按模型给出的参数直接执行。
-2. **凭据暴露面**：插件认证 token 会进入客户端持久化状态；MCP access code 也由客户端 AccessStore 持有并随每次 server action 传入，因此能访问前端的人可以复用该 code 调用 MCP 端点。MCP 子进程环境已改为 SDK 默认变量加 server 配置，但配置里的 `env` 仍是原样传入。应把 plugin schema、认证信息和 MCP 命令视为高信任配置。
+2. **凭据暴露面**：插件认证 token 会进入客户端持久化状态；MCP access code 也由客户端 AccessStore 持有并随每次 server action 传入，因此能访问前端的人可以复用该 code 调用 MCP 端点。MCP 子进程环境为 SDK 默认变量加 server 配置，但配置里的 `env` 仍是原样传入。应把 plugin schema、认证信息和 MCP 命令视为高信任配置。
 3. **文本协议脆弱**：MCP 依赖正则和完整 fenced block，模型输出多个调用、未闭合 block 或非法 JSON 时只会记录错误，未见结构化恢复或重试。
 4. **递归请求无步数上限**：工具始终重新请求同一 payload，若模型持续调用工具，主要依赖请求 abort，而不是 Agent 状态机收敛。
 5. **兼容性范围**：本次确认了 OpenAI-compatible adapter 的原生工具路径；其他 provider adapter 是否完整支持插件工具，需要逐个检查，不能从 `ClientApi` 接口直接推断。

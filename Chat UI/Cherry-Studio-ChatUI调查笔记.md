@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -18,7 +18,7 @@
 - **会话单位 Topic 是导航单位**：侧栏列表 + 右侧分支面板（React Flow 树图）+ 消息列表 `< i/N >` 兄弟导航三套入口并存；分支面板看到的是"DB 树 + live overlay"合并结果。
 - **搜索是双轨的**：会话内搜索（`MessageListSearch` + `FindBar`）是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"的混合实现，支持虚拟化窗口外的消息定位；跨会话全局搜索（`GlobalSearchPopup`，`app.search` 命令）走主进程 FTS（数据侧见会话与消息管理笔记 5）。
 - **多模型并行**通过 Composer 的"提及模型"多选触发：选中 N 个模型 → 主进程并行 N 个 execution，读侧按兄弟组横向/网格展示（执行语义见对话请求与上下文笔记 8）。
-- **桌面集成不与聊天状态联动**："助手回复完成"系统通知开关仍接不到任何触发点（全仓库无 `source: 'assistant'` 调用）、托盘无未读/流式角标、无快捷键速查浮层。
+- **通知与会话状态联动**：持久化会话完成及工具待审批会触发通知，聚焦窗口用 toast，失焦时按助手偏好发系统通知；点击返回对应会话。托盘未读/流式角标与快捷键速查浮层在所查入口中未找到。
 - **无障碍**：Topic/Session 列表有完整的 listbox 语义（roving tabindex + `aria-activedescendant`，有测试覆盖）；消息操作栏按钮现在都有 `aria-label`（取自 action 的翻译 label）；Composer 输入区本体仍没有可访问名称（RichEditor 内核支持可选 `ariaLabel`，但 ComposerSurface 未传入）。
 
 ## 工作台边界与用户主链
@@ -165,11 +165,11 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 **删除可用性**：语义由 `ChatWriteContext.ts:21` 的 `getMessageDeleteAvailability` 与 `useChatWriteActions.ts:210-220` 定义：消息未加载 → 禁用并提示"消息未加载"；生成中（`status='pending'`）→ 禁用并提示"正在生成"（tooltip 文案映射见 `messageDeleteAvailability.ts:6-13`）。数据侧（首轮可删、组删除只删兄弟回复）见会话与消息管理笔记 1.2。
 **可用性判定机制**：几乎所有 action 的 `availability` 都在判断 `!!actions.xxx`——能力是否出现完全由适配器注入的字段决定（6.2），不是 if/else 页面模式分支。
 
-### 6.2 适配器注入的操作面：Home 可写、Agent 只读 + agent 专属
+### 6.2 适配器注入的操作面：共同契约与业务专属能力
 
 - 能力以**可选字段对象**注入，由两个 hook 分别组装通用能力（导出/复制/通知等）与按消息的可变能力（`useMessageListAdapterCapabilities.ts:30`、`useMessageLeafCapabilities.ts:112`）；`messageListProviderBuilder.ts` 的三个 pick 函数（`pickMessageLeafState/pickMessageLeafActions/pickMessageHeaderActions`）只把存在的字段塞进 state/actions（`:24,44-57,66`）。
 - **Home 适配器**（`homeMessageListAdapter.tsx`）：无只读标志；注入全套写操作（完整清单见本节末尾源码列表，`:839-876`），全部经由 `requireChatWrite('xxx')` 从 `ChatWriteContext` 获取真实实现（该 context 由 `ChatContent.tsx:265` 注入）。
-- **Agent 适配器**（`agentMessageListAdapter.tsx`）是可写能力最少的一侧：`actions` 没有编辑、组删除、切换分支、重新生成、翻译等写操作（未注入清单见本节末尾源码列表）；`deleteMessage` 存在，但被 `normalInteractionsEnabled` 门控，仅图片捕获模式之外启用（`:257`）。
+- **Agent 适配器**提供用户消息“编辑并重发”、兄弟分支切换与“复制为新会话”。编辑入口只对普通交互模式下、非跨会话投递的用户消息显示，并在编辑忙碌时禁用；复制依据 runtime checkpoint 判断可用性，通过 IPC 创建会话后跳转新现场，子会话另有来源返回入口。编辑会保留原分支，持久化和原生历史语义见[会话与消息管理笔记 1.3](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)。依据：[agentMessageListAdapter.tsx:412–497](../../cherry-studio/src/renderer/pages/agents/messages/agentMessageListAdapter.tsx#L412-L497)。
 - **agent 专属操作**：另多出工作区文件、工具审批、artifact 面板等入口（`respondToolApproval/openArtifactFile/openAgentToolFlow/openInExternalApp/openPath`），相对路径经 `resolveWorkspaceFilePath` 解析到 agent workspace 目录（`:123-137`）——这些是 agent 运行时才有的概念，Home 侧没有对应实现。
 - **终态兜底**：agent 侧另有 `withTerminalErrorFallback`（`:48-73`）——消息终态是 `error`/`success` 但没有可见 part 时，补一条 `data-error` part，防止 UI 卡在空白/转圈（执行侧语义见对话请求与上下文笔记 6）。
 - 总结：不是靠 if/else 判断"我是 Home 还是 Agent"，而是靠两份完全独立的 hook 各自组装一份 `MessageListActions` 对象，字段有没有由各自的业务上下文决定；旧的 `state.readonly: true` 标志机制已不存在。
@@ -177,7 +177,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 **本节末尾源码列表**（各适配器注入的写操作集合）：
 
 - Home 注入：`deleteMessage`、`deleteMessageGroup(WithConfirm)`、`editMessage`、`startMessageBranch`、`setActiveBranch`、`regenerateMessage`、`translateMessage`、`abortMessageTranslation`、`removeMessageTranslation`、`renderRegenerateModelPicker`（`homeMessageListAdapter.tsx:839-876`）
-- Agent 未注入：`editMessage`、`deleteMessageGroup`、`setActiveBranch`、`regenerateMessage`、`translateMessage`（`agentMessageListAdapter.tsx:399-423`）
+- Agent 通过独立的 startEditing、setActiveBranch 与 forkSession 提供编辑重发、兄弟切换和复制新会话；普通 regenerate、翻译与代码块直接保存未由该适配器注入（[agentMessageListAdapter.tsx:479–525](../../cherry-studio/src/renderer/pages/agents/messages/agentMessageListAdapter.tsx#L479-L525)）。
 
 ### 6.3 分支面板（TopicBranchPanel）：消息树的图形导航
 
@@ -238,14 +238,8 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 - **托盘**：`TrayService.ts` 在 mac 上根据系统明暗主题切换亮/暗两套托盘图标（`:29`）；点击托盘图标的行为受偏好 `feature.quick_assistant.click_tray_to_show` 控制——开则唤起 QuickAssistant 悬浮窗，关则唤起主窗口（`:61-71`）。
 - **托盘无角标**：托盘本身**不显示未读消息数/流式状态角标**，未检索到 `setBadgeCount`/`flashFrame`/`setOverlayIcon` 等角标 API 调用。
-- **系统通知**：主进程通知服务（`src/main/services/NotificationService.ts:7-20`）用 Electron 原生通知 API，点击通知会唤起主窗口并广播 `notification.clicked`（`:14-17`）；渲染层发送入口（`src/renderer/services/notification/NotificationService.ts:10-24`）先查 `assistant/backup/knowledge` 三个偏好开关，再决定是否调 IPC 发送。
-- **通知空挂钩**：偏好 `app.notification.assistant.enabled` 和对应设置项（"助手回复完成通知"）确实存在，但**全仓库检索不到任何一处 `source: 'assistant'` 的发送调用**——"助手完成回复时弹系统通知"这个开关目前接不到任何触发点，用户能看到、能勾选，但不会生效。实际存在的发送调用点：
-
-  - `BackupService.ts`：6 处 `source: 'backup'`（`:80,150,168,233,251,344`）
-  - `useAutoBackupEvents.ts`：1 处（`:57-64`）
-  - `useAppUpdateHandler.ts`：`source: 'update'`（`:40-46`）
-
-  另有一条已知 TODO：`NotificationService.ts:17-20` 中 `update` 来源因没有对应偏好键而被静默丢弃。
+- **会话完成与审批通知**：主进程通知服务订阅普通聊天与 Agent 的完成/审批事件，按会话类型和 ID 生成导航目标。持久化会话成功结束才发完成事件，文案取最后一句回复或会话名；审批另用 warning 状态。若有聚焦的完整窗口，只向该窗口发送应用内通知；主/分离窗口均挂载通知消费组件，当前活动标签就是目标会话时抑制 toast，其余 toast 可点击返回目标现场。依据：[ChatStreamLifecycle.ts:71–89](../../cherry-studio/src/main/ai/streamManager/lifecycle/ChatStreamLifecycle.ts#L71-L89)、[NotificationService.ts:49–144](../../cherry-studio/src/main/services/NotificationService.ts#L49-L144)、[ConversationNotificationRuntime.tsx:10–32](../../cherry-studio/src/renderer/components/ConversationNotificationRuntime.tsx#L10-L32)。
+- **失焦与系统通知**：无聚焦完整窗口时才读取助手通知偏好，开启后创建 Electron 原生通知；点击经会话导航服务聚焦现有目标或打开对应会话。助手回复完成开关因此有真实执行入口，与只查找渲染层通知调用会得出的结论不同。操作系统通知中心、平台通知权限与点击后的焦点表现尚未运行验证。主进程另在全部系统通知偏好关闭时清 macOS Dock 计数；托盘角标与 Dock 计数是两类表面。依据：[NotificationService.ts:67–86,135–160](../../cherry-studio/src/main/services/NotificationService.ts#L67-L86)。
 - **全局快捷键**：`ShortcutService.ts` 按**本地/全局分轨**——带 `global` 标记的快捷键仍在系统级注册（`:44,104`），其余本地快捷键不再注册到系统，而是挂在窗口 `webContents.before-input-event` 事件上按命令解析拦截（含 guest webview 输入，`:173-187`），应用失焦时本地快捷键自然不生效。
 - **冲突处理**：快捷键被其他应用占用时仍记录冲突集合并经 IPC 广播给渲染层展示提示（`:243,266` 附近）。
 - **标签页导航**：另新增 `tab.next`/`tab.prev` 标签页导航快捷键（`AppShell.tsx:100-101`）。
@@ -291,9 +285,9 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 - **`ChatComposer.tsx` 单文件体量大**（约 1859 行）：`ChatComposerInner` 一个组件本体加上闭包状态，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，在同一个函数体内用多个 ref 协调（3.3）。
 - **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
-- **适配器模式的代价与收益**：能力注入（6.2）让"Home 可写、Agent 只读"不需要 if/else 分支，代价是追踪某个按钮为何出现需要跨两个 adapter 文件加能力 hook；`messageListProviderBuilder.ts` 的"只塞存在的字段"（`pickMessageLeafState` 等纯函数）保证 `actions.xxx &&` 判断语义清晰（该文件细节见消息渲染器笔记）。
+- **适配器模式**：Home 与 Agent 各自提供适合本业务的编辑、分支和执行操作，下游按能力存在性显示按钮。理解一个入口需同时追踪适配器与能力 hook，不能以两侧是否共用消息壳判断读写能力。
 - **搜索的"数据 + DOM"双轨**（2.3）：粗匹配在已加载数据上、精确高亮在已挂载 DOM 上，虚拟化窗口外的消息可定位但无 DOM 高亮；流式行被排除、未加载页搜不到，由分页与数据匹配的组合决定，数据侧影响见会话与消息管理笔记 5。
-- **桌面集成缺口**（8.2）：通知空挂钩、托盘无角标、无快捷键速查浮层；Session 列表无拖拽排序（2.2）。
+- **桌面集成边界**（8.2）：完成与审批通知可返回会话；托盘未读角标和快捷键速查浮层在所查入口中未找到，Session 列表无拖拽排序（2.2）。
 - **类目边界**：本笔记只记录用户工作流与界面状态；树模型与指针语义在会话与消息管理笔记 1/4，流式执行与最终化在对话请求与上下文笔记 5/6，消息壳与 Markdown 渲染在消息渲染器笔记。
 
 ## 12. 未验证事项

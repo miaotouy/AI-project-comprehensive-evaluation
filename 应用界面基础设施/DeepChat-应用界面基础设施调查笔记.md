@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -49,7 +49,7 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 
 另有 src/renderer/floating（悬浮按钮，自建轻量 Vue 根，`floating/main.ts:19-24`，主题经 floatingButtonAPI 独立拉取）与 src/renderer/browser-overlay（浏览器浮层）两个入口。
 
-跨窗口同步走主进程事件广播（主题/语言/设置变更事件），运行时状态（session busy/streaming）为窗口内内存（见 ChatUI 笔记 §1）。
+主题、语言和设置经主进程事件广播；聊天运行时由主进程权威状态投影到各窗口。窗口内独立缓存完整流式内容，绑定窗口接收流快照，其余窗口通过节流 activity 与状态事件更新最近视图，终态 activity 立即广播（`src/main/events/sessionEventRouter.ts:78-95,160-179`、`src/renderer/src/stores/ui/messageIpc.ts:230-245`）。
 
 **状态所有权概览。** 弹窗分三类——全局确认 MessageDialog 由主进程 DialogService 持状态（Promise map）、renderer dialog store 只做呈现；业务确认对话框状态在页面局部（pendingDeleteMessageId 等）；MCP 采样/许可等系统对话框由各自 Pinia store 持有。
 

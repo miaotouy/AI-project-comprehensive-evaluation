@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-当前快照只保留一条主链：**结构化 JSON 导出 + 导入重建**。导出对象是一个 JSON 文档，包含会话信息与消息数组，消息使用当前的消息模型（用户、助手、系统、合成、技能、shell、压缩等类型及其内容项），不经过渲染投影。导入不是逐表覆盖，而是把文档当作事件源重放：先发布会话创建事件，再按序写入消息并推进序列号；如果目标实例已存在同 id 会话则直接报冲突。
+当前快照的交付形态为**结构化 JSON 导出 + 导入重建**，CLI 与 App 使用不同抽取入口。导出对象是一个 JSON 文档，包含会话信息与消息数组，消息使用当前的消息模型（用户、助手、系统、合成、技能、shell、压缩等类型及其内容项），不经过渲染投影。导入发布会话创建事件，在其提交事务内直接插入消息行并预留后续事件序号；它没有逐条重建原始文本/工具事件；如果目标实例已存在同 id 会话则直接报冲突。
 
 分享与 PR 续作两条旧链已不在当前代码中：CLI 命令表里没有 share/unshare 与 pr 命令，服务端没有分享模块，会话表只保留遗留的分享地址列。导出文件也不含 Artifact 与工具输出落盘的内容。
 
@@ -25,11 +25,12 @@
 ```text
 导出
   CLI: opencode session export [--sanitize] [sessionID]
-  App: 会话命令 -> GET /api/experimental/session/:sessionID/export
-  -> SessionTransfer.export：取会话信息 + 全部消息（升序）
-  -> 过滤未收口消息（助手未完成、shell/压缩仍在运行）
-  -> 可选脱敏
-  -> 输出 {info, messages}
+   -> experimental.session.export -> SessionTransfer.export
+   -> 按 seq 升序读取消息，过滤未收口消息，可选脱敏
+  App: 会话/首页/时间线命令 -> fetchSessionExport
+   -> session.get + message.list（每页 200，mediaRefs:false）
+   -> 依游标拼接消息，无已收口过滤与脱敏步骤
+  两条路径均输出 {info, messages}，内容口径有差异
 
 导入
   CLI: opencode session import <file|url> [--directory]
@@ -51,13 +52,13 @@
 | App 导出 | `packages/app/src/session/commands/export.ts` | 拉取导出数据并下载为文件 |
 | HTTP 端点 | `/api/experimental/session/:sessionID/export`、`/api/experimental/session/import` | 服务端实现 |
 
-导出范围是整会话：CLI 一次取全部消息并按时间升序；App 端按游标分页拉取（每页 200）后拼成同一形状。没有单条消息、范围、选区或分支子集的选择。
+导出范围是整会话：CLI 一次取全部已收口消息并按消息 seq 升序；App 端按游标分页拉取（每页 200）后拼成同一形状。没有单条消息、范围、选区或分支子集的选择。
 
 ## 2. 内容口径与字段
 
 - **会话信息**：id、父会话、项目与位置、标题、Agent、模型、权限、开销与时间信息等（`packages/schema/src/session.ts` 的会话信息结构）。
 - **消息**：使用当前消息模型的完整结构（`packages/schema/src/session-message.ts`），包括用户消息的文本、文件、Agent、技能引用，助手消息的内容项（文本、推理、工具）与终止原因，shell 消息的命令与输出，压缩消息的摘要与状态。
-- **过滤规则**：导出与导入都只处理"已收口"消息——助手消息需有完成时间，shell 与压缩消息需处于非运行态（`transfer.ts:202`）；进行中的内容不会进入档案。
+- **过滤规则分入口**：CLI/实验性 export 端点与导入服务仅保留已收口消息：助手有完成时间，shell/压缩处于非运行态。App 则分页读取普通消息接口并原样拼接，可能携带进行中的消息；再次导入仍会过滤这些条目（[转移服务](../../opencode/packages/core/src/session/transfer.ts#L60-L83)、[App 抽取](../../opencode/packages/app/src/session/commands/export.ts#L10-L37)）。
 - **不含对象**：Artifact、工具输出的落盘文件、待办（属于会话事件而非消息）、blob 实体的原始字节（媒体由消息内联数据承载）。
 
 ## 3. 脱敏规则
@@ -77,7 +78,7 @@
 
 - 消息中的媒体有两种承载：内联数据与 blob 引用。导入时会拆分内联媒体，仅当目标实例启用 blob 存储时把内联数据写入 blob 表并记录引用；文档携带的 blob 引用不会被信任，避免导入方凭引用读取原本不持有的内容（`transfer.ts:96-110` 的注释与切分逻辑）。
 - 导出不下载、不打包外部文件；工具引用到的文件与 Artifact 不在文档内。
-- 因此档案可离线打开的范围限于 JSON 本身，图片等媒体能否显示取决于导入实例是否启用了 blob 存储。
+- 普通消息读取会把本地 blob 引用物化为消息内联媒体，App 明确设置 `mediaRefs:false`；CLI 的转移服务也读取物化后的消息。目标启用 blob 时再拆分内联字节，未启用则保留内联数据；因此媒体可移植性取决于导出文件是否携带字节，与目标是否启用 blob 无直接等价关系（[历史物化](../../opencode/packages/core/src/session/history.ts#L149-L159)、[导入分支](../../opencode/packages/core/src/session/transfer.ts#L95-L142)）。外部路径与远端资源仍需原环境。
 
 ## 5. 格式、往返与冲突
 
@@ -105,7 +106,7 @@
 
 - **只做数据交换**：导出物是结构化原文，没有 Markdown/HTML/PDF/截图等交付物，也没有分享稿编辑器或预览工作台。
 - **服务端脱敏**：脱敏集中在转移服务，CLI 只是开关；Web 端导出未暴露脱敏开关。
-- **导入按事件重放**：没有逐表覆盖路径，因此导入后的事件序列与投影保持一致，代价是必须跳过进行中消息。
+- **导入采用创建事件加批量消息提交**：创建与消息行写入共享提交边界，并预留事件序号；原始流式事件历史、inbox 与执行 claim 不由档案重建（[transfer.ts](../../opencode/packages/core/src/session/transfer.ts#L106-L180)）。
 - **拒绝重复 id**：跨实例迁移需要先删除或换 id，没有自动重命名策略。
 - **分享与 PR 续作属历史能力**：当前快照未实现，不能按旧笔记推断仍可用。
 

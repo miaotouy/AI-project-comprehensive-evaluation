@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/CherryHQ/cherry-studio`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e2fd716e569c73c1baa4ac226b6b0607792cdb9d`（分支：`main`）
 >
@@ -17,7 +17,7 @@
 Cherry Studio 有三条独立的完整主链，均为 `主链确认`（静态证据）：
 
 - **外部执行体（进程内 runtime）**：`AgentSessionRuntimeService` 把 Agent runtime 作为独立会话执行者接入，覆盖工作区、消息持久化、流事件、工具审批和取消。runtime 驱动为三种：`claude-code`、`pi`、`pi-durable`，由 Agent 行的 `type` 字段选择。
-- **外部执行体（受管 CLI）**：Code CLI 管理层为十余个第三方编程代理写配置、准备二进制并在本机终端中拉起，DeepSeek Harness 已从 Agent runtime 迁到这一面。
+- **外部执行体（受管 CLI/Web）**：Code 页面为十余个第三方编程代理准备配置与二进制；常规 CLI 在外部终端启动，DeepSeek Harness 则由专用服务启动本机 Web 子进程并嵌入应用标签页，独立于三种 Agent runtime。
 - **外部控制表面**：IM 渠道层（discord / dingtalk / feishu / qq / slack / telegram / wechat / wecom 八平台）与远程访问设备把 Agent Session 作为可由宿主之外发起、回答、接管和停止的交互对象。
 
 普通聊天中的 MCP server 只属于 Agent 工具。只有具备独立 runtime、进程或协议生命周期的路径才进入本类目。
@@ -26,7 +26,7 @@ Cherry Studio 有三条独立的完整主链，均为 `主链确认`（静态证
 
 - **进程内 Agent runtime**：三种驱动在 `registerRuntimeDrivers` 中一次性注册（`src/main/ai/runtime/registerDrivers.ts:149-152`），runtime 类型取值由 `AGENT_TYPES` 固定为 `claude-code`、`pi`、`pi-durable`（`src/shared/data/api/schemas/agents.ts:45`）。会话按 Agent 行的 `type` 选择驱动，驱动注册表只按类型查找。
 - **驱动与实现的分离**：每个驱动只做主进程侧适配，原生执行由内部包承担——Claude Code 走 `@anthropic-ai/claude-agent-sdk`，Pi 与 Pi-Durable 分别对应 `packages/agent-runtime-pi` 与 `packages/agent-runtime-pi-durable`，产品规则由与 harness 无关的 `packages/agent-behavior` 承担。Cherry 持有 Agent Session 产品对象、workspace、消息后端、工具曝光策略、审批 UI 和事件投影。
-- **受管 Code CLI**：`CodeCliService` 维护一组外部 CLI 预设（Claude Code、Codex、opencode、openclaw、DeepSeek Harness、Gemini CLI、Qwen Code、Kimi Code、Qoder、GitHub Copilot CLI、Pi、Hermes、MiniMax Code、Antigravity），负责写各家配置文件、准备二进制与登录，并在用户选择的终端应用中启动。
+- **受管 Code CLI/Web**：Code 页面维护多种外部编程代理预设，通用 Code CLI 服务负责配置、二进制与外部终端启动；DSH 由专门服务管理 Web 子进程，启动后前端用小程序标签打开其 URL。依据：[useDeepSeekHarnessController.ts:58–106](../../cherry-studio/src/renderer/pages/code/hooks/useDeepSeekHarnessController.ts#L58-L106)。
 - **外部控制表面**：IM 渠道（`src/main/ai/channels/`）以数据库渠道行保存连接，适配器覆盖八平台；远程访问服务（`src/main/services/remoteAccess/`）让已配对设备经加密 WebSocket 使用桌面 Agent。
 - **宿主作为工具面**：`src/main/ai/mcp/servers/assistant.ts` 以 SDK MCP 形式注入会话，提供页面导航（路由白名单）、产品信息、创建 Agent、应用设置等工具，外部 Agent 可操作宿主应用。
 
@@ -78,9 +78,9 @@ IM 渠道的执行与回流与桌面 Agent Session 共用同一套 runtime 驱�
 
 ## 权限、凭据与治理边界
 
-默认权限模式下，Bash 等原生工具逐次审批；`bypassPermissions` 会显著放宽执行。文件类工具由 workspace path hook 限制在工作区或 Agent 数据目录。MCP 工具可采用自身自动审批配置，但不能把普通 MCP 的权限模型等同于原生工具。Pi 侧没有 plan 模式，其 `auto` 是 Cherry 自己的规则门，与 Claude 的模型侧分类器同名不同机制。
+默认权限模式下，Bash 等原生工具逐次审批；`bypassPermissions` 会显著放宽执行。结构化文件工具越出工作区或 Agent 数据目录时触发 ask，是否放行仍受权限模式影响；Bash 文本路径不走这项字段校验，且该规则不构成 OS 沙箱。MCP 工具可采用自身自动审批配置，但不能把普通 MCP 的权限模型等同于原生工具。Pi 侧没有 plan 模式，其 `auto` 是 Cherry 自己的规则门，与 Claude 的模型侧分类器同名不同机制。
 
-模型凭据集中在宿主：Pi 与 Pi-Durable 的每次原生 provider 调用都落到 Cherry 的内部 gateway，由宿主持有上游凭据与计费；受管 Code CLI 则把 gateway 的模型 id 与占位密钥写入各 CLI 配置，凭据本体不出现在 CLI 配置里。远程访问的 token 按能力分权，LAN 守卫只放行远程访问的升级路径，其余 HTTP 路由一律要求 loopback。
+模型凭据集中在宿主：Pi 与 Pi-Durable 的每次原生 provider 调用都落到 Cherry 的内部 gateway，由宿主持有上游凭据与计费；经 gateway 的受管 CLI 配置使用网关模型与占位密钥；DSH 可选择 direct 模式，直接投影 Provider 凭据，具体边界见下节。远程访问的 token 按能力分权，LAN 守卫只放行远程访问的升级路径，其余 HTTP 路由一律要求 loopback。
 
 ## 相邻类目交接
 
@@ -91,7 +91,9 @@ IM 渠道的执行与回流与桌面 Agent Session 共用同一套 runtime 驱�
 
 ## 当前外部执行体补充
 
-DSH 不再是一种 Agent runtime：原 `runtime/dsh` 驱动与 bridge 已移除，DeepSeek Harness 变成 Code CLI 预设之一，由 `DeepSeekHarnessService` 负责网关配置写入、子进程启动/停止与状态发布（IPC 为 `deepseek_harness.start/stop`）。它与其它 Code CLI 的差别是带自己的权限模式与启动超时管理，但执行体仍在本机终端之外，不进入 Agent Session 的消息流。
+DSH 在 Code 页面提供独立受管 Web 执行体。三种 Agent 驱动注册中没有 DSH；通用 `code_cli.run` 也显式拒绝它，转由专用 IPC 控制。主进程服务解析模型与权限模式、写入 DSH 配置后，启动 `dsh web --host 127.0.0.1 --port 0 --no-open`，从标准输出提取 loopback URL 并验证 Web 就绪，才发布 running 状态。用户操作的是 DSH 自己的 Web 界面，会话内容不进入 Cherry 的 Agent Session 消息流。依据：[registerDrivers.ts:148–153](../../cherry-studio/src/main/ai/runtime/registerDrivers.ts#L148-L153)、[CodeCliService.ts:490–498](../../cherry-studio/src/main/services/codeCli/CodeCliService.ts#L490-L498)、[DeepSeekHarnessService.ts:280–312](../../cherry-studio/src/main/services/deepSeekHarness/DeepSeekHarnessService.ts#L280-L312)。
+
+其执行位置是 Cherry 持有生命周期的本机子进程，工作目录为专用托管目录，配置家目录由主进程路径服务解析后注入 DSH_HOME；不经过外部终端启动。启动操作互斥、超时 30 秒，失败会停止子进程并尝试回滚未被并发改动的配置；停止先取消尚在启动的请求，再终止进程树，宽限期后强制结束。配置可经 Cherry gateway 或直连 Provider，直连模式会读取用户启用的 Key 写入 DSH 配置，故“全部外部 CLI 配置仅含 gateway 占位密钥”不能套用于此分支。依据：[DeepSeekHarnessService.ts:89–206,221–277,333–343](../../cherry-studio/src/main/services/deepSeekHarness/DeepSeekHarnessService.ts#L89-L206)。
 
 Pi 一侧的接入面在本次快照中变得更宽：前台子 Agent 用原生会话 fork，后台子 Agent 从原生存储继续，子会话可以持久化并独立流式回投；Pi-Durable 把会话状态与命令收据落到可恢复存储，并在数据目录迁移后仍能恢复。两者的模型绑定共享同一 gateway 绑定逻辑，每个新增模型有独立的原生 provider 注册，避免同 Provider 下多个模型的请求选项互相覆盖。
 
@@ -99,7 +101,7 @@ Pi 一侧的接入面在本次快照中变得更宽：前台子 Agent 用原生�
 
 ## 已确认边界与未验证事项
 
-- 进程内 runtime 为三种（Claude Code / Pi / Pi-Durable），均为静态主链确认，不称为统一 CLI Agent 管理平台；受管 Code CLI 与它们不是同一层，前者只写配置并在终端拉起进程。
+- 进程内 runtime 为三种（Claude Code / Pi / Pi-Durable），均为静态主链确认，不称为统一 CLI Agent 管理平台；受管 Code CLI 与它们不是同一层，普通 Code CLI 写配置后在终端拉起，DSH 则由专门 Web 子进程服务管理。
 - IM 渠道层为八平台静态主链确认，逐平台回调、签名与真实往返未运行验证。
 - 远程访问的配对、加密 WebSocket、日志续传与分页协议均有单元/兼容测试覆盖，但真实移动端往返、网络切换与并发接管未运行验证。
 - SDK session resume、崩溃恢复、版本兼容和真实进程取消未运行验证。

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/lioensky/VCPToolBox`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（分支：`main`）
 >
@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维/配置中枢**，不是聊天产品本身：**Chat UI 不适用**。它不拥有会话事实源与最终用户聊天界面——`/v1/chat/completions` 等端点是纯 API（`server.js:1206`、`:1220`、`:1235-1239`），官方桌面聊天前端是外部项目 VCPChat；同时它是一个**无会话归属的请求级消息编排器**：调用方提交一份 `messages`，服务端在内存中复制、重排、展开、注入和裁剪，形成发给模型的请求；会话 ID、历史数组与最终展示状态仍由外部前端负责。
+VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维/配置中枢**，不是聊天产品本身：**Chat UI 不适用**。最终用户聊天界面与客户端会话导航由外部项目承担——`/v1/chat/completions` 等端点是纯 API（`server.js:1206`、`:1220`、`:1235-1239`），官方桌面聊天前端是外部项目 VCPChat；同时它是一个**无会话归属的请求级消息编排器**：调用方提交一份 `messages`，服务端在内存中复制、重排、展开、注入和裁剪，形成发给模型的请求；会话 ID、历史数组与最终展示状态仍由外部前端负责。
 
 ## 产品表面与系统边界
 
-- **产品表面**：HTTP/SSE API 服务（`server.js` 约 8.8 万行）+ AdminPanel-Vue（独立进程运维后台，`adminServer.js` 监听 PORT+1，主进程对 `/AdminPanel` 302 重定向，与聊天主链物理解耦）+ OpenWebUISub（三个 Tampermonkey 用户脚本，纯前端增强层，后端不感知）。
+- **产品表面**：HTTP/SSE API 服务 + AdminPanel-Vue（独立进程运维后台，`adminServer.js` 监听 PORT+1，主进程对 `/AdminPanel` 302 重定向，与聊天主链物理解耦）+ OpenWebUISub（三个 Tampermonkey 用户脚本，纯前端增强层，后端不感知）。
 - **系统边界**：模型推理由外部上游模型完成；VCP 工具调用走**纯文本标记协议**（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；`finalContextStore`（内存 5 组滑窗）与 ChatLog（可选审计文件）都不是会话持久化——历史必须由外部前端自行保存并在下一次请求重新提交。
 - 与聊天相关的界面全部核实为非聊天界面：Nova 看板娘气泡（静态语料随机台词，无网络请求）、FinalContextViewer（只读调试镜像，无输入框）、VcpForum（Agent 社区论坛管理）、ToolCallRecordsManager（插件调用审计台账）。
 
@@ -42,7 +42,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 ## 核心对象与状态权威
 
 - **无会话对象**：输入单位是请求体 `messages[]`；服务端在单次 HTTP 请求内拥有“请求历史 → 最终上游 messages → 工具递归 messages”的编排能力。
-- 工具循环事实源是模型正文纯文本标记；`finalContextStore`/`ToolCallRecordStore`/ChatLog 均为审计性质，不是会话事实源。
+- 工具循环由模型正文纯文本标记驱动；请求快照、工具台账与 ChatLog 用于审计调试。OneRing 被系统提示词触发后，另按 Agent 保存 SQLite 消息和回合状态，已确认存在跨请求插件历史。
 - 推理字段与正文分离：reasoning 另存日志消息，不进入工具解析与记忆；`<think>`/`<thinking>` 包裹只发生在发给客户端的输出适配（`reasoningContentAdapter.js`）。
 
 ## 专项导航
@@ -54,9 +54,9 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ## 关键能力与已确认边界
 
-- 支持：三种上游协议归一化（Responses/Anthropic/Gemini）；`contextTokenLimit` 按文本字符剪枝（非 token 真值、忽略图片）；VCPTavern 预设注入；消息变量/时间/环境/SAR/日记知识库/动态工具/插件描述展开；RAGDiary/VCPTimeLine/ContextFoldingV2 等插件改写本次数组；VCP 工具循环（普通调用与 archery 分离，成功结果默认不回送模型，仅出错时递归）；多模态预处理与图片翻译；Role Divider 角色拆分。
-- OneRing 默认把 assistant 的来源时间标记拆成独立 user 伪系统块；SAR 增加按模型排除的注入模式，Detector 支持正则替换。这些变化都作用于单次请求的消息编译结果，不改变“外部前端持有会话事实源”的边界（`Plugin/OneRing/OneRingConfig.json:1-8`、`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`）。
-- 已确认边界：无会话列表、消息编辑/删除/分支或跨请求恢复；无最终用户聊天 UI；不参与前端会话状态；`docs/FRONTEND_COMPONENTS.md` 描述的原生 JS AdminPanel 已过时（当前为 AdminPanel-Vue）。
+- 支持：三种上游协议归一化（Responses/Anthropic/Gemini）；`contextTokenLimit` 按文本字符剪枝（非 token 真值、忽略图片）；VCPTavern 预设注入；消息变量/时间/环境/SAR/日记知识库/动态工具/插件描述展开；RAGDiary/VCPTimeLine/ContextFoldingV2 等插件改写本次数组；VCP 工具循环（普通调用结果回灌，archery 成功业务输出通常静默，错误与审批留言可回灌）；多模态预处理与图片翻译；Role Divider 角色拆分。
+- OneRing 默认把 assistant 来源时间标记拆为独立 user 块，同时可记录提交历史并保存最终回复。最终 AI 回复需上游整轮有效且 HTTP finish 后才异步写入；失败只中止当前 pending 回合，不整体撤销此前历史记录（`Plugin/OneRing/OneRing.js:1047-1092`；`modules/handlers/interactionCompletion.js:3-60`）。详见[会话与消息管理](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
+- 已确认边界：已读通用聊天入口未找到客户端式会话列表或分支 CRUD；OneRing 的历史保留和响应更新属于插件级数据机制。无最终用户聊天 UI，不持有前端会话导航；`docs/FRONTEND_COMPONENTS.md` 描述的原生 JS AdminPanel 已过时（当前为 AdminPanel-Vue）。
 
 ## 未验证事项
 

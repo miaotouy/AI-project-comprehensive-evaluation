@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/janhq/jan`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`12c59c8b8b0d6831b3f5601799b4e5d3422cf5d9`（分支：`main`）
 >
@@ -20,7 +20,7 @@
 2. **`/v1/orchestrations` 服务端 MCP 编排端点**（辅助贡献候选）：把 MCP 工具执行作为 HTTP 服务暴露，可配置 router 模型预选工具；与本地 OpenAI 兼容服务相比，它多出服务端的工具编排。
 3. **Jan Agent CLI/TUI**（辅助贡献候选）：裸 `jan` 打开终端 Agent 控制台，`jan cli agent run` 非交互运行项目 Agent，Provider 由 `~/.jan/config.toml`、项目 `agent.toml` 或桌面配置解析。
 4. **Agent 运行时对外协议族**（辅助贡献候选）：会话级 JSON-RPC 允许外部客户端声明自己的 host tool 并由运行时把调用派回客户端；同一 Agent 另有实验性 ACP 入口与"把内置工具作为 MCP server 提供出去"的反向方向。
-5. **可运行时安装、worker 隔离的扩展运行时**（辅助贡献候选）：扩展以 npm 包形式在运行时安装，跑在 worker 里经 RPC 使用宿主能力，只能看见稳定 API 声明的清单字段与贡献点。
+5. **可运行时安装、worker 隔离的扩展运行时**（辅助贡献候选）：第三方扩展以 npm 包形式运行时安装，在 worker 中经 RPC 使用稳定 API 的受控能力；六个内置包仍在宿主进程激活。
 6. **MCP 智能工具路由**（辅助贡献候选）：LLM 路由器模型 + 关键词分类降级 + 遥测回调，属 Agent 工具类目的增强形态。
 
 明确不存在的实现：README 语境下不存在"本地↔云模型级 failover"（仅 API key 链 401 重试与 MCP 工具路由降级）；BrowserMCP 是伴生 Chrome 扩展，本仓库只有配置入口。
@@ -123,11 +123,13 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **用户目标**：让外部程序驱动 Jan 的 Agent 内核，而不是只能从桌面或终端界面使用它；同一内核同时要能当工具提供方，供别的 Agent 调用。
 
-**入口与触发者**：三条对外路径共用同一个 Agent 内核。会话级 JSON-RPC 走 LF 分隔的 stdio，由 `jan` 进程在客户端连接后建立会话（`src-tauri/src/core/cli/rpc.rs`）；实验性 ACP 走 stdio 供编辑器接入，需环境变量或项目配置显式开启（`src-tauri/src/core/cli/acp.rs`）；反向的 `jan mcp serve` 把内置工具作为 MCP server 提供出去（`src-tauri/jan-cli/src/main.rs:229` 起的命令树）。
+**入口与触发者**：外部客户端启动 `jan cli agent rpc`，通过 LF 分隔的 stdio 驱动 Jan 的 Agent 内核；这是外部程序控制 Jan 的方向。实验性 ACP 走 stdio 供编辑器接入，需环境变量或项目配置显式开启；反向的 `jan mcp serve` 把内置工具作为 MCP server 提供出去。命令分派见 [main.rs:563–578、1179](../../jan/src-tauri/jan-cli/src/main.rs#L563-L578)，RPC 服务见 [rpc.rs:488–552](../../jan/src-tauri/src/core/cli/rpc.rs#L488-L552)。
 
 **事实对象**：RPC 会话（连接身份 + 会话 id + 模型 + 工具集）、host tool 声明（客户端提供、运行时派发）、协议 schema 产物（`protocol/schema.json`、`protocol/rpc-schema.json`）与由它生成的客户端（`packages/adk` 的 JavaScript 实现、`adk/python` 的 Python 实现）。
 
-**完整主链**：客户端 `initialize` → `session.start` → `session.tools.set` 声明自己能执行的工具 → `turn.start` 与模型交互 → 模型产生 host tool 调用时运行时派回客户端 → `tool.respond` 回填结果 → 事件流持续回传直至 outcome；`turn.steer` 允许在回合中途追加输入。宿主侧的 SDK 运行时从发布清单安装并按版本钉住，仓库里另有 schema 与实现的契约一致性测试（`src-tauri/src/core/cli/contract_conformance.rs`）。
+**完整主链**：客户端请求 `initialize` 并发送 `initialized` 通知完成握手，再以 `session/start` 创建会话、`session/tools/set` 声明客户端工具，随后用 `turn/start` 发起生成。模型调用客户端工具时，Jan 派发请求，客户端通过 `tool/respond` 回填；`turn/steer` 可向运行中回合追加输入，结束通知为 `turn/completed`。方法名采用斜杠分隔，握手与调度分支见 [rpc.rs:518–610](../../jan/src-tauri/src/core/cli/rpc.rs#L518-L610)、[rpc.rs:673–801](../../jan/src-tauri/src/core/cli/rpc.rs#L673-L801)。
+
+**并发与持续性**：一个进程可持有多个会话，同时只运行一个回合；运行中更换该会话的工具或模型会收到可重试错误。`session/resume` 只查进程内会话表；成功完成且未设 ephemeral 的会话可保存为项目线程，但该 RPC 方法不从磁盘恢复旧进程的会话。临时会话还关闭项目记忆写入（[rpc.rs:459–473](../../jan/src-tauri/src/core/cli/rpc.rs#L459-L473)、[rpc.rs:569–581](../../jan/src-tauri/src/core/cli/rpc.rs#L569-L581)、[rpc.rs:704–751](../../jan/src-tauri/src/core/cli/rpc.rs#L704-L751)）。
 
 **人机与多 Agent 关系**：外部客户端既是调用方也是工具执行方，权限边界因此从"Jan 在本机执行什么"变成"客户端允许 Jan 请求什么"；`jan mcp serve` 方向则相反，是 Jan 把受限工具面交给别的 Agent。
 
@@ -139,11 +141,15 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **用户目标**：扩展不再是随仓库发布的固定清单，而能在运行时安装、升级、卸载，同时不让第三方便宜地直接拿到宿主全部能力。
 
-**入口与触发者**：扩展管理面在 `web-app/src/lib/extensions/`：`host.ts` 负责校验清单与注册贡献，`installed-loader.ts`、`dev-loader.ts`、`builtins.ts` 分别装载已安装、开发中与内置扩展，`contributions.ts`/`dispatcher.ts` 把贡献点接到 UI 与服务上。
+**入口与触发者**：设置页提供 Installed/Catalog 两个页签，可从本地 `.tgz` 包或目录索引安装；开发目录加载只在开发构建显示。安装先暂存，首次安装展示权限同意框，升级展示新增权限差异，确认后提交注册表并重载扩展。入口与事件见 [扩展设置页:107–155、240–263](../../jan/web-app/src/routes/settings/extensions/index.tsx#L107-L155)、[useStagedInstall:34–95](../../jan/web-app/src/containers/extensions/useStagedInstall.tsx#L34-L95)。
 
 **事实对象**：扩展包（npm 形式的包 + 清单）、稳定 API（`packages/extension-api` 的 `API_VERSION`、能力与贡献声明、语义化版本兼容判断、`Disposable` 与事件）、worker 侧运行时（`packages/extension-runtime` 的 `protocol.ts`、`handles.ts`、`endpoint.ts`、`worker/`）。
 
-**完整主链**：安装扩展到数据目录 → 宿主按清单校验 API 版本与权限 → 在 worker 中启动扩展包并通过 RPC 暴露宿主能力句柄 → 扩展注册的贡献点（设置项、服务、引擎）进入 UI 与服务注册表 → 卸载或升级时释放 `Disposable` 并重载。旧版的扩展设置以 localStorage 数组保存，现在迁到宿主设置存储且做一次性的键名与类型迁移（`extensions/rag-extension/src/settings.ts`）。
+**完整主链**：用户确认安装 → Rust 提交数据目录中的包与注册表 → loader 读取启用条目和经哈希核验的入口 → 宿主在启动 worker 前校验 API 版本，并把授权收窄为清单请求集合 → 第三方扩展在 worker 中经 RPC 调用受控宿主 API → 贡献点进入界面与服务注册表。禁用、升级、回滚、卸载与权限变更均通过按扩展串行的 reload 先释放旧贡献再重读注册表，避免旧权限的 worker 最后启动（[installed-loader.ts:66–117](../../jan/web-app/src/lib/extensions/installed-loader.ts#L66-L117)、[host.ts:260–389](../../jan/web-app/src/lib/extensions/host.ts#L260-L389)）。
+
+**执行域边界**：仓库内六个内置扩展使用宿主进程的 `activate(ctx)`，可取得内部服务、文件、引擎等能力；安装和开发加载的第三方扩展才使用 worker 隔离。两条路径共享 dispatcher 的参数校验，但内置扩展不受 worker 的通知速率、监听数和并发请求限额约束（[builtins.ts:9–27](../../jan/web-app/src/lib/extensions/builtins.ts#L9-L27)、[host.ts:564–600](../../jan/web-app/src/lib/extensions/host.ts#L564-L600)）。
+
+**持续性与故障收口**：安全模式先保存标志再停止所有已安装扩展，内置和开发扩展保持原状；关闭后重新加载启用项。已安装扩展崩溃后可从注册表重启，短时间反复崩溃则本次应用会话内禁用并通知用户。设置经宿主存储保存，RAG 设置另有一次性键名与类型迁移（[installed-loader.ts:125–157](../../jan/web-app/src/lib/extensions/installed-loader.ts#L125-L157)、[host.ts:500–528](../../jan/web-app/src/lib/extensions/host.ts#L500-L528)）。
 
 **独特性判断**：扩展能力从"仓库内固定 JS 目录"变成"运行时可安装 + worker 隔离 + 稳定 API + API 报告校验"的组合，与旧快照的实现相比是机制级变化；样本中同类桌面 Agent 产品少有把扩展隔离做到 worker + 版本化 API 报告。
 

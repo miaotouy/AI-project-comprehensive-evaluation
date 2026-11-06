@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/NousResearch/hermes-agent`（git 仓库）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`71736c9f32597bbca9d89cede5aa136e55946b2f`（分支：`main`）
 >
@@ -16,12 +16,12 @@
 
 Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agent 核心的个人 AI 助手：
 
-1. 桌面端不运行 agent，而是自 spawn 一个无头 `hermes serve` 后端进程，renderer 经 WebSocket 发起 `prompt.submit` 等 JSON-RPC 调用，后端在独立线程运行 `AIAgent.run_conversation`，流式增量以 `message.delta`/`message.complete` 事件推回 UI。
+1. 桌面端通过 `hermes gateway ensure --json` 附着或启动规范本地网关，并以 WebSocket JSON-RPC 观察与控制 Agent；网关生命周期独立于桌面窗口，远端连接保留其远端意图。实际消费入口见 [main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)。legacy serve/TUI 桥仍有独立实现，不能用该桥的旧启动描述覆盖规范连接路径。
 2. **后端 SQLite 是唯一事实源**：会话、消息全部落在 profile 作用域下单一 `state.db`；每会话 JSONL 消息日志已在 spec 002 移除（`gateway/session.py`）。桌面端所有会话原子只是后端真相的缓存，遵循"合并而非覆盖、先乐观后诚实、拒绝乱序回写"的更新原则。
 3. **身份有两层**：
    - 进程内 UI 句柄 `sid` 与持久化 `session_key` 分离；
    - 压缩轮转生成新的 `session_key`，经 `parent_session_id` + `end_reason='compression'` 连成轮转链，跨轮转不变的标识是列表接口派生的只读字段 `_lineage_root_id`（`hermes_state.py:7464`），桌面端 pin、路由匹配都基于它。
-4. 每条消息同时是历史里的事件，也是数据库里的行；落盘用"单事务批量 + 内存 marker 去重"的原子配对契约（`run_agent.py:2010`），崩溃中途不写库，痕迹只在 `turn_marker.py` 中断标记文件，恢复会话时按标记自动重放。
+4. 消息落库与输入受理有各自状态。Agent 运行中增量 flush 消息；规范网关先持久受理输入并返回可重试回执，owner 重启时已开始的输入变为 unknown 并暂停后续执行，保留用户明确处置的机会。legacy tui_gateway 仍有中断标记恢复机制（[受理与恢复实现](../../hermes-agent/hermes_state_runtime.py#L130-L177)）。
 5. 子代理是真实会话：`delegate_task` 创建占 DB 行的子会话（`_delegate_from` 标记），继承同一套创建与持久化语义，删除时沿标记级联。
 6. **标题**：会话在首轮 turn prologue 即得 derived 即时标题，随后由后台 LLM 升级；provenance（derived < llm < user）防自动覆盖，压缩轮转时标题不变（详见会话与消息管理笔记 §2.4）。
 
@@ -35,17 +35,18 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 | TUI（`hermes --tui`，Node/Ink） | Node 前端进程 → stdio → 后端 | 换行分隔 JSON-RPC over stdio |
 | gateway / CLI | 同进程 | 直接调用 |
 
-- 桌面端以 `['serve','--host','127.0.0.1','--port','0']` 参数 spawn 后端（`electron/backend-command.ts:18-22`）；设置 headless 环境变量时 SPA 挂载只暴露 JSON-RPC/WS/API 面（`hermes_cli/web_server.py:16296`，headless 分支 :16313）。
+- 桌面本地主连接与 profile 池都通过规范 gateway ensure 连接，持有私有原生端点而非公共 dashboard token；关闭桌面只断开 viewer。旧 serve 的 headless Web 装配属于另一条路径（[连接判定](../../hermes-agent/apps/desktop/electron/local-gateway.ts#L219-L254)）。
 - 边界：gateway 消息平台接入、cron/kanban/插件体系、Web 端、CLI 交互模式细节本次未调查。
 
 ## 端到端聊天主链
 
 ```text
-桌面 composer → prompt.submit（WS）
-→ methods_prompt.py：校验 / busy 门控 / truncate
-→ _run_prompt_submit（server.py:9707）：记录 turn marker、注册 _stream 回调、启动 run 线程
-→ agent.run_conversation（conversation_loop.py:1422）：build_turn_context 组装上下文、循环调用 Provider，每 token 增量经 _stream 回发 message.delta
-→ finalize_turn 持久化 → message.complete（含 status/text/usage）
+桌面 composer → prompt.submit（规范 WS，稳定 submission_id）
+→ AuthorityConnection.submit → SessionAuthority.submit
+→ 授权 / 不可变附件捕获 / 输入受理事务与回执
+→ 按会话 FIFO 调度 → Agent 上下文与 Provider/工具循环
+→ 增量事件投影 UI → 结果持久化与终态回执
+legacy tui_gateway：methods_prompt → prompt_turn → run_conversation，另有截断与中断标记机制
 ```
 
 桌面端 delta 进入自适应节流队列（33ms 起、上限 250ms），complete 后合并终态并触发会话列表刷新（300ms 合并）。

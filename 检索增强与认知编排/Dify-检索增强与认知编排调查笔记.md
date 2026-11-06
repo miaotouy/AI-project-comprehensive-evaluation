@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/langgenius/dify`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`e568478f8f2b95efc189b698c2f4386a7dbe1c3e`（分支：`main`）
 >
@@ -109,15 +109,25 @@
 
 关于安全，数据模型对 Dataset、Document、Segment、元数据绑定、附件绑定、外部知识绑定和 Pipeline 均保存 tenant ID；Dataset 权限表按 Dataset、账户和 tenant 建索引（`api/models/dataset.py:823-847`、`api/models/dataset.py:967-1018`、`api/models/dataset.py:1154-1179`、`api/models/dataset.py:1081-1129`）。检索可用库查询也明确按 tenant 过滤。**静态推断：** 这些字段与入口过滤按 tenant 划定工作区隔离。**未运行验证：** 未以不同角色、仅本人/部分团队权限、服务 API、外部知识端点或签名文件 URL 进行越权测试，因此不能据此断言端到端授权效果，也不能判断检索文本是否足以抵御不可信文档中的提示注入。
 
-**源码直接确认。** 知识库 Service API Key 可以绑定到指定 Dataset，也可以绑定 KnowledgeFS 空间。创建 Key 时控制台接收 `dataset_ids` 与 `knowledge_space_ids` 两组绑定；请求装饰器每次都按绑定行计算作用域，已绑定 Key 只能访问 URL 中明确携带且位于集合内的 Dataset，无 Dataset ID 的列表和创建类端点也会被拒绝。没有绑定行的 Key 仍保留租户内全库访问语义，以兼容既有 Key；只绑定 KnowledgeFS 空间的 Key 没有可达的旧 Dataset，会被拒绝（`api/controllers/console/datasets/datasets.py:271`、`api/controllers/console/datasets/datasets.py:785-800`；`api/controllers/service_api/wraps.py:332-400`）。同一条请求装饰器还接受资源访问令牌（resource access token）替代 API Key，这是本次新增的凭据形态；权限实际效果仍未进行多角色运行验证。
+**源码直接确认。** 知识库 Service API Key 可以绑定到指定 Dataset，也可以绑定 KnowledgeFS 空间。创建 Key 时控制台接收 `dataset_ids` 与 `knowledge_space_ids` 两组绑定；请求装饰器每次都按绑定行计算作用域，已绑定 Key 只能访问 URL 中明确携带且位于集合内的 Dataset，无 Dataset ID 的列表和创建类端点也会被拒绝。没有绑定行的 Key 仍保留租户内全库访问语义，以兼容既有 Key；只绑定 KnowledgeFS 空间的 Key 没有可达的旧 Dataset，会被拒绝（`api/controllers/console/datasets/datasets.py:271`、`api/controllers/console/datasets/datasets.py:785-800`；`api/controllers/service_api/wraps.py:332-400`）。
+
+资源访问令牌（resource access token）有独立的显式资源绑定，集合接口可列出其仍存在且已启用的知识库；这与绑定 API Key 遇到无 Dataset ID 接口就拒绝的行为不同。装饰器先解析令牌中的知识资源，列表控制器再把授权集合交给 Dataset 查询过滤（[查询作用域](../../dify/api/services/knowledge/dataset_service.py#L148-L172)）。资源详情请求还叠加租户和启用 API 检查。授权成功会记录使用时间，删除入口虽携带 relation ID，却会撤销整个令牌和全部关联；不能按“只解除一个资源”理解（[令牌授权](../../dify/api/services/resource_access_token_service.py#L120-L147)、[列表交接](../../dify/api/controllers/service_api/dataset/dataset.py#L437-L463)、[撤销事务](../../dify/api/repositories/resource_access_token_repository.py#L152-L165)）。权限效果仍未进行多角色运行验证。
 
 ## KnowledgeFS：并行的第二套知识面
 
 **源码直接确认。** 快照新增 `knowledge_fs` 子系统：控制台、Service API、OpenAPI、内部 API 各有独立路由，服务层包含控制空间生命周期、来源导入、暂存上传、文本存储与向量存储适配、成员变更、撤销与后台任务（`api/services/knowledge_fs/`、`api/controllers/console/knowledge_fs/`、`api/controllers/service_api/knowledge_fs/`）。文本层有 TiDB 原生与检索服务两种实现，向量层有 Elasticsearch 与 Weaviate 适配；这些选择属于该子系统的内部实现细节，本次未运行验证。
 
-**源码直接确认。** 可用性由部署开关决定：`KNOWLEDGE_FS_ENABLED` 且部署版本为 Cloud/Enterprise，或显式打开社区开发开关；上传能力还要求配置服务地址、Capability v2 开关与签名密钥；Agent 侧能力再加 Agent Shell 开关（`api/services/knowledge_fs/feature_service.py:1-37`）。因此默认自托管社区部署并不进入这条路径。
+**源码直接确认。** 可用性始终要求开启 `KNOWLEDGE_FS_ENABLED`，同时满足 Cloud/Enterprise 部署或社区开发开关二者之一；社区开发开关本身不能绕过总开关。上传还要求服务地址、Capability v2 开关与签名密钥；Agent 侧再要求 Agent Shell 开关（[可用性判断](../../dify/api/services/knowledge_fs/feature_service.py#L17-L37)）。默认自托管社区部署不进入这条路径。
 
-**源码直接确认。** 工作流侧提供独立的检索 v2 节点 `KnowledgeRetrievalV2Node`，节点类型由工作流节点工厂单独导入，与既有 `knowledge-retrieval` 节点并存（`api/core/workflow/node_factory.py:83-138`；`api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py:166-203`）。dify-agent 也有对应的 `knowledge_fs` 层，说明 Agent 运行时可以按会话挂载该知识面（`dify-agent/src/dify_agent/layers/knowledge_fs/`）。
+### 工作流检索 v2：配置、准入与输出
+
+**源码直接确认。** 前端节点目录按 KnowledgeFS 可用性显示 `knowledge-retrieval-v2`，面板保存文本变量、图片变量、所选空间、召回与元数据过滤配置。配置契约允许一至十个空间，输出数默认十、范围一至一百，文本或图片至少绑定一类。工作流节点工厂单独注册该节点，与旧 Dataset 检索并存（[前端目录](../../dify/web/app/components/workflow/node-catalog.ts#L79-L82)、[配置面板](../../dify/web/app/components/workflow/nodes/knowledge-retrieval-v2/panel.tsx#L28-L148)、[节点契约](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/entities.py#L33-L76)）。
+
+运行时从变量池解析 query，文本最多一万六千字符；图片引用由文件访问 owner 检查后签发短期 grant，节点还限制数量、总大小及重复文件。仅账户发起的 debugger 调用会尝试建立草稿空间绑定；公开/Explore 调用依赖已有应用绑定。之后按当前 tenant、app 和 Workflow 调用者身份向各空间请求检索，关闭 Workflow 渠道、空间不可用或绑定未授权都会转成节点错误；默认并发四路，可注入值限定为一至十路（[执行与输入](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py#L206-L427)）。
+
+各空间返回的候选先交错收集，候选池上限为 `min(100, 4 × top_n)`。有文本时调用租户的显式或默认 rerank 模型；缺失模型或调用失败会使节点失败，不会自动降级为原分数。纯图片查询跳过文本 rerank，直接合并空间分数。随后执行阈值过滤、稳定排序和截取，输出内容、引用、文档版本与空间分数，并补充兼容旧聊天引用的元数据；过程与输出中还携带 metrics（[候选与重排](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py#L637-L787)、[引用契约](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py#L852-L904)）。这条节点主链已在 Dify 侧静态确认，外部空间实际召回仍未运行。
+
+只有所有选中空间都原始返回空候选、文本 query 非空且配置了捕获分派器时，才逐空间尽力投递失败检索质量记录；捕获失败只记录日志，不改变空结果的成功状态。仅因重排阈值过滤为空、或纯图片无命中时不会走该分派，故它是有条件的质量观察面，未形成自动改写查询或知识写回循环（[空结果捕获](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py#L232-L237)、[分派边界](../../dify/api/services/knowledge_fs/knowledge_retrieval_v2/knowledge_retrieval_v2_node.py#L814-L850)）。
 
 **源码直接确认。** 与外部知识服务之间是显式契约边界：仓库内的 `api/knowledge-fs-contract/` 固定了 OpenAPI、能力操作清单、能力 v2 认证 profile 与源提交哈希，CI 只校验契约而不克隆实现仓库（`api/knowledge-fs-contract/README.md`、`api/knowledge-fs-contract.lock.json`）。这说明 KnowledgeFS 的存储与运行由独立服务承担，Dify 侧持有的是调用协议与授权凭据。
 

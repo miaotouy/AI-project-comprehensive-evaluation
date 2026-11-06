@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/anomalyco/opencode`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`7864a941527ad54e415d5875c98e038c5fc25697`（分支：`dev`）
 >
@@ -16,7 +16,7 @@
 
 OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不再集中注册在某个 registry，而是由插件在 `tool` 域里通过 `add/update/remove` 注册（`packages/plugin/src/effect/tool.ts`），内建工具本身就是一组内建插件（`packages/core/src/tool/plugin/*.ts`，每个文件导出 `name` 与 `Plugin`）；MCP 工具按命名空间并入，Code Mode 把工具暴露给受限解释器。
 
-模型侧只看到当轮工具定义快照：Tool 服务按 Agent/会话权限规则集过滤后生成 `ToolDefinition` 列表与执行器（`core/src/tool.ts` 的 `snapshot`），执行前再做一次权限求值并可能阻塞等待人工审批。结果统一归一化为文本/文件内容并做截断（2000 行 / 50 KiB），超限落盘到 `tool-output` 目录。编排循环由执行器驱动，而非 AI SDK 自动执行工具。
+模型侧只看到当轮工具快照：Tool 服务以整工具拒绝规则筛掉目录条目，保留当次定义及执行器；真实授权由各工具的叶子策略调用权限服务，注册表自身不统一审批。结果先归一化为文本/文件，再由 Session runner 做通用截断（2000 行 / 50 KiB，超限落盘）。每个步骤进行一次模型流式调用，runner 从持久历史重建下一步，AI SDK 不持有工具循环（[快照边界](../../opencode/packages/core/src/tool.ts#L250-L320)、[步骤执行](../../opencode/packages/core/src/session/runner/step.ts#L95-L130)）。
 
 ## 总体调用链
 
@@ -29,7 +29,7 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
   -> 请求发往 AI 层（session/model-request.ts）
   -> 模型返回工具调用
   -> SessionStep 调 Tool 服务执行（runner/step.ts）
-       -> Permission.evaluate/ask（core/src/permission.ts）
+       -> 工具叶子调用 Permission.assert（按各自策略授权）
        -> definition/execute/normalizeContent（core/src/tool/runtime.ts）
        -> ToolOutput.truncate（core/src/tool-output.ts）
   -> durable 事件 session.tool.called/progress/success/failed（schema/src/session-event.ts）
@@ -65,13 +65,13 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 - **插件工具**：外部插件通过 `ToolEditor.add` 注册，或在 `execute.before/after` 钩子里改写输入与结果（`packages/plugin/src/effect/tool.ts`）。
 - **MCP 工具**：`core/src/tool/mcp.ts` 把每个 MCP 工具注册为带命名空间的工具（`name(server, tool)`），调用前以完整名称做权限判定；MCP 服务器断开/重连时工具目录随之变更。
-- **Code Mode**：`packages/codemode` 是一个只支持受控语法的解释器，程序无法直接访问网络、文件系统、进程或应用 API，只能通过宿主提供的工具与扩展全局对象与外界交互，宿主可限制执行时间、调用次数、输出大小与数据；Core 的 `codemode/` 负责目录与工具暴露。
+- **Code Mode**：受限解释器通过宿主工具与扩展全局对象访问外界。模型 execute 入口提供 fetch；它按 webfetch 动作审批、禁止 file URL、逐跳检查重定向拒绝规则，并设 30 秒超时与 20 次重定向上限。独立的 Tool.check 路径不提供 fetch（[fetch.ts](../../opencode/packages/core/src/codemode/fetch.ts#L17-L82)、[Tool.check](../../opencode/packages/core/src/tool.ts#L44-L50)）。
 
 ## 2. 注册、注入与过滤
 
 - **注册即插件**：内建工具插件与用户插件都注册进 Tool 服务，形成 `Map<id, Tool.Info>` 与预转换的 `ToolDefinition`。
-- **注入快照**：`Tool.snapshot(permissions)` 一次性产出当轮可见定义与执行器，权限过滤在快照与执行两处都生效，避免模型看到不可用的工具。
-- **Agent 级控制**：Agent 的 `steps` 限制单轮工具回合数；Agent 的 `permissions` 规则集决定允许/询问/拒绝；`hidden`/`mode` 决定 Agent 是否出现在选择列表。
+- **注入快照**：整工具过滤只控制目录可见性；进入执行后由捕获的工具叶子策略授权。重载与释放影响后续快照，已捕获执行器仍可能引用生产方的可变状态。
+- **Agent 级控制**：steps 按逻辑模型调用计数，含文本收束步骤，与工具数量无一一对应。到达上限时请求选择禁用工具，执行回调也拒绝工具调用；新用户输入投递时重置额度（[runner 计数与请求](../../opencode/packages/core/src/session/runner/llm.ts#L200-L271)、[执行兜底](../../opencode/packages/core/src/session/runner/step.ts#L95-L97)）。
 - **MCP 默认 Code Mode**：`plugin/mcp-codemode-defaults.ts` 按 MCP 工具声明决定是否默认进 Code Mode 目录。
 
 ## 3. 参数校验与执行
@@ -82,7 +82,7 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 ## 4. 编排循环与工具回合
 
-- **循环位置**：执行器在 `core/src/session/runner/step.ts` 内驱动，单步内处理模型响应、工具调用与结果回注，`Outcome` 区分 Completed/Retry/Continue/RecoverFull/Compacted/OutputLimit。
+- **循环位置**：runner 的 llm 层驱动逻辑步骤循环，每一步显式调用一次 llm.stream，流中工具以独立 fiber 执行；下一步从已持久化历史重建请求，不维护内存工具循环（[step.ts](../../opencode/packages/core/src/session/runner/step.ts#L108-L155)、[llm.ts](../../opencode/packages/core/src/session/runner/llm.ts#L212-L220)）。
 - **上限**：达到 Agent `steps` 上限后注入 `runner/max-steps.ts` 的固定提示，要求只输出文本并总结进度。
 - **并行**：同一响应里的多个工具调用可并行执行，事件按调用 id 分别广播。
 - **中断**：中断时进行中的工具与步骤标记 aborted（`Tool execution interrupted`/`Step interrupted`）。
@@ -91,14 +91,14 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 - **规则集**：`Permission.Ruleset` 是 `{action, resource, effect}` 列表，action 可以是通配或具体工具名，effect 为 allow/ask/deny；`evaluate` 按顺序求值，`merge` 合并多层规则（`core/src/permission.ts`）。
 - **默认规则**：`Agent.Info.default` 给全允许，但对 `*.env`/`*.env.*` 的读取要求询问，`*.env.example` 允许（`packages/schema/src/agent.ts`）。
-- **审批阻塞**：需要询问时服务端创建 `Deferred` 等待客户端回复，`reply` 支持接受/拒绝/纠正等结果；无人值守场景使用 `Unattended` 规则跳过等待。
+- **审批阻塞**：需要询问时服务端等待客户端回复。无人值守只在原结果为 ask 时追加规则复评，全部资源均变为 allow 才放行，否则明确拒绝，原有 deny 先行拒绝（[permission.ts](../../opencode/packages/core/src/permission.ts#L184-L209)）。
 - **应用范围**：会话权限列 + Agent 权限规则 + 工具自身策略共同决定；shell 命令还有命令级扫描（`core/src/shell/scan.ts` 解析命令方言与结构）用于风险判定。
 
 ## 6. 执行边界
 
 - **进程内执行**：除 shell 外，工具都运行在服务端进程内，直接访问工作区文件与网络（受权限规则约束）。
 - **shell**：由子进程执行命令，权限在调用前判定；本次未找到额外的命令沙箱层。
-- **Code Mode**：与任意 JS 沙箱不同，解释器只实现受控语法，禁止网络、文件系统、进程与包引用；未实现语法返回 `UnsupportedSyntax` 诊断。
+- **Code Mode**：受控语法限制直接文件、进程与包访问；网络由宿主 fetch 扩展提供并独立授权，工具调用仍执行各叶子的策略。未实现语法返回诊断。
 - **图片**：工具输出中的图片会按尺寸限制压缩，超出范围时降级为文本提示（`core/src/tool.ts` 的 `normalizeImages`）。
 
 ## 7. 结果回注与截断
@@ -118,7 +118,7 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 - **插件化注册**让内建工具与第三方工具走同一套 `add/update` 接口，代价是工具可见性依赖插件装配顺序与激活状态（`Plugin.awaitActivation`）。
 - **快照式注入**把"模型看到的工具"和"实际能执行的工具"分离，权限变化需要重新快照。
 - **结果截断 + 落盘**控制上下文成本，但让模型需要二次读取；截断阈值可通过配置插件调整。
-- **Code Mode** 是受限解释器而非沙箱化 JS，能力面由宿主显式提供，因此不会出现任意代码逃逸面。
+- **Code Mode** 的外部能力由宿主提供，受限语法与执行额度构成实现边界；解释器实现本身仍属于信任面，静态调查不足以给出绝对逃逸安全保证。
 - **边界**：工具审批的 UI 表现、工具卡片的渲染属于 Chat UI/消息渲染；工具能力清单的横向比较在 Agent 工具横向对比文档。
 
 ## 10. 未验证事项

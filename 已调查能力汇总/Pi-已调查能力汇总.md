@@ -2,11 +2,11 @@
 
 > 汇总对象：`Pi（https://github.com/earendil-works/pi）`
 >
-> 汇总更新日期：2026-11-04
+> 汇总更新日期：2026-11-05
 >
 > 依据：Agent 工具、Agent 角色、Chat、Chat UI、LLM 渠道管理、仓库分布、会话与消息管理、对话导出与分享、对话请求与上下文、应用界面基础设施、消息渲染器、独特功能、生成式输出与运行时共 13 个类目的 Pi 调查笔记（完整清单见文末来源笔记索引），均基于同一代码快照 `ff33ef42c4bd762cecd6958e3aabbc8e684ceb05`（分支：`main`）；另引用 [特色功能贡献统计](../AI客户端特色功能贡献统计.md)
 >
-> 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；未进行新的源码调查与跨项目横向比较
+> 汇总方法：阅读各来源笔记的"结论摘要"与关键章节，按功能主题合并重复能力，保留来源笔记的证据状态与边界表述，逐条链接来源；定向静态复核首条输入落盘与分支投影、MCP/codemode 装配、durable 工具重放、steer 与 TUI 键盘链；其余沿用来源证据，未运行应用或模型请求
 >
 > 汇总范围：上述 13 个类目的既有调查结论；仓库分布与应用界面基础设施两个工程向类目单列于"工程与基础设施摘要"小节；排除跨项目横向比较、评分与排序
 >
@@ -36,11 +36,11 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 ### 会话与消息
 
-- **会话数据模型（JSONL 追加型树）**：每个会话一个 `.jsonl` 文件（`~/.pi/agent/sessions/<编码cwd>/`），记录带 `id/parentId` 形成树，`leafId` 指针标识当前位置，分支只移动指针不修改历史；条目九类型（message/thinking_level_change/model_change/compaction/branch_summary/custom/custom_message/label/session_info），`custom` 不进 LLM 上下文、`custom_message` 参与并控制显示；消息是分块内容模型，assistant 内容为 text/thinking/toolCall 块数组。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **会话数据模型（JSONL 追加型树）**：每个会话一个 `.jsonl` 文件（`~/.pi/agent/sessions/<编码cwd>/`），记录带 `id/parentId` 形成树，`leafId` 指针标识当前位置，分支只移动指针不修改历史；条目包含对话、设置、摘要、扩展、书签与 context_edit，`custom` 不进 LLM 上下文、`custom_message` 参与并控制显示；消息是分块内容模型，assistant 内容为 text/thinking/toolCall 块数组。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
-- **持久化时机与事实源**：落盘绑定 `message_end`——第一条 assistant 消息时创建文件（此前仅缓存，无模型回复的会话不产生文件），此后逐条 append；恢复时全量读入内存，读文件时版本落后自动迁移（v1→v2 生成 id/parentId 树，v2→v3 改 hookMessage 角色名）。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)。
+- **持久化时机与事实源**：落盘绑定 `message_end`——首条 user 或 assistant 消息时创建文件，纯启动设置留内存，首轮无回复也保留提示，此后逐条 append；恢复时全量读入内存，读文件时版本落后自动迁移（v1→v2 生成 id/parentId 树，v2→v3 改 hookMessage 角色名）。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)。
 
-- **分支、fork、clone 与树导航**：分支四入口 `branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`（跨目录复制记 `parentSession`、追加 branch_summary 摘要条目）；`/tree` 树形导航带 label 书签与可选分支摘要生成，`/fork` 从指定 user 消息开新分支，`/clone` 复制当前会话；`/copy` 复制最后一条助手消息。历史是追加型，编辑以分支表达；无独立续写入口，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **分支、fork、clone 与树导航**：分支四入口 `branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`（跨目录复制记 `parentSession`、追加 branch_summary 摘要条目）；`/tree` 树形导航带 label 书签与可选分支摘要生成，`/fork` 从指定 user 消息开新分支，`/clone` 复制当前会话；`/copy` 复制最后一条助手消息。原始历史追加保留，context_edit 可在分支内替换或排除模型投影；无独立续写入口，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
 - **会话列表、检索与搜索**：列表全量扫描 + 并发上限 10、按修改时间倒序；`/resume` 选择器内嵌搜索（fuzzy/短语/`re:` 正则，搜索文本含全部消息文本与 cwd）。消息级搜索的独立实现（扫描器与 SQLite FTS5 后端）本次未接入主路径，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)。
 
@@ -54,27 +54,27 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 - **生成任务主链与输入处理**：`AgentSession.prompt()` 依次执行扩展命令、input 钩子、`/skill:name` 展开、`/template` 模板展开、流式中入队（steer/followUp）、模型与认证校验、预压缩检查、user 消息组装、`before_agent_start` 扩展事件，再进 `Agent.prompt()` → `runAgentLoop`；无独立"任务记录"对象，运行状态在 Agent/AgentSession 内，事件是唯一对外通道。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
-- **流式协议与对象模型（能力等级 G2）**：模型输出只有 text/thinking/toolCall 三种结构化 part（外加工具结果中的 image），经统一 `AssistantMessageEvent` delta 事件归一化所有 provider；工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象（G2），写盘产物凭文件路径成为工作区普通文件。`toolcall_delta` 携带原始 JSON 片段即时解析，输出 token 截断时所有未完成工具调用统一标记错误回注；thinking 被过滤时保留 `thinkingSignature`。无独立 artifact 对象（能力总评为 G2，模型输出未进入专用运行环境）。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **流式协议与对象模型（能力等级 G2）**：模型输出只有 text/thinking/toolCall 三种结构化 part（外加工具结果中的 image），经统一 `AssistantMessageEvent` delta 事件归一化所有 provider；工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象（G2），写盘产物凭文件路径成为工作区普通文件。`toolcall_delta` 携带原始 JSON 片段即时解析，输出 token 截断时所有未完成工具调用统一标记错误回注；thinking 被过滤时保留 `thinkingSignature`。聊天对象维持 G2；模型工具脚本另可进入 codemode 的 QuickJS worker，经统一钩子调用工具，不能概括为全仓没有脚本运行环境。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
-- **文件写入与 diff**：write 全文覆盖（自动建父目录）、edit 精确文本替换（每处 oldText 必须唯一、模糊匹配、保留未改动行原始字节）、bash 在宿主本机 shell 子进程执行（spawn + 进程树终止 + 可选超时 + 输出截断落临时文件）；edit 工具在 TUI 先显示 diff 预览再显示最终 diff，`details.patch` 存标准 unified patch；同文件并发写按 realpath 串行化。模型是文件唯一修改者，无接受/拒绝 diff、无撤销、无 CRDT；沙箱/容器仅是部署文档而非内置运行时（容器化未做运行验证，见末尾小节）。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **文件写入与 diff**：write 全文覆盖（自动建父目录）、edit 精确文本替换（每处 oldText 必须唯一、模糊匹配、保留未改动行原始字节）、bash 在宿主本机 shell 子进程执行（spawn + 进程树终止 + 可选超时 + 输出截断落临时文件）；edit 工具在 TUI 先显示 diff 预览再显示最终 diff，`details.patch` 存标准 unified patch；同文件并发写按 realpath 串行化。模型是文件唯一修改者，无接受/拒绝 diff、无撤销、无 CRDT；基础文件/命令工具无内建操作系统隔离，codemode 另有 QuickJS VM 资源边界；容器化部署效果未运行验证。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
-- **会话恢复与模型回流**：resume/import/fork 后经 `buildSessionContext` 全量恢复到 `agent.state.messages`，模型在完整时间线上继续；compaction 后旧消息被 `<summary>` 用户消息回流；对象身份=文件路径，绑定到后续回合的是"会话 + 文件路径"。无 artifact ID 类稳定对象句柄。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
+- **会话恢复与模型回流**：resume/import/fork 后经 `buildSessionContext` 按分支、压缩和 context_edit 恢复当前模型投影，保留原始历史条目；compaction 后旧消息被 `<summary>` 用户消息回流；对象身份=文件路径，绑定到后续回合的是"会话 + 文件路径"。无 artifact ID 类稳定对象句柄。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
 
-- **停止、重试、steer/followUp**：自动重试用 `settings.retry` 预算（默认 maxRetries 3、指数退避），对最后一个 assistant 错误消息 `continue()` 重跑；溢出类错误不重试走压缩；运行中可投递 steer（打断，当前工具回合结束后注入）与 followUp（排队，agent 结束后处理）两种队列；abort 后以 `stopReason: "aborted"` 落盘，`/resume` 恢复。无独立"续写到消息末尾"入口（续写经分支/新消息），细节见末尾小节。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **停止、重试、steer/followUp**：自动重试用 `settings.retry` 预算（默认 maxRetries 3、指数退避），对最后一个 assistant 错误消息 `continue()` 重跑；溢出类错误不重试走压缩；运行中可投递 steer（当前助手与工具批次结束后注入，本身不取消执行中调用）与 followUp（排队，在自然结束前排空）两种队列；abort 后以 `stopReason: "aborted"` 落盘，`/resume` 恢复。无独立"续写到消息末尾"入口（续写经分支/新消息），细节见末尾小节。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
 ### Agent 运行时与外部协作
 
-- **Durable harness（packages/durable）**：`submit()` 先持久化输入再执行，Task 每个 phase 结束存 checkpoint，进程重启后 `resume()` 从最后 checkpoint 继续，等待中的任务睡在存储里；对话是不可变 entry 的记录，工具结果先提交再按序进入 transcript。存储后端可在 Memory、JSONL、SQLite、IndexedDB 间替换，只读打开用于另一进程正在驱动的会话。证据：主链确认（静态源码，恢复效果未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
+- **Durable harness（packages/durable）**：`submit()` 先持久化输入再执行，Task 每个 phase 结束存 checkpoint，进程重启后 `resume()` 从最后 checkpoint 继续，等待中的任务睡在存储里；对话是不可变 entry 的记录，工具结果先提交再按序进入 transcript；结果未提交的中断调用默认结算 interrupted，仅存储与当前声明均为 safe 时重跑，外部副作用并非恰好一次。存储后端可在 Memory、JSONL、SQLite、IndexedDB 间替换，只读打开用于另一进程正在驱动的会话。证据：主链确认（静态源码，恢复效果未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
 
 - **p2 多进程聊天表面**：`apps/p2` 以 Chord 插件搭建，Web host 与 TUI host 各一个入口；每个会话一个 fork 出来的 worker，第一次引用时启动、空闲后停止、崩溃后重启并把失败保留到重试，插件重载时对象与文档仍存活。证据：主链确认（静态源码，未运行跨进程/远端场景）。链接：[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)。
 
-- **工具系统（内置 + 扩展注册，本地执行模型）**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls），扩展经 `registerTool` 注册 `ToolDefinition`（JSON Schema 参数 + prompt snippet + 渲染回调 + 执行函数）；PowerShell 是 Windows 上可选的本地执行工具。默认激活集仍为 [read, bash, edit, write]，但 `defaultTools` 可按全局或项目设置替换内置启动集且不关闭扩展/SDK 自定义工具，`--tools` 再以严格允许名单覆盖；工具是代码对象非独立持久化实体，全部本地进程内执行。MCP 客户端已独立成包 `packages/mcp`（stdio 与 Streamable HTTP 传输、内存测试传输），p2 也有 mcp 插件；细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)。
+- **工具系统（内置 + 扩展注册，本地执行模型）**：内置 8 个工具（read/bash/powershell/edit/write/grep/find/ls），扩展经 `registerTool` 注册 `ToolDefinition`（JSON Schema 参数 + prompt snippet + 渲染回调 + 执行函数）；PowerShell 是 Windows 上可选的本地执行工具。默认激活集仍为 [read, bash, edit, write]，但 `defaultTools` 可按全局或项目设置替换内置启动集且不关闭扩展/SDK 自定义工具，`--tools` 再以严格允许名单覆盖；基础工具按启动用户权限执行，连接工具可调用远端 MCP，脚本工具有独立 VM 边界。MCP 客户端包已接入 coding-agent 内建扩展，支持脚本发现、延迟加载、直接暴露与隐藏；p2 有独立 server/worker MCP 装配；细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)。
 
 - **工具注入与模型协议**：激活集存于 `agent.state.tools`，每轮把当前工具集快照注入请求，再由各 Adapter 转成 Provider 原生工具格式。read/bash/edit/write 默认请求 strict-prefer JSON schema 采样；Provider 不支持时按兼容策略回退，执行前仍由 pi-schema 编译的校验器做校验与类型转换。扩展加载器拒绝根节点不是 object 的参数 schema。无工具级 token 预算或自动裁剪。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
 - **参数校验与编排循环**：`prepareToolCall` 在执行前集中校验并做值转换（pi-schema 编译缓存校验器 + coerce），未知工具与校验失败都转成 isError 工具结果回注给模型而非中断循环；`runLoop` 双 while（内层处理工具调用 + steering 队列、外层排空 followUp 队列），默认并行执行同批工具调用、结果按序回注，可按 `executionMode` 转串行；`length` 截断时整批工具调用统一按失败回注。循环无显式迭代上限（源码未发现 maxIterations），终止依赖模型 stopReason 与队列排空。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
 
-- **审批与执行边界**：审批是回调钩子而非执行端强制——`beforeToolCall` 返回 `block` 即拒绝并回注，`afterToolCall` 可改写结果，扩展 `tool_call`/`tool_result` 事件走同一路径；项目信任门决定项目级 `.pi` 设置、资源、扩展与包是否加载（不直接拦截 bash 执行，仅当 shell 路径与命令前缀取自项目设置时间接影响运行参数）。执行全部为本地进程内：文件工具直接 fs，bash spawn 子进程、进程树终止、可选超时、输出截断；`BashOperations` 接口允许扩展替换执行后端（如 SSH 远程），默认本地实现。按工具/风险分级的常驻审批策略未发现，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **审批与执行边界**：审批是回调钩子而非执行端强制——`beforeToolCall` 返回 `block` 即拒绝并回注，`afterToolCall` 可改写结果，扩展 `tool_call`/`tool_result` 事件走同一路径；项目信任门决定项目级 `.pi` 设置、资源、扩展与包是否加载（不直接拦截 bash 执行，仅当 shell 路径与命令前缀取自项目设置时间接影响运行参数）。基础工具本地执行：文件工具直接 fs，bash spawn 子进程、进程树终止、可选超时、输出截断；MCP 和 codemode 另有远端协议与 VM 边界；`BashOperations` 接口允许扩展替换执行后端（如 SSH 远程），默认本地实现。按工具/风险分级的常驻审批策略未发现，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
 - **扩展体系（自扩展 Agent harness）**：扩展可注册工具、改写 system prompt（`before_agent_start`）、注入 custom/custom_message 条目、提供 `/xxx` 命令与自定义会话条目；Pi Packages 经 npm/git 安装分享；Skill 是模型可见的文本资源（system prompt 索引 + `/skill:name` 全文注入），不是工具调用。harness SDK 的搜索接口未接入 TUI 主路径，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
 
@@ -134,7 +134,7 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 **未覆盖类目（仓库内本次未找到，按来源笔记检索范围表述）**
 
-- MCP：独立客户端已抽成 `packages/mcp`（transport 无关的客户端核心、stdio 与 Streamable HTTP 传输、内存测试传输），p2 有 mcp 插件；coding-agent 侧的 MCP 配置与桥接本次未逐条核对。来源：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- MCP 端到端 OAuth、远端环境与服务器兼容性未运行；coding-agent 的配置→工具注册→可用性复查→调用→限界回注已静态走通。来源：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 - 按工具/风险分级的常驻审批策略与确认框式授权 UI（审批仅 `beforeToolCall` 回调钩子，扩展未注册时工具直接执行）。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 - 渠道配置编辑器（TUI 只处理凭据/模型选择/重载；p2 的 Web 端只有模型选择器与登录页，渠道定义仍来自 models.json 或扩展）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 - 通用客户端侧跨 Provider 自动故障转移、多 Key 池与轮询仍未找到；Anthropic 服务端 refusal fallback 是限定模型与限定协议的例外。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
@@ -153,7 +153,7 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 ## 来源笔记索引
 
-- [Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)：工具定义/注册/注入/协议/校验/编排/审批/执行边界/结果回注，MCP 未找到。
+- [Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)：工具定义/注册/注入/协议/校验/编排/审批/执行边界/结果回注，MCP 内建连接与 codemode 嵌套工具、durable 重放策略。
 - [Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)：角色数据模型、SYSTEM/AGENTS 文件链、提示词拼装、模型与生成参数、运行时可见性。
 - [Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)：端到端聊天主链、核心对象与状态权威、压缩/重试/分支/导出概览与横向对比索引。
 - [Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)：TUI 工作台、输入区与命令面板、会话选择器与搜索、树导航、fullscreen、状态行、steer/followUp 界面、bash 交互、退出。

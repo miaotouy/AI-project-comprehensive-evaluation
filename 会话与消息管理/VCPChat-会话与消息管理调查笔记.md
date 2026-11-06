@@ -2,11 +2,11 @@
 
 > 调查对象：`https://github.com/lioensky/VCPChat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`ce9882266782ffdd7b958bbf79d8db70480047c0`（分支：`main`）
 >
-> 调查方式：原文段自 [`../Chat/VCPChat-Chat调查笔记.md`](../Chat/VCPChat-Chat调查笔记.md)（2026-08-05 调查）迁移；基于当前 HEAD 的静态源码核对 chatHandlers.js 行号，并补充新增的 VCP-CDS 子系统
+> 调查方式：静态源码走读聊天历史 IPC、主进程历史队列、压缩检查点构建与快照校验，并参考[Chat 笔记](../Chat/VCPChat-Chat调查笔记.md)及 VCP-CDS 索引实现；未运行应用或多窗口竞争
 >
 > 调查范围：会话与话题（Topic）的数据模型、消息字段、持久化格式、生命周期（创建/切换/选择）、列表索引与检索、未读计数、并发写入与一致性；请求执行与界面工作流分别进入对话请求与上下文、Chat UI 类目
 >
@@ -55,6 +55,12 @@ Agent/群组配置（topics[] 数组，仅元数据）
   - 归属与来源：`agentId`、`model`、`modelSource`（`'group_unified'` 或 `'agent'`，见 `Groupmodules/groupchat.js:950`）、`groupId`、`topicId`；
   - 标记：`isGroupMessage: true`、`interrupted`（用户中断时为 true，`:1033`）。
 - Agent 配置里的 `topics[]` 元素字段：`id, name, createdAt, locked（默认 true）, unread（默认 false）, creatorSource`（`modules/ipc/chatHandlers.js:522-529` 的兼容归一化逻辑）。
+
+### 压缩检查点的数据语义
+
+压缩检查点作为普通 user 消息追加到既有历史，正文包含接续报告与宿主保留的日记原文，元数据另存版本、报告、日记与审计结果。此前消息不删除，UI 可继续重读完整历史；出站上下文仅从最新有效检查点开始，检查点后新增消息正常追加。它是历史内的上下文边界，未创建新 Topic 或分支。依据：[检查点构建](../../VCPChat/modules/chat/contextCompactionPrompts.js#L116-L152)、[上下文起点选择](../../VCPChat/modules/chat/contextCompactionState.js#L6-L25)。
+
+压缩提交在 mutate 回调里比较完整历史的 JSON 快照，压缩期间发生任何变化都会拒绝追加；成功后提交原历史加一条检查点。该路径具有自身的过期快照防护，其他整份 replace 路径仍遵循其原有并发边界。依据：[压缩提交](../../VCPChat/modules/chat/contextCompactionService.js#L130-L148)。
 
 ### 1.3 分支数据语义
 

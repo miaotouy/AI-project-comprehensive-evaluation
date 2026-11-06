@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/open-webui/open-webui`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`c38885a1a737da4968f157092f304f3b5481d0bf`（分支：`main`）
 >
@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-Open WebUI v0.11.3 的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。
+Open WebUI 当前快照的 Chat 体系以**「会话 chat JSON 快照 + chat_message 消息表」双写**为特征：每条消息同时存在于 `chat.chat.history` 快照与 `chat_message` 行中，前端展示以历史快照为主，数据库行用于增量同步、统计和恢复。
 
-- 聊天消息的增删改查全部集中在 [`routers/chats.py`](../../open-webui/backend/open_webui/routers/chats.py)（2236 行），`routers/` 目录下不存在独立的 `messages.py`；`models/messages.py` 是频道（channel）消息模型，与聊天消息 `models/chat_messages.py` 是两套物理隔离的体系；
+- 常规聊天与消息 CRUD 位于 [`routers/chats.py`](../../open-webui/backend/open_webui/routers/chats.py)，审批/人工提问的消息 resolve 端点则装配在 [`main.py:1883-1906`](../../open-webui/backend/open_webui/main.py#L1883-L1906)；频道消息模型与聊天消息表属于两套体系；
 - 消息以 `{chat_id}-{message_id}` 复合键存储于 `chat_message` 表（`chat_messages.py:224`），`parentId`/`childrenIds` 构成消息树，`modelIdx` 保留多模型并行（side-by-side）的列序；
 - 编辑/删除消息粒度到单条消息；会话更新合并 history（`Chats.merge_history`，`chats.py:1360`），缺失 ID 不推断删除，删除走独立端点；
 - `meta.internal=True` 的会话视为内部会话（如子代理），不在普通列表展示（`chats.py` 模型层 `is_internal_chat`）；
@@ -153,7 +153,7 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 - 新会话通过 `originalChatId`/`branchPointMessageId`/`forked_from` 记录来源（1730-1734 行）；
 - **克隆**：`POST /{id}/clone` 复制整个会话为新会话（`import_chats`），`branchPointMessageId` 指向当前 `currentId`；
 - **版本切换**：不创建新消息对象。历史快照本身就是分支树，切换靠 `history.currentId` 指针与 `showMessage`（前端沿 `childrenIds` 走到叶子），数据语义见 Chat UI 笔记 Overview 一节；
-- **重试/续写/回退的执行语义**（从哪个节点重建请求）在对话请求与上下文笔记第 7 节；本类目只记录它们修改的对象：重试/续写复用原消息 ID 写入（`assistant_message_id`），不新建分支节点。
+- **重新生成与续写分别改变不同对象**：重新生成从目标回复的父 user 节点调用发送入口，为助手回复生成新的 UUID，形成同一父节点下的兄弟版本；带修改建议时还把原回复作为重生成上下文。继续生成则复用原助手消息 id，经 `assistant_message_id` 读取其已有输出并追加（[`Chat.svelte:4769-4827`](../../open-webui/src/lib/components/chat/Chat.svelte#L4769-L4827)、[`Chat.svelte:4118-4259`](../../open-webui/src/lib/components/chat/Chat.svelte#L4118-L4259)）。
 
 ## 5. 列表、分页、搜索与定位
 
@@ -180,7 +180,7 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
   embeds / files → 按 replace 标志追加或覆盖
   source / citation → sources 追加
   ```
-- **并发写入无锁**：`upsert_message` 是读-改-写（300 行起），usage 合并使用 `merge_usage` 幂等叠加；多实例并发写同一 chat 的最终一致性未做运行验证（见未验证事项）；
+- **并发保证按写入口区分**：普通消息 upsert 包含读改写；审批、人工提问结算与工具执行认领经 `edit_message_output`，在同一事务中读消息、修改 output 并双写。SQLite 使用 BEGIN IMMEDIATE，其它方言请求 chat 行锁；执行认领提交后再调用真实工具，结果完成时再次核对运行状态。不能把所有写路径统一描述为无锁，多实例最终一致性与外部工具恰好一次执行仍未运行验证（[`models/chats.py:449-489`](../../open-webui/backend/open_webui/models/chats.py#L449-L489)、[`utils/middleware.py:3236-3268`](../../open-webui/backend/open_webui/utils/middleware.py#L3236-L3268)）；
 - **Socket 会话身份与清理**：请求处理不再回查共享 SESSION_POOL 取用户，而是经 `get_socket_session_user` 读本 worker 的 Socket.IO 会话（`socket/main.py:478`）；SESSION_POOL 仍由心跳维护 last_seen_at，孤儿会话清理改为分批扫描——Redis 后端用 HSCAN 取批、HDEL 批量删（`socket/main.py:231`、`socket/utils.py`）；
 - **取消与清理**：删除/归档/分叉前都会 `stop_item_tasks` 或 409 拒绝，防止半截任务写回；`cleanup_task` 在任务 done 回调中注销（`tasks.py:143`）。
 
@@ -203,10 +203,8 @@ POST /api/chats/new 或 POST /api/chat/completions（is_new_chat）
 
 - **会话级**：`folder_id`、`variables`、`meta`（tags、internal、forked_from 等）、`tasks` 快照；
 - **消息级**：消息行保存模型、附件、引用、嵌入、输出与用量等字段（完整字段见 §1.2 表）；`ChatFile` 表另存 `chat_id+message_id+file_id` 关系（139-152 行）；
-- **任务级（不持久化在消息上）**：下列字段只随生成请求传递，`chat_message` 表列中不存在（表结构 128-172 行）：
-  ```text
-  tool_ids / skill_ids / filter_ids / features
-  ```
+- **请求配置与暂停恢复快照**：工具、技能、过滤器和能力选择没有各自独立的消息表列；持久聊天暂停审批或人工提问时，会把这些选择连同附件、终端、变量、参数和原 session id 保存到消息 `meta`。resolve 端点用该快照构造恢复请求，并优先采用会话当前的审批模式；因此它们在暂停场景下具有消息级持久化语义（[`utils/middleware.py:3348-3389`](../../open-webui/backend/open_webui/utils/middleware.py#L3348-L3389)、[`utils/tool_approval.py:188-254`](../../open-webui/backend/open_webui/utils/tool_approval.py#L188-L254)）。
+- **压缩检查点**：用户轮次边界的摘要写入消息字段 `contextSummary`（映射数据库 `context_summary`）；工具批次内的摘要保存为 assistant output 中的压缩标记。两者裁剪后续请求的重放范围，原始消息树仍保留，详细算法见[请求与上下文笔记](../对话请求与上下文/Open-WebUI-对话请求与上下文调查笔记.md#3-预算截断与压缩)。
 - 工具调用过程以 `output`/`meta` 内容留存，`_extract_tool_names` 扫描这些字段即为此类统计设计（89-120 行）；
 - **引用与历史快照**：分享（SharedChat）是时刻快照；分叉记录 `forked_from` 引用而非复制关系表；模型绑定是消息级快照（`model_id` 文本列），模型实体变更不回写历史。
 

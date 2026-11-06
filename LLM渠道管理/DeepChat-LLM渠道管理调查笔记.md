@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -135,9 +135,13 @@ OAuth 配置与抽象从 `src/main/provider/oauthHelper.ts` 移入 `src/shared/t
 
 模型目录不再由各调用方分别拉取，而是由主进程的 `ProviderCatalogService` 作为唯一写者聚合成快照（`src/main/provider/catalog/providerCatalogService.ts`）。它把六类来源合并成同一份模型列表：远端 `/models`、Provider DB、本地配置、运行时、Ollama 与 ACP；每份快照带 Provider 级 `revision`，状态取 `unknown|fresh|stale|refreshing|error` 之一，并记录来源、最后刷新原因、错误码与错误时间（类型定义 `src/shared/types/providerCatalog.ts`）。
 
-刷新节奏由服务自己控制：远端目录 TTL 6 小时、运行时目录 60 秒、失败后 5 分钟重试窗口；刷新原因区分 user、stale、config、provider-db、sync、external-write、acp，返回 `ok|not-modified|failed|superseded` 四态与 added/removed/updated 差异。并发刷新同一 Provider 会被合并，旧请求被标记 superseded。
+刷新按来源确定有效期：远端目录 6 小时、运行时目录 60 秒，自动 revalidate 在失败后的 5 分钟内不重试。同 Provider、同配置代际的刷新通常共用 Promise；但显式 user/config 请求若遇到跳过 Provider DB 同步的后台刷新，会排在其后再执行，以获得完整目录事实。配置改变会递增 generation，旧实例的返回值成为 superseded，不能写回（`providerCatalogService.ts:223-285,379-451`）。
+
+成功刷新即使模型内容相同，也更新刷新时间并递增快照 revision；renderer 拒绝更旧 revision，避免较早 IPC 响应覆盖新快照。失败保留已有目录并记录错误；Provider DB 下载失败时仍可从缓存继续构建目录（`providerCatalogService.ts:430-540`、`src/renderer/src/stores/modelStore.ts:187-201`）。
 
 renderer 侧通过四条路由消费（`src/shared/contracts/routes/providers.routes.ts:403-437`）：`providers.catalog.get` 取单 Provider 快照、`providers.catalog.list` 批量取、`providers.catalog.refresh` 触发刷新、`providers.catalog.ensureFresh` 在打开设置页或切换登录模式后确保新鲜。状态另落 settings DB（`getProviderCatalogState`/`setProviderCatalogState`），所以重启后仍能区分“从未成功拉取”和“过期”。
+
+首次接入会等待显式 config 刷新后再推荐并启用初始模型，防止提交配置后立即读取空目录。推荐失败发生在 Provider 已持久化之后，不回滚已连接的 Provider；返回结果还用 attempt 序号隔离已取消或被替换的界面流程（`src/renderer/settings/components/AddProviderFlow.vue:400-441`）。后台模型列表读取使用 ensureFresh 并先消费现有快照，设置向导使用等待刷新结果的路径，两者有不同的一致性时机（`src/renderer/src/stores/modelStore.ts:337-415`）。
 
 ### 5.2 模型来源与用户覆盖
 

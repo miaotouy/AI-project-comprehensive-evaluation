@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/rikkahub/rikkahub`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`903e058b9361bff71d0b79f4ef2d8ac23d6597e6`（分支：`master`）
 >
@@ -83,13 +83,13 @@ Provider 配置是独立的：`MediaGenerationProviderSetting` 保存厂商凭�
 - `PREPARING`：素材尚未上传或请求尚未组装完成；没有服务端任务。
 - `QUEUED` / `RUNNING`：已提交，记录持有 `taskId`（异步接口）或正在等待同步响应。
 - `DOWNLOADING`：接口已返回产出地址，正在把文件下载到本地。
-- `SUCCEEDED` / `FAILED` / `CANCELLED`：终态；失败时清空 `taskId` 并保留错误信息。
+- `SUCCEEDED` / `FAILED` / `CANCELLED`：本地终态。服务端已终止或成功响应无产出时清空任务 id；网络、下载等异常只记失败与错误，保留已有任务 id 以便重试续查。见 [执行与失败分流](../../rikkahub/app/src/main/java/me/rerere/rikkahub/service/MediaCreationService.kt#L243-L302)。
 
 轮询用固定间隔，查询失败按次数退避重试；下载失败会重试并重开连接——源码注释说明取消时线程可能卡在 `read()`，因此要主动关闭连接让读取立刻抛出。取消只停止本地等待，已经提交给服务端的任务无法撤回，`taskId` 会保留，之后可以重试接着查询（`MediaCreationService.cancel`、`retry`）。
 
 前台服务与通知负责保活：生成在应用不在前台时继续，完成后通过通知反馈；`MediaCreationForegroundService` 持有通知通道与启动/停止逻辑，`RouteActivity` 负责点按通知跳转。
 
-应用重启后的恢复由 `resumePending()` 完成：遍历仍处于活动状态且带 `taskId` 的记录，重新注册 Job 继续查询，不必重新提交（`MediaCreationService.kt`）。
+应用重启时只恢复仍处于活动状态的记录：有任务 id 则重新注册 Job 续查，没有则标记中断失败。失败或取消后的手动重试沿用同一记录：有任务 id 续查，否则重新提交；成功记录不重试。见 [retry/cancel/resumePending](../../rikkahub/app/src/main/java/me/rerere/rikkahub/service/MediaCreationService.kt#L138-L221)。
 
 ## 4. 落盘、持久化与版本
 
@@ -99,7 +99,7 @@ Provider 配置是独立的：`MediaGenerationProviderSetting` 保存厂商凭�
 
 持久化是 Room 三张表：会话、节点、记录；节点表维护 `selectedRecordId`，记录表的参数、输入、输出以 JSON 列保存。仓储提供按会话观察时间线、切换版本、删除项/会话、查询进行中记录与最近成功记录等接口，删除会话按外键级联删节点与记录（`data/db/entity/MediaCreationEntity.kt`、`MediaCreationRepository.kt`）。
 
-版本语义只到“同一项的多个记录”：再来一次或修改后重生成都记在原项的 `nodeId` 下，界面显示选中版本并可左右切换。没有跨项的素材库，也没有把成功产出直接作为下一次输入的回填入口（`editingNodeId` 只回填输入区，素材需重新选择）。
+版本语义是“同一项的多个记录”：再来一次或修改后重生成都记在原项下，界面可左右切换选中版本。成功产出也可进入下一次创作：图片可作为参考图、首帧或尾帧，视频可作为参考视频；“续写”优先取接口返回的尾帧，否则从本地视频抽取最后一帧。当前模型不接受所需素材角色时会选择兼容模型，再把素材复制进当前会话的草稿目录；副本与来源记录独立，删除来源不会删掉草稿素材。见 [MediaCreationVM.useImage/useVideo/continueVideo/copyToDraft](../../rikkahub/app/src/main/java/me/rerere/rikkahub/ui/pages/mediacreation/MediaCreationVM.kt#L320-L390)。这形成产出到后续任务的复用闭环，尚无独立的跨项工程或通用素材库对象。
 
 ## 5. 与聊天、旧图库和语音的边界
 
@@ -118,7 +118,7 @@ Provider 配置是独立的：`MediaGenerationProviderSetting` 保存厂商凭�
 - 能力来自适配器而非模型清单：参数是否出现、素材是否必须公网地址等由适配器常量描述；具体模型是否接受某个值仍由接口决定，界面不对取值做过细校验。
 - 只保留本地相对路径：记录不保存绝对路径，换设备或恢复备份后依赖统一根目录；旧图库页仍用相对路径登记。
 - 密钥按同源规则下发：仅当产出地址与配置的 `baseUrl` 同源时才带 `Authorization`，其余地址原样下载。
-- 视频生成的产品缺口已补上：旧快照的 `videogen` 只有库没有调用点，当前由 `mediagen` + 媒体创作页 + 前台服务接通，但聊天内的服务端内置工具仍只覆盖图片。
+- 视频生成由 `mediagen`、媒体创作页与前台服务接通；聊天内的服务端内置工具仍只覆盖图片。
 
 ## 7. 未验证事项
 

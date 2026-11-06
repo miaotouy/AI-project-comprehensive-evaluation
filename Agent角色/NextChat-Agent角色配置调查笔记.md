@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ChatGPTNextWeb/NextChat`（重点 `app/store/mask.ts`、`app/masks/`、`app/components/mask.tsx`、`app/components/new-chat.tsx`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`1d3dc331512929a4b1d3e82354e72acce33b5c7a`（分支：`main`）
 >
@@ -86,9 +86,9 @@ NewChat 页面
 
 `app/components/new-chat.tsx:77-107` 负责列出 Mask 与命令/URL 选择，`startChat` 调用 `newSession` 后进入聊天页。
 
-`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”顺序合并；会话保存的是 `ChatSession.mask` 完整副本而非 id，后续编辑直接修改这份副本。
+`useChatStore.newSession`（`app/store/chat.ts:307-328`）把 Mask 复制到新会话，模型配置按“全局后局部”顺序合并；会话保存顶层 Mask 对象而非仅 id，模型配置单独合并复制；context/plugin 等嵌套数组在创建时没有递归克隆。后续界面编辑直接修改会话中的 Mask。
 
-这也是 fork 行为的关键：`forkSession` 深拷贝消息并复制 Mask 及其 `modelConfig`（`app/store/chat.ts:243-267`），所以分叉会话之后可以拥有独立角色参数。
+fork 为消息重分配 id，并分别展开复制 Mask 与模型配置，但嵌套的 context、plugin 和消息内容数组在这一步仍可能共享引用；摘要与上下文清除位置也没有继承。分叉有独立的顶层角色参数，不能等同于完整深克隆。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)。
 
 ## 4. Context prompt 编辑和发送
 
@@ -152,7 +152,7 @@ Mask 页面导出时只导出 `builtin === false` 的 Mask JSON；导入支持�
 
 ## 7. 风险、边界和未验证事项
 
-1. **Mask 是可变副本**：会话保存完整 Mask，不是不可变引用。修改全局 Mask 定义不会自动回写已经创建的会话，除非它仍处于全局同步状态。
+1. **Mask 是可变副本**：会话保存完整 Mask，不是不可变引用。保存 Mask 定义不会主动遍历已创建会话回写；全局同步仅使会话模型参数跟随应用级模型配置，与保存 Mask 定义是不同路径。
 2. **`hideContext` 语义容易误解**：它只隐藏聊天 UI 中的示例消息，不提供隐私隔离或请求脱敏。
 3. **插件与角色耦合**：`Mask.plugin` 直接决定可用工具，但没有按角色声明权限、审批或参数范围。
 4. **导入信任边界宽**：JSON 导入几乎不校验字段，恶意/过大的 context、模型配置和插件 id 可以进入持久化状态。

@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/openai/codex`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`021fccb046508938c4754982efccfb51d6e8356e`（分支：`main`）
 >
@@ -189,7 +189,18 @@ ActiveTurnOutputSchemaMismatch / EmptyInput
 
 **不同线程并行**：每个线程一个 Session 与独立任务，线程管理器负责启动/恢复；并发上限与容量淘汰由 Agent 运行时控制（详见多 Agent 与工具类目）。
 
-**宿主参与轮次准入**：启用宿主准入的会话不再由核心自行向多 Agent 运行时申请名额，而是先等宿主准入通过再运行任务。app-server 用这套机制在关闭排空时拒接新轮、统计在途轮数，并在排空完成后统一放行（`codex-rs/core/src/tasks/mod.rs:363-410`、`codex-rs/app-server/src/turn_admission.rs:12-60`）。
+**宿主执行容量准入**：启用宿主 Agent 运行时的会话，由宿主提供执行名额，任务取得许可后才进入实际运行；等待期间输入归已注册任务持有，取消仍由该任务收口（[任务注册与运行](<../../codex/codex-rs/core/src/tasks/mod.rs#L364-L420>)、[等待与许可安装](<../../codex/codex-rs/core/src/tasks/admission.rs#L31-L66>)）。
+
+**app-server 的请求与启动准入**另设进程级计数门。相关 RPC 在进入串行化队列前取得许可，许可覆盖准备和提交过程；会启动轮次的请求在出队时还要复查。扩展自动启动也接入同一个门。该计数与已运行的 assistant 轮数分别观察，关闭流程先读取已准入请求数，再读取运行轮数，以覆盖“请求刚发布新轮、尚未释放许可”的交接窗口（[RPC 准入与复查](<../../codex/codex-rs/app-server/src/message_processor.rs#L1053-L1098>)、[自动启动接线](<../../codex/codex-rs/app-server/src/extensions.rs#L79-L81>)、[退出循环](<../../codex/codex-rs/app-server/src/lib.rs#L1088-L1115>)）。
+
+该门区分临时暂停与关闭排空，恢复条件各自独立（[TurnAdmission](<../../codex/codex-rs/app-server/src/turn_admission.rs#L37-L119>)）：
+
+| 场景 | 新请求/启动 | 已准入工作与后续状态 |
+|---|---|---|
+| 工作区切换的临时暂停 | 暂停期间拒绝 | 最多等待 10 秒让准入计数归零；暂停 guard 释放时清除暂停标记。若同时已关闭，关闭标记继续生效 |
+| 关闭排空 | 设置 `closed = true`，此实例后续准入持续拒绝 | 等已准入请求与运行轮均归零，再断开客户端并退出；托管 daemon 还等待恢复快照保存，强制关闭可跳过等待 |
+
+关闭流程保持关闭状态直到退出；下一进程的准入由新实例重新初始化。排空触发与完成条件见 [ShutdownState](<../../codex/codex-rs/app-server/src/lib.rs#L269-L323>)，断连与退出见[退出循环](<../../codex/codex-rs/app-server/src/lib.rs#L1093-L1121>)。
 
 **后台任务**：模型启动预热、MCP 预热与刷新、异步压缩都在主轮之外运行；每次开始新一轮且有用户输入时，app-server 还会为已配置主环境的线程启动记忆生成流水线；TUI 的自动标题另起隐藏的临时结构化线程，不与用户线程共用消息历史（`codex-rs/app-server/src/request_processors/turn_processor.rs:742-755`、`codex-rs/tui/src/app/thread_title.rs:64-127`）。预热与压缩入口见关键源码索引。
 

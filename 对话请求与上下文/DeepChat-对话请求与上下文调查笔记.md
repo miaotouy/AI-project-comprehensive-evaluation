@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-当前实现以 context occupancy 作为压缩判定的输入，并将压缩结果、边界原因和 Provider 用量分开记录。压缩期间会建立 checkpoint；若摘要不能收缩上下文或快照已过期，协调器拒绝继续采用该结果（`src/main/agent/deepchat/loop/contextCoordinator.ts`、`src/main/agent/deepchat/runtime/contextOccupancyCoordinator.ts`）。工具目录则在本轮请求开始时冻结为 tool-surface snapshot，避免工具激活改变已经发出的 Provider 请求（`contextCoordinator.ts` 的工具面快照段）。
+当前实现以 context occupancy 作为压缩判定的输入，并将压缩结果、边界原因和 Provider 用量分开记录。压缩期间建立 checkpoint；过期摘要受 CAS 拒绝，不能收缩上下文的摘要不被采用，但仍可推进带缺口标记的 boundary-only anchor，保留此前摘要（`src/main/agent/deepchat/runtime/compactionService.ts:629-745`、`src/main/session/data/settings.ts:270-310`）。工具目录则在本轮请求开始时冻结为 tool-surface snapshot，避免工具激活改变已经发出的 Provider 请求（`contextCoordinator.ts` 的工具面快照段）。
 
 工具结果的上下文处理是两段式：先由判定模型问“这条已结束的结果这轮还要不要”，判为不需要的整条换成短占位说明，再由既有的按大小截断处理剩余结果（`src/main/agent/deepchat/runtime/jevToolResultPruning.ts`，语义见独特功能笔记能力卡 10）。判定链路只在 Agent 配置了 `judgmentModel` 且本轮允许裁剪时启用，未配置时该段完全跳过。
 
@@ -94,7 +94,9 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - **自动压缩**：每次新 user turn 前由 `compactionService.prepareForNextUserTurn`（`compactionService.ts:311-`，调用点 turnCoordinator.ts:592-608）计算 intent，恢复 turn 用 `prepareForResumeTurn`（:359-）；intent 落地 `compactionRuntimeCoordinator.apply`（:291-，压缩消息的前插/顺移见会话与消息管理笔记 §4）。摘要生成（`generateRollingSummary` :774-、`summarizeBlocks` :810-、summary prompt 构造 :965-、模型调用 :996-）。
 - **manual compaction**：`turn.compactSession`（`turn.ts:401-413`）→ `compactionRuntimeCoordinator.compact`（`compactionRuntimeCoordinator.ts:133-`），要求非 ACP、状态 idle、无 pending interactions（:147-155）。
 - **判定模型裁剪（新增前置段）**：关闭的工具结果先经 `pruneClosedToolResultsForContext`（`jevToolResultPruning.ts:602`）逐条判题，候选与状态受 token、路径数上限约束（`jevReviewState.ts:68`、`:129`）；判为不需要的结果由 `buildJevPrunedResultContent`（`:521`）替换为指回 Tape 的短占位，判为需要的保持原文。该段是纯投影：不写 Tape、纯函数返回新数组，后续按大小截断仍然生效；反馈信号见 `jevPruningFeedback.ts`，判题材料是工具输出本身，不含大小/年龄提示。
-- **压缩摘要的存储**（summaryState 的持久化位置）本次未展开（§11）。
+- **摘要持久化与失败边界**：摘要状态同时落入会话表和 Tape 重建 anchor，写入时在同一事务中比较旧摘要、cursor 与更新时间，过期结果不能覆盖当前状态。读取优先从最新 Tape anchor 重建，无 anchor 才回退会话表（`src/main/session/data/settings.ts:244-310`）。
+
+  摘要调用失败、返回空内容或结果不够小时，仍可提交 boundary-only anchor：cursor 前移，保留旧摘要，更新时间置空，并记录未摘要区间。已生成但过大的摘要被拒绝采用，不等于整个压缩边界回滚；取消请求则抛出中止，不推进该结果（`compactionService.ts:629-745`）。启动时先协调压缩 marker，再恢复其余 pending 消息（`createDeepChatAgentHarness.ts:495-518`）。
 
 ## 4. SDK、Provider、模型与协议交接
 
@@ -120,7 +122,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 
 - **停止（界面 → 网络）**：ChatPage `onStop`（见 Chat UI 笔记 §5）→ `ChatService.stopStream`（`chatService.ts:212-`）→ `RunLifecycleCoordinator.cancel`（`runLifecycleCoordinator.ts:258-306`）：请求生成中断、延后工具调用与 provider 权限全部取消，未开始流的场景把 pending interaction 块写为 aborted 终态并调度队列（:284-305）。附件准备阶段另有 submission 取消（`chatCancelSubmissionRoute`，`routes.ts:710-718`）。
 - **重试**：`turn.retryMessage`（`turn.ts:333-375`）→ `prepareRetryMessage`（`transcriptMutations.ts:43-66`，取 source user 消息；error + steer receipt 时允许保留 restart-held queue）→ `runtime.send`，DeepChat 路径在 `beforeHistoryPreparation` 中 `commitRetryMessage`（:68-73，`deleteFromOrderSeq` 破坏性截断）。重试的起始上下文由 `buildCacheAwareResumeContextWithMetadata` 决定（§2）。
-- **续写**：本次在 turn 操作面与 ChatPage 动作中未找到独立的"续写"执行链；`onMessageContinue` 复用 retryMessage 语义（见 Chat UI 笔记 §6）。检查范围：`turn.ts` 全部公开操作、`useMessageActions.ts`。
+- **续写**：`onMessageContinue` 通过普通发送入口追加本地化的用户指令，不重写目标消息或截断历史；只读、阻塞性交互和同会话重复操作会阻止提交（`src/renderer/src/features/chat-page/composables/useMessageActions.ts:286-304`）。
 - **编辑后发送**：`editUserMessage`（`turn.ts:383-390`）→ `transcriptMutations.editUserMessage`（:85-106，原地改文本）；随后 UI 自动 retry 完成截断（Chat UI 笔记 §6）。
 - **队列项恢复**：`retryPendingQueueInput`（`turn.ts:230-242`）→ `PendingInputAdmissionCoordinator.retryPendingQueueInput`（见 §8）。
 
@@ -129,7 +131,7 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 - **并发粒度**：单会话串行由两层保证——`SessionTurn` 全部写操作走 `workdir.runWithSessionOperationGate`（`turn.ts:107-111` 等），DeepChat runtime 另以"drain lease"保证同一时间只启动一个 turn（`pendingInputPump.ts:407` `tryAcquirePendingQueueDrain`、`launch` :505-566）。不同会话各有独立 runtime scope，互不阻塞。
 - **入队与认领**：`PendingInputAdmissionCoordinator.queue`（`pendingInputAdmissionCoordinator.ts:104-139`）按 `shouldClaimImmediately`（`pendingInputPump.ts:295-331`）决定直接 claimed 启动还是入队等待；`sendQueuedMessage`（:141-190）在入队前完成附件准备。`drain`（`pendingInputPump.ts:402-494`）按 steer 优先取下一项（:432-439），restart-held 项不自动启动（:436-438）。
 - **失败释放与 retry_required**：`DurablePendingInputClaim.apply`（`pendingInputPump.ts:149-174`）——`release-before-user-fact`/`release-after-rollback` 对 queue 项调用 `releaseClaimedQueueInputForRetry`（数据层见会话与消息管理笔记 §1.4）；turn 内未 settle 的 claim 会在 finally 记账（:546-565）。
-- **恢复执行**：`retryPendingQueueInput`（`pendingInputAdmissionCoordinator.ts:433-474`）把 `retry_required` 项置回 pending 并 drain；`resumePendingQueue`（:476-494）要求无 blocked/claimed 项并释放 restart hold 后 drain。
+- **恢复执行**：运行失败释放的 retry_required 项由逐项 retry 改回 pending 后尝试 drain，返回 accepted 与 started 分别表示状态接受和是否已启动。重启释放的 claimed 未物化项则恢复为 pending 并带 restart hold，resume 在无阻塞或 claimed 项、可 drain 的条件下释放 hold；它不会替用户恢复 retry_required 项（`pendingInputAdmissionCoordinator.ts:433-494`、`src/main/session/data/pendingInputs.ts:429-451`）。
 - **steer 通道**：`steerActiveTurn`（:192-289）与 `steerPendingInput`（:315-410）把输入物化为可见 user 消息（`acceptSteerMessage`/`promoteQueuedInputToSteerMessage`，数据层见会话与消息管理笔记 §1.4）；工具 question/permission 响应经 `respondToolInteraction`（`turn.ts:427-437`）走独立通道。
 - 多会话并行生成与"后台（窗口外）生成"：本次在 ChatPage 与 runLifecycle 中未找到后台生成调度入口（检查范围：`turnCoordinator`、`runLifecycleCoordinator`、ChatPage 组合）；不同会话只是各自独立串行执行。
 
@@ -146,14 +148,14 @@ send/steer 经 `withSubmissionCancellation`（:129-141）注册 `SubmissionCance
 
 ## 10. 退出恢复、日志与已确认边界
 
-- **启动恢复**：`createDeepChatRuntimeServices`（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:512-523`）先 `recoverInputsAfterRestart`（queue/steer 收口，held 项交给 pump 持有）再 `recoverPendingMessages`（pending 消息置 error）；UI 侧 resume 动作见 Chat UI 笔记 §5。
+- **启动恢复**：harness 先处理执行日志恢复候选，再恢复 queue/steer 并把 hold 集合交给 pump；随后协调压缩 marker，最后收口其余 pending 消息（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts:495-518`）。UI 侧 resume 与逐项 retry 分开呈现，见 Chat UI 笔记 §5。
 - **可观测性**：结构化主进程 JSONL 日志（`src/main/logging/mainLogEvents.ts`）：`agent.run.started`（:921-941）与 `agent.run.terminal`（:942-982）携带 runId/sessionId/messageId 关联字段（`correlationIdentifier`，:511-532）与 stopReason 枚举（:399-420）；另有 `agent.admission.*`（:983-1100）与 `orchestration.delegation.*`（:1101-1195）事件。事件面已具备任务关联基础设施，但本次未运行验证落盘内容与恢复时的回填。
 - **已确认边界**：Provider 预检/严格重试/context-pressure recovery（§3）、overflow 抛出、manual compaction 限制（非 ACP + idle）、resume/retry 只对 DeepChat session 可用（`turn.ts:216`、:223-225、:237-239）。
 - 应用退出、切换 session 时任务收口的实时行为本次未运行验证；ACP runtime 的协议 payload 未展开。
 
 ## 11. 未验证事项
 
-- 压缩摘要的存储位置与恢复路径（summaryState 持久化）未展开；自动压缩触发阈值与算法细节未逐行验证。
+- 摘要状态、Tape anchor 与 CAS 提交已静态核对；自动压缩触发阈值和完整选段算法未逐行展开，进程崩溃与摘要请求中断的实时表现未运行验证。
 - 网络中断、快速切换 session、重复 IPC 事件的流式顺序未运行验证。
 - Provider fallback/同 Provider 重试与 context-pressure recovery 的实测效果未验证；重试幂等性（截断后重复执行）未实测。
 - 应用退出、窗口关闭时的任务收口未运行验证。

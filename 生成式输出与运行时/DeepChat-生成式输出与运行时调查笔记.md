@@ -2,7 +2,7 @@
 
 > 调查对象：`https://github.com/ThinkInAIXYZ/deepchat`（重点 `src/main/mcp/apps/`、`src/main/tool/agentTools/`、`src/renderer/src/components/mcp/`）
 >
-> 调查更新日期：2026-11-04
+> 调查更新日期：2026-11-05
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
@@ -17,7 +17,7 @@
 DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agent 改为创建工作区文件并用浏览器工具承载交互式内容；内置 Artifact 的生成、预览与执行运行时已移除，历史消息只保留“标题 + 可复制原文”的静态兼容视图（`docs/architecture/remove-built-in-artifacts/spec.md`）。当前承担生成式输出运行面的机制有四条：
 
 1. **历史 Artifact 兼容层**：消息里的 `<antArtifact>`/`<antThinking>` 文本仍被解析，但只渲染标题与原文并提供复制，HTML、SVG、React、Mermaid 一律不执行，也不触发工作区面板。保留旧消息类型、解析与导出支持，无需数据库迁移。
-2. **MCP App 沙箱**：任何 MCP 工具若声明 `ui` 元数据与 `text/html;profile=mcp-app` 资源，其 HTML 结果可进入 `mcp-app://` 协议的双层 iframe 沙箱，通过 JSON-RPC/postMessage 桥回宿主调用工具、资源、发消息与更新模型上下文，全部能力需用户逐次同意。
+2. **MCP App 沙箱**：MCP 工具通过 UI 元数据与 `text/html;profile=mcp-app` 资源声明 App；宿主校验持久化工具结果与当前服务器声明后，签发实例并用独立协议源的双层 iframe 承载。JSON-RPC/postMessage 桥允许受控工具调用、资源读取与上下文交互；审批按方法和会话权限模式区分，开外链、发消息、更新模型上下文与敏感浏览器权限另需用户同意（§7.1）。
 3. **Agent 本机执行**：命令类工具在本机 shell 中执行（目录白名单 + 命令权限审批 + 后台会话），文件类工具读写工作区，图像生成工具产出 image 块。
 4. **Provider 图像产物**：OpenAI Codex 图像生成走 Provider 适配层，结果作为聊天 image 块进入既有消息投影；工具响应中的 base64 图片预览会在主进程尽量转存为 `imgcache://`，单次最多处理 4 个不同预览。
 
@@ -41,7 +41,7 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
   → 代理页创建内层 sandbox="allow-scripts allow-same-origin allow-forms" iframe 写入 App HTML
   → App 通过 JSON-RPC/postMessage 请求 callTool / listTools / readResource / openLink /
     authorizeMessage / updateModelContext
-  → appHost.ts:293-640 逐项做来源校验、权限审批与用户同意
+  → appHost.ts:293-640 校验实例与服务器绑定，按方法及会话权限模式审批/取得同意
   → 结果回 return 给 App；模型上下文写回消息块 extra_json
 ```
 
@@ -52,7 +52,7 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
 ### 内置 Artifact 的退役
 
 - 生成侧：`src/main/mcp/inMemoryServers/artifactsServer.ts` 删除，`get_artifact_instructions` 工具不再存在；MCP 设置的默认启用列表只剩 macOS 的 `deepchat/apple-server`（`src/main/mcp/settings.ts:242`），归一化时会把持久化下来的 `inmemory` 型 Artifacts 服务器剔除（`settings.ts:560`）。外部用户自建的 MCP server 不受影响。
-- 渲染侧：`components/artifacts/` 全部组件、`stores/artifact.ts`、`useArtifact*` 组合式函数与 `resources/skills/web-artifacts-builder` 技能一起移除；普通 Markdown 代码块不再提供 Artifact 预览入口。
+- 渲染侧：旧预览组件、artifact store、预览/导出组合式函数与内置 web-artifacts-builder 技能已移除；正文解析用的 useArtifacts 保留，用于历史标签兼容。普通 Markdown 代码块不再提供 Artifact 预览入口，见 [退役规格](<../../deepchat/docs/architecture/remove-built-in-artifacts/spec.md#L10-L19>) 与 [MessageBlockContent.vue:26–46](<../../deepchat/src/renderer/src/components/message/MessageBlockContent.vue#L26-L46>)。
 - 替代路径：Agent 用文件工具把内容写成工作区文件，交互式内容交给浏览器工具；规格明确不引入新的替代工具，也不自动把历史 Artifact 迁移成文件。
 
 ### 历史兼容与输出协议
@@ -88,7 +88,7 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
 ## 4. 表现类型、依赖与运行环境
 
 - **Markdown/SVG/Mermaid**：均按普通消息渲染（MarkdownRenderer 与 markstream-vue 的代码块/Mermaid 节点），没有 Artifact 级运行环境；历史 Artifact 里的同类内容是纯文本。
-- **MCP App**：见 §7.1，双层 iframe + 动态 CSP，是当前唯一由输出内容自带脚本并运行的环境。
+- **MCP App**：双层 iframe + 动态 CSP 承载 MCP 服务器资源中的 HTML 脚本；工作区文件预览有自己的协议与执行面，详见 §7.1 与下一项。
 - **工作区文件预览**：HTML/SVG/PDF 走 `workspace-preview://`；SVG 预览有独立组件 `WorkspaceSvgPreview.vue`；代码面板为只读 Monaco（`WorkspaceCodePane.vue`）。
 - **图像生成**：`agentImageGenerationTool.ts` 走供应商图像模型，结果转为独立 image 块（`imageGenerationBlocks.ts:8-106` 负责预览呈现与块插入）。
 - **图像持久化（#2094）**：生成图片经 `src/main/platform/imageCache.ts` 落盘并以 `imgcache://` 引用进消息文本，协议处理器在 `protocols.ts:207-230`；MCP 工具调用时参数里的 `imgcache://` 引用会被解析回 data URL；renderer 侧已提升为独立 image 块的图不再在 Markdown 中重复显示（消息渲染器笔记 §3）。
@@ -98,9 +98,9 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
 
 ## 5. 用户交互、事件与错误反馈
 
-- **历史 Artifact**：仅剩标题与复制按钮（`LegacyArtifactSource.vue`，`DcCopyButton` 复制整段原文）；没有点击打开工作区、没有 viewMode 切换、没有“生成中”占位。
+- **历史 Artifact**：兼容视图展示标题、原文和复制按钮，复制内容为整段原文；消息本身即可阅读，不触发工作区跳转，见 [LegacyArtifactSource.vue:1–10](<../../deepchat/src/renderer/src/components/message/LegacyArtifactSource.vue#L1-L10>)。
 - **工具调用反馈**：`MessageBlockToolCall.vue` 提供参数/响应折叠、exec/终端输出样式、文本编辑类工具结果的 diff 视图、图像预览徽标与缩略图、长时工具自动展开、子代理任务卡与权限状态环；状态字面量为 running/reviewing/error（`MessageBlockToolCall.vue:24-70`、`:360-620`）。
-- **MCP App**：工具调用、读资源、打开外链、发送消息、更新模型上下文都走显式同意；同意请求有超时、去重与数量上限，拒绝后工具访问进入挂起态并可重试（§7.1）。
+- **MCP App**：工具调用按会话权限模式审批或放行，读资源/列工具校验绑定与预算；开外链、发送消息与更新模型上下文另需同意。同意请求有超时、去重与数量上限，工具调用被拒绝后访问挂起，可由用户重试（§7.1）。
 - **交互状态恢复**：展开/收起、viewMode、全屏属 renderer 内存态（sidepanel store），重新打开应用后不保留；MCP App 实例也不跨重载恢复。
 
 ## 6. 编辑、diff、版本与协作
@@ -113,21 +113,31 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
 
 ### 7.1 MCP App 沙箱（最完整的受控运行时）
 
-- **执行位置**：renderer 中 `<iframe :src="mcp-app://{instanceId}/sandbox.html">`（`McpAppView.vue`）；主进程协议处理器返回沙箱代理页（`src/main/mcp/apps/sandboxProtocol.ts:95-230`），代理页再创建内层 `sandbox="allow-scripts allow-same-origin allow-forms"` iframe 写入 App HTML。双层结构把协议源与 App 内容的执行源隔离。
-- **协议约束**：代理页响应带动态 CSP（`buildMcpAppContentSecurityPolicy`，`sandboxProtocol.ts:25`）与 Permissions-Policy（`:230`）——默认拒绝一切加载，脚本与样式仅放行自身源、内联与声明域，连接与嵌套框架默认关闭，对象与表单动作禁用；CSP 域声明来自工具资源的 `_meta.ui.csp`，经 `appHost.ts` 严格归一化（拒绝 `*`、凭据、非 https 等）。
-- **桥**：JSON-RPC 2.0 over postMessage（官方 app-bridge 库），消息大小经 `assertBoundedMcpJson` 上限校验；代理页还校验自己处于 iframe 且与宿主隔离。
-- **能力桥（全部需同意或审批）**：
-  - 调工具：`callTool`（`appHost.ts:293-400`）经 ToolPermissionBroker 逐次审批，拒绝后挂起并可 `retryToolAccess`（`:614`）；
-  - 读资源/列工具：`listTools`/`readResource`/`listResources`/`listResourceTemplates`/`listPrompts`（`:402-525`）；
-  - 打开外链：`openLink`（`:527-544`，用户同意后 `shell.openExternal`，仅 http/https 无凭据）；
-  - 发送消息：`authorizeMessage`（`:546-566`，同意后写入会话）；
-  - 更新模型上下文：`updateModelContext`（`:568-612`）同意后持久化到消息块（`deepchatAssistantBlocks.ts:263` 的 `updateMcpAppModelContext`），供后续回合回流。
-- **实例生命周期**：`McpAppSandboxRegistry` 限额 64 实例、每 webContents 32、TTL 30 分钟、pending consent 上限 64（`src/main/mcp/apps/sandboxRegistry.ts:11-15`）；webContents 销毁、服务器变更或源不匹配（每次使用都校验配置代际与绑定哈希，`appHost.ts` 的 `assertBoundServerCurrent`）即撤销实例。**重载后实例不恢复**（内存态），但持久化工具结果里的 app 描述符（`src/main/mcp/resultProjection.ts:183`）允许重新 prepare 一个新实例——恢复的是“可再生视图”而非原实例状态。
-- **来源校验**：App HTML 必须来自 MCP 资源（`text/html;profile=mcp-app`，2MiB 上限）；每次 prepare/callTool 都重新校验工具声明与持久化结果一致。
+MCP App 使用独立协议源承载脚本，与聊天宿主分域。外层 iframe 载入 `mcp-app://{instanceId}/sandbox.html` 代理页，内层 iframe 允许脚本、同源与表单并执行 App HTML。内层与代理页共享 App 协议源，代理页启动时确认无法读取宿主顶层地址；隔离发生在 App 与聊天宿主之间（[sandboxProtocol.ts:57–177](<../../deepchat/src/main/mcp/apps/sandboxProtocol.ts#L57-L177>)、[appHost.ts:274–284](<../../deepchat/src/main/mcp/apps/appHost.ts#L274-L284>)）。
+
+代理页响应携带动态 CSP 与 Permissions-Policy。CSP 以 default-src 拒绝为基线，同时显式允许自身源、内联脚本/样式和部分 data/blob 资源；外部资源、连接与嵌套 frame 按声明域放行，对象与表单提交禁用。资源中的域声明会经过归一化。摄像头、麦克风、地理位置与剪贴板写入需声明对应权限，并由 Electron 的请求级同意处理器逐次裁决，没有常驻授权（`src/main/mcp/apps/sandboxProtocol.ts:25-55`、`sandboxRegistry.ts:371-434`）。
+
+能力桥使用 JSON-RPC 2.0/postMessage，代理页检查消息 source/origin 与体积，宿主按方法校验存活实例、所属窗口、原工具结果和服务器绑定。具体权限如下：
+
+| 请求 | 条件与行为 | 主要源码 |
+|---|---|---|
+| 调用工具 | 只接受 App 可见且插件策略允许的工具；default 模式进入用户审批。当前调用未传 explicit_user，auto_approve/full_access 可由 broker 直接放行；拒绝后挂起工具访问，用户可重试 | `src/main/mcp/apps/appHost.ts:293-400`、`src/main/tool/permission/toolPermissionBroker.ts:146-168` |
+| 列工具、读资源、列资源/模板/提示词 | 校验实例和服务器绑定并限制结果体积；列工具还按 App 可见性与插件策略过滤。这些方法没有另行请求用户同意 | `src/main/mcp/apps/appHost.ts:402-525` |
+| 打开外链 | 仅接受无凭据的 HTTP(S)，同意后交系统浏览器 | `src/main/mcp/apps/appHost.ts:527-544` |
+| 发送消息 | 校验非空与长度，取得用户同意后允许进入会话 | `src/main/mcp/apps/appHost.ts:546-566` |
+| 更新模型上下文 | 校验体积并计算批准 hash，用户同意后持久化到来源消息块，供后续回合回流 | `src/main/mcp/apps/appHost.ts:568-612` |
+
+App HTML 必须来自指定 MIME 的 MCP 资源，大小上限 2 MiB；prepare 会核对持久化结果与当前工具声明，工具执行前再次校验 App 可见性、插件策略与服务器绑定。原消息、工具输入或配置绑定变化会使视图失效（`src/main/mcp/apps/appHost.ts:218-271`、`:375-390`、`:647-699`）。
+
+实例保存在内存：总上限 64、每 webContents 上限 32，TTL 为创建后 30 分钟；创建或访问时清理过期记录。pending consent 上限 64，同意请求 2 分钟超时。服务器撤销、原消息失效或所属 webContents 销毁会撤销实例及待决同意，见 [sandboxRegistry.ts](<../../deepchat/src/main/mcp/apps/sandboxRegistry.ts>)。
+
+视图卸载时尝试 teardown，最多等待 500ms 后关闭桥并释放宿主实例，见 [McpAppView.vue:206–227](<../../deepchat/src/renderer/src/components/mcp/McpAppView.vue#L206-L227>)。TTL 到期约束后续协议与宿主访问，源码没有在到点时主动移除 iframe 的定时器；脚本停止时序仍需在目标环境观察。
+
+重载后原实例及其交互状态不恢复。持久化工具结果里的 App 描述符可以重新 prepare 新视图，前提是资源、工具声明与服务器绑定仍有效；保存的是可再生视图的来源与已批准模型上下文，运行实例没有跨重载状态快照（`src/main/mcp/resultProjection.ts:183`、`src/main/mcp/apps/appHost.ts:218-285`）。
 
 ### 7.2 Agent 代码执行（本机进程）
 
-- **exec 工具**：`agentBashHandler.ts` 经 `spawn(shell)` 在**主进程本机**执行（分离/托管两种子进程形态），默认超时 120s、kill 宽限 5s，目录限定 `allowedDirectories`（工作区根 + skill 根 + 会话目录 + temp + 用户批准路径），cwd 越界拒绝。
+- **exec 工具**：本机 shell 以子进程执行命令，有分离/托管两种形态，默认超时 120s、终止宽限 5s。启动目录按 allowedDirectories 校验，范围可含工作区、Skill、会话目录、临时目录与批准路径，越界 cwd 被拒绝；这项检查限定启动位置，进程仍在本机用户权限下运行（[agentBashHandler.ts:287–325](<../../deepchat/src/main/tool/agentTools/agentBashHandler.ts#L287-L325>)）。
 - **命令 shell 可配置（#2109）**：执行 shell 从用户默认 shell 改为解析后的命令 shell（`src/shared/commandShell.ts`：8 种 preference/profile，dialect 归为 posix、cmd、powershell 三种，pathStyle 有 native/win32/msys），按 dialect 拼命令与提示；RTK 改写只在 posix 方言启用；后台会话同样携带该配置；命令审批请求附带 shellProfile（Agent 工具笔记 §3）。
 - **权限**：`CommandPermissionService` 按低/中/高/关键四级审批，白名单与破坏性/网络模式按 shell 方言分别匹配；文件读写走 `FilePermissionService`（read/write/all 三档），`auto_approve` 下的审阅范围由 `resolveAgentToolReview` 统一裁决（Agent 工具笔记 §3）。
 - **输出预览与落盘**：执行结果按内联上限截取预览，超过阈值的完整输出落会话目录 log 文件；Agent 配置的 `commandOutputInlineChars`/`toolOutputInlineChars` 可调节（Agent 角色笔记 §1）。
@@ -156,7 +166,7 @@ DeepChat 不再把模型输出物化成可执行的内置 Artifact 对象。Agen
 ## 10. 生命周期、资源治理与性能
 
 - **历史 Artifact**：无独立生命周期，随消息块存在；兼容视图不持有任何运行时资源。
-- **MCP App**：TTL、实例上限、webContents 销毁回收、consent 超时、服务器绑定变更失效，是本项目最完整的资源治理。
+- **MCP App**：实例上限与访问时 TTL 检查限制宿主登记，视图卸载关闭桥并释放实例，webContents 销毁与绑定变更触发撤销；同意请求独立超时。重载后重新准备视图，原运行状态不恢复；TTL 撤销与 frame 脚本停止应分开观察（§7.1）。
 - **进程**：exec 超时 + 进程树终止（`terminateProcessTree`）；后台会话由 `backgroundExecSessionManager` 登记，会话目录 log 落盘；应用级进程清单限额本次未找到（限额在权限层）。
 - **流式性能**：renderer 端 120ms 节流 + 解析 memo + `MessageBlockContent` 快照比对；DB 600ms 节流。全块快照序列化在超长输出下成本线性，未见增量 diff 机制。
 - **长会话**：上下文预算/压缩会截断历史消息文本；压缩后的历史 Artifact 文本与普通文本一并处理，兼容视图不依赖压缩前结构。
