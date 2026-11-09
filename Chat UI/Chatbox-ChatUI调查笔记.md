@@ -19,7 +19,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 - 页面顺序固定为 `Header → MessageList → InputBox`；侧栏桌面端是常驻挤压布局，移动端是左侧滑出的临时抽屉（没有底部 Tab Bar）。
 - 首页是一个"假会话"（id 固定为 `'new'`），发送前的临时状态被分散存放在三种不同的容器里；首次发送时转入真实 Session。
 - 消息区用 `react-virtuoso` 虚拟化，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不丢阅读位置；流式跟随由自研 smooth-follow 控制器接管。
-- Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换），替代回复不再以独立导航条平铺；两者与侧栏分组无关。
+- Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换）；两者与侧栏分组无关。
 - 发送控制按模式分流：Chat Mode 生成中保留停止按钮，Work Mode 有草稿时改为排队按钮；待执行消息在输入框上方可编辑、删除、清空或请求立即发送。
 - 桌面端全局快捷键只有"显示/隐藏窗口"，托盘不显示聊天状态，系统通知 API 未接入（`new Notification(` 全仓库无匹配）。
 - 草稿按会话粒度存 localStorage：首页假会话用固定 key `'new-chat'`，真实会话用 `draft-${sessionId}`（300ms 防抖）；发送成功后清除。

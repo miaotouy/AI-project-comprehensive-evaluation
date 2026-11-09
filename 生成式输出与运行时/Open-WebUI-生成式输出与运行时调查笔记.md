@@ -27,9 +27,29 @@ Open WebUI 的生成式输出分散在一套“消息即事实源”的模型上
    执行后 `ci_item['output']` 就地填充、`status='completed'`，追加 assistant message item 并 `convert_output_to_messages(raw=True)` 把“代码+输出”回流给模型继续分析；全部 output 落库 `ChatMessage.output`。前端按 output item 渲染，代码块内嵌 `attributes.output` 恢复上次运行结果，用户可编辑重跑、保存回写消息。
 
 2. **Artifact 链**（模型自由文本代码块探测）：
-   模型输出 ` ```html/css/js ` 或内联 `<html>/<style>/<script>` → `src/lib/utils/index.ts` 的 `getCodeBlockContents` 分组提取 → `Chat.svelte` 的 `getContents` 组装完整 HTML 文档 → 内容 store → `Artifacts.svelte` 侧栏 iframe 预览（CSP 注入 + sandbox）。关闭面板后内容仍是消息正文的一部分；重新打开聊天即重新派生。无独立持久化对象。
+   模型自由文本里的 html/css/js 代码块，或直接内联的整页 HTML 标签，经提取、拼装后送侧栏 iframe 预览（CSP 注入 + sandbox）。提取、组装与预览分属三个入口：
 
-3. **工具结果物化链**：工具执行后 `process_tool_result` 分出文件、嵌入与引用 sources 三类结果，经 `files`/`embeds` 事件分别进入 `message.files`、`message.embeds`（FullHeightIframe 渲染）与 `message.sources`（Citations），全部落库为 ChatMessage 的 JSON 列（`backend/open_webui/models/chat_messages.py:142-150`）。终端文件工具（`display_file`）的结果现在无论是否传 `inline` 都会物化为文件结果，只有 `inline=true` 才带 `displayed` 标记；前端默认不在消息里内联渲染该文件块，仅当结果带 `displayed` 或用户把终端文件显示设为 inline 时渲染，其余情况由 `terminal:display_file` 事件驱动右侧 FileNav 面板（`backend/open_webui/utils/middleware.py:258-292`、`src/lib/components/chat/Messages/structuredOutput.ts:166-186`、`StructuredOutputRenderer.svelte:164-169`、`src/lib/components/chat/Chat.svelte:1144-1149`）。
+   ```text
+   src/lib/utils/index.ts   getCodeBlockContents   按围栏正则切块，按 lang 分组（html 开新组，css/js 追加），内联标签作 fallback
+   Chat.svelte              getContents            组装完整 HTML 文档写入内容 store
+   Artifacts.svelte         侧栏 iframe 预览
+   ```
+
+   关闭面板后内容仍是消息正文的一部分；重新打开聊天即重新派生。无独立持久化对象。
+
+3. **工具结果物化链**：工具执行后，结果按文件、嵌入与引用三类分流，分别写进消息的一个 JSON 列，并与消息一起持久化。终端文件工具的结果无论是否传 `inline` 都会物化为文件结果，`inline=true` 只额外带 `displayed` 标记；前端默认不在消息里内联渲染该文件块，仅当结果带 `displayed` 或用户把终端文件显示设为 inline 时渲染，其余情况由 `terminal:display_file` 事件驱动右侧 FileNav 面板。
+
+   ```text
+   分流           process_tool_result      backend/open_webui/utils/middleware.py:258-292
+   文件           files 事件 → message.files
+   嵌入           embeds 事件 → message.embeds    FullHeightIframe 渲染
+   引用           sources → message.sources       Citations 组件
+   前端显示判定    src/lib/components/chat/Messages/structuredOutput.ts:166-186
+                  StructuredOutputRenderer.svelte:164-169
+   终端文件联动    display_file → terminal:display_file 事件 → 右侧 FileNav 面板
+                  src/lib/components/chat/Chat.svelte:1144-1149
+   落库           ChatMessage 表 JSON 列：backend/open_webui/models/chat_messages.py:142-150（files / embeds / sources 三列）
+   ```
 
 ## 1. 触发方式、输出协议与对象模型
 
@@ -67,7 +87,14 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
 - 代码解释器：inline——消息内代码块（`CodeBlock.svelte`）＋运行结果区（STDOUT/STDERR、RESULT、base64 图片，`CodeBlock.svelte:591-631`）；同一代码块同时是编辑器（CodeMirror，`src/lib/components/common/CodeEditor.svelte`）。
 - Artifact：sidecar——聊天工作台的 artifacts 标签（`ChatTabs/tabs.ts` 的 `artifacts` 型，由 `ChatTabs.svelte` 渲染），只读 iframe/SVG；版本切换遍历同一消息派生的多个 HTML 组（`Artifacts.svelte:137-186`）。同一对象无多同步投影：artifact 面板与消息代码块是“源与预览”关系，代码块改动不会即时同步到已打开的面板。
 - Pyodide 文件系统：sidecar——工作台的 files 标签页（`ChatTabs/tabs.ts` 的 `files` 型；选择 Terminal 时用终端 FileNav，否则用 `PyodideFileNav.svelte`）；执行后 `window.dispatchEvent(new Event('pyodide:files'))` 触发自动刷新（`CodeBlock.svelte:344-345`）。
-- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（现由 `ChatTabs/Browser.svelte` 的浏览器会话承担，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具 `display_file`/`write_file` 事件驱动面板跳转（`+layout.svelte:475-483`）。Office 预览优先向终端服务器索要服务端渲染的 PDF（`downloadFilePreview` 请求 `/files/view?path=…&preview=true`），拿不到再回落到浏览器端 docx/pptx 渲染（`src/lib/components/chat/FileNav.svelte:868-940`、`FileNav/FilePreview.svelte`、`Messages/TerminalOutputFile.svelte:143-200`）。
+- 终端工作区：sidecar——FileNav 面板内含文件预览（图片/视频/音频/PDF/SQLite/Office/ipynb/文本/代码）、端口预览 iframe（现由 `ChatTabs/Browser.svelte` 的浏览器会话承担，代理 URL + 浏览器式导航栏）、底部 xterm 终端（`XTerminal.svelte`）。工具事件驱动面板跳转；Office 预览优先向终端服务器索要服务端渲染的 PDF，拿不到再回落到浏览器端 docx/pptx 渲染。两个环节的入口如下：
+
+  ```text
+  面板跳转        display_file / write_file → src/routes/+layout.svelte:475-483
+  服务端 PDF      downloadFilePreview → GET /files/view?path=…&preview=true
+  回落落点        src/lib/components/chat/FileNav.svelte:868-940
+  docx/pptx 渲染  FileNav/FilePreview.svelte、Messages/TerminalOutputFile.svelte:143-200
+  ```
 - 工具结果：inline——`message.files`（文件卡片/图片）、`message.embeds`（`FullHeightIframe`，`ResponseMessage.svelte:711-728`）、`message.sources`（Citations 组件，源文档 iframe 弹窗带 CSP）。
 
 ## 4. 表现类型、依赖与运行环境
@@ -77,7 +104,14 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
   - iframe 沙箱模式 `sandbox="allow-scripts"`、隐藏、经 postMessage 通信（`pyodideSandboxHost.ts:196-288`），同一份代码逻辑内嵌在 `sandboxScript`。
   **Jupyter**：`JupyterCodeExecuter` 走 Jupyter REST API 建 kernel + WebSocket channels 执行，收集 stdout/stderr/execute_result/display_data（含 image/png base64）与 traceback（`backend/open_webui/utils/code_interpreter.py:69-189`）。
 - 依赖提供：Pyodide 引擎由前端代码内 import 探测自动列包（requests/numpy/pandas/matplotlib 等，`CodeBlock.svelte:224-238`），micropip 安装；Jupyter 引擎依赖管理员配置的 Jupyter 服务器（token/password 认证，`config.py:440-450`）。
-- HTML Artifact：完整 HTML/CSS/JS 文档跑在 `srcdoc` iframe 里。安全配置：`injectCsp` 注入 CSP（`src/lib/utils/csp.ts` + `$config?.ui?.iframe_csp`），sandbox 为 `allow-scripts allow-downloads`（可配 allow-forms/allow-same-origin，`Artifacts.svelte:246-260`）。外部导航被拦截（同源 pushState、异源阻止，`Artifacts.svelte:41-61`）；SVG 走 `SvgPanZoom` 本地渲染。
+- HTML Artifact：完整 HTML/CSS/JS 文档跑在 `srcdoc` iframe 里。安全边界由 CSP 注入与 sandbox 白名单共同划定，外部导航一律拦截；SVG 走本地平移缩放渲染。
+
+  ```text
+  CSP 注入     injectCsp（src/lib/utils/csp.ts + $config?.ui?.iframe_csp）
+  sandbox      allow-scripts allow-downloads，可另配 allow-forms / allow-same-origin（Artifacts.svelte:246-260）
+  导航拦截     同源 pushState、异源阻止（Artifacts.svelte:41-61）
+  SVG 渲染     SvgPanZoom
+  ```
 - 工具嵌入（embeds）：`FullHeightIframe` 渲染任意 HTML URL，带 `processHtmlForDeps`（Alpine/Chart.js 依赖处理）、高度协商 postMessage（`FullHeightIframe.svelte:33-235`）。
 - 终端：文件预览含 Office（mammoth/xlsx/pptx→图片）、SQLite（浏览器内 SqliteView）、notebook（ipynb 单元格渲染 + Jupyter 会话执行）。RAG 检索结果呈现为 citations/sources，不执行代码。
 
@@ -113,13 +147,20 @@ message / reasoning / function_call / function_call_output / open_webui:code_int
 
 ## 8. 持久化、恢复、分享与导出
 
-- 事实源：`ChatMessage` 表（`chat_messages.py:128-150`）有五列 JSON 存储（清单见下）；`Chats.upsert_message_to_chat_by_id_and_message_id` 随流式事件持续写入（`middleware.py:4160-4168`、`5513-5536`）。重新打开聊天即从 `/api/v1/chats/{id}` 恢复历史，渲染器按 `output` 重建代码块及 `attributes.output` 历史结果。JSON 列清单：
+- 事实源：`ChatMessage` 表，五列 JSON 存储（清单见下）。流式过程中写入集中在 `Chats.upsert_message_to_chat_by_id_and_message_id`（`chat_messages.py:128-150`、`middleware.py:4160-4168`、`5513-5536`）。
+- 恢复：重新打开聊天即从 `/api/v1/chats/{id}` 拉历史，渲染器按 `output` 列重建代码块与 `attributes.output` 历史结果。JSON 列清单：
 
   ```text
   content / output / files / sources / embeds
   ```
 - 代码解释器输出图片：base64 → `upload_image` → files 表 + URL（`middleware.py:5415-5440`、`builtin.py:609-643`），消息里留 `![Output Image](url)`，可下载。
-- 图像生成工具：图片现在以完整文件对象（`id`/`url`/`name`/`content_type`）随事件回流并挂到消息，而不是只回传一个 URL（`backend/open_webui/routers/images.py:552-560`、`tools/builtin.py:388-405`）；在频道会话里调图时还会带上 `channel_id`/`message_id`，使生成图同时落到频道消息（`tools/builtin.py:391-398`、`utils/middleware.py:1773-1782`）。
+- 图像生成工具：图片现在以完整文件对象随事件回流并挂到消息，取代此前只回传一个 URL 的形式（字段与两处写入口见下）；在频道会话里调图时还会带上 `channel_id`/`message_id`，使生成图同时落到频道消息。
+
+  ```text
+  文件对象字段  id / url / name / content_type
+  通用写入口    backend/open_webui/routers/images.py:552-560、tools/builtin.py:388-405
+  频道消息双写  tools/builtin.py:391-398、utils/middleware.py:1773-1782
+  ```
 - Pyodide 文件系统：仅当 `ENABLE_PYODIDE_FILE_PERSISTENCE=true`（`backend/open_webui/env.py:1137`）时 worker 模式挂 IDBFS 到 IndexedDB 并 `syncfs` 持久化（`pyodide.worker.ts:49-73`、`96-105`）；隐藏 iframe 沙箱模式无持久化，刷新即失。默认关闭。
 - 导出/分享：Artifact 可下载单 HTML 文件（`Artifacts.svelte:82-92`）、复制；终端文件可下载（目录打包 ZIP，`FileNav.svelte:526-552`）；Pyodide 文件可下载；消息分享/导出属 Chat 类目，此处不展开。
 

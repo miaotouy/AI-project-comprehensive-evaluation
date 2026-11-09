@@ -166,7 +166,7 @@ Claude Code mod（defineMod({ name, version, root, userConfig, register })）
 - **协议兼容层用宿主沙箱执行外部命令**：hooks 与 mods 的命令受会话沙箱与审批约束，不复刻 Claude Code 的 managed settings 层级。
 - **SSH 是传输而非安全边界**：远端文件效应由被选中的远端沙箱 provider 执行；连接丢失时如实报告未确认结果，不重连重放可能已执行的动作。
 - **对外协作面默认关闭**：forge、liveshare、webhook、plugin-market 都需要显式组合或 profile 选择，避免默认暴露网络面。
-- **已确认的移除**：E2B 远程沙箱包族与独立 `subagent-in-process-driver` 包已不存在；`backgroundMode`、`enableRunInBackground`、`run_in_background` 参数与用 `job_output` 收集子 Agent 的路径同样移除。
+- **委派能力边界**：仓库不含 E2B 远程沙箱包族与独立 `subagent-in-process-driver` 包，也没有 `backgroundMode`、`enableRunInBackground`、`run_in_background` 参数与用 `job_output` 收集子 Agent 的路径。
 
 ## 8. 未验证事项
 

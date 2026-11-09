@@ -26,7 +26,7 @@ Trigger Provider 仍只有 `入口确认`，因为外部事件已能启动异步
 
 README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台核心能力，并另列 Prompt IDE、LLMOps 和 Backend-as-a-Service。按本类目准入条件，本轮已调查可发布 workflow 应用与 workflow-as-tool、知识库/RAG Pipeline 及 KnowledgeFS、基础 App Prompt IDE、LLMOps 注解回复、人机协同表单交付、Agent v2 工作区和 Marketplace 安装生命周期；触发器仍保留待补边界。
 
-普通 Chat、Agent Chat、模型 Provider 与单个工具不进入本篇：它们已有对应通用类目，或尚未组成与其他项目不可替代的独立产品工作流。知识库不再按“已有类目”排除：现有笔记目录没有 RAG/数据集专项，且 RAG Pipeline 的对象和生命周期不能由对话上下文或单个工具笔记完整解释。workflow-as-tool 与可发布 workflow 共享同一用户目标和运行对象，因此合并为一张能力卡，而不把“可执行 workflow”和“workflow 被调用”拆成两项贡献。
+普通 Chat、Agent Chat、模型 Provider 与单个工具不进入本篇：它们已有对应通用类目，或尚未组成与其他项目不可替代的独立产品工作流。知识库纳入本篇：现有笔记目录没有 RAG/数据集专项，且 RAG Pipeline 的对象和生命周期不能由对话上下文或单个工具笔记完整解释。workflow-as-tool 与可发布 workflow 共享同一用户目标和运行对象，因此合并为一张能力卡，而不把“可执行 workflow”和“workflow 被调用”拆成两项贡献。
 
 | 候选能力 | 证据状态 | 本轮处理 | 原因 |
 | --- | --- | --- | --- |
@@ -53,7 +53,7 @@ README 将 LLM application、agentic workflow 和 RAG pipeline 并列为平台�
 
 **完整主链。** 外部程序调用 workflow API 或已发布应用提交 inputs/files 后，`AppGenerateService` 按 `AppMode.WORKFLOW` 或 advanced chat 分派给 workflow generator。生成器以 `WorkflowAppConfigManager` 取得并转换应用配置，验证输入和文件，创建运行 repository 后交给 graph engine。执行产生 workflow run、节点生命周期、文本 chunk、人工输入或完成事件；streaming 调用由 `MessageBasedAppGenerator.retrieve_events` 回收并转换为事件流，blocking 调用则走相应的最终响应转换。service API 还提供以 task ID 停止 streaming workflow 的路径。这条“调用 -> 运行对象 -> 图执行 -> 可消费事件/结果 -> 停止或日志”的主链足以确认其为可独立交付的运行单元，而非仅存在编辑画布。
 
-**再复用与边界。** `api/core/tools/workflow_as_tool/` 与 `WorkflowToolsManageService` 会把符合条件的 workflow 保存为某 tenant 的工具 Provider；注册时校验应用与 workflow 存在、名称或 app ID 不冲突，并钉住来源 workflow 的图与版本。快照中该服务不再在注册阶段排除含人工输入节点的 workflow，原先的同步检查已被移除；实际调用时工具侧以不开启人工暂停的方式运行子图，注册门槛与运行时限制因此分离（`api/core/tools/workflow_as_tool/tool.py:130-150`）。workflow 工具的执行改为由图引擎管理的子图容器：运行时向 `DifyWorkflowToolNode` 提交带来源 app/workflow 版本、输入、系统文件与调用深度的容器载荷，由引擎按容器节点运行（`api/core/workflow/workflow_tool_node.py`、`api/core/workflow/workflow_tool_container_types.py`）。人工暂停、访问控制和错误语义是否随子图自动传回调用方，仍需要运行验证。工具目录、schema 注入和 Agent 循环见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
+**再复用与边界。** `api/core/tools/workflow_as_tool/` 与 `WorkflowToolsManageService` 会把符合条件的 workflow 保存为某 tenant 的工具 Provider；注册时校验应用与 workflow 存在、名称或 app ID 不冲突，并钉住来源 workflow 的图与版本。注册阶段不排除含人工输入节点的 workflow；实际调用时工具侧以不开启人工暂停的方式运行子图，注册门槛与运行时限制因此分离（`api/core/tools/workflow_as_tool/tool.py:130-150`）。workflow 工具的执行改为由图引擎管理的子图容器：运行时向 `DifyWorkflowToolNode` 提交带来源 app/workflow 版本、输入、系统文件与调用深度的容器载荷，由引擎按容器节点运行（`api/core/workflow/workflow_tool_node.py`、`api/core/workflow/workflow_tool_container_types.py`）。人工暂停、访问控制和错误语义是否随子图自动传回调用方，仍需要运行验证。工具目录、schema 注入和 Agent 循环见[Agent 工具](../Agent工具/Dify-Agent工具调查笔记.md)。
 
 **持续性、控制与执行域。** workflow 定义和工具 Provider 是服务端持久化配置；每次调用的 run/节点事件由后端运行时与 repository 承接，公开 WebChat 仅订阅/投影事件。停止 API 同时保留旧队列 stop flag 和引擎命令通道，表明实现有兼容层，但本轮未运行，不能确认停止是否到达所有节点、插件 HTTP 调用或异步 worker。执行发生在 Dify 服务端和其配置的模型/工具连接中，不在终端用户浏览器中执行图。
 

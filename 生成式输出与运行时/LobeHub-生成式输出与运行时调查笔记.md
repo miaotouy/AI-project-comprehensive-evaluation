@@ -24,7 +24,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 **主链路 B（文档工作区）：** 文档存 `documents` 表（content + editorData 双格式）。
 - 用户编辑：Lexical 编辑器内修改，前端文档 store 防抖自动保存（`src/store/document/slices/document/action.ts`、`editor/action.ts:293-374`）；服务端 `DocumentService.updateDocument` 写历史快照（`apps/server/src/services/document/index.ts:623-755`）。
-- 模型修改：Page-Agent 工具经服务端 `pageAgentRuntime` 在无头 `EditorRuntime` 上做结构化修改（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47` 起的 `factory`），执行体位于 `@lobechat/builtin-tool-page-agent/executionRuntime`；同一文档的并发写入由 `apps/server/src/services/pageCollab` 的会话（`createPageSessions`/`runPageExclusive`）串行化，客户端不再有 executor 级 `onAfterCall` 回推，改由 `src/features/PageEditor/PageAgentProvider.tsx` 把当前 `documentId` 注入 conversation context 做页级绑定。
+- 模型修改：Page-Agent 工具经服务端 `pageAgentRuntime` 在无头 `EditorRuntime` 上做结构化修改（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47` 起的 `factory`），执行体位于 `@lobechat/builtin-tool-page-agent/executionRuntime`；同一文档的并发写入由 `apps/server/src/services/pageCollab` 的会话（`createPageSessions`/`runPageExclusive`）串行化；客户端侧由 `src/features/PageEditor/PageAgentProvider.tsx` 把当前 `documentId` 注入 conversation context 做页级绑定，不经 executor 级 `onAfterCall` 回推。
 - 模型回流闭环：agent 文档按 load rules/position 注入系统上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`），模型通过 `lobe-agent-documents` 工具做读取与节点修改（`readDocument`/`modifyNodes`/`replaceDocumentContent` 等，`packages/builtin-tool-agent-documents/src/manifest.ts`）。
 
 **未运行验证。**
@@ -52,7 +52,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 - **Artifact**：随消息正文逐 token 流式注入。Portal 内以 `isArtifactTagClosed` 判定标记是否闭合：未闭合时保持代码视图与流式动画，闭合后自动切到预览（`src/features/Portal/Artifacts/Body/index.tsx:35-40,62-68`）。更新粒度是**整段重写**：同一 `identifier` 在后续消息中由模型重发完整内容（技能指令要求复用 identifier，`content.ts:40`）；无 diff/patch。
 - **文档（模型修改）**：Page-Agent 的 `initPage`/`modifyNodes`/`replaceText` 在服务端无头 `EditorRuntime` 上以节点操作（LiteXML insert/modify/remove）执行，会话以 draft 打开、成功后 commit（`pageAgent.ts` 的 `buildService`；`services/agentDocuments/headlessEditor.ts` 的 `withHeadlessEditorLock`），最终写回经由 `services/pageCollab` 的 `PageWriter`（`saveSource: llm_call`）。
 - **文档（最终化）**：写库成功后由 `services/pageCollab` 的 `persistPageState` 落盘（含 `projectPageState` 投影），编辑器侧通过 page room 客户端接收变更；客户端交付物由 `packages/builtin-tool-page-agent/src/client/` 下的 `Inspector`/`Render`/`Streaming` 组件承担。
-- **文档（注）**：上一快照里仅被自身单测引用的 jsondiffpatch 工具（`document/diff/json.ts`）在本快照已从代码库中消失；服务端历史对比仍只返回两份 editorData 快照（`services/document/history.ts` 的 `compareDocumentHistoryItems`），视觉 diff 由客户端 `LexicalDiff` 计算。
+- **文档（注）**：服务端历史对比只返回两份 editorData 快照（`services/document/history.ts` 的 `compareDocumentHistoryItems`），视觉 diff 由客户端 `LexicalDiff` 计算。
 - **失败收口**：Page-Agent 无 documentId 时返回 `PageAgentMissingDocumentId` 失败（`packages/builtin-tool-page-agent/src/ExecutionRuntime/index.ts:72-80`）；编辑器侧另有 `src/features/PageEditor/Copilot/PageAgentUnavailableAlert.tsx` 在 Page Agent 不可用时提示改用 lobe-agent-documents。
 
 ## 3. 投影表面与多视图关系
@@ -104,7 +104,7 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
   自动保存有窗口合并与上限（`src/const/documentHistory.ts`）。服务端 `compareDocumentHistoryItems` 返回两份快照（`apps/server/src/services/document/history.ts:109-125`），客户端 `LexicalDiff` 渲染视觉对比（`src/features/PageEditor/History/DocumentHistoryDiff.tsx:61-114`）。
 - diff 接受/拒绝：编辑器内的 `diff` 类型节点由 `DiffAllToolbar` 一键全部接受/拒绝（`src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`）；保存路径刻意保留待审 diff 节点，仅在显式接受/拒绝时归一化（`src/store/document/slices/editor/action.ts:325-327`）。diff 节点来源在 `@lobehub/editor`（外部包），本次未深挖其生成时机；历史对比视图本身是只读的。
-- 协作：Redis 租约式编辑锁已抽成独立服务 `apps/server/src/services/editLock`（`EditLockService`，由 `DocumentService` 注入），模型写操作与用户编辑经同一锁串行化，跨 tab/跨用户锁语义见 `src/features/PageEditor/usePageLockedByOther.ts`。本快照新增 `apps/server/src/services/pageCollab`：以 page room 客户端（`createPageRoomClient`）、房间会话与 `fork`/`persist` 支撑协同，无头侧经 `@lobehub/editor/yjs` 的 `YjsPlugin` 接入（`pageCollab/editorYjs.ts`），整条路径由 `isPageCollabEnabled` 开关控制。即"是否已有 CRDT 协同"从上一快照的未发现变为已具备带开关的实现，实际运行行为未验证。
+- 协作：Redis 租约式编辑锁已抽成独立服务 `apps/server/src/services/editLock`（`EditLockService`，由 `DocumentService` 注入），模型写操作与用户编辑经同一锁串行化，跨 tab/跨用户锁语义见 `src/features/PageEditor/usePageLockedByOther.ts`。`apps/server/src/services/pageCollab` 以 page room 客户端（`createPageRoomClient`）、房间会话与 `fork`/`persist` 支撑协同，无头侧经 `@lobehub/editor/yjs` 的 `YjsPlugin` 接入（`pageCollab/editorYjs.ts`），整条路径由 `isPageCollabEnabled` 开关控制；实际运行行为未验证。
 
 ## 7. 能力桥、执行位置与权限范围
 

@@ -110,7 +110,12 @@ skill 命令与 prompt 模板共享 slash 资源表，但模型引用另有 `$sk
 
 memory 的文件权威源仍是 workspace Markdown，SQLite 主要保存索引、provenance、检索状态和部分插件治理状态。memory-core 通过 `registerMemoryCapability` 声明 deterministic recall tool、private transcript recall、prompt builder、flush plan 和 runtime；其他 memory 插件可添加 prompt supplement、异步 prompt preparation 或 corpus supplement。注册表以当前 active plugin registry 为准，prompt supplement 按 plugin id 排序合成，异步 preparation 先并行完成，再以不可变 snapshot 进入同步渲染（`src/plugins/registry-contribution-types.ts`；`src/plugins/memory-state.ts`）。
 
-context engine 是唯一明确以“assemble model context”为契约的插件面。配置槽 `plugins.slots.contextEngine` 只选择一个 engine；默认 `legacy` 的 `ingest` 不做事、`assemble` 透传消息、`compact` 委托内置 compaction。非 legacy engine 可以实现 `bootstrap`、`maintain`、`ingestBatch`、`afterTurn`、`commitTurn`、`assemble`、`compact` 和 subagent 生命周期，并通过 `acceptedHostParams` 限制 host 注入的 sessionKey、prompt、runtimeSettings、sessionTarget、runtimeContext 等字段（`src/context-engine/legacy.ts`；`src/context-engine/registry.ts`；`src/context-engine/types.ts`）。
+context engine 是唯一明确以“assemble model context”为契约的插件面，配置槽 `plugins.slots.contextEngine` 同时只能选一个 engine。默认的 `legacy` 实现只做透传：`ingest` 不做事、`assemble` 原样传出消息、`compact` 委托内置 compaction。
+
+- 非 legacy engine 可实现的钩子：`bootstrap`、`maintain`、`ingestBatch`、`afterTurn`、`commitTurn`、`assemble`、`compact`，以及 subagent 生命周期。
+- 宿主注入字段的收窄：`acceptedHostParams` 声明 engine 愿意接收的 sessionKey、prompt、runtimeSettings、sessionTarget、runtimeContext 等字段。
+
+钩子与字段的声明位置见 `src/context-engine/legacy.ts`、`src/context-engine/registry.ts`、`src/context-engine/types.ts`。
 
 ## 2. 选择条件、优先级与编译顺序
 
@@ -123,7 +128,15 @@ embedded 运行器先准备输入，再编译 prompt：
 3. attempt setup 解析 sandbox，构造 skill prompt、skill usage paths、环境覆盖和 code-mode catalog。
 4. bootstrap resolver 读取固定文件，按 session/privacy 过滤，排除不具备自动注入 provenance 的 `MEMORY.md`/`USER.md`，执行 `agent:bootstrap` hook，最后做路径安全化。
 5. bounded bootstrap builder 以固定输入顺序分配 per-file 和 total 字符预算；`USER.md` 另有 4,000 字符上限，`AGENTS.md` 超限时保留头尾并生成 policy digest，其他文件保留头尾和截断标记（`src/agents/embedded-agent-helpers/bootstrap.ts`）。
-6. `buildAgentSystemPrompt` 先生成 cache-stable prefix，再在 boundary 后追加日期、动态 project context、渠道/身份、消息投影、动态 provider suffix 和 runtime。context files 会按 `AGENTS`、`SOUL`、`IDENTITY`、`USER`、`TOOLS`、`BOOTSTRAP`、`MEMORY` 顺序排序，未识别文件按路径排序（`src/agents/system-prompt.ts`）。
+6. `buildAgentSystemPrompt` 先生成 cache-stable prefix，再在 boundary 后追加日期、动态 project context、渠道/身份、消息投影、动态 provider suffix 和 runtime。context files 按固定顺序排序，未识别文件按路径排序（渲染器见 `src/agents/system-prompt.ts`）：
+
+    - `AGENTS`
+    - `SOUL`
+    - `IDENTITY`
+    - `USER`
+    - `TOOLS`
+    - `BOOTSTRAP`
+    - `MEMORY`
 
 系统提示词的主要优先级表现为“来源与阶段覆盖”，而非通用数值优先级：provider 可以替换 interaction style/tool call style/execution bias 三个命名 section，并分别提供 cache-stable prefix 与 dynamic suffix；`before_prompt_build` 的 `systemPrompt` 可以替换当前系统提示词，prepend/append system context 再包到其两侧；context engine 的 `systemPromptAddition` 在历史 assemble 后追加到运行时系统提示词。相同阶段的普通 prepend/append 内容按 queued injections、turn prepare、heartbeat contribution、prompt-build hook 的顺序合并（`src/agents/system-prompt-contribution.ts:6-34`；`src/agents/embedded-agent-runner/run/attempt-prompt-helpers.ts`；`src/agents/embedded-agent-runner/run/attempt-history.ts`）。
 
@@ -153,7 +166,14 @@ engine 的 `promptAuthority` 只改变 preflight 采用的 token estimate，不�
 
 ## 3. 请求层编译与模型可见结果
 
-对 embedded/OpenClaw harness，`prepareEmbeddedAttemptPrompt` 在提交前安装两类临时边界：`installModelPromptTransform` 只替换 active user turn 的模型文本，使 `transcriptPrompt` 保持原样；`installRuntimeContextMessageForPrompt` 将隐藏 carrier 放入本次 prompt 和重试 prompt，并在提交结束后移除。真正模型调用由 Agent Core 的 `streamAssistantResponse` 执行：先运行 `transformContext`，再 `normalizeCoreContextMessages`，然后 `convertToLlm`，最后将 system prompt、转换后 messages 和 tools 交给 `streamFn`（`src/agents/embedded-agent-runner/run/attempt-llm-boundary.ts`；`packages/agent-core/src/agent-loop.ts`）。
+对 embedded/OpenClaw harness，提交前会安装两类临时边界，模型调用的真正入口由 Agent Core 持有。
+
+- 模型文本边界：只替换当前 user turn 送往模型的文本，`transcriptPrompt` 保持原样（`installModelPromptTransform`）。
+- 运行时上下文边界：把隐藏 carrier 同时放入本次 prompt 和重试 prompt，提交结束后移除（`installRuntimeContextMessageForPrompt`）。
+
+`prepareEmbeddedAttemptPrompt` 负责安装这两处边界。模型调用由 `streamAssistantResponse` 依次完成四步：先转换上下文，再规范化 core 消息，然后转换为 LLM 输入，最后把 system prompt、转换后的 messages 和 tools 交给 `streamFn`。
+
+前三步对应 `transformContext`、`normalizeCoreContextMessages` 和 `convertToLlm`；边界实现见 `src/agents/embedded-agent-runner/run/attempt-llm-boundary.ts`，循环实现见 `packages/agent-core/src/agent-loop.ts`。
 
 因此，本类别中最接近最终请求的证据是 `context.compiled` trajectory event、`prompt:before` cache trace 和 `streamFn` 接收的 `Context`；系统提示词本身由 `buildAttemptSystemPrompt` 先渲染，再经过 provider transform，raw model run 则保留 base prompt 供诊断而向 provider 传空 system prompt（`src/agents/embedded-agent-runner/run/attempt-system-prompt.ts`；`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts`）。
 
@@ -189,7 +209,11 @@ compaction 前的 memory flush 是另一条交接链：只有非 heartbeat、非
 
 `/context list|detail|json` 展示文件、skills、tools、prompt size、token estimate 和 compactable transcript 数；`/context map` 只有在存在实际 run report 时才生成 treemap。map 会额外统计 runtime context 和 model-only prompt，因为它们进入模型却不在 transcript；它仍是按字符和估算 token 组织的诊断图片，不是完整网络 payload 或 hook trace（`src/auto-reply/reply/commands-context-report.ts`）。
 
-显示与权威消息的分界由数据结构表达：runtime context custom message 使用 `role:"custom"`、`display:false` 和 `runtimeContextCarrier:true`，模型转换前会被重定位或过滤；hook 的 `historyMessages` 给插件的是 cloned snapshot；trajectory 记录 `context.compiled`，但不反向修改 session。由此，模型-only 的 memory/hook context 和用户可见 Markdown 需分别追踪，不能从 `/context` 或 UI 状态倒推权威 transcript（`src/agents/embedded-agent-runner/run/runtime-context-prompt.ts`；`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts`；`src/agents/embedded-agent-runner/run/attempt-session-prepare.ts`）。
+显示与权威消息的分界由数据结构表达：runtime context custom message 使用 `role:"custom"`、`display:false` 和 `runtimeContextCarrier:true` 三个标记，模型转换前会被重定位或过滤；hook 的 `historyMessages` 给插件的是 cloned snapshot；trajectory 记录 `context.compiled`，但不反向修改 session。模型-only 的 memory/hook context 与用户可见 Markdown 分属两条去向，`/context` 和 UI 状态承载诊断投影，权威 transcript 由 session 层维护：
+
+- 标记定义与剥离路径：`src/agents/embedded-agent-runner/run/runtime-context-prompt.ts`
+- prompt 支撑：`src/agents/embedded-agent-runner/run/attempt-prompt-support.ts`
+- session 准备：`src/agents/embedded-agent-runner/run/attempt-session-prepare.ts`
 
 对普通 SDK/CLI session，prompt template 展开和 extension command 处理也发生在输入处理层而非消息渲染器。extension command 找到后可以直接执行并不发送 LLM prompt；模板或 skill command 展开后才创建 user message。流式期间的新输入被分类为 steer/follow-up，展开后的内容进入队列并在后续 loop checkpoint 交接（`src/agents/sessions/agent-session-prompting.ts`；`packages/agent-core/src/agent.ts`）。
 

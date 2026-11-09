@@ -55,7 +55,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **消息与内容块**：消息是一组 typed block，`ContentBlockMap` 可合并扩展；v4 起消息来源用 `kind` 判别，插件内容类型以 `plugin:<原名>` 前缀命名，参数、回放状态与插件内容字段不被迁移遍历（`session-format-v3-to-v4/README.md` 的 Extension data 节）。
 
-**工具结果的 v4 表示**：`tool/result` 事件的消息为 `role: 'tool'`，`toolCallId` 与 `source.callId` 一致，content 直接是块数组，`isError` 提升为消息字段；旧的 `tool-result` 包装类型被移除。因此"工具结果投影为 user-role 消息"的旧描述已不成立，模型历史中的工具结果现在是独立角色。
+**工具结果的 v4 表示**：`tool/result` 事件的消息为 `role: 'tool'`，`toolCallId` 与 `source.callId` 一致，content 直接是块数组，`isError` 提升为消息字段；模型历史中的工具结果以该独立角色保存。
 
 **消息角色**：session 事件层面有 `user/message`、`system/message`、`developer/message`、`assistant/message` 与 `tool/result` 五类消息载荷，surface 派生只保留模型可见子集（`packages/core/session/src/types.ts:317, 449`）。
 
@@ -69,7 +69,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **格式与迁移**：格式版本由 `session-format-catalog` 描述，迁移边独立成包：v0→v1、v1→v2、v2→v3、v3→v4。每条边只改它声明的表示，保留源事件的时间、消息身份与其余字段，先跑前序边到 v3 再进 v4。v4 物理行复用已发布的 v2 帧加上 v4 原生准入；编码与解码不触发入向迁移，后继代以不可变文件发布，拒绝时不产生后继（`packages/session/session-format-v3-to-v4/`）。
 
-**恢复与投影**：投影成为一等公民——`session-projection` 提供注册表与句柄，`session-projection-cache` 缓存重建结果，`session/stats`、标题与遥测都作为投影或消费者存在。实时投影帧从"一帧一个 key"改为"一帧列出该事件改动的所有 key"（`{ sessionId, seq, changes }`），并新增 `onEventChanged` 每个提交事件回调一次（`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames/guide.md`）。
+**恢复与投影**：投影成为一等公民——`session-projection` 提供注册表与句柄，`session-projection-cache` 缓存重建结果，`session/stats`、标题与遥测都作为投影或消费者存在。实时投影帧为 `{ sessionId, seq, changes }`，一帧列出该事件改动的所有 key；`onEventChanged` 在每个提交事件后回调一次（`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames/guide.md`）。
 
 **上传通道**：`session-log-deepseek` 在官方 API 请求元数据启用时把规范会话日志增量随请求上传，用 `session-log-deepseek/delivery-accepted` 事件维护接受水位并重试；可整体关闭（`packages/session/session-log-deepseek/README.md`）。
 

@@ -126,7 +126,7 @@ Artifact 运行时退役后，本类目剩下的执行面是 MCP App 与工作�
 - **非视觉模式**：应用启用 accessibility support 时，ChatPage 关闭消息窗口化，消息区成为可聚焦 region；折叠组和工具卡提供 `aria-expanded/aria-controls`。这是静态接线事实，屏幕阅读器实际播报顺序仍未运行验证。
 - **渲染频率**：renderer 端接收主进程 120ms 节流发出的全块快照（`chat.stream.updated`）、DB 600ms 节流落盘，均由生成侧 `echo.ts` 控制（`src/main/agent/deepchat/runtime/echo.ts:6-7`，详细链路见生成式输出与运行时笔记 §2 与 Chat 笔记 §3），本笔记不再展开。
 - **复制按钮**：工具卡的参数/响应复制用 `@dc-ui` 的 `DcCopyButton`（`MessageBlockToolCall.vue`）；历史 Artifact 的复制按钮同样走 `DcCopyButton`（`LegacyArtifactSource.vue`）；整条消息复制由 `MessageItemAssistant` 的 `copyText` computed 提供，供 `MessageToolbar` 使用。
-- **测试覆盖（静态确认，未运行）**：`test/renderer/components/message/` 下 12 个组件测试（`MessageItemAssistant.test.ts`、`MessageBlockToolCall.test.ts`、`MessageBlockContent.test.ts`、`MessageBlockThink.test.ts`、`MessageBlockActivityGroup.test.ts`、`MessageBlockMedia.test.ts`、`LiveDelegationToolCallCard.test.ts` 等）；解析侧有 `useArtifacts.test.ts`、`MarkdownRenderer.test.ts`、`MessageListRow.test.ts`；原 `HTMLArtifact.test.ts` 等 Artifact 运行组件测试已不存在。未发现长会话/大数据量的虚拟化性能基准测试。
+- **测试覆盖（静态确认，未运行）**：`test/renderer/components/message/` 下 12 个组件测试（`MessageItemAssistant.test.ts`、`MessageBlockToolCall.test.ts`、`MessageBlockContent.test.ts`、`MessageBlockThink.test.ts`、`MessageBlockActivityGroup.test.ts`、`MessageBlockMedia.test.ts`、`LiveDelegationToolCallCard.test.ts` 等）；解析侧有 `useArtifacts.test.ts`、`MarkdownRenderer.test.ts`、`MessageListRow.test.ts`。未发现长会话/大数据量的虚拟化性能基准测试。
 - 视觉表现、键盘可用性与长会话滚动性能均未运行验证（见 §9）。
 
 ## 9. 边界与未验证事项

@@ -21,7 +21,9 @@ LobeHub 在外部执行体、外部应用和外部控制/交互表面三种接�
 - `主链确认`：Agent Share 把 Agent 以链接开放给已登录访客聊天。访客会话与创建者会话分离，拥有主题/回合/花费上限、工具授权、模型与错误信息可见性，以及创建者是否能查看访客会话等治理字段；本快照里分享治理从单一 `shareGate` 拆成 `shareChat` 路由族加运行期 gate。
 - `入口确认`：Slack、Discord、Telegram、Feishu/Lark、LINE、QQ、iMessage、WeChat 等平台的安装、绑定、webhook/gateway 和 outbound 已存在；Telegram Guest Mode、Feishu 历史读取与 WeChat 语音解码已有专门入口，但逐平台完整往返仍未运行验证。
 
-执行体的描述符目录现在集中在 `packages/types/src/agent/heterogeneousAgent.ts`：本地 CLI 描述符从 `:78`（amp）到 `:424`（trae），本地 runtime 传输见 `:474` 的 `deepseek-harness`，远程任务描述符在 `:500`（OpenClaw）与 `:510`（Hermes）。注册表与 adapter 实现在 `packages/heterogeneous-agents/src/registry.ts`，该包同时容纳 `adapters/`、`spawn/`、`askUser/`、`builtinMcp/` 与 `codex/`（含由 Codex app-server 协议生成的类型）。描述器与 transport adapter 不是同一层次，因此不应把这些传输名混入本地执行体数量。
+执行体的描述符集中在一个文件里，三类接入按行号分段排布：本地 CLI 从 amp（`:78`）排到 trae（`:424`），本地 runtime 传输在 `:474` 单列 `deepseek-harness`，远程任务在 `:500`（OpenClaw）与 `:510`（Hermes），整段都在 `packages/types/src/agent/heterogeneousAgent.ts:78-510`。
+
+注册表与 adapter 实现在 `packages/heterogeneous-agents/src/registry.ts`，该包同时容纳 `adapters/`、`spawn/`、`askUser/`、`builtinMcp/` 与 `codex/`（含由 Codex app-server 协议生成的类型）。描述符与 transport 适配层分属两层：本地执行体数量按描述符条目统计，传输名不计入。
 
 ## 接入角色与系统边界
 
@@ -46,7 +48,11 @@ Connect Agent / 模型选择
   -> UI cancel 终止进程树或平台任务
 ```
 
-三类传输共用同一条归一管线，但收尾语义不同：`ClaudeCodeSdkAdapter` 只把子类差异压在构造参数上（`runtimeEndStrategy: 'on-transport-close'`、`signalBackgroundTaskCompletion: true`，见 `packages/heterogeneous-agents/src/adapters/claudeCodeSdk.ts`），因为一次 Query 可能报告多个 result，运行期结束以传输关闭为准。ACP 一族（Copilot、Cursor、Devin、Droid、TRAE、DeepSeek Harness）走统一的 `spawn/acpAgentSession.ts` 与 `acpStdioClient.ts`：客户端声明 `ACP_PROTOCOL_VERSION = 1`，把 `session/request_permission` 的 options 数组交给按 agent 排列的偏好层级选择，取消时留 `DEFAULT_CANCEL_GRACE_MS = 2000` 的宽限。Codex 走 app-server 协议，`codex/protocol/generated.ts` 是按协议生成的类型。
+三类传输共用同一条归一管线，收尾语义各不相同。
+
+Claude Code SDK 把子类差异压在构造参数上，运行期结束以传输关闭为准，因为一次 Query 可能报告多个 result；`ClaudeCodeSdkAdapter` 的两个开关是 `runtimeEndStrategy: 'on-transport-close'` 与 `signalBackgroundTaskCompletion: true`，见 `packages/heterogeneous-agents/src/adapters/claudeCodeSdk.ts`。
+
+ACP 一族（Copilot、Cursor、Devin、Droid、TRAE、DeepSeek Harness）走统一的 `spawn/acpAgentSession.ts` 与 `acpStdioClient.ts`：客户端声明 `ACP_PROTOCOL_VERSION = 1`，把 `session/request_permission` 的 options 数组交给按 agent 排列的偏好层级选择，取消时留 `DEFAULT_CANCEL_GRACE_MS = 2000` 的宽限。Codex 走 app-server 协议，`codex/protocol/generated.ts` 是按协议生成的类型。
 
 OpenClaw/Hermes 不走本地 JSONL adapter。`GatewayConnectionCtr.runHeteroTask`（`apps/desktop/src/main/controllers/GatewayConnectionCtr.ts:518` 起的分发分支）按 topic/task 启动进程，OpenClaw 经 `lh notify` 回传，Hermes 经标准输出与通知接口回流；任务表保存 PID 并支持终止。Gateway 客户端协议抽在 `packages/agent-gateway-client`（`mux/GatewayMuxClient`、`intervention.ts`、`mirroredTerminalEcho.ts`）。
 
@@ -60,7 +66,11 @@ Bot 平台（slack/discord/telegram/feishu/line/qq/imessage/wechat）
 
 ## 身份、协议与状态映射
 
-本地 CLI 的原生 session id 和工作目录映射到 LobeHub operation/topic；远程任务另映射 task id、topic id、device 与 PID。两类执行体都有独立工具循环，LobeHub 负责适配与观察，不接管其原生工具执行。宿主能注入的能力集中在 `packages/heterogeneous-agents/src/`：`builtinMcp/LobeBuiltinMcpServer.ts` 提供宿主内建 MCP server，`askUser/AskUserBridge.ts` 是 Claude Code `AskUserQuestion` 的本地 HTTP MCP 生产端，`attachedFiles.ts` 处理随轮附件。干预链路仍是 `AgentStreamEvent` 上的 `agent_intervention_request` / `agent_intervention_response` 一对事件，由桥接层把外部 runtime 的结构化提问送到渲染层。
+本地 CLI 的原生 session id 和工作目录映射到 LobeHub operation/topic；远程任务另映射 task id、topic id、device 与 PID。两类执行体都有独立工具循环，LobeHub 负责适配与观察，原生工具执行仍留在执行体内部。
+
+宿主能注入的能力集中在 `packages/heterogeneous-agents/src/` 下的三个文件：内建 MCP server 在 `builtinMcp/LobeBuiltinMcpServer.ts`，Claude Code `AskUserQuestion` 的本地 HTTP MCP 生产端在 `askUser/AskUserBridge.ts`，随轮附件处理在 `attachedFiles.ts`。
+
+干预链路走 `AgentStreamEvent` 上的一对事件，`agent_intervention_request` 与 `agent_intervention_response`，由桥接层把外部 runtime 的结构化提问送到渲染层。
 
 Connector 以个人、Workspace 或 Agent scope 保存持久连接；Messenger installation 绑定 LobeHub 用户与平台账号/线程；设备网关把服务端任务路由到具体桌面设备，并反向把 iMessage 等设备侧消息 API 在桌面上执行（`apps/desktop/src/main/services/imessageBridgeSrv.ts`、`controllers/ImessageBridgeCtr.ts`）；bot 平台绑定以 `lh bot` 命令族和平台回调管理。
 
@@ -72,7 +82,7 @@ Connector 以个人、Workspace 或 Agent scope 保存持久连接；Messenger i
 navigate / snapshot / click / fill / press / scroll / screenshot / readPage
 ```
 
-非 CLI 传输的权限语义分三类（其中 Codex 的 app-server 是 Codex 描述符内部的传输选择，不单独出现在 runtime 适配器注册表里）：
+非 CLI 传输的权限语义分三类（Codex 的 app-server 属于 Codex 描述符内部的传输选择，在 runtime 适配器注册表中没有独立条目）：
 
 | 传输 | 权限语义 | 超时兜底 |
 |---|---|---|
@@ -82,15 +92,43 @@ navigate / snapshot / click / fill / press / scroll / screenshot / readPage
 
 取消由本地进程树终止或 gateway task 终止到达真实执行体。桌面侧每个执行体都有独立 driver（`apps/desktop/src/main/modules/heterogeneousAgent/drivers/` 下 14 个文件），负责参数拼装与本地进程生命周期；另有 `claudeCodeAccounts.ts`、`codexQuota.ts`、`fileStorePort.ts` 处理账号、额度与文件句柄。
 
-Agent Share 的运行由创建者账号承担模型调用，但访客身份被写入 topic 的 `senderId` 并作为 stream owner。本快照中分享面拆成了三块：路由与执行在 `apps/server/src/routers/lambda/shareChat/`（`conversation`、`exec`、`gateway`、`guards`、`runControl`、`runScope`、`upload`、`procedures`），运行期门禁在 `apps/server/src/services/agentRuntime/AgentRuntimeService/shareRunGate.ts`，路由辅助在 `routers/lambda/_helpers/shareVisitorTargetGuard.ts` 与 `agentShareFeatureGate.ts`。访客配额通过 `shareVisitorAbuseGuards.ts` 的 `reserveShareVisitorTopicOrThrow`（`:83`）、`reserveShareVisitorTopic`（`:142`）、`reserveShareVisitorTurnOrThrow`（`:178`）、`reserveShareVisitorTurn`（`:228`）在创建 topic 与写入 turn 时做原子预留；工具可见性由 `shareToolManifest.ts` 与 `grants.ts` 限制，并在 builtin dispatch 再检查一次；访客沙箱不注入创建者 JWT。分享数据结构分化为四张表：`agentShare`、`fileShare`、`documentShare`、`goalShare`（`packages/database/src/schemas/`），仓库另有 `.github/workflows/verify-share.yml` 专门校验分享链路。
+Agent Share 的运行由创建者账号承担模型调用；访客身份写入 topic 的 `senderId`，该对话流的所有者是访客。分享链路在本快照拆成路由与执行、运行期门禁、路由辅助三块，配额与工具可见性各自独立成模块。路由与执行集中在下列目录，按职能拆成 8 个子目录：
 
-产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口；CLI 侧 `lh` 命令族在本快照中显著扩张，除 bot/设备/异构 Agent 外还包含 `agent`、`agent-group`、`artifact`、`artifactCanvas`、`channel`、`doc`、`eval`、`kb`、`man`、`memory`、`message`、`model`、`notification`、`plugin`、`project`、`provider`、`read`、`recall`、`resourceUrl`、`search`、`session-group`、`skill`、`thread`、`topic`、`workspace`、`widget`、`acceptance/*` 等子命令。外部 CLI 输出的文本、工具调用和文件变化按事件流进入宿主会话，可触发文件写盘与浏览器操作，属于不可信输入面；其信任边界取决于各 runtime 的权限模型与宿主注入工具的审批，真实提权风险未做运行评估。
+```text
+apps/server/src/routers/lambda/shareChat/
+  conversation  exec  gateway  guards  runControl  runScope  upload  procedures
+```
+
+运行期门禁在 `apps/server/src/services/agentRuntime/AgentRuntimeService/shareRunGate.ts`，路由辅助在 `routers/lambda/_helpers/shareVisitorTargetGuard.ts` 与 `agentShareFeatureGate.ts`。
+
+访客配额由 `shareVisitorAbuseGuards.ts` 在创建 topic 与写入 turn 两个时机做原子预留：
+
+| 预留时机 | 预留入口 |
+|---|---|
+| 创建 topic | `reserveShareVisitorTopicOrThrow`（`:83`）、`reserveShareVisitorTopic`（`:142`） |
+| 写入 turn | `reserveShareVisitorTurnOrThrow`（`:178`）、`reserveShareVisitorTurn`（`:228`） |
+
+工具可见性由 `shareToolManifest.ts` 与 `grants.ts` 限制，并在 builtin dispatch 再检查一次；访客沙箱不注入创建者 JWT。
+
+分享数据结构分化为四张表 `agentShare`、`fileShare`、`documentShare`、`goalShare`（`packages/database/src/schemas/`）；仓库另有 `.github/workflows/verify-share.yml` 专门校验分享链路。
+
+产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口。
+
+CLI 侧 `lh` 命令族在本快照显著扩张。除 `lh bot`、设备与异构 Agent 外，新增子命令覆盖 Agent 与群组管理、产物与画布、知识库、记忆与召回、模型与 provider、消息与会话组织、文档、项目、技能、通知、检索、终端工具与验收流程，共 27 项：
+
+```text
+agent  agent-group  artifact  artifactCanvas  channel  doc  eval  kb  man  memory
+message  model  notification  plugin  project  provider  read  recall  resourceUrl
+search  session-group  skill  thread  topic  workspace  widget  acceptance/*
+```
+
+外部 CLI 输出的文本、工具调用和文件变化按事件流进入宿主会话，可触发文件写盘与浏览器操作，属于不可信输入面；其信任边界取决于各 runtime 的权限模型与宿主注入工具的审批，真实提权风险未做运行评估。
 
 ## 权限、凭据与治理边界
 
 Connector 支持 OAuth2、bearer、API key 和自定义 header，凭据经 `KeyVaultsGateKeeper` 加密。工具权限为 `auto / needs_approval / disabled`；客户端只拿 manifest，服务端在调用时解密连接凭据。Composio 当前预置业务应用类型清单在 `packages/const/src/composio.ts`，未逐应用运行验证。
 
-外部 CLI 的原生工具权限仍由各 runtime 承担；LobeHub 能观察、审批部分宿主注入工具和展示文件变化，不能由此推断完全统一了所有 CLI 的安全模型。凭据刷新与失效流转机制本次未单独验证。
+外部 CLI 的原生工具权限仍由各 runtime 承担；LobeHub 侧的能力限于观察、审批部分宿主注入工具和展示文件变化，各 CLI 的安全模型保持各自的实现。凭据刷新与失效流转机制本次未单独验证。
 
 ## 相邻类目交接
 

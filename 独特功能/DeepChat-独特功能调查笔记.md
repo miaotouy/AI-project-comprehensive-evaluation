@@ -321,7 +321,7 @@ deepchat <command>（终端）
 
 - **ACP 作为模型**：归并已有类目。Agent 角色笔记 §3（`agentManager.ts` 的 kind 分派）、LLM 渠道笔记 §2（`apiType: acp` 与 ACP backend 的边界）均已主链确认：ACP Agent 作为模型选择器一等条目、ACP-backed subagent 空工具目录、ACP workspace UI。本笔记不再重写。
 - **会话内/跨会话搜索**（自有数据搜索）：归并会话与消息管理笔记 §5 与 Chat UI 笔记 §2，已确认搜索入口、FTS5 和会话搜索服务。
-- **MCP App 沙箱 / 本机 exec / 历史 Artifact 兼容**：归并生成式输出与运行时笔记（G3 由 MCP App 与命令执行承担，内置 Artifact 生成与预览已退役）。
+- **MCP App 沙箱 / 本机 exec / 历史 Artifact 兼容**：归并生成式输出与运行时笔记（G3 由 MCP App 与命令执行承担）。
 - **cron 定时任务**：CHANGELOG 提及"定时任务 + 远程 /agent 命令"；cron 本体属 Agent 工具笔记边界，其 remote delivery 已在能力卡 1 记录交点，不重复展开。
 
 ## 声明不符、外部依赖与暂缓项

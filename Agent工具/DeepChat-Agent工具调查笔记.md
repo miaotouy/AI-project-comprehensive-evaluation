@@ -95,7 +95,7 @@ Codex 用户包是另一种组合来源。安装器识别 `.codex-plugin/plugin.
 
 `auto_approve` 下“这次调用是否要助手审阅、审批授权的是什么”由 `resolveAgentToolReview`（`src/main/tool/permission/agentToolReviewPolicy.ts:134-174`）单独回答：它按工具声明执行合同判断，`exec` 授权命令、文件类工具授权路径、其余写操作授权工具本身；`cronjob`、`deepchat_question` 自成审批路径，`process` 的 `list/poll/log` 与只读操作不进入审阅。该模块与允许路径共用同一份路径承载工具清单，避免“审阅认为授权路径、放行却不需要路径”的分歧。
 
-**判定模型审阅（可选）**：Agent 配置了 `judgmentModel`（providerId + modelId）后，审阅不再走生成式补全，而是调用 Jev 协议（`src/main/agent/deepchat/runtime/toolPermissionReviewer.ts:355-372`、`:228-300`）。动作被序列化成带 hash 的 envelope，`fitJevReviewState` 按约 64k token 的请求预算分阶段裁剪 `toolArgs` 等状态（`jevReviewState.ts:1-60`），问题固定为风险等级、用户授权程度与注入压力三问，由 `composeJevReviewDecision` 依阈值合成 `auto_allow`、`ask_user` 或 `block`（`jevPermissionQuestions.ts:20-45`）。只有 low 风险可自动放行，比生成式路径的 low+medium 更严格；超时、预算不足和异常一律落到 `ask_user`。未配置判定模型时沿用原有生成式审阅。
+**判定模型审阅（可选）**：Agent 配置了 `judgmentModel`（providerId + modelId）后，审阅调用 Jev 协议（`src/main/agent/deepchat/runtime/toolPermissionReviewer.ts:355-372`、`:228-300`）。动作被序列化成带 hash 的 envelope，`fitJevReviewState` 按约 64k token 的请求预算分阶段裁剪 `toolArgs` 等状态（`jevReviewState.ts:1-60`），问题固定为风险等级、用户授权程度与注入压力三问，由 `composeJevReviewDecision` 依阈值合成 `auto_allow`、`ask_user` 或 `block`（`jevPermissionQuestions.ts:20-45`）。只有 low 风险可自动放行，比生成式路径的 low+medium 更严格；超时、预算不足和异常一律落到 `ask_user`。未配置判定模型时沿用原有生成式审阅。
 
 命令工具在 `CommandPermissionService`（`src/main/tool/permission/commandPermissionService.ts`）里额外做 base command、signature 与风险等级判断。安全白名单按 shell dialect 分开（`:32-65`）：
 

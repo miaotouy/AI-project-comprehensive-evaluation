@@ -48,7 +48,7 @@ TypeScript 约 102.2 万行（93.8%），CSS 47,671 行（4.4%），Rust 13,923 
 
 `packages/*` 之间的依赖方向按仓库 AGENTS 约定收口：Schema 被 Core/Protocol 依赖，Core 与 Protocol 再被 Server 依赖；Client 只依赖 Schema/Protocol，不依赖 Core/Server；SDK 组合 Client、Core 与 Server。运行时核心在 `packages/core`（会话、工具、权限、provider、MCP、插件、Skill、PTY、调度等 Effect 服务），HTTP 契约在 `packages/protocol` 与 `packages/server`，生成式能力在 `packages/ai`，界面分 `packages/app`（Solid Web App）、`packages/session-ui`（会话渲染组件）、`packages/ui`（共享 UI）与 `packages/tui`（终端界面），桌面壳在 `packages/desktop`，GUI 插件运行时在 `packages/gui-plugins`。
 
-旧快照中的聚合包已拆分或移除：`packages/opencode`（v1 主包）不再存在，其职责散入 core/cli/server；`packages/llm` 并入 `packages/ai`；`packages/docs` 并入 `packages/web`；`packages/enterprise`、`packages/slack`、`packages/containers`、`packages/storybook`、`packages/effect-sqlite-node`、`packages/sdk-next` 已移除或合并。新增 `packages/merman`、`packages/latex`、`packages/patchmark`、`packages/process-daemon`、`packages/plugins`、`packages/plugin-browser`、`packages/stories`、`packages/simulation`、`packages/posts`、`packages/theme`、`packages/util` 等。
+`packages/*` 的其余成员包括 `packages/merman`、`packages/latex`、`packages/patchmark`、`packages/process-daemon`、`packages/plugins`、`packages/plugin-browser`、`packages/stories`、`packages/simulation`、`packages/posts`、`packages/theme`、`packages/util` 等。
 
 ## 文档与测试
 

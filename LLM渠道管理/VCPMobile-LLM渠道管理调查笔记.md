@@ -56,7 +56,7 @@ VCPMobile 没有本地 Provider、Endpoint 或 Profile 实体。它保存一套�
 
 模型测试将延迟和错误回传 UI；普通聊天链路有请求 ID 与用户中断租约，便于避免同 ID 重入，但本次检查范围内未找到普通聊天的自动重试、模型 fallback、Key 轮询、限流冷却、跨网关 failover、成本统计或结构化请求追踪。请求失败会返回错误到调用方。`src-tauri/src/vcp_modules/infra/vcp_client.rs:822-980,2810-2910`。
 
-网关侧的存活观测改由 WebSocket 活动通道承担：心跳、重连退避与前台恢复打断退避的规则集中在 `vcp_ws_activity.rs`，不再由已删除的本地服务或高速通道模块负责。`src-tauri/src/vcp_modules/infra/vcp_ws_activity.rs:36-180,112-260`。
+网关侧的存活观测由 WebSocket 活动通道承担：心跳、重连退避与前台恢复打断退避的规则集中在 `vcp_ws_activity.rs`。`src-tauri/src/vcp_modules/infra/vcp_ws_activity.rs:36-180,112-260`。
 
 ## 5. 已确认边界与未验证事项
 

@@ -84,7 +84,7 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 两个方向职责严格分离：
 
-- `syncMesToSwipe(messageId)`（`public/script.js:6837-6883`）：把当前 `mes`/时间戳/`extra` 写回 `swipes[swipe_id]`/`swipe_info[swipe_id]`。仅在 `chat_metadata.tainted || chat.length > 1` 时才写回 `swipes[swipe_id]`（6873），注释说明这是为了让"纯净首条问候语"在每次进聊天时宏还能重新解析——第 0 条消息在全新状态下故意不落盘同步。
+- `syncMesToSwipe(messageId)` 把当前正文、时间戳与附加信息写回当前候选（`mes`/`extra` → `swipes[swipe_id]`、`swipe_info[swipe_id]`，`public/script.js:6837-6883`）。写回只在会话被标记或不止一条消息时发生（`chat_metadata.tainted || chat.length > 1`，6873），注释说明这是为了让"纯净首条问候语"在每次进聊天时宏还能重新解析——第 0 条消息在全新状态下故意不落盘同步。
 - `syncSwipeToMes(messageId, swipeId, targetMessage)`（`public/script.js:6895-6959`）：反方向，把 `swipes[swipeId]` 读出来覆盖 `mes`/时间戳/`extra`。支持传 `targetMessage` 操作游离对象——branch 快照选 swipe 复用此路径。
 
 `deleteSwipe(swipeId, messageId)`（`public/script.js:9279-9345`）：至少保留 1 个 swipe；删除后按"删的是否当前选中项"重算 `swipe_id`；删除后置 `chat_metadata.tainted = true`（9323）。
@@ -99,13 +99,15 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 ### 2.2 加载与保存链
 
-- 保存：`saveChatConditional()`（`public/script.js:9352-9379`）先用 `isChatSaving` 互斥等待上一次保存结束，再按群聊/单聊分发 `saveGroupChat`/`saveChat`，结束后写 IndexedDB 缓存。`saveChatDebounced()`（7302-7323）以 1000ms 防抖调用它，并在超时回调里校验 `this_chid`/`selected_group` 未变（防止切换后误写旧聊天）。
+- 保存：`saveChatConditional()` 用 `isChatSaving` 互斥等待上一次保存结束，再按群聊/单聊分发到两个保存函数，结束后写 IndexedDB 缓存（`saveGroupChat`、`saveChat`，`public/script.js:9352-9379`）。
+- 防抖：`saveChatDebounced()` 以 1000ms 防抖调用保存，并在超时回调里校验 `this_chid`/`selected_group` 未变，防止切换后误写旧聊天（7302-7323）。
 - 服务端 `trySaveChat()`（`src/endpoints/chats.js:457-468`）分四步：
   1. 序列化整数组；
   2. `checkChatIntegrity`（337-365，读文件首行比对 slug，文件不存在、空文件或无 integrity 字段视为通过；非空但首行无法解析为头对象则不通过）；
   3. 原子写文件（`write-file-atomic`）；
   4. 节流备份（`backupChat`，按"用户 + 聊天名"分别节流 10s；非 ASCII 聊天名会附加原始名的短哈希，避免 CJK 名折叠成同一备份键共享配额，`_` 前缀 + 时间戳，受 `backups.chat.*` 配置控制，`src/endpoints/chats.js:42-61,93-101`）。
-- 加载：`/api/chats/get`（服务端 517-544）与 `/group/get`（797-806）返回整文件数组；前端 `getChatResult()`（7625-7649）在 `chat.length === 0` 时调 `getFirstMessage()` 造问候语并 `saveChatConditional()` 让文件首次落盘，随后发 `CHAT_CHANGED`，全新聊天再发 `CHAT_CREATED`（7641-7642）。
+- 加载：`/api/chats/get` 与 `/group/get` 分别返回单聊与群聊的整文件数组（服务端 517-544、797-806）。
+- 首次落盘：前端 `getChatResult()` 在会话为空（`chat.length === 0`）时调 `getFirstMessage()` 造问候语并 `saveChatConditional()` 让文件首次落盘，随后发 `CHAT_CHANGED`，全新聊天再发 `CHAT_CREATED`（7625-7649、7641-7642）。
 - 群聊加载（`getGroupChat`，`group-chats.js:255-320`）：先 `validateGroup`（剔除不存在的成员、去重 chat id，218-247），`freshChat = !metadata.tainted && 无数据` 时遍历 `group.members` 为每个成员各造一条首条消息并立即 `saveGroupChat`（283-304）。
 
 ### 2.3 无索引结构
@@ -165,7 +167,8 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 - **最近聊天列表**：`/api/chats/recent`（`src/endpoints/chats.js:979-1077`）扫描角色聊天目录 + 群聊文件 + 根目录三处，按 mtime 排序、pinned 优先，逐文件 `getChatInfo`（`src/endpoints/chats.js:393-505`，readline 流式读首行元数据与最后一条消息，不整读文件）得到文件大小/消息数/最后消息/预览。末行无法解析或缺少已知字段时返回降级预览（消息数按已读条数估算、预览置为空占位）而不是丢弃该聊天，扫描中途文件被删除也按跳过处理。欢迎屏消费它（`welcome-screen.js:763-817`），折叠阈值 `collapsedDisplayed`。
 - **单个角色的聊天列表**：`/api/characters/chats`（`src/endpoints/characters.js:1497-1533`），`simple` 模式只回文件名数组。
-- **搜索**：`/api/chats/search`（`src/endpoints/chats.js:874-977`）在**单个角色的聊天目录或单个群组的 chats 列表**范围内按查询词过滤：`getChatInfo` 逐行把 `mes` 累积成缓冲交给 `hasTextMatch`（所有词都出现在同一缓冲内即命中），结果含 `preview_message`（最后 400 字符）。本次未找到跨角色/全局的聊天内容搜索入口。- **分页**：消息读取与保存均不分页；渲染层"首屏 100 条 + Show more"只是显示截断（`power_user.chat_truncation` 默认 100，`public/scripts/power-user.js:133`，渲染细节在消息渲染器笔记）。
+- **搜索**：`/api/chats/search`（`src/endpoints/chats.js:874-977`）在**单个角色的聊天目录或单个群组的 chats 列表**范围内按查询词过滤：`getChatInfo` 逐行把 `mes` 累积成缓冲交给 `hasTextMatch`（所有词都出现在同一缓冲内即命中），结果含 `preview_message`（最后 400 字符）。本次未找到跨角色/全局的聊天内容搜索入口。
+- **分页**：消息读取与保存均不分页；渲染层"首屏 100 条 + Show more"只是显示截断（`power_user.chat_truncation` 默认 100，`public/scripts/power-user.js:133`，渲染细节在消息渲染器笔记）。
 - **定位**：搜索命中后跳转目标聊天靠 `displayPastChats` 的 `highlightNames` 参数滚动定位（`public/script.js:8560-8564`）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
@@ -188,7 +191,8 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 ## 8. 外部对象绑定与附件
 
 - **角色**：角色 JSON 持有 `chat`（当前聊天文件名）与 `date_last_chat`（`src/endpoints/characters.js:375, 423`），即会话级绑定，保存的是文件引用而非消息快照；角色级附件在 `extension_settings.character_attachments[avatar]`（见下）。
-- **群组**：群组 JSON 持有 `members`（avatar id 数组）、`chat_id`、`chats` 数组（`group-chats.js:255-320` 读写）；消息级绑定 `force_avatar`/`original_avatar`/`extra.gen_id` 在转群聊或群聊生成时写入（`public/script.js:6714-6716`）。
+- **群组**：群组 JSON 持有成员 avatar 列表、当前聊天 id 与全部历史聊天 id 列表（`members`、`chat_id`、`chats`，`group-chats.js:255-320` 读写）。
+- **消息级绑定**：`force_avatar`/`original_avatar`/`extra.gen_id` 在转群聊或群聊生成时写入（`public/script.js:6714-6716`）。
 - **模型/渠道**：消息保存 `extra.api`/`extra.model` **历史快照**（`saveReply`，6690-6691），不保存渠道引用；后续请求不读取这些字段回放，仅用于展示与 reasoning 签名校验（`openai.js:615-621`）。
 - **消息附件**：两类附件都存 URL 引用，内容在 prompt 组装时展开进消息文本——
   - 图片：`extra.media: MediaAttachment[]`（`switchMessageMediaDisplay`/`expandMessageMedia`，`public/scripts/chats.js:875-1067`）；
@@ -221,7 +225,11 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 ## 11. 关键源码索引
 
-- `public/script.js`：`chat`/`chat_metadata`（410, 453）；`saveChat`（7336-7421）；`saveChatDebounced`（7302-7323）；`saveChatConditional`（9352-9379）；`getChat`/`getChatResult`/`getFirstMessage`/`openCharacterChat`（7575-7693）；`ensureSwipes`/`syncMesToSwipe`/`syncSwipeToMes`（6778-6959）；`saveReply`（6583-6771）；`deleteSwipe`（9279-9345）；`deleteMessage`（1614-1700）；`doNewChat`/`renameGroupOrCharacterChat`（10558-10679）；`updateMessage`（8080-8124）
+- `public/script.js`：
+  - 会话状态与保存链：`chat`/`chat_metadata`（410, 453）；`saveChat`（7336-7421）、`saveChatDebounced`（7302-7323）、`saveChatConditional`（9352-9379）
+  - 加载与打开：`getChat`/`getChatResult`/`getFirstMessage`/`openCharacterChat`（7575-7693）
+  - swipe 与消息操作：`ensureSwipes`/`syncMesToSwipe`/`syncSwipeToMes`（6778-6959）；`saveReply`（6583-6771）、`deleteSwipe`（9279-9345）、`deleteMessage`（1614-1700）
+  - 新建、重命名与编辑：`doNewChat`/`renameGroupOrCharacterChat`（10558-10679）；`updateMessage`（8080-8124）
 - `public/scripts/bookmarks.js`：`getBranchChatSnapshot`/`createBranch`（171-243）；`createNewBookmark`/`backToMainChat`（253-326）；`branchChat`（449-469）；`convertSoloToGroupChat`（328-441）；slash commands 与 `initBookmarks`（471-737）
 - `public/scripts/group-chats.js`：`getGroupChat`（255-320）；`saveGroupChat`（623-675）；`regenerateGroup`（167-188）；`generateGroupWrapper`（945-1092）；聊天 CRUD（2139-2268）
 - `public/scripts/chats.js`：`hideChatMessageRange`（147-169）；附件上传/删除/媒体（198-1120）；Data Bank（1334-1804）

@@ -23,7 +23,7 @@ Chatbox 的媒体创作是一条窄而完整、用户主导的图像生成工作
 3. **跨重启持久化**：记录存 IndexedDB（桌面/Web）或 SQLite（移动），图片存 blob；核心服务提供启动清算入口，可把遗留 pending/generating 记录标为中断错误；当前 renderer 门面未找到该入口调用。已有任务身份首次落盘失败时还有内存保护，防止同进程重复发起计费任务。见同文件 `:153-182,209-226,325-334,469-486`。
 4. **聊天结果投影**：聊天工具触发的生成图片被提升到消息底部 artifacts 区域，与下载文件并列，不因 Work Mode 的过程时间线完成后折叠而隐藏；远程图片加载失败可重新请求并恢复显示。`src/renderer/components/message-parts/ToolCallPartUI.tsx:1038-1069`、`src/renderer/components/chat/Message.tsx:553`、`src/renderer/routes/image-creator/-components/GeneratedImagesGallery.tsx:168-224`。
 
-旧快照曾运行图像生成及聊天恢复相关测试并通过，当前快照未重新执行，现行测试结果需在当前快照上复跑。真实计费调用、外部模型与额度链路仍未运行验证。
+图像生成与聊天恢复相关测试当前未重新运行，现行测试结果需要在当前快照上复跑。真实计费调用、外部模型与额度链路仍未运行验证。
 
 ## 系统边界与完整主链
 
@@ -169,8 +169,8 @@ Agent 还可读历史：`chatbox image status|history|models`（`images.ts:356-3
 
 ### 运行验证
 
-- 依赖安装：`npm install --no-audit --no-fund` 首次因 ERESOLVE 失败（项目用 zod ^4，`@mastra/core@0.13.2` 声明 peer zod ^3；仓库 pnpm 的 auto-install-peers 可规避，npm 不能）；加 `--legacy-peer-deps` 后成功，2808 包约 6 分钟。设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（单元测试不需要 Electron 运行时，本机缓存已有 electron 35.6.0 zip）。postinstall 的原生依赖检查因调用 pnpm（本机 corepack 签名校验故障）失败，非致命。npm 安装未应用仓库 `pnpm-workspace.yaml` 的 patchedDependencies 补丁；首次运行还发现 npm 解析出的 `@tanstack/router-plugin` 1.168.x 无法转换既有路由文件，用 `--no-save` 对齐仓库 pin 的 1.120.15 后正常（gitignored 的 `routeTree.gen.ts` 由插件生成，未污染工作树；安装产生的 package-lock.json 已删除，`git status` 干净）。
-- 旧快照测试记录：`npx vitest run` 相关文件 9 个曾全部通过；以下结果不视为当前快照的运行确认——
+- 依赖安装：`npm install --no-audit --no-fund` 首次因 ERESOLVE 失败（项目用 zod ^4，`@mastra/core@0.13.2` 声明 peer zod ^3；仓库 pnpm 的 auto-install-peers 可规避，npm 不能）；加 `--legacy-peer-deps` 后成功，2808 包约 6 分钟。设 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（单元测试不需要 Electron 运行时，本机缓存已有 electron 35.6.0 zip）。postinstall 的原生依赖检查因调用 pnpm（本机 corepack 签名校验故障）失败，非致命。npm 安装未应用仓库 `pnpm-workspace.yaml` 的 patchedDependencies 补丁；首次运行还发现 npm 解析出的 `@tanstack/router-plugin` 1.168.x 无法转换既有路由文件，用 `--no-save` 对齐仓库 pin 的 1.120.15 后路由转换正常（gitignored 的 `routeTree.gen.ts` 由插件生成，`git status` 干净）。
+- 以下测试文件覆盖图像生成与聊天恢复主链，当前快照未重新运行，结果不视为当前快照的运行确认——
   - `stores/imageGenerationActions.test.ts`（7 用例：参考图 URL/键双源、completion promise、onRecordCreated 先于计费请求、resume 终态、结构化错误码、缩略图分离、失败 item 折叠）；
   - `storage/__tests__/SQLiteImageGenerationStorage.test.ts`（3）、`packages/chatbox-cli/images.test.ts`（12）、`image-task-follow-up.test.ts`（4）、`image-model-catalog.test.ts`（6）、`routes/image-creator/-components/model-selection.test.ts`（3）、`components/chat/ImageGenerationResultGallery.test.ts`（2）、`message-parts/ToolCallPartUI.image-recovery.test.tsx`（6）、`ToolCallPartUI.command.test.tsx`（6）。
 - 当前快照未重新运行上述测试。真实计费生成、真实模型 manifest/异步任务接口、应用级跨重启恢复、IndexedDB/SQLite 真机持久化、参考图实际构图与视觉行为、UI 视觉效果与键盘可用性均未运行。

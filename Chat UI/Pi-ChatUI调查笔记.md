@@ -148,7 +148,7 @@ Pi 是 TUI 命令行编码 Agent，聊天表面由底部多行编辑器 + 聊天
 
 默认 `pi` TUI 之外，仓库有 `apps/p2` 应用：它的 TUI host 复用稳定版 alternate-screen renderer、编辑器、消息卡、主题与工具渲染器；会话由 p2 的 session worker 持有，页面与 TUI 通过 Chord 对象引用观察更新，worker 崩溃后重启并保留失败到重试，断线重连由 p2 的 hosts 处理（`apps/p2/src/hosts/tui.ts`、`apps/p2/src/hosts/session-workers.ts`、`packages/chord/README.md`）。
 
-稳定 fullscreen 表面增加可点击 jump-to-end 指示器、搜索前后按钮、可拖动滚动条和 Alt 加速滚轮。选区自动复制可关闭；此时复制命令优先复制当前选区，并且后端失败会显示错误而不再假报成功（`packages/coding-agent/src/modes/interactive/tui-renderer.ts:24-37`、`packages/tui/src/tui-alt-screen.ts:496-625,968-1116,1419-1468,1621-1641`）。这些交互均未在真实终端运行验证。
+稳定 fullscreen 表面增加可点击 jump-to-end 指示器、搜索前后按钮、可拖动滚动条和 Alt 加速滚轮。选区自动复制可关闭；此时复制命令优先复制当前选区，并且后端失败会显示错误（`packages/coding-agent/src/modes/interactive/tui-renderer.ts:24-37`、`packages/tui/src/tui-alt-screen.ts:496-625,968-1116,1419-1468,1621-1641`）。这些交互均未在真实终端运行验证。
 
 ## 15. 关键源码索引
 

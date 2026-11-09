@@ -12,13 +12,13 @@
 >
 > 文档定位：实现学习与跨项目横向比较，不作为整改方案
 
-最新快照（2026-11-04）：Git 跟踪文件 3578 个；按扩展名可识别的源码 2194 个（不含 `vendor/` 为 2052 个），文档类文件 154 个，`tests/` 下跟踪文件 515 个，`vendor/` 610 个。该仓库仍在高频变化；本文不沿用旧快照的代码行数和提交频率统计。
+最新快照（2026-11-04）：Git 跟踪文件 3578 个；按扩展名可识别的源码 2194 个（不含 `vendor/` 为 2052 个），文档类文件 154 个，`tests/` 下跟踪文件 515 个，`vendor/` 610 个。该仓库仍在高频变化。
 
 ## 结论摘要
 
 VCPChat 是 Electron 主应用、众多按功能命名的前端目录、多个 Rust 本地服务以及 VCP 附属服务/工具合仓的复合仓库。一级目录很多但未形成统一 workspace；模块边界主要靠目录与进程协议维持。跟踪的 `vendor` 是最大单一区域，统计时与自有代码分开计算。
 
-与上一快照相比，扩展集中在三处：一是前端基础设施被拆成独立的 `modules/ui-system/`、`modules/renderer/`、`modules/services/`、`modules/ipc/` 与 `preloads/api/` 五层，原先的 `modules/vcpClient.js` 与 `preloads/shared/{apiFactory,catalog,roles}.js` 已删除；二是新增多个子应用目录（`Chartmodules/`、`DeskPetmodules/`、`Gamemodules/`、`ProjectForgemodules/`）与 `modules/deskpet/`、`modules/scriptorium/`、`modules/voice/`、`modules/emotion/`、`modules/game/`；三是 `vendor/` 追加了 pdf.js 5.7.284、pdf-lib 与 Excalidraw 0.18.1 及其打包脚本。
+目录组织上有三处集中区域：前端基础设施分成独立的 `modules/ui-system/`、`modules/renderer/`、`modules/services/`、`modules/ipc/` 与 `preloads/api/` 五层；子应用目录包括 `Chartmodules/`、`DeskPetmodules/`、`Gamemodules/`、`ProjectForgemodules/` 与 `modules/deskpet/`、`modules/scriptorium/`、`modules/voice/`、`modules/emotion/`、`modules/game/`；`vendor/` 收录 pdf.js 5.7.284、pdf-lib 与 Excalidraw 0.18.1 及其打包脚本。
 
 大型自有区域和测试面包括：
 

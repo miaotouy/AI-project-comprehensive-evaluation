@@ -164,7 +164,7 @@ incognito session 不走 durable transcript archive，并按 incognito 规则删
 
 ### Restart recovery
 
-重启续跑由 Gateway 的 restart resume 模块族承担，不再是旧的 recovery service + tombstone 单一路径。恢复入口按 store target inventory 读取持久化 lifecycle 投影，用 `restartResumeSkipReason` 判断是否可续跑，捕获并中断孤立的 pending input、恢复 queued input，再检查运行中的 bash 进程与 subagent 根会话是否仍存活；会话状态变化通过 session event handoff 交给下一轮消费。实现见 `src/gateway/session-restart-resume.ts`、`session-restart-resume-failure.ts`、`session-restart-resume-log.ts`、`src/config/sessions/session-run-lifecycle-projection.ts`、`src/config/sessions/session-pending-input-withdrawal.ts`。
+重启续跑由 Gateway 的 restart resume 模块族承担。恢复入口按 store target inventory 读取持久化 lifecycle 投影，用 `restartResumeSkipReason` 判断是否可续跑，捕获并中断孤立的 pending input、恢复 queued input，再检查运行中的 bash 进程与 subagent 根会话是否仍存活；会话状态变化通过 session event handoff 交给下一轮消费。实现见 `src/gateway/session-restart-resume.ts`、`session-restart-resume-failure.ts`、`session-restart-resume-log.ts`、`src/config/sessions/session-run-lifecycle-projection.ts`、`src/config/sessions/session-pending-input-withdrawal.ts`。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 

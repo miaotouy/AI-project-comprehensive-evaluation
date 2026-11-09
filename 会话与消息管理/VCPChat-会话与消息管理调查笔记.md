@@ -174,7 +174,7 @@ Agent 侧存在**两条**创建默认话题的路径，产生的默认话题 id 
   - 过滤掉 `role==='system'` 与 `isThinking===true` 的消息；
   - 只要历史中出现任何 `role==='user'` 消息就返回 0，否则返回全部 assistant 消息条数（`topicListManager.js:117-128`、`chatHandlers.js:1450-1466`）。
 
-  即自动未读覆盖"Agent 在无人回应的新话题里连续说了多条"的整个阶段，用户一旦发言即归零；旧的"非系统消息恰好只有 1 条且为 assistant"硬编号条件（`shouldActivateCount`）已被删除。注意历史消息的 `isThinking` 在落盘前被置 false（6.3），故历史里通常只有流式瞬时占位才带 `isThinking:true`。
+  即自动未读覆盖"Agent 在无人回应的新话题里连续说了多条"的整个阶段，用户一旦发言即归零。注意历史消息的 `isThinking` 在落盘前被置 false（6.3），故历史里通常只有流式瞬时占位才带 `isThinking:true`。
 - **持久化标记与来源**：右键菜单"标记为未读/已读"调用 `electronAPI.setTopicUnread(itemId, topicId, !isUnread)`（`topicListManager.js:974-988`），写入 `topic.unread` 字段；标记未读时同时写 `topic.unreadSource = 'manual'`，清除时删除该字段（`chatHandlers.js:1658-1683`）。Agent/TopicSponsor 等插件侧写入的旧标记没有 `unreadSource`，被视为"过期自动标记"：只要历史已有用户参与就失效。
 - 汇总函数 `calculateTopicUnreadCount(topic, history)`（`topicListManager.js:232-237`）的返回规则：
   - 自动计数 >0 → 返回数字；

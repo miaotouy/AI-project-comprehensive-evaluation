@@ -24,7 +24,7 @@ RikkaHub 的工具体系由 `ai` 模块定义协议、`app` 模块组装具体�
 
 第四，工具来源有七个，注册顺序在 `ChatToolFactory.createTools` 中固定为：记忆、搜索、本地、会话、工作区、Skill、MCP（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/ChatToolFactory.kt`）。这一顺序与 `docs/references/chat-generation-pipeline.md` 第四阶段的描述不一致，文档把搜索排在第一位且把 Memory 排在最后；当前快照以源码为准。
 
-横向比较可注意四点：工具目录是每轮生成现算的，没有持久化缓存；MCP 工具命名采用 `mcp__{server}__{tool}` 且服务名有字符白名单校验，非法名会让整次生成直接报错，不会静默丢弃；输出截断放在工具装配层统一包装，除搜索工具外所有工具都受 32KB 上限约束，但只有在会话具备可读本地 Rootfs 的工作区时才启用；记忆工具已从单入口动作分发改为六个独立工具，并按文件路径与版本号操作。
+横向比较可注意四点：工具目录是每轮生成现算的，没有持久化缓存；MCP 工具命名采用 `mcp__{server}__{tool}` 且服务名有字符白名单校验，非法名会让整次生成直接报错，不会静默丢弃；输出截断放在工具装配层统一包装，除搜索工具外所有工具都受 32KB 上限约束，但只有在会话具备可读本地 Rootfs 的工作区时才启用；记忆工具是六个独立工具，按文件路径与版本号操作。
 
 ## 系统边界与总体调用链
 
@@ -83,7 +83,7 @@ ChatService.handleMessageComplete()
 
 会话工具固定两个：`recent_chats` 列最近会话标题与日期，`conversation_search` 对历史消息做全文检索（`ConversationTools.kt`）。注释明确说明这是为了不把近期聊天静态注入 system prompt 以保持提示缓存（`ConversationTools.kt`）。
 
-工作区工具固定四个：读文件、写文件、编辑文件、shell。Skill 工具固定一个 `use_skill`。记忆工具已改为六个独立工具：读、写、唯一子串替换、追加、删除与列目录，读写以文件路径与版本号为契约，而不是早期单入口的动作分发（`tools/MemoryTools.kt`、`data/repository/MemoryRepository.kt`）。
+工作区工具固定四个：读文件、写文件、编辑文件、shell。Skill 工具固定一个 `use_skill`。记忆工具为六个独立工具：读、写、唯一子串替换、追加、删除与列目录，读写以文件路径与版本号为契约（`tools/MemoryTools.kt`、`data/repository/MemoryRepository.kt`）。
 
 ### 1.4 MCP 服务名白名单
 

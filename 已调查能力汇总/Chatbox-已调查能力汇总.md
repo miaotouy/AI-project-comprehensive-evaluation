@@ -39,7 +39,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 - **Thread / Fork / Summary 与来源导航**：线程路径、兄弟分支和摘要都映射进同一消息树，创建、切换、编辑重发和删除经领域结构命令提交；来源标记承接复制会话或线程独立后的导航。Work Mode 的结构操作受模式策略约束。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **消息渲染：结构化 contentParts**：text、reasoning、tool-call、image、info 等 part 分派给专用组件，不依赖从 Markdown 私有标记反向解析；Markdown 默认支持 GFM、软换行、LaTeX、Shiki、Mermaid、SVG 与图片查看器，原始 HTML 不进入 Markdown DOM、HTML 代码预览放进 sandboxed iframe。证据状态：`主链确认`。来源：[消息渲染调查笔记](../消息渲染器/Chatbox-消息渲染调查笔记.md)。
 - **流式更新与节流落盘**：每个可见增量只刷新 UI 缓存（几乎逐 token），落盘经流式写协调器和领域行提交队列，按 2 秒节流且 tool-call 立即持久化，流结束/出错/暂停时无条件补一次最终落盘。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Chatbox-Chat调查笔记.md)。
-- **消息搜索与定位**：当前会话与跨会话入口读取领域搜索候选窗口，扫描消息文本、推理与工具信息后定位会话和消息；无持久化倒排索引。分页和结果上限详见对应实现，未将旧快照数值视为当前结论。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
+- **消息搜索与定位**：当前会话与跨会话入口读取领域搜索候选窗口，扫描消息文本、推理与工具信息后定位会话和消息；无持久化倒排索引。分页和结果上限见对应实现。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **侧栏分页、排序与活动指示**：IndexedDB 游标分页（页大小 50、置顶优先）、分数索引落地排序、拖拽仅在同一置顶分组内生效；"生成中/回复完成未读"指示为内存态 zustand store，不落盘、重启即消失。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/Chatbox-会话与消息管理调查笔记.md)。
 - **草稿与现场恢复**：草稿按会话粒度存 localStorage（首页 `'new-chat'`、真实会话 `draft-${sessionId}`，300ms 防抖），发送成功后清除；每会话滚动快照缓存最多 100 个，切换会话不丢阅读位置。证据状态：`主链确认`。来源：[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
 - **停止、重试、续写与并行替代回复**：停止时把未完成的 tool-call 批收口为 error 态并落盘；重新生成走 fork 分支而非替换原消息，工具暂停后的继续/重试以 `appendToMessage` 写回原消息；"在下方继续回复"刻意绕过会话生成锁以支持并行替代回复，写入由领域行提交队列串行处理。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Chatbox-对话请求与上下文调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/Chatbox-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Chatbox-ChatUI调查笔记.md>)。
@@ -117,7 +117,7 @@ Chatbox 是一个 local-first、以单个 Session 为存储单元的多模型聊
 
 ### 共性未验证（方法学口径下的运行验证缺口）
 
-- 各笔记普遍未运行真实 Provider 调用与计费生成、UI 视觉与键盘可用性、桌面/移动/浏览器平台行为；多数结论来自静态代码，图像生成相关仅保留旧快照单测记录，当前快照未重跑。
+- 各笔记普遍未运行真实 Provider 调用与计费生成、UI 视觉与键盘可用性、桌面/移动/浏览器平台行为；多数结论来自静态代码，图像生成相关未运行单元测试。
 - provider 侧 token 截断与最终 HTTP payload 字段（`packages/model-calls` 适配层职责）未逐一核实。
 - MCP HTTP/SSE transport 默认超时数值未确认；`main/mcp/shell-env.ts` 实现未逐行读取。
 - Windows 无 OS 沙箱的实际影响未验证（`TASK_SANDBOX_DENY_READ_PATHS` 仅 macOS/Linux 分支生效，`~/.ssh` 等拒绝规则在 Windows 上不生效）。

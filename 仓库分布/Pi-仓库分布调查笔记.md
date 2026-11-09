@@ -44,7 +44,7 @@ Pi 是按可发布能力拆包的 TypeScript monorepo。产品面仍是 CLI/TUI�
 
 TypeScript/TSX 共 599,852 行（TS 587,532 + TSX 12,320），约占可识别源码的 94.6%，是绝对主语言；另有 17 个 Rust 文件 / 5,389 行，全部在 `packages/env/daemon`（远端执行 daemon）。
 
-结构上发生了较大的重组。旧的 `client`、`protocol`、`server`、`session-backends` 四个包已删除，新增 `durable`、`codemode`、`env`、`mcp`、`schema` 五个包：durable 承接会话与 turn 的持久化 harness，codemode 提供 QuickJS 中的工具脚本运行时，env 提供 SSH 远端执行环境，mcp 是独立 MCP 客户端，schema 是无 eval 的 JSON Schema 构建与校验。chord 从较小的服务包长成跨进程对象/插件框架，并成为 p2 的界面底座。
+包结构上，`durable` 承接会话与 turn 的持久化 harness，`codemode` 提供 QuickJS 中的工具脚本运行时，`env` 提供 SSH 远端执行环境，`mcp` 是独立 MCP 客户端，`schema` 是无 eval 的 JSON Schema 构建与校验。chord 是跨进程对象/插件框架，并作为 p2 的界面底座。
 
 ## 跨平台组织与边界
 

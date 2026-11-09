@@ -41,7 +41,7 @@ Cherry Studio 是 Electron 主应用与内部共享包合仓的 TypeScript monor
 | AI core | 97 / 18,654 |
 | `packages/agent-behavior` | 101 / 16,239 |
 
-provider registry 与 AI core 分别约 3.6 万行和 1.9 万行。渲染层原先自带的文件预览渲染与 Agent 运行时已抽出为内部包：`packages/file-preview` 承接 PDF、DOCX、PPTX、XLSX、RTF 与图片预览（HTML、Markdown 与源码预览仍留在桌面应用），`packages/agent-runtime-pi` 与 `packages/agent-behavior` 承接 Pi 运行时及其与具体 harness 无关的行为端口。`v2-refactor-temp` 目录在本次快照中已不存在。
+provider registry 与 AI core 分别约 3.6 万行和 1.9 万行。渲染层的文件预览渲染在 `packages/file-preview`：承接 PDF、DOCX、PPTX、XLSX、RTF 与图片预览（HTML、Markdown 与源码预览仍留在桌面应用）；Agent 运行时在 `packages/agent-runtime-pi`，其与具体 harness 无关的行为端口在 `packages/agent-behavior`。仓库中没有 `v2-refactor-temp` 目录。
 
 ## 语言、文档与测试
 

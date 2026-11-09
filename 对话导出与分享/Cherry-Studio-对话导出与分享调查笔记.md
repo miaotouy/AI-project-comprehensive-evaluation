@@ -148,7 +148,7 @@ Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionI
 
 Markdown 导出会携带多模态图片：图片来自用户附件的 `FileUIPart` 与 `generate_image` 工具产物，按原文顺序与文本交错序列化，并有两种落盘模式——内联 base64 数据 URI，或写 `assets/<name>.<ext>` 相对链接加一份延迟字节写入清单。模式在导出时由图片模式选择弹窗决定，未注册选择器则中止带图导出。单张图片解析失败只跳过并计数，不中止整次导出。Notion 转换会把 Markdown alert 映射为 Notion callout。依据：`src/renderer/services/markdownImageExport.ts`、`src/renderer/services/ExportService.ts`（`buildMarkdownWithImages`、`exportImageAssets`）、`src/renderer/services/imageExportModeChooser.ts`、`src/main/services/ExportService.ts`。
 
-图片加载、外链可用性、目标 Notion API 与语雀/思源等第三方端的最终呈现需要运行环境验证；保存对话框已改为挂到调用方窗口，避免非 ASCII 文件名在旧式对话框上崩溃。
+图片加载、外链可用性、目标 Notion API 与语雀/思源等第三方端的最终呈现需要运行环境验证；保存对话框挂到调用方窗口，非 ASCII 文件名不经旧式对话框。
 
 ## 8. 设计取舍与已确认边界
 

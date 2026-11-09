@@ -155,7 +155,7 @@ Open WebUI 是 Python 后端（FastAPI + Socket.IO）与 Svelte 前端（SvelteK
 
 - **仓库分布**：Python 后端 + Svelte 前端合仓的 Web 应用；5,274 个 Git 跟踪文件中 3,874 个位于 `static`（总文件数主要反映静态资源规模），可识别源码 1,230 文件 / 424,593 行，集中在 `backend/open_webui`（218,748 行）与 `src/lib`（195,759 行），另有仓库根部的 Rust 加密组件 `crypto/encryption`；仓内显式测试资产很少（仅 2 个测试文件），完整用户文档不在当前 docs 目录展开；产品经 pip、Docker、Kubernetes 运行，原生桌面应用位于独立仓库（`open-webui/desktop`），本仓不含其平台代码。来源：[仓库分布调查笔记](../仓库分布/Open-WebUI-仓库分布调查笔记.md)
 
-- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（68 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；界面字号经 `--app-text-scale` 缩放，字体族另有账户级设置 `fontFamily`（写入 `--app-font-family`）；另有 24 项快捷键注册表、13+16 tab 设置框架；桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入，本快照已移除桌面专用侧栏组件。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
+- **应用界面基础设施**：关闭 SSR 的 SvelteKit SPA（Svelte 5 框架 + Svelte 4 风格组件主体）、Tailwind CSS v4，无 UI 组件库——公共组件在 common 目录（68 个文件，Modal/ConfirmDialog/Drawer/Dropdown/Tooltip 等均自研）；Modal 负责 Portal、焦点陷阱、Esc、遮罩与滚动锁定，弹窗层级是「最后挂载者优先」而非 z-index 栈，全应用无自绘右键菜单；Toast 统一用 svelte-sonner，聊天完成等站内通知还旁路浏览器 Notification 与 webhook；主题以设备 localStorage 为权威（首屏内联脚本防 FOUC），聊天背景图却是账户级设置（文件夹 / 用户 / 许可三级优先级）；界面字号经 `--app-text-scale` 缩放，字体族另有账户级设置 `fontFamily`（写入 `--app-font-family`）；另有 24 项快捷键注册表、13+16 tab 设置框架；桌面壳（独立仓库）经 `window.electronAPI`/`window.applyTheme` 钩子接入，没有桌面专用侧栏组件。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Open-WebUI-应用界面基础设施调查笔记.md)
 
 ## 已知边界与待验证事项
 

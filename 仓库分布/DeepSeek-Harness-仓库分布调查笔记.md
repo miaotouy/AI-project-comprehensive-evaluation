@@ -66,7 +66,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的开源 agent harness，以“一切皆
 | `patches/` | 12 | 依赖补丁 |
 | 根目录 | 47 | 配置与门禁中枢 |
 
-包组清单以 `packages/README.md` 的 53 行表格为准，与 `packages/` 下 53 个组目录一一对应。相对上一快照，新增 `deliverables`、`document`、`team`、`telemetry` 四个组；`hooks`、`runtime-diagnostics`、`webhook` 三个组不再作为独立组存在（相关能力归入 `experimental/`），e2b provider 已按仓库内 simplified 决策记录移除（`.agents/notes/implemented/simplification/2026-09-11-remove-e2b-providers.md`）。
+包组清单以 `packages/README.md` 的 53 行表格为准，与 `packages/` 下 53 个组目录一一对应。其中 `deliverables`、`document`、`team`、`telemetry` 是独立组，`hooks`、`runtime-diagnostics`、`webhook` 的能力归入 `experimental/`；仓库内不提供 e2b provider（决策记录见 `.agents/notes/implemented/simplification/2026-09-11-remove-e2b-providers.md`）。
 
 `packages/experimental` 是规模最大的单组，含 60 余个子包，覆盖 CUA（含 macOS Swift 原生辅助程序）、browser-use 的 playwright/stagehand/chrome-devtools 后端、插件市场与 forge、liveshare、webhook、webworker、语音转写、worktree、session inspector/search、ralph 与多套 bundle。实验包的地位由该组 README 的 status 政策单独声明，与发布/安装无关。
 

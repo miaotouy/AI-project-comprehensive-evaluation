@@ -207,7 +207,7 @@ Hermes 的消息渲染由多套前端各自完成，它们共享一个 `tui_gate
 
 本节归纳反复出现的设计意图、以及从代码可确认的明确“不做”：
 
-- **Rich/ANSI 渲染回退**只在 `agent.rich_output` 存在时选择：桥接模块 `tui_gateway/render.py` 已在，但被桥接的 `agent.rich_output` 本次未找到 → 桥返回 `None`。这意味着 Python 的 ANSI `rendered` 不会注入，`message.delta` 净文本累积（注释提到 `display.final_response_markdown: render` 曾篡改 `rendered` 增量导致丢失，v2 改为始终累积 `text`，见 `turnController.ts` 处的 #167991）。
+- **Rich/ANSI 渲染回退**只在 `agent.rich_output` 存在时选择：桥接模块 `tui_gateway/render.py` 已在，但被桥接的 `agent.rich_output` 本次未找到 → 桥返回 `None`。这意味着 Python 的 ANSI `rendered` 不会注入，`message.delta` 的净文本始终累积为 `text`（注释见 `turnController.ts` 处的 #167991）。
 - **`message.complete` 段去重逻辑**：只在 `finalTail` 中剔除与最终文字重叠的 segment；`response_previewed` 时连已封 interims 也去重（`dedupeStart=interimBoundaryIndex ?? 0`）。Diff 段同理（`finalHasOwnFence`）。这是为了避免“同一 patch 两页”的已知 bug。
 - **系统消息不以 user 气泡呈现**：`display_kind` 的 `hidden/model_switch/auto_continue` 在 `toTranscriptMessages` 被转成 `kind:event` 或跳过；`pending_reaction_notes` 只进 model input 不进持久化文本（`methods_prompt.py`）。
 - **TUI 不渲染 Web 组件语义**：`<details>` 直接丢弃内容（`markdown.tsx` 起 `</details>` 跳过），`<summary>` 变成 `▶ ` 行——这是终端渲染器与 DOM 的边界。

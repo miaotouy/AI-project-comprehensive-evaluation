@@ -19,7 +19,10 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 媒体创作视角下三个关键机制（独特功能笔记均未展开）：
 
 1. **三层对象 + 服务端封面收口**：主题组织批次，批次保存模型与输入设置，单项生成关联结果资产、文件和异步任务。服务端成功路径在标记任务成功前，用缩略图填补空主题封面；并发批次通过数据库的空值条件更新只保留一个胜出封面，未使用的上传会清理。客户端即使退出轮询，成功路径仍可落封面。见 [GenerationService.ensureTopicCover](../../lobehub/apps/server/src/services/generation/index.ts#L330-L378)、[条件更新](../../lobehub/packages/database/src/models/generationTopic.ts#L115-L130)。
-2. **lambda/async 双路由 + 双完成路径**：`image.createImage` 在事务里建 batch+N 个 generation+N 个 asyncTask 后 fire-and-forget 触发 `asyncCaller.image.createImage`（`apps/server/src/routers/lambda/image/index.ts:215-332`），真正调模型在 async 路由（`apps/server/src/routers/async/image.ts`）；视频由 lambda 直接调 `modelRuntime.createVideo`，按 provider 返回分 webhook 等待（`apps/server/src/router-hono/webhooks/handlers/video.ts`，一次性 token 校验）与 `after()` 后台轮询（`apps/server/src/services/generation/videoBackgroundPolling.ts`，5s 固定间隔 × 120 次）两条路径收口。
+2. **lambda/async 双路由 + 双完成路径**：提交与执行分两层——lambda 路由在一个事务里建好批次、结果生成行与异步任务行后，以 fire-and-forget 方式触发异步调用，真正调模型发生在 async 路由；视频侧由 lambda 直接发起模型调用，再按 provider 返回的回调形态二选一收口。
+
+   - 图像：提交入口 `image.createImage` 触发 `asyncCaller.image.createImage`（`apps/server/src/routers/lambda/image/index.ts:215-332`），模型调用在 `apps/server/src/routers/async/image.ts`。
+   - 视频：lambda 直接调 `modelRuntime.createVideo`；webhook 型等回调（一次性 token 校验，`apps/server/src/router-hono/webhooks/handlers/video.ts`），否则由 `after()` 注册后台轮询（5s 固定间隔 × 120 次，`apps/server/src/services/generation/videoBackgroundPolling.ts`）。
 3. **Agent 创作通道**：`builtin-tool-image-generation` 是唯一的“结果进聊天”回流：Agent 可发现图像模型与参数 schema、发起生成并查询任务状态（4 个 API，见第 6 节），`humanIntervention: 'never'`，默认在工具内等待完成，结果以 markdown 图片标签 + 专用渲染组件进消息（`packages/builtin-tool-image-generation/src/manifest.ts`、`ExecutionRuntime/index.ts:441-587`）。
 
 已确认边界：OSS 快照中计费/通知为闭源占位（`ENABLE_BUSINESS_FEATURES=false`，charge*/notify* 均为 no-op stub），工作台生成结果与聊天会话之间**未找到** sendToChat 类回流入口；`recreateImage/recreateVideo` store 动作存在但**本次未找到 UI 调用点**；`apps/server/src/routers/async/video.ts`（异步轮询变体）注册在 asyncRouter 但**本次未找到生产调用者**。全部结论为静态源码事实；真实模型调用、S3/PostgreSQL/Redis、webhook 网络行为与 UI 视觉效果未运行验证。
@@ -72,7 +75,11 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 
 ## 1. 创作入口、触发者与事实对象
 
-**入口与触发者**：用户主导的工作台是主入口——`/image`、`/video` 两条路由（`desktopRouter.shared.tsx:672-711`）共享同一 `(create)` 布局族的页面骨架（目录 `src/routes/(main)/(create)/features/`）。PromptInput 顶部的 `GenerationMediaModeSegment` 负责 image/video 切换（`GenerationMediaModeSegment.tsx:104-110`）。URL 深链：`?topic=` 定位历史 topic，`?model=&prompt=` 自动生成（`image/features/PromptInput/index.tsx:187-267`，含模型未就绪防误触发的守卫注释）；全局命令菜单可搜索 image/video 历史 topic（`src/features/CommandMenu/SearchResults.tsx:68-71`）。第二个触发者是聊天内 Agent：`builtin-tool-image-generation` 工具（见第 6 节）。未找到插件、定时任务或外部服务触发入口；`notifyImageCompleted`/`notifyVideoCompleted` 钩子存在但为空实现（`packages/business-server/src/image-generation/notifyImageCompleted.ts:12`、`video-generation/notifyVideoCompleted.ts:11`）。
+**入口与触发者**：用户主导的工作台是主入口，两条路由共享同一套页面骨架，顶部模式段负责图像与视频切换，历史主题经 URL 深链与全局命令菜单进入；此外还有一条聊天内 Agent 触发通道（见第 6 节）。
+
+- 路由与页面骨架：`/image`、`/video` 两条路由（`desktopRouter.shared.tsx:672-711`）共用 `(create)` 布局族，目录 `src/routes/(main)/(create)/features/`，模式切换在 `GenerationMediaModeSegment`（`GenerationMediaModeSegment.tsx:104-110`）。
+- URL 深链：`?topic=` 定位历史 topic，`?model=&prompt=` 自动生成（`image/features/PromptInput/index.tsx:187-267`，含模型未就绪防误触发的守卫注释）；image/video 历史 topic 另可在全局命令菜单搜索（`src/features/CommandMenu/SearchResults.tsx:68-71`）。
+- Agent 通道：聊天内 Agent 走 `builtin-tool-image-generation` 工具（见第 6 节）。插件、定时任务与外部服务三类触发入口本次未找到；`notifyImageCompleted`/`notifyVideoCompleted` 钩子存在但为空实现（`packages/business-server/src/image-generation/notifyImageCompleted.ts:12`、`video-generation/notifyVideoCompleted.ts:11`）。
 
 **核心事实对象**——三层 + 两个关联对象（`packages/database/src/schemas/generation.ts`、relations `:325-362`）：
 
@@ -92,7 +99,16 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 - **schema**：每个模型的 `parameters` 来自 model-bank 标准参数——图像 `RuntimeImageGenParams`（`standard-parameters/index.ts:280-289`）、视频 `RuntimeVideoGenParams`（`video.ts:191-194`）；UI 按 schema 渲染参数控件，读取默认值/上下界/枚举（`useGenerationConfigParam`，`generationConfig/hooks.ts`）
 - **参数迁移**：模型切换时 `generationConfig` slice 经 `setModelAndProviderOnSelect` 用 `extractDefaultValues` 与 `preserveSupportedParams` 保留 prompt/参考图、丢弃不支持的参数（`generationConfig/action.ts:287-321`、`preserveSupportedParams.ts`）
 
-**参数进入请求**：image 与 video 的提交 schema（`apps/server/src/routers/lambda/image/index.ts:50-66`、`routers/lambda/video/index.ts:60-77`）都是“topicId + model/provider + 宽松 params 透传”结构——image 含 `params{prompt,cfg?,height?,width?,steps?,seed?,imageUrls?,...passthrough}` 等字段，video 含 `params{aspectRatio?,cameraFixed?,duration?,endImageUrl?,generateAudio?,imageUrl?,prompt,resolution?,seed?,...passthrough}`。参考图（本地上传经 `useFileStore.uploadWithProgress` 上 S3，`(create)/features/GenerationInput/useReferenceImageUpload.ts:92-195`）以 URL 形式进入请求。lambda 侧把 imageUrl/imageUrls/endImageUrl 用 `fileService.getKeyFromFullUrl` 归一化为 S3 key 再入库（避免存过期 presigned URL），并有 `validateNoUrlsInConfig` 防御性校验（`image/index.ts:112-186`、`image/utils.ts`）。开发环境把代理 URL 转回 S3 URL 供 async 任务访问（image `:157-183`、video `:137-165`）。
+**参数进入请求**：两份提交 schema 结构一致——主题标识加模型/provider，其余参数宽松透传，因此新增模型参数改动只落在参数清单上，路由契约保持稳定。两侧的透传字段清单见下表。
+
+| 侧 | 提交 schema | params 透传字段 |
+|---|---|---|
+| 图像 | `apps/server/src/routers/lambda/image/index.ts:50-66` | `params{prompt,cfg?,height?,width?,steps?,seed?,imageUrls?,...passthrough}` |
+| 视频 | `routers/lambda/video/index.ts:60-77` | `params{aspectRatio?,cameraFixed?,duration?,endImageUrl?,generateAudio?,imageUrl?,prompt,resolution?,seed?,...passthrough}` |
+
+参考图由本地上传写入 S3 后以 URL 进入请求（上传入口 `useFileStore.uploadWithProgress`，`(create)/features/GenerationInput/useReferenceImageUpload.ts:92-195`）。
+
+lambda 侧再用 `fileService.getKeyFromFullUrl` 把这些 URL 归一化为 S3 key 入库，避免过期 presigned URL 进入数据库，并有 `validateNoUrlsInConfig` 做防御性校验（`image/index.ts:112-186`、`image/utils.ts`）。开发环境另把代理 URL 转回 S3 URL 供 async 任务访问（image `:157-183`、video `:137-165`）。
 
 **执行位置**：
 
@@ -108,7 +124,8 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
   4. `createAssetAndFile` 收尾
 
   ComfyUI provider 额外透传认证头下载图片（`:212-228`）。
-- **视频**：lambda `video.createVideo`（`routers/lambda/video/index.ts:81-372`）事务建 batch+generation+asyncTask（webhookToken 放 metadata，`:184-247`），随后 `modelRuntime.createVideo`（`:259-266`）。完成后按响应 `useWebhook` 分流：webhook 型等回调（`apps/server/src/router-hono/webhooks/handlers/video.ts`），否则 `after()` 注册 `processBackgroundVideoPolling`（`videoBackgroundPolling.ts:32-142`，5s 间隔 × 120 次 `handlePollVideoStatus`）。
+- **视频**：lambda 的 `video.createVideo` 先在一个事务里建好批次、生成行与异步任务行，随后发起模型调用；入口与事务见 `routers/lambda/video/index.ts:81-372`、`:184-247`（webhookToken 放 metadata），模型调用见 `:259-266` 的 `modelRuntime.createVideo`。
+- 视频完成收口：按响应里的 `useWebhook` 分流，webhook 型等回调（`apps/server/src/router-hono/webhooks/handlers/video.ts`），否则由 `after()` 注册 `processBackgroundVideoPolling` 后台轮询（`videoBackgroundPolling.ts:32-142`，5s 间隔 × 120 次 `handlePollVideoStatus`）。
 
   视频加工在 `VideoGenerationService.processVideoForGeneration`（`services/generation/video.ts:58-163`）：
   1. 下载（500MB/5min 上限，`:166-221`）
@@ -133,7 +150,9 @@ LobeHub 有一条完整的图像 + 视频生成工作链，能力分型为 **M1 
 
 ## 4. 结果、历史、资产与工程持久化
 
-**三层落库**：lambda 事务内一次写入 batch + generations + asyncTasks（image `index.ts:215-298`；video `index.ts:192-247`）；成功时 `generationModel.createAssetAndFile` 在同一事务写 `asset jsonb` + `files` 行 + 回填 `fileId`（`packages/database/src/models/generation.ts:137-178`），file 的 visibility 跟随 topic visibility（`:156`）。
+**三层落库**：一次请求的三层对象在同一个 lambda 事务里写入，图像与视频两条路由分别见 `index.ts:215-298`、`index.ts:192-247`。
+
+任务成功时同一事务继续写结果资产（`asset jsonb`）、`files` 行并回填 `fileId`，文件的 visibility 跟随主题；写入入口 `generationModel.createAssetAndFile`，事务范围见 `packages/database/src/models/generation.ts:137-178`，可见性继承在 `:156`。
 
 **命名与去重**：S3 key 按以下模式生成（`services/generation/index.ts:212-259,266-310`、`video.ts:87-135`）：
 
@@ -145,7 +164,11 @@ covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 
 去重：原图与缩略图各算 sha256（`image.ts:116,148`），`FileModel.create(..., insertToGlobalFiles=true)` 以 `fileHash → globalFiles.hashId` + `onConflictDoNothing` 做全局 blob 去重（`models/file.ts:86-141`），`files` 行仍各自建。除这层 blob 去重外没有历史合并逻辑，同 prompt 重复生成会新建 batch。
 
-**索引与来源关联**：generations 建有 `user_id/workspace_id/batch_id/file_id` 索引（`schemas/generation.ts:155-161`）。来源语义：`FileSource.ImageGeneration|VideoGeneration`（`packages/types/src/files/index.ts:17-27`）区分生成文件与普通上传；生成文件不在 `LIBRARY_HIDDEN_FILE_SOURCES` 内，因此会出现在资源库的 Images/Videos tab（`desktopRouter.shared.tsx:73-74`）。`files.metadata` 记录 generationId/宽高/路径（`async/image.ts:255-264`）；asset jsonb 同时保留 provider 原始 URL（`originalUrl`，通常短期过期）。
+**索引与来源关联**：生成行的索引、文件来源标记与元数据字段共同决定文件在资源库中的可见位置。
+
+- 索引：generations 表按 `user_id/workspace_id/batch_id/file_id` 建索引（`schemas/generation.ts:155-161`）。
+- 来源：`FileSource.ImageGeneration|VideoGeneration`（`packages/types/src/files/index.ts:17-27`）区分生成文件与普通上传；生成文件不在 `LIBRARY_HIDDEN_FILE_SOURCES` 内，因此出现在资源库的 Images/Videos tab（`desktopRouter.shared.tsx:73-74`）。
+- 元数据：`files.metadata` 记录 generationId/宽高/路径（`async/image.ts:255-264`）；asset jsonb 另存 provider 原始 URL（`originalUrl`，通常短期过期）。
 
 **删除链**：删除按"数据库优先、文件后清理"原则——topic 删除收集 coverUrl+所有 generation 的 url/thumbnailUrl/coverUrl 后级联删表，再 `fileService.deleteFiles`（S3，失败只记日志不阻塞，`models/generationTopic.ts:159-215`）；batch 删除同构（`models/generationBatch.ts:247-298`）；generation 删除保留主文件、只删缩略图（`routers/lambda/generation.ts:37-63`，注释说明新需求如此）。
 
@@ -155,7 +178,11 @@ covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 
 - **预览**：batch 内 `Image.PreviewGroup` 网格 + 每张 `GenerationItem`（`BatchItem.tsx:148-159`）；视频 `VideoSuccessItem` 播放（静态代码确认组件存在，实际播放未运行验证）。
 - **导出**：图片 `useDownloadImage`（文件名 `<prompt前30字符>_<时间戳>.<ext>`，`GenerationItem/index.tsx:50-63`）；视频 `downloadFile`（`:132-146`）。
-- **重试/再生成**：UI 实装的是 batch 级 `reuseSettings`（image `BatchItem.tsx:100-106` 剔除 seed 后回填配置，video `BatchItem.tsx:110-120` 逐参数回填）与 `copyPrompt`。generation 级提供 `copySeed`（模型支持 seed 时 `reuseSeed` 直接应用，否则复制剪贴板，`GenerationItem/index.tsx:65-87`）。`recreateImage`/`recreateVideo` store 动作（删除原 batch 后用 `batch.config` 原参数重建，`src/store/image/slices/createImage/action.ts:115-152`、`src/store/video/slices/createVideo/action.ts:134-164`）**本次未找到 UI 调用点**（全 src grep 仅命中定义与测试）。
+- **重试/再生成**：重试入口停在批次级复用——回填上次配置或复制提示词；生成级只提供复制随机种子；store 层另有整批重建动作。
+
+  - 批次级：`reuseSettings`（image `BatchItem.tsx:100-106` 剔除 seed 后回填配置，video `BatchItem.tsx:110-120` 逐参数回填）与 `copyPrompt`。
+  - 生成级：`copySeed`，模型支持 seed 时 `reuseSeed` 直接应用，否则复制剪贴板（`GenerationItem/index.tsx:65-87`）。
+  - 整批重建：`recreateImage`/`recreateVideo` 删除原 batch 后用 `batch.config` 原参数重建（`src/store/image/slices/createImage/action.ts:115-152`、`src/store/video/slices/createVideo/action.ts:134-164`），**本次未找到 UI 调用点**（全 src grep 仅命中定义与测试）。
 - **视频对话式编辑**：支持该能力的模型、成功结果与结果中的交互句柄共同决定是否显示编辑入口。选中旧结果后，输入区暂存原草稿、继承可用生成设置并接受编辑指令；提交携带前次生成 id，成功提交或取消编辑后恢复原草稿。见 [BatchItem 编辑入口](../../lobehub/src/routes/%28main%29/%28create%29/video/features/GenerationFeed/BatchItem.tsx#L94-L107)、[提交与草稿恢复](../../lobehub/src/store/video/slices/createVideo/action.ts#L152-L174)。
 - **版本关系**：服务端核验来源在相同主题、provider 和模型下且有交互句柄后，传前次交互标识调用编辑；结果资产保留 `previousGenerationId` 与交互标识，界面据此显示版本与来源。批次仍追加到时间线；父子字段随视频编辑的来源链写入，适用范围限于该编辑路径产生的资产。见 [来源校验](../../lobehub/apps/server/src/routers/lambda/video/index.ts#L277-L325)、[结果资产写入](../../lobehub/apps/server/src/services/generation/videoBackgroundPolling.ts#L108-L130)。像素级局部绘制入口未在已读工作台中确认。
 - **再次引用**：参考图可以从本地上传，也可复用历史（`ReferenceImages` 展示 batch.config 里的参考图，`image/features/GenerationFeed/ReferenceImages.tsx`；复用即 reuseSettings 回填）；结果文件进资源库 tab（第 4 节）；topic 封面被 Sidebar 引用展示。
@@ -169,7 +196,11 @@ covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 - `generateImage`：prompt/imageNum 1-8/参考图 URL/parameters 透传；`waitUntilComplete` 默认 true，工具内 3s 间隔轮询至终态，上限 175s（`:441-587,399-439`）
 - `getImageGenerationStatus`：按 generationId+asyncTaskId 查单条
 
-`humanIntervention: 'never'`（manifest `:141`）；Client 与 server 双 executor 共用同一 `ImageGenerationExecutionRuntime` 类，分别接客户端 lambda 服务与 tRPC caller（`apps/server/src/services/toolExecution/serverRuntimes/imageGeneration.ts:24-104`）。注入规则：chat mode 下仅当模型支持工具调用、**非**原生 imageOutput 模型、且用户 pin 了该插件时才注入（`apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:258-294`）。结果回流：生成完成输出 `![Generated image N](url)` markdown 标签 + 专用渲染组件 `GenerateImage.tsx`/`GetImageGenerationStatus.tsx`（3s 轮询）进聊天消息。**未找到视频 Agent 工具**（packages 下无 builtin-tool-video-generation，grep 确认）；**未找到 Agent 读取创作历史/工作台历史引用的工具**（媒体历史仅 CommandMenu 全局搜索可见）。
+`humanIntervention: 'never'`（manifest `:141`）。Client 与 server 两个 executor 共用 `ImageGenerationExecutionRuntime`，分别接客户端 lambda 服务与 tRPC caller（`apps/server/src/services/toolExecution/serverRuntimes/imageGeneration.ts:24-104`）。
+
+注入条件：chat 模式下模型支持工具调用、模型未声明原生 imageOutput 能力、且用户 pin 了该插件，三条同时成立才注入（`apps/server/src/modules/Mecha/AgentToolsEngine/index.ts:258-294`）。
+
+结果回流：生成完成输出 `![Generated image N](url)` markdown 标签，加专用渲染组件 `GenerateImage.tsx`/`GetImageGenerationStatus.tsx`（3s 轮询）进入聊天消息。**未找到视频 Agent 工具**（packages 下无 builtin-tool-video-generation，grep 确认）；**未找到 Agent 读取创作历史/工作台历史引用的工具**（媒体历史仅 CommandMenu 全局搜索可见）。
 
 **外部依赖边界**：
 
@@ -178,11 +209,15 @@ covers: generations/covers/<uuid>_<WxH>_<ts>_cover.webp
 - sharp（图像转码/封面）；ffmpeg-static（子进程 `execFile` 元数据/截图，`services/generation/video.ts:24-28,223-285`）；Redis 可选（视频平均延迟缓存，`services/generation/latency.ts:15-20`）；LLM（主题标题生成 `chatService.fetchPresetTaskResult`）
 - `ssrfSafeFetch`：用户可控 URL 抓取防 SSRF（`services/generation/index.ts:53-70`，注释引用 GHSA-53h9-fmjf-frwr）
 
-OSS 中计费/配额/完成通知为闭源扩展点：`chargeBeforeGenerate`/`chargeAfterGenerate`/`notifyImageCompleted`/`notifyVideoCompleted`/`getVideoFreeQuota` 全部空实现且 `ENABLE_BUSINESS_FEATURES=false`（`packages/business/const/src/index.ts:7`）。无 ComfyUI 服务端编排、无自有渲染器；ComfyUI 仅作为普通图像 provider 之一出现（透传认证头下载结果图，`async/image.ts:212-228`）。
+OSS 快照里计费、配额与完成通知属闭源扩展点：`ENABLE_BUSINESS_FEATURES=false`（`packages/business/const/src/index.ts:7`），五个钩子 `chargeBeforeGenerate`、`chargeAfterGenerate`、`notifyImageCompleted`、`notifyVideoCompleted`、`getVideoFreeQuota` 全部空实现。
+
+ComfyUI 只作为普通图像 provider 之一出现（透传认证头下载结果图，`async/image.ts:212-228`），服务端没有编排层与自有渲染器。
 
 ## 7. 权限、资源边界与失败恢复
 
-- **权限**：写操作统一带 `withScopedPermission`（`file:upload`/`file:delete`/`topic:create|update|delete`，各 lambda 路由）；客户端以 `usePermission('create_content')` 门控生成与参考图上传（`PromptInput/index.tsx:140,193`）。workspace 作用域由 `buildWorkspaceWhere` 统一实现（`packages/database/src/utils/workspace.ts:40-86`）：
+- **权限**：写操作统一经 `withScopedPermission` 收口，权限点覆盖 `file:upload`/`file:delete`/`topic:create|update|delete`，由各 lambda 路由分别声明；客户端另以 `usePermission('create_content')` 门控生成与参考图上传（`PromptInput/index.tsx:140,193`）。
+
+  workspace 作用域由 `buildWorkspaceWhere` 统一实现（`packages/database/src/utils/workspace.ts:40-86`）：
   - personal 模式：`user_id + workspace_id IS NULL`
   - 工作区模式：成员可见 public，private 限 creator；topic 可见性翻转 `setVisibility` 仅 creator（`models/generationTopic.ts:126-146`），工作区外的 `setTopicVisibility` 调用直接拒绝（`routers/lambda/generationTopic.ts:134-166`）；topic 层 `assertWorkspaceRowManageable` 校验同 workspace 归属
 

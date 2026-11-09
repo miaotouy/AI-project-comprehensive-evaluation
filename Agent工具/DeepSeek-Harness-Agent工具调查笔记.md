@@ -137,7 +137,7 @@
 
 内置实现两个：`NativeToolExecutor` 直接执行可见能力并把批次交给共享管线（默认并发 10，`packages/core/agent-loop/src/constants.ts:6`）；PTC 执行器只描述 `run_code`，并在程序内把子调用按提交顺序送入同一管线，并发安全体最多重叠 `maxParallelSubCalls` 个（`packages/core/tool-executor-ptc/src/index.ts`）。旧配置项 `mode` 与 `maxParallelSubCalls` 已被注册表以 `z.never()` 拒绝，自定义组合必须显式挂载执行器行。
 
-**PTC 呈现**：模式只有 `native` 与 `ptc`，旧的 `both` 被移除，`DSH_TOOLS_MODE` 环境变量开关同样不再生效。PTC 运行时 `programFormat` 新增 `script`（支持语句与顶层 await），跨调用记忆由 `retainsState` 显式上报，而非靠格式推断（`packages/ptc-runtime/ptc-runtime-node/`）。子调用事件成对落盘为 `tool/ptc-dispatch-start` 与 `tool/ptc-dispatch`，持久副本可由 `tools/ptc-dispatch-log` 瀑布改写而程序已收到的值不变（`packages/core/tool-executor-ptc/src/{ptc,types,runtime-types}.ts`）。
+**PTC 呈现**：模式只有 `native` 与 `ptc`，由注册表选择，`DSH_TOOLS_MODE` 环境变量开关不再生效。PTC 运行时 `programFormat` 新增 `script`（支持语句与顶层 await），跨调用记忆由 `retainsState` 显式上报，而非靠格式推断（`packages/ptc-runtime/ptc-runtime-node/`）。子调用事件成对落盘为 `tool/ptc-dispatch-start` 与 `tool/ptc-dispatch`，持久副本可由 `tools/ptc-dispatch-log` 瀑布改写而程序已收到的值不变（`packages/core/tool-executor-ptc/src/{ptc,types,runtime-types}.ts`）。
 
 ## 4. 参数解析、校验与错误处理
 
@@ -187,7 +187,7 @@ repeat-tool-reminder 挂在 `tools/post-execute`：按 agent 维护连续相同�
 
 **恢复**：session log 是 append-only 日志，重启可重建历史；进行中的工具执行不持久化，进程退出后不恢复执行现场。
 
-**UI 呈现**：`presentCall`/`presentResult` 仍是只依赖参数（结果侧再加持久化投影）的纯函数，返回带 card 标签的渲染意图——generic/terminal/diff 三类调用卡与 generic/terminal/diff/search/read/web 六类结果卡（`packages/core/tools/src/presentation.ts`）。但内置 Web 客户端已改为自行派生工具卡，按 `tool.call.toolview` 选择业务渲染器，宿主不再计算 presenter 视图。
+**UI 呈现**：`presentCall`/`presentResult` 仍是只依赖参数（结果侧再加持久化投影）的纯函数，返回带 card 标签的渲染意图——generic/terminal/diff 三类调用卡与 generic/terminal/diff/search/read/web 六类结果卡（`packages/core/tools/src/presentation.ts`）。内置 Web 客户端自行派生工具卡，按 `tool.call.toolview` 选择业务渲染器，presenter 视图由客户端计算。
 
 ## 8. MCP、插件、Skill 与子 Agent
 

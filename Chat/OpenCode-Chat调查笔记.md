@@ -16,7 +16,7 @@
 
 OpenCode 2.x 的 Chat 体系以「Core 服务 + durable 事件日志 + 客户端投影」为核心。服务端把会话、消息、工具步骤的每次变化写成 durable 事件（`session.created`、`session.step.started/ended`、`session.text.delta`、`session.tool.success` 等，定义在 `packages/schema/src/session-event.ts`），由事件投影器落 SQLite（`session_v2`、`session_message`、`session_part`、`session_inbox`、`blob`），再经 Server 的 EventFeed 以 SSE 广播；App 客户端订阅事件流投影到 Solid store 渲染 timeline。
 
-消息模型收敛为 Session → Message → 内容三层：Message 是带类型的联合（user、assistant、synthetic、system、skill、shell、compaction、idle、agent-switched、model-switched、location-switched），assistant 的正文不再是独立 part 表行，而是内嵌的内容数组（text、reasoning、tool 三种，工具状态流式/running/完成/失败），`session_part` 只是内容数组的投影副本。发送主链为「Composer 提交 → `POST /api/session/:id/prompt` → Prompt 服务生成 inbox 条目（steer 或 queue）→ 执行器认领会话 → AI 层流式调用 → durable 事件」。旧快照中的 V1/V2 双轨已经结束：v1 包与 v1 消息表不再存在，v2 会话表是唯一主路径。
+消息模型收敛为 Session → Message → 内容三层：Message 是带类型的联合（user、assistant、synthetic、system、skill、shell、compaction、idle、agent-switched、model-switched、location-switched），assistant 的正文不再是独立 part 表行，而是内嵌的内容数组（text、reasoning、tool 三种，工具状态流式/running/完成/失败），`session_part` 只是内容数组的投影副本。发送主链为「Composer 提交 → `POST /api/session/:id/prompt` → Prompt 服务生成 inbox 条目（steer 或 queue）→ 执行器认领会话 → AI 层流式调用 → durable 事件」。会话表以 `session_v2` 为唯一主路径。
 
 ## 产品表面与系统边界
 

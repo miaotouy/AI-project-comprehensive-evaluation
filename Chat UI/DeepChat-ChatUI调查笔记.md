@@ -16,7 +16,7 @@
 
 DeepChat 是 Electron 桌面 GUI，聊天工作台由 ChatPage 单一页面组合：
 
-- ChatPage 组合顶栏、消息列表（窗口化数据分页接口）、消息地图与回到底部提示、搜索条、Composer（TipTap 编辑器 + 工具栏 + 状态栏 + 引用/附件节点）、pending input lane、question/权限浮层与附件准备对话框。计划能力已移除，不再有独立计划浮层。
+- ChatPage 组合顶栏、消息列表（窗口化数据分页接口）、消息地图与回到底部提示、搜索条、Composer（TipTap 编辑器 + 工具栏 + 状态栏 + 引用/附件节点）、pending input lane、question/权限浮层与附件准备对话框。
 - 发送中的输入不拼进已完成消息：生成中提交进入 pending lane（queue/steer/编辑/删除/重排），并提供 resume（恢复暂停队列）与 retry_required（释放后重试）动作；执行语义在对话请求与上下文笔记。
 - Composer 草稿按会话持久化到 localStorage（`composerDraftPersistence.ts`），切换会话与重启后恢复；provider 原生搜索（DeepSeek web 搜索）以开关进入发送前配置，意图按会话保存在 session store。
 - subagent session 在 ChatPage 中只读，但仍能显示消息、工具状态与最终 child result。

@@ -134,7 +134,7 @@ if (shouldPersist) {
 
 ### 5.3 节流写入的单一实现
 
-节流写入只剩一条实现路径：`src/renderer/stores/session/messages.ts` 的 `persistStreamingMessage` 配合每会话 `UpdateQueue`（`src/renderer/stores/updateQueue.ts`），`flushInterval` 仍为 2000ms。「原先另有一套独立的 jotai atom + WriteQueue 实现，本次在仓库中未找到该文件，不再作为并行实现记录」。但全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。该模块"创建/写入 atom"的部分（`createSessionAtom`、`WriteQueue`）因此是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
+节流写入只有一条实现路径：`src/renderer/stores/session/messages.ts` 的 `persistStreamingMessage` 配合每会话 `UpdateQueue`（`src/renderer/stores/updateQueue.ts`），`flushInterval` 为 2000ms。全仓库 grep `createSessionAtom` 的结果只有定义文件内部引用（`:74, 79, 86, 89, 90`，导出经 `stores/atoms/index.ts:4` 的 `export *` 透传），**没有任何外部调用点**。同文件里的 `cleanupSessionAtomCache` 则确实被 `chatStore.ts:37, 477` 引用（用于删除会话时清缓存）。该模块"创建/写入 atom"的部分（`createSessionAtom`、`WriteQueue`）因此是未被调用的旧实现，只有"清理"那半个函数还留在调用链里。
 
 ## 6. 完成、异常、半截流与最终回写
 

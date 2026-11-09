@@ -118,7 +118,7 @@ GatewayBrowserClient 把 WebSocket event frame 交给 pane lifecycle。连接切
 
 实时 `chat` 事件进入 `handleChatGatewayEvent`，负责 delta 拼接、run 状态、终态替换和迟到 final 去重；实时 `session.message` 进入 `applySessionMessagePayload`，负责把持久行纳入当前 projection。历史 snapshot 只在 session、agent、connection epoch 和 request version 都仍匹配时提交。`chat-state-events.ts` 在 delta 时使用 animation frame 请求重绘，在终态和历史交接时立即请求重绘；state 一侧已经拆成 controller、host、page、refresh 与 render-lifecycle 等兄弟模块，渲染请求与状态宿主分离，见 `ui/src/pages/chat/chat-state-events.ts`、`chat-state-controller.ts`、`chat-state-host.ts`、`chat-state-page.ts`、`chat-state-render-lifecycle.test.ts`。
 
-工具流走独立的 `tool-stream.ts`，并按职责拆出 `tool-stream-contract.ts`、`tool-stream-identity.ts`、`tool-stream-state.ts`、`tool-stream-status.ts`、`tool-stream-snapshot.ts` 等兄弟模块。它按 runId + toolCallId 保存工具条目，使用 Gateway sequence 防止历史恢复覆盖更新的 live 状态；工具事件与文本输出的保留上限、以及普通工具 UI 更新的节流窗口，本次未逐常量复核，保持与旧快照相同的量级描述待核。结果可以生成 tool call、tool result、diff、approval review 或 Canvas preview，见 `ui/src/pages/chat/tool-stream.ts` 与上述兄弟模块。
+工具流走独立的 `tool-stream.ts`，并按职责拆出 `tool-stream-contract.ts`、`tool-stream-identity.ts`、`tool-stream-state.ts`、`tool-stream-status.ts`、`tool-stream-snapshot.ts` 等兄弟模块。它按 runId + toolCallId 保存工具条目，使用 Gateway sequence 防止历史恢复覆盖更新的 live 状态；工具事件保留上限为 50 条（`TOOL_STREAM_LIMIT`），普通工具 UI 更新的节流窗口为 80 ms（`TOOL_STREAM_THROTTLE_MS`），文本输出按 120000 字符截断（`TOOL_OUTPUT_CHAR_LIMIT`，`tool-stream.ts:43-46`）。结果可以生成 tool call、tool result、diff、approval review 或 Canvas preview，见 `ui/src/pages/chat/tool-stream.ts` 与上述兄弟模块。
 
 ### TUI 更新
 

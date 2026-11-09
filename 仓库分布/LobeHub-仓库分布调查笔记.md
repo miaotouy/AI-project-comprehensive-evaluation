@@ -74,7 +74,7 @@ TypeScript 20,127 文件 / 3,283,524 行（98.4%），其次是 JavaScript 173 �
 
 Web/自托管服务是主形态，另有 Docker 部署、独立 server、CLI、share 页面和 Electron desktop workspace（`pnpm-workspace.yaml`）。
 
-后端 Hono 路由位于 `apps/server/src/router-hono/`，服务层位于 `apps/server/src/services/`，另有 `modules`、`workflows`、`runtimeConfig` 等并列目录。tools 治理在快照间换成了 `alint`（`packages/alint` 与根 `alint.config.toml`/`alint.audit.toml`），lint 栈从 `eslint.config.mjs` 迁到 `oxlint.config.mts`，并新增 bundle 边界与类型检查配置；`CLAUDE.md` 被移除，agent 协作说明集中在 `.agents/`。
+后端 Hono 路由位于 `apps/server/src/router-hono/`，服务层位于 `apps/server/src/services/`，另有 `modules`、`workflows`、`runtimeConfig` 等并列目录。tools 治理用 `alint`（`packages/alint` 与根 `alint.config.toml`/`alint.audit.toml`），lint 栈用 `oxlint.config.mts`，另有 bundle 边界与类型检查配置；agent 协作说明集中在 `.agents/`。
 
 多个独立包构成主要边界：
 

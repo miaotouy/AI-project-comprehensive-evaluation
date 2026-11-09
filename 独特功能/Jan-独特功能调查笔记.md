@@ -16,7 +16,7 @@
 
 以下达到 `主链确认`（静态证据）的新候选：
 
-1. **随附推理引擎的 worker 托管与逐线程 KV 缓存**（主贡献候选，范围较旧快照收窄）：引擎以编译期版本捆绑进随附 worker，运行机不再下载、选择或回滚后端；worker 按需承载多模型、容量满时只淘汰空闲的最近最少使用 chat 模型，并按 thread_id 保存/恢复提示缓存，运行后校验 GPU 卸载与实际嵌入。管理对象仍是推理引擎本身，通用"生成式输出与运行时"类目只覆盖模型服务抽象层。
+1. **随附推理引擎的 worker 托管与逐线程 KV 缓存**（主贡献候选，范围较旧快照收窄）：引擎以编译期版本捆绑进随附 worker，运行机不再下载、选择或回滚后端；worker 按需承载多模型、容量满时只淘汰空闲的最近最少使用 chat 模型，并按 `thread_id` 保存/恢复提示缓存，运行后校验 GPU 卸载与实际嵌入。管理对象仍是推理引擎本身，通用"生成式输出与运行时"类目只覆盖模型服务抽象层。
 2. **`/v1/orchestrations` 服务端 MCP 编排端点**（辅助贡献候选）：把 MCP 工具执行作为 HTTP 服务暴露，可配置 router 模型预选工具；与本地 OpenAI 兼容服务相比，它多出服务端的工具编排。
 3. **Jan Agent CLI/TUI**（辅助贡献候选）：裸 `jan` 打开终端 Agent 控制台，`jan cli agent run` 非交互运行项目 Agent，Provider 由 `~/.jan/config.toml`、项目 `agent.toml` 或桌面配置解析。
 4. **Agent 运行时对外协议族**（辅助贡献候选）：会话级 JSON-RPC 允许外部客户端声明自己的 host tool 并由运行时把调用派回客户端；同一 Agent 另有实验性 ACP 入口与"把内置工具作为 MCP server 提供出去"的反向方向。
@@ -59,13 +59,15 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 - 每模型 `<data>/llamacpp/models/<modelId>/model.yml`；
 - 逐线程 KV 缓存目录：以 `slotCacheMib` 为预算，0 表示关闭。
 
-**完整主链**（其余入口行号见文末索引）：扩展生成 preset → 插件启动受监督的引擎 worker（端口由 OS 分配后回传，并返回 pid、api_key 与已注册模型数）→ worker 的 registry 按需加载模型，容量满时只淘汰空闲的最近最少使用 chat 模型（`userModelsMax` 与 `loadedChatOrder`，`index.ts:459-461`）→ 请求以 thread_id 识别 KV 状态，换入前保存旧状态、命中时恢复，身份校验失败则删除而不恢复（`engine/slots.rs`）→ 运行后 `readiness.ts` 校验 GPU 卸载与嵌入向量、`gpuBackendMatch.ts` 判定引擎与探测 GPU 的家族匹配（`engine/worker.rs`、`engine/registry.rs`、`engine/http.rs`）。
+**完整主链**（其余入口行号见文末索引）：扩展先生成 preset，再由插件启动受监督的引擎 worker；端口由 OS 分配后回传，同时带回 pid、api_key 与已注册模型数。worker 的 registry 按需加载模型，容量满时只淘汰空闲的最近最少使用 chat 模型（`userModelsMax` 与 `loadedChatOrder`，`index.ts:459-461`）。
+
+请求以 `thread_id` 识别 KV 状态：换入前保存旧状态，命中时恢复，身份校验失败则删除而不恢复（`engine/slots.rs`）。运行结束后，`readiness.ts` 校验 GPU 卸载与嵌入向量，`gpuBackendMatch.ts` 判定引擎与探测到的 GPU 家族是否匹配；相关实现见 `engine/worker.rs`、`engine/registry.rs` 与 `engine/http.rs`。
 
 **持续性**：preset、`model.yml` 与线程 KV 目录落盘；worker 在启动它的进程退出（含被 SIGKILL）时因 stdin EOF 自行退出，无需收养或回收。跨会话缓存命中率与并发淘汰时序未运行验证。
 
-**外部依赖与执行域**：引擎与 CUDA/Vulkan 运行库在构建期打包（`src-tauri/build-utils/stage-engine.sh`、`engine-prebuilt.sh` 等），运行期不下载后端；只有回退嵌入模型仍按需获取。硬件探测模块负责 NVIDIA/AMD/Vulkan 厂商识别与显存占用轮询（`src-tauri/plugins/tauri-plugin-hardware/src/` 的 gpu.rs、cpu.rs 与 vendor/）。
+**外部依赖与执行域**：引擎与 CUDA/Vulkan 运行库在构建期打包（`src-tauri/build-utils/stage-engine.sh`、`engine-prebuilt.sh` 等），运行期不下载后端；只有回退嵌入模型仍按需获取。硬件探测模块负责 NVIDIA/AMD/Vulkan 厂商识别与显存占用轮询（`src-tauri/plugins/tauri-plugin-hardware/src/` 的 `gpu.rs`、`cpu.rs` 与 `vendor/`）。
 
-**独特性判断**：不再包含旧快照的“后端目录下载/更新/回滚与按硬件选型”（见文末声明不符）；保留的是随附引擎的 worker 托管、容量受限的多模型驻留与逐线程提示缓存，以及“探测→运行校验”的 GPU 实测，调查样本中仍未见同类组合。
+**独特性判断**：独特之处在于随附引擎的 worker 托管、容量受限的多模型驻留与逐线程提示缓存，以及“探测→运行校验”的 GPU 实测，调查样本中仍未见同类组合。
 
 **证据强度**：扩展、插件源码与单元测试为静态事实；worker 并发、缓存命中与 GPU 校验阈值未运行验证。
 
@@ -89,15 +91,25 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **用户目标**：终端用户不打开桌面窗口，即可在项目目录中运行一个能读写文件、执行命令的 Agent，并直接复用桌面或项目里已配置的远程 Provider。
 
-**入口与触发者**：独立 crate `src-tauri/jan-cli/src/main.rs`（`main` 在 `:763`），由用户在终端触发；裸 `jan` 打开交互式 Agent 控制台（TUI），带子命令则走非交互面。命令树除 `cli` 外还有 `login`/`auth`/`usage`/`config`/`plugin`/`mcp serve`/`update` 与隐藏实验项 `acp`（`main.rs:229` 起的 `Commands`）。
+**入口与触发者**：用户在终端运行独立 crate `src-tauri/jan-cli/src/main.rs`（`main` 在 `:763`）。裸 `jan` 进入交互式 Agent 控制台（TUI），带子命令则走非交互面。命令树除 `cli` 外还有下列子命令与一个隐藏实验项，入口定义在 `main.rs:229` 起的 `Commands`：
+
+```text
+jan login / auth / usage / config / plugin / mcp serve / update
+jan acp    （隐藏实验项）
+```
 
 **完整主链与非交互面**：
-- Provider 解析优先级：CLI 参数与 `JAN_API_KEY`/`<PROVIDER>_API_KEY` 环境变量 > 项目 `.jan/agent/agent.toml` 的 `[provider]` > 桌面 `settings.json`（只继承、不回写）> 全局 `~/.jan/config.toml`（`src-tauri/src/core/cli/providers.rs:1-16`）；
-- `jan cli agent run/step/status`：非交互运行项目 Agent；
-- `jan cli models list`、`jan cli threads list/get/delete/messages`、`jan cli mcp list/get/add/remove/enable/disable`：列出已配置 Provider 的模型、读取与删除线程、管理共享的 `mcp_config.json`（`main.rs:236-263,385-479`）；
-- `jan config set/unset/list/path` 管理 `~/.jan/config.toml` 中的 Provider 凭据，`jan login`/`auth` 处理 Tokamak 登录，`jan usage` 读取账号用量，`jan plugin` 管理项目插件与技能，`jan update` 自更新；
-- Agent 工具循环复用桌面的 Rust Agent 核心；`--safe` 在写入、命令与 MCP 调用前审批，`--sandbox` 开启 OS 沙箱（默认按配置关闭），`--no-sandbox` 临时取消持久配置，沙箱内升级需批准，`--plan` 只读计划模式，`-c`/`--resume` 恢复项目会话。
-- 反向方向：`jan mcp serve` 把只读内置工具按项目根目录暴露给其他 Agent（stdio 或 loopback HTTP，写与执行需 `--allow-write`/`--allow-exec`）。
+
+- **Provider 解析优先级**（`src-tauri/src/core/cli/providers.rs:1-16`），从高到低：
+  1. CLI 参数，以及 `JAN_API_KEY`、`<PROVIDER>_API_KEY` 环境变量；
+  2. 项目的 `.jan/agent/agent.toml` 中的 `[provider]` 节；
+  3. 桌面 `settings.json`，只继承、不回写；
+  4. 全局 `~/.jan/config.toml`。
+- **Agent 子命令**：`jan cli agent run/step/status` 非交互运行项目 Agent。
+- **模型、线程与 MCP**：`jan cli models list` 列出已配置 Provider 的模型，`jan cli threads list/get/delete/messages` 读取与删除线程，`jan cli mcp list/get/add/remove/enable/disable` 管理共享的 `mcp_config.json`（`main.rs:236-263,385-479`）。
+- **登录、配置与用量**：`jan config set/unset/list/path` 管理 `~/.jan/config.toml` 中的 Provider 凭据，`jan login` 与 `jan auth` 处理 Tokamak 登录，`jan usage` 读取账号用量，`jan plugin` 管理项目插件与技能，`jan update` 自更新。
+- **执行约束**：Agent 工具循环复用桌面的 Rust Agent 核心；`--safe` 在写入、命令与 MCP 调用前审批，`--sandbox` 开启 OS 沙箱（默认按配置关闭），`--no-sandbox` 临时取消持久配置，沙箱内升级需批准，`--plan` 只读计划模式，`-c`/`--resume` 恢复项目会话。
+- **反向方向**：`jan mcp serve` 把只读内置工具按项目根目录暴露给其他 Agent（stdio 或 loopback HTTP，写与执行需 `--allow-write`/`--allow-exec`）。
 
 **持续性**：全局/项目配置与项目维度线程均落盘，`-c`/`--resume` 可跨进程恢复最近或指定 ID 的会话；可写出 Desktop 兼容 thread（`src-tauri/src/core/cli/mod.rs`）。
 
@@ -139,7 +151,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 ### 能力六：可运行时安装的 worker 隔离扩展 — `主链确认`
 
-**用户目标**：扩展不再是随仓库发布的固定清单，而能在运行时安装、升级、卸载，同时不让第三方便宜地直接拿到宿主全部能力。
+**用户目标**：扩展在运行时安装、升级、卸载，同时不让第三方直接拿到宿主全部能力。
 
 **入口与触发者**：设置页提供 Installed/Catalog 两个页签，可从本地 `.tgz` 包或目录索引安装；开发目录加载只在开发构建显示。安装先暂存，首次安装展示权限同意框，升级展示新增权限差异，确认后提交注册表并重载扩展。入口与事件见 [扩展设置页:107–155、240–263](../../jan/web-app/src/routes/settings/extensions/index.tsx#L107-L155)、[useStagedInstall:34–95](../../jan/web-app/src/containers/extensions/useStagedInstall.tsx#L34-L95)。
 
@@ -151,7 +163,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **持续性与故障收口**：安全模式先保存标志再停止所有已安装扩展，内置和开发扩展保持原状；关闭后重新加载启用项。已安装扩展崩溃后可从注册表重启，短时间反复崩溃则本次应用会话内禁用并通知用户。设置经宿主存储保存，RAG 设置另有一次性键名与类型迁移（[installed-loader.ts:125–157](../../jan/web-app/src/lib/extensions/installed-loader.ts#L125-L157)、[host.ts:500–528](../../jan/web-app/src/lib/extensions/host.ts#L500-L528)）。
 
-**独特性判断**：扩展能力从"仓库内固定 JS 目录"变成"运行时可安装 + worker 隔离 + 稳定 API + API 报告校验"的组合，与旧快照的实现相比是机制级变化；样本中同类桌面 Agent 产品少有把扩展隔离做到 worker + 版本化 API 报告。
+**独特性判断**：扩展能力是"运行时可安装 + worker 隔离 + 稳定 API + API 报告校验"的组合；样本中同类桌面 Agent 产品少有把扩展隔离做到 worker + 版本化 API 报告。
 
 **证据强度**：包结构、加载器与迁移逻辑为静态事实；安装/升级的端到端流程、worker 崩溃恢复与 API 兼容性拒载未运行验证。
 ## 已归并到现有类目的能力
@@ -173,15 +185,15 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 ## 声明不符、外部依赖与暂缓项
 
 - **本地↔云模型级 failover**：README 语境下的"容灾/路由"易被读成智能调度；按当前快照只有云端 API key 链 401 重试（`provider-api-keys.ts`）与 MCP 工具路由降级，无分片、无模型级本地↔云自动切换。统一路由 = 按 `model_id` 静态解析，结论维持归并。
-- **设备级推理器下载/选型/回滚**：旧快照的 `configureBackends`、`updateBackend`、`restartRouterAndProbe` 与后端目录、`update_history.json` 已不在当前源码中；引擎改为编译期捆绑进随附 worker，首次运行不再下载数百 MB 后端，相关设置键（`llamacpp_version`、`llamacpp_backend`、`check_for_updates`、`auto_update_engine`、`verify_backend_deps`）已从扩展设置中移除。旧"按硬件选 CUDA/Vulkan/CPU 后端并回滚"的表述不再成立。[代码确认]
-- **旧 `jan serve` / `jan launch claude|openclaw`**：旧快照的一键启动本地模型服务、并自动预接外部 Agent CLI 的命令不在当前 CLI 命令树中；当前 CLI 只运行自身的 Agent（见能力三与外部执行体笔记）。
+- **设备级推理器下载/选型/回滚**：引擎以编译期版本捆绑进随附 worker，首次运行不下载数百 MB 后端，扩展设置中没有 `llamacpp_version`、`llamacpp_backend`、`check_for_updates`、`auto_update_engine`、`verify_backend_deps` 这些后端选型键；按硬件选 CUDA/Vulkan/CPU 后端并回滚的路径在当前实现中不存在。[代码确认]
+- **`jan serve` / `jan launch claude|openclaw`**：当前 CLI 命令树中没有本地模型服务一键启动与外部 Agent CLI 预接命令，CLI 只运行自身的 Agent（见能力三与外部执行体笔记）。
 - **BrowserMCP**：伴生 Chrome 扩展（`JanBrowserExtensionDialog.tsx` 仅为配置入口），本仓库主链未接入，标外部依赖。
 - **Project 工作流**：`入口确认`（`web-app/src/routes/project/$projectId.tsx`、`services/projects/default.ts`、rag-extension `scope: "project"` 检索），证据以 UI 层为主；与"协同工作区"聚类（Open WebUI Notes、LobeHub Pages）重叠，本轮不单独提案，留待聚类比较。
 - **首次运行向导**：普通引导流程，归并设置类目，不进入统计。
 
 ## 对特色贡献统计的影响
 
-- **主贡献候选**：能力一"随附推理引擎的 worker 托管与逐线程 KV 缓存"（`主链确认`，静态证据）。能力五与能力六目前只登记为辅助候选：前者与"多表面连续性"聚类相邻但方向相反（把内核交出去而非接进来），后者是工程机制贡献，是否计入待统一口径后再定。统计中 F41"本地模型运行时与云 Provider 统一路由"已有 Jan 主贡献，其计入理由应扩充为包含 worker 托管与线程缓存；若按"同一工作流合并"原则，将能力一与 F41 视为同一能力族（本地模型运行整体），则 Jan 主贡献理由增强而不新增条目。旧快照的"后端下载/选型/回滚"不再是当前实现，计入理由以当前的 worker 托管与逐线程 KV 缓存为依据。
+- **主贡献候选**：能力一"随附推理引擎的 worker 托管与逐线程 KV 缓存"（`主链确认`，静态证据）。能力五与能力六目前只登记为辅助候选：前者与"多表面连续性"聚类相邻但方向相反（把内核交出去而非接进来），后者是工程机制贡献，是否计入待统一口径后再定。统计中 F41"本地模型运行时与云 Provider 统一路由"已有 Jan 主贡献，其计入理由应扩充为包含 worker 托管与线程缓存；若按"同一工作流合并"原则，将能力一与 F41 视为同一能力族（本地模型运行整体），则 Jan 主贡献理由增强而不新增条目。计入理由以当前的 worker 托管与逐线程 KV 缓存为依据。
 - **辅助贡献候选**：能力二（服务端 MCP 编排端点）、能力三（Jan Agent CLI/TUI，属"多表面连续性"聚类方向）、能力四（MCP 智能工具路由，可并入 Agent 工具类目 F31/F33 相关条目）、能力五（Agent 运行时对外协议族）、能力六（可运行时安装的 worker 隔离扩展）。
 - **不重复计数**：Artifact（F22 严格隔离预览仍按消息渲染器归并）、Hub 下载、RAG、web_search。
 - 统计表重排待[待查清单](待查清单.md)全局待办第 6 条（按"产品特性贡献"与"机制贡献"拆分重做）一并处理，本笔记仅登记建议。

@@ -81,7 +81,7 @@
 ## 消息操作、分支导航与呈现投影
 
 - **分支/版本导航入口**：
-  - Chatbox：ForkGroup 折叠分支组（`N / M` 位置指示，替代已移除的 ForkNav"◀ 1/2 ▶"，替代回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；
+  - Chatbox：ForkGroup 折叠分支组（`N / M` 位置指示，回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；
   - Jan：`< n/m >` 版本导航与 activeRootId 切换；
   - NextChat：命令复制为新会话，不提供消息级兄弟版本导航；复制会重置摘要和截断位置，嵌套数组未递归克隆（[来源](<../会话与消息管理/NextChat-会话与消息管理调查笔记.md#L68>)）；
   - Cherry Studio：树图与内联兄弟导航并存；新分支先出现持久化的待输入叶子。Agent 入口另有编辑重发、兄弟切换与复制新会话，由能力契约决定入口可用性（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L166-L180>)）；

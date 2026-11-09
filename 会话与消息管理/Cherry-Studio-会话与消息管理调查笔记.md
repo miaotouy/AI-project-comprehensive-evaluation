@@ -95,8 +95,8 @@ Agent Session 与普通 Topic 分表存储，不能把 Topic 的所有操作套�
   - **等待输入状态**：由结构派生（`isBlankUserTurn`，`src/shared/data/types/uiParts.ts:367-373`），不落任何 draft 标记；
   - **删除/填充守卫**：`DELETE /messages/:id?awaitingInputOnly=true` 复核目标仍是空叶子（`MessageService.ts`，判定 `isAwaitingInputLeaf`）；`createUserMessageWithPlaceholders` 的 `fill-reserved` 模式在同一事务里填充该行并建 assistant 占位（填充前再校验）；
   - **竞态兜底**：主进程 `PersistentChatContextProvider` 在流式进行时拒绝 reserved-branch 提交（`PersistentChatContextProvider.ts:247-253`，错误原文见）；
-  - **渲染侧入口**：`useTopicBranchActions`（路径见文末索引）的 `reserveBranch`发 `POST /messages/:id/branches`、`deleteReservedBranch`发删除请求；`Chat.tsx` 旧的 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 三态 ref 已删除。
-- **分支图/列表的合并方向**：`topicMessageFlowLiveTree.ts` 的合并函数只叠加"流式中尚未持久化的消息"临时节点；awaiting-input 叶子本身是 DB 节点，直接进 `/topics/:id/tree` 结果（`TreeNode.isAwaitingInput`，`MessageService.ts`）——分支图 = 持久化树（含空分支叶子）+ 流式 overlay，不再有"假草稿节点"。
+  - **渲染侧入口**：`useTopicBranchActions`（路径见文末索引）的 `reserveBranch` 发 `POST /messages/:id/branches`、`deleteReservedBranch` 发删除请求。
+- **分支图/列表的合并方向**：`topicMessageFlowLiveTree.ts` 的合并函数只叠加"流式中尚未持久化的消息"临时节点；awaiting-input 叶子本身是 DB 节点，直接进 `/topics/:id/tree` 结果（`TreeNode.isAwaitingInput`，`MessageService.ts`）——分支图 = 持久化树（含空分支叶子）+ 流式 overlay。
 - **FTS 全文索引（跨会话内容搜索）**：持久化全文索引，由触发器随消息行维护，分三层：
   - **文本抽取**：`message.searchableText` 由 SQLite 触发器从 `data.parts` 抽取下列五类 part 的文本内容（`message.ts:112-146`）：
     ```text
@@ -259,7 +259,7 @@ Agent Session 与普通 Topic 分表存储，不能把 Topic 的所有操作套�
 
 删除活动节点后，服务层会在 splice/reparent 完成后重新计算 active node，保留仍可达的回复而不是把整条后续链视为被删节点的附属品。数据库还为 message 表上的 user-model 外键增加索引，改善按模型关联与迁移检查的访问路径。投递在重启、多个窗口和大量待投递任务下的实际恢复顺序尚未运行验证。依据：`src/main/data/services/MessageService.ts`、`src/main/ai/agentSession/AgentSessionDeliveryService.ts`、`src/main/data/services/AgentSessionMessageService.ts`、`src/main/data/db/schemas/message.ts`。
 
-删除路径本次还有两处结构性变化。其一，删除整条分支有了独立路由 `DELETE /messages/:id/branch`：按"所选节点到其叶子"的一条路径删除，而不是把所选子树里所有分支一起删，且会先排除虚拟根、唯一路径与叶子集合不可确定的情况。其二，`update` 增加了父子关系校验，自引用与跨 topic 的 parent 都被拒绝，树结构不再依赖调用方自觉。
+删除路径有两处结构性约束。其一，删除整条分支走独立路由 `DELETE /messages/:id/branch`：按"所选节点到其叶子"的一条路径删除，而不是把所选子树里所有分支一起删，且会先排除虚拟根、唯一路径与叶子集合不可确定的情况。其二，`update` 带父子关系校验，自引用与跨 topic 的 parent 都被拒绝，树结构不再依赖调用方自觉。
 
 回收站与清理任务一起改变了"删除"的可观察语义：回收站条目可以恢复，`deletedAt` 为空的行才出现在常规列表与搜索里，清理任务按保留期删除过期条目并保留自己的待处理状态，重启后不会丢失未完成的清理请求。Agent 会话侧另有自己的归档语义：归档的会话可随其 Agent 一起恢复，权限检查按行归属判定。
 ## 10. 设计取舍与已确认边界

@@ -111,7 +111,7 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 **仓库分布**
 
-- Pi 是按可发布能力拆包的 TypeScript monorepo。当前有 3888 个 Git 跟踪文件、3164 个可识别源码文件与 634,089 行源码；1089 个测试源码文件共 272,338 行。主体是 coding-agent、chord、p2、durable、ai、tui；旧的 client/protocol/server/session-backends 已删除，新增 durable、codemode、env、mcp、schema 五个包与 apps/p2。平台形态是 Node/Bun CLI/TUI、库和 p2 的 Web 界面，无本仓原生桌面或移动 GUI。证据：Git 跟踪文件机械统计 + workspace/入口复核（未运行构建与测试）。链接：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)。
+- Pi 是按可发布能力拆包的 TypeScript monorepo。当前有 3888 个 Git 跟踪文件、3164 个可识别源码文件与 634,089 行源码；1089 个测试源码文件共 272,338 行。主体是 coding-agent、chord、p2、durable、ai、tui；包集合还包括 codemode、env、mcp、schema 与 apps/p2。平台形态是 Node/Bun CLI/TUI、库和 p2 的 Web 界面，无本仓原生桌面或移动 GUI。证据：Git 跟踪文件机械统计 + workspace/入口复核（未运行构建与测试）。链接：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)。
 
 **应用界面基础设施**
 

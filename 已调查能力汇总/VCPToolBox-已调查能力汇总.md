@@ -137,7 +137,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 **人类工具面 / 活对象**
 
-- **能力六：浏览器托管运行时（managed Chrome + ChromeBridge 协议 v3）**：生命周期、页面观察/控制/验证/截图、Grounded Markdown Agent 视图、稳定内容 Hash、快照去重、默认敏感 DOM 脱敏与指标；2.4 新增正文图片语义与 Popup 人工 Managed 选择，agent 不再隐式控制托管运行时；运行时默认关闭，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力六、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md)。
+- **能力六：浏览器托管运行时（managed Chrome + ChromeBridge 协议 v3）**：生命周期、页面观察/控制/验证/截图、Grounded Markdown Agent 视图、正文图片语义、Popup 人工 Managed 选择、稳定内容 Hash、快照去重、默认敏感 DOM 脱敏与指标；agent 不隐式控制托管运行时；运行时默认关闭，细节见末尾小节。证据状态：`主链确认`。来源：[独特功能调查笔记](../独特功能/VCPToolBox-独特功能调查笔记.md) 能力六、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md)。
 
 **分布式多模态**
 

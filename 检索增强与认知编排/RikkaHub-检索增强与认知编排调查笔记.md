@@ -110,7 +110,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 索引的 tokenizer 是 FTS5 的 `simple` 扩展，随 APK 打包 `libsimple.so`（arm64-v8a 与 x86_64），提供 `simple_query` 与 `simple_snippet` 两个函数；它支持拼音展开与前缀匹配，因此英文、数字与拼音由它处理（`app/src/main/jniLibs/`、`data/db/fts/MessageFtsManager.kt`）。
 
-中文不再依赖 jieba 词典。查询构造的做法是：先把搜索词按“ASCII 字母数字连续段 / 其他字符连续段”切开；ASCII 段交给 `simple_query`，其余段拆成单字并用 NEAR 约束相邻程度，各段之间用 AND 连接。中文片段允许两字的额外间隔（标点、“的”等），片段越长允许的间隔越多；这样不建词典也能得到接近按词匹配的效果（同一文件中的 `buildFtsMatchQuery`、`nearQuery`、`CJK_NEAR_SLACK`）。
+中文查询按字符切分构造，不加载 jieba 词典。做法是：先把搜索词按“ASCII 字母数字连续段 / 其他字符连续段”切开；ASCII 段交给 `simple_query`，其余段拆成单字并用 NEAR 约束相邻程度，各段之间用 AND 连接。中文片段允许两字的额外间隔（标点、“的”等），片段越长允许的间隔越多；这样不建词典也能得到接近按词匹配的效果（同一文件中的 `buildFtsMatchQuery`、`nearQuery`、`CJK_NEAR_SLACK`）。
 
 该实现有两个已确认的后果：单字词会退化成单字匹配，召回偏宽；长中文片段在单字之间夹字过多时可能漏召回，因为 NEAR 距离是按片段长度推算的。片段本身由 `simple_snippet` 截取固定长度并给命中词加方括号。
 
@@ -126,7 +126,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 记忆段随 system message 注入，与工具结果分属不同通道：构造上下文时先写系统提示，再追加记忆段，最后追加各工具的系统提示。记忆段的格式是“当前记忆”标题、核心文件全文与一份文件目录；目录每行给出路径、一行描述、别名与更新时间，模型据此决定是否调用 `memory_read` 读取某个文件（`data/ai/ChatRequestFactory.kt`、`data/ai/prompts/MemoryPrompts.kt`）。
 
-这种“目录常驻 + 内容按需”的设计取代了早期的全量注入：注入体积只随文件数增长，正文读取由模型显式触发；系统提示同时要求画像与偏好两份文件已可直接使用、不必重读。记忆以外还有若干发送前注入层（时间提醒、Lorebook 触发注入、占位符替换、模板渲染等），属于检索结果的消费侧：Lorebook 条目按扫描深度匹配上下文并支持四种注入位置，其位置、优先级与变换器顺序见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
+这种“目录常驻 + 内容按需”的设计让注入体积只随文件数增长，正文读取由模型显式触发；系统提示同时要求画像与偏好两份文件已可直接使用、不必重读。记忆以外还有若干发送前注入层（时间提醒、Lorebook 触发注入、占位符替换、模板渲染等），属于检索结果的消费侧：Lorebook 条目按扫描深度匹配上下文并支持四种注入位置，其位置、优先级与变换器顺序见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
 
 ### 标题、建议、翻译与压缩：认知编排后处理
 

@@ -18,7 +18,7 @@
 
 Hermes Agent 把 Python Agent/CLI/gateway/tools 与 TypeScript 桌面、Web、TUI 放在同一仓库，另含 skills、插件、插件目录和文档站。测试约占全仓可识别源码行数的 40.6%，低于源码本身的增速；文档 1,551 文件，其中技能包与文档站占八成以上。
 
-仓库的代码组织自本快照起有明确成文约定：每个曾经的"巨型文件"是 facade（只保留公共入口与其他包引用的名字），实现按主题拆到同名前缀的兄弟模块（如 `hermes_state.py` 与 63 个 `hermes_state_*.py`）。这条约定解释了本快照中大量文件"内容全变"的现象——多数是拆分而非重写。仓库同时新增 `pm/`（依赖与环境管理器）、`hermes_platform/`（机器事实与可执行文件解析）、`native/fts5_cjk`（SQLite 全文检索扩展）与 `locales/`（TUI 与桌面共用词典）。
+仓库的代码组织遵循一条成文约定：每个"巨型文件"是 facade（只保留公共入口与其他包引用的名字），实现按主题拆到同名前缀的兄弟模块（如 `hermes_state.py` 与 63 个 `hermes_state_*.py`）。`pm/`（依赖与环境管理器）、`hermes_platform/`（机器事实与可执行文件解析）、`native/fts5_cjk`（SQLite 全文检索扩展）与 `locales/`（TUI 与桌面共用词典）同样在仓库内。
 
 ## 统计与模块分布
 

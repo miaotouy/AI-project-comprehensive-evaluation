@@ -41,7 +41,7 @@ VCPMobile 的可执行生成式输出是消息内的 HTML 预览块，可定位�
 
 预览组件默认展示代码；用户切换预览后会把 HTML 直接填入 iframe `srcdoc`。页面提供复制、刷新和全屏预览，主题变化会重新生成注入样式；图片点击会通过 `postMessage` 通知父页面，预览内图片经沙箱桥按 nonce 转发。`src/features/chat/blocks/HtmlPreviewBlock.vue:1-338`。
 
-iframe 的 sandbox 现在只声明 `allow-scripts`，内联与全屏两处同值；它不加 `allow-same-origin`，也不再加模态、表单或弹出窗口权限。组件已不再经过 DOMPurify 清洗，源码注释明确以 iframe 的 opaque origin 与 sandbox 作为唯一边界，并保留页面里的 `<script>`；注入内容只额外加入滚动条样式与一个点击处理脚本，后者拦截 `javascript:` 链接并经 `postMessage` 上报图片点击。因此可确认这是浏览器脚本运行表面，而不是只读高亮；本次未在真实 WebView 中验证脚本、网络请求和嵌套 iframe 的最终效果。`src/features/chat/blocks/HtmlPreviewBlock.vue:78-130,130-338`。
+iframe 的 sandbox 现在只声明 `allow-scripts`，内联与全屏两处同值；它不加 `allow-same-origin`，也不再加模态、表单或弹出窗口权限。组件不经 DOMPurify 清洗，源码注释明确以 iframe 的 opaque origin 与 sandbox 作为唯一边界，并保留页面里的 `<script>`；注入内容只额外加入滚动条样式与一个点击处理脚本，后者拦截 `javascript:` 链接并经 `postMessage` 上报图片点击。因此可确认这是浏览器脚本运行表面，而不是只读高亮；本次未在真实 WebView 中验证脚本、网络请求和嵌套 iframe 的最终效果。`src/features/chat/blocks/HtmlPreviewBlock.vue:78-130,130-338`。
 
 ## 3. 更新、回流与资源边界
 

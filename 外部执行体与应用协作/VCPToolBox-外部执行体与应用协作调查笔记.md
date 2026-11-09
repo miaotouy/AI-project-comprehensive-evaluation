@@ -62,7 +62,7 @@ AICodeWorker 使用 jobId 管理异步 CLI 任务。分布式节点以 WebSocket
 外部执行结果可同步返回、轮询 job、WebSocket 推送或经 `{{VCP_ASYNC_RESULT}}` 占位符回注。各接入路径的回流与取消语义如下：
 
 - 跨节点：`cancel_tool` 传播；SnowBridge 另有 `vcp_tool_status/result/cancel_ack` 帧
-- 浏览器：返回页面快照、截图和动作结果；扩展侧连接改为单飞（`connectAttemptInProgress`）并把心跳句柄绑定到具体 socket 代次，迟到 socket 的 open/close 不再抢占全局连接（`Plugin/ChromeBridge/VCPChrome/background.js:272-344,475-500`）
+- 浏览器：返回页面快照、截图和动作结果；扩展侧连接以单飞方式建立（`connectAttemptInProgress`），心跳句柄绑定到具体 socket 代次，迟到 socket 的 open/close 只作用于自身代次（`Plugin/ChromeBridge/VCPChrome/background.js:272-344,475-500`）
 - SSH：按会话流返回输出
 - 人类工具 API：复用 Bearer 鉴权和审批链（鉴权在 `/v1/*` 全局中间件层）
 

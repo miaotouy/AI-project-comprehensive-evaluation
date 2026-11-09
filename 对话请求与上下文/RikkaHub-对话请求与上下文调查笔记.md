@@ -68,7 +68,7 @@
 
 **对齐避免拆散工具对**。`alignContextStart()` 在截断点落在含工具的消息上时向前回退：若当前消息含已执行工具（有 output），向前找同一调用链中未执行的工具调用；若含未执行工具调用，向前找对应的 USER 消息。回退只减不增，故不破坏保留下界（同文件）。
 
-**压缩是手动、非自动，且改为检查点式**。入口是聊天页对话框经 `ChatVM.handleCompressContext()` 调到 `ChatService.compressConversation()`，没有基于 token 预算的自动触发。当前实现不再替换整段历史：它以会话中最后一个上下文检查点为起点，把“检查点之后、末尾保留区之前”的节点作为压缩范围；生成摘要后在压缩范围的最后一条消息之后插入一条检查点消息，原消息节点全部保留（`service/ChatService.kt` 的 `compressConversation`、`Conversation.insertContextCheckpoint`）。
+**压缩是手动、非自动，采用检查点式**。入口是聊天页对话框经 `ChatVM.handleCompressContext()` 调到 `ChatService.compressConversation()`，没有基于 token 预算的自动触发。它以会话中最后一个上下文检查点为起点，把“检查点之后、末尾保留区之前”的节点作为压缩范围；生成摘要后在压缩范围的最后一条消息之后插入一条检查点消息，原消息节点全部保留（`service/ChatService.kt` 的 `compressConversation`、`Conversation.insertContextCheckpoint`）。
 
 压缩请求刻意复用正常对话的请求组装：同一模型、同一系统提示与工具定义、同一 `sessionId`，只在末尾追加压缩指令，使请求前缀与上一轮对话一致以命中提示词缓存；摘要请求把 `maxTokens` 置空以免被聊天回复的输出上限截断（`data/ai/ChatRequestFactory.kt` 的 `generateCompressionSummary`）。前置条件包括：当前不在生成中、压缩范围内没有待执行或可续跑的工具调用；摘要回复若仍调用工具则判为失败而不是把说明文字存成摘要。
 
@@ -143,7 +143,7 @@ ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google
 **已确认边界**：
 - 截断只按消息条数，不做 token 估算；`limitContext` 不影响 system 消息与工具 schema。
 - 压缩是手动触发，以检查点插入摘要并保留原始节点，摘要本身不可再展开。
-- 整轮结束（成功、取消、失败）都会经 `finishGeneration` 兜底保存，与上一快照“仅成功落库”不同。
+- 整轮结束（成功、取消、失败）都会经 `finishGeneration` 兜底保存。
 - 工具结果内联在 ASSISTANT 消息 parts 中，不产生 TOOL 角色消息。
 - 同一会话严格串行，无 steer/替换当前生成的能力，再次发送即排队。
 

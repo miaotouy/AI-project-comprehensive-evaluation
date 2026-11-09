@@ -94,7 +94,7 @@ SessionSettings { provider, modelId }
 
 表格中的“未找到”只覆盖本次检查的当前源码范围，外部脚本与历史版本需另行检查。
 
-设置路由另有一个 `src/renderer/routes/settings/default-models.tsx` 页面，集中选择各用途的默认模型（对话、图片、embedding、rerank、语音、文档解析等），模型选择组件已换成 `ModelSelectorV2`；模型富化经 `@/packages/model-registry` 的 `enrichModelsFromRegistry`。这次页面重写与渠道配置的保存逻辑相互独立，渠道数据模型本身没有新增渠道级字段。
+设置路由另有一个 `src/renderer/routes/settings/default-models.tsx` 页面，集中选择各用途的默认模型（对话、图片、embedding、rerank、语音、文档解析等），模型选择组件为 `ModelSelectorV2`；模型富化经 `@/packages/model-registry` 的 `enrichModelsFromRegistry`。default-models 页面与渠道配置的保存逻辑相互独立，渠道数据模型没有渠道级字段。
 
 ### 2.2 新建渠道与已有渠道的可操作范围
 

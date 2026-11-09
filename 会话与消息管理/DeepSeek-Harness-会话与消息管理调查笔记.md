@@ -18,7 +18,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 - 逻辑格式为 v4。格式迁移按“相邻边”拆成独立包（`session-format-v0-to-v1` 至 `session-format-v3-to-v4`），由 `session-format-catalog` 在构建期静态组装成唯一读取器；读取旧代只在内存迁移，写打开才在同目录发布不可变的当前代后继文件，源文件字节不变。v4 的实质变化是把工具结果提升为 tool 角色消息、改写消息来源形状、收口证据化的中断回合并补齐父会话目录事实（`packages/session/session-format-v3-to-v4/README.md`）。
 - 产生消息的表面事件从三类扩到五类：`system/message`、`developer/message`、`user/message`、`assistant/message`、`tool/result`（`packages/core/session/src/types.ts:447`）。system prompt 现在是表面节点 0，不再写进 `request/header`。
-- 流式 chunk 不再是独立事件：`assistant/message` 内嵌紧凑的原始流（`stream`），未产生表面消息的失败、重试或取消尝试记为 `assistant/attempt`，因此每次模型尝试恰好有一个耐久收口。
+- 流式 chunk 内嵌在 `assistant/message` 的紧凑原始流（`stream`）里，未产生表面消息的失败、重试或取消尝试记为 `assistant/attempt`，因此每次模型尝试恰好有一个耐久收口。
 - 持久化仍是 handle 契约加第一方 JSONL。`create`/`open` 返回读/写句柄，追加批次与 flush 屏障由句柄承担；跨进程写排斥由 POSIX flock 或 Windows 命名信号量提供，进程内单写者由后端保证。
 - 投影仍分两层：`session-projection` 对已提交事件驱动纯函数单元，`session-projection-cache` 把结果存进独立 storage domain 供列表与统计冷读。新增的插件消息投影可在不改变表面节点成员的前提下改写既有消息内容。
 - fork、resume、transcript 都从日志流派生：fork 用 `isSeeded` 与精确的 `inheritedEventCount` 表达血缘并追加带标记的 `session/end-seed` 边界；resume 走 prepare→修复未闭合回合→发布；人类可读 transcript 读 append-origin 事件，模型历史读表面（表面会遮蔽被压缩替换的范围）。
@@ -48,7 +48,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 ## 1. 会话单位与标识
 
 - 会话 id 是 `Branded<'SessionId'>` 字符串。`SessionStore.create` 省略 id 时铸造计数器 id，显式 id 用于 resume/fork 的既有身份（`packages/core/session/src/index.ts:1127`）。
-- 会话头现用 `isSeeded` 表达血缘，不再有 `seedLength`；精确的 fork 前缀长度作为存储值 `inheritedEventCount` 随日志单独保存（`types.ts:95-150`；`packages/core/session/src/index.ts:1403`）。
+- 会话头用 `isSeeded` 表达血缘，没有 `seedLength` 字段；精确的 fork 前缀长度作为存储值 `inheritedEventCount` 随日志单独保存（`types.ts:95-150`；`packages/core/session/src/index.ts:1403`）。
 - 子 agent 会话在 header 上标记 `origin: 'subagent'` 与 `delegationDepth`（父深度 +1），供递归预算跨重启存活；两者都是展示/治理元数据，不证明子会话可继续。
 - 工作区归属仍用 header 的绝对 `cwd` 判定；会话本体现在另有可变的会话工作目录（`packages/session/working-directory`），变更后旧进程保留自己的 cwd，新选择可重放并进入用户上下文。
 

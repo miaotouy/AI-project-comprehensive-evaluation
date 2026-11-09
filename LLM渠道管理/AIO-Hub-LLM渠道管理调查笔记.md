@@ -250,7 +250,7 @@ Key 健康状态另存为 `llm-service/key-states.json`，记录的索引改为�
 
 内置规则按能力、Provider、模型家族、特定模型、图像/视频生成参数和图片输入限制分模块维护，汇总入口是 [`src/config/model-metadata-presets/index.ts`](../../aio-hub/src/config/model-metadata-presets/index.ts)。用户规则由 [`src/stores/modelMetadataStore.ts`](../../aio-hub/src/stores/modelMetadataStore.ts) 保存到 `model-metadata/metadata-rules.json`，并可从旧版 `localStorage` 的 `model-icon-configs` 迁移。
 
-内置目录随应用版本自动同步：加载时若当前内置目录的版本或指纹与已存快照不同，就整体替换快照，用户对某条内置规则的本地覆盖、屏蔽（suppressedBuiltinRuleIds）和自定义规则都保留；被上游删除但本地改过的规则继续作为用户规则生效，不会静默丢失。原先的目录三方差异比对与显式确认流程（含 `diff.ts` 与目录更新对话框）已移除，刷新模型配置保留为把规则写入已保存模型的显式动作（`packages/model-metadata-core/src/migration.ts` 的 syncCatalogSnapshot、`src/stores/modelMetadataStore.ts`）。
+内置目录随应用版本自动同步：加载时若当前内置目录的版本或指纹与已存快照不同，就整体替换快照，用户对某条内置规则的本地覆盖、屏蔽（suppressedBuiltinRuleIds）和自定义规则都保留；被上游删除但本地改过的规则继续作为用户规则生效，不会静默丢失。刷新模型配置是把规则写入已保存模型的显式动作（`packages/model-metadata-core/src/migration.ts` 的 syncCatalogSnapshot、`src/stores/modelMetadataStore.ts`）。
 
 ### 3.5 元数据的实际消费者
 
@@ -274,7 +274,7 @@ Key 健康状态另存为 `llm-service/key-states.json`，记录的索引改为�
 
 ### 3.7 外部元数据来源
 
-除内置目录与用户规则，模型元数据还能从外部来源订阅：`src/services/modelMetadataSourceService.ts` 提供来源适配器注册、目录拉取、更新与自动更新（`getMetadataSourceAdapters`、`fetchMetadataSourceCatalog`、`updateMetadataSource`、`runMetadataSourceAutoUpdate`），拉取结果经同一转换管线写成本地规则。配置入口是设置页的 `ModelMetadataSourcesDialog.vue`；与内置目录的差异比对、确认流程已移除，更新按来源整体应用。外部目录因此与内置规则、用户规则构成三个写入面，优先级仍按第 3.4 节的"独占/深合并"规则处理，来源本身不携带优先级。
+除内置目录与用户规则，模型元数据还能从外部来源订阅：`src/services/modelMetadataSourceService.ts` 提供来源适配器注册、目录拉取、更新与自动更新（`getMetadataSourceAdapters`、`fetchMetadataSourceCatalog`、`updateMetadataSource`、`runMetadataSourceAutoUpdate`），拉取结果经同一转换管线写成本地规则。配置入口是设置页的 `ModelMetadataSourcesDialog.vue`；外部来源更新按来源整体应用，不做逐条比对确认。外部目录因此与内置规则、用户规则构成三个写入面，优先级仍按第 3.4 节的"独占/深合并"规则处理，来源本身不携带优先级。
 
 ## 4. 运行时选择与路由
 
@@ -326,7 +326,7 @@ Key 管理器为每条 Profile 保存以下状态，入口见 `src/composables/u
 
 Key 选择逻辑先过滤手动禁用和已熔断项，再从上次下标之后轮询。默认自动恢复时间为 60 秒；到期的熔断项会被恢复并重新参与选择，入口是 `pickKey()`。
 
-**没有可用 Key 时不再回退到第一个 Key**——改为区分“全部被用户禁用”和“全部熔断”两种原因，并抛出 `ApiKeyUnavailableError`；后者附最早可恢复时间 `retryAt`，不会把请求打到已知坏 Key 上。
+**没有可用 Key 时区分“全部被用户禁用”和“全部熔断”两种原因，并抛出 `ApiKeyUnavailableError`**；后者附最早可恢复时间 `retryAt`，不会把请求打到已知坏 Key 上。
 
 ### 5.2 失败判定
 

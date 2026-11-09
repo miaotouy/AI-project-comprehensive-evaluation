@@ -96,7 +96,7 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 
 ## 5. 可靠性、历史与持久化
 
-除截图外还有一条纯文本导出链：Nowledge Mem 导出改成走插件连接，导出前先取目标连接再加载会话，取不到就返回“选择连接”错误；提交时把该连接随 thread 一起传入，连接检测也改为插件侧的 verify，而不是读取 settings 里的静态配置（`src/main/exporter/index.ts`、`src/main/exporter/nowledgeMemClient.ts`）。用户消息文本在导出时会把会话引用的内联项拼进正文，避免导出稿丢失“引用了哪个会话”的信息（`src/main/exporter/formats/userMessageText.ts`、`@shared/sessionReferences`）。
+除截图外还有一条纯文本导出链：Nowledge Mem 导出走插件连接，导出前先取目标连接再加载会话，取不到就返回“选择连接”错误；提交时把该连接随 thread 一起传入，连接检测在插件侧 verify（`src/main/exporter/index.ts`、`src/main/exporter/nowledgeMemClient.ts`）。用户消息文本在导出时会把会话引用的内联项拼进正文，避免导出稿丢失“引用了哪个会话”的信息（`src/main/exporter/formats/userMessageText.ts`、`@shared/sessionReferences`）。
 
 - `isCapturing` 防止同一 composable 并发截图（`usePageCapture.ts:159-161`）；
 - 捕获过程在 finally 中恢复滚动行为，消息层另行恢复隐藏覆盖层；

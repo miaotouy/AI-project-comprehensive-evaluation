@@ -35,7 +35,7 @@ Hermes 另有一套完整的对话导出子系统，入口独立于 `/save`：
 
 ## 系统边界与完整主链
 
-会话事实源：SQLite `state.db` 中的 `SessionDB` 是 canonical 消息存储，消息逐轮增量写入；`SessionDB` 本身已是 facade，实现分散在 `hermes_state_*.py` 兄弟模块（schema、会话、消息、压缩、标题、检索），可移植性 mixin 独立在 `hermes_state_portability.py`。旁路产物只剩 `~/.hermes/sessions/saved/` 一类显式导出；自动 JSON 快照已在本次快照中被移除，历史遗留的 `session_*.json`/`sessions.json` 不再由代码写出。
+会话事实源：SQLite `state.db` 中的 `SessionDB` 是 canonical 消息存储，消息逐轮增量写入；`SessionDB` 本身已是 facade，实现分散在 `hermes_state_*.py` 兄弟模块（schema、会话、消息、压缩、标题、检索），可移植性 mixin 独立在 `hermes_state_portability.py`。旁路产物只有 `~/.hermes/sessions/saved/` 一类显式导出，代码不写 `session_*.json`/`sessions.json`。
 
 主链 A（本地快照，三入口共用一个目标目录）：
 

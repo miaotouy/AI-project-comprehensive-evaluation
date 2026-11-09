@@ -24,7 +24,7 @@ Toast 采用单例 FIFO 队列，由根组件中的唯一 Snackbar 依次显示�
 
 WebChat 增加专用设置对话框，将主题、语言、流式、推理显示、发送快捷键和传输方式集中到同一表面；聊天区另增加历史加载失败组件、回到底部控件和 reduced-motion 处理。这些是 Chat 专用基础设施，不改变全应用仍以 Vuetify 对话框和项目 Toast 队列为公共底座的结论（`dashboard/src/components/chat/ChatSettingsDialog.vue`；`ChatLoadError.vue`；`Chat.vue`）。
 
-国际化资源从单文件字典改为按语言与功能域拆分的 JSON 包，四套语言按需异步加载；插件页面资源改用按作用域签发的路径令牌校验，v1 接口路由不走该中间件（`dashboard/src/i18n/locales/`、`i18n/composables.ts:12-37`；`astrbot/dashboard/plugin_page_auth.py:7-30`）。
+国际化资源按语言与功能域拆成 JSON 包，四套语言按需异步加载；插件页面资源改用按作用域签发的路径令牌校验，v1 接口路由不走该中间件（`dashboard/src/i18n/locales/`、`i18n/composables.ts:12-37`；`astrbot/dashboard/plugin_page_auth.py:7-30`）。
 
 ## 系统边界与总体装配
 

@@ -18,7 +18,7 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 
 主链路：composer → prompt.submit（WS）→ 参数契约校验与 busy 门控（`tui_gateway/methods_prompt.py`）→ 回合执行（`tui_gateway/prompt_turn.py` 的 `_run_prompt_submit`，记录 turn marker、注册流式回调、启动运行线程）→ 对话主循环（`agent/conversation_loop.py:1802` 的 `run_conversation`，组装上下文、循环调用 Provider，每个增量经流式回调回发）→ 收尾持久化 → message.complete（含 status/text/usage）。桌面端增量文本进入自适应节流队列，完成事件合并终态并触发会话列表刷新。
 
-本次快照的结构变化集中在四处：方法契约集中到 `tui_gateway/contracts/*.py` 并以 Pydantic 校验；`tui_gateway/server.py` 从约万行收缩到 1,705 行的 facade，prompt 执行、busy 处理、自动续跑、历史与压缩衔接分别落入 `prompt_turn.py`、`session_auto_continue.py`、`session_history.py`、`session_compression.py`；中断/重定向原语抽到 `agent/interrupt_control.py`；截断参数从"用户轮序号"改为优先使用持久化行 id 或消息 id。
+当前结构有四处落点：方法契约集中在 `tui_gateway/contracts/*.py` 并以 Pydantic 校验；`tui_gateway/server.py` 是 1,705 行的 facade，prompt 执行、busy 处理、自动续跑、历史与压缩衔接分别落在 `prompt_turn.py`、`session_auto_continue.py`、`session_history.py`、`session_compression.py`；中断/重定向原语在 `agent/interrupt_control.py`；截断参数优先取持久化行 id 或消息 id。
 
 ## 系统边界与生成任务主链
 

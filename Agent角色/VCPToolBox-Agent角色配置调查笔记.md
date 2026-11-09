@@ -92,7 +92,7 @@ AgentManager 监视 `agent_map.json` 与 `Agent/` 目录的变更，检测到修
 
 所有内置 Agent 都在提示词中大量使用变量占位符（`{{VarXxx}}`、`[[日记本::…]]` 等），依赖 VCPToolBox 的完整运行时才能正常工作。
 
-当前模板已出现两项配置方向变化。Nova 的三个主要日记声明由 TagMemo+ 改为 RiverMemo；Hornet 改用最近六篇加 BM25 的日记声明，并通过轻量工具折叠文档取得文件与系统工具；ThemeMaidCoco 则扩展为包含文件、代码检索与 MediaRenderer 的主题制作工作流。它们仍是提示词层的能力声明，是否实际生效取决于映射文件、插件启用状态和部署路径，不能仅由模板内容推断工具已授权（`Agent/Nova.txt:4-7`、`Agent/Hornet.txt:1,56-64`、`Agent/ThemeMaidCoco.txt:1-65`）。
+当前模板的配置方向如下。Nova 的三个主要日记声明使用 RiverMemo；Hornet 使用最近六篇加 BM25 的日记声明，并通过轻量工具折叠文档取得文件与系统工具；ThemeMaidCoco 包含文件、代码检索与 MediaRenderer 的主题制作工作流。这些仍是提示词层的能力声明，是否实际生效取决于映射文件、插件启用状态与部署路径（`Agent/Nova.txt:4-7`、`Agent/Hornet.txt:1,56-64`、`Agent/ThemeMaidCoco.txt:1-65`）。
 
 ## 3. AgentAssistant 插件层
 
@@ -203,7 +203,7 @@ AgentManager 监视 `agent_map.json` 与 `Agent/` 目录的变更，检测到修
 
 - 持久化：任务与历史存于插件目录内的 `task-center-data.json`（:10），`globalEnabled` 默认关闭（:30），历史上限默认 200 条（:12）。状态上报：`broadcastStatusUpdate()` 目前只输出日志（:49-51），前端靠管理 API 轮询 `getStatus`。
 - 调度实现：固定间隔模式最小间隔被强制为 10 分钟（`MIN_INTERVAL_MINUTES`，:11、:563）；单次模式执行后自动禁用任务（:550-556）；固定间隔与 cron 任务的执行异常不影响下一轮调度（:573-578）。
-- 派发链：`executeTask` → `wakeUpAgent` → 进程内调用 `agentAssistant.processToolCall(...)`（:229-257）——任务中心直接引用 AgentAssistant 模块，不再走 HTTP 回环；`injectTools` 已禁用（:230，注释说明 Agent 自身已有完整工具集）。
+- 派发链：`executeTask` → `wakeUpAgent` → 进程内调用 `agentAssistant.processToolCall(...)`（:229-257）——任务中心直接引用 AgentAssistant 模块，不经 HTTP 回环；`injectTools` 已禁用（:230，注释说明 Agent 自身已有完整工具集）。
 - 状态与结果：每次执行更新 `task.runtime`（最近运行时间、下次运行时间、最近错误与结果统计），并把执行记录追加进 `history`（:275-279）；结果只归属任务对象与历史记录，不落回会话。
 - 取消语义：清理与删除接口只能停止或删除**未来调度**，无法取消正在执行的派发（`executeTask` 没有取消机制）；被派发 Agent 的委托循环上限仍由 AgentAssistant 的 `delegationMaxRounds` 控制。
 

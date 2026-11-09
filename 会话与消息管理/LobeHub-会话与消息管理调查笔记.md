@@ -61,7 +61,7 @@ LobeHub 的会话由多维坐标 `ConversationContext` 压平出的 `messageMapK
 - `generateKey`（第 122-146 行）按 `${scope}_${scopeId}[_{topicId}][_{subTopicId}][_new]` 拼字符串；page 无 topic 时避免拼出字面量 `null` 段（第 127-132 行）。
 - 入口 `messageMapKey`（第 177-180 行）。
 
-这套 key 同时被 chat store 的 transcript 副本与会话级镜像使用（见第 2 节），是它们定位到"同一份数据"的唯一纽带。副本读写不再经过早期的写穿缓存函数：`src/services/message/replica` 用 `conversationMessagesKey`/`toPersistedTranscript` 定义持久化形状，`src/services/message/cache` 用 `getMessageListCacheIdentity` 计算服务端列表缓存身份——后者只认 agentId/groupId/threadId/topicId 等坐标，不认 `documentId`/`subAgentId` 这类本地专属维度，因此副本按自己的 key 存，服务端缓存按更粗的 key 取，两者天然不完全对齐。
+这套 key 同时被 chat store 的 transcript 副本与会话级镜像使用（见第 2 节），是它们定位到"同一份数据"的唯一纽带。副本读写不经写穿缓存函数：`src/services/message/replica` 用 `conversationMessagesKey`/`toPersistedTranscript` 定义持久化形状，`src/services/message/cache` 用 `getMessageListCacheIdentity` 计算服务端列表缓存身份——后者只认 agentId/groupId/threadId/topicId 等坐标，不认 `documentId`/`subAgentId` 这类本地专属维度，因此副本按自己的 key 存，服务端缓存按更粗的 key 取，两者天然不完全对齐。
 
 流式期间 chat store 的同步会丢弃不改变内容的头部响应，`settle` 只在 run 结束时把转写定稿落盘；也就是说，逐 token 的中间态只存在内存里，不逐次写副本。这一点与本地分桶 key 更细的事实叠加，构成本地展示与服务端快照之间持续存在的一致性耦合点。
 

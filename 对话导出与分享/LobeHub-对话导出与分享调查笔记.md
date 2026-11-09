@@ -28,7 +28,7 @@ LobeHub 把"复制/导入 Topic"与"导出/分享"明确分成两个面：前者
 
 OSS 仓库默认 `ENABLE_BUSINESS_FEATURES = false`，聊天头部的 SharePopover（链接分享入口）被该开关隐藏，导出弹窗不受影响。
 
-分享页在本次快照里已从主 Web 应用拆成独立 SPA：`apps/share`（包名 `@lobehub/share`，vite + react-router，`apps/share/src/router.tsx`），按对象分 topic/page/file/artifact 四类视图；共享外壳在 `src/business/client/features/ShareShell`。主应用 `src/routes` 下已不再注册 `/share/t/:id` 路由，分享页组件位于 `apps/share/src/features/topic/`（`SharedTopicView.tsx`、`SharedMessageList.tsx`、`SharedTopicAside/Body` 等）。
+分享页是独立 SPA：`apps/share`（包名 `@lobehub/share`，vite + react-router，`apps/share/src/router.tsx`），按对象分 topic/page/file/artifact 四类视图；共享外壳在 `src/business/client/features/ShareShell`。主应用 `src/routes` 下不注册 `/share/t/:id` 路由，分享页组件位于 `apps/share/src/features/topic/`（`SharedTopicView.tsx`、`SharedMessageList.tsx`、`SharedTopicAside/Body` 等）。
 
 工作区本地文件另出现一条不经 Topic Share 的公开交付链：HTML 预览和文件树可发起发布，收集 HTML/CSS/JS 引用的本地资源，32 KB 以下资源内联，其他资源作为静态站点 sidecar；系统拒绝遗留的本地引用，并在收集期限制为最多 64 个文件、单文件及总量各不超过 50 MB。打包后的 HTML 先写成 Artifact 消息，再交给业务发布槽生成公开地址；开源默认槽会报告发布不可用，因此本地文件发布链能否产出公开地址取决于所配置的业务发布槽，入口可见性只说明 UI 暴露了发布动作（`src/features/Portal/LocalFile/{prepareWorkspaceHtmlPublish,publishWorkspaceHtmlArtifact,readWorkspaceAsset}.ts`）。
 

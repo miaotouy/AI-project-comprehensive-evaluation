@@ -44,7 +44,7 @@
 - **SDK 使用分三类：AI SDK 统一抽象、官方 SDK 直用、自研协议实现。** 凡项目级重试与 SDK 重试并存的项目都显式分权——Chatbox、Cherry Studio 与 DeepSeek Harness 关闭 SDK 内层 retry，Pi 镜像官方 SDK 判定；SDK 只承担协议层，渠道决策、Key 选择与平台传输都在 SDK 之外。
 - **不适合给二十四个项目排一个总名次。** 桌面多模型客户端、服务端 Agent 平台、IM 机器人、角色扮演前端、单网关客户端、AI 中间层和终端编码 Agent 面对的管理边界不同。更有用的比较是判断能力位于哪一层，以及失败时是否真的改变 Provider、URL、Key 或模型。
 
-AstrBot 的 SSYCloud 与 MiraRouter 接入、默认 `astrbot/<version>` User-Agent、元数据备用端点与推理强度预设，继续落在来源实例、模型目录和请求预设三层；Local Agent 的默认聊天模型改由 `agent_runner.config.model.provider_id` 解析，为空才回退实例列表；Cherry Studio 则补充了 DeepSeek V4 的路由与图像目录，并让 Pi/DeepSeek Harness 的模型选择经过独立兼容性解析。这些变化强化了“渠道目录、运行时可选模型和实际请求协议”应分开比较的口径。
+AstrBot 的 SSYCloud 与 MiraRouter 接入、默认 `astrbot/<version>` User-Agent、元数据备用端点与推理强度预设，继续落在来源实例、模型目录和请求预设三层；Local Agent 的默认聊天模型改由 `agent_runner.config.model.provider_id` 解析，为空才回退实例列表；Cherry Studio 则补充了 DeepSeek V4 的路由与图像目录，并让 Pi/DeepSeek Harness 的模型选择经过独立兼容性解析。渠道目录、运行时可选模型和实际请求协议应分开比较。
 
 ## 一览矩阵
 
@@ -508,7 +508,7 @@ LobeHub 的密文导出还有密钥迁移约束：导出的 Provider 数据保�
 
 ### 备份与导出
 
-| 项目 | 默认行为 | 需要注意的边界 |
+| 项目 | 默认行为 | 适用边界 |
 |---|---|---|
 | AIO Hub | 单项目笔记未确认完整备份链 | 不据此推断包含或排除 Key |
 | AstrBot | 单项目笔记未确认备份/导出链 | `cmd_config.json` 本身含明文 Key |

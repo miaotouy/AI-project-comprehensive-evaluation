@@ -217,7 +217,7 @@ LOCKED_THEME_VAR_RULES（:951-976）把以下前缀类结构 token 锁为只读"
 
 **剪贴板。** copyToClipboard（navigator.clipboard → 隐藏 textarea + execCommand('copy') 回退，`utils/ui.ts:26-62`）；消费方如通知卡片"复制原始消息"（`NotificationsDrawer.vue:71-80`）、日志复制（`useServerLogViewer.ts:150-152`，成功/失败 toast）。
 
-**Markdown/代码。** `useMarkdownRenderer.ts` 懒加载 marked + marked-highlight + highlight.js + DOMPurify，消毒配置禁 `style/script/iframe/form/input/button` 等标签与 style 属性（:6-23）；代码围栏绘制改为 `renderMarkdownCodeBlock`：纯文本/未标注/未知语言、以及正文含 `<<<[TOOL_REQUEST]>>>` 等 VCP 协议标记的代码块一律转义为纯文本，不再回退 `highlightAuto`（避免协议块被误判为 XML 拆成 span），其余语言才走 highlight.js（:24-105,136-143）；EasyMDE 仅 `DailyNotesManager.vue:149-156` 懒加载使用。
+**Markdown/代码。** `useMarkdownRenderer.ts` 懒加载 marked + marked-highlight + highlight.js + DOMPurify，消毒配置禁 `style/script/iframe/form/input/button` 等标签与 style 属性（:6-23）；代码围栏绘制由 `renderMarkdownCodeBlock` 承担：纯文本、未标注、未知语言以及正文含 `<<<[TOOL_REQUEST]>>>` 等 VCP 协议标记的代码块一律转义为纯文本（避免协议块被误判为 XML 拆成 span），其余语言按显式标注走 highlight.js（:24-105,136-143）；EasyMDE 仅 `DailyNotesManager.vue:149-156` 懒加载使用。
 
 **虚拟滚动。** useVirtualScroll 用于笔记列表与服务器日志（`NoteList.vue:209`、`useServerLogViewer.ts:5`），属列表级工具而非全局机制。
 

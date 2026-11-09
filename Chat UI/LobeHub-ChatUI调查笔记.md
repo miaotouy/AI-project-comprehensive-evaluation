@@ -75,7 +75,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 `ModeSelector` 切换 Chat/Agent 模式；Agent 模式出现执行设备、工作目录/仓库、分支或 Worktree、审批模式和上下文窗口（这些面板在 `ChatInput/ActionBar` 的 `AgentMode`/`Params` 等目录）。模型按钮切换当前 topic 模型（topic 级快照语义见会话与消息管理笔记 1.3）。
 
-推理强度已并入模型选择器，不再保留独立 `ActionBar/Effort` 控件。`useReasoningEffortControl` 负责读取有效模型、模型实例配置和当前 topic 覆盖，并把更新写回相应作用域；模型菜单把可用强度作为同一选择流程的一部分显示。见 `src/features/ChatInput/hooks/useReasoningEffortControl.ts` 与 `src/features/ChatInput/ActionBar/Model/SelectorMenu.tsx`。Token 用量/预算明细条仍按对话、历史摘要、系统角色、工具与上限等来源拆分。
+推理强度作为模型选择器的一部分展示。`useReasoningEffortControl` 负责读取有效模型、模型实例配置和当前 topic 覆盖，并把更新写回相应作用域；模型菜单把可用强度作为同一选择流程的一部分显示。见 `src/features/ChatInput/hooks/useReasoningEffortControl.ts` 与 `src/features/ChatInput/ActionBar/Model/SelectorMenu.tsx`。Token 用量/预算明细条仍按对话、历史摘要、系统角色、工具与上限等来源拆分。
 
 ## 4. 发送、排队、流式反馈与停止
 
@@ -138,7 +138,7 @@ LobeHub 的聊天工作台由会话导航（Topic 侧栏）、消息区与 Lexic
 
 ### 8.3 工具审批快捷键
 
-- `ApprovalActions.tsx:229-276` 支持 1/2/3…（数字选行）、↑/↓（切换选项）、Enter（提交），并正确跳过 INPUT/TEXTAREA/contentEditable 焦点（243 行）与组合键（245 行）。与旧实现不同，监听器不再每张卡片各挂一个 `window` listener，改为经 `registerPendingHotkeyCard`（282-296 行）注册到共享 arbiter（`packages/shared-tool-ui/src/pendingHotkeys.ts:38-46`）：arbiter 只挂一个 `window keydown`，按“包含事件目标的卡片优先，否则最近注册的卡片”把每次按键分派给**恰好一张**卡片（28-32 行），避免多张审批卡同时响应；containment 覆盖 `data-pending-hotkey-scope` 标记的 InterventionBar/全局审批卡（287-293 行）。选择拒绝后自动聚焦原因输入框（221-227 行），该输入框有独立的 Enter/↑ 处理（298-310 行）。视觉上选项带编号（365 行）。
+- `ApprovalActions.tsx:229-276` 支持 1/2/3…（数字选行）、↑/↓（切换选项）、Enter（提交），并正确跳过 INPUT/TEXTAREA/contentEditable 焦点（243 行）与组合键（245 行）。监听器经 `registerPendingHotkeyCard`（282-296 行）注册到共享 arbiter（`packages/shared-tool-ui/src/pendingHotkeys.ts:38-46`）：arbiter 只挂一个 `window keydown`，按“包含事件目标的卡片优先，否则最近注册的卡片”把每次按键分派给**恰好一张**卡片（28-32 行），避免多张审批卡同时响应；containment 覆盖 `data-pending-hotkey-scope` 标记的 InterventionBar/全局审批卡（287-293 行）。选择拒绝后自动聚焦原因输入框（221-227 行），该输入框有独立的 Enter/↑ 处理（298-310 行）。视觉上选项带编号（365 行）。
 
 ## 9. 桌面通知与跨平台连续性
 

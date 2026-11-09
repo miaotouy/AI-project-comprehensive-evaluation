@@ -366,7 +366,7 @@ target:
 
 ### 5.6 附件打开的安全分支与音频播放器
 
-- **Python 附件不执行**：`renderAttachments` 识别 `.py` 附件（`messageRenderer.js:3509-3521`），点击时先阻断事件冒泡，使聊天区全局链接委托不再接管，改调 `electronAPI.openPythonAttachmentInTextEditor`（`modules/ipc/fileDialogHandlers.js:249-286`）用文本查看器打开；失败时 toast 报错。这是对旧行为"按系统文件关联二次打开可能直接触发 Python 执行"的收紧。
+- **Python 附件不执行**：`renderAttachments` 识别 `.py` 附件（`messageRenderer.js:3509-3521`），点击时先阻断事件冒泡，使聊天区全局链接委托不再接管，改调 `electronAPI.openPythonAttachmentInTextEditor`（`modules/ipc/fileDialogHandlers.js:249-286`）用文本查看器打开；失败时 toast 报错。
 - **音频播放器**：统一 DOM 后处理入口在末尾调用 `enhanceAudioPlayers`（`messageRenderer.js:3560-3690`），把原生 `<audio controls>` 替换为 `.vcp-audio-player` 自绘控件（标题、进度、音量、静音、下载按钮），以 aria-label 标注，播放新音频时暂停其他音频；附件音频与 Markdown 内音频一并覆盖。
 
 ## 6. 流式渲染引擎

@@ -98,7 +98,7 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 各类运行形态主链确认（静态，未启动 Gateway/timer/渠道）。依据见 [主动Agent与后台任务调查笔记](../主动Agent与后台任务/OpenClaw-主动Agent与后台任务调查笔记.md)。
 
 - **运行形态不是单一任务系统**：当前照照的主动运行分 cron/automations、heartbeat、hooks/webhooks、后台 CLI exec、detached subagent 五种，共享 Gateway 生命周期与结果交付设施，各自的状态 owner 不同。
-- **cron/automations（最完整的后台主链）**：Agent 用 `automations` 工具、Gateway cron RPC 或 CLI 保存 job；到期由 CronService 认领，SQLite `cron_jobs` + `cron_run_receipts` 提供 durable reservation/running fence，cron history owner 在 task_runs 保存日程运行历史，通用 tasks RPC 已移除。支持 at/every/cron 时间排程与 on-exit、stream 触发；main job 经 system event + heartbeat 重入主会话，isolated/current 用 detached run session；默认并发上限 8，支持退避重试、连续失败告警、10 次自动禁用、启动 catch-up 与 stale receipt 恢复。
+- **cron/automations（最完整的后台主链）**：Agent 用 `automations` 工具、Gateway cron RPC 或 CLI 保存 job；到期由 CronService 认领，SQLite `cron_jobs` + `cron_run_receipts` 提供 durable reservation/running fence，cron history owner 在 task_runs 保存日程运行历史。支持 at/every/cron 时间排程与 on-exit、stream 触发；main job 经 system event + heartbeat 重入主会话，isolated/current 用 detached run session；默认并发上限 8，支持退避重试、连续失败告警、10 次自动禁用、启动 catch-up 与 stale receipt 恢复。
 - **heartbeat 与 wake bus**：周期 monitor 是 system-owned cron job（默认周期 30m）；hook/cron/后台 task 等进入同一 wake bus，按 agent/session 分组合并、每 target 最多一个活跃 heartbeat turn；安静/可见结果由 outcome classifier 区分，结构化结果写 `heartbeat_outcomes`，不打扰用户时不发消息。
 - **hooks/webhooks**：Gateway HTTP 层只做认证/准入与幂等，不直接执行模型；`wake` hook 投递 system event，`agent` hook 把外部事件合成一次性 cron run。HTTP replay cache 仅进程内，不承担跨重启 ledger。
 - **后台 CLI exec**：yield/background 与进程完成竞争，后台路径保留 process session 控制身份，进程、输出和完成通知由 supervisor/activity/registry 协作；没有 runtime=cli 的通用任务行。取消分 durable 句柄与普通 supervisor 路径，完整重启接管未调查。

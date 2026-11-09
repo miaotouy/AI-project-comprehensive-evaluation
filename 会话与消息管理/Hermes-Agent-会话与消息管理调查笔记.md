@@ -15,9 +15,12 @@
 ## 结论摘要
 
 - **后端是唯一真相源**。会话、消息全部落在 profile 作用域下单一 SQLite（`state.db`），schema 版本 32。桌面端所有会话原子只是后端真相的缓存，遵循"合并而非覆盖、先乐观后诚实、拒绝乱序回写"的更新原则（`apps/desktop/AGENTS.md`）。
-- **写入者已收敛为单写者**：经典 CLI 不再直接持有写句柄。`hermes_cli/gateway_session_store.py` 把 `HermesCLI._session_db` 换成"只读 `state.db` 读取器 + gateway 动词"：读走只读连接，写走 `session.create`/`session.resume`/`session.mutate`/`session.detach`，尚未上 gateway 的写入直接抛 `GatewayClientError`（模块 docstring）。
-- **身份有两层**：进程内 UI 句柄 `sid`（8 位 hex，`tui_gateway/methods_session.py`）与持久化 `session_key`（时间戳 + 6 位 hex，`tui_gateway/session_registry.py` 的 `_new_session_key`，响应里叫 `stored_session_id`）；压缩轮转生成新 key，经 `parent_session_id` + `end_reason='compression'` 连链，跨轮转稳定标识是派生字段 `_lineage_root_id`。
-- **子会话有四类**：分支（`_branched_from`）、压缩续链（父 `end_reason='compression'`）、子代理（`_delegate_from`）、以及本快照新增的重置（`_reset_from`）。重置在列表里作为独立会话可见，但仍保留 `parent_session_id` 以维持血缘（`hermes_state_common.py:228-247`）。
+- **写入者已收敛为单写者**：经典 CLI 不再直接持有写句柄，`HermesCLI._session_db` 被换成「只读 `state.db` 读取器 + gateway 动词」的组合，读取走只读连接（`hermes_cli/gateway_session_store.py`）；尚未上 gateway 的写入直接抛 `GatewayClientError`。
+  写入按四个网关动词分流：`session.create`、`session.resume`、`session.mutate`、`session.detach`（模块 docstring）。
+- **身份有两层**：进程内 UI 句柄是 `sid`（8 位 hex），落库主键是 `session_key`（时间戳 + 6 位 hex），后者在响应里叫 `stored_session_id`。
+  - `sid` 的生成在 `tui_gateway/methods_session.py`，`session_key` 由 `tui_gateway/session_registry.py` 的 `_new_session_key` 生成。
+  - 压缩轮转生成新 key，经 `parent_session_id` 与 `end_reason='compression'` 连链；跨轮转稳定的标识是派生字段 `_lineage_root_id`。
+- **子会话有四类**：分支、压缩续链、子代理与重置，各由来源标记判定，列表可见性也按此区分（判定 SQL 见 §1.2）。分支用 `_branched_from`，压缩续链看父行 `end_reason='compression'`，子代理用 `_delegate_from`；重置用 `_reset_from`，它在列表里作为独立会话可见，仍保留 `parent_session_id` 以维持血缘（`hermes_state_common.py:228-247`）。
 - **消息持久化与执行受理分层**。关系表一行一条消息，软状态区分活动和压缩归档；Agent 增量 flush 使用内存 marker 去重。规范网关另持久化输入受理与执行代际：同主体、目标会话、请求 id 的相同 payload 返回原回执，变更 payload 报冲突；owner 重启把已开始的旧代际工作结算为 unknown，阻塞后续队列，避免自动重复副作用（[受理事务](../../hermes-agent/hermes_state_runtime.py#L130-L177)、[恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
 - **写区段按 session_id 串行**：`gateway/turn_lease.py` 的回合租约把"[载入历史 → 运行 → flush]"整段锁在解析后的 session_id 上，路由键多对一（第二次 /resume、委派钉住、topic tip 走查）时防止两份 flush 交叉；等待超时 fail-closed。
 - **惰性落行**：DB 行首次真实 turn 才创建，空草稿不留行；子代理首轮落行时写 `_delegate_from` 标记，删除时沿标记级联，分支/压缩子会话则"孤儿化不删"。
@@ -49,13 +52,17 @@
 
 ### 1.1 会话（Session）
 
-`sessions` 表 DDL 在 `hermes_state_common.py:461`，`SCHEMA_VERSION = 32`（`hermes_state_common.py:289`）。核心字段：
+`sessions` 表 DDL 在 `hermes_state_common.py:461`，`SCHEMA_VERSION = 32`（`hermes_state_common.py:289`）。字段按用途分六组：
 
-- 标识与血缘：`id` 主键即持久 `session_key`；`parent_session_id` 是血缘/轮转链的唯一关联字段；
-- 入口与生命周期：`source`（`cli`/`tui`/`telegram`/`subagent`…）、`started_at`/`ended_at`/`end_reason`；
-- 标题与配置：`title`/`title_source`、`model_config` JSON（含 `_branched_from`/`_delegate_from`/`_reset_from` 标记）；
-- 提示词：`system_prompt`/`system_prompt_hash`，v25 起提示词去重到 `system_prompts` 表（`hermes_state_common.py:456`）；
-- 软状态与聚合：`archived`/`pinned`、`message_count`/`tool_call_count`/token 计数、压缩冷却字段、`cwd`/`git_branch`/`git_repo_root`/`last_activity_at`。
+| 字段组 | 字段 | 说明 |
+|---|---|---|
+| 标识与血缘 | `id`、`parent_session_id` | `id` 主键即持久 `session_key`；`parent_session_id` 是血缘与轮转链的唯一关联字段 |
+| 入口 | `source` | 取 `cli`/`tui`/`telegram`/`subagent` 等入口值 |
+| 生命周期 | `started_at`、`ended_at`、`end_reason` | 会话起止时间与结束原因 |
+| 标题与配置 | `title`、`title_source`、`model_config` | `model_config` 为 JSON，含 `_branched_from`/`_delegate_from`/`_reset_from` 标记 |
+| 提示词 | `system_prompt`、`system_prompt_hash` | v25 起提示词去重到 `system_prompts` 表（`hermes_state_common.py:456`） |
+| 软状态与聚合 | `archived`、`pinned`、`message_count`、`tool_call_count` | 软状态与计数，另含 token 计数与压缩冷却字段 |
+| 工作环境 | `cwd`、`git_branch`、`git_repo_root`、`last_activity_at` | 工作目录、git 仓库与最近活动时间 |
 
 会话 ID 生成统一为"时间戳 + 6 位随机 hex"：网关实现 `_new_session_key`（`tui_gateway/session_registry.py:392`），gateway 消息平台用 8 位 hex（`gateway/session.py`）。
 
@@ -72,7 +79,7 @@ TUI/桌面另有进程内句柄 `sid`，返回给前端的是它，DB 行主键�
 
 标记与父 id 绑定：续链会话原样继承 `model_config`，因此指向别行的标记属继承而非 fork（`_LINEAGE_MARKER_SQL` 的 docstring）。列表可见行 = 根 + 分支/重置子会话（`_LISTABLE_CHILD_SQL`），不含子代理与压缩续链。
 
-链遍历工具（实现已迁到兄弟模块）：
+链遍历工具由兄弟模块提供：
 
 - `get_compression_lineage`（`hermes_state_compression.py:916`）：沿压缩链取全链；
 - `get_compression_tip`（`:897`）：只沿 compression 边取 tip；
@@ -88,19 +95,25 @@ TUI/桌面另有进程内句柄 `sid`，返回给前端的是它，DB 行主键�
 
 ### 1.3 消息行（ChatMessage / SessionMessage）
 
-后端 `messages` 表 DDL 在 `hermes_state_common.py:531`，一行一条消息：
+后端 `messages` 表 DDL 在 `hermes_state_common.py:531`，一行一条消息，字段按用途分六组：
 
-- `role`（user/assistant/tool）、`content`、`tool_call_id`/`tool_calls`（JSON 数组）/`tool_name`/`effect_disposition`；
-- `reasoning`/`reasoning_content`/`reasoning_details`、`codex_reasoning_items`/`codex_message_items`；多模态 content 经 `_encode_content` JSON 编码（`hermes_state_messages.py:140`）；
-- `timestamp`、`finish_reason`、`token_count`；`platform_message_id`（网关平台侧 ID）；
-- 状态：`active`、`compacted`、`observed`；`display_kind`/`display_metadata`（`model_switch`/`personality_switch` 等时间线条目、`hidden`）；
-- `api_content`：发给 API 的字节保真 sidecar，恢复时原样返回（`_rows_to_conversation`，`hermes_state_messages.py:1571`）；重建历史时由 `drop_stale_api_content`（`agent/turn_context.py`）丢弃过期 sidecar。
+| 字段组 | 字段 | 说明 |
+|---|---|---|
+| 角色与内容 | `role`、`content` | `role` 取 user/assistant/tool |
+| 工具关联 | `tool_call_id`、`tool_calls`、`tool_name`、`effect_disposition` | `tool_calls` 为 JSON 数组 |
+| 推理与多模态 | `reasoning`、`reasoning_content`、`reasoning_details`、`codex_reasoning_items`、`codex_message_items` | 多模态 content 经 `_encode_content` 做 JSON 编码（`hermes_state_messages.py:140`） |
+| 时序与外部标识 | `timestamp`、`finish_reason`、`token_count`、`platform_message_id` | `platform_message_id` 是网关平台侧 ID |
+| 软状态 | `active`、`compacted`、`observed` | 三个软状态位 |
+| 展示投影 | `display_kind`、`display_metadata` | `display_metadata` 承载 `model_switch`/`personality_switch` 等时间线条目与 `hidden` |
+| API 保真 | `api_content` | 发给 API 的字节保真 sidecar，恢复时原样返回（`_rows_to_conversation`，`hermes_state_messages.py:1571`） |
+
+重建历史时，过期的 `api_content` 由 `drop_stale_api_content`（`agent/turn_context.py`）丢弃。
 
 索引：主索引 `idx_messages_session(session_id, timestamp)` 与 `idx_messages_session_id(session_id, id)`、assistant 且 `tool_calls` 非空的专用部分索引、`idx_messages_session_active` 延迟索引段，均在 `hermes_state_common.py` 的索引定义区。
 
 工具结果与 assistant 调用靠 `tool_call_id` 关联，无独立子表。附件无表：图片经 `@image:` 指令或 vision 预分析转文本，落库时多模态图片部分被压成占位（`agent/tool_dispatch_helpers.py`）。
 
-桌面端模型 `ChatMessage` 在 `apps/desktop/src/lib/chat-messages/index.ts`（原单文件已拆成目录），字段分身份与角色、parts、状态（pending/error/hidden/interim）、外部引用（attachmentRefs/rowId/reactions）；后端投影 `SessionMessage`（`apps/desktop/src/types/hermes.ts`）经 `toChatMessages` 转为渲染模型。part 渲染细节见消息渲染器笔记。
+桌面端的渲染模型是 `ChatMessage`（`apps/desktop/src/lib/chat-messages/index.ts`），字段分为身份与角色、parts、状态（pending/error/hidden/interim）与外部引用（attachmentRefs/rowId/reactions）四组；后端的 `SessionMessage`（`apps/desktop/src/types/hermes.ts`）经 `toChatMessages` 转成该模型。part 渲染细节见消息渲染器笔记。
 
 ## 2. 事实源、单写者与持久化
 
@@ -112,27 +125,35 @@ TUI/桌面另有进程内句柄 `sid`，返回给前端的是它，DB 行主键�
 - **网关单写者**：`hermes_cli/gateway_session_store.py` 用只读 reader 做读取，把写入翻译成 gateway 动词；未覆盖的写入抛 `GatewayClientError`（模块 docstring 与 `delete_session`/`end_session` 等适配方法）；
 - **worker 持久化 facade**：`agent/runtime_session_store.py` 明确"显式 worker 持久化入口，从不打开规范 SQLite"，并注明尚未切换现有 cron/child/compute 消费者（模块 docstring）。
 
-原有的每会话 JSON 快照写入器（`sessions.write_json_snapshots` 门控、默认关闭）已不在代码中；JSON 产物只剩调试与观察类（trajectory、moa-trace、spawn 树），不在消息读路径上。`session.save` 仍导出 JSON 到 `~/.hermes/sessions/saved/hermes_conversation_<ts>.json`（`tui_gateway/methods_session.py:2160`）。
+消息读路径只依赖 SQLite：代码中没有每会话 JSON 快照写入器（其门控为 `sessions.write_json_snapshots`，默认关闭），JSON 产物仅剩调试与观察类（trajectory、moa-trace、spawn 树）。`session.save` 仍会把会话导出成 JSON，落到 `~/.hermes/sessions/saved/hermes_conversation_<ts>.json`（`tui_gateway/methods_session.py:2160`）。
 
 `api_content` 是发给 API 的字节保真 sidecar；桌面端各会话原子只是后端真相的缓存投影。
 
 ### 2.2 落盘与崩溃安全
 
 - `_DB_PERSISTED_MARKER = "_db_persisted"`（`agent/context_compressor.py:326`）：内存消息 dict 上的去重标记（`_` 前缀保证不上 API 线），取代按对象身份集合去重；压缩路径引用同一常量（`agent/context_compressor_prune.py`）。
-- 落盘走 `_flush_messages_to_session_db_unlocked`：收集本轮新消息 → 单事务 `append_messages_batch`（`hermes_state_messages.py:430`，支持 `chunk_rows` 分块事务）→ 成功才盖章；失败不盖章、清空扫描前缀，下轮全量重扫。`_persist_session` 在每处退出路径（完成、错误、关闭）调用它。
+- 落盘走 `_flush_messages_to_session_db_unlocked`：先收集本回合新增的消息，再单事务批量 `append_messages_batch`（`hermes_state_messages.py:430`，支持用 `chunk_rows` 分块），成功才给消息盖章；失败则不盖章并清空扫描前缀，下回合全量重扫。完成、出错、关闭三条退出路径都会调它，调用方是 `_persist_session`。
 - 工具执行增量落库：`_flush_session_db_after_tool_progress`（`agent/tool_executor.py:201`）在多个工具批次点调用，应对工具杀死进程的场景。
-- 崩溃痕迹：`tui_gateway/turn_marker.py` 写 `<home>/desktop/interrupted_turns.json`（`_marker_path`），`record_turn_start`（`:124`）写入、`clear_turn_marker`（`:140`）在任何"客户端已见到结果"的结局清除，`session.resume` 的自动续跑读它。标记上限 32 条/24 小时/64KB 提示词，并用跨进程文件锁（`hermes_cli.auth._file_lock`）避免同机多后端互相复活标记；每条标记带写入者 pid 与启动时间，用于区分"标记存在"与"写者已死"（`#94778`）。
+- 崩溃痕迹是一个 JSON 标记文件，由 `tui_gateway/turn_marker.py` 读写。
+
+  路径为 `<home>/desktop/interrupted_turns.json`（由 `_marker_path` 生成）：回合开始时 `record_turn_start`（`:124`）记录，凡「客户端已见到结果」的结局都由 `clear_turn_marker`（`:140`）清除。
+
+  `session.resume` 的自动续跑读这个文件，据此判断是否需要重放。
+
+  标记上限 32 条 / 24 小时 / 64KB 提示词，写入时取跨进程文件锁（`hermes_cli.auth._file_lock`），避免同机多后端互相复活标记；每条标记带写入者 pid 与启动时间，用来区分「标记存在」与「写者已死」（`#94778`）。
 - 中途断连的另一层恢复是 `_fail_inflight_turn`（`tui_gateway/session_history.py:447`）保留的可重放快照，经 `session.resume` 的 `inflight` payload 承载，见对话请求笔记 §6。
 
 ### 2.3 标题（两段式 + 带来源）
 
 `agent/title_generator.py` 的命名是两段式 + 带来源：
 
-- **即时标题（derived）**：会话首个 turn 的 prologue 内同步执行（`agent/turn_context.py:201` 的 `_maybe_title_session_at_turn_start`，经 `maybe_auto_title`（`agent/title_generator.py:736`）派发），无模型调用、不失败：
-  - `apply_instant_title`（`agent/title_generator.py:621`）调 `derive_title`（`:343`）从开场消息取首个有效行、折叠空白、按 `MAX_DERIVED_TITLE_CHARS=48`（`:54`）词边界截断，用户发出首条消息后立即可见；
-  - 斜杠命令等控制包装被剥离（`is_titleable_user_message`，`:333`）；
-  - 随后 `auto_title_session`（`:642`）在后台线程用小模型升级（约束 JSON `{"title": ...}`）。
-- **来源与覆盖**：标题来源按 derived < llm < user 排序，写入是"优先级检查 + 写入"的单事务 compare-and-swap：`set_auto_title`（`hermes_state_titles.py:170`，内部 `_set_session_title` `:83` 与 `_set_session_title_in_transaction` `:94`）只在更高来源时覆盖；用户 `/title` 记 `user` 来源且永不被覆盖；legacy NULL 行按 user 计，自动标题只填空；唯一索引冲突时经 `get_next_title_in_lineage`（`hermes_state_titles.py:222`）加 `#N`。
+- **即时标题（derived）**：在会话首个 turn 的 prologue 里同步生成，无模型调用、不失败。入口是 `_maybe_title_session_at_turn_start`（`agent/turn_context.py:201`），经 `maybe_auto_title`（`agent/title_generator.py:736`）派发：
+  - `apply_instant_title`（`agent/title_generator.py:621`）调 `derive_title`（`:343`）取开场消息的首个有效行、折叠空白，并按 `MAX_DERIVED_TITLE_CHARS=48`（`:54`）在词边界截断，用户发出首条消息后立即可见；
+  - 斜杠命令等控制包装先被剥离（`is_titleable_user_message`，`:333`）；
+  - 随后 `auto_title_session`（`:642`）在后台线程用小模型升级，约束输出为 JSON `{"title": ...}`。
+- **来源与覆盖**：标题来源按 derived < llm < user 排序，覆盖判断与写入在同一条事务内完成，相当于一次带优先级比较的 compare-and-swap。自动标题入口是 `set_auto_title`（`hermes_state_titles.py:170`），只在来源优先级更高时改写，内部落到 `_set_session_title`（`:83`）与 `_set_session_title_in_transaction`（`:94`）。
+
+  用户 `/title` 记为 `user` 来源，此后自动标题不再覆盖；legacy 的 NULL 来源行按 user 计，自动标题只填空缺。同链重名时由 `get_next_title_in_lineage`（`hermes_state_titles.py:222`）加 `#N` 后缀。
 - **压缩轮转携带标题**：轮转前取父标题，轮转后在新会话行重写同一标题并恢复原 provenance，不再对每个 fork/轮转重编号。
 - 桌面/TUI 侧通过 `session.title` 事件即时刷新侧栏；未命名会话由新标题逻辑补名，TTS 模型/脚手架回合不触发命名。
 
@@ -163,10 +184,17 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 - `session.resume` 的恢复流程：
   1. `resolve_resume_session_id`（`hermes_state_messages.py:1452`）沿压缩链跳到活 tip；
   2. `reopen_session` 清 `ended_at`/`end_reason`（`hermes_state_sessions.py:519`）；
-  3. `get_resume_conversations`（`hermes_state_messages.py:1667`）一次 SELECT 出两份投影——模型喂入用修复交替版、显示用原样版，`sanitize_replay_history`（`agent/replay_cleanup.py:147`）去掉悬空 tool 尾巴；
-  4. resume 有转录安全上限：`sessions.max_resume_messages`（默认 20,000，0 关闭；`resolved_max_resume_messages` 在 `hermes_state.py:109`），超限抛 `SessionResumeTooLargeError`（`hermes_state.py:117`），错误信息指向导出与 `max_resume_messages` 调参。导出侧另有 `sessions.max_export_messages`（`resolved_max_export_messages`）。
-- `session.close` → `_teardown_popped_session` → `_finalize_session`（`tui_gateway/session_lifecycle.py:430`）做三件事：flush 未写消息（明确不带 `conversation_history`，避免全部消息按身份视为已持久化而跳过）、调 `on_session_end` hook、`end_session` 标记 `ended_at`/`end_reason`（first-reason-wins；gateway 来源会话不归 TUI 所有不标记）。全程不删数据。
-- `session.save` 不写 DB，导出 JSON 到 `~/.hermes/sessions/saved/`（`tui_gateway/methods_session.py:2160`，含 system prompt）。
+  3. 取恢复历史时一次 SELECT 出两份投影——模型喂入用修复交替版、显示用原样版（`get_resume_conversations`，`hermes_state_messages.py:1667`），悬空的 tool 尾巴由 `sanitize_replay_history`（`agent/replay_cleanup.py:147`）去掉；
+  4. resume 有转录安全上限：配置键 `sessions.max_resume_messages` 默认 20,000、设 0 关闭，取值经 `resolved_max_resume_messages` 解析（`hermes_state.py:109`）。
+
+     超限时抛 `SessionResumeTooLargeError`（`hermes_state.py:117`），错误信息指向导出与 `max_resume_messages` 调参；导出侧另有 `sessions.max_export_messages`（`resolved_max_export_messages`）。
+- `session.close` 的收尾由 `_finalize_session` 完成（`tui_gateway/session_lifecycle.py:430`，经 `_teardown_popped_session` 转调），做三件事：
+  - flush 未写消息，此处特意不传 `conversation_history`，否则全部消息会按对象身份被当成已持久化而跳过；
+  - 调 `on_session_end` hook；
+  - 由 `end_session` 写入 `ended_at`/`end_reason`。
+
+  结束原因按 first-reason-wins 保留首个，gateway 来源的会话不归 TUI 所有、不标记。这一步全程只改状态，不删数据。
+- `session.save` 不写库，只把会话连同 system prompt 导出成 JSON，落在 `~/.hermes/sessions/saved/`（`tui_gateway/methods_session.py:2160`）。
 
 ### 3.4 删除与归档
 
@@ -179,15 +207,24 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 - 崩溃恢复：规范网关保存受理账本，旧 owner 已开始的输入变 unknown 并阻塞后续输入；legacy tui_gateway 的 resume 另消费中断标记。Agent 的 flush 时点包括工具进展与回合终结，turn 结束写库只覆盖后者（[代际恢复](../../hermes-agent/hermes_state_runtime.py#L453-L464)）。
 - 压缩轮转恢复：resume 沿压缩链跳到活 tip，`get_resume_conversations` 提供模型喂入与显示两份投影；`_lineage_root_id` 提供跨轮转稳定身份（`hermes_state_local.py:381`、`hermes_state_search.py:1432`），桌面端 pin、路由匹配都基于它。
 - 保留语义：轮转与原地压缩都以 `active=0`/`compacted=1` 保留旧行，压缩归档行仍可搜索；`end_session` 只标记不删数据；硬删除无回收站。
-- `/retry`、编辑/rewind 截断均改为保留归档历史的破坏性改写：`replace_messages` 带 `active_only`/`archive_dropped` 语义（`hermes_state_messages.py:720`），旧轮次不再从消息列表蒸发、但落盘为可搜索归档行。
+- `/retry`、编辑/rewind 截断都是保留归档历史的破坏性改写：`replace_messages` 带 `active_only`/`archive_dropped` 语义（`hermes_state_messages.py:720`），被替换的轮次落盘为可搜索归档行。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-- **编辑 = 截断 + 重发**。无 `session.edit`/`message.edit` RPC（检查范围：`tui_gateway/contracts/sessions.py` 的方法声明与桌面端消息操作代码）。数据变更分三处：桌面入口点开编辑 composer 后发送即"interrupt + rewind"；参数构造带 `truncate_before_user_ordinal`；服务端先 `db.replace_messages`（`hermes_state_messages.py:720`，单事务 DELETE+重插，压缩已结束会话抛 `CompressionSessionClosedError`）再改内存历史并 `history_version += 1`。
+- **编辑 = 截断 + 重发**：编辑没有独立的 RPC 入口（`session.edit` 与 `message.edit` 均不存在，检查范围是 `tui_gateway/contracts/sessions.py` 的方法声明与桌面端消息操作代码）。数据变更分三处：
+  1. 桌面端点开编辑 composer 后发送，等于「中断再回退」（interrupt + rewind）；
+  2. 请求参数带 `truncate_before_user_ordinal`，把历史截断到目标轮次；
+  3. 服务端以单事务 DELETE + 重插替换消息（`db.replace_messages`，`hermes_state_messages.py:720`；压缩已结束的会话抛 `CompressionSessionClosedError`），随后改写内存历史并把 `history_version` 加一。
 - **删除**：仅会话级，无单消息删除（检查范围同上）。软删原语 `rewind_to_message`（`hermes_state_messages.py:1850`，id≥target 全部 `active=0`）只服务 `/rewind` 命令；`session.undo` 是进程内历史截断。
-- **重试**：无 `session.retry`（检查范围同上）；三套实现共享"截断到最后一个真实 user turn 后重发"语义，真实 user turn 由 `is_user_originated_turn` 判定（`agent/context_compressor.py:5735`：`role=="user"` 且无 `display_kind`、非压缩摘要/合成轮）。入口有 TUI `/retry` 与 slash、桌面 reload/regenerate、CLI `retry_last()`。
+- **重试**：重试的共同语义是「截断到最后一个真实 user turn 后重发」，入口有 TUI 的 `/retry` 与 slash、桌面 reload/regenerate、CLI `retry_last()`。真实 user turn 的判据是 `role=="user"`、无 `display_kind`、非压缩摘要与合成轮，实现见 `is_user_originated_turn`（`agent/context_compressor.py:5735`）。`session.retry` 不存在（检查范围同上）。
 - **续写**：无 `/continue` 命令与独立 RPC，就是普通 `prompt.submit` 文本。空响应恢复会重放空 assistant 消息，持久化前由 `_drop_trailing_empty_response_scaffolding`（`agent/session_persistence.py:530`）删除。
-- **分支**：`session.branch`（契约在 `tui_gateway/contracts/sessions.py`）分四步：可选 `count` 截断复制历史 → 建新 `session_key` + `model_config={"_branched_from": old_key}` + `parent_session_id=old_key` → `append_messages_batch` 分块复制（保留原 timestamp）→ 标题经 `get_next_title_in_lineage` 生成 `"xxx #2"`。父会话保持 live，返回 `{session_id, stored_session_id, parent, messages}`。分支种子在首次 prompt 时经 `_persist_branch_seed`（`tui_gateway/session_workdir.py:682`）落库；桌面 fork 在无 live 源时走 `session.create` + `parent_session_id` + messages 种子。
+- **分支**：分支从现有会话派生出一个新会话，父会话保持 live，接口返回 `{session_id, stored_session_id, parent, messages}`（契约在 `tui_gateway/contracts/sessions.py` 的 `session.branch`）。执行分四步：
+  1. 可选按 `count` 截断后复制历史；
+  2. 生成新 `session_key`，写入 `model_config={"_branched_from": old_key}` 与 `parent_session_id=old_key`；
+  3. 用 `append_messages_batch` 分块复制消息，保留原 timestamp；
+  4. 标题经 `get_next_title_in_lineage` 生成 `"xxx #2"`。
+
+  分支种子在首次 prompt 时经 `_persist_branch_seed`（`tui_gateway/session_workdir.py:682`）落库；桌面 fork 在没有 live 源时改走 `session.create`，加 `parent_session_id` 与消息种子。
 - **版本切换**：无 checkpoint 版本 RPC。相关能力分三类：读取全量历史 `session.history`（`include_ancestors=True`）；运行中干预 `session.steer`/`session.redirect`（不新增持久化对象，执行语义在对话请求与上下文笔记 §7）；撤销 `session.undo`（拒绝 running 中调用，按 `is_user_originated_turn` 找最后一个真实 user turn 截断进程内历史并 `history_version += 1`）。
 
 ## 5. 列表、分页、搜索与定位
@@ -196,7 +233,8 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 
 - TUI `session.list`：`limit` 默认 200、单页无 offset，超取后 Python 过滤 deny 列表 `{"kanban","tool"}`，按最近活跃排序。
 - REST `GET /api/sessions`（`hermes_cli/web_routers/sessions.py`）支持 `limit`（默认 20、上限 100）、`offset`、`min_messages`、`archived`、`source(s)` 等过滤。
-- 底层 `list_sessions_rich`（`hermes_state_sessions.py:1303`）单查询完成：预览取首个 user 消息；`include_pinned` 把被 LIMIT 挤出的置顶会话回填；按压缩链递归 CTE 取 tip 的 `effective_last_active` 并在 SQL 层 LIMIT；压缩链 root 投影到活 tip 做逻辑去重；默认排除子代理与压缩续链会话（`_LISTABLE_CHILD_SQL` + `_delegate_from IS NULL`）。网关侧同语义适配在 `hermes_cli/gateway_session_store.py:448`。
+- 底层列表由 `list_sessions_rich`（`hermes_state_sessions.py:1303`）用一条查询完成：预览取首个 user 消息，`include_pinned` 把被 LIMIT 挤出的置顶会话回填，按压缩链递归 CTE 取 tip 的 `effective_last_active` 并在 SQL 层 LIMIT。
+- 列表默认排除子代理与压缩续链会话（`_LISTABLE_CHILD_SQL` 加 `_delegate_from IS NULL`），压缩链 root 投影到活 tip 做逻辑去重；网关侧同语义适配在 `hermes_cli/gateway_session_store.py:448`。
 - 桌面侧栏走 `/api/profiles/sessions/sidebar` 分 profile 分片（`apps/desktop/src/hermes.ts` 的 `listAllProfileSessions` 与批量 sidebar 请求，含 recents/cron/messaging 三切片与旧端点兼容回退），`SIDEBAR_SESSIONS_PAGE_SIZE` + `loadMoreSessions` 翻页；侧栏界面工作流与虚拟列表呈现见 Chat UI 笔记 §1。
 
 ### 5.2 消息列表
@@ -235,8 +273,12 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 
 - **绑定粒度是会话级**：每次创建/恢复/分支会话都构造独立 Agent 并初始化会话状态（`agent/agent_init.py:1096` 的 `_init_session_state`）；`model_override`/`create_reasoning_override` 为每会话字段。
 - **运行中 `/model` 切换** = `_apply_model_switch`（`tui_gateway/model_switch.py:311`）换 agent 客户端，工具集不中途更换；切换以 `model_switch` 的 `display_kind` 时间线条目入史，不计入 user 轮计数。
-- **子代理**：`_build_child_agent`（`tools/delegate_tool.py:203`）构造独立 `AIAgent`（platform 为 subagent，共享父会话句柄与 `parent_session_id`），子代理有独立 `session_id`，首轮惰性落行时写 `_delegate_from` 标记。列表隐藏是双层：`_LISTABLE_CHILD_SQL` 加 `_delegate_from IS NULL`；删除时沿标记递归级联（`_collect_delegate_child_ids`），未标记子会话走"孤儿化不删"防环。
-- **工具调用的消息表示**：持久化上 assistant 行带 `tool_calls`，结果落 `{"role":"tool", tool_call_id, ...}` 行，高风险工具内容包 `<untrusted_tool_result>`（`agent/tool_dispatch_helpers.py`），中断/取消工具写 `effect_disposition="none"` 占位（`agent/tool_executor.py`）；UI 投影里 tool 行渲染为 `{role:"tool", name, context}`（`_history_to_messages`，`tui_gateway/session_history.py:297`），assistant 的 `tool_calls` 不单独成行。
+- **子代理**：每种子代理由 `_build_child_agent`（`tools/delegate_tool.py:203`）构造独立的 `AIAgent`，platform 记为 subagent，共享父会话句柄与 `parent_session_id`，但有自己的 `session_id`，首轮惰性落行时写入 `_delegate_from` 标记。
+
+  列表隐藏由两层条件叠加：先按 `_LISTABLE_CHILD_SQL` 过滤，再要求 `_delegate_from IS NULL`。删除时沿 `_delegate_from` 标记递归级联（`_collect_delegate_child_ids`），未带标记的子会话只做孤儿化保留，以防删除成环。
+- **工具调用的消息表示**：持久化层上，assistant 行携带 `tool_calls`，每条结果单独落一行 `{"role":"tool", tool_call_id, ...}`；高风险工具的内容包在 `<untrusted_tool_result>` 里（`agent/tool_dispatch_helpers.py`），被中断或取消的工具写 `effect_disposition="none"` 占位（`agent/tool_executor.py`）。
+
+  UI 投影里这些行改渲染为 `{role:"tool", name, context}`（`_history_to_messages`，`tui_gateway/session_history.py:297`），assistant 的 `tool_calls` 不单独成行。
 - **附件（数据侧）**：无附件表，图片经 `@image:` 指令或 vision 预分析转文本，落库时多模态图片部分被压成占位；桌面拖放/上传管线属于 Chat UI 笔记 §3，提交注入点属于对话请求与上下文笔记 §9。
 
 ## 9. 设计取舍与已确认边界
@@ -268,13 +310,116 @@ JSON-RPC 方法在 `tui_gateway/contracts/sessions.py` 中以声明式契约定�
 
 ## 12. 关键源码索引
 
-- Schema：`hermes_state_common.py`——`SCHEMA_VERSION=32`（:289）、`system_prompts`（:456）、`sessions`（:461）、`messages`（:531）、子会话 SQL 片段（:171-247）。
-- SessionDB 兄弟模块：`hermes_state_sessions.py`（`create_session` :416、`_insert_session_row` :369、`reopen_session` :519、`set_session_archived` :953、`list_sessions_rich` :1303、`_session_lineage_root_to_tip` :1526、`delete_session_if_empty` :1791、`_collect_delegate_child_ids` :193）、`hermes_state_messages.py`（`append_messages_batch` :430、`replace_messages` :720、`archive_and_compact` :907、`resolve_resume_session_id` :1452、`get_messages_as_conversation` :1517、`_rows_to_conversation` :1571、`get_resume_conversations` :1667、`rewind_to_message` :1850）、`hermes_state_compression.py`（`publish_compression_child` :373、`get_compression_tip` :897、`get_compression_lineage` :916）、`hermes_state_titles.py`（`_set_session_title` :83、`set_auto_title` :170、`get_next_title_in_lineage` :222）、`hermes_state_search.py`（`search_messages` :1257、`search_sessions_by_id` :1432）、`hermes_state_local.py`（`_lineage_root_id` 使用 :381）。
-- 运行与持久化：`run_agent.py`（`_ensure_db_session` :315）、`agent/session_persistence.py`（`_persist_session` :509、`_flush_messages_to_session_db_unlocked` :548、`_drop_trailing_empty_response_scaffolding` :530）、`agent/context_compressor.py`（`_DB_PERSISTED_MARKER` :326、`is_user_originated_turn` :5735）、`agent/tool_executor.py`（`_flush_session_db_after_tool_progress` :201）、`agent/replay_cleanup.py`（`sanitize_replay_history` :147）、`agent/runtime_session_store.py`（worker 持久化 facade）。
-- 单写者与租约：`hermes_cli/gateway_session_store.py`、`gateway/turn_lease.py`。
-- 网关方法：`tui_gateway/contracts/sessions.py`（方法契约）、`tui_gateway/session_{registry,workdir,lifecycle,compression,history}.py`、`tui_gateway/model_switch.py`、`tui_gateway/methods_session.py`（`session.save` :2160）。
-- 崩溃标记：`tui_gateway/turn_marker.py`（`record_turn_start` :124、`clear_turn_marker` :140）。
-- 标题：`agent/title_generator.py`（`MAX_DERIVED_TITLE_CHARS` :54、`is_titleable_user_message` :333、`derive_title` :343、`apply_instant_title` :621、`auto_title_session` :642、`maybe_auto_title` :736）、`agent/turn_context.py:201`。
-- 子代理：`tools/delegate_tool.py`（`_build_child_agent` :203）。
-- 外部会话导入：`hermes_cli/foreign_sessions.py`、`hermes_cli/session_recovery.py`、`apps/desktop/src/app/session-import/index.tsx`。
-- 桌面端数据投影：`apps/desktop/src/types/hermes.ts`（`SessionMessage`）、`apps/desktop/src/lib/chat-messages/index.ts`（`ChatMessage`、`toChatMessages`）、`apps/desktop/src/store/session.ts`（`mergeSessionPage`、`sessionPinId`、`lineageAliases`）、`apps/desktop/src/app/session/hooks/use-session-list-actions.ts`。
+索引按层归集：存储层是 schema 定义与 SessionDB 兄弟模块，运行层是 `agent/` 下的持久化、标题与工具实现，网关层是 `tui_gateway/` 的契约与适配，桌面投影在 `apps/desktop/src/`。符号后附的行号是当前快照中的定义位置，范围表示一段实现。
+
+### 存储层
+
+```text
+hermes_state_common.py            Schema 与表结构
+  SCHEMA_VERSION=32        :289
+  system_prompts           :456
+  sessions                 :461
+  messages                 :531
+  子会话 SQL 片段          :171-247
+
+hermes_state_sessions.py          会话行创建、归档、删除与列表
+  create_session           :416
+  _insert_session_row      :369
+  reopen_session           :519
+  set_session_archived     :953
+  list_sessions_rich       :1303
+  _session_lineage_root_to_tip  :1526
+  delete_session_if_empty  :1791
+  _collect_delegate_child_ids   :193
+
+hermes_state_messages.py          消息读写、截断与历史投影
+  append_messages_batch    :430
+  replace_messages         :720
+  archive_and_compact      :907
+  resolve_resume_session_id     :1452
+  get_messages_as_conversation  :1517
+  _rows_to_conversation    :1571
+  get_resume_conversations :1667
+  rewind_to_message        :1850
+
+hermes_state_compression.py       压缩轮转与链遍历
+  publish_compression_child     :373
+  get_compression_tip      :897
+  get_compression_lineage  :916
+
+hermes_state_titles.py            标题来源与去重
+  _set_session_title       :83
+  set_auto_title           :170
+  get_next_title_in_lineage     :222
+
+hermes_state_search.py
+  search_messages          :1257
+  search_sessions_by_id    :1432
+
+hermes_state_local.py
+  _lineage_root_id 使用    :381
+```
+
+### 运行、持久化与工具
+
+```text
+run_agent.py
+  _ensure_db_session       :315
+
+agent/session_persistence.py
+  _persist_session         :509
+  _flush_messages_to_session_db_unlocked    :548
+  _drop_trailing_empty_response_scaffolding :530
+
+agent/context_compressor.py
+  _DB_PERSISTED_MARKER     :326
+  is_user_originated_turn  :5735
+
+agent/tool_executor.py
+  _flush_session_db_after_tool_progress     :201
+
+agent/replay_cleanup.py
+  sanitize_replay_history  :147
+
+agent/runtime_session_store.py    worker 持久化 facade
+
+agent/title_generator.py
+  MAX_DERIVED_TITLE_CHARS  :54
+  is_titleable_user_message     :333
+  derive_title             :343
+  apply_instant_title      :621
+  auto_title_session       :642
+  maybe_auto_title         :736
+
+agent/turn_context.py      :201
+
+tools/delegate_tool.py
+  _build_child_agent       :203
+```
+
+### 网关契约与方法
+
+```text
+tui_gateway/contracts/sessions.py    方法契约
+tui_gateway/session_{registry,workdir,lifecycle,compression,history}.py
+tui_gateway/model_switch.py
+tui_gateway/methods_session.py       session.save :2160
+tui_gateway/turn_marker.py
+  record_turn_start        :124
+  clear_turn_marker        :140
+
+hermes_cli/gateway_session_store.py  单写者适配
+gateway/turn_lease.py                回合租约
+hermes_cli/foreign_sessions.py       外部会话导入
+hermes_cli/session_recovery.py       旧库恢复与版本修补
+apps/desktop/src/app/session-import/index.tsx
+```
+
+### 桌面端数据投影
+
+```text
+apps/desktop/src/types/hermes.ts              SessionMessage
+apps/desktop/src/lib/chat-messages/index.ts   ChatMessage、toChatMessages
+apps/desktop/src/store/session.ts             mergeSessionPage、sessionPinId、lineageAliases
+apps/desktop/src/app/session/hooks/use-session-list-actions.ts
+```

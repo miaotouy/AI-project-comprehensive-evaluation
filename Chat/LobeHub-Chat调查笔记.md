@@ -17,7 +17,7 @@
 LobeHub 是全栈聊天工作台：Web、Electron 桌面端与独立打包的移动端 SPA 共用同一套会话模型，前端双层 Zustand store 与自建服务端数据库共同构成状态体系，模型调用分本地 client agent 与服务端 Gateway 两条执行路径。
 
 - 会话用多维坐标 `ConversationContext` 压平出的 `messageMapKey` 分桶（6+ 种 scope）；本地副本 key 比服务端缓存 key 更细，缓存身份另由 `services/message/cache` 计算。
-- 每个会话桶的消息由全局 ChatStore 的 transcript 层独占写入并落本地副本（`@/libs/replica`）；会话级 ConversationStore 是单向镜像，写入先转发回副本再回读，不再有双向回调同步。
+- 每个会话桶的消息由全局 ChatStore 的 transcript 层独占写入并落本地副本（`@/libs/replica`）；会话级 ConversationStore 是单向镜像，写入先转发回副本再回读。
 - 一次生成 = 发送 action 构造临时消息与 operation → 分流 client agent 或 Gateway → 流式回写 → 落库；operation 是前后端任务交接的载体；审批/干预先用 `resolveGatewayResume` 判断走 Gateway 新 operation 还是本地 runtime 重建，异构 Agent 则另走 IPC、tRPC。
 - 浏览器与服务端的 Agent 配置、上下文事实、工具规则和模型参数解析已抽到共享 `packages/mecha`；两端保留各自的数据采集与 transport，但不再维护两套上下文决策规则。
 - Gateway 可在实验开关下按用户/分享身份复用 WebSocket，并按 operation 订阅事件；同会话有排队输入时，服务端 Agent 会在决策点以软中断交还 turn，让输入队列继续，而不是等待长循环自然完成。

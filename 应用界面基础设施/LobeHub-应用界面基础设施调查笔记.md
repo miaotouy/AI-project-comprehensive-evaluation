@@ -63,7 +63,7 @@ antd 静态方法层在本快照已整体移除：`src/components/AntdStaticMeth
 
 业务模块普遍直接使用 base-ui Toast，覆盖成功、错误、警告和加载提示。进度型任务先取得 loading 句柄，异步结束后关闭旧提示，再显示成功或失败结果。重复的远端服务错误会使用固定 id，避免同类提示不断堆叠。（`src/components/Error/remoteServerErrorToast.ts:1-10`）
 
-Toast 的位置、默认时长、堆叠和按 id 更新的具体规则没有在项目仓库中配置，属于 base-ui 内部行为。旧 antd message 曾有桌面标题栏偏移配置，迁移后该逻辑已删除，因此新 Toast 是否避让自绘标题栏尚不能从项目代码确认。
+Toast 的位置、默认时长、堆叠和按 id 更新的具体规则没有在项目仓库中配置，属于 base-ui 内部行为。桌面标题栏的偏移与避让同样由 base-ui 内部实现决定，项目代码中未配置，Toast 是否避让自绘标题栏尚不能确认。
 
 项目还有一套自绘 `Notification` 卡片，用于比临时提示更重的场景。它固定在右下角，具有独立层级和视觉样式，不属于 Toast 队列。（`src/components/Notification/index.tsx`）
 

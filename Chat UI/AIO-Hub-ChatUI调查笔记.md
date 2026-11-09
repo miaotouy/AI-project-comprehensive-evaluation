@@ -60,7 +60,7 @@
 
 ### 2.1 同一会话项服务两处入口
 
-会话侧栏使用公共动态测量虚拟列表，71px 是初始估高，实际行高由 DOM 测量更新；搜索摘要和菜单等内容不再依靠固定高度假设。[列表配置](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L124-L146>)与[行测量挂载](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L375-L408>)共同确认这一点。输入区迷你会话列表复用相同会话项和操作对话框，只采用较紧凑的样式。
+会话侧栏使用公共动态测量虚拟列表，71px 是初始估高，实际行高由 DOM 测量更新；搜索摘要和菜单等内容按内容自适应高度。[列表配置](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L124-L146>)与[行测量挂载](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionsSidebar.vue#L375-L408>)共同确认这一点。输入区迷你会话列表复用相同会话项和操作对话框，只采用较紧凑的样式。
 
 会话项可点击或经 Enter/Space 激活；右键、Shift+F10 和菜单键打开同一操作菜单，全局只保留一个已打开的会话菜单。菜单除重命名、自动命名、收藏、导出和打开目录外，还提供“从文件重新加载”；生成中禁用重新加载，动作进入公共会话操作处理器。详见[会话项](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionItem.vue#L60-L98>)、[键盘与右键绑定](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionItem.vue#L129-L145>)、[重新加载处理](<../../aio-hub/src/tools/llm-chat/components/sidebar/SessionActionDialogs.vue#L179-L230>)。
 

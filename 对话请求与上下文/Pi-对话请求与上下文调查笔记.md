@@ -61,26 +61,41 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 - **上下文投影**：`buildSessionContext`（`session-manager.ts:461-470`）→ `buildContextEntries`（`session-manager.ts:418-454`）：沿 leaf 回溯得到路径，路径中若含 compaction 条目，则用"compaction 摘要消息 + firstKeptEntryId 起的保留条目 + 其后所有条目"替代完整历史；`sessionEntryToContextMessages` 把 compaction/branch_summary/custom_message 条目分别投影为摘要消息（`session-manager.ts:383-408`）。普通 `custom` 条目不参与（其数据语义见会话与消息管理笔记 §1）。
 - **LLM 转换**：`convertToLlm`（`core/messages.ts:148-195`）把自定义角色转成 user 文本（bash 执行按 `excludeFromContext` 跳过、custom、摘要消息加前缀/后缀包裹），输出 `packages/ai` 的 `Message[]`。
-- **system prompt**：`buildSystemPrompt`（`core/system-prompt.ts:28-162`）：自定义 prompt（`customPrompt`，来自 `.pi/system-prompt.md` 等）替换默认模板，追加 `appendSystemPrompt`、`<project_context>` 文件、skills 区块、cwd；默认模板含工具列表（带一行 snippet 的工具才显示，:82-84）、guidelines（含按工具集推导的提示，:97-119）、Pi 自身文档指引（:121-138）。拼装参数由 `_rebuildSystemPrompt` 汇总（`agent-session.ts:1023-1057`）。
+- **system prompt**：默认模板只显示带一行 snippet 的工具，guidelines 按工具集推导，另带 Pi 自身文档指引（`:82-84`、`:97-119`、`:121-138`）；拼装入口 `buildSystemPrompt`（`core/system-prompt.ts:28-162`），参数由 `_rebuildSystemPrompt` 汇总（`agent-session.ts:1023-1057`）。
+
+  覆盖顺序：自定义 prompt（`customPrompt`，来自 `.pi/system-prompt.md` 等）替换默认模板，其后追加 `appendSystemPrompt`、`<project_context>` 文件、skills 区块与 cwd。
 
 ## 3. 预算、截断、摘要与压缩
 
-- **token 估算**：`estimateTokens` 基于字符/块长度按角色估算（`compaction/compaction.ts:266-306`，chars/4 启发式；此前笔记标注的 `compaction/utils.ts` 位置有误，`utils.ts` 只含文件操作清单与 `SUMMARIZATION_SYSTEM_PROMPT`，见 `compaction/utils.ts:156`）；`estimateMessagesTokens`（`agent-session.ts:286-292`）配合模型 `contextWindow`。
+- **token 估算**：按字符/块长度分角色估算，采用 chars/4 启发式，再加总到模型上下文窗口上（`compaction/compaction.ts:266-306`、`agent-session.ts:286-292`）。
+
+  函数分工：单条估算用 `estimateTokens`，批量求和用 `estimateMessagesTokens`，窗口上限来自模型 `contextWindow`。
+
+  定位更正：此前笔记把估算位置标在 `compaction/utils.ts`；`utils.ts` 里只有文件操作清单与 `SUMMARIZATION_SYSTEM_PROMPT`（`compaction/utils.ts:156`）。
 - **压缩触发**：`shouldCompact` 判定 `contextTokens > contextWindow - reserveTokens`（`compaction.ts:235-238`，默认 reserve 16384、keepRecent 20000：`compaction.ts:132-136`、`settings-manager.ts:780-786`）。两条路径：
   - **常规检查**：`_handlePostAgentRun` 的 `_checkCompaction`（`agent-session.ts:1962-2053`）与发送前检查；阈值路径压缩不重试（`:2049-2051`）；
   - **溢出恢复**：溢出（`isContextOverflow`/可恢复 length）走"压缩并自动重试一次"（overflow 分支 `:1993-2022`，`_overflowRecoveryAttempted` 只允许一次，随后 `_runAutoCompaction("overflow", willRetry)`，`:2021`）。
-- **压缩执行**：`prepareCompaction`（`compaction.ts:710-789`）计算 cut point（`findCutPoint`，`:403-461`：只切 user/assistant 等上下文可见条目、不切 toolResult、支持 turn 内分割）；`compact`（`compaction.ts:817-919`）以 `SUMMARIZATION_SYSTEM_PROMPT` 生成摘要，记录 `firstKeptEntryId`/`tokensBefore`/文件操作清单（`CompactionDetails`）。压缩本身也是 LLM 调用，经 `completeSummarization` 统一入口并复用 `settings.retry`（`compaction.ts:562-581`）；`SessionManager.appendCompaction` 落盘（`session-manager.ts:1097-1119`）。`/compact` 手动触发（`compact()`，`agent-session.ts:1790-1933`，入口见 Chat UI 笔记 §1）。
+- **压缩执行**：先算切点再生成摘要——切点只落在上下文可见条目上，toolResult 不被切开，turn 内部允许分割；摘要记录保留起点、压缩前 token 数与文件操作清单。
+
+  - 切点：`prepareCompaction` 调 `findCutPoint`（`compaction.ts:710-789`、`:403-461`）。
+  - 摘要：`compact` 用 `SUMMARIZATION_SYSTEM_PROMPT` 生成（`compaction.ts:817-919`），写出 `firstKeptEntryId`、`tokensBefore` 与文件操作清单 `CompactionDetails`。
+  - 模型调用：摘要本身也是一次 LLM 调用，统一入口 `completeSummarization` 并复用 `settings.retry`（`compaction.ts:562-581`），落盘走 `SessionManager.appendCompaction`（`session-manager.ts:1097-1119`）。
+  - 手动入口：`/compact` 调 `compact()`（`agent-session.ts:1790-1933`，入口见 Chat UI 笔记 §1）。
 - 压缩是重写而非分页：旧条目仍在文件中但不再进上下文（持久化形状见会话与消息管理笔记 §9）。
 
 ## 4. SDK、Provider、模型与协议交接
 
-- `Agent.prompt()`（`agent.ts:347-358`）→ `runAgentLoop`（`agent-loop.ts:95-118`）→ `runLoop`（`agent-loop.ts:155-275`）；`streamAssistantResponse` 内 `transformContext` → `convertToLlm` → `streamFunction`（`agent-loop.ts:288-312`），输出 `packages/ai` 的 `Message[]`。
+- 调用链：`Agent.prompt()`（`agent.ts:347-358`）→ `runAgentLoop`（`agent-loop.ts:95-118`）→ `runLoop`（`agent-loop.ts:155-275`）。
+- 请求组装：`streamAssistantResponse` 内依次 `transformContext`、`convertToLlm`、`streamFunction`（`agent-loop.ts:288-312`），输出 `packages/ai` 的 `Message[]`。
 - 模型在会话状态绑定（`agent.state.model/thinkingLevel`，数据侧见会话与消息管理笔记 §8）；请求认证经 `_getRequiredRequestAuth`（`agent-session.ts:409-444`）解析 apiKey/headers/env；具体 provider adapter/协议层本次未展开（属于 LLM 渠道管理类目）。
 - `Agent` 是单活动运行的工具循环 runtime（`agent.ts:347-358` 拒绝运行中再次 prompt、:486-489 activeRun 守卫），无内置多 Agent 编排（数据侧见会话与消息管理笔记 §8）。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- `streamAssistantResponse`（`agent-loop.ts:281-372`）把 `AssistantMessageEventStream` 的 `start/text_*/thinking_*/toolcall_*` 逐事件转成 `message_start/message_update`，结束统一发 `message_end`（:346-371）；`toolcall_end` 携带完整 `ToolCall` 并覆盖 partial 累积结果（`proxy.ts:338-351`，partialJson 解析兜底在 :322-336）。
+- 事件链：`streamAssistantResponse`（`agent-loop.ts:281-372`）把 `AssistantMessageEventStream` 的细粒度事件按文本、思考、工具调用三类归一。
+- 归一口径：`start`、`text_*`、`thinking_*`、`toolcall_*` 四类事件统一转成 `message_start`/`message_update`。
+- 结束事件：流结束时统一发 `message_end`（`:346-371`）。
+- 工具调用：`toolcall_end` 携带完整 `ToolCall` 并覆盖 partial 累积结果（`proxy.ts:338-351`，partialJson 解析兜底在 `:322-336`）。
 - UI 在 `message_update` 时整体重建 assistant 组件内容（`interactive-mode.ts:3148-3181`），TUI 渲染由 `requestRender` 节流（`packages/tui/src/tui.ts:765-817`，`MIN_RENDER_INTERVAL_MS`=16ms 内合并帧，:343）——组件重建与节流的 DOM 侧见消息渲染器笔记 §2。
 - **工具增量**：`tool_execution_start/update/end` 事件驱动 `ToolExecutionComponent` 的流式输出（`interactive-mode.ts:3227-3268`）；assistant 消息里的 `toolCall` 块在 `message_update` 时同步建组件并逐步更新参数（`interactive-mode.ts:3153-3177`）。
 
@@ -99,7 +114,8 @@ TUI/输入 -> AgentSession.prompt() (core/agent-session.ts:1116)
 
 ## 8. 队列、多会话并发与后台生成
 
-- **并发粒度是单会话单 agent 循环**：运行中可投递 steer（回合边界转向）与 followUp（排队）消息（`agent-session.ts:1343-1408`，`_queueSteer` :1379-1391、`_queueFollowUp` :1396-1408）；`Agent` 侧队列模式 `all`/`one-at-a-time`，默认 one-at-a-time（`agent.ts:125-159`、`:231-232`）；`agent_settled` 事件通知 UI 进入空闲（`agent-session.ts:596-604`）。无多会话并行 UI。
+- **并发粒度是单会话单 agent 循环**：运行中可投递 steer（回合边界转向）与 followUp（排队）消息，入口分别在 `_queueSteer` 与 `_queueFollowUp`（`agent-session.ts:1343-1408`、`:1379-1391`、`:1396-1408`）。
+- 队列模式在 `Agent` 侧取 `all`/`one-at-a-time`，默认 one-at-a-time（`agent.ts:125-159`、`:231-232`）；`agent_settled` 事件通知 UI 进入空闲（`agent-session.ts:596-604`）。无多会话并行 UI。
 - `followUp` 队列在 agent 自然结束前排空（`agent-loop.ts:262-272`）；steer 在当前助手及工具批次结束后、下次请求前被消费，准备阶段也会补查；它自身只入队，不 abort 已在执行的模型流或工具（[队列入口与 abort](../../pi/packages/agent/src/agent.ts#L307-L351)、[循环边界](../../pi/packages/agent/src/agent-loop.ts#L267-L315)）。
 - 队列 UI 显示由 `queue_update` 事件驱动（`agent-session.ts:569-575`，`_steeringMessages`/`_followUpMessages` 追踪 :319-324；界面见 Chat UI 笔记 §5）。
 

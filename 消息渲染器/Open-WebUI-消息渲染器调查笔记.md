@@ -89,7 +89,7 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 
 ## 5. 结构化输出与代码执行
 
-- `structuredOutput.ts`：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems` 产出 message/详情序列，并新增对空/稀疏 output 槽位的处理（先补占位再写入，避免后续 spread 出 undefined part），事件流的槽位写入也改为越界时 push 而非留洞；终端文件结果不再要求 `displayed === true` 才算内联文件，实际是否在消息里渲染由结果标记或终端文件显示设置决定（`src/lib/components/chat/Messages/structuredOutput.ts:166-186,344,465-500`、`StructuredOutputRenderer.svelte:164-169`）；
+- `structuredOutput.ts`：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems` 产出 message/详情序列，并新增对空/稀疏 output 槽位的处理（先补占位再写入，避免后续 spread 出 undefined part），事件流的槽位写入在越界时 push 新槽位；终端文件结果是否内联由结果标记或终端文件显示设置决定，`displayed` 字段不参与该判定（`src/lib/components/chat/Messages/structuredOutput.ts:166-186,344,465-500`、`StructuredOutputRenderer.svelte:164-169`）；
 - `StructuredOutputRenderer.svelte`（43-168 行）：message → Markdown（或纯文本），详情 → `ToolCallDisplay`/`Collapsible`；
 - `CodeExecutions.svelte`（28-63 行）：`message.code_executions` → 齿轮徽章 + error/output/incomplete 状态点；`CodeExecutionModal.svelte` 显示 ERROR/OUTPUT + `result.files` 链接；
 - 执行后端分两条通道（按 `$config.code.engine` 选择）：配置为 `'jupyter'` 时走 `executeCode` API（从 stdout 抽 `data:image/png`）；否则浏览器端 `executePythonAsWorker`（CodeBlock.svelte 149-356 行，自动探测 import→依赖，60s 超时），经 Pyodide worker 沙箱运行（iframe srcdoc + `sandbox="allow-scripts"`，matplotlib 内联 base64 PNG 补丁）。

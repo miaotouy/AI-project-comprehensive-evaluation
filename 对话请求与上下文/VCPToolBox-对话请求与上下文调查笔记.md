@@ -22,7 +22,7 @@ VCPToolBox 在**单次 HTTP 请求内**拥有完整的"请求历史 → 最终�
 - **VCP 工具循环走纯文本标记协议**：`<<<[TOOL_REQUEST]>>>`，模型正文即调用声明，工具结果以 `<!-- VCP_TOOL_PAYLOAD -->` user 消息回送再次 POST；
 - **模型上下文与前端显示分叉**：工具循环维护独立的 `currentMessagesForLoop`，推理字段另存于日志消息，客户端看到的 SSE/JSON 与模型下一轮读取的内容不是同一份；
 - **预设占位符有按项收敛的注入边界**：VCPTavern 只对预设声明的允许名单、且标为伪系统消息的文本展开运行时占位符；其余占位符保留原文，嵌套消息对象递归处理（`Plugin/VCPTavern/VCPTavern.js:155-242,397-640`）；
-- **编译规则进一步分化**：SAR 支持精确/包含及其排除模式，Detector/SuperDetector 支持 `/pattern/flags` 正则替换；OneRing 默认把 assistant 的时间与来源标记投影为紧随其后的 user 伪系统块，而不再内联进 assistant 正文（`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`、`Plugin/OneRing/OneRing.js:518-568,1467`）；
+- **编译规则进一步分化**：SAR 支持精确/包含及其排除模式，Detector/SuperDetector 支持 `/pattern/flags` 正则替换；OneRing 默认把 assistant 的时间与来源标记投影为紧随其后的 user 伪系统块（`modules/sarPromptManager.js:112-128`、`modules/messageProcessor.js:608-642`、`Plugin/OneRing/OneRing.js:518-568,1467`）；
 - **存在显式的请求级停止与重试机制**：`/v1/interrupt` 端点 + 客户端断联级联中止；上游调用有状态码重试、连接超时、语义路由候选模型回退；响应层有按 `clientIp::messageId` 的去重回放。
 
 ## 系统边界与生成任务主链

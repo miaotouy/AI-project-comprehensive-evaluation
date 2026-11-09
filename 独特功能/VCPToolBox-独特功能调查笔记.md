@@ -193,7 +193,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **持续性**：Profile 持久化（登录态跨启动保留）；进程与 Profile 生命周期解耦。
 
-**主动性与取消**：AI 可主动 `close_chrome`/`close_managed_tabs`/`keep_chrome_alive`；`open_chrome` 支持 `interactiveSetup:true` 人工设置模式（有头窗口、24 小时空闲上限、启动后不等待握手即返回，`ChromeBridge.js:818-878`），`scripts/open_managed_browser_setup.js` 已改为经 `/v1/human/tool` 提交该请求，不再由脚本直启浏览器进程；进程异常退出有监听与状态清理；VCP 退出时关闭子进程（shutdown hooks）。
+**主动性与取消**：AI 可主动 `close_chrome`/`close_managed_tabs`/`keep_chrome_alive`；`open_chrome` 支持 `interactiveSetup:true` 人工设置模式（有头窗口、24 小时空闲上限、启动后不等待握手即返回，`ChromeBridge.js:818-878`），`scripts/open_managed_browser_setup.js` 经 `/v1/human/tool` 提交该请求；进程异常退出有监听与状态清理；VCP 退出时关闭子进程（shutdown hooks）。
 
 **人机与多 Agent 关系**：用户浏览器（user）默认 restricted 权限，managed 才 high；`close_chrome` 不能关用户 Chrome；权限判断依据扩展声明 + managed token 或 Popup 人工选择，IP 仅辅助（`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md` 权限模型）；"按 maid/valet 分 Agent Profile"是文档中的二期设计，**当前未实现**（仍是 global 单 Profile）。
 

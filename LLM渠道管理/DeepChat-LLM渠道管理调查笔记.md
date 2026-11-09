@@ -84,7 +84,7 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 
 ### 3.1 桌面端
 
-Provider 设置路由是 `settings-provider`，主界面左侧按启用/禁用分组显示 Provider，支持搜索和拖拽排序；新增入口改为“渠道目录”（`ProviderCatalog.vue`）：按内置渠道清单搜索、显示是否已配置，并提供“自定义渠道”入口；随后进入多阶段添加流程 `AddProviderFlow.vue`（校验连接 → 提交 → 保存 → 成功面板），不再是一次性对话框。点击 Provider 后进入连接、模型、advanced 三个页签（`src/renderer/settings/components/ModelProviderSettings.vue`、`ProviderSettingsShell.vue`）。
+Provider 设置路由是 `settings-provider`，主界面左侧按启用/禁用分组显示 Provider，支持搜索和拖拽排序；新增入口是“渠道目录”（`ProviderCatalog.vue`）：按内置渠道清单搜索、显示是否已配置，并提供“自定义渠道”入口；随后进入多阶段添加流程 `AddProviderFlow.vue`（校验连接 → 提交 → 保存 → 成功面板）。点击 Provider 后进入连接、模型、advanced 三个页签（`src/renderer/settings/components/ModelProviderSettings.vue`、`ProviderSettingsShell.vue`）。
 
 连接页可以编辑 API Key，密码输入默认脱敏但有显示切换；自定义 Provider 可以删除；部分内置 Provider 提供 OAuth 登录组件。Base URL 的变更通常在 blur 或 Enter 时写入 `updateProviderApi`，API Key 也在 blur 时写入（`src/renderer/settings/components/ProviderApiConfig.vue`）。
 

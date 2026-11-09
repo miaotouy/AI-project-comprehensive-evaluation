@@ -16,7 +16,7 @@
 
 OpenCode 2.x 把"渠道"拆成三层：Integration 是渠道定义与可用认证方法（key、OAuth、外部凭据、命令行、环境变量），Credential 是落库的认证材料（可按渠道保存多份并选出 active 一份），Provider 是运行时聚合出的可路由模型目录。凭据从旧版 `auth.json` 迁移进 SQLite `credential` 表，启动时有一次导入迁移。
 
-模型请求不再依赖 AI SDK：`@opencode/ai` 直接实现各家协议（chat/messages/responses/images/speech/transcription 等），Core 只负责把会话上下文转成请求并消费统一 LLM 事件。模型目录仍来自远端 models.dev 快照（磁盘缓存 + 构建期快照 + 网络，5 分钟 TTL）。
+模型请求不经 AI SDK 抽象层：`@opencode/ai` 直接实现各家协议（chat/messages/responses/images/speech/transcription 等），Core 只负责把会话上下文转成请求并消费统一 LLM 事件。模型目录仍来自远端 models.dev 快照（磁盘缓存 + 构建期快照 + 网络，5 分钟 TTL）。
 
 ## 总体调用链
 

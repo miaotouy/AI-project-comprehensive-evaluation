@@ -1,12 +1,12 @@
 # DeepSeek Harness 独特功能调查笔记
 
-> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`（重点 `packages/extensions/`、`packages/boot/plugin-manager`、`packages/boot/plugin-market`、`packages/sandbox/`、`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`、`packages/team/`，关联 `packages/bundle/`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/experimental/{forge,liveshare,worktree,auto-review,webhook,browser-use,computer-use}`）
+> 调查对象：`https://github.com/deepseek-ai/deepseek-harness`
 >
 > 调查更新日期：2026-11-04
 >
 > 代码快照：`8bd073392eef6f54e921a093b95076248eb08cbb`（分支：`master`）
 >
-> 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（goal、plan、schedule、sandbox、extensions、subagent、agent-team、forge、liveshare、persistence、spill 等）与关键 src 文件（`tool-cordis`、`cordis-host-runner` 的 inspection registry、`plugin-manager`、`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/tools、`sandbox-local`、`subagent` 的 activation/out-of-process、`team/agent-team`）；辅以 `docs/upgrade-guide/`；未运行任何进程或测试
+> 调查方式：静态源码阅读。通读六个机制各自的包 README、`docs/subsystems/` 对应页（含 persistence、spill 等跨机制主题）与各机制关键实现文件；辅以 `docs/upgrade-guide/`；未运行任何进程或测试
 >
 > 调查范围：覆盖 agent harness 特有的机制集合：只读自省 + 持久插件安装的自扩展、进程沙箱、同会话目标驱动、plan mode 日志化状态、Host 级定时任务、多 provider 子代理能力族与团队任务板，以及 plugin market/bundle/skill 注册表/workflow/jobs/forge/liveshare/worktree/auto-review/webhook/browser-use/computer-use 机制盘点；排除工具 schema、执行管线、审批与渲染细节（归 Agent 工具笔记）、agent-loop 回合执行（归 Chat 笔记）、会话持久化与压缩（归会话与消息管理、对话请求与上下文笔记）、LLM 渠道（归 LLM 渠道管理笔记）
 >
@@ -56,7 +56,7 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 1. **用户目标与入口**：让模型在会话中检查自己所在运行时的 API、Loader 条目与工具表，并把新的插件/bundle 装进 profile 以改变后续会话。模型面入口是 `cordis_inspect_list` 与 `cordis_inspect_query` 两个只读工具（`packages/extensions/tool-cordis/src/index.ts`），加上 `plugin_manager`（列插件与 bundle、启停、安装、移除）与 `plugin_market`（读市场索引）（`packages/boot/plugin-manager/src/tools.ts`、`plugin-market/src/tools.ts`）。
 2. **事实对象**：三个层次——运行时事实（服务/事件目录、Loader 条目及其 Config 状态、条目投影出的 JSON Schema）、插件包（package 目录、README、`lib/`）、bundle（可选补丁层包）。检查结果只读，不调用业务方法；查询从不触发副作用（`docs/tool-catalog.md` 的 tool-cordis 节）。
 3. **完整主链**：`cordis_inspect_list` 列 provider（服务/事件目录、Host Config、工具表；浏览器端 provider 需要连接页面）→ `cordis_inspect_query` 取某项 API 或某个 Loader 条目的 Config 投影 → 模型据此写插件或 MCP 配置 → 打包为 bundle → `plugin_manager` 安装进 profile → 用户重启或后续会话加载新行。安装与启停影响整个 profile，需 danger-full-access 或逐次审批。
-4. **与旧机制的差别**：本次未找到模型可调用的动态插件定义与运行入口——旧路径（`dyn-<n>` 插件 id、vm 沙箱求值、browser 半装载回执）不再出现在工具目录里。`cordis-host-runner` 仍保留 inspection registry 与生命周期工具，供宿主侧消费者使用；模型面只剩只读查询。
+4. **模型面入口范围**：本次未找到模型可调用的动态插件定义与运行入口，工具目录中没有 `dyn-<n>` 插件 id、vm 沙箱求值、browser 半装载回执这类条目。`cordis-host-runner` 仍保留 inspection registry 与生命周期工具，供宿主侧消费者使用；模型面只剩只读查询。
 5. **配置方式**：Creator 模式（cordis preset）组合 tool-cordis 与 plugin_manager；`agent-preset` 包随附四套 skill（agent-experience、cordis-plugin-development、editing-cordis-compositions、cordis-composition-reference）指导模型先读检查结果、再读包 README 与源码。
 6. **运行边界**：安装的插件是宿主进程内的真实代码，没有沙箱隔离；"只读检查"保证的是查询本身无副作用，而不是被装代码的安全性。
 
@@ -85,11 +85,12 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ### 能力五：Host 级定时任务（schedule）
 
-1. **用户目标与入口**：让 agent 按时间规则自动开工。模型工具为 `schedule_create`（`title`/`prompt`/`rrule`/`target`）、`schedule_list`（分页）、`schedule_view`、`schedule_edit`（update 含 pause/resume 与改 rrule/target，delete 同工具）。
-2. **事实对象**：Host 任务 —— `schedule` 领域存储中的记录（`ScheduleRecord`），带 typed timing（After/At/Every/Daily/Weekly/Cron/RRule）、`target`（`this_session`/`new_once`/`new`）、`targetSessionId` 与 paused/ended 状态；领域存储写 version 2、读 version 1，物理布局不变。
-3. **完整主链**：`schedule_create` 经 Remote 或原生服务写记录 → timer 作为可弃投影在到期时触发 → 目标会话空闲时以普通对话回合投递 → 每次投递记录 receipt 与目标会话 id → 记录变更追加领域事件，重启后由领域存储重建。
-4. **作用范围**：任何 Host 任务都按 id 可读可改可删，不再局限于调用者自己的提醒；委派子 Agent 调用 `schedule_create` 会返回 `subagent_session` 拒绝。要限制某个 preset 不能管理他人任务，只能移除该 preset 的 tool-schedule 行。
-5. **边界**：投递是尽力而为的 at-least-once；本轮不提供外部通知通道；历史会话日志里的旧提醒需要显式重建。
+1. **用户目标与入口**：让 agent 按时间规则自动开工。模型面工具为 `schedule_create`、`schedule_list`（分页）、`schedule_view` 与 `schedule_edit`（update 含 pause/resume 与改 rrule/target，delete 同工具）。
+2. **创建参数**：`title`、`prompt`、`rrule` 和 `target` 四个参数共同描述任务与投递目标。
+3. **事实对象**：Host 任务 —— `schedule` 领域存储中的记录（`ScheduleRecord`），带 typed timing（After/At/Every/Daily/Weekly/Cron/RRule）、`target`（`this_session`/`new_once`/`new`）、`targetSessionId` 与 paused/ended 状态；领域存储写 version 2、读 version 1，物理布局不变。
+4. **完整主链**：`schedule_create` 经 Remote 或原生服务写记录 → timer 作为可弃投影在到期时触发 → 目标会话空闲时以普通对话回合投递 → 每次投递记录 receipt 与目标会话 id → 记录变更追加领域事件，重启后由领域存储重建。
+5. **作用范围**：任何 Host 任务都按 id 可读可改可删，不再局限于调用者自己的提醒；委派子 Agent 调用 `schedule_create` 会返回 `subagent_session` 拒绝。要限制某个 preset 不能管理他人任务，只能移除该 preset 的 tool-schedule 行。
+6. **边界**：投递是尽力而为的 at-least-once；本轮不提供外部通知通道；历史会话日志里的旧提醒需要显式重建。
 
 ### 能力六：多 provider 子代理与团队任务板
 
@@ -133,7 +134,7 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 `feedback` 分 `message-feedback`（日志备注与 sidecar 评分两种契约）与 `command-feedback`；`attachment` 提供内容寻址附件存储与引用式读取；`deliverables` 提供 `present` 工具把已有文件登记为交付物。
 
-## 已移除或改道的机制
+## 机制缺位与归属
 
 | 机制 | 现状 | 证据 |
 |---|---|---|
@@ -147,13 +148,13 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ## 设计取舍与已确认边界
 
-- **自扩展从"运行期改自己"改为"安装持久补丁"**：放弃进程内热定义插件，换取可重放、可审计、可卸载的 profile 变更；代价是模型不能即时试跑自己写的插件。
+- **自扩展走安装持久补丁**：插件以 profile 变更的形式安装，可重放、可审计、可卸载；没有进程内热定义的入口，代价是模型不能即时试跑自己写的插件。
 - **权威集中在日志或领域存储**：goal/plan 在会话日志，schedule 在领域存储，team 在根会话；进程内只留可弃投影，重启即重建。
 - **沙箱策略按调用携带**：同一进程内的不同工具调用可用不同档位，代价是策略无法用进程级隔离表达。
 - **定时任务升为 Host 级**：跨会话管理与入口统一，代价是权限从"仅自己"变成"全部任务"，需要靠移除工具行来收缩。
 - **子代理统一激活契约**：外部一次性执行与本地可续会话共享一套准入、取消与归属，代价是两类的后续交互能力不同，调用方必须区分。
 - **实验面默认关闭**：forge/liveshare/webhook/auto-review/market 都需显式组合或选择，避免默认暴露网络与权限面。
-- **不变式机制退场**：以运行时不变式做防御的做法被移除，失败改由各插件自身的错误通道上报。
+- **失败上报走插件自身错误通道**：当前没有运行时不变式防御层，失败由各插件自身的错误通道上报。
 
 ## 未验证事项
 
@@ -166,6 +167,11 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ## 关键源码索引
 
+- 本次重点包（机制主体）：`packages/extensions/`、`packages/boot/plugin-manager`、`packages/boot/plugin-market`、`packages/sandbox/`
+- 本次重点包（目标、计划、定时与团队）：`packages/goal/`、`packages/plan/plan-mode`、`packages/schedule/`、`packages/subagent/`、`packages/team/`
+- 关联包：`packages/bundle/`、`packages/skill/`、`packages/workflow/`、`packages/jobs/`、`packages/experimental/{forge,liveshare,worktree,auto-review,webhook,browser-use,computer-use}`
+- 调查方式涉及的实现入口（宿主与插件面）：`tool-cordis`、`cordis-host-runner` 的 inspection registry、`plugin-manager`
+- 调查方式涉及的实现入口（机制实现）：`goal` 与 `goal-round-driver`、`plan-mode`、`schedule` 的 domain/runtime/tools、`sandbox-local`、`subagent` 的 activation/out-of-process、`team/agent-team`
 - 自省与自扩展：`packages/extensions/tool-cordis/src/{index,host,providers,present}.ts`、`packages/extensions/cordis-host-runner/src/{index,inspect-registry,lifecycle,sandbox,registry}.ts`、`packages/boot/plugin-manager/src/{index,tools}.ts`、`packages/boot/plugin-market/src/{index,tools}.ts`
 - sandbox：`packages/sandbox/sandbox/src/index.ts`、`sandbox-local/src/*`、`sandbox-policy/src/*`、`sandbox-windows-acl/src/*`、`native/`（Landlock 启动器）
 - goal：`packages/goal/goal/src/*`、`goal-round-driver/src/*`、`tool-goal/src/authority.ts`、`command-goal/src/*`、`docs/subsystems/goal.md`

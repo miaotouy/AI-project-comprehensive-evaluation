@@ -18,7 +18,16 @@
 
 按本类目的准入条件（媒体专用入口、独立任务/资产身份、可调参与再创作、异步任务语义、结果进入资产库或下一步工作流，至少满足三项），该工具只能算“一次图片 API 调用 + 消息附件”，未形成完整主链，因此按指南默认不计入。下面的卡片用于说明边界，而不是把 Codex 计为媒体创作项目。
 
-检索关键词与范围：`imagegen`、`image_generation`、`ImageGeneration`、`generated_images`、`video`、`audio`、`speech`、`tts`、`music`、`diffusion`、`comfy`、`stable-diffusion`、`workflow`、`media`、`artifact`。搜索覆盖 `codex-rs/ext`、`core`、`cli`、`tui`、`app-server`、`cloud-tasks`、`sdk` 与根目录文档。命中的生成能力只有 `codex-rs/ext/image-generation`；`voice-host`、`realtime_conversation` 与 `realtime-webrtc` 属于实时语音对话，不是媒体生成；`mermaid` crate 是图表渲染，不是图片创作工作站。
+检索按媒体关键词、crate 目录与命中复核三步展开，检索面见下表，命中结果随后说明。
+
+| 类别 | 取值 |
+|---|---|
+| 生成能力关键词 | `imagegen`、`image_generation`、`ImageGeneration`、`generated_images` |
+| 媒体类型关键词 | `video`、`audio`、`speech`、`tts`、`music` |
+| 实现路径关键词 | `diffusion`、`comfy`、`stable-diffusion`、`workflow`、`media`、`artifact` |
+| 搜索目录 | `codex-rs/ext`、`core`、`cli`、`tui`、`app-server`、`cloud-tasks`、`sdk` 与根目录文档 |
+
+命中的生成能力只有 `codex-rs/ext/image-generation`；`voice-host`、`realtime_conversation` 与 `realtime-webrtc` 属于实时语音对话，承载的是对话音频流；`mermaid` crate 提供图表渲染，产出落在另一类内容上。
 
 ## 系统边界与检索依据
 
@@ -41,7 +50,11 @@
 
 **输入与约束。** 参数为提示词、透明背景开关、参考图路径列表或“包含最近 N 张会话图片”，参考图上限 5 张（`ext/image-generation/src/tool.rs:101-114`）。说明文档要求编辑时优先用本地路径，只有无法取得路径时才引用最近图片，二者不能同时使用（`imagegen_description.md:12-18`）。输出大小上限 32 MiB，base64 传输有对应换算上限（`tool.rs:69-72`）。
 
-**动态图是可选输出而非独立能力。** 开启 `image_generation_animation` 特性后，工具参数多一个可选的 `gif`：不给字段即普通图片，给空对象取默认值（9 帧、每帧 200 毫秒），也可指定帧数与帧间隔，帧数限制 2–16。编辑既有 GIF 的做法是先看帧、再拼成等格 spritesheet 作为参考图重新生成，而不是把 GIF 本身当编辑输入（`ext/image-generation/src/tool.rs:103-113`、`imagegen_gif_description.md:1-4`）。产物格式按编码头识别，GIF 存为 `.gif` 并标记 `image/gif`，其余仍按 PNG 处理（`ext/image-generation/src/artifact.rs:8-30`、`:57-65`）。该特性当前处于 UnderDevelopment 且默认关闭（`codex-rs/features/src/lib.rs:1977-1981`）。
+**动态图是可选输出而非独立能力。** 开启 `image_generation_animation` 特性后，工具参数多一个可选的 `gif`：不给字段即普通图片，给空对象取默认值（9 帧、每帧 200 毫秒），也可指定帧数与帧间隔，帧数限制 2–16。
+
+编辑既有 GIF 时先看帧、再拼成等格 spritesheet 作为参考图重新生成，GIF 本身只作为参考素材（`ext/image-generation/src/tool.rs:103-113`、`imagegen_gif_description.md:1-4`）。
+
+产物格式按编码头识别：GIF 存为 `.gif` 并标记 `image/gif`，其余按 PNG 处理（`ext/image-generation/src/artifact.rs:8-30`、`:57-65`）；该特性处于 UnderDevelopment 且默认关闭（`codex-rs/features/src/lib.rs:1977-1981`）。
 
 **执行与结果。** 调用走当前 Provider 的图片接口，成功后把图片写到 codex home 下的 `generated_images/<session>/<call_id>.png`（`ext/image-generation/src/artifact.rs:5-65`）。工具返回给模型的提示只说明“已保存到该路径、已展示给用户、无需在回复里再渲染 Markdown 图片”（`artifact.rs:67-76`）。失败以带原因的结构化失败对象返回，并区分额度耗尽等情况（`ext/image-generation/src/tool.rs:116-128` 的结束事件字段）。
 

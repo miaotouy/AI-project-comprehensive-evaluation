@@ -20,7 +20,7 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 
 主题由主进程设置和 Electron nativeTheme 共同持有，渲染层通过带 revision 的 IPC 快照同步。用户配置集中在明暗、字号和正文或代码字体；主色阶、圆角和密度没有用户入口，也没有主题市场、壁纸、导入导出或自定义 CSS。多窗口主题与通知链路已静态确认，视觉时序仍未运行验证。
 
-设置窗的控制中心结构有几处变化：渠道管理改为“渠道目录 + 多阶段新增流程”（`ProviderCatalog.vue`、`AddProviderFlow.vue`），定时任务拆成任务列表与详情面板并带投递/调度模板（`cronJobs/`、`CronJobsSettings.vue`），新增同步设置页与独立 store（`TunnelSyncSettings.vue`、`stores/tunnelSync.ts`）以及记忆影响复核/谱系视图（`MemoryImpactReview.vue`、`MemoryLineageSection.vue`）。内置 MCP 市场组件（`McpBuiltinMarket.vue`）已删除。
+设置窗的控制中心由四部分构成：渠道目录与多阶段新增流程（`ProviderCatalog.vue`、`AddProviderFlow.vue`），定时任务列表与详情面板及其投递/调度模板（`cronJobs/`、`CronJobsSettings.vue`），同步设置页与独立 store（`TunnelSyncSettings.vue`、`stores/tunnelSync.ts`），记忆影响复核与谱系视图（`MemoryImpactReview.vue`、`MemoryLineageSection.vue`）。
 
 选择组原语位于 `src/dc-ui/components/choice-group/`，Provider 设置页采用分阶段编辑凭据；它们继续使用既有 renderer 到主进程的配置边界，未构成新的全局状态所有者。
 

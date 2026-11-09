@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序合仓的多运行时插件仓库。`Plugin` 与 `AdminPanel-Vue` 是两大主体；两者内部都包含大批技能文档与 vendor 代码，统计时需要区分产品源码与随仓资产。本快照的 Rust 代码量占比明显高于上一快照，来自 `rust-vexus-lite` 向量检索组件的扩展；管理台的构建产物 `dist` 不再被跟踪。
+VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序合仓的多运行时插件仓库。`Plugin` 与 `AdminPanel-Vue` 是两大主体；两者内部都包含大批技能文档与 vendor 代码，统计时需要区分产品源码与随仓资产。Rust 代码主要来自 `rust-vexus-lite` 向量检索组件；管理台的构建产物 `dist` 不被跟踪。
 
 ## 统计与模块分布
 
@@ -41,11 +41,11 @@ VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能�
 | `knowledge` | 263 / 20,952 |
 | 根服务源码 | 19 文件 / 16,295 行 |
 
-`AdminPanel-Vue/dist` 在当前快照不再有被跟踪文件，管理台产物因此不再计入文件规模；`vendor` 仍随仓提交，包含 22 个源码文件与约 6.97 万行。
+`AdminPanel-Vue/dist` 无被跟踪文件，管理台产物不计入文件规模；`vendor` 仍随仓提交，包含 22 个源码文件与约 6.97 万行。
 
 运行时内核、原生二进制与构建脚本集中在 `Plugin`、`scripts` 与 `tests`：
 
-- `Plugin/ChromeBridge/VCPChrome/webcore/`：运行时内核（扩展主链逻辑从 `content_script.js` 迁入）
+- `Plugin/ChromeBridge/VCPChrome/webcore/`：扩展运行时内核
 - `CodeSearcher` 的 Node 包装器与 Windows x64 原生二进制
 - `DailyNoteSearcher` Windows 二进制
 - `scripts/build_rust_plugin.js`、根目录的 `rust-toolchain.toml`
@@ -65,7 +65,7 @@ JavaScript 286,442 行（52.4%）、Rust 85,173 行（15.6%）、Vue 69,257 行�
 
 - `Plugin.js`：进程树终止跨平台化（Windows taskkill 失败回退、Unix 进程组 SIGKILL）
 - `modules/safeFilePath.js`：统一文件路径校验，供需要落盘的模块复用
-- `databaseCoordinator.js` 取代原先独立的 SQLite 健康管理模块，负责连接与 checkpoint 时机
+- `databaseCoordinator.js`：负责 SQLite 连接与 checkpoint 时机
 - `CodeSearcher`/`DailyNoteSearcher`：按 win32/linux/darwin × x64/arm64 三元组选择原生二进制（`scripts/build_rust_plugin.js` 统一构建）
 
 非容器环境的平台兼容性仍因插件而异，本次未逐插件运行。

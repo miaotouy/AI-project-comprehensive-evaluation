@@ -126,7 +126,7 @@ Agent ID 和员工 ID 都是字符串，没有独立版本字段。员工 Manife
 
 员工创建入口是 Gateway 方法 `employees.create`，实现见 `src/pkg/gateway/handlers/employees.go:63-168`。请求支持名称、描述、Prompt、启停、技能和 MCP 配置；带显式 ID 时进入编辑模式并合并字段，没有显式 ID 时创建新模板。
 
-新建时 ID 的处理值得单独说明。代码先规范化显式 ID，为空则调用 `deriveEmployeeIDFromName`。该函数当前直接返回名称本身，原有的小写化和字符过滤逻辑已被注释掉，见 `src/pkg/gateway/handlers/employees.go:201-227`。因此名称中的大小写、空格和中文都会进入目录名。
+新建时会先规范化显式 ID，为空则调用 `deriveEmployeeIDFromName`。该函数当前直接返回名称本身，原有的小写化和字符过滤逻辑已被注释掉，见 `src/pkg/gateway/handlers/employees.go:201-227`。因此名称中的大小写、空格和中文都会进入目录名。
 
 聊天入口解析员工 ID 时会把整个 sessionKey 转成小写，见 `src/pkg/gateway/handlers/chat.go:1420`。在大小写敏感的文件系统上，模板目录可能保留大写，而运行时按小写 ID 查找，形成目录不匹配；在 Windows 默认的大小写不敏感文件系统上，这种差异通常不会暴露。该推断基于两条代码路径的对比，尚未在 Linux 环境运行验证。
 

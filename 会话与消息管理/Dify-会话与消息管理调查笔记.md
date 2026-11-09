@@ -16,7 +16,7 @@
 
 Dify 的对话事实源是 API 侧数据库对象，不是浏览器中的消息数组。`Conversation` 与 `Message` 分别保存会话和每轮问答，查询时同时按 application 和 user 限定归属。公开 WebChat 的 chat tree 是服务端列表/详情的 UI 投影，首次发送时才可能由生成器创建持久化对象。`MessageChain` 表仍保存链式记录，但本轮未找到当前聊天重试或 sibling 将其写成树指针的执行路径；分支事实应以 `Message.parent_message_id` 为准。
 
-会话读写已拆成多个单向服务：查询、命令、改名、变量分别有自己的服务对象，控制器不再直接调用一个“大会话服务”。这些服务由 API 扩展层的组装根统一装配并暴露给传输层，配合 repository 承担数据库访问（`api/extensions/ext_application_services.py:316-340`、`api/extensions/ext_application_services.py:590-660`）。原先的 `ConversationService` 只剩取会话和投递删除清理两个职责，公开 Web 专用的会话服务已不存在。
+会话读写已拆成多个单向服务：查询、命令、改名、变量分别有自己的服务对象，控制器不再直接调用一个“大会话服务”。这些服务由 API 扩展层的组装根统一装配并暴露给传输层，配合 repository 承担数据库访问（`api/extensions/ext_application_services.py:316-340`、`api/extensions/ext_application_services.py:590-660`）。`ConversationService` 承担取会话与投递删除清理两项职责。
 
 ## 系统边界与数据主链
 

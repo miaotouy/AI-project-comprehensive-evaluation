@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-- **Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架**：共用类型契约而非组件树，两个适配器各自注入可选能力对象，下游组件按存在性判断渲染；旧的"`state.readonly` 标志"机制已不存在，差异由 `useMessageLeafCapabilities`/`normalInteractionsEnabled` 表达（组件装配见 1.1）。
+- **Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"框架**：共用类型契约而非组件树，两个适配器各自注入可选能力对象，下游组件按存在性判断渲染；入口差异由 `useMessageLeafCapabilities`/`normalInteractionsEnabled` 表达（组件装配见 1.1）。
 - **会话单位 Topic 是导航单位**：侧栏列表 + 右侧分支面板（React Flow 树图）+ 消息列表 `< i/N >` 兄弟导航三套入口并存；分支面板看到的是"DB 树 + live overlay"合并结果。
 - **搜索是双轨的**：会话内搜索（`MessageListSearch` + `FindBar`）是"已加载数据粗匹配 + 已挂载 DOM 精确 Range + CSS Custom Highlight 高亮"的混合实现，支持虚拟化窗口外的消息定位；跨会话全局搜索（`GlobalSearchPopup`，`app.search` 命令）走主进程 FTS（数据侧见会话与消息管理笔记 5）。
 - **多模型并行**通过 Composer 的"提及模型"多选触发：选中 N 个模型 → 主进程并行 N 个 execution，读侧按兄弟组横向/网格展示（执行语义见对话请求与上下文笔记 8）。
@@ -106,7 +106,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 3.2 附件拖入反馈：绿色虚线高亮
 
-拖拽处理挂在文件拖放 hook 上（`src/renderer/components/composer/paste/useFileDragDrop.ts:102-160`）：文件/文本/文件夹路径分别处理，不支持的拖入类型弹 toast 提示（`:124-131`）。视觉反馈是 2px 绿色虚线边框 + 半透明绿色蒙层（`ComposerSurface.tsx:2165-2167`），颜色走主题色变量，旧实现硬编码的 `#2ecc71` 已不存在。
+拖拽处理挂在文件拖放 hook 上（`src/renderer/components/composer/paste/useFileDragDrop.ts:102-160`）：文件/文本/文件夹路径分别处理，不支持的拖入类型弹 toast 提示（`:124-131`）。视觉反馈是 2px 绿色虚线边框 + 半透明绿色蒙层（`ComposerSurface.tsx:2165-2167`），颜色取自主题色变量。
 
 ### 3.3 草稿与编辑恢复状态机
 
@@ -172,11 +172,12 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 - **Agent 适配器**提供用户消息“编辑并重发”、兄弟分支切换与“复制为新会话”。编辑入口只对普通交互模式下、非跨会话投递的用户消息显示，并在编辑忙碌时禁用；复制依据 runtime checkpoint 判断可用性，通过 IPC 创建会话后跳转新现场，子会话另有来源返回入口。编辑会保留原分支，持久化和原生历史语义见[会话与消息管理笔记 1.3](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md)。依据：[agentMessageListAdapter.tsx:412–497](../../cherry-studio/src/renderer/pages/agents/messages/agentMessageListAdapter.tsx#L412-L497)。
 - **agent 专属操作**：另多出工作区文件、工具审批、artifact 面板等入口（`respondToolApproval/openArtifactFile/openAgentToolFlow/openInExternalApp/openPath`），相对路径经 `resolveWorkspaceFilePath` 解析到 agent workspace 目录（`:123-137`）——这些是 agent 运行时才有的概念，Home 侧没有对应实现。
 - **终态兜底**：agent 侧另有 `withTerminalErrorFallback`（`:48-73`）——消息终态是 `error`/`success` 但没有可见 part 时，补一条 `data-error` part，防止 UI 卡在空白/转圈（执行侧语义见对话请求与上下文笔记 6）。
-- 总结：入口差异来自两份完全独立的 hook，各自组装一份 `MessageListActions` 对象，字段有没有由各自的业务上下文决定；代码里没有 if/else 判断"我是 Home 还是 Agent"的分支；旧的 `state.readonly: true` 标志机制已不存在。
+- 总结：入口差异来自两份完全独立的 hook，各自组装一份 `MessageListActions` 对象，字段有没有由各自的业务上下文决定；代码里没有 if/else 判断"我是 Home 还是 Agent"的分支。
 
 **本节末尾源码列表**（各适配器注入的写操作集合）：
 
-- Home 注入：`deleteMessage`、`deleteMessageGroup(WithConfirm)`、`editMessage`、`startMessageBranch`、`setActiveBranch`、`regenerateMessage`、`translateMessage`、`abortMessageTranslation`、`removeMessageTranslation`、`renderRegenerateModelPicker`（`homeMessageListAdapter.tsx:839-876`）
+- Home 注入：`deleteMessage`、`deleteMessageGroup(WithConfirm)`、`editMessage`、`startMessageBranch`、`setActiveBranch`、`regenerateMessage`
+  `translateMessage`、`abortMessageTranslation`、`removeMessageTranslation`、`renderRegenerateModelPicker`（`homeMessageListAdapter.tsx:839-876`）
 - Agent 通过独立的 startEditing、setActiveBranch 与 forkSession 提供编辑重发、兄弟切换和复制新会话；普通 regenerate、翻译与代码块直接保存未由该适配器注入（[agentMessageListAdapter.tsx:479–525](../../cherry-studio/src/renderer/pages/agents/messages/agentMessageListAdapter.tsx#L479-L525)）。
 
 ### 6.3 分支面板（TopicBranchPanel）：消息树的图形导航
@@ -211,12 +212,20 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 **本节末尾源码列表**（分支面板各入口与图构建的定位）：
 
-- `TopicBranchPanel.tsx`：面板打开 `:63-67`、live 叠加 `:76-79`、图生成 `:80`、统计 `:262-268`、`handleNodeSelect` `:82-114`、右键菜单 `:280-294`（项定义 `getNodeContextMenuItems` `:182-247`）、`handleStartNodeBranch` `:116-136`
-- `topicMessageFlowGraph.ts`：`buildTopicMessageFlowGraph` `:13-59`（去重合并 `:61-93`）、`collectActivePath` `:137-152`、边打标 `:33-44`、`countBranchPaths` `:95-102`
-- `topicMessageFlowLayout.ts`：dagre 分层 `:55-70`、节点 220×112 `:14-17`、nodesep 56/ranksep 96 `:23-29`、OrderConstraint 排序 `:184-205`（比较 `:170-182`）、`toReactFlowEdge` 边样式 `:114-143`（`EDGE_COLORS` `:31-36`）
-- `TopicMessageFlowCanvas.tsx`：交互开关 `:241-242,252`、可视区挂载 `:248`、缩放 `:237-238`、`MiniMap` `:254-262`、`Controls` `:263`、图例 `:253`、空状态 `:208-219`、`getRootFocusViewport` `:90-97`、`focusKey` 复位 `:153-206`
-- `TopicMessageFlowNode.tsx`：role 徽标 `:25-32`、`getModelShortLabel` `:41-48`、状态圆点 `:34-39`、ring/透明度 `:228-233`、Handle `:241,283`、Popover `:186-200`、预览卡 `TopicMessageFlowNodePreviewCard` `:83-164`（`GET /messages/:id` `:96-99`、`MessageContent` `:151-158`、不触发节点 `:238-240,294`）
-- 分支切换接口：`GET /topics/:topicId/path?nodeId=` + `PUT /topics/:id/active-node`（`:91-103`）；新建分支 `POST /messages/:id/branches`（`reserveBranch`，`useTopicBranchActions.ts:18-31`）；复制分支 `POST /topics/:id/duplicate`（`:206-215`）；删除分支 `DELETE /messages/:id?awaitingInputOnly=true`（`:217-228`）
+- `TopicBranchPanel.tsx`：面板打开 `:63-67`、live 叠加 `:76-79`、图生成 `:80`、统计 `:262-268`。
+  交互入口：`handleNodeSelect` `:82-114`、右键菜单 `:280-294`（项定义 `getNodeContextMenuItems` `:182-247`）、`handleStartNodeBranch` `:116-136`
+- `topicMessageFlowGraph.ts`：`buildTopicMessageFlowGraph` `:13-59`（去重合并 `:61-93`）、`collectActivePath` `:137-152`。
+  边与统计：边打标 `:33-44`、`countBranchPaths` `:95-102`
+- `topicMessageFlowLayout.ts`：dagre 分层 `:55-70`、节点 220×112 `:14-17`、nodesep 56/ranksep 96 `:23-29`。
+  排序与边样式：OrderConstraint 排序 `:184-205`（比较 `:170-182`）、`toReactFlowEdge` 边样式 `:114-143`（`EDGE_COLORS` `:31-36`）
+- `TopicMessageFlowCanvas.tsx`：交互开关 `:241-242,252`、可视区挂载 `:248`、缩放 `:237-238`、`MiniMap` `:254-262`。
+  其余画布项：`Controls` `:263`、图例 `:253`、空状态 `:208-219`。
+  视口管理：`getRootFocusViewport` `:90-97`、`focusKey` 复位 `:153-206`
+- `TopicMessageFlowNode.tsx`：role 徽标 `:25-32`、`getModelShortLabel` `:41-48`、状态圆点 `:34-39`、ring/透明度 `:228-233`、Handle `:241,283`。
+  预览卡相关：Popover `:186-200`、`TopicMessageFlowNodePreviewCard` `:83-164`（`GET /messages/:id` `:96-99`、`MessageContent` `:151-158`）。
+  预览卡不触发节点 `:238-240,294`。
+- 分支切换接口：`GET /topics/:topicId/path?nodeId=` + `PUT /topics/:id/active-node`（`:91-103`）；新建分支 `POST /messages/:id/branches`（`reserveBranch`，`useTopicBranchActions.ts:18-31`）。
+  复制与删除：复制分支 `POST /topics/:id/duplicate`（`:206-215`）；删除分支 `DELETE /messages/:id?awaitingInputOnly=true`（`:217-228`）
 
 ## 7. 多会话、多模型、群聊与后台生成
 
@@ -228,8 +237,8 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 
 ### 8.1 UI 状态所有权
 
-- **分支草稿已是持久化行**：`Chat.tsx` 旧的 `branchDraftAnchorIdRef`/`branchSendAnchorOverrideIdRef` 三态 ref 状态机已被删除，"从历史节点开新分支"改为 `useTopicBranchActions.reserveBranch` 持久化空 user 叶子 + `fill-reserved` 填充（6.3；数据侧语义见会话与消息管理笔记 4.3）——原先"隐式三态机容易漏清空"的脆弱点随机制移除而消失。
-- **live branch 前端状态广播**：`TopicMessageFlowLiveState` 仍是纯前端结构，现在只广播流式中消息（草稿假节点已删除）；分支面板 dock/popout 时视口按 `focusKey` 复位（6.3 画布）。
+- **分支草稿已是持久化行**："从历史节点开新分支"走 `useTopicBranchActions.reserveBranch` 持久化空 user 叶子 + `fill-reserved` 填充（6.3；数据侧语义见会话与消息管理笔记 4.3）。
+- **live branch 前端状态广播**：`TopicMessageFlowLiveState` 仍是纯前端结构，只广播流式中消息；分支面板 dock/popout 时视口按 `focusKey` 复位（6.3 画布）。
 - **草稿事实源**：按会话缓存于 cacheService（`chatDraftCache`，24h TTL，3.3）；Topic 行草稿指示订阅同一缓存（2.1）。
 - **运行状态事实源**：主进程共享缓存键 `topic.stream.statuses.<topicId>`（`useTopicStreamStatus.ts:36`），"本窗口已读"读收条是另一个跨窗口共享键（`:37-39`）——运行指示是跨窗口一致的，不是窗口本地状态。
 - **无全局状态库**：parts 分层、overlay、状态广播等全部用 hook/ref + 共享缓存实现，仓库明确不引入全局状态库（`useStableMessagePartsLayers.ts:5-22` 注释）。
@@ -284,7 +293,7 @@ Home 和 Agent 两个入口共用同一套"会话壳 + composer + 消息列表"�
 ## 11. 设计取舍与已确认边界
 
 - **`ChatComposer.tsx` 单文件体量大**（约 1859 行）：`ChatComposerInner` 一个组件本体加上闭包状态，混杂了草稿缓存、输入历史导航、编辑会话恢复（含"编辑消息时保存旧草稿、取消编辑时还原"的完整状态机）、mentioned models、reasoning effort 的乐观更新+回滚、queued followups 等多套独立状态机，在同一个函数体内用多个 ref 协调（3.3）。
-- **branch draft 的持久化改型**（8.1）：旧的"三态 ref 状态机"被 `reserveBranch` 持久化行取代，原来的脆弱点随机制移除而消失；新机制的代价是"空 user 叶子"需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
+- **branch draft 的持久化载体**（8.1）：草稿由 `reserveBranch` 持久化为空 user 叶子行，代价是空叶子需要在渲染与删除/填充路径上做派生判断与守卫（数据侧见会话与消息管理笔记 4.3）。
 - **适配器模式**：Home 与 Agent 各自提供适合本业务的编辑、分支和执行操作，下游按能力存在性显示按钮。理解一个入口需同时追踪适配器与能力 hook，不能以两侧是否共用消息壳判断读写能力。
 - **搜索的"数据 + DOM"双轨**（2.3）：粗匹配在已加载数据上、精确高亮在已挂载 DOM 上，虚拟化窗口外的消息可定位但无 DOM 高亮；流式行被排除、未加载页搜不到，由分页与数据匹配的组合决定，数据侧影响见会话与消息管理笔记 5。
 - **桌面集成边界**（8.2）：完成与审批通知可返回会话；托盘未读角标和快捷键速查浮层在所查入口中未找到，Session 列表无拖拽排序（2.2）。

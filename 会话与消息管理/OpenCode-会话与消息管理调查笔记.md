@@ -16,7 +16,7 @@
 
 OpenCode 2.x 的会话数据核心是「durable 事件 + 事件投影落库」：服务端把每次变化（会话创建/重命名/归档、inbox 入队与投递、步骤开始/结束、文本与工具进度）发布为 durable 事件，投影器按 seq 写入 SQLite；客户端读取 HTTP 快照并用事件流增量更新。会话模型分为 Session（`session_v2`）、Message（`session_message`）、assistant 内容（`session_part`）、待执行输入（`session_inbox`）、附件（`blob`/`blob_ref`）五类存储。
 
-消息是 11 种类型的联合（`user`、`assistant`、`synthetic`、`system`、`skill`、`shell`、`compaction`、`idle`、`agent-switched`、`model-switched`、`location-switched`），assistant 的正文是内嵌内容数组（text / reasoning / tool），工具状态有 streaming、running、completed、error 四态。旧快照的 v1 消息表与 V1/V2 双轨已不存在，v2 会话表是唯一主路径。
+消息是 11 种类型的联合（`user`、`assistant`、`synthetic`、`system`、`skill`、`shell`、`compaction`、`idle`、`agent-switched`、`model-switched`、`location-switched`），assistant 的正文是内嵌内容数组（text / reasoning / tool），工具状态有 streaming、running、completed、error 四态。消息表与会话表都只有 v2 单轨，`session_v2` 是会话的唯一存储路径。
 
 ## 系统边界与数据主链
 

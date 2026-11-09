@@ -20,7 +20,7 @@ Jan 在外部关系上同时扮演三个角色，而不是单一的执行体：
 2. **执行体**：独立的 `jan` 二进制默认打开 Agent TUI，`jan cli` 提供非交互子命令；桌面另有一套由前端循环拥有的 Cowork 运行面。两者共用同一份 Agent 内核，但会话与工具事件的归属方不同。
 3. **工具提供方**：`jan mcp serve` 把 Jan 内置工具按项目根目录约束暴露给其他 Agent；实验性的 `acp` 子命令把同一 Agent 以 Agent Client Protocol 暴露给 Zed、JetBrains 一类编辑器。
 
-外接驱动面已从"命令行预接外部 Agent"改为**会话级 JSON-RPC 协议**：客户端经 LF 分隔的 stdio 与 `jan` 建立会话，声明自己要提供的 host tool，运行时把工具调用派回客户端执行。协议 schema 与生成的 JavaScript 客户端（ADK）一起提交在仓库里，Python ADK 作为独立实现放在 `adk/python`。桌面 Claude Code 设置页仍保留外部 Agent 配置入口，但旧 `jan serve` / `jan launch claude|openclaw` 一键预接链在现行命令树中不存在。
+外接驱动面是**会话级 JSON-RPC 协议**：客户端经 LF 分隔的 stdio 与 `jan` 建立会话，声明自己要提供的 host tool，运行时把工具调用派回客户端执行。协议 schema 与生成的 JavaScript 客户端（ADK）一起提交在仓库里，Python ADK 作为独立实现放在 `adk/python`。桌面 Claude Code 设置页仍保留外部 Agent 配置入口。
 
 ## 接入角色与系统边界
 

@@ -87,7 +87,12 @@ durable 事件（session.text.delta / tool.* / step.*）
 
 ## 6. 工具渲染
 
-- **工具渲染器**：`tools/tool-renderer.tsx` 按工具名分派到专用组件，覆盖 `read`/`list`/`glob`/`grep`/`browser`/`webfetch`/`websearch`/`subagent`/`shell`/`execute`/`edit`/`write`/`patch`/`question`/`skill` 等；未识别的工具走通用壳。
+- **工具渲染器**：`tools/tool-renderer.tsx` 按工具名分派到专用组件，未识别的工具走通用壳。已覆盖的工具按用途分组：
+
+  ```text
+  read / list / glob / grep / browser / webfetch / websearch / subagent
+  shell / execute / edit / write / patch / question / skill
+  ```
 - **通用壳**：`basic-tool.tsx` 提供折叠容器、状态副标题、参数摘要、延迟挂载与高度动画。
 - **输出渲染**：搜索结果走 markdown 或列表；shell 输出去掉 ANSI 后按等宽文本渲染；编辑/写入/补丁用 diff 视图（`pierre` 包）；错误统一错误卡片。
 - **上下文组**：连续读取类工具合并成可折叠组，减少时间线噪音。

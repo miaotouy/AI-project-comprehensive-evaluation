@@ -87,7 +87,7 @@ FlowLock 在压缩时暂停心跳并保留锁，只有持久化成功才按 Sess
 
 - 单聊请求在 `send-to-vcp` handler 内读取服务器地址与 API key，并直接 fetch，没有 Provider SDK 或 Adapter 层。发送前清理未设置参数、剥离思维链、按配置净化上下文并附加 `vcpchatExtensions`（逐条消息时间戳绑定 + sha256 摘要 + `requestContext`）；fetch 使用窗口生命周期任务的 signal。`modules/ipc/chatHandlers.js:74-153,1056-1360`
 - 群聊：主进程按 agent 逐个发起 fetch，超时由分阶段定时器治理（见第 5 节）；群聊 assistant 消息记录 `model/modelSource`（`'group_unified'` 或 `'agent'`），说明请求携带的模型标识同时落盘为消息字段。`Groupmodules/groupchat.js:1452,1461`
-- 旧笔记记录的死代码 `modules/vcpClient.js` 在当前快照中已删除；渲染进程的聊天能力入口改为 `preloads/api/chat.js`，preload 侧按窗口角色暴露 `chatAPI`/`utilityAPI`/`desktopAPI`。
+- 渲染进程的聊天能力入口为 `preloads/api/chat.js`，preload 侧按窗口角色暴露 `chatAPI`/`utilityAPI`/`desktopAPI`。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
@@ -118,9 +118,9 @@ FlowLock 在压缩时暂停心跳并保留锁，只有持久化成功才按 Sess
 
   因此单聊按钮现在两条路都能停止界面流：上游配合时由上游关闭响应流，上游不配合时本地兜底取消。主发送 fetch 本身仍无客户端超时，这与中断路径是两件事。
 
-### 7.2 旧的死代码对照已消失
+### 7.2 IPC 入口与超时边界
 
-旧笔记记录的 `modules/vcpClient.js`（带 `activeRequests` 与 300 秒超时的完整实现）在当前快照中已删除，不再是可对照的实现；相关能力改由 `preloads/api/*` 声明式注册 IPC。单聊请求仍没有客户端总超时，群聊侧超时已从固定 60 秒改为分阶段弹性。
+渲染进程的聊天能力经 `preloads/api/*` 声明式注册 IPC，按窗口角色区分。单聊发送 fetch 没有客户端总超时；群聊超时按阶段弹性控制，等待响应头 120 秒、块间空闲 62 秒。
 
 ### 7.3 重试与续写
 

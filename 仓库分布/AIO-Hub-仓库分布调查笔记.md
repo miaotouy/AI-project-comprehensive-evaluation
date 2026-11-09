@@ -16,7 +16,7 @@ Git 跟踪文件 3944 个；可识别源码 3178 文件 / 约 920422 行；文�
 
 ## 结论摘要
 
-AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带独立移动端工作区的多端仓库。源码集中度依然很高：`src/tools` 单一区域约 56.0 万行，占全仓可识别源码约 61%；它同时包含大量随工具就地维护的 Markdown，因此“工具实现”和“工具说明”在物理目录上重叠。自上一快照以来，`src/tools` 新增子智能体（`sub-agent`）工具目录，并补入 48 份按工具维护的 `ARCHITECTURE.md`；`packages/` 新增三个工作区包（`agent-preset-core`、`model-metadata-core`、`tool-icons`），`src-tauri/crates` 出现两个本地 crate（`code-formatter`、`desktop-entry`），workspace 边界从"仅 llm-core"扩展为四个包。
+AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带独立移动端工作区的多端仓库。源码集中度依然很高：`src/tools` 单一区域约 56.0 万行，占全仓可识别源码约 61%；它同时包含大量随工具就地维护的 Markdown，因此“工具实现”和“工具说明”在物理目录上重叠。`src/tools` 下有子智能体（`sub-agent`）工具目录，并按工具就地维护 48 份 `ARCHITECTURE.md`；`packages/` 有三个工作区包（`agent-preset-core`、`model-metadata-core`、`tool-icons`），`src-tauri/crates` 有两个本地 crate（`code-formatter`、`desktop-entry`），workspace 边界覆盖 llm-core 与上述三个包，共四个成员。
 
 ## 统计与模块分布
 

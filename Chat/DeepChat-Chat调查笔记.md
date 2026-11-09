@@ -23,7 +23,7 @@ DeepChat Chat 是 main process 驱动、renderer 订阅的持久化会话系统�
 5. renderer message store 维护持久化缓存、streaming blocks、解析缓存和 IPC 增量事件；`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象；消息窗口以测量 + spacer + anchor + 二分查找实现附近消息渲染。
 6. 上下文压缩现在同时记录占用快照和边界标记；聊天列表把压缩显示为独立分隔行，不混入普通 assistant 消息，启动时会协调遗留的压缩标记（`src/main/agent/deepchat/harness/createDeepChatAgentHarness.ts`、`src/renderer/src/components/chat/MessageListRow.vue`）。
 7. Tape 成为 transcript 的可重建事实来源：终态消息事实可经投影器重放到消息、结构化内容、blocks 与搜索文档表，并用独立 projection cursor 记录已应用的 Tape incarnation 和 entry 上界。
-8. 消息导航收紧为两件事：滚动缩略图（message map）用与窗口化同一张布局表计算刻度，跳转失败时可重试定位（`src/renderer/src/features/chat-page/model/minimapTicks.ts`、`messageJumpRetry.ts`）。计划能力（`update_plan` 工具与 `AgentProgressFloat` 浮层）已移除，会话不再有独立计划浮窗。
+8. 消息导航由两件事承担：滚动缩略图（message map）用与窗口化同一张布局表计算刻度，跳转失败时可重试定位（`src/renderer/src/features/chat-page/model/minimapTicks.ts`、`messageJumpRetry.ts`）。
 9. 输入侧新增 composer 路由与文档序列化：附件、内联引用和会话引用在提交前统一走 `composerInputRouting`，输入内容的序列化与恢复由 `composerDocumentSerialization` 负责，避免草稿与提交两份结构各自演化。
 
 ## 产品表面与系统边界

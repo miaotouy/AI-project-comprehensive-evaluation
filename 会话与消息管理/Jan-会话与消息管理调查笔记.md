@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-普通 Chat 的 Thread/Message 经服务层直调 `@janhq/core` 暴露的 `window.core.api.*` 再到 Tauri Rust 命令，桌面用逐线程 JSON/JSONL、移动用 SQLite；旧快照里负责透传的 conversational 扩展已不在仓库，线程与消息的桥接并入 core 宿主。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
+普通 Chat 的 Thread/Message 经服务层直调 `@janhq/core` 暴露的 `window.core.api.*` 再到 Tauri Rust 命令，桌面用逐线程 JSON/JSONL、移动用 SQLite；线程与消息的桥接由 core 宿主承担。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
 
 数据层关键事实（均有源码依据，正文标注位置）：
 

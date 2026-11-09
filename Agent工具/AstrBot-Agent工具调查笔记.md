@@ -29,7 +29,7 @@ AstrBot 的 Agent 工具体系以「统一执行器 + 多来源注册」为核�
 - **网页搜索包含 AnySearch**：选择 `websearch_provider=anysearch` 时注入 `web_search_anysearch`，支持普通搜索和垂直领域标签；无 Key 时允许一次匿名请求，有 Key 时沿用错误驱动轮换（`astrbot/core/tools/web_search_tools.py:57-60,1248-1448`）。
 - **内置工具 5 组约 26 个 + shipyard_neo 14 个**，每组带 config 规则（`BuiltinToolConfigRule`），但**规则只驱动 WebUI 展示"可用状态"，不参与运行时注入**（唯一消费方 tools_service.py:533-569）。
 - **MCP 生命周期自管理**：启动并行初始化（并发 task + `asyncio.gather`）、连接超时/启用超时双环境变量、幂等启动、同任务内清理（#9068 修复）、ModelScope 云端同步；**工具名对 LLM 侧清洗**（`[^A-Za-z0-9_-]+`→`_`），原名保留用于实际 MCP 调用（mcp_client.py:800-808，#9534）。
-- **停止即取消**：`_await_or_stop`（tool_loop_agent_runner.py:472-512）把进行中的 LLM 请求/上下文压缩与 abort 信号竞速，停止请求立即取消等待而不再等其自然返回；中断回填从长提示改为 user「Stop output.」+ assistant「Output stopped.」消息对（:116-117、1483-1516，#9602）。
+- **停止即取消**：`_await_or_stop`（tool_loop_agent_runner.py:472-512）把进行中的 LLM 请求/上下文压缩与 abort 信号竞速，停止请求立即取消等待；中断回填用 user「Stop output.」+ assistant「Output stopped.」消息对（:116-117、1483-1516，#9602）。
 
 ## 总体调用链
 

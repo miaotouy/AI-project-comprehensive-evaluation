@@ -128,7 +128,7 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 **已确认边界**：
 
 - 云沙箱（Web/Mobile）是 stub，全部方法返回"not yet implemented"（`src/renderer/sandbox/cloud-provider.ts:17-86`），实际能力仅桌面端。
-- 消息级 `MessageArtifact`（整条消息 HTML 拼装预览）与 `needArtifact`/`previewArtifact` 状态已保留但未接入渲染（`Message.tsx:85,193,431` 仅定义/计算，全仓检索无渲染调用点）——旧路径疑似被逐代码块预览取代，此为静态推断。
+- 消息级 `MessageArtifact`（整条消息 HTML 拼装预览）与 `needArtifact`/`previewArtifact` 状态已保留但未接入渲染（`Message.tsx:85,193,431` 仅定义/计算，全仓检索无渲染调用点）。
 - `autoPreviewArtifacts` 默认关闭（`src/shared/defaults.ts:98`）。
 
 **未验证事项**：整个运行时链路（执行、预览、下载、暂停继续、重启恢复）均未运行验证；Windows 原生执行与 SRT 隔离的实际行为、网络放行策略的实际生效情况、artifact 跨重启可用性只由代码路径与测试文件支持。

@@ -88,7 +88,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 
 TypeScript 与 Svelte 合计约 94.9%，全部是手写业务代码；第三方资源改变的是字节量，不改变行数。JavaScript 的 9 个文件是运行时必需的杂项：`server.cjs`、`public/assets` 下的翻译 worker、`public/sw.js`、`public/functions` 的 Cloudflare 代理函数、`util/risuUserscript.user.js` 与构建辅助文件。
 
-运行时按平台分工：浏览器运行 Svelte 组件与 TypeScript 逻辑；Tauri 桌面由 Rust 层补齐原生能力（原生请求、可按 fetch id 取消的流式响应、OAuth 登录）；Node 运行 `server.cjs`；hono 骨架的目标运行时是 Node/Bun/Cloudflare Workers/Vercel。仓内的本地推理后端（原 `src-tauri/src-python` 的 FastAPI + llama_cpp 服务）在本快照已移除，本地推理改由用户配置的外部 Provider（如 Ollama）承担。
+运行时按平台分工：浏览器运行 Svelte 组件与 TypeScript 逻辑；Tauri 桌面由 Rust 层补齐原生能力（原生请求、可按 fetch id 取消的流式响应、OAuth 登录）；Node 运行 `server.cjs`；hono 骨架的目标运行时是 Node/Bun/Cloudflare Workers/Vercel。仓库内不含本地推理后端（FastAPI + llama_cpp 服务），本地推理由用户配置的外部 Provider（如 Ollama）承担。
 
 ## 3. 文档分布与数量
 
@@ -115,7 +115,7 @@ Rust 代码与 `drive`、`sync`、`model`、`lang` 目录未识别到同目录�
 平台策略是单一 SPA 代码库加运行时探测：`src/ts/platform.ts` 通过 `__TAURI_INTERNALS__`、`__NODE__` 全局标记、hostname 与 user agent 区分本地桌面、Node 服务器、官网 Web 与移动浏览器，同一份 `src` 不经过条件编译即服务全部平台。平台专属差异放在三类外围目录：
 
 - Web：`vite build` 产出 `dist` 供静态托管；`public` 下的服务 worker `sw.js` 与 `manifest.json` 支持 PWA 缓存；`public/functions` 的三个代理函数按 Cloudflare Functions 约定提供 CORS 代理；`util/risuUserscript.user.js` 是 Tampermonkey 用户脚本。
-- 桌面：`src-tauri` 是完整 Tauri 2 工程，`main.rs` 注册的命令层提供原生网络请求、可取消的流式事件响应与 OAuth 登录；流式请求按 fetch id 持有 abort 句柄，页面重载时可批量取消，并以空闲超时取代原先的固定总时长；`tauri.conf.json` 声明 deb/rpm/appimage/nsis/app/dmg 六个打包目标、GitHub Releases 更新器与 `risuailocal` 深链。
+- 桌面：`src-tauri` 是完整 Tauri 2 工程，`main.rs` 注册的命令层提供原生网络请求、可取消的流式事件响应与 OAuth 登录；流式请求按 fetch id 持有 abort 句柄，页面重载时可批量取消，并以空闲超时中止；`tauri.conf.json` 声明 deb/rpm/appimage/nsis/app/dmg 六个打包目标、GitHub Releases 更新器与 `risuailocal` 深链。
 - 移动：`capacitor.config.ts` 声明 appId 与 `webDir: dist`，但仓库未跟踪 android/ios 原生工程（构建时生成）；移动适配以 `src/lib/Mobile` 组件、`LiteUI` 变体与 `MobileGUI` 状态切换实现。
 
 自托管服务与桌面并行：`server/node/server.cjs` 托管 `dist` 并提供代理与认证，`Dockerfile` + `docker-compose.yml` 以端口 6001 发布；`server/hono` 是面向多运行时（Node、Bun、Cloudflare、Vercel）的替代实现骨架。发布流水线在 `.github/workflows`：`github-actions-builder.yml` 对 production 分支矩阵构建四个平台的 Tauri 产物，`docker-build.yml` 推送 ghcr.io 镜像，`pr-check.yml` 对 main 的 PR 跑类型检查与测试，另有 `mod.yml` 与 `codeql.yml`。
@@ -135,7 +135,7 @@ Rust 代码与 `drive`、`sync`、`model`、`lang` 目录未识别到同目录�
 
 - 平台共享程度高：桌面、Web、自托管共享同一份业务代码与存档格式（`decodeRisuSave`），平台差异收敛在 `platform.ts` 判定和 Rust 命令层，未形成第二套业务实现。
 - 网络层多后端并存是刻意结构：Web 用 Cloudflare Functions 代理并可被用户脚本接管，Tauri 用 `native_request`/`streamed_fetch` 命令，Node 自托管用服务端代理；同一 fetch 抽象的三个后端。
-- 本地推理后端退场：本快照删除了 `src-tauri/src-python` 与 `src/ts/process/models/local.ts`，桌面端不再下载或引导 Python 环境，本地模型改由 Ollama 等外部 Provider 承担；仓库内只剩根目录 `t.py` 翻译演示脚本。
+- 本地推理由外部 Provider 承担：仓库内没有本地推理后端（`src-tauri/src-python` 与 `src/ts/process/models/local.ts` 均不存在），桌面端不下载或引导 Python 环境，本地模型由 Ollama 等外部 Provider 提供；仓库内只有根目录 `t.py` 翻译演示脚本。
 - `server/node` 与 `server/hono` 并存：前者可用但 readme 声明将被弃用，后者是未来替代骨架，目前源码文件均为入口存根。
 - 移动端只保证到“配置 + UI 变体”层次：无原生工程、无移动构建 CI，Capacitor 配置是静态声明，未运行验证。
 - 测试覆盖集中在解析器、请求与存储层（最接近数据契约的代码），UI 层仅 1 个渲染测试，未识别到 e2e；这与“无综合测试套件、依赖类型检查”的开发者文档自述一致，但该文档同时描述了不存在的 `src/test/runTest.ts`。

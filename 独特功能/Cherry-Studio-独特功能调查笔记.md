@@ -31,7 +31,7 @@
 
 ## 介绍声明与候选盘点
 
-README 关键特色：300+ 预配置助手、多模型同时对话、文档与数据处理（Office/PDF、WebDAV 备份）、全局搜索、Topic 管理、AI 翻译、拖拽排序、Mini Apps、MCP、Skills、定时任务与消息渠道（Channels）、语音输入与朗读、选中文本工具。README 已不再维护独立的 Roadmap 愿景清单，改为指向项目板与 Releases；因此旧快照中"Notes/Canvas/OCR/TTS 仍属愿景"的判断不再适用，本轮直接以代码入口重新核对。
+README 关键特色：300+ 预配置助手、多模型同时对话、文档与数据处理（Office/PDF、WebDAV 备份）、全局搜索、Topic 管理、AI 翻译、拖拽排序、Mini Apps、MCP、Skills、定时任务与消息渠道（Channels）、语音输入与朗读、选中文本工具。README 不列独立的 Roadmap 愿景清单，指向项目板与 Releases；Notes/Canvas/OCR/TTS 等能力以代码入口为准。
 
 ## 已确认的独特能力
 

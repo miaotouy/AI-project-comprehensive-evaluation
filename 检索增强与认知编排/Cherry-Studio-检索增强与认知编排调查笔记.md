@@ -29,7 +29,7 @@ Cherry Studio 的本地知识库属于“知识资产管线”与“工具化检
 
 知识库服务将管理、摄取、查询和 Concept 读写拆分。Base 是顶层范围；条目可被添加、删除和重新索引；索引后的内容以 chunk 支持召回，Concept 表示可按字符范围读取或 grep 的文档对象。服务还提供组织树，因此模型不必仅依赖相似度片段定位原文。接口集中在 `src/main/features/knowledge/KnowledgeService.ts:76-169`。
 
-摄取为异步任务式生命周期。初始化时注册根目录准备、文档索引、文件处理结果检查、子树删除和重新索引 handler；应用完全就绪后会恢复删除中或中断的条目。重新索引不再默认复用库内旧副本：文件重新复制原文件，目录根重新扫描原目录，Note 从数据库内容重建快照，URL 重新获取。重取阶段失败会将对应根标为失败；若来源在入队后、锁内重置前消失，则跳过该根并保留现有向量与可搜索状态。来源解析与写入见 `src/main/features/knowledge/pipeline/sources/reacquire.ts`、`tasks/reindexSubtreeJobHandler.ts`。
+摄取为异步任务式生命周期。初始化时注册根目录准备、文档索引、文件处理结果检查、子树删除和重新索引 handler；应用完全就绪后会恢复删除中或中断的条目。重新索引按来源重新获取内容：文件重新复制原文件，目录根重新扫描原目录，Note 从数据库内容重建快照，URL 重新获取。重取阶段失败会将对应根标为失败；若来源在入队后、锁内重置前消失，则跳过该根并保留现有向量与可搜索状态。来源解析与写入见 `src/main/features/knowledge/pipeline/sources/reacquire.ts`、`tasks/reindexSubtreeJobHandler.ts`。
 
 文档转 Markdown 与图片转文本由文件处理子系统独立承担：文件处理有自己的任务模型（`FileProcessingService` 与 `FileProcessingTaskId`），知识库摄取只通过任务 API 创建与查询任务，不再直接调用处理器；判断处理结果改为任务结算时检查一次，而不是轮询。导入来源的文件复制也被移出 Base 锁，避免长耗时复制阻塞同一知识库的其它操作。依据：`src/main/features/fileProcessing/FileProcessingService.ts`、`ingestion/KnowledgeIngestionService.ts`、`tasks/utils/jobInput.ts`。
 

@@ -90,7 +90,7 @@ Jan 是本地优先的 AI 桌面客户端：Tauri 桌面 + Web + Android/iOS 多
 
 保留独特功能笔记的能力卡标题与证据状态，完整机制见来源笔记：
 
-- **能力一：随附推理引擎的 worker 托管与逐线程 KV 缓存 — `主链确认`**：引擎以编译期版本捆绑进随附 worker，运行机不再下载、选择或回滚后端；worker 按需承载多模型、容量满时只淘汰空闲的最近最少使用 chat 模型，并按 thread_id 保存/恢复提示缓存（身份校验失败则删除）；运行后 `readiness`/`gpuBackendMatch` 校验 GPU 卸载与实际嵌入。旧快照的“后端目录下载/更新/回滚与按硬件选型”已从当前实现移除（见声明不符）。为独特功能主贡献候选。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)
+- **能力一：随附推理引擎的 worker 托管与逐线程 KV 缓存 — `主链确认`**：引擎以编译期版本捆绑进随附 worker，运行机不再下载、选择或回滚后端；worker 按需承载多模型、容量满时只淘汰空闲的最近最少使用 chat 模型，并按 thread_id 保存/恢复提示缓存（身份校验失败则删除）；运行后 `readiness`/`gpuBackendMatch` 校验 GPU 卸载与实际嵌入。为独特功能主贡献候选。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)
 - **能力二：`/v1/orchestrations` 服务端 MCP 编排 — `主链确认`**：把 MCP 工具执行循环暴露为 HTTP 服务——外部客户端提交请求后，服务端加载 assistant 系统提示 → 模型出 tool_calls → 进程内执行 MCP 工具 → 循环至完成并返回聚合响应；`stream=true` 不支持，外部输入按请求处理，权限沿用 MCP 既有执行域。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
 - **能力三：Jan Agent CLI/TUI — `主链确认`**：独立 crate 的裸 `jan` 打开终端 Agent 控制台，`jan cli agent run` 非交互运行项目 Agent，`jan cli models/threads/mcp` 管理模型、线程与 MCP server，`jan config` 管理 `~/.jan/config.toml` 的 Provider 凭据；Provider 解析优先级为 CLI 参数/环境变量、项目 `agent.toml`、桌面 `settings.json`（只继承）、全局 `config.toml`；仅用远程 Provider，不含本地推理与 GUI 依赖。旧 `jan serve` / `jan launch claude|openclaw` 已不在命令树中。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Jan-外部执行体与应用协作调查笔记.md)
 - **能力四：MCP 智能工具路由 — `主链确认`**：用独立小模型对用户意图做工具级路由选择，LLM 不可用时降级关键词分类（七类 fallbackReason），路由决策与降级原因写入遥测；路由结果冻结（签名 + 缓存）以保持提示缓存稳定；为 Agent 工具类目的增强形态，不单独计主贡献。[独特功能调查笔记](../独特功能/Jan-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Jan-Agent工具调查笔记.md)

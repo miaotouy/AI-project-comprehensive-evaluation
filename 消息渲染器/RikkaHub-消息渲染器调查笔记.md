@@ -16,7 +16,7 @@
 
 RikkaHub 的消息渲染是纯原生 Compose 实现，不存在 DOM。消息内容以 `UIMessagePart` 密封类表达，渲染时先由 `groupMessageParts()` 把连续的 reasoning 与工具部分聚成一个“思考块”，其余部分按原始下标生成内容块，再逐块分派到 Compose 组件（`ChatMessage.kt`）。部件类型的字段定义、分支节点与持久化约束由会话与消息管理笔记负责，见 [会话与消息管理调查笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
 
-Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应用侧 `MarkdownBlock` 只负责主题与组件插槽（代码块、图片、公式、表格、citation、颜色代码块），解析、排版与流式补全由库完成。代码高亮同样由 BetterText 的 highlight 模块提供，随包自研的 `highlight` 模块与 intellij-markdown/JLatexMath 依赖一并移除。Mermaid 仍在 WebView 中执行本地脚本并桥接导出 PNG，html/svg 预览另走一条 WebView 路径。
+Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应用侧 `MarkdownBlock` 只负责主题与组件插槽（代码块、图片、公式、表格、citation、颜色代码块），解析、排版与流式补全由库完成。代码高亮同样由 BetterText 的 highlight 模块提供。Mermaid 仍在 WebView 中执行本地脚本并桥接导出 PNG，html/svg 预览另走一条 WebView 路径。
 
 流式输出把每个 chunk 按事件 id 合并进末条助手消息，由 `ChatRequestFactory` 调用输出变换器产生展示态与持久态两条流；最终落库用 `onGenerationFinish()` 的结果（`ChatRequestFactory.kt`）。请求侧的流式事件、节流与半截流语义见 [对话请求与上下文调查笔记](../对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md)。
 
@@ -76,7 +76,7 @@ Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应
 
 ## 4. Markdown、代码与富文本管线
 
-- **解析与分派。** `MarkdownBlock` 是应用侧统一入口（`Markdown.kt` 的 `MarkdownBlock`）。它把内容交给 BetterText 的 Markdown 模块解析与排版，自己只构造主题与组件插槽：正文样式合并 `LocalTextStyle` 与 `LocalContentColor`，标题字号按正文字号等比缩放，块间距与 fontSize 联动，引用色可按设置开启；`streaming = true` 时库会补全或隐藏末尾未写完的语法（如 `**加粗`、`$\frac{`）。旧的 intellij-markdown AST + 手写节点分派（`MarkdownNew`、`SimpleHtmlBlock`）已删除。
+- **解析与分派。** `MarkdownBlock` 是应用侧统一入口（`Markdown.kt` 的 `MarkdownBlock`）。它把内容交给 BetterText 的 Markdown 模块解析与排版，自己只构造主题与组件插槽：正文样式合并 `LocalTextStyle` 与 `LocalContentColor`，标题字号按正文字号等比缩放，块间距与 fontSize 联动，引用色可按设置开启；`streaming = true` 时库会补全或隐藏末尾未写完的语法（如 `**加粗`、`$\frac{`）。
 
 **组件插槽。** `MarkdownBlock` 通过 BetterText 的 `MarkdownComponents` 注入 Material 实现：代码块交给 `HighlightCodeBlock`（`completeCodeBlock = block.closed` 决定流式未闭合围栏是否高亮），图片交给 `ZoomableAsyncImage`（工作区路径先经 `rememberWorkspaceImageUrl` 解析成宿主文件路径），块级公式交给 `MathBlock`、行内公式交给 `LatexInline`（关闭 LaTeX 渲染时不注册组件，公式回退等宽源码），表格交给 `TableCard`，链接交给 citation 徽标逻辑，行内代码与正文里的颜色代码经 `parseColorCode` 前置色块。`MaterialMarkdown` 是不带聊天特化的默认包装（中文注释说明它供悬浮窗等拿不到导航上下文的场景使用），默认组件未注册公式与高亮。
 
@@ -84,9 +84,9 @@ Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应
 
 **代码块。** `HighlightCodeBlock` 保留复制、按语言映射扩展名导出文件、html/svg 内联与新窗口预览、超长折叠、行号与自动换行切换；着色由 BetterText 的 `rememberHighlightedCode` 提供（`CodeHighlightText` 是同源的轻量版，供工具调用预览这类不需要并入正文选择的场景）。文档级代码块与正文共享同一个 `BetterSelectionContainer`，因此可以连续选择（`SelectableContent.kt`）。
 
-**数学公式。** 块级公式用 `MathBlock`（内部是 BetterText 的 `LatexBlock`），行内公式用 `LatexInline`；JLatexMath 依赖与应用侧的 `JLatexMathSplitter` 拆分均已移除，公式换行与排版由库负责。公式渲染失败或关闭 `enableLatexRendering` 时回退为等宽源码。
+**数学公式。** 块级公式用 `MathBlock`（内部是 BetterText 的 `LatexBlock`），行内公式用 `LatexInline`；公式换行与排版由 BetterText 负责。公式渲染失败或关闭 `enableLatexRendering` 时回退为等宽源码。
 
-**高亮实现。** 高亮与语言定义来自 BetterText 的 `bettertext-highlight`，配色走 `HighlightTextColorPalette`（默认配色与 web-ui 的 Atom One 同源）；随包自研的 `highlight` 模块（语言 DSL、`HighlightEngine`、hljs 夹具）整体移除，应用侧不再维护语言清单。
+**高亮实现。** 高亮与语言定义来自 BetterText 的 `bettertext-highlight`，配色走 `HighlightTextColorPalette`（默认配色与 web-ui 的 Atom One 同源），应用侧不维护语言清单。
 
 **Mermaid。** Mermaid 代码块把源码与主题色注入 WebView，页面加载本地 `assets/html/mermaid.min.js` 后经 `mermaid.initialize`/`mermaid.run` 渲染成 SVG（`Mermaid.kt`）。导出时页面内函数把 SVG 序列化、画到 canvas 转 PNG，经注入的 `AndroidInterface` 回传 base64，Kotlin 侧解码写入相册目录。
 
@@ -110,7 +110,7 @@ Markdown 与富文本渲染已整体迁移到外部 Compose 库 BetterText：应
 
 消息正文不执行脚本、不内嵌 iframe：
 
-- 消息正文不执行脚本、不内嵌 iframe：Markdown 与内嵌 HTML 片段都由 BetterText 的 Compose 渲染器绘制，应用侧不再有 Jsoup 白名单分支；`jsoup` 目前只被 `search` 模块用于解析 Bing 搜索结果页。
+- 消息正文不执行脚本、不内嵌 iframe：Markdown 与内嵌 HTML 片段都由 BetterText 的 Compose 渲染器绘制，应用侧不使用 Jsoup 白名单；`jsoup` 目前只被 `search` 模块用于解析 Bing 搜索结果页。
 - WebView 只用于 Mermaid、html/svg 代码预览与「用 WebView 渲染」预览；WebView 组件已移入公共 `ui` 模块（`ui/src/main/java/me/rerere/ui/webview/WebView.kt`），虚拟域名 `rikkahub.local` 与本地 assets 映射保留（`WebViewLocalAssets.kt`）。
 - 消息操作菜单的“用 WebView 渲染”把文本 part 转成 HTML 模板并跳转到独立 WebView 路由（`ChatMessage.kt` 的 `buildMarkdownPreviewHtml`）；模板加载 `assets/html/mark.html`，其中 marked.js、KaTeX、highlight.js、Mermaid 均从 CDN 导入，故该路径渲染依赖网络（`MarkdownWeb.kt`、`app/src/main/assets/html/mark.html`）。
 
@@ -130,14 +130,14 @@ WebView 的沙箱姿态（脚本默认开启、无 CSP 与来源白名单）与�
 ## 8. 性能、缓存与测试
 
 - **解析与高亮的线程归属**：解析、排版与着色都在 BetterText 内部完成，应用侧不再用 `snapshotFlow + flowOn(Dispatchers.Default)` 自行卸载解析；流式补全由 `streaming` 参数交给库处理。
-- **代码高亮长度上限**：应用侧原先“超过 4096 字符跳过高亮”的判定随 highlight 模块删除，现由 BetterText 的 `rememberHighlightedCode` 决定；应用未再额外设阈值。
+- **代码高亮长度上限**：上限由 BetterText 的 `rememberHighlightedCode` 决定，应用侧不另设阈值。
 - **测试**：原 highlight 模块的 `CodeHighlighterTest`、`HighlightEngineTest`、`RegexesTest`、`LanguageFixtureTest` 与 `hljs` 夹具随模块移除；相关回归覆盖转移到 `ai` 与 `app` 的单元测试（本笔记未逐条确认新增用例覆盖范围）。
 - **缓存**：WebView 内容通过 `WebViewContentCache`（`ui` 模块）以内容 id 落盘复用（Mermaid、代码预览与 WebView 预览均使用）。消息列表本身无渲染缓存，依赖 Compose 重组与稳定 key。
 
 ## 9. 扩展方式与已确认边界
 
 - **新增工具渲染器**：实现 `ToolUIRenderer` 并加入 `ToolUIRegistry` 的渲染器列表即可，未注册工具自动回退默认实现（`tools/ToolUI.kt`）。
-- **新增高亮语言**：语言定义与别名由 BetterText 的 highlight 模块提供，应用侧不再有 `builtinLanguages()` 或模式 DSL 入口；需要新语言时只能依赖库版本升级。
+- **新增高亮语言**：语言定义与别名由 BetterText 的 highlight 模块提供，应用侧不暴露 `builtinLanguages()` 或模式 DSL 入口；需要新语言时只能依赖库版本升级。
 - **新增 part 类型**：需要同时改密封类、`StreamChunkHandler` 的合并分支、`groupMessageParts()` 的归类与 `MessagePartsBlock` 的分派；四处都按 `when` 穷举。
 - **已确认边界**：消息正文不执行脚本、不内嵌 iframe，WebView 只承载 Mermaid 与代码/HTML 预览；Markdown/HTML 由 Compose 渲染（具体安全策略属外部库实现），代码高亮为纯 Kotlin 实现、不依赖 WebView 或 native 库（详见第 6 节）。
 

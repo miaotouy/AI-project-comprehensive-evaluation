@@ -51,7 +51,7 @@
   `- OpenClaw: hook/webhook -> 一次性 cron run 或 wake -> heartbeat/isolated run
 ```
 
-同一项目可落入多个分型。例如 Hermes 同时具有会话 heartbeat 与隔离 cron；VCPToolBox 的邮件投递不是 TaskAssistant 的任务记录；AstrBot 的后台工具有运行 ID，却没有可恢复的持久任务对象。OpenClaw 的分型差异由 sessionTarget 决定：同一份 cron 定义既可回主会话（main）也可走独立 run session（isolated/current），heartbeat 的调度与状态判断则分布在 auto-reply 主题模块与 gateway state owner 两处，不再是单一的 runner 文件。
+同一项目可落入多个分型。例如 Hermes 同时具有会话 heartbeat 与隔离 cron；VCPToolBox 的邮件投递不是 TaskAssistant 的任务记录；AstrBot 的后台工具有运行 ID，却没有可恢复的持久任务对象。OpenClaw 的分型差异由 sessionTarget 决定：同一份 cron 定义既可回主会话（main）也可走独立 run session（isolated/current），heartbeat 的调度与状态判断分布在 auto-reply 主题模块与 gateway state owner 两处。
 
 ## 核心比较矩阵
 
@@ -92,7 +92,7 @@
 
 - 本类目的“主链确认”均基于静态源码走读；未运行实际 cron、休眠、断线、平台消息投递、QStash、Socket 或多实例部署。
 - OpenClaw 的 cron/heartbeat/hook/exec/subagent 主链均基于静态走读，未启动真实 Gateway、Channel adapter、Provider 或 ProcessSupervisor，未验证多 Gateway 同库时 receipt owner 判断与真实长停机 catch-up。
-- OpenClaw 各状态 owner 分别持久化日程历史、子 Agent、更新账本与消息交付。`task_runs` 表仍作为 cron 专属历史使用，已移除的是通用 tasks RPC/注册表；媒体 operation 和后台进程的可恢复性需分别检查。内部 outcome 与已发送消息是两份记录，前者只描述运行结果。
+- OpenClaw 各状态 owner 分别持久化日程历史、子 Agent、更新账本与消息交付。`task_runs` 表承担 OpenClaw 的 cron 专属历史，没有通用 tasks RPC 与注册表；媒体 operation 和后台进程的可恢复性需分别检查。内部 outcome 与已发送消息是两份记录，前者只描述运行结果。
 - 分布式去重强度不同：Hermes 与 Open WebUI 已确认持久认领或数据库事务；LobeHub 会在执行端重验状态；AstrBot 本次未确认跨副本锁；VCPChat FlowLock 只管理单个 renderer 内存状态。
 - 任务结果的可见表面不同。Open WebUI 和 LobeHub 有独立 run/chat/topic 记录，VCPToolBox 有任务 history，Hermes 有 execution/output；VCPChat 与 AstrBot 会话续作主要借用常规消息历史。
 - 本次未将候选清单中尚未建立同等主链证据的项目写为“不支持”；其状态应继续以独特功能清单和相邻类目笔记为准。

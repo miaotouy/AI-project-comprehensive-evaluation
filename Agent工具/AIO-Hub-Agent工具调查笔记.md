@@ -329,7 +329,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 | `send_task_message` | 沿子会话执行车道追加消息并持久化，不自动发起新一轮 |
 | `cancel_task` | 紧急叫停 |
 
-它取代了此前"只有 Agent 配置编辑、没有 Agent 调用"的能力空白：
+子 Agent 调用面覆盖以下几点：
 
 - **双轨数据**：子会话的聊天数据仍是标准 `ChatSessionDetail`，由 llm-chat 写入；任务调度、状态机与进度由 `BackgroundTaskRegistry` 独立维护（`src/services/background-tasks/registry.ts`），并通过 `approvalBridge.ts` 把子会话的待审批请求关联回任务。
 - **后台归属**：background 模式在主 WebView 里启动不阻塞父调用的异步链，显式指定 detached 子会话发送，不切换主会话；同一子会话的 Promise 车道串行生成，繁忙时新任务状态为 queued。独立 background-runtime 的 dispatch 当前只实现 ping/getInfo，未承接子Agent runner；关闭主窗口后能否继续执行，属于运行验证范围（`sub-agent.registry.ts:1020-1141`；`src/background-runtime/main.ts:27-49`）。
@@ -361,7 +361,7 @@ return isGlobalAuto && (isMethodAutoApprove || isToolAutoApprove)
 - 已与 VCPToolBox `WebSocketServer.js:729`（`register_tools` 分支）核实：AIO 发送的 `register_tools` 会被存入 `distributedServers`，并**显式过滤掉 `internal_request_file`**（服务端按工具名做不等过滤），确认它确实是协议层专属能力，不会出现在插件列表 UI 里，但仍可被服务端通过 `execute_tool` 直接调用。
 - VCPToolBox 侧 `execute_tool` 消息经 `executeDistributedTool()` 按 `serverId`/`serverName` 查找已连接节点并转发（`WebSocketServer.js:866-896`），超时按插件 manifest 的 `communication.timeout` 或默认 60000ms。
 - 本地暴露规则（`useVcpDistributedNode.ts:discoverTools()`）：自动模式暴露所有 `agentCallable === true || distributedExposed === true` 且未被禁用的方法；手动模式按 `exposedToolIds` 白名单；**排除 `vcp:` 前缀工具**（防止把桥接进来的远端工具二次暴露回去形成循环）。
-- 审批协议往返（AIO 与 VCPToolBox 双侧代码已核实一致）：VCPToolBox 的 `toolApprovalManager.getApprovalDecision()` 命中规则后发 `tool_approval_request`（含 `requestId`/`toolName`/`args`/`maid`）；AIO `vcpNodeProtocol.handleToolApprovalRequest()` 把它转成本地请求塞进审批 store（`sessionId = "vcp-" + maid`），用户点允许/拒绝后回传 `tool_approval_response`。VCPToolBox 侧默认 `timeoutMinutes = 5`；AIO 侧本地审批支持可配置超时（默认关闭，见第 6 节），不再存在“一边有超时一边永久挂起”的差异。
+- 审批协议往返（AIO 与 VCPToolBox 双侧代码已核实一致）：VCPToolBox 的 `toolApprovalManager.getApprovalDecision()` 命中规则后发 `tool_approval_request`（含 `requestId`/`toolName`/`args`/`maid`）；AIO `vcpNodeProtocol.handleToolApprovalRequest()` 把它转成本地请求塞进审批 store（`sessionId = "vcp-" + maid`），用户点允许/拒绝后回传 `tool_approval_response`。VCPToolBox 侧默认 `timeoutMinutes = 5`；AIO 侧本地审批支持可配置超时（默认关闭，见第 6 节），两侧都有超时机制。
 - VCP 文本协议支持**索引化批量调用**——`splitIndexedToolArgs()` 把 `command1/path1, command2/path2` 这类数字后缀参数拆成多个独立调用，每个调用分配 `requestId_1/requestId_2...`（`vcpNodeProtocol.ts`）。
 - 渠道判定：`useIsVcpChannel` 从“API baseUrl 与 wsUrl 同主机启发式”改为 `resolveChannelToolHandling`（`llm-chat/core/tool-calling/channel-tool-handling.ts`）：LLM Profile 显式 `toolHandling` 声明（`callConsumer`/`upstreamProtocol`/`aioDistributedExposure`）优先，未声明的旧 Profile 保留同主机启发式回退。
 

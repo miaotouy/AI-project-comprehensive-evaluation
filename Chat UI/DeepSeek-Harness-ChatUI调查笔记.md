@@ -188,7 +188,7 @@ turn tail 行（ui-deliverables）展示每个收尾 assistant 消息下的产�
 - **模型选择器**：可依据 adapter 提供的目录能力显示并批量修改选择项，但选择本身仍由宿主 settings 与会话请求构建链裁决（`packages/client/runtime/src/client/workspaces/service.ts`）。
 - **双 Cordis 树与运行时插件加载**：浏览器复用宿主 Loader 治理，模块使用懒 CJS 表与同源外部脚本。HMR 仅在开发组合装配，插件需先重建 bundle，再由接收器重挂；React 局部状态随重挂丢失，对象数据层保留。生产组合不装配开发 HMR（`cordis.patch.yml`）。
 - **对象层 React-free + uSES 快照**：令牌流不打乱渲染树，行级重渲染靠引用稳定；代价是自研快照/批处理机制（`markDirty` 微任务、`notifyNow` 仅用户手势直回声、`animation-frame` 流式合并）。
-- **重连按 generation 重建 transport、按 journal 修补业务窗口**：Connection 等 `$events` ready 后发布 generation；Session journal 再用 opening snapshot、tail page 与 follow reopen 修复缺口。业务流不再是旧式双 socket。
+- **重连按 generation 重建 transport、按 journal 修补业务窗口**：Connection 等 `$events` ready 后发布 generation；Session journal 再用 opening snapshot、tail page 与 follow reopen 修复缺口，业务流经 `$events` 通道。
 - **浏览器认证独立于 Host 信任检查**：启动 token 只可在根 GET 换取签名 cookie；所有 RPC 与 WebSocket 都要求 cookie。Host/Origin 检查先于认证，用于 DNS rebinding 与 cross-site 防护（`packages/client/connection/README.md:30-46`）。
 - **一次翻转 boot**：无渐进渲染；settled 前只有 loading 页。
 - **每会话一个 Lexical editor runtime**，同一会话不支持同时挂载多个 editable root；繁忙态可配置 Enter 使用 Queue 或 Steer。

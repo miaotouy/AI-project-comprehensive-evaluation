@@ -49,7 +49,7 @@
 
 MemoryProvider 是可选扩展契约，定义初始化、预取、回合同步、工具暴露、会话结束、会话切换和压缩前回调。该契约不规定文档切块、Embedding、K 值、重排器或结果字段，因此 Honcho、Mem0 等 provider 可能采用不同的事实模型；本笔记只把该契约内的回调与等待逻辑记为 Hermes 核心，具体检索与重排实现归属各 provider。宿主对非内置预取设置 8 秒默认等待，超时跳过该轮，并将回合写回放入单线程后台队列以维持写入顺序。见 `agent/memory_provider.py`、`agent/memory_manager.py`。
 
-外部提供方的装配位置在快照间发生了变化：仓库内置的 `plugins/memory/` 现在只保留 byterover 与 retaindb 两个记忆插件（另有 `config_schema.py`、`query_rewrite.py`），Honcho、Mem0 等改由 `plugin-catalog/` 中 SHA 固定的清单条目按需安装，安装后仍通过同一 MemoryProvider 契约接入。因此“内置外部记忆提供方清单”不再是仓库内固定集合，而是随用户安装的插件变化。
+内置 `plugins/memory/` 只有 byterover 与 retaindb 两个记忆插件（另有 `config_schema.py`、`query_rewrite.py`），Honcho、Mem0 等经 `plugin-catalog/` 中 SHA 固定的清单条目按需安装，安装后仍通过同一 MemoryProvider 契约接入。因此外部记忆提供方清单由用户在 `plugin-catalog/` 中的安装决定。
 
 会话检索的事实源是 profile 的 SQLite `state.db` 消息与会话行。检索函数根据查询形态选择通用 FTS5、CJK bigram、trigram 或 LIKE 路由；索引重建进度可返回给 `session_search` 调用者，以避免把重建期间的稀疏结果当作完整历史。工具默认只检索 user/assistant 角色，工具输出需显式要求才纳入。见 `hermes_state_search.py:1415-1487`、`tools/session_search_tool.py:259-278, 761-813, 1145-1247`。
 

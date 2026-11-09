@@ -268,7 +268,7 @@ common/Dropdown.svelte（359 行）：
 
 ### 桌面集成交点（壳在独立仓库）
 
-- 入口：window.electronAPI（app:info/app:data/token:update/window:isFocused/onEvent，`+layout.svelte:1038-1216`）；桌面模式把 `isApp` store 置位（`:1202`），本快照内已无组件读取该标志——原先的桌面导航条组件已移除，桌面壳只通过事件通道影响导航与主题；
+- 入口：window.electronAPI（app:info/app:data/token:update/window:isFocused/onEvent，`+layout.svelte:1038-1216`）；桌面模式把 `isApp` store 置位（`:1202`），本快照内无组件读取该标志，桌面壳经事件通道影响导航与主题；
 - 双向事件：桌面→Web 经 `desktopEventHandler` 写入 desktopEvent store（page:reload/page:navigate/query/call/theme:update/models:refresh/connections:*，`+layout.svelte:1038-1054`）；Web→桌面 window.applyTheme（主题，`:1191-1192`）与 load（导航）；
 - 本仓不含桌面壳实现（仓库分布笔记同述），electronAPI/applyTheme 无类型声明，属运行时注入钩子。
 

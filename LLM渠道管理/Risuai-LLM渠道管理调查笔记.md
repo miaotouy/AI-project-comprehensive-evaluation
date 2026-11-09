@@ -56,7 +56,16 @@ Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
-`LLMProvider` 枚举共 17 个值（OpenAI、Anthropic、GoogleCloud、VertexAI、AsIs、Mistral、NovelList、Cohere、NovelAI、WebLLM、Horde、AWS、DeepSeek、DeepInfra、Echo、NanoGPT、Ollama），定义在 `src/ts/model/types.ts:34-53`。OpenRouter、Ooba、Kobold、NovelList、Plugin、Custom API 等不占用独立枚举值，统一标记为 `AsIs`，说明该枚举是模型分类标签而不是渠道注册表。每个 `LLMModel` 条目携带 provider、format、flags、parameters、tokenizer、internalID、endpoint、keyIdentifier 等字段（`types.ts:104-118`），其中 `format` 决定协议 Adapter，`endpoint` 可覆盖默认请求 URL，`keyIdentifier` 决定从 `OaiCompAPIKeys` 取哪一把 Key。
+`LLMProvider` 枚举共 17 个值，定义在 `src/ts/model/types.ts:34-53`：
+
+```text
+OpenAI / Anthropic / GoogleCloud / VertexAI / AsIs / Mistral / NovelList / Cohere / NovelAI /
+WebLLM / Horde / AWS / DeepSeek / DeepInfra / Echo / NanoGPT / Ollama
+```
+
+OpenRouter、Ooba、Kobold、NovelList、Plugin、Custom API 等不占用独立枚举值，统一标记为 `AsIs`，说明该枚举是模型分类标签而不是渠道注册表。
+
+每个 `LLMModel` 条目携带 provider、format、flags、parameters、tokenizer、internalID、endpoint、keyIdentifier 等字段（`types.ts:104-118`）；其中 `format` 决定协议 Adapter，`endpoint` 可覆盖默认请求 URL，`keyIdentifier` 决定从 `OaiCompAPIKeys` 取哪一把 Key。
 
 多端点表达方式有三种：
 
@@ -70,7 +79,11 @@ Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条
 
 全部配置（含凭据）是唯一的 `Database` 对象，由 `setDatabase()` 在加载时对缺失字段逐个补默认值并执行字段级迁移（`src/ts/storage/database.svelte.ts:30-722`），"默认配置"与"用户配置"的合并就是这次启动补齐，没有独立的默认配置层。
 
-持久化使用自定义分块格式：`RisuSaveEncoder` 把数据库按 root、preset、modules、loadouts、plugins、pluginStorage、每个角色独立块打包为 msgpack + 可选 gzip，写入 `database.bin`（`src/ts/storage/risuSave.ts:124-326`）。`saveDb()` 用 Svelte 5 的 `$effect` 监听数据库变化，500ms 防抖后写主文件并同时生成 `dbbackup-<时间戳>.bin`，最多保留 20 份（`src/ts/globalApi.svelte.ts:292-529`）；损坏时启动流程按时间倒序尝试恢复备份（`src/ts/bootstrap.ts:89-153`）。Web 端同一文件存 IndexedDB（localforage），Tauri 端存 AppData 目录；启用账号同步后改经 `/api/account/write` 上传同一份 `database.bin`（`src/ts/storage/accountStorage.ts:22-58`）。
+持久化使用自定义分块格式：`RisuSaveEncoder` 把数据库按 root、preset、modules、loadouts、plugins、pluginStorage、每个角色独立块打包为 msgpack + 可选 gzip，写入 `database.bin`（`src/ts/storage/risuSave.ts:124-326`）。
+
+`saveDb()` 用 Svelte 5 的 `$effect` 监听数据库变化，500ms 防抖后写主文件并同时生成 `dbbackup-<时间戳>.bin`，最多保留 20 份（`src/ts/globalApi.svelte.ts:292-529`）；损坏时启动流程按时间倒序尝试恢复备份（`src/ts/bootstrap.ts:89-153`）。
+
+Web 端同一文件存 IndexedDB（localforage），Tauri 端存 AppData 目录；启用账号同步后改经 `/api/account/write` 上传同一份 `database.bin`（`src/ts/storage/accountStorage.ts:22-58`）。
 
 ### 2.1 各对象的操作边界
 
@@ -149,10 +162,13 @@ Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust comman
 模型目录有三层来源：
 
 1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）。其中 Gemini Flash 3.7 条目使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 等能力，并与 3.5/3.6 Flash 一样在 Vertex 请求中固定走 global endpoint（`model/providers/google.ts:4-17`、`process/request/google.ts:412-417`）；
-2. 动态注册 `registerModelDynamic`：启动时若 `dynamicModelRegistry` 开启，分别调用 Google `v1beta/models`、Anthropic `/v1/models`、OpenAI `/v1/models`（只收 `gpt-` 前缀），以 `dynamic_<provider>_<id>` 追加到内存数组（`modellist.ts:613-770`，启动入口 `bootstrap.ts:255`）；
+2. 动态注册 `registerModelDynamic`：启动时若 `dynamicModelRegistry` 开启，按 provider 分别拉取目录——Google `v1beta/models`、Anthropic 与 OpenAI 的 `/v1/models`（OpenAI 只收 `gpt-` 前缀）。
+   拉到的条目以 `dynamic_<provider>_<id>` 命名追加到内存数组（`modellist.ts:613-770`，启动入口 `bootstrap.ts:255`）；
 3. 设置页实时拉取：OpenRouter（含价格、context、缓存价与推理价元数据，`src/ts/model/openrouter.ts:51-106`）、NanoGPT（模型与订阅目录，`src/ts/model/nanogpt.ts:162-192`）、Ollama `/api/tags`（`src/ts/model/ollama.ts:23-45`）、Horde `status/models`（模块级内存缓存，`src/ts/horde/getModels.ts:19-44`）。
 
-元数据以能力位 `LLMFlags`（27 个值，`types.ts:3-32`）与参数白名单 `parameters` 表达，直接驱动请求行为：`reformater` 按 flags 决定 system prompt 处理、角色交替要求与首条 user 补齐（`request.ts:348-432`）；`keyIdentifier` 决定取哪把 Key，`endpoint` 覆盖默认 URL，`parameters` 决定 `applyParameters` 注入哪些采样参数（`shared.ts:137-342`）。
+元数据以能力位 `LLMFlags`（27 个值，`types.ts:3-32`）与参数白名单 `parameters` 表达，直接驱动请求行为：`reformater` 按 flags 决定 system prompt 处理、角色交替要求与首条 user 补齐（`request.ts:348-432`）。
+
+凭据与采样参数同样取自模型条目：`keyIdentifier` 决定取哪把 Key，`endpoint` 覆盖默认 URL，`parameters` 决定 `applyParameters` 注入哪些采样参数（`shared.ts:137-342`）。
 
 未知模型 ID 在 `getModelInfo` 中回退为 OpenAI 兼容的通用条目；`hf:::`、`horde:::`、`xcustom:::`、`pluginmodel:::` 四种前缀分别映射到 WebLLM、Horde、自定义条目与插件目录（`modellist.ts:775-870`）。
 
@@ -172,11 +188,17 @@ Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust comman
 | Ollama | `ollama` SDK，本地走 `ollamaURL`，云端走 `ollama.com` 并注入 Bearer Key；云端还可切换为 OpenAI 兼容/Responses/Anthropic 格式复用对应 Adapter（`request.ts:1118-1228`） |
 | WebLLM / Plugin / Echo | 浏览器内 transformers.js、插件回调、纯回显 |
 
-底层网络在 `globalFetch` / `fetchNative` 统一（`globalApi.svelte.ts:681-740, 1713-1968`）：Tauri 走 `streamed_fetch`，Web 走 `/proxy2`，可被 `usePlainFetch` 强制直连，局域网地址在 `localNetworkMode` 下走 `local_network` 路由（Node 端还有 ProxyJobWs 通道），并按模型类型附加可选的 `requestTimeoutMs`（`src/ts/process/request/openAI/shared.ts:9-21`）。自定义 Header 与 Body 字段通过附加参数注入：`applyAdditionalParameters` 支持 `header::` 前缀、`json::` 值、`{{none}}` 删除标记与类型推断（`shared.ts:79-135`），Custom API 与自定义模型均可使用。
+底层网络在 `globalFetch` / `fetchNative` 统一（`globalApi.svelte.ts:681-740, 1713-1968`）：Tauri 走 `streamed_fetch`，Web 走 `/proxy2`。
+
+直连与局域网分流也在这里：`usePlainFetch` 可强制直连，局域网地址在 `localNetworkMode` 下走 `local_network` 路由（Node 端还有 ProxyJobWs 通道），并按模型类型附加可选的 `requestTimeoutMs`（`src/ts/process/request/openAI/shared.ts:9-21`）。
+
+自定义 Header 与 Body 字段通过附加参数注入：`applyAdditionalParameters` 支持 `header::` 前缀、`json::` 值、`{{none}}` 删除标记与类型推断（`shared.ts:79-135`），Custom API 与自定义模型均可使用。
 
 ## 6. 运行时选择、绑定与路由
 
-运行时有两个全局模型槽 `aiModel` / `subModel`，各辅助任务（memory、emotion、translate、otherAx）可在 `seperateModels` 中单独覆盖（`request.ts:440-447`）；`requestChatDataMain` 的取值优先级是 staticModel（fallback 传入）> 主/子模型槽 > 按模式分离的模型。`reverse_proxy` 与 `xcustom:::` 模型在分发前把 URL、Key、格式从数据库字段解析进请求参数（`request.ts:468-478`）。模型 ID 决定 Provider、格式、端点和凭据，没有别名、语义路由或负载均衡；会话与角色不保存渠道引用（该部分属相邻类目）。
+运行时有两个全局模型槽 `aiModel` / `subModel`，各辅助任务（memory、emotion、translate、otherAx）可在 `seperateModels` 中单独覆盖（`request.ts:440-447`）；`requestChatDataMain` 的取值优先级是 staticModel（fallback 传入）> 主/子模型槽 > 按模式分离的模型。
+
+`reverse_proxy` 与 `xcustom:::` 模型在分发前把 URL、Key、格式从数据库字段解析进请求参数（`request.ts:468-478`）。模型 ID 决定 Provider、格式、端点和凭据，没有别名、语义路由或负载均衡；会话与角色不保存渠道引用（该部分属相邻类目）。
 
 ## 7. 重试、模型 fallback 与故障转移
 

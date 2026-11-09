@@ -126,7 +126,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 - **Markdown Notes 工作区**：笔记是独立资产（SQLite 行 + 文件目录），编辑器支持 Markdown、引用到会话的 note reference 与写入知识库的快照；笔记可以被理解为"可被 Agent 与知识库共同消费的第二类文档"，与 Topic 消息不同源。证据状态：主链确认（静态证据）；富文本编辑体验未运行验证。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md) 能力卡 7、[检索增强与认知编排调查笔记](../检索增强与认知编排/Cherry-Studio-检索增强与认知编排调查笔记.md)
 ## 工程与基础设施摘要
 
-- **仓库分布**：Electron 主应用与内部共享包合仓的 TypeScript monorepo。当前快照有 12625 个 Git 跟踪文件、9800 个可识别源码文件和 1745263 行源码；`src/main` 685843 行、`src/renderer` 684024 行、`packages/ui` 89127 行，另有 `packages/file-preview` 20228 行、`packages/agent-runtime-pi` 22234 行等新抽取包；测试文件 3443 个。桌面端覆盖 Windows、macOS、Linux，无本仓独立移动端入口；旧的 `v2-refactor-temp` 目录已不存在。证据状态：Git 跟踪文件机械统计 + workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)
+- **仓库分布**：Electron 主应用与内部共享包合仓的 TypeScript monorepo。当前快照有 12625 个 Git 跟踪文件、9800 个可识别源码文件和 1745263 行源码；`src/main` 685843 行、`src/renderer` 684024 行、`packages/ui` 89127 行，另有 `packages/file-preview` 20228 行、`packages/agent-runtime-pi` 22234 行等新抽取包；测试文件 3443 个。桌面端覆盖 Windows、macOS、Linux，无本仓独立移动端入口。证据状态：Git 跟踪文件机械统计 + workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)
 
 - **应用界面基础设施**：界面栈为 React + Tailwind（+ tw-animate-css），内部 UI 包 `@cherrystudio/ui` 基于 Radix 生态（无 antd/framer-motion/sonner）。弹窗主路径迁到 UI 包（Radix Dialog 封装 + 模块级 popup store + 每窗口 PopupHost，命令式调用，single-flight）；Toast 是自研单例 store（loading→success/error promise 桥接，按严重程度区分 aria 语义）；主题权威在主进程 ThemeService，视觉 token 分层契约（foundation → runtime input → 官方 Shadcn 语义 → 产品语义 → Tailwind 生成层），用户可设明暗/单主色/字体/自定义 CSS，无主题市场/壁纸/主题文件导入导出；右键菜单可在自绘与系统原生双模式间切换；错误边界分窗口/路由/消息块三层（react-error-boundary），另有崩溃遥测与 render-process-gone 自动 reload。证据状态：静态源码核对（键盘与多窗口表现需运行验证，见末尾小节）。[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 

@@ -39,13 +39,26 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 辅助与机制标注：content-deduplicator（五阶段漏斗 + 规范化匹配，非语义）与 danmaku-player、embedding-playground、media-info-reader、user-profile-manager、text-diff 等为辅助/第二梯队；`st-worldbook-manager` 已确认编辑、持久化、导入导出及聊天运行主链，归并 Agent 角色与上下文既有类目，不作为本篇新增能力重复计分；smart-ocr 作为共享 OCR 平台层（`platform/runner.ts` 被 realtime-subtitle-ocr、transcription、window-automator 三处复用；平台层含作业协议与稳定贡献点配置，`platform/plugin-engine.ts`/`config-migration.ts`）按机制标注；ffmpeg-tools 的跨工具回流链（输出→Chat 附件/转写工作台/资产）按机制标注，附注见第二梯队小节。
 
-归并已有类目：上下文分析器（对话请求与上下文笔记 9.8 已确认复用真实管道预览）、上下文管道中的 regex-processor（同一笔记第 2 节管道处理器；Global/Agent/User 三层合并细节）。多运行时插件系统的 Agent 工具面已由 Agent 工具笔记覆盖，其 UI/生命周期扩展面本次标 `入口确认`。code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector 经全量扫描确认无超出名字的跨工具/Agent/后台面，不入候选。当前快照 `src/tools/` 下有 49 个工具目录（含仅存文档、无实现的 `weather`），其中 48 个带 `ARCHITECTURE.md`；`packages/` 已从 1 个共享包扩展为 4 个 npm 工作区（`llm-core`、`model-metadata-core`、`agent-preset-core`、`tool-icons`），另有本地 Rust crate `code-formatter`、`desktop-entry`。
+归并已有类目：上下文分析器在对话请求与上下文笔记 9.8 已确认复用真实管道预览；上下文管道中的 `regex-processor`（同一笔记第 2 节）负责请求清洗，Global/Agent/User 三层合并的细节在同一处说明。多运行时插件系统的 Agent 工具面由 Agent 工具笔记覆盖，其 UI 与生命周期扩展面本次标 `入口确认`。
+
+下列七个工具经全量扫描确认，跨工具、Agent 与后台面都没有超出名字所述的范围，因此未进入候选：code-formatter、json-formatter、component-tester、symlink-mover、system-pulse、service-monitor、wallpaper-detector。
+
+当前快照的 `src/tools/` 下有 49 个工具目录，其中 48 个带 `ARCHITECTURE.md`，`weather` 仅有文档而无实现。
+
+`packages/` 已从 1 个共享包扩展为 4 个 npm 工作区：`llm-core`、`model-metadata-core`、`agent-preset-core`、`tool-icons`；本地 Rust crate 另有 `code-formatter` 与 `desktop-entry`。
 
 声明不符项：README/ARCHITECTURE 中 media-generator 的 `generateMedia(prompt, type)` Agent 方法声明存在但**未实现**（占位，见 `media-generator/ARCHITECTURE.md:435`），Agent 实际通过 `generate_<model>` 动态方法触发生成。
 
 ## 介绍声明与候选盘点
 
-根 README 将产品定位为"本地优先的 AI 能力枢纽｜人类工作台与 Agent 运行时"，功能面非常宽。`docs/architecture/tools-architecture-overview.md` 与当前 `src/tools/` 实际 49 个工具目录、48 个 registry 文件基本一致，是本轮候选盘点的可靠索引。这些工具中，与现有十类笔记重叠（Chat/上下文/会话/渲染/AST/Agent 工具与角色/渠道）的主要是 `llm-chat`、`rich-text-renderer`、`tool-calling`、`knowledge-base`、`web-canvas`、`sub-agent` 等；其余工具构成"工具枢纽"产品面。
+根 README 把产品定位为"本地优先的 AI 能力枢纽｜人类工作台与 Agent 运行时"，功能面很宽。架构总览文档列出的工具与当前 `src/tools/` 的 49 个工具目录、48 个 registry 文件基本一致，可作为候选盘点的可靠索引（`docs/architecture/tools-architecture-overview.md`）。
+
+这些工具与现有十类笔记（Chat、上下文、会话、渲染、AST、Agent 工具与角色、渠道）有重叠，主要是下面六个：
+
+- `llm-chat`、`rich-text-renderer`、`tool-calling`
+- `knowledge-base`、`web-canvas`、`sub-agent`
+
+其余工具构成"工具枢纽"产品面。
 
 | 候选（待查清单第二批） | 证据状态 | 结论 |
 |---|---|---|
@@ -89,7 +102,17 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **完整主链**：输入提示词先打包为任务，按模型能力决定是否带上下文，再加入全局任务池并在会话树建立 User/Assistant 节点。生成执行支持 AbortController 中断，参考图转为 Base64，参数清洁逻辑按模型规则剔除不支持的参数并校验取值，随后决定多轮上下文。请求返回后解码 Base64 或拉取 URL，将生成参数写入文件元数据并导入资产库，同时保存衍生数据；最后把任务标为 completed 并关联结果资产。关键入口和落库逻辑见 media-generator 模块 ARCHITECTURE 文档。
 
-**持续性**：`{appDataDir}/media-generator/` 下 `sessions-index.json` + `sessions/{id}.json` + `tasks.json` + `settings.json`；`syncIndex()` 启动自愈（补齐/移除索引项），崩溃遗留的 `generating` 节点自动标 `error`，`activeLeafId` 修复到最深叶子。
+**持续性**：数据落在 `{appDataDir}/media-generator/` 下，会话索引、按 ID 存放的会话文件、任务池与设置各占一项：
+
+```text
+{appDataDir}/media-generator/
+├─ sessions-index.json
+├─ sessions/{id}.json
+├─ tasks.json
+└─ settings.json
+```
+
+`syncIndex()` 在启动时自愈索引，补齐缺失项、移除失效项；崩溃遗留的 `generating` 节点自动改标 `error`，`activeLeafId` 修复到最深叶子。
 
 **主动性与取消**：无后台主动执行；取消入口可中止单个或全部生成，任务完成后保留在池中供 UI 查看，也可通过自动清理设置移除。
 
@@ -157,7 +180,7 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`MacroDefinition`（name/type/phase/handler/example），注册在 `MacroRegistry`（reactive Map）。
 
-**完整主链**：`MacroProcessor` 按 PRE_PROCESS、SUBSTITUTE、POST_PROCESS 三阶段执行，分别处理初始化、主体替换和格式化输出；每阶段批量处理对应宏，未注册宏记录 warning。内建宏实测 74 个，分类数量为 datetime 25、core 19、variables 8、functions 7、system 7、tools 3、recall 2、knowledge 1，另有 assets 和 cssVariables 各 1。system 组新增 `appVersion`，通过 Tauri `getVersion()` 读取应用版本，失败时返回 `Unknown`；旧 `{{kb}}` 宏已移除。全局和局部变量支持读写、增减及全局变量操作，会话变量快照语义见对话请求与上下文笔记 9.4；三阶段入口见 `macro-engine/MacroProcessor.ts:84`，版本宏见 `macro-engine/macros/system.ts:144-164`。
+**完整主链**：`MacroProcessor` 按 PRE_PROCESS、SUBSTITUTE、POST_PROCESS 三阶段执行，分别处理初始化、主体替换和格式化输出；每阶段批量处理对应宏，未注册宏记录 warning。内建宏实测 74 个，分类数量为 datetime 25、core 19、variables 8、functions 7、system 7、tools 3、recall 2、knowledge 1，另有 assets 和 cssVariables 各 1。system 组宏包含 `appVersion`，通过 Tauri `getVersion()` 读取应用版本，失败时返回 `Unknown`。全局和局部变量支持读写、增减及全局变量操作，会话变量快照语义见对话请求与上下文笔记 9.4；三阶段入口见 `macro-engine/MacroProcessor.ts:84`，版本宏见 `macro-engine/macros/system.ts:144-164`。
 
 **持续性**：宏定义为代码内建；变量值随消息快照/会话 JSON 持久化（见会话管理笔记 1.3）。
 
@@ -185,7 +208,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：Agent 目录 `{appConfigDir}/llm-chat/agents/{agent_id}/assets/` 下的 `assets/` 子目录 + 组管理（`AgentAssetsManager.vue`、`agentAssetUtils.ts`）。
 
-**完整主链**：资产管理 UI 导入 → 资产存 Agent 目录并注册组/ID → 引用格式 `agent-asset://{group}/{id}.{ext}` 写入预设消息或由 LLM 输出 → 发送前 `{{assets}}` 宏（`macro-engine/macros/assets.ts`）把资产清单注入 Prompt 引导使用 → 渲染时 `MessageContent.vue:728`/`ImageNode.vue`/`HtmlBlockNode.vue` 等组件通过 `resolveAsset` 钩子解析为真实 URL（AST 模式下由具体节点组件按需解析，避免二次编码）→ 消息内联显示。与 `skill_read_file` 的作用域严格分离（`docs/architecture/skill-integration.md:20`）。
+**完整主链**：用户在资产管理界面导入后，资产存进 Agent 目录并登记组与 ID；引用格式为 `agent-asset://{group}/{id}.{ext}`，可写进预设消息，也可由 LLM 在回复里直接输出。
+
+发送前 `{{assets}}` 宏（`macro-engine/macros/assets.ts`）把可用资产清单注入 Prompt，引导模型使用。渲染阶段由 `MessageContent.vue:728`、`ImageNode.vue`、`HtmlBlockNode.vue` 等组件经 `resolveAsset` 钩子解析成真实 URL，AST 模式下由具体节点组件按需解析，避免二次编码，最后在消息里内联显示。该协议与 `skill_read_file` 的作用域严格分离（`docs/architecture/skill-integration.md:20`）。
 
 **持续性**：资产随 Agent 配置目录持久化，PNG 角色卡 V2/V3 导入导出可携带资产。
 
@@ -207,7 +232,14 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：AIO Hub 作为 VCP（外部开源 AI 运行时）的桌面端观测与控制面——实时看 RAG 检索细节、元思考链、Agent 私聊预览、插件步骤状态，并把本机工具暴露给 VCP 云端 Agent。
 
-**入口**：工具页 `/vcp-connector`（`VcpConnector.vue`，连接/监控/分布式三 Tab）。消息监控走两个 WebSocket 端点（`/vcpinfo/VCP_Key=<key>`、`/VCPlog/VCP_Key=<key>`），六类广播事件（RAG_RETRIEVAL_DETAILS / META_THINKING_CHAIN / AGENT_PRIVATE_CHAT_PREVIEW / AI_MEMO_RETRIEVAL / PLUGIN_STEP_STATUS / vcp_log）以虚拟滚动消息列表 + 分类卡片展示；历史消息持久化 `messages.json`。消息通知可分类配置：总开关默认关闭以避免高频 WebSocket 打扰，全局可选关闭/仅浮动/通知中心/同时四种模式，并允许对六类消息分别覆盖（`types/protocol.ts` 的 `VcpNotificationMode`、`components/NotificationSettingsPage.vue`）。
+**入口**：工具页 `/vcp-connector`（`VcpConnector.vue`，连接、监控、分布式三个 Tab）。消息监控连两个 WebSocket 端点，端点路径中带 `VCP_Key=<key>`：`/vcpinfo/VCP_Key=<key>` 与 `/VCPlog/VCP_Key=<key>`。六类广播事件以虚拟滚动消息列表加分类卡片展示，历史消息持久化到 `messages.json`：
+
+```text
+RAG_RETRIEVAL_DETAILS  META_THINKING_CHAIN  AGENT_PRIVATE_CHAT_PREVIEW
+AI_MEMO_RETRIEVAL      PLUGIN_STEP_STATUS   vcp_log
+```
+
+通知按类别配置：总开关默认关闭，避免高频 WebSocket 打扰；全局有四种模式，取关闭、仅浮动、通知中心或同时，并可对上述六类消息分别覆盖（`types/protocol.ts` 的 `VcpNotificationMode`、`components/NotificationSettingsPage.vue`）。
 
 **状态**：`config.json`（WS 地址/VCP Key）、`distributed-config.json`（节点名/暴露列表/自动注册开关）。分布式节点（AIO 作为节点被远端 `execute_tool` 调用，含 `internal_request_file` 强制内置）与工具桥（`VcpToolProxy` 把远端插件包装成本地 ToolRegistry）的执行细节已由 Agent 工具笔记第 7/9 节确认，本笔记不再重复。
 
@@ -217,13 +249,17 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ### 能力十：Recall 思绪集（世界书的 RAG 进阶版）— `主链确认`
 
-**用户目标**：把旧 knowledge 拆分出的"语义条目召回"做成上下文即时召回层——比世界书（手动/关键词规则）更强的语义即时检索；传统文档库 RAG 的位置由重构后的 Knowledge 主动工具承担（不再是空壳）。
+**用户目标**：把旧 knowledge 拆分出的"语义条目召回"做成上下文即时召回层——比世界书（手动/关键词规则）更强的语义即时检索；传统文档库 RAG 的位置由 Knowledge 主动工具承担。
 
 **入口与触发者**：工具页 `/recall` 提供工作区、统计、监控、实验室和设置；上下文管道以 priority 450 的 recall-processor 解析 `【recall::...】` 占位符，校验编码、数值范围以及未知或重复参数。旧 `【kb::...】` 只告警不执行。管道结合 Agent 绑定构造检索请求并调用即时召回入口；Agent 侧导出基础读写实例和管理实例，后者的方法均标记为可供 Agent 调用。
 
 **事实对象**：RecallCollection 表示思绪集，RecallEntry 保存 key、Markdown 内容、带权标签、优先级、内容哈希和资产引用，RecallResult 保存分数、匹配类型和高亮，另有检索过滤条件对象；预设字段 `presetId: "algorithmic" | "comprehensive"` 的定义见 types/pipeline.ts。
 
-**完整主链**：占位符或 Agent 绑定 → `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`）→ 按绑定/占位符参数（when/gate-tags/entries/limit/min-score）→ 检索管线执行 → 后置过滤 → `applyCharLimit`（maxRecallChars）→ `formatResults` 按结果模板格式化 → 注入上下文。Rust 侧旧 `recall/search/` 四引擎模块（keyword/vector/lens/blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` + `retrieval_modules.rs`）：管线按预设（`Algorithmic`/`Comprehensive`）编排候选模块（内容向量/标签向量/Lens 关联等），产出带 `source_module_id`/ArtifactKey 的可追踪检索工件；`recall-monitor` 事件 + 心跳上报；检索缓存键含查询/集合/标签/数量/阈值/预设/模型等要素。写入链：`recall_upsert_entry` 持久化 + 内存索引 → 前端索引编排器调 Embedding 模型 → `recall_update_entry_vector` 按模型隔离写向量 → 标签向量同步更新，HNSW 可按需重建。
+**完整主链**：占位符或 Agent 绑定先进入 `resolvePlaceholderRetrieval`（`recall/logic/placeholderRetrieval.ts`），按绑定与占位符参数（when、gate-tags、entries、limit、min-score）整理检索请求；随后检索管线执行、后置过滤，按 `applyCharLimit` 的 maxRecallChars 截断，由 `formatResults` 套用结果模板后注入上下文。
+
+Rust 侧原 `recall/search/` 下的四个引擎（keyword、vector、lens、blender）已并入**检索管线**（`src-tauri/src/recall/retrieval_pipeline.rs` 与 `retrieval_modules.rs`）。管线按 `Algorithmic`、`Comprehensive` 两种预设编排候选模块——内容向量、标签向量、Lens 关联等——产出带 `source_module_id` 与 ArtifactKey 的可追踪检索工件，同时上报 `recall-monitor` 事件与心跳。检索缓存键由查询、集合、标签、数量、阈值、预设、模型等要素组成。
+
+写入链分三段：`recall_upsert_entry` 落库并更新内存索引；前端索引编排器调用 Embedding 模型；`recall_update_entry_vector` 按模型隔离写向量，标签向量同步更新，HNSW 索引可按需重建。
 
 **持续性**：存储已切换为 **SQLite 真源**，由 SqliteRecallRepository 落盘数据库和向量文件，旧 knowledge 数据经幂等迁移，备份过程通过 recall-backup-progress 事件报告。knowledge-base 已重构为主动工具，提供资料库列表和多策略搜索，支持 topK、过滤条件、相邻内容和字符上限，并收敛资料库访问授权、聊天显式资料引用、研究任务编排及 FTS/标签管理；关键存储定位见 `src-tauri/src/recall/storage/sqlite.rs`。
 
@@ -239,7 +275,9 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`RegexPreset`（多条 `RegexRule` 规则链 + name/description）+ `PresetsConfig`（presets + activePresetId），持久化 `{appConfigDir}/regex_applier/presets.json`（ConfigManager 防抖 500ms 保存）；应用配置（processingMode/selectedPresetIds 组合）另存 appConfig。
 
-**完整主链**：预设管理（`PresetManager.vue`：新建/复制/重命名/删除/切换激活/从 JSON 文件或剪贴板导入/导出，导入按 `regex::replacement` 键去重合并）→ 工作台"添加预设"多选 `selectedPresetIds: string[]` → 拖拽排序（VueDraggableNext，"按顺序应用"）→ `watch(selectedPresetIds, debouncedProcessText)` 防抖自动重处理 → JS 引擎 `applyRules` 逐条规则链替换实时预览；文件模式：Rust `validate_regex_pattern` 预校验（JS 与 Rust 正则差异如前瞻/后瞻）→ `process_files_with_regex` 批量处理（多预设规则展平为带 `preset_name` 的规则数组传后端）；一键处理 `oneClickProcess`（粘贴→处理→复制）走剪贴板链（`readText`/`writeText`）。
+**完整主链**：预设管理页负责新建、复制、重命名、删除、切换激活，以及从 JSON 文件或剪贴板导入导出，导入时按 `regex::replacement` 键去重合并（`PresetManager.vue`）。工作台用“添加预设”多选把若干预设组成 `selectedPresetIds: string[]`，拖拽排序即“按顺序应用”（VueDraggableNext）；选择变化触发 `watch(selectedPresetIds, debouncedProcessText)` 防抖重处理，再由 JS 引擎的 `applyRules` 逐条跑规则链，实时预览替换结果。
+
+文件模式先由 Rust 侧 `validate_regex_pattern` 预校验，覆盖 JS 与 Rust 正则的差异（如前瞻、后瞻），再交给 `process_files_with_regex` 批量处理；多个预设的规则展平成带 `preset_name` 的规则数组传给后端。一键处理 `oneClickProcess` 串起粘贴、处理、复制三步，走剪贴板的 `readText` 与 `writeText`。
 
 **持续性**：presets.json 重启恢复；规则链内每条规则可启停/重排；selectedPresetIds 组合记忆恢复上次堆叠。
 
@@ -255,7 +293,11 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`RepositoriesConfig`（多仓库列表）、`RepoStatus`（staged/unstaged/ahead 等）、DiffTab（original/modified）、提交草稿。
 
-**完整主链**：`refreshStatus`（Rust `git_get_repo_status`）→ `stageFiles` 乐观更新（先移前端状态，失败回滚，成功再刷真实状态）→ `loadFileDiff`（`git_get_file_diff`，二进制降级 Tab）→ AI 生成：`buildDiffPrompt` 组装暂存文件 diff 文本（二进制占位"无文本差异"）→ `generateCommitMessage`（`useGitCommitterRunner.ts:385`）：`parseModelCombo` 取 LLM Profile → `useLlmRequest.sendRequest` 流式生成（systemPrompt 可自定义，`inspectorContext: { toolName: "git-committer", purpose: "generate-commit-message" }` 接入 llm-inspector）→ 用户确认后 `executeCommit`（可 pushAfter）→ 全景模式 `stageAllRepos`/`unstageAllRepos`/`pushAllRepos` 批量操作；切换仓库可选自动 pull。
+**完整主链**：`refreshStatus` 调 Rust 的 `git_get_repo_status` 拉仓库状态；`stageFiles` 做乐观更新，先改前端状态，失败回滚、成功后重刷真实状态；`loadFileDiff` 读单文件差异（`git_get_file_diff`，二进制文件降级到 Tab 展示）。
+
+AI 生成从 `buildDiffPrompt` 开始，把暂存文件的 diff 文本拼成提示（二进制文件用“无文本差异”占位）。`generateCommitMessage` 先由 `parseModelCombo` 取 LLM Profile，再由 `useLlmRequest.sendRequest` 流式生成提交信息；请求带 `inspectorContext: { toolName: "git-committer", purpose: "generate-commit-message" }` 接入 llm-inspector，系统提示词可自定义（`systemPrompt`）。用户确认后调用 `executeCommit` 执行提交（可勾选 pushAfter）。
+
+全景模式另提供 `stageAllRepos`、`unstageAllRepos`、`pushAllRepos` 三组批量操作，切换仓库时可选自动 pull。生成入口见 `useGitCommitterRunner.ts:385`。
 
 **仓库级 AI 配置与并发隔离。** 提交信息生成的系统提示词可下放到仓库：仓库配置新增 systemPrompt 字段，解析时“仓库专属优先、留空继承全局”，由仓库提示词弹窗与主区编辑标签页承载；另有提交语言设置与结构化 Prompt 模板（系统规则、仓库上下文、diff 与最终任务拆成多条消息）。生成过程持有 AbortController 可中止；拉取/推送/生成/提交等工作流状态和草稿按仓库隔离，切换仓库不串台（`composables/useGitCommitterState.ts`、`composables/useGitCommitterRunner.ts`）。差异审查扩展为“更改总览”标签页，可按文件展开暂存区/工作区全部差异并一键放弃更改（已跟踪文件还原、未跟踪文件移入回收站），另有提交详情卡片、提交 diff 视图与差异导航；仓库栏支持自定义图标颜色与配色色盘。
 
@@ -269,7 +311,14 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **用户目标**：聊天上下文预算的底层支撑——按模型精确计 token（含多模态计费），被 llm-chat 的 token-limiter、上下文压缩、输入预览、响应处理九处以上消费；独立工具页只是它的调试面。
 
-**入口与触发者**：工具页 `/token-calculator`；但实际主入口是**被消费**——`llm-chat/core/context-processors/token-limiter.ts`、`useContextCompressor`、`useChatInputTokenPreview`、`useChatResponseHandler`、`useChatExecutor`、`preview-builder`、`message-format-processors`、`llm-inspector/core/tokenEstimator.ts`、`translator`、`agent-manager` 均导入 `tokenCalculatorService`（`token-calculator.registry.ts:341`）。
+**入口与触发者**：工具页是 `/token-calculator`，但实际主入口在**被消费**一侧：llm-chat 的 token 限制器、上下文压缩、输入预览与响应处理等模块，连同 llm-inspector 的 token 估算器、translator 与 agent-manager，都导入 `tokenCalculatorService`。消费点如下，注册见 `token-calculator.registry.ts:341`：
+
+```text
+llm-chat/core/context-processors/token-limiter.ts   useContextCompressor
+useChatInputTokenPreview   useChatResponseHandler   useChatExecutor
+preview-builder   message-format-processors
+llm-inspector/core/tokenEstimator.ts   translator   agent-manager
+```
 
 **事实对象**：Tokenizer 资产注册表（bundled 内置 / local 本地文件 / remote 远程拉取三种来源 + 置信度 + modelId 匹配规则 + 校准参数）、TokenCount 结果（count/tokensPerSecond 等）。
 
@@ -289,7 +338,15 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`FetchResult`、`Recipe`（站点配方：提取规则 + 动作序列）、`CookieProfile`（身份卡片）；配方与身份持久化。
 
-**完整主链**：三层蒸馏——`fast` 纯 HTTP `quickFetch`（毫秒级）；`smart` 隐藏 Iframe + JS 渲染（SPA 支持）；`interactive` 可视化浏览器视口人工拾取规则。smart/interactive 走 Rust Axum 本地代理（`127.0.0.1:0` 随机端口，`distillery_start_proxy`）：`handle_proxy_html` 获取目标 HTML 并剥除 `X-Frame-Options`/`Content-Security-Policy`/Content-Encoding 头（防 iframe 拦截）→ 同步注入 `anti-detection.js`（隐藏 `window.chrome.webview`/`webkit.messageHandlers`、覆盖 `navigator.webdriver=false`、伪装 chrome 插件环境、requestIdleCallback 延迟隐藏桥全局变量）→ defer 注入 `bridge.js`（含随机 nonce 防重放，postMessage 双向通信）+ `api-sniffer.js`（拦截 XHR/fetch 嗅探 JSON API）→ 前端 `transformer.ts` 六阶段蒸馏管道（HTML 解析/元数据/去噪/主内容 Readability/格式转换/后处理）→ 配方 `action-runner.ts` 执行动作序列（click/scroll/input/wait）→ Cookie 身份卡按域匹配注入 → 结果格式化供 Agent/UI。
+**完整主链**：蒸馏分三层。`fast` 走纯 HTTP `quickFetch`，毫秒级返回；`smart` 用隐藏 Iframe 加 JS 渲染，支持 SPA；`interactive` 打开可视化浏览器视口，由人工拾取规则。
+
+后两层经 Rust Axum 本地代理访问目标页（`127.0.0.1:0` 随机端口，`distillery_start_proxy`）。`handle_proxy_html` 取回 HTML 后剥掉 `X-Frame-Options`、`Content-Security-Policy`、Content-Encoding 等响应头，避免 iframe 被拦，再按顺序注入三段脚本：
+
+- `anti-detection.js`（同步注入）：隐藏 `window.chrome.webview` 与 `webkit.messageHandlers`，覆盖 `navigator.webdriver=false`，伪装 chrome 插件环境，并用 requestIdleCallback 延迟隐藏桥全局变量。
+- `bridge.js`（defer 注入）：含随机 nonce 防重放，负责 postMessage 双向通信。
+- `api-sniffer.js`（defer 注入）：拦截 XHR/fetch，嗅探 JSON API。
+
+页面就绪后，前端 `transformer.ts` 跑六阶段蒸馏管道（HTML 解析、元数据、去噪、主内容 Readability、格式转换、后处理），配方 `action-runner.ts` 按 click、scroll、input、wait 等动作序列操作页面，Cookie 身份卡按域匹配注入，结果格式化后交给 Agent 或 UI。
 
 **持续性**：配方（`recipe-store.ts`）与 Cookie 身份（`cookie-profile-store.ts`）持久化；内置配方库 + 用户自定义。
 
@@ -339,7 +396,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`LongTextTask`（chunks 状态机 idle/waiting/completed/error + progress）、`TranslationChannel`（profile+model+prompt）、渠道预设。
 
-**完整主链**：`useLongTextTranslator` → `recursiveSplitText` 递归分片 → `ConcurrencyLimiter` 限流并发翻译（`maxConcurrentChunks`）→ `buildLongTextPrompt`：有上一分片时注入 `<source_context>`/`<translation_context>`（仅上一分片，不重复翻译上文参考）→ `translateChunkWithRetry` 重试（429/timeout/503 等模式，最多 3 次）→ 流式 chunk 追加更新进度 → `joinTranslatedChunks` 合并；token 精确估算接入 token-calculator（`useTranslatorStore.ts:97-110`，防抖 500ms），超限风险事前预警。生成侧还支持展示并干预模型思考：结果卡片顶部提供可折叠的“思考过程”块（`reasoningContent`），`thinkingMode`（default/disabled/minimal）按模型能力下发思考参数，`core/thinking.ts` 的 `resolveThinkingParams` 覆盖 switch/budget/effort 三类模型配置。
+**完整主链**：入口是 `useLongTextTranslator`。长文先经 `recursiveSplitText` 递归切成分片，再由 `ConcurrencyLimiter` 按 `maxConcurrentChunks` 限流并发翻译。`buildLongTextPrompt` 组装分片提示，存在上一分片时把原文与译文放进 `<source_context>`、`<translation_context>` 两个标签，只带上一分片，不重复翻译上文参考。
+
+`translateChunkWithRetry` 负责失败重试，覆盖 429、timeout、503 等模式，最多 3 次；分片流式返回时追加进度，最后由 `joinTranslatedChunks` 合并。
+
+token 精确估算接在 token-calculator 上，输入变化后防抖 500ms 重算，超限风险事前预警（`useTranslatorStore.ts:97-110`）。
+
+生成侧支持展示并干预模型思考：结果卡片顶部是可折叠的“思考过程”块（`reasoningContent`），`thinkingMode` 取 default、disabled、minimal，按模型能力决定是否下发思考参数；`core/thinking.ts` 的 `resolveThinkingParams` 覆盖 switch、budget、effort 三类模型配置。
 
 **持续性**：渠道预设持久化；任务状态在内存。
 
@@ -367,7 +430,13 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 **事实对象**：`ParsedDanmaku`（统一弹幕行，时间秒，坐标基于 ASS `PlayResX/PlayResY`，滚动弹幕用 x1/y1→x2/y2 + t1/t2 表达移动）、`SubtitleTrack`（cues + ASS/SSA 原文 rawContent）、`DanmakuConfig`（类型/彩色/密度/显示区域/透明度/字号/速度/字体/描边/屏蔽词）、`ExternalPlayerConfig`/`OverlayState`（播放器类型、端口/IPC、裁切、全屏增强、目标 HWND、播放状态）。
 
-**完整主链**（内置模式）：视频 `convertFileSrc` → 弹幕文件 `smartDecode()` 解码 → `parseDanmaku`（ASS + B 站 JSON `DanmakuElem[]` + B 站 XML `<d p=...>`）→ 字幕 `parseSubtitle`（SRT/VTT/ASS/SSA/LRC/SBV/SubViewer/MicroDVD/SAMI/TTML；IDX/SUP 图形字幕拒绝）→ `DanmakuEngine` 绑定 HTML5 video `currentTime`：`setDanmakus` 按 startTime 排序并预计算每条稳定哈希（`danmakuEngine.ts:67-75`）→ 每帧二分查找可见窗口（回溯最多 20s，`getVisibleWindow`）→ 内联执行类型/彩色/密度/屏蔽词过滤 + 显示区域限制 → Canvas 2D 绘制（描边/阴影/字体缩放缓存）→ 渲染节流约 30fps，无弹幕时停止 rAF。字幕双轨：普通文本走 DOM `SubtitleOverlay`（按当前时间筛选 active cues）；ASS/SSA 优先 `JassubRenderer` 动态 `import("jassub")` 高保真渲染（`object-fit: contain` 计算 letterbox 内实际视频区 + 极小 `backdrop-filter` 触发 WebView2 正常合成路径规避硬件 overlay 不可见），初始化失败降级 DOM（`JassubRenderer.vue:163`）。
+**完整主链**（内置模式）：视频源先经 `convertFileSrc` 转成可播放地址；弹幕文件由 `smartDecode()` 解码后，按格式分派给 `parseDanmaku`——ASS、B 站 JSON 的 `DanmakuElem[]`、B 站 XML 的 `<d p=...>` 都在这里归一。
+
+字幕走另一个解析器 `parseSubtitle`，支持 SRT、VTT、ASS、SSA、LRC、SBV、SubViewer、MicroDVD、SAMI、TTML 十种文本格式，IDX/SUP 图形字幕在入口拒绝。
+
+渲染侧由 `DanmakuEngine` 绑定 HTML5 video 的 `currentTime`：`setDanmakus` 先按 startTime 排序，并预计算每条弹幕的稳定哈希（`danmakuEngine.ts:67-75`）；每帧二分查找可见窗口（最多回溯 20s，`getVisibleWindow`），内联执行类型、彩色、密度、屏蔽词过滤与显示区域限制，再用 Canvas 2D 绘制（描边、阴影、字体缩放缓存），渲染节流约 30fps，没有弹幕时停止 rAF。
+
+字幕双轨并行：普通文本由 DOM 的 `SubtitleOverlay` 按当前时间筛选 active cues；ASS/SSA 优先交给 `JassubRenderer` 动态 `import("jassub")` 高保真渲染，容器按 `object-fit: contain` 算出 letterbox 内的实际视频区，并用极小的 `backdrop-filter` 触发 WebView2 正常合成路径，绕开硬件 overlay 不可见的问题；初始化失败时降级到 DOM（`JassubRenderer.vue:163`）。
 
 **完整主链**（外部覆盖模式）：`useExternalPlayer` 按播放器类型自动扫描常见 Win32 类名（`find_player_windows`，也可全量扫描手动选 HWND）→ `TauriExternalPlayerStatusProvider` 统一 `get_external_player_status` 读状态。四类播放器的状态来源与访问方式不同，均经 Rust 代理规避 CSP：
   - MPC-BE / MPC-HC：`variables.html` 按 `<p id>` 提取 file/state/position/duration；
@@ -375,7 +444,11 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
   - mpv：JSON IPC named pipe `--input-ipc-server`；
   - VLC：`requests/status.json` + Basic Auth。
 
-随后 → `create_danmaku_overlay_window`（透明、无边框、跳过任务栏、鼠标穿透）→ 主窗口经 `danmaku-overlay:init/config-update/danmaku-update/stop` 事件同步数据与配置 → 覆盖窗口内最小渲染应用（`DanmakuOverlayApp.vue`：透明 Canvas + DanmakuEngine + 状态 provider + 虚拟时钟）→ 虚拟时钟（`useVirtualClock.ts`）：rAF 帧增量推进（播放速率可调）、每 200ms 轮询真实进度、偏差超 500ms 才校准（`CALIBRATION_THRESHOLD = 0.5`，防微小抖动跳帧）、暂停→播放强制校准、seek 后 `seekTo` 复位 → 位置同步（`useDanmakuOverlay.ts`）：`get_player_window_rect` 取物理像素 → 按 `scaleFactor` 转逻辑像素 → 普通/全屏分别应用 `offsetTop/offsetBottom` 裁切 → 默认 100ms 同步，检测到位置/尺寸/DPI/全屏变化进入 1s 活跃期改 16ms → 每轮刷新 Z-Order（全屏增强时 `HWND_TOPMOST`）→ 目标 HWND 失效自动关闭覆盖窗口。
+随后创建覆盖窗口（`create_danmaku_overlay_window`，透明、无边框、跳过任务栏、鼠标穿透）。主窗口经 `danmaku-overlay:init/config-update/danmaku-update/stop` 四类事件同步数据与配置，覆盖窗口内跑一个最小渲染应用 `DanmakuOverlayApp.vue`：透明 Canvas 加 DanmakuEngine、状态 provider 和虚拟时钟。
+
+虚拟时钟负责时间轴（`useVirtualClock.ts`）：以 rAF 帧增量推进，播放速率可调；每 200ms 轮询一次真实进度，偏差超过 500ms 才校准，避免微小抖动跳帧（`CALIBRATION_THRESHOLD = 0.5`）；暂停转播放时强制校准，seek 后由 `seekTo` 复位。
+
+位置同步在 `useDanmakuOverlay.ts`：`get_player_window_rect` 取物理像素，按 `scaleFactor` 转逻辑像素，普通与全屏分别应用 `offsetTop`/`offsetBottom` 裁切；默认 100ms 同步一次，检测到位置、尺寸、DPI 或全屏变化后进入 1s 活跃期改为 16ms；每轮刷新 Z-Order（全屏增强用 `HWND_TOPMOST`），目标 HWND 失效时自动关闭覆盖窗口。
 
 **持续性**：弹幕显示配置（`useDanmakuConfig`）与外部播放器配置（`useExternalPlayer`）均 ConfigManager 防抖持久化；覆盖窗口位置不落盘，每次启动重新扫描对齐。
 
@@ -389,8 +462,27 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 
 ### 第二梯队与确认无隐藏特性的工具
 
-- **入口确认（第二梯队，未走完整主链）**：`embedding-playground`（A/B 对比/1:N 排行/多模型竞技场 + 百分位阈值校准 + RAG 检索模拟，无 Agent 暴露）；`media-info-reader`（EXIF/WebUI/PNG 三层 + AioBundle 解析，`readImageMetadata` agentCallable）；`user-profile-manager`（richTextStyleOptions/regexConfig/worldbookIds/quickActionSetIds 跨工具配置中枢，被 llm-chat 消费）；`text-diff`（Monaco diff + 拖文件自动分左右 + `generatePatch` agentCallable 生成 unified diff）；`api-tester`（REST/GraphQL/LLM 预设 + `{{variable}}` 模板变量 + SSE 渲染 + 请求档案恢复）；`config-converter`（6 格式 N×N 互转 + 有损转换警告 + 批量模式）；`data-filter`（深层路径/多键 OR/自定义 JS 条件，Agent `applyFilter` 输出 Markdown 报表）；`dir-search`（Rust 并行流式搜索 + GBK 回退 + 单项替换 preserveCase + 文件整理，Agent 搜索替换）；`directory-janitor`（Agent 可远程触发的扫描+回收站清理，删除能力下放给 Agent）；`git-analyzer`（git2-rs 原生 + 流式加载 + Agent `getFormattedAnalysis` 20 参数报告）；`color-picker`（三算法并行 + Dexie 历史 + EyeDropper 回退，图片走资产库）。
-- **确认无隐藏特性（全量扫描结论）**：`code-formatter`（纯 Prettier 静态/动态混合插件加载，不调 LLM）；`json-formatter`（无 AI 修复，sortKeys 为半成品设置）；`component-tester`（内部开发调试工具）；`symlink-mover`（双模式 + 历史日志，无跨工具面）；`system-pulse`（技术扎实的推送式仪表盘但仅页面挂载启停、无后台常驻/Agent/被引用）；`service-monitor`（只读 API 文档浏览器，无实时监听）；`wallpaper-detector`（跨平台探测但仅手动刷新）；`regex-applier` 的 Agent 面（methods 为 TODO）。
+- **入口确认（第二梯队，未走完整主链）**：以下工具已确认入口，主链尚未走完。
+  - `embedding-playground`：A/B 对比、1:N 排行与多模型竞技场，另有百分位阈值校准与 RAG 检索模拟，无 Agent 暴露。
+  - `media-info-reader`：EXIF/WebUI/PNG 三层读取加 AioBundle 解析，`readImageMetadata` 为 agentCallable。
+  - `user-profile-manager`：richTextStyleOptions/regexConfig/worldbookIds/quickActionSetIds 组成的跨工具配置中枢，由 llm-chat 消费。
+  - `text-diff`：Monaco diff，拖文件自动分左右，`generatePatch` 为 agentCallable，输出 unified diff。
+  - `api-tester`：REST/GraphQL/LLM 预设、`{{variable}}` 模板变量、SSE 渲染与请求档案恢复。
+  - `config-converter`：6 格式 N×N 互转，带损耗提示与批量模式。
+  - `data-filter`：深层路径、多键 OR、自定义 JS 条件；Agent 侧的 `applyFilter` 输出 Markdown 报表。
+  - `dir-search`：Rust 并行流式搜索、GBK 回退、单项替换 preserveCase，另有文件整理与 Agent 搜索替换。
+  - `directory-janitor`：Agent 可远程触发扫描与回收站清理，删除能力下放给 Agent。
+  - `git-analyzer`：git2-rs 原生实现加流式加载，Agent 侧 `getFormattedAnalysis` 输出 20 参数报告。
+  - `color-picker`：三算法并行、Dexie 历史、EyeDropper 回退，图片走资产库。
+- **确认无隐藏特性（全量扫描结论）**：
+  - `code-formatter`：纯 Prettier 静态/动态混合插件加载，不调 LLM。
+  - `json-formatter`：无 AI 修复，sortKeys 为半成品设置。
+  - `component-tester`：内部开发调试工具。
+  - `symlink-mover`：双模式加历史日志，无跨工具面。
+  - `system-pulse`：推送式仪表盘，技术扎实，但只在页面挂载时启停，无后台常驻、无 Agent 面、无外部引用。
+  - `service-monitor`：只读的 API 文档浏览器，无实时监听。
+  - `wallpaper-detector`：跨平台探测，仅手动刷新。
+  - `regex-applier` 的 Agent 面：methods 为 TODO。
 
 ### 能力二十：可观测的子智能体委派工作流 — `主链确认`
 
@@ -435,8 +527,8 @@ AIO Hub 的独特功能集中在"**本地工具枢纽 + 上下文工程**"两翼
 - **regex-applier 的 Agent 面**：`getFormattedTextResult`/`getFormattedFileResult` 方法已完整实现（`regex-applier.registry.ts:223-261`），但 `getMetadata().methods` 为 TODO 空数组——接口可用、注册未通，Agent 无法实际调用，标 `声明不符`（代码对注册）。
 - **content-deduplicator 的 fuzzy 模糊匹配**：ARCHITECTURE 相关描述与代码不一致——`minSimilarity` 为 dead code、模糊匹配标注未实现、自定义忽略模式未生效；实际能力为精确哈希 + 规范化匹配，非语义去重，标 `声明不符`（介绍对实现）。
 - **插件目录是独立仓库**：`plugins/` 已被主仓库 `.gitignore`（`plugins/README.md`），示例插件托管在独立 GitHub 仓库；运行时从 `%APPDATA%/com.aio-hub.app/plugins/` 加载。多运行时插件的完整安装/分发链路本次未验证，标 `暂缓`。
-- **移动端**（`mobile/`）为独立 Tauri 应用且私有许可证，本轮未调查，标 `暂缓`。
-- **media-info-reader 的 A1111/ComfyUI/ST 角色卡元数据提取**：README 列出但不在待查清单，属工具清单成员，本轮未走主链，不计数。
+- **移动端**（`mobile/`）为独立 Tauri 应用且私有许可证，未调查，标 `暂缓`。
+- **media-info-reader 的 A1111/ComfyUI/ST 角色卡元数据提取**：README 列出但不在待查清单，属工具清单成员，主链未走，不计数。
 - **translator 术语表/批量文件翻译**：仅在设计文档阶段，未实现（探索代理源码确认），标 `声明不符`（文档对代码）。
 
 ## 对特色贡献统计的影响

@@ -14,9 +14,9 @@
 
 ## 项目概览
 
-OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面端、服务端、SDK、客户端库、插件与内建 GUI 插件。2.x 已收敛为单一架构：Schema 定义契约，Core 承担会话与执行，Protocol 用 Effect `HttpApi` 声明端点，Server 实现处理器并通过 SSE 广播事件，客户端由协议生成，SDK 在进程内直接运行服务端路由。会话持久化只有一套 Drizzle/SQLite v2 模型（会话、消息、内容、收件箱、指令、blob），不再有 v1 双轨。
+OpenCode 是 Bun/TypeScript monorepo，交付 CLI、TUI、Web 工作台、桌面端、服务端、SDK、客户端库、插件与内建 GUI 插件。2.x 已收敛为单一架构：Schema 定义契约，Core 承担会话与执行，Protocol 用 Effect `HttpApi` 声明端点，Server 实现处理器并通过 SSE 广播事件，客户端由协议生成，SDK 在进程内直接运行服务端路由。会话持久化只有一套 Drizzle/SQLite v2 模型（会话、消息、内容、收件箱、指令、blob）。
 
-模型请求不再经 AI SDK：`packages/ai` 提供原生协议实现，执行器以步骤（step）为单位运行，工具调用、结果回流与压缩都在服务端完成。界面层分三套：TUI（opentui + Solid）、Web App（Solid + Kobalte + Tailwind，Web/桌面使用 `packages/session-ui`，TUI 独立终端渲染）、桌面 Electron 薄壳复用 App；非外壳功能全部是 GUI 插件。生成式输出以真实文件系统为事实源，回合边界用快照服务记录文件版本，撤销按消息粒度分阶段执行；此外新增 Artifact 托管与 Code Mode 受限执行两条独立产物通道。
+模型请求由 `packages/ai` 的原生协议实现发出：执行器以步骤（step）为单位运行，工具调用、结果回流与压缩都在服务端完成。界面层分三套：TUI（opentui + Solid）、Web App（Solid + Kobalte + Tailwind，Web/桌面使用 `packages/session-ui`，TUI 独立终端渲染）、桌面 Electron 薄壳复用 App；非外壳功能全部是 GUI 插件。生成式输出以真实文件系统为事实源，回合边界用快照服务记录文件版本，撤销按消息粒度分阶段执行；此外新增 Artifact 托管与 Code Mode 受限执行两条独立产物通道。
 
 ## 功能能力摘要
 

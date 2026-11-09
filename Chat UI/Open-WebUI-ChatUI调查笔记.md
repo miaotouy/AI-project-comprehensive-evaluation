@@ -39,7 +39,7 @@ Open WebUI 的前端会话状态机整体内聚在 `src/lib/components/chat/Chat
 
 - 路由 `/c/[id]` 的页面只是 `<Chat chatIdProp={$page.params.id} />` 一行装配（`src/routes/(app)/c/[id]/+page.svelte:1-7`）；根路径 `/` 同样挂载 Chat（新会话占位）；
 - 会话控制器 `Chat.svelte`（5754 行）按职责分层挂载渲染组件：`Messages.svelte`（566 行）负责消息列表壳、`MessageInput.svelte`（3067 行）负责输入区；消息壳内部的入口分发、主渲染（流式内容/Markdown/引用/代码执行/评分）、用户消息、并排多列与结构化输出等组件的渲染实现属于消息渲染器，此处只作为工作台结构记录；
-- 右侧工作台 `ChatTabs.svelte`（1202 行）取代原先的三 tab 控制面板：标签种类覆盖会话、文件、文件预览、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊（`ChatTabs/tabs.ts:5-32`），会话概览改为按需打开的抽屉（`showOverview` store，`ChatTabs.svelte:792-818` 挂载 `Overview.svelte` → `Overview/View.svelte`，195 行）；左侧 `Sidebar.svelte`（2038 行）承载会话导航（见第 2 节）；
+- 右侧工作台 `ChatTabs.svelte`（1202 行）按标签组织内容：标签种类覆盖会话、文件、文件预览、终端、浏览器、桌面、Artifact、预览、语音、评论与侧聊（`ChatTabs/tabs.ts:5-32`），会话概览是按需打开的抽屉（`showOverview` store，`ChatTabs.svelte:792-818` 挂载 `Overview.svelte` → `Overview/View.svelte`，195 行）；左侧 `Sidebar.svelte`（2038 行）承载会话导航（见第 2 节）；
 - 多窗口：同一用户的多标签页经 Socket.IO 事件广播共享生成状态（对话请求与上下文笔记 5.3），但 `chatRequestQueues` 等前端 store 不跨窗口同步——同一会话在两个标签页同时提交的队列行为未验证；
 - 嵌入场景：`Chat.svelte` 支持 `embedded` 模式（在笔记内嵌聊天，经 `onCreateEmbeddedChat`/`onSelectEmbeddedChat` 等 prop 接入，125-137 行），草稿按 `embeddedDraftKey` 管理（525-528 行）。
 

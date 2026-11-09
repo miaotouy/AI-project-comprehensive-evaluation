@@ -144,7 +144,14 @@ ACPX 元数据将 Gateway session key 映射到外部 backend/agent 和 upstream
 
 Gateway 以 client identity、role、scope、token/password、设备签名、设备配对和节点 pairing generation 做准入。Control UI 的 bootstrap token、device token 和 scope upgrade 属于浏览器设备身份链；CLI/TUI/SDK 复用 Gateway 协议但不应共享“匿名本地客户端”的假设。`attach.grant` 明确要求 `operator.admin`，并将 grant 绑定到 session key、短 TTL 和 loopback MCP 配置。
 
-节点命令还受 capability 声明、allowlist、scope、插件策略和执行审批限制。ACPX 配置提供 `permissionMode`（`approve-all`、`approve-reads`、`deny-all`）及 `nonInteractivePermissions`（`deny`、`fail`）；默认 runtime operation timeout 为 120 秒。普通 MCP server 的 `tools/list -> tools/call` 不因存在协议就算外部执行体；ACPX 的 `openclaw-plugin-tools`/`openclaw-tools` MCP bridge 需要显式 opt-in，且以 session key 环境变量标识 session。进程租约的 gateway instance、session key、wrapper 路径、PID 和 command hash 用于限制清理范围。
+节点命令要同时满足 capability 声明、allowlist、scope、插件策略和执行审批五道约束。ACPX 的授权档位和非交互处置见下表，默认的运行时操作超时为 120 秒。
+
+| 配置项 | 取值 | 作用 |
+|---|---|---|
+| `permissionMode` | `approve-all`、`approve-reads`、`deny-all` | 外部 harness 的授权档位 |
+| `nonInteractivePermissions` | `deny`、`fail` | 无交互通道时的处置 |
+
+MCP 侧有两类入口：普通 MCP server 只做 `tools/list -> tools/call`，属于协议动作，外部执行体判定还需身份、生命周期与治理条件；ACPX 的 `openclaw-plugin-tools` 与 `openclaw-tools` 两个 MCP bridge 提供受治理的资源入口，需要显式 opt-in，并以 session key 环境变量标识会话。进程租约用 gateway instance、session key、wrapper 路径、PID 和 command hash 限定清理范围。
 
 这些边界意味着外部 harness、设备节点或经授权的渠道输入可能触发文件、命令、浏览器、相机、录屏、语音或业务侧副作用，权限责任分别落在 Gateway policy、ACP harness permission、节点 capability/approval 和渠道账号上。凭据加密存储、OAuth 刷新、团队/服务账号审计，以及所有平台的撤销传播本次**未深入验证**；不能从静态入口推断其部署级保证。
 
@@ -171,10 +178,13 @@ Gateway 以 client identity、role、scope、token/password、设备签名、设
 - 节点 registry、invoke、progress/result/cancel：`src/gateway/node-registry.ts`、`src/gateway/server-methods/nodes.invoke.ts`、`:608-714`、`src/gateway/server-methods/nodes.event.ts`
 - TUI Gateway chat/backend/lifecycle：`src/tui/gateway-chat.ts`、`src/tui/tui-backend.ts`、`src/tui/tui-event-handlers.ts`、`src/tui/tui-run-lifecycle.ts`
 - Control UI 浏览器连接：`ui/src/api/gateway.ts`、`ui/src/api/gateway-browser-socket.ts`
-- companion app Gateway/node/camera/screen：`apps/ios/Sources/Gateway/GatewayConnectionController.swift`、`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`、`apps/ios/Sources/Capabilities/NodeCapabilityRouter.swift`、`apps/ios/Sources/Camera/CameraController.swift`、`apps/ios/Sources/Screen/ScreenRecordService.swift`；`apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt`、`GatewaySession.kt`、`node/InvokeDispatcher.kt`、`node/InvokeCommandRegistry.kt`、`node/CameraHandler.kt`
+- companion app 的 Gateway 与设备能力（iOS）：`apps/ios/Sources/Gateway/GatewayConnectionController.swift`、`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`、`apps/ios/Sources/Capabilities/NodeCapabilityRouter.swift`、`apps/ios/Sources/Camera/CameraController.swift`、`apps/ios/Sources/Screen/ScreenRecordService.swift`
+- companion app 的 Gateway 与设备能力（Android）：`apps/android/app/src/main/java/ai/openclaw/app/gateway/GatewayProtocol.kt`、`GatewaySession.kt`、`node/InvokeDispatcher.kt`、`node/InvokeCommandRegistry.kt`、`node/CameraHandler.kt`
 - native ACP server/client/translator：`src/acp/server.ts`、`src/acp/client.ts`、`src/acp/translator.ts`、`src/acp/translator.session-lifecycle.ts`、`src/acp/translator.prompt-stream.ts`、`:387-440`、`src/acp/translator.session-updates.ts`
 - ACP control plane/runtime registry：`src/acp/control-plane/manager.types.ts`、`src/acp/control-plane/manager.core.ts`、`src/acp/control-plane/manager.cancel-session.ts`、`src/acp/control-plane/manager.turn-stream.ts`、`src/acp/runtime/registry.ts`、`src/acp/runtime/session-meta.ts`
-- ACPX plugin/runtime/config/process lifecycle：`extensions/acpx/index.ts`、`extensions/acpx/register.runtime.ts`、`extensions/acpx/src/service.ts`、`extensions/acpx/src/config-schema.ts`、`extensions/acpx/src/config.ts`、`extensions/acpx/src/runtime.ts`、`:967-1106`、`:1108-1168`、`:1228-1462`、`:1486-1571`、`:1624-1745`、`:1832-1875`、`extensions/acpx/src/process-lease.ts`、`:40-178`、`extensions/acpx/src/process-reaper.ts`
+- ACPX 插件注册与配置：`extensions/acpx/index.ts`、`extensions/acpx/register.runtime.ts`、`extensions/acpx/src/service.ts`、`extensions/acpx/src/config-schema.ts`、`extensions/acpx/src/config.ts`
+- ACPX 运行时 turn 与进程处理：`extensions/acpx/src/runtime.ts`（`:967-1106`、`:1108-1168`、`:1228-1462`、`:1486-1571`、`:1624-1745`、`:1832-1875`）
+- ACPX 进程租约与回收：`extensions/acpx/src/process-lease.ts`（`:40-178`）、`extensions/acpx/src/process-reaper.ts`
 - attach grant/revoke 与 CLI：`src/cli/attach-cli.ts`、`:33-184`、`src/gateway/server-methods/attach.ts`
 - ACP 渠道/线程 binding 与 spawn：`src/auto-reply/reply/commands-acp/bindings.ts`、`src/auto-reply/reply/commands-acp/lifecycle.ts`、`src/agents/subagents/spawn/acp-spawn*.ts`、`src/agents/subagents/spawn/subagent-spawn-thread-binding.ts`；相关声明见 `docs/tools/acp-agents.md`、`docs/tools/acp-agents-setup.md`
 - 媒体边界入口：`src/media-understanding/*`、`src/media/*`、`src/tts/*`、`src/media-generation/*`、`src/video-generation/*`、`src/gateway/chat-attachments.ts`、`src/gateway/managed-image-attachments.ts`

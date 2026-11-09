@@ -43,7 +43,7 @@ VCPChat 单聊中止现在同时交接本地请求控制与远端 interrupt，�
 1. **"消息渲染"至少有四层含义**：AIO 当前把消息树编译成活动路径并完整挂载 DOM，再用 `content-visibility` 裁剪屏外渲染；它早期曾使用 TanStack Virtual，后因聊天场景的动态高度和滚动稳定性问题撤回。Chatbox/Cherry/Lobe/Jan 也把消息模型先编译成活动路径或 flat list；DeepChat 做测量驱动的窗口化，NextChat 只做固定页窗；SillyTavern/VCPChat/Manifold 主要增量或整段修改 DOM；VCPToolBox 只改第三方 DOM，不拥有消息列表。渲染实现细节在[消息渲染器横向对比](../消息渲染器/消息渲染器横向对比.md)。
 2. **停止反馈与执行结算分层**：VCPChat 本地取消、远端 interrupt 与部分内容保存分别交接；Hermes viewer 与规范 owner 分别持有显示和执行状态，Manifold 的 stop token 等待回调检查；Open WebUI 可跨实例路由取消。停止效果应沿实际任务控制层核对。
 3. **输入区承载了大量 Agent 交互**：DeepChat 的 steer/queue/permission、Jan 的排队与附件、Open WebUI 的工具确认和终端事件，与 AIO/Chatbox/Cherry/Lobe/VCPChat 的附件、知识库、mention、审批共同组成了输入协议。
-4. **窗口化与搜索存在结构性冲突**：Chatbox/Cherry/LobeHub/DeepChat 通过虚拟或窗口列表控制长会话成本，但 Cherry 的 DOM 搜索以及任何依赖已挂载节点的扩展会漏掉窗口外消息；NextChat 的固定页窗也需要显式移动窗口。AIO 曾经也有这一类窗口化方案，但在消息高度动态、倒序加载和滚动定位稳定性上付出的复杂度过高，后来改为完整 DOM + `content-visibility`，以保留真实 DOM 定位能力并把成本转给浏览器的屏外渲染裁剪。SillyTavern/VCPChat 没有这个漏搜原因，却把成本转移到整段 DOM。
+4. **窗口化与搜索存在结构性冲突**：Chatbox/Cherry/LobeHub/DeepChat 通过虚拟或窗口列表控制长会话成本，但 Cherry 的 DOM 搜索以及任何依赖已挂载节点的扩展会漏掉窗口外消息；NextChat 的固定页窗也需要显式移动窗口。AIO 采用完整 DOM + `content-visibility`，保留真实 DOM 定位能力，把长会话成本转给浏览器的屏外渲染裁剪。SillyTavern/VCPChat 没有这个漏搜原因，却把成本转移到整段 DOM。
 5. **UI 调查应记录"呈现投影"**：AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图（React Flow，选分支辅助面板）、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图（SvelteFlow，点击节点切分支）、VCPChat 的 bubble/panel/immersive、Chatbox 和 Jan 的分支版本导航，都说明同一份会话数据可以有多种用户可见投影；仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
 ## VCPToolBox：网关消息编译与条件会话持久化

@@ -98,7 +98,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 - **skill provider 注册表**：已归并到 Agent 工具类目（工具侧）；注册表本身是 scope 分层的中立发现机制（本地文件、嵌入、远端均可），发现与加载分离。证据：归并已有类目。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **feedback / attachment**：已归并到既有类目（反馈属生成输出 sidecar，附件属内容寻址附件存储）；feedback 分命令反馈（日志备注）与消息反馈（独立 sidecar，均不进模型上下文）两种契约，附件落 `$DSH_HOME` 下。证据：归并已有类目（普通能力）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)。
 
-另有 workflow/ralph、jobs、bundle 与 plugin market、forge、LiveShare、webhook、worktree、auto-review 等入口确认（机制）的支撑与实验能力，以及已移除的运行时不变式与 e2b 远程执行 POC，见文末"已知边界与待验证事项"。
+另有 workflow/ralph、jobs、bundle 与 plugin market、forge、LiveShare、webhook、worktree、auto-review 等入口确认（机制）的支撑与实验能力；运行时不变式与 e2b 远程执行的当前状态见文末"已知边界与待验证事项"。
 
 ## 工程与基础设施摘要
 
@@ -129,7 +129,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 - workflow / ralph：模型可提交编排脚本给 `ctx.workflowEngine`，worker-thread provider 在隔离线程执行（明确非安全边界）；`ralph` 是固定 fresh-agent 策略。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - jobs 后台任务：owner 隔离的后台任务协议（观察、取消、等待、完成通知），`job_list`/`job_output`/`job_kill` 为模型面。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
-- bundle profile patch-layer 与 plugin market：npm 包 manifest 声明 `dsh.bundle.patch` 即成 profile 可安装补丁层（`dsh-base` 为第一层），`plugin_manager` 负责列出与安装、`plugin_market` 读市场索引，`apps/plugin-market-generator` 生成索引；此前的 `./invariant` 伴侣与 `ctx.invariants` 运行时不变式已整体移除。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
+- bundle profile patch-layer 与 plugin market：npm 包 manifest 声明 `dsh.bundle.patch` 即成 profile 可安装补丁层（`dsh-base` 为第一层），`plugin_manager` 负责列出与安装、`plugin_market` 读市场索引，`apps/plugin-market-generator` 生成索引。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 
 **未覆盖类目（笔记已声明检索范围）**
 

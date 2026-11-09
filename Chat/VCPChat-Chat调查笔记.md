@@ -24,7 +24,7 @@ VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（
 
 ## 当前聊天内核边界
 
-当前主窗口不再把聊天视图、流式投影和历史写入集中在一个 renderer 全局对象中：初始化时分别建立会话上下文、仓库、历史写入权威和 presentation state，再由主聊天 composition 创建 surface adapter；VCP 流事件经过 bridge 与 coordinator，按操作和 surface generation 投递。因而切换话题、关闭内部表面或撤销路由时，旧操作可以停止向已失效的 DOM 投影，同时持久化仍经单独的 history authority 进入仓库。消息的磁盘事实源与单聊远端中断边界未因此改变。
+当前主窗口的聊天视图、流式投影与历史写入分别由独立对象承担：初始化时建立会话上下文、仓库、历史写入权威和 presentation state，再由主聊天 composition 创建 surface adapter；VCP 流事件经过 bridge 与 coordinator，按操作和 surface generation 投递。因而切换话题、关闭内部表面或撤销路由时，旧操作可以停止向已失效的 DOM 投影，同时持久化仍经单独的 history authority 进入仓库。消息的磁盘事实源与单聊远端中断边界未因此改变。
 
 依据：`modules/renderer/mainChatComposition.js`、`modules/renderer/mainChatSurfaceAdapter.js`、`modules/chat/vcpStreamBridge.js:9-82`、`modules/chat/streamCoordinator.js:28-112`、`modules/renderer/mainChatStreamConsumer.js:26-128`。
 
@@ -98,5 +98,5 @@ textarea#messageInput（Enter 发送，Shift+Enter 换行）
 - `modules/renderer/streamManager.js`：`startStreamingMessage` `:1371`，`projectStreamTerminal` `:1845-2079`\n- `modules/renderer/mainChatStreamConsumer.js:35-128`：终态消费、投影与提交状态机\n- `modules/chat/chatHistoryPersistence.js:12-42`：终态历史提交（群聊跳过）
 - `modules/topicListManager.js`：未读计数 `:47-106`（`hasUserParticipation` `:47`、`countUnreadMessages` `:91`、`calculateTopicUnreadCount` `:206`），"未读话题"置顶 `:128-175`，`loadTopicList` `:498-616`，拖放排序 `:635-694`
 - `Groupmodules/groupchat.js`：`handleGroupChatMessage` `:477-1118`，超时/中断 `:864-899`, `:1030-1039`, `:1910-1954`；`Groupmodules/topicTitleManager.js`（20 秒超时）`:76-130`；`modules/topicSummarizer.js`（无超时）`:11-109`
-- `modules/renderer/mainChatSendOwner.js:74-121`：按钮态与中断分支（旧的 `modules/vcpClient.js` 已删除）
+- `modules/renderer/mainChatSendOwner.js:74-121`：按钮态与中断分支
 - `modules/services/chatDataService/*`：VCP-CDS 影子服务生命周期 `lifecycle.js`、客户端 `client.js`、外观 `index.js`；`main.js:761-788`（启动）、`:1050-1065`（`chat-data-service-status`/`chat-data-service-reconcile` IPC）

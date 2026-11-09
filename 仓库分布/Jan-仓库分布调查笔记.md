@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-Jan 是 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可运行时安装的扩展、共享能力包与文档站合仓的 workspace。`web-app/src` 约 17.3 万行；`src-tauri`（含插件、utils 与 jan-cli）约 24.4 万行，Rust 侧的体量增长主要来自并入 `src-tauri/src/core/` 的 Agent 核心与 CLI/TUI（`tui.rs` 单文件约 5.4 万行）。与旧快照相比多了两类目录：`packages/`（extension-api、extension-runtime、adk）把扩展契约与 SDK 抽成可发布包，`protocol/` 与 `adk/` 把对外 RPC 协议与 Python 实现纳入仓库。
+Jan 是 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可运行时安装的扩展、共享能力包与文档站合仓的 workspace。`web-app/src` 约 17.3 万行；`src-tauri`（含插件、utils 与 jan-cli）约 24.4 万行，Rust 侧的体量增长主要来自并入 `src-tauri/src/core/` 的 Agent 核心与 CLI/TUI（`tui.rs` 单文件约 5.4 万行）。仓库还含两类目录：`packages/`（extension-api、extension-runtime、adk）把扩展契约与 SDK 抽成可发布包，`protocol/` 与 `adk/` 把对外 RPC 协议与 Python 实现纳入仓库。
 
 ## 统计口径与仓库形态
 
@@ -62,7 +62,7 @@ Jan 是 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可运行时安�
 - `core/`：浏览器侧共享 TS 运行时（约 4.4 千行），提供扩展工具箱、设置、模型类型与 `createServiceRegistry`，单独打包并发布 npm；
 - `packages/`：三个新包。`extension-api` 是扩展可用的稳定 API（清单校验、贡献点、能力、语义化版本兼容、API 报告），`extension-runtime` 是 worker 侧的扩展运行协议（握手、句柄、端点），`adk` 是由 RPC schema 生成类型的 JavaScript 客户端与运行时安装器；
 - `protocol/`：对外协议产物——事件 schema 与 RPC schema 两份 JSON，与服务端实现一起做契约一致性校验；
-- `extensions/*`（71 文件 / 15,047 行）：6 个扩展包，覆盖本地推理、MLX、助手、RAG、向量库与下载。旧快照的 `conversational-extension` 已不在，其职责并入 `assistant-extension`。包清单：
+- `extensions/*`（71 文件 / 15,047 行）：6 个扩展包，覆盖本地推理、MLX、助手、RAG、向量库与下载。助手能力由 `assistant-extension` 承担。包清单：
   - `llamacpp-extension`（本地推理）
   - `mlx-extension`
   - `assistant-extension`

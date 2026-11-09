@@ -138,7 +138,7 @@ App HTML 必须来自指定 MIME 的 MCP 资源，大小上限 2 MiB；prepare �
 ### 7.2 Agent 代码执行（本机进程）
 
 - **exec 工具**：本机 shell 以子进程执行命令，有分离/托管两种形态，默认超时 120s、终止宽限 5s。启动目录按 allowedDirectories 校验，范围可含工作区、Skill、会话目录、临时目录与批准路径，越界 cwd 被拒绝；这项检查限定启动位置，进程仍在本机用户权限下运行（[agentBashHandler.ts:287–325](<../../deepchat/src/main/tool/agentTools/agentBashHandler.ts#L287-L325>)）。
-- **命令 shell 可配置（#2109）**：执行 shell 从用户默认 shell 改为解析后的命令 shell（`src/shared/commandShell.ts`：8 种 preference/profile，dialect 归为 posix、cmd、powershell 三种，pathStyle 有 native/win32/msys），按 dialect 拼命令与提示；RTK 改写只在 posix 方言启用；后台会话同样携带该配置；命令审批请求附带 shellProfile（Agent 工具笔记 §3）。
+- **命令 shell 可配置（#2109）**：执行命令所用的 shell 由 `src/shared/commandShell.ts` 解析出的 preference/profile 决定（8 种 preference/profile，dialect 归为 posix、cmd、powershell 三种，pathStyle 有 native/win32/msys），按 dialect 拼命令与提示；RTK 改写只在 posix 方言启用；后台会话同样携带该配置；命令审批请求附带 shellProfile（Agent 工具笔记 §3）。
 - **权限**：`CommandPermissionService` 按低/中/高/关键四级审批，白名单与破坏性/网络模式按 shell 方言分别匹配；文件读写走 `FilePermissionService`（read/write/all 三档），`auto_approve` 下的审阅范围由 `resolveAgentToolReview` 统一裁决（Agent 工具笔记 §3）。
 - **输出预览与落盘**：执行结果按内联上限截取预览，超过阈值的完整输出落会话目录 log 文件；Agent 配置的 `commandOutputInlineChars`/`toolOutputInlineChars` 可调节（Agent 角色笔记 §1）。
 - **后台会话**：`backgroundExecSessionManager` 支持 background/yield 与 `process` 工具（查询、轮询、日志、写入、终止、清理、移除），输出超限落会话目录 log 文件。

@@ -218,7 +218,7 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 
 ### 拖放细节
 
-**Composer 附件拖入。** 拖拽经过 `useFileDragDrop.ts`（文件、文本、文件夹路径分别处理，不支持类型会 toast 提示），视觉反馈是绿色虚线边框与半透明蒙层，颜色已改为主题语义变量，不再使用硬编码绿色。
+**Composer 附件拖入。** 拖拽经过 `useFileDragDrop.ts`（文件、文本、文件夹路径分别处理，不支持类型会 toast 提示），视觉反馈是绿色虚线边框与半透明蒙层，颜色取自主题语义变量。
 
 **Topic 拖拽排序。** 只有按"助手分组"显示时才可拖（canDragTopicItem/`dragReady = isAssistantDisplayMode && ...`，`Topics.tsx:1136-1139,797`），按"时间分组"显示时完全不可拖（该模式下顺序由时间戳决定）。
 
@@ -271,7 +271,7 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 选择助手从单一浮层扩展成"选择动作 + 独立 Agent 窗口"两类表面：选择动作可绑定 Agent 并由显式 runner 执行，执行中的 Agent 窗口可以收成胶囊，macOS 上还能从窗口黄色灯收起；这些窗口共用声明式窗口尺寸与布局计算，胶囊布局与原生面板由独立模块提供。
 
-基础组件层有三处结构性替换：拖拽排序改由 `@dnd-kit/react` 承载（`packages/ui/src/components/composites/sortable/`），滚动容器统一到单一 `scroll-area` 原语以收敛应用内滚动与侧栏间距，Mermaid 图表改由 `@mermanjs/web-render` 在 worker 中渲染并从默认 Markdown 预设中懒加载，代码高亮统一到一套 Highlights 管线并对大代码预览做虚拟化。标签页方面活动会话标签有独立视觉态、新标签插入位置与标题来源都做了调整；Tooltip 在对话框内容旁改用 portal 挂载。
+基础组件层：拖拽排序由 `@dnd-kit/react` 承载（`packages/ui/src/components/composites/sortable/`），滚动容器统一到单一 `scroll-area` 原语以收敛应用内滚动与侧栏间距，Mermaid 图表由 `@mermanjs/web-render` 在 worker 中渲染并从默认 Markdown 预设中懒加载，代码高亮统一到一套 Highlights 管线并对大代码预览做虚拟化。标签页方面活动会话标签有独立视觉态；Tooltip 在对话框内容旁用 portal 挂载。
 
 本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。依据：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/main/services/selection/`、`packages/ui/src/components/composites/sortable/`、`packages/ui/src/components/primitives/scroll-area.tsx`、`packages/ui/src/lib/mermaid/runtime.ts`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`。
 

@@ -35,13 +35,25 @@ Hermes 的 Python 核心同时服务 CLI、消息 Gateway、TUI 和桌面端。�
 
 完整链路是：`hermes cron`、`/cron` 或 `cronjob` 保存 job -> gateway ticker 每 60 秒在 tick 锁内读取到期 job -> 预推进循环 job 的下次时间、创建执行记录并领取 fire claim -> 线程池运行 `run_one_job` -> 生成独立 cron session 或执行纯脚本 -> 输出落入 profile 的 cron output 目录并投递到 job 配置的目标 -> job 与 execution 写入终态。存储路径随 profile 的 `HERMES_HOME` 切换，避免凭据、技能和 cron job 跨 profile 混用（`cron/jobs.py`; `cron/scheduler.py`）。
 
-当前快照中 cron 已从 `jobs.py`/`scheduler.py` 两文件拆成约 45 个职责模块：调度权威与归属（`scheduler_authority.py`、`scheduler_ownership.py`、`scheduler_liveness.py`）、派发与投递（`scheduler_tick.py`、`scheduler_delivery*.py`、`delivery_queue.py`、`dispatch_hold.py`）、诊断与账本（`incidents.py`、`executions.py`、`monitor.py`、`store_health.py`）、时间语义（`occurrences.py`、`missed_runs.py`、`jobs_time.py`）以及 worktree 维护（`scheduler_worktree_maintenance.py`）等。job 存储仍是每 profile 的 `cron/jobs.json` 加跨进程文件锁，执行记录与输出目录语义未变。
+当前快照中 cron 已从 `jobs.py`/`scheduler.py` 两文件拆成约 45 个职责模块，按调度权威、派发投递、诊断账本、时间语义与 worktree 维护五组分工：
+
+```text
+调度权威与归属   scheduler_authority.py、scheduler_ownership.py、scheduler_liveness.py
+派发与投递       scheduler_tick.py、scheduler_delivery*.py、delivery_queue.py、dispatch_hold.py
+诊断与账本       incidents.py、executions.py、monitor.py、store_health.py
+时间语义         occurrences.py、missed_runs.py、jobs_time.py
+worktree 维护    scheduler_worktree_maintenance.py
+```
+
+job 存储仍是每 profile 的 `cron/jobs.json` 加跨进程文件锁，执行记录与输出目录语义未变。
 
 ## 触发、调度与运行对象
 
 ### Heartbeat 的触发与状态权威
 
-一个 `HeartbeatState` 包含 prompt、间隔、`active`/`paused`/`cleared` 状态、创建与上次触发时间和触发次数。`set`、`pause`、`resume`、`clear` 都立即写回 SessionDB；恢复时重置锚点，避免暂停期间积累的到期 tick 立即触发（`hermes_cli/heartbeat.py:100-137,241-280`）。最小间隔为 60 秒。
+一个 `HeartbeatState` 记录 prompt、间隔、状态取值 `active`/`paused`/`cleared`、创建与上次触发时间和触发次数。
+
+`set`、`pause`、`resume`、`clear` 四个命令都立即写回 SessionDB；恢复时重置锚点，避免暂停期间积累的到期 tick 立即触发（`hermes_cli/heartbeat.py:100-137,241-280`）。最小间隔为 60 秒。
 
 CLI 驱动每五秒检查当前会话。仅当没有 Agent 正在运行、没有语音录制或处理，且输入队列为空时才调用 `due_prompt`；真实用户输入因此优先。Gateway 使用单个异步轮询器，并以来源和 session id 注册 watch；会话仍在运行时跳过本轮。忙碌期间不会排队多个 tick：fire 时将 `last_fired_at` 更新为当前时间，所以空闲后至多补一次（`cli.py:12778-12818`; `gateway/run.py:21914-21959`; `hermes_cli/heartbeat.py:284-298`）。
 
@@ -61,7 +73,9 @@ heartbeat 不换系统提示、不替换工具集，只把预设文本包装为�
 
 Agent 型 cron job 建立 id 为 `cron_<job_id>_<timestamp>` 的独立会话，默认跳过记忆；其上下文不伪装成原始网关用户会话，异步委派也被限制为在 job 内同步收束。纯脚本 job 可用 `no_agent` 绕过 LLM，标准输出就是最终交付内容（`cron/scheduler.py:5310-5465,5677-5739`）。cron 运行还会禁用交互型 messaging 和 clarify toolset；默认也禁用 cronjob，防止 job 自行扩张调度循环。具体工具审批与权限链属于 Agent 工具类目（`cron/scheduler.py:464-495`）。
 
-`run_one_job` 的顺序是执行、保存 Markdown 输出、按 job origin 或目标投递、最后更新 job 和 execution。`[SILENT]` 只抑制投递，不抑制输出归档；失败则保留错误并走失败交付。job 终态保存 `last_run_at`、`last_status`、`last_error`、独立的 `last_delivery_error` 和失败连续次数；有限单次任务完成后保留 completed 记录一段时间，而不是立即抹去结果（`cron/scheduler.py:6919-6937,7137-7160`; `cron/jobs.py:2657-2801`）。
+`run_one_job` 的顺序是执行、保存 Markdown 输出、按 job origin 或目标投递、最后更新 job 和 execution。`[SILENT]` 只抑制投递，不抑制输出归档；失败则保留错误并走失败交付。
+
+job 终态保存 `last_run_at`、`last_status`、`last_error`、独立的 `last_delivery_error` 和失败连续次数；有限单次任务完成后保留 completed 记录一段时间，而不是立即抹去结果（`cron/scheduler.py:6919-6937,7137-7160`; `cron/jobs.py:2657-2801`）。
 
 ## 并发、取消、失败与恢复
 

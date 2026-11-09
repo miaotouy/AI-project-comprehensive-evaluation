@@ -38,7 +38,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 - **Topic**：`src/shared/data/types/topic.ts`，SQLite 行；新建事务内同时创建虚拟根消息（CHECK 约束 `(role='root') = (parentId IS NULL)` 强制）。`TopicService.setActiveNodeTx`（`:373-409`）把 `active_node_id` 指向目标分支 leaf，是分支选择的唯一权威指针。
 - **Message**：`MessageService` 维护 adjacency-list 树；`siblingsGroupId` 标记多模型/多分支兄弟组，`rootId`（`parentId === rootId`）判定"第一轮"；虚拟根不可删、清空保留根。
-- **运行状态**：`AiStreamManager` 的 `ActiveExecution/ActiveStream`（status 6 种取值）是主进程侧权威；渲染层 live overlay 由窗口级 `ExecutionStreamOverlayService` 持有（组件卸载不拆 reader），分支草稿持久化为空 user 叶子（`reserveBranch`，见专项笔记），不再有 `Chat.tsx` 的锚点 ref 临时态。
+- **运行状态**：`AiStreamManager` 的 `ActiveExecution/ActiveStream`（status 6 种取值）是主进程侧权威；渲染层 live overlay 由窗口级 `ExecutionStreamOverlayService` 持有（组件卸载不拆 reader），分支草稿持久化为空 user 叶子（`reserveBranch`，见专项笔记）。
 - **UI 数据分层**：`useTopicMessages`（SWR 缓存历史）+ `executionStreamOverlayService`（流式增量，`useExecutionOverlay` 只是 React 绑定）+ 分支图 `mergeTopicMessageFlowLiveTree`（DB 树 + 运行时 overlay 合并；awaiting-input 叶子本身已是 DB 节点）三套数据互不混入持久层。
 
 ## 专项导航
@@ -57,7 +57,7 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 - **消息搜索为 DOM 搜索**：`utils/contentSearch.ts` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
 - **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
 - **完成与审批通知**：主进程订阅会话事件，聚焦时发送应用内 toast、失焦时按偏好发送系统通知，点击能返回对应会话；详见[Chat UI 笔记 8.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)。
-- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子（`reserveBranch`/`fill-reserved`，原 `Chat.tsx` 锚点 ref 已删除）；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期清理由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）执行，永久删除才真正 purge；附件回收由 FileManager 引用计数 + 策略化 GC 兜底。
+- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子，经 `reserveBranch`/`fill-reserved` 创建与填充；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期清理由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）执行，永久删除才真正 purge；附件回收由 FileManager 引用计数 + 策略化 GC 兜底。
 
 ## 当前聊天主链补充
 

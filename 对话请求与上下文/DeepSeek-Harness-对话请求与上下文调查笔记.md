@@ -66,7 +66,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 - `user/message` 原样投影为 user 消息，不添加任何框架文本（框架由生产方自己写进 content）；
 - `developer/message` 投影为 developer 角色消息，用于按 turn/step 记账的增量会话变更（工具新增等），其 `headerSeq` 指向定义它的请求头；
 - `assistant/message` 投影为 assistant 消息，**空内容跳过**——只为承载 usage 的 max-tokens 步不进请求；
-- `tool/result` 投影为 tool 角色消息（v4 起不再塞进 user 消息）。
+- `tool/result` 投影为 tool 角色消息。
 
 `assistant/attempt`、turn/step 边界、log-only 记录一律不投影。派生带缓存：表面替换或插件消息投影推进 `contentGeneration` 时整体重建（`packages/core/session/src/index.ts:999`）。surface 折叠有严格校验：replace 的范围必须是当前 surface 节点、`sourceEventSeqs` 必须覆盖全部被遮蔽节点（`surface.ts:594` 的 `foldSurface`）。
 

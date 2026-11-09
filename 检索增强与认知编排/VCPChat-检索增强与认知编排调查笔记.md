@@ -58,11 +58,25 @@ VCPChat 的桌面入口为 Electron；包描述也明确称其为“为 VCP 服�
 
 启用工具注入时，客户端把请求 URL 改为 `/v1/chatvcp/completions`；否则保留配置的 URL。请求使用 Bearer API key，消息仅保留角色、内容、名称和工具调用所需字段，附件与思考等私有 UI 元数据被剔除。默认还会从上下文去除元思考链，只有设置显式启用才保留（`modules/ipc/chatHandlers.js:1016-1034,1098-1156,1170-1210`）。因此元思考的观察与保留属于客户端可配置的上下文卫生策略，作用范围限于发往网关的上下文；元思考链本身由远端 VCP 服务产生，客户端只负责观察、筛选与展示。
 
-流式 HTTP 响应按 SSE `data:` 行解析，统一映射为 `chat.stream.*` 事件契约：`started`/`chunk`/`final` 加 4 个终态，`normalizeChatTerminal` 把 `end`/`done`/`success`/`stop` 归一为 `completed`，`abort`/`cancel` 归一为 `cancelled`，`discard`/`stale` 归一为 `discarded`，`error`/`disconnect`/`reader-error` 归一为 `failed`；事件附带消息 ID、上下文与 IPC 侧生成的流操作 ID（`modules/chat/chatEventContract.js:7-34`；`modules/ipc/chatHandlers.js:1056-1360`）。非流式结果原样作为 JSON 返回。该契约没有定义 RAG 候选、分数或阶段必然进入聊天消息；这些细节另从日志观察通道到达时才会显示。
+流式 HTTP 响应按 SSE `data:` 行解析，统一映射为 `chat.stream.*` 事件契约：`started`/`chunk`/`final` 三个过程事件加 4 个终态，终态归一化由 `normalizeChatTerminal` 完成，映射关系见下表。事件附带消息 ID、上下文与 IPC 侧生成的流操作 ID。
+
+| 服务端返回的终态 | 归一后的客户端状态 |
+|---|---|
+| `end`、`done`、`success`、`stop` | `completed` |
+| `abort`、`cancel` | `cancelled` |
+| `discard`、`stale` | `discarded` |
+| `error`、`disconnect`、`reader-error` | `failed` |
+
+契约定义见 `modules/chat/chatEventContract.js:7-34`，流式解析、取消与事件转发见 `modules/ipc/chatHandlers.js:1056-1360`。非流式结果原样作为 JSON 返回。该契约没有定义 RAG 候选、分数或阶段必然进入聊天消息，这些细节要等日志观察通道到达时才显示。
 
 ## RAG 与元思考观察面
 
-观察器是单独 BrowserWindow，可用 `--rag-observer-only` 在没有主聊天窗时启动（`main.js:1274-1289`；`package.json:24-27`）。主进程读设置后把 `vcpLogUrl`/`vcpLogKey` 拼进窗口 URL 查询串（`modules/ipc/ragHandlers.js:278-284`），观察器从 URL 参数取这两个值（`RAGmodules/rag-observer-config.js:19-28`），分别连接 `${vcpLogUrl}/vcpinfo/VCP_Key=...` 与可选的 `${vcpLogUrl}/VCPlog/VCP_Key=...`。信息通道的事件分派在 `RAG_Observer.js:386-900`，通知通道用 `.type` 白名单集合过滤（`rag-observer-config.js:143-160`）。事件类型是客户端筛选白名单，不是服务端事件的完整规范。
+观察器是单独 BrowserWindow，可用 `--rag-observer-only` 在没有主聊天窗时启动（`main.js:1274-1289`；`package.json:24-27`）。主进程读设置后把 `vcpLogUrl` 与 `vcpLogKey` 拼进窗口 URL 查询串（`modules/ipc/ragHandlers.js:278-284`），观察器再从 URL 参数取这两个值（`RAGmodules/rag-observer-config.js:19-28`），分别连接信息通道和可选的通知通道：
+
+- 信息通道：`${vcpLogUrl}/vcpinfo/VCP_Key=...`
+- 通知通道（可选）：`${vcpLogUrl}/VCPlog/VCP_Key=...`
+
+信息通道的事件分派在 `RAG_Observer.js:386-900`，通知通道用 `.type` 白名单集合过滤（`rag-observer-config.js:143-160`）。事件类型是客户端筛选白名单，其取值由远端日志服务定义。
 
 事件卡片可显示查询、数据库名、核心标签、BM25 模式和 token、结果等服务端字段；元思考、记忆检索、日记和梦境有专门显示分支（`RAGmodules/RAG_Observer.js:889-900` 起的分派与各 render 函数）。这些字段的来源与含义由到达的事件决定。静态代码确认“可展示”，不能确认每种事件一定产生、字段完整性、结果分数的计算方法，或事件是否覆盖一次请求的全部检索阶段。
 

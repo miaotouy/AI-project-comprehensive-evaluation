@@ -17,7 +17,7 @@
 Jan 的“渠道”由两层构成：
 
 1. **远程 provider**：`web-app/src/constants/providers.ts` 内置 11 个预定义 provider（完整清单见 1.1），每个 provider 只有 api key、base url、模型列表与少量自定义 header；另支持用户自定义 OpenAI 兼容端点（api_type 可选 `openai`/`anthropic`）。
-2. **本地引擎**：llamacpp-extension 与 mlx-extension 把 GGUF/MLX 模型通过 OpenAI 兼容端点暴露；本轮 llama.cpp 改由独立 worker 管理模型驻留与线程 KV 状态。Rust 侧 `src-tauri/src/core/server/` 仍提供本地 API server 代理、认证与远程 provider 转发。
+2. **本地引擎**：llamacpp-extension 与 mlx-extension 把 GGUF/MLX 模型通过 OpenAI 兼容端点暴露；llama.cpp 由独立 worker 管理模型驻留与线程 KV 状态。Rust 侧 `src-tauri/src/core/server/` 仍提供本地 API server 代理、认证与远程 provider 转发。
 
 聊天请求不经过任何后端业务服务，由前端 `CustomChatTransport` 直接经 `createCustomFetch` 包装的 fetch 发出；**推理参数在 HTTP 层注入 body**，`streamText` 本身只传 AI SDK 字段。请求默认打到本地 router 代理，Rust 按模型 ID 决定转发远程 provider 还是路由到 llama-server/mlx-server 子进程。
 
@@ -77,7 +77,21 @@ Web 详情页确实提供“刷新、手动新增、编辑、删除”按钮，�
 
 ### CLI 与 TUI 边界
 
-独立 crate `src-tauri/jan-cli` 的命令树分为 `cli`（threads/models/agent/mcp）、`login`/`auth`、`config`（set/unset/list/path）、`plugin` 与 `update`。渠道管理落在 `jan config`：`set` 可按 `--provider` 写入 API key、base URL、模型列表与 `api_type`，`list` 输出已配置 provider 的 JSON（key 脱敏），`unset` 删除条目，全部作用于全局 `~/.jan/config.toml`；`jan cli models list` 再按解析结果列出模型。解析优先级为 CLI 参数与环境变量、项目 `.jan/agent/agent.toml` 的 `[provider]`、桌面 `settings.json`（只继承不回写）、全局 `~/.jan/config.toml`（`src-tauri/src/core/cli/providers.rs:1-16`）。CLI 不提供 provider 启停开关、独立连接测试与导入导出；`jan login`/`auth` 只处理 Tokamak 账号凭据。裸 `jan` 打开的是 Agent TUI（`src-tauri/src/core/cli/tui.rs`）而非渠道管理界面；MCP server 的增删改与启停由 `jan cli mcp` 负责。
+独立 crate `src-tauri/jan-cli` 的命令树分五组，渠道管理全部落在 `jan config`：
+
+```text
+jan cli                threads / models / agent / mcp
+jan login / jan auth   Tokamak 账号凭据
+jan config             set / unset / list / path
+jan plugin             插件
+jan update             版本更新
+```
+
+`set` 可按 `--provider` 写入 API key、base URL、模型列表与 `api_type`；`list` 输出已配置 provider 的 JSON（key 脱敏）；`unset` 删除条目；三者都作用于全局 `~/.jan/config.toml`。`jan cli models list` 再按解析结果列出模型。
+
+解析优先级为 CLI 参数与环境变量、项目 `.jan/agent/agent.toml` 的 `[provider]`、桌面 `settings.json`（只继承不回写）、全局 `~/.jan/config.toml`（`src-tauri/src/core/cli/providers.rs:1-16`）。
+
+CLI 不提供 provider 启停开关、独立连接测试与导入导出；`jan login`/`auth` 只处理 Tokamak 账号凭据。裸 `jan` 打开的是 Agent TUI（`src-tauri/src/core/cli/tui.rs`）而非渠道管理界面；MCP server 的增删改与启停由 `jan cli mcp` 负责。
 
 ## 1. Provider 定义与配置模型
 
@@ -315,10 +329,14 @@ ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型
 - 读取 `models/<modelId>/model.yml` 的模型配置；
 - `resolveEmbeddingConfig`（L1432）：GGUF 元数据探测 embedding → 回写 `cfg.embedding` 与版本化缓存；embedding 模型默认补 `pooling` 与批量参数；
 - `resolveMtpLayersConfig`：MTP 层数探测，在建 preset 前与 embedding 探测一起调用；
-- `PRESET_AFFECTING_KEYS`（L121）集合内的设置变化会通知 worker 重新应用 preset；旧版的防抖 router 重启与 `selfInflicted` 自激保护已不存在；
+- `PRESET_AFFECTING_KEYS`（L121）集合内的设置变化会通知 worker 重新应用 preset；
 - 模型配置中 `quant_type: undefined` 为硬编码 TODO（L1397）。
 
-引擎不再是运行机下载的后端二进制：它按编译期版本捆绑进随附 worker，扩展 `startEngine()`（L870 起）生成 preset 后由插件启动该 worker，握手返回 OS 分配的端口、pid 与 API key；worker 内部 registry 按需加载模型，并在容量已满时只淘汰空闲的最近最少使用 chat 模型（`index.ts:2297-2318` 的 `userModelsMax`/`loadedChatOrder`）。逐线程 KV 状态可按 thread_id 保存到磁盘、在身份校验通过时恢复，缓存预算（MiB）为零即关闭。进程实际生命周期、跨会话缓存命中率与淘汰时延均未运行验证（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs`、`engine/registry.rs`、`engine/http.rs`、`engine/slots.rs`）。
+引擎按编译期版本捆绑进随附 worker：扩展 `startEngine()`（L870 起）生成 preset 后由插件启动该 worker，握手返回 OS 分配的端口、pid 与 API key。
+
+worker 内部 registry 按需加载模型，容量已满时只淘汰空闲的最近最少使用 chat 模型（`index.ts:2297-2318` 的 `userModelsMax`/`loadedChatOrder`）。逐线程 KV 状态可按 thread_id 保存到磁盘、在身份校验通过时恢复，缓存预算（MiB）为零即关闭。
+
+进程实际生命周期、跨会话缓存命中率与淘汰时延均未运行验证（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/worker.rs`、`engine/registry.rs`、`engine/http.rs`、`engine/slots.rs`）。
 
 `ModelConfig`（`src-tauri/plugins/tauri-plugin-llamacpp/guest-js/types.ts:104-116`）：
 
@@ -343,7 +361,20 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 
 ### 8.2 代理链路
 
-`proxy_request`（L694）按模型解析上游：本地引擎走 `engine_upstream`（L632），远程 provider 走 `core/agent` 上游层的 `call_openai_chat_completions`（`src-tauri/src/core/agent/upstream.rs:1156`）并带 Bearer key 直连。编排辅助已从 `proxy.rs` 移到该文件：`resolve_upstream_for_model` :636、`load_assistant_config` :66、`parse_openai_messages` :92、`repair_dangling_tool_calls` :173、`assemble_tool_array` :970、`collect_mcp_openai_tools` :996、`execute_mcp_tool_calls` :1068。工具数组另有"上次可用列表"复用（`reuse_last_good_listings` :930），让工具顺序在多轮之间稳定，避免提示缓存失效。
+`proxy_request`（L694）按模型解析上游：本地引擎走 `engine_upstream`（L632），远程 provider 走 `core/agent` 上游层的 `call_openai_chat_completions`（`src-tauri/src/core/agent/upstream.rs:1156`）并带 Bearer key 直连。编排辅助已从 `proxy.rs` 移到该文件：
+
+```text
+resolve_upstream_for_model   :636
+load_assistant_config        :66
+parse_openai_messages        :92
+repair_dangling_tool_calls   :173
+assemble_tool_array          :970
+collect_mcp_openai_tools     :996
+execute_mcp_tool_calls       :1068
+reuse_last_good_listings     :930   工具数组复用"上次可用列表"
+```
+
+工具数组复用"上次可用列表"，让工具顺序在多轮之间稳定，避免提示缓存失效。
 
 服务端编排入口在 `src-tauri/src/core/agent/loop.rs`，`max_turns` 默认 8（`PROXY_DEFAULT_MAX_TURNS`，loop.rs:3095）。
 

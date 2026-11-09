@@ -53,7 +53,17 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 ## 4. 表现类型、依赖与运行环境
 
 - 表现层级：静态 Markdown（GFM、KaTeX、Streamdown 代码块、Mermaid 图）覆盖 G0 至 G1 静态层；HTML artifact 是唯一动态层——模型 HTML/CSS/JS 在 iframe 中执行（`sandbox="allow-scripts"`，无 `allow-same-origin` → 不透明源，`referrerPolicy="no-referrer"`）（`web-app/src/components/HtmlArtifact.tsx:118-122`）。
-- 依赖提供：iframe 用 `srcDoc` 内联，文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装：CSP meta 置于最前，再注入内存存储 shim 与元素检查器脚本，然后才是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档——禁脚本（SVG 静态，无 `script-src`）、默认可脚本禁网（内联与 blob 脚本、data/blob 媒体、blob worker，`connect-src` 为 none）、`allowNetwork` 时放宽到 `https:`；普通 Chat 的 `HtmlArtifact` 调用点未传 `allowNetwork`，Cowork 独立预览面板则有自己的网络开关。预览还会统计无法在沙箱内解析的相对资源并显示提示条（`lib/htmlSandbox.ts:4-60`、`HtmlArtifact.tsx:38-44`、`lib/htmlAssets.ts`）。SVG 段复用同一组件但传 `allowScripts={false}`：sandbox 为空、CSP 不声明 `script-src`，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
+- 依赖提供：iframe 用 `srcDoc` 内联，文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装：CSP meta 置于最前，再注入内存存储 shim 与元素检查器脚本，然后才是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档，决定页面能用哪些脚本、媒体与网络：
+
+  | 档位 | 脚本 | 媒体与网络 |
+  |---|---|---|
+  | 禁脚本（SVG 静态） | 不声明 `script-src` | 静态渲染 |
+  | 默认可脚本禁网 | 内联与 blob 脚本、blob worker | data/blob 媒体；`connect-src` 为 none |
+  | `allowNetwork` | 同上 | 放宽到 `https:` |
+
+  普通 Chat 的 `HtmlArtifact` 调用点未传 `allowNetwork`，Cowork 独立预览面板则有自己的网络开关。预览还会统计无法在沙箱内解析的相对资源并显示提示条（`lib/htmlSandbox.ts:4-60`、`HtmlArtifact.tsx:38-44`、`lib/htmlAssets.ts`）。
+
+  SVG 段复用同一组件但传 `allowScripts={false}`：sandbox 为空、CSP 不声明 `script-src`，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
 - 产品文案与实现一致：设置页说明"HTML runs the model-generated page in a sandboxed frame that executes its own scripts but cannot access Jan, your files, or the network"（web-app/src/locales/en/settings.json:99）。该功能标注为实验性，默认关闭（web-app/src/hooks/useInterfaceSettings.ts:186）。
 
 ## 5. 用户交互、事件与错误反馈

@@ -14,7 +14,13 @@
 
 ## 结论摘要
 
-OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，而不是 Artifact、Canvas 或 Notebook。服务端把模型文本流包装成 `createSurface` / `updateComponents` / `updateDataModel` 三类消息，经网关的 `chat` 事件以 `state: "a2ui"` 推给前端；前端用 `@a2ui/web_core` 的 MessageProcessor 加 `@a2ui/lit` 的 basic catalog 渲染，用户点击组件后通过 `chat.a2ui.action` 回到网关并合成一条新的用户消息，形成"生成 → 渲染 → 交互 → 再生成"的闭环。
+OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，而不是 Artifact、Canvas 或 Notebook。服务端把模型文本流包装成三类协议消息，经网关事件通道以独立状态标记推给前端；前端用 `@a2ui/web_core` 的 MessageProcessor 加 `@a2ui/lit` 的 basic catalog 渲染，用户点击组件后回到网关并合成一条新的用户消息，形成"生成 → 渲染 → 交互 → 再生成"的闭环。协议动作键与事件通道的对应关系：
+
+```text
+createSurface / updateComponents / updateDataModel   三类服务端消息，分别对应建面、布组件、写数据
+chat 事件（state: "a2ui"）                            网关把 A2UI 消息推给前端
+chat.a2ui.action                                      组件点击回传网关
+```
 
 协议与渲染栈具备声明式交互对象（能力谱系 G2）的完整组件，但**当前快照的生产端只发文本表面**：`AssistantTextStream` 固定生成 Column + Text 结构，富组件（按钮、输入框等）有渲染与事件回传路径，却本次未找到由模型或工具提交 components 的入口。因此实际投影更接近 G0/G1（格式化文本与可查看文件）。G3（隔离执行的 Artifact）与 G4（可编辑工作区）本次未找到；执行发生在本机进程，没有容器、WebView 或 iframe 沙箱运行时。
 
@@ -48,7 +54,15 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 - **工具结果**：工具调用与结果作为 `toolCall` / `toolResult` 内容块进入转录和界面；写文件、抓网页、读图片等工具的输出还会被解析成附件块（`src/pkg/gateway/handlers/chat.go:2751-2806`）。
 - **A2UI 客户端动作**：组件事件被转换成一条带 `[A2UI Action: <name>]` 前缀和完整 JSON 上下文的用户消息（`chat.go:3649-3662`），随后走普通发送流程。
 
-**协议形状。** 一条服务端消息必须且只能带一个动作键，取值集合为 `createSurface`、`updateComponents`、`updateDataModel`、`deleteSurface`，另兼容 v0.8 的 `surfaceUpdate` / `dataModelUpdate` / `beginRendering` 并在解析后归一（`src/pkg/a2ui/message.go:14-175`）。catalog 标识会被归一成客户端 basic catalog 的正式 URL，接受 `basic`、`standard` 等简写（`message.go:150-160`）。校验只检查"恰好一个动作键"，不校验组件树结构（`message.go:161-171`）；组件数组同时接受数组、`{"item":[...]}` 包装和以 id 为键的对象映射（`message.go:53-100`）。
+**协议形状。** 一条服务端消息必须且只能带一个动作键，catalog 标识统一归一成客户端 basic catalog 的正式 URL。校验只检查"恰好一个动作键"，不校验组件树结构（`message.go:161-171`）；组件数组同时接受数组、`{"item":[...]}` 包装和以 id 为键的对象映射（`message.go:53-100`）。
+
+动作键取值、v0.8 兼容键与 catalog 简写：
+
+```text
+动作键集合    createSurface / updateComponents / updateDataModel / deleteSurface
+v0.8 兼容键   surfaceUpdate / dataModelUpdate / beginRendering，解析后归一（src/pkg/a2ui/message.go:14-175）
+catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（message.go:150-160）
+```
 
 **对象模型。** A2UI 对象没有独立于会话的持久标识：
 
@@ -66,7 +80,9 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 ## 2. 增量生成、更新与最终化
 
-**更新粒度是整段覆盖，不是补丁。** `AppendDelta` 每次把累积后的全文写进 `updateDataModel.value`（`src/pkg/a2ui/stream.go:62-69`）。前端 `dedupeA2UIMessages` 以 `surfaceId + path` 为键，用最新一条替换旧条（`ui/src/ui/chat/a2ui-bridge.ts:319-379`）；服务端同样做折叠：`AppendAssistantA2UIBlock` 命中同一 surface/path 时替换原块（`src/pkg/a2ui/dedupe.go:83-108`），落库前再整体 `CoalesceAssistantA2UIBlocks`（`src/pkg/a2ui/dedupe.go:24-32`）。因此一次回复在转录里只剩一条最终 data model，流式中间态不持久化。
+**更新粒度是整段覆盖，不是补丁。** `AppendDelta` 每次把累积后的全文写进 `updateDataModel.value`（`src/pkg/a2ui/stream.go:62-69`）。
+
+前端与落库侧各自再折叠一次：前端 `dedupeA2UIMessages` 以 `surfaceId + path` 为键用最新一条替换旧条（`ui/src/ui/chat/a2ui-bridge.ts:319-379`）；服务端 `AppendAssistantA2UIBlock` 命中同一 surface/path 时替换原块（`src/pkg/a2ui/dedupe.go:83-108`），落库前再整体 `CoalesceAssistantA2UIBlocks`（`src/pkg/a2ui/dedupe.go:24-32`）。因此一次回复在转录里只剩一条最终 data model，流式中间态不持久化。
 
 **文本去重规则。** 只要本轮出现过 A2UI，纯 text 块在落库前被剥离（`chat.go:916-930`、`chat.go:958-973`）。这带来两个并存表示：界面看到的是 A2UI 的 data model，IM 投递则从 textBuf 兜底取原文，代码注释明确写出这一分工（`chat.go:1105-1119`）。
 
@@ -104,7 +120,14 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 ## 5. 用户交互、事件与错误反馈
 
-**事件回传。** 面板把 `A2uiClientAction` 交给 chat 控制器的 `dispatchA2UIActionFromChat`，后者先按 surface 清理本地历史，再发 `chat.a2ui.action` 请求并把返回的 runId 设为当前运行（`ui/src/ui/controllers/chat.ts:180-228`）。网关侧只透传 `name`、`surfaceId`、`sourceComponentId`、`timestamp`、`context`（`a2ui-bridge.ts:74-93`），不解释业务语义——交互含义完全落在下一轮模型提示里。
+**事件回传。** 面板把 `A2uiClientAction` 交给 chat 控制器的 `dispatchA2UIActionFromChat`，后者先按 surface 清理本地历史，再发 `chat.a2ui.action` 请求并把返回的 runId 设为当前运行（`ui/src/ui/controllers/chat.ts:180-228`）。
+
+网关侧只做字段透传，不解释业务语义——交互含义完全落在下一轮模型提示里：
+
+```text
+透传字段   name / surfaceId / sourceComponentId / timestamp / context
+透传实现   a2ui-bridge.ts:74-93
+```
 
 **交互状态不恢复。** 面板的 processor 是组件私有实例，`resetChatA2UISurfaces` 已退化为空操作（`a2ui-bridge.ts:69-72`）；重开时从数据模型重建，按钮的按下态、输入框内容等不落库。动作提交后原 surface 被从消息中剔除（`a2ui-bridge.ts:122-160`），因此同一按钮不会被重复点击消费。
 
@@ -123,7 +146,9 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 ## 7. 能力桥、执行位置与权限范围
 
-**执行位置是本机进程。** Eino DeepAgent 使用本地文件系统后端，`Execute` / `ExecuteStreaming` 直接拉起子进程：Windows 走 `cmd.exe /c`，并隐藏控制台窗口（`src/pkg/agent/eino/localbackend/shell_windows.go:22-33`、`:29-31`）；非 Windows 委托给 eino-ext 的本地后端（`shell_unix.go:12-26`）。未找到容器、虚拟机、WebView、iframe 或远端沙箱作为执行环境；`runtime.Options.EnableSandbox` 字段存在但未被运行时读取（`src/pkg/agent/runtime/runtime.go:206`，全仓库检索仅赋值处）。
+**执行位置是本机进程。** Eino DeepAgent 用本地文件系统后端，`Execute` / `ExecuteStreaming` 直接拉起子进程：Windows 走 `cmd.exe /c` 并隐藏控制台窗口（`src/pkg/agent/eino/localbackend/shell_windows.go:22-33`、`:29-31`）。
+
+非 Windows 委托给 eino-ext 的本地后端（`shell_unix.go:12-26`）。本次未找到容器、虚拟机、WebView、iframe 或远端沙箱作为执行环境；`runtime.Options.EnableSandbox` 字段存在但未被运行时读取（`src/pkg/agent/runtime/runtime.go:206`，全仓库检索仅赋值处）。
 
 **命令校验、中断审批与兼容文件分属不同路径。**
 
@@ -139,7 +164,15 @@ OpenOcta 的生成式输出走 **A2UI v0.9（Agent-to-UI）声明式协议**，�
 
 审批中间件按工具名拦截，恢复入口是 `chat.resume`；运行时另将三组规则写入 SDK 兼容文件，两条链路各自消费不同状态（[engine.go:100–102](<../../openocta/src/pkg/agent/eino/engine.go#L100-L102>)、[approval_middleware.go:45–85](<../../openocta/src/pkg/agent/eino/approval_middleware.go#L45-L85>)、[runtime.go:151–159、392–450](<../../openocta/src/pkg/agent/runtime/runtime.go#L151-L159>)）。
 
-**UI 侧审批入口与后端不闭环（静态事实）。** 聊天页有一个 `exec.approval.requested` 驱动的居中确认卡（`ui/src/ui/views/exec-approval.ts:25-89`），决议经 `exec.approval.resolve` 发送（`ui/src/ui/app.ts:976-994`）；但该事件的广播名单里只有事件名（`src/pkg/gateway/ws/hub.go:109-112`），仓库内没有生产者，`exec.approval.request` 与 `exec.approval.resolve` 的处理函数分别是"未实现"和直接回 `ok` 的桩（`src/pkg/gateway/handlers/exec_approvals.go:41-48`、`handlers/stubs.go:93-97`）。另一条 `approvals.list` / `approve` 通道面向 `security.ApprovalQueue`（`handlers/approvals.go:157-284`），但执行链没有调用 `Request` 写入记录（检索范围：`src/**/*.go` 中 `GetApprovalQueue`、`NewApprovalQueue`、`q.Approve` 的全部引用）。同时，中断事件以 `chat` 事件的 `state: "interrupted"` 下发（`chat.go:3240-3250`），而前端事件联合类型与处理函数都没有这一分支，也没有 `chat.resume` 的调用方（检索范围：`ui/src` 全量）。结果是：审批相关的数据结构与 UI 都在，端到端路径在本次快照中没有接通；实际可见的批准方式仍是模型在对话里询问、用户回"确认"。
+**UI 侧审批入口与后端不闭环（静态事实）。** 三条审批相关通道各自只接通一半：前端确认卡有 UI 与发送动作，网关侧没有生产者、处理函数是桩；队列通道有后端数据结构，执行链从不写入记录；中断事件能下发，前端没有对应分支，也没有恢复入口。
+
+| 通道 | 前端入口 | 后端实现 | 断点 |
+|---|---|---|---|
+| exec 确认卡 | `exec.approval.requested` 驱动居中确认卡（`ui/src/ui/views/exec-approval.ts:25-89`），决议经 `exec.approval.resolve` 发送（`ui/src/ui/app.ts:976-994`） | 广播名单只有事件名（`src/pkg/gateway/ws/hub.go:109-112`）；`exec.approval.request` 与 `exec.approval.resolve` 的处理函数分别是"未实现"与直接回 `ok` 的桩（`src/pkg/gateway/handlers/exec_approvals.go:41-48`、`handlers/stubs.go:93-97`） | 仓库内没有生产者 |
+| 审批队列 | `approvals.list` / `approve` | `security.ApprovalQueue`（`handlers/approvals.go:157-284`） | 执行链没有调用 `Request` 写入记录（检索范围：`src/**/*.go` 中 `GetApprovalQueue`、`NewApprovalQueue`、`q.Approve` 的全部引用） |
+| 中断事件 | 前端事件联合类型与处理函数都没有 `state: "interrupted"` 分支 | `chat` 事件下发（`chat.go:3240-3250`） | 没有 `chat.resume` 的调用方（检索范围：`ui/src` 全量） |
+
+结果是：审批相关的数据结构与 UI 都在，端到端路径在本次快照中没有接通；实际可见的批准方式仍是模型在对话里询问、用户回"确认"。
 
 **工具能力面。** 内置工具覆盖文件读写、shell、网页抓取、浏览器、会话与定时任务等（`src/pkg/agent/tools` 目录），文件写路径只做相对路径归一到工作区、Windows 盘根文件重定向，不强制阻止绝对路径写出工作区（`src/pkg/agent/eino/localbackend/paths.go:15-59`）；附件提取则显式校验目标位于工作区内（`src/pkg/agent/tools/deliverable_files.go:292-329`）。
 

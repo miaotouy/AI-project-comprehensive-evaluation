@@ -17,7 +17,7 @@
 DeepSeek Harness（dsh）是构建在 vendored Cordis 插件框架上的 agent harness，"一切皆插件"：模型适配器、工具注册表、会话日志、agent 循环本身都是插件。对话运行的核心仍是 `packages/core/agent-loop` 的 `ReactLoopAgent`，它是 `Agent` 接口的默认具体实现，驱动"turn 打开 → step 循环 → turn 关闭"的过程：
 
 1. **step 与 turn**：step 是一次模型请求加它调用的工具；turn 是零或多个 step，在首次 claim 输入前打开、在模型不再欠任何回复时关闭。turn/step 边界全部是 durable session 事件（`turn/start`、`step/start`、`step/end`、`turn/end`）。
-2. **输入入口**：所有输入经一条 inbox（`next-turn` 与 `next-step` 两个 pending 列表）投递，每次 claim 取"全部 next-step 输入加一条 queued 消息"；followup/steer 唤醒驱动，inject 只排队不唤醒。inbox 现在是可折叠的 durable 投影（从 `agent/inbox/spliced` 重建），live 的 `agent/inbox/*` 通知已移除，因此没有活动 Agent 也能读出待办输入。
+2. **输入入口**：所有输入经一条 inbox（`next-turn` 与 `next-step` 两个 pending 列表）投递，每次 claim 取"全部 next-step 输入加一条 queued 消息"；followup/steer 唤醒驱动，inject 只排队不唤醒。inbox 是可折叠的 durable 投影（从 `agent/inbox/spliced` 重建），没有活动 Agent 时也能读出待办输入。
 3. **事件三域**：session 事件（durable、可重放）、agent/* 事件（live、按 agent 作用域过滤）、capability 事件（策略/适配器 seam）。"模型可见 ⟺ 已记录"是硬约束；流式过程本身是 live 的 `agent/assistant-stream`，落盘的是内嵌完整流的 `assistant/message` 或 `assistant/attempt`。
 4. **工具调度已下沉为独立执行器**：循环把原始批次与并发上限交给 `ctx.tools.execute()`，由所选执行器（`tool-executor-native` 或 `tool-executor-ptc`）负责分发、并发、取消与调用记录；agent-loop 不再自带工具池实现。
 5. **循环控制全在插件层**：守卫（repeat-tool-reminder、timeout-policy）、审批、人类问答、命令都通过事件与工具 seam 影响循环，不改驱动本身。
@@ -54,7 +54,7 @@ DeepSeek Harness（dsh）是构建在 vendored Cordis 插件框架上的 agent h
   -> 驱动收敛 idle -> agent/status idle；调用方读 session/event 或 flush
 ```
 
-关键交接点：输入进入 inbox 时 durable 事件先于任何 live 派生提交；驱动在 turn 打开后于 preStep 阶段完成 claim，并重新组装提示词与工具 schema；请求配置每步经 `agent/request` 重新决定，这是模型路由可插拔的落点。系统提示词不再是请求头字段，而是以 `system/message` 表面节点协调（空文本清除、可路由追加、其余路由归并到首节点）。
+关键交接点：输入进入 inbox 时 durable 事件先于任何 live 派生提交；驱动在 turn 打开后于 preStep 阶段完成 claim，并重新组装提示词与工具 schema；请求配置每步经 `agent/request` 重新决定，这是模型路由可插拔的落点。系统提示词以 `system/message` 表面节点协调（空文本清除、可路由追加、其余路由归并到首节点）。
 
 ## 核心对象与状态权威
 

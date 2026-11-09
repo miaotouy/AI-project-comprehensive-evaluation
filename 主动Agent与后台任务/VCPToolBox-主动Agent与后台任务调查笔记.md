@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-当前快照确认四种不同形态的主动运行。TaskAssistant 是持久化的后台任务队列：规则由 `task-center-data.json` 持有，node-schedule 触发后向具名 Agent 派发提示词，结果写回任务运行字段和有上限的历史。其全局开关默认关闭。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 281-484, 697-734`（文件现 936 行，段落位置未变）
+当前快照确认四种不同形态的主动运行。TaskAssistant 是持久化的后台任务队列：规则由 `task-center-data.json` 持有，node-schedule 触发后向具名 Agent 派发提示词，结果写回任务运行字段和有上限的历史。其全局开关默认关闭。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:10-36, 281-484, 697-734`。
 
 VCPClawMail 是条件唤醒：常驻 WebSocket 收到邮件事件后刷新邮箱缓存；若该邮箱绑定子邮箱和 Agent，插件用已处理邮件记录去重、读取正文与附件，再交给 AgentAssistant。低频轮询是 WebSocket 的后备，不是为每封公共邮箱邮件创建任务对象。`Plugin/VCPClawMail/VCPClawMail.js:1738-1786, 1847-2039, 2041-2181`
 
@@ -35,7 +35,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 - 配置字段：启用状态、调度规则、目标 Agent、派发参数。
 - runtime 字段：running、开始/完成时间、上次结果/错误、耗时、计数和下一次运行。
 
-`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。写入现经单一 Promise 队列串行化，先写随机临时文件再原子 rename；写前轮转 `.bak`。主文件损坏时尝试备份，主备均不可解析则启用写盘熔断，避免默认空数据覆盖现场（`Plugin/VCPTaskAssistant/vcp-task-assistant.js:177-287,486-510`）。
+`task-center-data.json` 才是该对象与历史的权威，内存 `activeTimers` 只保存当前进程的 node-schedule Job。写入经由单一 Promise 队列串行化，先写随机临时文件再原子 rename；写前轮转 `.bak`。主文件损坏时尝试备份，主备均不可解析则启用写盘熔断，避免默认空数据覆盖现场（`Plugin/VCPTaskAssistant/vcp-task-assistant.js:177-287,486-510`）。
 
 ### VCPClawMail：邮件条件唤醒
 
@@ -47,7 +47,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 
 主链为：插件初始化读取并恢复上次成功梦境时间 -> 定时检查符合时间窗、冷却和概率的 Agent -> 串行 `triggerDream` -> 生成梦境叙事和待审操作 -> 写入 `dream_logs/`；成功后持久化每个 Agent 的最后梦境时间。调度运行中以单个 `isDreamingInProgress` 门阻止重叠，并在多 Agent 间等待 30 秒。`Plugin/AgentDream/AgentDream.js:53-109, 198-361, 755-913, 922-957`
 
-梦操作以 `pending_review` 记录落盘，意图由管理路由审批后影响日记和索引。插件导出的 approve/reject 函数仍返回 `not_implemented`，因此不能把它们当作可从插件工具面完成审批的链路；审批执行域在管理路由，具体路由运行未验证。`Plugin/AgentDream/AgentDream.js:467-633, 1084`；`Plugin/AgentDream/README.md:30-38, 99-108`
+梦操作以 `pending_review` 记录落盘，意图由管理路由审批后影响日记和索引。插件导出的 `approve`、`reject` 函数返回 `not_implemented`，因此不能把它们当作可从插件工具面完成审批的链路；审批执行域在管理路由，具体路由运行未验证。`Plugin/AgentDream/AgentDream.js:467-633, 1084`；`Plugin/AgentDream/README.md:30-38, 99-108`
 
 ### VCPSleep：工具链内睡眠与做梦联动
 
@@ -66,7 +66,7 @@ TaskAssistant 调用 AgentAssistant、VCPClawMail 将邮件交给 AgentAssistant
 | AgentDream | 每 15 分钟检查，默认 1-6 点、8 小时冷却、0.6 概率；全局单运行门与串行 Agent 减少并发。 | 关闭插件或服务可停止后续检查；本次未找到进行中 LLM 请求的任务级取消或失败自动重试。 | 保存最后成功时间避免重启立即重触发；但插件 manifest 为 `.block`，默认不加载。 |
 | VCPSleep | 同步等待，单次上限 12 小时；一个调用占用一条工具链直到醒来。做梦联动另起异步请求，不延长等待。 | 睡眠本身无中途取消入口；睡醒后照常返回，做梦失败只记日志。 | 无持久状态，等待期间重启服务会中断该次调用；插件默认启用。 |
 
-TaskAssistant 的 `once` 作业执行后自动禁用；cron 的下一次时间取自 Job，interval 则在本轮完成后重新安排。运行历史最多保留配置的数量，默认上限 200；状态更新函数当前只输出调试日志，所以管理面需要轮询而非从该插件接收实时推送。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:45-51, 512-605, 697-711`
+TaskAssistant 的 `once` 作业执行后自动禁用；cron 的下一次时间取自 Job，interval 则在本轮完成后重新安排。运行历史最多保留配置的数量，默认上限 200；状态更新函数只输出调试日志，所以管理面需要轮询而非从该插件接收实时推送。`Plugin/VCPTaskAssistant/vcp-task-assistant.js:45-51, 512-605, 697-711`
 
 VCPClawMail 的 WebSocket 连接若稳定足够久会重置重连计数；断开后以抖动退避重新连接。该代码可确认连接生命周期管理，不能确认外部 SDK 实际是否保证事件投递顺序、是否会重复或遗漏 mailId。`Plugin/VCPClawMail/VCPClawMail.js:1795-1845, 2041-2152`
 

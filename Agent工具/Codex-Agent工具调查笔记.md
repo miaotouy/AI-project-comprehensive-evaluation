@@ -68,7 +68,7 @@ step 开始
 
 这些工具大多受 feature 或模型能力双重门控。例如 shell 组要求 `ShellTool` feature 且模型没有把 shell 类型设为禁用；统一执行器关闭时只注册一次性执行，不暴露可恢复进程与 `write_stdin`（`spec_plan.rs:1279-1305`）。
 
-宿主还可以限制线程的根能力：`request_user_input` 的异步变体与向用户发消息的工具在 `root_capabilities_restricted` 为真时不再注册，这一判断取代了原先按会话来源识别非根 Agent 的写法（`spec_plan.rs:1357-1394`）。
+宿主还可以限制线程的根能力：`request_user_input` 的异步变体与向用户发消息的工具在 `root_capabilities_restricted` 为真时不注册这些工具（`spec_plan.rs:1357-1394`）。
 
 ### 1.3 MCP 工具
 

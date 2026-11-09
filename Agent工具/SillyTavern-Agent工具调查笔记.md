@@ -101,7 +101,7 @@ depth += 1; if depth < RECURSE_LIMIT(默认5, 可配 1~50): 重新调用 Generat
 - `public/scripts/openai.js:2779-2781`：真正写入请求体的地方，条件是 `!canMultiSwipe && ToolManager.canPerformToolCalls(type, settings, model)`。**多重 swipe（`n>1`）时会跳过工具注册**。
 - 服务端各 provider 分支（Claude/Google/OpenAI 兼容等，`src/endpoints/backends/chat-completions.js`）只是把 `request.body.tools` 原样转发/改写格式，不做二次的“是否该注入”判断，即前端一旦放入 tools 字段，服务端默认信任并转发。
 
-stealth 语义：`isStealthTool(name)` 为 true 时，`invokeFunctionTools` 把该次调用名放入 `stealthCalls` 而不放入 `invocations`；`saveFunctionToolInvocations` 只处理非 stealth 的 `invocations`，因此 stealth 工具的调用**完全不写入 chat/不持久化/不触发后续生成**（`shouldStopGeneration` 判断里 `invocationResult.stealthCalls.length` 为真也会直接中止本轮递归）。
+stealth 语义：`isStealthTool(name)` 为 true 时，`invokeFunctionTools` 把该次调用名放入 `stealthCalls` 而不放入 `invocations`，因此 `saveFunctionToolInvocations` 不会落盘这次调用。结果是 stealth 工具的调用**完全不写入 chat/不持久化/不触发后续生成**；`shouldStopGeneration` 里 `invocationResult.stealthCalls.length` 为真也会直接中止本轮递归。
 
 依据：`../../SillyTavern/public/scripts/tool-calling.js:608-688`、`../../SillyTavern/public/scripts/tool-calling.js:619-625`（GPT-6 Astra 排除）、`../../SillyTavern/public/scripts/openai.js:1301-1307`、`../../SillyTavern/public/scripts/openai.js:2779-2781`
 
@@ -256,20 +256,39 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 
 **浏览器扩展的 manifest 与动态加载：**
 
-- `manifest.json` 通过 `fetch('/scripts/extensions/{name}/manifest.json')` 拉取（`extensions.js:543`），字段包括 `js`/`css`/`loading_order`/`requires`/`dependencies`/`minimum_client_version`/`generate_interceptor`/`hooks`。
+- `manifest.json` 通过 `fetch('/scripts/extensions/{name}/manifest.json')` 拉取（`extensions.js:543`），声明字段覆盖入口脚本与样式、加载顺序、依赖与最低客户端版本、生成拦截器与生命周期钩子；完整字段名如下。
+
+  ```text
+  js / css / loading_order / requires / dependencies
+  minimum_client_version / generate_interceptor / hooks
+  ```
 - 发现阶段会剔除没有 `manifest.json` 的扩展目录：服务端 discover 端点与客户端加载清单都过滤这类文件夹（常见于手动删除残留或 Windows 上的锁定目录），避免列表、状态查询与扩展加载里出现无法加载的幽灵扩展（`src/endpoints/extensions.js:486-528`、`extensions.js:1797-1806`）。
-- `activateExtensions()` 校验 `requires`（Extras 模块子集）、`dependencies`（其他扩展未禁用）、`minimum_client_version` 后，用 `import(url)`（`url = /scripts/extensions/{name}/{manifest.js}`）动态加载 JS 入口（`extensions.js:813-819`），加载后调用生命周期 hook `activate`（若 manifest 声明了 `hooks.activate`）。
+- `activateExtensions()` 校验 `requires`（Extras 模块子集）、`dependencies`（其他扩展未禁用）、`minimum_client_version` 后，用 `import(url)` 动态加载 JS 入口，加载后调用生命周期 hook `activate`（manifest 声明 `hooks.activate` 时才调用）。入口地址由清单名拼出：
+
+  ```text
+  url = /scripts/extensions/{name}/{manifest.js}   // extensions.js:813-819
+  ```
 - `generate_interceptor`：manifest 可声明一个全局函数名，`runGenerationInterceptors` 在每次生成前按 `loading_order` 排序依次调用 `globalThis[interceptorKey](chat, contextSize, abort, type)`，可修改 `chat`/中止生成（`extensions.js:2015-2038`）。这本身不是"Agent 工具"（模型不可见、不经过 tool_calls），但是另一条扩展可以无审批干预生成流程的通道，需与 Agent 工具区分开。
 
 **第三方 Git 安装流程：**
 
-- 客户端 `installExtension(url, global, branch)`（`extensions.js:1698-`）：校验 URL protocol 只能是 `http:`/`https:`；若不是 `isOfficialExtension(url)`（正则 `^https://github.com/SillyTavern/(.+)$`），弹出一次性可勾选"不再提醒"的信任警告 `Popup.show.confirm`，用户确认后才继续；确认状态用 `accountStorage`（浏览器本地存储）持久化，之后不再提示。
-- 服务端 `POST /api/extensions/install`（`src/endpoints/extensions.js:92-156`）：二次校验 URL protocol；用 `sanitize-filename` 库净化从 URL 提取的目录名（`extensionNameSanitized = sanitize(path.basename(parsedUrl.pathname, '.git'))`）防止路径穿越；用 `simple-git`（可切换 `git.backend`）`clone(url, extensionPath, {depth:1, branch})`；安装 `global` 扩展需要 `request.user.profile.admin`。
+- 客户端 `installExtension(url, global, branch)` 先校验 URL protocol 只能是 `http:`/`https:`；若不是 `isOfficialExtension(url)`（判定正则见下），弹出一次性可勾选"不再提醒"的信任警告 `Popup.show.confirm`，用户确认后才继续；确认状态用 `accountStorage`（浏览器本地存储）持久化，之后不再提示。
+
+  ```text
+  ^https://github.com/SillyTavern/(.+)$   // extensions.js:1698-
+  ```
+- 服务端 `POST /api/extensions/install`（`src/endpoints/extensions.js:92-156`）二次校验 URL protocol，用 `sanitize-filename` 净化从 URL 提取的目录名以防止路径穿越，再用 `simple-git`（可切换 `git.backend`）克隆仓库；安装 `global` 扩展需要 `request.user.profile.admin`。目录名与克隆调用的取值如下：
+
+  ```text
+  extensionNameSanitized = sanitize(path.basename(parsedUrl.pathname, '.git'))
+  clone(url, extensionPath, {depth:1, branch})
+  ```
 - `enableServerPluginsAutoUpdate`（默认 true）会在服务器启动时对 `plugins/` 下所有 git 仓库自动 `fetch`+`pull`，**不做任何"这是否是官方仓库"的判断**，纯粹按目录是否是 git repo 来决定是否自动更新；一旦装了不可信插件，其上游仓库后续推送的任意代码都会被自动拉取并在下次重启时被 `import()` 执行。
 
 **服务端 plugin 的 `import()` 加载：**
 
-- `loadPlugins(app, pluginsPath)` 默认 `enableServerPlugins: false`；打开后扫描 `plugins/` 目录，支持单文件（`.js/.cjs/.mjs`）或带 `package.json`/`index.js` 的目录形式；用 Node `import(fileUrl)` 动态加载后要求导出 `info{id,name,description}` 和 `init(router)` 函数，`id` 仅做正则 `^[a-z0-9_-]+$` 校验（防止路由路径注入），不做代码签名/来源校验。
+- `loadPlugins(app, pluginsPath)` 默认 `enableServerPlugins: false`；打开后扫描 `plugins/` 目录，支持单文件（`.js/.cjs/.mjs`）或带 `package.json`/`index.js` 的目录形式。
+- 插件模块用 Node `import(fileUrl)` 动态加载，要求导出 `info{id,name,description}` 与 `init(router)` 函数；`id` 仅做正则 `^[a-z0-9_-]+$` 校验（防止路由路径注入），不做代码签名/来源校验。
 - `console.log` 会在加载完成后明确打印警告："Make sure you know exactly what they do, and only install plugins from trusted sources!"——这是代码里唯一的"信任提示"，且只出现在服务端日志，不会展示给最终用户。
 
 **默认 `config.yaml` 中与暴露面相关的项：**
@@ -287,7 +306,7 @@ SillyTavern 的信任模型完全建立在"是否安装/启用某扩展"这一�
 
 这些配置共同决定的是"谁能访问这个 SillyTavern 实例、能不能通过网络打到内网"，而不是"已安装的扩展/插件能做什么"——一旦通过身份验证进入前端，Agent 工具执行链路上没有额外的按配置项收窄的权限点。
 
-依据：`../../SillyTavern/public/scripts/extensions.js:400-466`,`568-646`,`813-819`,`1698-1740`,`1797-1806`,`2015-2038`、`../../SillyTavern/src/endpoints/extensions.js:92-156`,`486-528`、`../../SillyTavern/src/plugin-loader.js:40-90`,`179-231`,`237-293`、`../../SillyTavern/default/config.yaml:6`,`59-70`,`154-182`,`392-394`
+依据：`../../SillyTavern/public/scripts/extensions.js:400-466,568-646,813-819,1698-1740,1797-1806,2015-2038`、`../../SillyTavern/src/endpoints/extensions.js:92-156,486-528`、`../../SillyTavern/src/plugin-loader.js:40-90,179-231,237-293`、`../../SillyTavern/default/config.yaml:6,59-70,154-182,392-394`
 
 ## 维度 11：STscript / slash command 与 Agent 工具的关系
 
@@ -334,7 +353,7 @@ Quick Reply 扩展（`public/scripts/extensions/quick-reply/`）监听角色消�
 
 进入下一轮 prompt 时，工具调用消息被核心聊天过滤逻辑重新包含；由于它仍是系统消息，宏和正则处理继续跳过，所以模型最终看到的工具结果是**原始文本**。
 
-依据：`../../SillyTavern/public/scripts/tool-calling.js:988-1163`、`../../SillyTavern/public/scripts/slash-commands.js:3066-3074`,`2578-2604`、`../../SillyTavern/public/scripts/extensions/quick-reply/src/AutoExecuteHandler.js:57-60`,`85-103`、`../../SillyTavern/public/scripts/world-info.js:902`、`../../SillyTavern/public/script.js:3066-3074`,`4252`,`1774-1777`
+依据：`../../SillyTavern/public/scripts/tool-calling.js:988-1163`、`../../SillyTavern/public/scripts/slash-commands.js:3066-3074,2578-2604`、`../../SillyTavern/public/scripts/extensions/quick-reply/src/AutoExecuteHandler.js:57-60,85-103`、`../../SillyTavern/public/scripts/world-info.js:902`、`../../SillyTavern/public/script.js:3066-3074,4252,1774-1777`
 
 ## 维度 12：子 Agent 与任务委派
 

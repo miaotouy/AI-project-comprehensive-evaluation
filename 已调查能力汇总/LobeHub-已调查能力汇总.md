@@ -107,7 +107,7 @@ LobeHub 是全栈聊天与 Agent 工作台 monorepo：Web（Next.js SPA）、Ele
 
 - **内建工具清单与风险面**：30+ 项内建工具逐项核对 humanIntervention 默认值：lobe-browser（点击/填表/导航零审批）、lobe-local-system（runCommand 为 required、文件类走 pathScopeAudit dynamic）、lobe-message（updateBot/uninstallMessenger 零审批）、lobe-creds（发起第三方 OAuth 零审批）等构成风险面；lobe-cloud-sandbox 写入类 required；lobe-goal 仅 /goal 前缀触发且 always 审批；lobe-image-generation 需 pinned。部分条目字段未逐条核实，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
-- **扩展机制与信任边界**：旧 simple/OpenAPI 自定义插件已迁移为 connector、不再是一等执行路径；MCP 三种 transport（http/stdio/cloud）与认证（none/bearer/oauth2）；桌面 stdio MCP 无沙箱隔离（等同本机子进程）；凭据 AES-GCM 加密且未发现跨 connector 复用 token 的路径；Market/Discover gateway 是分层防御最后一环；Composio 支持工作区成员代表 owner 账户调用。DiscoverService 内部与 OAuth scope 运行期收窄未验证，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
+- **扩展机制与信任边界**：扩展经 connector 接入；MCP 三种 transport（http/stdio/cloud）与认证（none/bearer/oauth2）；桌面 stdio MCP 无沙箱隔离（等同本机子进程）；凭据 AES-GCM 加密且未发现跨 connector 复用 token 的路径；Market/Discover gateway 是分层防御最后一环；Composio 支持工作区成员代表 owner 账户调用。DiscoverService 内部与 OAuth scope 运行期收窄未验证，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 
 - **子 Agent 与任务委派**：callSubAgent 是异步 deferred 模型（fork 独立 async operation，父操作转入 waiting_for_async_tool，完成回调回填，启动失败则直接返回失败）；嵌套阻断三层防御（manifest 层删工具/执行体自检/runtime 兜底）；isolated thread 隔离、inheritMessages 默认 false；runInClient 显式选择桌面本机/服务端执行；execSubAgents 并发上限 15、群组 broadcast 无并发上限；客户端 AbortController 级联与服务端轮询式取消存在结构性差异。inheritMessages 转发与 callSubAgent 默认超时待验证，见末尾小节。证据状态：静态源码确认。来源：[Agent 工具调查笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)
 

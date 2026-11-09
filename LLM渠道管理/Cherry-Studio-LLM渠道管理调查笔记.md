@@ -405,7 +405,7 @@ maxRetries: maxRetries ?? 0
 重试与切换过程只在消息流中实时可见，持久化前会被剥离：该过程以瞬时 `data-retry` part 呈现在消息里（见消息渲染器笔记）。因此：
 
 - "普通聊天默认不重试"（SDK 层）仍成立；
-- "没有跨 Provider、跨模型自动 failover"改为：**默认没有**，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；
+- 默认没有跨 Provider、跨模型的自动 failover，但用户可配置"同模型重试 + 能力兼容的 fallback 模型"（fallback 仍属模型级，不按 Key/渠道池调度）；
 - 重试与 fallback 不改变 Key 轮询、渠道权重、成本/延迟路由等缺失项。
 
 Claude Code Agent Runtime 会接收其 SDK 的 `api_retry` 事件并向 UI 报告 attempt、delay 和错误类别。这属于外部 Agent Runtime 自带的重试机制，作用范围限于该 Runtime 的调用链；普通聊天的重试由 `chat.retry.*` 配置决定。
@@ -431,7 +431,7 @@ API Gateway 仍是本机推理协议的入口，同时把局域网暴露收窄�
 原先的配对码 HTTP 路由（`routes/pairing.ts`）与 `ApiGatewayPairing` 已不存在，Provider 导出现在是远程访问协议里的一个能力方法，而不是 LAN 上的独立端点。
 ## 11. 当前渠道与模型适配补充
 
-Provider Registry 从应用内模块抽成 `packages/provider-registry` 包，预设与能力目录随包发布。渠道侧新增 QwenCloud（原 DashScope 方向改为 Qwen AI Platform 品牌）、LongCat 2.5、GPT-6.1 Terra、Kimi K3.1 Pro 等预设与模型条目，并给 DeepSeek V4 Flash 加了可关闭开关；已退役的 GitHub Models 集成被移除。Pi 与 Pi-Durable 的模型选择不直接复用普通聊天的任意 endpoint，而是经过 Pi 兼容性与默认 Chat endpoint 解析，且每次原生调用都落到内部 gateway；LM Studio 预设补齐了该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口从 `/api/show` 读取。
+Provider Registry 从应用内模块抽成 `packages/provider-registry` 包，预设与能力目录随包发布。渠道侧的 provider 预设包含 QwenCloud（Qwen AI Platform 品牌）、LongCat 2.5、GPT-6.1 Terra、Kimi K3.1 Pro 等条目，DeepSeek V4 Flash 带可关闭开关。Pi 与 Pi-Durable 的模型选择不直接复用普通聊天的任意 endpoint，而是经过 Pi 兼容性与默认 Chat endpoint 解析，且每次原生调用都落到内部 gateway；LM Studio 预设补齐了该默认 endpoint。模型设置还可选择 token 上限预设，Ollama 的上下文窗口从 `/api/show` 读取。
 
 计费元数据也有独立类型：Provider 与模型可以声明按倍率或按价格两种计费模式，倍率支持按时间段切换（例如夜间折扣），未声明时用默认倍率。重排序能力进入目录：Jina 系列按端点家族区分 `jina-rerank` 适配器，OpenRouter 的 rerank 模型可被发现并通过其 Provider 走重排调用。
 

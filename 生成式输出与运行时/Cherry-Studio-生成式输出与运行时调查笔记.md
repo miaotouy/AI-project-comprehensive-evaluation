@@ -56,7 +56,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
   - 消息正文就是 AI SDK 的消息 parts（`src/shared/data/types/message.ts:136`），自定义 part 类型只有错误、翻译、视频、紧凑与 agent 任务事件等少数几种（`src/shared/data/types/uiParts.ts:139-151`），**没有 artifact part 类型**——HTML artifact 以 text part 承载。
   - `artifactId` 为 `${blockId}:${codeBlockId}`，`codeBlockId` 由 Markdown 节点行列偏移派生（`src/renderer/utils/markdown.ts:162`），是每次渲染重算的派生身份，仅用于列表项重挂载时保住已打开的弹窗会话（`src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 注释），无持久对象 ID。
   - Agent 侧 `report_artifacts` 是 zod 校验的结构化工具输入（`src/shared/ai/builtinTools.ts:489-552`，`REPORT_ARTIFACTS_TOOL_NAME`），以 tool part 持久化，是最接近"输出声明"的协议；声明只含 path/description/summary 三项，不含对象 ID 或版本。
-  - 另注：所有内建工具去掉了 `strict: true`，`report_artifacts` schema 相应改为非 strict 形态。
+  - 另注：内建工具不使用 `strict: true`，`report_artifacts` 的 schema 为非 strict 形态。
 - **事实源**：chat 消息行（SQLite `data` JSON）是消息文本的事实源；agent 文件的事实源是磁盘，消息只存声明与执行记录。
 
 ## 2. 增量生成、更新与最终化
@@ -96,7 +96,7 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 ## 5. 用户交互、事件与错误反馈
 
 - 交互面：预览缩放（50%-200%）、预览/源码切换、分屏、全屏、PNG 截图（文件/剪贴板，需 `allow-same-origin` 读 contentDocument，`HtmlArtifactsPopup.tsx:148-176`）、下载、外部打开、同意交互预览。
-- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本的 console 消息通道上报高度与滚轮（`HtmlArtifactView.tsx:196-206,542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；该上下文从消息块目录迁入消息列表目录，并同时隔离嵌套滚动区）。
+- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本的 console 消息通道上报高度与滚轮（`HtmlArtifactView.tsx:196-206,542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；该上下文位于消息列表目录，并同时隔离嵌套滚动区）。
 - 错误反馈：渲染错误经日志与 toast；文件预览有加载中、过大、读取失败、空四种分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）；agent 文件编辑显式关闭时若保存失败可直接丢弃草稿，不再被失败保存阻塞。
 - 交互状态恢复：弹窗会话可在列表项重挂载间存活（artifactId 派生身份），但**未发现**跨会话/跨重载的 artifact 视图状态持久化（缩放、弹窗开合均为运行时状态）。
 

@@ -66,7 +66,7 @@ Agent 面向的工具名是 `automations`。它提供 scheduler status/list/get/
 | --- | --- | --- |
 | `cron_jobs` | job owner、schedule、session target、payload、delivery 及最近运行字段 | 定义和最近状态的权威行 |
 | `cron_run_receipts` | receipt、job、config revision、owner pid/start time、running/terminal status | 一次运行的 durable fence 和执行事实 |
-| `task_runs` | cron 运行的状态、错误、终态摘要与运行详情 | 由 cron history owner 读写的日程历史；与已移除的通用 tasks RPC 分开，媒体和 exec 不据此建立通用任务行 |
+| `task_runs` | cron 运行的状态、错误、终态摘要与运行详情 | 由 cron history owner 读写的日程历史；媒体和 exec 不据此建立通用任务行 |
 | `cron_job_runtime_authorities` / `cron_job_scratch` | 工具运行权威与脚本/trigger scratch | 与 job 配置分离的运行时状态 |
 
 cron history 仍借用 task_runs 表名，但写入明确限定 runtime=cron，历史记录不授权执行或 receipt 接管，见 [recordCronRunInDatabase](<../../openclaw/src/cron/store/run-history.kernel.ts#L180-L233>)。表结构和 active receipt 的唯一 job 约束见 `src/state/openclaw-state-schema.sql`。receipt store 将生命周期分为 queued reservation、active running、settling 和 terminal；非终态 receipt 必须由当前 owner 持有，或能被其他 Gateway 进程判断为 stale 后恢复，见 `src/cron/store/run-receipt-store.ts`。

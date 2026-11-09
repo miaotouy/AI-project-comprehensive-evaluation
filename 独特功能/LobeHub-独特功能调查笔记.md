@@ -108,8 +108,9 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 
 记忆带 `sourceIds`（支撑消息 id）、tags、accessedCount。
 
-**完整主链**（按职能拆三段）：
-- **提取链**：话题完成或定时触发 `processTopic` workflow（`apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts`）→ `MemoryExtractionExecutor.extractTopic`（`apps/server/src/services/memory/userMemory/extract/extractTopic.ts`，由 `@lobechat/memory-user-memory` 包执行 CEPA 层与 Identity 层两阶段提取，层可选）→ LLM 提取 + 向量嵌入 → 写入五层表；同目录另有 `consolidation.ts`（记忆合并，可回退）与 `personaUpdate.ts`（画像更新）两条独立管线；
+**完整主链**（按职能分段）：
+- **提取链**：话题完成或定时触发 `processTopic` workflow（`apps/server/src/router-hono/workflows/memory-user-memory/workflows/processTopic.ts`）；工作流调用 `MemoryExtractionExecutor.extractTopic`（`apps/server/src/services/memory/userMemory/extract/extractTopic.ts`），由 `@lobechat/memory-user-memory` 包执行 CEPA 层与 Identity 层两阶段提取，层可按需选择，结果经 LLM 提取与向量嵌入写入五层表；
+- **旁支管线**：同目录另有 `consolidation.ts`（记忆合并，可回退）与 `personaUpdate.ts`（画像更新）两条独立管线；
 - **消费链**：`lobe-user-memory` 工具（`packages/builtin-tool-memory/src/manifest.ts:91`）提供 9 个 API——语义检索（多查询 + 层/标签/关系/时间意图过滤）、分类查询，以及各层新增、身份更新的合并策略写入与必须给理由的删除；工具注入受 `globalMemoryEnabled` 门控；
 - **用户面**：`/memory` 六条路由（identities/contexts/preferences/experiences/activities + home，home 含 Persona 与 RoleTagCloud），逐层列表/网格/时间线视图与编辑，记忆卡片在对话中以特殊渲染投影（`packages/builtin-tool-memory/src/client/`）。
 
@@ -125,11 +126,13 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 
 **Brief 主链**：任务运行完成 → `TaskLifecycleService.onTopicComplete`（`apps/server/src/services/taskLifecycle/index.ts:108`）→ 默认 auto 模式经 `synthesizeTopicBrief`（`index.ts:697`）程序化合成 `briefs` 行（`packages/database/src/schemas/task.ts:281`）；legacy agent 模式为逃生舱。briefs 行字段契约：
 - 类型：decision/result/insight/error；优先级：urgent/normal/info；
-- artifacts 程序化收集，带动作与已读/已处理状态。
+- `artifacts` 由程序收集，带动作与已读/已处理状态。
 
 用户界面 `HomeInbox` 分"Needs you"（阻塞 Agent 的 decision/fix，error 沉底）与"News"（insight/result 报告）两栏，brief 按用户且按工作区隔离；`DailyBrief` 卡片带任务引用与跳转；"未解决 urgent brief"反过来挂起后续自动化 tick（见能力一）；brief 可 resolve/标记已读。
 
-**Work 主链**：`works` + `work_versions` 表（`packages/database/src/schemas/work.ts:26,144`）——每个版本绑定工具调用、消息、Agent、话题、线程与根操作（来源谱系），`currentVersionId` 指向最新版本；类型覆盖 document/task/external（github/linear 品牌图标与 URL 白名单，`src/features/Work/descriptors.tsx:34-73`）/filePreview；列表/摘要卡与 WorkGallery。WorkGallery 为独立 feature（`src/features/WorkGallery/`），入口经 `/resource/works` 路径段与过滤参数，点击在 Portal 中预览。Work 是"Agent 交付物"的统一事实对象，与工具注册的 `work?: PluginApiWorkConfig`（Agent 工具笔记 §1.3）衔接。
+**Work 主链**：`works` 与 `work_versions` 两张表承载"Agent 交付物"这一统一事实对象（`packages/database/src/schemas/work.ts:26,144`）。每个版本记录来源谱系——绑定的工具调用、消息、Agent、话题、线程与根操作——最新版本由 `currentVersionId` 指向。类型覆盖 document、task、external 与 filePreview，其中 external 带 github/linear 品牌图标与 URL 白名单（`src/features/Work/descriptors.tsx:34-73`）。
+
+列表与摘要卡由独立 feature WorkGallery 提供（`src/features/WorkGallery/`），入口走 `/resource/works` 路径段与过滤参数，点击后在 Portal 中预览。Work 与工具注册里的 `work?: PluginApiWorkConfig` 衔接（Agent 工具笔记 §1.3）。
 
 **统计入口**：`agent/statistics`（`AgentUsage`：7d/30d/90d 用量与成本、模型拆分、趋势图，`src/features/AgentUsage/hooks.ts:21`）+ `agent/permission`（工作区 Agent 的访问级 edit/use/view、模型策略 member/fixed、执行目标策略，`src/features/AgentPermission/PermissionForm.tsx`）。统计主链（数据聚合源）本次未深入。
 
@@ -139,23 +142,36 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 
 **用户目标**：不打开几十个表单字段，用自然语言描述需求让一个专门 Agent 帮你把目标 Agent 配好（README “describe what you need once”）。
 
-**主链**：右侧面板 `AgentBuilder`（`src/features/AgentBuilder/index.tsx:14`）初始化内置角色 `AGENT_BUILDER`（`packages/builtin-agents/src/agents/agent-builder/index.ts:43`，slug `agent-builder`，持久化落库）→ 对话中挂载 `lobe-agent-builder` 工具，并剥离同族 Agent/群组管理工具（避免"改到 builder 自己"；四组工具名见文末索引）→ 工具 API（`packages/builtin-tool-agent-builder/src/manifest.ts:6`）分读写两侧：读侧取可用模型与市场工具；写侧装插件（注释明确"ALWAYS REQUIRES user approval even in auto-run mode"）、改 Agent 配置与提示词 → 配置变更经 `AgentBuilderProvider` 实时作用于左侧目标 Agent。另有群组版本 `group-agent-builder`。
+**主链**：右侧面板 `AgentBuilder`（`src/features/AgentBuilder/index.tsx:14`）先初始化一个内置角色 `AGENT_BUILDER`，slug 同名 `agent-builder`，落库持久化，定义见 `packages/builtin-agents/src/agents/agent-builder/index.ts:43`。
+
+随后对话中挂载 `lobe-agent-builder` 工具，并剥离同族的一组 Agent 与群组管理工具，避免 builder 改到自己（四组工具名见文末索引）。配置变更经 `AgentBuilderProvider` 实时作用于左侧目标 Agent，另有群组版本 `group-agent-builder`。
+
+工具的读写能力分开：读侧取可用模型与市场工具，写侧装插件、改 Agent 配置与提示词（`packages/builtin-tool-agent-builder/src/manifest.ts:6`）。装插件在注释里标注为"ALWAYS REQUIRES user approval even in auto-run mode"，自动运行模式下同样要人确认。
 
 **独特性判断**：把“配置 Agent”本身做成一个 Agent 任务，且通过工具审批门把危险写操作（装插件）锁死在人审；与通用表单式配置（Cherry Studio 等）形成产品差异。运行时执行面（工具审批、配置对象）回链 Agent 工具/角色笔记。
 
 ### 能力五：Goals——带验收计划与有界自动修复的目标闭环（`主链确认`，静态证据）
 
 **用户目标**：用户用 `/goal` 声明一个目标，Agent 把它拆成带验收标准、预算上限和轮次上限的任务循环，跑完后提交验收；普通 Chat 的"一次性回复"没有"目标 → 验收 → 有界修复"的闭环。该能力覆盖以下环节：
-- /goal loop；
+- `/goal` loop；
 - 与任务创建拆分；
 - 统一创建流程；
 - goal 视图与验收进度。
 
 **入口与触发者**：Composer 的 `/goal` 命令——`goalTag.ts` 把目标标记存为结构化 chip；发送时 `conversationLifecycle.ts:323-328` 检测 goal 提示并注入 `lobe-goal` 工具。
 
-**事实对象**：Goal 已是独立实体：`goals` 表保存标题、完成要求、预算、生命周期以及可选的 `subjectType`/`subjectId` 执行载体；当前 `/goal` 仍可用 task 作为载体，但 schema 不再把 Goal 绑定为 task 配置。随后加入的 goal graph 用 nodes、edges、决策、Work 版本证据和追加式事件表保留目标拆解与跨运行的人工决策，节点可关联负责执行的 task（`packages/database/src/schemas/goal.ts`、`goalGraph.ts`，另有 `goalShare.ts`、`goalSubscription.ts`、`goalTrace.ts` 承载分享、订阅与追加式轨迹）。轮次、成本与验收等执行性状态仍由载体及现有运行时表承担。
+**事实对象**：Goal 已是独立实体。`goals` 表保存标题、完成要求、预算、生命周期以及可选的 `subjectType`/`subjectId` 执行载体；当前 `/goal` 仍可用 task 作为载体，schema 里 Goal 与 task 配置已经分离。随后加入的 goal graph 用 nodes、edges、决策、Work 版本证据和追加式事件表保留目标拆解与跨运行的人工决策，节点可关联负责执行的 task。轮次、成本与验收等执行性状态仍由载体及现有运行时表承担。
 
-**完整主链**：`/goal` chip → `lobe-goal.createGoal`（`packages/builtin-tool-goal/src/manifest.ts`，`humanIntervention: 'always'`，创建必须人工确认）→ 创建任务话题并启动 goal 循环 → 有界自动修复/验收（`apps/server/src/services/goal/` 的 `advanceGoal`、`decideNextMove`、`deliverySettle`、`criteriaGenerator`、`exploreGraph` 等模块，加 `services/verify/` 下的验收证据链：`evidencePlanner`/`evidenceIntake`/`evidenceCoverage`、`goalReview`、`acceptanceDecision`/`acceptanceMerge`）→ 消息内实时结果卡 → goal 视图（`agent/goals`、`agent/goal/[goalId]` 路由：创建/详情/验收/HowItWorks）→ 完成/拒绝由用户验收。
+相关 schema 在 `packages/database/src/schemas/goal.ts` 与 `goalGraph.ts`；`goalShare.ts`、`goalSubscription.ts`、`goalTrace.ts` 分别承载分享、订阅与追加式轨迹。
+
+**完整主链**：
+
+1. `/goal` chip 经 `lobe-goal.createGoal` 建目标（`packages/builtin-tool-goal/src/manifest.ts`）；该工具声明 `humanIntervention: 'always'`，创建必须人工确认。
+2. 创建任务话题并启动 goal 循环。
+3. 有界自动修复与验收：推进逻辑在 `apps/server/src/services/goal/`，含 `advanceGoal`、`decideNextMove`、`deliverySettle`、`criteriaGenerator`、`exploreGraph` 等模块。
+4. 验收证据链在 `services/verify/`，由 `evidencePlanner`、`evidenceIntake`、`evidenceCoverage`、`goalReview`、`acceptanceDecision`、`acceptanceMerge` 组成。
+5. 结果先进消息内实时结果卡，再进 goal 视图（`agent/goals`、`agent/goal/[goalId]` 路由，含创建、详情、验收与 HowItWorks 页）。
+6. 完成或拒绝由用户验收。
 
 **持续性与资源边界**：目标定义、图和事件在 PostgreSQL 持久化；task 与验收表继续承载执行细节。轮次与花费双上限防止失控循环；目标与载体的状态桥接、真实 UI 状态和恢复表现仍未运行验证。
 
@@ -168,7 +184,7 @@ README 四个宣传点中，**Schedule 与 Personal Memory 已形成可走通的
 - **Agent 市场 / Community（hires 面）**：`community/` 路由族（agent/group_agent/model/provider/skill/mcp/user/org 详情与列表）、市场导入链在 Agent 角色笔记 §7 有记录；本次只做运营盘点的组成部分，不单独成卡。
 - **插件、知识库、搜索、设备工具**：全部回链 [Agent 工具笔记](../Agent工具/LobeHub-Agent工具调查笔记.md)，不再重复。
 
-异构 Agent、Agent Share、Connector、Messenger 与浏览器控制表面的横向样本见[外部执行体与应用协作横向对比](../外部执行体与应用协作/外部执行体与应用协作横向对比.md)。Agent Share 的访客 topic 以 senderId 隔离，运行时强制 headless，并通过装配期与执行期双门禁限制数据和工具；治理字段见 `packages/database/src/schemas/agentShare.ts:7-59`，执行门禁分布在 `apps/server/src/routers/lambda/shareChat/`（执行、守卫、运行控制）与 `apps/server/src/services/agentRuntime/AgentRuntimeService/shareRunGate.ts`。
+异构 Agent、Agent Share、Connector、Messenger 与浏览器控制表面的横向样本见[外部执行体与应用协作横向对比](../外部执行体与应用协作/外部执行体与应用协作横向对比.md)。Agent Share 的访客 topic 以 `senderId` 隔离，运行时强制 headless，数据与工具由装配期和执行期两道门禁限制；治理字段见 `packages/database/src/schemas/agentShare.ts:7-59`，执行门禁分布在 `apps/server/src/routers/lambda/shareChat/`（执行、守卫、运行控制）与 `apps/server/src/services/agentRuntime/AgentRuntimeService/shareRunGate.ts`。
 
 ## 声明不符、外部依赖与暂缓项
 
