@@ -18,7 +18,7 @@ AstrBot 的消息渲染是"**统一组件链 + 平台自治转换**"架构：LLM
 
 关键事实：
 
-- **组件体系**：组件枚举 24 种，基类提供同步/异步双轨序列化（`toDict` 与 `to_dict`），并覆写 repr 把 base64 与超长字段截断，日志与异常输出自动安全（components.py:94-131）。
+- **组件体系**：枚举定义 24 种消息组件；基类同时提供同步与异步两条序列化通道，并在 repr 里把 base64 内容与超长字段截断，日志和异常输出因此保持简短（components.py:94-131）。
 - **可移植按钮**：消息链提供按钮、按钮行与入站交互组件；平台按能力转换。回调登记保存动作、JSON 数据与到期时间，令牌是这三者序列化结果的摘要；点击回到流水线后只派发给声明了按钮动作过滤器的插件。登记内容没有用户或会话绑定，令牌解析与过期检查只确认登记有效性，插件动作的用户权限仍由处理器过滤器和业务检查承担（`astrbot/core/platform/button_interaction.py:47-140`；`pipeline/waking_check/stage.py:81-91,184-211`）。
 - **业务语义元协议**：`MessageChain.type` 字段（message_event_result.py:33-34）承载 `tool_call`/`reasoning`/`audio_chunk` 等业务语义，仅 WebChat 出站序列化与前端消费，其他平台忽略。
 - **装饰阶段做链重写**（result_decorate/stage.py:126-447）：集中完成思考内容注入、TTS 文本转音频、文本转图、超长转发和 @/Reply 前缀五类重写，细节见 §4.1 表格。
@@ -58,11 +58,11 @@ LLM 结果 / 插件 CommandResult
   / At / Node / Nodes / Poke / Reply / Forward / RPS / Dice / Shake / Share / Contact
   / Location / Music / Json / Unknown
   ```
-- `BaseMessageComponent(BaseModel)`（:94-131）：
-  - `type: ComponentType` 必填（:95）；
-  - `__repr_args__`（:100-117）：覆盖 pydantic repr，`base64://` 前缀显示为 `base64://<N chars>`，>64 字符截断——日志与异常输出自动安全；
-  - `toDict()`（:119-127）：跳过 type 与 None 值，输出 `{"type": type.lower(), "data": {...}}`；
-  - `to_dict()`（:129-131）：默认回退同步版本，**需下载/注册的组件重写**。
+- `BaseMessageComponent` 继承 pydantic 模型基类，统一了组件的类型字段、repr 与序列化三条行为（components.py:94-131）：
+  - 每个组件必须声明自己的组件类型；
+  - repr 被重写：base64 URI 只显示成 `base64://<N chars>` 的样子，超过 64 字符的字段直接截断，日志与异常输出不会带出整段数据；
+  - 同步序列化接口 `toDict()` 跳过类型字段与空值，输出类型名小写、负载放在 data 键下的字典；
+  - 异步序列化接口 `to_dict()` 默认回退到同步版本，只有需要下载或注册资源的组件才重写它。
 
 ### 1.2 关键组件
 
@@ -95,29 +95,29 @@ use_markdown_: bool | None = None   # None 跟随平台默认（:30-32）
 type: str | None = None             # 业务语义元协议（:33-34）
 ```
 
-- `derive(chain)`（:36-47）：继承 `use_t2i_/use_markdown_/type` 的派生链（RespondStage 分段发送用）；
+- `derive(chain)` 以当前链为模板派生新链，只沿用文本转图开关、Markdown 开关与业务类型这三个可选字段，供分段发送阶段按段复制（:36-47）；
 - 构建方法（:49-147）：文本消息、@某人、@全体、三种图片来源（url/文件/base64）与 t2i、markdown 模式的快捷构造，均继承基础字段；
 - `get_plain_text(with_other_comps_mark)`（:149-168）：默认空格拼接所有 Plain；带标记时非 Plain 输出 `[类名]`、Json 输出 `data`；
 - `squash_plain()`（:170-192）：所有 Plain 聚合到第一个 Plain（aiocqhttp 非流式缓冲合并用）。
 
 ### 2.2 结果类型
 
-- `EventResultType`（:195-205）：CONTINUE/STOP；
+- `EventResultType` 只有继续与停止两种取值（:195-205）；
 - `ResultContentType`（:208-220）：`LLM_RESULT / AGENT_RUNNER_ERROR / GENERAL_RESULT / STREAMING_RESULT / STREAMING_FINISH`；
-- `MessageEventResult(MessageChain)`（:223-284）：`result_type`（默认 CONTINUE）、`result_content_type`（默认 GENERAL）、`async_stream`；`is_llm_result()`/`is_model_result()`（:275-284）；
-- `CommandResult = MessageEventResult` 兼容别名（:287-288）。
+- `MessageEventResult` 在消息链之外补充三个字段：默认为继续的结果类型、默认为通用结果的内容类型，以及流式响应对象；结果是否来自 LLM 或模型由两个判定方法给出（:223-284）；
+- 命令结果与消息结果共用同一个类，`CommandResult` 只是兼容别名（:287-288）。
 
 ## 3. 事件发送入口（astr_message_event.py）
 
-- `process_buffer`（:359-370）：不支持流式的平台 fallback——按正则切句 `send` + `asyncio.sleep(1.5)` 限速；
-- `send_streaming`（:372-404）：基类仅 `asyncio.create_task(Metric.upload(...))` 上传指标 + 标记 `_has_send_oper`——**实现全部在平台子类**（docstring：仅 telegram、qq official 私聊支持，fallback 仅 aiocqhttp）；`streaming_response_event` 上下文变量用于区分“生成中的流式发送”与工具/插件的独立发送；
-- `send_typing`/`stop_typing`（:386-404）：默认空实现，平台按需重写；
-- `set_result`（:406-433）：str 自动包 `MessageEventResult().message()`；chain=None 兜底 `[]`；
-- `stop_event`/`continue_event`/`is_stopped`（:435-457）：`_force_stopped` 与结果类型双源；
-- `should_call_llm`（:459-464）：只阻止默认 LLM 链路，不阻止插件内请求；
-- `_outline_chain`（:213-247）：日志概要（Image→`[图片]`、Face→`[表情:id]` 等占位）；
-- `get_button_interaction`/`is_button_interaction`（:250-270）：读取事件携带的按钮点击组件；
-- `request_llm`（:512-569）：返回 ProviderRequest。
+- 平台不支持流式时走 `process_buffer` 兜底：按正则把文本切成句子逐句发送，句间休眠 1.5 秒限速（:359-370）；
+- `send_streaming` 在基类只做两件事：异步上传发送指标，并标记本条事件已经发生过发送；真正的流式实现都在平台子类，类注释说明仅 Telegram 与 QQ 官方私聊原生支持，aiocqhttp 走兜底（:372-404）。上下文变量 `streaming_response_event` 用来区分生成中的流式发送与工具、插件的独立发送；
+- `send_typing` 与 `stop_typing` 默认是空实现，由平台按需重写（:386-404）；
+- `set_result` 收到字符串时自动包成一条普通文本结果，收到空链时用空列表兜底（:406-433）；
+- `stop_event` 与 `continue_event` 负责中断或恢复事件，`is_stopped` 供外部查询状态，判断依据都是强制停止标记与结果类型（:435-457）；
+- `should_call_llm` 的作用范围限于默认 LLM 链路，插件内部自行发起的请求照常执行（:459-464）；
+- `_outline_chain` 把消息链压成一行日志概要，图片、表情等组件替换为 `[图片]`、`[表情:id]` 这类占位符（:213-247）；
+- `get_button_interaction` 与 `is_button_interaction` 读取事件里携带的按钮点击组件（:250-270）；
+- `request_llm` 返回平台发起模型请求使用的 ProviderRequest（:512-569）。
 
 ## 4. 流水线：装饰与发送
 
@@ -147,31 +147,31 @@ TTS trigger_probability（夹在 [0,1]）
 
 `process` 流程：
 
-1. 无结果 / `_streaming_finished` 防重（:200-203）/ `STREAMING_FINISH` 置标记返回（:204-206）；
-2. **防重**（:213-235）：`send_message_to_user` 已发过的纯文本（会话内记录 `_send_message_to_user_current_session_plain_texts`）+ 链仅 Plain/Reply/At → 跳过；
-3. **流式直通**（:241-309）：`STREAMING_RESULT` → 包装 `traced_stream` 后调用 `event.send_streaming(async_stream, realtime_segmenting)`；包装层累计最多 4 KiB 回复概要写入 trace，并屏蔽生成期间工具/插件的独立发送；
-4. **路径映射**（:311-318）：`path_mapping` 平台设置对 File 段生效（`path_Mapping`）；
-5. 空链校验（:319-325）+ 空 Plain 移除（:327-336）；
-6. **分段回复**：启用条件为开关开启、结果类型符合（非 only_llm_result 或模型结果）且平台不在 QQ 官方/微信公众号/钉钉排除表（`is_seg_reply_required` :155-192）。启用后 Reply/At 先提取为“头”（:341-355），其余组件逐条按随机间隔发送（:356-366），Record 强制单独发；间隔计算（:123-152）采用对数或均匀随机两种策略：对数模式按字数对数插值（`interval_method=="log"` 时 Plain 按 `log(wc+1, log_base)` 随机插值），否则在默认区间 [1.5, 3.5] 秒内均匀随机（:103-110）；
-7. **非分段**：链仅 Reply/At 时跳过（:368-379）；Record 先逐条单独发（:385-395），剩余链一次发（:396-404）；
-8. `OnAfterMessageSentEvent` hook（:406-407）→ `clear_result`（:409）。
+1. 结果为空，或本次流式已经结束过，直接返回；收到流式结束标记时先置位再返回（:200-206）；
+2. **防重**：会话内已经由 `send_message_to_user` 发过的纯文本不再重复发送，当结果链只剩普通文本、引用与 @ 时整条跳过（:213-235）；
+3. **流式直通**：结果类型为流式结果时，先用一层包装包住异步流再交给平台的流式接口；包装层累计最多 4 KiB 的回复概要写入 trace，并在生成期间屏蔽工具与插件的独立发送（:241-309）；
+4. **路径映射**：平台配置了路径映射时，映射规则会作用到文件组件上，把它改写成平台可访问的路径（:311-318）；
+5. 链为空直接结束，随后移除内容为空的普通文本组件（:319-336）；
+6. **分段回复**：开关开启、结果类型通过判定（`only_llm_result` 未开启，或结果来自模型），且平台不在 QQ 官方、微信公众号、钉钉的排除表内时启用（`is_seg_reply_required`，:155-192）。启用后引用与 @ 先被提取为固定的“头”，其余组件按随机间隔逐条发送，语音组件强制单独一条；间隔计算提供两种策略，对数模式按普通文本字数做对数插值，否则在默认的 [1.5, 3.5] 秒区间内均匀随机（:103-152）；
+7. **非分段**：链里只剩引用与 @ 时跳过；否则先逐条单独发语音，再把剩余链一次发出（:368-404）；
+8. 发送结束后触发 `OnAfterMessageSentEvent` 钩子，并清空本次结果（:406-409）。
 
 ## 5. 平台出站适配
 
 ### 5.1 aiocqhttp / OneBot V11（aiocqhttp_message_event.py:25-354）
 
-- `_from_segment_to_dict`（:38-70）：Image/Record → `base64://`；File → `to_dict()` + 绝对路径无协议头转 `file:` URI；Video → `to_dict()`；其余 `toDict()`；
-- `_parse_onebot_json`（:73-114）：At 后**强制插入空格 Plain**防粘连、空 Plain 跳过；按钮行没有 OneBot 段，降级为文本：`fallback_text`、URL 按钮输出“label: url”，回调按钮输出 `[Button unavailable] label`（:87-110）；
-- `_dispatch_send`（:117-152）：按数字 session_id 路由群聊/私聊/事件兜底；
-- `send_message`（:153-209）：链含合并转发节点或 File 时逐条发送，转发节点统一包成 Nodes 走群聊/私聊合并转发接口，普通消息逐条间隔 0.5s；
-- `send_streaming`（:226-262）：非 fallback **先缓冲全部链 + `squash_plain()` 合并一次发**；fallback 按 `[^。？！~…]+[。？！~…]+` 正则切句逐段发（`process_buffer` 限速 1.5s）。
+- 组件转 OneBot 段由 `_from_segment_to_dict` 统一处理：图片与语音转成 base64 URI，文件走异步序列化并把没有协议头的绝对路径补成 `file:` URI，视频同样走异步序列化，其余组件用同步版本（:38-70）；
+- 消息链转 OneBot JSON 数组时，@ 之后强制补一个空格文本以防昵称与正文粘连，空文本直接跳过。按钮行在 OneBot 协议里没有对应段，只能降级成文本：优先用按钮行自带的兜底文案，URL 按钮显示“label: url”，回调按钮显示 `[Button unavailable] label`（:73-114）；
+- `_dispatch_send` 按会话 ID 是否为数字把发送路由到群聊、私聊，无法判定时走事件兜底接口（:117-152）；
+- `send_message` 遇到合并转发节点或文件时改为逐条发送：转发节点统一包成 `Nodes` 走合并转发接口，普通消息之间固定间隔 0.5 秒（:153-209）；
+- `send_streaming` 在原生支持流式的路径上先把整条流缓冲下来，合并普通文本后一次发出；兜底路径则按标点正则切句逐段发送，并复用 `process_buffer` 的 1.5 秒限速（:226-262）。
 
 ### 5.2 Telegram（tg_event.py）
 
-- `MAX_MESSAGE_LENGTH = 4096`、`SPLIT_PATTERNS` 按 `\n\n`→句子→单词逐级切块（:48-116）；
-- `_send_text_chunks`（:117-195）：`telegramify_markdown.markdownify` 转 MarkdownV2，失败降级纯文本；
-- 按钮行转 `InlineKeyboardButton`：URL 动作直接带 url，回调动作注册令牌并带 callback_data（:147-194、:335）；发送时 action row 与文本一起提交（`send` :426、`send_streaming` :672）；
-- Chat action 映射（Record→UPLOAD_VOICE、Video→UPLOAD_VIDEO 等）；论坛 topic 的 `message_thread_id` 贯穿发送、媒体与 typing（:196-311）。
+- 单条消息上限为 4096 字符，超长文本按空行、句子、单词的顺序逐级切块，直到符合限制（tg_event.py:48-116）；
+- 切好的文本块交给 `_send_text_chunks`，先用 telegramify_markdown 转成 MarkdownV2，转换失败时按纯文本发出（:117-195）；
+- 按钮行转成 `InlineKeyboardButton`：URL 动作直接带链接，回调动作注册令牌后把令牌写进 `callback_data`，发送时按钮行与文本一并提交（:147-194、335、426、672）；
+- 其余组件按类型映射到对应的 chat action（语音对应上传语音、视频对应上传视频等）；论坛话题的线程 ID 贯穿发送、媒体与 typing 提示（:196-311）。
 
 ### 5.3 其他平台
 
@@ -190,9 +190,9 @@ TTS trigger_probability（夹在 [0,1]）
 
 ## 6. 平台入站适配
 
-- **aiocqhttp**（aiocqhttp_platform_adapter.py:198-413）：要求 OneBot array 格式，按段类型 groupby 路由（:243）；text/file/reply 递归解析（reply 调 `get_msg` 拉引用链，:311）、at 调 `get_group_member_info` 补昵称（:356）、markdown 降级 Plain（:400-404）、未知段记 warning；
-- **Telegram**（tg_adapter.py:543-900）：动图/视频贴纸（.tgs/.webm 非位图）改用静态缩略图转 `Image`（:828-866）；`video_note`（无文件名、不能带 caption）转 `Video` 组件（:867-899）；`callback_query_handler`（:462-541）把按钮点击还原为 `ButtonInteraction` 并解析令牌。
-- 入站统一消费 `ComponentTypes` 注册表（:251）。
+- **aiocqhttp**：入站要求 OneBot array 格式，按段类型分组后分派处理。文本、文件与引用段递归解析，其中引用段会再调 `get_msg` 拉取被引用消息链；@ 段补查群成员信息拿到昵称；markdown 段降级为普通文本；未知段记一条 warning（aiocqhttp_platform_adapter.py:198-413）。
+- **Telegram**：动画贴纸与视频贴纸这类非位图资源改用静态缩略图转成图片组件；圆形视频消息既没有文件名也不能带说明文字，直接转成视频组件；按钮点击由回调处理器还原成按钮交互组件并解析令牌（tg_adapter.py:543-900）。
+- 各平台入站解析共用 `ComponentTypes` 注册表，把段名字符串映射回组件类（aiocqhttp_platform_adapter.py:251）。
 
 **按钮点击回流**：点击被平台回调后，适配器还原出 `ButtonInteraction`（动作 ID、data、interaction_id、原始令牌与消息 ID），再作为普通事件进入流水线。令牌由按钮回调注册表生成与校验，过期信息持久化在 SQLite 的 `button_callbacks` 表；唤醒检查阶段按令牌查到注册项并只派发给声明了按钮动作过滤器的插件。令牌结构见 `astrbot/core/platform/button_interaction.py:14-200`，派发入口见 `astrbot/core/pipeline/waking_check/stage.py:81-192`。
 
@@ -200,7 +200,11 @@ TTS trigger_probability（夹在 [0,1]）
 
 `ToolLoopAgentRunner._handle_function_tools`（tool_loop_agent_runner.py:1183-1375）：每个工具调用产生 `MessageChain(type="tool_call")` + 单个 `Json({id, name, args, ts})`（:1214）；结果链 `type="tool_call_result"`（:1330-1356）。
 
-消费方：`astr_agent_run_util._extract_chain_json_data`（:45）取链中第一个 Json；`astr_agent_run_util` 把 agent 响应转成 WebChat parts（:233-260）；前端 `useMessages.ts`（chainType==="tool_call" → upsertToolCall :1336-1337）；工具执行中缓存的图片经 `from_cached_image` 以独立链 yield（:1330、:1356）。
+消费方：
+
+- `astr_agent_run_util` 从链中取第一个 Json 组件作为工具调用数据，再把 agent 响应转成 WebChat 的结构化 parts（:45、233-260）；
+- 前端按链类型把工具调用记录写入或更新到工具卡片（`useMessages.ts:1336-1337`）；
+- 工具执行期间缓存的图片经 `from_cached_image` 以独立消息链产出（`tool_loop_agent_runner.py:1330、1356`）。
 
 ## 8. WebChat 渲染管线
 
@@ -218,10 +222,10 @@ TTS trigger_probability（夹在 [0,1]）
 | `File` | `get_file` + 文件名清洗（去 `\x00`、剥路径壳）→ `"[FILE]{filename}\|{original_name}"` | :157-184 |
 | 其他 | `logger.debug("webchat 忽略")` | :185 |
 
-- `send`（:201-217）：follow_up_captured 直通 + `_send` + 父类指标；
-- `send_typing`（:218-231）：`run_started`；
-- `send_streaming`（:232-263）：逐链 `_send`，累计 final_data/reasoning_content，`audio_chunk` 类型链直通（Live Mode 音频），结束发 complete；
-- 队列：`webchat_queue_mgr.py` 入站 maxsize=128、出站 back-queue maxsize=512，按会话 asyncio.Queue + request_id 关联（:7-207）。
+- `send`：先看是否为追问捕获场景，是则直接放行；否则逐组件发送，并补记父类的发送指标（:201-217）；
+- `send_typing` 只发一条 `run_started` 消息（:218-231）；
+- `send_streaming` 逐条链调用逐组件发送，累计最终消息与推理内容；音频块类型的链直接透传以支持实时语音模式，结束时补一条完成事件（:232-263）；
+- 队列按会话各建一条 asyncio 队列，入站上限 128、出站回退队列上限 512，用请求 ID 关联响应（webchat_queue_mgr.py:7-207）。
 
 ### 8.2 结构化 parts（message_parts_helper.py:72-585）
 
@@ -245,14 +249,14 @@ TTS trigger_probability（夹在 [0,1]）
 
 ## 9. 媒体转换与文件服务
 
-- `MediaResolver`（`astrbot/core/utils/media_utils.py`）：统一处理 `file://` / http / `base64://` / `data:` 四种来源，提供转路径与转 base64 两条通道（Record 固定 wav，silk↔wav 转换辅助）；
-- 文件服务：`register_to_file_service` 把资源注册到 `{callback_api_base}/api/file/{token}`，由 `file_token_service` 签发 token（components.py:701-724 等）；TTS 音频、t2i 结果与 Record/Video 出站兜底复用同一机制（result_decorate :333-351、:400-412）。
+- `MediaResolver` 统一处理 file URI、http 链接、base64 URI 与 data URI 四类来源，对外提供转本地路径与转 base64 两条通道；语音固定转 wav，并附带 silk 与 wav 互转的辅助方法（`astrbot/core/utils/media_utils.py`）；
+- 需要对外暴露的资源经 `register_to_file_service` 注册后由文件服务接管：返回 `{callback_api_base}/api/file/{token}` 形式的链接，令牌由文件令牌服务签发。TTS 音频、文本转图产物与语音、视频的出站兜底都复用这条机制（components.py:701-724；result_decorate :333-351、:400-412）。
 
 ## 10. 设计取舍与边界
 
 ### 10.1 已确认的设计（代码事实）
 
-1. **统一链 + 平台自治转换**：无通用转换函数，平台特性不泄漏，代价是转换逻辑在各适配器重复；
+1. **统一链 + 平台自治转换**：各类结果先归一化成统一的消息链，再由各平台适配器自行转成平台格式；核心层没有公共转换函数，平台差异因此收敛在各自适配器内，代价是转换逻辑重复；
 2. **`type` 字段是流式协议的元协议**：`tool_call`/`reasoning`/`audio_chunk` 被 webchat 出站与前端两端消费，其他平台忽略——平台间行为不对称是有意的；
 3. **WebChat 半开放协议**：出站 `[IMAGE]` 等前缀魔改字符串 + 前端反向解析（实时通道）；历史记录走结构化 parts（持久化通道）——两套表示并存；
 4. **异步/同步双轨序列化**：`toDict()`（同步，OneBot 用）与 `to_dict()`（异步，可下载/注册）并存，调用点各自选择（`_from_segment_to_dict` 混合调用两者 :38-70）；
@@ -262,7 +266,7 @@ TTS trigger_probability（夹在 [0,1]）
 
 ### 10.2 取舍（平衡决策）
 
-- **t2i 整链降级单图**：At/Reply/Record 全部丢失（result_decorate:400-412）——换取渲染质量，代价是引用语义丢失；
+- **t2i 整链降级单图**：文本转图一旦触发，整条链被替换成一张图片，原本的 @、引用与语音组件随之丢失；这是用引用语义换取渲染质量（result_decorate/stage.py:400-412）；
 - **TTS dual_output**：默认可选同时保留文本（:358-360），缓解语音可读性损失；
 - **分段回复默认区间 [1.5, 3.5]s**：随机插值防平台风控，log 模式按字数增长（:123-152）；
 - **aiocqhttp 非 fallback 流式缓冲**：非流式支持平台干脆缓冲完再发（:226-262），换稳定性；

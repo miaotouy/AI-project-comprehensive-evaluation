@@ -261,13 +261,22 @@ Markdown 处理器初始化函数创建全局 Showdown converter，开启：
 
 净化发生在正文格式化管线的末尾：Showdown 生成 HTML 之后，标准正文和 reasoning 最终都会调用 DOMPurify。
 
-消息 hook 会统一改写链接与 class：链接加上 `target="_blank"` 和 `rel="noopener"`；普通 HTML class 改名为 `custom-*`，避免直接命中主界面 class（Font Awesome、`note-*` 和 `monospace` 例外）；默认还会阻止消息 HTML 内跨源的 `img`、`audio`、`video`、`source`、`track`、`embed` 和 `object` 资源。
+净化阶段的消息 hook 统一改写链接、class 名和跨源资源：
+
+- 链接统一补上 `target="_blank"` 和 `rel="noopener"`。
+- 普通 HTML 的 class 改名为 `custom-*` 前缀，避免直接命中主界面样式；Font Awesome、`note-*` 和 `monospace` 三类保留原名。
+- 消息 HTML 内的跨源资源默认被拦截，涉及图片、音视频、字幕轨和嵌入对象，对应 img、audio、video、source、track、embed、object 七类标签。
 
 内置 welcome、welcome prompt 和 assistant note 可设置 `uses_system_ui`。它只允许 `BUTTON` / `DIV` 上的 `menu_button` class 保持原名，以便可信的内置模板接入主 UI；普通模型消息不会得到这个例外。
 
 ### `<style>` 的特殊路径
 
-为了保留消息自定义样式，代码在 DOMPurify 前把 `<style>` 内容 URL 编码进 `<custom-style>`。净化完成后，再使用 `@adobe/css-tools` 解析 CSS 并恢复真实 `<style>`：恢复阶段会删除 CSS `@import`、给选择器加 `.mes_text ` 前缀、把 CSS 中的 `.foo` 同步改成 `.custom-foo`，并在外部媒体未获许可时删除 value 中包含 `://` 的 declaration。
+为保留消息自定义样式，代码在进入 DOMPurify 前把 style 标签的内容做 URL 编码、暂存到 custom-style 元素上，净化结束后再用 `@adobe/css-tools` 解析这段 CSS，还原成真实样式节点。还原时会改写 CSS 内容：
+
+- 删除 `@import` 规则。
+- 给选择器统一加 `.mes_text ` 前缀。
+- 选择器中的 `.foo` 同步改写成 `.custom-foo`。
+- 外部媒体未获许可时，删除值里含 `://` 的声明。
 
 样式标签最终位于主文档，作用域依靠这套选择器和 class 改写约束，不使用 Shadow DOM 或 sandbox iframe。
 
@@ -296,14 +305,14 @@ reasoning 折叠区带有可见内容标记：仅当 reasoning 文本去空白�
 
 媒体装配函数处理结构化附件，而不是解析正文中的 Markdown 图片：
 
-- 先把旧版单值 `image` / `file` / `video` 兼容成数组接口。
-- extra.media 支持 image、video、audio。
-- 媒体可按 LIST 全部显示，也可按 GALLERY 只显示当前项。
-- audio 使用独立 `AudioPlayer`。
-- extra.files 克隆文件模板并以文本方式写入文件名和大小。
-- 重新装配 audio/video 时会尝试保存和恢复播放位置、暂停状态。
-- 图片和媒体加载采用 `Promise.race` 与短超时，不阻塞整条消息渲染。
-- 根据 `SCROLL_BEHAVIOR` 调整或保持聊天滚动位置。
+- 旧版以单值形式存放的 image、file、video 字段先转换成数组，再交给装配函数。
+- extra.media 支持 image、video、audio 三类媒体。
+- 媒体区有两种展示模式：LIST 列出全部条目，GALLERY 只显示当前项。
+- 音频交给独立的 `AudioPlayer` 播放。
+- extra.files 克隆文件模板后，以文本形式填入文件名和大小。
+- 重新装配 audio/video 时会保存并尝试恢复播放位置与暂停状态。
+- 图片和媒体加载用 `Promise.race` 配短超时，不阻塞整条消息渲染。
+- 滚动位置按 `SCROLL_BEHAVIOR` 调整或保持不变。
 
 外链媒体开关的 DOMPurify hook 约束的是消息 HTML 内资源；结构化 `extra.media[].url` 则直接赋给模板元素的 `src`，不走这条 hook。
 
@@ -325,14 +334,14 @@ Showdown 生成 `<pre><code>` 后，代码块处理函数对每个代码块执�
 
 每个 generator yield 提供累计 `text`、候选 swipes、logprobs、tool calls 和 state。处理过程为：
 
-- 每个 yield 立即更新内存中的累计结果。
-- 每次发送 `STREAM_TOKEN_RECEIVED`；其参数实际上是当前累计 `text`，不一定是单个 token delta。
-- `Stopwatch(1000 / streaming_fps)` 控制昂贵 DOM 更新频率，默认 30 FPS。
-- 清理逻辑清理停止词和不完整句子。
-- 未结束时临时补齐奇数个星号、双引号、三反引号或三个波浪号，降低残缺 Markdown 造成的布局跳变。
-- 更新 `chat[messageId]`，再对累计全文执行完整 `messageFormatting()`。
-- 直接覆盖正文容器的 HTML，或使用可选 fade-in 差量动画。
-- reasoning 由 `ReasoningHandler` 同步更新到独立区域。
+- 每个 yield 到达时，先更新内存里的累计结果。
+- 每处理一轮都发出 `STREAM_TOKEN_RECEIVED`，参数是当前的累计 text，未必是单个 token 的增量。
+- 昂贵的 DOM 更新由 `Stopwatch(1000 / streaming_fps)` 限频，默认 30 FPS。
+- 清理逻辑去掉停止词和不完整句子。
+- 流未结束时，临时补齐奇数个星号、双引号、三反引号或三波浪号，降低残缺 Markdown 造成的布局跳变。
+- 写回 chat[messageId] 后，对累计全文执行完整的 `messageFormatting()`。
+- 正文容器的 HTML 被整体覆盖，也可选用 fade-in 差量动画。
+- reasoning 由 `ReasoningHandler` 同步刷新到独立区域。
 
 这个实现简单且保证与非流式格式一致，但复杂度随消息增长：每个可见帧都会重新执行正则、Markdown 解析和净化，并替换整段正文 DOM。长回复中的表格、大量 HTML 或代码块会逐渐变贵；选择文本、正文内部临时 DOM 状态也可能在下一帧丢失。
 
@@ -358,15 +367,10 @@ Showdown 生成 `<pre><code>` 后，代码块处理函数对每个代码块执�
 
 消息 UI 通过全局事件总线对扩展开放。关键事件包括：
 
-- `MESSAGE_SENT`
-- `USER_MESSAGE_RENDERED`
-- `MESSAGE_RECEIVED`
-- `CHARACTER_MESSAGE_RENDERED`
-- `MESSAGE_UPDATED`
-- `MESSAGE_EDITED`
-- `MORE_MESSAGES_LOADED`
-- `STREAM_TOKEN_RECEIVED`
-- `STREAM_REASONING_DONE`
+- 发送与接收：`MESSAGE_SENT`、`MESSAGE_RECEIVED`
+- 渲染完成：`USER_MESSAGE_RENDERED`、`CHARACTER_MESSAGE_RENDERED`
+- 更新与编辑：`MESSAGE_UPDATED`、`MESSAGE_EDITED`
+- 历史加载与流式：`MORE_MESSAGES_LOADED`、`STREAM_TOKEN_RECEIVED`、`STREAM_REASONING_DONE`
 
 非流式 assistant 消息通常先触发 `MESSAGE_RECEIVED`，再装配 DOM，最后触发 `CHARACTER_MESSAGE_RENDERED`；流式消息把前两个 rendered 事件都留到现有 DOM 完成最终化之后。user 消息则有对应的 `MESSAGE_SENT` 和 `USER_MESSAGE_RENDERED`。
 
@@ -410,25 +414,13 @@ Translate、TTS、memory、quick reply、logprobs 等扩展依靠这些事件运
 
 ## 关键位置
 
-- Markdown converter：`public/script.js:520`
-- 消息模板引用：`public/script.js:447`
-- 历史打印：`public/script.js:1475`
-- 历史批量重显：`public/script.js:1497`
-- 正文格式化：`public/script.js:1800`
-- 格式化钩子调用点：`public/script.js:1855, 1866, 1948`
-- 局部消息更新：`public/script.js:1974`
-- 媒体装配：`public/script.js:2157`
-- 代码高亮与复制：`public/script.js:2479`
-- 正文覆盖选择：`public/script.js:2523`
-- 单条消息入口：`public/script.js:2551`
-- 单条消息装配：`public/script.js:2618`
-- 主聊天流处理器：`public/script.js:3481`
-- assistant 消息写入：`public/script.js:6583`
-- CSS encode/decode：`public/scripts/chats.js:536`、`public/scripts/chats.js:551`
-- DOMPurify hook：`public/scripts/chats.js:1901`
-- reasoning DOM 更新：`public/scripts/reasoning.js:254`；可见内容标记（data-has-content）：`public/scripts/reasoning.js:579`
-- 消息 HTML 模板：`public/index.html:7378`
-- CSP 关闭：`src/server-main.js:104`
+| 文件 | 关键入口 |
+|---|---|
+| `public/script.js` | 消息模板引用 447；Markdown 转换 520；历史打印 1475；历史批量重显 1497；正文格式化 1800；格式化钩子调用 1855、1866、1948；局部消息更新 1974；媒体装配 2157；代码高亮与复制 2479；正文覆盖选择 2523；单条消息入口 2551 与装配 2618；主聊天流处理器 3481；assistant 消息写入 6583 |
+| `public/scripts/chats.js` | CSS encode/decode 536、551；DOMPurify hook 1901 |
+| `public/scripts/reasoning.js` | reasoning DOM 更新 254；可见内容标记（data-has-content）579 |
+| `public/index.html` | 消息 HTML 模板 7378 |
+| `src/server-main.js` | CSP 关闭 104 |
 
 ## 结论
 

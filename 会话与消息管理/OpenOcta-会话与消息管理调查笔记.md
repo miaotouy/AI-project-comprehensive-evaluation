@@ -18,12 +18,12 @@ OpenOcta 没有数据库。会话的事实源是两层文件：每个 agent 一�
 
 关键事实：
 
-- 消息是线性追加日志，不是树。每条消息行确实写了 `parentId`，但读取路径从不使用它，只按文件顺序取最后 N 条（`src/pkg/session/transcript.go:258-309`）。
-- 写入粒度是"回合/片段"：用户消息在请求前追加一次；assistant 内容在每次 `message_stop` 追加一行；工具结果单独作为 `toolResult` 行追加（`src/pkg/gateway/handlers/chat.go:2780-2806`、`:2890-2899`）。
-- 消息追加没有会话级文件锁。池条目锁仅约束同一个 Runtime；超时驱逐先删映射、再等待旧锁释放后关闭，期间同键新旧 run 可能并行并追加同一转录（[pool.go:193–209、237–247](<../../openocta/src/pkg/agent/runtime/pool.go#L193>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182>)）。
-- 同一份 JSONL 还承载 `token_usage` 与 `tool_call` 旁路行，由 Eino 全局回调写入，只服务成本与工具统计，不参与上下文（`src/pkg/agent/eino/usage_callback.go:207-262`）。
-- 无消息级编辑、删除、重试、重新生成与分支能力：本次在 `src/pkg/gateway/handlers`、`src/pkg/session`、`ui/src/ui` 检索 edit/delete/retry/regenerate/fork/branch，未找到对应入口（`apiKeys.regenerate` 是密钥接口，不相关）。
-- `/new`、`/reset` 的语义是换一个新 sessionId 与新 JSONL 文件，旧文件留在磁盘上；"压缩"只是按行数保留尾部并归档原文件，不做摘要（`chat.go:1661-1727`、`sessions.go:880-1052`）。
+- 网关按到达顺序把消息追加到 JSONL 末尾，读取时只按文件顺序取最后 N 条。行内记录的 `parentId` 在读取路径中未被使用（`src/pkg/session/transcript.go:258-309`）。
+- 写入以回合或片段为单位：用户消息在请求发出前追加一次，assistant 内容在每次 `message_stop` 追加一行，工具结果单独写成 `toolResult` 行（`src/pkg/gateway/handlers/chat.go:2780-2806`、`:2890-2899`）。
+- 消息追加没有会话级文件锁，池条目锁只约束同一个 Runtime。发生超时驱逐时，系统先删除映射，等旧锁释放后关闭运行时，期间同键新旧 run 可能并行追加同一份转录（[pool.go:193–209、237–247](<../../openocta/src/pkg/agent/runtime/pool.go#L193>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182>)）。
+- 同一份 JSONL 还保存 `token_usage` 与 `tool_call` 两类旁路行。它们由 Eino 全局回调写入，服务于成本与工具统计，不参与上下文组装（`src/pkg/agent/eino/usage_callback.go:207-262`）。
+- 在 `src/pkg/gateway/handlers`、`src/pkg/session` 与 `ui/src/ui` 中检索 edit、delete、retry、regenerate、fork、branch，本次未找到消息级的编辑、删除、重试、重新生成或分支入口；`apiKeys.regenerate` 属于密钥接口，与消息无关。
+- `/new` 与 `/reset` 会换用新的 sessionId 和新的 JSONL 文件，旧文件留在磁盘上（`chat.go:1661-1727`）。压缩按行数保留尾部并归档原文件，不做摘要（`sessions.go:880-1052`）。
 
 ## 系统边界与数据主链
 
@@ -55,7 +55,13 @@ sessions.create / sessions.ensure（写索引 + 建空 JSONL）
 | `spawnedBy` | 子会话来源 |
 | `systemPromptReport` / `skillsSnapshot` / `tools` | 一次运行后写入的快照，供 UI 与下一轮参考 |
 
-键的规范化集中在 `src/pkg/gateway/handlers/sessions.go:1097-1174`。`agent:<agentId>:<rest>` 被保留为规范键；裸键补成 `agent:main:<key>`；`custom:` 前缀原样保留；查找时还会尝试去掉 `agent:<id>:` 后的裸值，以兼容渠道与工具写入的旧键。agentId 从键的第二段解析（`src/pkg/agent/model_factory.go:15-24`），没有该段则归 `main`。
+键的规范化由网关处理层统一完成，规则位于 `src/pkg/gateway/handlers/sessions.go:1097-1174`，规范键形如 `agent:<agentId>:<rest>`：
+
+- 符合该形状的三段键保留为规范键。
+- 裸键补成 `agent:main:<key>`。
+- `custom:` 前缀原样保留。
+- 查找时尝试去掉 `agent:<id>:` 段取裸值，以兼容渠道与工具写入的旧键。
+- agentId 从键的第二段解析，缺少该段则归入 `main`（`src/pkg/agent/model_factory.go:15-24`）。
 
 sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以及从键推导。推导规则是取键的第三段做字符清洗（`src/pkg/agent/tools/sessions.go:16-32`），清洗器把非法字符换成 `-` 并要求匹配 `^[a-z0-9][a-z0-9._-]{0,127}$`（`src/pkg/session/paths.go:20-53`）。因此会话键与 sessionId 不是一一映射：多个键可以指向同一文件，而同一键在条目缺失时会退化出派生 ID。
 
@@ -70,9 +76,15 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 {"type":"message","id":"<8位>","parentId":"<上一行id>","timestamp":"<RFC3339>","message":{...}}
 ```
 
-`message` 内的角色是 `user`、`assistant`、`toolResult`，字段包括 `content`、`timestamp`、`usage`、`stopReason`、`provider`、`model` 以及四类耗时（`src/pkg/session/transcript.go:23-39`）。工具结果行额外带 `toolCallId`、`toolName`、`isError`。
+消息对象的字段集中在 `src/pkg/session/transcript.go:23-39`，按角色、公共字段与工具结果专属字段三部分理解：
 
-内容块是一个宽松结构，覆盖文本、思考、图片、视频、文件、工具调用与 A2UI（`transcript.go:42-55`）。它的反序列化接受两种图片形状：扁平 `mimeType`/`data`，以及来自附件工具的嵌套 `source`（`:57-86`）。写入侧与读取侧的块类型对照如下（`src/pkg/gateway/handlers/chat.go:510-658`）：
+| 部位 | 内容 |
+| --- | --- |
+| 角色 | `user`、`assistant`、`toolResult` |
+| 公共字段 | `content`、`timestamp`、`usage`、`stopReason`、`provider`、`model`、四类耗时 |
+| 工具结果专属字段 | `toolCallId`、`toolName`、`isError` |
+
+内容块由一套宽松结构表达，文本、思考、图片、视频、文件、工具调用与 A2UI 共用这套字段。反序列化接受扁平 `mimeType` 与嵌套 `source` 两种图片形状，形状解析与块类型转换分别位于 `src/pkg/session/transcript.go:42-86` 和 `src/pkg/gateway/handlers/chat.go:510-658`。写入侧与读取侧的块类型对照如下：
 
 | 持久化 type | 客户端 type | 关键字段 |
 | --- | --- | --- |
@@ -86,7 +98,7 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 
 关于"树"：写消息时确实把上一行的短 id 填入 `parentId`（`chat.go:1042-1052`、`:2780-2806`、`:2890-2899`），但 `ReadTranscriptMessages` 与预览读取都不解析该字段，重建历史时按行序切片。推断：这是为兼容外部格式保留的元数据；当前活动路径只有一条，版本切换不在可执行路径上。
 
-`token_usage` 与 `tool_call` 行不在消息读取的转换里，`ReadTranscriptMessages` 会尝试把它们当 `TranscriptMessage` 解析，因缺少 `role` 而被丢弃；成本统计则单独扫描（`src/pkg/session/usage.go:322-441`）。
+`token_usage` 与 `tool_call` 两类旁路行不参与消息转换。转录读取函数 `ReadTranscriptMessages` 仍会尝试把它们解析成消息对象，由于缺少 `role` 字段而丢弃；成本统计走另一条扫描路径（`src/pkg/session/usage.go:322-441`）。
 
 ## 3. 事实源、索引与持久化时机
 
@@ -102,18 +114,21 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 
 ## 4. 创建、切换、重命名、置顶、删除与清理
 
-创建有两条路径。`sessions.create` 每次生成新 UUID，键为 `custom:<uuid>`，缺省标题按"自定义会话N"递增（`sessions.go:227-282`）。`sessions.ensure` 幂等：先按候选键查条目，存在就返回 `created:false`，否则写入 `channel:"webchat"` 的条目并建空文件，供数字员工在首条消息前就出现在侧栏（`sessions.go:300-389`、`ui/src/ui/controllers/sessions.ts:30-59`）。
+创建会话有两条入口：
+
+- `sessions.create` 每次生成新 UUID 作为键（`custom:<uuid>`），缺省标题按"自定义会话N"递增（`sessions.go:227-282`）。
+- `sessions.ensure` 幂等：先按候选键查条目，命中时返回 `created:false`，否则写入 `channel:"webchat"` 条目并建空文件，数字员工因此在首条消息前就出现在侧栏（`sessions.go:300-389`、`ui/src/ui/controllers/sessions.ts:30-59`）。
 
 修改与置顶都走 `sessions.patch`。解析层接受模型、发送策略、执行级别等字段，但真正写回条目的只有标题、思考级别、详细级别、来源和置顶时间（`sessions.go:2323-2362`）——其余参数目前只出现在请求结构中。条目缺 sessionId 时，patch 会懒创建 UUID。
 
-重置（`sessions.reset`）与聊天里的 `/new`、`/reset` 做同一件事：保留标题、渠道、聊天类型与两个级别，换新 UUID 与新文件，清掉旧会话的运行时历史与 checkpoint，并中止在飞运行（`sessions.go:585-665`、`chat.go:1661-1727`、`:3297-3379`）。
+重置由会话接口 `sessions.reset` 与聊天命令 `/new`、`/reset` 共同触发，执行同一套动作：保留标题、渠道、聊天类型与思考级别、详细级别；换用新 UUID 和新转录文件；清掉旧会话的运行时历史与 checkpoint；中止正在运行的任务。实现见 `sessions.go:585-665` 与 `chat.go:1661-1727、3297-3379`。
 
 删除有三层保护与三种清理范围：
 
-- 主会话键拒绝删除（`sessions.go:700-706`）。
-- 默认同时删转录文件；`deleteTranscript:false` 可只删索引。
-- 删除后中止该键的运行并清出运行时池（`sessions.go:759-761`）。
-- 员工删除会按 `employee:<id>` 与 `employee-<id>` 匹配清理全部相关键（`sessions.go:775-826`）；swarm 工作区删除按成员键与显式键清理（`:829-877`）。
+- 主会话键不允许删除（`sessions.go:700-706`）。
+- 删除默认连同转录文件一起清理，传入 `deleteTranscript:false` 时只删索引条目。
+- 删除完成后，系统中止该键正在运行的任务，并将它移出运行时池（`sessions.go:759-761`）。
+- 员工删除按 `employee:<id>` 与 `employee-<id>` 两种键形态匹配，清理全部相关会话；swarm 工作区删除按成员键与显式键清理（`sessions.go:775-826`、`:829-877`）。
 
 返回结构里的 `archived` 字段名容易误解：它列出的是被 `os.Remove` 永久删除的路径（`sessions.go:1348-1354`），不是归档副本。真正的归档只发生在压缩：原文件重命名为 `<file>.bak.<时间戳>`（`:1356-1364`）。
 
@@ -135,11 +150,11 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 - 排序：置顶优先（`pinnedAt` 大者在前），其次 `updatedAt` 降序；`limit` 在排序之后才截断。
 - 补全：每行按条目 sessionId 找到转录并累计 token；可选补"首条用户消息派生标题"和"最后一条消息摘要"，这两项都要再读一次文件。
 
-搜索只覆盖元数据：显示名、label、subject、sessionId 与会话键，全部是大小写不敏感子串匹配（`sessions.go:2184-2209`）。**消息内容全文检索本次未找到**：在 `src/pkg/session`、`src/pkg/gateway`、`src/pkg/agent/knowledge`、`ui/src` 检索 search/query/FTS/index，只看到上述元数据匹配、`sessions.preview` 的尾部预览，以及一个仅被测试引用的历史检索函数（`src/pkg/agent/knowledge/history.go:17`，调用方仅有 `history_test.go`）。系统提示与工具策略里出现的 `session_search` 没有对应的 Go 注册实现（`src/pkg/agent/runtime/knowledge.go:32-47`、`ui/src/ui/agents/tool-policy.ts:20`）。
+会话搜索只匹配元数据：显示名、label、subject、sessionId 与会话键，按大小写不敏感的子串比较（`sessions.go:2184-2209`）。**消息正文的全文检索本次未找到**。检索覆盖 src/pkg 下的会话、网关与知识库三个包及 ui/src，关键词为 search、query、FTS、index；命中只有上述元数据匹配、预览接口的尾部预览，以及一个仅被测试引用的历史检索函数（`src/pkg/agent/knowledge/history.go:17`）。系统提示与工具策略里出现的 `session_search` 没有对应的 Go 注册实现（`src/pkg/agent/runtime/knowledge.go:32-47`、`ui/src/ui/agents/tool-policy.ts:20`）。
 
 预览与会话列表分开取数。`sessions.preview` 对每个键最多 64 个，读转录文件最后 64KB、最近 50 行，按时间正序返回角色与截断文本，默认 12 条、每条 240 字符（`src/pkg/session/preview.go:18-114`、`sessions.go:441-499`）。
 
-消息读取没有游标分页。`chat.history` 读整个文件、丢掉解析失败行，再取最后 N 条；默认 100，超过 1000 按 100 处理（`chat.go:1556-1657`）。界面固定请求 500 条（`ui/src/ui/controllers/chat.ts:246`、`:266-287`）。文件读取上限是单行 32MB（`transcript.go:110-113`），超长工具输出会整行失败而不是截断。
+消息读取没有游标分页：`chat.history` 读整个文件、丢弃解析失败的行，再取最后 N 条，N 默认 100，超过 1000 时改按 100 处理（`chat.go:1556-1657`）。界面固定请求 500 条（`ui/src/ui/controllers/chat.ts:246-287`）。单行读取上限为 32MB，超长工具输出会让该行整体读取失败（`transcript.go:110-113`）。
 
 ## 7. 缓存、一致性、并发写入
 
@@ -180,7 +195,7 @@ sessionId 的来源有三档：参数显式传入、`sessions.json` 条目、以
 
 ## 11. 未验证事项
 
-1. 并发 `sessions.patch` / touch 的实际丢失范围未做运行验证；结论基于读—改—写实现推断。同键旧 run 超过首次 30 秒等待、驱逐后新 run 启动的重叠时长，以及转录追加顺序、检查点覆盖和最终索引快照尚未运行验证。
+1. 并发 `sessions.patch` 与 touch 的实际丢失范围尚未运行验证，现有结论基于读—改—写的实现结构推断。以下行为同样需要实测才能确认：同键旧 run 超过首次 30 秒等待并被驱逐后，新 run 启动造成的重叠时长；转录的追加顺序；检查点覆盖结果；最终索引快照。
 2. 压缩把消息切成半截后，模型对首条残缺消息的处理未实测。
 3. 转录单行超过 32MB 时的界面表现（整行丢弃）未实测。
 4. 多窗口同时打开同一会话、以及 WebSocket 重连后 `chat.history` 与本地流的合并未验证。

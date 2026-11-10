@@ -36,7 +36,11 @@ Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Ru
 | `docs` | 15 | 面向用户/贡献者的独立文档 |
 | 根目录文件 | 33 | 构建入口与仓库级配置 |
 
-构建编排有三层：Cargo 负责开发态编译与测试，Bazel（`MODULE.bazel`、`BUILD.bazel`、`defs.bzl`、`bazel/`）负责可复现发行与 v8/voice 等原生依赖，pnpm 工作区只包含 `codex-cli`、`sdk/typescript` 与 `codex-rs/responses-api-proxy/npm` 三个发布包。`justfile` 是统一任务入口。
+构建编排分三层，统一任务入口是根目录的 `justfile`：
+
+- Cargo 负责开发态的编译与测试。
+- Bazel 负责可复现发行和 v8、voice 等原生依赖，规则分布在 `MODULE.bazel`、`BUILD.bazel`、`defs.bzl` 与 `bazel/` 目录。
+- pnpm 工作区只承载三个发布包：`codex-cli`、`sdk/typescript`、`codex-rs/responses-api-proxy/npm`。
 
 ## 1. 模块分布与量级
 
@@ -58,7 +62,17 @@ Codex 是 OpenAI 的本地编码 Agent（Codex CLI）仓库，主体是单个 Ru
 | `codex-rs/windows-sandbox-rs` | 125 / 31039 | Windows 沙箱实现 |
 | `sdk/python` | 89 / 29067 | Python SDK（含文档、示例与测试） |
 
-Cargo workspace 的 `members` 列表有 166 项，按能力域拆得很细：既有 `core`、`tui`、`app-server` 这样的产品面，也有 `linux-sandbox`、`windows-sandbox-rs`、`mxc-sandbox`、`bwrap` 的平台沙箱，`config`、`protocol`、`app-server-protocol` 的契约层，`agent-graph-store`、`agent-identity`、`rollout`、`state` 的会话与状态层，`cloud-tasks`、`cloud-client` 的云端任务层，`code-mode`、`code-mode-host`、`code-mode-runtime` 的代码模式分层，以及大量 `utils/*` 小 crate。目录深度普遍为 1 至 2 层，模块边界基本与 crate 边界一致。
+Cargo workspace 的 `members` 收录 166 个 crate，按能力域分层，目录深度普遍为 1 至 2 层，模块边界基本与 crate 边界一致。
+
+| 能力域 | 代表 crate |
+| --- | --- |
+| 产品面 | `core`、`tui`、`app-server` |
+| 平台沙箱 | `linux-sandbox`、`windows-sandbox-rs`、`mxc-sandbox`、`bwrap` |
+| 契约层 | `config`、`protocol`、`app-server-protocol` |
+| 会话与状态层 | `agent-graph-store`、`agent-identity`、`rollout`、`state` |
+| 云端任务层 | `cloud-tasks`、`cloud-client` |
+| 代码模式 | `code-mode`、`code-mode-host`、`code-mode-runtime` |
+| 通用工具 | 大量 `utils/*` 小 crate |
 
 ## 2. 语言分布与运行时分工
 
@@ -97,13 +111,36 @@ Rust 承担产品主体。Python 的 201 个文件里，除 SDK 与运行时打�
 | `codex-rs/rmcp-client` | 28 / 12109 |
 | `sdk/python` | 22 / 6798 |
 
-`justfile` 的 `test` 目标统一使用 cargo nextest；`codex-rs/tui` 用 insta `.snap` 做终端渲染快照，`app-server` 与 `exec-server` 各有协议与集成测试。SDK 侧 Python 与 TypeScript 分别维护独立测试与一致性夹具。
+Rust 测试的本地入口由 justfile 的 test 目标调用 cargo nextest；SDK 与脚本测试保留各自入口（`justfile:81-98`、`sdk/typescript/package.json:34-42`）。
+
+测试按对象划分：终端渲染使用 insta 快照，app-server 与 exec-server 各自配有协议测试和集成测试，Python 与 TypeScript SDK 则维护独立的测试套件与一致性夹具。
 
 ## 5. 跨平台与发布组织
 
-发行目标从工作流静态确认：macOS 的 `aarch64-apple-darwin` 与 `x86_64-apple-darwin`，Linux 的 `x86_64-unknown-linux-musl` 与 `aarch64-unknown-linux-musl`（发行物刻意采用 MUSL 静态链接），Windows 由独立的 `rust-release-windows.yml` 承载；每个目标还产出配套的 app-server 工件。安装渠道包括 `install.sh`/`install.ps1`（默认从 `releases.openai.com` 下载并回退 GitHub Releases）、npm `@openai/codex`、Homebrew cask 与 winget 打包脚本。
+发行目标由工作流的静态配置确定，三个平台各自独立构建，每个目标都附带配套的 app-server 工件。
 
-平台差异没有做成前端探测，而是按操作系统各写沙箱 crate：Linux 用 `linux-sandbox` 与 `bwrap`（另 vendored bubblewrap），Windows 用 `windows-sandbox-rs` 与 `windows-sandbox-service`，macOS 用 `mxc-sandbox`，另由 `sandboxing`、`process-hardening`、`arg0` 统一编排。Bazel 侧为 Windows 工具链、v8 与原生依赖维护了一组补丁（`patches/` 共 35 个文件）。
+| 平台 | 发行目标 |
+| --- | --- |
+| macOS | `aarch64-apple-darwin`、`x86_64-apple-darwin` |
+| Linux | `x86_64-unknown-linux-musl`、`aarch64-unknown-linux-musl`，发行物刻意采用 MUSL 静态链接 |
+| Windows | 由独立的 `rust-release-windows.yml` 承载 |
+
+安装渠道有四条：
+
+- `install.sh` 与 `install.ps1`：默认从 `releases.openai.com` 下载，失败时回退 GitHub Releases。
+- npm 包 `@openai/codex`。
+- Homebrew cask。
+- winget 打包脚本。
+
+沙箱能力按操作系统各有一套 crate 实现：
+
+| 平台 | 沙箱 crate | 说明 |
+| --- | --- | --- |
+| Linux | `linux-sandbox`、`bwrap` | `bwrap` 为 vendored 的 bubblewrap |
+| Windows | `windows-sandbox-rs`、`windows-sandbox-service` | |
+| macOS | `mxc-sandbox` | |
+
+三者由 `sandboxing`、`process-hardening`、`arg0` 统一编排。Bazel 侧为 Windows 工具链、v8 与原生依赖维护了一组补丁，`patches/` 下共 35 个文件。
 
 ## 6. 工程配套与结构特征
 

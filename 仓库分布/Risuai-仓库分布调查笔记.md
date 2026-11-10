@@ -18,7 +18,7 @@
 
 Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScript 的 Web 应用是主体（`src` 占源码行约 95%），同仓附带 Tauri 2 Rust 桌面壳、Node 自托管服务器、Capacitor 移动配置和 Cloudflare Functions 代理。600 个跟踪文件中源码 425 文件 / 119,987 行，TypeScript 79,428 行（66.2%）与 Svelte 34,480 行（28.7%）构成绝大部分；无生成代码影响占比，但跟踪了约 80 MB 的第三方 tokenizer 模型数据（`public/token`）。
 
-业务逻辑集中在 `src/ts`（204 个源码文件 / 67,683 行），其中 `process` 子目录 77 文件 / 30,789 行是聊天、请求、记忆与 MCP 的核心；UI 组件在 `src/lib`（184 文件 / 34,647 行）；多语言文案在 `src/lang`（11,082 行）。`server/hono` 仍是自带锁文件与 wrangler 配置的嵌套独立包，文档声明它将替换 `server/node` 的 Express 服务器。测试 32 文件 / 4,144 行，全部为 Vitest 单元测试，无端到端测试。
+业务逻辑集中在 `src/ts`（204 个源码文件 / 67,683 行），聊天、请求、记忆与 MCP 的核心在 process 子目录（77 文件 / 30,789 行）。界面组件在 `src/lib`（184 文件 / 34,647 行），多语言文案在 `src/lang`（11,082 行）。`server/hono` 自带锁文件与 wrangler 配置，是嵌套的独立包，文档声明它将替换 server/node 的 Express 服务器。测试 32 文件 / 4,144 行，全部是 Vitest 单元测试，没有端到端测试。
 
 主链路入口是 `src/main.ts`：挂载 App 组件后调用 `loadData()`（`src/ts/bootstrap.ts`），按平台分支把存档解码进 DBState 状态树，Tauri 端读文件系统、Web 端走 LocalForage；聊天处理编排在 `src/ts/process/index.svelte.ts`。平台差异由运行时探测承担（`src/ts/platform.ts`）。
 
@@ -26,7 +26,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 
 机械统计只计 Git 跟踪文件（600 个），行数为物理行（含空行与注释），语言按扩展名归类，文档按 `.md/.txt` 识别，测试按 `tests`/`__snapshots__` 目录与 `*.test.*` 文件名模式识别；`git rev-parse HEAD` 与本文代码快照一致。模块级行数用同一口径按目录汇总，用于量级描述。
 
-仓库形态是“单根包 + 平台壳 + 服务端合仓”：根 `package.json` 为 private 单包（`packageManager: pnpm@11.28.10`），没有 `packages:` 声明；根目录 `pnpm-workspace.yaml` 只承载 pnpm 11 的构建许可与依赖发布年龄配置，不构成多包工作区。`server/hono` 自带 `package.json`、`tsconfig.json`、`wrangler.jsonc`、独立的 `pnpm-lock.yaml` 与 `pnpm-workspace.yaml`，形成嵌套独立包；`src-tauri` 是 Cargo 包。`dist/` 与 `node_modules/` 未跟踪。
+仓库形态是单根包加平台壳、服务端合仓。根 `package.json` 是 private 单包，`packageManager` 固定 pnpm@11.28.10，无 packages 声明；根目录的 pnpm-workspace.yaml 仅承载 pnpm 11 的构建许可与依赖发布年龄配置，工作区仍是单包。`server/hono` 自带 package.json、tsconfig.json 与 wrangler.jsonc，锁文件与工作区配置也留在该目录，形成嵌套独立包；`src-tauri` 是 Cargo 包。dist 与 node_modules 未跟踪。
 
 ## 1. 模块分布与量级
 
@@ -44,7 +44,7 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 
 `src` 内部按职责分四块：
 
-- `src/ts` 204 个源码文件 / 67,683 行，是业务层，内部量级如下表；其余 `translator`、`gui`、`drive`、`network`、`media`、`sync`、`horde`、`kei` 均为千行上下的小目录。
+- `src/ts` 204 个源码文件 / 67,683 行，是业务层，按聊天管线、模型接入、插件、存储、解析与设置分块，量级见下表；表外还有 translator、gui、drive、network、media、sync、horde、kei 八个目录，每个都在千行上下。
 
 | `src/ts` 子目录 | 文件 | 行数 | 职责 |
 | --- | ---: | ---: | --- |
@@ -68,10 +68,10 @@ Risuai 是单包前端应用与多平台壳合仓的项目：Svelte 5 + TypeScri
 | `Playground` | 15 | 1,773 | 调试与功能试验面板 |
 | `Mobile`、`LiteUI` | 5 | 约 300 | 移动与轻量界面变体 |
 
-- `src/lang` 8 文件 / 11,082 行：`index.ts` 选择逻辑加上 7 个语言包（en、ko、cn、zh-Hant、vi、de、es）。
-- `src` 顶层 `main.ts`、`App.svelte`、`LiteMain.svelte`、`preload.ts`、`styles.css` 与类型声明等十余个文件；`src/etc` 为补丁说明、`o200k_base.json` 词表与 `.cbs` 应用内文档。
+- `src/lang` 8 文件 / 11,082 行：由 `index.ts` 的选择逻辑和 7 个语言包组成，语种为 en、ko、cn、zh-Hant、vi、de、es。
+- `src` 顶层是十余个入口与全局文件：main.ts 入口、App.svelte 根组件、preload.ts 预加载脚本、全局样式表与类型声明；`src/etc` 放补丁说明、`o200k_base.json` 词表与 `.cbs` 格式的应用内文档。
 
-`server/node` 的主体是单文件 Express 服务器 `server.cjs`（约 1.5 千行），实现静态托管 `dist`、流式代理、限流与 OpenID 登录；`server/hono` 的源码文件合计约 40 行，是 node/bun/cf 三份入口存根加一个 Hono 应用骨架。`src-tauri` 的可识别源码只有 `main.rs`（约 380 行）与 `build.rs`，其余图标、capabilities 与 `gen/schemas` 都是配置与资源。
+自托管服务几乎集中在一个文件里：`server/node/server.cjs` 约 1.5 千行，用 Express 实现静态托管 dist、流式代理、限流与 OpenID 登录。`server/hono` 的源码合计约 40 行，由 node、bun、cf 三份入口存根和一个 Hono 应用骨架组成。桌面壳的可识别源码同样很少，`src-tauri/src/main.rs` 约 380 行，另有 `build.rs`，其余图标、capabilities 与 gen/schemas 都是配置与资源。
 
 ## 2. 语言分布与运行时分工
 
@@ -92,9 +92,9 @@ TypeScript 与 Svelte 合计约 94.9%，全部是手写业务代码；第三方�
 
 ## 3. 文档分布与数量
 
-仓内文档共 11 文件 / 2,144 行：`README.md`（产品介绍，用户文档指向 GitHub Wiki）、`plugins.md`（插件开发指南）、`AGENTS.md`（开发者约定）在根目录；`src/ts/plugins/migrationGuide.md` 是插件 API v2→v3 迁移指南，位于插件代码目录内部。`.github/pull_request_template.md`，`server/node/readme.md` 与 `server/hono/README.md` 各数行，分别声明未来弃用与开发中状态。
+仓内文档共 11 文件、2,144 行。根目录三份主要文档分工清晰：`README.md` 做产品介绍并把用户文档指向 GitHub Wiki，plugins.md 是插件开发指南，AGENTS.md 记录开发者约定。插件 API v2→v3 的迁移指南 `src/ts/plugins/migrationGuide.md` 放在插件代码目录内部。另有三份各数行的文件：PR 模板、server/node 的 readme 与 server/hono 的 README，后两份分别声明未来弃用与开发中状态。
 
-其余文档命中来自统计口径，实际并非说明文档：`public/token/glm4/SOURCE.md`、`glm5/SOURCE.md` 是 tokenizer 数据的来源说明，`public/colors.txt` 是颜色清单，`src-tauri/src/mainx.txt` 是遗留存根。应用内帮助内容以 `.cbs` 自定义格式存放在 `src/etc/docs`，不进入 Markdown 文档统计。用户手册主体在仓库外的 GitHub Wiki。
+其余文档命中来自统计口径，内容上分三类：tokenizer 数据的来源说明（public/token 下的 SOURCE.md）、`public/colors.txt` 颜色清单、`src-tauri/src/mainx.txt` 这类遗留存根。应用内帮助内容以 `.cbs` 自定义格式存放在 `src/etc/docs`，不进入 Markdown 文档统计。用户手册主体在仓库外的 GitHub Wiki。
 
 ## 4. 测试分布与数量
 
@@ -102,43 +102,43 @@ TypeScript 与 Svelte 合计约 94.9%，全部是手写业务代码；第三方�
 
 分布按测试文件数：
 
-- `src/ts/parser` 8 个：CBS 语法的条件、转义、循环、字符串测试与 `chatML`、`chatVar`，以及资源地址清洗（`assetSrcSanitize`）。
-- `src/ts/process` 10 个：`coldstorageData`、`files/inlays`、MCP risuaccess 模块、OpenAI responses 请求、`additionalParams`、`scriptings`、`ttsHooks`、`contextualEmbeddingCache`、`chatLoadPages`、`sourcemap`。
-- `src/ts/plugins` 2 个：`apiV3/pluginPermissionCache` 与插件 API 相关断言。
-- `src/ts/storage` 2 个：`nodeStorage` 与保存格式相关断言。
-- 其余分散在 `network`、`media`、`translator` 与 `src/lib/UI/guiRendering`。
+- `src/ts/parser` 8 个：覆盖 CBS 语法的条件、转义、循环与字符串测试，`chatML` 与 `chatVar` 两个模块，以及资源地址清洗（`assetSrcSanitize`）。
+- `src/ts/process` 10 个：覆盖冷存储数据、内联文件、MCP 的 risuaccess 模块、OpenAI responses 请求、附加参数、脚本处理、TTS 钩子、上下文嵌入缓存、聊天分页加载与 sourcemap。
+- `src/ts/plugins` 2 个：`apiV3/pluginPermissionCache` 加上插件 API 的相关断言。
+- `src/ts/storage` 2 个：覆盖 `nodeStorage` 与保存格式的相关断言。
+- 其余测试分散在 network、media、translator 与 `src/lib/UI/guiRendering` 四处。
 
-Rust 代码与 `drive`、`sync`、`model`、`lang` 目录未识别到同目录或邻近测试文件。项目开发文档（`AGENTS.md` 的 Testing 小节）仍指向 `src/test/runTest.ts`，该目录不在跟踪文件内，属于文档滞后于实现；实际测试入口以根 `vitest.config.ts` 为准。
+桌面壳的 Rust 代码，以及 drive、sync、model、lang 四个业务目录，未识别到同目录或邻近的测试文件。开发者文档 `AGENTS.md` 的 Testing 小节仍指向 `src/test/runTest.ts`，该目录不在跟踪文件内，属于文档滞后于实现；实际测试入口以根目录的 `vitest.config.ts` 为准。
 
 ## 5. 跨平台与发布组织
 
 平台策略是单一 SPA 代码库加运行时探测：`src/ts/platform.ts` 通过 `__TAURI_INTERNALS__`、`__NODE__` 全局标记、hostname 与 user agent 区分本地桌面、Node 服务器、官网 Web 与移动浏览器，同一份 `src` 不经过条件编译即服务全部平台。平台专属差异放在三类外围目录：
 
-- Web：`vite build` 产出 `dist` 供静态托管；`public` 下的服务 worker `sw.js` 与 `manifest.json` 支持 PWA 缓存；`public/functions` 的三个代理函数按 Cloudflare Functions 约定提供 CORS 代理；`util/risuUserscript.user.js` 是 Tampermonkey 用户脚本。
-- 桌面：`src-tauri` 是完整 Tauri 2 工程，`main.rs` 注册的命令层提供原生网络请求、可取消的流式事件响应与 OAuth 登录；流式请求按 fetch id 持有 abort 句柄，页面重载时可批量取消，并以空闲超时中止；`tauri.conf.json` 声明 deb/rpm/appimage/nsis/app/dmg 六个打包目标、GitHub Releases 更新器与 `risuailocal` 深链。
-- 移动：`capacitor.config.ts` 声明 appId 与 `webDir: dist`，但仓库未跟踪 android/ios 原生工程（构建时生成）；移动适配以 `src/lib/Mobile` 组件、`LiteUI` 变体与 `MobileGUI` 状态切换实现。
+- Web：`vite build` 生成 dist 目录交给静态托管；`public` 下的 sw.js 与 manifest.json 让站点具备 PWA 缓存；`public/functions` 里的三个代理函数按 Cloudflare Functions 约定转发跨域请求；`util/risuUserscript.user.js` 是 Tampermonkey 用户脚本。
+- 桌面：`src-tauri` 是完整的 Tauri 2 工程，`main.rs` 注册的命令层提供原生网络请求、可取消的流式事件响应与 OAuth 登录；流式请求按 fetch id 持有 abort 句柄，页面重载时可批量取消，空闲超时则中止。`tauri.conf.json` 声明六个打包目标（deb、rpm、appimage、nsis、app、dmg），并配置 GitHub Releases 更新器与 `risuailocal` 深链。
+- 移动：`capacitor.config.ts` 声明 appId 与 webDir（指向 dist），android/ios 原生工程不在跟踪文件内，构建时生成；移动适配由 `src/lib/Mobile` 的组件、LiteUI 变体与 MobileGUI 状态切换承担。
 
-自托管服务与桌面并行：`server/node/server.cjs` 托管 `dist` 并提供代理与认证，`Dockerfile` + `docker-compose.yml` 以端口 6001 发布；`server/hono` 是面向多运行时（Node、Bun、Cloudflare、Vercel）的替代实现骨架。发布流水线在 `.github/workflows`：`github-actions-builder.yml` 对 production 分支矩阵构建四个平台的 Tauri 产物，`docker-build.yml` 推送 ghcr.io 镜像，`pr-check.yml` 对 main 的 PR 跑类型检查与测试，另有 `mod.yml` 与 `codeql.yml`。
+桌面端与自托管服务并行：`server/node/server.cjs` 托管 dist 并提供代理与认证，配套的 Dockerfile 与 docker-compose.yml 以 6001 端口发布；`server/hono` 是面向 Node、Bun、Cloudflare 与 Vercel 多运行时的替代实现骨架。发布流水线集中在 `.github/workflows`：github-actions-builder.yml 对 production 分支做矩阵构建，产出四个平台的 Tauri 产物；docker-build.yml 推送 ghcr.io 镜像；pr-check.yml 在 main 的 PR 上跑类型检查与测试；另有 mod.yml 与 codeql.yml 两个工作流。
 
 ## 6. 工程配套与结构特征
 
-工程配套分布在根目录脚本与工作流中：`package.json` 提供 dev/build/tauribuild/buildsite/runserver/hono:build/check/test 等脚本；`server.bat` 与 `server.sh` 是面向自托管的一键脚本，带 `VITE_RISU_LITE`、`VITE_AD_CLIENT` 等构建期环境变量开关。`pnpm-lock.yaml` 在根目录与 `server/hono` 各一份，体现两个包的独立依赖树。
+工程配套分布在根目录脚本与工作流中。`package.json` 的 scripts 覆盖开发、构建、Tauri 打包、站点构建、本地服务器、hono 构建、类型检查与测试八类入口，键名形如 dev、build、tauribuild。`server.bat` 与 `server.sh` 是面向自托管的一键脚本，带 VITE_RISU_LITE、VITE_AD_CLIENT 等构建期环境变量开关。根目录与 `server/hono` 各有一份 pnpm-lock.yaml，对应两个包的独立依赖树。
 
-结构信号（均为本次快照内可观察的事实）：
+结构信号（均可在当前快照内直接观察）：
 
-- `package.json` 的 `sync`、`electron` 脚本指向仓库中不存在的 `electron/` 目录，是失效入口；`AGENTS.md` 目录图里列出的 `dist/` 与 `src/test/` 同样不在跟踪文件内。
-- 第三方与生成物被跟踪：`public/token` 约 80 MB 的 tokenizer 模型（覆盖 claude、cohere、deepseek、gemma、glm4/5、llama、mistral、nai、trin 等厂商词表），另有 `public/lua/json.lua`、`src/ts/rpack`、`src/etc/o200k_base.json` 词表、`public/assets` 的 wasm 翻译 worker，以及 `src-tauri/gen/schemas/capabilities.json` 等 Tauri 生成文件。
-- 根目录残留开发痕迹：`t.py`（翻译演示脚本）、`src-tauri/key.txt`（含一个固定十六进制值）、`src-tauri/src/mainx.txt`（lib 风格 main 存根）、`.cargo/config.toml`。
-- `.gitattributes` 为 `.gitignore` 设置 merge=ours，与文档化的 fork 维护方式呼应。
+- `package.json` 里的 sync 与 electron 两个脚本指向仓库中并不存在的 electron/ 目录，属于失效入口；`AGENTS.md` 目录图列出的 dist/ 与 src/test/ 同样不在跟踪文件内。
+- 仓库跟踪了第三方产物与生成物：`public/token` 下约 80 MB 的 tokenizer 模型覆盖 claude、deepseek、gemma、llama 等厂商词表；此外还跟踪着 vendored 的 Lua 库（public/lua）、rpack 目录（src/ts/rpack）、应用内词表 o200k_base.json（src/etc）、wasm 翻译 worker（public/assets），以及 `src-tauri/gen` 下的 Tauri 生成文件。
+- 根目录残留若干开发痕迹：`t.py` 是翻译演示脚本，`src-tauri/key.txt` 含一个固定十六进制值，`src-tauri/src/mainx.txt` 是 lib 风格的 main 存根，另有 `.cargo/config.toml`。
+- `.gitattributes` 给 `.gitignore` 设了 merge=ours 属性，与文档描述的 fork 维护方式呼应。
 
 ## 7. 设计取舍与已确认边界
 
-- 平台共享程度高：桌面、Web、自托管共享同一份业务代码与存档格式（`decodeRisuSave`），平台差异收敛在 `platform.ts` 判定和 Rust 命令层，未形成第二套业务实现。
-- 网络层多后端并存是刻意结构：Web 用 Cloudflare Functions 代理并可被用户脚本接管，Tauri 用 `native_request`/`streamed_fetch` 命令，Node 自托管用服务端代理；同一 fetch 抽象的三个后端。
-- 本地推理由外部 Provider 承担：仓库内没有本地推理后端（`src-tauri/src-python` 与 `src/ts/process/models/local.ts` 均不存在），桌面端不下载或引导 Python 环境，本地模型由 Ollama 等外部 Provider 提供；仓库内只有根目录 `t.py` 翻译演示脚本。
-- `server/node` 与 `server/hono` 并存：前者可用但 readme 声明将被弃用，后者是未来替代骨架，目前源码文件均为入口存根。
-- 移动端只保证到“配置 + UI 变体”层次：无原生工程、无移动构建 CI，Capacitor 配置是静态声明，未运行验证。
-- 测试覆盖集中在解析器、请求与存储层（最接近数据契约的代码），UI 层仅 1 个渲染测试，未识别到 e2e；这与“无综合测试套件、依赖类型检查”的开发者文档自述一致，但该文档同时描述了不存在的 `src/test/runTest.ts`。
+- 平台共享程度高：桌面、Web 与自托管共用同一份业务代码和存档格式，解码统一走 `decodeRisuSave`；平台差异收敛在 `platform.ts` 的判定与 Rust 命令层，仓库里没有第二套业务实现。
+- 网络层多后端并存是刻意结构：Web 走 Cloudflare Functions 代理，请求也能被用户脚本接管；Tauri 走 `native_request` 与 `streamed_fetch` 两个命令；Node 自托管走服务端代理。三者实现同一个 fetch 抽象。
+- 本地推理由外部 Provider 承担：仓库内没有本地推理后端，`src-tauri/src-python` 与 `src/ts/process/models/local.ts` 都不存在；桌面端不下载也不引导 Python 环境，本地模型由 Ollama 等外部 Provider 提供。仓库内与 Python 相关的只有根目录的 `t.py` 翻译演示脚本。
+- `server/node` 与 `server/hono` 并存：前者功能可用，readme 声明将被弃用；后者是未来的替代骨架，源码文件目前都是入口存根。
+- 移动端只做到配置加 UI 变体的层次：没有原生工程，也没有移动构建 CI；Capacitor 配置是静态声明，未运行验证。
+- 测试覆盖集中在解析器、请求与存储层，这些代码最接近数据契约；UI 层只有 1 个渲染测试，也未识别到 e2e。开发者文档自述“无综合测试套件、依赖类型检查”，与观察结果一致，但同一文档提到了并不存在的 `src/test/runTest.ts`。
 
 ## 8. 未验证事项
 

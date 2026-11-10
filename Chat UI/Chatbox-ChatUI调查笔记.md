@@ -16,7 +16,7 @@
 
 Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 
-- 页面顺序固定为 `Header → MessageList → InputBox`；侧栏桌面端是常驻挤压布局，移动端是左侧滑出的临时抽屉（没有底部 Tab Bar）。
+- 页面自上而下是顶栏、消息列表和输入框；侧栏在桌面端常驻并挤压内容区，移动端改为从左侧滑出的临时抽屉，没有底部 Tab Bar。
 - 首页是一个"假会话"（id 固定为 `'new'`），发送前的临时状态被分散存放在三种不同的容器里；首次发送时转入真实 Session。
 - 消息区用 `react-virtuoso` 虚拟化，并缓存每个 Session 的滚动快照（最多 100 个），切换会话不丢阅读位置；流式跟随由自研 smooth-follow 控制器接管。
 - Thread 边界是消息列表里的内联锚点标签；Fork 是分叉点下方的折叠分支组（`ForkGroup`，含 N/M 位置切换）；两者与侧栏分组无关。
@@ -52,7 +52,7 @@ Chatbox 是桌面/移动双表面的聊天工作台（Electron + Web）：
 
 会话页（`routes/session/$sessionId.tsx`）的页面顺序固定为顶栏 → 消息列表 → 输入框，线程历史通过抽屉组件（`src/renderer/components/session/`）作为侧滑层挂载。进入会话后延迟调用一次"回到底部"滚动；发送新消息前先把消息列表标记为新消息并瞬间滚到底部（onSubmit 内，:189-201），生成期间由 smooth-follow 控制器跟随输出，用户手动向上滚动后会暂停跟随。
 
-`MessageList` 使用 `react-virtuoso` 虚拟化，但关闭其内置的流式跟随，改由自研 smooth-follow 控制器接管（`MessageList.tsx:56, 478-533`）；并缓存每个 Session 的滚动快照（上限 100，:61-73），恢复时用虚拟列表的状态恢复 API 直接回到原位置（:484-492），切换会话不会把阅读位置丢掉。桌面端消息导航（上一条/下一条用户消息、"回到底部"）与移动端顶部浮条由两个组件提供（`MessageList.tsx:537-585`）。
+消息列表的虚拟化由 `react-virtuoso` 承担，它内置的流式跟随被关闭，改由自研的 smooth-follow 控制器跟随输出；每个会话的滚动快照单独缓存，上限 100 份，恢复时调用虚拟列表的状态恢复 API 直接回到原位置，因此切换会话不会丢掉阅读位置。桌面端的消息导航（上一条/下一条用户消息、回到底部）和移动端顶部的浮条分别由两个组件提供。相关装配见 `MessageList.tsx:56-73, 478-533, 537-585`。
 
 ### 1.2 侧栏：桌面常驻 / 移动端抽屉
 
@@ -121,10 +121,10 @@ const [session, setSession] = useState<Session>({
    }
    ```
 
-   `useKnowledgeBase({ isNewSession })`（`hooks/useKnowledgeBase.ts`）对新会话读写的是 `newSessionState.knowledgeBase`，而不是通用的 `sessionKnowledgeBaseMap['new']`。
+   首页会话的知识库读写落在 `newSessionState.knowledgeBase` 上，通用映射里的 `'new'` 键不参与这条路径（`hooks/useKnowledgeBase.ts`）。
 3. **通用的"按 sessionId 映射"Map，直接复用字符串 `'new'` 当 key**：
-   - `sessionWebBrowsingMap: Record<string, boolean|undefined>`（`uiStore.ts:36`），`InputBox.tsx:261`：`sessionWebBrowsingMap[currentSessionId || 'new']`；
-   - `sessionAgentModeMap: Record<string, AgentModeEntry>`（`uiStore.ts:60`），读取见 `stores/session/agent-mode.ts:20-26`（`legacyMap[sessionId]`，sessionId 传入的就是 `'new'`）。
+   - 网页浏览：`sessionWebBrowsingMap` 以会话 id 为键，首页直接用字符串 `'new'` 取值（`uiStore.ts:36`、`InputBox.tsx:261`）；
+   - Agent 模式：`sessionAgentModeMap` 沿用同一套按会话 id 的映射，读取时传入的 id 同样是 `'new'`（`uiStore.ts:60`、`stores/session/agent-mode.ts:20-26`）。
 
 `newSessionState.webBrowsing` 在类型定义里存在，但网页浏览的真实临时值走的是 `sessionWebBrowsingMap['new']`，两者并行——全仓库 grep 该字段没有任何读写点，仅有类型声明，是**未被使用的死字段**。
 
@@ -132,7 +132,7 @@ const [session, setSession] = useState<Session>({
 
 ### 3.2 草稿：按会话粒度的 localStorage
 
-草稿由 `useMessageInput` 管理：key 规则是首页假会话固定 `'new-chat'`、真实会话按 `draft-${sessionId}`（`useMessageInput.ts:18-20`），输入 300ms 防抖写入 localStorage（:29-35），挂载时恢复、发送成功后清除对应 key（:22-27, 62-79）。首页假会话的草稿在创建真实会话后被显式删除（`routes/index.tsx:336`）。真实会话按会话各自独立，切换会话不串草稿。
+草稿由 `useMessageInput` 统一管理。存储 key 按会话区分：首页假会话固定用 `'new-chat'`，真实会话用 `draft-${sessionId}`。输入内容经 300ms 防抖后写入 localStorage，组件挂载时读回，发送成功后删除对应的 key；首页假会话的草稿在创建真实会话后会被显式删除（`routes/index.tsx:336`）。各真实会话的草稿彼此独立，切换会话不会串。以上读写与清理逻辑见 `useMessageInput.ts:18-35, 62-79`。
 
 ### 3.3 输入快捷操作
 
@@ -154,13 +154,13 @@ Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **排队与 steering 表面**：Work Mode 生成中提交会进入 `QueuedMessagesBar`，列表最多显示 20 条并限制高度；条目保留队列位置，支持就地编辑、删除和清空。纯文本条目可点“立即发送”请求 steering，带附件条目禁用该动作；队列因停止、错误、模式建议或会话路径变化暂停时会显示原因和继续入口。`src/renderer/components/InputBox/QueuedMessagesBar.tsx:63-238,251-333`。
-- **模式化提交控件**：`getSubmitAction` 与 `getSubmitControl` 把发送、排队、继续排队和阻塞作为独立状态。Chat Mode 生成中不开放队列，Work Mode 才显示排队提示；已有旧队列时，即使当前模式不再允许新入队，也会保持顺序排空。`src/renderer/components/InputBox/submitAction.ts:39-83`。
+- **排队与 steering 表面**：Work Mode 生成过程中再次提交，消息会先进入待发送队列，由 `QueuedMessagesBar` 呈现：最多同时显示 20 条并限制整体高度，条目保留原有队列位置，可就地编辑、删除或清空。纯文本条目额外有“立即发送”动作，用来请求 steering，带附件的条目禁用该动作。请求会在当前 provider 响应及整批工具调用结束后的下一轮请求边界注入，见 `packages/chatbox-core/src/generation/GenerationService.ts:887-905`。队列因停止、错误、模式建议或会话路径变化而暂停时，条上会显示暂停原因和继续入口。界面实现见 `src/renderer/components/InputBox/QueuedMessagesBar.tsx:63-238, 251-333`。
+- **模式化提交控件**：发送、排队、继续排队和阻塞被当作四种互相独立的状态，由 `getSubmitAction` 和 `getSubmitControl` 共同判断。Chat Mode 生成中不开放队列，Work Mode 才显示排队提示；会话里已有旧队列时，即使当前模式不再允许新的入队，队列仍会按顺序排空。判断逻辑见 `src/renderer/components/InputBox/submitAction.ts:39-83`。
 - **待处理动作条**：工具调用次数暂停、命令审批、文件变更与应用动作统一投影到输入框上方的 PendingActionBar，替代仅依赖滚出视野后的审批胶囊；相关装配位于 `src/renderer/components/InputBox/PendingActionBar.tsx` 与会话路由。
-- **提交顺序**：提交处理器先更新 UI 滚动状态（标记新消息并瞬间滚到底部），再经 `submitNewUserMessage` 提交；输入区提交前有禁用态合并检查（生成中、预处理中、等待审批、存在预处理错误、RAG 附件索引未就绪时弹"文档仍在索引中"确认框，`InputBox.tsx:838-848, 881-884, 1936-1967`）。
-- **发送/停止按钮**：`InputBox.tsx:1486-1510`——同一个按钮，按生成状态切换发送/停止动作，用图标区分状态；生成态外包了一层 Tooltip（"Stop"/"Stop all N replies"，仅在生成时显示），但**按钮本身没有 `aria-label` 属性**（Mantine Tooltip 不向触发元素注入可访问名称，见 9.1）；生成中若有多个并发回复，停止按钮文案为"Stop all N replies"（`generatingCount`）。
+- **提交顺序**：提交处理器先更新滚动状态，把新消息标记为最新并瞬间滚到底部，随后交给 `submitNewUserMessage` 完成提交。提交前输入区还会合并检查一批禁用条件：正在生成、正在预处理、等待审批、存在预处理错误，或 RAG 附件索引尚未就绪；最后一种情况会弹出"文档仍在索引中"确认框。检查与提交入口见 `InputBox.tsx:838-848, 881-884, 1936-1967`。
+- **发送/停止按钮**：同一个按钮在发送与停止之间按生成状态切换，两者只用图标区分；生成态外层包了一层 Tooltip，文案是 "Stop"/"Stop all N replies"，只在生成时出现，而按钮本身没有 `aria-label` 属性，Mantine 的 Tooltip 又不会向触发元素注入可访问名称（见 9.1）。生成中若有多个并发回复，停止按钮的提示文案为 "Stop all N replies"，取自 `generatingCount`。实现见 `InputBox.tsx:1486-1510`。
 - **生成中占位**：`Message.tsx:982-991` 在生成且内容为空时渲染自定义 `Loading` 组件（`components/icons/Loading.tsx`）——手写 SVG 动画：四个圆点用 `<animate>` 标签分别做纵坐标/透明度/半径三个属性的关键帧动画（周期 1.25s），四个点依次延迟 0s/0.2s/0.4s/0.6s 开始，形成"依次跳动"的等待指示器。
-- **工具调用等待中**：`MessageLoading.tsx` 提供 `MessageStatuses`/`PreparingToolCallStatus`（`Message.tsx:89` 引入，`:955-957` 渲染），用于区分"纯文本生成中"和"准备/等待工具调用"两种状态展示。
+- **工具调用等待中**：准备或等待工具调用的过程由 `MessageLoading.tsx` 里的两个状态组件呈现，用来区分"纯文本生成中"和"准备/等待工具调用"两种展示；引入与渲染位置见 `Message.tsx:89, 955-957`。
 - **网络请求失败**：走消息级的 `MessageErrTips.tsx`，根据 HTTP 状态码查一张文案映射表（`httpStatusCodeI18nKeys`，覆盖 401/403/408/429/500/502/503/504），给出可读文案；还会检测错误内容是不是网关返回的原始 HTML 页面（`isHtmlContent`），避免把一整页 HTML 源码糊给用户看。
 - **审批卡片滚出视野时**：`PendingApprovalPill`（`components/chat/PendingApprovalPill.tsx`）——当审批卡在消息列表里滚出可视区时，输入框上方浮现浮动审批胶囊（内容来自审批关注 store 的待处理摘要），点击滚回审批卡所在消息，避免"审批在视野外用户不知情"。
 
@@ -174,9 +174,9 @@ Agent 面板/按钮的界面变化：工作目录选择器有"最近使用的工
 
 `MessageList.tsx` 将最新一轮 user+assistant 合成一个渲染 item（组装函数见 `message-render-items.ts:49`、`message-timeline.ts:35`），其余消息逐条渲染；消息顶部可插入 `ThreadLabel`，Fork 在分叉点下显示 `ForkGroup`，摘要和跨会话来源分别由专用组件呈现（这些组件的内容渲染归消息渲染器，这里记录导航工作流）：
 
-- **Thread 边界**：渲染每条消息前先检查该消息是否命中当前 thread 的历史哈希（数据侧见会话与消息管理笔记 1.2），命中就在该消息上方插入一个 `ThreadLabel`（`MessageList.tsx:396-456`）——thread 边界是消息列表里的一个内联锚点标签（"# threadName"，可打开菜单编辑名字/在抽屉里定位/继续这个 thread/移到独立会话/删除），和侧栏完全无关。`ThreadHistoryDrawer.tsx` 提供的是当前会话内所有 thread 的侧滑抽屉列表（作用域仅限"这一个 Session"），条目点击经滚动定位 API 跳到 thread 首条消息（:32-45）。
-- **Fork 切换**：分支切换并入 `ForkGroup`：折叠组头部显示 `N / M` 位置指示（`ForkGroup.tsx:204`），切换走两个入口函数 → 会话 store 的纯函数（数据语义见会话与消息管理笔记 1.3），上一/下一按钮带可访问名称（`ForkGroup.tsx:160, 212`）。
-- **替代回复折叠分支组**：分叉点下方渲染 `ForkGroup`（`MessageList.tsx:440-451`）：把多条替代回复收进"N 个回复"折叠组（新→旧排列，活动分支在最后），可展开逐条查看、复制、删除分支或从组内继续生成/停止（与主列表的 `generatingReplyCount` 计数联动）。
+- **Thread 边界**：列表在渲染每条消息前先判断它是否命中当前 thread 的历史哈希（数据侧见会话与消息管理笔记 1.2），命中就在该消息上方插入一个内联锚点标签 `ThreadLabel`，形如 "# threadName"。标签菜单可编辑名字、在抽屉里定位、继续这个 thread、移到独立会话或删除，它与侧栏分组无关。当前会话内所有 thread 另有一份侧滑抽屉列表 `ThreadHistoryDrawer`，作用域限于这一个 Session，条目点击经滚动定位跳到该 thread 的首条消息。两处实现见 `MessageList.tsx:396-456` 与 `ThreadHistoryDrawer.tsx:32-45`。
+- **Fork 切换**：分支切换由折叠组 `ForkGroup` 承担，组头显示 "N / M" 位置指示，上一/下一按钮都带可访问名称。按钮只发起切换，实际改动落到会话 store 的纯函数上（数据语义见会话与消息管理笔记 1.3），位置指示与两个按钮的实现在 `ForkGroup.tsx:160, 204, 212`。
+- **替代回复折叠分支组**：分叉点下方的多条替代回复被收进一个"N 个回复"折叠组，组内按从新到旧排列，活动分支排在最后；展开后可逐条查看、复制或删除分支，也能从组内继续生成或停止，计数与主列表的 `generatingReplyCount` 联动。折叠组的渲染位置见 `MessageList.tsx:440-451`。
 - **桌面端还有** `MessageMinimapRail`（仅桌面显示）、上一条/下一条用户消息导航和"回到底部"按钮（1.1）；minimap 锚点只用消息短预览文本并保持引用稳定（渲染细节见消息渲染器笔记）。
 
 ### 6.3 右键/上下文菜单：桌面端根本没有右键菜单
@@ -206,7 +206,7 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ## 8. Chat UI 状态所有权与同步
 
-- **状态分散**："new" 临时状态分散在三种不同容器里（本地 state / `newSessionState` 专用对象 / 通用 map 复用字符串 `'new'` 作 key），且 `newSessionState.webBrowsing` 字段完全未被使用（3.1）。
+- **状态分散**："new" 临时状态被拆进三种容器：首页组件里的本地 state、`newSessionState` 专用对象，以及拿字符串 `'new'` 直接当 key 的通用映射；其中 `newSessionState` 的 webBrowsing 字段只有类型声明，全仓库没有任何读写点（3.1）。
 - **草稿**：按会话粒度存 localStorage（`'new-chat'`/`draft-${sessionId}`），刷新与重启后恢复（3.2）；首页假会话的草稿在创建真实会话后被显式删除（会话与消息管理笔记 3.1 第 6 步）。
 - **滚动位置**：每个 Session 的滚动快照缓存最多 100 个，切换会话不丢阅读位置（1.1）；`clearScrollPositionCache` 随会话删除清理（`MessageList.tsx:79-81`）。
 - **会话级开关**：网页浏览开关（`sessionWebBrowsingMap`）经 uiStore persist 持久化；知识库（`sessionKnowledgeBaseMap`）与 Agent 模式（`sessionAgentModeMap`）仅内存态，重启丢失（会话与消息管理笔记 8）。
@@ -220,12 +220,12 @@ const handleContextMenu = (event: MouseEvent) => {
 
 ### 9.1 无障碍
 
-- **发送/停止按钮没有 `aria-label`**：`InputBox.tsx:1493-1510` 的发送/停止按钮只用图标区分状态，没有可访问名称、没有 title 属性；生成态有 Tooltip 包裹（"Stop"/"Stop all N replies"，:1486-1492），但 Mantine Tooltip 不向触发元素注入可访问名称属性——屏幕阅读器用户聚焦此按钮时仍得不到文字描述。这是最直接的无障碍缺口。输入框本身有可访问名称（`MessageInputField`，:1477）。
-- **模型选择器有 Tooltip，但触发元素本身没有 `aria-label`**：`InputBox.tsx:1899-1920` 的模型选择器触发按钮没有可访问名称，视觉上靠内部文本文案传达当前模型名，对屏幕阅读器不算严重问题（有文本内容可读），但下拉箭头图标没有 `aria-hidden`。内部的行项组件（`ModelRow.tsx:113, 121, 127, 144`）反而做得更完整：视觉能力图标（Vision/Reasoning）、模型详情、收藏按钮都有 `aria-label`。
-- **`trapFocus={false}` 的弹窗**（消息编辑、会话设置、Copilot 详情与设置四个弹窗）打开时键盘 Tab 键可以聚焦到弹窗背后的页面元素——这是 git log 可查证的、有意为之的修复（为解决 iOS Safari 里 Modal 内文本框无法长按选中文字的问题），但这也牺牲了这四个弹窗的键盘可达性边界，是有代码证据的有意取舍。
+- **发送/停止按钮的可访问名称缺失**：发送与停止共用同一个按钮，状态切换只靠图标，按钮既没有 title 也没有 `aria-label`。生成态外层有 Tooltip 包裹，文案为 "Stop"/"Stop all N replies"，Mantine 的 Tooltip 不向触发元素注入可访问名称，屏幕阅读器用户聚焦该按钮时得不到文字描述，这是本文最直接的无障碍缺口。同一个输入区里，输入框本身有可访问名称（`MessageInputField`）。相关代码见 `InputBox.tsx:1477-1510`。
+- **模型选择器的触发按钮**：选择器有 Tooltip，触发按钮本身却没有可访问名称；当前模型名靠按钮内的文本传达，屏幕阅读器仍能读到这段文本，影响有限，只是下拉箭头图标没有 `aria-hidden`。选择器内部的行项做得更完整：视觉/推理能力图标、模型详情和收藏按钮都带 `aria-label`。定位分别是 `InputBox.tsx:1899-1920` 与 `ModelRow.tsx:113, 121, 127, 144`。
+- **关闭焦点陷阱的四个弹窗**（消息编辑、会话设置、Copilot 详情与 Copilot 设置）：它们以 `trapFocus={false}` 打开，Tab 键因此可以聚焦到弹窗背后的页面元素。git log 可查证这是为解决 iOS Safari 里 Modal 内文本框无法长按选中文字而有意做的修复，代价是这四个弹窗的键盘可达性边界被放开。
 - **多处图标按钮补了可访问名称**：
-  - 消息跳转导航：真实 `<button type="button">` 元素 + 可访问名称（"Jump to message N"）+ focus-visible 焦点环，装饰性圆点用 `aria-hidden="true"` 正确隔离（`MessageMinimapRail.tsx:350-365`）；
-  - 模型行、会话项的置顶/归档按钮、拖拽把手、分支标记与分支切换按钮等处的图标按钮（`ModelRow.tsx`、`SessionItem.tsx:310, 332`、`SessionList.tsx:264`、`ForkMarkerMessage.tsx:45`、`ForkGroup.tsx:160, 212`）；
+  - 消息跳转导航：用的是真实的 `<button type="button">` 元素，带 "Jump to message N" 名称和 focus-visible 焦点环，装饰性圆点用 `aria-hidden="true"` 隔离（`MessageMinimapRail.tsx:350-365`）；
+  - 模型行、会话项的置顶/归档按钮、拖拽把手、分支标记与分支切换按钮：这些图标按钮也补了可访问名称，覆盖模型行、会话项、会话列表、分支标记消息和分支组五处组件（`ModelRow.tsx`、`SessionItem.tsx:310, 332`、`SessionList.tsx:264`、`ForkMarkerMessage.tsx:45`、`ForkGroup.tsx:160, 212`）；
   - 侧栏活动指示：状态角色 + 可访问名称（`SessionItem.tsx:280-282`）。
 
   覆盖并不整齐：发送/停止按钮没有可访问名称。

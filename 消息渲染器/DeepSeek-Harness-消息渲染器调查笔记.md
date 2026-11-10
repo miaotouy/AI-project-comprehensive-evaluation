@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-1. **消息渲染位于 Web Client 插件层且已拆成两个包**：`ui-chat` 负责 ChatView、conversation nodes、Markdown 与滚动；`ui-conversation` 负责与目标平台无关的会话装配（事件折叠器）与浏览器壳。Session Controller 传原始 durable 事件与 assistant live frames，Client 的会话对象层折叠为快照，ui-chat、ui-tool 与 ui-primitives 绘制；Host 不计算 Web 工具卡。
+1. **消息渲染位于 Web Client 插件层，由两个包分担**：`ui-chat` 提供聊天视图、会话节点、Markdown 与滚动，`ui-conversation` 负责与目标平台无关的会话装配（事件折叠器）和浏览器壳。Session Controller 把原始 durable 事件与 assistant live frames 交给 Client，会话对象层折叠成快照，再由 ui-chat 的聊天气泡、ui-tool 的工具卡与 ui-primitives 的基础组件分行绘制；Web 工具卡的计算全部留在 Client 侧。
 2. **输入模型是原始事件 journal（当前格式 v4）**：Session Controller 的历史页与 follow opening 传输 `SessionWireEvent`，工具参数、结果内容、错误和持久化 meta 原样通过；Host 不再解析工具定义或附加 `ToolEventView`。assistant 的紧凑流保存在 `assistant/message` 或 `assistant/attempt` 内，Web 适配器把流成员展开为 Client-only 的 `assistant/live-chunk` 临时项，durable settlement 到达时收口（`packages/api/session-controller/README.md`）。
 3. **流式链路是"逐 chunk 折叠、按帧发布、增量渲染"**：流成员以块下标累积、只替换该块的引用（`ui-conversation` 的 partial accumulator 语义），可见 chunk 请求 `animation-frame` 发布、同帧合并（`session-controller/src/client/sessions/notifier.ts`）；`MarkdownText` 的增量解析器只重解析尾部两块、冻结块缓存为 React 元素（`ui-primitives/src/markdown/incremental.ts`）。
 4. **工具卡在 Client 派生**：客户端从 raw call args、结果文本、失败状态与持久化 meta 生成卡片；业务包仍可注册 keyed toolview。Host-local presenter 留作其它消费者，内置 Web 不使用它（`packages/client/ui-tool/README.md`）。
@@ -39,35 +39,35 @@ LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（to
 
 ## 1. 消息与内容块数据模型
 
-- **事件流为唯一输入**：`Session` 维护连续事件窗口（history 装载 + live 缓冲拼接），`ConversationNodeAssembler` 把每个事件交给注册的 Definition 折叠出业务上下文（`ui-conversation/src/client/conversation/assembler.ts`）。
+- **事件流是唯一输入**：`Session` 维护一段连续的事件窗口，把历史装载与 live 缓冲拼接成一条流，`ConversationNodeAssembler` 再把每个事件交给已注册的 Definition 折叠出业务上下文；装配入口在 `ui-conversation/src/client/conversation/assembler.ts`。
 - **assistant 内容块**：`AssistantBlock` 是渲染器的最小内容单元，kind 取五值——text、reasoning、image、tool-call、other；流式、收口、中断三种状态共享一个按 turn:step 标识的节点（`ui-chat/src/client/conversation-nodes/assistant.ts`）。
 - **工具块**：工具 conversation node 从原始 `tool/call`、`tool/result` 与 code-dispatch 事件配对并形成递归子调用；窗口截断时结果可退化为缺调用头的通用展示。
 - **渲染节点**：`ChatNode` 的 kind 与 payload 通过 `ChatNodeDataMap` 声明合并扩展（`ui-chat/src/client/contract/chat-nodes.ts`），`ChatNodeSeat` 按 key 订阅并路由到 keyed 槽位 `conversation.chat.node`（`ui-chat/src/client/chat/ChatNodeSeat.tsx`）。
 
 ## 2. 流式数据到 UI 的更新链
 
-- **chunk 折叠**：live 帧以块下标稀疏数组累积五种可见 chunk（block-start、三种 delta、block-end），只替换该块的引用；usage/finish 不算可见变化。assistant Definition 的流式更新做同样的折叠，并顺带记录首可见块与首 token 时间（`ui-chat/src/client/conversation-nodes/assistant.ts`）。
+- **chunk 折叠**：live 帧按块下标存成稀疏数组，累积五种可见 chunk（block-start、三种 delta、block-end），每次只替换对应块的引用，usage 与 finish 不计入可见变化。assistant 定义的流式更新做同样的折叠，并顺带记录首可见块与首 token 时间（`ui-chat/src/client/conversation-nodes/assistant.ts`）。
 - **发布节流**：流式 chunk 请求 `animation-frame` 发布，`Notifier.markFrameDirty` 用 requestAnimationFrame 合并同帧多次更新（`packages/api/session-controller/src/client/sessions/notifier.ts`）。收口与 tool/result 事件则走 immediate 的 microtask 发布。
 - **增量渲染**：`MarkdownText` 流式时用增量解析器，只重解析末尾两块，冻结块缓存为 React 元素，块以源码偏移作稳定 key 保证 React 复配而非重挂载（`ui-primitives/src/markdown/incremental.ts`、`markdown/MarkdownText.tsx`）。
 - **收口与中断**：`assistant/message` 以完整 content 替换折叠块并立即发布，`streaming` 标志翻转后 `MarkdownText` 全量重解析（数学与高亮落地）；turn/step 关闭边界处若残留可见块，生成合成 seq 的 `interrupted` 节点并渲染"已停止"标记。
 
 ## 3. 消息列表、窗口化与滚动
 
-- **无虚拟化**：ChatView 是稳定 keyed 的节点列表，每个 `ChatNodeSeat` 只订阅自己的节点 key，assistant 增量只替换自身行（`ui-chat/src/client/chat/ChatView.tsx`）。
+- **无虚拟化**：ChatView 渲染一份 key 稳定的节点列表，每个节点座（`ChatNodeSeat`）只订阅自己的节点 key，assistant 的增量更新只替换自身所在行，渲染入口在 `ui-chat/src/client/chat/ChatView.tsx`。
 - **分页**：`hasMore` 与"加载更早"按钮做 prepend，加载后按 `data-chat-anchor-key` 锚点保持阅读位置；历史页按 turn 对齐窗口发放，可用 `loadThrough(seq)` 跳到指定 turn。
 - **滚动**：底部跟随阈值 24px，滚动归属用"观察顶账本"区分程序写入与读者输入（滚轮/触摸/滚动条/键盘统一处理），钉底时 ResizeObserver 跟随流式高度变化。
 - **trajectory 是独立表面**：时间线视图用纯投影把记录折叠为可测量的虚拟行（`ui-trajectory/src/client/trajectory-virtual-rows.ts`），与聊天列表的滚动策略互不相干。
 
 ## 4. 消息壳层与角色分派
 
-- **用户与 steering**：右对齐气泡，文本经 `MessageText` 字面渲染（不解析 markdown），斜杠与 @ 开头的词法 token 装饰为 skill/subagent 标签，图片走 ImageGallery（`chat/MessageItem.tsx:157-205`）。
+- **用户与 steering**：用户消息渲染为右对齐气泡，正文经 `MessageText` 按字面输出、不解析 markdown，斜杠与 @ 开头的词法 token 装饰成 skill 或 subagent 标签，随消息带入的图片交给 ImageGallery 展示（`chat/MessageItem.tsx:157-205`）。
 - **助手**：`AssistantMarkdown` 按块序渲染——text 块进 `MarkdownText`（带 streaming 标志）、reasoning 块进 Think 折叠行、image 块连续合并成画廊、tool-call 头不在此渲染而由 chat 视图分组为工具行（`chat/AssistantMarkdown.tsx:37-110`）。
 - **其他节点**：context 注入行、compaction 标记、model-retry 倒计时、turn-error / turn-max-tokens 状态行、unknown JSON 兜底，全部经 `registerChatNodeRenderers` 注册到 keyed 槽位（`chat/register-node-renderers.ts:15-51`）。
 - **操作栏**：turn-tail 节点承载复制/反馈/分支等 IconActions，仅在该 turn 的收尾助手节点就绪时挂载（`chat/AssistantNodeView.tsx:14-22`）。
 
 ## 5. Markdown、代码与富文本管线
 
-- **两套语法**：流式用纯 GFM（无数学，避免半截 TeX 触发 KaTeX 报错），收口用 GFM + 数学；两者都带 CJK 友好加粗与数学兼容定界符（`markdown/parse.ts:26-44`）。
+- **两套语法**：渲染器为流式与收口各配一套 Markdown 语法。流式只用纯 GFM，关闭数学，避免半截 TeX 触发 KaTeX 报错；收口阶段才启用 GFM 加数学。两套都带 CJK 友好加粗与数学兼容定界符（`markdown/parse.ts:26-44`）。
 - **渲染顺序**：自建 mdast→React 直接 switch，替换了 react-markdown 管线，DOM 结构由 `tests/fixtures/markdown-dom/` 的 settled/streaming 成对夹具按字节钉住；引用定义、脚注编号在流式帧间累积（`markdown/render.tsx:146-298`、:543-583）。
 - **代码高亮**：shiki core（纯 JS 正则引擎，不打包 oniguruma WASM），引导只加载三个语法，其余 23 个语法按首次使用动态 import；语法未就绪先渲染纯文本、加载完成后再补高亮（`markdown/highlight.ts:42-77`、`markdown/CodeBlock.tsx:26-74`）。
 - **数学**：KaTeX 输出经 DOMParser 映射为 React 元素，三层错误链与 rehype-katex 对齐；`` ```math `` 围栏在收口后渲染为显示 TeX（`markdown/katex.tsx:66-90`、`render.tsx:313-317`）。
@@ -87,7 +87,7 @@ LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（to
 | read | 行号 + 语法高亮窗口 + totalLines | read | ReadBlock |
 | web | 引用来源列表（kind: search）或抓取摘要（kind: fetch） | web_search、web_fetch | WebBlock |
 
-- **纯函数约束**：Host-local presenter 仍须无 I/O、不读会话状态、不用时钟或随机，以服务非 Web 消费者；内置 Web 不调用它。Web card model 自行防御旧参数、未知工具和未知 meta，并回退 generic 展示。
+- **纯函数约束**：Host 侧的本地 presenter 服务 Web 之外的消费者，因此要求无 I/O、不读会话状态、不依赖时钟或随机；内置 Web 前端并不调用它。Web 侧的卡片模型自己防御旧参数、未知工具与未知 meta，识别不了的输入回退到 generic 展示。
 - **结果期事实经 meta 传递**：search/read/web 的结构化数据无法从模型可见文本无损恢复：工具用 `output.presentationMeta` 把结构化 JSON 写入结果事件的元数据（随日志持久化），`presentResult` 读回并防御性窄化（`presentation.ts:130-205`）。
 - **client 卡片派生**：`GenericToolCard` 依次派生行模型与五类卡片模型；行模型按工具名分类为 `ToolRowVariant`（七类行变体，`tool-call-model.ts:37-78`）并从 args 取摘要、从结果取扁平输出（`toolviews/GenericToolCard.tsx:36-77`、`tool-call-model.ts:211-240`）。各卡片模型处理 wire 上未知 card/kind 值的降级（如 `models/web-card-model.ts:39-74`）。
 - **专属工具视图**：`ToolCallTree` 经 keyed 槽位 `tool.call.toolview` 按工具名分派，未注册则回退 `GenericToolCard`（`tool/ToolCallTree.tsx:38-41`）。
@@ -96,7 +96,7 @@ LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（to
 
 ## 7. HTML 与内容承载边界
 
-- 运行时不承载 HTML/iframe/Artifact：模型输出只经 `MarkdownText` 管线，raw HTML 保持字面文本；唯一 `dangerouslySetInnerHTML` 是 shiki 生成的静态 span 树（`CodeBlock.tsx:52-57`）。
+- 运行时的渲染面止于文本与组件：HTML、iframe、Artifact 在消息里没有承载入口，模型输出一律走 `MarkdownText` 管线，raw HTML 按字面文本显示；代码块中唯一一处 `dangerouslySetInnerHTML` 用于插入 shiki 生成的静态 span 树（`CodeBlock.tsx:52-57`）。
 - 数学与代码的 HTML 来源可信：KaTeX 输出经 DOMParser 映射为 React 元素，词汇表限定 span/MathML/SVG（`katex.tsx:88-89`）。
 - 链接与图片目的地过白名单；行内代码的文件提及由调用方解析器决定 token 是否对应真实文件，渲染器不猜测（`render.tsx:107-115`、:243-258）。
 - `schema-form` 是设置编辑器的 schema/草稿模型层（schemastery 重水化 + 按路径不可变编辑），与消息渲染无关（`packages/client/schema-form/src/index.ts`）。
@@ -104,14 +104,15 @@ LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（to
 
 ## 8. 内容交互反馈与可访问性
 
-- 复制：fence 复制按钮带 1 秒"复制成功"确认窗口，剪贴板写入经统一封装（`CodeBlock.tsx:36-46`）；行操作栏另有图标复制。
+- 复制：代码围栏的复制按钮带有 1 秒"复制成功"确认窗口，剪贴板写入复用统一封装（`CodeBlock.tsx:36-46`）；行操作栏另有一个图标形态的复制入口。
 - 展开/折叠：DisclosureRow 支撑工具行、Think 行与 terminal 卡片；卡片默认折叠，长内容在行内 max-height 容器中滚动；details 面板是单调用全高阅读面（`tool/ToolDetails.tsx:25-66`）。
 - 运行状态反馈：工具行用 StateDot 着色并配隐藏文本状态（`ToolRow.tsx:119-126`）；terminal 卡的非零退出码/信号映射为错误红点（`models/terminal-card-model.ts:72-75`）；turn 级"Deep diving..."时钟在运行 15 秒后出现（`ChatView.tsx:107-140`）。
 - 键盘与无障碍细节（焦点环、锚定语义、复读行为）需运行验证，见未验证事项。
 
 ## 9. 性能、缓存与测试
 
-- 增量解析把整篇重解析（随回复长度二次增长）降为尾部小区域解析；冻结块缓存 React 元素且 key 稳定，跨冻结边界复配而非重挂载（`markdown/incremental.ts`、`MarkdownText.tsx`）。
+- 增量解析按块冻结已稳定的前缀，常规追加只重解析尚未冻结的尾部，减少前缀的重复解析；尾部保留最后两块，其长度随输入结构变化。单段无换行文本可能始终只有一块，追加时仍会重解析整段，总解析代价仍可能随回复长度二次增长（[增量切分](<../../deepseek-harness/packages/client/ui-primitives/src/markdown/incremental.ts#L310-L358>)）。
+- 冻结块把已解析结果缓存为 React 元素，块 key 取自源码偏移因而稳定，跨过冻结边界时直接复配，无需重挂载（[元素缓存与复用](<../../deepseek-harness/packages/client/ui-primitives/src/markdown/MarkdownText.tsx#L92-L153>)）。
 - 块级不可变与 memo 组件配合（助手、节点座、工具调用行等），chunk 帧合并经 `markFrameDirty`。
 - shiki 在模块加载后延迟构造并预 tokenize 三个引导语法，懒加载语法避免首包携带约 1.6MB 语法模块（`highlight.ts:159-186`、:244-251）。
 - 测试证据（均未运行）：DOM 字节级 parity 夹具、增量行为单测、组装快照测试（`apps/web/tests/search-card.snapshot.ts` 以文本字段钉住 grep 卡）、若干 markdown 与数学 e2e 的 `ui.expected.md`（可访问性树文本）、trajectory 虚拟化 e2e。
@@ -120,7 +121,7 @@ LLM 流（assistant/message 内嵌流 + assistant/attempt）与工具事件（to
 
 消息模型仍以内容块与会话事件为输入；图片随消息进入同一投影链，推理内容按独立 reasoning block 与正文、工具卡片分离。Session Controller 只暴露 v3 逻辑事件，因此渲染器无需识别 JSONL 的物理压缩与格式代际。
 
-- 新工具卡片：Web 侧先为原始事件定义客户端 card model；需要专属外观时注册 keyed `tool.call.toolview` 条目。Host presenter 是其它交付面的可选投影，不是 Web 前置条件。
+- 新工具卡片：Web 侧先针对原始事件定义客户端卡片模型，需要专属外观时再注册一条 keyed `tool.call.toolview` 条目。Host presenter 只在其它交付面按需提供投影，Web 渲染走自己的卡片模型。
 - 新消息节点：注册 `ConversationNodeDefinition`（match/start/update/buildViewNode）+ keyed `conversation.chat.node` 渲染器；折叠按日志 seq 确定，可确定性重放（`ui-chat/src/client/conversation-nodes/`）。
 - 新投影：在 `SessionProjectionMap` 上声明合并 + 注册纯 init/apply/view 单元，框架负责驱动与变更通知（`packages/session/session-projection/src/index.ts`）。
 - 已确认边界：UI 展示数据不进入会话日志；结构化工具结果 meta 可持久化，但 Web 卡片由 Client 重算。流式期间无高亮/数学，收口才全量渲染；聊天列表无虚拟化，超长会话渲染成本随已加载节点增长。

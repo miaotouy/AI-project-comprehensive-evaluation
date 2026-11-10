@@ -36,13 +36,13 @@ chat.a2ui.action                                      组件点击回传网关
 
 **主链路（触发 → 生成 → 投递 → 展示 → 持久化 → 重开 → 回流）：**
 
-1. 用户发送消息，网关 `chat.send` 建立运行时并进入流式回合（`src/pkg/gateway/handlers/chat.go:2342` 附近的运行时创建）。
-2. Eino 迭代器产出模型增量，`StreamEventsFromIterator` 为每个会话创建 `AssistantTextStream`（`src/pkg/agent/eino/event_bridge.go:304`）。
-3. 文本增量同时走两条路：包装成 A2UI 消息（`src/pkg/agent/eino/a2ui_emit.go:25-30`），以及作为普通 text delta 事件。首块文本触发 `createSurface`、一次布局 `updateComponents`，之后每个增量都发一条携带**累积全文**的 `updateDataModel`（`src/pkg/a2ui/stream.go:26-70`）。
-4. 网关把 A2UI 事件转成 `chat` 事件广播，并把内容块并入当前助手消息（`src/pkg/gateway/handlers/chat.go:2679-2690`）。
-5. 回合结束时收到 `message_stop`：若本轮出现过 A2UI，则剥掉 text 块、合并同 surface 的 data model，再写入转录并广播 final（`chat.go:958-973`、`chat.go:997-1067`）。
-6. 前端按消息内容分派：纯文本表面渲染为 Markdown，非文本表面挂载 `chat-a2ui-panel`（`ui/src/ui/chat/grouped-render.ts:1375-1412`）。
-7. 用户点击组件 → `chat.a2ui.action` → 网关把动作序列化成用户消息并触发新一轮（`chat.go:3622-3674`）；前端同时把被消费的 surface 从历史中移除（`ui/src/ui/chat/a2ui-bridge.ts:122-160`）。
+1. 用户发送消息，网关的 `chat.send` 调用建立运行时并进入流式回合（`src/pkg/gateway/handlers/chat.go:2342`）。
+2. Eino 迭代器产出模型增量，桥接函数为每个会话创建一个文本流对象（`src/pkg/agent/eino/event_bridge.go:304`）。
+3. 文本增量同时走两条路：一条包装成 A2UI 消息（`src/pkg/agent/eino/a2ui_emit.go:25-30`），另一条作为普通 text delta 事件。首块文本触发建面与一次布局，之后每个增量都发一条携带**累积全文**的数据模型更新（`src/pkg/a2ui/stream.go:26-70`）。
+4. 网关把 A2UI 事件转成 chat 事件广播，并把内容块并入当前助手消息（`src/pkg/gateway/handlers/chat.go:2679-2690`）。
+5. 回合结束收到停止事件：若本轮出现过 A2UI，就先剥掉 text 块、合并同 surface 的 data model，再写入转录并广播 final（`chat.go:958-1067`）。
+6. 前端按消息内容分派：纯文本表面渲染为 Markdown，非文本表面挂载 `chat-a2ui-panel` 面板（`ui/src/ui/chat/grouped-render.ts:1375-1412`）。
+7. 用户点击组件后，网关把动作序列化成用户消息并触发新一轮（`chat.go:3622-3674`），前端同时把被消费的 surface 从历史中移除（`ui/src/ui/chat/a2ui-bridge.ts:122-160`）。
 
 **重开链路：** `chat.history` 读转录并按 limit（默认 100，上限 1000）返回最后若干条（`chat.go:1556-1616`），前端把 a2ui 块交给面板重放；面板按"首条消息指纹 + 已处理条数"决定整体重放还是增量追加（`ui/src/ui/components/chat-a2ui-panel.ts:207-243`）。
 
@@ -82,16 +82,16 @@ catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（messag
 
 **更新粒度是整段覆盖，不是补丁。** `AppendDelta` 每次把累积后的全文写进 `updateDataModel.value`（`src/pkg/a2ui/stream.go:62-69`）。
 
-前端与落库侧各自再折叠一次：前端 `dedupeA2UIMessages` 以 `surfaceId + path` 为键用最新一条替换旧条（`ui/src/ui/chat/a2ui-bridge.ts:319-379`）；服务端 `AppendAssistantA2UIBlock` 命中同一 surface/path 时替换原块（`src/pkg/a2ui/dedupe.go:83-108`），落库前再整体 `CoalesceAssistantA2UIBlocks`（`src/pkg/a2ui/dedupe.go:24-32`）。因此一次回复在转录里只剩一条最终 data model，流式中间态不持久化。
+前端与落库侧各自再折叠一次：前端以 surface 加数据路径为键，同一键只保留最新一条（`ui/src/ui/chat/a2ui-bridge.ts:319-379`）；服务端在追加内容块时命中同一 surface 与路径就替换原块，写入转录前再整体合并一遍（`src/pkg/a2ui/dedupe.go:83-108`）。因此一次回复在转录里只剩一条最终 data model，流式中间态不持久化。
 
 **文本去重规则。** 只要本轮出现过 A2UI，纯 text 块在落库前被剥离（`chat.go:916-930`、`chat.go:958-973`）。这带来两个并存表示：界面看到的是 A2UI 的 data model，IM 投递则从 textBuf 兜底取原文，代码注释明确写出这一分工（`chat.go:1105-1119`）。
 
 **回合收口与失败。**
 
-- 正常：`message_stop` 携带 stop reason，触发快照落库并按 `tool_use` 与否区分 turn/final 广播（`chat.go:2818-2860`、`chat.go:1057-1061`）。
-- 工具轮：助手消息带 toolCall 落库，工具结果按"先挂起、助手消息落库后再补写"的顺序写入转录，避免前端先看到结果后看到调用（`chat.go:2570-2595`）。
-- 中断：`run_interrupted` 事件把 stop reason 置为 `interrupt`，同时广播一条 `state: "interrupted"` 的 `chat` 事件（`chat.go:2811-2817`、`chat.go:3231-3253`）。
-- 协议解析失败：服务端流式行缓冲遇到不完整 JSON 会把整段退回缓冲等下一块（`src/pkg/a2ui/parser.go:55-95`），不产生错误事件；前端处理消息抛错时改为显示 "Interactive UI failed to render" 面板并把异常打到控制台（`ui/src/ui/components/chat-a2ui-panel.ts:228-242`、`:252-260`）。
+- 正常结束：停止事件携带 stop reason，触发快照落库，并按本轮是否含工具调用区分 turn 与 final 广播（`chat.go:2818-2860`）。
+- 工具轮：助手消息连同 toolCall 一起落库，工具结果先挂起，等助手消息写完之后再补写进转录，前端因此先看到调用、后看到结果（`chat.go:2570-2595`）。
+- 中断：run_interrupted 事件把 stop reason 置为 interrupt，同时广播一条 state 为 interrupted 的 chat 事件（`chat.go:3231-3253`）。
+- 协议解析失败：服务端流式行缓冲遇到不完整 JSON 时把整段退回缓冲，等下一块数据到达再解析，不产生错误事件（`src/pkg/a2ui/parser.go:55-95`）；前端处理消息抛错时改为显示 "Interactive UI failed to render" 面板并把异常打到控制台（`ui/src/ui/components/chat-a2ui-panel.ts:228-260`）。
 
 ## 3. 投影表面与多视图关系
 
@@ -112,9 +112,9 @@ catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（messag
 
 **渲染层级。** 只有一层"声明式组件 + Markdown"，没有 HTML 组件、脚本组件或语言解释器：
 
-- 组件由 `@a2ui/lit` 的 basic catalog 提供，面板样式针对 `a2ui-basic-text`、`a2ui-basic-row`、`a2ui-basic-button` 做了覆盖（`ui/src/ui/components/chat-a2ui-panel.ts:88-108`），说明文本、行列布局与按钮是实际使用过的组件。
-- Text 组件的 Markdown 由注入的渲染器处理，最终仍走 DOMPurify 白名单清洗（`ui/src/ui/chat/a2ui-markdown.ts:4-7`、`ui/src/ui/markdown.ts:172-221`）。
-- 依赖集中在三处：`lit` 与 `@a2ui/lit`、`@a2ui/web_core` 负责组件与协议，`marked` + `dompurify` 负责文本（`ui/package.json:13-19`）。
+- 组件由 `@a2ui/lit` 的 basic catalog 提供；面板为文本、行列布局与按钮三类组件覆盖了样式（`ui/src/ui/components/chat-a2ui-panel.ts:88-108`），这三类也是实际用到过的组件。
+- 文本组件的 Markdown 交给注入的渲染器处理，输出仍经过 DOMPurify 白名单清洗（`ui/src/ui/chat/a2ui-markdown.ts:4-7`、`ui/src/ui/markdown.ts:172-221`）。
+- 依赖按职责分两组：组件与协议用 lit 生态的 `@a2ui/lit`、`@a2ui/web_core`，文本处理用 marked 与 DOMPurify，两组声明同在 `ui/package.json:13-19`。
 
 **交付物运行环境。** HTML 与 PDF 在预览浮层中用 `iframe` 直接载入 data URL（`chat-file-preview.ts:225-232`），未设置 `sandbox` 属性；按浏览器规则 data URL 文档属 opaque origin，但这属于运行时行为，本次未验证。图片走 `<img>`，文本类文件由前端按扩展名解码后渲染表格或代码块（`chat-file-preview.ts:212-244`）。
 
@@ -131,7 +131,7 @@ catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（messag
 
 **交互状态不恢复。** 面板的 processor 是组件私有实例，`resetChatA2UISurfaces` 已退化为空操作（`a2ui-bridge.ts:69-72`）；重开时从数据模型重建，按钮的按下态、输入框内容等不落库。动作提交后原 surface 被从消息中剔除（`a2ui-bridge.ts:122-160`），因此同一按钮不会被重复点击消费。
 
-**命令类确认不通过组件。** `stripCommandConfirmationButtons` 会删除 action 名以 confirm 开头、或文案含"确认/取消"的按钮，并追加一句"请在聊天输入框回复 **确认** 执行"（`src/pkg/a2ui/confirmation_strip.go:7-46`、`:119-161`）。也就是说，命令批准被有意退回对话层，由用户在输入框作答。该修复函数只在 `repair.go:164` 的组件修复链内被调用，而修复链本身在当前快照里没有非测试调用方（检索范围：`src/**/*.go` 中 `RepairMessages`、`ExtractMessagesFromToolParams` 的引用），所以它更像为外部/历史产出准备的兼容层。
+**命令类确认走对话层。** 确认按钮会先被剥离：action 名以 confirm 开头、或文案含"确认/取消"的按钮一律删除，并追加一句"请在聊天输入框回复 **确认** 执行"（`src/pkg/a2ui/confirmation_strip.go:7-46`）。命令批准因此回到输入框，由用户以文字作答。这个剥离函数只在组件修复链里被调用，而修复链本身没有非测试调用方（检索范围：`src/**/*.go` 中 `RepairMessages`、`ExtractMessagesFromToolParams` 的引用），实现形态更接近为外部或历史产出准备的兼容层。
 
 **错误反馈。** 面板级错误是局部文案；运行错误走 `chat` 事件 `state: "error"` 并清空流式状态，由历史重载呈现（`ui/src/ui/controllers/chat.ts:611-618`）。前端没有为未知 state 设兜底分支（`ChatEventPayload` 的联合类型只列了 7 种，见 `chat.ts:232-236`），见第 7 节关于中断的说明。
 
@@ -172,7 +172,7 @@ catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（messag
 | 审批队列 | `approvals.list` / `approve` | `security.ApprovalQueue`（`handlers/approvals.go:157-284`） | 执行链没有调用 `Request` 写入记录（检索范围：`src/**/*.go` 中 `GetApprovalQueue`、`NewApprovalQueue`、`q.Approve` 的全部引用） |
 | 中断事件 | 前端事件联合类型与处理函数都没有 `state: "interrupted"` 分支 | `chat` 事件下发（`chat.go:3240-3250`） | 没有 `chat.resume` 的调用方（检索范围：`ui/src` 全量） |
 
-结果是：审批相关的数据结构与 UI 都在，端到端路径在本次快照中没有接通；实际可见的批准方式仍是模型在对话里询问、用户回"确认"。
+审批相关的数据结构与前端 UI 都已存在，端到端路径尚未接通；当前实际可用的批准方式是模型在对话里询问、用户在输入框回"确认"。
 
 **工具能力面。** 内置工具覆盖文件读写、shell、网页抓取、浏览器、会话与定时任务等（`src/pkg/agent/tools` 目录），文件写路径只做相对路径归一到工作区、Windows 盘根文件重定向，不强制阻止绝对路径写出工作区（`src/pkg/agent/eino/localbackend/paths.go:15-59`）；附件提取则显式校验目标位于工作区内（`src/pkg/agent/tools/deliverable_files.go:292-329`）。
 
@@ -200,7 +200,7 @@ catalog 简写  basic、standard 等简写 → basic catalog 正式 URL（messag
 
 ## 10. 生命周期、资源治理与性能
 
-**前端限额。** 工具流最多保留 50 条、300 毫秒合批、单条输出截断到 12 万字符（`ui/src/ui/app-tool-stream.ts:4-6`、`:90-95`、`:120-129`、`:145-157`）。A2UI 面板对消息做 JSON 指纹比较与去重，避免重复处理（`a2ui-bridge.ts:319-379`、`chat-a2ui-panel.ts:216-238`）。
+**前端限额。** 工具流最多保留 50 条，增量按 300 毫秒合批，单条输出截断到 12 万字符（`ui/src/ui/app-tool-stream.ts:4-6`）。A2UI 面板另对消息做 JSON 指纹比较与去重，同一条消息不重复处理（`ui/src/ui/chat/a2ui-bridge.ts:319-379`、`ui/src/ui/components/chat-a2ui-panel.ts:216-238`）。
 
 **潜在成本。** 每个文本增量都携带全文，服务端每轮做一次同路径替换、前端每帧做一次去重与指纹计算。按实现结构推断，长回复的传输与字符串比较量随文本长度平方增长（未做基准测试，未作定性结论）。
 

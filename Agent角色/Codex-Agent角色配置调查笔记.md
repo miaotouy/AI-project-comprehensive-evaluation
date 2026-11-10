@@ -18,12 +18,12 @@ Codex 的“Agent 角色”是一组按名字声明的子 Agent 配置预设，�
 
 关键事实：
 
-- 角色实体只有三个字段：描述、可选的角色配置文件路径、昵称候选，见 `codex-rs/agent-roles/src/agent_role_config.rs:9-18`。
-- 声明位置是 `agents.<role>`，可出现在任何配置层；同一层还会递归发现 `agents/**/*.toml`，见 `codex-rs/agent-roles/src/loader.rs:23-117`。
-- 内置角色有三个：`default`、`explorer`、`worker`；`awaiter` 的声明被注释掉，见 `codex-rs/core/src/agent/role.rs:344-421`。
-- 角色配置只被投影到一小组字段，并且只能收窄能力，不能扩大父会话的权限，见 `codex-rs/core/src/agent/role.rs:1-4` 与 `:69-128`。
-- 角色层按 `SessionFlags` 优先级插入配置栈，高于项目层，低于遗留托管层，见 `codex-rs/core/src/agent/role.rs:242-268`。
-- AGENTS.md 是独立于角色的项目指令通道，以 user 上下文注入，不参与角色覆盖，见 `codex-rs/core/src/agents_md.rs:58-116`。
+- 角色实体只有描述、可选的角色配置文件路径和昵称候选三个字段，结构定义在 `codex-rs/agent-roles/src/agent_role_config.rs:9-18`。
+- 角色可以写在任意配置层的 `agents.<role>` 表里；同一层还会递归发现 `agents/**/*.toml`，两条来源的合并见 `codex-rs/agent-roles/src/loader.rs:23-117`。
+- 内置角色只有 default、explorer、worker 三个，awaiter 的声明被注释掉，见 `codex-rs/core/src/agent/role.rs:344-421`。
+- 角色配置只投影到一小组字段，只能收窄能力，无法扩大父会话的权限，见 `codex-rs/core/src/agent/role.rs:1-4、69-128`。
+- 角色层按 `SessionFlags` 的优先级插入配置栈，高于项目层、低于遗留托管层，见 `codex-rs/core/src/agent/role.rs:242-268`。
+- AGENTS.md 是独立于角色的项目指令通道，以 user 上下文注入，不参与角色的字段覆盖，见 `codex-rs/core/src/agents_md.rs:58-116`。
 - 子线程的来源标签和持久化记录都保留角色名，见 `codex-rs/protocol/src/protocol.rs:3491-3496`。
 
 ## 系统边界与总体调用链
@@ -65,8 +65,8 @@ Codex 源码里有两个容易被混为一谈的“角色”概念。第一个�
 
 角色配置文件是 TOML 表，顶层可写 `name`、`description`、`nickname_candidates`，其余字段被展开为普通 `ConfigToml`，见 `agent_role_config.rs:20-28`。这带来两条严格约束：
 
-- 目录发现的角色文件必须自己写非空 `name`，否则报错（`agent_role_config.rs:73-88`）。
-- 目录发现的角色文件必须写 `developer_instructions`；被 `agents.<role>.config_file` 引用的文件可以不写，因为此时角色名由声明提供（`agent_role_config.rs:67-71`、`:134-157`）。
+- 目录发现的角色文件必须自带非空 `name`，缺失时解析直接报错（`agent_role_config.rs:73-88`）。
+- 目录发现的角色文件还必须写 `developer_instructions`；由 `agents.<role>.config_file` 引用的文件可以省略它，因为此时角色名由声明提供（`agent_role_config.rs:67-71、134-157`）。
 
 角色文件侧使用 `deny_unknown_fields`，未知字段会直接解析失败。声明侧则不同：`AgentRoleToml` 只定义三个字段，但没有 serde 级未知字段拒绝；`agents` 表顶层不认识的键会被展开逻辑当成新角色名，角色表内部的未知键则被忽略。
 
@@ -88,10 +88,7 @@ Codex 源码里有两个容易被混为一谈的“角色”概念。第一个�
 
 处理每个配置层时，先读 `agents` 声明，再扫描目录：
 
-1. 声明逐个转成角色；同名重复只保留第一个并记录启动警告（`loader.rs:47-72`）。
-2. 记录所有被声明引用的 `config_file` 路径（`loader.rs:56-58`）。
-3. 目录发现时跳过这些已被引用的文件，避免同一个文件被注册两次（`loader.rs:298-301`）。
-4. 目录内部按角色名去重，冲突同样只保留第一个并告警（`loader.rs:311-323`）。
+声明按顺序逐个转成角色，遇到同名只保留第一个并记录启动警告（`loader.rs:47-72`）。转换时把所有被声明引用的 `config_file` 路径一并记下（`:56-58`），目录发现阶段据此跳过这些文件，避免同一个文件被注册两次（`:298-301`）。目录内部再按角色名去重，冲突同样只保留第一个并告警（`:311-323`）。
 
 因此同一层里“声明”优先于“目录发现”。
 
@@ -142,11 +139,7 @@ spawn 工具的说明文本由 `spawn_tool_spec::build` 生成：先列用户定
 
 有配置文件时，执行顺序如下：
 
-1. 内置角色读嵌入式内容，用户角色用敏感文件读取器读磁盘（`role.rs:136-155`）。
-2. 先把文件解析成 `ConfigToml`，再解析一次以校验，并相对角色文件目录解析路径（`role.rs:157-161`）。
-3. 只把下表字段放进 `AgentRoleOverrides`（`role.rs:80-89`）。
-4. 只保留“关闭能力”的 feature 与 skill 条目（`role.rs:91-117`）。
-5. 若投影结果为空，直接返回；否则重建配置（`role.rs:119-127`）。
+读取配置内容时按角色来源分流：内置角色的文件内容随二进制嵌入，直接取内存副本；用户角色由敏感文件读取器从磁盘读取（`role.rs:136-155`）。内容先解析成 `ConfigToml`，再解析一次以校验，其中的相对路径以角色文件所在目录为基准展开（`:157-161`）。随后只把下表的字段放进 `AgentRoleOverrides`，并只保留用于关闭能力的 feature 与 skill 条目（`:80-117`）。投影结果为空时函数直接返回，有内容才按投影结果重建配置（`:119-127`）。
 
 投影字段与效果：
 
@@ -202,12 +195,12 @@ V2 子 Agent 冷加载会先基于当前父回合构造配置，再应用来源�
 
 AGENTS.md 的发现和角色完全独立，规则如下：
 
-- 从当前工作目录向上找到项目根，默认标记是 `.git`；找不到标记时只考虑当前目录（`codex-rs/core/src/agents_md.rs:189-222`）。
-- 从项目根向下到当前目录逐层收集，每层只取第一个命中的文件名（`codex-rs/core/src/agents_md.rs:242-268`）。
-- 每层的候选顺序固定为 `AGENTS.override.md`、`AGENTS.md`，再拼接 `project_doc_fallback_filenames`（`codex-rs/core/src/agents_md.rs:272-295`）。
-- 总预算由 `project_doc_max_bytes` 控制，默认 32768 字节；超出后截断后续文件（`codex-rs/core/src/agents_md.rs:68-113`、`config_toml.rs:77-85`）。
-- 不可信项目直接跳过项目文档，只保留宿主提供的用户指令（`codex-rs/core/src/agents_md.rs:63-66`）。
-- 多个执行环境各自读取，按环境顺序累加，直到预算耗尽（`codex-rs/core/src/agents_md.rs:68-113`）。
+- 查找项目根时从当前工作目录向上走，默认标记是 `.git`；找不到标记时只考虑当前目录（`codex-rs/core/src/agents_md.rs:189-222`）。
+- 确定项目根后，从根向下逐层收集到当前目录，每层只取第一个命中的文件名（`:242-268`）。
+- 每层的候选顺序固定为 `AGENTS.override.md`、`AGENTS.md`，之后拼接 `project_doc_fallback_filenames` 里的名字（`:272-295`）。
+- 总预算由 `project_doc_max_bytes` 控制，默认值为 32768 字节，定义在 `config_toml.rs:77-85`；预算耗尽后截断后续文件（`:68-113`）。
+- 不可信项目直接跳过项目文档，只保留宿主提供的用户指令（`:63-66`）。
+- 多个执行环境按顺序各自读取并累加，直到预算耗尽（`:68-113`）。
 
 AGENTS.md 片段最终以 user 角色注入（`codex-rs/core/src/context/world_state/agents_md.rs:36-42`、`session/mod.rs:5139`）。因此角色改的是开发者指令，AGENTS.md 改的是用户上下文，两者不会互相覆盖。
 

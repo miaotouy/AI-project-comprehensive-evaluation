@@ -84,10 +84,10 @@ interface Assistant {
 
 `assembleSystemPrompt` 函数（`src/main/ai/runtime/aiSdk/params/assembleSystemPrompt.ts`）：
 
-1. 若 `assistant.prompt` 非空，先做变量替换（`replacePromptVariables`，代入模型名）再写入；
-2. 若工具集中包含 `tool_search` 工具，追加推迟工具的命名空间目录提示词（`deferredToolsSystemPrompt`）；
-3. 所选首方查询工具带 citation-id 契约时（`hasCitableTools`）追加 `CITATIONS_SYSTEM_PROMPT` 引用格式说明段（`assembleSystemPrompt.ts:19-25,41-49`）；
-4. 多段用 `\n\n` 连接，全空返回 `undefined`。
+1. 该函数在助手提示词字段非空时，先代入模型名等上下文完成变量替换，再写入系统提示；
+2. 工具集包含 `tool_search` 时，追加推迟工具的命名空间目录提示词；
+3. 首方查询工具带 citation-id 契约时，追加引用格式说明段，拼接位置见 `assembleSystemPrompt.ts:19-25,41-49`；
+4. 多段之间以空行连接，全部为空时返回 `undefined`。
 
 目前 `prompt` 是纯文本，支持变量替换但没有类似 AIO Hub 的多节点消息树；没有 few-shot 示例对话的原生存储字段。
 
@@ -103,12 +103,14 @@ interface Assistant {
 
 本节源码定位：
 
-- `modelResolution.ts:32-45`：`resolveAssistantModelId`，随后 `assistantDataService.getById` 读取助手
-- `AiService.ts`：`getProviderAndModel` 在请求构造时再次 `getById(request.assistantId)`
-- `assembleSystemPrompt.ts`：`buildAgentParams` 建参时直接读 `assistant.prompt`
-- `src/main/data/db/schemas/message.ts:39-41`、`src/shared/data/types/message.ts:396-402`：消息快照字段定义
-- `PersistentChatContextProvider.ts:39-55`（:246）：`buildAssistantMessageSnapshot` 写入点
-- `modelResolution.ts:53-64`：`resolvePersistentSiblingsGroupId`（重新生成分支）
+| 链路环节 | 源码定位 | 说明 |
+| --- | --- | --- |
+| 模型解析与助手读取 | `modelResolution.ts:32-45` | `resolveAssistantModelId` 解析助手模型后，助手数据服务按 id 读取助手记录 |
+| 请求构造 | `AiService.ts` | `getProviderAndModel` 再次按 `request.assistantId` 读取助手 |
+| 参数构建 | `assembleSystemPrompt.ts` | `buildAgentParams` 直接读取助手提示词 |
+| 消息快照字段 | `src/main/data/db/schemas/message.ts:39-41`、`src/shared/data/types/message.ts:396-402` | 快照字段定义 |
+| 快照写入 | `PersistentChatContextProvider.ts:39-55,246` | `buildAssistantMessageSnapshot` 写入点 |
+| 重新生成分支 | `modelResolution.ts:53-64` | `resolvePersistentSiblingsGroupId` 解析兄弟分组 id |
 
 重新生成不是覆盖：前端入口 `regenerateWithCapabilities`（`src/renderer/pages/home/hooks/useChatWriteActions.ts:304`）发起流式请求，主进程在重生成分支中为回复继承或新分配 `siblingsGroupId`，在原用户消息下新建 assistant 兄弟占位，旧回复保留——与 AIO Hub 的"同历史分支重新生成对比"语义一致。
 
@@ -194,17 +196,21 @@ Cherry Studio 只有一个内置助手实例（空提示词的 "Cherry 助手"�
 
 Legacy v1 代码（`LegacyAssistant` 类型）显示旧版本曾有更多字段，v2 迁移时做了精简：主要能力保留在 `AssistantSettings` 中，或移到了独立关联表。旧版字段（部分列举）包括：
 
-- `type`、`group`
-- `messages`（少样本示例对话）
-- `enableUrlContext`
-- `knowledgeRecognition`
-- `regularPhrases`
+| 旧版字段 | 说明 |
+| --- | --- |
+| `type`、`group` | — |
+| `messages` | 少样本示例对话 |
+| `enableUrlContext` | — |
+| `knowledgeRecognition` | — |
+| `regularPhrases` | — |
 
 ## 7. 导入与兼容性
 
-- **资源目录**：通过 `resourceCatalog/` 和 `assistantTransfer.ts`，支持从市场导入助手模板；工具配置不跨随助手迁移，需在目标机器重新绑定。
-- **v1 → v2 迁移**：`AssistantMigrator.ts` 把旧版字段映射到新 Schema；部分字段（如 `contextCount`、`toolUseMode`）被废弃或并入助手设置层。
-- **SillyTavern/AIO Hub 迁移**：没有官方路径；将源角色的系统提示词导入 `prompt` 字段即可，少样本对话和世界书没有原生对应字段。
+| 迁移路径 | 做法与边界 |
+| --- | --- |
+| 资源目录导入 | 助手模板可从市场导入，转换逻辑在 `resourceCatalog/` 与 `assistantTransfer.ts`；工具配置不随助手迁移，需在目标机器重新绑定 |
+| v1 → v2 迁移 | `AssistantMigrator.ts` 把旧版字段映射到新 Schema，`contextCount`、`toolUseMode` 等被废弃或并入助手设置层 |
+| SillyTavern / AIO Hub 迁移 | 没有官方路径，把源角色的系统提示词写入 `prompt` 字段即可；少样本对话与世界书没有原生对应字段 |
 
 ## 8. 当前角色能力边界
 

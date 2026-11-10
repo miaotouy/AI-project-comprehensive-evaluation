@@ -28,18 +28,18 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 一条 text 调用链：
 
-1. `ChatComposer`（`ChatComposer.tsx:978-1002`）汇总草稿、附件与知识库范围，经发送链由 `useConversationTurnController.ts:59` 通过 IPC `ai.stream.open` 发出请求。
-2. 主进程 `PersistentChatContextProvider.prepareDispatch`（`:143-331`）：解析模型数组（多于一个即多模型），单事务建 1 条用户消息 + N 条 assistant 占位消息；随后按锚点路径、`data-clear` 标记与压缩视图拼装上下文，并重放工具输出、剔除媒体、合并相邻同角色消息（`messageRules.ts:75-83`）。
-3. `AiStreamManager.send`（`AiStreamManager.ts:322-407`）为每个模型并行启动并执行生成循环；AI SDK Agent（`Agent.ts:238`）把 initialMessages 转成 model messages 后由 provider runtime 发起流式调用。
-4. 流式块经各自的 `PersistenceListener` 写回占位消息；渲染层通过 `useExecutionOverlay`（`useExecutionOverlay.ts:149-379`）读取流式增量并与 DB 历史合并，`MessageList.tsx:170-186` 按 `firstLiveGroupIndex` 把同一批消息切成已封存历史段与 live 段渲染。
-5. 最终化落库后 `TopicNamingService` 两阶段自动命名（首条用户消息临时标题 → 首轮回复后 AI 摘要标题），`isNameManuallyEdited` 手动改名后永久停止。
+1. Composer 组件汇总草稿、附件与知识库范围，再交给发送链，由渲染层的回合控制器经 IPC 通道发出 `ai.stream.open` 请求；入口位于 `ChatComposer.tsx:978-1002` 与 `useConversationTurnController.ts:59`。
+2. 主进程在派发前解析模型数组，多于一个模型即按多模型处理，单事务写入 1 条用户消息和 N 条 assistant 占位消息；随后按锚点路径、`data-clear` 标记与压缩视图拼装上下文，并重放工具输出、剔除媒体、合并相邻同角色消息。定位见 `PersistentChatContextProvider.ts:143-331` 与 `messageRules.ts:75-83`。
+3. 流管理器为每个模型并行启动并推进一条生成循环；AI SDK 的 Agent 把 initialMessages 转成 model messages，再由 provider runtime 发起流式调用。定位见 `AiStreamManager.ts:322-407` 与 `Agent.ts:238`。
+4. 流式块由每个执行各自的持久化监听器写回占位消息；渲染层从执行 overlay 读取流式增量，与数据库历史合并后交给消息列表，由后者按流式分组的起始索引把同一批消息切成已封存历史段与 live 段渲染。定位见 `useExecutionOverlay.ts:149-379` 与 `MessageList.tsx:170-186`。
+5. 最终化落库后，主题命名服务分两阶段自动命名：先用首条用户消息生成临时标题，首轮回复完成后再换成 AI 摘要标题；一旦手动改名（`isNameManuallyEdited`），自动命名永久停止。
 
 ## 核心对象与状态权威
 
-- **Topic**：`src/shared/data/types/topic.ts`，SQLite 行；新建事务内同时创建虚拟根消息（CHECK 约束 `(role='root') = (parentId IS NULL)` 强制）。`TopicService.setActiveNodeTx`（`:373-409`）把 `active_node_id` 指向目标分支 leaf，是分支选择的唯一权威指针。
-- **Message**：`MessageService` 维护 adjacency-list 树；`siblingsGroupId` 标记多模型/多分支兄弟组，`rootId`（`parentId === rootId`）判定"第一轮"；虚拟根不可删、清空保留根。
-- **运行状态**：`AiStreamManager` 的 `ActiveExecution/ActiveStream`（status 6 种取值）是主进程侧权威；渲染层 live overlay 由窗口级 `ExecutionStreamOverlayService` 持有（组件卸载不拆 reader），分支草稿持久化为空 user 叶子（`reserveBranch`，见专项笔记）。
-- **UI 数据分层**：`useTopicMessages`（SWR 缓存历史）+ `executionStreamOverlayService`（流式增量，`useExecutionOverlay` 只是 React 绑定）+ 分支图 `mergeTopicMessageFlowLiveTree`（DB 树 + 运行时 overlay 合并；awaiting-input 叶子本身已是 DB 节点）三套数据互不混入持久层。
+- **Topic**：对应 SQLite 表中的一行，类型定义在 `src/shared/data/types/topic.ts`；新建时在同一事务内创建虚拟根消息，CHECK 约束 `(role='root') = (parentId IS NULL)` 保证根角色与空父节点同时成立。分支切换由 `TopicService.setActiveNodeTx`（`:373-409`）把 `active_node_id` 指向目标分支的叶子节点，该指针是分支选择的唯一权威。
+- **Message**：消息由 `MessageService` 维护成邻接表树；`siblingsGroupId` 把同一次发送产生的多模型或多分支回复标为兄弟组，父节点等于根节点的消息判定为"第一轮"；虚拟根不可删除，清空会话时保留根。
+- **运行状态**：运行中的执行与流以主进程流管理器内的 `ActiveExecution/ActiveStream` 对象为准，状态字段共 6 种取值，是主进程一侧的权威来源。渲染层的 live overlay 由窗口级 `ExecutionStreamOverlayService` 持有，组件卸载不会拆掉 reader；分支草稿持久化为空 user 叶子，经 `reserveBranch` 创建（见专项笔记）。
+- **UI 数据分层**：渲染层叠合三套数据源：`useTopicMessages` 提供 SWR 缓存的历史，`executionStreamOverlayService` 持有流式增量（`useExecutionOverlay` 只是它的 React 绑定），分支图则把数据库树与运行时 overlay 合成一份视图，awaiting-input 叶子本身已是数据库节点。三者各自在展示层汇合，均不写入持久层。
 
 ## 专项导航
 
@@ -52,12 +52,16 @@ Cherry Studio 是 Electron 桌面聊天客户端，Home（普通会话）与 Age
 
 ## 关键能力与已确认边界
 
-- **真树 + 指针切换**：分支是持久化树（`parentId`/`siblingsGroupId`），切分支 = `setActiveBranch` 先求目标分支最新 leaf 再改 `active_node_id`；`< i/N >` 兄弟导航与分支面板（React Flow + dagre 布局）同语义并存。
-- **多模型并行回复**：N 个 execution 真并行，各自流式写各自占位消息，共享 `siblingsGroupId` 在 UI 横向/网格分组展示（`bucketAssistantSiblingsByModel`）。
-- **消息搜索为 DOM 搜索**：`utils/contentSearch.ts` 用 TreeWalker 遍历渲染出的文本节点 + CSS Custom Highlight API 高亮，虚拟化窗口外/未展开的内容搜不到（架构固有限制，非 bug）。
-- **消息列表**：virtua 虚拟化，`getMessageGroupKey` 按"assistant+parentId"分组以支持多模型/重试同组展示，`stableGroupedMessages` 结构共享避免 memo 失效。
+- **真树 + 指针切换**：分支以持久化树表达，节点位置由父节点与兄弟组字段确定；切换分支时由 `setActiveBranch` 先找到目标分支的最新叶子，再改写 `active_node_id` 活动指针。`< i/N >` 兄弟导航与分支面板（React Flow + dagre 布局）走同一套语义。
+- **多模型并行回复**：N 个 execution 真正并行执行，各自把流式结果写进自己的占位消息，共享 `siblingsGroupId`，界面再按模型把它们横向或网格分组展示（`bucketAssistantSiblingsByModel`）。
+- **消息搜索为 DOM 搜索**：搜索作用于渲染后的 DOM，`utils/contentSearch.ts` 用 TreeWalker 遍历文本节点，再用 CSS Custom Highlight API 高亮命中；虚拟化窗口之外和尚未展开的内容搜不到，这是虚拟化架构的固有限制。
+- **消息列表**：virtua 负责虚拟化，`getMessageGroupKey` 按"assistant + parentId"分组，让多模型回复与重试落在同一组展示；`stableGroupedMessages` 通过结构共享避免 memo 失效。
 - **完成与审批通知**：主进程订阅会话事件，聚焦时发送应用内 toast、失焦时按偏好发送系统通知，点击能返回对应会话；详见[Chat UI 笔记 8.2](<../Chat UI/Cherry-Studio-ChatUI调查笔记.md>)。
-- **分支草稿、删除与附件回收**（详见专项笔记）：分支草稿持久化为空 user 叶子，经 `reserveBranch`/`fill-reserved` 创建与填充；消息删除收敛为"splice 保留可达历史"（首轮消息可删、多模型组删除只删兄弟回复）；删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期清理由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）执行，永久删除才真正 purge；附件回收由 FileManager 引用计数 + 策略化 GC 兜底。
+- **分支草稿、删除与附件回收**（详见专项笔记）：
+  - 分支草稿持久化为空 user 叶子，经 `reserveBranch` 与 `fill-reserved` 两步创建并填充。
+  - 消息删除收敛为"splice 保留可达历史"：首轮消息可删，多模型组删除只删兄弟回复。
+  - 删除 Topic 先进入回收站（`src/main/services/trash/TrashService.ts`），到期由 `trashPurgeJobHandler` 按 `data.trash.retention_days`（默认 30 天）清理，永久删除才真正 purge。
+  - 附件回收由 FileManager 的引用计数与策略化 GC 兜底。
 
 ## 当前聊天主链补充
 

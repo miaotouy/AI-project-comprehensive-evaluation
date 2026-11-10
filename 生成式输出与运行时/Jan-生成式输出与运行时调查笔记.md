@@ -24,26 +24,26 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 
 已走通的主链路（触发 → 生成 → 展示/运行 → 交互 → 保存 → 重新打开）：
 
-1. 触发：用户提交后，发送入口构建 AI SDK 的 `UIMessage`，再由传输层组装上下文并启动流式生成（发送链路见 web-app/src/routes/threads/$threadId.tsx:913-1123；组装与生成见 web-app/src/lib/custom-chat-transport.ts:1296-1375）。
-2. 生成：文本 delta 流式进入消息 parts；生成结束回调 `onFinish` 把完成的消息转为 `ThreadMessage`（content 数组含 text/file/reasoning 等）写入后端（web-app/src/routes/threads/$threadId.tsx:293-460）。
-3. 保存：Rust 把消息写入 `threads/<threadId>/messages.jsonl`（`src-tauri/src/core/threads/commands.rs:159` 起；mod.rs 说明单线程串行写保证一致性）。事实源就是这份 JSONL 消息文件，文件中不存在 artifact 对象。
-4. 展示/运行：消息渲染器渲染文本 part；若设置开启且非流式，拆段逻辑（`splitHtmlArtifacts`）把 html/svg 围栏拆出，html 段交给 `HtmlArtifact`（代码/预览双页签，预览为沙箱 iframe），svg 段以禁脚本静态预览渲染（`web-app/src/containers/RenderMarkdown.tsx:335-355`、`web-app/src/lib/utils.ts:72-121`、`web-app/src/components/HtmlArtifact.tsx`）。
+1. 触发：用户提交消息后，发送入口把它包装成 AI SDK 的 `UIMessage`，传输层补齐上下文并启动流式生成（`web-app/src/routes/threads/$threadId.tsx:913-1123`、`web-app/src/lib/custom-chat-transport.ts:1296-1375`）。
+2. 生成：文本增量持续写入当前消息的文本 part；生成结束时，回调 `onFinish` 把这条消息整理成 `ThreadMessage` 写入后端，其 content 数组可包含文本、文件与推理等 part（`web-app/src/routes/threads/$threadId.tsx:293-460`）。
+3. 保存：Rust 侧把消息写入 `threads/<threadId>/messages.jsonl`，同一线程的写入串行执行以保证一致性；这份 JSONL 文件就是消息的事实源，其中不存在 artifact 对象（`src-tauri/src/core/threads/commands.rs:159` 起）。
+4. 展示与运行：消息渲染器按 part 渲染文本；设置开启且消息不在流式状态时，拆段逻辑把 html/svg 围栏从文本中切出，html 段交给 `HtmlArtifact` 组件（代码与预览双页签，预览是沙箱 iframe），svg 段以禁脚本的静态方式预览（`web-app/src/containers/RenderMarkdown.tsx:335-355`、`web-app/src/lib/utils.ts:72-121`）。
 5. 交互：页签切换，iframe 内模型脚本可运行；公共壳会发送错误/框选消息，但普通 Chat 卡片没有对应消费，详见第 5 节。
-6. 重新打开：读回 JSONL，把消息对象转回 AI SDK 的 `UIMessage`（`web-app/src/lib/messages.ts:255`），再走同一渲染链按消息文本重新推导 artifact。链路闭合，但闭合的是"文本渲染"，不是对象恢复。
+6. 重新打开：读回 JSONL 后把消息对象转回 AI SDK 的 `UIMessage`，再走同一渲染链按持久文本重新渲染 artifact（`web-app/src/lib/messages.ts:255`）。预览打开时从源码创建新的 iframe 实例；旧实例的表单值、脚本变量和定时器等运行状态没有保存与回灌通道（[预览文档生成](<../../jan/web-app/src/components/HtmlArtifact.tsx#L26-L48>)、[iframe 挂载](<../../jan/web-app/src/components/HtmlArtifact.tsx#L102-L121>)）。
 
 普通 Chat 的围栏 artifact 无文件读取与定向修改；Cowork 可通过 read/find/grep 查找已有文件，再经 edit/write 对同一工作区文件修改。文件路径充当对象定位键，工具执行结果进入后续模型回合（`web-app/src/lib/agentTools.ts:39-56`、`web-app/src/lib/coworkRunner.ts:571-590`）。
 
 ## 1. 触发方式、输出协议与对象模型
 
-- 触发方式：HTML/SVG artifact 完全由模型自由文本中的围栏触发，无用户命令、无结构化 part、无工具调用参与。识别正则 `ARTIFACT_RE` 匹配 html/svg 两种围栏及裸 `<svg>…</svg>` 标签，其余语言围栏（js、py 等）原样留在 Markdown 流中（web-app/src/lib/utils.ts:72-121）。防误触发靠两点：一是要求围栏体是孤立的 SVG，二是流式中不拆段，未闭合围栏不会在 token 中途被抽出（web-app/src/containers/RenderMarkdown.tsx:258-264）。协议处理的是正则文本，无转义与嵌套概念——嵌套围栏不会被该正则识别，直接留在正文。
-- 普通 Chat 围栏没有独立对象；Cowork Artifact 由 write/edit 与 shell 输出的工具轨迹派生，新建且扩展名允许的交付文件收为卡片，修改已有文件进入差异面板。文件位于会话沙箱或附加目录，卡片引用的是该文件本体（`web-app/src/lib/coworkArtifacts.ts:107-201`、`web-app/src/lib/coworkDiffs.ts`）。
-- 消息对象本身有完整身份：稳定 ID、所属线程、角色、状态、创建时间与元数据（元数据承载 `parentId` 分支、`stopped` 标记等）（web-app/src/routes/threads/$threadId.tsx:397-411），但那是 Chat/消息层身份，不属于输出对象。
+- 触发方式：HTML/SVG artifact 完全由模型自由文本中的围栏触发，用户命令、结构化 part 与工具调用都不参与。识别用的正则可匹配 html、svg 两种围栏以及裸 `<svg>…</svg>` 标签，其它语言的围栏（js、py 等）原样留在 Markdown 流中（`web-app/src/lib/utils.ts:72-121`）。防误触发有两道约束：围栏体必须是孤立的 SVG，流式期间不拆段，因此未闭合的围栏不会在生成中途被抽出（`web-app/src/containers/RenderMarkdown.tsx:258-264`）。该协议直接在正则文本上工作，没有转义与嵌套概念，嵌套围栏不会被识别，最终留在正文里。
+- 普通 Chat 的围栏没有独立对象；Cowork 的 Artifact 从 write、edit 与 shell 的工具轨迹中派生，新建且扩展名允许的交付文件收为卡片，对已有文件的修改进入差异面板，卡片指向会话沙箱或附加目录里的文件本体（`web-app/src/lib/coworkArtifacts.ts:107-201`、`web-app/src/lib/coworkDiffs.ts`）。
+- 消息对象本身有完整身份：稳定 ID、所属线程、角色、状态、创建时间与元数据，元数据承载 `parentId` 分支与 `stopped` 标记等字段。这套身份属于 Chat 消息层，输出对象自身没有身份（`web-app/src/routes/threads/$threadId.tsx:397-411`）。
 
 ## 2. 增量生成、更新与最终化
 
-- 流式输出按 token 增量更新消息文本 part；渲染器用延迟值与条件 memo 合并高频渲染，流式中走纯文本路径避免每 token 高亮（web-app/src/containers/RenderMarkdown.tsx:68-95, 216-231, 347-352）。这属于消息渲染器的增量机制。
-- artifact 的"更新"是整体替换：非流式且设置开启时，输入内容变化会使分段与 iframe 的文档源整体重建（`HtmlArtifact` 组件内由 memo 驱动）（web-app/src/components/HtmlArtifact.tsx:77-81）。没有 AST 节点更新、没有 diff/patch 应用——搜索 diff、patch 在输出链中未找到任何应用机制（仅日期差值与 MCP schema 修补等无关命中）。
-- 最终化收口：生成完成回调持久化消息；当生成因长度截断结束（`finishReason === 'length'`）时标记 `stopped` 并提供 Continue（重放前缀继续生成）（web-app/src/routes/threads/$threadId.tsx:301-341, 1352 起）；流式进行中预览页签禁用，强制显示 Code 视图（HtmlArtifact.tsx:83-84, 120-127）。
+- 流式输出按 token 增量更新消息的文本 part；渲染器用延迟值与条件 memo 合并高频渲染，流式期间改走纯文本路径，避免每个 token 都触发语法高亮。这套增量机制位于消息渲染器这一层（`web-app/src/containers/RenderMarkdown.tsx:68-95, 216-231, 347-352`）。
+- artifact 的"更新"是整体替换：非流式且设置开启时，输入内容一变化，分段结果与 iframe 的文档源就整体重建，重建由组件内的 memo 驱动（`web-app/src/components/HtmlArtifact.tsx:77-81`）。更新过程不涉及 AST 节点级改动；在输出链中搜索 diff 与 patch 未找到任何应用机制，命中项只有日期差值与 MCP schema 修补等无关代码。
+- 最终化：生成完成回调负责持久化消息。生成因长度截断结束时（`finishReason === 'length'`），消息会标记为 stopped 并提供 Continue，用重放前缀的方式继续生成（`web-app/src/routes/threads/$threadId.tsx:301-341, 1352` 起）。流式进行中预览页签不可用，界面强制停在 Code 视图（`HtmlArtifact.tsx:83-84, 120-127`）。
 
 ## 3. 投影表面与多视图关系
 
@@ -52,8 +52,8 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 
 ## 4. 表现类型、依赖与运行环境
 
-- 表现层级：静态 Markdown（GFM、KaTeX、Streamdown 代码块、Mermaid 图）覆盖 G0 至 G1 静态层；HTML artifact 是唯一动态层——模型 HTML/CSS/JS 在 iframe 中执行（`sandbox="allow-scripts"`，无 `allow-same-origin` → 不透明源，`referrerPolicy="no-referrer"`）（`web-app/src/components/HtmlArtifact.tsx:118-122`）。
-- 依赖提供：iframe 用 `srcDoc` 内联，文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装：CSP meta 置于最前，再注入内存存储 shim 与元素检查器脚本，然后才是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档，决定页面能用哪些脚本、媒体与网络：
+- 表现层级：静态 Markdown（GFM、KaTeX、Streamdown 代码块、Mermaid 图）覆盖 G0 至 G1 静态层；HTML artifact 是唯一的动态层，模型的 HTML/CSS/JS 在 iframe 中执行。该 iframe 只授予 allow-scripts、不授予 allow-same-origin，页面因此落在不透明源上，引用策略设为 no-referrer（`web-app/src/components/HtmlArtifact.tsx:118-122`）。
+- 依赖提供：iframe 用 srcDoc 内联整份文档，文档壳由 `buildSrcDoc` 按顺序拼装：先是 CSP meta，再是内存存储 shim 与元素检查器脚本，最后是模型标记（`htmlSandbox.ts:46-65`）。CSP 分三档，决定页面能用哪些脚本、媒体与网络：
 
   | 档位 | 脚本 | 媒体与网络 |
   |---|---|---|
@@ -63,15 +63,15 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 
   普通 Chat 的 `HtmlArtifact` 调用点未传 `allowNetwork`，Cowork 独立预览面板则有自己的网络开关。预览还会统计无法在沙箱内解析的相对资源并显示提示条（`lib/htmlSandbox.ts:4-60`、`HtmlArtifact.tsx:38-44`、`lib/htmlAssets.ts`）。
 
-  SVG 段复用同一组件但传 `allowScripts={false}`：sandbox 为空、CSP 不声明 `script-src`，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
+  SVG 段复用同一个组件，只是把 allowScripts 传成 false：此时 sandbox 为空，CSP 不声明 script-src，也不注入元素检查器（`RenderMarkdown.tsx:355-361`、`htmlSandbox.ts:58-60`）。
 - 产品文案与实现一致：设置页说明"HTML runs the model-generated page in a sandboxed frame that executes its own scripts but cannot access Jan, your files, or the network"（web-app/src/locales/en/settings.json:99）。该功能标注为实验性，默认关闭（web-app/src/hooks/useInterfaceSettings.ts:186）。
 
 ## 5. 用户交互、事件与错误反馈
 
-- 模型页面的按钮、表单与 JS 状态在 iframe 内运行。公共壳注入的 shim 可向父窗口发送异常、加载失败及 CSP 拦截报告，inspector 可发送元素 pin/clear 消息；脚本发送与宿主消费需要分开判断。普通 Chat 的 `HtmlArtifact` 仅组装 iframe，没有 message 监听或框选状态，因此这些报告不会在卡片形成错误反馈或模型回流（[HtmlArtifact.tsx:26–48、114–121](../../jan/web-app/src/components/HtmlArtifact.tsx#L26-L48)、[htmlSandbox.ts:56–65](../../jan/web-app/src/lib/htmlSandbox.ts#L56-L65)）。
-- Cowork 的 srcdoc 预览按 iframe 的 contentWindow 过滤报告、去重并限量显示错误提示，本次读取的组件未消费 pin/clear。live URL 分支没有该 frame ref，上述错误反馈的过滤、去重与限量提示只作用于 srcdoc 预览这一支（[CoworkPreviewPanel.tsx:250–319](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx#L250-L319)）。
+- 模型页面的按钮、表单与 JS 状态都在 iframe 内运行。公共壳注入的 shim 会向父窗口上报异常、加载失败与 CSP 拦截，元素检查器则发送框选与清除消息；这些消息能否生效，取决于宿主是否消费。普通 Chat 的 HtmlArtifact 只组装 iframe，没有 message 监听，也没有框选状态，因此卡片上不会出现错误反馈，报告也不会回流给模型（[HtmlArtifact.tsx:26–48、114–121](../../jan/web-app/src/components/HtmlArtifact.tsx#L26-L48)、[htmlSandbox.ts:56–65](../../jan/web-app/src/lib/htmlSandbox.ts#L56-L65)）。
+- Cowork 的 srcdoc 预览会按 iframe 的 contentWindow 过滤报告、去重后限量显示错误提示；本次读取的组件没有消费框选与清除消息。live URL 分支不持有该 frame 引用，错误反馈的过滤、去重与限量提示只作用于 srcdoc 预览（[CoworkPreviewPanel.tsx:250–319](../../jan/web-app/src/containers/CoworkPreviewPanel.tsx#L250-L319)）。
 - 交互状态不恢复：切到 Code 视图即卸载 iframe，切回重建全新文档；应用重载后从文本重建。预览高度用 CSS 的 resize-y 样式可拖拽，属浏览器原生行为，不持久化。
-- 工具结果（Web 搜索/抓取、RAG、MCP）以只读卡片展示：搜索条/地址栏样式的工具条，配结果链接行、引用卡片与文本片段（`web-app/src/containers/message/WebToolWidget.tsx:58` 起；`RagToolWidget.tsx:25` 起）。可点击打开外部链接，卡片承担工具结果的只读展示，结果本身未物化为可编辑对象。
+- 工具结果（Web 搜索与抓取、RAG、MCP）以只读卡片展示：工具条做成搜索框或地址栏样式，下方配结果链接行、引用卡片与文本片段，链接可点击打开外部页面。卡片只承担结果的只读展示，结果本身没有物化成可编辑对象（`web-app/src/containers/message/WebToolWidget.tsx:58` 起、`RagToolWidget.tsx:25` 起）。
 
 ## 6. 编辑、diff、版本与协作
 
@@ -81,9 +81,9 @@ Cowork 的 Artifact 有三条派生来源：`write` 工具确认真正新建了�
 
 ## 7. 能力桥、执行位置与权限范围
 
-- 普通 Chat 围栏 iframe 无宿主能力桥；Cowork 的文件和 shell 工具是 Agent 自身受工具网关控制的能力，不应混同于 HTML 页面的任意宿主 API。Cowork 预览默认隔离，开启 live `preview://` 后有专用 origin 和文件 root 限制，需单独评价网络开关（`web-app/src/containers/CoworkPreviewPanel.tsx:44-83`）。
-- 工具执行位置（与本类目交界，属 Agent 工具类目）：Web 搜索/抓取在 Rust 进程内用 reqwest 请求 Exa、Tavily、SearXNG 等搜索服务（`src-tauri/plugins/tauri-plugin-websearch/src/provider.rs:74-188`）；RAG 走扩展（extensions/rag-extension）；MCP 工具经服务中心的 callTool 通道调 Rust 侧 MCP 客户端（`web-app/src/routes/threads/$threadId.tsx:218` 起）。执行调度与审批属 Agent 工具调查，本笔记只记交接点：这些工具的结果以文本/JSON 回填消息，未产生可操作对象。
-- 外部执行桥（能力桥的另一次应用）：Claude Code 集成把 Jan 本地 OpenAI 兼容服务器地址写入 shell 环境文件并提示用户自行启动外部 CLI（`web-app/src/routes/settings/claude-code.tsx:38` 起；`src-tauri/src/core/system/commands.rs:897-1038`）；独立 Jan Agent CLI/TUI 运行自己的 Agent 并用远程 Provider（`src-tauri/jan-cli/src/main.rs`），旧 `jan launch` 派生外部 agent 程序的分支已不在当前命令树中。执行面在外部终端或 CLI 自身进程，Jan 桌面只提供模型后端与配置，不在 Jan 内产生输出对象。
+- 普通 Chat 的围栏 iframe 没有宿主能力桥；Cowork 的文件与 shell 工具属于 Agent 自身的能力，由工具网关控制，和 HTML 页面可用的宿主 API 是两条独立通道。Cowork 预览默认隔离，开启 live 的 `preview://` 模式后才使用专用 origin 与受限的文件 root，网络开关要按这一模式单独评估（`web-app/src/containers/CoworkPreviewPanel.tsx:44-83`）。
+- 工具执行位置（与本类目交界，细节归 Agent 工具类目）：Web 搜索与抓取在 Rust 进程内用 reqwest 请求 Exa、Tavily、SearXNG 等服务，RAG 由独立扩展（extensions/rag-extension）提供，MCP 工具经服务中心的 callTool 通道转给 Rust 侧客户端。工具调用入口见 `web-app/src/routes/threads/$threadId.tsx:218` 起，搜索与抓取的请求实现在 `src-tauri/plugins/tauri-plugin-websearch/src/provider.rs:74-188`。执行调度与审批留给 Agent 工具调查，本笔记只记交接点：这些工具的结果以文本或 JSON 回填消息，没有产生可操作对象。
+- 外部执行桥（能力桥的另一种应用）：Claude Code 集成把 Jan 本地 OpenAI 兼容服务器地址写入 shell 环境文件，并提示用户自行启动外部 CLI（`web-app/src/routes/settings/claude-code.tsx:38` 起、`src-tauri/src/core/system/commands.rs:897-1038`）。独立 Jan Agent CLI/TUI 运行自己的 Agent 并使用远程 Provider（`src-tauri/jan-cli/src/main.rs`），旧的 jan launch 命令已不在当前命令树中。这些路径的执行面都在外部终端或 CLI 自身进程，Jan 桌面只提供模型后端与配置，输出对象不在 Jan 内产生。
 
 ## 8. 持久化、恢复、分享与导出
 

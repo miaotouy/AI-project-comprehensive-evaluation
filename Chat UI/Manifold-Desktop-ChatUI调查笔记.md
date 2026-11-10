@@ -37,39 +37,39 @@ Manifold Desktop 的 Chat 界面把状态放在标签页内存里：应用提供
 
 ## 1. 页面结构、导航与多窗口
 
-- 布局为固定四区：标签条、主区（内含侧栏与标签内容）、输入栏、Toast 容器（`index.html:18-26`）。
-- `tab-bar.js` 渲染标签条：`role=tablist`/`aria-selected`、每个标签的关闭按钮、末尾 "+" 新建按钮（:48-81）。标签类型由 `app.js` 决定：Home 常驻不可关（:33-44），chat/terminal/compare 由三个创建函数生成（:138-174）。
-- 本快照为单 WebView2 窗口（`MainWindow.xaml.cpp:197-236`），未发现多窗口或分离窗口机制（检查范围：前端与 MainWindow 源码，无第二窗口创建点）。
-- 侧栏折叠：`side-panel.js:23-25` 导出 `toggle()` 但全仓库无调用点，未发现折叠入口。
+- 页面骨架在 `index.html:18-26` 固定为四个区域：顶部标签条、中部主区（内含侧栏与标签内容）、底部输入栏和 Toast 容器。
+- 标签条由 `tab-bar.js:48-81` 渲染，向辅助技术暴露 `tablist` 角色与选中状态，每个标签带关闭按钮，末尾另有 `+` 新建按钮。标签类型由 `app.js:33-174` 决定：Home 常驻且不可关闭，chat、terminal、compare 各由一个创建函数生成。
+- 当前快照只使用一个 WebView2 窗口，承载实现在 `MainWindow.xaml.cpp:197-236`；前端与 MainWindow 源码中都没有第二窗口创建点，本次未发现多窗口或窗口分离机制。
+- 侧栏在 `side-panel.js:23-25` 导出了折叠函数 `toggle()`，但全仓库检索不到调用点，本次未发现折叠入口。
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **侧栏**（`side-panel.js`）：搜索输入（:43-47）、New Chat/Terminal 按钮（:54-55）、会话列表（:74-147）。列表项支持双击标题重命名（:84-105，发送 `SAVE_SESSION {title}`，数据语义见会话与消息管理笔记）、悬停显示的删除（×，带确认，:117-127）与 MD 导出（:129-137）。无置顶、归档、分组或拖放。
-- **Home 页**：Recent Sessions 网格最多 12 条（`home-tab.js:100`）、Import Session 按钮（`:88`）。
-- **搜索浮层**（`search-overlay.js`，Ctrl+F 打开）：300ms 防抖（:24-32）、↑↓/Enter/Esc 键盘导航（:34-58）、结果点击后关闭浮层并 `openChatTab(item.sessionId)` 定位（:76-79）。底层是后端逐文件子串扫描（会话与消息管理笔记第 5 节），无会话内搜索。
-- **现场恢复**：磁盘会话可从侧栏/Home/搜索重新打开并渲染（`chat-tab.js:101-114`）；内存标签关闭后无恢复路径。
+- **侧栏**：搜索框、新建聊天与新建终端两个按钮、会话列表自上而下排列，结构定义在 `side-panel.js:43-147`。列表项支持双击标题重命名，重命名时发送 `SAVE_SESSION {title}`，重命名数据的落盘语义见会话与消息管理笔记；条目的删除按钮在悬停时出现并带确认，列表项另提供 Markdown 导出。侧栏没有置顶、归档、分组或拖放排序。
+- **Home 页**：Recent Sessions 以网格展示最多 12 条会话，另有 Import Session 按钮，入口见 `home-tab.js:88-100`。
+- **搜索浮层**：按 Ctrl+F 打开，输入后等待 300ms 防抖再发起搜索，可用上下方向键选择、Enter 确认、Esc 关闭；点击结果时关闭浮层并调用 `openChatTab` 打开对应会话。交互实现在 `search-overlay.js:24-79`，底层是后端逐文件子串扫描（会话与消息管理笔记第 5 节），没有会话内搜索。
+- **现场恢复**：磁盘上的会话可以从侧栏、Home 或搜索结果重新打开并渲染，恢复逻辑在 `chat-tab.js:101-114`；内存中的标签关闭后没有恢复路径。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- **输入区**：单一全局 `input-bar`（`app.js:26` 创建一次），textarea 自动增高（`input-bar.js:79,186-191`）、Enter 发送 / Shift+Enter 换行（:73-78）、按字符数/4 估算 token 数（:84-87）。Home 与 terminal 标签下输入栏不渲染（:41-42）。
-- **草稿**：不持久化；发送后清空（`:173`）。标签切换时 `setTabType()` 无条件调用 `render()` 重建 DOM（`:32-42`），未发送的文本随重建丢失——此为静态推断（render 清空 innerHTML 后无草稿恢复逻辑）。
-- **提示词库**：输入栏 📋 按钮经 `LIST_PROMPTS` 弹出下拉（`input-bar.js:109-154`）；标记为 system 的提示词替换全局系统提示，其余插入文本（`:133-143`）。
-- **附件**：无附件 UI 入口（后端附件链路未接线，见对话请求与上下文笔记第 9 节）。
+- **输入区**：输入栏是全局单例，由 `app.js:26` 创建一次，所有聊天标签共用。输入框随内容自动增高，按字符数除以四估算 token 数，Enter 发送、Shift+Enter 换行，这些输入行为集中在 `input-bar.js:41-191`。Home 与 terminal 标签下不渲染输入栏。
+- **草稿**：草稿不落盘，发送后立即清空。切换标签时输入栏无条件重新渲染 DOM，未发送的文本随重建丢失（`input-bar.js:32-42,173`）；渲染会清空容器且没有草稿恢复逻辑，这一结论由静态代码推断。
+- **提示词库**：输入栏的 📋 按钮通过 `LIST_PROMPTS` 拉取提示词并弹出下拉（`input-bar.js:109-154`）；标记为 system 的提示词会替换全局系统提示，其余提示词插入输入框。
+- **附件**：界面没有附件入口，后端的附件链路尚未接线（见对话请求与上下文笔记第 9 节）。
 
 ## 4. Agent、模型、工具与发送前配置
 
-- 发送前配置全部为全局设置，无会话级或分支级作用域：
-  - Provider/模型下拉在输入栏内（`input-bar.js:52-63`），Provider 切换触发 `LIST_MODELS`（`:55-57`），模型按设置值预选（`:233-235`）；
-  - 温度滑杆（0–2）、系统提示、流式开关在设置面板 General 节（`settings-panel.js:138-152`，绑定 `:167-197`）；
+- 发送前配置全部是全局设置，没有会话级或分支级作用域：
+  - 输入栏内是 Provider 与模型下拉，切换 Provider 会触发 `LIST_MODELS` 重新拉取模型，选中的模型按设置值预选（`input-bar.js:52-63,233-235`）；
+  - 温度滑杆（0–2）、系统提示和流式开关放在设置面板的 General 节，控件定义与事件绑定在同一文件（`settings-panel.js:138-197`）；
 - 两处已确认的"配置不生效"：设置面板的 `streamResponses` 开关在发送路径无读取点；前端发送的 `temperature` 值后端不消费（均见对话请求与上下文笔记第 4 节，源码确认）。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **发送**：发送按钮（`input-bar.js:92-97`）→ 发送编排（`app.js:86-123`）把用户消息加入 `messages[]` 并发送 `CHAT_SEND`；发送后按钮禁用、Cancel 显示（流式状态复位，`input-bar.js:22-30`）。
-- **流式反馈**：chunk 追加 `streamingText` 并重设 `innerHTML`（`chat-tab.js:42-45`）；首个文本 chunk 的 innerHTML 赋值会移除流式指示器（`:37-44`）；完成时挂 cost badge（`:61-85`）。
+- **发送**：点击发送按钮后，编排逻辑先把用户消息追加进 `messages[]`，再派发 `CHAT_SEND` 事件；发送期间按钮禁用并显示 Cancel。按钮状态变化在 `input-bar.js:22-97`，消息入列与事件派发在 `app.js:86-123`。
+- **流式反馈**：每个文本 chunk 追加到 `streamingText` 后重设消息容器的 `innerHTML`；首个文本 chunk 写入时，流式指示器会一并被清掉；回合结束时挂上 cost badge。渲染细节见 `chat-tab.js:37-85`。
 - **滚动**：每个 chunk 无条件滚到底（`chat-tab.js:58`），无"停留在历史位置"的开关。
-- **排队与停止**：无界面级排队指示；停止入口是输入栏 Cancel（`input-bar.js:100-106`）→ `providerApi.cancelChat()`（`app.js:126-129`），停止语义是后端单线程 stop+join（对话请求与上下文笔记第 7 节）。无每标签停止按钮。
-- **关闭确认**：× 按钮关闭标签时若 `appStreaming` 为真则弹确认（`app.js:66-69`）；该标志是全局的，任一标签流式时关闭任意标签都会询问（源码确认）。Ctrl+W 直接关闭、不经过此确认（`:186-196`）——鼠标路径与键盘路径行为不一致。
+- **排队与停止**：界面没有排队指示；停止入口只有输入栏的 Cancel 按钮（`input-bar.js:100-106`），它调用 `providerApi.cancelChat()`，由后端按单线程 stop+join 结束生成（`app.js:126-129`，执行语义见对话请求与上下文笔记第 7 节）。每个标签没有独立的停止按钮。
+- **关闭确认**：点击 × 关闭标签时，若全局 `appStreaming` 标志为真则弹出确认；该标志由所有标签共享，任一标签正在流式输出时关闭任意标签都会询问。Ctrl+W 直接关闭标签、不经过这层确认，鼠标与键盘两条路径的行为因此不一致（`app.js:66-69,186-196`）。
 
 ## 6. 消息操作、分支与版本导航
 
@@ -78,26 +78,26 @@ Manifold Desktop 的 Chat 界面把状态放在标签页内存里：应用提供
 
 ## 7. 多会话、多模型、群聊与后台生成
 
-- 多标签共享同一条全局生成线程；`CHAT_CHUNK`/`CHAT_DONE` 广播没有会话标识（对话请求与上下文笔记第 5、8 节），界面没有运行标签标记，也无法从界面判断哪条仍在运行。
-- compare 标签是独立的并排比较表面：共享用户消息 + 每列独立流式（`compare-tab.js:43-81`），发送走 `COMPARE_CHAT`（`app.js:91-105`），默认槽位硬编码（`app.js:163-166`）。
+- 多标签共用同一条全局生成线程：`CHAT_CHUNK` 与 `CHAT_DONE` 事件以广播形式发出，不带会话标识（对话请求与上下文笔记第 5、8 节），界面因此没有运行标签标记，用户也无法从界面判断哪个标签仍在生成。
+- compare 标签是独立的并排比较表面：用户消息在各列之间共享，每列各自流式输出（`compare-tab.js:43-81`）。它的发送走 `COMPARE_CHAT` 通道，默认槽位为硬编码（`app.js:91-105,163-166`）。
 - 无群聊、子 Agent 或后台生成通知。
 
 ## 8. Chat UI 状态所有权与同步
 
-- `messages[]`、`streamingText` 均为 chat-tab 组件局部状态（`chat-tab.js:19-22`），标签切换时随组件保留；标签登记在 `app.js` 的 `tabPanes` Map（:18）。
-- 输入栏状态（provider/model 选择、streaming 标志）是模块级单例（`input-bar.js:4-12`），不随标签区分；草稿不保存。
-- 应用级 `appStreaming` 布尔（`app.js:21`）只用于关闭确认与输入栏状态复位（`:132-135`）。
-- 用量统计存 localStorage（`pricing.js:40-61`）；设置经 `settings-store.js` + 后端 `SAVE_SETTINGS`。
-- 无跨窗口同步问题（单窗口）。
+- 每个聊天标签的消息数组与流式文本都保存在 chat-tab 组件的局部状态里（`chat-tab.js:19-22`），标签切换时随组件保留；标签本身登记在 `app.js:18` 的 `tabPanes` Map 中。
+- 输入栏的 provider/model 选择与 streaming 标志是模块级单例（`input-bar.js:4-12`），所有标签共用一份；草稿不保存。
+- 应用级的 `appStreaming` 布尔值（`app.js:21,132-135`）只用于关闭确认和输入栏状态复位。
+- 用量统计保存在 localStorage（`pricing.js:40-61`）；设置由 `settings-store.js` 维护，并通过后端的 `SAVE_SETTINGS` 保存。
+- 应用只有单窗口，因此没有跨窗口同步问题。
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 
 静态代码可确认的键盘路径：
 
-- 发送/换行：Enter / Shift+Enter（`input-bar.js:73-78`）。
-- 全局快捷键：Ctrl+N 新聊天、Ctrl+T 新终端、Ctrl+W 关标签、Ctrl+, 设置、Ctrl+K 聚焦侧栏搜索、Ctrl+F 搜索浮层、Ctrl+1–9 切换标签（`app.js:177-218`）。
+- 发送与换行：输入框内按 Enter 发送，按 Shift+Enter 换行（`input-bar.js:73-78`）。
+- 全局快捷键：Ctrl+N、Ctrl+T、Ctrl+W 分别新建聊天、新建终端和关闭标签，Ctrl+, 打开设置，Ctrl+K 聚焦侧栏搜索，Ctrl+F 打开搜索浮层，Ctrl+1–9 在标签之间切换（`app.js:177-218`）。
 - 搜索浮层：↑↓/Enter/Esc（`search-overlay.js:34-58`）。
-- 可访问名称：标签条 `role=tablist` + `aria-selected`（`tab-bar.js:51-57`）、textarea 与发送/取消按钮的 `aria-label`（`input-bar.js:71,95,103`）。
+- 可访问名称：标签条用 tablist 角色和 aria-selected 标记当前标签（`tab-bar.js:51-57`），输入框与发送、取消按钮各自带 aria-label（`input-bar.js:71,95,103`）。
 
 静态代码可确认的焦点缺口：chat-tab 实例没有 `focus` 方法，`app.js:54` 的 `entry.instance.focus?.()` 对聊天标签是空操作（对比 terminal 标签有实现，`terminal-tab.js:258`）——切换回聊天标签不会自动聚焦输入框（静态推断）。键盘可用性、焦点顺序、响应式与视觉反馈均未运行验证。
 

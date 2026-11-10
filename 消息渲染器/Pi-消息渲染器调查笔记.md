@@ -16,14 +16,18 @@
 
 Pi 的“消息渲染器”是终端组件树 + 事件驱动全量重建 + 帧节流渲染：
 
-1. **输入模型是完整消息对象**：`AgentSessionEvent` 携带 `AgentMessage` 或增量事件，事件名覆盖消息生命周期、工具执行与 bash 输出三类（`message_start/update/end`、`tool_execution_*`、`bash_execution_update` 等，`core/agent-session.ts:210`）；`AssistantMessageEvent` 按文本/思考/工具调用细分增量事件，随 `message_update` 透传给 UI（`interactive-mode.ts` 的事件到 UI 分支）。
-2. **渲染管线是“Markdown 文本 → 终端行”**：`packages/tui` 的 `Markdown` 组件用 marked 解析（自定义 strikethrough 与 LaTeX tokenizer），再经主题函数着色、ANSI 感知换行、边距/背景填充产出终端行（`packages/tui/src/components/markdown.ts`）。扩展 `MarkdownTransformer` 在解析前改写文本（如 mermaid 渲染为 Unicode 图，`components/mermaid.ts:60-88`）。
-3. **代码高亮是 highlight.js + 主题作用域映射**：`utils/syntax-highlight.ts` 把 hljs 的 `hljs-*` span 作用域映射到主题函数，输出 ANSI（`utils/syntax-highlight.ts`）。
-4. **消息壳层按 role/类型分派**：`addMessageToChat` 按 user/assistant/bashExecution/custom/compactionSummary/branchSummary 分支建组件（`interactive-mode.ts:3963`）；assistant 组件按 content 块顺序渲染 text/thinking（toolCall 块由 interactive-mode 另建 `ToolExecutionComponent`），并按 stopReason 追加截断/中止/错误状态文本（`components/assistant-message.ts:31`）。
-5. **列表是普通 Container，无虚拟化**：聊天区是 `chatContainer: Container`（`interactive-mode.ts:394`），流式时在末尾追加组件、重建内容，滚动交给 TUI 主屏幕整帧渲染；`packages/tui` 提供 `ScrollView`（滚动条/动画）组件，但聊天列表未使用虚拟化。
-6. **性能策略是缓存 + 帧合并**：`Markdown` 组件按 `text + width` 缓存渲染结果（`markdown.ts:271-281`）；TUI `requestRender` 以 `MIN_RENDER_INTERVAL_MS` 合并请求（`packages/tui/src/tui.ts:765-817`）；未使用 worker/增量 AST/虚拟列表。`packages/tui/test/markdown.test.ts`（1334 行）覆盖 Markdown 管线。
-7. **安全边界**：终端渲染不产生 HTML；导出 HTML 是离线静态生成（marked + highlight.js + 模板，`core/export-html/`），工具结果渲染走 `tool-renderer.ts`。本次未发现运行时 HTML 渲染路径。
-8. **扩展机制**：`MarkdownTransformer`（解析前文本改写）、工具渲染三元组 `renderCall/renderResult/renderShell`、自定义消息/条目渲染器（`getMessageRenderer`/`getEntryRenderer`）、主题热切换（`theme-controller.ts`）。
+1. **输入模型是完整消息对象**：会话事件向渲染器投递整条消息或带增量的消息事件，类型覆盖消息生命周期、工具执行与 bash 输出三组，助手侧另有按文本、思考、工具调用细分的增量事件随消息更新一并透传（`core/agent-session.ts:210`、`interactive-mode.ts` 的事件分发分支）。
+2. **渲染管线从 Markdown 文本到终端行**：TUI 的 Markdown 组件先用 marked 解析（含自定义删除线与 LaTeX 分词器），再由主题函数着色、按 ANSI 感知换行，最后补边距与背景填充，产出可直接写屏的终端行。扩展点在解析之前，MarkdownTransformer 可改写原始文本，例如把 mermaid 转成 Unicode 图（`packages/tui/src/components/markdown.ts`、`components/mermaid.ts:60-88`）。
+3. **代码高亮走 highlight.js 加主题映射**：代码块先由 highlight.js 高亮成带作用域的 span，再由语法高亮模块把 hljs 作用域换算成主题函数，输出 ANSI 着色结果（`utils/syntax-highlight.ts`）。
+4. **消息壳层按角色与类型分派**：入站消息由统一入口按用户、助手、bash 执行、自定义、压缩摘要、分支摘要逐一建壳；助手壳层再按内容块顺序渲染文本与思考，工具调用块由事件层单独建组件，最后依 stopReason 补上截断、中止或错误提示（`interactive-mode.ts:3963`、`components/assistant-message.ts:31`）。
+5. **列表结构是普通容器，没有虚拟化**：聊天区就是一个容器，流式时在末尾追加组件并重建内容，滚动交给 TUI 主屏幕整帧重绘；TUI 包另有带滚动条与动画的 ScrollView，聊天列表没有使用虚拟化（`interactive-mode.ts:394`、`packages/tui`）。
+6. **性能策略是缓存叠加帧合并**：Markdown 组件以文本与宽度为键缓存渲染结果，渲染请求由 TUI 按最小间隔合并降频；worker、增量 AST 与虚拟列表均未使用，Markdown 管线由 1334 行的测试覆盖（`markdown.ts:271-281`、`packages/tui/src/tui.ts:765-817`、`packages/tui/test/markdown.test.ts`）。
+7. **安全边界**：终端渲染只输出 ANSI 与 OSC 序列，HTML 由导出命令离线静态生成（marked、highlight.js 与模板），工具结果另走独立的渲染模块；本次未发现运行时的 HTML 渲染路径（`core/export-html/`、`tool-renderer.ts`）。
+8. **扩展机制**：扩展可接入四个位置：
+   - 解析前的 Markdown 文本改写（MarkdownTransformer）
+   - 工具节点的调用、结果与壳层渲染钩子
+   - 按类型注册的自定义消息与条目渲染器
+   - 主题热切换（`theme-controller.ts`）
 
 ## 总体渲染链路
 
@@ -39,73 +43,76 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 
 ## 1. 消息与内容块数据模型
 
-- **消息**：`AgentMessage` 按角色分 user/assistant/toolResult，另有 custom/bashExecution/compactionSummary/branchSummary 等类型（`core/messages.ts:29-67`）；assistant 内容为 `(TextContent | ThinkingContent | ToolCall)[]`（`packages/ai/src/types.ts:338-368`）。
-- **事件携带**：`message_update` 携带 `assistantMessageEvent`（按 text/thinking/toolcall 细分的 delta 事件，`types.ts:523-539`），UI 不消费 delta 本身而是用携带的 `partial` 完整消息重建（`interactive-mode.ts` 的事件到 UI 分支）。
-- **角色分派点**：`addMessageToChat` 的 switch 与 `message_start` 分支是唯一分派入口（interactive-mode.ts:3456-3561、:3124-3146）；`toolCall` 块在 `message_update` 时同步建 `ToolExecutionComponent`（:3153-3177）。
+- **消息**：消息对象按角色分为用户、助手与工具结果三类，另有自定义消息、bash 执行、压缩摘要、分支摘要等类型；助手消息的内容块数组由文本、思考、工具调用三种块组成（`core/messages.ts:29-67`、`packages/ai/src/types.ts:338-368`）。
+- **事件携带**：消息更新事件带出助手增量事件，该增量按文本、思考、工具调用细分；界面重建时取同一事件里携带的 partial 完整消息，增量字段用于标识当前内容块（`types.ts:523-539`、`interactive-mode.ts` 的事件到 UI 分支）。
+- **角色分派点**：组件创建只有两个分派入口，入站消息走消息追加函数的类型分支，消息开始事件走另一分支；工具调用块在消息更新事件到达时同步建出工具组件（`interactive-mode.ts:3456-3561,3124-3146,3153-3177`）。
 
 ## 2. 流式数据到 UI 的更新链
 
-- **每 delta 重建**：`message_update` 触发 `streamingComponent.updateContent(partial, true)`，整体清除内容容器并重建（`assistant-message.ts:89-196`）；thinking 块在流式中按“连续块合并”渲染，隐藏时显示静态标签（`assistant-message.ts:115-169`）。
-- **工具参数流式**：`toolcall_delta` 逐步 `updateArgs`（`interactive-mode.ts:3171-3175`）；`tool_execution_update` 以部分结果刷新 `ToolExecutionComponent`（`interactive-mode.ts:3251-3258`）；非 PNG 结果图片经 `maybeConvertImagesForKitty` 异步转码后重绘（`tool-execution.ts:178-199`）。
-- **收口**：`message_end` 时 `updateContent(final, false)`，按 stopReason 补状态文本（aborted/error/length），中止或错误时把原因写进所有挂起工具组件（`interactive-mode.ts:3183-3221`）；`agent_end` 清理流式组件与挂起工具表（`interactive-mode.ts:3270-3283`）。
-- **bash 流式**：`bash_execution_update` 事件经 `BashExecutionComponent.appendOutput` 增量追加（`interactive-mode.ts:3223-3225` 注释与 `components/bash-execution.ts`）。
-- **节流**：UI 只调用 `requestRender`，实际帧合并/降频在 `tui.ts`（`MIN_RENDER_INTERVAL_MS`，强制 `force=true` 可立即渲染）。
+- **每个增量都整体重建**：消息更新事件触发流式组件的更新方法，内容容器被清空后按最新消息重画；思考块在流式中按连续块合并成一个区，隐藏时退化为静态标签（`assistant-message.ts:89-196,115-169`）。
+- **工具参数流式**：工具调用增量到达时逐步更新参数，工具执行更新事件携带部分结果刷新工具组件；结果中的非 PNG 图片先异步转码成 kitty 可显示的格式再重绘（`interactive-mode.ts:3171-3175,3251-3258`、`tool-execution.ts:178-199`）。
+- **收口**：消息结束事件用最终消息再更新一次，按 stopReason 补写中止、错误或长度截断的状态文本，中止与错误时把原因写进所有挂起的工具组件；代理结束事件负责清理流式组件与挂起工具表（`interactive-mode.ts:3183-3221,3270-3283`）。
+- **bash 流式**：bash 执行更新事件由 bash 执行组件追加输出，逐段写入已有内容（`interactive-mode.ts:3223-3225` 与 `components/bash-execution.ts`）。
+- **节流**：界面侧只发出渲染请求，帧合并与降频由 TUI 主体按最小渲染间隔统一处理，强制渲染可以立即出帧（`tui.ts`）。
 
 ## 3. 消息列表、窗口化与滚动
 
-- **列表结构**：聊天区是普通 `Container`，无分页/虚拟化/窗口化；流式期间组件持续追加（`interactive-mode.ts:394`）。会话列表（`/resume`、`/tree`）用 `SelectList`/`TreeSelectorComponent`，是选择器而非渲染大列表。
-- **滚动与高度**：整屏组件树由 `renderLayoutFrame(root, width, height, requestRender)` 布局（`tui-alt-screen.ts:831`）；滚动行为由 TUI 主屏幕管理（输入区与聊天区共存，`tui-main-screen.ts`）。`packages/tui` 提供通用 `ScrollView`（滚动条、鼠标滚轮与 API 滚动，`components/scroll-view.ts`；无拖拽），另有 `scrollTo(..., { disableFollow })` 半页滚动与“到达末端时抑制跟随”语义（fullscreen 搜索跳转使用，`scroll-view.ts:116-190`）；本次未在聊天列表中找到虚拟化使用。
-- **分支切换**：`/tree` 提交导航走 `chatContainer.clear() + renderInitialMessages()`（interactive-mode.ts:5053-5054，`renderInitialMessages` 定义 :3696）；`rebuildChatFromMessages`（:3747）用于压缩结束、thinking 切换、设置变更与会话重载场景。
+- **列表结构**：聊天区就是一个普通容器，没有分页、虚拟化或窗口化，流式期间组件持续追加；`/resume` 与 `/tree` 的会话列表由选择器组件呈现，只负责选择条目（`interactive-mode.ts:394`）。
+- **滚动与高度**：整屏组件树交给布局函数按终端宽高排布，滚动行为由 TUI 主屏幕统一管理，输入区与聊天区共存；TUI 包另有通用 ScrollView，支持滚动条、鼠标滚轮与 API 滚动，没有拖拽。半页滚动与“到达末端抑制跟随”的语义只在 fullscreen 搜索跳转里使用，聊天列表本次未找到虚拟化接入（`tui-alt-screen.ts:831`、`tui-main-screen.ts`、`components/scroll-view.ts:116-190`）。
+- **分支切换**：`/tree` 提交导航后，聊天容器先清空再调用初始消息渲染重建整屏；另有从消息列表整体重建的路径，用于压缩结束、thinking 开关切换、设置变更与会话重载（`interactive-mode.ts:5053-5054,3696,3747`）。
 
 ## 4. 消息壳层与角色分派
 
-- **用户消息**：`UserMessageComponent`——背景 Box（`userMessageBg`）+ `Markdown`，且保留有序列表标记与反斜杠转义（`preserveOrderedListMarkers`/`preserveBackslashEscapes` 两个渲染开关，`user-message.ts:38-58`）。
-- **助手消息**：`AssistantMessageComponent`——按 content 顺序：text 块 → `Markdown`（assistant 主题）；连续 thinking 块合并为一个 Markdown 区（斜体、`thinkingText` 色）或隐藏为单行标签（`assistant-message.ts:104-169`）；`stopReason` 状态文本追加（length/aborted/error，`assistant-message.ts:172-195`）。OSC 133 区域标记仅在无工具调用时包裹（`assistant-message.ts:78-87`）。
-- **工具执行**：`ToolExecutionComponent`——默认“调用标题 + 输出 Box”壳（`renderShell: "default"`），工具可自绘（`self`）；内容渲染优先 `ToolDefinition.renderCall/renderResult`，内置工具定义兜底，最后是纯文本兜底（`tool-execution.ts:81-145`）。
-- **系统/扩展消息**：`CompactionSummaryMessageComponent`、`BranchSummaryMessageComponent`（可折叠）、`CustomMessageComponent`/`CustomEntryComponent`（扩展渲染器）、`SkillInvocationMessageComponent`（可折叠的 `<skill>` 块，`interactive-mode.ts:3509-3513`）。
-- **状态与操作栏**：footer 显示模型/token/成本与运行状态（`components/footer.ts`）；retry/compaction/branchSummary 有专用状态指示器（`status-indicator.ts`）。
+- **用户消息**：用户消息组件由一个带背景色的盒子包住 Markdown 渲染结果，背景色取主题里的 userMessageBg；渲染时打开两个开关，保留有序列表序号与反斜杠转义（`user-message.ts:38-58`）。
+- **助手消息**：助手组件按内容块顺序渲染，文本块走 Markdown 并使用助手主题；连续的思考块合并成一个 Markdown 区，以斜体和 thinkingText 色呈现，隐藏时收成单行标签；最后按 stopReason 追加长度截断、中止或错误状态文本，OSC 133 区域标记只在没有工具调用时包裹整段（`assistant-message.ts:78-87,104-169,172-195`）。
+- **工具执行**：工具组件默认套一层“调用标题加输出框”的壳，工具也可以选择自绘；内容优先由工具定义自带的渲染钩子产出，其次用内置工具定义兜底，最后落到纯文本输出（`tool-execution.ts:81-145`）。
+- **系统与扩展消息**：另有一组专用壳层：
+  - 压缩摘要与分支摘要：可折叠
+  - 自定义消息与自定义条目：交给扩展注册的渲染器
+  - skill 调用：渲染为可折叠的 `<skill>` 块（`interactive-mode.ts:3509-3513`）
+- **状态与操作栏**：底部栏显示当前模型、token 用量、成本与运行状态；重试、压缩和分支摘要各有专用状态指示器（`components/footer.ts`、`status-indicator.ts`）。
 
 ## 5. Markdown、代码与富文本管线
 
-- **解析**：marked 实例 + `StrictStrikethroughTokenizer`（`~~x~~` 要求非空格起止，markdown.ts:9-24）+ LaTeX 扩展，支持行内与块级两类数学分隔符（`$...$`、`$$`、`\(...\)`、`\[...\]` 等；未闭合且形似数学时按 pending 渲染，markdown.ts:48-144）。流式时裁剪未闭合围栏（`trimPartialClosingFences`，`markdown.ts:146-169`）。
-- **渲染顺序**：tokens → `renderToken` 逐类处理（heading/code/codespan/blockquote/link/list/hr 等，`markdown.ts:454` 起）→ ANSI 感知换行 `wrapTextWithAnsi`（图片行跳过换行，`markdown.ts:316-326`）→ 边距 + 背景填充到整行宽（`markdown.ts:328-350`）。
-- **代码高亮**：`theme.highlightCode`（MarkdownTheme 钩子，`markdown.ts:215, 523-525`）→ `utils/syntax-highlight.ts`：hljs 高亮为 HTML → 把 `hljs-*` scope 映射到主题函数生成 ANSI，作用域栈处理嵌套（`syntax-highlight.ts:80-132`）。
-- **LaTeX**：`latex.ts` 将 LaTeX 转 Unicode 文本（`renderLatex` 选项默认开）。布局能力：矩阵/array 环境以多行布局节点参与行高对齐（`latex.ts:655-668, 1314-1341`），分数/算符/矩阵统一走 `renderLayout` 拼行；关系运算符与命名算子（`\leq`、`\Rightarrow`、`\sin` 等）有自动空格与等号/不等号间距处理（`latex.ts:291-378, 869-873`），并处理 CRLF 换行与跨行控制空格（`latex.ts:923-930`）。
-- **图片**：`terminal-image.ts` 探测终端能力，ImageProtocol 仅 `"kitty" | "iterm2" | null`（getCapabilities:138），能力不足时以文本占位（image.ts:114-119）；图片行由 `isImageLine` 识别并在换行阶段跳过。
-- **链接/超链接**：`hyperlink()` 在支持时输出 OSC 8 超链接（`terminal-image.ts` 导出）。
+- **解析**：Markdown 由 marked 实例解析，挂在其上的是两个自定义分词器：删除线要求 `~~` 两端紧贴非空格字符，LaTeX 分词器支持行内与块级两类数学分隔符（美元符号与反斜杠括号两种写法）；未闭合且形似公式的片段按 pending 状态渲染，流式时还会裁掉未闭合的代码围栏（`markdown.ts:9-24,48-144,146-169`）。
+- **渲染顺序**：解析出的 token 按类型逐个处理标题、代码、行内代码、引用、链接、列表与分隔线，再按 ANSI 感知换行（图片行跳过），最后补边距并填充背景到整行宽（`markdown.ts:454,316-326,328-350`）。
+- **代码高亮**：主题通过 MarkdownTheme 的 highlightCode 钩子接管代码块；高亮模块先用 highlight.js 生成带作用域的 HTML，再把作用域映射成主题函数输出 ANSI，嵌套结构由作用域栈处理（`markdown.ts:215,523-525`、`syntax-highlight.ts:80-132`）。
+- **LaTeX**：LaTeX 渲染默认开启，把公式转成 Unicode 文本。矩阵与 array 环境按多行布局节点参与行高对齐，分数、运算符和矩阵统一由布局器拼行；关系运算符与命名算子会自动补空格，等号与不等号有专门的间距处理，CRLF 换行与跨行控制空格也在处理范围内（`latex.ts:291-378,655-668,869-873,923-930,1314-1341`）。
+- **图片**：终端图片能力由能力探测函数返回，图片协议只有 kitty、iterm2 和空值三种取值，能力不足时退化为文本占位；图片行由识别函数标记，在换行阶段跳过（`terminal-image.ts:138`、`image.ts:114-119`）。
+- **链接与超链接**：终端支持超链接时，链接由 hyperlink 函数输出为 OSC 8 序列（`terminal-image.ts`）。
 
 ## 6. 工具、reasoning、附件与自定义节点
 
-- **工具调用**：toolCall 块 → `ToolExecutionComponent`（见 4）；结果图片在 kitty 终端非 PNG 转码显示（`tool-execution.ts:178-199`）。
-- **thinking**：独立 Markdown 区（斜体）或隐藏标签（`assistant-message.ts:115-169`），settings 可切换。
-- **附件**：用户消息里的 `ImageContent` 由终端图片能力渲染（粘贴/拖入图片、`showImages` 设置开关，`interactive-mode.ts` 相关设置读取）；工具结果图片同路径。
-- **自定义节点**：扩展注册 `getMessageRenderer(customType)`/`getEntryRenderer(customType)` 返回组件工厂（`getEntryRenderer` 在 addCustomEntryToChat，interactive-mode.ts:3434-3435；`getMessageRenderer` 在 :3474）；bash 执行、压缩摘要、分支摘要都是独立节点类型。
+- **工具调用**：内容里的工具调用块建为工具执行组件，细节见第 4 节；结果图片在 kitty 终端会把非 PNG 格式转码后显示（`tool-execution.ts:178-199`）。
+- **thinking**：思考内容渲染成独立的 Markdown 区并整体设为斜体，也可以收成一行标签，行为由设置项切换（`assistant-message.ts:115-169`）。
+- **附件**：用户消息中的图片内容交给终端图片能力渲染，粘贴或拖入都走这条路径，是否显示由 showImages 设置控制；工具结果里的图片处理方式相同（`interactive-mode.ts` 的设置读取处）。
+- **自定义节点**：扩展按类型注册消息渲染器与条目渲染器，渲染器返回组件工厂；自定义条目在建节点时读取注册结果，自定义消息则在消息分派处读取。bash 执行、压缩摘要和分支摘要各自是独立节点类型（`interactive-mode.ts:3434-3435,3474`）。
 
 ## 7. HTML、Artifact 与安全隔离
 
-- **运行时无 HTML**：终端输出只有 ANSI 转义与 OSC 序列；模型输出不经过 HTML 渲染。OSC 133 区域标记（常量在 `components/assistant-message.ts:7-9` 与 `components/user-message.ts:6-8`）用于终端复制语义。
-- **HTML 导出**：`/export` 生成自包含页面（marked 服务端解析 + highlight.min.js + ANSI→HTML 转换 `ansi-to-html.ts` + 工具结果渲染 `tool-renderer.ts`，`core/export-html/`），system prompt 可折叠展示（`template.js:1405-1420`）。
+- **运行时无 HTML**：终端输出只包含 ANSI 转义与 OSC 序列，模型输出直接进入终端管线，未经 HTML 渲染。OSC 133 区域标记的常量定义在助手消息与用户消息组件中，用于终端复制时识别消息边界（`components/assistant-message.ts:7-9`、`components/user-message.ts:6-8`）。
+- **HTML 导出**：`/export` 生成自包含的单页文件，解析由 marked 在服务端完成，代码高亮使用打包好的 highlight.min.js，ANSI 转 HTML 与工具结果渲染各有一个模块；system prompt 可折叠展示（`core/export-html/`、`template.js:1405-1420`）。
 - **终端输入侧**：编辑器渲染用户输入（`packages/tui/src/components/editor.ts`），无 HTML 注入面。
 
 ## 8. 交互反馈与可访问性
 
-- **复制/折叠/重试**：`/copy` 复制最后一条助手消息；工具/摘要组件支持展开收起（`setExpanded`，`interactive-mode.ts:3168`）；自动重试与压缩有状态指示器与 Esc 中止（`interactive-mode.ts:3342-3368`）。
-- **键盘**：全局按键系统（`keybindings.ts`、`packages/tui/src/keybindings.ts`），`/hotkeys` 查看；另有 fullscreen transcript 搜索（Ctrl+Shift+F）、半页/单行滚动与多击选词/选行等按键（`packages/tui/src/keybindings.ts:44-52, 165-207`，工作流见 Chat UI 笔记）。编辑器支持 IME 与硬件光标选项（`settings-manager.ts:128`）。
-- **可访问性**：终端渲染无图形无障碍 API；OSC 133 标记帮助终端模拟器与复制工具定位消息边界。无专门的无障碍审计测试。
+- **复制、折叠与重试**：`/copy` 取最后一条助手消息；工具与摘要类组件支持展开收起，自动重试与压缩期间有状态指示器，可用 Esc 中止（`interactive-mode.ts:3168,3342-3368`）。
+- **键盘**：按键由全局按键系统统一注册，可用 `/hotkeys` 查看；此外还有 fullscreen 会话搜索（Ctrl+Shift+F）、半页与单行滚动、多击选词选行等绑定，编辑器支持输入法输入与硬件光标选项（`packages/tui/src/keybindings.ts:44-52,165-207`、`settings-manager.ts:128`，工作流见 Chat UI 笔记）。
+- **可访问性**：终端渲染没有图形无障碍接口可用，消息边界识别依赖 OSC 133 标记，供终端模拟器与复制工具定位；无障碍审计目前没有专门测试。
 
 ## 9. 性能、缓存与测试
 
-- **缓存**：`Markdown` 组件 `cachedLines` 按 `text + width` 命中（`markdown.ts:271-295`），流式每 delta 的文本变化会使缓存失效并全量重解析。
-- **帧节流**：`requestRender` 合并与 `MIN_RENDER_INTERVAL_MS` 降频（`tui.ts:765-817`）；`force=true` 用于关键路径（如编辑器聚焦）。
-- **无虚拟化/worker**：长会话聊天区重建为 O(消息数)；本次未找到增量 AST、Web Worker 或延迟渲染。
-- **测试**：`packages/tui/test/markdown.test.ts`（1334 行）覆盖解析/换行/主题；`tui` 包另有 latex/terminal 等测试；聊天列表性能无基准测试。
+- **缓存**：Markdown 组件按文本与宽度缓存已排版的行，流式时每个增量都会改变文本，缓存随之失效并触发整段重新解析（`markdown.ts:271-295`）。
+- **帧节流**：渲染请求按最小渲染间隔合并降频，关键路径（如编辑器聚焦）用强制渲染跳过等待（`tui.ts:765-817`）。
+- **无虚拟化与 worker**：长会话的聊天区按消息数线性重建；本次未找到增量 AST、Web Worker 或延迟渲染的实现。
+- **测试**：1334 行的 markdown 测试覆盖解析、换行与主题，TUI 包另有 LaTeX 与终端相关测试；聊天列表性能没有基准测试（`packages/tui/test/markdown.test.ts`）。
 
 ## 10. 扩展方式与已确认边界
 
-- **MarkdownTransformer**：注册到扩展，按消息类型与流式状态改写 Markdown 文本；默认只作用于 assistant/user/assistant-thinking 三类，注册时可传 `{ messageTypes }` 扩展到 custom 消息与 skill 块、分支与压缩摘要、以及 What's New/`/changelog` 等更新提示表面（`core/extensions/loader.ts:365`、`core/extensions/types.ts:1583`）；mermaid 是内置 transformer 实例，现在也会在展开的分支/压缩摘要里画图。
-- **工具渲染**：`renderCall/renderResult/renderShell` 控制工具节点的外观与壳；`executionMode` 影响编排而非渲染。
-- **主题**：`theme-controller.ts` 热切换主题（dark/light JSON，`theme/dark.json`），`MarkdownTheme` 接口是渲染器与主题的契约。
-- **已确认边界**：渲染器输入是“完整消息 + 事件”，不支持局部块级更新；无虚拟化意味着超长会话的渲染成本线性增长；终端图片能力依赖 `getCapabilities` 探测，能力不足时图片退化为不可显示。
+- **MarkdownTransformer**：扩展可以在解析前改写 Markdown 文本，作用范围由消息类型与流式状态决定，默认只覆盖助手、用户与助手思考三类；注册时传入 messageTypes 可扩到自定义消息、skill 块、分支与压缩摘要以及 What's New、changelog 等更新提示表面。mermaid 就是内置的 transformer 实例，展开的分支与压缩摘要里同样会画图（`core/extensions/loader.ts:365`、`core/extensions/types.ts:1583`）。
+- **工具渲染**：工具定义通过调用渲染、结果渲染与壳层渲染三个钩子决定节点外观；执行模式影响工具的编排流程（`tool-execution.ts`）。
+- **主题**：主题控制器支持 dark 与 light 两套 JSON 主题热切换，MarkdownTheme 接口是渲染器与主题之间的契约（`theme-controller.ts`、`theme/dark.json`）。
+- **已确认边界**：渲染器的输入是完整消息加事件，块级局部更新不在支持范围；聊天列表没有虚拟化，超长会话的渲染成本随消息数线性增长；终端图片能力靠能力探测获得，能力不足时图片退化为不可显示。
 
 ## 11. 未验证事项
 
@@ -115,7 +122,7 @@ AgentSession 事件 (message_start/update/end, tool_execution_*, bash_execution_
 
 ## 12. 终端能力覆盖
 
-渲染器的超链接、图片和真彩色分支既可依赖环境自动探测，也可由 `terminal` 设置或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量明确覆盖。覆盖结果集中缓存于 `getCapabilities()`，Markdown 链接、图片降级文本与工具结果共用该结果（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
+渲染器的超链接、图片与真彩色分支既可以由环境自动探测决定，也能被 terminal 设置或三个环境变量显式覆盖（PI_HYPERLINKS、PI_IMAGE_PROTOCOL、PI_TRUECOLOR）。覆盖结果由能力探测函数集中缓存，Markdown 链接、图片降级文本与工具结果共用这一份结果（`packages/tui/src/terminal-image.ts:143-184`、`components/markdown.ts:690-699`）。
 
 ## 13. Fullscreen 渲染交互
 

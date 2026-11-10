@@ -16,11 +16,11 @@
 
 Pi 的对话导出与分享围绕“会话即 JSONL 树”这一事实源展开，能力分属 `E1 数据交换`、`E4 链接分享` 和 `E5 发布与研究`（交接侧）：
 
-- **JSONL 导出（`/export x.jsonl`）是把当前分支线性化**：取 `getBranch()` 从叶子到根的路径条目，重排 `parentId` 成线性链写盘，侧枝与完整树不进入该文件；但**HTML 导出嵌入了完整树**（所有 entries + leafId），默认按当前分支渲染，查看器侧栏可浏览并切换任意分支。两种导出口径不同。
-- **HTML 是单文件自包含交付物**：CSS、应用 JS、marked.min.js、highlight.min.js 全部内联（`export-html/index.ts:143-175`），会话数据以 base64 JSON 嵌在 `<script id="session-data">` 中，图片内容块以 data: URL 渲染；无外部 CSS/JS/字体依赖，可离线打开（推断，未运行验证）。Markdown 中引用远端图片的 URL 仍保持引用，离线时该图不显示。
-- **`/share` 有 Radius 与 Gist 两条载荷不同的路径**：有可用 Radius provider 和凭据时，上传当前分支 JSONL并追加 system prompt 与工具 schema；否则导出自包含 HTML，再由 `gh gist create --public=false` 创建 secret Gist。客户端只创建链接，无本地更新、撤销、删除或过期记录。
-- **HF 数据集发布位于仓库外**：本仓库只承担“交付物与格式 + 引导”角色。README 指引使用外部伴生工具 `badlogic/pi-share-hf` 把会话发布为 HF 数据集（示例 `badlogicgames/pi-mono`）；数据来源、提示与权限默认值由外部工具负责，本次未找到仓库内任何 HF 上传代码或隐私提示。
-- 同仓库的 CI（`issue-analysis.yml`）复用同一导出链路：把分析会话导出为 HTML+JSONL 后经 GitHub API 创建 secret Gist（`public: false`），并把链接和 `/ir` 导入指令评论到 issue 上；`.pi/extensions/import-repro.ts` 则演示了匿名 `GET api.github.com/gists/{id}` 拉回 HTML/JSONL 并转回会话的往返消费路径。
+- **JSONL 导出把当前分支线性化**：`getBranch()` 取出叶子到根路径上的条目，父指针重排成一条单链后写盘，侧枝与完整树因此不进入该文件。HTML 导出则把完整树（全部条目加 `leafId`）嵌进页面，默认按当前分支渲染，查看器侧栏可以浏览并切换到任意分支，两种导出口径由此不同。
+- **HTML 是单文件自包含交付物**：样式表、应用脚本以及 marked 与 highlight 两个渲染库全部内联进模板（`export-html/index.ts:143-175`），会话数据以 base64 JSON 嵌在 session-data 脚本块中，图片内容块用 data: URL 渲染。页面不依赖外部 CSS、脚本或字体，可离线打开（推断，未运行验证）；Markdown 里引用远端图片的 URL 保持原样，离线时这类图片不显示。
+- **`/share` 分 Radius 与 Gist 两条载荷不同的路径**：Radius provider 与凭据可用时，上传当前分支的 JSONL 并追加 system prompt 和工具 schema；否则导出自包含 HTML，交给 `gh gist create --public=false` 建成 secret Gist。客户端只负责创建链接，本地不保留更新、撤销、删除或过期记录。
+- **HF 数据集发布位于仓库外**：本仓库承担“交付物与格式 + 引导”的角色，README 指引用外部伴生工具 `badlogic/pi-share-hf` 把会话发布成 HF 数据集，示例为 `badlogicgames/pi-mono`。数据来源、提示与权限默认值都由该外部工具负责；本次未找到仓库内的 HF 上传代码或隐私提示。
+- 同仓库 CI（`issue-analysis.yml`）复用同一条导出链路：分析会话导出成 HTML 与 JSONL 后经 GitHub API 建 secret Gist（public 为 false），再把链接和 `/ir` 导入指令评论到 issue 上。`.pi/extensions/import-repro.ts` 演示了反方向的消费路径：匿名 `GET api.github.com/gists/{id}` 拉回 HTML 或 JSONL 并转回会话，构成一次完整往返。
 
 ## 系统边界与完整主链
 
@@ -48,12 +48,12 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 内置斜杠命令列表定义于 `packages/coding-agent/src/core/slash-commands.ts:19-42`，入口在 `interactive-mode.ts:2895-2914` 分发：
 
-- `/export [file]`：按后缀分流，带 .jsonl 走 JSONL、否则走 HTML；无参数时默认输出 `pi-session-<会话文件basename>.html`（`export-html/index.ts:274-278`）。JSONL 无参数时生成带时间戳文件名（`agent-session.ts:3250-3253`）。目标为个人存档与人际传播。
-- `/import <path.jsonl>`：确认后复制文件到会话目录并切换运行时（`agent-session-runtime.ts:361-396`），目标为跨机恢复与接续。
-- `/share`：优先把当前分支及环境元数据发布为 Radius 组织 artifact；无可用 Radius 凭据时创建 secret Gist 并给出查看链接（`modes/interactive/session-share.ts:24-203`）。
-- `/copy`：复制最后一条助手消息文本到剪贴板（`interactive-mode.ts:5956-5972`、`agent-session.ts:3291-3306`）；属于普通复制，不构成选区/格式工作流。
-- CLI `--export <in> [out]`：非交互地把任意会话文件转 HTML 后退出（`main.ts:626-638`；`args.ts:149-150, 288, 356-357`）。
-- RPC `export_html`：对外部进程/客户端暴露的导出命令（`rpc-types.ts:59`、`rpc-mode.ts:596-598`）。
+- `/export [file]`：导出入口按目标文件后缀分流，写 .jsonl 时导出当前分支，其余路径一律产出 HTML。省略参数时自动命名：HTML 默认存为 `pi-session-<会话文件名>.html`（`export-html/index.ts:274-278`），JSONL 则带时间戳（`agent-session.ts:3250-3253`）。用途是个人存档与人际传播。
+- `/import <path.jsonl>`：用户确认后把文件复制进会话目录并切换运行时接手，用于跨机恢复与接续（`agent-session-runtime.ts:361-396`）。
+- `/share`：有可用的 Radius provider 与凭据时，把当前分支和环境元数据发布成组织可见的 artifact；没有可用凭据时改为创建 secret Gist，并返回查看链接（`modes/interactive/session-share.ts:24-203`）。
+- `/copy`：把最后一条助手消息的文本放进系统剪贴板，复制范围固定在这条消息，没有选区或格式选项（`interactive-mode.ts:5956-5972`、`agent-session.ts:3291-3306`）。
+- CLI 的 `--export <in> [out]`：非交互模式下把任意会话文件转成 HTML 后退出，适合脚本调用（`main.ts:626-638`；`args.ts:149-150, 288, 356-357`）。
+- RPC 的 `export_html`：把导出能力提供给外部进程与客户端（`rpc-types.ts:59`、`rpc-mode.ts:596-598`）。
 
 导出源粒度：只有“整会话”一个粒度。未发现单消息、连续范围、选区或批量会话导出入口；`/fork`/`/clone` 创建新会话属于会话管理，不在导出侧。顺序由树结构决定（见下节）。
 
@@ -67,24 +67,28 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 **HTML 导出 = 完整树嵌入 + 分支视图**：
 
-- `sessionData` 携带头部、全部条目（含侧枝与隐藏消息）与 `leafId`，TUI 路径还附带 system prompt、工具定义与预渲染工具 HTML（`export-html/index.ts:263-270`）。
-- 模板 JS 用 `getPath(leafId)` 渲染消息视图（当前分支），用 `buildTree()` 渲染侧栏完整树；点击树节点跳转到该节点下最新叶子（`template.js:73-176, 133-145, 1495-1551`）。
-- 内容口径是“持久化原始数据”（含 thinking、工具调用/结果、bash 命令与输出、文件路径、图片 base64），未转换为请求 Payload，也未生成脱敏副本。
-- 树/消息的显隐由查看器端过滤控制：默认模式隐藏设置类条目（label、custom、model_change、thinking_level_change），另有 no-tools / user-only / labeled-only / all 过滤与搜索（`template.js:368-424`，模板按钮在 `template.html:20-27`）。这些是查看时过滤，导出文件本身始终含全部条目。
-- 隐藏消息：工具结果条目内联进对应助手工具调用块，消息视图不单独渲染（`template.js:904-1063,1287`）；thinking 块默认展开、可折叠（`template.js:1249-1254,1792-1800`）；自定义消息仅 display 为 true 的渲染（`template.js:1309-1314`）。
+- `sessionData` 是嵌入页面的完整快照：头部、全部条目（含侧枝与隐藏消息）与 `leafId`，TUI 路径还会附带 system prompt、工具定义和预渲染工具 HTML（`export-html/index.ts:263-270`）。
+- 查看器读入快照后分两处渲染：消息视图只取当前分支，侧栏树展示完整树；点击树节点会跳到该节点下最新的叶子（`template.js:73-176, 133-145, 1495-1551`）。
+- 内容口径即持久化原始数据，thinking、工具调用与结果、bash 命令及输出、文件路径、图片 base64 都原样保留，没有请求 Payload 转换，也没有脱敏副本。
+- 树与消息的显隐交给查看器端过滤，只作用于查看时的呈现，导出文件本身始终含全部条目：默认模式隐藏设置类条目（标签、自定义消息、模型与思考级别的变更记录），另可切换下列预设并配合搜索（`template.js:368-424`，模板按钮在 `template.html:20-27`）：
+  - `no-tools`
+  - `user-only`
+  - `labeled-only`
+  - `all`
+- 隐藏消息按条目类型分别呈现：工具结果内联进对应的助手工具调用块，消息视图不单独渲染；thinking 块默认展开、可折叠；自定义消息只在 display 为 true 时渲染（`template.js:904-1063, 1249-1254, 1287, 1309-1314, 1792-1800`）。
 
 ## 3. 附件、资源与离线封装
 
-- 生成 HTML 时把模板 CSS、模板 JS 与 marked、highlight 两个 vendor 库全部读入并替换进 `template.html` 占位符（`export-html/index.ts:143-175`）；模板文件本身无任何外部脚本、样式、导入或 URL 引用（`template.html` 全文），字体用系统字体栈（`template.css:19`）。
-- 会话图片内容块（`ImageContent` 的 base64 data）以 `data:<mimeType>;base64,<data>` 内联（`template.js:924, 1208, 1230`），离线可见。
-- Markdown 正文中的图片 URL 走 `sanitizeMarkdownUrl` 后原样输出 `<img src>`（`template.js:616-626, 1599-1610`），保持远端引用；离线打开时这类图片需网络。
+- HTML 的内联装配在生成阶段完成：模板 CSS、模板 JS 以及 marked、highlight 两个渲染库被整体读入，替换进 `template.html` 的占位符（`export-html/index.ts:143-175`）；模板本身不引用任何外部脚本、样式、导入或 URL，字体只用系统字体栈（`template.css:19`）。
+- 会话里的图片内容块不走外链，`ImageContent` 的 base64 数据直接写成 `data:<mimeType>;base64,<data>` 内联进页面，离线可见（`template.js:924, 1208, 1230`）。
+- Markdown 正文引用的图片 URL 经 `sanitizeMarkdownUrl` 处理后原样输出为 img 的 src，保持远端引用，离线打开时这类图片仍需联网（`template.js:616-626, 1599-1610`）。
 - 结论：HTML 交付物基本单文件自包含，可复制为单个文件离线打开（静态推断，未运行验证）；“本地文件双击打开”下深链与剪贴板 API 的部分行为依赖浏览器能力。
 
 ## 4. 格式、schema 与往返能力
 
-- 格式只有 JSONL（v3，见 `docs/session-format.md` 的完整字段文档）与 HTML（v3 数据嵌 base64 JSON）两种；未发现 Markdown/PDF/PNG 导出、剪贴板图片导出或打印链路（搜索 `pdf|toPng|print` 只命中与导出无关的终端图片转换/CLI print 模式）。
-- JSONL 无独立导出 schema 版本：头行带 `version: 3`，条目即持久化格式原样。往返：导入走 `loadEntriesFromFile`（`session-manager.ts:514-556`），要求首行 `type:"session"` 且有 id，容忍坏行跳过；随后打开会话并把最后一条设为 leaf。因此 `/export x.jsonl` 的产物可直接导回，但分支关系已被线性化，无法还原侧枝；未知字段原样保留。
-- HTML 查看器内置“下载 JSONL”按钮（`template.js:1069-1090`）重建头部 + 全部条目（完整树、不重排 parentId）。按导入端校验要求，该文件首行是 `type:'header'` 而非 `type:'session'`，会被判为“not a valid pi session”（静态推断，未运行验证）。`.pi/extensions/import-repro.ts:96-118` 从 HTML 反向提取时写回的是 `type:'session'` 头、可导入。两处 JSONL 重建口径不一致。
+- 导出格式只有 JSONL（v3，完整字段文档在 `docs/session-format.md`）与 HTML（v3 数据以 base64 JSON 内嵌）两种。本次搜索 `pdf|toPng|print` 只命中与导出无关的终端图片转换和 CLI print 模式，未发现 Markdown、PDF、PNG 导出、剪贴板图片导出或打印链路。
+- JSONL 没有独立的导出 schema 版本，头行带 `version: 3`，条目按持久化格式原样写出。导入端由 `loadEntriesFromFile` 读取，要求首行的 type 为 session 且带 id，坏行会被跳过，打开会话后把最后一条设为 leaf（`session-manager.ts:514-556`）。所以 `/export x.jsonl` 的产物可以直接导回，但分支关系已被线性化，侧枝无法还原，未知字段原样保留。
+- HTML 查看器的“下载 JSONL”按钮重建头部与全部条目，保留完整树、不重排 parentId（`template.js:1069-1090`）。这份文件的首行是 type 为 header 的记录，按导入端校验会被判为“not a valid pi session”（静态推断，未运行验证）；`.pi/extensions/import-repro.ts:96-118` 从 HTML 反向提取时写回的是 type 为 session 的头，可以导入。两处 JSONL 重建口径不一致。
 - `docs/session-format.md` 与代码一致地声明 v3 = 树结构（`session-manager.ts:30`）。
 
 ## 5. 分享稿编辑、编排与预览
@@ -105,14 +109,14 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 `/share` 先由 `shareSession` 选择传输路径（`modes/interactive/session-share.ts:56-103`）：默认按 Radius → gist 回退，也可用 destination 选项强制走其中一条：
 
-- Radius provider 与凭据可用时，导出当前分支 JSONL，追加 `pi.share` custom entry 保存实际 system prompt 与激活工具 schema，再上传组织可见 artifact；上传失败直接报错，不回退 Gist。
-- 只有 Radius 不可用或无凭据时才检查 `gh auth status`，未安装或未登录会提示修复。
-- 导出 `session.html` 到临时目录，随后以子进程执行 `gh gist create --public=false`（`5914`）——secret Gist、单文件、无 description。
-- 从 `gh` 输出 URL 尾部截取 gistId，拼出查看链接：默认 `https://pi.dev/session/#<gistId>`，可用环境变量 `PI_SHARE_VIEWER_URL` 覆盖（`config.ts:502-508`）。文档见 `docs/environment-variables.md:88`。
-- 上传的内容是自包含 HTML（其中嵌有头部、全部条目、leafId 与 system prompt、工具定义、预渲染工具 HTML 的 base64 JSON）。“消息/标题/元数据”均以会话数据形式存在于 HTML 内，Gist 本身无标题字段。
-- 访问语义：secret Gist 属于“有链接即可访问”的 GitHub 平台语义；同仓库 `import-repro.ts:263-281` 用匿名 `GET https://api.github.com/gists/{id}`（无认证头）拉取 Gist 文件，说明创作者侧的消费路径不依赖登录态。撤销/更新/删除路径在客户端本次未找到；Gist 生命周期完全交给 GitHub（手动删除为止），分享 URL 无法猜测性（32 位十六进制 ID）与可枚举性由 GitHub 决定，未运行验证。
-- `pi.dev/session` 查看器本体不在本仓库。模板预留了 iframe srcdoc 注入钩子（pi-share-base-url、pi-url-params 两个 meta 标签，`template.js:23-29,1096-1118`），推断查看器以 srcdoc 方式嵌入 Gist 内容，并支持 `?leafId=&targetId=` 深链与每条消息的“复制链接”按钮（`template.js:1165-1172`）——查看器实际行为未验证。
-- 同仓库 CI 复用同一语义：`issue-analysis.yml:539-569` 用 `PI_GIST_TOKEN` 调用 GitHub API 创建含 session.html 与 session.jsonl 双文件的 secret Gist，随后把 gist URL 与分享 URL 评论到 issue（GitHub Actions bot），`import-repro.ts:236-261` 再从 issue 评论中提取 gistId。
+- Radius 路径：provider 与凭据都可用时，导出把当前分支写成 JSONL，并追加一条 `pi.share` custom entry，把本轮实际的 system prompt 与激活工具的参数 schema 一并存入，再上传为组织可见的 artifact；上传失败按错误返回，不再改走 Gist。
+- Gist 回退的前提是 Radius 不可用或没有凭据，此时才检查 `gh auth status`，`gh` 未安装或未登录会提示用户先修复。
+- 回退路径把 `session.html` 写到临时目录，再由子进程执行 `gh gist create --public=false` 创建 secret Gist，单文件、无 description（`session-share.ts:182`）。
+- 创建成功后从 `gh` 输出的 URL 尾部截取 gistId，拼成查看链接，默认 `https://pi.dev/session/#<gistId>`，可用环境变量 `PI_SHARE_VIEWER_URL` 覆盖（`config.ts:502-508`，说明见 `docs/environment-variables.md:88`）。
+- 上传的内容是一份自包含 HTML：头部、全部条目、leafId、system prompt、工具定义与预渲染工具 HTML 都以 base64 JSON 嵌在页面里；消息、标题与元数据同样只以会话数据的形式存在，Gist 本身没有标题字段。
+- 访问语义：secret Gist 沿用 GitHub“有链接即可访问”的平台语义；同仓库 `.pi/extensions/import-repro.ts:263-281` 用不带认证头的匿名 `GET https://api.github.com/gists/{id}` 拉取文件，创作者侧的消费路径不依赖登录态。客户端没有撤销、更新或删除路径，Gist 生命周期交回 GitHub，直到手动删除；分享 URL 的不可猜测程度（32 位十六进制 ID）与可枚举性由 GitHub 决定，未运行验证。
+- `pi.dev/session` 查看器本体不在本仓库。模板预留了 iframe srcdoc 注入钩子，即 pi-share-base-url 与 pi-url-params 两个 meta 标签（`template.js:23-29, 1096-1118`），据此推断查看器以 srcdoc 方式嵌入 Gist 内容，并支持 `?leafId=&targetId=` 深链与每条消息的“复制链接”按钮（`template.js:1165-1172`），实际行为未验证。
+- 同仓库 CI 复用同一语义：`issue-analysis.yml:539-569` 用 PI_GIST_TOKEN 调用 GitHub API，创建包含 session.html 与 session.jsonl 的 secret Gist，再把 gist URL 与分享 URL 评论到 issue（GitHub Actions bot）；`.pi/extensions/import-repro.ts:236-261` 再从 issue 评论中提取 gistId。
 
 ## 9. 隐私、安全与内容治理
 
@@ -122,9 +126,9 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 10. 性能、失败恢复与测试
 
-- 失败处理：`/export` 异常统一弹错误提示；`/share` 有可取消的加载指示（取消时终止子进程、恢复编辑器、删除临时文件），`gh` 非零退出码、gistId 解析失败均显式报错（`interactive-mode.ts:5884-5953`）；临时文件在成功/失败路径都尝试清理。
-- HTML 生成用 `Buffer.from(...).toString("base64")` + 同步 `writeFileSync`，大会话的序列化与体积未发现分块或上限处理（静态推断：超大会话导出时 HTML 体积随条目数线性增长）。
-- 测试覆盖：`test/export-html-*.test.ts` 是对模板 JS 文本的静态断言（转义/白名单/skill 块/空白），`test/suite/regressions/5596-missing-theme-export.test.ts` 覆盖 `exportToHtml` 的 theme 路径。未发现 `/share` 的 gh 子进程 mock 测试；HTML 离线打开、Gist 可访问性均无运行证据。
+- 失败处理分两条命令：`/export` 抛出的异常统一转成错误提示；`/share` 在创建过程中显示可取消的加载指示，取消时终止子进程、恢复编辑器并删除临时文件，`gh` 返回非零退出码或 gistId 解析失败都会显式报错，临时文件在成功与失败路径上都会尝试清理（`interactive-mode.ts:5884-5953`）。
+- HTML 生成走 `Buffer.from(...).toString("base64")` 加同步 writeFileSync 的一次性序列化，大会话没有分块或体积上限处理；静态推断下，导出产物随条目数线性增长。
+- 测试覆盖集中在模板文本的静态断言：`test/export-html-*.test.ts` 检查转义、白名单、skill 块与空白，`test/suite/regressions/5596-missing-theme-export.test.ts` 覆盖 `exportToHtml` 的 theme 路径。`/share` 的 gh 子进程没有 mock 测试，HTML 离线打开与 Gist 可访问性也都没有运行证据。
 
 ## 11. 设计取舍与已确认边界
 
@@ -136,10 +140,10 @@ session-data（base64 JSON：header + entries + leafId + systemPrompt + tools + 
 
 ## 12. 未验证事项
 
-- HTML 离线打开行为（双击本地文件时 base64 解析、剪贴板/深链、图片显示）——需浏览器运行验证。
+- HTML 在浏览器里双击本地文件打开的行为，包括 base64 数据解析、剪贴板与深链功能、图片能否显示，都需要实际运行验证。
 - secret Gist 的匿名可访问性、URL 可枚举性、保留期与删除路径——GitHub 平台行为，需实际运行 `/share` 验证。
 - `pi.dev/session` 查看器如何取 Gist、注入 srcdoc meta、解析 `#gistId`——服务端在仓库外，未验证。
-- HTML 查看器“下载 JSONL”产物（`type:'header'` 头）被 `/import` 拒绝的具体表现——静态推断，未运行。
+- HTML 查看器“下载 JSONL”产物以 `type:'header'` 开头，被 `/import` 拒绝时的具体表现属于静态推断，尚未运行验证。
 - `badlogic/pi-share-hf` 的数据来源（是否直接消费本仓库 JSONL）、隐私提示、HF 仓库与权限默认值——仓库外，未调查。
 - 超大会话导出的 HTML 体积与内存表现、`gh gist create` 在大文件上的行为——未运行。
 - 自定义工具预渲染 HTML 注入的 XSS 实际风险——依赖第三方工具渲染器输出，未评估。

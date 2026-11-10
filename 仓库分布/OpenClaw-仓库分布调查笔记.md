@@ -16,7 +16,7 @@
 
 OpenClaw 是以本地 Gateway 为控制平面的多渠道个人 AI 助手仓库。`src` 承担 Gateway、会话、工具和 CLI 主链，`extensions` 承担消息渠道与插件，`ui` 与 `apps` 提供 Control UI、桌面及移动伴侣应用，`packages` 提供共享 SDK/协议。当前快照有 63,787 个 Git 跟踪文件、55,362 个可识别源码文件 / 12,650,472 行源码。
 
-仓库仍以 TypeScript 单语言为主（约 87.4% 源码行），但工程配套区域明显变厚：`scripts` 逼近百万行、`config` 与 `qa` 成为独立大区，并在根目录新增 Rust crate、`custodian-skills`、`security`、`patches`、`deploy` 等目录。
+TypeScript 仍是仓库的主力语言，占源码行约 87.4%，但工程配套区域的体量明显更厚：scripts 逼近百万行，config 与 qa 各自独立成区。根目录同时承载 Rust 侧 crate，以及 custodian-skills（质量资产）、security（安全策略与审计材料）、patches（依赖补丁）和 deploy（发行配置）等配套目录。
 
 ## 统计与模块分布
 
@@ -44,17 +44,48 @@ OpenClaw 是以本地 Gateway 为控制平面的多渠道个人 AI 助手仓库�
 | `.agents` | 303 / 77,968 |
 | `crates` | 48 / 24,282 |
 
-根 `package.json` 与 `pnpm-workspace.yaml` 声明 pnpm 工作区，发布入口为 `openclaw.mjs`；`cli-invocation.mjs`、`cli-root-options.mjs`、`cli-parent-lifetime.mjs` 等根级 `.mjs` 与对应 `.d.mts` 承担 CLI 启动期的参数与生命周期约定。扩展目录按渠道和能力拆分，共 192 个一级扩展目录，主运行时仍由 `src` 统一调度。`crates` 承载 Rust 侧实现（如原生辅助能力），`qa`、`custodian-skills`、`skills` 存放质量资产与可执行知识。
+根目录的 package.json 与 pnpm-workspace.yaml 声明 pnpm 工作区，发布入口是 openclaw.mjs。CLI 启动期的参数解析与父进程生命周期约定由根级 .mjs 模块连同各自的 .d.mts 类型声明承担，具体文件名见关键源码索引。
+
+扩展目录按渠道和能力拆分，共 192 个一级扩展目录，主运行时仍由 src 统一调度。crates 承载 Rust 侧实现（如原生辅助能力），qa、custodian-skills、skills 存放质量资产与可执行知识。
 
 ## 语言、文档与测试
 
-TypeScript 11,055,207 行（约 87.4%），Swift 490,980 行，Kotlin 259,741 行，JS 350,048 行，TSX 375,371 行，CSS 116,401 行。Swift/Kotlin 主要服务 companion app 与平台集成，TypeScript 覆盖 Gateway、工具、UI、扩展和测试。
+源码共 12,650,472 行，按语言分布如下：
 
-文档共 2,384 个文件 / 631,954 行（`docs`、`.agents`、扩展目录、`skills` 与根级说明文件共同贡献），其中 `docs/` 约 45 万行。测试共 23,788 个文件 / 6,408,658 行，分布跟随 `src`（12,194 个文件）、`extensions`（4,408）、`ui`（3,267）与顶层 `test`（2,607）；测试按同目录 `*.test.ts` 与独立 `test/` 树两种方式组织。未运行测试。
+| 语言 | 行数 |
+| --- | ---: |
+| TypeScript | 11,055,207 |
+| Swift | 490,980 |
+| Kotlin | 259,741 |
+| JS | 350,048 |
+| TSX | 375,371 |
+| CSS | 116,401 |
+
+TypeScript 占源码行约 87.4%，覆盖 Gateway、工具、UI、扩展和测试；Swift 与 Kotlin 主要服务 companion app 与平台集成。
+
+文档共 2,384 个文件、631,954 行，由 docs 目录、.agents、各扩展目录、skills 与根级说明文件共同贡献，其中 docs 单独占约 45 万行。
+
+测试共 23,788 个文件、6,408,658 行，文件数量跟随源码主区分布：
+
+| 测试位置 | 文件数 |
+| --- | ---: |
+| src | 12,194 |
+| extensions | 4,408 |
+| ui | 3,267 |
+| test（顶层） | 2,607 |
+
+测试按同目录 *.test.ts 与独立 test 树两种方式组织。本次未运行测试。
 
 ## 跨平台与工程配套
 
-README 与安装脚本覆盖 macOS、Linux、Windows/WSL；Gateway、CLI、TUI、Control UI 和桌面/移动 companion apps 通过共享协议连接。`apps`、`ui`、`extensions`、`crates`、`deploy`、`.github/workflows` 和 `scripts` 分别承担平台应用、控制界面、渠道插件、原生组件、发行与自动化配套。工程侧另有 `patches`（依赖补丁）、`security`（安全策略与审计材料）、`config`（运行期配置模板）与 `qa`（质量校验资产）。工具默认在主机执行，沙箱由配置选择，属于运行时边界而非单独仓库。
+README 与安装脚本覆盖 macOS、Linux、Windows/WSL；Gateway、CLI、TUI、Control UI 以及桌面和移动 companion apps 通过共享协议连接，各部分落在不同目录：
+
+- apps、ui：平台应用与控制界面
+- extensions：渠道插件
+- crates：原生组件
+- deploy、.github/workflows、scripts：发行与自动化配套
+
+工程侧另有 patches（依赖补丁）、security（安全策略与审计材料）、config（运行期配置模板）与 qa（质量校验资产）。工具默认在主机执行，沙箱由配置选择，属于仓库内的运行时边界。
 
 ## 已确认边界与未验证事项
 

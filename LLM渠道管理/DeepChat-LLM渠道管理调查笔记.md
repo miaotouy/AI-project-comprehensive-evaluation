@@ -16,23 +16,31 @@
 
 DeepChat 中的“渠道”主要是持久化的 `LLM_PROVIDER` 用户实例。默认 Provider 是应用内置的配置模板和注册表条目；用户可以新增 `custom: true` 的实例，也可以修改已有 Provider 的部分字段。运行时再依据 Provider 的 `id`、`apiType`、凭据和模型配置创建具体连接实例。
 
-1. **桌面端是完整管理入口**：设置页可以查看 Provider 列表和详情，新增自定义 Provider，编辑名称、API Key、部分 Base URL，启停、排序、删除自定义 Provider，刷新模型、启停模型和编辑模型配置。源码没有找到 Provider 复制按钮或 Provider 导出入口。
-2. **CLI 是本地控制面，不是独立配置编辑器**：`provider list/test/add/update/set-credential/clear-credential/remove` 已实现。CLI 依赖正在运行的 DeepChat main 进程，公共返回值脱敏，凭据通过 stdin 写入 main。CLI 没有 Provider 导入、导出、复制或专门的 enable/disable 命令，启停通过 `provider update --enabled` 完成。
-3. **TUI 不适用，远程 Web 管理未找到**：CLI V1 文档明确把 TUI/交互 shell 列为不包含能力；本次在 `src`、CLI surface 和文档中未找到独立 Web server 或浏览器端 Provider 管理 API。桌面 renderer 使用 Vue，但它属于 Electron 桌面端，不单列为远程 Web 前端。
-4. **导入是桌面设置页的数据迁移向导**：Provider import service 从 CC Switch、Alma、Cherry Studio、Hermes、OpenClaw 的本地数据中扫描配置，先预览和映射，再按选择创建或更新内置/自定义 Provider，并导入模型。它不是通用的 DeepChat Provider 导出/导入文件格式。
-5. **默认渠道与用户渠道的可操作范围不同**：默认 Provider 会参与初始化合并；内置 Provider 通常保留身份和协议，只允许修改凭据、启停及特定可编辑字段。自定义 Provider 可编辑 Base URL，并可从桌面端删除。CLI 还显式禁止修改内置 Provider 的 `apiType`，只允许删除自定义 Provider。
+1. **桌面端是完整管理入口**：设置页把渠道管理的大部分动作集中在同一处。用户可查看 Provider 列表和详情，新增自定义 Provider，修改名称、API Key 和部分 Base URL，对自定义 Provider 执行启停、排序和删除，并在模型页刷新模型、启停单个模型和编辑模型配置。源码没有找到 Provider 复制按钮或导出入口。
+2. **CLI 是本地控制面，不是独立配置编辑器**：Provider 的 list、test、add、update、set-credential、clear-credential、remove 子命令均已实现。CLI 依赖正在运行的 DeepChat main 进程，公共返回值脱敏，凭据通过 stdin 写入 main。CLI 没有 Provider 导入、导出、复制或专门的 enable/disable 命令，启停通过 `provider update --enabled` 完成。
+3. **TUI 不适用，远程 Web 管理未找到**：CLI V1 文档明确把 TUI/交互 shell 列为不包含能力；本次在源码、CLI surface 和文档中未找到独立 Web server 或浏览器端 Provider 管理 API。桌面 renderer 使用 Vue，但它属于 Electron 桌面端，不单列为远程 Web 前端。
+4. **导入是桌面设置页的数据迁移向导**：Provider import service 从 CC Switch、Alma、Cherry Studio、Hermes、OpenClaw 的本地数据中扫描配置，先预览和映射，再按选择创建或更新内置/自定义 Provider，并导入模型。该向导读取其他应用的本地数据结构，接受范围限于上述迁移来源；DeepChat 自身的 Provider 配置另按内部数据结构持久化。
+5. **默认渠道与用户渠道的可操作范围不同**：默认 Provider 会参与初始化合并；内置 Provider 通常保留身份和协议，只允许修改凭据、启停及特定可编辑字段。自定义 Provider 可编辑 Base URL，并可从桌面端删除。CLI 还显式禁止修改内置 Provider 的 apiType，只允许删除自定义 Provider。
 6. **渠道请求可附加用户配置 Header**：Header 作为独立的 Provider 配置契约进入请求组装；APIMart、Synthorai 与 OpenAI Codex 图像生成均有 Provider 接线，模型目录和能力判断不能只按早期内置 Provider 集合理解（`src/main/provider/providerHeaders.ts`、`providers/apimartProvider.ts`、`openaiCodexAdapter.ts`）。
-7. **内置渠道目录明显扩张**：本次新增 23 个默认 Provider，其中 TypeSafe（Jev 判定模型）与 Cloudflare（Workers AI）各有专用 provider 实现（`providers/jevProvider.ts`、`providers/workersAiProvider.ts`），其余多为 OpenAI-compatible 聚合/代理服务商（`defaults.ts`）。它们不是用户临时创建的 custom Provider。
-8. **模型目录改由主进程单一写者维护**：新增 provider catalog 服务，把远端 `/models`、Provider DB、配置、运行时、Ollama、ACP 六类来源聚合成带 revision 的快照，由主进程统一刷新并落状态；renderer 通过 `providers.catalog.get/list/refresh/ensureFresh` 只读消费，不再各自发起模型拉取（`src/main/provider/catalog/providerCatalogService.ts`）。
-9. **OpenAI 渠道有两种登录模式**：`openaiAuthMode` 可在 `api-key` 与 `chatgpt` 之间切换；后者让 `openai` 这个 Provider ID 直接路由到 Codex 后端定义，复用 openaiCodex 的 OAuth 凭据与模型目录（`providerRegistry.ts:948`）。
+7. **内置渠道目录明显扩张**：本次新增 23 个默认 Provider，其中 TypeSafe（Jev 判定模型）与 Cloudflare（Workers AI）各有专用 provider 实现（`providers/jevProvider.ts`、`providers/workersAiProvider.ts`），其余多为 OpenAI-compatible 聚合/代理服务商（`defaults.ts`）。这些条目随应用内置，不属于用户临时创建的 custom Provider。
+8. **模型目录改由主进程单一写者维护**：新增 provider catalog 服务，把远端 /models、Provider DB、配置、运行时、Ollama、ACP 六类来源聚合成带 revision 的快照，由主进程统一刷新并落状态；renderer 通过 providers.catalog 的 get、list、refresh、ensureFresh 路由只读消费，不再各自发起模型拉取（`src/main/provider/catalog/providerCatalogService.ts`）。
+9. **OpenAI 渠道有两种登录模式**：openaiAuthMode 可在 api-key 与 chatgpt 之间切换；后者让 openai 这个 Provider ID 直接路由到 Codex 后端定义，复用 openaiCodex 的 OAuth 凭据与模型目录（`providerRegistry.ts:948`）。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
-`LLM_PROVIDER`（`src/shared/types/provider.ts:75-110`）是渠道实例的主要数据结构，包含 `id`、名称、`apiType`、API Key/OAuth token、`baseUrl`、模型集合、模型启停状态、`enable`、`custom`、网站信息、限流配置，以及 OpenAI 渠道的 `openaiAuthMode`（`api-key` 或 `chatgpt`）。`provider.id + modelId` 构成运行时选择的基本身份；同名模型在不同 Provider 下可以对应不同 Base URL、凭据和能力。另有 `capabilityProviderId` 表示“能力与目录继承自哪个 Provider”，让同一协议下的不同 profile 共享事实而不共享凭据。
+`LLM_PROVIDER` 是渠道实例的主要数据结构，字段按用途分成五组（`src/shared/types/provider.ts:75-110`）：
+
+- 身份：id、名称和 custom 标记；
+- 协议：apiType，以及 OpenAI 渠道的 openaiAuthMode（取值为 api-key 或 chatgpt）；
+- 凭据与地址：API Key 或 OAuth token、baseUrl；
+- 模型：模型集合与每个模型的启停状态；
+- 其他：enable 启停标记、网站信息和限流配置。
+
+运行时以 Provider ID 加模型 ID 作为选择的基本身份，因此同名模型挂在不同 Provider 下可以对应不同的 Base URL、凭据和能力。capabilityProviderId 标记能力与目录继承自哪个 Provider，让同一协议下的多个 profile 共享目录事实而各自持有凭据。
 
 Provider 是持久化的配置与运行时实例，不是每次请求临时创建的连接。`ProviderSettings` 持有用户配置，`ProviderInstanceManager` 按 Provider ID 创建并缓存 `BaseLLMProvider` 实例；配置变化时通过 Provider change event 触发实例更新或重建（`src/main/provider/managers/providerInstanceManager.ts`）。
 
-默认目录中，既有渠道如 RunInfra 与 API Route 均以 OpenAI-compatible `apiType` 注册；API Route 的默认 Base URL 与文档元数据见 `defaults.ts:238-248`。Provider ID 优先路由保留各自独立身份，协议请求仍复用通用适配器；定义与注册见 `src/main/provider/defaults.ts`、`src/main/provider/providerRegistry.ts` 的 `resolveAiSdkProviderDefinition`（`:942-953`）。
+默认目录里的 RunInfra、API Route 等既有渠道都以 OpenAI 兼容的 apiType 注册，其中 API Route 的默认 Base URL 和文档元数据定义在默认渠道表中（`src/main/provider/defaults.ts:238-248`）。路由按 Provider ID 优先匹配，这些渠道因此保留各自的独立身份，协议请求仍复用通用适配器；身份解析入口是注册表的 `resolveAiSdkProviderDefinition`（`src/main/provider/providerRegistry.ts:942-953`）。
 
 一个 Provider 实例只有一个持久化 `baseUrl` 字段，本次未找到在同一个 `LLM_PROVIDER` 内维护多个 Endpoint 或 Endpoint 列表的模型。若要使用同一协议的多个地址，实际做法是创建多个 Provider 实例；它们可以共享同一 `apiType`，但各自保存自己的 URL 和凭据。
 
@@ -42,14 +50,14 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 
 源码显示 Provider 配置存在两条相互协作的存储路径：
 
-- 传统/运行时设置路径使用 Electron Store 的 `providers` 键，`ProviderHelper` 通过 `getSetting`/`setSetting` 读写完整 Provider 数组（`src/main/provider/providerHelper.ts:18-51`、`:169-244`）。
-- 当前 Provider 数据库使用 SQLite 的 `providers` 表，同时保存 `id`、名称、`api_type`、`api_key`、`base_url`、启用标记、custom 标记、排序、最后使用时间和 `provider_json`；删除时还级联清理 Provider 模型、模型状态和模型配置（`src/main/provider/data/settingsTable.ts:156-223`）。
+- 传统/运行时设置路径落在 Electron Store：整份 Provider 数组保存在 providers 键下，`ProviderHelper` 负责读取和写回（`src/main/provider/providerHelper.ts:18-51,169-244`）。
+- 当前 Provider 数据库落在 SQLite：providers 表按列保存 id、名称、api_type、api_key、base_url、启用标记、custom 标记、排序和最后使用时间，完整配置写入 provider_json 列；删除 Provider 时级联清理其模型、模型状态和模型配置（`src/main/provider/data/settingsTable.ts:156-223`）。
 
 因此，“配置文件”在源码层面不是一个用户可直接编辑的 `providers.json`。Provider 的主配置由 Electron Store/SQLite-backed settings 管理，Provider DB 模型目录另有本地缓存目录；本次未找到面向用户的 YAML/TOML/JSON Provider 配置编辑文件。
 
 ### 2.2 默认配置与用户配置合并
 
-`ProviderSettings` 初始化时连接 settings store 和 Provider database，执行旧配置迁移、清理 deprecated Provider，并将新增默认 Provider 合并到已有配置（`src/main/provider/settings.ts:367-470`，默认渠道来自 `DEFAULT_PROVIDERS`，新增项在 `:440` 过滤后并入）。`getDefaultProviders`（`:1434`）单独返回默认渠道，用于 UI 展示默认网站、默认 Base URL 等元数据；当前用户 Provider 列表则由 `getProviders` 返回。
+`ProviderSettings` 初始化时同时连接 settings store 和 Provider database，先迁移旧配置、清理已废弃的 Provider，再把新增的默认 Provider 合并进现有配置；默认渠道来自 `DEFAULT_PROVIDERS`，其中新增项先按条件过滤后再并入。界面展示默认网站、默认 Base URL 等元数据时，由 `getDefaultProviders` 单独返回默认渠道；当前用户的渠道列表则由 `getProviders` 返回（`src/main/provider/settings.ts:367-470`，`getDefaultProviders` 见 `:1434`）。
 
 新增自定义 Provider 时，桌面端生成 `nanoid` ID，设置 `custom: true`，然后调用 `addProviderAtomic`。更新、添加、删除和排序都会发布 Provider change event，renderer 的 `providerStore` 收到事件后刷新列表。
 
@@ -75,10 +83,10 @@ Provider 是持久化的配置与运行时实例，不是每次请求临时创�
 
 已有内置 Provider 和新建 custom Provider 共用 Provider 列表、模型管理、启停、连接测试和运行时实例机制，但字段可编辑性不同：
 
-- 桌面端通过 `EDITABLE_BASE_URL_PROVIDER_IDS` 和 `provider.custom` 决定 Base URL 是否直接可编辑；非列表内置 Provider 默认锁定 Base URL，用户可以在 UI 中点击解锁，但本次未验证解锁后的保存行为。
-- 删除按钮只在 `provider.custom` 时渲染。底层 route 对 renderer caller 没有同样的 custom 检查，但 UI 入口没有提供内置 Provider 删除；CLI route 则明确拒绝删除内置 Provider。
-- 新增流程只创建 custom Provider，apiType 选项为 OpenAI、OpenAI Completions、Gemini、Anthropic、Ollama、Mistral AI 与 System One（`jev`，即判定模型渠道）；Ollama 可不填 API Key，并默认 Base URL 为 `http://localhost:11434`。
-- 内置 Provider 可能拥有 OAuth、专用凭据、Provider DB 元数据和特殊高级设置；新建 custom Provider 不自动获得这些内置身份能力，只按所选 `apiType` 进入通用 runtime。
+- Base URL 是否可直接编辑由桌面端按 `EDITABLE_BASE_URL_PROVIDER_IDS` 白名单和 Provider 的 custom 标记决定：不在白名单里的内置 Provider 默认锁定 Base URL，用户可以在界面上点击解锁，解锁后的保存行为本次未验证。
+- 删除按钮只在 Provider 标记为 custom 时渲染；底层 route 对 renderer 调用方没有同样的 custom 校验，界面也没有提供内置 Provider 的删除入口，CLI route 则明确拒绝删除内置 Provider。
+- 新增流程只创建 custom Provider，可选协议为 OpenAI、OpenAI Completions、Gemini、Anthropic、Ollama、Mistral AI 和 System One（jev，即判定模型渠道）；选择 Ollama 时可以不填 API Key，Base URL 默认为 `http://localhost:11434`。
+- 内置 Provider 可能带有 OAuth、专用凭据、Provider DB 元数据和特殊高级设置；新建的 custom Provider 只按所选 apiType 进入通用 runtime。
 
 ## 3. 配置入口的具体行为
 
@@ -123,7 +131,7 @@ CLI 不是桌面端所有操作的镜像：它不暴露 Provider import/export�
 
 OpenAI Codex 和 xAI Grok OAuth 使用独立 credential store，并通过 Electron `safeStorage` 加密；不可用时存在 file storage fallback（`src/main/provider/auth/openaiCodex/credentialStore.ts` 及 xAI 对应实现，两个 store 本次都有较大改动，新增了账号/计划类型与失效处理）。OpenAI 的 ChatGPT 登录模式复用同一份 Codex 凭据，不另建凭据类型。AWS Bedrock credential 另由 settings store 的 `awsBedrockCredential` 键保存（`src/main/provider/settings.ts`）。
 
-OAuth 配置与抽象从 `src/main/provider/oauthHelper.ts` 移入 `src/shared/types/oauth.ts`（`OAuthConfig`、`OAuthServicePort`），具体登录流程保留在 `src/main/provider/auth/index.ts`：GitHub Copilot 走 device flow，OpenAI Codex 与 xAI Grok 走各自授权窗口加本地回调服务器（监听 3000 端口），回调完成后写入 credential store。原来的通用 `OAuthHelper` 类已不存在。
+OAuth 的类型定义集中在 `src/shared/types/oauth.ts`，其中 `OAuthConfig` 与 `OAuthServicePort` 分别定义配置结构和登录服务接口，具体登录流程由 `src/main/provider/auth/index.ts` 实现：GitHub Copilot 走 device flow，OpenAI Codex 与 xAI Grok 各自弹出授权窗口并启动本地回调服务器（监听 3000 端口），回调完成后把凭据写入 credential store。源码中已无通用 `OAuthHelper` 类。
 
 桌面端 API Key 输入默认是 password 类型，仅在当前表单中显示/隐藏；Provider summary、CLI 公共 DTO 和 Provider import 预览对 API Key 脱敏。导入预览使用掩码值，导入 apply 才把原始凭据写入目标 Provider。请求 trace 使用 `redact.ts` 对 authorization、api-key、token、secret、password 等字段脱敏；本次未验证导出、备份和崩溃日志是否包含普通 Provider 凭据。
 
@@ -133,13 +141,29 @@ OAuth 配置与抽象从 `src/main/provider/oauthHelper.ts` 移入 `src/shared/t
 
 ### 5.1 聚合服务（provider catalog）
 
-模型目录不再由各调用方分别拉取，而是由主进程的 `ProviderCatalogService` 作为唯一写者聚合成快照（`src/main/provider/catalog/providerCatalogService.ts`）。它把六类来源合并成同一份模型列表：远端 `/models`、Provider DB、本地配置、运行时、Ollama 与 ACP；每份快照带 Provider 级 `revision`，状态取 `unknown|fresh|stale|refreshing|error` 之一，并记录来源、最后刷新原因、错误码与错误时间（类型定义 `src/shared/types/providerCatalog.ts`）。
+`ProviderCatalogService` 在主进程中作为唯一写者，把各路来源聚合成模型目录快照（`src/main/provider/catalog/providerCatalogService.ts`）。六类来源合并进同一份模型列表：
+
+- 远端 `/models` 接口；
+- Provider DB；
+- 本地配置；
+- 运行时；
+- Ollama；
+- ACP。
+
+每份快照带 Provider 级 `revision`，状态字段取 `unknown|fresh|stale|refreshing|error` 之一，并记录来源、最后刷新原因、错误码与错误时间（类型定义 `src/shared/types/providerCatalog.ts`）。
 
 刷新按来源确定有效期：远端目录 6 小时、运行时目录 60 秒，自动 revalidate 在失败后的 5 分钟内不重试。同 Provider、同配置代际的刷新通常共用 Promise；但显式 user/config 请求若遇到跳过 Provider DB 同步的后台刷新，会排在其后再执行，以获得完整目录事实。配置改变会递增 generation，旧实例的返回值成为 superseded，不能写回（`providerCatalogService.ts:223-285,379-451`）。
 
 成功刷新即使模型内容相同，也更新刷新时间并递增快照 revision；renderer 拒绝更旧 revision，避免较早 IPC 响应覆盖新快照。失败保留已有目录并记录错误；Provider DB 下载失败时仍可从缓存继续构建目录（`providerCatalogService.ts:430-540`、`src/renderer/src/stores/modelStore.ts:187-201`）。
 
-renderer 侧通过四条路由消费（`src/shared/contracts/routes/providers.routes.ts:403-437`）：`providers.catalog.get` 取单 Provider 快照、`providers.catalog.list` 批量取、`providers.catalog.refresh` 触发刷新、`providers.catalog.ensureFresh` 在打开设置页或切换登录模式后确保新鲜。状态另落 settings DB（`getProviderCatalogState`/`setProviderCatalogState`），所以重启后仍能区分“从未成功拉取”和“过期”。
+renderer 通过四条路由读取和使用快照（`src/shared/contracts/routes/providers.routes.ts:403-437`）：
+
+- `providers.catalog.get`：读取单个 Provider 的快照；
+- `providers.catalog.list`：批量读取；
+- `providers.catalog.refresh`：主动触发刷新；
+- `providers.catalog.ensureFresh`：在打开设置页或切换登录模式后确保快照新鲜。
+
+快照状态另保存到 settings DB，由 `getProviderCatalogState` 读取、`setProviderCatalogState` 写入，重启后仍能区分“从未成功拉取”和“过期”。
 
 首次接入会等待显式 config 刷新后再推荐并启用初始模型，防止提交配置后立即读取空目录。推荐失败发生在 Provider 已持久化之后，不回滚已连接的 Provider；返回结果还用 attempt 序号隔离已取消或被替换的界面流程（`src/renderer/settings/components/AddProviderFlow.vue:400-441`）。后台模型列表读取使用 ensureFresh 并先消费现有快照，设置向导使用等待刷新结果的路径，两者有不同的一致性时机（`src/renderer/src/stores/modelStore.ts:337-415`）。
 
@@ -157,7 +181,7 @@ renderer 侧通过四条路由消费（`src/shared/contracts/routes/providers.ro
 
 因此，同一 OpenAI-compatible apiType 可以复用统一适配器，同时保留每个 Provider 自己的 Base URL、API Key 和模型目录。Anthropic、Gemini、OpenAI Responses、OpenAI Completions、Vertex、Bedrock、Ollama 等特殊协议在 provider factory/AI SDK provider 中组装 endpoint、headers 和协议请求体；上层 runtime 统一消息、工具、reasoning、媒体和 embedding 的调用接口。
 
-**路由选择**：`resolveProviderTransport`（`src/main/provider/providerTransport.ts`）在运行时再决定该请求实际走哪个 provider kind。`new-api` 与 `apimart` 两类 route strategy 会按模型或 route 元数据解析出 `openai-response`、`anthropic`、`gemini` 等 endpoint 类型并映射为对应 kind；`opencode-go` 策略遇到 Anthropic 兼容路由时切到 anthropic kind；其余取 definition 的 runtimeKind。该层解决同一 Provider 内部不同模型走不同协议的问题。
+**路由选择**：请求实际走哪个 provider kind 由 `resolveProviderTransport` 在运行时决定（`src/main/provider/providerTransport.ts`）。new-api 与 apimart 两类路由策略会先按模型或路由元数据解析出 endpoint 类型，再映射成对应的 kind；opencode-go 策略遇到 Anthropic 兼容路由时切到 anthropic kind；其余策略直接取 definition 声明的 runtime kind。这一层让同一个 Provider 内部的不同模型可以各走各的协议。
 
 **专用实现**：新增的 TypeSafe Jev 与 Cloudflare Workers AI 各自有 provider 实现（`providers/jevProvider.ts`、`providers/workersAiProvider.ts`），前者把 `/v1/systemone` 判题端点包装成 Provider（目录端点为其兄弟 `/v1/models`），后者走 Workers AI 的账号/网关协议。
 
@@ -173,7 +197,7 @@ DeepSeek 官方 Responses endpoint 的原生 Web Search 是 Provider ID、模型
 
 ## 8. 连接检测、日志与可观测性
 
-桌面和普通 IPC 连接测试走 `providers.testConnection` -> `ProviderService.testConnection` -> `providerRuntime.check`，ProviderService 设置 5 秒查询超时（`src/main/provider/providerService.ts:18-61`）。如果提供 modelId，`ProviderRuntime.check` 使用真实 completions 请求发送测试消息；不提供 modelId 时使用 Provider 自己的 `check()`（`src/main/provider/index.ts:863-930`）。因此源码确认设置页连接测试复用真实 Provider 执行链，而不是 mock。
+桌面端和普通 IPC 的连接测试从 `providers.testConnection` 路由进入 ProviderService，再交给 Provider runtime 的 check 执行，ProviderService 对整条链路设置 5 秒查询超时（`src/main/provider/providerService.ts:18-61`）。调用方传入 modelId 时，运行时使用真实 completions 请求发送测试消息；未传 modelId 时使用 Provider 自身的 check（`src/main/provider/index.ts:863-930`）。因此设置页的连接测试跑的是真实 Provider 执行链。
 
 CLI 的 public connection route 再包一层 5 秒 scheduler timeout，并把失败统一返回为 `isOk: false, errorMsg: 'Provider connection failed'`，不向 CLI 暴露内部错误（`src/main/cli/providerModelAdminRoutes.ts:119-140`）。桌面端 IPC route 则返回 ProviderService 的 `{ isOk, errorMsg }`。
 

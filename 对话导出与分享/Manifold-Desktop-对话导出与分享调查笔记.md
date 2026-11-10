@@ -43,18 +43,18 @@ JSON 导入主链：
 
 ## 1. 入口、用户目标与导出源
 
-- **Markdown 导出**：唯一入口是侧栏会话列表项上的 "MD" 小按钮，初始 `opacity: 0`，鼠标进入该行才显示（`frontend/components/side-panel.js:128-141`）。入口按"会话项"逐个提供，无批量操作、无命令行、无快捷键。导出源为单个整会话（`LoadSession(id)`），目标为个人存档/文本交换。
-- **JSON 导出**：`EXPORT_SESSION` 已注册进 bridge 分发器且 handler 实现完整（分发器 `MainWindow.xaml.cpp:428`，handler `MainWindow.xaml.cpp:619-646`），但前端全部源码中搜索该消息无任何发送方；git 历史中 `-S "EXPORT_SESSION" -- frontend` 亦无匹配（自初始提交起）。结论：该消息属于无 UI 状态，不属于“本次未找到调用”的未确认情况。
-- **JSON 导入**：首页 Quick Actions 的 "Import Session" 按钮（`frontend/components/home-tab.js:88`），无会话选择、单文件导入。
+- **Markdown 导出**：唯一的导出入口是侧栏会话项上悬浮显示的 MD 按钮，按钮初始透明，鼠标移到该行才浮现，点击后把这个会话写成 .md 文件，按钮的创建与事件绑定见 `frontend/components/side-panel.js:128-141`。入口按会话逐个提供，没有批量操作、命令行或快捷键，导出源固定为单个完整会话，用途为个人存档与文本交换。
+- **JSON 导出**：后端把 EXPORT_SESSION 注册进了 bridge 分发器，对应的导出 handler 也实现完整（`MainWindow.xaml.cpp:428、619-646`），但前端源码里没有任何地方发送这条消息，按消息名在 git 历史中检索前端路径同样没有命中，自初始提交起就是如此。据此可以确认这条能力处于无 UI 入口的状态。
+- **JSON 导入**：入口是首页 Quick Actions 区的 "Import Session" 按钮，选中单个 JSON 文件即完成整会话导入，没有会话选择步骤（`frontend/components/home-tab.js:88`）。
 
 ## 2. 范围选择、内容口径与字段过滤
 
-- 无消息级选择、无连续范围、无分支概念、无批量导出；粒度固定为整会话。会话文件本身是扁平 `messages` 数组（`frontend/services/session-store.js:34-46` 定义的 `{role, text, parts, timestamp}` 结构），不存在分支树。
-- **Markdown 口径**（`MainWindow.xaml.cpp:686-698`）：输出由头部、角色映射与分隔规则构成：
-  - 头部：`# title` + `**Provider:**`/`**Model:**`/`**Date:**`（取 updatedAt）三行 + `---`；
-  - 角色映射：`### User` / `### Assistant`，其余角色（含 system）一律 `### System`；
-  - 正文：取 `msg.value("content", msg.value("text", ""))`，消息间以 `---` 分隔。
-- **字段过滤**：只输出正文文本字段。reasoning、工具调用、附件（parts）、system prompt 均无结构化导出路径——工具调用只有以文本形式写进 content 才会出现；`parts` 字段从未被任何导出/导入逻辑读取。system prompt 属 SettingsManager 全局设置，不进入会话 JSON，因此不进入导出。
+- 导出粒度固定为整会话：界面上没有按消息勾选、连续范围、分支或批量导出的入口。会话文件本身就是扁平的 messages 数组，每条消息由角色、正文、分段与时间戳四个字段组成，没有分支树结构，字段定义见 `frontend/services/session-store.js:34-46`。
+- **Markdown 口径**：导出文件由头部、角色映射与正文三部分拼成，各部分之间用分隔线隔开，拼接规则集中在 `MainWindow.xaml.cpp:686-698`。
+  - 头部：一行会话标题，接 Provider、Model、Date 三行（日期取 updatedAt），末尾一条分隔线；
+  - 角色映射：用户与助手分别输出到 User、Assistant 小节，其余角色（含 system）统一归入 System；
+  - 正文：取消息的 content 字段，缺失时回退到 text，消息之间用分隔线隔开。
+- **字段过滤**：导出只带消息正文。推理内容、工具调用、附件与 system prompt 都没有结构化出口：工具调用只有在被写成 content 文本时才随正文出现；附件字段（`parts`）在导出和导入两端都不被读取；system prompt 保存在 SettingsManager 的全局设置里，不进入会话 JSON，因此也不会出现在导出文件中。
 - 比较模式（Compare tab）的对话不产生会话文件、不进入导出。
 
 ## 3. 附件、资源与离线封装
@@ -65,7 +65,7 @@ JSON 导入主链：
 ## 4. 格式、schema 与往返能力
 
 - **Markdown**：手写拼接的普通文本，无 schema 版本、无元数据；导出后无任何导入路径（全仓未找到 Markdown 导入），不可往返。
-- **JSON**：导出即会话文件原样 `data.dump(2)` 缩进输出（`MainWindow.xaml.cpp:639`），无包装、无版本字段。导入为 parse 后原样 `SaveSession`（`MainWindow.xaml.cpp:665-669`），未知字段原样保留。因此"导出文件→再导入"对同 schema 文件可往返（往返语义 = 整对象回存），但缺少版本标识，未来 schema 演化无法自动判别。导入时无 `id` 字段则生成 `imported-<unix时间>` 作为 id（`:667`），此时源会话身份不保留。
+- **JSON**：导出把会话对象缩进序列化后原样写进文件，外面没有包装层，也没有版本字段；导入是解析后整对象回存，未知字段一并保留，两端实现合并在 `MainWindow.xaml.cpp:639、665-669`。同一 schema 的文件可以在导出与再导入之间往返，往返语义就是整对象回存；文件本身不带版本标识，未来 schema 演化时无法自动判别。导入时对象若缺少 id，会生成 `imported-<unix时间>` 作为新 id，源会话身份随之丢失（`:667`）。
 - 消息 `parts`、时间戳等字段往返时原样保留（导入是整对象存储），但没有任何读取/展示路径使用它们。
 
 ## 5. 分享稿编辑、编排与预览
@@ -88,8 +88,8 @@ JSON 导入主链：
 
 - 导出内容即会话正文原样拼接，无脱敏、无密钥扫描；API key 存 Windows Credential Manager（`Manifold.Core/CredentialManager`），不进入会话 JSON。
 - Markdown 为纯文本交付物，无 HTML 脚本执行面；会话正文作为标题/正文原样写入，未做转义（`.md` 文件无执行风险，但含恶意 Markdown 的会话内容会被原样带出）。
-- 文件名默认固定为 `chat-export.md`/`session-export.json`（`MainWindow.xaml.cpp:631,707`），标题不参与命名，因此不存在标题非法字符进文件名的路径；用户可在保存对话框中自行修改。
-- JSON 导入对解析失败静默丢弃（`parse(content, nullptr, false)` 后 `is_discarded()` 即 return，`:665-666`），无提示、无内容校验。
+- 默认文件名固定为 chat-export.md 与 session-export.json，会话标题不参与命名，标题中的非法字符不会进入文件名；用户可以在保存对话框中自行修改（`MainWindow.xaml.cpp:631,707`）。
+- JSON 导入采用不抛异常的解析方式：文件无法解析时直接返回，既不提示用户也不校验内容，处理逻辑在 `MainWindow.xaml.cpp:665-666`。
 
 ## 10. 性能、失败恢复与测试
 

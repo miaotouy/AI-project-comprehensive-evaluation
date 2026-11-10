@@ -36,7 +36,7 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 **根组件。** `App.vue` 只承载路由视图和三个全局件：WaitingForRestart、UpgradeRecoveryDialog、全局唯一 v-snackbar（消费 toast store，`App.vue:7-17`）。
 
-**双布局。** `FullLayout.vue`（v-app 绑定主题、顶部进度条、VerticalHeader、VerticalSidebar、v-main；chat 路由时内嵌 `Chat.vue` 并隐藏侧栏）与 `BlankLayout.vue`（v-app + RouterView，用于 `/auth/login`、`/auth/setup`、`/chatbox`）。
+**双布局。** 应用由两套布局壳承载页面：FullLayout 用 v-app 绑定主题，内部依次是顶部进度条、VerticalHeader、VerticalSidebar 和 v-main，进入 chat 路由时把 `Chat.vue` 嵌进主内容区并隐藏侧栏；BlankLayout 只有 v-app 加 RouterView，服务于登录、初始化向导和独立聊天箱三条路由（`FullLayout.vue`、`BlankLayout.vue`）。
 
 **与外部系统交点。** 桌面 wrapper（外部 AstrBot Desktop 项目）通过 window.astrbotDesktop / window.astrbotAppUpdater bridge 注入（类型见 `src/types/desktop-bridge.d.ts`），本仓只消费不实现：`App.vue:51-58` 订阅托盘重启事件、`VerticalHeader.vue` 桌面更新对话框、`src/utils/restartAstrBot.ts` 优先走 bridge 重启后端。
 
@@ -79,7 +79,7 @@ WebChat 增加专用设置对话框，将主题、语言、流式、推理显示
 
 **样式约定被制度化。** `ConfirmDialog.vue:4-9` 的标题类 text-h3 pa-4 pb-0 pl-6、按钮 `variant="text"/"tonal"` 与仓库 `AGENTS.md:54` 的 WebUI 对话框规范一致，且在 WaitingForRestart、FileConfigItem、BackupDialog、SidebarCustomizer 等多处对话框重复出现——这是项目层唯一显式的弹窗一致性约束。
 
-**全屏代码编辑对话框。** `AstrBotConfig.vue:364`、`AstrBotConfigV4.vue:450`、`ConfigPage.vue:90` 用 `fullscreen + transition="dialog-bottom-transition" + scrollable` 的 v-dialog 内嵌 Monaco 编辑器（`AstrBotConfigV4.vue:463-465` 按 editor_theme 传 Monaco 明暗主题）。
+**全屏代码编辑对话框。** 配置页与两代配置编辑组件都在 v-dialog 里内嵌 Monaco，对话框同时开启 fullscreen、底部滑入过渡和 scrollable 滚动；编辑器主题由配置项 `editor_theme` 决定，明暗两套随配置切换。定位见 `AstrBotConfig.vue:364`、`AstrBotConfigV4.vue:450,463-465`、`ConfigPage.vue:90`。
 
 **菜单。** StyledMenu 包装 v-menu，统一毛玻璃卡片样式、菜单阴影变量和深色主题覆盖，在 VerticalHeader 功能菜单、语言/主题下拉、登录页复用；项目内另有直接使用 v-menu 的子菜单。实现见 `StyledMenu.vue`。
 
@@ -125,7 +125,7 @@ variables 还有 border-color、carousel-control-size 两项），**定义本身
 
 **三态与持久化。** `config.ts` 定义 `ThemeMode = 'light'|'dark'|'system'`，`checkThemeMode()` 读取 localStorage themeMode 并迁移旧版 uiTheme 值；SET_THEME_MODE（`customizer.ts:43-49`）同时写 themeMode 与 uiTheme 两个 key。
 
-切换入口共四处：VerticalHeader、登录页和设置向导提供 light/dark/system 三选项，聊天工作台提供只在明暗间切换的按钮；前者调用 SET_THEME_MODE，后者调用 SET_UI_THEME，并同步全局主题名称（定位见 `VerticalHeader.vue:906-915`、`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`、`Chat.vue:338`、`Chat.vue:1747-1749`）。
+切换入口共四处：VerticalHeader、登录页和设置向导这三处提供明暗与跟随系统三档选项，聊天工作台那一处只有明暗互切按钮。前一类入口调用 SET_THEME_MODE 写入模式，聊天工作台调用 SET_UI_THEME 直接换当前主题，两条路径都会同步 Vuetify 的全局主题名称（定位见 `VerticalHeader.vue:906-915`、`LoginPage.vue:31-39,174-221`、`SetupPage.vue:18-26,68-114`、`Chat.vue:338,1747-1749`）。
 
 **system 跟随。** `config.ts:31-38` 的 resolveUiTheme 在模块加载期用 matchMedia('(prefers-color-scheme: dark)') 计算初始值；`main.ts:61-101` setupThemeSync 注册全局唯一 matchMedia change 监听器（仅 `themeMode==='system'` 时生效），系统切换即改 store + localStorage + theme.global.name。
 
@@ -137,13 +137,18 @@ variables 还有 border-color、carousel-control-size 两项），**定义本身
 
 `main.ts:41-53` 启动时读回应用（与 Settings.vue 为**两份重复实现**，改的是同一批槽位）；resetThemeColors（`Settings.vue:1121-1127`）删除两个 key 并还原默认色。无色阶生成、无预设色板。
 
-**视觉 token。** SCSS 变量层（`scss/_variables.scss`：`$border-radius-root: 8px`、字体栈 `$body-font-family` Outfit/Noto Sans + CJK fallback、`$rounded`/`$typography` map、`$box-shadow`）。
+**视觉 token。** 圆角、字体、阴影这类基础值先由一层 SCSS 变量统一定义（`scss/_variables.scss`），Vuetify 组件再从这里派生样式：
+
+- 圆角根值 8px；
+- 正文与标题字体栈为 Outfit、Noto Sans 加 CJK 回退；
+- `$rounded` 与 `$typography` 两张 map 定义组件级圆角与排版取值；
+- 阴影序列由 `$box-shadow` 提供。
 
 项目自定义 CSS 变量共 10 个，主要覆盖 CJK 字体、代码颜色、菜单阴影和六个滚动条状态。滚动条颜色继续引用 Vuetify 的主色与表面色，并同时适配 WebKit 和 Firefox。（`_variables.scss:17-19`；`components/_VScrollbar.scss:4-9`）
 
-Vuetify 把 theme 对象生成 `--v-theme-*` CSS 变量，被业务组件与 scss 直接消费（grep `var(--v-theme-` 全 src 命中 100+ 处且被截断，含自定义槽位 `--v-theme-secondaryText`、`--v-theme-border`、`--v-theme-mcpCardBg`、`--v-theme-codeBg` 等）——权威仍是 JS theme 对象，但组件与 scss 实际消费的是 Vuetify 生成的 CSS 变量。
+theme 对象在运行时被 Vuetify 编译成一组 `--v-theme-*` CSS 变量，业务组件与 scss 消费的正是这些变量：全 src 里 `var(--v-theme-` 引用超过 100 处且 grep 结果被截断，除标准色槽外也用 secondaryText、border、mcpCardBg、codeBg 这类自定义槽位。JS 侧的 theme 对象仍是取值源头。
 
-深色适配不只在 `_override.scss:102-131`（scrim 更黑、surface 背景、代码色、扁平按钮透明度、markdown 链接色），还有两处：`components/_CodeBlockDark.scss:1-18`（shiki 代码块切 `--shiki-dark`/`--shiki-dark-bg`，markstream-vue 重定义 `--border/--background/--foreground/--secondary/--muted/--muted-foreground` HSL 变量）与 `components/_VScrollbar.scss`（无 dark 覆盖段，滚动条颜色直接由 `--v-theme-*` 动态值决定）。
+深色适配在三处落地。主覆盖段 `_override.scss:102-131` 统一处理遮罩更黑、表面背景、代码配色、扁平按钮透明度和 markdown 链接色；代码块另由 `components/_CodeBlockDark.scss:1-18` 接管，shiki 高亮切到 dark 变量，markstream-vue 的边框、背景、前景、次级、弱化与弱化前景几组 HSL 变量也在此重定义；滚动条没有单独的深色覆盖段，颜色直接跟随 `--v-theme-*` 的动态取值。
 
 **本次未找到（检查范围：`dashboard/src` 全量 grep + glob `**/themes/**` 无目录）。** 主题市场/商店/下载、主题导入导出（importTheme/exportTheme/`theme.json`）、`themes/` 主题目录、壁纸/背景图（wallpaper/backgroundImage/bgImage）、自定义 CSS（customCss/userStyle）、字体切换 UI、密度/圆角设置 UI——均无匹配。
 
@@ -173,7 +178,12 @@ customizer.fontTheme 与 inputBg 虽有 store 字段与 class 绑定但无设置
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-**图片预览无公共灯箱。** 4 处独立实现，均为 v-overlay + `<img>`：`ChatMessageList.vue:439-451`、`MessageList.vue:261-273`、`StandaloneChat.vue:203-210`、`MessageListDEPRECATED.vue:174-178`；
+**图片预览无公共灯箱。** 图片预览由四处独立实现承担，结构都是 v-overlay 包一张图片：
+
+- `ChatMessageList.vue:439-451`
+- `MessageList.vue:261-273`
+- `StandaloneChat.vue:203-210`
+- `MessageListDEPRECATED.vue:174-178`
 
 统一形态是 scrim rgba(0,0,0,0.86)、overlay 点击关闭、图片 @click.stop 阻止关闭。**无缩放/旋转/前后张导航/工具栏**；无共享组件。消息壳中哪些内容触发预览由消息渲染侧决定（[`../消息渲染器/`](../消息渲染器/) 类目范围）。
 
@@ -221,7 +231,7 @@ Dashboard 自身未调用浏览器 Notification API（grep new Notification 无�
 
 自研 i18n 仍由 `src/i18n/composables.ts` 提供：模块级 currentLocale、`t()`（点路径 + `{param}` 插值）与按模块取命名空间的 `useModuleI18n()`。
 
-语言资源已按语言与功能域拆成静态 JSON：`src/i18n/locales/<locale>/{core,features}/*.json`，`zh-CN`、`en-US`、`ja-JP`、`ru-RU` 四套；`locales/index.ts` 汇总并按语言生成异步 loader，`loadTranslations` 在切换语言时动态 import 该语言整包，加载失败回退 `zh-CN`（`i18n/composables.ts:12-37`）。因此新增文案按功能域进入对应 JSON，不再写进单一字典。
+语言资源已按语言与功能域拆成静态 JSON，按 zh-CN、en-US、ja-JP、ru-RU 四套语言各建一个目录，目录内再按 core 与 features 两个功能域分文件（`src/i18n/locales/<locale>/{core,features}/*.json`）。`locales/index.ts` 汇总这些文件并生成按语言拆分的异步 loader，切换语言时动态 import 该语言整包，加载失败回退到 zh-CN（`i18n/composables.ts:12-37`）。新增文案按功能域进入对应 JSON，不再写进单一字典。
 
 setLocale 写 localStorage astrbot-locale 并 dispatchEvent('astrbot-locale-changed') 通知页面重拉插件 i18n 数据。
 

@@ -16,9 +16,9 @@
 
 Risuai 的会话和消息内嵌于角色数据，主存档采用块编码并由前端响应式状态驱动保存；remote 角色、冷归档和资源库另有外置后端：
 
-- 角色（含群聊）对象内嵌 `chats: Chat[]` 数组，`chatPage` 下标即"当前会话指针"（`database.svelte.ts:1817-1839`，`character.chats`）；会话 `id` 为 UUID，由启动时的 `assignIds` 补齐与去重（`bootstrap.ts:645-671`）。
-- 消息是**线性数组中的扁平对象**：`role: 'user'|'char'`、`data`、`saying`（说话角色 chaId）、`chatId`、`time`、`generationInfo`/`promptInfo` 快照、`disabled`（含 'allBefore' 语义）、`isComment`（`database.svelte.ts:1848-1860`）；无 swipe/版本字段。
-- 运行时与持久化事实源都是 `DBState.db` 这一个响应式内存对象：`saveDb()`（`globalApi.svelte.ts:292-486`）用 `$effect` 快照监听变化，500ms 防抖后由 `RisuSaveEncoder` 做**块级增量编码**（root 块 + 每角色一块），重新拼装主存档 `database/database.bin`，外置角色和冷数据由其中的引用连接，并每次保存都额外写一份 `dbbackup-<ts>.bin`（保留 20 份）。加载失败时按时间倒序尝试备份。
+- 角色（含群聊）对象内嵌一个会话数组 chats，当前会话就是 chatPage 下标指向的那一项；会话的 id 是 UUID，启动时由 assignIds 统一补齐并去重（`database.svelte.ts:1817-1839`、`bootstrap.ts:645-671`）。
+- 消息是**线性数组中的扁平对象**，正文、说话角色、会话标识、时间戳、生成快照与禁用态等字段都平铺在同一条目上，`disabled` 含 'allBefore' 语义，无 swipe/版本字段（`database.svelte.ts:1848-1860`，字段定义见 1.2）。
+- 运行时与持久化的事实源都是内存中的 `DBState.db`：渲染、生成与保存都直接操作这个响应式对象；保存入口 `saveDb`（`globalApi.svelte.ts:292-486`）以快照依赖加 500ms 防抖触发，由编码器做**块级增量编码**（根块 + 每角色一块）并整库写回主存档 database/database.bin，每次保存另写一份 dbbackup 备份（保留 20 份），加载失败时按时间倒序回退；外置角色与冷数据通过存档内的引用接入。
 - 分支 = **复制整个会话对象并截断**，再在尾部插入一条 `isComment` 的 `branchedfrom` 特殊注释消息作为回链；父会话不记录子分支。分支导航视图由 `getChatBranches` 对消息内容哈希做前缀树**实时计算**，不依赖持久化元数据（`gui/branches.ts:69-93`）。
 - Reroll（重生成）是**纯内存候选机制**：候选文本挂在 `process/prereroll.ts` 按生成 ID 索引的模块级对象上，切换时原地替换最后一条消息的 `data`，候选不落盘；没有候选时则物理删除尾部 char 消息后重新生成。
 - 冷存储（Cold Storage）是自动归档机制：角色 10 天未交互或会话 10 天无新消息（且 ≥4 条）时，把消息等数据外置到 Tauri 文件/OPFS/账户远端，原地留下带 `COLDSTORAGE` 头的占位消息，打开时惰性恢复（`process/coldstorage.svelte.ts`）。
@@ -35,7 +35,7 @@ bootstrap.loadData()（bootstrap.ts:55-269）
   -> saveDb() 常驻循环（$effect 监听 -> 500ms 防抖 -> 块级重编码 -> 整库写回 + 备份）
 ```
 
-保存主链（`globalApi.svelte.ts:292-486`）：`saveDb()` 对 `DBState.db` 建 `$effect`，快照读取除大块外的全部字段与"当前角色"（`selIdState`）的所有字段和 `chats` 数组；任一变化经 500ms 防抖置 `changed`。变化只记录最近修改的 `[chaId, chat.id]` 对，循环里调用 `encoder.set()` 只重编码这些块，最后整文件写回。**会话与消息没有按条或按会话的落盘单位**，任何修改的持久化路径都是"块重编码 + 整库覆写"。
+保存主链由 `saveDb()` 承担（`globalApi.svelte.ts:292-486`）：它用 `$effect` 对 `DBState.db` 建立深层依赖，快照读取除大块外的全部字段、当前角色（`selIdState` 指向的对象）的全部字段以及 chats 数组；任一可观察变化先置 changed，经 500ms 防抖后进入保存。变化只记下最近修改的一组 [chaId, chat.id]，循环里通过 encoder.set() 重编码这些块，最后把整个文件写回。会话与消息没有按条或按会话的落盘单位，任何修改的持久化路径都是块重编码加整库覆写。
 
 边界：请求如何从 `chat.message` 组装上下文、流式事件如何驱动 `message[i].data` 属于对话请求与上下文类目；消息渲染窗口、滚动与折叠交互属于消息渲染器/Chat UI 类目。本笔记只记录这些操作改变的数据对象与最终持久化结果。
 
@@ -56,16 +56,16 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 消息是线性 `Message[]`，不是树、父子 part 或事件日志。字段分四组：
 
-- 身份与角色：`role`（`user`/`char`）、`name`、`otherUser`（多用户房间中区分他人发言）、`saying`（char 消息的说话者 chaId，群聊据此渲染发言者）。
-- 内容与状态：`data`（正文，可含 `{{inlayed::id}}` 附件内联语法与 `{{specialcomment::...}}` 注释）、`isComment`（注释消息，分支回链用）、`disabled`（`false`/`true`/`'allBefore'`：单条禁用或该条之前全部禁用，渲染为不同分隔线）。
-- 生成快照：`generationInfo`（模型、`generationId`、输入输出 token 数、`maxContext`、各阶段耗时的 `stageTiming`）、`promptInfo`（`promptName`、`promptToggles`、`promptText`，仅 `db.promptInfoInsideChat` 开启时写入，web 端被强制为 false，`database.svelte.ts:696-699`）。
-- 时间与标识：`time`（Date.now 毫秒）、`chatId`（UUID，发送时对缺失的旧消息惰性补齐，`process/index.svelte.ts:256-259`；书签添加时也会补，`Chat.svelte:287-290`）。
+- 身份与角色：`role` 取 user 或 char，`name` 是显示名；`otherUser` 在多用户房间里区分他人发言，`saying` 记录 char 消息的说话者（chaId），群聊据此渲染发言者。
+- 内容与状态：正文存于 data 字段，可带 `{{inlayed::id}}` 附件内联语法与 `{{specialcomment::...}}` 注释；isComment 标记用于分支回链的注释消息；disabled 取 false、true 或 `'allBefore'`，分别表示未禁用、单条禁用和该条之前全部禁用，渲染成不同样式的分隔线。
+- 生成快照：`generationInfo` 记录模型、`generationId`、输入输出 token 数、上下文上限和各阶段耗时；`promptInfo` 记录提示词名称、开关与文本，只在 `db.promptInfoInsideChat` 打开时写入，web 端该开关被强制为 false（`database.svelte.ts:696-699`）。
+- 时间与标识：`time` 是毫秒时间戳；`chatId` 是 UUID，旧消息缺失时在发送过程中惰性补齐，添加书签时也会补（`process/index.svelte.ts:256-259`、`Chat.svelte:287-290`）。
 
 `generationId` 是**本次生成回合的标识**，同时写入消息 `generationInfo` 与内存 reroll 候选表，是两者关联的键（见 4.2）。没有 swipe 数组、没有消息级版本历史、没有消息级附件字段（附件内容经 inlay 语法进 `data`，inlay 资源存独立 localforage 实例；角色资产另走 assets 路径）。
 
 ### 1.3 首条消息的虚拟化
 
-角色会话的"第 0 条"不进入 `message` 数组：`chat.fmIndex === -1` 时渲染角色 `firstMessage`，否则渲染 `alternateGreetings[fmIndex]`（`DefaultChatScreen.svelte:837-838`）；fmIndex 随会话持久化，UI 左右切换改写该值。群聊例外：新会话创建时直接把每个成员的 `firstMessage` 各 push 一条进消息数组（`SideChatList.svelte:146-153`），因此群聊无虚拟首条。
+角色会话的"第 0 条"存放在会话对象之外：fmIndex 为 -1 时渲染角色开场白，否则渲染对应索引的备选开场白；fmIndex 随会话持久化，UI 左右切换改写该值（`DefaultChatScreen.svelte:837-838`）。群聊例外：新会话创建时把每个成员的开场白各 push 一条进消息数组，因此群聊没有虚拟首条（`SideChatList.svelte:146-153`）。
 
 ## 2. 事实源、索引与持久化
 
@@ -100,26 +100,26 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **新建会话**：`chats.unshift({message:[], note:'', name:'New Chat N', localLore:[], fmIndex:-1})`（`ChatList.svelte:71-90` 与 `SideChatList.svelte:139-158`）——内存惰性创建，首次落盘由 saveDb 自动完成，无独立"新建"持久化动作；会话列表顺序即创建/排序顺序。
-- **复制会话**：`$state.snapshot` 深拷贝整个 Chat，`createChatCopyName` 生成不重复的 `(Copy N)` 名字、换新 `id`，`unshift` 到列表头（`SideChatList.svelte:267-272`）。
-- **切换**：`changeChatTo(index|id)` 改写 `chatPage`（`globalApi.svelte.ts:2410-2429`）；切换本身不触发保存，依赖反应式监听。
-- **重命名/笔记**：`chat.name`、`chat.note` 直接双向绑定修改（`SideChatList.svelte:254`、`CharConfig.svelte:331`）。
-- **删除会话**：`chats.splice(i, 1)`（确认弹窗，`ChatList.svelte:49-66`），不产生回收站对象；`message` 内消息删除见 4.1。
-- **删除角色（软删）**：`removeChar` 的 normal 模式只写 `trashTime = Date.now()`，角色仍在列表（垃圾桶视图），3 天后 `checkNewFormat` 启动清理时物理移除（`characters.ts:809-840`、`bootstrap.ts:497-504`）；垃圾桶中恢复即置 `trashTime = undefined`（`GridCatalog.svelte:144`）。
-- **会话文件夹**：`chatFolders` 增删与拖拽排序直接改数组和 `folderId`；删文件夹把其中会话的 `folderId` 置空（`SideChatList.svelte:221-237`）。
+- **新建会话**：聊天页与角色侧栏的按钮都只在内存里向列表头部插入一个空会话，标题取 `New Chat N`，`fmIndex` 置 -1 以便渲染角色开场白；首次落盘由 saveDb 自动完成，没有独立的"新建"持久化动作，列表顺序即创建/排序顺序（`ChatList.svelte:71-90`、`SideChatList.svelte:139-158`）。
+- **复制会话**：对当前会话做深拷贝，由 createChatCopyName 生成不重复的 `(Copy N)` 名称、换新 id 后插到列表头部（`SideChatList.svelte:267-272`）。
+- **切换**：changeChatTo 按下标或会话 id 改写当前下标 chatPage；动作本身不写盘，落盘交给响应式监听（`globalApi.svelte.ts:2410-2429`）。
+- **重命名/笔记**：名称与笔记分别双向绑定到会话的 name、note 字段，输入即改内存值（`SideChatList.svelte:254`、`CharConfig.svelte:331`）。
+- **删除会话**：确认弹窗后从会话数组里移除该项，不生成回收站对象；消息级删除见 4.1（`ChatList.svelte:49-66`）。
+- **删除角色（软删）**：removeChar 的 normal 模式只给角色写一个 `trashTime` 时间戳，对象仍留在数据里供垃圾桶视图展示；3 天后由启动迁移阶段（checkNewFormat）物理移除，垃圾桶里的恢复操作则把这个时间戳清空（`characters.ts:809-840`、`bootstrap.ts:497-504`、`GridCatalog.svelte:144`）。
+- **会话文件夹**：文件夹的增删与拖拽排序直接改 chatFolders 数组，会话归属靠 folderId 字段；删除文件夹时把其中会话的归属置空（`SideChatList.svelte:221-237`）。
 - **归档（冷存储）**：见下。
 
 ### 3.1 冷存储（Cold Storage）归档与恢复
 
 启动时先尝试迁移插件存储，再加载插件；后续 `makeColdData()` 会启动插件存储的后台加载，这一步不受冷归档开关控制。角色和会话判龄归档仍由该开关控制，每批至多 5 项并行、批次顺序等待（`bootstrap.ts:200-214,253`；`process/coldstorage.svelte.ts:560-614`）：
 
-- **角色级**：`lastInteraction` 距今超 10 天且未归档的角色，整体写入冷存储（键为 UUID），原对象替换为只含 `image/name/chaId/chats 占位/coldstorage: id/coldStoragedChats` 的"瘦身壳"；打开角色时 `changeChar` 按壳内键读回完整对象（`characters.ts:884-893`）。
-- **会话级**：最后一条消息时间距今超 10 天、且消息数 ≥4、且未归档的会话，把 `message`、`hypaV2Data`、`hypaV3Data`、`scriptstate`、`localLore` 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`（`coldstorageData.ts:4` 定义头）；打开会话时 `preLoadChat` 读回并恢复这些字段（`coldstorage.svelte.ts:627-665`），数据缺失时替换为显式错误提示消息。
-- **插件存储布局**：小值 JSON 集中在一个冷索引内，大值写到独立冷条目，数据库保留 `_coldpluginIndex` 指针。默认大值阈值为 256 Ki 字符量级，索引软预算 8 Mi 字符量级，单值至多 4 Ki 时始终保留在索引；实现按 JSON 字符串长度计量，UTF-8 文件字节限额需按编码后的字节数折算（`process/pluginStorageStore.ts:34-60,372-401`）。
-- **迁移与提交**：旧内联值和旧逐键映射在加载时合并进新索引。新索引冷写成功后，才同步移动数据库指针并移除已迁移的旧副本；失败保留旧指针并安排重试。主数据库仍由独立保存循环落盘，所以插件 API 的写入完成、索引指针提交和整库存档写出是三个时点（同文件 `:225-316,433-519`）。
-- **读写与回收**：小值写入先更新内存，索引延迟批量刷新；大值先写冷条目再纳入索引，后到的同键操作可使早期写入失效。被替换条目先进入垃圾列表，后续加载时才按宽限期清理，默认普通条目一天、旧索引一小时。页面隐藏时另做 best-effort flush，不能保证强制退出已持久化（同文件 `:319-341,372-401`；`process/coldstorage.svelte.ts:684-692`）。
+- **角色级**：`lastInteraction` 超过 10 天且未归档的角色，整体写入冷存储（以 UUID 为键），原位置换成只保留 image、name、chaId、chats 占位、coldstorage 引用与 coldStoragedChats 的瘦身壳；打开角色时 changeChar 按壳内引用读回完整对象（`characters.ts:884-893`）。
+- **会话级**：归档门槛是最后一条消息距今超过 10 天、消息数不少于 4 条且尚未归档；命中后把 message 数组连同 hypaV2Data、hypaV3Data、scriptstate、localLore 写入冷存储，原地替换为一条占位消息 `'\uEF01COLDSTORAGE\uEF01' + key`；打开会话时 preLoadChat 读回并恢复这些字段，数据缺失则替换为显式错误提示（`coldstorageData.ts:4`、`coldstorage.svelte.ts:627-665`）。
+- **插件存储布局**：小值 JSON 集中在一份冷索引里，大值写到独立冷条目，数据库只留 `_coldpluginIndex` 指针。默认大值阈值约为 256 Ki 字符，索引软预算约 8 Mi 字符，4 Ki 以下的单值始终留在索引中；计量用的是 JSON 字符串长度，UTF-8 文件字节限额要按编码后的字节数折算（`process/pluginStorageStore.ts:34-60,372-401`）。
+- **迁移与提交**：旧内联值和旧逐键映射在加载时合并进新索引。新索引冷写成功后，才同步移动数据库指针并移除已迁移的旧副本；失败保留旧指针并安排重试。主数据库仍由独立的保存循环落盘，插件 API 的写入完成、索引指针提交和整库存档写出因此落在三个时点（`process/pluginStorageStore.ts:225-316,433-519`）。
+- **读写与回收**：小值写入只改内存，索引随后批量刷新；大值先写冷条目再登记进索引，同键的后到操作会让早先的写入失效。被替换的条目先进入垃圾列表，等后续加载时才按宽限期清理，普通条目一天、旧索引一小时。页面隐藏时另有一次尽力而为的 flush，强制退出能否落盘没有保证（`process/pluginStorageStore.ts:319-341,372-401`、`process/coldstorage.svelte.ts:684-692`）。
 
-冷存储后端按平台分派：账户远端（`/hub/account/coldstorage`）、Node 文件、Tauri `AppData/coldstorage/<key>.json`、web OPFS（`coldstorage.svelte.ts:40-197`）；值统一 JSON + fflate 压缩。写入后**先读回验证再替换原对象**（390-410、499-505）。无引用的条目由 `cleanColdStorage` 定期清理；它的保护清单另合并插件索引、大值及待回收条目；备份遍历也收集索引引用，避免把当前使用项当作孤儿清除（`process/coldstorage.svelte.ts:253,325,345-359`）。迁移到账户模式时冷存储条目单独迁移并做资源路径重写（`autoStorage.ts:85-131`）。
+冷存储后端按平台分派：账户远端（`/hub/account/coldstorage` 接口）、Node 文件、Tauri AppData 目录下按 key 命名的 JSON 文件与 web OPFS，值统一 JSON + fflate 压缩（`process/coldstorage.svelte.ts:40-197,253-359,390-410,499-505`）。写入后**先读回验证再替换原对象**。无引用的条目由清理逻辑定期回收，其保护清单合并插件索引、大值与待回收条目，备份遍历也收集索引引用，避免把在用项当作孤儿删除。迁移到账户模式时冷存储条目单独迁移并重写资源路径（`autoStorage.ts:85-131`）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -135,7 +135,8 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 4.2 Reroll：内存候选机制
 
-- **候选来源**：流式结束时只把最后一帧的候选全文集合存入表，并未保存每个时间片；OpenAI 多生成路径按 choice index 分别累计文本。因此候选切换不具有逐流片回退语义（`process/index.svelte.ts:1702-1704,1759`；`request/openAI/requests.ts:1036-1052`）。非流式 multiline 时，第一个文本进入消息，多项文本进入候选表（1864-1866）。`genTime > 1` 且模型为 gpt 且非续写时请求层才启用多候选（`request/request.ts:464`、`openAI/requests.ts:851-869`）。
+- **流式候选来源**：候选表只在流式结束时记下最后一帧的全部候选文本，中间时间片不保留；OpenAI 多生成路径按 choice index 分别累计。因此切换候选只能在最后一帧的几种完整文本之间回退（`process/index.svelte.ts:1702-1704,1759`、`request/openAI/requests.ts:851-869,1036-1052`）。
+- **非流式候选来源**：multiline 的第一段文本进入显示消息，同时与其余文本一起进入候选数组；候选超过一个时保存整份数组，游标从首段所在的下标 0 开始（`process/index.svelte.ts:1836-1865`、`process/prereroll.ts:26-28`）。请求层启用多候选的条件是 genTime 大于 1、模型为 gpt 且当前非续写（`request/request.ts:464`）。
 - **切换**：先按最后一条消息的生成 ID 查询文本候选，命中就原地替换正文；否则使用组件内的尾部消息段快照。没有可切换候选时截去尾部回复并重新生成；删除在遇到第二条同一说话者消息或 user 消息时停止。反向切换沿同样两层缓存回退（`DefaultChatScreen.svelte:219-301`）。
 - **持久化边界**：候选表（`prereroll.ts` 模块级对象）与组件内 `rerolls` 都是内存态，重启即失；切换后写入消息数组的版本随 saveDb 落盘，未选中的候选**不持久化**。这与 SillyTavern 的 swipes 数组字段形成对照。
 - 首次消息（虚拟首条）的"reroll"按钮语义不同：切换 `fmIndex` 选择不同开场白（`DefaultChatScreen.svelte:845-870`）。
@@ -144,11 +145,11 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 分支按钮流程（`Chat.svelte:830-865`）：
 
-1. 可选：若当前会话无 `folderId` 且 `createFolderOnBranch` 开启，先建"Branches of <name>"文件夹并绑定；
-2. `$state.snapshot(currentChat)` 深拷贝整个会话（含全部字段），`createChatCopyName(name,'Branch')` 改名（剥离旧 `(Branch N)` 后缀再编号）、换新 `chat.id`；
-3. 消息截断为 `message.slice(0, idx+1)`；
-4. 尾部插入回链注释消息：`data: '{{specialcomment::branchedfrom::<源chatId>::<源会话名>::<源消息chatId>::}}'`，`isComment: true`、`disabled: true`；
-5. `chats.unshift(newChat)` + `changeChatTo(0)` 跳转到新分支。
+1. 若当前会话还没有 folderId，且设置项 createFolderOnBranch 已开启，先建一个 "Branches of <name>" 文件夹并把新分支归入其中；
+2. 深拷贝整个会话对象，用 createChatCopyName 生成带 Branch 后缀的新名字（先剥离旧的 `(Branch N)` 后缀再编号），并换新 chat.id；
+3. 消息数组保留到触发分支的那一条为止，即截断为前 idx+1 条；
+4. 尾部插入回链注释消息，正文为 `{{specialcomment::branchedfrom::<源chatId>::<源会话名>::<源消息chatId>::}}`，同时把 isComment 与 disabled 都置 true；
+5. 把新会话插到列表头部并切换过去。
 
 父会话**不写任何子分支记录**。注释消息在渲染时变为可点击的"Branched from ..."按钮，点击后 `changeChatTo(源chatId)` + `foldChatToMessage(源消息chatId)` 跳回源位置（`Chat.svelte:396-411`）。
 
@@ -158,21 +159,21 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ## 5. 列表、分页、搜索与定位
 
-- **会话列表**：无独立索引，直接遍历 `chara.chats`，按 `folderId` 分组渲染，Sortable 拖拽改顺序（`SideChatList.svelte:39-121`）；顺序、分组、文件夹折叠都是持久化数据。
-- **消息渲染分页**：`loadPages` 初始 30 页（`chatLoadPages.ts:1-2` 的 `DEFAULT_CHAT_LOAD_INITIAL_PAGES`），滚动到顶部时按附加页数增加（`DefaultChatScreen.svelte:575-576`）；`Chats.svelte` 用消息哈希 diff 增量挂载/卸载尾部窗口（`Chats.svelte:65-167`）。这是渲染窗口化，`chat.message` 数组本身不分页。
-- **搜索**：角色列表按名称过滤（`GridCatalog.svelte:41`）、模型网格与 HypaV3 摘要等局部搜索存在，但**聊天消息内容搜索本次未找到**：检查了 `src/lib` 全部 svelte 组件与 `src/ts` 下 search/filter 相关入口，未发现对 `chat.message` 做关键词检索的 UI 或工具函数；MCP 只提供 `risu-get-chat-history`（按 offset/count 分页读取当前角色当前会话，`process/mcp/risuaccess/chats.ts:42-82`），也没有内容搜索。此结论受上述检查范围限制。
-- **定位**：书签列表跳转用 `ScrollToMessageStore` 设置下标，`scrollToMessage` 临时扩大 loadPages 后滚动到 `[data-chat-index]` 元素并高亮（`DefaultChatScreen.svelte:73-135`）；折叠定位用 `chatFoldedState`（内存态，见下）。
+- **会话列表**：没有独立索引，渲染时直接遍历当前角色的 chats 数组，按 folderId 分组，Sortable 拖拽改的也是数组顺序；列表顺序、分组与文件夹折叠状态都随角色一起持久化（`SideChatList.svelte:39-121`）。
+- **消息渲染分页**：loadPages 默认 30 页，滚动到顶部时按附加页数递增，Chats 组件用消息哈希做 diff，增量挂载或卸载尾部窗口；chat.message 数组本身始终完整，分页只影响渲染（`chatLoadPages.ts:1-2`、`DefaultChatScreen.svelte:575-576`、`Chats.svelte:65-167`）。
+- **搜索**：角色列表按名称过滤，模型网格与 HypaV3 摘要各有局部搜索；**聊天消息内容搜索本次未找到**——检查了 `src/lib` 全部 Svelte 组件与 `src/ts` 下 search/filter 相关入口，没有对 chat.message 做关键词检索的 UI 或工具函数，MCP 的 `risu-get-chat-history` 也只在当前角色当前会话里按 offset/count 分页读取（`GridCatalog.svelte:41`、`process/mcp/risuaccess/chats.ts:42-82`）。此结论受上述检查范围限制。
+- **定位**：书签跳转先把目标下标写进 `ScrollToMessageStore`，再由 scrollToMessage 临时扩大 loadPages、滚动到对应的 data-chat-index 元素并高亮；折叠定位另用内存态 chatFoldedState（`DefaultChatScreen.svelte:73-135`）。
 
 ### 5.1 折叠（Chat Fold）与分支跳转
 
-`foldChatToMessage` 把目标消息的 `{characterId, chatId, messageId}` 写入内存态 `chatFoldedState`，渲染窗口改为该消息附近的 `loadPages` 条（`globalApi.svelte.ts:2341-2408`、`Chats.svelte:86-89`），提供"加载更多"按钮；不持久化，切换角色/会话时自动清空。这是渲染定位机制，不是数据修改。
+折叠定位由 foldChatToMessage 实现：它把目标消息的角色、会话与消息标识写入内存态 `chatFoldedState`，渲染窗口收缩到该消息附近的 loadPages 条（`globalApi.svelte.ts:2341-2408`、`Chats.svelte:86-89`），提供"加载更多"按钮；该状态不持久化，切换角色或会话时自动清空，消息数组本身保持不变。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
 ### 6.1 单窗口写入节流与流式临时状态
 
-- 保存循环本身串行：`changed` 置位后开始编码写入，期间 `saving.state` 防止重入；失败重试 4 次（`globalApi.svelte.ts:406-485`）。
-- 流式生成直接写 `message[msgIndex].data` 并置 `chat.isStreaming = true`；该状态与 `activeStreamingDisplayOptimizationMode` 每次启动时被强制复位（`database.svelte.ts:714-719`），避免重启后遗留"流式中"标记。流式中止时**已写入的半截消息留在数组内**（sendChat 的 abort 分支只 `return false`，不删除消息；最终是否保留取决于 `removeIncompleteResponse` 对输出文本的截断而非数据层）。
+- 保存循环本身串行：changed 置位后进入编码与写入，期间用 saving.state 挡住重入，失败重试 4 次（`globalApi.svelte.ts:406-485`）。
+- 流式生成直接写最后一条消息的正文并置 chat.isStreaming 标记；该标记与 activeStreamingDisplayOptimizationMode 在每次启动时被强制复位，重启后不会遗留"流式中"状态（`database.svelte.ts:714-719`）。中止时已写入的半截消息留在数组内，sendChat 的中止分支只返回 false 而不删消息，最终是否保留取决于 removeIncompleteResponse 对输出文本的截断。
 
 ### 6.2 多窗口：BroadcastChannel 互斥，无合并
 
@@ -180,37 +181,37 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ### 6.3 Web 存储后端选择
 
-`AutoStorage.Init`（`autoStorage.ts:165-219`）按优先级：账户模式（localStorage 标记 `accountst=able`）→ Node 服务器 → OPFS（`opfs_flag!=able`，首次从 IndexedDB 迁移，标记 `migrated`）→ localforage IndexedDB。`checkAccountSync`（40-163）负责本地↔账户迁移：先问用户"加载远端或覆盖远端"，覆盖需手输 `RISUAI`，迁移过程重写资源路径（`replaceDbResources`）并单独迁移冷存储。
+后端选择入口 AutoStorage.Init（`autoStorage.ts:40-219`）按账户模式、Node 服务器、OPFS、localforage IndexedDB 的优先级依次尝试；OPFS 首次启用时从 IndexedDB 迁移并落下迁移标记。同一入口内的账户同步检查负责本地↔账户迁移：先问用户"加载远端或覆盖远端"，覆盖需手输 `RISUAI`，迁移过程重写资源路径（`replaceDbResources`）并单独迁移冷存储。
 
 ### 6.4 多用户（WebRTC）实时同步
 
-房间内（`multiuser.ts`，peerJS）`peerSync` 发送当前会话对象；接收端 `request-chat-sync`/`receive-chat` 直接**用收到的整个 Chat 对象覆盖本地 `char.chats[chatPage]`**（`multiuser.ts:127-162`），不合并差异；生成前 `peerSafeCheck` 轮询所有成员、失败则 `peerRevertChat` 回滚到最近同步快照 `latestSyncChat`（369-435）。这是会话级整对象覆盖，接收方对 `setDatabase` 的调用同样走 saveDb 落盘。
+房间内通过 peerJS 建连，发送方的 peerSync 把当前会话对象整份发出；接收方处理 request-chat-sync 与 receive-chat 时，直接用收到的 Chat 覆盖本地 char.chats[chatPage]，不做差异合并。生成前 peerSafeCheck 会轮询所有成员，检查失败则用 peerRevertChat 回滚到最近一次同步快照 latestSyncChat。这类同步都是会话级整对象覆盖，接收方改完同样经 setDatabase 走 saveDb 落盘（`multiuser.ts:127-162,369-435`）。
 
 ### 6.5 孤儿资源清理
 
-启动 `cleanChunks`（`bootstrap.ts:512-639`）遍历 `assets/` 与 `remotes/`：未被数据库引用的资产删除；`remotes/<chaId>.local.bin` 在角色不存在时先写 `.meta` 时间戳，**7 天**宽限期后删除（`remoteSaveCleanup.ts:1-38`）。账户/Node 模式跳过资产清理（`db.account?.useSync` 时直接返回）。
+启动清理入口 cleanChunks（`bootstrap.ts:512-639`）遍历 assets 与 remotes 两个目录：删除无人引用的资产；每个角色的 remote 外置文件在角色不存在时先写 `.meta` 时间戳，**7 天**宽限期后才删除（`remoteSaveCleanup.ts:1-38`）。账户或 Node 同步模式下整段资产清理直接跳过。
 
 ## 7. 迁移、导入导出与保留策略
 
 ### 7.1 格式迁移与兼容
 
-`checkNewFormat`（`bootstrap.ts:335-507`）在每次启动时执行：角色/模块/人设的 null 补默认、`formatversion` 逐级升到 5 的版本迁移（资产路径 `assets/` 前缀清理、`sdData` 默认值、`loreBookToken` 下限、`trashTime` 过期清理；版本 4 的迁移被注释为"removed due to issues"直接置位）。与 SillyTavern 的"读取路径惰性补齐"不同，Risuai 的迁移是**启动时一次性改写内存对象**，由随后的 saveDb 落盘为新格式；旧字段未读到则不迁移（快照升级语义，不保留原文件）。
+每次启动都会执行格式检查 checkNewFormat（`bootstrap.ts:335-507`）：为角色、模块与人设补齐 null 默认值，再把 formatversion 逐级升到 5，涵盖资产路径前缀清理、若干字段默认值补全、token 下限修正与垃圾时间戳过期清理。版本 4 的迁移被注释为"removed due to issues"直接置位。与 SillyTavern 的"读取路径惰性补齐"不同，Risuai 的迁移在启动时**一次性改写内存对象**，由随后的保存循环落盘为新格式；未读到的旧字段不迁移，原文件也不保留（快照升级语义）。
 
 ### 7.2 备份与恢复
 
-- **自动备份**：每次保存写 `dbbackup-<ts>.bin`（见 2.3），加载失败时自动回退（2.4）；`getDbBackups` 同时负责清理超龄备份。
-- **手动备份**：`SaveLocalBackup` 打包数据库（压缩编码）+ 全部资产 + 冷存储条目为 `.risudat`，可选 AES-GCM 加密；账户模式的解密密钥从 `sv.risuai.xyz/cryptokey` 按时间分发（`backuplocal.ts:162-169, 533-536`）。`LoadLocalBackup` 反向恢复；恢复前校验冷存储条目完整（缺失/损坏需用户确认继续）。
+- **自动备份**：每次保存都写一份 dbbackup-<ts>.bin（见 2.3），加载失败时按备份回退（2.4）；getDbBackups 既供回退枚举备份，也负责清理超龄备份。
+- **手动备份**：SaveLocalBackup 把压缩编码后的数据库、全部资产与冷存储条目打成一个 `.risudat`，可选 AES-GCM 加密；账户模式的解密密钥按时间从 `sv.risuai.xyz/cryptokey` 分发。LoadLocalBackup 反向恢复，恢复前校验冷存储条目完整性，缺失或损坏时由用户确认是否继续（`backuplocal.ts:162-169,533-536`）。
 - 密码学实现为 WebCrypto AES-GCM，密钥由口令 SHA-256 派生，IV 固定 12 字节全零（`util.ts:378-426`）。
 
 ### 7.3 会话/数据库导入导出
 
-- 导出：单会话 JSON（`type:'risuChat'` ver 2，含 `folders`）、TXT（`--名字\n正文` 文本流）、HTML 文件/HTML embed（`.idat` 隐藏节点内嵌会话 JSON，用于网页传播后回导）；全部会话 JSON（`risuAllChats` ver 2）（`characters.ts:192-521`）。
-- 导入：JSON 按 `type/ver` 识别 risuChat/risuAllChats v1/v2，folderId 冲突时重映射；JSONL 按 Tavern 格式（`name/is_user/mes`）转换，首行视为元数据跳过；HTML 从 `.idat` 取 JSON；导入的会话换新 `id` 后 `unshift`（`characters.ts:371-505`）。
+- 导出有四种形态：单会话 JSON（type 为 risuChat、版本 2，带 folders）、TXT 文本流（每段以 `--名字` 起头，后接正文）、HTML 文件与 HTML embed（会话 JSON 藏在 .idat 隐藏节点里，便于网页传播后再导回）、全部会话 JSON（risuAllChats 版本 2）。实现集中在 `characters.ts:192-521`。
+- 导入按 type/ver 区分 risuChat 与 risuAllChats 的 v1、v2，folderId 冲突时重新映射；JSONL 按 Tavern 的 name/is_user/mes 行格式转换，首行当元数据跳过；HTML 从 .idat 节点里取 JSON。导入的会话一律换新 id 后插到列表头部（`characters.ts:371-505`）。
 - 数据库整体迁移：账户同步（6.3）、Drive 云同步（`drive/`，`syncDrive` 每次保存前调用）、KEI 服务器备份（`kei/backup.ts`）属于本类目边界外的多端同步，不展开。
 
 ### 7.4 角色卡与预设格式
 
-角色导入支持 JSON（spec v2/v3 与 Tavern off-spec）、`.charx`（容器 zip，内含 `card.json` + 可选 `module.risum`）、加密卡（AES-GCM，密码或内置密钥，`characterCards.ts:327-357`）；导出支持 PNG（spec v2/v3 嵌入）、CharX、JSON。`.risum` 是模块容器，`.risup`/`.risupreset` 是加密预设（密钥串 `risupreset`，`database.svelte.ts:2291-2359`）。这些格式都**内嵌 `chats` 数组**，因此角色卡的导出即会话的跨端搬迁载体；独立的 `exportAsDataset`（`storage/exportAsDataset.ts`）把全部角色会话导出为训练数据集 JSON（跳过群聊）。
+角色导入接受三类来源：角色卡 JSON（spec v2/v3，另兼容 Tavern 的 off-spec 变体）、.charx 容器（zip，内含 card.json 与可选的 module.risum）、AES-GCM 加密卡（用密码或内置密钥解开）。导出提供 PNG（把 spec v2/v3 数据嵌入图片）、CharX 与 JSON。.risum 是模块容器，.risup 与 .risupreset 是加密预设，密钥串为 `risupreset`。这些格式都内嵌 chats 数组，角色卡本身即会话跨端搬迁的载体；exportAsDataset 另把全部角色会话导出为训练数据集 JSON，跳过群聊（`characterCards.ts:327-357`、`database.svelte.ts:2291-2359`、`storage/exportAsDataset.ts`）。
 
 ## 8. 外部对象绑定
 
@@ -225,13 +226,13 @@ bootstrap.loadData()（bootstrap.ts:55-269）
 
 ## 9. 设计取舍与已确认边界
 
-- **整库单文件 + 块级增量**：会话与消息没有独立持久化单位，任何操作（含一次编辑）最终都是"角色块重编码 + 整库覆写"，配合每次保存的备份；换取的是实现简单、跨端文件易迁移，代价是保存粒度粗、`remotes/` 外置与 `risuSaveCache` 补回链条增加了加载复杂度。
-- **reroll 不持久化**：候选仅存内存，重启丢失；与"复制会话做分支"形成两种互斥的回退手段——回退到旧版本只能靠分支/复制会话，不能靠消息内版本切换。
-- **分支不对称**：子分支只在自身保存 `branchedfrom` 回链注释，父会话无子列表；分支视图靠内容哈希前缀树实时计算，文本编辑会改变树形，branchedfrom 的回链关系不参与树构建，但注释消息的 `data` 仍按文本哈希入树。多分支的导航依赖"跳回源会话"单向链路。
-- **多窗口不合并**：BroadcastChannel 互斥让后到标签页刷新，无字段级冲突解决；多用户实时同步是会话级整对象覆盖，无写冲突检测以外的保护（`peerSafeCheck` 只检查是否正在生成）。
-- **保留策略分层**：消息编辑删除无 undo（无事件日志）；会话删除即物理移除；角色删除有 3 天垃圾桶期；会话/角色过期走冷存储（10 天）而非删除；判龄归档受冷归档开关控制，插件冷存储独立加载。
-- **加密边界**：`database.bin` 本身**不加密**（AGENTS.md 所称"加密支持"实际落在备份 `.risudat`、角色加密卡、`.risup` 预设、翻译预设等处）；`cipherChat` 是接口中的遗留字段，全代码库仅一处定义与一处置 false 的赋值（`database.svelte.ts:821`、`openAI/requests.ts:348`），无功能实现。
-- **流式中止的语义**：中止后已写入的半截 char 消息保留在数组中（数据层不删除），`removeIncompleteResponse` 只影响输出文本的标点截断，不产生"完成标记"字段。
+- **整库单文件 + 块级增量**：会话与消息没有独立的持久化单位，任何操作（包括改一条消息）最终都表现为角色块重编码加整库覆写，并顺带写一份备份。这样实现简单、跨端文件容易搬移，代价是保存粒度粗；remotes 外置与 risuSaveCache 回填又拉长了加载链条。
+- **reroll 不持久化**：候选只存在内存里，重启即丢。回到旧版本有两套互斥手段，即分支与复制会话；消息内没有版本切换。
+- **分支不对称**：子会话携带一条 branchedfrom 回链注释，父会话不记录任何子列表；分支视图由内容哈希前缀树实时算出，回链关系不参与建树，注释消息的正文照样按哈希入树，因此编辑消息文本就会改变树形。多分支导航走"跳回源会话"的单向链路。
+- **多窗口不合并**：BroadcastChannel 只做互斥，后到的标签页直接整页刷新，没有字段级冲突处理；多用户实时同步按会话整对象覆盖，写前检查只有 peerSafeCheck，它只看对方是否正在生成。
+- **保留策略分层**：消息的编辑与删除没有 undo，也没有事件日志可回溯；会话删除直接物理移除，角色删除先进垃圾桶 3 天再清理；会话与角色过期后转入冷存储（10 天门槛），对象继续保留；判龄归档受冷归档开关控制，插件冷存储独立加载。
+- **加密边界**：database.bin 以明文落盘；AGENTS.md 提到的"加密支持"落在备份 `.risudat`、加密角色卡、`.risup` 预设和翻译预设上。cipherChat 是接口里的遗留字段，全库只有一处定义与一处赋 false，没有对应的功能实现（`database.svelte.ts:821`、`openAI/requests.ts:348`）。
+- **流式中止的语义**：中止后已写入的半截 char 消息留在数组里，removeIncompleteResponse 只影响输出文本的标点截断，数据侧不写"完成标记"字段。
 
 ## 10. 未验证事项
 

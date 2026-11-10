@@ -18,7 +18,7 @@ OpenOcta 的聊天表面是一个「任务会话工作台」，区别于 IM 式�
 
 关键实现事实：
 
-- **状态宿主单一**：`openclaw-app`（`ui/src/ui/app.ts` 的 `OpenClawApp`）持有全部聊天 `@state`；消息线程与输入框被拆成两个独立自定义元素，避免每次按键重绘整页。
+- **状态宿主单一**：壳层自定义元素 `openclaw-app` 持有全部聊天状态，类定义在 `ui/src/ui/app.ts`；消息线程与输入框拆成两个独立自定义元素，按键不再触发整页重绘。
 - **运行态按会话分桶**：`ui/src/ui/chat/chat-session-runs.ts` 用模块级 `Map` 保存每个会话的 runId、阶段、流式文本与终止 run 集合，切换会话时保存/恢复，因此 A 会话生成中切到 B 再切回仍显示进行中。
 - **服务端事件是事实源**：WebSocket 上的聊天事件与 Agent 事件驱动状态，run 结束后再用历史接口全量对齐；停止另发中止请求。
 - **排队在客户端**：同会话正在生成时，新消息只进内存数组 `chatQueue`，等当前 run 结束事件到达后再补发。
@@ -48,8 +48,8 @@ OpenOcta 的聊天表面是一个「任务会话工作台」，区别于 IM 式�
 
 「消息」页对壳层做了三处改写：
 
-- 左侧导航整块替换为会话侧栏 `session-sidebar`，含搜索框、「新消息」按钮和会话列表（`app-render.ts:889-1135`）；侧栏可整体折叠，折叠状态存在设置里（`navCollapsed`）。
-- 主区不渲染通用页头，因此页头里的聊天工具条（刷新、专注模式）在消息页不出现（`app-render.ts:1229-1260`、`app-render.helpers.ts:40-116`）。聊天表面只消费其中的专注模式回调，`onRefresh` 传入后没有对应控件；专注模式的退出按钮改由聊天表面自己提供（`views/chat.ts:988-1002`）。
+- 左侧导航整块替换为会话侧栏元素 `session-sidebar`：搜索框、「新消息」按钮与会话列表都在这一栏里（`app-render.ts:889-1135`）；侧栏可整体折叠，折叠状态记录在设置项 `navCollapsed` 里。
+- 主区不渲染通用页头，页头里的聊天工具条（刷新、专注模式）因此在消息页整体缺席（`app-render.ts:1229-1260`、`app-render.helpers.ts:40-116`）。聊天表面只用到专注模式的回调：刷新回调传进来后没有对应控件，退出专注模式的按钮改由聊天表面自己提供（`views/chat.ts:988-1002`）。
 - 主区成为 `chat` 分区，内部再分 `chat-split-container`（线程 + 可拉开的 Markdown 侧栏）与 `chat-compose`（`views/chat.ts:1004-1250`）。
 
 聊天表面自身没有多标签或多窗口形态：桌面运行时只暴露最小化、最大化、退出等窗口能力（`app.ts:118-129`），会话切换靠侧栏与 URL 完成。AgentSwarm 是另一条独立入口（`tab=agentSwarm`），不嵌在消息页里。
@@ -66,8 +66,8 @@ AgentSwarm 表面是房间式协作工作台：左侧房间列表、上方成员
 
 现场恢复有三个层次：
 
-- 当前会话键同时写进本地设置与 URL 的 `session` 查询参数；刷新时 URL 优先，其次回退到设置里记录的上次会话（`ui/src/ui/app-settings.ts:104-156`、`486-496`、`ui/src/ui/storage.ts:9-45`）。
-- 历史消息一次取最近 500 条（`controllers/chat.ts:246`、`266-287`），超过上限时线程顶部插一条「仅显示最近 N 条」的系统提示（`ui/src/ui/chat/chat-items.ts:95-106`）。没有向上翻页或加载更早历史的入口。
+- 当前会话键同时写进本地设置与 URL 的 `session` 查询参数；刷新页面时先按 URL 恢复，参数缺失再回退到设置里记录的上次会话（`ui/src/ui/app-settings.ts:104-156,486-496`、`ui/src/ui/storage.ts:9-45`）。
+- 历史消息每次只取最近 500 条；超过上限时，线程顶部会插一条「仅显示最近 N 条」的系统提示（`controllers/chat.ts:246,266-287`、`ui/src/ui/chat/chat-items.ts:95-106`）。界面没有向上翻页或加载更早历史的入口。
 - 若当前会话键已不在 `sessions.list`（被删除或归档），聊天刷新会把界面切到可用会话并提示（`app-chat.ts:48-104`）；员工会话、cron 单次会话与主会话被显式排除在误判之外。
 
 ## 3. Composer、草稿、附件与快捷输入
@@ -78,9 +78,9 @@ AgentSwarm 表面是房间式协作工作台：左侧房间列表、上方成员
 
 草稿粒度为「单个输入组件实例」：
 
-- 上层通过 `clearToken` 递增清空、`insertToken` 追加片段，而不是双向绑定文本（`openocta-chat-input.ts:62-97`）。
+- 上层改文本时走两条令牌通道：`clearToken` 递增一次清空全部内容，`insertToken` 追加片段（`openocta-chat-input.ts:62-97`）。文本本身由输入组件内部保管，上层不持副本。
 - 上层只镜像 `hasText` 布尔值用于启用发送按钮（`views/chat.ts:871-872`、`openocta-chat-input.ts:170-178`）。
-- `ChatProps.draft` 与 `onDraftChange` 仍然存在，但聊天视图没有把 `draft` 传入输入框，也没有调用 `onDraftChange`；`state.chatMessage` 实际保持空串。
+- 组件属性里的 `draft` 与 `onDraftChange` 仍然保留，聊天视图却没有把草稿传进输入框，也没有调用该回调；`state.chatMessage` 实际一直保持空串。
 - 因此切换会话（`prepareChatSessionSwitch` 置空草稿、附件、模型与资源）后再回来，本次未找到任何文本草稿恢复路径（`app-chat.ts:115-126`）。
 
 附件限制是单文件：图片与常见文档 5MB、视频 50MB，压缩包与可执行文件按扩展名和 MIME 双拦截，白名单以扩展名收口（`views/chat.ts:130-300`）。选择文件或粘贴图片都会读成 data URL 暂存（`views/chat.ts:378-476`），发送时图片转 base64 内容块，视频与文档降级成一行文字标记（`controllers/chat.ts:329-361`）。
@@ -97,9 +97,9 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 - 未显式配置时默认全部 Skill/MCP 可用，联网搜索默认开启（`ui/src/ui/chat/chat-resources.ts:3-16`、`views/chat.ts:610-612`）。
 - 弹层可按技能键与 MCP 服务名选择、搜索和分组；前端把选择作为本次资源声明提交。后端会重新补入部分全局 MCP，技能也由目录再次扫描，因此该 UI 选择不能独立保证最终能力集合（`views/chat.ts:577-759`、`src/pkg/gateway/handlers/chat_runtime_pool.go:55-77`）。
-- 该对象随 `chat.send` 的 `resources` 字段一起发出（`chat-resources.ts:18-25`、`controllers/chat.ts:432-434`），不构成会话级持久设置。
+- 这份资源声明随 `chat.send` 请求的 `resources` 字段一起发出，只对本次发送生效（`chat-resources.ts:18-25`、`controllers/chat.ts:432-434`）。
 
-推理过程是否显示由两个条件同时决定：设置项 `chatShowThinking`（默认开启）与当前会话行的推理等级未关闭（`views/chat.ts:861-862`、`app-render.ts:557`）。本次在 UI 内未找到修改推理等级或该设置项的控件：聊天工具条里的思考开关变量只被声明、未参与渲染，样式表中对应的切换按钮类名也没有任何标记使用（`app-render.helpers.ts:40-116`、`ui/src/styles/chat/layout.css:24-67`）。
+推理过程是否显示要同时满足两个条件：设置项 `chatShowThinking` 处于开启（默认如此），并且当前会话行的推理等级没有关闭（`views/chat.ts:861-862`、`app-render.ts:557`）。本次在 UI 内未找到修改推理等级或该设置项的控件：聊天工具条里的思考开关变量只被声明，没有参与渲染，样式表中对应的切换按钮类名也没有任何标记使用（`app-render.helpers.ts:40-116`、`ui/src/styles/chat/layout.css:24-67`）。
 
 参数级配置（温度、最大步数等）不在聊天界面里，本次未找到对应控件；它们由配置页与 Agent 默认值决定。
 
@@ -117,12 +117,16 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 聊天事件用 state 字段区分七种情况（含 A2UI），处理逻辑集中在 `handleChatEvent`（`controllers/chat.ts:232-243`、`495-621`）：
 
-- `delta`：文本与推理分片累加到 `chatStream` / `chatReasoningStream`，并对旧网关的「整段快照」做前缀兼容判断。
-- `turn`：把该轮消息压入历史，清空流式文本与 A2UI，阶段切到 `tool`。
-- `final`：把 final 消息（并合并仍挂起的 A2UI）替换成最后一条，然后清空运行态。
-- `aborted` / `complete`：清空运行态；`error` 记下出错 runId 并等历史重载。
-- `a2ui`：结构化 UI 分片先进入专用数组；run 已终止时改为并入末条助手消息，避免 `final` 与它竞争后丢失。
-- 已终止的 run 会进 `chatTerminalRunIds`（保留 24 个），迟到的 delta 被丢弃（`controllers/chat.ts:63-81`、`539-547`）。
+| `state` 取值 | 处理方式 |
+|---|---|
+| `delta` | 文本与推理分片分别累加到 `chatStream`、`chatReasoningStream`；旧网关推送整段快照时按前缀做兼容判断 |
+| `turn` | 该轮消息压入历史，清空流式文本与 A2UI，阶段切到 `tool` |
+| `final` | final 消息连同仍挂起的 A2UI 合并后替换成最后一条，再清空运行态 |
+| `aborted`、`complete` | 清空运行态 |
+| `error` | 记下出错的 runId，等历史重载 |
+| `a2ui` | 结构化 UI 分片先进入专用数组；run 已终止时并入末条助手消息，避免与 `final` 竞争后丢失 |
+
+已终止的 run 会进 `chatTerminalRunIds`（保留 24 个），迟到的 delta 被丢弃（`controllers/chat.ts:63-81,539-547`）。
 
 界面上的阶段文案与形态是：无流式文本时显示带光球动效和三点动画的活动行，按思考、调用工具、生成回复三个阶段显示对应文案，有推理文本时同屏展开「推理过程」折叠面板（`ui/src/ui/chat/grouped-render.ts:249-329`）。上下文压缩另有独立提示条，开始显示 Compacting，结束显示成功并 5 秒后自动消失（`views/chat.ts:328-355`、`ui/src/ui/app-tool-stream.ts:179-207`）。
 
@@ -146,9 +150,13 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 审批是独立通道，不在消息流里渲染：
 
-- 执行审批：`exec.approval.requested` 事件带命令、宿主、Agent、会话、工作目录、安全策略等字段，进入全局队列并设置到期清理定时器（`app-gateway.ts:326-344`、`controllers/exec-approval.ts:30-63`）。界面是覆盖全屏的模态卡片，只显示队首一条与待处理条数，提供「允许一次 / 始终允许 / 拒绝」，动作走 `exec.approval.resolve`（`views/exec-approval.ts:25-88`）。
-- 顶栏提示条：每 3 秒轮询 `approvals.list`，只在出现新增待审批 id 时弹出「有 N 条敏感命令待人工审批」，可跳到 sandbox 页或关闭（`ui/src/ui/app-approvals-banner.ts:8-66`、`app-render.ts:658-687`）。
-- sandbox 页审批表：显示命令、状态、到期时间与 TTL，动作是「批准一次 / 会话免审 / 拒绝」，走 `approvals.approve|deny|whitelistSession` 三个 RPC，并提供跳回对应会话的链接（`views/approvals.ts:63-144`）。该页实际由 `views/security.ts` 装配（`app-render.ts:2454-2483`），仓库里另有未被引用的 `views/sandbox.ts`。
+| 入口 | 触发条件 | 界面与动作 | 接口 |
+|---|---|---|---|
+| 执行审批浮层 | `exec.approval.requested` 事件携带命令、宿主、Agent、会话、工作目录与安全策略等字段；事件进入全局队列，并为每条记录挂上到期清理定时器（`app-gateway.ts:326-344`、`controllers/exec-approval.ts:30-63`） | 覆盖全屏的模态卡片，一次只显示队首一条与待处理条数，可选「允许一次」「始终允许」「拒绝」（`views/exec-approval.ts:25-88`） | `exec.approval.resolve` |
+| 顶栏提示条 | 每 3 秒轮询 `approvals.list`，只在出现新增待审批 id 时弹出「有 N 条敏感命令待人工审批」（`ui/src/ui/app-approvals-banner.ts:8-66`、`app-render.ts:658-687`） | 可跳到 sandbox 页或关闭 | `approvals.list` |
+| sandbox 页审批表 | 表中列出命令、状态、到期时间与 TTL，并提供跳回对应会话的链接（`views/approvals.ts:63-144`） | 动作为「批准一次」「会话免审」「拒绝」 | `approvals.approve`、`approvals.deny`、`approvals.whitelistSession` |
+
+sandbox 页由 `views/security.ts` 装配（`app-render.ts:2454-2483`），仓库里另有未被引用的 `views/sandbox.ts`。
 
 ## 7. 多会话、多 Agent 与后台生成
 
@@ -158,9 +166,11 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 后台与子 Agent 的独立表面是 AgentSwarm：
 
-- 房间由 `swarm.workspaces.create` 创建，成员按父子关系组成树与图，删除房间会连带删除成员、蜂群历史及关联聊天会话（`controllers/swarm.ts:94-141`、`views/agent-swarm.ts:450-472`）。
-- 发送是 `swarm.message.send`，流式由 `swarm.task.delta` 事件按成员与 stream 类型分发（assistant / reasoning / tool_call / tool_result），只更新当前选中成员（`controllers/swarm.ts:206-228`、`241-317`、`app-gateway.ts:360-386`）。
-- 停止是整房间级的 `swarm.workspaces.abortAll`，没有单成员停止入口（`controllers/swarm.ts:75-92`）。
+| 环节 | 入口 | 行为与边界 |
+|---|---|---|
+| 建房间 | `swarm.workspaces.create` | 成员按父子关系组成树与图；删除房间会连带删除成员、蜂群历史及关联聊天会话（`controllers/swarm.ts:94-141`、`views/agent-swarm.ts:450-472`） |
+| 发送与流式 | `swarm.message.send`、`swarm.task.delta` | 流式事件按成员与流类型（`assistant`、`reasoning`、`tool_call`、`tool_result`）分发，只更新当前选中的成员（`controllers/swarm.ts:206-228,241-317`、`app-gateway.ts:360-386`） |
+| 停止 | `swarm.workspaces.abortAll` | 整房间级中止，没有单成员停止入口（`controllers/swarm.ts:75-92`） |
 
 本机 CLI Agent 是第三种协作对象，但只在 Composer 里以 `@别名` 文本形式出现，由后端解释，不构成独立会话或独立状态面板。
 
@@ -183,10 +193,10 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 ## 9. 键盘、焦点与响应式
 
-- Enter 发送、Shift+Enter 换行、输入法保护；`@` 列表内 Up/Down 移动、Enter/Tab 选中、Esc 关闭（`openocta-chat-input.ts:240-281`）。
-- 会话行是 `role=button` 且可聚焦，Enter 触发切换；双击进入改名，Esc 退出（`app-render.ts:1005-1039`、`1059-1061`）。
+- 输入框里 Enter 发送、Shift+Enter 换行，输入法组合状态下回车不会发出；`@` 提及列表打开后，上下键移动候选，Enter 或 Tab 选中，Esc 关闭（`openocta-chat-input.ts:240-281`）。
+- 会话行带 `role=button` 且可聚焦，回车即切换到该会话；双击行进入改名，Esc 退出改名（`app-render.ts:1005-1039,1059-1061`）。
 - Esc 在全局只处理两件事：关闭原生对话框、关闭会话溢出菜单（`app.ts:754-769`），不会中止生成。
-- 活动行、队列条与审批卡都带实时区域语义，分别用礼貌播报、状态角色和对话框角色表述（`grouped-render.ts:287-292`、`views/chat.ts:1033`、`views/exec-approval.ts:35`）。
+- 活动行、队列条与审批卡都带实时区域语义：活动行用礼貌播报，队列条用状态角色，审批卡用对话框角色（`grouped-render.ts:287-292`、`views/chat.ts:1033`、`views/exec-approval.ts:35`）。
 - 消息线程本身声明为日志区并关闭实时播报，避免流式过程中逐字朗读（`components/openocta-chat-thread.ts:56-63`）。
 - 响应式只在样式层：聊天布局在 900px、640px 处降级，工具卡结果区在 768px 处铺满（`ui/src/styles/chat/layout.css:1023-1230`、`sidebar.css:132-141`）；侧栏在窄屏下不自动变抽屉，仅整体折叠。
 - 专注模式隐藏侧栏与页头，由设置项 `chatFocusMode` 或引导流程决定，退出按钮在聊天表面右上角（`app-render.ts:556`、`views/chat.ts:988-1002`）。
@@ -195,11 +205,11 @@ Composer 底部还有三个 IT Ops 取向的入口：附件、全部资源（Ski
 
 ## 10. 设计取舍与已确认边界
 
-- **单一状态宿主 + 两个隔离元素**：消息线程与输入框都是独立自定义元素，用属性与自定义事件交互，目的是把高频输入与长列表渲染解耦（`views/chat.ts:928-952`、`1094-1109`）。
+- **单一状态宿主 + 两个隔离元素**：消息线程与输入框各自是独立自定义元素，靠属性传入数据、靠自定义事件回传动作，让高频输入与长列表渲染互不牵连（`views/chat.ts:928-952,1094-1109`）。
 - **运行态本地分桶，不依赖服务端会话状态**：界面判断「是否在生成」只看本地 runId 与终止集合，服务端并不下发统一的会话状态字段（`chat-session-runs.ts:160-180`）。断线重连只清当前宿主运行字段，后台会话快照仍可能保留；没有 journal 重放恢复。
 - **排队、草稿、资源限定都不持久化**：这三者都是操作现场而非会话属性，切会话或刷新即消失；相对地，模型选择的「默认」项让用户不必为每次会话显式绑定模型。
 - **审批与聊天解耦**：审批有三处入口、两种 RPC（`exec.approval.resolve` 与 `approvals.*`），聊天线程里既没有审批消息也没有待审批徽标。
-- **AgentSwarm 是并行产品面而非聊天扩展**：它有自己的房间、成员、RPC 与中止粒度，消息渲染复用 Markdown 管线但不复用 `openocta-chat-thread`。
+- **AgentSwarm 是并行的产品面**：它有自己的房间、成员、RPC 与中止粒度，消息渲染沿用同一套 Markdown 管线，线程部分另用一套元素实现。
 - 本轮未覆盖：配置页、初始化向导、员工市场等非聊天页面的结构与交互。
 
 ## 11. 未验证事项

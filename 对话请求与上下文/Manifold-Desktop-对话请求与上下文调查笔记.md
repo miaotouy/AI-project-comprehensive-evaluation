@@ -25,7 +25,7 @@ input-bar doSend（input-bar.js:169-184）
   -> CHAT_CHUNK / CHAT_DONE / CHAT_ERROR 广播 -> 所有 chat-tab 全局监听
 ```
 
-执行层确认的缺口：assistant 流式回复只进 DOM 不进 `messages[]`（第二次发送缺少上一轮 assistant 上下文，数据语义见会话与消息管理笔记）；`CHAT_CHUNK`/`CHAT_DONE` 广播没有会话标识；主进程只有一个 `m_chatThread`（`MainWindow.xaml.h:54`），常规聊天全局串行。本次调查还确认：前端发送的 `temperature` 与 `tools` 字段在后端不消费；MCP 工具只注入不执行。
+执行层确认的缺口：assistant 的流式回复只写进 DOM，没有回写当前标签的消息数组，第二次发送时上下文里缺少上一轮的 assistant 回复（数据语义见会话与消息管理笔记）。`CHAT_CHUNK` 与 `CHAT_DONE` 两条广播都不带会话标识，主进程也只维护一条聊天线程（`MainWindow.xaml.h:54`），常规聊天因此全局串行。前端随请求发送的 temperature 与 tools 字段在后端没有读取点，MCP 工具只被注入进请求体，不会被调用执行。
 
 ## 系统边界与生成任务主链
 
@@ -41,14 +41,14 @@ input-bar.js doSend（读取输入、清空 textarea）
 
 ## 1. 提交入口、任务对象与状态机
 
-- **入口**：`input-bar.js:169-184` 读取输入文本并清空 textarea；`app.js:86-123` 的 `onSend` 回调把用户消息加入当前标签的 `messages[]`（`chat-tab.js:119-126`），再经 `providerApi.sendChat` 发送 `CHAT_SEND`（`provider-api.js:4-13`）。
-- **任务对象**：`HandleChatSend` 从 payload 读取 `provider/model/messages/systemPrompt`（`MainWindow.xaml.cpp:759-762`），构造 `ChatRequest`（`:771-783`）。没有显式任务 ID——任务身份隐含在全局 `m_chatThread` 与无标识的广播事件中。
-- **状态机**：未发现任务级状态机或占位消息；用户消息同步进入 `messages[]`，前端 `streaming` 标志是组件/输入栏局部布尔（`chat-tab.js:19,31`、`input-bar.js:10,22-30`），`appStreaming` 是应用级布尔（`app.js:21,111,132-135`）。
+- **入口**：输入栏在发送时读取输入文本、清空 textarea，再把文本交给应用层的 `onSend` 回调（`input-bar.js:169-184`、`app.js:86-123`）；回调把用户消息追加进当前标签的消息数组，随后经 `providerApi.sendChat` 发出 `CHAT_SEND` 桥消息（`chat-tab.js:119-126`、`provider-api.js:4-13`）。
+- **任务对象**：`HandleChatSend` 把 payload 里的 provider、model、messages 与 systemPrompt 读进通用请求对象 `ChatRequest`，请求本身没有显式任务 ID，任务身份由全局聊天线程与无标识的广播事件隐含表示（`MainWindow.xaml.cpp:759-762`、`:771-783`）。
+- **状态机**：未发现任务级状态机或占位消息；用户消息同步进入消息数组，前端的 `streaming` 标志只是组件与输入栏各自的局部布尔，应用层另有 `appStreaming` 布尔（`chat-tab.js:19,31`、`input-bar.js:10,22-30`、`app.js:21,111,132-135`）。
 
 ## 2. 历史选择与上下文拼装顺序
 
-- **历史选择**：`chat-tab.js:127-129` 的 `getMessages()` 返回当前标签整个 `messages[]` 的 `role`/`content` 副本；没有按 token、分支或角色再筛选历史的逻辑。
-- **顺序与 prompt 来源**：上下文顺序即数组顺序；system prompt 由 `app.js:120` 从设置取值随请求发送，后端在 payload 缺省时回退 `m_currentSettings.systemPrompt`（`MainWindow.xaml.cpp:762`）。assistant 流式文本只更新 DOM 与 `streamingText`（`chat-tab.js:27-59`），不回写 `messages[]`，因此第二轮消息不含上一轮 assistant（该数据缺口在会话与消息管理笔记）。
+- **历史选择**：发送时取的是当前标签的整份历史。标签侧的 `getMessages()` 把消息数组里的 `role` 与 `content` 复制成一个列表交给请求构造，不再按 token、分支或角色筛选（`chat-tab.js:127-129`）。
+- **顺序与 prompt 来源**：上下文顺序就是消息数组的顺序；system prompt 随请求从设置里取值，payload 缺省时后端回退到已保存的 systemPrompt（`app.js:120`、`MainWindow.xaml.cpp:762`）。assistant 的流式文本只更新 DOM 与 streamingText，不回写消息数组，因此第二轮消息不含上一轮的 assistant 回复（`chat-tab.js:27-59`；该数据缺口在会话与消息管理笔记）。
 
 ## 3. 预算、截断、摘要与压缩
 
@@ -56,50 +56,53 @@ input-bar.js doSend（读取输入、清空 textarea）
 
 ## 4. SDK、Provider、模型与协议交接
 
-- **Provider 解析**：`HandleChatSend` 经 `ProviderRegistry::GetProvider` 查找，未找到即回 `CHAT_ERROR`（`MainWindow.xaml.cpp:764-768`）；Provider 在窗口构造时注册（Gemini/OpenAI/Anthropic/Proxy/Ollama/OpenAI-compat，`:129-155`）。
+- **Provider 解析**：`HandleChatSend` 按请求里的 provider 名向 `ProviderRegistry` 取实例，取不到就直接回 `CHAT_ERROR`。Gemini、OpenAI、Anthropic、Proxy、Ollama 与 OpenAI-compat 六个 Provider 在窗口构造时一次性注册（`MainWindow.xaml.cpp:764-768`，注册见 `:129-155`）。
 - **参数交接（多个前端字段在后端不消费）**：
-  - `req.temperature` 取 `m_currentSettings.temperature`（`MainWindow.xaml.cpp:775`），前端 payload 中的 `temperature` 字段无人读取——前端发送值不生效（实际来源为已保存到宿主的全局设置）；
-  - `req.tools` 只来自 MCP 注入（`:786-789`），前端 `tools` 字段（`provider-api.js:11`）同样无人消费；
-  - 设置里的 `streamResponses` 开关在发送路径无读取点（grep 仅命中 settings-store/settings-panel/SettingsManager），界面开关不改变行为。
-- **协议映射**：OpenAI 系 `BuildRequestBody` 把 system prompt 作为首条 system 消息、role 直传、parts 转内容数组、工具转 function schema（`OpenAIProvider.cpp:20-86`）；Gemini `BuildRequestBody` 把 role 映射 `assistant→model`、system prompt 放 `systemInstruction`、温度放 `generationConfig`、工具转 `functionDeclarations`（`GeminiProvider.cpp:16-88`）。网络层统一走 `HttpClient::StreamPost`（`HttpClient.cpp:93-155`，WinHTTP + SSE 行解析在各 Provider 内）。
+  - 温度：请求里的温度一律取自宿主保存的全局设置，前端 payload 中随请求发出的 `temperature` 没有读取点，发送值不生效（`MainWindow.xaml.cpp:775`）；
+  - 工具定义：请求里的工具只来自 MCP 客户端注入的清单，前端 `tools` 字段同样无人消费（`MainWindow.xaml.cpp:786-789`、`provider-api.js:11`）；
+  - 流式开关：设置项 `streamResponses` 在发送路径上没有读取点，grep 只在 settings-store、settings-panel 与 SettingsManager 命中该名字，切换界面开关不改变发送行为。
+- **协议映射**：两个 Provider 各自在 BuildRequestBody 里把通用请求对象翻译成自家格式：
+  - OpenAI 系把 system prompt 放成首条 system 消息、role 原样传递，内容 parts 合成内容数组，工具定义转成 function schema（`OpenAIProvider.cpp:20-86`）。
+  - Gemini 把 assistant 角色映射为 model，system prompt 移入 systemInstruction，温度放进 generationConfig，工具转成 functionDeclarations（`GeminiProvider.cpp:16-88`）。
+  - 两者最终都交给共享网络层 `HttpClient::StreamPost`，由它持有 WinHTTP 请求、读取与句柄关闭，再把原始 chunk 回调给 Provider 做 SSE 行解析（`HttpClient.cpp:93-155`）。
 - **交接点结论**：请求体在 Provider 内直接构造，不存在独立的 Adapter 层；`ChatMessage.role` 原样进入 OpenAI 系请求，system/assistant 语义差异由各 Provider 自行处理。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- **链**（MainWindow.xaml.cpp:800-822）：
-  1. Provider 线程内 `onChunk` 回调检查 `stop_token`（`:801`）后构造 `chunkData`（`:803-817`，只含 `text`/`toolCall`/`done`）；
-  2. `DispatcherQueue.TryEnqueue`（`:819`）→ `PostMessageToWeb("CHAT_CHUNK")`（`:820`）；
-  3. `bridge.js:30-40` 分发 → 每个 chat-tab 的全局监听器（`chat-tab.js:27-59`）。
+- **链**（`MainWindow.xaml.cpp:800-822`）：Provider 线程每产出一段增量，都沿同一条路径送回前端。
+  1. Provider 线程的 onChunk 回调先确认任务没有收到停止请求，再把文本、工具调用与结束标记打包成 chunk 数据；
+  2. 这份数据经 DispatcherQueue.TryEnqueue 切回 UI 线程，由 PostMessageToWeb 以 `CHAT_CHUNK` 广播出去；
+  3. 前端 bridge.js 收到桥消息后分发，各 chat-tab 的全局监听器各自更新自己的流式状态（`bridge.js:30-40`、`chat-tab.js:27-59`）。
 - **缓冲**：SSE 行缓冲在 Provider 层（`OpenAIProvider.cpp:151-203`、`GeminiProvider.cpp:157-181`）；未发现节流或合并逻辑。
 - **顺序**：chunk 经同一 dispatcher 队列投递（`:819-821`），静态推断同一请求内顺序保持；未运行验证。
 - **串扰风险**：chunk/done 载荷不含 session/tab 标识，所有已打开标签都监听同一广播（`chat-tab.js:27,61,87`）；多标签同时打开时一个请求可能更新多个标签的局部消息区（可见行为未运行验证）。
 
 ## 6. 完成、异常、半截流与最终回写
 
-- **完成**：线程正常结束且未被请求停止时发送 `CHAT_DONE`（`MainWindow.xaml.cpp:824-833`，含 tokens 与 finishReason）；前端据此收尾、挂 cost badge 并记录用量（`chat-tab.js:61-85`）。完整流式文本停留在 DOM 与 `streamingText`，不写回 `messages[]` 也不落盘（落盘缺口见会话与消息管理笔记）。
+- **完成**：后台线程跑完且期间没有收到停止请求时，主进程广播 `CHAT_DONE`，并带上本次消耗的 tokens 与 finishReason；前端收到后结束流式状态、挂上 cost badge 展示费用并累计用量（`MainWindow.xaml.cpp:824-833`、`chat-tab.js:61-85`）。完整的流式文本只留在 DOM 与 streamingText 中，既不回写消息数组也不落盘（落盘缺口见会话与消息管理笔记）。
 - **异常**：`catch` 回 `CHAT_ERROR`（`MainWindow.xaml.cpp:834-839`）；前端渲染错误行，其 Retry 按钮只删除错误提示、不重发请求（`chat-tab.js:87-98`），工作流见 Chat UI 笔记。
 - **半截流**：任何路径都没有把半截文本写入消息数组或文件；停止后 `CHAT_DONE` 不会发送（`:824` 的 `stop_requested` 判断）。
 
 ## 7. 停止、重试、续写与重新生成
 
-- **停止**：`CHAT_CANCEL` → `HandleChatCancel`（`MainWindow.xaml.cpp:843-850`）`request_stop()` 后 `m_chatThread = std::jthread{}`。两个静态推断的边界：
-  - `stop_token` 只在 onChunk 回调处检查（`:801`），而 `HttpClient::StreamPost` 是阻塞式 `WinHttpQueryDataAvailable/WinHttpReadData` 循环（`HttpClient.cpp:140-149`）——取消不能主动中断已阻塞的读取，只能等下一次回调；
-  - `std::jthread` 的赋值会先 `request_stop()` 再 `join()` 旧线程，若旧线程阻塞在读取上，join 会阻塞 UI 线程直到读取返回。
+- **停止**：前端发来的 `CHAT_CANCEL` 由 `HandleChatCancel` 处理：先对当前线程请求停止，再用一个空的线程对象替换 `m_chatThread`。这条路径有两条静态推断出的边界（`MainWindow.xaml.cpp:843-850`）：
+  - 停止标记只在 Provider 的 onChunk 回调里检查一次，而网络层是 `HttpClient::StreamPost` 内阻塞式的 WinHttpQueryDataAvailable 与 WinHttpReadData 循环，取消无法主动打断已经阻塞的读取，只能等下一次回调（`HttpClient.cpp:140-149`）；
+  - 给 `std::jthread` 赋新值会先请求旧线程停止、再 join 等待结束；旧线程卡在读取上时，这次 join 会把 UI 线程一并阻塞到读取返回。
   真实中断效果均需运行验证。
 - **新请求先停旧线程**：`HandleChatSend` 在启动新线程前执行同样动作（`MainWindow.xaml.cpp:791-795`），因此连续发送是"停旧 + join + 起新"的串行关系。
 - **重试/续写/重新生成**：除无效 Retry 按钮外未发现独立机制（grep 检查范围：chat-tab.js、app.js、MainWindow 聊天 handler）；再次发送就是重走同一主链，起始上下文仍是当前 `messages[]`。
 
 ## 8. 队列、多会话并发与后台生成
 
-- 常规聊天只有一条全局 `m_chatThread`（`MainWindow.xaml.h:54`），没有发送队列、每会话隔离或后台生成机制；不同标签的聊天请求也互相覆盖（见第 7 节）。
-- compare 标签使用独立的 `m_compareThreads` 向量、每槽位一线程（`MainWindow.xaml.h:55`、`MainWindow.xaml.cpp:1063-1125`），与 chat 线程并存；compare 请求不注入 MCP 工具，且其广播（`COMPARE_CHUNK` 等）带 `slotIndex` 标识，与 chat 广播不同源。
+- 常规聊天在主进程里只占一条全局线程 `m_chatThread`，发送队列、按会话隔离与后台生成机制都不存在，不同标签的聊天请求会互相覆盖，原因见第 7 节的停止逻辑（`MainWindow.xaml.h:54`）。
+- compare 标签走另一套线程结构：独立的线程向量 `m_compareThreads` 为每个槽位各开一条线程，与 chat 线程并存；compare 请求不注入 MCP 工具，其广播事件（如 `COMPARE_CHUNK`）带 `slotIndex` 标识，与 chat 广播不同源（`MainWindow.xaml.h:55`、`MainWindow.xaml.cpp:1063-1125`）。
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- **MCP 工具（只注入、不执行）**：
-  - 注入：请求构造时 `m_mcpClient.GetAllTools()` 全局注入（`MainWindow.xaml.cpp:786-789`），工具 schema 进入请求体（`OpenAIProvider.cpp:74-83`、`GeminiProvider.cpp:79-85`）；
-  - 展示：模型返回的 `toolCall` chunk 只渲染为可折叠卡片（`chat-tab.js:47-49`、`message-renderer.js:36-56`）；
-  - 无执行证据：全仓库搜索确认 `MCPClient::CallTool`（`MCPClient.cpp:131`）与 `ChatRequest.maxToolCallRounds`（`ProviderTypes.h:128`）均无调用点/读取点——不存在工具循环。
+- **MCP 工具（只注入、不执行）**：整条链止于工具定义的注入与工具调用的展示。
+  - 注入：每次构造请求时用 `m_mcpClient.GetAllTools()` 取回全部工具直接挂到请求上，工具 schema 由两个 Provider 各自翻译进请求体（`MainWindow.xaml.cpp:786-789`、`OpenAIProvider.cpp:74-83`、`GeminiProvider.cpp:79-85`）；
+  - 展示：模型返回的 toolCall 增量在前端只渲染成可折叠卡片，没有回执或执行动作（`chat-tab.js:47-49`、`message-renderer.js:36-56`）；
+  - 执行入口：全仓库搜索显示 `MCPClient::CallTool` 与 `ChatRequest.maxToolCallRounds` 既无调用点也无读取点，因此不存在工具循环（`MCPClient.cpp:131`、`ProviderTypes.h:128`）。
 - **附件**：后端有文件对话框与 `FILE_ATTACHED` 广播（`MainWindow.xaml.cpp:559-617`），前端无发送方与监听方（grep 无结果），附件链路未接通。
 - **记忆/知识库/Agent 角色**：Chat 主链上未找到对应字段或注入点（检查范围：`provider-api.js`、`HandleChatSend`、`ProviderTypes.h`）。
 

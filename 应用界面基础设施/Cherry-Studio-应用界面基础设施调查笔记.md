@@ -70,9 +70,9 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
 **native 模式。** `event.preventDefault()` 后调 window.api.command.showNativePopupMenu(...) 把菜单模型序列化成 NativePopupMenuModel 丢给主进程弹系统原生右键菜单（`CommandMenus.tsx:469-540`），点击结果经 IPC 返回再本地执行。
 
-设置 > 外观 > 右键菜单样式（`AppearanceSettings.tsx:198-199,394`）切换，切换后需重启应用生效（`AppearanceSettings.tsx:91-92` 有专门重启提示 popup）。
+右键菜单样式在设置 > 外观里切换，改完需要重启应用才生效，该设置项附近带一个专门的重启提示弹窗（`AppearanceSettings.tsx:91-92,198-199,394`）。
 - Topic 行、Agent Session 行的右键菜单经 ResourceListActionContextMenu（`src/renderer/components/chat/actions/ResourceListActionContextMenu.tsx:21-27`）包一层——里面写明原因："一个动作若带 inline confirm，会被转成 ConfirmActionPopup 在弹窗里执行，因为系统原生菜单没法承载内嵌确认框"。
-- 消息正文右键菜单是另一路：`SelectionContextMenu.tsx`（选中文本时"复制/引用到主窗口"），专门剥离代码块行号（`.line-number` 过滤，`SelectionContextMenu.tsx:18-54`），保证复制代码不带行号前缀。图片有自己的第三路右键菜单（见第 6 节）。
+- 消息正文右键菜单走另一套实现：选中文本时提供"复制/引用到主窗口"，并按 `.line-number` 类名过滤掉代码块的行号元素，使复制出来的代码不带行号前缀。图片另有第三路右键菜单（见第 6 节），实现见 `SelectionContextMenu.tsx:18-54`。
 
 ## 3. 通知、加载态与错误反馈
 
@@ -80,7 +80,7 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
 **位置。** ToastViewport 固定在屏幕顶部居中，消息纵向堆叠（`toast.tsx:372-380`）。
 
-**自动消失时长。** 默认时长为 3000ms（`toast.tsx:51`）；成功类型的 loading→success 转换默认更短，为 2000ms（`toast.tsx:223`）；错误转换默认不自动消失（`toast.tsx:242`）；loading 类型永不自动消失（`toast.tsx:116-118`）。
+**自动消失时长。** Toast 默认停留 3000ms 后自动消失；loading 状态在转为 success 后缩短为 2000ms，转为 error 后保持常驻，而 loading 状态本身永不自动消失（`toast.tsx:51,116-118,223,242`）。
 
 **loading→success/error 的 promise 桥接。** `toast.loading({ promise, onError })` 跟踪一个 Symbol 令牌（loadingTokens），只有令牌匹配才允许把 loading 状态"续写"为 success/error（`toast.tsx:189-249`），防止同一 key 被后来的 loading 覆盖后旧 promise resolve 误写状态。
 
@@ -106,13 +106,16 @@ focusOnClose 让调用方在 onCloseAutoFocus（`ConfirmPopupItem.tsx:111-119`�
 
     WindowFatalFallback（`src/renderer/components/WindowFatalFallback.tsx:16-42`）在无任何 React context 的环境渲染：i18n 走全局单例（禁止 useTranslation）、样式只能靠 :root token 默认值（ThemeProvider 没跑到，主题留在浅色），并主动移除启动 `#spinner` 残留覆盖层（否则 Provider 崩溃时全屏 spinner 遮罩挡住点击）；
 
-    呈现错误 Alert（formatErrorDetails 过滤后的详情，用户文案"似乎出现了一些问题..."，`zh-cn.json:2507`）+ "打开调试面板"/"重新加载"两个按钮（system.toggle_dev_tools/window.main.reload）。
-  - **路由/tab 级**：TanStack Router defaultErrorComponent: RouteErrorFallback（`TabRouter.tsx:28-31`）——路由渲染错误限定在单个 tab，可原地 `reset()` 重试（`RouteErrorFallback.tsx:26`），不炸掉整个窗口。
-  - **消息/块级**：每条消息包 MessageErrorBoundary（手写 class 组件 getDerivedStateFromError，`src/renderer/components/chat/messages/frame/MessageErrorBoundary.tsx:34-50`，`role="alert"`，生产隐藏具体 error.message 只显示通用文案、仅 dev 显示详情）；
+    界面呈现一个错误 Alert：详情经过 formatErrorDetails 过滤，标题采用 zh-cn 词条里的"似乎出现了一些问题..."，下方给出"打开调试面板"和"重新加载"两个按钮，分别调用 system.toggle_dev_tools 与 window.main.reload（`zh-cn.json:2507`）。
+  - **路由/tab 级**：注册为 TanStack Router 的 defaultErrorComponent，路由渲染出错只影响当前 tab，用户可在原处 reset() 重试，整个窗口保持可用（`TabRouter.tsx:28-31`、`RouteErrorFallback.tsx:26`）。
+  - **消息/块级**：每条消息各自包一层 ErrorBoundary，由手写 class 组件通过 getDerivedStateFromError 捕获渲染异常；占位区带 role=alert 语义，生产环境只显示通用文案，仅开发环境展示具体 error.message（`src/renderer/components/chat/messages/frame/MessageErrorBoundary.tsx:34-50`）。
 
-    `MessagePartsRenderer.tsx:153,165` 与 `ToolBlockGroup.tsx:552` 用 BlockErrorFallback（`BlockErrorFallback.tsx:6-15`，同样 dev-only 详情）。
+    消息部件渲染与工具调用块渲染也使用 BlockErrorFallback，详情同样只在开发环境显示（`MessagePartsRenderer.tsx:153,165`、`ToolBlockGroup.tsx:552`、`BlockErrorFallback.tsx:6-15`）。
 
-    局部还有 `FilePreview.tsx:151`（直接 import react-error-boundary）、`McpServerCard.tsx:217`、`RightPanel.tsx:497`、ResourceList 的 errorFallback（`Topics.tsx:1661`）。
+    另有几处局部包裹：
+    - 文件预览直接引入 react-error-boundary 的组件（`FilePreview.tsx:151`）；
+    - MCP 服务器卡片与右侧面板也各自包裹了一层（`McpServerCard.tsx:217`、`RightPanel.tsx:497`）；
+    - ResourceList 通过 errorFallback 属性接入（`Topics.tsx:1661`）。
   - **双实现并存**：`packages/ui/src/components/primitives/error-boundary/index.tsx`（首行注释 "Original path: src/renderer/components/ErrorBoundary.tsx"）是另一份平行封装（英文默认文案、props 面不同：errorMessage/onDebugClick/onReloadClick），全仓库只在 UI 包自己的 stories 里使用；
 
     渲染层实际消费的是 `@renderer/components/ErrorBoundary`。
@@ -145,28 +148,29 @@ Electron 侧配合：主窗口 showMode: 'manual'（`src/main/core/window/window
 窗口创建时 backgroundColor 直接按 nativeTheme.shouldUseDarkColors 取 `#181818`/`#FFFFFF`（`MainWindowService.ts:188-190`），内容加载前的窗口底色已与主题一致。
 
 全仓库 prefers-color-scheme 消费面只有 ThemeProvider 这一处（另有一处 `MigrationApp.tsx:410` 用于迁移窗口自身首帧判断）。
-3. **Design Token 体系（packages/ui/src/styles，契约分层 + 生成器）**：UI 包内含一套正式的分层 CSS 契约，contract.css 声明导入顺序必须单向：“foundation providers → runtime inputs → official Shadcn semantics → product semantics”（`contract.css:1-13`）：
-   - **基础色板（foundation）**：`tokens/index.css` 汇总 `tokens/colors/primitive.css`（23 个色族 × 50-950 共 10 阶 + `--cs-black`/`--cs-white`/`--cs-brand-*`，全部 oklch 值，
-
-     `primitive.css:6-309`）、`tokens/colors/status-legacy.css`（冻结的旧状态色板，
-
-     只缩不扩）、`tokens/colors/providers.css`（语义提供层：`--cs-primary`=`--cs-brand-500`、`--cs-destructive`/`--cs-success`/`--cs-warning`/`--cs-info` 及其 subtle/border 反馈契约、sidebar 子调色板、light/dark 双模式分写，
-
-     `providers.css:13-165`），以及 `tokens/spacing.css`/`tokens/radius.css`/`tokens/typography.css`（`--cs-size-*`/`--cs-radius-*`/`--cs-font-*` 等设计刻度）。
-   - **受控运行时输入**：`theme-input.css` 定义 `--cs-theme-primary`/`--cs-theme-primary-foreground` 的默认值（`var(--cs-primary)` 等），是唯一允许运行时主题逻辑写入的共享变量子集（`theme-input.css:9-13`）。
-   - **官方 Shadcn 契约（公共 API）**：`shadcn.css` 把 `--background`/`--primary` 等官方无前缀变量全部 `var()` 转发到 `--cs-*`（`shadcn.css:11-54`），文件顶部注释解释原因：官方变量名不加前缀是"生态兼容性"——第三方 Shadcn 主题（如 TweakCN）可直接套用。`--radius: var(--cs-radius-lg)` 也是契约输入之一，但用户侧没有可调圆角的设置（见下方"未找到"）。
-   - **Cherry 产品语义层**：`product.css` 在同一个无前缀公共命名空间里追加产品扩展（`--background-subtle`/`--link`/`--success`/`--warning`/`--info`/`--error` 系列、`--code-block`/`--inline-code`、`--reference`/`--highlight`、`--chat-user`、`--resource-list-row-*`，
-
-     light/dark 分写，`product.css:10-80`）。
+3. **Design Token 体系（packages/ui/src/styles，契约分层且带生成脚本）**：UI 包内含一套正式的分层 CSS 契约，contract.css 规定导入顺序只能单向推进，四层依次是“foundation providers → runtime inputs → official Shadcn semantics → product semantics”（`contract.css:1-13`）：
+   - **基础色板（foundation）**：`tokens/index.css` 汇总三类颜色来源与三组设计刻度。
+     - **原始色板**：23 个色族，每族 50 到 950 共十阶，另有黑、白与品牌色变量，取值全部是 oklch（`tokens/colors/primitive.css:6-309`）。
+     - **旧状态色板**：冻结保留，只允许收缩、不再扩增（`tokens/colors/status-legacy.css`）。
+     - **语义提供层**：把品牌色映射为主色，定义危险、成功、警告、信息四类反馈色及其 subtle/border 契约，并附 sidebar 子调色板，全部按明暗双模式分写（`tokens/colors/providers.css:13-165`）。
+     - **设计刻度**：尺寸、圆角、字体三组变量分别由 tokens 目录下的 spacing、radius、typography 三个文件提供。
+   - **受控运行时输入**：theme-input.css 为 `--cs-theme-primary` 与 `--cs-theme-primary-foreground` 提供默认值（回落到 `var(--cs-primary)`），这是唯一允许运行时主题逻辑写入的共享变量子集（`theme-input.css:9-13`）。
+   - **官方 Shadcn 契约（公共 API）**：shadcn.css 把官方那些无前缀变量（背景、主色等）全部转发到内部的 `--cs-*` 变量，文件顶部注释说明不加前缀是为了生态兼容——第三方 Shadcn 主题（如 TweakCN）可以直接套用。圆角变量 `--radius` 同在这层接入，取值指向 `--cs-radius-lg`；用户侧没有可调圆角的设置（见下方"未找到"）。转发定义见 `shadcn.css:11-54`。
+   - **Cherry 产品语义层**：product.css 在同一个无前缀公共命名空间里追加产品扩展，按用途分成几组：
+     - 反馈与链接：`--background-subtle`、`--link`、`--success`、`--warning`、`--info`、`--error` 及其系列变量；
+     - 代码展示：`--code-block`、`--inline-code`；
+     - 引用与高亮：`--reference`、`--highlight`；
+     - 聊天与资源列表：`--chat-user`、`--resource-list-row-*`；
+     - 这些变量按 light/dark 双模式分写（`product.css:10-80`）。
    - **Tailwind 适配层（生成产物）**：`theme.css` 由 pnpm theme:build（`packages/ui/scripts/build-theme-css.ts`，package.json 脚本 theme:build/theme:check）生成，用 Tailwind v4 @theme inline 把上述语义映射成 `--color-*`/`--radius-*`/`--font-*` 等工具类层（`theme.css:11-453`），文件头部标注"DO NOT EDIT DIRECTLY"。
 
      配套约束工具：`packages/ui/scripts/theme-contract.ts`、`check-theme-contract.ts`、`validate-theme-contract.ts`、`migration-registry.ts` + `scripts/migrations/shadcn-v2.json`；
 
-     契约规范见 `packages/ui/docs/design-token-system.md`（v2 契约：无前缀语义是唯一公共 API、`--cs-*` 只是内部 provider、`--cs-theme-*` 是受控输入、`--app-*` 属 owner-local）、`variable-catalog.md`、`migration-plan.md`、`styles-reference.md`。
+     契约规范见 `packages/ui/docs/design-token-system.md`。该文档的 v2 契约把变量分成四类：无前缀语义是唯一公共 API，`--cs-*` 是内部 provider，`--cs-theme-*` 是受控输入，`--app-*` 归各 owner 私有。同目录下另有变量目录、迁移计划与样式参考三份文档。
     - **消费规则**：组件只消费无前缀公共变量（bg-background/text-foreground 等工具类），不直接引用内部变量。
 4. **用户自定义主题**：外观设置提供明暗三态预览、五个预设主色、任意颜色输入，以及全局字体和代码字体选择。字体列表通过 IPC 从系统字体表取得。（`AppearanceSettings.tsx:148-162,283-341,621-660`）
 
-`useUserTheme.ts` 把这些偏好直接写 document.documentElement 行内样式：`--cs-theme-primary` + `--cs-theme-primary-foreground`（后者用 getForegroundColor 按 WCAG 相对亮度、阈值 0.179 选黑/白，`src/renderer/utils/style.ts:138-145`），以及 `--app-user-font-family`/`--app-user-code-font-family`（`useUserTheme.ts:19-26`，属于 `--app-*` owner-local 命名空间）；
+useUserTheme 把这些偏好直接写成 document.documentElement 的行内样式。主色写两个变量：`--cs-theme-primary` 与 `--cs-theme-primary-foreground`，后者由 getForegroundColor 按 WCAG 相对亮度（阈值 0.179）在黑与白之间挑选；字体方面写入用户字体和代码字体两个变量，属于 `--app-*` owner-local 命名空间（`useUserTheme.ts:19-26`、`src/renderer/utils/style.ts:138-145`）；
 
 字体变量被 `src/renderer/assets/styles/font.css:3,13,19,25` 的 UI/代码字体栈兜底消费。livePreview 时不需要重新生成样式表。**没有色阶生成引擎**：用户主色只产出 primary + 对比前景两个变量，不生成 50-950 色阶，也没有 dark 变体；
 
@@ -177,7 +181,7 @@ Electron 侧配合：主窗口 showMode: 'manual'（`src/main/core/window/window
 
 `useCustomCss.ts` 把文本原样同步进 `<head>` 的 `<style id="user-defined-custom-css">` 单元素（先删旧节点防重复、卸载时移除、空值/v1 标记内容不注入，`useCustomCss.ts:17-34`）。
 
-注入点覆盖所有常规 UI 窗口：main/subWindow 走 `useWindowRuntime.ts:52` 的公共 hook，另有 quickAssistant（`QuickAssistantApp.tsx:20`）、selection toolbar/action（`SelectionToolbarApp.tsx:14`、`SelectionActionApp.tsx:18`）；
+注入点覆盖所有常规 UI 窗口。主窗口与子窗口共用同一个 runtime hook（`useWindowRuntime.ts:52`）；快捷助手、选择工具栏和选择动作窗口则在各自的应用入口接入，三处入口分别是 `QuickAssistantApp.tsx:20`、`SelectionToolbarApp.tsx:14` 和 `SelectionActionApp.tsx:18`；
 
 preboot 迁移窗口（migrationV2/userDataRelocation）不初始化偏好、不注入（`useCustomCss.ts:38-40` 注释）。
 
@@ -230,12 +234,10 @@ zh-cn 词条 settings.theme 段只有 color_primary/title 两个 key；②壁纸
 ### 无障碍（静态代码结论）
 
 **已具备显式语义或键盘支持的位置**：
-- ResourceList（Topic 列表、Agent Session 列表共用）实现标准 **roving tabindex + aria-activedescendant** 模式：容器 `role="listbox"`（`ResourceListVirtual.tsx:551,777`），行 `role="option"` + aria-selected（`ResourceList.tsx:388-394`），
-
-  键盘 `ArrowUp/ArrowDown/Home/End/Enter` 都有对应测试覆盖并断言 aria-activedescendant 正确移动（`__tests__/ResourceList.test.tsx:622-671`）。
+- ResourceList（Topic 列表与 Agent Session 列表共用）实现 **roving tabindex + aria-activedescendant** 模式：容器声明为 listbox，行声明为 option 并带选中状态；上下方向键、Home、End 与 Enter 都能移动焦点，焦点位置经 aria-activedescendant 同步给辅助技术，键盘行为另有测试断言（`ResourceListVirtual.tsx:551,777`、`ResourceList.tsx:388-394`、`__tests__/ResourceList.test.tsx:622-671`）。
 - Toast 有 `role="alert"`/`role="status"` + aria-live 区分严重程度（第 3 节）。
-- 折叠交互（用户消息折叠、Thinking 块展开/收起）用了真实 aria-expanded/aria-controls（`MainTextBlock.tsx:234-235`、`ThinkingBlock.tsx:95-96`），并且是可聚焦、可键盘触发的 `role="button"` + onKeyDown 处理 Enter/Space（`ThinkingBlock.tsx:93-105`），不是纯鼠标 div。
-- 消息操作栏**部分**按钮显式传了 aria-label：模型选择器（renderModelPickerToolbarAction，`MessageMenuBarToolbarRenderers.tsx:287`）、翻译（:311）、更多菜单弹出按钮（:355,412）。
+- 折叠交互（用户消息折叠、Thinking 块展开/收起）使用真实的 aria-expanded 与 aria-controls 属性；触发元素可聚焦，用 role="button" 配合 onKeyDown 响应 Enter 和 Space（`MainTextBlock.tsx:234-235`、`ThinkingBlock.tsx:93-105`）。
+- 消息操作栏**部分**按钮显式传了 aria-label：模型选择器、翻译和更多菜单弹出按钮都从 action 的本地化标签取名（`MessageMenuBarToolbarRenderers.tsx:287,311,355,412`）。
 
 **消息操作栏名称。** 默认与专用渲染路径都向图标按钮传入 action 的本地化标签，复制、编辑、重新生成、删除、模型选择和更多菜单均有显式 `aria-label`。静态代码可确认名称接线，读屏顺序与弹出菜单焦点仍需运行验证；见 `MessageMenuBarToolbarRenderers.tsx:83,107,292,316,367,424`。
 
@@ -247,9 +249,9 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 `package.json` 全文搜索 framer-motion **无匹配**。三层方案：
 
-1. **tw-animate-css**（`package.json:426`）+ Radix 的 `data-[state=open|closed]` 属性驱动 Dialog/ContextMenu/Tooltip/Popover 进出场（`dialog.tsx:33-37,123-127`：fade-in-0/zoom-in-99/slide-in-from-bottom-4 等，进场 260ms、退场 200ms，统一 motion-reduce:animate-none）。
-2. **手写 CSS @keyframes**：`src/renderer/assets/styles/animation.css` 的 animation-shimmer（3s 线性循环，文字渐变光泽扫过，用于 Topic 重命名加载态和工具调用占位文本 `PlaceholderShimmerText.tsx`）与 animation-reveal（0.5s，重命名刚完成时的"揭示"效果，`Topics.tsx:1634-1638` 消费）。
-3. **纯 CSS transition**：折叠展开（Thinking 块、用户消息折叠）用 hidden 属性硬切换 + chevron 图标 transition-transform duration-200（`ThinkingBlock.tsx:134-138`、`MainTextBlock.tsx:244`）——内容本身没有高度动画，只有箭头旋转有过渡，"展开"在视觉上是瞬时的。
+1. **tw-animate-css 配合 Radix 状态属性**：Radix 组件在开合时输出 data-[state=open|closed] 属性，Tailwind 动画类据此播放淡入、缩放与滑入效果；Dialog、ContextMenu、Tooltip、Popover 共用这套进出场，进场 260ms、退场 200ms，统一带 motion-reduce:animate-none（`package.json:426`、`dialog.tsx:33-37,123-127`）。
+2. **手写 CSS @keyframes**：`src/renderer/assets/styles/animation.css` 定义了两个动画。animation-shimmer 以 3s 线性循环让文字呈现渐变光泽扫过，用于 Topic 重命名加载态和工具调用占位文本（`PlaceholderShimmerText.tsx`）；animation-reveal 时长 0.5s，负责重命名刚完成时的"揭示"效果，由 `Topics.tsx:1634-1638` 消费。
+3. **纯 CSS transition**：折叠展开（Thinking 块、用户消息折叠）用 hidden 属性直接切换显隐，只有 chevron 图标带 200ms 的旋转过渡；内容高度本身没有动画，展开在视觉上是瞬时的（`ThinkingBlock.tsx:134-138`、`MainTextBlock.tsx:244`）。
 
 消息栏悬停显隐、滚动到底按钮出现都是 opacity/duration-150 级简单 CSS transition（`MessageFrame.tsx:34,119`；`MessageVirtualList.tsx` 的 ScrollToBottomButton）。
 
@@ -273,7 +275,13 @@ prefers-reduced-motion 方面唯一相关的是 Radix 动画类统一带 motion-
 
 基础组件层：拖拽排序由 `@dnd-kit/react` 承载（`packages/ui/src/components/composites/sortable/`），滚动容器统一到单一 `scroll-area` 原语以收敛应用内滚动与侧栏间距，Mermaid 图表由 `@mermanjs/web-render` 在 worker 中渲染并从默认 Markdown 预设中懒加载，代码高亮统一到一套 Highlights 管线并对大代码预览做虚拟化。标签页方面活动会话标签有独立视觉态；Tooltip 在对话框内容旁用 portal 挂载。
 
-本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。依据：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`、`src/main/services/selection/`、`packages/ui/src/components/composites/sortable/`、`packages/ui/src/components/primitives/scroll-area.tsx`、`packages/ui/src/lib/mermaid/runtime.ts`、`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`。
+本次只做静态核对，没有对多显示器、输入法候选窗、各平台窗口层级和通知投递做运行验证。本节的依据源码如下：
+
+- 截图覆盖层：`src/renderer/windows/screenshot/CaptureOverlay.tsx`、`src/main/services/screenshot/ScreenshotOverlayService.ts`
+- 选择服务：`src/main/services/selection/`
+- 排序与滚动原语：`packages/ui/src/components/composites/sortable/`、`packages/ui/src/components/primitives/scroll-area.tsx`
+- Mermaid 运行时：`packages/ui/src/lib/mermaid/runtime.ts`
+- 任务设置与通知服务：`src/renderer/pages/settings/TasksSettings.tsx`、`src/main/services/NotificationService.ts`
 
 ## 9. 设计取舍与已确认边界
 

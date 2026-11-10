@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单页应用**，不是组件库驱动的界面。`ui/index.html` 只放一个 `<openclaw-app>`，`main.ts` 仅加载全局样式并注册组件；根组件让 `createRenderRoot` 返回自身，把整棵界面渲染到文档 light DOM，因此 19 个参与加载的全局 CSS 文件可以按类名作用到所有视图。界面依赖只有 Lit 3.3、A2UI 的 Lit/核心包、`marked` 与 `dompurify`，没有 UI 组件库、路由库或状态管理库（`ui/package.json:13-20`）。
+OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单页应用**，界面由模板字符串和类名约定组装。`ui/index.html` 只放一个 openclaw-app 标签，`main.ts` 加载全局样式并注册组件；根组件让 `createRenderRoot` 返回自身，把整棵界面渲染到文档 light DOM，因此 19 个参与加载的全局 CSS 文件可以按类名作用到所有视图。界面依赖只有 Lit 3.3、A2UI 的 Lit/核心包、marked 与 dompurify，没有 UI 组件库、路由库或状态管理库（`ui/package.json:13-20`）。
 
 浮层、反馈与主题都由“根组件状态 + 渲染函数 + CSS 类”手工拼装。快照内有 28 个 `.modal-overlay` 根节点、一套右侧滑出面板样式（`.channel-panel-overlay`，模板与类名引用 18 处）、独立的执行审批/网关切换全屏层、文件预览层和会话溢出菜单。它们没有公共 Modal 组件，也没有 Portal Host，而是随所在视图渲染在 `.content` 或 `.shell` 内，再由样式强制改回固定定位；层级靠手写 z-index 阶梯维持。Esc 只在四个入口绑定，本次未找到焦点陷阱、焦点归还或滚动锁定。
 
@@ -38,12 +38,12 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **启动装配链。**
 
-1. `ui/index.html:10-12` 只有 `<openclaw-app>` 与模块入口，没有内联主题脚本或 splash。
-2. `ui/src/main.ts:1-2` 先导入 `styles.css`，再导入 `ui/app.ts` 完成自定义元素注册。
-3. 根组件的 `connectedCallback` 注册原生对话框代理、全局 Escape 监听和卸载保护，然后调用 `handleConnected`（`ui/src/ui/app.ts:783-790`）。
-4. `handleConnected` 依次推断 base path、应用 URL 参数、同步 tab、同步主题、挂系统主题监听、连接网关（`ui/src/ui/app-lifecycle.ts:45-52`）。
-5. `firstUpdated` 观察顶栏高度，并在 400 毫秒后尝试启动安装引导（`app-lifecycle.ts:69-79`）。
-6. `render()` 只转调 `renderApp`（`ui/src/ui/app.ts:1301-1303`）；总渲染函数按 tab 组装 `.shell` 栅格（`ui/src/ui/app-render.ts:638-656`）。
+1. 页面骨架由 `ui/index.html:10-12` 提供：一个 `<openclaw-app>` 标签加模块入口脚本，页面内没有内联的主题脚本或启动画面。
+2. 模块入口先载入全局样式表，再载入根组件模块，由后者完成自定义元素注册（`ui/src/main.ts:1-2`）。
+3. 根组件在 `connectedCallback` 中注册原生对话框代理、全局 Escape 监听和卸载保护，随后进入连接流程（`ui/src/ui/app.ts:783-790`）。
+4. 连接流程依次推断 base path、应用 URL 参数、同步当前 tab 与主题、挂上系统主题监听，最后连接网关（`ui/src/ui/app-lifecycle.ts:45-52`）。
+5. 首帧完成后观察顶栏高度，并在 400 毫秒后尝试拉起安装引导（`app-lifecycle.ts:69-79`）。
+6. 根组件的渲染方法只转调总渲染函数（`ui/src/ui/app.ts:1301-1303`），后者按当前 tab 组装 `.shell` 栅格（`ui/src/ui/app-render.ts:638-656`）。
 
 **状态所有权。** 根类持有 494 个 `@state` 字段，覆盖聊天、配置、渠道、模型、技能、蜂群、知识库、日志等全部页面（`ui/src/ui/app.ts:150-728`）。控制器目录下的 41 个文件（另有 3 个测试文件）提供 205 个导出入口，统一接收 host 并直接改字段。
 
@@ -51,25 +51,25 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **一次浮层的完整主链。** 以 API Key 表单弹窗为例：
 
-1. 入口按钮把 `apiKeysFormModalOpen` 置真（状态声明见 `app.ts:484`）。
-2. 总渲染在根级条件分支中调用 `renderApiKeysFormModal`（`app-render.ts:3879`）。
-3. 视图返回 `div.modal-overlay`，内容卡片停止冒泡，遮罩点击直接关闭（`ui/src/ui/views/api-keys.ts:312-343`）。
-4. 样式把该层设为固定定位、铺满视口、`z-index: 150`（`ui/src/styles/common.css:482-496`）；若它被渲染在 `.content` 或 `.shell` 内，另有规则用 `!important` 抵消父级定位与网格排布（`ui/src/styles/components.css:1257-1276`）。
+1. 入口按钮把表单开关状态置真，该状态在根组件中声明（`ui/src/ui/app.ts:484`）。
+2. 总渲染函数在根级条件分支里调用 API Key 表单的渲染函数，把视图插入模板（`ui/src/ui/app-render.ts:3879`）。
+3. 视图返回一层遮罩，内层卡片阻止点击冒泡，点遮罩即关闭（`ui/src/ui/views/api-keys.ts:312-343`）。
+4. 样式表把这层遮罩设为固定定位并铺满视口，层级取 150（`ui/src/styles/common.css:482-496`）；当它落在内容区或 shell 内时，另有规则用 `!important` 抵消父级定位与网格排布（`ui/src/styles/components.css:1257-1276`）。
 5. 关闭回调把状态置假，Lit 重新渲染后节点直接移除；没有退场动画、焦点归还或滚动锁定。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**根节点与 light DOM。** `createRenderRoot` 返回 `this`，根组件不使用 shadow root（`ui/src/ui/app.ts:779-781`）。另有 9 个组件做同样选择，包括聊天输入、聊天线程、建议提示、交付物附件、本地 Agent 选择器、吉祥物、思考计时器、Vault 编辑器与图谱视图；其余组件保持 Lit 默认的 shadow DOM。结果是一半组件共享全局 CSS 与 `:root[data-theme]` 选择器，另一半必须把样式写进各自的 `static styles`。`thinking-timer.ts:27` 的注释直接说明了这一动机：为了让组件继承全局 CSS。
+**根节点与 light DOM。** `createRenderRoot` 返回 `this`，根组件不使用 shadow root（`ui/src/ui/app.ts:779-781`）。另有 9 个组件做同样选择，集中在聊天输入、思考计时器、Vault 编辑器与图谱视图等场景；其余组件保持 Lit 默认的 shadow DOM。结果是一半组件共享全局 CSS 与 `:root[data-theme]` 选择器，另一半必须把样式写进各自的 static styles。`thinking-timer.ts:27` 的注释直接说明了动机：让组件继承全局 CSS。
 
 **公共组件面。** 实际存在的复用件集中在少数交互：
 
-- `resizable-divider` 提供拖拽分隔条与 `splitRatio` 事件（`ui/src/ui/components/resizable-divider.ts:8-96`），但模板中没有 `<resizable-divider>` 引用，属于本次未接入的组件。
-- `native-dialog-bridge` 把 `confirm` / `alert` / `prompt` 代理到应用内浮层，未注册时回退浏览器原生 API（`ui/src/ui/native-dialog-bridge.ts:1-40`）。
-- `openocta-mascot` 元素与 `styles/mascot.css` 都存在，但组件未出现在任何模板中，样式文件也不在导入链上，当前处于未接入状态。
-- `chat-file-preview`、`chat-local-image` 承担文件与图片查看（见第 6 节）。
-- `openocta-chat-input`、`openocta-chat-thread`、`openocta-chat-suggestions` 是聊天区的局部组件。
+- 分隔条组件 `resizable-divider` 实现了拖拽分隔与比例变化事件（`ui/src/ui/components/resizable-divider.ts:8-96`），模板里尚无该标签的引用，当前未接入。
+- 原生对话框桥 `native-dialog-bridge` 把确认、警告与输入三类原生弹窗代理到应用内浮层，桥未注册时回退浏览器 API（`ui/src/ui/native-dialog-bridge.ts:1-40`）。
+- 吉祥物元素 `openocta-mascot` 与配套样式表都已存在，元素未出现在任何模板中，样式表也不在导入链上，同样处于未接入状态。
+- 附件与图片查看由文件预览、本地图片两个组件承担，见第 6 节。
+- 聊天区的输入框、消息线程与建议提示各有一个局部组件，命名统一带 `openocta-` 前缀。
 
-没有 Button、Modal、Drawer、Toast、Tooltip 这类应用级原语；按钮、卡片、胶囊和弹窗都靠 `.btn`、`.card`、`.pill`、`.modal` 等类名约定复用，样式定义分散在 `common.css`、`components.css`、`tech-theme.css` 与各业务样式表中。
+没有 Button、Modal、Drawer 这类应用级原语，按钮、卡片、胶囊和弹窗都靠 `.btn`、`.card`、`.pill`、`.modal` 等类名约定复用，样式定义分散在 common.css、components.css、tech-theme.css 与各业务样式表中。
 
 **状态所有权。**
 
@@ -81,11 +81,11 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 | 窗口最大化、桌面模式 | 根组件字段 + `window.runtime` | 不持久化 |
 | 安装引导完成状态 | localStorage + `openocta.json` 的 `wizard.setup` | 双写，按版本比较 |
 
-**路由与多入口。** 没有路由库。`setTab` 更新字段后调用 `syncUrlWithTab`，用 `history.pushState` 写入路径（`ui/src/ui/app-settings.ts:461-495`）；启动与后退分别由 `syncTabWithLocation` 与 `popstate` 恢复（`app-lifecycle.ts:45-51`）。浏览器与桌面共用同一页面，仅靠 `_shell=d` 查询参数把桌面模式写入 sessionStorage，从而启用窗口按钮与外部链接处理（`ui/src/ui/open-external-url.ts:19-54`）。
+**路由与多入口。** 页面没有路由库：切换 tab 时先改根组件字段，再把当前路径写进浏览器地址栏（`ui/src/ui/app-settings.ts:461-495`）；启动和后退时按地址栏与 `popstate` 事件恢复选中项（`app-lifecycle.ts:45-51`）。浏览器与桌面共用同一份页面，桌面模式由 URL 中的 `_shell=d` 参数标记并存入 sessionStorage，据此启用窗口按钮与外部链接处理（`ui/src/ui/open-external-url.ts:19-54`）。
 
 ## 2. 弹窗、浮层与菜单
 
-**没有 Portal，浮层就地渲染。** 所有浮层都是视图模板的一部分，挂载点随调用位置变化：业务页弹窗通常落在 `.content` 内，根级审批与引导落在 `.shell` 内或 `.shell` 之后。`tech-theme.css:21-26` 的注释记录了这样做的代价：内容区子元素统一 `position: relative` 并获得入场动画，而 `translateY(0)` 也会成为固定定位的包含块，因此弹层必须显式排除；`components.css:1257-1276` 再用 `position: fixed !important` 与 `inset: 0 !important` 把落在内容区或 shell 里的弹层拉回视口。
+**浮层就地渲染。** 所有浮层都是所在视图模板的一部分，挂载点随调用位置变化：业务页弹窗通常落在内容区 `.content` 内，根级审批与引导落在栅格容器内或容器之后。`tech-theme.css:21-26` 的注释记录了这样做的代价：内容区子元素统一设为相对定位并获得入场动画，而位移变换即使取 0 也会让元素成为固定定位的包含块，因此弹层必须显式排除；`components.css:1257-1276` 再用带 `!important` 的固定定位与四边归零规则覆盖父级设置，把落在内容区或 shell 里的弹层拉回视口。
 
 **浮层家族。**
 
@@ -104,10 +104,10 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **关闭、Esc 与焦点。**
 
-- 遮罩关闭由每个视图自行实现：多数在根层绑定点击回调，内层卡片 `stopPropagation`；有的先判断 `e.target.classList.contains(...)` 以免误关（`ui/src/ui/views/app-update-modal.ts:34-40`、`channels.config.ts:272-276`）；原生 `alert` 点遮罩等同确认（`ui/src/ui/views/native-dialog-overlay.ts:29-38`）。
-- Escape 只有四个处理点：全局监听负责原生对话框与会话溢出菜单（`ui/src/ui/app.ts:754-769`）；会话重命名输入框取消编辑（`app-render.ts:1054-1062`）；聊天输入的 @ 提及浮层收起（`openocta-chat-input.ts:260-264`）；安装引导把 Esc 映射为“跳过当前步骤”（`views/setup-wizard.ts:1348-1353`）。28 个 `modal-overlay` 没有任何一个绑定 Esc。
-- 本次未找到焦点陷阱、`inert`、焦点归还或 `document.body` 滚动锁定（检索范围：`ui/src` 全量检索 `focusTrap`、`inert`、`body.style.overflow`、`.focus()`；只有聊天输入与 Vault 编辑器会主动聚焦文本框）。
-- 无障碍标注不完整：15 处 `aria-modal="true"`、18 处 `role="dialog"`，其余弹窗只有类名；遮罩内的关闭按钮多数有 `aria-label`，但列表项、菜单项之外的内容没有统一的可访问名称约定。
+- 遮罩关闭由每个视图自己实现：多数在遮罩根层绑定点击回调，内层卡片阻止事件冒泡；有的视图先判断点击目标是否带指定类名再决定关闭，避免误关（`ui/src/ui/views/app-update-modal.ts:34-40`、`channels.config.ts:272-276`）；原生提示弹窗点遮罩等同于确认（`ui/src/ui/views/native-dialog-overlay.ts:29-38`）。
+- Escape 只有四个处理点：全局监听负责关闭原生对话框与会话溢出菜单（`ui/src/ui/app.ts:754-769`）；会话重命名输入框用它取消编辑（`ui/src/ui/app-render.ts:1054-1062`）；聊天输入用它收起 @ 提及浮层（`views/openocta-chat-input.ts:260-264`）；安装引导把它映射为“跳过当前步骤”（见 7.3 节）。28 个居中弹窗的遮罩根节点没有一个绑定 Esc。
+- 本次未找到焦点陷阱、`inert` 属性、焦点归还或页面滚动锁定；检索范围是 `ui/src` 全量搜索 focusTrap、inert、body.style.overflow 与 focus 调用，命中的只有聊天输入与 Vault 编辑器主动聚焦文本框的实现。
+- 无障碍标注覆盖不完整：只有 15 处标了 `aria-modal="true"`、18 处标了 `role="dialog"`，其余弹窗仅靠类名识别；遮罩内的关闭按钮多数带 `aria-label`，列表项与菜单项之外的内容还没有统一的可访问名称约定。
 
 **会话溢出菜单。** 位置由触发按钮计算出的 `top` / `right` 写入状态，菜单固定定位并配一层独立遮罩；点击菜单项先关菜单再执行动作（`ui/src/ui/app-render.ts:248-342`）。它使用 `role="menu"` / `role="menuitem"`，但没有方向键导航或焦点移入，键盘路径只有 Esc 关闭。
 
@@ -115,7 +115,7 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 ## 3. 通知、加载态与错误反馈
 
-**没有全局反馈宿主。** 本次未找到 Toast Host、Snackbar、通知中心或消息队列（检索范围：`ui/src` 全量检索 `toast`、`Toast`、`notification`、`snackbar`；`new Notification` 与 `serviceWorker` 也无命中）。现有反馈按场景分散：
+**反馈宿主。** 本次未找到 Toast Host、Snackbar、通知中心或消息队列（检索范围：`ui/src` 全量检索 toast、notification、snackbar；`new Notification` 与 `serviceWorker` 也无命中）。现有反馈按场景分散：
 
 | 机制 | 触发 | 呈现与持续时间 |
 |---|---|---|
@@ -134,15 +134,15 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 ## 4. 主题、视觉 token 与持久化
 
-**token 权威源。** `ui/src/styles/base.css:1-78` 定义浅色 `:root`，`:80-124` 用 `:root[data-theme="dark"]` 覆盖为深色，并分别设置 `color-scheme`。变量覆盖背景、文本、边框、强调色、警告/危险/信息色、阴影、圆角、字体、缓动与时长，另有 `--text`、`--muted`、`--card-bg` 等语义别名供旧样式使用。
+**token 权威源。** 主题变量集中在 `ui/src/styles/base.css:1-124`：浅色定义在根选择器上，深色由 `:root[data-theme="dark"]` 覆盖同一批变量，两套分别设置 `color-scheme`。变量覆盖背景、文本、边框、强调色、警告、危险与信息色，以及阴影、圆角、字体、缓动和时长；另有一组语义别名（text、muted、card-bg）供旧样式使用。
 
 `tech-theme.css` 不重新定义这批变量，而是在其上做组件级外观覆盖，部分规则以深色为基底、用 `:root[data-theme="light"]` 反向修正（`tech-theme.css:755-771`）；因此组件最终样式需要按“base → tech-theme → 业务样式”的导入顺序叠加理解。
 
-**初始化。** 根组件字段初始化时直接调用 `loadSettings()`，默认主题为 light（`ui/src/ui/storage.ts:34-45`、`app.ts:195-196`）。连接后 `syncThemeWithSettings` 解析 `system` 并调用 `applyResolvedTheme`，把结果写到 `document.documentElement.dataset.theme` 与 `style.colorScheme`（`ui/src/ui/app-settings.ts:328-341`）。系统跟随通过 `matchMedia("(prefers-color-scheme: dark)")` 的 `change` 监听实现，只有当前模式为 `system` 时才重新应用（`app-settings.ts:343-362`）。
+**初始化。** 根组件在字段初始化阶段读取偏好设置，默认主题为 light（`ui/src/ui/storage.ts:34-45`、`app.ts:195-196`）。连接后主题同步逻辑解析 system 取值，把结果写入文档根元素的 data-theme 属性与 color-scheme 样式。系统跟随依赖深色媒体查询的变化事件，只有当前模式为 system 时才重新应用（`ui/src/ui/app-settings.ts:328-362`）。
 
 **切换与过渡。** 顶栏按钮按 light → dark → system 循环，并把指针坐标或按钮位置交给过渡函数（`app-render.ts:757-769`、`ui/src/ui/theme.ts:18-23`）。`startThemeTransition` 在支持 View Transition 且用户未要求减少动态效果时，把指针位置换算成百分比写入 `--theme-switch-x/y`，在回调里应用主题，结束后清理类名与变量；不支持或抛错时直接应用（`ui/src/ui/theme-transition.ts:46-108`）。
 
-**持久化与首屏。** 偏好写入 localStorage 的 `openclaw.control.settings.v1`，每次 `applySettings` 都同步保存（`ui/src/ui/storage.ts:1`、`:99-100`；`app-settings.ts:79-91`）。`index.html` 没有在模块加载前读取并写入 `data-theme` 的内联脚本，因此深色用户可能先看到浅色 token 再切换；这是由加载顺序推出的风险，未做首屏实测。也没有 `storage` 事件监听或跨窗口广播（检索范围：`ui/src` 全量），当前只有一个窗口，暂不构成功能缺口。
+**持久化与首屏。** 界面偏好写入 localStorage 键 `openclaw.control.settings.v1`，设置每次变更立即保存（`ui/src/ui/storage.ts:99-100`、`app-settings.ts:79-91`）。`index.html` 没有在模块加载前写入主题属性的内联脚本，深色用户可能先看到浅色界面再切换；这是从加载顺序推出的风险，未做首屏实测。代码里也没有 storage 事件监听或跨窗口广播，检索范围为 ui/src 全量；当前只有一个窗口，暂不构成功能缺口。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -164,7 +164,7 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **窗口与移动端。** Wails 窗口初始 1280×800，最小 800×600（`src/main.go:108-112`）。没有独立移动端路由、触摸手势或系统性的安全区处理，只有聊天输入区引用了一次 `env(safe-area-inset-bottom)`（`chat/layout.css:303`）。在浏览器中打开时窗口可以更窄，但布局只做隐藏与堆叠，不改变信息架构。
 
-**用户可控的布局状态。** 导航折叠写入 `navCollapsed` 并在启动时恢复。`splitRatio` 也进入设置与 props，但聊天视图只声明该属性，渲染时使用固定栅格 `clamp(340px, 30vw, 520px)`（`ui/src/styles/chat/sidebar.css:12-15`、`views/chat.ts:1004-1027`）；拖动组件 `resizable-divider` 没有出现在任何模板中，因此该偏好当前不影响布局。
+**用户可控的布局状态。** 导航折叠写入 `navCollapsed` 并在启动时恢复。`splitRatio` 也进入设置与 props，但聊天视图只声明该属性，渲染时使用固定栅格 clamp(340px, 30vw, 520px)（`ui/src/styles/chat/sidebar.css:12-15`、`views/chat.ts:1004-1027`）；拖动组件 `resizable-divider` 没有出现在任何模板中，因此该偏好当前不影响布局。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
@@ -176,7 +176,7 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **图片。** `chat-local-image` 通过网关的附件接口取得 URL，渲染为受限尺寸的 `<img>`，点击用 `window.open` 打开新窗口（`ui/src/ui/components/chat-local-image.ts:50-97`）。本次未找到灯箱、缩放、旋转或图片列表切换组件。
 
-**拖放。** 唯一实现拖放的入口是技能创建的 ZIP 上传区：`dragover` 阻止默认行为，`drop` 只接受 `.zip`，点击则动态创建 file input（`ui/src/ui/views/skill-create-modals.ts:94-128`）。聊天区、知识库和附件条都没有拖放监听（检索范围：`ui/src` 全量 `dragenter`、`dragover`、`dragleave`、`drop`、`dataTransfer`）。
+**拖放。** 全站只有技能创建的 ZIP 上传区实现了拖放：拖动经过时阻止默认行为，松开时只接受 zip 后缀，点击则动态创建文件选择框（`ui/src/ui/views/skill-create-modals.ts:94-128`）。聊天区、知识库和附件条都没有绑定拖放事件；检索范围是 `ui/src` 全量的 dragenter、dragover、dragleave、drop 与 dataTransfer。
 
 **剪贴板。** 只有写入：复制会话链接、复制更新提示、复制 API Key、复制消息为 Markdown 等，均调用 `navigator.clipboard.writeText`；失败时用 `nativePrompt` 让用户手动复制（例如 `app-render.ts:304-310`）。没有读取剪贴板图片或文本的入口。
 
@@ -188,9 +188,9 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 **单窗口壳。** Wails 只创建一个窗口，启动本地网关并等待健康检查，然后把内置启动页交给 WebView；启动页用 `fetch` 轮询 `http://127.0.0.1:18900?_shell=d`，最多 120 次、每次 500 毫秒，超时后显示手动链接（`src/main.go:63-123`、`src/wails-bootstrap/index.html:26-48`）。业务界面本身由网关托管的 Web 页面提供，所以窗口能力只通过 `window.runtime` 暴露的最小 API 使用。
 
-**窗口控制。** 根组件在桌面模式下读取 `runtime.Environment()` 判断平台，只有 Windows 才启用自定义最小化/最大化/关闭按钮，并对 `resize` 做 120 毫秒防抖后查询最大化状态（`ui/src/ui/app.ts:1169-1292`）。Windows 构建同时把 `Frameless` 设为 `false`，注释说明要保留系统原生标题栏（`src/main.go:114-122`），但界面仍会在 `isWindowsDesktop` 时渲染一套窗口按钮（`app-render.ts:842-876`）。两套控制是否同时可见、是否重叠，需要实际运行确认。
+**窗口控制。** 桌面模式下根组件读取运行环境判断平台，仅 Windows 启用自定义的最小化、最大化与关闭按钮，并在窗口尺寸变化 120 毫秒后才查询最大化状态（`ui/src/ui/app.ts:1169-1292`）。Windows 构建同时关闭无边框模式，注释说明要保留系统原生标题栏（`src/main.go:114-122`），而界面在 Windows 下仍会渲染一套窗口按钮（`app-render.ts:842-876`）。两套控制是否同时可见、是否重叠，需要实际运行确认。
 
-**系统集成缺口。** 本次未找到托盘、系统通知、全局快捷键、文件关联或多窗口 API（检索范围：`src` 全量 `Tray`、`Notification`、`NewWebviewWindow`；`ui/src` 全量 `new Notification`）。应用更新提示走页面内弹窗与顶栏链接，不依赖系统通知。
+**系统集成缺口。** 本次未找到托盘、系统通知、全局快捷键、文件关联或多窗口 API（检索范围：`src` 全量 Tray、Notification、NewWebviewWindow；`ui/src` 全量 new Notification）。应用更新提示走页面内弹窗与顶栏链接，不依赖系统通知。
 
 **打包与运行形态。**
 
@@ -204,15 +204,15 @@ OpenOcta 的控制台是**以单个 Lit 自定义元素为根的 light DOM 单�
 
 ### 7.2 国际化
 
-`ui/src/ui/strings.ts:1-17` 定义最小 i18n：locale 从 `document.documentElement.lang` 读取，只有 `zh` 与 `en` 两套字典，`t()` 在调用时同步查表（`strings.ts:3025-3029`）。`index.html:2` 固定 `lang="zh"`，本次未找到语言切换入口或对 `documentElement.lang` 的写入（检索范围：`ui/src` 全量 `documentElement.lang`、`setAttribute("lang")`）。配置字段的标签与帮助文本另有中英双份映射（`ui/src/ui/config-field-labels.ts:538-543`、`config-field-help.ts:594-599`）。
+`ui/src/ui/strings.ts:1-17` 定义了一套最小国际化方案：语言取自文档根元素的 lang 属性，字典只有中文和英文两份，取词函数在调用时同步查表（同文件 `:3025-3029`）。`index.html:2` 把 lang 固定为 zh，本次未找到语言切换入口，也没有代码改写该属性；检索范围是 ui/src 全量搜索 documentElement.lang 与 lang 属性写入。配置字段的标签与帮助文本另有中英双份映射（`ui/src/ui/config-field-labels.ts:538-543`、`config-field-help.ts:594-599`）。
 
 界面文案是混合状态：导航标题、主题切换等使用 `t()`，顶部标签、审批横幅、部分弹窗标题与说明直接写中文（例如 `app-render.ts:700-710`、`:663-667`）。因此切换到英文需要同时改 HTML 语言与替换硬编码文案，当前没有完整路径。
 
 ### 7.3 首次启动与设置框架
 
-**版本门控。** 安装引导是否显示由 `shouldShowSetupWizard(version, config)` 决定：配置中的 `wizard.setup` 状态为 completed/skipped 且版本相同则跳过；版本不同、状态未完成、配置已加载但缺少该字段时重新显示；配置尚未加载时退回 localStorage 中的版本记录（`ui/src/ui/setup-wizard.ts:195-242`）。完成后把版本写入 localStorage，并同步到 `openocta.json`；跳过时先写一个“待同步”标记，避免配置尚未落盘时重复弹出（`setup-wizard.ts:274-318`）。首帧后延迟 400 毫秒启动，给配置加载留出时间（`app-lifecycle.ts:69-79`）。
+**版本门控。** 安装引导是否显示由版本判断函数决定，输入是当前版本与已加载的配置（`ui/src/ui/setup-wizard.ts:195-242`）。配置记录着引导状态与版本号：状态为 completed 或 skipped 且版本一致时跳过；版本变化、状态未完成、配置已加载但缺少该字段时重新显示；配置还没加载完时退回 localStorage 里的版本记录。完成引导会把版本写入 localStorage 并同步到 `openocta.json`，跳过时先写一个“待同步”标记，防止配置尚未落盘时重复弹出（`setup-wizard.ts:274-318`）。引导在首帧后延迟 400 毫秒启动，给配置加载留出时间（`app-lifecycle.ts:69-79`）。
 
-**引导界面。** 主层是固定全屏的 `.setup-wizard`，`z-index: 300`，内部再叠 310/320 两级（`ui/src/styles/setup-wizard.css:9-28`）。它用 `role="dialog"` 与 `aria-modal`，点击背景关闭场景菜单，Esc 执行“跳过当前步骤”（`views/setup-wizard.ts:1341-1355`）。欢迎页是同一体系的独立全屏层（`setup-wizard.ts:1286-1311`）。
+**引导界面。** 主层是固定全屏的引导浮层，层级 300，内部再叠 310 与 320 两级（`ui/src/styles/setup-wizard.css:9-28`）。这层声明了对话框角色与模态属性，点击背景关闭场景菜单，Esc 执行“跳过当前步骤”（`views/setup-wizard.ts:1341-1355`）。欢迎页是同一体系里的另一个独立全屏层（`setup-wizard.ts:1286-1311`）。
 
 **设置框架。** 配置页以“表单 / 原始 JSON”双模式编辑，状态包括搜索词、当前分区、脏标记与 schema 版本（`app.ts:268-288`）。保存走网关配置接口，成功后以服务端配置为准；与 localStorage 中的界面偏好分属两套持久化。
 

@@ -22,7 +22,7 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 ## 系统边界与总体装配
 
-**入口。** `index.html` 只挂 `#app` 容器和 `#preloading` 静态加载层（index.html:19-37），`src/main.ts` 挂载 App 后移除预加载层，并行执行 `loadData()`（bootstrap）与 `initHotkey()`（main.ts:16-21）。
+**入口。** 页面从 index.html 起步，该文件只放一个应用挂载点和一层静态预加载层；src/main.ts 把 App 挂载完成后移除预加载层，同时并行启动数据加载（bootstrap）与全局快捷键初始化（index.html:19-37、src/main.ts:16-21）。
 
 **根装配。** `src/App.svelte` 是唯一根组件：先按优先级条件渲染整屏模式——法律声明页（构建期变量或 `globalThis.__RISU_LEGAL_CONFIGURED__` 任一存在即跳过）、愚人节彩蛋、加载中（`loadedStore` 为假）、自定义 GUI 编辑、首次设置欢迎页、设置页、移动端骨架，最后是桌面布局（侧栏 + ChatScreen，或角色网格）；随后在 `<main>` 尾部统一渲染各浮层宿主。全部模式切换都是 Svelte 条件块，没有路由表。
 
@@ -40,7 +40,7 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 **公共组件。** `src/lib/UI/GUI/` 提供输入类基础件（Button、TextInput、SelectInput、SliderInput 等十余个），是设置页与表单的主要积木；业务组件大多直接消费它们，没有更高层的"设计系统"封装层。
 
-**状态所有权。** 整个应用数据是 `DBState` 这一个 `$state` 代理对象（结构定义在 database.svelte），界面偏好、主题、角色与聊天全在其中；瞬时 UI 状态由 `stores.svelte.ts` 的 writable store 与 `$state` 对象承担（如 `settingsOpen`、`alertStore` 等），不落在主进程或服务端。
+**状态所有权。** 应用的全部业务数据集中在一个 DBState 状态代理对象上，其结构定义在 database.svelte，界面偏好、主题、角色与聊天数据都挂在这一个对象里；瞬时 UI 状态另由 stores.svelte.ts 中的 writable store 与状态对象分担，例如设置页开关与全局弹窗状态，两类状态都只存在于渲染进程内。
 
 **持久化。** 存档写入由 `saveDb` 完成：`$effect.root` 内对各字段做 `$state.snapshot` 跟踪，任一变化延迟 500ms 后落盘（globalApi.svelte.ts:330-389 起），Tauri 下走文件系统、Web 下走 localforage，最终编码为加密存档文件。
 
@@ -48,7 +48,7 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 **命令式模态：alertStore 单一模态。** `src/ts/alert.ts` 用约二十种 type 区分场景（error、normal、toast、progress 等），全部写入同一个 writable store；AlertComp 按 type 渲染成模态框、toast 或全屏 iframe（login）。调用方式是"设值 + 轮询等待"：`waitAlert()` 每 10ms 检查 type 是否为 none 再继续（alert.ts:76-83）。因此同一时刻只有一个模态框，不可堆叠，后到者覆盖先到者。
 
-**模态框行为。** AlertComp 主模态（AlertComp.svelte:189-191）外层遮罩没有点击关闭，只能通过按钮或全局按键关闭；`hotkey.ts:241-258` 里 Esc 把 type 置为 none 并弹一条 "Alert Closed" toast，Enter 对 ask/normal/error 直接按 yes 关闭。错误类型有专门的详情区：可展开的堆栈跟踪、复制按钮，以及基于 sourcemap 的堆栈翻译（AlertComp.svelte:259-287）。`cardexport` 类型是唯一带"点遮罩关闭"的主模态变体（AlertComp.svelte:726-729）。
+**模态框行为。** 主模态弹出后只能由按钮或全局按键关闭，外层遮罩不响应点击：Esc 会清空当前模态类型并补一条 "Alert Closed" 提示，Enter 在询问、普通、错误三类场景下等同确认。错误类型额外提供详情区，包含可展开的堆栈跟踪、复制按钮，以及借助 sourcemap 还原的堆栈翻译；cardexport 是唯一允许点击遮罩退出的主模态变体（AlertComp.svelte:189-191、259-287、726-729；hotkey.ts:241-258）。
 
 **业务模态：各自手写。** 十余个业务模态组件（如 BookmarkList、LoadoutModal、PopupEditor、EasyPanel）共用同一种手写模式："`fixed inset-0` 半透明遮罩 + 内容层 + 点击内容 stopPropagation"，遮罩普遍带 `role="button" tabindex="0"` 和点击关闭。层级只有零散的 z-30/z-40/z-50 约定，没有统一层级注册表，同层浮层靠挂载顺序决定上下。
 
@@ -64,7 +64,7 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 **加载与进度。** 首屏是 index.html 静态预加载层，挂载完成后由 main.ts 直接移除；随后加载中状态由 `loadedStore` 与 `LoadingStatusState.text` 驱动，bootstrap 在各个阶段更新文案（检查文件、读存档、解码、加载插件等，bootstrap.ts:55-268）。
 
-阻塞型等待用 `wait`/`wait2` 类型模态（wait2 额外加 `.vis` 强制不透明），百分比进度用 `progress` 类型进度条（AlertComp.svelte:190、289-296）；存档保存中显示 `SavePopupIconComp` 动画图标，其状态来自全局 `saving` 字段（SavePopupIcon.svelte:10-15）。
+阻塞型等待由 wait 与 wait2 两种模态承担，后者额外加 vis 类强制不透明；带百分比的进度走 progress 类型进度条。存档保存期间另有一个动画图标常驻显示，其状态取自全局 saving 字段（AlertComp.svelte:190、289-296；SavePopupIcon.svelte:10-15）。
 
 **错误边界。** bootstrap 的 `updateErrorHandling()` 给 window 挂 error 与 unhandledrejection 监听，把异常统一转成 alertError 模态（Worker 内错误被排除），这是应用级渲染崩溃兜底（bootstrap.ts:289-302）。alertError 对 "Failed to fetch" 类网络错误会附加按平台区分的提示文案并保留堆栈（alert.ts:31-74）。Vite 分包加载失败另有 `vite:preloadError` 的浏览器 alert 兜底（main.ts:10-13）。
 
@@ -72,7 +72,16 @@ Risuai 是 Svelte 5 + Tailwind CSS 4 的单页应用，没有路由，根组件�
 
 **权威源。** 主题相关状态全部在数据库对象上：配色与自定义配色、自定义 CSS、文字主题、字体，以及布局主题 `theme`、动画速度 `animationSpeed`、高度模式 `heightMode`。它们随存档持久化，没有 localStorage 参与；bootstrap 加载完存档后统一调用 `updateColorScheme()` 与 `updateTextThemeAndCSS()` 应用（bootstrap.ts:231-233）。
 
-**配色机制。** `src/ts/gui/colorscheme.ts` 内置 17 套预设（default 即 Dracula、dark、light、cherry、galaxy、nature、ocean、aurora、twilight、realblack、monokai 两套、四套浅色和 lite）。`updateColorScheme()` 把 9 个颜色逐项写到根元素的 `--risu-theme-*` 变量（colorscheme.ts:260-286），styles.css 的 :root 静态默认值就是 Dracula 配色，Tailwind 的 `@theme` 再把 `bg-bgcolor` 等工具类映射到这些变量（styles.css:5-15）——整套主题是运行时改写 CSS 变量，不换 CSS 文件。`ColorSchemeTypeStore` 同步暗/亮标记，prose-invert 等样式读它。
+**配色机制。** 预设配色集中定义在 src/ts/gui/colorscheme.ts，共 17 套，名称清单如下：
+
+- default，即 Dracula
+- dark、light
+- cherry、galaxy、nature、ocean、aurora、twilight、realblack
+- monokai 两套
+- 四套浅色方案
+- lite
+
+用户选定配色后，updateColorScheme() 把 9 个颜色逐项写入根元素的 --risu-theme-* 变量；styles.css 的 :root 静态默认值本身就是 Dracula，Tailwind 的 @theme 再把 bg-bgcolor 一类工具类映射到同一批变量上，因此换主题只改运行时 CSS 变量的取值，样式文件保持加载状态（colorscheme.ts:260-286；styles.css:5-15）。ColorSchemeTypeStore 同步暗/亮标记，prose-invert 等样式直接读它。
 
 **文字主题与字体。** 由 `updateTextThemeAndCSS()` 应用：standard/highcontrast/custom 三档写 `--FontColor*` 系列变量，字体写 `--risu-font-family`（默认 Arial），`* { font-family: var(--risu-font-family) }` 全局生效（styles.css:346-348、colorscheme.ts:335-413）。
 
@@ -105,7 +114,7 @@ Tauri 单窗口最小 300×500，`dragDropEnabled: false` 关掉原生文件拖�
 
 ## 6. 图片、附件、拖放与常见内容交互
 
-**图片没有灯箱。** 消息内图片由解析器按资产占位符渲染成内联 `<img>`（parser.svelte.ts:479-576），聊天正文整体在 `clickToEdit` 开启时点击进入编辑（Chat.svelte:428-432）；没有找到点击放大、全屏查看或预览器组件。资产图加载后追加 `root-loaded-image` 类控制居中与尺寸（ChatBody.svelte:173-243）。附件输入（inlay）在输入区直接预览 image/video/audio（DefaultChatScreen.svelte:732-749）。
+**图片查看方式。** 消息里的图片由解析器按资产占位符渲染成内联 img 元素，正文整体在开启 clickToEdit 后点击即进入编辑；本次未找到点击放大、全屏查看或独立预览器组件。资产图加载完成后由追加的 root-loaded-image 类控制居中与尺寸（parser.svelte.ts:479-576、ChatBody.svelte:173-243；Chat.svelte:428-432）。附件输入在输入区直接预览 image、video、audio 三类内容（DefaultChatScreen.svelte:732-749）。
 
 **文件拖入只有一条公共通道。** App.svelte 的 `<main>` 在 dragover 时按 dataTransfer 类型决定 dropEffect，在 drop 时按扩展名分流：.risup 导入预设、.risum 导入模块、其余走角色卡导入；内部拖拽类型（`application/x-risu-app-internal-drag`、`application/x-risu-sidebar-drag`）在根节点被直接拦截，不会误走文件导入（App.svelte:49-101、73-77）。
 
@@ -113,7 +122,7 @@ Tauri 单窗口最小 300×500，`dragDropEnabled: false` 关掉原生文件拖�
 
 **列表排序。** SortableJS 在聊天列表、Lorebook、正则、触发器 v1、人设列表等处各自初始化，但共享 `sortableOptions`：触摸端延迟 300ms、`.no-sort` 过滤（util.ts:1091-1098）。触屏设备或 iOS 上不支持原生 draggable 时，用 mobile-drag-drop 补丁（polyfill.ts:23-39），滚动行为按库的 scroll-behaviour 覆盖。
 
-**剪贴板。** 没有公共剪贴板服务，各组件直接调 `navigator.clipboard.writeText`；AlertComp 的复制按钮带 execCommand 兜底（AlertComp.svelte:94-110），代码块右键菜单提供 Copy/Download（observer.svelte.ts:10-53），消息复制会先解析成富文本再写剪贴板（Chat.svelte:511-539）。PDF 预览通过动态导入 pdfjs 在业务层实现（process/dynamicutils/pdf.ts:25-38）。
+**剪贴板。** 复制动作由各组件自行调用浏览器的 navigator.clipboard.writeText 完成，项目里没有统一的剪贴板服务：AlertComp 的复制按钮带 execCommand 兜底，消息复制会先把内容解析成富文本再写入剪贴板，代码块右键菜单提供 Copy 与 Download 两项（AlertComp.svelte:94-110、observer.svelte.ts:10-53；Chat.svelte:511-539）。PDF 预览通过动态导入 pdfjs 在业务层实现（process/dynamicutils/pdf.ts:25-38）。
 
 ## 7. 扩展调查
 

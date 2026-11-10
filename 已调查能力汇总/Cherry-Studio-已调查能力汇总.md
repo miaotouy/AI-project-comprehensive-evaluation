@@ -38,7 +38,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 ### 角色与上下文
 
-- **Assistant 助手配置体系**：角色核心对象是 Assistant，一套"模型 + 提示词 + 推理参数 + 工具源（`mcpServerIds`/`knowledgeBaseIds`/`modelId`/`groupId`）"的稳定配置；`AssistantSettings` 用 `enable*` 标志区分"存了但不用"与"发送给 API"，并支持 `customParameters` 透传 provider 专有参数。会话只存 `assistantId` 引用，每次请求按 id 重读助手（运行时引用语义），消息侧只冻结 `messageSnapshot` 快照；内置仅一个空提示词 Cherry 助手，另有资源目录市场模板与内置 cherry-assistant Agent 两套体系。证据状态：静态源码核对。[Agent 角色配置调查笔记](../Agent角色/Cherry-Studio-Agent角色配置调查笔记.md)
+- **Assistant 助手配置体系**：角色以 Assistant 对象为核心，把模型、提示词、推理参数与工具源（模型、MCP 服务器、知识库、分组四类 id）收成一份稳定配置；助手设置对象用一组 enable 开关区分只在本地保存的配置与真正发送给 API 的部分，provider 专有参数经 `customParameters` 原样透传。会话只存 `assistantId` 引用，每次请求按 id 重读助手，消息侧冻结 `messageSnapshot` 快照。内置只有一个空提示词的 Cherry 助手，另有资源目录市场模板与内置 cherry-assistant Agent 两套体系。证据状态：静态源码核对。[Agent 角色配置调查笔记](../Agent角色/Cherry-Studio-Agent角色配置调查笔记.md)
 
 - **系统提示词装配与上下文来源注入**：`assembleSystemPrompt` 依次做变量替换、追加延迟工具命名空间目录与引用格式契约段；四类输入组织方式不统一——文件/知识库以消息 parts 表达（知识库范围是 `data-knowledge-scope` part、清理边界是 `data-clear` part）、联网搜索是 assistant 设置布尔开关、推理强度是独立请求字段、工具是否携带由主进程按模型能力判定。证据状态：主链确认（静态源码）。[Agent 角色配置调查笔记](../Agent角色/Cherry-Studio-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 9 节
 
@@ -62,13 +62,13 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **会话自动命名（两阶段）**：第一条用户消息落库后先用原文截断出临时标题，首轮回复完成后用 AI 生成摘要标题替换；`isNameManuallyEdited` 手动改名后永久停止自动命名；标题生成请求刻意不携带 `assistantId`，避免把助手工具配置挂到标题请求上。证据状态：主链确认（静态源码）。[会话与消息管理调查笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md) 第 3.2 节
 
-- **停止、重试、续写、重新生成与编辑**：停止经 IPC `ai.stream.abort` → `AbortController` → AI SDK 请求 signal（网络层已接线）；`trigger='continue-conversation'` 复用原 assistant 行续流，审批决定写回 parts 后恢复；regenerate 继承源回复模型与 turnOptions，live 期间被拒；编辑用户消息可"仅保存"（PATCH parts）或 `forkAndResend` 建兄弟行重发；半截流以 `paused` 持久化、工具审批等待中的打断终态化为 `output-error`。证据状态：主链确认（静态源码）；取消效果属运行验证项，见末尾小节。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 6、7 节
+- **停止、重试、续写、重新生成与编辑**：停止经 IPC 命令 `ai.stream.abort` 到达主进程，再由 AbortController 通过请求 signal 中断对应 AI SDK 请求，网络层已接线。续写以 continue-conversation 触发，复用原 assistant 行继续流式输出，工具审批决定写回消息 parts 后恢复执行；重新生成继承源回复的模型与生成参数，回复进行中发起会被拒绝。编辑用户消息可以只保存内容，也可以按分支重发建立兄弟行。半截流以 `paused` 持久化，停在工具审批等待中的打断终态化为 `output-error`。证据状态：主链确认（静态源码）；取消效果属运行验证项，见末尾小节。[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 6、7 节
 
 - **数据备份、恢复与崩溃收口**：启动时 boot reconcile 把遗留 `pending` assistant 行翻为 `error`，避免 UI 永久"思考中"；备份恢复期间用 `pause`/`drainInFlight` 写安静期门禁新 turn 并等待在途持久化落盘；备份引擎 v7 full/slim 布局都包含 `cherrystudio.sqlite`（含凭据），恢复经 checkpoint + 崩溃安全 promotion 原子替换。证据状态：主链确认（静态源码）；恢复端到端行为见末尾小节。[会话与消息管理调查笔记](../会话与消息管理/Cherry-Studio-会话与消息管理调查笔记.md) 第 3.5 节、[对话请求与上下文调查笔记](../对话请求与上下文/Cherry-Studio-对话请求与上下文调查笔记.md) 第 10 节、[LLM 渠道管理调查笔记](../LLM渠道管理/Cherry-Studio-LLM渠道管理调查笔记.md) 第 3.4 节
 
 ### 生成与创作
 
-- **媒体创作绘画工作台**：用户主导、模型能力目录驱动的图像生成工作站（能力分型 M1 主 + M3 资产生命周期 + M5 Agent 驱动创作边界）。每次生成写 `painting` 收据行（冻结 provider/model/prompt）+ `painting_file_ref` + v2 `file_entry`，可变参数只活在渲染内存草稿；执行全在 main（同步 AI SDK 与异步 submit/poll job 双路径，job 非重启持久、崩溃即弃）；`generate_image` 工具走同一核心但 `cleanupPolicy: 'manual'`、不写 painting 行。本地 ComfyUI 服务器作为一等图像供应商接入（AI SDK Provider V3、`comfyui` 适配器族、默认 `http://localhost:8188`），transport 内部提交并轮询，模型来自用户服务器上的工作流。聊天→绘画有导航入口。证据状态：主链确认（静态走通）；真实模型与 job 运行项见末尾小节。[媒体创作调查笔记](../媒体创作/Cherry-Studio-媒体创作调查笔记.md)
+- **媒体创作绘画工作台**：用户主导、由模型能力目录驱动的图像生成工作站，能力分型覆盖图像生成主链路、资产生命周期与 Agent 驱动的创作边界三层。每次生成写一行 `painting` 收据（冻结 provider、模型与提示词），同时记一条文件引用和一条 v2 文件条目，可变参数只活在渲染内存草稿里；执行全部落在主进程，同步调 AI SDK 与异步提交轮询两条路径并存，其中 job 不跨重启持久、崩溃即弃。模型侧的 `generate_image` 工具复用同一核心，但采用手动清理策略且不写 painting 收据行。本地 ComfyUI 服务器作为一等图像供应商接入，走 AI SDK Provider V3 与 comfyui 适配器族，默认地址是 http://localhost:8188，由 transport 内部提交并轮询，模型来自用户服务器上的工作流。聊天页有进入绘画的导航入口。证据状态：主链确认（静态走通）；真实模型与 job 运行项见末尾小节。[媒体创作调查笔记](../媒体创作/Cherry-Studio-媒体创作调查笔记.md)
 
 - **聊天内 HTML Artifact**：模型以 Markdown 文本或裸 HTML 输出，前端内容探测分类 document/fragment——片段恒进无脚本 iframe（严格 CSP），完整文档经用户同意后进入独立沙箱 webview（主进程强制沙箱/上下文隔离、DNS 级 SSRF 防护、无 IPC 桥）；对象可整段重写保存回消息正文，可下载/外部打开/PNG 截图。无独立 part 类型与对象 ID（身份为按 Markdown 位置派生的临时 ID），回流靠"会话历史重入"。证据状态：主链确认（静态走通），能力等级 G3。[生成式输出与运行时调查笔记](../生成式输出与运行时/Cherry-Studio-生成式输出与运行时调查笔记.md)
 
@@ -80,7 +80,7 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 
 - **Agent Session（三运行时会话执行体）**：`AgentSessionRuntimeService` 把 Agent runtime 作为独立会话执行者接入，覆盖工作区、独立消息持久化后端（`AgentSessionMessageBackend`）、流事件、工具审批与取消。claude-code 驱动以 cwd=workspace 调 SDK `query()`，原生工具（Bash/Read/Write/...）由 SDK 子进程执行，Cherry 通过禁用名单、使用权限判定与 PreToolUse hook 三层控制；pi 与 pi-durable 驱动把工具循环交给原生实现，Cherry 通过 behavior 端口提供审批、提问、模型选择与摘要，不持有执行本身。证据状态：主链确认（静态证据）；各 runtime 级运行行为见末尾小节。[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Cherry-Studio-外部执行体与应用协作调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
-- **Agent 工具体系（三条路径）**：普通聊天 MCP 路径（`McpRuntimeService` 管理用户配置的 stdio/SSE/Streamable HTTP/OAuth/in-memory server，工具经 `syncMcpToolsToRegistry` 注册进 AI SDK 工具表，按 `scope.mcpToolIds` 过滤）与 Claude Code Agent 路径（声明式 `toolRegistry.ts` 定义每个 SDK 原生工具与进程内 MCP 工具的 `exposure`：user/internal/disabled）各自独立，共享 MCP 运行时与审批 UI。Pi 路径不复用该注册表：驱动只提供工具清单，Pi 自带 `tool_search`/`tool_call`/`codemode`/`vcc_recall` 元工具在原生侧完成工具发现与批量编排，MCP 工具经 linked transport 接入并共用审批闸门；MCP 客户端已迁到 2.x SDK 并支持 server 侧交互请求。进程内 MCP（cherry-tools/agent-memory/assistant/skills）在主进程直接函数调用；执行域全部落在 Electron 主进程，Bash 等原生工具无通用命令沙箱；工具 id 双轨制（legacy 名称型 + AI SDK catalog 哈希型）消除碰撞面。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
+- **Agent 工具体系（三条路径）**：普通聊天走 MCP 路径，由 McpRuntimeService 管理用户配置的本地进程、SSE、Streamable HTTP 等 MCP 服务器（含 OAuth 与 in-memory 模式），工具注册进 AI SDK 工具表后按会话允许的工具 id 过滤；Claude Code Agent 走声明式注册表 toolRegistry.ts，为每个 SDK 原生工具与进程内 MCP 工具标注用户可见、内部可用、禁用三级暴露面。两条路径各自独立，共享 MCP 运行时与审批界面。Pi 路径不复用这份注册表：驱动只提供工具清单，工具发现与批量编排由 Pi 自带的 tool_search、tool_call 等元工具在原生侧完成，MCP 工具经 linked transport 接入并共用审批闸门；MCP 客户端已迁到 2.x SDK，支持 server 侧交互请求。进程内的 cherry-tools、agent-memory 等 MCP 服务在主进程直接函数调用；执行域全部落在 Electron 主进程，Bash 等原生工具没有通用命令沙箱；工具 id 走 legacy 名称与 AI SDK catalog 哈希双轨，消除命名碰撞。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md)
 
 - **工具审批与安全边界**：普通聊天决定持久化到消息 parts；Agent 注册表控制原生授权，后台交互卡片可另持久化为独立 assistant 行，先校验锚点并保存决定再解除等待。Claude 的首词 acceptEdits 快路径仍保留，但禁用、用户数据 SQLite 写入、全局安装与停滞等前置拒绝规则继续生效。跨运行时 required 策略覆盖 Skill/MCP 安装等工具，Pi auto 也需审批，Full Access 仅能豁免明确允许的规则；无人应答回合拒绝必需交互与再次委派。结构化文件越界触发 ask，Bash 文本路径没有通用校验，均不构成 OS 沙箱。证据状态：代码已确认（静态源码）。[Agent 工具调查笔记](../Agent工具/Cherry-Studio-Agent工具调查笔记.md) 第 7、11～13 节
 
@@ -126,7 +126,12 @@ Cherry Studio 是 Electron 桌面聊天客户端（React + Tailwind 渲染层、
 - **Markdown Notes 工作区**：笔记是独立资产（SQLite 行 + 文件目录），编辑器支持 Markdown、引用到会话的 note reference 与写入知识库的快照；笔记可以被理解为"可被 Agent 与知识库共同消费的第二类文档"，与 Topic 消息不同源。证据状态：主链确认（静态证据）；富文本编辑体验未运行验证。[独特功能调查笔记](../独特功能/Cherry-Studio-独特功能调查笔记.md) 能力卡 7、[检索增强与认知编排调查笔记](../检索增强与认知编排/Cherry-Studio-检索增强与认知编排调查笔记.md)
 ## 工程与基础设施摘要
 
-- **仓库分布**：Electron 主应用与内部共享包合仓的 TypeScript monorepo。当前快照有 12625 个 Git 跟踪文件、9800 个可识别源码文件和 1745263 行源码；`src/main` 685843 行、`src/renderer` 684024 行、`packages/ui` 89127 行，另有 `packages/file-preview` 20228 行、`packages/agent-runtime-pi` 22234 行等新抽取包；测试文件 3443 个。桌面端覆盖 Windows、macOS、Linux，无本仓独立移动端入口。证据状态：Git 跟踪文件机械统计 + workspace/构建配置复核。[仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)
+- **仓库分布**：Electron 主应用与内部共享包合仓的 TypeScript monorepo。当前快照有 12625 个 Git 跟踪文件，其中可识别源码文件 9800 个、合计 1745263 行，测试文件 3443 个；桌面端覆盖 Windows、macOS、Linux，本仓没有独立移动端入口。证据状态：Git 跟踪文件机械统计 + workspace/构建配置复核，见 [仓库分布调查笔记](../仓库分布/Cherry-Studio-仓库分布调查笔记.md)。源码行数按分区拆开如下，其中文件预览与 Pi Agent 运行时两个包是新抽取的独立包：
+  - 主进程 `src/main`：685843 行
+  - 渲染进程 `src/renderer`：684024 行
+  - UI 包 `packages/ui`：89127 行
+  - 文件预览包 `packages/file-preview`：20228 行
+  - Pi Agent 运行时包 `packages/agent-runtime-pi`：22234 行
 
 - **应用界面基础设施**：界面栈为 React + Tailwind（+ tw-animate-css），内部 UI 包 `@cherrystudio/ui` 基于 Radix 生态（无 antd/framer-motion/sonner）。弹窗主路径迁到 UI 包（Radix Dialog 封装 + 模块级 popup store + 每窗口 PopupHost，命令式调用，single-flight）；Toast 是自研单例 store（loading→success/error promise 桥接，按严重程度区分 aria 语义）；主题权威在主进程 ThemeService，视觉 token 分层契约（foundation → runtime input → 官方 Shadcn 语义 → 产品语义 → Tailwind 生成层），用户可设明暗/单主色/字体/自定义 CSS，无主题市场/壁纸/主题文件导入导出；右键菜单可在自绘与系统原生双模式间切换；错误边界分窗口/路由/消息块三层（react-error-boundary），另有崩溃遥测与 render-process-gone 自动 reload。证据状态：静态源码核对（键盘与多窗口表现需运行验证，见末尾小节）。[应用界面基础设施调查笔记](../应用界面基础设施/Cherry-Studio-应用界面基础设施调查笔记.md)
 

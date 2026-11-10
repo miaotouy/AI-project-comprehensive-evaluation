@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Dify 是前后端合仓的 LLM 应用开发平台：`api` 以 Python 承担服务、数据模型、任务和 Provider，`web` 以 TypeScript 承担管理与运行界面，`packages` 提供共享契约与 UI，`dify-agent`/`dify-agent-runtime` 和 `cli` 形成 Agent 与命令行运行面。当前快照有 15,833 个 Git 跟踪文件、12,655 个可识别源码文件 / 2,645,433 行源码；测试文件 4,950 个，主要集中在 `web`、`api`、`e2e` 和 `packages`。
+Dify 把后端、前端与运行面收在同一个仓库，构成一个 LLM 应用开发平台：`api` 用 Python 承担服务、数据模型、任务和 Provider，`web` 用 TypeScript 承担管理与运行界面，共享契约与 UI 集中在 `packages`，Agent 与命令行运行面由同仓的独立子目录提供。当前快照有 15,833 个 Git 跟踪文件、12,655 个可识别源码文件 / 2,645,433 行源码；测试文件 4,950 个，主要分布在前端、后端、共享包与端到端测试四个方向。
 
 ## 统计与模块分布
 
@@ -36,19 +36,44 @@ Dify 是前后端合仓的 LLM 应用开发平台：`api` 以 Python 承担服�
 | `cli` | 233 / 21,089 |
 | `dify-agent-runtime` | 79 / 14,410 |
 
-仓库根部声明 `pnpm@12.16.1` 与 `pnpm-workspace.yaml`；Docker Compose 位于 `docker/`，可作为自托管发行入口。`packages/contracts`（250 文件 / 187,162 行）是共享契约的主要区域，规模已明显超过前端组件包；`packages/dify-ui` 提供前端组件，另有 `packages/openapi-content-mapper`、`packages/tooling` 与 `packages/dev-proxy` 等构建/映射配套包。
+仓库根部声明 `pnpm@12.16.1`，由 `pnpm-workspace.yaml` 定义工作区，自托管发行入口的 Docker Compose 放在 `docker/`。`packages/contracts` 是共享契约的主要区域，含 250 个文件、187,162 行，规模已明显超过前端组件包；前端组件包为 `packages/dify-ui`，配套包还包括 openapi-content-mapper、tooling 与 dev-proxy，分别负责内容映射、构建工具链和开发代理。
 
 ## 语言、文档与测试
 
 Python 1,301,129 行、TypeScript 1,249,132 行、JavaScript 62,021 行，前三者合计占可识别源码约 98.7%。TypeScript 主要来自 `web` 与共享包，Python 主要来自 `api`；此快照中 Python 行数已超过 TypeScript。Go 代码集中在 Agent 运行时和辅助组件。
 
-文档共 218 个文件，主要位于 `docs`（50 个）、`api` 源码旁说明（20 个）及 `packages`（26 个）、`web`（40 个）与 `dify-agent`（18 个）。测试识别到 `web` 2,366 个、`api` 2,058 个、`e2e` 168 个、`packages` 138 个和 `dify-agent` 91 个，测试树覆盖前后端与 Agent 运行面；本次未运行测试。
+文档共 218 个文件，主要分布在以下区域：
 
-除 `api`、`web`、`packages` 主体外，仓库还保留了独立的 `e2e`（168 文件）、`sdks`（Node/PHP 客户端）、`scripts`、`dev` 与 `.agents`、`skills` 目录，说明端到端测试与 Agent 技能材料已从主代码目录分拆出来。
+| 区域 | 文档文件 |
+| --- | ---: |
+| `docs` | 50 |
+| `web` | 40 |
+| `packages` | 26 |
+| `api` 源码旁说明 | 20 |
+| `dify-agent` | 18 |
+
+测试文件同样按区域分布，测试树覆盖前后端与 Agent 运行面；本次未运行测试。
+
+| 区域 | 测试文件 |
+| --- | ---: |
+| `web` | 2,366 |
+| `api` | 2,058 |
+| `e2e` | 168 |
+| `packages` | 138 |
+| `dify-agent` | 91 |
+
+除 `api`、`web`、`packages` 三个主体外，仓库还保留了几个承担独立职责的目录：
+
+- `e2e`：168 个端到端测试文件
+- `sdks`：Node 与 PHP 客户端
+- `scripts` 与 `dev`：开发脚本和本地环境
+- `.agents` 与 `skills`：Agent 技能材料
+
+端到端测试与 Agent 技能材料已从主代码目录分拆出来。
 
 ## 跨平台与工程配套
 
-产品主要以 Web 服务、自托管 Docker 和 CLI 形态交付。`web` 与 `api` 是核心部署单元，`cli`、`dify-agent` 和 `dify-agent-runtime` 提供独立运行入口；`sdks` 保存 Node/PHP 等客户端。`.github/workflows`、`docker/`、`.devcontainer/` 和 `scripts/` 形成 CI、部署与开发配套边界。README 的安装路径与仓库构建配置均为静态确认结果，未进行实际部署验证。
+产品主要以 Web 服务、自托管 Docker 和 CLI 形态交付。核心部署单元是 `web` 与 `api`；CLI、Agent 及其运行时提供独立运行入口，`sdks` 保存 Node 与 PHP 等客户端。CI、部署与开发配套集中在 `.github/workflows`、`docker/` 以及开发容器和脚本目录中。README 的安装路径与仓库构建配置均为静态确认结果，未进行实际部署验证。
 
 ## 已确认边界与未验证事项
 

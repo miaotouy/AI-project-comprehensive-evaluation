@@ -22,20 +22,20 @@ Chatbox 以聊天为主，没有独立的 artifact 对象模型或专用工作�
 
 **主链路（触发 → 生成 → 展示/运行 → 交互 → 保存 → 重新打开）**：
 
-1. **触发**：用户发送消息，会话 `agentMode` 为 `on`（或 `auto` 首轮经分类器建议、用户确认），且模型 `isSupportToolUse('agent')`。`src/renderer/stores/session/orchestration.ts:500-575`（auto 建议）、`agent-harness.ts:204-243`（有效模式与沙箱提供器创建）。
-2. **工具构建**：`buildToolsForSession`（`src/renderer/stores/session/tools-builder.ts:221`）注入三类模型侧工具——代码执行、文件读取、产物声明（`code_execution`、`read_file`、`create_download`，定义于 `src/renderer/packages/model-calls/toolsets/code-execution.ts:77`）——以及文件系统工具（`filesystem.ts:296`）。
-3. **生成**：模型流式调用工具，`stream-chunk-processor.ts:243-298` 把工具调用 part 从 `call` 态推进到 `result` 态，大结果溢出时写 blob（`resultStorageKey`）；每 2 秒持久化一次当前消息（`src/renderer/stores/session/messages.ts:143`）。
-4. **运行**：`code_execution` 沿渲染层提供器、IPC、主进程执行器三层落地（入口 `LocalSandboxProvider.exec` → `sandbox:exec-code` → `execCode`，定位见文末源码索引），首次调用懒初始化会话临时目录并复制上传附件（`code-execution.ts:87-156`）。
-5. **产物声明**：模型调用 `create_download`（`code-execution.ts:316`）→ `persistSandboxArtifact`（`manager.ts:1454`）把文件复制到 `userData/chatbox-sandbox/artifacts/<sessionId>/<sha1>/<basename>`，消息内保存绝对路径。
-6. **展示与交互**：消息时间线内工具卡（`src/renderer/components/message-parts/ToolCallPartUI.tsx`）与底部产物文件卡（`ToolCallPartUI.tsx:925`）提供 HTML/图片 Preview 与 Save 按钮，保存走系统保存对话框（`exportFileFromSandbox`）。下载卡内的沙箱文件链接经链接重映射组件渲染：模型幻觉出、不在沙箱允许根内的路径会被重映射或标记不可用（`sandbox-link.ts`），避免展示无效链接。
-7. **保存**：整个会话（含 tool-call parts 与 result 路径）提交为行存储记录（`SessionService` + `RowBackedSessionRepository`）。
-8. **重新打开**：会话从 storage 加载；artifact 因位于 userData 持久根而继续可 Save/Preview（`manager.ts:1379` 的 `getSandboxAllowedRoots` 重启回退逻辑；`persist-artifact.test.ts:48` 验证）。
+1. **触发**：用户发送消息后，只要会话的 `agentMode` 为 `on`（`auto` 模式首轮由分类器给出建议、用户确认后同样进入），且当前模型的 agent scope 声明支持工具调用，本轮就带上工具集开始生成。模式判定与自动建议见 `src/renderer/stores/session/orchestration.ts:500-575`，沙箱提供器创建见同目录 `agent-harness.ts:204-243`。
+2. **工具构建**：会话开始时由 `buildToolsForSession` 装配本轮工具集，注入代码执行（`code_execution`）、文件读取（`read_file`）与产物声明（`create_download`）三类模型侧工具，以及写入和编辑文件的文件系统工具。装配入口见 `src/renderer/stores/session/tools-builder.ts:221`，三类工具定义在 `src/renderer/packages/model-calls/toolsets/code-execution.ts:77`，文件系统工具在 `filesystem.ts:296`。
+3. **生成**：模型以流式方式发起工具调用，处理器把对应 part 从 call 态推进到 result 态；结果体积超过阈值时转存为 blob，消息里只留引用键，当前消息每 2 秒落盘一次。流式推进见 `src/renderer/stores/session/stream-chunk-processor.ts:243-298`，定时持久化见同目录 `messages.ts:143`。
+4. **运行**：`code_execution` 的请求按渲染层提供器、IPC 通道 `sandbox:exec-code`、主进程执行器三层转发，首次调用时懒初始化会话临时目录并把上传附件复制进去。三层入口见文末源码索引，懒初始化与附件复制见 `code-execution.ts:87-156`。
+5. **产物声明**：模型调用 `create_download` 后，主进程把文件复制到 userData 下的 artifacts 目录，路径按会话 ID、内容哈希与文件名分层（`userData/chatbox-sandbox/artifacts/<sessionId>/<sha1>/<basename>`），消息里只记录该绝对路径。工具入参见 `code-execution.ts:316`，复制与落盘见 `src/main/sandbox/manager.ts:1454`。
+6. **展示与交互**：消息时间线里的工具卡和消息底部的产物文件卡提供 HTML、图片预览与保存按钮，保存经系统保存对话框完成；下载卡内的沙箱文件链接由重映射组件渲染，模型编造或位于沙箱允许根之外的路径会被改写或标记为不可用，避免展示无效链接。卡片实现在 `src/renderer/components/message-parts/ToolCallPartUI.tsx:925`，链接重映射在 `sandbox-link.ts`。
+7. **保存**：整个会话连同工具调用 part 与结果路径一起提交为行存储记录，由 `SessionService` 与 `RowBackedSessionRepository` 写入。
+8. **重新打开**：会话从 storage 重新加载后，产物仍可预览与保存，原因是文件位于 userData 持久根内，允许根在重启时由 `getSandboxAllowedRoots` 补齐回退。回退逻辑见 `src/main/sandbox/manager.ts:1379`，验证用例在 `persist-artifact.test.ts:48`。
 
 未运行验证：第 3-8 步的运行时行为均为静态确认。
 
 ## 1. 触发方式、输出协议与对象模型
 
-**触发**：全部由模型自由文本发起工具调用，无用户直接运行的入口。门控链为：桌面平台 + `agentMode` 为 `on` + 模型 agent scope + 沙箱可用性检查（`agent-harness.ts:208-227`；`orchestration.ts:506-575,767-788`）。`auto` 模式首轮由快速分类模型决定是否注入 `agent-mode-suggestion` part，用户接受后锁定为开启态。
+**触发**：工具调用全部由模型在自由文本中发起，用户侧没有直接执行的入口。一次调用需同时满足四项条件：运行在桌面平台、`agentMode` 为 `on`、当前模型的 agent scope 允许、沙箱可用性检查通过。`auto` 模式首轮由快速分类模型判断是否注入 `agent-mode-suggestion` part，用户接受后锁定为开启态。门控链与自动建议分支见 `agent-harness.ts:208-227`、`orchestration.ts:506-788`。
 
 **输出协议**：无独立 artifact 协议。输出走 AI SDK `ToolSet` + JSON schema（`code-execution.ts:166-187`）。唯一"产物声明"是 `create_download` 的返回，字段如下：
 
@@ -47,18 +47,20 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 
 **对象模型**：核心对象是 `MessageToolCallPart`（`src/shared/types/session.ts:159-206`），嵌入消息内容部件数组，无独立 ID 体系——`toolCallId` 是唯一寻址键，生命周期绑定消息与会话；产物文件本身没有元数据记录（无版本/状态/能力声明），`downloadable` 仅是结果字段。主要字段：
 
-- `state`：call / result / error / paused
-- `toolName`、`args`、`result`
-- `resultStorageKey`：大结果溢出落盘键
-- `pauseReason`、`duration`
+| 字段 | 说明 |
+|---|---|
+| `state` | call / result / error / paused |
+| `toolName`、`args`、`result` | 工具名、入参与返回结果 |
+| `resultStorageKey` | 大结果溢出后落盘所用的键 |
+| `pauseReason`、`duration` | 暂停原因与调用耗时 |
 
 ## 2. 增量生成、更新与最终化
 
-- 流式逐 chunk 更新消息 contentParts（`stream-chunk-processor.ts:243-298`），工具调用间穿插文本与 reasoning part。
-- 大工具结果溢出阈值触发 blob 落盘，消息内只留预览片段（`stream-chunk-processor.ts:285-295`；`TOOL_RESULT_SIZE_LIMIT` 与 `TOOL_RESULT_PREVIEW_LENGTH`）；转存 blob 时保留 part 原有的 provider metadata 等字段。
-- 最终化：`finishReason` 结束消息；工具失败置 `state='error'`，超时置退出码 124 并在 stderr 标注（`manager.ts:839-864`）。停止生成时仍在运行的 tool-call 也会被收口为错误态落盘（`generation-cancellation.ts`）。
-- 暂停机制持久化：`tool_call_limit` 上限与三类审批（user_exec / file_mutation / app_action）把 part 置 `paused`（`session.ts:178-203`），随会话落盘；重启后经 `continuePausedToolCall` 在原消息内继续（`orchestration.ts:1157-1212`）。暂停的调用不注入上下文（`docs/technical/code-execution.md:179`）。
-- 确认点可配置：`tool_call_limit` 确认点可被会话或全局关闭（`pauseOnToolCallLimit`），暂停卡片继续按钮拆分为"继续"与"继续并本次不再暂停"（`ToolCallPartUI.tsx`；设计文档同步更新）。
+- 模型回复以流式方式逐段更新消息的内容部件数组，工具调用与文本、reasoning 片段按到达顺序穿插排列。处理器实现在 `stream-chunk-processor.ts:243-298`。
+- 单个工具结果超过阈值后转存为 blob，消息里只保留预览片段，转存时保留 part 原有的 provider metadata 等字段；阈值与预览长度由 `TOOL_RESULT_SIZE_LIMIT`、`TOOL_RESULT_PREVIEW_LENGTH` 两个常量决定。相关逻辑见 `stream-chunk-processor.ts:285-295`。
+- 最终化由 `finishReason` 收尾整条消息：工具执行失败把 part 置为 `state='error'`，超时以退出码 124 结束并在 stderr 标注；停止生成时仍在运行的工具调用同样收口为错误态落盘。执行与超时处理见 `manager.ts:839-864`，取消收口见 `generation-cancellation.ts`。
+- 暂停机制持久化：工具调用数达到上限，或命中用户执行、文件变更、应用操作三类审批时，part 被置为 `paused` 并随会话落盘，重启后经 `continuePausedToolCall` 在原消息内继续；暂停中的调用不进入上下文。字段定义见 `session.ts:178-203`，继续逻辑见 `orchestration.ts:1157-1212`，上下文规则见 `docs/technical/code-execution.md:179`。
+- 确认点可配置：工具调用上限的确认点由 `pauseOnToolCallLimit` 控制，可在会话级或全局关闭；暂停卡片的继续按钮拆分为"继续"与"继续并本次不再暂停"两种。界面见 `ToolCallPartUI.tsx`。
 
 ## 3. 投影表面与多视图关系
 
@@ -66,18 +68,18 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 
 ## 4. 表现类型、依赖与运行环境
 
-- **artifact iframe**：`sandbox="allow-scripts allow-forms"`，本地 preview URL 追加 `allow-same-origin`（`Artifact.tsx:222-228`）；远程宿主经 postMessage 注入 HTML，srcDoc 内嵌 Tailwind CDN（`Artifact.tsx:281-294`）。
-- **代码执行**：语言为 node（Electron 内置二进制，`ELECTRON_RUN_AS_NODE`）、powershell（仅 Windows）与 bash（macOS/Linux 直跑，Windows 需 Git Bash/WSL 或回退）（`manager.ts:714-748`）。Python 不可用；依赖只允许 Node 内置与 shell 工具，并提示模型避免安装包（`code-execution.ts:425,427-434`）。
-- **本地预览服务器**：127.0.0.1 随机端口，路径解析限制在沙箱允许根、拒绝 symlink、重写根相对引用（`preview-server.ts:94-151`）。
+- **artifact iframe**：iframe 的 sandbox 属性设为 `allow-scripts allow-forms`，本地预览地址再追加 `allow-same-origin`；远程预览宿主经 postMessage 注入 HTML，srcDoc 中内嵌 Tailwind CDN。两处实现同在 `Artifact.tsx:222-294`。
+- **代码执行**：可执行语言为 node（Electron 内置二进制，以 ELECTRON_RUN_AS_NODE 方式运行）、powershell（仅 Windows）与 bash（macOS/Linux 直接执行，Windows 需 Git Bash、WSL 或回退）。Python 不可用；依赖限于 Node 内置模块与 shell 工具，提示词要求模型避免安装包。语言分支见 `manager.ts:714-748`，依赖约束见 `code-execution.ts:425-434`。
+- **本地预览服务器**：监听 127.0.0.1 的随机端口，路径解析限定在沙箱允许根内，拒绝 symlink，并重写根相对引用。实现见 `preview-server.ts:94-151`。
 
 ## 5. 用户交互、事件与错误反馈
 
-- 工具卡展开/折叠、运行中状态、耗时、错误摘要（`ToolCallPartUI.tsx:1377-1536` 附近）。运行中的命令卡可展开读取结构化输出，取消的命令显示 "Stopped" 而非失败。
-- 暂停卡片提供批准/拒绝/停止（`ToolCallPartUI.tsx:1301`）；审批经 `requestUserExecApproval`/`requestFileMutationApproval` 两个入口（`tools-builder.ts:545`、`filesystem.ts:11`）。
-- artifact 模态框操作：刷新、全屏、Open in Browser（仅 previewUrl）、Publish Webpage（Vibedrop）（`src/renderer/modals/ArtifactPreview.tsx:68-87,124-168`）；移动端操作收进安全头部（避免误触），`ArtifactPreview.tsx` 布局重排为移动优先（`:1-239`）。
-- 下载卡：图片内联预览、HTML Preview、Save（导出）按钮与错误回显（`ToolCallPartUI.tsx:750-910`，`DownloadArtifactsUI:925`）。
-- 图片生成工具的结果图不再只留在步骤卡内部，而是与下载文件一起集中到消息 artifacts 区；即使 Work Mode 完成后折叠过程时间线，结果图仍保持可见。装配见 `src/renderer/components/message-parts/ToolCallPartUI.tsx:1038-1069` 与 `src/renderer/components/chat/Message.tsx:553`。
-- 无编辑器、无沙箱文件浏览器 UI（检索 `SandboxFile*`、`sandbox files` 无命中；`SandboxFileLink` 只是下载卡内链接组件，不是文件浏览器）。
+- 工具卡支持展开与折叠，显示运行中状态、耗时和错误摘要；运行中的命令卡可展开查看结构化输出，被取消的命令显示为 "Stopped"，与执行失败区分。卡片实现见 `ToolCallPartUI.tsx:1377-1536`。
+- 暂停卡片提供批准、拒绝与停止三个操作，审批受理分用户执行与文件变更两个入口。卡片见 `ToolCallPartUI.tsx:1301`，两个审批入口见 `tools-builder.ts:545` 与 `filesystem.ts:11`。
+- artifact 模态框提供刷新、全屏、在浏览器打开（仅在存在预览地址时）与发布网页（Vibedrop）四项操作；移动端把操作收进安全头部以避免误触，整体布局按移动优先重排。操作与布局同在 `src/renderer/modals/ArtifactPreview.tsx:1-239`。
+- 下载卡提供图片内联预览、HTML 预览、导出保存按钮和错误回显，卡片主体与产物汇总区同在 `ToolCallPartUI.tsx:750-925`。
+- 图片生成的结果图与下载文件一起集中到消息 artifacts 区，Work Mode 完成后折叠过程时间线时结果图仍保持可见。装配见 `ToolCallPartUI.tsx:1038-1069`，消息侧挂载见 `Message.tsx:553`。
+- 用户侧交互集中在消息时间线的工具卡与下载卡，代码中没有编辑器或沙箱文件浏览器界面；按 `SandboxFile*` 与 sandbox files 检索无命中，`SandboxFileLink` 这个链接组件只负责渲染下载卡内的链接。
 
 ## 6. 编辑、diff、版本与协作
 
@@ -95,41 +97,51 @@ HTML 预览存在第二个隐性协议：消息正文的 html 代码块由 `isCo
 | allowWrite | 工作目录、`/tmp`、用户授予目录（含 symlink 规范化与安全根校验 `isUnsafeResolvedPath`，`manager.ts:283-317`） |
 | denyWrite | `.env*` |
 
-网络：SRT config 未设 `allowedDomains`，注释表明生成 `(allow network*)`（`manager.ts:401-407`）；Windows 无网络限制。宿主桥：导出保存对话框、`openLink`、平台 `fsRead` 回退（`code-execution.ts:249-272`）、Vibedrop 外部发布。IPC 表面完整登记于 `ipc-handlers.ts:36-298`。
+网络：SRT 沙箱配置没有设置 `allowedDomains`，注释显示最终生成 `(allow network*)`，即允许全部网络访问；Windows 平台不施加网络限制。沙箱之外的宿主桥接覆盖导出保存对话框、打开链接、平台相关的文件读取回退与 Vibedrop 外部发布。SRT 配置生成见 `manager.ts:401-407`，宿主桥接见 `code-execution.ts:249-272`，IPC 表面登记在 `ipc-handlers.ts:36-298`。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 消息与工具结果随会话行树持久化（`session_messages`）；临时沙箱目录位于 `os.tmpdir()/chatbox-sandbox/<sessionId>`，启动时清理 7 天以上旧目录（`manager.ts:1582-1606`）。
-- `create_download` 产物持久化到 userData 且豁免清理（`manager.ts:1436-1505`）；删除会话时提示并删除（`src/renderer/stores/session/crud.ts`）。
-- 导出：保存对话框复制（`manager.ts:1511-1570`）；大结果 blob 随备份重映射（`packages/chatbox-core/src/backup-export/session.ts:77-79,207-210`）。导出聊天含工具调用摘要（`packages/chatbox-core/src/backup-export/session.ts`）。
-- 重新打开后下载卡仍可用，依赖持久副本路径与 `getSandboxAllowedRoots` 的重启回退（`manager.ts:1374-1380`）。
+- 消息与工具结果随会话行树写入 `session_messages` 表；临时沙箱目录放在系统临时目录下按会话 ID 分隔（`os.tmpdir()/chatbox-sandbox/<sessionId>`），启动时清理超过 7 天的旧目录。清理逻辑见 `manager.ts:1582-1606`。
+- `create_download` 产物持久化到 userData，不参与上述清理；删除会话时提示用户并一并删除。持久化见 `manager.ts:1436-1505`，会话删除在 `src/renderer/stores/session/crud.ts`。
+- 导出走系统保存对话框复制文件，导出的聊天记录中含工具调用摘要，大结果 blob 随备份重映射。导出入口见 `manager.ts:1511-1570`，备份重映射见 `packages/chatbox-core/src/backup-export/session.ts:77-210`。
+- 重新打开会话后下载卡仍可用，依赖持久副本路径与允许根在重启时的回退。回退实现见 `manager.ts:1374-1380`。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- 上下文默认保留最近若干轮的 tool-call parts（`src/shared/context/builder.ts:101-154`，`cleanToolCalls` 仅清理更早轮次）；暂停调用不注入。
-- sandboxMode 下附件以 `<SANDBOX_PATH>/<PARSED_SANDBOX_PATH>` 元数据注入而不带内容（`builder.ts:186-190`），模型通过 `read_file`/`code_execution` 主动读取。
-- 模型可查询沙箱状态（`read_file`/`list_files`/`search_files`，路径经 ripgrep 与沙箱校验），工作目录由会话 ID 确定性计算（`resolveSandboxWorkingDir`，`manager.ts:1250-1255`），重启后复用同一目录——"查询 → 读取 → 定向修改"闭环在代码路径上成立。此为静态推断，未运行验证。
-- `view_image` 把沙箱或授权路径中的图片作为模型图像内容回注，弥补仅靠文件名与文本输出无法检查视觉结果的闭环；不支持 tool-result image 的模型改用后续 user 消息注入，并限制历史图像负载。`src/renderer/packages/model-calls/toolsets/view-image.ts:302-488`。
+- 上下文中默认保留最近若干轮的工具调用 part，更早轮次由 `cleanToolCalls` 清理，处于暂停状态的调用不进入上下文。清理逻辑见 `src/shared/context/builder.ts:101-154`。
+- sandboxMode 下附件只以路径元数据注入，正文不带文件内容，元数据由 `<SANDBOX_PATH>` 与 `<PARSED_SANDBOX_PATH>` 两个占位符组成；模型需要时通过 `read_file` 或 `code_execution` 主动读取。注入逻辑见 `builder.ts:186-190`。
+- 模型可查询沙箱状态：读取、列目录与全文检索三类操作均先做路径校验，工作目录由会话 ID 确定性计算（`resolveSandboxWorkingDir`），重启后复用同一目录，因此"查询 → 读取 → 定向修改"的闭环在代码路径上成立。该结论为静态推断，未运行验证；实现见 `manager.ts:1250-1255`。
+- `view_image` 把沙箱或授权路径中的图片作为图像内容重新注入，让模型核对只靠文件名与文本输出看不到的视觉结果；不支持 tool-result image 的模型改由后续 user 消息注入，并限制历史图像负载。实现见 `src/renderer/packages/model-calls/toolsets/view-image.ts:302-488`。
 
 ## 10. 生命周期、资源治理与性能
 
-- 每会话至多一个运行子进程（`session.runningChild`）。终止走 `killRunningCommand` 入口（`manager.ts:874`，支持按 toolCallId 定位）；超时默认 30s（执行器）/120s（工具层），超时先 SIGTERM 后 SIGKILL，Windows 用 taskkill /T。POSIX 侧命令以进程组 spawn，`killProcessTree()`（`src/main/process-tree.ts`）用负 pid 信号终止整棵树，避免孤儿进程。
-- stdout/stderr 各 10MB 缓冲上限 + tail 截断 + 脱敏（`manager.ts:775,844-849`）。
-- 会话重置、退出时 `resetAllSessions`，预览服务器随 quit 关闭（`sandbox/index.ts:6-15`）；temp 目录 7 天清理（`cleanupStaleSandboxDirs`，`manager.ts:1600`），持久 artifact 永不清理。
-- 多轮工具调用上限 `MAX_TOOL_CALLS_BEFORE_CONFIRMATION` 暂停防循环（`orchestration.ts:750-752`，可经 `pauseOnToolCallLimit` 关闭）。无对象级冻结/卸载逻辑（对象即消息 part，随消息生命周期）。
+- 每个会话同时最多运行一个子进程，终止统一走 `killRunningCommand` 并按工具调用 ID 定位目标；超时阈值为执行器 30 秒、工具层 120 秒，到点先发 SIGTERM 再发 SIGKILL，Windows 上改用 taskkill /T。POSIX 侧命令以进程组启动，进程树终止用负 pid 向整组发信号，避免留下孤儿进程。终止入口见 `manager.ts:874`，进程树实现在 `src/main/process-tree.ts`。
+- stdout 与 stderr 各设 10MB 缓冲上限，超出后保留尾部并做脱敏。上限与清理逻辑见 `manager.ts:775-849`。
+- 会话重置与进程退出时调用 `resetAllSessions` 关闭全部会话，预览服务器随应用退出关闭；临时目录按 7 天清理，持久 artifact 不参与清理。关闭流程见 `sandbox/index.ts:6-15`，清理见 `manager.ts:1600`。
+- 多轮工具调用累计到上限时暂停请求以打断循环，该暂停可经 `pauseOnToolCallLimit` 关闭；对象本身即消息 part，随消息生命周期存在，没有独立的冻结或卸载逻辑。上限判定见 `orchestration.ts:750-752`。
 
 ## 11. 测试、已确认边界与未验证事项
 
 测试覆盖（均未执行，仅静态确认存在）：
-- `src/main/sandbox/`：`manager.test.ts`（路径与写入授权）、`manager.windows.test.ts`（Windows 原生路径）、`persist-artifact.test.ts`（持久化、会话删除、路径穿越拒绝，`persist-artifact.test.ts:114`）、`preview-server.test.ts`、`exec-script.test.ts`、`file-read.test.ts`、`truncate.test.ts`
-- renderer 侧：`code-execution.test.ts`（懒初始化/文件注入/错误处理）、`tools-builder.test.ts`（不同 agent mode 下工具可见性）、`stream-chunk-processor.test.ts`（resultStorageKey 溢出）、`agent-harness.test.ts`（有效模式计算）
-- 文档 `docs/technical/code-execution.md:223-235` 列有对应测试清单
+
+| 范围 | 测试文件 | 覆盖内容 |
+|---|---|---|
+| 主进程沙箱 | `manager.test.ts` | 路径与写入授权 |
+| 主进程沙箱 | `manager.windows.test.ts` | Windows 原生路径 |
+| 主进程沙箱 | `persist-artifact.test.ts` | 持久化、会话删除、路径穿越拒绝（第 114 行有对应断言） |
+| 主进程沙箱 | `preview-server.test.ts`、`exec-script.test.ts`、`file-read.test.ts`、`truncate.test.ts` | 对应模块的单元测试 |
+| renderer | `code-execution.test.ts` | 懒初始化、文件注入、错误处理 |
+| renderer | `tools-builder.test.ts` | 不同 agent mode 下的工具可见性 |
+| renderer | `stream-chunk-processor.test.ts` | `resultStorageKey` 溢出 |
+| renderer | `agent-harness.test.ts` | 有效模式计算 |
+
+对应测试清单另见 `docs/technical/code-execution.md:223-235`。
 
 **已确认边界**：
 
-- 云沙箱（Web/Mobile）是 stub，全部方法返回"not yet implemented"（`src/renderer/sandbox/cloud-provider.ts:17-86`），实际能力仅桌面端。
-- 消息级 `MessageArtifact`（整条消息 HTML 拼装预览）与 `needArtifact`/`previewArtifact` 状态已保留但未接入渲染（`Message.tsx:85,193,431` 仅定义/计算，全仓检索无渲染调用点）。
-- `autoPreviewArtifacts` 默认关闭（`src/shared/defaults.ts:98`）。
+- 云沙箱在 Web 与 Mobile 端是 stub，全部方法直接返回 "not yet implemented"，实际能力仅桌面端。见 `src/renderer/sandbox/cloud-provider.ts:17-86`。
+- 消息级 `MessageArtifact`（把整条消息的 HTML 拼装成预览）与 `needArtifact`、`previewArtifact` 两个状态仍在代码中定义和计算，渲染层没有调用点，全仓检索未发现使用。定位见 `Message.tsx:85-431`。
+- `autoPreviewArtifacts` 默认为关闭状态，见 `src/shared/defaults.ts:98`。
 
 **未验证事项**：整个运行时链路（执行、预览、下载、暂停继续、重启恢复）均未运行验证；Windows 原生执行与 SRT 隔离的实际行为、网络放行策略的实际生效情况、artifact 跨重启可用性只由代码路径与测试文件支持。
 

@@ -20,11 +20,11 @@ Risuai 以纯字符串消息模型驱动渲染：`Message` 只有 `data` 字符�
 
 代码中可以确认以下实现特点：
 
-- 列表窗口化：默认只挂载最近 30 条，滚到顶部每次追加 15 条，消息按哈希差量挂载/卸载（`src/ts/chatLoadPages.ts:1-2`、`src/lib/ChatScreens/Chats.svelte:65-167`）。
-- 富文本能力集中在字符串协议上：`{{img::}}` 类资产占位符、`{{inlay::}}` 图片嵌入、`<Thoughts>`/`<tool_call>` 正文标记、KaTeX、按需加载的 highlight.js，以及可作用域化的消息内 `<style>`。
-- 特色能力：角色表情图系统（`CharEmotion` + waifu 主题的 `TransitionImage`）、Stable Diffusion 图生成 inlay（`<ImgGen="...">`）、可定制的 HTML 消息壳主题（`guiHTML`）、消息级 Lua 触发器按钮。
-- 承载边界：DOMPurify 清洗（class 统一加 `x-risu-` 前缀、iframe 只放行 YouTube embed、href 只放行 http(s)）；消息 CSS 用 `.chattext` 选择器前缀做作用域；插件运行在无 same-origin 的沙箱 iframe 中并带独立 CSP。
-- 主文档没有启用 CSP（`index.html` 中 CSP meta 处于注释状态）。
+- 列表窗口化：默认只挂载最近 30 条，滚到顶部时每次再追加 15 条；消息以哈希作差量依据挂载或卸载，窗口默认值与哈希窗口逻辑见 `chatLoadPages.ts:1-2` 和 `Chats.svelte:65-167`。
+- 富文本能力集中在字符串协议上：资产占位符、inlay 图片嵌入、思考与工具调用标记、KaTeX 公式、按需加载的 highlight.js，以及可用 `.chattext` 限定作用域的消息内 `<style>`。
+- 特色能力：角色表情图系统（状态存于 `CharEmotion`，由 waifu 主题的 `TransitionImage` 呈现）、Stable Diffusion 图生成 inlay、可定制的 HTML 消息壳主题、消息级 Lua 触发器按钮。
+- 承载边界：正文先经 DOMPurify 清洗，class 统一加 `x-risu-` 前缀，iframe 只放行 YouTube embed，href 只放行 http(s)；消息 CSS 靠 `.chattext` 选择器前缀限定作用域；插件运行在不带 allow-same-origin 的沙箱 iframe 中，并自带 CSP。
+- 主文档的 CSP meta 在 `index.html` 中处于注释状态，页面级 CSP 未启用。
 
 ## 总体渲染链路
 
@@ -77,11 +77,11 @@ Message.data（字符串）
 
 没有系统、工具或 reasoning 角色：这些内容都作为字符串标记出现在 `data` 里，由解析阶段识别。
 
-渲染上下文由组件参数传递：`Chat` 接收 `message`、`role`、`idx`、`character`（`createSimpleCharacter` 裁剪出的简单角色，只带脚本与资产）、`firstMessage`、`isComment` 与 `messageGenerationInfo`。`risuChatParser` 的 `CbsConditions`（`firstmsg`、`chatRole`）让变量与脚本按消息角色和首条身份生效。
+渲染上下文由组件参数传递：消息壳接收消息对象、角色、索引、角色资产、首条标记与生成信息等属性，其中角色参数经 `createSimpleCharacter` 裁剪，只保留脚本与资产。变量解析器按消息角色与首条身份两条件切换解析行为（`CbsConditions`，`src/ts/parser/parser.svelte.ts`）。
 
 ## 2. 流式数据到 UI 的更新链
 
-流式消费端位于 `src/ts/process/index.svelte.ts:1591-1753` 的 `sendChat` 内：请求层返回 ReadableStream，循环 `reader.read()` 逐 chunk 更新累计结果。`StreamingDisplayOptimizationMode`（`off`/`balanced`/`strong`，`database.svelte.ts:28`）在生成开始时写入会话，生成结束后清除。
+流式消费端位于 `src/ts/process/index.svelte.ts:1591-1753` 的生成入口内：请求层返回 ReadableStream，循环读取逐 chunk 更新累计结果。三档优化模式的类型 `StreamingDisplayOptimizationMode` 定义在 `database.svelte.ts:28`，取值在生成开始时写入会话，生成结束后清除。
 
 三个档位的差异集中在「多久处理一次」与「流式期间跑不跑正则脚本」：
 
@@ -91,17 +91,19 @@ Message.data（字符串）
 | balanced | 125ms 定时器 + rAF 合帧（`scheduleStreamingDisplayFlush`，`index.svelte.ts:1667-1681`） | 累计全文 `editoutput` + 全量 Markdown | 全量渲染 |
 | strong | 同上 | 流式期间跳过 `editoutput`，仅 trim 后直接写入 | `rawStreamingText` 原样文本（`whitespace-pre-wrap`，`ChatBody.svelte:262`），不做任何 Markdown |
 
-合帧器是串行的：`flushStreamingDisplay` 用 `streamingFlushPromise` 保证同一时刻只有一个处理中，期间新到达的 chunk 置 `streamingFlushQueued`，处理完再取最新值，丢弃中间帧。`off` 模式下无合帧，每个 chunk 都同步跑 `processScriptFull(...,'editoutput',...)`，其结果直接写 `message[msgIndex].data`。`removeIncompleteResponse` 开启时会在写入前用 `trimUntilPunctuation` 截到最后一个标点。
+合帧器是串行的：`flushStreamingDisplay` 用 `streamingFlushPromise` 保证同一时刻只有一个处理中，期间新到达的 chunk 置排队标记，处理完再取最新值，丢弃中间帧。off 模式下无合帧，每个 chunk 都同步跑一遍正文脚本，结果直接写回消息数据。开启 removeIncompleteResponse 设置时，会在写入前把文本截到最后一个标点。
 
 每次写入后递增 `character.reloadKeys`，配合对 `DBState` 深层状态对象的赋值，这是向 UI 传递变化的通知点（该失效在 Svelte 5 代理中的确切传播语义未运行验证，见文末）。
 
-`Chats.svelte` 的 `$effect`（`Chats.svelte:200-227`）重跑 `updateChatBody`：对最后一条 char 消息，若会话仍在流式且优化模式非 off，哈希计算排除 `message.data`（`Chats.svelte:99`），因此 chunk 更新不改变哈希，已挂载实例命中，直接调用其实例方法 `updateStreamingDisplay` 传入最新 `rawStreamingText`。`Chat.svelte` 随即在 `$effect.pre` 中重新执行 `risuChatParser`，`ChatBody` 的 `markParsing` 重新走完整 `ParseMarkdown`。
+会话数据变化后，列表组件的 `$effect` 重跑消息更新逻辑（`Chats.svelte:99,200-227`）。对最后一条角色消息，只要会话仍在流式且优化模式为 balanced 或 strong，哈希就不计入正文数据，于是每个 chunk 更新都不改变哈希，命中已挂载实例，改为调用实例方法传入最新文本，跳过重挂载。随后消息壳在 `$effect.pre` 中重新解析变量，正文组件重走一遍完整 Markdown 管线。
 
-收尾阶段（`index.svelte.ts:1727-1753`）：先强制 flush 剩余内容；strong 模式此时补跑一次 `editoutput`；随后 `isStreaming=false` 并清除优化模式。哈希随即纳入最终 `data`，与流式期间的哈希不同，整条消息被卸载并重新挂载，以完整管线渲染最终文本——因此"strong 流式期间看到的是未处理原文"只影响流式过程，不影响最终显示。完成后还依次执行 `runInlayScreen`（处理 `<Emotion>`/`<ImgGen>` 替换）、`runChatOutputListeners`（插件 `chatOutput` 钩子）与可选的自动 TTS。
+收尾阶段（`index.svelte.ts:1727-1753`）：先强制 flush 剩余内容；strong 模式此时补跑一次正文脚本；随后结束流式状态并清除优化模式。哈希随即纳入最终正文数据，与流式期间的哈希不同，整条消息被卸载并重新挂载，以完整管线渲染最终文本，因此 strong 模式下流式期间显示的未处理原文只影响流式过程，最终画面仍是完整渲染结果。完成后还依次执行屏幕命令替换（`<Emotion>`/`<ImgGen>`）、插件输出钩子与可选的自动 TTS。
 
 ## 3. 消息列表、窗口化与滚动
 
-`DefaultChatScreen.svelte:47` 维护 `loadPages` 状态，初值来自 `getInitialChatLoadPages`（默认 30，`chatLoadPages.ts:1-18`，可由数据库字段 `chatLoadInitialPages` 覆盖）。滚动容器是 `flex-col-reverse` 的纵向滚动 div（`DefaultChatScreen.svelte:572-585`）：滚到顶部 100px 内且消息数大于当前窗口时，`loadPages += getAdditionalChatLoadPages`（默认 15）。
+聊天屏组件维护窗口大小状态，初始显示量默认 30 条，可由数据库字段 `chatLoadInitialPages` 覆盖（[默认值与配置读取](<../../Risuai/src/ts/chatLoadPages.ts#L1-L23>)）。
+
+滚动容器是 `flex-col-reverse` 的纵向滚动 div：滚到顶部 100px 内且消息数大于当前窗口时，窗口按配置追加消息，默认每次追加 15 条，追加量由 `chatLoadAdditionalPages` 控制（[窗口扩展入口](<../../Risuai/src/lib/ChatScreens/DefaultChatScreen.svelte#L572-L585>)）。
 
 `Chats.svelte` 是窗口化的执行者，它不用 `{#each}` 而是命令式挂载：
 
@@ -109,64 +111,76 @@ Message.data（字符串）
 2. 与上一轮的哈希集合比较：新哈希 → `mount(Chat, {target: div})` 并插到前一个已挂载节点之后；既有哈希 → 调用实例的 `updateStreamingDisplay`（仅流式场景有意义）。
 3. 集合差集 → `unmount` 并移除 DOM（`Chats.svelte:152-163`）。
 
-滚动锚定依赖两条事实：新消息始终 prepend 到最旧消息之前（视觉底部），加载更早历史时新节点插在既有节点之后（视口上方），因此滚动位置天然保持；用户不在底部且 `autoScrollToNewMessage` 开启时，新消息不自动滚动，而是显示"新消息"按钮（`showNewMessageButton`，滚动到底部后消失）。书签/跳转到指定消息时，先临时把 `loadPages` 扩到目标索引覆盖的范围，再轮询 `[data-chat-index]` 元素并 `scrollIntoView`（`DefaultChatScreen.svelte:73-135`）；截图功能则把 `loadPages` 设为 `Infinity` 后逐条 canvas 拼接（同文件 `screenShot`，`DefaultChatScreen.svelte:449-503`）。
+滚动锚定依赖两条布局事实：新消息始终 prepend 到最旧消息之前，即落在视觉底部；加载更早历史时新节点插在既有节点之后，即位于视口上方。两个方向都不改变当前可见内容，滚动位置因此天然保持。用户不在底部且开启了 `autoScrollToNewMessage` 时，新消息不触发自动滚动，改为显示「新消息」按钮，滚到底部后按钮消失。书签跳转先临时把窗口大小扩到能覆盖目标索引的范围，再轮询 `[data-chat-index]` 元素并滚动到该元素；截图则把窗口设为无限大，逐条 canvas 拼接（`DefaultChatScreen.svelte:73-135,449-503`）。
 
 ## 4. 消息壳层与角色分派
 
-消息壳只有一个组件：`Chat.svelte`（1157 行），同时承载用户、角色、评论、首条问候与群聊消息，通过 props（`role`、`isComment`、`idx === -1`、`firstMessage`）分派。`src/lib/ChatScreens/Message.svelte` 是标注"future-proofing 重写"的 27 行 TODO 存根，未被引用。
+消息壳只有一个组件 `Chat.svelte`（1157 行），同时承载用户、角色、评论、首条问候与群聊消息，按角色、评论标记、首条身份与问候语属性分派。`src/lib/ChatScreens/Message.svelte` 是标注"future-proofing 重写"的 27 行 TODO 存根，未被引用。
 
 壳层渲染按主题分四路（`Chat.svelte:1068-1147`）：
 
 - `mobilechat`：气泡式，头像在角色侧，用户消息右对齐。
 - `cardboard`：卡片式，大头像 + 名称 + 固定高度正文区。
-- `customHTML`：使用 `DBState.db.guiHTML` 字符串作为消息壳模板，经 `RenderGUIHtml`（DOMParser 解析）后由 `renderGuiHtmlPart` 递归转译成 Svelte 组件（`Chat.svelte:220-229, 918-1056`）。模板只接受约二十种白名单标签，未知标签降级为 `div`；四个特殊标签 `RISUTEXTBOX`、`RISUICON`、`RISUBUTTONS`、`RISUGENINFO` 分别被替换为正文框、发送者头像、操作栏和生成信息，`A` 标签的 href 只放行 `https`。
+- `customHTML`：以 `DBState.db.guiHTML` 字符串作为消息壳模板，经 DOMParser 解析后由 `renderGuiHtmlPart` 递归转译成 Svelte 组件（`Chat.svelte:220-229,918-1056`）。模板只接受约二十种白名单标签，未知标签降级为 div，A 标签的 href 只放行 https。四个特殊标签分别替换为：
+  - `RISUTEXTBOX` → 正文框
+  - `RISUICON` → 发送者头像
+  - `RISUBUTTONS` → 操作栏
+  - `RISUGENINFO` → 生成信息
 - 默认：头像 + 名称行 + 操作栏 + `genInfo`（模型信息、LLM 翻译状态）+ 正文。
 
-正文容器是带 `chattext` class 的 span（`Chat.svelte:425`），用 `{#key}` 包住 `ChatBody`，键值叠加 `ReloadChatPointer[idx]`（触发器、角色切换等场景自增），指针变化时整块重挂载。首条消息（`idx === -1`）由 `DefaultChatScreen` 直接渲染一个独立 `Chat`，支持 alternateGreetings 分页和 `{{none}}`/`{{blank}}`/空串占位（显示"无消息"文案）；评论消息以 `{{specialcomment::branchedfrom::...}}` 数据渲染分支跳转链接。操作栏（`iconButtons`）包含复制、翻译、编辑、TTS、删除、书签、分支、禁用、禁用以上与 reroll，桌面端主要按钮直接展示、次要按钮收进 PopupButton。
+正文容器是带 `chattext` class 的 span，内部以 `{#key}` 包住正文组件，键值为重挂载指针；触发器、角色切换等场景自增该指针，指针一变整块正文重挂载。首条消息由聊天屏直接渲染一个独立消息壳，支持问候语分页与 `{{none}}`、`{{blank}}`、空串三种占位文案；评论消息按分支来源数据渲染成分支跳转链接。操作栏集中复制、翻译、编辑、TTS、删除、书签、分支、禁用、禁用以上与 reroll 按钮，桌面端主要按钮直接展示，次要按钮收进弹出菜单（`Chat.svelte:425`）。
 
 ## 5. Markdown、代码与富文本管线
 
 `ParseMarkdown`（`src/ts/parser/parser.svelte.ts:736-777`）是正文管线的总入口，处理顺序本身是渲染协议：
 
-1. `parseAdditionalAssets`：替换 `{{img::名称}}` 类资产占位符（raw/path/img/video/audio/bgm/bg/emotion/asset 等十余种类型，正则见 `assetRegex`，`parser.svelte.ts:408`）。资产名按角色 `additionalAssets` 精确匹配；未命中且 `legacyMediaFindings` 关闭时做 Levenshtein 模糊匹配（`getClosestMatch`，距离上限 `assetMaxDifference`）；同一资产多条路径时用 `pickHashRand` 按会话确定性随机选一条。多选项时在脚本处理后二次解析，覆盖脚本改写出的新占位符。
-2. `processScriptFull(char, data, 'editdisplay', ...)`：依次运行 Lua editDisplay 触发器（`runLuaEditTrigger`）、插件 `pluginV2.editdisplay` 钩子、全局+角色+模块正则脚本（`scripts.ts:99-387`）。
-3. `parseInlayAssets`：把 `{{inlay::id}}`/`{{inlayed::id}}`/`{{inlayeddata::id}}` 换成本地 blob URL 的图片/视频/音频标签（parser.svelte.ts:666-701）。
-4. `parseThoughtsAndTools`：深度配对的 `<Thoughts>` 折叠为 `<details><summary>`；`<tool_call>id\uf100名称</tool_call>` 替换为一行 `x-risu-tool-call` 提示（parser.svelte.ts:713-734）。
-5. `encodeStyle`：`<style>` 内容 hex 编码成 `<risu-style>` 保护起来，防止 DOMPurify 直接处理。
-6. `renderHighlightableMarkdown`：`$$...$$` 先被 `katex.renderToString` 替换（`renderMarkdown`，parser.svelte.ts:152-204，`output: 'mathml'`、`displayMode: false`），随后 markdown-it 渲染（`html: true`、`breaks`、`typographer`、引号占位符机制）；带语言标记的代码围栏由第二个 markdown-it 实例（`mdHighlight`）输出 `pre-hljs-placeholder` 占位，之后逐块按需 `import` highlight.js 语言并生成 `pre.hljs`（switch 共映射 18 种语言，未知语言转义为纯文本，`risuerror` 输出错误面板）。
-7. `trimMarkdown`（ChatBody 渲染时）：普通内容直接经 DOMPurify 清洗；含 `risu-style` 时先取得清洗后的 DOM，再只解码其中真实的样式节点并原地替换为 style。CSS 以解码后的 style 节点原位替换，清洗只作用于 HTML 结构，因此其中含有类似标记的文本或 SVG data URL 时不会被清洗器误删（`parser.svelte.ts:779-834,966-1003`）。
+1. 资产替换：把 `{{img::名称}}` 一类占位符换成对应的文件 src，覆盖 raw、path、img、video、audio、bgm、bg、emotion、asset 等十余种类型。资产名先在角色的 `additionalAssets` 中精确查找；未命中且 `legacyMediaFindings` 关闭时，改用 Levenshtein 模糊匹配，距离上限由 `assetMaxDifference` 限定；同一资产存在多条路径时，按会话做确定性随机选择。出现多选项时，这一步会在脚本处理后再跑一次，覆盖脚本新写出的占位符（`parser.svelte.ts:408`）。
+2. 脚本处理：由 `processScriptFull` 依次运行 Lua editDisplay 触发器、插件的 `pluginV2.editdisplay` 钩子，以及全局、角色和模块三级正则脚本（`scripts.ts:99-387`）。
+3. inlay 资产：把 `{{inlay::id}}`、`{{inlayed::id}}` 和 `{{inlayeddata::id}}` 三种引用换成本地 blob URL 的图片、视频或音频标签（`parser.svelte.ts:666-701`）。
+4. 思考与工具标记：深度配对的 `<Thoughts>` 折叠为 details/summary 结构；`<tool_call>` 标签（id 与名称之间以私有区字符分隔）替换成一行带 `x-risu-tool-call` class 的提示（`parser.svelte.ts:713-734`）。
+5. 样式保护：把 `<style>` 的内容做 hex 编码并包进 `<risu-style>`，避免 DOMPurify 直接处理样式内容。
+6. Markdown 与高亮：先处理公式，再渲染正文，最后替换代码围栏占位节点。
+   - 公式由 `katex.renderToString` 把 `$$...$$` 替换成 MathML（关闭 displayMode）。正文交给 markdown-it，开启 html 与 breaks、启用 typographer，引号经占位符机制处理（[公式与正文转换](<../../Risuai/src/ts/parser/parser.svelte.ts#L152-L204>)）。
+   - 带语言标记的代码围栏交给第二个 markdown-it 实例输出占位节点，之后逐块按需加载 highlight.js 语言并生成高亮块，switch 映射 18 种语言。
+   - 未知语言转义为纯文本；显式标记为 `risuerror` 的围栏输出错误面板。高亮处理发生异常时进入空 catch，错误面板由特殊语言标记触发（[语言分派与异常分支](<../../Risuai/src/ts/parser/parser.svelte.ts#L373-L401>)）。
+7. 清洗收尾：正文渲染时调用 `trimMarkdown`。普通内容直接经 DOMPurify 清洗；含 `risu-style` 时先取得清洗后的 DOM，再把其中真实的样式节点解码并原位替换为 style。清洗只作用于 HTML 结构，样式以解码后的节点替换回去，因此文本或 SVG data URL 中出现的类似标记不会被误删（`parser.svelte.ts:779-834,966-1003`）。
 
 两个 markdown-it 实例都 `disable(['code'])`（缩进代码块规则），正文行内代码与围栏行为由上述占位机制统一处理。markdown-it 的 typographer 把引号替换为 PUA 字符，随后按 `customQuotes`/`blockquoteStyling` 设置决定是原样还原还是包成 `<mark risu-mark>` 引用样式。
 
 `risuChatParser`（parser.svelte.ts:1538-1812）是变量层，按语法元素划分能力：
 
-- 变量与函数调用：`{{变量}}`、`{{函数::参数}}`（经 `registerCBS` 注册到 `matcherMap`，如 `{{file::}}` 在显示模式输出文件名块）、`{{call::}}` 复用已定义函数，`?:` 前缀表示计算表达式。
-- 控制块：`{{#if}}`/`{{#when}}`（含 not/and/or/is/var/toggle/比较等条件）、`{{#each}}`、`{{#func}}`、`{{#escape}}`、`{{#pure}}` 与 `{{#code}}` 归一化，块嵌套有 512 层数组与 20 层调用栈上限。
-- 兼容归一：`<(user|char|bot)>` 与 `{{user}}`/`{{char}}` 占位在解析前统一替换。
+- 变量与函数调用：`{{变量}}` 直接取值；`{{函数::参数}}` 调用经 `registerCBS` 注册的函数，注册时写入内部匹配表，文件类函数在显示模式下输出文件名块；`{{call::}}` 复用已定义函数，`?:` 前缀表示按表达式计算。
+- 控制块：按语法元素分为条件、循环、函数定义、转义与纯文本、代码归一化几类，块嵌套上限为 512 层数组与 20 层调用栈。
+  - 条件：`{{#if}}` 与 `{{#when}}`，判断项包括 not、and、or、is、var、toggle 与比较运算
+  - 循环：`{{#each}}`
+  - 函数定义：`{{#func}}`
+  - 转义与纯文本：`{{#escape}}`、`{{#pure}}`
+  - 代码归一化：`{{#code}}`
+- 兼容归一：解析前把 `<(user|char|bot)>` 写法与 `{{user}}`、`{{char}}` 占位统一替换。
 
 Chat 的 `displaya` 以 `visualize: true` 调用它，使 `{{file::}}` 这类函数走显示分支。
 
 ## 6. 工具、reasoning、附件与自定义节点
 
-- 工具调用：请求层把 API 工具调用序列化为 `<tool_call>{id}\uf100{name}</tool_call>` 文本（`src/ts/process/mcp/mcp.ts:359`），展示层替换为一行只读提示（带 🛠️ 图标与 `x-risu-tool-call` class），没有工具卡、审批或展开交互；工具参数与结果都在上下文侧处理，不进入消息正文。
-- reasoning：`<Thoughts>` 标签折叠为可展开的 details（默认文案来自语言文件 `cot`），不区分流式状态。
-- 资产 inlay：`{{inlay::id}}` 系列引用 localforage 的 inlay 库（`src/ts/process/files/inlays.ts:30-33`），图片上传时经 canvas 缩放到不超过 1024×1024，读取时迁移为 Blob 并缓存 object URL（`blobUrlCache`）。发送输入框粘贴图片、菜单"发布文件"都走 `postChatFile` → inlay id 写入消息文本；多模态模型把 inlay 图片作为 `{{inlayed::}}` 拼接进提示（`inlays.ts:225-228` 的 `supportsInlayImage` 判定）。
-- 表情图：`{{emotion::名称}}` 按角色 `emotionImages` 列表解析为图片；正则脚本 `@@emo 名称` 把表情压入全局 `CharEmotion` store（`scripts.ts:184-206`），waifu/waifuMobile 主题的 `ChatScreen` 据此驱动右侧 `TransitionImage`（切换时新旧两张图交叉淡入淡出，多表情支持横向分格，`emp` 样式叠加显示），桌面聊天面板可用 `ResizeBox` 拖动调整大小。
-- 屏幕模式：角色 `viewScreen` 为 `emotion` 时模型按指令输出 `<Emotion="...">` 命令，`runInlayScreen` 把它转成 `{{emotion::}}`；为 `imggen` 时 `<ImgGen="...">` 先显示 "[Generating...]" 占位，异步调 Stable Diffusion 生成后把图片写入 inlay 库并替换为 `{{inlay::id}}`（`src/ts/process/inlayScreen.ts:7-50`）。
-- 文件：`{{file::名称::base64}}` 在显示模式下输出带 `risu-file` class 的文件名块（`cbs.ts:972-981`），上下文侧才解码内容。
-- 音频：`{{bgm::}}` 输出隐藏的 `risu-ctrl="bgm___auto___路径"` 元素，由 `observer.svelte.ts` 的 MutationObserver 轮询接管播放。
+- 工具调用：请求层把 API 返回的工具调用序列化成 `<tool_call>` 文本，id 与名称以 `\uf100` 分隔；展示层再把它换成一行只读提示，带 🛠️ 图标与 `x-risu-tool-call` class，没有工具卡、审批或展开交互。工具参数与结果都在上下文侧处理，不进入消息正文（`src/ts/process/mcp/mcp.ts:359`）。
+- reasoning：`<Thoughts>` 标签折叠成可展开的 details，默认文案取自语言文件的 `cot` 条目，折叠行为在流式与非流式下一致。
+- 资产 inlay：`{{inlay::id}}` 系列引用存放在 localforage 中的 inlay 库；图片上传时经 canvas 缩放到不超过 1024×1024，读取时迁移为 Blob 并缓存 object URL。输入框粘贴图片与菜单里的「发布文件」都走 `postChatFile`，把 inlay id 写入消息文本；多模态模型再把 inlay 图片以 `{{inlayed::}}` 形式拼进提示，是否支持由 `supportsInlayImage` 判定（`src/ts/process/files/inlays.ts:30-33,225-228`）。
+- 表情图：`{{emotion::名称}}` 按角色的表情图列表解析成图片。正则脚本里的 `@@emo` 指令把表情压入全局表情状态，waifu 与 waifuMobile 主题的聊天屏据此驱动右侧表情组件：切换时新旧两张图交叉淡入淡出，多表情横向分格，叠加显示由 `emp` 样式负责；桌面聊天面板可拖动调整该区域大小（`scripts.ts:184-206`）。
+- 屏幕模式：角色的 `viewScreen` 取值决定命令类型。emotion 时模型按指令输出 `<Emotion="...">` 命令，解析层把它转成表情引用；imggen 时 `<ImgGen="...">` 先显示「[Generating...]」占位，图片由 Stable Diffusion 异步生成后写入 inlay 库，再替换成 inlay 引用（`src/ts/process/inlayScreen.ts:7-50`）。
+- 文件：`{{file::名称::base64}}` 在显示模式下只输出一个带 `risu-file` class 的文件名块，内容解码发生在上下文侧（`cbs.ts:972-981`）。
+- 音频：`{{bgm::}}` 输出一个隐藏的 `risu-ctrl="bgm___auto___路径"` 元素，由 `observer.svelte.ts` 的 MutationObserver 轮询接管播放。
 
 ## 7. HTML、CSS 与内容承载边界
 
-正文 HTML 最终通过 `{@html}` 输出，但任何路径都先经 `trimMarkdown`（`parser.svelte.ts:779-799`）调用 DOMPurify；该函数同时是历史、流式、翻译后的统一清洗点，渲染组件里没有绕过它的输出路径。`ChatBody` 渲染时还会调用 `addMetadataToElement` 把模型名编码成零宽字符注入 `<p>` 标签（`parser.svelte.ts:860-874`），但开关函数 `aiWatermarkingLawApplies` 当前恒返回 false（`globalApi.svelte.ts:2333-2338`），该路径在本快照中是死代码。
+正文 HTML 都要先经 `trimMarkdown` 里的 DOMPurify 清洗，再交给 `{@html}` 输出；历史消息、流式渲染与翻译后重渲染共用这一个清洗点，渲染组件没有绕过它的输出路径。正文组件渲染时还会把模型名编码成零宽字符注入段落标签，但水印开关当前恒返回 false，这段逻辑在本快照中是死代码（`parser.svelte.ts:779-799,860-874`；`globalApi.svelte.ts:2333-2338`）。
 
 DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 
-- `uponSanitizeElement`：iframe 只放行 `https://www.youtube.com/embed/` 前缀；img 在 `hideAllImages` 开启时替换为 `/none.webp` 占位（含 style 里 background-image 的清理），否则补 `loading="lazy"`/`decoding="async"`。
-- `uponSanitizeAttribute`：class 逐个加 `x-risu-` 前缀（`hljs`、`x-risu-` 开头的例外）；href 只允许 `http://`/`https://` 并加 `target="_blank"`，其余置空；`IMG/SOURCE/VIDEO/AUDIO/STYLE` 的 `blob:` 与 `asset:` src 通过 `forceKeepAttr` 保留（inlay 依赖）。
-- HTML 清洗保留样式、受限 iframe、MathML 和交互属性，其中 `risu-form` 允许普通消息保留表单触发键；直接绑定聊天变量的两个属性只在独立 Onboarding 清洗配置放行，普通聊天消息不使用这套扩展配置（`parser/parser.svelte.ts:779-788`）。
+- 元素级 hook：iframe 只放行 `https://www.youtube.com/embed/` 前缀；img 在 `hideAllImages` 开启时换成 `/none.webp` 占位，并清理 style 里的 background-image，未开启时补上 `loading="lazy"` 与 `decoding="async"`。
+- 属性级 hook：class 逐个加 `x-risu-` 前缀，`hljs` 与已带前缀的除外；href 只允许 http 与 https 并补 `target="_blank"`，其余置空；`IMG/SOURCE/VIDEO/AUDIO/STYLE` 上的 blob 与 asset 协议 src 通过 `forceKeepAttr` 保留，inlay 依赖这条规则。
+- 清洗结果保留样式、受限 iframe、MathML 与交互属性，其中 `risu-form` 让普通消息保留表单触发键；直接绑定聊天变量的两个属性只在独立的 Onboarding 清洗配置里放行，普通聊天消息不启用这套扩展配置（`parser/parser.svelte.ts:779-788`）。
 
-消息内 `<style>` 走特殊路径（parser.svelte.ts:930-1003）：内容先以 hex 编码躲过 HTML 清洗，随后由 `decodeStyleContent` 用 `@adobe/css-tools` 解析 CSS，选择器加 `.chattext ` 前缀、class 加 `x-risu-` 前缀，再把所得 CSS 放进已清洗 DOM 的真实 style 节点。这与 SillyTavern 的 custom-style 思路同类：样式留在主文档，隔离靠选择器前缀而非 Shadow DOM。解析失败时按 `returnCSSError` 设置回显错误文本或丢弃；`@import` 规则只有 data: 开头才被保留，且被清空为 `data:,`。为避免样式标签提早闭合，恢复前会转义 CSS 内的 `</style` 序列。
+消息内样式标签走特殊路径（`parser.svelte.ts:930-1003`）：内容先以 hex 编码躲过 HTML 清洗，随后用 CSS 解析器还原，选择器加 `.chattext` 前缀、class 加 `x-risu-` 前缀，再把所得 CSS 放进已清洗 DOM 的真实 style 节点。这与 SillyTavern 的 custom-style 思路同类：样式留在主文档，隔离靠选择器前缀而非 Shadow DOM。解析失败时按设置回显错误文本或丢弃；`@import` 规则只有 data: 开头才被保留，保留时清空为空值 data:,。为避免样式标签提早闭合，恢复前会转义 CSS 内的 `</style` 序列。
 
 主文档 `index.html` 的 CSP meta 处于注释状态（index.html:14），页面级 CSP 未启用。插件运行在独立沙箱 iframe（`src/ts/plugins/apiV3/factory.ts:438, 784-788, 894-921`）：sandbox 仅 `allow-scripts allow-modals allow-downloads`（无 `allow-same-origin`，保持 opaque origin），srcdoc 附带 CSP，插件与主文档通过 postMessage RPC 桥通信（`SandboxHost`）。该沙箱服务于插件 UI，不参与普通消息正文的渲染路径。iframe 内 CSP 指令如下：
 
@@ -176,12 +190,12 @@ DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 
 ## 8. 内容交互反馈
 
-- 复制：`Chat.svelte:511-741` 支持富文本复制——重新 `ParseMarkdown` 后用 DOMParser 拆 DOM，把引用/段落/强调按主题变量内联成样式，图片经 fetch + canvas 重编码为 data URL，再以 `ClipboardItem` 同时写 `text/plain` 与 `text/html`；成功弹 `alertNormal(language.copied)`，异常降级为 `writeText` 纯文本并显示行内状态。代码块复制走右键菜单（`observer.svelte.ts:10-54`：复制全文 / 按 `x-hl-lang` 扩展名下载文件）。
-- 编辑：整段编辑切换 textarea；块级编辑（`PartialEditController.svelte`）在悬停块上追加编辑/删除按钮，拖选文本也可直接编辑；保存时把选中 HTML 转纯文本，经 `findAllOriginalRangesFromText` 的 exact/anchor/fuzzy/bigram 四级匹配定位原文区间（`src/ts/parser/partialEdit.ts:326-619`），`replaceRange` 替换后回写 `message.data` 并重新渲染，匹配失败弹窗提示。
-- **消息内按钮**：消息容器捕获点击，从目标向上查找交互属性；手动触发器优先，否则进入 Lua 按钮交互。返回结果可替换当前会话并更新该消息的重渲染计数，群聊在入口直接返回（`Chat.svelte:306-345`）。
-- **消息内表单**：容器捕获 submit 并统一阻止页面默认提交；只有带 `risu-form` 的表单且当前角色非群聊时，才收集 FormData、传给 Lua 表单交互。重复字段保留为数组，提交按钮也纳入数据；回调收到触发键及包含 data 的 JSON 元信息，可修改聊天并触发重绘。表单不会直接把字段当成聊天发送请求（`Chat.svelte:348-385,1184-1185`；`process/scriptings.ts:1121-1126,1489-1513`）。
-- 翻译：按钮切换已翻译/原文，LLM 翻译有加载旋转占位与"重新翻译/编辑翻译"入口（`ChatBody.svelte:109-149`）；翻译可在 HTML 格式化前或后进行，后者的路径会重新执行代码高亮（`postTranslationParse`）。
-- 状态反馈：删除确认、书签命名弹窗、TTS 按钮、分支创建，均通过既有 alert 系统；`clickToEdit` 设置下单击正文直接进入编辑模式。
+- 复制：消息壳的复制按钮支持富文本复制。复制前重新执行一次 Markdown 解析，用 DOMParser 拆出 DOM，把引用、段落、强调按主题变量内联成样式，图片经 fetch 与 canvas 重编码为 data URL，最后用 `ClipboardItem` 同时写入纯文本与 HTML 两种剪贴板格式；成功时弹出语言包提示，异常时降级为纯文本写入并在行内显示状态。代码块复制走右键菜单，可复制全文，或按高亮节点记录的扩展名下载文件（`Chat.svelte:511-741`；`observer.svelte.ts:10-54`）。
+- 编辑：整段编辑由消息壳把正文切换为 textarea；块级编辑由 `PartialEditController.svelte` 在悬停块上追加编辑与删除按钮，拖选文本也能直接编辑。保存时先把选中 HTML 转成纯文本，再用 exact、anchor、fuzzy、bigram 四级匹配定位原文区间，命中后由 `replaceRange` 替换并回写 `message.data`，随后重新渲染，匹配失败则弹窗提示（`src/ts/parser/partialEdit.ts:326-619`）。
+- **消息内按钮**：消息容器捕获点击后从事件目标向上查找交互属性，命中手动触发器就直接执行，未命中则进入 Lua 按钮交互。返回结果可替换当前会话并刷新该消息的重渲染计数，群聊场景在入口处直接返回（`Chat.svelte:306-345`）。
+- **消息内表单**：容器捕获 submit 事件并统一阻止浏览器的默认提交。只有带 `risu-form` 的表单且当前角色不是群聊时才继续：收集 FormData 后交给 Lua 表单交互，重复字段保留为数组，提交按钮本身也计入数据。回调收到触发键和含 data 的 JSON 元信息，可修改聊天内容并触发重绘；字段只流向 Lua 交互层（`Chat.svelte:348-385,1184-1185`；`process/scriptings.ts:1121-1126,1489-1513`）。
+- 翻译：按钮在译文与原文之间切换，LLM 翻译期间显示加载旋转占位，并提供「重新翻译」「编辑翻译」入口（`ChatBody.svelte:109-149`）。翻译可发生在 HTML 格式化之前，也可在其后执行；后一条路径由 `postTranslationParse` 重新跑一遍代码高亮。
+- 状态反馈：删除确认、书签命名弹窗、TTS 按钮与分支创建都复用项目既有的 alert 系统；开启 `clickToEdit` 后单击正文即可进入编辑模式。
 
 ## 9. 性能、缓存与测试
 
@@ -189,21 +203,25 @@ DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 
 - 列表层：窗口化（默认 30+15）限制常驻消息实例数；哈希差量挂载避免整表重渲染；流式消息在哈希中排除 data，使合帧更新只走实例方法而不是重挂载。
 - 流式层：125ms + rAF 合帧丢弃中间帧；strong 模式流式期间跳过 `editoutput` 脚本与全部 Markdown 解析，只显示纯文本。
-- 解析层：`processScriptCache`（键为脚本+数据+模式的哈希，容量上限 1000，`scripts.ts:68-93`）、`fileSrcCache` 与 `blobUrlCache`、资产索引缓存（`assetsCache`，角色切换时重建）；highlight.js 语言按需 `import`，只加载实际出现的语言；`ChatBody` 组件内缓存上一次解析结果（`lastParsed`），翻译/角色参数未变时复用。
+- 解析层：脚本执行结果按「脚本+数据+模式」的哈希缓存，容量上限 1000（`scripts.ts:68-93`）；文件与 blob URL、资产索引各有独立缓存，资产索引在角色切换时重建；highlight.js 语言按需 `import`，只加载实际出现的语言；正文组件内缓存上一次解析结果，翻译与角色参数未变时复用。
 - 渲染层：hljs 高亮结果直接进入清洗后的 HTML，不在 DOM 上二次高亮；`{#key}` 控制 ChatBody 重挂载时机。
 
 可确认的取舍是：每次流式合帧仍然对累计全文执行完整 Markdown 管线（含正则脚本、KaTeX、高亮与清洗），成本随单条回复线性增长；`balanced` 与 `off` 的唯一区别是合帧频率，不是重算范围。
 
-测试：仓库使用 vitest（`package.json` 的 `test` 脚本），共 24 个 `*.test.ts` 文件。覆盖渲染相关的主要有：parser 的 CBS 函数（strings/loop/escapes/conditionals）、chatML、chatVar、inlay 资产读写、chatLoadPages 数值归一化、scriptings 触发器；另有 GUI 原语、请求层、翻译正则等测试。未发现针对 `Chat`/`ChatBody`/`Chats` 组件或流式合帧链路的组件级测试，`parser.svelte.ts` 的 DOMPurify hook 与 `decodeStyle` 没有直接测试文件。
+测试：仓库使用 vitest（`package.json` 的 test 脚本），共 24 个 `*.test.ts` 文件。覆盖渲染相关的主要有：parser 的 CBS 函数（strings/loop/escapes/conditionals）、chatML、chatVar、inlay 资产读写、chatLoadPages 数值归一化、scriptings 触发器；另有 GUI 原语、请求层、翻译正则等测试。未发现针对消息壳、正文组件与列表组件的组件级测试，也没有覆盖流式合帧链路；`parser.svelte.ts` 的 DOMPurify hook 与样式解码没有直接测试文件。
 
 ## 10. 扩展方式与已确认边界
 
 新增"节点类型"没有注册表，全部落在字符串协议的既定阶段：
 
-- 新变量/函数：`registerCBS` 注册到 `matcherMap`（parser.svelte.ts:984-1064），`{{名称::参数}}` 即得；`cbs.ts` 已有 40+ 内置函数（含文件、数组、字符串、日期、随机等）。
-- 新资产类型：改 `assetRegex` 与 `parseAdditionalAssets` 的 switch，并同步 DOMPurify 的 `ADD_TAGS`/`ADD_ATTR` 与 `x-risu-` class 前缀白名单。
-- 新正文标记（如 `<Thoughts>`、`<tool_call>`）：在 `parseThoughtsAndTools` 加正则或配对扫描，输出受清洗白名单约束的 HTML。
-- 脚本层：正则脚本按 `editinput`/`editoutput`/`editdisplay`/`editprocess` 四模式作用于文本（另有 `edittrans` 翻译正则）；Lua 触发器（`triggerscript`）提供同名模式与按钮触发；插件 V2 提供 `addRisuScriptHandler` 四模式钩子和 `chatOutput` 监听器；插件面板（`chatPanelStore`）的 HTML 直接 `{@html}` 渲染，独立于消息管线。
+- 新变量与函数：用 `registerCBS` 把回调注册进 `matcherMap` 后，正文即可用 `{{名称::参数}}` 形式调用；`cbs.ts` 已内置 40 多个函数，覆盖文件、数组、字符串、日期、随机等类别（`parser.svelte.ts:984-1064`）。
+- 新资产类型：在 `assetRegex` 与 `parseAdditionalAssets` 的 switch 中加分支，并同步 DOMPurify 的 `ADD_TAGS`、`ADD_ATTR` 与 `x-risu-` class 前缀白名单。
+- 新正文标记（如 `<Thoughts>`、`<tool_call>`）：在 `parseThoughtsAndTools` 中加正则或配对扫描，输出受清洗白名单约束的 HTML。
+- 脚本层：正则脚本按模式作用于文本，Lua 触发器、插件 V2 与插件面板各有一套入口。
+  - 正则脚本：`editinput`、`editoutput`、`editdisplay`、`editprocess` 四种模式作用于文本，另有 `edittrans` 专用于翻译
+  - Lua 触发器：同名模式加按钮触发
+  - 插件 V2：`addRisuScriptHandler` 四模式钩子与 `chatOutput` 监听器
+  - 插件面板：HTML 由 `{@html}` 直接渲染，独立于消息管线
 - 新消息壳主题：`guiHTML` 模板是白名单标签转译，新增标签需要扩展 `renderGuiHtmlPart`。
 
 已确认边界：
@@ -211,7 +229,7 @@ DOMPurify 通过全局 hook 收紧三类行为（parser.svelte.ts:46-119）：
 - 消息角色只有 user/char 两值；reasoning、工具、附件都借道正文文本标记，展示层不维护独立状态机。
 - 窗口化卸载是彻底的（unmount），离屏消息不保留 DOM 状态；挂载/卸载由非加密哈希驱动，哈希冲突或 reloadPointer 变化会导致非预期重挂载（静态推断，未实测）。
 - 流式三档中 `balanced`/`strong` 的合帧器只在 `isStreaming` 期间生效；脚本修改消息文本的 `@@inject` 等动作在合帧期间以累计全文为输入，每帧从零开始而非增量。
-- `Message.svelte` 重写计划停留在 TODO；`VisualNovel` 目录与 AGENTS.md 描述不符（本快照中不存在）；`LiteUI` 目录只有角色卡 hub 组件（`LiteMain.svelte` + `LiteCardIcon.svelte`），聊天仍复用 `DefaultChatScreen`，不是独立的渲染变体。
+- `Message.svelte` 重写计划停留在 TODO；`VisualNovel` 目录与 AGENTS.md 描述不符（本快照中不存在）；`LiteUI` 目录只有角色卡 hub 的两个组件，聊天仍复用 `DefaultChatScreen` 渲染。
 
 ## 设计取舍与已确认边界
 
@@ -223,14 +241,14 @@ Risuai 把"渲染"定义为字符串变换链，而不是组件树：一切内�
 
 ## 未验证事项
 
-- Svelte 5 深层 `$state` 代理的失效传播语义：`message[i].data` 赋值与 `reloadKeys` 自增如何使 `Chats.svelte` 的 `$effect` 重跑，静态代码只能确认这是设计上的通知点，未安装依赖验证具体信号行为。
-- 流式合帧的实测帧耗时：每次合帧对累计全文跑完整管线（含逐块 hljs 高亮）在长回复下的表现未运行测量；`balanced`/`strong` 的实际性能差未实测。
-- strong 模式下流式显示与最终渲染的内容差异（脚本改写、Markdown 收尾）在运行中的观感未验证。
-- `trimUntilPunctuation`、`pickHashRand`、资产模糊匹配等边界行为未运行验证。
-- 自动播放的 `autoplay` 视频/音频受浏览器策略影响，实际行为未验证。
-- 消息壳层与操作栏的键盘可用性未验证（多个点击元素只有 click 处理，依赖 `a11y_*` ignore 注释）。
-- DOMPurify hook 组合（style 二次恢复、blob: src 保留、iframe 白名单）对攻击语料的行为未验证。
-- Tauri（`convertFileSrc`/`asset.localhost`）与 Web（hub URL/SW 缓存）两种部署下资产 URL 的解析差异未运行对比。
+- Svelte 5 深层 `$state` 代理的失效传播语义：给 `message[i].data` 赋值、自增 `reloadKeys` 之后，`Chats.svelte` 的 `$effect` 在什么粒度上重跑，静态代码只能确认这是设计上的通知点；本次未安装依赖，具体信号行为未验证。
+- 流式合帧的实测帧耗时：每次合帧都要对累计全文跑完整管线，其中包含逐块 highlight.js 高亮，长回复下的耗时未做运行测量；balanced 与 strong 两档的实际性能差距同样未实测。
+- strong 模式下，流式期间的原文显示与收尾后完整渲染在内容上的差异（脚本改写、Markdown 收尾）在运行时观感如何，本次未验证。
+- 截断到最后一个标点、资产路径的确定性随机选择、资产名模糊匹配等边界行为未做运行验证（`trimUntilPunctuation`、`pickHashRand`）。
+- 自动播放的视频与音频受浏览器 autoplay 策略影响，实际行为未验证。
+- 消息壳层与操作栏的键盘可用性未验证：多个点击元素只绑定了 click，依赖 `a11y_*` 的 ignore 注释。
+- DOMPurify 的几项 hook 组合（样式二次恢复、`blob:` src 保留、iframe 白名单）对攻击语料的行为未验证。
+- 两种部署下资产 URL 的解析差异未做对比：Tauri 走 `convertFileSrc` 与 `asset.localhost`，Web 走 hub URL 与 Service Worker 缓存。
 
 ## 关键源码索引
 

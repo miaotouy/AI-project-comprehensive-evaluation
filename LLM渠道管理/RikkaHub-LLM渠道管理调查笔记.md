@@ -26,7 +26,13 @@ RikkaHub 把「渠道」拆成两层：一层是可序列化的配置对象 `Pro
 
 ## 系统边界与总体调用链
 
-渠道配置属于 `ai/` 模块的数据层与 `app/` 模块的持久化层；协议请求属于 `ai/` 的 provider 实现；运行时选择属于 `app/` 的 `ChatService` 与 `ChatRequestFactory`。一次对话的主链路可概括为：
+三块职责分别落在两个模块：
+
+- 渠道配置的结构定义在 `ai/`，持久化由 `app/` 的设置层完成；
+- 协议请求由 `ai/` 下的 provider 实现发出；
+- 运行时按模型反查渠道，由 `app/` 的 `ChatService` 与 `ChatRequestFactory` 完成。
+
+一次对话的主链路可概括为：
 
 ```text
 Settings.providers : List<ProviderSetting>   (DataStore 单键 JSON)
@@ -50,7 +56,12 @@ app 层不直接持有协议实现，只通过 `ProviderManager` 以子类为键
 
 ### 1.1 配置模型
 
-`ProviderSetting` 是 kotlinx 序列化的密封类，公共字段为 `id`（Uuid）、`enabled`、`name`、`models`、`balanceOption`；`builtIn`、`description`、`shortDescription` 标了 `@Transient`，属于运行时展示信息，不落盘。三个密钥型子类各自带端点与凭据字段，账号型子类只带凭据对象：
+`ProviderSetting` 是 kotlinx 序列化的密封类，字段分两类：
+
+- 随配置落盘的公共字段：`id`（Uuid）、`enabled`、`name`、`models`、`balanceOption`；
+- 标了 `@Transient` 的展示字段：`builtIn`、`description`、`shortDescription`，运行时有值，写盘时跳过。
+
+三个密钥型子类各自再带端点与凭据字段，账号型子类只带凭据对象：
 
 | 子类（`@SerialName`） | 默认 baseUrl | 端点字段 | 凭据字段 | 其它字段 |
 |---|---|---|---|---|
@@ -68,19 +79,25 @@ ChatGPT 与 Grok 继承自一个 `Account` 基类，配置里只有凭据对象�
 
 一个 `ProviderSetting` 实例对应一个可路由渠道：它同时携带名称、启用状态、端点、凭据和模型列表，数据模型里没有「一个渠道下挂多个 Endpoint」的结构。要接多个中转地址，只能创建多个实例，`id` 由 Uuid 区分。内置渠道与用户渠道在这一层没有结构差异，区别只在 `builtIn` 标记和固定的 Uuid。
 
-模型对象 `Model` 的字段包括 API 侧模型名 `modelId`、展示名 `displayName`、内部标识 `id`（Uuid）、类型（CHAT/IMAGE/EMBEDDING）、输入输出模态、能力集合、内置工具集合、模型级 `customHeaders` 与 `customBodies`，以及一个模型级 `providerOverwrite: ProviderSetting?`。
+模型对象 `Model` 的字段按三组划分：
+
+| 分组 | 字段 |
+|---|---|
+| 标识与展示 | `modelId`（API 侧模型名）、`displayName`、`id`（Uuid） |
+| 能力描述 | 类型（CHAT/IMAGE/EMBEDDING）、输入输出模态、能力集合、内置工具集合 |
+| 模型级覆盖 | `customHeaders`、`customBodies`、`providerOverwrite: ProviderSetting?` |
 
 `providerOverwrite` 让单个模型可以覆盖所属渠道的端点与凭据。选择时会先用覆盖对象替换渠道，并把它的 `models` 置空以避免 JSON 循环引用；设置页创建覆盖对象时同样显式清空模型列表。
 
 ### 1.3 Endpoint 的定义
 
-本笔记把「渠道实例 + 其端点字段 + 凭据 + 模型列表」视为一个 Endpoint。路径拼接方式是按协议硬编码的：OpenAI 用 baseUrl 拼 `chatCompletionsPath` 或 `responsesPath`，Claude 固定拼 `/messages`，Google 的路径由 `vertexAI` 决定是 `models/{id}:...` 还是 `publishers/google/models/{id}:...`。自定义路径的能力只对 OpenAI 子类开放，且路径输入框对内置渠道禁用。
+本笔记把「渠道实例 + 其端点字段 + 凭据 + 模型列表」视为一个 Endpoint。请求路径按协议在代码里写死：OpenAI 子类在 baseUrl 后接渠道配置的 Chat Completions 路径或 Responses 路径，Claude 固定接 `/messages`，Google 依是否开启 Vertex 分别拼 `models/{id}:...` 或 `publishers/google/models/{id}:...`。只有 OpenAI 子类开放自定义路径，内置渠道的路径输入框处于禁用状态。
 
 ## 2. 配置生命周期、管理入口与持久化
 
 ### 2.1 存储
 
-所有渠道配置放在同一个 DataStore Preferences 文件（名称 `settings`）里的一个字符串键 `providers`，值是 `List<ProviderSetting>` 的 JSON。`Settings` 数据类里 `providers` 的默认值就是内置默认列表。写盘走持久化函数，把整个 `Settings` 逐字段写入；读取时对 `providers` 键做 JSON 解码，为空则用默认列表。
+所有渠道配置都放在同一个 DataStore Preferences 文件里，文件名 `settings`，只占一个字符串键 `providers`，值是一段 `List<ProviderSetting>` 的 JSON。设置数据类给这个键的默认值就是内置渠道列表。写盘时持久化函数把整个设置对象逐字段写入；读取时先对该键做 JSON 解码，内容为空则回退到默认列表。
 
 读取管线是连续多次 `map`：先补齐缺失的内置渠道（按 Uuid 判断），再把内置渠道的 `builtIn`、`description`、`shortDescription` 用默认值覆盖回来，然后按渠道 Uuid 去重、按模型 Uuid 去重，最后过滤掉指向不存在模型的收藏项。这条管线同时解释了「内置渠道删不掉」和「内置渠道的说明文案随版本更新」两个可观察行为。
 
@@ -117,9 +134,24 @@ ChatGPT 与 Grok 继承自一个 `Account` 基类，配置里只有凭据对象�
 
 两条导入来自备份/导入页，且只导入渠道与（Chatbox 的）会话，不涉及导出。
 
-CherryStudio 导入器把备份当作 ZIP，读取其中的 `data.json`，再逐层取到 localStorage 里的持久化字符串、`llm` 字段和 `providers` 数组。它按 `type` 字段映射协议：`anthropic` 映射为 Claude 子类并补 `/v1`，`gemini`、`vertexai` 映射为 Google 子类并补 `/v1beta`，其余映射为 OpenAI 子类；`openai-response` 类型或模型带 `endpoint_type: "openai-response"` 时置 `useResponseApi`。没有 `apiKey` 的渠道会被跳过，最终按「协议 + baseUrl + apiKey」去重后整体插到列表头部。模型能力用 `ModelRegistry` 按模型 ID 现算后写入。
+CherryStudio 导入器把备份当作 ZIP，先读其中的 `data.json`，再逐层取到 localStorage 里的持久化字符串，从中拿到 `llm` 字段和 `providers` 数组。协议按 `type` 字段映射成渠道子类：
 
-Chatbox 导入器面向 Chatbox 备份 v2：校验 `manifest.json` 的格式与版本，从 settings 文件里读 `providers` 对象，按 provider key 映射协议（`claude`/`anthropic`、`gemini`/`google`、其余 OpenAI 兼容），并用一张内置的 key 到 baseUrl 映射表补齐缺省端点（DeepSeek、Qwen、Moonshot、OpenRouter、SiliconFlow、Groq、xAI、Mistral、Perplexity 等）。它按 `apiStyle` 是否含 response 或模型级 `apiStyle` 决定 Responses 模式，模型能力来自 Chatbox 的 `capabilities` 数组（vision、image_generation、tool_use、reasoning）而不是本地注册表。同样跳过无 Key 的渠道；导入结果会与现有渠道按身份串去重，避免重复。
+| `type` 取值 | 映射结果 |
+|---|---|
+| `anthropic` | Claude 子类，baseUrl 补 `/v1` |
+| `gemini`、`vertexai` | Google 子类，baseUrl 补 `/v1beta` |
+| `openai-response`，或模型带 `endpoint_type: "openai-response"` | OpenAI 子类并置 `useResponseApi` |
+| 其余取值 | OpenAI 子类 |
+
+没有 `apiKey` 的渠道会被跳过，其余按「协议 + baseUrl + apiKey」去重后整体插到列表头部；模型能力由 `ModelRegistry` 按模型 ID 现算后写入。
+
+Chatbox 导入器面向 Chatbox 备份 v2：先校验 `manifest.json` 的格式与版本，再从 settings 文件里读出 `providers` 对象。协议按 provider key 映射：
+
+- `claude`、`anthropic` → Claude 子类；
+- `gemini`、`google` → Google 子类；
+- 其余 → OpenAI 兼容子类。
+
+缺省端点由一张内置的 key 到 baseUrl 映射表补齐，覆盖 DeepSeek、Qwen、Moonshot、OpenRouter、SiliconFlow、Groq、xAI、Mistral、Perplexity 等。`apiStyle` 含 response 或模型级 `apiStyle` 命中时，渠道改走 Responses 模式；模型能力直接取自 Chatbox 备份的 `capabilities` 数组（vision、image_generation、tool_use、reasoning），本地注册表不参与这里的推算。导入同样跳过无 Key 的渠道，结果与现有渠道按身份串去重，避免重复。
 
 两个导入器都要求凭据非空，也就是「导入渠道」在实现上等价于「导入带 Key 的渠道」；同时导入对象的 Uuid 由字符串哈希派生（Chatbox 用 name-based UUID），因此同一份备份重复导入会命中相同 Uuid，而不是每次生成新实例。
 
@@ -131,7 +163,13 @@ Chatbox 导入器面向 Chatbox 备份 v2：校验 `manifest.json` 的格式与�
 
 凭据会出现在四个可见位置。分享/二维码把完整 JSON（含 Key）Base64 编码后展示并可通过系统分享发出；备份会把完整 `Settings` 序列化为 `settings.json` 打进 ZIP（WebDAV/S3 备份项为数据库与文件）；请求日志在开启时会记录请求头与请求体；设置页的 Key 输入框可切换明文显示。请求日志的掩码只覆盖 `Proxy-Authorization` 一个头，`Authorization` 与 `x-api-key` 不在掩码范围内。
 
-Header 分三层组装。协议层负责认证与内容类型（OpenAI 用 Bearer，Claude 用 `x-api-key` 加 `anthropic-version`，Google 用 `x-goog-api-key` 或 Vertex 的 Bearer/key 查询参数）；渠道层不加额外 Header；请求层在最后合并模型级与助手级的自定义 Header，并追加两个按来源域判断的 Header——aihubmix 追加 `APP-Code`，OpenRouter 追加 `X-Title` 与 `HTTP-Referer`。会话 ID 通过 `X-Session-ID` 下发，目标域为 opencode.ai 时额外加 `x-opencode-session`。
+Header 分三层组装：
+
+- 协议层负责认证与内容类型：OpenAI 走 Bearer，Claude 用 `x-api-key` 加 `anthropic-version`，Google 用 `x-goog-api-key` 或 Vertex 的 Bearer/key 查询参数；
+- 渠道层不加额外 Header；
+- 请求层最后合并模型级与助手级的自定义 Header，并按来源域追加两项：aihubmix 加 `APP-Code`，OpenRouter 加 `X-Title` 与 `HTTP-Referer`。
+
+会话 ID 通过 `X-Session-ID` 下发，目标域为 opencode.ai 时额外加 `x-opencode-session`。
 
 代理与传输参数来自全局网络设置：OkHttp 客户端挂载按设置动态选择的代理选择器与代理认证器，连接超时 20 秒、读超时 10 分钟、写超时 120 秒，并开启连接失败重试；拦截器统一注入 `Accept-Language` 与 User-Agent（未设置时用 `RikkaHub-Android/<版本>`）。代理配置变化时会清空连接池。这些属于全局设置而非单渠道字段，即渠道不能各自指定代理。
 
@@ -145,7 +183,9 @@ Header 分三层组装。协议层负责认证与内容类型（OpenAI 用 Beare
 
 ### 4.2 静态能力推断与 models.dev 目录
 
-`ModelRegistry` 维护两套数据。第一套是从 models.dev 目录裁出的模型信息：应用启动时先装 `filesDir/models_dev/api.json` 或 assets 里的 `models_dev.json` 快照，再按一天一次的节奏带 ETag 拉取 `https://models.dev/api.json`，成功才替换缓存，并要求目录至少 100 条以防空响应覆盖；匹配时把完整 id、去前缀名称与 canonical id 都建索引，同一键下多条记录按多数投票合并（`ai/src/main/java/me/rerere/ai/registry/ModelsDevCatalog.kt`、`app/src/main/java/me/rerere/rikkahub/data/remote/ModelsDevUpdater.kt`）。
+`ModelRegistry` 维护两套数据。第一套是从 models.dev 目录裁出的模型信息：应用启动时先装 `filesDir/models_dev/api.json` 或 assets 里的 `models_dev.json` 快照，再按一天一次的节奏带 ETag 拉取 `https://models.dev/api.json`，成功才替换缓存，并要求目录至少 100 条以防空响应覆盖；匹配时把完整 id、去前缀名称与 canonical id 都建索引，同一键下多条记录按多数投票合并。
+
+这一套的目录结构与更新节奏分别实现在 `ai/src/main/java/me/rerere/ai/registry/ModelsDevCatalog.kt` 与 `app/src/main/java/me/rerere/rikkahub/data/remote/ModelsDevUpdater.kt`。
 
 第二套是内置的定义表，每条定义由匹配器与三类元数据组成：输入模态、输出模态、能力集合，外加可选上下文长度。匹配基于把模型 ID 转成小写并切分成字母段、数字段与单字符，然后对各段序列做匹配；支持 token 序列、取反序列、正则段和精确 ID 四种形式，精确 ID 带 1000 分加权。解析时取所有定义里得分最高的一组，同分则合并；模态为空时回退为纯文本，能力取并集。定义表用 `defineGroup` 把多个定义聚合成一个逻辑组（如 `CLAUDE_SERIES`、`GEMINI_SERIES`），供请求层按系列判断。
 
@@ -161,7 +201,14 @@ Header 分三层组装。协议层负责认证与内容类型（OpenAI 用 Beare
 
 ### 5.1 协议分支与实现归属
 
-`Provider` 接口定义 `listModels`、`generateText`、`streamText`、`getBalance`，并为 embedding 与图像生成/编辑提供默认实现（默认直接抛「不支持」）。OpenAI 子类的实现内部持有 ChatCompletions 与 Response 两个 API 对象，在两个入口按 `useResponseApi` 二选一，因此「切换协议」是渠道级开关而不是新类型。Claude 与 Google 各自只有一个实现类，但 Google 在非 Vertex 且 `useInteractionsApi` 打开时改走 Interactions API，Vertex 与其余情况仍走 generateContent。ChatGPT 与 Grok 是独立实现，共用账号鉴权的请求适配。`ProviderMessageUtils` 提供把消息 parts 按工具边界分组的公共逻辑，保证工具调用与其结果相邻。
+`Provider` 接口定义四个方法：
+
+- `listModels`：取渠道可用的模型；
+- `generateText`：非流式生成；
+- `streamText`：流式生成；
+- `getBalance`：查询余额。
+
+接口另为 embedding 与图像生成/编辑提供默认实现，默认直接抛「不支持」。OpenAI 子类的实现内部持有 Chat Completions 与 Response 两个 API 对象，在两个入口按 `useResponseApi` 二选一，因此切换协议是渠道级开关，不产生新类型。Claude 与 Google 各自只有一个实现类，但 Google 在非 Vertex 且 `useInteractionsApi` 打开时改走 Interactions API，Vertex 与其余情况仍走 generateContent。ChatGPT 与 Grok 是独立实现，共用账号鉴权的请求适配。`ProviderMessageUtils` 提供把消息 parts 按工具边界分组的公共逻辑，保证工具调用与其结果相邻。
 
 ### 5.2 OpenAI 兼容（Chat Completions）
 
@@ -179,7 +226,15 @@ Claude 实现外还有一层针对 `pause_turn` 的续跑逻辑：非流式与�
 
 ### 5.5 Google / Vertex
 
-未开 Vertex 时请求 `generativelanguage` 的 baseUrl，认证头为 `x-goog-api-key`；开 Vertex 且用服务账号时请求 `aiplatform.googleapis.com` 的项目级路径并用服务账号换取的 Bearer token 认证；开 Vertex 但用 API Key 时请求 `aiplatform` 的通用路径并把 Key 作为 `key` 查询参数。路径按是否 Vertex 在 `models/{id}:generateContent` 与 `publishers/google/models/{id}:...` 之间切换，流式端点固定加 `alt=sse`。请求体把 system 写成 systemInstruction，消息写成 contents，工具写成 functionDeclarations 与 functionResponse，服务端工具映射为 Google 的搜索与 URL 上下文档位。服务账号 token 由独立组件用私钥签发 JWT 换取，私钥在请求时先做 JSON 反转义。
+地址与认证按场景分支：
+
+| 场景 | baseUrl | 认证方式 |
+|---|---|---|
+| 未开 Vertex | `generativelanguage` 的地址 | `x-goog-api-key` |
+| 开 Vertex、用服务账号 | `aiplatform.googleapis.com` 的项目级路径 | 服务账号换取的 Bearer token |
+| 开 Vertex、用 API Key | `aiplatform` 的通用路径 | Key 作为 `key` 查询参数 |
+
+路径随是否 Vertex 在 `models/{id}:generateContent` 与 `publishers/google/models/{id}:...` 之间切换，流式端点固定加 `alt=sse`。请求体把 system 写成 systemInstruction，消息写成 contents，工具写成 functionDeclarations 与 functionResponse，服务端工具映射为 Google 的搜索与 URL 上下文档位。服务账号 token 由独立组件用私钥签发 JWT 换取，私钥在请求时先做 JSON 反转义。
 
 非 Vertex 渠道还有一个 `useInteractionsApi` 开关：打开后非流式与流式都改走 Interactions API，其请求体与流式解码器独立；该接口目前只由 Gemini Developer API 提供，Vertex 渠道忽略此开关（`ai/src/main/java/me/rerere/ai/provider/providers/google/InteractionsAPI.kt`、`GoogleProvider.kt` 的 `usesInteractionsApi`）。
 

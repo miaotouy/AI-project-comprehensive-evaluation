@@ -16,7 +16,7 @@
 
 NextChat 当前没有数据库化或列表化的“渠道实例”。渠道是代码内固定的 Provider 枚举；每个 Provider 在一个全局客户端 Access store 中对应一组 endpoint、凭据和协议参数。用户可以编辑当前 Provider 的配置，但不能在同一 Provider 下新增第二个命名 Endpoint，也不能建立带独立 ID 的渠道档案。
 
-1. 渠道实体粒度是“固定 Provider + 一组字段”，不是用户实例。`ServiceProvider` 提供固定选项，`useAccessStore` 只保存一份各 Provider 配置；当前会话的模型配置另存 `model` 和 `providerName`，两者分属不同的 store（`app/constant.ts:120-164`、`app/store/access.ts:65-154`、`app/store/config.ts:63-84`）。
+1. NextChat 把渠道实现为「固定 Provider + 一组配置字段」，同一 Provider 只保留一份配置，用户无法再创建第二个实例。源码用 `ServiceProvider` 枚举固定可选平台，全局 Access store 为每个 Provider 只保存这一组字段；当前会话的模型名与 Provider 名保存在另一个 store（`app/constant.ts:120-164`、`app/store/access.ts:65-154`、`app/store/config.ts:63-84`）。
 2. Web 设置页可以查看和编辑固定 Provider 的 endpoint、key、版本等字段，并选择当前 Provider；App 构建会强制启用自定义配置。源码未找到渠道级新增、复制、删除、独立启停或命名管理入口。
 3. 本地配置可通过设置页导出和导入。导出的是多个 Zustand store 的完整非函数状态，其中包括 Access store，因此源码路径上 API key、endpoint 和 access code 会进入备份 JSON；未找到脱敏或排除凭据的导出逻辑（`app/utils/sync.ts:17-26`、`121-135`、`app/store/sync.ts:58-83`）。
 4. Web 默认通过 Next.js `/api/...` 代理；App/export 使用 Provider 官方 base URL 或用户填写的 URL 直连。Tauri Rust 层只注册流式请求命令，没有独立的渠道管理或凭据服务（`app/store/access.ts:31-63`、`src-tauri/src/main.rs:4-11`）。
@@ -62,7 +62,14 @@ Access store 为各 Provider 保存 endpoint 和凭据字段，例如 OpenAI 的
 
 ### 2.1 配置文件和服务端环境变量
 
-服务端渠道配置来自环境变量，例如 `OPENAI_API_KEY`、`BASE_URL`、`AZURE_URL`、`GOOGLE_API_KEY` 和其他 Provider 对应的 URL/key 变量；`getServerSideConfig` 将它们组装成 `/api/config` 返回的能力和默认配置（`app/config/server.ts:5-99`、`132-277`）。这属于部署配置，不是用户可管理的渠道文件。
+服务端渠道配置来自部署环境中的变量：每个 Provider 各有一套 key 与 URL 字段，由 `getServerSideConfig` 把它们组装成 `/api/config` 返回的能力和默认配置（`app/config/server.ts:5-99`、`132-277`）。常见变量包括：
+
+- OpenAI：`OPENAI_API_KEY`、`BASE_URL`
+- Azure：`AZURE_URL`
+- Google：`GOOGLE_API_KEY`
+- 其他平台：各自对应的 URL/key 变量
+
+这类配置属于部署侧设定，用户无法在 Web UI 中将其作为渠道条目管理。
 
 源码未找到单独的渠道 JSON/YAML/TOML 配置文件、渠道 schema 文件或迁移工具。环境变量可以作为服务端默认配置来源，但不能在 Web UI 中列出、复制或删除多个服务端渠道。
 
@@ -86,7 +93,7 @@ Provider 选择器列出 `Object.entries(ServiceProvider)`，切换后只改变�
 
 ### 2.3 App/export 与桌面端
 
-`BUILD_MODE=export`、`BUILD_APP=1` 用于生成导出构建和 Tauri App（`package.json:10-16`）。App 运行设置页时会把 `useCustomConfig` 强制设为 `true`，并隐藏 Web 专用的自定义 Endpoint 开关；用户仍可编辑当前 Provider 的 URL/key 字段（`app/components/settings.tsx:657-674`、`722-739`）。
+构建脚本用两个环境变量区分产物：设 `BUILD_MODE=export` 时生成导出构建，设 `BUILD_APP=1` 时生成 Tauri App（`package.json:10-16`）。App 运行设置页时会把 `useCustomConfig` 强制开启，并隐藏 Web 专用的自定义 Endpoint 开关；用户仍可编辑当前 Provider 的 URL/key 字段（`app/components/settings.tsx:657-739`）。
 
 App/export 复用同一套 React 设置和 Zustand store，没有发现另一个桌面渠道管理界面。Tauri 主进程只注册 `stream::stream_fetch` 和窗口状态插件，未找到渠道 CRUD、系统密钥链、主进程配置文件或 IPC 管理 API（`src-tauri/src/main.rs:4-11`）。因此桌面端的查看、编辑、导入、导出范围主要继承 Web 设置组件；本次未运行打包 App，窗口保存对话框等实际平台行为未验证。
 
@@ -102,7 +109,7 @@ App/export 复用同一套 React 设置和 Zustand store，没有发现另一个
 
 ### 2.5 本地持久化、默认配置和合并
 
-`createPersistStore` 将所有持久化 store 的 JSON 存储切换到 IndexedDB，失败时回退到 localStorage（`app/utils/store.ts:29-77`、`app/utils/indexedDB-storage.ts:7-43`）。Access store 的版本为 2，只处理旧 `token` 到 `openaiApiKey` 等字段迁移（`app/store/access.ts:285-301`）。源码未见 API key 加密、设备绑定或按字段脱敏。
+所有持久化 store 的 JSON 存储由 `createPersistStore` 统一切换到 IndexedDB，写入失败时回退到 localStorage（`app/utils/store.ts:29-77`、`app/utils/indexedDB-storage.ts:7-43`）。Access store 当前版本为 2，迁移只覆盖旧 token 字段到 `openaiApiKey` 一类字段改名（`app/store/access.ts:285-301`）。源码中未见 API key 加密、设备绑定或按字段脱敏。
 
 Web 启动时 `useAccessStore.fetch` 请求 `/api/config`，将服务端配置合并到客户端 Access store；App/export 不请求该接口（`app/store/access.ts:252-283`）。服务端下发的字段可能覆盖同名客户端状态，实际覆盖结果取决于当前 store 的持久化和请求时序；本次未运行验证竞态。
 
@@ -112,7 +119,17 @@ Web 启动时 `useAccessStore.fetch` 请求 `/api/config`，将服务端配置�
 
 ### 3.1 凭据存储和进入请求
 
-用户凭据进入 Access store，并通过 IndexedDB 或 localStorage 持久化。`getHeaders` 根据会话 `providerName` 选择对应 key，并设置协议需要的认证头：OpenAI 等使用 Bearer，Azure 使用 `api-key`，Anthropic 使用 `x-api-key`，Google 使用 `x-goog-api-key`；Iflytek 将 key 和 secret 拼接（`app/client/api.ts:244-365`）。Baidu 在 App 模式有不设置认证头的特殊分支，具体认证由其平台请求逻辑处理。
+用户凭据进入 Access store，并通过 IndexedDB 或 localStorage 持久化。请求发出前，`getHeaders` 按会话中的 `providerName` 选出该 Provider 的 key，再依协议写入认证头（`app/client/api.ts:244-365`）：
+
+| Provider | 认证头 |
+|---|---|
+| OpenAI 一类 | Bearer |
+| Azure | `api-key` |
+| Anthropic | `x-api-key` |
+| Google | `x-goog-api-key` |
+| Iflytek | key 与 secret 拼接 |
+
+Baidu 在 App 模式有不设置认证头的特殊分支，具体认证由其平台请求逻辑处理。
 
 Web 请求可携带 access code，由服务端认证逻辑验证；当允许使用服务端 key 且用户没有 key 时，代理从服务端配置注入 Provider 对应 key（`app/api/auth.ts:27-129`）。服务端 Provider key 支持逗号分隔值并随机选择一项，但选择结果不持久化为健康状态（`app/config/server.ts:116-129`）。
 
@@ -124,7 +141,7 @@ Web 代理 `app/api/common.ts` 和 `app/api/proxy.ts` 负责路径恢复、认�
 
 ## 4. 模型目录与能力元数据
 
-模型与渠道分开维护。`DEFAULT_MODELS` 提供静态模型表；首页还会调用当前 adapter 的 `models()`，把动态返回的模型合并进 Config store（`app/constant.ts:746-805`、`app/components/home.tsx:223-235`、`app/store/config.ts:171-192`）。用户和服务端可通过逗号分隔的 `CUSTOM_MODELS`/`customModels` 增加、显示、启用或禁用模型；找不到的模型会生成 custom provider 类型的模型项（`app/utils/model.ts:46-161`）。
+模型目录与渠道配置分开维护。静态模型表由 `DEFAULT_MODELS` 给出；首页加载时会调用当前 adapter 的模型列表接口，把动态返回的模型合并进 Config store（`app/constant.ts:746-805`、`app/components/home.tsx:223-235`）。用户和服务端都能通过逗号分隔的模型列表配置增加、显示、启用或禁用模型，源码中查不到的模型会生成 custom provider 类型的模型项（`app/store/config.ts:171-192`、`app/utils/model.ts:46-161`）。
 
 模型完整身份使用 `model@provider`，用于解决同名模型跨 Provider 并存。设置页的 `ModelConfigList` 修改的是会话模型、压缩模型和生成参数，不会创建或编辑渠道（`app/components/model-config.tsx:12-49`、`194-270`）。模型表包含可用性、显示名和 Provider 元数据；本次未找到统一维护价格、配额、延迟或健康度的渠道目录。
 

@@ -51,31 +51,31 @@ MCP 不是静态内置工具。`agent-bundle-mcp-runtime.ts:127-162` 通过 MCP 
 
 ## 3. 模型调用表示与 Provider 适配
 
-Agent Core 使用统一的 `AssistantMessage` 内容块；工具调用块类型为 `toolCall`，包含调用 id、名称和参数（`packages/agent-core/src/types.ts`）。`streamAssistantResponse` 将内部消息经 `convertToLlm` 转换为 Provider 请求，并把 Provider 流中的 tool-call start/delta/end 合并回 assistant 消息（`agent-loop.ts:515-600`）。Provider 的协议差异由 `StreamFn`/LLM runtime 适配层承担，Agent 工具本身不直接依赖某一厂商格式。
+模型响应在 Agent Core 中统一表示为 `AssistantMessage` 内容块，其中工具调用块使用 `toolCall` 类型，携带调用 id、名称和参数（`packages/agent-core/src/types.ts`）。下一轮请求由 agent 循环发出：内部消息先转换成 Provider 请求，Provider 流中的 tool-call 增量再合并回 assistant 消息（`agent-loop.ts:515-600`）。协议差异由流适配层承担，工具实现本身不依赖某一厂商格式。
 
 `src/agents/agent-tool-definition-adapter.ts` 把运行时 `AgentTool` 的 schema、描述、执行模式和更新回调转为会话工具定义，同时兼容新旧 execute 参数顺序。客户端托管工具在适配前检查名称冲突；与现有工具或彼此重复的规范化名称会被拒绝（同文件 `findClientToolNameConflicts`）。
 
 ## 4. 参数解析、校验与错误处理
 
-各工具在创建时提供 TypeBox/JSON Schema；例如 `read` 的路径、offset、cursor 和 optional 字段由 `readToolInputSchema` 声明，执行体再次检查 offset/cursor 的整数范围和文件路径解析（`src/agents/sessions/tools/read.ts`）。MCP 输入 schema 从服务器目录标准化后直接放入投影工具；资源与 prompt 工具对 `uri`、`name` 和字符串参数执行运行时类型检查（`agent-bundle-mcp-materialize.ts:330-420`）。
+每个工具在创建时就带上参数 schema，形式为 TypeBox 或 JSON Schema。以 `read` 为例，schema 覆盖路径、offset、cursor 和可选字段，执行体再检查整数范围并解析文件路径（`src/agents/sessions/tools/read.ts`）。MCP 工具的输入 schema 取自服务器目录，标准化后直接进入投影工具；资源与 prompt 工具在运行时另对 uri、name 等字符串参数做类型检查（`agent-bundle-mcp-materialize.ts:330-420`）。
 
 Agent Core 在批量执行前按工具名解析并验证调用；找不到工具、参数无效或准备失败都会形成未执行的错误结果，而不会调用执行体（`packages/agent-core/src/agent-loop.ts`）。适配器会把非标准返回值强制转换为带 `content[]` 的结果；执行异常被记录并转成 `{status:"error", tool, error}` 文本结果，取消信号则向上抛出以进入中断路径（`agent-tool-definition-adapter.ts:180-248`）。
 
 ## 5. 编排循环、并发与终止条件
 
-`packages/agent-core/src/agent-loop.ts` 是“模型响应—工具批次—下一轮模型”主循环。仅当 assistant 的 `stopReason` 为 `toolUse` 且含调用块时才执行工具；工具结果追加到下一轮上下文。批次默认可并行执行，但任一工具声明 `executionMode:"sequential"` 或配置要求串行时，批次切换为逐个预检、执行和回注（`agent-loop.ts:618-683`）。并行模式先顺序准备和审批，再并发启动允许的工具，执行事件按完成顺序发出，而 toolResult 消息按 assistant 原始顺序回注（`agent-loop.ts:865-1030`）。
+agent 循环按批次执行工具，模型响应、工具批次与下一轮模型往复推进（`packages/agent-core/src/agent-loop.ts`）。只有 assistant 的 `stopReason` 为 `toolUse` 且带调用块时才真正执行工具，结果追加到下一轮上下文。批次默认并行；任一工具声明 `executionMode:"sequential"` 或配置要求串行时，改为逐个预检、执行和回注。并行批次先按顺序完成准备与审批，再并发启动获准工具，执行事件按完成顺序发出，toolResult 消息则按 assistant 原始调用顺序回注（`agent-loop.ts:618-1030`）。
 
 工具执行前后都检查 abort；串行执行在每个调用前检查 steering 队列，队列消息会使未启动尾部调用生成 `skipped` 结果。工具循环检测在 `before_tool_call` 入口运行，首次 critical loop 可走一次恢复；再次检测到 critical loop 时生成终止消息且不执行被阻断调用（`agent-tools.before-tool-call.policy.ts:113-155`、`agent-loop.ts:1683-1720`）。
 
 ## 6. 审批、授权与执行边界
 
-审批属于执行前策略链，不是单独的 UI 行为。`runBeforeToolCallHook` 先做循环准入、技能工作台与语音确认，再执行可信策略和插件 hook；策略可改写参数、阻断或返回 `requireApproval`（`src/agents/agent-tools.before-tool-call.policy.ts`）。审批请求由 Gateway 或嵌入式 approval broker 承载，允许一次、始终允许、拒绝和超时等决策；超时和 Gateway 不可用默认 fail-closed（`src/agents/agent-tools.before-tool-call.approval.ts`）。这条前置链已按职责拆成相邻模块：策略、审批、决策结果、运行态与状态、以及包装入口各自独立（`agent-tools.before-tool-call.policy.ts`、`.approval.ts`、`.decision.ts`、`.runtime.ts`、`.state.ts`、`.wrapper.ts`，入口为 `agent-tools.before-tool-call.ts`）。
+审批在执行前的前置链里完成，与工具策略共用同一个 hook。该 hook 依次做循环准入、技能工作台与语音确认，再运行可信策略和插件 hook；策略可以改写参数、阻断调用或要求审批（`src/agents/agent-tools.before-tool-call.policy.ts`）。命中审批要求后，请求交给 Gateway 或嵌入式 approval broker，可选允许一次、始终允许、拒绝和超时，超时或 Gateway 不可用按 fail-closed 处理（`src/agents/agent-tools.before-tool-call.approval.ts`）。这条链按职责拆成策略、审批、决策结果、运行态与状态、包装入口几个相邻模块，统一由 `agent-tools.before-tool-call.ts` 导出。
 
 执行域按工具不同分布：读写编辑和 shell 运行在主机或 sandbox workspace；Gateway、消息和渠道工具经 Gateway/渠道适配器执行；MCP 经 stdio、SSE 或 streamable HTTP transport 执行（`agent-bundle-mcp-runtime.ts:77-103`）；节点、浏览器、计算机等工具需相应客户端能力。沙箱根、workspace-only/read-only、进程 scope key、超时和 safe-bin 策略在 `createCoreCodingTools` 与 `agent-tools.ts:500-640` 注入，阻止工具越过授权工作区；这些边界作用在授权工作区这一层；操作系统级隔离由沙箱实现与运行配置决定。
 
 ## 7. 结果回注、执行状态与恢复
 
-工具返回 `AgentToolResult`，内容由文本或图片块组成，可附 `details`、进度和网络内容来源标记（`packages/agent-core/src/types.ts`）。Agent Core 为每个调用发出 `tool_execution_start/update/end`，再构造 `toolResult` 消息并按顺序交给下一轮模型（`agent-loop.ts:729-864`）。MCP 结果转换会删除 `_meta`，把结构化值序列化为 JSON 文本，并标记 `untrustedMcpOutput`；MCP 工具结果可附 MCP App 预览，但 requester-scoped 服务器不会创建跨运行视图（`agent-bundle-mcp-materialize.ts:429-520`）。
+工具执行完返回 `AgentToolResult`，正文由文本或图片块组成，可附 `details`、进度和网络内容来源标记（`packages/agent-core/src/types.ts`）。Agent Core 为每个调用依次发出开始、更新、结束三类执行事件，再把结果封装成 toolResult 消息，按顺序交给下一轮模型（`agent-loop.ts:729-864`）。MCP 结果在转换时删掉 `_meta`，结构化值序列化为 JSON 文本并标记为不可信网络输出；结果可附 MCP App 预览，requester-scoped 服务器不提供跨运行视图（`agent-bundle-mcp-materialize.ts:429-520`）。
 
 工具调用与结果主要作为运行时事件和会话消息交给上层持久化；工具状态本身不是独立数据库实体。未启动、被 steering 跳过、策略拒绝、参数错误、执行失败和取消均有对应 result/diagnostic，便于 UI 或渠道显示。MCP runtime 以 session 级租约管理连接，目录失败有重试/冷却常量，运行结束释放租约；重启后不会恢复正在执行的工具，新的运行需重新建目录与连接（MCP runtime `:77-103,95-103`，materialize `:434-446`）。
 

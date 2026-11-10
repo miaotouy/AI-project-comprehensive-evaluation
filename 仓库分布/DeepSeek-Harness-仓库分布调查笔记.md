@@ -42,9 +42,29 @@ DeepSeek Harness 是 DeepSeek AI 官方的开源 agent harness，以“一切皆
 
 统计只覆盖当前提交的 Git 跟踪文件。源码按常见程序语言扩展名识别，文档按 md/mdx/rst/adoc/asciidoc/txt 识别，测试按 tests 目录与 `*.spec.*`/`*.test.*` 命名识别。文件数可精确复算；行数来自 `git grep -c ""` 求和，跳过了被判定为二进制的文件，因此与文本编辑器行数可能有极小差异。
 
-仓库形态依据：根 `package.json` 声明 workspace 与 246 条脚本（`package.json:1-300` 区间的 scripts 段），工作区成员由 `pnpm-workspace.yaml` 扩为七个层级——`vendor/*`、`packages/*/*`、`native/system` 及其 `packages/*`、`apps/*`、`benchmarks`、`website`、`python/sdk-runtime`。构建入口是 `scripts/build.ts`，按 `--scope` 分 artifacts/check/typecheck 三种流程，配合 `compile-referenced-projects.ts` 生成 Typert 声明并驱动 tsc 工程引用；`tsconfig.host.json` 与 `tsconfig.client.json` 是两个编译面，产出再由 tsdown 打包。开发态 `dsh` 命令以 `node --import tsx/esm apps/cli/src/bin.ts` 直接跑源码。
+工作区范围与构建流程由根目录配置确定。根 `package.json` 声明 workspace 并登记 246 条脚本，这些脚本集中在 scripts 段（`package.json:1-300`）；工作区成员由 `pnpm-workspace.yaml` 扩为七个层级：
 
-顶层层级保持清晰：`packages/` 放产品能力，`apps/` 含 CLI、Web、desktop、desktop-host 与 plugin-market-generator，`scripts/` 放门禁和生成器，`vendor/` 放 Cordis，`python/` 与 `native/` 放 SDK/runtime 和原生平台层，`.agents/` 与 `docs/` 放决策记录及参考文档，`snapshots/` 是跨端回放语料，`benchmarks/` 是私有基准包，`patches/` 是依赖补丁。
+- `vendor/*`
+- `packages/*/*`
+- `native/system` 及其 `packages/*`
+- `apps/*`
+- `benchmarks`
+- `website`
+- `python/sdk-runtime`
+
+构建入口是 `scripts/build.ts`，按 `--scope` 分 artifacts、check、typecheck 三条流程，并调用 `compile-referenced-projects.ts` 生成 Typert 声明、驱动 tsc 工程引用。host 与 client 两个编译面分别由 `tsconfig.host.json`、`tsconfig.client.json` 定义，产物再经 tsdown 打包。开发态 `dsh` 命令以 `node --import tsx/esm apps/cli/src/bin.ts` 直接跑源码。
+
+顶层目录按职责分工：
+
+- `packages/`：产品能力
+- `apps/`：CLI、Web、desktop、desktop-host 与 plugin-market-generator
+- `scripts/`：门禁和生成器
+- `vendor/`：Cordis
+- `python/`、`native/`：SDK/runtime 与原生平台层
+- `.agents/`、`docs/`：决策记录及参考文档
+- `snapshots/`：跨端回放语料
+- `benchmarks/`：私有基准包
+- `patches/`：依赖补丁
 
 ## 1. 模块分布与量级
 
@@ -66,21 +86,49 @@ DeepSeek Harness 是 DeepSeek AI 官方的开源 agent harness，以“一切皆
 | `patches/` | 12 | 依赖补丁 |
 | 根目录 | 47 | 配置与门禁中枢 |
 
-包组清单以 `packages/README.md` 的 53 行表格为准，与 `packages/` 下 53 个组目录一一对应。其中 `deliverables`、`document`、`team`、`telemetry` 是独立组，`hooks`、`runtime-diagnostics`、`webhook` 的能力归入 `experimental/`；仓库内不提供 e2b provider（决策记录见 `.agents/notes/implemented/simplification/2026-09-11-remove-e2b-providers.md`）。
+包组清单以 `packages/README.md` 的 53 行表格为准，与 `packages/` 下 53 个组目录一一对应。组目录的归类约定有两条：
+
+- deliverables、document、team、telemetry 各自独立成组。
+- hooks、runtime-diagnostics、webhook 的能力归入 `experimental/` 组。
+
+仓库内不提供 e2b provider，相关决策记录见 `.agents/notes/implemented/simplification/2026-09-11-remove-e2b-providers.md`。
 
 `packages/experimental` 是规模最大的单组，含 60 余个子包，覆盖 CUA（含 macOS Swift 原生辅助程序）、browser-use 的 playwright/stagehand/chrome-devtools 后端、插件市场与 forge、liveshare、webhook、webworker、语音转写、worktree、session inspector/search、ralph 与多套 bundle。实验包的地位由该组 README 的 status 政策单独声明，与发布/安装无关。
 
-`packages/client` 的 60 个 `ui-*` 包承载浏览器半区，`connection`、`web`、`modules`、`store`、`locale`、`resources`、`hmr`、`file-upload`、`shortcuts`、`product-analytics` 提供壳与对象层。Session、Workspace、Settings、Terminal 之外，`packages/api` 现另有 account、job、remote-access 三个 controller 族。
+`packages/client` 的 60 个 `ui-*` 包承载浏览器半区，壳与对象层由同组十个非 UI 包提供：
 
-`apps/` 有五个成员：`cli`（`dsh` bin 与 profile 启动）、`web`（Vite 构建的前端入口，649 文件、tests 目录 629 文件）、`desktop`（Electron 壳，668 文件）、`desktop-host`（桌面端私有 Node host 进程）与 `plugin-market-generator`。
+```
+connection  web  modules  store  locale
+resources  hmr  file-upload  shortcuts  product-analytics
+```
+
+`packages/api` 的 controller 族除 Session、Workspace、Settings、Terminal 外，另有 account、job、remote-access 三族。
+
+`apps/` 下五个成员：
+
+- `cli` 提供 `dsh` bin 与 profile 启动
+- `web` 是 Vite 构建的前端入口，649 文件，其中 tests 目录 629 文件
+- `desktop` 是 Electron 壳，668 文件
+- `desktop-host` 是桌面端私有的 Node host 进程
+- `plugin-market-generator`
 
 ### llm 组与 pi-ai 复用关系
 
-`packages/llm` 由缝隙包 llm（抽象服务、内容块词汇、流式装配）与若干角色包组成：token-meter、llm-retry 为消费者，`llm-deepseek` 与 `llm-pi-ai` 是并行注册到 `ctx.llm` 的两个 provider 适配器，另有 `llm-deepseek-account` 与 `llm-deepseek-api-key` 承担第一方两种认证形态。后者包描述仍自称是前者的 design-verification twin，即同一缝隙契约的双实现。
+`packages/llm` 组以缝隙包 llm 为核心，它定义抽象服务、内容块词汇与流式装配，其余包按角色分成三类：
+
+- token-meter 与 llm-retry：缝隙的消费方
+- llm-deepseek 与 llm-pi-ai：并行注册到 `ctx.llm` 的两个 provider 适配器
+- llm-deepseek-account 与 llm-deepseek-api-key：第一方两种认证形态
+
+后者包描述仍自称是前者的 design-verification twin，即同一缝隙契约的双实现。
 
 `llm-pi-ai` 的外部运行时依赖只有 `@earendil-works/pi-ai@^1.3.0` 一个 npm 包（另有 vendored 的 schemastery），Pi 家族包未被 vendored。继承与复用发生在三个层面：路由配置直接映射 pi-ai 的 Provider、Model、ThinkingBudgets 类型；运行时用 createModels 构造 provider 并做流式转换；目录层从 `@earendil-works/pi-ai/providers/all` 读取内置 provider 与模型目录。模型询问入口对 pi-ai 目录内的路由直接以目录作答、不发网络请求，只对目录外的 OpenAI 兼容端点做在线列举。
 
-pi-ai 在本仓的配套管理可见于三处：`pnpm-workspace.yaml` 显式 deny 其传递依赖 `@google/genai` 与 `protobufjs` 的生命周期脚本，并用 `minimumReleaseAgeExclude` 豁免 pi-ai 与 pi-telemetry 的发布年龄门槛；`pi-ai-provider-e2e.yml` 是仅手动触发的 Azure OpenAI + Anthropic 可选 e2e；twin 取舍理由记录在 Agent Note `2026-06-13-twin-llm-adapters.md`。
+pi-ai 的配套管理分布在三处：
+
+- `pnpm-workspace.yaml` 对其传递依赖 `@google/genai` 与 `protobufjs` 显式 deny 生命周期脚本。同一文件用 `minimumReleaseAgeExclude` 把 pi-ai 与 pi-telemetry 排除在发布年龄门槛之外。
+- `pi-ai-provider-e2e.yml` 提供仅手动触发的 Azure OpenAI + Anthropic 可选 e2e。
+- twin 取舍理由记录在 Agent Note `2026-06-13-twin-llm-adapters.md`。
 
 ## 2. 语言分布与运行时分工
 
@@ -118,9 +166,9 @@ TypeScript 独占主体。前端样式以独立 CSS 文件存在，是仅次于 
 
 跨模块测试的主要类型如下：
 
-- `apps/web/tests`：629 个文件的 keyless 回放语料，jsdom 中组装构建产物，以 FixtureApiClient 驱动到聊天内容端到端。
-- `snapshots/` 与 profile fixtures：JSONL/JSON/期望文本的 keyless 回放，对应 `test:snapshot` 档。
-- `apps/cli/tests`：built-bin 与配置装配。
+- `apps/web/tests`：629 个文件的 keyless 回放语料，先在 jsdom 中组装构建产物，再由 FixtureApiClient 驱动，一直跑到聊天内容的端到端验证。
+- `snapshots/` 与 profile fixtures：JSONL、JSON 与期望文本组成的 keyless 回放，对应 `test:snapshot` 档。
+- `apps/cli/tests`：覆盖 built-bin 与配置装配。
 - `native/system/test` 与 `sandbox-windows-acl`：原生层与 Windows ACL 的契约测试。
 
 真实 API e2e 在无 `DEEPSEEK_API_KEY` 的环境自跳过。仓库规范要求 packages 源码按文件 100% 覆盖率，并区分 GUI 单测、Web snapshot replay 与 SDK expected-output 表面；该声明和当前覆盖率均未运行验证。
@@ -133,7 +181,14 @@ TypeScript 独占主体。前端样式以独立 CSS 文件存在，是仅次于 
 
 操作系统专属代码可见四处：`native/system` 提供 Linux/macOS 原生启动器与按平台拆分的预构建包（linux-x64/arm64、darwin-x64/arm64）；Windows 侧有 `sandbox-windows-acl`（C++ ABI 探针与测试）、terminal 组经 node-pty 的 ConPTY 后端、JSONL 落盘经 koffi 的 MoveFileExW 写穿发布；macOS 除 Seatbelt 外还有 CUA 的 Swift 辅助程序与打包/签名工作流。
 
-CI 现有 31 个工作流，按平台与产物分线：`ci.yml` 是主干门禁，另有 `ci-master.yml`、`ci-windows.yml`、`ci-python.yml`、`e2e.yml`、`macos-package.yml`、`windows-package.yml`、`macos-intel-package.yml`、`desktop-publish.yml`、`release*.yml`、`cua-helper-package.yml`、`node-addon-system*.yml` 等。Windows 采用“Wine 跑 Node 的阻塞门禁 + windows-native 完整内核清单”双线策略，由 `scripts/wine-windows-gates.sh` 与 `ci-windows.yml` 落实。
+CI 现有 31 个工作流，按平台与产物分线。`ci.yml` 是主干门禁，其余工作流按用途分布，常见的有：
+
+- 分支、平台与 e2e：ci-master.yml、ci-windows.yml、ci-python.yml、e2e.yml
+- 打包：macos-package.yml、windows-package.yml、macos-intel-package.yml
+- 发布与辅助：desktop-publish.yml、release*.yml、cua-helper-package.yml
+- 原生 addon：node-addon-system*.yml
+
+Windows 侧另用双线策略：一条以 Wine 跑 Node 作为阻塞门禁，一条维护 windows-native 的完整内核清单，分别由 `scripts/wine-windows-gates.sh` 与 `ci-windows.yml` 落实。
 
 当前产品版本为 `0.2.2-alpha.3`（根 `package.json` 与 apps 各包一致）。发布仍按 npm 产品/vendor、Python wheel 与原生平台资产分流；桌面端经 `desktop-publish.yml` 发布 NSIS 安装器与自动更新通道。开发工具链使用 pnpm、lefthook、oxlint、jscpd、knip/publint 等仓库级门禁。
 

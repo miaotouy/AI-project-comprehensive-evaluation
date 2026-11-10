@@ -16,7 +16,7 @@
 
 Pi 的会话是"JSONL 追加型树"，持久化事实源是每个会话一个 `.jsonl` 文件：
 
-- 每个会话一个 `.jsonl` 文件（`~/.pi/agent/sessions/--<编码cwd>--/`），每条记录带 `id/parentId` 形成树；`leafId` 指针标识当前位置，分支只移动指针不修改历史（`session-manager.ts:988`（类）与 `:1528`（append-only 注释））。
+- 每个会话对应一个 `.jsonl` 文件，放在 `~/.pi/agent/sessions/` 下按 cwd 编码的目录里；文件内每条记录带 id 与 parentId，因而构成一棵树，当前停留位置由 leafId 指针标记，切换分支只移动这个指针，历史记录保持原样（`session-manager.ts:988`、`:1528`）。
 - 落盘发生在 message_end：第一条 user 或 assistant 消息落盘时创建文件，只有启动设置时留在内存；首轮尚无回复也保留提示（[持久化判定](../../pi/packages/coding-agent/src/core/session-manager.ts#L1161-L1206)）。
 - 消息是分块内容模型：user/assistant/toolResult 与 custom/bashExecution/compactionSummary/branchSummary 并存；assistant 内容是 `text/thinking/toolCall` 块数组。
 - 原历史追加保留，分支内 context_edit 可替换或排除模型投影内容（§4）；会话删除由 UI 负责文件级 trash/unlink，SessionManager 本身无删除方法。
@@ -41,22 +41,22 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 ## 1. 会话、消息与分支数据模型
 
-- **会话单位**：会话 id 由 `SessionManager` 构造时用 `uuidv7` 生成（`createSessionId`，`session-manager.ts:264`），其余命名规则分三点：
-  - 文件名：`<ISO时间戳(冒号与句点替换为连字符)>_<id>.jsonl`（`session-manager.ts:1081`）；
-  - 会话目录按 cwd 编码：`--<cwd 中 / \ : 替换为 ->--`（Windows 上 `E:\works\GitStudyNotes\pi` → `--E-works-GitStudyNotes-pi--`，`getDefaultSessionDirPath`，`session-manager.ts:590`）；
-  - 文件首行：`SessionHeader { type, version(当前3), id, timestamp, cwd, parentSession? }`（`session-manager.ts:43`）。
-- **条目类型**：SessionEntry 包含对话、模型/思考设置、usage、压缩/分支摘要、扩展状态与消息、上下文编辑和书签/名称（[联合定义](../../pi/packages/coding-agent/src/core/session-manager.ts#L183-L194)），主要用途如下：
-  - `custom`：扩展状态存储，不参与 LLM 上下文（`session-manager.ts:94-108` 注释）；
-  - `custom_message`：参与上下文并控制 TUI 显示（`session-manager.ts:123-141`）；
-  - context_edit 替换或排除当前分支的模型投影，usage 记录用量。
-  - `label`：条目书签；`session_info`：显示名（`session-manager.ts:110-121`）。
-- **消息结构**：`AgentMessage` 是 `Message | CustomAgentMessages[...]` 的联合（`packages/agent/src/types.ts:374`），消息分三类：
-  - assistant 消息：`AssistantMessage`（`packages/ai/src/types.ts:593`），含 `content` 块数组（text/thinking/toolCall）、`usage`、`stopReason`、`errorMessage`、`deferred` 句柄；
-  - 工具结果：`ToolResultMessage`（role=toolResult，`packages/ai/src/types.ts:648`，含 toolCallId/toolName/isError）独立成消息；
-  - coding-agent 扩展角色（`core/messages.ts:30-80`）：`bashExecution`（带 `excludeFromContext`）、`custom`、`branchSummary`、`compactionSummary`。
-- **版本迁移**：读文件时若版本落后则自动迁移并重写（`session-manager.ts:343-344`），分两步：
-  - v1→v2：生成 id/parentId 树，并把 compaction 的 `firstKeptEntryIndex` 转为 `firstKeptEntryId`；
-  - v2→v3：把 `hookMessage` 角色改名为 `custom`（`migrateV1ToV2`/`migrateV2ToV3`，`session-manager.ts:287-341`）。
+- **会话单位**：`SessionManager` 构造时用 uuidv7 为每个会话生成 id，文件名、目录名和文件首行都由这个 id 与创建时的 cwd 派生（`session-manager.ts:264`）。
+  - 文件名由创建时的 ISO 时间戳（冒号与句点换作连字符）、该 id 与 `.jsonl` 后缀拼成（`session-manager.ts:1081`）。
+  - 会话目录按 cwd 编码：把路径中的斜杠、反斜杠与冒号换成连字符，首尾各留两个连字符；Windows 上的 `E:\works\GitStudyNotes\pi` 因此落到 `--E-works-GitStudyNotes-pi--`（`session-manager.ts:590`）。
+  - 文件首行是版本 3 的 header，字段依次为类型、版本、id、时间戳、cwd 与可选的父会话（`session-manager.ts:43`）。
+- **条目类型**：SessionEntry 涵盖对话、模型与思考设置、usage、压缩与分支摘要、扩展状态与消息、上下文编辑、书签与名称（[联合定义](../../pi/packages/coding-agent/src/core/session-manager.ts#L183-L194)），各类条目的分工如下：
+  - custom：给扩展存放状态，不进入 LLM 上下文（`session-manager.ts:94-108` 注释）；
+  - custom_message：进入上下文，同时决定 TUI 是否显示（`session-manager.ts:123-141`）；
+  - context_edit：替换或排除当前分支里的模型投影内容，usage 记录用量；
+  - label 是条目书签，session_info 存放会话显示名（`session-manager.ts:110-121`）。
+- **消息结构**：`AgentMessage` 把内置消息与 coding-agent 自定义消息合成一个联合类型（`packages/agent/src/types.ts:374`），实际出现的消息分三类：
+  - assistant 消息：`AssistantMessage` 携带 content 块数组（text、thinking、toolCall）以及 usage、stopReason、errorMessage 与 deferred 句柄（`packages/ai/src/types.ts:593`）；
+  - 工具结果：`ToolResultMessage` 以 role=toolResult 独立成一条消息，记录 toolCallId、toolName 与 isError（`packages/ai/src/types.ts:648`）；
+  - coding-agent 扩展角色：bashExecution（可带 excludeFromContext）、custom、branchSummary 与 compactionSummary（`core/messages.ts:30-80`）。
+- **版本迁移**：读取会话文件时，版本落后的内容会自动迁移并整份重写（`session-manager.ts:343-344`），迁移分两步：
+  - v1→v2：为条目生成 id 与 parentId 的树结构，并把压缩条目的 firstKeptEntryIndex 换成 firstKeptEntryId；
+  - v2→v3：把 hookMessage 角色改名为 custom（迁移实现见 `session-manager.ts:287-341`）。
 
 ## 2. 事实源、索引与持久化
 
@@ -71,23 +71,23 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **新建/继续/恢复**：`SessionManager.create/open/continueRecent/inMemory`（`session-manager.ts:1766-1825`）。`AgentSessionRuntime.newSession/switchSession` 先 `teardownCurrent`（abort 当前响应 → 发 `session_shutdown` 扩展事件 → dispose）再创建新 runtime（`core/agent-session-runtime.ts:167-178`、`:196-260`）。
-- **命名**：`appendSessionInfo(name)` 记录 `session_info` 条目，空字符串清除名字（`session-manager.ts:1315`）；显示名取最新条目（`getSessionName`，`session-manager.ts:1329`）。选择器内重命名入口见 Chat UI 笔记 §2。
-- **删除/归档**：`SessionManager` 类无删除方法（全文件通读确认，`session-manager.ts:988-2029` 无删除入口）；删除在 UI 层做文件级删除，分几个环节：
-  - 删除执行：`deleteSessionFile`（trash 优先、unlink 兜底，`components/session-selector.ts:645-680`），挂到会话选择器的删除处理（`:832-856`）；
-  - 入口：选择器内 Ctrl+D（`app.session.delete`，`core/keybindings.ts:147-150`）与 Ctrl+Backspace（`deleteSessionNoninvasive`，`:151-154`、`session-selector.ts:592-601`）；
-  - 确认与保护：先进入确认状态（`session-selector.ts:394-405`、`:536-549`），当前活动会话不可删（`:399-402`）。
-  - 注意：durable 的 JSONL 存储本次未找到文件级删除接口（检查范围 `packages/durable/src/storage/jsonl/`），与 coding-agent 的 `SessionManager` 是两套实现。
+- **新建/继续/恢复**：`SessionManager` 提供四个构造入口，分别用于新建空会话、打开指定会话、续接最近会话和建立纯内存会话（`session-manager.ts:1766-1825`）。运行时的新建与切换都先 teardown 收尾：中止当前响应、向扩展发出 `session_shutdown` 事件、释放旧实例，之后才创建新的 runtime（`core/agent-session-runtime.ts:167-260`）。
+- **命名**：命名通过追加 session_info 条目完成，空字符串表示清除，读取时取最新一条作为显示名（`session-manager.ts:1315-1329`）。选择器内重命名入口见 Chat UI 笔记 §2。
+- **删除/归档**：`SessionManager` 类没有删除方法，通读整个类也找不到删除入口（`session-manager.ts:988-2029`）；删除由 UI 在文件级完成，流程分三个环节：
+  - 执行删除时优先走 trash，失败再 unlink，动作由会话选择器的删除处理触发（`components/session-selector.ts:645-680`）；
+  - 入口是选择器内的 Ctrl+D 与 Ctrl+Backspace（`core/keybindings.ts:147-154`）；
+  - 删除前先进入确认状态，当前活动会话不能删（`session-selector.ts:394-405`）。
+  - 注意：durable 的 JSONL 存储本次未找到文件级删除接口（检查范围 `packages/durable/src/storage/jsonl/`），它与 coding-agent 是两套实现。
 - **恢复语义**：中断后 assistant 消息以 `stopReason: "aborted"` 持久化（执行侧见对话请求与上下文笔记 §6），下次 `/resume` 恢复该消息；断网自动续传未找到。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-- **分支**：分支相关能力分四个方法（均在 `session-manager.ts`）：
-  - `branch(branchFromId)`（`:1590`）：只移动内存 leaf；下一条追加把所选分支写为父链，单独导航后退出不会记录新 leaf；
-  - `createBranchedSession`（`:1643`）：把"根到指定叶子"的路径抽成新文件，重链 label 条目并记 `parentSession`；
-  - `forkFrom`（`:1826`）：跨目录复制整个会话到新 cwd 并记 `parentSession`；
-  - `branchWithSummary`（`:1611`）：追加 `branch_summary` 摘要条目。
-  - UI 层分支切换入口是 `navigateTree`（`agent-session.ts:4093`，支持可选的分支摘要生成）。
+- **分支**：分支相关能力由 `session-manager.ts:1590-1826` 一带的四个方法承担：
+  - branch：只移动内存里的 leaf 指针，下一次追加才把所选分支写成父链；单独导航后直接退出不会留下新 leaf；
+  - createBranchedSession：把从根到指定叶子的路径抽成新文件，重链 label 条目并记录父会话；
+  - forkFrom：跨目录复制整个会话到新 cwd 并记录父会话；
+  - branchWithSummary：追加一条 branch_summary 摘要条目。
+  - UI 层的分支切换入口是 navigateTree，切换时可以一并生成分支摘要（`agent-session.ts:4093`）。
 - **回退**：`resetLeaf` 把指针清空以便重发首条 user 消息（`session-manager.ts:1602`）。
 - **消息与上下文编辑分层**：原始历史继续追加；context_edit 记录对当前分支既有模型可见条目的替换或排除，投影时取最后一次编辑，原条目保留。null 排除该内容，带 content 的值替换其模型投影；目标必须在当前分支且具有可编辑内容（[追加校验](../../pi/packages/coding-agent/src/core/session-manager.ts#L1370-L1408)、[投影](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
 - **续写**：未找到"继续生成到当前消息末尾"的独立入口；续写通过分支/新消息实现。
@@ -95,48 +95,48 @@ AgentSession.prompt() -> Agent -> agentLoop（执行链 -> 对话请求与上下
 
 ## 5. 列表、分页、搜索与定位
 
-- **会话列表**：`SessionManager.list/listAll` 全量扫描 + 并发上限 10（§2）；无分页游标。
-- **搜索**：`session-selector-search.ts` 支持 token 模式（fuzzy/短语混合，`"node cve"` 引号）与 `re:` 正则模式，搜索文本是 `id + name + 全部消息文本 + cwd`（`getSessionSearchText`，`session-selector-search.ts:26-28`；解析 `parseSearchQuery` :39-114）；`/resume` 会话选择器内嵌搜索框（入口见 Chat UI 笔记 §2）。
-- **消息级搜索**：coding-agent 的 TUI 路径仍只有会话级扫描，本次未找到按消息建索引的实现。相关能力现在分两处：
-  - durable 自带的是工具检索而非消息检索：`packages/durable/src/search.ts` 提供 BM25 排序，供 codemode 的 `searchTools()` 与 `tool_search` 工具使用；
-  - p2 有真正的消息全文检索：`apps/p2/plugins/search/` 在 SQLite 上建 `message_search` FTS5 虚表（`create virtual table ... content='messages'`），查询用 `MATCH` + bm25，`plugins/search/query.ts` 负责把用户输入转成安全的 MATCH 表达式，供历史工具与页面使用（`db.ts:43`、`:143`、`:170`）。
+- **会话列表**：列表由一次全量扫描产出，并发上限 10（§2），不提供分页游标。
+- **搜索**：选择器的搜索支持 token 与 `re:` 正则两种模式，token 模式把模糊匹配和加引号短语混用，例如 `"node cve"`；参与匹配的文本是会话 id、名称、全部消息文本与 cwd 的拼接，查询解析见 `session-selector-search.ts:26-114`。`/resume` 的会话选择器内嵌了搜索框（入口见 Chat UI 笔记 §2）。
+- **消息级搜索**：coding-agent 的 TUI 路径仍只有会话级扫描，本次未找到按消息建索引的实现。相关能力分两处：
+  - durable 自带的是工具检索：`packages/durable/src/search.ts` 提供 BM25 排序，供 codemode 的 `searchTools()` 与 `tool_search` 工具使用；
+  - p2 侧有消息级全文检索：search 插件在 SQLite 上建一张内容指向 messages 表的 FTS5 虚表 message_search，查询走 MATCH 并用 bm25 排序，用户输入先由 query 模块转成安全的 MATCH 表达式，供历史工具与页面使用（`apps/p2/plugins/search/db.ts:43-170`）。
 - **定位/统计**：`/session` 显示统计（用户/助手/工具消息数、token、成本，`getSessionStats`，`agent-session.ts:4317`）；`/tree` 树形导航带 label 书签（`getTree`，`session-manager.ts:1540`）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- 写入是单进程逐条 append；`_persist` 在只有设置而尚无 user/assistant 消息时仅缓存（§2）。内存 `fileEntries` 数组是运行时权威，文件是磁盘投影；同进程内读改写（压缩、分支重链）走整文件重写（`_rewriteFile`，`session-manager.ts:1125`），期间不持有文件锁。
-- 多实例并发写同一会话文件的合并语义未调查：会话文件本身无锁/事务证据（检查范围：`session-manager.ts` 全部写入入口均无 lockfile 调用）。设置文件例外：`settings.json` 写入使用 `proper-lockfile` 同步锁（`settings-manager.ts:195-262`），与会话文件无关。
+- 写入由单进程逐条追加完成；只有设置、还没有 user 或 assistant 消息时，落盘逻辑只把条目留在内存缓存里（§2）。运行时以内存中的条目数组为准，文件是它的磁盘投影；压缩、分支重链这类读改写会整份重写文件（`session-manager.ts:1125`），全程不持有文件锁。
+- 多实例并发写同一会话文件时的合并语义未调查：会话文件一侧没有锁或事务的证据，写入入口都没有 lockfile 调用（检查范围 `session-manager.ts`）。设置文件是例外，settings.json 的写入用 proper-lockfile 取同步锁，与会话文件互不相干（`settings-manager.ts:195-262`）。
 - 单会话单 agent 循环（执行侧见对话请求与上下文笔记 §8），会话文件本身无并发写保护证据。
-- **durable harness（packages/durable，p2 使用的另一套会话栈）**：会话是一段不可变 entry 的对话记录，外加对象拥有的命名文档；写入以 commit 为单位，先落存储再对外发布，进程中途死掉重开存储会接着跑（`packages/durable/README.md` 的 Persist and Resume）。存储后端可换：`MemoryStorage`（`storage/memory.ts:239`）、JSONL（`storage/jsonl/`）、SQLite（`storage/sqlite/`）与 IndexedDB（`storage/indexeddb.ts`），统一实现 `Storage` 接口（`types.ts:1331`）。
+- **durable harness（packages/durable，p2 使用的另一套会话栈）**：会话是一段不可变 entry 的对话记录，外加对象拥有的命名文档；写入以 commit 为单位，先落存储再对外发布，进程中途死掉重开存储会接着跑（`packages/durable/README.md` 的 Persist and Resume）。存储后端可在内存、JSONL、SQLite 与 IndexedDB 之间替换，四者统一实现 `Storage` 接口，各后端入口都在 `packages/durable/src/storage/` 下（`types.ts:1331`）。
   - 会话身份：每个 conversation 有持久 UUIDv7，作为 `sessionId` 传给 pi-ai，用于 provider 的 prompt cache 与会话亲和；重开、重试、reset、压缩、换模型都不变，子会话与 fork 另取新 id。
   - 只读打开：另一个进程正在驱动同一会话时，可以 `readOnly: true` 打开，只做展示；任何写入、`resume()` 或会运行任务的调用都会以 `ReadOnlySession` 拒绝。
   - 与 coding-agent 的关系：两套实现互不引用，p2 的插件（agent、chat、sessions、search 等）建立在 durable 之上，而 `pi` CLI/TUI 仍走 `SessionManager`。
 
 ## 7. 迁移、导入导出与保留策略
 
-- 版本迁移：读文件时落后版本自动迁移并重写（§1，`session-manager.ts:343-344`）。
-- 一次性目录迁移：`migrateSessionsFromAgentRoot` 把历史版本误存到 `~/.pi/agent/*.jsonl` 的文件按 header.cwd 移到编码目录（`migrations.ts:84-131`，注释引用 issue #320）。
-- **导出**：`/export` 支持 HTML（`core/export-html/`，vendor 的 marked、marked-cjk-friendly 与 highlight.js 生成静态页面，`export-html/index.ts:143-175`）与 JSONL（`exportToJsonl` 导出当前分支并重链 parentId 成线性序列，`agent-session.ts:4448`）。
-- **导入**：`/import` 复制 JSONL 到会话目录后恢复（`importFromJsonl`，`agent-session-runtime.ts:359`）；`/share` 优先上传 Radius 组织 artifact，缺少 Radius 凭据时才回退 secret gist（`session-share.ts`、`gh gist create --public=false`）。
+- 版本迁移在读文件时触发，落后的版本会被自动迁移并重写（§1，`session-manager.ts:343-344`）。
+- 一次性目录迁移：早期版本把会话文件误存到 `~/.pi/agent/*.jsonl`，迁移函数按 header 里记录的 cwd 把它们移进编码目录（`migrations.ts:84-131`，注释引用 issue #320）。
+- **导出**：`/export` 支持两种格式。HTML 导出借助 vendor 进来的 marked、marked-cjk-friendly 与 highlight.js 生成静态页面（`core/export-html/index.ts:143-175`）；JSONL 导出把当前分支写成线性序列，parentId 一并重链（`agent-session.ts:4448`）。
+- **导入**：`/import` 把 JSONL 复制进会话目录再恢复（`agent-session-runtime.ts:359`）；`/share` 先尝试上传到 Radius 组织 artifact，缺凭据时回退到 secret gist（`session-share.ts`、`gh gist create --public=false`）。
 - 保留策略：压缩后旧条目仍在文件中但不再进上下文（执行侧见对话请求与上下文笔记 §3）；无自动清理/轮转策略的证据（检查范围：`session-manager.ts` 无删除/清理路径，配置项中未发现保留期限字段）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- **绑定层级**：模型与工具集都在会话状态上——
-  - 模型与 thinking level：`agent.state.model/thinkingLevel`，切换写入 `model_change`/`thinking_level_change` 条目（`setModel`/`cycleModel`；`appendModelChange`/`appendThinkingLevelChange`，`session-manager.ts:1228-1254`）；
-  - 工具启用集：会话级 `setActiveToolsByName`（`agent-session.ts:1562`），默认 `[read, bash, edit, write]`（`_buildRuntime` 的 `defaultActiveToolNames`，`agent-session.ts:2600-2602`），`--tools`/设置可增删。
-- **Agent 形态**：`Agent` 是单活动运行（activeRun 守卫，`packages/agent/src/agent.ts:224`、`:365`）的工具循环 runtime，`AgentSession` 包一层事件/持久化/压缩。子 Agent 相关边界：
+- **绑定层级**：模型与工具集都挂在会话状态上。
+  - 模型与 thinking level：读取自 agent.state 的 model 与 thinkingLevel 字段，切换时向会话追加 model_change 或 thinking_level_change 条目（`session-manager.ts:1228-1254`）。
+  - 工具启用集：由会话级的 setActiveToolsByName 设定，默认是 read、bash、edit、write 四项，可通过 `--tools` 或设置增删（`agent-session.ts:1562`、`:2600-2602`）。
+- **Agent 形态**：`Agent` 是只允许一个活动运行的工具循环 runtime，并发由 activeRun 守卫限制（`packages/agent/src/agent.ts:224-365`）；`AgentSession` 在其外包一层事件、持久化与压缩。子 Agent 相关边界：
   - 根 `README.md:13-17` 明说跳过 sub-agents 这类特性，`packages/agent/README.md` 也未把它列为内置能力；
   - 子 Agent 目前由扩展自行实现（示例 `packages/coding-agent/examples/extensions/subagent/`），durable 文档把 subagents 与 abort 放在同一节讨论，但均非 `Agent` 内置能力；
   - 扩展可用 `createAgentSession`（`core/sdk.ts:169`）自行启动子会话；本次未找到 UI 层面的多 Agent 编排。
-- **附件**：图片以 `ImageContent` 进 user 消息（剪贴板图片、`--image`、拖动/粘贴，入口见 Chat UI 笔记 §1）；`settings.images.autoResize`/`blockImages` 控制自动缩放与阻止发送（`settings-manager.ts:46-49`、`:1161-1185`）。工具结果中的图片可回注为上下文图像（`normalizeToolResultImages`，`agent-session.ts:727`）。
-- **外部能力**：skills（`/skill:name` 展开为 `<skill>` 块 + 进 system prompt 索引）、prompt 模板（`/template`）、扩展注入的 custom 消息、`before_agent_start` 系统提示改写均在此链路生效（`agent-session.ts:1159-1261`；注入语义见对话请求与上下文笔记 §9）。
+- **附件**：图片以 ImageContent 形式进入 user 消息，来源包括剪贴板、`--image` 参数与拖放或粘贴（入口见 Chat UI 笔记 §1）；settings.images 下的 autoResize 与 blockImages 分别控制自动缩放和阻止发送（`settings-manager.ts:46-49`、`:1161-1185`）。工具结果里的图片可以回注成上下文图像（`agent-session.ts:727`）。
+- **外部能力**：skills、prompt 模板、扩展注入的 custom 消息与 before_agent_start 的系统提示改写都在这条链路上生效；其中 skills 由 `/skill:name` 展开成 skill 块并进入 system prompt 索引，prompt 模板由 `/template` 调用（`agent-session.ts:1159-1261`；注入语义见对话请求与上下文笔记 §9）。
 
 ## 9. 设计取舍与已确认边界
 
-- **追加型树会话**：原始条目保留，分支与 context_edit 改变当前模型投影；代价是单个文件持续增长，恢复时全量读入内存（`loadEntriesFromFile`，`session-manager.ts:628`）。
+- **追加型树会话**：原始条目一直保留，分支切换与 context_edit 只改变当前的模型投影；代价是单个文件持续增长，恢复时要把整份文件读进内存（`session-manager.ts:628`）。
 - **压缩是重写而非分页**：压缩后旧条目仍在文件中但不再进上下文，保留可回溯性（执行侧见对话请求与上下文笔记 §3）。
-- **上下文边界明确**：`custom` 条目、`bashExecution(excludeFromContext)`、`custom_message(display=false)` 各自独立控制"是否进 LLM 上下文"与"是否可见"（执行侧见对话请求与上下文笔记 §2）。
+- **上下文边界明确**：custom 条目、带 excludeFromContext 的 bashExecution 与 display=false 的 custom_message 各自独立控制"是否进 LLM 上下文"与"是否可见"（执行侧见对话请求与上下文笔记 §2）。
 - **首条用户输入即可落盘**：无对话的启动不留文件；首轮无助手回复时，用户提示仍可从文件恢复（§2）。
 - **两套并行的会话实现**：coding-agent 的 `SessionManager`（v3 header、JSONL 树）与 `packages/durable` 的 harness（不可变 entry + commit、四类存储后端）互不引用；CLI/TUI 走前者，p2 走后者，两套事实源未合并（§12）。
 

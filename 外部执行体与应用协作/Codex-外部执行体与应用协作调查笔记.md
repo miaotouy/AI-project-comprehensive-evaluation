@@ -45,9 +45,13 @@ app-server 是一个长驻 JSON-RPC 服务。传输由 `--listen` 指定，支�
 
 协议分三层：
 
-- 客户端请求：`initialize`、`thread/start`、`turn/start`、`turn/interrupt`、`thread/archive` 等。
-- 服务端通知：回合与条目的生命周期，例如 `turn/started`、`turn/completed`、`item/started`、`item/completed`（`codex-rs/app-server-protocol/src/protocol/common.rs:2049-2062`）。
-- 服务端请求：命令审批、文件变更审批、工具提问、MCP elicitation、权限申请、动态工具调用（`common.rs:1861-1910`）。
+| 协议层 | 承载内容 | 代表方法 |
+|---|---|---|
+| 客户端请求 | 初始化连接、开启线程、启动与中断回合、归档线程 | `initialize`、`thread/start` 等 |
+| 服务端通知 | 回合与条目的生命周期事件，例如回合开始、回合完成、条目开始与条目完成 | `turn/started`、`item/completed` 等 |
+| 服务端请求 | 命令审批、文件变更审批、工具提问、MCP elicitation、权限申请、动态工具调用 | 清单见第 4.1 节 |
+
+通知与请求两类的定义都写在同一份协议文件里（`codex-rs/app-server-protocol/src/protocol/common.rs:1861-1910`、`:2049-2062`）。
 
 ### 1.2 exec-server：Codex 作为控制方
 
@@ -143,15 +147,15 @@ app-server 的映射最直接：外部 `threadId` 对应本地线程，`turnId` 
 
 exec-server 的映射是“环境 + 逻辑进程”：
 
-- `environment_id` 标识一个执行环境，本地环境有固定 ID，远端环境由注册表分配。
-- `process_id` 标识该环境内的一个逻辑进程，生命周期独立于 OS PID。
-- 连接状态由 `EnvironmentConnectionState` 表示：`Connected`、`Recovering`、`Disconnected`（`codex-rs/exec-server/src/environment.rs:72-79`）。
+- 一个执行环境由环境 ID（`environment_id`）标识：本地环境的 ID 固定，远端环境由注册表在注册时分配。
+- 环境内的逻辑进程由进程 ID（`process_id`）标识，其生命周期独立于 OS PID。
+- 连接状态由 `EnvironmentConnectionState` 表示，分已连接（`Connected`）、恢复中（`Recovering`）与已断开（`Disconnected`）三档（`codex-rs/exec-server/src/environment.rs:72-79`）。
 
 remote control 的映射是“客户端 + 流”：
 
-- `installation_id` 标识本机安装，`environment_id` 标识注册后的环境。
-- `client_id` 标识配对客户端，`stream_id` 标识一次消息流。
-- 连接状态是 `Disabled`、`Connecting`、`Connected`、`Errored`（`app-server-protocol/src/protocol/v2/remote_control.rs:158-166`）。
+- 本机安装用安装 ID（`installation_id`）区分，注册后的环境用环境 ID（`environment_id`）区分。
+- 配对客户端用客户端 ID（`client_id`）区分，一次消息流用流 ID（`stream_id`）区分。
+- 连接状态分四档：已禁用（`Disabled`）、连接中（`Connecting`）、已连接（`Connected`）与出错（`Errored`），定义在 `app-server-protocol/src/protocol/v2/remote_control.rs:158-166`。
 
 ### 3.3 传输
 
@@ -163,13 +167,15 @@ app-server 支持 stdio、Unix socket 与 WebSocket；exec-server 支持 stdio�
 
 服务端请求是 app-server 与普通“只回通知”的 RPC 最大的区别。客户端必须按请求 ID 回复，否则回合会停在等待状态。当前快照中的请求类型包括（`app-server-protocol/src/protocol/common.rs:1861-1910`）：
 
-- `item/commandExecution/requestApproval`：命令执行审批。
-- `item/fileChange/requestApproval`：文件变更审批。
-- `item/tool/requestUserInput`：工具向用户提问。
-- `mcpServer/elicitation/request`：MCP 服务器 elicitation。
-- `item/permissions/requestApproval`：附加权限申请。
-- `item/tool/call`：让客户端执行动态工具。
-- `account/chatgptAuthTokens/refresh`：让客户端刷新账号令牌。
+| 请求方法 | 用途 |
+|---|---|
+| `item/commandExecution/requestApproval` | 命令执行审批 |
+| `item/fileChange/requestApproval` | 文件变更审批 |
+| `item/tool/requestUserInput` | 工具向用户提问 |
+| `mcpServer/elicitation/request` | MCP 服务器 elicitation |
+| `item/permissions/requestApproval` | 附加权限申请 |
+| `item/tool/call` | 让客户端执行动态工具 |
+| `account/chatgptAuthTokens/refresh` | 让客户端刷新账号令牌 |
 
 审批请求只负责“是否允许这次例外”，不改变本地沙箱策略；真正的执行仍由 Codex 的审批与沙箱链路决定。
 
@@ -214,18 +220,27 @@ app-server 不把审批权交给客户端，而是把“询问”交给客户端
 exec-server 的治理重点是“执行位置”和“执行权限”都要显式传递：
 
 - 连接层用 token 或 Noise 密钥证明执行体身份。
-- 每个进程请求携带沙箱意图与托管网络要求；如果要求托管网络但缺少必要参数，执行体必须 fail closed（`protocol.rs:406-410`）。
-- 文件系统操作在远端执行体上做权限检查，而不是在 Codex 本地做完再信任远端。
-- 能力发现（`capabilityRoots/discoverV1`）让 Codex 知道执行体上有哪些可用的技能与插件根，而不是假设远端布局与本地一致；插件根的识别认三种清单布局，即 `.codex-plugin`、`.claude-plugin` 与 `.cursor-plugin` 下的 `plugin.json`（`codex-rs/exec-server-protocol/src/protocol.rs:52-59`）。
-- 第二版能力发现在客户端侧按环境、执行会话、工作目录与沙箱维度缓存，带响应上限；可重试的失败会被记录并用来触发依赖方（MCP 投影）刷新（`codex-rs/exec-server/src/capability_discovery_v2_cache.rs:1-2`）。
+- 每个进程请求携带沙箱意图与托管网络要求；要求托管网络却缺少必要参数时，执行体直接拒绝该请求（`codex-rs/exec-server-protocol/src/protocol.rs:406-410`）。
+- 文件系统操作在远端执行体上做权限检查，Codex 只负责发起请求。
+- 能力发现（`capabilityRoots/discoverV1`）让 Codex 拿到执行体实际可用的技能与插件根，按执行体自身的目录布局读取。
+
+  插件根以三种清单目录识别，每种目录下取 `plugin.json`（`codex-rs/exec-server-protocol/src/protocol.rs:52-59`）：
+
+  ```text
+  .codex-plugin/
+  .claude-plugin/
+  .cursor-plugin/
+  ```
+
+- 第二版能力发现在客户端侧按环境、执行会话、工作目录与沙箱维度缓存，并设有响应上限；可重试的失败会被记录，用来触发依赖方（MCP 投影）刷新（`codex-rs/exec-server/src/capability_discovery_v2_cache.rs:1-2`）。
 
 ### 5.3 remote control
 
 remote control 有三层治理：
 
-- 启动策略：`RemoteControlPolicy::DisabledByRequirements` 时直接不可用（`remote_control/mod.rs:72-77`）。
-- 账号层：enrollment token 有到期时间并会刷新；认证主体变化会中断会话。
-- 客户端层：`clients/list` 查看已配对设备，`clients/revoke` 把撤销请求转给中继服务；本机不保存可直接放行的客户端凭据（`codex-rs/app-server-transport/src/transport/remote_control/controller.rs:248-262`、`remote_control/mod.rs:795-809`）。
+- 启动策略：取值为 `RemoteControlPolicy::DisabledByRequirements` 时，远程控制直接不可用（`remote_control/mod.rs:72-77`）。
+- 账号层：enrollment token 带到期时间并会刷新；认证主体变化会中断当前会话。
+- 客户端层：已配对设备用 `clients/list` 查看，撤销走 `clients/revoke`，请求由中继服务执行；本机不保存可直接放行的客户端凭据（`codex-rs/app-server-transport/src/transport/remote_control/controller.rs:248-262`、`remote_control/mod.rs:795-809`）。
 
 ### 5.4 与 MCP 应用连接器的区别
 

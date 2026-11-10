@@ -20,9 +20,9 @@
 
 **源码事实。** 元思考不是 LLM 的逐步推理循环：它顺序检索已索引的“思维簇”，用上一阶段命中向量的均值与原查询向量加权融合，驱动下一阶段检索，并把每阶段文本拼成注入块。AgentDream 则从同一日记和向量索引形成跨时间层级的联想树，调用本地 VCP API 生成梦叙事；模型提出的合并、删除、感悟先落为 `pending_review` 日志，再由管理路由审批后写日记或删除源文件。
 
-**源码事实。** 主要的会话内日记写入入口是启用的 DailyNote 常驻工具服务。它对模型暴露创建和更新日记命令；请求按单进程 FIFO 执行，文件提交后即可返回，而 KnowledgeBaseManager 在后台协调 SQLite/Rust 索引更新。AgentDream 的 manifest 处于 `.block` 禁用态，并且它在缺少自己的 `config.env` 时主动休眠，因此在当前默认文件状态下承担常规对话记录职责的是 DailyNote。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin/DailyNote/dailynote.js:41-49,1573-1684`、`Plugin/AgentDream/plugin-manifest.json.block:1-48`、`Plugin/AgentDream/AgentDream.js:119-135`。
+**源码事实。** 会话内的日记写入入口是启用中的 DailyNote 常驻工具服务：它向模型暴露创建和更新两条日记命令，请求按单进程 FIFO 排队执行，文件提交后工具即返回结果，SQLite 与 Rust 索引的更新由 KnowledgeBaseManager 在后台继续。AgentDream 的插件声明处于 .block 禁用态，缺少自己的 config.env 时还会主动休眠，因此当前默认文件状态下，常规对话记录由 DailyNote 承担。相关声明与入口见 `Plugin/DailyNote/plugin-manifest.json:3-21,61-90；Plugin/DailyNote/dailynote.js:41-49,1573-1684；Plugin/AgentDream/plugin-manifest.json.block:1-48；Plugin/AgentDream/AgentDream.js:119-135`。
 
-**源码事实。** OneRing 补充的是另一类短期事实源，而不参与日记向量检索。顶层 system 提示词含 `[[OneRing::Agent::Frontend]]` 时，预处理器按 Agent 分库维护 user/assistant 消息的时间、来源前端和来源对象；随后 OneRingMemo 可将该账本中近期记录压缩为文本，替换顶层 system 中的 `[[OneRingMemo::Agent]]`。当前提交的 manifest 默认 `ONERING_RECORD_ONLY=true`，因此默认路径是同步同端 post、补来源尾标及异步写入 AI 最终回复，不进行跨端上下文补充；显式关闭该配置后才进入补齐分支。`Plugin/OneRing/OneRing.js:937-958,960-1073,3059-3143`、`Plugin/OneRing/OneRingMemo.js:190-237`、`Plugin/OneRing/plugin-manifest.json:37-51`。
+**源码事实。** OneRing 补充的是另一类短期事实源，其账本不参与日记向量检索。顶层 system 提示词含 `[[OneRing::Agent::Frontend]]` 时，预处理器按 Agent 分库维护 user/assistant 消息的时间、来源前端与来源对象；OneRingMemo 随后可把这批近期记录压缩为文本，替换顶层 system 中的 `[[OneRingMemo::Agent]]`。当前提交的 manifest 默认 `ONERING_RECORD_ONLY=true`，默认路径是同步同端 post、补来源尾标并异步写入 AI 最终回复，跨端上下文补齐只在显式关闭该配置后进入。相关实现见 `Plugin/OneRing/OneRing.js:937-958,960-1073,3059-3143；Plugin/OneRing/OneRingMemo.js:190-237；Plugin/OneRing/plugin-manifest.json:37-51`。
 
 **匿名化运行观察。** 在一份外部部署中，会话内主动或指导式 DailyNote 写入是日记的主要来源；这与源码中启用的会话工具和异步索引衔接相符。Dream 的写入比例较低，但除合并、删除或压缩已有日记之外，它还会混入梦境专属的叙事和联想内容。该观察的覆盖范围限于这份部署；其他 VCPToolBox 安装的默认比例、调用频率和内容质量需要各自的运行样本才能确认。
 
@@ -34,7 +34,16 @@
 
 ### 事实对象与来源
 
-**源码事实。** 权威持久化层是 `VectorStore/knowledge_base.sqlite` 与配置的日记根目录；默认分别是项目下的 `VectorStore/` 和 `dailynote/`。SQLite 的 `files` 保存相对路径、所属日记本、校验和、修改时间和大小，`chunks` 保存分块正文及向量 BLOB，`tags` 保存全局唯一标签与向量，`file_tags` 保存文件标签及其位置。模型名和向量维度共同形成模型签名，模型或维度变化会使相关派生数据不能沿用。见 `KnowledgeBaseManager.js` 的数据库初始化段与 `rust-vexus-lite/src/schema.rs`。建表与迁移已归到 Rust schema 模块，JS 侧不再持有独立的 schema 管理器；`modules/knowledgeBase/` 拆成协调、索引仓库、摄取、检索、标签一致性、日记元数据缓存与向量编解码等 11 个模块。
+**源码事实。** 权威持久化层是项目下 `VectorStore/knowledge_base.sqlite` 与配置的日记根目录，后者默认为 dailynote/。SQLite 按四张表保存索引事实：
+
+| 表 | 保存内容 |
+| --- | --- |
+| files | 相对路径、所属日记本、校验和、修改时间和大小 |
+| chunks | 分块正文及向量 BLOB |
+| tags | 全局唯一标签与向量 |
+| file_tags | 文件标签及其位置 |
+
+模型名与向量维度共同构成模型签名，两者任一处变化都会使相关派生数据无法沿用。建表与迁移已归 Rust schema 模块负责，JS 侧不再持有独立的 schema 管理器，知识库相关代码在 `modules/knowledgeBase/` 下拆成协调、索引仓库、摄取、检索、标签一致性、日记元数据缓存与向量编解码等 11 个模块。数据库初始化段与表结构定义分别见 `KnowledgeBaseManager.js`、`rust-vexus-lite/src/schema.rs`。
 
 **源码事实。** TagMemo 的派生资产以标签共现、标签间相似度、残差等为输入；RiverMemo 另有 `rivermemo_artifacts` 表，保存来源 V9 artifact、模型/配置/数据库/来源代际、压缩 JSON payload、校验和、状态、节点边数和发布时间。当前生产说明明确将完整图、CSR 和 provenance 交给 Rust 的 `VexusIndex.memoRuntime` 持有，而不是由 Node 中的旧 Map 构建。`rust-vexus-lite/src/schema.rs`、`KnowledgeBaseManager.js:336-371`。
 
@@ -58,7 +67,7 @@
 
 ### DailyNote：会话内的主动记录主链
 
-**源码事实。** DailyNote 是已启用的 direct `hybridservice`，声明 `create` 与 `update` 两个 invocation command。插件管理器会把声明的工具描述生成为 `{{VCPDailyNote}}`；只有 Agent 的系统提示词实际包含该占位符时，模型才会收到这些调用说明。创建要求作者、日期和完整正文，可显式指定目录和标签；更新以最少 15 字符的旧文本定位替换内容。`Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin.js:1060-1087`。
+**源码事实。** 已启用的 DailyNote 是一个 direct 型 `hybridservice`，对外声明创建（create）与更新（update）两条调用命令。插件管理器把声明的工具描述生成为 `{{VCPDailyNote}}`，只有 Agent 的系统提示词实际包含该占位符时，模型才会收到这些调用说明。创建要求作者、日期和完整正文，可显式指定目录和标签；更新用至少 15 字符的旧文本定位替换内容。声明与注册见 `Plugin/DailyNote/plugin-manifest.json:3-21,61-90`、`Plugin.js:1060-1087`。
 
 **源码事实。** 调用经 VCP 工具循环进入 `PluginManager.processToolCall`，随后由 DailyNote 的常驻服务串行处理。服务会对缺失或错误的 command 按参数推断 create/update；每个请求先进入本进程 FIFO，再交给 `KnowledgeBaseManager.runExternalFileMutation`。文件系统提交是工具返回的完成边界，索引更新在知识库管理器的后台队列继续进行，因此“模型已得到创建成功结果”只代表文件已写入，新日记要等后台索引完成才可被向量检索。`modules/vcpLoop/toolExecutor.js:371-374`、`Plugin.js:1131-1159,1197-1346`、`Plugin/DailyNote/dailynote.js:1573-1651`。
 
@@ -173,7 +182,7 @@ OneRing 可与发送前的聊天摘要、跨端历史补齐和近期上下文注
 
 **历史确认。** Git 记录显示，RAGDiaryPlugin 在 2025-08-24 进入仓库；随后经历多层匹配、数据库重构和结构召回。2025-11-16 首次以“浪潮”命名，之后可见 V3、V6、V7.1、V8、V8.2、V9 及测地线重构节点。2026-07-21 起提交开始以 V10 推进，7 月 23-24 日进入生产管线和 Rust/Vexus 一体化；当前生产文档改用 RiverMemo Topology V3 描述这一后续链。提交标题可确认演进节点，不能单独证明算法质量或完整公式。
 
-**作者自述。** 本次提供的字幕《【浪潮v9】向统一语义场的山顶攀登而去。》把 V1-V8 回顾为逐层增加 Tag、上下文、传播和测地线的经验路径，把 V9 解释为将原先独立计算统一到一个数学场，把 V9.1 解释为不再直接把 Tag 传播路线等同于测地线，而是在多层语义地图上计算候选路径。视频还报告：V9 相对旧 V8 的中央候选约提升 30%、边缘候选提升更明显；将三项工程修复下放给 V8 后，修复版 V8 与 V9 只差约 0.2%。视频 `00:01:01-00:14:43`。
+**作者自述。** 本次提供的字幕《【浪潮v9】向统一语义场的山顶攀登而去。》把 V1-V8 回顾为逐层叠加标签、上下文、传播和测地线的经验路径，认为 V9 把原先独立计算的部分统一进一个数学场；V9.1 不再把 Tag 传播路线直接当作测地线，改为在多层语义地图上计算候选路径。视频还报告：V9 相对旧 V8 的中央候选约提升 30%，边缘候选提升更明显；将三项工程修复下放给 V8 后，修复版 V8 与 V9 只差约 0.2%。对应视频时间段为 00:01:01-00:14:43。
 
 **交叉确认与边界。** 2026-07-14 的 V9.1 正式发布说明记录了相同消融结果，并将测试口径限定为 1,500 组次；它明确认为 V8.3 的结构传播方向有效，主要折损来自状态一致性、噪声和派生资产管理，而不是把全部收益归给单一新方程。视频末尾仍把“统一坐标与运动”作为 V10 展望；当前 RiverMemo 已把 V9 源场与河网继续映射为双尺度场、候选曲线、相对拓扑、Omega 和 Direct Anchor 排序。这里确认的是历史意图与工程实现的连续；物理类比属于工程建模表述，其语言学或认知科学依据需要独立证明。`docs/TAGMEMO_V9_1正式版更新说明_2026-07-14.md:1-147`、`docs/RIVERMEMO_TOPOLOGY_V3.md:93-202`。
 

@@ -87,7 +87,7 @@ web-ui 的 Markdown 口径独立实现（`web-ui/app/lib/export-markdown.ts`）�
 
 对话导出只有 Markdown 与 PNG 两种格式（`ConversationExport.kt` 的导出面板），两者都没有 schema、消息 ID、时间戳、模型或分支元数据，无法据其恢复会话，属于一次性阅读交付；JSON/HTML/PDF 形式的对话导出本次未找到。Markdown 与图片都不能反向导入。
 
-配置类导出有明确的信封结构 `ExportData(version=1, type, data)`，`type` 为 `mode_injection` 或 `lorebook`，JSON 采用 `ignoreUnknownKeys`、保留默认值、非美化（`data/export/ExportSerializer.kt`）；世界书导入先试原生信封，再降级试 SillyTavern 世界书结构，注入只支持原生。
+配置类导出统一装进版本号为 1 的信封，字段是 version、type 与 data，其中 type 只有 `mode_injection` 与 `lorebook` 两种取值。序列化时忽略未知字段、写出默认值，输出非美化 JSON（`data/export/ExportSerializer.kt`）。导入按类型分叉：世界书先解析原生信封，失败后降级尝试 SillyTavern 的世界书结构；注入只接受原生信封。
 
 可往返的是备份 ZIP：它没有 manifest 或版本号，靠固定文件名约定，设置读取时先经 `SettingsJsonMigrator.migrate` 做旧版兼容（`BackupManager.kt`），ZIP 结构本身没有版本协商；包构成与 Chatbox/Cherry Studio 导入校验见 [会话与消息管理笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)与 [LLM 渠道管理笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
@@ -99,11 +99,11 @@ web-ui 的 Markdown 口径独立实现（`web-ui/app/lib/export-markdown.ts`）�
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
-图片（E3）走"离屏复刻"路线，不截取当前视口，也不依赖 WebView/Canvas。`BitmapComposer.composableToBitmap` 在目标 Activity 的 decorView 上临时挂一个不可见的 `ComposeView` 容器，按给定宽度与屏幕密度测量布局，`postDelayed(100ms)` 等待异步内容后 `drawToBitmap`，随后移除容器（`ui/src/main/java/me/rerere/ui/components/BitmapComposer.kt`）。尺寸上限为 10000dp×10000dp，未给高度时用 `AT_MOST` 让内容自撑。
+图片（E3）由 Compose 组件重新排版后绘制成整张位图，当前视口与 WebView/Canvas 都不参与出图。做法是在目标 Activity 的 decorView 上临时挂一个不可见的 Compose 容器，按给定宽度与屏幕密度测量布局，用固定 100ms 延迟等异步内容加载，再遍历绘制成位图并移除容器；尺寸上限为 10000dp×10000dp，未给高度时按内容自撑。入口见 `BitmapComposer.composableToBitmap`（`ui` 模块）。
 
-导出的画面由 `ExportedChatImage` 定义（`ConversationExport.kt`）：应用 `RikkahubTheme`，宽度 540dp，顶部是会话标题、本地时间、`rikka-ai.com` 与应用图标，消息逐个列出，底部固定一行 `export_image_warning` 水印（10sp、半透明）。助手消息在前一条是用户消息时会显示模型图标与模型名（`ConversationExport.kt`）。
+导出的画面由 `ExportedChatImage` 组合出来：套用 `RikkahubTheme` 主题，宽度固定 540dp，顶部依次是会话标题、本地时间、rikka-ai.com 与应用图标，中间逐条列出消息，底部固定一行半透明的 10sp 水印（文案取 export_image_warning）。助手消息紧跟前一条用户消息时，额外显示模型图标与模型名。布局定义见 `ConversationExport.kt`。
 
-生成后先 `bitmap.compress(PNG)` 写临时文件，再保存到相册，最后经 `FileProvider` 以 `image/png` 分享（`ConversationExport.kt` 的 `exportToImage`）。相册写入按系统版本分叉：Android 10 及以上用 MediaStore 写 `Pictures`，更低版本直接写外部存储并广播媒体扫描，且需 `WRITE_EXTERNAL_STORAGE` 权限（`utils/ContextUtil.kt`）。
+点击图片导出后按顺序做三件事：把位图压缩成 PNG 写入临时文件，保存一份到相册，再通过 FileProvider 以 `image/png` 交给系统分享面板。相册写入按系统版本分叉：Android 10 及以上通过 MediaStore 存进 Pictures 目录，更低版本直接写外部存储并广播媒体扫描，需要 `WRITE_EXTERNAL_STORAGE` 权限。三步流程见 `ConversationExport.kt` 的 `exportToImage`，版本分叉的相册写入见 `utils/ContextUtil.kt`。
 
 Markdown 导出是纯字符串拼接（`buildAnnotatedString` 后取字符串），没有图片渲染与分页；HTML 与 PDF 导出本次未找到。配置二维码由 zxing 生成 512×512 位图（`ui/components/ui/QRCode.kt`），其编码协议见 [LLM 渠道管理笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。图片生成资产本身的展示与删除属于 [媒体创作笔记](../媒体创作/RikkaHub-媒体创作调查笔记.md)。
 
@@ -115,9 +115,21 @@ Markdown 导出是纯字符串拼接（`buildAnnotatedString` 后取字符串）
 
 ## 8. 分享载体、访问控制与撤销
 
-本地分享载体是 Android 系统分享面板。三条链路都用 `Intent.createChooser + ACTION_SEND`，并授予 `FLAG_GRANT_READ_URI_PERMISSION`：Markdown 为 `text/markdown`、图片为 `image/png`（`ConversationExport.kt` 的 `shareFile`）、配置 JSON 为 `application/json`（`ui/hooks/ExportHooks.kt`）、Provider 文本为 `text/plain`；文件来自 `${packageName}.fileprovider`。本地备份导出走 SAF `CreateDocument("application/zip")`，由用户选择保存位置（`backup/tabs/ImportExportTab.kt,227-252`），而不是分享面板。
+本地分享载体是 Android 系统分享面板。三条链路都用 `Intent.createChooser` 包一个 `ACTION_SEND` 选择器，并授予 `FLAG_GRANT_READ_URI_PERMISSION` 让接收方临时读取，文件统一由 `${packageName}.fileprovider` 暴露。各交付物的 MIME 类型与分享入口如下：
 
-远端传输面是 WebDAV 与 S3。WebDAV 上传到配置的 `path`（默认 `rikkahub_backups`），列出时只认前缀 `backup_` 且后缀 `.zip` 的文件，按修改时间倒序，支持下载恢复与删除（`data/sync/webdav/WebDavSync.kt`）。S3 使用固定前缀 `rikkahub_backups/backup_*.zip`，同样支持列出、恢复与删除（`data/sync/S3Sync.kt`）。两者都不是长期分享链接，没有 token、公开页或过期语义，访问控制完全由用户配置的服务器凭据决定。
+| 交付物 | MIME 类型 | 分享入口 |
+| --- | --- | --- |
+| Markdown | `text/markdown` | `ConversationExport.kt` 的 `shareFile` |
+| 图片 | `image/png` | 同上 |
+| 配置 JSON | `application/json` | `ui/hooks/ExportHooks.kt` |
+| Provider 文本 | `text/plain` | 同上 |
+
+本地备份导出走另一条路：用 SAF 的 CreateDocument 请求 application/zip，由用户选定保存位置（`backup/tabs/ImportExportTab.kt,227-252`），不经过分享面板。
+
+远端传输面是 WebDAV 与 S3，两者都只把备份 ZIP 送进用户自己的远端存储，并能列出、下载恢复与删除。它们不提供长期分享链接、公开页、token 或过期语义，访问控制完全由用户配置的服务器凭据决定。
+
+- WebDAV：上传到配置项 `path` 指定的目录（默认 rikkahub_backups），列目录时只认 `backup_` 前缀、以 `.zip` 结尾的文件，按修改时间倒序（`data/sync/webdav/WebDavSync.kt`）。
+- S3：使用固定前缀 rikkahub_backups/backup_*.zip，能力与 WebDAV 一致（`data/sync/S3Sync.kt`）。
 
 二维码分享是明文凭据传播，其前缀校验、无签名/有效期与导入去重口径见 [LLM 渠道管理笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
@@ -125,7 +137,10 @@ Markdown 导出是纯字符串拼接（`buildAnnotatedString` 后取字符串）
 
 对话导出没有任何脱敏或敏感内容开关。system 消息（会话级自定义系统提示）在 Markdown 里按角色标记输出（非 User 即记 Assistant），reasoning 与工具调用含可能的路径、查询与结果，全部原样进入交付物；图片导出则把思考折叠并隐藏工具内容。三条链路都没有导出前的密钥检查引导。
 
-配置与备份侧则明文携带凭据：Provider 二维码与文本分享含 `apiKey` 且 `models` 被清空（`ShareSheet.kt`）；备份 ZIP 的 `settings.json` 是完整 `Settings` 序列化，含 provider 的 `apiKey`、自定义 header 等，本次未找到导出时的脱敏或过滤开关（`BackupManager.kt`）。
+配置与备份侧把凭据明文写进交付物，有两个出口：
+
+- Provider 的二维码与文本分享：带 `apiKey`，并把 `models` 清空（`ShareSheet.kt`）。
+- 备份 ZIP：其中的 settings.json 是完整的设置序列化，provider 的 `apiKey`、自定义 header 都在里面；本次未找到导出时的脱敏或过滤开关（`BackupManager.kt`）。
 
 投递安全方面，Markdown 把会话标题、消息正文与图片 URL 直接拼接，未做转义；图片文件名固定无非法字符问题，但 web-ui 用原始标题作 `${detail.title}.md`，非法字符行为取决于浏览器。
 
@@ -135,7 +150,7 @@ Markdown 导出是纯字符串拼接（`buildAnnotatedString` 后取字符串）
 
 图片导出在内存中构建整张位图，上限 10000dp×10000dp，无分页或分段；超长会话与超大图的内存、耗时未运行验证。它等待异步内容只靠固定 `postDelayed(100ms)`（`ui` 模块的 `BitmapComposer`），远程图片是否来得及加载属运行时行为；Markdown 导出是线性拼接，无大小上限。
 
-对话导出的失败反馈较弱：`exportToImage` 的 onClick 先 `scope.launch` 生成、随后立即弹成功提示，失败时再补错误提示，因此失败时用户会先看到成功（`ConversationExport.kt`）；`exportToMarkdown` 的异常被内部捕获后只 `printStackTrace`，没有面向用户的失败提示（`ConversationExport.kt`）。两者都没有取消机制。
+对话导出的失败反馈较弱。图片导出点下按钮后先启动协程生成，紧接着就弹出成功提示，真正失败时再补一条错误提示，用户会先看到成功；Markdown 导出把异常在内部捕获后只打印堆栈，不给用户失败提示。两条链路都没有取消机制，实现见 `ConversationExport.kt` 的 `exportToImage` 与 `exportToMarkdown`。
 
 测试覆盖方面，备份暂存与回滚、外部备份导入、Provider 编解码往返各有测试（分别见 [会话与消息管理笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)、[LLM 渠道管理笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)）；对话导出本身本次未找到对应测试。
 

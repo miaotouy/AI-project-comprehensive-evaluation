@@ -29,11 +29,11 @@ main_api
 当前快照的关键结论：
 
 - Chat Completion 有 26 个 `chat_completion_source`，Text Completion 有 15 个 `textgen_type`；
-- Chat Completion 后端按 source 分支构造各家端点、Header、payload 和流式解析，Custom 路径兼容 OpenAI Chat Completions；
+- Chat Completion 后端按 source 分派到各条适配分支，分别构造端点、Header 和请求体，并处理流式解析；Custom 路径沿用 OpenAI Chat Completions 协议；
 - Connection Profile 保存 API、URL、模型、代理和 Secret ID 等引用，可快速切换整套连接；
 - Secret Manager 对同一种 Secret 支持多条带 UUID、标签和 active 状态的 Key；
 - 新写入的 Key 会成为唯一启用项，也可以手动 rotate，Profile 还能显式固定某个 Secret ID；
-- 多 Key 不会随机或轮询，不会因 401/429 自动切换，也没有失败计数、熔断和恢复；
+- 多 Key 的读取只认 active 条目或 Profile 指定的 UUID，401/429 之后请求仍按原 Key 返回，失败计数、熔断与恢复机制均未实现；
 - 普通聊天请求没有统一自动重试和指数退避，失败直接返回前端；
 - `/profile-genstream` 专用命令在流式失败时会改成非流式再请求一次，但仍使用同一 Profile、模型和 Secret；
 - 本地没有跨 Profile failover、权重、成本或延迟路由；
@@ -42,9 +42,9 @@ main_api
 - `settings.json` 的自动快照包含 Connection Profile、URL 和普通设置，但不包含独立 `secrets.json`；
 - 全量用户 ZIP 默认排除 `secrets.json` 及 Secret 迁移备份，只有显式开启 `allowKeysExposure` 才把它们纳入归档；
 - 状态检查主要调用 Provider `/models`，部分 Provider 只提示用 Test Message 验证；成功/失败只更新全局 UI 状态，不参与后续调度。
-- 本次补查未找到独立的 CLI/TUI 渠道管理界面。CLI 只解析服务启动、网络、数据根目录和请求代理等参数；Electron 入口只启动同一 HTTP 服务并把 Web 页面装入窗口。
+- 独立的 CLI 与 TUI 渠道管理界面在本次检查范围内未找到。CLI 只解析服务启动、网络、数据根目录和请求代理等参数；Electron 入口只启动同一个 HTTP 服务并把 Web 页面装入窗口。
 - Web 是当前源码中唯一直接提供渠道配置管理的界面：普通 API 设置通过设置页和 preset 操作，Connection Profile 提供查看、新建、编辑、更新、重新应用和删除，Secret Manager 提供查看掩码、新增、重命名、复制、人工启用和删除。
-- 现有 Profile 可以更新和编辑，但没有 Profile 复制按钮；“新建 Profile”实际读取当前全局 API 设置生成快照，因此新建渠道与已有渠道不是同一层对象，也不存在把一个 Provider 实例复制成另一个独立 Endpoint 的后端 CRUD。
+- 现有 Profile 支持更新和编辑，复制入口在界面中未找到；“新建 Profile”读取当前全局 API 设置生成快照，新建渠道与已有渠道因此分属不同层级的对象，后端 CRUD 也只覆盖 Profile 自身，没有把 Provider 实例复制成独立 Endpoint 的接口。
 
 ## 总体调用链
 
@@ -81,10 +81,10 @@ Profile 的 `secret-id` 只是对 Secret Manager 条目的引用。Profile 删�
 
 ### 配置文件与默认值
 
-- 部署级 `config.yaml` 由 `src/command-line.js` 读取并与命令行参数合并。它控制端口、监听地址、数据根目录、请求代理、认证、备份和 `allowKeysExposure` 等服务行为，不定义用户 Provider 实例列表，也不创建 Connection Profile。
-- 用户 `settings.json` 由 `/api/settings/save` 原子写入；其中包含普通 API 设置、Provider 专属模型和 URL、preset 选择、代理预设以及 Connection Profile。服务端在启动、保存和定时流程中创建设置快照（`src/endpoints/settings.js:118-156, 206-216`）。
-- 用户 Provider preset 是按 API ID 分目录保存的 JSON 文件。OpenAI preset 位于用户 `openAI_Settings` 目录，由 `/api/presets/save`、`/delete` 和 `/restore` 管理；preset 保存的是生成/连接字段子集，不是 Secret 文件，也不是 Profile（`src/endpoints/presets.js:16-36, 42-101`）。
-- `secrets.json` 是用户目录独立文件，服务端 `SecretManager` 原子写入；默认设置和用户 preset 不会把 Secret 值自动合并进去。
+- 服务启动时，命令行入口读取部署级 `config.yaml` 并与命令行参数合并（`src/command-line.js`），由合并结果决定端口、监听地址、数据根目录、请求代理、认证、备份和密钥暴露开关（`allowKeysExposure`）等服务行为；用户的 Provider 实例与 Connection Profile 由用户目录的设置文件及其中的扩展设置块承载。
+- 用户 `settings.json` 由 `/api/settings/save` 原子写入，保存当前 API 设置、各 Provider 的模型与 URL、preset 选择、代理预设和 Connection Profile 列表；服务端在启动、保存和定时流程中创建设置快照（`src/endpoints/settings.js:118-156, 206-216`）。
+- 用户 Provider preset 是按 API ID 分目录存放的 JSON 文件。OpenAI preset 保存在该用户的 `openAI_Settings` 目录，由 `/api/presets/save`、`/delete` 和 `/restore` 管理；文件内容只覆盖生成与连接字段的子集，Secret 值由 Secret Manager 单独保存，Connection Profile 则另存于设置文件（`src/endpoints/presets.js:16-36, 42-101`）。
+- `secrets.json` 是用户目录下的独立文件，由服务端 `SecretManager` 原子写入；默认设置与用户 preset 的保存流程都不会把 Secret 值并入该文件。
 
 ### 配置入口操作矩阵
 
@@ -293,13 +293,16 @@ Text Completion 也按 type 使用各自的模型拉取函数，例如 Ollama、
 
 oai_settings 为不同 Provider 保存独立字段，例如：
 
-- `openai_model`；
-- `claude_model`；
-- `openrouter_model`；
-- `google_model` / `vertexai_model`；
-- `custom_model`；
-- `azure_openai_model`；
-- 各聚合平台和厂商的专属 model 字段。
+| 字段 | 对应 Provider |
+|---|---|
+| `openai_model` | OpenAI |
+| `claude_model` | Claude |
+| `openrouter_model` | OpenRouter |
+| `google_model`、`vertexai_model` | Google AI Studio、Vertex AI |
+| `custom_model` | Custom 自定义端点 |
+| `azure_openai_model` | Azure OpenAI |
+
+其余聚合平台和厂商各自维护专属 model 字段。
 
 切换来源时，`getChatCompletionModel()` 从对应 Provider 字段取当前模型；Connection Profile 则把最终选定的 API 和模型固化为通用字段。
 
@@ -386,8 +389,8 @@ Text Completion 则由后端类型决定 URL 规则、模型发现、模板能�
 
 [`public/scripts/extensions/shared.js`](../../SillyTavern/public/scripts/extensions/shared.js) 的 `ConnectionManagerRequestService.sendRequest()` 不必先永久切换整个 UI，就能读取指定 Profile 并构造请求：
 
-- Chat Completion 传 `source`、`model`、`api-url`、`secret-id` 和 Proxy；
-- Text Completion 传 `type`、`model`、`api_server` 和 `secret-id`。
+- Chat Completion 请求传入来源、模型、接口地址、Secret ID 和代理设置（`source`、`model`、`api-url`、`secret-id`、Proxy）；
+- Text Completion 请求传入后端类型、模型、服务地址和 Secret ID（`type`、`model`、`api_server`、`secret-id`）。
 
 这是插件、slash command 和后台功能复用 Profile 的重要接口，但调用方一次仍只提供一个 Profile ID。
 
@@ -395,12 +398,14 @@ Text Completion 则由后端类型决定 URL 规则、模型发现、模板能�
 
 适配层的 Provider 分支行为如下，仍属一请求一 Adapter 的路由：
 
-- Google AI Studio 目录改为分页拉取全部页（`fetchGoogleModels`）；其 MakerSuite 分支按上游 API 变更调整了参数；
-- Fireworks 流式请求设置会话亲和 Header 以改进缓存，并请求与解析 reasoning 字段（`public/scripts/reasoning.js:157`、`public/scripts/openai.js:2585`）；
-- OpenRouter 在用户请求时启用 logprobs 返回；
-- Pollinations 提供端点选择项，可在设置页或 `/api-url` 命令中切换，合法值由 `POLLINATIONS_ENDPOINT` 枚举限定（`public/scripts/openai.js:272`、`public/scripts/slash-commands.js:6687-6710`）；
-- NovelAI 设置迁移保留零值 temperature，零值作为显式取值迁移，缺省填充只作用于缺失字段；
-- 内置模型/上下文映射表持续跟上游刷新，当前已收录 Claude Opus 5 / Sonnet 5 / Fable 系、GPT-5.6 与 `gpt-6-astra`、Gemini 3.5/3.6/3.7 Flash 系、DeepSeek V4 Flash Vision 等条目。这些是硬编码表维护，不改变本地路由结构。
+- Google AI Studio 的模型目录分页拉取，直到取完所有页（`fetchGoogleModels`）；MakerSuite 分支按上游接口要求传入参数；
+- Fireworks 在流式请求中带上会话亲和 Header 以命中缓存，并请求和解析 reasoning 字段；
+- OpenRouter 在用户开启对应选项时请求 logprobs 返回；
+- Pollinations 提供端点选择项，可在设置页或 `/api-url` 命令中切换，合法值由 `POLLINATIONS_ENDPOINT` 枚举限定；
+- NovelAI 的设置迁移把零值 temperature 当作显式取值保留，缺省填充只补缺失字段；
+- 内置的模型与上下文映射表在代码中硬编码维护，已收录 Claude Opus 5 / Sonnet 5 / Fable 系、GPT-5.6 与 `gpt-6-astra`、Gemini 3.5/3.6/3.7 Flash 系、DeepSeek V4 Flash Vision 等条目，本地路由结构不随条目更新而变化。
+
+上述分支的入口集中在 `public/scripts/openai.js:272, 2585`、`public/scripts/reasoning.js:157` 和 `public/scripts/slash-commands.js:6687-6710`。
 
 ## 6. 重试、故障转移和路由
 

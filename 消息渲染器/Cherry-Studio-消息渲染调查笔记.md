@@ -16,13 +16,13 @@
 
 Cherry Studio 通过一套分层的消息 UI 运行时完成消息渲染，Markdown 只负责其中的正文呈现：
 
-1. 主进程经 IPC 发送 AI SDK `UIMessageChunk`。
-2. renderer 按 topic、execution 和 anchor 拆分流，用 AI SDK 的 `readUIMessageStream` 组装 `UIMessage.parts`；overlay 逻辑从 hook 抽成窗口级服务 `ExecutionStreamOverlayService` 后，组件卸载不再拆掉 reader。
+1. 主进程经 IPC 把 AI SDK 的 `UIMessageChunk` 发送给渲染进程。
+2. 渲染进程先按 topic、execution 和 anchor 分流，再用 `readUIMessageStream` 把分片组装成消息 parts；overlay 逻辑由窗口级服务 `ExecutionStreamOverlayService` 承接，组件卸载不会拆掉 reader。
 3. 当前流式快照以 overlay 形式覆盖数据库历史，持久化数据保持不变；分支草稿（awaiting-input 空叶子）以持久化行保存，不再属于渲染层临时态。
 4. 页面 adapter 将 Home、Agent 等业务能力注入统一的 `MessageListProvider`。
-5. `MessageList` 虚拟化消息组，把历史组与高频更新的 live 组隔离开。
-6. `MessagePartsRenderer` 把 parts 投影为正文、思考、工具、附件、图片、视频、错误、翻译和压缩记录。
-7. 正文最终由基于 Streamdown 的静态/流式 Markdown 组件渲染。
+5. 消息列表组件（`MessageList`）虚拟化消息组，把历史组与高频更新的 live 组隔离开。
+6. 消息部件渲染器（`MessagePartsRenderer`）把 parts 投影为正文、思考、工具、附件、图片、视频、错误、翻译和压缩记录。
+7. 正文最终交给基于 Streamdown 的静态与流式 Markdown 组件渲染。
 
 代码中可以确认以下设计特点：
 
@@ -133,30 +133,40 @@ Agent 同样渲染统一的 MessageList，差异由 adapter 提供，包括：
 
 主要内建类型：
 
-- `text`
-- `reasoning`
-- `tool-*`
-- `dynamic-tool`
-- `file`
-- `source-url`
-- `source-document`
-- `step-start`
+```text
+text
+reasoning
+tool-*
+dynamic-tool
+file
+source-url
+source-document
+step-start
+```
 
 ### Cherry 自定义 data part
 
 定义于 `src/shared/data/types/uiParts.ts:139-151`（`CherryDataPartTypes`）：
 
-- `data-error`
-- `data-translation`
-- `data-video`
-- `data-compact`
-- `data-compaction-anchor`
-- `data-conversation-reset`（CLI 会话无法续接、另起新会话的标记）
-- `data-agent-task-event`
-- `data-knowledge-scope`
-- `data-clear`（上下文清理边界标记）
-- `data-code`
-- `data-retry`（模型重试/fallback 状态；**瞬时 part**——流式期间实时显示，持久化监听器在写库前剥离、永不落库，见 `uiParts.ts:112-129`）
+```text
+data-error
+data-translation
+data-video
+data-compact
+data-compaction-anchor
+data-conversation-reset
+data-agent-task-event
+data-knowledge-scope
+data-clear
+data-code
+data-retry
+```
+
+三个取值还附带额外语义：
+
+- `data-conversation-reset` 标记 CLI 会话无法续接、需要另起新会话。
+- `data-clear` 标记上下文清理的边界。
+- `data-retry` 记录模型重试与 fallback 状态，属于**瞬时 part**：流式期间实时显示，持久化监听器在写库前将其剥离，不会落库（`uiParts.ts:112-129`）。
 
 其中 data-agent-task-event、data-knowledge-scope、data-clear 等是隐藏状态，不直接进入聊天正文。
 
@@ -388,12 +398,14 @@ MessageList
 
 `useChatMarkdownComponents.tsx` 已拆分：当前映射集中在同目录的 `ChatMarkdownRenderers.tsx` 与 `ChatMarkdownRenderContext.tsx`。citation 展示由 `CitationSup.tsx` / `CitationTooltip.tsx` 负责：
 
-- `a` -> citation tooltip 或普通 link hover card。
-- `code` -> inline code、file path、CodeBlockView 或 HTML artifact。
-- `table` -> 支持复制和 Excel 导出。
-- `img` -> ImageViewer。
-- `svg` -> 自适应尺寸和预览菜单。
-- `p` -> 含图片时改为 div，避免非法 DOM nesting。
+| Markdown 元素 | 映射结果 |
+| --- | --- |
+| `a` | citation tooltip，或普通链接的 hover card |
+| `code` | 行内代码、文件路径、`CodeBlockView` 或 HTML artifact |
+| `table` | 支持复制与 Excel 导出 |
+| `img` | `ImageViewer` |
+| `svg` | 自适应尺寸与预览菜单 |
+| `p` | 含图片时改为 div，避免非法 DOM nesting |
 
 代码块能识别不完整 fence，流式高亮状态会传给 `CodeBlockView`。在 fancy mode 下，HTML fenced code 先显示为 `HtmlArtifactsCard`，不会直接注入正文 DOM。
 
@@ -429,10 +441,10 @@ MCP/meta 工具详情中有两处通过 `dangerouslySetInnerHTML` 注入 Shiki �
 
 Markdown 中的 fenced `html` 被 `CodeBlock.tsx` 映射为 `HtmlArtifactsCard`，用户点击 preview 后打开 `HtmlArtifactsPopup`。预览的承载方式与安全边界随内容形态和交互状态分四种情形：
 
-- 默认 iframe：`HtmlPreviewFrame.tsx:10` 的默认 sandbox 为 `allow-scripts allow-same-origin allow-forms`（常量 `HTML_PREVIEW_IFRAME_SANDBOX`），iframe 通过 `srcDoc` 注入内容。
-- 受限预览：fragment 或未同意交互的 document 走 `HtmlArtifactView.tsx:465-471` 的 `AdaptiveHtmlPreview`，显式传 `sandbox="allow-same-origin"` 与严格 CSP `HTML_PREVIEW_RESTRICTED_CSP`。
-- 交互预览：用户同意交互后的 document 在沙箱 webview 中运行；其安全细节与运行分级见生成式输出与运行时笔记。
-- 主窗口边界：主窗口在 `windowRegistry.ts:88` 关闭 `webSecurity` 与沙箱、开启 webview 标签，以宽权限承载上面三类内嵌页面；配套 preload 在 `preload.ts:362-363` 暴露 `window.electron` 与完整 `window.api`（含文件读取、文件写入、打开路径等操作）。
+- 默认情形由 `HtmlPreviewFrame` 渲染，iframe 的 sandbox 取值为 `allow-scripts allow-same-origin allow-forms`，内容通过 `srcDoc` 注入（`HtmlPreviewFrame.tsx:10`）。
+- fragment 内容与尚未同意交互的 document 走受限预览：`AdaptiveHtmlPreview` 把 sandbox 收窄为 `allow-same-origin`，并施加严格 CSP（`HtmlArtifactView.tsx:465-471`）。
+- 用户同意交互后，document 转入沙箱 webview 运行，安全细节与运行分级见生成式输出与运行时笔记。
+- 三类内嵌页面共用主窗口的宽权限底座：窗口创建时关闭 `webSecurity` 与沙箱、开启 webview 标签。配套 preload 向页面暴露 `window.electron` 与完整 `window.api`，覆盖文件读取、文件写入、打开路径等操作，位置分别见 `windowRegistry.ts:88` 和 `preload.ts:362-363`。
 
 四种情形同时存在：预览内容按形态与交互状态在默认最小权限、受限预览和放开后的沙箱 webview 之间切换，主窗口始终以宽权限提供运行底座。
 
@@ -460,12 +472,14 @@ ECharts 语言代码块会把 JSON 解析为 option，并在专用预览中用 S
 
 `tools/toolResponse.ts` 将 AI SDK ToolUIPart 映射为统一状态：
 
-- `input-streaming` -> `streaming`
-- `input-available` -> `invoking`
-- approval states -> `pending`
-- `output-available` -> `done`
-- `output-error` -> `error`
-- denied/cancelled -> `cancelled`
+| AI SDK 状态 | 统一状态 |
+| --- | --- |
+| `input-streaming` | `streaming` |
+| `input-available` | `invoking` |
+| approval 相关状态 | `pending` |
+| `output-available` | `done` |
+| `output-error` | `error` |
+| denied 或 cancelled | `cancelled` |
 
 它还结合 tool name、metadata、MCP 命名规则和 provider metadata 判断工具类型为 mcp、builtin 或 provider。
 
@@ -508,10 +522,12 @@ Cherry Studio 对流式渲染的优化覆盖了从输入到 DOM 的整条链路�
 
 静态盘点（HEAD）：
 
-- `components/chat/messages`：312 个文件，其中 116 个测试文件。
-- 消息组件 TSX 文件：`MessageList`、`MessageFrame`、`MessagePartsRenderer`、`MainTextBlock`、`ThinkingBlock`、`ToolBlockGroup` 等。
-- `services/aiTransport`：8 个文件，其中 3 个测试文件（含 `ExecutionStreamOverlayService.test.ts`）。
-- `packages/ui` Markdown：34 个文件，其中 10 个测试文件。
+| 盘点对象 | 结果 |
+| --- | --- |
+| `components/chat/messages` | 312 个文件，其中 116 个测试文件 |
+| 消息组件 TSX 文件 | `MessageList`、`MessageFrame`、`MessagePartsRenderer`、`MainTextBlock`、`ThinkingBlock`、`ToolBlockGroup` 等 |
+| `services/aiTransport` | 8 个文件，其中 3 个测试文件（含 `ExecutionStreamOverlayService.test.ts`） |
+| `packages/ui` Markdown | 34 个文件，其中 10 个测试文件 |
 
 已看到的测试覆盖包括：
 

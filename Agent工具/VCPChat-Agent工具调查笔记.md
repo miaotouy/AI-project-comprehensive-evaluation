@@ -18,16 +18,16 @@ VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistr
 
 代码中已确认的关键发现：
 
-1. **VCPChat 自带的分布式节点默认开启**（`enableDistributedServer: true`，`modules/utils/appSettingsManager.js:170`），随主进程一起启动（`main.js:1276`），把本机插件目录（`VCPDistributedServer/Plugin/*`，当前 HEAD 30 个目录）中的能力注册进主 VCPToolBox 的工具目录，包括：
+1. **分布式节点随主进程默认开启**：应用启动时读取 `enableDistributedServer` 设置，其默认值为真（`modules/utils/appSettingsManager.js:170`、`main.js:1276`）；启用时加载分布式节点模块并完成初始化，把本机插件目录（当前 HEAD 30 个目录）中的能力注册进主 VCPToolBox 的工具目录，包括：
    - `PowerShellExecutor`、`PTYShellExecutor`：本机 shell 执行；
    - `FileOperator`：读写任意/受限目录；
    - `ScreenPilot`：截图/OCR/模拟点击/UI 自动化；
    - `MediaShot`：截取本机文件。
-   这些插件由本机 Node/Python 子进程执行，不在渲染器进程内；renderer 型插件不再进入工具注册。
-2. **审批终端的"自动允许规则"是纯字符串/正则匹配**：`modules/filterManager.js:567` 起的 `checkToolAutoApproval()` 只按 `toolPattern` 对 `toolName` 做 `contains`/`exact`/`regex` 匹配，规则存在 `settings.json` 的 `toolAutoApprovalRules` 里，明文、无权限分级。
-3. **VCPLog WebSocket 通道在一次握手后不再做消息级鉴权**：主进程连接时用 URL 里的 `VCP_Key` 做一次性握手鉴权（`main.js:2208-2226`），握手成功后同一条 WebSocket 上收到的任意 `tool_approval_request` payload 都被无条件展示为审批 UI 并可被自动规则批准（`modules/notificationRenderer.js:324-340`）。审批与拒绝的响应也通过同一条无进一步签名的通道回传（`sendToolApprovalResponse`，`modules/notificationRenderer.js:294-322`）。
-4. **`/admin_api` 使用 Basic Auth，凭据明文落盘在 `forum.config.json`**（`modules/ipc/forumHandlers.js:60-65`），renderer 端通过 `btoa(username:password)` 直接拼 `Authorization` header（`Agenttaskmodules/task.js:240`、`Forummodules/forum.js:206`）；该 admin 面板可改写服务端的 Agent Assistant / Task Assistant 配置（`agent-assistant/config`、`task-assistant/config`），包括新增/删除委托 Agent、系统提示词、定时任务。
-5. **DESKTOP_PUSH 是模型输出中一条不经 VCPToolBox 审批协议直达桌面的本地协议**：模型只需在流式输出中吐出 `<<<[DESKTOP_PUSH]>>>...<<<[DESKTOP_PUSH_END]>>>` 包裹的 HTML/CSS/JS，流式投影把 token 交给 `modules/renderer/desktopPushConsumer.js` 直接拦截并调用 `electronAPI.desktopPush()`，主进程 `desktop-push` IPC（`modules/ipc/desktopHandlers.js:1105-1132`）原样转发给桌面窗口渲染——不经过 `tool_approval_request`，唯一的前置校验是前缀白名单（完整清单见下）：
+   上述插件都在本机 Node/Python 子进程中执行，渲染进程内不运行它们；renderer 型插件改由前端插件加载器加载，不进入工具注册。
+2. **审批终端的"自动允许规则"是纯字符串/正则匹配**：`modules/filterManager.js:567` 起的匹配函数只拿规则里的工具名模式与服务端上报的工具名比对，支持包含、完全相等和正则三种模式，规则以明文存在 `settings.json` 的 `toolAutoApprovalRules` 中，无权限分级。
+3. **VCPLog WebSocket 通道在一次握手后不再做消息级鉴权**：主进程连接时用 URL 里的 `VCP_Key` 做一次性握手鉴权（`main.js:2208-2226`），握手成功后同一条连接上收到的任意 `tool_approval_request` 载荷都被无条件展示为审批 UI，也可被自动规则直接批准；允许与拒绝的响应同样经这条无进一步签名的通道回传（`modules/notificationRenderer.js:294-340`）。
+4. **`/admin_api` 使用 Basic Auth，凭据明文落盘在 `forum.config.json`**（`modules/ipc/forumHandlers.js:60-65`），renderer 端由页面脚本用 base64 编码直接拼出 Authorization 头（`Agenttaskmodules/task.js:240`、`Forummodules/forum.js:206`）；该 admin 面板可改写服务端的 Agent Assistant / Task Assistant 配置，包括新增/删除委托 Agent、系统提示词、定时任务。
+5. **DESKTOP_PUSH 是模型输出中一条不经 VCPToolBox 审批协议直达桌面的本地协议**：模型只需在流式输出中吐出 `<<<[DESKTOP_PUSH]>>>` 起始标记与结束标记包裹的 HTML/CSS/JS，流式投影把 token 交给 `modules/renderer/desktopPushConsumer.js:36-45,195` 直接拦截。主进程再经 IPC 把内容原样转发给桌面窗口渲染（`modules/ipc/desktopHandlers.js:1105-1132`）——不经过 `tool_approval_request`，唯一的前置校验是前缀白名单（完整清单见下）：
 
 ```text
 <!doctype  <div  <section  <article  <main  <header  <nav  <aside  <canvas  <svg  <style  target:  <!--
@@ -75,7 +75,7 @@ VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistr
      └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-依据：`main.js:2208-2250`（VCPLog 连接、握手与转发）、`main.js:1276-1291`（分布式服务器初始化）、`VCPDistributedServer/VCPDistributedServer.js:275-284`（WS 连接与注册）、`modules/renderer/desktopPushConsumer.js:36-45,195`（DESKTOP_PUSH 拦截与白名单）、`modules/notificationRenderer.js:294-340`（审批渲染与自动批准）。
+依据：`main.js:1276-1291,2208-2250` 与 `VCPDistributedServer/VCPDistributedServer.js:275-284` 覆盖分布式服务器初始化、WS 连接注册与 VCPLog 握手转发；`modules/notificationRenderer.js:294-340` 覆盖审批卡片渲染与自动批准。
 
 ## VCPChat 本地能力清单（模型可触发、在本机 Electron 或本机子进程中执行）
 
@@ -102,7 +102,7 @@ VCPChat 随包携带一个独立的 `VCPDistributedServer` 子进程（`VCPDistr
 | DesktopRemote 本地测试后门路由 `/pw=<file_key>/desktop-remote-test` | HTTP POST（仅限 loopback） | 分布式节点直接调用 `handleDesktopRemoteControl` | `isLoopbackAddress` + `file_key` 明文比较，无速率限制 | `VCPDistributedServer/VCPDistributedServer.js:182-258` |
 | 剪贴板读取（图片/文本） | 渲染层 UI 触发（非模型直接触发） | 主进程 `clipboard` API | 不适用——**未确认**模型可主动触发此路径，暂列为需进一步核实 | `preloads/api/files.js:12-15` |
 
-DeepMemo 的运行时后端由插件 `config.env` 的 `DeepMemoBackend=central` 决定（`DeepMemoService.js:215-223` 的 `normalizeConfig`），`backend: 'legacy'` 时回退旧链路。settings 默认值里的 `DeepMemoUseCentralSearch: false`（`appSettingsManager.js:176`）并未被 DeepMemoService 读取（grep 全仓库该键仅出现在 appSettingsManager 与 rust README 中）；中央检索的启用状态由 `DeepMemoBackend=central` 决定。
+DeepMemo 的运行时后端由插件 `config.env` 里的 `DeepMemoBackend` 决定（`DeepMemoService.js:215-223`），取值为 legacy 时回退旧链路。设置默认值里另有一项 `DeepMemoUseCentralSearch`，默认关闭（`appSettingsManager.js:176`），服务代码从不读取这个键——全仓库检索该键只出现在设置管理器与 rust README 中。中央检索是否启用，实际只取决于插件侧的这个开关。
 
 VCPMobileSync 的中央索引模式（`MobileSyncUseCentralIndex=true`）下，`delete_notify` 需携带上下文或走删除推送（`sync/central.js`）。
 
@@ -114,7 +114,7 @@ VCPMobileSync 的中央索引模式（`MobileSyncUseCentralIndex=true`）下，`
 
 **结论：不存在**（对聊天流内的 `<<<[TOOL_REQUEST]>>>`/`tool_calls` 而言），但**存在**（对 DESKTOP_PUSH 这一条专用协议而言）。
 
-`contentPipeline.js` 的 `protect-tool-requests`/`restore-tool-requests` 步骤（消息渲染器笔记 4.3 节已确认）只是把工具请求文本保护起来避免被 Markdown 破坏，随后交给 `transformSpecialBlocks()` 生成展示用 `<pre>` 块，**不会**解析 `tool_name`/参数字段去触发任何本地调用。
+`contentPipeline.js` 里的工具请求保护与还原两个步骤（消息渲染器笔记 4.3 节已确认）只是把工具请求文本保护起来避免被 Markdown 破坏，随后交给特殊块转换生成展示用的预格式块，**不会**解析 `tool_name` 与参数字段去触发任何本地调用。
 
 `Flowlockmodules/flowlock-protocol.js` 同样只解析 Flowlock 控制行用于渲染状态气泡和驱动 `flowlock.js` 状态机（续写下一轮对话），不解析 VCP 工具字段。
 
@@ -126,7 +126,7 @@ VCPMobileSync 的中央索引模式（`MobileSyncUseCentralIndex=true`）下，`
 
 **结论：是**，且默认开启。
 
-`main.js:1276-1291` 在应用启动后异步读取 `settings.enableDistributedServer`（默认 `true`，见 `appSettingsManager.js:170`），若为真则 `require('./VCPDistributedServer/VCPDistributedServer.js')` 并 `initialize()`。该模块：
+`main.js:1276-1291` 在应用启动后异步读取分布式节点开关（默认开启，见 `appSettingsManager.js:170`），若为真则加载分布式节点模块并完成初始化。该模块：
 
 - 用 `config.vcpLogUrl`/`config.vcpLogKey`（与聊天所用 VCPLog 同一对 URL/Key）拼出 `ws://.../vcp-distributed-server/VCP_Key=<key>` 连接主服务器（`VCPDistributedServer.js:275-279`）。
 - 连接成功后 `registerTools()`：扫描本机 `VCPDistributedServer/Plugin/*/plugin-manifest.json`，把所有后端类型插件的 manifest 一次性发给主服务器（`type:'register_tools'`）。后端类型包括：
@@ -135,22 +135,22 @@ VCPMobileSync 的中央索引模式（`MobileSyncUseCentralIndex=true`）下，`
 static / synchronous / asynchronous / service / hybridservice
 ```
 
-排除规则：`pluginType: 'renderer'` 的插件在 `Plugin.js:122-125` 被跳过，不进入工具注册（改由前端插件加载器注入渲染进程）。由于该节点只向主服务器注册自身能力、不会反向拉取其他节点，循环代理风险有限。
-- 收到 `execute_tool` 消息后 `handleToolExecutionRequest()` 用 `pluginManager.processToolCall()` 在本机 `spawn()` 子进程执行（`Plugin.js:202-301`）；`MusicController`/`SuperDice`/`Flowlock`/`DesktopRemote` 四类工具走特殊分支直接调用 `main.js` 注入的 handler 操纵本机窗口。
-- direct 插件契约：`execute_tool` 消息里的 `_vcpContext` 与模型生成的 `toolArgs` 分离，作为可信执行上下文传给 direct 插件（`VCPDistributedServer.js:664-676`、`Plugin.js:187-193`）；direct 插件的字符串结果原样返回，不走 stdio JSON 提取（`VCPDistributedServer.js:771-789`）。
-- 服务注入：`initializeServices` 把 Electron 持有的 `chatDataService`/`loomManager`/`scriptoriumAgentControl` 注入 direct 插件，`registerRoutes` 采用 await 等待（`Plugin.js:303-351`）。
-- 插件子进程清理：`_killProcessTree` 为 Windows `taskkill` 增加 error 监听（`Plugin.js:16-30`），POSIX 侧插件进程以 `detached` 独立进程组启动（`Plugin.js:235-250,390-405`），超时终止向整个进程组发信号，避免孤儿进程。
-- 鉴权：客户端到服务端方向只有一次性 URL Key 握手；服务端到客户端方向的 `execute_tool` 消息**没有任何签名或二次校验**，只要该 WebSocket 连接存在，连接上收到的 `toolName`/`toolArgs` 就会被分布式节点按原样执行。
-- 暴露面：本机 Express HTTP 服务器还额外监听 `0.0.0.0:<随机或固定端口>`（`bindHttpServer()` 用 `'0.0.0.0'` 而非 `127.0.0.1`），提供 `/plugin/callback`（异步插件回调，无鉴权）和 `/pw=<file_key>/desktop-remote-test`（仅限 loopback + 固定密钥）。`/plugin/callback` 绑定在 `0.0.0.0` 且不做来源校验，理论上局域网内其他主机可以 POST 数据进来，被转发进 VCPLog 通知流。
+- 注册前的过滤规则：`pluginType: 'renderer'` 的插件会被过滤掉，它们改由前端插件加载器注入渲染进程，不进入工具目录（`Plugin.js:122-125`）。该节点只把自身能力上报给主服务器，不反向拉取其他节点，循环代理的路径因此有限。
+- 收到 `execute_tool` 消息后，节点用 `handleToolExecutionRequest()` 经 `pluginManager.processToolCall()` 在本机 spawn 子进程执行（`Plugin.js:202-301`）。音乐控制、骰子、Flowlock 与 DesktopRemote 四类工具走特殊分支，直接调用主进程注入的 handler 操纵本机窗口。
+- direct 插件拿到的执行上下文与模型参数分开传递：`_vcpContext` 由节点侧注入并按可信上下文处理，`toolArgs` 是模型生成的内容（`VCPDistributedServer.js:664-789`、`Plugin.js:187-193`）。这类插件返回的字符串原样回传，不经过 stdio 的 JSON 提取流程。
+- 服务注入：`initializeServices` 把主进程持有的聊天数据服务、Loom 管理器与 Scriptorium 控制服务注入 direct 插件，路由注册以 await 等待完成（`Plugin.js:303-351`）。
+- 子进程清理：Windows 上 `_killProcessTree` 调用 `taskkill` 时补挂了 error 监听；POSIX 侧插件进程以独立进程组启动，超时终止时向整个进程组发信号，避免留下孤儿进程（`Plugin.js:16-30,235-405`）。
+- 鉴权只在连接建立时做一次：客户端用 URL 里的 Key 完成握手；此后服务端下发的 `execute_tool` 消息没有任何签名或二次校验，连接上收到的工具名与参数会被分布式节点按原样执行。
+- 暴露面：本机 Express HTTP 服务器监听 `0.0.0.0` 上的随机或固定端口，绑定的是通配地址，回环地址只是可访问地址之一。对外提供异步插件回调 `/plugin/callback` 与诊断路由；后者限定 loopback 并用固定密钥比较。回调路由既不鉴权也不校验来源，局域网内其他主机可以 POST 数据进来，被转发进 VCPLog 通知流（`VCPDistributedServer.js:79-173`）。
 
-依据：[`../../VCPChat/main.js:1276-1291`](../../VCPChat/main.js)、[`../../VCPChat/VCPDistributedServer/VCPDistributedServer.js:79-105`](../../VCPChat/VCPDistributedServer/VCPDistributedServer.js)（`bindHttpServer` 监听 `0.0.0.0`）、[`../../VCPChat/VCPDistributedServer/VCPDistributedServer.js:152-173`](../../VCPChat/VCPDistributedServer/VCPDistributedServer.js)（`/plugin/callback` 无鉴权）、[`../../VCPChat/VCPDistributedServer/Plugin.js:104-164`](../../VCPChat/VCPDistributedServer/Plugin.js)。
+依据：[`../../VCPChat/main.js:1276-1291`](../../VCPChat/main.js)（启动与初始化）、[`../../VCPChat/VCPDistributedServer/VCPDistributedServer.js:79-173`](../../VCPChat/VCPDistributedServer/VCPDistributedServer.js)（HTTP 服务器绑定通配地址、回调路由无鉴权）、[`../../VCPChat/VCPDistributedServer/Plugin.js:104-164`](../../VCPChat/VCPDistributedServer/Plugin.js)。
 
 ## 3. 上游工具调用的接收：`tool_calls` 与 VCP 文本块
 
 VCPChat 主聊天链路对上游返回的 `tool_calls` 字段采取**原样透传**策略，不在客户端解析或执行：
 
-- 请求组装侧保留 `tool_calls`/`tool_call_id` 字段（`modules/chat/chatContextPipeline.js:388`、上下文压缩的白名单 `contextCompactionPrompts.js:85`），只是为了把历史消息原样发回服务器，不做本地分支；主进程转发前也只做白名单式复制（`modules/ipc/chatHandlers.js:1132`）。
-- 流式 chunk 归一化只识别 `choices[0].delta.content`/`delta.content`/`content` 三种文本字段形态来累积回复文本，**没有**读取或处理 `delta.tool_calls`/`function_call` 等结构化字段（`modules/ipc/chatHandlers.js:1056-1360`）。因此，如果上游模型走原生 function-calling 而不是 VCP 文本协议，VCPChat 当前实现不会把这类结构化调用转成任何本地动作——它假定所有“需要执行”的工具调用都以 VCP 文本块（`<<<[TOOL_REQUEST]>>>`）形式出现在 content 文本流中，由服务端（VCPToolBox）解析执行，客户端只负责显示。
+- 请求组装阶段会保留历史消息里的 `tool_calls` 与 `tool_call_id` 字段，上下文压缩的白名单也把它们列入保留项（`modules/chat/chatContextPipeline.js:388`、`contextCompactionPrompts.js:85`）。这段代码只做字段搬运，目的是把历史消息原样发回服务器，不产生本地分支；主进程转发前同样只做白名单式复制（`modules/ipc/chatHandlers.js:1132`）。
+- 流式响应的归一化只累积文本：客户端只从 `content` 字段累积文本，对 `delta.tool_calls` 等结构化字段没有读取或处理逻辑（`modules/ipc/chatHandlers.js:1056-1360`）。因此上游模型若走原生 function-calling，VCPChat 不会把这类调用转成本地动作——它假定所有需要执行的工具调用都以 VCP 文本块（`<<<[TOOL_REQUEST]>>>`）出现在 content 文本流里，由服务端 VCPToolBox 解析执行，客户端只负责显示。
 - 流式期间的组装完全在渲染进程的流式投影中完成（消息渲染器笔记 6.3-6.4 节已确认），产物是 DOM 展示，不产生任何本地调用副作用，唯一例外仍是 DESKTOP_PUSH 拦截器。
 
 依据：[`../../VCPChat/modules/chat/chatContextPipeline.js:319-417`](../../VCPChat/modules/chat/chatContextPipeline.js)（请求消息组装，保留但不解析 `tool_calls`）、[`../../VCPChat/modules/ipc/chatHandlers.js:1056-1360`](../../VCPChat/modules/ipc/chatHandlers.js)（流式 chunk 归一化，只认 `content` 字段）。
@@ -159,18 +159,18 @@ VCPChat 主聊天链路对上游返回的 `tool_calls` 字段采取**原样透�
 
 ### 4.1 `tool_approval_request` 接收与展示
 
-VCPLog WebSocket 消息由主进程 `main.js:1576-1585` 的 `onmessage` 回调 `JSON.parse` 后原样通过 IPC `vcp-log-message` 转发给 renderer，renderer 端 `notificationRenderer.js:renderVCPLogNotification()` 判断 `logData.type === 'tool_approval_request'` 时：
+VCPLog WebSocket 消息由主进程 `main.js:1576-1585` 的 `onmessage` 回调解析后原样通过 IPC `vcp-log-message` 转发给 renderer，renderer 端通知渲染函数判断 `logData.type === 'tool_approval_request'` 时：
 
 1. 先调用 `window.filterManager.checkToolAutoApproval(logData.data)`（见 4.2）；命中则自动发送允许响应并把这次自动批准记为一条 `tool_auto_approval` 类型通知，**不展示原始审批卡片**。
 2. 未命中自动规则时，渲染一张带"允许/拒绝"按钮和可选理由输入框的通知卡片（悬浮 toast + 侧栏列表两处），且该卡片**永不自动消失**（`autoDismissDelay = Infinity`，`notificationRenderer.js:936-937`），点击卡片本体也不会关闭（"审核请求防误触"注释，`notificationRenderer.js:430-432`）。
 
-审批卡片上展示的 `titleText`/`mainContent` 直接取自服务端 `tool_approval_request.data` 中的 `toolName`/`args`/`maid`/`timestamp` 字段（`notificationRenderer.js:307-311`），客户端只负责展示，不自行构造这些字段。
+审批卡片上的标题与正文直接取自服务端 `tool_approval_request.data` 中的工具名、参数、maid 与时间戳字段（`notificationRenderer.js:307-311`），客户端只负责展示，不自行构造这些字段。
 
 ### 4.2 允许/拒绝响应发送
 
-`sendToolApprovalResponse(requestId, approved, reason)`（`notificationRenderer.js:81-114`）构造 `{type:'tool_approval_response', data:{requestId, approved, reason?}}`，经 `window.chatAPI.sendVCPLogMessage()` → IPC `send-vcplog-message` → 主进程 `vcpLogWebSocket.send(JSON.stringify(data))`（`main.js:1684-1686`）原样发回同一条 WebSocket。
+审批响应由 renderer 侧的发送函数（`notificationRenderer.js:81-114`）构造成一条类型为 `tool_approval_response` 的消息，经 IPC 通道 `send-vcplog-message` 交给主进程，由主进程在同一条 WebSocket 上原样发回（`main.js:1684-1686`）。
 
-响应体里除 `requestId`/`approved`/可选 `reason` 外**没有任何身份或时间戳字段**，也没有对 `requestId` 做签名或来源校验——`requestId` 完全由服务端在 `tool_approval_request` 中给出，客户端只是照抄。
+响应体里除 `requestId`、批准标志与可选理由外**没有任何身份或时间戳字段**，也没有对该 ID 做签名或来源校验——它完全由服务端在审批请求里给出，客户端只是照抄。
 
 ### 4.3 本地自动允许规则的匹配语义与存储位置
 
@@ -182,13 +182,13 @@ VCPLog WebSocket 消息由主进程 `main.js:1576-1585` 的 `onmessage` 回调 `
 
 `checkToolAutoApproval(approvalData)`（`filterManager.js:509-543`）的匹配语义：
 
-- 全局开关 `settings.toolAutoApprovalEnabled` 为 `false` 时整个机制不生效。
-- 取 `approvalData.toolName || approvalData.tool_name`（信任服务端上报的工具名，无本地白名单交叉校验）。
-- 按 `order` 排序遍历规则，`enabled:false` 的规则跳过。
-- `matchMode === 'exact'`：`toolName === pattern` 精确相等。
-- `matchMode === 'regex'`：`new RegExp(pattern).test(toolName)`——**用户可以直接填一个 `.*` 或空模式的宽正则**，`saveToolAutoApprovalRule()` 只校验正则语法是否合法（`filterManager.js:439-446`），不校验其宽泛程度。
-- 默认（`contain`）：`toolName.includes(pattern)`——**留空 `toolPattern` 会在 UI 层被 `!ruleData.toolPattern` 挡掉**（`filterManager.js:434-437`），但一个只有一个字符的 pattern（如 `e`）几乎会匹配所有工具名，等价于全局自动允许。
-- 命中第一条规则即返回 `{rule, action:'approve'}`，后续规则不再检查——**没有"deny 优先"或"高危工具强制人工审批"的硬编码例外**：无论工具名是 `PowerShellExecutor` 还是 `SuperDice`，只要匹配到一条启用的规则，都会被同等自动允许。
+- 匹配前先看全局开关：`settings.toolAutoApprovalEnabled` 为 `false` 时，整条规则链都不参与判断。
+- 待匹配的工具名取自审批数据里的 `toolName`，也兼容 `tool_name` 写法；这个值直接采用服务端上报的结果，客户端没有本地白名单做交叉校验。
+- 规则按 `order` 字段排序后依次尝试，`enabled` 为 false 的规则跳过。
+- `exact` 模式要求工具名与 `toolPattern` 完全相等。
+- `regex` 模式用 `new RegExp(pattern)` 对工具名做正则测试。保存规则时只校验正则语法是否合法，不限制表达式的宽泛程度，用户填一个 `.*` 就能匹配全部工具名。
+- `contain` 是默认模式，按子串包含判断。空 pattern 会在界面层被非空校验挡掉，但只填一个字符（例如 `e`）几乎能命中所有工具名，效果等同于全局自动允许（两处校验见 `filterManager.js:434-446`）。
+- 第一条命中的规则即返回批准结果，后面的规则不再检查。代码里没有 deny 优先或高危工具强制人工确认的硬编码例外：`PowerShellExecutor` 与 `SuperDice` 这类工具只要命中一条启用规则，就按同一路径自动批准。
 
 ### 4.4 超时行为
 
@@ -196,11 +196,11 @@ VCPLog WebSocket 消息由主进程 `main.js:1576-1585` 的 `onmessage` 回调 `
 
 ### 4.5 通知渠道鉴权与消息级校验
 
-VCPLog WebSocket 的鉴权模型是**一次性握手**：连接 URL 中携带 `VCP_Key`（`main.js:1548`：`${wsUrl}/VCPlog/VCP_Key=${wsKey}?deviceName=...`），服务端在建立连接时校验一次。握手成功后，该连接上收到的每一条消息都**不校验发送方身份、不做消息级签名**——`main.js:1576-1585` 的 `onmessage` 只做 `JSON.parse`，直接转发给 renderer 渲染成审批卡片或其它通知。
+VCPLog WebSocket 的鉴权模型是**一次性握手**：连接 URL 中携带 `VCP_Key`，服务端在建立连接时校验一次。握手成功后，该连接上收到的每一条消息都**不校验发送方身份、不做消息级签名**——主进程的 `onmessage` 回调只做解析，直接转发给 renderer 渲染成审批卡片或其它通知（`main.js:1548-1585`）。
 
 审批与拒绝的响应也通过同一条无进一步签名的通道原样回传（`sendToolApprovalResponse`，见 4.2）。`vcpLogUrl` 的协议（`ws://` 或 `wss://`）由用户在设置里填写，代码未见强制升级到 `wss://` 的逻辑。
 
-依据：[`../../VCPChat/main.js:1540-1686`](../../VCPChat/main.js)（VCPLog 连接、消息转发、发送响应）、[`../../VCPChat/modules/notificationRenderer.js:79-157`](../../VCPChat/modules/notificationRenderer.js)、[`../../VCPChat/modules/notificationRenderer.js:307-422`](../../VCPChat/modules/notificationRenderer.js)（审批卡片渲染与按钮）、[`../../VCPChat/modules/filterManager.js:88-96`](../../VCPChat/modules/filterManager.js)（规则默认值归一化）、[`../../VCPChat/modules/filterManager.js:421-543`](../../VCPChat/modules/filterManager.js)（编辑器校验与匹配逻辑）。
+依据：[`../../VCPChat/main.js:1540-1686`](../../VCPChat/main.js)（VCPLog 连接、消息转发、发送响应）、[`../../VCPChat/modules/notificationRenderer.js:79-422`](../../VCPChat/modules/notificationRenderer.js)（审批卡片渲染与按钮）、[`../../VCPChat/modules/filterManager.js:88-543`](../../VCPChat/modules/filterManager.js)（规则默认值归一化、编辑器校验与匹配逻辑）。
 
 ## 5. 编排：客户端是否参与迭代循环
 
@@ -209,10 +209,10 @@ VCPLog WebSocket 的鉴权模型是**一次性握手**：连接 URL 中携带 `V
 1. **普通工具调用迭代循环**：客户端**不参与**。VCPChat 的发送链路只做单次请求/响应（或单次流式会话），把完整历史发给服务端，工具调用的"发起模型请求 -> 执行工具 -> 把结果回注上下文 -> 再次请求模型"的整轮迭代逻辑在 VCPToolBox 服务端完成（属另一 agent 调查范围）。客户端能看到的只是最终这一轮的 `data`/`end`/`error` 流事件。
 2. **Flowlock 心流锁循环**：客户端**确实**参与一个本地自主循环，但这个循环编排的是“要不要发起下一轮完整对话请求”，不是“工具调用内部的多轮迭代”。
 
-   `Flowlockmodules/flowlock.js` 的 `FlowlockManager` 为每个 Agent 维护一个状态机（`start()`/`stop()`/`scheduleNextRound()`/`triggerRound()`）：触发条件是模型输出末尾出现 `[[Flowlock::Start]]` 等控制行（由 `flowlock-protocol.js` 解析）；`triggerRound()` 调 `continueWritingForContext()`（`Flowlockmodules/flowlock-integration.js:58-267`）重新读取历史、重新发起一次完整的 `chatAPI.sendToVCP()` 请求。
-   - **上限**：每个 session 有 `maxRetries = 3`（错误重试上限），无对"正常轮数"的硬上限——只要模型持续输出 `[[Flowlock::NextHeartbeat::N]]` 而不输出 `Stop`/`Complete`/`Fail`，循环可以无限期持续，唯一的软约束是 `delaySeconds` 被 `normalizeDelaySeconds()` 限制在 1-86400 秒之间（`flowlock-protocol.js:233-239`）。
-   - **超时**：DesktopPush 有独立的 150 秒空闲超时（见能力清单），Flowlock 本身没有总时长超时。
-   - **取消**：`stop(agentId)`（右键菜单、快捷键 Ctrl/Cmd+G、或模型输出 `[[Flowlock::Stop]]`）可随时中断；`cleanup()` 在页面卸载时清空所有 session。
+   每个 Agent 对应一个 `FlowlockManager` 状态机，负责启动、停止、安排下一轮与触发本轮（`Flowlockmodules/flowlock.js`）。触发条件是模型输出末尾出现 `[[Flowlock::Start]]` 一类控制行，由协议解析器识别后交给状态机；触发时它会重新读取历史，再向服务器发起一次完整的对话请求（`Flowlockmodules/flowlock-integration.js:58-267`）。
+   - **上限**：每个 session 的错误重试上限是 3 次，正常轮数没有硬上限——模型只要持续输出 `[[Flowlock::NextHeartbeat::N]]` 而始终不输出 Stop、Complete 或 Fail，循环就会一直续下去；唯一的软约束是轮次间隔被限制在 1 到 86400 秒之间（`flowlock-protocol.js:233-239`）。
+   - **超时**：Flowlock 没有总时长超时；DesktopPush 另有独立的 150 秒空闲超时（见能力清单）。
+   - **取消**：`stop(agentId)` 可随时中断循环，入口有右键菜单、快捷键 Ctrl/Cmd+G 和模型输出的 `[[Flowlock::Stop]]` 控制行；页面卸载时 `cleanup()` 会清空所有 session。
 
 依据：[`../../VCPChat/Flowlockmodules/flowlock.js:43-160`](../../VCPChat/Flowlockmodules/flowlock.js)（start/stop）、[`../../VCPChat/Flowlockmodules/flowlock.js:293-450`](../../VCPChat/Flowlockmodules/flowlock.js)（`handleFinalizedMessage` 编排下一轮）、[`../../VCPChat/Flowlockmodules/flowlock-integration.js:58-267`](../../VCPChat/Flowlockmodules/flowlock-integration.js)（`continueWritingForContext` 重新发起请求）。
 
@@ -239,24 +239,29 @@ const configToSave = {
 };
 ```
 
-**密码明文写入磁盘 JSON 文件**，`rememberCredentials` 开关只决定是否持久化，不做任何加密或 OS keychain 集成。renderer 侧 `Forummodules/forum.js:206` 和 `Agenttaskmodules/task.js:240` 都用 `btoa(username:password)` 直接构造 `Authorization: Basic ...` header——这只是 Base64 编码而非加密，且发生在 renderer 进程的页面 JS 中，`apiAuthHeader` 变量位于页面全局作用域（`Agenttaskmodules/task.js:6`）。
+**密码明文写入磁盘 JSON 文件**，`rememberCredentials` 开关只决定是否持久化，不做任何加密或 OS keychain 集成。renderer 侧的论坛模块与任务模块都用页面 JS 的 base64 编码直接构造 Authorization 头（`Forummodules/forum.js:206`、`Agenttaskmodules/task.js:6,240`）——这只是 Base64 编码，不具备加密强度，且凭据字符串长期留在页面全局作用域。
 
 ### 7.2 Agent Assistant / Task Assistant 配置写入范围
 
 `Agenttaskmodules/task.js` 通过 `apiFetch()`（`task.js:253-270`，固定拼接 `${serverBaseUrl}admin_api${endpoint}`）暴露以下写操作：
 
-- `POST /admin_api/agent-assistant/config`：整体覆盖 Agent Assistant 配置，包括新增/编辑/删除 Agent 及其字段：
-  - Agent 字段：`chineseName`/`baseName`/`modelId`/`systemPrompt`/`temperature`/`maxOutputTokens`；
-  - 全局委托参数：`delegationMaxRounds`/`delegationSystemPrompt`/`delegationHeartbeatPrompt`。
+- `POST /admin_api/agent-assistant/config`：整体覆盖 Agent Assistant 配置，可新增、编辑或删除 Agent，请求体同时携带 Agent 字段与全局委托参数。
+  - Agent 字段：
+
+      ```text
+      chineseName  baseName  modelId  systemPrompt  temperature  maxOutputTokens
+      ```
+
+  - 全局委托参数：`delegationMaxRounds`、`delegationSystemPrompt`、`delegationHeartbeatPrompt`。
 - `POST /admin_api/agent-assistant/delegations/:id/cancel`：取消正在运行的异步委托任务。
-- `POST /admin_api/task-assistant/config`：覆盖定时任务配置（cron/interval/once/manual 调度、`forum_patrol`/`custom_prompt` 类型、`dispatch.taskDelegation` 开关）、全局调度器开关。
+- `POST /admin_api/task-assistant/config`：覆盖定时任务配置，涉及调度方式（cron、interval、once、manual）、任务类型（`forum_patrol`、`custom_prompt`）、`dispatch.taskDelegation` 开关，以及全局调度器开关。
 - `POST /admin_api/task-assistant/trigger`：立即触发指定任务。
 
 这些写操作覆盖的配置范围包括：任意 Agent 的系统提示词与模型参数、指向任意后端 `modelId` 的 Agent、定时任务提示词模板与调度开关，改动会持续生效直到被再次覆盖。管理面板与论坛登录共用同一份 Basic Auth 凭据（`forum.config.json`）。
 
-依据：[`../../VCPChat/modules/ipc/forumHandlers.js:11-75`](../../VCPChat/modules/ipc/forumHandlers.js)（凭据明文存取）、[`../../VCPChat/Forummodules/forum.js:178-227`](../../VCPChat/Forummodules/forum.js)（Basic Auth 构造与登录表单）、[`../../VCPChat/Agenttaskmodules/task.js:224-270`](../../VCPChat/Agenttaskmodules/task.js)（继承论坛凭据、`apiFetch` 封装）、[`../../VCPChat/Agenttaskmodules/task.js:334-363`](../../VCPChat/Agenttaskmodules/task.js)（AA 配置读写）、[`../../VCPChat/Agenttaskmodules/task.js:619-665`](../../VCPChat/Agenttaskmodules/task.js)（FA 配置读写与立即触发）、[`../../VCPChat/Agenttaskmodules/task.js:853-870`](../../VCPChat/Agenttaskmodules/task.js)（取消委托）。
+依据：[`../../VCPChat/modules/ipc/forumHandlers.js:11-75`](../../VCPChat/modules/ipc/forumHandlers.js)（凭据明文存取）、[`../../VCPChat/Forummodules/forum.js:178-227`](../../VCPChat/Forummodules/forum.js)（Basic Auth 构造与登录表单）、[`../../VCPChat/Agenttaskmodules/task.js:224-870`](../../VCPChat/Agenttaskmodules/task.js)（继承论坛凭据与 `apiFetch` 封装、AA/FA 配置读写、立即触发与取消委托）。
 
-**文档声称但未在代码验证**：VCPHumanToolBox 的 README 中提到管理面板配置存储于 `localStorage`（`vcpht_adminConfig`）"与 contextIsolation 隔离保护"——`tool-manager.js:18-40` 确认了 `localStorage` 存取代码，但 README 所说的"隔离保护"只是指 `localStorage` 属于该 Electron 子应用自己的 origin，并不构成额外加密或访问控制；与 `forum.config.json` 一样是明文存储，只是介质不同。
+**文档声称但未在代码验证**：VCPHumanToolBox 的 README 提到管理面板配置存储于 `localStorage`（`vcpht_adminConfig`）"与 contextIsolation 隔离保护"——`tool-manager.js:18-40` 确认了这份配置的读写代码；README 所说的"隔离保护"指该存储属于这个 Electron 子应用自己的 origin，没有额外加密或访问控制；与 `forum.config.json` 一样是明文存储，只是介质不同。
 
 ## 8. 子 Agent 与任务委派
 
@@ -288,9 +293,9 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 
 ## 10. 与消息渲染器笔记的交叉点
 
-- **工具块与审批 UI 呈现的分离**：聊天气泡内的 `<<<[TOOL_REQUEST]>>>`/`[[VCP调用结果信息汇总:...]]` 展示（消息渲染器笔记 5.2-5.3 节）与本笔记第 4 节的 `tool_approval_request` 通知卡片是**两条完全独立的 UI 通道**——前者渲染在聊天消息流的 `.md-content` 内，走 Marked + 保护映射；后者渲染在悬浮 toast / 侧栏通知列表内，通过 `element.appendChild`/`textContent` 拼接 DOM，未见用 `innerHTML` 拼接用户可控内容。
-- **模型是否可以伪造出"看起来像审批请求"的聊天消息**：消息渲染器笔记未发现聊天正文中存在会被误认成 `tool_approval_request` 通知卡片的语法——两者视觉和 DOM 结构都不同（通知卡片有独立的 `.notification-tool-approval` class 和"允许/拒绝"按钮，聊天消息里的工具请求展示是 `<pre>` 代码块美化）。因此**模型无法仅通过聊天正文输出伪造出弹在通知区域的审批卡片**；通知区域审批卡片的唯一来源是 VCPLog 通道上的 `tool_approval_request` 消息（该通道不做消息级来源校验，见 4.5 节），聊天正文内容不会触发该 UI。
-- **工具结果的两层信任降级**：消息渲染器笔记 5.3 节确认工具结果 HTML 走"收紧后的 Markdown"，比 assistant 正文的"完整 HTML 运行时"权限更低。这与本笔记确认的"工具结果本身在客户端不经过任何执行逻辑，只是展示"一致——工具执行发生在服务端/分布式节点，客户端接收到的只是文本结果，双重确认了 VCPChat 聊天窗口对工具结果是纯展示消费者。
+- **工具块与审批 UI 是两条独立通道**：聊天气泡内的工具请求与结果汇总展示走 Marked 渲染加保护映射，落在消息流的 `.md-content` 内（消息渲染器笔记 5.2-5.3 节）；审批卡片走悬浮 toast 与侧栏通知列表，DOM 由 `appendChild` 和 `textContent` 拼接，未见用 `innerHTML` 写入用户可控内容。
+- **聊天正文能否伪造审批卡片**：消息渲染器笔记在聊天正文里没有找到会被误认成审批通知的语法，两类 UI 的视觉和 DOM 结构都不同——通知卡片带独立的 `.notification-tool-approval` class 与允许/拒绝按钮，聊天正文里的工具请求展示是 `<pre>` 代码块美化。因此仅靠聊天正文输出无法在通知区域生成审批卡片；该区域的唯一来源是 VCPLog 通道上的 `tool_approval_request` 消息（该通道不做消息级来源校验，见 4.5 节）。
+- **工具结果的信任降级发生在两层**：消息渲染器笔记 5.3 节确认工具结果里的 HTML 走收紧后的 Markdown，权限低于 assistant 正文的完整 HTML 运行时；本笔记确认工具结果在客户端不经过任何执行逻辑，只按文本展示。工具执行发生在服务端或分布式节点，聊天窗口拿到的只有结果文本。
 
 依据：[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 5.2-5.3、7.3 节；[`../../VCPChat/modules/notificationRenderer.js:322-487`](../../VCPChat/modules/notificationRenderer.js)（通知卡片 DOM 构造方式）。
 
@@ -300,18 +305,24 @@ VCPChat 客户端不直接执行"子 Agent"或"任务委派"的调度逻辑（�
 
 LoomSkill 是 LoomController 内的组合执行面。CreateSkill/EditSkill 接收串行步骤，先校验声明的输入占位符，再对固定 target 做 WebCore 持久目标验证；trial 模式会试跑整条链，current 模式允许目标验证失败时保留低可靠性原始句柄并记录 warning，none 模式跳过 DOM 验证。执行时会在页面动作前完成输入替换，限制同步模式两分钟、异步任务数量与结果字节数，并以 busyApps 防止同一应用并发；任务状态只保留在进程内并按 TTL 回收，服务重启后查询不到旧 task。`VCPDistributedServer/Plugin/LoomController/LoomControllerService.js:325-412`、`LoomSkillService.js:129-269`
 
-依据：`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:32-33`、`VCPDistributedServer/Plugin/VCPMobileSync/index.js:114-191`、`transport/routes.js:76-184`、`sync/canonical.js:178-400`。
+依据：
+
+- `VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`（文档侧超时与 PR 提交流程）
+- `modules/ipc/docxHandlers.js:32-33`（文档读写入口）
+- `VCPDistributedServer/Plugin/VCPMobileSync/index.js:114-191`（手机同步插件主入口）
+- `VCPDistributedServer/Plugin/VCPMobileSync/transport/routes.js:76-184`（同步路由与错误契约）
+- `VCPDistributedServer/Plugin/VCPMobileSync/sync/canonical.js:178-400`（同步协议 canonicalizer）
 
 ## 12. 未验证事项与后续调查缺口
 
-- **`preload/chat.js` vs `preload/utility.js` vs `preload/desktop.js` 的通道白名单差异**：三者都暴露 `loadForumConfig`，但未逐一核实每个 BrowserWindow 实际装载的是哪个 preload，以及是否存在某个窗口既能执行不受信任内容又同时拥有论坛凭据读取权限的组合。
-- **VCPLog 默认协议是 `ws://` 还是 `wss://`**：代码本身不强制升级，具体默认值取决于用户在设置里填写的 `vcpLogUrl`；未找到硬编码默认 URL 来判断典型部署是否走加密连接。
-- **服务端 `toolApprovalConfig.json` 的实际匹配规则与超时行为**：本笔记第 4.4 节已说明客户端无超时机制，但服务端是否有超时后的显式通知消息（例如 `tool_approval_timeout` 类型）需要结合 VCPToolBox 源码确认，本笔记未越界调查。
-- **`/plugin/callback` 端点的入站数据影响面**：确认了该端点监听 `0.0.0.0` 且无鉴权，但未验证局域网内其他主机向该端点 POST 的数据会在 VCPLog 通知流里产生何种具体呈现（例如是否会被渲染为一条 `vcp_log` 消息）。
-- **审批卡片展示字段的构造来源**：客户端只展示服务端 `tool_approval_request` payload 中的字段（见 4.1），服务端如何构造这些字段的内容超出本次客户端调查范围，未进一步验证。
-- **本机分布式节点在 Windows 上的实际默认监听范围**：`bindHttpServer` 使用 `'0.0.0.0'`，意味着同一局域网内其他设备理论上可达 `/plugin/callback` 和诊断路由；未实测防火墙默认规则是否会拦截，也未确认这是否是有意为之的设计（例如配合 VCPMobileSync 局域网同步的需求）。
-- **VCP-CDS（Rust 聊天数据服务）的降级与一致性**：shadow 服务（`modules/services/chatDataService/*`）在二进制缺失/启动超时/崩溃时降级为"聊天功能不受影响"，但 DeepMemo 中央检索与 MobileSync 中央同步会随之不可用或要求回退开关；CDS 摄取与 `history.json` 之间的最终一致性未做运行验证。
-- **DeepMemo v2 的中央/legacy 双后端行为差异**：`DeepMemoService.js` 以 `backend: 'central'` 为默认、`DeepMemoLegacyFallback` 配置项控制回退，两套检索对同一关键词的召回与排序差异未运行对比。
-- **LoomController 的能力边界**：LoomAPP 的 `request.headers` 禁止覆盖 Cookie/Host（manifest 注释声明），但"允许外部 origin 打开"（`openExternalOriginsInBrowser`）、WebContentsView 隔离导航策略（`VCPLoomManager.js` 注释声明）的具体防护只做了静态阅读，未实测。
-- **renderer 前端插件的信任面**：`listEnabledFrontendPlugins` 只校验 `frontend.script/style` 为文件名（`path.basename` 相等校验，`desktopHandlers.js:135-141`），插件本体脚本在主窗口上下文执行；启用机制（PluginManagerModules 界面）与插件可访问 `window.chatAPI` 全通道的组合影响未进一步核实。
-- **LoomSkill 的真实页面效果**：源码确认 schema、验证、执行和 TTL 状态机，但未运行 LoomAPP、WebCore 动作、目标跨文档代次失效或异步结果回流。
+- **各窗口 preload 的通道白名单差异**：聊天、工具与桌面三个 preload 脚本都暴露 `loadForumConfig`，本次未逐一核实每个 BrowserWindow 实际装载哪一个，也尚未确认是否存在某个窗口既执行不受信任内容、又具备论坛凭据读取权限的组合。
+- **VCPLog 的默认连接协议**：代码不做协议强制升级，实际取用户在设置里填写的 `vcpLogUrl`；本次未找到硬编码默认地址，典型部署是否走加密连接尚未确认。
+- **服务端审批配置的匹配规则与超时行为**：客户端侧没有审批超时机制（见 4.4 节）；服务端 `toolApprovalConfig.json` 是否在超时后下发显式通知消息（例如 `tool_approval_timeout` 类型），需要结合 VCPToolBox 源码确认，本次未覆盖。
+- **插件回调端点的入站数据影响面**：该端点监听 `0.0.0.0` 且不做鉴权已确认；局域网内其他主机向它 POST 的数据在 VCPLog 通知流里呈现成什么形态（例如是否成为一条 `vcp_log` 消息），本次未运行验证。
+- **审批卡片字段的构造来源**：客户端只渲染服务端审批请求 payload 里的字段（见 4.1 节）；服务端如何生成这些内容属于服务端范围，本次未下探。
+- **本机分布式节点的实际可达范围**：HTTP 服务器绑定 `0.0.0.0`，同一局域网内其他设备理论上可以访问回调端点与诊断路由；Windows 防火墙默认规则是否拦截，以及这一绑定是否为配合手机同步的局域网需求而有意开放，本次均未实测确认。
+- **VCP-CDS 的降级与一致性**：Rust 聊天数据服务以 shadow 形式运行（`modules/services/chatDataService/*`），二进制缺失、启动超时或崩溃时降级，聊天功能本身不受影响，但 DeepMemo 的中央检索与手机同步的中央索引随之不可用，或需要回退开关；CDS 摄取与 `history.json` 之间的最终一致性本次未运行验证。
+- **DeepMemo v2 两套后端的行为差异**：`DeepMemoService.js` 默认使用 `backend: 'central'`，由 `DeepMemoLegacyFallback` 控制回退旧链路；两套检索对同一关键词的召回与排序差异，本次未运行对比。
+- **LoomController 的能力边界**：manifest 注释声明 LoomAPP 的 `request.headers` 不可覆盖 Cookie 与 Host；"允许外部 origin 打开"开关与 WebContentsView 的隔离导航策略只有 `VCPLoomManager.js` 注释说明，具体防护效果本次仅做静态阅读，未实测。
+- **渲染进程前端插件的信任面**：启用插件时只校验脚本与样式声明的文件名（`path.basename` 相等比较，`desktopHandlers.js:135-141`），插件脚本本身在主窗口上下文执行；配合界面里的启用机制，插件可以拿到 `window.chatAPI` 的完整通道，这一组合的实际影响本次未进一步核实。
+- **LoomSkill 在真实页面上的效果**：schema、验证、执行与 TTL 状态机已从源码确认；LoomAPP 运行、WebCore 动作、目标跨文档代次失效与异步结果回流均未运行验证。

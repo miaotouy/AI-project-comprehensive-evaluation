@@ -16,10 +16,10 @@
 
 DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Cordis 插件。本仓库的对外协作以四条互相独立的主链呈现，均达到主链确认（静态证据）：
 
-- **外部执行体委派（宿主 → 外部进程 Agent）**：`ctx.subagents` 注册表下的 `acp`、`claude-code`、`codex`、`dsh-sdk` 四个后端把外部 Agent 作为**一次性执行体**启动、通信、取消并回收最终文本；每次委派统一返回「激活」句柄，模型立即拿到子 Agent id，最终答案以父 Agent 的完成通知回传（`packages/subagent/subagent/src/{index,manager}.ts`）。
-- **反向控制表面（外部客户端 → 宿主 Agent）**：`packages/acp/acp` 的标准 ACP v1 服务器经 JSON-RPC stdio 暴露持久宿主会话，支持创建/恢复、模型与思考等级选择、挂载 MCP server、提交与取消、语义更新与独立关闭。
-- **外部协议兼容层**：MCP 客户端桥把外部 server 工具以 `mcp__<serverName>__<rawName>` 注册进宿主工具表并带代际重连；hooks 双桥在扩展点上按 Claude Code/Codex 的 hooks.json 契约运行外部命令；新增的 Claude Code mods 兼容层把 mod 形式的 hooks 模块作为普通 DSH 插件挂载。
-- **远端执行世界**：POSIX SSH provider 家族用一条部署自管的 OpenSSH 连接把 fs、subprocess、sandbox、terminal、LSP 与 PTC 映射到同一远端主机，Harness、模型传输与会话存储留在本机（`packages/ssh/*`、`docs/subsystems/ssh.md`）。E2B 远程沙箱已从仓库移除。
+- **外部执行体委派（宿主 → 外部进程 Agent）**：宿主在 subagent 注册表下挂了四个外部后端，分别对接 ACP Agent、Claude Code、Codex 与另一套 DSH 进程。它们把对方当作一次性执行体：启动、通信、取消，最后回收最终文本。每次委派都立即返回激活句柄与子 Agent id，答案随后以父 Agent 完成通知的形式回传，实现在 `packages/subagent/subagent/src/{index,manager}.ts`。
+- **反向控制表面（外部客户端 → 宿主 Agent）**：外部客户端经 JSON-RPC stdio 连上标准 ACP v1 服务器，就能驱动一个持久的宿主会话：创建或恢复会话、选择模型与思考等级、挂载 MCP server、提交与取消回合、接收语义更新，以及单独关闭会话。服务器实现位于 `packages/acp/acp`。
+- **外部协议兼容层**：宿主用三层机制兼容外部协议。MCP 客户端桥把外部服务器提供的工具注册进宿主工具表，模型可见名为 `mcp__<serverName>__<rawName>`，断线后按代际重建；hooks 双桥在扩展点上按 Claude Code 与 Codex 的 hooks.json 契约调用外部命令；Claude Code mods 兼容层把 mod 形式的 hooks 模块当作普通 DSH 插件挂载。
+- **远端执行世界**：POSIX SSH provider 家族用一条部署自管的 OpenSSH 连接，把文件系统、子进程、沙箱、终端、LSP 与 PTC 映射到同一台远端主机，而 Harness、模型传输与会话存储仍留在本机，实现在 `packages/ssh/*` 与 `docs/subsystems/ssh.md`。E2B 远程沙箱已经从仓库移除。
 
 另有四条**对外协作面**（非 Agent 委派）：forge 读代码托管平台的变更请求、LiveShare 把单个会话共享给外部观看者、webhook 把已认证外部投递变成普通根会话、plugin-market 经市场索引分发插件包。它们都默认不装载，需要显式组合或 profile 选择。
 
@@ -55,7 +55,7 @@ DeepSeek Harness 是 DeepSeek AI 官方的 agent harness，一切能力都是 Co
      -> 树级 SIGTERM -> grace -> SIGKILL，waitForExit 证明整树静止
 ```
 
-外部 provider 只回传最终文本，不回流推理、工具事件或文件变化；本地 spawn/fork 子 Agent 拥有 durable 会话，可在结算后继续接收消息（`send_message`）。控制工具集中在 `tool-subagent-control`：`send_message`、`interrupt_agent`、`list_agents`、`wait_agent`。
+外部 provider 交回的只有最终文本，推理过程、工具事件与文件变化都不回流。本地 spawn/fork 子 Agent 走另一条路：它持有 durable 会话，结算之后仍能继续接收消息。后续追问由 `tool-subagent-control` 包的四个工具承载。`send_message` 续接已结算的会话，`interrupt_agent` 请求中断。`list_agents` 负责枚举子 Agent，`wait_agent` 负责等待结果。
 
 **主链 B：ACP 服务器反向控制**：
 
@@ -129,31 +129,44 @@ Claude Code mod（defineMod({ name, version, root, userConfig, register })）
 
 ## 3. MCP：客户端桥、管理器与资源面
 
-- **客户端桥**（`packages/mcp/mcp-client`）：每插件实例一个服务器，激活阻塞到首次连接与工具发现完成；传输支持 stdio 子进程与 streamable-http。源码按职责拆为 connection、generation、deadline、probe、transport、credentials、status、templates 等模块，工具同步集中在 `tools.ts`。
+- **客户端桥**（`packages/mcp/mcp-client`）：每个插件实例对应一个 MCP 服务器。加载过程会一直阻塞到首次连接与工具发现完成，传输方式可选 stdio 子进程或 streamable-http。源码按连接、换代、超时、探活、传输、凭据、状态与模板等职责分文件实现，工具同步逻辑集中在 `tools.ts`。
 - **命名与冲突**：模型可见名 `mcp__<serverName>__<rawName>`，受长度与字符集约束并追加身份哈希；调用只发服务器原始名。同名工具冲突按整代回滚，不留半套注册。
 - **重连**：断线后按有界指数退避重连，每代重新同步；消耗完预算则撤销该服务器全部工具并停止重试。
 - **管理器**（`packages/mcp/mcp-manager`）：汇总各服务器状态与配置面，供设置界面与工具使用；凭据经 `credentials.ts` 走凭据 seam，不落明文配置。
-- **资源面**（`packages/mcp/mcp-resources`）：`list_mcp_resources`、`list_mcp_resource_templates`、`read_mcp_resource` 三个共享工具；按调用 Agent 的 scope 解析服务器，文本与元数据进结果，base64 blob 只给长度说明。
+- **资源面**（`packages/mcp/mcp-resources`）：向宿主注册三个共享工具，服务器按调用 Agent 的 scope 解析；结果携带文本与元数据，base64 blob 只附长度说明。
+  - `list_mcp_resources`：列出服务器资源。
+  - `list_mcp_resource_templates`：列出资源模板。
+  - `read_mcp_resource`：读取资源内容。
 
 ## 4. hooks 双桥与 Claude Code mods 兼容层
 
-- **协议共享**：`hook-protocol` 提供 matcher 引擎、stdin/exit-code/stdout 编解码、多 hook 合并与 `hook/invoked`、`hook/result` 事件；Claude Code 与 Codex 两个桥各自实现各自的事件名与字段映射。
+- **协议共享**：Claude Code 桥与 Codex 桥共用同一个 `hook-protocol` 包。这一层提供 matcher 匹配引擎、标准输入/退出码/标准输出的编解码、多 hook 合并，以及 `hook/invoked` 与 `hook/result` 两个事件。两个桥在协议层之上各自实现自己的事件名与字段映射。
 - **执行方式**：hook 命令经 `ctx.shell` 在沙箱内执行，继承当前会话的目录与策略；`detached.ts` 处理需要脱离主流程的命令。
 - **配置来源**：`configPath` 是进程级一次性读取，没有 per-session 项目内 hooks.json 发现；这是已确认的边界。
-- **代码位置**：三包现在位于 `packages/experimental/{hook-protocol,hooks-claude-code,hooks-codex}`，包名仍为 `@deepseek-ai/dsh-hook-protocol`、`dsh-hooks-claude-code`、`dsh-hooks-codex`。
-- **mods 兼容层**（新增，`packages/experimental/claude-code-mods`）：把 Claude Code mod 的 hooks 模块包成 `defineMod()` 规格，作为普通 DSH 插件行挂载。与 Claude Code 的差异集中记录在 `docs/subsystems/claude-code-mods.md`：不读 `plugin.json`/`hooks.json`，tier 一律按 user，`next.to` 拒绝，热重载与 `claude plugin` 系列命令没有对应物，测试用 `createModTestKit` 替代。
+- **代码位置**：三包位于 `packages/experimental/{hook-protocol,hooks-claude-code,hooks-codex}`，包名仍为 `@deepseek-ai/dsh-hook-protocol`、`dsh-hooks-claude-code`、`dsh-hooks-codex`。
+- **mods 兼容层**（`packages/experimental/claude-code-mods`）：把 Claude Code mod 里的 hooks 模块包装成 `defineMod()` 规格，作为普通 DSH 插件行挂载。与 Claude Code 的差异集中在 `docs/subsystems/claude-code-mods.md`，主要几条是：
+  - `plugin.json` 与 `hooks.json` 均不读取，插件信息来自 mod 定义本身；
+  - tier 一律按 user 处理，`next.to` 请求直接拒绝；
+  - 热重载与 `claude plugin` 系列命令没有对应实现；
+  - 测试用 `createModTestKit` 搭建。
 
 ## 5. 执行边界：subprocess、PTY、沙箱与 PTC
 
-- **subprocess seam**：`subprocess-local`（本机）与 `subprocess-ssh`（远端）共享同一 API；`win32-process` 提供 Windows 进程树控制。子进程输出保留尾窗口与完整流 spill 路径。
-- **PTY**：`terminal` seam 加 `terminal-bash` 后端，模型面工具在 `packages/experimental/tool-terminal`；持久 shell 由 `tool-bash-persistent`/`tool-pwsh-persistent` 提供，挂在同一 PTY 之上。终端会话只在进程内存活，不进日志。
-- **沙箱**：`sandbox` seam 与 `sandbox-local`（bwrap/Landlock/macOS Seatbelt/Windows ACL 受限令牌）按平台选后端、运行期拒绝 fail-closed；`sandbox-ssh` 把同一策略应用到远端主机。
-- **PTC runtime**：`ptc-runtime` seam 加 Node 实现（`ptc-runtime-node`），Python 实现在 `packages/experimental/ptc-runtime-python`；工具呈现改造后由独立执行器插件驱动（见 Agent 工具笔记）。
-- **SSH 远端世界**：`ssh`（部署自管连接与 helper）、`ssh-helper-runtime`（内嵌 Node 与 PTC worker 的 helper）、`fs-ssh`、`subprocess-ssh`、`sandbox-ssh` 五个包。管理面 RPC 走 helper 的 exec 流，普通数据流走单独认证的转发 Unix socket；路径语义、执行查找与语言服务器 URL 都指向远端主机，`processPathFromHostPath()` 在 SSH 下不可用。连接断开视为未确认结果，不重连重放。
+- **subprocess seam**：宿主用同一套接口管理本机与远端主机上的子进程。`subprocess-local` 负责本机进程，`subprocess-ssh` 把同一接口搬到远端主机。Windows 下的进程树控制由 `win32-process` 承担。子进程输出保留一个尾部窗口，完整流另外落到 spill 文件，并给出该文件路径。
+- **PTY**：终端能力由 `terminal` seam 与 `terminal-bash` 后端提供。模型可调用的工具放在 `packages/experimental/tool-terminal`。持久 shell 另由 `tool-bash-persistent` 与 `tool-pwsh-persistent` 承担，两者挂在同一个 PTY 之上。终端会话只存在于进程内存，不写入日志。
+- **沙箱**：`sandbox` seam 定义策略，`sandbox-local` 按平台选择后端：Linux 的 bwrap 与 Landlock、macOS 的 Seatbelt、Windows 的 ACL 受限令牌。后端选择在运行时完成，选不出可用后端即拒绝执行（fail-closed）；`sandbox-ssh` 把同一套策略应用到远端主机。
+- **PTC runtime**：`ptc-runtime` seam 定义运行时接口，Node 侧实现为 `ptc-runtime-node`。Python 实现放在 `packages/experimental/ptc-runtime-python`。工具呈现改造之后，实际执行由独立执行器插件驱动，细节见 Agent 工具笔记。
+- **SSH 远端世界**：五个包把文件系统、子进程与沙箱能力桥接到一台远端主机。管理面 RPC 走 helper 的 exec 流，普通数据流走单独认证的转发 Unix socket；路径语义、可执行文件查找与语言服务器 URL 都指向远端主机，`processPathFromHostPath()` 在 SSH 下不可用；连接断开时结果记为未确认，不重连重放。分工如下：
+  - `ssh`：自管 OpenSSH 连接，负责 helper 部署；
+  - `ssh-helper-runtime`：内嵌 Node 与 PTC worker 的远端 helper；
+  - `fs-ssh`、`subprocess-ssh`、`sandbox-ssh`：分别把文件系统、子进程与沙箱映射到远端。
 
 ## 6. 对外协作面
 
-- **forge**（`packages/experimental/forge*`）：默认禁用的 capability seam，`ctx.forge` 读代码托管平台的变更请求（PR/MR），`forge-github` 是 GitHub provider，`forge-session` 把变更请求绑定到会话并经 `ctx.forgeSession` 提供，`client-ui-forge` 提供面板；伴随 `worktree` 服务与 `create_worktree` 工具。
+- **forge**（`packages/experimental/forge*`）：一组默认禁用的 capability seam，宿主经 `ctx.forge` 读取代码托管平台的变更请求（PR/MR）。这些能力伴随一个 worktree 服务与 `create_worktree` 工具，包家族按职责分工：
+  - `forge-github`：GitHub 侧 provider；
+  - `forge-session`：把变更请求绑定到会话，经 `ctx.forgeSession` 暴露给工具；
+  - `client-ui-forge`：面板界面。
 - **LiveShare**（`packages/experimental/liveshare`）：把单个会话共享给外部观看者。观看者请求由宿主读入并以观看者自己的 Peer 派发，`share-viewer` 主体经 remote-access 策略裁决，并把共享会话的执行限制在授权工作区内；观看者不获得 owner 工具。
 - **webhook**（`packages/experimental/webhook*`）：provider 适配器负责认证与 JSON 入库，程序化规则决定条件与外部调用，`ctx.webhookRuntime` 管回调生命周期与基于工作区的根会话创建；不保存投递或完成状态，delivery id 只记录不幂等去重。
 - **plugin-market / plugin-inventory**：市场索引与已装插件清单，配合 `plugin_manager` 做安装与启停。
@@ -166,7 +179,11 @@ Claude Code mod（defineMod({ name, version, root, userConfig, register })）
 - **协议兼容层用宿主沙箱执行外部命令**：hooks 与 mods 的命令受会话沙箱与审批约束，不复刻 Claude Code 的 managed settings 层级。
 - **SSH 是传输而非安全边界**：远端文件效应由被选中的远端沙箱 provider 执行；连接丢失时如实报告未确认结果，不重连重放可能已执行的动作。
 - **对外协作面默认关闭**：forge、liveshare、webhook、plugin-market 都需要显式组合或 profile 选择，避免默认暴露网络面。
-- **委派能力边界**：仓库不含 E2B 远程沙箱包族与独立 `subagent-in-process-driver` 包，也没有 `backgroundMode`、`enableRunInBackground`、`run_in_background` 参数与用 `job_output` 收集子 Agent 的路径。
+- **委派能力边界**：仓库不含 E2B 远程沙箱包族，也没有独立的 `subagent-in-process-driver` 包。后台委派沿上述 activation 入口启动并通过通知交付结果，下列旧式参数与 jobs 收集做法均无实现：
+  - `backgroundMode`
+  - `enableRunInBackground`
+  - `run_in_background`
+  - 用 `job_output` 收集子 Agent 结果
 
 ## 8. 未验证事项
 

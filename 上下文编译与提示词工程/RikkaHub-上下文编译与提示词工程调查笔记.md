@@ -20,7 +20,7 @@ RikkaHub 的上下文编译集中在一次模型调用前的一次性消息变�
 
 规则对象没有独立的编译阶段，也没有优先级之外的冲突仲裁：所有命中项放在一起按 priority 降序稳定排序，再按位置和深度分组，同组内容用换行拼接进同一条消息（`PromptInjectionTransformer.kt`、`231-243`）。
 
-Pebble 模板与占位符是两套并行的展开机制，且处理对象不同：`{{key}}` 形式的占位符对所有消息（含合成消息）生效，Pebble 的 `{{ message }}`/`{{ role }}`/`{{ time }}`/`{{ date }}` 只作用于非合成消息，因此不作用于系统提示与前四种注入块（`PlaceholderTransformer.kt`、`TemplateTransformer.kt`）。
+Pebble 模板与占位符是两套并行的展开机制，覆盖范围不同。占位符写成 `{{key}}` 这种形式，对所有消息生效，合成消息也包含在内；Pebble 变量（message、role、time、date）只渲染非合成消息，系统提示与前四种注入块因此被模板跳过（`PlaceholderTransformer.kt`、`TemplateTransformer.kt`）。
 
 助手正则按 `visualOnly` 分成互斥的两组：非 visualOnly 的在生成结束时作用于助手消息并写回会话，visualOnly 的只在 UI 渲染时替换文本，两条路径都不会改变模型输入（`data/model/Assistant.kt`、`RegexOutputTransformer.kt`、`ui/components/message/ChatMessage.kt`）。
 
@@ -46,9 +46,25 @@ ChatService.sendMessage / sendQueuedMessage
        -> 有工具调用则执行并写回本步助手消息，回到下一个 step
 ```
 
-转换器按接口分成两类，调用时机也随之不同：`InputMessageTransformer` 只覆盖 `transform`，在每次模型调用前对完整消息列表生效；`OutputMessageTransformer` 在 `transform` 之外还提供 `visualTransform` 与 `onGenerationFinish`，后两者在调度时会检查接口类型，输入类转换器不会被调用（`data/ai/transformers/Transformer.kt`）。三个时机的分工是：`transforms` 为真实变换，`visualTransform` 面向流式展示，`onGenerationFinish` 在生成完全结束后做收尾。转换上下文由 `TransformerContext` 统一携带运行环境（Model、Assistant、Settings、处理状态、工作区目录），不再逐参数散传。
+调度器按接口类型分派转换器：输入类只实现 `transform`，在每次模型调用前对完整消息列表生效；输出类在其之外还声明 `visualTransform` 与 `onGenerationFinish`，只有实现了对应方法的转换器才会被调用（`data/ai/transformers/Transformer.kt`）。三个时机分工如下：
 
-七个输入转换器的实际顺序由 `ChatRequestFactory` 在构造时组装：固定列表为时间提醒、提示注入、占位符、文档转提示、OCR、模板、工作区提醒（`data/ai/ChatRequestFactory.kt`）。因此项目文档把顺序写成 TimeReminder 起、WorkspaceReminder 止与代码一致，但两处命名和描述与当前快照有出入：文档称核心生成类为 `GenerationHandler`，当前快照中该类不存在，循环由 `ai/agent/AgentLoop` 承担、请求组装由 `ChatRequestFactory` 承担；文档说时间提醒注入到系统消息，实际注入的是一条独立的 USER 消息（`TimeReminderTransformer.kt`）。
+- 真实变换：对消息做实际改写，结果进入后续步骤。
+- 展示变换：面向流式展示。
+- 生成结束回调：在生成完全结束后做收尾。
+
+转换上下文由 `TransformerContext` 统一携带运行环境（Model、Assistant、Settings、处理状态、工作区目录），不再逐参数散传。
+
+七个输入转换器的实际顺序由 `ChatRequestFactory` 在构造时组装，固定为下列序列（`data/ai/ChatRequestFactory.kt`）：
+
+1. 时间提醒
+2. 提示注入
+3. 占位符
+4. 文档转提示
+5. OCR
+6. 模板
+7. 工作区提醒
+
+项目文档把顺序写成由 TimeReminder 起、WorkspaceReminder 止，这一点与代码一致；两处命名和描述则与当前快照有出入：文档称核心生成类为 `GenerationHandler`，该快照中并不存在，循环实际由 `ai/agent/AgentLoop` 承担、请求组装由 `ChatRequestFactory` 承担；文档说时间提醒注入到系统消息，实际注入的是一条独立的 USER 消息（`TimeReminderTransformer.kt`）。
 
 ## 1. 规则对象、权威源与作用域
 
@@ -63,13 +79,18 @@ ChatService.sendMessage / sendQueuedMessage
 
 注入位置的五个作用域定义在 `InjectionPosition`：BEFORE_SYSTEM_PROMPT 与 AFTER_SYSTEM_PROMPT 并入第一条 SYSTEM 消息；TOP_OF_CHAT、BOTTOM_OF_CHAT 与 AT_DEPTH 生成独立消息，此时才使用注入自带的 `role`（`Assistant.kt`；`ui/pages/extensions/PromptPage.kt` 按此决定是否显示角色选择器）。
 
-ModeInjection 与 RegexInjection 共享同一组字段：名称、启用、优先级、位置、内容、`injectDepth`、角色。Lorebook 条目额外有 `keywords`、`useRegex`、`caseSensitive`、`scanDepth`、`constantActive`（`Assistant.kt`）。
+ModeInjection 与 RegexInjection 共用一套字段，Lorebook 条目在此基础上追加匹配相关字段（`Assistant.kt`）。
 
-导入导出以单对象 JSON 为单位，外层是 `{version, type, data}`。ModeInjection 的类型标记是 `mode_injection`，Lorebook 是 `lorebook`；导入时统一重新生成 ID，Lorebook 还会为每个条目换新 ID，并且可以识别 SillyTavern 世界书格式并把 position、order、disable、scanDepth 等字段映射过来（`data/export/ExportSerializer.kt`）。编辑入口是全局提示词页的两个分页，支持拖拽排序、逐个启用开关与导入导出（`PromptPage.kt`）；绑定入口是助手扩展页和对话内的扩展选择器（`ui/pages/assistant/detail/AssistantExtensionsPage.kt`、`ui/components/ui/ExtensionSelector.kt`）。
+| 对象 | 字段 |
+|---|---|
+| ModeInjection、RegexInjection | 名称、启用、优先级、位置、内容、`injectDepth`、角色 |
+| Lorebook 条目 | 上述共有字段，另加 `keywords`、`useRegex`、`caseSensitive`、`scanDepth`、`constantActive` |
+
+导入导出以单对象 JSON 为单位，外层固定为版本、类型、数据三段。ModeInjection 的类型标记是 `mode_injection`，Lorebook 是 `lorebook`。导入时所有对象都会重新生成 ID，Lorebook 连每个条目也换新 ID；导入器还能识别 SillyTavern 世界书格式，把 position、order、disable、scanDepth 等字段映射过来（`data/export/ExportSerializer.kt`）。编辑入口是全局提示词页的两个分页，支持拖拽排序、逐个启用开关与导入导出（`PromptPage.kt`）；绑定入口分助手扩展页与对话内扩展选择器两处（`ui/pages/assistant/detail/AssistantExtensionsPage.kt`、`ui/components/ui/ExtensionSelector.kt`）。
 
 ## 2. 选择条件、优先级与编译顺序
 
-**作用域选择**：生效 ID 集合不再由转换器在助手与对话之间二选一，而是先由 `Settings.getAssistantOf(conversation)` 解析出“会话视角下的助手”：会话一旦固定了 `config`，其 `modeInjectionIds` 与 `lorebookIds` 就替换助手值；`config` 为空（新会话尚未开始）时直接使用助手绑定（`data/model/ConversationConfig.kt`）。`PromptInjectionTransformer` 只读取传入助手的字段，因此不再感知会话层级（`data/ai/transformers/PromptInjectionTransformer.kt`）。助手上的 `allowConversationPromptInjection` 开关已不存在。对话侧绑定现在随会话固定配置保存，由聊天页的配置改动路径写入；本次未逐条复核 Web 端会话更新接口是否仍提供该字段。
+**作用域选择**：生效 ID 集合由 `Settings.getAssistantOf(conversation)` 先行解析。该方法产出“会话视角下的助手”：会话一旦固定了 `config`，其中的 ModeInjection 与 Lorebook 绑定就替换助手值；该字段为空（新会话尚未开始）时直接使用助手绑定（`data/model/ConversationConfig.kt`）。转换器本身只读取传入助手的字段，会话层级的覆盖在更早一步完成（`data/ai/transformers/PromptInjectionTransformer.kt`）。助手上的 `allowConversationPromptInjection` 开关已不存在。对话侧绑定现在随会话固定配置保存，由聊天页的配置改动路径写入；Web 端会话更新接口是否仍提供该字段，本次未逐条复核。
 
 **ModeInjection 命中条件**：自身 enabled 且 ID 在生效集合中，无其他条件（`PromptInjectionTransformer.kt`）。
 
@@ -89,7 +110,13 @@ ModeInjection 与 RegexInjection 共享同一组字段：名称、启用、优�
 
 **占位符**展开覆盖所有文本部件，不分角色，也不排除合成消息，因此系统提示与注入块里的占位符同样会被替换。可用键为 cur_date、model_id、model_name、locale、timezone、system_version、device_info、battery_level、nickname、char、user，值分别取系统日期、模型标识与显示名、系统语言、时区、Android 版本、设备厂商型号、电池电量，以及用户昵称，其中昵称/角色名留空时回退为 user/assistant。替换同时接受 `{{key}}` 和 `{key}` 两种写法且忽略大小写（`PlaceholderTransformer.kt`、`140-161`）。`{{ key }}` 这种带空格的写法不在替换范围内，它与 Pebble 语法并不冲突。
 
-**模板**用 Pebble 逐条渲染消息的每一个文本部件，可用变量是 `message`、`role`（角色名小写）、`time`、`date`。模板正文取助手 `messageTemplate`，由自定义 Loader 按助手 ID 从 Settings 读取，引擎关闭了自动转义；变量时间取消息自身的 `createdAt` 而非当前时间，以便同一历史在多轮请求中渲染稳定、不破坏提示词缓存。`isSynthetic` 为真的消息直接跳过（`TemplateTransformer.kt`、`58-86`、`di/DataSourceModule.kt`）。由于系统消息在构造时就被标记为合成消息，模板实际只作用于会话历史（含对话创建时写入的预设消息），不作用于系统提示与注入块。
+**模板**用 Pebble 逐条渲染消息的每一个文本部件，渲染时可用的变量有：
+
+- `message`：当前消息
+- `role`：角色名，小写形式
+- `time`、`date`：消息时间
+
+模板正文取助手的 `messageTemplate` 字段，由自定义 Loader 按助手 ID 从 Settings 读取，引擎关闭了自动转义；变量时间取消息自身的 `createdAt` 而非当前时间，使同一段历史在多轮请求中渲染稳定，也不破坏提示词缓存。`isSynthetic` 为真的消息直接跳过（`data/ai/transformers/TemplateTransformer.kt:58-86`、`di/DataSourceModule.kt`）。系统消息在构造时就标记为合成消息，因此模板实际只作用于会话历史（含对话创建时写入的预设消息），系统提示与注入块被跳过。
 
 **文档与 OCR**：文档部件被换成 `<UploadFile name=... path=...>` 文本并插到该消息部件列表最前；图片 OCR 只在模型不具备图像输入能力且存在本地 file 图片时触发，把图片部件替换成 `<image_file_ocr>` 文本，结果按 URL 缓存三天，缓存文件在应用缓存目录（`DocumentAsPromptTransformer.kt`、`OcrTransformer.kt`、`109-122`）。两者都在占位符与模板之前/之后有固定相对位置，因此它们插入的文本不会再被占位符替换，但会被随后的模板渲染——这是按管道顺序推断，未做运行验证。
 
@@ -101,19 +128,19 @@ ModeInjection 与 RegexInjection 共享同一组字段：名称、启用、优�
 
 三处正则处理点的分工可以按"是否写回会话"区分：
 
-- 用户输入、visualOnly 关闭：改写用户消息并持久化，见 `preprocessUserInputParts`。
-- 助手输出、visualOnly 关闭：在每步生成结束时替换助手消息的文本与推理部件，替换结果作为该步消息参与会话更新写回，见 `RegexOutputTransformer.visualTransform` 与 `ChatRequestFactory` 的 `finishStep`（`RegexOutputTransformer.kt`、`ChatRequestFactory.kt`）。
-- 任意角色、visualOnly 打开：只在 UI 渲染时替换，不进入请求也不写回（见下节）。
+- 用户输入、visualOnly 关闭：在入库前改写用户消息并持久化，入口是 `preprocessUserInputParts`。
+- 助手输出、visualOnly 关闭：每步生成结束时替换助手消息的文本与推理部件，替换结果作为该步消息参与会话更新写回，入口在输出正则转换器与 `ChatRequestFactory.finishStep`（`RegexOutputTransformer.kt`、`ChatRequestFactory.kt`）。
+- 任意角色、visualOnly 打开：只在 UI 渲染时替换文本，请求与存储都不经过该路径（见下节）。
 
-生成结束的收尾顺序固定为：`transforms` → `visualTransforms` → `onGenerationFinish`，且只处理本步新生成的 part；因此 base64 图片落盘与 think 标签拆分都发生在权威消息落地之前（`ChatRequestFactory.transformNewParts`、`ai/agent/AgentLoop.kt`）。用户输入正则的应用点已抽成 `List<UIMessagePart>.replaceUserRegexes()`，发送与编辑路径共用（`data/model/Assistant.kt`）。
+生成结束的收尾按固定顺序执行：真实变换（transforms）、展示变换（visualTransforms）与生成结束回调（onGenerationFinish）依次进行，三步都只看本步新生成的 part。因此 base64 图片落盘与 think 标签拆分都发生在权威消息落地之前（`ChatRequestFactory.transformNewParts`、`ai/agent/AgentLoop.kt`）。用户输入正则的应用点已抽成 `replaceUserRegexes`，由发送与编辑两条路径共用（`data/model/Assistant.kt`）。
 
 ## 5. 显示层投影与消息渲染器交接
 
-`visualOnly` 为正则的显隐开关：`replaceRegexes` 只在 `regex.visualOnly == visual` 时应用，因此显示层（`visual=true`）只跑 visualOnly 为真的正则，管道层（`visual=false`）只跑 visualOnly 为假的正则，两组互斥、不会重复替换（`Assistant.kt`）。
+`visualOnly` 是每条正则的显隐开关。替换函数 `replaceRegexes` 只应用与调用方 visual 标志一致的正则：显示层以 `visual=true` 调用，跑的是 visualOnly 为真的那一组；管道层以 `visual=false` 调用，跑的是 visualOnly 为假的那一组。两组互斥，同一条正则不会在两个层重复替换（`Assistant.kt`）。
 
 显示层调用点有三处：助手气泡文本、用户气泡文本、推理内容，都按消息自身角色选择 USER 或 ASSISTANT 作用域后替换，再交给 Markdown 渲染（`ui/components/message/ChatMessage.kt`、`ui/components/message/ChatMessageReasoning.kt`）。同一份正则配置在请求层与显示层有不同去向，不能因为共用对象就推断显示替换会进入模型输入。
 
-输出转换器的流式表现单独说明：流式 chunk 到达时 `AgentLoop` 先走 `hooks.previewStep()`，对“本步新生成的 part”跑 `visualTransform` 并把结果放进 `MessageUpdated` 事件，展示副本不写回循环内部；每步结束时 `hooks.finishStep()` 先跑真实 `transform`（当前三个输出转换器都未覆盖该方法，实际是空操作），再依次跑 `visualTransform` 与 `onGenerationFinish`，结果才成为该步的权威消息并最终落库（`data/ai/ChatRequestFactory.kt`、`ai/agent/AgentLoop.kt`）。项目文档“visualTransforms 不影响实际存储”的说法只适用于流式阶段。
+输出转换器在流式阶段的表现值得单独说明。流式 chunk 到达时，`AgentLoop` 先执行预览回调，对本步新生成的 part 跑展示变换，结果放进 `MessageUpdated` 事件；这份展示副本不写回循环内部。每步结束时 `finishStep` 先跑真实变换（当前三个输出转换器都未覆盖该方法，实际是空操作），再依次跑展示变换与生成结束回调，结果才成为该步的权威消息并最终落库（`data/ai/ChatRequestFactory.kt`、`ai/agent/AgentLoop.kt`）。项目文档“visualTransforms 不影响实际存储”的说法只适用于流式阶段。
 
 ## 6. 调试、预览与可解释性
 
@@ -135,14 +162,14 @@ ModeInjection 与 RegexInjection 共享同一组字段：名称、启用、优�
 
 ## 8. 未验证事项
 
-- 规则命中与注入结果的运行验证：多作用域同时命中时的实际消息顺序、`findSafeInsertIndex` 在多条注入连续插入时的整体效果，均只在单元测试覆盖的样例上确认。
-- 会话固定配置与提示词注入的交互：会话开始后修改助手绑定是否对既有会话生效（据 `getAssistantOf` 推断被会话值覆盖），未运行验证。
-- 时间提醒插入的 `<time_reminder>` 是否真的会被 Lorebook 的扫描上下文命中（由管道顺序推断，未运行）。
-- 文档/OCR 插入文本被 Pebble 模板渲染的实际后果（例如内容中恰好含 `{{ }}` 时的表现）。
-- 模板求值失败在生成链路上的具体表现，与模板缓存失效时机的并发行为。
-- `contextMessageLimit` 阶梯裁剪与注入插入的交互：AT_DEPTH/TOP_OF_CHAT 的插入发生在裁剪之后，裁剪基准是否因此偏移未验证。
+- 规则命中与注入结果的运行验证：多作用域同时命中时的实际消息顺序，安全插入位置在多条注入连续插入时的整体效果，目前只在单元测试覆盖的样例上确认。
+- 会话固定配置与提示词注入的交互：会话开始后修改助手绑定是否对既有会话生效，据 `getAssistantOf` 的覆盖逻辑推断为被会话值覆盖，未运行验证。
+- 时间提醒插入的 `<time_reminder>` 块是否会被 Lorebook 的扫描上下文命中，由管道顺序推断，未运行验证。
+- 文档与 OCR 插入的文本被 Pebble 模板渲染后的实际后果，例如内容中恰好含 `{{ }}` 时。
+- 模板求值失败在生成链路上的具体表现，以及模板缓存失效时机的并发行为。
+- `contextMessageLimit` 的阶梯裁剪与注入插入的交互：AT_DEPTH 与 TOP_OF_CHAT 的插入发生在裁剪之后，裁剪基准是否因此偏移未验证。
 - 对话侧绑定随会话固定配置保存后的写入一致性；Web 端会话更新接口的字段范围只做了源码阅读。
-- 是否存在其他绕过 `replaceUserRegexes` 的用户消息写入路径（例如导入、同步、语音），本次只确认了发送队列与编辑两条。
+- 除发送队列与编辑两条路径之外，是否还有导入、同步、语音等写入用户消息的通道绕开用户正则，本次只确认了前两条。
 
 ## 9. 关键源码索引
 

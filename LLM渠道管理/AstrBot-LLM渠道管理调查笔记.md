@@ -20,16 +20,16 @@ AstrBot 把"渠道管理"拆成**来源（provider_sources）＋模型实例（p
 
 核心事实链（详见各节）：
 
-- **注册**：注册装饰器在 import 时写入两个全局容器（`provider_registry` 与 `provider_cls_map`，register.py:6-53），同名类型直接抛 `ValueError`。真正的模块 import 发生在 `ProviderManager.dynamic_import_provider`（manager.py:456-636）——type 字符串到类的 match 分派，导入失败记 critical 并跳过。
-- **加载**：`load_provider`（manager.py:712-885）先合并 source 配置、解析 `$ENV` 键（仅 chat_completion 类型）、跳过 disabled/agent_runner，再校验类继承关系后实例化，最后写 `inst_map` 与六类实例列表。
-- **路由**：异步入口 `get_using_provider_async` 按 UMO 会话偏好、各类别默认 id 与实例列表首项解析；同步入口 `get_using_provider` 保留但已标 deprecated。Local Agent 的默认聊天模型位于 `agent_runner.config.model.provider_id`，为空时回退实例列表第一个（`astrbot/core/provider/manager.py:318-365`；`core/config/agent_runner.py:9-36`）。
-- **重试存在两层**：transport 层 tenacity（5 次指数退避）与 OpenAI 适配器内层（max_retries=10 的错误分类循环，按 429、上下文超长、非 VLM、工具不可用、图片审核等类别分别降级，详见 4.2）。
-- **Key 轮换是错误驱动的**：`key` 数组随机择一，429/无效时剔除当前 key 换下一个（openai_source.py:1084-1103；gemini_source.py:131-158），无定时轮换与健康检查。
-- **fallback 只有两个消费者**：图片模态降级（`astr_main_agent/builder.py:151` 调用 `providers.select_image_provider`，`providers.py:174`）与空输出/err 回复降级（`tool_loop_agent_runner.py:547-640`，候选 `[provider, *fallback_providers]`）；普通 5xx/网络错误不走 fallback，由重试层处理。
-- **渠道与请求标识**：除 SSYCloud 外增加 MiraRouter OpenAI-compatible 适配器；Provider 请求默认携带 `astrbot/<version>` User-Agent，自定义 Header 可覆盖它。MiraRouter 额外写入 `X-APP-CODE: astrbot`（`astrbot/core/provider/headers.py:1-24`；`sources/mirarouter_source.py:1-20`）。
-- **配置持久化**：`data/cmd_config.json`（AstrBotConfig，dict 子类），原子写（临时文件 + fsync + os.replace + revision），启动缺项自愈；热更新经 Dashboard API → `ProviderManager`。
-- **管理入口**：源码确认 WebUI 提供 source 与 provider 两级查看、新增、编辑、启停、删除和连接测试，非聊天能力的 provider 卡片还提供复制；配置文件和备份机制支持整体查看、导入、导出，CLI 只管理少量通用键，未找到 provider 专用 CLI/TUI；桌面端在本仓库中只是托管同一后端的外部客户端，渠道管理界面未在本仓库确认。
-- **未实现机制**：无渠道池/权重/负载均衡（`provider_pool` 与 `persona_pool` 只声明在默认配置，全仓 grep 无消费者）；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
+- **注册**：模块 import 时，注册装饰器把适配器类同时写进 `provider_registry` 与 `provider_cls_map` 两个全局容器，类型名重复直接抛 `ValueError`；模块 import 推迟到加载阶段，由管理器按 type 字符串 match 分派，导入失败记 critical 后跳过该渠道（`astrbot/core/provider/register.py:6-53`；`astrbot/core/provider/manager.py:456-636`）。
+- **加载**：`load_provider` 依次合并 source 配置、解析 `$ENV` 键（仅 chat_completion 类型）、跳过已停用与 agent_runner 条目，校验类继承关系后实例化，最后写入 `inst_map` 和六类实例列表（`astrbot/core/provider/manager.py:712-885`）。
+- **路由**：异步入口 `get_using_provider_async` 依次尝试 UMO 会话偏好、各类别默认 id 与实例列表首项；同步入口 `get_using_provider` 仅为兼容保留并已标 deprecated。Local Agent 的默认聊天模型取 `agent_runner.config.model.provider_id`，该值为空时回退实例列表第一个（`astrbot/core/provider/manager.py:318-365`；`astrbot/core/config/agent_runner.py:9-36`）。
+- **重试存在两层**：传输层用 tenacity 做 5 次指数退避；OpenAI 适配器内层是 max_retries=10 的错误分类循环，429、上下文超长、非 VLM、工具不可用与图片审核分别对应一种降级动作，细节见 4.2。
+- **Key 轮换由错误驱动**：`key` 数组随机取一个进请求，遇到 429 或无效凭据时剔除当前 key 再换下一个，没有定时轮换与健康检查（`astrbot/core/provider/sources/openai_source.py:1084-1103`；`astrbot/core/provider/sources/gemini_source.py:131-158`）。
+- **fallback 只有两个消费者**：图片模态降级与空输出/err 回复降级。前者在图片请求需要备用视觉模型时由 `providers.select_image_provider` 选出；后者按 `[provider, *fallback_providers]` 的候选名单逐个尝试，主 provider 没有产出时轮到下一个。普通 5xx 与网络错误不进入 fallback，直接由重试层处理（`astr_main_agent/builder.py:151`；`astr_main_agent/providers.py:174`；`astr_main_agent/tool_loop_agent_runner.py:547-640`）。
+- **渠道与请求标识**：Provider 请求默认带 `astrbot/<version>` 的 User-Agent，自定义 Header 可以覆盖它；新增的 MiraRouter OpenAI-compatible 适配器在此之上写入 `X-APP-CODE: astrbot`，SSYCloud 之外多了一个可直接接入的兼容渠道（`astrbot/core/provider/headers.py:1-24`；`sources/mirarouter_source.py:1-20`）。
+- **配置持久化**：渠道配置统一落在 `data/cmd_config.json`，由 dict 子类 `AstrBotConfig` 承载；保存用临时文件、fsync、os.replace 加 revision 的原子写，启动时缺项自愈；热更新从 Dashboard API 转到 `ProviderManager` 的增删改方法。
+- **管理入口**：WebUI 提供 source 与 provider 两级的查看、新增、编辑、启停、删除和连接测试，非聊天能力的卡片还支持复制；配置文件与备份机制支持整体查看、导入、导出；CLI 只管理少量通用键，本次未找到 provider 专用 CLI 或 TUI；桌面端在本仓库中只是托管同一后端的外部客户端，渠道管理界面未在本仓库确认。
+- **未实现机制**：渠道池、权重与负载均衡均未实现，`provider_pool` 与 `persona_pool` 只声明在默认配置里，全仓 grep 无消费者；API Key 明文落盘，Dashboard 列表 API 向有权限前端返回完整 key。
 
 ## 总体调用链
 
@@ -86,9 +86,9 @@ Adapter.text_chat / text_chat_stream（内部 result_chain/tools_call_*）
 
 字段（entities.py:194-234）：
 
-- `prompt`、`system_prompt`、`conversation`、`contexts`（OpenAI 格式消息列表）、`model`（每请求覆盖，None 用默认）、`session_id`（标注已废弃）；
-- `image_urls`、`audio_urls`、`extra_user_content_parts`（在用户消息后追加内容块，如系统提醒/知识库结果）；
-- `func_tool: ToolSet`、`tool_calls_result`（多轮工具结果，`append_tool_calls_result` :235-242）。
+- **对话内容**：`prompt` 与 `system_prompt` 承载提示词，`conversation` 与 `contexts` 保存 OpenAI 格式的消息列表，`model` 允许按请求覆盖默认模型，另有已标注废弃的会话 id 字段；
+- **多模态素材**：`image_urls`、`audio_urls` 传入媒体地址，`extra_user_content_parts` 在用户消息之后追加内容块，系统提醒与知识库结果走这条路径；
+- **工具调用**：`func_tool` 携带 `ToolSet`，`tool_calls_result` 保存多轮工具结果，`append_tool_calls_result` 负责追加（:235-242）。
 
 `_print_friendly_context()`（:243-290）：日志友好，checkpoint 跳过、图片/音频折叠为 `[+N images]`，避免 base64 刷日志（与消息组件 `__repr_args__` 同样的防日志污染思路）。
 
@@ -143,20 +143,24 @@ is_chunk / id / usage
 
 ### 2.1 结构
 
-- `inst_map: dict[provider_id, Providers]`（manager.py:64-99）；另按能力维护六类实例列表（chat/stt/tts/embedding/rerank/decision，:60-90）。
-- 变更通知两套并存的机制：`set_provider_change_callback`（单回调，兼容）与 `register_provider_change_hook`（多订阅），`_notify_provider_changed` 逐个发，异常只 warning（:100-144）。
-- `curr_provider_inst` 仍保留为全局默认实例字段，同步入口 `get_using_provider` 已标 deprecated，推荐改用 `get_using_provider_async`（:83-98、:317-341）。
+- **实例登记**：管理器用 `inst_map` 按 provider id 保存所有实例，同时按能力维护 chat、stt、tts、embedding、rerank、decision 六类实例列表。
+- **变更通知**：两套机制并存，`set_provider_change_callback` 保留单回调以兼容旧调用方，`register_provider_change_hook` 支持多订阅；`_notify_provider_changed` 逐个通知，单个订阅者抛异常只记 warning。
+- **全局默认实例**：`curr_provider_inst` 仍是全局默认实例字段；同步入口 `get_using_provider` 已标 deprecated，调用方应改用 `get_using_provider_async`。
+
+上述结构定义、默认实例字段与同步/异步两个路由入口都集中在 `astrbot/core/provider/manager.py:60-341`。
 
 ### 2.2 load_provider 完整流程（manager.py:712-885）
 
-1. `get_merged_provider_config`（:637-659）：provider 有 `provider_source_id` 时合并 source config，`**source, **pc` 且保留 **provider 的 id**；
-2. chat_completion 类型先跑 `_resolve_env_key_list`（:680-711）把 `$ENV` / `${ENV}` 前缀项替换为环境变量值，未设置则 warning 并留 `""`；
-3. `enable=false` 跳过；`provider_type=agent_runner` 跳过（agent runner 是独立体系，不纳入本管理器实例）；
-4. `dynamic_import_provider(provider_config["type"])`——如果 import 失败（缺依赖）记 critical 并 return，**该渠道静默不加载**；
-5. `provider_cls_map` 查不到 → error 跳过；
-6. 按 ProviderType `match` 分支实例化，`issubclass` 校验，有 `initialize()`（HasInitialize protocol，manager.py:32-34）则 await；
-7. 各能力分支会同步更新对应 `curr_*_inst`（命中默认配置或第一个）；
-8. 写入 `inst_map`。
+1. 合并配置：`get_merged_provider_config` 在 provider 带 `provider_source_id` 时把 source 配置并入，provider 自己的字段优先，`id` 始终保留 provider 侧的值；
+2. 解析环境变量：只有 chat_completion 类型会跑 `_resolve_env_key_list`，把 `$ENV` 或 `${ENV}` 前缀的 key 换成环境变量值，变量未设置时记 warning 并留空串；
+3. 筛选条目：`enable=false` 的直接跳过；`provider_type=agent_runner` 的也跳过，agent runner 走独立体系，不归本管理器管；
+4. 导入类：按 type 字符串调用 `dynamic_import_provider`，缺依赖导致导入失败时记 critical 并返回，该渠道静默不加载；
+5. 校验类：`provider_cls_map` 里查不到对应类时记 error 并跳过；
+6. 实例化：按 ProviderType 分支 match，先做 `issubclass` 校验，类实现了 `initialize()`（HasInitialize 协议）就 await 调用；
+7. 记录默认实例：各能力分支顺带更新对应的 `curr_*_inst`，取命中默认配置的那个或列表第一个；
+8. 登记：最后写入 `inst_map`。
+
+以上步骤的实现位于 `astrbot/core/provider/manager.py:637-885`。
 
 边界：embedding/rerank 没有 `_warn_about_unset_default` 之类的兜底首选项，靠调用方显式选择；实例化整段异常会 `raise`（热更新 API 能收到 500，可转 UI 错误）。
 
@@ -166,28 +170,29 @@ is_chunk / id / usage
 
 ### 2.4 terminate / reload / CRUD
 
-- `terminate_provider`（manager.py:947-989）：从各类实例列表移除、清空 `curr_*` 引用、调用实例终止方法（若有）并删除 `inst_map` 条目；
-- `reload`（:886-943）：锁内 terminate + load + **清理配置中已被删除的实例**（按 `config_ids` 对 `inst_map` 反查 terminate，实现列表与 config 的同步），并重选 `curr_*`；
-- `delete_provider(provider_id, provider_source_id)`（:990-1013）：按 id 或按 provider_source_id 级联删除目标 provider 集合，落盘（`config.save_config()`）后同步内存 `providers_config`，删除后 API 列表查询不再读到旧实例（#9568）；
-- `update_provider`（:1014-1037）：查 id 重复冲突才报错，替换 config，save_config，reload；
-- `create_provider`（:1038-1059）：append config → save → load → 同步内存 `providers_config`；
-- `terminate`（:1060-1073）：**先 cancel MCP init 后台任务**，再逐个 terminate，最后 `disable_mcp_server`。
+- **删除单个实例**：`terminate_provider` 把实例从各类实例列表移除、清空对应的 `curr_*` 引用、调用实例自身的终止方法，并删除 `inst_map` 条目；
+- **重载**：`reload` 在锁内先 terminate 再 load，并按配置里的 `config_ids` 反查 `inst_map` 清理已从配置删除的实例，让实例列表与配置保持一致，最后重选 `curr_*`；
+- **删除**：`delete_provider(provider_id, provider_source_id)` 按 id 或按 provider_source_id 级联删除目标 provider 集合，先落盘再同步内存里的 `providers_config`，删除后 API 列表查询不再读到旧实例（#9568）；
+- **更新与新增**：`update_provider` 在 id 重复冲突时报错，替换配置、写入文件后 reload；`create_provider` 追加配置、写入文件、加载实例，再同步内存列表；
+- **整体终止**：`terminate` 先 cancel MCP 初始化的后台任务，再逐个终止实例，最后调用 `disable_mcp_server`。
+
+上述生命周期与 CRUD 方法集中在 `astrbot/core/provider/manager.py:886-1073`。
 
 `reload` 后若 chat 实例列表为空则当前实例置空；若仍有实例但当前实例为空，则自动选第一个并记 info 日志——"自动选第一"是刻意行为不是异常。
 
 ### 2.5 配置生命周期与管理入口
 
-渠道配置的可管理对象仍然是两级：`provider_sources[]` 保存共享的上游地址、凭据和协议参数，`provider[]` 保存具体模型实例及 `enable` 状态。配置文件可以直接表达两级对象；WebUI 则把聊天能力明确呈现为“source 列表 + source 下的模型实例”，其他能力类型直接展示 provider 卡片。删除 source 会连带删除其关联 provider，source 重命名还会迁移关联 provider 的 `provider_source_id`；删除单个 provider 不影响同 source 下的其他模型。相关行为由 `ProviderConfigService.upsert_provider_source/delete_provider_source` 和 `ProviderManager.delete_provider/update_provider` 共同完成（`astrbot/dashboard/services/config_service.py:1406-1445`、`1711-1724`；`astrbot/core/provider/manager.py:847-909`）。
+渠道配置的可管理对象分两级：`provider_sources[]` 保存共享的上游地址、凭据和协议参数，`provider[]` 保存具体模型实例及启停状态。配置文件直接表达这两级对象；WebUI 把聊天能力呈现为“source 列表加 source 下的模型实例”，其他能力类型直接展示 provider 卡片。删除 source 会连带删除其关联 provider，重命名 source 会迁移关联 provider 的来源引用，删除单个 provider 只影响该模型实例。这些动作由 Dashboard 配置服务的 source 增删方法与管理器的删除、更新方法协作完成（`astrbot/dashboard/services/config_service.py:1406-1724`；`astrbot/core/provider/manager.py:847-909`）。
 
 #### 配置文件入口
 
-**源码确认**主配置文件是 `data/cmd_config.json`，其中 `provider_sources` 与 `provider` 是普通 JSON 数组；`AstrBotConfig` 启动时读取并把缺失字段递归补入默认值，保存时采用临时文件、`fsync`、`os.replace` 和 revision 去重（`astrbot/core/config/astrbot_config.py:31-113,232-323`）。**静态推断**直接编辑配置文件可以表达查看、新增、编辑、启停和删除已有或新建渠道；复制没有独立字段或命令，实际只能由用户复制 JSON 条目并改写唯一 `id`；导入/导出的载体是整体备份 ZIP 中的 `config/cmd_config.json`，渠道条目随全量配置一起进出。备份导出读取该文件原文，导入以 replace 模式覆盖现有配置，并在覆盖前写出 `.bak`（`astrbot/core/backup/exporter.py:160-167`；`astrbot/core/backup/importer.py:456-475`）。
+**源码确认**：主配置文件是 `data/cmd_config.json`，来源数组与模型实例数组都是普通 JSON 数组；配置对象在启动时读取该文件并把缺失字段递归补成默认值，保存时走临时文件、fsync、重命名加 revision 去重的原子写（`astrbot/core/config/astrbot_config.py:31-323`）。**静态推断**：直接编辑配置文件即可完成渠道的查看、新增、编辑、启停和删除；复制只能由用户复制 JSON 条目再改写唯一 id；导入导出的载体是整体备份 ZIP 中的 `config/cmd_config.json`，渠道条目随全量配置一起进出，导出读取该文件原文，导入以 replace 模式覆盖现有配置并在覆盖前备份原文件（`astrbot/core/backup/exporter.py:160-167`；`astrbot/core/backup/importer.py:456-475`）。
 
-配置文件本身没有连接测试动作；修改后由下一次启动读取，或由运行中的 WebUI 保存流程触发热更新。配置文件也不提供独立的“启用/停用”操作，启停表现为修改 provider 条目的 `enable` 布尔值。默认配置与用户配置的关系是启动时以 `DEFAULT_CONFIG` 初始化，再把文件内容合并进 `AstrBotConfig`，不是把每个 provider 与一个独立的默认 provider 实例合并；source 与 provider 的字段合并只发生在命中 `provider_source_id` 的运行时解析阶段（`astrbot/core/config/astrbot_config.py:46-113`；`astrbot/core/provider/manager.py:525-546`）。
+配置文件的修改由下一次启动读取，或由运行中的 WebUI 保存流程触发热更新，文件层面没有连接测试动作。启停通过 provider 条目里的 `enable` 布尔值表达，配置文件不提供独立的启用与停用操作。默认配置只作为初始化基线：启动时以 `DEFAULT_CONFIG` 建立配置对象，再合并文件内容；source 与 provider 的字段合并发生在命中 `provider_source_id` 的运行时解析阶段（`astrbot/core/config/astrbot_config.py:46-113`；`astrbot/core/provider/manager.py:525-546`）。
 
 #### CLI 与 TUI
 
-CLI 源码直接确认只有 `astrbot conf get/set` 这组常用配置命令。可读写的白名单是时区、日志等级、Dashboard 端口/用户名/密码和回调地址，不包括 `provider_sources`、`provider` 或 provider 设置；所以 CLI 能查看/编辑少量系统配置，但不能新增、复制、启停、删除、导入、导出或测试渠道（`astrbot/cli/commands/cmd_conf.py:70-78,157-240`，仓库文档 `docs/zh/use/cli.md:87-112`）。其保存路径是直接写 `data/cmd_config.json`，且使用的是 CLI 自己的 JSON 写入函数，不是 `AstrBotConfig.save_config` 的原子写路径（`cmd_conf.py:81-110`）。
+CLI 源码里只有 `astrbot conf get/set` 这组常用配置命令。白名单覆盖时区、日志等级、Dashboard 端口、用户名、密码和回调地址，渠道来源、渠道实例与各类 provider 设置都不在其中；因此 CLI 只能查看和编辑少量系统配置，新增、复制、启停、删除、导入、导出与连接测试这些渠道操作都没有对应命令（`astrbot/cli/commands/cmd_conf.py:70-240`，仓库文档 `docs/zh/use/cli.md:87-112`）。写入时它直接落 `data/cmd_config.json`，用的是 CLI 自己的 JSON 写入函数，与配置层的原子写路径相互独立。
 
 本次检查的 CLI 命令注册、依赖和源码目录中**未找到** Textual、prompt-toolkit、curses 等 TUI 框架或 provider 管理命令，TUI 对上述渠道操作的结论为**未找到**；本仓库快照中没有可复查入口。
 
@@ -199,7 +204,7 @@ WebUI 是当前源码确认最完整的渠道管理入口。`/api/v1/providers/s
 
 非聊天能力（STT、TTS、Embedding、Rerank，以及页面列出的 Agent Runner）按 provider 卡片管理。页面提供新建、已有项编辑、复制、启停、删除和单项连接测试；复制由前端深拷贝已有配置、生成不冲突的 `<id>_copy`（必要时追加序号），并将副本设置为停用后调用普通 create 接口（`dashboard/src/views/ProviderPage.vue:147-206,485-612`）。因此“复制”不是后端独立能力，已有渠道和新建渠道最终都进入相同的 create/update/delete/reload 链路，但已有项能测试、启停和删除，新建项在保存前只有表单状态，不能测试或启停。
 
-连接测试也有明确边界：WebUI 只对已加载到 `ProviderManager.inst_map` 的 provider 调用 `target.test()`；基类默认发送 `REPLY PONG ONLY`，具体适配器可覆盖探测请求。未启用的非聊天卡片在前端阻止测试，Agent Runner 页面改为提示去“配置文件”页测试；这不是 provider 的真实连接测试路径（`astrbot/dashboard/services/config_service.py:1751-1770`；`astrbot/dashboard/src/views/ProviderPage.vue:639-708`；`astrbot/core/provider/provider.py:207-211`）。测试结果只返回本次 available/unavailable 状态和错误，不作为持久化健康评分。
+连接测试的边界很明确：WebUI 只对已加载进 `ProviderManager.inst_map` 的 provider 发起测试；基类默认发送 `REPLY PONG ONLY`，具体适配器可覆盖探测请求。未启用的非聊天卡片在前端阻止测试，Agent Runner 页面提示转到“配置文件”页测试，该页面的测试对象是整份配置档案（`astrbot/dashboard/services/config_service.py:1751-1770`；`astrbot/dashboard/src/views/ProviderPage.vue:639-708`；`astrbot/core/provider/provider.py:207-211`）。测试结果只返回本次 available/unavailable 状态和错误，不作为持久化健康评分。
 
 WebUI 的“配置文件”页是另一层配置入口：它可以查看、编辑和保存系统配置及多份 `abconf_<uuid>.json` 配置档案，也能新建、复制、重命名和删除档案；保存档案时可以通过右侧聊天抽屉测试该档案。该页面的复制是整个配置档案复制，不是单个 provider 复制（`dashboard/src/views/ConfigPage.vue:112-167,486-556,672-890`；`astrbot/dashboard/api/config_profiles.py:85-167`）。源码确认配置档案与 provider 管理 API 是并列入口；本次未进一步验证一个非默认档案中的 provider 是否会独立初始化成另一组运行时 provider 实例，避免把档案 CRUD 直接等同于渠道实例隔离。
 
@@ -215,10 +220,12 @@ WebUI 还提供系统级备份入口，可查看备份列表、异步导出、�
 
 ### 3.1 注册装饰器语义（register.py）
 
-- `register_provider_adapter(type_name, desc, provider_type, tmpl, display_name)`（:14-53）；
-- 同名冲突：`if provider_type_name in provider_cls_map: raise ValueError`（:24-27）；
-- 模板补默认：缺 `type` → 当前 type_name；缺 `enable` → False；缺 `id` → type_name（:30-37）；
-- 入表后 `ProviderMetaData.id = "default"` 占位，实例化时由 load 流程用真实 id 覆盖（:38-48）。
+- **注册入口**：装饰器 `register_provider_adapter` 接收类型名、描述、能力类型、配置模板和显示名，把适配器类注册进全局容器。
+- **冲突处理**：同名类型重复注册直接抛 `ValueError`，重复在注册阶段就被拦住。
+- **模板补默认值**：模板缺少 `type` 时填当前类型名，缺少 `enable` 时填 False，缺少 `id` 时同样填类型名。
+- **id 占位**：入表时 `ProviderMetaData.id` 先写成 `"default"`，实例化阶段由加载流程覆盖为真实 id。
+
+注册逻辑集中在 `astrbot/core/provider/register.py:14-48`。
 
 ### 3.2 已注册适配器全清单（全仓静态检索确认 45 个注册点）
 
@@ -265,10 +272,12 @@ WebUI 还提供系统级备份入口，可查看备份列表、异步导出、�
 
 六类能力现在共用 `AbstractProvider`（:33-74）作为根抽象，各能力子类分别实现。`Provider` 基类中几个"提供默认但语义重要"的实现：
 
-- `text_chat_stream`（:144-182）基类直接 `raise NotImplementedError`——**流式需各适配器自己实现**；
-- `pop_record`（:183-197）：从 contexts **弹 2 条**首个非 system 记录（`poped==2` break），供上下文超长时重试；
-- `_ensure_message_to_dicts`（:198-215）：过滤 checkpoint 消息，统一 dict；
-- `test()`（:216-233）默认超时 45s，发送 `prompt="REPLY PONG ONLY"` 探测文本——各适配器覆盖此探测 prompt（如 STT 用 `samples/stt_health_check.wav`，TTS 生成 `get_audio("hi")` 并校验文件大小非 0）。
+- **流式接口**：基类 `text_chat_stream` 直接 `raise NotImplementedError`，流式能力需要各适配器自己实现；
+- **上下文裁剪**：`pop_record` 从 contexts 头部弹出 2 条非 system 记录（`poped==2` 时 break），供上下文超长时重试前一并缩小历史；
+- **消息归一**：`_ensure_message_to_dicts` 过滤 checkpoint 消息，把剩余内容统一成 dict；
+- **连接测试**：`test()` 默认超时 45 秒，发送 `prompt="REPLY PONG ONLY"` 探测文本；STT 适配器改用 `samples/stt_health_check.wav` 探测，TTS 则生成 `get_audio("hi")` 并校验文件大小非 0。
+
+这四项默认实现位于 `astrbot/core/provider/provider.py:144-233`。
 
 TTS 基类 `support_stream()` 默认 False；`get_audio_stream`（:265-307）默认实现是"攒整段 → 一次性 get_audio → 读文件 → 队列送 (text, bytes)"，真正的边生成边送需要子类重写。
 
@@ -280,28 +289,23 @@ Embedding 基类提供批量接口 `get_embeddings_batch`（:353 起）：默认
 
 外层选择与错误分类是本项目渠道管理的最核心代码：
 
-- `text_chat` / `text_chat_stream`（:1192-1355）：**内层最多重试 10 次**，每轮随机挑一把可用 key 设到 client 后再请求；错误处理入口 `_handle_api_error`（:1078-1191）按错误字符串先分类：
-  - `429` → 睡眠 1s（最后一次不睡），**剔除当前 key**，随机再取一个，返回 `(False, new_key, ...)` 进入下一轮；key 用尽直接 `raise`；
-  - `context length` → 弹记录 + 更新 payload，retry；
-  - `The model is not a VLM` → `_fallback_to_text_only_and_retry`（只删图片重试，`image_fallback_used` 防止重复删）；
-  - 图片内容审核错误（`is_content_moderated_upload_error`，字符串模式匹配）→ 同删图重试；
-  - 无效附件 → 同删图；
-  - `Function calling is not enabled` 或 tool/function+support → **`payloads.pop("tools")` 并 `func_tool=None`** 重试，并提示用户 WebUI 可关闭工具；
-  - `is_connection_error` → 记录 proxy 信息后 re-raise。
-- `_prepare_chat_payload` 与 `_finally_convert_payload`：assistant 消息对 DeepSeek v4 / MiMo 推理模型**回填空 `reasoning_content`**（:1008-1057，厂商协议要求的特殊兼容）；Gemini 的 tool response 纯文本包成 JSON `{"result": content}`。
-- azure 切换：`api_version` 存在时切 `AsyncAzureOpenAI`（:369-378）。
-- 卸载 `_remove_image_from_context`（:1356-1374）：删光图片后，原纯图片消息替换为 `{"type":"text","text":"[图片]"}` 占位。
-- `get_current_key`/`get_keys`/`set_key`（:1375-1383）。
+- **重试循环**：`text_chat` 与 `text_chat_stream` 在单次请求里最多重试 10 次，每轮先随机取一个可用 key 装进 client 再发请求，错误分类集中在 `_handle_api_error`，按错误字符串分流（`astrbot/core/provider/sources/openai_source.py:1008-1383`）：
+  - **429 限流**：睡眠 1 秒（最后一轮不睡），剔除当前 key 后随机换一个，返回失败标记与新 key 进入下一轮；key 用尽直接抛出。
+  - **上下文超长**（`context length`）：弹出部分历史记录并更新 payload 后重试。
+  - **模型不支持视觉**（`The model is not a VLM`）：走 `_fallback_to_text_only_and_retry`，只删图片重试，`image_fallback_used` 保证只删一次。
+  - **图片内容审核错误**：由 `is_content_moderated_upload_error` 做字符串模式匹配，命中后同样删图重试。
+  - **无效附件**：同样删图重试。
+  - **工具不可用**（`Function calling is not enabled` 或 tool/function+support）：从 payload 移除 tools 并把 `func_tool` 置空后重试，同时提示用户可在 WebUI 关闭工具。
+  - **连接错误**：记录 proxy 信息后重新抛出。
+- **协议兼容**：`_prepare_chat_payload` 与 `_finally_convert_payload` 负责消息整形——对 DeepSeek v4、MiMo 这类推理模型，assistant 消息要回填空的 `reasoning_content`，这是厂商协议要求的特殊兼容；Gemini 的 tool response 纯文本会被包成 JSON `{"result": content}`。
+- **azure 分支**：配置里存在 `api_version` 时，客户端在构造阶段切到 `AsyncAzureOpenAI`。
+- **图片移除**：`_remove_image_from_context` 删光图片后，把原纯图片消息替换为 `{"type":"text","text":"[图片]"}` 占位。
+- **key 维护**：`get_current_key`、`get_keys`、`set_key` 三个方法负责读写当前生效的 key 集合。
 
 ### 4.3 其他协议要点
 
-- **Anthropic**（anthropic_source.py）：
-  - 协议转换：`_prepare_payload`（:179）把 OpenAI 消息转 Anthropic，thinking 块签名回传（:197-215、:599）；
-  - prompt caching：`_PROMPT_CACHE_CONTROL = {"type":"ephemeral"}`（:40），作用在消息末块 `last_block["cache_control"]`（:517）；
-  - key 与超时：`_init_api_key` 取 key 列表第一个（:111），timeout 默认 120（:100）。
-- **Gemini**（gemini_source.py）：
-  - 传输与安全：使用 `google.genai` SDK，通过显式 `HttpOptions` 与 httpx 客户端控制超时（:93-100）；安全设置由 `CATEGORY_MAPPING`/`THRESHOLD_MAPPING` 两表控制（:49-63）；
-  - 错误处理：`_handle_api_error` 在 429 或 "API key not valid" 时换 key（:172 起），timeout 默认 180（:74）。
+- **Anthropic**（`astrbot/core/provider/sources/anthropic_source.py:40-599`）：`_prepare_payload` 把 OpenAI 格式消息转成 Anthropic 格式，thinking 块连同签名一起回传；prompt caching 用 `{"type":"ephemeral"}` 的 cache_control 标记，作用在消息末块上；key 初始化只取列表第一个，默认超时 120 秒。
+- **Gemini**（`astrbot/core/provider/sources/gemini_source.py:49-180`）：走 `google.genai` SDK，超时由显式 `HttpOptions` 与 httpx 客户端控制，默认 180 秒；安全设置由类别与阈值两张映射表决定；错误处理在 429 或“API key not valid”时换 key。
 
 ## 5. 请求路由与会话绑定
 
@@ -321,10 +325,10 @@ Embedding 基类提供批量接口 `get_embeddings_batch`（:353 起）：默认
 
 ### 5.2 会话级/事件级/命令级切换
 
-- 会话偏好：`set_provider`（manager.py:160-239）写入 umo scope 的 `provider_perf_chat_completion`，经 SharedPreferences 会话读写落 SQLite。管理员可 `/provider` 切换（builtin_stars/builtin_commands/commands/provider.py:231-246）。
-- 事件级 model 覆盖：`req.model = event.get_extra("selected_model")`（`astr_main_agent/request.py:267`）→ `ProviderRequest.model` → 各适配器 `model or self.get_model()`。
-- WebChat/API 请求可直接 `event.get_extra("selected_provider")`（`astr_main_agent/providers.py:43`）。
-- 会话组批量：`batch_update_service`（session_management_service.py:438-494，`sp.session_get`/`session_put` 逐会话读写）。
+- **会话偏好**：`set_provider` 把选择写入 umo scope 的 `provider_perf_chat_completion`，经 SharedPreferences 的会话读写落到 SQLite；管理员用 `/provider` 命令切换（`astrbot/core/provider/manager.py:160-239`；`builtin_stars/builtin_commands/commands/provider.py:231-246`）。
+- **事件级 model 覆盖**：请求构建时从事件 extra 取 `selected_model` 赋给 `ProviderRequest.model`，各适配器再用 `model or self.get_model()` 决定实际模型（`astr_main_agent/request.py:267`）。
+- **WebChat/API 临时选渠道**：这类请求直接从事件 extra 读 `selected_provider`（`astr_main_agent/providers.py:43`）。
+- **会话组批量**：`batch_update_service` 用 `sp.session_get`/`sp.session_put` 逐会话读写，实现整组会话的统一变更（`session_management_service.py:438-494`）。
 
 ### 5.3 专用模型绑定
 
@@ -362,11 +366,11 @@ Embedding 基类提供批量接口 `get_embeddings_batch`（:353 起）：默认
 
 ### 7.1 读写链路
 
-- 启动：`astrbot/core/__init__.py:32` `AstrBotConfig()`；缺项 `check_config_integrity` 递归补默认（astrbot_config.py:192-281）；`save_config`（:282-293）与异步版本原子写（临时文件 + fsync + os.replace + revision 去重提交）。
-- 新配置端：`AstrBotConfigManager`（astrbot_config_mgr.py:32 起）维护默认配置与多会话 `abconf_<uuid>.json`，会话配置经 `get_conf(umo)`/`UmopConfigRouter` 路由；档案映射 `abconf_mapping` 存 SharedPreferences global 键（:54-69），启动时 `initialize()` 异步加载（:49-53，装配点 core_lifecycle.py:190）。
-- 配置 CRUD（create/delete/update）已全部异步化并以 `_abconf_lock` 串行（:205-300，#9582/#9584）。
-- 热更新：Dashboard REST（`astrbot/dashboard/api/providers.py` + `config_service.py`）→ ProviderManager 的 create/update/delete。
-- `get_provider_schema`（config_service.py:1570 起）合并 `CONFIG_METADATA_2` 模板 + `provider_cls_map[type].default_config_tmpl` → WebUI 动态表单。
+- 启动与保存：`astrbot/core/__init__.py:32` 构造 `AstrBotConfig`，`check_config_integrity` 递归补齐缺失项，`save_config` 及其异步版本用临时文件、fsync、os.replace 加 revision 去重完成原子写（`astrbot/core/config/astrbot_config.py:192-293`）。
+- 多配置档案：`AstrBotConfigManager` 维护默认配置与多份 `abconf_<uuid>.json` 会话配置，按会话 umo 路由到对应档案；档案映射以 global 键存放在 SharedPreferences，启动时异步加载（`astrbot/core/astrbot_config_mgr.py:32-300`，装配点在 `core_lifecycle.py:190`）。
+- 配置 CRUD：create/delete/update 全部异步，并用 `_abconf_lock` 串行化（#9582/#9584）。
+- 热更新：Dashboard REST 接口（`astrbot/dashboard/api/providers.py`、`services/config_service.py`）调用 ProviderManager 的 create/update/delete 方法。
+- 表单模板：`get_provider_schema` 把 `CONFIG_METADATA_2` 模板与 `provider_cls_map` 里该适配器的 `default_config_tmpl` 合并，产出 WebUI 的动态表单（`astrbot/dashboard/services/config_service.py:1570` 起）。
 
 ### 7.2 敏感信息处理（关键事实 + 设计边界）
 

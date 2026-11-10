@@ -26,14 +26,15 @@ Codex 的生成式输出以**真实文件系统加事件流**为核心：模型�
 
 **主链一：补丁从模型文本到可审阅文件改动。**
 
-1. 模型以自由文本发出补丁，工具参数以 `ToolPayload::Custom` 承载整段 patch 文本（`codex-rs/core/src/tools/handlers/apply_patch.rs:305-337`），而不是 JSON 字段。
-2. 处理器先解析补丁文法，再以当前环境的文件系统校验每个目标文件，得到带工作目录与逐文件变更的补丁动作对象（`prepare_patch_request`，同文件 `464-507`）。
-3. 校验后的补丁再依据权限配置计算每个目标路径的可写性，把越界路径折算成“额外权限”请求，然后做安全评估，得出自动通过、询问或拒绝三种结论（`core/src/safety.rs:67-136`、`core/src/tools/handlers/apply_patch.rs:523-583`）。
-4. 需要询问时，会话把 `ApplyPatchApprovalRequest` 事件发给客户端并挂起等待审批决定（`core/src/session/mod.rs:3354-3397`）；TUI 以审批浮层呈现，选项为“执行 / 本次会话内这些文件不再询问 / 拒绝并说明改法”（`tui/src/bottom_pane/approval_overlay.rs:1042-1059`）。
-5. 执行由编排器统一负责“审批 → 选择沙箱 → 运行 → 沙箱拒绝时按策略重试”，补丁运行时最终把变更写入目标文件系统（`core/src/tools/orchestrator.rs:125`、`core/src/tools/runtimes/apply_patch.rs:172-262`）。
-6. 执行前后各发一次 item 事件：开始时是状态为空的文件改动项，结束时带补丁应用状态与 `stdout/stderr`；同时把提交过的增量喂给回合 diff 跟踪器（`core/src/tools/events.rs:241-378`、`core/src/turn_diff_tracker.rs:92-120`）。
-7. app-server 把该事件转成 v2 的 `item/started`、`item/completed` 通知（`app-server-protocol/src/protocol/event_mapping.rs:410-439`），TUI 据此生成 diff 卡片，完成态 item 再写入 rollout（`rollout/src/policy.rs:232-287`）。
-8. 重开会话时，rollout 被重放成对话历史，UI 侧从完成态 `FileChange` item 重新画出同一张卡片（`tui/src/chatwidget/replay.rs:250-271`）。
+模型通过补丁工具调用提交自由文本形式的整段补丁，工具参数以 `ToolPayload::Custom` 自定义载荷承载（[载荷入口](<../../codex/codex-rs/core/src/tools/handlers/apply_patch.rs#L305-L336>)）。处理器先按补丁文法解析，再用当前环境的文件系统逐个校验目标文件，产出带工作目录与逐文件变更的补丁动作对象（`codex-rs/core/src/tools/handlers/apply_patch.rs:305-507`）。
+
+校验后的补丁依据权限配置计算每个目标路径的可写性，越界路径折算成额外权限请求，随后做安全评估，得出自动通过、询问或拒绝三种结论（`core/src/safety.rs:67-136`、`core/src/tools/handlers/apply_patch.rs:523-583`）。
+
+结论为询问时，会话向客户端发出补丁审批事件并挂起，等待审批决定；TUI 用审批浮层呈现三个选项：执行、本会话内这些文件不再询问、拒绝并说明改法（`core/src/session/mod.rs:3354-3397`、`tui/src/bottom_pane/approval_overlay.rs:1042-1059`）。
+
+执行交给编排器，由它按审批结果选择沙箱、运行补丁，并在沙箱拒绝时按策略重试；补丁运行时最终把变更写入目标文件系统（`core/src/tools/orchestrator.rs:125`、`core/src/tools/runtimes/apply_patch.rs:172-262`）。
+
+执行前后各发一次 item 事件：开始时是状态为空的文件改动项，结束时带上补丁应用状态与 `stdout`、`stderr`，提交过的增量同时喂给回合 diff 跟踪器（`core/src/tools/events.rs:241-378`、`core/src/turn_diff_tracker.rs:92-120`）。app-server 把该事件转成 v2 的 `item/started` 与 `item/completed` 通知，TUI 据此生成 diff 卡片，完成态 item 再写入 rollout（`app-server-protocol/src/protocol/event_mapping.rs:410-439`、`rollout/src/policy.rs:232-287`）；重开会话时 rollout 被重放成对话历史，UI 侧从完成态 `FileChange` item 重画同一张卡片（`tui/src/chatwidget/replay.rs:250-271`）。
 
 **主链二：命令作为可持续交互的进程对象。**
 
@@ -97,7 +98,7 @@ diff 的两种粒度并存：卡片正文是内容级 diff；卡片首行是“�
 
 终端能直接表达的类型有限：Markdown、语法高亮代码块、unified diff、ASCII 图表。Codex 把 Mermaid 图在本地渲染成字符图后再进入消息，属于消息内的静态渲染，不产生可交互对象（`tui/src/markdown_render.rs:1155-1170`、`codex-rs/mermaid/src/lib.rs:54-63`）。
 
-图片分两类。模型可通过 `view_image` 查看本地图片，也可生成图片并把结果保存到本地路径，item 中带 `saved_path` 与状态（`protocol/src/items.rs:407-417`）。在拥有 Kitty 图形或 Sixel 能力的终端里，全屏 transcript 会用原生图形协议显示像素预览，并为其预留布局行（`tui/src/transcript_image.rs:1-12`、`tui/src/pets/image_protocol.rs:28-40`）。同一套有界预览也服务输入框里的本地图片缩略图，解码时按 EXIF 方向纠正并同时限制编码字节与解码后分配（`transcript_image.rs:80-112`）。字符终端下这些图片退化为路径与元信息。
+图片有查看与生成两条路径：模型用 `view_image` 工具读取本地图片，生成图片时把结果写到本地路径，消息项记录该路径与生成状态（`protocol/src/items.rs:407-417`）。持有 Kitty 图形或 Sixel 能力的终端会用原生图形协议在全屏 transcript 里显示像素预览，并预留相应布局行；同一套有界预览也服务输入框中的本地图片缩略图，解码时按 EXIF 方向纠正，并同时限制编码字节与解码后的内存分配。字符终端下这些图片退化为路径与元信息（`tui/src/transcript_image.rs:1-112`、`tui/src/pets/image_protocol.rs:28-40`）。
 
 真正的“可执行产物”只有一条窄路径：模型在回答中写入一条内联可视化指令，指向本线程可视化目录里的 HTML 片段；TUI 把片段包进固定 viewer 模板、复制到 `CODEX_HOME` 的 viewer 目录，再把消息里的指令改写成指向该文件的链接（`tui/src/inline_visualization.rs:30-31`、`116-148`、`185-260`）。
 
@@ -170,11 +171,13 @@ diff 的两种粒度并存：卡片正文是内容级 diff；卡片首行是“�
 
 **测试（源码存在，本次未运行）**：用例覆盖文法、增量解析、diff 跟踪、终端投影、事件压平与持久化筛选几层。
 
-- `apply-patch` crate：parser、streaming_parser、file_update 单测，以及含流式事件断言的集成用例（`core/tests/suite/apply_patch_cli.rs:1732`）
-- `core/src/turn_diff_tracker_tests.rs`：增量、失效与超时
-- `tui/src/history_cell/patches_tests.rs`、`tui/src/diff_render` 快照：卡片与 diff 渲染
-- `exec/src/event_processor_with_jsonl_output_tests.rs`：事件压平
-- `rollout/src/policy_tests.rs`：持久化筛选
+| 层次 | 覆盖内容 | 用例位置 |
+| --- | --- | --- |
+| apply-patch crate | 解析器、流式解析器与文件更新的单测，外加带流式事件断言的集成用例 | `core/tests/suite/apply_patch_cli.rs:1732` |
+| core | 回合 diff 跟踪的增量、失效与超时 | `core/src/turn_diff_tracker_tests.rs` |
+| tui | 补丁卡片与 diff 渲染 | `tui/src/history_cell/patches_tests.rs`、`tui/src/diff_render` 快照 |
+| exec | 事件压平 | `exec/src/event_processor_with_jsonl_output_tests.rs` |
+| rollout | 持久化筛选 | `rollout/src/policy_tests.rs` |
 
 **已确认边界**
 

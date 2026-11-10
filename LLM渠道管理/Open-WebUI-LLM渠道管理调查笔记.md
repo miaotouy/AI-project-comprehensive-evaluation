@@ -16,12 +16,17 @@
 
 Open WebUI 当前把服务端 LLM 渠道表示为 OpenAI 兼容连接或 Ollama 后端的配置行，而不是一个独立的 Provider 实体。每条连接至少由 URL 和按索引关联的配置对象组成；OpenAI 连接另有同索引的 API Key，Ollama 的 Key 放在该连接配置对象中。一个服务端可以配置多个 OpenAI 兼容 URL 和多个 Ollama URL，但没有通用的渠道复制、导入单条连接或导出单条连接操作。
 
-- 环境变量是启动默认值。`OPENAI_API_BASE_URL(S)`、`OPENAI_API_KEY(S)`、`OLLAMA_BASE_URL(S)` 和对应配置在启动配置中形成默认配置；当前代码的 `Config.seed_defaults` 只向数据库补入不存在的 key，已有数据库值优先。
-- 服务端运行时配置保存于数据库 `config` 表，按配置 key 分行存储，连接数组和连接配置字典分别保存为 `openai.api_base_urls`、`openai.api_keys`、`openai.api_configs`、`ollama.base_urls`、`ollama.api_configs`。管理员 Web Connections 的保存直接更新这些值。
-- `config.json` 仅保留旧版本迁移用途：首次发现 `DATA_DIR/config.json` 时读入数据库并改名为 `old_config.json`。本次未找到把当前连接配置持续写回配置文件的路径。
-- 管理员 Web Connections 支持查看、添加、编辑、启用/停用、删除和连接测试；没有复制单条连接入口。保存后会清模型目录缓存并重新拉取模型列表，但这不是连接测试。
-- 用户 Web Direct Connections 是另一套用户设置中的 OpenAI 兼容连接列表。管理员只控制 `ENABLE_DIRECT_CONNECTIONS` 开关；用户可以查看、添加、编辑、启用/停用、删除并在浏览器中直接测试。它不进入服务端 `Config` 表，也不提供 Ollama、服务端代理、管理员导入导出或跨用户共享。
-- OpenAI 和 Ollama 的连接测试都是独立的管理员后端 `/verify` 路径：OpenAI 通常请求 `{url}/models`，Azure 请求模型端点，Anthropic 使用专用模型请求；Ollama 请求 `{url}/api/version`。模型列表刷新则使用 `/models` 或 `/api/tags`，不能用来替代连接测试。
+- 环境变量是启动默认值的来源。OpenAI 兼容连接的基础地址与 Key 均提供单数、复数环境变量；Ollama 的基础地址也有两种形式，Key 则放在 `OLLAMA_API_CONFIGS` 连接配置对象中。这些值启动时与其余配置一起生成默认配置；补种逻辑 `Config.seed_defaults` 只把数据库里尚不存在的配置键写进去，已有的数据库值优先。
+- 服务端运行时配置保存于数据库 `config` 表，按配置键分行存储。连接数据分成下列几个键：
+
+  - `openai.api_base_urls`、`openai.api_keys`、`openai.api_configs`：OpenAI 兼容连接的 URL 列表、Key 列表和按索引保存的连接配置字典；
+  - `ollama.base_urls`、`ollama.api_configs`：Ollama 的 URL 列表和连接配置字典。
+
+  管理员 Web Connections 的保存直接更新这些值。
+- 旧版配置文件只承担迁移用途：启动时首次在数据目录发现 `config.json`，就把内容读入数据库并改名为 `old_config.json`。本次未找到把当前连接配置持续写回该文件的路径。
+- 管理员 Web Connections 支持查看、添加、编辑、启用/停用、删除和连接测试；没有复制单条连接入口。保存后会清模型目录缓存并重新拉取模型列表，这次刷新与连接测试分属两条路径。
+- 用户 Web Direct Connections 是另一套放在用户设置里的 OpenAI 兼容连接列表。管理员只控制 `ENABLE_DIRECT_CONNECTIONS` 开关；用户可以查看、添加、编辑、启用/停用、删除，并在浏览器中直接测试。这些连接保存在用户设置内，服务端配置表里没有副本；Ollama 连接、服务端代理、管理员导入导出和跨用户共享在用户直连里都没有对应入口。
+- OpenAI 和 Ollama 的连接测试都走独立的管理员后端验证路径：OpenAI 普通连接请求 `{url}/models`，Azure 请求模型端点，Anthropic 使用专用模型请求，Ollama 请求 `{url}/api/version`。模型列表刷新另走 `/models` 或 `/api/tags`，与连接测试是两次独立请求。
 - OpenAI 模型在合并时通常由首次出现的连接占用固定 `urlIdx`，没有通用跨连接 failover；Ollama 同名模型记录多个后端索引，请求时随机选择后端。代码中未找到 LLM 请求失败后的通用重试循环。
 - CLI 入口只有 `serve`、`dev` 和 `--version` 等启动相关命令，没有渠道查看、新增、编辑或测试子命令。本仓库内未找到 TUI。变更记录提到独立的 `open-webui/desktop` 桌面仓库，但该仓库不在本次调查范围内，因此桌面端连接管理能力未验证。
 
@@ -49,7 +54,11 @@ Open WebUI 当前把服务端 LLM 渠道表示为 OpenAI 兼容连接或 Ollama 
   -> 允许时直接请求用户填写的 OpenAI 兼容 URL
 ```
 
-管理员 Web 读取 `/openai/config`、`/ollama/config` 和 `/configs/connections`；保存连接分别调用 `/openai/config/update`、`/ollama/config/update`。后端路由使用管理员依赖保护这些服务端配置接口。实现见 `backend/open_webui/routers/openai.py:468`、`backend/open_webui/routers/ollama.py:288-348` 和 `backend/open_webui/routers/configs.py:139-160`。
+管理员页面通过三个接口读取当前连接：OpenAI 连接配置、Ollama 连接配置和通用连接配置；保存连接时分别调用 OpenAI 与 Ollama 的更新接口。后端为这些服务端配置接口统一挂上管理员依赖。
+
+- 读取：`/openai/config`、`/ollama/config`、`/configs/connections`
+- 保存：`/openai/config/update`、`/ollama/config/update`
+- 实现：`backend/open_webui/routers/openai.py:468`、`ollama.py:288-348`、`configs.py:139-160`
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
@@ -69,9 +78,17 @@ Direct Connections 只允许用户填写 OpenAI 兼容 Endpoint。每个用户�
 
 ### 2.1 配置文件和数据库
 
-`.env.example` 展示的 `OLLAMA_BASE_URL`、`OPENAI_API_BASE_URL` 和 `OPENAI_API_KEY` 是部署时的环境变量入口。完整默认配置在 `backend/open_webui/config.py` 中组装，并通过 `DEFAULT_CONFIG` 提供给配置模型。环境变量不会像 Web 表单一样提供逐连接编辑器；要修改它们需改部署环境并重启。
+部署时通过环境变量给出默认连接，示例文件 `.env.example` 列出 Ollama 与 OpenAI 兼容服务的基础地址和 Key：
 
-当前配置模型每个 key 使用一行数据库记录，列为 `key`、JSON `value` 和更新时间。`Config.get`/`get_many` 在持久化配置开启时先查数据库，缺失时回退默认值；`seed_defaults` 只插入不存在的默认 key。因此环境变量是种子/回退来源，数据库是运行时权威来源，而不是每次启动都覆盖数据库。见 `backend/open_webui/models/config.py:99-165`、`196-218`、`239-264`。
+```text
+OLLAMA_BASE_URL
+OPENAI_API_BASE_URL
+OPENAI_API_KEY
+```
+
+完整默认配置在 `backend/open_webui/config.py` 中组装，组装结果以 `DEFAULT_CONFIG` 的形式交给配置模型。环境变量只能整体在部署环境里修改并重启生效，没有针对单条连接的编辑界面。
+
+当前配置模型让每个配置键在数据库里占一行，行内是 `key`、JSON 格式的 `value` 和更新时间三列。开启持久化配置后，读取配置先查数据库，查不到才回退到默认值；启动补种只插入数据库中不存在的键。于是环境变量提供初始值和兜底值，数据库保存运行时生效的值，后续启动不会用环境变量覆盖已有配置。读取、补种与持久化逻辑见 `backend/open_webui/models/config.py:99-165`、`:196-218`、`:239-264`。
 
 旧版 `DATA_DIR/config.json` 会在启动迁移函数中整体写入数据库，然后重命名为 `old_config.json`。这是迁移路径，不是当前连接的文件编辑协议。见 `backend/open_webui/config.py:90`。
 
@@ -89,7 +106,7 @@ Direct Connections 只允许用户填写 OpenAI 兼容 Endpoint。每个用户�
 | 导出单条渠道 | 未找到 | 未找到连接专用导出按钮。 |
 | 连接测试 | 支持 | 新建/编辑弹窗的 Verify Connection 调用独立 `/verify`；测试不保存配置。 |
 
-管理员页面由 `src/lib/components/admin/Settings/Connections.svelte:54-139` 负责保存和新增，由 `:257-334` 负责已有连接的编辑、删除和启停。编辑器的验证、字段校验和删除确认见 `src/lib/components/AddConnectionModal.svelte:74-230`、`:741-788`。
+管理员页面的新增与保存、已有连接的编辑删除和启停分别落在页面组件的两块逻辑里，编辑器弹窗另外承担连接验证、字段校验和删除确认，位置见 `src/lib/components/admin/Settings/Connections.svelte:54-139`、`:257-334` 和 `src/lib/components/AddConnectionModal.svelte:74-230`、`:741-788`。
 
 ### 2.3 用户 Web Direct Connections 操作矩阵
 
@@ -108,7 +125,7 @@ Direct Connections 的总开关位于管理员 Connections 页面，保存为 `d
 
 ### 2.4 通用管理员配置导入导出
 
-管理员 Database 设置提供通用配置 JSON 导入导出，而非连接专用格式。`GET /configs/export` 返回 `Config.get_all()`，`POST /configs/import` 将传入字典直接 upsert；前端把导出结果保存为 `config-<timestamp>.json`。因此从静态实现看，通用导出可能包含 OpenAI/Ollama 连接配置及凭据，且本次未找到对 API Key 的导出排除或加密处理。相关路径为 `backend/open_webui/routers/configs.py:97-121`、`src/lib/components/admin/Settings/Database.svelte:85-118`。
+管理员 Database 设置以整库配置为单位做 JSON 导入导出，连接配置只是其中一部分：导出接口 `GET /configs/export` 返回数据库里的全部配置，导入接口 `POST /configs/import` 把传入字典直接 upsert，前端把导出结果保存成带时间戳的 `config-<timestamp>.json`。从静态实现看，导出文件因此可能包含 OpenAI 与 Ollama 的连接配置及凭据，本次未找到导出时排除或加密 API Key 的处理。相关路径为 `backend/open_webui/routers/configs.py:97-121`、`src/lib/components/admin/Settings/Database.svelte:85-118`。
 
 这项通用导入按配置 key 直接改写数据库，作用层面在配置存储；Web Connections 页面提供逐条新增、编辑、删除，导入后前端缓存与运行中连接状态的更新方式在本次静态调查中未确认。
 
@@ -122,7 +139,9 @@ Direct Connections 的总开关位于管理员 Connections 页面，保存为 `d
 
 ## 4. 模型目录与能力元数据
 
-OpenAI 连接默认从 `{url}/models` 拉模型；Ollama 从 `{url}/api/tags` 拉模型。连接配置提供 `model_ids` 白名单：有白名单时后端不必依赖完整上游目录，可直接或筛选出指定模型。前缀、标签、连接类型和 Provider 会注入统一模型条目。模型目录缓存由后端维护，保存连接后会清空相关缓存并重新获取模型；基础模型目录另有一层跨进程 Redis 缓存（键 `{prefix}:models:base`，`models.base_models_cache` 开启时启用），保存/启用连接与管理端刷新都会显式删除该键，避免多 worker 各持一份过期目录（`backend/open_webui/utils/models.py:32,69-105`、`routers/openai.py:347-356`、`routers/ollama.py:321-327`）。
+OpenAI 连接默认从 `{url}/models` 拉模型，Ollama 从 `{url}/api/tags` 拉模型。连接配置提供 `model_ids` 白名单：填了白名单时，后端不必依赖完整的上游目录，可以直接使用清单里的模型，也可以从中筛出指定模型。前缀、标签、连接类型和 Provider 会注入统一的模型条目。
+
+模型目录缓存由后端维护，保存连接后会清空相关缓存并重新获取模型。基础模型目录另有一层跨进程 Redis 缓存，缓存键为 `{prefix}:models:base`，由 `models.base_models_cache` 开关启用；保存连接、启用连接和管理端刷新都会显式删除该键，避免多个 worker 各自持有一份过期目录。相关位置见 `backend/open_webui/utils/models.py:32,69-105`、`routers/openai.py:347-356`、`routers/ollama.py:321-327`。
 
 `/models`、`/api/tags` 以及页面加载时的模型刷新只回答“有哪些模型”或更新缓存，不验证聊天生成能力。连接验证是单独的请求：OpenAI 普通连接请求 `/models`，Azure 和 Anthropic 有专用分支；Ollama 请求 `/api/version`。因此模型目录刷新成功说明的是目录可达，连接测试是否通过取决于上述独立验证请求的结果。
 

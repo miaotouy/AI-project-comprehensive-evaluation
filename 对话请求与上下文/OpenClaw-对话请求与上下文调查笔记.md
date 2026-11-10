@@ -66,7 +66,7 @@ Gateway chat.send
 
 ### 运行身份与状态投影
 
-一次 `chat.send` 用请求的 `idempotencyKey` 充当 `clientRunId`。准入阶段先在去重表里占位：写入一条 pending 状态的去重记录（pending dedupe row），记录里带上这次 attempt 的编号、这次占位的连接与设备、过期时间，以及 `accepted` 状态；写完才去申请会话运行权（session work admission）。拿到准入锁后，代码会把这条请求重新核对一遍：reservation 是否仍归它、生命周期 generation 有没有换代、会话路由（session routing）和 active leaf 是否还对得上、restart claim 是否已被别人认领。全部通过才注册 abort controller，并把 Gateway run context 绑到 session 上。主要状态和所有权逻辑见 `src/gateway/server-methods/chat-send-admission.ts`、`:325-563`。
+一次 `chat.send` 直接拿请求里的 `idempotencyKey` 当本次运行的 clientRunId。准入阶段先在去重表里占位：写入一条 pending 记录，带上 attempt 编号、占位所用的连接与设备、过期时间和 `accepted` 状态，写完才去申请会话运行权。拿到准入锁后，代码把这条请求重新核对一遍——reservation 是否仍归它、生命周期 generation 有没有换代、会话路由与 active leaf 是否还对得上、restart claim 有没有被别人认领。全部通过才注册 abort controller，并把 Gateway 的 run context 绑到 session 上。状态与所有权逻辑见 `src/gateway/server-methods/chat-send-admission.ts:325-563`。
 
 同一个请求在不同层有不同身份：
 
@@ -86,7 +86,7 @@ Gateway chat.send
 
 附件解析落在 Gateway 准入之后、ACK 之前。`parseMessageWithAttachments` 先把文本里的附件标记拆出来；图片能不能进模型，由当前 session 的模型或显式指定的 plugin/ACP route 决定。非图片文件可以预先放进 sandbox workspace，managed PDF 在特定条件下保留 host-readable path。附件本身有永久错误时，ACK 之前就返回 invalid request；只是暂存失败则返回 unavailable；offload 出去但正文没有引用的媒体，由准入清理阶段丢弃。附件准备的主要入口见 `src/gateway/server-methods/chat-send-attachments.ts`、`:181-305`。
 
-`createGatewayChatUserTurnController` 负责把用户这次输入包成一个 turn：原始文本、到达时间、幂等键（`${runId}:user`）、发送者、owner 标记、回复目标和 provenance 都记在里面。`prepareChatSendUserTurn` 接着把图片的持久化 promise、媒体信息、媒体布局和可移植的 `MsgContext` 绑到这个 turn 上。普通 turn 的 transcript 写入可以推迟到 ACK 之后；restart-safe 的 Control UI turn 则要在 ACK 前完成 durable admission，这样 Gateway 重启后重试时还能认出是同一个用户 turn。见 `src/gateway/server-methods/chat-user-turn-recorder.ts`、`src/gateway/server-methods/chat-send-user-turn.ts`。
+`createGatewayChatUserTurnController` 把用户这次输入包成一个 turn 对象，原始文本、到达时间、幂等键 `${runId}:user`、发送者、owner 标记、回复目标和 provenance 都随对象一起保存。另一处入口 `prepareChatSendUserTurn` 再往这个 turn 上绑定图片的持久化 promise、媒体信息、媒体布局和可移植的消息上下文。普通 turn 的 transcript 写入可以推迟到 ACK 之后；restart-safe 的 Control UI turn 必须在 ACK 前完成 durable admission，Gateway 重启后重试才能认出是同一个用户 turn。见 `src/gateway/server-methods/chat-user-turn-recorder.ts` 和 `src/gateway/server-methods/chat-send-user-turn.ts`。
 
 ### Agent attempt 中的历史恢复
 
@@ -149,13 +149,13 @@ Context Engine 是插件化的生命周期接口，把一轮 turn 拆成若干�
 
 legacy engine 的职责很窄：`ingest` 不写自己的存储；`assemble` 把 messages 原样返回，`estimatedTokens` 固定为 0；sanitize、validate、limit、repair 这批管线仍由 attempt 负责；`compact` 则 delegate 到 OpenClaw 内置的 compaction runtime。所以 assemble 的透传只说明这一层不做组装，预算和 provider-boundary precheck 依然在 runner 里执行。见 `src/context-engine/legacy.ts`。
 
-非 legacy engine 只有在 turn 成功、没被 abort、也没有 prompt error 时才会收到 `afterTurn`。engine 没有实现这个方法时，host 会对新增消息调用 `ingestBatch`，或者逐条 `ingest`，然后跑 maintenance。若 engine 声明支持 durable turn advancement，host 就能把用户的 admission anchor 和 terminal anchor 作为 `commitTurn` 的候选交给它，engine 自身不必再猜 transcript leaf。见 `src/agents/harness/context-engine-lifecycle.ts`、`src/agents/embedded-agent-runner/run/attempt-finalize.ts`。
+非 legacy engine 只在 turn 成功、没被 abort、也没有 prompt error 时收到 `afterTurn`。engine 没有实现这个方法时，host 改为把新增消息批量或逐条摄入，再跑一次 maintenance。如果 engine 声明支持 durable turn advancement，host 就会把用户的 admission anchor 和 terminal anchor 作为 `commitTurn` 的候选交给它，engine 不必自己再猜 transcript leaf。见 `src/agents/harness/context-engine-lifecycle.ts` 和 `src/agents/embedded-agent-runner/run/attempt-finalize.ts`。
 
 ## 4. SDK、Provider、模型与协议交接
 
 ### Reply runtime 到 embedded runner
 
-`dispatchReplyFromConfig` 是一条串行流水线：收集请求、确定投递方式、准备 operation 上下文、准备 operation、选择路由、准备执行，最后做 audit 与 delivery。对 Gateway 内部的 webchat，`dispatchInboundMessageWithProjectedDispatcher` 改用 projected message delivery hooks，把 Agent 运行结果交给 Gateway 自己的 `ReplyDispatcher`，见 `src/auto-reply/dispatch.ts`、`:472-482`、`src/auto-reply/reply/dispatch-from-config.ts`。
+回复派发入口 `dispatchReplyFromConfig` 把一次回复拆成串行流水线：先收集请求并确定投递方式，再准备 operation 及其上下文，然后选择路由、准备执行，最后做 audit 与 delivery。Gateway 内部的 webchat 走另一条入口，改用 projected message delivery hooks，把 Agent 运行结果交给 Gateway 自己的 `ReplyDispatcher`。两个入口见 `src/auto-reply/dispatch.ts:472-482` 和 `src/auto-reply/reply/dispatch-from-config.ts`。
 
 `executePreparedReplyRun` 把当前 turn 固化成一个 `FollowupRun`，字段大致分三组：文本与媒体（transcript prompt、当前 inbound context、媒体）、权限与路由（渠道准入证据、工具 allowlist、skills 快照、来源路由、发送者与群组字段）、运行参数（provider/model、thinking/verbose/fast 模式、sandbox 和 `sessionKey`）。整份对象随后交给 `runReplyAgent`，从 auto-reply 进入 channel/embedded Agent runner 的交接点见 `src/auto-reply/reply/get-reply-run-execute.ts`。
 
@@ -168,12 +168,12 @@ legacy engine 的职责很窄：`ingest` 不写自己的存储；`assemble` 把 
 Agent Core 的模型交接固定为：
 
 1. 读取 Agent 内存中的 system prompt、transcript messages 和 tools。
-2. 跑一遍 `transformContext`，做 provider 历史里的工具结果截断、cache-TTL 清理，以及图片、computer frame 等运行时投影。
-3. `normalizeCoreContextMessages` 规整之后调用 `convertToLlm`，得到面向 Provider 的 `Message[]`。
-4. 以 `Context { systemPrompt, messages, tools }` 调用 `streamFn(model, context, options)`；API key 在请求时解析，abort signal 随请求传递。
-5. 将 Provider 的 start、text/thinking/toolcall 增量、done/error 重新组合为 assistant message 和 AgentSession events。
+2. 跑一遍 `transformContext`，对 provider 历史做工具结果截断、cache-TTL 清理，并投影图片、computer frame 等运行时内容。
+3. 把消息结构规整后调用 `convertToLlm`，得到面向 Provider 的消息数组。
+4. 以 `Context` 对象调用 `streamFn`，API key 在请求时解析，abort signal 随请求传递。
+5. 把 Provider 的 start、text/thinking/toolcall 增量、done/error，重新组合成 assistant message 和 AgentSession 事件。
 
-对应实现见 `packages/agent-core/src/agent-loop.ts`。`Agent` 本身持有当前 transcript、system prompt、tools、active run 和两个队列，并在 `runWithLifecycle` 中设置 streaming 状态；`agent_end` 事件监听器全部 settle 后才清除 active run，见 `packages/agent-core/src/agent.ts`、`:466-575`。
+上面几步落在 `packages/agent-core/src/agent-loop.ts`。`Agent` 对象自己持有当前 transcript、system prompt、tools、active run 和两个队列；它在 `runWithLifecycle` 里设置 streaming 状态，等 `agent_end` 事件的监听器全部 settle 之后才清除 active run，见 `packages/agent-core/src/agent.ts:466-575`。
 
 ### Harness 分界
 
@@ -183,7 +183,7 @@ Agent Core 的模型交接固定为：
 
 ### AgentSession 内部事件
 
-Agent Core 在 prompt 开始时先发 `agent_start`、`turn_start` 和用户消息的 `message_start`/`message_end`；模型每响应一次就发一轮 assistant message 的 start/update/end，工具执行同样有 start/update/end，回合收尾发 `turn_end`，整次 run 结束才发 `agent_end`。assistant 的 `message_end` 先落进 AgentSession 的内存消息，再交给监听器往下处理。Agent Core 的主循环在 `packages/agent-core/src/agent-loop.ts`，消息状态归约和监听器等待在 `packages/agent-core/src/agent.ts`。
+prompt 开始时，Agent Core 先发 `agent_start` 和 `turn_start`，并为用户消息补一对 message start/end；模型每响应一次，assistant 消息走一遍 start、update、end，工具执行同样走三段；回合收尾发 turn end，整次 run 的收尾是 `agent_end` 事件。assistant 的 message end 先落进 AgentSession 的内存消息，再交给监听器往下处理。主循环与事件归约的实现见 `packages/agent-core/src/agent-loop.ts` 和 `packages/agent-core/src/agent.ts`。
 
 embedded subscriber 给每个 AgentSession 装一套事件处理器。大多数事件排进串行的 `pendingEventChain`，让异步格式化、block flush、usage 和回复 payload 都按事件顺序收口；`tool_execution_end` 走 detached 调度，工具终态在执行生命周期里已经记下，不必卡在核心结束事件前面。见 `src/agents/embedded-agent-subscribe.handlers.ts`。
 
@@ -236,7 +236,7 @@ detached dispatch 完成后，Gateway 检查 reply payload 和 Agent run 是否�
 
 这组分支见 `src/gateway/server-methods/chat-send-agent-dispatch.ts` 和 `src/gateway/server-methods/chat-send-reply-dispatch.ts`。
 
-`server-chat` 看到 lifecycle 的 `end` 或 `error` 之后，先按统一的 terminal outcome 归类成 success、timeout、cancellation 或 failure，再映射到 chat 侧的 `done`、`error` 或 `aborted`。收尾顺序是：flush 最后一段 paced text，清掉 chat state、run registry、event sequence 和 run context；session lifecycle 的持久化落在 Gateway session accessor 里，写成功之后才广播 `sessions.changed`，订阅者拿到的就是写后的 canonical session row。见 `src/gateway/server-chat.ts`、`:1058-1121`，以及 `src/gateway/session-lifecycle-state.ts`、`:337-421`。
+server-chat 收到 lifecycle 的 end 或 error 后，先把结果归成 success、timeout、cancellation 或 failure，再映射到 chat 侧的 `done`、`error`、`aborted` 三种终态。收尾时它先 flush 最后一段 paced text，清掉 chat state、run registry、event sequence 和 run context；session lifecycle 由 Gateway session accessor 持久化，写成功之后才广播 `sessions.changed`，订阅者拿到的是写后的 canonical session row。实现见 `src/gateway/server-chat.ts:1058-1121` 和 `src/gateway/session-lifecycle-state.ts:337-421`。
 
 ## 7. 停止、重试、续写与重新生成
 
@@ -258,7 +258,7 @@ embedded run 的外层 retry loop 共用一个 run retry budget。几类失败�
 
 Agent Core 的 `steer` 消息会挑下一次尚未启动的模型/工具边界注入，正在跑的工具可以自然完成；`followUp` 则等 Agent 原本就要结束时排空，再开启一个后续 turn。串行工具批次在每个调用前都会检查 steering，没来得及启动的尾部调用生成 skipped tool result；并行批次同样会给未启动的调用补一份可观察结果。见 `packages/agent-core/src/agent.ts`、`packages/agent-core/src/agent-loop.ts`。
 
-OpenClaw 的 `chat.send` 另外支持运行中注入消息、interrupt、followup 和 collect。Gateway 在发送前或 queue admission 时就把精确的 backend target 捕获下来；当前运行一旦清除，这个 target 保持原样，不再解析 successor。这一层的 stop/steer 竞态由 Reply operation 的 `attachBackend`、`abortByUser`、`supersede` 和 terminal barrier 管理，见 `src/auto-reply/reply/reply-run-registry.registry.ts`、`src/auto-reply/reply/reply-run-registry.operation.ts`。
+`chat.send` 除普通发送外，还支持运行中注入消息、interrupt、followup 和 collect。Gateway 在发送前或排队准入时就把精确的 backend target 捕获下来；当前运行一旦清除，这个 target 保持原样，不再解析 successor。这一层的 stop/steer 竞态由 Reply operation 统一管理，backend 挂接、按用户中止、supersede 与 terminal barrier 都在同一个 operation 对象上完成，见 `src/auto-reply/reply/reply-run-registry.registry.ts` 和 `src/auto-reply/reply/reply-run-registry.operation.ts`。
 
 ## 8. 队列、多会话并发与后台生成
 

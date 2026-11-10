@@ -18,14 +18,14 @@ AstrBot 的 Persona 仍是纯指令与能力白名单模型：一个 persona 由
 
 关键事实：
 
-- **存储**：v4 起存 SQLite `personas` 表（po.py:150-183，SQLModel），`persona_id` 即显示名（字符串，非 UUID）；v3 的 config.json `persona` 键已废弃，由迁移脚本改写（migra_3_to_4.py:236-276）。
-- **运行时是 v3 兼容层**：`PersonaManager.get_v3_persona_data`（persona_mgr.py:437-500）把 DB 行转成 `Personality` TypedDict 缓存，每次 CRUD 后重建；主 Agent 消费的是 `personas_v3`，不是 DB 模型。
-- **解析优先级**（`resolve_selected_persona`，persona_mgr.py:123-207）：会话规则强制 persona → 对话级 persona → 当前配置档案的 Agent Runner 默认 persona → WebChat 特例；`"[%None]"` 哨兵显式禁用。
-- **注入位置**：persona 提示以 `<persona_instructions>` 块追加到请求的 system_prompt（`astr_main_agent/persona.py:76-79`）；预设对话以不保存标记插到上下文最前（:80-81），每轮重注入、不入库；技能提示另用 `<skills_instructions>` 块包裹（:118-128）。
+- **存储**：v4 起 Persona 存进 SQLite 的 `personas` 表，行模型由 SQLModel 声明，主键 `persona_id` 直接使用显示名字符串，没有单独的 UUID。v3 写在 config.json 里的 `persona` 键已废弃，由 3→4 迁移脚本改写进表（`po.py:150-183`；`migra_3_to_4.py:236-276`）。
+- **运行时读的是 v3 兼容层**：`get_v3_persona_data` 把数据库行转换成性格字典，缓存进 `personas_v3` 并在每次增删改后整体重建；主 Agent 取用这份缓存，数据库行只在转换时读一次（`persona_mgr.py:437-500`）。
+- **解析优先级**：`resolve_selected_persona` 依次尝试会话规则强制绑定、对话级绑定、当前配置档案的 Agent Runner 默认值和 WebChat 特例，取第一个命中的来源；`"[%None]"` 哨兵用于显式禁用（`persona_mgr.py:123-207`）。
+- **注入位置**：persona 提示包进 `<persona_instructions>` 块追加到请求的 system prompt；预设对话带不保存标记插到上下文最前，每轮重新注入、不入库；技能提示另用 `<skills_instructions>` 块包裹（`astr_main_agent/persona.py:76-128`）。
 - **构建顺序**：`build_main_agent` 依次执行请求准备、persona、子 Agent、系统提醒、工作区指令、知识库、联网、安全指令与 Computer Use 注入（`astr_main_agent/builder.py:86-121`）。
-- **三态语义有作用域**：Persona 的 tools 三态只控制该阶段取得的注册工具；空列表不会阻止后续装配联网、Computer Use、cron 和主动投递工具。Skills 空列表会一并排除工作区技能；非空名单只筛选注册技能，工作区技能随后按名合并（`astrbot/core/astr_main_agent/persona.py:106-148`；`builder.py:93-133`）。
-- **第三方 runner 不注入 persona**：Dify/Coze/Dashscope/DeerFlow 等只解析自定义错误文案，persona 对内置 Agent 执行器专属。
-- **system 消息受压缩保护**：persona 永不被截断器丢弃（truncator.py:15-29 的 `_split_system_rest`），但计入 token 统计（token_counter.py:56-83），超长会推高总量、更早触发历史压缩。
+- **三态语义只在当前阶段生效**：tools 三态限制的是这一阶段取到的注册工具，空列表不会挡住后续装配的联网、Computer Use、cron 和主动投递工具；skills 的空列表会连工作区技能一起排除，非空名单只筛选注册技能，工作区技能随后按名称合并（`astrbot/core/astr_main_agent/persona.py:106-148`；`astrbot/core/astr_main_agent/builder.py:93-133`）。
+- **persona 仅作用于内置执行器**：Dify、Coze、Dashscope、DeerFlow 等第三方 runner 对 persona 只解析自定义错误文案，不参与角色注入。
+- **system 消息受压缩保护**：截断器先用 `_split_system_rest` 剥离开头连续的 system 消息，三种截断策略都不碰它们，persona 文本因此不会被丢弃；这部分内容仍计入 token 统计，超长会推高总量、更早触发历史压缩（`truncator.py:15-29`；`token_counter.py:56-83`）。
 - **内置角色两个**：内存 `DEFAULT_PERSONALITY`（persona_mgr.py:20-30）与 webchat 专用 `CHATUI_SPECIAL_DEFAULT_PERSONA_PROMPT`（astr_main_agent_resources.py:50-67）。
 - **解析结果写事件 extra**：所选 persona 的标识写入 `_trace_persona_id`，随事件的 trace 快照上报，不再单独记一条 persona 追踪记录（`astr_main_agent/persona.py:46,68`）。
 
@@ -69,15 +69,15 @@ PersonaFolder 表（po.py:117-147）：递归层级，`parent_id` NULL=根（:13
 
 ### 1.2 v3 兼容层（persona_mgr.py）
 
-- `Personality` TypedDict（po.py:605-625）：包含 prompt、name、begin_dialogs、已废弃的 mood_imitation_dialogs、tools、skills 和 custom_error_message；
-- `DEFAULT_PERSONALITY`（persona_mgr.py:20-30）：`prompt="You are a helpful and friendly assistant."`，name=`"default"`，tools/skills=None；
-- `get_v3_persona_data`（persona_mgr.py:437 起）：
-  - 每行 DB persona 转为 dict（mood_imitation_dialogs 恒为 `[]`）；
-  - `begin_dialogs` 校验：**奇数条整组丢弃并记 error**，合法则按 user/assistant 交替生成 `{role, content, _no_save: True}`；
-  - 解析失败的 persona 记 error 跳过；
-  - `selected_default_persona`：先匹配 `name == self.default_persona`，无匹配取第一个，全空则 `DEFAULT_PERSONALITY` 并**追加进 personas_v3**；
-  - 同时写 `selected_default_persona`（Persona 模型）；
-- 每次 CRUD 后重建：delete（:144）、update（:152）、move（:201）、batch sort（:277）、create（:330）。
+- `Personality` 是 v3 兼容层的数据形状，由 TypedDict 声明，字段覆盖提示词、显示名、预设对话、已废弃的 mood_imitation_dialogs、工具名单、技能名单和自定义错误文案（`po.py:605-625`）；
+- 内存常量 `DEFAULT_PERSONALITY` 充当兜底角色：提示词固定为 `You are a helpful and friendly assistant.`，显示名为 default，tools 与 skills 都取 None（`persona_mgr.py:20-30`）；
+- `get_v3_persona_data`（`persona_mgr.py:437` 起）逐行把数据库记录转成缓存内容：
+  - 每条记录转成一个字典，已废弃的 mood_imitation_dialogs 字段固定为空列表；
+  - 预设对话先过校验：**奇数条整组丢弃并记一条 error**，条数合法则按 user/assistant 交替组装成带 role、content 与 `_no_save` 标记的消息字典；
+  - 解析失败的角色记 error 后跳过；
+  - 选默认角色时先按显示名匹配配置里的 default_persona，匹配不到就取列表第一项，列表全空则用内存默认角色并**追加进 personas_v3**；
+  - 选中的默认角色同时以 Persona 模型写入 selected_default_persona 字段；
+- 缓存由各增删改入口在操作结束后重建，删除、更新、移动、批量排序和新建五处都会触发（`persona_mgr.py:144-330`）。
 
 ### 1.3 管理 API
 
@@ -222,21 +222,21 @@ subagent router_prompt
 
 ### 5.1 会话创建、消息快照与重新生成
 
-- **会话创建不写入任何初始消息**：new_session（astrbot/dashboard/services/chat_service.py:1554-1569）只建 PlatformSession 行；ConversationV2 在首条消息时惰性创建且 content=None（astrbot/core/conversation_mgr.py:207-210）。begin_dialogs 每轮以前置插入方式注入（`astr_main_agent/persona.py:80-81`），消息带不保存标记（persona_mgr.py:458-467），历史保存逻辑会显式跳过它（internal.py:445-504）——永不入库，因此旧历史不会残留旧版 begin_dialogs。
-- **修改 begin_dialogs 后既有会话下一轮自动生效**：`personas_v3` 缓存每次 CRUD 重建（persona_mgr.py:144、152、201、277、330），每轮 `apply_persona` 重新解析注入。
-- **消息对象层不保存角色/模型快照**：PlatformMessageHistory（po.py:246-278）只有 platform_id、user_id、sender、content、llm_checkpoint_id，无 persona_id、无模型名；bot 消息内容由 build_bot_history_content 生成（chat_service.py:141-157），AgentStats 只含 token/耗时（astrbot/core/agent/response.py:31-38）。当次实际模型的记录分层存放在 trace 日志和 DB provider_stat 表中，具体定位见相关实现（internal.py:256、:390、:535 起）；selected_model 只经请求 extra 进入 req.model（astr_main_agent/request.py:267），不留存。
-- **重新生成走完整主链路**：`chat.py:234` regenerate → `prepare_regenerate_message_payload`（chat_service.py:1960-2066，回滚历史、删旧 bot 展示记录、换新 checkpoint）→ `_send_chat`（chat.py:84）→ `build_chat_stream` → 同一 Agent 构建链 → 重新解析 Persona 当前值。行为上每轮解析与 AIO Hub 的实时引用一致，但消息本身没有任何执行参数快照可查。
+- **会话创建时只落一条空会话记录**：new_session 只建一条 PlatformSession 记录，ConversationV2 留到首条消息到达时才惰性创建，初始内容为空（`astrbot/dashboard/services/chat_service.py:1554-1569`；`astrbot/core/conversation_mgr.py:207-210`）。预设开场白每轮由 persona 阶段插到上下文最前，消息带不保存标记，历史保存逻辑会显式跳过它们，因此开场白永不入库，旧历史也不会残留旧版内容（`astr_main_agent/persona.py:80-81`；`internal.py:445-504`）。
+- **改完 begin_dialogs 后下一轮自动生效**：personas 缓存在每次增删改后重建，每轮注入阶段都会重新解析角色，既有会话不需要额外刷新（`persona_mgr.py:144-330`）。
+- **消息对象层只存内容与 checkpoint 引用**：PlatformMessageHistory 只记平台 ID、用户 ID、发送者、内容和 LLM checkpoint 引用，persona 标识与模型名都不在其中；bot 侧内容在读取时由 build_bot_history_content 现场拼出，AgentStats 也只含 token 与耗时（`astrbot/core/db/po.py:246-278`；`astrbot/core/agent/response.py:31-38`）。当次实际使用的模型另存于 trace 日志和 DB 的 provider_stat 表，selected_model 只经请求 extra 填进 req.model，不随消息留存（`internal.py:256-535`；`astr_main_agent/request.py:267`）。
+- **重新生成会重走完整主链路**：前端 regenerate 入口提交后，服务端先回滚历史、删掉旧的 bot 展示记录并换新 checkpoint，再经 send 入口进入同一条 Agent 构建链，Persona 因此按当前值重新解析。消息本身没有任何执行参数快照，每轮解析的行为与 AIO Hub 的实时引用一致（`chat.py:84-234`；`chat_service.py:1960-2066`）。
 
 ## 6. 自定义错误回复（persona_error_reply.py，86 行）
 
-- 核心键：`PERSONA_CUSTOM_ERROR_MESSAGE_EXTRA_KEY = "persona_custom_error_message"`（:6）；
-- `normalize_persona_custom_error_message`（:9-14）：非 str/空串 → None，去空白；
-- 写入点：`set_persona_custom_error_message_on_event`（:37-47）在 `apply_persona`（`astr_main_agent/persona.py:70-72`）写入事件 extra；
-- 消费点：
-  - `astr_agent_run_util.py:348-358`：run_agent 异常时优先用自定义文案；
-  - `pipeline/process_stage/method/agent_sub_stages/internal.py:297-303`：内部 runner 兜底；
-  - `third_party.py:191-207`：第三方 runner 会话级错误文案——**第三方 runner 唯一解析 persona 相关内容的入口**；
-- resolve_persona_custom_error_message（:50-69）独立复用角色解析逻辑，供无 Agent 路径（如 API 直连）解析。
+- 事件 extra 的键名固定为 `persona_custom_error_message`，由模块常量 `PERSONA_CUSTOM_ERROR_MESSAGE_EXTRA_KEY` 声明（:6）；
+- 规范化函数 `normalize_persona_custom_error_message` 先去掉首尾空白，非字符串或空白串的输入一律返回 None（:9-14）；
+- 写入点只有一个：角色注入阶段结束时由 `set_persona_custom_error_message_on_event` 把文案挂到事件 extra 上（:37-47；`astr_main_agent/persona.py:70-72`）；
+- 消费点分三处：
+  - run_agent 抛出异常时优先使用自定义文案（`astr_agent_run_util.py:348-358`）；
+  - 内部 runner 的兜底分支同样读取它（`pipeline/process_stage/method/agent_sub_stages/internal.py:297-303`）；
+  - 第三方 runner 的会话级错误文案也走这里，这是第三方路径里**唯一读取 persona 相关内容的位置**（`third_party.py:191-207`）；
+- `resolve_persona_custom_error_message` 独立复用同一套角色解析逻辑，供没有 Agent 执行器的路径（如 API 直连）取文案（:50-69）。
 
 ## 7. 内置角色
 
@@ -250,11 +250,11 @@ subagent router_prompt
 
 ## 8. 与上下文压缩的交互
 
-- **system 保护**：ContextTruncator 的 `_split_system_rest`（truncator.py:15-29）把开头连续 system 消息剥离；后续三种截断策略（:100-202）均不触碰 system——persona 文本永不被丢弃；
-- **计入 token**：token_counter.py:56-83 统计 system——超长 persona 推高总量、更早触发轮次截断或 LLM 摘要压缩（阈值 82%，keep_recent_ratio 默认 0.15）；
-- `_ensure_user_message`（truncator.py:31-49）：截断后保证 system 后紧跟 user 消息（Zhipu 等 API 硬性要求）；
-- `fix_messages`（:51-98）：tool_call/tool 配对修复（Gemini 严格校验）；
-- **begin_dialogs 的脆弱性（静态推断）**：带 `_no_save` 的 begin_dialogs 在消息列表中是"非 system"，位于历史最前——按轮次截断/折半策略会先被丢弃，长会话中开场白可能静默消失（其语义为每轮重注入，但截断发生在注入之后）。
+- **system 保护**：`ContextTruncator` 先调用 `_split_system_rest` 把开头连续的 system 消息整体剥离，后续三种截断策略都不碰它们，persona 文本因此不会被丢弃（`truncator.py:15-29`；策略代码在同文件 :100-202）；
+- **计入 token**：token 统计把 system 消息一起算进去，超长 persona 会推高总量、更早触发轮次截断或 LLM 摘要压缩；压缩阈值为 82%，keep_recent_ratio 默认 0.15（`token_counter.py:56-83`）；
+- 截断后由 `_ensure_user_message` 保证 system 之后紧跟一条 user 消息，这是 Zhipu 等 API 的硬性要求（`truncator.py:31-49`）；
+- `fix_messages` 修复 tool_call 与 tool 消息的配对，应对 Gemini 的严格校验（:51-98）；
+- **begin_dialogs 的脆弱性（静态推断）**：带 `_no_save` 标记的开场白在消息列表里属于非 system 消息，位置又排在历史最前，按轮次截断或折半时会先被丢弃，长会话中的开场白可能静默消失。开场白虽然每轮重新注入，截断却发生在注入之后。
 
 ## 9. UI 层
 
@@ -279,14 +279,14 @@ PersonaManager 的移动端工具栏现在始终保留新建文件夹入口，�
 
 1. persona 是纯文本指令 + 白名单，无头像/语音/名称字段；
 2. 只在内置 Agent 执行器生效；第三方 runner 完全不注入 persona（仅错误文案）；
-3. `persona_pool` 配置项定义未用（astrbot-config.md:339-341）；
-4. `mood_imitation_dialogs` v4 起废弃，迁移改写进 system_prompt（migra_3_to_4.py:253-266）；
-5. v3 config.json persona 键已废弃（astrbot-config.md:561-565）；
+3. `persona_pool` 配置项已定义，实现中没有使用处（astrbot-config.md:339-341）；
+4. 旧的 mood_imitation_dialogs 从 v4 起废弃，迁移时被改写进 system_prompt（migra_3_to_4.py:253-266）；
+5. v3 config.json 里的 persona 键已废弃（astrbot-config.md:561-565）；
 6. SubAgent 无法隔离人格的 Skills；子 agent 对话历史不保存；
-7. 每次 CRUD 重建 v3 缓存（persona_mgr.py:198,169,201,274,350）；
+7. 每次增删改后 v3 缓存整体重建（persona_mgr.py:169-350）；
 8. 自定义错误文案经事件 extra 每请求解析写入，非全局状态；
 9. begin_dialogs 奇数条整组丢弃（persona_mgr.py:452-457）；
-10. `"[%None]"` 哨兵两处语义：对话级与规则级都能禁用（:107-108、:102-103）；
+10. `"[%None]"` 哨兵在对话级和规则级都能禁用角色（:102-108）；
 11. persona 引用计数不存在：删除被引用 persona 后相关对话/规则静默回落默认。
 
 ### 10.2 取舍（平衡决策）

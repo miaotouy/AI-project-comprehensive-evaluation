@@ -16,7 +16,7 @@
 
 DeepChat 是 main process 驱动、renderer 订阅的持久化会话系统：
 
-- 会话事实源分两张表：`new_sessions` 承载会话身份与结构（标题、项目目录、置顶、草稿、子会话、编排策略等），`deepchat_sessions` 承载生成相关运行时状态（provider/模型/权限/生成设置）；id 由 main process 用 nanoid 生成（`src/main/agent/shared/appSessionService.ts:71`）。
+- 会话事实源由两张表承担：`new_sessions` 记录会话身份与结构（标题、项目目录、置顶与草稿标记、子会话关系、编排策略等），`deepchat_sessions` 记录生成相关的运行时状态（provider、模型、权限模式与生成设置）。会话 id 由 main process 的会话服务用 nanoid 生成（`src/main/agent/shared/appSessionService.ts:71`）。
 - `deepchat_messages` 保存 user/assistant 消息的顺序、内容、状态（仅 `pending`/`sent`/`error` 三档）和 metadata；assistant 的结构化 blocks 另存于 `deepchat_assistant_blocks`，流式更新时两表分别写入（blocks 表落内容，消息表状态不变）。
 - 消息事实源是 main process 的 SQLite；renderer message store 维护持久化缓存、解析缓存与 IPC 增量，`useDisplayMessages` 用稳定 render key 让流式消息在落盘后复用显示对象。
 - 队列输入是独立的 `deepchat_pending_inputs` 状态对象（待处理/已认领/阻塞/需重试/已消费五档）。重启时 claimed 且未物化的项回到 pending 并加 restart hold，等待 resume；运行失败后释放的项进入 retry_required，等待逐项 retry，两条恢复路径分开处理。
@@ -49,11 +49,13 @@ SessionTurn（执行侧 -> 对话请求与上下文笔记）
 
 `NewSessionRow`（`src/main/session/data/tables/newSessions.ts:13-30`）是会话主表，字段按用途分组如下：
 
-- 身份与标题：`id`、`agent_id`、`title`
-- 项目与状态：`project_dir`、`is_pinned`、`is_draft`
-- 技能与工具：`active_skills`、`disabled_agent_tools`
-- 子会话：`subagent_enabled`、`session_kind`（`regular`/`subagent`）、`parent_session_id`、`subagent_meta_json`
-- 编排与维护：`orchestration_policy`、`created_at`、`updated_at`、`revision`
+| 用途 | 字段 |
+| --- | --- |
+| 身份与标题 | `id`、`agent_id`、`title` |
+| 项目与状态 | `project_dir`、`is_pinned`、`is_draft` |
+| 技能与工具 | `active_skills`、`disabled_agent_tools` |
+| 子会话 | `subagent_enabled`、`session_kind`（取值 `regular` 或 `subagent`）、`parent_session_id`、`subagent_meta_json` |
+| 编排与维护 | `orchestration_policy`、`created_at`、`updated_at`、`revision` |
 
 表建索引 `idx_new_sessions_agent` 与 `idx_new_sessions_updated`（`updated_at DESC`，:92-93），列表默认按更新时间倒序排序（:247）。会话 id 在 `appSessionService.create` 内用 nanoid 生成（`src/main/agent/shared/appSessionService.ts:71`）。
 
@@ -63,10 +65,14 @@ runtime 级状态在 `deepchat_sessions`（`src/main/session/data/tables/deepcha
 
 `deepchat_messages`（建表 SQL 与行接口在 `src/main/session/data/tables/deepchatMessages.ts:42-56`、`:4-16`）是消息主表，字段按用途分组如下：
 
-- 标识与排序：`id`、`session_id`、`order_seq`，按 `(session_id, order_seq)` 建索引（:54）
-- 内容与角色：`role`（`user`/`assistant`）、`content`
-- 状态：`status` 仅 `pending`/`sent`/`error` 三档（:10）
-- 边界与扩展：`is_context_edge`、`metadata`、`created_at`、`updated_at`
+| 用途 | 字段 |
+| --- | --- |
+| 标识与排序 | `id`、`session_id`、`order_seq`；索引建在 `(session_id, order_seq)` 上 |
+| 内容与角色 | `role`（取值 `user` 或 `assistant`）、`content` |
+| 状态 | `status`：`pending`、`sent`、`error` 三档 |
+| 边界与扩展 | `is_context_edge`、`metadata`、`created_at`、`updated_at` |
+
+索引与状态取值的定义见 `deepchatMessages.ts:10,54`。
 
 消息 id 由 `SessionTranscript` 用 nanoid 生成（`src/main/session/data/transcript.ts:189`、:207）。
 
@@ -80,13 +86,15 @@ runtime 级状态在 `deepchat_sessions`（`src/main/session/data/tables/deepcha
 
 `deepchat_assistant_blocks`（建表 SQL 在 `src/main/session/data/tables/deepchatAssistantBlocks.ts:79-102`）保存 assistant 消息的结构化 blocks，主键 `(message_id, block_index)`，字段按用途分组：
 
-- `block_type`/`status`：类型与状态
-- `text_content`：正文
-- `tool_call_id`/`tool_name`/`tool_params`/`tool_response`：工具调用
-- `action_type`：动作类型
-- `image_mime_type`：媒体类型
-- `reasoning_start_at`/`reasoning_end_at`：推理时间
-- `extra_json`/`updated_at`：扩展数据与更新时间
+| 用途 | 字段 |
+| --- | --- |
+| 块类型与状态 | `block_type`、`status` |
+| 正文 | `text_content` |
+| 工具调用 | `tool_call_id`、`tool_name`、`tool_params`、`tool_response` |
+| 动作类型 | `action_type` |
+| 媒体类型 | `image_mime_type` |
+| 推理时间 | `reasoning_start_at`、`reasoning_end_at` |
+| 扩展数据与更新时间 | `extra_json`、`updated_at` |
 
 写入侧：`replaceForMessage`（:115-166）在单事务内删除旧行后按 index 重建，保证 block 顺序；`:52-72` 把一组运行时字段折叠进扩展 JSON。MCP App 的 model context 经 `updateMcpAppModelContext`（:223-271）回写该表（tool_call 块的 model context）。
 
@@ -115,7 +123,7 @@ pending assistant 消息的兜底恢复在 `recoverPendingMessages`（`transcrip
 
 ### 1.5 分支与版本
 
-fork 在持久化层是**复制而非父子指针**：`SessionLifecycle.forkSession`（`src/main/session/lifecycle.ts:446-519`）创建新的 regular 会话（继承 agent、project_dir、禁用工具与编排策略，标题默认"原标题 - Fork"），再把源会话中到目标消息为止的已发送消息按原顺序复制为新 id（含 user content 结构化表与 assistant blocks 重建、搜索文档 upsert；复制链见 `transcriptMutations.ts:108-120` → `transcript.ts:724-769`）。消息表没有任何"父消息/变体"字段，变体标记只存在于 renderer 的 DisplayMessage 投影（`useDisplayMessages.ts:127`）。
+fork 在持久化层是一次整段复制：`SessionLifecycle.forkSession` 新建一个 `regular` 类型的会话，继承源会话的 agent、项目目录、禁用工具与编排策略，标题默认取"原标题 - Fork"；随后把源会话中截至目标消息的已发送消息按原顺序复制成新 id，并重建 user 内容分表与 assistant blocks、补写搜索文档。消息表本身没有父消息或变体字段，变体标记只存在于 renderer 的显示消息投影里。复制入口见 `src/main/session/lifecycle.ts:446-519`，复制链见 `transcriptMutations.ts:108-120` 与 `transcript.ts:724-769`，投影标记见 `useDisplayMessages.ts:127`。
 
 ## 2. 事实源、索引与持久化
 
@@ -141,63 +149,67 @@ setMessageError(...)          :419-441（同上，status=error）
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **创建**：`SessionLifecycle.createSession`（`lifecycle.ts:64-180`）依次：解析 agent/provider/model 分配 → 落 `new_sessions`（非草稿标记）→ 把 provider/model/权限/生成设置写入 `deepchat_sessions` → 绑定窗口 → 直接发送首条输入（:164-172）。取消创建时若尚无消息则删除会话。
-- **ACP 草稿会话**：`ensureAcpDraftSession`（:383-444）惰性复用空的草稿会话（复用查找在 :526-535），首次发送时由 `SessionTurn.promoteDraft`（`src/main/session/turn.ts:439-443`）转为正式会话并生成标题。
-- **切换**：active session 按 webContentsId 绑定（`src/main/desktop/sessionBinding.ts:13-64`；激活/停用路由在 `src/main/session/routes.ts:213-227`）。
-- **删除**：`deleteSession`（`lifecycle.ts:521-524`）→ 会话树删除实现（文件 `src/main/session/deletion.ts` 本次未展开）。消息清理入口（`turn.ts:415-420`）→ 事务层（`transcriptMutations.ts:33-41`，连同 pending 输入与 Tape 记录一起清）。
-- **恢复**：`restoreSession`（`src/main/session/sessionService.ts:69-112`）返回会话 + 第一页消息（默认 `DEFAULT_RESTORE_MESSAGE_LIMIT`）；启动恢复见 §1.4（queue/steer 收口 + pending 消息置 error）。
+- **创建**：主进程的会话生命周期服务 `createSession` 按固定顺序建会话：先解析本次使用的 agent、provider 与模型，再把会话行以非草稿状态写入会话表，随后将 provider、模型、权限模式与生成设置写入运行时状态表，绑定到发起窗口，最后直接发送首条输入。若在发送前取消创建且会话尚无消息，这条空会话会被删除（`src/main/session/lifecycle.ts:64-180`）。
+- **ACP 草稿会话**：ACP 会话创建时不立即新建正式会话，`ensureAcpDraftSession` 先复用已有的空草稿会话，首次发送才由 `SessionTurn.promoteDraft` 把草稿转为正式会话并生成标题。复用查找与转正入口见 `src/main/session/lifecycle.ts:383-444,526-535` 与 `src/main/session/turn.ts:439-443`。
+- **切换**：每个窗口按 webContentsId 绑定自己的活动会话，激活与停用经由会话路由处理（`src/main/desktop/sessionBinding.ts:13-64`、`src/main/session/routes.ts:213-227`）。
+- **删除**：删除会话从 `deleteSession` 进入，会话树的实际删除在 `src/main/session/deletion.ts`，本次未展开；消息清理先走 turn 层入口，再交给事务层，连同 pending 输入与 Tape 记录一并删除（`src/main/session/lifecycle.ts:521-524`、`src/main/session/turn.ts:415-420`、`src/main/session/transcriptMutations.ts:33-41`）。
+- **恢复**：`restoreSession` 返回会话本身与第一页消息，页大小取默认常量 `DEFAULT_RESTORE_MESSAGE_LIMIT`；启动恢复见 §1.4（queue/steer 收口与 pending 消息置 error）。入口在 `src/main/session/sessionService.ts:69-112`。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
-- **重试**：`turn.retryMessage`（`turn.ts:333-375`）：以目标消息向上取最近 user 消息作为起点准备重试（`transcriptMutations.ts:43-66`），发送前（:68-73）执行 `deleteFromOrderSeq` 截断——**retry 是破坏性截断**，从源 user 消息起删除其后全部消息（`transcript.ts:597-617`），同步清理 blocks、结构化表、搜索文档、执行轨迹与搜索命中，并写 Tape 撤销记录。
-- **删除消息**：`turn.deleteMessage`（`turn.ts:377-381`）先取消运行再走事务层删除（:75-83）——同样从目标消息截断，且要求没有进行中的 pending 输入。
-- **编辑**：`turn.editUserMessage`（`turn.ts:383-390`）→ 事务层 `editUserMessage`（`transcriptMutations.ts:85-106`）：只允许 user 消息，**原地更新**该消息内容并同步 user 结构化表与搜索文档（`transcript.ts:522-563`），不物理删除尾随消息；界面流程随后自动触发 retry 完成截断（见 Chat UI 笔记 §6）。这是源码确认的"编辑改原对象、截断由 retry 承担"的语义。
+- **重试**：重试以目标消息为锚点，先向上找到最近的 user 消息作为起点，发送前再从这条消息起截断其后全部内容。截断会一并清理 assistant blocks、user 内容分表、搜索文档、执行轨迹与搜索命中，并写入一条 Tape 撤销记录，因此重试会丢弃源消息之后的整段历史。入口与起点解析见 `src/main/session/turn.ts:333-375`、`transcriptMutations.ts:43-73`，实际删除由 `deleteFromOrderSeq` 完成（`transcript.ts:597-617`）。
+- **删除消息**：删除单条消息时先取消正在进行的运行，再走事务层从目标消息截断，并要求该会话没有进行中的 pending 输入（`turn.ts:377-381`、`transcriptMutations.ts:75-83`）。
+- **编辑**：编辑只对 user 消息开放，事务层原地改写该消息内容，并同步 user 内容分表与搜索文档，尾随消息此时保留原样；界面随后会自动触发一次重试，历史截断由这次重试完成。编辑入口与事务实现见 `turn.ts:383-390`、`transcriptMutations.ts:85-106`，内容与搜索文档的同步在 `transcript.ts:522-563`（界面流程见 Chat UI 笔记 §6）。
 - **续写**：ChatPage 的 continue 动作通过普通发送入口追加用户指令，保留已有消息，不触发 retry 的历史截断（`src/renderer/src/features/chat-page/composables/useMessageActions.ts:286-304`）。
-- **分支**：见 §1.5（复制到新会话，非版本指针）。
-- **失败保留**：失败 assistant 消息保留 `error` 状态与 error block（`buildTerminalErrorBlocks`，`transcript.ts:44-70`），不静默丢弃；用户可经 retry/fork 再生成。
-- **压缩消息**：compaction 生成专门的 assistant 消息（`createCompactionMessage`，:239-246）：content 为固定文案、metadata 带 `messageType:'compaction'` 与摘要时间戳；另有前插变体（:248-268）可把压缩消息插到指定位置并顺移排序号。
+- **分支**：见 §1.5（整段复制到新会话，消息之间没有父子或变体指针）。
+- **失败保留**：生成失败的 assistant 消息保留 `error` 状态，并由 `buildTerminalErrorBlocks` 补上一组错误 block，正文不会被静默丢弃，用户可以经重试或 fork 再次生成（`transcript.ts:44-70`）。
+- **压缩消息**：上下文压缩会生成一条专门的 assistant 消息，正文是固定文案，metadata 带上 `messageType:'compaction'` 与摘要时间戳；该消息另有前插写法，可以把压缩消息插到指定位置并顺移其后的排序号。追加与前插两种入口见 `transcript.ts:239-268`。
 
 ## 5. 列表、分页、搜索与定位
 
-- **消息分页接口**：`SessionTranscript.listMessagesPage`（`transcript.ts:457-485`）页上限 500、游标 `(orderSeq, id)`、带"是否还有更多"探测；renderer 侧由 message store 维护缓存与下一页游标（`src/renderer/src/stores/ui/message.ts:743` 起）。
-- **会话列表分页**：`NewSessionsTable.listPage`（`newSessions.ts:252-297`，默认 30 上限 100，`(updated_at, id)` 游标）；renderer session store 以"列表 epoch"保护分页游标链（`src/renderer/src/stores/ui/session.ts:330-344`）。
-- **消息窗口（数据分页侧）**：`MessageList` 及其行组件只接收当前窗口的消息项（`src/renderer/src/components/chat/MessageList.vue:10-31`、props :61-88）。窗口化由 `useMessageWindow`（估算高度 + 实测 + 顶部/底部 spacer + 逻辑 anchor 保存滚动位置）与 `useMessageVirtualization`（超阈值 160 条时二分查找视口附近索引，只渲染该窗口）两个 composable 完成（阈值常量 :437-440）。历史分页与流式追加共用该机制：远离视口的 settled 消息只保留估算高度。窗口化、滚动锚定与消息壳 DOM 实现在消息渲染器笔记 §6（该笔记把此主题列为交接点）。
-- **会话内查找**：`useChatSearch`（`src/renderer/src/features/chat-page/composables/useChatSearch.ts`）在已加载的 display messages 上做内存匹配（`src/renderer/src/lib/chatSearch.ts:501-522`），高亮与命中定位走 DOM 层（:387-430），导航复用共享滚动控制器（`useChatSearch.ts:124-128`）。该路径只搜索当前窗口已加载消息，不触发数据库查询。
-- **跨会话历史搜索**：`SessionHistorySearch.search`（`src/main/session/sessionHistorySearch.ts:98-204`）先走 FTS 查询、空结果回退 LIKE 模糊匹配，命中按会话/消息去重排序，另加标题 LIKE 兜底；经服务路由 `sessionsSearchHistoryRoute`（`routes.ts:394-401`）由 renderer 的 Spotlight 调用（`spotlight.ts:314`），命中可定位到消息。
-- **MCP 搜索工具**：内存 MCP 服务器 `conversationSearchServer`（`src/main/mcp/inMemoryServers/conversationSearchServer.ts`）在 `tools/list` 暴露四个工具——搜索会话、搜索消息、读取对话历史、读取对话统计（:461-504），把同一索引服务给模型工具。
+- **消息分页接口**：按会话读取消息时，`listMessagesPage` 用 `(orderSeq, id)` 复合游标向前翻页，单页最多 500 条，并额外探测是否还有更多；renderer 侧由消息 store 保存已加载的页与下一页游标（`src/main/session/data/transcript.ts:457-485`、`src/renderer/src/stores/ui/message.ts:743` 起）。
+- **会话列表分页**：`NewSessionsTable.listPage` 以 `(updated_at, id)` 为游标分页，默认每页 30 条、上限 100 条；renderer 的会话 store 给列表带上 epoch，用它保护分页游标链（`newSessions.ts:252-297`、`src/renderer/src/stores/ui/session.ts:330-344`）。
+- **消息窗口（数据分页侧）**：消息列表与行组件只接收当前窗口内的消息项，窗口由两个 composable 共同维护：`useMessageWindow` 以估算高度加实测高度确定范围，用首尾 spacer 与逻辑锚点保持滚动位置；消息数超过 160 条后，`useMessageVirtualization` 用二分查找定位视口附近的索引，只渲染这一段。历史分页与流式追加共用同一套窗口：远离视口的已结算消息只保留估算高度。组件 props 与阈值常量见 `src/renderer/src/components/chat/MessageList.vue:10-88,437-440`，窗口化、滚动锚定与消息壳 DOM 的实现在消息渲染器笔记 §6（该笔记把此主题列为交接点）。
+- **会话内查找**：会话内查找在 renderer 内存里完成，范围是当前已加载的显示消息，不触发数据库查询；匹配由 `chatSearch.ts` 在显示消息列表上完成，高亮与命中定位交给 DOM 层，导航复用共享的滚动控制器。入口、匹配与导航位置见 `useChatSearch.ts:124-128`、`src/renderer/src/lib/chatSearch.ts:387-522`。
+- **跨会话历史搜索**：跨会话搜索先走 FTS5 全文查询，结果为空时回退到 LIKE 模糊匹配，命中按会话与消息去重排序，另用标题 LIKE 兜底；结果经服务路由交给 renderer 的 Spotlight 展示，命中可以直接定位到具体消息。查询入口见 `src/main/session/sessionHistorySearch.ts:98-204`，路由与调用方在 `routes.ts:394-401`、`spotlight.ts:314`。
+- **MCP 搜索工具**：内存 MCP 服务器 `conversationSearchServer` 在 `tools/list` 里注册四个工具，分别是搜索会话、搜索消息、读取对话历史与读取对话统计，把同一套搜索索引也提供给模型调用（`src/main/mcp/inMemoryServers/conversationSearchServer.ts:461-504`）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- renderer message store（`src/renderer/src/stores/ui/message.ts`）维护的状态包括：
-  - `messageIds`/`messageCache`：已加载消息的 id 列表与缓存（:62-63）
-  - `committedSessionId`：当前已提交的会话 id，防止新旧会话记录混写（:68）
-  - `nextCursor`/`hasMoreHistory`/`isLoadingHistory`/`historyLoadError`：分页游标与加载状态（:69-75）
-  - `parsedMessageCache`：LRU 解析缓存，上限 1024（:31、:76）
-  - 最近会话视图缓存（:77）
-- **流式一致性与 IPC 顺序**：生成侧快照节流为 renderer 120ms / DB 600ms（`src/main/agent/deepchat/runtime/echo.ts:5-6`）；终态事件 `chat.stream.completed`/`failed` 由 dispatch 的 finalize 入口发布（`src/main/agent/deepchat/runtime/dispatch.ts:2693-2735`）。
-- renderer 的 IPC 绑定（`src/renderer/src/stores/ui/messageIpc.ts`）按 (sessionId, requestId) 维护请求注册表：`settleStream`（:127-163）在终态后把流状态折叠进持久化记录并重载消息页（同一消息不换 DOM 节点）；增量记录合入缓存（:213-219）；流式快照以"generation + 时间戳"拒绝过期/乱序（:92-113）。
-- `useDisplayMessages`（`src/renderer/src/features/chat-page/composables/useDisplayMessages.ts`）的 `displayMessages` computed（:367-438）：先按持久化标识重建显示列表，流式记录未进入有序列表时临时插入，再用稳定的 render key（:339-355）把占位与最终落盘的同一消息关联，减少 DOM 替换；转换缓存保证 settled 对象稳定（:95-162）。
-- **多窗口**：窗口分别持有消息与流式缓存，主进程负责事件分发。已知本地会话的完整流定向给绑定窗口；无绑定窗口时保留广播回退。其他窗口收到每会话约 1 秒节流的 activity 信号，终态立即发出；非活动会话的最近视图缓存据此失效（`src/main/events/sessionEventRouter.ts:78-95,160-179`、`src/renderer/src/stores/ui/messageIpc.ts:230-245`）。会话状态另经版本事件进入 session store（`src/renderer/src/features/chat-session/store.ts:462-465`）。
+- renderer 的消息 store 维护以下状态（`src/renderer/src/stores/ui/message.ts:31-77`）：
+  - `messageIds` 与 `messageCache`：已加载消息的 id 列表和消息缓存
+  - `committedSessionId`：当前已提交的会话 id，用于防止新旧会话记录混写
+  - `nextCursor`、`hasMoreHistory`、`isLoadingHistory` 与 `historyLoadError`：分页游标与历史加载状态
+  - `parsedMessageCache`：LRU 解析缓存，上限 1024
+  - 最近会话视图缓存
+- **流式一致性与 IPC 顺序**：生成侧对快照做两级节流，发往 renderer 的快照每 120ms 一批，落库每 600ms 一次；流的终态由 dispatch 的 finalize 入口发布，对应 `chat.stream.completed` 与 `chat.stream.failed` 两个事件（`src/main/agent/deepchat/runtime/echo.ts:5-6`、`dispatch.ts:2693-2735`）。
+- renderer 的 IPC 绑定层按会话 id 与请求 id 维护请求注册表：流终态到达后，`settleStream` 把流状态折叠进持久化记录并重新加载消息页，同一条消息因此沿用原来的 DOM 节点；增量记录直接合入缓存；流式快照带 generation 与时间戳，过期或乱序的快照被丢弃。相关实现集中在 `src/renderer/src/stores/ui/messageIpc.ts:92-163,213-219`。
+- `useDisplayMessages` 的 `displayMessages` computed 先按持久化标识重建显示列表；流式记录尚未进入有序列表时临时插入；稳定的 render key 把占位消息与最终落盘的同一消息关联起来，减少 DOM 替换；转换缓存保证已结算对象保持稳定。各段位置见 `src/renderer/src/features/chat-page/composables/useDisplayMessages.ts:95-162,339-355,367-438`。
+- **多窗口**：每个窗口各自持有消息与流式缓存，事件分发由主进程负责。本地会话的完整流只发给绑定的窗口，没有绑定窗口时退化为广播；其他窗口收到的只是一条每会话约 1 秒节流的 activity 信号，终态信号则立即发出，非活动会话的最近视图缓存据此失效。会话状态另经版本事件进入 session store。分发与失效逻辑见 `src/main/events/sessionEventRouter.ts:78-95,160-179`、`messageIpc.ts:230-245` 与 `src/renderer/src/features/chat-session/store.ts:462-465`。
 - 未运行网络中断、快速切换 session 或重复事件场景的实测（§10）。
 
 ## 7. schema 版本、导入导出与保留策略
 
-- **schema 版本与升级**：`mainDatabase`（`src/main/data/mainDatabase.ts`）用版本表记录已应用版本的高水位，启动时对每个未应用版本在单事务内执行各表的迁移 SQL 并调用收尾钩子（:315-388）。连接层用 `better-sqlite3-multiple-ciphers`，启用 SQLCipher 兼容与 WAL（`src/main/data/connectionConfig.ts:6-20`）。
-- 已知升级路径按表拆分（版本号即各表演进史）：
-  - `deepchat_pending_inputs`：v17 → v43 → v46 → v67（`deepchatPendingInputs.ts:52-71`；v67 加 `retry_required_at` 并归一化旧行）
-  - `new_sessions`：v11 → v15 → v16 → v20 → v21 → v44 → v59（`newSessions.ts:97-131`；v44 为 revision 前移恢复、v59 加编排策略列）
-  - `deepchat_assistant_blocks` / `deepchat_search_documents`：v26 规范化重建（`deepchatAssistantBlocks.ts:104-113`、`deepchatSearchDocuments.ts:64-73`）
-  - transcript projection cursor：独立表 `deepchat_transcript_projection_meta`，当前 projection version 为 1；该版本号标识 Tape 到 transcript 派生表的重放协议，与消息 schema 版本各自独立演进。
-- **导入导出**：导出路由 `sessionsExportRoute`（`routes.ts:511-518`）→ `AgentSessionExportService`；启动组件清单含 `legacy_import`（`src/main/logging/mainLogEvents.ts:76`）。本次未追踪 legacy import 与导出的完整数据链。
+- **schema 版本与升级**：数据库启动时用一张版本表记录已应用版本的高水位，逐个执行尚未应用的版本，每个版本的迁移 SQL 与收尾钩子都放在同一个事务里。连接层使用 `better-sqlite3-multiple-ciphers`，开启 SQLCipher 兼容模式与 WAL。升级驱动见 `src/main/data/mainDatabase.ts:315-388`，连接参数见 `src/main/data/connectionConfig.ts:6-20`。
+- 已知升级路径按表演进：
+  - `deepchat_pending_inputs` 依次经历 v17、v43、v46、v67，其中 v67 增加 `retry_required_at` 列并归一化旧行（`deepchatPendingInputs.ts:52-71`）；
+  - `new_sessions` 从 v11 起，经 v15、v16、v20、v21、v44 到 v59，v44 处理 revision 前移恢复，v59 增加编排策略列（`newSessions.ts:97-131`）；
+  - `deepchat_assistant_blocks` 与 `deepchat_search_documents` 在 v26 一起做规范化重建（`deepchatAssistantBlocks.ts:104-113`、`deepchatSearchDocuments.ts:64-73`）；
+  - transcript 重放游标放在独立表 `deepchat_transcript_projection_meta`，当前投影协议版本为 1；该版本号标识 Tape 到 transcript 派生表的重放协议，与消息 schema 版本各自独立演进。
+- **导入导出**：会话导出路由把请求交给 `AgentSessionExportService` 执行，启动组件清单里还能看到 `legacy_import` 一项；legacy import 与导出的完整数据链本次未追踪（`routes.ts:511-518`、`src/main/logging/mainLogEvents.ts:76`）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- 会话级绑定落在两张表：`new_sessions` 保存 agent、项目目录、技能/工具开关与子会话关系（`newSessions.ts:13-30`，skills/tools 另有规范化子表，:383-428）；`deepchat_sessions` 保存 provider/model/权限模式与生成设置（`deepchatSessions.ts:39-54`）。
-- 消息级绑定分两类：
-  - user 消息内容分表：`deepchat_user_messages`、`deepchat_user_message_files`、`deepchat_user_message_links`（`transcript.ts:986-1017`；读取时物化回 `UserMessageContent`，:875-912）
-  - assistant 元数据：metadata、`deepchat_usage_stats`、`deepchat_message_traces`（`transcript.ts:679-722`、:1176-1221）
+- 会话级绑定分放在两张表里：`new_sessions` 记录 agent、项目目录、技能与工具开关和子会话关系，技能与工具另有规范化子表；`deepchat_sessions` 记录 provider、模型、权限模式与生成设置。字段定义与子表位置见 `newSessions.ts:13-30,383-428`、`deepchatSessions.ts:39-54`。
+- 消息级绑定分两类，存储位置见下表：
+
+| 绑定对象 | 存储方式 |
+| --- | --- |
+| user 消息内容 | 正文、附件与链接三张分表：`deepchat_user_messages`、`deepchat_user_message_files`、`deepchat_user_message_links`；读取时拼回 `UserMessageContent`（`transcript.ts:875-912,986-1017`） |
+| assistant 元数据 | 消息 metadata 加上 `deepchat_usage_stats`、`deepchat_message_traces` 两张统计表（`transcript.ts:679-722,1176-1221`） |
+
 - MCP App model context 绑定在 assistant block 的 `extra_json`（§1.3）。
-- 附件属于 `SendMessageInput.files`（`agent-interface.d.ts:289-296`），无法接受附件时返回 `needs_user_action`（执行语义见对话请求与上下文笔记 §1）。
+- 附件随 `SendMessageInput.files` 传给执行侧，模型无法接收附件时返回 `needs_user_action`（`agent-interface.d.ts:289-296`；执行语义见对话请求与上下文笔记 §1）。
 
 ## 9. 设计取舍与已确认边界
 

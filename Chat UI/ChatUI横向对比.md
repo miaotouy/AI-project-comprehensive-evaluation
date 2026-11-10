@@ -63,65 +63,81 @@
 
 数据侧的索引、命中粒度与定位标识见会话与消息管理横向对比，这里只记录用户可见的搜索入口和定位行为：
 
-- **Chatbox**：`SearchDialog` 提供"当前会话"和"全部会话"两个入口，点击结果后切换目标会话并 `scrollToMessage` 定位到具体消息——不受 DOM 虚拟窗口限制。
-- **DeepChat**：会话内 Cmd/Ctrl+F 走 `useChatSearch` 在已加载 display messages 上匹配并定位，不触发数据库查询；跨会话 FTS5 命中直接定位到消息并可滚动到目标行。
-- **Cherry Studio**：会话内先扫描已加载数据，再挂载目标并对 DOM 做精确 Range 高亮，支持虚拟窗口外定位；全局搜索走主进程 FTS。不能把该混合路径缩为 DOM-only 搜索（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L17-L22>)）。
-- **LobeHub**：侧栏 `TopicSearchBar`/`AllTopicsDrawer` 提供全量 Topic 搜索入口（后端 BM25 返回 Topic 列表，不直接定位到消息）。
-- **Jan**：SearchDialog 展示并导航 Thread（Fzf 懒建索引的会话列表搜索）。
-- **AIO Hub**：会话内搜索是前端线性扫描，仅覆盖当前活动路径，无法命中隐藏分支；跨会话搜索只能定位到会话，两套搜索没有衔接。
-- **Pi**：搜索在选择器内对 `id+名称+全部消息文本+cwd` 做 token/正则匹配，结果是会话级命中；harness SDK 另存 `createScanningSessionSearch`（异步迭代器分页扫描，未接入 TUI/AgentSession，数据侧见会话与消息管理横向对比）。
-- **DeepSeek Harness**：侧栏 WorkspaceBrowser 提供本地过滤 + 宿主全文搜索（`session.search`，250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询），结果粒度是会话/工作区行；命中具体消息并定位的行为本次笔记未确认。
-- **Risuai**：只有角色名搜索（桌面角色网格与移动端各一处，按名称过滤）；会话列表与消息内容搜索无 UI 入口，消息定位靠书签跳转与分支回链注释。
-- **VCPMobile**：全局消息搜索可按 owner、Topic、角色与时间过滤；点击命中后请求 Rust 导航，目标仍存在且通话允许时才关闭搜索页、展示消息锚点窗口。标题/日期过滤仍是侧栏的另一入口（[来源](<./VCPMobile-ChatUI调查笔记.md#L25-L29>)）。
-- **OpenClaw**：Control UI 有两条搜索路径——pane-local 的当前线程内搜索（不改变 URL，打开时记录焦点返回目标），以及 command palette 的跨 session Gateway 搜索（请求 ID 防止旧查询覆盖新查询，结果可结合 session metadata 与 transcript 命中并导航到对应 session）；TUI 只有 recent session 选择器的模糊匹配（完整 key → 唯一 substring → fuzzy，歧义时列候选）。跨 session 命中后是否直接定位到具体消息行本次未确认。
-- **Codex**：`F3` 在完整 transcript 中查找，`Ctrl+T` 打开 transcript overlay 后在其中跳转；Composer 的历史搜索只覆盖输入历史，不搜会话消息。跨会话消息搜索、未读计数与置顶在本次源码范围内未找到。
-- **OpenOcta**：只有侧栏的客户端过滤——把会话行、标题与副标题拼成 haystack 后按子串匹配；没有消息内容检索，也没有服务端搜索 RPC。
-- **Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode**：本次笔记未确认用户可见的"命中具体消息并跳转"链路（Open WebUI 后端 `/search` 结果粒度是 Chat；OpenCode 仅会话标题搜索；VCPChat 的"未读话题"/"unread topic"是置顶约定词，非内容搜索）。
+| 项目 | 搜索入口 | 命中粒度与定位 |
+|---|---|---|
+| Chatbox | 搜索对话框提供"当前会话"与"全部会话"两个范围 | 点击结果后切换到目标会话并定位到具体消息，目标即使已被虚拟列表移出 DOM 也能滚动到位 |
+| DeepChat | 会话内 Cmd/Ctrl+F；跨会话走 FTS5 | 会话内搜索在已加载的 display messages 上匹配并定位，不查数据库；跨会话命中直接定位到消息，并可滚动到目标行 |
+| Cherry Studio | 会话内搜索；全局搜索走主进程 FTS | 会话内先扫描已加载数据，再挂载目标并对 DOM 做精确 Range 高亮，虚拟窗口外的消息也能定位，这条混合路径无法用纯 DOM 搜索概括（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L17-L22>)） |
+| LobeHub | 侧栏的 Topic 搜索框与全量抽屉（`TopicSearchBar`、`AllTopicsDrawer`） | 后端用 BM25 返回 Topic 列表，命中停在主题层，不直接定位到消息 |
+| Jan | SearchDialog | 只用于展示并导航 Thread，索引由 Fzf 懒建在会话列表上 |
+| AIO Hub | 会话内搜索为前端线性扫描，跨会话另有一套入口 | 会话内只覆盖当前活动路径，隐藏分支中的消息命中不到；跨会话搜索只能定位到会话，两套搜索之间没有衔接 |
+| Pi | 选择器内的 token 与正则匹配，匹配对象是 id、名称、全部消息文本与 cwd | 结果是会话级命中；harness SDK 另存 `createScanningSessionSearch`，以异步迭代器分页扫描，未接入 TUI 与 AgentSession，数据侧见会话与消息管理横向对比 |
+| DeepSeek Harness | 侧栏 WorkspaceBrowser 的本地过滤与宿主全文搜索（`session.search`） | 搜索带 250ms 防抖、500 码位截断、结果上限 20 条并提示精化查询；结果粒度是会话或工作区行，命中具体消息并定位的行为本次笔记未确认 |
+| Risuai | 只有角色名过滤，桌面角色网格与移动端各一处 | 按名称过滤，命中停在角色层；会话列表与消息内容没有搜索界面入口，消息定位靠书签跳转与分支回链注释 |
+| VCPMobile | 独立的全局消息搜索页，可按 owner、Topic、角色与时间过滤；标题与日期过滤在侧栏另有一个入口 | 点击命中后请求 Rust 导航，目标仍存在且通话允许时才关闭搜索页并展示消息锚点窗口（[来源](<./VCPMobile-ChatUI调查笔记.md#L25-L29>)） |
+| OpenClaw | Control UI 的 pane 内搜索与 command palette 的跨 session 搜索；TUI 只有 recent session 选择器的模糊匹配（完整 key → 唯一 substring → fuzzy，歧义时列候选） | pane 内搜索不改变 URL，打开时记录焦点以便返回；palette 搜索用请求 ID 防止旧查询覆盖新查询，结果可结合 session metadata 与 transcript 命中并导航到对应 session；跨 session 命中后是否直接定位到具体消息行本次未确认 |
+| Codex | `F3` 在完整 transcript 中查找，`Ctrl+T` 打开 transcript overlay 后在其中跳转 | Composer 的历史搜索只覆盖输入历史，不搜会话消息；跨会话消息搜索、未读计数与置顶在本次源码范围内未找到 |
+| OpenOcta | 只有侧栏的客户端过滤 | 把会话行、标题与副标题拼成 haystack 后按子串匹配，没有消息内容检索，也没有服务端搜索 RPC |
+| Open WebUI、Manifold Desktop、NextChat、AstrBot、SillyTavern、VCPChat、OpenCode | 本次笔记未确认用户可见的"命中具体消息并跳转"链路 | Open WebUI 后端 `/search` 的结果粒度是 Chat；OpenCode 只有会话标题搜索；VCPChat 的"未读话题"/"unread topic"是置顶约定词，属于非内容搜索 |
 
 ## 消息操作、分支导航与呈现投影
 
 - **分支/版本导航入口**：
-  - Chatbox：ForkGroup 折叠分支组（`N / M` 位置指示，回复收进"N 个回复"折叠组）与 ThreadLabel 内联锚点；
-  - Jan：`< n/m >` 版本导航与 activeRootId 切换；
-  - NextChat：命令复制为新会话，不提供消息级兄弟版本导航；复制会重置摘要和截断位置，嵌套数组未递归克隆（[来源](<../会话与消息管理/NextChat-会话与消息管理调查笔记.md#L68>)）；
-  - Cherry Studio：树图与内联兄弟导航并存；新分支先出现持久化的待输入叶子。Agent 入口另有编辑重发、兄弟切换与复制新会话，由能力契约决定入口可用性（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L166-L180>)）；
-  - AIO Hub：Vue Flow 树图与 `BranchNavigator`；
-  - Open WebUI：Overview 消息树图（SvelteFlow 只读画布，点击节点沿 childrenIds 走到叶子并切换分支）；
-  - SillyTavern：checkpoint 旗标（Shift+点击新建）与 branch 跳转；
-  - Pi：label/分支切换选择器；
-  - DeepSeek Harness：无树图式分支导航，分支是消息操作栏动作，仅已完成回合的 transcript 尾可用，传消息 seq 给 `session.fork` 按 turn 分叉。
-  - Risuai：分支按钮把当前会话快照复制为 idx+1 会话并追加回链注释，跳转走会话列表与回链；这是持久化的复制会话式分支，分支树弹窗只读预览、节点点击不导航；
-  - VCPMobile：本次未找到分支树、版本导航或候选切换；编辑和重新生成均截断后续线性历史。
-  - OpenClaw：Control UI 消息右键菜单提供 rewind/fork（活动路径中的 user message，streaming/reading 中的消息禁用），Apple/Android 长按菜单提供 Rewind from here / Fork from here；Android branch switcher 是独立 header bottom sheet，分支变化会清理旧 branch/run 局部状态并刷新历史；TUI 本次未找到独立消息级 rewind/fork 入口（范围结论，不排除扩展）。
-  - Codex：分支发生在 thread 层——fork 新建 thread，side/btw 是临时 fork 侧对话，`Ctrl+/` 返回；没有消息级版本切换、兄弟节点或树图。
-  - OpenOcta：本次未找到分支树、版本导航、编辑、删除或重新生成入口；A2UI 面板提交按钮会发起新一轮 run，但不构成版本历史。
-- **消息操作入口**：Chatbox 按角色显示操作栏（编辑/复制/引用/删除/更多），桌面端无右键菜单；SillyTavern 消息 hover 操作栏（复制/编辑/删除/上下移）加 swipe 左右箭头，删除默认连带其前紧邻的工具调用系统消息（`/cut`、`/del` 可用 `toolcalls` 参数关闭），`/addswipe` 追加候选后原位更新消息元素而非整聊天重载；VCPChat 发送/中止同一按钮；OpenCode 消息操作在 Web hover 菜单与 TUI 快捷键两条路径。
-- **消息操作入口（Risuai）**：操作栏分主次两层——复制/翻译/编辑/TTS/删除为主按钮，书签/分支/禁用收进弹出层，窄屏主按钮也收进弹出层；操作按钮带 `button-icon-*` class，供热键按 class 触发。
-- **消息操作入口（DeepSeek Harness）**：消息操作栏提供复制（剪贴板 + 1 秒对勾反馈）、分支与按需时钟指标（运行时长/TTFT/tok/s），插槽式扩展位供第三方动作（如 Like/Dislike）挂载；历史是追加型，未找到就地编辑与删除入口，修改以分支表达。
-- **消息操作入口（Codex）**：复制走 `/copy` 与 `Ctrl+O`，`Alt+R` 切原始回滚模式便于终端原生选择。`/export` 导出 Markdown、`/diff` 查看工作区差异；消息级编辑、重新生成、删除与悬浮工具条在本次源码范围内未找到。
-- **消息操作入口（OpenOcta）**：助手气泡只有复制 Markdown（成功/失败带短文案回退），工具卡可展开输入输出、点击进右侧 Markdown 侧栏看完整输出，附件可预览下载；同一范围内未找到编辑、删除、重新生成或续写。
-- **reroll/swipe（Risuai）**：左右箭头渲染在每条消息上但动作总是作用于会话尾部；没有持久化的 swipe 候选，候选只存组件内快照栈与模块级分块缓存，切角色清空、刷新即失；首条问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。该内存候选与前述复制会话式分支是两条不同机制。
+
+| 项目 | 入口形态与边界 |
+|---|---|
+| Chatbox | ForkGroup 把多条回复收进"N 个回复"折叠组，并用 `N / M` 指示当前位置；同一条消息另有 ThreadLabel 内联锚点 |
+| Jan | 用 `< n/m >` 做版本导航，并配合 activeRootId 切换 |
+| NextChat | 命令复制会生成新会话，消息级没有兄弟版本导航；复制过程重置摘要与截断位置，嵌套数组未做递归克隆（[来源](<../会话与消息管理/NextChat-会话与消息管理调查笔记.md#L68>)） |
+| Cherry Studio | 树图与内联兄弟导航并存，新分支先落成持久化的待输入叶子；Agent 入口另有编辑重发、兄弟切换与复制新会话，入口是否可用由能力契约决定（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L166-L180>)） |
+| AIO Hub | Vue Flow 树图配合 `BranchNavigator` 提供分支导航 |
+| Open WebUI | Overview 的消息树图是一张 SvelteFlow 只读画布，点击节点后沿 childrenIds 走到叶子并切换分支 |
+| SillyTavern | checkpoint 旗标（Shift+点击新建）配合 branch 跳转 |
+| Pi | 由 label 与分支切换选择器提供 |
+| DeepSeek Harness | 没有树图式导航，分支作为消息操作栏上的动作出现，只在已完成回合的 transcript 尾部可用；点击后把消息 seq 交给 `session.fork`，由它按 turn 分叉 |
+| Risuai | 分支按钮把当前会话快照复制成 idx+1 号会话并追加回链注释，跳转经由会话列表与回链完成；这是持久化的复制会话式分支，分支树弹窗只读预览、节点点击不导航 |
+| VCPMobile | 本次未找到分支树、版本导航或候选切换；编辑与重新生成都会截断其后的线性历史 |
+| OpenClaw | Control UI 的消息右键菜单提供 rewind/fork，作用于活动路径上的 user message，streaming 或 reading 中的消息禁用；Apple/Android 用长按菜单提供 Rewind from here 与 Fork from here；Android 的分支切换器是独立 header bottom sheet，分支变化会清理旧 branch/run 局部状态并刷新历史；TUI 本次未找到独立的消息级 rewind/fork 入口（范围结论，不排除扩展） |
+| Codex | 分支发生在 thread 层：fork 新建 thread，side/btw 是临时 fork 出的侧对话，用 `Ctrl+/` 返回；消息级没有版本切换、兄弟节点或树图 |
+| OpenOcta | 本次未找到分支树、版本导航、编辑、删除或重新生成入口；A2UI 面板的提交按钮会发起新一轮 run，版本历史里没有对应记录 |
+
+- **消息操作入口**：
+
+| 项目 | 入口与边界 |
+|---|---|
+| Chatbox | 操作栏按角色显示（编辑/复制/引用/删除/更多），桌面端没有右键菜单 |
+| SillyTavern | 消息悬停时出现操作栏（复制/编辑/删除/上下移）与 swipe 左右箭头；删除默认连带其前紧邻的工具调用系统消息，`/cut`、`/del` 可用 `toolcalls` 参数关掉这种连带；`/addswipe` 追加候选后原位更新消息元素，不整聊天重载 |
+| VCPChat | 发送与中止共用一个按钮 |
+| OpenCode | Web 上走 hover 菜单，TUI 上走快捷键，两条路径 |
+| Risuai | 操作栏分主次两层：复制/翻译/编辑/TTS/删除是主按钮，书签/分支/禁用收进弹出层，窄屏时主按钮也收进弹出层；按钮带 `button-icon-*` class，热键按 class 触发 |
+| Risuai（reroll/swipe） | 左右箭头渲染在每条消息上，动作却总是作用于会话尾部；候选没有持久化，只存在组件内快照栈与模块级分块缓存里，切角色清空、刷新即失；首条问候语轮换走持久化的 `fmIndex`，带"第几页/共几页"指示。这组内存候选与复制会话式分支是两条不同机制 |
+| DeepSeek Harness | 操作栏提供复制（写剪贴板并给 1 秒对勾反馈）、分支与按需展开的时钟指标（运行时长、TTFT、tok/s），另留插槽供第三方动作（如 Like/Dislike）挂载；历史是追加型，没有就地编辑与删除入口，修改以分支表达 |
+| Codex | 复制走 `/copy` 与 `Ctrl+O`，`Alt+R` 切到原始回滚模式方便终端原生选择；`/export` 导出 Markdown，`/diff` 查看工作区差异。消息级编辑、重新生成、删除与悬浮工具条在本次源码范围内未找到 |
+| OpenOcta | 助手气泡只有复制 Markdown（成功与失败带短文案回退）；工具卡可展开输入输出、点击进右侧 Markdown 侧栏查看完整输出，附件可预览下载。同一范围内未找到编辑、删除、重新生成或续写 |
+
 - **呈现投影**：同一份会话数据可以有多种用户可见投影——AIO 的 linear/force-graph、Cherry 的 `TopicBranchPanel` 消息树图、Open WebUI 的 side-by-side/MoA 与 Overview 消息树图、VCPChat 的 bubble/panel/immersive 三种 CSS 投影、Chatbox 和 Jan 的分支版本导航。仅记录 `Session/Topic/Thread` schema 无法解释用户实际如何切换、编辑、停止和定位。
 
 ## 停止入口与生成反馈（用户可见部分）
 
 执行语义（abort、任务取消、最终化）在对话请求与上下文横向对比，这里只记录用户可见的停止入口与反馈形态：
 
-- **SillyTavern**：生成中 toast 直接带停止按钮（Action Loader `STOPPABLE` 模式）；`document.body.dataset.generating` 全局状态位驱动 CSS 禁用交互；流式生成中主动隐藏 swipe 按钮。
-- **Manifold Desktop**：新请求先停止全局旧线程；取消只能在下一次流回调检查 stop token——按钮存在但停止能力受限。
-- **Open WebUI**：停止经 `stopResponse` 按 chat/task 停止；`chat:active=false` 事件只在事件携带的 message_id（未携带时任一消息）确实存在未完成 assistant 叶子时才清空 taskIds 并重载，随后更新已读。
-- **AIO Hub**：停止按钮除中止当前请求，还会清理该会话尚未执行的队列节点，并把「队列已停止」与「用户手动停止」作为停止结果显示，避免继续呈现为排队或普通错误。
-- **LobeHub**：生成时停止保留，允许排队且有新输入时发送并列出现；上传、只读或环境预检拒绝时保留编辑内容。队列托盘承接等待项与立即发送（[来源](<./LobeHub-ChatUI调查笔记.md#L80-L86>)）。
-- **Chatbox**：生成时发送按钮变为停止按钮（`IconPlayerStopFilled`），点击 cancel 当前 generating 消息并乐观写回。
-- **Cherry Studio**：回复完成与审批请求进入会话通知通道；聚焦窗口接收前台反馈，无聚焦窗口时按助手通知开关发系统通知，点击返回对应会话。当前会话的前台提示另有抑制规则，真实系统通知与窗口导航未运行验证（[来源](<./Cherry-Studio-ChatUI调查笔记.md>)）。
-- **Pi**：TUI 键盘停止（abort），中断后消息以 stopReason 持久化、下次恢复可见。
-- **VCPChat**：发送/中止同一按钮；单聊只通知远端，前端没有本地 abort 的完整反馈闭环。
-- **Jan**：流式态禁止编辑/删除；AI SDK 与 transport 控制当前生成，`resume:false` 不恢复未完成回合。
-- **DeepSeek Harness**：停止按钮 → `session.cancel()`（保留 pending inbox 工作，结算后按 FIFO 恢复；子 agent 会话走 `subagent.interrupt`）；运行中 TurnStatus 显示 "Deep diving..."，15 秒后叠加运行时钟。
-- **Risuai**：发送按钮原位变停止按钮；停止经 `abortController.abort()` → fetch signal 取消流，半截回复保留在消息流中；自动续写、群聊顺序生成、触发器重发共用同一 signal，一次停止中断整条递归链；无排队指示器、无重试按钮，错误后自行再发或 reroll。
-- **OpenClaw**：停止入口与运行身份绑定——Control UI 优先发送带精确 runId 的 `chat.abort`，无本地 run id 时回退会话级 `sessions.abort`，断线只重放拥有精确 run identity 的 abort intent；Composer 的 in-progress label 区分 sending/responding/waiting approval/preparing model/working。TUI 以 Escape 中断活动 run、Ctrl+C 首次清空输入；Apple/Android 运行期保留停止入口。可见反馈与中止入口可静态确认，真实中断深度与断线重连行为未运行验证。
-- **Codex**：`Esc` 绑定 `chat.interrupt_turn`，向 app-server 发回合中断；回合 ID 不匹配时用错误返回的实际 ID 重试一次，仍失败则以警告回到聊天流而不是静默丢弃。底部预览同时列出排队消息、待发送 steer 与被拒绝的 steer，用户能区分两种排队语义。
-- **OpenOcta**：停止与「新会话」共用按钮位，点击后带会话键与 runId 发中止请求并先本地清空，避免迟到事件把界面卡在进行中；没有全局快捷键，只能点按钮或在输入框发送 `stop`/`esc` 一类文本。断线重连直接丢弃遗留 run 状态。
+| 项目 | 停止入口与可见反馈 |
+|---|---|
+| SillyTavern | 生成中的 toast 直接带停止按钮（Action Loader 的 `STOPPABLE` 模式）；`document.body.dataset.generating` 这个全局状态位驱动 CSS 禁用交互；流式生成期间 swipe 按钮主动隐藏 |
+| Manifold Desktop | 新请求会先停掉全局的旧线程；取消要等下一次流回调检查 stop token，按钮存在但停止能力受限 |
+| Open WebUI | 停止经 `stopResponse` 按 chat 或 task 停止；`chat:active=false` 事件只有在它携带的 message_id（未携带时取任一消息）确实对应未完成的 assistant 叶子时，才清空 taskIds 并重载，随后更新已读 |
+| AIO Hub | 停止按钮除中止当前请求，还会清掉该会话尚未执行的队列节点，并把「队列已停止」与「用户手动停止」作为停止结果展示，界面不再停在排队状态或落成普通错误 |
+| LobeHub | 生成时保留停止，允许排队，有新输入时停止与发送并列出现；上传、只读或环境预检被拒时保留已输入的编辑内容。队列托盘承接等待项与立即发送（[来源](<./LobeHub-ChatUI调查笔记.md#L80-L86>)） |
+| Chatbox | 生成时发送按钮变成停止按钮（`IconPlayerStopFilled`），点击后 cancel 当前 generating 消息并乐观写回 |
+| Cherry Studio | 回复完成与审批请求进入会话通知通道；有聚焦窗口时走前台反馈，没有聚焦窗口时按助手通知开关发系统通知，点击返回对应会话。当前会话的前台提示另有抑制规则，真实系统通知与窗口导航未运行验证（[来源](<./Cherry-Studio-ChatUI调查笔记.md>)） |
+| Pi | TUI 用键盘停止（abort）；中断后消息带着 stopReason 持久化，下次恢复仍可见 |
+| VCPChat | 发送与中止共用一个按钮；单聊只通知远端，前端没有本地 abort 的完整反馈闭环 |
+| Jan | 流式期间禁止编辑与删除；当前生成由 AI SDK 与 transport 控制，`resume:false` 时不恢复未完成回合 |
+| DeepSeek Harness | 点停止调用 `session.cancel()`，pending inbox 里的工作会保留，结算后按 FIFO 恢复；子 agent 会话走 `subagent.interrupt`。运行中 TurnStatus 显示 "Deep diving..."，15 秒后叠加运行时钟 |
+| Risuai | 发送按钮原位变成停止按钮；停止经 `abortController.abort()` 取消 fetch 流的 signal，半截回复留在消息流中；自动续写、群聊顺序生成与触发器重发共用同一个 signal，一次停止就中断整条递归链。界面没有排队指示器与重试按钮，出错后用户自行再发或 reroll |
+| OpenClaw | 停止入口与运行身份绑定：Control UI 优先发送带精确 runId 的 `chat.abort`，本地没有 run id 时回退到会话级的 `sessions.abort`，断线重连只重放持有精确 run identity 的 abort intent；Composer 的 in-progress label 区分 sending、responding、waiting approval、preparing model 与 working。TUI 用 Escape 中断活动 run，Ctrl+C 首次按下清空输入；Apple/Android 在运行期保留停止入口。可见反馈与中止入口可由静态源码确认，真实中断深度与断线重连行为未运行验证 |
+| Codex | `Esc` 绑定 `chat.interrupt_turn`，向 app-server 发出回合中断；回合 ID 不匹配时用错误返回的实际 ID 重试一次，仍然失败就以警告回到聊天流，消息不会静默丢弃。底部预览同时列出排队消息、待发送的 steer 与被拒绝的 steer，两种排队语义由此可区分 |
+| OpenOcta | 停止与「新会话」共用按钮位，点击后带会话键与 runId 发中止请求并先本地清空，迟到的运行事件不会把界面卡在进行中；没有全局快捷键，只能点按钮或在输入框发送 `stop`/`esc` 一类文本。断线重连时直接丢弃遗留的 run 状态 |
 
 ## 草稿、配置与窗口现场
 
@@ -140,31 +156,35 @@
 
 通用无障碍盘点（弹窗焦点、主题对比等）见 [`../应用界面基础设施/应用界面基础设施横向对比.md`](../应用界面基础设施/应用界面基础设施横向对比.md) 与各项目应用界面基础设施笔记，这里只记录与聊天关键路径直接相关的结论：
 
-- **AIO Hub**：会话列表项已接入 Tab、Enter/Space 与 Shift+F10/菜单键，公共弹窗也有焦点管理；树图拖拽和嫁接尚未找到完整键盘等效路径。实际焦点顺序与读屏体验未实测。
-- **Chatbox**：发送/停止按钮完全没有 `aria-label`（最高频交互点反而是缺失的）；`trapFocus={false}` 的四个弹窗（消息编辑/会话设置等）键盘 Tab 可穿透背景（有提交记录的已知取舍）；消息跳转导航 `MessageMinimapRail` 是规范反例（真实 `<button>` + `aria-label`）。
-- **Cherry Studio**：列表有 roving tabindex 与活动项语义，消息操作栏以翻译 label 提供可访问名称；Composer 本体仍未传可访问名称，分支画布键盘操作未核实（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L248-L267>)）。
-- **LobeHub**：有多处规范实现（`role="progressbar"`、`aria-live="polite"` 等），但 Topic 行、消息操作栏图标按钮普遍缺 `aria-label`——"点状覆盖，非体系化"。
-- **SillyTavern**：`index.html` 全文仅 1 处 `aria-hidden`；245 个"按钮"全是 `<div class="menu_button">`；为此专门写了 `keyboard.js`（MutationObserver + 动态 tabindex + Enter 触发）做键盘可达性补偿，但屏幕阅读器语义几乎空白——**无障碍最薄弱**。
-- **VCPChat**：Presentation mode 切换、侧栏 tab、compact navigation 等有基础 ARIA；但 Agent/Topic/消息列表项均无 `aria-label`/`role`，无 focus trap。
-- **DeepSeek Harness**：Lexical 输入有组合输入保护，命令菜单按键仲裁保留编辑器焦点；工作区选择和侧栏搜索有键盘接线。实际 IME、焦点顺序与读屏表现未运行验证（[来源](<./DeepSeek-Harness-ChatUI调查笔记.md>)）。
-- **Risuai**：document 级 keydown 匹配 `DBState.db.hotkeys` 配置，动作通过点击 class 匹配按钮与鼠标走同一条路径，无修饰键热键在输入框聚焦时失效；侧栏角色/会话项用 `role="button"` + `tabindex="0"` 保证可达，但存在若干用 `svelte-ignore a11y_*` 压制告警的 div 点击控件；主输入框无自动聚焦；读屏命名与焦点顺序未运行验证。
-- **OpenClaw**：Control UI 的 Composer keydown、焦点恢复（搜索等关闭后回到触发按钮或 Composer）与窄屏禁用分屏有静态源码证据；TUI 是完整键盘主链（编辑/发送/shell/命令/选择器/工具展开/停止/退出，overlay 关闭恢复编辑器焦点）；Apple/Android 各有 semantics、focus 与 IME 处理。真实键盘、IME、VoiceOver/TalkBack、触摸与窄屏断点行为未运行验证。
-- **VCPMobile**：软键盘避让由 `useKeyboardInsets.ts` 把原生 Window Insets 事件桥接为 CSS 变量（`--vcp-safe-bottom`、`--vcp-ime-offset`）供样式回退；功能工作区以持久/懒加载覆盖页接入，路由只负责聊天主表面。焦点顺序、TalkBack 与真实软键盘动画未运行验证。
-- **Codex**：键位可经 `tui.keymap.*` 覆盖并在加载时检测冲突；焦点由 overlay 与 `BottomPane` 视图栈决定，`Esc` 依次是关快捷键帮助 → 退出编辑/回溯 → 打断回合。终端不提供 ARIA 或读屏语义，键盘可完成选择会话、输入、排队、停止与审批；实际焦点顺序与组合键保留情况需在目标终端观察。
-- **OpenOcta**：输入框有输入法组合态保护与 `@` 列表方向键；会话行是 `role=button` 且可聚焦，Esc 只关原生对话框与会话菜单、不中止生成；活动行、队列条与审批卡带实时区域语义，消息线程本身关闭实时播报。窄屏侧栏只整体折叠、不转抽屉，焦点顺序与读屏播报未运行验证。
+| 项目 | 键盘可达性与读屏语义 |
+|---|---|
+| AIO Hub | 会话列表项已接入 Tab、Enter/Space 与 Shift+F10/菜单键，公共弹窗也有焦点管理；树图拖拽和嫁接尚未找到完整的键盘等效路径。实际焦点顺序与读屏体验未实测 |
+| Chatbox | 发送与停止按钮完全没有 `aria-label`，缺失的恰好是最高频的交互点；四个弹窗（消息编辑、会话设置等）用 `trapFocus={false}`，Tab 能穿透到背景，这是有提交记录的已知取舍；消息跳转导航 `MessageMinimapRail` 用的是真实 `<button>` 加 `aria-label`，与前面几处缺失形成对照 |
+| Cherry Studio | 列表有 roving tabindex 与活动项语义，消息操作栏用翻译 label 提供可访问名称；Composer 本体仍未传可访问名称，分支画布的键盘操作未核实（[来源](<./Cherry-Studio-ChatUI调查笔记.md#L248-L267>)） |
+| LobeHub | 有多处规范实现（`role="progressbar"`、`aria-live="polite"` 等），但 Topic 行与消息操作栏的图标按钮普遍缺 `aria-label`，属于"点状覆盖，非体系化" |
+| SillyTavern | `index.html` 全文只有 1 处 `aria-hidden`；245 个"按钮"全是 `<div class="menu_button">`。为此专门写了 `keyboard.js`，用 MutationObserver、动态 tabindex 与 Enter 触发补偿键盘可达性，屏幕阅读器语义几乎空白，属于无障碍最薄弱的一项 |
+| VCPChat | Presentation mode 切换、侧栏 tab 与 compact navigation 有基础 ARIA；Agent、Topic 与消息列表项都没有 `aria-label` 或 `role`，也没有 focus trap |
+| DeepSeek Harness | Lexical 输入有组合输入保护，命令菜单的按键仲裁会保留编辑器焦点；工作区选择与侧栏搜索有键盘接线。实际 IME、焦点顺序与读屏表现未运行验证（[来源](<./DeepSeek-Harness-ChatUI调查笔记.md>)） |
+| Risuai | document 级 keydown 匹配 `DBState.db.hotkeys` 配置，动作按 class 匹配按钮，与鼠标点击走同一条路径，无修饰键热键在输入框聚焦时失效；侧栏角色/会话项用 `role="button"` 与 `tabindex="0"` 保证可达，另有若干 div 点击控件靠 `svelte-ignore a11y_*` 压制告警；主输入框没有自动聚焦；读屏命名与焦点顺序未运行验证 |
+| OpenClaw | Control UI 的 Composer keydown、焦点恢复（搜索等关闭后回到触发按钮或 Composer）与窄屏禁用分屏都有静态源码证据；TUI 是完整的键盘主链（编辑、发送、shell、命令、选择器、工具展开、停止、退出，overlay 关闭后恢复编辑器焦点）；Apple/Android 各有 semantics、focus 与 IME 处理。真实键盘、IME、VoiceOver/TalkBack、触摸与窄屏断点行为未运行验证 |
+| VCPMobile | 软键盘避让由 `useKeyboardInsets.ts` 把原生 Window Insets 事件桥接成 CSS 变量（`--vcp-safe-bottom`、`--vcp-ime-offset`）供样式回退；功能工作区以持久或懒加载的覆盖页接入，路由只负责聊天主表面。焦点顺序、TalkBack 与真实软键盘动画未运行验证 |
+| Codex | 键位可经 `tui.keymap.*` 覆盖，加载时检测冲突；焦点由 overlay 与 `BottomPane` 的视图栈决定，`Esc` 依次关闭快捷键帮助、退出编辑或回溯、打断回合。终端不提供 ARIA 或读屏语义；键盘能完成选择会话、输入、排队、停止与审批，实际焦点顺序与组合键保留情况需在目标终端观察 |
+| OpenOcta | 输入框有输入法组合态保护与 `@` 列表方向键；会话行是 `role=button` 且可聚焦，`Esc` 只关原生对话框与会话菜单，不中止生成。活动行、队列条与审批卡带实时区域语义，消息线程本身关闭实时播报。窄屏侧栏只整体折叠、不转抽屉，焦点顺序与读屏播报未运行验证 |
 
 **共同结论**：各项目的无障碍语义都不完整，缺口的性质不同；键盘可达性（Tab/Enter）与屏幕阅读器语义（ARIA）是两件独立的事，SillyTavern 用自研框架解决前者、放弃后者。
 
 ## 界面层技术债（有具体代码证据支撑的）
 
-- **Chatbox**：文件拖入输入区没有任何高亮遮罩或视觉反馈（`react-dropzone` 未使用拖拽激活等状态字段）；桌面端会话项没有右键菜单；初始断点判定用 599.95px、后续响应式用 640px，两个数字之间存在窄缝；`newSessionState.webBrowsing` 是死字段。
-- **SillyTavern**：swipe（候选回复切换）在移动端是**点按钮，不是划手势**，与功能名字暗示的手势操作不符；"角色正在输入"三点动画 keyframe 存在但未挂到主聊天流。
-- **VCPChat**：compact navigation 由 `sidebarAvatarOnly` 字段显式控制，**不是宽度断点自动触发**；表情包选择器是平铺图片网格，无搜索无分类，点击插入原始 `<img>` HTML 标签。
-- **LobeHub**：移动端是独立路由树 + 独立构建产物，不是同构响应式；资源管理器的文件拖拽是团队主动放弃 `dnd-kit`、自建原生 HTML5 drag/drop。
-- **AIO Hub**：侧栏拖拽宽度由自研 `useResizable` 实现，200–600px 硬编码约束。
-- **DeepSeek Harness**：插件 HMR 只在开发构建接入，发布构建不加载；重载后的局部状态和真实浏览器表现需独立验证（[来源](<../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md#L59-L65>)）。
-- **Risuai**：reroll 快照栈只按角色清空、不校验与具体会话的对应关系——同角色内切换会话后 reroll 可能把旧候选套到新会话（静态观察，未运行验证）；分支树弹窗画出了全部会话的连接线树，但节点点击只切换预览、不能导航。
-- **OpenOcta**：消息页不渲染通用页头，聊天工具条的刷新回调虽被传入但没有对应控件；「思考」开关变量只声明、未参与渲染，样式表中对应的切换按钮类名也无标记使用；`views/sandbox.ts` 未接入，审批页实际由 `views/security.ts` 装配。
+| 项目 | 代码证据与影响 |
+|---|---|
+| Chatbox | 文件拖入输入区时没有任何高亮遮罩或视觉反馈，`react-dropzone` 的拖拽激活等状态字段没有接入样式；桌面端会话项没有右键菜单；初始断点判定用 599.95px、后续响应式用 640px，两个数字之间留出一条窄缝；`newSessionState.webBrowsing` 是死字段 |
+| SillyTavern | "角色正在输入"的三点动画 keyframe 已经存在，但没有挂到主聊天流 |
+| VCPChat | compact navigation 由 `sidebarAvatarOnly` 字段显式控制，宽度断点不会自动触发；表情包选择器是平铺图片网格，没有搜索与分类，点击后插入原始 `<img>` HTML 标签 |
+| LobeHub | 移动端是独立的路由树与独立构建产物，没有走同构响应式；资源管理器的文件拖拽是团队主动放弃 `dnd-kit` 后自建原生 HTML5 drag/drop |
+| AIO Hub | 侧栏拖拽宽度由自研的 `useResizable` 实现，200–600px 的约束硬编码在代码里 |
+| DeepSeek Harness | 插件 HMR 只在开发构建接入，发布构建不加载；重载后的局部状态与真实浏览器表现需要独立验证（[来源](<../应用界面基础设施/DeepSeek-Harness-应用界面基础设施调查笔记.md#L59-L65>)） |
+| Risuai | reroll 快照栈只在切换角色时清空，不校验它与具体会话的对应关系，同角色内切换会话后 reroll 可能把旧候选套到新会话（静态观察，未运行验证）；分支树弹窗画出了全部会话的连接线树，但点击节点只切换预览、不能导航 |
+| OpenOcta | 消息页不渲染通用页头，聊天工具条的刷新回调虽被传入却没有对应控件；「思考」开关的变量只声明、未参与渲染，样式表里对应的切换按钮类名也没有标记使用；`views/sandbox.ts` 未接入，审批页实际由 `views/security.ts` 装配 |
 
 ## 设计取舍与已确认边界
 

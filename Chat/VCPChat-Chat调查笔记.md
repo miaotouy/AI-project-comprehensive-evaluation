@@ -16,7 +16,17 @@
 
 VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（群组）为一级会话主体、Topic（话题）为二级会话单位**：Agent/群组配置里的 `topics[]` 数组只存元数据，消息内容全部落在 `UserData/<agentId 或 groupId>/topics/<topicId>/history.json`（裸 JSON 数组，整份覆盖写）。
 
-端到端职责由几个模块接力：`chatManager.js`（会话选择与发送编排）、`modules/chat/chatContextPipeline.js`（消息与系统提示词组装）、`modules/ipc/chatHandlers.js`（单聊 IPC 与 VCP 请求）、`modules/renderer/mainChatStreamConsumer.js`（终态投影与历史提交）、`modules/renderer/streamManager.js`（流式 DOM 投影）、`topicListManager.js`（列表/未读/拖放）、`Groupmodules/groupchat.js`（群聊串行调度，主进程侧历史事实源）。打开 Topic 的优先级为 **Flowlock 锁定 > localStorage 记忆 > 最新创建**。
+端到端职责由几个模块接力完成：
+
+1. `chatManager.js` 负责会话选择与发送编排。
+2. `modules/chat/chatContextPipeline.js` 负责消息与系统提示词的组装。
+3. `modules/ipc/chatHandlers.js` 负责单聊 IPC 与 VCP 请求。
+4. `modules/renderer/mainChatStreamConsumer.js` 负责终态投影与历史提交。
+5. `modules/renderer/streamManager.js` 负责流式 DOM 投影。
+6. `topicListManager.js` 负责话题列表、未读状态与拖放排序。
+7. `Groupmodules/groupchat.js` 负责群聊串行调度，并在主进程侧保存历史事实。
+
+打开 Topic 的优先级依次为 **Flowlock 锁定 > localStorage 记忆 > 最新创建**。
 
 单聊与群聊的中断实现仍不完全对称：群聊侧有按消息登记的 AbortController 和分阶段弹性超时（TTFT 120 秒、块间空闲 62 秒）；单聊 fetch 绑定主进程任务注册表的 controller，可在窗口导航或销毁时取消，中止按钮向远端 VCP 服务器发 `/v1/interrupt` 时带 5 秒超时，上游未受理则用本地兜底取消流任务。单聊主发送 fetch 仍没有客户端超时。`modules/ipc/chatHandlers.js:1561-1614`
 
@@ -30,9 +40,9 @@ VCPChat 是 Electron 桌面聊天客户端，聊天以 **Agent 或 AgentGroup（
 
 ## 产品表面与系统边界
 
-- **产品表面**：Electron GUI（主进程 + 渲染进程），主窗口三栏布局——左侧 sidebar（助手/话题/设置三个 tab）、中央 chat、右侧通知侧栏，是并列工作区而非路由页面；`bubble`/`panel`/`immersive` 三种呈现模式是同一消息数据的 CSS 投影。另有主题选择器、图片查看器、语音聊天等独立子窗口与系统托盘（应用栏含"文坊"/Scriptorium 入口，`modules/trayManager.js:28`）。
+- **产品表面**：应用采用 Electron 的主进程加渲染进程结构。主窗口分三栏常驻：左侧 sidebar 放助手、话题、设置三个 tab，中间是 chat，右侧是通知侧栏，三块并列构成工作区，界面切换不经过路由。同一份消息数据可以在 `bubble`、`panel`、`immersive` 三种呈现模式间即时切换，模式差异只落在 CSS 投影上。此外还有主题选择器、图片查看器、语音聊天等独立子窗口和系统托盘，应用栏提供"文坊"/Scriptorium 入口，托盘实现见 `modules/trayManager.js:28`。
 - **外部系统**：模型推理与流式输出由外部 **VCP 服务器**承担（`settings.json` 的 `vcpServerUrl/vcpApiKey`），客户端通过 HTTP 流式读取并依赖远端 `/v1/interrupt`；表情库亦来自服务端 API。Agent 配置、话题历史、设置均本地持久化，应用**不发送系统桌面通知**（所有通知经内置通知侧栏与浮动 Toast）。
-- 当前 HEAD 另有一个本地旁路服务 VCP-CDS（Rust 子进程，`ChatDataServiceEnabled: true` 默认开启，`modules/services/chatDataService/*`、`main.js:761-788`）：旁路镜像 `history.json` 并建 Tantivy 全文索引，不改变其作为消息事实源，供 DeepMemo 检索与 VCPMobileSync 中央同步消费，不参与聊天主链（主链仍是直接 fetch VCP 服务器）。
+- 当前 HEAD 另有一个本地旁路服务 VCP-CDS：它以 Rust 子进程运行，默认由 `ChatDataServiceEnabled: true` 开启，把 `history.json` 镜像一份再建 Tantivy 全文索引，供 DeepMemo 检索与 VCPMobileSync 中央同步消费。旁路服务只做镜像与索引，消息事实源仍是 `history.json`，聊天主链依旧直接 fetch VCP 服务器。生命周期、客户端与外观入口见 `modules/services/chatDataService/*`、`main.js:761-788`。
 - **其它专项**：Agent 角色配置、Agent 工具、LLM 渠道管理、生成式输出与运行时、仓库分布各有独立笔记；通用界面盘点（弹窗/Toast/主题/动画/图片查看器/快捷键/无障碍）见 [`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)。
 
 ## 端到端聊天主链
@@ -53,32 +63,44 @@ textarea#messageInput（Enter 发送，Shift+Enter 换行）
 
 ## 核心对象与状态权威
 
-- **Agent/AgentGroup 配置**（`config.json`）：`topics[]` 元数据权威，每个话题记录标识、名称、创建时间、锁定状态、未读标记及来源等字段。
-- **`history.json`**：消息内容事实源（裸 JSON 数组）；主进程写入队列提供同文件进程内串行与临时文件改名，完整替换仍没有版本校验或跨进程锁。
-- **群聊消息事实源**：主进程 `groupchat.js` 内存 `groupHistory` + 各阶段写盘；渲染进程只读。
-- **渲染进程内存 `currentChatHistory`**：可见视图权威；**streamManager** 持有流式投影状态（预缓冲、稳定块、延迟终态），**mainChatStreamConsumer** 持有终态投影与提交状态机（`saving/saved/unsaved`）。
-- **现场恢复**：`settings.json` 的 `lastOpenItemId/lastOpenItemType/lastOpenTopicId` + `localStorage` 的 `lastActiveTopic_*`。
+- 话题元数据以 Agent 或 AgentGroup 的 `config.json` 为准：每个话题在 `topics[]` 里记录标识、名称、创建时间、锁定状态、未读标记及来源。
+- 消息内容以 `history.json` 为事实源，文件本身是裸 JSON 数组；主进程写入队列保证同一文件的进程内串行，并靠临时文件改名提交，完整替换仍没有版本校验或跨进程锁。
+- 群聊的消息事实源在主进程：`groupchat.js` 在内存维护 `groupHistory` 并分阶段写盘，渲染进程只读。
+- 渲染进程的可见视图由内存中的 `currentChatHistory` 决定。
+- 流式投影状态由 `streamManager` 持有，包括预缓冲、稳定块与延迟终态。
+- 终态投影与提交状态机由 `mainChatStreamConsumer` 持有，状态取值为 `saving`、`saved`、`unsaved`。
+- 现场恢复靠 `settings.json` 的 `lastOpenItemId`、`lastOpenItemType`、`lastOpenTopicId` 与 `localStorage` 的 `lastActiveTopic_*`。
 
 ## 专项导航
 
-- 会话与消息管理：[`../会话与消息管理/VCPChat-会话与消息管理调查笔记.md`](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md)
-- 对话请求与上下文：[`../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md`](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md)
-- Chat UI：[`<../Chat UI/VCPChat-ChatUI调查笔记.md>`](<../Chat UI/VCPChat-ChatUI调查笔记.md>)
-- 消息渲染器：[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md)
-- 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)
-- 通用界面盘点（弹窗、Toast、主题、动画、图片查看器、全局快捷键、无障碍等）：[`../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md`](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md)
+| 主题 | 笔记 |
+| --- | --- |
+| 会话与消息管理 | [VCPChat-会话与消息管理调查笔记.md](../会话与消息管理/VCPChat-会话与消息管理调查笔记.md) |
+| 对话请求与上下文 | [VCPChat-对话请求与上下文调查笔记.md](../对话请求与上下文/VCPChat-对话请求与上下文调查笔记.md) |
+| Chat UI | [VCPChat-ChatUI调查笔记.md](<../Chat UI/VCPChat-ChatUI调查笔记.md>) |
+| 消息渲染器 | [VCPChat-消息渲染器调查笔记.md](../消息渲染器/VCPChat-消息渲染器调查笔记.md) |
+| 会话与消息管理横向对比 | [会话与消息管理横向对比.md](../会话与消息管理/会话与消息管理横向对比.md) |
+| 对话请求与上下文横向对比 | [对话请求与上下文横向对比.md](../对话请求与上下文/对话请求与上下文横向对比.md) |
+| Chat UI 横向对比 | [ChatUI横向对比.md](<../Chat UI/ChatUI横向对比.md>) |
+| 通用界面盘点：弹窗、Toast、主题、动画、图片查看器、全局快捷键、无障碍等 | [VCPChat-应用界面基础设施调查笔记.md](../应用界面基础设施/VCPChat-应用界面基础设施调查笔记.md) |
 
 ## 关键能力与已确认边界
 
-- **支持**：流式输出（流光边框/panel 轨道动画）、三种呈现模式即时切换、Topic 搜索（前端标题过滤 + 后端内容检索并集；"未读话题"/"unread topic"约定词把未读话题稳定置顶，`topicListManager.js:154-201`、`main.html:213-216`）、拖放排序、手动/自动未读（自动未读带 `unreadSource` 持久化标记）、Flowlock 续写锁、群聊四种发言模式（sequential/naturerandom/invite_only/game）、消息右键操作、话题自动总结、图片查看器（缩放/绘图/OCR/导出）、输入区附件与表情包。
-- **请求体扩展**：发送请求携带 `vcpchatExtensions`（逐条消息时间戳绑定与 sha256 摘要 + `requestContext`：请求 id、agent 与话题标识、所有者类型、群聊标记，`modules/ipc/chatHandlers.js:74-120`）；采样温度、上下文 token 上限、最大输出与 top-p/top-k 等模型参数未设置时经 `omitUnsetOptionalModelParams` 从请求体省略（`:130-153`）。
+- **支持**：主窗口内的交互能力按呈现、话题列表、会话续写、消息与输入四组分布。
+  - 呈现：流式输出带流光边框与 panel 轨道动画，三种呈现模式可即时切换。
+  - 话题列表：Topic 搜索把前端标题过滤与后端内容检索取并集，"未读话题"/"unread topic"约定词把未读话题稳定置顶；列表支持拖放排序，手动标记与自动统计的未读分开维护，自动未读带 `unreadSource` 持久化标记。搜索与置顶实现在 `modules/topicListManager.js:154-201`，约定词见 `main.html:213-216`。
+  - 会话：Flowlock 续写锁管理续写入口，话题自动总结随发送流程触发；群聊提供 sequential、naturerandom、invite_only、game 四种发言模式。
+  - 消息与输入：消息右键菜单承载单条消息的操作，图片查看器支持缩放、绘图、OCR 与导出，输入区提供附件与表情包。
+- **请求体扩展**：发送请求在标准字段之外附带 `vcpchatExtensions`，其中逐条消息记录时间戳绑定与 sha256 摘要，`requestContext` 记录请求 id、agent 与话题标识、所有者类型和群聊标记；采样温度、上下文 token 上限、最大输出、top-p 与 top-k 在未设置时经 `omitUnsetOptionalModelParams` 从请求体省略。两部分字段的组装见 `modules/ipc/chatHandlers.js:74-120,130-153`。
 - **已确认边界**：
   - 单聊中断按钮不完整：HTTP 流绑定了窗口生命周期 controller，但按钮没有按 messageId 取消它，仍只发远端 `/v1/interrupt`；请求也没有客户端超时。
   - 单聊话题总结无超时保护（群聊 20 秒超时有，同功能健壮性不对等）。
   - 内容搜索只匹配字符串 `content`，多模态数组内容检索不到。
-  - 自动未读只统计"尚无用户参与"的话题（无用户消息时按 assistant 消息计数，系统消息与思考占位排除）；用户参与后自动未读归零，仅右键手动标记（`unreadSource:'manual'`）保留，Agent 遗留标记被清除；发送消息时主动清除持久化未读（`chatManager.js:1273-1291`）。详见会话与消息管理笔记 5.3、Chat UI 笔记 2.1/2.3。
+  - 自动未读只统计"尚无用户参与"的话题：没有用户消息时按 assistant 消息计数，系统消息与思考占位不计入。用户参与后该话题的自动未读归零，只保留右键手动标记（`unreadSource:'manual'`），Agent 遗留的标记会被清除；发送消息时还会主动清除持久化的未读，实现在 `chatManager.js:1273-1291`。详见会话与消息管理笔记 5.3、Chat UI 笔记 2.1/2.3。
   - 群聊写盘受同进程队列串行；完整 replace 仍无版本号校验，旧快照可能覆盖并发变化。
-  - `history.json` 仍是整份数组替换，但写入已使用临时文件改名；旧快照 `replace` 仍可能覆盖并发变化。消息区非虚拟列表；通用 Modal 无 focus trap；不发送系统桌面通知。
+  - `history.json` 仍按整份数组替换，写入已改用临时文件改名；旧快照 `replace` 仍可能覆盖并发变化。
+  - 消息区使用非虚拟列表，通用 Modal 缺少 focus trap。
+  - 应用不发送系统桌面通知。
 
 ## 未验证事项
 

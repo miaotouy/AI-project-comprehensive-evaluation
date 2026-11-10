@@ -20,11 +20,11 @@ Manifold Desktop 的“渠道”主要是启动时放入 `ProviderRegistry` 的 
 
 ## 总体调用链
 
-1. `SettingsManager::Load()` 读取 `%LOCALAPPDATA%\\Manifold\\settings.json`，文件不存在时写入默认设置和设备 ID（`Manifold.Core/SettingsManager.cpp:106-133`）。
-2. `MainWindow` 构造函数先注册三个内置 Provider，再根据 `proxyUrl`、`providerConfigs` 和 `ollamaEndpoint` 构造 Proxy、OpenAI-compatible 和 Ollama 实例（`MainWindow.xaml.cpp:126-155`）。
-3. WebView2 加载前端后，宿主通过 `HOST_READY` 发送设置和 Provider Key 是否存在的布尔值；前端也可以发送 `LIST_PROVIDERS` 获取 Provider 与内置模型信息（`MainWindow.xaml.cpp:300-315, 852-874`）。
-4. 聊天输入栏按 Provider 列表填充选择器，切换 Provider 时发送 `LIST_MODELS`；发送聊天时把 Provider ID 和模型 ID 交给 `CHAT_SEND`，C++ 端从 Credential Manager 取 Key，按 Provider 实例调用 `StreamChat()`（`frontend/components/input-bar.js:52-57, 159-167`；`MainWindow.xaml.cpp:757-840`）。
-5. OpenAI、Anthropic、Gemini 和 OpenAI-compatible Provider 各自组装协议请求。模型目录请求则由对应实例的 `ListModels()` 执行，结果回传 WebView2；连接校验通过 `VALIDATE_KEY` 调用 Provider 的 `ValidateKey()`（`MainWindow.xaml.cpp:885-914`）。
+1. 启动时设置管理器读取 `%LOCALAPPDATA%\\Manifold\\settings.json`；文件不存在就写入默认设置和新生成的设备 ID（`Manifold.Core/SettingsManager.cpp:106-133`）。
+2. `MainWindow` 构造函数先注册三个内置 Provider，再按代理地址、`providerConfigs` 配置表和 Ollama endpoint 分别构造 Proxy、OpenAI-compatible 与 Ollama 实例（`MainWindow.xaml.cpp:126-155`）。
+3. WebView2 加载前端后，宿主用 `HOST_READY` 把设置和各 Provider 的 Key 是否存在推给页面；页面需要 Provider 与内置模型信息时发送 `LIST_PROVIDERS`（`MainWindow.xaml.cpp:300-315, 852-874`）。
+4. 输入栏按 Provider 列表填充选择器，切换 Provider 时发送 `LIST_MODELS` 拉取该 Provider 的模型；发送聊天时把 Provider ID 和模型 ID 交给 `CHAT_SEND`，C++ 端从 Credential Manager 取出 Key，再交给对应实例的 `StreamChat()`（`frontend/components/input-bar.js:52-57, 159-167`；`MainWindow.xaml.cpp:757-840`）。
+5. 各 Provider 实例按自己的协议组装请求；模型目录由实例的 `ListModels()` 拉取后回传 WebView2，连接校验则经 `VALIDATE_KEY` 消息调用实例的 `ValidateKey()`（`MainWindow.xaml.cpp:885-914`）。
 
 ## 1. Provider、渠道与 Endpoint 数据模型
 
@@ -43,7 +43,7 @@ Manifold Desktop 的“渠道”主要是启动时放入 `ProviderRegistry` 的 
 
 ### 默认配置与用户配置
 
-`AppSettings` 的默认值包括 `activeProviderId = "gemini"`、默认 Gemini 模型、默认 Proxy URL 和 `http://localhost:11434` 的 Ollama endpoint。`providerConfigs` 默认为空 map；每一项包含 `endpointUrl` 和 `enabled`，序列化键为同名字段（`Manifold.Core/SettingsManager.cpp:11-16, 34-72`）。
+`AppSettings` 默认把 Gemini 设为活动 Provider，同时给出一份默认 Gemini 模型、默认 Proxy URL 和指向 `http://localhost:11434` 的 Ollama endpoint；`providerConfigs` 初始为空，每一项保存 endpoint 地址与启用标志，序列化键和字段同名（`Manifold.Core/SettingsManager.cpp:11-16, 34-72`）。
 
 启动时，内置 Provider 总是注册；Proxy 只要 `proxyUrl` 非空就注册；兼容 Provider 只有在 `enabled` 为真且 endpoint 非空时注册；Ollama 只要 endpoint 非空就注册。当前默认 Proxy URL 是示例域名，因此按默认设置会尝试注册 Proxy（`SettingsManager.h:45-50`；`MainWindow.xaml.cpp:133-155`）。
 
@@ -83,15 +83,22 @@ Manifold Desktop 的“渠道”主要是启动时放入 `ProviderRegistry` 的 
 
 本仓库没有独立 CLI 入口、参数解析依赖或 TUI 框架。C++ 的 ConPTY 终端可以启动 `cmd.exe` 或 PowerShell，并把用户输入转发给 Shell；搜索到的“CLI”注释属于终端进程管理，不是渠道管理。
 
-`frontend/` 是嵌入 Windows 桌面程序的 WebView2 页面，不是独立 Web 管理站点。独立 `server/` 是 Express Proxy 样例，提供 `/health`、`/v1/models`、`/v1/chat` 和配额相关路由；没有 Provider CRUD、渠道开关、配置导入导出或管理认证。服务器中的 `/v1/models` 返回 Gemini 模型列表，不能查看桌面客户端的 `providerConfigs`（`server/src/index.js:19-26`；`server/src/routes/models.js:6-12`）。
+- 前端资源随 Windows 桌面程序内的 WebView2 加载，没有独立的 Web 管理站点。
+- 仓库中的 `server/` 是 Express 编写的 Proxy 样例，暴露健康检查、模型列表和聊天转发三类路由及配额逻辑，没有 Provider 的增删改查、渠道开关、配置导入导出或管理认证。
+- 服务器上的模型列表返回自己的 Gemini 模型目录，读不到桌面客户端的 `providerConfigs`（`server/src/index.js:19-26`；`server/src/routes/models.js:6-12`）。
 
 ## 3. 凭据、Header 与代理边界
 
-API Key 不写入 `settings.json`。`CredentialManager` 使用 Windows Credential Manager 的 generic credential，目标名为 `Manifold_` 加 Provider ID；桌面端前端只收到 Key 是否存在的布尔值，保存时把明文从输入框通过 WebView2 消息传到 C++，请求前再由 C++ 取出并放入 `ChatRequest::apiKey`（`CredentialManager.cpp:47-87`；`MainWindow.xaml.cpp:300-315, 496-505, 770-777`）。仓库 README 和代码都表明使用 Windows 凭据存储；本次未运行验证 Windows Credential Manager 的实际系统保护行为。
+API Key 交由 Windows Credential Manager 保管，`settings.json` 记录的是设置项，两者分开存放。桌面端为每个 Provider ID 建一条 generic credential，目标名是 `Manifold_` 加 Provider ID，前端只能读到 Key 是否存在的布尔值；保存时明文从输入框经 WebView2 消息传到 C++，请求前再由 C++ 取出放进聊天请求的 `apiKey` 字段（`CredentialManager.cpp:47-87`；`MainWindow.xaml.cpp:300-315, 496-505, 770-777`）。仓库 README 和代码都表明使用 Windows 凭据存储；本次未运行验证 Windows Credential Manager 的实际系统保护行为。
 
-设置页的密码输入框保存后会清空，并将 placeholder 改为 `Key saved`；没有显示、编辑或单独删除按钮。向 `SET_API_KEY` 发送空字符串会调用 `DeleteApiKey`，因此“清空 Key”是已确认的删除凭据入口（`frontend/components/settings-panel.js:243-255`；`MainWindow.xaml.cpp:496-505`）。源码未找到请求日志、导出流程或错误消息中对 Key 的显式脱敏处理；正常 Provider 列表和 `HOST_READY` 不返回 Key 正文。
+设置页的密码输入框保存后会清空，占位提示变成 `Key saved`，页面上没有查看、编辑或单独删除 Key 的按钮。要清除已有 Key，可以给 `SET_API_KEY` 发一条空字符串消息，C++ 端据此调用凭据删除方法，这是本次确认的清除 Key 路径（`frontend/components/settings-panel.js:243-255`；`MainWindow.xaml.cpp:496-505`）。源码里没有找到请求日志、导出流程或错误消息对 Key 的显式脱敏处理；正常 Provider 列表和 `HOST_READY` 都不回传 Key 正文。
 
-OpenAI 使用 `Authorization: Bearer`，Anthropic 使用 `x-api-key` 和 `anthropic-version`，Gemini 把 Key 放在 URL 查询参数；OpenAI-compatible 继承 OpenAI 的请求组装。Proxy 通过 `X-Manifold-Device-ID` 添加设备 ID，但继承 OpenAI-compatible 的路径和 SSE 解析（`OpenAIProvider.cpp:16-18, 121-142`；`AnthropicProvider.cpp:15-19, 103-108`；`GeminiProvider.cpp:125-146`；`ProxyProvider.cpp:7-10, 40-42`）。
+- OpenAI 走 `Authorization: Bearer`。
+- Anthropic 同时带 `x-api-key` 和 `anthropic-version`。
+- Gemini 把 Key 拼进 URL 查询参数。
+- OpenAI-compatible 沿用 OpenAI 的组装方式；Proxy 在兼容协议上追加 `X-Manifold-Device-ID` 设备 ID，路径与 SSE 解析沿用 OpenAI-compatible 实现。
+
+源码定位：`OpenAIProvider.cpp:16-18, 121-142`、`AnthropicProvider.cpp:15-19, 103-108`、`GeminiProvider.cpp:125-146`、`ProxyProvider.cpp:7-10, 40-42`。
 
 ## 4. 模型目录与能力元数据
 
@@ -121,7 +128,7 @@ Proxy 优先请求其 `/v1/models` 并把结果标为免费；请求失败时退
 
 聊天消息携带 Provider ID 和模型 ID。C++ 端按 Provider ID 从启动时的 `ProviderRegistry` 查找实例；未找到时向前端发送 `CHAT_ERROR`。API Key 也按相同 Provider ID 查询，因此配置 map 的 key 同时承担渠道实例 ID 和凭据命名空间的作用（`MainWindow.xaml.cpp:759-777`）。
 
-前端输入栏切换 Provider 后才请求该 Provider 的模型列表；当前 `populateProviders()` 和 `populateProviderOptions()` 默认请求列表第一项的模型，随后用全局 `settings.model` 尝试选中模型。`activeProviderId` 会被写入设置 schema，但本次查看到的输入栏发送逻辑直接使用选择器值，未找到依据 `activeProviderId` 自动恢复选择器的代码（`frontend/components/input-bar.js:193-235`）。
+输入栏在切换 Provider 时才请求该 Provider 的模型列表；两个填充函数默认取列表第一项的模型，再用全局 `settings.model` 去匹配选择器里的模型。`activeProviderId` 会写进设置 schema，本次看到的发送逻辑直接用选择器当前值，没有找到依据它自动恢复选择的代码（`frontend/components/input-bar.js:193-235`）。
 
 未找到 Provider 别名、按模型语义路由、负载均衡、同一渠道多 Key 轮询或跨 Provider 自动故障转移。Compare 功能是前端固定 Gemini 和 OpenAI 两个槽位的并行请求，不是通用渠道路由或 failover（`frontend/app.js:161-173`；`MainWindow.xaml.cpp` 中的 compare 处理入口）。
 
@@ -138,7 +145,7 @@ Proxy 优先请求其 `/v1/models` 并把结果标为免费；请求失败时退
 
 Provider 列表会暴露 `requiresApiKey`、流式和工具支持标志，以及模型目录；Key 只暴露存在性。聊天完成消息包含 prompt/completion token 和 finish reason，前端 `pricing.js` 另以静态价格表和 localStorage 做估算；本次未找到渠道级请求日志、HTTP 延迟、状态历史或统一错误分类。
 
-独立 Proxy 的 `/health` 只返回 Express 进程的 `status: ok`，不检查 Gemini Key、上游网络或模型请求。服务器代码把 Gemini SSE 原样转发到 `/v1/chat`，而桌面 Proxy Provider 继承的是 OpenAI-compatible 的 `/v1/chat/completions` 路径；两者路由和响应协议的差异按源码确认，未做网络运行验证（`server/src/index.js:19-26`；`server/src/routes/chat.js:8-47`；`ProxyProvider.cpp:7-10`）。
+独立 Proxy 的健康检查端点只回报 Express 进程存活，返回体里 status 字段固定为 ok；Gemini Key、上游网络和模型请求的状态需要另行确认。服务器把 Gemini SSE 原样转发到 `/v1/chat`，桌面 Proxy Provider 走的是 OpenAI-compatible 的 `/v1/chat/completions`，两处路由与响应协议的差异按源码确认，未做网络运行验证（`server/src/index.js:19-26`；`server/src/routes/chat.js:8-47`；`ProxyProvider.cpp:7-10`）。
 
 ## 9. 设计取舍与已确认边界
 

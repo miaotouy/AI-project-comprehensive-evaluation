@@ -16,15 +16,15 @@
 
 Open WebUI v0.11.3 的「Agent 角色」载体是**自定义模型（Workspace Models）**：一个模型条目 = 上游基础模型 + system prompt + 推理参数 + 知识引用 + 工具/技能/过滤器绑定 + 访问授权。没有独立的 persona 实体。
 
-- `Model` 表在 v0.11.3 已是 8 列（models/models.py 114-127 行，列名见 1.1）；旧版的 `system`、`files`、`modelfile`、`meta_categories` 独立字段已删除——system prompt 现在存于 `params.system`，知识库改为 `meta.knowledge` 引用列表，`access_control` 被独立的 `access_grants` 表取代；
-- 自定义模型有两种形态（utils/models.py 157-242 行）：**Override（覆盖型）** 不设 `base_model_id`，沿用上游模型的同一个 id 只覆盖 name/info；**Preset（预设型）** `base_model_id` 指向上游，生成全新 id 且列表带 `preset: true`；
-- 模型 id 语法：本版本**没有** `user/modelid` 前缀，也没有旧式 `"model-id:params"` 内联参数语法；id 是用户名的 slug 化（ModelEditor.svelte 69-76 行），限长 256（routers/models.py 91-92 行），参数一律存 DB、由服务端合并应用；
-- 生效链路是**双层合并**：
-  - 请求侧：前端请求带 `params`，经 `main.py` 按「全局默认 < 模型 params < 请求 params」三层合并（1086-1097 行），`process_chat_payload` 捕获 `system`（middleware.py 2286-2289 行）；
-  - 注入侧：真正的注入在**路由层**——openai/ollama 端点各自按 `model_id` 重新读 DB 后应用参数与 system prompt（routers/openai.py 1210-1232 行、routers/ollama.py 1124-1141 行），即「persona 的权威来源是 DB，不是前端缓存」；
-- 权限是核心安全机制：模型 `params`（含 system prompt）对**只读调用者直接剥空**（routers/models.py 197-200、540-547 行）；写操作要求 owner、write-grant 或 admin；`BYPASS_MODEL_ACCESS_CONTROL`、`BYPASS_ADMIN_ACCESS_CONTROL` 两个环境变量可全局绕过；
-- 工具/能力默认全部开启：`capabilities` 与 `builtinTools` 缺失时默认 True（utils/tools.py 533-540 行），前端 `DEFAULT_CAPABILITIES` 同名默认（constants.ts 100-113 行）；没有 per-model 的 "eval" 开关——Evaluation 是独立的竞技场功能；
-- system prompt 支持变量模板：`resolve_system_prompt`（utils/payload.py 13-39 行）依次渲染聊天变量、用户变量、元数据变量，最后是旧式 `{{ }}` 模板；模型 system 在出站时**前置拼接**到已有 system message 之前（`add_or_update_system_message`，utils/misc.py 580-596 行），实现「模型人设 + 聊天级 system 并存」。
+- `Model` 表在 v0.11.3 已收敛为 8 列（`models/models.py:114-127`，列名见 1.1）：旧版四个独立字段（system、files、modelfile、meta_categories）全部删除，system prompt、知识引用与访问控制分别改由 params.system、meta.knowledge 与独立的 access_grants 表承担；
+- 列表解析把自定义模型分成两种形态（`utils/models.py:157-242`）：**Override（覆盖型）** 不设 `base_model_id`，沿用上游模型的同一个 id，只覆盖名称与描述；**Preset（预设型）** 用 `base_model_id` 指向上游模型，生成全新 id，列表条目上带 `preset: true`；
+- 模型 id 由用户名 slug 化生成（`ModelEditor.svelte:69-76`），限长 256（`routers/models.py:91-92`）；本版本没有 `user/modelid` 这样的前缀，旧式 `"model-id:params"` 内联参数语法也已取消，参数一律存 DB、由服务端合并后应用；
+- 生效链路分请求与注入两层：
+  - 请求侧：前端请求带上参数，main.py 按「全局默认 < 模型 params < 请求 params」做三层合并（`main.py:1086-1097`），随后 `process_chat_payload` 从中捕获 system 字段（`middleware.py:2286-2289`）；
+  - 注入侧：真正的注入发生在路由层，openai 与 ollama 两个端点各自按 `model_id` 重读 DB，再应用参数与 system prompt（`routers/openai.py:1210-1232`、`routers/ollama.py:1124-1141`），每轮请求的 persona 都以 DB 记录为准；
+- 权限是核心安全机制：只读调用者拿到的模型 `params`（含 system prompt）会被直接剥空（`routers/models.py:197-200、540-547`），写操作要求 owner、write-grant 或 admin 之一，`BYPASS_MODEL_ACCESS_CONTROL` 与 `BYPASS_ADMIN_ACCESS_CONTROL` 两个环境变量可整体绕过这层判断；
+- 工具与能力默认开启：`capabilities` 与 `builtinTools` 缺失时按 True 处理（`utils/tools.py:533-540`），前端 `DEFAULT_CAPABILITIES` 使用同一组缺省值（`constants.ts:100-113`）；每个模型没有单独的 "eval" 开关，Evaluation 属于独立的竞技场功能；
+- system prompt 支持变量模板：`resolve_system_prompt` 先渲染聊天变量、用户变量与元数据变量，最后套用旧式 `{{ }}` 模板（`utils/payload.py:13-39`）；模型 system 在出站时前置拼接到已有 system message 之前（`utils/misc.py:580-596`），聊天级 system 与模型人设因此可以并存。
 
 ## 1. 数据模型
 
@@ -46,18 +46,18 @@ Open WebUI v0.11.3 的「Agent 角色」载体是**自定义模型（Workspace M
 
 ### 1.2 存储层（ModelsTable，184-654 行）
 
-- `insert_new_model`（208-231 行）：写表 + `AccessGrants.set_access_grants`；
-- `get_base_models`（290-302 行）：`base_model_id IS NULL` 即「上游模型行」；
-- `search_models`（336-444 行）：分页、模糊匹配名称/基础模型/用户、SQL 级访问过滤（367-373 行）、tag 按 JSON 文本模式匹配（SQLite/PostgreSQL 两种转义）、按名称或时间排序；
-- `sync_models`（593-651 行）：外部同步（差量 upsert + 删除）。
+- 新增模型时，`insert_new_model` 先写模型表，再调用授权模块为它建立访问记录（`models/models.py:208-231`）；
+- 上游模型行的判定条件是 `base_model_id` 为空，`get_base_models` 据此列出基础模型（`models/models.py:290-302`）；
+- 搜索由 `search_models` 承担：分页、按名称/基础模型/用户模糊匹配、按名称或时间排序，访问过滤下沉到 SQL，tag 过滤按 JSON 文本模式匹配并为 SQLite 与 PostgreSQL 各写一套转义（`models/models.py:336-444`）；
+- `sync_models` 负责与外部来源同步，按差量执行 upsert 与删除（`models/models.py:593-651`）。
 
 ### 1.3 默认/内置模型
 
 无内置预设表。管理员的全局默认来自 Config keys（config.py 1633-1697、3047-3052 行）：
 
-- `models.default_metadata`（env `DEFAULT_MODEL_METADATA`）→ 合并进每个模型的 `info.meta`，capabilities 以「默认打底、模型覆盖」（utils/models.py 312-331 行）；
-- `models.default_params`（env `DEFAULT_MODEL_PARAMS`）→ 作为每个模型 params 的基线（main.py 1087 行）；
-- Arena 评估模型也是配置（`evaluation.arena.enable/models`，config.py 3077-3078 行）。
+- 全局默认元数据来自配置项 `models.default_metadata`（环境变量 `DEFAULT_MODEL_METADATA`），列表解析时合并进每个模型的 `info.meta`，capabilities 按「默认打底、模型覆盖」处理（`utils/models.py:312-331`）；
+- 默认推理参数来自 `models.default_params`（环境变量 `DEFAULT_MODEL_PARAMS`），作为每个模型参数合并的基线（`main.py:1087`）；
+- Arena 评估所用的模型同为配置项，键分别是 `evaluation.arena.enable` 与 `evaluation.arena.models`（`config.py:3077-3078`）。
 
 ## 2. 路由与 API（routers/models.py）
 
@@ -75,13 +75,18 @@ Open WebUI v0.11.3 的「Agent 角色」载体是**自定义模型（Workspace M
 
 ### 前端
 
-- 聊天选择器：`src/lib/components/chat/ModelSelector.svelte`（items 直接来自 `$models` store，取 `model.id/name`，支持多选/固定/设为默认，47-86 行）；子组件 `ModelItemMenu.svelte` 跳编辑页（48-67 行）；
-- 用户创建页：`src/lib/components/workspace/Models.svelte` + `Models/ModelEditor.svelte`。ID 由名字 slug 化（69-76 行）；提交时把下列绑定全部塞进 `meta`，`system` 单独塞 `params.system` 并清空空值（261-366 行）：
-  - 工具类：`toolIds`、`builtinTools`；
-  - 技能与过滤器：`skillIds`、`filterIds`、`defaultFilterIds`；
-  - 动作与默认功能：`actionIds`、`defaultFeatureIds`；
-  - 其他：`terminalId`、`knowledge`、`access_grants`；
-  - 管理员页：`Settings/Models.svelte`（列表、启用/禁用、排序拖拽、Public/Shared/Private 徽章；列表加载时另并入 provider 模型目录 `getModels(token, null, true)`，以覆盖被隐藏/停用的上游条目，269-280 行）；`Settings/Models/ModelDefaultsPanel.svelte` 通过 `getModelsConfig/setModelsConfig` 读写 `DEFAULT_MODEL_METADATA`/`DEFAULT_MODEL_PARAMS`（82-116 行）。
+- 聊天选择器的选项直接取自 `$models` store，每个条目只取 id 与名称，支持多选、固定和设为默认（`src/lib/components/chat/ModelSelector.svelte:47-86`）；同级菜单组件负责从条目跳转到编辑页（`ModelItemMenu.svelte:48-67`）；
+- 用户创建页分两层：`src/lib/components/workspace/Models.svelte` 负责列表，`src/lib/components/workspace/Models/ModelEditor.svelte` 负责编辑表单。id 随名称输入做 slug 化，提交时按类别把各类绑定写进 `meta`，system prompt 单独写入 `params.system` 并清掉空值（`ModelEditor.svelte:69-76、261-366`）：
+
+| 绑定类别 | 写入 `meta` 的字段 |
+|---|---|
+| 工具 | `toolIds`、`builtinTools` |
+| 技能与过滤器 | `skillIds`、`filterIds`、`defaultFilterIds` |
+| 动作与默认功能 | `actionIds`、`defaultFeatureIds` |
+| 其他 | `terminalId`、`knowledge`、`access_grants` |
+
+  - 管理员页 `src/lib/components/admin/Settings/Models.svelte` 提供模型列表、启用/禁用、拖拽排序和 Public/Shared/Private 徽章；加载列表时另通过 `getModels(token, null, true)` 并入 provider 模型目录，以覆盖被隐藏或停用的上游条目（`:269-280`）；
+  - 同一目录下的默认值面板 ModelDefaultsPanel.svelte 通过配置读写接口维护 `DEFAULT_MODEL_METADATA` 与 `DEFAULT_MODEL_PARAMS` 两组全局默认（`:82-116`）。
 
 ## 3. 模型解析与生效
 
@@ -101,16 +106,16 @@ Ollama 基线查找：id.split(':')[0] 登记 + 精确 id 登记，精确优先�
 
 ### 3.2 访问控制
 
-- `check_model_access`（utils/models.py 431-472 行）：arena 读 `meta.access_grants`；普通模型查 `AccessGrants.has_access(read)` 与 `has_base_model_access`，沿 `base_model_id` 链逐跳校验（utils/access_control/__init__.py 301-339 行，中间无 DB 行的基模型只放行 admin）；
-- `get_filtered_models`（475-529 行）：用户或 admin（未开 BYPASS）且未开 `BYPASS_MODEL_ACCESS_CONTROL` 时，只返回 owner/可读/admin 的模型；
+- `check_model_access` 决定某个用户能否使用某个模型（`utils/models.py:431-472`）：arena 虚拟模型直接读 `meta.access_grants`；普通模型先检查模型自身的可读性，再沿 `base_model_id` 链逐跳校验每一层基模型，链上中间那层若没有 DB 记录则只对 admin 放行（`utils/access_control/__init__.py:301-339`）；
+- 列表返回前还会再过滤一轮：当请求者是普通用户，或管理员没有开启全局 BYPASS，且 `BYPASS_MODEL_ACCESS_CONTROL` 也未开启时，结果只保留自己拥有的、可读的或自己有管理权限的模型（`utils/models.py:475-529`）；
 - grant 模型：`AccessGrants` 表 `principal_type ∈ user/group/anyone`，`principal_id='*'` 为公开；空列表=私有；旧 `access_control` dict 有自动迁移（access_control/__init__.py 179-217 行）。
 
 ## 4. 角色在聊天请求中的生效链路
 
 ### 4.1 前端（Chat.svelte 3124-3192 行）
 
-- `model.info.params.stream_response` 决定流式（3032-3036 行）；`params.system || $settings.system` 作为 `messages[0]` 发送（3039-3043 行）；
-- 选中模型时从 `model.info.meta` 读工具、技能、默认过滤器、默认功能与终端等绑定（762-844 行）；`features`（web_search/image_generation/code_interpreter/memory）按 `capabilities` 与用户权限生成（816-841 行）。
+- 发请求前，前端先看模型参数里的流式开关决定是否按流式返回（`Chat.svelte:3032-3036`）；首条 system message 取模型的 `params.system`，模型未配置时回落到用户全局设置（`Chat.svelte:3039-3043`）；
+- 选中模型时，聊天页从 `model.info.meta` 读取工具、技能、默认过滤器、默认功能与终端绑定，并按模型能力与用户权限生成功能开关，覆盖联网搜索、图像生成、代码解释器与记忆四项（`Chat.svelte:762-844`）。
 
 ### 4.2 后端合并（main.py 1052 行起）
 
@@ -124,36 +129,40 @@ Models.get_model_by_id(model_id)（1074）
 
 ### 4.3 路由层注入（权威来源）
 
-- `routers/openai.py generate_chat_completion`（1182 行起）的注入顺序：
-  1. 按 `base_model_id` 改写 `payload['model']`（1214-1219 行）；
-  2. 取出并弹出 `system`（1224 行）；
-  3. 应用模型参数 `apply_model_params_to_body_openai`（1226 行）；
-  4. 非 `bypass_system_prompt` 时应用 `apply_system_prompt_to_body`（1227-1228 行）；
-  5. `check_model_access`（1230 行）。
-- `routers/ollama.py generate_chat_completion`（1086-1160 行）：同样逻辑，参数应用为 `apply_model_params_to_body_ollama`（1132-1137 行）；
-- `utils/payload.py` 的处理函数：
-  - `resolve_system_prompt`（13-39 行）：渲染变量；
-  - `apply_model_params_to_body_openai/ollama`（108-219 行）：参数类型强转、`max_tokens→num_predict`、`custom_params` JSON 解析、Ollama 根级 `format/keep_alive/think` 提升（205-215 行）；
-  - `remove_open_webui_params`（81-104 行）：剔除 `stream_response`、`function_calling`、`reasoning_tags`、`system` 等内部字段。
+- openai 端点的 `generate_chat_completion` 在一次请求里依次完成五件事（`routers/openai.py:1182-1230`）：
+  1. 按 `base_model_id` 改写请求体里的模型名；
+  2. 取出 `system` 并从参数中弹出；
+  3. 用 `apply_model_params_to_body_openai` 把模型参数写进请求体；
+  4. 未设置 `bypass_system_prompt` 时，用 `apply_system_prompt_to_body` 注入 system prompt；
+  5. 做一次 `check_model_access` 校验。
+- ollama 端点走同样的顺序（`routers/ollama.py:1086-1160`），参数应用换成 `apply_model_params_to_body_ollama`；
+- 参数与 system 的实际处理都在 `utils/payload.py`，按职责分成三块：
+  - `resolve_system_prompt` 按聊天、用户、元数据三层渲染变量模板（`utils/payload.py:13-39`）；
+  - 参数应用函数把模型参数写进上游请求体：做类型强转，把 max_tokens 改名为 num_predict，解析 custom_params 里的 JSON，并把 Ollama 侧的 format、keep_alive、think 三项提升到请求体根级（`utils/payload.py:108-215`）；
+  - 写请求体前还会先剔掉 stream_response、function_calling、reasoning_tags、system 等 WebUI 内部字段（`utils/payload.py:81-104`）。
 
 ### 4.4 middleware 中的角色处理（process_chat_payload 2248-2987 行）
 
-- arena 子模型随机解析（2260-2284 行）；
-- 捕获 `model_system_prompt` 后再 pop params（2286-2289 行）；
-- 文件夹级 system_prompt 注入（2449-2450 行）；
-- 知识注入按模式分流：legacy 模式下模型 `meta.knowledge` 展开成 `files` 做 RAG（2462-2502 行）；native FC 模式下知识走内置工具 `query_knowledge_files`（utils/tools.py 602-638 行），`get_attached_knowledge` 汇总模型/聊天/笔记三处知识（460-517 行）；
-- 技能 `<skill>` 注入 / `<available_skills>` 清单（2607-2685 行）；
-- 内置工具按能力注入（2888-2900 行）；
-- 模型 system 解析后**前置拼接**到已有 system message 内容，存入 `metadata['system_prompt']`（2937-2948 行），供子代理/定时器/工具循环还原用（main.py 1692、utils/subagents.py 321、utils/timers.py 111 行）。
+- arena 场景先用随机子模型替换请求模型（`middleware.py:2260-2284`）；
+- 把模型自带的 system prompt 捕获到 `model_system_prompt` 后从参数里弹出，避免后续重复注入（`middleware.py:2286-2289`）；
+- 若当前对话挂在某个文件夹下，再叠加文件夹级 system prompt（`middleware.py:2449-2450`）；
+- 知识注入按模式分流：legacy 模式把模型的知识引用展开成文件列表走 RAG，native FC 模式改调内置的知识检索工具，模型、聊天、笔记三处挂载的知识先汇总再注入（`middleware.py:2462-2502`，工具实现见 `utils/tools.py`）；
+- 技能以 `<skill>` 片段与 `<available_skills>` 清单的形式注入（`middleware.py:2607-2685`）；
+- 内置工具按模型启用的能力逐项注入（`middleware.py:2888-2900`）；
+- 模型 system 解析后前置拼接到已有 system message 之前，结果存入 `metadata['system_prompt']`，供子代理、定时器和工具循环还原人设时取用（`middleware.py:2937-2948`，下游取用见 `main.py`、`utils/subagents.py`、`utils/timers.py`）。
 
 ## 5. System prompt 处理
 
-- `utils/misc.py` 的系统消息工具：
-  - `get_system_message`（514-518 行）：取系统消息；
-  - `replace_system_message_content`（572-577 行）：替换内容；
-  - `add_or_update_system_message`（580-596 行）：`append=False` 时前置；
-  - `update_message_content`（556-569 行）：更新内容；
-  - `merge_system_messages`（529-553 行）：多个 system 合并到位置 0，兼容 Qwen 等模板；
+- `utils/misc.py` 的一组工具函数负责系统消息的取值、替换、更新与合并，五个函数都位于 `utils/misc.py:514-596`：
+
+| 函数 | 行为 |
+|---|---|
+| `get_system_message` | 取当前系统消息 |
+| `replace_system_message_content` | 替换系统消息内容 |
+| `update_message_content` | 更新消息内容 |
+| `merge_system_messages` | 多条 system message 合并到位置 0，兼容 Qwen 等模板 |
+| `add_or_update_system_message` | `append=False` 时前置写入 |
+
 - `utils/task.py`：`prompt_template`（旧式 API `{{ ... }}`）、`prompt_variables_template`（WebUI 元数据变量）——由 `resolve_system_prompt` 串联；
 - Chat Controls（用户侧 system）走 `apply_system_prompt_to_body(..., replace=True)` 渲染变量后替换（middleware.py 2387-2394 行）；
 - Ollama 侧：system 若落在 options 里会被提升为根级 `system` 字段（payload.py 361-366 行）。
@@ -192,13 +201,13 @@ Models.get_model_by_id(model_id)（1074）
 
 会话与消息两层的持久化结构：
 
-- chat 表（`backend/open_webui/models/chats.py:70-102`）的 `chat` JSON 列保存 `{id, title, models, history, params, files}`（model id 存于 `chatContent.models`，无独立列），另有 `meta/variables/tasks/summary/current_message_id` 列；前端加载后据此恢复（`src/lib/components/chat/Chat.svelte:1992-2026`），后端合并保存（`routers/chats.py:1358-1366`）；
-- chat_message 表（`models/chat_messages.py:128-172`）：assistant 消息有 `model_id` 列（:145），另有 `content/output/files/sources/embeds/meta/usage` 等 JSON 列，但**无 params 快照列**，`meta` 只存内部标记（timer/delegation/status）。
+- chat 表用一个 chat JSON 列保存整段会话（id、title、models、history、params、files 六组），模型 id 藏在 `chatContent.models` 里，没有独立列；同表另有元数据、变量、任务、摘要和当前消息指针等列，表结构见 `models/chats.py:70-102`。前端加载会话时据此恢复（`Chat.svelte:1992-2026`），保存时由后端合并写入（`routers/chats.py:1358-1366`）；
+- chat_message 表的 assistant 消息带 `model_id` 列，正文、输出、附件、来源、嵌入与用量等内容都放在 JSON 列里，没有 params 快照列，`meta` 只记录定时器、委派、状态这类内部标记（`models/chat_messages.py:128-172`）。
 
-- **chat 级 params 是用户侧覆盖**：Chat Controls 写入的 `chat.params`（Chat.svelte:3130-3134 把用户设置、聊天参数与 stop 合并进请求体）随 chat JSON 保存并随请求发送，与模型 params 并存（模型侧出站前置拼接）；chat 表不保存模型 system prompt 快照，模型 system 的权威来源仍是 DB（`routers/openai.py:1210-1232`）。
-- **regenerate 是纯前端实现**：后端无 regenerate API（仅权限开关 `regenerate_response`，config.py:1967）；`Chat.svelte:3380` 的 `regenerateResponse` 复用父 user 消息 id 调 `sendMessage`，生成**新 uuid 的 assistant 消息**追加到 `parent.childrenIds`（Chat.svelte:2809-2844），即新建兄弟分支、不替换原消息；
-- 多模型对话用 `message.model/modelIdx` 恢复列（:3402-3408）。
-- **开场白与提示词分组不存在**：Workspace Model 无 greeting/opening 字段（后端 .py 全量 grep 无模型侧命中），空聊天的 Suggestions/Placeholder 是静态引导 UI；`params.system` 是单一 textarea（ModelEditor.svelte:78、427），无多段/逐段启停；模型整体导入/导出存在（routers/models.py:315-502），但无段级导入导出。
+- **chat 级 params 是用户侧的覆盖层**：Chat Controls 把用户设置、聊天参数与 stop 合并进请求体（`Chat.svelte:3130-3134`），这份 `chat.params` 随会话 JSON 一起保存，也随每次请求发送，与模型自带的参数并存。会话表不存模型 system prompt 的快照，每轮注入仍按 `model_id` 从 DB 取（`routers/openai.py:1210-1232`）。
+- **重新生成由前端完成**：后端没有 regenerate 接口，只有 `regenerate_response` 这一个权限开关（`config.py:1967`）。前端复用父级 user 消息的 id 再调一次发送流程（`Chat.svelte:3380`），结果是一条新 uuid 的 assistant 消息追加进 `parent.childrenIds`（`Chat.svelte:2809-2844`），形成新的兄弟分支，原消息保留；
+- 多模型对话的回复靠 `message.model` 与 `modelIdx` 两个字段恢复（`Chat.svelte:3402-3408`）。
+- **开场白与提示词分组**：Workspace Model 没有 greeting 或 opening 字段，后端 Python 代码全量搜索也没有模型侧命中；空聊天页的 Suggestions 与 Placeholder 属于静态引导 UI。`params.system` 是单个 textarea（`ModelEditor.svelte:78、427`），没有多段或逐段启停；模型可以整体导入导出（`routers/models.py:315-502`），没有段级导入导出。
 
 ## 9. 关键源码索引
 

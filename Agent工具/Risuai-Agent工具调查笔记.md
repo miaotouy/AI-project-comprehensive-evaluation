@@ -14,12 +14,12 @@
 
 ## 结论摘要
 
-1. RisuAI 的 Agent 工具面完全以 MCP 为骨架，没有独立于 MCP 的函数注册表。工具来源共四类：模块声明的远程 HTTP(S)/SSE MCP 服务器、内置 internal 前缀客户端（文件、角色与模块访问、LLM 直调、搜索、图记忆、骰子）、插件经 `registerMCP` 注册的 plugin 模块，以及 OpenAI Responses 请求体里由 `db.modelTools` 开关控制的 `web_search_preview`。
-2. 发现与注入没有任何过滤：主聊天请求不传工具参数，请求入口每请求拉取全部已激活 MCP 的工具，注入 OpenAI 兼容、Responses、Anthropic、Google 四类请求体（`request.ts:208`）。无模型能力判定、无按会话裁剪、无 token 预算、无去重。
-3. 模型协议是各家原生结构化字段；应用另有一套 `<tool_call>` 文本标签只用于持久化：调用与结果按 ID 存入 localforage，消息文本里只留引用，下一轮请求再解码还原成结构化格式。模型从不直接输出该标签。
-4. 编排循环没有统一驱动者：四条 provider 链各自为政。非流式路径靠请求函数递归调用自己；流式路径在 `wrapToolStream` 这类流包装器内于流结束时执行工具并内联续请求（重新 fetch 后继续读新流）。工具串行执行、无并发、未找到任何迭代上限；续请求失败按 `db.requestRetrys`（默认 2）重试后以已有结果收尾。
-5. 审批只存在于 `internal:risuai` 的写/删类工具：执行端 handler 在真正变更前弹 `alertConfirm`，拒绝则返回 "Access denied by user." 文本结果。其余所有工具（含文件写入、远程 MCP、插件 MCP）无任何审批。
-6. 所有工具都在前端 JS 上下文执行：远程 MCP 走 `fetchNative`（桌面经 Tauri Rust 侧 `streamed_fetch`，web 走 CORS 代理），stdio MCP 仅桌面可用、经 Tauri shell 插件启动子进程，内置客户端直接操作浏览器 API 与数据库。
+1. RisuAI 的 Agent 工具面完全以 MCP 为骨架，没有独立于 MCP 的函数注册表。工具来源分四类：模块声明的远程 HTTP(S) 与 SSE MCP 服务器；内置的 internal 前缀客户端，覆盖文件、角色与模块访问、LLM 直调、搜索、图记忆和骰子；插件通过 v3 API 的 `registerMCP` 注册的 plugin 模块；以及 OpenAI Responses 请求体里受 `db.modelTools` 开关控制的 `web_search_preview`。
+2. 发现与注入环节没有任何过滤：主聊天请求不携带工具参数，请求入口在每次调用时拉取全部已激活 MCP 的工具，再注入 OpenAI 兼容、Responses、Anthropic、Google 四类请求体。这条链路上没有额外的收敛条件：既无模型能力判定，也无按会话裁剪、token 预算或去重（`request.ts:208`）。
+3. 模型侧走各家原生的结构化字段；应用另有一套 `<tool_call>` 文本标签，只承担持久化职责——调用与结果按 ID 存进 localforage，消息文本里只留这句引用，下一轮请求再解码回结构化格式。该标签由应用写入，模型从不直接输出。
+4. 编排循环由四条 provider 链各自维护，没有统一驱动者。非流式路径在请求函数内部递归调用自身；流式路径把工具执行放进 `wrapToolStream` 这类流包装器，流结束时执行工具并就地发起续请求，重新 fetch 后继续读新流。工具按模型返回顺序串行执行，没有并发，本次也未找到迭代上限；续请求失败按 `db.requestRetrys`（默认 2）重试，仍失败则以已拿到的结果收尾。
+5. 审批只覆盖 `internal:risuai` 的写/删类工具：这些工具的 handler 在真正改动数据前弹出确认框（`alertConfirm`），用户拒绝就回一条 "Access denied by user." 文本结果，数据保持原样。文件写入、远程 MCP、插件 MCP 等其余工具都没有审批环节。
+6. 所有工具都在前端 JS 上下文里执行。远程 MCP 的请求经 `fetchNative` 发出，桌面端交给 Tauri Rust 侧的 `streamed_fetch`，web 端走 CORS 代理；stdio MCP 只在桌面可用，由 Tauri shell 插件启动子进程；内置客户端直接操作浏览器 API 与数据库。
 
 ## 总体调用链
 
@@ -47,7 +47,7 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 **远程 MCP 服务器**（http/https 前缀）：`MCPClient`（`mcplib.ts:80-860`）自实现 JSON-RPC 2.0 客户端——`initialize` 握手优先 2025-03-26 streamable HTTP，404 时回退 2024-11-05 的 SSE 传输；401 触发 OAuth 授权码流程（PKCE，刷新令牌持久化到 `DBState.db.authRefreshes`）；`tools/list` 支持游标分页。除协议版本必须为上述两个之一外，握手结果无其他校验。
 
-**stdio MCP**（`stdio:` 前缀 + JSON 配置）：仅 `isTauri` 时允许；`Command.create` 启动子进程，先做最多 10 次、每次 1 秒的 ping-pong 探测，stdout 逐行 JSON 解析，`onDestroy` 时 `child.kill()`（`mcp.ts:91-183`）。
+**stdio MCP**（`stdio:` 前缀 + JSON 配置）：只在桌面端可用，即 isTauri 为真时。客户端用 `Command.create` 拉起子进程，先做最多 10 次、每次 1 秒的 ping-pong 探测，之后按行解析 stdout 上的 JSON，销毁时调用 `child.kill()` 结束进程（`mcp.ts:91-183`）。
 
 **内置 internal 客户端**：按前缀 switch 实例化六个 `MCPClientLike` 子类（`mcp.ts:45-77`）：
 
@@ -74,9 +74,12 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 四类格式的注入点相同，schema 都经 `simplifySchema` 规整（util.ts:1125-1200：type 转小写、数组 type 中的 null 提升为 nullable、保留 required/enum/format/anyOf）后写入请求体：
 
-- OpenAI 兼容与 Responses：`body.tools`（requests.ts:474-485、responses.ts:324-334）
-- Anthropic：`body.tools`（anthropic.ts:574-583）
-- Google：`body.tools.functionDeclarations`（google.ts:352-359）
+| 请求格式 | 注入字段 | 实现位置 |
+| --- | --- | --- |
+| OpenAI 兼容 | `body.tools` | `requests.ts:474-485` |
+| Responses | `body.tools` | `responses.ts:324-334` |
+| Anthropic | `body.tools` | `anthropic.ts:574-583` |
+| Google | `body.tools.functionDeclarations` | `google.ts:352-359` |
 
 工具为空时不写该字段；OpenAI 兼容模式下 multiGen（n>1 多生成）与工具互斥，直接返回失败（requests.ts:566-572）。tool_choice 全程未设置，交给服务端默认。
 
@@ -84,12 +87,12 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 模型侧协议全部是原生结构化字段，没有文本协议解析（`<tool_call>` 标签只出现在应用自己写入的消息文本里，见维度 7）：
 
-- **OpenAI 兼容**：非流式取 `choices[i].message.tool_calls`，多 choice 的调用合并到 choices[0]（requests.ts:733-746）；流式把 `delta.tool_calls` 按 index 增量拼进 `__tool_calls` 内部键（arguments 用拼接语义，requests.ts:1055-1090）。
-- **Anthropic**：非流式遍历 content 数组里的 `tool_use` 块（anthropic.ts:1088-1167）。流式分支只解析 text/thinking/redacted_thinking delta，content_block_start 里的 tool_use 完全被忽略——Claude 在流式模式下返回的工具调用不会被执行，这是已确认的实现边界（anthropic.ts:921-1049）。
-- **Google**：`functionCall` part 在非流式与流式候选里一次性整块出现；流式用 `__tool_calls` 收集，thoughtSignature 经 `__sign_text`/`__sign_function` 透传（google.ts:798-806,1099-1110）。
-- **Responses API**：非流式从 data.output 提取 `function_call` 项（responses.ts:458-463）；流式按 `call_id` 聚合 `response.function_call_arguments.delta`，response.completed 时从完整 response 提取（responses.ts:618-666）。
+- **OpenAI 兼容**：非流式从每条 choice 的 message.tool_calls 取调用，多 choice 的调用统一合并到 choices[0]；流式把 delta.tool_calls 按 index 增量拼进内部键 `__tool_calls`，其中 arguments 按字符串拼接。两条路径的解析见 `requests.ts:733-746、1055-1090`。
+- **Anthropic**：非流式遍历 content 数组里的 tool_use 块，逐个取出调用。流式分支只解析 text、thinking 与 redacted_thinking 三类 delta，content_block_start 事件里的 tool_use 整块被忽略，因此 Claude 在流式模式下给出的工具调用不会被执行，这是已确认的实现边界。两处解析见 `anthropic.ts:921-1049、1088-1167`。
+- **Google**：functionCall part 在非流式与流式候选里都一次性整块出现，流式侧把它收进 `__tool_calls`，并让 thoughtSignature 经 `__sign_text` 与 `__sign_function` 透传（`google.ts:798-806、1099-1110`）。
+- **Responses API**：非流式从 data.output 提取 function_call 项；流式按 call_id 聚合 response.function_call_arguments.delta 片段，等 response.completed 到达再从完整 response 里取调用（`responses.ts:458-463、618-666`）。
 
-历史消息的还原：上一轮持久化进消息文本的 `<tool_call>` 标签，在请求组装阶段被解码回原生结构——OpenAI 拆成 assistant `tool_calls` 与 `role:'tool'` 消息对（requests.ts:41-107）；Claude 重建 `tool_use`/`tool_result` 块、Google 重建 functionCall/functionResponse parts、Responses 链同样拆分（anthropic.ts:272-335、google.ts:138-249、responses.ts:29-111）。
+历史消息在请求组装阶段还原：上一轮写进消息文本的 `<tool_call>` 标签被解码回各家原生结构，OpenAI 拆成 assistant 的 tool_calls 与 role 为 tool 的消息对，Claude 重建 tool_use/tool_result 块，Google 重建 functionCall/functionResponse parts，Responses 链做同样的拆分。四条链的解码入口分别是 `requests.ts:41-107`、`anthropic.ts:272-335`、`google.ts:138-249` 与 `responses.ts:29-111`。
 
 ## 4. 参数解析、校验与错误处理
 
@@ -101,26 +104,26 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 循环由各家请求处理函数自行驱动，四条链结构同构，没有共享的编排层：
 
-- **OpenAI 兼容非流式**（requests.ts:748-849）：发现 tool_calls 后把 assistant 消息与逐个执行得到的工具消息推入 `body.messages`，然后**递归调用 `requestHTTPOpenAI` 自身**；下一层若再返回工具调用则继续递归，直到模型不再调用。
-- **OpenAI 兼容流式**（`wrapToolStream`，requests.ts:1138-1318）：`getTranStream` 把增量汇总进 `__tool_calls`；流读完发现调用时执行工具、续请求（失败按 `db.requestRetrys` 重试，默认 2，database.svelte.ts:201-202），把新响应经同一变换流接回后继续读——即"工具调用在流包装器内联续请求"，且可一轮接一轮重复。已产出的文本与调用码累积进 prefix 持续输出。
-- **Anthropic 非流式**（anthropic.ts:1088-1167）：发现 tool_use 时执行并以 `tool_result` 回注后递归 `requestClaudeHTTP`；流式无此能力（见维度 3）。
-- **Google 非流式与流式**（google.ts:806-939、`wrapToolStream` google.ts:1069-1309）：同 OpenAI 模式。
-- **Responses 非流式与流式**（responses.ts:549-570、`wrapResponsesToolStream` responses.ts:723-865）：同前；store:false 时续请求输入先经 `sanitizeResponsesContinuationItem` 清洗。
+- **OpenAI 兼容非流式**：解析到 tool_calls 后，把 assistant 消息与逐个执行工具得到的消息追加进请求体的 messages，再递归调用 requestHTTPOpenAI 发起下一轮；下一轮若又返回工具调用就继续递归，直到模型不再调用（`requests.ts:748-849`）。
+- **OpenAI 兼容流式**：wrapToolStream 用 getTranStream 把增量汇总进 `__tool_calls`，流读完一旦发现调用就执行工具并就地续请求，续请求失败按 `db.requestRetrys`（默认 2）重试，再把新响应接回同一条变换流继续读，于是一轮接一轮的调用可以在包装器内连环发生。已产出的文本和调用码累积进 prefix 持续输出（`requests.ts:1138-1318`、`database.svelte.ts:201-202`）。
+- **Anthropic 非流式**：解析到 tool_use 后执行工具，把结果以 tool_result 回注，再递归 requestClaudeHTTP；流式侧没有对应的执行能力（`anthropic.ts:1088-1167`，另见维度 3）。
+- **Google 非流式与流式**：结构与 OpenAI 相同，非流式在请求函数内递归，流式在 wrapToolStream 里内联续请求（`google.ts:806-939、1069-1309`）。
+- **Responses 非流式与流式**：同样分成递归与包装器两条路径；流式一侧在 store:false 时，续请求的输入要先经 sanitizeResponsesContinuationItem 清洗（`responses.ts:549-570、723-865`）。
 
 共同特征：工具按模型返回顺序 **串行 await**，无并发；**未找到任何迭代上限或深度上限**（全请求目录搜索无 maxIteration/depth 相关代码），模型持续返回工具调用即持续递归，终止只依赖模型不再调用或 `abortSignal`；续请求彻底失败时 `alertError` 并以已积累的结果按成功返回收尾。工具调用期间若用户在 UI 停止生成，`abortSignal` 会中断后续 fetch。
 
 ## 6. 审批、授权与执行边界
 
-**审批**：仅 `internal:risuai` 的 13 个写/删类工具在执行端逐次审批——handler 在真正变更前调用 `promptAccess`（`alertConfirm`，`characters.ts:10-12`、`modules.ts:15-17`），拒绝则返回 "Access denied by user." 文本结果且不发生变更；读类工具无审批。这是执行端审批而非仅展示层（判断与执行在同一个 handler 内），但审批状态不持久化、无超时。其余全部工具——文件写入删除、远程 MCP `tools/call`、网页搜索消耗用户凭据、插件工具——均无审批、无风险分级、无全局开关（除模块本身可删除）。
+**审批**：只有 `internal:risuai` 的 13 个写/删类工具带审批，并且确认动作紧贴真正的变更——这些工具的 handler 在改动数据前调用 `promptAccess`（即 `alertConfirm`），用户拒绝就返回 "Access denied by user." 文本结果，数据保持原样；读类工具不经过这一步。判断与执行落在同一个 handler 内，审批因此发生在执行端；审批结果不持久化，也没有超时。文件写入与删除、远程 MCP 的 tools/call、消耗用户凭据的网页搜索、插件工具都不经过审批，既没有风险分级，也没有全局开关，只能靠删除模块本身来停用。审批入口见 `characters.ts:10-12`、`modules.ts:15-17`。
 
 **执行域与隔离**：
 
-- 远程 MCP：前端发起，经 `fetchNative`（globalApi.svelte.ts:1713+）——桌面由 Tauri Rust 侧 `streamed_fetch` 执行 HTTP，web 端走 CORS 代理（`usePlainFetch` 可绕过）；URL 只校验 http/https 前缀，未发现 SSRF 过滤或私有地址限制。
-- stdio MCP：Tauri shell 子进程（`Command.create`，env 可配置），stdout 行协议，应用退出时 kill；无沙箱。
-- internal:fs：File System Access 目录句柄，浏览器授予目录权限后工具在所选目录内活动，读写有大小上限。
-- internal:risuai：直接改数据库对象（角色、模块、聊天），无独立隔离。
-- internal:aiaccess：递归发起新的 LLM 请求——工具可以嵌套模型调用，且嵌套调用同样带全量工具（requestChatData 入口无阻止）。
-- 插件工具：插件代码运行在 iframe 沙箱（sandbox 仅 allow-scripts/allow-modals/allow-downloads，CSP 含 `connect-src 'none'`，factory.ts:438,769-921），callTool 回调经 postMessage RPC 回到沙箱内执行，只能经宿主 API 白名单访问外部能力（如 nativeFetch 需 `getPluginPermission`）。
+- 远程 MCP：请求从前端发起，统一经 fetchNative 转发；桌面端由 Tauri Rust 侧的 streamed_fetch 实际执行 HTTP，web 端走 CORS 代理，usePlainFetch 可以绕开代理。URL 只校验 http/https 前缀，本次未发现 SSRF 过滤或私有地址限制（`globalApi.svelte.ts:1713` 起）。
+- stdio MCP：由 Tauri shell 插件启动子进程，env 可配置，stdout 按行读 JSON，应用退出时 kill；没有沙箱约束。
+- internal:fs：以 File System Access 的目录句柄为边界，用户授予目录权限后工具只能在该目录内活动，读写另有大小上限。
+- internal:risuai：直接修改数据库对象（角色、模块、聊天），没有独立的隔离层。
+- internal:aiaccess：工具执行时会递归发起新的 LLM 请求，嵌套调用同样带全量工具，因为 requestChatData 入口没有阻止。
+- 插件工具：插件代码运行在 iframe 沙箱里，sandbox 只放行 allow-scripts、allow-modals 与 allow-downloads，CSP 把 connect-src 设为 'none'；callTool 回调经 postMessage RPC 回到沙箱内执行，插件访问外部能力必须走宿主 API 白名单，例如 nativeFetch 需要 getPluginPermission 授权（`factory.ts:438、769-921`）。
 
 ## 7. 结果回注、执行状态与恢复
 
@@ -162,16 +165,16 @@ db.modules[*].mcp.url   // http(s):// 或 internal: 或 stdio: 或 plugin: 前�
 
 ## 10. 未验证事项
 
-1. 未运行验证真实 MCP 服务器的端到端流程：OAuth 授权码、SSE 回退、`tools/list` 分页、401 刷新。
-2. Claude 流式忽略 `tool_use` 后的用户可见行为（流可能无文本结束或被当作空回复）未运行验证。
-3. stdio MCP 子进程在 Windows 上的生命周期、env 传递与 kill 行为未运行验证。
-4. 无迭代上限的递归在实际服务上的表现（API 消耗、上下文膨胀）未运行验证。
-5. `decodeToolCall` 标签剥离分支的恒空行为未运行验证（调用方均传内文，静态上不可达）。
-6. 插件 MCP 的激活路径（插件自行写入 `db.modules`）是否为受支持的官方流程未确认。
-7. `enabledModules` 不参与 MCP 过滤属于静态推断；模块设置页的启用开关对工具可达性无效这一点未运行确认。
-8. risuaccess 写工具的 `alertConfirm` 在流式续请求等待期间的交互（用户不点确认时循环是否挂起、有无超时）未运行验证。
-9. `fetchNative` 在 web 端 CORS 代理与桌面 Rust 端 `streamed_fetch` 的超时与重定向行为未展开。
-10. 权限拒绝与调用接线已由宿主 API 确认；弹窗呈现、跨页面授权恢复与撤销操作未运行验证。网络桥的已读入口未调用权限确认，实际平台代理和请求限制另需目标环境观察。
+1. 真实 MCP 服务器的端到端流程尚未运行验证，包括 OAuth 授权码、SSE 回退、tools/list 分页与 401 之后的令牌刷新。
+2. Claude 流式忽略 tool_use 之后用户在界面上看到什么（流可能没有文本结束，或被当成空回复）尚未运行验证。
+3. stdio MCP 子进程在 Windows 上的生命周期、env 传递和 kill 行为尚未运行验证。
+4. 无迭代上限的递归在真实服务上会怎样（API 消耗、上下文膨胀）尚未运行验证。
+5. decodeToolCall 的标签剥离分支恒返回空串，这一点只有静态结论：调用方都传标签内文，该分支不可达，尚未运行验证。
+6. 插件自行写入 db.modules 来激活 MCP 工具是否属于受支持的官方流程，尚未确认。
+7. enabledModules 不参与 MCP 过滤目前是静态推断；模块设置页的启用开关是否真的影响工具可达性，尚未运行确认。
+8. risuaccess 写工具在流式续请求等待期间弹出 alertConfirm 时的交互情况（用户不点确认时循环是否挂起、有没有超时）尚未运行验证。
+9. fetchNative 在 web 端 CORS 代理与桌面 Rust 端 streamed_fetch 两条路径上的超时和重定向行为，本次未展开。
+10. 权限拒绝与调用接线已由宿主 API 确认；弹窗的呈现方式、跨页面授权恢复与撤销操作尚未运行验证。网络桥的已读入口不调用权限确认，平台代理和请求限制需要到目标环境中观察。
 
 ## 关键源码索引
 

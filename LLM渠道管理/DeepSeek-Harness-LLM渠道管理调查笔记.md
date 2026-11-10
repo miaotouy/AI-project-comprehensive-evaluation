@@ -16,9 +16,9 @@
 
 DeepSeek-Harness 的 LLM 渠道管理是"一个中性流式词汇 + 一个注册表 + 两个实现同一 seam 的适配器"：
 
-1. **Provider 是注册键，不是用户实体。** 抽象服务 `LlmRuntime` 持有 provider route → adapter 实例的注册表；route 是普通字符串（如 `deepseek-official`、`deepseek-account`、`openai`、自建网关名），同一 adapter 实例可注册多条 route，注册与替换全有或全无且同步原子。用户没有"新建渠道"的数据表或 UI 实体，渠道的增删改全部表达为组合配置与用户 settings 文档。
-2. **第一方 DeepSeek 已拆成"传输 + 两种认证 + 扩展"四包。** `dsh-llm-deepseek` 只提供共享的 Messages 传输、请求配置与模型能力，不再自己注册 route；`dsh-llm-deepseek-api-key` 注册 `deepseek-official`（API key 经 `x-api-key`），`dsh-llm-deepseek-account` 注册 `deepseek-account`（账户令牌经 `x-dsh-auth-token`，由账户凭据服务签发）。两者互不回退，也未随协议切换保留 `protocol` 配置项——当前只接受 Messages。
-3. **pi-ai 只贡献模型目录、Provider 构造与事件流。** dsh 复用 pi-ai 的 `Models` 集合、Provider/Model/Api 类型、安装目录、createProvider、streamSimple 事件词汇和思考等级工具；其余全部在 dsh 侧：凭据解析、retry policy、settings 分层、attribution 头、空闲看门狗、请求冻结、replay 状态投影、错误分类。SDK 自动重试被强制为 0，pi-ai 的凭据库/OAuth/价格元数据未被使用（详见 §9）。依赖版本现为 `^1.3.0`。
+1. **Provider 是注册键。** 抽象服务 `LlmRuntime` 维护一张 provider route 到 adapter 实例的注册表。route 只是普通字符串，官方渠道的 deepseek-official 与 deepseek-account、pi-ai 目录里的 openai，以及用户自建的网关名都按同一规则注册；一个 adapter 实例可以注册多条 route，注册与替换全有或全无且同步原子。用户没有"新建渠道"的数据表或 UI 实体，渠道的增删改全部表达为组合配置与用户 settings 文档。
+2. **第一方 DeepSeek 拆成传输、两种认证与扩展四个包。** 传输包 dsh-llm-deepseek 只提供共享的 Messages 传输、请求配置与模型能力，自己不注册 route。注册 route 的是两个认证包：api-key 包注册 deepseek-official，key 以 x-api-key 头发送；account 包注册 deepseek-account，发送账户凭据服务签发的令牌，头名 x-dsh-auth-token。两条渠道互不回退，配置里也没有随协议切换保留的 protocol 项，当前只接受 Messages。
+3. **pi-ai 贡献模型目录、Provider 构造与事件流。** 安装目录与 `Models` 集合、Provider/Model/Api 类型、createProvider 工厂、streamSimple 的事件词汇以及思考等级工具都由 pi-ai 提供。其余部分在 dsh 侧实现：凭据解析、retry policy、settings 分层、attribution 头、空闲看门狗、请求冻结、replay 状态投影与错误分类。SDK 自动重试被强制为 0，pi-ai 的凭据库、OAuth 与价格元数据没有用到（详见 §9）；依赖版本为 `^1.3.0`。
 4. **配置只存凭据引用，key 永不进配置文件。** API-key 配置携带 `apiKeyEnv`（环境变量名）这类引用，经凭据 seam 每次请求解析；托管文档是 `$DSH_HOME/.credentials.yaml`（0600 + 文件锁），继承环境 > 托管文档 > 项目/用户 .env 分层。引用有值但不可用报 `INVALID_CREDENTIAL`，引用未命中报 `MISSING_CREDENTIAL`，只有完全不声明凭据的 profile 才允许 pi-ai 的 ambient 发现。账户认证走独立的 account 凭据平台，key 与账户令牌分属两条解析链。
 5. **配置热生效，route 事实注册时捕获。** 适配器把 `cordis.yml` 入口配置作为 base、`$DSH_HOME/settings.yaml` 用户节为覆盖层，通过 thunk 每次请求重读连接事实，settings 文件热重载即可改 baseURL、模型目录和 key，无需重启；只有注册时捕获的 retry policy 和 route 集变化时需要同步原子重注册。
 6. **模型目录仍由配置拥有。** 第一方默认目录含文本与视觉模型，均通过同一 resolve 路径暴露文本/图像能力；未列模型仍按 text-only pass-through。pi-ai 继续以安装目录和 profile 覆盖构建目录，配置时可探测端点，但运行目录不自动刷新。
@@ -57,13 +57,13 @@ dsh-agent-loop (packages/core/agent-loop/src/agent.ts step/buildRequest)
 
 **seam 三角色**：按仓库约定，一个 capability seam 由三个角色组成，缺一不可（根 `AGENTS.md`、`docs/glossary.md`）：
 
-- **Service Definition/Consumer**：`LlmRuntime` 同时承担两者——抽象服务定义与消费者使用的调用 API。它维护三类注册：adapter route 注册表（决定谁服务哪个 provider）、configurable-provider 目录（声明"可被配置激活"的休眠 route）、model discovery 注册表（按 settings namespace 提供端点探测）。
-- **Service Provider**：`LlmAdapter` 抽象基类（`index.ts:180-233`），`stream()` 是唯一必实现方法；providerInfo、providerRetryPolicy、listModels、resolveModel 为可选能力，分别提供展示元数据、重试策略、advisory 目录和精确模型元数据。
-- **Consumer**：agent-loop（逐回合调用）、`dsh-llm-retry`（消费失败事实）、`token-meter`（消费 usage 事件）、模型选择器与 Models 页（消费目录与凭据描述）。
+- **Service Definition/Consumer**：`LlmRuntime` 同时承担抽象服务定义与消费者调用的 API 两层角色，并维护三张注册表：adapter route 注册表决定哪个适配器服务哪个 provider，configurable-provider 目录登记可被配置激活的休眠 route，model discovery 注册表按 settings namespace 提供端点探测。
+- **Service Provider**：`LlmAdapter` 抽象基类（`index.ts:180-233`）里只有 stream() 必须实现，其余四项能力都可选：providerInfo 提供展示元数据，providerRetryPolicy 提供重试策略，listModels 给出 advisory 目录，resolveModel 返回精确模型元数据。
+- **Consumer**：agent-loop 逐回合调用；`dsh-llm-retry` 消费失败事实；`token-meter` 消费 usage 事件；模型选择器与 Models 页消费目录与凭据描述。
 
 **route 语义**：`registerAdapter(providers, adapter)` 一次性注册一组 route，任一冲突（`DUPLICATE_ADAPTER`）则整体拒绝；返回的 handle 携带 replace() 做同步原子换路由集，请求不会观察到注册空隙。route 的展示名来自 adapter 声明的元数据，pi-ai 用 profile 的 `displayName`（route 键只是注册键）。**Endpoint 不是实体**：baseURL 是 route 配置字段（直连适配器一个实例一个 baseURL；pi-ai 每个 profile 一个 baseURL，目录模型可自带各自端点）。每 route 注册时解析并捕获不可变 retry policy。
 
-**第一方认证分裂为两个 provider 插件**：`llm-deepseek-api-key` 只解析配置的 `apiKeyEnv` 引用，注册 `deepseek-official`；`llm-deepseek-account` 只解析账户平台签发的 grant，注册 `deepseek-account`，其允许的 `inferenceOrigin` 默认 `https://api.deepseek.com`。两条 route 互不回退；登出只清账户 grant，不删 API key。基座 bundle 把 `llm-deepseek-api-key` 挂在名为 `llm-deepseek` 的行上，另起一行挂 account 插件（`packages/bundle/base/cordis.patch.yml:545` 附近）。
+**第一方认证分成两个 provider 插件**：第一方只认两种凭据，各有一个插件负责解析。api-key 插件 `llm-deepseek-api-key` 解析配置里 apiKeyEnv 指定的引用并注册 deepseek-official；account 插件 `llm-deepseek-account` 解析账户平台签发的 grant 并注册 deepseek-account，它允许的 inferenceOrigin 默认指向 https://api.deepseek.com。两条 route 互不回退，登出只清账户 grant、不删 API key。基座 bundle 把 api-key 插件挂在名为 `llm-deepseek` 的行上，account 插件另起一行（`packages/bundle/base/cordis.patch.yml:545` 附近）。
 
 **休眠目录**：`registerConfigurableProviders` 声明 adapter 可激活但未注册的 route，每条带 settings namespace 与到 profile 的路径（`settingsPath`），供配置界面展示"可添加的 Provider"；pi-ai 把全部安装目录 route（仅限声明 api-key 认证者）与当前 profile 声明的 route 取并集（`llm-pi-ai/src/index.ts:120-147`），并用 `declared` 区分"目录自带"与"配置声明"。拓扑每次提交点发 `llm/adapters-updated` 事件，观察者重读列表而不是轮询。
 
@@ -105,13 +105,13 @@ dsh-agent-loop (packages/core/agent-loop/src/agent.ts step/buildRequest)
 
 **适配器解析**：每流调用经凭据 seam resolve(ref) 取 key；没有凭据 seam 的组合退化为读受信环境层。解析后的 key 一律过 assertUsableApiKey（trim + 可打印 ASCII 检查），非法值报 `INVALID_CREDENTIAL` 且错误消息只命名引用、绝不回显 key（`llm/src/index.ts:137-152`）；引用未命中报 `MISSING_CREDENTIAL` 并枚举配置入口。pi-ai 侧只有 profile 完全不命名凭据时才把认证交给 pi-ai 自身（ambient 发现）；一旦命名引用，未命中就 fail loud，防止误用无关环境 key 计到别家账上（`llm-pi-ai/src/index.ts:175-198`）。
 
-**账户认证边界**：`deepseek-account` 的令牌不经 Bearer 前缀，直接以 `x-dsh-auth-token` 发送；API key 仍走 `x-api-key`。两种凭证都不跟随重定向。401 的分类与令牌失效由账户提供方负责，传输层只把失败回调给它；adapter 侧拿到的是已归一化的 `AUTH` 失败。账户平台与授权流程位于 `packages/credentials/{deepseek-account,deepseek-account-platform,authorization}`，与 API key 的 `credentials-local` 分层解析是两条独立链。
+**账户认证边界**：`deepseek-account` 的令牌直接放在 x-dsh-auth-token 头里发送，不带 Bearer 前缀；API key 仍走 x-api-key 头。两种凭证都不跟随重定向。401 的分类与令牌失效判定由账户提供方负责，传输层只把失败回调给它，adapter 侧拿到的是已归一化的 `AUTH` 失败。账户平台与授权流程位于 `packages/credentials/{deepseek-account,deepseek-account-platform,authorization}`，与 API key 走 `credentials-local` 分层解析是两条独立链。
 
 **pi-ai 边界**：key 通过 `streamSimple` 的 `apiKey` 选项传入，是 pi-ai 认证覆盖的最高优先级；`Models` 集合完全不持有凭据库，因此 pi-ai 需要"已存储 OAuth 凭据"的认证路径（如 openai-codex）在此不可用，相关 route 从可配置目录中隐去（`llm-pi-ai/src/catalog.ts`）。
 
 **Header 与代理**：所有请求携带 attributionHeaders() 生成的 User-Agent（app 身份，公开字段，白标部署可替换不可抑制）。直连适配器额外发送三个身份与用途头（x-deepseek-harness-user-id、按需 x-deepseek-harness-session-id、compaction 请求的 x-deepseek-harness-compact，`llm-deepseek/src/adapter.ts:283-295`）；pi-ai 把 profile 的请求头并进 SDK 请求，冲突时 Harness attribution 名优先（`llm-pi-ai/src/adapter.ts:172-179`）。**HTTP 代理配置本次未找到**：直连适配器用裸 fetch（README 记录 TODO(http)，未接入 cordis-plugin-http），pi-ai 侧由各 SDK 的 transport 决定，两处都未见 proxy 配置键。
 
-**脱敏**：settings 的 `redactSecrets` 按 schema 的 `role('secret')` 摘除值并枚举位置（`settings/src/redact.ts`）；`apiKeyEnv` 是引用不是秘密，因此两个 LLM 适配器的 settings 节没有 secret 字段。pi-ai 的 `headers` dict 是纯字符串，可在其中放明文 `Authorization` 且 redactor 不可见——README 已把该点列为已知限制（"headers 可携带 redactor 看不到的凭据"）。
+**脱敏**：settings 的 `redactSecrets` 按 schema 里 `role('secret')` 的声明摘掉值，只枚举出现位置（`settings/src/redact.ts`）。`apiKeyEnv` 存的是引用，两个 LLM 适配器的 settings 节因此没有 secret 字段。pi-ai 的 headers 字典是纯字符串，可以在里面放明文 Authorization 而不被 redactor 看见，README 已把这点列为已知限制（"headers 可携带 redactor 看不到的凭据"）。
 
 ## 4. 模型目录与能力元数据
 
@@ -140,7 +140,9 @@ usage / finish { stop | tool-calls | max-tokens | aborted | error }
 
 **适配器契约**（`docs/subsystems/llm-streaming.md`）：两种错误路径——`stream()` 抛出（传输/协议）或流内 `finish {kind:'error'|'aborted'}`（provider 带内错误）；一次适配器调用 = 一次 provider 尝试；空闲看门狗默认 5 分钟只计时在途读；context 溢出统一到 `CONTEXT_WINDOW_EXCEEDED` 码；空完成（stop 但无内容块）是 `EMPTY_RESPONSE` 错误而非成功；每个请求带 attribution 头。
 
-**第一方适配器组装**：官方根是 `https://api.deepseek.com/anthropic`，Messages 请求追加 `/v1/messages`、图片文件追加 `/v1/files`；显式 `baseURL` 或 `$DEEPSEEK_BASE_URL` 可替换为任意 Messages 兼容根。配置只接受 Messages，没有 `protocol` 字段；旧配置里残留 `protocol` 会让该适配器持续拒绝该配置，直到手工删除。Messages 把文本、思考、工具调用与工具结果都表达为 content block，推理等级走 `output_config.effort`，图片走 Files 引用或内联 base64；声明 `systemPromptUpdate: in-history` 的模型保留首个顶层 system，并把后续 system 快照作为历史发在对应回合，未声明的模型用最新快照作顶层 system（`packages/llm/llm-deepseek/README.md` 的 Endpoint and wire format 一节）。图像保留 request version、按像素网格缩放并按附件 id 命名，Files 上传失败时整请求回退为内联 base64，一个请求不会混用两种表示。声明 `toolUpdate` 的模型可把开发者工具变更投影为 system 角色的 `tool_addition`/`tool_removal` 块，并附带 `mid-conversation-tool-changes-2026-07-01` beta 头。
+**第一方适配器组装**：官方根是 `https://api.deepseek.com/anthropic`，Messages 请求在根后追加 `/v1/messages`，图片文件追加 `/v1/files`；显式 baseURL 或环境变量 `$DEEPSEEK_BASE_URL` 可以把它换成任意 Messages 兼容根。配置只接受 Messages，没有 protocol 字段；旧配置里残留的 protocol 会让该适配器持续拒绝这份配置，直到手工删除。
+
+Messages 把文本、思考、工具调用与工具结果都表达为 content block，推理等级走 `output_config.effort`，图片走 Files 引用或内联 base64。声明了 systemPromptUpdate: in-history 的模型保留首个顶层 system，把后续 system 快照作为历史发在对应回合；未声明的模型用最新快照作顶层 system。图像保留 request version、按像素网格缩放并按附件 id 命名，Files 上传失败时整请求回退为内联 base64，一个请求不会混用两种表示。声明 toolUpdate 的模型能把开发者工具变更投影成 system 角色的 tool_addition/tool_removal 块，并附带 `mid-conversation-tool-changes-2026-07-01` beta 头。源码与线格式见 `packages/llm/llm-deepseek/README.md` 的 Endpoint and wire format 一节。
 
 **请求扩展缝**：适配器在 `fetch` 前从已序列化的基础请求构造 `ctx.deepseekLlmApiExtensions` 注册的顶层字段；字段冲突在 HTTP 前失败，准备失败的字段被跳过，2xx 后接受各贡献者捕获的状态，非 2xx 与传输失败不接受。基础请求连同扩展字段无法序列化时，适配器单独发送基础请求、跳过接受并告警。基座组合用这条缝默认开启 `dsh_session_log`（会话日志增量）与 `dsh_plugin_packages`（Loader 包清单），两者都不进入模型输入。
 
@@ -180,11 +182,11 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 
 `isContextOverflow` 与错误文本中的溢出识别统一归一为 `CONTEXT_WINDOW_EXCEEDED`（`stream.ts:73-113`）。pi-ai 的结束原因五值（stop、length、toolUse、aborted、error）直接映射为 finish 的对应 reason；stop 且无内容块 → `EMPTY_RESPONSE`。
 
-**replay 状态**：成功的 assistant 响应在 `finish` chunk 携带版本化投影 `PiAiReplayState`（kind pi-ai、version 1，记录 api/provider/model、结束原因与各块签名；`llm-pi-ai/src/replay.ts:63-91`）。`LlmRuntime` 只在历史 provider 与目标 provider 当前属于同一 adapter 实例时把它传给目标（`index.ts:823-836`）；pi-ai 适配器验证后重建原生 pi-ai assistant 消息（恢复 responseId 与 provider 签名），无 replay 状态的历史按 provider-neutral 内容转成 api 为 dsh-foreign 的消息，绝不冒充原生响应。版本、provider/model 或块数不匹配报 `INVALID_REPLAY_STATE`。直连适配器无 replay 状态——它在历史序列化时自己回传 reasoning_content。
+**replay 状态**：成功的 assistant 响应会把版本化投影 `PiAiReplayState` 挂到 `finish` chunk 上，其中记录 api/provider/model、结束原因与各块签名（kind 为 pi-ai、version 1；`llm-pi-ai/src/replay.ts:63-91`）。只有历史和目标 provider 当前属于同一个 adapter 实例时，`LlmRuntime` 才把它传给目标（`index.ts:823-836`）；pi-ai 适配器验证后据此重建原生 pi-ai assistant 消息，恢复 responseId 与 provider 签名。没有 replay 状态的历史按 provider-neutral 内容转成 api 为 dsh-foreign 的消息，不会冒充原生响应。版本、provider/model 或块数不匹配报 `INVALID_REPLAY_STATE`；直连适配器没有 replay 状态，它在历史序列化时自己回传 reasoning_content。
 
 ## 6. 运行时选择、绑定与路由
 
-**模型来源**：新 Agent 的默认选择来自 `agent-default-model` 服务（`packages/core/agent-default-model/src/index.ts`）：组合入口配置（base bundle 中为 `deepseek-official`/`deepseek-v4-flash`）+ 同名 settings 节（provider、model、可选 reasoningEffort），Models 页通过 `saveSelection` 写入；消费端在 Agent 创建时读取 `currentSelection()`。
+**模型来源**：新 Agent 的默认模型由 `agent-default-model` 服务决定（`packages/core/agent-default-model/src/index.ts`）。取值来自组合入口配置与同名 settings 节两层：base bundle 里配置的是 deepseek-official 的 deepseek-v4-flash，settings 节可写 provider、model 与可选的 reasoningEffort。Models 页通过 saveSelection 写入 settings 节，消费端在 Agent 创建时读 currentSelection()。
 
 **选择与生效**：会话模型选择通过独立事件持久化，投影优先取待生效选择，再取最近实际请求，最后回退 Agent 选项。每步准备前固定 Provider、模型与 effort；模型变更时，pre-step 还会追加模型切换说明供后续历史重建（`packages/core/agent/src/model-selection.ts:72-120,157-170`）。
 
@@ -209,7 +211,7 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 | normal 默认退避 | 500ms 起、上限 10s、10% 对称抖动 |
 | normal 默认可重试码 | `EMPTY_RESPONSE`、`RATE_LIMIT`、`SERVER`、`TIMEOUT`、`TRANSPORT` |
 
-**执行位置**：`dsh-llm-retry`（`packages/llm/llm-retry/src/index.ts:99-226`）监听 agent-loop 的 `agent/request-error` 瀑布，携带失败 `LlmFailure`、该次调用的不可变策略与回合信号。normal 模式先查可重试码集，再按 (provider、策略键、回合、步) 从会话日志续接重试计数；provider 请求的 `providerRetryAfterMs` 不超过 `maxDelayMs` 时直接采用，超限时 normal 模式放弃、always 模式用本地退避。
+**执行位置**：重试逻辑在 `dsh-llm-retry`（`packages/llm/llm-retry/src/index.ts:99-226`）里，它监听 agent-loop 的 `agent/request-error` 瀑布，拿到失败 `LlmFailure`、该次调用的不可变策略与回合信号。normal 模式先查可重试码集，再按 provider、策略键、回合与步从会话日志续接重试计数。provider 给出的 providerRetryAfterMs 不超过 maxDelayMs 时直接采用该等待值，超限时 normal 模式放弃重试、always 模式改用本地退避。
 
 等待前后分别记录重试调度与开始事件，返回重试决定后，循环在同一开放 turn/step 内重新发起请求；失败尝试已经通过 assistant/attempt 收口，不需要关闭旧 turn 再开启新 turn（`packages/core/agent-loop/src/agent.ts:541-563`）。取消与插件销毁中止在途退避；直接调用 LLM 裸流的辅助消费者仍保持单次尝试。
 
@@ -219,13 +221,15 @@ streamSimple(model, context, options) 把 profile 的流选项（思考预算、
 
 ## 8. 连接检测、日志与可观测性
 
-**连接检测**：没有独立“连接测试”真实请求路径。Models 页的 Provider 就绪状态来自 `credentials.describe`（configured/source/writable 布尔）与 settings 节存在性的静态组合（`packages/client/ui-settings-models/src/client/store.ts:161-184`）；真实网络探测只有配置时的 `discoverModels`（GET /models，见 §4），且其结果不进入运行时路由。Web 的模型编辑器可以把当前表单中的未保存 baseURL、协议和一次性 key 传给该探测；`LlmRuntime.discoverModels()` 明确说明不会读写 settings 或 credentials，只返回供界面采纳的候选（`packages/llm/llm/src/index.ts:523-558`）。因此它不是保存后的聊天健康检查，认证失败仍只在真实请求的错误码上（`AUTH`/`INVALID_CREDENTIAL`/`MISSING_CREDENTIAL`）或探测调用自身的错误上出现。
+**连接检测**：代码里没有独立的“连接测试”请求路径。Models 页的 Provider 就绪状态是静态组合的结果：`credentials.describe` 返回的 configured/source/writable 布尔值，加上 settings 节是否存在（`packages/client/ui-settings-models/src/client/store.ts:161-184`）。真实网络探测只有配置时的 `discoverModels`（GET /models，见 §4），结果不进入运行时路由。
 
-**会话日志（请求重建）**：`request/header` 记录完整调用配置（含 `adapterDefaults` 标记、工具顺序，不含 system），`request/context` 记录 provider/model/contextWindow；system prompt 以 `system/message` 表面事件记录；每步以 `assistant/message` 落组装块 + usage + 内嵌紧凑流，未产生表面消息的尝试记 `assistant/attempt`。请求可完全从日志重建（见 docs/subsystems/session.md 与 2026-07-05-reconstructable-requests.md 笔记）；dev invariant 对每个 loop 请求重算该等式。
+Web 的模型编辑器可以把表单里尚未保存的 baseURL、协议和一次性 key 传给该探测；`LlmRuntime.discoverModels()` 只返回供界面采纳的候选，不读写 settings 或 credentials（`packages/llm/llm/src/index.ts:523-558`）。认证失败只会出现在真实请求的错误码上（`AUTH`、`INVALID_CREDENTIAL`、`MISSING_CREDENTIAL`），或者探测调用自身的错误里。
+
+**会话日志（请求重建）**：每步请求由几类事件共同记录。`request/header` 存完整调用配置，含 adapterDefaults 标记与工具顺序、不含 system；`request/context` 存 provider、model 与 contextWindow；system prompt 作为 `system/message` 表面事件单独记录。组装结果以 `assistant/message` 落块、usage 与内嵌紧凑流，没有产生表面消息的尝试记 `assistant/attempt`。请求因此可以完全从日志重建（见 docs/subsystems/session.md 与 2026-07-05-reconstructable-requests.md 笔记），dev invariant 会对每个 loop 请求重算这个等式。
 
 **token 计量**：`dsh-token-meter`（`packages/llm/token-meter/src/index.ts:74-156`）提供 `measure(session, requestHeader?)` 与 estimateMessage。固定启发式（4 字符/token + 角色/块/信封结构开销）；当最新成功调用的规范请求信封与测量信封一致时，优先复用 provider 报告的 usage 作为锚点，否则全量启发式估计。三个投影单元（真实 usage 汇总、上下文压力并可选项含外推的 `projectedTokens`、启发式组成）是独立 last-wins 记录，不是同一边界的一次原子观测；README 明确占用百分比只是参考值，compaction 走 `measure()` 而不是投影。**价格不参与**：pi-ai 侧 replay 把成本清零（"harness 从不读 pi-ai 的 cost 元数据"），直连适配器无价格表。
 
-**错误与拓扑可观测**：`LlmError` 携带稳定 `code` + 可序列化 `failure`（status/providerRetryAfterMs/requestId），`errorChain` 渲染完整 cause 链供 UI/日志；pi-ai 路径拿不到 HTTP status（README 记录的限制）。拓扑变更经 `llm/adapters-updated` 事件与 listProviders/listModels/listConfigurableProviders/resolveModelInfo 等查询可见。Web Models 页还订阅 settings 文档、凭据和适配器拓扑三类推送失效事件，已打开页面才重新加载 joined snapshot，不靠轮询（`packages/client/ui-settings-models/src/client/index.ts:98-116`）。遥测行 `session-telemetry-otel` 存在于基座组合，但本次未追到 LLM 请求路径的具体埋点。
+**错误与拓扑可观测**：`LlmError` 带一个稳定的 `code` 和可序列化的 `failure`，后者含 status、providerRetryAfterMs 与 requestId；`errorChain` 能把完整 cause 链渲染给 UI 与日志。pi-ai 路径拿不到 HTTP status，README 记录了这条限制。拓扑变更经 `llm/adapters-updated` 事件广播，查询侧提供 listProviders、listModels、listConfigurableProviders 与 resolveModelInfo 等入口。Web Models 页订阅 settings 文档、凭据和适配器拓扑三类推送失效事件，已打开的页面据此重新加载合并快照，不靠轮询（`packages/client/ui-settings-models/src/client/index.ts:98-116`）。遥测行 `session-telemetry-otel` 存在于基座组合，本次未追到 LLM 请求路径上的具体埋点。
 
 ## 9. pi-ai 复用边界
 
@@ -252,15 +256,15 @@ pi-ai 版本 `^1.3.0`（`packages/llm/llm-pi-ai/package.json`，lock 解析为 1
 
 ## 10. 设计取舍与已确认边界
 
-- **twin adapters 钉住中性词汇**：两个实现（直连 fetch vs 库事件流）自始共享 `StreamChunk` 契约，任何词汇无法同时表达两个实现的行为都被视为核心词汇缺陷（Agent Note `2026-06-13-twin-llm-adapters.md`）；代价是双份适配器与双份 key 门控 e2e。第一方在 twin 之上再按认证形态拆成 api-key 与 account 两个 provider 插件，共享同一传输与模型目录。
-- **route 键即注册项**：没有用户渠道实体与实例管理，多账号/多网关靠多 route 键或多 profile 表达；pi-ai 一个实例可挂任意多 route，第一方传输由两个认证插件各注册一条 route（`deepseek-official` 与 `deepseek-account`）。
+- **twin adapters 钉住中性词汇**：直连 fetch 与库事件流两个实现从一开始就共用同一份 `StreamChunk` 契约；只要有词汇无法同时表达两边行为，就按核心词汇缺陷处理（Agent Note `2026-06-13-twin-llm-adapters.md`）。代价是要维护双份适配器与双份 key 门控 e2e。第一方在 twin 之上再按认证形态拆成 api-key 与 account 两个 provider 插件，两者共享同一传输与模型目录。
+- **route 键即注册项**：用户侧没有渠道实体，也没有实例管理，多账号与多网关靠增加 route 键或多份 profile 表达。pi-ai 的一个实例可以挂任意多条 route；第一方传输由两个认证插件各注册一条，分别是 deepseek-official 与 deepseek-account。
 - **凭据引用而非存储**：配置永不落 key，换来"改 key 即热生效、配置可共享"；代价是每次请求一次 seam 解析，且 key 值只存在于进程内存与托管文档。
 - **dormant 挂载 + settings 驱动注册**：组合决定"哪些适配器存在"，settings 文档决定"哪些 provider 运行"（基座 bundle 对 pi-ai 采用零 profile 休眠挂载）；route 集与 retry policy 是注册级事实，变化时同步原子 replace。
 - **一次调用一次尝试**：SDK 重试被禁用，重试闭环全部在 agent 请求尝试边界（durable `llm/retry` 事件可重建），避免"流已发出部分 chunk 后不可重放"的边界。
 - **目录即配置**：模型目录来自 pi-ai 安装目录 + settings，无远端刷新；新模型上线必须写配置，换取确定性（与 Pi 的"构建期 + 远端叠加"策略相反）。
 - **无跨渠道高可用**：无多 Key、无健康调度、无模型 fallback、无跨 Provider failover；`RATE_LIMIT`/`SERVER` 只在同一 route 内重试。
-- **平台边界**：llm seam、凭据与 settings 全部在服务端进程；浏览器经 remote API（settings/credentials/llm 域）读写，Models 页负责把 key 写入托管文档、把 profile 写入 settings 节。`web-search-deepseek` 是独立搜索 provider（Anthropic-compatible `/messages` 端点、同一 `DEEPSEEK_API_KEY` 凭据、单独 baseURL 覆盖），不属于 LLM 渠道 seam，但复用同一凭据存储。
-- **文档与实现一致性**：README、`docs/subsystems/llm-streaming.md` 与代码一致（抽查了错误码、默认值、route 名、限制清单）；`stream.ts:31-38` 的 `XXX(pi-ai upstream)` 注释如实记录上游把错误压平成文本的限制。
+- **平台边界**：llm seam、凭据与 settings 都跑在服务端进程里；浏览器经 remote API（settings、credentials、llm 三个域）读写，Models 页负责把 key 写进托管文档、把 profile 写进 settings 节。搜索 provider `web-search-deepseek` 走 Anthropic-compatible 的 /messages 端点，共用同一 `DEEPSEEK_API_KEY` 凭据并单独覆盖 baseURL，属于独立的搜索链路，读取同一份凭据存储。
+- **文档与实现一致性**：抽查错误码、默认值、route 名与限制清单后，README、`docs/subsystems/llm-streaming.md` 与代码一致；`stream.ts:31-38` 的 XXX(pi-ai upstream) 注释如实记下了上游把错误压平成文本这一限制。
 
 ## 11. 未验证事项
 

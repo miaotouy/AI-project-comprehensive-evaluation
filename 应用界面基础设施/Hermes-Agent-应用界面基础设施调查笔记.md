@@ -30,10 +30,15 @@ Hermes Agent 同时维护 Electron 桌面、Ink TUI 和 Web dashboard 三套界�
 
 桌面前端在快照之间大幅扩张：
 
-- `apps/desktop/src/app/` 下新增 `agents`、`learning`、`command-center`、`capabilities`、`gateway`、`messaging`、`profiles`、`cron`、`quick-entry`、`overlays`、`pet-overlay`/`pet-generate`、`master-detail` 等表面；
-- `apps/desktop/src/plugins/`、`sdk/`、`i18n/`、`debug/` 升为独立目录；
-- 根装配仍由 contrib 注册表驱动（`app/contrib/`、`contrib/registry.ts`），核心与插件走同一套注册 API；
-- 仓库一级新增 `apps/bootstrap-installer`（MSIX/安装器方向）与顶层 `pm/` 包管理器。
+- 应用根 `apps/desktop/src/app/` 下新增的界面表面（目录名）：
+
+  ```text
+  agents  learning  command-center  capabilities  gateway  messaging
+  profiles  cron  quick-entry  overlays  pet-overlay/pet-generate  master-detail
+  ```
+- sdk、i18n、debug 与 plugins 一起升为独立目录；
+- 装配方式保持不变，根装配仍由 contrib 注册表驱动，核心与插件共用同一套注册 API（`contrib/registry.ts`）；
+- 仓库一级多了安装器方向的 apps/bootstrap-installer（MSIX）与顶层包管理器 pm。
 
 TUI 仍为 Ink fork，Web dashboard 仍是 REST + PTY。
 
@@ -69,7 +74,7 @@ App（`web/src/App.tsx:371-823`）内部套着 ProfileProvider，侧栏同时支
 
 命令式 UI 状态——弹窗开合、toast、调色板开关——都放在模块级 atom 上（`$commandPaletteOpen`、`$notifications`、`$sessionPickerOpen`），不经 React context。命令入口和渲染视图读的是同一个 store。
 
-**TUI**：`$uiState`、`$overlayState`、`$uiSessionId` 等都是模块级 atom（`app/uiStore.ts:41`、`app/overlayStore.ts:27`）；浮层状态全部落在 `$overlayState` 这一个 atom 的字段上（见第 2 节）。
+**TUI**：界面状态都放在模块级 atom 上，uiState、overlayState 与 uiSessionId 各自一份；浮层状态全部收在 overlayState 这一个 atom 的字段里（见第 2 节）。定义见 `app/uiStore.ts:41` 与 `app/overlayStore.ts:27`。
 
 **Web**：主题、Profile 和 SystemActions 走 context（`web/src/themes/context.tsx`、`contexts/ProfileProvider.tsx`）；服务端数据走 `lib/api` 的 fetch 封装。
 
@@ -86,12 +91,12 @@ App（`web/src/App.tsx:371-823`）内部套着 ProfileProvider，侧栏同时支
   横幅变体 banner（error/warn/info 三色调，底部贴边，`dialog.tsx:125-170`）。
 - **弹窗内 Popover 改投**（`components/ui/dialog-portal-context.ts`）：Radix 的 Select、Popover、DropdownMenu 默认把浮层 portal 到 document.body，浮层于是成了 Dialog 的 DOM 兄弟。这样一来，在弹窗内点下拉时，DismissableLayer 会把弹窗内的交互判成“outside”，整个弹窗跟着被误关；跨 body 兄弟比较 z-index 也没有稳定的控制点。
 
-  DialogContent 把自身的 content 节点发布进 context（`dialog.tsx:100,146,192`），下面三个浮层组件便把自己的 Portal container 换成弹窗节点：
+  DialogContent 把自己渲染出的 content 节点发布进 context，弹窗内的三个浮层组件取它当 Portal 容器，把浮层挂到弹窗节点之下（`dialog.tsx:100,146,192`）：
   - `popover.tsx:33-36`
   - `select.tsx:50-53`
   - `dropdown-menu.tsx:79-82`
 
-  浮层成为弹窗真子节点后，焦点不出弹窗，层级共享弹窗 stacking context。
+  浮层转成弹窗的真子节点后，焦点陷阱继续把焦点留在弹窗内，层级也并入弹窗自己的 stacking context。
 - **ConfirmDialog**（`components/ui/confirm-dialog.tsx`）：共享的确认弹窗。Enter 或 Space 在弹窗任意位置都能触发确认（onKeyDown，:99-106）；内部自带 pending→done→close 的节拍，done 之后 600ms 自动关闭。错误以内联形式出现，throw 后弹窗保持打开；它还提供 dismissOnConfirm 乐观模式。
 - **覆盖层视图**（settings/command-center/agents/cron/profiles/webhooks/starmap）：挂在 ContribWiring 尾部、由 hash 路由驱动的全尺寸视图（`wiring.tsx:1057-1119`，懒加载 Suspense），渲染路径独立于 Modal 组件；关闭时回跳被覆盖前的路由（`use-overlay-routing.ts:33-59` 的 returnPathRef）。
 - **命令面板 ⌘K**（`app/command-palette/index.tsx`）：Radix Dialog 加一层透明 overlay（没有遮罩变暗，但保留 click-away 与焦点陷阱，:1270-1272），里面嵌 cmdk。搜索排序是自研的（scoreItem/rankGroups，:180-241），cmdk 只承担键盘与选择机制，配 `shouldFilter={false}`；
@@ -105,9 +110,9 @@ App（`web/src/App.tsx:371-823`）内部套着 ProfileProvider，侧栏同时支
 
 `$overlayState` 一个 atom 管全部浮层（`app/overlayStore.ts:27`），按形态分三类（`appOverlays.tsx`）：
 
-1. **flow 提示**（approval、billing、subscription、confirm、clarify、sudo、secret，PromptZone，:58-163）：渲染在正常文档流里，位于 ComposerPane 上方（`appLayout.tsx:553-568`），效果是**推挤**下方内容，而非盖在它上面。Esc、数字键、Enter 各有绑定；ApprovalPrompt 用纯函数做键分发，Esc 对应 deny（`components/prompts.tsx:52-81`）。
-2. **浮层面板**（sessions、modelPicker、petPicker、skillsHub、pluginsHub、pager、completions，FloatingOverlays，:165-384）：用 `position="absolute" bottom="100%"` 从 Composer 顶部向上长出来（:380-383），外面包 FloatBox 边框；completions 列表是固定 16 行、居中的视口（COMPLETION_WINDOW，:203-205）。
-3. **widget 模态**（SDK 应用，ActiveWidgetSlot，`sdk/host.tsx:209-214`）：渲染在视图层，可以锚定九宫格 zone，并带一层伪 scrim（`components/overlay.tsx:31-66`）；scrim 由逐行空格加背景色拼成，注释说它沿用 lipgloss 的经典做法。Dialog 在这里是圆边框卡片原语（:76-105）。模态打开期间独占键盘（`useInputHandlers.ts:440-442`）。
+1. **flow 提示**：审批、计费、订阅、确认、澄清、sudo 与密钥这七类提示由 PromptZone 承接。它们排在正常文档流里、位于 ComposerPane 上方（`appLayout.tsx:553-568`），出现时把下方内容整体下推。按键上 Esc、数字键和 Enter 各有绑定，其中审批提示由纯函数分发按键，Esc 对应拒绝。提示形态见 `appOverlays.tsx:58-163`，按键分发见 `components/prompts.tsx:52-81`。
+2. **浮层面板**：会话、模型选择、宠物选择、技能中心、插件中心、分页和补全这几类面板由 FloatingOverlays 承载。它们采用绝对定位，底边按 100% 的偏移贴在 Composer 上沿，面板因此从输入区向上生长，外面再套一层 FloatBox 边框；补全列表是固定 16 行、居中的视口，尺寸由 COMPLETION_WINDOW 决定。定义见 `appOverlays.tsx:165-384`。
+3. **widget 模态**：SDK 应用通过 ActiveWidgetSlot 渲染在视图层，可以锚定九宫格中的某个 zone，打开期间独占键盘。它下面垫一层伪 scrim，由逐行空格加背景色拼成，代码注释说明这沿用 lipgloss 的经典做法；同处的 Dialog 是圆边框卡片原语。入口见 `sdk/host.tsx:209-214`，scrim 与 Dialog 见 `components/overlay.tsx:31-66`，键盘接管见 `useInputHandlers.ts:440-442`。
 另有 AmbientDock/AmbientRail 这类驻留在文档流里的卡片：dock 行占真实行高，rail 的列宽从转录宽度预算里扣（`sdk/host.tsx:219-286`）。浮层的关闭语义由 `resetFlowOverlays` 定：每轮结束只清 flow 这一类，用户主动打开的（agents、modelPicker、skillsHub 等）继续留在界面上（`overlayStore.ts:150-163`）。
 
 ### Web：`@nous-research/ui` 组件库
@@ -127,7 +132,7 @@ ConfirmDialog（重启/更新确认，:1068-1095）和 useToast（见第 3 节�
   `notifyError` 带一张错误摘要规则表（ERROR_SUMMARIES，:91-133），磁盘满、网关鉴权失败、OpenAI API key 被拒（带状态码）、ElevenLabs 或麦克风权限等常见错误都能命中；超过 180 字符的错误会折叠成 fallback，细节收进可展开的 detail。
 - **渲染**（`components/notifications.tsx`）：两个栈都 portal 到 body——TopCenterStack（`role="region"`，最新一条常显，可展开“+N more”，带 clear-all，:104-141）和 BottomRightStack（全部平铺，:145-164）。
 
-  单条的 role 和 aria-live 按 kind 定：error 用 alert/assertive，其余用 status/polite（:205-207）。detail 用 `<details>` 折叠，旁边配复制按钮；成功、错误、警告分别触发对应的 haptic（:71-77）。代码注释解释了为什么要 portal 到 body：React 根子树里的 toast 会被 body 级弹窗遮罩盖住（:99-103）。
+  单条 toast 的 role 与 aria-live 由消息种类决定：错误用 alert 配 assertive，其余用 status 配 polite。detail 部分用 `<details>` 折叠，旁边配一个复制按钮，成功、错误和警告各自触发对应的触觉反馈。toast 之所以 portal 到 body，是因为挂在 React 根子树里会被 body 级弹窗遮罩盖住，代码注释记下了这条原因。这三处细节依次在 :205-207、:71-77 和 :99-103。
 - **后端通知接入**（`store/agent-notices.ts`）：后端发来的 notification.show 负载会映射成 toast。这条链路是 Python 端 `agent/credits_tracker.py` 产生 AgentNotice，经 `tui_gateway/server.py` 转发到前端；映射规则逐条如下：
   - 剥离前导严重级字形（CLI/TUI 用字形表达级别，桌面 toast 已有图标，stripGlyph，:39-44）；
   - 用 · 分隔主文本与 meta；
@@ -166,7 +171,7 @@ ConfirmDialog（重启/更新确认，:1068-1095）和 useToast（见第 3 节�
 
   模块一加载，就按“上次活跃 profile”预应用主题（:274-281）；同时把背景色和色系写进 hermes-boot-background、hermes-boot-color-scheme 两个 localStorage 键，index.html 的内联脚本在 React 挂载前就能给首帧上色（:243-252），两层合起来防首帧闪烁。跨窗口同步靠 storage 事件（:361-376）。
 
-  应用主题时，把 seed 色写进 `--theme-*` 行内变量，`styles.css` 再用 `color-mix()` 派生 `--ui-*` 语义层，另留一组 `--dt-*` 直通 shadcn token（:198-234）。data-hermes-theme、data-hermes-mode、`.dark` class 与 color-scheme 保持同步（:192-195）；
+  应用主题时，种子色先写进 `--theme-*` 行内变量，样式表再用 color-mix() 派生出 `--ui-*` 语义层，另留一组 `--dt-*` 直接透传 shadcn token。data-hermes-theme、data-hermes-mode、`.dark` class 与 color-scheme 这四项标记保持同步。变量写入见 :198-234，标记同步见 :192-195；
 
   renderedMode 反向从背景亮度推算，免得出现“暗色主题配亮背景”的误判（:148-158）。字体通过动态 `<link>` 注入，注入前会去重（:254-261）。原生窗口的外观另有引脚：setNativeTheme 把 Electron 的 nativeTheme 固定到应用模式，标题栏和模糊材质跟着走（:268-269）。
 
@@ -184,7 +189,7 @@ ConfirmDialog（重启/更新确认，:1068-1095）和 useToast（见第 3 节�
 
   **accent 派生护栏**：皮肤转桌面模型这一步（`themes/skin.ts:65-104`）只认 accent 等少数种子，回退顺序是 ui_accent → banner_accent → banner_title → mix；primary、ring、midground、composerRing 全部由 accent 驱动；
 
-  `styles.css:165-169, 255-289` 定义了 `--theme-fill-{primary..quinary}-accent-mix` 五级填充（3%~16%），再配合 row-hover/active 的 mix 阶梯，把单一 accent 摊成整套 `--ui-bg-*` 表面；`DESIGN.md:100` 的 token 表把这一契约归纳了出来。
+  桌面样式表负责把单一 accent 摊成整套表面：先为五级填充定义 `--theme-fill-{primary..quinary}-accent-mix`（3%~16%），再配合 row-hover/active 的 mix 阶梯铺开 `--ui-bg-*` 系列（`styles.css:165-169, 255-289`）。这套契约在 DESIGN.md 的 token 表里有归纳（`DESIGN.md:100`）。
 - **TUI**（`theme.ts` + `lib/themeBoot.ts`）：亮/暗检测走一条有序的 env 链——先看 HERMES_TUI_LIGHT，依次退到 HERMES_TUI_THEME、HERMES_TUI_BACKGROUND 的亮度、COLORFGBG，最后看 TERM_PROGRAM 白名单（detectLightMode，:702-762）；
 
   `fromSkin()` 把后端皮肤转成 ThemeSeeds，次级色调一律由 mix 阶梯派生（deriveTones；代码注释点明这是桌面 color-mix 体系的终端版，:556-568）。它还会针对真实终端背景做对比度护栏（display 1.45、semantic 2.2，亮端更低，:472-475），并处理填充极性回退（:528-538）；
@@ -193,12 +198,12 @@ ConfirmDialog（重启/更新确认，:1068-1095）和 useToast（见第 3 节�
 
   **首帧防闪烁**：上次解析出的主题会写进 `$HERMES_HOME/tui-theme-boot.json`（防抖 400ms 的原子写，`themeBoot.ts:96-121`）。启动时把它回放成第一帧（`$uiState` 初始值就是 bootTheme，`app/uiStore.ts:37`），同时回种 env，让首次皮肤解析的结果与上次一致（seedBootEnvironment，:148-179）。
 
-  TUI 的显示密度由 `/density [on|off|toggle]` 命令控制（`app/slash/commands/core.ts:285-300`）：它写 `$uiState.compact`，再用 config.set density 持久化。这是紧凑布局的开关，与皮肤和主题 token 无关。
-- **Web**（`web/src/themes/context.tsx`）：**服务端是权威源**（`api.getThemes()` 和 `setTheme`，内建主题加用户 YAML，:474-517；用户主题来自 `~/.hermes/dashboard-themes/*.yaml`，后端扫描在 `hermes_cli/web_server.py:16704-16735`）。localStorage 只承担首帧防闪烁缓存（STORAGE_KEY，:34-35, 411-423），旧主题名由 migrateThemeName 迁移；
+  TUI 的显示密度由 `/density` 命令控制，参数可取 on、off 或 toggle：命令写入 `$uiState.compact`，再用 config.set density 持久化。这个开关只管紧凑布局，与皮肤和主题 token 无关。实现见 `app/slash/commands/core.ts:285-300`。
+- **Web**（`web/src/themes/context.tsx`）：权威源在服务端。主题列表由 getThemes 读取、切换由 setTheme 提交，内建主题与用户 YAML 一并返回（:474-517）；用户主题以 YAML 文件存放在 `~/.hermes/dashboard-themes/` 下，由后端扫描加载（`hermes_cli/web_server.py:16704-16735`）。渲染层只用 localStorage 做首帧防闪烁缓存，键名 STORAGE_KEY（:34-35, 411-423），旧主题名由 migrateThemeName 迁移；
 
   字体覆盖独立于主题（服务端权威 + localStorage 防闪，:41, 443-449, 521-541）。
 
-  token 输出为 :root 行内变量：
+  主题变量最终全部写成 `:root` 上的行内变量，按用途分七组：
   - palette 分层：`--background`/`--midground`/`--foreground` 的 color-mix 透明度层（:68-78）；
   - 排版与布局：字体参数、半径与密度系数 `--theme-spacing-mul`；
   - `--color-*`：shadcn 覆盖与数据序列色；
@@ -224,7 +229,7 @@ ConfirmDialog（重启/更新确认，:1068-1095）和 useToast（见第 3 节�
 
 窄视口下，可折叠的边栏（sessions、files、review）会**离开网格**，改成贴边的覆盖层：鼠标移到边条上揭示，⌘B/⌘G 可以钉住揭示，Esc 关闭（`narrow-overlays.tsx:103-147`）。宽度取 pane 声明宽度和 85vw 中较小的那个。
 
-pane 树本身是一套重量级的可拖拽布局，支持 split/group 权重和 Default、Focus、Terminal deck、Quad 四种预设（`controller.tsx:342-391`）；会话选项卡能拖出来变成独立 pane。
+pane 树是一套重量级的可拖拽布局：节点支持 split 与 group 两种权重分配，另内置 Default、Focus、Terminal deck、Quad 四种预设；会话选项卡可以从主区域拖出，独立成一个 pane。预设与拖拽逻辑见 `controller.tsx:342-391`。
 - **窗口最小尺寸**（Electron）：
   - 主窗：`MIN_WIDTH=400`（`electron/window-state.ts:14`，默认 1220×? 记忆化恢复）
   - 独立会话窗：`SESSION_WINDOW_MIN_WIDTH=420` / `MIN_HEIGHT=620`（`electron/session-windows.ts:10-11`）
@@ -247,7 +252,7 @@ pane 树本身是一套重量级的可拖拽布局，支持 split/group 权重�
 
   灯箱只做查看与下载，没有缩放、旋转和多图导航，能力面比 Cherry Studio 的灯箱小。
 
-  消费点分布在消息 markdown 图片、指令文本、工具输出图、生成的图片结果和 composer 附件上（测试里断言“附件图走灯箱，不进预览 rail”）：
+  灯箱在五类内容上复用：消息 markdown 图片、指令文本、工具输出图、生成的图片结果和 composer 附件。测试断言附件图走灯箱、不进预览 rail。源码入口如下：
   - `components/assistant-ui/markdown-text.tsx:389`
   - `directive-text.tsx:370,433`
   - `tool/fallback.tsx:611`
@@ -267,7 +272,7 @@ pane 树本身是一套重量级的可拖拽布局，支持 split/group 权重�
 
 **HUD 与辅助窗口。** HUD 是一个完整的 renderer，并非傀儡窗；它的快照快捷键和窗口位置记忆（`hud-state.json`）记在 Chat UI 笔记 §1/§8。pet overlay、quick entry 和 wake indicator 是各自独立的最小根（`main.tsx:46-51`）。
 
-**快捷键。** `store/keybinds.ts` 是一张可重绑定的 action 注册表（由 KEYBINDS_AREA 贡献）。TipKeybindLabel 从注册表读标签和组合键，自动渲染成 tooltip 提示（`components/ui/tooltip.tsx:216-223`）；快捷键面板则通过自定义事件 hermes:open-keybinds 打开设置页（`wiring.tsx:293-298`）。
+**快捷键。** 可重绑定的动作统一登记在 `store/keybinds.ts` 这张注册表里，通过 KEYBINDS_AREA 这个 area 贡献。展示端有两处：TipKeybindLabel 从注册表取出标签与组合键，自动渲染成 tooltip 提示；快捷键面板收到 hermes:open-keybinds 自定义事件后打开设置页。前者见 `components/ui/tooltip.tsx:216-223`，后者见 `wiring.tsx:293-298`。
 - **浮层层级变量**（`styles.css:222-236`）：
   - `--z-modal-backdrop`：120
   - `--z-modal`：130
@@ -320,7 +325,7 @@ pane 树本身是一套重量级的可拖拽布局，支持 split/group 权重�
 - VS Code 市场端到端链路（Gallery API 查询、VSIX 下载/解包、明暗变体合并、粘贴导入）未运行验证，`electron/vscode-marketplace.ts` 的手写 zip central-directory 解析行为未实测。
 - Web 主题的 assets.bg/hero 背景图、layoutVariant 的 cockpit/tiled 布局变体、swatchColors 与密度三档的实际渲染效果未运行验证。
 - Connector 授权弹窗、Vault 自动填充与 GPT-Live 的真实平台权限、焦点和失败恢复未运行验证。
-- 本轮按路径复核了装配入口、contrib 注册表与公共组件的归位，未新增对 `agents`/`learning`/`pet-*`/`command-center` 等新表面的界面调查；这些表面只确认存在，未展开交互与状态所有权。
+- 装配入口、contrib 注册表与公共组件的归位已按路径复核；agents、learning、pet-* 与 command-center 等新表面只确认了目录存在，交互与状态所有权尚未展开调查。
 
 ## 10. 关键源码索引
 

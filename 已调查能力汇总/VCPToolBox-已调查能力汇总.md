@@ -18,7 +18,18 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 产品历史上，它从 2025-05-12 的“AI API 与工具交互”工具箱逐步扩展为插件运行时、分布式执行、管理面板和长期记忆中枢；当前 README 将整体定位提升为让 AI 持续存在的环境。RAG 是这一定位变化最集中的演进线：早期多路相似度与结构召回经浪潮 V1-V8、TagMemo V9.1/V9.2 发展到当前 RiverMemo Topology V3。历史作者自述、提交节点和当前执行边界见[产品结构与设计基因](../产品结构与设计基因/VCPToolBox-产品结构与设计基因调查笔记.md)与[检索增强与认知编排](../检索增强与认知编排/VCPToolBox-检索增强与认知编排调查笔记.md)；历史版本不替代当前源码。
 
-核心边界：客户端提交完整历史并持有会话导航，服务端按请求编排消息；OneRing 另有按 Agent 持久化的插件历史；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` + `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling；当前快照为 `Plugin/` 下 96 个插件目录（77 启用、19 个 `.block` 禁用）。大量能力高度依赖用户配置且默认关闭或禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`、`ModelRedirect.json` 本快照不存在），“主链确认”指在默认或文档说明配置下代码链路完整存在；开箱可用还需补齐上述配置项。
+核心边界：客户端提交完整历史并持有会话导航，服务端按请求编排消息；模型推理由外部上游完成，上游出口是单一 OpenAI-compatible 配置（`API_URL` 与 `API_Key`）；工具调用走纯文本标记协议（`<<<[TOOL_REQUEST]>>>`），不依赖原生 Function Calling。OneRing 在触发后另按 Agent 持久化插件历史，当前快照为 `Plugin/` 下 96 个插件目录，其中 77 个启用、19 个以 `.block` 禁用。
+
+大量能力依赖用户配置，默认处于关闭或禁用状态：
+
+- AgentDream 插件以 `.block` 禁用；
+- 托管浏览器由 `VCP_BROWSER_RUNTIME_ENABLED=false` 关闭；
+- 推理内容转正文由 `ReasoningToContentEnabled=false` 关闭；
+- 隐私保护由 `privacyProtection.enabled=false` 关闭；
+- TaskAssistant 由 `globalEnabled=false` 关闭；
+- 模型重定向配置 `ModelRedirect.json` 在本快照中不存在。
+
+“主链确认”指在默认或文档说明配置下代码链路完整存在；开箱可用还需补齐上述配置项。
 
 ## 完成度速览
 
@@ -41,9 +52,18 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ### 角色与上下文
 
-- **Agent 提示词文件层与别名映射**：`Agent/` 目录下每个 `.txt` 是一段含 VCP 变量占位符的系统提示词模板，经 `agent_map.json` 映射别名并以 `{{agent:AlterName}}` 嵌套引用；真实映射文件需用户创建（仓库只带 `agent_map.json.example`），映射缺失时占位符不展开、Agent 文件层默认未激活；AgentManager 监视文件变更实现免重启热重载。证据状态：`主链确认`（默认未激活）。来源：[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
+- **Agent 提示词文件层与别名映射**：AgentManager 把 `Agent/` 目录下的每个 .txt 文本文件当成一段系统提示词模板，模板里可以写 VCP 变量占位符。别名由 `agent_map.json` 映射，`{{agent:AlterName}}` 因此能嵌套引用另一个 Agent。映射文件需要用户自建，仓库只附带示例文件 agent_map.json.example；映射缺失时占位符不展开，整个文件层保持未激活。AgentManager 监视这些文件，改动后免重启热重载。证据状态：`主链确认`（默认未激活）。来源：[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
 
-- **变量体系（多前缀占位符注入管线）**：发送前由 `messageProcessor.js` 多阶段管线替换 `{{VarXxx}}`（环境变量）、`{{TarXxx}}`（对话目标）、`{{Sar Xxx}}`（会话）、`{{VCP…}}`（静态插件）、`[[日记本名::Group::Time::…]]`（TagMemo 知识库）、`{{agent:AlterName}}`（嵌套 Agent）、`《《文件名::…》》`/`<<文件名>>`（TVStxt 文本块）。证据状态：`主链确认`。来源：[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
+- **变量体系（多前缀占位符注入管线）**：发送前，`messageProcessor.js` 的多阶段管线按前缀名称把占位符替换成对应内容，共覆盖七类来源。
+  - `{{VarXxx}}`：环境变量；
+  - `{{TarXxx}}`：对话目标；
+  - `{{Sar Xxx}}`：会话；
+  - `{{VCP…}}`：静态插件数据；
+  - `[[日记本名::Group::Time::…]]`：TagMemo 知识库；
+  - `{{agent:AlterName}}`：嵌套 Agent；
+  - `《《文件名::…》》` 与 `<<文件名>>`：TVStxt 文本块。
+
+  证据状态：`主链确认`。来源：[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
 
 - **AgentAssistant 多 Agent 身份配置与委派（主体）**：每个命名 Agent 定义身份、模型、温度、提示词等；支持即时通讯、`timely_contact` 定时联络与异步委托（`delegationMaxRounds` 默认 15 轮上限），`inject_tools` 可临时拼接工具说明到被委托 Agent 提示词尾部（未做权限限制）。主体已归并到 Agent 工具/Agent 角色类目，跨 Agent 长期通信局部见独特能力十一。证据状态：`归并已有类目`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)、[Agent 角色配置调查笔记](../Agent角色/VCPToolBox-Agent角色配置调查笔记.md)。
 
@@ -63,7 +83,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **存储职责分离**：内存请求快照、可选 ChatLog 和工具调用台账用于审计调试；VCPTavern 保存会话键时间戳。OneRing 的消息表与回合表则承担插件历史记录，最终 AI 回复需上游整轮有效且 HTTP finish 后异步写入，失败只中止当前 pending 回合，预处理阶段已记录的历史不整体回滚。证据状态：`主链确认`。来源：[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
-- **请求级停止与响应去重**：`/v1/interrupt` 按 `requestId`/`messageId` 在 `activeRequests` 注册表中置中止标志并级联 `AbortController`，客户端断联触发同一中止链；`ResponseReplayCache` 按 `clientIp::messageId` 做响应回放去重（默认关）。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
+- **请求级停止与响应去重**：调用方请求 `/v1/interrupt` 时，服务端按 requestId 或 messageId 在 `activeRequests` 注册表中置位中止标志，并把中止沿 AbortController 级联到该请求的各环节，客户端断联会触发同一条中止链。响应回放去重由 `ResponseReplayCache` 按 `clientIp::messageId` 组合键完成，默认关闭。证据状态：`主链确认`。来源：[对话请求与上下文调查笔记](../对话请求与上下文/VCPToolBox-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/VCPToolBox-会话与消息管理调查笔记.md)。
 
 - **Chat UI 不适用边界**：不产出最终用户聊天主界面。AdminPanel-Vue 40 条路由逐条核对无聊天路由；`adminServer.js` 独立进程监听 PORT+1、主进程 302 重定向，与聊天主链物理解耦；Nova 看板娘气泡、沉浸观星面板等均为彩蛋装饰；`aiChat` 后台 API 代理无消费页面；OpenWebUISub 是第三方页面纯前端增强层。证据状态：`主链确认`（不适用记录）。来源：[Chat UI 调查笔记](<../Chat UI/VCPToolBox-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/VCPToolBox-Chat调查笔记.md)。
 
@@ -79,7 +99,11 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ### Agent 运行时与外部协作
 
-- **VCP 文本协议解析器**：状态机扫描器（`toolCallParser.js`）解析 `<<<[TOOL_REQUEST]>>>` 块与「始」「末」字段，默认严格模式精确匹配，`fuzzyToolMatching` 开启后容忍 `{始}`、`<<[TOOL_REQUEST]>>` 等变体（可配置的协议宽松开关）；支持 ESCAPE 转义、同轮多块、` thinking` 思考块剥离（未闭合标签保守丢弃其后内容）；解析器不识别 code fence，流式解析发生在完整拼接后。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md)。
+- **VCP 文本协议解析器**：状态机扫描器从模型输出的 `<<<[TOOL_REQUEST]>>>` 块及其「始」「末」字段中取出工具调用。严格模式要求精确匹配；fuzzyToolMatching 开关分别放宽两类标记：
+  - 工具块头接受 `<<[TOOL_REQUEST]>>` 等尖括号变体；
+  - 字段开始接受 `{始}` 等括号变体。
+
+  扫描支持 ESCAPE 转义与同轮多块，会剥离 thinking 思考块，未闭合的思考标签连同其后内容一并丢弃；code fence 不参与边界识别，流式输出等完整拼接后才解析。证据状态：主链确认。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/VCPToolBox-生成式输出与运行时调查笔记.md)。
 
 - **工具定义与上下文注入**：模型看到的工具描述是插件 manifest 中的原始中文自然语言文本（无 JSON Schema/function-calling 转换层），经 `{{VCP<PluginName>}}` 占位符注入 system prompt；static 插件另有 `{{VCPxxx}}` 数据占位符，支持 `refreshIntervalCron` 周期性刷新与 stale-while-revalidate 语义。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
 
@@ -87,7 +111,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **审批系统与隐私脱敏**：执行前的人工控制环节，审批请求经 WebSocket 广播给所有已认证的 VCPLog 客户端，任何持有全局 `VCP_Key` 的客户端均可批准/拒绝任意请求（身份未绑定发起者）；超时默认 5 分钟且默认拒绝执行，`WebSocketServer` 未初始化时直接抛错；`requiresAdmin` 非框架强制（两条注入路径都要求插件自己比对）；`privacyProtection.enabled` 开启后工具结果回注前按敏感模式掩码（默认关闭，细节见末尾小节）；审批判定发生在分布式分支之前，对转发调用同样生效。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
 
-- **分布式节点协议**：WebSocket 节点经 `register_tools` 注册工具与能力，主服务器 `executeDistributedTool` 分派并等待 `tool_result`；结果绑定目标 `serverId`（非目标节点结果被忽略），节点声明 `cancelTool` 时超时 best-effort 发送 `cancel_tool`，断线立即 reject 全部 pending；鉴权只有一层全局 `VCP_Key`（无节点级密钥），同名工具注册会被跳过但可注册诱导性命名新工具。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
+- **分布式节点协议**：WebSocket 节点先通过 `register_tools` 注册自己的工具与能力，主服务器接到调用后用 `executeDistributedTool` 分派，并等待节点回传结果。结果按目标 serverId 绑定，其他节点回传的结果被忽略；节点声明 cancelTool 后，超时处理会尽力向它发送 `cancel_tool`，连接一断就拒绝该节点上全部待处理调用。鉴权只有一层全局 `VCP_Key`，没有节点级密钥；同名工具的注册会被跳过，节点仍可注册诱导性命名的新工具。证据状态：`主链确认`。来源：[Agent 工具调查笔记](../Agent工具/VCPToolBox-Agent工具调查笔记.md)。
 
 - **外部执行体接入**：AICodeWorker 以 jobId 调度 opencode/Antigravity CLI（analyze/patch/write 三模式，共用并发闸门）；SSHManagerService 按 hosts.json 连接池预热执行远端设备；DeepWikiVCP 是全仓库唯一 MCP-over-HTTP 客户端。托管浏览器与跨节点文件两条链分别见独特能力六、能力七。证据状态：`主链确认`（静态证据）。来源：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/VCPToolBox-外部执行体与应用协作调查笔记.md)。
 
@@ -107,7 +131,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 - **重试、超时与 Embedding 备用模型**：普通 Chat 最多 `ApiRetries` 次总尝试（默认 3），重试 500/503/429/特定 token 型 401/连接/首包超时/网络错误，退避为按尝试次序递增的线性延迟（不读 Retry-After、无抖动）；Embedding 有独立主模型 + 最多 9 个备用模型顺序切换，URL/Key 不变；无多 Key 轮询、Key 级熔断、多渠道权重或 Provider 健康表。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md)。
 
-- **凭据存储、备份与鉴权缺口**：`config.env` 与插件 `config.env` 均为磁盘明文，管理 API 把完整主配置原文返回给已认证管理员（无 Secret 掩码）；`backup_vcp.py` 默认归档所有 `.env`/`.json`，会把核心/插件 Key 一起放入未加密 ZIP；白名单图像/Embedding 路由在通用 Bearer 鉴权之前挂载，命中请求直接使用上游 `API_Key` 转发。证据状态：`主链确认`（含已确认风险点）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md)。
+- **凭据存储、备份与鉴权缺口**：主程序与插件各有一份 `config.env`，其中的密钥都以明文落在磁盘上。管理 API 会把完整主配置原文返回给已认证管理员，不做 Secret 掩码；`backup_vcp.py` 默认归档所有 .env 与 .json 文件，核心 Key 与插件 Key 因此会一起进入未加密 ZIP。白名单图像与 Embedding 路由挂在通用 Bearer 鉴权之前，命中后直接用上游 `API_Key` 转发请求。证据状态：`主链确认`（含已确认风险点）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md)。
 
 - **可观测性与连接测试**：`/v1/models` 单次拉取上游目录并附加语义路由虚拟模型；管理端模型列表接口、Chat 代理与语义匹配预览是三个层次的检查（目录/可达性、真实生成链、只算路由计划）；可选 NewAPI Monitor 显示请求/token/quota/RPM/TPM，数据来自外部 NewAPI 管理 API、不参与 VCP 路由；CLI、TUI 与独立桌面端渠道管理入口未找到。证据状态：`主链确认`。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/VCPToolBox-LLM渠道管理调查笔记.md)。
 
@@ -189,7 +213,7 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：VCPToolBox 是 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序合仓的多运行时插件仓库。Git 跟踪 3,332 文件，可识别源码 1,372 文件/546,854 行，文档 362 文件/145,336 行，测试 142 文件/27,741 行；两大主体为 `AdminPanel-Vue`（src 264 文件 + vendor 22 文件，构建产物 dist 不再跟踪）与 `Plugin`（SkillBridge 213 个源码文件），根服务源码 19 文件/16,295 行。语言占比 JavaScript 52.4%、Rust 15.6%、Vue 12.7%、TypeScript 5.2%、CSS 4.5%；测试集中在根 tests 与 AdminPanel，未随插件数量成比例扩展；Docker CI 构建 Linux amd64/arm64。统计为 Git 跟踪文件机械统计，未运行构建、部署与测试。来源：[仓库分布调查笔记](../仓库分布/VCPToolBox-仓库分布调查笔记.md)。
+- **仓库分布**：VCPToolBox 把 Node 编排服务、Vue 管理台、插件集合、知识/技能资料与多个 Rust/Python 辅助程序收在同一个仓库里，形成多运行时插件项目，两大主体是 AdminPanel-Vue 管理台与 Plugin 插件目录。Git 跟踪 3,332 个文件，其中可识别源码 1,372 个文件共 546,854 行，文档 362 个文件共 145,336 行，测试 142 个文件共 27,741 行；AdminPanel-Vue 下 src 264 个文件、vendor 22 个文件，构建产物 dist 不再跟踪，Plugin 下的 SkillBridge 有 213 个源码文件，根服务源码 19 个文件共 16,295 行。语言占比以 JavaScript 最多（52.4%），其后是 Rust 15.6% 与 Vue 12.7%，TypeScript 与 CSS 分别为 5.2% 与 4.5%；测试集中在根 tests 与 AdminPanel，规模未随插件数量成比例扩展；Docker CI 构建 Linux amd64 与 arm64 两个架构。统计口径为 Git 跟踪文件的机械统计，未运行构建、部署与测试。来源：[仓库分布调查笔记](../仓库分布/VCPToolBox-仓库分布调查笔记.md)。
 
 - **应用界面基础设施**：AdminPanel-Vue 是 Vue 3 + Pinia + vue-router 单页应用，无第三方 UI 组件库、无动画库、无 i18n 库，40 条路由分 4 个导航分组。BaseModal 自研弹窗基座（Teleport、焦点陷阱、滚动锁定、Esc/遮罩关闭）；confirm/input/loading/message 经模块级 feedbackState 单例 + FeedbackHost 提供命令式接口（总线可替换）；通知中心经 WebSocket 自动重连、抽屉内嵌工具审批响应。主题完全保存在 localStorage，OKLCH token + 17 预设 + 颜色覆盖 + 自定义 CSS + 背景图，运行时变量发现、结构 token 锁定、导入导出；无系统跟随、主题市场或自动色阶生成。响应式依赖媒体查询，Dashboard 另用容器查询与列数感知；拖放分 HTML5（插件上传）与自研指针会话（排序/面板）两套；无公共图片灯箱、上传组件、应用级错误边界；无障碍静态盘点有焦点陷阱、aria-live、skip-link，命令式对话框焦点圈与 BaseModal 不一致（运行态未验证）。来源：[应用界面基础设施调查笔记](../应用界面基础设施/VCPToolBox-应用界面基础设施调查笔记.md)。
 
@@ -199,18 +223,26 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ### 声明不符
 
-- **元思考主题配置（`thinktheme/*.json`）**：`docs/FEATURE_MATRIX.md` 声明主题配置位于 `thinktheme/*.json`，仓库未找到该目录；实际主题入口是 `meta_thinking_chains.json` 的非 default 链条目，当前快照只有 default 链（能力二局部异常）。
-- **README“300+ 官方插件”**：实际快照为 96 个插件目录（77 启用 + 19 个 `.block` 禁用），数量口径与文档不符（不影响插件热重载主链判断）。
-- **README“跨模型上下文无缝持久化”**：无服务端跨模型上下文持久化，历史由客户端携带，表述夸大。
-- **VCPClawMail 轮询间隔**：manifest 声称默认 60000ms，代码以 5 分钟为下限（能力十六局部异常）。
-- **AgentDream 插件内审批函数**（非异常记录，不计入计数）：`approveDreamOperation`/`rejectDreamOperation` 为 not_implemented 占位，但管理路由 `routes/admin/dream.js` 实现真实审批执行，以可执行路径为准，链完整。
+- **元思考主题配置（`thinktheme/*.json`）**：文档声明的主题配置目录在仓库里并不存在：`docs/FEATURE_MATRIX.md` 把主题配置写在 `thinktheme/*.json`，仓库中找不到该目录；实际的主题入口是 `meta_thinking_chains.json` 的非 default 链条目，当前快照只有 default 一条链（能力二局部异常）。
+- **README“300+ 官方插件”**：README 声称有 300 多个官方插件，当前快照实际是 96 个插件目录，其中 77 个启用、19 个以 `.block` 禁用；数量口径与文档不符，插件热重载的主链判断不受影响。
+- **README“跨模型上下文无缝持久化”**：README 宣称跨模型上下文可以无缝持久化，服务端没有跨模型上下文持久化，历史由客户端携带，属于表述夸大。
+- **VCPClawMail 轮询间隔**：manifest 声明轮询间隔默认 60000ms，代码实际以 5 分钟为下限（能力十六局部异常）。
+- **AgentDream 插件内审批函数**（非异常记录，不计入计数）：插件里的 `approveDreamOperation` 与 `rejectDreamOperation` 是 not_implemented 占位，真实审批执行落在管理路由 `routes/admin/dream.js`，以可执行路径为准，整条链完整。
 
 ### 暂缓与外部依赖
 
-- **按 Agent 隔离浏览器 Profile（maid/valet）**：仅存在于二期设计文档，当前未实现（`暂缓`），当前仍是 global 单 Profile。
-- **VCPForumOnline 在线论坛**：`.block` 禁用，功能比文件版更全（私信/点赞/编辑/搜索/未读追踪），当前主链以文件版 VCPForum 为准（`暂缓`）。
-- **默认关闭/禁用机制**：AgentDream（`.block` 默认禁用）、托管浏览器（`VCP_BROWSER_RUNTIME_ENABLED=false`）、ReasoningToContent、privacyProtection、TaskAssistant（`globalEnabled=false`）、ModelRedirect.json（本快照不存在）等默认关闭项在真实部署中的推荐配置组合未验证；主链在默认或文档配置下代码完整，开箱可用还需补齐这些默认关闭项。
-- **外部依赖**：VCPEverything 需本机 Everything HTTP 服务；VCPClawMail 需 ClawMailKey（manifest required）；DeepWikiVCP/DigitalOracle 需网络与上游服务；TagMemo/元思考/LightMemo 的 Embedding 依赖上游 API。均属配置可用而非默认可用。
+- **按 Agent 隔离浏览器 Profile（maid/valet）**：maid 与 valet 两档隔离只出现在二期设计文档里，当前未实现（`暂缓`），代码仍是 global 单 Profile。
+- **VCPForumOnline 在线论坛**：以 `.block` 禁用，功能比文件版更全，含私信、点赞、编辑、搜索与未读追踪；当前主链以文件版 VCPForum 为准（`暂缓`）。
+- **默认关闭/禁用机制**：下列能力默认关闭或禁用，它们在真实部署中的推荐配置组合尚未验证。
+  - AgentDream：插件以 `.block` 默认禁用；
+  - 托管浏览器：`VCP_BROWSER_RUNTIME_ENABLED=false`；
+  - 推理内容转正文：ReasoningToContent 默认关闭；
+  - 隐私保护：privacyProtection 默认关闭；
+  - TaskAssistant：`globalEnabled=false`；
+  - 模型重定向：ModelRedirect.json 在本快照中不存在。
+
+  这些主链在默认或文档配置下代码完整，开箱可用还需补齐上述默认关闭项。
+- **外部依赖**：几项能力要先备好外部服务才能启用：VCPEverything 需要本机运行 Everything HTTP 服务，VCPClawMail 需要 manifest 中标记为 required 的 ClawMailKey，DeepWikiVCP 与 DigitalOracle 需要网络与上游服务，TagMemo、元思考与 LightMemo 的 Embedding 依赖上游 API。这些能力在配置后可用，默认配置下不可用。
 
 ### 入口确认未闭合
 
@@ -218,14 +250,19 @@ VCPToolBox 是 VCP（Variable & Command Protocol）协议的**服务端 + 运维
 
 ### 未覆盖类目
 
-- **插件细节**：`ScheduleManager`/`TimedTaskQuery` 等定时插件后台调度、各插件内部参数校验/路径处理/命令拼接、ImageServer 路径 key 比对逻辑未逐一深入。
-- **能力卡局部子项**：VCPClawMail 的 listEmails/readMail/sendMail 主体与 `getDataDir()` 实际路径未逐行验证；LightMemo 的 `_rerankDocuments` HTTP 调用细节未逐行验证；MagiAgent `/MagiAgent/:id` 回调端点鉴权未核对；UserAuth 在 `chatCompletionHandler.js:363-374` 的另一 code.bin 读取点用途未核实；SkillBridge 的 vcp_fold 在 system prompt 端实际展开与 FileOperator “Ink 模式”具体命令名未核对。
+- **插件细节**：定时类插件（ScheduleManager、TimedTaskQuery 等）的后台调度、各插件内部的参数校验、路径处理与命令拼接，以及 ImageServer 的路径 key 比对逻辑，本次未逐一深入。
+- **能力卡局部子项**：以下局部子项未逐行验证或未核对。
+  - VCPClawMail 的 listEmails、readMail、sendMail 主体，以及 getDataDir() 的实际路径；
+  - LightMemo 的 `_rerankDocuments` HTTP 调用细节；
+  - MagiAgent 的 `/MagiAgent/:id` 回调端点鉴权；
+  - UserAuth 在 `chatCompletionHandler.js:363-374` 处另一 code.bin 读取点的用途；
+  - SkillBridge 的 vcp_fold 在 system prompt 端的实际展开，以及 FileOperator 的 Ink 模式具体命令名。
 
 ### 共性未验证
 
-- **静态证据为主**：全部主链为静态代码结论；记忆召回质量、梦境叙事、媒体渲染、托管浏览器进程行为、任务调度长跑、主题/无障碍/键盘运行态均未运行验证。
-- **分布式与外部执行**：分布式节点断线/重连/在途文件与取消竞争、SSH 会话中断、AICodeWorker 真实取消与工作区写入、SnowBridge 断线语义未运行验证；managed browser 的登录态、Profile 隔离、私网/云元数据防护未验证。
-- **安全边界**：`/plugin-callback` 无鉴权与 `plugin_callback_forward` 来源未绑定的实际利用面、白名单路由绕过 Bearer 的利用面、PowerShellExecutor 关键字黑名单绕过空间未做端到端验证；Docker 下 `SANDBOX_BACKEND=docker` 可用性未验证。
+- **静态证据为主**：本汇总的主链结论都来自静态代码阅读；记忆召回质量、梦境叙事、媒体渲染、托管浏览器进程行为、任务调度长跑，以及主题、无障碍与键盘的运行态均未做运行验证。
+- **分布式与外部执行**：分布式节点的断线、重连、在途文件与取消竞争，SSH 会话中断，AICodeWorker 的真实取消与工作区写入，以及 SnowBridge 的断线语义都未运行验证；托管浏览器的登录态、Profile 隔离、私网与云元数据防护同样未验证。
+- **安全边界**：`/plugin-callback` 未鉴权且 `plugin_callback_forward` 未绑定来源，两者的实际利用面未做端到端验证；白名单路由绕过 Bearer 的利用面与 PowerShellExecutor 关键字黑名单的绕过空间同样未做端到端验证，Docker 下 `SANDBOX_BACKEND=docker` 的可用性也未验证。
 - **范围说明**：本汇总的来源笔记已统一对齐到快照 `018cd7fae1bbcf6a993bc45dcdd0914f909ca3bf`（`main` 分支），历史提交 `1ae9b63c5afcea7677db5d71e5cf561a0f5debd9` 只在需要说明早期结构时引用。
 
 ## 来源笔记索引

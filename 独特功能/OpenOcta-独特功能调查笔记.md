@@ -56,13 +56,13 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 | 持续性 | 任务定义存 `cron/jobs.json`，运行日志存 `cron/runs/*.jsonl`，重启后由 timer 重新计算下次运行 |
 | 证据强度 | 主链确认（静态）；真实渠道送达未验证 |
 
-**主链。** 创建任务时解析 `at`/`every`/`cron` 三种调度、两种 payload（`systemEvent` 与 `agentTurn`）以及 `main`/`isolated` 两种会话目标，连同数字员工 ID、资源过滤和投递配置写入 jobs 文件（`src/pkg/gateway/handlers/cron.go:102-179`、`src/pkg/cron/types.go:5-71`）。服务启动后按最近一次到期时间睡眠，最多 60 秒唤醒一次，取到期任务逐个执行（`src/pkg/cron/service.go:440-496`）。
+**主链。** 创建任务时先解析调度、载荷与会话目标三项取值：调度接受定点时刻、固定间隔与 cron 表达式，载荷分为系统事件与 Agent 回合两类，会话目标在 `main` 与 `isolated` 之间选择；解析结果连同数字员工 ID、资源过滤和投递配置一起写入 jobs 文件（`src/pkg/gateway/handlers/cron.go:102-179`、`src/pkg/cron/types.go:5-71`）。服务启动后按最近一次到期时间睡眠，最多 60 秒唤醒一次，取到期任务逐个执行（`src/pkg/cron/service.go:440-496`）。
 
-执行时先校验 payload 与会话目标是否匹配，再构造会话键：手动强制运行使用 `agent:main:cron:<jobId>:run:<uuid>`，定时运行复用 `agent:main:cron:<jobId>`（任务显式配置 sessionKey 时改用该值），绑定数字员工时改用 `agent:main:employee:<id>`（`src/pkg/cron/service.go:298-350`）。随后调用 `RunCronChat`，再由 HTTP 层转成 `chat.send`，因此 Cron 运行和用户聊天共享同一套转录、工具与权限链路（`src/pkg/gateway/http/server.go:338-352`）。
+执行时先校验 payload 与会话目标是否匹配，再构造会话键：定时运行用 `agent:main:cron:<jobId>`，手动强制运行在键尾追加随机 run 段（任务显式配置 sessionKey 时改用该值），绑定数字员工时改用 `agent:main:employee:<id>`（`src/pkg/cron/service.go:298-350`）。随后经 HTTP 层转成 `chat.send`，Cron 运行和用户聊天共享同一套转录、工具与权限链路（`src/pkg/gateway/http/server.go:338-352`）。
 
-**投递。** 会话结束后取「最后一个工具块之后」的文本作为摘要，思考与工具输出不会进入 IM（`src/pkg/gateway/handlers/chat.go:1072-1103`）。若任务配置了 `announce`，调用 Gateway 的 `send` 方法带 header 发往指定渠道；若配置了 `webhook`，POST 一个含任务 ID、会话键、摘要与状态的 JSON（`src/pkg/gateway/handlers/cron_delivery.go:142-199`）。10 秒内重复摘要会被去重，header 超过 50 字符会截断（`:42-61`、`:154-158`）。
+**投递。** 会话结束后，投递链只截取最后一个工具块之后的文本作为摘要，思考过程与工具输出留在转录里，不进入 IM（`src/pkg/gateway/handlers/chat.go:1072-1103`）。摘要按任务配置分发：配了 announce 的任务经 Gateway 的 send 方法带 header 发往指定渠道，配了 webhook 的任务则 POST 一段含任务 ID、会话键、摘要与状态的 JSON；同一摘要 10 秒内重复发送会被去重，header 超过 50 字符会被截断（`src/pkg/gateway/handlers/cron_delivery.go:42-199`）。
 
-**外部触发。** `/hooks/alert` 不要求固定的告警结构：解析失败时把整个请求体当作 message，然后拼出一段要求先查 MCP/Skill 再分析的 SRE 提示词，在新建的 `agent:main:alert:<uuid>` 会话里运行（`src/pkg/gateway/http/hooks.go:284-392`）。这条链路没有告警字段校验，也没有限流或来源签名，是否启用与 token 由 hooks 配置控制（`:88-105`）。该调用只传 `Deliver: true`，没有带 `Channel` 与 `To`，因此告警分析结果默认只留在会话里，不会像 Cron 那样主动外发（`:314-320`、`src/pkg/gateway/handlers/chat.go:806-811`）。
+**外部触发。** 外部系统投给 `/hooks/alert` 的请求体不按固定告警结构解析：结构化解析失败时，整个请求体被当作 message，再拼上一段要求先查 MCP 与 Skill 再分析的 SRE 提示词，在一个新建的 `agent:main:alert:<uuid>` 会话里运行（`src/pkg/gateway/http/hooks.go:88-392`）。该入口没有告警字段校验、限流与来源签名，是否启用以及用哪个 token 由 hooks 配置决定。调用只带 `Deliver: true`，不带渠道与目标，告警分析结果默认留在会话内，缺少 Cron 那样的主动外发（`src/pkg/gateway/handlers/chat.go:806-811`）。
 
 **已确认边界。** 运行状态字段 `RunningAtMs` 只在结束时被清空，从未在开始时写入，`Run` 也没有互斥判断；因此定时触发与界面上的强制运行可能同时启动同一任务（`src/pkg/cron/types.go:37-46`、`src/pkg/cron/service.go:356-390`）。桌面模式原本计划跳过 Cron，但对应开关被注释掉，当前桌面端仍会启动调度（`src/pkg/desktop/gateway.go:31-36`）。
 
@@ -87,11 +87,11 @@ OpenOcta 的辨识度不在聊天界面，而在「把 Agent 放进运维闭环�
 
 Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运行时另将三组命令规则写入 SDK 兼容权限文件，当前 Eino 中间件未读取该文件（[chat.go:3231–3254、3677–3719](<../../openocta/src/pkg/gateway/handlers/chat.go#L3231-L3254>)、[runtime.go:151–159、392–450](<../../openocta/src/pkg/agent/runtime/runtime.go#L151-L159>)）。
 
-**队列管理。** `ApprovalQueue` 把记录与按会话的到期白名单落盘，支持批准、拒绝、等待（条件变量）与白名单续期（`src/pkg/security/approval.go:66-273`）。Gateway 暴露 `approvals.list/approve/deny/whitelistSession`，并按配置的 `timeoutSeconds` 计算过期状态（`src/pkg/gateway/handlers/approvals.go:36-60`、`:157-199`）。
+**队列管理。** `ApprovalQueue` 承担审批队列的落盘与流转：待批记录与按会话设定的到期白名单以 JSON 原子写入，支持批准、拒绝、阻塞等待（靠条件变量唤醒）与白名单续期（`src/pkg/security/approval.go:66-273`）。Gateway 在队列之上暴露列出、批准、拒绝与会话白名单四个方法，过期状态按配置的 `timeoutSeconds` 现算（`src/pkg/gateway/handlers/approvals.go:36-199`）。
 
 **未接通部分。** 前端存在一个 Exec 审批浮层，监听 `exec.approval.requested` 并提供 Allow once / Always allow / Deny（`ui/src/ui/views/exec-approval.ts:25-80`、`ui/src/ui/app-gateway.ts:326-345`）。但这条链在仓库内没有生产端：
 
-- 后端 `exec.approval.request`、`exec.approval.resolve` 与 `exec.approvals.set` 都是未实现桩，也没有代码广播该事件（`src/pkg/gateway/handlers/exec_approvals.go:17-48`）。
+- 后端与这条链对应的三个方法 `exec.approval.request`、`exec.approval.resolve` 与 `exec.approvals.set` 都只是未实现的桩，仓库内也没有代码广播前端正在监听的审批事件（`src/pkg/gateway/handlers/exec_approvals.go:17-48`）。
 - 本次未找到 UI 调用 `chat.resume` 的位置，中断后的「点击批准继续」只完成到后端接口。
 - 审批队列的写入方不在本仓库：`ApprovalQueue.Request` 除测试外没有调用者，审批列表读取的文件可能由外部 Agent SDK 写入或始终为空（`src/pkg/security/approval.go:66-109`、`src/pkg/gateway/handlers/approvals.go:62-70`）。
 
@@ -106,9 +106,9 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 | 持续性 | Manifest 存 `~/.openocta/employees/<id>/manifest.json`，随状态目录持久化；删除员工会级联删除其会话 |
 | 证据强度 | 主链确认（静态）；官网市场下载未验证 |
 
-**建模与存储。** 员工模板包含 prompt、`SkillIDs`、`McpServers`，并标注 `Builtin`、`Type`、`From` 以区分内置、自建与远程安装（`src/pkg/employees/model.go:7-30`）。列表汇总会同时解析 manifest 中的技能与员工目录下的 `employee_skills`（`src/pkg/employees/model.go:32-46`）。
+**建模与存储。** 员工模板包含 prompt、`SkillIDs`、`McpServers`，并标注来源与类型字段以区分内置、自建与远程安装；列表汇总会同时解析 manifest 中的技能与员工目录下的 `employee_skills`（`src/pkg/employees/model.go:7-46`）。
 
-**会话装配。** 当会话键形如 `agent:main:employee:<id>` 时，聊天处理链从员工 manifest 取 prompt 作为系统提示覆盖，把员工 MCP 合并进全局 MCP（同名时员工覆盖全局），并把技能目录切换到员工专属目录（`src/pkg/gateway/handlers/chat.go:1399-1410`、`:2212-2219`、`src/pkg/agent/runtime/skills.go:82-83`）。定时任务若绑定员工，会直接使用员工会话键，从而复用同一套装配（`src/pkg/cron/service.go:316-318`）。
+**会话装配。** 会话键形如 `agent:main:employee:<id>` 时，聊天处理链改用该员工的装配：从员工 manifest 取 prompt 覆盖系统提示，把员工 MCP 并进全局 MCP 列表（同名项以员工为准），技能目录也切到员工专属目录（`src/pkg/gateway/handlers/chat.go:1399-1410,2212-2219`、`src/pkg/agent/runtime/skills.go:82-83`）。定时任务绑定员工时直接使用员工会话键，因此复用同一套装配（`src/pkg/cron/service.go:316-318`）。
 
 **管理面。** 创建接口支持名称、描述、prompt、启停、技能 ID 与 MCP，编辑时合并已有 manifest 且不允许改内置员工；删除时先清理该员工的会话条目（`src/pkg/gateway/handlers/employees.go:66-199`）。员工 ID 默认直接取名称，仅做 `local:` 前缀与冒号替换（`:14-27`、`:201-227`）。
 
@@ -127,11 +127,11 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 
 **入口与文件面。** `vault.*` 方法覆盖状态、列目录、读写文件、新建/重命名/删除文件与目录、搜索、同步和图谱（`src/pkg/gateway/handlers/health.go:148-160`）。文件操作被限制在 Vault 根目录内，路径会被清洗（`src/pkg/gateway/handlers/vault.go:558-581`、`:584-633`）。
 
-**索引与检索。** `knowledge.Engine` 用 Bleve 建全文索引，并在配置了 embedder 时叠加向量相似度，默认权重为全文 0.55、向量 0.45（`src/pkg/agent/knowledge/engine.go:34-47`）。`memory_search` 工具只检索 `document` 类型，默认返回 8 条命中，结果是带路径与文本片段的 JSON（`src/pkg/agent/eino/knowledge_tools.go:20-55`）。知识库始终启用，启动时解析 Vault 与索引目录并注入系统提示（`src/pkg/agent/runtime/knowledge.go:13-46`）。
+**索引与检索。** 检索引擎用 Bleve 建全文索引，并在配置了 embedder 时叠加向量相似度，默认权重为全文 0.55、向量 0.45（`src/pkg/agent/knowledge/engine.go:34-47`）。`memory_search` 工具只检索 `document` 类型，默认返回 8 条命中，结果是带路径与文本片段的 JSON（`src/pkg/agent/eino/knowledge_tools.go:20-55`）。知识库始终启用，启动时解析 Vault 与索引目录并注入系统提示（`src/pkg/agent/runtime/knowledge.go:13-46`）。
 
 **图谱。** `vault.graph` 扫描 Markdown 中的 wiki 链接与普通链接，建立节点和边，供前端拓扑视图渲染（`src/pkg/gateway/handlers/vault.go:584-660`）。同步会清空会话运行时缓存并全量重建索引，返回文件数与分块数（`:558-581`）。
 
-**已确认边界。** 系统提示明确要求模型使用 `session_search` 查询当前会话历史，但工具注册只包含 `memory_search`，仓库内也没有 `session_search` 的工具实现；`knowledge.SearchHistory` 存在但未被接入（`src/pkg/agent/runtime/knowledge.go:46`、`src/pkg/agent/eino/knowledge_tools.go:20-55`、`src/pkg/agent/knowledge/history.go:17`）。这意味着提示词会引导模型调用一个不存在的工具。
+**已确认边界。** 系统提示要求模型用 `session_search` 查当前会话历史，实际注册的工具只有 `memory_search`，仓库内也找不到前者的工具实现；历史检索在 knowledge 包里有实现，未接进检索工具，提示词因此引导模型调用注册表中不存在的工具（`src/pkg/agent/runtime/knowledge.go:46`、`src/pkg/agent/eino/knowledge_tools.go:20-55`、`src/pkg/agent/knowledge/history.go:17`）。
 
 ### 5. Agent Swarm：房间式多 Agent 协作
 
@@ -165,9 +165,9 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 
 **注册与热重载。** HTTP 层按配置注册 wework、weixin、dingtalk、feishu、qq 五个 Runtime，配置变更时停止旧连接并按新配置重建（`src/pkg/gateway/http/server.go:719-758`、`:364-378`）。渠道 Runtime 统一实现启动、停止、允许发送者判断与状态快照（`src/pkg/channels/runtime.go:44-105`）。
 
-**入站映射。** `hooksAgentSink` 取消息内容与 `ChatID`（缺失时退回发送者 ID），拼出 `agent:main:channel:<channel>:<peer>`；若该渠道配置了 `digitalEmployeeId` 且 manifest 存在，则整个渠道切到员工会话键（`src/pkg/gateway/http/inbound_sink.go:32-94`）。随后调用 `HooksAgent`，携带 `Deliver: true`、渠道、目标会话与元数据。
+**入站映射。** 入站 sink 取消息内容与会话 ID（缺失时退回发送者 ID），拼出 `agent:main:channel:<channel>:<peer>`；若该渠道配置了 `digitalEmployeeId` 且 manifest 存在，则整个渠道切到员工会话键（`src/pkg/gateway/http/inbound_sink.go:32-94`）。随后调用 Hooks 入口，携带 `Deliver: true`、渠道、目标会话与元数据。
 
-**回投。** 回复经 `deliverAssistantToIM` 交给原渠道 Runtime 的 `Send`，并带回原消息 ID 作为引用（`src/pkg/gateway/handlers/chat.go:805-846`）。代码里保留了「`| 回复 <agentName>: <userQuery>` + 正文」的格式化意图，但 `formatChannelReply` 当前直接返回正文，前缀分支被注释掉，因此实际发送的是纯回复内容（`:1137-1149`）。仅当渠道与目标都存在时才投递，缺失时静默跳过（`:806-811`）。
+**回投。** 助手回复经 `deliverAssistantToIM` 交给原渠道 Runtime 的 `Send`，并带回原消息 ID 作为引用（`src/pkg/gateway/handlers/chat.go:805-1149`）。代码里还留着「`| 回复 <agentName>: <userQuery>` + 正文」的格式化意图，但 `formatChannelReply` 现在直接返回正文、前缀分支已被注释，实际发出的只有回复本身；渠道与目标任一缺失时投递静默跳过。
 
 **边界。** 渠道允许发送者由 `isAllowed` 与各 Runtime 的配置决定，`runtime.go` 只提供基础判断（`src/pkg/channels/runtime.go:175-189`）。群聊与单聊的会话隔离依赖 peer ID 与 `chatType` 元数据；同一群不同话题是否共享会话，本次未验证。
 
@@ -182,12 +182,13 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 | 持续性 | 提炼结果不落盘；安装后的技能以文件形式存在于托管/工作区技能目录 |
 | 证据强度 | 主链确认（静态）；模型提炼质量未验证 |
 
-**提炼链。** 后端读整段转录，跳过 system 与工具结果，把用户/助手文本与思考块拼成对话记录，套上「只提炼反复出现或关键工作流、必须带 frontmatter」的提示词，在一个禁用技能、子 Agent、沙箱与系统提示的独立运行时里执行（`src/pkg/gateway/handlers/chat_extract_skill.go:18-30`、`:99-142`、`:176-218`）。输出经围栏剥离后返回 Markdown 与文件名；前端在只读弹窗中预览并用 Blob 下载（`ui/src/ui/views/chat.ts:761-785`、`ui/src/ui/controllers/chat-extract-skill.ts:44-52`）。
+**提炼链。** 后端从整段转录里挑出用户与助手的文本以及思考块，跳过 system 消息和工具结果，拼成对话记录后套上一段提示词：只提炼反复出现或关键的工作流，产物必须带 frontmatter；这轮调用跑在一个禁用技能、子 Agent、沙箱与系统提示的独立运行时里（`src/pkg/gateway/handlers/chat_extract_skill.go:18-218`）。输出剥掉围栏后以 Markdown 与文件名返回，前端在只读弹窗中预览并用 Blob 下载（`ui/src/ui/views/chat.ts:761-785`、`ui/src/ui/controllers/chat-extract-skill.ts:44-52`）。
 
 **技能体系。** 技能以 `SKILL.md` 或单文件 Markdown 存在，按 `extraDirs < bundled < managed < workspace` 的优先级合并，同名时后者覆盖前者（`docs/skills.md:17-31`、`src/pkg/agent/skills/loader.go:89-177`）。Gateway 暴露的方法分两组：
 
-- 安装与文件编辑：`skills.install` 接收上传包，保存、列举、读取单文件分别由 `skills.saveFile`、`skills.listFiles`、`skills.getFile` 承担。
-- 创作辅助：`skills.compose` 用对话生成技能草稿，`skills.analyze` 解析已有技能并推断其所需工具（`src/pkg/gateway/handlers/health.go:139-147`、`:212-213`、`src/pkg/gateway/handlers/skill_compose.go:191-256`）。
+- 安装与文件编辑：`skills.install` 接收上传包，装进技能目录。
+  - 单个技能文件的保存、列举与读取分别由 `skills.saveFile`、`skills.listFiles`、`skills.getFile` 承担。
+- 创作辅助：`skills.compose` 用对话生成技能草稿，`skills.analyze` 解析已有技能的组成并推断它需要的工具（`src/pkg/gateway/handlers/health.go:139-213`、`src/pkg/gateway/handlers/skill_compose.go:191-256`）。
 
 **闭环程度。** 提炼结果只能下载，仓库内没有「把返回的 Markdown 直接安装为技能」的调用；用户需要再走上传/保存流程。因此这是「经验 → 文档」的沉淀，不是自动安装的自进化闭环。技能草稿在 compose 中只作为返回值，落盘由后续保存动作完成（`src/pkg/gateway/handlers/skill_compose.go:225-238`）。
 
@@ -202,17 +203,17 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 | 持续性 | 组件块随助手消息写入转录，重开会话可重新渲染 |
 | 证据强度 | 文本承载与动作回流确认；模型主动生成交互组件未验证 |
 
-**服务端编码。** `AssistantTextStream.AppendDelta` 在首个增量时发 `createSurface`，随后发一个 `Column` 包含 `Text` 组件的布局，再把累计文本写入 `/content` 数据模型（`src/pkg/a2ui/stream.go:26-72`）。Gateway 收到 `EventA2UI` 后广播并把它追加成消息内容块，供历史回放（`src/pkg/gateway/handlers/chat.go:2679-2690`）。
+**服务端编码。** 助手的文本增量由 A2UI 流写入器逐段转成消息：首个增量发 `createSurface` 建立 surface，随后发一个纵向布局节点容纳文本组件，累计文本随增量写进 `/content` 数据模型（`src/pkg/a2ui/stream.go:26-72`）。Gateway 收到 `EventA2UI` 事件后广播该消息，并把它追加为消息内容块，重开会话时据此回放（`src/pkg/gateway/handlers/chat.go:2679-2690`）。
 
 **前端渲染与去重。** UI 用 `@a2ui/web_core`/`@a2ui/lit` 处理消息，按 surface 去重、过滤纯文本 surface，并在存在 A2UI 时抑制重复的 Markdown 正文（`ui/src/ui/chat/a2ui-bridge.ts:50-93`、`:162-272`、`ui/src/ui/chat/grouped-render.ts:331-359`）。
 
-**动作回流。** 组件动作被包装成含 `name`、`surfaceId`、`sourceComponentId`、`timestamp`、`context` 的对象，调用 `chat.a2ui.action`；后端把它格式化为 `[A2UI Action: <name>]` 加 JSON，再作为一条新消息走 `chat.send`（`ui/src/ui/chat/a2ui-bridge.ts:74-93`、`src/pkg/gateway/handlers/chat.go:3622-3675`）。
+**动作回流。** 用户在组件上触发的动作由前端包装成一个对象，携带动作名、所属 surface、来源组件、时间戳与上下文等字段，经 `chat.a2ui.action` 提交给后端；后端把它格式化成动作标记加该对象的 JSON，作为一条新消息再走 `chat.send` 进入下一轮（`ui/src/ui/chat/a2ui-bridge.ts:74-93`、`src/pkg/gateway/handlers/chat.go:3622-3675`）。
 
 **已确认边界。** 解析器支持从标记为 a2ui、jsonl 或 json 的代码围栏中提取消息，也保留了「移除命令确认按钮、改为文字确认」的清理函数，但本次未找到这些函数的调用方；没有证据表明模型可以主动输出可交互组件并被渲染（`src/pkg/a2ui/parser.go:100-134`、`src/pkg/a2ui/confirmation_strip.go:7-40`）。当前可确认的是「文本回复以 A2UI 文本组件承载」这一条通道。
 
 ## 已归并到现有类目的能力
 
-- **Wails 桌面壳**：`src/main.go` 在窗口创建前启动内嵌 Gateway，等待 127.0.0.1:18900 健康后加载引导页；关闭窗口时关停服务（`src/main.go:48-130`、`src/pkg/desktop/gateway.go:20-110`）。这是应用交付形态，不是运维工作流。
+- **Wails 桌面壳**：桌面进程在创建窗口之前启动内嵌的 Gateway，等 `127.0.0.1:18900` 健康检查通过才加载引导页，关闭窗口时一并关停服务（`src/main.go:48-130`、`src/pkg/desktop/gateway.go:20-110`）。它属于应用交付形态，归并到基础设施。
 - **单实例与安装引导**：启动时结束其他 OpenOcta 进程，macOS 首次从 DMG 启动会提示安装到应用程序目录（`src/main.go:58-62`）。
 - **应用内更新**：`appupdate` 负责下载、校验与重启，桌面壳把退出回调注入 Gateway（`src/main.go:90-95`）。
 - **日志导出**：属于运维排障而非对话分享，已在对话导出笔记记录。
@@ -221,7 +222,7 @@ Gateway 广播中断状态并提供 `chat.resume` 接收决定与上下文。运
 
 ## 声明不符、外部依赖与暂缓项
 
-- **L4 Evolution 写入未接线。** `Store.Add/Replace/Remove` 提供带字符预算的增删改，但除测试外没有调用方；运行时只在创建时读取并注入快照，`SnapshotForSession` 也固定传空 session ID（`src/pkg/agent/evolution/store.go:41-44`、`:147-238`、`src/pkg/agent/runtime/runtime.go:180-186`）。README 的「L4 autonomous evolution」在当前快照中只能确认到「读取并注入」。
+- **L4 Evolution 写入未接线。** 记忆存储提供了带字符预算的新增、替换与删除接口，这些接口在测试之外没有调用方；运行时只在创建时读取记忆文件并把快照拼进系统提示，构造快照时传入的 session ID 还是固定空值（`src/pkg/agent/evolution/store.go:41-238`、`src/pkg/agent/runtime/runtime.go:180-186`）。README 所称的「L4 autonomous evolution」在当前快照中只能确认到读取与注入环节。
 - **`session_search` 不存在。** 系统提示与知识库文档都要求使用它，但工具注册只有 `memory_search`（`src/pkg/agent/runtime/knowledge.go:41-46`、`docs/knowledge-vault.md:5`）。
 - **命令策略接线。** 配置含 allow/ask/deny 与默认动作，完整分段求值器存在但只有包装方法与测试引用；本机执行实际使用 deny 转换后的首词/片段/参数校验。审批启用后按工具名统一拦截，未消费 ask/allow（见能力卡 2）。
 - **Exec 审批前端接线。** 审批浮层与事件监听存在，后端 `exec.approval.*` 为未实现桩，也没有事件生产者（见能力卡 2）。

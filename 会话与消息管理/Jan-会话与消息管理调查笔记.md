@@ -14,19 +14,19 @@
 
 ## 结论摘要
 
-普通 Chat 的 Thread/Message 经服务层直调 `@janhq/core` 暴露的 `window.core.api.*` 再到 Tauri Rust 命令，桌面用逐线程 JSON/JSONL、移动用 SQLite；线程与消息的桥接由 core 宿主承担。新增加的 Cowork 以独立的 `CoworkSession` 保存 `UIMessage[]` 权威历史、轮次与模型/工作区状态，使用 zustand persist 经 backendStorage 写入设置后端；CLI 项目会话又是另一条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。以下分支、编辑和文件后端章节只适用于普通 Chat。
+普通 Chat 的线程与消息由服务层直接调用 @janhq/core 暴露的 `window.core.api.*`，再落到 Tauri 的 Rust 命令上：桌面端把每个线程存成独立的 JSON 与 JSONL，移动端改用 SQLite，这段桥接由 core 宿主承担。Cowork 走另一条链路，用 `CoworkSession` 保存 UIMessage 权威历史、轮次以及模型与工作区状态，经 zustand persist 调 backendStorage 写入设置后端；CLI 项目会话还有第三条恢复链（`web-app/src/hooks/useCoworkSessions.ts:41-64,143-166,323-348`、`src-tauri/jan-cli/src/main.rs:111-140`）。下文的分支、编辑与文件后端章节只覆盖普通 Chat。
 
 数据层关键事实（均有源码依据，正文标注位置）：
 
-1. **持久化双后端**：桌面端 `threads/<id>/thread.json` + `messages.jsonl`（每线程锁 + 整文件重写）；移动端（Android/iOS）才用 SQLite，由 `should_use_sqlite` 判定（`helpers.rs:17-19`）；Rust `create_thread` 用服务端 UUID 无条件覆盖前端传入的 id，消息的创建/修改命令有按 id 的去重/upsert 语义。
-2. **三个 store 协作**：`useThreads`（线程列表/排序/搜索/增删改）、`useMessages`（乐观写 + 异步持久化）、`useChatSessions`（AI SDK 会话与流状态，按 threadId 键控）；`$threadId.tsx`（1863 行）是线程页中枢，承载分支/编辑/续写/上下文扩展的数据仲裁。
-3. **线程的助手是嵌入快照**：core 类型为 `ThreadAssistantInfo`（`threadEntity.ts:29-35`）；web 服务层实际写入的是完整 web Assistant 对象（含头像、指令、参数等，运行时 JSON 是类型超集），其中 `model` 被改写为 `{id, engine}` 线格式。
-4. **分支/编辑**：分支树与编辑/续写语义如下（实现文件 `message-branching.ts`）：
-   - 树形链接：消息 `metadata.parentId` + `metadata.activeChildId`，活跃根 `activeRootId` 存线程元数据
-   - 编辑：`makeSibling` 产生新版（内容替换为纯文本，媒体丢失）
-   - 续写：原地替换（删除旧 partial，不 fork）
-   - 自愈：`repairDetachedAssistants` 修复 `parentId:null` 幽灵根缺陷（#8357 系）
-5. **删除**：`deleteThread` 级联清理各 store、向量库集合与搜索索引；`deleteAllThreads` 保留收藏与带 project 的线程；无回收站（本次未找到软删除/回收站机制，检查范围见 §3）。
+1. **持久化双后端**：桌面端为每个线程建立目录，写 thread.json 与 messages.jsonl，写入时按线程加锁并整文件重写；Android 与 iOS 移动端改走 SQLite，由 should_use_sqlite 的编译目标判断决定（`helpers.rs:17-19`）。Rust 创建线程时用服务端 UUID 无条件覆盖前端传入的 id，消息的创建与修改命令则按 id 去重或 upsert。
+2. **三个 store 协作**：`useThreads` 管线程列表的排序、搜索与增删改，`useMessages` 管乐观写与异步持久化，`useChatSessions` 按 threadId 保存 AI SDK 会话与流状态；线程页中枢 `$threadId.tsx`（1863 行）负责分支、编辑、续写与上下文扩展的数据仲裁。
+3. **线程的助手是嵌入快照**：core 把线程助手声明为 ThreadAssistantInfo（`threadEntity.ts:29-35`），web 服务层写入的却是完整 web Assistant 对象，带头像、指令与参数等字段，运行时 JSON 因此是类型超集，其中 model 改写成 `{id, engine}` 线格式。
+4. **分支/编辑**：分支树与编辑、续写语义都在 `message-branching.ts` 里实现，要点如下：
+   - 树形链接：父消息由消息元数据里的 parentId 指认，activeChildId 选出当前子版本，活跃根 activeRootId 存在线程元数据中
+   - 编辑：`makeSibling` 产生新版本，内容替换为纯文本，媒体丢失
+   - 续写：原地替换，删掉旧 partial 而不再 fork
+   - 自愈：`repairDetachedAssistants` 修复 parentId 为空的幽灵根缺陷（#8357 系）
+5. **删除**：`deleteThread` 级联清理各 store、向量库集合与搜索索引，`deleteAllThreads` 保留收藏与带 project 的线程；删除直接落到磁盘目录，软删除与回收站机制本次未找到，检查范围见 §3。
 
 ## 系统边界与数据主链
 
@@ -66,7 +66,7 @@ Thread {
 ThreadAssistantInfo { id, name, model: ModelInfo, instructions?, tools? }
 ```
 
-- web-app 另有私有 `Thread` 类型（`web-app/src/types/threads.d.ts:38-55`），增加顶层收藏、模型与排序字段及 `metadata.project`——core 共享类型没有这些字段。
+- web-app 本地另有一份私有 Thread 类型，在 core 共享类型之外增加了顶层的收藏、模型与排序字段，以及项目归属字段 metadata.project（`web-app/src/types/threads.d.ts:38-55`）。
 - **收藏的存取**：前端状态里 `isFavorite` 是顶层字段；服务层读写时把它映射到 `metadata.is_favorite`（`web-app/src/services/threads/default.ts:65` 读、`default.ts:139` 写），因此落盘的 thread.json 里是 `metadata.is_favorite`，顶层字段只是 web 端投影。
 - **运行时"会话"**：AI SDK 的 Chat 会话按 threadId 保存在 `useChatSessions`（`web-app/src/stores/chat-session-store.ts`），不单独持久化，是线程的运行时流状态。
 - **临时会话**：`TEMPORARY_CHAT_ID = 'temporary-chat'`（`web-app/src/constants/chat.ts:5`）的内存线程——服务层对临时线程跳过读写（`threads/default.ts:79-82`、`messages/default.ts:16-19` 直接短路返回），界面与请求照常工作。
@@ -88,8 +88,8 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
   text | reasoning | image_url | input_audio | input_video | tool_call
   ```
 
-- `status`：core 枚举为 `ready/pending/error/stopped`（`messageEntity.ts:113-122`）；运行时的 submitted/streaming 是 AI SDK 状态，映射到 UI（`containers/message/types.ts` 的 `CHAT_STATUS`）。
-- `metadata.stopped`：完成回调在中止或因长度截断而完成时写 true（`$threadId.tsx:341-353`），续写入口依赖它。错误相关：`metadata.error`（错误文本，与错误消息 store 双写）、`metadata.oomError/backendError/contextError`（banner 持久化标记，`$threadId.tsx:893-910` 切线程时回读）。
+- **状态字段**：core 的消息状态枚举有 `ready/pending/error/stopped` 四值（`messageEntity.ts:113-122`）；运行时另会出现 AI SDK 的 submitted 与 streaming，两者在 `containers/message/types.ts` 的 CHAT_STATUS 里映射成界面状态。
+- **中止与错误标记**：完成回调在中止或因长度截断而结束时把 `metadata.stopped` 置为 true，续写入口据此判断；错误文本写进 `metadata.error`，与错误消息 store 双写，`metadata.oomError/backendError/contextError` 是 banner 的持久化标记，切线程时回读（`$threadId.tsx:341-353、893-910`）。
 
 ### 1.3 UI 消息 ↔ 持久化消息双向转换
 
@@ -101,22 +101,19 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
   image → image_url | audio → input_audio | video → input_video
   ```
 
-- `convertThreadMessageToUIMessage`（L255 起）：
-  - `tool_call` 内容转 `tool-<name>` part（L282-301）
-  - 兼容旧 `metadata.tool_calls`（L304-354）
-  - `parseReasoning`（L170）兼容 `<think>`/`<thought>`/`<|channel|>analysis` 三种历史包裹格式
-- `uiMessageHasMeaningfulContent`（L402）、`threadMessageIsEmpty`（L428，用于清理空 assistant 行）、`extractContentPartsFromUIMessage`（L491）。
+- `convertThreadMessageToUIMessage` 把持久化消息还原成 UI 消息：`tool_call` 内容转成 `tool-<name>` part，旧数据里的 `metadata.tool_calls` 也一并兼容；`parseReasoning` 负责拆开 `<think>`、`<thought>` 与 `<|channel|>analysis` 三种历史包裹格式（`messages.ts:170-354`）。
+- 另有三个辅助函数：`uiMessageHasMeaningfulContent` 判断消息是否还有实质内容，`threadMessageIsEmpty` 用于清理空的 assistant 行，`extractContentPartsFromUIMessage` 抽出内容数组（`messages.ts:402-491`）。
 
 ### 1.4 分支模型：parentId 树 + activeRootId
 
 `web-app/src/lib/message-branching.ts`（256 行，全读）：
 
-- 树形链接存在消息自身的元数据字段：`parentId`（根节点为空、有字符串为父、缺省为未链接旧数据）+ `activeChildId`（父消息选择哪个子版本；缺省取最新兄弟）；`computeActivePath`（`:98`）从活跃根沿活跃子节点走出一条可见线性会话。
-- `backfillParentIds`（`:159`）：首次 fork 时沿当前线性路径铺平 parentId（只写需要的消息，幂等）。
-- `makeSibling`（`:253`）：新 id/时间戳、继承父节点、清 `error` 与 `activeChildId`、content 可整体替换为纯文本。
-- `planContinuation`（`:234`）：原地续写——继承被续半截消息的 `parentId` 并返回待删 id，使续写替换原半截消息而非 fork。
-- `repairDetachedAssistants`（`:187`）：修复分支线程里 assistant 回复被写成 `parentId:null`（或无父链）的"幽灵根"：重挂到其回答的 user 回合并把被挤掉的后续 user 重新链接。幂等；对未分支线程无操作。
-- 活跃根指针 `activeRootId` 存线程 `thread.json` 的元数据（写读入口在 `$threadId.tsx` 的分支相关回调里），因此分支状态跨重启可恢复。旧数据（尚无 parentId 的线性线程）在首次 fork 时才回填，回填前的树完整性未验证。
+- 父子关系记在消息自身的元数据里：parentId 为字符串时指向父消息，根节点留空，缺该字段的是尚未链接的旧数据；activeChildId 记录父消息当前选用哪个子版本，缺省取最新兄弟。`computeActivePath` 从活跃根沿活跃子节点走出一条可见的线性会话（`message-branching.ts:98`）。
+- `backfillParentIds` 在首次 fork 时沿当前线性路径铺平 parentId，只写需要的消息，可重复执行。
+- `makeSibling` 生成新 id 与时间戳，继承父节点，清掉 error 与 activeChildId，内容可整体替换为纯文本。
+- `planContinuation` 做原地续写：继承被续半截消息的 parentId 并返回待删 id，续写因此替换原半截消息，不再 fork。
+- `repairDetachedAssistants` 修复分支线程里被写成 parentId 为空或没有父链的 assistant 回复，把它们重挂到所回答的 user 消息上，并把被挤掉的后续 user 消息重新链接；该函数可重复执行，对未分支线程不做改动。
+- 活跃根指针 activeRootId 写在 `thread.json` 的线程元数据里，读写入口在 `$threadId.tsx` 的分支相关回调，分支状态因此能跨重启恢复。旧线性线程要等到首次 fork 才回填 parentId，回填前的树完整性尚未验证。
 
 ## 2. 事实源、索引与持久化
 
@@ -192,78 +189,78 @@ created_at, completed_at, metadata?, type?, error_code?, tool_call_id?
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **创建**：`useThreads.createThread`（L315-361）：id 用 `ulid()` 或 `TEMPORARY_CHAT_ID`；标题默认取首次输入（`ChatInput.tsx:488`）；可选项目元数据；创建成功回填列表并置当前线程指针。磁盘层再被 Rust uuid 覆盖（§2.2）。首次发送前的线程页现场建立见 Chat UI 笔记 §2。
-- **删除线程**：`deleteThread`（`useThreads.ts` 内）级联清理各 store（agent 模式、AI SDK 会话、页面状态）、向量库集合（`useThreads.ts:48` 向扩展宿主取 `ServiceKeys.VectorDB` 后删集合，注意它传入的已是带前缀的名字）、服务层记录，并重建搜索索引。
-- **批量删除**：
-  - `deleteAllThreads`（L183-228）：保留收藏或带项目元数据的线程
-  - `deleteAllThreadsByProject`（L250-285）：按项目过滤删除
-  - `clearAllThreads`（L229-249）：全部清理并清空当前线程指针
-  - `unstarAllThreads`（L286-305）：批量取消收藏
-- **删除消息**：Rust `delete_message` retain 整写（§2.2）；前端 `handleDeleteMessage`（`$threadId.tsx:1410-1422`）：store 删除 + 清错误 + 从 chatMessages 过滤；流式态禁用（界面侧见 Chat UI 笔记 §6）。
-- **首拉与防清空**：`web-app/src/providers/DataProvider.tsx:291-330`——fetchThreads 失败按 150ms×attempt 退避重试（上限 20 次），扩展注册事件会重新触发；**空结果不覆盖已填充的列表**；线程内消息加载合并本地乐观写（`$threadId.tsx:790-810`）。
-- **载入时自愈**：`$threadId.tsx:815-835` 丢弃并删除空 assistant 行（旧 bug 产物），并对 `parentId:null` 幽灵根跑 `repairDetachedAssistants` 后回写。
-- **保留语义**：无回收站（检查范围：`threads` 模块全部命令、`useThreads` 全部删除方法、`ThreadList`/`NavChats`/对话框目录——均无软删除或回收站入口）；`deleteAllThreads` 的保留集是唯一的"批量保护"。
-- **归档**：本次未找到归档机制（core Thread 类型无 archived 字段；threads 命令无归档命令；ThreadList 菜单无归档项）——标注为未找到，非项目级否定。
+- **创建**：`createThread`（`useThreads.ts:315-361`）为一段新对话生成线程记录，id 用 ULID，临时会话固定取 `TEMPORARY_CHAT_ID`；标题默认用首次输入（`ChatInput.tsx:488`），可附带项目元数据，创建成功后回填列表并把当前线程指针移过去。落盘时 Rust 端再以自己的 UUID 覆盖该 id（§2.2）。首次发送前线程页的现场建立见 Chat UI 笔记 §2。
+- **删除线程**：`deleteThread` 删记录前先逐层解绑运行时资源：agent 模式、AI SDK 会话与页面状态各自清理，再向扩展宿主取向量库服务删掉该线程的集合（传入的集合名已带前缀），随后删服务层记录并重建搜索索引（`useThreads.ts:48`）。
+- **批量删除**：`useThreads.ts:183-305` 里有四个批量入口，作用范围各不相同：
+  - `deleteAllThreads`：删除全部线程，收藏与带项目元数据的线程保留
+  - `deleteAllThreadsByProject`：按项目过滤后删除
+  - `clearAllThreads`：清空全部线程并复位当前线程指针
+  - `unstarAllThreads`：批量取消收藏
+- **删除消息**：Rust 侧 `delete_message` 用 retain 过滤后整文件重写（§2.2）；前端 `handleDeleteMessage` 先删 store 记录、清掉错误状态，再从 chatMessages 中过滤该条，流式进行中禁用（`$threadId.tsx:1410-1422`，界面侧见 Chat UI 笔记 §6）。
+- **首拉与防清空**：`web-app/src/providers/DataProvider.tsx:291-330` 首次拉取线程列表，失败时按 150ms×attempt 退避重试（上限 20 次），扩展注册事件会重新触发；返回空结果时保留已填充的列表。线程内消息加载再与本地乐观写按 id 合并（`$threadId.tsx:790-810`）。
+- **载入时自愈**：线程页载入时丢弃并删除空的 assistant 行（旧 bug 产物），再对 parentId 为空的幽灵根跑 `repairDetachedAssistants` 修好挂接后回写（`$threadId.tsx:815-835`）。
+- **保留语义**：删除直接作用到磁盘目录，没有回收站；检查范围覆盖 threads 模块全部命令、useThreads 全部删除方法以及 ThreadList、NavChats 与对话框目录，均无软删除或回收站入口。`deleteAllThreads` 的保留集是唯一的"批量保护"。
+- **归档**：本次未找到归档机制——core 的 Thread 类型没有 archived 字段，threads 命令没有归档命令，ThreadList 菜单也没有归档项。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
 数据侧仲裁全部在 `web-app/src/routes/threads/$threadId.tsx`（界面入口与可用性见 Chat UI 笔记 §6）：
 
-- **编辑**：`handleEditMessage`（L1373-1407）：首次 fork 时回填 `parentId`（L1227-1233）→ `makeSibling` 生成新标识/时间戳、同父节点的兄弟，**内容整体替换为纯文本（媒体丢失）** → 切换活跃分支；用户消息编辑同步重新生成新回复（L1392-1395），助手消息编辑仅 fork 不重新生成（L1396-1398）。
-- **重新生成**：`handleRegenerate`（L1317-1346）：清 banner 错误 → 确保已分支 → 解析新回复的父节点（L1291-1313）→ 触发 `regenerate()`；新回复在完成回调中落为兄弟并成为活跃版本（L432-442）。
-- **续写**：`handleContinue`（L1352-1369）：取最后部分文本/推理 → 记录续写起点 → 触发重新生成；完成回调中 `planContinuation` 继承 `parentId` 并在落盘后**删除旧半截消息**（L444-449），因此续写是原地替换、不产生新版本。
-- **切换版本**：`handleSwitchVersion`（L1272-1288）：在兄弟列表内前后切换（`getSiblings`）→ 切换活跃分支并同步路径；活跃指针写回线程元数据或父消息 `activeChildId`。
-- **父链维护**：发送时若线程已分支，新 user 消息链接到活跃路径末位（L1064-1079）；assistant 回复的父节点在完成回调落盘前再兜底解析（`resolveAssistantParent`，L385-395），防止产生脱链的 assistant。
-- **编辑丢媒体的设计取舍**：原版本仍保留可回退（fork 而非覆盖），但新兄弟版本只有文本——编辑对话框里展示的图片/文件保留 chips 只影响 UI 展示，不会进入落盘内容（`makeSibling` 只接收文本；编辑对话框 `EditMessageDialog.tsx:63-73` 仅回传字符串）。
+- **编辑**：`handleEditMessage` 走完整的编辑链路：需要首次 fork 时先回填 parentId，再由 `makeSibling` 生成带新标识与时间戳的同父兄弟节点，内容整体替换为纯文本（媒体随之丢失），最后把活跃分支切到新版本。用户消息编辑后会同步重新生成回复，助手消息编辑只 fork、不触发重新生成（`$threadId.tsx:1227-1407`）。
+- **重新生成**：`handleRegenerate` 先清掉 banner 错误，确保线程已分支，再解析出新回复应挂的父节点并触发 `regenerate()`；新回复在完成回调里落成兄弟节点，并成为活跃版本（`$threadId.tsx:1291-1346`）。
+- **续写**：`handleContinue` 取最后一段部分文本或推理作为续写起点，然后触发重新生成；完成回调里 `planContinuation` 让新内容继承原半截消息的 parentId，并在落盘后删掉旧半截消息，续写因此是原地替换、不产生新版本（`$threadId.tsx:444-449、1352-1369`）。
+- **切换版本**：`handleSwitchVersion` 在兄弟列表内前后切换（`getSiblings`），随后切换活跃分支并同步可见路径，活跃指针写回线程元数据或父消息的 activeChildId（`$threadId.tsx:1272-1288`）。
+- **父链维护**：线程已分支时，新发的 user 消息链接到活跃路径末位；assistant 回复的父节点在完成回调落盘前再由 `resolveAssistantParent` 兜底解析一次，避免产生脱链的 assistant（`$threadId.tsx:385-395、1064-1079`）。
+- **编辑丢媒体的设计取舍**：编辑产生的新兄弟只保留文本，原版本仍在磁盘上，可以回退；编辑对话框里展示的图片与文件保留 chips 只作用于界面展示，进不了落盘内容——`makeSibling` 只接收文本，对话框也只回传字符串（`EditMessageDialog.tsx:63-73`）。
 
 ## 5. 列表、分页、搜索与定位
 
-- **排序**：`ThreadList.tsx:297-301` 按 `updated` 降序；`updateThreadTimestamp`（`useThreads.ts:433-463`）置顶刷新。
-- **收藏**：`toggleFavorite` store 方法存在（§2.4），但本快照 **web-app 内没有 UI 调用点**（搜索 `toggleFavorite` 仅命中 store 与测试；侧栏无收藏分区）；收藏星标界面本次未找到。`deleteAllThreads` 的收藏保留逻辑仍有效。
-- **搜索**：`getFilteredThreads`（`useThreads.ts:104-138`）用 Fzf 按标题模糊搜索，索引懒建且排除 `TEMPORARY_CHAT_ID` 与无标题线程；搜索对话框的搜索记录（localStorage，上限 5）与键盘导航属于 Chat UI 笔记 §2。
-- **线程列表加载**：`ThreadList.tsx:68-98` ThreadItem 懒加载消息——磁盘为空（新线程）不覆盖乐观写；列表滚动加载策略未找到（全量渲染）。
-- **消息列表**：无分页接口——`fetchMessages`（`messages/default.ts`）全量返回；AI SDK 会话内消息全量渲染，窗口化策略在消息渲染器笔记（无窗口化/虚拟化）。
-- **标题生命周期**：自动标题在完成回调后按"每 4 条 assistant 消息"的节拍触发（`TITLE_REFRESH_EVERY_N_ASSISTANT_MESSAGES=4`，`$threadId.tsx:93,589-656`），受自动标题开关与 `metadata.titleSetManually` 约束；llamacpp 下先等路由空闲（L626-642）再生成标题（≤10 词）。
+- **排序**：线程列表按 updated 降序展示，置顶刷新由 `updateThreadTimestamp` 把 updated 改成当前时间完成（`ThreadList.tsx:297-301`、`useThreads.ts:433-463`）。
+- **收藏**：store 里的 `toggleFavorite` 仍在（§2.4），本快照里 web-app 内没有 UI 调用点：搜索只命中 store 与测试，侧栏也没有收藏分区，收藏星标界面本次未找到。`deleteAllThreads` 的收藏保留逻辑照常生效。
+- **搜索**：`getFilteredThreads`（`useThreads.ts:104-138`）用 Fzf 按标题模糊匹配，索引懒建，并排除临时线程与无标题线程；搜索记录（localStorage，上限 5 条）与键盘导航属于 Chat UI 笔记 §2。
+- **线程列表加载**：ThreadItem 按需加载所在线程的消息（`ThreadList.tsx:68-98`），磁盘为空的新线程不会覆盖乐观写；列表一次全量渲染，滚动分页策略本次未找到。
+- **消息列表**：没有分页接口，`fetchMessages` 一次返回全部消息（`messages/default.ts`），AI SDK 会话内的消息也全量渲染，窗口化策略见消息渲染器笔记（无窗口化或虚拟化）。
+- **标题生命周期**：自动标题在回复完成后按每 4 条 assistant 消息的节拍触发，受自动标题开关与 `metadata.titleSetManually` 约束；llamacpp 下先等路由空闲再生成标题（≤10 词），节拍常量与回调都在 `$threadId.tsx:93,589-656`。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **per-thread 锁**：`MESSAGE_LOCKS`（`helpers.rs:14`）串行化同一线程消息写；无跨线程/跨文件锁；`modify_thread` 与消息写之间无共享锁（thread.json 与 messages.jsonl 各自独立整写）。
-- **去重与 upsert**：桌面创建命令"已存在即返回"、修改命令"找不到则追加"（`commands.rs:192-202`、L259-262）；SQLite 侧用 `INSERT OR IGNORE`（`db.rs:248`）与 `ON CONFLICT DO UPDATE`——两层都防止"乐观写创建与流式更新竞速"产生重复消息【代码确认；竞态本身未运行验证】。
-- **乐观写合并**：`addMessage` 先入内存、`createMessage().then` 按 id 替换（`useMessages.ts:46-55`）；`updateMessage` 走修改路径避免重复。
-- **多窗口并发**：聊天状态无跨窗口同步机制（本次未找到；检查范围：web-app chat stores、window 服务调用点——`services/window` 仅用于创建主题/扩展窗口）；多窗口并发写入同一 thread 的行为未验证（推测会互相整文件覆盖）。
-- **内存权威源关系**：磁盘/数据库是权威持久化；`useMessages` 内存数组是投影 + 乐观写源，读取时按 id 合并（`$threadId.tsx:790-810`）；AI SDK 会话内的 UIMessage 是渲染投影。
+- **per-thread 锁**：`MESSAGE_LOCKS`（`helpers.rs:14`）把同一线程的消息写串行化，跨线程与跨文件没有共用锁；thread.json 与 messages.jsonl 各自独立整写，`modify_thread` 与消息写之间也不共享锁。
+- **去重与 upsert**：桌面端创建命令遇到同 id 直接返回，修改命令找不到就追加（`commands.rs:192-202`）；SQLite 侧分别用 `INSERT OR IGNORE` 与 `ON CONFLICT DO UPDATE` 兜底（`db.rs:248`）。两层共同避免乐观写创建与流式更新竞速时写出重复消息【代码确认；竞态本身未运行验证】。
+- **乐观写合并**：`addMessage` 先写内存，等 `createMessage` 返回后按 id 替换占位记录（`useMessages.ts:46-55`）；`updateMessage` 走修改路径，不必再建一条。
+- **多窗口并发**：聊天状态没有跨窗口同步机制；检查范围覆盖 web-app 的 chat stores 与 window 服务调用点，后者只用于创建主题与扩展窗口。多窗口同时写同一 thread 的实际行为未验证，按整文件重写推测会互相覆盖。
+- **内存权威源关系**：磁盘与数据库是权威持久化，`useMessages` 的内存数组是它的投影兼乐观写来源，读取时按 id 合并（`$threadId.tsx:790-810`）；AI SDK 会话里的 UIMessage 用于渲染。
 
 ## 7. 迁移、导入导出与保留策略
 
-- **设置迁移**：`migrateLocalStorageToBackend`（`web-app/src/lib/migrateLocalStorageSettings.ts`，由 `providers/ServiceHubProvider.tsx` 调用）：一次性把 localStorage 设置迁移到后端存储、API key/令牌入系统 keyring，后端标记防重复；**不涉及线程/消息数据**。
-- **线程数据迁移**：
-  - `setThreads`：模型名归一化与 cortex 模型 id 拼接（`useThreads.ts:71-86`）
-  - 消息兼容：`<think>` 旧格式解析（`messages.ts:161-196`）、`metadata.tool_calls` 旧工具格式（L304-354）、空 assistant 行清理与 parentId 为空幽灵根修复（§3）
-  - Rust 侧：thread.json 无结构迁移（整对象透传）
-- **Schema 版本**：SQLite 为 `CREATE TABLE IF NOT EXISTS`，本快照未发现版本迁移机制（检查范围：`db.rs` 全文，无 `PRAGMA user_version` 或迁移表）——标注为未找到。
-- **导入导出/备份恢复**：本次未覆盖（检查范围：web-app services、Rust threads 模块、对话框目录均无导入导出入口）。
-- **保留策略**：`deleteAllThreads` 保留收藏与带 project 的线程；消息级删除为整文件重写不可恢复（无回收站）。
+- **设置迁移**：`migrateLocalStorageToBackend` 由 `ServiceHubProvider.tsx` 在启动时调用，把 localStorage 里的设置一次性搬到后端存储，API key 与令牌写进系统 keyring，并在后端留标记以防重复迁移；迁移范围只到设置项，线程与消息数据留在原处（`web-app/src/lib/migrateLocalStorageSettings.ts`）。
+- **线程数据迁移**：线程数据的兼容处理集中在三处：
+  - `setThreads`：模型名归一化，cortex 模型 id 按路径分隔符拼接（`useThreads.ts:71-86`）
+  - 消息兼容：解析 `<think>` 旧格式、兼容 `metadata.tool_calls` 旧工具格式、清理空 assistant 行并修复 parentId 为空的幽灵根（§3，`messages.ts:161-354`）
+  - Rust 侧：thread.json 整对象透传，没有结构迁移
+- **Schema 版本**：SQLite 建表用 `CREATE TABLE IF NOT EXISTS`，`db.rs` 全文没有 `PRAGMA user_version` 或迁移表，版本迁移机制本次未找到。
+- **导入导出/备份恢复**：本次未覆盖；检查了 web-app services、Rust threads 模块与对话框目录，均无导入导出入口。
+- **保留策略**：`deleteAllThreads` 保留收藏与带 project 的线程；消息级删除是整文件重写，删掉后无法恢复，也没有回收站。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- **嵌入快照**：线程助手是 `ThreadAssistantInfo` 快照而非对全局 assistant 的引用（core 类型 §1.1）；服务层写入的是完整 web Assistant 对象（§2.4），因此快照字段实际是类型超集。
-- **参数编解**：线程内参数弹窗编辑为"快照 + 全局镜像"双写——先 `updateCurrentThreadAssistant`（线程快照），若全局 assistant 仍存在再镜像更新（`SamplerPopover.tsx:100-113`）【代码确认】；线程外（助手编辑页）修改全局对象不回流既有线程（静态推断：线程保存的是快照，未发现同步逻辑）。
-- **请求参数来源**：线程助手 `parameters` 在 transport 内解析为推理参数（`custom-chat-transport.ts:773-784`，`model-only` 时取空），执行语义见对话请求与上下文笔记 §2。
-- **附件**：附件作为消息的 file parts 持久化——图片/音频/视频存 base64 data URL（`completion.ts:61-95`），文档注入"不含路径"的元数据文本与 `metadata.inline_file_contents` 全文（L37-48、L107-115）；向量库 `attachments_<threadId>` 集合随线程删除清理（`useThreads.ts:45-59`）。
-- **遗留 API**：Rust 与 SQLite 两端的 `get_thread_assistant` 等 3 个命令无 web 功能调用方【代码确认，§2.2/§2.3】。
+- **嵌入快照**：线程助手以 `ThreadAssistantInfo` 快照随线程保存（core 类型 §1.1），字段取自服务层写入的完整 web Assistant 对象（§2.4），快照字段因此常是类型超集。
+- **参数编解**：线程内的参数弹窗做成"快照 + 全局镜像"双写：先 `updateCurrentThreadAssistant` 改线程快照，全局 assistant 仍存在时再镜像更新（`SamplerPopover.tsx:100-113`）【代码确认】；在助手编辑页改全局对象，既有线程里的快照不跟着变（静态推断：未发现同步逻辑）。
+- **请求参数来源**：线程助手的 parameters 由 transport 解析成推理参数，model-only 占位助手取空（`custom-chat-transport.ts:773-784`）；执行语义见对话请求与上下文笔记 §2。
+- **附件**：附件作为消息的 file parts 持久化：图片、音频与视频存成 base64 data URL，文档转成元数据文本并把全文放进 `metadata.inline_file_contents`（`completion.ts:37-115`）；线程的向量库集合 `attachments_<threadId>` 随线程删除一并清理（`useThreads.ts:45-59`）。
+- **遗留 API**：`get_thread_assistant` 等 3 个 assistant 命令在 Rust 与 SQLite 两端都有实现，web 功能代码里没有调用方【代码确认，§2.2/§2.3】。
 
 ## 9. 设计取舍与已确认边界
 
 以下按【代码确认】/【静态推断】区分证据强度：
 
-1. **messages.jsonl 整文件重写**（`helpers.rs:34-44`）：每次写入全量 `File::create`，长会话每轮 O(消息数) 文件 I/O；per-thread 锁串行化但无增量维护。【代码确认】
-2. **服务端 uuid 覆盖前端 id**（`commands.rs:79-80`）：前端 ULID 落盘时被替换，前端需按响应同步；消息 id 则保留前端值。【代码确认】
-3. **upsert 去重语义**：create 已存在直接返回 + modify 找不到追加 + SQLite INSERT OR IGNORE/ON CONFLICT，配合前端乐观写按 id 替换。【代码确认】
-4. **分支树懒回填**：`backfillParentIds` 只在首次 fork 时铺平 parentId，旧线性线程的树完整性依赖该次回填；`activeRootId` 持久化在线程 metadata，跨重启可恢复活跃路径。【代码确认（机制）+ 未验证行为】
-5. **编辑丢媒体**：`makeSibling` 只保留纯文本，编辑对话框的图片保留 UI 不落盘；原版本保留可回退。【代码确认】
-6. **线程级 model 与助手参数**：线程保存自己的 model/assistant 快照；SamplerPopover 线程内编辑双写，线程外编辑不回流。【代码确认 + 静态推断】
-7. **快照超集**：thread.json 实际写入完整 Assistant 对象（`default.ts:89-91`），core `ThreadAssistantInfo` 是声明形状。【代码确认】
-8. **无回收站、无归档**：检查范围见 §3，不是项目级绝对结论。【代码确认（范围内）】
+1. **messages.jsonl 整文件重写**：每次写入都用 `File::create` 全量重写，长会话每轮的文件 I/O 随消息数线性增长；per-thread 锁保证串行，但没有增量维护（`helpers.rs:34-44`）。【代码确认】
+2. **服务端 uuid 覆盖前端 id**：前端 ULID 在落盘时被服务端 UUID 替换，前端需按响应同步；消息 id 则保留前端值（`commands.rs:79-80`）。【代码确认】
+3. **upsert 去重语义**：创建命令遇到已存在的直接返回，修改命令找不到就追加，SQLite 侧用 `INSERT OR IGNORE` 与 `ON CONFLICT`，配合前端乐观写按 id 替换。【代码确认】
+4. **分支树懒回填**：`backfillParentIds` 只在首次 fork 时铺平 parentId，旧线性线程的树完整性依赖这次回填；`activeRootId` 持久化在线程 metadata 里，活跃路径可跨重启恢复。【代码确认（机制）+ 未验证行为】
+5. **编辑丢媒体**：`makeSibling` 只保留纯文本，编辑对话框里的图片保留只作用于界面，原版本留在磁盘可以回退。【代码确认】
+6. **线程级 model 与助手参数**：线程保存自己的 model 与 assistant 快照；SamplerPopover 的线程内编辑双写，线程外编辑不回流。【代码确认 + 静态推断】
+7. **快照超集**：thread.json 实际写入的是完整 Assistant 对象，core 的 `ThreadAssistantInfo` 是声明形状（`default.ts:89-91`）。【代码确认】
+8. **回收站与归档**：删除直接作用到磁盘目录，线程模型里没有 archived 状态，本次未找到回收站或归档入口；检查范围见 §3。【代码确认（范围内）】
 
 ## 10. 未验证事项
 

@@ -16,11 +16,11 @@
 
 OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托管的公开会话链接。文件导出仍有四条相互独立的抽取与交付路径：
 
-- 消息会话内的 owner-only 命令 `/export-session`（别名 `/export`）把持久化 transcript 渲染成**自包含 HTML 阅读稿**并写入工作区（阅读交付，含分支树与 system prompt，离线可用）。
-- `/export-trajectory` 与 CLI `openclaw sessions export-trajectory` 把活动分支 transcript + 每轮运行的轨迹事件打成**脱敏 JSONL 支持包**，写入工作区 `.openclaw/trajectory-exports/`（数据交换/支持交付）。
-- Control UI 会话页本地执行 `/export-session`，把**当前已加载消息**下载为纯文本 Markdown 文件。
-- 官方 iOS/macOS 应用提供 “Export Transcript” 按钮，把当前视图消息导出为 Markdown 并经系统分享。
-- Control UI 的会话共享面可在显式确认后发布世界可读 token 链接，并可独立撤销；团队可见性、成员关系和公开发布是不同状态。
+- 消息会话内的 owner-only 命令 `/export-session`（别名 `/export`）把持久化 transcript 渲染成**自包含 HTML 阅读稿**，作为阅读交付写入操作者工作区，产物含分支树与 system prompt，离线可打开。
+- `/export-trajectory` 与 CLI 的 `openclaw sessions export-trajectory` 把活动分支 transcript 连同每轮运行的轨迹事件打包成**脱敏 JSONL 支持包**，作为数据交换与支持交付写入工作区 `.openclaw/trajectory-exports/`。
+- Control UI 会话页在浏览器本地执行同名命令 `/export-session`，把**当前已加载消息**下载为纯文本 Markdown 文件。
+- 官方 iOS/macOS 应用提供 **Export Transcript** 按钮，把当前视图消息导出为 Markdown 并交给系统分享。
+- Control UI 的会话共享面在显式确认后发布世界可读的 token 链接，可独立撤销；团队可见性、成员关系与公开发布分属不同状态。
 
 **未找到**：独立的分享稿编辑器/预览编排工作台、会话整图/长图导出，以及本地导出文件的版本历史。普通会话深链仍要求鉴权；公开分享使用单独的 token 路由，撤销后旧链接失效。
 
@@ -40,15 +40,38 @@ OpenClaw 的导出与分享分为本地文件交付、支持包和 Gateway 托�
 | Control UI 会话 `/export-session`（/export） | 会话文本留存 | 客户端内存中当前加载的实时消息 | 浏览器下载 `<chat-<assistant>-<时间戳>.md` |
 | iOS/macOS “Export Transcript”（macOS ⌘⇧E） | 移动/桌面导出并系统分享 | 客户端 `viewModel.messages` | `.md`（macOS 存盘面板；iOS 临时文件→系统分享 sheet） |
 
-in-chat 的 HTML 导出目标“当前活动会话”：`buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读 transcript 行，组装会话数据并生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts`）。默认文件名为 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时做冲突后缀（`-1`、`-2`…）避让（`commands-export-session-file.ts:13-30`）。
+in-chat 的 HTML 导出目标是当前活动会话。处理函数 `buildExportSessionReply` 先解析可选路径参数，再把会话入口解析为 store/agent，从 SQLite 读出 transcript 行，组装会话数据后生成 HTML，最后经 fs-safe 的工作区写入口落盘（`src/auto-reply/reply/commands-export-session.ts`）。默认文件名形如 `openclaw-session-<sessionId前8位>-<时间戳>.html`；显式给出路径时覆盖同路径既有文件，省略路径时追加 -1、-2 等后缀避让冲突（`commands-export-session-file.ts:13-30`）。
 
-轨迹导出另有 CLI 版本。`openclaw sessions export-trajectory` 注册为 `sessions` 子命令并显式拒绝 `--all-agents` 等列表过滤（`src/cli/program/register.status-health-sessions.ts`），其 handler 解析单个 `--session-key`，读取对应 store 的 session 后调用共享导出核心（`src/commands/export-trajectory.ts`）。in-chat 版本把导出交给审批通道执行：它组一条 `openclaw sessions export-trajectory --request-json-base64 ...` 的 exec 请求，落盘发生在该命令获批执行之后（`commands-export-trajectory.ts:275-304`）。
+轨迹导出另有 CLI 版本，命令 `openclaw sessions export-trajectory` 挂在 sessions 子命令下（`src/cli/program/register.status-health-sessions.ts`）。该命令拒绝 `--all-agents` 一类列表过滤，只接受单个 `--session-key`，读取对应 store 的会话后调用共享导出核心（`src/commands/export-trajectory.ts`）。in-chat 版本把实际导出交给审批通道：它先组一条带 `--request-json-base64` 参数的 exec 请求，等该命令获批执行后文件才落盘（`commands-export-trajectory.ts:275-304`）。
 
 ## 2. 范围选择、内容口径与字段过滤
 
-HTML 导出包含持久化 activity 分支上的全部条目：user/assistant/toolResult/bashExecution 消息、compaction、branch_summary、model_change、custom_message、label 等会话条目类型，并携带 `leafId`、`hasLeafControl`（`commands-export-session.ts:276-326`）。assistant 内容块按 text/thinking/toolCall 分解渲染；工具调用会匹配同 call id 的 toolResult 展示结果；system prompt 与工具名/描述/参数被一并嵌入会话数据（`commands-export-session.ts:352-377`）。若会话由 CLI/ACP 等后端运行时代理，持久化侧可能只有 user 行，回复会附加一条说明提示看后端 transcript（`BACKEND_DELEGATED_WARNING`，`commands-export-session.ts:43-89`）。
+HTML 导出收录持久化 activity 分支上的全部会话条目，涵盖用户和助手消息、工具结果、Bash 执行，以及压缩、分支摘要、模型变更、自定义消息和标签等类型。条目数组与会话级分支信息并列放在导出数据顶层，字段关系如下（`src/auto-reply/reply/commands-export-session.ts:128-185`）：
 
-轨迹导出的事件口径记录在 `docs/tools/trajectory.md`：transcript 事件由活动分支重建（user/assistant 消息、工具调用与结果、compaction、model change、label、custom entries），runtime 事件覆盖 `session.started`、`trace.metadata`、`context.compiled`、`prompt.submitted`、`model.fallback_step`、`model.completed`、`trace.artifacts`、`session.ended`。会话语义上的“隐藏分支/非活动分支”在两者中都不包含——都只取当前 active leaf 的 branch。malformed transcript 行会被跳过并以警告汇总（JSON 行号）出现在回复或 manifest 中（`commands-export-session.ts:216-274`、`src/trajectory/export.ts` 的 warnings 汇总）。
+| 顶层字段 | 含义 |
+| --- | --- |
+| `entries` | 会话条目数组 |
+| `leafId` | 当前叶节点标识 |
+| `hasLeafControl` | 会话树是否具有叶节点控制信息 |
+
+assistant 内容块按文本、思考与工具调用分解渲染，工具调用按同名 call id 匹配对应的 toolResult 展示结果，system prompt 与工具的名称、描述和参数一并嵌入会话数据。
+
+会话若由 CLI/ACP 等后端运行时代理，持久化侧可能只有 user 行，回复会附一条说明提示读者查看后端 transcript（`src/auto-reply/reply/commands-export-session.ts:149-174`）。
+
+轨迹导出的事件口径记录在 `docs/tools/trajectory.md`，分为 transcript 事件与 runtime 事件两类。transcript 事件由活动分支重建，包括 user/assistant 消息、工具调用与结果、compaction、model change、label 与 custom entries；runtime 事件覆盖以下会话生命周期节点：
+
+```text
+session.started
+trace.metadata
+context.compiled
+prompt.submitted
+model.fallback_step
+model.completed
+trace.artifacts
+session.ended
+```
+
+两类事件都只取当前 active leaf 的 branch，隐藏分支与非活动分支不进入导出。malformed transcript 行会被跳过，其 JSON 行号以警告形式汇总到回复或 manifest 中（`commands-export-session.ts:216-274`、`src/trajectory/export.ts`）。
 
 Control UI 与原生应用的 Markdown 导出口径窄得多：只取消息的可见正文文本。Web 端抽取会先剥内部运行时上下文、inbound 元数据与思考标签（`ui/src/lib/chat/message-extract.ts`），原生端同样走 `visibleText`，且只导出 user/assistant 行（system 直接丢弃，见 `ChatTranscriptExporter.swift:93-102`）。
 
@@ -98,7 +121,11 @@ Control UI 的普通会话深链服务于书签与换端续聊，仍位于 Gatew
 
 轨迹导出设了明确的规模上限：会话文件 50 MiB、导出 runtime 事件 200,000、总事件 250,000（`src/trajectory/export.ts`），单事件行截断 256 KiB（`src/trajectory/paths.ts`），live capture 为滚动窗口 10 MiB。路径全部经 fs-safe 的 root 约束（防符号链接逃逸、目录必须落在工作区内），冲突文件名自动后缀避让、显式路径覆盖。HTML 导出未发现同样的体积上限，超大会话或内嵌大字节图片会整体进单文件，属未验证的极端场景。
 
-覆盖情况：HTML 导出与模板各有测试（`commands-export-session.test.ts` 覆盖路径越界/覆盖语义/后端代理警告，`template.security.test.ts` 覆盖转义与清洗），轨迹导出有大规模单测（`src/trajectory/export.test.ts`、`command-export.ts` 的 CLI wrapper 测试），Control UI 与原生端各有导出单测（`ui/src/pages/chat/export.test.ts`、`ChatTranscriptExporterTests.swift`）。
+覆盖情况按导出路径分组：
+
+- HTML 导出：`commands-export-session.test.ts` 覆盖路径越界、覆盖语义与后端代理警告；`template.security.test.ts` 覆盖转义与清洗。
+- 轨迹导出有较大规模单测：`src/trajectory/export.test.ts`、`command-export.ts` 的 CLI wrapper 测试。
+- Control UI 与原生端各有导出单测：`ui/src/pages/chat/export.test.ts`、`ChatTranscriptExporterTests.swift`。
 
 ## 11. 设计取舍与已确认边界
 

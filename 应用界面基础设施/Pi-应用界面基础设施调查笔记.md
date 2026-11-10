@@ -26,7 +26,7 @@ TUI 没有主题市场、壁纸、字体、密度或圆角设置。键盘由统�
 
 不采用 Ink/blessed/react 等框架。
 
-**两种渲染器。** TuiMainScreen（regular：渲染进主屏与滚动回滚，行级差分比较；`tui-main-screen.ts:127` 起，doRender 内含 compositeOverlays 调用 :273）与 TuiAltScreen（fullscreen 备屏：应用自有视口与布局引擎；`tui-alt-screen.ts:203`，ViewportTUI 标记符号，`tui.ts:1382`）。
+**两种渲染器。** TUI 按屏幕模式选用两套渲染器。regular 模式用 TuiMainScreen，把内容渲染进主屏并随终端滚动保留回滚，逐行做差分比较，doRender 内会调用 overlay 合成；fullscreen 模式用 TuiAltScreen，切到备用屏幕后由应用自己维护视口与布局引擎，并以 ViewportTUI 标记该屏幕类型（`tui-main-screen.ts:127-273`、`tui-alt-screen.ts:203`、`tui.ts:1382`）。
 
 **装配。** createInteractiveTui（`modes/interactive/tui-renderer.ts`，由 interactive-mode 转出）按 tuiMode 选择渲染器，fullscreen 时注入搜索匹配样式、链接打开与右键粘贴回调；
 
@@ -42,10 +42,15 @@ InteractiveMode.init（`interactive-mode.ts:974` 起）构建组件树（文档�
 
 ## 1. 界面栈、公共组件与状态所有权
 
-- **公共组件**（`packages/tui/src/components/`）：基础布局包括文本、截断文本、盒、间隔与 VStack/HStack 栈（basis/grow/shrink/minSize/maxSize/visible 回调，`stack.ts:4-11,82-87`）；ScrollView 提供尾随、overscroll 链/包含与三态滚动条（`scroll-view.ts:21`）。
-- 输入与内容组件包括：输入框、多行编辑器（自动补全、历史/kill-ring/undo，`editor.ts:270`）、选择列表（键盘导航，`select-list.ts:40`）、设置列表（含子菜单与搜索，`settings-list.ts:34,198-220`）、Markdown（主题接口 MarkdownTheme，`markdown.ts:236`）、加载器（见 §3）与图片（见 §6）。
+- **公共组件**（`packages/tui/src/components/`）：基础布局组件有文本、截断文本、盒、间隔，以及按弹性参数（basis、grow、shrink、minSize、maxSize）与 visible 可见性回调分配空间的 VStack/HStack 栈；ScrollView 在此基础上提供尾随滚动、overscroll 链式与包含模式，以及三态滚动条（`stack.ts:4-87`、`scroll-view.ts:21`）。
+- **输入与内容组件**：以下几类组件分别负责输入与内容展示，加载器见 §3，图片组件见 §6。
+  - 输入框负责单行文本输入。
+  - 多行编辑器在编辑之外带自动补全、历史、kill-ring 与撤销（`editor.ts:270`）。
+  - 选择列表用键盘导航选中项（`select-list.ts:40`）。
+  - 设置列表在列表之上叠加子菜单与搜索（`settings-list.ts:34`）。
+  - Markdown 组件按 MarkdownTheme 接口取色（`markdown.ts:236`）。
 
-**fullscreen 布局引擎。** `layout.ts` renderLayoutFrame（:353-382）按终端尺寸逐帧布局，render 缓存按组件+宽度键控（:62-75），scroll 节点计算 scrollTop 与 clip（:130-162），paintBox 逐行合成并处理 Kitty 图片裁剪与滚动条绘制（:304-351），全宽行有直接引用快速路径（:319-325）；滚动条几何 getScrollbarGeometry（:266-291）。
+**fullscreen 布局引擎。** `layout.ts` 以 renderLayoutFrame 为入口，每帧按当前终端尺寸重新排布一次。布局分三步：先按“组件 + 宽度”为每个组件键控缓存渲染结果，再由 scroll 节点算出 scrollTop 与裁剪区域，最后由 paintBox 逐行合成到屏幕，同时处理 Kitty 图片裁剪与滚动条绘制；全宽行另有一条直接引用的快速路径。滚动条的几何位置由 getScrollbarGeometry 单独计算（`layout.ts:62-382`）。
 
 **状态所有权。** 编辑器文本/历史/undo 在 editor 组件内（`editor.ts:316-339`）；选择器选中项/搜索文本在各自组件实例内（如 `session-selector.ts:288-310`）；主题是模块级全局单例（§4）；键盘注册表是模块级单例（§7）；busy/流式事实源在 agent session（`agent-session.ts:878-885`，UI 投影见 Chat UI 笔记 §5/§9）。组件树外的共享状态只有 theme 与 keybindings 两个全局点。
 
@@ -65,8 +70,8 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
 ### 仓库内的 overlay 消费点
 
-1. **fullscreen transcript 搜索框**：openSearch 以 anchor: "top-right"、width: "40%"、minWidth: 24、margin: 1 打开 AltScreenSearchComponent overlay（`tui-alt-screen.ts:416-437`），Enter/Ctrl+G 下一个、Shift+Enter 上一个、Esc 关闭（:567-584）——这是内置代码中唯一的 overlay 实例。
-2. **扩展自定义组件**：showExtensionCustom 的 options.overlay 模式（`interactive-mode.ts:2662-2730`，overlayOptions 可为函数动态解析 :2708-2716），关闭时 `ui.hideOverlay()`；该 API 由扩展系统暴露（`core/extensions/types.ts:199-210`）。
+1. **fullscreen transcript 搜索框**：openSearch 在终端右上角锚定一个 overlay，宽度取终端的 40%、最小 24 列、四周留 1 格间距，里面放 AltScreenSearchComponent 搜索组件；打开后 Enter 与 Ctrl+G 跳到下一个匹配，Shift+Enter 回上一个，Esc 关闭。这是内置代码中唯一使用 overlay 的地方（`tui-alt-screen.ts:416-584`）。
+2. **扩展自定义组件**：扩展要显示自绘界面时调用 showExtensionCustom 并指定 overlay 模式，overlay 参数可以直接给固定对象，也可以给函数在打开时动态解析；关闭时由调用方调 ui.hideOverlay 收起。这套能力由扩展系统的类型定义对外暴露（`interactive-mode.ts:2662-2730`、`core/extensions/types.ts:199-210`）。
 
 本次未在仓库内找到任何具体扩展以 overlay: true 调用的实例（Grep 范围：`packages/coding-agent/src` 全部 `.ts`）。
 
@@ -82,8 +87,8 @@ TUI 层有 overlay 专项测试（`packages/tui/test/overlay-*.test.ts`、`tui-o
 
 ### 聊天区文本反馈（regular 与 fullscreen 共用）
 
-- showError（`interactive-mode.ts:4098-4102`）：追加 Error: …（theme.fg("error")）进 chatContainer；showWarning（:4104-4108）用 warning 色；showStatus（:3414-3432）用 dim 色，且连续状态消息复用最后一个文本节点就地更新（lastStatusText/lastStatusSpacer 判定）——明确的防刷屏设计。三者都随聊天区滚动，无自动消失。
-- 扩展 notify 事件映射到这三条通道（showExtensionNotify，:2651-2659）。
+- 聊天区的文本反馈由三个入口写入：showError 用 error 色把一行 Error: … 追加进 chatContainer，showWarning 用 warning 色追加提示，showStatus 用 dim 色追加状态行。连续到达的状态行会复用最后一个文本节点就地更新，避免刷屏。三种反馈都是聊天区里的普通文本，随内容滚动，不会自动消失（`interactive-mode.ts:3414-4108`）。
+- 扩展的 notify 事件经 showExtensionNotify 映射到这三条通道（`interactive-mode.ts:2651-2659`）。
 
 ### fullscreen flash（Toast 等价物）
 
@@ -166,7 +171,7 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 - 扩展面：ctx.theme（当前 Theme 实例）、getAllThemes/getTheme/setTheme（`core/extensions/types.ts:265-275`）；ui.setTheme 接受主题名或 Theme 实例（`interactive-mode.ts:2382-2395`）。
 
-**内存主题实例。** 传实例走 setThemeInstance（`theme.ts:914-921`）——当前主题名置为内存标记并**停止热重载 watcher**（注释 "Can't watch a direct instance"，:917）；非交互扩展运行器中主题 API 为空实现或报 "UI not available"（`runner.ts:258-263`、`rpc-mode.ts:290-298`）。
+**内存主题实例。** 调用方直接传 Theme 实例时走 setThemeInstance：当前主题名被置为内存标记，热重载 watcher 同时停下，因为直接给出的实例没有文件可监听。非交互的扩展运行器里这套主题 API 为空实现，或直接报 "UI not available"（`theme.ts:914-921`、`runner.ts:258-263`、`rpc-mode.ts:290-298`）。
 
 **仓库内调用实例。** `examples/extensions/mac-system-theme.ts` 轮询 macOS 外观（osascript，2s 间隔）并 `ctx.ui.setTheme("dark"/"light")` 跟随系统明暗——说明扩展可在内置三级检测之外自建系统跟随通道。
 
@@ -187,13 +192,13 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 **overlay 自适应。** visible 回调每渲染帧评估（尺寸不足自动隐藏，`tui.ts:666-672`）；百分比宽高按当前终端计算（resolveOverlayLayout :957-1055）。
 
-**手动控制。** tuiMode（regular/fullscreen）是设置项，可经 `/settings` 切换（`settings-manager.ts:1131-1137`、`settings-selector.ts:638-640`）或 `--tui-mode` CLI（`cli/args.ts:182-186`）；全屏输出与滚动条开关同层（:1141-1157）。
+**手动控制。** tuiMode 决定用 regular 还是 fullscreen，值保存在设置里，可在 `/settings` 界面切换，也可在启动时用 `--tui-mode` 命令行参数指定；同一层设置里还有全屏输出与滚动条两个开关（`settings-manager.ts:1131-1157`、`settings-selector.ts:638-640`、`cli/args.ts:182-186`）。
 
-**其它终端适配。** 四项：
-- 多路复用器（tmux/zellij/STY）下鼠标跟踪降级为按钮运动模式（`tui-alt-screen.ts:271-284`）；
-- SSH 下 Esc 重组窗口 100ms（`terminal.ts:104-121`）；
-- cell size 查询校准图片行高（`tui.ts:735-743,933-951`）；
-- 终端尺寸回退默认值：宽度 COLUMNS/80、高度 LINES/24（`terminal.ts:493-499`）。
+**其它终端适配。** 以下几种运行场景各有对应处理：
+- 在 tmux、zellij 或 STY 等终端多路复用器下，鼠标跟踪降级为按钮运动模式（`tui-alt-screen.ts:271-284`）；
+- SSH 连接下 Esc 按 100ms 窗口重组输入序列（`terminal.ts:104-121`）；
+- 通过 cell size 查询校准图片行高（`tui.ts:735-951`）；
+- 探测不到终端尺寸时回退默认值，宽度取 COLUMNS 或 80，高度取 LINES 或 24（`terminal.ts:493-499`）。
 
 ## 6. 图片、附件、剪贴板与常见内容交互
 
@@ -227,7 +232,7 @@ InteractiveThemeController（`theme-controller.ts:18-139`）在 auto 模式时�
 
 **键注册表分层。** TUI 层 TUI_KEYBINDINGS（`packages/tui/src/keybindings.ts:71-210`，tui.select.*/tui.editor.*/tui.input.*/tui.altScreen.*）；
 
-coding-agent 通过模块声明合并扩展 app.* 键（`core/keybindings.ts:13-62`），KeybindingsManager 继承 TUI 基类并加载 `~/.pi/agent/keybindings.json` 用户覆盖（:340-367），同键多绑定记录冲突（`packages/tui/src/keybindings.ts:243-268`），旧键名有迁移表（`core/keybindings.ts:209-269`）。
+coding-agent 在这张表上扩展自己的键：用模块声明合并加入 app.* 命名空间的绑定，KeybindingsManager 继承 TUI 的基类，启动时再读 `~/.pi/agent/keybindings.json` 应用用户覆盖，同一按键绑定多个动作时记录冲突，旧键名经一张迁移表对应到新键（`core/keybindings.ts:13-367`、`packages/tui/src/keybindings.ts:243-268`）。
 
 组件只通过 keybindings.matches(data, …) 消费，不硬编码键（Pi 的 AGENTS.md 也强制此规则）。
 
@@ -264,16 +269,23 @@ StdinBuffer 把批量输入拆成单序列（`stdin-buffer.ts`），bracketed pa
 
 ## 9. 未验证事项
 
-- 未在真实终端运行：差分渲染输出、resize 行为、Kitty 图片显示、OSC 52/OSC 9;4、颜色方案通知（DSR 996/OSC 2031）在各终端模拟器上的实际支持度、IME 硬件光标定位、flash 视觉表现——静态代码只确认事件绑定与序列生成。
-- 依赖库内部未下钻：marked（Markdown 解析）、cli-highlight（语法高亮）、`@mariozechner/clipboard`（native 剪贴板）、get-east-asian-width 的内部行为均未阅读依赖源码。
+- 未在真实终端运行。静态代码只确认了事件绑定与序列生成，以下行为要在目标终端里实际观察：
+  - 差分渲染的实际输出与 resize 行为；
+  - Kitty 图片能否正常显示；
+  - OSC 52 剪贴板写入与 OSC 9;4 进度条；
+  - 颜色方案通知（DSR 996 查询与 OSC 2031 订阅）在各终端模拟器上的实际支持度；
+  - IME 硬件光标定位是否落在候选窗位置；
+  - fullscreen flash 条的视觉表现。
+- 依赖库内部未下钻：Markdown 解析（marked）、语法高亮（cli-highlight）、native 剪贴板（`@mariozechner/clipboard`）与东亚字符宽度计算（get-east-asian-width）的源码都没有阅读。
 - 主题自动跟随的实际切换延迟与热重载 debounce 表现未实测。
-- 主题资源管线端到端未实测：设置 themes 键、项目 `.pi/themes` 自动发现、`--theme` 目录形态、扩展 themePaths 的实际解析与优先级；`/settings` 主题子菜单预览与首次设置向导的视觉表现未运行验证；setThemeInstance 内存主题路径无仓库内真实调用（示例扩展只按名字调用，`runner.ts`/`rpc-mode.ts` 均为占位实现）。
+- 主题资源管线没有端到端跑通：设置在 themes 键里添加的资源、项目 `.pi/themes` 的自动发现、`--theme` 指向目录、扩展贡献的 themePaths 四条来源的实际解析与优先级都未实测，`/settings` 主题子菜单的预览与首次设置向导的视觉表现也未运行验证。
+- setThemeInstance 的内存主题路径在仓库内没有真实调用：示例扩展只按名字设主题，`runner.ts` 与 `rpc-mode.ts` 里都是占位实现。
 - 扩展 overlay 模式仅确认 API 存在，无仓库内运行实例。
 - 进程级错误兜底（uncaughtCrash/emergencyTerminalExit）的触发路径未实测。
 
 ## 10. 终端能力配置
 
-终端链接、图片协议和真彩色能力除了环境探测外，也可由设置中的 `terminal` 对象或 `PI_HYPERLINKS`、`PI_IMAGE_PROTOCOL`、`PI_TRUECOLOR` 环境变量覆盖。设置层只接受明确的布尔值或受支持图片协议，未指定时保留自动探测；该能力决定链接、图片和色彩的投影策略，不改变消息内容或会话数据（`packages/coding-agent/src/core/settings-manager.ts:43-47,1135-1138`、`packages/tui/src/terminal-image.ts:143-170`）。
+终端链接、图片协议和真彩色三项能力默认由环境探测得出，也可以在设置的 terminal 对象里显式指定，或用 PI_HYPERLINKS、PI_IMAGE_PROTOCOL、PI_TRUECOLOR 三个环境变量覆盖。设置层只接受明确的布尔值或受支持的图片协议，没填时保留自动探测结果；这三项能力只决定界面输出里链接、图片和颜色的投影策略，消息内容与会话数据保持原样（`packages/coding-agent/src/core/settings-manager.ts:43-47`、`packages/tui/src/terminal-image.ts:143-170`）。
 
 ## 11. 原生平台辅助与鼠标基础设施
 

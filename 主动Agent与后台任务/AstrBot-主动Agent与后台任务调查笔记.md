@@ -44,7 +44,14 @@ active-agent cron 主链如下：
 
 **创建与权限范围。** 启用 `provider_settings.proactive_capability.add_cron_tools` 后，主 Agent 获得 `future_task`。它可创建循环 cron 或一次性 `run_at`，创建 payload 时保存当前统一消息会话、发送者、指令 note 和来源，见 `astrbot/core/tools/cron_tools.py:105-199`。编辑只允许任务创建者；删除允许创建者或 AstrBot 管理员；列表在私聊中只返回本人任务并提示同会话还有他人任务，在群聊中则返回该群全部任务并标注创建者（`cron_tools.py:200-398`）。这套控制的作用域限于会话与发送者，鉴权依据是创建者与管理员身份。
 
-**调度与权威状态。** `CronJobManager.start` 仅将 enabled 且 persistent 的数据库任务恢复至 APScheduler；调度器将五段 cron 或日期 trigger 注册为 `_run_job`，并把下次运行时间异步写回数据库。运行时先重读 job，禁用项不运行，随后写 `running`、`last_run_at` 和清空旧错误；finally 按任务类型写 `dispatched`、`completed`、`failed` 或 `cancelled`，同时记录错误和下次时间。active-agent 任务只负责把唤醒事件入队，所以该行的 `dispatched` 记的是入队动作本身（`astrbot/core/cron/manager.py:128-142,310-415,426-473`）。数据库是工作定义和最近派发状态的权威，但“当前正在运行”的执行体没有单独持久化 run 对象，Agent 回合结果落在会话历史与 trace，而非 job 行。
+**调度与权威状态。** 管理器启动时只把数据库中已启用且标记为持久的任务装回调度器，为每个五段 cron 或日期触发器挂上统一的运行入口，并把下次运行时间异步写回数据库。每次触发都先重读任务行：已禁用的任务直接跳过，其余任务先标记为运行中、更新上次运行时间并清空旧错误；收尾阶段按任务类型写入终态，同时记录错误信息和下次运行时间：
+
+- `dispatched`：唤醒事件已入队，等待普通流水线执行
+- `completed`：任务本次执行完成
+- `failed`：执行失败，错误写入任务行
+- `cancelled`：运行被取消
+
+主动 Agent 任务只负责把唤醒事件放进队列，`dispatched` 记录的就是入队动作本身。数据库是工作定义和最近派发状态的权威来源；正在运行的执行体没有单独的持久化记录，Agent 回合的结果落在会话历史与 trace 里，任务行只保留任务层面的状态（`astrbot/core/cron/manager.py:128-142,310-415,426-473`）。
 
 **一次性与重启。** `run_once` 使用日期 trigger，派发后即删除 job；只有运行被取消时才保留，见 `astrbot/core/cron/manager.py:391-409`。循环任务继续保留。核心生命周期在启动时创建 CronJobManager 并异步调用其 `start`，停止时关闭 scheduler；这确认了持久任务会在应用启动时被重装，但未确认宕机期间错过的 cron 是否补跑，见 `astrbot/core/core_lifecycle.py:254-271,325-328,410-411`。
 
@@ -52,7 +59,7 @@ active-agent cron 主链如下：
 
 ## 执行、结果交付与状态更新
 
-cron 到期后，管理器从 payload 取回目标 UMO 和 note，按 payload 来源与发送者是否为管理员确定调用者角色，再把 cron 上下文（任务 ID、名称、描述、note、开始时间、目标会话）序列化为 `<system_reminder>` 用户提示，经 `wake_main_agent` 入队（`astrbot/core/cron/manager.py:426-473`；`astrbot/core/astr_main_agent_resources.py:101-115`）。Agent 由普通流水线构建：按 UMO 选择配置档案、加载当前对话历史、取 session lock，并因唤醒事件豁免 provider 唤醒前缀检查；回复经 Respond 阶段发送到原会话，流式输出合并为一条完整消息再投递（`astrbot/core/astr_agent_wakeup.py:10-51`；`astrbot/core/platform/agent_wakeup_event.py:87-129`）。历史持久化与发送成功记账仍由流水线承担。
+cron 到期后，管理器从任务载荷中取回目标会话标识和指令 note，再根据载荷记录的来源、发送者是否管理员确定调用者角色；随后把任务 ID、名称、描述、note、开始时间和目标会话组装成一段 `<system_reminder>` 形式的用户提示，交给唤醒入口入队（`astrbot/core/cron/manager.py:426-473`；`astrbot/core/astr_main_agent_resources.py:101-115`）。被唤醒的 Agent 由普通流水线构建：按会话标识选择配置档案、加载当前对话历史并取得会话锁，唤醒来源的请求跳过 provider 唤醒前缀检查；回复经 Respond 阶段发回原会话，流式输出合并成一条完整消息再投递（`astrbot/core/astr_agent_wakeup.py:10-51`；`astrbot/core/platform/agent_wakeup_event.py:87-129`）。会话历史的持久化和发送成功后的记账仍由流水线承担。
 
 job 行只保存任务层面的派发状态、时间与最后错误；Agent 回合的成败不会回写到 `cron_jobs`。因此排查某次主动运行的结果要结合会话历史与 trace，而不是 job 行状态。
 
@@ -60,7 +67,7 @@ job 行只保存任务层面的派发状态、时间与最后错误；Agent 回�
 
 ## 进程内后台工具任务
 
-标记 `is_background_task` 的普通 FunctionTool，或带 `background_task` 的 handoff，会在模型回合内生成 UUID 后立即返回“已提交”。随后 `asyncio.create_task` 在当前事件循环执行工具或子 Agent，任务与所属事件登记到活跃事件注册表并按 UMO 持有到完成；后台执行使用 3600 秒工具超时。完成时收集文本结果，异常转为错误文本，再经 `wake_main_agent` 以 `source="background_task"` 唤醒主 Agent，提示中包含 task_id、工具名、参数、结果与 note，并携带共享停止信号，见 `astrbot/core/astr_agent_tool_exec.py:165-193,399-546`。被唤醒的 Agent 走普通流水线并取得原会话历史，普通文本回复也会经过 Respond 阶段投递；提示只把 `send_message_to_user` 列为发送图片、文件等产物的工具，并未要求所有结果都通过工具交付。实际发送由唤醒事件转给目标平台，只有发送成功才记账（`astrbot/core/astr_main_agent_resources.py:117-128`；`platform/agent_wakeup_event.py:93-129`）。
+模型在回合内调用标记为后台任务的普通 FunctionTool，或调用带后台标记的 handoff 时，工具执行器先生成一个 UUID 并立即返回“已提交”提示，真正的工具调用或子 Agent 交给 `asyncio.create_task` 在当前事件循环执行。任务连同所属事件登记到活跃事件注册表，按目标会话持有到执行结束，后台工具超时为 3600 秒。执行结束后触发一次唤醒：正常结果收集为文本，异常转为错误文本，以后台任务为来源经唤醒入口重新进入主 Agent，提示中携带任务 ID、工具名、参数、结果与 note，并附带共享停止信号（`astrbot/core/astr_agent_tool_exec.py:165-193,399-546`）。被唤醒的 Agent 走普通流水线并取得原会话历史，普通文本回复同样经过 Respond 阶段投递；提示只把 `send_message_to_user` 列为发送图片、文件等产物的工具，实际发送由唤醒事件转交目标平台，发送成功才记账（`astrbot/core/astr_main_agent_resources.py:117-128`；`astrbot/core/platform/agent_wakeup_event.py:93-129`）。
 
 运行身份仍是返回文本加内存中的 coroutine 与注册表条目。检查范围覆盖 `astrbot/` 下 background 与 cancel 相关实现：没有按 task ID 查询状态、持久化、队列认领或重启恢复的路径；取消能力来自会话级停止信号（下节）。进程退出或事件循环取消时，不能从已读代码推断会有可靠的用户终态交付。
 
@@ -68,7 +75,7 @@ job 行只保存任务层面的派发状态、时间与最后错误；Agent 回�
 
 **cron 任务。** 删除 job 会先从调度器移除，取消并等待该 job 正在运行的 `_run_job` task，再删除数据库行；删除期间新开始的运行会直接返回。更新 job 先用新定义构建 trigger 校验，把无效编辑挡在持久化和已有调度之外，再移除旧调度并注册新定义；禁用 job 在运行前检查中直接返回，见 `astrbot/core/cron/manager.py:202-246,360-415`。这里的取消只覆盖到“唤醒事件入队”这一步：一旦 active-agent 回合已作为独立事件进入流水线，删除 job 不会中断它。
 
-APScheduler 注册使用 `replace_existing=True` 与 300 秒 `misfire_grace_time`，但未设置 `max_instances`、coalesce 或分布式锁；单进程下同一 job 的重叠派发、多副本部署的重复运行，以及超过宽限期后的行为需要运行验证。异常写入 job 的 `last_error`；循环 job 保留到下个 trigger，单次 job 在派发后即删除，因此一次性失败没有内置重试或错误保留任务供重跑。此外 `run_job_now` 提供忽略 enabled 的手动触发，并不删除一次性 job（`astrbot/core/cron/manager.py:357-358`）。
+APScheduler 注册任务时覆盖同名旧条目，错过触发的宽限时间设为 300 秒；任务实例上限、错过触发合并和分布式锁都没有配置，因此单进程下同一任务的重叠派发、多副本部署的重复运行，以及超过宽限期后的行为都需要运行验证。执行异常写入任务的 `last_error`，循环任务保留到下个触发时点，单次任务在派发后即被删除，一次性失败没有内置重试，也没有可重跑的错误任务。手动触发入口 `run_job_now` 忽略任务的启用状态，同样不删除一次性任务（`astrbot/core/cron/manager.py:357-358`）。
 
 **后台工具与 handoff。** 会话停止时，`stop_all` 与 `request_agent_stop_all` 会置位该会话的停止信号并取消已登记的后台 task；注册时若所属事件已停止则立即取消；`wake_main_agent` 在入队前检查停止信号，因此被停止的会话不会产生迟到的主动回复。平台删除时按平台前缀停止该平台的全部会话与后台任务（`astrbot/core/utils/active_event_registry.py:57-189`）。除此之外没有独立的后台任务取消 API、状态查询或持久化记录。
 

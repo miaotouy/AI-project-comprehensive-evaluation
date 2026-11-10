@@ -16,11 +16,11 @@
 
 SillyTavern 的"聊天"是**内存可变数组 + 定期整份序列化到 JSONL 文件**的模型，不是增量事件日志或数据库表：
 
-- 运行时事实源是 `chat: ChatMessage[]`（`public/script.js:410`）与 `chat_metadata`（`public/script.js:453`），全部渲染、生成、保存逻辑直接读写该数组；消息没有持久化全局 ID，`mesid` 是数组下标（DOM 属性由 `updateViewMessageIds` 维护，`public/script.js:9407`）。
-- 单人聊天与群聊是两个存储位置，JSONL 文件格式一致：首行头对象 `{chat_metadata, user_name:'unused', character_name:'unused'}` + 每行一条消息；加载时一次性整份读入内存与 DOM（`getChat` `public/script.js:7575-7623`、`getGroupChat` `public/scripts/group-chats.js:255-320`），没有分页读取或流式解析。
-- 服务端保存带 `integrity` 完整性检查（配置项 `backups.chat.checkIntegrity` 默认 true，`src/endpoints/chats.js:29`）：不一致抛 `IntegrityMismatchError` 返回 `{error:'integrity'}`，前端弹窗要求手输 `OVERWRITE` 才强制覆盖，否则整页刷新（`public/script.js:7400-7416`）。
+- 运行时的事实源是内存中的消息数组与聊天元数据对象，渲染、生成与保存逻辑都直接读写它们；消息没有持久化的全局 ID，界面上的消息序号只是数组下标，对应的 DOM 属性由视图刷新函数维护（`public/script.js:410,453,9407`）。
+- 单人聊天与群聊存放在两个位置，JSONL 文件格式一致：首行是头对象，含 `chat_metadata` 与固定的占位用户、角色名，之后每行一条消息。加载时整份读入内存并渲染到界面，没有分页读取或流式解析；单聊入口是 `getChat`（`public/script.js:7575-7623`），群聊入口是 `getGroupChat`（`public/scripts/group-chats.js:255-320`）。
+- 服务端保存前做完整性检查，由配置项 `backups.chat.checkIntegrity` 控制，默认开启（`src/endpoints/chats.js:29`）。标识不一致时服务端抛出 `IntegrityMismatchError` 并返回 integrity 错误，前端弹窗要求手输 `OVERWRITE` 才强制覆盖，否则整页刷新（`public/script.js:7400-7416`）。
 - **checkpoint 与 branch 共用"截断另存为新文件"逻辑**（`public/scripts/bookmarks.js`），区别：checkpoint 不跳转、`extra.bookmark_link` 单值且新建覆盖；branch 必定跳转、`extra.branches` 数组追加、支持连同指定 swipe 版本截断。
-- swipe 是消息级候选版本机制：`mes`/`swipe_id`/`swipes`/`swipe_info` 四字段并行，`ensureSwipes` 对老文件惰性补齐（`public/script.js:6778-6828`）。
+- swipe 是消息级的候选版本机制：当前正文、当前候选下标、候选文本数组与候选附加信息四个字段并行保存，老文件由 `ensureSwipes` 惰性补齐（`public/script.js:6778-6828`）。
 - 除 JSONL 外还有三类客户端旁路存储：IndexedDB（localforage，`SillyTavern_Prompts` 库）存 itemized prompt 与 token 缓存；localStorage 存草稿、置顶聊天等 UI 状态；sessionStorage 存"无角色临时聊天"。它们都不是消息事实源。
 
 ## 系统边界与数据主链
@@ -59,20 +59,31 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 消息是**线性数组中的扁平对象**，不是树、父子 part 或事件日志。稳定字段（`saveReply` 构造，`public/script.js:6684-6701`）：
 
-- `name`/`is_user`/`is_system`/`send_date`：角色名、user/assistant 角色、是否系统消息（隐藏消息即 `is_system=true`）、时间戳；
-- `mes`：正文；`title`：工具提示；
-- `gen_started`/`gen_finished`：生成起止时间；
-- `extra`：自由形态对象，按用途分几类——
-  - 生成来源快照：`api`/`model`；
-  - 内容扩展：`reasoning`（思考链）、`token_count`、`bias`；
-  - 附件与工具：`media`/`files`（附件）、`tool_invocations`（工具调用）；
-  - 群聊与系统消息：`gen_id`（群聊生成批次）、`isSmallSys`（小型系统消息）、`type`（narrator 等系统消息类型）；
-  - swipe 行为覆盖：`overswipe_behavior`/`swipeable`。
-- swipe 四字段：
-  - `mes`：当前显示正文，是 `swipes[swipe_id]` 的镜像；
-  - `swipe_id`：当前候选下标；
-  - `swipes: string[]`：候选版本；
-  - `swipe_info`：与 `swipes` 等长的 `{send_date, gen_started, gen_finished, extra}` 数组。
+| 字段 | 含义 |
+|---|---|
+| `name`、`is_user`、`is_system`、`send_date` | 角色名、user/assistant 角色、是否系统消息（隐藏消息即 `is_system=true`）、时间戳 |
+| `mes`、`title` | 正文、工具提示 |
+| `gen_started`、`gen_finished` | 生成起止时间 |
+| `extra` | 自由形态对象，按用途分组，见下表 |
+
+`extra` 的用途分组：
+
+| 用途 | 字段 |
+|---|---|
+| 生成来源快照 | `api`、`model` |
+| 内容扩展 | `reasoning`（思考链）、`token_count`、`bias` |
+| 附件与工具 | `media`、`files`（附件）、`tool_invocations`（工具调用） |
+| 群聊与系统消息 | `gen_id`（群聊生成批次）、`isSmallSys`（小型系统消息）、`type`（narrator 等系统消息类型） |
+| swipe 行为覆盖 | `overswipe_behavior`、`swipeable` |
+
+swipe 相关的四个字段：
+
+| 字段 | 含义 |
+|---|---|
+| `mes` | 当前显示正文，是 `swipes[swipe_id]` 的镜像 |
+| `swipe_id` | 当前候选下标 |
+| `swipes` | 字符串数组，保存候选版本 |
+| `swipe_info` | 与 `swipes` 等长的数组，每项含 `send_date`、`gen_started`、`gen_finished`、`extra` |
 
 `ensureSwipes(message)`（`public/script.js:6778-6828`）负责老文件字段的惰性补齐：
 
@@ -84,8 +95,8 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 两个方向职责严格分离：
 
-- `syncMesToSwipe(messageId)` 把当前正文、时间戳与附加信息写回当前候选（`mes`/`extra` → `swipes[swipe_id]`、`swipe_info[swipe_id]`，`public/script.js:6837-6883`）。写回只在会话被标记或不止一条消息时发生（`chat_metadata.tainted || chat.length > 1`，6873），注释说明这是为了让"纯净首条问候语"在每次进聊天时宏还能重新解析——第 0 条消息在全新状态下故意不落盘同步。
-- `syncSwipeToMes(messageId, swipeId, targetMessage)`（`public/script.js:6895-6959`）：反方向，把 `swipes[swipeId]` 读出来覆盖 `mes`/时间戳/`extra`。支持传 `targetMessage` 操作游离对象——branch 快照选 swipe 复用此路径。
+- 一个方向是把消息正文写回候选版本：`syncMesToSwipe` 把当前正文、时间戳与附加信息写入当前候选槽位（`public/script.js:6837-6883`）。写回只在会话被标记或消息不止一条时发生，注释说明这是为了让"纯净首条问候语"在每次进入聊天时仍能重新解析宏，第 0 条消息在全新状态下故意不落盘。
+- 另一个方向是 `syncSwipeToMes`（`public/script.js:6895-6959`）：读出指定候选的正文、时间戳与附加信息，覆盖当前消息。它接受一个可选的目标消息对象，可以改写游离副本而不触碰真实数组，branch 快照挑选 swipe 时复用的正是这条路径。
 
 `deleteSwipe(swipeId, messageId)`（`public/script.js:9279-9345`）：至少保留 1 个 swipe；删除后按"删的是否当前选中项"重算 `swipe_id`；删除后置 `chat_metadata.tainted = true`（9323）。
 
@@ -116,21 +127,13 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **新建**：`doNewChat`（`public/script.js:10558-10587`）先确认弹窗（含"同时删除当前聊天"勾选，11554-11561），然后按类型分两条路：
-  - 单聊：改 `characters[this_chid].chat` 为新文件名后 `getChat()` 走首次落盘；
-  - 群聊：`createNewGroupChat`（`group-chats.js:2139-2154`，push 进 `group.chats` 并 `editGroup` 落盘群组 JSON）。
-- **惰性创建**：进入新角色聊天时 `getChatResult()` 在空文件分支现造问候语（见 2.2）；`openCharacterChat`（7685-7693）与 `openGroupChat`（2194-2209）都先 `clearChat({clearData:true})` 清空再加载。
-- **切换**：角色与群聊分别处理——
-  - 角色列表点击 `selectCharacterById`（873-907，`isChatSaving`/`is_send_press` 期间拒绝切换）；
-  - 群聊切换 `openGroupById`/`select_group_chats`（group-chats.js:2017, 1802）。
-  - 切换本身不触发保存，依赖切换前各操作的 `saveChatConditional`/`saveChatDebounced` 完成。
-- **重命名**：`/api/chats/rename`（`src/endpoints/chats.js:546-577`）用"复制新文件 + 删旧文件"实现；前端 `renameGroupOrCharacterChat`（10598+）同时更新群组 `chats` 数组或角色 `chat` 指针，并同步更新置顶条目（`welcome-screen.js:947`）。
-- **删除**：单聊与群聊各自处理——
-  - 单聊：`delChat`（1336）走 `/api/chats/delete`（`src/endpoints/chats.js:579-602`）；
-  - 群聊：`deleteGroupChatByName`（`group-chats.js:2241-2268`）删文件并从 `group.chats` 移除，若删的是当前聊天则切到列表最后一个，若列表空则新造 `humanizedDateTime()` 名；
-  - 清理：删除后发 `GROUP_CHAT_DELETED`/`CHAT_DELETED`，IndexedDB itemized prompts 随之清除（`itemized-prompts.js:352-357`）。
-- **归档**：本次未找到"归档/置顶聊天"的持久化对象——欢迎屏的 pinned 是"最近聊天列表置顶"（`PinnedChatsManager`，`welcome-screen.js:83-202`，存 accountStorage），不是消息文件的归档标记。
-- **恢复**：聊天文件损坏时 `getChatData` 只丢弃解析失败的行；空文件按新聊天处理。崩溃恢复无专门机制（见未验证事项）。"无角色临时聊天"在切换时用 sessionStorage 保存/恢复（`preserveNeutralChat`/`restoreNeutralChat`，`public/scripts/chats.js:1857-1879`，调用点 `public/script.js:1684, 1693`），只跨导航不跨会话。
+- **新建**：`doNewChat` 先弹出确认框，可选同时删除当前聊天，再按会话类型分两路（`public/script.js:10558-10587,11554-11561`）。单聊把当前角色的聊天指针改成新文件名，交给 `getChat()` 走首次落盘；群聊由 `createNewGroupChat` 把新聊天加入群组的聊天列表并落盘群组 JSON（`public/scripts/group-chats.js:2139-2154`）。
+- **惰性创建**：进入新角色的聊天时，空文件分支由 `getChatResult()` 现造问候语（见 2.2）；单聊与群聊的打开入口都先清空内存和界面再加载（`public/script.js:7685-7693`、`public/scripts/group-chats.js:2194-2209`）。
+- **切换**：角色与群聊各有入口。角色列表点击走 `selectCharacterById`，保存中或生成中会拒绝切换（`public/script.js:873-907`）；群聊切换走 `openGroupById` 与 `select_group_chats`（`public/scripts/group-chats.js:1802,2017`）。切换本身不触发保存，数据由切换前的各次保存调用落盘。
+- **重命名**：服务端用"复制成新文件再删旧文件"实现（`src/endpoints/chats.js:546-577`）；前端改名后同步更新群组的聊天列表或角色的聊天指针，并刷新置顶条目（`public/script.js:10598`、`public/scripts/welcome-screen.js:947`）。
+- **删除**：单聊与群聊分别处理。单聊入口 `delChat` 调用删除接口（`public/script.js:1336`、`src/endpoints/chats.js:579-602`）；群聊由 `deleteGroupChatByName` 删文件并从群组的聊天列表移除，若删的是当前聊天就切到列表最后一个，列表为空则按时间戳造一个新名字（`public/scripts/group-chats.js:2241-2268`）。删除后派发对应的删除事件，IndexedDB 中的 itemized prompt 缓存一并清除（`public/scripts/itemized-prompts.js:352-357`）。
+- **归档**：本次未找到聊天文件层面的归档对象。欢迎屏的置顶只是最近聊天列表的排序偏好，由 `PinnedChatsManager` 存在 accountStorage 里，不写进消息文件（`public/scripts/welcome-screen.js:83-202`）。
+- **恢复**：聊天文件损坏时服务端只丢弃解析失败的行，空文件按新聊天处理；崩溃恢复没有专门机制（见未验证事项）。"无角色临时聊天"在切换时用 sessionStorage 保存与恢复，只跨导航，不跨会话（`public/scripts/chats.js:1857-1879`，调用点 `public/script.js:1684,1693`）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -147,9 +150,9 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 `saveChat({chatName: name, withMetadata: newMetadata, mesId})` 内部用 `chat.slice(0, Number(mesId)+1)` 截断另存新文件（`public/script.js:7362-7366`），当前主聊天不受影响。其余语义分三点：
 
-- **回链**：触发消息的 `extra.bookmark_link = name` 记回链（bookmarks.js:290），随后 `saveChatConditional()` 把该字段写回主聊天文件；
-- **覆盖**：多次在同一条消息建 checkpoint 会覆盖旧 `bookmark_link`（273 行的 `isReplace` 只改弹窗文案，逻辑上直接覆盖，无历史列表）；
-- **父聊天记录**：`chat_metadata.main_chat` 记录父聊天名；老版本 checkpoint 文件无此字段时由 `getMainChatName` 从文件名 `"xxx - Checkpoint #N"` 推断并回填（bookmarks.js:119-122）。
+- **回链**：checkpoint 创建时在触发消息上写入回链字段，指向新文件，随后由一次条件保存把它写回主聊天（`public/scripts/bookmarks.js:290`）。
+- **覆盖**：同一条消息重复创建 checkpoint 会直接覆盖旧回链，只留最后一次，没有历史列表可查；文件里的替换标记只影响弹窗文案。
+- **父聊天记录**：新文件的头元数据里记录父聊天名；老文件缺少该字段时，由 `getMainChatName` 从 "xxx - Checkpoint #N" 形式的文件名推断并回填（`public/scripts/bookmarks.js:119-122`）。
 
 ### 4.2 Branch（`createBranch`/`branchChat`，`bookmarks.js:186-243, 449-469`）
 
@@ -161,60 +164,54 @@ openCharacterChat(file_name) / openGroupChat(groupId, chatId)（bookmarks.js:449
 
 新建分支与 checkpoint 都会在新文件的头元数据里生成新的 `integrity` slug（`public/scripts/bookmarks.js:201,284`），使子文件与父聊天有独立文件身份；这不提供子文件每次保存的版本递增或同文件并发冲突检测。
 
-两者都不支持"合并回主线"：回到主聊天只能靠 `/checkpoint-exit`（`backToMainChat`，bookmarks.js:312-326）依赖 `chat_metadata.main_chat` 手动切文件，没有树状导航。分支/checkpoint 全部入口（旗标、Swipe Picker、`/branch-create`、`/checkpoint-create` 等 slash command）最终汇到 `createBranch`/`createNewBookmark`。
+两者都没有把分支合并回主线的操作：要回到主聊天，只能用 `/checkpoint-exit` 命令按头元数据里的父聊天名手动切换文件，没有树状导航（`public/scripts/bookmarks.js:312-326`）。创建入口包括旗标、Swipe Picker 以及 `/branch-create`、`/checkpoint-create` 等 slash command，最终都汇到 `createBranch` 与 `createNewBookmark`。
 
 ## 5. 列表、分页、搜索与定位
 
-- **最近聊天列表**：`/api/chats/recent`（`src/endpoints/chats.js:979-1077`）扫描角色聊天目录 + 群聊文件 + 根目录三处，按 mtime 排序、pinned 优先，逐文件 `getChatInfo`（`src/endpoints/chats.js:393-505`，readline 流式读首行元数据与最后一条消息，不整读文件）得到文件大小/消息数/最后消息/预览。末行无法解析或缺少已知字段时返回降级预览（消息数按已读条数估算、预览置为空占位）而不是丢弃该聊天，扫描中途文件被删除也按跳过处理。欢迎屏消费它（`welcome-screen.js:763-817`），折叠阈值 `collapsedDisplayed`。
+- **最近聊天列表**：接口扫描角色聊天目录、群聊文件和根目录三处，按修改时间排序并让置顶项优先，再逐个文件读出文件大小、消息数、最后消息和预览（`src/endpoints/chats.js:393-505,979-1077`）。读取由 `getChatInfo` 用 readline 流式完成，只看首行元数据与最后一条消息，不整读文件；末行无法解析或缺字段时返回降级预览，消息数按已读条数估算、预览置空，该聊天仍保留在列表里，扫描中途文件被删除则跳过。欢迎屏消费这个列表，并用 `collapsedDisplayed` 控制初始折叠条数（`public/scripts/welcome-screen.js:763-817`）。
 - **单个角色的聊天列表**：`/api/characters/chats`（`src/endpoints/characters.js:1497-1533`），`simple` 模式只回文件名数组。
-- **搜索**：`/api/chats/search`（`src/endpoints/chats.js:874-977`）在**单个角色的聊天目录或单个群组的 chats 列表**范围内按查询词过滤：`getChatInfo` 逐行把 `mes` 累积成缓冲交给 `hasTextMatch`（所有词都出现在同一缓冲内即命中），结果含 `preview_message`（最后 400 字符）。本次未找到跨角色/全局的聊天内容搜索入口。
-- **分页**：消息读取与保存均不分页；渲染层"首屏 100 条 + Show more"只是显示截断（`power_user.chat_truncation` 默认 100，`public/scripts/power-user.js:133`，渲染细节在消息渲染器笔记）。
+- **搜索**：搜索接口只在单个角色的聊天目录或单个群组的聊天列表范围内按查询词过滤（`src/endpoints/chats.js:874-977`）。实现上由 `getChatInfo` 逐行把消息正文累积成一个缓冲，交给 `hasTextMatch` 判断，查询词全部出现在同一缓冲内才算命中；结果附带最后 400 字符的预览。本次未找到跨角色或全局的聊天内容搜索入口。
+- **分页**：消息的读取与保存都不分页，界面上"首屏 100 条 + Show more"只是显示层截断，阈值由 `power_user.chat_truncation` 控制，默认 100（`public/scripts/power-user.js:133`）。渲染细节在消息渲染器笔记。
 - **定位**：搜索命中后跳转目标聊天靠 `displayPastChats` 的 `highlightNames` 参数滚动定位（`public/script.js:8560-8564`）。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **防抖与串行**：`saveChatConditional` 用 `isChatSaving` 互斥（9354-9363）；`saveChatDebounced` 1000ms 防抖且带 chid/group 变更守卫（7308-7317）；`swipe()` 开始时 `cancelDebouncedChatSave()` 防过期写入覆盖 swipe_id（9932-9933）。
-- **跨窗口/多端**：本次检查聊天保存与加载入口未发现实时同步。服务端比对文件头与请求中的 `integrity` slug，不匹配时进入手输 `OVERWRITE` 的覆盖流程；它还会拒绝非空但无法解析头对象的文件。该标识在缺失时生成，普通保存直接沿用，branch/checkpoint 才另发新标识。两个标签页加载同一正常文件会取得相同 slug，先后正常保存不会因内容变化而冲突，因此这属于文件身份/完整性检查，不能当作逐次版本号或覆盖所有同文件并发写入的乐观锁。见 [服务端比对](../../SillyTavern/src/endpoints/chats.js#L337-L369)、[写入条件](../../SillyTavern/src/endpoints/chats.js#L532-L542)、[前端保存与覆盖入口](../../SillyTavern/public/script.js#L7395-L7475)。
-- **加载期间的写保护**：`openCharacterChat` 等待 `!isChatSaving` 才清空（7686）；`selectCharacterById` 在保存中拒绝切换（878-881）。
-- **流式临时状态**：流式生成把文本逐 token 写内存 `chat[messageId].mes`（`StreamingProcessor.onProgressStreaming`，3624），只有流结束才 `saveChatConditional`（3756）；中途停止/错误不落盘半截消息。`beforeunload` 只 `onStopStreaming()` 不做保存（12401-12407）。
-- **IndexedDB 一致性**：itemized prompts 在 `clearChat` 时先存后清（1599-1600），`deleteItemizedPromptForMessage` 负责下标移位（`itemized-prompts.js:389-398`），与消息删除同点调用。
+- **防抖与串行**：保存入口用互斥标记串行化，上一次保存未结束就等待；防抖保存延迟 1000ms 执行，触发时校验当前角色与群组有没有变化；切换 swipe 之前会先取消已排队的防抖保存，避免过期写入覆盖候选下标（`public/script.js:7308-7317,9354-9363,9932-9933`）。
+- **跨窗口/多端**：本次检查聊天保存与加载入口，未发现实时同步机制。服务端把文件头里的完整性标识与请求中的值比对，不匹配就进入手输 `OVERWRITE` 的覆盖流程，并拒绝非空但无法解析头对象的文件。标识缺失时生成一个，普通保存继续沿用，只有 branch/checkpoint 才另发新标识。两个标签页加载同一个正常文件会拿到相同标识，之后的正常保存不会因为内容变化而冲突；该标识承担文件身份与完整性检查，不提供逐次版本号，也不承担同文件并发写入的互斥。见 [服务端比对](../../SillyTavern/src/endpoints/chats.js#L337-L369)、[写入条件](../../SillyTavern/src/endpoints/chats.js#L532-L542)、[前端保存与覆盖入口](../../SillyTavern/public/script.js#L7395-L7475)。
+- **加载期间的写保护**：打开角色聊天的入口要等到保存结束才清空当前会话，角色切换入口在保存中直接拒绝切换（`public/script.js:878-881,7686`）。
+- **流式临时状态**：流式生成把文本逐 token 写进内存中的消息正文，只有流结束才触发保存；中途停止或出错时，半截消息不会落盘。页面卸载时只停止流式生成，不做保存（`public/script.js:3624,3756,12401-12407`）。
+- **IndexedDB 一致性**：清空会话时先把 itemized prompt 存好再清缓存；删除消息时由缓存模块负责把后续条目的下标前移，调用点与消息删除保持一致（`public/script.js:1599-1600`、`public/scripts/itemized-prompts.js:389-398`）。
 
 ## 7. 格式转换、导入导出与保留策略
 
-- **旧格式字段惰性补齐（客户端）**：`ensureSwipes`（见 1.2）、`ensureMessageMediaIsArray`（1991）、`swipe_info` 回填（`syncSwipeToMes` 6931-6939）都在读取/使用路径上补齐老文件字段，不改文件本身直到下次保存。
-- **服务端格式升级**：`migrateGroupChatsMetadataFormat`（`src/endpoints/groups.js:34-90`）启动时执行（`server-main.js:302`），把群组 JSON 中废弃的 `chat_metadata`/`past_metadata` 逐聊天转移到各自 JSONL 首行头对象，转换前备份到 `backups/_group_metadata_update/`。
-- **导入**：`/api/chats/import`（`src/endpoints/chats.js:696-795`）支持 jsonl（含 Chub 格式的 `mes`/`swipes` 扁平化，258-279）与 json（按结构识别 Ooba、Agnai、CAI Tools、Kobold Lite、RisuAI 五种格式，110-308），统一输出头对象 + 消息行的 JSONL。
-- **导出**：`/api/chats/export`（604-674）jsonl 原样导出或文本模式（跳过 `is_system` 行，用 `extra.display_text || mes`）。
-- **单聊转群聊**：`convertSoloToGroupChat`（`bookmarks.js:328-441`）一次性不可逆转换（确认文案明确"This cannot be reverted"，339），给非用户/系统消息写 `force_avatar`/`original_avatar`/`extra.gen_id`（400-419）。
-- **备份**：每次保存节流备份到 `<user>/backups/`（`backupChat`，`src/endpoints/chats.js:41-61`），`maxTotalBackups` 负值不限制总数；恢复入口是聊天历史弹窗里的 Chat Backups 浏览器（`public/scripts/chat-backups.js:326`，调 `/api/backups/chat/get|delete|download`，`src/endpoints/backups.js:9-54`）。
+- **旧格式字段惰性补齐（客户端）**：读取和使用路径上有几处补齐逻辑，swipe 字段由 `ensureSwipes` 处理（见 1.2），消息附件由 `ensureMessageMediaIsArray` 处理，候选附加信息由 `syncSwipeToMes` 回填；这些补齐只改内存，文件要到下次保存才更新（`public/script.js:1991,6931-6939`）。
+- **服务端格式升级**：启动时会执行群组元数据格式升级，把群组 JSON 中废弃的 `chat_metadata` 与 `past_metadata` 逐聊天转移到各自 JSONL 首行头对象，转换前备份到 `backups/_group_metadata_update/`（`src/endpoints/groups.js:34-90`，调用点 `server-main.js:302`）。
+- **导入**：导入接口同时接受 JSONL 与 JSON。JSONL 分支会处理 Chub 格式的正文与候选版本扁平化；JSON 分支按结构识别 Ooba、Agnai、CAI Tools、Kobold Lite、RisuAI 五种格式；两部分最终都输出头对象加消息行的 JSONL（`src/endpoints/chats.js:110-308,696-795`）。
+- **导出**：导出接口支持 JSONL 原样导出；文本模式跳过系统消息行，优先取展示文本，没有展示文本时用正文（`src/endpoints/chats.js:604-674`）。
+- **单聊转群聊**：转换函数 `convertSoloToGroupChat` 执行一次性不可逆转换，确认文案写明 "This cannot be reverted"，转换时给非用户、非系统消息写入头像字段与群聊生成批次（`public/scripts/bookmarks.js:328-441`）。
+- **备份**：每次保存都由 `backupChat` 按节流规则备份到用户目录下的 backups 目录，总数上限由 `maxTotalBackups` 控制，取负值表示不限制。恢复入口是聊天历史弹窗里的 Chat Backups 浏览器，它调用备份读取与删除接口（`src/endpoints/chats.js:41-61`、`public/scripts/chat-backups.js:326`）。
 
 ## 8. 外部对象绑定与附件
 
-- **角色**：角色 JSON 持有 `chat`（当前聊天文件名）与 `date_last_chat`（`src/endpoints/characters.js:375, 423`），即会话级绑定，保存的是文件引用而非消息快照；角色级附件在 `extension_settings.character_attachments[avatar]`（见下）。
-- **群组**：群组 JSON 持有成员 avatar 列表、当前聊天 id 与全部历史聊天 id 列表（`members`、`chat_id`、`chats`，`group-chats.js:255-320` 读写）。
-- **消息级绑定**：`force_avatar`/`original_avatar`/`extra.gen_id` 在转群聊或群聊生成时写入（`public/script.js:6714-6716`）。
-- **模型/渠道**：消息保存 `extra.api`/`extra.model` **历史快照**（`saveReply`，6690-6691），不保存渠道引用；后续请求不读取这些字段回放，仅用于展示与 reasoning 签名校验（`openai.js:615-621`）。
-- **消息附件**：两类附件都存 URL 引用，内容在 prompt 组装时展开进消息文本——
-  - 图片：`extra.media: MediaAttachment[]`（`switchMessageMediaDisplay`/`expandMessageMedia`，`public/scripts/chats.js:875-1067`）；
-  - 文件：`extra.files: FileAttachment[]`（`populateFileAttachment`/`deleteMessageFile`，`public/scripts/chats.js:198-427`）；
-  - 展开：文件内容经 `appendFileContent` 进入消息文本（调用点 `public/script.js:4448`）。
-- **Data Bank（知识库）**：附件管理器的三个作用域——
-  - 全局：`extension_settings.attachments`；
-  - 角色：`extension_settings.character_attachments[avatar]`；
-  - 聊天：`chat_metadata.attachments`（`ATTACHMENT_SOURCE`，`public/scripts/chats.js:77-81`；读写 1488-1492, 1733-1742, 1779-1804）。
-  - **注入路径已核实**：Data Bank 文件不直接进 prompt，而是由 vectors 扩展摄取进向量索引（`extensions/vectors/index.js:644-669` 的 `ingestDataBankAttachments`，`EXTENSION_PROMPT_TAG_DB = '4_vectors_data_bank'` 第 53 行），生成时按查询检索注入为 `extension_prompts['4_vectors_data_bank']` 块（第 582-586 行；`public/script.js:5291` 记录到 itemized prompt）。
-  - 这与消息级 `extra.files` 是两套并行体系：消息文件随消息文本注入，Data Bank 文件经向量检索注入。
+- **角色**：角色 JSON 持有当前聊天文件名与最后聊天时间两个字段，属于会话级绑定，保存的是文件引用；角色级附件另存在 `extension_settings.character_attachments[avatar]`（`src/endpoints/characters.js:375,423`，见下文）。
+- **群组**：群组 JSON 同时持有成员头像列表、当前聊天 id 与全部历史聊天 id 列表，读写都在群聊加载路径上（`public/scripts/group-chats.js:255-320`）。
+- **消息级绑定**：转群聊或群聊生成时，消息会被写入头像字段与群聊生成批次号（`public/script.js:6714-6716`）。
+- **模型/渠道**：消息里保存的是生成当时的模型与接口字段快照，渠道引用不落盘，后续请求也不读取这些字段回放，它们只用于界面展示和 reasoning 签名校验（`public/script.js:6690-6691`、`public/scripts/openai.js:615-621`）。
+- **消息附件**：图片与文件保存附件引用，组装请求时分路处理。文件附件由 `appendFileContent` 读取文本并前置到消息正文（`public/scripts/chats.js:508-527`）；图片走媒体附件路径，例如 OpenAI 请求在支持图片内联时调用媒体转换，将图片 URL 加入多模态消息（`public/scripts/openai.js:966-992`）。
+- **Data Bank（知识库）**：附件管理器分全局、角色、聊天三个作用域，分别挂在扩展设置、角色附件表和聊天元数据上（`public/scripts/chats.js:77-81,1488-1804`）。
+  - **注入路径已核实**：Data Bank 文件由 vectors 扩展的 `ingestDataBankAttachments` 摄取进向量索引，生成时按查询检索，注入为一个独立的扩展 prompt 块，同时记录进 itemized prompt（`extensions/vectors/index.js:53,582-586,644-669`；`public/script.js:5291`）。
+  - 它与消息级文件附件是两套并行体系：消息附件随消息文本注入，Data Bank 附件经向量检索注入。
 
 ## 9. 设计取舍与已确认边界
 
-- **整份读写、无分页、无索引**：文件一次性读入内存和 DOM，长聊天读写/渲染成本线性增长；checkpoint 定位靠全数组扫描；消息 ID 靠数组下标，删除后需全局 `updateViewMessageIds` 维护 DOM 一致性。
-- **完整性标识与覆盖确认**：标识不一致或文件头损坏时要求显式覆盖；相同标识下的旧窗口保存仍可能覆盖新内容，本轮未实测多标签页竞争。
-- **checkpoint/branch 不对称**：单值覆盖 vs 数组追加，是有意的数据设计差异（4.1/4.2）。
+- **整份读写、无分页、无索引**：文件一次性读入内存和界面，长聊天的读写与渲染成本随消息数线性增长；checkpoint 定位靠全数组扫描；消息 ID 就是数组下标，删除后要重新刷新全局消息编号才能保持 DOM 一致。
+- **完整性标识与覆盖确认**：标识不一致或文件头损坏时，服务端要求显式确认覆盖；同一个标识下，旧窗口的保存仍可能盖掉新内容，本轮未实测多标签页竞争。
+- **checkpoint 与 branch 的差异**：回链取单值覆盖还是数组追加，是有意的数据设计差异（4.1/4.2）。
 - **群聊与单聊的"重新生成"是两套机制**：
-  - 单聊：swipe 保留候选（`swipes` 数组）；
-  - 群聊：`regenerateGroup` 按 `extra.gen_id` 分组物理删除尾部消息再触发（`group-chats.js:167-188`，`gen_id = Date.now()` 批次号在 `generateGroupWrapper` 988 行生成）。
-- **"纯净问候语"特例**：`tainted` 标记在多处写入（`public/script.js:1659, 4288, 5846, 8131, 9323, 11669`），控制首条问候语的宏重解析与 overswipe 循环行为。
-- **类目边界**：本笔记只回答数据语义；`Generate()` 的请求构建在对话请求与上下文；swipe/Swipe Picker/checkpoint 旗标用户工作流在 Chat UI；DOM 渲染与流式更新在消息渲染器笔记。
+  - 单聊把旧回复留在候选数组里，靠切换候选回看；
+  - 群聊由 `regenerateGroup` 按群聊生成批次号分组，先物理删除尾部消息再重新生成，批次号取当时的时间戳（`public/scripts/group-chats.js:167-188`，批次号在 988 行生成）。
+- **"纯净问候语"特例**：已修改标记在多处写入，控制首条问候语的宏重解析与 overswipe 循环行为（`public/script.js:1659,4288,5846,8131,9323,11669`）。
+- **类目边界**：本笔记只回答数据语义；`Generate()` 的请求构建在对话请求与上下文；swipe、Swipe Picker 与 checkpoint 旗标的用户工作流在 Chat UI；DOM 渲染与流式更新在消息渲染器笔记。
 
 ## 10. 未验证事项
 

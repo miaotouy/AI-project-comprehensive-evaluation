@@ -51,20 +51,21 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 ## 1. 触发方式、输出协议与对象模型
 
-- **触发**：无独立协议。HTML artifact 由模型自由文本（html 围栏或裸 HTML 节点）触发，靠内容探测识别：`classifyHtmlArtifactSource` 用正则把输出判为完整文档（以 `<!doctype` 或 `<html>` 开头）或片段（如 `<div` 式闭合开标签）两类；未闭合的半截前缀返回未定型，渲染器选择"先不渲染、等几个字符再定型"。误触发防护有两层：只把顶层裸 HTML 区域重写为代码节点、行内 HTML 留在 Markdown 树；以及用占位符保护 artifact 源文本不被预处理污染。检测与两处防护见 `remarkHtmlArtifact.ts:29-41,150-212`，渲染器侧判断在 `CodeBlock.tsx:105`。
+- **触发**：模型输出 HTML Artifact 时没有独立协议，触发源就是自由文本里的 html 代码围栏或裸 HTML 节点，由渲染层做内容探测来认定。探测函数 `classifyHtmlArtifactSource` 用正则把输出分成两类：以 `<!doctype` 或 `<html>` 开头的判为完整文档，以 `<div` 这类带闭合的起始标签开头的判为片段；遇到尚未闭合的半截前缀则先返回未定型，渲染器据此暂不渲染，等后续几个字符到达再重新判定。
+- **误触发防护**：识别只把顶层的裸 HTML 区域重写成代码节点，行内 HTML 留在 Markdown 树中；源文本另用占位符保护，避免被后续预处理改写。探测与这两处防护在 `src/renderer/components/chat/messages/markdown/plugins/remarkHtmlArtifact.ts:29-41,150-212`，渲染器侧的启用判断在 `CodeBlock.tsx:105`。
 - **输出协议与对象模型**：
-  - 消息正文就是 AI SDK 的消息 parts（`src/shared/data/types/message.ts:136`），自定义 part 类型只有错误、翻译、视频、紧凑与 agent 任务事件等少数几种（`src/shared/data/types/uiParts.ts:139-151`），**没有 artifact part 类型**——HTML artifact 以 text part 承载。
-  - `artifactId` 为 `${blockId}:${codeBlockId}`，`codeBlockId` 由 Markdown 节点行列偏移派生（`src/renderer/utils/markdown.ts:162`），是每次渲染重算的派生身份，仅用于列表项重挂载时保住已打开的弹窗会话（`src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 注释），无持久对象 ID。
-  - Agent 侧 `report_artifacts` 是 zod 校验的结构化工具输入（`src/shared/ai/builtinTools.ts:489-552`，`REPORT_ARTIFACTS_TOOL_NAME`），以 tool part 持久化，是最接近"输出声明"的协议；声明只含 path/description/summary 三项，不含对象 ID 或版本。
+  - 消息正文直接用 AI SDK 的消息 parts 承载，自定义 part 类型只有错误、翻译、视频、紧凑与 agent 任务事件等少数几种，其中没有 artifact 类型，HTML artifact 一律以 text part 进入消息。part 结构见 `src/shared/data/types/message.ts:136`，自定义类型清单见 `src/shared/data/types/uiParts.ts:139-151`。
+  - `artifactId` 由块 ID 与代码块 ID 拼成，代码块 ID 取自 Markdown 节点的行列偏移，因此每次渲染都会重算。这个身份只用于列表项重挂载时保住已打开的弹窗会话，没有持久对象 ID。派生规则见 `src/renderer/utils/markdown.ts:162`，用途在 `src/renderer/components/chat/HtmlArtifactView.tsx:60-61` 的注释中说明。
+  - Agent 侧的 `report_artifacts` 是经 zod 校验的结构化工具输入，以 tool part 持久化，是最接近"输出声明"的协议；声明只有 path、description、summary 三个字段，不含对象 ID 与版本。定义见 `src/shared/ai/builtinTools.ts:489-552`。
   - 另注：内建工具不使用 `strict: true`，`report_artifacts` 的 schema 为非 strict 形态。
 - **事实源**：chat 消息行（SQLite `data` JSON）是消息文本的事实源；agent 文件的事实源是磁盘，消息只存声明与执行记录。
 
 ## 2. 增量生成、更新与最终化
 
-- 聊天文本逐 token 流式：活动消息在生成中持有 `inlineHtmlPreviewMode: 'generating'` 标记，完成态回落为 `'ready'`（仅 assistant 且状态 success），状态注入与回落均在 `src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx:504-507,1203`。
+- 聊天文本按 token 流式到达。正在生成的消息带上 `inlineHtmlPreviewMode: 'generating'` 标记，回合结束、角色为 assistant 且状态为 success 时回落到 `'ready'`；标记的注入与回落都在同一处实现，见 `src/renderer/components/chat/messages/blocks/MessagePartsRenderer.tsx:504-507,1203`。
 - 流式中 artifact 的 HTML 按 250ms 节拍重灌 iframe 的 srcDoc（`useStreamingPacedHtml`，`HtmlArtifactView.tsx:326-344`），避免每 token 全量重解析；完成后的 HTML 原样直通。
 - 分类为完整文档且流式未完时先以只读代码块视图展示，完成后才进入交互同意门（`CodeBlock.tsx:107-118`）；片段类恒实时渲染。
-- **更新/编辑粒度**：整段覆盖。代码块编辑保存时先解析 Markdown，按位置 ID 找到代码节点整体替换后再序列化（`src/renderer/utils/markdown.ts:179-189`），最终整体写回消息的 text part（`src/renderer/pages/home/messages/homeMessageListAdapter.tsx:460-489`）。无 patch/diff/AST 级更新协议。
+- **更新/编辑粒度**：整段覆盖。用户在代码块里保存编辑时，前端先解析 Markdown，按位置 ID 定位到对应的代码节点并整体替换，序列化后整段写回消息的 text part。替换逻辑见 `src/renderer/utils/markdown.ts:179-189`，写回链路见 `src/renderer/pages/home/messages/homeMessageListAdapter.tsx:460-489`。没有 patch、diff 或 AST 级的更新协议。
 - Agent 文件由模型经 CLI 文件工具直接写磁盘（全量文件写），无 host 侧 diff 应用层。
 - 失败收口：artifact 渲染失败或分类未定型时按完整文档模式收紧处理，即"fail closed"（`MessageHtmlArtifact.tsx:22`）；编辑保存失败走 toast 提示并保留原文（`homeMessageListAdapter.tsx:483-485`）。
 
@@ -84,19 +85,25 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 预览层已拆成可移植包与应用内插件两层。PDF、DOCX、PPTX、XLSX、RTF 与图片等"与产品无关"的预览实现、工具栏、布局和超限提示进入 `packages/file-preview`，由 `filePreviewRegistry` 按文件类型注册；HTML、Markdown 与源码预览仍留在应用内，因为它们依赖宿主的沙箱、主题与编辑器能力。桌面侧通过 `Preview.tsx` 与 `previewContext.ts` 把宿主能力注入包内组件，注入面包含资源解析、选中文本与本地化，因此包本身不引用 Electron。
 ## 4. 表现类型、依赖与运行环境
 
-- **HTML artifact 分级运行**：
-  - 片段 / 未同意交互的完整文档：无脚本 iframe 预览——`sandbox="allow-same-origin"` 仅用于父级读 `contentDocument` 测量高度与截图，配合严格 CSP（`default-src 'none'`，只放行 data/blob/file 静态资源）；实现见 `HtmlArtifactView.tsx:465-471`，常量在 `HtmlPreviewFrame.tsx:10-28`。
-  - 同意后的完整文档：进入 Electron `<webview>`，以 data URL 形式加载编码后的完整文档并注入高度/滚轮桥接脚本（`HtmlArtifactView.tsx:115-194,530-535`）。主进程在 webview 附加时强制开启沙箱、上下文隔离与 web 安全，关闭 Node 集成并删除 preload；URL 只接受 data: 前缀、拒绝 `window.open`，导航仅限 data: 前缀（`src/main/services/MainWindowService.ts:292-323`）。专用分区会话 `html-artifact-preview` 拒绝全部权限请求、禁下载，网络请求经 `isAllowedHtmlArtifactRequest` 拦截（`MainWindowService.ts:268-290`）。
-  - 文件预览 HTML：普通文件类型用空 sandbox（禁脚本）+ 严格 CSP；agent 工作区的 artifact 类型才授予脚本等权限（`src/renderer/components/FilePreview/plugins/html/HtmlFilePreview.tsx:24-32`），`FilePreview/README.md` 明确"不要把任意本地文件标为 artifact"。
-- **同意判定**：`htmlArtifactRequiresUserConsent` 用 htmlparser2 静态扫描危险模式——可执行与嵌入标签（script/iframe/object/embed）、`on*` 事件属性、javascript: 与外部 URL、meta refresh、CSS url() 引用（含转义解码）（`src/renderer/utils/htmlArtifact.ts:49-106`），解析失败 fail-closed。
+- **HTML artifact 分级运行**：同一份 HTML 按内容性质与用户是否同意交互，分三档给予运行环境。
+
+| 场景 | 运行方式 | 边界 |
+|---|---|---|
+| 片段，或尚未同意交互的完整文档 | 无脚本 iframe 预览；父级读取 `contentDocument` 测量高度并截图 | sandbox 只开 `allow-same-origin`，CSP 为 `default-src 'none'`，静态资源限 data/blob/file |
+| 用户同意后的完整文档 | 进入 Electron webview，以 data URL 加载编码后的文档，并注入高度与滚轮桥接脚本 | 主进程在 webview 附加时强制沙箱、上下文隔离与 web 安全，关闭 Node 集成并删除 preload；URL 与导航都只接受 data: 前缀，拒绝 `window.open` |
+| 文件预览中的 HTML | 普通文件用空 sandbox 加严格 CSP；agent 工作区的 artifact 类型才授予脚本权限 | 权限按文件类型是否标记为 artifact 区分 |
+
+iframe 档与 webview 档的装载实现在同一文件，见 `HtmlArtifactView.tsx:115-194,465-471,530-535`；CSP 常量见 `HtmlPreviewFrame.tsx:10-28`。webview 档的主进程加固见 `src/main/services/MainWindowService.ts:268-323`：专用分区会话名为 `html-artifact-preview`，拒绝全部权限请求、禁止下载，网络请求交由 `isAllowedHtmlArtifactRequest` 拦截。文件预览档见 `HtmlFilePreview.tsx:24-32`，同目录的 `FilePreview/README.md` 明确要求不要把任意本地文件标为 artifact。
+
+- **同意判定**：完整文档是否要弹交互同意门，由 `htmlArtifactRequiresUserConsent` 用 htmlparser2 静态扫描内容后决定。扫描覆盖这几类危险模式：可执行与嵌入标签（script、iframe、object、embed）、行内事件属性、javascript: 与外部 URL、meta refresh、CSS url() 引用（含转义写法）；扫描过程中解析失败按 fail-closed 处理。判定逻辑见 `src/renderer/utils/htmlArtifact.ts:49-106`。
 - **图表**：Mermaid、Graphviz/viz-js、PlantUML 与 SVG 均以静态渲染 + shadow DOM 挂载（`src/renderer/components/Preview/` 及 `CodeBlockView/constants.ts:7`），无交互、无对象身份，留在消息渲染器类目。
-- **代码执行**：仅 `python` 语言且偏好开启时，`pyodideService.runScript` 在渲染进程的 Web Worker 内执行（`src/renderer/services/PyodideService.ts:136-188`），默认超时 60s、初始化重试 5 次、可重置；matplotlib 输出图片经 image 输出显示。主进程侧另有 Python 服务经 IPC 桥接同一 worker，供 MCP 工具 `python_execute` 调用（`src/main/services/PythonService.ts`、`src/main/ai/mcp/servers/python.ts`）。
+- **代码执行**：只有 python 语言且偏好开关打开时才能执行，入口把脚本交给渲染进程内的 Web Worker 运行，默认超时 60 秒、初始化最多重试 5 次，运行状态可重置；matplotlib 输出的图片以 image 内容显示。主进程另有一套 Python 服务经 IPC 桥接同一个 worker，供 MCP 的 `python_execute` 工具调用。执行入口见 `src/renderer/services/PyodideService.ts:136-188`，桥接侧见 `src/main/services/PythonService.ts` 与 `src/main/ai/mcp/servers/python.ts`。
 - **Agent 执行环境**：三种 runtime 驱动都在会话工作区目录上运行——claude-code 用 Claude Agent SDK 的查询入口，pi 与 pi-durable 用原生会话，工作区路径由 `prepareAgentSessionWorkspaceDirectory` 统一准备（`src/main/ai/runtime/claudeCode/ClaudeCodeRuntimeDriver.ts:3-11,1297-1298`），是"Agent 工具/执行"类目边界，此处只作为产物的产生方记录；其 Bash 工具等调度语义不展开。
 
 ## 5. 用户交互、事件与错误反馈
 
-- 交互面：预览缩放（50%-200%）、预览/源码切换、分屏、全屏、PNG 截图（文件/剪贴板，需 `allow-same-origin` 读 contentDocument，`HtmlArtifactsPopup.tsx:148-176`）、下载、外部打开、同意交互预览。
-- 高度自适应：iframe 通过 ResizeObserver/MutationObserver 测高（`HtmlArtifactView.tsx:363-452`）；webview 通过注入脚本的 console 消息通道上报高度与滚轮（`HtmlArtifactView.tsx:196-206,542-567`）；滚轮经 `ScrollOwnershipContext` 边界转发，避免内嵌文档吞掉消息列表滚动（`HtmlArtifactView.tsx:267-308`；该上下文位于消息列表目录，并同时隔离嵌套滚动区）。
+- 预览弹窗提供的操作面包括缩放（50%-200%）、预览与源码切换、分屏、全屏、下载、外部打开，以及显式的"同意交互预览"。PNG 截图可存为文件或写入剪贴板，取像素依赖 iframe 的 `allow-same-origin` 权限与 `contentDocument` 访问，链路见 `HtmlArtifactsPopup.tsx:148-176`。
+- 高度自适应分两条通道。iframe 用 ResizeObserver 与 MutationObserver 直接测量内容高度；webview 只能靠注入脚本通过 console 消息通道上报高度与滚轮事件。滚轮事件再经 `ScrollOwnershipContext` 在边界处转发，避免内嵌文档吞掉消息列表的滚动；该上下文位于消息列表目录，并同时隔离嵌套滚动区。测量、上报与转发见 `HtmlArtifactView.tsx:196-206,267-308,363-452,542-567`。
 - 错误反馈：渲染错误经日志与 toast；文件预览有加载中、过大、读取失败、空四种分级状态（`HtmlFilePreview.tsx:34-92`）；编辑保存失败提示重试/丢弃（`ArtifactPane.tsx:603-634`）；agent 文件编辑显式关闭时若保存失败可直接丢弃草稿，不再被失败保存阻塞。
 - 交互状态恢复：弹窗会话可在列表项重挂载间存活（artifactId 派生身份），但**未发现**跨会话/跨重载的 artifact 视图状态持久化（缩放、弹窗开合均为运行时状态）。
 
@@ -109,27 +116,28 @@ chat 内 artifact 没有独立对象类型（无 artifact part，身份为按 Ma
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **HTML artifact webview**：隔离分区 + 沙箱 webview，无 preload、无 IPC 桥（不能调用宿主 API）；唯一"桥"是 console 消息通道上的高度/滚轮结构化消息（`HtmlArtifactView.tsx:108-114`，带随机前缀防伪造）。网络：请求只放行 data:/blob: 与经净化函数通过的 https URL——后者先解析 DNS 并拒绝本机回环、私网、多播与保留网段（SSRF 防护，`src/main/utils/remoteUrlSafety.ts:21-51`）；权限请求（摄像头等）全拒、下载禁止。
+- **HTML artifact webview**：运行在隔离分区里的沙箱 webview，没有 preload，也没有 IPC 桥，因此页面无法调用宿主 API。唯一的通道是 console 消息上的高度与滚轮结构化消息，消息带随机前缀以防伪造。网络只放行两类请求：data: 与 blob:，以及经净化函数检查通过的 https URL；后者先解析 DNS，拒绝本机回环、私网、多播与保留网段，构成 SSRF 防护。摄像头等权限请求一律拒绝，下载被禁止。桥接消息见 `HtmlArtifactView.tsx:108-114`，网络判定见 `src/main/utils/remoteUrlSafety.ts:21-51`。
 - **fragment iframe**：无脚本（空 sandbox + CSP），同源仅用于测高。
 - **Pyodide worker**：渲染进程内 Web Worker，无 Node 集成；能力仅 Python 运行时自身（标准库+科学包），文件/网络受限（未在本快照中查证 worker 内是否开放网络，见未验证事项）。
 - **agent 文件投影**：FilePreview `type='file'` 严格沙箱；`type='artifact'` 授予脚本权限（`HtmlFilePreview.tsx:24-32`）。外部编辑器/系统浏览器打开是宿主文件能力（`window.api.file.*`），属正常桥接。
 
 ## 8. 持久化、恢复、分享与导出
 
-- chat artifact：源文本存于消息 `data.parts`（SQLite）；编辑后整体写回；重开会话从 DB 重读并重新渲染。分享/导出：下载 `.html`（经宿主文件保存 API）、临时文件外部打开、PNG 截图、剪贴板；消息图片导出时 `data-html-artifact` 标记被显式排除（`src/renderer/utils/image.ts:192-193`）。
-- agent 文件：磁盘即持久化，跨会话存活；系统工作区位于托管根目录按日期 + sessionId 生成（`src/main/data/services/AgentWorkspaceService.ts:47-56` 附近），用户工作区为任意绝对路径（DB 实体，`agentWorkspace` 表）。文件树展开态/选中态为渲染器状态，随 workspace 切换重置（`ArtifactPane.tsx:849-872`）。另有**删除影响预览**：删除工作区前先统计并预览引用它的会话/渠道/任务（`AgentWorkspaceService.ts:115-141`），确认对话框列出这些引用（`WorkspaceDeleteConfirmDialog.tsx`）。
-- 无 artifact 对象的复制/分享/删除协议（文件本身可复制删除）。
+- chat artifact 的源文本存在消息的 `data.parts` 中（SQLite 消息行）；用户编辑后整段写回，重开会话时从数据库重读消息并重新渲染。分享与导出有四条路径：经宿主保存接口下载 `.html` 文件、写入临时文件后交给系统浏览器打开、PNG 截图、复制到剪贴板。消息图片导出时会显式跳过带 `data-html-artifact` 标记的节点，见 `src/renderer/utils/image.ts:192-193`。
+- agent 文件的持久化就是磁盘本身，因此产物跨会话存活。系统工作区由托管根目录按日期加 sessionId 生成，用户工作区可指向任意绝对路径并以 `agentWorkspace` 表记录；工作区路径与删除前的引用统计见 `src/main/data/services/AgentWorkspaceService.ts:47-56,115-141`。文件树的展开态与选中态属于渲染器状态，切换 workspace 时随之重置，见 `ArtifactPane.tsx:849-872`。删除工作区前，系统先统计引用它的会话、渠道与任务并在确认对话框中逐项列出，对话框实现在 `WorkspaceDeleteConfirmDialog.tsx`。
+- artifact 对象层没有复制、分享或删除协议，能操作的只有底层文件本身。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- **chat 内 artifact**：编辑后的文本回到消息行，下回合作为历史上下文进入模型——回流通道是"会话历史重入"，不是对象查询。模型无法列出/定位具体 artifact（无 ID 协议），也无法对其定向 patch；每回合输出新 HTML 即新"副本"。
-- **agent 工作区**：闭环存在且是"磁盘态"回流——模型用文件工具（Read/Glob/Edit/Write）直接感知磁盘当前状态（含用户编辑），`report_artifacts` 声明在会话中重复调用即可更新交付物列表（右 pane 按 path 去重，`agentRightPaneProjection.ts:474-503`）；会话支持跨回合续跑（恢复令牌、转向与后台任务，`AgentRuntimeConnection`/`AgentSessionRuntimeService`），对象身份绑定在"路径+会话工作区"而非对象 ID。
+- **chat 内 artifact**：用户编辑后的文本回到消息行，下一回合作为历史上下文一起送进模型，回流通道只有"会话历史重入"这一条，没有对象查询接口。模型因此无法列出或定位某个 artifact（缺少 ID 协议），也无法对它做定向 patch；每回合重新输出 HTML，得到的是新的一份副本。
+- **agent 工作区**：闭环建立在磁盘状态上——模型用文件工具直接读取磁盘的当前内容（含用户编辑），交付物列表靠重复调用 `report_artifacts` 更新，右 pane 按 path 去重；会话可跨回合续跑，支持恢复令牌、转向与后台任务。对象身份绑定在"路径 + 会话工作区"这一组合上，没有单独的对象 ID。去重逻辑见 `agentRightPaneProjection.ts:474-503`，续跑能力由 `AgentRuntimeConnection` 与 `AgentSessionRuntimeService` 承担。
 - **显式引用回流**：文件面板可把文件/目录加入上下文；Office/PDF 选区和文本行评论可作为引用芯片插入当前会话 Composer。事件按 topicId 与当前活动输入层过滤，避免同时挂载的 Composer 吞入别的会话引用。文档引用保留结构锚点、摘录、文件大小与整数毫秒时间戳；行评论保留路径、行范围、原文及用户评论。发送时芯片的提示文本进入用户消息，形成比“下回合模型主动读盘”更明确的目标交接。依据：[AgentRightPane.tsx:1122–1165](../../cherry-studio/src/renderer/pages/agents/components/AgentRightPane/AgentRightPane.tsx#L1122-L1165)、[useComposerSelectionReferenceInsertion.ts:22–42](../../cherry-studio/src/renderer/components/composer/variants/shared/useComposerSelectionReferenceInsertion.ts#L22-L42)。
 - 文档选区序列化为 `selection-ref` 围栏内的 JSON，锚点分别采用表格范围、段落、页面或幻灯片坐标；文本行评论则输出 Markdown 路径、原文围栏与评论。它们是输入文本契约，由模型或 Skill 继续解释，不是宿主对 Office 文件直接执行的结构化编辑命令。浏览器元素批注另走注释芯片，包含页面定位与评论，同样经用户下一次发送回流。依据：[selectionReferenceToken.ts:17–65](../../cherry-studio/src/renderer/components/composer/selectionReferenceToken.ts#L17-L65)、[selectionReference.ts:18–55](../../cherry-studio/src/renderer/types/selectionReference.ts#L18-L55)、[AgentRightPane.tsx:1199–1217](../../cherry-studio/src/renderer/pages/agents/components/AgentRightPane/AgentRightPane.tsx#L1199-L1217)。
 
 ## 10. 生命周期、资源治理与性能
 
-- 文件树：主进程先做初始扫描，再由 watcher 事件增量更新（含背压处理），共享 watcher 去重，缺失根目录可等待其出现（`src/main/services/file/tree/builder.ts:19-20,212-218,225-227` 及 `DirectoryTreeManager.ts`）；渲染端镜像按事件增删改。tree IPC 采用 `file.tree.create/activate/dispose` 三阶段握手（关闭"快照到流"交付间隙——consumer 创建后先挂起、变更在主进程排队，activate 成功才放行，被拒绝则重取快照，最多 3 次），渲染侧相应改为请求式调用，并给懒加载 watcher 加 10 秒 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`）吸收 `<Activity>` 标签切换。
+- 文件树由主进程维护：先做一次全量初始扫描，之后的变更靠 watcher 事件增量更新，处理时带背压，多个消费者共享同一 watcher 去重；根目录暂时不存在时可以先等待它出现。渲染端只按事件增删改本地镜像。初始扫描与事件更新见 `src/main/services/file/tree/builder.ts:19-20,212-218,225-227`，去重与等待逻辑在 `DirectoryTreeManager.ts`。
+- 快照与实时流之间的交付间隙由三阶段握手补上：渲染进程依次调用 `file.tree.create`、`activate` 与 `dispose`，consumer 创建后先挂起、期间的变更在主进程排队，activate 成功才放行，被拒绝则重新取快照（最多 3 次）。渲染侧因此改为请求式调用，并给懒加载 watcher 保留 10 秒的 dispose 宽限（`LAZY_WATCHER_DISPOSE_GRACE_MS`），用于吸收 `<Activity>` 标签切换。
 - webview：分区会话随应用生命周期注册/释放（`setupHtmlArtifactPreviewSession` 的 `registerDisposable`）；`did-attach-webview` 拦截导航；未发现按可见性冻结/卸载 artifact 预览的机制（iframe 一直挂载，仅流式节拍降低重建频率）。
 - Pyodide：单例 worker，终止时拒绝所有挂起请求；超时清理；模块状态跨次执行保留（可 reset）。
 - 编辑会话资源在无租约、无脏草稿或错误时才可回收；保留的失败草稿属于当前渲染进程内存状态，本次未确认跨窗口或应用重启恢复。文件编辑资源上限与二进制判断在主进程文件编辑服务处理；HTML 预览另有类型插件自己的大小限制。长会话的压缩与上下文用量属请求类目。依据：[FileEditSessionManager.ts:95–126,488–507](../../cherry-studio/src/renderer/services/fileEdit/FileEditSessionManager.ts#L95-L126)、[useFileEditSession.ts](../../cherry-studio/src/renderer/hooks/useFileEditSession.ts)。
@@ -144,7 +152,14 @@ PDF 翻译的结果会进入翻译历史与文件管理器，可作为可重新�
 
 ## 12. 测试、已确认边界与未验证事项
 
-- 单元测试覆盖（均属组件/服务级）：iframe 沙箱属性与 CSP（`CodeBlockView/__tests__/HtmlPreviewFrame.test.tsx`）、webview 附加时主进程强制沙箱/拒绝危险源（`MainWindowService.test.ts:233-300`）、artifact 请求白名单（`src/main/utils/__tests__/htmlArtifactRequest.test.ts`）、分类与流式表面切换（`markdown/__tests__/CodeBlock.test.tsx`、`CodeBlock.test.tsx` 内 MessageHtmlArtifact 分支）、编辑保存载荷（`homeMessageListAdapter.test.tsx:625`）、自动保存/冲突（`hooks/__tests__/useFileEditSession.test.tsx`）、report_artifacts 投影（`agentRightPaneProjection.test.ts`）。
+- 单元测试覆盖组件与服务两级，集中在这些对象上：
+  - iframe 沙箱属性与 CSP：`CodeBlockView/__tests__/HtmlPreviewFrame.test.tsx`
+  - webview 附加时主进程强制沙箱、拒绝危险源：`MainWindowService.test.ts:233-300`
+  - artifact 请求白名单：`src/main/utils/__tests__/htmlArtifactRequest.test.ts`
+  - 分类与流式表面切换：`markdown/__tests__/CodeBlock.test.tsx`，含其中的 MessageHtmlArtifact 分支
+  - 编辑保存载荷：`homeMessageListAdapter.test.tsx:625`
+  - 自动保存与冲突：`hooks/__tests__/useFileEditSession.test.tsx`
+  - report_artifacts 投影：`agentRightPaneProjection.test.ts`
 - 未发现覆盖"生成→展示→编辑→保存→重开"整链的端到端测试（`tests/e2e/` 仅 app-launch）。
 - 未运行验证：HTML artifact 实际渲染、同意流程交互、webview 执行行为、Pyodide 执行、自动保存/冲突对话框——本次仅静态确认入口、状态与事件绑定；视觉效果与平台行为（Windows/macOS）未验证。
 - 未覆盖/超出范围：`v2-refactor-temp/` 阶段代码、MiniApp webview（`persist:webview` 分区为自定义应用，非模型输出）、知识库文件处理 artifact（`knowledge.ts` 中为内部处理产物，非生成式输出）、MCP 工具调度。

@@ -101,7 +101,7 @@ UI 另有一条检索入口 `vault.search`，默认返回 20 条，输出裁剪�
 
 ### 候选生成
 
-`SearchIndex` 的候选来自 Bleve 的 `MatchQuery`，作用在 `text` 与 `title` 两个字段上，两者取并集；如果调用方给了 kind 集合，再与 kind 的 term 查询取交集。索引映射把 kind 设为 keyword，title 与 text 使用英文分析器（`src/pkg/agent/knowledge/engine.go:80-97`、`191-220`）。
+候选全部由全文检索给出：查询词在正文与标题两个字段上做词项匹配，任一字段命中即进入候选集；调用方给定文档类型集合时，再与类型条件求交集。索引映射把文档类型建成 keyword 字段，正文与标题共用英文分析器（`src/pkg/agent/knowledge/engine.go:80-97,191-220`）。
 
 请求条数是 `limit × 3`，按 `-_score` 排序（`engine.go:222-227`）。没有关键词扩展、同义词、标签过滤或邻接扩展；也没有多路候选融合。
 
@@ -115,12 +115,12 @@ UI 另有一条检索入口 `vault.search`，默认返回 20 条，输出裁剪�
 
 ### 主链二：一次 `memory_search` 的完整回合
 
-1. 模型在某轮生成中发出 `memory_search` 工具调用，参数为查询与条数。
-2. 工具闭包从共享引擎按索引目录取引擎；传 nil 嵌入器，但若启动时已加载过嵌入器，单例会保留它（`knowledge_tools.go:35-39`、`shared.go:34-50`）。
-3. 引擎执行上一节的候选生成与向量重排，按分数降序、id 升序稳定排序，截断到 limit（`engine.go:274-283`）。
-4. 每条命中按字节截取约 240 长度的摘要，优先围绕查询词附近；切点没有按 UTF-8 字符边界调整（`engine.go:286-324`）。
-5. 命中数组整体序列化成 JSON 返回；无命中时返回一句“No vault hits for …”，而不是空数组（`knowledge_tools.go:45-49`）。
-6. 工具结果作为一条 tool 消息进入对话，模型在下一轮生成中使用；没有自动追加第二次检索或引用校验。
+1. 模型在某一轮生成中发起检索，调用 `memory_search` 并带上查询文本与需要的条数。
+2. 工具闭包按索引目录从进程级单例取出共享引擎；它传入的嵌入器为空，单例若在启动时已加载过嵌入器，就沿用那一份（`src/pkg/agent/eino/knowledge_tools.go:35-49`、`src/pkg/agent/knowledge/shared.go:34-50`）。
+3. 引擎按上一节的方式生成候选并完成向量重排，随后按分数降序、同一分数按 id 升序稳定排序，截断到请求条数。
+4. 每条命中按字节截取约 240 长度的摘要，取片段时偏向查询词所在位置；切点按字节位置计算，没有对齐 UTF-8 字符边界（`src/pkg/agent/knowledge/engine.go:274-324`）。
+5. 命中数组整体序列化成 JSON 返回；Vault 一条未命中时，结果是一句以 “No vault hits for …” 开头的说明文字。
+6. 这份结果作为一条 tool 消息进入对话，由模型在下一轮生成时读取；流程中没有自动的二次检索，也没有引用校验。
 
 单次检索只限制条数，没有字符或 token 总预算。工具返回每个命中的完整正文，块的 2400 字节只是按行累加阈值，长行可越过；条数参数只有非正值回退默认 8，没有硬上限。摘要短于正文不会减少正文回注量（`knowledge_tools.go:26-49`、`engine.go:187-188`）。
 
@@ -162,13 +162,18 @@ Vault 侧相反：写回是显式的用户动作。保存笔记与创建笔记�
 
 顶层 `memory` 配置声明了 builtin 与 qmd 两种后端、索引路径、会话导出、更新间隔、结果上限等字段（`src/pkg/config/schema.go:1054-1100`），但 Go 侧没有读取该结构的运行时代码；本次未找到 QMD 进程启动、索引或注入实现。示例配置只写了后端类型与引用开关两项，没有 qmd 段。
 
-`src/prompt/prompt-zh/AGENTS.md` 另有一套文件约定：会话启动读 `SOUL.md`、`USER.md`、每日 `memory/YYYY-MM-DD.md` 与 `MEMORY.md`。这是工作区提示词层面的行为约定，和 `evolution` 存储、Vault 索引都不是同一实现。
+提示词目录的 `src/prompt/prompt-zh/AGENTS.md` 另有一套文件约定，属于工作区提示词层面的行为约束，与 evolution 存储、Vault 索引分别实现。约定要求会话启动时读取以下文件：
+
+- `SOUL.md`
+- `USER.md`
+- 每日记忆 `memory/YYYY-MM-DD.md`
+- `MEMORY.md`
 
 ## 预算、作用域、可观测与恢复
 
 **预算**：切块字节阈值与两行重叠、三倍候选数和混合权重固定。工具默认返回 8 条，但调用方可以传更大的正数；结果正文没有总字符或 token 上限。嵌入整库一次请求、超时 120 秒，没有分批与重试（`vault_sync.go:119-149`、`knowledge_tools.go:26-49`）。
 
-**作用域**：Vault 目录优先取 `agents.defaults.knowledge.vaultDir`，否则取 Agent 工作区下的 `vault/`，再否则取状态目录下的 `vault/`（`src/pkg/agent/vault.go:17-36`）。代码只读取 defaults，Agent 列表里的同名配置不参与解析；索引目录固定为状态目录下的 `knowledge-index`，不按 Agent 或 Vault 隔离（`src/pkg/agent/runtime/knowledge.go:18-20`）。
+**作用域**：Vault 目录按三级顺序解析，先取默认配置项 `agents.defaults.knowledge.vaultDir`，没有配置时用 Agent 工作区下的 vault 目录，仍取不到则落到状态目录下的 vault 目录（`src/pkg/agent/vault.go:17-36`）。解析只读默认配置段，Agent 列表里的同名配置不参与；索引目录固定为状态目录下的 knowledge-index，不按 Agent 或 Vault 隔离（`src/pkg/agent/runtime/knowledge.go:18-20`）。
 
 因此多个 Agent 若配置了不同 Vault，共享同一索引；对其中一个 Vault 执行同步会用该 Vault 的内容整体替换索引，其他 Vault 的块随之消失。这是由“单一索引目录 + 全量重建”直接推出的结果，未运行多 Agent 场景验证。
 

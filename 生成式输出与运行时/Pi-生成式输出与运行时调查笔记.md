@@ -22,12 +22,12 @@ Pi 同时保留稳定的 coding-agent 运行链和实验性 durable harness。�
 
 主链路（触发→生成→展示→交互→保存→重开）：
 
-1. 用户输入：编辑器提交（interactive-mode.ts:3015-3024）→ `AgentSession.prompt()`（agent-session.ts:1116）→ `agent.prompt()`。
-2. 生成：`streamAssistantResponse`（packages/agent/src/agent-loop.ts:281-372）消费 `AssistantMessageEvent` 流，逐事件更新 partial 消息并发出 `message_start/message_update/message_end`。
-3. 展示：TUI 订阅事件（interactive-mode.ts:3068-3129），assistant 文本进 `AssistantMessageComponent`（Markdown 实时渲染），每个 `toolCall` 建 `ToolExecutionComponent`（tool-execution.ts:13），edit 工具执行前异步计算 diff 预览（edit.ts:377-386）。
-4. 执行：agent-loop 执行工具（executeToolCalls，agent-loop.ts:411）；write/edit 直接写宿主文件系统，bash 在本机 spawn shell（bash.ts:88-150）。
-5. 保存：`message_end` 时按角色写入会话（agent-session.ts:640-657 → sessionManager.appendMessage），JSONL append 持久化（session-manager.ts:1173）。
-6. 重新打开：`SessionManager.open()`（session-manager.ts:1530）→ `buildSessionContext()` → `agent.state.messages = existingSession.messages`（sdk.ts:363-364），模型在完整时间线上继续。另有 `/export`（HTML/JSONL）、`/import`、`/fork`、`/tree` 分支导航。
+1. 用户输入：编辑器把输入交给 `AgentSession.prompt()`，再由它下传到 `agent.prompt()`（`interactive-mode.ts:3015-3024`、`agent-session.ts:1116`）。
+2. 生成：agent 循环的 `streamAssistantResponse` 消费 `AssistantMessageEvent` 流，逐事件更新 partial 消息，并按开始、更新、结束三个阶段向外发出事件（`packages/agent/src/agent-loop.ts:281-372`）。
+3. 展示：TUI 订阅事件流，assistant 文本进入 `AssistantMessageComponent` 做 Markdown 实时渲染，每个 `toolCall` 再建一个 `ToolExecutionComponent`；edit 工具在执行前还会异步算好 diff 预览（`interactive-mode.ts:3068-3129`、`tool-execution.ts:13`、`edit.ts:377-386`）。
+4. 执行：agent-loop 通过 `executeToolCalls` 执行工具调用，write 与 edit 直接写宿主文件系统，bash 在本机启动 shell（`agent-loop.ts:411`、`bash.ts:88-150`）。
+5. 保存：`message_end` 到达时按角色把消息写入会话，再由 session manager 追加到 JSONL（`agent-session.ts:640-657`、`session-manager.ts:1173`）。
+6. 重新打开：`SessionManager.open()` 打开会话后，`buildSessionContext()` 重建上下文，再把既有消息整体赋给 `agent.state.messages`，模型据此在完整时间线上继续。另提供导出（`/export`）、导入（`/import`）、fork（`/fork`）与会话树导航（`/tree`）四项命令（`session-manager.ts:1530`、`sdk.ts:363-364`）。
 
 ## 1. 触发方式、输出协议与对象模型
 
@@ -47,14 +47,14 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 2. 增量生成、更新与最终化
 
-- 文本/thinking：逐 token 注入（text_delta 追加到 part，proxy.ts:252-264），TUI 每次事件重渲染 Markdown（interactive-mode.ts:3148-3151）。
-- 工具参数：逐片段累积 JSON 并即时解析（proxy.ts:322-336）；参数完成前 TUI 即展示（tool-execution.ts:158-162）；`toolcall_end` 现在携带最终完整 `ToolCall` 并 `Object.assign` 覆盖 partial 累积结果（proxy.ts:338-345）。
-- 文件更新：无 diff/patch 应用层，工具直接改文件：
-  - `write` 全文覆盖（core/tools/write.ts:194-226，自动建父目录）；
-  - `edit` 精确文本替换（core/tools/edit.ts:308-362）：每处 oldText 必须唯一、不重叠，先全部匹配原文件再倒序应用（edit-diff.ts:304-366）；支持模糊匹配（Unicode 引号/破折号/空白归一化，edit-diff.ts:33-54,206-244）并保留未改动行的原始字节（131-172）。
-  - 失败收口为异常→错误工具结果（未找到/重复/重叠/无变化均有专门错误文案，edit-diff.ts:257-293）。
-- bash 输出：流式累积，截断后完整输出存临时文件（bash.ts:349-480；OutputAccumulator）。
-- 最终化：`done`/`error` 事件后 `response.result()` 取最终消息（agent-loop.ts:346-371）；同一文件并发写经按 realpath 的 mutation queue 串行化（file-mutation-queue.ts:32-61）。
+- 文本与 thinking：模型每产生一个 token 就追加到对应的 part，TUI 收到事件后重渲染 Markdown（`proxy.ts:252-264`、`interactive-mode.ts:3148-3151`）。
+- 工具参数：JSON 片段逐个累积并即时解析，参数还没补全时 TUI 就已经开始展示；结束时 `toolcall_end` 携带完整的 `ToolCall`，用 `Object.assign` 覆盖此前累积的部分结果（`proxy.ts:322-336,338-345`、`tool-execution.ts:158-162`）。
+- 文件更新：没有 diff/patch 应用层，工具直接改写文件：
+  - write 全文覆盖目标文件，父目录不存在时自动创建（`core/tools/write.ts:194-226`）。
+  - edit 做精确文本替换：每处 oldText 必须唯一且互不重叠，工具先在整个原文件里匹配全部目标，再倒序应用；匹配支持 Unicode 引号、破折号与空白归一化的模糊形式，未改动的行保留原始字节（`core/tools/edit.ts:308-362`、`edit-diff.ts:33-54,131-172,206-244,304-366`）。
+  - 失败统一收口为异常并转成错误工具结果，未找到、重复、重叠与无变化各有专门文案（`edit-diff.ts:257-293`）。
+- bash 输出：流式累积，超过显示上限的部分被截断，完整输出另存临时文件，由输出累积器负责（`bash.ts:349-480`）。
+- 最终化：`done` 或 `error` 事件到达后调用 `response.result()` 取最终消息；同一文件的并发写入经按 realpath 的变更队列串行化（`agent-loop.ts:346-371`、`file-mutation-queue.ts:32-61`）。
 
 ## 3. 投影表面与多视图关系
 
@@ -71,52 +71,55 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 5. 用户交互、事件与错误反馈
 
-- 用户可操作项：展开/折叠工具输出（`app.tools.expand`，keybindings.ts:86）、切换 thinking 显示（ctrl+t）、复制消息（ctrl+x）、粘贴图片、外部编辑器编辑输入框（ctrl+g，external-editor.ts:13）、会话树导航/标记/重命名（tree-selector.ts）、fork/resume/new。
-- 事件回传：AgentEvent → AgentSessionEvent 全链路订阅（packages/agent/src/types.ts:428-443，agent-session.ts:141-183）；工具可经 `onUpdate` 流式回传部分结果（bash 节流 100ms，bash.ts:377-390）。
-- 错误反馈：错误工具结果着色、abort/timeout/exit code 状态行（bash-execution.ts:171-204）；assistant 消息的 error/aborted/length 提示（assistant-message.ts:177-195）。
-- 交互状态重载后恢复：TUI 内的展开状态不持久化（推断：状态在组件实例字段内，重载后重建）；会话树的 label、分支在会话文件中持久化（session-manager.ts:1232-1253）。无运行验证，静态代码可确认状态存放位置。
+- 用户可操作项：工具输出可以展开或折叠（按键绑定 `app.tools.expand`），thinking 显示、消息复制与图片粘贴各有快捷键（ctrl+t、ctrl+x 与粘贴），输入框可交给外部编辑器（ctrl+g），会话树支持导航、标记和重命名，另有 fork、resume 与 new 三个会话入口（`keybindings.ts:86`、`external-editor.ts:13`、`tree-selector.ts`）。
+- 事件回传：AgentEvent 到 AgentSessionEvent 之间有全链路订阅，工具还能通过 `onUpdate` 流式回传部分结果，bash 对此按 100ms 节流（`packages/agent/src/types.ts:428-443`、`agent-session.ts:141-183`、`bash.ts:377-390`）。
+- 错误反馈：错误工具结果带颜色，abort、timeout 与退出码各有状态行；assistant 消息会按 error、aborted 或 length 给出提示（`bash-execution.ts:171-204`、`assistant-message.ts:177-195`）。
+- 交互状态重载后恢复：TUI 的展开状态不持久化，推断其存放在组件实例字段里，重载后随组件重建；会话树的 label 与分支则写入会话文件（`session-manager.ts:1232-1253`）。该结论来自静态代码，未经运行验证。
 
 ## 6. 编辑、diff、版本与协作
 
-- 模型↔文件：模型是唯一修改者；用户不能直接编辑模型输出对象，也不能接受/拒绝 diff。`edit` 工具在 TUI 中先显示"预览 diff"再在结果区显示最终 diff（edit.ts:363-431），但这是展示，不是审批流。
-- diff 形态：`generateDiffString` 生成带行号的展示 diff（edit-diff.ts:380-503），`generateUnifiedPatch` 生成标准 unified patch 存入 `details.patch` 供外部使用（edit-diff.ts:369-374，edit.ts:359）。
-- 版本：文件层面依赖用户自己的 Git（Pi 仅在 package-manager 与 footer 分支显示处调用 git，未发现对生成产物的 git 版本管理）；会话层面有分支树（branch()、resetLeaf()、createBranchedSession()，session-manager.ts:1360-1512）、fork 独立会话文件、compaction/branch_summary 条目。
-- 协作：无 CRDT、无并发编辑、无多用户。`file-mutation-queue.ts:32-61` 只串行化同一进程内的同文件写入。
+- 模型与文件：模型是唯一修改者，用户无法直接编辑模型输出对象，也不能接受或拒绝一次 diff。`edit` 工具在 TUI 中先显示"预览 diff"，执行后在结果区显示最终 diff，两处都只承担展示，工具随后照常写盘（`edit.ts:363-431`）。
+- diff 形态：`generateDiffString` 生成带行号的展示用 diff，`generateUnifiedPatch` 生成标准 unified patch 并存入 `details.patch` 供外部使用（`edit-diff.ts:369-374,380-503`、`edit.ts:359`）。
+- 版本：文件版本依赖用户自己的 Git，Pi 只在 package-manager 与 footer 的分支显示处调用 git，未发现针对生成产物的版本管理。会话层面有分支树，可创建分支、重置叶子并生成分支会话，fork 会产出独立会话文件，compaction 与 branch_summary 则作为条目记录（`session-manager.ts:1360-1512`）。
+- 协作：协作能力限于单机单进程，文件写入由变更队列串行化，CRDT、并发编辑与多用户机制均不存在（`file-mutation-queue.ts:32-61`）。
 
 ## 7. 能力桥、执行位置与权限范围
 
-- 执行位置：文件写与命令执行均在宿主本机进程/本机 shell（bash.ts:103-126，spawn + detached + 进程树清理 killProcessTree）。基础文件/命令工具本身不在 VM 内运行；codemode 的 QuickJS worker 是独立工具执行路径（§4）。基础工具远端后端以可插拔 `operations` 接口形式提供（write.ts:25-40、edit.ts:74-92、bash.ts:56-74，注释指明 SSH 等场景），默认实现均为本机。
-- 权限：无逐操作授权。`README.md:88-96` 明确无内置权限系统；`trust-manager.ts` 仅是"项目目录级信任"（决定是否在某 cwd 启动，trust-manager.ts:66-94），不审批具体写文件/执行命令。能力桥为全权（进程权限即代理权限）。
-- 会话信息桥：bash 工具默认注入 `PI_SESSION_ID/PI_SESSION_FILE/PI_PROVIDER/PI_MODEL/PI_REASONING_LEVEL` 环境变量（bash.ts:165-191）。
+- 执行位置：文件写入与命令执行都发生在宿主本机，bash 通过 spawn 起子进程、以 detached 方式跟踪并做进程树清理。基础文件与命令工具不在 VM 内运行，codemode 的 QuickJS worker 是另一条独立的工具执行路径（§4 已述）。这些工具预留了可插拔的 `operations` 接口用于远端后端，注释举的是 SSH 场景，默认实现全部落在本机（`bash.ts:56-126`、`write.ts:25-40`、`edit.ts:74-92`）。
+- 权限：没有逐操作授权，README 明确项目不内置权限系统；`trust-manager.ts` 只做"项目目录级信任"，决定是否在某个 cwd 启动，不审批具体的写文件或执行命令。能力桥拿到的是完整进程权限（`README.md:88-96`、`trust-manager.ts:66-94`）。
+- 会话信息桥：bash 工具默认向子进程注入一组环境变量，供它识别当前会话与模型配置（`bash.ts:165-191`）：
+  - PI_SESSION_ID 与 PI_SESSION_FILE 标识会话本身；
+  - PI_PROVIDER、PI_MODEL 标识 provider 与模型；
+  - PI_REASONING_LEVEL 标识推理等级。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 存储格式：append-only JSONL 会话树（v3），首行 header（id/version/timestamp/cwd/parentSession），每条 entry 带 id/parentId/timestamp；追加写，首条 user 或 assistant 消息即触发整文件 flush，此后追加，纯启动设置留内存（[实现](../../pi/packages/coding-agent/src/core/session-manager.ts#L1161-L1189)）。
+- 存储格式：会话以 append-only 的 JSONL 会话树保存到 v3 格式：首行 header 记录会话 id、版本、时间戳、cwd 与父会话，其后每条 entry 自带 id、parentId 与时间戳。写入方式为追加，首条 user 或 assistant 消息触发整文件 flush，之后只追加，纯启动设置留在内存（[实现](../../pi/packages/coding-agent/src/core/session-manager.ts#L1161-L1189)）。
 - 损坏容忍与原子发布：
-  - durable 的 JSONL 存储加载时对末行语法错误判定 torn tail，并通过"临时文件 + 原子 rename"发布有效前缀修复（`packages/durable/src/storage/jsonl/`）；
-  - durable 的 fork 以整文件原子发布，避免把源文件整段读入内存；
-  - coding-agent 侧为逐行容错解析与 v1→v3 迁移（session-manager.ts:287-341,628）。
-- 恢复：`SessionManager.open`（session-manager.ts:1777）、`continueRecent`（:1804）、CLI 会话选择器（interactive-mode.ts:5107-5134）；模型/thinking level 从会话 entry 恢复（sdk.ts:188-231）。
-- 分享导出：`/export`（HTML 或 JSONL 副本，interactive-mode.ts:5997-6013）、`/import`（agent-session-runtime.ts:361-396）、`/share`（先尝试 Radius 组织可见 artifact，无 Radius provider 或凭据时退回私密 gist，见第 12 节）。HTML 导出为自包含单文件（模板 + base64 会话数据，core/export-html/index.ts:143-175），内置工具按模板渲染、自定义工具预渲染（178-230）。
-- 独立后端：durable 在 `packages/durable/src/storage/sqlite/` 提供 SQLite 实现，与 JSONL、Memory、IndexedDB 并列，分两部分：
-  - 后端实现：node:sqlite 适配、schema 与 migration；
-  - 消息级 FTS 搜索移到 p2 的搜索插件：`apps/p2/plugins/search/db.ts` 在 SQLite 上建 FTS5 虚表，`query.ts` 负责把关键词转成 MATCH 表达式。
-  coding-agent 当前仍使用 JSONL 路径；durable 的 `src/search.ts` 是工具检索（BM25），不是消息检索。
+  - durable 的 JSONL 存储加载时把末行语法错误判为 torn tail，修复时先写临时文件、再以原子 rename 发布有效前缀（`packages/durable/src/storage/jsonl/`）。
+  - durable 的 fork 以整文件原子发布，源文件不必整段读入内存。
+  - coding-agent 侧按行容错解析，并提供 v1→v3 迁移（`session-manager.ts:287-341,628`）。
+- 恢复：`SessionManager.open` 与 `continueRecent` 负责打开既有会话，CLI 会话选择器提供交互入口，模型与 thinking level 再从会话 entry 读回（`session-manager.ts:1777,1804`、`interactive-mode.ts:5107-5134`、`sdk.ts:188-231`）。
+- 分享导出：导出、导入与分享各有一条命令。`/export` 负责导出 HTML 或 JSONL 副本，`/import` 读回外部会话，`/share` 先尝试把会话发布成 Radius 组织可见 artifact，在没有 Radius provider 或凭据时退回私密 gist（第 12 节）。HTML 导出是自包含单文件，模板内嵌 base64 会话数据，内置工具按模板渲染、自定义工具预渲染（`interactive-mode.ts:5997-6013`、`agent-session-runtime.ts:361-396`、`core/export-html/index.ts:143-175,178-230`）。
+- 独立后端：durable 的 SQLite 实现与 JSONL、Memory、IndexedDB 并列，代码分两部分（`packages/durable/src/storage/sqlite/`）：
+  - 后端实现：node:sqlite 适配、schema 与 migration。
+  - 消息级 FTS 搜索由 p2 的搜索插件承担，它在 SQLite 上建 FTS5 虚表，并把关键词转成 MATCH 表达式（`apps/p2/plugins/search/db.ts`、`query.ts`）。
+  coding-agent 当前仍走 JSONL 路径；消息检索落在上述 p2 插件，durable 自身的 `src/search.ts` 只做工具检索（BM25）。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- 当前投影回流：resume 时 `agent.state.messages = existingSession.messages`（sdk.ts:363-364），模型看到按分支、压缩与 context_edit 计算的当前投影，原始条目仍保留，后续回合继续追加（[投影](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
-- 对象感知与定向修改：模型通过 `read/find/grep/ls` 工具查询工作区，通过 `edit/write` 按路径定向修改（工具描述要求 oldText 唯一，edit-diff.ts:268-277 强制唯一性）。对象身份=文件路径；绑定到后续回合的是"会话 + 文件路径"，没有 artifact ID 之类的稳定对象句柄。
-- 摘要回流：compaction 后旧消息被 `<summary>` 用户消息替换（messages.ts:11-17,176-183）；分支切换时 branch_summary 注入（19-24,170-175）；bash 执行可用 `!!` 排除出上下文（148-161）。
-- 扩展注入：`custom_message` entry 可带内容进上下文（session-manager.ts:135-141,1171-1189），`custom` entry 仅存扩展状态不进上下文（98-108）。
+- 当前投影回流：resume 时把既有会话消息整体赋给 `agent.state.messages`，模型看到的是按分支、压缩与 context_edit 计算出的当前投影，原始条目仍然保留，后续回合在其后继续追加（`sdk.ts:363-364`，[投影](../../pi/packages/coding-agent/src/core/session-manager.ts#L519-L570)）。
+- 对象感知与定向修改：模型先用 read、grep、ls 等只读工具定位工作区里的目标，再用 edit 或 write 按路径修改；工具描述要求 oldText 唯一，edit-diff 层同样强制这一约束。对象身份落在文件路径上，后续回合绑定的是"会话 + 文件路径"，没有 artifact ID 这类稳定对象句柄（`edit-diff.ts:268-277`）。
+- 摘要回流：compaction 之后旧消息被 `<summary>` 用户消息替换，分支切换时注入 branch_summary，用 `!!` 执行的 bash 命令可以排除出上下文（`messages.ts:11-24,148-183`）。
+- 扩展注入：`custom_message` entry 会把内容带进上下文，`custom` entry 只保存扩展状态（`session-manager.ts:98-108,135-141,1171-1189`）。
 
 ## 10. 生命周期、资源治理与性能
 
-- 会话级清理：`dispose()` 触发全部 abort（retry/compaction/bash）+ 会话资源清理（agent-session.ts:839-856）；`cleanupSessionResources` 为注册制（packages/ai/src/session-resources.ts:5-23，唯一注册点是 Codex WebSocket 会话，openai-codex-responses.ts:927）。
-- 进程治理：bash 子进程 detached 跟踪（trackDetachedChildPid）、超时 killProcessTree、信号退出时清理（print-mode.ts:50-68）；交互模式限制同时一个 bash 命令（interactive-mode.ts:3013-3017）。
-- 内存与截断：bash 输出按行/字节双上限截断并落临时文件（truncate.ts）；read 工具同样截断（DEFAULT_MAX_LINES/MAX_BYTES）；TUI 预览按视觉行缓存截断（visual-truncate.ts）。
-- 长会话：自动 compaction（阈值 + overflow 恢复）与手动 `/compact`（compaction.ts），Token 估算决定时机。deferred（异步续答）仅在 model-runtime 有 provider 守卫（model-runtime.ts:647-660），本次检索 `deferred` 在 coding-agent 仅命中该两处及配置字面量，未见使用路径。
-- 性能手段：TUI 差分渲染、渲染器按 width 缓存（bash.ts:272-295）、事件节流（bash 100ms）。
+- 会话级清理：`dispose()` 会 abort 掉所有进行中的 retry、compaction 与 bash 任务，并清理会话资源；资源清理走注册制，目前唯一的注册点是 Codex WebSocket 会话（`agent-session.ts:839-856`、`packages/ai/src/session-resources.ts:5-23`、`openai-codex-responses.ts:927`）。
+- 进程治理：bash 子进程以 detached 方式跟踪，超时调用 killProcessTree 终止整棵进程树，收到退出信号时也会清理；交互模式同一时刻只允许运行一个 bash 命令（`print-mode.ts:50-68`、`interactive-mode.ts:3013-3017`）。
+- 内存与截断：bash 输出按行数与字节数双上限截断，超出部分落到临时文件；read 工具用同样的上限截断，TUI 预览则按视觉行缓存截断（`truncate.ts`、`visual-truncate.ts`）。
+- 长会话：compaction 分自动与手动两条路径，自动模式在阈值触发并支持 overflow 恢复，手动入口是 `/compact`，时机由 Token 估算决定。deferred（异步续答）只在 model-runtime 有 provider 守卫，coding-agent 侧本次检索仅命中这两处与配置字面量，未找到使用路径（`compaction.ts`、`model-runtime.ts:647-660`）。
+- 性能手段：TUI 采用差分渲染，渲染器按 width 缓存，bash 输出事件按 100ms 节流（`bash.ts:272-295`）。
 
 ## 11. 测试、已确认边界与未验证事项
 
@@ -132,7 +135,7 @@ start / text_start / text_delta / text_end / thinking_* / toolcall_start / toolc
 
 ## 12. 会话投影的分享元数据
 
-`/share` 有主备两条路径（`packages/coding-agent/src/modes/interactive/session-share.ts:46-203`）：主路径把当前分支导出为 JSONL，追加一条 `pi.share` custom entry 保存当前 system prompt 与激活工具定义，再把该 JSONL 上传为 Radius 组织可见 artifact（`exportSessionForShare` :25-43、`tryShareViaRadius` :91-150）；只有在 Radius provider 不可用或取不到凭据时才退回 `gh gist create --public=false`（`shareViaGist` :152-203），而退回路径导出的是 HTML 而非 JSONL（`shareSession` :46-89）。一旦命中 provider 与凭据，上传失败只报错、不再退回 gist。因此分享物仍是会话投影而非带独立 ID 的输出对象，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；命令帮助文案仍写作向私密 gist 分享（`core/slash-commands.ts:27`），未反映 Radius 优先的实现。
+`/share` 有主备两条路径，实现集中在 `packages/coding-agent/src/modes/interactive/session-share.ts:25-203`。主路径先把当前分支导出为 JSONL，再追加一条 `pi.share` custom entry 保存当前 system prompt 与激活工具定义，最后把该 JSONL 上传为 Radius 组织可见 artifact。只有 Radius provider 不可用或取不到凭据时，才退回 `gh gist create --public=false`，这条退回路径导出的是 HTML。一旦 provider 与凭据都能拿到，上传失败只报错，不再退回 gist。分享物因此仍是会话投影，没有独立 ID 这类对象身份，却比普通 JSONL/HTML 导出多出复现该回合环境所需的文本和工具 schema；命令帮助文案仍写作向私密 gist 分享（`core/slash-commands.ts:27`），未反映 Radius 优先的实现。
 
 ## 13. Durable harness 的运行状态投影
 

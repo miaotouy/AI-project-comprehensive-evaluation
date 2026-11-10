@@ -20,10 +20,10 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 + Node 服务�
 
 ## 产品表面与系统边界
 
-- 产品表面：Web 应用（桌面/移动浏览器 + PWA），服务端提供静态资源与 `/api` 路由，无原生客户端。
-- 聊天形态：单人（`<user>/chats/<角色>/<name>.jsonl`）与群聊（`<user>/group chats/<id>.jsonl`）两种文件布局，JSONL 结构一致：首行 `chat_metadata` 头对象 + 每行一条 `ChatMessage`。
-- 外部系统拥有：聊天文件、主题 JSON、群组 JSON 由 Node 服务端持久化（`src/endpoints/chats.js`、`src/endpoints/groups.js`）；模型推理由外部 LLM Provider 承担，SillyTavern 只拼装请求与消费流式返回。
-- 不拥有：无服务端会话状态，聊天状态在浏览器内存中，文件只是存档。
+- 产品表面：SillyTavern 的客户端就是浏览器页面，桌面与移动浏览器均可访问，也支持 PWA；Node 服务端负责提供静态资源与 `/api` 路由。
+- 聊天形态：单聊与群聊各用一种文件布局，单聊落在 `<user>/chats/<角色>/<name>.jsonl`，群聊落在 `<user>/group chats/<id>.jsonl`；两者 JSONL 结构一致，首行是 `chat_metadata` 头对象，之后每行一条 `ChatMessage`。
+- 外部系统拥有：聊天文件、主题 JSON 和群组 JSON 都由 Node 服务端负责持久化（`src/endpoints/chats.js`、`src/endpoints/groups.js`）；模型推理交给外部 LLM Provider，SillyTavern 只拼装请求并消费流式返回。
+- 会话状态归属：服务端不保存会话状态，聊天状态驻留浏览器内存，磁盘文件承担存档角色。
 
 ## 端到端聊天主链
 
@@ -37,44 +37,47 @@ SillyTavern 是自托管式 Web 聊天应用（浏览器客户端 + Node 服务�
 
 ## 核心对象与状态权威
 
-- `chat`（`script.js:410`）：消息事实源，所有渲染、生成、保存逻辑直接读写该数组。
-- 消息关键字段：正文 `mes` 与 swipe 候选（`swipe_id`/`swipes`/`swipe_info`）。
-- `ensureSwipes()`（`:6778`）负责老文件读取时懒惰补齐 swipe 数据。
-- `chat_metadata`（`:453`）：
+- 消息事实源是内存中的 `chat` 数组：渲染、生成与保存逻辑都直接读写它（`script.js:410`）。
+- 每条消息用 `mes` 存正文，swipe 候选由 `swipes` 数组及配套的 `swipe_id`、`swipe_info` 字段共同表达。
+- 读取旧聊天文件时，`ensureSwipes()` 才懒惰补齐缺失的 swipe 数据（`script.js:6778`）。
+- `chat_metadata` 是随文件首行保存的头对象，承载四类元信息（`script.js:453`）：
   - `main_chat`：checkpoint 回链；
-  - `tainted`：是否脱离"纯净"首条问候语；
-  - `integrity`：防并发覆写 UUID slug；
-  - `attachments`。
-- 群聊对象：成员/设置存 `<user>/groups/<id>.json`，`chats: string[]` 列出该群聊天文件；群聊消息用 `extra.gen_id` 标记同一轮生成。
-- 持久化权威：服务端文件；加载时一次性整份读入内存（`getChat()` `:7575-7623`、`getGroupChat()` `group-chats.js:255-320`），无分页读取。
-- 可见 UI 状态：`power_user` 设置、DOM 节点与 body 属性（如 `data-generating`）为展示层状态，不是消息事实源。
+  - `tainted`：是否脱离"纯净"的首条问候语；
+  - `integrity`：防并发覆写的 UUID slug；
+  - `attachments`：附件。
+- 群聊的成员与设置存在 `<user>/groups/<id>.json`，其中 `chats` 数组列出该群名下的聊天文件；群聊消息用 `extra.gen_id` 标记属于同一轮生成。
+- 服务端文件是持久化权威；加载时整份文件一次读入内存，没有分页读取，单聊走 `getChat()`，群聊走 `getGroupChat()`（`script.js:7575-7623`、`group-chats.js:255-320`）。
+- `power_user` 设置、DOM 节点与 body 上 `data-generating` 一类属性只服务于展示层，判断消息事实仍以 `chat` 数组为准。
 
 ## 专项导航
 
-- 会话与消息管理：[`../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md`](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md)（加载判定、无虚拟化渲染、checkpoint/branch/swipe 数据语义、群聊差异、消息隐藏与附件）
-- 对话请求与上下文：[`../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md`](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md)（Generate 主链、slash command 拦截、正则分层、宏与 Quick Reply 介入点）
-- Chat UI：[`../Chat UI/SillyTavern-ChatUI调查笔记.md`](<../Chat UI/SillyTavern-ChatUI调查笔记.md>)（消息操作、swipe 工作流、生成反馈、快捷键、键盘可达性）
-- 消息渲染：[`../消息渲染器/SillyTavern-消息渲染调查笔记.md`](../消息渲染器/SillyTavern-消息渲染调查笔记.md)
-- 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`../Chat UI/ChatUI横向对比.md`](<../Chat UI/ChatUI横向对比.md>)
-- 应用界面基础设施（弹窗、Toastr、主题、无障碍等）：[`../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md`](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md)
+| 专项 | 笔记 | 覆盖内容 |
+| --- | --- | --- |
+| 会话与消息管理 | [SillyTavern-会话与消息管理调查笔记](../会话与消息管理/SillyTavern-会话与消息管理调查笔记.md) | 加载判定、无虚拟化渲染、checkpoint/branch/swipe 数据语义、群聊差异、消息隐藏与附件 |
+| 对话请求与上下文 | [SillyTavern-对话请求与上下文调查笔记](../对话请求与上下文/SillyTavern-对话请求与上下文调查笔记.md) | Generate 主链、slash command 拦截、正则分层、宏与 Quick Reply 介入点 |
+| Chat UI | [SillyTavern-ChatUI调查笔记](<../Chat UI/SillyTavern-ChatUI调查笔记.md>) | 消息操作、swipe 工作流、生成反馈、快捷键、键盘可达性 |
+| 消息渲染 | [SillyTavern-消息渲染调查笔记](../消息渲染器/SillyTavern-消息渲染调查笔记.md) | — |
+| 应用界面基础设施 | [SillyTavern-应用界面基础设施调查笔记](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md) | 弹窗、Toastr、主题、无障碍等 |
+
+横向对比笔记：[会话与消息管理](../会话与消息管理/会话与消息管理横向对比.md)、[对话请求与上下文](../对话请求与上下文/对话请求与上下文横向对比.md)、[Chat UI](<../Chat UI/ChatUI横向对比.md>)。
 
 ## 关键能力与已确认边界
 
-- **Swipe**：消息级候选回复（`swipes` 并行数组），备选开场白复用 swipe 机制塞进第 0 条消息，Swipe Picker 支持从某个候选开分支；越界行为由 `getOverswipeBehavior()`（`:9163-9181`）状态机决定，四档取值：
+- **Swipe**：每条消息都能保留多份候选回复，并列存放在 `swipes` 数组里；备选开场白沿用同一机制塞进第 0 条消息，Swipe Picker 可以从任一候选新开分支。继续越界时由 `getOverswipeBehavior()` 的状态机决定行为，共四档（`script.js:9163-9181`）：
   - `REGENERATE`、`LOOP`、`PRISTINE_GREETING`、`NONE`
-- **Checkpoint 与 Branch 不对称**：共用"截断另存为新文件"的底层（`bookmarks.js`），但 checkpoint 不跳转、`extra.bookmark_link` 单值且新建覆盖；branch 必定跳转、`extra.branches` 数组追加、支持连同指定 swipe 版本截断。回到主聊天只能靠 `/checkpoint-exit` 手动切文件，无树状导航 UI。
-- **流式渲染两套机制**：主聊天走 `StreamingProcessor`（直接写 `innerHTML`，流式期间隐藏 swipe 按钮，渲染事件只在流结束时 emit 一次）；`streaming-display.js` 是仅 `/profile-genstream` 使用的独立浮层，脱离 `chat[]`。
-- **渲染模型非虚拟化**：默认只渲染最近 100 条（`power_user.chat_truncation`，`power-user.js:133`），"Show more"单向向前追加永不回收；`refreshSwipeButtons()`（`:9190-9249`）全量扫描已渲染 DOM。
-- **并发保护**：服务端保存前比对文件首行 `chat_metadata.integrity` 与内存值，不一致抛 `IntegrityMismatchError`，前端弹窗要求手输 `OVERWRITE` 才强制覆盖，否则整页刷新。
-- **群聊与单聊机制不同**：单聊重新生成靠 swipe 候选保留；群聊靠 `extra.gen_id` 分组 + 物理删除尾部消息再触发（`regenerateGroup()`，`group-chats.js:167-188`）；单聊转群聊是不可逆格式迁移（`bookmarks.js:328-441`）。
+- **Checkpoint 与 Branch 不对称**：两者共用"截断另存为新文件"的底层实现（`bookmarks.js`），差别在跳转与记录方式。checkpoint 停在原地，只把新文件记进 `extra.bookmark_link` 这个单值字段，再建一次就覆盖旧值；branch 立即跳转，把链接追加进 `extra.branches` 数组，还能连同指定的 swipe 版本一起截断。回到主聊天只能手动执行 `/checkpoint-exit` 切换文件，界面上没有树状导航。
+- **流式渲染两套机制**：主聊天由 `StreamingProcessor` 负责，它把增量文本直接写进 `innerHTML`，流式期间隐藏 swipe 按钮，渲染事件到流结束才 emit 一次。另有一个独立浮层 `streaming-display.js`，只在 `/profile-genstream` 场景使用，与 `chat` 数组无关联。
+- **渲染模型非虚拟化**：DOM 里默认只渲染最近 100 条消息，条数由 `power_user.chat_truncation` 控制；点 "Show more" 只向前追加，已渲染的节点不会回收。每次刷新 swipe 按钮，`refreshSwipeButtons()` 都要全量扫描已渲染 DOM（`power-user.js:133`、`script.js:9190-9249`）。
+- **并发保护**：服务端写盘前比对文件首行的 `chat_metadata.integrity` 与内存值，对不上就抛 `IntegrityMismatchError`；前端随即弹窗，要求手动输入 `OVERWRITE` 才强制覆盖，取消则整页刷新。
+- **群聊与单聊机制不同**：单聊重新生成时把旧回复留作 swipe 候选；群聊则用 `extra.gen_id` 分组，再物理删除尾部消息触发重生成，入口是 `regenerateGroup()`（`group-chats.js:167-188`）。单聊转群聊是一次不可逆的格式迁移（`bookmarks.js:328-441`）。
 
 ## 未验证事项
 
-- `is_system`（隐藏消息）是否在 prompt 组装阶段被过滤，未追踪到具体构建函数验证。
-- `extra.files`（消息内嵌附件）与 Data Bank 附件（`extension_settings.attachments` 等）在 World Info/prompt 注入层面的关系。
-- `promptOnly` 正则脚本的具体调用点（仅从枚举值推断存在）。
-- `StreamingProcessor` 缓存 DOM 引用失效与长聊天 `refreshSwipeButtons`/`redisplayChat` 性能，仅代码层分析，未运行时实测。
-- 应用界面基础设施笔记中的无障碍、触屏体验等为静态代码结论，未做运行或读屏软件验证（见 [`../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md`](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md)）。
+- 带 `is_system` 标记的隐藏消息是否会在 prompt 组装阶段被过滤，本次没有追踪到具体的构建函数来验证。
+- 消息内嵌附件（`extra.files`）与 Data Bank 附件（`extension_settings.attachments` 等）在 World Info 和 prompt 注入层面如何相互作用，尚未厘清。
+- 正则脚本的 `promptOnly` 选项在何处生效，目前只从枚举值推断它存在，未定位到实际调用点。
+- 流式渲染缓存的 DOM 引用何时失效，以及长聊天时 `refreshSwipeButtons()`、`redisplayChat()` 的性能，仅有代码层分析，未做运行时实测。
+- 应用界面基础设施笔记中的无障碍、触屏体验等结论来自静态代码阅读，未在真机或读屏软件上验证（见 [应用界面基础设施调查笔记](../应用界面基础设施/SillyTavern-应用界面基础设施调查笔记.md)）。
 
 ## 关键源码索引
 

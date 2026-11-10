@@ -18,7 +18,7 @@
 
 1. **随附推理引擎的 worker 托管与逐线程 KV 缓存**（主贡献候选，范围较旧快照收窄）：引擎以编译期版本捆绑进随附 worker，运行机不再下载、选择或回滚后端；worker 按需承载多模型、容量满时只淘汰空闲的最近最少使用 chat 模型，并按 `thread_id` 保存/恢复提示缓存，运行后校验 GPU 卸载与实际嵌入。管理对象仍是推理引擎本身，通用"生成式输出与运行时"类目只覆盖模型服务抽象层。
 2. **`/v1/orchestrations` 服务端 MCP 编排端点**（辅助贡献候选）：把 MCP 工具执行作为 HTTP 服务暴露，可配置 router 模型预选工具；与本地 OpenAI 兼容服务相比，它多出服务端的工具编排。
-3. **Jan Agent CLI/TUI**（辅助贡献候选）：裸 `jan` 打开终端 Agent 控制台，`jan cli agent run` 非交互运行项目 Agent，Provider 由 `~/.jan/config.toml`、项目 `agent.toml` 或桌面配置解析。
+3. **Jan Agent CLI/TUI**（辅助贡献候选）：用户在终端直接运行裸 `jan` 即进入 Agent 控制台，`jan cli agent run` 则非交互地运行项目 Agent。Provider 可从 `~/.jan/config.toml`、项目 `agent.toml` 或桌面配置解析。
 4. **Agent 运行时对外协议族**（辅助贡献候选）：会话级 JSON-RPC 允许外部客户端声明自己的 host tool 并由运行时把调用派回客户端；同一 Agent 另有实验性 ACP 入口与"把内置工具作为 MCP server 提供出去"的反向方向。
 5. **可运行时安装、worker 隔离的扩展运行时**（辅助贡献候选）：第三方扩展以 npm 包形式运行时安装，在 worker 中经 RPC 使用稳定 API 的受控能力；六个内置包仍在宿主进程激活。
 6. **MCP 智能工具路由**（辅助贡献候选）：LLM 路由器模型 + 关键词分类降级 + 遥测回调，属 Agent 工具类目的增强形态。
@@ -27,7 +27,15 @@
 
 ## 介绍声明与候选盘点
 
-README 与 docs 反复强调的能力集中在：本地优先（模型/后端/API 全本地）、多引擎（llama.cpp + MLX）、Hub 模型市场、MCP、Artifact、Assistant/Agent 与 Project。候选归属的权威表面：`extensions/`（6 个扩展包：assistant、download、llamacpp、mlx、rag、vector-db）、`src-tauri/plugins/`（8 个 Tauri 插件：agent-tools、extensions、hardware、llamacpp、mlx、rag、vector-db、websearch）、`packages/`（extension-api、extension-runtime、adk）、`protocol/`（RPC 与事件 schema）、`src-tauri/src/core/`（Rust 核心，含 Agent 核心与 CLI/TUI）、`src-tauri/jan-cli/`（独立 CLI crate）、`web-app/src/routes/`（前端路由）。
+README 与 docs 反复强调的能力集中在本地优先（模型、后端与 API 都留在本机）、多引擎（llama.cpp 与 MLX）、Hub 模型市场、MCP、Artifact、Assistant/Agent 与 Project。候选归属由以下几处表面共同界定：
+
+- `extensions/`：6 个扩展包，即 assistant、download、llamacpp、mlx、rag 与 vector-db；
+- `src-tauri/plugins/`：8 个 Tauri 插件，即 agent-tools、extensions、hardware、llamacpp、mlx、rag、vector-db 与 websearch；
+- `packages/`：extension-api、extension-runtime 与 adk；
+- `protocol/`：RPC 与事件 schema；
+- `src-tauri/src/core/`：Rust 核心，含 Agent 核心与 CLI/TUI；
+- `src-tauri/jan-cli/`：独立 CLI crate；
+- `web-app/src/routes/`：前端路由。
 
 | 候选 | 证据状态 | 结论 |
 |---|---|---|
@@ -61,11 +69,13 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **完整主链**（其余入口行号见文末索引）：扩展先生成 preset，再由插件启动受监督的引擎 worker；端口由 OS 分配后回传，同时带回 pid、api_key 与已注册模型数。worker 的 registry 按需加载模型，容量满时只淘汰空闲的最近最少使用 chat 模型（`userModelsMax` 与 `loadedChatOrder`，`index.ts:459-461`）。
 
-请求以 `thread_id` 识别 KV 状态：换入前保存旧状态，命中时恢复，身份校验失败则删除而不恢复（`engine/slots.rs`）。运行结束后，`readiness.ts` 校验 GPU 卸载与嵌入向量，`gpuBackendMatch.ts` 判定引擎与探测到的 GPU 家族是否匹配；相关实现见 `engine/worker.rs`、`engine/registry.rs` 与 `engine/http.rs`。
+KV 状态按线程保存。模型已加载后，同一 slot 切换线程时先保存原线程状态，再尝试恢复目标线程的缓存；同一线程连续请求保留内存中的最新状态。身份校验失败会删除缓存并跳过恢复（`src-tauri/plugins/tauri-plugin-llamacpp/src/engine/http.rs:225-280`、`engine/slots.rs`）。
+
+运行结束后，readiness 模块校验 GPU 卸载与嵌入向量，GPU 匹配模块判定引擎与探测到的硬件家族是否匹配；入口分别为 `readiness.ts`、`gpuBackendMatch.ts`。引擎侧实现见 engine 目录下的 slots、worker、registry 与 http 四个模块。
 
 **持续性**：preset、`model.yml` 与线程 KV 目录落盘；worker 在启动它的进程退出（含被 SIGKILL）时因 stdin EOF 自行退出，无需收养或回收。跨会话缓存命中率与并发淘汰时序未运行验证。
 
-**外部依赖与执行域**：引擎与 CUDA/Vulkan 运行库在构建期打包（`src-tauri/build-utils/stage-engine.sh`、`engine-prebuilt.sh` 等），运行期不下载后端；只有回退嵌入模型仍按需获取。硬件探测模块负责 NVIDIA/AMD/Vulkan 厂商识别与显存占用轮询（`src-tauri/plugins/tauri-plugin-hardware/src/` 的 `gpu.rs`、`cpu.rs` 与 `vendor/`）。
+**外部依赖与执行域**：引擎与 CUDA/Vulkan 运行库由 `src-tauri/build-utils/` 下的打包脚本（stage-engine.sh、engine-prebuilt.sh 等）在构建期一并打包，运行机因此不需要下载后端，只有回退嵌入模型仍按需获取。硬件探测模块负责识别 NVIDIA、AMD 与 Vulkan 厂商并轮询显存占用，实现位于 `src-tauri/plugins/tauri-plugin-hardware/src/`，按 GPU、CPU 与厂商表三部分组织。
 
 **独特性判断**：独特之处在于随附引擎的 worker 托管、容量受限的多模型驻留与逐线程提示缓存，以及“探测→运行校验”的 GPU 实测，调查样本中仍未见同类组合。
 
@@ -91,7 +101,7 @@ README 与 docs 反复强调的能力集中在：本地优先（模型/后端/AP
 
 **用户目标**：终端用户不打开桌面窗口，即可在项目目录中运行一个能读写文件、执行命令的 Agent，并直接复用桌面或项目里已配置的远程 Provider。
 
-**入口与触发者**：用户在终端运行独立 crate `src-tauri/jan-cli/src/main.rs`（`main` 在 `:763`）。裸 `jan` 进入交互式 Agent 控制台（TUI），带子命令则走非交互面。命令树除 `cli` 外还有下列子命令与一个隐藏实验项，入口定义在 `main.rs:229` 起的 `Commands`：
+**入口与触发者**：用户在终端运行独立的 jan-cli crate，入口是 `src-tauri/jan-cli/src/main.rs:763` 的 `main`。不带子命令时进入交互式 Agent 控制台（TUI），带子命令则走非交互面。命令树定义在同文件 `:229` 起的 `Commands` 里，除 `cli` 外还有下列子命令与一个隐藏实验项：
 
 ```text
 jan login / auth / usage / config / plugin / mcp serve / update
@@ -100,14 +110,30 @@ jan acp    （隐藏实验项）
 
 **完整主链与非交互面**：
 
-- **Provider 解析优先级**（`src-tauri/src/core/cli/providers.rs:1-16`），从高到低：
-  1. CLI 参数，以及 `JAN_API_KEY`、`<PROVIDER>_API_KEY` 环境变量；
-  2. 项目的 `.jan/agent/agent.toml` 中的 `[provider]` 节；
-  3. 桌面 `settings.json`，只继承、不回写；
-  4. 全局 `~/.jan/config.toml`。
+- **Provider 配置合并**：CLI 启动 Agent 时依次加载多个来源，按各层规则补充或覆盖配置（`src-tauri/src/core/cli/providers.rs:1023-1052,1078-1101`）：
+  1. 以全局 `~/.jan/config.toml` 为基础；
+  2. 从桌面 settings.json 补充全局未定义的 Provider，继承结果只用于运行；
+  3. 应用项目 `.jan/agent/agent.toml` 中的 provider 配置覆盖；
+  4. 应用 CLI 参数和环境变量覆盖，随后补充会话模型目录及凭据。
 - **Agent 子命令**：`jan cli agent run/step/status` 非交互运行项目 Agent。
-- **模型、线程与 MCP**：`jan cli models list` 列出已配置 Provider 的模型，`jan cli threads list/get/delete/messages` 读取与删除线程，`jan cli mcp list/get/add/remove/enable/disable` 管理共享的 `mcp_config.json`（`main.rs:236-263,385-479`）。
-- **登录、配置与用量**：`jan config set/unset/list/path` 管理 `~/.jan/config.toml` 中的 Provider 凭据，`jan login` 与 `jan auth` 处理 Tokamak 登录，`jan usage` 读取账号用量，`jan plugin` 管理项目插件与技能，`jan update` 自更新。
+- **模型、线程与 MCP**：`jan cli` 之下按模型、线程、MCP 三类对象分组操作，入口在 `main.rs:236-263,385-479`：
+
+  | 命令 | 作用 |
+  |---|---|
+  | `jan cli models list` | 列出已配置 Provider 的模型 |
+  | `jan cli threads list/get/delete/messages` | 读取与删除线程 |
+  | `jan cli mcp list/get/add/remove/enable/disable` | 管理共享的 `mcp_config.json` |
+
+- **登录、配置与用量**：配置、登录、用量、插件与自更新各有独立子命令。
+
+  | 命令 | 作用 |
+  |---|---|
+  | `jan config set/unset/list/path` | 管理 `~/.jan/config.toml` 中的 Provider 凭据 |
+  | `jan login`、`jan auth` | 处理 Tokamak 登录 |
+  | `jan usage` | 读取账号用量 |
+  | `jan plugin` | 管理项目插件与技能 |
+  | `jan update` | 自更新 |
+
 - **执行约束**：Agent 工具循环复用桌面的 Rust Agent 核心；`--safe` 在写入、命令与 MCP 调用前审批，`--sandbox` 开启 OS 沙箱（默认按配置关闭），`--no-sandbox` 临时取消持久配置，沙箱内升级需批准，`--plan` 只读计划模式，`-c`/`--resume` 恢复项目会话。
 - **反向方向**：`jan mcp serve` 把只读内置工具按项目根目录暴露给其他 Agent（stdio 或 loopback HTTP，写与执行需 `--allow-write`/`--allow-exec`）。
 
@@ -139,7 +165,7 @@ jan acp    （隐藏实验项）
 
 **事实对象**：RPC 会话（连接身份 + 会话 id + 模型 + 工具集）、host tool 声明（客户端提供、运行时派发）、协议 schema 产物（`protocol/schema.json`、`protocol/rpc-schema.json`）与由它生成的客户端（`packages/adk` 的 JavaScript 实现、`adk/python` 的 Python 实现）。
 
-**完整主链**：客户端请求 `initialize` 并发送 `initialized` 通知完成握手，再以 `session/start` 创建会话、`session/tools/set` 声明客户端工具，随后用 `turn/start` 发起生成。模型调用客户端工具时，Jan 派发请求，客户端通过 `tool/respond` 回填；`turn/steer` 可向运行中回合追加输入，结束通知为 `turn/completed`。方法名采用斜杠分隔，握手与调度分支见 [rpc.rs:518–610](../../jan/src-tauri/src/core/cli/rpc.rs#L518-L610)、[rpc.rs:673–801](../../jan/src-tauri/src/core/cli/rpc.rs#L673-L801)。
+**完整主链**：外部客户端先用 `initialize` 请求与 `initialized` 通知完成握手，再建会话并声明自己的工具。会话由 `session/start` 创建，`session/tools/set` 声明客户端工具，生成由 `turn/start` 发起。模型要调用客户端工具时，Jan 派发请求，客户端用 `tool/respond` 回填；`turn/steer` 向运行中回合追加输入，`turn/completed` 报告回合结束。方法名采用斜杠分隔，握手与调度分支见 [rpc.rs:518–610](../../jan/src-tauri/src/core/cli/rpc.rs#L518-L610)、[rpc.rs:673–801](../../jan/src-tauri/src/core/cli/rpc.rs#L673-L801)。
 
 **并发与持续性**：一个进程可持有多个会话，同时只运行一个回合；运行中更换该会话的工具或模型会收到可重试错误。`session/resume` 只查进程内会话表；成功完成且未设 ephemeral 的会话可保存为项目线程，但该 RPC 方法不从磁盘恢复旧进程的会话。临时会话还关闭项目记忆写入（[rpc.rs:459–473](../../jan/src-tauri/src/core/cli/rpc.rs#L459-L473)、[rpc.rs:569–581](../../jan/src-tauri/src/core/cli/rpc.rs#L569-L581)、[rpc.rs:704–751](../../jan/src-tauri/src/core/cli/rpc.rs#L704-L751)）。
 
@@ -155,7 +181,11 @@ jan acp    （隐藏实验项）
 
 **入口与触发者**：设置页提供 Installed/Catalog 两个页签，可从本地 `.tgz` 包或目录索引安装；开发目录加载只在开发构建显示。安装先暂存，首次安装展示权限同意框，升级展示新增权限差异，确认后提交注册表并重载扩展。入口与事件见 [扩展设置页:107–155、240–263](../../jan/web-app/src/routes/settings/extensions/index.tsx#L107-L155)、[useStagedInstall:34–95](../../jan/web-app/src/containers/extensions/useStagedInstall.tsx#L34-L95)。
 
-**事实对象**：扩展包（npm 形式的包 + 清单）、稳定 API（`packages/extension-api` 的 `API_VERSION`、能力与贡献声明、语义化版本兼容判断、`Disposable` 与事件）、worker 侧运行时（`packages/extension-runtime` 的 `protocol.ts`、`handles.ts`、`endpoint.ts`、`worker/`）。
+**事实对象**：安装与运行涉及三层实体：
+
+- 扩展包：npm 形式的包体加一份清单；
+- 稳定 API：`packages/extension-api` 定义 `API_VERSION`、能力与贡献声明、语义化版本兼容判断，以及 `Disposable` 与事件；
+- worker 侧运行时：`packages/extension-runtime` 内的协议、句柄、端点与 worker 四部分，对应 `protocol.ts`、`handles.ts`、`endpoint.ts` 与 `worker/`。
 
 **完整主链**：用户确认安装 → Rust 提交数据目录中的包与注册表 → loader 读取启用条目和经哈希核验的入口 → 宿主在启动 worker 前校验 API 版本，并把授权收窄为清单请求集合 → 第三方扩展在 worker 中经 RPC 调用受控宿主 API → 贡献点进入界面与服务注册表。禁用、升级、回滚、卸载与权限变更均通过按扩展串行的 reload 先释放旧贡献再重读注册表，避免旧权限的 worker 最后启动（[installed-loader.ts:66–117](../../jan/web-app/src/lib/extensions/installed-loader.ts#L66-L117)、[host.ts:260–389](../../jan/web-app/src/lib/extensions/host.ts#L260-L389)）。
 
@@ -184,8 +214,14 @@ jan acp    （隐藏实验项）
 
 ## 声明不符、外部依赖与暂缓项
 
-- **本地↔云模型级 failover**：README 语境下的"容灾/路由"易被读成智能调度；按当前快照只有云端 API key 链 401 重试（`provider-api-keys.ts`）与 MCP 工具路由降级，无分片、无模型级本地↔云自动切换。统一路由 = 按 `model_id` 静态解析，结论维持归并。
-- **设备级推理器下载/选型/回滚**：引擎以编译期版本捆绑进随附 worker，首次运行不下载数百 MB 后端，扩展设置中没有 `llamacpp_version`、`llamacpp_backend`、`check_for_updates`、`auto_update_engine`、`verify_backend_deps` 这些后端选型键；按硬件选 CUDA/Vulkan/CPU 后端并回滚的路径在当前实现中不存在。[代码确认]
+- **本地↔云模型级 failover**：README 的"容灾/路由"措辞容易被读成智能调度。当前实现只有云端 API key 链在 401 时重试（`provider-api-keys.ts`），外加 MCP 工具路由降级；既没有分片，也没有本地与云之间的模型级自动切换，请求路由按 model_id 静态解析，该能力维持归并。
+- **设备级推理器下载/选型/回滚**：引擎以编译期版本捆绑进随附 worker，首次运行不下载数百 MB 后端；扩展设置中也没有后端选型键，本次核对的五个键在设置里均未出现：
+  - `llamacpp_version`、`llamacpp_backend`；
+  - `check_for_updates`、`auto_update_engine`；
+  - `verify_backend_deps`。
+
+  按硬件选 CUDA/Vulkan/CPU 后端并回滚的路径在当前实现中不存在。[代码确认]
+
 - **`jan serve` / `jan launch claude|openclaw`**：当前 CLI 命令树中没有本地模型服务一键启动与外部 Agent CLI 预接命令，CLI 只运行自身的 Agent（见能力三与外部执行体笔记）。
 - **BrowserMCP**：伴生 Chrome 扩展（`JanBrowserExtensionDialog.tsx` 仅为配置入口），本仓库主链未接入，标外部依赖。
 - **Project 工作流**：`入口确认`（`web-app/src/routes/project/$projectId.tsx`、`services/projects/default.ts`、rag-extension `scope: "project"` 检索），证据以 UI 层为主；与"协同工作区"聚类（Open WebUI Notes、LobeHub Pages）重叠，本轮不单独提案，留待聚类比较。

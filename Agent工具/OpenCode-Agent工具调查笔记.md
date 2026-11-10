@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不再集中注册在某个 registry，而是由插件在 `tool` 域里通过 `add/update/remove` 注册（`packages/plugin/src/effect/tool.ts`），内建工具本身就是一组内建插件（`packages/core/src/tool/plugin/*.ts`，每个文件导出 `name` 与 `Plugin`）；MCP 工具按命名空间并入，Code Mode 把工具暴露给受限解释器。
+OpenCode 2.x 的工具全部由 Core 的 `Tool` 服务统一管理。插件在 `tool` 域里注册工具，内建工具也按插件形式装配：`packages/core/src/tool/plugin/` 下的每个文件导出一个插件的 `name` 与 `Plugin`，插件侧的新增、更新与移除入口在 `packages/plugin/src/effect/tool.ts`。MCP 工具按命名空间并入同一份目录，Code Mode 再把工具暴露给受限解释器。
 
 模型侧只看到当轮工具快照：Tool 服务以整工具拒绝规则筛掉目录条目，保留当次定义及执行器；真实授权由各工具的叶子策略调用权限服务，注册表自身不统一审批。结果先归一化为文本/文件，再由 Session runner 做通用截断（2000 行 / 50 KiB，超限落盘）。每个步骤进行一次模型流式调用，runner 从持久历史重建下一步，AI SDK 不持有工具循环（[快照边界](../../opencode/packages/core/src/tool.ts#L250-L320)、[步骤执行](../../opencode/packages/core/src/session/runner/step.ts#L95-L130)）。
 
@@ -38,8 +38,23 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 ## 1. 工具定义与来源
 
-- **工具形状**（`packages/schema/src/tool.ts`）：`Tool.Info` 含 `name`、`input`（Effect Schema / StandardSchema / JSON Schema）、`description`、`execute`、可选 `output` 与 `options`；`Context` 含 `sessionID/agent/messageID/id/progress`；返回 `Result`（`output`、`content`、`metadata`）。
-- **命名空间**：`options.namespace` 让工具带上命名空间，`options.permission` 指定权限动作名，`options.codemode`/`pinned` 控制是否暴露给 Code Mode；`runtime.ts` 的 `normalizedName`/`effectiveName` 负责把名字规整为模型可见的名称。
+- **工具形状**：工具定义是一份带输入 Schema 的可执行对象，`Tool.Info` 把工具名、输入 Schema、描述与执行器合在一起交给宿主，另允许附加可选配置。输入 Schema 可用 Effect Schema、StandardSchema 或 JSON Schema 编写。执行时宿主传入 `Context`，执行器返回 `Result`，三者包含的字段如下（`packages/schema/src/tool.ts`）：
+
+  | 结构 | 字段 |
+  |---|---|
+  | `Tool.Info` | `name`、`input`、`description`、`execute` |
+  | `Tool.Info` 可选项 | `output`、`options` |
+  | `Context` | `sessionID`、`agent`、`messageID`、`id`、`progress` |
+  | `Result` | `output`、`content`、`metadata` |
+
+- **命名空间**：工具选项里有几项与命名和可见性相关的配置：
+
+  - `namespace` 给同一来源的工具打上命名空间；
+  - `permission` 指定审批使用的权限动作名；
+  - `codemode` 与 `pinned` 控制是否暴露给 Code Mode。
+
+  模型最终看到的名称由 runtime 的规整逻辑生成，`normalizedName` 与 `effectiveName` 分别负责名称规整与生效名称（`packages/core/src/tool/runtime.ts`）。
+
 - **内建工具**（`packages/core/src/tool/plugin/`，由 `core/src/plugin/internal.ts` 装配）：
 
   | 名称 | 文件 | 说明 |
@@ -76,9 +91,9 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 ## 3. 参数校验与执行
 
-- **校验**：输入按工具声明的 Schema 解码，失败返回带字段说明的 `Tool.Error`，该信息会作为模型可见的纠正提示；`plugin/tool-input-repair.ts` 对历史别名（如 `bash` → `shell`）做兼容修复。
-- **执行**：`runtime.ts` 的 `execute` 负责调用工具、归一化内容（文本/文件、图片压缩与超限提示）并包装错误。
-- **进度**：工具可通过 `Context.progress` 上报 metadata，事件流以 `session.tool.progress` 广播，客户端据此显示实时状态。
+- **校验**：工具执行前，宿主按工具声明的 Schema 解码输入；解码失败时返回带字段说明的工具错误，这段说明会回注给模型，作为下一轮的纠正提示。旧版本遗留的工具别名由输入修复插件在解码前统一改写，例如把 `bash` 映射到 `shell`（`packages/core/src/tool/plugin/tool-input-repair.ts`）。
+- **执行**：runtime 层的 `execute` 承担实际调用，它运行工具实现，把返回值归一化为文本或文件内容，处理图片压缩与超限提示，并把抛出的错误包装成统一结果（`packages/core/src/tool/runtime.ts`）。
+- **进度**：工具在执行过程中可通过 `Context.progress` 上报元数据，这类更新以 `session.tool.progress` 事件广播，客户端据此显示实时状态。
 
 ## 4. 编排循环与工具回合
 
@@ -89,10 +104,17 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 ## 5. 审批与授权
 
-- **规则集**：`Permission.Ruleset` 是 `{action, resource, effect}` 列表，action 可以是通配或具体工具名，effect 为 allow/ask/deny；`evaluate` 按顺序求值，`merge` 合并多层规则（`core/src/permission.ts`）。
-- **默认规则**：`Agent.Info.default` 给全允许，但对 `*.env`/`*.env.*` 的读取要求询问，`*.env.example` 允许（`packages/schema/src/agent.ts`）。
-- **审批阻塞**：需要询问时服务端等待客户端回复。无人值守只在原结果为 ask 时追加规则复评，全部资源均变为 allow 才放行，否则明确拒绝，原有 deny 先行拒绝（[permission.ts](../../opencode/packages/core/src/permission.ts#L184-L209)）。
-- **应用范围**：会话权限列 + Agent 权限规则 + 工具自身策略共同决定；shell 命令还有命令级扫描（`core/src/shell/scan.ts` 解析命令方言与结构）用于风险判定。
+- **规则集**：权限以 `Permission.Ruleset` 表示，每条规则记录动作、资源与处理效果三件事。动作可以写成通配符，也可以写成具体工具名；效果分三档：
+
+  - allow：放行；
+  - ask：转入审批，等待客户端答复；
+  - deny：拒绝执行。
+
+  整套规则按列表顺序求值，多层规则由 merge 合并（`packages/core/src/permission.ts`）。
+
+- **默认规则**：`Agent.Info.default` 整体放行，只有读取 env 文件这一项例外：`*.env` 与 `*.env.*` 需要询问，`*.env.example` 直接放行（`packages/schema/src/agent.ts`）。
+- **审批阻塞**：命中需要询问的规则时，服务端挂起这次调用并等待客户端回复。无人值守模式只对原本判为 ask 的调用追加规则重新求值：所有目标资源都改判为 allow 才放行，否则按拒绝处理，原本就是 deny 的调用直接拒绝（[permission.ts](../../opencode/packages/core/src/permission.ts#L184-L209)）。
+- **应用范围**：一次工具调用是否放行，由会话权限列、Agent 权限规则与工具自身策略共同决定。shell 另有一层命令级扫描，解析命令方言与结构来做风险判定（`packages/core/src/shell/scan.ts`）。
 
 ## 6. 执行边界
 
@@ -109,9 +131,9 @@ OpenCode 2.x 的工具系统由 Core 的 `Tool` 服务统一管理：工具不�
 
 ## 8. MCP、Skill 与子 Agent
 
-- **MCP**：stdio 与 HTTP/SSE 两类传输；工具按 `server_命名空间` 暴露，资源读取由 `mcp-resource` 工具承担；服务器状态变化会触发热重载。
-- **Skill**：不是工具注册来源；系统提示列出可用技能，`skill` 工具按名加载技能文本（`core/src/skill.ts`、`skill/discovery.ts`），`read` 工具也会发现技能文件。
-- **子 Agent**：`subagent` 工具创建子会话或向已有子 Agent 追加任务（`tool/plugin/subagent.ts`），子会话继承收窄的权限，完成/失败通过 `session/subagent-job.ts`、`subagent-completion.ts` 回传父会话；结果为空或子会话报错时作为失败结果返回而不是当成功。
+- **MCP**：MCP 支持 stdio 与 HTTP/SSE 两类传输，远端服务器上的工具以服务器名作命名空间并入工具目录，资源读取交给 `mcp-resource` 工具完成。服务器连接状态变化时，工具目录随之热重载。
+- **Skill**：系统提示会列出当前可用的技能，模型通过 `skill` 工具按名称加载对应文本，`read` 工具在读取文件时也会发现技能文件；技能的内容经提示与加载进入上下文，不向工具目录新增条目（`packages/core/src/skill.ts`、`packages/core/src/skill/discovery.ts`）。
+- **子 Agent**：`subagent` 工具负责派生工作，它新建子会话，或向已存在的子 Agent 追加任务。子会话拿到收窄后的权限；任务完成或失败都通过子 Agent 任务与完成回传通道送回父会话，结果为空或子会话报错时按失败结果返回（`packages/core/src/tool/plugin/subagent.ts`、`packages/core/src/session/subagent-job.ts`、`packages/core/src/session/subagent-completion.ts`）。
 
 ## 9. 设计取舍与已确认边界
 

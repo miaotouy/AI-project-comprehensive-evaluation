@@ -18,12 +18,12 @@ Codex 的工具系统是“中央注册表 + 分层暴露策略 + 回合内并�
 
 关键事实：
 
-- 目录构建入口是 `build_tool_router`，注册来源按固定顺序合并，见 `codex-rs/core/src/tools/spec_plan.rs:122-218`。
-- 执行入口是 `ToolRegistry::dispatch_any_with_state`，前置 hook、环境解析、审批、原生复核都在这里汇合，见 `codex-rs/core/src/tools/registry.rs:724-1033`。
-- 采样循环在每个 `response.output_item.done` 上调用 `build_tool_call`，命中工具就落历史并起一个执行 future，见 `codex-rs/core/src/stream_events_utils.rs:327-381`。
-- 并发不是全并行：支持并行的工具拿读锁，其余拿写锁，等价于“并行批次中的独占段”，见 `codex-rs/core/src/tools/parallel.rs:292-304`。
-- 审批在工具执行端统一处理，先跑 permission hook，再在人工审批与 Guardian 自动复核之间选择，见 `codex-rs/core/src/tools/approvals.rs:548-703`。
-- 工具结果按调用产生顺序回注，而不是按完成时间；采样流结束后用 `FuturesOrdered` 统一 drain，见 `codex-rs/core/src/session/turn.rs:2779-2807`、`:3665-3675`。
+- 每个 step 开始时，目录构建入口 `build_tool_router` 按固定顺序合并各路注册来源，构建本 step 的工具目录，见 `codex-rs/core/src/tools/spec_plan.rs:122-218`。
+- 一次工具调用先进入执行入口 `ToolRegistry::dispatch_any_with_state`，前置 hook、环境解析、审批与原生复核都在这里汇合，见 `codex-rs/core/src/tools/registry.rs:724-1033`。
+- 采样循环每收到一个 `response.output_item.done` 事件就调用 `build_tool_call` 解析，命中工具后落历史并启动一个执行 future，见 `codex-rs/core/src/stream_events_utils.rs:327-381`。
+- 并发能力由工具声明决定：声明支持并行的工具拿读锁，其余工具拿写锁，并行批次里因此仍夹着独占段，见 `codex-rs/core/src/tools/parallel.rs:292-304`。
+- 审批在工具执行端统一处理：先运行 permission hook，再在人工审批与 Guardian 自动复核之间选择，见 `codex-rs/core/src/tools/approvals.rs:548-703`。
+- 工具结果按调用产生的顺序回注历史，完成时间先后不影响写入次序；采样流结束后用 `FuturesOrdered` 统一 drain，见 `codex-rs/core/src/session/turn.rs:2779-2807、3665-3675`。
 - 没有固定的工具迭代次数上限；循环由 `needs_follow_up`、待处理输入、token 预算与自动压缩共同控制。
 
 ## 总体调用链
@@ -123,9 +123,9 @@ MCP 跳过路径只覆盖宿主管理的模型搜索工具：该 step 选择宿�
 
 MCP 与应用工具的暴露由位集合运算得出（`spec_plan.rs:229-321`）。起点是三种表面的全集，先减掉 `omit_tools_from`，再按命名空间与模型能力调整：
 
-- 被列进 `code_mode.direct_only_tool_namespaces` 的命名空间，去掉 Deferred 与 Code Mode，只留直接可见。
-- 模型支持工具搜索时，优先去掉 Direct，让工具通过搜索发现；但在只允许 Code Mode 的会话里，只有工具同时保留 Code Mode 表面时才这样做，否则去掉 Deferred（`spec_plan.rs:297-305`）。
-- `code_mode_only_strict_3p_tools` 开启时，第三方工具强制留在 Deferred，并忽略 MCP/应用的 `omit_tools_from` 冲突（`spec_plan.rs:273-282`、`:634-657`）。
+- 命名空间一旦列入 `code_mode.direct_only_tool_namespaces`，其下的工具就失去 Deferred 与 Code Mode 两个表面，只剩直接可见。
+- 模型支持工具搜索时，暴露计算优先去掉 Direct 表面，让工具转由搜索发现；在只允许 Code Mode 的会话里，这条规则只对同时保留 Code Mode 表面的工具生效，其余工具改为去掉 Deferred（`spec_plan.rs:297-305`）。
+- 开启 `code_mode_only_strict_3p_tools` 后，第三方工具强制留在 Deferred，并忽略 MCP 与应用配置的 `omit_tools_from` 冲突（`spec_plan.rs:273-282、634-657`）。
 
 ### 2.3 工具搜索的合成
 
@@ -168,11 +168,13 @@ Provider 差异被收敛在模型信息与请求构造层：工具类型、是�
 
 `try_run_sampling_request` 消费模型流。每遇到一个完成的输出项就交给输出项处理器；如果产生工具 future，就压入 `in_flight`，并置需要继续回合的标记（`turn.rs:3222-3236`）。
 
-采样流结束后，若还有未完成的工具调用，就进入 drain 阶段，逐个 await 并按顺序写入历史（`turn.rs:2779-2807`、`:3665-3675`）。外层回合循环在模型要求继续或有待处理输入时再次采样（`turn.rs:644`、`:758`）。
+采样流结束后，运行循环若发现还有未完成的工具调用，就进入 drain 阶段：逐个等待其完成，再按顺序写入历史（`turn.rs:2779-2807、3665-3675`）。
+
+外层回合循环在模型要求继续或仍有待处理输入时再次发起采样（`turn.rs:644、758`）。
 
 ### 5.2 并发模型
 
-工具声明是否支持并行，决定它拿读锁还是写锁（`parallel.rs:183`、`:292-304`）。读锁可以重叠，写锁独占。命令执行与写入标准输入都声明支持并行，因此多个命令可以同时执行（`unified_exec/exec_command.rs:121-123`、`write_stdin.rs:56`）。
+工具声明是否支持并行，决定调度时给它读锁还是写锁：读锁可以重叠，写锁独占（`parallel.rs:183、292-304`）。命令执行与写入标准输入都声明支持并行，因此多个命令能同时执行（`unified_exec/exec_command.rs:121-123`、`write_stdin.rs:56`）。
 
 MCP 工具的并行判定是“服务器配置声明支持，或工具注解声明只读”（`core/src/tools/handlers/mcp.rs:172-184`）。动态工具默认支持并行（`handlers/dynamic.rs:87-90`）。
 

@@ -37,11 +37,11 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 ## 1. 入口、用户目标与导出源
 
-- 入口只有一处：会话顶部工具栏的 ActionMenu 菜单项 "Export Chat"（`src/renderer/components/layout/Toolbar.tsx:136-140`，窄屏布局同样存在 `:202-205`）；本次未在其他位置（消息菜单、会话列表、命令行）找到导出入口。
-- 菜单经 NiceModal 的 `export-chat` 注册项（`Toolbar.tsx:45-47`，注册于 `modals/index.tsx:29`）打开 `ExportChat` 弹窗。
-- 弹窗仅两个下拉：范围（`all_threads` / `current_thread`）与格式（Markdown / TXT / HTML），默认 HTML + 全部线程（`src/renderer/modals/ExportChat.tsx:15-16,48-65`）。弹窗内固定显示警示文案 "Exports are for viewing only. Use Settings → Backup if you need a backup you can restore."（`ExportChat.tsx:43-47`），明确区分"阅读导出"与"备份"两种用户目标。
-- 点击 Export 后弹窗立即关闭、不等待导出完成（`ExportChat.tsx:23-30`）；导出函数从行存储投影取会话后转交线程组装入口 `exportChat`（`src/renderer/stores/session/export.ts:5-11`）。
-- 导出源为完整 Session。普通范围仍按当前或全部 thread 组装；启用“全部分支”后，Markdown/TXT 使用共享层的 `expandMessageBranches` 展开每条路径，HTML 使用原始 `messageForksHash` 构建交互数据。共享组装见 `packages/chatbox-core/src/backup-export/session.ts:47-71`，HTML 收集与控制器见 `src/renderer/lib/format-chat.tsx:169-385`。
+- 导出入口只有一处：会话顶部工具栏的 ActionMenu 里有一项 "Export Chat"，宽屏与窄屏布局各渲染一次，实现见 `src/renderer/components/layout/Toolbar.tsx:45-47,136-140,202-205`；消息菜单、会话列表和命令行本次都未找到导出入口。
+- 点击该菜单项后，NiceModal 按 `export-chat` 注册项打开导出弹窗 `ExportChat`，注册位置见 `src/renderer/modals/index.tsx:29`。
+- 弹窗只有范围与格式两个下拉：范围可选当前线程或全部线程，格式可选 Markdown、TXT、HTML，默认全部线程加 HTML。弹窗内固定显示一条警示，说明导出仅供查看，需要可恢复的备份请走设置页 Backup。默认值与文案见 `src/renderer/modals/ExportChat.tsx:15-16,43-47,48-65`。
+- 点击 Export 后弹窗立即关闭，不等待导出完成；导出函数先从行存储投影取出会话，再交给线程组装入口 `exportChat`，两处调用见 `src/renderer/modals/ExportChat.tsx:23-30` 与 `src/renderer/stores/session/export.ts:5-11`。
+- 导出源是完整 Session。默认范围按当前线程或全部线程组装；启用全部分支后，Markdown/TXT 用共享层的 `expandMessageBranches` 把每条分叉展开成线性路径，HTML 则保留原始 `messageForksHash` 供文件内脚本切换。共享组装与 HTML 收集分别见 `packages/chatbox-core/src/backup-export/session.ts:47-71` 和 `src/renderer/lib/format-chat.tsx:169-385`。
 - 顺序：线程按 `threads` 数组顺序，消息按 `messages` 数组顺序，无排序或重排选项。
 
 ## 2. 范围选择、内容口径与字段过滤
@@ -57,27 +57,27 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 | `reasoning` | 跳过 | 跳过 |
 | `agent-mode-suggestion` | 跳过 | 跳过 |
 
-- reasoning 排除可从两处确认：内容分片循环没有 reasoning 分支（`chat-export.ts:110-137`、`format-chat.tsx:50-91`）；回退取文本路径的 `getMessageText` 默认不包含 reasoning（`src/shared/utils/message.ts:5-11`）。这与聊天现场"思考块可见"形成口径差。
-- 工具调用：摘要收集器只合并内联的参数/结果字段（`collectToolCallSummaries`，`chat-export.ts:15-31`）。超大工具结果走 blob 溢出的 `resultStorageKey`，不会出现在导出中（schema 见 `src/shared/types/session.ts:204-205`）。参数与结果经 JSON 识别与 2 空格美化（`chat-export.ts:46-55`）。
-- system 角色消息原样导出（标题 `**system**:` / `SYSTEM:`），默认提示词等 system 消息会出现在交付物中；无任何脱敏、密钥扫描或按角色过滤开关。
-- 附件与链接：附件只导出文件名列表（`getAttachmentNames`，`chat-export.ts:64-66`）；`msg.links`（已解析链接）在三种格式中均未处理，本次未找到任何引用。
-- 空消息（仅 tool-call 完成态的消息）仍会输出一个带"角色标题"的空块（消息级循环无空过滤，`chat-export.ts:109-148`）。
+- 推理内容在导出时被丢弃，可以从两处实现确认：三种格式共用的内容分片循环里没有 reasoning 分支，回退取纯文本时 `getMessageText` 也只返回正文。定位见 `chat-export.ts:110-137`、`src/renderer/lib/format-chat.tsx:50-91` 与 `src/shared/utils/message.ts:5-11`。聊天现场把思考块展示给用户，导出物中这部分内容缺席，两处可见范围不一致。
+- 工具调用只保留内联的参数与结果：摘要收集器合并这两个字段，超出阈值的工具结果已溢写到 blob（`resultStorageKey`），导出物里没有这部分内容；参数与结果经 JSON 识别后按 2 空格缩进美化。收集与美化见 `chat-export.ts:15-31,46-55`，溢出字段定义见 `src/shared/types/session.ts:204-205`。
+- system 角色消息原样导出，Markdown 用 `**system**:`、TXT 用 `SYSTEM:` 作角色标题，默认提示词一类内容会直接出现在交付物里；导出端没有脱敏、密钥扫描或按角色过滤的开关。
+- 附件只导出文件名列表（`getAttachmentNames`）；`msg.links` 中的已解析链接在三种格式里都没有处理，本次未找到任何引用。定位见 `chat-export.ts:64-66`。
+- 只有工具调用完成态、没有正文的消息仍会输出一个空块，块内只有一个角色标题；消息级循环没有空内容过滤，见 `chat-export.ts:109-148`。
 
 ## 3. 附件、资源与离线封装
 
-- Markdown/TXT：图片为 `[image]` 占位，附件为文件名列表，正文无图片数据；文件可离线阅读，但内容不可见。
+- Markdown 与 TXT 的正文里没有图片数据：图片位置写成 `[image]` 占位，附件只留文件名列表。文件可以离线打开，正文里的图片与附件内容则看不到。
 - HTML：受管图片从 IndexedDB blob 存储读出（`storage.getBlob(storageKey)`），转成 `data:` URL 内联（`format-chat.tsx:74-89`）；读取失败时静默产出空 `src`，无降级占位。旧式 `p.url` 图片保持原始外部 URL 引用，不做代理或转码。附件仍只有文件名列表，链接不导出。
 - HTML 离线性：页面引 `https://cdn.tailwindcss.com`（运行时 JIT 生成样式，含 typography 插件）、jsdelivr KaTeX CSS 与 chatboxai.app 图标（`format-chat.tsx:107-141`），因此断网打开时布局样式、数学公式样式与图标缺失；正文文本本身随文件携带。CDN 脚本在打开文件时执行，属于加载期远端脚本依赖（安全见第 9 节）。
 - 备份 ZIP v2 才是资源级封装：`resources/` 目录收集消息图片、附件解析/原文 blob、离线工具结果、头像与背景图（`packages/chatbox-core/src/backup-export/session.ts:19-120`），且遍历范围含分叉分支（`resources.ts:88-98`），比对话导出的抽取范围更完整。
 
 ## 4. 格式、schema 与往返能力
 
-- 导出格式只有 `ExportChatFormat` 一种定义（`'Markdown' | 'TXT' | 'HTML'`，`src/shared/types.ts:20-22`）。会话级 JSON、PDF、PNG 导出本次未找到：全仓搜索 html-to-image、html2canvas、toPng、screenshot 等截图关键词均无会话导出用途命中；`package.json` 无相关依赖。
-- Markdown 输出是"带围栏的线性文档"：一级标题为会话名，每线程 `## N. 线程名`，每条消息以 `**role**:` 开头、正文包进代码围栏，结尾固定追加 Chatbox 品牌 HTML 片段（`chat-export.ts:151-158`）。TXT 是同一抽取逻辑的纯文本变体。
-- 三种格式都不可往返。交互 HTML 虽携带消息 ID 和 fork 结构以便离线切换，但没有稳定导入 schema、完整 Session 设置与资源映射，不能恢复为 Chatbox 会话。
-- "备份"才是可往返的导出（ZIP v2）：`manifest.json` 声明格式与版本（`format: 'chatbox-backup'`、`formatVersion: 2`，`packages/chatbox-core/src/backup-export/types.ts:4-5,65-91`），包内含会话 JSON、资源、SHA-256 校验、双向映射与统计；导入分"读取暂存 → 完整校验 → 事务提交"三阶段（见 `docs/technical/data-backup.md`，与实现一致）。`backup-roundtrip.test.ts`（890 行）用内存存储做导出→导入闭环断言。
-- 旧版单 JSON 备份仍可导入（`general.tsx:792-801` 走 `importLegacyJsonBackup`）。
-- 遗留 UI：`src/renderer/pages/SettingDialog/AdvancedSettingTab.tsx` 仍是旧的单 JSON 备份/恢复界面（含 `__exported_items` 字段），但本次全仓搜索未发现任何引用，属于死代码；活动入口是 `src/renderer/routes/settings/general.tsx` 的 `ImportExportDataSection`。
+- 导出格式只有 `ExportChatFormat` 一个联合类型，取值限定为 Markdown、TXT、HTML 三种，定义见 `src/shared/types.ts:20-22`。会话级 JSON、PDF、PNG 导出本次未找到：全仓用 html-to-image、html2canvas、toPng、screenshot 等截图关键词搜索，没有命中会话导出用途，`package.json` 里也没有相关依赖。
+- Markdown 输出是一份带围栏的线性文档：会话名作一级标题，每个线程一个 `## N. 线程名` 小节，每条消息以 `**role**:` 开头并把正文包进代码围栏，文件末尾固定追加一段 Chatbox 品牌 HTML。结构见 `chat-export.ts:151-158`，TXT 沿用同一套抽取逻辑，只是输出纯文本。
+- 三种格式都无法重新导入。交互 HTML 携带了消息 ID 与分叉结构，可以在导出文件里离线切换分支，但缺少稳定的导入 schema、完整的 Session 设置和资源映射，恢复不成 Chatbox 会话。
+- 可往返的导出是 ZIP v2 备份：包内 `manifest.json` 声明格式标识 `chatbox-backup` 与版本 2，并包含会话 JSON、资源、SHA-256 校验、双向映射和统计；导入分读取暂存、完整校验、事务提交三个阶段，与 `docs/technical/data-backup.md` 的描述一致。格式声明见 `packages/chatbox-core/src/backup-export/types.ts:4-5,65-91`，往返闭环由 `backup-roundtrip.test.ts`（890 行）在内存存储上断言。
+- 旧版单 JSON 备份仍有导入路径，走 `importLegacyJsonBackup`（`general.tsx:792-801`）。
+- 遗留界面：`src/renderer/pages/SettingDialog/AdvancedSettingTab.tsx` 里还留着旧的单 JSON 备份/恢复界面，含 `__exported_items` 字段，但全仓搜索没有发现引用，属于死代码。当前生效的备份入口是 `src/renderer/routes/settings/general.tsx` 中的 `ImportExportDataSection`。
 
 ## 5. 分享稿编辑、编排与预览
 
@@ -85,19 +85,19 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 ## 6. 图片、HTML、PDF 与富内容生成
 
-- 图片（E3）：本次未找到把对话渲染成 PNG/JPEG 的能力；`PictureDialog`（`src/renderer/pages/PictureDialog.tsx:48-67`）与图片查看器的下载方法只是把会话里已有图片下载成文件（指南界定范围外，模型图片生成/原始附件下载）。
-- PDF：本次未找到（导出端无打印/PDF 管线，`src/main` 的 pdf 相关仅为文档解析 `parsePdf`）。
-- HTML：独立渲染器路线。`formatChatAsHtml` 用 `ReactDOMServer.renderToStaticMarkup` 静态渲染共享 Markdown 组件，并传入专门参数（`format-chat.tsx:67` 起）：
-  - `hiddenCodeActions`：隐藏复制/预览/发布按钮，测试断言无 `<button>`（`format-chat.test.tsx:32-46`）；
-  - `defaultCollapsed={false}`：关闭代码折叠；
-  - `forceColorScheme="dark"`：导出页无主题，固定深色代码块（源码注释 `format-chat.tsx:67`）。
+- 图片（E3）：本次未找到把对话渲染成 PNG/JPEG 的能力。`PictureDialog` 页面与图片查看器的下载方法只把会话里已有的图片存成文件，属于模型图片生成与原始附件下载，在指南界定的范围之外，见 `src/renderer/pages/PictureDialog.tsx:48-67`。
+- PDF：本次未找到。导出端没有打印或 PDF 处理管线，`src/main` 中与 pdf 相关的代码只服务于文档解析（`parsePdf`）。
+- HTML：走独立渲染器路线。`formatChatAsHtml` 用 `ReactDOMServer.renderToStaticMarkup` 把共享 Markdown 组件渲染成静态标记，并传入几项专用参数，见 `src/renderer/lib/format-chat.tsx:67` 起：
+  - `hiddenCodeActions`：隐藏复制、预览、发布按钮，测试断言产物中没有 `<button>`（`format-chat.test.tsx:32-46`）；
+  - `defaultCollapsed={false}`：代码块默认展开；
+  - `forceColorScheme="dark"`：导出页不套用应用主题，代码块固定为深色。
   - 富内容保真（基于静态代码的推断）：
-    - Shiki 走同步高亮（`components/Markdown.tsx:486-501`），可进入静态输出；不支持同步的语言不会异步升级，回退为纯 `<code>`（`Markdown.tsx:514-521`）。
-    - Mermaid 是 effect 驱动的客户端渲染（`components/Mermaid.tsx:19-62`，初态 `svgCode=''`），静态导出得到的是空占位，图源文本也不进入页面——推断为"Mermaid 不随 HTML 导出"。
-    - SVG 代码块（语言为 svg/xml/html 且以 `<svg` 开头）由 `SVGPreview` 同步转 data URL 图片（`Mermaid.tsx:161-177`、`Markdown.tsx:322-327`），可进入静态输出。
-    - KaTeX 为 rehype 同步插件，样式靠导出的 CDN CSS。
-  - 样式缺口（推断）：导出页只加载 Tailwind CDN 与 KaTeX CSS，Markdown 组件输出的 Mantine 类名与 `shiki-code.css` 类名（`Markdown.tsx:72` 应用内引入）在导出文件中无对应样式，代码块底色/行号样式可能丢失；需运行验证。
-  - 文件名：`${session.name}.html`（`sessionHelpers.ts:964`），无非法字符清洗，跨平台文件名行为未验证。
+    - Shiki 走同步高亮，能够进入静态输出；不支持同步高亮的语言不会异步升级，回退成纯 `<code>`。两处逻辑见 `src/renderer/components/Markdown.tsx:486-501,514-521`。
+    - Mermaid 由 effect 在客户端渲染，初始 `svgCode` 为空，静态导出只得到空占位，图源文本也不进页面，据此推断 Mermaid 图不随 HTML 导出，见 `src/renderer/components/Mermaid.tsx:19-62`。
+    - SVG 代码块（语言为 svg、xml 或 html，且内容以 `<svg` 开头）由 `SVGPreview` 同步转成 data URL 图片，可以进入静态输出，见 `src/renderer/components/Mermaid.tsx:161-177` 与 `Markdown.tsx:322-327`。
+    - KaTeX 是 rehype 的同步插件，公式样式依赖导出文件引入的 CDN CSS。
+  - 样式缺口（推断）：导出页只加载 Tailwind CDN 与 KaTeX CSS，Markdown 组件输出的 Mantine 类名和 `shiki-code.css` 的类名在导出文件里没有对应样式，代码块底色与行号样式可能丢失，需运行验证；`shiki-code.css` 在应用内的引入见 `Markdown.tsx:72`。
+  - 文件名：`${session.name}.html`，没有非法字符清洗，跨平台文件名行为未验证，见 `sessionHelpers.ts:964`。
 
 ## 7. 生成历史、版本与持久化
 
@@ -105,9 +105,9 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 ## 8. 分享载体、访问控制与撤销
 
-- 会话导出：本地文件是唯一载体（Web/Desktop anchor 下载、Mobile 系统写入），无链接、无远端对象。Web 端备份完成后可选系统 Share Sheet 交付 ZIP 文件（`web_file_share.ts:6-22`，`general.tsx:646-669`），仅限备份文件。
-- VibeDrop 发布（`src/renderer/modals/VibedropPublish.tsx` + `src/renderer/packages/vibedrop.ts`）：把聊天中可渲染代码块（HTML/XML/SVG/JS 等，`Markdown.tsx:583-595,646-660`）的 HTML 内容发布为静态页。该能力只发布代码块 HTML，不发布会话，主体归属生成式输出与运行时类目，本类目只记录边界。
-- 认证与治理：发布前需登录 Chatbox 账号并签发 per-user key（`issueVibedropKey`，缓存于设置 `vibedropPublishKey` 且按账号 email 绑定）；可见性仅 `unlisted` / `public` 两档，同名 slug 可更新（更新失败会提示 slug 不再归属）；发布记录按会话存最近 20 条。以上逻辑见 `vibedrop.ts:131-148,165-190`。管理入口在第三方站点 app.vibedrop.cc；删除、过期、克隆等其余治理由服务端承担，本地无对应调用。
+- 会话导出的载体是本地文件：Web 与桌面端通过 anchor 下载，移动端写入系统目录，全程没有链接也没有远端对象。Web 端在备份完成后还可以调用系统 Share Sheet 交付备份 ZIP，这条路径只针对备份文件，见 `web_file_share.ts:6-22` 与 `general.tsx:646-669`。
+- VibeDrop 发布：把聊天中可渲染代码块（HTML、XML、SVG、JS 等）的 HTML 内容发布成静态页。弹窗入口在 `src/renderer/modals/VibedropPublish.tsx`，发布逻辑在 `src/renderer/packages/vibedrop.ts`，代码块渲染与发布触发点见 `Markdown.tsx:583-595,646-660`。发布对象限于代码块，会话本身不进这条链路，主体归属生成式输出与运行时类目，本类目只记录边界。
+- 认证与治理：发布前要登录 Chatbox 账号并签发按用户区分的发布 key（`issueVibedropKey`），key 缓存在设置项 `vibedropPublishKey` 中并绑定账号 email；可见性只有 `unlisted` 与 `public` 两档，同名 slug 可以更新，更新失败会提示 slug 已不再归属本账号；发布记录按会话保存最近 20 条。以上逻辑见 `vibedrop.ts:131-148,165-190`。管理入口在第三方站点 app.vibedrop.cc，删除、过期、克隆等治理由服务端承担，本地没有对应调用。
 - 会话级公开链接分享（E4）：本次未找到（无分享 API 调用、无 URL 生成代码）。
 
 ## 9. 隐私、安全与内容治理
@@ -131,10 +131,10 @@ HTML 导出用 `ReactDOMServer.renderToStaticMarkup` 复用聊天现场同一套
 
 ## 10. 性能、失败恢复与测试
 
-- 生成是纯内存拼接：Markdown/TXT 单字符串构建；HTML 逐消息异步读取 blob 并拼接（`format-chat.tsx:35-106`），无大小上限、无分页、无分段写入；超长会话与超大图片的内存/耗时未验证。
-- 失败路径：`exportSessionChat` 被 `void` 调用且无 catch（`ExportChat.tsx:27`），会话加载失败或 HTML 生成抛错时无任何用户反馈；图片 blob 读取失败静默变空 `src`。
-- 平台交付：Web 下载用 `<a download>` + ObjectURL，1 秒后 revoke（`web_exporter.ts:14-40`）。桌面平台复用 `WebExporter`（`desktop_platform.ts:33`），main 进程本次未找到 `will-download` 处理，Electron 默认下载行为（保存位置、是否弹框）未运行验证。
-- 移动端 `MobileExporter`/`AndroidFilterWriter` 有完整的失败降级与取消收口（Documents 写入失败 → Cache + 系统选择器，日志分级，`filter_writer.ts:656-811`），并有单测覆盖。
+- 生成全程在内存里拼接：Markdown 与 TXT 一次性构建成单个字符串，HTML 逐条消息异步读取 blob 后再拼接，没有大小上限、分页或分段写入，内容处理循环见 `src/renderer/lib/format-chat.tsx:35-106`。超长会话与超大图片的内存占用和耗时未验证。
+- 会话导出的调用点没有局部错误处理或失败提示：弹窗以 void 调用 `exportSessionChat` 后立即关闭。若会话加载或 HTML 生成抛错，返回的 Promise 拒绝在这条调用链中没有 catch 处理（`src/renderer/modals/ExportChat.tsx:25-30`、`src/renderer/stores/session/export.ts:16-37`）。图片 blob 未读到内容且没有可用 URL 时，HTML 中的图片地址保留为空；读取本身抛错则继续沿异步调用链传播（`src/renderer/lib/format-chat.tsx:71-84`）。
+- 平台交付：Web 端用 `<a download>` 加 ObjectURL 下载，1 秒后 revoke，见 `web_exporter.ts:14-40`。桌面平台复用 `WebExporter` 的下载实现，main 进程本次未找到 `will-download` 处理，Electron 默认的保存位置与是否弹框未运行验证，复用关系见 `desktop_platform.ts:33`。
+- 移动端的 `MobileExporter` 与 `AndroidFilterWriter` 有完整的失败降级与取消收口：Documents 写入失败时改走 Cache 加系统选择器，日志分级输出，并有单测覆盖，见 `filter_writer.ts:656-811`。
 - 测试：下列导出相关测试存在；对话导出的 Markdown/TXT 内容断言测试本次未找到。
   - `format-chat.test.tsx`（HTML 导出无交互按钮）
   - `backup-roundtrip.test.ts`（ZIP 往返）

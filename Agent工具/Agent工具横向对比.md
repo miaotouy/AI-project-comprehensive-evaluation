@@ -63,7 +63,7 @@
 
 二十四个项目的差异集中在工具是否真正形成执行闭环、目录如何按会话收窄、编排循环由谁驱动、审批绑定强度和执行域。Manifold Desktop 只完成“发现、注入、展示”；VCPMobile 会执行远端调度的设备工具，但本地没有 LLM 工具循环。这两者不能与其余二十二个具有“LLM -> 工具 -> LLM”执行回环的项目视为同等工具运行时。Dify 是租户服务端运行时：工具由发布应用或 Agent/workflow 配置决定，传统 Agent 串行执行并把结果回注下一轮。其余项目又分为服务端/主进程 Agent 运行时、普通聊天上的工具回环、VCP 文本协议链和本地编码 Agent 等不同形态。可按以下十七条观察：
 
-1. **策略层完整但默认放行面大：LobeHub。** `humanIntervention` 审批状态机在七个项目里最完整，支持四种模式，`always` 不被 auto-run 绕过；多数内建工具未声明该字段，未声明即 `never` 自动执行，凭证、浏览器、消息与代理四类插件均零声明。
+1. **策略层完整但默认放行面大：LobeHub。** LobeHub 的 `humanIntervention` 审批状态机在七个项目中实现最完整，支持四种模式，`always` 档不会被 auto-run 绕过。多数内建工具没有声明该字段，缺省即按 `never` 自动执行，凭证、浏览器、消息与代理四类插件全部零声明。
 2. **三家均有逐次审批：Chatbox、Cherry Studio、DeepChat。** Chatbox 计费与状态变更不可绕过，Windows 无 OS 隔离；Cherry Studio `acceptEdits` 只看首词；DeepChat 绑定会话与参数 hash，MCP 传输未核验。
 3. **同处 VCP 协议链，角色不同：AIO Hub、VCPChat、VCPToolBox。** 三端解析、审批超时与鉴权粒度不一；AIO 的协议层只有代码级替换接口，当前只实现 VCP。后台子会话仍在主 WebView 执行，`ApprovalArbiter` 可能批准强制审批。
 4. **远端调度的移动设备节点：VCPMobile。** 注册用户显式启用的 14 项设备工具，白名单持久化；收到主服务 `execute_tool` 后经 Tauri/Rust 与 Android 桥执行。本地聊天不注入该目录，循环由主服务持有，CLI 能力经 `VCPMobileCLI` 投影。
@@ -121,7 +121,7 @@ AIO Hub 自行负责目录、VCP 文本解析、工具循环与执行前复核�
 
 ### Chatbox
 
-Chatbox 通过 `buildToolsForSession()` 按 Agent 模式、模型能力、附件、知识库、MCP 和平台动态组装 AI SDK `ToolSet`；命令契约按会话快照分两代，新会话用 sandbox-first 的 `run_command`，只有旧会话继续保留 `code_execution`/`user_exec` 以续跑历史调用，并新增图像与记忆工具（`view_image`、`save_memory`、`delete_memory`）。stdio MCP 是宿主上的真实子进程；高风险命令和越界写入可暂停等待批准，应用状态变更与计费类 action 即使开启 `agentFullAccess` 也不能绕过。macOS/Linux 使用 `@anthropic-ai/sandbox-runtime`，Windows 明确没有 OS 级隔离。Skills 是指令与流程文本，不是独立权限沙箱。工具定义仍由 renderer 组装，但 MCP 工具准备与 schema 校验、记忆工具和旧版回退已移到宿主无关的 `packages/chatbox-core`，同一工具集因此同时受 renderer 组装条件与 core 领域逻辑约束。
+Chatbox 的 renderer 在每次建会话时按 Agent 模式、模型能力、附件、知识库、MCP 与平台动态组装 AI SDK 工具集，入口是 `buildToolsForSession()`。命令契约随会话快照分两代：新会话使用 sandbox-first 的 `run_command`，旧会话保留旧版 code_execution 与 user_exec 以续跑历史调用，图像查看与记忆保存、删除则作为新增工具接入。stdio MCP 在宿主上作为真实子进程运行；高风险命令和越界写入会暂停等待批准，应用状态变更与计费类 action 即使开启 `agentFullAccess` 也不能绕过。macOS 与 Linux 使用 `@anthropic-ai/sandbox-runtime`，Windows 没有 OS 级隔离。Skills 只承载指令与流程文本，权限边界由宿主工具沙箱负责。工具定义仍由 renderer 组装，MCP 工具准备与 schema 校验、记忆工具和旧版回退已移到宿主无关的 `packages/chatbox-core`，同一工具集因此同时受 renderer 组装条件与 core 领域逻辑约束。
 
 ### AstrBot
 
@@ -129,21 +129,21 @@ AstrBot 把内置、插件、MCP 与 Handoff 子 Agent 统一成 `FunctionTool`/
 
 ### Cherry Studio
 
-Cherry Studio 同时存在通用 `McpRuntimeService` 与 Claude Code Agent 注册表两条工具路径。注册表用 `user`、`internal`、`disabled` 三态控制曝光，并叠加 `disabledTools`、自动批准规则、`canUseTool` 和 hook。审批由 renderer 展示、Electron 主进程持久化并恢复执行；但 Claude Code 的 Bash/Read/Write 最终由 SDK 原生二进制执行，Cherry Studio 处于拦截者而非执行器位置。`acceptEdits` 的首词白名单和不解析 Bash 路径的检查是已确认盲点。
+Cherry Studio 有两条并行的工具路径：通用的 `McpRuntimeService` 与 Claude Code Agent 注册表。注册表用 user、internal、disabled 三种曝光状态控制工具是否可见，再叠加禁用清单、自动批准规则、可用性回调与 hook 四层约束。审批界面在 renderer，决议由 Electron 主进程持久化并在恢复后继续执行；Claude Code 的 Bash、Read、Write 最终交给 SDK 原生二进制运行，Cherry Studio 只承担拦截。`acceptEdits` 的白名单只比对命令首词，路径检查也不解析 Bash 命令文本，这两处是已确认盲点。
 
 ### DeepChat
 
-DeepChat 用 `DeepChatToolResolver` 为会话生成带 fingerprint 的工具 profile，再由 `ToolService` 合并 MCP 与 Agent 工具；同名时保留 MCP 版本。原生 tool call 和 `<function_call>` legacy 文本协议最终都进入 `DeepChatLoopEngine`，默认最多 128 次工具调用。审批记录把会话、服务器身份、配置代数、binding、execution id 与参数 hash 绑定在一起，另有命令风险分级和 workspace 路径检查。`exec`/`process` 使用可配置命令 shell（`posix|cmd|windows-powershell|git-bash`，#2109）；Agent 配置另有三组输出字符数上限字段（#2103，归一化到 1,000–200,000）；MCP 与 Agent 工具分派前统一经 `assertExecutionContractDispatchAllowed` 执行契约门（Tape 契约谱系）；octet-stream 文本文件允许读取（#2110）。
+DeepChat 的 `DeepChatToolResolver` 为每个会话生成带 fingerprint 的工具 profile，再经 `ToolService` 与 MCP 工具合并，同名时保留 MCP 版本。原生 tool call 与 `<function_call>` 文本协议都汇入 `DeepChatLoopEngine`，默认最多 128 次工具调用。审批记录把会话、服务器身份、配置代数、binding、execution id 与参数 hash 绑定在一起，另有命令风险分级和 workspace 路径检查。命令 shell 由 exec 与 process 工具共用，可选 posix、cmd、windows-powershell 或 git-bash（#2109）；Agent 配置另有三组输出字符数上限字段，取值归一化到 1,000–200,000（#2103）。MCP 与 Agent 工具在分派前统一经过 `assertExecutionContractDispatchAllowed` 的契约门（Tape 契约谱系），octet-stream 类型的文本文件允许读取（#2110）。
 
 ### DeepSeek Harness
 
-DeepSeek Harness 的工具是注册在内存 registry 中的代码对象：`ToolDefinition` 由模型可见 schema、强制 `output` 输出契约、`execute` 与纯函数 `presentCall`/`presentResult` 组成，注册即 effect、可卸载。作用域为全局加每 agent 的层链，restrict 的 allow/deny 以交集过滤继承面，Code Mode 附加 `run_code` 保留传输。执行沿固定管线：`tool/call` 落盘 → pre-execute 瀑布（ask 经 approval 放行）→ 单调 guard → execute → post-execute → `tool/result` 落盘。整批调用还可整体委派给 scoped 执行器：`ctx.tools.execute()` 把原始批次交给 `ToolExecutor`，内置 native 与 PTC 两个插件分别承担普通能力与 `run_code` 的批次语义。调度器按 executionMode 分 exclusive 屏障与 parallel 滚动池（默认并发 10）。工具集按包拆分（bash/pwsh、fs、web、terminal、skill、subagent、todo/goal、MCP 桥 `mcp__<server>__<name>` 等），能力经 capability seam 与 provider 解耦。
+DeepSeek Harness 把工具当作注册在内存 registry 里的代码对象：`ToolDefinition` 由模型可见的 schema、强制的输出契约、执行实现和两个纯函数展示钩子组成，注册即产生 effect，也可卸载。作用域是全局加每 agent 的层链，restrict 的 allow/deny 以交集过滤继承面，Code Mode 另附 `run_code` 保留传输。执行走固定管线：调用与结果各落盘一次，中间依次经过 pre-execute 瀑布、单调 guard、执行本体与 post-execute，命中 ask 的调用在瀑布中经 approval 放行。整批调用可以整体委派给 scoped 执行器，`ctx.tools.execute()` 把原始批次交给 `ToolExecutor`，内置的 native 与 PTC 两个插件分别承担普通能力与 `run_code` 的批次语义。调度器按 executionMode 分成 exclusive 屏障和 parallel 滚动池，默认并发 10。工具集按包拆分，shell、文件、网络、终端、Skill、子代理、待办目标与 MCP 桥各自独立成包，MCP 工具名形如 `mcp__<server>__<name>`，能力经 capability seam 与 provider 解耦。
 
 ### Hermes Agent
 
 Hermes 是纯 Python 后端聚合核心。工具面有四个来源汇入同一张注册表：tools 目录下的模块导入注册、plugins 目录里的插件、MCP 客户端的动态发现，以及 skills 与 optional-skills 这两处指令文本。所有来源统一进 `tools/registry.py`，再由 `get_tool_definitions()` 全量注入每次 API 调用；因为 tools 数组不参与 prompt caching，工具集刻意保持小而窄。
 
-执行与编排沿三个模块分层：入口 `run_agent.py`，中间层 `model_tools.py`，分发落点 `registry.dispatch`，全部在 Python 主进程内。`execute_code` 是唯一例外：代码跑在沙箱子进程，其中的工具调用经 `_rpc_server_loop` 回调父进程线程的 `handle_function_call`。
+Hermes 的执行与编排分三层并全部留在 Python 主进程内：`run_agent.py` 是入口，`model_tools.py` 居中，最终交给 `registry.dispatch` 分发。`execute_code` 是唯一例外，代码跑在沙箱子进程，其中的工具调用经 RPC 回调父进程线程，落到 `handle_function_call`。
 
 批次执行按 tool_calls 规模分三路：单调用顺序、并发、分段。分段入口把「并行安全段 + 顺序屏障」显式规划出来，归并逻辑独立成模块，三条路径共用同一套 fail-closed 审批门。审批在 CLI 交互完成，`resolve_pre_tool_block` 是各分发点唯一的审批门；`HERMES_YOLO_MODE` 或会话级 yolo 可以跳过。另有一类 agent-level 工具由 `_AGENT_LOOP_TOOLS` 特判拦截，不进入注册表分发：
 
@@ -155,7 +155,7 @@ Jan 的工具面由 Web 搜索、RAG 与 MCP 三类组成，只有模型声明 t
 
 ### LobeHub
 
-LobeHub 将工具可见性、执行位置和人工审批拆成独立链路。builtin、connector 和 MCP 工具可在 server、cloud gateway、用户设备或桌面本地运行；`humanIntervention` 支持多种模式，API 级规则覆盖 manifest 级规则，`always` 不会被 auto-run 绕过。机制完整，默认放行面却很大：多数内建工具未声明该字段，未声明即 `never` 自动执行，子 Agent 的 `headless` 路径还会跳过人工审批。循环外壳现由共享 `runAgentLoop` 统一，宿主只提供单步函数，停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、步数预算与无后续上下文；共享 Agent 的访客工具面在装配和实际执行两处都受门禁，只有 `toolGrants` 明确列入的工具或 API 才可用。
+LobeHub 把工具可见性、执行位置和人工审批拆成三条独立链路。builtin、connector 与 MCP 工具可以在 server、cloud gateway、用户设备或桌面本地运行；`humanIntervention` 支持多种模式，API 级规则覆盖 manifest 级规则，`always` 档不会被 auto-run 绕过。机制完整，默认放行面却很大：多数内建工具没有声明该字段，缺省即按 `never` 自动执行，子 Agent 的 headless 路径还会跳过人工审批。循环外壳由共享 `runAgentLoop` 统一，宿主只提供单步函数，停止原因覆盖正常完成、错误、中断、等待人工或异步工具、成本上限、步数预算与无后续上下文；共享 Agent 的访客工具面在装配与实际执行两处都受门禁，只有 `toolGrants` 明确列入的工具或 API 才可用。
 
 ### Manifold Desktop
 
@@ -470,7 +470,7 @@ MCP 通常连接本机进程或远端服务，Skill 通常是模型可读的指�
 
 **LobeHub 已确认命中。** `callSubAgent` 派出的子 agent 以 `approvalMode: 'headless'` 运行，即跳过人工审批门；而该入口本身 `humanIntervention` 未声明，默认自动执行。父 agent 只要能派子 agent，就等于获得一条绕开审批的执行路径。嵌套虽有三层阻断（manifest 过滤、执行体自检、runtime 兜底），但三层都依赖同一个 `isSubAgent` 布尔位。
 
-Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权限策略快照，依赖 SDK 内部实现）。Hermes 的 `delegate_tool` 默认按 `_subagent_auto_deny` 拒绝，配置 `delegation.subagent_auto_approve` 后才改用 `_subagent_auto_approve` 放行；子代理是否在 `dispatch` 执行阶段逐次复验 `enabled_tools` 尚未验证（见未验证项）。检查任何支持 agent-as-tool 的实现时，这应是第一个问题。
+Cherry Studio 是否存在同类问题尚未验证：子 agent 是否共享父会话的权限策略快照取决于 SDK 内部实现。Hermes 的 `delegate_tool` 默认走拒绝分支，配置了 `delegation.subagent_auto_approve` 之后才改走放行分支；子代理是否在 dispatch 执行阶段逐次复验允许的工具清单，本次未验证（见未验证项）。检查任何支持 agent-as-tool 的实现时，这应是第一个问题。
 
 ### 2. 协议两端的解析语义是否一致
 
@@ -491,7 +491,13 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 ### 5. 是否存在绕开自身审批协议的旁路能力
 
-已确认三条真正由**模型输出**触发的旁路：VCPChat 的 `DESKTOP_PUSH`（模型输出特定标记即在 renderer 侧被拦截并在桌面画布执行 HTML+JS，无审批无白名单）、AIO Hub 的 `data-filter` `customScript`（Agent 路径已隔离——`parseFilterOptions()` 对 custom 操作符或含 `customScript` 的条件直接返回错误，`new Function()` 只保留在用户手动操作的 DataFilter.vue 界面路径，模型生成的 VCP 参数不再能触发任意 JS）、Hermes 的 `execute_code` 沙箱 RPC（沙箱内代码经 `_rpc_server_loop` 在父进程线程回调 `handle_function_call`，给定 allow-list 后执行已允许工具，不重复走编排层审批门；该清单与主会话工具面一致）。VCPToolBox 的 `/plugin-callback/:pluginName/:taskId` 是另一类：无鉴权的外部 HTTP 入口，可伪造异步任务结果注入下一轮上下文，触发方是网络对端而非模型。
+已确认三条真正由**模型输出**触发的旁路：
+
+- VCPChat 的 `DESKTOP_PUSH`：模型输出特定标记后，renderer 侧直接拦截并在桌面画布执行 HTML+JS，无审批也无白名单。
+- AIO Hub 的 `data-filter` `customScript`：Agent 路径已经隔离，`parseFilterOptions()` 遇到 custom 操作符或含自定义脚本的条件直接返回错误，`new Function()` 只保留在用户手动操作的 DataFilter.vue 界面路径，模型生成的 VCP 参数不再能触发任意 JS。
+- Hermes 的 `execute_code` 沙箱 RPC：沙箱内代码经 RPC 在父进程线程回调 `handle_function_call`，按给定 allow-list 执行已允许工具，不重复走编排层审批门；该清单与主会话工具面一致。
+
+VCPToolBox 的 `/plugin-callback/:pluginName/:taskId` 属于另一类：无鉴权的外部 HTTP 入口，可伪造异步任务结果注入下一轮上下文，触发方是网络对端。
 
 审计时不要只看工具目录和审批配置，要搜"模型输出能触发的所有代码路径"——但也要反向区分：**入向协议义务与模型可用的旁路属于两类路径**，详见审计项 ⑧。
 
@@ -511,9 +517,9 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 一个能力出现在某处工具清单里，本端模型只能发现和调用进入本端工具目录的条目。**AIO Hub 的 `internal_request_file` 是这条审计项的正例**：它只声明在 `BUILTIN_VCP_TOOLS`（AIO 作为分布式节点注册时上报的 manifest）中，不进 `toolRegistryManager`，因此 AIO 内的模型既看不到也调不动它；VCPToolBox 侧收到 `register_tools` 后又把它从 `externalTools` 里显式过滤掉，远端模型的工具列表里同样没有它。它纯粹是为满足 VCP 分布式契约而实现的**入向**协议义务。
 
-模型不会主动调用它；实际触发方是 VCPToolBox 的透明文件拉取：当某个**非分布式**插件的参数里出现 `file://` 字符串时，`Plugin.js:947-977` 会拦截并调用 `FileFetcherServer.resolveFileUrl`，后者按 `findServerByIp(requestIp)` 定位到发起方节点，再向该节点发出 `internal_request_file` 请求（`FileFetcherServer.js:118`）。所以模型对它只有**间接影响**：在别的工具参数里写一个 `file://` 路径，读取范围则被限定在发起该次调用的那个节点上。
+模型不会主动调用它，真正的触发方是 VCPToolBox 的透明文件拉取：某个**非分布式**插件的参数里出现 `file://` 字符串时，框架拦截该参数并解析文件地址，再按请求 IP 定位到发起方节点，向该节点发出 `internal_request_file` 请求（`Plugin.js:947-977`、`FileFetcherServer.js:118`）。模型对它因此只有**间接影响**：在别的工具参数里写一个 `file://` 路径，读取范围被限定在发起该次调用的那个节点上。
 
-`internal_request_file` 跳过的是节点侧的暴露名单校验（`vcpNodeProtocol.ts` 的 294 行早退，绕过 341-380 行的清单检查）；分布式入向调用本身没有逐次人工审批门。它不再是无限制读取：`parseLocalFileUrl()` 只接受格式正确的 `file://` URL（拒绝凭据/端口/查询/片段，拒绝 UNC 与远程主机路径），读取改走 aio-file-operator 的 Rust 加固命令（`inspectFileForExternalTransfer`/`readFileForExternalTransfer`）——白名单内直读、审批区需用户审批、Rust 侧复校验沙箱/规则/文件大小、60 秒速率窗口与审计日志，沙箱外目录会被 Rust 侧拦截。VCPChat 侧同一机制同样成立（`VCPDistributedServer.js:599-640`），这是协议要求两端实现的能力。
+`internal_request_file` 跳过的是节点侧的暴露名单校验：协议实现遇到该请求在 294 行提前返回，341-380 行的清单检查因此不再执行（`vcpNodeProtocol.ts:294,341-380`）；分布式入向调用本身也没有逐次人工审批门。读取范围已经收窄，`parseLocalFileUrl()` 只接受格式正确的 `file://` URL，带凭据、端口、查询或片段的地址会被拒绝，UNC 与远程主机路径同样拒绝；实际读取走 aio-file-operator 的 Rust 加固命令，白名单内直接读，审批区需用户审批，Rust 侧再复校验沙箱、规则与文件大小，另有 60 秒速率窗口与审计日志，沙箱外目录会被 Rust 侧拦截。VCPChat 侧实现同一机制（`VCPDistributedServer.js:599-640`），这是协议要求两端具备的能力。
 
 审计任何分布式/多端协议实现时都要分开问三件事：本端模型能否发现它、本端模型能否调用它、谁才是真正的触发方。三者混淆会把协议义务误判成提权路径，也会反过来漏掉真正的入向风险。
 
@@ -560,7 +566,7 @@ Cherry Studio 的同类问题尚未验证（子 agent 是否共享父会话权�
 
 ### 需进一步验证
 
-- Chatbox：`user_exec` 白名单的反引号/`$()` 检测基于 bash 语义，未覆盖 PowerShell 调用运算符 `&`——理论绕过面，未构造 PoC。
+- Chatbox：`user_exec` 的白名单检查会拦截反引号与 `$()` 命令替换，规则按 bash 语义编写，PowerShell 的调用运算符 `&` 未在覆盖范围内，因此存在理论绕过面，尚未构造 PoC。
 - Cherry Studio：子 agent 是否共享父会话权限策略快照（依赖 SDK 内部实现）；Pyodide Web Worker 能否桥接回主进程；`skillService.install()` 的下载内容校验。
 - Hermes：子代理执行阶段 `enabled_tools` 是否在 `dispatch` 时逐次复验（静态代码显示过滤仅发生在 `get_tool_definitions`）；`_should_skip_container_guards` 与 `has_host_access`（docker bind-mount host 路径）的运行时关系；`.env` 凭据类工具的审批覆盖。
 - LobeHub：MCP SDK 的 `StreamableHTTPClientTransport` 自身是否有内建 SSRF 过滤；云沙箱网络隔离范围。

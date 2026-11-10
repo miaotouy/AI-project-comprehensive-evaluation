@@ -30,26 +30,26 @@ config.env
 
 当前快照的关键结论：
 
-- 核心上游只有一个 `API_URL` 和一个 `API_Key`，客户端访问 VCP 则使用另一枚 `Key`；
-- 上游 endpoint 固定拼为 `/v1/models`、`/v1/chat/completions` 和 `/v1/embeddings`，Header 固定为 Bearer；
-- 入站支持 OpenAI Chat/Responses、Anthropic Messages 和 Gemini GenerateContent，后几种会先转换并内部回送到主 Chat 链；
-- 上游出站仍统一为 OpenAI-compatible Chat Completions，不是按 Provider 选择原生 Adapter；
-- `/v1/models` 单次拉取上游目录，应用模型别名，并附加语义路由虚拟模型；
-- 当前没有 `ModelRedirect.json`，所以模型重定向能力在本快照默认未启用；
-- `VCPModelAuto` 用最后 user/assistant 内容的 embedding 与 route description 做余弦相似度排序，低于阈值时选默认模型；
-- 普通 Chat 最多执行 `ApiRetries` 次总尝试，默认 3；重试 500、503、429、特定 token 型 401、连接/首包超时和网络错误；
-- 退避是按尝试次序递增的线性延迟，不读取 `Retry-After`，也没有抖动；
-- 普通指定模型重试时模型不变；只有语义虚拟模型请求才会在每次尝试前沿候选模型链改写 `body.model`；
-- 语义 fallback 仍使用同一个 `API_URL + API_Key`，本地不知道不同模型是否落到不同 Provider 渠道；
-- Embedding 有独立的主模型 + 最多 9 个备用模型/逗号列表，失败后按顺序换模型，但 URL 和 Key 不变；
-- 没有多 Key 随机/轮询、Key 级熔断、多个 Base URL、渠道权重或 Provider 级健康表；
-- `config.env` 和插件 `config.env` 均为磁盘明文，管理 API 会把完整主配置原文返回给已认证管理员，没有 Secret 掩码；
-- `backup_vcp.py` 默认归档所有 `.env` 和 `.json`，会把核心/插件 Key 一起放入未加密 ZIP；
-- 可选 NewAPI Monitor 能显示请求、token、quota、RPM/TPM，但数据来自外部 NewAPI 管理 API，不参与 VCP 路由；
-- 项目没有可供用户创建的本地 Provider/Endpoint 实体，因此 Provider 级新增、复制、启停、删除、导入和导出不适用；相关“渠道管理”只能通过编辑单个全局上游配置或修改模型路由配置完成；
-- Web 管理端的新增、复制、删除和启停，针对的是 `SemanticModelRouter.json` 中的 preset/route，不是上游 Provider；全局 `config.env` 只有原文查看和覆盖保存，没有 Provider 列表生命周期；
-- CLI、TUI 和独立桌面端的专门渠道管理入口本次未找到。`commander` 只用于脚本级语义分类器；桌面端同样未找到 Electron、Tauri 或其他桌面壳；
-- `/v1/models`、管理端模型列表接口、管理端 Chat 代理和语义匹配预览是不同层次的检查：前两者检查模型目录/上游可达性，Chat 代理可复用真实 VCP 生成链，语义预览只计算路由计划，不发真实推理请求；
+- 核心链路只有一个上游出口：一枚地址（`API_URL`）加一枚上游凭据（`API_Key`），客户端访问 VCP 时另用一枚对外 `Key`；
+- 出站请求固定落在模型目录、Chat 补全和 Embedding 三个路径上，请求头统一带 Bearer；
+- 入站接受 OpenAI Chat/Responses、Anthropic Messages 和 Gemini GenerateContent，后几种先转成 OpenAI Chat 请求体，再回送本机主 Chat 链；
+- 上游出站始终是 OpenAI-compatible Chat Completions，没有按 Provider 切换原生 Adapter 的出站实现；
+- 模型目录由一次上游拉取得到，套用模型别名后附加语义路由虚拟模型；
+- 本快照的仓库里没有 `ModelRedirect.json`，模型重定向默认未启用；
+- `VCPModelAuto` 用最后一条 user/assistant 内容的 embedding 与 route description 做余弦相似度排序，低于阈值时落到默认模型；
+- 普通 Chat 最多尝试 `ApiRetries` 次（默认 3 次），覆盖 500、503、429、特定 token 型 401、连接/首包超时和网络错误；
+- 退避按尝试次序线性递增，不读取 `Retry-After`，也没有抖动；
+- 普通指定模型重试时模型保持不变，只有语义虚拟模型请求才会在每次尝试前按候选链改写请求里的模型字段；
+- 语义 fallback 仍走同一个上游地址与凭据，本地无法知道不同模型是否落到不同 Provider 渠道；
+- Embedding 另有一套主模型加最多 9 个备用模型的链（逗号列表），失败后按顺序换模型，URL 和 Key 不变；
+- 多 Key 随机/轮询、Key 级熔断、多个 Base URL、渠道权重和 Provider 级健康表都没有对应机制；
+- 主服务与插件的环境配置在磁盘上都是明文，管理 API 会把完整主配置原文交给已认证管理员，没有 Secret 掩码；
+- `backup_vcp.py` 默认归档全部 env 与 json 文件，核心与插件 Key 会一起进入未加密 ZIP；
+- 可选 NewAPI Monitor 展示请求、token、quota、RPM/TPM，数据取自外部 NewAPI 管理 API，不参与 VCP 路由；
+- 本地没有可供用户创建的 Provider/Endpoint 实体，Provider 级的新增、复制、启停、删除、导入导出都不适用，渠道管理只能靠编辑单个全局上游配置或修改模型路由配置；
+- Web 管理端的新增、复制、删除和启停作用于 `SemanticModelRouter.json` 里的 preset/route；全局上游配置只有原文查看和覆盖保存，没有 Provider 列表生命周期；
+- CLI、TUI 和独立桌面端没有专门的渠道管理入口：`commander` 只用于脚本级语义分类器，桌面端也未见 Electron、Tauri 或其他桌面壳；
+- 模型目录接口、管理端模型列表、管理端 Chat 代理和语义匹配预览处在不同层次：前两者验证模型目录与上游可达性，Chat 代理复用真实 VCP 生成链，语义预览只算路由计划、不发推理请求；
 - **安全边界风险**：白名单图像/Embedding 路由在通用 Bearer 鉴权之前挂载，命中请求会直接使用上游 `API_Key` 转发，绕过 VCP 对外 `Key` 校验。
 
 ## 总体调用链
@@ -96,7 +96,7 @@ VCPToolBox 没有本地 Provider 表，也没有可持久化的渠道实例、En
 
 ### 2.1 配置文件入口
 
-全局上游配置的真相源是根目录 `config.env`；仓库提供 `config.env.example` 作为字段和默认说明。管理 API `GET /admin_api/config/main` 同时读取实际配置和示例配置，返回当前选用的文本、来源以及是否存在自定义配置；`POST /admin_api/config/main` 接收整段文本并覆盖写回 `config.env`（`routes/admin/config.js:56-129`）。因此可以查看、新增字段和编辑已有字段，但这仍是原文文件编辑，不是新增 Provider。
+全局上游配置的真相源是仓库根目录的 `config.env`，仓库另附 `config.env.example` 说明字段与默认值。管理 API 的 `GET/POST /admin_api/config/main` 对应读写两端：GET 同时读取实际配置和示例配置，返回当前选用的文本、来源以及是否存在自定义配置；POST 接收整段文本覆盖写回该文件（`routes/admin/config.js:56-129`）。这条链路可以查看、新增字段和编辑已有字段，操作对象始终是这份原文文件，本地 Provider 列表不随之增加。
 
 AdminPanel-Vue 的“全局基础配置”页把环境变量解析成表单，敏感字段只在浏览器输入控件中提供显示/隐藏切换，保存时仍提交完整配置文本（`AdminPanel-Vue/src/views/BaseConfig.vue:922-1024`）。页面提示部分修改需要重启；后端保存后调用的是插件重载，主服务已经捕获的 URL、Key 等核心运行值不会因此形成新的渠道实例或自动切换。
 
@@ -175,7 +175,7 @@ AdminPanel-Vue 的“全局基础配置”页把环境变量解析成表单，�
 
 本快照另有一类独立的外部决策服务端点（JEV），用于折叠筛选、上下文剪枝与语义重排。它有自己的 provider、地址、模型、多 Key 轮换与超时配置，不进入 `/v1/models` 目录，不参与语义选模与模型级 fallback，也不消耗主 Chat 的重试预算。就渠道视角而言，它是检索侧的判断服务，不是可供聊天选路的模型渠道；其中的 Key 轮换与重试语义与主链的 `ApiRetries` 是两套独立实现。
 
-依据：`config.env.example` 的 JEV 段（`JEV_PROVIDER`、`JEV_API_KEY`、`JEV_API_URL`、`JEV_MODEL`、`JEV_TIMEOUT_MS`、`JEV_MAX_RETRIES` 与三类功能开关）、`modules/jevClient.js`。
+依据：`config.env.example` 的 JEV 段与 `modules/jevClient.js`。该段定义提供方类型、上游地址、模型名和访问 Key，并给出超时、最大重试次数与三类功能开关。
 
 ## 4. Base URL、端点、Header 与凭据
 
@@ -368,7 +368,7 @@ Authorization: Bearer API_Key
 | `ReasoningToContentModel` | `kimi,claude`（示例） | 逗号分隔模型名片段，对真实后端模型名做包含子串匹配（大小写不敏感） |
 | `ReasoningToContentTag` | `think` | 转换后的标签名，`thinking` 或回退 `think` |
 
-判定函数（`reasoningContentAdapter.js:41-49`）按总开关与模型名白名单匹配决定是否转换。流式与非流式处理链在**转发给客户端的副本**上，把 `reasoning_content`、`reasoning`、`reasoning_chunk`、`thinking`、`thoughts` 等推理字段提取为 `<think>` 标签正文（流式按块拼接、规范闭合、结束时补闭合标签），并删除原始推理字段；内部循环仍只用原始 `content`（`streamHandler.js:172-218` 定义、`:332`/`:375` 使用；`nonStreamHandler.js:272-306`）。语义要点：
+判定函数按总开关与模型名白名单匹配决定是否转换（`reasoningContentAdapter.js:41-49`）。流式与非流式链都只改**转发给客户端的副本**：把上游返回的推理字段（如 `reasoning_content`、`thinking` 等命名变体）提取成 `<think>` 标签正文，流式一侧按块拼接、规范闭合，结束时补上闭合标签，随后删掉原始推理字段；内部循环仍只读取原始 `content`。两处实现的位置是 `streamHandler.js:172-218`、`:332`、`:375` 与 `nonStreamHandler.js:272-306`。语义要点：
 
 - 这是**客户端展示协议**的转换，不是渠道或 Adapter 变化：出站仍只发 OpenAI-compatible body，不新增任何上游字段；
 - 它是只读展示适配：转换只发生在流式/非流式推向客户端的响应流与响应体中，不写回历史消息，不影响后续轮次输入；
@@ -381,19 +381,24 @@ Authorization: Bearer API_Key
 VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridgeServer`（`Plugin/VCPBridgeServer/`），配合主服务器的 `protocolBridge.js`，提供两种维度的接管方案：
 
 #### 1. 独立透明劫持代理（VCPBridgeServer）
-- **独立端口运行**：默认监听 `3100`（或 `6003`），专为不能修改 System Prompt 的外部 CLI/前端设计。
-- **四大劫持模式 (`hijackMode`)**：
-  - `replace`（夺舍）：直接丢弃下游请求自带的所有 `system` 消息，替换为 VCP 配置的 System Prompt；
-  - `prepend`（置顶注入）：在客户端原 System Prompt 之前插入 VCP 规范，获取最高优先级；
-  - `append`（追加覆盖）：在客户端原 System Prompt 之后追加注入；
-  - `merge`（融合重组）：合并所有 system 消息为一条置顶消息；
-  - `off`：仅做协议转发与模型映射，不改写提示词。
-- **请求级模型映射 (`modelMap`)**：下游客户端请求固定模型（如 `gpt-4`）时，透明映射为配置的真实上游模型（如 `claude-3-7-sonnet` 或 `gemini-2.5-pro`）。
-- **多 Profile 场景路由**：
-  - 优先级按 `URL 路径前缀 (/v1/<profile>/...)` > `HTTP Header (x-bridge-profile)` > `模型名前缀 (<profile>/<model>)` > `defaultProfile` 匹配；
-  - 每个 Profile 拥有独立的提示词文件、劫持模式和模型覆盖；
-  - 运行时真相源为 `Plugin/VCPBridgeServer/bridge-config.json` 及 `profiles/` 目录，通过 `chokidar` 实现热加载。
-- **连通性探活端点**：代理新增 `GET /v1/models` 与 `GET /v1/:profile/models`，返回由 `defaultModel` 与 `modelMap` 键值集合构成的 OpenAI 风格模型目录（配置为空时回退一个占位模型），供客户端健康检查；`chat`/`responses`/`messages`/`beta` 前缀路径不被它拦截，继续交给下游代理路由。`debugMode` 开启时另打印路径、原始模型与命中的 Profile（`Plugin/VCPBridgeServer/bridgeserver.js:1008-1029`、`:880-887`）。
+
+这一层是运行在独立端口上的代理，默认监听 3100，也可配成 6003，面向 System Prompt 写死、无法自行改造请求逻辑的外部 CLI 和前端。它的行为按 profile 组织：每个 profile 各有提示词文件、劫持模式和模型覆盖，运行时以 `Plugin/VCPBridgeServer/bridge-config.json` 与 `profiles/` 目录为准，改动经 chokidar 热加载。
+
+一次请求按四级顺序确定 profile：先看 URL 路径前缀（`/v1/<profile>/...`），再看请求头 `x-bridge-profile`，再看模型名前缀（`<profile>/<model>`），都没有命中时使用 `defaultProfile`。
+
+提示词改写由 `hijackMode` 的五种取值控制：
+
+| 取值 | 对 system 消息的处理 |
+|---|---|
+| `replace`（夺舍） | 丢弃下游请求自带的所有 system 消息，换成 VCP 配置的 System Prompt |
+| `prepend`（置顶注入） | 在客户端原 System Prompt 之前插入 VCP 规范，取得最高优先级 |
+| `append`（追加覆盖） | 在客户端原 System Prompt 之后追加注入 |
+| `merge`（融合重组） | 合并所有 system 消息为一条置顶消息 |
+| `off` | 只做协议转发与模型映射，不改写提示词 |
+
+模型映射按请求生效：下游把模型固定写成 `gpt-4` 这类名字时，代理照 `modelMap` 换成配置里的真实上游模型，例如 claude-3-7-sonnet 或 gemini-2.5-pro，客户端配置不用改。
+
+代理还提供两个连通性探活端点，`GET /v1/models` 与 `GET /v1/:profile/models`，返回由 `defaultModel` 和 `modelMap` 键值集合拼出的 OpenAI 风格模型目录，配置为空时回退一个占位模型，供客户端做健康检查。`chat`、`responses`、`messages`、`beta` 前缀路径不被这两个端点拦截，继续交给下游代理路由；开启 `debugMode` 后另会打印请求路径、原始模型和命中的 profile（`bridgeserver.js:1008-1029`、`:880-887`）。
 
 #### 2. 主服务全链路接管（protocolBridge）
 - **定位**：如果不仅需要劫持提示词，还希望下游 CLI/客户端透明接入 VCP 的 RAG（RiverMemo/TagMemo）、变量系统（Tar/Sar/Var）和全量工具生态，则将客户端 Base URL 指向主服务端口（默认 `6006`）。
@@ -424,10 +429,13 @@ VCP 实现渠道与前端劫持的核心组件为独立 Service 插件 `VCPBridg
 
 [`SemanticModelRouter.json`](../../VCPToolBox/SemanticModelRouter.json) 的每个 preset 包含：
 
-- `routes[]`：名称、模型、描述、`failoverPool`；
-- `defaultModel`；
-- `fallbackModels[]`；
-- `matchThreshold` 与 `contextWeights` 控制选模阈值和上下文合成权重。
+| 字段 | 作用 |
+|---|---|
+| `routes[]` | 每条路由的名称、模型、描述和 `failoverPool` 标记 |
+| `defaultModel` | 默认模型名称 |
+| `fallbackModels[]` | 显式回退模型列表 |
+| `matchThreshold` | 选模相似度阈值 |
+| `contextWeights` | user/assistant 上下文向量的合成权重 |
 
 候选链为：
 
@@ -661,7 +669,7 @@ VCP 当前不会持久化：
 
 ### 需要补强或谨慎复用
 
-- 单一 `API_URL + API_Key` 把 Provider 渠道管理全部外包给聚合上游，VCP 本地无法做渠道级治理；
+- 只有一枚上游地址和一个上游凭据，Provider 渠道管理全部外包给聚合上游，VCP 本地无法做渠道级治理；
 - `ApiRetries` 命名容易被理解为“额外重试次数”，实际是总尝试数；
 - 线性退避不读取 `Retry-After`，429 处理可能与上游限流窗口不匹配；
 - 模型 fallback 与 retry 共用 attempt 数，候选较少时会重复最后一个模型；

@@ -152,20 +152,25 @@ SillyTavern 还有一个 **User Persona** 系统，独立于角色卡：
 
 开场白（`first_mes` + `alternate_greetings`）采用"创建时实例化 + tainted 固化"的语义：
 
-1. **创建会话**：`getChatResult`（`script.js:7625-7648`）在 chat 为空时调 `getFirstMessage()`（`script.js:7651-7683`）。`first_mes` 作为首条消息，`alternate_greetings` 全部转成 swipes 及其 `swipe_info`（send_date 相同、gen_* 为 void 0）。这些内容经宏展开后由 `saveChatConditional` 落盘。
-2. **修改角色卡后的重建**：`shouldRegenerateMessage`（`script.js:9844-9861`）要求 `!chat_metadata.tainted` 且 chat 为空或仅一条首条，满足时用 `getFirstMessage()` 整体替换 chat。`tainted` 在 Generate（`script.js:4288`）等多处被置 true，因此**首次生成后开场白即固化**，不再跟随角色卡后续修改。此后每次生成只对 `chat[0].mes` 做 `substituteParams` 宏展开（`script.js:4430-4432`）。
-3. **快照落盘**：首条消息对象（mes + swipes + swipe_info）经 `saveChat`（`script.js:7336`）→ `/api/chats/save`（`src/endpoints/chats.js:470`）写入 JSONL。没有“重新选择 greeting”UI：备选以 swipe 呈现，overswipe 的 `PRISTINE_GREETING` 只是循环回 swipe 0（`script.js:9163-9181`），不会重新拉取角色卡。
+1. **创建会话**：聊天记录为空时，会话初始化先取开场白，再把首条消息写入 chat。`first_mes` 成为第一条消息，`alternate_greetings` 全部转成 swipe 与对应的 `swipe_info`，两者的 send_date 相同，`gen_*` 字段留空（void 0）；内容经宏展开后由 `saveChatConditional` 落盘。入口见 `script.js:7625-7683`。
+2. **修改角色卡后的重建**：会话初始化会判断能否重建首条消息，条件是 `chat_metadata.tainted` 未置位，且 chat 为空或只有一条首条消息；条件成立就用当前角色卡的开场白整体替换 chat。`tainted` 在 Generate 等生成路径中被置位，因此**首次生成后开场白即固化**，后续修改角色卡不再影响它；此后每次生成只对首条消息正文做 `substituteParams` 宏展开。见 `script.js:4288, 4430-4432, 9844-9861`。
+3. **快照落盘**：首条消息对象（mes + swipes + swipe_info）经 `saveChat` 写入 JSONL，落盘走 `/api/chats/save`。界面没有重新选择 greeting 的入口：备选开场白以 swipe 呈现，overswipe 的 `PRISTINE_GREETING` 只是循环回 swipe 0，不会重新拉取角色卡。见 `script.js:7336, 9163-9181`、`src/endpoints/chats.js:470`。
 
 ## 9. 每次生成的配置读取与请求参数快照
 
-- 每次发送、续写、swipe 或 regenerate 都会重新读取角色卡当前配置：`Generate`（`script.js:4231`）每次调 `getCharacterCardFields()` 读取 live `characters[this_chid]`，`depth_prompt` 同样取自当前卡（`script.js:4401-4411, 4424-4426`）。
-- 每条消息或每个 swipe 只保存 `extra.api` 与 `extra.model`（由 `getGeneratingApi`/`getGeneratingModel` 写入，`script.js:6980/6991`）。
-- `swipe_info` 结构为 `{send_date, gen_started, gen_finished, extra: structuredClone}`（`script.js:6734-6749`）。
-- **未找到**温度/采样参数/预设名快照（全仓 grep `extra.temp|extra.preset|generation_parameters` 零命中）——与 AIO Hub 的 `metadata.requestParameters` 相比，这里只快照 api/model。
-- **swipe 与 regenerate 的关系**：两者都复用发送链，但保存语义相反：
-  - swipe 越过末尾（`OVERSWIPE_BEHAVIOR.REGENERATE`，`script.js:10350-10357`）走 `Generate('swipe')`，`saveReply`（`script.js:6612-6637`）在 swipes 数组**追加**新版，旧回复保留；
-  - Ctrl+Enter 触发 `Generate('regenerate')`（`script.js:11578`），先把最后一条助手消息从 chat 删除（`script.js:4340-4353`），`saveReply` 走非 swipe 分支（`script.js:6682-6725`）**新建消息、旧回复被丢弃**（覆盖语义）；
-  - swipe 时提示装配先 `coreChat.pop()` 剔除被重生成的消息（`script.js:4438-4440`）。
+- 发送、续写、swipe 与 regenerate 共用一条发送链，每次都会重新读取角色卡当前配置：生成入口调用 `getCharacterCardFields()` 读取内存中的 live 角色卡，`depth_prompt` 也取自当前卡。定位见 `script.js:4231, 4401-4411, 4424-4426`。
+- 快照只覆盖模型标识：每条消息或每个 swipe 仅保存 `extra.api` 与 `extra.model`，由 `getGeneratingApi()` 和 `getGeneratingModel()` 写入。定位见 `script.js:6980, 6991`。
+- `swipe_info` 记录四个字段：`send_date`、`gen_started`、`gen_finished`，以及 `extra` 的深拷贝。定位见 `script.js:6734-6749`。
+- 温度、采样参数和预设名都没有进入快照；本次全仓检索 `extra.temp`、`extra.preset`、`generation_parameters` 零命中。与 AIO Hub 的 `metadata.requestParameters` 相比，这里的快照范围只有 api 与 model。
+
+**swipe 与 regenerate 的关系**：两者都复用发送链，保存语义相反。
+
+| 操作 | 处理链 | 保存语义 |
+| --- | --- | --- |
+| swipe 越过末尾 | 按 `OVERSWIPE_BEHAVIOR.REGENERATE` 调用 `Generate('swipe')` | `saveReply` 在 swipes 数组追加新版，旧回复保留 |
+| Ctrl+Enter 重生成 | 调用 `Generate('regenerate')`，先把最后一条助手消息从 chat 删除 | `saveReply` 走非 swipe 分支，新建消息、旧回复被丢弃（覆盖语义） |
+
+swipe 时提示装配还会先 `coreChat.pop()` 剔除被重新生成的那条消息，使模型只看到保留下来的历史。以上入口均位于 `script.js:4340-4353, 4438-4440, 6612-6637, 6682-6725, 10350-10357, 11578`。
 
 ## 10. 模型与 Preset 系统
 
@@ -183,10 +188,13 @@ SillyTavern 还有一个 **User Persona** 系统，独立于角色卡：
 SillyTavern 自身不内置角色卡（源码中无预置 `characters/` 目录）；内容来自社区共享站点（如 [chub.ai](https://chub.ai)、[character.ai](https://character.ai) 导出、Discord 频道等）。
 
 SillyTavern 提供内置 Default Character 作为测试（文件名 `default_character`），其字段均为示例值：
-- `name`: `Seraphina`
-- `description`: 简短描述助手形象
-- `first_mes`: 标准欢迎语
-- `system_prompt`/`post_history_instructions`：空字符串（不覆盖）
+
+| 字段 | 示例值 |
+| --- | --- |
+| `name` | `Seraphina` |
+| `description` | 简短描述助手形象 |
+| `first_mes` | 标准欢迎语 |
+| `system_prompt` / `post_history_instructions` | 空字符串（不覆盖） |
 
 ## 12. 导入与兼容性
 

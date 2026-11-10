@@ -16,10 +16,18 @@
 
 OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gateway 是中心状态、路由与控制平面；CLI、TUI、浏览器 Control UI、iOS/Android companion app 与消息渠道适配器主要是外部控制表面或设备节点，不各自持有主 Agent 运行时；模型请求可由同机 agent 运行器、受管理 worker environment、配对节点或外部 ACP harness 承担。产品形态与调用面依据见 [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)。
 
-- **主要调用者与表面**：操作者通过 CLI、TUI、Control UI 和移动 companion 应用发起并管理会话；多渠道 IM（文档列出约 20 个支持渠道，为入口/文档级确认）上的消息、thread/topic 映射到 Gateway session 或 ACP binding；外部 ACP client 与第三方 Claude Code 子进程可以从相反方向桥接。
-- **仓库结构与规模**：pnpm workspace，根入口 `openclaw.mjs`。`src` 承担 Gateway、Agent、会话、工具与 CLI 主链；`extensions` 承担消息渠道、Provider 插件与可选能力；`ui` 是 Control UI；`apps` 是桌面/移动 companion；`packages` 提供共享 SDK/协议。照照有 43,542 个跟踪文件、38,648 个源码文件和约 1,172 万行源码，TypeScript 约占 91%，Swift/Kotlin 服务 companion 与平台集成。依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
-- **Agent 形态**：普通用户 Agent 是配置 roster（`agents.entries.<agentId>`）与 workspace 角色文件（AGENTS.md、SOUL.md、IDENTITY.md、USER.md、BOOTSTRAP.md、MEMORY.md）的组合，按 agentId 隔离 SQLite 状态与会话目录；另有 Gateway 投影的 system agent 行与外部 ACP harness 两类边界。依据见 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md)。
-- **重要外部依赖**：模型 Provider（OpenAI、Anthropic、Google、本地 Ollama/llama.cpp/LM Studio 等）；hosted 模型目录（`catalog.openclaw.ai`，源仓库在仓库外）；ClawHub 外部注册表及其扫描/审核服务；ComfyUI 本地/云端等媒体 Provider；消息渠道平台账号与推送服务；iOS/Android 设备本地能力；ACPX 外部 harness。
+- **调用者与控制表面**：操作者通过 CLI、TUI、Control UI 和移动 companion 应用发起并管理会话。约 20 个支持渠道（入口与文档级确认）把渠道上的消息、thread 或 topic 映射成 Gateway 会话或 ACP 绑定；方向相反时，外部 ACP client 与第三方 Claude Code 子进程也能接入本机会话。
+- **仓库结构与规模**：仓库是 pnpm workspace，根入口为 openclaw.mjs。规模上共 43,542 个跟踪文件、38,648 个源码文件和约 1,172 万行源码，TypeScript 约占 91%，Swift 与 Kotlin 服务于 companion 与平台集成。代码按职责分布在五个目录：
+
+  - `src`：Gateway、Agent、会话、工具与 CLI 主链
+  - `extensions`：消息渠道、Provider 插件与可选能力
+  - `ui`：Control UI
+  - `apps`：桌面与移动 companion
+  - `packages`：共享 SDK 与协议
+
+  依据见 [仓库分布调查笔记](../仓库分布/OpenClaw-仓库分布调查笔记.md)。
+- **Agent 形态**：普通用户 Agent 由配置 roster（`agents.entries.<agentId>`）与一组 workspace 角色文件共同定义，文件包括 AGENTS.md、SOUL.md、IDENTITY.md、USER.md、BOOTSTRAP.md 与 MEMORY.md。每个 agentId 拥有隔离的 SQLite 状态与会话目录，另有 Gateway 投影出的 system agent 行与外部 ACP harness 两类边界形态。依据见 [Agent 角色配置调查笔记](../Agent角色/OpenClaw-Agent角色配置调查笔记.md)。
+- **重要外部依赖**：模型 Provider 覆盖 OpenAI、Anthropic、Google 与本地 Ollama、llama.cpp、LM Studio；托管模型目录 catalog.openclaw.ai 的源仓库在仓库之外，ClawHub 外部注册表连同其扫描与审核服务，ComfyUI 本地或云端等媒体 Provider，以及消息渠道平台账号、推送服务、iOS/Android 设备本地能力和 ACPX 外部 harness 也都需要单独接入。
 - **产品辨识点**：把"谁能接触 Agent、谁能往本机安装会改变 Agent 行为的代码"做成显式、可审计的准入与信任决策，见 [独特功能调查笔记](../独特功能/OpenClaw-独特功能调查笔记.md) 与本汇总"渠道、设备节点与外部执行体"一节。
 
 本工作区未撰写产品结构与设计基因类笔记，产品演变叙事不展开。
@@ -28,13 +36,17 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 主链确认（静态代码，未运行 Gateway/UI）。完整依据见 [会话与消息管理调查笔记](../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md)。
 
-- **数据模型与标识**：会话分两层寻址——逻辑会话用 `sessionKey`，transcript generation 用 `sessionId`；同一逻辑会话可轮换保留多代 transcript。持久会话默认使用 per-agent SQLite，agent store 也可选择 PostgreSQL（agent schema 40，transcript 新会话协议 4、最低可读 3）；incognito 的状态和 transcript 由内存 actor 持有，关闭或进程退出后不恢复。持久存储中 `session_nodes.entry_json` 是逻辑会话记录 canonical source，`session_windows` 与 `transcript_events` 拥有 transcript generations；活动路径、消息序号与全文搜索是从事件派生的可重建投影，不是第二份消息主库。消息是带 `parentId` 的父子链/DAG，entry 区分普通消息与 thinking 变化、model 切换、compaction、reset、branch 摘要等控制条目；写入必须经带 parent、幂等与媒体规范化的追加入口。
-- **生命周期与版本操作**：创建、metadata patch、归档/置顶/未读、列表切换、reset、删除（archive-then-delete，先冷归档再回收）、restart recovery（仅接受带 restart tombstone 的 source）。rewind、fork、branch switch、checkpoint branch/restore 通过轮换 transcript generation 改变活动路径，旧代际通常保留而非物理删除；带 upstream link 的外部 harness session 不进本地 branch graph。
-- **一致性**：SQLite 写入由 per-store writer queue 串行，事务内同步提交前重读权威行并做 expected identity/lifecycleRevision 比较；message 幂等键有唯一索引，重复请求返回原消息、payload 冲突显式报错。事件提交与活动路径/FTS 前向更新同事务；无法从新增行安全推断路径时用持久 dirty watermark 隐藏派生行，由 reconcile 完整重建（小型重建阈值约 4,000 行/4 MiB，超出转后台）。
-- **检索与分页**：会话列表支持 offset 分页、固定排序（pinned 优先再按更新时间）与 agent/归档/owner 等过滤；聊天历史按活动路径的逻辑消息序号分页，可用 messageId anchor 定位并可回退 reset archive；正文搜索走 per-agent FTS5，只索引活动路径中的 user/assistant 可读文本，索引 dirty 时返回 indexing 而不是不可靠旧行。
-- **迁移与导入**：transcript 新会话协议版本 4、最低可读版本 3，agent schema 版本 40，旧格式迁移与 `importSqliteSessionRows` 属 doctor/migration 路径；正常 runtime 写入器拒绝非 canonical key。迁移与 canonical repair 兼容旧 JSONL、旧 alias 与旧 schema。
-- **会话级绑定**：模型/provider 覆盖、工具策略、worktree/exec 目录、channel/conversation 路由、CLI/ACP harness 元数据等作为会话引用或归属照照保存；附件随消息内容或 media store 引用关联，schema 中无独立会话附件表。
-- **本次未找到**：面向用户的通用"就地编辑一条已落盘消息"或"按 message id 删除消息"RPC（精确 event rewrite 仅用于受保护 repair）；通用 sessions export/import RPC（导出/分享见本汇总对应小节）。
+- **数据模型与标识**：会话分两层寻址，逻辑会话用 `sessionKey` 标识，transcript generation 用 `sessionId` 标识，同一逻辑会话可以轮换保留多代 transcript。持久会话默认落在 per-agent SQLite，agent store 也可以改用 PostgreSQL（agent schema 40，transcript 新会话协议 4、最低可读 3）。incognito 会话的状态与 transcript 由内存 actor 持有，关闭会话或进程退出后不再恢复。
+
+  持久存储里，逻辑会话记录以 `session_nodes.entry_json` 为权威来源，`session_windows` 与 `transcript_events` 承载各代 transcript。活动路径、消息序号和全文搜索都是从事件派生、可重建的投影。
+
+  消息本身是带 `parentId` 的父子链/DAG；entry 除普通消息外，还记录 thinking 变化、model 切换、compaction、reset 与分支摘要等控制条目；写入必须经过带 parent 校验、幂等判断与媒体规范化的追加入口。
+- **生命周期与版本操作**：会话生命周期覆盖创建、metadata 修改、归档/置顶/未读、列表切换、reset 与删除；删除走 archive-then-delete，先冷归档再回收，重启恢复只接受带 restart tombstone 的 source。版本类操作包括 rewind、fork、分支切换与 checkpoint 分支/恢复，它们都通过轮换 transcript generation 改变活动路径，旧代际通常保留而不做物理删除；带 upstream link 的外部 harness 会话不进本地 branch graph。
+- **一致性与幂等**：同一 SQLite store 的写入先进 per-store writer queue 串行执行；事务提交前会重读权威行，并比较 expected identity 与 lifecycleRevision。消息幂等键建有唯一索引，重复请求返回原消息，payload 冲突则显式报错。事件提交与活动路径、FTS 前向更新在同一事务内完成；当新增行不足以安全推断路径时，写入方用持久 dirty watermark 隐藏派生行，再由 reconcile 完整重建，小型重建的阈值约 4,000 行或 4 MiB，超出转后台执行。
+- **检索与分页**：会话列表支持 offset 分页、pinned 优先再按更新时间的固定排序，以及按 agent、归档状态和 owner 过滤。聊天历史沿活动路径的逻辑消息序号分页，可用 messageId anchor 定位，也能回退到 reset archive。正文搜索使用 per-agent FTS5，只索引活动路径里 user 与 assistant 的可读文本；索引处于 dirty 状态时返回 indexing，不返回可能过期的旧行。
+- **迁移与导入**：transcript 新会话协议为版本 4、最低可读版本 3，agent schema 为版本 40。旧格式迁移与 importSqliteSessionRows 只走 doctor/migration 路径，正常 runtime 写入器会拒绝非 canonical key；迁移与 canonical repair 兼容旧 JSONL、旧 alias 与旧 schema。
+- **会话级绑定**：模型与 provider 覆盖、工具策略、worktree/exec 目录、channel/conversation 路由、CLI/ACP harness 元数据都以会话引用或归属关系的形式保存。附件跟随消息内容或 media store 引用建立关联，schema 里没有独立的会话附件表。
+- **本次未找到**：面向用户的"就地编辑一条已落盘消息"或"按 message id 删除消息"RPC，精确 event rewrite 只用于受保护的 repair；也未找到通用的 sessions export/import RPC，导出与分享路径见本汇总对应小节。
 
 ## 对话请求与上下文
 
@@ -52,12 +64,28 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 主链确认（静态，未运行构建、CLI 与 Gateway）。依据见 [LLM渠道管理调查笔记](../LLM渠道管理/OpenClaw-LLM渠道管理调查笔记.md)。
 
-- **三层渠道结构**：逻辑 Provider（`provider/model` 中的品牌身份）→ 协议与 Adapter（按 `model.api` 协议族注册的流式实现）→ 模型目录与凭据（运行时可查询、可复制的目录照照）。没有持久化的"渠道实例"对象；"解析到具体渠道"的终点是 Model 行（baseUrl/api/compat）、可用 auth 方案、stream adapter 与会话绑定 LlmRuntime 四者。
-- **模型目录**：来源合并为 author 的 agent `models.json`、provider 插件生成目录（agent SQLite `cache_entries`，scope `plugin-model-catalog-v1`）与运行时 `registerProvider(...)` 动态注入；hosted catalog 默认 `https://catalog.openclaw.ai/models/v1/catalog.json`（TTL 6 小时，源仓库不在本仓库内）可增量覆盖。`models.mode` 的 merge/replace 影响配置层，目录层始终是各来源之和。
-- **凭据解析**：最终凭据统一为 `ResolvedRequestAuth(apiKey + headers)`。优先级链为显式 pin 的 auth profile → `auth.order` 配置顺序 → aws-sdk → env-first 环境变量 → provider 内联 key（env/exec/SecretRef 解析）→ auth store 按序逐 profile（api_key/token/oauth）。`models.json` 持久化的是来源 marker 而非明文；OAuth 是可刷新运行时状态，不接受 SecretRef。
-- **故障转移四层**：同 key 瞬时重试、限流时 env 多 key 轮换、auth profile 轮换（各 profile 独立 cooldown/disabled，round-robin 且会话有 stickiness）、模型级 fallback 链。user pin 是严格选择不落入 fallback；configured/cron 主选可回退；仅当全链都是超载类错误时才整链最多重试 10 次。fallback 是 turn-local 的，不写回成下一轮选择。
-- **连接检测与可观测**：CLI `models status/list --probe` 与 Control UI "Test connection"（RPC `models.probe`）复用同一 auth-probe 引擎，发起真实最小模型请求并返回状态桶与稳定 reasonCode；usage/cost 随每条 assistant 消息归一化落账。
-- **管理入口（入口确认）**：config、CLI `models` 命令族、Control UI Settings→Model Providers；"复制 provider""导入/导出 provider 配置""桌面端独立 provider CRUD"本次未找到（限定于已读入口）。
+- **三层渠道结构**：渠道解析分三层完成。第一层是逻辑 Provider，即 `provider/model` 里的品牌身份；第二层是协议与 Adapter，按 `model.api` 声明的协议族注册具体的流式实现；第三层是模型目录与凭据，存放运行时可以查询和复制的目录项。系统里没有持久化的"渠道实例"对象，"解析到具体渠道"的终点是四样东西：Model 行的 baseUrl、api 与 compat 字段，可用的 auth 方案，stream adapter，以及会话绑定的 LlmRuntime。
+- **模型目录**：模型目录由三处来源合并而成，包括 author 提供的 agent `models.json`、provider 插件生成的目录，以及运行时通过 `registerProvider` 动态注入的条目；插件目录落在 agent SQLite 的 `cache_entries` 表，scope 为 `plugin-model-catalog-v1`。托管目录默认请求 `https://catalog.openclaw.ai/models/v1/catalog.json`，TTL 为 6 小时，源仓库不在本仓库内，可对上述来源做增量覆盖。`models.mode` 的 merge 与 replace 只影响配置层，目录层始终是各来源之和。
+- **凭据解析**：所有来源最终归一到同一个 `ResolvedRequestAuth(apiKey + headers)` 结构。解析按下列顺序逐级尝试：
+
+  1. 显式 pin 的 auth profile
+  2. `auth.order` 里配置的顺序
+  3. aws-sdk
+  4. env-first 环境变量
+  5. provider 内联 key（env/exec/SecretRef 解析）
+  6. auth store 按顺序逐个 profile（api_key/token/oauth）
+
+  `models.json` 中持久化的只是来源 marker，明文不落盘；OAuth 属于可刷新的运行时状态，不接受 SecretRef。
+- **故障转移四层**：故障转移按四层递进处理：
+
+  - 同 key 瞬时重试
+  - 限流时在 env 的多个 key 之间轮换
+  - auth profile 轮换：各 profile 独立维护 cooldown 与 disabled 状态，轮换为 round-robin，会话保持 stickiness
+  - 模型级 fallback 链
+
+  user pin 属于严格选择，不落入 fallback；configured 与 cron 的主选可以回退；只有全链错误都属于超载类时，才整链最多重试 10 次。fallback 是 turn-local 的，不写回成下一轮的选择。
+- **连接检测与可观测**：CLI 的 `models status`、`models list --probe` 与 Control UI 的 "Test connection" 按钮共用同一个 auth-probe 引擎，探测会发出一次真实的最小模型请求，返回状态桶和稳定的 reasonCode。usage 与 cost 随每条 assistant 消息归一化落账。
+- **管理入口（入口确认）**：模型 Provider 的管理入口有三处，分别是配置文件、CLI 的 `models` 命令族和 Control UI 的 Settings→Model Providers。复制 provider、导入导出 provider 配置、桌面端独立 provider CRUD 这三项在已读入口中未找到。
 
 ## Agent 角色与工具
 
@@ -65,13 +93,13 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 ### Agent 角色与配置
 
-- **角色模型**：Agent 边界是 `agents.entries.<agentId>` 配置条目 + workspace 角色文件，不是单独 Persona 表，也不是只包一段 system prompt 的包装。配置条目承担身份元数据、workspace/目录、模型、能力策略与运行时选择；workspace 文件承担可编辑规则、人格、用户偏好、引导与记忆。唯一稳定标识是 roster 中的 Agent ID（schema 约束标识格式，无通用角色版本字段）。
-- **身份与提示词来源**：身份由结构化 config identity 与人类可编辑 `IDENTITY.md` 两个来源合并，UI 展示优先 config、再 workspace、最后默认 Assistant。角色提示词主要来自源码内安全/工具指导、workspace 有界读取的上下文文件与本次运行的 channel/session/owner 等动态输入；`SOUL.md` 标 persona/tone、`USER.md` 标用户偏好。`AGENTS.md` 的 Tools 段只指导使用方式，不能授予工具。
-- **workspace 与状态**：默认 workspace 由 `OPENCLAW_WORKSPACE_DIR`/`OPENCLAW_STATE_DIR`/profile 推导；Agent 状态、memory 与 session 按 agentId 隔离（per-agent `openclaw-agent.sqlite`）。bootstrap 文件注入模式有 always/continuation-skip/never 之分，pending `BOOTSTRAP.md` 约束首轮仪式；subagent 与 ACP worker 不重复接收顶层 bootstrap。
-- **模型与覆盖**：Agent 支持 primary/fallback 两种形状；Agent primary 优先于 defaults；会话 pin（`modelOverrideSource:"user"`）严格、自动 fallback 记 auto 并周期 re-probe 原主选。配置默认模型、session 覆盖与"最近一次实际运行模型"是不同事实。
-- **路由与 session key**：`bindings[]` 把 channel/account/peer/guild/team/role 条件映射到 Agent，结果同时是路由所有权与 session 命名空间；session key 以 agentId 为第一层命名空间，显式 Agent 与 session key 不一致会被拒绝。
-- **原生 subagent 与 ACP**：subagent 目标须同时满足 allowlist 与已配置 Agent registry，child 保存 role、spawn depth、父 session 与继承工具策略；ACP binding 有独立的 `acpAgentId` 与持久 metadata，ACP-shaped key 本身不足以证明运行在 ACP。
-- **Gateway/UI 可见面（入口确认）**：`agents.list/update`、identity、files、workspace 预览等 RPC 面向 operator 客户端做收窄投影；Agents 页面只覆盖字段子集的管理表单。普通 Agent 无通用 clone/import/export；Claw 包安装/导出是独立的 provenance + consent 资产流（实验开关下），其载荷按包资产定义。
+- **角色模型的构成**：一个 Agent 由 `agents.entries.<agentId>` 配置条目与 workspace 角色文件两部分组成，没有单独的 Persona 表，角色定义也不止一段 system prompt。配置条目负责身份元数据、workspace 与目录、模型、能力策略和运行时选择；workspace 文件负责可编辑规则、人格、用户偏好、引导与记忆。唯一稳定的标识是 roster 中的 Agent ID，schema 会约束其格式，且没有通用的角色版本字段。
+- **身份与提示词来源**：身份由结构化 config identity 与人类可编辑的 `IDENTITY.md` 合并而得，UI 展示时按 config、workspace、默认 Assistant 的顺序取值。角色提示词来自三处：源码内的安全与工具指导、workspace 中有界读取的上下文文件，以及本次运行的 channel、session、owner 等动态输入。`SOUL.md` 标注 persona 与 tone，`USER.md` 承载用户偏好；`AGENTS.md` 的 Tools 段只说明工具用法，改变不了可用的工具集合。
+- **workspace 与状态**：默认 workspace 由 `OPENCLAW_WORKSPACE_DIR`、`OPENCLAW_STATE_DIR` 与 profile 推导。每个 agentId 的状态、memory 和 session 相互隔离，各自落在自己的 `openclaw-agent.sqlite`。bootstrap 文件的注入模式分为 always、continuation-skip 与 never 三种，pending 的 `BOOTSTRAP.md` 对首轮仪式形成约束；subagent 与 ACP worker 不会重复接收顶层的 bootstrap。
+- **模型与覆盖**：Agent 的模型配置有 primary 与 fallback 两种形状，Agent primary 优先于 defaults。会话里的 pin（`modelOverrideSource` 为 user）属于严格选择；自动 fallback 记为 auto，并周期性 re-probe 原来的主选。配置里的默认模型、session 覆盖与"最近一次实际运行模型"是三类不同的事实。
+- **路由与 session key**：`bindings` 数组把 channel、account、peer、guild、team 和 role 条件映射到具体 Agent，映射结果同时表达路由所有权与 session 命名空间。session key 以 agentId 作为第一层命名空间；请求里显式指定的 Agent 与 session key 不一致时直接拒绝。
+- **原生 subagent 与 ACP**：启动 subagent 时，目标必须同时出现在 allowlist 和已配置的 Agent registry 中；child 会保存 role、spawn depth、父 session 与继承来的工具策略。ACP binding 有自己的 `acpAgentId` 和持久 metadata，仅凭 ACP 形状的 session key 无法断定运行在 ACP 上。
+- **Gateway/UI 可见面（入口确认）**：`agents.list`、`agents.update` 以及 identity、files、workspace 预览等 RPC 只向 operator 客户端暴露收窄后的投影，Agents 页面也只是覆盖部分字段的管理表单。普通 Agent 没有通用的 clone、import、export；Claw 包的安装与导出走独立的 provenance + consent 资产流，需要实验开关，载荷按包资产定义。
 
 ### 工具面
 
@@ -85,27 +113,27 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 主链确认（静态）部分来自 [外部执行体与应用协作调查笔记](../外部执行体与应用协作/OpenClaw-外部执行体与应用协作调查笔记.md)，独特能力卡依据 [独特功能调查笔记](../独特功能/OpenClaw-独特功能调查笔记.md)。
 
-- **多表面控制链**：Gateway WebSocket 以 connect.challenge → connect → hello-ok 完成认证、设备证明、节点配对与 session 注册；请求/响应与事件分离，事件 `seq` 检测缺口，重连后经恢复/历史重建投影。CLI/TUI/Control UI/移动 app 都是外部控制表面，不拥有主 Agent runtime；TUI `--local` 嵌入式 backend 属宿主内建路径。
-- **外部执行体 ACPX**：`sessions_spawn({runtime:"acp"})` 或 `/acp spawn` 进入 ACPX，由插件启动 Claude/Codex/Gemini/Pi 等外部 harness；harness 保有自己的工具循环与原生 session，text/tool/审批/错误经 Gateway session、父 session 或绑定渠道回流，进程租约与回收链完整。`openclaw attach` 是另一条带短期 grant + loopback MCP 配置的外部 Claude Code 协作链；原生 `openclaw acp` 反向让外部 ACP client 经 stdio 控制 OpenClaw 的 Gateway session。
-- **设备节点调用**：Gateway node registry 向已配对节点发 `node.invoke.request`，节点回 progress/result，超时/取消/空闲超时/断线走结构化失败或 cancel；iOS 前台专属命令另有 TTL+容量的 pending action 与 APNS wake 流程。节点能力按声明 capability、allowlist、scope、插件策略与审批限制。
-- **渠道 DM 与设备配对审批门（独特能力，主链确认静态）**：渠道账号的 `dmPolicy`（pairing/allowlist/open/disabled）与 allowFrom 决定陌生私聊是否放行。pairing 模式下未批准发送者收到 8 位 TTL 码（挂起请求 1 小时过期、单账号上限 3 条），消息不进 Agent；操作者经 CLI `openclaw pairing approve`、Control UI 队列或配对渠道批准后写入 allow entries，批准持久化并驱动下一次准入。设备端 setup-code/bootstrap token 配对及 scope 升级走同源的显式审批语义。该门 fail-closed、不透明码，各渠道插件共享核心决定器（以 Telegram 为例走通，其余渠道未逐一核对）。
-- **身份分层**：连接身份、Gateway session key、ACP runtime session name、渠道 thread/topic、node id 是不同层级标识，不能凭聊天标题推断相等。
-- **渠道 ACP binding**：把会话/Discord thread/Telegram topic 绑定到外部 ACP session；平台级消息编辑、线程与失败重试为入口确认、未运行验证。
-- **云与节点工作环境**：Gateway 可把 session 放置到受管理 worker environment 或配对节点，持久化 placement state、generation、environment owner epoch 与 turn claim；仓库工作区经过准备、同步、远端执行、结果暂存和本地 reconcile，冲突形成显式 workspace result。recovery/reclaim 负责重启后的环境与待结算结果，旧 claim 不能恢复执行权。
+- **多表面控制链**：Gateway 的 WebSocket 握手依次经过 connect.challenge、connect 和 hello-ok 三步，完成认证、设备证明、节点配对与 session 注册。连接上请求/响应与事件分开传递，事件携带 `seq` 用于检测缺口，重连后通过恢复流程和历史重建恢复投影。CLI、TUI、Control UI 与移动 app 都是外部控制表面，主 Agent runtime 不在这些客户端里；TUI 的 `--local` 嵌入式 backend 属于宿主机内建路径。
+- **外部执行体 ACPX**：调用 `sessions_spawn` 时指定 runtime 为 acp，或执行 `/acp spawn`，都会进入 ACPX，由插件启动 Claude、Codex、Gemini、Pi 等外部 harness。harness 保有自己的工具循环与原生 session，文本、工具调用、审批和错误经 Gateway 会话、父会话或绑定渠道回流，进程租约与回收链完整。`openclaw attach` 是另一条外部 Claude Code 协作链，带短期 grant 与 loopback MCP 配置；原生 `openclaw acp` 反向工作，让外部 ACP client 通过 stdio 控制 OpenClaw 的 Gateway 会话。
+- **设备节点调用**：Gateway 的 node registry 向已配对节点发送 `node.invoke.request`，节点回传 progress 或 result；超时、取消、空闲超时和断线都归为结构化失败或 cancel。iOS 前台专属命令另有一套受 TTL 与容量约束的 pending action 与 APNS wake 流程。节点能力受声明的 capability、allowlist、scope、插件策略和审批共同限制。
+- **渠道 DM 与设备配对审批门（独特能力，主链确认静态）**：渠道账号的 `dmPolicy` 取值为 pairing、allowlist、open、disabled，配合 allowFrom 决定陌生私聊是否放行。pairing 模式下未批准的发送者会收到 8 位 TTL 码，挂起请求 1 小时过期、单账号最多 3 条，期间消息不进入 Agent。操作者通过 CLI 的 `openclaw pairing approve`、Control UI 队列或配对渠道批准后，系统写入 allow entries；批准结果持久化，并决定下一次准入是否放行。设备端的 setup-code 与 bootstrap token 配对、scope 升级沿用同一套显式审批语义。这道门默认拒绝，只认不透明码，各渠道插件共用同一核心决定器，其中 Telegram 已走通，其余渠道未逐一核对。
+- **身份分层**：连接身份、Gateway session key、ACP runtime session name、渠道 thread/topic 与 node id 分属不同层级的标识，聊天标题相同也推不出标识相等。
+- **渠道 ACP binding**：把一个会话、Discord thread 或 Telegram topic 绑定到外部 ACP 会话上。平台级消息编辑、线程操作与失败重试只到入口确认，未运行验证。
+- **云与节点工作环境**：Gateway 可以把 session 放到受管理的 worker environment 或配对节点上，并持久化 placement state、generation、environment owner epoch 与 turn claim。仓库工作区要依次经过准备、同步、远端执行、结果暂存和本地 reconcile，出现冲突时形成显式的 workspace result。重启后的环境恢复与待结算结果由 recovery/reclaim 处理，旧的 claim 拿不回执行权。
 
 ## 后台与主动任务
 
 各类运行形态主链确认（静态，未启动 Gateway/timer/渠道）。依据见 [主动Agent与后台任务调查笔记](../主动Agent与后台任务/OpenClaw-主动Agent与后台任务调查笔记.md)。
 
-- **运行形态不是单一任务系统**：当前照照的主动运行分 cron/automations、heartbeat、hooks/webhooks、后台 CLI exec、detached subagent 五种，共享 Gateway 生命周期与结果交付设施，各自的状态 owner 不同。
-- **cron/automations（最完整的后台主链）**：Agent 用 `automations` 工具、Gateway cron RPC 或 CLI 保存 job；到期由 CronService 认领，SQLite `cron_jobs` + `cron_run_receipts` 提供 durable reservation/running fence，cron history owner 在 task_runs 保存日程运行历史。支持 at/every/cron 时间排程与 on-exit、stream 触发；main job 经 system event + heartbeat 重入主会话，isolated/current 用 detached run session；默认并发上限 8，支持退避重试、连续失败告警、10 次自动禁用、启动 catch-up 与 stale receipt 恢复。
-- **heartbeat 与 wake bus**：周期 monitor 是 system-owned cron job（默认周期 30m）；hook/cron/后台 task 等进入同一 wake bus，按 agent/session 分组合并、每 target 最多一个活跃 heartbeat turn；安静/可见结果由 outcome classifier 区分，结构化结果写 `heartbeat_outcomes`，不打扰用户时不发消息。
-- **hooks/webhooks**：Gateway HTTP 层只做认证/准入与幂等，不直接执行模型；`wake` hook 投递 system event，`agent` hook 把外部事件合成一次性 cron run。HTTP replay cache 仅进程内，不承担跨重启 ledger。
-- **后台 CLI exec**：yield/background 与进程完成竞争，后台路径保留 process session 控制身份，进程、输出和完成通知由 supervisor/activity/registry 协作；没有 runtime=cli 的通用任务行。取消分 durable 句柄与普通 supervisor 路径，完整重启接管未调查。
-- **Detached subagent**：`sessions_spawn` 创建子 session 并登记 run，`subagent_runs` 持久化；结果可直投 requester、进 steering queue 注入下一次 turn，或经 settle wake 在所有子项结束后重入 requester。跨 restart 的 handoff 走 SQLite session delivery queue。
-- **统一 durable channel delivery**：cron/heartbeat/subagent/task 的可见结果都进入写前队列（SQLite row + producer/platform lease），发送结果分 sent/suppressed/partial_failed/failed，保留 unknown-after-send 语义，避免平台调用已开始但结果不明时盲目重发。
-- **持久更新运行**：软件更新使用 `update_runs` 账本记录触发源、目标、阶段步骤、验证、修复、终态和驱动身份；驱动必须显式 adopt，死亡驱动和遗留运行按保存的 recovery 继续或结算。它是独立运维运行形态，不与 cron/subagent 合并为通用 worker queue。
-- **本次未找到**：统一的跨进程通用 worker queue；持久性是 receipt、subagent registry、session/outbound delivery queue 分别承担的。
+- **五种主动运行形态**：主动运行分成 cron/automations、heartbeat、hooks/webhooks、后台 CLI exec 与 detached subagent 五类，它们共享 Gateway 生命周期与结果交付设施，但每类各有自己的状态 owner。
+- **cron/automations（最完整的后台主链）**：Agent 通过 `automations` 工具、Gateway cron RPC 或 CLI 保存 job，到期后由 CronService 认领。SQLite 的 `cron_jobs` 与 `cron_run_receipts` 两张表提供 durable reservation 与 running fence，cron history owner 把日程运行历史写进 task_runs。排程支持 at、every、cron 三种写法，以及 on-exit 与 stream 触发。main job 经 system event 与 heartbeat 重入主会话，isolated 与 current 使用 detached run session。默认并发上限为 8，另有退避重试、连续失败告警、连续 10 次失败后自动禁用、启动 catch-up 与 stale receipt 恢复。
+- **heartbeat 与 wake bus**：周期 monitor 本身是一个 system-owned 的 cron job，默认周期 30 分钟。hook、cron 与后台 task 等来源统一进入同一条 wake bus，按 agent 与 session 分组后合并，每个 target 最多有一个活跃的 heartbeat turn。结果是安静还是可见由 outcome classifier 判定，结构化结果写入 `heartbeat_outcomes`；判定为安静时不发消息打扰用户。
+- **hooks/webhooks**：Gateway 的 HTTP 层只负责认证、准入与幂等，模型不在这一层执行。wake hook 投递 system event，agent hook 把外部事件合成一次性的 cron run。HTTP replay cache 只存在于进程内，重启后不会保留。
+- **后台 CLI exec**：命令转到后台时，yield 与 background 两条路径跟进程完成竞争，后台路径保留 process session 控制身份；进程、输出与完成通知由 supervisor、activity 和 registry 三方协作处理，不存在 runtime 为 cli 的通用任务行。取消分 durable 句柄与普通 supervisor 两条路径；完整重启接管尚未调查。
+- **Detached subagent**：`sessions_spawn` 创建子 session 并登记一次 run，运行记录持久化在 `subagent_runs` 表。结果有三条去向：直接投递 requester、进入 steering queue 注入下一次 turn，或在所有子项结束后经 settle wake 重入 requester。跨 restart 的 handoff 走 SQLite 的 session delivery queue。
+- **统一 durable channel delivery**：cron、heartbeat、subagent 与 task 的可见结果都先进入写前队列，队列由 SQLite 行加 producer/platform 租约构成。发送结果分为 sent、suppressed、partial_failed 与 failed 四种，unknown-after-send 语义被保留：平台调用已经开始而结果不明的消息不会盲目重发。
+- **持久更新运行**：软件更新用 `update_runs` 账本记录触发源、目标、阶段步骤、验证、修复、终态与驱动身份。驱动需要显式 adopt 才接手，已经死亡的驱动和遗留运行按保存的 recovery 继续执行或结算。它作为一种独立的运维运行形态存在，没有与 cron、subagent 合并成通用 worker queue。
+- **本次未找到**：统一的跨进程通用 worker queue。持久化分别由 receipt、subagent registry 与 session/outbound delivery queue 承担。
 
 ## 媒体生成与输出运行时
 
@@ -120,12 +148,12 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 ### 生成式输出与 Widget/Canvas 运行时
 
-- **基座（G0）**：默认聊天输出是普通文本/结构化 content part，以 assistant 消息进入 transcript，无内容级活对象生命周期。
-- **Canvas 文档**：`show_widget` 工具（唯一向模型公开的生成输出入口）把模型 HTML/SVG 包进带 CSP + host bridge 的 document shell；未 pin 时落盘为 `state/canvas/documents/<id>/` 托管文档，作消息内沙箱 iframe 预览（无网络、只读演示、用户激活驱动的 prompt 回流）。历史重载时可从工具结果/短码恢复 inline 预览。
-- **Session Board Widget**：`pin:true` 经 `board.widget.put` 写入 session board（per-agent SQLite `board_tabs`/`board_widgets`），以 widget name 为稳定身份、revision/instanceId/viewGeneration 为版本线，成为 dashboard 上可长期存在、可被再次同名生成整段覆盖的 widget；可承载 HTML、插件注册 content、MCP App view 三种内容。
-- **能力授权**：带能力声明的 widget 首次为 pending，经会话 exec 策略（Guarded 人工/auto 模型评审/full/Read only）批准后冻结字节 hash；数据读取、action、cron 触发与免确认 prompt 都要求 grantState=granted 且工具名在 declared 集合。网络 fetch 只允许声明并获准的精确 HTTPS origin 进入 CSP `connect-src`；widget 代码运行在客户端隔离 iframe（非服务器沙箱）。
-- **事件回流**：widget `state.emit` 经 board event 变 session system event（`[dashboard] ...`），使交互在下一个 Agent turn 自动进入模型上下文；`prompt.send` 生成会话内普通 user prompt 并需用户激活。
-- **资源治理边界**：每 session board widget ≤48、HTML 上限 256 KiB、canvas 文档配额 ≤32、view ticket TTL 20 分钟、widget 事件 payload ≤8 KiB 等；无 board 级导入/导出 RPC、无 diff/patch 协作历史、无模型侧查询 board widget 列表的专用工具（未确认项）。
+- **基座（G0）**：默认聊天输出是普通文本或结构化的 content part，作为 assistant 消息进入 transcript，内容级的活对象没有独立生命周期。
+- **Canvas 文档**：模型只能通过 `show_widget` 这一个入口生成输出，它把模型产出的 HTML 或 SVG 包进带 CSP 与 host bridge 的 document shell。未 pin 时文档落盘到 `state/canvas/documents/<id>/` 作为托管文档，并以消息内沙箱 iframe 预览，预览环境无网络、只读演示，prompt 回流由用户激活驱动。历史重载时可以从工具结果或短码恢复 inline 预览。
+- **Session Board Widget**：调用时传 `pin` 为 true，内容经 `board.widget.put` 写入 session board，落在 per-agent SQLite 的 `board_tabs` 与 `board_widgets` 表。widget name 是稳定身份，revision、instanceId 与 viewGeneration 组成版本线，因此它能长期留在 dashboard 上，也能被再次同名生成整段覆盖。它可承载 HTML、插件注册的 content 与 MCP App view 三种内容。
+- **能力授权**：带能力声明的 widget 首次处于 pending，由会话 exec 策略批准后冻结字节 hash；策略有 Guarded（人工确认）、auto（模型评审）、full 与 Read only 四种取值。数据读取、action、cron 触发与免确认 prompt 都要求 grantState 为 granted，且工具名落在 declared 集合内。网络 fetch 只放行声明并获准的精确 HTTPS origin，将其写入 CSP 的 connect-src。widget 代码运行在客户端隔离 iframe 中，沙箱边界由客户端提供。
+- **事件回流**：widget 调用 `state.emit` 后，事件经 board event 转成 session system event（前缀 `[dashboard]`），交互内容因此在下一个 Agent turn 自动进入模型上下文。`prompt.send` 生成的是会话内普通 user prompt，需要用户激活。
+- **资源治理边界**：每个 session 的 board widget 不超过 48 个，HTML 上限 256 KiB，canvas 文档配额 32 个，view ticket TTL 为 20 分钟，widget 事件 payload 不超过 8 KiB。board 级导入导出 RPC、diff/patch 协作历史、模型侧查询 board widget 列表的专用工具均为未确认项。
 
 ## 记忆检索与上下文编译
 
@@ -133,36 +161,42 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 ### 记忆检索与认知编排
 
-- **谱系与边界（源码事实）**：内置记忆是"可编辑 Markdown 事实源 + 每 agent SQLite 派生索引 + 受权限控制的工具召回 + 发送前即时注入 + 后台记忆晋级"，不是外置知识库。QMD backend 已移除，配置迁移负责把旧路径迁移到内置后端；内置 SQLite 引擎是当前唯一内置 memory engine（memory-lancedb 是可替换插件）。
-- **事实源与索引**：源为根 MEMORY.md、USER.md、`memory/` 下 Markdown 与显式 extraPaths（可选 session transcript corpus）；派生资产在 agent `openclaw-agent.sqlite`（source/chunks/FTS5/可选 sqlite-vec/embedding cache/provenance 等表）。切块默认约 400 token、80 overlap；Embedding provider 默认 openai，可配多种本地/远程；provider/model/source 等参与 index identity，变化后旧向量索引判 mismatched 而非静默复用。
-- **检索主链**：`memory_search` 关键词（FTS5/BM25）+ 向量（KNN 或进程内 cosine）+ 混合合并，再按时效/importance/project affinity/MMR 重排；默认返回 ≤6 条、minScore 0.35。结果是带 path/line/score/provenance 的候选，不是 learned cross-encoder rerank。
-- **工具化检索与即时注入**：模型可 `memory_search` 后 `memory_get` 精读；Bootstrap 阶段按 provenance/预算注入 MEMORY.md/USER.md；项目记忆块最多 48 条 curated 候选；Wiki（memory-wiki）把来源编译成 entity/concept/synthesis 页面并支持 `wiki_search/wiki_get` 与受预算的 digest 注入。
-- **Active Memory（检索驱动编排的部分实现）**：Lane 1 是无模型的 lexical trigger 即时召回（≤3 条 hidden 前缀）；Lane 2 只在 recall intent 且 Lane 1 无 strong hit 时启动受限记忆子 Agent 返回摘要。当前未确认命中向量反馈、关系路径递进或多阶段自然语言 query planner；可确认的编排形态是一次额外 subagent turn 加有界摘要，固定多阶段认知链属于尚未确认的部分。
-- **主动记忆演化（dreaming）**：memory-core 默认注册受 cron 管理的 light→REM→deep 后台 sweep；deep gate 通过后由有界 consolidation 子 Agent 按 operation 契约维护 MEMORY.md（preimage + hash fence + append-only fallback），DREAMS.md 是审阅面。untrusted/system 内容不能靠高 recall 晋级。
-- **权限与不可信内容**：provenance 是 SQLite 关闭元数据；自动注入与晋级在分数前先过资格门；搜索对显式 provider 不可用保持 visible unavailable，不伪装成零命中。
+- **谱系与边界（源码事实）**：内置记忆由五部分构成，包括可编辑的 Markdown 事实源、每 agent 一份 SQLite 派生索引、受权限控制的工具召回、发送前即时注入，以及后台记忆晋级，整套机制在本地实现。QMD backend 已经移除，配置迁移负责把旧路径迁到内置后端；内置 SQLite 引擎是目前唯一的记忆引擎，memory-lancedb 作为可替换插件存在。
+- **事实源与索引**：记忆源包括根目录的 MEMORY.md、USER.md，`memory/` 下的 Markdown，以及显式配置的 extraPaths，可选 session transcript corpus。派生资产存放在 agent 的 `openclaw-agent.sqlite` 里，包含 source、chunks、FTS5、可选 sqlite-vec、embedding cache 与 provenance 等表。切块默认约 400 token、80 重叠；Embedding provider 默认为 openai，也支持多种本地或远程实现。provider、model 与 source 等参数参与 index identity，其中任一变化后旧向量索引会被判为 mismatched，不会静默复用。
+- **检索主链**：`memory_search` 先做关键词检索（FTS5/BM25）与向量检索（KNN 或进程内 cosine），再混合合并，按时效、importance、project affinity 与 MMR 重排；默认返回不超过 6 条，minScore 为 0.35。返回的候选带有 path、line、score 与 provenance，重排阶段不含 learned cross-encoder 模型。
+- **工具化检索与即时注入**：模型先用 `memory_search` 检索，再用 `memory_get` 精读命中条目。Bootstrap 阶段按 provenance 与预算注入 MEMORY.md 和 USER.md；项目记忆块最多灌入 48 条 curated 候选。Wiki（memory-wiki）把来源编译成 entity、concept 与 synthesis 页面，提供 `wiki_search` 与 `wiki_get`，并按预算做 digest 注入。
+- **Active Memory（检索驱动编排的部分实现）**：Lane 1 是无模型的 lexical trigger 即时召回，最多取 3 条作为 hidden 前缀注入。Lane 2 只在出现 recall intent 且 Lane 1 没有 strong hit 时启动，由一个受限的记忆子 Agent 返回摘要。命中向量反馈、关系路径递进与多阶段自然语言 query planner 目前都未确认；能确认的编排形态是一次额外 subagent turn 加有界摘要，固定的多阶段认知链仍未确认。
+- **主动记忆演化（dreaming）**：memory-core 默认注册一条受 cron 管理的后台 sweep，按 light、REM、deep 三个阶段推进。deep gate 通过后，有界的 consolidation 子 Agent 按 operation 契约维护 MEMORY.md，写入时使用 preimage、hash fence 与 append-only fallback，DREAMS.md 则是供人审阅的界面。untrusted 与 system 内容即使 recall 很高也无法晋级。
+- **权限与不可信内容**：provenance 以 SQLite 关闭元数据的形式保存；自动注入与晋级在打分之前先过一道资格门。显式 provider 不可用时搜索返回 visible unavailable，不会把不可用表示成零命中。
 
 ### 上下文规则对象与编译
 
-- **规则对象分布，不是单一编译器**：规则散落在 workspace Markdown、skills、文件 prompt 模板、插件 hook、memory 插件与可选 context engine。embedded 运行器先准备来源，`buildAgentSystemPrompt` 生成系统提示词，模型调用前把消息转成 Provider 可见数组。
-- **workspace 文件**：身份/用户偏好/长期记忆/首轮仪式文件生命周期与注入条件不同；身份文件解析只识别有限标签、回写稳定字段；bootstrap 完成标记写入 transcript，compaction/reset 使其失效。
-- **skills**：是规则对象最完整实现。多优先级根目录合并、同名按来源覆盖，产出有硬上限的 `<available_skills>` 目录（只放元数据，正文按需读取）；显式 `$skill` 引用走另一条请求前展开路径。模型可见性与运行时可用性两套面，`disable-model-invocation` 只从正常目录隐藏、授权引用仍可调。Skill Workshop 提供待审写入与 apply。
-- **prompt 模板与 slash 资源**：模板从 agent `prompts/`、项目 `.openclaw/prompts/` 与显式路径加载，参数替换单次展开、无递归；`command-dispatch: tool` 的 skill 命令可绕过模型直投工具。
-- **插件 hooks 与 context engine**：`before_prompt_build`、`agent_turn_prepare` 等 hook 可替换/追加系统提示词并影响工具面，但普通 hook 不自动获得工具执行授权；context engine 槽只选一个 engine，默认 legacy 透传消息并委托内置 compaction，非 legacy 可实现 assemble/compact/afterTurn 等并自带 quarantine/fallback。
-- **模型可见结果与权威 transcript 分界**：prompt-only（skills 目录、hook context、多数 system prompt addition）、runtime carrier（hidden custom message，display:false）与 durable lifecycle（用户原文、compaction summary、skill snapshot、memory flush）三类变换分开；`systemPromptReport` 与 `/context` 是诊断投影，与最终 Provider payload 分开维护。
-- **compaction 与 memory flush**：compaction 是输入历史的明确重写边界（summary + 近期 tail 进模型，完整历史仍在 SQLite）；compaction 前可运行 silent memory maintenance turn 把未写事实追加到当天记忆文件。
-- **本次未找到**：统一的"规则 schema + 命中器 + 统一编译"层（preset/lorebook/宏式引擎）；各规则来源各有 owner 与错误边界。
+- **规则对象的存放位置**：规则分散在 workspace Markdown、skills、文件 prompt 模板、插件 hook、memory 插件和可选的 context engine 中，没有单一的编译器统一处理。embedded 运行器先准备各来源，由 `buildAgentSystemPrompt` 生成系统提示词，模型调用前再把消息转换成 Provider 可见的数组。
+- **workspace 文件**：身份、用户偏好、长期记忆与首轮仪式四类文件的注入条件和生命周期各不相同。身份文件解析只识别有限标签，回写时保持字段稳定；bootstrap 完成标记写入 transcript，compaction 或 reset 会让它失效。
+- **skills**：skills 是规则对象实现得最完整的一类。它按优先级合并多个根目录，同名 skill 由来源覆盖，最终产出一个有硬上限的 `<available_skills>` 目录，目录里只放元数据，正文按需读取；显式 `$skill` 引用走另一条请求前展开的路径。模型可见性与运行时可用性是两套面：标记 `disable-model-invocation` 的 skill 只从正常目录中隐藏，授权引用仍可调用。Skill Workshop 提供待审写入与 apply。
+- **prompt 模板与 slash 资源**：模板从 agent 的 `prompts/` 目录、项目的 `.openclaw/prompts/` 目录以及显式路径加载，参数替换只做一次展开，不递归。带 `command-dispatch` 为 tool 的 skill 命令可以不经过模型，直接投给工具。
+- **插件 hooks 与 context engine**：`before_prompt_build`、`agent_turn_prepare` 等 hook 可以替换或追加系统提示词，也能影响工具面，但 hook 本身不会因此获得工具执行授权。context engine 槽位同一时间只选一个 engine：默认的 legacy 引擎透传消息并把压缩委托给内置 compaction，其他引擎可以实现 assemble、compact、afterTurn 等阶段，并自带 quarantine 与 fallback。
+- **模型可见结果与权威 transcript 的分界**：上下文变换分成三类，各自独立：
+
+  - prompt-only：skills 目录、hook context、多数 system prompt addition
+  - runtime carrier：hidden custom message，display 为 false
+  - durable lifecycle：用户原文、compaction summary、skill snapshot、memory flush
+
+  诊断用的 `systemPromptReport` 与 `/context` 是独立投影，与最终发给 Provider 的 payload 分开维护。
+- **compaction 与 memory flush**：compaction 是输入历史的一处明确重写边界，压缩后只有 summary 与近期 tail 进入模型，完整历史仍保留在 SQLite。compaction 之前可以跑一次 silent memory maintenance turn，把尚未写入的事实追加到当天的记忆文件。
+- **本次未找到**：统一的"规则 schema + 命中器 + 统一编译"层，即 preset、lorebook 或宏式引擎那种形态；现有各规则来源各有自己的 owner 与错误边界。
 
 ## 对话导出与分享
 
 依据 [对话导出与分享调查笔记](../对话导出与分享/OpenClaw-对话导出与分享调查笔记.md)。导出路径四条相互独立、无共享管线，全部为静态确认（未运行 CLI/UI）。
 
-- **消息内 `/export-session`（/export，owner-only）**：把持久化 transcript 活动分支渲染为自包含离线 HTML 阅读稿（base64 内嵌会话数据，带分支树、thinking、工具展示与 system prompt），写入工作区；`/export-trajectory` 与 CLI `openclaw sessions export-trajectory` 输出脱敏 JSONL 支持包（schema `openclaw-trajectory` v1），写入 `.openclaw/trajectory-exports/`，供调试/支持交付。
-- **Control UI 会话页 `/export-session`**：本地执行、只把"当前已加载消息"下载为纯文本 Markdown（剥内部上下文与 thinking）。
-- **原生应用 Export Transcript**：iOS/macOS 把当前视图消息导出为 Markdown 并经系统分享（macOS ⌘⇧E）。
-- **口径差异**：同一命令名在渠道端与 Web 端是不同实现、不同内容口径（渠道端含 system prompt 与完整工具轨迹，Web 端仅正文 Markdown）；导出都是照照，无与源会话再同步语义。
-- **内容边界**：只导出活动分支，不包含隐藏分支；轨迹导出做本地路径/secret 类清洗（尽力而为），HTML 导出刻意不脱敏；图片需以 base64 存在于 transcript 才真正内联显示（是否普遍携带未验证）。
-- **公开会话分享**：Control UI 可在显式确认后发布世界可读 token 链接并独立撤销；公开发布绑定精确 session generation，与 shared/read-only/suggest/draft 团队可见性和成员关系分离。普通会话 URL 仍是鉴权深链。
-- **仍未找到**：分享稿编辑器/预览工作台、会话整图/长图导出和本地导出版本历史；公开链接的过期、评论、访问统计和克隆未确认。控制面导出会话（如 CLI/ACP 代理时）只见 user 行并附说明。
+- **消息内 `/export-session`（/export，owner-only）**：在会话里执行这条命令，会把持久化 transcript 的活动分支渲染成一份自包含的离线 HTML 阅读稿，写入工作区。稿中 base64 内嵌了会话数据，带分支树、thinking、工具展示与 system prompt。`/export-trajectory` 与 CLI 的 `openclaw sessions export-trajectory` 输出另一份脱敏 JSONL 支持包，供调试和支持交付使用。这份支持包的 schema 为 `openclaw-trajectory` v1，默认落到 `.openclaw/trajectory-exports/`。
+- **Control UI 会话页 `/export-session`**：导出在浏览器本地执行，只把当前已加载的消息下载成纯文本 Markdown，内部上下文与 thinking 会被剥掉。
+- **原生应用 Export Transcript**：iOS 与 macOS 把当前视图中的消息导出为 Markdown，再交给系统分享面板，macOS 上的快捷键是 ⌘⇧E。
+- **口径差异**：同一个命令名在渠道端和 Web 端对应两套实现，导出的内容范围也不同：渠道端包含 system prompt 与完整工具轨迹，Web 端只有正文 Markdown。两端导出的都是快照，之后不会与源会话再同步。
+- **内容边界**：导出范围限于活动分支，隐藏分支不会出现。轨迹导出会清洗本地路径与 secret 类内容，属于尽力而为；HTML 导出则有意识地保留原始内容。只有当图片以 base64 形式存在于 transcript 中时才会真正内联显示，图片是否普遍携带这一点尚未验证。
+- **公开会话分享**：Control UI 在用户显式确认后可以发布一条世界可读的 token 链接，也能单独撤销。公开发布绑定到精确的 session generation，与 shared、read-only、suggest、draft 这些团队可见性和成员关系彼此分离。普通会话 URL 仍然是要鉴权的深链。
+- **仍未找到**：分享稿编辑器与预览工作台、会话整图或长图导出、本地导出版本历史。公开链接的过期、评论、访问统计与克隆也都未确认。走控制面导出会话时（例如经 CLI 或 ACP 代理），只能看到 user 行，并附有说明。
 
 ## 界面与独特功能
 
@@ -192,10 +226,10 @@ OpenClaw 是一个以本机 Gateway 为控制平面的多渠道 AI 助手。Gate
 
 依据 [独特功能调查笔记](../独特功能/OpenClaw-独特功能调查笔记.md)。
 
-- **ClawHub 分发与安装信任门（主链确认，静态，依赖外部 ClawHub 响应）**：`openclaw skills install`/`plugins install clawhub:` 等入口先取目标 release 的信任元数据，裁决为 clean 放行、blocked（恶意/拉黑/审核阻止）拒绝下载、review-required 要求 `--acknowledge-clawhub-risk` 显式确认；裁决随安装记录持久化，`update --all`/doctor 后续重新过门。聊天命令面不能代替本机确认（防经 Agent 诱骗安装）。
-- **`openclaw doctor` 诊断-修复-迁移链（入口确认，工程机制）**：检查/修复按模块族拆分，顶层 doctor 命令按只读/`--fix`/非交互/`--lint --json` 驱动；完整 check→fix→verify 回合未逐条走查，故不进入用户功能统计。
-- **暂缓项与仓库内部资产**：companion 语音/talk、A2UI、meeting-bot、fleet、projects/flows/tasks 等"新表面"只到声明/入口层，未走主链；Canvas 文档与 session board widget 已归入本汇总“媒体生成与输出运行时”。taxonomy.yaml、custodian-skills 与仓库根 `skills/` 是 QA 与维护 agent 资产，不是用户产品能力。
-- 渠道/设备配对审批门归并在本汇总"渠道、设备节点与外部执行体"一节。
+- **ClawHub 分发与安装信任门（主链确认，静态，依赖外部 ClawHub 响应）**：执行 `openclaw skills install` 或 `plugins install clawhub:` 这类入口时，系统先取目标 release 的信任元数据再决定是否继续。裁决有三种：clean 直接放行；blocked（恶意、拉黑或审核阻止）拒绝下载；review-required 要求操作者用 `--acknowledge-clawhub-risk` 显式确认。裁决随安装记录持久化，`update --all` 与 doctor 之后还会重新过门。聊天命令面无法代替本机确认，以防用户经 Agent 被诱骗安装。
+- **`openclaw doctor` 诊断、修复与迁移链（入口确认，工程机制）**：检查与修复逻辑按模块族拆分，顶层 doctor 命令由只读、`--fix`、非交互、`--lint --json` 几种参数组合驱动。完整的 check→fix→verify 回合没有逐条走查，因此不计入用户功能统计。
+- **暂缓项与仓库内部资产**：companion 语音与 talk、A2UI、meeting-bot、fleet、projects/flows/tasks 这些"新表面"只查到声明与入口层，尚未走通主链；Canvas 文档与 session board widget 归入本汇总“媒体生成与输出运行时”一节。taxonomy.yaml、custodian-skills 与仓库根的 `skills/` 属于 QA 与维护 agent 资产，不在用户产品能力范围内。
+- **归并位置**：渠道与设备的配对审批门见本汇总"渠道、设备节点与外部执行体"一节。
 
 ## 证据边界与遗漏
 

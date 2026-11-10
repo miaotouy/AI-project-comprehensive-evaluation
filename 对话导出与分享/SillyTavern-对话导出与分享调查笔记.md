@@ -16,12 +16,12 @@
 
 SillyTavern 的对话导出是单一 `E1 数据交换` 类型：两条格式（JSONL 原样导出、TXT 正文导出）、一个入口面（“管理聊天文件”弹窗内每个聊天块的导出按钮）、一种交付方式（浏览器本地文件下载）。本次未找到分享稿编辑器、导出预览、PNG/HTML/PDF 交付、剪贴板分享或链接/远端发布。
 
-- JSONL 导出是持久化原始数据的逐字节交付：服务端对聊天文件直接整读回传（`src/endpoints/chats.js:625-643`），header 行（`chat_metadata`）、系统消息、完整 swipe 历史、附件引用与分支字段原样保留。点击导出前客户端先强制落盘（`saveChatConditional`，`public/script.js:11443`），保证导出即磁盘最新状态。
-- TXT 导出是可见正文投影：服务端 readline 流式处理，跳过 `is_system` 消息，输出 `name: (extra.display_text || mes)`（`chats.js:645-669`）。`extra.display_text` 仅由 translate 扩展写入（译文），因此译文优先；`mes` 与活动 swipe 互为镜像，故 TXT 只含活动 swipe，附件与元数据全部丢弃。
-- 往返：JSONL 导出可无损导回——导入时校验首行结构后逐字节复制落盘，未知字段保留（Chub 聊天数据是唯一被改写的情况，会拍平其 `mes`/`swipes` 的对象包装）；TXT 无导入路径。导入另支持 Kobold Lite、CAI Tools、oobabooga、Agnai、RisuAI 五种外部 JSON 格式，投影为无 swipe 的简化消息。群聊导入仅接受自身 JSONL。
-- 角色/群聊信息以消息级字段携带：每条消息的 name 字段（说话人）随 JSONL 原样保留，群聊消息另有 `original_avatar`/`force_avatar` 头像引用（`public/scripts/group-chats.js:594-608`）；群成员配置在独立 group 文件中，不进入聊天导出；角色卡/提示词快照不嵌入（角色资产交换属 Agent 角色类目）。
-- swipe/branch：JSONL 原样导出保留同一消息的全部 swipe 与 `swipe_info`；分支以独立聊天文件 + header 父引用 + 分支点名单表达（`public/scripts/bookmarks.js:186-243`），导出按文件粒度进行，一次只导出一个文件、不打包分支树。swipe 选择器中的“导出”按钮被改造成“创建分支”操作（`public/scripts/swipe-picker.js:159-174`），不作为导出入口。
-- 本次未找到：HTML/PDF/PNG 对话交付与长图生成（全仓检索 html2canvas、jsPDF、window.print 等库均无对话相关使用，toDataURL 仅用于视频缩略图与头像裁剪）、navigator.share 系统分享、Gist/公开链接/远端快照及对应访问控制。
+- JSONL 导出交付持久化原始数据的逐字节副本：服务端整读聊天文件后原样回传，header 行、系统消息、完整 swipe 历史、附件引用与分支字段都保留在交付物中。客户端在点击导出后先强制当前会话落盘再发起请求，交付内容因此对应磁盘上的最新状态（`src/endpoints/chats.js:625-643`、`public/script.js:11443`）。
+- TXT 导出交付可见正文投影：服务端用 readline 逐行处理，跳过系统消息，每行输出说话人名与正文；正文优先取 display_text（translate 扩展写入的译文），缺失时回退到消息本体，译文存在时交付译文（`src/endpoints/chats.js:645-669`、`public/scripts/extensions/translate/index.js:215`）。正文与活动 swipe 互为镜像，TXT 因此只含活动 swipe，附件与元数据全部丢弃。
+- 往返：JSONL 导出可以无损导回。导入端校验首行结构后逐字节复制落盘，未知字段完整保留；Chub 聊天数据是唯一被改写的来源，其消息与 swipe 中的对象包装会被拍平。TXT 没有导入路径。导入另接受 Kobold Lite、CAI Tools、oobabooga、Agnai、RisuAI 五种外部 JSON 格式，统一投影为不带 swipe 的简化消息；群聊导入只接受自身导出的 JSONL。
+- 角色与群聊信息以消息级字段携带：每条消息的 name 字段记录说话人，随 JSONL 原样保留；群聊消息另有 original_avatar 与 force_avatar 两个头像引用。群成员配置存放在独立的 group 文件中，不进入聊天导出；角色卡与提示词快照同样不嵌入（`public/scripts/group-chats.js:594-608`）。
+- swipe 与分支：JSONL 原样导出保留同一消息的全部 swipe 及其 `swipe_info`；分支以独立聊天文件表达，靠 header 中的父引用与分支点上的分支名单串联。导出按文件粒度进行，一次只导出一个文件，不打包分支树。swipe 选择器里的“导出”按钮已改成“创建分支”操作，不承担导出职责（`public/scripts/bookmarks.js:186-243`、`public/scripts/swipe-picker.js:159-174`）。
+- 本次未找到 HTML/PDF/PNG 形式的对话交付与长图生成、navigator.share 系统分享，以及 Gist、公开链接、远端快照一类的发布渠道与其访问控制。全仓检索 html2canvas、jsPDF、window.print 等库与 API 时，未见与对话相关的使用；toDataURL 只用于视频缩略图与头像裁剪。
 
 ## 系统边界与完整主链
 
@@ -50,18 +50,18 @@ assistantNote 模板 .assistant_note_export
 
 ## 1. 入口、用户目标与导出源
 
-- 主入口：“管理聊天文件”弹窗（`#option_select_chat` 选择器经渲染函数链打开），每个聊天块渲染导出按钮（`public/index.html:6779-6780`、`public/script.js:8521-8558`）；按钮在键盘可聚焦序列中（`public/scripts/keyboard.js:25-26`）。本次未找到斜杠命令、消息级菜单或 Chat UI 中的其他导出入口。
-- 导出源：磁盘上的单个完整聊天文件（`.jsonl`），不接受内存选区或可见消息子集；角色聊天与群聊共用同一模板与点击处理器，群聊请求带群聊标记（`is_group: true`）、头像地址为空（`script.js:11447-11453`），服务端按该标记选择 chats 或 groupChats 目录（`chats.js:608-614`）。
+- 主入口是“管理聊天文件”弹窗：`#option_select_chat` 选择器经渲染函数链打开弹窗，每个聊天块各渲染一个导出按钮，按钮落在键盘可聚焦序列内。本次未找到斜杠命令、消息级菜单或 Chat UI 中的其他导出入口（`public/index.html:6779-6780`、`public/script.js:8521-8558`、`public/scripts/keyboard.js:25-26`）。
+- 导出源：服务端按请求整读磁盘上的单个完整聊天文件，用户选区或可见消息子集不参与导出。角色聊天与群聊共用同一模板与点击处理器，群聊请求带群聊标记、头像地址留空，服务端据此决定读取 chats 还是 groupChats 目录（`public/script.js:11447-11453`、`src/endpoints/chats.js:608-614`）。
 - 用户目标：JSONL 面向存档与跨应用/跨安装交换，TXT 面向阅读传播。无批量导出，一个按钮导出一个文件。
-- 次要入口：Assistant 临时聊天的 “Export as JSONL / Import from JSONL”（`public/scripts/templates/assistantNote.html:5-12`、`public/scripts/chats.js:2138-2180`），导出当前内存会话（过滤 ASSISTANT_NOTE 系统消息），导入则解析文件后直接拼接进当前会话——它是独立于服务端管线的浏览器端往返。
+- 次要入口是 Assistant 临时聊天的“Export as JSONL / Import from JSONL”按钮：导出把当前内存会话序列化，过滤掉 ASSISTANT_NOTE 类型的系统消息；导入解析文件后直接拼接进当前会话。这条往返全部在浏览器端完成，不经过服务端管线（`public/scripts/templates/assistantNote.html:5-12`、`public/scripts/chats.js:2138-2180`）。
 
 ## 2. 范围选择、内容口径与字段过滤
 
 - 无范围/选区/单条消息选择能力：整文件导出，顺序即磁盘 JSONL 顺序。
-- JSONL 口径 = 持久化原始数据：服务端直读原文件（`src/endpoints/chats.js:625-643`），无字段过滤、无转换、无脱敏，system 消息、`chat_metadata`、全部 `extra` 内部字段（token_count、api/model、gen_id 等）均随文件交付。
-- TXT 口径 = 可见正文：跳过 `is_system` 消息（`chats.js:653-655`），按“说话人名: 文本”格式输出（`chats.js:656-660`）；`extra.display_text` 只由 translate 扩展写入（`public/scripts/extensions/translate/index.js:215`），因此译文存在时导出译文、否则导出原文。无标题、无日期、无模型/角色元信息。
-- swipe 口径：持久化中当前文本与活动 swipe 互为镜像（`script.js:6837`、`6895`），故 TXT 只含活动 swipe；JSONL 含 `swipes` 全历史。
-- Assistant 导出口径：内存 `chat` 减去 ASSISTANT_NOTE 类型系统消息（`chats.js:2147`），其余消息（含其他系统消息与 swipe）原样序列化。
+- JSONL 口径是持久化原始数据：服务端直读原文件后原样回传，中间不做字段过滤、格式转换或脱敏，系统消息、chat 元数据以及 `extra` 里的 token 计数、模型标识、生成 ID 等内部字段都随文件交付（`src/endpoints/chats.js:625-643`）。
+- TXT 口径是可见正文：服务端跳过系统消息，每行按“说话人名: 文本”输出；正文优先取 display_text（只有 translate 扩展会写入该字段），取不到时回退到消息本体，译文存在时导出译文、否则导出原文。输出中没有标题、日期或模型与角色元信息（`src/endpoints/chats.js:653-660`、`public/scripts/extensions/translate/index.js:215`）。
+- swipe 口径：持久化数据里当前文本与活动 swipe 互为镜像，TXT 因此只含活动 swipe，JSONL 保留 swipes 全历史（`public/script.js:6837-6895`）。
+- Assistant 导出口径：序列化前先从内存会话中剔除 ASSISTANT_NOTE 类型的系统消息，其余消息（含其他系统消息与 swipe）原样写出（`public/scripts/chats.js:2147`）。
 
 ## 3. 附件、资源与离线封装
 
@@ -71,7 +71,7 @@ assistantNote 模板 .assistant_note_export
 
 ## 4. 格式、schema 与往返能力
 
-- 格式与命名：jsonl（原文件直读）与 txt（投影正文）两种。导出文件名 `<聊天名>.jsonl` / `<聊天名>.txt`（`script.js:11451`）。下载 MIME 分别为 `application/octet-stream` 与 `text/plain`（`script.js:11469`）。
+- 格式与命名：导出按钮把同一个聊天文件按两种口径交付，jsonl 直读原文件，txt 交付投影正文；文件名由聊天名加 `.jsonl` 或 `.txt` 扩展名组成，下载 MIME 分别为 application/octet-stream 与 text/plain（`public/script.js:11451-11469`）。
 - schema：JSONL 首行为 `ChatHeader`（`chat_metadata` + 占位的人名/角色名字段，`script.js:7368-7373`），其后每行一条 `ChatMessage`（`global.d.ts:66-81`）。无显式格式版本号，兼容性靠字段存在性判定。
 - 往返（JSONL）：导入校验首行含 `user_name`、`name`、`chat_metadata` 任一（`chats.js:764`）。非 Chub 数据时逐字节复制落盘、未知字段完整保留（`chats.js:786`）。Chub 聊天数据是唯一改写路径：其 `mes`/`swipes` 中的对象包装会被拍平成字符串（`chats.js:258-279`）。导入另存为新文件，不覆盖源（`chats.js:780-782`）。
 - 往返（外部 JSON）：按结构特征识别五种外部格式并转换，全部投影为 `name/is_user/mes/send_date/extra` 简化消息（不保 swipe 与分支），CAI 支持多历史批量导入（`chats.js:718-738`、转换器 `110-308`）。识别特征对照如下：
@@ -120,18 +120,18 @@ TXT/JSONL 导出无任何独立分享稿对象：无预览、无编辑、无内�
 
 ## 10. 性能、失败恢复与测试
 
-- JSONL 直读整文件；TXT 用 readline 流式逐行处理，避免整读大文件（`chats.js:645-669`）；客户端最终都整体放入 Blob 下载（`utils.js:405-412`），下载侧无分片。
-- 错误路径：文件缺失返回 404 + message（`chats.js:616-622`）、读取失败 500（`chats.js:636-642`）、异常 400；客户端对非 ok 响应与 fetch 异常均 toastr 报错（`script.js:11462-11481`），成功路径先 toastr 再触发下载。
-- 导出前 `saveChatConditional` 等待在途保存结束并取消防抖保存（`script.js:9352-9362`），避免导出过期状态。
+- 服务端按格式选择读取方式：JSONL 一次整读整个文件，TXT 走 readline 逐行读取并转换，但转换后的全文仍累积在内存字符串中，读取结束后一次性返回 JSON 响应（`src/endpoints/chats.js:699-743`）。客户端拿到结果后再整体放入 Blob 下载，下载侧没有分片（`public/scripts/utils.js:405-412`）。
+- 错误路径：文件缺失时服务端返回 404 与提示信息，读取失败返回 500，其他异常返回 400；客户端对非 ok 响应和 fetch 异常都弹 toastr 报错，成功路径先弹 toastr 再触发下载（`src/endpoints/chats.js:616-642`、`public/script.js:11462-11481`）。
+- 导出前客户端调用 saveChatConditional，等待在途保存结束后再取消防抖保存，避免把过期状态写进交付物（`public/script.js:9352-9362`）。
 - 本次未找到针对导出/导入的自动化测试；下载触发、导入解析等浏览器/交互行为需运行验证。
 
 ## 11. 设计取舍与已确认边界
 
-- 双格式一条管线：同一 `/api/chats/export` 按 `format` 分流，jsonl 交付原始数据（交换/迁移）、txt 交付可见正文（阅读），两种口径不同，且 txt 的“可见正文”含译文替换语义。
+- 双格式共用一条管线：同一个 `/api/chats/export` 按 format 参数分流，jsonl 交付原始数据用于交换与迁移，txt 交付可见正文用于阅读。两种口径差异集中在 txt，它以译文替换原文后再输出。
 - 导出被定义为聊天文件管理面操作（文件级、无选区、无预览），没有会话内容工作台；与 NextChat 的逐条选择 + 品牌图片稿形成明显不同路线。
 - 往返以 JSONL 为唯一无损通道（逐字节复制、未知字段保留）；外部格式导入只保文本与角色归属。
-- 分支关系由文件命名体系 + `chat_metadata`/`extra` 字段表达，而非单文件内嵌树结构；附件以引用而非打包表达，交付物自包含性低。
-- 边界确认：角色卡 PNG/JSON 导出（入口 `#export_button`，`script.js:11970-12008`）属 Agent 角色类目。SD 资产清单下载（`extensions/assets` 的 `downloadAssetsList`，`index.js:289-313`）是资产列表而非对话导出。自动备份属备份恢复类目。以上均不作为对话导出主体记录。
+- 分支关系由文件命名体系与 chat_metadata、extra 字段共同表达，单个聊天文件内部不内嵌分支树；附件以引用形式记录，交付物的自包含性偏低。
+- 边界确认：角色卡 PNG/JSON 导出（入口 `#export_button`）归 Agent 角色类目；SD 资产清单下载（`extensions/assets` 的 downloadAssetsList）输出的是资产列表；自动备份归备份恢复类目。以上三项都列在对话导出主体之外（`public/script.js:11970-12008`、`extensions/assets/index.js:289-313`）。
 
 ## 12. 未验证事项
 

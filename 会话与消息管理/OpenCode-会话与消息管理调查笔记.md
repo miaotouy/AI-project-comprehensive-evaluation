@@ -14,9 +14,22 @@
 
 ## 结论摘要
 
-OpenCode 2.x 的会话数据核心是「durable 事件 + 事件投影落库」：服务端把每次变化（会话创建/重命名/归档、inbox 入队与投递、步骤开始/结束、文本与工具进度）发布为 durable 事件，投影器按 seq 写入 SQLite；客户端读取 HTTP 快照并用事件流增量更新。会话模型分为 Session（`session_v2`）、Message（`session_message`）、assistant 内容（`session_part`）、待执行输入（`session_inbox`）、附件（`blob`/`blob_ref`）五类存储。
+OpenCode 2.x 的会话数据以 durable 事件为源头，再由投影落库：服务端把会话创建、重命名与归档、inbox 入队与投递、步骤开始与结束、文本与工具进度都发布成 durable 事件，投影器按 seq 顺序写入 SQLite；客户端先读 HTTP 快照，再用事件流补增量。会话模型分五类表存储：
 
-消息是 11 种类型的联合（`user`、`assistant`、`synthetic`、`system`、`skill`、`shell`、`compaction`、`idle`、`agent-switched`、`model-switched`、`location-switched`），assistant 的正文是内嵌内容数组（text / reasoning / tool），工具状态有 streaming、running、completed、error 四态。消息表与会话表都只有 v2 单轨，`session_v2` 是会话的唯一存储路径。
+- `session_v2`：会话
+- `session_message`：消息
+- `session_part`：assistant 内容
+- `session_inbox`：待执行输入
+- `blob`、`blob_ref`：附件
+
+消息是 11 种类型的联合，取值范围如下：
+
+```text
+user / assistant / synthetic / system / skill / shell
+compaction / idle / agent-switched / model-switched / location-switched
+```
+
+assistant 的正文是内嵌内容数组，条目分 text、reasoning、tool 三类；工具状态有 streaming、running、completed、error 四态。消息表与会话表都只保留 v2 单轨，`session_v2` 是会话的唯一存储路径。
 
 ## 系统边界与数据主链
 
@@ -34,7 +47,7 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 
 ## 1. 数据模型
 
-- **Session**（`packages/core/src/session/sql.ts:28-84`）：项目/工作区/父会话/fork 来源与边界、slug、目录与子路径、标题、版本、分享地址、摘要与 diff 统计、成本与五类 token 计数、回退状态、权限规则集、agent 与 model、忙碌/空闲/查看/压缩/归档时间戳，以及重启续跑用的 `time_suspended`/`resume_attempts`。
+- **Session**（会话表 `session_v2`）：一行记录把一次会话的归属与运行状态放在一起，包括所属项目与工作区、父会话与 fork 来源及其边界、slug、目录与子路径、标题、版本与分享地址、摘要与 diff 统计、成本与五类 token 计数、回退状态、权限规则集，以及绑定的 agent 与 model。忙碌、空闲、查看、压缩和归档各有时间戳，另有 `time_suspended` 与 `resume_attempts` 两个字段供重启后续跑使用（`packages/core/src/session/sql.ts:28-84`）。
 - **Message**（`session_message`，`sql.ts:86-105`）：按 `session_id + seq` 唯一有序，`type` 与 `data` 分离存储；分页索引覆盖创建时间与 id。
 - **assistant 内容**（`session_part`，`sql.ts:107-128`）：以 `message_id + ordinal` 为主键保存 text/reasoning/tool 条目，读取时批量拼回消息体（`history.ts:92-126`），因此内容既可整体重放也可按键读取。
 - **Inbox**：只保存未投递条目，投递事务消费 inbox 并创建可见消息。同会话、同类型重用用户/合成输入 id 时首次受理胜出，重试中的内容、metadata 与投递方式被忽略；已投递后仍可从消息投影识别，跨会话或跨类型复用报冲突（[reconcile/admit](../../opencode/packages/core/src/session/inbox.ts#L125-L223)）。
@@ -43,14 +56,23 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 
 ## 2. 事实源、事件与持久化
 
-- **SQLite 唯一事实源**：会话库位于应用数据目录，启动时执行迁移；迁移文件在 `packages/core/src/database/migration/`。
-- **事件清单**：会话级事件覆盖 `session.created/renamed/archived/unarchived/moved/viewed/permissions/metadata.updated/forked/deleted`；消息与执行事件覆盖 `session.message.content.updated`、`session.step.started/streamed/ended/failed`、`session.text.*`、`session.reasoning.*`、`session.tool.*`、`session.shell.*`、`session.compaction.*`、`session.execution.*`、`session.inbox.*`、`session.usage.*`、`session.instructions.updated`（`packages/schema/src/session-event.ts`）。
+- **SQLite 唯一事实源**：服务端启动时对位于应用数据目录的会话库执行迁移，迁移文件放在 `packages/core/src/database/migration/`，运行期的会话读写都以这个库为准。
+- **事件清单**：会话级事件覆盖创建、重命名、归档与反归档、移动、查看、权限、metadata 更新、fork 与删除；消息与执行事件覆盖内容更新、步骤生命周期、文本、推理、工具与 shell 进度、压缩、执行状态、inbox、用量和指令更新。完整事件名在 `packages/schema/src/session-event.ts` 定义：
+
+  | 分组 | 事件名 |
+  | --- | --- |
+  | 会话 | `session.created`、`session.renamed`、`session.archived`、`session.unarchived`、`session.moved`、`session.viewed`、`session.permissions`、`session.metadata.updated`、`session.forked`、`session.deleted` |
+  | 消息内容 | `session.message.content.updated` |
+  | 步骤 | `session.step.started`、`session.step.streamed`、`session.step.ended`、`session.step.failed` |
+  | 流式增量 | `session.text.*`、`session.reasoning.*`、`session.tool.*`、`session.shell.*`、`session.compaction.*`、`session.execution.*`、`session.inbox.*`、`session.usage.*` |
+  | 指令 | `session.instructions.updated` |
+
 - **投影与顺序**：投影器是全局节点（`projector.ts` 的 `makeGlobalNode`），按事件 `created` 与 seq 生成消息体与 part 行；`message-updater.ts` 负责把单个事件应用为 assistant 消息增量（文本、推理、工具状态、快照、重试）。事件顺序即持久化顺序。
 - **执行恢复标记**：会话行的 `time_suspended` 记录执行 claim，`resume_attempts` 保存该忙碌期的自动恢复次数。执行开始时写入，成功、失败或用户中断时释放，关闭中断与进程死亡则保留；它承担重启恢复记录，不承担集群租约或跨进程执行互斥（[execution.ts](../../opencode/packages/core/src/session/execution.ts#L73-L143)、[store.ts](../../opencode/packages/core/src/session/store.ts#L68-L91)）。
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **创建**：`POST /api/session`（`protocol/src/groups/session.ts:165`）→ `Session.create`（`core/src/session.ts:288`）；默认标题与 slug 由服务端生成，可带父会话继承 metadata 与权限。
+- **创建**：客户端调用 `POST /api/session` 创建会话，服务端由 `Session.create` 处理并生成默认标题与 slug；请求若带上父会话，则继承父会话的 metadata 与权限（`protocol/src/groups/session.ts:165`、`core/src/session.ts:288`）。
 - **切换 agent/model**：独立端点 `session.switchAgent`、`session.switchModel`，成功后追加 `agent-switched`/`model-switched` 消息并同步会话列。
 - **移动与归档**：`session.move`、`session.update`（归档字段）；归档事件 `session.archived/unarchived`，列表默认过滤已归档。
 - **删除**：`DELETE /api/session/:id` → `Session.remove`（`core/src/session.ts:391`），级联删除消息、part、inbox、blob 引用，并取消该会话的执行。
@@ -59,15 +81,21 @@ POST /api/session（创建）-> Session.create（core/src/session.ts:288）
 
 ## 4. 编辑、重试、续写、回退与分支
 
-- **编辑**：没有整体编辑消息的端点；消息内容只能按工具/文本事件追加，用户可在客户端改写自己的输入后重新提交。
+- **编辑**：消息正文随工具与文本事件追加，服务端没有整体改写已存消息的端点；用户要改自己的输入，就在客户端改写后重新提交。
 - **重试**：自动重试由 runner 的 retry 逻辑承担（`core/src/session/runner/retry.ts`、`model-retry.ts`），失败原因写入 assistant 消息的 `retry` 字段；用户侧"重试"是再次 prompt。
 - **续写**：继续 prompt 即可；`delivery: "steer"` 会插入当前轮，`"queue"` 在轮结束后投递（`packages/schema/src/session-inbox.ts:11`）。
-- **回退是分阶段操作**：`POST /api/session/:id/revert/stage` 记录目标消息与文件快照（`session.revert` 字段 + `RevertEvent.Staged`），`revert/commit` 执行清理，`DELETE revert` 撤销暂存并恢复文件（`core/src/session/revert.ts`、`protocol/src/groups/session.ts:470-499`）。回退按消息边界删除后续消息，不新建分支；分支用 fork 表达。
+- **回退是分阶段操作**：暂存、提交、撤销各有端点，流程由 `revert.ts` 实现（`core/src/session/revert.ts`、`protocol/src/groups/session.ts:470-499`）：
+
+  1. 暂存：调用 `POST /api/session/:id/revert/stage` 记录目标消息与文件快照，写入 `session.revert` 字段，事件为 `RevertEvent.Staged`。
+  2. 提交：调用 `revert/commit` 执行清理。
+  3. 撤销：调用 `DELETE revert` 撤销暂存并恢复文件。
+
+  回退按消息边界删除后续消息，不新建分支；分支用 fork 表达。
 - **压缩**：`POST /api/session/:id/compact` 生成 compaction 消息（running → completed/failed），completed 支持本地摘要与 provider 原生窗口（`compaction.ts`、`history.ts` 的 native window 判定）；历史读取按压缩边界裁剪。
 
 ## 5. 列表、分页、搜索与定位
 
-- **会话列表**：`GET /api/session`（`protocol/src/groups/session.ts:126`）支持按目录、父会话、搜索、limit 等参数；`store.ts:155` 显示搜索只对标题做 `LIKE` 子串匹配。
+- **会话列表**：`GET /api/session` 支持按目录、父会话、搜索词和条数上限筛选，其中搜索只对会话标题做 `LIKE` 子串匹配（`protocol/src/groups/session.ts:126`、`store.ts:155`）。
 - **消息读取**：`GET /api/session/:sessionID/message`（`protocol/src/groups/message.ts:102`），服务端从 `session_message` 分页读取并批量拼 part。
 - **全局会话列表**：`GET /api/session/active` 与 stats 端点供首页和统计使用。
 - **搜索边界**：本次未在会话核心找到消息正文的全文索引；检索能力集中在会话标题与目录/项目筛选。

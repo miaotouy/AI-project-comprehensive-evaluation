@@ -67,7 +67,7 @@
 
 ## 1. 创作入口、触发者与事实对象
 
-**入口和触发者。** 源码事实是 Agent 工具工厂显式构造三个生成工具，并把它们与 `tts`、`nodes`、`image` 等其他工具分开装配；工具是否出现由插件启用状态、Provider 能力、模型配置、认证和 allow/deny 策略共同决定。工具描述明确告诉 Agent：会话聊天中的媒体生成在后台运行，调用一次后等待完成事件，再提交可见回复。入口与装配见 `src/agents/core-tool-factory-descriptors.ts`、`src/agents/openclaw-tools.ts`、`src/agents/tools/media-tool-shared.ts`。
+**入口和触发者。** Agent 工具工厂显式构造三个媒体生成工具，把它们与语音、节点、图片等其他工具分开装配；工具是否出现在当前 Agent 中，取决于插件启用状态、Provider 能力、模型配置、认证以及 allow/deny 策略。工具描述明确告诉 Agent：会话聊天中的媒体生成在后台运行，调用一次后等待完成事件，再提交可见回复。入口与装配见 `src/agents/openclaw-tools.ts`，工具描述与共享辅助分别位于 `src/agents/core-tool-factory-descriptors.ts` 与 `src/agents/tools/media-tool-shared.ts`。
 
 用户主要通过聊天提出需求，Agent 是直接触发者；cron 运行的 Agent 回合也可以使用同一工具。Provider 插件、ComfyUI、OpenAI、Google、fal 等属于执行后端，不是独立的 OpenClaw 媒体工作台入口。文档把这些能力描述为 tool-driven，并说明工具在有 backing Provider 时才出现，这是文档声明，见 `docs/tools/media-overview.md`；本次未找到独立的 `/image`、`/video` 媒体创作页面或媒体画廊路由。
 
@@ -81,7 +81,7 @@
 | managed outgoing media record | `attachmentId`、sessionKey、messageId、retentionClass、媒体类型、尺寸/时长/文件信息 | 将可见回复中的媒体与消息和会话绑定，并为 Artifact 下载提供受控访问 |
 | transcript artifact | session transcript 中的媒体 block、Artifact ID、task/run provenance、下载模式 | 客户端和 Gateway 的读取投影，不是独立媒体编辑工程 |
 
-媒体任务没有独立的通用任务表：本次快照未找到任务注册表模块与任务 SQLite store，任务状态由会话 async-task 投影与媒体任务状态模块承担，状态词与终态语义需按这两个模块核对（`src/agents/media-generation-task-status.ts`、`src/agents/session-async-task-status.ts`）。媒体生命周期在创建任务时传入任务类型、Provider、prompt 和请求者身份；完整参数更多保留在即时工具结果、最终媒体详情和 transcript 投影中，因此单个任务状态描述一次 session-backed 生成的生命周期，完整的媒体创作历史树需要由多次任务与 transcript 投影汇总得到。
+媒体任务没有独立的通用任务表：本次未找到任务注册表模块与任务 SQLite store，任务状态由会话 async-task 投影与媒体任务状态模块承担，状态词与终态语义按这两个模块核对（`src/agents/media-generation-task-status.ts`、`src/agents/session-async-task-status.ts`）。媒体生命周期在创建任务时传入任务类型、Provider、prompt 和请求者身份；完整参数更多保留在即时工具结果、最终媒体详情和 transcript 投影中，因此单个任务状态只描述一次 session-backed 生成的生命周期，完整的媒体创作历史树由多次任务与 transcript 投影汇总得到。
 
 本次在图片、视频、音乐生成模块、媒体任务模块、Gateway managed media 和 Artifact RPC 范围内**未找到**独立的媒体历史树、版本对象、项目对象、跨会话资产库或媒体工程 DAG。Comfy 的 workflow JSON、`promptId` 和输出节点 ID 是 Provider 配置或一次 Provider 结果的元数据，不是 OpenClaw 媒体工程身份，见 `extensions/comfy/workflow-runtime.ts`。
 
@@ -97,7 +97,7 @@
 | `video_generate` | prompt、model、filename、size、aspectRatio、resolution、durationSeconds、audio、watermark、providerOptions | `image`/`images`、`video`/`videos`、`audioRef`/`audioRefs`；角色数组传递 first/last/reference 等语义 | 根据参考输入选择 generate、imageToVideo 或 videoToVideo；按模型归一化时长和几何参数 |
 | `music_generate` | prompt、lyrics、instrumental、model、durationSeconds、format、filename | `image`/`images`，用于图片条件的 edit 模式 | Provider 能力决定歌词、器乐、时长和输出格式是否保留 |
 
-工具边界会先清洁参考素材。图片工具最多接受 14 个参考图，视频工具的共享入口上限为 9 个图、4 个视频和 3 个音频，音乐工具最多 10 个参考图；工具层再与 Provider/model 的实际上限取交集。路径、`file://`、`data:` 和 HTTP(S) 输入按工具及 sandbox 条件分别处理，远程素材走 SSRF/大小/超时控制，加载结果会保存已解析输入和可能的重写来源。相关 schema 和执行见 `src/agents/tools/image-generate-tool.ts`、`src/agents/tools/video-generate-tool.ts`、`src/agents/tools/music-generate-tool.ts`、`src/agents/tools/media-tool-shared.ts`。
+工具边界会先清洁参考素材，并按工具类型设一道参考数量上限：图片工具最多 14 张参考图，视频工具的共享入口放宽到 9 张图、4 个视频和 3 个音频，音乐工具最多 10 张参考图；工具层再与 Provider 和模型的实际能力取交集。路径、`file://`、`data:` 和 HTTP(S) URL 按工具与 sandbox 条件分别解析，远程素材受 SSRF、大小和超时约束，加载后会保留已解析输入和可能被重写的来源。相关 schema 与执行见 `src/agents/tools/media-tool-shared.ts`，三个工具各自的实现在同目录的 image-generate-tool.ts、video-generate-tool.ts 和 music-generate-tool.ts 里。
 
 ### 模型能力目录与 Provider 编排
 
@@ -109,9 +109,9 @@
 
 ### 执行位置
 
-Core 不负责把任意 HTML、节点图或 FFmpeg 脚本当作 OpenClaw 媒体工程执行。实际生成由 Provider 所有：托管模型走 Provider API，Comfy local 走本地 ComfyUI HTTP 服务，Comfy Cloud 走 Cloud API，其他插件自行实现模型请求和结果下载。以 Comfy 为例，源码加载按能力选择的 workflow JSON，把 prompt 写入指定节点；有参考图时先上传，再 POST `/prompt`，随后轮询本地 `/history` 或云端 `/api/job/.../status`，最后从 `/view` 或 `/api/view` 下载输出，见 `extensions/comfy/workflow-runtime.ts`。这是一条 Provider 适配链，不是 OpenClaw 自有节点编辑器。
+实际生成由 Provider 承担，Core 只负责候选选择、参数归一化和结果收口。托管模型走 Provider API，Comfy local 走本地 ComfyUI HTTP 服务，Comfy Cloud 走 Cloud API，其余插件自行实现模型请求与结果下载；Core 自身不执行 HTML、节点图或 FFmpeg 脚本。以 Comfy 为例，源码按能力加载 workflow JSON，把 prompt 写入指定节点；有参考图时先上传，再 POST `/prompt` 提交，随后轮询本地 history 或云端 job status 接口，最后从 view 接口下载输出，云端路径统一带 `/api` 前缀，见 `extensions/comfy/workflow-runtime.ts`。这条路径是 Provider 侧的适配链，OpenClaw 自身没有对应的节点编辑器。
 
-视频 Provider 可在插件内部实现外部异步任务。例如 DashScope 兼容适配器提交后取得 `task_id`，轮询 `SUCCEEDED`、`FAILED`、`CANCELED`、`UNKNOWN` 等状态，再下载结果 URL；Core 看到的是一个最终返回 `VideoGenerationResult` 的 Provider 合同，见 `src/video-generation/dashscope-compatible.ts`。文档对各 Provider 的队列、轮询和模式差异有声明，真实 Provider 服务行为本次未运行验证。
+视频 Provider 可以在插件内部实现外部异步任务。以 DashScope 兼容适配器为例，提交后先取得 `task_id`，再按间隔轮询任务状态；成功后才提取结果 URL 并下载，失败、取消或任务未知时直接报错（[轮询终态分支](<../../openclaw/src/video-generation/dashscope-compatible.ts#L425-L455>)、[成功后的下载](<../../openclaw/src/video-generation/dashscope-compatible.ts#L513-L541>)）。Core 收到的只是一份最终返回 `VideoGenerationResult` 的 Provider 合同。文档声明了各 Provider 在队列、轮询和模式上的差异，真实服务行为本次未运行验证。
 
 ## 3. 任务状态、异步回调与取消
 
@@ -121,7 +121,7 @@ Provider 资源现在由预检阶段取得并显式移交给已接纳任务。�
 
 session-backed 媒体调用先创建进程拥有的媒体 operation，记录请求会话、请求者 Agent、prompt、来源 Provider 与运行身份；同一 runId 同时充当 taskId。来源名称区分图片、视频和音乐工具。operation 保存在内存 Map 中；具有可保留 requester transcript 且符合脱离条件的任务才移交后台 scheduler，其他路径在前台执行。后台工具结果包含异步启动状态和任务身份，之后执行器更新生成与保存进度。入口见 [任务准入](<../../openclaw/src/agents/tools/media-generate-background-shared.ts#L225-L332>)、[执行调度](<../../openclaw/src/agents/tools/media-generate-background.ts>)。
 
-媒体完成不是简单的“Provider 返回即任务完成”。成功后台作业先把任务进度改为 `Generated media; delivering completion`，再尝试唤醒请求会话；只有完成事件处理结束后才把任务写成 `succeeded`。失败路径先尝试把错误送回原会话，再记录 `failed`；完成投递未确认时保留 `blocked` 终态语义，避免任务在用户尚未收到媒体时显示为普通成功。该顺序见 `src/agents/tools/media-generate-background-shared.ts` 与完成投递模块 `src/agents/tools/media-generate-background-completion.ts`。
+媒体任务以完成事件处理结束为收口标志：成功的后台作业先把进度写成投递中状态，再尝试唤醒请求会话，等到完成事件处理结束后才把任务记为 `succeeded`。失败路径同样先尝试把错误送回原会话，再记录 `failed`；完成投递尚未确认时，任务停在 `blocked` 终态，用户还没收到媒体时不会显示成普通成功。该顺序见 `src/agents/tools/media-generate-background-shared.ts` 与完成投递模块 `src/agents/tools/media-generate-background-completion.ts`。
 
 ### Provider 异步、轮询与内部回调
 
@@ -137,8 +137,8 @@ OpenClaw 有两类“回调”需要区分：
 
 ### 取消、失败与恢复
 
-- **请求中止。** 参考素材加载和任务接纳前会检查 `AbortSignal`；源码注释明确，任务一旦接纳，生成的付费工作独立于请求者信号，见 `src/agents/tools/image-generate-tool.ts`、`src/agents/tools/video-generate-tool.ts`、`src/agents/tools/music-generate-tool.ts`。
-- **任务取消。** 通用任务取消 RPC（`tasks.cancel`）与 `src/tasks/` 任务注册表在本次快照中均未找到，媒体任务没有统一的任务级取消入口；可用的中止路径是会话/tool abort 与运行中止，见 `src/agents/tools/media-generate-background.ts`、`src/agents/media-generation-task-status.ts`。图片、视频、音乐 Provider 请求合同没有统一取消句柄，因此即便插件自身支持取消，也需按 Provider 实现核对，不能从公共合同推断。
+- **请求中止。** 工具在加载参考素材和接纳任务之前检查 `AbortSignal`；任务一旦被接纳，生成的付费工作就独立于请求者信号，源码注释对此有明确说明。图片、视频、音乐三个工具的处理一致，见 `src/agents/tools/image-generate-tool.ts`，视频与音乐的工具入口分别在 `src/agents/tools/video-generate-tool.ts` 和 `src/agents/tools/music-generate-tool.ts`。
+- **任务取消。** 本次未找到通用任务取消 RPC `tasks.cancel`，也没有 `src/tasks/` 任务注册表，媒体任务因此没有统一的任务级取消入口；可用的中止路径是会话与工具层的 abort，以及运行级中止。图片、视频、音乐三类 Provider 请求合同同样没有统一的取消句柄，插件自身是否支持取消需逐个 Provider 核对。入口见 `src/agents/tools/media-generate-background.ts` 与 `src/agents/media-generation-task-status.ts`。
 - **失败。** Provider 错误、空结果、空 buffer、不可投递视频、参考素材不符合能力、超时和响应超过大小上限都会进入候选失败或任务失败；fallback 会保留每次尝试的诊断。视频轮询还区分未知/过期任务、终态失败和超时，见 `src/video-generation/dashscope-compatible.ts`、`src/image-generation/runtime.ts`、`src/video-generation/runtime.ts`。
 - **运行时恢复。** 执行状态由进程级媒体 operation Map 和当前 run lifecycle generation 约束，查询时会清理旧 generation。普通终态保留 2 分钟，带 blocked 结果的终态保留 7 天；这是当前进程内的保留策略。完成投递由 durable session queue 接管，与 Provider 计算是否仍在运行分开。已读调度、状态 owner 和 completion 路径没有重启后接管 Provider Job 的执行链，不能由队列可持久化推断生成工作可跨重启继续。依据见 [状态 owner 与清理](<../../openclaw/src/agents/media-generation-activity.ts#L8-L62>)、[后台完成处理](<../../openclaw/src/agents/tools/media-generate-background-shared.ts#L410-L568>)。
 
@@ -146,11 +146,11 @@ OpenClaw 有两类“回调”需要区分：
 
 ### 生成结果
 
-图片、视频、音乐工具分别把非空 Provider 输出保存到 `tool-image-generation`、`tool-video-generation`、`tool-music-generation` 媒体子目录。文件由 UUID-backed media ID 标识，可保留经净化的原始文件名；按媒体类型使用生成上限，批量保存失败时执行尽力回滚，见 `src/media/store.ts`、`src/agents/tools/generated-media-batch-persistence.ts`。视频结果可以是本地 buffer，也可以保留 Provider URL-only 资产；这解决的是交付形态，不是版本或工程持久化，见 `src/video-generation/types.ts`、`src/agents/tools/video-generate-tool.ts`。
+图片、视频、音乐三个工具都会把非空的 Provider 输出保存到各自的媒体子目录 `tool-{image,video,music}-generation`。文件以 UUID-backed media ID 标识，可以保留经净化的原始文件名；保存过程按媒体类型受生成上限约束，批量保存失败时执行尽力回滚，见 `src/media/store.ts` 与 `src/agents/tools/generated-media-batch-persistence.ts`。视频结果可以是本地 buffer，也可以保留 Provider 的 URL-only 资产，两种形态只影响交付方式，版本与工程持久化在媒体侧没有对应对象，见 `src/video-generation/types.ts` 与 `src/agents/tools/video-generate-tool.ts`。
 
 ### 托管附件与 Artifact
 
-可见回复到达 Gateway 后，`createManagedOutgoingMediaBlocks` 会把图片、音频或视频存进 `media/outgoing/originals`，写入 managed outgoing media record，并生成带类型的 `artifact_managed_image_*` 或 `artifact_managed_media_*` ID。记录保存 session、可选 message、retention class、MIME、大小、图像尺寸和文件名；有 message 时从 transient 提升为 history。实现见 `src/gateway/managed-image-attachments.ts`、`src/gateway/managed-image-record-store.ts`。
+可见回复到达 Gateway 后，`createManagedOutgoingMediaBlocks` 会把其中的图片、音频或视频复制进 `media/outgoing/originals`，同时写入 managed outgoing media record，并生成带类型的 `artifact_managed_{image,media}_*` ID。记录保存会话、可选消息、保留级别、MIME、大小、图像尺寸和文件名；一旦绑定消息，记录就从 transient 提升为 history。实现见 `src/gateway/managed-image-attachments.ts` 与 `src/gateway/managed-image-record-store.ts`。
 
 Artifact 查询从授权的 session transcript 中读取媒体；会话范围由显式 sessionKey 或 runId 解析，当前协议没有 taskId 查询参数。runId 先解析到原会话与 Agent，显式 sessionKey 则按所选 Agent 解析，再取得会话共享权限和目标身份；managed media 下载继续检查 transcript 关联、访问范围与文件，返回短期 ticket。依据见 [查询协议](<../../openclaw/packages/gateway-protocol/src/schema/artifacts.ts>)、[会话解析](<../../openclaw/src/gateway/server-methods/artifacts-session-resolution.ts#L59-L89>) 与 [Artifact RPC](<../../openclaw/src/gateway/server-methods/artifacts.ts>)。
 
@@ -166,11 +166,11 @@ Artifact 查询从授权的 session transcript 中读取媒体；会话范围由
 
 ## 5. 预览、编辑、重试、分支与复用
 
-**预览和导出。** Agent 结果先以 `AgentGeneratedAttachment` 携带类型、路径/URL、MIME、文件名、尺寸和时长等信息；Gateway 再转成 transcript 中的 managed block。Control UI 和客户端可用 Artifact RPC 获取摘要或短期下载地址，图片有全图/缩略图路径，音频和视频有 `Range`、`ETag`、`HEAD` 和播放/下载处理。源码事实见 `src/agents/generated-attachments.ts`、`src/gateway/managed-image-attachments.ts`；播放器和 lazy FFmpeg rendition 是消费侧机制，文档说明见 `docs/nodes/media-playback.md`，不计为媒体创作工作台。
+**预览和导出。** Agent 产出的媒体先由 `AgentGeneratedAttachment` 承载，携带类型、路径或 URL、MIME、文件名、尺寸和时长，再由 Gateway 转成 transcript 中的 managed block。Control UI 和客户端通过 Artifact RPC 获取摘要或短期下载地址，图片另有全图和缩略图路径，音频、视频则按 Range 请求、ETag 校验和 HEAD 探测提供播放与下载处理。源码事实见 `src/agents/generated-attachments.ts` 与 `src/gateway/managed-image-attachments.ts`；播放器和按需 FFmpeg rendition 属于消费侧机制，文档说明见 `docs/nodes/media-playback.md`，不计为媒体创作工作台。
 
 **编辑和继续创作。** 生成工具支持“带参考输入的下一次生成”：图片是 reference-image edit，视频是 image-to-video/video-to-video，音乐是 image-conditioned edit。它们是 Provider 生成模式，不是对已保存 Artifact 的像素编辑、时间线剪辑或节点图编辑。Comfy 的 workflow 可以由外部配置修改，但 OpenClaw 只注入 prompt/参考图并读取指定输出节点，源码没有针对已生成结果打开编辑工程的入口。
 
-**重试。** Core 在一次调用内按候选 Provider/model 做自动 fallback；任务失败后，Agent 可以再次调用对应工具形成新的生成请求。工具 action 只有 `generate`、`status`、`list`，本次未找到媒体专用 `retry` action。相同 prompt/request 在活动期间会返回现有任务状态，最近成功的完全相同请求也会在短期 duplicate guard 窗口内被拦截；修改 prompt、参考素材或参数可形成不同请求。本次也未找到通用 `tasks.retry` RPC（`src/gateway/server-methods/tasks.ts` 已不存在）；面向阻塞 completion 投递的重试路径需在 delivery 相关模块单独核对。相关入口见 `src/agents/tools/media-tool-shared.ts`、`src/agents/tools/media-generate-tool-actions-shared.ts`。
+**重试。** 单次调用内，Core 会按候选 Provider 和模型自动 fallback；任务失败后，Agent 再次调用同一个工具就能发起新的生成请求。工具只接受三类 action：发起生成、查询任务和列出 Provider 目录；本次未找到媒体专用的 `retry` action。请求在活动期间重复提交会直接返回现有任务状态，最近成功的完全相同请求会被短期的 duplicate guard 拦截；改动 prompt、参考素材或参数则形成新请求。本次也未找到通用的 `tasks.retry` RPC（`src/gateway/server-methods/tasks.ts` 已不存在），阻塞中的 completion 投递如何重试需要在 delivery 模块单独核对。相关入口见 `src/agents/tools/media-generate-tool-actions-shared.ts` 与 `src/agents/tools/media-tool-shared.ts`。
 
 **分支和复用。** 没有媒体专用分支树或版本浏览。下一次创作可以把上一次结果暴露的本地路径或 URL 重新作为参考输入，也可以重新使用模型配置和 Provider fallback；这种复用由 Agent 再次填充工具参数完成，未形成跨任务的资产引用边。Artifact 下载地址则是短期访问能力，不应被视为永久创作输入身份。
 
@@ -205,14 +205,14 @@ Comfy 插件同时覆盖 image/music/video 三个能力，但它仍然只是统�
 
 ### 边界样本与不适用结论
 
-- **媒体理解：不适用。** `runCapability` 的入口是入站图片、音频、视频附件，Provider/CLI 输出的是描述或转写文本，随后写入 `MsgContext.Body`、`Transcript` 和理解决策；它处理用户已经拥有的素材，不创建媒体生成任务、生成结果历史或可编辑资产。本次仅核对附件选择、Provider/CLI fallback、失败 disposition 和上下文回写，见 `src/media-understanding/runner.ts`、`src/media-understanding/apply.ts`。
-- **TTS：不适用。** `textToSpeechCore` 同步调用语音 Provider，按频道选择 audio-file 或 voice-note 目标，再由 `tts-audio-store` 写入 `tool-speech-synthesis`；没有媒体创作任务、提示词/参考素材历史、版本或编辑入口。本次仅核对合成、转码、文件保存和频道投递边界，见 `src/tts/tts-synthesis.ts`、`src/tts/tts-audio-store.ts:1-23`。
-- **节点相机/录屏：入口确认，但不适用。** `nodes` 工具暴露 `camera_snap`、`camera_clip`、`screen_record`、`screen_snapshot` 等设备动作；相机和屏幕代码负责验证节点返回的 base64/HTTPS URL、写入临时文件和施加大小/时长边界，没有模型生成、独立媒体任务、创作历史或继续编辑契约。本次仅核对节点动作清单、载荷校验、节点权限/命令边界和临时输出文件，见 `src/agents/tools/nodes-tool.ts`、`src/cli/nodes-camera.ts`、`src/cli/nodes-screen.ts`。
-- **普通附件、播放器和 Artifact 服务：支撑能力，不单独准入。** Gateway managed outgoing media、`artifacts.*`、缩略图、Range/ETag、lazy playback rendition 负责把已经产生并写入 transcript 的媒体安全地保存、展示、下载或播放；它们没有生成提示词、模型执行或媒体编辑历史。本次将其作为生成结果的交付和复用支撑检查，未把普通附件、播放器或通用 FFmpeg 路径计作媒体创作能力，见 `src/gateway/managed-image-attachments.ts`、`src/gateway/server-methods/artifacts.ts`、`docs/nodes/media-playback.md`。
+- **媒体理解：不适用。** `runCapability` 处理入站的图片、音频和视频附件，Provider 或 CLI 返回描述、转写这类文本，随后写回消息上下文、会话 transcript 和理解决策。它处理用户已经拥有的素材，不创建媒体生成任务、生成结果历史或可编辑资产。本次只核对了附件选择、Provider 与 CLI 之间的 fallback、失败处置和上下文回写，见 `src/media-understanding/runner.ts` 与 `src/media-understanding/apply.ts`。
+- **TTS：不适用。** `textToSpeechCore` 同步调用语音 Provider 完成合成，按频道选择 audio-file 或 voice-note 作为投递目标，音频文件由 `tts-audio-store` 落到 `tool-speech-synthesis` 目录。这条链路没有创作任务、提示词或参考素材历史，也没有版本与编辑入口。本次只核对合成、转码、文件保存和频道投递的边界，见 `src/tts/tts-synthesis.ts`，音频存储实现见 `src/tts/tts-audio-store.ts:1-23`。
+- **节点相机/录屏：入口确认，但不适用。** `nodes` 工具暴露四个设备动作，分别负责拍照、录像、录屏和截屏。相机和屏幕代码负责校验节点返回的 base64 或 HTTPS URL、写入临时文件，并施加大小与时长边界，整条链路没有模型生成、独立媒体任务、创作历史或继续编辑契约。本次只核对节点动作清单、载荷校验、节点权限与命令边界、临时输出文件，见 `src/agents/tools/nodes-tool.ts`，相机与录屏的 CLI 实现分别在 `src/cli/nodes-camera.ts` 和 `src/cli/nodes-screen.ts`。
+- **普通附件、播放器和 Artifact 服务：支撑能力，不单独准入。** Gateway 的 managed outgoing media、`artifacts.*` 方法、缩略图生成、Range/ETag 响应和按需播放 rendition 共同负责把已经写入 transcript 的媒体安全保存、展示、下载和播放；这些能力没有生成提示词、模型执行或媒体编辑历史。本次把它们作为生成结果的交付与复用支撑来检查，普通附件、播放器和通用 FFmpeg 路径不在媒体创作能力之列，见 `src/gateway/managed-image-attachments.ts`，另外两处入口为 `src/gateway/server-methods/artifacts.ts` 与 `docs/nodes/media-playback.md`。
 
 ## 7. 权限、资源边界与失败恢复
 
-**工具可见性和配置。** 生成工具受 `tools.allow`、`tools.deny`、插件启用状态、媒体 Provider manifest 和认证状态共同控制；显式媒体模型配置可以使工具保留，未配置模型则依赖认证可用的 Provider 默认值。全局禁用插件会关闭这些可选生成工具，见 `src/agents/openclaw-tools.media-factory-plan.ts`。媒体模型默认配置位于 `agents.defaults.mediaModels.image/video/music`，见 `src/config/types.agent-defaults.ts`；文档给出的配置与 Provider 顺序是文档声明，见 `docs/tools/image-generation.md`、`docs/tools/video-generation.md`。
+**工具可见性和配置。** 一个生成工具是否进入当前 Agent，由工具的 allow/deny 策略、插件启用状态、Provider manifest 和认证状态共同决定；配置里显式写了媒体模型时工具保留，未配置时则依赖认证可用的 Provider 默认模型。全局禁用插件会关闭这些可选生成工具，判断逻辑见 `src/agents/openclaw-tools.media-factory-plan.ts`。媒体模型的默认配置位于 `agents.defaults.mediaModels` 的 image、video、music 三个键下，见 `src/config/types.agent-defaults.ts`；文档给出的配置方式与 Provider 顺序属于文档声明，见 `docs/tools/image-generation.md` 与 `docs/tools/video-generation.md`。
 
 **文件、网络与会话作用域。** 参考素材加载会区分 workspace/local roots、sandbox bridge、media store URI 和远程 URL；sandbox 默认拒绝远程参考 URL，远程读取使用 SSRF policy，Provider 也可以进一步限制只能使用 HTTPS URL。Comfy local 请求将 base URL hostname 纳入网络策略，cloud mode 的 private network 需要显式配置，见 `src/agents/tools/media-tool-shared.ts`、`extensions/comfy/workflow-runtime.ts`。生成结果进入 Gateway 时，managed record、session transcript、Artifact query 和短期 ticket 共同限制访问范围；`artifacts.*` 的方法由 `operator.read` 描述，见 `src/gateway/methods/core-descriptors.ts`。
 

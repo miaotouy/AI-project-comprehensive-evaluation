@@ -69,12 +69,14 @@ app-server 的 `ThreadItemPayload` 是十九类 item 的联合：用户消息、
 
 增量通知进入 `ChatWidget::handle_server_notification` 后按类型分派（`tui/src/chatwidget/protocol.rs:4-249`）：
 
-- `AgentMessageDelta` 更新当前助手消息的流式标识并调用 `on_agent_message_delta`；
-- `PlanDelta` 进入计划流；
-- 推理摘要和原始推理分别处理，原始推理只有在配置允许时才显示；
-- 命令执行和文件变更的输出增量进入各自的工具 cell；
-- `TurnDiffUpdated` 和 `TurnPlanUpdated` 更新差异与计划视图；
-- `TurnCompleted` 触发收口、用量输出和状态清理。
+| 通知或增量 | 分派结果 |
+|---|---|
+| `AgentMessageDelta` | 更新当前助手消息的流式标识，转入助手消息增量回调 `on_agent_message_delta` |
+| `PlanDelta` | 进入计划流 |
+| 推理摘要与原始推理 | 分开处理，原始推理仅在配置允许时显示 |
+| 命令执行与文件变更的输出增量 | 分别归入对应的工具 cell |
+| `TurnDiffUpdated`、`TurnPlanUpdated` | 刷新差异视图与计划视图 |
+| `TurnCompleted` | 触发收口、用量输出与状态清理 |
 
 流式控制器的核心是 `StreamCore`（`tui/src/streaming/controller.rs:86-106`）。它同时维护四份状态：累积源码、已提交源码的增量渲染、可丢弃的散文预览，以及待提交的稳定行队列。`push_delta` 只提交已经出现换行的完整行段；最后一个未换行的残段留在预览或活动尾部（同文件 `:150-179`）。这条规则对表格尤其重要：未换行的半行如果提前提交，会在下一帧变成另一组列宽。
 
@@ -87,7 +89,7 @@ app-server 的 `ThreadItemPayload` 是十九类 item 的联合：用户消息、
 | `Smooth` | 每个 tick 提交一行 | 默认状态，队列为空时回到此模式 |
 | `CatchUp` | 批量排空当前队列 | 队列深度达到 8 行，或最老行等待达到 120ms |
 
-退出 CatchUp 需要队列深度降到 2 行以下、最老行等待降到 40ms 以下，并持续 250ms；退出后还有 250ms 的再进入抑制。队列深度达到 64 行或最老行等待达到 300ms 时视为严重积压，可绕过抑制（`tui/src/streaming/chunking.rs:85-116`）。两个控制器的队列深度和最大等待时间会合并成一个决策，再执行统一的排空计划（`tui/src/streaming/commit_tick.rs:71-100`）。
+控制器的模式切换带迟滞：队列深度降到 2 行以下、最老行等待降到 40 毫秒以下，并持续 250 毫秒，才退出 `CatchUp`；退出后的 250 毫秒内不再重新进入。队列深度达到 64 行或最老行等待达到 300 毫秒时判为严重积压，可绕过这段抑制。两级阈值定义在 `tui/src/streaming/chunking.rs:85-116`。两个控制器的队列深度和最大等待时间会合并成一个决策，再执行统一的排空计划，见 `tui/src/streaming/commit_tick.rs`。
 
 完成收口分两步。首先取出控制器，渲染剩余源码，并把原始 Markdown 作为合并事件发给 App（`tui/src/chatwidget/streaming.rs:92-169`）。然后 App 找到尾部连续的流式助手 cell，用一个保存源码的助手 cell 替换整段（`tui/src/app/agent_message_consolidation.rs:24-90`）。如果流式文本与完成消息不一致，或者存在尚未稳定提交的尾部，会要求对终端回滚区做重排。
 
@@ -136,14 +138,14 @@ Markdown 渲染入口在 `render_markdown_agent_with_list_spacing`（`tui/src/ma
 
 写入阶段的行为：
 
-- **代码块**：取 info string 的第一个 token 作为语言，调用 syntect 高亮；语言无法识别或超过保护阈值时回落为纯文本（`tui/src/render/highlight.rs:596-634`、`:740-754`）。
-- **表格**：按列内容计算宽度并绘制终端表格；超宽时按列分类和换行策略降级，表头与数据行分别处理。
-- **HTML**：作为字面文本逐行写入，不解析标签、不执行脚本（`tui/src/markdown_render.rs:941-982`）。
-- **数学**：在 `preferences.math` 开启时用有界 Unicode 排版近似小型 TeX 子集；公式过长或无法满足宽度时保留源码。
-- **Mermaid**：完成的围栏块交给 `codex_mermaid` 渲染为终端 span；不支持、超宽或超限时显示说明并回退为高亮源码（`tui/src/markdown_render/mermaid.rs:39-61`）。
-- **链接**：逻辑行保留目标地址和源范围，终端层可以标记 OSC 8 超链接；本地文件链接会按会话 `cwd` 缩短显示并做受信任重定向。
+- **代码块**：写入器取 info string 的第一个 token 作为语言标识，交给 syntect 着色；语言无法识别或触发保护阈值时，这个块整体回落为纯文本（`tui/src/render/highlight.rs:596-634`）。
+- **表格**：按每列内容计算宽度后绘制终端表格；超宽时依据列的分类和换行策略逐级降级，表头与数据行分开处理。
+- **HTML**：作为字面文本逐行输出，标签按原样可见，脚本与样式都没有执行环境（`tui/src/markdown_render.rs:941-982`）。
+- **数学**：渲染偏好开启数学后，写入器用有界的 Unicode 排版近似一个小型 TeX 子集；公式过长或无法满足宽度时保留源码。
+- **Mermaid**：已闭合的围栏块交给 `codex_mermaid` 渲染为终端 span；遇到不支持、超宽或超限的情况，显示一段说明并回退为高亮源码（`tui/src/markdown_render/mermaid.rs:39-61`）。
+- **链接**：逻辑行保留目标地址和源码范围，终端层据此标记 OSC 8 超链接；本地文件链接按会话 `cwd` 缩短显示，并做受信任连接重定向。
 
-代码高亮使用 `two_face` 的语法集和 32 个内置主题，主题可以在运行时切换；切换时递增全局修订号，使已渲染内容的缓存失效（`tui/src/render/highlight.rs:64-100`、`:267-292`）。高亮有明确护栏：超过 512 KB、10000 行或单行 4 KiB 时跳过着色（同文件 `:636-655`）。
+高亮器从 `two_face` 取语法集，内置 32 个主题并允许运行时切换；每次切换递增一个全局修订号，先前渲染内容的缓存随之失效。着色前还有一层护栏：内容超过 512 KB、10000 行或单行 4 KiB 时直接跳过。语法集、主题切换与这层阈值集中在 `tui/src/render/highlight.rs:64-100`。
 
 ## 6. 工具、reasoning、附件与自定义节点
 

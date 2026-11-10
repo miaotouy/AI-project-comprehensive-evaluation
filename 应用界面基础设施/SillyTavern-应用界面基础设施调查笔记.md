@@ -90,7 +90,7 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 **无全局 JS 错误钩子。** 在 `public/script.js` 与 `public/scripts/`（排除 `lib/`、`extensions/*/lib/` 与 `*.min.js` 第三方打包）搜索 window.onerror / unhandledrejection / addEventListener('error'|'unhandledrejection')，应用代码无匹配；
 
-唯一命中 `script.js:1543, 1551` 是 `scrollOnMediaLoad()`（`script.js:1532-1566`）给聊天内 `<img>`/`<video>`/`<audio>` 挂的加载失败计数——图片/媒体加载失败也算"加载完"继续滚到底部，属单点行为，不是全局错误边界。
+搜索命中的唯一一处就在 `script.js:1532-1566`：`scrollOnMediaLoad()` 给聊天内的 `<img>`、`<video>`、`<audio>` 挂加载失败计数，媒体加载失败同样算作"加载完"并继续滚动到底部。该逻辑只作用于聊天区媒体，属于单点行为。
 
 **启动失败恢复而非渲染兜底。** getSettings() 请求失败时进入 reloadLoop()（script.js:7862-7866）：toastr.error 提示 + sessionStorage 计数最多 5 次 location.reload()（script.js:7842-7850），5 次后不再重载（超限后表现未运行验证）。
 
@@ -124,7 +124,14 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 **首帧主题与防闪烁。** 启动时先取得设置，把 power_user 合入全局对象，再批量应用颜色、模糊和自定义 CSS。主题列表随设置响应返回，主题端点只负责保存和删除，没有独立读取路由。（`script.js:750,7911`；`power-user.js:1475-1606`）
 
-**启动阶段不调用 applyTheme(name)**——该函数只在 4 个交互/命令点触发：删除主题后（`power-user.js:2423`）、背景图生成主题后（:2945）、ST Script setTheme（:2975）、设置页下拉切换（:3511），主题切换总是先写 power_user.* 并 `saveSettingsDebounced()` 持久化，下次启动直接应用持久化值。
+**启动阶段不调用 applyTheme(name)。** 该函数只在 4 个交互或命令点触发：
+
+- 删除主题之后（`power-user.js:2423`）；
+- 由背景图生成主题之后（:2945）；
+- 执行 ST Script 的 setTheme 命令时（:2975）；
+- 在设置页用下拉框切换主题时（:3511）。
+
+这四条路径都先写 power_user.* 再调用 `saveSettingsDebounced()` 持久化，下次启动直接应用已保存的值。
 
 首帧兜底：`style.css:70-82` 的 :root 静态 `--SmartTheme*` 默认值（注释 "Default Theme, will be changed by ToolCool Color Picker"）在 JS 改写前生效，power_user 的颜色默认值也是从 getComputedStyle 读这套 CSS 变量（`power-user.js:159-168`）——静态 CSS 本身就是 "Default (Dark)" 观感；
 
@@ -144,21 +151,27 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 **字号、字体族与阴影 token（本次补充核对）**：
 
-- 字号是全站派生链不是单点：power_user.font_scale（0.5-1.5 滑块，`index.html:5048-5049`）→ applyFontScale 写 `--fontScale`（`power-user.js:1172-1185`，滑块拖动时只在 mouseup touchend 才应用，
+- 字号走一条全站派生链：用户在设置里拖动 power_user.font_scale 滑块（范围 0.5 到 1.5，`index.html:5048-5049`），拖动过程只记录值，等 mouseup 或 touchend 才调用 applyFontScale 写入 `--fontScale`，避免实时重排（`power-user.js:1172-1185`）；`--mainFontSize` 再以 15px 为基准乘上缩放比例（`style.css:95-96`），tags.css、welcome.css、st-tailwind.css 等十多个 CSS 文件各自乘以倍数，派生出全站几十处字号。
 
-  避免实时重排）→ `--mainFontSize: calc(var(--fontScale) * 15px)`（`style.css:95-96`）→ 全站几十处 `calc(var(--mainFontSize) * …)` 派生字号（`tags.css`/`welcome.css`/`st-tailwind.css` 等十多个 CSS 文件）。
-
-**字体族硬编码、无自定义字体设置。** `--mainFontFamily: "Noto Sans", sans-serif` 与 `--monoFontFamily`（`style.css:97-98`）写死在 CSS，grep customFont/font_family 于 `public/scripts/` 无匹配——用户只能缩放字号，不能换字体。
+**字体族写死在 CSS，界面里没有字体设置入口。** `--mainFontFamily` 取 "Noto Sans", sans-serif，`--monoFontFamily` 另给一套等宽字体，两者都在 `style.css:97-98` 直接写定；`public/scripts/` 中搜索 customFont、font_family 均无匹配。用户能调的只有字号，字体族始终沿用这两个变量。
 - 阴影基变量：`--blurStrength`（默认 10）与 `--shadowWidth`（默认 2）在 `style.css:101-104`，由 applyBlurStrength/applyShadowWidth 改写（`power-user.js:1160-1170`）；
 
   全局通配规则 `* { text-shadow: 0px 0px calc(var(--shadowWidth) * 1px) var(--SmartThemeShadowColor); }`（`style.css:140`）把"文本阴影"做成全站统一 token。
 
 **`--SmartTheme` 变量全集与派生 token（本次补充核对）**：
 
-- 静态默认定义在 `public/style.css:70-89`（注意是 `public/style.css` 根文件，不是 `public/css/` 子目录）：除笔记前述十来个颜色外，还有 `--SmartThemeCheckboxBgColorR/G/B` 与**亮度派生的勾选色** `--SmartThemeCheckboxTickColorValue`/`--SmartThemeCheckboxTickColor`（按主文本色亮度公式自动算黑白勾选色，`style.css:83-89`）——主题切换时 applyThemeColor('main') 把主文本色的 RGBA 分量解析写入（`power-user.js:1105-1111`）；
+- 静态默认值定义在 `public/style.css:70-89`：除前述十来个颜色外，还提供复选框背景的 RGB 三个分量，并根据主文本色的亮度公式，将派生的勾选色自动设为黑或白。
 
-  `--SmartThemeFastUIBGColor` 在 CSS 与 JS 中都是注释掉的死代码（`style.css:75`、`power-user.js:1122-1124`）。
-- applyThemeColor('blurTint') 还同步改写 `meta[name=theme-color]`（`power-user.js:1126-1128`）——浏览器标签页主题色跟随 UI 背景色（静态默认 `#333` 只在 JS 未跑时生效）。
+  | 变量 | 用途 |
+  | --- | --- |
+  | `--SmartThemeCheckboxBgColorR/G/B` | 复选框背景的三个颜色分量 |
+  | `--SmartThemeCheckboxTickColorValue` | 由背景分量亮度计算出的勾选色分量 |
+  | `--SmartThemeCheckboxTickColor` | 组合成最终的黑色或白色勾选色 |
+
+  主题切换时 applyThemeColor('main') 解析主文本色的 RGBA 分量，写入复选框背景分量变量，供 CSS 派生勾选色（`power-user.js:1105-1111`）；
+
+  `--SmartThemeFastUIBGColor` 在 CSS 与 JS 两处都被注释掉，运行时取不到值（`style.css:75`、`power-user.js:1122-1124`）。
+- applyThemeColor('blurTint') 还会同步改写 `meta[name=theme-color]`（`power-user.js:1126-1128`），让浏览器标签页的主题色跟随当前 UI 背景色；静态默认的 `#333` 只在 JS 尚未执行时生效。
 
 **背景图库子系统（本次补充核对，此前笔记完全未记录）**：背景图是独立于主题色的一层视觉机制，实现规模与弹窗系统同级：
 
@@ -172,7 +185,12 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 **4 种 fitting。** cover/contain/stretch/center 是 `#bg1` 的 class 切换（`backgrounds.js:1632-1638`，CSS 在 `backgrounds.css:19-41`），默认 classic（无任何 fitting class，走 `backgrounds.css:2-11` 的基础 background-size: cover）。
 
-**缩略图工程。** `--bg-thumb-columns` 列数（2-8 可调，`backgrounds.js:200-209`）、IntersectionObserver 懒加载（:1357-1396）、localforage 缩略图缓存（:42, 431-465）、服务端图片元数据（`/api/image-metadata/all` 的 dominantColor/aspectRatio 做加载占位，:740-759）。
+**缩略图工程。** 背景缩略图网格由四层机制配合：
+
+- 列数由 `--bg-thumb-columns` 控制，用户可在 2 到 8 之间调整（`backgrounds.js:200-209`）；
+- 网格进入视口才加载图片，由 IntersectionObserver 驱动（同文件 :1357-1396）；
+- 缩略图缓存存放在 localforage 中（:42, 431-465）；
+- 服务端 `/api/image-metadata/all` 返回的 dominantColor 与 aspectRatio 用于图片加载前的占位（:740-759）。
 
 **动画背景。** mp4/webp/gif/apng 视为动画背景（:55），开关 background_settings.animation 决定用静态缩略图还是动图（:1430-1434）。
 
@@ -180,9 +198,11 @@ toast 三种模式（ActionLoaderToastMode：NONE、STATIC、STOPPABLE，action-
 
 **autobg AI 自动选背景。** 把背景名列表喂给模型，用 Fuse 模糊匹配选中（`backgrounds.js:622-655`）。
 
-**bgcol 背景图配色生成主题。** 斜杠命令（`power-user.js:2890-2949`，注册于 :4194-4216）取当前背景图 → `util/ThemeGenerator.js`（322 行，全文已读）用 Oklch 色空间提取主色（chroma² 加权平均 + 循环色相平均，150px 降采样，
+**bgcol 背景图配色生成主题。** bgcol 斜杠命令（`power-user.js:2890-2949`，命令注册见 :4194-4216）取当前背景图交给 `util/ThemeGenerator.js`（322 行，全文已读）处理，流程分三步：
 
-extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互补/类似/三色色相关系 + 逐点迭代保证对面板背景 WCAG 对比度 ≥3.5:1，`ThemeGenerator.js:225-300`）→ 存为 `bgcol - <背景名>` 新主题并应用。
+1. 主色提取：把背景图降采样到 150px，在 Oklch 色空间里对采样点按 chroma² 加权平均、对色相做循环平均，得到主色（extractDominantColor）；
+2. 调色板生成：generateThemePalette 从主色展开 12 个字段，色相按互补、类似、三色关系取点，再逐点迭代调整，保证每个面板背景上的 WCAG 对比度不低于 3.5:1（同文件 :225-300）；
+3. 落盘应用：结果存成 `bgcol - <背景名>` 的新主题并立即应用到界面。
 - 服务端点：`/api/backgrounds/all|folders|delete|rename|upload`（`src/endpoints/backgrounds.js`）与 `/api/image-metadata/*`（`src/endpoints/image-metadata.js`）。
 
 **本次未找到（检查范围：`public/index.html` 全文 + `public/scripts/` 全部源码 + `public/css/` + 主题 JSON 字段全集）**：
@@ -209,9 +229,9 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 **iOS 专属分支。** @supports (-webkit-touch-callout: none)（:583-656）处理 env(safe-area-inset-*) 刘海屏安全区与 PWA 模式（body.PWA）底部安全区内边距（:610-615）。
 
-**触摸手势（已核实缺失）。** 全仓库搜索 swipe 相关代码 + `touchstart/touchmove/touchend` 绑定，**没有"消息上左右滑动触发 swipe 候选回复"的手势实现**——移动端 swipe 是点击 `<` `>` 箭头按钮（`.swipe_left`/`.swipe_right`）。
+**触摸手势。** 左右滑动事件绑定在 document 上，触点须位于同时包含消息区和输入区的聊天壳内；开启手势、当前无弹窗且消息未处于编辑态时，会触发最后一条消息当前可见的候选切换箭头（`public/scripts/RossAscends-mods.js:908-956`、`public/index.html:8080-8084`）。移动端还可直接点箭头切换，实际触屏体验未运行验证。
 
-用触摸事件的只有三处：滑动条触摸时锁页面滚动 300ms（`script.js:11696-11711`）、角色卡长按（见第 2 节）、头像放大层关闭点击兼容 touchend（`script.js:12225`）。
+其他触摸入口包括滑动条触摸时锁页面滚动 300ms（`script.js:11696-11711`）、角色卡长按（见第 2 节），以及头像放大层关闭点击对 touchend 的兼容（`script.js:12225`）。
 
 **触屏专用调参。** getSortableDelay()（utils.js:358-364）——桌面拖拽排序延迟 50ms，移动端 750ms，注释明确“防止滚动页面时误触发拖拽”；sortable({ delay, handle }) 模式遍布 world-info、tags、openai、textgen-settings 等十余个文件，但各模块各自初始化，无集中的“可排序列表”组件封装。
 
@@ -221,9 +241,7 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 - 弹窗类型 POPUP_TYPE.DISPLAY（只有关闭 X），传入 large 和 transparent 选项（chats.js:960）铺大、背景透明。
 
-**点击放大/还原是纯 class toggle。** 点击图片切换 `.zoomed` class（`chats.js:941-945`），CSS 侧 `.img_enlarged` 用 object-fit: contain + cursor: zoom-in，`.zoomed` 切 object-fit: cover 并允许滚动（`style.css:5305-5319`，
-
-`.img_enlarged_holder:has(.zoomed) { overflow: auto; }`）——只是"缩小适应"与"原始比例填充可滚动"两种填充模式的切换，不支持拖拽平移或滚轮缩放。
+- **点击放大/还原只切换一个 class。** 用户点击图片时，代码在容器上切换 `.zoomed`（`chats.js:941-945`）：未放大时 CSS 以 object-fit: contain 把整图缩进可视区并显示放大光标，放大后改为 object-fit: cover，由 `.img_enlarged_holder:has(.zoomed)` 打开 overflow: auto 允许滚动查看（`style.css:5305-5319`）。两种状态分别对应"缩小适应"和"原始比例填充可滚动"两种填充方式，拖拽平移与滚轮缩放都没有实现。
 - 视频走同样弹窗但换 `<video controls autoplay>`（`chats.js:913-919`）；音频类型**明确不支持展开**（`chats.js:896-898`，console.warn('Audio media cannot be expanded')）。
 - 点击弹窗背景关闭（`popup.dlg.addEventListener('click', () => popup.completeCancelled())`，`chats.js:964-966`）——与"Popup 不支持点遮罩关闭"不矛盾：这是调用方在内容层手动加的监听，非类内建能力。
 - 有标题媒体用 `<pre><code>` 渲染说明文字（`chats.js:947-957`），stopPropagation 防点击标题触发放大/关闭。
@@ -234,14 +252,16 @@ extractDominantColor）→ generateThemePalette 生成 12 字段调色板（互�
 
 **拖放分两类完全不同的实现**：
 
-**A. 文件拖入导入**（DragAndDropHandler 类，`public/scripts/dragdrop.js`，107 行已读）：构造传选择器和回调，用 jQuery 事件委托在 document.body 上监听 `dragover/dragleave/drop`（目标元素重渲染也不丢监听，`dragdrop.js:52-65`）；dragleave 用 debounce_timeout.quick 去抖（`dragdrop.js:87-91`，防内部子元素边界闪烁）。4 个消费点：
-- 角色卡拖入导入：`charDragDropHandler = new DragAndDropHandler('body', ...)`（`script.js:12494-12499`，noAnimation: true），区分文件（`processDroppedFiles()`，`script.js:10401-10434`，
+**A. 文件拖入导入**（DragAndDropHandler 类，`public/scripts/dragdrop.js`，107 行已读）：构造时传入选择器和回调，再用 jQuery 事件委托把 `dragover`、`dragleave`、`drop` 三个监听挂在 document.body 上，目标元素重新渲染后监听依然有效；dragleave 用 debounce_timeout.quick 去抖，避免内部子元素跨边界时反复闪烁（`dragdrop.js:52-91`）。全仓库共 4 个消费点：
 
-  按 MIME/扩展名白名单——`application/json`、`image/png`、YAML、`.charx`、`.byaf`，其它 toastr.warning 拒绝）与外部 URL（importFromURL）。
-- 聊天记录导入：`chatDragDropHandler = new DragAndDropHandler('#select_chat_popup', ...)`（`script.js:12501-12507`），拖入文件塞进隐藏 `<input type="file">` 触发 change 复用文件选择逻辑。
-- 附件拖入弹窗：`chats.js:1510`（Data Bank / Attachment Manager 弹窗内，拖入后弹目标选择器选作用域）。
-- 消息输入框拖入：`chats.js:2392-2394`（`#form_sheld`，直接走 handleFileAttach）。
-- 拖拽悬停视觉统一由 drop_target/dragover class 驱动（`dragdrop.js:75, 90, 102`），各消费点共享一套视觉语言。
+| 触发区域 | 注册入口 | 拖入后的处理 |
+| --- | --- | --- |
+| 角色卡（body 全屏） | `script.js:12494-12499`（noAnimation: true） | 先区分文件与外部 URL：文件走 processDroppedFiles（`script.js:10401-10434`），按 MIME/扩展名白名单接收（`application/json`、`image/png`、YAML、`.charx`、`.byaf`），其余类型 toastr.warning 拒绝；外部 URL 走 importFromURL |
+| 聊天记录导入弹窗 | `script.js:12501-12507` | 把文件塞进隐藏的 `<input type="file">` 并触发 change，复用文件选择逻辑 |
+| Data Bank / Attachment Manager 弹窗 | `chats.js:1510` | 弹目标选择器，由用户指定附件作用域 |
+| 消息输入框 `#form_sheld` | `chats.js:2392-2394` | 直接交给 handleFileAttach |
+
+拖拽悬停的视觉反馈统一由 drop_target、dragover 两个 class 驱动（`dragdrop.js:75, 90, 102`），四个消费点共用同一套视觉语言。
 
 **B. 列表拖拽排序（jQuery UI sortable）**：public/lib/jquery-ui.min.js 的 sortable 插件，不是 SortableJS。
 
@@ -251,9 +271,9 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 第三方扩展入口是输入框旁"魔法棒"图标（`addExtensionsButtonAndMenu()`，`extensions.js:688-723`）弹出 Popper.js 定位的下拉菜单（`#extensionsMenu`，placement: 'top-start'，`extensions.js:699-701`），点击外部白名单外区域自动收起（`extensions.js:714-722`）——魔法棒菜单是"扩展快捷动作入口"，Extensions 抽屉是"扩展详细设置面板"，两个不同概念。
 
-扩展启停：`.extension_toggle` 复选框（`extensions.js:928, 1225, 1243`）触发 `enableExtension/disableExtension`（`extensions.js:473-500`），**默认整页刷新**（`location.reload()`，:479, 496），批量切换场景传 reload: false 累积后用 requiresReload 标记统一刷新一次（`extensions.js:1218-1243`）——零散切换与批量切换的交互刻意区分。
+扩展启停由 `.extension_toggle` 复选框触发，勾选变化后调用 `enableExtension` 或 `disableExtension`，默认直接 `location.reload()` 整页刷新；批量切换场景传入 reload: false 逐个累积，最后用 requiresReload 标记统一刷新一次。零散切换与批量切换的交互刻意区分，启用、禁用与刷新逻辑见 `extensions.js:473-500`，批量分支见 `extensions.js:1218-1243`。
 
-第三方扩展列表弹窗区分"默认容器/外部容器"两组展示，加载时显示 fa-spin + "Loading third-party extensions... Please wait..."（`extensions.js:1156-1164`），提供 "Update all"/"Update enabled"（`extensions.js:1186-1203`）与 "Toggle extensions"（`extensions.js:1205-1219`，含仅在有历史批量记录时显示的 "Restore toggled extensions" 还原按钮，:1214-1216）；
+第三方扩展列表弹窗按"默认容器"与"外部容器"分两组展示。打开时先显示 fa-spin 旋转图标和 "Loading third-party extensions... Please wait..." 文案，加载完成后提供三个操作：Update all、Update enabled 与 Toggle extensions；其中的 "Restore toggled extensions" 还原按钮只在存在历史批量切换记录时出现（`extensions.js:1156-1164, 1186-1219`）；
 
 排序偏好（sortByName/sortManifestsByOrder，`extensions.js:1166-1169`）存 accountStorage（浏览器本地，非服务端）。
 
@@ -263,8 +283,8 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 **"键盘可达性有自建框架，语义化 ARIA 几乎缺失"**：
 
-- aria-* 属性几乎不存在：`index.html` grep aria- 仅 1 处命中（装饰图标 `aria-hidden="true"`，`index.html:5733`）；全部 `public/scripts/*.js` 只有 3 个文件各 1 处 `role=`，且都是把业务数据值（prompt 的 role 字段）写进 HTML 属性，不是无障碍语义——实质上没有专门为读屏设计的 aria-label/aria-describedby/`role="button"`（全文 grep 的确定性结果）。
-- 绝大多数"按钮"是 `<div>`/`<i>` 图标：`index.html` 有 245 处 `.menu_button` 相关 `<div>`，而非原生 `<button>`。
+- 用 grep 全文核对，`aria-*` 属性几乎没有用于语义标注：`index.html` 只命中 1 处，还是装饰图标的 `aria-hidden="true"`（`index.html:5733`）；`public/scripts/*.js` 中只有 3 个文件各出现 1 次 `role=`，写入的都是业务数据值（prompt 的 role 字段）。为读屏准备的 aria-label、aria-describedby 和 `role="button"` 一处都没有。
+- 按钮类控件大多由 `<div>` 或 `<i>` 图标承载：`index.html` 里带 `.menu_button` 类的 `<div>` 有 245 处，原生 `<button>` 很少出现。
 
 **补偿机制。** keyboard.js 维护约 30 类可交互选择器。MutationObserver 会给新出现的匹配元素补 `tabindex="0"`，全局 Enter 处理再找到最近的可交互祖先并触发点击。这使大量非原生控件获得基本键盘路径；读屏所需的完整语义仍取决于 role 与 aria 属性，此处缺失。（`public/scripts/keyboard.js:2-234`）
 
@@ -302,7 +322,7 @@ World Info、Quick Reply、正则规则和多组采样参数都使用相同的 S
 
 **"生成中"反馈不是三点动画。** 走 Action Loader toast + data-generating 全局状态位，气泡无"正在输入"动画。
 
-**移动端 swipe 是点按钮不是划手势。** 与功能名字暗示不符，已核实缺失。
+**候选回复支持按钮与触摸手势切换。** 手势在聊天壳内受开关、弹窗、编辑状态与末条箭头可见性约束，具体绑定见第 5 节。
 
 **主角色列表空状态缺失。** CSS :empty 空状态模式未覆盖主角色列表。
 

@@ -16,7 +16,7 @@
 
 Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对象"，没有 Agent 数据表；会话行只保存 Agent 的 id 引用。Agent 服务维护一张内存表，内建插件与配置插件通过编辑器接口写入或改写条目，读取方拿到的始终是当前快照。
 
-配置来源分两类：配置文档里的 agents 字段，以及带 frontmatter 的 markdown 文件（`agent/`、`agents/` 与旧式 `mode/`、`modes/` 目录）。V2 原生字段（`permissions`、`request`、`system`、`disabled`）与 V1 字段共用同一加载器，V1 写法先经迁移函数转换。默认 Agent 由会话绑定、`default_agent` 配置、内建 build、可选项首个依次决定。
+配置来源分两类：配置文档里的 agents 字段，以及带 frontmatter 的 markdown 文件，发现路径覆盖 `agent/`、`agents/` 和旧式的 `mode/`、`modes/` 四个目录。permissions、request、system、disabled 这四个 V2 原生字段与 V1 字段共用同一个加载器，V1 写法先经迁移函数转换。默认 Agent 的确定顺序依次是会话绑定、`default_agent` 配置、内建 build 和第一个可选项。
 
 ## 总体生效链路
 
@@ -49,34 +49,34 @@ Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对�
   | `steps` | 新用户输入投递后允许的逻辑模型步骤额度，含禁用工具的收束步骤 |
   | `permissions` | 权限规则集 |
 
-- **默认值**：`Agent.Info.default(id)` 生成"全允许 + 读取 `.env` 需询问 + `.env.example` 允许"的基线（`agent.ts:36-55`）。
+- **默认值**：`Agent.Info.default(id)` 生成一条全允许的权限基线，仅在读取 `.env` 时需要询问，读取 `.env.example` 直接放行（`agent.ts:36-55`）。
 - **存储**：Agent 不落库；会话的 `agent` 列保存 id（`packages/core/src/session/sql.ts:28-84`）。进程内由 Agent 服务以 `Map<ID, Info>` 维护，变更时发 Agent 更新事件（`core/src/agent.ts`）。
 - **可编辑性**：`Editor` 支持 `list/get/default/update/remove`，内建插件通过 `transform` 修改条目，第三方插件同样可以注册 Agent。
 
 ## 2. 配置来源、加载与合并
 
-- **配置文档**：配置服务按全局、项目、环境变量指定文件、托管配置等来源合并为文档序列；`agent` 字段解码为 `Config.Agent`（`packages/schema/src/config/agent.ts`），未知字段忽略。
+- **配置文档**：配置服务把全局、项目、环境变量指定文件与托管配置合并成一份文档序列，其中 agent 字段解码为 `Config.Agent`，未知字段直接忽略（`packages/schema/src/config/agent.ts`）。
 - **markdown 文件**：`{agent,agents}/**/*.md` 与 `{mode,modes}/*.md` 被发现并解析 frontmatter；`mode` 目录强制 primary。带 V2 原生字段的文件按 V2 形状解码，其余按 V1 形状解码后经迁移转换（`packages/core/src/config/plugin/agent.ts`、`v1/config/agent.ts`、`v1/config/migrate.ts`）。
 - **目录监听**：配置代理文件变化会触发重新加载（`ConfigEntryObserver.observeSources`）。
 - **默认 Agent**：配置键 `default_agent` 指定；加载器在条目合并后应用，并校验其可选性（`config/plugin/agent.ts:68`）。
 
 ## 3. 选择、绑定与切换
 
-- **选择优先级**：`Agent.select` 先取显式 id（会话绑定或调用方传入），否则取 `default_agent`，再退到内建 build，最后取第一个可选条目（`core/src/agent.ts`）。
+- **选择优先级**：选择 Agent 时，`Agent.select` 优先采用显式 id（来自会话绑定或调用方传入）；没有显式 id 就取 `default_agent`，仍未命中则退到内建 build，最后取第一个可选条目（`core/src/agent.ts`）。
 - **可选性**：`subagent` 与 `hidden` 的条目不会成为默认或主选择；子 Agent 只能由 `subagent` 工具引用。
 - **会话绑定**：会话创建可带 agent；`session.switchAgent` 端点切换会话 Agent 并写入 `agent-switched` 消息；历史消息保留当时的 Agent id，因此时间线能显示每条助手消息由哪个角色产生。
 - **模型绑定**：会话优先使用自己的 model，未设置时回退到 Agent 的 model，再回退到默认模型（`session/runner/model.ts`）；切换 Agent 不自动改写会话模型。
 
 ## 4. 提示词与上下文
 
-- **系统提示**：最终提示由 Agent 的 `system` 与上下文基线拼装，基线包含工具指引、项目/全局指令、技能与引用引导等，由 SystemContext 组合（`core/src/session/runner/llm.ts`、`core/src/system-context/`）。
+- **系统提示**：最终系统提示由 Agent 自定义的 system 文本与上下文基线拼装而成；基线由 SystemContext 组织，涵盖工具指引、项目与全局指令、技能说明和引用引导（`core/src/session/runner/llm.ts`、`core/src/system-context/`）。
 - **动态注入**：插件可通过 session 的 context 钩子在请求尾部追加提醒。Plan 插件就是这样维持"计划模式"提醒的：Agent 切换、压缩或回退都可能冲掉提醒，因此在每次请求时核对并补回（`core/src/plugin/plan.ts`）。
 - **工具指引**：内建系统提示模板位于 `core/src/session/runner/prompt/system.txt`，工具自身的说明由工具定义携带。
 - **变量替换**：本次未找到 Agent 提示中的 `$ARGUMENTS` 之类变量展开；该语义存在于命令模板而非 Agent。
 
 ## 5. 权限、工具与 Skill 授权
 
-- **权限求值**：规则集是 action/resource/effect 三元组列表，按顺序求值，后写规则可覆盖前项（`core/src/permission.ts` 的 `evaluate`/`merge`）。
+- **权限求值**：权限规则集是一串 action、resource、effect 三元组，求值时按顺序逐条匹配，靠后的规则可以覆盖靠前的规则（`core/src/permission.ts` 中的 evaluate 与 merge）。
 - **合并层级**：Agent 权限 + 会话权限 + 工具自身策略共同生效；无人值守场景以 `Unattended` 规则替代人工确认。
 - **工具可见性**：Tool 服务按合并后的规则集生成当轮工具快照，被拒绝的工具不会出现在模型可调用列表里。
 - **Skill**：技能是否可用同样经权限规则判定，系统提示与 `skill` 工具只暴露允许的技能。
@@ -90,7 +90,7 @@ Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对�
 
 ## 7. 内置 Agent
 
-- **build**：默认主 Agent，基线权限来自 `Agent.Info.default`，即允许全部工具但对 `.env` 读取询问。
+- **build**：默认主 Agent，权限基线取自 Agent 默认配置：全部工具允许，读取 `.env` 时询问。
 - **plan**：由 Plan 插件注册为只读规划角色，允许提问，拒绝编辑，仅允许写入全局计划目录；工具执行后再拦一次越权修改（`core/src/plugin/plan.ts`）。
 - **general**：通用子 Agent（`core/src/plugin/agent.ts:63`）。
 - **explore**：探索型子 Agent，允许搜索与读取类工具（`core/src/plugin/agent.ts:74`）。
@@ -102,7 +102,7 @@ Agent 在 OpenCode 2.x 中是"由配置构建、可被插件编辑的内存对�
 - **选择器**：App 的 Agent 选择器与 TUI 的 Agent 对话框都调用同一列表接口，仅展示可选条目；`@` 提及子 Agent 的入口在输入框补全中。
 - **可见状态**：时间线与侧栏按消息上的 Agent id 着色或标注；切换 Agent 产生 `agent-switched` 消息。
 - **调试**：CLI 保留 `debug agents` 处理器打印 Agent 列表（`packages/cli/src/commands/handlers/debug/agents.ts`）。
-- **创建与导入导出**：旧版的 `agent create` 生成命令在本次快照中未找到；Agent 通过配置文件与 markdown 手工编写，导出会话不包含 Agent 定义。
+- **创建与导入导出**：本次快照中未找到 `agent create` 生成命令；Agent 依靠配置文件与 markdown 手工编写，会话导出内容不包含 Agent 定义。
 
 ## 9. 设计取舍与已确认边界
 

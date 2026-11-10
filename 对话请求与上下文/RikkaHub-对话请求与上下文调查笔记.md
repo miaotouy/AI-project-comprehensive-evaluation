@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-- 生成任务由 `ChatService` 统一编排，每个会话对应一个内存中的 `ConversationSession`，会话状态、生成 Job 与消息队列都收敛在该对象内；发送输入先进入内存消息队列，再由队列调度器串行取出执行，同一会话不并行，不同会话各自独立。
-- 通用的 Agent 循环已下沉到 `ai` 模块：`ai/agent/AgentLoop` 负责 Step 循环、工具执行与审批等待，通过 `AgentHooks` 回调把“怎么组装请求”交还应用层；应用侧 `ChatRequestFactory` 实现这些回调，负责系统提示、上下文裁剪、输入/输出变换与 `sessionId`。
-- 上下文在 `ChatRequestFactory.buildStep()` 内一次性拼装：先构造一条合成 system 消息（助手系统提示 + 记忆 + 各工具的系统提示），再拼接经 `limitContext()` 裁剪的历史消息，最后依次穿过输入变换管道。变换器成员的构成与执行规则见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
-- `limitContext()` 是“滞回/阶梯式”截断而非逐条滑动窗口：截断点只在消息条数越过阈值时前进一大步，保留条数始终落在 `[limit*0.5, limit)`，并向前对齐以避免把工具调用与其结果拆散。
-- Provider 层是无状态接口，`ProviderManager` 按 ProviderSetting 类型路由（OpenAI 兼容、Google、Claude）；调用 `streamText` 还是 `generateText` 由助手配置 `streamOutput` 决定；两套线协议的请求组装与解码细节见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
-- 流式链为：Provider 解码 SSE → 通用 `StreamChunk` 事件 → `StreamChunkHandler` 合并进末尾助手消息 → `AgentEvent.MessageUpdated` → `ChatService` 写回会话内存状态；数据库落盘发生在整轮结束（含取消与异常兜底）而非每个 chunk。
-- Step 循环默认上限 256 步，工具结果内联写回助手消息的 parts（不创建 TOOL 角色消息）；审批未决时循环以 `AwaitingApproval` 结束、等待用户。工具契约、注册顺序与审批状态机见 [Agent 工具笔记](../Agent工具/RikkaHub-Agent工具调查笔记.md)。
-- 网络型 `IOException` 重试由 `RetryPolicy` 描述，默认最多 3 次、1s 起指数退避，受设置项 `enableAutoRetry` 开关；用户取消通过协程取消传播，并在重试判定前用 `ensureActive()` 防止把取消误判为网络波动而重放请求。
+- 生成任务由 `ChatService` 统一编排。每个会话在内存里对应一个 `ConversationSession`，会话状态、生成 Job 与待发消息队列都收在这个对象内；用户输入先入队，再由队列调度器逐个取出执行，同一会话内的请求串行，不同会话各自独立。
+- 通用的 Agent 循环下沉到了 `ai` 模块。AgentLoop 负责 Step 循环、工具执行与审批等待，把“请求怎么组装”通过 `AgentHooks` 回调交回应用层；应用侧的 ChatRequestFactory 实现这些回调，产出系统提示、裁剪后的上下文、输入与输出变换以及会话标识。
+- 上下文在请求工厂的 buildStep() 里一次性拼装：先合成一条 system 消息（助手系统提示、记忆、各工具的系统提示），再接上经 limitContext() 裁剪过的历史消息，最后依次穿过输入变换管道。变换器成员与执行规则见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
+- limitContext() 采用滞回式截断：消息条数越过阈值后，截断点一次前进一大步，保留条数始终落在 `[limit*0.5, limit)` 区间，并向前对齐，避免把工具调用和它的结果拆散。
+- Provider 层是无状态接口，由 ProviderManager 按渠道设置的具体类型路由到 OpenAI 兼容、Google 或 Claude 实现；这次调用走流式还是一次性生成，由助手配置里的 streamOutput 决定。两套线协议的请求组装与解码细节见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
+- 流式链为：Provider 解码 SSE 得到通用的 StreamChunk 事件，StreamChunkHandler 把它合并进末尾助手消息，再以 MessageUpdated 事件通知 `ChatService` 写回会话内存状态。数据库落盘发生在整轮结束时（含取消与异常兜底），单个 chunk 不单独落库。
+- Step 循环默认最多 256 步。工具执行结果内联写回助手消息的 parts，不额外创建 TOOL 角色消息；仍有工具等待审批时，循环以 AwaitingApproval 状态结束并等用户处理。工具契约、注册顺序与审批状态机见 [Agent 工具笔记](../Agent工具/RikkaHub-Agent工具调查笔记.md)。
+- 网络异常的重试由 RetryPolicy 描述：默认最多 3 次、从 1s 起指数退避，受设置项 enableAutoRetry 控制。用户取消沿协程取消传播，重试判定前先调用 ensureActive() 检查协程是否仍然活跃，避免把取消当成网络抖动而重放请求。
 
 ## 系统边界与生成任务主链
 
@@ -29,19 +29,19 @@
 
 一条完整主链（从 UI 提交到最终回写）：
 
-1. `ChatVM.handleMessageSend()` 调用 `ChatService.sendMessage()`（`app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt`）。
-2. `sendMessage()` 把内容封装为队列项并入队，然后触发队列调度（`service/ChatService.kt`）。
-3. `dispatchNextQueuedMessage()` 在当前会话空闲时取出下一项，`sendQueuedMessage()` 预处理用户文本、追加 USER 消息节点并落库。
-4. 生成任务经 `launchGenerationJob()` 启动，任务体调用 `runTurn()`：先 `requestFactory.createContext()` 解析助手、模型、渠道、记忆与工具，再 `createAgent()` 得到 `AgentRequest` + `AgentHooks`。
-5. `runAgent(request, hooks)` 返回 `Flow<AgentEvent>`，`ChatService` 在 IO 线程收集：`MessageUpdated` 写回会话内存状态并发出通知事件，`Retrying` 更新处理状态，`Finished` 记录结束原因（`service/ChatService.kt` 的 `runTurn`）。
-6. `AgentLoop` 在每一步调用 `hooks.prepareStep()` 取得实际请求与参数（上下文拼装、裁剪、输入变换），按 `stream` 选择 Provider 的流式或一次性调用；流式增量经 `StreamChunkHandler` 合并后，由 `hooks.previewStep()` 产出展示态、`hooks.finishStep()` 产出该步最终消息。
-7. 本步若含未执行工具：先按审批状态决定执行或结束等待；工具执行结果写回本步助手消息后继续下一 Step；无工具调用则以 `Completed` 结束（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`）。
+1. 用户在聊天页发送消息，ChatVM 的 handleMessageSend() 把内容交给 `ChatService.sendMessage()`（`app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt`）。
+2. sendMessage() 把内容封装成一个队列项入队，随后立即触发队列调度（`service/ChatService.kt`）。
+3. 当前会话空闲时，dispatchNextQueuedMessage() 取出下一项，交给 sendQueuedMessage() 预处理用户文本、追加 USER 消息节点并落库。
+4. 生成任务由 launchGenerationJob() 启动，任务体执行 runTurn()：先把助手、模型、渠道、记忆和工具解析成一份上下文，再据此创建 AgentRequest 与 AgentHooks 回调。
+5. runAgent(request, hooks) 返回一条 AgentEvent 流，ChatService 在 IO 线程上收集。收集到的事件分三类：MessageUpdated 写回会话内存状态并发出通知事件，Retrying 更新处理状态，Finished 记录结束原因（`service/ChatService.kt` 的 `runTurn`）。
+6. 每一步由 AgentLoop 先调 prepareStep() 拿到本次实际请求与参数，上下文拼装、裁剪、输入变换都在这里完成；随后按请求里的 stream 标记选择流式或一次性调用。流式增量由 StreamChunkHandler 合并，previewStep() 产出展示态，finishStep() 产出这一步的最终消息。
+7. 这一步若还有未执行的工具调用，先按审批状态决定是执行还是结束等待；工具结果写回本步助手消息后进入下一 Step，一个工具调用都没有则以 Completed 结束（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`）。
 
 文档差异：`docs/references/chat-generation-pipeline.md` 仍把核心生成类记作 `GenerationHandler`，当前快照中不存在该类；实际拆分为 `ai/agent/AgentLoop`（循环、工具、审批）与 `app` 的 `data/ai/ChatRequestFactory`（请求组装与变换），`ChatService` 只做编排与持久化。
 
 ## 1. 提交入口、任务对象与状态机
 
-**入口与任务对象**：没有独立的“任务 ID”实体。会话状态由 `ConversationSession` 承载，本链只用到其中几样任务态：权威会话内存态、生成状态提示、当前生成 Job、回复消息 id 与生成开始时间（`state`、`processingStatus`、`generationJob`、`replyMessageId`、`generationStartedAt`）。会话对象由会话管理器惰性创建，初始值只是一条带 id 与助手 id 的占位会话，真正的历史在初始化时经 `ConversationStore` 从数据库载入（`service/ConversationSession.kt`、`service/ConversationSessionManager.kt`）；消息节点、分支与占位会话的数据语义归[会话与消息管理笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
+**入口与任务对象**：这条链上没有独立的“任务 ID”实体，任务态都挂在会话对象上。`ConversationSession` 保存权威的会话内存态、给界面看的生成状态提示、当前生成 Job、回复消息 id 与生成开始时间，对应字段依次是 state、processingStatus、generationJob、replyMessageId 和 generationStartedAt。会话对象由会话管理器按需惰性创建，刚建出来时只是一条带 id 与助手 id 的占位会话，真实历史在初始化时经 ConversationStore 从数据库载入（`service/ConversationSession.kt`、`service/ConversationSessionManager.kt`）；消息节点、分支与占位会话的数据语义归[会话与消息管理笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
 
 **发送即入队**：`sendMessage()` 先判空，再把输入封装成队列项入队并立即触发调度。队列语义在 `MessageQueue` 中：`takeNext()` 跳过处于编辑占位的项，暂停时返回空，`pause()` 把所有等待中的回复以异常结束（`service/MessageQueue.kt`）。因此“再次发送”进入队列，等待本轮结束后再调度。
 
@@ -58,13 +58,13 @@
 
 随后整段消息列表穿过输入变换管道。管道成员在 `ChatRequestFactory` 构造时固定：时间提醒、提示注入、占位符、文档转提示、OCR、模板渲染、会话级工作区提醒，以 `fold` 顺序应用，后者能看到前者的结果（`data/ai/ChatRequestFactory.kt`、`data/ai/transformers/Transformer.kt`）。各变换器的成员、触发条件、注入位置与优先级、占位符与模板渲染规则归[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)；本链只关心这条管道是 Provider 调用前的最后一道拼装步骤。
 
-**请求参数**：`TextGenerationParams` 由助手与模型配置合成——温度、topP、maxTokens、reasoningLevel 取自助手，`tools` 取本轮工具集（`AgentRequest` 声明给模型的工具与可执行工具始终是同一份），自定义 header/body 把助手级与模型级拼接，`sessionId` 使用会话 id（`data/ai/ChatRequestFactory.kt`）。该 sessionId 会经 `configureSessionHeaders()` 进入请求头，是“同一会话稳定标识”的落点，也是与渠道笔记的交接面。
+**请求参数**：一次调用的 `TextGenerationParams` 由助手配置与模型配置合成。温度、topP、maxTokens 与 reasoningLevel 取自助手上的设置；tools 取本轮工具集，声明给模型的工具与可执行工具始终是同一份；自定义 header 与 body 把助手级和模型级配置拼在一起；sessionId 直接使用会话 id（`data/ai/ChatRequestFactory.kt`）。这个 sessionId 经 configureSessionHeaders() 进入请求头，让同一会话在渠道侧有稳定标识，也是与渠道笔记的交接面。
 
 **后台请求**：标题、建议、记忆整理这类请求由 `backgroundTextGenerationParams()` 生成参数，只带模型级自定义请求头与请求体，并沿用同一 `sessionId`；实现在 `ChatRequestFactory.kt` 与 `ConversationMetaGenerator` / `MemoryConsolidator` 附近。
 
 ## 3. 预算、截断、摘要与压缩
 
-**截断是条数口径，不是 token 口径**。`limitContext(limit)` 只依据消息条数：`limit <= 0` 或未超限时原样返回；超限时计算回落目标 `target = limit * 0.5`（四舍五入并夹取到 `[1, limit]`），步幅 `stride = limit - target`，截断起点按步幅对齐。因此截断点在一段连续轮次内保持不动，请求前缀稳定，利于命中提示词缓存（`ai/src/main/java/me/rerere/ai/ui/Message.kt`）。
+**截断按消息条数计算**。limitContext(limit) 只看当前分支有多少条消息：limit 小于等于 0 或消息未超限时原样返回；超限时先算出回落目标 target = limit * 0.5（四舍五入并夹取到 1 到 limit 之间），再以 limit 减去 target 得到步幅 stride，截断起点按步幅对齐。截断点因此在一段连续轮次内保持不动，请求前缀稳定，便于命中提示词缓存（`ai/src/main/java/me/rerere/ai/ui/Message.kt`）。
 
 **对齐避免拆散工具对**。`alignContextStart()` 在截断点落在含工具的消息上时向前回退：若当前消息含已执行工具（有 output），向前找同一调用链中未执行的工具调用；若含未执行工具调用，向前找对应的 USER 消息。回退只减不增，故不破坏保留下界（同文件）。
 
@@ -76,9 +76,9 @@
 
 ## 4. SDK、Provider、模型与协议交接
 
-**模型与渠道解析**：`ChatRequestFactory.createContext()` 以会话视角解析助手与模型（`settings.getChatModelOf`），查不到直接抛“未选择对话模型”；渠道由 `model.findProvider(settings.providers)` 解析，支持模型级 `providerOverwrite` 覆盖；实现实例由 `ProviderManager.getProviderByType()` 按 `ProviderSetting` 子类型取得（`data/datastore/Settings.kt`、`ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt`）。创建上下文时还会一次性取出记忆文件、构建工具集，并校验 MCP 服务名。
+**模型与渠道解析**：createContext() 站在会话视角解析出助手与对话模型，取不到就直接抛“未选择对话模型”；渠道从模型配置里查找，模型级 providerOverwrite 可以覆盖默认选择；最后按渠道设置的具体子类型向 ProviderManager 要一个实现实例（`data/datastore/Settings.kt`、`ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt`）。创建上下文时还会一次性取出记忆文件、构建工具集，并校验 MCP 服务名。
 
-ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google、Claude。**协议交接点**就是 `Provider` 接口的两个方法：`streamText` 返回 `Flow<StreamChunk>`，`generateText` 返回 `TextGenerationResult`（含 message、finishReason、usage）；是否流式由 `AgentRequest.stream = assistant.streamOutput` 决定。协议内部的分支不改变这个交接面——OpenAI 兼容渠道再按 `useResponseApi` 二分到 Chat Completions 与 Responses 两套线协议，Claude 渠道把首条 SYSTEM 提取为顶层字段并实现 `pause_turn` 续跑，这些字段映射、方言适配与续跑细节见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
+ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google 与 Claude。**协议交接点**是 `Provider` 接口的两个方法：streamText 返回一条 StreamChunk 流，generateText 返回一次生成结果，其中带消息、结束原因与用量；这次调用走哪条路，由请求里的 stream 标记决定，它取自助手的 streamOutput 配置。渠道内部再怎么分支都不影响这个交接面——OpenAI 兼容渠道按 useResponseApi 拆成 Chat Completions 与 Responses 两套线协议，Claude 渠道把首条 SYSTEM 提取为顶层字段并实现 pause_turn 续跑，这些字段映射、方言适配与续跑细节见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
 **用量记录**：`ChatRequestFactory` 用 `UsageRecorder` 包裹 Provider，给每次调用打上来源标签（聊天/压缩）与助手、会话 id；`TokenUsage` 的合并规则仍是“非零值优先覆盖”（`ai/src/main/java/me/rerere/ai/core/Usage.kt`）。
 
@@ -86,7 +86,7 @@ ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google
 
 **传输与缓冲**：Provider 侧用 `callbackFlow` 承载 SSE 事件，流以 `Channel.UNLIMITED` 缓冲并 `flowOn(Dispatchers.IO)`；注释明确指出缓冲必须有界性反转的原因——曾有缓冲满静默丢 delta 导致回复中间缺字（`ai/.../openai/ChatCompletionsAPI.kt`、`ai/.../claude/ClaudeProvider.kt`）。这是全链唯一的显式缓冲策略，管道本身不做节流或合并窗口，每个 chunk 都向下游转发。SSE 事件源与各协议的逐字段解码见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
-**通用事件模型**：`StreamChunk` 是与协议无关的密封类，覆盖文本、推理、工具调用、服务端工具、图片、注解、用量与 Finish，并普遍采用 Start/Delta/End 三元组（`ai/src/main/java/me/rerere/ai/ui/StreamChunk.kt`）。各协议实现 `StreamChunkDecoder`（`accept`/`onClosed`），且要求 Finish 幂等、每条流独立实例（`ai/src/main/java/me/rerere/ai/provider/stream/StreamChunkDecoder.kt`）。
+**通用事件模型**：`StreamChunk` 是与具体协议无关的密封类，覆盖文本、推理、工具调用、服务端工具、图片、注解、用量与 Finish 等类型，多数类型按 Start/Delta/End 三元组发出（`ai/src/main/java/me/rerere/ai/ui/StreamChunk.kt`）。每个协议各自实现 StreamChunkDecoder，提供接受事件与流关闭两个入口，并要求 Finish 幂等、每条流使用独立实例（`ai/src/main/java/me/rerere/ai/provider/stream/StreamChunkDecoder.kt`）。
 
 **合并层**：`StreamChunkHandler` 保存每个事件 id 在 parts 中的下标，把增量并入末尾助手消息；容忍 Provider 未发 Start 时由首个 Delta 直接建 part；工具调用按 `toolCallId` 而非 part 位置定位（支持并行）；`Finish` 时设置 `finishedAt`、结束未关闭的推理 part 并清空索引（`ai/src/main/java/me/rerere/ai/ui/StreamChunkHandler.kt`）。它是有状态对象，“每条流独立实例、不复用”被写在类注释中。
 
@@ -98,11 +98,11 @@ ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google
 
 ## 6. 完成、异常、半截流与最终回写
 
-**单步收尾**：每一步生成结束后，`AgentLoop` 调用 `hooks.finishStep()` 拿到该步最终消息，再检查未执行的工具调用：待审批则以 `AwaitingApproval` 结束，已批准则执行并进入下一 Step，无工具调用则 `Completed`；步数达到 `maxSteps` 以 `StepLimitReached` 结束（`ai/src/main/java/me/rerere/ai/agent/Agent.kt`、`AgentLoop.kt`）。
+**单步收尾**：每一步生成结束后，AgentLoop 先经 finishStep() 拿到该步最终消息，再检查其中未执行的工具调用，按情况决定后续：有待审批的工具就以 AwaitingApproval 结束本轮，已获批准的就执行并进入下一 Step，一个工具调用都没有则以 Completed 收尾；步数用满 maxSteps 时以 StepLimitReached 结束（`ai/src/main/java/me/rerere/ai/agent/Agent.kt`、`AgentLoop.kt`）。
 
-**输出变换的三个时机**（`data/ai/transformers/Transformer.kt`）：循环每次发出增量前调用 `hooks.previewStep()`（只影响这一次展示事件，不写回循环内部）；每步结束时 `hooks.finishStep()` 依次跑 `transforms()`、`visualTransforms()`、`onGenerationFinish()`；且只对“这一步新生成”的 part 生效，避免正则改写叠加（`ChatRequestFactory.kt` 的 `transformNewParts`）。`RegexOutputTransformer` 只实现视觉变换；`visualOnly == true` 的正则在生成管道中被过滤掉，只在消息渲染层以 `visual = true` 调用时生效（`data/model/Assistant.kt`、`ui/components/message/ChatMessage.kt`）。
+**输出变换的三个时机**（`data/ai/transformers/Transformer.kt`）：循环每发出一次增量之前先调 previewStep()，它只影响这一次展示事件，不写回循环内部状态；每步结束时 finishStep() 依次跑 transforms()、visualTransforms() 与 onGenerationFinish() 三组变换；这些变换只作用于“这一步新生成”的 part，避免正则改写反复叠加（`ChatRequestFactory.kt` 的 `transformNewParts`）。RegexOutputTransformer 只做视觉变换，标记为 visualOnly 的正则在生成管道里会被过滤掉，只在消息渲染层以 visual 模式调用时生效（`data/model/Assistant.kt`、`ui/components/message/ChatMessage.kt`）。
 
-**整轮收尾**：`runTurn` 的 `finally` 在 `NonCancellable` 中清空处理状态、调用 `session.finishGeneration()` 兜底保存并发出 `ChatGenerationEnded` 事件；随后 Job 完成回调再 `session.flush()` 落库并调度队列。因此**取消或异常也会保存本轮已产生的半截消息**（`service/ChatService.kt`、`service/ConversationSession.kt` 的 `finishGeneration`）。
+**整轮收尾**：runTurn 的 finally 在 NonCancellable 上下文中清空处理状态、调用会话的 finishGeneration() 兜底保存，并发出 ChatGenerationEnded 事件；之后 Job 完成回调再执行一次 flush 落库并调度队列。取消与异常走的也是这条路，本轮已经产生的半截消息同样会保存（`service/ChatService.kt`、`service/ConversationSession.kt` 的 `finishGeneration`）。
 
 轮次结束后按结束原因做派生任务：非 `AwaitingApproval` 时异步启动标题生成、建议生成，并在启用记忆时通知 `MemoryConsolidationScheduler.onTurnFinished()`；等待审批的轮次把这些推迟到审批之后（`ChatService.kt` 的 `runTurn`）。
 
@@ -110,11 +110,11 @@ ProviderManager 在初始化时注册三个渠道实现：OpenAI 兼容、Google
 
 ## 7. 停止、重试、续写与重新生成
 
-**停止**：`stopGeneration()` 先暂停消息队列（把所有等待中的回复置错），再取消会话所有活跃 Job，逐个 `join()` 等待收尾，最后把未执行工具以取消错误补全（`service/ChatService.kt`、`service/ConversationSession.kt`）。补全仅在确实有未执行工具时才保存会话。取消会沿协程传播到 Provider 的 `callbackFlow`，其 `awaitClose` 调用 `eventSource.cancel()`；本次调查未运行验证底层 OkHttp 连接是否同步中断。
+**停止**：stopGeneration() 先暂停消息队列，把所有等待中的回复以错误结束；再取消该会话所有活跃 Job，逐个 join 等待任务收尾；任务取消后的 finally 通过 finishGeneration 兜底保存已有内容；join 结束后，会话已初始化时再补全未执行工具并 flush（`service/ChatService.kt:653-667,739-741,1243-1251`；`service/ConversationSession.kt:200-210`）。取消沿协程传播到 Provider 的 callbackFlow，其 awaitClose 里调用 eventSource.cancel()；底层 OkHttp 连接是否同步中断，本次调查未运行验证。
 
-**网络重试**：`RetryPolicy` 描述“最多重试几次、初始延迟、按什么异常判定”，默认值 `NETWORK` 为 3 次、1s 起翻倍，仅重试 `IOException`；设置项 `enableAutoRetry` 关闭时使用 `NONE`。`withRetry()` 在每次失败判定前先 `currentCoroutineContext().ensureActive()`，避免把用户取消导致的 `IOException("canceled")` 当成网络抖动重放；重试经 `AgentEvent.Retrying` 上报，`ChatService` 据此显示带错误分类的提示文案（`ai/src/main/java/me/rerere/ai/agent/Retry.kt`、`service/ChatService.kt`）。渠道侧的多 Key 与故障转移策略见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
+**网络重试**：RetryPolicy 用三个参数描述重试行为：最多重试几次、初始延迟多长、按什么异常判定。默认的 NETWORK 策略为 3 次、从 1s 起每次翻倍，只重试 `IOException`；设置项 enableAutoRetry 关闭后改用 NONE 策略，即不重试。withRetry() 在每次判定失败之前先检查协程是否仍然活跃，避免把用户取消产生的 IOException（消息为 canceled）当成网络抖动而重放请求；每次重试经 Retrying 事件上报，`ChatService` 据此显示带错误分类的提示文案（`ai/src/main/java/me/rerere/ai/agent/Retry.kt`、`service/ChatService.kt`）。渠道侧的多 Key 与故障转移策略见 [LLM 渠道笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
-**重新生成**：`regenerateAtMessage()` 区分角色——对 USER 消息，把消息节点截断到该条并保存后重新补全；对 ASSISTANT 消息，`regenerateAssistantMsg` 为真时以该条之前的上下文重跑，为假时仅保存；重跑前会清空上一轮建议并剔除无法续跑的工具调用（`service/ChatService.kt` 的 `runTurn` 中 `withoutUnresumableToolCalls`）。它复用同一个 Job 槽位并先 `join` 上一个 Job。
+**重新生成**：regenerateAtMessage() 按消息角色分两种处理。目标是 USER 消息时，把消息节点截断到该条并保存，然后重新补全；目标是 ASSISTANT 消息时看 regenerateAssistantMsg 开关，为真就以该条之前的上下文重跑，为假则只做保存。重跑前会清空上一轮建议，并剔除无法续跑的工具调用（`service/ChatService.kt` 的 `runTurn` 中 `withoutUnresumableToolCalls`）。重新生成复用同一个 Job 槽位，先 join 上一个 Job 再启动。
 
 **工具审批后的续跑**：`handleToolApproval()` 更新目标工具为 Approved/Denied/Answered 并落库，只有在没有其他未决工具时才再次启动生成；`AgentLoop` 从消息末尾的助手消息继续执行工具而非重新请求模型（`service/ChatService.kt`、`ai/agent/AgentLoop.kt`）。审批状态机本身归 [Agent 工具笔记](../Agent工具/RikkaHub-Agent工具调查笔记.md)。
 

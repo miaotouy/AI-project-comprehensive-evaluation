@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-**源码直接确认。** Dify 的核心谱系是“知识资产管线”，并附带“工具化检索”和“上下文即时注入”两种消费面。长期事实源是租户拥有的 Dataset、Document、DocumentSegment 及可选的 ChildChunk、摘要、元数据和附件绑定；应用或工作流只按已配置的 Dataset ID 检索。Dataset 可选择经济型关键词索引或高质量向量/混合索引，并保存检索模型、Embedding 模型、分段结构和访问权限等配置（`api/models/dataset.py:150`、`api/models/dataset.py:302-372`、`api/models/dataset.py:374-553`、`api/models/dataset.py:554-647`）。
+**源码直接确认。** Dify 以“知识资产管线”为核心谱系，另提供工具化检索与上下文即时注入两种消费面。租户拥有的 Dataset、文档与分段记录，连同可选的子块、摘要、元数据和附件绑定，共同构成长期事实源；应用或工作流只按已配置的 Dataset ID 检索。Dataset 自身可以选择经济型关键词索引或高质量向量/混合索引，并保存检索模型、Embedding 模型、分段结构和访问权限等配置（`api/models/dataset.py:150-647`）。
 
 **源码直接确认。** 主摄取链是“建立文档记录并置为等待 -> 按租户隔离的 Celery 队列 -> 解析、清洗、切分、落分段 -> 关键词或向量建索引 -> 文档完成”；索引期间会持续写入阶段、时间、错误、token 数和延迟。高质量索引且开启摘要时，在文档完成后另投递摘要索引任务。执行体已从原先的单一 IndexingRunner 收敛为应用层 `DocumentIndexingService` 加适配器 `IndexingExecutionAdapter`，后者提供抽取、转换、准入、计数、写入和回滚的生命周期接口（`api/services/knowledge/indexing/execution.py:77`；`api/services/knowledge/indexing/adapters/execution.py:49-208`；`api/tasks/document_indexing_task.py:51-204`）。
 
-**源码直接确认。** 一次检索可以是单库模式：先由 LLM 路由器在允许的 Dataset 中选一库，再检索；也可以是多库模式：对各库并发取候选并进行跨库重排。普通应用将最终内容拼成上下文后交给 prompt 组装；Knowledge Retrieval 工作流节点则输出具备来源与分数的 `result` 对象数组，后续节点是否注入、改写查询或再次调用检索，由图定义决定（`api/core/rag/retrieval/dataset_retrieval.py:156-405`、`api/core/rag/retrieval/dataset_retrieval.py:649-946`；`api/core/app/apps/chat/app_runner.py:173-196`；`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-184`）。
+**源码直接确认。** 一次检索先选库再召回：单库模式下，LLM 路由器在允许的 Dataset 中挑出一个库，随后只检索该库；多库模式下，服务对各库并发取候选，再做一次跨库重排。结果回到调用方后分两种用法——普通应用把最终内容拼成上下文交给 prompt 组装，Knowledge Retrieval 工作流节点则输出带来源与分数的 `result` 对象数组；后续节点是否注入、改写查询或再次调用检索，取决于用户绘制的图（`api/core/rag/retrieval/dataset_retrieval.py:156-946`；`api/core/app/apps/chat/app_runner.py:173-196`；`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-184`）。
 
 **静态推断。** RAG Pipeline 将“资料来源到索引”的摄取过程表达成可发布工作流，包含草稿、发布快照、单步试跑、工作流/节点执行记录和文档管线日志；它是可编排的摄取图，而不是代码中内建的“检索结果自动产生下一认知方向”的循环。DatasetRetrieval、Knowledge Retrieval 节点及其调用方中未找到根据上一批召回自动生成下一次查询、思维簇、关系传播或后台记忆演化的固定机制；这仅覆盖上述入口，不构成全仓库的绝对否定。
 
@@ -83,7 +83,7 @@
 
 **源码直接确认。** Knowledge Retrieval 节点最终输出键为 `result`，类型为对象数组。每项为 `Source`：正文、标题、可选文件/摘要，以及 `_source=knowledge`、Dataset/Document/Segment ID 与名称、来源类型、分数、来源位置、文档元数据；父子分段还携带子块 ID、内容、位置与分数（`api/core/workflow/nodes/knowledge_retrieval/retrieval.py:13-85`；`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-184`）。节点还将路由或自动元数据过滤所消耗的 LLM token、价格、货币写入 process data 和 execution metadata。
 
-**源码直接确认。** 本地检索命中会回查 DocumentSegment/Document/Dataset，只保留启用且完成的分段；内容可带问答形式的 `answer` 或摘要，最终按 score 降序并赋位置。检索结束的异步副作用会递增命中分段的 `hit_count`，并将文档、耗时交给应用 trace manager；查询审计则以独立事务写 `dataset_queries`，含文本/图片查询、Dataset、应用、操作者角色和时间（`api/core/rag/datasource/retrieval_service.py:472-791`；`api/core/rag/retrieval/dataset_retrieval.py:947-1090`、`api/core/rag/retrieval/dataset_retrieval.py:1107-1160`）。
+**源码直接确认。** 本地检索命中后，服务回查分段、文档和数据集，只保留启用且已完成索引的分段；返回内容可带问答形式的答案或摘要，最终按分数降序、逐条赋位置。检索结束时还有两类异步动作：命中分段的命中次数加一，文档与耗时交给应用的 trace manager；查询本身以独立事务写入查询审计表，记录文本或图片查询、数据集、应用、操作者角色和时间（`api/core/rag/datasource/retrieval_service.py:472-791`；`api/core/rag/retrieval/dataset_retrieval.py:947-1160`）。
 
 **源码直接确认。** Chat 与 Completion 应用在生成模型调用之前调用检索；`retrieve` 将按分数排序的片段内容以换行连接为 context，同时可返回关联图片文件。若启用展示来源，回调会携带来源资源；之后 runner 调用 prompt 组织函数并传入 context 与 context files（`api/core/rag/retrieval/dataset_retrieval.py:406-648`；`api/core/app/apps/chat/app_runner.py:173-196`）。因此来源对象可用于展示/追踪，而普通应用主注入物是拼接后的文本，不是自动保留结构化 `Source` 的模型协议。
 
@@ -91,7 +91,7 @@
 
 **源码直接确认。** Knowledge Retrieval 节点从变量池读取字符串 query 和可选文件数组；类型不符即节点失败。它可使用单库或多库配置、手工/自动元数据过滤、rerank 或加权配置，并将结构化结果交给后续图节点。没有选择 query/附件时节点成功返回空输出（`api/core/workflow/nodes/knowledge_retrieval/knowledge_retrieval_node.py:101-350`）。是否把 `result` 格式化到 LLM prompt、以它计算下一 query，或在错误时改走另一支，属于用户绘制的 Workflow 连接和节点设置，不能由该节点单独保证。
 
-**源码直接确认。** RAG Pipeline 的 `Pipeline` 记录 tenant、关联 workflow、公开/发布标志，并能在相同 tenant 下反查 Dataset；Pipeline 工作流保存草稿或按发布时间新建发布快照。发布时会扫描 `knowledge-index` 节点并更新关联 Dataset 的索引设置（`api/models/dataset.py:1081-1129`；`api/services/rag_pipeline/rag_pipeline.py:269-307`、`api/services/rag_pipeline/rag_pipeline.py:366-519`）。单节点试跑会保存节点执行、输入、过程数据、输出和草稿变量；文档来源执行还可留下 `DocumentPipelineExecutionLog`（`api/services/rag_pipeline/rag_pipeline.py:581-667`；`api/models/dataset.py:1108-1129`）。
+**源码直接确认。** 每条 RAG Pipeline 记录都属于某个租户，绑定它编排的工作流，并带公开与发布标志，可在同一租户内反查关联的 Dataset；工作流侧保存草稿，发布时按发布时间另建一份发布快照。发布动作会扫描图中的 `knowledge-index` 节点，并把节点上的索引设置写回关联 Dataset。单节点试跑会保存该节点的执行记录、输入、过程数据、输出和草稿变量，文档来源的执行还会留下文档管线执行日志（`api/models/dataset.py:1081-1129`；`api/services/rag_pipeline/rag_pipeline.py:269-667`）。
 
 **源码直接确认。** 已发布 Pipeline 的异步任务从文件读取序列化调用实体，在一个最多十线程的池中逐项运行；每个执行重新加载 account、tenant、pipeline、workflow，创建带 tenant、app 和触发来源的 workflow/节点执行仓库，随后用 `PipelineGenerator` 运行。任务 finally 部分继续租户队列、删除暂存调用文件并关闭会话（`api/tasks/rag_pipeline/rag_pipeline_run_task.py:46-126`、`api/tasks/rag_pipeline/rag_pipeline_run_task.py:127-207`）。
 
@@ -107,7 +107,7 @@
 | 观测 | OpenTelemetry trace span 覆盖检索与检索服务；应用 trace manager 接收检索文档和耗时；查询审计、命中计数、文档错误/时延、节点/工作流执行均可持久化。 | 追踪后端、采样、控制台展示和敏感内容脱敏策略未验证。 |
 | 恢复 | 暂停/恢复、重试、分阶段恢复和删除后清理均有任务入口；Pipeline 执行使用暂存文件，finally 删除。 | 服务崩溃发生在数据库提交、向量写入和暂存文件删除之间时的精确恢复语义未运行验证。 |
 
-关于安全，数据模型对 Dataset、Document、Segment、元数据绑定、附件绑定、外部知识绑定和 Pipeline 均保存 tenant ID；Dataset 权限表按 Dataset、账户和 tenant 建索引（`api/models/dataset.py:823-847`、`api/models/dataset.py:967-1018`、`api/models/dataset.py:1154-1179`、`api/models/dataset.py:1081-1129`）。检索可用库查询也明确按 tenant 过滤。**静态推断：** 这些字段与入口过滤按 tenant 划定工作区隔离。**未运行验证：** 未以不同角色、仅本人/部分团队权限、服务 API、外部知识端点或签名文件 URL 进行越权测试；端到端授权效果，以及检索文本对不可信文档中提示注入的抵御能力，均属运行验证范围。
+关于安全，租户 ID 直接记在各类知识对象上：数据集、文档和分段各存一份，元数据、附件与外部知识三类绑定同样记录，RAG Pipeline 也带该字段；Dataset 权限表以数据集、账户和租户三列建索引（`api/models/dataset.py:823-1179`）。检索可用的库查询另外显式按租户过滤。**静态推断：** 这些字段与入口过滤共同划出租户工作区。**未运行验证：** 未以不同角色、仅本人或部分团队权限、服务 API、外部知识端点或签名文件 URL 做越权测试；端到端授权效果，以及检索文本对不可信文档中提示注入的抵御能力，都属于运行验证范围。
 
 **源码直接确认。** 知识库 Service API Key 可以绑定到指定 Dataset，也可以绑定 KnowledgeFS 空间。创建 Key 时控制台接收 `dataset_ids` 与 `knowledge_space_ids` 两组绑定；请求装饰器每次都按绑定行计算作用域，已绑定 Key 只能访问 URL 中明确携带且位于集合内的 Dataset，无 Dataset ID 的列表和创建类端点也会被拒绝。没有绑定行的 Key 仍保留租户内全库访问语义，以兼容既有 Key；只绑定 KnowledgeFS 空间的 Key 没有可达的旧 Dataset，会被拒绝（`api/controllers/console/datasets/datasets.py:271`、`api/controllers/console/datasets/datasets.py:785-800`；`api/controllers/service_api/wraps.py:332-400`）。
 

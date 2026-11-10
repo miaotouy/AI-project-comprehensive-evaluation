@@ -16,14 +16,14 @@
 
 工具系统是建立在 vendored Cordis 插件框架上的注册-执行管线，由 `packages/core/tools` 的 `ToolsService`（`ctx.tools`）持有注册表与执行器选择，执行本体则交给可替换的执行器插件：
 
-1. **工具是注册即 effect 的代码对象**：`ToolDefinition` 由模型可见 schema、强制 `output` 输出契约（`schema` + 纯 `render` + 可选 `presentationMeta`）、`execute` 与若干宿主侧可选回调组成（`packages/core/tools/src/contracts.ts:26-101`）。`schemas()` 用显式白名单投影模型面字段，执行与呈现回调永不上模型请求。
-2. **执行器是独立缝隙**：`ctx.tools.execute()` 把整个原始调用批次委派给最近的 scoped `ToolExecutor`；内置 native 与 PTC 两个执行器插件分别负责解析、调度、取消与 `tool/call`、`tool/result` 落盘（`packages/core/tools/src/executor.ts:64-85`、`packages/core/tool-executor-native/src/index.ts`）。
-3. **工具可见性按 step 准入**：注册可带 `when` 条件，agent-loop 每步用 `ctx.tools.resolve()` 求值一次得到 `ResolvedToolSet`，该集合同时决定该步的模型声明、dispatch、PTC 绑定与嵌套调用；条件求值抛错以 `TOOL_ACTIVATION_FAILED` 结束回合。
-4. **执行走固定管线**：`tools/pre-execute` 瀑布（allow/deny/cancel/ask）→ 单调 guard → `tools/execute` 环绕瀑布 → 工具体 → `projectContent` → `tools/post-execute` 瀑布 → `finalizeContent` → `tools/result` 通知（`packages/core/tools/src/pipeline.ts:190-420`）。
-5. **模型可见 ⟺ 已记录**：`tool/call` 在执行前落盘、`tool/result` 落盘，均由执行器批次结算提交；`deriveMessages` 从 session log 投影模型历史。canonical 规范值只存在于执行局部。
-6. **PTC 只剩一种呈现**：`run_code` 是保留传输名，PTC 执行器只向模型暴露它并附生成式 SDK；模型的直接调用必须命名 `run_code`，程序内子调用带 parent 令牌走同一守卫管线。
-7. **审批在 registry 执行端**：策略瀑布返回 ask 时经 `ctx.approval` 发起一次性审批，只有 `allowed-once` 放行；守卫只能拒绝。
-8. **Web 呈现由客户端派生**：工具定义仍可保留 `presentCall`/`presentResult` 纯函数呈现意图，但内置 Web 客户端不再消费该视图，改从原始参数、结果内容与持久化 meta 自行派生卡片（`packages/client/ui-tool/`）。
+1. **工具是注册即 effect 的代码对象**：一个工具定义由模型可见的 schema、必填的输出契约、执行体与若干宿主侧可选回调组成，输出契约本身包含 schema、纯渲染函数与可选的呈现元信息（`packages/core/tools/src/contracts.ts:26-101`）。模型面字段由注册表的 `schemas()` 按显式白名单投影得到，执行与呈现回调不进入模型请求。
+2. **执行器是独立缝隙**：注册表把整个原始调用批次交给最近的 scoped 执行器；内置的 native 与 PTC 两个执行器插件分别负责解析、调度与取消，并把调用事件与结果事件落盘（`packages/core/tools/src/executor.ts:64-85`、`packages/core/tool-executor-native/src/index.ts`）。
+3. **工具可见性按 step 准入**：注册可带 when 条件，agent-loop 每步求值一次，得到本步的可见集合，该集合同时决定模型声明、调度、PTC 绑定与嵌套调用；条件求值抛错时回合以 TOOL_ACTIVATION_FAILED 结束。
+4. **执行走固定管线**：预执行瀑布给出 allow、deny、cancel 或 ask 判定，经单调守卫复核后进入由执行瀑布环绕的工具体；结果依次经过内容投影、后置瀑布与最终内容变换，并发出结果通知（`packages/core/tools/src/pipeline.ts:190-420`）。
+5. **模型可见的内容即已记录的内容**：调用事件在执行前落盘，结果事件随批次结算提交，`deriveMessages` 再从会话日志投影模型历史；规范化后的值只存在于执行局部。
+6. **PTC 呈现收敛为 run_code**：`run_code` 是保留的传输名，PTC 执行器只向模型暴露它并附生成式 SDK；模型的直接调用必须命名 `run_code`，程序内子调用带 parent 令牌走同一守卫管线。
+7. **审批在 registry 执行端**：策略瀑布返回 ask 时经审批 seam 发起一次性审批，只有 `allowed-once` 放行；守卫只能拒绝。
+8. **Web 呈现由客户端派生**：工具定义仍可保留 `presentCall` 与 `presentResult` 两个纯函数表达呈现意图；内置 Web 客户端不消费该视图，从原始参数、结果内容与持久化元信息自行派生卡片（`packages/client/ui-tool/`）。
 
 ## 系统边界与总体调用链
 
@@ -47,22 +47,26 @@
   → 下一请求 deriveMessages 从日志投影（tool/result 是独立 tool 角色消息）
 ```
 
-调度与落盘都从 agent-loop 移出：本地调度器位于 `packages/core/tools/src/batch.ts:50`，`tool/call` 与 `tool/result` 的追加同在该文件 `:236-264`；执行期间若 step 失败，agent-loop 用 `ToolCallRecovery` 补写已结算但未落盘的结果（`agent.ts:360-390`）。
+调度与事件落盘从 agent-loop 移出，集中在 `packages/core/tools/src/batch.ts:50-264`：滚动池负责本地调度，批次结算时追加 `tool/call` 与 `tool/result`。执行期间若 step 失败，agent-loop 用 `ToolCallRecovery` 补写已结算但尚未落盘的结果（`packages/core/agent-loop/src/agent.ts:360-390`）。
 
 ## 1. 工具定义、来源与注册
 
-**定义接口**：`execute` 只返回 lossless JSON 值，registry 校验其符合 `output.schema` 后调用纯投影得到模型可见内容。两个内容回调分工明确：`projectContent` 在 `tools/post-execute` 之前安装执行期准备好的文本与图片（`:49`），`finalizeContent` 是同步的最后一公里变换，对每个归一化结果恰好调用一次——包括绕过 post-execute 的管线失败（`:61`）。
+**定义接口**：`execute` 只返回 lossless JSON 值，registry 校验它符合 `output.schema` 后调用纯投影得到模型可见内容。两个内容回调分工明确：`projectContent` 在 `tools/post-execute` 之前装入执行期准备好的文本与图片，`finalizeContent` 做同步的最后一公里变换，对每个归一化结果恰好调用一次，管线失败绕过 post-execute 时同样执行（`packages/core/tools/src/contracts.ts:49-61`）。
 
-**defineTool**（`packages/core/tools/src/schema.ts`）：一等公民工具用统一 schema DSL 声明参数与输出（标量、数组、对象、`json`、`oneOf`），编译进受约束的 JSON Schema 子集，并把参数与输出绑定到类型推断。`validateArgs` 失败抛 `ToolArgsError`（`INVALID_ARGS`）；输出非法抛 `ToolOutputError`（`INVALID_TOOL_OUTPUT`）。
+**defineTool**：一等公民工具用统一的 schema DSL 声明参数与输出，覆盖标量、数组、对象、json 与 oneOf 等形态，编译进受约束的 JSON Schema 子集，并把参数与输出绑定到类型推断（`packages/core/tools/src/schema.ts`）。参数过不了 `validateArgs` 时抛 `ToolArgsError`（`INVALID_ARGS`），输出非法则抛 `ToolOutputError`（`INVALID_TOOL_OUTPUT`）。
 
 **注册 API**（`packages/core/tools/src/index.ts`）：
 
-- `register(definition, options?)`（`:128`）：必填 output、校验 raw schema、`timeoutMs` 须为正有限数、保留名 `run_code` 拒绝注册；`options.when` 声明 step 级准入条件（`:115-123`）。返回卸载 disposer。
-- `restrict(filter)`（`:162`）：仅限 agent 作用域，allow/deny 以交集生效；空过滤器、未知名字、scope 本地名与保留传输名都会失败。
-- `guard(guard)`（`:384`）：注册单调守卫；`checkGuards`（`:393`）在 pre-execute 与审批之后复查。
-- `get`（`:239`）/`executable`（`:251`）/`definitions`（`:305`）/`schemas`（`:316`）：按 scope 与 step 准入解析可见与可执行定义。
-- `setExecutor(executor)`（`:325`）：为当前 scope 提供执行器；未作用域的贡献即部署默认。
-- `execute(input)`（`:375`）：把整批原始调用交给选中的执行器。
+| 方法 | 行为与约束 |
+|---|---|
+| `register(definition, options?)` | 输出契约必填，注册时校验原始 schema，`timeoutMs` 须为正有限数，保留名 `run_code` 拒绝注册；`options.when` 声明 step 级准入条件。返回卸载 disposer。 |
+| `restrict(filter)` | 仅限 agent 作用域，allow 与 deny 取交集生效；空过滤器、未知名字、scope 本地名与保留传输名都会失败。 |
+| `guard(guard)` | 注册单调守卫；`checkGuards` 在 pre-execute 与审批之后复查。 |
+| `get` / `executable` / `definitions` / `schemas` | 按 scope 与 step 准入解析可见与可执行定义。 |
+| `setExecutor(executor)` | 为当前 scope 提供执行器；未限定作用域的贡献即部署默认。 |
+| `execute(input)` | 把整批原始调用交给选中的执行器。 |
+
+上表方法都位于 `packages/core/tools/src/index.ts`，从注册到执行覆盖 115-393 行。
 
 **工具来源清单**（base bundle 默认行与 opt-in 包；工具名可由 load-time config 改变，以生成目录 `docs/tool-catalog.md` 为准）：
 
@@ -117,9 +121,9 @@
 
 ## 2. 工具发现、准入与注入
 
-**schema 装配**：`ToolsService` 构造时向 `ctx.systemPrompt.tools()` 注册 provider，每次组装按 scope 与 step 准入取可见定义，再交给当前执行器的 `describe()`（`index.ts:111-117`）。`system-prompt/assemble` 瀑布本身不再携带工具数组，监听器返回的 `tools` 字段被忽略。
+**schema 装配**：`ToolsService` 在构造时向系统提示词注册一个工具 provider；每次组装提示词，它按 scope 与 step 准入取出可见定义，再交给当前执行器生成模型声明（`packages/core/tools/src/index.ts:111-117`）。提示词组装瀑布 system-prompt/assemble 本身不携带工具数组，监听器返回的 tools 字段会被忽略。
 
-**step 级准入**：agent-loop 在 prompt 组装与 `agent/pre-step` 之前调用 `ctx.tools.resolve({ agent, modelSelection, signal })`（`agent.ts:292`），得到本步的 `ResolvedToolSet`；`preStep` 的每个出口都会 `dispose()` 该集合（`agent.ts:300-360`）。条件为假时工具从声明与 dispatch 中同时消失；未持有准入集合的调用、集合已释放后的调用、以及注册在 step 中被替换或移除的待执行调用，都返回 `UNKNOWN_TOOL`。
+**step 级准入**：agent-loop 在组装提示词、触发前置事件之前，先按调用者与模型选择求值一次工具准入，得到本步的可见集合，该步结束的每个出口都会释放这个集合（`packages/core/agent-loop/src/agent.ts:292-360`）。条件为假的工具同时退出声明与调度；未持有准入集合的调用、集合已释放后的调用，以及注册在 step 内被替换或移除的待执行调用，都返回 `UNKNOWN_TOOL`。
 
 **作用域过滤**：`view()` 单次层遍历解析可见集（`index.ts:239-305`）：继承面为全局层加祖先链，同名条目就近覆盖，restriction 以交集过滤继承面，自身层注册不受限。PTC 模式下执行器在过滤面之外追加 `run_code`。
 
@@ -131,13 +135,13 @@
 
 执行器协议（`packages/core/tools/src/executor.ts`）：
 
-- `describe(definitions)` → `{ schemas, knownNames }`，决定该 scope 的模型声明与工具序校验（`:72`）。
-- `execute(ToolBatchInput)` → `ToolBatchResult`（`:85`）。输入携带原始 `calls`、`signal`、可选 `agent`、可选 `log: { turn, step }`（`:19`）与批次级 `maxParallelToolCalls` 覆盖；输出按输入顺序回报结果、延迟上下文与 `concluded`（`:57`）。
-- 内部失败在排干已启动工作后以 `ToolBatchExecutionError` 拒绝，并保留已提交结果与上下文（`:90`）。
+- `describe` 接收本执行器负责的定义集，返回该 scope 的模型声明与合法工具名清单，后者用于工具序校验。
+- `execute` 接收整批原始调用，按输入顺序回报结果、延迟上下文与 `concluded` 标记；批次输入含原始调用、取消信号、可选调用者与 turn/step 日志身份，并允许批次级覆盖并发上限。
+- 内部失败在排干已启动工作后以 `ToolBatchExecutionError` 拒绝，已提交的结果与上下文仍然保留（`packages/core/tools/src/executor.ts:19-90`）。
 
-内置实现两个：`NativeToolExecutor` 直接执行可见能力并把批次交给共享管线（默认并发 10，`packages/core/agent-loop/src/constants.ts:6`）；PTC 执行器只描述 `run_code`，并在程序内把子调用按提交顺序送入同一管线，并发安全体最多重叠 `maxParallelSubCalls` 个（`packages/core/tool-executor-ptc/src/index.ts`）。旧配置项 `mode` 与 `maxParallelSubCalls` 已被注册表以 `z.never()` 拒绝，自定义组合必须显式挂载执行器行。
+内置实现有两个：native 执行器直接执行可见能力，把整批调用交给共享管线，默认并发上限 10（`packages/core/tool-executor-native/src/index.ts`，常量在 `packages/core/agent-loop/src/constants.ts:6`）。PTC 执行器只描述 `run_code`，在程序内把子调用按提交顺序送进同一管线，并发安全体最多重叠 `maxParallelSubCalls` 个（`packages/core/tool-executor-ptc/src/index.ts`）。旧配置项 mode 与 maxParallelSubCalls 已被注册表以 z.never() 拒绝，自定义组合需要显式挂载执行器行。
 
-**PTC 呈现**：模式只有 `native` 与 `ptc`，由注册表选择，`DSH_TOOLS_MODE` 环境变量开关不再生效。PTC 运行时 `programFormat` 新增 `script`（支持语句与顶层 await），跨调用记忆由 `retainsState` 显式上报，而非靠格式推断（`packages/ptc-runtime/ptc-runtime-node/`）。子调用事件成对落盘为 `tool/ptc-dispatch-start` 与 `tool/ptc-dispatch`，持久副本可由 `tools/ptc-dispatch-log` 瀑布改写而程序已收到的值不变（`packages/core/tool-executor-ptc/src/{ptc,types,runtime-types}.ts`）。
+**PTC 呈现**：模式只有 native 与 ptc 两种，由注册表选择，环境变量 DSH_TOOLS_MODE 对其没有影响。PTC 运行时的 programFormat 支持 script 形态（含语句与顶层 await），跨调用记忆由 `retainsState` 显式上报（`packages/ptc-runtime/ptc-runtime-node/`）。子调用事件成对落盘为 tool/ptc-dispatch-start 与 tool/ptc-dispatch，持久副本可被 tools/ptc-dispatch-log 瀑布改写，程序已收到的值保持不变（`packages/core/tool-executor-ptc/src/{ptc,types,runtime-types}.ts`）。
 
 ## 4. 参数解析、校验与错误处理
 
@@ -145,9 +149,9 @@
 
 校验位置：
 
-1. `defineTool` 包装的 execute 内 `validateArgs`——失败抛 `ToolArgsError`（`INVALID_ARGS`）。
-2. 输出侧 `createSuccessResult` 校验 `output.schema`（`pipeline.ts:537-583`）——失败为 `ToolOutputError`（`INVALID_TOOL_OUTPUT`），render 或 `presentationMeta` 投影异常同样转为输出错误。
-3. 未知工具：`ToolNotFoundError`（`UNKNOWN_TOOL`）；PTC 模式下无 parent 令牌的模型直调在策略管线之前被拒为 `UNKNOWN_TOOL`；`run_code` 被调用者取消时错误码由 `CODE_RUN_FAILED` 改为 `ABORTED`，运行时自身失败仍保留前者。
+1. 参数校验发生在 `defineTool` 包装的执行体内：`validateArgs` 不通过就抛 `ToolArgsError`，错误身份为 `INVALID_ARGS`。
+2. 输出侧由 `createSuccessResult` 按 `output.schema` 校验，失败为 `ToolOutputError`（`INVALID_TOOL_OUTPUT`）；render 与呈现元信息投影时的异常同样归入输出错误（`packages/core/tools/src/pipeline.ts:537-583`）。
+3. 未知工具统一为 `ToolNotFoundError`，错误身份 `UNKNOWN_TOOL`；PTC 模式下，没有 parent 令牌的模型直调在进入策略管线之前同样以该身份被拒；`run_code` 被调用者取消时错误码为 `ABORTED`，运行时自身失败仍保留 `CODE_RUN_FAILED`。
 
 失败语义：一切错误（校验失败、未知工具、监听器抛错、输出非法、管线快照失败）都物化为 isError 工具结果回注给模型，回合不中断。候选结果在 `finalizeContent` 之前先做一次物化快照，快照失败也被归一化成 isError 并仍进入该回调（`pipeline.ts:336-420`）。
 
@@ -163,7 +167,7 @@
 
 ## 6. 审批、授权与执行边界
 
-**审批发生在 registry 执行端**：pre-execute 决策返回 `ask` 时，`serviceAsk` 经 approval seam 发起一次性审批（`pipeline.ts:432-520`）。只有 `allowed-once` 放行；拒绝、取消、通道不可用都转为可区分的拒绝原因，无审批服务或调用无 agent 时也拒绝。决策里的 `reason` 是审计理由，`displayReason` 是本地化提示文本（`docs/subsystems/tools.md`）。每次问答以 `approval/asked` 与 `approval/decided` 事件成对落盘，属日志审计而非模型历史。
+**审批发生在 registry 执行端**：预执行决策返回 ask 时，`serviceAsk` 经 approval seam 发起一次性审批，只有 `allowed-once` 放行；拒绝、取消、通道不可用都会转成可区分的拒绝原因，没有审批服务或调用不带 agent 时同样拒绝（`packages/core/tools/src/pipeline.ts:432-520`）。决策里的 reason 记录审计理由，displayReason 是本地化的提示文本（`docs/subsystems/tools.md`）。每次问答以 approval/asked 与 approval/decided 成对落盘，只用于日志审计。
 
 **决策词汇**：pre-execute 可返回 allow / deny / cancel / ask；deny 可附带结构化错误身份与用户可见细节而不改模型可见理由。post-execute 可接受、只替换 content、只替换 value（重新校验并重算 content）或以 block 把纠正反馈转成 isError；content 与 value 互斥。参数不可被任何策略改写。
 
@@ -199,7 +203,7 @@ MCP 资源由独立 `mcp-resources` consumer 提供三项共享工具：列资�
 
 **Skill**：会话级 skill 目录以 catalog 形式上下文注入，模型用 skill 工具按名加载全文，不作为函数式工具注册。
 
-**子 Agent 与旁路**：委派侧由 `tool-subagent`（一次性 `subagent`、继承历史的 `subagent_fork`、可选的模型路由发现）与 `tool-subagent-control`（`send_message`/`interrupt_agent`/`list_agents`/`wait_agent`）构成；每次委派立即返回子 Agent id，本地子 Agent 接受后续消息，外部后端只执行一次。`tool-agent-team` 在同一棵树根会话上叠加四项任务板工具。PTC 是主要旁路面：ptc 呈现下模型的直接调用只能命名 `run_code`，程序内 SDK 子调用带 parent 令牌走完整守卫管线并成对落盘 dispatch 事件。
+**子 Agent 与旁路**：委派侧由两个工具包构成，`tool-subagent` 提供一次性委派、继承历史的分叉委派与可选的模型路由发现，`tool-subagent-control` 提供发送消息、中断、列出与等待四类控制工具；每次委派立即返回子 Agent id，本地子 Agent 接受后续消息，外部后端只执行一次。`tool-agent-team` 在同一棵树根会话上叠加四项任务板工具。PTC 是主要旁路面：ptc 呈现下模型的直接调用只能命名 `run_code`，程序内 SDK 子调用带 parent 令牌走完整守卫管线，并成对落盘 dispatch 事件。
 
 ## 9. 设计取舍与已确认边界
 
@@ -214,7 +218,7 @@ MCP 资源由独立 `mcp-resources` consumer 提供三项共享工具：列资�
 
 ## 10. 未验证事项
 
-- 未运行真实工具调用：流式 chunk、并行调度时序、timeout/abort 与准入释放的实际行为均未实测。
+- 本次未运行真实工具调用，流式分块、并行调度时序、超时与中止行为，以及准入集合释放的实际行为都未实测。
 - MCP 端到端（连接、重连、注册冲突回滚、task-based 拒绝）未实测；`mcp-manager` 的入口与配置面只做了目录级确认。
 - tool-terminal、tool-session-query、tool-lsp、schedule、worktree、spill-policy、tool-result-pruner 等包的执行细节未逐包深入。
 - `run_code` 的 Node/Python PTC 运行时、`script` 格式与 `retainsState` 语义未做运行验证。

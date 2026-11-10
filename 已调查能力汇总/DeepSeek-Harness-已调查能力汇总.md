@@ -35,7 +35,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 ### 角色与上下文
 
-- **per-session agent 组合（preset 角色体系）**：preset 是 Cordis 组合里的声明行，以稳定 id 和子插件列表定义角色组合。注册表急切挂载每一修订，会话经 scope 父链加入；声明退役后，旧修订等现有 Agent、子 Agent 和历史读取引用释放再销毁。首次 turn 开始后会话不能切 preset；preset 不绑定模型，模型选择由独立日志投影维护。证据：静态源码确认。链接：[Agent 角色调查笔记](../Agent角色/DeepSeek-Harness-Agent角色调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
+- **per-session agent 组合（preset 角色体系）**：每个会话的 Agent 组合来自 preset 声明：preset 是 Cordis 组合里的一行声明，用稳定 id 和子插件列表定义角色组合。注册表在每次修订时立即挂载，会话沿 scope 父链加入；某个声明退役后，旧修订要等现有 Agent、子 Agent 与历史读取的引用全部释放才销毁。会话开始首个 turn 后不能再切换 preset；preset 本身不绑定模型，模型选择由独立的日志投影维护。证据：静态源码确认。链接：[Agent 角色调查笔记](../Agent角色/DeepSeek-Harness-Agent角色调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)、[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)。
 - **系统提示词按 scope 分层组装**：`system-prompt` 是按 scope 分层的注册表（section / context / tools / variables），组装时按 agent → preset standing → global 的链就近覆盖；`{{variable}}` 严格插值，`complete` section 可整篇替换（minimal preset 靠它只留 persona 一句话）。证据：静态源码确认。链接：[Agent 角色调查笔记](../Agent角色/DeepSeek-Harness-Agent角色调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)。
 - **模型历史从事件日志派生（"模型可见 ⟺ 已落盘"）**：模型历史唯一来源是 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储；新的 model-visible 输入先记为 session event；system prompt 是独立表面消息，请求头只存配置与工具快照，首次、变化或请求系列边界才追加。模型请求由两者共同重建。证据：静态源码确认。链接：[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)。
 - **请求组装与模型路由**：每步准备前从会话模型选择确定 Provider、模型和 effort，再交给请求瀑布调整输出等控制项。瀑布若改变已固定的路由或 effort 会被拒绝；模型切换须在步骤准备前通过 Agent 模型选择接口记录。适配器随后物化默认值，日志表面历史与工具快照合成冻结请求。证据：静态源码确认。链接：[对话请求与上下文调查笔记](../对话请求与上下文/DeepSeek-Harness-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
@@ -45,7 +45,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 ### 会话与消息
 
-- **会话即 append-only 事件日志**：内存中的 `Session` 是交互历史的单一事实源，`seq` 恒等于 `log.length`；事件类型经 `SessionEventMap` 声明合并扩展，当前逻辑格式为 v4，旧代通过相邻迁移边读取。未知必需事件拒绝重建；原始流在 assistant 消息或失败尝试事件中紧凑内嵌，支撑精确回放。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)。
+- **会话即 append-only 事件日志**：内存里的 `Session` 对象是交互历史的唯一事实源，它按递增的 `seq` 追加事件，当前序号恰好等于日志条数 `log.length`。事件类型通过 `SessionEventMap` 的声明合并扩展，当前逻辑格式为 v4，旧代日志沿相邻迁移边读取。重建时遇到未知的必需事件会拒绝，原始流则紧凑内嵌在 assistant 消息或失败尝试事件中，支撑精确回放。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)、[Chat 调查笔记](../Chat/DeepSeek-Harness-Chat调查笔记.md)。
 - **消息模型与 surface 双投影**：system、developer、user、assistant 与 tool 五类表面消息派生 LLM 历史，工具结果使用独立 tool 角色；每条消息事件带 `surfaceOp` 与可选 `sourceEventSeqs`。表面分 append-origin（人可见对话）与 replacement（仅模型可见）两类，模型历史与人类 transcript 语义刻意不同。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/DeepSeek-Harness-对话导出与分享调查笔记.md)。
 - **会话格式与 JSONL 持久化**：当前逻辑格式为 v4，v0→v4 通过相邻迁移包恢复并在写打开时发布不可变后继代；第一方 SQLite 会话后端已移除。持久化改为 handle 契约，JSONL provider 拥有 live write path、flush 屏障与跨进程 kernel lease。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/DeepSeek-Harness-生成式输出与运行时调查笔记.md)。
 - **会话生命周期（create/resume/fork/崩溃恢复）**：create 为 prepare+enter+announce 三步；resume 通过写句柄加载日志、追加崩溃收口事件后发布，冷读缓存由查询服务负责；fork 复制到指定事件边界的前缀，以 `isSeeded` 和精确的 inheritedEventCount 记录血缘，再追加子会话自己的 seed 边界；普通 fork 不再填 parentSession；崩溃恢复对完整中断回合补合成 closers（interrupted 收口与缺失工具错误），torn 尾部丢弃。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/DeepSeek-Harness-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/DeepSeek-Harness-ChatUI调查笔记.md>)。
@@ -67,7 +67,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 ### Agent 运行时与外部协作
 
-- **工具注册与执行管线**：工具是注册在内存 registry 的代码对象（ToolDefinition：模型可见 schema、强制 output 契约、execute 与可选回调），注册即 effect、返回卸载 disposer、无独立持久化实体；执行走固定管线——策略瀑布（允许/拒绝/询问）→ 单调 guard → 调度瀑布（超时等包装）→ 工具体 → 结果策略 → 内容终结与最终通知；`tool/call` 与 `tool/result` 执行前后落盘。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
+- **工具注册与执行管线**：工具是注册在内存注册表里的代码对象，定义中携带模型可见的参数 schema、强制输出契约、执行函数与可选回调；注册本身是一个 effect，返回卸载 disposer，工具没有独立的持久化实体。每次调用都走同一条管线：先由策略瀑布判定允许、拒绝还是询问，经单调 guard 与调度瀑布包装超时等条件，再进入工具体，最后由结果策略完成内容终结与最终通知；调用与结果在执行前后分别落盘为 `tool/call` 与 `tool/result` 事件。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 - **工具作用域与过滤**：作用域是层链而非单一目录（全局层 + 每 agent 一个 scope 层）；agent 层同名 shadow 全局，restriction 只过滤继承面、自身层注册不受限；PTC 的 `run_code` 是保留传输，支持 native/ptc/both 三种呈现。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **capability seam 三角色**：seam = Service Definition（接口）+ Provider（实现）+ Consumer（模型工具）；工具包只拥有 schema、校验与呈现，provider 可整体替换（fs/shell/web/subagents/jobs 等映射）而模型可见 schema 不变。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)、[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 - **工具 guard 机制**：timeout-policy 是 tools/execute 包装器，把声明的超时预算变成 `TOOL_TIMEOUT` 结构化错误；repeat-tool-reminder 是 post-execute 观察者，经 additionalContexts 注入重复调用提醒，只提醒不否决。证据：静态源码确认。链接：[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
@@ -78,7 +78,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 ### 渠道与调度
 
-- **LLM 渠道：中性流式词汇 + 双适配器**：Provider 是注册键（route）而非用户实体，同一 adapter 实例可注册多条 route，注册与替换全有或全无且同步原子；`dsh-llm-deepseek`（直连 fetch + SSE）与 `dsh-llm-pi-ai`（经 pi-ai 库）作为 twin 双实现验证同一 `StreamChunk` 契约，route 名刻意区分，一份组合可同时挂两个 DeepSeek 路径。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)、[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
+- **LLM 渠道：中性流式词汇 + 双适配器**：LLM 渠道中的 Provider 就是一个注册键（route），同一 adapter 实例可以注册多条 route，注册与替换都是全有或全无的同步原子操作。直连适配器 `dsh-llm-deepseek` 用 fetch + SSE 访问，`dsh-llm-pi-ai` 经 pi-ai 库访问，两者作为 twin 双实现共同验证同一 `StreamChunk` 契约；它们的 route 名刻意区分，一份组合可以同时挂两个 DeepSeek 路径。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)、[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
 - **凭据引用模型**：配置只携带 `apiKeyEnv` 之类引用，key 永不进配置文件；凭据 seam 每次请求解析，分层为继承环境 > 托管文档（`$DSH_HOME/.credentials.yaml`，0600 + 文件锁）> 项目/用户 .env；非法值报 `INVALID_CREDENTIAL`、引用未命中报 `MISSING_CREDENTIAL`，错误消息只命名引用、绝不回显 key。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
 - **模型目录与能力元数据**：目录是配置而非远端刷新（"catalog never refreshes itself"）；直连适配器模型为配置列表（默认 V4 Flash/Pro、100 万上下文），pi-ai 以安装目录为默认、models 整表替换、modelOverrides 逐模型微调；未列出的模型 id 在直连侧仍可请求（pass-through）、pi-ai 侧报 `UNKNOWN_MODEL`；`discoverModels` 是配置时端点探测而非目录刷新。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
 - **重试与限流**：重试由 agent 请求错误钩子驱动，在同一开放 turn/step 内换一次尝试，SDK 不自动重试：`dsh-llm-retry` 监听 `agent/request-error` 瀑布执行 provider-owned 策略（normal 默认对五个可重试码最多重试 5 次、500ms→10s 指数退避 + 10% 抖动；always 无上限）；一次 adapter 调用 = 一次 provider 尝试。无多 Key、无 Key 轮换、无跨渠道 failover，`RATE_LIMIT` 只作为可重试码，属已确认的边界。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
@@ -89,7 +89,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 以下能力卡保留[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)的能力卡标题与证据状态。六项主机制均达主链确认（静态证据）；它们共享三条架构模式：能力缝三角、会话事件日志为唯一持久权威、日志完整不变量。
 
-- **能力一：自省式自扩展（inspect + 持久插件安装）**：模型用 `cordis_inspect_list`/`cordis_inspect_query` 只读检查自己所在 Cordis 进程的服务、事件目录、Loader 条目与工具表，再用 `plugin_manager`/`plugin_market` 把插件或 bundle 装进 profile，后续会话加载新行；旧的动态 define/run/stop/undefine 与 `@<pluginId>` 引用注入已不存在。安装的是宿主进程内真实代码，只读保证的是查询无副作用而非被装代码安全。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- **能力一：自省式自扩展（inspect + 持久插件安装）**：模型先用两个只读工具 `cordis_inspect_list` 与 `cordis_inspect_query` 检查自己所在 Cordis 进程的服务、事件目录、Loader 条目与工具表，再用 `plugin_manager` 与 `plugin_market` 把插件或 bundle 装进 profile，后续会话就会加载这些新增的行。旧的动态插件加载、运行、停止与卸载操作，以及按 `@<pluginId>` 注入引用的方式都已不存在。装进 profile 的是宿主进程内真实代码，会随会话加载执行；只读约束只保证查询不产生副作用。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **能力二：进程沙箱（sandbox）**：给"同世界子进程"施加文件效应策略（read-only / workspace-write / danger-full-access 三档），策略按每次调用经 `ctx.sandbox.confine` 携带；后端按平台链选择（Linux bwrap 优先、探针失败再 Landlock；macOS Seatbelt；Windows ACL 受限令牌 runner），运行期拒绝 fail-closed；无静默无沙箱回退，选不出后端抛 `SANDBOX_UNAVAILABLE`。真实内核行为属平台运行验证项，见末尾小节。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 - **能力三：同会话目标驱动循环（goal）**：把长期目标做成事件溯源状态（`goal/change` 会话事件 + 严格递增 revision），`goal-round-driver` 在会话内自动续跑；激活（armed）是分离的、从不持久化的进程内标志；完成/阻塞由模型自报（连续 N 轮同一条件默认 3 判定 blocked）；轮次预算默认上限 256。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - **能力四：plan mode 作为日志化协作状态**：`plan/mode` 是 log-only、整值替换的会话事件，`foldPlanMode` 纯折叠出状态、无 live mirror；激活时把 `plan:policy` 提示段（order 50）加入每轮请求；`exit_plan_mode` 工具要求完整 Markdown 计划并经 user-questions 缝审批；沙箱与审批策略独立强制执行、互不读写该状态。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
@@ -104,7 +104,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **仓库分布（结构、构建、文档、测试、平台）**
 
-- **仓库形态与规模**：单一 TypeScript monorepo（pnpm workspace、tsc 双编译面、tsdown、vitest），当前有 11,239 个 Git 跟踪文件、4,308 个可识别源码文件与 3,538 个文档文件；源码行按旧基线加净 diff 估算约 940,328。包组已扩到 51 个，产品 API 脊柱仍在 `packages/core`，Web、Electron、SSH、PTC、browser/computer-use 与 webhook 等边界分属独立组。证据：Git 树统计、同口径净变化与源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
+- **仓库形态与规模**：仓库是单一 TypeScript monorepo，用 pnpm workspace 组织，按 tsc 双编译面与 tsdown 构建，以 vitest 运行测试；当前有 11,239 个 Git 跟踪文件、4,308 个可识别源码文件与 3,538 个文档文件，源码行按旧基线加净 diff 估算约 940,328。包组已扩到 51 个，产品 API 脊柱仍在 `packages/core`，Web、Electron、SSH、PTC、browser/computer-use 与 webhook 等边界分属独立组。证据：Git 树统计、同口径净变化与源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
 - **框架层"双持有"与 twin 实现**：Cordis 全家被 vendored 进 `vendor/`（9 包、18 项本地修改清单、产品包以 peer dependency 解析到 vendored 源码）；`@earendil-works/pi-ai` 以普通 npm 依赖被消费（消费不持有），`llm-pi-ai` 与 `llm-deepseek` 是同一 LLM 缝隙的 twin 双实现。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/DeepSeek-Harness-LLM渠道管理调查笔记.md)。
 - **文档与测试体系**：当前树识别出 3,538 个文档文件与 2,170 个测试资产；README 双语配对、生成目录、Web e2e、session snapshot 回放和 scripts 门禁仍是主要组织方式。仓库声明 packages 源码按文件 100% 覆盖率，本次未运行门禁验证。证据：静态统计与仓库规范。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)。
 - **跨平台与发布组织**：四个对外运行面（CLI、Web GUI、进程外 JSON-RPC/Python SDK、ACP/MCP 自动化协议）；平台差异按"同缝隙多 provider 包"组织而非条件编译；`native/` 含 Landlock C 启动器与 Windows ACL C++ 探针；发布按 npm 产品族 / vendor 族 / Python wheel / Landlock 四族资产组织。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/DeepSeek-Harness-仓库分布调查笔记.md)、[外部执行体与应用协作调查笔记](../外部执行体与应用协作/DeepSeek-Harness-外部执行体与应用协作调查笔记.md)。
@@ -127,7 +127,7 @@ DeepSeek-Harness 是 DeepSeek AI 官方的开源 agent harness，构建在 vendo
 
 **入口确认未闭合（支撑机制）**
 
-- workflow / ralph：模型可提交编排脚本给 `ctx.workflowEngine`，worker-thread provider 在隔离线程执行（明确非安全边界）；`ralph` 是固定 fresh-agent 策略。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
+- workflow / ralph：模型可以把编排脚本提交给 `ctx.workflowEngine`，由 worker-thread provider 在隔离线程里执行，文档把该线程明确标为非安全边界，只用于执行隔离；`ralph` 是固定的 fresh-agent 策略。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - jobs 后台任务：owner 隔离的后台任务协议（观察、取消、等待、完成通知），`job_list`/`job_output`/`job_kill` 为模型面。机制入口与契约已确认，未展开主链验证。证据：入口确认（机制）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/DeepSeek-Harness-Agent工具调查笔记.md)。
 - bundle profile patch-layer 与 plugin market：npm 包 manifest 声明 `dsh.bundle.patch` 即成 profile 可安装补丁层（`dsh-base` 为第一层），`plugin_manager` 负责列出与安装、`plugin_market` 读市场索引，`apps/plugin-market-generator` 生成索引。证据：主链确认（静态）。链接：[独特功能调查笔记](../独特功能/DeepSeek-Harness-独特功能调查笔记.md)。
 

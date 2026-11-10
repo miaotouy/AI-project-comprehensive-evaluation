@@ -14,16 +14,16 @@
 
 ## 结论摘要
 
-- 提交入口 `useChatHandler.sendMessage` → 上下文管道（11 个处理器按 priority 拼装）→ 执行器请求模型 → 流式回调 → 节流写回。
-- 渲染与持久化是**两套独立节流**：流缓冲 → RAF 节流 → UI（显示几乎实时）；chunk 缓冲 → setTimeout（默认 2 秒或增量保存间隔）→ 节点 content → 落盘。崩溃时可能丢失最后几秒流式内容——`content` 字段本身滞后于屏幕显示。
-- 上下文压缩是**非破坏性遮罩**：只压当前活动路径、摘要由独立 LLM 请求生成、原消息保留可恢复。两个自动检查点 + 手动入口；连续压缩时旧摘要作为 `previous_summary` 传入续写模板、新摘要创建后旧摘要一并隐藏。
-- 目标父节点到根的路径仍在生成时再发消息会**排队**（`skipGeneration` + `metadata.isQueued` 节点）；同一会话的其它分支可继续并行。调度器扫描持久化队列标记，在该路径空闲后按 `queueReplyMode` 合并或链式触发（触发本身还受 `autoTriggerGenerationAfterQueue` 设置控制，默认开启）。
-- 工具调用审批用 Promise resolver 挂起执行（`toolCallingStore.requestApproval` 返回 Promise，UI 审批时才 resolve）；编排循环内部语义已由 Agent 工具笔记承接。
-- 纯图片用户消息若在附件解析后没有有效文本，默认只在请求副本中补充占位文本，以兼容拒绝空文本的上游 API；原消息正文和资产不被改写。该行为可由请求设置关闭（`src/tools/llm-chat/core/context-processors/asset-resolver.ts:182-249`、`config/defaultSettings.ts:162`）。
-- 节点在请求发出后、收到首个有效流式内容前处于 `waiting`，收到内容后切到 `generating`；两者都由节点状态驱动 UI 骨架/流式表现，最终统一收口为 `complete` 或 `error`。
-- 单节点执行器按"可重试 HTTP 状态码白名单"决定是否重试：有明确状态码但不在配置白名单（默认 429/5xx 系列的一部分，`retryStatusCodes` 可改）时直接报错，2xx/504/524 始终排除；无状态码的网络/超时错误不受该限制。命中限流时在退避基础上追加惩罚等待（`useSingleNodeExecutor.ts:557-610`、`utils/retryStatusCodes.ts`）。
-- 压缩的"保护区/单次压缩量"可按消息条数或**用户回合**计数（`countUnit`），回合包含该用户消息后的助手回复与工具结果，原生工具调用与 VCP 拆分消息都归入同一回合；两种单位各自记忆数量设置（`useContextCompressor.ts:125-180`、`types/llm.ts:388-426`）。
-- Provider/协议交接不再视作黑盒：请求由 `useLlmRequest` 编排后按 `profile.type` 与模型 binding 分发适配器；输出预算由共享核心 `output-tokens.ts` 的默认值（65,536）与模型 `tokenLimits.output` 裁剪，协议层再按模型声明的采样能力过滤参数（细节见第 4 节）。
+- 提交入口是 useChatHandler.sendMessage：上下文管道把 11 个处理器按 priority 拼装成请求，交给执行器发往模型，流式回调写回后再由节流落盘。
+- 渲染与持久化是**两套独立节流**：流缓冲经 RAF 节流后直送界面，屏幕显示几乎实时；正文 chunk 先进入缓冲区，再由定时器按增量保存间隔或默认 2 秒写入节点 content，最后落盘。崩溃时可能丢失最后几秒流式内容——`content` 字段本身滞后于屏幕显示。
+- 上下文压缩是**非破坏性遮罩**：只压当前活动路径，摘要由独立 LLM 请求生成，原消息保留可恢复。两个自动检查点加一个手动入口；连续压缩时旧摘要作为 previous_summary 传入续写模板、新摘要创建后旧摘要一并隐藏。
+- 目标父节点到根的路径仍在生成时再发消息会**排队**：本次生成调用被跳过，排队标记随节点持久化（`metadata.isQueued`），同一会话的其它分支可继续并行。调度器扫描这些持久化标记，在该路径空闲后按 queueReplyMode 合并或链式触发，触发本身还受 autoTriggerGenerationAfterQueue 设置控制（默认开启）。
+- 工具调用审批把执行挂在 Promise resolver 上：审批请求返回 Promise，界面点击时才 resolve，工具执行流程用 await 原地等待；编排循环内部语义已由 Agent 工具笔记承接（`toolCallingStore.requestApproval`）。
+- 纯图片用户消息若在附件解析后没有有效文本，默认只在请求副本中补充占位文本，以兼容拒绝空文本的上游 API；原消息正文和资产不被改写。该行为可由请求设置关闭（`asset-resolver.ts:182-249`、`defaultSettings.ts:162`）。
+- 节点在请求发出后、收到首个有效流式内容前处于 waiting，收到内容后切到 generating；两者都由节点状态驱动 UI 骨架与流式表现，最终统一收口为 complete 或 error。
+- 单节点执行器按可重试的 HTTP 状态码白名单决定是否重试：有明确状态码但不在配置白名单（默认 429/5xx 系列的一部分，retryStatusCodes 可改）时直接报错，2xx/504/524 始终排除；无状态码的网络/超时错误不受该限制。命中限流时在退避基础上追加惩罚等待（`useSingleNodeExecutor.ts:557-610`、`utils/retryStatusCodes.ts`）。
+- 压缩的保护区与单次压缩量可按消息条数或**用户回合**计数（countUnit）：回合包含该用户消息后的助手回复与工具结果，原生工具调用与 VCP 拆分消息都归入同一回合；两种单位各自记忆数量设置（`useContextCompressor.ts:125-180`、`types/llm.ts:388-426`）。
+- 请求由 useLlmRequest 编排，再按 profile.type 与模型 binding 分发给对应适配器；输出预算取共享核心 output-tokens.ts 的默认值 65,536，按模型的 tokenLimits.output 裁剪，协议层再按模型声明的采样能力过滤参数（细节见第 4 节）。
 
 ## 系统边界与生成任务主链
 
@@ -43,20 +43,20 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 `useChatHandler.sendMessage()`（`composables/chat/useChatHandler.ts:94-612`）是主提交入口，创建任务对象的顺序：
 
-1. 取 Agent 配置；附件未导入完成则等待（9.1）；
+1. 读取 Agent 配置；附件尚未导入完成时先等待（9.1）；
 2. 压缩检查点 1：创建新用户消息前调用一次（附录 A.1），保证本轮请求可以使用刚生成的摘要；
-3. 创建用户消息节点与占位助手节点（`createMessagePair`），`generatingNodes.add(id)` → `updateActiveLeaf` → 最后才真正调用 `executeRequest`——这个顺序保证 UI 能立刻看到"等待中"的占位气泡，即使还没发出网络请求；
-4. 请求发出后节点保持 `waiting`，收到首个有效流式内容时由响应处理器切到 `generating`，中途失败或结束再收口为 `error`/`complete`（第 5、6 节）；
-5. 若目标父节点到根的路径仍含生成节点，走排队分支：消息节点被创建、持久化但不触发实际 LLM 请求，节点打 `metadata.isQueued = true` 且 `status: "queued"`；切换到其它空闲分支则可直接执行（`useChatHandler.ts:540-580`，见第 8 节）。
+3. 创建用户消息节点与占位助手节点（createMessagePair），把占位节点加入生成集合、更新活动叶子，最后才真正发起请求。这个顺序保证界面立刻出现"等待中"的占位气泡，即使网络请求还没发出；
+4. 请求发出后节点停在 waiting，收到首个有效流式内容时由响应处理器切到 generating，中途失败或结束再收口为 error 或 complete（第 5、6 节）；
+5. 若目标父节点到根的路径仍含生成节点，走排队分支：消息节点照常创建并持久化，实际 LLM 请求被跳过，节点打上 metadata.isQueued 标记且 status 写为 queued；切换到其它空闲分支则可直接执行（`useChatHandler.ts:540-580`，见第 8 节）。
 
-执行器分层：`useChatExecutor`（LLM 请求执行、附件/Token 前置处理，`useChatExecutor.ts:92-180` 的 `executeRequest`）与 `useSingleNodeExecutor`（单次请求 + 重试策略，`useSingleNodeExecutor.ts:128-700`，含前缀续写 `prefix: true` 的调用，`:313`）。Provider/协议 Adapter 层见第 4 节。
+执行器分两层：`useChatExecutor` 负责发起 LLM 请求并做附件与 Token 的前置处理（入口 `executeRequest`，`useChatExecutor.ts:92-180`），下层 `useSingleNodeExecutor` 承担单次请求与重试策略，前缀续写也由它发出（`useSingleNodeExecutor.ts:128-700`）。Provider 与协议 Adapter 层见第 4 节。
 
 ## 2. 历史选择与上下文拼装顺序
 
 发送给模型的内容由历史选择与管道拼装共同决定：
 
-- **历史选择**：`getBranchHistory`（`core/context-processors/session-loader.ts:149-215`）两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的 ID，第二遍跳过这些原消息而保留摘要节点（压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user（`convertToolRoleToUser`）；保留工具调用中间助手节点的 reasoningContent，普通最终回答则去掉；服务端分段调用通过同请求的工具子节点识别中间助手；可选把旧消息 HTML 转 Markdown 以省 token。
-- **上下文管道**：`contextPipelineStore.ts:49-219` 注册并按 `priority` 排序执行 11 个处理器（`sortedAndEnabledProcessors`，`contextPipelineStore.ts:114-118`）。当前默认顺序：
+- **历史选择**：`getBranchHistory` 分两遍回溯构建请求上下文——第一遍从叶子向上收集所有"已启用压缩节点"遮罩的消息 ID，第二遍跳过这些原消息、保留摘要节点（压缩的"非破坏性遮罩"语义，见附录 A.2）。tool 角色按配置转成 user；工具调用中间助手节点的 reasoningContent 保留，普通最终回答则去掉；服务端分段调用通过同请求的工具子节点识别中间助手；可选把旧消息 HTML 转成 Markdown 以省 token（`core/context-processors/session-loader.ts:149-215`）。
+- **上下文管道**：管道 store 注册并按 priority 排序执行 11 个处理器（排序由 sortedAndEnabledProcessors 完成，`contextPipelineStore.ts:49-219`）。当前默认顺序：
   1. 会话加载（100）；
   2. 异步任务结果（110）；
   3. 正则（200）；
@@ -68,25 +68,25 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
   9. Token 限制（600）；
   10. 消息格式化（800）；
   11. 附件解析（10000）。
-  启用状态和用户调整后的顺序持久化到 `llm-chat/pipeline-settings.json`（配置 UI `PipelineConfig.vue` 见 Chat UI 4.4）。压缩发生在这个管道之前（由会话加载器把原消息替换为摘要）；图片实际缩放/Base64 化在管道末端才发生（9.3）。
+  启用状态和用户调整后的顺序持久化到 `llm-chat/pipeline-settings.json`（配置界面 PipelineConfig.vue 见 Chat UI 4.4）。压缩发生在这个管道之前，由会话加载器把原消息替换为摘要；图片的实际缩放与 Base64 化在管道末端才发生（9.3）。
 
 ## 3. 预算、截断、摘要与压缩（模型、入口与不变量）
 
 主文保留配置模型、触发入口与关键不变量，触发/执行细节见附录 A：
 
-- **配置模型**：压缩是 **Agent 级配置**（`LlmParameters.contextCompression`），生效优先级"调用参数 > 当前选中 Agent 的配置 > 默认值"（`useContextCompressor.getEffectiveConfig()`，`useContextCompressor.ts:424-460`）。
-- **计数单位**：保护区与单次压缩量可按"消息条数"或"用户回合"计数（`countUnit`），用户回合把该用户消息之后的助手回复与工具结果合并计为一条，原生工具调用和 VCP 拆分消息都按同一规则归并；两种单位各自记忆数量设置，默认按消息条数（`useContextCompressor.ts:125-180`、`types/llm.ts:388-426`）。
-- **触发入口**：两个自动检查点——`sendMessage()` 创建新用户消息前（`useChatHandler.ts:465-480`）、`useSingleNodeExecutor.execute()` 助手节点完成后（`useSingleNodeExecutor.ts:690-700`，工具循环中的单节点执行也经过后者）；外加输入框"更多"菜单的 `manualCompress()` 手动入口（`useContextCompressor.ts:501-509`）。两处自动检查点都捕获压缩错误，摘要请求失败不会阻断正常聊天。
+- **配置模型**：压缩是 **Agent 级配置**，字段位于 LlmParameters.contextCompression，生效优先级为"调用参数 > 当前选中 Agent 的配置 > 默认值"，由 useContextCompressor.getEffectiveConfig() 计算（`useContextCompressor.ts:424-460`）。
+- **计数单位**：保护区与单次压缩量可按消息条数或**用户回合**计数（countUnit）。用户回合把该用户消息之后的助手回复与工具结果合并计为一条，原生工具调用和 VCP 拆分消息都按同一规则归并；两种单位各自记忆数量设置，默认按消息条数（`useContextCompressor.ts:125-180`、`types/llm.ts:388-426`）。
+- **触发入口**：自动检查点有两处——一处位于 sendMessage() 创建新用户消息之前，一处位于单节点执行器完成助手节点之后（工具循环中的单节点执行也经过后者）；输入框"更多"菜单另提供 manualCompress() 手动入口。两处自动检查点都捕获压缩错误，摘要请求失败不会阻断正常聊天（`useChatHandler.ts:465-480`；`useSingleNodeExecutor.ts:690-700`；`useContextCompressor.ts:501-509`）。
 - **任务与路径**：压缩是按会话登记的独立异步任务，同一会话重复触发复用运行中的 Promise；发送前先等待既有压缩，再按提交的父节点路径检查，手动入口默认取活动叶子。完成后的自动检查不再阻塞已完成的回复。只遮罩目标路径，不删除旧消息；禁用压缩节点可让原消息重新进入上下文。取消贯通任务控制器与摘要请求，并在 Token 计算后、改树前再次检查（`session/sessionRuntimeManager.ts:63-151`；`useContextCompressor.ts:455-505`）。
-- **已确认边界**：连续压缩的"增量摘要滚动合并"已接入执行路径（`executeCompression()` 会把本次压缩范围之前最近的已启用摘要节点作为 `previousSummary` 传入续写模板，新摘要创建后旧摘要一并隐藏，`useContextCompressor.ts:580-640`；仓库文档 `src/tools/llm-chat/docs/architecture/context-compression.md` 已同步，文档与实现一致）。仍存在的边界：后台会话自动压缩可能读取前台会话/Agent 的配置与 Token 统计（状态依赖错位）。两者详情见附录 A.3/A.4。
+- **已确认边界**：连续压缩的"增量摘要滚动合并"已接入执行路径——executeCompression() 会把本次压缩范围之前最近的已启用摘要节点作为 previousSummary 传入续写模板，新摘要创建后旧摘要一并隐藏；仓库文档 src/tools/llm-chat/docs/architecture/context-compression.md 已同步，文档与实现一致。仍存在的边界：后台会话自动压缩可能读取前台会话或 Agent 的配置与 Token 统计（状态依赖错位）。两者详情见附录 A.3/A.4（`useContextCompressor.ts:580-640`）。
 
 ## 4. SDK、Provider、模型与协议交接
 
-- 请求编排：`useLlmRequest` 调用共享核心 `@aiohub/llm-core`，按 `profile.type` 与模型 binding 选适配器；OpenAI 兼容家族多数共用 `openAiAdapter`，Gemini、Anthropic、Cohere、Vertex、OpenRouter 等各有适配器，virtual channel 在路由前把聚合预设映射到实际渠道（虚拟渠道机制见 LLM 渠道管理笔记）。
-- 输出预算：共享核心 `output-tokens.ts` 提供默认输出预算 65,536、编辑范围常量 1,000,000 与按模型 `tokenLimits.output` 裁剪的能力；桌面端在选定物理模型后裁剪 `maxTokens`/`maxCompletionTokens`，未知输出限制时保留显式预算。新默认值只影响新建与缺省配置。
-- 采样参数兼容：请求入口读取 `supportedFeatures.parameters` 过滤模型未声明的字段，`sampling-compatibility.ts` 补充已知模型与推理模式约束，协议层在合并额外参数后清理冲突；协议层省略调用方未提供的温度，Gemini 的可选输出预算交给服务端默认值，Anthropic 缺省 `max_tokens` 时使用共享预算。OpenAI Chat Completions 映射到 `max_completion_tokens`，Responses 映射到 `max_output_tokens`。
-- 模型能力过滤：`filterParametersForModel` 按目标模型支持的参数过滤——这是"切换模型重试"的实现基础（第 7 节）。
-- 前缀续写：`useSingleNodeExecutor.ts:313` 对续写节点用 `prefix: true` 调用支持前缀续写的 API（节点语义在会话管理 4.3）。
+- 请求编排：`useLlmRequest` 调用共享核心 llm-core，按 profile.type 与模型 binding 选择适配器；OpenAI 兼容家族多数共用 openAiAdapter，Gemini、Anthropic、Cohere、Vertex、OpenRouter 等各有适配器，virtual channel 在路由前把聚合预设映射到实际渠道（虚拟渠道机制见 LLM 渠道管理笔记）。
+- 输出预算：共享核心 `output-tokens.ts` 提供 65,536 的默认输出预算、1,000,000 的编辑范围常量，并按模型的 tokenLimits.output 裁剪；桌面端在选定物理模型后裁剪 maxTokens 与 maxCompletionTokens，未知输出限制时保留显式预算。新默认值只影响新建与缺省配置。
+- 采样参数兼容：请求入口按模型声明的 supportedFeatures.parameters 过滤未声明的字段，`sampling-compatibility.ts` 补充已知模型与推理模式约束，协议层在合并额外参数后清理冲突。协议层省略调用方未提供的温度，Gemini 的可选输出预算交给服务端默认值，Anthropic 缺省 max_tokens 时使用共享预算；OpenAI Chat Completions 映射到 max_completion_tokens，Responses 映射到 max_output_tokens。
+- 模型能力过滤：`filterParametersForModel` 按目标模型支持的参数过滤，这是"切换模型重试"的实现基础（第 7 节）。
+- 前缀续写：续写节点以 prefix 模式调用支持前缀续写的 API，从已写入的前缀之后继续生成（`useSingleNodeExecutor.ts:313`；节点语义在会话管理 4.3）。
 - 重试：单节点执行器按 `retryStatusCodes` 白名单与退避策略重试，详见第 1 节与 `useSingleNodeExecutor.ts:557-610`。
 - 独立端点：DeepSeek 网页工具（搜索/抓取）走 `src/llm-apis/adapters/deepseek/tools.ts` 的独立调用，复用渠道连接与传输层但独立于 Chat Completions 消息协议，详情见 Agent 工具笔记。
 - 翻译：独立请求的模型选择优先级见 9.7。
@@ -105,10 +105,10 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 流式正文和持久化更新分离的具体机制在 `composables/chat/useStreamingMessageSources.ts` + `useChatResponseHandler.ts`（渲染侧的显示交接见消息渲染器笔记 2 节，这里记录执行与落盘侧）：
 
-- **渲染通道**：`useStreamingMessageSources.ts` 维护模块级 `sources: Map<nodeId, ReplayableMessageStreamSource>`（`:119`），**完全独立于节点的持久化 content**（`session.nodes[id].content`）；`getOrCreateStreamingMessageSource`（`useStreamingMessageSources.ts:130-150`）是渲染层唯一入口，`MessageContent.vue` 只在生成中为真时创建/获取（细节见渲染器笔记 2.1）。
-- **持久化通道**：`useChatResponseHandler.handleStreamUpdate()`（`useChatResponseHandler.ts:245-330`）对正文（非 reasoning）分支把 chunk 同时塞进 `contentUpdateBuffer` 里的 `persistBuffer`（用于落地节点内容）与 `syncBuffer`（用于跨窗口同步）。节流分两路：
-  - **跨窗口同步**：`scheduleStreamSync()`（`:157-190`）用 `requestAnimationFrame` 节流，把 `syncBuffer` 经 `useWindowSyncBus().syncState("chat:streaming-delta", ...)` 广播给分离窗口（主窗口/悬浮输入框窗口共享生成状态的机制）；
-  - **内容落盘**：`scheduleContentFlush()`（`:145-155`）用定时器延迟写盘，延迟由 `getContentPersistDelay()`（`:114-121`）计算：开启增量保存时取增量保存间隔（下限 250ms），否则固定 2000ms。延迟到时，`flushContentToNode()`（`:122-140`）把 persistBuffer 写入节点 `content`，再触发按配置节流的增量落盘。
+- **渲染通道**：useStreamingMessageSources.ts 维护一张模块级的流源映射表（sources，键为节点 ID），**完全独立于节点持久化的 content**；渲染层只通过 getOrCreateStreamingMessageSource 取用流源，MessageContent.vue 仅在节点处于生成中时创建或获取（细节见渲染器笔记 2.1；`useStreamingMessageSources.ts:119-150`）。
+- **持久化通道**：useChatResponseHandler.handleStreamUpdate() 对正文（reasoning 之外）分支把 chunk 同时写入同一更新缓冲里的两个子缓冲：persistBuffer 负责落地节点内容，syncBuffer 负责跨窗口同步。节流分两路（`useChatResponseHandler.ts:114-330`）：
+  - **跨窗口同步**：scheduleStreamSync() 用 requestAnimationFrame 节流，把 syncBuffer 通过窗口同步总线以 chat:streaming-delta 事件广播给分离窗口，主窗口与悬浮输入框窗口据此共享生成状态；
+  - **内容落盘**：scheduleContentFlush() 用定时器延迟写盘，延迟由 getContentPersistDelay() 计算：开启增量保存时取增量保存间隔（下限 250ms），否则固定 2000ms。延迟到期后，flushContentToNode() 把 persistBuffer 写入节点 content，再触发按配置节流的增量落盘。
 
 渲染路径（流缓冲区 → RAF 节流 → UI）与持久化路径（chunk 缓冲 → setTimeout 节流 → 节点 content → 落盘）是两套独立的节流策略：渲染更新几乎实时（RAF 级别），持久化写盘则明显更慢（默认 2 秒或用户配置的增量保存间隔）。应用崩溃时可能丢失最后几秒的流式内容——`content` 字段本身滞后于屏幕显示。
 
@@ -116,16 +116,16 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 ## 6. 完成、异常、半截流与最终回写
 
-- `finalizeNode()`（`useChatResponseHandler.ts:457-718`）在生成结束时**强制 flush 所有缓冲区**（正文与 reasoning 各自写回节点），确保最终落盘内容完整；过程中的中间态可能因节流未落盘（第 5 节）。同一函数内对 `metadata.isContinuation` 且返回内容未包含原 `continuationPrefix` 的节点手动补回前缀，防止模型漏复述前缀导致内容断裂（节点语义在会话管理 4.3）。
-- 响应中的 Base64 内联图片会被转换为附件追加到节点（`finalizeNode` 内 `processInlineData`，`useChatResponseHandler.ts:470-520`）；usage 为 0 但有内容时用本地 token 计算修复（`validateAndFixUsage`，`useChatResponseHandler.ts:330-410`）。
-- 生成结束后，`llmChatStore.ts` 里对 `generatingNodes.value.size` 减少的 watch（`llmChatStore.ts:154-190`）触发排队任务处理（第 8 节）；同一 watch 也是"僵死节点修复"的触发点（数据语义在会话管理 9 缺陷 1）。
-- 半截流的错误诊断（错误与空响应诊断存 metadata）见消息渲染器笔记 1.1；执行侧的异常分支 `handleNodeError`（`useChatResponseHandler.ts:719-770`）区分超时/abort/普通错误并写 `metadata.error`，清理缓冲后收口。工具编排层异常由 `orchestrate` 的 catch 统一转交 `handleNodeError`（`useToolCallOrchestrator.ts`）。
+- `finalizeNode()` 在生成结束时**强制 flush 所有缓冲区**（正文与 reasoning 各自写回节点），确保最终落盘内容完整；过程中的中间态可能因节流未落盘（第 5 节）。同一个函数还会对标记为续写、返回内容却没有包含原前缀的节点手动补回前缀，防止模型漏复述前缀导致内容断裂（节点语义在会话管理 4.3；`useChatResponseHandler.ts:457-718`）。
+- 响应中的 Base64 内联图片由 finalizeNode 内的 processInlineData 转成附件追加到节点；usage 为 0 但确实有内容时，再用本地 token 计算修复（`useChatResponseHandler.ts:330-520`）。
+- 生成结束后，llmChatStore 中对生成节点数量减少的 watch 会触发排队任务处理（第 8 节）；同一处 watch 也是僵死节点修复的触发点（`llmChatStore.ts:154-190`；数据语义在会话管理 9 缺陷 1）。
+- 半截流的错误诊断（错误与空响应诊断存 metadata）见消息渲染器笔记 1.1；执行侧的异常分支 handleNodeError 区分超时、abort 与普通错误，写入 metadata.error 并在清理缓冲后收口。工具编排层的异常由 orchestrate 的 catch 统一转交给它（`useChatResponseHandler.ts:719-770`；`useToolCallOrchestrator.ts`）。
 
 ## 7. 停止、重试、续写与重新生成
 
-- **重新生成（regenerateFromNode）**：`useChatHandler.regenerateFromNode()`（`useChatHandler.ts:613-770`）负责取 Agent 配置，若 `options.modelId/profileId` 存在则覆盖模型并用 `filterParametersForModel` 过滤出目标模型支持的参数——这就是"切换模型重试"的执行链（UI 层"切换模型重新生成"按钮在 Chat UI 6.1）。节点语义（给同一用户消息新增兄弟助手节点）在会话管理 4.3。
-- **续写（continueGeneration）**：`useChatHandler.continueGeneration()`（`useChatHandler.ts:771-895`）：对 assistant 节点新建内容等于原内容、`isContinuation` 的兄弟节点，发送时用 `prefix: true`（`useSingleNodeExecutor.ts:313`）让支持前缀续写的 API 从 `continuationPrefix` 后继续；对 user 节点是"角色接力"（空子节点）。最终内容的前缀补回在 `finalizeNode`（第 6 节）。
-- **停止/abort**：`abortControllers: Map<string, AbortController>` 在 `sessionRuntimeManager`（数据语义在会话管理 6）。停止走 `llmChatStore.abortSending`/`abortNodeGeneration`（`llmChatStore.ts:748-770`）：先拒绝挂起审批，再中止正在执行的节点；有内容的半截回复结算为 complete，无内容则写入“用户手动停止”。会话级停止还会扫描未执行的排队节点，移除 `isQueued` 并写入“队列已停止”，同时清理会话排队集合，避免中止后又被调度器触发（`sessionRuntimeManager.ts:23-43,77-168`）。网络级中断是否到达上游服务仍未核实。
+- **重新生成（regenerateFromNode）**：useChatHandler.regenerateFromNode() 先取 Agent 配置，调用方传入 modelId 或 profileId 时覆盖模型，再用 filterParametersForModel 过滤出目标模型支持的参数——这就是"切换模型重试"的执行链（UI 层的"切换模型重新生成"按钮在 Chat UI 6.1）。节点语义（给同一用户消息新增兄弟助手节点）在会话管理 4.3（`useChatHandler.ts:613-770`）。
+- **续写（continueGeneration）**：useChatHandler.continueGeneration() 对 assistant 节点新建一个内容等于原内容、标记为续写的兄弟节点，发送时以 prefix 模式调用支持前缀续写的 API，从 continuationPrefix 之后继续生成；对 user 节点则是"角色接力"，新建空子节点。最终内容的前缀补回在 finalizeNode 完成（第 6 节；`useChatHandler.ts:771-895`）。
+- **停止/abort**：中止控制器集合（abortControllers）挂在会话运行时管理器上（数据语义在会话管理 6）。停止入口是 llmChatStore 的 abortSending 与 abortNodeGeneration，先拒绝挂起的审批，再中止正在执行的节点：有内容的半截回复结算为 complete，无内容则写入“用户手动停止”。会话级停止还会扫描未执行的排队节点，移除 isQueued 标记并写入“队列已停止”，同时清理会话排队集合，避免中止后又被调度器触发（`llmChatStore.ts:748-770`；`sessionRuntimeManager.ts:23-168`）。网络级中断是否到达上游服务仍未核实。
 
 ## 8. 队列、多会话并发与后台生成
 
@@ -133,9 +133,9 @@ sendMessage（useChatHandler：Agent 配置、附件等待、压缩检查点 1�
 
 - **排队写入**：发送入口发现目标父节点到根的路径仍在生成时，改为只落库不请求——消息节点照常创建并持久化，真正的请求调用被跳过，节点同时打上排队标记；标记位置随模式走，combined 模式标在 user 节点上，chained 模式标在占位 assistant 节点上（`sessionGenerationManager.ts:290-330`、`useChatHandler.ts:540-580`）。
 
-  字段组成：入队集合 `queuedSessionIds`，跳过生成的调用参数 `chatHandler.sendMessage(..., {skipGeneration: true})`，节点标记 `metadata.isQueued = true`、`status` 写为 `"queued"`；旧数据里的 `pending` 状态在展示层仍按 queued 兼容。入口函数为 `sendMessage()`。
-- **触发条件**：当前生成结束（`llmChatStore.ts` 对 `generatingNodes.value.size` 减少的 watch，`llmChatStore.ts:195-240`）且 `settings.uiPreferences.autoTriggerGenerationAfterQueue` 为真（`llmChatStore.ts:208`）。
-- **触发执行**：调度器扫描节点上的持久化排队标记，只启动没有排队祖先且目标路径已经空闲的节点，因此同一条排队链保持顺序，其他分支仍可并行。扫描入口 `triggerQueuedGenerationForSession()`（`sessionGenerationManager.ts:134-268`），识别 `isQueued`/`queued` 与兼容的 `pending` 三种写法。
+  这些标记分三处落地：入队集合 queuedSessionIds、调用参数 skipGeneration（跳过本次生成），以及节点上的 metadata.isQueued 与 status 的 `queued` 字面量。旧数据里的 `pending` 状态在展示层仍按 queued 兼容；入口函数是 sendMessage()。
+- **触发条件**：当前生成结束（llmChatStore 监听生成节点数量减少）且设置项 autoTriggerGenerationAfterQueue 为真（`llmChatStore.ts:195-240`）。
+- **触发执行**：调度器扫描节点上的持久化排队标记，只启动没有排队祖先且目标路径已经空闲的节点，因此同一条排队链保持顺序，其他分支仍可并行。扫描入口是 triggerQueuedGenerationForSession()，同时识别 isQueued、queued 与兼容旧数据的 pending 三种写法（`sessionGenerationManager.ts:134-268`）。
 
   恢复动作按节点内容分流：内容为空的 Assistant 占位节点直接复用（`reuseNode`），已有部分内容的节点改走续写分支；user 节点走 `regenerateFromNode`（合并回复），assistant 占位节点走 `continueGeneration`（链式追加），由 `queueReplyMode` 的 `"combined"`/`"chained"` 决定，默认 combined。
 
@@ -182,15 +182,15 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
 
   store 文件为 `stores/toolCallingStore.ts`，待审请求数组类型 `pendingRequests: PendingToolRequest[]`，每条的 resolver 声明 `resolve: (result) => void`。
 
-  UI 侧的 `approveRequest`、`rejectRequest`、`approveByIds`、`rejectByIds` 在点击时才 resolve 对应 Promise（`toolCallingStore.ts:189-225`）。相关行为：
-  - **可配置超时**：默认 `toolApprovalTimeoutEnabled: false`（无限等待）；开启后按 `toolApprovalTimeoutSeconds`（5 秒–24 小时，默认 60 秒，`toolCallingStore.ts:25-27`）定时自动拒绝（`scheduleTimeout`，`toolCallingStore.ts:122-133`），调用方也可显式传 `timeoutMs` 或 `AbortSignal`；
-  - **批量拒绝**：会话删除/清理按 sessionId 批量拒绝（`cancelBySession`，`toolCallingStore.ts:227-233`），窗口关闭（beforeunload/pagehide）时全部拒绝（`toolCallingStore.ts:251-255,273-277`）；
-  - **VCP 兼容**：`externalId` 用于兼容 VCP（通过 WebSocket 连接的外部协议）广播过来的审批请求——这类请求的 `sessionId` 是 `vcp-${maid}` 格式，跟本地 `llm-chat` 会话 ID 体系不是一套，审批条 UI 因此不按 sessionId 精确匹配（见 Chat UI 5.3）。
-- **编排层**：编排器用"LLM 生成 → 检测工具请求 → 等待审批 → 执行 → 把结果拼回上下文 → 再请求"的循环驱动整个回合，循环上限由 `toolCallConfig.maxIterations` 控制（默认 5，`:111`）。
+  界面上的批准与拒绝动作（单条入口 approveRequest 与 rejectRequest，另有按 ID 批量的两个版本）只在用户点击时才 resolve 对应的 Promise。相关行为（`toolCallingStore.ts:189-225`）：
+  - **可配置超时**：审批默认无限等待（toolApprovalTimeoutEnabled 为 false）；开启后按 toolApprovalTimeoutSeconds 定时自动拒绝，该值范围 5 秒到 24 小时、默认 60 秒，调用方也可显式传入 timeoutMs 或 AbortSignal（`toolCallingStore.ts:25-133`）；
+  - **批量拒绝**：会话删除或清理时按 sessionId 批量拒绝（cancelBySession），窗口关闭触发的 beforeunload 与 pagehide 事件则全部拒绝（`toolCallingStore.ts:227-277`）；
+  - **VCP 兼容**：VCP（通过 WebSocket 连接的外部协议）广播过来的审批请求靠 externalId 识别——这类请求的 sessionId 是 vcp-${maid} 格式，与本地 llm-chat 会话 ID 体系分属两套，审批条 UI 因此不按 sessionId 精确匹配（见 Chat UI 5.3）。
+- **编排层**：编排器用"LLM 生成 → 检测工具请求 → 等待审批 → 执行 → 把结果拼回上下文 → 再请求"的循环驱动整个回合，循环上限由 toolCallConfig.maxIterations 控制，默认 5（`:111`）。
 
-  - 入口：`composables/chat/useToolCallOrchestrator.ts` 的 `orchestrate()`（`useToolCallOrchestrator.ts:73-470`）。
-  - 每轮处理：先用 `parseToolRequests()` 检测响应文本中的工具调用（VCP 或其他协议），命中后建 `role: "tool"` 节点、`metadata.toolCalls` 初始状态置为 `"awaiting_approval"`，再由 `processCycle()` 调 `requestApproval()` 等待审批。
-  - 交接：`processCycle()` 来自 `@/tools/tool-calling`，其内部解析/校验/执行/结果格式化的细节已由 [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md)（同代码快照）承接。
+  - 入口是 composables/chat 下 useToolCallOrchestrator 的 orchestrate()（`useToolCallOrchestrator.ts:73-470`）。
+  - 每轮处理：先用 parseToolRequests() 检测响应文本中的工具调用（VCP 或其他协议），命中后建一个 role 为 tool 的节点、把 metadata.toolCalls 的初始状态置为 `awaiting_approval`，再由 processCycle() 调用 requestApproval() 等待审批。
+  - 交接：processCycle() 来自 `@/tools/tool-calling`，其内部的解析、校验、执行与结果格式化细节已由 [`../Agent工具/AIO-Hub-Agent工具调查笔记.md`](../Agent工具/AIO-Hub-Agent工具调查笔记.md)（同代码快照）承接。
 
 审批开关的另一层是**自动决策仲裁**：配置允许时，审批请求可先交给 `src/services/decision-arbiter/` 的仲裁器判定自动批准/拒绝（JEV 问卷评估与普通 LLM 两种引擎）；自动批准/拒绝直接结算，只有升级人工或仲裁失败进入人工等待，人工审批超时会拒绝；外部来源（VCP 节点、文件传输）的请求带独立来源标记，不与应用内会话混用。仲裁细节与配置入口在 Agent 工具笔记第 6 节，本笔记只记"审批点位于队列与执行之间"这一交接位置。
 
@@ -209,7 +209,7 @@ Agent 开启 `variableConfig` 后，`variable-processor.ts`（priority 500）解
 
 模型选择按三级回退：配置的翻译专用模型 → 全局默认模型 → 报错要求用户手动选择。
 
-提示词占位符为 `{targetLang}`、`{text}`、`{thinkTags}`，其中 `{thinkTags}` 展开成当前生效的思考标签列表（例如 `<think>...</think>`），让模型保留 XML 标签结构、只翻标签内文本（`useTranslation.ts:76-97`）。
+提示词占位符为 `{targetLang}`、`{text}`、`{thinkTags}`；最后一项会展开成当前生效的思考标签列表（例如 `<think>...</think>`），让模型保留 XML 标签结构、只翻译标签内的文本（`useTranslation.ts:76-97`）。
 
 翻译结果存消息 `metadata.translation`（字段语义在会话管理 1.3），界面入口与快捷交互在 Chat UI 6.1。
 
@@ -305,10 +305,8 @@ Token 统计优先取 `llmChatStore.contextStats.totalTokenCount`，统计未就
 
 ### A.3 压缩实现与仓库说明的差异
 
-- `executeCompression()` 先定位本次压缩范围之前最近一个"已启用且未被遮罩"的摘要节点（`useContextCompressor.ts:572-583`）；
-- 把它作为 `previousSummary` 传给 `generateSummary()`（`useContextCompressor.ts:591-596`），`generateSummary()` 在有前情提要时改用续写模板（`CONTINUE_CONTEXT_COMPRESSION_PROMPT` 或用户配置的 `continueSummaryPrompt`，`useContextCompressor.ts:183-199`）；
-- 新摘要创建时把旧摘要一并纳入 `compressionNodes`（`useContextCompressor.ts:590-600`），即旧摘要随新压缩一起被隐藏，避免上下文中累积多个摘要；
-- 新摘要的 `originalTokenCount`/`originalMessageCount` 会继承旧摘要承载的历史统计（`compressNodes`，`useContextCompressor.ts:300-320`）；
+- `executeCompression()` 先定位本次压缩范围之前最近一个"已启用且未被遮罩"的摘要节点，把它作为 previousSummary 传给 generateSummary()；后者在有前情提要时改用续写模板，模板取自内置的 CONTINUE_CONTEXT_COMPRESSION_PROMPT 或用户配置的 continueSummaryPrompt。
+- 新摘要创建时把旧摘要一并纳入 compressionNodes，即旧摘要随新压缩一起被隐藏，避免上下文中累积多个摘要；新摘要的 originalTokenCount 与 originalMessageCount 会继承旧摘要承载的历史统计（`useContextCompressor.ts:183-600`）。
 - 仓库文档 `src/tools/llm-chat/docs/architecture/context-compression.md` 同步改写了对应段落。
 
 注：旧摘要的定位只找"本次压缩范围之前最近"的一个，且摘要生成/隐藏链路为静态代码确认，未做运行验证。

@@ -16,13 +16,13 @@
 
 Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”是多个互补的提示词机制，按“身份 → 命名模板 → 全局/会话覆盖 → 运行时注入”分层叠加：
 
-1. **身份层（SOUL.md）**：`$HERMES_HOME/SOUL.md` 是代理的“主身份文件”，首次运行自动用 `DEFAULT_SOUL_MD` 种子（`hermes_cli/config.py:840-914`），进入 system prompt 的 stable 层；无文件时回退到硬编码 `DEFAULT_AGENT_IDENTITY`（`agent/prompt_builder.py:144`）。
-2. **人格模板（personalities）**：`agent.personalities` 配置是具名模板，值为纯字符串或“提示词 + 语气 + 风格”的映射；内置 14 个模板集中在**单一所有者模块**（`hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，由 CLI 默认值迁入），用户条目按名覆盖内置。该模块同时接受顶层 `personalities:` 块（原始 #643 形状），`agent.personalities` 在同名冲突时优先；`NEUTRAL_PERSONALITY_NAMES` 把空串、none、default、neutral 都视为“无人格 overlay”。
+1. **身份层（SOUL.md）**：首次运行时，`$HERMES_HOME/SOUL.md` 由内置模板写入，成为代理的主身份文件并进入 system prompt 的稳定层；文件缺失时改用硬编码的默认身份文本（`hermes_cli/config.py:840-914`；`agent/prompt_builder.py:144`）。
+2. **人格模板（personalities）**：`agent.personalities` 是一组具名模板，值可以是纯字符串，也可以是“提示词 + 语气 + 风格”的映射。内置 14 个模板与用户条目由同一个模块 `hermes_cli/personality.py` 统一持有，用户条目按名称覆盖同名内置项，模板定义最初由 `cli.py` 的默认值迁入。该模块还接受顶层 `personalities:` 块（最初 #643 的形状），同名冲突时以 `agent.personalities` 为准；空串、none、default、neutral 四个取值统一按“无人格 overlay”处理。
 3. **全局/会话 system prompt**：
-   - `display.personality` 保存**选中的名称**（空 = 无 overlay）并成为权威来源。启动/建 agent 时按“env 覆盖 → 命名人格 → 用户手动提示”的优先级取文本：env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 最优先，命名人格渲染失败时回退到 user-owned 的 `agent.system_prompt`；最终收集为 agent 的 `ephemeral_system_prompt`，在主请求路径中附加在缓存 prompt 之后，**不写入轨迹**。
-   - **人格代码永不写 `agent.system_prompt`**（该字段保留给用户手动提示）；v33→v34 迁移一次性清理旧 `/personality` 写入的文本并重置选择（`config_migrations.py:648-717`）。
-4. **会话/渠道覆盖**：渠道级覆盖由 `ChannelOverride` 承担，含模型、提供商与提示词三个字段（`gateway/config.py:543-574`）；TUI 会话可存 `personality` 覆盖键。
-5. **角色隔离由 Profile 承担**：`hermes profile create --clone` 复制 `config.yaml/.env/SOUL.md/skills/`，构成一套含模型、记忆、技能与提示词的完整隔离包。
+   - `display.personality` 只保存选中的名称，空值表示不叠加人格，全表面以它为准。启动或新建 agent 时按“env 覆盖 → 命名人格 → 用户手动提示”的顺序取文本：`HERMES_EPHEMERAL_SYSTEM_PROMPT` 优先级最高，命名人格渲染失败则回退到用户自有的 `agent.system_prompt`；取到的文本作为 agent 的 ephemeral 提示，在主请求路径上追加到缓存 prompt 之后，不写入轨迹。
+   - 人格代码始终不写 `agent.system_prompt`，该字段留给用户手动提示；v33→v34 迁移一次性清理旧 `/personality` 写入的文本并重置选择（`config_migrations.py:648-717`）。
+4. **会话/渠道覆盖**：渠道级覆盖由 `ChannelOverride` 承担，含模型、提供商与提示词三个字段，TUI 会话另可存一个 `personality` 覆盖键（`gateway/config.py:543-574`）。
+5. **角色隔离由 Profile 承担**：`hermes profile create --clone` 会复制 config.yaml、.env、SOUL.md 与 skills 目录，得到一套自带模型、记忆、技能与提示词的独立环境。
 
 关键运行时语义：system prompt **每个会话构建一次并缓存，仅在上下文压缩时重建**（`agent/system_prompt.py:1-8`），字节稳定以保住前缀缓存；`ephemeral_system_prompt` 在 API 调用时才拼接，不进缓存、不进轨迹（`agent/chat_completion_helpers.py:2394-2395`）。完整构建的 system prompt 会被记录（`system_prompts` hash 去重表 + session 行引用 model/model_config），但当前人格文本本身不随历史保存。
 
@@ -71,138 +71,149 @@ Hermes Agent **没有独立持久化的“角色对象”**。它的“角色”
 | system_prompts 表 | 提示文本去重存储 | `hermes_state.db` | SQLite（hash → text） |
 | sessions 表 | 会话消耗的 model/model_config 快照 | `hermes_state.db` | SQLite 行 |
 
-- **SOUL.md 种子与升级**：首轮运行写 `DEFAULT_SOUL_MD`；若现有内容与 legacy 空模板逐字节匹配则自动升级，用户自定义内容永不改写（`hermes_cli/config.py:840-914`；模板在 `hermes_cli/default_soul.py`）。`hermes profile create` 也会做种子写入，`hermes doctor` 检查其存在与空/非空（入口见文末源码索引）。
+- **SOUL.md 种子与升级**：首轮运行写入默认模板；现有内容若与旧版空模板逐字节一致，会被自动升级成新模板，用户改过的内容保持原样。创建 profile 时同样会播种，`hermes doctor` 另外检查该文件是否存在、内容是否为空（模板定义在 `hermes_cli/default_soul.py`，播种与升级逻辑见 `hermes_cli/config.py:840-914`，创建与体检入口见文末源码索引）。
 - **内置 14 个人格字符串模板**：完整名单见下（由 `cli.py:481-496` 迁入，集中定义于 `hermes_cli/personality.py` 的 `BUILTIN_PERSONALITIES`，`personality.py:60-79`）：
 
   ```text
   helpful / concise / technical / creative / teacher / kawaii / catgirl / pirate / shakespeare / surfer / noir / uwu / philosopher / hype
   ```
 
-- **dict 形式模板**：值为纯字符串时原样使用；值为映射时可同时给出 `system_prompt`、`tone`、`style` 三字段，示例见 `cli-config.yaml.example` 的 `agent.personalities`。
-- **dict 值渲染**：`render_personality_prompt`（`hermes_cli/personality.py:82`，`config.py:2947` 转发）对纯字符串原样使用；对映射则把提示词字段与 `Tone:`/`Style:` 两行逐行拼出。
-- **名称规范化**：`normalize_personality_name`（`hermes_cli/personality.py:104`）把 `none`/`default`/`neutral` 与空串统一视为未选择。
-- **配置读取与 env**：env `HERMES_EPHEMERAL_SYSTEM_PROMPT` 最优先，其次常规解析入口 `resolve_ephemeral_system_prompt_from_config`（其内部 `display.personality` 命名人格优先于 `agent.system_prompt`）。
-- **整体失效开关**：`HERMES_IGNORE_RULES`/`--ignore-rules` 使 SOUL、项目规则与记忆一起失效。
-- **记忆相关文件**：`memory.memory_enabled` 与 `memory.user_profile_enabled` 两个开关分别控制 `MEMORY.md`（agent 长期记忆）与 `USER.md`（用户画像）的启用，示例见 `cli-config.yaml.example`。
-- **删除**：不存在“删除某个角色对象”；删除 `display.personality`/`agent.system_prompt` 配置、把 personality 设为 `none` 或空串，或删除整个 profile 目录即为删除。
+- **dict 形式模板**：纯字符串值原样使用。映射值可同时给出三个字段，分别是提示词 `system_prompt`、语气 `tone` 与风格 `style`；示例配置见 `cli-config.yaml.example` 的 `agent.personalities` 段。
+- **dict 值渲染**：渲染由 `render_personality_prompt` 完成，纯字符串原样返回，映射则把提示词与 `Tone:`、`Style:` 两行依次拼成一段文本；`hermes_cli/config.py:2947` 处只是转发调用，主体实现在 `hermes_cli/personality.py:82`。
+- **名称规范化**：`normalize_personality_name` 把 none、default、neutral 与空串一律视为未选择（`hermes_cli/personality.py:104`）。
+- **配置读取与 env**：环境变量 `HERMES_EPHEMERAL_SYSTEM_PROMPT` 优先级最高；没有它时走常规解析入口 `resolve_ephemeral_system_prompt_from_config`，其中命名人格优先于用户手动提示 `agent.system_prompt`。
+- **整体失效开关**：设置 `HERMES_IGNORE_RULES` 或加 `--ignore-rules` 会让 SOUL、项目规则与记忆一起失效。
+- **记忆相关文件**：`memory.memory_enabled` 控制 `MEMORY.md`（agent 长期记忆）是否启用，`memory.user_profile_enabled` 控制 `USER.md`（用户画像）是否启用，示例见 `cli-config.yaml.example`。
+- **删除**：这套机制里没有可删除的角色对象；删掉 `display.personality` 或 `agent.system_prompt` 配置、把 personality 设为 `none` 或空串、或者删除整个 profile 目录，效果都等同于删除角色。
 
 ## 2. 创建、选择与会话绑定
 
 - **创建**：
-  - SOUL.md：首轮/`hermes profile create` 自动种子，或直接编辑 `$HERMES_HOME/SOUL.md`；web 提供 `/api/profiles/<name>/soul` GET/PUT/DELETE（`hermes_cli/web_routers/profiles.py:600-640`）。
-  - personalities：直接编辑 config.yaml（本次未发现专门的创建命令）。
-  - Profile：`hermes profile create <name> [--clone|--clone-all]`（`hermes_cli/profiles.py:998-1090`）。
+  - SOUL.md 在首轮运行或执行 `hermes profile create` 时自动播种，也可以直接编辑 `$HERMES_HOME/SOUL.md`；Web 端另有 REST 接口可以读取、写入或删除该文件（`hermes_cli/web_routers/profiles.py:600-640`）。
+  - personalities 没有专门的创建命令，直接编辑 config.yaml 即可（本次未发现其他入口）。
+  - Profile 由 `hermes profile create <name>` 创建，加 `--clone` 或 `--clone-all` 可复制现有环境（`hermes_cli/profiles.py:998-1090`）。
 - **选择**：
-  - CLI：`/personality <name>`（cli_commands_mixin.py:1329-1357）设置；`none` 等中立名或空串清除选择。
-  - Gateway：`/personality` 列出/设置（`gateway/slash_commands.py:2492-2560`）。
-  - TUI/桌面：`/personality` 打开 picker（`hermes_cli/commands.py` 的 picker 命令集），通过 RPC 写 `personality` 配置键（`ui-tui/app/slash/commands/session.ts:191-216`）。
-  - Profile：`hermes -p <name>` 选择；gateway 按名路由到最具体的渠道/线程作用域（`gateway/profile_routing.py:1-38`）。
+  - CLI 用 `/personality <name>` 设定；输入 none 等中立名或空串则清除选择（`hermes_cli/cli_commands_mixin.py:1329-1357`）。
+  - Gateway 的 `/personality` 同时负责列出与设置（`gateway/slash_commands.py:2492-2560`）。
+  - TUI 与桌面端的 `/personality` 打开选择器，选中结果通过 RPC 写入 personality 配置键（`ui-tui/app/slash/commands/session.ts:191-216`）。
+  - 选 profile 用 `hermes -p <name>`；gateway 按名称路由到最具体的渠道或线程作用域（`gateway/profile_routing.py:1-38`）。
 - **会话绑定**：
-  - CLI：`agent.system_prompt` 是会话启动时的一次性值（env 或 `resolve_ephemeral_system_prompt_from_config`），持久化后供下次启动读取；TUI 支持会话内 `session["personality"]` 覆盖（server.py:5192-5193）。
-  - TUI 修改人格会对**既有会话**就地生效：更新临时提示文本，必要时插入 `[System: ...]` 提示、写 `personality_switch` 时间线条目（`_apply_personality_to_session`，`server.py:6040-6090`），不重置历史；选择本身持久化到 `display.personality`（落库入口见文末源码索引）。
-  - CLI 则走 `self.agent = None` 强制重建，下一条消息生效。
-  - Channel 覆盖作用域为渠道；Profile 作用域为整个 profile。
-- **会话记录**：`run_agent.py` 建会话时把完整 system prompt 与模型/模型配置快照写入会话行；CLI 建会话不传提示词，只传模型配置（`max_iterations`/`reasoning_config`）。
+  - CLI 会话启动时只取一次提示文本（来自环境变量或统一解析函数），持久化后供下次启动读取；TUI 还能用会话级 personality 覆盖键改写这一层（`tui_gateway/server.py:5192-5193`）。
+  - TUI 改人格对既有会话就地生效：更新临时提示文本，需要时插入 `[System: ...]` 提示并写入 `personality_switch` 时间线条目，历史消息保持不动；选择本身另行落盘到 `display.personality`（`tui_gateway/server.py:6040-6090`，落库入口见文末源码索引）。
+  - CLI 的路径不同：把 agent 实例置空，强制下一条消息重建后生效。
+  - 渠道覆盖只作用于该渠道，profile 覆盖作用于整个 profile。
+- **会话记录**：`run_agent.py` 建会话时把完整 system prompt 连同模型与模型配置快照写进会话行；CLI 自己建会话时不传提示词，只传 `max_iterations` 与 `reasoning_config` 两项模型配置。
 
 **覆盖优先级（综合）**：
-- 模型：会话 `/model` 或模型切换 > 渠道 override > 全局 `model:` 配置。
-- 提示：三大块拼装后，ephemeral 段在缓存之后追加、永不覆盖；人格文本按“`display.personality` 命名 → 运行时渲染 → `ephemeral_system_prompt` overlay”逐级取得（解析入口在 `config.py:2957` 附近，生效名见 `personality.py:142`），且人格代码**不再写 `agent.system_prompt`**。
+- 模型：会话内的 `/model` 切换高于渠道 override，渠道 override 又高于全局 `model:` 配置。
+- 提示：三块拼装完成后，ephemeral 段追加在缓存之后，始终不覆盖前面的内容。人格文本按“`display.personality` 记录的选择名 → 运行时渲染 → ephemeral 覆盖层”三级取得，解析入口在 `hermes_cli/config.py:2957` 附近，实际生效的名称以 `hermes_cli/personality.py:142` 为准。人格代码同样不写 `agent.system_prompt`。
 
 ## 3. 提示词字段与最终拼装顺序
 
 `agent/system_prompt.py` 的 `build_system_prompt_parts`（152-558）返回三块，`build_system_prompt`（561-587）用双换行连接并缓存：
 
-- **stable**（跨会话稳定，字节固定以保前缀缓存）：按固定顺序拼装以下部分——
-  1. 身份：SOUL.md，缺失时回退 `DEFAULT_AGENT_IDENTITY`（189-201）
-  2. 通用指引：`HERMES_AGENT_HELP_GUIDANCE`、`TASK_COMPLETION_GUIDANCE`（如有工具且未禁用）、`PARALLEL_TOOL_CALL_GUIDANCE`
-  3. 工具专用指引（仅加载了对应工具时才注入：memory/session_search/skill_manage/steer note）
-  4. computer-use 指引与 nous 订阅
-  5. `TOOL_USE_ENFORCEMENT`（按模型名匹配 + 各模型操作指引）
-  6. 技能索引相关提示与 alibaba model-name 兜底
-  7. 环境提示（`build_environment_hints`）与环境探测（`environment_probe`）
-  8. active-profile 提示
-  9. 平台提示（`PLATFORM_HINTS` + config `platform_hints` override）
-- **context**（cwd 相关）：在编码时 workspace 快照（coding_context）之后接 `system_message`（如调用方提供），再经 `build_context_files_prompt` 汇总（`prompt_builder.py:2273`）。
-  - 项目上下文**优先级**：`.hermes.md`/`HERMES.md` → `AGENTS.md` → `CLAUDE.md` → `.cursorrules`，只取一种（优先级注释 :2281-2287）。
-  - **AGENTS.md 例外——目录链合并**：沿 git root 到 cwd 每个目录各取 `AGENTS.md`/`agents.md` 首个命中，带 provenance 标签合并成段、链上重复内容跳过（`_agents_md_directory_chain`，`prompt_builder.py:2139`；该机制源自 grok-cli）。
-  - SOUL.md 独立且总是包含（除非已作为身份载入，`skip_soul` 防止重复加载）。
-  - cwd 回退到 Hermes 安装树时跳过项目上下文发现（:2316-2327）。
-- **volatile**（最易变，放最后）：技能索引（正因为在缓存稳定前缀中不需要）→ MEMORY.md（agent 记忆）→ USER.md（用户画像）→ 外部 memory provider 的 `build_system_prompt()` → 日期行（到天，保证全天 byte-stable，`system_prompt.py:543-552`）。
+- **stable**（跨会话稳定，字节固定以保住前缀缓存）：按固定顺序拼装九部分，实现集中在 `build_system_prompt_parts`（`agent/system_prompt.py:152-558`）。
+  1. 身份：SOUL.md，缺失时回退到硬编码的默认身份文本。
+  2. 通用指引：帮助指引、任务完成指引（工具可用且未禁用时才加）与并行工具调用指引。
+  3. 工具专用指引，只在该工具已加载时注入，覆盖 memory、session_search、skill_manage 与 steer note 四类。
+  4. computer-use 指引与 nous 订阅。
+  5. 工具使用强制条款，按模型名匹配并附各模型的操作指引。
+  6. 技能索引相关提示，以及 alibaba 模型名的兜底分支。
+  7. 环境提示与环境探测。
+  8. active-profile 提示。
+  9. 平台提示，由内置平台表与 config 的 `platform_hints` 覆盖合成。
+- **context**（随 cwd 变化）：先放编码时生成的 workspace 快照，再接调用方传入的 system_message，最后由项目上下文汇总函数合成一段；项目上下文的发现、优先级判定与目录链合并都在 `agent/prompt_builder.py:2139-2327` 内。
+  - 项目上下文按优先级只取一种，顺序如下：
+    1. `.hermes.md` 或 `HERMES.md`
+    2. `AGENTS.md`
+    3. `CLAUDE.md`
+    4. `.cursorrules`
+  - `AGENTS.md` 的处理是例外，走目录链合并：从 git 根到 cwd 逐目录各取首个 `AGENTS.md` 或 `agents.md`，带 provenance 标签合并成段，链上重复内容跳过；这套机制来自 grok-cli。
+  - SOUL.md 独立成段且总是包含，已作为身份载入时由 `skip_soul` 拦住，避免重复加载。
+  - cwd 落在 Hermes 安装树内时跳过项目上下文发现。
+- **volatile**（最易变，放在最后）：技能索引（稳定前缀里用不到）→ agent 记忆 MEMORY.md → 用户画像 USER.md → 外部记忆 Provider 追加的 `build_system_prompt()` → 日期行；日期只精确到天，保证全天字节稳定（`agent/system_prompt.py:543-552`）。
 
 细节：
-- `ephemeral_system_prompt` **不进入这三块**（`system_prompt.py:475-478` 注释明确），只由请求组包与对话循环在 API 调用时以 `\n\n` 追加。
-- `skip_soul` 防止 SOUL 被加载两次（identity 槽位与 project-context 槽位）。
-- 每个由 `_cached_system_prompt_static` 重建 static 前缀的机制保留 `[stable, volatile]` 两段缓存布局（`reconstruct_static_prefix`，602-654）。
+- `ephemeral_system_prompt` 不进这三块，只由请求组包与对话循环在 API 调用时用空行拼在末尾（`agent/system_prompt.py:475-478` 的注释已写明）。
+- `skip_soul` 保证 SOUL 只加载一次，身份槽位与项目上下文槽位不会重复放入。
+- 重建 static 前缀时沿用 `[stable, volatile]` 两段缓存布局（`reconstruct_static_prefix`，`agent/system_prompt.py:602-654`）。
 
 ## 4. 模型、Provider 与生成参数
 
-- 人格/身份文件**不绑定**模型、Provider 或采样参数；绑定发生在全局 `model:` 配置、session `/model` 切换、ChannelOverride（`gateway/config.py:543-574`）、Profile（独立 config.yaml）和 `auxiliary.*` 任务级覆盖。
-- **采样参数进包**：`agent/transports/chat_transport.py:599-664` 的 `_build_kwargs_from_profile` 解析采样参数——temperature 取 profile 的 `fixed_temperature`（可能返回 `OMIT_TEMPERATURE` 表示省略）或调用方参数；`max_tokens` 按“ephemeral > 用户 > profile 默认”的优先级（`profile.get_max_tokens`）。
-- **Provider 差异**：Anthropic 对思维模型强制 temperature=1，对 Opus 4.7 等剔除非默认 temperature/top_p/top_k（`anthropic_adapter.py:3012-3022`）；Kimi/Moonshot 等由 `auxiliary_client.py:640-656` 决定是否省略 temperature。
-- 上下文窗口限额来自模型目录 `DEFAULT_CONTEXT_LENGTHS_LOWER`（context_compressor），`context_file_max_chars` 显式配置可覆盖。
-- **切换模型不改 system prompt 内容**，只换请求 model/provider；会话快照记录 `model/model_config`（session 行）。
+- 人格与身份文件不绑定模型、Provider 或采样参数，绑定发生在全局 `model:` 配置、会话 `/model` 切换、渠道覆盖、独立 config.yaml 的 Profile 与 `auxiliary.*` 任务级覆盖（渠道覆盖的实现见 `gateway/config.py:543-574`）。
+- **采样参数进包**：请求组包时从 profile 解析 temperature 与 max_tokens。temperature 先取 profile 的固定值，取到表示省略的标记时不下发，其次用调用方传入的参数；max_tokens 按“ephemeral > 用户 > profile 默认”的优先级取值（`agent/transports/chat_transport.py:599-664`）。
+- **Provider 差异**：Anthropic 对思维模型强制 temperature=1，对 Opus 4.7 一类模型剔除与默认值不同的 temperature、top_p、top_k；Kimi/Moonshot 是否省略 temperature 由辅助客户端判断（`agent/anthropic_adapter.py:3012-3022`；`agent/auxiliary_client.py:640-656`）。
+- 上下文窗口限额来自模型目录里的默认长度表，显式配置的 `context_file_max_chars` 可以覆盖它。
+- 切换模型只替换请求中的 model 与 provider，system prompt 内容保持原样；会话行照旧保存当时的 model 与 model_config 快照。
 
 ## 5. 工具、知识、记忆与子 Agent
 
-- 人格/提示词**不授权工具**：工具授权在平台级配置（`tools.<platform>.enabled/disabled`，管理命令 `hermes tools`，实现 `hermes_cli/tools_config.py`）。授权只影响提示词——比如加载了 `memory` 工具才注入对应指引（`system_prompt.py:228-245`），角色本身不绑工具。
-- **Skills**：技能索引只在存在 skills 工具时生成（`build_skills_system_prompt`），放入 volatile。技能位于 `~/.hermes/skills/`；技能命令以 user 消息注入（不破坏缓存）。
-- **记忆**：`MEMORY.md`（agent 记忆）与 `USER.md`（用户画像，位于 `~/.hermes/memories/USER.md`）都在 volatile 段（`system_prompt.py:515-524`）；USER.md 有独立开关 `memory.user_profile_enabled`。
-- **外部记忆 Provider**：可选插件，同一时刻至多启用一个，由 `memory.provider` 配置；插件目录 `plugins/memory/<name>`，经 `agent/memory_manager.py` 编排，其 `build_system_prompt()` 追加 volatile 段（`system_prompt.py:527-533`）。
-- **子 Agent**：`delegate_task` 生成子 agent，默认继承 `ephemeral_system_prompt`（`agent/background_review.py:753-754`），角色提示随委派上下文传入。
+- 人格与提示词本身不授予工具权限，授权由平台级配置 `tools.<platform>.enabled/disabled` 决定，管理命令是 `hermes tools`，实现在 `hermes_cli/tools_config.py`。授权结果反过来影响提示词：只有加载了 memory 工具，系统提示里才出现对应的使用指引（`agent/system_prompt.py:228-245`）。
+- **Skills**：技能索引只在 skills 工具存在时生成，放进易变段。技能文件存放在 `~/.hermes/skills/`，技能命令以用户消息注入，已经构建好的缓存前缀保持不变。
+- **记忆**：agent 长期记忆 `MEMORY.md` 与用户画像 `USER.md` 都放在易变段。后者文件位于 `~/.hermes/memories/USER.md`，启停由独立开关 `memory.user_profile_enabled` 控制（`agent/system_prompt.py:515-524`）。
+- **外部记忆 Provider**：这是可选插件，同一时刻最多启用一个，由 `memory.provider` 选定。插件放在 `plugins/memory/<name>`，经记忆管理器 `agent/memory_manager.py` 编排后往易变段追加内容，追加接口是插件自己的 `build_system_prompt()`（追加点见 `agent/system_prompt.py:527-533`）。
+- **子 Agent**：`delegate_task` 派生的子 agent 默认继承 `ephemeral_system_prompt`，角色提示随委派上下文一起传入（`agent/background_review.py:753-754`）。
 
 ## 6. 资产、变量、开场白与用户画像
 
-- **用户画像**：USER.md（persona 描述）进入 volatile 段，`format_for_system_prompt("user")`（`system_prompt.py:521-524`）。
-- **变量/占位符**：config.yaml 支持 `${VAR}`/`${env:VAR}` 递归展开（`hermes_cli/config.py:2546-2560` 的 `_expand_env_vars`，配置加载时展开）；未解析保留原样。这是通用配置机制，不属于角色字段。
-- **头像/开场白/快捷回复**：本次范围内未找到人格绑定头像/开场白/快捷回复的字段；快捷指令存在（quick_commands）但与 persona 无关。
-- **prefill**：`agent.prefill_messages_file` 独立于 persona，预先填充 few-shot，不持久化（cli.py:4493-4495）。
+- **用户画像**：USER.md 里的 persona 描述在构建提示时由 `format_for_system_prompt("user")` 渲染，进入易变段（`agent/system_prompt.py:521-524`）。
+- **变量/占位符**：config.yaml 支持 `${VAR}` 与 `${env:VAR}` 两种写法的递归展开，展开发生在配置加载阶段，解析不到的值原样保留。这是全配置通用的机制，不专属于角色字段（`hermes_cli/config.py:2546-2560` 的 `_expand_env_vars`）。
+- **头像/开场白/快捷回复**：人格没有绑定头像、开场白或快捷回复的字段（本次范围内未找到）；快捷指令 quick_commands 属于另一套机制，与 persona 无关。
+- **prefill**：`agent.prefill_messages_file` 与 persona 相互独立，用于预先填充 few-shot 消息，内容不持久化（`cli.py:4493-4495`）。
 
 ## 7. 导入、导出、迁移与兼容性
 
-- **从其他代理导入**：`hermes import-agent`（命令与来源清单由 `agent-importers` 插件提供，旧 `claw` 拼写继续可用）导入 Claude Code（`~/.claude`）与 Codex CLI（`~/.codex`）：
-  - CLAUDE.md / AGENTS.md / memories/*.md → `memories/MEMORY.md`（去重、20,000 字符上限）
-  - permissions.allowBash → config `command_allowlist`；denyBash → `approvals.deny`（`claude_rule_to_command_pattern`，332-351）
-  - mcpServers → `config.yaml mcp_servers`（env secret 名剥离）
-  - skills → `skills/claude-code-imports/`、`skills/codex-imports/`
-  - **不导入凭据**（`auth.json`/`.credentials.json` 忽略、secret 名 env 剥离报告）。
-  - 人类协议中提示语模板与**persona 系统不迁移**（本模块不写 `agent.personalities`/`system_prompt`）。
-- **备份/恢复**：`hermes backup` → `~/.hermes/backups/*.zip` → `hermes import` 恢复（`hermes_cli/backup.py`，含 SOUL.md/config/MEMORY/skills/会话）。
-- **Profile 迁移**：导出用 `hermes profile export <name> -o`（`profiles.py:1925`），本地/跨机恢复用 `profile install/update`（`profile_distribution.py`，manifest 为 `distribution.yaml`）。
-  - 发行方默认管理、可被更新覆盖：`SOUL.md`、`config.yaml`、`mcp.json`、`skills`、`cron`。
-  - 用户数据绝不覆盖：`memories`、`sessions`、`logs`、`auth.json`、`.env`、`state.db` 等（`USER_OWNED_EXCLUDE`，101-120）。
-- **OpenClaw 迁移**：`hermes claw migrate` 迁移整个 home（SOUL.md/MEMORY.md/USER.md/skills）。
-- **兼容性分层结论**：对 CLAUDE.md/AGENTS.md/memories——能解析、能保留内容、运行时生效于记忆/上下文是贯彻到底；permissions→command 白名单与 skills 是一对一映射；但 **persona/system_prompt 字段没有导入承载**，“导入后没有 personality 模板”是已确认事实。
+- **从其他代理导入**：`hermes import-agent` 读取 Claude Code 与 Codex CLI 的既有配置并转成 Hermes 结构，来源目录分别是 `~/.claude` 与 `~/.codex`。命令本体与来源清单由 `agent-importers` 插件提供，旧拼写 `claw` 仍可调用。各类资产的处理方式如下：
+
+  | 源资产 | 落点 | 处理规则 |
+  | --- | --- | --- |
+  | CLAUDE.md、AGENTS.md、memories/*.md | `memories/MEMORY.md` | 去重，总量上限 20,000 字符 |
+  | permissions 的 allowBash 与 denyBash | config 的 `command_allowlist` 与 `approvals.deny` | 把规则翻译成命令模式（`claude_rule_to_command_pattern`，332-351） |
+  | mcpServers | config.yaml 的 `mcp_servers` | 剥离 env secret 名 |
+  | skills | `skills/claude-code-imports/`、`skills/codex-imports/` | 按来源分目录存放 |
+
+  凭据不参与导入：`auth.json` 与 `.credentials.json` 直接忽略，被剥离的 secret 名会出现在报告里。人类协议里的提示语模板与 persona 系统不在迁移范围，导入器不写 `agent.personalities` 与 `system_prompt`。
+- **备份/恢复**：`hermes backup` 把 home 打包成 `~/.hermes/backups/*.zip`，再由 `hermes import` 恢复，范围覆盖 SOUL.md、config、MEMORY、skills 与会话（`hermes_cli/backup.py`）。
+- **Profile 迁移**：导出用 `hermes profile export <name> -o`；本地或跨机恢复用 `profile install` 与 `profile update`。发行包清单是 distribution.yaml，分发逻辑在 `hermes_cli/profile_distribution.py`，导出入口是 `hermes_cli/profiles.py:1925`。恢复时按两类清单处理：
+  - 发行方管理、可被更新覆盖：SOUL.md、config.yaml、mcp.json、skills、cron。
+  - 用户数据从不覆盖：memories、sessions、logs、auth.json、.env、state.db 等，清单由 `USER_OWNED_EXCLUDE` 维护（101-120）。
+- **OpenClaw 迁移**：`hermes claw migrate` 迁移整个 home 目录，包括 SOUL.md、MEMORY.md、USER.md 与 skills。
+- **兼容性分层结论**：CLAUDE.md、AGENTS.md 与 memories 能被解析、内容被保留，运行时作用于记忆与上下文；权限规则到命令白名单、skills 到技能目录都是一对一映射。persona 与 system_prompt 字段没有对应的导入承载，导入完成后不会产生 personality 模板，这一点已确认。
 
 ## 8. 配置 UI 与运行时可见性
 
-- **CLI**：`/personality` 列出/设置；`/status` 显示 Model + Provider 与 `active_personality_name`（`config.py:4397-4402`），不显示人格文本。
-- **TUI/桌面**：配置读写接口操作 `personality` 键（**经 `active_personality_name` 回报生效值**，`tui_gateway/methods_config.py:211-218`）；会话信息接口返回当前人格；`/personality` 打开 picker；健康检查 `_probe_config_health` 在所选人格与内置或用户条目不匹配时警告人格 overlay 将被跳过；各入口行号见文末源码索引。
-- **Web/桌面**：web 提供 SOUL.md 的 REST 接口（`web/src/lib/api.ts:723-727`，`/profiles/<name>/soul`）；desktop 用 `personalityNamesFromConfig` 计算可用人格（`apps/desktop/src/lib/chat-runtime.ts:241`）；桌面类型定义中有可选的 `personality` 字段。
-- **历史快照语义**：会话把**构建好的 system prompt** 存进 `system_prompts` 去重表（`hermes_state.py`），session 行保存当时 `model/model_config`。**人格当前值（ephemeral）不进轨迹**。所以“历史回放时的角色”只能反映当时的 system cached 部分，不含会话后新设置的人格字符串。
+- **CLI**：`/personality` 负责列出与设置人格；`/status` 显示当前 Model、Provider 与生效的人格名称，不显示人格文本（`hermes_cli/config.py:4397-4402`）。
+- **TUI/桌面**：配置读写接口直接操作 personality 键，回报时经 `active_personality_name` 换算出生效值（`tui_gateway/methods_config.py:211-218`）。会话信息接口返回当前人格，`/personality` 打开选择器；健康检查会比较所选人格与内置、用户条目，对不上时警告该人格覆盖层将被跳过。其余入口行号见文末源码索引。
+- **Web/桌面**：Web 端为 SOUL.md 提供了一组 REST 接口，路径是 `/profiles/<name>/soul`；桌面端用 `personalityNamesFromConfig` 汇总可用人格名单，类型定义里 personality 是可选字段（`web/src/lib/api.ts:723-727`；`apps/desktop/src/lib/chat-runtime.ts:241`）。
+- **历史快照语义**：建会话时把构建好的 system prompt 文本存进 `system_prompts` 去重表，会话行另存当时的模型与模型配置。人格当前值只存在于 ephemeral 段，不进轨迹。因此回放历史时看到的角色只覆盖当时缓存的提示文本，会话之后新设的人格字符串不在其中（`hermes_state.py`）。
 
 ### 8.1 重试、缓存键与 stale 判定
 
-- **session 记录 schema**：`hermes_state_common.py:207-263` 的 `CREATE TABLE sessions` 角色相关列——
-  - 提示文本：`system_prompt`（全文）与 `system_prompt_hash`（外键 → `system_prompts(hash,prompt)`，:202-205）
-  - 模型快照：`model`、`model_config`（TEXT 快照）
-  - 会话上下文：`parent_session_id`、`cwd/git_branch/git_repo_root/profile_name` 及 token/成本/标题等计费列
-- 即完整 system prompt 文本入库存档，人格"当前值"（ephemeral）不入库。
-- **缓存键**：内存键是 `agent._cached_system_prompt` 字符串本身；DB 去重键 = 全文 sha256（`hermes_state.py:90-91` `_system_prompt_hash`，:1976-1984 `_store_system_prompt` INSERT OR IGNORE），孤儿行由 `_delete_unreferenced_system_prompts` 回收。
-- **CLI retry_last**（cli.py:8714 起）：截断内存 history 后重发同一 user 消息，**agent 实例不变**，直接复用缓存提示（agent_init.py），不重建。
-- **Gateway 重试**：`_handle_retry_command`（gateway/slash_commands.py）重写 transcript 后走正常消息处理；每轮新建 agent 时 `_restore_or_build_system_prompt`（conversation_loop.py:555 起）从 DB 读出当时存储的提示，`_stored_prompt_matches_runtime`（:693 起）通过则原样复用（含恢复缓存断点布局），不重新构建。
-- **修改人格文本不判 stale**：stale 比对只检查提示尾部 `Model:`/`Provider:` 行，改人格文本不会让存储提示判为过期；CLI 侧 `/personality` 强制重建（cli_commands_mixin.py:1385 附近），TUI 侧只改 `ephemeral_system_prompt`（tui_gateway/server.py:6040）不碰缓存；重建后刷新库中提示全文与 hash。
-- **提示词组与编辑器密度**：四层之外无"组"级抽象——`agent.personalities` 是扁平 dict，各消费点均按名整体单选（CLI、gateway、TUI 入口见文末源码索引），无多选组合、单选组互斥、组级总开关或逐条开关；`agent/system_prompt.py:152-587` 只按固定顺序拼 stable/context/volatile 三块。人格无专用编辑器（CLI/TUI 是列表选择器，桌面端只是设置页下拉 `display.personality`），无拖拽/批量；导入导出仅 profile 级（见第 7 节）。
+- **session 记录 schema**：sessions 表里与角色相关的列分三类，建表语句在 `hermes_state_common.py:207-263`：
+
+  | 用途 | 列 | 说明 |
+  | --- | --- | --- |
+  | 提示文本 | `system_prompt`、`system_prompt_hash` | 前者存全文，后者是外键，指向 `system_prompts(hash, prompt)`（`hermes_state_common.py:202-205`） |
+  | 模型快照 | `model`、`model_config` | 均为 TEXT 快照 |
+  | 会话上下文 | `parent_session_id`、`cwd`、`git_branch`、`git_repo_root`、`profile_name` | 另有 token、成本、标题等计费列 |
+
+  完整 system prompt 文本随会话入库存档，人格的运行时当前值只留在内存，不写库。
+- **缓存键**：内存里的键就是 agent 上缓存的那段提示字符串本身；数据库按全文 sha256 去重，写入用 INSERT OR IGNORE，失去引用的孤儿行会被回收（`hermes_state.py`：哈希函数在 90-91 行，写入与回收在 1976-1984 行）。
+- **CLI retry_last**：截断内存 history 后重发同一条用户消息，agent 实例保持不变，直接复用缓存提示，不重建（`cli.py:8714` 起，缓存取值见 `agent/agent_init.py`）。
+- **Gateway 重试**：重试处理器（`gateway/slash_commands.py`）重写 transcript 后交回正常消息处理。每轮新建 agent 时，恢复函数先从库里读出当时存下的提示，校验函数比对通过就原样复用，连缓存断点布局一并恢复，跳过重建（`agent/conversation_loop.py:555` 起，校验在 693 行起）。
+- **人格文本改动与 stale 判定**：过期判定只比对提示末尾的 `Model:` 与 `Provider:` 两行，改动人格文本不会让库里的提示被判过期。CLI 侧的 `/personality` 会强制重建，TUI 侧只替换 ephemeral 提示、缓存不动；重建完成后刷新库中的提示全文与哈希（`hermes_cli/cli_commands_mixin.py:1385` 附近；`tui_gateway/server.py:6040`）。
+- **提示词组与编辑器密度**：四层之外没有"组"一级的抽象。`agent.personalities` 是扁平字典，CLI、Gateway、TUI 各消费点都按名称整体单选，不支持多选组合、互斥单选组、组级总开关或逐条开关；拼装侧只按固定顺序生成 stable、context、volatile 三块（`agent/system_prompt.py:152-587`）。人格也没有专用编辑器，CLI 与 TUI 只提供列表选择器，桌面端是设置页下拉 `display.personality`，没有拖拽与批量操作；导入导出只到 profile 一级（见第 7 节）。
 
 ## 9. 设计取舍与已确认边界
 
-1. **提示缓存第一**：system prompt 一次构建、字节稳定，只有压缩时重建（AGENTS.md 的 “prompt caching is sacred” 约束）。这使“角色编写”能不破坏缓存，但代价是**角色修改只在下一次重建/新建会话生效**；CLI 用 `self.agent = None` 显式触发，TUI 用 `ephemeral_system_prompt` 就地替换实现会话内即时生效。
-2. **人格即文本叠加，不是对象**：没有角色版本、头像、开场白等承载字段；横向比较时应把 Hermes 归为“配置聚合/全局语义”，不是“角色卡实体”。
-3. **Profile 隔离是有意的**：profile 之间不继承（`--clone` 是唯一的“从默认开始”手段），与“profiles are independent islands”设计一致（AGENTS.md）。
-4. **ephemeral 不入轨迹** 是一处取舍：人格不会污染历史，但也意味着轨迹/审计记录无法精确重放当时人格文本。
-5. **配置 UI 字段不一定在请求链路生效**：`custom_prompt`（TUI `config.set prompt`）有 UI 与存储（`server.py:11135-11145`、`methods_config.py:194`），但本次检索仅发现读写，**没有读取它的请求路径**，属于“界面存在、链路未消费”。
-6. **SOUL 与项目规则分离**：身份（HERMES_HOME）与项目 AGENTS/CLAUDE/.cursorrules（cwd）独立、优先级明确，不会互相覆盖。
-7. **多段固定指引文本均为稳定文本**：稳定 system prompt 是对缓存友好的设计选择；压缩重建时只会重新渲染一次，不影响前缀缓存。
-8. **当前角色边界**：当前提交没有新增独立持久化角色实体，也没有把插件、profile 或模型目录改造成角色对象。Provider 的推理强度映射与新增模型目录会影响角色引用解析后的实际请求参数，但角色仍只是提示词和运行时覆盖的组合；这部分影响落在请求参数层，是否存在新的角色配置层需要另行核对。
+1. **提示缓存第一**：system prompt 一次构建、字节稳定，只在上下文压缩时重建，这是 AGENTS.md 中 “prompt caching is sacred” 约束的体现。角色编写因此不会打断缓存，代价是角色修改要等到下一次重建或新建会话才生效：CLI 把 agent 实例显式置空来触发，TUI 则就地替换 ephemeral 提示，实现会话内即时生效。
+2. **人格以文本叠加实现**：角色没有版本、头像、开场白等承载字段；横向比较时把 Hermes 归入“配置聚合/全局语义”，与“角色卡实体”区分开。
+3. **Profile 隔离是有意的**：profile 之间不继承，`--clone` 是唯一的“从默认开始”手段，与 AGENTS.md 里“profiles are independent islands”的设计一致。
+4. **ephemeral 不进轨迹**：这一取舍让人格不污染历史，代价是轨迹与审计记录无法精确重放当时的人格文本。
+5. **配置 UI 字段不一定在请求链路生效**：`custom_prompt` 在 TUI 的设置入口既能写也有存储，但本次检索只找到读写它的代码，没有找到读取它的请求路径，属于“界面存在、链路未消费”（`tui_gateway/server.py:11135-11145`，`tui_gateway/methods_config.py:194`）。
+6. **SOUL 与项目规则分离**：身份文件放在 HERMES_HOME 下，项目规则来自 cwd 下的 AGENTS.md、CLAUDE.md 与 .cursorrules，两组来源独立、优先级明确，互不覆盖。
+7. **多段固定指引文本均为稳定文本**：把固定指引放进稳定 system prompt 是对缓存友好的设计选择，压缩重建时只会重新渲染一次，前缀缓存不受影响。
+8. **当前角色边界**：这个快照里角色仍由提示词与运行时覆盖组合而成，没有独立持久化的角色实体，插件、profile 与模型目录各自充当配置来源。Provider 的推理强度映射与模型目录改动会影响角色解析之后的实际请求参数，其影响落在请求参数层；是否存在新的角色配置层需要另行核对。
 
 ## 10. 未验证事项
 

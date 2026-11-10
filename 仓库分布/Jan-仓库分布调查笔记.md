@@ -16,21 +16,23 @@
 
 ## 结论摘要
 
-Jan 是 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可运行时安装的扩展、共享能力包与文档站合仓的 workspace。`web-app/src` 约 17.3 万行；`src-tauri`（含插件、utils 与 jan-cli）约 24.4 万行，Rust 侧的体量增长主要来自并入 `src-tauri/src/core/` 的 Agent 核心与 CLI/TUI（`tui.rs` 单文件约 5.4 万行）。仓库还含两类目录：`packages/`（extension-api、extension-runtime、adk）把扩展契约与 SDK 抽成可发布包，`protocol/` 与 `adk/` 把对外 RPC 协议与 Python 实现纳入仓库。
+Jan 把 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可在运行时安装的扩展、共享能力包与文档站放进同一个 workspace。前端 `web-app/src` 约 17.3 万行；原生层 `src-tauri/`（含插件、utils 与 jan-cli）约 24.4 万行，这里的体量增长主要来自并入 src-tauri/src/core 的 Agent 核心与 CLI/TUI，其中 `tui.rs` 单文件就约 5.4 万行。仓库还含两类目录：packages/ 下的 extension-api、extension-runtime 与 adk 把扩展契约和 SDK 抽成可发布包，protocol/ 与 adk/ 把对外 RPC 协议和 Python 实现一并纳入仓库。
 
 ## 统计口径与仓库形态
 
-- **快照边界**：只统计当前 commit 的 Git 跟踪文件；不统计 `.git`、未跟踪文件、本地依赖、构建缓存与运行时数据。
+- **快照边界**：统计范围是当前 commit 里被 Git 跟踪的文件，`.git` 目录、未跟踪文件、本地依赖、构建缓存与运行时数据均不计入。
 - **量级单位**：同时记录文件数与物理行数；行数含空行和注释，只用于仓库内部与同口径项目间的近似量级比较。
 - **语言识别**：按源文件扩展名归类（ts/tsx/mts/cts → TypeScript，rs → Rust，swift → Swift）；JSON、YAML、锁文件、图片与二进制不计入编程语言行数。
 - **文档识别**：`.md/.mdx/.rst/.adoc/.asciidoc/.txt`，按一级目录与用途解释分布。
-- **测试识别**：目录名含 `__tests__`/`tests`/`specs`/`e2e`/`playwright`/`cypress` 或文件名含 `.test.`/`.spec.` 的源码文件；Rust 内嵌测试模块（`tests.rs` 等）不匹配该规则、不计入测试行数——下文测试规模对 Rust 侧偏保守。
+- **测试识别**：源码文件的目录名或文件名命中测试标记才计入测试，Rust 以 `tests.rs` 内嵌模块写的测试不在其中，下文测试规模对 Rust 侧偏保守。
+  - 目录名含 `__tests__`、`tests`、`specs`、`e2e`、`playwright`、`cypress` 之一
+  - 文件名含 `.test.` 或 `.spec.`
 - **仓库形态**：Yarn workspaces monorepo。
-  - workspace 声明：根 `package.json` 纳入 `core`、`web-app`、`extensions/*`、`packages/*` 与 `extensions-samples/*`
-  - 构建工具：web-app 用 Vite，`core/` 用 rolldown 打包（`core/rolldown.config.mjs`），扩展包各自带 rolldown 配置
-  - 统一测试：vitest；仅 `src-tauri/jan-cli` 是独立 Rust crate，带自己的 `Cargo.lock`
-  - 桌面壳：Tauri 2（`src-tauri/tauri.conf.json`）
-  - 工具链：仓库根多出 `rust-toolchain.toml`，Rust 版本随仓库固定
+  - workspace 声明：根 `package.json` 把 core、web-app、extensions/*、packages/* 与 extensions-samples/* 纳入 workspace
+  - 构建工具：web-app 用 Vite 构建，core 用 rolldown 打包（配置在 core/rolldown.config.mjs），扩展包各自带 rolldown 配置
+  - 测试框架：统一用 vitest；src-tauri/jan-cli 是唯一独立 Rust crate，自带 Cargo.lock
+  - 桌面外壳：Tauri 2，应用配置在 src-tauri/tauri.conf.json
+  - 工具链：仓库根的 rust-toolchain.toml 把 Rust 版本固定在仓库内
 
 ## 1. 模块分布与量级
 
@@ -58,21 +60,29 @@ Jan 是 Web 前端、Tauri/Rust 原生层、独立 CLI crate、可运行时安�
 
 按职责分：
 
-- `web-app/`：React + Vite 前端主仓（components、routes、hooks、lib、locales），内置扩展宿主 `lib/extensions/` 与服务总线 `services/`；
-- `core/`：浏览器侧共享 TS 运行时（约 4.4 千行），提供扩展工具箱、设置、模型类型与 `createServiceRegistry`，单独打包并发布 npm；
-- `packages/`：三个新包。`extension-api` 是扩展可用的稳定 API（清单校验、贡献点、能力、语义化版本兼容、API 报告），`extension-runtime` 是 worker 侧的扩展运行协议（握手、句柄、端点），`adk` 是由 RPC schema 生成类型的 JavaScript 客户端与运行时安装器；
-- `protocol/`：对外协议产物——事件 schema 与 RPC schema 两份 JSON，与服务端实现一起做契约一致性校验；
-- `extensions/*`（71 文件 / 15,047 行）：6 个扩展包，覆盖本地推理、MLX、助手、RAG、向量库与下载。助手能力由 `assistant-extension` 承担。包清单：
+- `web-app/`：React + Vite 前端主仓，components、routes、hooks、lib 与 locales 都在这一层；扩展宿主放在 lib/extensions/，前端能力通过 services/ 服务总线接入；
+- `core/`：浏览器侧共享的 TypeScript 运行时，约 4.4 千行，提供扩展工具箱、设置、模型类型，以及创建服务注册表用的 `createServiceRegistry`，单独打包发布到 npm；
+- `packages/`：三个可发布包。extension-api 是扩展可用的稳定 API，负责清单校验、贡献点、能力、语义化版本兼容与 API 报告；extension-runtime 承载 worker 侧的扩展运行协议，包括握手、句柄与端点；adk 是由 RPC schema 生成类型的 JavaScript 客户端与运行时安装器；
+- `protocol/`：对外协议产物，事件 schema 与 RPC schema 各一份 JSON，和服务端实现一起做契约一致性校验；
+- `extensions/*`（71 文件 / 15,047 行）：6 个扩展包，分别覆盖本地推理、MLX、助手、RAG、向量库与下载，助手能力由 assistant-extension 承担。包清单：
   - `llamacpp-extension`（本地推理）
   - `mlx-extension`
   - `assistant-extension`
   - `rag-extension`
   - `vector-db-extension`
   - `download-extension`
-- `src-tauri/`（约 24 万行）：`src`（核心命令、并入的 Agent 核心与 CLI/TUI、服务端代理）+ `plugins`（8 个 Tauri 插件：agent-tools、extensions、hardware、llamacpp、mlx、rag、vector-db、websearch，各含 guest-js）+ `utils` + `jan-cli`（独立 crate，`src/main.rs` 加 9 个集成测试文件，测 ACP、agent RPC、host tools、遥测与 TUI 信号）+ `build-utils`；
-- `adk/python/`：对外 Agent SDK 的 Python 实现，与 `packages/adk` 的 JavaScript 实现并列；
+- `src-tauri/`（约 24 万行）：src 放核心命令、并入的 Agent 核心与 CLI/TUI、服务端代理；此外还有 utils、build-utils 两个目录，以及独立 crate jan-cli（入口 src/main.rs 加 9 个集成测试文件，覆盖 ACP、agent RPC、host tools、遥测与 TUI 信号）。plugins 目录下是 8 个各自带 guest-js 的 Tauri 插件：
+  - agent-tools
+  - extensions
+  - hardware
+  - llamacpp
+  - mlx
+  - rag
+  - vector-db
+  - websearch
+- `adk/python/`：对外 Agent SDK 的 Python 实现，与 packages/adk 的 JavaScript 实现并列；
 - `mlx-server/`（11 文件）：Swift 实现的 macOS MLX 推理服务；
-- 其他：`docs/`（Nextra 文档站）、`autoqa/`（25 文件，Python 自动 QA 框架）、`e2e/`（27 文件，WebdriverIO 端到端测试）、`examples/` 与 `extensions-samples/`（扩展示例）、`flatpak/`（Linux 打包清单）。
+- 其他：docs/ 是 Nextra 文档站，autoqa/ 是 25 文件的 Python 自动 QA 框架，e2e/ 是 27 文件的 WebdriverIO 端到端测试，examples/ 与 extensions-samples/ 存放扩展示例，flatpak/ 是 Linux 打包清单。
 
 ## 2. 语言分布与运行时分工
 
@@ -89,13 +99,15 @@ TypeScript 213,044 行（46.3%，ts 124,914 + tsx 88,130）、Rust 244,451 行�
 
 文档共 217 文件 / 27,124 行，主要位置：
 
-- `docs/src`：179 文件，Nextra 文档站主体（构建入口为 `docs/package.json` 的 `next build`）
-- `src-tauri/plugins`：7 文件，各插件 README
-- `extensions/`：3 文件（贡献指南与包说明）
-- 根目录 README/SECURITY/CONTRIBUTING：5 文件
-- `.github/ISSUE_TEMPLATE`：4 文件
-- `packages/`：2 文件（adk、extension-api 的 README）
-- `adk/`、`extensions-samples/`：各 1 文件
+| 位置 | 文件数 | 内容 |
+| --- | ---: | --- |
+| `docs/src` | 179 | Nextra 文档站主体，构建入口是 docs/package.json 里的 `next build` |
+| `src-tauri/plugins` | 7 | 各插件 README |
+| `extensions/` | 3 | 贡献指南与包说明 |
+| 根目录 README、SECURITY、CONTRIBUTING | 5 | — |
+| `.github/ISSUE_TEMPLATE` | 4 | — |
+| `packages/` | 2 | adk 与 extension-api 的 README |
+| `adk/`、`extensions-samples/` | 各 1 | — |
 
 `docs/` 共 759 个跟踪文件，其中 578 个为站点资产（`docs/src` 里的图片与样式、`docs/public` 等），不计入文档行数。
 
@@ -103,34 +115,55 @@ TypeScript 213,044 行（46.3%，ts 124,914 + tsx 88,130）、Rust 244,451 行�
 
 测试 490 文件 / 102,904 源码行，主要分布：
 
-- `web-app/src`：389 文件（vitest，随组件与 lib 共置 `__tests__` 目录）
-- `core/src`：31
-- `extensions/*`：26（每个扩展包带自己的 vitest 配置与测试）
-- `src-tauri/`：23（`jan-cli` 的 9 个集成测试加插件测试文件，如 `jan-cli/tests/agent_rpc.rs`、`rpc_parity.rs`、`stream_json_host_tools.rs`）
-- `packages/`：9（extension-api 的清单/版本/可释放对象测试、extension-runtime 的 RPC 与打包测试、adk 的安装与类型测试）
-- `e2e/`：9（WebdriverIO）
+| 位置 | 文件数 | 测试组织 |
+| --- | ---: | --- |
+| `web-app/src` | 389 | vitest 用例随组件与 lib 共置在各自的 `__tests__` 目录 |
+| `core/src` | 31 | — |
+| `extensions/*` | 26 | 每个扩展包带自己的 vitest 配置与测试 |
+| `src-tauri/` | 23 | jan-cli 的 9 个集成测试加插件测试文件 |
+| `packages/` | 9 | extension-api 的清单、版本与可释放对象测试，extension-runtime 的 RPC 与打包测试，adk 的安装与类型测试 |
+| `e2e/` | 9 | WebdriverIO |
 
-Rust 侧另有以 `tests.rs` 内嵌模块为主的单元测试（如 `src-tauri/src/core/threads/tests.rs`、`src-tauri/src/core/server/tests.rs`），未计入上述测试文件数。端到端测试位于 `e2e/`（WebdriverIO，入口 `e2e/wdio.conf.ts`，另有 `e2e/specs/smoke.e2e.ts`），使用独立的 TypeScript 工程，不计入 vitest 口径。
+`src-tauri/` 一侧的集成测试位于 jan-cli 的 tests 目录，示例入口：
+
+- `jan-cli/tests/agent_rpc.rs`
+- `jan-cli/tests/rpc_parity.rs`
+- `jan-cli/tests/stream_json_host_tools.rs`
+
+Rust 侧另有以 tests.rs 内嵌模块为主的单元测试，threads 与 server 两部分各有一处，分别位于 `src-tauri/src/core/threads/tests.rs` 和 `src-tauri/src/core/server/tests.rs`，这部分未计入上述测试文件数。端到端测试放在 e2e/，由 WebdriverIO 驱动，入口 `e2e/wdio.conf.ts`，冒烟用例在 `e2e/specs/smoke.e2e.ts`；它自成一套 TypeScript 工程，不计入 vitest 口径。
 
 ## 5. 跨平台与发布组织
 
 桌面发布覆盖 Windows、macOS、Linux；构建脚本还提供 Tauri iOS/Android 入口。前端共用 `web-app`，桌面/移动差异进入 Tauri feature、原生插件和资源复制步骤；README 当前主要列出桌面发行物，因此移动端仅能确认源码与构建入口存在，未确认发行成熟度。
 
-- 发布流水线在 `.github/workflows/`（42 个文件）：`jan-tauri-build.yaml`（tag `v*.*.*` 触发）、`jan-tauri-build-nightly.yaml` 与 `jan-tauri-build-agent-nightly.yaml`（定时 + 手动）、`template-tauri-build-*.yml` 为 win/mac/linux/flatpak/external 各平台模板，`template-cli-build-*.yml` 构建独立 CLI 二进制，另有 SDK 与扩展示例相关流水线；
+发布流水线集中在 `.github/workflows/`，共 42 个文件，SDK 与扩展示例另有相关流水线。主要入口：
+
+| 流水线 | 说明 |
+| --- | --- |
+| `jan-tauri-build.yaml` | 打 tag `v*.*.*` 时触发发布构建 |
+| `jan-tauri-build-nightly.yaml` | 夜间构建，定时触发并支持手动运行 |
+| `jan-tauri-build-agent-nightly.yaml` | Agent 夜间构建，定时触发并支持手动运行 |
+| `template-tauri-build-*.yml` | win/mac/linux/flatpak/external 各平台构建模板 |
+| `template-cli-build-*.yml` | 构建独立 CLI 二进制 |
+
 - `mlx-server` 仅 macOS（`build:mlx-server` 脚本），模型源对非 macOS 过滤 mlx（`useModelSources.ts`，见 LLM 渠道管理笔记 §6.5）；
 - iOS/Android 走 `--features mobile`（根 `package.json` 的构建脚本），移动端持久化用 SQLite（见 Chat 笔记 §2.3）。
 
 ## 6. 工程配套与结构特征
 
-- **CI**：`.github/workflows/` 42 个文件：
-  - `jan-linter-and-test.yml`：push/PR 触发 `yarn test:coverage`
-  - `rust-check.yml`、`e2e-check.yml`：Rust 检查与端到端测试流水线
-  - `engine-build.yml`：引擎构建（llamacpp/MLX 预编译与缓存）
-  - `jan-tauri-build.yaml`：tag 触发发布构建
-  - `jan-docs.yml`：文档站构建部署
-  - `publish-npm-core.yml`：core 包发布 npm；另见 `packages/*` 各自的发布配置
-  - `autoqa-*`：手动触发的自动 QA
-  - 各平台构建模板
+CI 由 `.github/workflows/` 下的 42 个文件承担，各流水线职责如下：
+
+| 流水线 | 职责 |
+| --- | --- |
+| `jan-linter-and-test.yml` | push/PR 触发 `yarn test:coverage` |
+| `rust-check.yml`、`e2e-check.yml` | Rust 检查与端到端测试 |
+| `engine-build.yml` | 引擎构建，含 llamacpp/MLX 预编译与缓存 |
+| `jan-tauri-build.yaml` | tag 触发发布构建 |
+| `jan-docs.yml` | 文档站构建部署 |
+| `publish-npm-core.yml` | core 包发布 npm，`packages/*` 另有各自的发布配置 |
+| `autoqa-*` | 手动触发的自动 QA |
+| 各平台构建模板 | — |
+
 - **脚本**：
   - `scripts/download-bin.mjs`：发布时下载 llama-server 等二进制
   - `src-tauri/build-utils/`：引擎预编译与 staging（`engine-prebuilt.sh`、`stage-engine.sh`、`fetch-engine-source.sh`、`mlx-prebuilt.sh`、`sign-engine.sh`）

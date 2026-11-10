@@ -16,10 +16,10 @@
 
 VCPChat 的单聊请求由渲染侧统一组装器编成消息后，经 `send-to-vcp` 直连 VCP 服务器（`fetch(vcpServerUrl)`）；群聊由主进程 `groupchat.js` 编排多 Agent 串行发言。
 
-- **单聊中止按钮已接上本地兜底**：`interrupt-vcp-request` 给远端 `/v1/interrupt` 请求加了 5 秒超时；上游拒绝或超时后，`finally` 分支用 `vcpStreamTasks.cancel(..., 'interrupt-local-fallback')` 关掉本次流的本地读取，因此按钮不再只依赖远端停流。上游正常受理时仍由上游发送终态（第 7 节）。`modules/ipc/chatHandlers.js:1561-1614`
+- **单聊中止按钮具备本地兜底**：`interrupt-vcp-request` 向远端 `/v1/interrupt` 发起请求时带 5 秒超时；上游拒绝、超时或抛错后，`finally` 分支调用 `vcpStreamTasks.cancel(..., 'interrupt-local-fallback')` 关闭本次流的本地读取，停止操作因此不再依赖远端配合。上游正常受理时仍由上游发送终态（第 7 节）。`modules/ipc/chatHandlers.js:1561-1614`
 - **主发送 fetch 仍无客户端超时**：`send-to-vcp` 只绑 sender 生命周期 signal，窗口存活且远端挂死时该请求会一直等待。`modules/ipc/chatHandlers.js:1369,1544-1560`
 - 群聊超时改为分阶段弹性：等待响应头 120 秒、块间空闲 62 秒；工具审批挂起期间看门狗只续期不熔断。`Groupmodules/groupchat.js:1247-1362`、`Groupmodules/streamWatchdog.js:1-40`
-- 流事件有七个名称和四种终态。契约只将 `completed` 标记为 durable，但实际写入判断允许失败与取消的部分结果落库，只有 discarded 跳过；该标记不能当作持久化白名单。终态先完成投影、释放发送状态，再提交历史；保存失败留下 `unsaved` 状态。依据：[事件声明](../../VCPChat/modules/chat/chatEventContract.js#L10-L18)、[实际持久化条件](../../VCPChat/modules/chat/streamCoordinator.js#L164-L189)、[终态消费](../../VCPChat/modules/renderer/mainChatStreamConsumer.js#L79-L125)。
+- 流事件有七个名称和四种终态。契约只把 `completed` 标为 durable，实际写入判断却允许失败与取消的部分结果落库，仅 discarded 跳过；`durable` 只描述契约声明，持久化结果由写入判断单独决定。终态先完成投影、释放发送状态，再提交历史；保存失败时消息留下 `unsaved` 状态。依据：[事件声明](../../VCPChat/modules/chat/chatEventContract.js#L10-L18)、[实际持久化条件](../../VCPChat/modules/chat/streamCoordinator.js#L164-L189)、[终态消费](../../VCPChat/modules/renderer/mainChatStreamConsumer.js#L79-L125)。
 - 话题自动总结的超时保护仍不对称：单聊 `topicSummarizer.js` 无超时，群聊 `topicTitleManager.js` 有明确 20 秒超时（第 3 节）。
 - 群聊在同一 `handleGroupChatMessage` 调用内部严格串行（杜绝 chunk 交错），但多次调用之间无锁，写盘并发风险的数据语义见会话与消息管理笔记 6.1（第 8 节）。
 
@@ -40,15 +40,16 @@ mainChatSendOwner 发送/中止按钮
 
 ## 1. 提交入口、任务对象与状态机
 
-- 单聊发送入口由 `chatManager` 调用 `singleChatRequestOrchestrator`，后者只做三件事：`buildRequest`（转调统一组装器）、`sendPrepared`（调用 `sendToVCP`）、`send`。消息编译主体在 `modules/chat/chatContextPipeline.js`。`modules/chat/singleChatRequestOrchestrator.js:7-40`、`modules/chat/chatContextPipeline.js:319-417`
-- 发送/中止按钮的状态与分支集中在新模块 `mainChatSendOwner`：按钮模式在 `send` 与 `interrupt` 间切换，中止时群聊走 `chatAPI.interruptGroupRequest`，单聊走 `interruptHandler.interrupt`。`modules/renderer/mainChatSendOwner.js:74-121`
-- 任务标识：单聊以 `messageId` 为任务引用（中断请求体 `{requestId: messageId}`）；群聊以 `messageIdForAgentResponse` 为 key 登记 `activeRequestControllers`。`modules/ipc/chatHandlers.js:1588-1590`、`Groupmodules/groupchat.js:42-92`
-- 流事件名与终态是显式契约：`chat.stream.started/chunk/final` 非终态，`chat.stream.completed/failed/cancelled/discarded` 为终态，其中只有 `completed` 的 `durable` 为真；`normalizeChatTerminal` 把 `end/done/stop` 归一为 completed、`abort/cancel` 归一为 cancelled、`discard/stale` 归一为 discarded、`error/disconnect` 归一为 failed。`modules/chat/chatEventContract.js:10-34`
+- 单聊发送入口由 `chatManager` 转交 `singleChatRequestOrchestrator`，后者只承担三个动作：组装请求（转调统一组装器）、发送已组装请求、完整发送；消息编译主体在统一组装器里。定位：`modules/chat/singleChatRequestOrchestrator.js:7-40`、`modules/chat/chatContextPipeline.js:319-417`
+- 发送与中止按钮的状态和分支集中在 `mainChatSendOwner`：按钮在发送与中止两种模式间切换，中止时群聊调用 `chatAPI.interruptGroupRequest`，单聊调用 `interruptHandler.interrupt`。`modules/renderer/mainChatSendOwner.js:74-121`
+- 任务标识按会话类型区分：单聊用 `messageId` 引用任务，中断请求体只带该 ID；群聊以 `messageIdForAgentResponse` 为键，把控制器登记进 `activeRequestControllers` 映射（`modules/ipc/chatHandlers.js:1588-1590`、`Groupmodules/groupchat.js:42-92`）。
+- 流事件名与终态由显式契约定义：过程事件为 started、chunk、final，终态为 completed、failed、cancelled、discarded，名称统一带 `chat.stream.` 前缀；四种终态中仅 completed 的 durable 为真。
+- 终态归并集中在 `normalizeChatTerminal`：end、done、stop 记为 completed，abort、cancel 记为 cancelled，discard、stale 记为 discarded，error、disconnect 记为 failed（`modules/chat/chatEventContract.js:10-34`）。
 
 ## 2. 历史选择与上下文拼装顺序
 
-- 群聊：循环体内每个 agent 的上下文构建先按窗口配置截取最近 N 条（默认关闭，窗口 100、范围 1–10000），再基于**同一个内存变量 `groupHistory`** 的当前状态构建，而不是每次重新读盘。因此后发言的 agent 能看到前一个 agent 刚说的话（数据写入语义见会话与消息管理笔记 6.1）。`Groupmodules/groupContextWindow.js:11-39`、`Groupmodules/groupchat.js:972-975`
-- 群聊系统提示词现在还会展开两类占位符：`{{VCPChatGroupSessionWatcher}}` 由主进程填入群会话监视信息，`{{VCPChatWorkSpace…}}` 按工作区索引展开为目录树，`{{VCPChatCanvas}}` 在当前用户消息里替换为最新画布内容。`Groupmodules/groupchat.js:44-60,953-1008`
+- 群聊：循环体内每个 agent 构建上下文时，先按窗口配置截取最近 N 条（默认关闭，窗口 100、范围为 1–10000），再基于同一个内存变量 `groupHistory` 的当前状态拼接，循环期间不重新读盘。后发言的 agent 因此能看到前一个 agent 刚说的话（数据写入语义见会话与消息管理笔记 6.1）。`Groupmodules/groupContextWindow.js:11-39`、`Groupmodules/groupchat.js:972-975`
+- 群聊系统提示词还会展开以下占位符：`{{VCPChatGroupSessionWatcher}}` 由主进程填入群会话监视信息，`{{VCPChatWorkSpace…}}` 按工作区索引展开为目录树，`{{VCPChatCanvas}}` 在当前用户消息里替换为最新画布内容。`Groupmodules/groupchat.js:44-60,953-1008`
 - 单聊上下文顺序已集中到统一组装器：先解析会话快照与 Tavern 规则，从最近压缩检查点起截取历史并过滤 `isThinking`；逐消息构建附件 content parts 与文本变换，仅对当前用户消息应用 user suffix；随后展开 `{{AgentName}}` 与 `{{VCPChatWorkSpace…}}`，合成 system prompt 并应用 system suffix，最后插入 context inject。客户端组装器未执行 token 预算裁剪。`modules/chat/chatContextPipeline.js:319-417`
 
 ## 3. 预算、截断、摘要与压缩
@@ -59,15 +60,15 @@ mainChatSendOwner 发送/中止按钮
 
 `chatManager.js` 的 `attemptTopicSummarizationIfNeeded()`（`modules/chatManager.js:1491-1540`），触发时机是单聊流终态收尾且该消息属于当前可见视图时，然后在消息落盘后的 `afterPersist` 副作用里被调用。
 
-- 触发条件：当前选中项类型是 agent、历史至少两轮对话（`currentChatHistory.length >= 4`）、且存在 `currentTopicId`；重新从磁盘拉取最新 agent 配置后，仅当 topic 名是默认名（`name === "主要对话"` 或以 `"新话题"` 开头）才调用 `messageRenderer.summarizeTopicFromMessages` 请求 AI 总结，成功后 `electronAPI.saveAgentTopicTitle` 落盘。`modules/chatManager.js:1491-1538`
-- `modules/topicSummarizer.js` 的 `summarizeTopicFromMessages` 直接对 VCP 服务器发起 fetch（`:44`），没有 `AbortController`，也没有 `setTimeout` 兜底。服务器不响应时这个 `await fetch` 会一直挂着，没有机制探测或中止。
+- 触发条件有三项：当前选中项类型是 agent、历史数组至少 4 条记录（即两轮对话）、且存在 `currentTopicId`（`modules/chatManager.js:1491-1538`）。满足后从磁盘重新拉取最新 agent 配置，仅当话题名是默认名（等于“主要对话”或以“新话题”开头）时才调用 `messageRenderer.summarizeTopicFromMessages` 请求 AI 总结，成功后由 `electronAPI.saveAgentTopicTitle` 落盘。
+- 摘要请求本身在 `modules/topicSummarizer.js` 中实现：`summarizeTopicFromMessages` 直接对 VCP 服务器发起 fetch（`:44`），未设置 AbortController 或 setTimeout 兜底。服务器不响应时该 await fetch 会一直挂起，没有机制探测或中止。
 
 ### 3.2 群聊路径：20 秒超时
 
-`Groupmodules/topicTitleManager.js` 的 `generateTitleFromAI`（`:81-130`），**有明确的 20 秒超时**：创建 `AbortController` 并 `setTimeout(() => controller.abort(), 20000)`（`:92`），`finally` 里清理定时器。触发条件在 `triggerSummarizationIfNeeded`（`:184-210`）：
+群聊标题生成实现在 `generateTitleFromAI`，带明确的 20 秒超时：函数创建 AbortController，并用 setTimeout 在 20000 毫秒后触发 abort，finally 中清理定时器。触发判断在 `triggerSummarizationIfNeeded`，两处入口均位于 `Groupmodules/topicTitleManager.js:81-130,92,184-210`：
 
-- `groupHistory.length >= MIN_MESSAGES_FOR_SUMMARY(=4)`，且当前话题名是默认名集合（`DEFAULT_TOPIC_NAMES = ["主要群聊"]`）中的一个，或以 `"新话题"` 开头（`:8-9`, `:193`）；
-- 清洗逻辑 `cleanSummarizedTitle` 去掉标点、数字编号、常见前后缀，截断到 15 字符；清洗后为空则回退 `"AI总结话题"` 常量，且最终标题等于该回退值或与原标题相同时**不会**写回，避免把占位字符串当真标题存进配置（`:200-215`）。
+- 历史消息数达到 `MIN_MESSAGES_FOR_SUMMARY`（值为 4），且当前话题名属于默认名集合 `DEFAULT_TOPIC_NAMES = ["主要群聊"]`，或该名称以“新话题”开头（`:8-9`、`:193`）；
+- 清洗逻辑 `cleanSummarizedTitle` 去掉标点、数字编号与常见前后缀，并把标题截断到 15 字符；清洗结果为空时回退到 `"AI总结话题"` 常量。最终标题若等于该回退值或与原标题相同，则跳过写回，避免把占位字符串当真标题存进配置（`:200-215`）。
 
 ### 3.3 上下文压缩检查点
 
@@ -85,36 +86,36 @@ FlowLock 在压缩时暂停心跳并保留锁，只有持久化成功才按 Sess
 
 ## 4. SDK、Provider、模型与协议交接
 
-- 单聊请求在 `send-to-vcp` handler 内读取服务器地址与 API key，并直接 fetch，没有 Provider SDK 或 Adapter 层。发送前清理未设置参数、剥离思维链、按配置净化上下文并附加 `vcpchatExtensions`（逐条消息时间戳绑定 + sha256 摘要 + `requestContext`）；fetch 使用窗口生命周期任务的 signal。`modules/ipc/chatHandlers.js:74-153,1056-1360`
-- 群聊：主进程按 agent 逐个发起 fetch，超时由分阶段定时器治理（见第 5 节）；群聊 assistant 消息记录 `model/modelSource`（`'group_unified'` 或 `'agent'`），说明请求携带的模型标识同时落盘为消息字段。`Groupmodules/groupchat.js:1452,1461`
+- 单聊请求在 `send-to-vcp` handler 内读取服务器地址与 API key 后直接 fetch，未经过 Provider SDK 或 Adapter 层。发送前先清理未设置参数、剥离思维链、按配置净化上下文，再附加 `vcpchatExtensions` 扩展（含逐条消息时间戳绑定、sha256 摘要与 `requestContext`）；fetch 使用窗口生命周期任务的 signal。`modules/ipc/chatHandlers.js:74-153,1056-1360`
+- 群聊：主进程按 agent 逐个发起 fetch，超时由分阶段定时器治理（见第 5 节）。群聊 assistant 消息把实际模型标识保存到 `model`；来源字段 `modelSource` 则按是否使用群统一模型取 group_unified 或 agent。`Groupmodules/groupchat.js:1452,1461`
 - 渲染进程的聊天能力入口为 `preloads/api/chat.js`，preload 侧按窗口角色暴露 `chatAPI`/`utilityAPI`/`desktopAPI`。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- 单聊流式消费拿到 reader 后一直读取到终态、连接关闭、窗口生命周期取消或网络错误。主发送 fetch 没有客户端超时；窗口保持存活且远端挂死时仍可能无限等待（中断按钮的 5 秒超时只作用于中断请求本身）。`modules/ipc/chatHandlers.js:1056-1360`
-- 流事件链：主进程把 chunk 作为流事件发回渲染进程，渲染侧由 `mainChatStreamConsumer` 归一化 chunk 并按终态类型分派；缓冲队列、30 FPS 合帧与 DOM 投影属于消息渲染器笔记（[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 6 节）。`modules/chat/contentRuntime.js`、`modules/renderer/mainChatStreamConsumer.js:35-78`
-- 群聊流式改为分阶段弹性超时：等待响应头 120 秒（`GROUP_TTFT_TIMEOUT_MS`），收到响应后切换为块间空闲 62 秒（`GROUP_CHUNK_IDLE_TIMEOUT_MS`），超时以 `controller.abort('ttft_timeout'|'chunk_idle_timeout')` 熔断并在收尾文本里附看门狗说明。`Groupmodules/groupchat.js:1247-1362,1451`
+- 单聊流式消费拿到 reader 后持续读取，直到收到终态、连接关闭、窗口生命周期取消或网络错误。主发送 fetch 没有客户端超时，窗口保持存活且远端挂死时仍可能无限等待；中断按钮的 5 秒超时只作用于中断请求本身。`modules/ipc/chatHandlers.js:1056-1360`
+- 流事件链：主进程把 chunk 作为流事件发回渲染进程，渲染侧由 `mainChatStreamConsumer` 归一化 chunk 并按终态类型分派。缓冲队列、30 FPS 合帧与 DOM 投影属于消息渲染器笔记（[`../消息渲染器/VCPChat-消息渲染器调查笔记.md`](../消息渲染器/VCPChat-消息渲染器调查笔记.md) 第 6 节）；相关入口为 `modules/chat/contentRuntime.js` 与 `modules/renderer/mainChatStreamConsumer.js:35-78`。
+- 群聊流式改为分阶段弹性超时：等待响应头 120 秒（`GROUP_TTFT_TIMEOUT_MS`），收到响应后切换为块间空闲 62 秒（`GROUP_CHUNK_IDLE_TIMEOUT_MS`）；超时以 `controller.abort('ttft_timeout'|'chunk_idle_timeout')` 熔断，并在收尾文本里附看门狗说明。`Groupmodules/groupchat.js:1247-1362,1451`
 - 工具审批挂起会暂停块间看门狗：`streamWatchdog` 记录待审批 requestId 与 maid，审批未回应期间该助手的空闲计时只续期；超过 15 分钟的记录会被清理，避免把“正在等用户点允许”误判为僵死。`Groupmodules/streamWatchdog.js:1-40`、`Groupmodules/groupchat.js:1451`
 
 ## 6. 完成、异常、半截流与最终回写
 
 终态统一走 `mainChatStreamConsumer`，它把事件分成投影、渲染与持久化三段：
 
-- `consume(event)` 判定终态（`completed`/`failed`/`cancelled`/`discarded`），先把终态分派给 Rendering（`dispatchTerminal`/`renderError`），再让投影 `settle`。流式错误文本以 `[!WARNING]` 追加“已保存已接收的部分内容”。`modules/renderer/mainChatStreamConsumer.js:45-78,87-89`
+- 终态判定由事件消费函数 `consume(event)` 完成：事件落入 completed、failed、cancelled、discarded 四种结果之一后，先交给渲染层分派终态或错误，再让投影 `settle`。流式错误文本以 `[!WARNING]` 追加“已保存已接收的部分内容”。`modules/renderer/mainChatStreamConsumer.js:45-78,87-89`
 - 单聊分块累积时还会检查工具返回边界 `<<<[END_ROLE_DIVIDE_USER]>>>`，命中后异步触发上下文压缩边界检查，不阻塞流。`modules/renderer/mainChatStreamConsumer.js:51-62`
-- `persist(value)` 先取 `outcome.persistence.value` 作为已落盘结果，再走 `projectTerminal` 做乐观 DOM 投影并撤销流所有权；随后 `persistTerminal` 提交历史，状态机依次为 `saving`→`saved`/`unsaved`，失败时保留可诊断的未保存状态并继续抛出。`modules/renderer/mainChatStreamConsumer.js:79-126`
-- 历史提交落在 `services.historyPersistence.commit(projected)`；该 provider 负责读取当前历史、合并被投影的终态消息并写回仓库，临时上下文（`assistant_chat`）与群聊消息直接跳过。`modules/renderer/mainChatSurfaceAdapter.js:17-20`、`modules/chat/chatHistoryPersistence.js:12-42`
+- 落盘由 `persist(value)` 执行：先取 `outcome.persistence.value` 作为已落盘结果，再交给 `projectTerminal` 做乐观 DOM 投影并撤销流所有权；随后 `persistTerminal` 提交历史，状态机依次经过 saving、saved 或 unsaved，失败时保留可诊断的未保存状态并继续抛出。`modules/renderer/mainChatStreamConsumer.js:79-126`
+- 历史提交由 `services.historyPersistence.commit(projected)` 完成：该 provider 读取当前历史、合并被投影的终态消息后写回仓库，临时上下文 `assistant_chat` 与群聊消息直接跳过。`modules/renderer/mainChatSurfaceAdapter.js:17-20`、`modules/chat/chatHistoryPersistence.js:12-42`
 - 落盘成功后才执行 `afterPersist` 副作用（话题摘要等），副作用失败只记日志，不影响已提交的历史。`modules/renderer/mainChatStreamConsumer.js:120-124`、`modules/renderer/mainChatSurfaceAdapter.js:49-56`
-- 群聊侧 `AbortError` 分支把已累积的响应连同 `interrupted:true` 写进 `groupHistory` 并发终态事件，即中断会停止本地流读取并落盘已生成部分。`Groupmodules/groupchat.js:1451-1481`
+- 群聊侧的 AbortError 分支把已累积的响应连同 `interrupted:true` 写进 `groupHistory` 并发出终态事件，中断因此会停止本地流读取并落盘已生成部分。`Groupmodules/groupchat.js:1451-1481`
 
 ## 7. 停止、重试、续写与重新生成
 
 ### 7.1 中断请求的实际执行路径
 
-按钮分支集中在 `mainChatSendOwner`：有可中断消息时走 `interrupt` 分支，群聊调用 `interruptGroupRequest`，单聊调用 `interruptHandler.interrupt`；按钮同时切换为方形中止图标并设置 `aria-busy`。`modules/renderer/mainChatSendOwner.js:74-121`
+中止按钮的分支逻辑集中在 `mainChatSendOwner`：存在可中断消息时按钮切到 interrupt 分支，群聊调用 `interruptGroupRequest`，单聊调用 `interruptHandler.interrupt`，并切换为方形中止图标、设置 `aria-busy`。`modules/renderer/mainChatSendOwner.js:74-121`
 
-- **群聊**：`interruptGroupRequest`（`Groupmodules/groupchat.js:2478-2495`）从 `activeRequestControllers` 取到 controller 后调用 `controller.abort()` 中断本地 fetch/reader，再补发远端 `/v1/interrupt`；整组队列另有 `interruptGroupChatQueue` 按 `groupQueueCancellationVersions` 取消后续发言者。`Groupmodules/groupchat.js:42-92,2478-2495,2564`
-- **单聊**：`interrupt-vcp-request` 只向远端发 `/v1/interrupt`，但这条请求本身带 5 秒超时；`finally` 里若上游未受理（拒绝、超时或抛错），立即用 `vcpStreamTasks.cancel(event.sender, messageId, 'interrupt-local-fallback')` 取消本地流任务。上游受理时保留“上游发终态、本地正常收尾”的路径。`modules/ipc/chatHandlers.js:1561-1614`、`modules/interruptHandler.js:18-42`
+- **群聊**：`interruptGroupRequest` 从 `activeRequestControllers` 取 controller，调用 `controller.abort()` 中断本地 fetch 与 reader，再补发远端 `/v1/interrupt`；整组队列另按取消版本号取消后续发言者。`Groupmodules/groupchat.js:42-92,2478-2495,2564`
+- **单聊**：`interrupt-vcp-request` 向远端发起 `/v1/interrupt` 请求，该请求本身带 5 秒超时；上游未受理（拒绝、超时或抛错）时，收尾分支立即取消本地流任务。上游受理时保留“上游发终态、本地正常收尾”的路径。`modules/ipc/chatHandlers.js:1561-1614`、`modules/interruptHandler.js:18-42`
 
   因此单聊按钮现在两条路都能停止界面流：上游配合时由上游关闭响应流，上游不配合时本地兜底取消。主发送 fetch 本身仍无客户端超时，这与中断路径是两件事。
 
@@ -132,9 +133,9 @@ FlowLock 在压缩时暂停心跳并保留锁，只有持久化成功才按 Sess
 
 发言模式通过策略对象注册在 `CHAT_MODES`（`Groupmodules/groupchat.js:35-40`）：
 
-- **sequential**（`Groupmodules/modes/sequentialMode.js`）：返回全部 active members，按 `modeSettings.sequential.speakerOrder` 排定；旧字段 `sequentialSpeakerOrder` 作为迁移来源，不在成员列表里的旧成员被过滤，新成员按成员顺序稳定追加。`Groupmodules/groupchat.js:467-483`
-- **naturerandom**（`Groupmodules/modes/natureRandomMode.js`）：按优先级依次判定直接提及、tag 匹配（strict/natural 两种模式）、`@所有人`、基础概率与保底，最后按 tag 是否命中用户最新发言排序。`:68-265`
-- **invite_only**（`Groupmodules/modes/inviteOnlyMode.js`）：返回空数组，只能通过“邀请发言”入口触发 `handleInviteAgentToSpeak`（`Groupmodules/groupchat.js:1565`）。
+- **sequential**（`Groupmodules/modes/sequentialMode.js`）：返回全部 active members，并按 `modeSettings.sequential.speakerOrder` 排定顺序。旧字段 `sequentialSpeakerOrder` 作为迁移来源：不在成员列表里的旧成员被过滤，新成员按成员顺序稳定追加。`Groupmodules/groupchat.js:467-483`
+- **naturerandom**（`Groupmodules/modes/natureRandomMode.js`）：按优先级依次判定直接提及、tag 匹配（strict 与 natural 两种模式）、@所有人、基础概率与保底，最后按 tag 是否命中用户最新发言排序。`:68-265`
+- **invite_only**（`Groupmodules/modes/inviteOnlyMode.js`）：返回空数组，发言只能经“邀请发言”入口触发 `handleInviteAgentToSpeak`（`Groupmodules/groupchat.js:1565`）。
 - **game**：只返回空发言者，游戏回合由游戏模块自行驱动。`Groupmodules/groupchat.js:39`
 
 ### 8.2 并发粒度

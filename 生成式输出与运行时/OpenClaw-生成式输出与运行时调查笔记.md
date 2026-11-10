@@ -16,7 +16,13 @@
 
 OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复是普通文本/结构化内容 part（含 thinking、工具调用/结果、媒体引用等），最终以 assistant 消息进入 transcript，除消息自身的 ID 外没有活对象生命周期；媒体文件通过 artifact 服务获得可寻址引用但归属媒体创作类目。这个基座之上的“输出对象”机制集中在两处：**Canvas 文档**（把一段自包含 HTML/媒体预览落到 `state/canvas/documents/<id>/`，带 manifest 与 `cv_*` doc id，作为消息内 widget 预览或托管内容面）和**Session Board Widget**（以 widget name 为稳定身份、revision/instanceId/viewGeneration 为版本线，持久化在 per-agent SQLite 的 `board_tabs`/`board_widgets`，可以承载 HTML、plugin registered content、MCP App view 三种内容，并带 grantState 能力授权）。
 
-`show_widget` 工具是唯一向模型公开的“生成可操作输出”入口（`src/canvas/widget-tool.ts`）。它把模型给出的 HTML/SVG 包进统一 document shell（CSP + host bridge + theme/snapshot/size 桥），随后走两条目标路径：未 pin 时物化成 assistant-message 内嵌 Canvas 文档（沙箱 iframe、无网络、只读演示 + 用户激活驱动的 prompt 回流）；`pin: true` 时调用 `board.widget.put` 写入 session board，成为 dashboard 上可长期存在、可被再次同名字段更新、可声明网络 origin 与工具能力的 widget。pinned widget 运行于带 view ticket 的隔离 iframe/专用沙箱 host，脚本默认 `connect-src 'none'`，声明并获准的网络 origin 才进入 `connect-src`；host bridge 暴露 `prompt.send/state.emit/data.read/action.run/cron.trigger`，其中 data/action/cron 与 prompt 免确认都要求 grantState 为 `granted` 且工具名在 declared 集合内。
+模型调用 `show_widget` 工具即可自助生成可操作输出，这是唯一对模型开放的入口（`src/canvas/widget-tool.ts`）。它把模型给出的 HTML/SVG 装进统一的 document shell（CSP、host bridge、theme/snapshot/size 桥），再按是否 pin 分两路落位：未 pin 时物化为 assistant 消息内嵌的 Canvas 文档，在沙箱 iframe 里以无网络、只读方式演示，用户激活后经 prompt 回流；`pin: true` 时经 board.widget.put 写入 session board，成为 dashboard 上长期存在、可被同名更新、可声明网络 origin 与工具能力的 widget。pinned widget 运行在带 view ticket 的隔离 iframe 或专用沙箱 host 中，脚本默认禁止网络，只有声明并获准的 origin 才进入 connect-src；宿主桥对模型开放的调用为：
+
+```text
+prompt.send / state.emit / data.read / action.run / cron.trigger
+```
+
+其中 data、action、cron 与免确认的 prompt 都要求授权状态为 granted，且工具名落在已声明集合内（`src/canvas/widget-tool.ts`）。
 
 按指南能力谱系，本快照的核心聊天输出与普通富文本属于 G0/G1；widget/canvas 子系统整体处于 **G2–G3**：它以“声明式内容 kind + 能力声明 + 授权状态 + host 注册表路由”（G2 要素）承载 HTML/JS 沙箱执行（G3 要素），但更新粒度是整段覆盖（revision+1、授权随字节变化重审），没有 G4 需要的 diff/接受-拒绝编辑器或文件级管理，也没有脱离会话的 G5 环境化活对象；board widget 生命周期与会话绑定。媒体、图表等富静态结果经 artifact/媒体路径另归 G1，见 [OpenClaw 媒体创作调查笔记](../媒体创作/OpenClaw-媒体创作调查笔记.md)。
 
@@ -68,7 +74,11 @@ OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复�
 
 聊天历史对 Canvas widget 的可恢复展示做了一次专门的显示投影：`augmentChatHistoryWithCanvasBlocks` 会扫描 assistant 消息与 tool call/result 的 details，把工具结果里可识别的 canvas 载荷转成一个 `{type:"canvas", preview:{viewId/url/boardWidgetName/...}, rawText}` 内容块，追加/合并到最近的可渲染 assistant 消息上，保证只读客户端重载历史后仍能恢复内嵌 widget（`src/gateway/chat-display-projection.canvas.ts`、`:264-340`；入口见 `src/gateway/server-methods/chat-history-pages.ts`）。也就是说，消息正文内的 widget 在数据层上是“对象引用 + 预览块”，本体在 Canvas 文档或 Board Store 中。
 
-可识别载荷的来源有三种，统一由 `src/chat/canvas-render.ts` 定义：工具结果 details 中的 `{kind:"canvas", presentation:{target,sandbox,...}, view:{url,id,boardWidgetName}, mcpApp?}` JSON（`coerceCanvasPreview`，见 `src/chat/canvas-render.ts`）；assistant 文本中的 `[embed ...]`/`[embed]...[/embed]` 短码（会跳过代码围栏并按 `ref/url` 生成默认 `/__openclaw__/canvas/documents/<ref>/index.html` 地址，见 `src/chat/canvas-render.ts`）。MCP UI resource 工具结果也按 `target:"assistant_message"` 产生同类 canvas 预览（`src/agents/mcp-ui-resource.ts`）。
+可识别的 canvas 载荷有三种来源，识别与归一化都由 `src/chat/canvas-render.ts` 处理：
+
+- 工具结果的 details 中带有 canvas JSON（`{kind:"canvas", presentation:{target,sandbox,...}, view:{url,id,boardWidgetName}, mcpApp?}`），由 coerceCanvasPreview 归一成预览对象。
+- assistant 文本中的 embed 短码：形如 `[embed]...[/embed]` 或带参数的写法，解析时跳过代码围栏，未给地址时按 ref 或 url 拼出默认地址 `/__openclaw__/canvas/documents/<ref>/index.html`。
+- MCP UI resource 工具结果：按 assistant_message 目标产生同类 canvas 预览（`src/agents/mcp-ui-resource.ts`）。
 
 ### 未发现独立身份的证据面
 
@@ -78,8 +88,8 @@ OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复�
 
 输出对象创建的两个触发入口：
 
-1. **`show_widget` 核心工具**（唯一对模型开放的自助生成入口）。参数含 `title`、`widget_code`、可选 `kind`（html 或插件注册 kinds）、`pin`、`name/tab/size/presentation`、`capabilities{netOrigins,tools}`，schema 见 `src/canvas/widget-tool.ts`。其存在受客户端能力控制：只有在来源客户端声明 `inline-widgets`，或恰好一个 current-channel presenter 同步匹配可信运行上下文时才被注入工具集（`src/canvas/widget-tool.ts`，见 `docs/tools/show-widget.md`）。这说明协议本身是 typed tool-call，不是自由文本探测，也没有半截流/转义问题——工具按完整调用执行。
-2. **插件注册内容 kind 与 MCP App view**。`show_widget` 的 `kind` 若指向插件 `registerBoardWidgetContentKind` 注册的 kind（如 diagram），会先 `validateSource` 再 `composeDocument` 把插件资源拼进文档（`src/plugins/board-widget-content-kind.types.ts`、`src/plugins/board-widget-content-kinds.ts`）；MCP 场景下，`mcp-ui-resource` 把 MCP server 的 `ui://` 资源转成 canvas 预览或可 pin 的 `mcp-app` view（`src/gateway/server-methods/board.ts`，view 由 transcript 工具调用重建，见 `src/gateway/mcp-app-reconstruction.ts`）。这类内容源由插件/服务器声明，同样不是模型自由文本。
+1. **`show_widget` 核心工具**：模型调用它即可自助生成输出，工具集里面向模型的生成入口只有这一个，schema 见 `src/canvas/widget-tool.ts`。调用方给出标题、`widget_code`（HTML 源码）、内容 kind（html 或插件注册的 kind）、是否 pin、name/tab/size/presentation 布局参数，以及可选的网络 origin 与工具能力声明。该工具按客户端能力注入：来源客户端声明了 inline-widgets，或恰有一个 current-channel presenter 与可信运行上下文同步匹配，它才会进入工具集（`docs/tools/show-widget.md`）。协议层是带类型的工具调用，工具拿到完整调用后一次执行，半截流与转义问题都不成立。
+2. **插件注册内容 kind 与 MCP App view**：`show_widget` 的 kind 指向插件注册的内容类型时（如 diagram），会先经 validateSource 校验，再由 composeDocument 把插件资源拼进文档（`src/plugins/board-widget-content-kinds.ts`）。MCP 场景由 mcp-ui-resource 把服务器的 `ui://` 资源转成 canvas 预览或可 pin 的 mcp-app view，view 在打开时从 transcript 的工具调用重建（`src/gateway/mcp-app-reconstruction.ts`）。这类内容由插件或服务器声明。
 
 产生规则上，HTML widget 的 `widget_code` 上限 262,144 字符（`WIDGET_CODE_MAX_CHARS`），pinned 文档在 wrapping 后还有 256 KiB UTF-8 的收紧上限；错误（超限、kind 不可用、validateSource 失败、capabilities 未带 pin、缺 inline 客户端且无 presenter 路由）一律以结构化工具错误或 partial 结果返回，不依赖消息文本里找标记。
 
@@ -87,7 +97,14 @@ OpenClaw 的默认聊天输出停留在 G0 层次：模型产出的可见回复�
 
 ### Canvas 文档
 
-Canvas 文档是“一块托管内容”的最小对象，落盘在 state dir 下 `canvas/documents/<id>/`（`src/canvas/documents.ts`）。对象字段包括 `cv_<hex>` 形态的 id、kind、title、preferredHeight、`surface`、`retentionScope`、`cspSandbox`、entryUrl、entry 文件清单与 manifest.json；kind 取值为：
+Canvas 文档是“一块托管内容”的最小对象，落盘在 state dir 下的 `canvas/documents/<id>/` 目录（`src/canvas/documents.ts`）。对象字段如下：
+
+```text
+id（cv_<hex>）/ kind / title / preferredHeight / surface
+retentionScope / cspSandbox / entryUrl / entry 文件清单 / manifest.json
+```
+
+kind 取值为：
 
 ```text
 html_bundle / url_embed / document / image / video_asset
@@ -114,11 +131,19 @@ widget name 是稳定地址，分“显式 name”和“生成 identity”两类
 
 ### HTML widget 的包装与落盘
 
-pinned 路径中真正的“生成”有两步：`buildWidgetDocument` 把模型 HTML 装进带完整 CSP、五段 bridge 注入、设计 token 基础样式和 title 的 document shell（`src/canvas/wrap.ts`）；然后 Gateway 的 `board.widget.put` handler 再做一次幂等包装并写入 store（`src/gateway/server-methods/board.ts`）。写入内容不是模型原文：CSP `default-src 'none'; connect-src <declared-or-'none'>`、`script-src 'unsafe-inline'...`、`img-src data:`，inline widget 无外部脚本来源、无网络。HTML 字节会被求 sha256；带声明能力的 widget 首次写为 `grantState:"pending"`，随后由会话 exec 策略（Guarded 人工/auto 模型评审/full 直接授权/Read only 拒绝）裁决，批准后 `granted_sha` 冻结为该字节 hash（`src/gateway/server-methods/board.ts`、`src/boards/board-store.ts`）。
+pinned 路径的“生成”分两步：`buildWidgetDocument` 先把模型 HTML 装进 document shell，附上完整 CSP、五段 bridge 注入、设计 token 基础样式和标题（`src/canvas/wrap.ts`）；随后 Gateway 的 board.widget.put handler 再做一次幂等包装并写入 store（`src/gateway/server-methods/board.ts`）。写入 store 的是改写后的文档，CSP 策略如下：
+
+```text
+default-src 'none'; connect-src <declared-or-'none'>
+script-src 'unsafe-inline' ...
+img-src data:
+```
+
+因此 inline widget 没有外部脚本来源，也不具备网络能力。HTML 字节会被求 sha256；带声明能力的 widget 首次写入时授权状态为 pending，由会话 exec 策略裁决（Guarded 人工确认、auto 模型评审、full 直接授权、Read only 拒绝），批准后把该字节 hash 冻结进 granted_sha（`src/boards/board-store.ts`）。
 
 ### 更新语义与最终化
 
-同名 widget 再次 put 是整段覆盖：`revision+1`、新 `instanceId`、新 `viewGeneration`；只有内容 kind 一致才允许覆盖，html/registered 的字节 hash 若与冻结授权 hash 相同且声明是已授权子集，才维持 `granted`，否则回到 `pending` 重新走授权（`src/boards/board-store.ts`）。失败路径由工具层收口：presentation 失败而 pin 已成功时返回 `status:"partial"` 并保留 board widget，不会回滚已落盘的 board 状态（`src/canvas/widget-tool.ts`）。
+同名 widget 再次 put 会整段覆盖：revision 自增一，instanceId 与 viewGeneration 一并换新；内容 kind 必须与既有 widget 一致，html 与 registered 两类只有在字节 hash 与冻结授权相同、且新声明是已授权子集时才保持 granted，否则退回 pending 重新授权（`src/boards/board-store.ts`）。失败由工具层收口：pin 已成功而 presentation 失败时返回 partial 状态并保留 board widget，已落盘的 board 状态不回滚（`src/canvas/widget-tool.ts`）。
 
 registered（插件 kind）widget 落盘只存 `source`；真正组装发生在授权后的 view 解析，按插件 `composeDocument` 注入插件资源 URL（`src/gateway/board-widget-view.ts`）。MCP App widget 落盘存 descriptor（server/tool/uiResourceUri/toolCallId），每次开 app view 时从 transcript 重新 mint，非 interactive/授权丢失时退化为只读（`src/gateway/server-methods/board.ts`）。
 
@@ -126,10 +151,10 @@ registered（插件 kind）widget 落盘只存 `source`；真正组装发生在�
 
 同一输出对象存在多个投影面，内容事实在 Store/DB，投影各自持有访问凭证：
 
-- **assistant 消息内嵌（inline）**：canvas 文档 URL 由 widget-card 在沙箱 iframe 中加载，属于客户端 DOM 面，见 [OpenClaw 消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。
-- **session dashboard / workspace board**：pinned widget 显示在 Chat 工作区 dashboard/board 面板，Control UI 通过 `board.get` 拉 snapshot 并对每个可渲染 widget 生成 `frameUrl` 与 `sandboxUrl`（`src/gateway/server-methods/board.ts`）；网格布局/侧 dock/tab 由 `board.update` 管理。dashboard 是 widget 的“长期住所”，也是本类目对象能力最完整的投影面。
-- **当前渠道（current channel presenter）**：渠道插件可为同一 core 工具注册上下文 presenter，`show_widget` 结果可被投到当前 IM 会话（文档示例 Discord Activities“Open widget”按钮，见 `docs/tools/show-widget.md`），工具仍只有一次调用。
-- **node panel / 独立设备面板**：`presentation.target:"node_panel"` 时把同一个 wrapped document 交给已配对 widget-panel 能力节点，文档明示该面板第一阶段 render-only（`docs/tools/show-widget.md`）。
+- **assistant 消息内嵌（inline）**：canvas 文档地址由 widget-card 在沙箱 iframe 中加载，渲染面在客户端 DOM，见 [OpenClaw 消息渲染器调查笔记](../消息渲染器/OpenClaw-消息渲染器调查笔记.md)。
+- **session dashboard / workspace board**：pinned widget 显示在 Chat 工作区的 dashboard/board 面板。Control UI 通过 board.get 拉取 snapshot，为每个可渲染 widget 生成 frameUrl 与 sandboxUrl，网格布局、侧 dock 与 tab 由 board.update 管理（`src/gateway/server-methods/board.ts`）。dashboard 是 widget 的长期住所，也是本类目对象能力最完整的投影面。
+- **当前渠道（current channel presenter）**：渠道插件可为同一个 core 工具注册上下文 presenter，`show_widget` 的结果就能投到当前 IM 会话，工具调用仍然只有一次；文档以 Discord Activities 的“Open widget”按钮为例（`docs/tools/show-widget.md`）。
+- **node panel / 独立设备面板**：presentation 的目标设为 node_panel 时，同一个已包装文档交给已配对且具备 widget-panel 能力的节点；文档说明该面板第一阶段只做渲染（`docs/tools/show-widget.md`）。
 
 同步契约：inline 与 board 是多份“投影”，其内容由一次 create/put 固化；pin 语义允许消息预览保留，而 dashboard 上另有同名 widget 实例（不同 revision 线）——所以同一视觉 widget 在消息与 dashboard 上可以是两份对象，用户把消息内 widget “Pin to dashboard”是创建动作而非引用共享（`ui/src/pages/chat/components/widget-card.ts`、`ui/src/pages/chat/components/widget-card.ts`）。
 
@@ -145,13 +170,13 @@ registered（插件 kind）widget 落盘只存 `source`；真正组装发生在�
 | WebRTC/嵌套 frame | 尽力阻断 | `webrtc 'block'` + sandbox host `blockDescendantFrames`，文档承认 WebRTC data-channel egress 为建模残余 |
 | host API | 见下节 | 经 MessageChannel bridge 的单请求通道 |
 
-运行位置：widget 代码不在服务器进程或 worker/容器里跑，而是在**客户端宿主 DOM 的隔离 iframe**。inline widget 以 opaque origin（canvas 服务响应头再补 `CSP: sandbox allow-scripts`）；pinned widget 文档描述为“dedicated-origin、double-iframe 的 sandbox host”，代码侧至少可以确认 dashboard frame 由 `/__openclaw__/board/...` ticketed URL 提供 HTML 并以 sandbox host path 处理 CSP 域（`src/gateway/board-sandbox.ts`、`docs/tools/show-widget.md`），double-iframe 的具体代理实现未完整展开验证。token/主题由宿主经 `openclaw:widget-theme` 推送，白名单内 token 落入 CSS 变量（`src/canvas/wrap.ts`、`src/canvas/wrap.ts`）。
+运行位置：widget 代码在**客户端宿主 DOM 的隔离 iframe** 里执行，服务器进程与 worker/容器都不承载它。inline widget 以 opaque origin 加载，canvas 服务的响应头再补 `CSP: sandbox allow-scripts`；pinned widget 的文档描述为“dedicated-origin、double-iframe 的 sandbox host”，代码侧能确认的是 dashboard frame 由 `/__openclaw__/board/...` 的 ticketed URL 返回 HTML，并由 sandbox host path 处理 CSP（`src/gateway/board-sandbox.ts`、`docs/tools/show-widget.md`），double-iframe 的具体代理实现未完整展开验证。主题 token 由宿主经 openclaw:widget-theme 消息推送，白名单内的 token 落入 CSS 变量（`src/canvas/wrap.ts`）。
 
 ## 7. 用户交互、事件与错误反馈
 
 用户可做的直接操作集中在两个面：
 
-- **widget 卡/board 单元格**：允许/拒绝能力授权（pending widget）、移除 widget、复制/下载为 PNG（经框内 snapshot bridge 把当前 DOM+canvas 渲成 data URL，超时/不可用回退下载原始 HTML 单文件）、查看 raw details、消息内 widget “Pin to dashboard”、dashboard 上对 MCP App widget 刷新 view。实现面见 `ui/src/pages/chat/components/widget-card.ts`、`ui/src/components/board/board-widget-cell.solid.tsx`、`ui/src/pages/chat/components/widget-export.ts`。
+- **widget 卡/board 单元格**：对 pending widget 允许或拒绝能力授权、移除 widget、复制或下载为 PNG、查看 raw details；消息内 widget 可“Pin to dashboard”，dashboard 上的 MCP App widget 可刷新 view。PNG 导出由框内 snapshot 桥把当前 DOM 与 canvas 渲成 data URL，超时或不可用时回退为下载原始 HTML 单文件。实现见 `ui/src/pages/chat/components/widget-card.ts`、`ui/src/components/board/board-widget-cell.solid.tsx`、`ui/src/pages/chat/components/widget-export.ts`。
 - **布局编辑**：tab 增删改/排序、widget move/resize/remove 通过 `board.update` ops 生效；Board handler 每次广播 `board.changed`（`src/gateway/server-methods/board.ts`）。
 
 widget 内事件（`openclaw.state.emit`）到达 Gateway 后追加为“board notice”，payload ≤8 KiB、5 秒内同内容去重，随后以 `[dashboard] <摘要> on widget <name>` 系统事件进入该 session（`src/boards/board-notices.ts`）——这是 board 事件唯一的持久落点。错误反馈：动作失败、frame 加载失败、授权卡状态（rejected）等由 board cell/widget card 展示并可重试/移除；无 widget 内日志通道。
@@ -201,13 +226,13 @@ host.open（把点击的 http(s) 链接转交宿主打开，禁 popup）
 
 ## 11. 模型回流、对象感知与持续维护
 
-- **事件回流**：widget `state.emit` → board event → session system event（`[dashboard] ... on widget <name>`），因此 widget 交互会在**下一个 agent turn** 自动进入模型上下文，无需模型去查询。这是“交互结果回流”的主通道。
-- **prompt 回流**：widget `prompt.send` 生成会话内普通 user prompt 并触发正常 agent turn；要求瞬时用户激活、frame 可见聚焦、文本≤4000 字符、拒绝 `/`/`!` 命令前缀、每文档每滚动分钟 ≤10 条（`docs/tools/show-widget.md`；宿主约束 `ui/src/components/mcp-app-security.ts`）。
-- **对象感知与定向修改**：模型“更新既有对象”靠同一 name/generated identity 的 `show_widget(pin:true)` 整段覆盖，而非先查询对象树再打补丁。本次未找到模型侧“列出本会话 board widget 状态/读取某 widget 当前内容”的专用工具入口——消息内可见信息来自工具自身记忆与 transcript；后续回合能可靠感知的只有系统事件与被 pin 成功/部分成功的工具结果。模型感知的精确边界标注为未验证。
+- **事件回流**：widget 通过 state.emit 发出的事件先成为 board event，再转成 session system event，形如 `[dashboard] ... on widget <name>`；因此 widget 上的交互会在**下一个 agent turn** 自动进入模型上下文，模型无需主动查询。这是“交互结果回流”的主通道。
+- **prompt 回流**：widget 通过 prompt.send 生成会话内普通 user prompt，并触发正常 agent turn；触发要求用户有瞬时激活、frame 可见聚焦，文本不超过 4000 字符、不以 / 或 ! 命令前缀开头，同一文档每个滚动分钟最多 10 条（文档见 `docs/tools/show-widget.md`，宿主侧约束见 `ui/src/components/mcp-app-security.ts`）。
+- **对象感知与定向修改**：模型更新既有对象时，用同一 name 或 generated identity 调用 show_widget(pin:true) 做整段覆盖，过程中没有对象树查询或补丁式修改。本次未找到模型侧“列出本会话 board widget 状态/读取某 widget 当前内容”的专用工具入口：消息内可见信息来自工具自身记忆与 transcript，后续回合能可靠感知的只有系统事件与被 pin 成功（或部分成功）后的工具结果。模型感知的精确边界标注为未验证。
 
 ## 12. IM 渠道投递（边界说明）
 
-普通文本回复进入 IM 由 auto-reply/source-reply 管线执行：按来源路由与 SourceReplyDeliveryMode 决定用 source delivery、message tool 或 direct send，并对回复 payload 施加渠道插件 `transformReplyPayload` 与 typing 回调（`src/channels/message/reply-pipeline.ts`）。发送完成得到平台回执，规范化为 `MessageReceipt`（`primaryPlatformMessageId`/`platformMessageIds`/`parts`/thread 与 replyTo 归属，`src/channels/message/receipt.ts`），该回执是工具卡/交付状态回调和 run 终态判定的依据；写前队列、platform-send lease 与 unknown-after-send 恢复在 `src/infra/outbound/deliver-queue.ts`，属于 [主动Agent与后台任务调查笔记](../主动Agent与后台任务/OpenClaw-主动Agent与后台任务调查笔记.md) 的 durable delivery 主题。widget 对象在 IM 面不落普通文本，而是走渠道 presenter（文档化的 Discord Activities 按钮），其 transport 细节归渠道插件实现，本轮未展开。
+普通文本回复进入 IM 由 auto-reply/source-reply 管线执行：它按来源路由，并由 SourceReplyDeliveryMode 决定走 source delivery、message tool 还是直接发送，发送前套用渠道插件的 transformReplyPayload 与 typing 回调（`src/channels/message/reply-pipeline.ts`）。发送完成后平台回执被规范化为 MessageReceipt，字段覆盖 `primaryPlatformMessageId`、`platformMessageIds`、`parts`、thread 与 replyTo 归属（`src/channels/message/receipt.ts`）；工具卡与交付状态回调、run 终态判定都以该回执为依据。写前队列、platform-send lease 与 unknown-after-send 恢复在 `src/infra/outbound/deliver-queue.ts`，属于 [主动Agent与后台任务调查笔记](../主动Agent与后台任务/OpenClaw-主动Agent与后台任务调查笔记.md) 的 durable delivery 主题。widget 对象在 IM 面经渠道 presenter 投递（文档化的 Discord Activities 按钮），transport 细节归渠道插件实现，本轮未展开。
 
 ## 13. 生命周期、资源治理与性能
 

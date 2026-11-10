@@ -67,11 +67,11 @@ Topics/会话列表菜单“导出图片/复制图片”
 
 **DOM 层取舍（captureMode）**：`MessageGroup` 在 captureMode 下跳过选中状态重同步（`list/MessageGroup.tsx:145`），初始选中优先活动分支，其次按 fold 选中/处理中状态，最后取末条（`list/MessageGroup.tsx:70-145`）。
 
-fold 布局只显示选中气泡（`MessageWrapper` 的 `[&.fold]:hidden` + `[&.fold.selected]:inline-block`，`list/MessageGroup.tsx:514`），未选气泡为 `display:none`，同时被捕获工具的隐藏节点过滤器排除（`utils/image.ts:372-395`）。
+fold 布局下组件只显示被选中的那条气泡：`MessageWrapper` 用 hidden 与 selected 两个条件类切换显隐（`list/MessageGroup.tsx:514`），未选中的气泡落在 `display:none`，捕获工具过滤隐藏节点时也会一并跳过（`utils/image.ts:372-395`）。
 
 horizontal/grid 布局渲染组内全部气泡，样式来自偏好设置 `chat.message.multi_model.style`（`messageGroupLayout.ts:11-19`），capture 不强制 fold。
 
-`MessageImageCaptureHost` 定位在 `left:-10000px`，宽度固定 960px、容器本身高度 1px 且 overflow hidden，并用 `aria-hidden`、`inert`、`pointer-events-none` 屏蔽交互（`components/chat/messages/MessageImageCaptureHost.tsx:13-35`）。
+图片捕获宿主组件 `MessageImageCaptureHost` 把自身挪到视口左侧 10000px 之外，固定 960px 宽、1px 高并裁剪溢出内容，同时用 inert 属性、禁止指针事件和 aria-hidden 屏蔽页面交互与无障碍暴露（`components/chat/messages/MessageImageCaptureHost.tsx:13-35`）。
 
 宿主内部仍挂载完整 `MessageListProvider + MessageList`。捕获对象是消息列表内部仅在动作排队期间渲染的隐藏表面：`data-topic-image-capture` 的 fixed 定位 div，逐组非虚拟化渲染全部消息分组（`MessageList.tsx:887-899`）。虚拟列表不参与捕获。
 
@@ -79,18 +79,17 @@ horizontal/grid 布局渲染组内全部气泡，样式来自偏好设置 `chat.
 
 `MessageList` 收到 capture action 后等待两帧布局，再执行：
 
-- `copy`：`captureScrollable()` -> Canvas -> PNG Blob -> `copyImage`；
-- `export`：`captureScrollableAsDataUrl()` -> PNG Data URL -> `saveImage(topic.name, data)`（`components/chat/messages/MessageList.tsx:520-575`）。
+- 复制：先用 `captureScrollable()` 把列表整块渲染到 Canvas，转成 PNG Blob 后写入剪贴板；
+- 导出：改用 `captureScrollableAsDataUrl()` 取得 PNG Data URL，再按 Topic 名称调用 `saveImage` 保存为文件（`components/chat/messages/MessageList.tsx:520-575`）。
 
 `captureScrollable()` 读取元素完整 `scrollWidth/scrollHeight`，不受当前视口尺寸限制。主要边界包括（`src/renderer/utils/image.ts`，捕获入口 `captureScrollable` 与 `MAX_ALLOWED_DIMENSION` 常量附近）：
 
-- 总宽或总高超过 32767px 时直接返回 `dimension_too_large` 错误；判定发生在 CSS 像素层（`scrollWidth/scrollHeight`），而 `pixelRatio: window.devicePixelRatio` 会进一步放大最终画布——DPR>1 时实际画布尺寸可能先撞上浏览器 canvas 上限（推断，未运行验证）；
-- `data-html-artifact` 节点被过滤，交互 HTML Artifact 不进入图片；
-- `display:none` 和计算样式隐藏的节点被过滤（与 fold 布局的隐藏分支形成双重排除）；
-- 本地 `file://` 图片源先由 `inlineLocalImageSources()` 临时内联（经 IPC `file.read` 读文件转 Data URL），完成后恢复；
-- 背景取 CSS 变量（聊天链路传 `CHAT_CAPTURE_BACKDROP_VARIABLE`），像素倍率使用 `window.devicePixelRatio`；
-- 高度、overflow、position 和滚动条样式只在**根元素**上被临时覆盖为完整展开状态，后代容器（如 horizontal/grid 布局的内部滚动容器）的样式未被改写；
-- 先执行一次 `htmlToImage.toCanvas()` 预热资源缓存并销毁暖机 Canvas，再正式生成。
+- 捕获尺寸按 CSS 像素的滚动宽高判定：总宽或总高超过 32767px 时直接返回 `dimension_too_large` 错误；最终画布还要乘上设备像素比，DPR 大于 1 时可能先触及浏览器 canvas 上限（推断，未运行验证）；
+- 交互 HTML Artifact 所在的节点带 `data-html-artifact` 标记，被过滤器跳过；`display:none` 和计算样式隐藏的节点同样被跳过，fold 布局的未选中气泡因而同时被隐藏样式与过滤器排除；
+- 本地 `file://` 图片先经 IPC 读取文件、转成 Data URL 临时内联，捕获完成后恢复；
+- 背景色取自 CSS 变量，聊天链路传入的是 `CHAT_CAPTURE_BACKDROP_VARIABLE`，像素倍率使用设备像素比；
+- 只有根元素的高度、overflow、position 和滚动条样式被临时覆盖为完整展开状态，horizontal 与 grid 布局的内部滚动容器等后代容器保持原有样式；
+- 正式生成前先执行一次 `htmlToImage.toCanvas()` 预热资源缓存，再销毁这张暖机 Canvas。
 
 该实现生成单 Canvas 长图，**没有**分段捕获后拼接的策略；32767px 上限是显式失败边界。系统内唯一带缩放降级的捕获是 `captureScrollableIframe*`（超过上限时按比例缩小），但它只被 HTML Artifact 预览弹窗（`CodeBlockView/HtmlArtifactsPopup.tsx`）用于 Artifact 自身导出，不在对话导出链路内。SVG 图形经光栅化导出时改成 UTF-8 安全的数据 URL 加载，避免含 `foreignObject` HTML 标签的 SVG 通过 blob URL 污染画布导致 PNG 导出失败。
 
@@ -114,9 +113,9 @@ Markdown、代码块、工具调用卡、reasoning 与附件由与聊天现场�
 
 captureMode 的表面对 live 现场还有其他 DOM 差异（均为样式类代码事实，实际图片效果未运行验证）：
 
-- 多模型组的**组菜单栏**（布局切换图标、fold 模式模型标签列表、删除/重试按钮）不感知 captureMode（`list/MessageGroup.tsx:411-425` 无条件渲染组菜单栏，组件本身无 capture 分支），会一并进入图片；Home 端 capture adapter 仍提供删除确认与重试动作（`homeMessageListAdapter.tsx:868-869`），删除按钮不受删除可用性判断限制（capture 下该动作未提供，`homeMessageListAdapter.tsx:863`），呈可用外观；
-- grid 布局的卡片固定 300px 高、内容容器 `overflow-hidden`（`list/MessageGroup.tsx:514`），horizontal 布局内容容器 `max-h-[calc(100vh-350px)]` 且 `overflow-y-auto`（`list/MessageGroup.tsx:514`），而 `captureScrollable` 只展开根元素，后代裁剪容器会把长内容截断在图片内；
-- 这些布局样式由偏好设置 `chat.message.multi_model.style` 决定，capture 不强制 fold，因此用户当前的 grid/horizontal 设置会直接影响图片保真。
+- 多模型组的**组菜单栏**列出布局切换图标、fold 模式的模型标签以及删除、重试按钮。`MessageGroup` 在任何模式下都无条件渲染这块菜单栏（`list/MessageGroup.tsx:411-425`），捕获时它随气泡一起进入图片；Home 端捕获用的 adapter 照旧提供删除确认与重试动作，按钮的可用性判断依赖一个捕获场景未提供的动作，于是按钮照常显示为可用（`homeMessageListAdapter.tsx:863-869`）。
+- grid 布局的卡片固定 300px 高、内容容器裁剪溢出，horizontal 布局的内容容器限高为视口高度减去 350px 并纵向滚动（`list/MessageGroup.tsx:514`）。捕获只展开根元素，这些后代裁剪容器会把超长内容截断在图片内。
+- 上述布局来自偏好设置 `chat.message.multi_model.style`，捕获端不强制切到 fold，用户当前的 grid 或 horizontal 选择会直接影响图片保真。
 
 本地图片在捕获前临时内联，降低了 Electron 本地协议无法被 `html-to-image` 读取的风险。远端图片不再只依赖 html-to-image 自身跨域抓取，而是在捕获前经受限抓取路径预内联；验证失败会降级为占位。代理、认证图片及各站防盗链下的实际成功率仍需运行验证。
 
@@ -144,9 +143,23 @@ Agent 端 live（`AgentSessionMessages.tsx:66-75`）与 capture（`AgentSessionI
 
 ## 7. 文本导出目标与多模态图片
 
-文本类导出的目标是 Markdown、带 reasoning 的 Markdown、Word、Notion、语雀、Obsidian、Joplin、思源，以及写入 Notes 目录；菜单项按偏好 `data.export.menus.*` 逐项开关（含 `image`、`markdown`、`markdown_reason`、`docx`、`notion`、`yuque`、`joplin`、`obsidian`、`siyuan`）。单条消息与多选批量共用这些目标：多选时按会话顺序合成同一个文件或同一篇笔记，标题取 Topic 名，图片类目标仍是单条消息或整个 Topic。见 `src/renderer/components/chat/messages/hooks/useMessageMenuConfig.ts`、`services/ExportService.ts`（`exportMessagesAsMarkdown`、`exportMessagesToNotion`）。
+文本类导出提供八个落点：Markdown、带 reasoning 的 Markdown、Word、Notion、语雀、Obsidian、Joplin 与思源，此外还能写入 Notes 目录。每个落点在菜单里的开关由偏好设置 `data.export.menus.*` 逐项决定，键名与落点的对应关系如下：
 
-Markdown 导出会携带多模态图片：图片来自用户附件的 `FileUIPart` 与 `generate_image` 工具产物，按原文顺序与文本交错序列化，并有两种落盘模式——内联 base64 数据 URI，或写 `assets/<name>.<ext>` 相对链接加一份延迟字节写入清单。模式在导出时由图片模式选择弹窗决定，未注册选择器则中止带图导出。单张图片解析失败只跳过并计数，不中止整次导出。Notion 转换会把 Markdown alert 映射为 Notion callout。依据：`src/renderer/services/markdownImageExport.ts`、`src/renderer/services/ExportService.ts`（`buildMarkdownWithImages`、`exportImageAssets`）、`src/renderer/services/imageExportModeChooser.ts`、`src/main/services/ExportService.ts`。
+| 落点 | 偏好键 |
+| --- | --- |
+| Markdown | `markdown` |
+| 带 reasoning 的 Markdown | `markdown_reason` |
+| Word | `docx` |
+| Notion | `notion` |
+| 语雀 | `yuque` |
+| Obsidian | `obsidian` |
+| Joplin | `joplin` |
+| 思源 | `siyuan` |
+| 图片 | `image` |
+
+单条消息与多选批量共用这些落点：多选时按会话顺序合成同一个文件或同一篇笔记，标题取 Topic 名称，图片类落点仍作用于单条消息或整个 Topic。菜单配置与导出实现分别位于 `src/renderer/components/chat/messages/hooks/useMessageMenuConfig.ts` 和 `services/ExportService.ts`，后者对应 Markdown 与 Notion 两条导出路径。
+
+Markdown 导出会一并写出消息中的多模态图片，来源是用户附件的 `FileUIPart` 与 `generate_image` 工具的产物，图片按正文顺序与文本交错。落盘有两种方式：把图片内联成 base64 数据 URI，或写出 `assets/<name>.<ext>` 形式的相对链接并附一份延迟写入的字节清单。用哪一种由导出时的图片模式选择弹窗决定，弹窗未注册就中止带图导出；单张图片解析失败只跳过并计数，整次导出继续进行。Notion 转换另把 Markdown 的 alert 语法映射为 callout。依据：`src/renderer/services/markdownImageExport.ts`、`src/renderer/services/ExportService.ts`（`buildMarkdownWithImages`、`exportImageAssets`）、`src/renderer/services/imageExportModeChooser.ts`、`src/main/services/ExportService.ts`。
 
 图片加载、外链可用性、目标 Notion API 与语雀/思源等第三方端的最终呈现需要运行环境验证；保存对话框挂到调用方窗口，非 ASCII 文件名不经旧式对话框。
 

@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-一次生成是"WebSocket 方法调用 + 后台 goroutine + 会话级 TurnLoop"的组合。入口是 `chat.send`，任务身份是调用方传入的 `idempotencyKey`（缺省生成 UUID），并立刻成为 `runId`。请求返回 `{runId,status:"started"}` 之后，真正的执行在 goroutine 里跑，进度通过 `chat` 事件的 `state` 字段推给客户端。
+一次生成的实现由三部分组成：客户端发起 WebSocket 方法调用，网关把调用转进后台 goroutine 执行，每个会话再有一个 TurnLoop 循环负责多轮交互。发送入口 chat.send 收到调用后，用调用方传入的幂等键作为任务身份，调用方没给就生成一个 UUID，这个值立刻成为本次运行的 runId。网关先返回运行编号与 started 状态的应答，真正的执行随后在 goroutine 里展开，进度通过 chat 事件的状态字段推给客户端。
 
 关键事实：
 
-- 模型历史每轮从 JSONL 转录水化，Gateway 的历史开关只控制上层预加载；下层在消息为空且转录路径存在时仍会读取，当前纯文本输入已先落盘，并另有 Prompt 回退（[chat.go:1980、2420–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L1980>)、[event_bridge.go:20–46、77–83](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20>)）。读取出错且没有可用历史时，下层会返回错误。
+- 模型历史每轮由下层从 JSONL 转录重新水化，Gateway 的历史开关只决定上层是否预加载；下层只看当前消息列表是否为空、转录路径是否存在，两者都满足就直接读取该文件。当前纯文本输入在请求发出前已先落盘，另有 Prompt 回退（[chat.go:1980、2420–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L1980>)、[event_bridge.go:20–46、77–83](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20>)）。读取出错且没有可用历史时，下层返回错误。
 - 拼装顺序是固定的：运行时创建时构造系统提示与工具，随后每轮加载历史、合并当前输入，最后统一做工具轮修复（`src/pkg/agent/eino/event_bridge.go:20-47`、`tool_call_arguments.go:52-61`）。
 - 池条目互斥通常让同键请求等待，但等待超时会先删除映射、延后关闭旧 Runtime；旧 run 尚未结束时，新请求可以创建同键的新 Runtime。抢占标记只作用于实际接收它的 TurnLoop，跨 Runtime 没有停止旧 run 的作用（[chat.go:1915–1935、3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915>)、[pool.go:193–209、237–247](<../../openocta/src/pkg/agent/runtime/pool.go#L193>)）。不同会话可并行，本次未找到全局并发上限。
 - 取消有两层：`ctx` 超时/取消让流循环退出，TurnLoop 的 `StopImmediate` 立即终止 agent；两者都由 `chat.abort` 或 `/stop` 触发（`chat.go:3258-3279`、`:3458-3515`）。
@@ -42,7 +42,11 @@ WS chat.send（health.go:206-215 注册）
 
 ## 1. 提交入口、任务对象与状态机
 
-`chat.send` 的参数决定任务形状：`sessionKey` 缺省 `main`，`message` 为空且无附件时直接报错，附件最多一个（`chat.go:1732-1899`）。消息不是普通文本时先走命令分支：`/stop`、`!stop`、`/think`、`/new`、`/reset`（`:1744-1769`）。命令命中后不再走模型，或先重置会话再把剩余文本当新输入。
+发送方法 chat.send 的参数决定任务形状：会话键缺省为 main，消息为空且没有附件时直接报错，附件最多一个（`chat.go:1732-1899`）。消息文本命中命令时先走命令分支，命中后不再进入模型，或者先重置会话再把剩余文本当作新输入（`:1744-1769`）。当前识别的命令为：
+
+```text
+/stop  !stop  /think  /new  /reset
+```
 
 任务状态没有枚举字段，而是由三个东西共同表达：
 
@@ -60,7 +64,7 @@ WS chat.send（health.go:206-215 注册）
 
 每轮请求的模型输入由四段合成，顺序稳定：
 
-1. 系统提示：运行时创建时按"覆盖优先，否则内置模板"决定；内置模板包含身份、工具、命令执行约束、安全、工作区，再追加技能段、知识库段与进化提示（`src/pkg/agent/runtime/runtime.go:70-102`、`system_prompt.go:92-155`）。
+1. 系统提示：运行时创建时确定，有覆盖提示就优先使用，否则回落到内置模板。内置模板依次包含身份、工具、命令执行约束、安全与工作区说明，其后追加技能段、知识库段和进化提示（`src/pkg/agent/runtime/runtime.go:70-102`、`system_prompt.go:92-155`）。
 2. 每轮覆盖：数字员工清单里的提示词，加上本地代理场景提示，作为 `SystemPromptOverrides` 直接替换系统提示而不是追加（`chat.go:2212-2226`）。
 3. 历史消息：Gateway 在历史开关启用时预加载当前转录，按角色与最大条数转换；若未得到消息，Eino 层还会按请求内的转录路径读取（[chat.go:2427–2452](<../../openocta/src/pkg/gateway/handlers/chat.go#L2427-L2452>)、[event_bridge.go:20–46](<../../openocta/src/pkg/agent/eino/event_bridge.go#L20-L46>)）。
 4. 当前输入：通常已经包含在转录历史中，附件再按内容块合并；没有可用历史且未返回读取错误时，直接由请求的文本和内容块构建用户消息。
@@ -89,8 +93,8 @@ WS chat.send（health.go:206-215 注册）
 
 实现分工：
 
-- `reduction` 负责截断与清理旧工具输出，清理结果写到 `<stateDir>/agents/reduction`，可再读回。
-- `summarization` 负责在阈值处总结，写入 `<stateDir>/agents/transcripts/conversation.jsonl`，这份文件与用户会话的 `<sessionId>.jsonl` 不是同一个。
+- 旧工具输出的截断与清理由 reduction 环节负责，清理后的内容写到 `<stateDir>/agents/reduction`，之后可以再读回。
+- 摘要由 summarization 环节在达到阈值时生成，写入 `<stateDir>/agents/transcripts/conversation.jsonl`；这份摘要文件与用户会话的 `<sessionId>.jsonl` 相互独立。
 - 两者都可用环境变量关闭；`compaction.mode == "off"` 只关摘要，不关清理（`context_middleware.go:96-107`、`:123-129`）。
 
 会话级"压缩"是另一回事：`sessions.compact` 只按行数裁文件，不生成摘要（`src/pkg/gateway/handlers/sessions.go:880-1052`）。因此一次请求的上下文可能同时受"行级截断后的转录"和"运行中摘要"影响，两者不共享状态，也不可逆。
@@ -138,7 +142,7 @@ Eino 事件先转成内部 `StreamEvent`，再由 `chat.send` 的循环翻译成
 
 正常完成有三条路径：
 
-- 消息流式结束：每轮 `message_stop` 都落盘一行 assistant，最终轮广播 `final`；循环结束后再做一次 IM/cron 投递（`chat.go:2818-2945`、`:2965-2991`）。
+- 消息流正常结束：每轮收到 `message_stop` 就落盘一行 assistant，最后一轮再广播 `final`；循环结束后做一次 IM/cron 投递（`chat.go:2818-2945、2965-2991`）。
 - 非流式回退：`RunStreamTurn` 不可用时调 `Run`，拿到整段文本后按带用量参数追加（`:2455-2553`）。
 - 只拿到增量没有 `message_stop`：收尾时用快照函数 `publishAssistantSnapshot` 补一行（`:3048-3090`、`:998-1068`）。
 
@@ -158,7 +162,11 @@ Eino 事件先转成内部 `StreamEvent`，再由 `chat.send` 的循环翻译成
 
 ## 7. 停止、重试、续写与重新生成
 
-停止有三个入口：消息里的 `/stop` 或 `!stop`、`chat.abort` 带 runId、`chat.abort` 不带 runId（中止该会话全部）。执行动作一致：调用 `TurnAbort`（TurnLoop 立即停），再调 ctx 取消，最后从 map 删除（`chat.go:3282-3294`、`:3458-3515`、`:3258-3279`）。
+停止有三个入口，三者最终执行同一套动作：先调用 `TurnAbort` 让 TurnLoop 立即停下，再取消 ctx，最后从在飞任务表里删除记录（`chat.go:3258-3294、3458-3515`）。入口分别是：
+
+1. 消息文本里的 `/stop` 或 `!stop`。
+2. 调用 `chat.abort` 并带上 runId。
+3. 调用 `chat.abort` 不带 runId，中止该会话的全部运行。
 
 runId 与会话键不匹配时只记警告仍允许停止，理由写在注释里：runId 已唯一标识运行实例（`chat.go:3496-3501`）。
 
@@ -172,7 +180,7 @@ runId 与会话键不匹配时只记警告仍允许停止，理由写在注释�
 
 运行时池按会话键缓存条目，每个 run 另有 goroutine；互斥范围是具体池条目，映射被驱逐后可出现同键的新旧条目。
 
-1. 发送入口先探测同键在飞任务。命中时记录 `preempt=true` 并先等待池可用，这个分支未调用旧 run 的中止控制器；未命中时才走另一分支调用整会话中止函数，再等池（[chat.go:1915–1935](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915-L1935>)）。
+1. 发送入口先探测同一会话键下是否已有在飞任务。命中时记下抢占标记并先等待运行时池可用，这条分支没有调用旧 run 的中止控制器；没有命中时才走另一条分支，先调用整会话中止函数，再等池（[chat.go:1915–1935](<../../openocta/src/pkg/gateway/handlers/chat.go#L1915-L1935>)）。
 2. 首次等待使用 30 秒常量；超时后驱逐映射，再给当前映射最多 5 秒的可用性检查，仍忙才返回错误。第二段并未等待原条目关闭：映射已经删除时，可用性检查会直接成功（[chat.go:43](<../../openocta/src/pkg/gateway/handlers/chat.go#L43>)、[chat.go:3182–3208](<../../openocta/src/pkg/gateway/handlers/chat.go#L3182-L3208>)）。
 3. 驱逐先从池里删除映射，再尝试关闭。旧条目仍被运行持锁时，关闭工作转入 goroutine，等待旧锁释放后才执行 Runtime 清理；驱逐本身未取消旧 run。新请求可在映射空缺期间建新的 Runtime，两个条目的锁互不约束（[pool.go:167–181、193–209](<../../openocta/src/pkg/agent/runtime/pool.go#L167-L209>)、[pool.go:237–261](<../../openocta/src/pkg/agent/runtime/pool.go#L237-L261>)）。
 

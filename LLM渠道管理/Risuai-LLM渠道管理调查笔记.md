@@ -18,12 +18,12 @@ Risuai 没有 Provider 实体表或渠道实例对象。Provider 只是模型条
 
 当前快照的关键结论：
 
-- 模型目录是"静态表 + 启动时动态注册 + 设置页实时拉取"三层：内置模型写在 `LLMModels` 数组，启动时按开关拉取 Google/Anthropic/OpenAI 目录合并，设置页再按需拉取 OpenRouter、NanoGPT、Ollama、Horde 目录；远端结果不持久化；
-- 协议适配集中在请求层的格式分发：`LLMFormat` 枚举的每个值对应一个 Adapter 函数，OpenAI 兼容协议是主干，Custom API（`reverse_proxy`）可切换格式以复用 Anthropic/Gemini/Responses 等 Adapter；
-- 凭据以明文字符串存于 `database.bin`（Tauri）或 IndexedDB（Web），UI 仅提供开关控制的输入掩码；请求日志、云同步与备份都会携带完整凭据；
-- 失败处理分三层：同模型重试（`requestRetrys` 默认 2）、按任务模式分离的模型 fallback 候选链、工具调用链重试；没有多 Key、Key 轮换、熔断或健康状态，也没有健康感知的跨渠道 failover；
-- 管理入口只有应用内设置 UI；未找到项目内 CLI 或 TUI。Web 和 Tauri 桌面复用同一套 Svelte 组件，桌面端没有另一套 Provider 管理面板；设置页实时加载模型目录与请求体预览（Preview Body）承担部分验证作用，但没有独立的连接测试入口。
-- “启停”对 Provider 和模型条目均不适用：模型目录没有 enabled 字段，当前模型通过 `aiModel`/`subModel` 选择，清空可选槽位只表示不使用该槽位；botPreset 也没有启用状态。
+- 模型目录来自三层：内置模型以静态数组写在源码里，启动时按开关拉取 Google、Anthropic、OpenAI 目录合并进内存，设置页再按需拉取 OpenRouter、NanoGPT、Ollama、Horde 目录；远端结果不写回配置文件；
+- 协议适配集中在请求层的格式分发：每个 LLM 格式枚举值对应一个 Adapter 函数，OpenAI 兼容协议是主干；Custom API 条目可以切换格式，复用 Anthropic、Gemini、Responses 的 Adapter；
+- 凭据以明文字符串存于 `database.bin`（Tauri）或 IndexedDB（Web），界面只提供开关控制的输入掩码；请求日志、云同步与备份都会携带完整凭据；
+- 失败处理分三层：同模型重试（默认 2 次）、按任务模式分离的模型 fallback 候选链、工具调用链重试；没有多 Key、Key 轮换、熔断或健康状态，也没有健康感知的跨渠道 failover；
+- 管理入口只有应用内设置 UI；本次未找到项目内 CLI 或 TUI。Web 和 Tauri 桌面复用同一套 Svelte 组件，桌面端没有另一套 Provider 管理面板；设置页的实时目录加载与请求体预览（Preview Body）承担部分验证作用，独立的连接测试入口本次未找到。
+- “启停”对 Provider 和模型条目均不适用：模型目录没有 enabled 字段，当前模型通过 aiModel 与 subModel 两个槽位选择，清空槽位只表示不使用该槽位；botPreset 也没有启用状态。
 
 ## 术语定义
 
@@ -65,15 +65,15 @@ WebLLM / Horde / AWS / DeepSeek / DeepInfra / Echo / NanoGPT / Ollama
 
 OpenRouter、Ooba、Kobold、NovelList、Plugin、Custom API 等不占用独立枚举值，统一标记为 `AsIs`，说明该枚举是模型分类标签而不是渠道注册表。
 
-每个 `LLMModel` 条目携带 provider、format、flags、parameters、tokenizer、internalID、endpoint、keyIdentifier 等字段（`types.ts:104-118`）；其中 `format` 决定协议 Adapter，`endpoint` 可覆盖默认请求 URL，`keyIdentifier` 决定从 `OaiCompAPIKeys` 取哪一把 Key。
+模型条目是请求构造的最小单位，由一组字段描述（`src/ts/model/types.ts:104-118`）。其中 format 决定使用哪个协议 Adapter，endpoint 可覆盖默认请求 URL，keyIdentifier 决定从 `OaiCompAPIKeys` 取哪一把 Key；provider 记录 Provider 归类，flags 声明能力位，parameters 限定采样参数白名单，tokenizer 与 internalID 保存分词器和内部 ID。
 
 多端点表达方式有三种：
 
-- 内置条目复制：构建 `LLMModels` 时自动为每个 OpenAI 兼容模型生成 `-response-api` 变体、为每个 Google 模型生成 `-vertex` 变体（`src/ts/model/modellist.ts:586-611`）；
-- Custom API 单例：模型 ID `reverse_proxy` 使用全局字段 `forceReplaceUrl`（Base URL）、`customAPIFormat`（协议格式）、`customProxyRequestModel`、`proxyKey`（`modellist.ts:558-567`）；
-- 自定义模型数组：`db.customModels` 的每条记录以 `xcustom:::<uuid>` 为 ID，携带独立 url、key、format、tokenizer、flags、params，在设置页增删改（`src/lib/Setting/Pages/Advanced/CustomModelsSettings.svelte:174-188`）。
+- 内置条目复制：构建 `LLMModels` 时，每个 OpenAI 兼容模型会自动多出一个 `-response-api` 变体，每个 Google 模型会自动多出一个 `-vertex` 变体，变体靠模型 ID 后缀区分（`src/ts/model/modellist.ts:586-611`）；
+- Custom API 单例：模型 ID `reverse_proxy` 的端点、协议格式、请求模型名与 Key 全部取自全局 Database 字段，分别由 `forceReplaceUrl`（Base URL）、`customAPIFormat`（协议格式）、`customProxyRequestModel`（请求模型名）、`proxyKey`（Key）提供（同文件第 558-567 行）；
+- 自定义模型数组：`db.customModels` 的每条记录以 `xcustom:::<uuid>` 为 ID，独立携带 url、key、format、tokenizer、flags 与 params，可在设置页增删改（`src/lib/Setting/Pages/Advanced/CustomModelsSettings.svelte:174-188`）。
 
-插件模型是第四类：插件调用 `addProvider` 注册回调后，自动生成 `pluginmodel:::<name>` 条目进入 `customV3ProviderMetaStore`（`src/ts/plugins/apiV3/v3.svelte.ts:682-709`）。同一 Provider 实例（如一个 OpenRouter 账号）不能创建多条独立连接，只能通过 `customModels` 或 `reverse_proxy` 条目另起；内置 Provider 条目是全局单例。
+插件模型是第四类来源：插件调用 `addProvider` 注册回调后，系统自动生成 ID 为 `pluginmodel:::<name>` 的条目，写进插件侧的 Provider 元数据存储（`src/ts/plugins/apiV3/v3.svelte.ts:682-709`）。同一个 Provider 实例（例如一个 OpenRouter 账号）不能创建多条独立连接，需要另起时只能借助 `customModels` 或 `reverse_proxy` 条目；内置 Provider 条目全局只有一份。
 
 ## 2. 配置生命周期、管理入口与持久化
 
@@ -112,7 +112,7 @@ botPreset 的生命周期不同：新建和导入都是向 `botPresets` 追加�
 | Web 设置 UI | 可查看 Provider 分组、内置模型、动态目录、自定义模型和 botPreset | 可编辑全局 Database 字段、新增/编辑 `customModels` 和 botPreset | 只有 botPreset 复制 | 不适用 | 可删 `customModels` 和 botPreset；内置模型/Provider 无删除入口 | botPreset 支持 JSON/`.risup`/`.risupreset`；设置报告是脱敏后的整体报告 | 未找到独立测试；目录拉取和 Preview Body 仅为间接验证 |
 | Tauri 桌面设置 UI | 与 Web 使用同一 Svelte 设置组件 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同 | 与 Web 相同，文件落 AppData/本地文件系统 | 与 Web 相同；真实请求经 Tauri 网络命令 |
 
-- **配置文件**：`database.bin` 是 RisuSave 自定义分块文件，不是面向用户逐条编辑的 Provider 配置文件。应用启动时读取、补默认值并迁移；保存时写入主文件和最多 20 份带时间戳备份。源码提供备份恢复，但本次未找到面向 CLI/TUI 的配置文件编辑命令（`src/ts/storage/risuSave.ts`、`src/ts/globalApi.svelte.ts:292-529`）。
+- **配置文件**：`database.bin` 是 RisuSave 自定义的分块文件，由应用自身读取和写入，没有供用户逐条编辑 Provider 的文本结构。应用启动时读取它、补齐默认值并执行迁移；保存时写入主文件和最多 20 份带时间戳备份。源码提供备份恢复能力，面向 CLI/TUI 的配置文件编辑命令本次未找到（`src/ts/storage/risuSave.ts`、`src/ts/globalApi.svelte.ts:292-529`）。
 - **Web**：设置组件直接绑定 `DBState.db`；主数据库落在 IndexedDB，预设 JSON/`.risup` 导入导出通过浏览器文件 API 完成。Web 端没有独立服务端 Provider CRUD API，服务端主要承担代理和数据库同步路径。
 - **桌面端**：Tauri WebView 使用同一套设置组件和生命周期操作，主数据库改存 Tauri AppData 下的数据库文件；Tauri Rust 命令主要提供文件、网络和运行环境能力，没有发现独立的渠道管理命令或 TUI。桌面与 Web 的 UI 操作覆盖因此相同，持久化位置和请求网络路径不同。
 - **CLI/TUI**：`package.json` 只有 Vite、检查、测试、Node server 和 Tauri 等脚本；在源码、脚本和 Tauri 命令中未找到 `process.argv`、命令解析器、交互式终端 UI 或渠道管理子命令。本次结论是“未找到项目内 CLI/TUI”，不是断言外部脚本不能直接修改文件。
@@ -140,37 +140,37 @@ API Key 与其他秘密是 `Database` 接口上的普通字符串字段，没有
 
 凭据会随数据库进入多条同步/备份路径：
 
-- 账号同步：`AccountStorage` 把完整 `database.bin` 上传到 hub 的 `/api/account/write`（`accountStorage.ts:48-58`）；
-- Google Drive 备份：`backupDrive` 上传 `encodeRisuSaveLegacy(getDatabase(), 'compression')` 的完整数据库，仅压缩不加密（`src/ts/drive/drive.ts:186-193`）；
-- Kei 自动备份：`saveDbKei` 每 5 分钟把整个 `db` 对象以 JSON 发给备份服务器（`src/ts/kei/backup.ts:83-103`）；
-- 本地备份 `.risudat`：仅在账号模式且运行于 risuai.xyz 时，用 `sv.risuai.xyz/cryptokey` 下发的临时密钥加密数据库块，并写入加密元数据文件（`src/ts/drive/backuplocal.ts:161-174`）；非账号模式与其它来源的备份为明文。
+- 账号同步：`AccountStorage` 把整份 `database.bin` 上传到 hub 的账号写入路径 `/api/account/write`（`src/ts/storage/accountStorage.ts:48-58`）；
+- Google Drive 备份：`backupDrive` 以压缩方式编码整份数据库后上传，这一步只有压缩（`src/ts/drive/drive.ts:186-193`）；
+- Kei 自动备份：`saveDbKei` 每 5 分钟把整个数据库对象序列化成 JSON 发给备份服务器（`src/ts/kei/backup.ts:83-103`）；
+- 本地备份 `.risudat`：只在账号模式且运行于 risuai.xyz 时，用 `sv.risuai.xyz/cryptokey` 下发的临时密钥加密数据库块，并写入加密元数据文件（`src/ts/drive/backuplocal.ts:161-174`）；非账号模式与其它来源的备份为明文。
 
 因此"加密"只出现在一条条件性的备份路径上，属于传输与备份保护，不是磁盘静态加密。
 
 ### 3.3 进程间传递与日志
 
-Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust command `streamed_fetch` 发起，headers 以 JSON 字符串传入（`src-tauri/src/main.rs:433-567`）。Web 端请求经 hub 或自托管 Node 服务的 `/proxy2` 转发：目标 URL 放 `risu-url`，完整 headers（含 Authorization）经 `risu-header` 传入，服务端解包后原样转发上游（`server/node/server.cjs:742-821`）。也就是说 Web 运行模式下，凭据会完整经过第三方中转服务器进程。
+Tauri 桌面端的凭据全部由前端 webview 持有，HTTP 请求交 Rust 侧的 `streamed_fetch` 命令发起，headers 以 JSON 字符串传入（`src-tauri/src/main.rs:433-567`）。Web 端请求经 hub 或自托管 Node 服务的 `/proxy2` 转发：目标 URL 与含 Authorization 的完整 headers 分别装进 risu-url、risu-header 两个请求头，服务端解包后原样转发上游（`server/node/server.cjs:742-821`）。Web 运行模式下，凭据完整经过第三方中转进程。
 
-请求日志会把 headers 与 body 原样记录进内存数组 `fetchLog`（最多 20 条，`globalApi.svelte.ts:650-777`），流式请求在 `fetchNative` 中也先写入日志再返回（`globalApi.svelte.ts:1780-1791`）。日志可通过 DevTool 侧栏或设置页"Show Log"以 Markdown 展示和复制（`src/lib/Setting/Pages/Advanced/SettingsExportButtons.svelte:12-19`），因此 API Key 在日志中可见，没有脱敏。插件读取日志需先获得 `fetchLogs` 权限（`src/ts/plugins/apiV3/v3.svelte.ts:569-605`）。
+请求日志把 headers 与 body 原样记进内存数组 `fetchLog`，最多保留 20 条，流式请求也在发出前先写入日志再返回，这段逻辑位于 `src/ts/globalApi.svelte.ts:650-777, 1780-1791`。这些记录可以通过 DevTool 侧栏或设置页的 Show Log 以 Markdown 展示和复制（`src/lib/Setting/Pages/Advanced/SettingsExportButtons.svelte:12-19`），API Key 因此在日志中可见，没有脱敏。插件要读取日志，需先获得 `fetchLogs` 权限（`src/ts/plugins/apiV3/v3.svelte.ts:569-605`）。
 
 ### 3.4 导出与前端可见性
 
-"Export Settings for Bug Report" 导出会删除含 key/proxy/hypa 关键字、URL 类字段及 `customModels`、`authRefreshes` 等键（`SettingsExportButtons.svelte:43-58`）；Preset 导出同样清空 Key 与 URL。设置页输入框的掩码由 `hideApiKey` 开关（默认开启）控制，仅是 UI 行为，数据始终明文绑定在 `DBState.db` 上（如 `BotSettings.svelte:403-408`）。不存在设置页之外的"只读掩码 API"，前端任意代码均可访问全部凭据。
+"Export Settings for Bug Report" 导出时删除键名含 key、proxy、hypa 的字段、URL 类字段，以及 customModels、authRefreshes 等键，Preset 导出同样清空 Key 与 URL（`src/lib/Setting/Pages/Advanced/SettingsExportButtons.svelte:43-58`）。设置页输入框的掩码由默认开启的 `hideApiKey` 开关控制，只作用于显示，明文数据始终绑定在数据库对象 DBState.db 上（`src/lib/Setting/Pages/BotSettings.svelte:403-408`）。掩码只覆盖设置页 UI，前端任意代码都能读到全部凭据。
 
 ## 4. 模型目录与能力元数据
 
 模型目录有三层来源：
 
-1. 静态内置表 `LLMModels`：OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI、Ollama（本地/云两个条目）、WebLLM、Kobold、NovelList、特殊条目（ooba、mancer、openrouter、kobold、custom、reverse_proxy、echo_model）等（`modellist.ts:44-578`）。其中 Gemini Flash 3.7 条目使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 等能力，并与 3.5/3.6 Flash 一样在 Vertex 请求中固定走 global endpoint（`model/providers/google.ts:4-17`、`process/request/google.ts:412-417`）；
-2. 动态注册 `registerModelDynamic`：启动时若 `dynamicModelRegistry` 开启，按 provider 分别拉取目录——Google `v1beta/models`、Anthropic 与 OpenAI 的 `/v1/models`（OpenAI 只收 `gpt-` 前缀）。
-   拉到的条目以 `dynamic_<provider>_<id>` 命名追加到内存数组（`modellist.ts:613-770`，启动入口 `bootstrap.ts:255`）；
-3. 设置页实时拉取：OpenRouter（含价格、context、缓存价与推理价元数据，`src/ts/model/openrouter.ts:51-106`）、NanoGPT（模型与订阅目录，`src/ts/model/nanogpt.ts:162-192`）、Ollama `/api/tags`（`src/ts/model/ollama.ts:23-45`）、Horde `status/models`（模块级内存缓存，`src/ts/horde/getModels.ts:19-44`）。
+1. 静态内置表：内置模型写在源码的 `LLMModels` 数组里，覆盖 OpenAI、Anthropic、Google、DeepSeek、DeepInfra、Mistral、Cohere、NovelAI 和 Ollama（本地、云两个条目），以及 WebLLM、Kobold、NovelList 和 ooba、mancer、openrouter、custom、reverse_proxy、echo_model 等特殊条目（`src/ts/model/modellist.ts:44-578`）。其中 Gemini Flash 3.7 条目使用 GoogleCloud 格式，声明图像、音频、视频、流式、思考和首条 system prompt 能力，在 Vertex 请求中与 3.5/3.6 Flash 一样固定走 global endpoint（`src/ts/model/providers/google.ts:4-17`、`src/ts/process/request/google.ts:412-417`）；
+2. 动态注册：启动时若开启 `dynamicModelRegistry` 开关，`registerModelDynamic` 会按 Provider 分别拉取远端目录——Google 取 v1beta/models，Anthropic 与 OpenAI 取 /v1/models（OpenAI 只收 gpt- 开头的条目）。
+   拉到的条目以 `dynamic_<provider>_<id>` 命名追加到内存数组（`src/ts/model/modellist.ts:613-770`，启动入口 `src/ts/bootstrap.ts:255`）；
+3. 设置页实时拉取：设置页打开时按需请求四类远端目录——OpenRouter（含价格、context、缓存价与推理价元数据，`src/ts/model/openrouter.ts:51-106`）、NanoGPT（模型与订阅目录）、Ollama 的 /api/tags 与 Horde 的 status/models（结果放在模块级内存缓存里）；四类目录的模块定位见关键源码索引。
 
 元数据以能力位 `LLMFlags`（27 个值，`types.ts:3-32`）与参数白名单 `parameters` 表达，直接驱动请求行为：`reformater` 按 flags 决定 system prompt 处理、角色交替要求与首条 user 补齐（`request.ts:348-432`）。
 
 凭据与采样参数同样取自模型条目：`keyIdentifier` 决定取哪把 Key，`endpoint` 覆盖默认 URL，`parameters` 决定 `applyParameters` 注入哪些采样参数（`shared.ts:137-342`）。
 
-未知模型 ID 在 `getModelInfo` 中回退为 OpenAI 兼容的通用条目；`hf:::`、`horde:::`、`xcustom:::`、`pluginmodel:::` 四种前缀分别映射到 WebLLM、Horde、自定义条目与插件目录（`modellist.ts:775-870`）。
+未知模型 ID 在模型信息查询中回退为 OpenAI 兼容的通用条目；带前缀的 ID 各有专门的条目来源：`hf:::` 指向 WebLLM，`horde:::` 指向 Horde，`xcustom:::` 指向自定义条目，`pluginmodel:::` 指向插件目录（`src/ts/model/modellist.ts:775-870`）。
 
 远端目录不落盘：动态注册只在每次启动执行一次，设置页目录每次打开实时拉取，失败静默返回空列表；模型条目全部在内存数组中，没有上下文长度、价格等元数据的持久化缓存。
 
@@ -206,18 +206,18 @@ Tauri 桌面端由前端 webview 直接持有全部凭据，HTTP 经 Rust comman
 
 `requestChatData` 是唯一的通用失败处理层（`request.ts:205-346`）。它先取当前任务模式对应的 `fallbackModels[mode]` 候选列表，追加空字符串表示"当前模型本身"，然后对每个候选做内层重试：
 
-- 内层循环中 `trys` 超过 `requestRetrys`（默认 2，设置页可调 0–20，`advancedSettingsData.ts:47-48`）时推进到下一个 fallback 候选；
-- 失败且标记 `failByServerError` 时先等待 1 秒，开启 `antiServerOverloads` 时每次计数只加 0.5（实际重试次数翻倍，`advancedSettingsData.ts:207`）；
-- 成功但响应为空且 `fallbackWhenBlankResponse` 开启时立即推进候选；
-- 成功但命中 `banCharacterset` 禁用脚本时留在同一模型重发；
-- 部分 Adapter 返回 `noRetry`（Horde 判定不可能、Kobold 等）直接放弃；
-- 插件模型（`custom` / `pluginmodel:::`）不参与候选推进。
+- 内层重试计数超过 `requestRetrys` 上限（默认 2，设置页可调 0–20）时，循环推进到下一个 fallback 候选；
+- 请求失败且被标记为服务端错误时先等待 1 秒；开启防过载（`antiServerOverloads`）后每次计数只加 0.5，实际重试次数随之翻倍（两个开关的阈值见 `advancedSettingsData.ts:47-48, 207`）；
+- 响应成功但内容为空、且空响应回退开关（`fallbackWhenBlankResponse`）打开时，立即推进候选；
+- 响应成功但命中 `banCharacterset` 禁用脚本时，留在同一模型上重发；
+- 部分 Adapter 返回 `noRetry`，例如 Horde 判定任务不可能、Kobold 等场景，此时直接放弃；
+- 插件模型（`custom`、`pluginmodel:::`）不参与候选推进。
 
 fallback 候选是任意模型 ID，设置 UI 在 `PromptSettings.svelte:313-334` 按模式分别配置，因此候选链可以跨 Provider（例如主模型是 OpenAI、候选是 DeepSeek 或 OpenRouter 条目），这是用户静态配置的模型 fallback，不是健康感知的自动 failover；推进候选会完整重发同一请求，存在重复生成与计费的可能（影响未实测）。
 
 ### 7.2 工具调用链与 Google 过载路径
 
-工具调用循环在 OpenAI 兼容（`requests.ts:821-828, 1292`）、Responses API（`responses.ts:564, 775`）与 Google（`google.ts:912-919`）三个 Adapter 内各自实现，统一使用同一个 `requestRetrys` 计数。Google 的 RESOURCE_EXHAUSTED 走独立的递归重发路径 `fallBackGemini`（`google.ts:589-614`），开启防过载时递归重发同一请求；静态代码中未发现深度上限，仅受 abort 信号与错误不再命中条件的约束（推断）。
+工具调用循环在三个 Adapter 内分别实现：OpenAI 兼容与 Responses API 的循环分别在 `src/ts/process/request/openAI/requests.ts:821-828, 1292` 与 `src/ts/process/request/openAI/responses.ts:564, 775`，Google 的循环与递归重发路径 fallBackGemini 都在 `src/ts/process/request/google.ts:589-614, 912-919`，三者共用同一个 `requestRetrys` 计数。Google 遇到 RESOURCE_EXHAUSTED 时走递归重发，开启防过载后递归重发同一请求；静态代码中没有深度上限，终止条件只取决于 abort 信号与错误是否仍命中重发条件（推断）。
 
 ### 7.3 多 Key 与健康状态
 
@@ -249,7 +249,7 @@ fallback 候选是任意模型 ID，设置 UI 在 `PromptSettings.svelte:313-334
 
 - Provider/Format/Flags 枚举与模型类型：`src/ts/model/types.ts`
 - 内置模型表与动态注册：`src/ts/model/modellist.ts`
-- 远端目录：`src/ts/model/openrouter.ts`、`src/ts/model/nanogpt.ts`、`src/ts/model/ollama.ts`、`src/ts/horde/getModels.ts`
+- 远端目录：`src/ts/model/openrouter.ts:51-106`、`src/ts/model/nanogpt.ts:162-192`、`src/ts/model/ollama.ts:23-45`、`src/ts/horde/getModels.ts:19-44`
 - 数据库定义、默认值与迁移：`src/ts/storage/database.svelte.ts`
 - 保存格式与备份：`src/ts/storage/risuSave.ts`、`src/ts/globalApi.svelte.ts`
 - 请求入口与 fallback 链：`src/ts/process/request/request.ts`

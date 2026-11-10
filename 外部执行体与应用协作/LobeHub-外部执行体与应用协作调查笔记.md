@@ -16,14 +16,17 @@
 
 LobeHub 在外部执行体、外部应用和外部控制/交互表面三种接入角色上都有实现，且三者从本快照起分属清晰的四层描述符目录：
 
-- `主链确认`：**14 种本地执行体**（Amp、Claude Code、CodeBuddy、Codex、Copilot、Cursor、Devin、Factory Droid、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE）以本地 CLI 形式接入；**4 种 runtime 传输**（`claude-code-sdk`、`cursor-acp`、`droid-acp`、`deepseek-harness`）与它们并列注册但语义不同；OpenClaw/Hermes 属远程任务类，走 gateway 而非本地 JSONL adapter。
+- `主链确认`：宿主对三类外部执行体分别采用不同接入方式：
+  - 本地执行体共 **14 种**，以本地 CLI 形式接入：Amp、Claude Code、CodeBuddy、Codex、Copilot、Cursor、Devin、Factory Droid、Grok Build、Kimi Code、OpenCode、Pi、Qoder、TRAE。
+  - 另有 **4 种 runtime 传输**与上述 CLI 描述符并列注册，语义不同：claude-code-sdk、cursor-acp、droid-acp、deepseek-harness。
+  - OpenClaw 与 Hermes 属远程任务类，经 gateway 接入，与本地 CLI 的 JSONL adapter 分属两条通道。
 - `主链确认`：Connector/Composio 账号与动作权限；CLI Agent 驱动内置浏览器；Bot 平台层安装、回调与 CLI 管理。
 - `主链确认`：Agent Share 把 Agent 以链接开放给已登录访客聊天。访客会话与创建者会话分离，拥有主题/回合/花费上限、工具授权、模型与错误信息可见性，以及创建者是否能查看访客会话等治理字段；本快照里分享治理从单一 `shareGate` 拆成 `shareChat` 路由族加运行期 gate。
 - `入口确认`：Slack、Discord、Telegram、Feishu/Lark、LINE、QQ、iMessage、WeChat 等平台的安装、绑定、webhook/gateway 和 outbound 已存在；Telegram Guest Mode、Feishu 历史读取与 WeChat 语音解码已有专门入口，但逐平台完整往返仍未运行验证。
 
-执行体的描述符集中在一个文件里，三类接入按行号分段排布：本地 CLI 从 amp（`:78`）排到 trae（`:424`），本地 runtime 传输在 `:474` 单列 `deepseek-harness`，远程任务在 `:500`（OpenClaw）与 `:510`（Hermes），整段都在 `packages/types/src/agent/heterogeneousAgent.ts:78-510`。
+外部执行体的描述符集中定义在 `packages/types/src/agent/heterogeneousAgent.ts` 一个文件里，三类接入按顺序排成三段：本地 CLI 从 amp 排到 trae，本地 runtime 传输单独一条、只列 DeepSeek Harness，远程任务条目以 OpenClaw 和 Hermes 收尾，整段横跨 `:78-510`。
 
-注册表与 adapter 实现在 `packages/heterogeneous-agents/src/registry.ts`，该包同时容纳 `adapters/`、`spawn/`、`askUser/`、`builtinMcp/` 与 `codex/`（含由 Codex app-server 协议生成的类型）。描述符与 transport 适配层分属两层：本地执行体数量按描述符条目统计，传输名不计入。
+注册表与 adapter 实现在 `packages/heterogeneous-agents/src/registry.ts`。该包按职责把代码分成五类子目录：adapters 放各 runtime 的适配器，spawn 放进程与协议会话的启动逻辑，askUser 承接结构化提问，builtinMcp 提供宿主内建 MCP，codex 存放由 Codex app-server 协议生成的类型。描述符与 transport 适配层分属两层：本地执行体数量按描述符条目统计，传输名不计入。
 
 ## 接入角色与系统边界
 
@@ -52,9 +55,9 @@ Connect Agent / 模型选择
 
 Claude Code SDK 把子类差异压在构造参数上，运行期结束以传输关闭为准，因为一次 Query 可能报告多个 result；`ClaudeCodeSdkAdapter` 的两个开关是 `runtimeEndStrategy: 'on-transport-close'` 与 `signalBackgroundTaskCompletion: true`，见 `packages/heterogeneous-agents/src/adapters/claudeCodeSdk.ts`。
 
-ACP 一族（Copilot、Cursor、Devin、Droid、TRAE、DeepSeek Harness）走统一的 `spawn/acpAgentSession.ts` 与 `acpStdioClient.ts`：客户端声明 `ACP_PROTOCOL_VERSION = 1`，把 `session/request_permission` 的 options 数组交给按 agent 排列的偏好层级选择，取消时留 `DEFAULT_CANCEL_GRACE_MS = 2000` 的宽限。Codex 走 app-server 协议，`codex/protocol/generated.ts` 是按协议生成的类型。
+Copilot、Cursor、Devin、Droid、TRAE 与 DeepSeek Harness 六个 agent 共用一套 ACP 客户端，入口在 `spawn/acpAgentSession.ts` 与 acpStdioClient.ts：客户端声明协议版本为 1，收到 session/request_permission 时按 agent 各自的偏好层级从 options 数组中挑出一项，取消操作留 2000ms 宽限。Codex 另走 app-server 协议，其类型由 codex/protocol/generated.ts 按协议生成。
 
-OpenClaw/Hermes 不走本地 JSONL adapter。`GatewayConnectionCtr.runHeteroTask`（`apps/desktop/src/main/controllers/GatewayConnectionCtr.ts:518` 起的分发分支）按 topic/task 启动进程，OpenClaw 经 `lh notify` 回传，Hermes 经标准输出与通知接口回流；任务表保存 PID 并支持终止。Gateway 客户端协议抽在 `packages/agent-gateway-client`（`mux/GatewayMuxClient`、`intervention.ts`、`mirroredTerminalEcho.ts`）。
+本地 CLI 的 JSONL adapter 只覆盖本地执行体；OpenClaw 与 Hermes 属于远程任务，由桌面主进程的 GatewayConnectionCtr.runHeteroTask 分发：它按 topic 与 task 启动进程，OpenClaw 经 `lh notify` 回传结果，Hermes 经标准输出与通知接口回流，任务表记录 PID 以支持终止；分发分支从 `apps/desktop/src/main/controllers/GatewayConnectionCtr.ts:518` 开始。Gateway 客户端协议抽在 packages/agent-gateway-client 包，含多路复用客户端、干预消息与终端回显镜像三个模块。
 
 ```text
 Bot 平台（slack/discord/telegram/feishu/line/qq/imessage/wechat）
@@ -110,7 +113,13 @@ apps/server/src/routers/lambda/shareChat/
 
 工具可见性由 `shareToolManifest.ts` 与 `grants.ts` 限制，并在 builtin dispatch 再检查一次；访客沙箱不注入创建者 JWT。
 
-分享数据结构分化为四张表 `agentShare`、`fileShare`、`documentShare`、`goalShare`（`packages/database/src/schemas/`）；仓库另有 `.github/workflows/verify-share.yml` 专门校验分享链路。
+分享数据按对象类型分别落到四张表，表定义都在 `packages/database/src/schemas/` 下：
+
+```text
+agentShare  fileShare  documentShare  goalShare
+```
+
+仓库另有 verify-share 工作流专门校验这条链路，定义在 `.github/workflows/verify-share.yml`。
 
 产品面（桌面设置与对话界面）会显示已连接 Agent、工作目录和任务/操作视图，并提供干预、取消与 bot/Messenger 绑定入口。
 

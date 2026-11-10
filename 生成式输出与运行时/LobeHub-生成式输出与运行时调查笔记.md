@@ -20,18 +20,18 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
 
 本类目与 Chat（会话/流式装配）、消息渲染器（普通 Markdown/工具卡）、Agent 工具（工具注册与执行调度）、插件生态的交接点：本文只记录"输出获得独立对象身份或专用运行环境"之后的环节；工具如何被调用、流式协议如何装配属于相邻类目。
 
-**主链路 A（Artifact）：** 模型经内置技能 `lobe-artifacts`（`packages/builtin-skills/src/artifacts/content.ts`）的指令在消息正文输出 `<lobeArtifact identifier type title>` 标记；客户端 Markdown 管线先归一化半截标记，再由 rehype 插件转成卡片节点，卡片组件在生成中自动打开 Portal（`src/features/Conversation/utils/markdown.ts`；`src/features/Conversation/Markdown/plugins/LobeArtifact/rehypePlugin.ts`；`LobeArtifact/Render/index.tsx:79-83`），Portal 按类型渲染预览。消息结束写入数据库 `messages.content` 文本列（`packages/database/src/schemas/message.ts:103`），重新打开会话时从该消息内容按正则提取源码展示（`src/store/chat/slices/portal/selectors.ts:103-118`）。**未运行验证。**
+**主链路 A（Artifact）：** 模型按内置技能 `lobe-artifacts` 的指令，在消息正文里写出 `<lobeArtifact identifier type title>` 标记，客户端收到后把标记变成卡片，并在生成过程中自动打开右侧 Portal 预览。协议指令与触发判定定义在技能内容文件；客户端先由 Markdown 管线归一化半截标记，再经 rehype 插件转成卡片节点，卡片组件负责自动开面板，Portal 再按类型选择渲染器（`packages/builtin-skills/src/artifacts/content.ts`；`src/features/Conversation/utils/markdown.ts`；`src/features/Conversation/Markdown/plugins/LobeArtifact/` 下的 rehype 插件与 `Render/index.tsx:79-83`）。消息结束后正文写入消息内容列，重新打开会话时再按正则从该消息内容提取源码用于展示（`packages/database/src/schemas/message.ts:103`；`src/store/chat/slices/portal/selectors.ts:103-118`）。**未运行验证。**
 
-**主链路 B（文档工作区）：** 文档存 `documents` 表（content + editorData 双格式）。
-- 用户编辑：Lexical 编辑器内修改，前端文档 store 防抖自动保存（`src/store/document/slices/document/action.ts`、`editor/action.ts:293-374`）；服务端 `DocumentService.updateDocument` 写历史快照（`apps/server/src/services/document/index.ts:623-755`）。
-- 模型修改：Page-Agent 工具经服务端 `pageAgentRuntime` 在无头 `EditorRuntime` 上做结构化修改（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47` 起的 `factory`），执行体位于 `@lobechat/builtin-tool-page-agent/executionRuntime`；同一文档的并发写入由 `apps/server/src/services/pageCollab` 的会话（`createPageSessions`/`runPageExclusive`）串行化；客户端侧由 `src/features/PageEditor/PageAgentProvider.tsx` 把当前 `documentId` 注入 conversation context 做页级绑定，不经 executor 级 `onAfterCall` 回推。
-- 模型回流闭环：agent 文档按 load rules/position 注入系统上下文（`apps/server/src/services/agentDocuments/index.ts:574-611`），模型通过 `lobe-agent-documents` 工具做读取与节点修改（`readDocument`/`modifyNodes`/`replaceDocumentContent` 等，`packages/builtin-tool-agent-documents/src/manifest.ts`）。
+**主链路 B（文档工作区）：** 文档保存在 `documents` 表，正文与编辑态各存一份。
+- 用户编辑：改动先落在 Lexical 编辑器里，前端文档 store 防抖后自动保存，服务端保存时写一条历史快照（`src/store/document/slices/` 下 `document/action.ts` 与 `editor/action.ts:293-374`；`apps/server/src/services/document/index.ts:623-755`）。
+- 模型修改：Page-Agent 工具让服务端在无头编辑器上执行结构化改动（执行体位于 builtin-tool-page-agent 包的 executionRuntime），文档先以草稿打开、成功后提交，同一文档的并发写入由 pageCollab 的页面会话串行化，客户端在页面侧绑定当前文档 ID，不依赖执行器的调用后回调（`apps/server/src/services/toolExecution/serverRuntimes/pageAgent.ts:47`；`apps/server/src/services/pageCollab`；`src/features/PageEditor/PageAgentProvider.tsx`）。
+- 模型回流闭环：agent 文档按加载规则与位置注入系统上下文，模型再用 lobe-agent-documents 工具读取内容、修改节点，形成读—改—再注入的循环（`apps/server/src/services/agentDocuments/index.ts:574-611`；`packages/builtin-tool-agent-documents/src/manifest.ts`）。
 
 **未运行验证。**
 
 ## 1. 触发方式、输出协议与对象模型
 
-- **触发**：Artifact 由模型自由文本中的 `<lobeArtifact>` 私有标记触发，协议指令以内置技能 `lobe-artifacts`（`packages/builtin-skills/src/artifacts/index.ts:12`）的形式注入。技能内容定义触发判定（实质、自包含、可迭代内容才用；代码片段一律内联）、属性规范（`identifier` 需跨轮复用）、类型约束与示例（`packages/builtin-skills/src/artifacts/content.ts:1-204`）。技能经 `<available_skills>` 装配进系统提示（`apps/server/src/services/aiAgent/index.ts:4121,4254-4279`）。
+- **触发**：模型在自由文本里写出 `<lobeArtifact>` 私有标记，就产生一条 Artifact；触发规则由内置技能 `lobe-artifacts` 以协议指令的形式注入系统提示。技能内容规定只有实质、自包含、可迭代的内容才用 Artifact，代码片段一律内联；属性方面要求 identifier 跨轮复用，并给出类型约束与示例。技能经 `<available_skills>` 装配进提示词（`packages/builtin-skills/src/artifacts/index.ts:12`、`packages/builtin-skills/src/artifacts/content.ts:1-204`；`apps/server/src/services/aiAgent/index.ts:4121,4254-4279`）。
 - **协议**：标签形式为 `<lobeArtifact identifier="..." type="..." title="...">content</lobeArtifact>`，type 取值见下列清单；正则与闭合判定见 `packages/const/src/plugin.ts:26-42`。
 
   ```text
@@ -45,15 +45,15 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   { children?, id, identifier?, language?, title?, type? }
   ```
 
-  `id` 是消息 ID，`identifier` 是模型自管 ID。Artifact **没有独立持久化行**：源码事实源是 `messages.content` 文本列（`packages/database/src/schemas/message.ts:103`），Portal 仅是投影，代码经 `artifactCode(id, identifier)` 从消息内容正则抽取（`src/store/chat/slices/portal/selectors.ts:103-118`）。文档/文件/任务输出则另有独立对象（见下）。
+  结构里的 id 是消息 ID，identifier 由模型自行维护。Artifact **没有独立持久化行**：源码以 `messages.content` 文本列为事实源，Portal 只是这份文本的投影，展示代码时由 `artifactCode(id, identifier)` 按正则从消息内容中抽取（`packages/database/src/schemas/message.ts:103`；`src/store/chat/slices/portal/selectors.ts:103-118`）。文档、文件和任务输出另有独立对象（见下）。
 
 ## 2. 增量生成、更新与最终化
 
-- **Artifact**：随消息正文逐 token 流式注入。Portal 内以 `isArtifactTagClosed` 判定标记是否闭合：未闭合时保持代码视图与流式动画，闭合后自动切到预览（`src/features/Portal/Artifacts/Body/index.tsx:35-40,62-68`）。更新粒度是**整段重写**：同一 `identifier` 在后续消息中由模型重发完整内容（技能指令要求复用 identifier，`content.ts:40`）；无 diff/patch。
-- **文档（模型修改）**：Page-Agent 的 `initPage`/`modifyNodes`/`replaceText` 在服务端无头 `EditorRuntime` 上以节点操作（LiteXML insert/modify/remove）执行，会话以 draft 打开、成功后 commit（`pageAgent.ts` 的 `buildService`；`services/agentDocuments/headlessEditor.ts` 的 `withHeadlessEditorLock`），最终写回经由 `services/pageCollab` 的 `PageWriter`（`saveSource: llm_call`）。
-- **文档（最终化）**：写库成功后由 `services/pageCollab` 的 `persistPageState` 落盘（含 `projectPageState` 投影），编辑器侧通过 page room 客户端接收变更；客户端交付物由 `packages/builtin-tool-page-agent/src/client/` 下的 `Inspector`/`Render`/`Streaming` 组件承担。
-- **文档（注）**：服务端历史对比只返回两份 editorData 快照（`services/document/history.ts` 的 `compareDocumentHistoryItems`），视觉 diff 由客户端 `LexicalDiff` 计算。
-- **失败收口**：Page-Agent 无 documentId 时返回 `PageAgentMissingDocumentId` 失败（`packages/builtin-tool-page-agent/src/ExecutionRuntime/index.ts:72-80`）；编辑器侧另有 `src/features/PageEditor/Copilot/PageAgentUnavailableAlert.tsx` 在 Page Agent 不可用时提示改用 lobe-agent-documents。
+- **Artifact**：内容随消息正文逐 token 流入。Portal 判断标记是否闭合：未闭合时停在代码视图并保留流式动画，闭合后自动切到预览。更新粒度是**整段重写**，模型在后续消息里用同一个 identifier 重发完整内容，没有 diff 或 patch 通道（`src/features/Portal/Artifacts/Body/index.tsx:35-40,62-68`；`packages/builtin-skills/src/artifacts/content.ts:40`）。
+- **文档（模型修改）**：Page-Agent 的初始化页面、修改节点、替换文本三个动作，在服务端无头编辑器上以 LiteXML 节点操作（插入、修改、删除）执行，会话以草稿打开、成功后提交，最终由 pageCollab 的写入器落库并把来源记为 llm_call（`serverRuntimes/pageAgent.ts` 的 `buildService`；`services/agentDocuments/headlessEditor.ts`；`services/pageCollab`）。
+- **文档（最终化）**：写库成功后，pageCollab 持久化页面状态并生成投影（`services/pageCollab`），编辑器侧通过 page room 客户端接收变更；工具调用的交付物由 page agent 客户端包中的检查、渲染、流式三类组件呈现（`packages/builtin-tool-page-agent/src/client/`）。
+- **文档（注）**：服务端历史对比返回两份 editorData 快照，视觉差异交由客户端的 LexicalDiff 计算（`services/document/history.ts` 的 `compareDocumentHistoryItems`）。
+- **失败收口**：Page-Agent 拿不到 documentId 时以 PageAgentMissingDocumentId 失败返回；Page Agent 不可用时，编辑器另弹提示引导改用 lobe-agent-documents（`packages/builtin-tool-page-agent/src/ExecutionRuntime/index.ts:72-80`；`src/features/PageEditor/Copilot/PageAgentUnavailableAlert.tsx`）。
 
 ## 3. 投影表面与多视图关系
 
@@ -78,20 +78,20 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   | `text/markdown` | Markdown 渲染 |
   | 其余 | 默认按 HTML 进 iframe |
 
-  Sandpack 依赖 `@codesandbox/sandpack-react` + `packages/artifact-template` 生成 Vite+React+Tailwind 项目；iframe 由 `@lobehub/ui` HtmlPreview 提供（`src/components/HtmlPreview/InlinePreview.tsx`）。
-- 代码/项目级运行：Cloud Sandbox 提供 13 个 API（`packages/builtin-tool-cloud-sandbox/src/manifest.ts:8-318`），覆盖 `executeCode`（Python/JS/TS）、`runCommand`（含后台命令、120s 超时）、文件操作与导出；执行位置为远端沙箱，服务端经 `MarketSandboxProvider`/`OnlyboxesSandboxProvider` 桥接（`apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`），系统提示声明基于 AWS Bedrock AgentCore 且与用户本机隔离（`systemRole.ts:3`）。
-- 桌面端另有 **Local Sandbox 执行环境**（`packages/device-sandbox`，含环境创建、启动计划、运行时与能力探测等 API）。`src/helpers/localSandbox.ts` 在客户端判定是否围栏执行（`isLocalSandboxEnabled`/`resolveClientLocalSandbox`，含 `localSandboxNetwork` 成员/管理者双重判定），本地 system 工具因此多了“沙箱围栏”这一执行形态（与 device gateway 转发、裸 spawn 并存）；沙箱围栏强度（进程/网络隔离、writable roots）未运行验证。
-- 依赖提供：HTML 仅允许 cdnjs 外部脚本；React 预装 lucide-react、recharts、shadcn 并禁用外部图片（`content.ts:48-67`）；沙箱预装 Python 数据栈、Node、Chromium 等（`systemRole.ts:27-80`）。
+  React 预览由 Sandpack 在浏览器内完成打包，项目模板来自 artifact-template 包，产出 Vite + React + Tailwind 工程；HTML 预览的 iframe 由 @lobehub/ui 的 HtmlPreview 提供（`src/components/HtmlPreview/InlinePreview.tsx`）。
+- 代码/项目级运行：Cloud Sandbox 暴露 13 个 API，覆盖代码执行（Python、JS、TS）、命令执行（含后台命令与 120s 超时）、文件操作和导出。执行发生在远端沙箱，服务端经两个 provider 桥接，系统提示声明运行环境基于 AWS Bedrock AgentCore，与用户本机隔离（`packages/builtin-tool-cloud-sandbox/src/manifest.ts:8-318`；`apps/server/src/services/sandbox/providers/market.ts:19`、`onlyboxes.ts:47`；`systemRole.ts:3`）。
+- 桌面端另有 **Local Sandbox 执行环境**，提供环境创建、启动计划、运行时与能力探测等接口（`packages/device-sandbox`）。客户端据此判断一次本地调用是否走围栏执行，判定同时覆盖成员与管理者的网络策略，本地 system 工具因此多出“沙箱围栏”这一执行形态，与 device gateway 转发、裸 spawn 并存；围栏强度（进程与网络隔离、可写目录）尚未运行验证（`src/helpers/localSandbox.ts`）。
+- 依赖提供：HTML 只允许加载 cdnjs 上的外部脚本；React 模板预装 lucide-react、recharts、shadcn，外部图片被禁用；沙箱镜像预装 Python 数据栈、Node 与 Chromium（`content.ts:48-67`、`systemRole.ts:27-80`）。
 
 ## 5. 用户交互、事件与错误反馈
 
-- Artifact：预览/代码双模式切换（`src/features/Portal/Artifacts/Title.tsx:73-93`）、SVG 下载 PNG/SVG、复制为图片（`SVG.tsx:41-130`）；生成中卡片显示 loading 与字符数（`LobeArtifact/Render/index.tsx:106-124`）。文档内的交互状态（diff 待审、dirty、编辑锁）不随重载恢复，以持久化行 + 锁服务重建（见第 8/10 节）。
-- 工具渲染层分四类注册表（`packages/builtin-tools/src/register.ts:174-352`，类别清单见下），ToolUI Portal 按工具 identifier 取内置 Portal 组件渲染（`src/features/Portal/Plugins/Body/ToolRender.tsx:26-38`）。这是工具/插件输出的声明式扩展点（内置白名单注册，非任意脚本）。
+- Artifact：顶部可在预览与代码两种模式间切换，SVG 支持下载成 PNG/SVG 和复制为图片，生成中的卡片显示加载状态与字符数。文档侧的交互状态（待审 diff、dirty、编辑锁）在重新加载后由持久化行与锁服务重建（`src/features/Portal/Artifacts/Title.tsx:73-93`、`SVG.tsx:41-130`、`LobeArtifact/Render/index.tsx:106-124`）。
+- 工具渲染层按四类注册表登记（类别清单见下），ToolUI Portal 再按工具 identifier 取出内置组件渲染，这套注册构成工具与插件输出的声明式扩展点，白名单内置（`packages/builtin-tools/src/register.ts:174-352`；`src/features/Portal/Plugins/Body/ToolRender.tsx:26-38`）。
 
   ```text
   Render / Inspector / Streaming / Intervention / Placeholder / Portal
   ```
-- 错误反馈：执行失败以 `state.error`/`exitCode`/`stderr` 结构化回传（`packages/builtin-tool-cloud-sandbox/src/ExecutionRuntime/index.ts:40-74`）；文档保存冲突以 toast + `saveBlockedByLock` 状态呈现（`src/store/document/slices/editor/action.ts:355-373`）。
+- 错误反馈：沙箱执行失败时，错误信息、退出码与标准错误以结构化字段回传；文档保存冲突则以 toast 加阻塞状态提示用户（`packages/builtin-tool-cloud-sandbox/src/ExecutionRuntime/index.ts:40-74`；`src/store/document/slices/editor/action.ts:355-373`）。
 
 ## 6. 编辑、diff、版本与协作
 
@@ -102,9 +102,9 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   autosave / manual / restore / system / llm_call
   ```
 
-  自动保存有窗口合并与上限（`src/const/documentHistory.ts`）。服务端 `compareDocumentHistoryItems` 返回两份快照（`apps/server/src/services/document/history.ts:109-125`），客户端 `LexicalDiff` 渲染视觉对比（`src/features/PageEditor/History/DocumentHistoryDiff.tsx:61-114`）。
-- diff 接受/拒绝：编辑器内的 `diff` 类型节点由 `DiffAllToolbar` 一键全部接受/拒绝（`src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`）；保存路径刻意保留待审 diff 节点，仅在显式接受/拒绝时归一化（`src/store/document/slices/editor/action.ts:325-327`）。diff 节点来源在 `@lobehub/editor`（外部包），本次未深挖其生成时机；历史对比视图本身是只读的。
-- 协作：Redis 租约式编辑锁已抽成独立服务 `apps/server/src/services/editLock`（`EditLockService`，由 `DocumentService` 注入），模型写操作与用户编辑经同一锁串行化，跨 tab/跨用户锁语义见 `src/features/PageEditor/usePageLockedByOther.ts`。`apps/server/src/services/pageCollab` 以 page room 客户端（`createPageRoomClient`）、房间会话与 `fork`/`persist` 支撑协同，无头侧经 `@lobehub/editor/yjs` 的 `YjsPlugin` 接入（`pageCollab/editorYjs.ts`），整条路径由 `isPageCollabEnabled` 开关控制；实际运行行为未验证。
+  自动保存会合并时间窗口并限制条数（`src/const/documentHistory.ts`）。服务端对比接口返回两份 editorData 快照，视觉差异由客户端的 LexicalDiff 渲染（`apps/server/src/services/document/history.ts:109-125`、`src/features/PageEditor/History/DocumentHistoryDiff.tsx:61-114`）。
+- diff 接受/拒绝：编辑器里的 diff 节点可以一键全部接受或拒绝，保存路径会刻意留住待审节点，只有用户显式确认时才归一化；节点的生成时机位于外部包 @lobehub/editor，本次未深挖，历史对比视图本身只读（`src/features/EditorCanvas/DiffAllToolbar.tsx:117-167`；`src/store/document/slices/editor/action.ts:325-327`）。
+- 协作：编辑锁是独立的 Redis 租约服务，由文档服务注入使用，模型写操作与用户编辑因此排在同一把锁上，跨 tab、跨用户的互斥效果见页面侧的 hook。实时协同由 pageCollab 承担：它以 page room 客户端、房间会话和 fork/persist 组织多人编辑，无头侧通过 Yjs 插件接入，整条路径由开关控制，实际运行行为未验证（`apps/server/src/services/editLock`；`src/features/PageEditor/usePageLockedByOther.ts`；`apps/server/src/services/pageCollab`）。
 
 ## 7. 能力桥、执行位置与权限范围
 
@@ -114,30 +114,30 @@ LobeHub 的生成式输出分为三个并存的层次：**Artifact**（`<lobeArt
   executeCode / writeFile / editFile / moveFiles / runCommand
   ```
 
-- 执行位置分层：Artifact HTML/React 在浏览器 iframe/Sandpack；Cloud Sandbox 在远端沙箱（HTTP provider 桥接）；本地文件工具在桌面设备（经 device gateway，本次仅确认入口）。沙箱文件可经导出并上传流程登记为云存储文件记录（`apps/server/src/services/sandbox/service.ts:141`；`routers/tools/market.ts:690-696`），生成文件可自动登记为 work 资产（`apps/server/src/services/toolExecution/workRegistration.ts` 与 `apps/server/src/services/workRegistration/`：`registerWorksForOperation`、`localRunWorkRegistration`、`shareWorkScope`）。
-- MCP/插件：本文只确认其输出扩展点（ToolUI Portal + 注册表渲染、`ToolRender.tsx`），插件发现/授权属于插件生态类目，未展开。
+- 执行位置分层：Artifact 的 HTML/React 在浏览器 iframe 或 Sandpack 内运行；Cloud Sandbox 在远端沙箱执行，由 HTTP provider 桥接；本地文件工具落在桌面设备，经 device gateway 转发，本次只确认到入口。沙箱产物可通过导出上传流程登记为云存储文件记录，生成的文件也能自动登记为 work 资产（`apps/server/src/services/sandbox/service.ts:141`、`routers/tools/market.ts:690-696`；`apps/server/src/services/toolExecution/workRegistration.ts`、`apps/server/src/services/workRegistration/`）。
+- MCP/插件：本文只记录工具与插件输出的扩展点（ToolUI Portal 与渲染注册表），插件发现与授权属于插件生态类目，未展开。
 
 ## 8. 持久化、恢复、分享与导出
 
-- Artifact：源码存消息文本（`messages.content`），恢复仍从 DB 消息提取。HTML Artifact 可通过工作区本地文件发布链或 `lh artifact publish <file>` 打包本地依赖并发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前限制本地资源数量与总量，并拒绝未打包的本地引用。共享核心见 `packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`，CLI 入口见 `apps/cli/src/commands/artifact.ts:84-138,204-246`。具体发布后端仍由业务槽提供；OSS 自托管环境可见的是发布入口，服务可用性取决于所配置的后端实现。
-- 文档：`documents` 行（`apps/server/src/services/document/index.ts` 的行构造与校验）字段含 content、editorData、title、parentId、fileType 等，另配历史表与编辑锁；恢复 = `restoreFromHistoryId` 与历史对比（`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。文档可发布到 workspace 并参与可见性/权限（`DocumentService.setVisibility`/`publishToWorkspace`）。
-- 沙箱导出文件成为 `files` 记录（预签名 URL 下载），图片生成工具的图片以消息内渲染展示（`packages/builtin-tool-image-generation/src/client/Render/GenerateImage.tsx`），文件落库链路本次未追完。
-- 备注：`ArtifactDeploymentActions`（"保存到工作区"）目前是空桩返回 null（`src/business/client/features/ArtifactDeploymentActions.tsx:11-13`），对应 lab 开关 `enableArtifactDeployment`（`src/store/user/slices/preference/selectors/labPrefer.ts:12-14`）——Artifact 到文档/文件的落盘能力未实现。
+- Artifact：源码仍存在消息文本里，恢复时从数据库消息中提取。HTML Artifact 可以走工作区本地文件发布链，也可以执行 `lh artifact publish <file>` 打包本地依赖后发布；发布器返回 revision 编号和公开 URL，CLI 会打印分享地址。发布前会限制本地资源的数量与总量，并拒绝未打包的本地引用。具体发布后端由业务槽提供，OSS 自托管环境能看到的是发布入口，服务可用性取决于所配置的后端实现（`packages/html-artifact/src/publishWorkspaceHtmlArtifact.ts:35-118`；`apps/cli/src/commands/artifact.ts:84-138,204-246`）。
+- 文档：一条文档记录同时保存正文与编辑态两份数据，外加标题、父节点、文件类型等元数据，另配历史表与编辑锁。恢复入口是 restoreFromHistoryId 与配套的历史对比，发布后可参与工作区可见性与权限控制（`apps/server/src/services/document/index.ts` 负责行构造与校验；`apps/server/src/routers/lambda/_schema/documentHistory.ts:47`）。
+- 沙箱导出文件成为 `files` 记录（预签名 URL 下载），图片生成工具产出的图片直接在消息内渲染展示，其落库链路本次未追完（`packages/builtin-tool-image-generation/src/client/Render/GenerateImage.tsx`）。
+- 备注：“保存到工作区”对应的 ArtifactDeploymentActions 目前是返回 null 的空桩，背后由 lab 开关 enableArtifactDeployment 控制，Artifact 到文档或文件的落盘能力未实现（`src/business/client/features/ArtifactDeploymentActions.tsx:11-13`、`src/store/user/slices/preference/selectors/labPrefer.ts:12-14`）。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- Artifact 迭代：模型依靠会话历史看到上一版内容并按指令复用 `identifier` 整段重发，无对象查询接口；对象身份（消息 id + identifier）只存在于客户端 Portal 栈。
+- Artifact 迭代：模型从会话历史里读到上一版内容，按技能指令复用同一个 identifier 整段重发；对象身份（消息 ID 加 identifier）只存在于客户端 Portal 栈里，模型侧没有查询接口。
 - 文档：完整闭环。模型经 `lobe-agent-documents` 工具集读写文档（`packages/builtin-tool-agent-documents/src/manifest.ts:8-283`）：
   - 读取：`listDocuments`、`readDocument`（XML 带节点 ID + markdown 双格式）；
   - 修改：`modifyNodes`、`replaceText`、`createDocument`、`renameDocument`、`copyDocument`、`removeDocument`；
   - 注入策略：`updateLoadRule`。
-  agent 文档按 policy/loadRules 自动注入上下文（`apps/server/src/services/agentDocuments/index.ts` 与 `services/agentDocuments/contextPayload.ts`；`packages/agent-templates/src/types.ts:4-45`）。
+  agent 文档按加载策略与规则自动注入上下文，注入内容由上下文载荷构造（`apps/server/src/services/agentDocuments/index.ts`、`services/agentDocuments/contextPayload.ts`；`packages/agent-templates/src/types.ts:4-45`）。
 - 注入链路在 context-engine 侧实现，三个处理器各司其职：
   - `AgentDocumentInjector/shared.ts`：按 `loadPosition`/`loadRules` 注入；
   - `SystemReplaceInjector`：让动态激活文档只携带一次、用绝对日期索引；
   - `ActivationResultTrim`：避免激活结果重复进 LLM 载荷（`packages/context-engine/src/processors/ActivationResultTrim.ts`）。
-  文档写入前自动快照历史（`services/agentDocuments/index.ts` 的历史快照路径）；`receiptRollbackService` 存在基于历史回滚的服务端机制（`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`，细节未深挖）。
-- 会话文件：上传文件自动同步进沙箱会话目录（`systemRole.ts:21-24`），沙箱每 topic 独立会话、过期重建（`systemRole.ts:222-227`）。
+  文档写入前会自动留一份历史快照；服务端另有基于历史回滚的服务 receiptRollbackService，细节未深挖（`services/agentDocuments/index.ts`；`apps/server/src/services/agentSignal/services/receiptRollbackService.ts:179`）。
+- 会话文件：用户上传的文件会自动同步进沙箱会话目录；沙箱为每个 topic 开独立会话，过期后重建（`systemRole.ts:21-24,222-227`）。
 
 ## 10. 生命周期、资源治理与性能
 

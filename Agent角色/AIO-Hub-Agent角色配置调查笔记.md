@@ -109,19 +109,23 @@ LLM Chat 的右侧栏（LeftSidebar.vue，组件类名为 right-sidebar）有“
 
 首次出现的 presetMessages 是 ChatMessageNode[]；每个节点还有 id、parentId、childrenIds、role、content、status 和 isEnabled。它可以表达：
 
-- `system`：角色设定、规则、知识和输出约束；
-- `user` / `assistant`：few-shot 示例、开场对话和角色口吻；
-- `chat_history`：实际会话历史的插入锚点；
-- `user_profile`：用户档案注入锚点；
-- `presetAttachments`：引用 Agent 专属资产作为预设消息附件；
-- `groupId`：把消息放进可整体开关的预设组。
+| 类型 | 用途 |
+| --- | --- |
+| `system` | 角色设定、规则、知识和输出约束 |
+| `user` / `assistant` | few-shot 示例、开场对话和角色口吻 |
+| `chat_history` | 实际会话历史的插入锚点 |
+| `user_profile` | 用户档案注入锚点 |
+| `presetAttachments` | 引用 Agent 专属资产作为预设消息附件 |
+| `groupId` | 把消息放进可整体开关的预设组 |
 
 消息可以按数组默认顺序注入，也可以使用 `injectionStrategy`：
 
-- `default`：按默认上下文顺序；
-- `depth`：相对聊天历史末尾按深度插入；
-- `advanced_depth`：用 `N`、`N1,N2` 或 `S~I` 等语法在多个深度重复注入；
-- `anchor`：相对于 `chat_history`、`user_profile` 等锚点前后插入，并用 `order` 排序。
+| 注入策略 | 插入行为 |
+| --- | --- |
+| `default` | 按默认上下文顺序 |
+| `depth` | 相对聊天历史末尾按深度插入 |
+| `advanced_depth` | 用 `N`、`N1,N2` 或 `S~I` 等语法在多个深度重复注入 |
+| `anchor` | 相对于 `chat_history`、`user_profile` 等锚点前后插入，并用 `order` 排序 |
 
 消息还可用 modelMatch 按模型 ID 或渠道正则决定是否生效，支持 any / all 和排除模式。也就是说，同一个角色可以为不同模型准备不同的提示词片段。
 
@@ -280,7 +284,11 @@ Agent 可以关联 `worldbookIds`，并配置：
 | 可保存或部分可编辑，但未确认被运行时消费 | `automationId`、trigger filtering、`excludeRecursion`、`ignoreBudget`、`useGroupScoring`、vectorized 状态；`Outlet` 可编辑/导出并保留在共享数据中，但未找到按 `outletName` 继续消费的注入链 |
 | 降级映射或兼容边界 | Before/After Char、AN、EM 等锚点会映射到 AIO 的消息结构，语义落在 AIO 自身的位置模型上；酒馆扩展事件、脚本协议和全部 World Info 字段本次未找到等价运行时 |
 
-还有几个 UI/类型差异需要保留：`characterFilter.tags` 在类型和运行时存在，当前编辑器只绑定 `names`；`useProbability` 会被运行时检查，但 UI 主要暴露概率值。导入归一化当前读取 `key`/`keysecondary`，导出则使用常见 ST 的 `keys`/`secondary_keys`，`character_filter` 的 snake_case 归一化也未见完整覆盖。它们需要用真实 V2/V3 样本做往返验证，目前只能记为兼容风险。
+字段存在与界面可编辑之间还有几处落差，都需要真实 V2/V3 样本做往返验证，目前记为兼容风险：
+
+- 标签过滤：`characterFilter.tags` 在类型和运行时都存在，当前编辑器只绑定 `names`；
+- 概率开关：`useProbability` 会被运行时检查，界面主要暴露概率值；
+- 键名归一化：导入读取 `key` 和 `keysecondary`，导出使用常见 ST 的 `keys` 和 `secondary_keys`；`character_filter` 的 snake_case 归一化也未见完整覆盖。
 
 ### 5.2 知识库与思绪（Recall/Knowledge 双域）
 
@@ -366,10 +374,13 @@ toolCallConfig 支持：
 
 assetGroups 和 assets 允许为一个 Agent 管理图片、音频、视频和文件。资产字段包括：
 
-- `id`：宏引用用的 handle；
-- `path`、`filename`、`type`；
-- `description`、`group`、`usage`（`inline` / `background`）；
-- 音视频 `autoplay`、`loop`、`muted`、封面和样式选项。
+| 字段 | 作用 |
+| --- | --- |
+| `id` | 宏引用用的 handle |
+| `path`、`filename`、`type` | 物理位置、文件名与媒体类型 |
+| `description`、`group`、`usage` | 描述、分组与用途，usage 取 `inline` 或 `background` |
+| `autoplay`、`loop`、`muted` | 音视频自动播放、循环与静音 |
+| 封面和样式选项 | 音视频封面图与展示样式 |
 
 预设消息可用附件引用这些资产，也可在内容中使用 `agent-asset://{group}/{id}.{ext}`。资产随 Agent 导入导出，可选择放入 ZIP/文件夹或 PNG 内嵌包。
 
@@ -453,11 +464,13 @@ AIO 的会话保存消息树、当前显示 Agent ID 和每条生成消息的元
 
 如果目标是创建一个“角色”，最小可靠配置是：
 
-1. `name`、`description`、`icon`、`category`、`tags`；
-2. 一个明确的 `system` 预设消息；
-3. `chat_history` 锚点，必要时加入 `user_profile`；
-4. 若需要稳定口吻，加入 1 至 3 组 user/assistant 示例；
-5. 设置合适的 `temperature` 和 `maxTokens`。
+| 配置项 | 内容 |
+| --- | --- |
+| 基础字段 | `name`、`description`、`icon`、`category`、`tags` |
+| 人格消息 | 一条明确的 `system` 预设消息 |
+| 对话锚点 | `chat_history`，必要时加入 `user_profile` |
+| 口吻示例 | 需要稳定口吻时，加入 1 至 3 组 user/assistant 示例 |
+| 采样参数 | 设置合适的 `temperature` 和 `maxTokens` |
 
 如果目标是创建一个“Agent”，再按需求增加：
 

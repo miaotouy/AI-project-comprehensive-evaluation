@@ -16,7 +16,11 @@ Git 跟踪文件 3944 个；可识别源码 3178 文件 / 约 920422 行；文�
 
 ## 结论摘要
 
-AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带独立移动端工作区的多端仓库。源码集中度依然很高：`src/tools` 单一区域约 56.0 万行，占全仓可识别源码约 61%；它同时包含大量随工具就地维护的 Markdown，因此“工具实现”和“工具说明”在物理目录上重叠。`src/tools` 下有子智能体（`sub-agent`）工具目录，并按工具就地维护 48 份 `ARCHITECTURE.md`；`packages/` 有三个工作区包（`agent-preset-core`、`model-metadata-core`、`tool-icons`），`src-tauri/crates` 有两个本地 crate（`code-formatter`、`desktop-entry`），workspace 边界覆盖 llm-core 与上述三个包，共四个成员。
+AIO Hub 是一个多端仓库：Vue/TypeScript 前端承担主体业务，Rust/Tauri 提供桌面外壳，移动端另有独立工作区。源码高度集中在 `src/tools`，该区域约 56.0 万行，占全仓可识别源码约 61%；工具实现与随工具就地维护的 Markdown 说明共处同一物理目录，“工具实现”和“工具说明”因此在目录上重叠。该区域下设子智能体（`sub-agent`）工具目录，48 份 `ARCHITECTURE.md` 按工具就地维护。其余工作区成员的分布如下：
+
+- `packages/`：`agent-preset-core`、`model-metadata-core`、`tool-icons` 三个工作区包
+- `src-tauri/crates`：`code-formatter`、`desktop-entry` 两个本地 crate
+- workspace 边界：`llm-core` 与上述三个包，共四个成员
 
 ## 统计与模块分布
 
@@ -46,7 +50,16 @@ AIO Hub 是以 Vue/TypeScript 前端为主体、Rust/Tauri 为桌面壳，并带
 | `src/services` | 55 个源码文件 / 约 15,616 行 |
 | `src/llm-apis` | 85 个源码文件 / 约 15,540 行 |
 
-`packages/` 已是一个四包 workspace：`llm-core` 约 1.78 万行、`model-metadata-core` 约 1984 行、`agent-preset-core` 约 1665 行、`tool-icons` 约 595 行。根 `package.json:22-26` 把 `packages/*`、`plugins/*` 与 `mobile` 一起纳入 workspace；`src-tauri/Cargo.toml:31-32` 以 path 依赖引入 `crates/code-formatter` 与 `crates/desktop-entry` 两个本地 crate。
+`packages/` 是四包 workspace，根 `package.json:22-26` 把 `packages/*`、`plugins/*` 与 `mobile` 一并纳入 workspace，四个包的行数如下：
+
+| 包 | 行数（约） |
+| --- | ---: |
+| `llm-core` | 1.78 万 |
+| `model-metadata-core` | 1984 |
+| `agent-preset-core` | 1665 |
+| `tool-icons` | 595 |
+
+`src-tauri/Cargo.toml:31-32` 则以 path 依赖引入 `crates/code-formatter` 与 `crates/desktop-entry` 两个本地 crate。
 
 `src/tools` 下现有 49 个一级条目，其中 48 个是带 `ARCHITECTURE.md` 的工具模块；`weather` 目录当前只有一份功能规划文档，尚未形成工具模块。工具域中体量较大的包括 llm-chat、media-generator、rich-text-renderer、agent-manager、tool-calling、git-committer、window-automator 等，各工具的架构说明与实现同目录维护。
 
@@ -63,7 +76,17 @@ TypeScript 约 472,093 行（51.3%）、Vue 约 370,062 行（40.2%）、Rust �
 | `mobile` | 20 |
 | `其他位置` | 27 |
 
-`docs` 内以用户手册与工具说明为主：`docs/user-guide` 约 129 篇、`docs/design` 37 篇、`docs/Plan` 37 篇、`docs/guide` 28 篇、`docs/architecture` 22 篇。`src` 下的文档几乎全部是随工具的 `ARCHITECTURE.md`、协议说明与计划文档。
+`docs` 内的文档以用户手册和工具说明为主，各子目录篇数分布如下：
+
+| 目录 | 篇数（约） |
+| --- | ---: |
+| `docs/user-guide` | 129 |
+| `docs/design` | 37 |
+| `docs/Plan` | 37 |
+| `docs/guide` | 28 |
+| `docs/architecture` | 22 |
+
+`src` 下的文档几乎全部是随工具的 `ARCHITECTURE.md`、协议说明与计划文档。
 
 测试分布落在五个区域：
 
@@ -79,7 +102,7 @@ TypeScript 约 472,093 行（51.3%）、Vue 约 370,062 行（40.2%）、Rust �
 
 ## 跨平台组织与边界
 
-根 `src` 与 `src-tauri` 组成 Windows、macOS、Linux 桌面应用；`mobile/` 下另有源码与 Tauri 壳组成移动入口，构建脚本提供 Android/iOS 命令（`package.json:43`、`package.json:66-69`）。桌面和移动端共享 workspace 与 `packages/*` 中的协议/元数据包，但各自是独立入口。README 的桌面发布矩阵见 `README.md:286-291`（Windows exe/portable、macOS dmg、Linux deb/AppImage/flatpak）。
+桌面端由根目录的 `src` 前端与 `src-tauri` 原生层共同承载，产出覆盖 Windows、macOS、Linux；移动端在 `mobile/` 下自成一套源码加 Tauri 壳，Android 与 iOS 的构建命令集中于 `package.json:43、66-69`。两端共用同一 workspace 和 `packages/*` 中的协议、元数据包，启动入口各自独立。桌面发布物按 `README.md:286-291` 的矩阵分发：Windows 为 exe 与 portable，macOS 为 dmg，Linux 为 deb、AppImage 与 flatpak。
 
 工程配套方面，`.github/workflows` 覆盖桌面构建、iOS/Android 构建、AppImage/flatpak 验证、PR 检查与文档站部署；`scripts/` 约 142 个文件，包含构建、性能基准、安全扫描、图标/文档校验等入口。本次未实际构建各平台。
 

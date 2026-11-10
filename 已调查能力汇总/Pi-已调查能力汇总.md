@@ -36,11 +36,17 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 ### 会话与消息
 
-- **会话数据模型（JSONL 追加型树）**：每个会话一个 `.jsonl` 文件（`~/.pi/agent/sessions/<编码cwd>/`），记录带 `id/parentId` 形成树，`leafId` 指针标识当前位置，分支只移动指针不修改历史；条目包含对话、设置、摘要、扩展、书签与 context_edit，`custom` 不进 LLM 上下文、`custom_message` 参与并控制显示；消息是分块内容模型，assistant 内容为 text/thinking/toolCall 块数组。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **会话数据模型（JSONL 追加型树）**：每个会话保存为一个 JSONL 文件，按编码后的工作目录放在 `~/.pi/agent/sessions/` 下的分目录中。文件里的记录都带 id 与 parentId，整份历史构成一棵追加型树；叶子指针 `leafId` 标记当前所在位置，切换分支只移动这个指针，历史条目不增不删。记录类型覆盖对话、设置、摘要、扩展、书签与 context_edit，其中 `custom` 条目不进入 LLM 上下文，`custom_message` 会进入上下文并控制是否显示。消息采用分块内容模型，助手消息由文本、思考与工具调用三类块组成数组。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
 - **持久化时机与事实源**：落盘绑定 `message_end`——首条 user 或 assistant 消息时创建文件，纯启动设置留内存，首轮无回复也保留提示，此后逐条 append；恢复时全量读入内存，读文件时版本落后自动迁移（v1→v2 生成 id/parentId 树，v2→v3 改 hookMessage 角色名）。证据：主链确认（静态源码）。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)。
 
-- **分支、fork、clone 与树导航**：分支四入口 `branch`/`createBranchedSession`/`forkFrom`/`branchWithSummary`（跨目录复制记 `parentSession`、追加 branch_summary 摘要条目）；`/tree` 树形导航带 label 书签与可选分支摘要生成，`/fork` 从指定 user 消息开新分支，`/clone` 复制当前会话；`/copy` 复制最后一条助手消息。原始历史追加保留，context_edit 可在分支内替换或排除模型投影；无独立续写入口，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **分支、fork、clone 与树导航**：分支体系分底层入口与用户命令两层，原始历史一律以追加方式保留，context_edit 能在分支内替换或排除送给模型的投影。底层有四个建分支入口，跨目录复制会在新会话记录来源的 parentSession，并追加一条 branch_summary 摘要条目。
+
+  ```text
+  branch / createBranchedSession / forkFrom / branchWithSummary
+  ```
+
+  用户命令分工是：`/tree` 打开树形导航（带 label 书签与可选的分支摘要生成），`/fork` 从指定 user 消息开新分支，`/clone` 复制当前会话，`/copy` 复制最后一条助手消息。无独立续写入口，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
 - **会话列表、检索与搜索**：列表全量扫描 + 并发上限 10、按修改时间倒序；`/resume` 选择器内嵌搜索（fuzzy/短语/`re:` 正则，搜索文本含全部消息文本与 cwd）。消息级搜索的独立实现（扫描器与 SQLite FTS5 后端）本次未接入主路径，细节见末尾小节。证据：静态源码确认。链接：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)。
 
@@ -52,7 +58,14 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 ### 生成与创作
 
-- **生成任务主链与输入处理**：`AgentSession.prompt()` 依次执行扩展命令、input 钩子、`/skill:name` 展开、`/template` 模板展开、流式中入队（steer/followUp）、模型与认证校验、预压缩检查、user 消息组装、`before_agent_start` 扩展事件，再进 `Agent.prompt()` → `runAgentLoop`；无独立"任务记录"对象，运行状态在 Agent/AgentSession 内，事件是唯一对外通道。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
+- **生成任务主链与输入处理**：一次发送从 `AgentSession.prompt()` 进入，输入侧处理按固定顺序走完后交给 `Agent.prompt()`，由 runAgentLoop 驱动执行。
+
+  ```text
+  扩展命令 → input 钩子 → /skill:name 展开 → /template 模板展开 → 流式中入队（steer/followUp）
+  → 模型与认证校验 → 预压缩检查 → user 消息组装 → before_agent_start → Agent.prompt() → runAgentLoop
+  ```
+
+  整条链没有独立的"任务记录"对象，运行状态保存在 Agent 与 AgentSession 上，事件是唯一的对外通道。证据：主链确认（静态源码）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Pi-Chat调查笔记.md)。
 
 - **流式协议与对象模型（能力等级 G2）**：模型输出只有 text/thinking/toolCall 三种结构化 part（外加工具结果中的 image），经统一 `AssistantMessageEvent` delta 事件归一化所有 provider；工具调用凭 `toolCallId` 成为 TUI 中可展开/折叠的声明式执行对象（G2），写盘产物凭文件路径成为工作区普通文件。`toolcall_delta` 携带原始 JSON 片段即时解析，输出 token 截断时所有未完成工具调用统一标记错误回注；thinking 被过滤时保留 `thinkingSignature`。聊天对象维持 G2；模型工具脚本另可进入 codemode 的 QuickJS worker，经统一钩子调用工具，脚本运行环境限于这条 codemode 路径。证据：主链确认（静态源码）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Pi-生成式输出与运行时调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
@@ -74,7 +87,11 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 - **参数校验与编排循环**：`prepareToolCall` 在执行前集中校验并做值转换（pi-schema 编译缓存校验器 + coerce），未知工具与校验失败都转成 isError 工具结果回注给模型而非中断循环；`runLoop` 双 while（内层处理工具调用 + steering 队列、外层排空 followUp 队列），默认并行执行同批工具调用、结果按序回注，可按 `executionMode` 转串行；`length` 截断时整批工具调用统一按失败回注。循环无显式迭代上限（源码未发现 maxIterations），终止依赖模型 stopReason 与队列排空。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
 
-- **审批与执行边界**：审批是回调钩子而非执行端强制——`beforeToolCall` 返回 `block` 即拒绝并回注，`afterToolCall` 可改写结果，扩展 `tool_call`/`tool_result` 事件走同一路径；项目信任门决定项目级 `.pi` 设置、资源、扩展与包是否加载（不直接拦截 bash 执行，仅当 shell 路径与命令前缀取自项目设置时间接影响运行参数）。基础工具本地执行：文件工具直接 fs，bash spawn 子进程、进程树终止、可选超时、输出截断；MCP 和 codemode 另有远端协议与 VM 边界；`BashOperations` 接口允许扩展替换执行后端（如 SSH 远程），默认本地实现。按工具/风险分级的常驻审批策略未发现，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- **审批与执行边界**：审批挂在回调钩子上，执行端没有额外的强制拦截环节：`beforeToolCall` 返回 block 时该次调用被拒绝并回注结果，`afterToolCall` 可以改写返回内容，扩展注册的 tool_call 与 tool_result 事件走同一条路径。
+
+  项目信任门决定项目级 `.pi` 设置、资源、扩展与包是否加载。bash 是否执行由工具层判断，只有 shell 路径与命令前缀取自项目设置时，信任门才间接影响运行参数。
+
+  基础工具都在本地执行：文件工具直接调用 fs，bash 拉起子进程并带进程树终止、可选超时与输出截断。MCP 与 codemode 各自还有远端协议与 VM 边界；执行后端可经 `BashOperations` 接口替换（如 SSH 远程），默认实现运行在本机。按工具或风险分级的常驻审批策略本次未发现，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
 
 - **扩展体系（自扩展 Agent harness）**：扩展可注册工具、改写 system prompt（`before_agent_start`）、注入 custom/custom_message 条目、提供 `/xxx` 命令与自定义会话条目；Pi Packages 经 npm/git 安装分享；Skill 是模型可见的文本资源（system prompt 索引 + `/skill:name` 全文注入），不是工具调用。harness SDK 的搜索接口未接入 TUI 主路径，细节见末尾小节。证据：主链确认（静态源码）。链接：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
 
@@ -82,7 +99,18 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 ### 渠道与调度
 
-- **LLM 渠道与 Provider 管理**：Provider 是代码注册项而非可多实例化用户实体（每 Provider 固定 id，`providers/all.ts` 构造 40 个，KnownProvider 枚举 40 个），Radius 网关是唯一多实例入口（`radiusProvider({ id })` 工厂）；模型目录四层合并（构建期内置目录 gitignore → 启动期 pi.dev 远端目录 ETag 叠加 → 用户 `models.json` 定义与 modelOverrides → 扩展注册）；Endpoint 不是独立实体，只是 `Model.baseUrl` 字段；`~/.pi/agent/models.json` 是唯一直接定义 Provider 的持久化入口，TUI 的 `/login`、`/logout`、`/model`、`/reload` 处理凭据、模型选择与重载。渠道配置编辑器未找到；p2 的 Web 端只有模型选择器与登录页，models.json 仍是唯一直接定义 Provider 的持久化入口，细节见末尾小节。证据：静态源码确认（"未找到"按本次检索范围表述）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
+- **LLM 渠道与 Provider 管理**：Provider 在代码中注册，每个 Provider 固定一个 id，`providers/all.ts` 构造 40 个，KnownProvider 枚举也是 40 个；Radius 网关是唯一可多实例化的入口，由 radiusProvider 工厂按 id 创建。Endpoint 只是 Model 上的 baseUrl 字段，没有独立实体。
+
+  模型目录由四层信息合并，后一层覆盖前一层：
+
+  1. 构建期的内置目录，由 gitignore 管理
+  2. 启动期从 pi.dev 拉取远端目录，按 ETag 叠加
+  3. 用户的 `models.json` 定义与 modelOverrides
+  4. 扩展注册
+
+  `~/.pi/agent/models.json` 是唯一直接定义 Provider 的持久化入口。TUI 里 `/login` 与 `/logout` 处理凭据，`/model` 做模型选择，`/reload` 重载配置。
+
+  渠道配置编辑器未找到；p2 的 Web 端只有模型选择器与登录页，Provider 定义仍来自 models.json 或扩展，细节见末尾小节。证据：静态源码确认（"未找到"按本次检索范围表述）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 
 - **凭据、Header 与安全边界**：凭据按 Provider 一粒存于 `~/.pi/agent/auth.json`（0600 权限 + proper-lockfile 文件锁，每 Provider 一文件记录 api_key 或 oauth access/refresh/expires）；解析优先级为显式 apiKey > 已存凭据 > 环境变量/ambient（AWS profile/ADC），已存凭据刷新失败不回退环境变量；models.json 内嵌凭据支持明文/`$VAR` 插值/`!command` 取值三条路径。凭据静态未加密；`auth print-api-key`/`print-bearer-token` 是显式导出路径，静态存储与日志未见自动脱敏。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 
@@ -90,7 +118,22 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 - **重试、限流与故障转移**：常规重试分 SDK、消息与会话三层；OpenRouter/Vercel Gateway 把路由策略交给聚合服务。客户端没有通用跨 Provider failover 或多 Key 池，但 Anthropic Messages 可按模型元数据请求服务端 refusal fallback，并按实际返回模型计费；中途切换会被拒绝。上下文溢出走压缩后单次恢复。证据：主链确认（静态源码）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
 
-- **模型选择与解析**：模型保存在会话状态、以 `model_change` 条目落会话并回放恢复；`resolveCliModel` 支持 `--provider/--model`、`provider/model` 规范引用、裸模型 id（歧义报错或按唯一已认证 Provider 消歧）、部分匹配优先 alias 再取最新日期版本；`--models`/作用域支持 glob 模式与 `:thinkingLevel` 后缀；初始选择优先级为 CLI 参数 > scoped models > 设置默认 > `defaultModelPerProvider` 匹配首个可用 > 第一个可用模型。无本地语义路由（上游路由策略由聚合服务执行）。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
+- **模型选择与解析**：选定的模型写进会话状态，以 `model_change` 条目持久化，回放会话时据此恢复。命令行解析由 `resolveCliModel` 负责，支持四种指定方式：
+
+  - `--provider` 与 `--model` 组合
+  - `provider/model` 规范引用
+  - 裸模型 id：有歧义时报错，或按唯一已认证的 Provider 消歧
+  - 部分匹配：优先 alias，其次取日期最新的版本
+
+  `--models` 与作用域支持 glob 模式和 `:thinkingLevel` 后缀。初始模型按以下优先级确定：
+
+  1. CLI 参数
+  2. scoped models
+  3. 设置中的默认值
+  4. 由 `defaultModelPerProvider` 匹配到的首个可用模型
+  5. 第一个可用模型
+
+  模型路由交给上游聚合服务执行。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 
 - **连接检测与可观测性**：`checkAuth` 检查凭据完整性（存储/环境/命令源），CLI `pi auth check` 返回 ready/not_ready/invalid；用量与成本按模型价格表 `calculateCost` 计算，footer 展示 token/成本、`/session` 输出统计；`packages/telemetry` 是无 exporter、无全局 span 状态的 vendor-neutral 契约包，无会话数据上报路径。无独立真实连接测试入口（checkAuth 不发真实请求），细节见末尾小节。证据：静态源码确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
 
@@ -115,8 +158,10 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 **应用界面基础设施**
 
-- **自研 TUI 框架**：`packages/tui` 是差分渲染终端 UI 库（不采用 Ink/blessed/react），提供 regular 与 fullscreen 两种屏幕模式、overlay 栈和单焦点模型；常规选择器通过编辑器插槽替换显示（showSelector 把编辑器换成选择器组件），真正悬浮的 overlay 只用于 fullscreen 搜索框与扩展 API；渲染调度为 16ms 最小帧间隔节流 + 输入路径立即渲染。
-- **反馈、主题与输入基础设施**：反馈分聊天区状态文本（showError/showWarning/showStatus，连续状态复用末行防刷屏）、fullscreen flash（Toast 等价物，仅 TuiAltScreen 提供）与 OSC 9;4 终端进度条三类；主题使用 JSON token + 全局单例（跨模块加载器共享），支持终端色彩降级（24bit/256 色）、var 引用与循环检测、`light/dark` 自动模式（三级终端主题检测：DSR 996/OSC 2031 通知、OSC 11 背景色、COLORFGBG 兜底）、自定义主题文件热重载；主题来源为内置、`~/.pi/agent/themes`、设置 themes 键、`--theme`、npm 包与扩展六路，选择走"预览不落盘、确认才持久化"。
+- **自研 TUI 框架**：终端 UI 由 `packages/tui` 自行实现，走差分渲染路线，未使用 Ink、blessed 或 react。库提供 regular 与 fullscreen 两种屏幕模式，用 overlay 栈与单焦点模型管理浮层；常规选择器通过编辑器插槽把编辑器替换成选择器组件显示，真正悬浮的 overlay 只用于 fullscreen 搜索框与扩展 API。渲染按 16ms 最小帧间隔节流，输入路径则立即渲染。
+- **反馈、主题与输入基础设施**：反馈统一为三类：聊天区状态文本（`showError` 显示错误、`showWarning` 显示告警、`showStatus` 显示一般状态，连续状态复用末行防止刷屏）、fullscreen flash（相当于 Toast，仅 TuiAltScreen 提供）与 OSC 9;4 终端进度条。
+
+  主题由 JSON token 与全局单例实现，跨模块加载器共享；支持 24 位与 256 色两级终端色彩降级、var 引用与循环检测、`light/dark` 自动模式，自动模式的三级终端主题检测依次为 DSR 996 与 OSC 2031 通知、OSC 11 背景色、COLORFGBG 兜底；自定义主题文件可热重载。主题来源包括内置、`~/.pi/agent/themes` 目录、设置中的 themes 键、`--theme` 参数、npm 包与扩展，共六路；选择时先预览、确认后才持久化。
 - **键盘与剪贴板**：键盘由统一注册表管理（TUI 层 + coding-agent 层模块声明合并），支持 `keybindings.json` 用户覆盖与同键冲突检测，组件只经 `keybindings.matches` 消费不硬编码；剪贴板在 native 插件、平台命令与 OSC 52 之间多层回退，图片按 Kitty/iTerm2 能力渲染、无协议时文本替代；终端能力探测保守（tmux/screen 下关闭图片与 OSC 8 超链接）；错误兜底为进程级 uncaughtException 恢复终端与 EIO 紧急退出，渲染层超宽行写 crash log 后 throw，无组件级错误恢复。无主题市场/壁纸/字体/密度/圆角设置。
 - **p2 的 Web 界面**：`apps/p2` 用 React 19 与 Chord 插件构建 Web host，Web 端自有组件（如 `ModelPicker.tsx`）与打包流程，与 TUI 不共享组件树。
 - 证据状态：静态源码核对（视觉/焦点/键盘/终端能力需运行验证）。链接：[应用界面基础设施调查笔记](../应用界面基础设施/Pi-应用界面基础设施调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Pi-ChatUI调查笔记.md>)、[消息渲染器调查笔记](../消息渲染器/Pi-消息渲染器调查笔记.md)。
@@ -134,14 +179,21 @@ Pi 是命令行编码 Agent 与 Agent 运行时 monorepo。稳定产品表面仍
 
 **未覆盖类目（仓库内本次未找到，按来源笔记检索范围表述）**
 
-- MCP 端到端 OAuth、远端环境与服务器兼容性未运行；coding-agent 的配置→工具注册→可用性复查→调用→限界回注已静态走通。来源：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
-- 按工具/风险分级的常驻审批策略与确认框式授权 UI（审批仅 `beforeToolCall` 回调钩子，扩展未注册时工具直接执行）。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
-- 渠道配置编辑器（TUI 只处理凭据/模型选择/重载；p2 的 Web 端只有模型选择器与登录页，渠道定义仍来自 models.json 或扩展）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
+- MCP 的端到端 OAuth、远端环境与服务器兼容性尚未运行验证；coding-agent 从配置到工具注册、可用性复查、调用与限界回注这条链已在静态源码上走通。来源：[仓库分布调查笔记](../仓库分布/Pi-仓库分布调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- 按工具或风险分级的常驻审批策略与确认框式授权 UI。审批只经由 `beforeToolCall` 回调钩子，扩展没有注册钩子时工具直接执行。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)。
+- 渠道配置编辑器。TUI 只处理凭据、模型选择与重载；p2 的 Web 端只有模型选择器与登录页，渠道定义仍来自 models.json 或扩展。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 - 通用客户端侧跨 Provider 自动故障转移、多 Key 池与轮询仍未找到；Anthropic 服务端 refusal fallback 是限定模型与限定协议的例外。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
-- 消息级搜索接入 CLI/TUI 主路径（p2 的搜索插件有 SQLite FTS5 消息检索，但 CLI/TUI 仍只有会话级扫描）；durable 的 `src/search.ts` 是工具 BM25 检索，不是消息检索。来源：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
-- 内置子 Agent 委托配置与 UI 层多 Agent 编排（子 Agent 仅由扩展经 `createAgentSession` 自建，无内置委托入口；单会话单 agent 循环，无多会话并行 UI）。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
-- 导出/分享无隐私提示、无脱敏：HTML/JSONL 原样携带 system prompt、thinking 全文、bash 命令与输出、文件路径与图片；Radius 分享还附加激活工具 schema。`/share` 前无内容确认或警告；来源笔记判断"隐私无护栏是有意为之还是疏漏，本次无从判断"。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
-- 独立"续写到消息末尾"入口（续写经分支/新消息）、`/system-prompt` 查看命令、消息就地编辑（历史追加型）、独立真实连接测试入口（`checkAuth` 不发真实请求）、`/settings` 之外无渠道级配置 UI。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
+- 消息级搜索接入 CLI/TUI 主路径：p2 的搜索插件有 SQLite FTS5 消息检索，CLI/TUI 仍只有会话级扫描；durable 的 `src/search.ts` 做的是工具 BM25 检索。来源：[会话与消息管理调查笔记](../会话与消息管理/Pi-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Pi-独特功能调查笔记.md)。
+- 内置子 Agent 委托配置与 UI 层多 Agent 编排：子 Agent 由扩展经 `createAgentSession` 自建，没有内置委托入口；单会话单 agent 循环，也没有多会话并行 UI。来源：[Agent 工具调查笔记](../Agent工具/Pi-Agent工具调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)。
+- 导出与分享环节没有隐私提示，也没有脱敏：HTML/JSONL 原样携带 system prompt、thinking 全文、bash 命令与输出、文件路径与图片，Radius 分享还附加激活工具 schema；`/share` 之前没有内容确认或警告，来源笔记判断隐私护栏是有意为之还是疏漏、本次无从判断。来源：[对话导出与分享调查笔记](../对话导出与分享/Pi-对话导出与分享调查笔记.md)。
+- 以下入口尚未提供：
+  - 独立"续写到消息末尾"入口，续写经分支或新消息完成；
+  - `/system-prompt` 查看命令；
+  - 消息就地编辑，历史按追加方式组织；
+  - 独立真实连接测试入口，`checkAuth` 不发真实请求；
+  - `/settings` 之外的渠道级配置 UI。
+
+  来源：[对话请求与上下文调查笔记](../对话请求与上下文/Pi-对话请求与上下文调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Pi-Agent角色配置调查笔记.md)、[LLM 渠道管理调查笔记](../LLM渠道管理/Pi-LLM渠道管理调查笔记.md)。
 
 **尚待运行观察的共性维度**
 

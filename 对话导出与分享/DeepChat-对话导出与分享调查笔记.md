@@ -6,7 +6,7 @@
 >
 > 代码快照：`3db91f876ad903b17215da94cd1a4a6398823dad`（分支：`dev`）
 >
-> 调查方式：静态源码局部调查；本轮补充阅读虚拟列表窗口化（useMessageVirtualization/useMessageWindow）、历史懒加载分页（messageStore.loadOlderMessages）、Markdown 节点虚拟化、preload 剪贴板实现与相关测试；未运行 Electron 应用、未执行测试
+> 调查方式：静态源码局部调查；阅读范围包括虚拟列表窗口化（useMessageVirtualization、useMessageWindow）、历史懒加载分页（messageStore.loadOlderMessages）、Markdown 节点虚拟化、preload 剪贴板实现与相关测试；未运行 Electron 应用、未执行测试
 >
 > 调查范围：当前问答组与“从顶部到当前消息”的图片复制主链，重点为迭代上限、分页/虚拟化影响、DOM 截图口径、跨平台剪贴板四个方向；不覆盖 Artifact 图片复制、浏览器页面截图、Tape/Trace 导出和会话 JSON 保存
 >
@@ -44,8 +44,8 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 “从顶部”的起点是容器内第一个已挂载 `[data-message-id]`（`useMessageCapture.ts:129-134`），即当前 DOM 中最早的一条已挂载消息；它与会话第一条消息的差距由两层机制决定：
 
-- 历史懒加载：会话打开只恢复约 100 条消息（`ChatPage.vue:437`）；更早历史以 100 条/页游标分页，仅在用户滚动到顶部时经 `loadOlderMessagesAtTop` 加载。捕获的程序化滚动不会触发分页：滚动监听要求用户手势意图（`hadUpwardPaginationIntent`）才可能加载，非用户滚动被视口通知直接判定为 native 而跳过，无手势意图时也会早退（`ChatPage.vue:684-692`；`useChatScrollController.ts:244-263`）。因此长会话的“从顶部”截图覆盖的是已加载页的最早消息，而非会话真实起点。
-- 消息窗口化：已加载消息超过 `MESSAGE_WINDOWING_THRESHOLD = 160` 条时启用窗口化渲染（`ChatPage.vue:438`），只挂载视口 ±2400px overscan 范围内的行，其余区域用前后 spacer 占位（`ChatPage.vue:86-107`；`MessageList.vue:5-36`；`useMessageVirtualization.ts:81-125`）。捕获滚动时窗口随滚动监听的 rAF 指标同步移动，但没有代码在捕获前强制窗口已就位，未挂载区域的占位空白是否进入分段取决于滚动与挂载的时序（运行行为未验证）。≤160 条时全部挂载，无占位空白问题。
+- 历史懒加载：会话打开时只恢复约 100 条消息，更早的历史按每页 100 条游标分页，用户在滚动到顶部时才触发加载。捕获过程中的程序化滚动不会触发分页：滚动监听要求先有用户向上滚动的手势意图，非用户滚动会被视口通知判定为原生滚动而跳过，没有手势意图时也会提前退出。因此长会话的“从顶部”截图覆盖的是已加载页的最早消息，会话起点之前仍有未加载的历史（`ChatPage.vue:437,684-692`；`useChatScrollController.ts:244-263`）。
+- 消息窗口化：已加载消息超过 160 条（阈值常量 `MESSAGE_WINDOWING_THRESHOLD`）时启用窗口化渲染，只挂载视口上下各 2400 像素范围内的行，其余区域由前后占位元素填充。捕获滚动时窗口跟随滚动的 rAF 指标同步移动，代码中没有在捕获开始前强制窗口就位的步骤，未挂载区域的占位空白是否进入分段取决于滚动与挂载的时序（运行行为未验证）。消息不超过 160 条时全部挂载，不存在占位空白（`ChatPage.vue:86-107,438`；`MessageList.vue:5-36`；`useMessageVirtualization.ts:81-125`）。
 
 ## 2. 分段捕获与垂直拼接
 
@@ -75,7 +75,9 @@ DeepChat 提供消息级图片复制，并用同一按钮的短按/长按区分�
 
 剪贴板交付已移到主进程：`registerClipboardIpc` 创建 `nativeImage`，空图会抛错，合法图再写入 clipboard；preload 以 `ipcRenderer.invoke` 调用并记录异步错误（`src/main/app/clipboardIpc.ts:1-21`、`src/preload/index.ts:8-33`）。该调用仍无平台分支和返回值，截图工作流也不等待成功结果；Electron 负责平台格式转换。
 
-`captureAndCopy` 调用后无条件返回 true，不检查写入结果（`usePageCapture.ts:344-346`）；若 `writeImage` 抛错，异常沿 IPC 抛回 renderer，`captureMessage` 无 catch 分支，表现为未处理的 Promise 拒绝（`useMessageCapture.ts:160-186`）。工具栏的“复制成功”浮层在 mouseup/键盘触发时即显示（`MessageToolbar.vue:227-249`），先于实际捕获与写入完成，与实际成败无关。
+复制入口先等待截图完成，只有捕获成功且返回图片数据时才发起剪贴板写入并返回 true，否则返回 false；它不等待或核对剪贴板写入结果（`src/renderer/src/composables/usePageCapture.ts:341-349`）。写入失败由 preload 捕获并记录日志，捕获工作流没有获得这项失败结果（`src/preload/index.ts:24-27`）。
+
+工具栏的“复制成功”浮层在鼠标松开或键盘触发时就已显示，早于实际捕获与写入完成，提示时机由用户操作决定；捕获调用与提示入口分别见 `src/renderer/src/composables/message/useMessageCapture.ts:160-186`、`src/renderer/src/components/message/MessageToolbar.vue:242-264`。
 
 Web 平台路径不存在：renderer 的 `getDeepchatBridge` 在无 `window.deepchat` 时直接抛错（`renderer/api/core.ts:8-14`），`window.api` 仅由 Electron preload 暴露（`src/preload/index.ts:114-133`），本快照未找到浏览器端 mock 或独立 Web 构建目标。
 
@@ -83,8 +85,8 @@ Web 平台路径不存在：renderer 的 `getDeepchatBridge` 在无 `window.deep
 
 截图对象是现场消息 DOM，内容口径不取自原始数据。每段由主进程 `webContents.capturePage(rect)` 抓取视口位图（`src/main/desktop/tab.ts:958-968`），因此进入图片的是“当前渲染后的可见内容”：已渲染的 Markdown/代码、流式输出进行到一半的文本、折叠/展开的当前 UI 状态，均按捕获瞬间的 DOM 呈现。捕获期间有两项针对性处理：
 
-- Markdown 节点级虚拟化在捕获期间被关闭（`MessageList.vue:103-105` 的条件使 MarkdownRenderer 的 `resolvedNodeVirtual` 变 false、`maxLiveNodes` 归零，`MarkdownRenderer.vue:243-249`；平时静态长文最多保留 260 个 live 节点），保证已挂载消息的节点全部渲染进截图；
-- 工具栏整体隐藏（`MessageToolbar.vue:2`，捕获中不再渲染），与 `.chat-capture-hide` 覆盖层（顶栏、输入区、只读工具交互浮层，`ChatPage.vue:9,127,141`）一起避免操作控件入图（`useMessageCapture.ts:33-53`）。
+- 捕获期间关闭 Markdown 节点级虚拟化：列表组件据此把节点虚拟化开关置为关闭，并把活跃节点上限归零，保证已挂载消息的节点全部渲染进截图；平时静态长文最多保留 260 个活跃节点（`MessageList.vue:103-105`；`MarkdownRenderer.vue:243-249`）；
+- 工具栏在捕获期间整体不渲染，加上 `.chat-capture-hide` 覆盖层隐藏的顶栏、输入区与只读工具交互浮层，操作控件不会进入截图（`MessageToolbar.vue:2`；`ChatPage.vue:9,127,141`；`useMessageCapture.ts:33-53`）。
 
 `.chat-capture-hide` 是明确的截图排除契约；除此之外，本次没有找到针对敏感内容、system prompt、路径或工具参数的专用过滤。
 
@@ -98,12 +100,16 @@ Artifact 的 `copyAsImage()` 也复用页面捕获能力，但其导出源是独
 
 除截图外还有一条纯文本导出链：Nowledge Mem 导出走插件连接，导出前先取目标连接再加载会话，取不到就返回“选择连接”错误；提交时把该连接随 thread 一起传入，连接检测在插件侧 verify（`src/main/exporter/index.ts`、`src/main/exporter/nowledgeMemClient.ts`）。用户消息文本在导出时会把会话引用的内联项拼进正文，避免导出稿丢失“引用了哪个会话”的信息（`src/main/exporter/formats/userMessageText.ts`、`@shared/sessionReferences`）。
 
-- `isCapturing` 防止同一 composable 并发截图（`usePageCapture.ts:159-161`）；
-- 捕获过程在 finally 中恢复滚动行为，消息层另行恢复隐藏覆盖层；
-- 单段失败会停止循环；已有分段仍可能继续进入拼接，是否形成部分图片没有显式完成度标记（`usePageCapture.ts:279-291,299-320`）；
-- 最多 30 次迭代，命中上限时静默拼接已有分段，无截断错误（详见第 2 节）；
-- 剪贴板写入会拒绝空图并记录错误，但截图工作流不等待该 Promise，没有重试或专用用户失败反馈（见第 3 节）；
-- 测试覆盖：`test/renderer/composables/usePageCapture.test.ts` 只验证分段裁剪与拼接调用参数；`test/renderer/composables/useMessageCapture.test.ts` 以 mock 验证两种范围计算路径；`test/main/routes/dispatcher.test.ts:5923-5959` 验证路由接线。迭代上限、分页、剪贴板与平台行为均无测试；
+- 并发保护：捕获进行中再次进入会直接被拒绝，返回“正在进行截图”错误（`usePageCapture.ts:159-161`）；
+- 状态恢复：捕获在 finally 中恢复滚动位置与滚动行为，消息层另行恢复被隐藏的覆盖层；
+- 失败处理：单段捕获失败会结束循环，已收集的分段仍可能进入拼接，是否产出部分图片没有显式完成度标记（`usePageCapture.ts:279-291,299-320`）；
+- 迭代上限：最多 30 次，命中上限时静默拼接已有分段，没有截断错误（详见第 2 节）；
+- 剪贴板写入：空图会被拒绝并记录错误，截图工作流不等待这个 Promise，没有重试或专用的用户失败反馈（见第 3 节）；
+- 测试覆盖：
+  - `test/renderer/composables/usePageCapture.test.ts` 验证分段裁剪与拼接调用参数；
+  - `test/renderer/composables/useMessageCapture.test.ts` 以 mock 验证两种范围计算路径；
+  - `test/main/routes/dispatcher.test.ts:5923-5959` 验证路由接线；
+  - 迭代上限、分页、剪贴板与平台行为没有测试。
 - 没有应用内图片历史、预览、版本或持久化对象。
 
 ## 6. 设计取舍与已确认边界

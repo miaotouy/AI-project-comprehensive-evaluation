@@ -30,13 +30,13 @@ OpenOcta 的“渠道”是配置文件 `models.providers` 下的一个 provider
 
 一条完整的对话级主链如下：
 
-1. 聊天页维护 `chatModelRef`，空值表示“使用默认配置”；下拉选项由 `agents.defaults.models` 的别名和 `models.providers.*.models` 合并生成（`ui/src/ui/app-render.ts:2585-2641`）。
-2. 前端通过 WebSocket 发送 `chat.send`，把所选引用放进 `modelRef`（方法白名单见 `src/pkg/gateway/ws/hub.go:103`）。
-3. 处理器先取请求显式引用，取不到再按会话键解析 Agent 默认模型（`src/pkg/gateway/handlers/chat.go:2117-2125`）。
-4. 用该引用创建模型工厂；显式引用走 `CreateModelFactoryForModelRef`，否则走 `CreateModelFactoryFromConfig`（`chat.go:2162-2166`）。
+1. 聊天页维护当前选中的模型引用，空值表示“使用默认配置”；下拉选项由默认模型的别名和各 provider 下的模型条目合并生成（`ui/src/ui/app-render.ts:2585-2641`）。
+2. 前端通过 WebSocket 发送 `chat.send`，把所选引用随请求带给后端（方法白名单见 `src/pkg/gateway/ws/hub.go:103`）。
+3. 处理器先取请求里的显式引用，取不到再按会话键解析 Agent 默认模型（`src/pkg/gateway/handlers/chat.go:2117-2125`）。
+4. 用该引用创建模型工厂：有显式引用时走 `CreateModelFactoryForModelRef`，否则按配置创建（`chat.go:2162-2166`）。
 5. 工厂解析 provider 与模型，组装 claude 或 openai 客户端（`src/pkg/agent/eino/model_factory.go:183-280`）。
-6. 工厂随运行时选项进入会话运行时池；池未命中时调用 `runtime.New`，在构建 Eino 引擎时执行一次 `ChatModel(ctx)` 拿到具体模型实例（`src/pkg/agent/eino/engine.go:71-74`）。
-7. 流式事件由 Eino 迭代器转成 `message_delta`、`content_block_delta` 等事件，经 WS 广播给前端（`src/pkg/agent/stream/event.go:6-24`、`src/pkg/agent/eino/event_bridge.go:299-435`）。
+6. 工厂随运行时选项进入会话运行时池；池中没有命中时新建运行时，在构建 Eino 引擎时实例化一次具体模型（`src/pkg/agent/eino/engine.go:71-74`）。
+7. 流式事件由 Eino 迭代器转成 `message_delta` 一类的增量事件，经 WS 广播给前端（`src/pkg/agent/stream/event.go:6-24`、`src/pkg/agent/eino/event_bridge.go:299-435`）。
 
 在这条链里，`modelRef` 是唯一的渠道选择依据；没有按任务类型、成本或延迟的语义路由。OpenAI 兼容的对外接口 `/openocta/open/v1/completion` 复用同一套 `chat.send`，只是额外校验入站 Key 的模型白名单（`src/pkg/gateway/http/open_api.go:145-157`）。
 
@@ -116,9 +116,9 @@ UI 侧的操作实现集中在 `ui/src/ui/app-models.ts:38-388`，按动作可�
 
 读取侧有三条路径都会把密钥结构原样带出：
 
-- WS 的 `config.get` 返回完整快照，包含文件原文与解析后的结构（`src/pkg/gateway/handlers/config.go:36-48`、`659-670`）。
-- REST 的 `GET /api/config` 不返回原文，但同样返回含密钥的解析结果（`src/pkg/gateway/http/config_api.go:29-36`、`69-76`）。
-- 模型可调用的 `gateway_config` 工具，暴露读取、schema、环境变量、打补丁四个动作（`src/pkg/agent/tools/gateway.go:16-22`）。
+- WS 的 `config.get` 返回完整快照，既有文件原文也有解析后的结构（`src/pkg/gateway/handlers/config.go:36-48,659-670`）。
+- REST 的 GET /api/config 只返回解析结果，字段里照样带着密钥（`src/pkg/gateway/http/config_api.go:29-36,69-76`）。
+- 模型可调用 `gateway_config` 工具读写配置，提供读取、schema 查询、环境变量和打补丁四个动作（`src/pkg/agent/tools/gateway.go:16-22`）。
 
 因此密钥会原样回到前端，也会被模型通过工具读到。
 
@@ -126,29 +126,29 @@ UI 侧的操作实现集中在 `ui/src/ui/app-models.ts:38-388`，按动作可�
 
 代理边界是显式的：模型流量统一使用禁用代理的 HTTP 客户端，注释说明本机代理会让部分厂商 TLS 握手失败。该客户端总超时 180 秒，响应头超时 30 秒，空闲连接 90 秒（`model_factory.go:106-123`）。因此系统代理、`HTTP_PROXY` 对模型请求无效，需要走代理的网络环境只能改 baseUrl 指向本地转发。
 
-入站 Key 是另一套体系，容易与上游凭据混淆。`apikeys` 服务生成 `octa_` 前缀的随机密钥，保存 SHA-256 哈希用于校验，同时用由存储路径派生的密钥做 AES-GCM 加密以支持管理端回显；明文只在创建和轮换时返回一次（`src/pkg/apikeys/service.go:167-218`、`src/pkg/apikeys/crypto.go:13-37`）。它还带路径白名单、模型白名单、月度 token 上限和数字员工绑定（`service.go:384-467`），在对外接口 `/openocta/open/v1/completion` 上强制执行。
+入站 Key 与上游模型凭据是两套体系，由独立的 API Key 服务签发和管理。该服务生成带 `octa_` 前缀的随机密钥，只保存 SHA-256 哈希用于校验，另用由存储路径派生的密钥做 AES-GCM 加密以支持管理端回显，明文仅在创建和轮换时返回一次。密钥还带路径白名单、模型白名单、月度 token 上限和数字员工绑定，在对外接口 `/openocta/open/v1/completion` 上强制执行（`src/pkg/apikeys/service.go:167-218,384-467`、`src/pkg/apikeys/crypto.go:13-37`）。
 
 ## 4. 模型目录与能力元数据
 
 模型目录有三个来源，彼此不合并成一个统一目录：
 
-- **内置模板**：每个模板给一个默认模型名，仅用于未显式指定模型时的兜底；`vllm`、`litellm`、`huggingface` 等没有默认模型，必须显式给出（`model_factory.go:26-52`、`212-246`）。
-- **用户手填**：provider 的 `models[]` 由 UI 逐条添加，字段只有 id、显示名、上下文窗口、最大输出，其余能力字段需手写配置文件（`ui/src/ui/app-models.ts:114-145`）。
+- **内置模板**：每个模板自带一个默认模型名，只在没有显式指定模型时兜底；其中 vllm、litellm、huggingface 等没有默认模型，必须显式给出模型名（`src/pkg/agent/eino/model_factory.go:26-52,212-246`）。
+- **用户手填**：UI 在 provider 下逐条添加模型，表单只提供 id、显示名、上下文窗口和最大输出四项，其余能力字段要手写配置文件（`ui/src/ui/app-models.ts:114-145`）。
 - **内嵌模型运行时**：启动本地 GGUF 后，按运行快照生成 provider 条目，上下文和输出上限取自内置 catalog（`src/pkg/embeddedmodels/provider_config.go:39-99`）。
 
 没有远端模型列表拉取：本次未找到调用厂商 `/models` 的代码路径，`models.list` 的处理器虽然存在，但服务端注入的实现固定返回空切片（`src/pkg/gateway/http/server.go:200`、`src/pkg/gateway/handlers/models.go:15-25`）。UI 的模型下拉因此完全依赖配置里的模型数组；内置模板在没有配置 models 时会显示默认模型名（`ui/src/ui/views/models.ts:147-153`）。
 
-能力元数据的使用面很窄。`contextWindow` 是唯一进入运行时预算的字段：它被当作会话历史裁剪的 token 上限传给运行时（`src/pkg/agent/model_factory.go:108-134`、`src/pkg/gateway/handlers/chat.go:2317-2319`）。`maxTokens` 会作为客户端最大输出传给适配器；`reasoning`、`input`、`cost`、`compat` 在本快照中没有请求侧消费点。价格字段不参与成本计算，见第 8 节。
+能力元数据的使用面很窄。`contextWindow` 是唯一进入运行时预算的字段，被当作会话历史裁剪的 token 上限传给运行时；`maxTokens` 会作为客户端最大输出传给适配器；推理标记、输入模态、价格与兼容性字段在本快照中没有请求侧消费点（`src/pkg/agent/model_factory.go:108-134`、`src/pkg/gateway/handlers/chat.go:2317-2319`）。价格字段不参与成本计算，见第 8 节。
 
 内嵌模型目录另有一套静态表：可下载模型、GGUF 地址、量化、上下文与向量维度写在 `src/pkg/embeddedmodels/catalog.go`，模型广场的前端目录由脚本从外部列表生成。二者只按 id 对齐，运行状态由 manifest 维护。
 
 ## 5. Adapter、协议与请求组装
 
-适配器选择发生在创建工厂时：若 provider 配置的 `api` 等于 `anthropic` 或 `anthropic-messages`，就用 claude 客户端；否则一律用 openai 客户端（`model_factory.go:203-208`）。两边的组装都很薄——只传 API Key、模型名、可选 baseUrl、可选最大输出，再挂上前面提到的直连 HTTP 客户端（`125-154`）。没有自定义 Header 注入、没有请求体重写、没有 `max_tokens` 字段名兼容分支，schema 里的 `compat.maxTokensField` 也没有被读取。
+适配器在创建工厂时确定：provider 配置的协议字段为 anthropic 或别名 anthropic-messages 时使用 claude 客户端，其余一律使用 openai 客户端。两边的组装都很薄，只传 API Key、模型名、可选 baseUrl 和可选最大输出，再挂上前面提到的直连 HTTP 客户端。没有自定义 Header 注入，没有请求体重写，也没有 max_tokens 字段名兼容分支，schema 里的兼容性开关同样没有被读取（`src/pkg/agent/eino/model_factory.go:125-154,203-208`）。
 
-Anthropic 分支在未配置 baseUrl 时使用 SDK 官方端点；OpenAI 分支同理。`apiKey` 前缀不会自动补 `Bearer`，由 SDK 负责。Builtin 模板声明了是否使用 Anthropic 协议，`kimi-coding`、`synthetic`、`xiaomi`、`minimax` 四项走 Anthropic 兼容路径。
+Anthropic 分支在未配置 baseUrl 时使用 SDK 官方端点，OpenAI 分支同样如此。apiKey 原样交给 SDK，Bearer 前缀由 SDK 补充。内置模板各自声明是否使用 Anthropic 协议，其中 kimi-coding、synthetic、xiaomi、minimax 四项走 Anthropic 兼容路径。
 
-唯一的“非标准协议”是讯飞图片理解：当 provider 名为 xunfei/spark 且本次请求带图片附件时，处理器改用自定义 WebSocket 客户端，用 HMAC-SHA256 生成鉴权 URL，走 `spark-api.cn-huabei-1.xf-yun.com` 的图片接口（`src/pkg/gateway/handlers/chat.go:2144-2188`、`src/pkg/agent/xunfei_image.go:20-80`）。凭据需要 `XUNFEI_APP_ID`、`XUNFEI_API_KEY`、`XUNFEI_API_SECRET` 三项；缺省时回退到 OpenAI 兼容端点并记一条警告。这是本快照中唯一按“模型能力 + 输入模态”改变协议路径的分支。
+唯一的“非标准协议”是讯飞图片理解：provider 名为 xunfei 或 spark、且本次请求带图片附件时，处理器改用自定义 WebSocket 客户端，用 HMAC-SHA256 生成鉴权 URL，走 `spark-api.cn-huabei-1.xf-yun.com` 的图片接口（`src/pkg/gateway/handlers/chat.go:2144-2188`、`src/pkg/agent/xunfei_image.go:20-80`）。凭据需要 XUNFEI_APP_ID、XUNFEI_API_KEY、XUNFEI_API_SECRET 三项环境变量；缺省时回退到 OpenAI 兼容端点并记一条警告。这是本快照中唯一按模型能力与输入模态改变协议路径的分支。
 
 内嵌模型走的是另一条链路：provider 的 baseUrl 指向 Gateway 自己的 OpenAI 兼容代理 `/api/embedded-models/v1`，请求体里的 `model` 字段决定转发到哪个本地实例。启动模型时分配回环端口并注册 OpenAI 路由（`src/pkg/embeddedmodels/runtime.go:162-197`），代理按模型 id 查运行时并转发，超时 5 分钟（`src/pkg/embeddedmodels/chat_proxy.go:12-56`）。对话与向量共用同一代理前缀，但分别只能命中对应类型的实例。
 
@@ -156,7 +156,7 @@ Anthropic 分支在未配置 baseUrl 时使用 SDK 官方端点；OpenAI 分支�
 
 ## 6. 运行时选择、绑定与路由
 
-解析顺序是：请求显式 `modelRef` → 会话键解析出的 Agent 配置里的 `model`（字符串或 `{primary}`）→ `agents.defaults.model.primary` → 空（`src/pkg/agent/model_factory.go:59-77`）。Agent 的查找先按会话键第二段匹配 id，再找 `default` 标记，最后取列表首项（`26-46`）。
+模型引用的解析按四级回退：请求里显式给出的引用、会话键对应的 Agent 配置里的模型字段（可写字符串，也可写带 primary 的对象）、全局默认模型，都没有时为空。Agent 的查找先按会话键第二段匹配 id，再找 default 标记，最后取列表首项（`src/pkg/agent/model_factory.go:26-46,59-77`）。
 
 运行时池以会话键为粒度，指纹包含工作区、Agent id、数字员工 id、模型引用、讯飞图片模式、Web 搜索开关、系统提示覆盖、工具 schema 标记、系统提示版本，以及排序后的 MCP 与 Skill 键（`src/pkg/gateway/handlers/chat_runtime_pool.go:15-46`）。指纹一致就复用已有运行时，否则关闭重建（`src/pkg/agent/runtime/pool.go:85-101`）。
 
@@ -170,7 +170,7 @@ Anthropic 分支在未配置 baseUrl 时使用 SDK 官方端点；OpenAI 分支�
 
 上游 Key 没有多 Key 概念：`ModelProvider.APIKey` 是单个字符串，代码里没有 Key 列表、轮询、冷却或健康状态。`auth.cooldowns` 结构声明了计费退避、失败窗口等字段（`src/pkg/config/schema.go:359-365`），但没有读取点。
 
-模型调用没有重试层。检索 `retry`、`backoff`、`fallback` 等关键词，命中的是下载重试、MCP 传输回退、渠道消息回退和运行时池忙重试，模型请求路径没有命中。`agents.defaults.model.fallbacks` 只在 schema、注释和示例配置里出现（`schema.go:575-579`、示例 `src/prompt/prompt-zh/openocta.json.example:71-74`），没有执行逻辑。
+模型调用路径没有重试层。检索 retry、backoff、fallback 等关键词，命中的只有下载重试、MCP 传输回退、渠道消息回退和运行时池忙重试，模型请求代码里没有命中。故障转移配置只在 schema、注释和示例配置里出现，没有执行逻辑（`src/pkg/config/schema.go:575-579`、`src/prompt/prompt-zh/openocta.json.example:71-74`）。
 
 失败处理的实际形态是逐次冒泡：工厂创建失败会写一条错误到会话转写并结束本次运行（`chat.go:2167-2171`），运行时创建失败同样处理（`2365-2368`），运行中 panic 会尽量先冲刷已生成的部分文本再记错（`2097-2115`）。对外 OpenAI 兼容接口把错误映射成 HTTP 状态（`src/pkg/gateway/handlers/open_api_chat.go:330-350`）。因此不存在“同渠道重试”“换 Key 重试”或“跨渠道 failover”的区分，三层都没有实现。
 
@@ -184,7 +184,7 @@ Anthropic 分支在未配置 baseUrl 时使用 SDK 官方端点；OpenAI 分支�
 
 成本统计基本为空：聚合逻辑只在转写条目自带 `cost` 时累计，否则记入 `missingCostEntries`（`src/pkg/session/usage.go:855-880`）；而用量写入器不产生 cost，schema 里的单价表也没有被使用。因此 `usage.cost` 能返回结构，但价格字段通常为零。价格表和模型 `cost` 字段属于“有 schema、无计算”。
 
-链路追踪是默认开启的。若配置没有 `cozeloop` 段，`resolveCozeLoopSettings` 返回启用并填入内置的工作区 id 与 API Token；示例配置同样默认 `enable: true` 并带同一组值（`src/pkg/agent/eino/cozeloop.go:81-98`、`src/prompt/prompt-zh/openocta.json.example:59-64`）。启用后所有 Eino 组件回调（模型、工具、Agent）都会导出到 CozeLoop，导出内容包括输入输出与 Agent 事件序列（`src/pkg/agent/eino/cozeloop_parser.go:22-60`）。
+链路追踪默认开启。配置里没有 cozeloop 段时，设置解析函数返回启用状态，并填入内置的工作区 id 与 API Token，示例配置同样默认开启并带同一组值（`src/pkg/agent/eino/cozeloop.go:81-98`、`src/prompt/prompt-zh/openocta.json.example:59-64`）。开启后，模型、工具与 Agent 三类 Eino 组件回调都会导出到 CozeLoop，内容包括输入输出与 Agent 事件序列（`src/pkg/agent/eino/cozeloop_parser.go:22-60`）。
 
 关闭需要同时满足两个条件：显式写入 `cozeloop` 段的 `enable` 或 `enabled` 为 false，且 token 与 workspace 都为空。函数末尾还有一次兜底——只要 token 和 workspace 都有值（来自配置或 `COZELOOP_*` 环境变量），即使显式写了 false 也会重新置为启用（`cozeloop.go:109-111`）。
 

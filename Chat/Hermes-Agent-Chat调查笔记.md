@@ -16,7 +16,7 @@
 
 Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agent 核心的个人 AI 助手：
 
-1. 桌面端通过 `hermes gateway ensure --json` 附着或启动规范本地网关，并以 WebSocket JSON-RPC 观察与控制 Agent；网关生命周期独立于桌面窗口，远端连接保留其远端意图。实际消费入口见 [main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)。legacy serve/TUI 桥仍有独立实现，不能用该桥的旧启动描述覆盖规范连接路径。
+1. 桌面端启动时调用 `hermes gateway ensure --json`，附着到已在运行的规范本地网关，没有可用网关时就地拉起一个，随后通过 WebSocket JSON-RPC 观察并控制 Agent；网关生命周期独立于桌面窗口，连接远端网关时沿用该远端的意图。实际消费入口见 [main.ts](../../hermes-agent/apps/desktop/electron/main.ts#L11887-L11913)。旧的 serve/TUI 桥是另一套独立启动路径，规范连接以 gateway ensure 为准。
 2. **后端 SQLite 是唯一事实源**：会话、消息全部落在 profile 作用域下单一 `state.db`；每会话 JSONL 消息日志已在 spec 002 移除（`gateway/session.py`）。桌面端所有会话原子只是后端真相的缓存，遵循"合并而非覆盖、先乐观后诚实、拒绝乱序回写"的更新原则。
 3. **身份有两层**：
    - 进程内 UI 句柄 `sid` 与持久化 `session_key` 分离；
@@ -60,22 +60,26 @@ legacy tui_gateway：methods_prompt → prompt_turn → run_conversation，另�
 | `sessions`（`hermes_state_common.py:207-263`） | `id` 主键即持久 `session_key`；`source`；`parent_session_id`（血缘/轮转链唯一关联字段）；`model_config`（内含 `_branched_from`/`_delegate_from` 标记）；`system_prompt_hash`；`archived`/`pinned`；`compression_failure_*` 冷却字段 |
 | `messages`（:265-289） | 一行一条消息：`role`、`content`、`tool_call_id`/`tool_calls`、`reasoning_*`、`active`（软删/归档）、`compacted`（压缩归档仍可搜索）、`display_kind`/`display_metadata`、`api_content`（发 API 的字节保真 sidecar，恢复时原样返回） |
 
-- **桌面端权威**：仅原生/OS 性、窗口、流式渲染缓冲、发送前的乐观向量；后端事件投影进本地状态，不做本地合成。状态原子集中在 `store/session.ts`（会话、消息、活动会话 id、busy 标记），per-session 真实状态在 `sessionStateByRuntimeIdRef`。
+- **桌面端权威**：桌面端只在本地持有原生与操作系统层面的能力、窗口状态、流式渲染缓冲，以及消息发出前的乐观状态；后端事件到达后投影进本地状态，客户端不再另行合成。集中管理的状态放在 `store/session.ts`，覆盖会话、消息、活动会话 id 与 busy 标记，每个会话运行时的真实状态另存在 `sessionStateByRuntimeIdRef`。
 - **渲染投影**：后端 `SessionMessage` 经 `toChatMessages` 转为 assistant-ui part 数组（reasoning 是 part 而非顶层字段），工具行折叠、`@image:` 行提取回 attachmentRefs（`lib/chat-messages.ts`）。
 
 ## 专项导航
 
-- 会话与消息管理：[`../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md`](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)
-- 对话请求与上下文：[`../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md`](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)
-- Chat UI：[`<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>`](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)
-- 消息渲染：[`../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md`](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)
-- 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)；跨层综合结论见 [`../Chat/Chat横向对比.md`](../Chat/Chat横向对比.md)
+| 专项 | 笔记 |
+|---|---|
+| 会话与消息管理 | [Hermes-Agent-会话与消息管理调查笔记.md](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md) |
+| 对话请求与上下文 | [Hermes-Agent-对话请求与上下文调查笔记.md](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md) |
+| Chat UI | [Hermes-Agent-ChatUI调查笔记.md](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>) |
+| 消息渲染 | [Hermes-Agent-消息渲染器调查笔记.md](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md) |
+| 横向对比 | [会话与消息管理横向对比.md](../会话与消息管理/会话与消息管理横向对比.md)、[对话请求与上下文横向对比.md](../对话请求与上下文/对话请求与上下文横向对比.md)、[ChatUI横向对比.md](<../Chat UI/ChatUI横向对比.md>) |
+| 跨层综合 | [Chat横向对比.md](../Chat/Chat横向对比.md) |
 
 ## 关键能力与已确认边界
 
-- **lineage root 跨压缩轮转**：lineage/root 查询只沿 compression 边向上遍历（上限 100 层，`hermes_state.py:9425/:7004`）；轮转压缩以单事务插入子行并写压缩后消息，原地压缩则同 ID 软归档（`hermes_state.py:4670`、`:8287`）；`_lineage_root_id` 是桌面端 pin 与路由匹配的键（`session.ts:246-247`）。
+- **压缩与会话 ID**：轮转式压缩在一个事务内创建子会话、写入压缩消息并关闭父会话；原地压缩沿用当前会话 ID，软归档旧消息并写入压缩结果（`hermes_state_compression.py:373-400,446-480`、`hermes_state_messages.py:907-945`）。
+- **跨轮转身份**：列表查询沿 compression 边找根，再选择链上的活跃 tip，分支与委派会话按条件分开（`hermes_state_sessions.py:1162-1248`）。桌面端使用由此派生的只读字段 `_lineage_root_id`，pin 与路由匹配都以它为键。
 - **编辑 = 截断 + 重发**：无单消息编辑 RPC（检查范围：方法注册表），编辑经 `prompt.submit` + 截断到指定用户消息（服务端先替换 DB 行再改内存历史，要求显式 `confirm_truncate=true`，压缩已结束会话抛错）；无单消息删除，`rewind_to_message` 软删只服务 `/rewind`。
-- **steer/redirect 分层中断**：`steer` 把文本追加到最后一条 tool 消息 content 尾部（不新增消息、不破坏角色交替），无 tool 可挂时回存为下一轮用户消息（`agent_runtime_helpers.py:3940`）；`redirect` 只打断 model request，不扩散到工具/子代理；每轮开头 `clear_interrupt`。
+- **steer/redirect 分层中断**：steer 文本排队后在工具结果之后插入独立的 user 消息，下一次 flush 将其持久化；工具消息保留原内容，无工具结果可用时先回存，留待后续注入（`agent/turn_iteration_prep.py:284-295`、`agent/agent_runtime_helpers.py:3668-3705`）。redirect 只打断模型请求，不扩散到工具或子代理；每轮开头清理中断状态。
 - **崩溃安全**：`_flush_messages_to_session_db_unlocked`（`run_agent.py:2010`）单事务批量 + `_db_persisted` marker 去重，失败不盖章、下轮全量重扫；`interrupted_turns.json` 是唯一中途痕迹，resume 时按标记自动重跑（attempts 防崩溃循环）。
 - **压缩触发**：无 token 级截断原语；`should_compress` 阈值由 context_length 比例算出；preflight 多 pass（至多 3 轮，要求行数减少或 token 降幅 >5%）+ idle 压缩（墙上时间门）；另有 gpt-5.6 直接 OpenAI 路由的 native 服务端压缩（`agent/native_compaction.py`）与 stable/volatile 缓存边界注册表（`agent/prompt_cache_boundary.py`），详见对话请求笔记 §3。
 - **搜索边界**：FTS 索引矩阵（unicode61/bigram/trigram + LIKE 兜底），cjk/trigram 明确跳过 `role='tool'` 行（约 90% 字节是机器噪声）；rewind 行默认隐藏、压缩归档行默认可见。

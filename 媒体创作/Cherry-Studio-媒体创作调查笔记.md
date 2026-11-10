@@ -16,12 +16,12 @@
 
 Cherry Studio 的媒体创作是一条**用户主导、模型能力目录驱动、持久化在 v2 文件层之上的图像生成工作站**，能力分型为 **M1 模型生成工作站（主）+ M3 资产生命周期 + M5 Agent 驱动创作（边界）**。单一核心 `AiService.generateImage` 被两条产品面共享，但持久化目标不同：
 
-1. **工作台面**：绘画页 `/app/paintings/*` 把每次生成写成 `painting` 行（冻结收据：provider/model/prompt，`src/main/data/db/schemas/painting.ts:16-27`）+ `painting_file_ref`（output/input 角色）+ v2 `file_entry` 文件行；参数/模式/seed 等可变表单态**不落盘**，只活在渲染进程内存草稿里，应用退出即弃（`painting.ts:5-15` 注释明示）。
+1. **工作台面**：绘画页 `/app/paintings/*` 会把每次生成写成一行 `painting` 作为冻结收据，记录 provider、model 与 prompt，再挂上 output/input 两种角色的 `painting_file_ref`，文件本体落在 v2 的 `file_entry`。参数、模式、seed 这些可变表单态**不落盘**，只活在渲染进程的内存草稿里，应用退出即丢失。收据行结构与表头注释见 `src/main/data/db/schemas/painting.ts:5-27`。
 2. **Agent 面**：`generate_image` 工具（AI-SDK builtin 族 + Claude Code 内置 MCP 桥两个运行时）经 `generateImageFromPrompt` 调用同一核心。与工作台不同，它声明 `cleanupPolicy: 'manual'`，**不写 painting 行、不注册任何 ref**，结果只存在于 tool-call part 的文本结果中（`src/main/ai/tools/painting.ts:186-192` 注释 + #17169 跟踪）。待查清单疑点①确认：是同一生成核心的两条产品面。
 
-执行位置全部在 **main 进程**（renderer 只做参数清洁与编排）：普通 provider 走 AI SDK `aiCoreGenerateImage` 同步生成，本地 ComfyUI 服务器也是这条路径（transport 内部提交并轮询）；ppio、dashscope 等异步 submit/poll 供应商走 `image-generation.generate` job（`src/main/ai/AiService.ts:756-758`、`src/main/ai/provider/custom/tasks/imageGenerationJobHandler.ts`，完整供应商清单见第 6 节）。异步 job **非重启持久**，崩溃即弃（`recovery: 'abandon'`，`imageGenerationJobHandler.ts:50-58`）。
+图像生成全部在 **main 进程**执行，renderer 只负责参数清洁与编排。普通 provider 与本地 ComfyUI 服务器共用 AI SDK 的 `aiCoreGenerateImage` 同步路径，ComfyUI 由 transport 内部提交任务并轮询；ppio、dashscope 等异步 submit/poll 供应商则交给 `image-generation.generate` job（`src/main/ai/AiService.ts:756-758`，完整供应商清单见第 6 节）。异步 job **非重启持久**，进程崩溃即丢弃（`recovery: 'abandon'`，见 `imageGenerationJobHandler.ts:50-58`）。
 
-待查清单疑点②：**聊天 → 绘画页有导航入口**（消息 markdown 内链经 `isKnownNavigationPath` 渲染为导航条目 `Link.tsx:56-57`、Agent 导航工具 `NavigateTool.tsx:15`、侧栏标签 `sidebar.ts:80-82`）；**绘画页 → 聊天"插入结果"直接入口本次未找到**（painting 目录无 sendToTopic/insert 调用；Artboard 工具栏只有多图切换/缩放/旋转/复位，`Artboard.tsx:548-580`）。
+待查清单疑点②：**聊天到绘画页存在导航入口**——消息 markdown 内链命中已知路由即渲染为导航条目，Agent 导航工具与侧栏绘画标签构成另外两个入口（`Link.tsx:56-57`、`NavigateTool.tsx:15`，侧栏标签定位见 §1）。**绘画页到聊天的"插入结果"直接入口本次未找到**：painting 目录内没有 sendToTopic 或 insert 调用，Artboard 工具栏只提供多图切换、缩放、旋转与复位（`Artboard.tsx:548-580`）。
 
 ## 系统边界与完整主链
 
@@ -58,84 +58,84 @@ Cherry Studio 的媒体创作是一条**用户主导、模型能力目录驱动�
 
 ## 1. 创作入口、触发者与事实对象
 
-**入口**：用户主导是唯一完整触发面。侧栏绘画标签（`sidebar.ts:80-82`，routePrefix `/app/paintings`，resolveUrl 拼 `defaultPaintingProvider`）与 splat 路由（捕获任意 `/app/paintings/*`，`$.tsx:9-10`，不读 `$` 段，非深链）之外，聊天侧还有三个进入点：
+**入口**：用户主导是唯一完整触发面。侧栏绘画标签（`sidebar.ts:80-82`，routePrefix `/app/paintings`，resolveUrl 拼 `defaultPaintingProvider`）与 splat 路由（捕获该前缀下任意路径，`$.tsx:9-10`，不读通配段，非深链）之外，聊天侧还有三个进入点：
 
-- 消息 markdown 中已知路由链接渲染为导航条目（`Link.tsx:56-57`，测试用例 `Link.test.tsx:59` 用 `/app/paintings?source=assistant`）
-- Agent 导航工具白名单（`NavigateTool.tsx:15`）
-- home 消息适配器通用 `navigateToRoute`（`homeMessageListAdapter.tsx:508-511`）
+- 消息 markdown 内的链接：命中已知路由就渲染为导航条目，测试用 `/app/paintings?source=assistant` 覆盖这条路径（`Link.tsx:56-57`，测试见 `Link.test.tsx:59`）
+- Agent 导航工具的白名单入口（`NavigateTool.tsx:15`）
+- home 消息适配器统一的 `navigateToRoute` 跳转（`homeMessageListAdapter.tsx:508-511`）
 
 无插件、定时任务、外部服务触发入口（本次未找到）；Agent 触发面（`generate_image`）见第 6 节。
 
 **事实对象**分两层：
 
-- **活稿 `PaintingData`**（`model/types/paintingData.ts`）：字段为 `id/providerId/mode(generate|edit)/prompt/files/params(Record)/model/inputFiles/generationStatus`。全在渲染进程内存；生成前由 `createPainting` 落收据行。
-- **收据行 `painting`**（`schemas/painting.ts:16-27`）：字段为 `id/providerId/modelId/prompt/orderKey/timestamps`，**无 params/mode/seed/文件列**——输出与输入文件全在 `painting_file_ref`（`role` 取 output/input，`fileRelations.ts:92-111`），文件本体在 v2 `file_entry`（`file.ts`）。这是"资产不是消息附件"的关键证据：painting 行独立于会话持久化，聊天回填不是它的投影。
+- **活稿对象**：`PaintingData` 只存活在渲染进程内存里，记录本次生成的 id、providerId、mode（generate 或 edit）、prompt、files、params、model、inputFiles 与 generationStatus；提交生成前由 `createPainting` 先把收据行落库（`model/types/paintingData.ts`）。
+- **收据行**：`painting` 表保存 id、providerId、modelId、prompt、orderKey 与时间戳，参数、模式、seed 和文件都不在其中——输出与输入文件通过 `painting_file_ref` 的 role（output/input）关联，文件本体在 v2 的 `file_entry` 里（`schemas/painting.ts:16-27`、`fileRelations.ts:92-111`）。这是资产与消息附件分离的关键证据：painting 行独立于会话持久化，聊天回填并不复用这条记录。
 
 ## 2. 参数、素材与模型/渲染执行
 
 **模型能力目录**：三层来源合一：
 
-- **provider 列表**：`usePaintingProviderOptions` 按能力推导——模型带 `image-generation` capability 或 OpenAI image 端点（`paintingModelOptions.ts:25-42`）；OVMS 本地服务需 `ovms.is_supported/get_status` 门（`usePaintingProviderOptions.ts:30-46`）
-- **模型选择器**：从统一 `/models?providerId=X` 取数（`usePaintingModelCatalog.ts:63-77`）
-- **registry 支持块**：`imageGenerationSupport`（字段 `modes/supports/requirePrompt/maxInputImages/vendorTransport`）经 `GET /providers/:providerId/models/:modelId*/image-generation-support` 提供（`paintingPipeline.ts:60-81`、`models.ts:182`、`ProviderRegistryService.ts:1198`）
+- **provider 列表**：绘画 provider 由模型能力决定，模型带 image-generation capability 或兼容 OpenAI image 端点即可入选；接入 OVMS 本地服务时还要通过 `ovms.is_supported` 与 `ovms.get_status` 两步探测（`paintingModelOptions.ts:25-42`、`usePaintingProviderOptions.ts:30-46`）
+- **模型选择器**：统一从 `/models?providerId=X` 取数（`usePaintingModelCatalog.ts:63-77`）
+- **registry 支持块**：`imageGenerationSupport` 由 registry 的 image-generation-support 端点按 provider 与 model 返回，声明可用模式、能力标记、prompt 是否必填、最大输入图数量与 vendor transport 类型（读取与端点实现见 `paintingPipeline.ts:60-81`、`models.ts:182`、`ProviderRegistryService.ts:1198`）
 
 Agent 面绘画模型从 `feature.paintings.default_model_id` 偏好解析（`painting.ts:99-110`），与工作台默认草稿同源（`usePaintingDraftDefaults.ts:17-57`），无默认值时回退 `feature.paintings.default_provider`（zhipu）。
 
-**参数清洁**：表单字段由 `imageGenerationToFields` 从 registry support 动态生成（`PaintingComposer.tsx:134-138`）。提交时 `canonicalGenerate` 用 `buildParamsSchema` 校验并强制边界——seed 字符串转数字、enum/range 边界、`customSize` 合成 `WxH`、空值丢弃。main 侧 `splitParamValues` 把参数袋拆成 AI SDK 结构化字段（n/size/seed/aspectRatio）与 vendor 剩余袋（cfg 等），保持“字节一致 wire”不变式（`imageOptions.ts:26-40`）。编辑模式（非 generate）强制要求输入图（`EDIT_IMAGE_REQUIRED`）；输入图以 `data:` URL 随 IPC 发送，main 按 `cleanupPolicy: 'delete_when_unreferenced'` 持久化（`canonicalGenerate.ts:78-136`、`generatePainting.ts:54`）。
+**参数清洁**：表单字段由 registry 的 support 块动态生成，提交时按参数 schema 校验并收紧边界：seed 字符串转数字、enum 与 range 取合法值、自定义尺寸合成为「宽x高」、空值丢弃（`PaintingComposer.tsx:134-138`、`canonicalGenerate.ts:78-136`）。main 侧再把参数袋拆成 AI SDK 的 n/size/seed/aspectRatio 与 vendor 专属剩余袋（如 cfg），维持“字节一致 wire”的不变式（`imageOptions.ts:26-40`）。编辑模式必须携带输入图，缺失时报 `EDIT_IMAGE_REQUIRED`；输入图以 data URL 随 IPC 发送，由 main 按 `cleanupPolicy: 'delete_when_unreferenced'` 持久化。
 
 **执行位置**：全部在 main。同步路径 `aiCoreGenerateImage` 用 AI SDK ImageModel 调用，vendor wire 映射走 WireProfile 引擎（`AiService.ts:765-817`，含 `experimental_download` 兜底下载 URL 结果）；异步路径 job handler 拥有 submit/poll/download/persist 循环（`imageGenerationJobHandler.ts:100-137`），密钥不落 job——apiKey 每次执行重读（同文件 :27-30）。渲染侧无任何直连模型代码。
 
 ## 3. 任务状态、异步回调与取消
 
-- **状态**：`generationStatus`（running/canceled/failed 三值）是页面内存态，另有 Memory 缓存镜像 `painting.generation.${id}`——导航离开再回来可重水合 spinner（`usePaintingGeneration.ts:88-97`）。`painting` 行本身无状态列，收据冻结（`PaintingPage.tsx:80-84` 注释）。
-- **进度**：同步路径无进度回调，只有 spinner；异步 job 有 `reportProgress`（poll stage + 100%，`imageGenerationJobHandler.ts:190,136`），但唯一消费者只是等待 job 结束（`AiService.ts:945`），渲染进程无轮询——任务中心 UI 本次未找到（`useJob` 仅被 TranslatePage 消费，`TranslatePage.tsx:81`）。
-- **取消**：取消沿全链路传导：
-  1. renderer 的 AbortController 经 IPC `ai.image.abort`（`generatePainting.ts:43`、`ai.ts:152-154`）
-  2. `runImageRequest` 注册表中止请求（`AiService.ts:715-731`）
-  3. AI SDK abortSignal / job 的 `jobManager.cancel`（`AiService.ts:937-941`）；job 取消会顺带调 `transport.cancel` 撤远程任务（`imageGenerationJobHandler.ts:179-197`）
+- **状态**：`generationStatus` 取 running、canceled、failed 三值，只存在于页面内存中；同一状态另有一份 Memory 缓存镜像，键为 `painting.generation.${id}`，导航离开再回来可据此重新水合 spinner。painting 行本身没有状态列，收据写入后不再变更（`usePaintingGeneration.ts:88-97`、`PaintingPage.tsx:80-84`）。
+- **进度**：同步路径没有进度回调，界面只显示 spinner；异步 job 会通过 `reportProgress` 上报轮询阶段与 100% 完成度，但唯一的消费者是等待 job 结束的那段代码，渲染进程并不轮询，任务中心 UI 本次未找到（`imageGenerationJobHandler.ts:190,136`、`AiService.ts:945`；`useJob` 只被 TranslatePage 消费，见 `TranslatePage.tsx:81`）。
+- **取消**：一次取消会沿全链路向下传导，逐层生效：
+  1. renderer 的 AbortController 经 IPC `ai.image.abort` 通知 main（`generatePainting.ts:43`、`ai.ts:152-154`）
+  2. main 的 `runImageRequest` 在请求注册表中找到并中止对应请求（`AiService.ts:715-731`）
+  3. 到达 SDK 的 abortSignal，或由 job 的 `jobManager.cancel` 取消任务；job 取消时还会调用 `transport.cancel` 撤销已提交的远程任务（`AiService.ts:937-941`、`imageGenerationJobHandler.ts:179-197`）
 
-  取消结果折叠为 'canceled' 且不弹错误（`usePaintingGeneration.ts:131-141`）。
-- **失败**：provider/SDK 错误经 `exposeAiError` 包成带序列化详情的 IpcError（`ai.ts:39-53`），renderer `runPainting` 恢复真实原因（HTTP 状态/响应体片段，`runPainting.ts:69-83`），用户面 REMOTE_ERROR 模态（`paintingGenerateError.ts`）。
-- **重启/重试**：job 明确 `recovery: 'abandon'` 且 `maxAttempts: 1`（防重启后二次提交重复计费，`imageGenerationJobHandler.ts:32-58`）——**生成中崩溃即丢弃，本次未找到重启恢复路径**（与 Chatbox 的 taskId 恢复语义相反）。用户侧重试即改参再次生成（无 taskId 概念）。
+  取消完成后状态折叠为 canceled，界面不弹错误提示（`usePaintingGeneration.ts:131-141`）。
+- **失败**：provider 或 SDK 抛出的错误先由 `exposeAiError` 包成带序列化详情的 IpcError，renderer 侧 `runPainting` 从中还原 HTTP 状态与响应体片段等真实原因，最终以 REMOTE_ERROR 模态提示用户（`ai.ts:39-53`、`runPainting.ts:69-83`，模态定义见 `errors/paintingGenerateError.ts`）。
+- **重启/重试**：job 声明 `recovery: 'abandon'` 与 `maxAttempts: 1`，防止重启后再提交一次造成重复计费；生成过程中崩溃的任务会被直接丢弃，重启恢复路径本次未找到（`imageGenerationJobHandler.ts:32-58`）。这一点与 Chatbox 依靠 taskId 恢复的行为相反。用户侧重试就是改参后重新生成，没有 taskId 概念。
 
 ## 4. 结果、历史、资产与工程持久化
 
-- **写链**：生成前先 `createPainting` 落收据行（`usePaintingGeneration.ts:76-86`，`shouldCreate` 判定新建 vs 更新）。成功后 `updatePainting` 写 `files:{output,input}`（同文件 :119-124）。`PaintingService` 随后全量替换 `painting_file_ref`（`PaintingService.ts:246-257`，FK 双级联）。v1→v2 过渡期的无效文件 id 由 `buildPaintingRefRowsFiltered` 静默过滤并记日志（同文件 :339-394）。
-- **命名/去重**：文件由 FileManager 生成 v2 FileEntry（uuid 主键），无内容级去重（本次未找到）；painting 行 orderKey 排序（`PaintingService.ts:102-145` keyset 分页 + total）。
-- **清理**：清理语义见 `docs/dev/references/file/file-entry-cleanup.md`——`painting_file_ref` 提供保护引用；`painting` 删除经 FK 级联删 ref，随后清理 pass（`delete_when_unreferenced` + 1h grace，`:114,133`）回收孤儿文件。草稿附件不落库，materialize 与 painting 行、input ref 落在同一事务窗口（`:83`），文件的持久化时机与拥有它的对象同步。
+- **写链**：生成开始前先由 `createPainting` 写入收据行，该调用同时判定是否新建记录；成功后 renderer 补上 output/input 两组文件。随后 `PaintingService` 一次性全量替换该 painting 的 `painting_file_ref`，外键按双级联处理。v1→v2 过渡期产生的无效文件 id 在建 ref 时被静默过滤并记录日志（`usePaintingGeneration.ts:76-124`、`PaintingService.ts:246-394`）。
+- **命名/去重**：文件由 FileManager 生成 v2 FileEntry，主键为 uuid，内容级去重本次未找到；painting 行按 orderKey 排序，分页采用 keyset 并附带总数（`PaintingService.ts:102-145`）。
+- **清理**：`painting_file_ref` 为文件提供保护引用；删除 painting 时外键级联清掉对应 ref，之后的清理 pass 按 `delete_when_unreferenced` 与 1 小时 grace 回收孤儿文件（`:114,133`）。草稿附件不落库，materialize 与 painting 行、input ref 落在同一事务窗口内（`:83`），文件的持久化时机与拥有它的对象同步（清理语义见 `docs/dev/references/file/file-entry-cleanup.md`）。
 - **迁移**：v2 `PaintingMigrator` 把 Redux 历史迁入 SQLite（重复 id 重写、悬空 ref 丢弃计数、`markEntriesAutoCleanup` 标记，`PaintingMigrator.ts:54-249`）。
 - **来源关联**：painting 行无 parent 列（对比 Chatbox 的 parentIds DAG）；"再次创作"只通过草稿复制/历史回选，无显式分支树。Agent 生成的结果无任何持久化关联（见第 6 节）。
 
 ## 5. 预览、编辑、重试、分支与复用
 
-- **预览**：`Artboard` 画布（contain-fit 测量、prompt 条、reveal 动画机，`Artboard.tsx:469-584`）+ `PaintingImageSkeleton`（生成中骨架）；多图时显示 prev/next 切换按钮；`PaintingStrip` 历史缩略图条（滚动加载 `loadMore`，`PaintingStrip.tsx:98-110`）。
-- **编辑**：无像素级编辑（裁剪/局部重绘本次未找到）；"编辑"= 换模型/改 prompt/换参考图再次生成。参考图上传走统一 composer 附件管道（`PaintingImageAddButton`/`PaintingImageGallery`，`PaintingImageGallery.tsx:24-127`），仅 `image/*` 扩展（`PaintingComposer.tsx:44-49`）。
-- **重试**：无"重试上一次"按钮语义——重新提交即新请求；失败面板给出 REMOTE_ERROR 原因（`errors/paintingGenerateError.ts`）。模型切换保留参数草稿（`usePaintingModelSwitch` 只处理图片能力不兼容清空，`usePaintingModelSwitch.ts:47-49`）。
-- **分支**：无显式分支；多条 painting = 平行收据，`select` 在历史间切换（`usePaintingList.ts:62-70`），切换前 `saveCurrent` 保当前草稿（`:47-60`）。
-- **复用**：历史回选载入 prompt/模型/参考图（`recordToPaintingData` 水合，`usePaintingHistory.ts:33-47`）；`usePaintingResultSync` 把后台完成的输出回填到可见草稿（`usePaintingResultSync.ts:32-49`）。**导出**：本次未找到绘画页专用下载按钮（工具栏只有切换/缩放/旋转/复位）；文件可从 Files 页管理（v1 习惯，`file-entry-cleanup.md:96`）。**聊天插入**：未找到（见结论摘要疑点②）。
+- **预览**：结果展示在 Artboard 画布上，画布负责 contain-fit 测量、顶部 prompt 条与 reveal 动画，生成期间用骨架屏占位；一次生成多张图时出现 prev/next 切换按钮。历史缩略图条由 PaintingStrip 承担，滚动到底部触发加载更多（`Artboard.tsx:469-584`、`PaintingStrip.tsx:98-110`）。
+- **编辑**：裁剪与局部重绘这类像素级编辑本次未找到；页面上的"编辑"是换模型、改 prompt 或换参考图后再生成一次。参考图上传复用 composer 的统一附件管道，接受 `image/*` 类型的文件（`PaintingImageGallery.tsx:24-127`、`PaintingComposer.tsx:44-49`）。
+- **重试**：界面没有"重试上一次"按钮，重新提交就产生一次新请求；失败面板展示 REMOTE_ERROR 的具体原因，切换模型时参数草稿保留，`usePaintingModelSwitch` 只在图片能力不兼容时清空（`usePaintingModelSwitch.ts:47-49`、`errors/paintingGenerateError.ts`）。
+- **分支**：没有显式分支；多条 painting 是彼此平行的收据，`select` 在历史条目间切换，切换前先用 `saveCurrent` 保存当前草稿（`usePaintingList.ts:47-70`）。
+- **复用**：回选历史条目时，`recordToPaintingData` 把 prompt、模型与参考图水合回草稿；后台完成的生成由 `usePaintingResultSync` 自动回填到当前可见草稿（`usePaintingHistory.ts:33-47`、`usePaintingResultSync.ts:32-49`）。**导出**：绘画页专用的下载按钮本次未找到，工具栏只有切换、缩放、旋转与复位，文件可在 Files 页管理，这是沿用 v1 的管理习惯（`file-entry-cleanup.md:96`）。**聊天插入**：未找到直接入口（见结论摘要疑点②）。
 
 ## 6. Agent 回流、插件与外部依赖
 
-**Agent 面**：`generate_image` 工具经 `registerBuiltinTools.ts:34` 进 AI-SDK builtin 族、`cherryBuiltinTools.ts:143` 进 Claude Code 内置 MCP 桥——两运行时共用 `painting.ts` 核心，受两道门控制：聊天 composer 工具栏的 `assistant.settings.enableGenerateImage` 开关（无绘画模型时禁用，`generateImageTool.tsx:21-52`）与全局 `feature.paintings.default_model_id` 默认模型。其余行为要点：
+**Agent 面**：generate_image 工具同时注册进 AI-SDK builtin 族与 Claude Code 内置 MCP 桥两个运行时，两者共用同一份核心实现（注册入口见 `registerBuiltinTools.ts:34`、`cherryBuiltinTools.ts:143`）。是否可用由两道门控制：聊天 composer 工具栏的 `assistant.settings.enableGenerateImage` 开关，以及全局 `feature.paintings.default_model_id` 指定的默认模型；开关在没有可用绘画模型时禁用（UI 见 `generateImageTool.tsx:21-52`）。其余行为要点：
 
-- **schema 与失败**：工具 schema 从模型 support 动态构建（enum/range/size 约束、prompt 1-4000 字符、image_ids ≤ 1，`generateImageTool.ts:104-156`）；失败返回 `{error}` 提示词而非抛出，并按可重试/不可重试分流（`painting.ts:54-72`）
-- **结果回流**：经 `paintingModelOutput` 转成一行文本（`文件名 (id)` 列表）回 tool-call part（`painting.ts:88-97`）；`cherryBuiltinApproval.ts:48` 表明 generate_image 在审批名单
-- **已有资产引用**：可传 `image_ids`（FileEntry id）做编辑参考，`painting.ts:144-153` 从 FileManager 读回 base64；但 Agent 无 painting 行读取工具（本次未找到——历史条只在绘画页 UI）
+- **schema 与失败**：工具 schema 随模型 support 动态构建，包含 enum/range/size 约束、prompt 1-4000 字符与 image_ids 至多 1 个；生成失败时工具把 `{error}` 文本交回模型，并按可重试与不可重试两类分流（`generateImageTool.ts:104-156`、`painting.ts:54-72`）
+- **结果回流**：`paintingModelOutput` 把结果整理成一行文本，每项形如「文件名 (id)」，再写回 tool-call part；generate_image 同时在审批名单中（`painting.ts:88-97`、`cherryBuiltinApproval.ts:48`）
+- **已有资产引用**：调用方可以传 `image_ids`（FileEntry id）作为编辑参考图，工具据此从 FileManager 读回 base64；Agent 侧读取 painting 行的工具本次未找到，历史条只出现在绘画页 UI（`painting.ts:144-153`）
 
-**本地 ComfyUI 供应商**：ComfyUI 作为一等图像供应商接入，是 AI SDK Provider V3 的一种，适配器族标识为 `comfyui`，默认地址 `http://localhost:8188`。它走自己的节点图 HTTP API（`/prompt`、`/queue`、`/history`、`/userdata/workflows/…`），因此复用同步生成路径，由 transport 内部提交任务并轮询历史取结果，不进入异步 job 系统。模型来自用户服务器上的工作流：发现阶段读取工作流列表，提交前把 UI 格式工作流转换成 API prompt。该供应商只服务图像生成，chat 与 embedding 工厂直接抛错，避免把聊天请求打到只返回网页的服务器。
+**本地 ComfyUI 供应商**：ComfyUI 作为一等图像供应商接入，是 AI SDK Provider V3 的一种，适配器族标识为 `comfyui`，默认地址 `http://localhost:8188`。它走自己的节点图 HTTP API：提交任务走 `/prompt`，轮询取结果走 `/history`，队列查询与用户工作流读取共用同一套接口。这条路径复用同步生成，由 transport 内部提交任务并轮询历史取结果，不进入异步 job 系统。模型来自用户服务器上的工作流：发现阶段读取工作流列表，提交前把 UI 格式工作流转换成 API prompt。该供应商只服务图像生成，chat 与 embedding 工厂直接抛错，避免把聊天请求打到只返回网页的服务器。
 
 **外部依赖**：无 FFmpeg/自有渲染器/文件 CDN。依赖面为：模型 provider API（AI SDK，同步）+ 异步供应商 submit/poll 端点（ppio/dashscope/modelscope/dmxapi-bespoke）+ 可选本地 ComfyUI 服务器与 OVMS 本地图像服务（`ovms.*` IPC）+ 本地 SQLite/FileEntry 存储。`downloadImageAsBase64` 兜底下载 URL 结果（`AiService.ts:790-803`、`imageGenerationJobHandler.ts:210`）。
 
 ## 7. 权限、资源边界与失败恢复
 
-- **凭据/权限**：provider 与模型管理走 LLM 渠道类目（交接，不重复）；绘画工具经审批链（`cherryBuiltinApproval.ts`）；无绘画专用文件系统直写（FileEntry 抽象）。
+- **凭据/权限**：provider 与模型管理沿用 LLM 渠道类目，细节见对应笔记；绘画工具的调用经过审批链；绘画代码只通过 FileEntry 抽象读写文件，没有专用的文件系统直写通道（`cherryBuiltinApproval.ts`）。
 - **限额**：
   - job：超时 30 分钟、并发 2/queue、`maxAttempts: 1`（防重复计费，`imageGenerationJobHandler.ts:52-58`）
   - 工具：prompt ≤ 4000 字符、image_ids ≤ 1（`generateImageTool.ts:10-16`）
   - 工作台：输入图上限按模型 support `maxInputImages`（`canonicalGenerate.ts:74-77`）
-  - IPC：请求体 1MB job 载荷上限（输入图以 FileEntry id 引用规避，`imageGenerationJobHandler.ts:29-30,884-887`）
-- **清理保护**：`delete_when_unreferenced` 仅回收无任何持久 ref 的 file_entry（5 张 ref 表联合 NOT EXISTS，`fileRelations.ts:235-239`）；`manual` 策略文件永不自动回收（Agent 输出，见第 6 节）。
-- **失败恢复**：取消=中止请求+job 远程撤销；崩溃后 job 丢弃（abandon）；收据行与文件引用分离保证已完成的生成结果持久。
+  - IPC：job 载荷上限为 1MB，输入图改以 FileEntry id 引用，避开把图片本体塞进 payload（`imageGenerationJobHandler.ts:29-30,884-887`）
+- **清理保护**：`delete_when_unreferenced` 只回收在 5 张 ref 表里都查不到引用的 file_entry；`manual` 策略的文件永不自动回收，Agent 输出就属于这一类，见第 6 节（`fileRelations.ts:235-239`）。
+- **失败恢复**：取消会中止请求并撤销 job 的远程任务；进程崩溃后 job 被丢弃（abandon）；收据行与文件引用分离，已完成的生成结果得以持久。
 
 ## 8. 当前创作与文档处理补充
 

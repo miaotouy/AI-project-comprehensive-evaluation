@@ -18,9 +18,9 @@ RikkaHub 是原生 Android 的 LLM 聊天客户端，具备由回合后空闲、
 
 后台工作分为三类：
 
-- **会话级后台生成**：由用户动作或外部 HTTP 请求发起，运行期间由 `ChatGenerationForegroundService` 把进程钉在前台，结果写入会话数据库，并可在 App 不在前台时投递系统通知。运行对象与状态权威都在内存中，进程结束即失效，没有补跑。
-- **媒体创作任务**：用户提交后由 `MediaCreationService` 在后台执行提交、轮询与下载，`MediaCreationForegroundService` 保活；记录与 `taskId` 落库，应用重启后可凭 `taskId` 继续查询（见 [媒体创作笔记](../媒体创作/RikkaHub-媒体创作调查笔记.md)）。
-- **记忆库整理（“做梦”）**：一轮对话结束后，由 `MemoryConsolidationScheduler` 在空闲计时到点（默认 2 分钟）、累计轮数到上限（6 轮）、应用切后台、用户离开会话或应用重启时触发，后台调用模型把对话内容整理进记忆库；应用不可见时用 `MemoryDreamForegroundService` 保活。它仍由用户活动驱动，不是独立日程。
+- **会话级后台生成**：用户动作或外部 HTTP 请求都可以发起一次生成，生成期间 `ChatGenerationForegroundService` 把进程钉在前台；结果写入会话数据库，完成事件带有内容预览、App 不在前台且用户已开启生成通知时，才投递系统通知。运行对象与状态权威都留在内存，进程结束即失效，没有补跑。
+- **媒体创作任务**：用户提交后，`MediaCreationService` 在后台完成提交、轮询与下载，`MediaCreationForegroundService` 负责保活；记录连同 `taskId` 一起落库，应用重启后可凭 `taskId` 继续查询（见 [媒体创作笔记](../媒体创作/RikkaHub-媒体创作调查笔记.md)）。
+- **记忆库整理（“做梦”）**：一轮对话结束后，`MemoryConsolidationScheduler` 先记下待整理轮数，并在空闲计时到点（默认 2 分钟）、累计轮数到上限（6 轮）、应用切后台、用户离开会话或应用重启时启动一次整理，后台调用模型把对话内容写进记忆库；应用不可见时由 `MemoryDreamForegroundService` 保活。它仍由用户活动驱动，不是独立日程。
 
 另有两项与后台体验相关：后台生成时可选显示**悬浮窗**（默认关闭，需悬浮窗权限），支持查看进度与快速回复；时间提醒、备份提醒与更新检查都不启动运行。媒体创作页已接入视频生成，聊天内模型侧仍只覆盖图片。
 
@@ -77,11 +77,13 @@ Web API 是唯一"不由本机界面发起"的生成入口，其 Ktor 服务与�
 
 以下 API 在全仓 Kotlin 源码中检索后没有命中声明或调用点（已排除 `.agents/`、`.claude/`、`build/`、`generated/` 与第三方原生库）：
 
-- `AlarmManager`、`setExactAndAllowWhileIdle`、`setRepeating`、`setAlarmClock`
-- `JobScheduler`、`JobService`、`JobInfo`
-- `CoroutineWorker`、`: Worker`、`WorkRequest`、`enqueueUniqueWork`
-- `BroadcastReceiver`、`registerReceiver`、`PendingIntent.getBroadcast`、`BOOT_COMPLETED`
-- 定时表达式相关标识（`cron`、`heartbeat` 作为调度语义时）
+| API 类别 | 具体接口 |
+| --- | --- |
+| 闹钟 | `AlarmManager`、`setExactAndAllowWhileIdle`、`setRepeating`、`setAlarmClock` |
+| 作业调度 | `JobScheduler`、`JobService`、`JobInfo` |
+| WorkManager | `CoroutineWorker`、`: Worker`、`WorkRequest`、`enqueueUniqueWork` |
+| 广播与开机自启 | `BroadcastReceiver`、`registerReceiver`、`PendingIntent.getBroadcast`、`BOOT_COMPLETED` |
+| 定时表达式 | `cron`、`heartbeat`（按调度语义计） |
 
 AndroidManifest 中也没有 receiver 声明、没有 `RECEIVE_BOOT_COMPLETED` 权限；服务均返回 `START_NOT_STICKY`。
 
@@ -108,9 +110,9 @@ WorkManager 仍处于"已集成但未接线"的状态：依赖在 `app/build.gra
 
 三个带"提醒"字样的功能都不是调度器：
 
-- **时间提醒**：发送给模型前，按相邻用户消息的时间间隔（默认阈值 60 分钟）注入 `<time_reminder>` 合成消息；它是输入变换管道的一环，只在生成被触发时执行，不触发任何运行（`data/ai/transformers/TimeReminderTransformer.kt`）。
-- **备份提醒**（`BackupReminderConfig`）：只有开关、间隔天数与上次备份时间戳三个配置项，默认关闭；界面组件用当前时间是否超过“上次备份 + 间隔”决定是否显示卡片。没有定时器与通知（`data/datastore/PreferencesStore.kt`、`ui/components/ui/BackupReminderCard.kt`）。
-- **更新提醒**：`stateIn(SharingStarted.Lazily)` 的懒加载流，只有被界面订阅时才请求一次，聊天页按设置中的暂停截止时间决定是否订阅；下载交给系统 `DownloadManager`（`utils/UpdateChecker.kt`）。这是快照中唯一由系统托管的异步传输。
+- **时间提醒**：发送给模型前，`TimeReminderTransformer` 按相邻用户消息的时间间隔（默认阈值 60 分钟）注入一条 `<time_reminder>` 合成消息；它属于输入变换管道的一环，只在生成被触发时执行，不启动任何运行（`data/ai/transformers/TimeReminderTransformer.kt`）。
+- **备份提醒**：界面组件用当前时间是否超过“上次备份时间 + 间隔天数”决定是否显示卡片，背后只有 `BackupReminderConfig` 的开关、间隔天数与上次备份时间戳三项配置，功能默认关闭，没有定时器与通知（`data/datastore/PreferencesStore.kt`、`ui/components/ui/BackupReminderCard.kt`）。
+- **更新提醒**：检查器把更新状态做成懒加载流，界面订阅时才请求一次，聊天页再按设置里的暂停截止时间决定是否订阅，下载交给系统下载管理器 `DownloadManager`（`utils/UpdateChecker.kt`）。这是快照中唯一由系统托管的异步传输。
 
 ## 前台服务与通知
 
@@ -123,11 +125,19 @@ WorkManager 仍处于"已集成但未接线"的状态：依赖在 `app/build.gra
 | `MemoryDreamForegroundService` | `dataSync` | 记忆整理期间保活，`holdId` 引用计数 | 2004 |
 | `WebServerService` | `specialUse` | 内嵌 Web 服务器运行期间 | 由服务自行发布 |
 
-四个服务都不拥有业务逻辑：聊天生成归 `ChatService`，媒体创作归 `MediaCreationService`，记忆整理归调度器；服务只维护活跃集合与通知。Android 14+ 走 `ServiceCompat.startForeground`，Manifest 中 `dataSync`/`specialUse` 类型与权限一致，`FOREGROUND_SERVICE_SPECIAL_USE` 已声明（`AndroidManifest.xml`）。
+四个前台服务都只保活并发布通知，具体业务由各自的调用方承担：聊天生成归 `ChatService`，媒体创作归 `MediaCreationService`，记忆整理归整理调度器。Android 14+ 通过 `ServiceCompat.startForeground` 启动，Manifest 中声明的服务类型与对应权限一致，其中包括 `FOREGROUND_SERVICE_SPECIAL_USE`（`AndroidManifest.xml`）。
 
 ### 五个通知渠道
 
-进程启动时创建渠道：`chat_completed`（HIGH，生成完成）、`chat_live_update`（LOW，进度与聊天前台服务通知）、`web_server`（LOW，本地 Web 服务）、`media_creation`（DEFAULT，媒体创作）、`memory_dream`（LOW，记忆整理）（`RikkaHubApp.kt`）。
+进程启动时在 `RikkaHubApp.kt` 中一次性创建五个通知渠道：
+
+| 渠道 ID | 重要性 | 用途 |
+| --- | --- | --- |
+| `chat_completed` | HIGH | 生成完成 |
+| `chat_live_update` | LOW | 进度与聊天前台服务通知 |
+| `web_server` | LOW | 本地 Web 服务 |
+| `media_creation` | DEFAULT | 媒体创作 |
+| `memory_dream` | LOW | 记忆整理 |
 
 聊天进行中通知有两条来源：前台服务的常驻通知由服务在 `acquire` 时发布，只要生成在跑就存在；带正文的进度更新由 `ChatNotificationManager` 订阅事件后发送，条件是 App 不在前台、`enableLiveUpdateNotification` 开启（默认关闭）并受每会话 1 秒节流限制。两者共用同一通知 ID，不会重复出现。完成通知在生成结束（完成、失败或取消）时触发，要求预览非空、App 不在前台、总开关开启三者同时满足。
 

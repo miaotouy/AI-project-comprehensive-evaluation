@@ -14,27 +14,27 @@
 
 ## 结论摘要
 
-- OpenClaw 当前的 Agent 角色边界是 `agents.entries.<agentId>` 配置条目与其 workspace 文件的组合，不是单独的 Persona 表，也不是只保存一段 system prompt 的模型包装。配置条目负责身份元数据、目录、模型、能力策略和运行时选择；`AGENTS.md`、`SOUL.md`、`USER.md`、`IDENTITY.md`、`BOOTSTRAP.md`、`MEMORY.md` 等 workspace 文件负责可编辑的规则、人格、用户偏好、引导和记忆上下文。字段定义见 `src/config/types.agents.ts`，canonical workspace 文件集合见 `src/agents/workspace.ts`。
-- 普通用户 Agent 由 authored roster 管理；Gateway 还可以按 client capability 投影独立的 system-agent rows，但这些 system agents 不是 `agents.entries` 中的普通用户角色。Gateway 的分层投影见 `src/gateway/agent-list.ts`、`src/gateway/agent-list.ts`。
-- Agent 的唯一稳定标识是配置 roster 中的 agent ID。当前 `AgentConfig` 没有通用的角色版本字段；schema 对 ID 使用字母数字开头、长度受限的标识格式。`createdVia`、`createdAt` 等来源信息属于 Gateway/list 和 provenance 投影，不构成 Agent 配置版本号。相关 schema 见 `src/config/zod-schema.agents.ts` 与 `packages/gateway-protocol/src/schema/agents-models-skills.ts`。
+- OpenClaw 的 Agent 角色由 `agents.entries.<agentId>` 配置条目和该 Agent 的 workspace 文件共同定义：配置条目承担身份元数据、目录、模型、能力策略和运行时选择，workspace 文件承担可编辑的规则、人格、用户偏好、引导和记忆上下文。canonical workspace 文件共六个，分别是 AGENTS.md、SOUL.md、USER.md、IDENTITY.md、BOOTSTRAP.md 和 MEMORY.md。字段定义见 `src/config/types.agents.ts`，文件集合见 `src/agents/workspace.ts`。
+- 普通用户 Agent 由人工编写的 roster（authored roster）管理；Gateway 另外按 client capability 投影出一组独立的 system-agent 行，这些 system agent 只存在于投影结果里，不在 `agents.entries` 中。分层投影的实现见 `src/gateway/agent-list.ts`。
+- Agent 的唯一稳定标识是配置 roster 里的 agent ID。`AgentConfig` 没有通用的角色版本字段，schema 只规定 ID 以字母数字开头并限制长度。createdVia、createdAt 这类来源信息由 Gateway 列表和 provenance 投影产生，记录的是创建来源，不带版本号语义。相关 schema 见 `src/config/zod-schema.agents.ts` 和 `packages/gateway-protocol/src/schema/agents-models-skills.ts`。
 - 一次实际运行的角色由多层事实共同决定：配置文件加载和迁移、显式 `agentId` 或渠道 binding、带 Agent 命名空间的 session key、Agent workspace/state 目录、bootstrap 文件、Skill 和工具策略、session 覆盖、实际 provider/model/runtime，以及请求级 prompt 参数。主链路可概括为“配置加载 -> Agent 所有者解析 -> 路由/session key -> 目录与能力解析 -> bootstrap/prompt -> provider/runtime -> session 报告和 UI 投影”。
-- 配置身份与 workspace `IDENTITY.md` 是两个来源。配置中的 identity 字段适合保存结构化的 name、theme、emoji、avatar；workspace 文件还可包含 `creature`、`vibe` 等人类编辑字段。Control UI 展示时优先使用 Agent 配置 identity，再用 workspace identity 补缺，最后使用默认 Assistant；但本次没有在规范 system prompt renderer 中找到把配置 identity 自动转成完整人格提示的独立步骤。合并和解析见 `src/agents/identity-file.ts`、`src/gateway/assistant-identity.ts`。
-- 角色提示词主要来自三类输入：源码定义的安全/工具/运行时指导，Agent workspace 中有界读取的上下文文件，以及本次运行的 channel、session、owner、时间、模型和额外提示。`SOUL.md` 在 prompt 中被标记为 persona/tone，`USER.md` 被标记为用户偏好和 profile directives，`AGENTS.md` 的 Tools 段只指导使用方式，不能授予工具。渲染顺序和缓存边界由 `src/agents/system-prompt.ts` 控制。
-- 模型选择支持 Agent 级 primary/fallback，格式可以是单字符串，也可以是 `{ primary, fallbacks }`。Agent primary 优先于 defaults primary；别名、已配置 Provider、裸模型的唯一 Provider 推断和默认 Provider/model 在后续解析中参与决策。会话还可以持久化显式或自动 fallback 覆盖，因此“配置中的默认模型”和“当前 session 上一次实际运行模型”是不同事实。解析入口见 `src/agents/model-selection-shared.ts`，session 运行时字段见 `src/config/sessions/types.ts`。
-- 工具可用性由 profile、全局、Provider、Agent、group、sender、sandbox、subagent、runtime 和 inherited policy 共同过滤固定工具目录决定，角色提示文字仅参与使用说明；最终有效工具列表才进入运行时和 prompt。Skill 使用类似的 Agent/default/session 过滤，但 Agent 显式 `skills` 会替换默认列表，session overlay 可以再对单项启用或禁用。相关实现见 `src/agents/conversation-tool-policy-pipeline.ts` 与 `src/skills/discovery/agent-filter.ts`。
-- 普通 Agent 的 session 主要通过 `agent:<agentId>:...` key 和 Agent 所属 store 绑定，而不是在每条消息中复制完整角色配置。SessionEntry 会保存实际 provider/model、runtime/harness、session 覆盖、Skill snapshot、system prompt report 和 ACP metadata 等运行时事实；system prompt report 保存大小、hash、注入统计和工具/Skill 统计，不保存完整原始角色快照。投影见 `src/config/sessions/session-accessor.sqlite-session-row.ts`、`src/config/sessions/session-prompt-types.ts` 与 `src/config/sessions/session-system-prompt-report.ts`。
-- ACP 是外部 harness 的独立运行时边界。配置同时区分负责 OpenClaw session/storage 的 `agentId` 与外部 harness 的 `acpAgentId`；ACP-shaped session key 本身不足以证明 session 正在 ACP 中运行，必须有持久化 ACP metadata/runtime 标识。普通 Agent 的 `subagents.allowAgents` 和本地 subagent tool policy 不应与 ACP harness ID 混为一谈。
-- 本次在普通 Agent 的 CLI/Gateway 配置入口中没有找到通用的 Agent clone/import/export 命令。本次未找到 `src/claws/` 目录：与之相关的只剩渠道安装入口（`src/commands/channels/add.ts`、`add-wizard.ts`）与 Claw 包生命周期租约（`src/state/claw-package-lifecycle-lease.ts`、`claw-package-lifecycle-lease-key.ts`），portable Agent/profile/workspace 导出的实现模块本次未找到，因此不能把渠道安装入口等同于普通 Agent 的角色分享格式。
+- 配置里的 identity 字段和 workspace 的 `IDENTITY.md` 是两个独立来源。配置一侧适合保存结构化的 name、theme、emoji 和 avatar；workspace 文件另外可以包含 creature、vibe 这类供人编辑的字段。Control UI 展示时先取 Agent 配置 identity，缺失部分由 workspace identity 补齐，最后落到默认 Assistant；本次没有在规范 system prompt renderer 中找到把配置 identity 自动展开成完整人格提示的独立步骤。两侧的合并与解析见 `src/agents/identity-file.ts` 和 `src/gateway/assistant-identity.ts`。
+- 角色提示词由三类输入拼成：源码里固定的安全、工具和运行时指导，Agent workspace 中按上限读取的上下文文件，以及本次运行的 channel、session、owner、时间、模型和额外提示。上下文文件在 prompt 里各有分工：`SOUL.md` 标记为 persona/tone，`USER.md` 标记为用户偏好和 profile directives，`AGENTS.md` 的 Tools 段只讲使用方式，不授予工具。渲染顺序和缓存边界由 `src/agents/system-prompt.ts` 控制。
+- 模型选择支持 Agent 级 primary/fallback，取值可以是单个字符串，也可以是 `{ primary, fallbacks }` 对象。Agent 的 primary 优先于 defaults 的 primary，之后别名、已配置 Provider、裸模型名的唯一 Provider 推断和默认 Provider/model 依次参与解析。会话还会持久化显式或自动 fallback 覆盖，配置里的默认模型和当前 session 上一次实际运行的模型因此是两条不同的事实。解析入口见 `src/agents/model-selection-shared.ts`，session 运行时字段见 `src/config/sessions/types.ts`。
+- 工具的可用集合由固定目录经过多层策略过滤得出，参与过滤的层次包括 profile、全局、Provider、Agent、群组、发送者和 sandbox、subagent、runtime 与 inherited policy，角色提示文字只负责说明用法；进入运行时和 prompt 的是过滤后的有效列表。Skill 走类似的 Agent/default/session 三层过滤，区别在于 Agent 显式写出的 `skills` 会替换默认列表，session overlay 再对单个 Skill 做启用或禁用。相关实现见 `src/agents/conversation-tool-policy-pipeline.ts` 与 `src/skills/discovery/agent-filter.ts`。
+- 普通 Agent 的 session 通过 `agent:<agentId>:...` 形式的 key 和 Agent 所属 store 建立绑定，每条消息不复制完整角色配置。SessionEntry 保存的是运行时事实：实际 provider/model、runtime/harness、session 覆盖、Skill snapshot、system prompt report 和 ACP metadata；其中 system prompt report 只记大小、hash、注入统计和工具/Skill 统计，完整原始角色快照留在配置侧。投影实现见 `src/config/sessions/session-accessor.sqlite-session-row.ts`、`src/config/sessions/session-prompt-types.ts` 与 `src/config/sessions/session-system-prompt-report.ts`。
+- ACP 是外部 harness 的独立运行时边界。配置同时区分两个 ID：负责 OpenClaw session 与存储的 `agentId`，和指向外部 harness 的 `acpAgentId`。session key 呈 ACP 形状还不足以证明该 session 跑在 ACP 里，需要持久化的 ACP metadata 与 runtime 标识。普通 Agent 的 `subagents.allowAgents` 和本地 subagent tool policy 属于本机委派授权，与 ACP harness ID 分属两套机制。
+- 本次在普通 Agent 的 CLI 和 Gateway 配置入口中没有找到通用的 Agent clone/import/export 命令，也没有找到 `src/claws/` 目录。与 Claw 相关的只剩渠道安装入口（`src/commands/channels/add.ts` 及其 add-wizard）和 Claw 包生命周期租约（`src/state/claw-package-lifecycle-lease.ts` 及配套 key 模块）；portable Agent/profile/workspace 导出的实现模块同样未找到，渠道安装入口不能当作普通 Agent 的角色分享格式。
 
 ## 系统边界与总体调用链
 
 ### 配置到运行时
 
 1. 配置加载器读取 JSON5 配置，处理 include、环境变量和 dotenv 影响，然后执行 legacy 迁移、schema 校验和 runtime materialization。配置不存在时也会经过同一套 runtime defaults，避免首次运行和空配置的默认行为分叉；主入口见 `src/config/io.load.ts`。
-2. Agent roster 的 canonical 输入是 `agents.entries`，每个 key 是 Agent ID；runtime 还会生成供旧调用方使用的 list projection。多 Agent 配置如果没有明确 ownership 或 legacy default marker，会要求调用方显式选择所有者。选择和兼容逻辑集中在 `src/agents/agent-scope-config.ts`。
-3. 请求可以直接携带 `agentId`，也可以通过渠道 binding、session key 或已准备的 fallback owner 得到 Agent。若显式 Agent 与 `agent:<id>:...` session key 不一致，session resolution 会拒绝，而不是静默改用默认 Agent；见 `src/agents/agent-scope.ts`。
-4. 路由 binding 把 channel/account/peer/guild/team/role 条件映射到 Agent，并同时计算普通会话 key、main session key 和 last-route policy。Binding 的结果是路由所有权和 session 命名空间，不是一次性复制 Agent 配置；见 `src/routing/resolve-route.ts`。
-5. Agent scope 解析 workspace 和 agent directory。显式 `workspace` 优先；兼容默认 Agent 可继承 `agents.defaults.workspace` 或默认 workspace，其他 Agent 在默认 workspace 下派生 `<workspace>/<agentId>`，没有默认 workspace 时使用 state 下的 `workspace-<agentId>`。`agentDir` 显式值优先，否则使用 state 下的 `agents/<agentId>/agent`；见 `src/agents/agent-scope-config.ts`。
+2. Agent roster 的 canonical 来源是 `agents.entries`，每个 key 就是 Agent ID，runtime 另外生成一份供旧调用方使用的 list projection。多 Agent 配置缺少明确 ownership 或 legacy default marker 时，加载方必须显式指定所有者；选择和兼容逻辑见 `src/agents/agent-scope-config.ts`。
+3. 请求可以直接带 `agentId`，也可以由渠道 binding、session key 或事先准备的 fallback owner 推出 Agent。显式 Agent 与 `agent:<id>:...` 形式的 session key 不一致时，session resolution 直接拒绝，不会静默回落到默认 Agent；见 `src/agents/agent-scope.ts`。
+4. 路由 binding 按 channel、account、peer、guild、team 和 role 条件匹配 Agent，同时算出普通会话 key、main session key 与 last-route policy。它产出的只是路由所有权和 session 命名空间，Agent 配置在运行时另行解析；见 `src/routing/resolve-route.ts`。
+5. Agent scope 负责把 Agent 解析到具体的 workspace 和 agent 目录。workspace 先看显式设置；兼容默认 Agent 可以继承 `agents.defaults.workspace` 或默认 workspace，其余 Agent 在默认 workspace 下派生 `<workspace>/<agentId>`，没有默认 workspace 时落到 state 下的 `workspace-<agentId>`。agentDir 同样先看显式值，缺省时用 state 下的 `agents/<agentId>/agent`；见 `src/agents/agent-scope-config.ts`。
 6. 运行准备阶段按 Agent 和 session 解析 bootstrap context、Skill、memory、工具策略、sandbox、channel 能力和模型事实。bootstrap 文件会被每文件和总量上限截断，之后才交给 system prompt renderer；见 `src/agents/embedded-agent-runner/run/attempt-bootstrap-prepare.ts` 与 `src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts`。
 7. embedded runner 先建立 OpenClaw base system prompt，再按非 raw run 条件交给 Provider-specific transform；raw model run 保留 base prompt 供诊断，但提交给 Provider 的 prompt 为空。这个边界由 `src/agents/embedded-agent-runner/run/attempt-system-prompt.ts` 明确。
 8. 运行结束或中途更新时，session entry 记录实际 runtime model、provider、harness、覆盖、Skill snapshot、prompt report 和 ACP metadata；Gateway/Control UI 读取这些投影展示配置值与部分“当前生效”值。
@@ -66,15 +66,15 @@
 | 交互和生命周期 | `heartbeat`、`groupChat`、`humanDelay`、`typingMode`、`tts` | heartbeat、群聊、延迟、输入反馈和语音相关行为 |
 | 委派 | `subagents.delegationMode`、`allowAgents`、`model`、`thinking`、`requireAgentId` | 子 Agent 的目标、模型、提示词倾向和选择约束 |
 
-字段定义和 deprecated/compat 标记见 `src/config/types.agents.ts`。`agents.defaults` 提供共享默认值，但所有字段都不是由同一个通用 merge 函数简单深合并。`resolveAgentConfig` 对 `verboseDefault`、`fastModeDefault`、`typingMode`、`experimental`、`contextLimits` 等字段做了有限合流；模型、Skill、工具和 workspace 又分别由各自 resolver 处理，见 `src/agents/agent-scope-config.ts`。
+字段定义和 deprecated/compat 标记见 `src/config/types.agents.ts`。`agents.defaults` 提供共享默认值，合流按字段分组进行：`resolveAgentConfig` 只合并 verbose、fast mode、输入模式与 context 限制等少数默认字段，模型、Skill、工具和 workspace 另由各自的 resolver 处理，没有统一深合并全部字段的 merge 函数；见 `src/agents/agent-scope-config.ts`。
 
 Agent ID 使用 schema 约束的 `[a-z0-9_][a-z0-9_-]{0,63}` 形式。schema 仍保留一个 `default=true` 兼容 marker，并限制最多一个；`agents.ownership=explicit` 不能与 legacy marker 共存，多 Agent roster 没有 marker 时需要 explicit ownership。类型层已将这个 marker 标记为 deprecated，schema 和 runtime 的兼容路径见 `src/config/zod-schema.agents.ts`、`src/agents/agent-scope-config.ts`。
 
 ### Workspace 与 Agent state
 
-- 默认 workspace 先看 `OPENCLAW_WORKSPACE_DIR`，再看 `OPENCLAW_STATE_DIR`，然后按 `OPENCLAW_PROFILE` 和 home 目录推导；默认安装位置是 `<home>/.openclaw/workspace`。解析逻辑见 `src/agents/workspace-default.ts:13-31`。
-- 非默认 Agent 没有显式 workspace 时，若存在 defaults workspace，会派生 `<defaults.workspace>/<agentId>`；否则派生 `<state-dir>/workspace-<agentId>`。显式路径会经过用户路径解析和 null byte 清理，见 `src/agents/agent-scope-config.ts`。
-- Agent state 的默认数据库路径是 `<state-dir>/agents/<agentId>/agent/openclaw-agent.sqlite`。Agent-scoped runtime state、memory store 和部分 auth/session 边界使用 Agent ID 隔离，路径 helper 见 `src/state/openclaw-agent-db.paths.ts`。
+- 默认 workspace 从环境变量逐级推导：先取 `OPENCLAW_WORKSPACE_DIR`，其次 `OPENCLAW_STATE_DIR`，再结合 `OPENCLAW_PROFILE` 和 home 目录算出位置，默认安装点是 `<home>/.openclaw/workspace`。解析逻辑见 `src/agents/workspace-default.ts:13-31`。
+- 非默认 Agent 缺少显式 workspace 时，存在 defaults workspace 就派生 `<defaults.workspace>/<agentId>`，否则用 state 目录下的 `workspace-<agentId>`。显式路径先经过用户路径解析，并做 null byte 清理；见 `src/agents/agent-scope-config.ts`。
+- Agent state 的默认数据库落在 state 目录的 `agents/<agentId>/agent/openclaw-agent.sqlite`。Agent-scoped runtime state、memory store 和部分 auth/session 边界按 Agent ID 隔离，路径 helper 见 `src/state/openclaw-agent-db.paths.ts`。
 - Agent session/transcript 目录是 `<state-dir>/agents/<agentId>/sessions`，由 `src/config/sessions/paths.ts` 解析。session accessor 和 SQLite logical-node projection 负责把 session entry 与 transcript/store 生命周期连接起来。
 - shared state DB 仍承载全局注册和 ACP metadata 等共享事实；当前 ACP metadata 以 `acp_sessions` 表保存，key 由 Agent ID 和 store session key 共同组成，见 `src/acp/runtime/session-meta-keys.ts`。
 - Agent auth profile 属于凭证层，与角色字段分开存放。Agent directory 可以拥有 Agent-local credential store，默认 Agent 或迁移状态下还存在继承/共享 auth store 的兼容边界；创建第二个 Agent 时 CLI 只在用户确认后复制可移植 profile，OAuth 通常要求单独登录。相关创建路径见 `src/commands/agents.commands.add.ts`，敏感值不应进入角色导出或调查记录。
@@ -96,9 +96,9 @@ Agent ID 使用 schema 约束的 `[a-z0-9_][a-z0-9_-]{0,63}` 形式。schema 仍
 
 ### 创建、更新和删除对存储的影响
 
-- `createAgent` 先校验 ID、计算 workspace/agentDir、在配置 mutation lock 内写入 roster，再确保 workspace 和 session 目录存在。若 workspace 仍处于 bootstrap pending，创建时不会立即把结构化 identity 写进 `IDENTITY.md`；只有 bootstrap 已完成时才写入，以免初始化模板覆盖首轮仪式。见 `src/agents/agent-create.ts` 与 `src/agents/agent-create.ts`。
-- Agent 更新可以同时改变 name、workspace、model 和结构化 identity。Gateway handler 在配置提交前初始化新 workspace，并把 identity merge 到目标 workspace 的 `IDENTITY.md`；workspace 迁移时还会尝试从旧 workspace 保留原有 identity 内容。见 `src/gateway/server-methods/agents.ts`。
-- 删除普通 Agent 不是只删 roster 行。配置 mutation 会移除指向它的 route binding、Agent-to-Agent allow、subagent allowAgents、相关 owner refs 和兼容引用；之后按 deletion journal、database ownership、session purge 和安全 trash 流程清理 workspace、agentDir、sessions 与数据库文件。删除 sole Agent、共享 auth store owner 或 inherited auth owner 会被拒绝。配置裁剪见 `src/commands/agents.config.ts`，Gateway 删除入口见 `src/gateway/server-methods/agents.ts`。
+- `createAgent` 先校验 ID、算出 workspace 和 agentDir，在配置 mutation lock 内写入 roster，再确保 workspace 与 session 目录存在。workspace 仍处于 bootstrap pending 时，创建流程不会立刻把结构化 identity 写进 `IDENTITY.md`，要等 bootstrap 完成后才写入，以免初始化模板覆盖首轮仪式。见 `src/agents/agent-create.ts`。
+- Agent 更新可以同时改动 name、workspace、model 和结构化 identity。Gateway handler 在配置提交前初始化新 workspace，再把 identity 合并进目标 workspace 的 `IDENTITY.md`；workspace 迁移时它还会尝试从旧 workspace 保留原有 identity 内容。见 `src/gateway/server-methods/agents.ts`。
+- 删除普通 Agent 时，配置 mutation 先移除指向它的 route binding、Agent-to-Agent allow、subagent allowAgents、相关 owner refs 和兼容引用，再按 deletion journal、database ownership、session purge 和安全 trash 流程清理 workspace、agentDir、sessions 与数据库文件。删除 sole Agent、共享 auth store owner 或 inherited auth owner 会被拒绝。配置裁剪见 `src/commands/agents.config.ts`，Gateway 删除入口见 `src/gateway/server-methods/agents.ts`。
 
 ## 2. 创建、选择与会话绑定
 
@@ -106,9 +106,9 @@ Agent ID 使用 schema 约束的 `[a-z0-9_][a-z0-9_-]{0,63}` 形式。schema 仍
 
 普通 Agent 当前有三类主要入口：
 
-- CLI `openclaw agents add` 支持交互向导和 non-interactive 模式。自动化模式必须提供 workspace 和 name；随后可选 model、agentDir、binding，并进入 workspace 初始化和 auth profile 处理。入口见 `src/commands/agents.commands.add.ts`。
-- Gateway `agents.create` 的公开参数只有 name、workspace、model、emoji、avatar；它委托同一个 `createAgent`，因此协议创建入口不会直接暴露完整 AgentConfig。schema 见 `packages/gateway-protocol/src/schema/agents-models-skills.ts`，handler 见 `src/gateway/server-methods/agents.ts`。
-- Control UI 的 Agents 页面在本地 config form 中编辑模型、fallback、tools、skills 等允许的配置片段，结构化 identity 通过 `agents.update` 写入。UI 不是所有 AgentConfig 字段的通用表单；可见和可编辑字段取决于页面 panel、Gateway capability 和当前 config shape。
+- CLI 的 `openclaw agents add` 支持交互向导和 non-interactive 模式。自动化模式必须提供 workspace 和 name，之后可选 model、agentDir 和 binding，再进入 workspace 初始化与 auth profile 处理。入口见 `src/commands/agents.commands.add.ts`。
+- Gateway 的 `agents.create` 对外只暴露 name、workspace、model、emoji、avatar 五个参数，内部委托同一个 `createAgent`，协议创建入口因此拿不到完整 AgentConfig。schema 见 `packages/gateway-protocol/src/schema/agents-models-skills.ts`，handler 见 `src/gateway/server-methods/agents.ts`。
+- Control UI 的 Agents 页面在本地 config form 里编辑模型、fallback、tools、skills 等允许的配置片段，结构化 identity 走 `agents.update` 写入。页面能看到的可编辑字段取决于 panel、Gateway capability 和当前 config shape，它覆盖的只是 AgentConfig 的一部分字段。
 
 Agent identity 还可以通过 `openclaw agents set-identity` 设置。它可以从 flags 读取 name、emoji、theme、avatar，也可以从指定 workspace 或 `IDENTITY.md` 读取，再把稳定字段写回 config；见 `src/commands/agents.commands.identity.ts`。
 
@@ -122,7 +122,7 @@ Agent identity 还可以通过 `openclaw agents set-identity` 设置。它可以
 - 多 Agent 且没有兼容 owner 时，Gateway list 会返回 `selectionRequired=true`，需要请求、binding 或 ambient service 明确指定 Agent。
 - `agents.defaults.systemAgent.agentId` 是 ambient system work 的显式 owner，优先于被剥离的 legacy marker。
 
-解析函数区分了 sole、legacy、explicit 三类 ownership。Gateway list 的公开投影包含 `defaultId`、`ownership`、`selectionRequired`、`mainKey` 和 session scope，见 `src/gateway/agent-list.ts`、`src/gateway/agent-list.ts` 与 `packages/gateway-protocol/src/schema/agents-models-skills.ts`。
+解析函数区分 sole、legacy、explicit 三类 ownership。Gateway list 的公开投影给出 `defaultId`、`ownership`、`selectionRequired` 以及 main key 和 session scope 五个字段，实现见 `src/gateway/agent-list.ts`，协议 schema 见 `packages/gateway-protocol/src/schema/agents-models-skills.ts`。
 
 ### Route binding 与 session key
 
@@ -134,7 +134,7 @@ Agent identity 还可以通过 `openclaw agents set-identity` 设置。它可以
 - 可选 DM/group session scope；
 - thread 的 parent peer 继承。
 
-类型和 schema 见 `src/config/types.agents.ts` 与 `src/config/zod-schema.agents.ts`。路由解析结果同时包含 `agentId`、`sessionKey`、`mainSessionKey`、last-route policy 和 matched-by 说明，见 `src/routing/resolve-route.ts`。
+类型和 schema 见 `src/config/types.agents.ts` 与 `src/config/zod-schema.agents.ts`。路由解析结果同时包含 `agentId`、`sessionKey`、main session key 以及 last-route policy 和 matched-by 说明，见 `src/routing/resolve-route.ts`。
 
 session key 以 Agent ID 作为第一层命名空间。常见形状包括：
 
@@ -215,30 +215,30 @@ Bootstrap 还有运行场景路由：
 9. 本次运行的 `extraSystemPrompt`、reaction guidance、Provider dynamic suffix、watched sessions。
 10. Runtime 行，包含 Agent/session/model/provider 相关事实和 reasoning 状态。
 
-稳定部分和 volatile 部分的实际拼接见 `src/agents/system-prompt.ts`、`src/agents/system-prompt.ts`。如果某个 context provider 已提供这些文件，Prompt renderer 会按 `AGENTS.md`、`SOUL.md`、`IDENTITY.md`、`USER.md`、`TOOLS.md`、`BOOTSTRAP.md`、`MEMORY.md` 的 basename 顺序排序；当前 canonical workspace loader 是否产生某文件仍由 workspace loader、过滤和 bootstrap routing 决定，排序表见 `src/agents/system-prompt.ts`。
+稳定部分与 volatile 部分的实际拼接在 `src/agents/system-prompt.ts` 中完成。context provider 提供这些文件时，Prompt renderer 按 basename 排序，顺序为 AGENTS.md、SOUL.md、IDENTITY.md、USER.md、TOOLS.md、BOOTSTRAP.md、MEMORY.md；某个文件是否真的出现，仍取决于 workspace loader、过滤和 bootstrap routing，排序表同样在该文件里。
 
 ### 生效优先级
 
 这里不存在覆盖所有字段的一条数字优先级链，而是多个 owner-specific resolver 组合：
 
-- Agent 显式 workspace 优先于 defaults workspace；没有显式 workspace 时再走默认 Agent/derived workspace 规则。
-- Agent 显式 Skill filter（包括显式空列表）优先于 defaults Skill filter；session sparse overlay 最后对单个 Skill 做启用/禁用判断，见 `src/skills/discovery/agent-filter.ts`。
-- 模型 primary 由 Agent entry 优先于 `agents.defaults.model`；模型选择、session override、request override 和自动 fallback 还会在运行时继续改变当前选择，不能只看 Agent list 的 model 字段。
-- 配置中的工具 policy 与全局/profile/provider/group/sender/sandbox/subagent/runtime/inherited policy 共同收敛，后置 deny/allow 层不能通过在 prompt 中写一句话绕过，见 `src/agents/conversation-tool-policy-pipeline.ts`。
-- `buildConfiguredAgentSystemPrompt` 先解析 config-derived prompt fields，再把它们 spread 到 renderer 参数中，因此同名的 owner display、delegation、TTS、model aliases、memory citations、FS policy 以 config resolver 的值为准，见 `src/agents/system-prompt-config.ts`。
-- workspace 文件内容作为 Project Context 注入；prompt 文本要求遵循 `SOUL.md`、`USER.md` 等内容，除非更高优先级指令覆盖。它们不是 schema-level allow/deny，也不能改变工具实际 availability。
-- Provider prompt contribution 可以替换若干完整 section，并追加 stable prefix/dynamic suffix；这属于 Provider runtime hook，不是 Agent identity 字段的覆盖。
-- `extraSystemPrompt` 是本次运行的局部输入，位于 channel/session guidance 之后、Runtime 行之前。embedded runner 会把调用方 extra prompt、project memory 写入提示和 model-tools-unavailable 提示合并，见 `src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts`。
+- Agent 显式 workspace 优先于 defaults workspace，没有显式设置时再按默认 Agent 或派生 workspace 的规则计算。
+- Agent 显式 Skill filter 优先于 defaults Skill filter，显式空列表也算显式设置；session sparse overlay 最后对单个 Skill 决定启用还是禁用，见 `src/skills/discovery/agent-filter.ts`。
+- 模型 primary 先取 Agent entry，其次 `agents.defaults.model`；模型选择、session override、request override 和自动 fallback 在运行时还会继续改变当前选择，单看 Agent list 的 model 字段读不到最终结果。
+- 配置里的工具 policy 与全局、profile、Provider、群组、发送者、sandbox、subagent、runtime 和 inherited policy 逐层收敛，靠后执行的是 deny/allow 判定，prompt 里写一句话绕不过去，见 `src/agents/conversation-tool-policy-pipeline.ts`。
+- `buildConfiguredAgentSystemPrompt` 先解析 config-derived prompt fields，再展开成 renderer 参数；owner display、delegation、TTS、model aliases、memory citations 和 FS policy 这些同名项最终以 config resolver 的值为准，见 `src/agents/system-prompt-config.ts`。
+- workspace 文件内容作为 Project Context 注入，prompt 文本要求模型遵循 `SOUL.md`、`USER.md` 等内容，更高优先级指令可以覆盖它。这类内容没有 schema-level allow/deny 语义，改变不了工具的实际可用性。
+- Provider 的 prompt contribution 可以替换若干完整 section，并追加 stable prefix 和 dynamic suffix；它属于 Provider runtime hook，作用范围不涉及 Agent identity 字段。
+- `extraSystemPrompt` 是本次运行的局部输入，位置在 channel/session guidance 之后、Runtime 行之前。embedded runner 会把调用方的 extra prompt、project memory 写入提示和 model-tools-unavailable 提示合并到一起，见 `src/agents/embedded-agent-runner/run/attempt-system-prompt-prepare.ts`。
 
 ### 输出契约
 
 角色提示词还承担渠道和运行时输出契约，而不只是人格文本：
 
-- 有 message tool 时，prompt 会根据 source reply delivery mode 指示 `message(action=send)`、附件、语音和 replyTo；旧 automatic mode 仍可能使用 `MEDIA:`、`[[reply_to_current]]` 等过渡 marker。
-- `message_tool_only` 会关闭 generic silent-reply section，并要求可见回复走 message tool；对应代码见 `src/agents/system-prompt.ts` 和 `src/agents/system-prompt.ts`。
-- reasoning tag provider 可获得 `<think>...</think><final>...</final>` 形式提示；reasoning level 和是否隐藏由当前运行与 Provider 能力决定。
-- 没有可说内容时，full prompt 的 silent reply section 要求整段回复精确使用 silent token，不能把 token 夹在正常回复中，见 `src/agents/system-prompt.ts`。
-- Agent prompt 先生成 base prompt，再执行 Provider transform；因此 `systemPromptReport` 记录的是 attempt 组装出的 prompt，Provider 最终协议可能仍有额外转换。见 `src/agents/embedded-agent-runner/run/attempt-system-prompt.ts`。
+- 存在 message tool 时，prompt 按 source reply delivery mode 指示模型用 `message(action=send)` 发送，并说明附件、语音和 replyTo 的处理方式；旧 automatic mode 下仍可能使用 `MEDIA:`、`[[reply_to_current]]` 这类过渡 marker。
+- `message_tool_only` 会关掉通用的 silent-reply section，要求可见回复一律走 message tool，实现在 `src/agents/system-prompt.ts`。
+- 支持 reasoning tag 的 Provider 会收到 `<think>...</think><final>...</final>` 形式的提示；reasoning level 以及是否隐藏由当前运行和 Provider 能力决定。
+- 没有可说内容时，full prompt 的 silent reply section 要求整段回复精确使用 silent token，把 token 夹在正常回复里不符合该约定，见 `src/agents/system-prompt.ts`。
+- Agent prompt 先拼出 base prompt，再执行 Provider transform，所以 `systemPromptReport` 记录的是 attempt 组装出的那份 prompt，Provider 最终协议可能还有额外转换，见 `src/agents/embedded-agent-runner/run/attempt-system-prompt.ts`。
 
 ## 4. 模型、Provider 与生成参数
 
@@ -281,15 +281,15 @@ SessionEntry 保存以下角色相关的运行时模型事实：
 - Agent 配置更新不会把历史 session 直接重写成一份新的角色快照；新的 turn 会按 session override、配置和运行时策略重新解析；
 - `modelSelectionScope` 支持 session、agent、global 三种产品语义，但具体 mutation surface 由调用方选择，不是单纯 Agent entry resolver 的行为。
 
-Gateway `agent` 请求可以直接携带 `provider`、`model`、`thinking`、`promptMode`、`extraSystemPrompt`、`sourceReplyDeliveryMode` 等字段，协议定义见 `packages/gateway-protocol/src/schema/agent.ts`。请求入口需要把这些字段与 session/config facts 组合后再进入 runner。
+Gateway 的 `agent` 请求可以直接携带 provider/model 选择、`thinking`、`promptMode` 和投递模式等运行级参数，协议定义见 `packages/gateway-protocol/src/schema/agent.ts`。请求入口把这些参数与 session 和配置事实组合后，才交给 runner。
 
 ### thinking、reasoning、streaming 与其他参数
 
-- Agent/default 可以设置 `thinkingDefault`、`verboseDefault`、`reasoningDefault`、`fastModeDefault`；session entry 还会记录 `thinkingLevel`、`reasoningLevel`、`fastMode` 等当前状态。
-- `params` 是任意 key/value 的 Provider 参数容器，Agent entry、defaults 和 per-model metadata 都有对应类型入口。当前调查没有完整追完每个 Provider Adapter 的参数 merge 和覆盖顺序，因此不能把它概括为一条全局温度或输出格式优先级。
-- `modelPolicy.allow` 用于限制可供 session/run override 的 model refs；空或省略按类型注释表示允许任意模型。显式 override authorization 与自动 fallback authorization 是分开处理的，见 `src/agents/model-selection-shared.ts`。
-- UI Agents overview 明确展示 primary、fallbacks、runtime 和 thinking default，并支持保留 `{ fallbacks }` 而清空 primary；清空 Agent primary 的语义是恢复 defaults inheritance，不删除已编写的 fallback list，见 `ui/src/pages/agents/model-config.ts`。
-- 配置化 ACP binding 如果只发生 model drift，会保留现有 channel conversation binding，并通过 ACP manager 原地更新 runtime model；mode/backend/cwd/external agent 改变则会重建 session，见 `src/acp/persistent-bindings.lifecycle.ts`。
+- Agent 和 defaults 可以设置 `thinkingDefault`、`verboseDefault`、`reasoningDefault` 和 `fastModeDefault` 四项默认值；session entry 另外记录思考、推理和 fast mode 的当前生效状态。
+- `params` 是任意 key/value 的 Provider 参数容器，Agent entry、defaults 和 per-model metadata 各有对应类型入口。每个 Provider Adapter 的参数 merge 与覆盖顺序本次没有完整追完，因此无法概括成一条全局的温度或输出格式优先级。
+- `modelPolicy.allow` 限制 session 和 run override 能用的 model refs，空值或省略按类型注释表示允许任意模型。显式 override 授权与自动 fallback 授权分开处理，见 `src/agents/model-selection-shared.ts`。
+- UI 的 Agents overview 明确展示 primary、fallbacks、runtime 和 thinking default，并支持保留 `{ fallbacks }` 而清空 primary；清空 Agent primary 的语义是恢复 defaults inheritance，已写好的 fallback list 不动，见 `ui/src/pages/agents/model-config.ts`。
+- 配置化 ACP binding 只发生 model drift 时，会保留现有 channel conversation binding，由 ACP manager 原地更新 runtime model；mode、backend、cwd 或 external agent 改变时才重建 session，见 `src/acp/persistent-bindings.lifecycle.ts`。
 
 ### 可见的实际模型事实
 
@@ -377,7 +377,7 @@ Agent identity 的 UI/display precedence 是：
 
 实现见 `src/gateway/assistant-identity.ts`。结构化 identity 还影响消息 prefix 和 ack reaction，但 reaction/prefix 另有 channel account、channel、global messages 层级，不能把它们等同于角色人格 prompt；见 `src/agents/identity.ts`。
 
-头像可以是受限的 HTTP URL、data URL、本地 workspace-relative path 或短文本 avatar。`IDENTITY.md` 读取有 4 MiB 文件上限，avatar data URL 还受单独的媒体上限；解析边界见 `src/agents/identity-file.ts` 和 `src/gateway/assistant-identity.ts`。Control UI 通过 `agents.update` 保存 name/emoji/avatar，Gateway 也会同步 rewrite workspace `IDENTITY.md`，见 `ui/src/lib/agents/index.ts` 和 `src/gateway/server-methods/agents.ts`。
+头像支持受限的 HTTP URL、data URL、workspace 相对路径和短文本四种形式。`IDENTITY.md` 读取有 4 MiB 文件上限，avatar data URL 另受媒体上限约束；解析见 `src/agents/identity-file.ts` 和 `src/gateway/assistant-identity.ts`。Control UI 通过 agents.update 保存 name、emoji 和 avatar，Gateway 同步改写 workspace 的 identity 文件，入口见 `ui/src/lib/agents/index.ts` 和 `src/gateway/server-methods/agents.ts`。
 
 ### 开场白、快捷回复和变量
 

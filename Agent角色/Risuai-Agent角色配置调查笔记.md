@@ -16,7 +16,7 @@
 
 Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局数据库和预设（preset）四层分离。`character` 与 `groupChat` 两种对象都存放在单一数据库对象的 `characters` 数组里，用 `chaId`（UUID）标识；聊天是角色下的 `chats[]` 数组元素，每个聊天单独持有开场白索引、作者注、会话级 lorebook、绑定的用户档案和记忆状态。角色本身**不持有模型与生成参数**——模型、温度、上下文长度等全部是全局 Database 字段，由 botPreset（预设）成批切换，角色与聊天都不绑定预设。
 
-提示词装配按全局装配顺序（或可选的模板卡片序列）把多个语义槽位拼成消息序列：`systemPrompt` 与 `replaceGlobalNote` 分别以占位符替换全局主提示词与备注，描述、人格、场景拼进描述槽，聊天作者注、向量检索出的附加文本、按深度插入的 `depth_prompt` 各占位置。开场白（`firstMessage` 与 `alternateGreetings`）**不写入历史**，渲染与提示装配每次都实时读取角色字段，由聊天级 `fmIndex` 选择，修改角色会直接影响既有会话的下一轮生成。
+提示词装配按全局装配顺序（或可选的模板卡片序列）把多个语义槽位拼成消息序列：`systemPrompt` 与 `replaceGlobalNote` 分别以占位符替换全局主提示词与备注，描述、人格、场景拼进描述槽，聊天作者注、向量检索出的附加文本、按深度插入的深度提示词各占位置。开场白（`firstMessage` 与 `alternateGreetings`）**不写入历史**，渲染与提示装配每次都实时读取角色字段，由聊天级 `fmIndex` 选择，修改角色会直接影响既有会话的下一轮生成。
 
 外部能力分层挂接：lorebook 由角色级、聊天级与全局模块三源合并激活，激活语义（关键词、正则、概率、延迟、深度、注入、递归）在运行时解析；记忆按角色开关与全局算法选择，状态回写聊天对象；MCP 工具注册在全局模块与插件层，角色没有工具字段，仅以 `lowLevelAccess` 门控脚本能力。导入导出覆盖 Tavern V2/V3、PNG（`chara`/`ccv3` 文本块与附加资产块）、JSON、CharX（ZIP）、Chub 下载与 Risu Hub（realm）深链，扩展数据存放在 `extensions.risuai`。
 
@@ -26,7 +26,7 @@ Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局�
 
 发送入口 `sendChat`（`src/ts/process/index.svelte.ts:99`）的完整链路如下：
 
-1. 读取当前角色（`selectedCharID` 下标）与当前聊天（`chatPage`），按装配顺序把主提示词、描述、人格、示例对话、历史、lorebook、备注、作者注、persona 各槽位填成 `OpenAIChat[]` 消息序列；角色字段的覆盖逻辑见 `index.svelte.ts:410-496`，槽位拼装见 `index.svelte.ts:1221-1468`。
+1. 发送链先取出当前角色与当前聊天（分别由 `selectedCharID` 下标和 `chatPage` 指定），再按装配顺序把主提示词、描述、人格、示例对话、历史、lorebook、备注、作者注与 persona 填成一条 `OpenAIChat[]` 消息序列。角色字段如何覆盖全局值、各槽位如何拼装，实现同在 `index.svelte.ts:410-496,1221-1468`。
 2. 插入开场白、执行可选记忆压缩、按上下文上限截断，再把深度注入（角色 `depth_prompt` 与 lorebook 的 depth 条目）插入历史。
 3. 调用 `requestChatData`（`src/ts/process/request/request.ts:205`）按当前预设选定的模型发起请求，流式结果逐段写入 `chat.message` 并附带 `generationInfo`。
 4. 自动保存循环（500ms 防抖）把整库增量编码写进 `database/database.bin`（`src/ts/globalApi.svelte.ts:315-479`）。
@@ -37,12 +37,14 @@ Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局�
 
 `character` 接口定义在 `src/ts/storage/database.svelte.ts:1343-1499`，按职责可分成几组：
 
-- 身份与元数据：`name`、`nickname`、`chaId`（唯一标识）、`tags/creator/characterVersion`（导出用 `additionalData` 镜像）、`creation_date/modification_date`、`source`、`license/private/realmId`（分享与 Hub 关联）、`trashTime`（软删除标记）。
-- 提示词与人格：`desc`、`personality`、`scenario`、`exampleMessage`、`systemPrompt`、`replaceGlobalNote`、`additionalText`、`depth_prompt`、`firstMessage` 与 `alternateGreetings`、`firstMsgIndex`。
-- 聊天集合：`chats[]`（`Chat` 类型，含 `message/note/localLore/fmIndex/bindedPersona/folderId` 与各记忆数据字段，`database.svelte.ts:1817-1839`）、`chatFolders`、`chatPage`。
-- 外观与资产：`image`、`emotionImages`、`additionalAssets`、`ccAssets`（V3 资产表）、`largePortrait`、`backgroundHTML/backgroundCSS`、`viewScreen`（表情/图像生成模式）。
-- 脚本与能力：`customscript`（正则脚本）、`triggerscript`（触发脚本）、`virtualscript`（导入时强制置空，见注释 "removed due to security issue"）、`lowLevelAccess`、`utilityBot`、`prebuiltAssetCommand`。
-- 外部能力：`globalLore`（lorebook 条目数组）、`loreSettings/loreExt`（世界书预算与扫描设置）、`supaMemory`、`defaultVariables`、`modules/moduleNamespace/customModuleToggle`（模块挂接）、`coldstorage`（冷存储外置键）。
+| 分组 | 字段 | 说明 |
+| --- | --- | --- |
+| 身份与元数据 | `name`、`nickname`、`chaId`、`tags`、`creator`、`characterVersion`、`creation_date`、`modification_date`、`source`、`license`、`private`、`realmId`、`trashTime` | `chaId` 是唯一标识；`tags`、`creator`、`characterVersion` 在导出时镜像进 `additionalData`；`license`、`private`、`realmId` 服务于分享与 Hub 关联；`trashTime` 是软删除标记。 |
+| 提示词与人格 | `desc`、`personality`、`scenario`、`exampleMessage`、`systemPrompt`、`replaceGlobalNote`、`additionalText`、`depth_prompt`、`firstMessage`、`alternateGreetings`、`firstMsgIndex` | 提示词正文材料，各字段的槽位去向见 3.2 节。 |
+| 聊天集合 | `chats`、`chatFolders`、`chatPage` | `chats` 的元素为 `Chat` 类型，含 `message/note/localLore/fmIndex/bindedPersona/folderId` 与各记忆数据字段（`database.svelte.ts:1817-1839`）。 |
+| 外观与资产 | `image`、`emotionImages`、`additionalAssets`、`ccAssets`、`largePortrait`、`backgroundHTML`、`backgroundCSS`、`viewScreen` | `ccAssets` 是 V3 资产表；`viewScreen` 决定表情或图像生成模式。 |
+| 脚本与能力 | `customscript`、`triggerscript`、`virtualscript`、`lowLevelAccess`、`utilityBot`、`prebuiltAssetCommand` | `customscript` 存正则脚本，`triggerscript` 存触发脚本；`virtualscript` 在导入时强制置空，源码注释写明 "removed due to security issue"。 |
+| 外部能力 | `globalLore`、`loreSettings`、`loreExt`、`supaMemory`、`defaultVariables`、`modules`、`moduleNamespace`、`customModuleToggle`、`coldstorage` | `globalLore` 是 lorebook 条目数组，`loreSettings` 与 `loreExt` 管世界书预算和扫描设置，`modules` 一组负责模块挂接，`coldstorage` 是冷存储外置键。 |
 
 `groupChat`（`database.svelte.ts:1510-1580`）是另一种持久化对象：成员以 `characters`（chaId 数组）引用，另有发言权重、激活开关、自动模式、顺序发言、单次发言与是否使用成员角色 lorebook 等群聊专用字段，以及 `group_only_greetings`（V3 卡导出字段）。群聊是独立的角色集合容器，不是角色实体的聚合视图。
 
@@ -78,7 +80,7 @@ Risuai 的"角色"是**独立持久化对象**，与聊天（会话）、全局�
 ['main','description','personaPrompt','chats','lastChat','jailbreak','lorebook','globalNote','authorNote']
 ```
 
-若启用 `promptTemplate`（预设可携带），则完全按卡片序列装配，卡片类型如下（键名见源码），支持内联格式包裹与 `{{slot}}` 填充、角色转换与缓存点标记（`index.svelte.ts:676-820` 与 `1271-1461`）；`utilityBot` 角色强制使用一套精简模板（`index.svelte.ts:379-408`）。persona、description、authornote 与 memory 卡可单独把本槽位改标为 user、bot 或 system；未填或导入值无效时保留 system 默认。description 卡只改角色本体描述，前后位置的 lorebook 仍按条目角色处理；lorebook 条目也新增默认角色，正文 `@@role` 仍可逐条覆盖（`PromptDataItem.svelte:56-58,364-376`、`index.svelte.ts:654-708,1273-1437`、`database.svelte.ts:2543-2552`）。
+预设可以携带卡片模板，启用后装配完全改由卡片序列驱动，卡片清单见下方代码块（键名见源码）。每张卡支持内联格式包裹与槽位占位填充，并能做角色转换与缓存点标记。`utilityBot` 角色不走这套模板，强制改用一套精简版本。persona、description、authornote、memory 四类卡能单独把本槽位改标为 user、bot 或 system，字段未填或导入值无效时按 system 默认处理。description 卡只改角色本体描述，它前后位置的 lorebook 仍按条目自身的角色处理；lorebook 条目也新增了默认角色，正文里的 `@@role` 可以逐条覆盖。装配与角色默认值的实现见 `index.svelte.ts:379-408,654-820,1271-1461`、`PromptDataItem.svelte:56-58,364-376`、`database.svelte.ts:2543-2552`。
 
 ```
 persona / description / lorebook / chat / authornote / memory / cache / plain / jailbreak / cot / chatML / postEverything
@@ -100,7 +102,7 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 
 ### 3.3 变量与覆盖优先级
 
-所有槽位文本都经 `risuChatParser` 解析（`src/ts/parser/parser.svelte.ts:1538` 起）：替换 `{{char}}`/`{{user}}`、执行 `{{...}}` 嵌套模板与 CBS 函数（条件、循环、读写变量），并支持 `{{//注释}}` 语法。
+槽位文本拼进请求前都会过一遍 `risuChatParser`：替换 `{{char}}/{{user}}` 宏，执行 `{{...}}` 形式的嵌套模板和 CBS 函数（条件、循环、变量读写），另外支持 `{{//注释}}` 注释语法。解析入口在 `src/ts/parser/parser.svelte.ts:1538` 起。
 
 变量取值的优先级链是：会话已存值 > 角色默认变量 > 全局默认变量 > 空值，实现在 `getChatVar`（`src/ts/parser/chatVar.svelte.ts:5-39`），写入侧 `setChatVar` 把值存进会话的 `scriptstate`。
 
@@ -110,15 +112,15 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 
 角色、聊天均不持有模型与采样参数（已核对两个接口定义）。模型与参数是 Database 全局字段（主模型 `aiModel`、辅助模型 `subModel`、温度与上下文上限等），由预设成批切换。
 
-`botPreset`（`database.svelte.ts:1582-1685`）是这些全局值的成批快照，还包含提示词字段（主提示词、jailbreak、备注、装配顺序、模板）与渠道字段（API 类型、密钥、端点、代理）。保存与切换由 `saveCurrentPreset` 与 `changeToPreset` 实现，选中 id 为全局 `botPresetsId`（`database.svelte.ts:2036-2255`）。切换角色不改变预设，切换预设不改变角色——两者在数据层完全正交。
+`botPreset` 把上面这些全局值打成一份快照，另外带上提示词字段（主提示词、jailbreak、备注、装配顺序、模板）和渠道字段（API 类型、密钥、端点、代理）。保存与切换分别由 `saveCurrentPreset`、`changeToPreset` 完成，当前选中的预设由全局 `botPresetsId` 指向，结构与读写实现见 `database.svelte.ts:1582-1685,2036-2255`。切换角色不会改动预设选择，切换预设也不会改动角色，两者在数据层完全正交。
 
-请求解析在 `requestChatDataMain`（`request.ts:435-458`）：主请求用 `db.aiModel`，辅助请求（记忆/表情/翻译等模式）用 `db.subModel`，开启分离模型时按模式覆盖；失败时按 `fallbackModels` 列表逐个重试。温度默认 `db.temperature / 100`。
+请求参数由 `requestChatDataMain` 解析：主请求取全局主模型，记忆、表情、翻译等辅助模式改取 `db.subModel`，开启分离模型时再按模式覆盖；请求失败则沿备用模型列表逐个换模型重试。温度默认按 `db.temperature / 100` 折算。入口在 `request.ts:435-458`。
 
 消息里保存的模型显示名由 `getGenerationModelString` 生成（`src/ts/process/models/modelString.ts:3-24`），把 openrouter 前缀、Ollama 等可读字符串而非内部 id 记入历史。
 
 ## 5. 工具、知识库、记忆与子 Agent
 
-**工具**：MCP 服务器注册在全局模块（`RisuModule.mcp` 字段）与插件层，`getTools()` 只是 `getMCPTools()` 的包装（`src/ts/process/mcp/mcp.ts:273-275`）。角色类型没有任何工具字段，也没有工具白名单——工具对角色全局可见，这与"角色卡只带内容"的取向一致；角色侧相关的只有 `lowLevelAccess`（是否允许脚本调用危险操作）与 `utilityBot`。工具的发现、schema 注入与执行细节归 Agent 工具类目，本篇不展开。
+**工具**：工具与角色解耦，MCP 服务器注册在全局模块（`RisuModule.mcp` 字段）与插件层，角色类型里没有任何工具字段，也没有工具白名单；取工具列表的入口只是 MCP 工具函数的简单包装（`src/ts/process/mcp/mcp.ts:273-275`）。角色侧能影响工具使用范围的只有 `lowLevelAccess`（是否允许脚本调用危险操作）与 `utilityBot` 两个开关，这与"角色卡只带内容"的取向一致。工具的发现、schema 注入与执行细节归 Agent 工具类目，本篇不展开。
 
 **知识库（lorebook）**：运行时 `loadLoreBookV3Prompt`（`src/ts/process/lorebook.svelte.ts:75-666`）把角色 `globalLore`、当前聊天 `localLore` 与全局模块 lorebook 三源合并后逐个求值：条目以关键词（支持正则、全词匹配、大小写敏感）与 `@@` 装饰符（概率、延迟、深度、角色、位置、注入、排除键、递归、激活后保持等）决定激活，另有子条目模式。
 
@@ -130,15 +132,15 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 
 ## 6. 资产、变量、开场白与用户档案
 
-**资产**：头像、表情图、附加资产与 V3 资产表等资产字段（键名见第 1.1 节）都以资产 id 存储：经 `saveAsset` 写入应用资产存储，卡内引用在导入导出时以 `__asset:N`、`embeded://`、`data:` 等前缀解析（见第 7 节）。消息文本中的 `{{asset_prompt::name}}` 占位可按名称把附加资产作为多模态图注入请求（`index.svelte.ts:1010-1037`）。
+**资产**：头像、表情图、附加资产与 V3 资产表里存的都是资产 id，实体另写进应用资产存储（键名见第 1.1 节）。导入导出时，卡内的资产引用按 `__asset:N`、`embeded://`、`data:` 等前缀分别解析（见第 7 节）。消息文本里写 `{{asset_prompt::name}}` 占位，就能按名称把对应附加资产作为多模态图注入请求（`index.svelte.ts:1010-1037`）。
 
-**变量**：角色 `defaultVariables` 提供键值默认（与全局 `templateDefaultVariables` 合并），`{{getvar}}/{{setvar}}` 读写会话 `scriptstate`；`globalChatVariables` 是全局变量（含 toggle 开关值）。三者分别由 `chatVar.svelte.ts` 与解析器消费，写入会在自动保存时随角色/聊天落盘。
+**变量**：角色 `defaultVariables` 提供键值默认（与全局默认变量合并），`{{getvar}}/{{setvar}}` 读写会话 `scriptstate`；`globalChatVariables` 是全局变量（含 toggle 开关值）。三者分别由 `chatVar.svelte.ts` 与解析器消费，写入会在自动保存时随角色/聊天落盘。
 
-**开场白**：`firstMessage` 与 `alternateGreetings` 不进入 `chat.message`，聊天界面按会话级 `fmIndex`（-1 = 默认开场白）显示与翻页（`DefaultChatScreen.svelte:837-872`），发送链同样按该索引实时取文本插入 prompt（`index.svelte.ts:868-884`）。
+**开场白**：开场白文本不写进 `chat.message`，聊天界面按会话级 `fmIndex` 显示与翻页，取 -1 时用默认开场白。发送链同样按这个索引从角色字段实时取文本，插到消息序列最前。渲染入口在 `DefaultChatScreen.svelte:837-872`，发送侧在 `index.svelte.ts:868-884`。
 
 因此修改开场白或新增备选开场白会立即影响既有会话的显示与下一次生成；历史中不保存开场白快照，`fmIndex` 本身随聊天持久化。
 
-**用户档案**：`personas` 数组（`RisuPersona`：name/icon/personaPrompt/note/largePortrait/id，`database.svelte.ts:792-800`）由全局 `selectedPersona` 指向当前档案，`changeUserPersona` 把选中项复制到全局用户名、人格文本、头像与备注字段（`src/ts/persona.ts:36-46`）。
+**用户档案**：档案存放在全局 `personas` 数组里，每项是 `RisuPersona`，带名称、图标、人格文本、备注、大图与 id 六个字段。当前档案由 `selectedPersona` 指出，切换时把选中项的内容复制到全局用户名、人格文本、头像与备注字段。类型定义与复制逻辑分别在 `database.svelte.ts:792-800`、`src/ts/persona.ts:36-46`。
 
 档案可导出为带 `persona` PNG chunk 的图片、从图片导入（`persona.ts:54-141`），并可与角色双向转换（`src/ts/interchangeability.ts:122-193`，转换时把人格文本包成 `@@indicator` lorebook 条目，模块内嵌到档案的 `embeddedModule`）。
 
@@ -156,11 +158,13 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 
 **字段映射**：`importCharacterCardSpec`（`characterCards.ts:720-1036`）把卡 data 映射到角色对象，标准字段一一对应，关键映射包括：
 
-- `post_history_instructions` → `replaceGlobalNote`
-- `character_book` → `globalLore` 加 `loreSettings/loreExt`
-- `alternate_greetings` → 备选开场白数组
-- `extensions.risuai` → 本应用私有字段（表情、bias、视图模式、正则、trigger、utilityBot、SD 配置、背景、许可、附加文本、largePortrait、lorePlus、newGenData、VITS、defaultVariables、lowLevelAccess 等）
-- `extensions` 其余键 → 原样保留到 `extentions`；`depth_prompt` 从扩展里拆出为顶层字段
+| 卡片字段 | 角色字段 |
+| --- | --- |
+| `post_history_instructions` | `replaceGlobalNote` |
+| `character_book` | `globalLore`，同时写出 `loreSettings` 与 `loreExt` |
+| `alternate_greetings` | 备选开场白数组 |
+| `extensions.risuai` | 本应用私有字段（表情、bias、视图模式、正则、trigger、utilityBot、SD 配置、背景、许可、附加文本、largePortrait、lorePlus、newGenData、VITS、defaultVariables、lowLevelAccess 等） |
+| `extensions` 其余键 | 原样保留到 `extentions`；`depth_prompt` 单独拆出为顶层字段 |
 
 `convertCharbook`（`characterCards.ts:1038-1143`）把 SillyTavern 风格的世界书扩展字段（概率、位置+深度+角色、选择逻辑、延迟、整词匹配）内联成 `@@` 装饰符写进内容前缀，把二次键语义转成排除键或附加键装饰符。
 
@@ -187,17 +191,17 @@ persona / description / lorebook / chat / authornote / memory / cache / plain / 
 ## 9. 设计取舍与已确认边界
 
 - **角色是纯内容容器，运行参数全部在外层**：与同类角色扮演应用把推理参数放卡外一致，Risuai 更进一步——连"预设选择"都全局化，角色与聊天都锚定不到某个预设。好处是角色切换零配置成本；代价是同一聊天内换角色会沿用上一预设的提示词与采样设置。
-- **开场白是实时引用而非快照**：没有类似 SillyTavern tainted 的固化机制，`firstMessage` 修改后旧聊天下一次生成即用新文本；历史消息中也不存在开场白副本，导出聊天时开场白从角色字段现取（`characters.ts:292`）。
-- **重新生成是破坏性重建**：reroll 从消息末尾弹回到最近一条用户消息后重新请求（`DefaultChatScreen.svelte:246-270`），旧回复只保存在界面内存的 `rerolls` 数组与 `prereroll.ts` 的 generationId 索引中，刷新或切换页面即丢失；多消息生成时同样只缓存当轮结果（`prereroll.ts:26-29`）。历史中没有任何 swipe/分支结构。
+- **开场白按实时引用读取**：项目里没有 SillyTavern tainted 那样的固化机制，改完 `firstMessage` 后旧聊天下一轮生成立刻用新文本；历史消息中不留开场白副本，导出聊天时也从角色字段现取（`characters.ts:292`）。
+- **重新生成是破坏性重建**：reroll 会把消息列表弹回到最近一条用户消息之后，再重新发起请求，被弹掉的旧回复只留在界面内存的 `rerolls` 数组和按 generationId 建的索引里，刷新或切换页面即丢失，多消息生成也只缓存当轮结果。历史里没有 swipe 或分支结构。弹回逻辑在 `DefaultChatScreen.svelte:246-270`，缓存索引在 `prereroll.ts:26-29`。
 - **全局 lorebook 是遗留功能**：数据与编辑入口仍在，但 UI 明示移除、运行时未消费，属于可观察的未清理边界。
-- **导入导出兼容多种方言**：SillyTavern 扩展字段被内联成装饰符而非保留原结构，`@@` 语法即运行时语法；`extensions` 未知键整体保留但不保证被任何逻辑读取。
-- **安全边界**：`lowLevelAccess` 需导入确认、`virtualscript` 被移除、资产导入只接受白名单 chunk 且单 chunk 限 20KB（`characters.ts:101-119`）、卡数据限 5MB。
+- **导入导出兼容多种方言**：SillyTavern 的扩展字段在导入时被内联成 `@@` 装饰符，运行时直接按这套写法求值，原结构不再保留；`extensions` 里的未知键整块保留，运行时是否读取按具体功能而定。
+- **安全边界**：导入带 `lowLevelAccess` 的卡需要用户确认，`virtualscript` 已被移除；资产导入只接受白名单内的 chunk，单 chunk 上限 20KB，卡数据整体上限 5MB。chunk 白名单与大小检查在 `characters.ts:101-119`。
 
 ## 10. 未验证事项
 
 - 未运行应用：聊天界面渲染、开场白分页器交互、消息悬浮信息（模型/耗时）的展示方式均为静态推断，未做运行验证。
 - `promptInfo.promptText` 与 `showPromptComparison` 的界面呈现组件未逐项核对。
-- 群聊场景中 `bindedPersona`、`{{char}}` 解析与 `groupOrder` 权重算法的实际行为未验证。
+- 群聊场景中，聊天级档案绑定的实际效果、`{{char}}` 的解析结果与按 `groupOrder` 排定的发言权重都未验证。
 - 温度等全局参数经各 Provider 适配层进入请求体的最终映射只确认了共享层（`request.ts:458`、`shared.ts:286`），各适配器内部细节未全部核对。
 - MCP 工具在请求中的 schema 注入、执行与结果回注归 Agent 工具类目，本篇未覆盖。
 - coldstorage 的自动触发阈值与恢复流程只确认了入口（`coldstorage.svelte.ts:575/627`），未追踪完整状态机。

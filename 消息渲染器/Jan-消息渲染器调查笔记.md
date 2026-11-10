@@ -16,7 +16,7 @@
 
 Jan 的消息渲染是 **React 组件 + AI SDK UIMessage parts** 的结构化模型：消息正文以 `text / reasoning / file / tool-*` 部件数组承载，渲染层的输入是这类部件而非整条消息的单一字符串（`web-app/src/containers/message/types.ts`，36 行：`CONTENT_TYPE` 仅 TEXT/FILE/REASONING 三种，`isToolPart = type.startsWith('tool-')`）。整体是一个 React web-app（`web-app/`），本次未发现独立的移动端渲染器。
 
-Markdown 渲染以 **Jan fork 的 streamdown** 为核心（依赖 `npm:@janhq/streamdown@^2.1.1`，`web-app/package.json`）：remark 管线（GFM、数学、禁用缩进代码块）+ rehype 管线（KaTeX + `defaultRehypePlugins.harden` 消毒）+ 流式专用插件（code/mermaid/cjk）。**Jan 替换了 fork 的 rehype 插件集：丢弃默认的 rehype-raw + rehype-sanitize，改用 `[rehypeKatex, restrictChatLinks, harden]`**（插件常量见 §2.1 代码块）；其中 `restrictChatLinks` 是仓库自己的插件，用于约束聊天正文里的链接。流式期间有专门优化：`useDeferredValue` 合并 token、流式中代码块不跑 Shiki 高亮、LaTeX 占位符保护管线。
+Markdown 渲染以 **Jan fork 的 streamdown** 为核心，依赖声明为 `npm:@janhq/streamdown@^2.1.1`（`web-app/package.json`）。fork 的管线分三层：remark 侧启用 GFM 与数学公式，并禁用缩进代码块；rehype 侧用 KaTeX 排版公式，再由 `defaultRehypePlugins.harden` 做 HTML 消毒；另有 code、mermaid、cjk 三个流式专用插件。Jan 在这个 fork 上换了一套 rehype 插件，默认的 rehype-raw 与 rehype-sanitize 已被移除，改用 KaTeX、`restrictChatLinks` 与 harden 的组合（常量定义见 §2.1 代码块）；该插件由本仓库实现，专门约束聊天正文里的链接。流式期间另有三处优化：`useDeferredValue` 合并 token、代码块在流式中跳过 Shiki 高亮、LaTeX 走占位符保护管线。
 
 Jan 的三个设计点：
 
@@ -30,30 +30,36 @@ Jan 的三个设计点：
 
 `web-app/src/lib/messages.ts` 负责 UI 消息 ↔ ThreadMessage 双向转换：
 
-- `convertUIMessageToThreadMessage`（`:17` 起）：text / reasoning（包裹 `<think>`）/ file（image/audio/video）/ tool part → ThreadMessage；
-- `convertThreadMessageToUIMessage`（`:255` 起）：`tool_call` content 转 `tool-<name>` part；兼容旧 `metadata.tool_calls`；`parseReasoning`（`:170`）解析 `<think>`/`<thought>`/`<|channel|>analysis`；
-- `uiMessageHasMeaningfulContent`（`:402`）、`threadMessageIsEmpty`（`:428`）。
+- 正向转换入口是 `convertUIMessageToThreadMessage`：文本、推理、文件与工具部件逐类映射成 ThreadMessage，推理内容包裹为 `<think>`，文件按 image、audio、video 区分（`messages.ts:17` 起）。
+- 反向转换入口是 `convertThreadMessageToUIMessage`：把工具调用内容转成 `tool-<name>` 部件，兼容旧数据里的 metadata.tool_calls；think、thought 与 channel|analysis 三种推理分隔标记统一由 `parseReasoning` 解析（`messages.ts:170-255`）。
+- 空内容判断由两个函数承担：`uiMessageHasMeaningfulContent` 与 `threadMessageIsEmpty`（`messages.ts:402`、`:428`）。
 
 ### 1.2 MessageItem 分派（915 行）
 
-- `hasPendingToolCall`（`:192`）：终态仅 `output-available`/`output-error`/`output-denied`；`awaitingApproval` 查 `pendingApprovals[toolCallId]`；
-- `renderedParts`（`:507` 起）：顺序遍历 parts，`reasoning`/`tool-*` 归入 `ChainOfThoughtGroup`（`isCotPart`，L416-417），text/file 打断 flush；
-- 用户消息渲染为气泡（`coloredUserBubble`，附件 chips 显示 `injectionMode`，L272-310）；assistant 文本走 `RenderMarkdown` 并注入 `injectCitationMarkers`（grounding 后，L313-326）；
-- 引用聚合：tool part 输出经 `parseCitationsFromToolOutput` 分 rag/web；流结束触发 `ensureGrounding`（走 `useGroundingStore` 的 `ensure`，`:252-278`，`rag.embed` 句子级余弦校验）；web 引用行 `WebSourcesRow`；
-- 附件：音频/视频内嵌播放器、用户图片缩略图+预览对话框（L333-411、L644-657）；
-- 错误框 + Regenerate（L528-555）；
-- 操作区：复制/编辑（`EditMessageDialog` 带 imageUrls）/删除/Continue（仅 `metadata.stopped`）/Regenerate（仅末条）（L558-642）；
-- memo 比较器对末条流式消息恒重渲染（L661-680）。
+- 工具调用是否还在进行由 `hasPendingToolCall` 判断：状态为 output-available、output-error 或 output-denied 时算终态，其余状态都按未完成处理；待审批状态另查 pendingApprovals 里对应的工具调用 id（`MessageItem.tsx:192`）。
+- 部件按顺序渲染，入口是 `renderedParts`：遍历时推理与工具部件收进 `ChainOfThoughtGroup`，文本和文件部件打断当前分组并触发 flush，分组条件由 `isCotPart` 判断（`MessageItem.tsx:507` 起、`:416-417`）。
+- 用户消息渲染成气泡，附件 chips 上显示注入方式；assistant 的正文交给 `RenderMarkdown`，引用标记在 grounding 完成后注入（`MessageItem.tsx:272-310`、`:313-326`）。
+- 引用聚合分两步：工具输出先由 `parseCitationsFromToolOutput` 拆成 rag 与 web 两类，流结束后再触发 `ensureGrounding`，由 grounding store 调用 rag 扩展的 embed 接口做句子级余弦校验；web 引用行由 `WebSourcesRow` 渲染（`MessageItem.tsx:252-278`）。
+- 附件按类型渲染：音频与视频用内嵌播放器，用户图片显示缩略图并可打开预览对话框（`MessageItem.tsx:333-411`、`:644-657`）。
+- 出错时显示错误框并附带 Regenerate 操作（`MessageItem.tsx:528-555`）。
+- 操作区提供复制、编辑、删除、Continue 与 Regenerate：编辑使用带 imageUrls 的 `EditMessageDialog`，Continue 仅在 `metadata.stopped` 为真时出现，Regenerate 只对最后一条开放（`MessageItem.tsx:558-642`）。
+- memo 比较器对末尾仍在流式的消息始终判定需要重渲染（`MessageItem.tsx:661-680`）。
 
 派生工具部件组件（独立文件）：
 
-- `ChainOfThoughtGroup`（291 行）：推理链 / 工具调用分组折叠渲染，并按 messageId 记录推理耗时（`hooks/useCoTDuration.ts`）；
-- `ToolCallCard.tsx`（156 行）：单个工具调用卡片；
-- `AgentToolWidget.tsx`（327 行）/ `SubagentToolWidget.tsx`（47 行）：Agent 与子 Agent 的工具调用；
-- `RagToolWidget.tsx`（95 行）：RAG 检索结果卡片；
-- `WebToolWidget.tsx`（142 行）：Web 搜索展开项；
-- `Citations`（213 行）/ `CitationLink`（82 行）：引用聚合与锚点链接；
-- `WebSourcesRow`（58 行）、`MarkdownTable`（146 行）、`MermaidError`（27 行）。
+| 组件 | 行数 | 负责的渲染内容 |
+| --- | --- | --- |
+| `ChainOfThoughtGroup` | 291 | 推理链与工具调用分组折叠渲染，并按 messageId 记录推理耗时（`hooks/useCoTDuration.ts`） |
+| `ToolCallCard.tsx` | 156 | 单个工具调用卡片 |
+| `AgentToolWidget.tsx` | 327 | Agent 的工具调用 |
+| `SubagentToolWidget.tsx` | 47 | 子 Agent 的工具调用 |
+| `RagToolWidget.tsx` | 95 | RAG 检索结果卡片 |
+| `WebToolWidget.tsx` | 142 | Web 搜索展开项 |
+| `Citations` | 213 | 引用聚合 |
+| `CitationLink` | 82 | 锚点链接 |
+| `WebSourcesRow` | 58 | web 引用来源行 |
+| `MarkdownTable` | 146 | 表格渲染 |
+| `MermaidError` | 27 | Mermaid 渲染错误的展示 |
 
 `conversation.tsx` 提供列表容器：`use-stick-to-bottom` 吸附底部、`role="log"` 无障碍角色。
 
@@ -63,11 +69,11 @@ Jan 的三个设计点：
 
 ### 1.4 消息列表、窗口化与滚动
 
-列表容器 `web-app/src/components/ai-elements/conversation.tsx`（235 行）：`Conversation` 包装 `use-stick-to-bottom` 的 `StickToBottom`（initial/resize 均 smooth，`role="log"`），`ConversationContent` 是消息列容器，`ConversationScrollButton` 在非底部时显示回底按钮；本轮新增 `useReleaseScrollLock` 上下文，供子组件临时让出滚动锁（例如展开工具卡片时）。
+消息列表的容器实现在 `web-app/src/components/ai-elements/conversation.tsx`（235 行）。顶层 Conversation 在 `StickToBottom` 之外做了一层封装，初次挂载和容器尺寸变化时都平滑吸附到底部，并带上 log 无障碍角色；ConversationContent 承担消息列的容器职责，ConversationScrollButton 在用户离开底部时显示回底按钮。同文件还提供 `useReleaseScrollLock` 上下文，子组件可借此临时让出滚动锁，例如展开工具卡片时。
 
-- **无窗口化/虚拟化**：消息列表全量渲染；`@tanstack/react-virtual`（`web-app/package.json` 依赖）仅用于 Hub 模型列表（`web-app/src/routes/hub/index.tsx` 的 `useVirtualizer`），消息列表未使用；
-- 本轮未在 web-app 找到 `content-visibility` 样式声明（grep 无命中），长列表性能依赖 MessageItem 的 memo 比较器与流式节流（§1.2、§2.2），无窗口化策略；
-- 滚动锚定由 StickToBottom 的 `isAtBottom`/`scrollToBottom` 提供；分支/版本切换时的滚动定位行为未运行验证。
+- **消息列表全量渲染**：列表没有做窗口化或虚拟化，所有消息一次性挂载；依赖清单里的 `@tanstack/react-virtual` 只服务于 Hub 模型列表，调用点在 `web-app/src/routes/hub/index.tsx` 的 `useVirtualizer`，消息列表没有用到它。
+- **长列表性能来源**：本次在 web-app 中未找到 `content-visibility` 样式声明（grep 无命中），长列表的流畅度依赖 MessageItem 的 memo 比较器与流式节流（§1.2、§2.2）。
+- **滚动锚定**：吸附逻辑由 StickToBottom 的 `isAtBottom` 与 `scrollToBottom` 提供；分支与版本切换时的滚动定位行为尚未运行验证。
 
 ## 2. RenderMarkdown
 
@@ -82,47 +88,47 @@ STREAMDOWN_PLUGINS = { code, mermaid, cjk }                                  (:1
 LINK_SAFETY       = { enabled: false }                                       (:113)
 ```
 
-- **Fork 插件替换确认**：`REHYPE_PLUGINS` 没有沿用 streamdown 默认的 `rehype-raw + rehype-sanitize`，而是替换为 `[rehypeKatex, restrictChatLinks, harden]`；`rehype-raw` 仅存在于 `package.json` 依赖清单，src 中无 `rehypeRaw` 使用点。`restrictChatLinks`（`:59`）是本仓库新增的插件，因此链接渲染受两层控制：插件改写 href，`LINK_SAFETY` 关闭 streamdown 自带的协议过滤。
-- `Streamdown` props：`mode`、`parseIncompleteMarkdown`、`animate`、`animationDuration={500}`、`linkSafety`、mermaid 错误组件等；含 `className`/`messageId`。
-- 插件引用被 hoist 到模块级常量（注释说明：Streamdown 是 memoized 的，若每次渲染传入新字面量会破坏 memo，导致每个流式 token 全量重解析 + 重高亮）。
-- 代码块样式钩子：`[data-streamdown="code-block-header"]` 相关样式在 `index.css`。
+- **rehype 插件集**：`REHYPE_PLUGINS` 由 KaTeX、`restrictChatLinks` 与 harden 三个插件组成，streamdown 默认的 rehype-raw 与 rehype-sanitize 已不在其中；rehype-raw 只保留在 web-app 的依赖清单，src 里没有它的使用点。该插件由本仓库实现（`:59`），链接渲染因此受两层控制：插件负责改写 href，`LINK_SAFETY` 负责关闭 streamdown 自带的协议过滤。
+- **Streamdown 的 props**：一组控制流式行为，包括 `mode` 与不完整 Markdown 解析开关、是否播放动画及动画时长；另一组是常规渲染参数，包括链接安全检查、mermaid 错误组件、class 名与消息 id。
+- **模块级常量**：插件引用被提升到模块作用域，源码注释解释了原因——Streamdown 是 memoized 的，每次渲染传入新的字面量会破坏 memo，导致每个流式 token 都触发全量重新解析与重新高亮。
+- **样式钩子**：代码块头部样式通过 `[data-streamdown="code-block-header"]` 选择器挂接，规则写在 `index.css`。
 
 ### 2.2 流式优化
 
-- 流式输入走 AI SDK `useChat`（throttle 50ms），`useDeferredValue` 合并 token（`:268`）；
-- 流式中代码块不跑 Shiki（`StreamingCode`，`:121`）：活动代码块在流式期间渲染纯文本，避免每 token 全量高亮（webkitgtk 慢）；流结束由 Shiki `CodeBlock` 接管；
+- 流式数据来自 AI SDK 的 `useChat`，回调按 50ms 节流；上层再用 `useDeferredValue` 合并连续到达的 token，减少每帧重渲染的次数（`RenderMarkdown.tsx:268`）。
+- 流式中的代码块暂不交给 Shiki：活动代码块先以纯文本渲染（`StreamingCode`，`:121`），避免每个 token 都触发一次全量高亮——这段开销在 webkitgtk 上尤其明显；流结束后由 Shiki 的 `CodeBlock` 接管。
 - LaTeX 规范化占位符管道（L97-201）：先用 PUA 占位符遮蔽代码/数学，再做行内数学掩码与货币符号转义，随后插入 ZWSP 修复强调 flanking（`fixEmphasisFlanking`，L103-108），最后把 `\[..\]`/`\(..\)` 归一为 `$$..$$`。ZWSP 只加在代码/数学被遮蔽之后，避免 KaTeX 报 "Unrecognized Unicode character 8203"。
 
 ### 2.3 组件覆盖
 
-- `a` → `#cite-`/`#webcite-` 锚点（`CitationLink`/`WebCitationChip`，`mergedComponents :281` 内覆写）；
-- `table` → `MarkdownTable`；
-- HTML 工件分段：仅非流式 + 设置开启；svg 分支强制 `allowScripts={false}`（L258-296）；
-- 代码块 `code-block.tsx`：shiki `codeToHtml`，light/dark 双高亮。
+- 链接：`a` 标签被覆写为 `#cite-/#webcite-` 锚点，分别由 CitationLink 与 WebCitationChip 渲染，覆写点在 `mergedComponents`（`RenderMarkdown.tsx:281`）。
+- 表格：`table` 交给 `MarkdownTable` 渲染。
+- HTML 工件：分段处理只在非流式输出且相关设置开启时启用；svg 分支强制传入 `allowScripts={false}`（`RenderMarkdown.tsx:258-296`）。
+- 代码块：`code-block.tsx` 调用 shiki 的 `codeToHtml` 同时产出亮色与暗色两套高亮结果。
 
 ### 2.4 HTML 消毒、工件与链接渲染
 
-- 正文 HTML 消毒由 streamdown fork 的 `defaultRehypePlugins.harden` 承担（`:110`）；仓库源码中未发现 DOMPurify 使用；
-- `LINK_SAFETY = { enabled: false }`（`:113`）——streamdown 自带的链接安全检查被显式关闭，补位的是 `restrictChatLinks`；
-- `web-app/src/components/HtmlArtifact.tsx`（130 行）：iframe 承载，默认严格 CSP + sandbox 不透明源（`allowNetwork` 默认 false、`allowScripts` 默认 true 但 SVG 分支强制 false）；CSP 与文档壳由 `lib/htmlSandbox.ts` 的 `buildSrcDoc` 组装（含内存存储 shim 与元素检查器脚本），相对资源不可解析时显示提示条（`lib/htmlAssets.ts`）；`allowNetwork`/`allowScripts` props 可放宽（非流式 + 设置开启时）；
-- 链接不再直接跳转，而是锚点到引用区（`#cite-`/`#webcite-`），配合 `web-citation-store.ts` 与 `WebSourcesRow` 展示来源；`lib/citation-parser.ts` 与 `lib/grounding.ts` 负责从工具输出提取引用（句子切分 + 余弦相似度）并做真值校验。
+- 正文里的 HTML 交给 streamdown fork 提供的 `defaultRehypePlugins.harden` 消毒（`:110`），仓库源码中没有 DOMPurify 的使用点。
+- `LINK_SAFETY` 被设为 `{ enabled: false }`（`:113`），streamdown 自带的链接安全检查因此关闭，协议过滤改由 `restrictChatLinks` 接管。
+- HTML 工件由 `web-app/src/components/HtmlArtifact.tsx`（130 行）用 iframe 承载，默认启用严格 CSP 与不透明源 sandbox：`allowNetwork` 默认关闭，`allowScripts` 默认开启，但 SVG 分支强制关闭。文档壳与 CSP 由 `lib/htmlSandbox.ts` 的 srcDoc 拼装逻辑生成，其中包含内存存储 shim 与元素检查器脚本；相对资源无法解析时，`lib/htmlAssets.ts` 负责给出提示条。只有非流式输出且设置开启时，才通过对应的 props 放宽网络与脚本限制。
+- 正文链接点击后跳到引用区锚点（`#cite-/#webcite-`），来源展示由 `web-citation-store.ts` 与引用来源行组件完成；引用的提取与校验落在 `lib/citation-parser.ts`、`lib/grounding.ts`，做法是句子切分加余弦相似度比对。
 
 ## 3. 扩展方式与新增节点机制
 
-- **部件层无注册表**：消息部件按 `part.type` 在 `MessageItem.renderedParts`（`:507` 起）中顺序分派——文本进 renderTextPart（RenderMarkdown）、文件进 renderFilePart、推理与工具进 `ChainOfThoughtGroup`（`isCotPart`，L416-417）；新增类型需同时改转换层（`messages.ts` 的 ThreadMessage ↔ UIMessage 转换，§1.1）与分派分支，无插件注册表；
-- **Markdown 层扩展点**：`RenderMarkdown` 的 `mergedComponents`（`:281`）覆写 `a` 为 `#cite-`/`#webcite-` 锚点（CitationLink/WebCitationChip）、`table` 为 MarkdownTable，并与调用方传入的 `components` prop 合并；代码/数学/Mermaid 走 Streamdown 插件常量（§2.1），注释明确不覆写 `code` 组件以保留 html/svg 拆段（L254-257）；
-- **扩展边界（静态确认）**：本快照未发现 schema 驱动或注册表式的动态渲染组件机制；新增节点类型是硬编码分派。
+- **部件层由硬编码分支分派**：消息部件按 `part.type` 在渲染循环里顺序分派，分派代码直接写在组件内部（`MessageItem.tsx:507` 起）：文本走 renderTextPart 交给 `RenderMarkdown`，文件走 renderFilePart，推理与工具部件走 `ChainOfThoughtGroup`。新增一种部件类型要同时改动两侧：`messages.ts` 的 ThreadMessage ↔ UIMessage 转换（§1.1）和这里的分派分支；本快照没有可供注册新类型的插件注册表。
+- **Markdown 层的扩展点**：`mergedComponents` 把 `a` 覆写成引用锚点（`#cite-/#webcite-` 两种前缀，由 CitationLink 与 WebCitationChip 渲染），把 table 换成 MarkdownTable，再与调用方传入的 components prop 合并。代码、数学与 Mermaid 由 Streamdown 插件常量控制（§2.1），源码注释说明 code 组件保持原样，以便 html 与 svg 仍按段拆出（`RenderMarkdown.tsx:254-257`、`:281`）。
+- **扩展边界（静态确认）**：本快照未发现 schema 驱动或注册表式的动态渲染组件机制，新增节点类型依赖硬编码分派。
 
 ## 4. 边界与未验证事项
 
-- streamdown 内部 harden 的标签/属性白名单无法从本仓库源码确认（推测项）；
-- `LINK_SAFETY={enabled:false}` 的影响范围（streamdown 按协议白名单过滤链接的逻辑）未确认；
-- RAG `retrieve` 返回的 citations 载荷结构以 `citation-parser.ts` 与 `rag-extension` 索引为准，未核对运行时实际 JSON；
-- `editMessage` 后重新渲染、分支切换时的引用/grounding 状态一致性未验证；
-- “无语音输入”结论基于源码搜索（`speech`/`voice`/`webkitSpeechRecognition` 无命中），未运行验证；
-- `MermaidError`（27 行）在流式错误时直接展示，错误内容/样式未运行确认；
-- 长会话下列表全量渲染的实际性能（无窗口化）未运行验证；
-- 未运行项目测试或构建；记录来自静态源码，UI 行为（动画、无障碍、平台差异）需运行验证。
+- streamdown 内部 harden 的标签与属性白名单无法从本仓库源码确认，该项属推测。
+- `LINK_SAFETY` 设为 `{ enabled: false }` 后，streamdown 按协议白名单过滤链接的逻辑受影响的范围尚未确认。
+- RAG `retrieve` 返回的 citations 载荷结构以 `citation-parser.ts` 与 `rag-extension` 的索引为准，运行时实际的 JSON 未核对。
+- `editMessage` 重新渲染、分支切换时，引用与 grounding 状态能否保持一致尚未验证。
+- “无语音输入”的结论来自源码搜索，`speech`、`voice`、`webkitSpeechRecognition` 均无命中，未做运行验证。
+- `MermaidError`（27 行）在流式出错时直接展示，错误内容与样式未运行确认。
+- 长会话下列表全量渲染的实际性能（无窗口化）未运行验证。
+- 项目测试与构建没有运行，本文的记录来自静态源码；动画、无障碍与平台差异等 UI 行为需要在目标环境中运行验证。
 
 ## 5. 关键源码索引
 

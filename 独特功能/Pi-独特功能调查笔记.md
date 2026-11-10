@@ -18,7 +18,7 @@ Pi 有两条达到主链确认的差异化能力。会话数据生产与分享�
 
 ## 介绍声明与候选盘点
 
-README（`README.md:13-17`）自称“Pi is a minimal, extensible agent harness”，并明说跳过 sub-agents 与 plan mode 这类特性；包清单在 Packages 小节（:72 起），权限与容器化说明在 :88-96，“Share your OSS coding agent sessions”在 :182-196。五条候选状态：
+README 开篇把 Pi 定位为“minimal, extensible agent harness”，并明说跳过 sub-agents 与 plan mode 这类特性；其余介绍性内容集中在同一文件的 Packages 小节、权限与容器化段落和“Share your OSS coding agent sessions”章节（`README.md:13-17`、`:72`、`:88-96`、`:182-196`）。五条候选状态：
 
 | 候选 | 状态 | 依据 |
 |---|---|---|
@@ -41,21 +41,37 @@ README（`README.md:13-17`）自称“Pi is a minimal, extensible agent harness�
 
 ### 能力一：会话数据生产与分享（研究数据发布候选）
 
-1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 明示“Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks”（`README.md:186`）；此前在 `docs/usage.md` 出现的“model, prompt, tool, and evaluation research”表述本次在 `packages/coding-agent/docs` 全文检索未找到。它把会话文件格式、导出命令与外部发布工具组合成一条数据生产工作流。
-2. **入口与触发者**：用户触发。交互命令 `/export`（HTML 或 JSONL 副本）与 `/share` 实现见 `interactive-mode.ts:6746`（`shareSession` 入口）；另有 docs 指向的伴生 CLI `pi-share-hf` 批量发布。
-3. **事实对象**：JSONL 会话树文件（v3 格式，`~/.pi/agent/sessions/<编码cwd>/`）。`docs/session-format.md` 公开条目类型与消息结构，注释明言理解这些类型是解析会话与编写扩展的前提（session-format.md:41）——第三方解析器依赖此格式契约。
-4. **完整主链**：会话落盘（append-only JSONL，见会话笔记 §2）→ `/export` 生成 HTML 自包含单文件（`core/export-html/`，模板 + base64 会话数据）或 JSONL 副本 → `/share` 为 Radius artifact 导出当前分支，并额外记录 system prompt 与激活工具定义；没有 Radius provider 或有效凭据时才调用 `gh gist create --public=false` → 外部工具 `pi-share-hf` 读 JSONL 发布为 HF 数据集。仓库内链已静态确认；发布端在仓库外（`packages/coding-agent/src/modes/interactive/session-share.ts`）。
-5. **持续性**：会话文件本身长期保留（无自动清理证据，会话笔记 §7）；Radius artifact、gist 与 HF 数据集生命周期分别由外部平台管理。
-6. **主动性与取消**：无后台调度；全部用户触发；`/share` 失败有 showError 错误路径（interactive-mode.ts:5930-5933），上传期间有可取消的 loader（`session-share.ts` 的上传 loader）。
-7. **人机与多 Agent 关系**：无多 Agent 参与；用户可检查导出文件内容后决定是否分享。
-8. **外部依赖与执行域**：本机 JSONL/HTML 导出（仓库内）；Radius provider 与登录态可将 `/share` 上传为组织可见 artifact；缺少此条件时，`gh` CLI 与 GitHub gist（需本机安装 gh 与登录态）构成回退路径；`pi-share-hf`（伴生仓库 badlogic/pi-share-hf）与 Hugging Face 位于发布端（`README.md:190` 引用）。`packages/telemetry` 与本能力无关：它是 vendor-neutral 遥测契约包，仓库提供内存参考实现与 conformance 测试（供 ai/agent 包做类型化 span），但仍是"无 exporter、无全局 span 状态、不依赖后端"的契约包（telemetry/README.md:5-13），无会话数据上报路径。
-9. **安全与资源边界**：Radius 路径创建组织可见 artifact，gist 回退路径仍创建 secret gist（`--public=false`）；两者都把外发动作限定在用户显式触发 `/share` 后。会话 JSONL 含完整对话、工具输出，以及 Radius 路径额外写入的 system prompt 与工具 schema，分享前需按实际外部平台可见性判断数据边界。
-10. **独特性判断**：现有类目只解释“会话导出”（会话/导出是普通功能）；本能力把导出格式、公开文档与研究导向的发布工作流连成闭环，属于对话导出与分享的研究/发布分型。Hermes Agent 的批量轨迹生成、OpenCode 的可移植会话档案与本能力对象和消费者不同，暂不形成统一自然聚类，保留为稀有能力卡。
-11. **证据强度**：README 与 docs 声明（介绍候选）；仓库内 `/export`/`/share` 主链为静态源码确认（主链确认，限定仓库边界）；HF 发布端为伴生仓库引用（外部依赖，未验证）。未运行验证。
+1. **用户目标**：把真实 OSS 编码 Agent 会话变成可发布的训练/评估数据。README 说明公开 OSS 会话数据能让编码 Agent 用真实任务、工具使用、失败与修复来改进，替代玩具基准（`README.md:186`）；docs/usage.md 里“model, prompt, tool, and evaluation research”的表述，本次在 `packages/coding-agent/docs` 全文检索未找到。会话文件格式、导出命令与外部发布工具由此组合成一条数据生产工作流。
+2. **入口与触发者**：由用户主动触发。交互层提供 `/export` 与 `/share` 两个命令，前者导出 HTML 或 JSONL 副本，后者经 shareSession 上传当前分支；文档另指向伴生 CLI pi-share-hf 做批量发布（`interactive-mode.ts:6746`）。
+3. **事实对象**：会话以 JSONL 会话树文件保存，v3 格式，位于 `~/.pi/agent/sessions/<编码cwd>/`。docs/session-format.md 公开条目类型与消息结构，并注明理解这些类型是解析会话与编写扩展的前提，第三方解析器据此形成格式契约（`packages/coding-agent/docs/session-format.md:41`）。
+4. **完整主链**：会话先以 append-only JSONL 落盘（见会话笔记 §2），之后按用途分流：
+    - `/export` 生成自包含 HTML 单文件或 JSONL 副本，HTML 的模板与 base64 会话数据取自 `core/export-html/`；
+    - `/share` 把当前分支导出为 Radius artifact，并额外记录 system prompt 与激活的工具定义；没有 Radius provider 或有效凭据时，才回退到 `gh gist create --public=false`；
+    - 外部工具 pi-share-hf 读取 JSONL，发布为 Hugging Face 数据集。
+
+    仓库内的导出与分享主链已静态确认，发布端位于仓库外（`packages/coding-agent/src/modes/interactive/session-share.ts`）。
+5. **持续性**：会话文件本身长期保留，本次未找到自动清理证据（会话笔记 §7）；Radius artifact、gist 与 HF 数据集的生命周期分别由各自外部平台管理。
+6. **主动性与取消**：没有后台调度，全部动作由用户触发。`/share` 失败时走 showError 错误路径（`interactive-mode.ts:5930-5933`），上传期间提供可取消的 loader。
+7. **人机与多 Agent 关系**：本能力没有多 Agent 参与，用户检查导出文件内容后自行决定是否分享。
+8. **外部依赖与执行域**：执行域按依赖分四层：
+    - 本机：JSONL 与 HTML 导出都在仓库内完成；
+    - Radius：具备 provider 与登录态时，`/share` 可把会话上传为组织可见 artifact；
+    - GitHub：缺少 Radius 条件时回退到 gh CLI 与 gist，需要本机安装 gh 并已登录；
+    - 发布端：伴生仓库 badlogic/pi-share-hf 与 Hugging Face 位于仓库之外（`README.md:190`）。
+
+    `packages/telemetry` 与本能力无关，它是 vendor-neutral 遥测契约包，提供内存参考实现与 conformance 测试，供 ai/agent 包生成类型化 span；该包按无 exporter、无全局 span 状态、不依赖后端的契约形态提供，没有会话数据上报路径（`packages/telemetry/README.md:5-13`）。
+9. **安全与资源边界**：两条上传路径都要求用户先显式触发 `/share`，Radius 路径创建组织可见 artifact，gist 回退路径创建的是 secret gist（`--public=false`）。会话 JSONL 含完整对话与工具输出，Radius 路径还会额外写入 system prompt 与工具 schema，分享前需按目标平台的实际可见性判断数据边界。
+10. **独特性判断**：现有类目覆盖的是会话导出这一普通功能。本能力把导出格式、公开文档与研究导向的发布工作流连成闭环，属对话导出与分享中的研究/发布分型。Hermes Agent 的批量轨迹生成、OpenCode 的可移植会话档案在对象和消费者上都与本能力不同，暂未形成统一自然聚类，保留为稀有能力卡。
+11. **证据强度**：按证据层级记录：
+    - README 与 docs 的声明：介绍候选；
+    - 仓库内 `/export` 与 `/share` 主链：静态源码确认（主链确认，限定仓库边界）；
+    - HF 发布端：伴生仓库引用（外部依赖，未验证）。
+
+    以上均未做运行验证。
 
 ## 已归并到现有类目的能力
 
-- **自扩展 Agent harness**：Pi 的“自扩展”体现在扩展系统（工具注册 `registerTool`、`before_agent_start` 改写、custom 会话条目、Pi Packages 经 npm/git 安装分享，`docs/packages.md`），已被 Agent 工具笔记（§1 扩展注册、§5 钩子）与 Agent 角色笔记（§3 每轮改写）覆盖；harness 会话存储抽象已迁到 `packages/durable`（会话身份与存储后端见会话笔记 §12），不另立能力卡。
+- **自扩展 Agent harness**：Pi 的扩展系统承担自扩展能力，扩展可以注册工具、在 `before_agent_start` 阶段改写上下文、写入 custom 会话条目，并通过 Pi Packages 经 npm 或 git 安装分享（`packages/coding-agent/docs/packages.md`）。这些机制已被 Agent 工具笔记（§1 扩展注册、§5 钩子）与 Agent 角色笔记（§3 每轮改写）覆盖，harness 的会话存储抽象也已迁到 durable 包（会话身份与存储后端见会话笔记 §12），因此不另立能力卡。
 - **终端组件树**：pi-tui 差分渲染库（`packages/tui`，92 文件/33.9k 行，仓库分布笔记）是消息渲染器笔记的核心内容，非独特功能。
 - **分支会话**：会话笔记 §4 完整覆盖。
 - **容器化**：README 与 `docs/containerization.md` 的三种模式（Gondolin 扩展、Plain Docker、OpenShell）是部署文档而非内置运行时，Agent 工具笔记 §5 与生成式输出笔记 §11 已确认；Gondolin 以示例扩展形式存在于本仓库（`examples/extensions/gondolin/`），属扩展生态而非独特能力。

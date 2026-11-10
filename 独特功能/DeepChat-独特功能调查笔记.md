@@ -78,9 +78,16 @@ IM 入站（telegramPoller / discordGatewaySession / feishuClient / qqbotGateway
 
 **执行日志与契约谱系**（静态确认）：
 
-- **严格执行日志**（`tape/domain/executionJournal.ts` + `application/executionJournalService.ts`）：以 `execution/run_started`、`execution/dispatch_committed`、`execution/tool_outcome`、`execution/run_terminal` 四类事件记录 run 边界与工具分派，带 provenance key、canonical JSON 比对和协议版本；启动时按日志行分类恢复，crash 场景可识别未收口 run。
-- **执行契约**（`tape/domain/executionContract.ts`，上限：契约 64 KiB、工具 256、subagent 深度 1）：每次请求按工具、工作区和深度冻结 ceilings，工具服务在分派前校验；绑定 id 写入 assistant block 的 `executionContractBinding`（`src/main/tool/index.ts:885`、`:953`、`:1065`；字段见 `src/shared/chat.d.ts:191`）。工具执行结果与 `providerReplayJson`（见能力卡 4）都由日志约束。
-- **任务契约与评估**（领域层与应用层的任务契约、评估服务）：delegation 子任务在冻结时继承父契约（`contract/task_frozen`），完成后按 `contract/evaluated` 事件评估；补偿或压缩造成的顺序位移也会写入 order 类型的消息替换事实（`tape/application/transcript.ts`）。
+- **严格执行日志**：一次 run 的边界与工具分派由四类事件记录，事件字面量如下：
+
+  - `execution/run_started`：run 开始
+  - `execution/dispatch_committed`：工具分派提交
+  - `execution/tool_outcome`：工具结果
+  - `execution/run_terminal`：run 终止
+
+  日志事件带 provenance key、canonical JSON 比对和协议版本；服务启动时按日志行分类恢复，crash 场景能识别出没有收口记录的 run。事件定义在 `tape/domain/executionJournal.ts`，日志分类与恢复逻辑在 `application/executionJournalService.ts`。
+- **执行契约**：每次请求按工具、工作区和调用深度冻结一组 ceilings，上限为契约 64 KiB、工具 256 个、subagent 深度 1，工具服务在分派前逐项校验。冻结结果以绑定 id 写入 assistant block 的 `executionContractBinding` 字段。写入位置在 `src/main/tool/index.ts:885-1065`，字段定义见 `src/shared/chat.d.ts:191`。工具执行结果与 provider 重放数据（`providerReplayJson`，见能力卡 4）都由这份日志约束。契约定义见 `tape/domain/executionContract.ts`。
+- **任务契约与评估**：任务契约与评估服务分处领域层和应用层。delegation 子任务在冻结时继承父契约，冻结动作记为 `contract/task_frozen` 事件；子任务完成后再由 `contract/evaluated` 事件承接评估。补偿或压缩造成的顺序位移同样会写入 order 类型的消息替换事实，相关实现见 `tape/application/transcript.ts`。
 
 **完整主链**（静态走通）：
 
@@ -208,7 +215,7 @@ app.setAsDefaultProtocolClient('deepchat')（deeplink/index.ts:66-83）
 
 **入口与触发者**：CLI 可执行文件由构建脚本随主应用产出；首次使用经 launcher 安装或授权，设置页提供管理入口（`scripts/build-cli.mjs`、`launcherService.ts`）。触发者是终端用户或脚本。
 
-**事实对象**：本地 HTTP 控制面由 CLI 服务提供，监听 localhost 并通过带 scope 的 token 鉴权；RPC 路径包括 `/rpc`、`/stream`、`/upload`。控制协议定义版本、方法表、事件信封和 JSON 响应、流记录、上传头等边界，命令再按 12 组路由面装配，覆盖 80+ 个 route（`cli/server.ts`、`agentTokenAuthority.ts`、`src/shared/contracts/localControl.ts`、`src/shared/contracts/cliCommands.ts`、`src/main/cli/routes.ts`）。
+**事实对象**：CLI 服务在本机起一个 HTTP 控制面，只监听 localhost，调用方须持有带 scope 的 token 才能通过鉴权。RPC 入口有 `/rpc`、`/stream`、`/upload` 三条；控制协议在共享契约中固定了版本、方法表、事件信封、JSON 响应、流记录与上传头等边界，命令再按 12 组路由面装配，覆盖 80 多个 route。服务主体与路由装配见 `cli/server.ts` 和 `src/main/cli/routes.ts`。协议与命令契约在 `src/shared/contracts/localControl.ts` 与同目录的 `cliCommands.ts` 中定义，token 授权由 `agentTokenAuthority.ts` 承担。
 
 **完整主链**（静态走通）：
 
@@ -228,7 +235,7 @@ deepchat <command>（终端）
      （src/shared/types/agent-interface.d.ts:886）
 ```
 
-**Agent 侧程序化调用（新增面）**：agent 可以把 `deepchat <命令>` 当作工具执行，走 `cli/deepChatToolPort.ts` 与 `agent/deepchat/runtime/programmaticToolSurface.ts` 组成的程序化工具面：能力以 grant 形式绑定（schema 版本、capability hash、适配模式 `cli-programmatic`），执行前后校验工具面视图仍活跃/已提交，并对输入、输出、批次步数、子调用数与时长设上限；`agentCommandAccess.ts` 只在命令命中注册表且拿到 capability 时把 CLI 目录注入 PATH，否则退回非特权环境（`:66-178`）。
+**Agent 侧程序化调用（新增面）**：agent 也能把 `deepchat <命令>` 当作普通工具调用，这条路径由程序化工具面承载，能力以 grant 形式绑定，grant 中记录 schema 版本、capability hash 与 `cli-programmatic` 适配模式。每次执行前后都做一次校验，确认工具面视图仍活跃或已提交；输入、输出、批次步数、子调用数和时长都有上限。CLI 目录只在命令命中注册表且拿到对应 capability 时注入 PATH，其余情况退回非特权环境。程序化工具面在 `cli/deepChatToolPort.ts` 与 `agent/deepchat/runtime/programmaticToolSurface.ts`，命令访问控制在 `agentCommandAccess.ts:66-178`。
 
 **持续性**：launcher 安装可逆，卸载或数据重置仍保留入口；detached run 有独立生命周期与终端状态等待（#2136）；descriptor 文件供 CLI 发现宿主布局（`LOCAL_CONTROL_DESCRIPTOR_FILENAME`）。
 
@@ -248,9 +255,19 @@ deepchat <command>（终端）
 
 **事实对象与入口**：用户插件只认 `.codex-plugin/plugin.json`。来源可以是本地目录、ZIP 或无凭据的公开 HTTPS Git URL；安装前先复制到临时 snapshot，解析 manifest，并让用户分别选择 Skills、hooks 和 MCP。安装、更新、诊断与卸载界面位于 Plugins Hub，契约见 `src/shared/types/userPlugin.ts`、`src/main/plugin/userPluginSource.ts:188-299` 与 `src/renderer/src/pages/plugins/UserPluginInstallDialog.vue`。
 
-**执行与治理**：hook 只支持 SessionStart、UserPromptSubmit、SubagentStart 三类输入边界，命令默认 5 秒超时；stdout 只接受事件名匹配的文本 `additionalContext`。调用记录写入 Tape 的 `plugin/context-hook`，失败进入诊断；禁用或更新会撤销资格并取消在途命令。Direct ACP Agent 不接收这些 hook 上下文。实现见 `src/main/plugin/userPluginPackage.ts:287`（包读取）、`userPluginHooks.ts:45-152`（注册与 `accept`）与 `:376-410`（诊断与重试）。
+**执行与治理**：hook 的输入边界限定在三类事件上，即会话开始、用户提交提示词和 subagent 启动（SessionStart、UserPromptSubmit、SubagentStart），每条命令默认 5 秒超时；stdout 只接受事件名匹配的 `additionalContext` 文本。调用记录写入 Tape 的 `plugin/context-hook`，失败的调用进入诊断；禁用或更新插件会撤销资格并取消在途命令，Direct ACP Agent 不接收这些 hook 上下文。包读取见 `src/main/plugin/userPluginPackage.ts:287`。hook 注册、`accept`、诊断与重试在 `src/main/plugin/userPluginHooks.ts:45-152、:376-410`。
 
-**工作区 Skills**：Skill 服务在当前项目根的 `.agents`、`.deepchat`、`.claude`、`.codex`、`.cursor` 五个 `skills/` 目录即时发现条目，校验物理路径位于项目内，并把它们作为只读项目资产合并到本轮路由目录，不污染共享 Skill 缓存（`src/main/skill/index.ts:1295-1322`、`src/main/skill/routingCatalog.ts`）。
+**工作区 Skills**：Skill 服务只在当前项目根的五个约定位置做即时发现：
+
+```text
+.agents/skills/
+.deepchat/skills/
+.claude/skills/
+.codex/skills/
+.cursor/skills/
+```
+
+发现到的条目先校验物理路径确实位于项目内，再作为只读项目资产合并进本轮路由目录，共享 Skill 缓存不受影响。实现见 `src/main/skill/index.ts:1295-1322` 与 `src/main/skill/routingCatalog.ts`。
 
 **独特性判断**：这一能力组合了包来源审查、按能力授权、运行时上下文贡献、MCP/Skill 发布和项目作用域发现，超出普通 Skill 导入或普通 MCP 配置。标签：可携带 Agent 扩展包、上下文 hook、项目级 Skill。
 

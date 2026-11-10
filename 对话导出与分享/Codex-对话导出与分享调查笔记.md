@@ -20,7 +20,7 @@ Codex 没有统一的 CLI 导出子命令，也不提供远端分享。交互界
 2. **面向阅读的交付**——交互界面提供 `/export`，把整条线程渲染成 Markdown，复制到剪贴板或写入文件。这是唯一由用户主动触发、可交付给他人的产物。
 3. **面向自动化的输出**——`codex exec --json` 把 Agent 侧事件写成 stdout JSONL，`-o` 保存最后一条消息，`--output-schema` 约束最终消息为结构化 JSON；app-server 则向 IDE/客户端提供分页读取线程历史的 RPC。
 
-按本类目分型，Markdown 导出属于 `E2 阅读交付` 的窄实现，rollout 与 `exec --json` 属于 `E1 数据交换` 的事件/日志侧；本次未找到 `E3 图片分享`、`E4 链接分享`、`E5 发布与研究` 的对应实现。`/import` 只做从 Claude Code 到 Codex 的单向迁移，不构成通用往返。
+按本类目的分型，Markdown 导出落在 E2 阅读交付，是该类型里的一处窄实现；rollout 与 exec --json 落在 E1 数据交换，处于事件与日志一侧。E3 图片分享、E4 链接分享、E5 发布与研究这三类，本次均未找到对应实现。导入侧只有从 Claude Code 到 Codex 的单向迁移，尚无通用的往返路径。
 
 三种口径的差异是本次调查的核心：同一段对话在 rollout、Markdown 和 `exec` 事件流中保留的字段并不相同，不能互相替代。
 
@@ -63,7 +63,7 @@ Codex 没有统一的 CLI 导出子命令，也不提供远端分享。交互界
 | `/import` | 用户；从 Claude Code 迁移 | 外部会话、配置、项目与近期会话 | 新建本地线程 |
 | `codex resume` / `codex fork` | 用户；继续或分叉 | 既有 rollout 的全部条目或某个 turn 之前的前缀 | 新会话状态 |
 
-`/export` 的入口在斜杠命令表中定义，说明文字是“export the conversation as markdown”（`codex-rs/tui/src/slash_command.rs:51,112`）；弹窗只提供“Copy to clipboard”和“Save to file”两个目标（`codex-rs/tui/src/chatwidget/transcript_export.rs:8-45`），文件名默认 `codex-session-<thread-id>.md`（同文件 `:47-63`）；Android 上剪贴板项被禁用，只剩文件目标（`:22`）。任务进行中仍可执行导出（`slash_command.rs:248-269`）。
+用户在会话中触发 `/export` 后，弹窗给出两个去处：复制到剪贴板，或保存为文件，文件名默认为 `codex-session-<thread-id>.md`。该命令登记在斜杠命令表中，说明文字为“export the conversation as markdown”；Android 上剪贴板一项被禁用，只剩文件目标，任务进行中同样可以执行导出（`codex-rs/tui/src/slash_command.rs:51,112,248-269`、`codex-rs/tui/src/chatwidget/transcript_export.rs:8-63`）。
 
 没有 `codex export` 子命令：子命令枚举（`codex-rs/cli/src/main.rs:145-245`）只有 exec、resume、fork、archive、delete、migrate-rollouts、cloud 等，没有导出项。全仓库出现的 `export` 多数是 TypeScript/JSON Schema 代码生成（`app-server-protocol/src/export.rs`），不是会话导出。此结论限定于本快照的 CLI 与 TUI 入口。
 
@@ -75,11 +75,11 @@ Codex 没有统一的 CLI 导出子命令，也不提供远端分享。交互界
 
 各部分的内容口径如下：
 
-- **用户消息**：取正文并清洗；本地或远端图片只追加编号标签（如 `[Image #1]`），不内联图片数据（`tui/src/app/transcript_export.rs:232-246`）。
-- **reasoning**：只输出摘要；是否包含原始 reasoning 取决于 `show_raw_agent_reasoning` 配置（`:42-46,247-249`）。
-- **文件变更**：输出状态、变更数量，以及每个文件的 diff 全文（`:139-151`）。
-- **MCP 调用**：输出服务器/工具、参数、文本结果；图片降级为“Returned image”，音频为“<audio content>”，嵌入资源只留 URI，资源链接只留链接地址（`:152-196`）。
-- **元数据**：会话信息 cell 被显式跳过；产物只有一级标题 `# Codex conversation` 和按角色分节的正文，不含模型、时间、token、会话 ID 等头信息（`:229-297`）。
+- **用户消息**：导出正文并做控制字符清洗；本地或远端图片只留一个编号标签（如 `[Image #1]`），图片数据本身不写入正文（`tui/src/app/transcript_export.rs:232-246`）。
+- **reasoning**：只导出摘要；原始 reasoning 是否出现，由 `show_raw_agent_reasoning` 配置决定（`:42-46,247-249`）。
+- **文件变更**：导出状态与变更数量，并附上每个文件的 diff 全文（`:139-151`）。
+- **MCP 调用**：导出服务器与工具名、参数和文本结果；图片降级为“Returned image”，音频降级为“<audio content>”，嵌入资源只保留 URI，资源链接只保留链接地址（`:152-196`）。
+- **元数据**：会话信息条目被显式跳过；产物只有一级标题 `# Codex conversation` 与按角色分节的正文，模型、时间、token、会话 ID 等头信息都不写入（`:229-297`）。
 
 文件写入先解析 `~`、绝对路径和相对 cwd 的路径，再以临时文件加 `persist_noclobber` 落盘；同名文件已存在时直接报错，不覆盖（`:299-316`；测试 `transcript_export_tests.rs:181-204`）。因此重复导出必须换文件名，仓库内没有“生成历史/版本列表”。
 
@@ -87,17 +87,17 @@ Codex 没有统一的 CLI 导出子命令，也不提供远端分享。交互界
 
 rollout 的落盘位置与形态分三条规则：
 
-- **路径与文件名**：新会话路径由 codex home、`sessions`、年/月/日三级目录和文件名拼成（`codex-rs/rollout/src/recorder.rs:1727-1734`），文件名是 `rollout-<UTC 时间戳>-<thread-id>.jsonl`；被 revert 过的线程会在 thread id 后再拼一个 rollout id（`rollout/src/rollout_file_name.rs:67-72`）。
-- **归档与压缩**：归档把文件重命名到 codex home 下的 `archived_sessions`，文件名不变、不再保留年/月/日层级、不重写内容（`thread-store/src/local/archive_thread.rs:80-118`）；超过 7 天的文件压缩成 `.jsonl.zst`，读取端对两种表示透明（`rollout/src/compression.rs:26,63,370-371`）。
-- **注释滞后**：`recorder.rs:79` 的示例仍是旧的扁平路径，与按日期分目录的实现不一致，应以 `:1727-1734` 为准。
+- **路径与文件名**：新会话落在 codex home 之下，路径由 `sessions` 与年、月、日三级目录逐层拼出，文件名形如 `rollout-<UTC 时间戳>-<thread-id>.jsonl`；线程被 revert 过时，文件名会在 thread id 之后再接一个 rollout id（`codex-rs/rollout/src/recorder.rs:1727-1734`、`rollout/src/rollout_file_name.rs:67-72`）。
+- **归档与压缩**：归档把文件移动到 codex home 下的 `archived_sessions` 目录，文件名保持不变，年/月/日层级不再保留，内容原样搬走；超过 7 天的文件会被压缩成 `.jsonl.zst`，读取端对压缩与否两种形态一视同仁（`thread-store/src/local/archive_thread.rs:80-118`、`rollout/src/compression.rs:26,63,370-371`）。
+- **注释滞后**：recorder 模块里的示例注释仍按旧的扁平路径书写，与按日期分目录的实现不符，实际行为以同一文件中的路径拼接实现为准（`codex-rs/rollout/src/recorder.rs:79,1727-1734`）。
 
 每行是一个带时间戳的信封，内部条目使用扁平序列化（`codex-rs/history/src/lib.rs:388-394`）。条目类型包括会话元数据、模型可见的响应项、压缩记录、turn 上下文、token 用量、世界状态、保留上下文、事件消息与实时消息（`history/src/lib.rs:228-249`）。其中 `EventMsg` 只服务 UI 与生命周期，模型历史由响应项等条目承载。
 
 落盘不是“全量录制”。写入策略按条目类型取舍（`rollout/src/policy.rs:22-51`）：
 
-- 响应项中消息、reasoning、工具调用与输出、网页搜索、图片生成、压缩记录保留；`CompactionTrigger` 和 `Other` 丢弃（`:81-101`）。
-- 分页历史模式下只保留 `ItemCompleted` 等少量事件；旧式历史模式才保留用户/Agent 消息、补丁结束、MCP 结束等旧事件（`:128-227`）。
-- 审批请求、exec 开始/结束、错误、流式增量、会话配置、计划增量等属于瞬态事件，不落盘（`:161-227`）。这解释了为什么 rollout 不能当作完整的交互审计日志：谁批准了什么、命令何时开始，都不在其中。
+- 响应项中，消息、reasoning、工具调用与输出、网页搜索、图片生成和压缩记录都会写入；`CompactionTrigger` 与 `Other` 两类被丢弃（`:81-101`）。
+- 分页历史模式下只写入 `ItemCompleted` 等少量事件；旧式历史模式才带上用户与 Agent 消息、补丁结束、MCP 结束这类旧事件（`:128-227`）。
+- 审批请求、exec 开始与结束、错误、流式增量、会话配置、计划增量都属于瞬态事件，写入时即被跳过（`:161-227`）。rollout 因此无法充当完整的交互审计日志：谁批准了什么、命令何时开始，都不在其中。
 
 大输出在写入时被裁剪：命令聚合输出超过 64 KiB 会从中间截断并留下标记，MCP 结果也按 64 KiB 截断（`policy.rs:16-19,252-286`）。因此 rollout 保留的是“可恢复上下文所需的内容”，不是逐字全量。
 
@@ -109,16 +109,23 @@ rollout 的落盘位置与形态分三条规则：
 
 分叉与回退在 app-server 协议层定义：
 
-- `thread/fork` 支持 `lastTurnId`（含该 turn）或 `beforeTurnId`（不含该 turn 及其后全部 turn），两者互斥（`app-server-protocol/src/protocol/v2/thread.rs:544-573`）。
-- `thread/revert` 以 `beforeTurnId` 为界丢弃该 turn 及之后的内容，线程 ID 保持不变，但切换到一个新的不可变 rollout 文件（`thread.rs:1314-1318`；语义说明见 `rollout/src/metadata.rs:113-120`，文件名规则见 `rollout_file_name.rs:69-72`）。
+- 分叉由 `thread/fork` 的两个参数之一指定切点，二者互斥：给出 `lastTurnId` 表示保留到该 turn 并包含它，给出 `beforeTurnId` 表示该 turn 及其后的全部 turn 都丢弃（`app-server-protocol/src/protocol/v2/thread.rs:544-573`）。
+- 回退由 `thread/revert` 以 `beforeTurnId` 为界，丢掉该 turn 及之后的内容；线程 ID 保持不变，承载它的文件则切换到一个新的不可变 rollout（`thread.rs:1314-1318` 定义方法，`rollout/src/metadata.rs:113-120` 说明语义，文件名规则见 `rollout_file_name.rs:69-72`）。
 
 分叉后的新线程在会话元数据中保留来源线程 ID（`history/src/lib.rs:423-434` 的 `forked_from_id`），但父会话内容不会自动出现在导出物里。Markdown 导出不读取这条谱系信息。
 
 ## 5. `codex exec` 的结构化输出
 
-`codex exec` 的导出相关参数集中在 `codex-rs/exec/src/cli.rs:52-85`：`--json` 打印 JSONL，`--output-last-message/-o` 写最后消息，`--output-schema` 指定最终消息的 JSON Schema，`--ephemeral` 表示不落会话文件。`exec` 还提供 `resume` 与 `fork` 子命令（`cli.rs:172-182`）。
+`codex exec` 的导出相关参数集中定义在 `codex-rs/exec/src/cli.rs:52-85`，各参数负责的产物不同：
 
-`--json` 的契约是“stdout 每行一个合法 JSON 事件”（`exec/src/lib.rs:3`）。事件类型为线程开始、turn 开始/完成/失败、item 开始/更新/完成和错误（`exec/src/exec_events.rs:11-37`），item 负载覆盖 Agent 消息、reasoning 摘要、命令执行、文件变更、MCP 调用、协作工具、网页搜索、待办列表与错误（`:107-133`）。事件由 `EventProcessorWithJsonOutput` 直接打印，序列化失败时退化为一个 error 事件（`exec/src/event_processor_with_jsonl_output.rs:89-105`）。
+- `--json`：把事件以 JSONL 形式打印到 stdout。
+- `--output-last-message` / `-o`：把最后一轮消息写入文件。
+- `--output-schema`：指定最终消息需要满足的 JSON Schema。
+- `--ephemeral`：表示本次运行不落会话文件。
+
+`exec` 另有 `resume` 与 `fork` 两个子命令（`codex-rs/exec/src/cli.rs:172-182`）。
+
+`--json` 的契约是 stdout 每行输出一个合法 JSON 事件（`exec/src/lib.rs:3`）。事件类型包括线程开始，turn 的开始、完成与失败，item 的开始、更新与完成，以及错误；item 一侧的负载涵盖 Agent 消息、reasoning 摘要、命令执行、文件变更、MCP 调用、协作工具、网页搜索、待办列表与错误（`exec/src/exec_events.rs:11-37`，负载字段见同文件 `:107-133`）。这些事件由 EventProcessorWithJsonOutput 直接打印，序列化失败时退化为一条 error 事件（`exec/src/event_processor_with_jsonl_output.rs:89-105`）。
 
 关键边界：`ThreadItemDetails` 没有“用户消息”变体，因此 JSONL 流只描述 Agent 侧行为，不能单独重建一份完整对话。`thread.started` 给出的线程 ID 可用于后续 resume（`exec_events.rs:39-43`），完整历史仍需读 rollout。`-o` 只在成功 turn 后写入，失败不会覆盖旧文件（测试 `exec/src/event_processor_with_jsonl_output_tests.rs:7`）。
 
@@ -126,7 +133,7 @@ rollout 的落盘位置与形态分三条规则：
 
 ## 6. app-server 的线程读取面
 
-app-server 把线程历史拆成三个读取方法：`thread/read` 取线程与元数据，`thread/turns/list` 按游标分页取 turn，`thread/items/list` 按 turn 或全线程分页取条目（方法注册见 `app-server-protocol/src/protocol/common.rs:880-901`）。`thread/read` 的 `include_turns` 被标注为对分页线程已弃用，推荐只读元数据后再分页（`v2/thread.rs:1743-1751`）；turn 与 item 列表都支持升降序和前后游标（`:1809-1838,1823-1898`）。
+app-server 把线程历史拆成三个读取方法，各自负责一层：`thread/read` 返回线程本身与元数据，`thread/turns/list` 以游标分页取 turn，`thread/items/list` 再按单个 turn 或整条线程分页取条目（方法注册见 `app-server-protocol/src/protocol/common.rs:880-901`）。`thread/read` 的 `include_turns` 参数对分页线程已标记为弃用，推荐先只读元数据，再逐页取内容；turn 与 item 两个列表都支持升降序和前后游标（`app-server-protocol/src/protocol/v2/thread.rs:1743-1751,1809-1898`）。
 
 这套接口是 IDE/客户端消费对话历史的正式通道，返回的是规范化 `ThreadItem`，与 TUI Markdown 导出使用同一份条目模型（`tui/src/app/transcript_export.rs:8-9,123-135`）。它解决“如何取到结构化历史”，但自身不生成可交付文件，也不涉及访问控制；传输层提供 stdio、Unix socket 与 WebSocket（`cli/src/main.rs:590-597`）。
 
@@ -138,7 +145,7 @@ app-server 把线程历史拆成三个读取方法：`thread/read` 取线程与�
 
 ## 8. 导入与往返
 
-本次唯一的对话导入入口是 `/import`，说明为“从 Claude Code 导入 setup、项目与近期会话”（`tui/src/slash_command.rs:118`）。迁移模块把外部会话转成 Codex 的 rollout 条目，并在历史中插入一个 `<EXTERNAL SESSION IMPORTED>` 标记消息（`codex-rs/external-agent-migration/src/sessions/export.rs:27,150-160`）；再次导入时可用 ledger 检查点追加缺失后缀（`sessions/append.rs:27-40`）。默认只发现 30 天内、最多 50 条外部会话（`external-agent-migration/src/model.rs:5-24`）。
+对话导入只有 `/import` 一个入口，说明文字为“从 Claude Code 导入 setup、项目与近期会话”。该入口由迁移模块实现：它把外部会话转成 Codex 的 rollout 条目，并在历史中插入一条 `<EXTERNAL SESSION IMPORTED>` 标记消息（`tui/src/slash_command.rs:118`、`codex-rs/external-agent-migration/src/sessions/export.rs:27,150-160`）；再次导入时，ledger 检查点可以补上缺失的后缀（`sessions/append.rs:27-40`）。默认只发现 30 天以内、最多 50 条外部会话（`external-agent-migration/src/model.rs:5-24`）。
 
 这是单向迁移：没有把 Codex rollout 转成通用交换格式再导回的路径，也没有任意 JSON/JSONL 的通用导入命令。`resume` 与 `fork` 属于同一实现内部的往返，前提是 rollout 文件仍在原 codex home。
 
@@ -150,9 +157,9 @@ app-server 把线程历史拆成三个读取方法：`thread/read` 取线程与�
 
 ## 10. 版本、失败恢复与测试
 
-- 没有导出格式版本号；rollout 的 schema 由 `RolloutLine` 生成（`app-server-protocol/src/export.rs:209-213`），兼容性靠读取端容错和 `SessionMeta` 中的 CLI 版本字段，而不是显式格式版本。
-- 导出失败时错误直接回到 TUI 提示；文件写入失败不会留下半成品（临时文件加 `persist_noclobber`）。剪贴板写入有独立结果提示（`tui/src/app/transcript_export.rs:56-76`）。
-- 测试覆盖 Markdown 渲染与过滤、MCP/补丁详情、ANSI 清洗、路径解析与拒绝覆盖（`transcript_export_tests.rs:21-232`）。rollout 侧有策略与压缩测试，`exec` 侧有 JSONL 事件测试。**本次未找到**针对 `/export` 与 app-server 端到端联调、超大会话、跨平台剪贴板的测试。
+- 导出格式没有版本号；rollout 的 schema 由 `RolloutLine` 生成，兼容性依靠读取端的容错和 `SessionMeta` 里的 CLI 版本字段来维持（`app-server-protocol/src/export.rs:209-213`）。
+- 导出出错时，错误直接回到 TUI 提示；文件写入采用临时文件加 `persist_noclobber`，失败不会留下半成品；剪贴板写入另有独立的结果提示（`tui/src/app/transcript_export.rs:56-76`）。
+- 测试覆盖 Markdown 渲染与过滤、MCP 与补丁详情、ANSI 清洗、路径解析和拒绝覆盖（`transcript_export_tests.rs:21-232`）。rollout 侧有策略与压缩测试，`exec` 侧有 JSONL 事件测试；针对 `/export` 与 app-server 的端到端联调、超大会话、跨平台剪贴板的测试，**本次未找到**。
 
 ## 11. 设计取舍与已确认边界
 

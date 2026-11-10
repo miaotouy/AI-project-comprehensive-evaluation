@@ -16,8 +16,8 @@
 
 DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是交互历史的单一事实源，LLM 消息历史从日志派生，不存在独立消息表。当前实现的边界与以前不同：
 
-- 逻辑格式为 v4。格式迁移按“相邻边”拆成独立包（`session-format-v0-to-v1` 至 `session-format-v3-to-v4`），由 `session-format-catalog` 在构建期静态组装成唯一读取器；读取旧代只在内存迁移，写打开才在同目录发布不可变的当前代后继文件，源文件字节不变。v4 的实质变化是把工具结果提升为 tool 角色消息、改写消息来源形状、收口证据化的中断回合并补齐父会话目录事实（`packages/session/session-format-v3-to-v4/README.md`）。
-- 产生消息的表面事件从三类扩到五类：`system/message`、`developer/message`、`user/message`、`assistant/message`、`tool/result`（`packages/core/session/src/types.ts:447`）。system prompt 现在是表面节点 0，不再写进 `request/header`。
+- 当前逻辑格式为 v4。格式迁移按相邻代际拆成四条独立迁移包，由 `session-format-catalog` 在构建期静态组装成唯一读取器：读取旧代只在内存里完成迁移，写打开才在同目录发布一份不可变的当前代后继文件，源文件字节保持不变。v4 的实质变化是把工具结果提升为 tool 角色消息、改写消息来源形状、收口证据化的中断回合，并补齐父会话目录事实（`packages/session/session-format-v3-to-v4/README.md`）。
+- 产生消息的表面事件有五类，依次承载系统提示、开发者增量、用户消息、助手消息与工具结果，事件定义见 `packages/core/session/src/types.ts:447`。system prompt 作为表面节点 0 保存，`request/header` 只保留 config 与工具快照。
 - 流式 chunk 内嵌在 `assistant/message` 的紧凑原始流（`stream`）里，未产生表面消息的失败、重试或取消尝试记为 `assistant/attempt`，因此每次模型尝试恰好有一个耐久收口。
 - 持久化仍是 handle 契约加第一方 JSONL。`create`/`open` 返回读/写句柄，追加批次与 flush 屏障由句柄承担；跨进程写排斥由 POSIX flock 或 Windows 命名信号量提供，进程内单写者由后端保证。
 - 投影仍分两层：`session-projection` 对已提交事件驱动纯函数单元，`session-projection-cache` 把结果存进独立 storage domain 供列表与统计冷读。新增的插件消息投影可在不改变表面节点成员的前提下改写既有消息内容。
@@ -47,33 +47,33 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 ## 1. 会话单位与标识
 
-- 会话 id 是 `Branded<'SessionId'>` 字符串。`SessionStore.create` 省略 id 时铸造计数器 id，显式 id 用于 resume/fork 的既有身份（`packages/core/session/src/index.ts:1127`）。
+- 会话 id 是一个带品牌类型的字符串（`Branded<'SessionId'>`）。创建会话时若省略 id，store 会铸造一个计数器 id；resume 使用既有 id 恢复会话；fork 创建独立子会话，可省略子 id 交给 store 生成，显式子 id 已存在时会拒绝（`packages/core/session/src/index.ts:1403-1418`）。
 - 会话头用 `isSeeded` 表达血缘，没有 `seedLength` 字段；精确的 fork 前缀长度作为存储值 `inheritedEventCount` 随日志单独保存（`types.ts:95-150`；`packages/core/session/src/index.ts:1403`）。
 - 子 agent 会话在 header 上标记 `origin: 'subagent'` 与 `delegationDepth`（父深度 +1），供递归预算跨重启存活；两者都是展示/治理元数据，不证明子会话可继续。
 - 工作区归属仍用 header 的绝对 `cwd` 判定；会话本体现在另有可变的会话工作目录（`packages/session/working-directory`），变更后旧进程保留自己的 cwd，新选择可重放并进入用户上下文。
 
 ## 2. 消息模型：事件日志与派生历史
 
-- **日志结构**：`Session` 是 `SessionEvent[]` 数组，`seq` 恒等于 `log.length`（连续契约），事件深度冻结、不可修改。`turn/*` 与 `step/*` 是执行围栏：一个 turn 包住一次模型循环，step 是一次模型调用加其工具执行。
-- **表面事件**：五类事件携带完整消息。`system/message` 承载渲染后的系统提示（表面节点 0；变更时替换 node 0 或在 in-history 路由上追加新节点）；`user/message` 承载人提示、`agent.inject()` 合成上下文与目标续写回合；`developer/message` 承载按 turn/step 记账的增量会话变更，工具新增时用 `headerSeq` 指向定义它的请求头；`assistant/message` 承载组装后的助手消息、usage 与内嵌流；`tool/result` 承载工具结果（v4 起为 tool 角色消息）。
-- **表面与来源**：每条表面事件必须带 `surfaceOp`（`'append'` 或 `{ op: 'replace', startSeq, endSeq }`），可选 `sourceEventSeqs` 只能引用更早的事件且必须覆盖被遮蔽节点。`assistant/message` 不允许 `sourceEventSeqs`，其内嵌流就是流式证据。
+- **日志结构**：会话在内存中就是一条事件数组，每个事件的 `seq` 恒等于写入前的日志长度，序号因此连续，事件一旦落定就被冻结、不再修改。`turn/*` 与 `step/*` 两组事件充当执行围栏：一个 turn 包住一次完整的模型循环，一个 step 是一次模型调用及其工具执行。
+- **表面事件**：五类事件携带完整消息。`system/message` 承载渲染后的系统提示（表面节点 0；变更时替换 node 0 或在 in-history 路由上追加新节点）；`user/message` 承载人提示、注入合成的上下文与目标续写回合；`developer/message` 承载按 turn/step 记账的增量会话变更，工具新增时记录定义它的请求头序号；`assistant/message` 承载组装后的助手消息、usage 与内嵌流；`tool/result` 承载工具结果（v4 起为 tool 角色消息）。
+- **表面与来源**：每条表面事件必须带 `surfaceOp`，取值是追加，或一段替换范围 `{ op: 'replace', startSeq, endSeq }`；可选 `sourceEventSeqs` 只能引用更早的事件且必须覆盖被遮蔽节点。`assistant/message` 不允许 `sourceEventSeqs`，其内嵌流就是流式证据。
 - **派生规则**：`deriveEventMessage`（`packages/core/session/src/surface.ts:120`）把表面节点投影为消息；空 content 的 `assistant/message` 仍记账但不进模型历史；`assistant/attempt`、turn/step 边界与插件只记日志的事件都不产生消息。
 - **插件消息投影**：声明 `@messageProjection` 的事件可注册纯函数定义（`ctx.sessions.registerMessageProjection()`），在提交前校验并改写既有消息内容，推进 `contentGeneration`；图像替换（`image/offload`）走这条路，且不会改变表面节点成员或消息身份。
 - **缓存**：`Session.deriveMessages()` 沿表面节点折叠，每个节点只投影一次；表面替换或消息投影（`contentGeneration` 变化）才重建（`packages/core/session/src/index.ts:999`）。
 
 ## 3. 事件类型系统与格式版本
 
-- **词汇表**：`SessionEventMap`（`types.ts:287`）声明核心事件，插件通过 declaration merging 追加（compaction、hook 桥、标题、计划模式、命令生命周期、job、schedule、goal 等）。生成目录 `docs/persistence-catalog.md` 逐条枚举仓库内全部 durable 事件，并为每个根类型给出规范化结构与 SHA-256 指纹，机读清单在 `docs/persistence-schema.json`；实验包的插件记录另见 `docs/experimental-persistence-catalog.md`。
+- **事件词汇表**：核心事件由 `SessionEventMap` 声明（`types.ts:287`），插件通过 declaration merging 向同一张表追加自己的事件，涉及压缩、hook 桥、标题、计划模式、命令生命周期、job、schedule、goal 等主题。仓库的构建流程据此生成持久化目录，逐条枚举全部 durable 事件，为每个根类型给出规范化结构与 SHA-256 指纹，并另出一份机读清单（`docs/persistence-catalog.md`、`docs/persistence-schema.json`，实验包的插件记录见 `docs/experimental-persistence-catalog.md`）。
 - **信封**：每条事件为 `type/seq/time/data` 加可选 `ignorable: true`；表面事件额外带 `surfaceOp`/`sourceEventSeqs`，非表面事件禁止携带两者。`ignorable` 缺失意味着“必须理解”，读者遇到不认识的类型时必须拒绝重建而不是静默跳过。
 - **版本机制**：`SESSION_FORMAT_VERSION = 4`（`types.ts:90`）。`docs/session-format-status.md` 记录 writer 常量、已接受的兼容基线与已发布格式：当前 finalization 与 release 记录均为 v4，发布证据是 tag `dsh-v0.2.0-rc.2`。同版本内的结构兼容变更需按 reader-compatibility 规则评审，不能复用 3→4 这条过渡。
 - **迁移边**：`session-format-catalog` 在模块初始化时检查从最早支持版本到当前 writer 的完整无缺口链，并暴露物理分发、仅头部分类、单遍行恢复与当前记录编码（`packages/session/session-format-catalog/src/index.ts:3`）。读打开迁移到内存逻辑视图；写打开才在独占 claim 下发布当前代。
 
 ## 4. 事实源、持久化与派生历史不变量
 
-- **三层数据**：内存事件日志是运行时权威；JSONL 持久化是磁盘投影；投影缓存是折叠捷径（可能过期，绝不会错误）。文档用“内存 log / durable log / cached projection”三个词分别称呼。
+- **三层数据**：运行时以内存事件日志为权威，JSONL 文件是它在磁盘上的投影，投影缓存则是折叠消息历史的捷径，可能落后于最新提交但结果不会出错。官方文档分别用内存 log、durable log 与 cached projection 三个词称呼这三层。
 - **model-visible ⟺ logged**：任何到达模型请求的内容必须能从会话日志重建。支撑机制有三：每次请求的配置与工具 schema 以全量快照进 `request/header`，`foldRequestHeader` 选最新快照重建（`packages/core/session/src/request-header.ts:63`），而 system prompt 作为表面节点同样在日志里；seed/load 边界校验消息身份、来源与 provider/model，缺失即拒绝而非猜测；派生历史与外部重建器共用同一个 `deriveEventMessage`，不会与缓存分歧。
 - **header 与日志分离**：`SessionHeader`（version/id/createdAt/cwd/parentSession/isSeeded/origin/delegationDepth/agentPreset）是存储元数据，不进事件日志、不进派生历史；`session.header` 总是存在（无 store 头时合成最小头）。
-- **持久化契约**：抽象 `SessionPersistence` 负责 `create`、`open`、`stat`、`list`；会话级 read/append/flush/close 由 `SessionHandle` 承担。写句柄校验连续 seq，读句柄只暴露逻辑事件；句柄还携带 `inheritedEventCount` 与被撤销的策略化访问边界（`packages/session/session-persistence/src/handle.ts`）。
+- **持久化契约**：`SessionPersistence` 抽象只承载创建、打开、查看与列举四类操作；会话级的读取、追加、flush 与关闭由 `SessionHandle` 承担。写句柄校验连续 seq，读句柄只暴露逻辑事件；句柄还携带继承事件数与被撤销的策略化访问边界（`packages/session/session-persistence/src/handle.ts`）。
 
 ## 5. 持久化后端与格式代际
 
@@ -87,9 +87,9 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 ## 6. 生命周期：创建、resume、fork、销毁与恢复
 
-- **创建**：`SessionStore.create` = `prepare` + `enter` + `announce` 三步，append 在 `session/created` 完成前被拒绝（`index.ts:1127` 起）。agent 工厂把三步折叠进自己的唯一 effect，保证循环关闭事件在 store 摘除前落定。
+- **创建**：`SessionStore.create` 把创建拆成 prepare、enter、announce 三步，在 `session/created` 落定之前任何 append 都会被拒绝；agent 工厂把这三步折叠进自己唯一的 effect，让循环关闭事件先于 store 摘除落定（`index.ts:1127` 起）。
 - **resume**：`AgentLoop.resume`（`packages/core/agent-loop/src/index.ts:752`）经 `resumeWith` 用会话写句柄读取存储日志，先算出并追加 `interruptedTurnClosers`（缺失工具错误、未闭合 step 结束、合成 `turn/end { kind: 'interrupted' }`），再交给 store prepare 发布。持久化侧没有 prepared-session 缓存，冷读缓存归 session-query。
-- **fork**：`SessionStore.fork(source, boundary?, childSessionId?)`（`index.ts:1403`）把源会话到 inclusive 边界的前缀深拷贝为种子，子会话 header 记 `isSeeded: true`、精确 `inheritedEventCount` 与继承的 cwd，但不写 `parentSession`（普通 fork 已不再以此表达血缘）。种子在 cut 处带 `session/end-seed { inherited: true }` 标记，仍开放的源回合以 `forked` 原因收口；有效事件边界可位于开放回合内，种子构造负责补齐 fork 收口事件（`index.ts:1403-1454`）。
+- **fork**：fork 把源会话到 inclusive 边界的前缀深拷贝为种子，子会话 header 保存种子标记与继承的 cwd，精确前缀长度 `inheritedEventCount` 属于 Session 状态，并随存储单独保存；普通 fork 不写父会话字段。种子在 cut 处带 `session/end-seed { inherited: true }` 标记，仍开放的源回合以 `forked` 原因收口；有效事件边界可位于开放回合内，种子构造负责补齐 fork 收口事件（`packages/core/session/src/index.ts:1403-1454`）。
 - **销毁**：会话释放时，JSONL write handle 先排空 live buffer、flush，再释放 writer ownership。**本次未找到会话删除 API**：持久化 seam 与 JSONL provider 均无 delete 入口。归档由 workspace registry 持有（`archivedSessionIds`），Session Controller 用 `archived-session-gate` 阻止归档会话继续执行步骤，Web 设置页的 Archived sessions 负责恢复；归档只隐藏导航项，不删除会话日志。
 - **崩溃恢复**：持久化不截断、不修复完整中断回合，只丢弃 torn 物理尾部（JSONL 会部分解码被截断帧并重写完整记录）；修复是读者的职责，由 resume 通过写句柄追加合成 closers。`interrupted` 是唯一循环本身不会发出的结束原因，`forked` 只由 fork 种子构造发出。
 
@@ -109,7 +109,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 ## 9. 缓存、一致性与并发写入
 
-- 单进程单写者：`Session.append` 同步进内存日志、同步通知监听者（失败按监听器隔离，不改变提交结果），热路径不做 I/O。持久化在后台异步追：`session/event` 通知被路由进活动写句柄的 write-behind 窗口，首个待写事件开启固定批处理窗口，后续事件加入但不重置截止时间。
+- 单进程单写者：`Session.append` 同步写进内存日志，并同步通知监听者，单个监听器失败只影响自身，不会改变提交结果；热路径不做磁盘 I/O。持久化在后台异步追赶：`session/event` 通知被路由到活动写句柄的 write-behind 窗口，首个待写事件开启一个固定长度的批处理窗口，后续事件加入队列但不会顺延截止时间。
 - 串行化与写批：每个 JSONL write handle 串行化 append；`flush()` 取消等待并排空到静止，是唯一的耐久与错误观察点；失败的后台写保留事件顺序并暂停自动路径，下一次显式 flush 重试并大声报错。`session/disposed` 与 `close()` 完成同样的最终排空。
 - 跨进程：公共 seam 只保证同一 backend instance 的单写者；第一方 JSONL 另用内核 lease 做跨进程排斥。POSIX 依赖非阻塞 flock，Windows 使用按路径派生的命名信号量；NFSv3 等网络文件系统仍可能削弱 advisory flock 语义。
 - 检查点语义（`session-checkpoint-policy`）：模型请求流开始前、顶层工具体执行前、每个 pre-step 边界各做一次 flush 屏障（`session-checkpoint-policy/src/index.ts:35,72,80`），请求前缀先于 adapter dispatch 落盘，失败即 fail-closed。
@@ -117,7 +117,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 ## 10. 迁移与导入导出
 
-- 受支持的 v0→v4 历史格式经相邻迁移链恢复；更新版本、目录外版本或无法无损解释的记录仍拒绝。当前格式恢复会保留已安装扩展与带 `ignorable` 的未知事件；v0/v1/v2 历史迁移拒绝未知类型，即使标了 `ignorable`。
+- 历史会话沿相邻迁移链从 v0 逐代恢复到 v4；来自更新版本、目录之外版本或无法无损解释的记录会被拒绝。恢复当前格式时会保留已安装扩展以及标了 `ignorable` 的未知事件，而从 v0/v1/v2 迁移时，连标了 `ignorable` 的未知类型也要拒绝。
 - 读句柄迁移旧代只返回当前逻辑视图；写打开才发布新的当前代文件。崩溃 repair 仍通过普通 append 把合成 closers 写入当前代。
 - 导出：`session-log-export` 在会话头“更多操作”菜单提供 `Download session log` 与 `Copy Session as Markdown`，`/export` 斜杠命令触发同一个 ZIP 下载；ZIP 从 persistence read handle 序列化当前逻辑日志，并收集图片与通用文件（细节见对话导出与分享类目）。
 - 官方会话日志上传：`session-log-deepseek` 在启用官方 DeepSeek 请求元数据的部署里，把规范化会话日志作为请求字段增量上传，并以 `session-log-deepseek/delivery-accepted` 事件维护接受水位；插件可注册排除谓词让特定请求不贡献日志。上传只针对官方 API，禁用该插件即关闭。
@@ -125,7 +125,7 @@ DeepSeek-Harness 的会话仍是 append-only 事件日志，内存 Session 是�
 
 ## 11. 外部对象绑定
 
-- **会话级（header）**：cwd、父会话、`isSeeded` 与 `inheritedEventCount`、subagent 标记与深度、agent preset 都随 header 持久化；preset 可恢复会话的工具与提示构成。
+- **会话级**：header 随会话一起持久化工作目录、父会话、种子血缘标记 `isSeeded`、subagent 标记与委派深度，以及 agent preset；preset 决定会话恢复后能用到哪些工具与提示。精确继承长度作为独立 Session 状态保存（`packages/core/session/src/types.ts:108-151`）。
 - **请求级（日志事件）**：每次请求的 config 与工具 schema 以全量快照进 `request/header`（reason 区分 initial/resume/change/series）；路由容量与 `systemPromptUpdate` 进 `request/context`（仅变化时记录），两者都是 log-only，不产生消息。system prompt 是表面事件而非请求头字段。
 - **消息级**：`user/message.source` 区分人、注入与目标续写来源；`assistant/message` 携带 provider/model 与内嵌流；`tool/result` 携带 callId、可选失败身份与工具私有 `meta`（随日志持久化，回放时客户端可重建同一卡片）。
 - 会话工作目录：`working-directory` 让单个会话切换 cwd，已有进程保留自己的目录，选择可重放并进入用户上下文；目录缺失时回退到仍可用的原项目目录。

@@ -51,7 +51,7 @@ Home（`app/components/home.tsx:237-272`）依次执行主题、数据加载、�
 
 ## 2. 弹窗、浮层与菜单
 
-- **Modal 组件**（`ui-lib.tsx:122-179`）：标题栏含最大化/最小化（以 -max 类切换 95vw/95vh）与关闭按钮；Esc 关闭由组件挂载时在 window 上注册 keydown 监听实现（`ui-lib.tsx:123-136`，依赖数组为空，首次渲染的关闭回调闭包常驻）。
+- **Modal 组件**：标题栏含最大化/最小化与关闭按钮，最大化通过追加 `-max` 类把尺寸切到 95vw×95vh。Esc 关闭在挂载时向 window 注册 keydown 监听，监听只在首次渲染建立一次（依赖数组为空），常驻的是首帧那份关闭回调闭包（`ui-lib.tsx:122-179`）。
 - **命令式弹窗四件套**（`ui-lib.tsx:181-475`）：showModal、showConfirm、showPrompt 与 showImageModal 实现一致——每次调用自建 div 节点与 React root，节点挂到 modal-mask 遮罩样式上（`app/styles/globals.scss:246-261`，z-index 9999、flex 居中、移动端底部弹起）。
 
   遮罩点击通过事件目标与遮罩节点是否相等来判定（`ui-lib.tsx:193-197`）；关闭即卸载 React root 并移除节点，没有两阶段退场（区别于 Cherry Studio 的 200ms 延迟卸载）。showConfirm 返回布尔结果的 Promise 且确认按钮自动聚焦，showPrompt 返回字符串结果。
@@ -77,10 +77,10 @@ Home（`app/components/home.tsx:237-272`）依次执行主题、数据加载、�
 
 **Loading。** 全屏三圆点 SVG 加载组件（`home.tsx:34-41`）用作页面懒加载的 fallback（`home.tsx:43-83`）与首屏水合门控；`ui-lib.tsx:98-112` 另有一个等价的全屏版本。消息流式打字/预览态在 Chat UI 笔记 §5。
 
-**空状态。** 按位置分三类：
-- MCP 市场有 "No servers available" 文案（`mcp-market.tsx:474`），SD 页有本地化空记录文案（`sd.tsx:332`）；
-- 会话列表无空态渲染（`chat-list.tsx:134-173` 只遍历会话，最后一条删除时 store 自动补空会话 `store/chat.ts:352-355`）；
-- 聊天窗无欢迎/空态文本（grep Welcome|EmptyChat 无匹配，检查范围 app 目录）。
+**空状态。** 三个位置的处理各不相同：
+- MCP 市场显示 "No servers available"，SD 页给的是可本地化的空记录文案（`mcp-market.tsx:474`、`sd.tsx:332`）。
+- 会话列表自身不渲染空态，只遍历现有会话；删掉最后一条时由会话 store 自动补一个空会话（`chat-list.tsx:134-173`、`store/chat.ts:352-355`）。
+- 聊天窗没有欢迎语或空态文本（在 app 目录搜索 Welcome、EmptyChat 均无匹配）。
 
 **错误边界。** ErrorBoundary（`app/components/error.tsx:19-73`）以 class 组件挂在 Home 最外层，捕获后展示错误栈、Report This Error（GitHub issue 链接）与 Clear All Data；清空需经确认弹窗，确认后先导出数据再清除。
 
@@ -94,15 +94,26 @@ Home（`app/components/home.tsx:237-272`）依次执行主题、数据加载、�
 
 auto 模式不加减类，由 `globals.scss:84-88` 的媒体查询（prefers-color-scheme: dark）让根元素跟随系统。
 
-**视觉 token。** SCSS 明暗混合（`globals.scss:4-45`）定义两组 CSS 变量，挂在明暗类与根元素媒体查询上（:47-88）：
-- 颜色：`--primary`（rgb(29,147,171)，明暗同值）、`--white`、`--black`、`--gray`、`--second`、`--hover-color`、`--bar-color`、`--theme-color`（取 gray 值）、`--theme` 模式标识
-- 阴影：`--shadow`、`--card-shadow`
-- 描边：`--border-in-light`
+**视觉 token。** 明暗两套外观由同一批 CSS 变量承载：样式文件前段先按明暗两组分别声明，再由明暗类与根元素媒体查询把对应一组挂到页面上（`globals.scss:4-45,47-88`）。变量按用途分三类：
 
-布局变量定义在根元素（`globals.scss:59-68`），600px 断点下整体重定义（:70-82）：
-- `--window-width` 90vw、`--window-height` 90vh、`--full-height`（整页高度）
-- `--sidebar-width` 300px、`--window-content-width` 为总宽减侧栏宽
-- `--message-max-width` 80%
+| 用途 | 变量 |
+| --- | --- |
+| 颜色 | `--primary`、`--white`、`--black`、`--gray`、`--second`、`--hover-color`、`--bar-color`、`--theme-color`、`--theme` |
+| 阴影 | `--shadow`、`--card-shadow` |
+| 描边 | `--border-in-light` |
+
+颜色组中主色在明暗两组里同为 rgb(29,147,171)，`--theme-color` 取 gray 的值，`--theme` 只作模式标识。
+
+布局尺寸也走这类变量：根元素先给出桌面取值，600px 断点下整组重新定义（`globals.scss:59-68,70-82`）：
+
+| 变量 | 取值与含义 |
+| --- | --- |
+| `--window-width` | 90vw |
+| `--window-height` | 90vh |
+| `--full-height` | 整页高度 |
+| `--sidebar-width` | 300px |
+| `--window-content-width` | 总宽减去侧栏宽度 |
+| `--message-max-width` | 80% |
 
 暗色下对 SVG 图标做全局反色滤镜（:42-44），no-dark 类可豁免。
 
@@ -130,7 +141,7 @@ Tailwind 配置（无 tailwind.config.*）。
 
 ## 5. 响应式、移动端与窗口适配
 
-**断点。** 600px 单断点双轨一致——JS 常量 `MOBILE_MAX_WIDTH = 600`（`app/utils.ts:145-150`，基于窗口尺寸监听）+ CSS @media (max-width: 600px)（覆盖全局、主布局与 UI 库样式：`globals.scss:70-82,111-113`、`home.module.scss:108-134`、`ui-lib.module.scss:22-26,171-181`）。
+**断点。** 移动端判定只用 600px 一个断点，脚本侧与样式侧取值一致：脚本以常量 `MOBILE_MAX_WIDTH = 600` 配合窗口尺寸监听判断，样式侧用同值的 max-width 媒体查询，覆盖全局变量、主布局与 UI 库组件（`app/utils.ts:145-150`、`globals.scss:70-82,111-113`、`home.module.scss:108-134`、`ui-lib.module.scss:22-26,171-181`）。
 
 useMobileScreen 驱动多个组件差异（如移动端隐藏全屏/快捷键按钮、附件与弹窗入口差异，见 Chat UI 笔记 §9）。
 
@@ -161,8 +172,8 @@ readFromFile 用隐藏的 JSON 文件选择输入（`utils.ts:96-114`）。
 
 **拖放。** 本次未找到文件拖放支持——grep 拖放事件相关关键词（onDrop/onDragOver/dataTransfer/DragEvent）在 app 目录无业务代码匹配（拖拽排序库内部未下钻）。图片只能经文件选择器或粘贴（`chat.tsx:1512-1598`）。
 
-- **图片预览。** showImageModal（`ui-lib.tsx:452-475`）只是 Modal 里一个 img，无缩放/旋转/导航；消费方包括导出图片预览（`exporter.tsx:483`）、mermaid 图点击（`markdown.tsx:47-53`）与 SD 页图片（`sd.tsx:170`）。
-- **聊天消息图片无灯箱**：消息列表渲染裸 img 且无点击处理（`chat.tsx:1988-2022`）。
+- **图片预览。** showImageModal 弹出的内容只有 Modal 里一张 img，没有缩放、旋转或前后切换；导出图片预览、mermaid 图点击与 SD 页图片都走这个入口（`ui-lib.tsx:452-475`、`exporter.tsx:483`、`markdown.tsx:47-53`、`sd.tsx:170`）。
+- **聊天消息图片无灯箱**：消息列表直接渲染 img，未绑定点击处理（`chat.tsx:1988-2022`）。
 
 **内容嵌入。** Markdown 链接按扩展名自动内嵌音频/视频（`markdown.tsx:293-307`）；代码块复制按钮与 HTML/mermaid 预览在 `markdown.tsx:74-174`。
 
@@ -185,9 +196,9 @@ readFromFile 用隐藏的 JSON 文件选择输入（`utils.ts:96-114`）。
 
 ### 无障碍与动画（静态代码结论）
 
-- 图标按钮可选 aria 属性，多处传入（如 `chat.tsx:1733,1813`）；但多数图标按钮只有 title 而无 aria-label（`button.tsx:37` 的 title 不自动进入 aria-label，读屏可访问名称覆盖参差——静态推断）。
-- Modal/Toast/Popover 均无 role/aria-modal/aria-live 语义；PromptToast 入口有 role="button"（`chat.tsx:246-248`）。
-- 动画：无动画库，全部手写 CSS——animation.scss 的 slide-in 等 keyframes 用于弹窗/列表进场（`ui-lib.module.scss:18,44,84,99,190`）；Toast 用透明度/位移过渡退场；prefers-reduced-motion 处理本次未找到。
+- 图标按钮接受可选的 aria 属性，聊天页等调用点会显式传入；多数图标按钮仍只设 title，组件只把 title 透传、不生成 aria-label，读屏可拿到的可访问名称覆盖参差（`chat.tsx:1733,1813`、`button.tsx:37`；静态推断）。
+- Modal、Toast 与 Popover 都没有 role、aria-modal 或 aria-live 语义；带 role="button" 的只有 PromptToast 入口（`chat.tsx:246-248`）。
+- 动画全部手写 CSS，未引入动画库：弹窗与列表进场用 animation.scss 的 slide-in 等 keyframes（`ui-lib.module.scss:18,44,84,99,190`），Toast 靠透明度与位移过渡退场；prefers-reduced-motion 的处理本次未找到。
 
   代码块复制按钮 hover 显隐、消息悬停等为 CSS transition（`globals.scss:273-305`、`home.module.scss:208-224`）。
 

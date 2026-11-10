@@ -16,9 +16,9 @@
 
 本仓库的外部协作能力由三条执行位置不同的主链构成，均可在当前快照静态走通：
 
-- **外部工具服务（MCP 客户端）**：应用作为 MCP Host 连接远端 SSE 或 Streamable HTTP 服务器，把发现的工具注册进当前助手的工具表；工具循环留在宿主进程，服务器只提供工具能力，连接与令牌刷新由运行时注册表管理（`app/src/main/java/me/rerere/rikkahub/data/ai/mcp/McpManager.kt`）。
-- **外部执行体（workspace，两种后端）**：本地后端是一份用户自行下载的 Ubuntu rootfs 加一个应用私有文件区，模型通过 workspace 工具在其内读写文件、执行 shell，命令落在 PRoot 用户态沙箱中；远程后端通过 SSH 连接用户自备主机，文件与命令都在远端执行，宿主只保留会话与工具结果（`workspace/src/main/java/me/rerere/workspace/WorkspaceManager.kt`、`ProotShellRunner.kt`、`ssh/SshWorkspaceBackend.kt`）。
-- **外部控制表面（内嵌 Web 服务器）**：端上启动 Ktor CIO 服务器，随包发布的 React 前端经 HTTP 与 SSE 复用同一套会话服务与设置存储（`app/src/main/java/me/rerere/rikkahub/web/WebServerManager.kt`、`WebApiModule.kt`）。
+- **外部工具服务（MCP 客户端）**：应用充当 MCP Host，连接远端的 SSE 或 Streamable HTTP 服务器，把服务器暴露的工具注册进当前助手的工具表。工具循环留在宿主进程内，服务器只负责执行工具，连接的建立与令牌刷新由运行时注册表统一管理（`app/src/main/java/me/rerere/rikkahub/data/ai/mcp/McpManager.kt`）。
+- **外部执行体（workspace，两种后端）**：本地后端由一份用户自行下载的 Ubuntu rootfs 和一个应用私有文件区组成，模型通过 workspace 工具在其中读写文件、执行 shell，命令落在 PRoot 用户态沙箱内；远程后端经 SSH 连接用户自备的主机，文件与命令都在远端执行，宿主只保留会话与工具结果（`workspace/src/main/java/me/rerere/workspace/` 下的 `WorkspaceManager.kt`、`ProotShellRunner.kt`、`ssh/SshWorkspaceBackend.kt`）。
+- **外部控制表面（内嵌 Web 服务器）**：端上启动 Ktor CIO 服务器，随包发布的 React 前端通过 HTTP 与 SSE 复用同一套会话服务与设置存储（`app/src/main/java/me/rerere/rikkahub/web/WebServerManager.kt`、`WebApiModule.kt`）。
 
 三者的共同点：是否自动执行由工具自带的审批需求与该表面的用户开关决定，外部内容只被当作工具输入或沙箱命令，而不是可回写宿主状态的外部会话；MCP 独有账号级凭据与远端连接生命周期，workspace 独有独立执行环境，Web 是唯一能从宿主之外驱动同一会话的控制表面。
 
@@ -33,7 +33,18 @@
 
 MCP 侧有完整生命周期与凭据，满足本类目"可识别身份 + 持续生命周期 + 双向协议 + 状态映射 + 治理边界"的准入；但它不把外部服务器的会话或资源映射回本地对象，工具结果直接并入助手消息。workspace 有独立 runtime 与文件系统，本地后端由宿主拉起 PRoot 子进程并同步等待结果，远程后端则把同一套文件与命令接口转发到 SSH 主机，两种后端共用工具协议与审批路径，不存在两端的会话协议。Web 端满足"可发起、回答、停止同一任务"的控制表面定义。
 
-本次未找到：外部 CLI Agent、Agent SDK、ACP 或远程任务队列入口；MCP stdio 传输；账号/installation/Connector 模型；webhook 或 WebSocket 反向推送。检查范围为当前快照的 `data/ai/mcp`、`data/ai/extension`、`workspace`、`web`、`web-ui`、`oauth` 模块与 `settings.gradle.kts` 所列模块。
+检索覆盖当前快照的 MCP 客户端、扩展、workspace、内嵌 Web 服务器、web-ui 与 OAuth 六块代码，另加 `settings.gradle.kts` 列出的模块，具体目录如下：
+
+- MCP 客户端与扩展：`data/ai/mcp`、`data/ai/extension`
+- workspace 执行体与内嵌 Web 服务器：`workspace`、`web`
+- Web 前端与 OAuth 协调：`web-ui`、`oauth`
+
+上述范围内本次未找到以下入口：
+
+- 外部 CLI Agent、Agent SDK、ACP 与远程任务队列
+- MCP 的 stdio 传输
+- 账号、installation 与 Connector 模型
+- webhook 与 WebSocket 反向推送
 
 ## 完整主链
 
@@ -49,7 +60,7 @@ MCP 侧有完整生命周期与凭据，满足本类目"可识别身份 + 持续
   -> 两段都成功后暴露为 McpStatus.Connected；调用工具时 callTool 带 120 秒超时
 ```
 
-判定是两段式：`connectSession` 先 connect 传输再 `syncTools`，只有连接参数在同步前后一致才把客户端与配置标记为已连接，否则关闭重连（`McpSessionRegistry.kt`）。断线由传输层 `onClose`/`onError` 触发有界重连，最多 5 次，退避自 1 秒指数增长、封顶 30 秒（同文件 `45-47`、`347-409`）。
+连接判定分两段进行：connectSession 先建立传输，再调用 syncTools 同步工具；只有连接参数在同步前后保持一致，客户端与配置才会被标记为已连接，否则关闭连接并重新建立（`McpSessionRegistry.kt`）。连接断开时，传输层的 onClose 与 onError 回调触发有界重连，最多 5 次，退避从 1 秒起指数增长、封顶 30 秒（同文件 `45-47`、`347-409`）。
 
 ### 主链 B：workspace 创建、rootfs 安装与 shell 执行
 
@@ -82,13 +93,15 @@ Web 服务器是应用进程内的同一服务实例，`configureWebApi` 直接�
 
 ### MCP 侧
 
-服务器的本地身份是配置项里的 Uuid，用户可见身份是配置名，同时用作 MCP 客户端实现名与工具命名空间前缀；服务器名只允许字母数字（白名单），工具注册名由它拼成 `mcp__…__…`，构造与启用过滤见文末交接（`data/ai/tools/ChatToolFactory.kt`）。传输方式只有 `sse` 与 `streamable_http`，配置模型是密封类，从 MCP JSON 导入时也只解析 URL、type 与 headers（`data/ai/mcp/McpConfig.kt`；`ui/pages/setting/SettingMcpPage.kt`），未发现 stdio 或本地进程传输。
+每台 MCP 服务器在本地以配置项里的 Uuid 作为身份，用户看到的是配置名；这个名字同时充当 MCP 客户端实现名和工具命名空间前缀，按白名单只允许字母数字，工具注册名由它拼成 `mcp__…__…` 的形式，构造与启用过滤见文末交接（`data/ai/tools/ChatToolFactory.kt`）。传输方式只有 sse 与 streamable_http 两种，配置模型是密封类，从 MCP JSON 导入时同样只解析 URL、type 与 headers（`data/ai/mcp/McpConfig.kt`、`ui/pages/setting/SettingMcpPage.kt`），本次未发现 stdio 或本地进程传输。
 
 工具的持久身份是工具名，重新同步时描述与输入 Schema 被服务器返回值覆盖，用户设置的启用开关与审批标志保留（`McpSessionRegistry.kt`）。是否触发重连只取决于传输类型、服务器 URL、客户端名与 headers 组成的连接键，工具开关变化不会重连（同文件 `465-497`）。OAuth 状态（动态注册结果、端点与令牌、过期时间）随服务器配置持久化，而连接客户端只在内存注册表里，重启后由配置流重新协调建立（`McpConfig.kt`）。
 
 ### workspace 侧
 
-持久身份是 Room 表 `workspaces` 的 id 与唯一 root 字段，另有名称、shell 状态、工具审批覆盖表和 shell 兼容模式等列（`data/db/entity/WorkspaceEntity.kt`）。助手通过自身的 `workspaceId` 绑定 workspace（`data/model/Assistant.kt`），会话级另有 `workspaceCwd` 作为默认工作目录。shell 状态是四态枚举（禁用、安装中、已就绪、损坏，`workspace/src/main/java/me/rerere/workspace/Workspace.kt`）。启动时做完整性检查：目录缺失只标记损坏而不删记录，声明就绪或安装中但找不到 rootfs 则回退为禁用（`data/repository/WorkspaceRepository.kt`）；删除 workspace 会清理目录并清空指向它的助手绑定（同文件 `308-330`）。
+workspace 的持久身份由 Room 表 `workspaces` 的 id 与唯一 root 字段确定，其余列保存名称、shell 状态、工具审批覆盖与 shell 兼容模式（`data/db/entity/WorkspaceEntity.kt`）。助手通过自身的 workspaceId 绑定 workspace（`data/model/Assistant.kt`），会话级另有 workspaceCwd 作为默认工作目录。
+
+shell 状态是禁用、安装中、已就绪、损坏四态枚举（`workspace/src/main/java/me/rerere/workspace/Workspace.kt`）。启动时做完整性检查：目录缺失只把状态标为损坏并保留记录，声明就绪或安装中却找不到 rootfs 则回退为禁用。删除 workspace 会清理目录并清空指向它的助手绑定（`data/repository/WorkspaceRepository.kt`；删除分支见同文件 `308-330`）。
 
 ### Web 侧
 
@@ -102,7 +115,7 @@ Web 服务器是应用进程内的同一服务实例，`configureWebApi` 直接�
 
 ### workspace 的执行与回流
 
-shell 工具把命令交给 `WorkspaceRepository.executeCommand`，后者用 `runInterruptible` 包装，使协程取消转成线程中断并杀死阻塞中的子进程（`WorkspaceRepository.kt`）。`ProotShellRunner` 把根目录指向该 workspace 的 linux 目录，工作目录固定在 `/workspace` 或 `/workspace/<cwd>`，再按挂载表把文件区、技能、工具输出与上传目录绑进沙箱（`ProotShellRunner.kt`）。命令经位置参数传入，最后在 rootfs 内以固定环境变量的非交互 bash 求值一次，环境里关闭颜色、分页与交互提示（同文件 `95-115`）。
+shell 工具把命令交给 WorkspaceRepository.executeCommand，后者用 runInterruptible 包装命令执行，让协程取消转成线程中断并杀掉卡在阻塞中的子进程（`WorkspaceRepository.kt`）。ProotShellRunner 负责组装命令：根目录指向该 workspace 的 linux 目录，工作目录固定在 `/workspace` 或 `/workspace/<cwd>`，再按挂载表把文件区、技能、工具输出与上传目录绑进沙箱（`ProotShellRunner.kt`）。命令以位置参数传入，最后在 rootfs 内用非交互 bash 求值一次，环境变量固定，并关闭颜色、分页与交互提示（同文件 `95-115`）。
 
 输出回流是结构化的：退出码、标准输出、标准错误、是否超时与是否截断一并写入工具结果，单流超过 128KB 后继续读到 EOF 但丢弃多余内容，避免管道写满阻塞子进程（`workspace/src/main/java/me/rerere/workspace/WorkspaceShellRunner.kt, 102-143`）。默认超时 30 秒，工具允许模型指定最长 600 秒（`WorkspaceManager.kt`；`data/ai/tools/WorkspaceTools.kt, 253-256`）。workspace 另有面向人的交互终端：详情页用 Termux 组件在同一 PRoot 参数下建持久 PTY 会话，与模型工具共享 rootfs 与文件区，但不经 Web 暴露（`ui/pages/extensions/workspace/WorkspaceTerminalSession.kt`）。
 
@@ -122,7 +135,7 @@ Web 端能发送与编辑消息、重生成、切换分支、设标题、移动/
 
 **workspace 边界**。这是用户态 PRoot 沙箱，不提供内核级隔离：PRoot 在宿主用户权限下重映射路径与 root 身份，`--root-id` 让 rootfs 内进程看到 root，`--link2symlink` 兼容不支持符号链接的场景，`--kill-on-exit` 保证退出时回收子进程（`ProotShellRunner.kt`）。
 
-文件区是应用私有的 `filesDir/workspaces/<root>/files`，Linux 区与临时区是同 workspace 下的 `linux`、`tmp`。跨目录访问由路径解析统一处理：`/workspace` 映射文件区，挂载表路径映射各自源目录，`/dev`、`/proc`、`/sys` 被明确拒绝为可读文件并要求改用 shell（`WorkspaceManager.kt, 255`）。
+文件区位于应用私有的 `filesDir/workspaces/<root>/files`，Linux 区与临时区是同 workspace 下的 linux 与 tmp 目录。跨目录访问由路径解析统一处理：`/workspace` 映射到文件区，挂载表里的路径映射到各自源目录，`/dev`、`/proc`、`/sys` 被明确拒绝为可读文件并要求改用 shell（`WorkspaceManager.kt, 255`）。
 
 越界写另有产品边界：写文件与编辑文件默认免强制审批，目标路径落在 `/workspace`、`/tmp`、`/skills` 之外时强制转审批，并可按 workspace 覆盖落库（`WorkspaceTools.kt, 126, 169, 407-420`；`WorkspaceRepository.kt`）。
 
@@ -144,9 +157,9 @@ Web 端能发送与编辑消息、重生成、切换分支、设标题、移动/
 
 已确认边界：
 
-- MCP 工具是否进入本轮工具表，由服务器启用、助手（或会话固定配置）的服务器集合与工具自身开关共同决定，过滤规则见 Agent 工具笔记（`McpManager.kt`）。
-- workspace 工具只在助手绑定 workspace 且 shell 就绪时注入，系统提示中的工作区引导与 `AGENTS.md` 注入共用同一条件；本地与 SSH 远程后端共用同一注入判断（`ChatToolFactory.kt`、`WorkspaceReminderTransformer.kt`）。
-- Web 服务器由前台服务保活，启动前检查通知权限，非仅本机模式在目标 SDK 上还需本地网络权限，任一缺失即跳过启动（`RikkaHubApp.kt`；`service/WebServerService.kt`）。rootfs 安装的下载 URL 与工具审批开关由用户在 workspace 详情页设置，rootfs 内容不随应用分发。
+- MCP 工具能否进入本轮工具表，由服务器启用状态、助手（或会话固定配置）绑定的服务器集合与工具自身开关共同决定，过滤规则见 Agent 工具笔记（`McpManager.kt`）。
+- workspace 工具只在助手已绑定 workspace 且 shell 就绪时注入；系统提示中的工作区引导与 AGENTS.md 注入沿用同一条件，本地与 SSH 远程后端也共用这一判断（`ChatToolFactory.kt`、`WorkspaceReminderTransformer.kt`）。
+- Web 服务器由前台服务保活，启动前要检查通知权限，启用非仅本机模式时在目标 SDK 上还需要本地网络权限，缺任何一项都会跳过启动（`RikkaHubApp.kt`、`service/WebServerService.kt`）。rootfs 安装的下载 URL 与工具审批开关由用户在 workspace 详情页设置，rootfs 内容不随应用分发。
 
 未验证事项：
 

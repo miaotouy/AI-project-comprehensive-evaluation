@@ -33,24 +33,24 @@ MUI Snackbar 的 action 现已用于归档会话 Undo，失败时可替换为重
 
 **全局挂载。** MUI Toasts 挂在 `routes/__root.tsx:355`，顶层包 NiceModal.Provider，Mantine Provider 在 `routes/__root.tsx:641-644`。
 
-**错误边界挂载。** `components/common/ErrorBoundary.tsx`（基于 `@sentry/react`）分四层包裹：
-- `index.tsx:189`：整棵渲染树最外层
-- `routes/__root.tsx:706`：Root 布局
-- `routes/__root.tsx:381`：`name="main"`，包住 Outlet 全部页面内容
-- `MessageList.tsx:403`：单条消息（message-item）
+**错误边界挂载。** `components/common/ErrorBoundary.tsx` 封装 `@sentry/react` 的错误边界，从整棵渲染树的根节点一路包到单条消息，共四层：
+- 整棵渲染树最外层（`index.tsx:189`）
+- Root 布局（`routes/__root.tsx:706`）
+- Root 布局内 `name="main"` 那一层，包住 Outlet 的全部页面内容（`routes/__root.tsx:381`）
+- 单条消息（message-item，`MessageList.tsx:403`）
 
 `session/$sessionId.tsx:278,284` 另有审批胶囊与输入框两个局部边界。
 
-**渲染端组合根。** renderer 启动链已收进 `src/renderer/app/`：`bootstrapRenderer.ts`、`runRendererStartup.ts` 负责启动阶段，`createRendererApplication.ts`、`renderer-application.ts` 组装应用服务与运行时（会话存储、生成运行时、平台适配），`native-task-protection.ts` 处理原生任务与窗口生命周期的保护。UI 组件不再各自构造服务，而是从同一组合根取依赖。
+**渲染端组合根。** renderer 启动链收在 `src/renderer/app/`：启动阶段由 bootstrapRenderer 与 runRendererStartup 承担，createRendererApplication 与 renderer-application 组装应用服务与运行时（会话存储、生成运行时、平台适配），native-task-protection 负责原生任务与窗口生命周期保护。UI 组件统一从同一组合根取依赖。
 
-**内置浏览器。** 桌面端新增内置浏览器子系统 `src/main/built-in-browser/`：`controller.ts` 管理页面会话生命周期，页面能力按 `page-run`、`page-snapshot`、`page-tracker`、`page-upload`、`page-downloads`、`page-debugger`、`page-operation`、`page-outcomes`、`extract` 拆分。它给 agent 提供可操作的页面视图（导航、快照、点击、上传、下载），并通过 main↔renderer 的视图承载呈现给用户；本次未运行验证页面加载、下载与上载的实际行为。
+**内置浏览器。** 桌面端有一套独立的内置浏览器子系统，位于 `src/main/built-in-browser/`：controller.ts 管理页面会话的生命周期，其余按页面能力拆成一组 page-* 模块，导航、快照、跟踪、上传、下载、调试、页面操作、操作结果与内容提取各有一个入口。这套能力给 agent 提供可操作的页面视图（导航、快照、点击、上传、下载），再经 main↔renderer 的视图承载呈现给用户；本次未运行验证页面加载、下载与上载的实际行为。
 
-**设置弹窗路由套路由。**'@
-R3 '- `src/renderer/index.tsx`' @'
-- `src/renderer/index.tsx`
-- `src/renderer/app/bootstrapRenderer.ts`、`runRendererStartup.ts`、`createRendererApplication.ts`、`renderer-application.ts`（渲染端组合根与启动链）
-- `src/renderer/app/native-task-protection.ts`（原生任务与窗口生命周期保护）
-- `src/main/built-in-browser/controller.ts`、`page-run.ts`、`page-snapshot.ts`、`page-tracker.ts`、`page-upload.ts`、`page-downloads.ts`、`page-debugger.ts`、`extract.ts`（内置浏览器子系统） `modals/Settings.tsx:256-264` 用 createMemoryHistory + createRouter 单独起一套内存路由，外层 URL 的 `?settings=/settings/xxx` 同步进内存路由，弹窗内"页面切换"不影响浏览器地址栏；移动端（matchMedia(max-width: 640px)）则走整页路由 `routes/settings/route.tsx`（:115-131）——同一功能在不同屏幕尺寸下走完全不同的路由策略。
+**设置弹窗路由套路由。** 设置弹窗在桌面端与移动端走两套不同的路由实现：
+
+- 桌面端：`modals/Settings.tsx:256-264` 用 createMemoryHistory + createRouter 单独起一套内存路由，外层 URL 的 `?settings=/settings/xxx` 同步进这套内存历史，弹窗内"页面切换"只改内存路由，不影响浏览器地址栏。
+- 移动端：屏幕宽度命中 matchMedia(max-width: 640px) 时改走整页路由 `routes/settings/route.tsx`（:115-131）。
+
+同一功能在不同屏幕尺寸下走完全不同的路由策略。
 
 ## 1. 界面栈、公共组件与状态所有权
 
@@ -95,7 +95,7 @@ R3 '- `src/renderer/index.tsx`' @'
 
 - 默认（不传 trapFocus/closeOnEscape/closeOnClickOutside）：Mantine 默认行为，Esc 和点遮罩都能关。
 
-**`trapFocus={false}`。** 下列四个弹窗关闭焦点陷阱（git log -S 定位到一次提交，提交信息 "fix: hard to select text on ios when opening a modal"）：
+**焦点陷阱关闭。** 消息编辑、会话设置、Copilot 详情与 Copilot 设置这四个弹窗都关掉了 Mantine 的焦点陷阱（`trapFocus={false}`）。改动由一次提交引入，git log -S 可定位到它，提交信息为 "fix: hard to select text on ios when opening a modal"：
 - `MessageEdit.tsx:244`
 - `SessionSettings.tsx:171`
 - `CopilotDetailModal.tsx:118`
@@ -103,7 +103,7 @@ R3 '- `src/renderer/index.tsx`' @'
 
 这是专门为 iOS 上 Modal 内文本无法选中而做的取舍，代价是这四个弹窗打开时 Tab 可跳出到背景内容。
 
-**`closeOnClickOutside={false}` + `closeOnEscape={false}` + `withCloseButton={false}`。** 登录/许可证类"必须做出选择才能继续"的弹窗禁用一切意外关闭路径：
+**三个关闭开关同时关掉。** 登录与许可证这类"必须做出选择才能继续"的弹窗关闭了所有意外退出路径：点遮罩不关、Esc 不关、默认关闭按钮也不渲染（`closeOnClickOutside={false}`、`closeOnEscape={false}`、`withCloseButton={false}`）：
 - `EmailCodeLoginModal.tsx:74-76`
 - `LicenseSelectionModal.tsx:37-39`
 - `guide/-components/ActionButton.tsx:147-149`
@@ -135,7 +135,7 @@ R3 '- `src/renderer/index.tsx`' @'
 
 **公共 Loading 组件仅一个。** `components/icons/Loading.tsx`（四点跳动 SVG，1.25s 周期），用于流式无内容、Mermaid 解析中等行内场景；`components/common` 目录无骨架屏/空状态公共组件（目录清单核对）。
 
-**骨架屏只在图片创作页。** Mantine Skeleton 全库共 4 处，全部位于 `routes/image-creator/-components/`：
+**骨架屏集中在图片创作页。** Mantine Skeleton 全库共 4 处，都在图片创作页的组件目录 `routes/image-creator/-components/` 下，分别用作历史网格、缩略图、生成图画廊与参考图预览的占位：
 - `HistoryPanel.tsx:71`：历史网格占位
 - `HistoryItem.tsx:161`：缩略图
 - `GeneratedImagesGallery.tsx:230`
@@ -174,7 +174,7 @@ Sentry.init 仅在 allowReportingAndTracking 开启时执行，设置关闭时 `
 
 深色模式的"是否生效"由 uiStore.realTheme（'light'|'dark'）单一状态源决定，但三套消费方的响应方式不同，另有两个独立的"主题输入"维度（界面颜色与字号）和两级背景图能力：
 
-1. **Tailwind / CSS 变量**：`useAppTheme.ts:45-52` 在 realTheme 变化时切换根元素的 `dark` class（Tailwind `darkMode: ['class']`，`tailwind.config.js:3`）并设置 data-theme 属性。浅色值在 `static/globals.css` 顶部 `:root{}`（:27-108），暗色在 :111 的 `:root[data-mantine-color-scheme="dark"]` 块重赋值 `--chatbox-*` 颜色变量。
+1. **Tailwind / CSS 变量**：realTheme 变化时，useAppTheme 在根元素上切换 dark class 并设置 data-theme 属性（`useAppTheme.ts:45-52`），该 class 对应 Tailwind 的 darkMode class 配置（`tailwind.config.js:3`）。浅色变量写在 globals.css 顶部的根选择器里，深色变量由 `:root[data-mantine-color-scheme="dark"]` 块整组重新赋值 Chatbox 颜色变量，两段位置见 `static/globals.css:27-108,111`。
 
 注意暗色块挂在 data-mantine-color-scheme 选择器（由 Mantine 侧维护，见第 3 点）而不是 data-theme 上；data-theme 的消费面不止滚动条：
 
@@ -184,7 +184,7 @@ Sentry.init 仅在 allowReportingAndTracking 开启时执行，设置关闭时 `
 | 消息表格与消息区块的深浅色 | `static/Block.css:93-164,167-182` |
 | splash 屏深色样式 | `index.html:54-121` |
 
-2. **MUI**：`getThemeDesign(realTheme, language)`（`useAppTheme.ts:74-126`）生成 palette.mode，并把深色背景硬编码为具体色值 `#242424`——注释写明 MUI 内部无法处理 CSS 变量。该值与 Tailwind 侧 `--chatbox-background-primary` 相同（`globals.css:137`），但不是同一来源；ThemeProvider 与 CssBaseline 挂载于 `routes/__root.tsx:703-704`。
+2. **MUI**：getThemeDesign 按 realTheme 与 language 生成 palette.mode（`useAppTheme.ts:74-126`），并把深色背景硬编码成 `#242424`——注释写明 MUI 内部处理不了 CSS 变量。该值与 Tailwind 侧的 `--chatbox-background-primary` 相同（`globals.css:137`），两处各自独立取值；ThemeProvider 与 CssBaseline 挂在 `routes/__root.tsx:703-704`。
 3. **Mantine**：Provider 的 defaultColorScheme 只决定初始值。运行期由 `useMantineColorScheme().setColorScheme()` 监听 settings.theme，并映射为 dark、light 或 auto；Mantine 再维护 data-mantine-color-scheme 属性，触发全局暗色 token 与 Chatbox 变量桥接。（`routes/__root.tsx:226-236,698-701`）
 
 System 模式下 Mantine 走自带的 auto 监听，与第 1 点 realTheme 驱动的 Tailwind `dark` class 各自独立判定。
@@ -214,10 +214,10 @@ Tailwind 侧在 `tailwind.config.js:41-134` 把 chatbox 色系、spacing、borde
 
 规则细节：品牌色不允许 `#ffffff`（isInterfaceBrandColorAllowed，`theme-colors.ts:84-86`，被拒时回退默认品牌色，见 `theme-colors.test.ts:54-56`）。
 
-**颜色预设子体系**：内置 3 套预设 INTERFACE_COLOR_PRESETS（Default/Claude Classic/Mist Blue，`theme-colors.ts:33-75`），叠加自定义预设的保存/重命名/删除/套用（`general.tsx:102-161,268-327`）：
-- 预设徽章按品牌色用 withColorOpacity 渲染（`theme-colors.ts:110-113`，8 位 hex alpha）；
-- 套用预设经 resolveInterfaceBrandColors 把浅/深两套一并替换（`general.tsx:96-100`）；
-- 编辑器支持 "Reset Colors" 回退当前主题默认值（`general.tsx:92-94`）。
+**颜色预设子体系**：内置三套预设 INTERFACE_COLOR_PRESETS（Default、Claude Classic、Mist Blue，`theme-colors.ts:33-75`），自定义命名预设另支持保存、重命名、删除与套用（`general.tsx:102-161,268-327`）：
+- 预设徽章按品牌色用 withColorOpacity 换算成 8 位 hex alpha 后渲染（`theme-colors.ts:110-113`）；
+- 套用预设时把浅色与深色两套颜色一并替换（`general.tsx:96-100`）；
+- 编辑器提供 "Reset Colors"，把颜色退回当前主题的默认值（`general.tsx:92-94`）。
 
 **字号（唯一标量主题设置）**：滑块 10–22、默认 14（`general.tsx:380-400`，schema `settings.ts:525`）调整 settings.fontSize，随后在 `__root.tsx:691-694` 写入 CSS 变量 `--chatbox-msg-font-size`。该变量只有 `static/Block.css:2` 的消息区块消费——输入框、侧栏等其余界面不随滑块变化。
 
@@ -229,16 +229,16 @@ Tailwind 侧在 `tailwind.config.js:41-134` 把 chatbox 色系、spacing、borde
 
 渲染在 BackgroundImageOverlay（`routes/__root.tsx:71-135`）：仅首页与 `/session/*` 页生效（:105），优先级为会话 storage-key → 会话 url → 全局 key（:82-87），按 backgroundImageOpacity 铺底并叠三层渐变遮罩（桌面：顶部 + 侧栏让位区 sidebarWidth×2；
 
-移动端：顶部/底部/工具条三段，:108-133）。copilot 级背景图由 `CopilotSettingsModal.tsx:78-86` 设置并在新会话继承（`routes/index.tsx:217`）；侧栏抽屉 paper 显式 backgroundImage: 'none'（`Sidebar.tsx:154`）。
+移动端：顶部/底部/工具条三段渐变）。copilot 级背景图由 `CopilotSettingsModal.tsx:78-86` 设置并在新会话继承（`routes/index.tsx:217`）；侧栏抽屉 paper 显式 backgroundImage: 'none'（`Sidebar.tsx:154`）。
 
-**首屏防闪烁链路**：`index.html:43-52`（index.ejs:63-67 同）在渲染树建立前同步读 `localStorage['initial-theme']` 并同时设置 data-theme 与 data-mantine-color-scheme 两个属性；`uiStore.ts:26` 用同一 key 初始化 realTheme；splash 屏（`index.html:54-121`）按 data-theme 深色化——三处共享同一持久化 key。
+**首屏防闪烁链路**：页面在渲染树建立前先同步读出 localStorage 里的 `initial-theme`，把它同时写到 data-theme 与 data-mantine-color-scheme 两个属性上；主题 store 用同一个 key 初始化 realTheme，splash 屏再按 data-theme 切深色样式。三处共用同一个持久化 key：内联脚本在 `index.html:43-52,54-121`，模板副本见 index.ejs:63-67，store 侧见 `uiStore.ts:26`。
 
-**主题来源与存储**：switchTheme 在 Theme.System 时询问平台层"系统当前是否为深色"（`useAppTheme.ts:10-23`），三端判定来源：
+**主题来源与存储**：switchTheme 遇到 Theme.System 时向平台层询问"系统当前是否为深色"（`useAppTheme.ts:10-23`），三端的判定来源各不相同：
 - 桌面端：转发 Electron 主进程的 nativeTheme.shouldUseDarkColors（`desktop_platform.ts:58-59`、`main.ts:763`）
-- 网页端：查 `prefers-color-scheme` 媒体查询（`web_platform.ts:39-41`）
-- 移动端：同 Web（`mobile_platform.ts:94-95`）
+- 网页端：查 prefers-color-scheme 媒体查询（`web_platform.ts:39-41`）
+- 移动端：与网页端相同（`mobile_platform.ts:94-102`）
 
-系统变化实时监听：桌面主进程 nativeTheme 更新事件经 IPC（system-theme-updated）转发，渲染进程的 onSystemThemeChange 重新走 switchTheme（`main.ts:486-488`、`desktop_platform.ts:61-63`）；Web 与移动端监听 prefers-color-scheme 变化（`web_platform.ts:42-47`、`mobile_platform.ts:97-102`）。realTheme 落盘 `localStorage['initial-theme']`（`useAppTheme.ts:20`）。
+系统主题的变化同样实时回灌渲染层：桌面主进程把 nativeTheme 的更新事件经 IPC 通道 system-theme-updated 转给渲染进程，渲染进程收到 onSystemThemeChange 后重新执行 switchTheme（发送端 `main.ts:486-488`、订阅端 `desktop_platform.ts:61-63`）；Web 与移动端则监听 prefers-color-scheme 的变化（网页端 `web_platform.ts:42-47`，移动端走同一套媒体查询）。realTheme 由 store 初始化，并沿同一个 initial-theme 键持久化。
 
 **主题市场 / 主题文件导入导出 / 自定义 CSS：本次未找到**。搜索范围：src 全库 grep 下列关键词，外加仓库内 `theme.json` 文件与 `themes/` 目录核对：
 
@@ -268,7 +268,7 @@ marketplace 仅出现在 Skills 插件市场（`components/settings/skills/Skill
 
 侧栏宽度 useSidebarWidth（`useScreenChange.ts:30-59`）按 `sm/md/lg/xl` 给 `200/220/240/280`（× scale），小屏默认 240 但被 temporary 变体的 75vw（`Sidebar.tsx:154-156`）覆盖。
 
-useInputBoxHeight（`useScreenChange.ts:61-76`）按同套断点给输入框最小/最大高度（`{min:32,max:192}` 到 `{min:96,max:480}`）。
+输入框的高度另由 useInputBoxHeight 控制：它按同一套断点给出最小与最大高度，取值从 32~192px 到 96~480px（`useScreenChange.ts:61-76`）。
 
 ## 6. 图片、附件、拖放与常见内容交互
 
@@ -298,7 +298,7 @@ useInputBoxHeight（`useScreenChange.ts:61-76`）按同套断点给输入框最�
 
 `package.json` 全文确认**没有安装 framer-motion 或 motion**。动画来源分四类：
 
-1. **tailwindcss-animate**（`tailwind.config.js:118`）：animate-in/animate-out/fade-in/zoom-in/slide-in-from-* 等 data-attribute 工具类，用于弹窗（`components/ui/dialog.tsx:20,37`，200ms）、图片灯箱（`pages/PictureDialog.tsx:153`，animate-in fade-in duration-300）与图片创作页等场景。
+1. **tailwindcss-animate**（`tailwind.config.js:118`）：提供一组基于 data-attribute 的进出场工具类，例如 animate-in、fade-in、zoom-in、slide-in-from-*。弹窗、图片灯箱与图片创作页的入场动画都直接复用这些类名，其中弹窗 200ms，灯箱用 animate-in fade-in duration-300（`components/ui/dialog.tsx:20,37`、`pages/PictureDialog.tsx:153`）。
 2. **Mantine 自带 transitionProps**：`InputBox.tsx:1755-1756,1841-1844,1936-1937` 给弹出面板配 transition: 'pop' 或 'fade-up'，模型选择器那处显式 duration: 200（:1843）。
 3. **vaul 自带弹簧式滑入**：AdaptiveModal/ActionMenu 移动端分支由库内部实现，无额外配置。
 4. **手写 SVG/CSS 关键帧**：四点跳动指示器是纯 SVG `<animate>`（1.25s 周期）；图片生成 shimmer 骨架屏是内联 `<style>` 的 @keyframes shimmer-diagonal（3s 周期）；`tailwind.config.js:102-114` 声明 fadeIn（1s ease-out）与 flash（0.5s ease-in-out ×2）两个全局关键帧。

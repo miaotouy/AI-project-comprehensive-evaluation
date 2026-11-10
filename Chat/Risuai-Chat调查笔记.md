@@ -16,15 +16,15 @@
 
 Risuai 是 Svelte 5 + Tauri 2.5 的角色扮演聊天应用，聊天状态全部驻留前端内存：`DBState.db` 是唯一权威对象（`src/ts/stores.svelte.ts:105-107`），角色、会话、消息与全部设置都挂在同一个 `Database` 上，由常驻保存循环按角色分块增量编码到单一二进制存档 `database/database.bin`（`src/ts/globalApi.svelte.ts:292` 的 saveDb）。
 
-主链集中在巨型编排函数 `sendChat()`（`src/ts/process/index.svelte.ts:99`）：UI 层直接向消息数组 push 用户消息，sendChat 依次完成上下文拼装、记忆、组装、渠道请求与流式回写，全程直接读写 `DBState.db`，用 `reloadKeys` 计数驱动渲染。渲染入口是 `Chats.svelte` 的哈希差量挂载与 `ChatBody.svelte` 的 Markdown 管线。
+聊天主链由单个巨型编排函数 `sendChat()` 承担（`src/ts/process/index.svelte.ts:99`）。界面层先把用户消息直接推入消息数组，该函数随后依次完成上下文拼装、记忆处理、请求组装、渠道调用与流式回写，全过程直接读写内存中的存档对象，并以 reloadKeys 计数变化驱动重渲染。渲染入口是 `Chats.svelte` 的哈希差量挂载与 `ChatBody.svelte` 的 Markdown 管线。
 
 会话不是独立集合：会话数组与当前页索引挂在每个角色对象上；"分支"表达为整份会话副本（Copy/Branch 命名）而非消息树。重roll候选按 generationId 只存内存（`src/ts/process/prereroll.ts:1-29`），不随消息持久化，与 SillyTavern 的持久 swipe 字段形成对照。
 
 ## 产品表面与系统边界
 
-- 产品表面：桌面 GUI（Tauri 2.5）、Web 静态站（service worker + IndexedDB）、移动 Web 布局（`MobileGUI` 分支）与 Node 服务器内嵌模式四种载体；`src/App.svelte:196-237` 用条件渲染切换加载、设置、移动端与主界面，无路由。
-- 数据拥有：全部数据由前端内存持有并写回本地。Tauri 将存档写到 AppData（`src/ts/bootstrap.ts:55` 的 loadData 启动读取），Web 走 `AutoStorage` 存储适配（LocalForage/Node/OPFS/账号，`src/ts/storage/autoStorage.ts:12`）；另有 `remotes/` 角色级分块存档、`coldstorage/` 冷存档与最多 20 份滚动备份。
-- 外部系统拥有：模型推理由外部 Provider 承担（OpenAI、Anthropic、Gemini、Ollama、Ooba、AI Horde、Kobold、WebLLM 与插件渠道等），应用只拼装请求并消费流式返回；角色卡分享走 RisuHub，账号同步与 Drive 备份为可选外部服务。
+- 产品表面：同一套前端代码以四种载体交付，包括桌面 GUI（Tauri 2.5）、Web 静态站（service worker + IndexedDB）、移动 Web 布局（`MobileGUI` 分支）与 Node 服务器内嵌模式。`src/App.svelte:196-237` 的条件渲染按状态在加载页、设置页、移动端与主界面之间切换，没有路由层。
+- 数据拥有：全部数据由前端内存持有并写回本地。桌面端启动时由 loadData 读入 AppData 中的存档（`src/ts/bootstrap.ts:55`），Web 端经 `AutoStorage` 适配层落到 LocalForage、Node、OPFS 或账号存储（`src/ts/storage/autoStorage.ts:12`）。此外还有 remotes/ 下的角色级分块存档、coldstorage/ 冷存档以及最多 20 份滚动备份。
+- 外部系统拥有：模型推理交给外部 Provider，涵盖 OpenAI、Anthropic、Gemini、Ollama、Ooba、AI Horde、Kobold、WebLLM 以及插件渠道，应用只负责拼装请求并消费流式返回；角色卡分享走 RisuHub，账号同步与 Drive 备份是可选的外部服务。
 - 不拥有：无服务端会话状态；Node 服务器只提供托管与存储适配。
 
 ## 端到端聊天主链
@@ -44,35 +44,35 @@ Composer（DefaultChatScreen.svelte:137-216）→ 直接 push 用户 Message 到
 
 ## 核心对象与状态权威
 
-- `DBState.db`（`Database`）是事实源：角色、会话、消息、设置、提示词与渠道密钥全部在内；`getDatabase/setDatabase`、`getCurrentCharacter/getCurrentChat` 是存取包装（`src/ts/storage/database.svelte.ts:802,732-780`）。
-- `character`（database.svelte.ts:1343）：角色卡数据 + `chats: Chat[]` + 当前会话索引 `chatPage`；群聊 `groupChat`（:1510）用成员 ID 数组、`characterTalks` 与 `characterActive` 描述参与度。
-- `Chat`（:1817）：消息数组、会话级 note 与 localLore、记忆数据、流式标记、书签与问候语索引；新建会话在 `ChatList.svelte:71-90` 直接向数组 unshift。
-- `Message`（:1848）：`role` 只有 `'user'|'char'` 两种，正文在 `data`，`saying` 记录说话角色 ID；`disabled` 表达隐藏或 `'allBefore'` 截断；`chatId` 与生成元数据随消息保存。
-- 生成元数据：`MessageGenerationInfo`（:1862）记录模型、generationId、输入/输出 token 与四阶段计时；`MessagePresetInfo`（:1876）记录本次请求的提示词名、开关与正文，供消息详情弹窗展示。
-- 可见 UI 状态：`selectedCharID`、`ReloadGUIPointer`/`ReloadChatPointer`（渲染键）、`chatProcessStage`/`doingChat`（生成阶段）等 store 只是展示与流程状态，不是消息事实源。
+- 存档对象 `DBState.db`（类型 `Database`）是全部数据的事实源，角色、会话、消息、设置、提示词与渠道密钥都挂在这个对象上；上层经 getDatabase/setDatabase 与 getCurrentCharacter/getCurrentChat 两组包装读写它（`src/ts/storage/database.svelte.ts:802,732-780`）。
+- 角色对象 `character` 持有角色卡数据、会话数组与当前会话索引 chatPage；群聊对象 groupChat 在此基础上用成员 ID 数组、characterTalks 与 characterActive 记录各成员的参与度（`src/ts/storage/database.svelte.ts:1343,1510`）。
+- 会话对象 `Chat` 承载消息数组、会话级 note 与 localLore、记忆数据、流式标记、书签与问候语索引（`src/ts/storage/database.svelte.ts:1817`）；新建会话时 `ChatList.svelte:71-90` 直接向角色上的会话数组头部插入一条。
+- 消息对象 `Message` 的 role 只取 user 与 char 两种值，正文写在 data 字段，saying 记录本条的说话角色 ID；disabled 控制该消息是否进入提示词，取值为 allBefore 时排除该消息及更早历史，保留之后的消息；chatId 与生成元数据随消息一同保存（`src/ts/storage/database.svelte.ts:1848`）。
+- 生成元数据分两层：MessageGenerationInfo 记录所用模型、generationId、输入输出 token 与四阶段计时，MessagePresetInfo 记录本次请求的提示词名、开关与正文，供消息详情弹窗展示（`src/ts/storage/database.svelte.ts:1862,1876`）。
+- 界面状态：选中角色 ID、渲染键与生成阶段都放在 Svelte store 里（`ReloadChatPointer`、`doingChat` 等），只服务于展示与流程控制，消息事实以存档对象为准。
 
 ## 专项导航
 
-- 会话管理：会话对象是角色持有的 `Chat`（消息数组 + 会话级 note/localLore + 记忆数据 + 书签），当前页由角色上的 `chatPage` 索引；导航、新建与删除在 `ChatList.svelte`，切换与折叠跳转入口 `changeChatTo`/`foldChatToMessage` 位于 globalApi.svelte.ts:2390-2429，旧会话冷存档由 `process/coldstorage.svelte.ts`（makeColdData/preLoadChat）承担。尚未拆分调查。
-- 请求上下文：`process/index.svelte.ts` 的 sendChat 单文件承担全部拼装（分桶、promptTemplate、lorebook、记忆、token 预算与回写），辅助模块为 `process/lorebook.svelte.ts`、`process/memory/*` 与 `process/scripts.ts`。尚未拆分调查。
-- Chat UI：`ChatScreen.svelte` 负责主题布局（classic/waifu/waifuMobile），`DefaultChatScreen.svelte` 承载 Composer、建议、重roll、自动模式与聊天菜单，`Chats.svelte` 是消息列表挂载点。尚未拆分调查。
-- 消息渲染：`Chat.svelte`（消息壳与操作）与 `ChatBody.svelte`（渲染体）调用 `parser.svelte.ts:736` 的 ParseMarkdown（变量、显示脚本、inlay 资产、高亮、DOMPurify）；`PartialEditController.svelte` 提供局部编辑。尚未拆分调查。
-- 角色：数据模型见 `character`/`groupChat`，导入导出在 `characterCards.ts`（.risum/.risup/.charx），日常管理在 `characters.ts`。尚未拆分调查。
-- 渠道：`process/request/request.ts:435-534` 按模型格式分发到 `request/openAI`、`anthropic.ts`、`google.ts`、`models/` 等实现；`model/modellist.ts` 提供模型信息与能力标志（含插件自定义渠道）。尚未拆分调查。
-- 生成式输出：消息级 `generationInfo` 详情弹窗（`alertRequestData`）、表情屏与图片屏（viewScreen 的 emotion/imggen）、TTS、稳定扩散、inlay 屏幕与记忆摘要。尚未拆分调查。
+- 会话管理：会话挂在角色对象上，角色上的 chatPage 指向当前页；导航、新建与删除集中在 `ChatList.svelte`，切换会话与折叠跳转由 `globalApi.svelte.ts:2390-2429` 的 changeChatTo 与 foldChatToMessage 处理，旧会话的冷存档交给 process/coldstorage.svelte.ts 中的 makeColdData 与 preLoadChat。尚未拆分调查。
+- 请求上下文：分桶、promptTemplate 拼接、lorebook 注入、记忆处理、token 预算与结果回写都由 `process/index.svelte.ts` 的 sendChat 承担；lorebook、记忆与脚本执行另有辅助模块（process/lorebook.svelte.ts、process/memory、process/scripts.ts）。尚未拆分调查。
+- 聊天界面：`ChatScreen.svelte` 负责主题布局，按 classic、waifu 与 waifuMobile 三套外观切换；`DefaultChatScreen.svelte` 承载输入框、建议、重roll、自动模式与聊天菜单；消息列表的挂载点在 `Chats.svelte`。尚未拆分调查。
+- 消息渲染：`Chat.svelte` 是消息壳与操作栏，渲染体 `ChatBody.svelte` 调用 `parser.svelte.ts:736` 的 ParseMarkdown，由后者完成变量替换、显示脚本、inlay 资产、语法高亮与 DOMPurify 净化；局部编辑由 PartialEditController.svelte 提供。尚未拆分调查。
+- 角色：数据模型由 character 与 groupChat 两个对象定义，导入导出在 `characterCards.ts` 中处理 .risum、.risup 与 .charx 三种格式，日常增删改由 characters.ts 负责。尚未拆分调查。
+- 渠道：`process/request/request.ts:435-534` 按模型格式把请求分发到 OpenAI、Anthropic、Google 等各家的实现文件，`model/modellist.ts` 提供模型信息与能力标志，其中包含插件自定义渠道。尚未拆分调查。
+- 生成式输出：消息级的生成详情由 generationInfo 弹窗展示，入口是 alertRequestData；表情屏与图片屏由 viewScreen 的 emotion 与 imggen 两种模式驱动；另有 TTS、稳定扩散、inlay 屏幕与记忆摘要。尚未拆分调查。
 - 本轮未建立任何 Risuai 专项笔记，以上职责均属"尚未拆分调查"，概览不展开其完整实现。
 
 ## 关键能力与已确认边界
 
-- **全局生成锁**：生成期间 `doingChat` 阻止新的顶层发送；群聊递归调用绕过该锁，形成单轮内顺序多角色生成（index.svelte.ts:212-218, 295-336）。未找到跨会话并行生成机制。
-- **停止生成**：UI 的 abortChat 触发 AbortController，`abortSignal` 使流循环调用 `reader.cancel()` 协作退出（index.svelte.ts:1682-1686, 1755-1757）。
-- **重roll**：候选按 generationId 存于内存 `prereroll.ts:1-29`（addRerolls/Prereroll），切换角色时清空（DefaultChatScreen.svelte:149-152）；候选不随消息落盘，与 SillyTavern 的持久 swipe 字段形成对照。
-- **分支/复制**：复制是整份会话副本并命名 (Copy)/(Branch)（`createChatCopyName`，globalApi.svelte:2431）；分支消息以 `{{specialcomment::branchedfrom::…}}` 注释消息表达，点击后跳转到源会话并用 `foldChatToMessage` 折叠到源消息，没有消息树导航。
-- **消息隐藏与截断**：`disabled` 字段在 prompt 组装时被跳过，`'allBefore'` 从该消息处截断全部历史（index.svelte.ts:849-864）；会话内隐藏不删除数据。
-- **自动续写**：结果过短或未以标点结尾时递归以 continue 模式把续文拼接到上一条消息（index.svelte.ts:1885-1904）。
-- **窗口化渲染**：默认只挂载最近 30 条消息，滚动到顶追加 15 条（`src/ts/chatLoadPages.ts`）；消息 DOM 用哈希差量增删，不做虚拟化（`Chats.svelte:65-167`）。
-- **搜索**：本次未找到消息级搜索；仅见角色列表（`MobileSearch`）与模型列表的过滤搜索。
-- **冷存档**：启动时把久未使用的角色与聊天搬到 `coldstorage/` 键，按需 `preLoadChat` 取回（`process/coldstorage.svelte.ts:575,627`），作为会话管理的归档边界。
+- **全局生成锁**：一次生成进行中，`doingChat` 会把新的顶层发送挡在门外；群聊走递归调用绕开该锁，在同一轮内按活跃度顺序生成多个角色的回复（`src/ts/process/index.svelte.ts:212-218,295-336`）。未找到跨会话并行生成机制。
+- **停止生成**：用户在界面上停止时，abortChat 触发 AbortController，流读取循环收到 abortSignal 后调用 reader.cancel() 协作退出（`src/ts/process/index.svelte.ts:1682-1686,1755-1757`）。
+- **重roll**：候选回复按 generationId 只留在内存里，由 `prereroll.ts:1-29` 的 addRerolls 与 Prereroll 管理，切换角色时清空（DefaultChatScreen.svelte:149-152）；这些候选不随消息落盘，与 SillyTavern 把 swipe 字段写进消息的做法形成对照。
+- **分支与复制**：复制产生整份会话副本，命名时缀上 (Copy)/(Branch)（`globalApi.svelte:2431` 的 createChatCopyName）；分支用一条 `{{specialcomment::branchedfrom::…}}` 注释消息标记，点击后跳到源会话并折叠到对应源消息，没有消息树导航。
+- **消息隐藏与截断**：提示词组装会跳过 disabled 的消息，取值为 allBefore 时排除该消息及更早历史，保留之后的消息（`src/ts/process/index.svelte.ts:849-864`）；隐藏只影响组装结果，消息本身仍保留在会话里。
+- **自动续写**：回复过短或没有以标点收尾时，应用会以 continue 模式再发一次请求，把续文拼接到上一条消息末尾（`src/ts/process/index.svelte.ts:1885-1904`）。
+- **窗口化渲染**：消息列表按配置挂载最近一批消息，滚到顶部时再向前追加；初始数量默认 30 条、追加数量默认 15 条，两者均可配置（`src/ts/chatLoadPages.ts:1-23`）；消息 DOM 按哈希差量增删，没有做虚拟化（`Chats.svelte:65-167`）。
+- **搜索**：本次未找到消息级搜索，只在角色列表（MobileSearch）与模型列表上见到过滤搜索。
+- **冷存档**：启动时把久未使用的角色与聊天搬到 coldstorage/ 下的键，需要时由 preLoadChat 取回（`process/coldstorage.svelte.ts:575,627`），构成会话管理的归档边界。
 
 ## 未验证事项
 

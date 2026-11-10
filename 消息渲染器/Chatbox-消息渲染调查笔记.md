@@ -16,13 +16,13 @@
 
 Chatbox 以 `Message.contentParts` 组织消息渲染，Markdown renderer 只处理其中的文本 part。完整链路如下：
 
-1. 模型流由 `orchestrateGeneration()` 消费。
-2. `processStreamChunk()` 把增量转换成 `text`、`reasoning`、`tool-call`、`image` 等 part。
+1. 生成入口消费模型流（`orchestrateGeneration()`）。
+2. 流处理把每个增量转换成文本、思考、工具调用和图片等 part（`processStreamChunk()`）。
 3. 流式期间每个可见增量都更新 React Query session cache；每 2 秒或遇到工具调用时落盘，结束时最终落盘。
-4. 会话路由把"会话头 + transcript 窗口"交给 `MessageList`：`useSessionPresentation` 给会话头，`useSessionTranscript` 给按窗口加载的消息行与 thread 行。
-5. `MessageList` 用 `buildTranscriptRenderItems(rows, threads)` 拼出渲染项，用 `react-virtuoso` 虚拟化，并把最后一轮用户/助手消息组合成一个列表项。
-6. 每个渲染项再交给 `Message`，按 part 类型分派 Markdown、思考时间线、工具 UI、图片、提示卡等专用组件；有替代回复的消息在下方挂 `ForkGroup` 折叠分支组。
-7. 文本 part 才进入 `Markdown`；Markdown 内再分派普通文本、代码、LaTeX、Mermaid、SVG 和图片。
+4. 会话路由把"会话头 + transcript 窗口"交给消息列表：会话头由 `useSessionPresentation` 提供，按窗口加载的消息行与 thread 行由 `useSessionTranscript` 提供。
+5. 列表用 `buildTranscriptRenderItems(rows, threads)` 拼出渲染项，再交给 `react-virtuoso` 虚拟化，并把最后一轮用户与助手消息合成一个列表项。
+6. 每个渲染项交给 `Message`，按 part 类型分派 Markdown、思考时间线、工具 UI、图片和提示卡等专用组件；存在替代回复的消息在下方挂 `ForkGroup` 折叠分支组。
+7. 文本 part 进入 `Markdown`，Markdown 内再分派普通文本、代码、LaTeX、Mermaid、SVG 和图片。
 
 总体链路：
 
@@ -51,7 +51,7 @@ model.chatStream()
 已确认的当前问题：
 
 1. **流式正文没有 UI 级节流。** 每个可见文本增量都更新 React Query cache，并重新解析当前累计 Markdown；长回复或高频小增量会使 CPU 成本随正文增长。
-2. **“自动预览 Artifact”设置已完全无消费方。** `Message.tsx` 中已无 `autoPreviewArtifacts`/`previewArtifact`/`needArtifact` 状态与 `MessageArtifact` import，但设置项仍保留在 schema（`shared/types/settings.ts:547`）与设置页开关（`routes/settings/chat.tsx:455`，默认 false）里，全仓库没有任何读取该设置的消费方。用户仍可从 HTML 代码块按钮手动预览。
+2. **“自动预览 Artifact”设置已完全无消费方。** 设置项仍保留在 schema（`shared/types/settings.ts:547`）与设置页开关（`routes/settings/chat.tsx:455`，默认 false）中，但全仓库没有任何读取该设置的消费方。消息组件里与预览相关的状态和 HTML Artifact 预览组件 `MessageArtifact` 的导入都已移除（[组件定义](<../../chatbox/src/renderer/components/Artifact.tsx#L15-L40>)）。用户仍可从 HTML 代码块按钮手动预览。
 3. **Markdown 自动化测试偏窄。** 已有 sandbox 文件链接与 Mermaid 真实渲染（`Mermaid.real.test.tsx`）用例，但 GFM、LaTeX、代码块、Mermaid fallback 与流式不完整语法的组合测试仍缺。
 
 另有一项边界事实：**HTML 导出的会话名和线程名未转义。** `format-chat.tsx:39,112,125` 直接把 `sessionName`、`thread.name` 插入导出的 HTML，标题包含 HTML 时会原样进入导出文件。
@@ -63,7 +63,7 @@ model.chatStream()
 - `useSessionPresentation()` 取会话头（`SessionHeaderRead`）与展示摘要；
 - `useSessionTranscript()` 取按窗口加载的 transcript：`rows`（消息行）、`threads`（thread 行），以及 controller 与视口状态。
 
-`MessageList` 的 props 因此是 `{ headerRead, transcript, className }`。`key` 仍绑定 session id，切换会话会重建整个列表实例，从而隔离滚动与局部交互状态。列表内部用 `transcript.controller` 加载更多历史窗口，首窗就绪与否由 `transcript.firstWindowReady` 暴露；视口锚点用 `SessionTranscriptViewportAnchor` 表示，换算成滚动位置由 `transcript-content-anchor.ts`、`transcript-item-scroll.ts` 负责。历史线程与当前线程的合并由 `buildTranscriptRenderItems(rows, threads)` 完成，各线程首条消息前由 `ThreadLabel` 标出边界。
+消息列表因此只接收会话头、transcript 和 className 三项 props。列表的 key 绑定 session id，切换会话会重建整个实例，滚动位置与局部交互状态随之隔离。列表内部通过 transcript 的 controller 加载更多历史窗口，首窗就绪与否由 firstWindowReady 暴露；视口锚点用 `SessionTranscriptViewportAnchor` 表示，换算成滚动位置由 `transcript-content-anchor.ts` 与 `transcript-item-scroll.ts` 负责。历史线程与当前线程由 `buildTranscriptRenderItems(rows, threads)` 合并，各线程首条消息前用 `ThreadLabel` 标出边界。
 ## 消息数据模型
 
 核心定义位于：
@@ -72,16 +72,12 @@ model.chatStream()
 
 消息结构由 Zod schema 定义，主要字段包括：
 
-- `id`
-- `role`: `system | user | assistant | tool`
-- `contentParts`
-- `generating`
-- `isStreamingMode`
-- `files` / `links`
-- `status`
-- `error` / `errorCode` / `errorExtra`
-- `usage` / `generationDuration` / `firstTokenLatency`
-- `backgroundTask`
+- 身份与角色：`id`，`role`（system、user、assistant、tool 之一）
+- 内容与生成状态：`contentParts`、`generating`、`isStreamingMode`
+- 附件：`files`、`links`
+- 状态与错误：`status`、`error`、`errorCode`、`errorExtra`
+- 用量与耗时：`usage`、`generationDuration`、`firstTokenLatency`
+- 后台任务：`backgroundTask`
 
 `contentParts` 是 discriminated union：
 
@@ -297,11 +293,13 @@ otherwise    -> Message
 
 `ToolCallPartUI` 当前有四类专用分派：
 
-- `web_search` -> 搜索查询、结果卡和错误状态。
-- `parse_link` -> 链接解析 UI。
-- `create_download` -> 文件/图片/HTML artifact 下载和预览（`ToolCallPartUI.tsx:925`；下载卡内的沙箱文件链接经 `SandboxFileLink` 渲染，可对模型幻觉出来的 sandbox 路径做重映射救援，见生成式输出笔记）。
-- `user_exec` -> 命令、结果与拒绝状态（命令卡可展开读取结构化输出，取消的命令显示 "Stopped" 而非失败）。
-- 其他工具 -> 通用 pill + args/result/error details。
+| 工具 | 渲染内容 |
+| --- | --- |
+| `web_search` | 搜索查询、结果卡和错误状态 |
+| `parse_link` | 链接解析 UI |
+| `create_download` | 文件、图片和 HTML artifact 的下载与预览（`ToolCallPartUI.tsx:925`）。下载卡内的沙箱文件链接经 `SandboxFileLink` 渲染，可对模型幻觉出来的 sandbox 路径做重映射救援，见生成式输出笔记 |
+| `user_exec` | 命令、结果与拒绝状态。命令卡可展开读取结构化输出，取消的命令显示 "Stopped" 而非失败 |
+| 其他工具 | 通用 pill + args/result/error details |
 
 暂停的工具调用进入 `StepTimelineUI`，可显示继续、停止、批准或拒绝操作；`tool_call_limit` 暂停的继续按钮为拆分按钮（继续 / 继续并本会话不再暂停确认），`pauseOnToolCallLimit` 可会话级或全局关闭。工具 payload 只作为文本放进 Mantine Code 组件，不会当 HTML 执行；通用 preview 有 8000 字符上限，错误 preview 有 1200 字符上限。超过 30000 字符的完整 tool result 在流处理阶段转存 blob，只在消息里保留 1500 字符预览。
 
@@ -523,20 +521,22 @@ Git 历史显示重做代码块时删除了：
 
 与消息渲染直接相关的现有自动化包括：
 
-- `Markdown.test.tsx`：Markdown 图片、linked image、viewer grouping、sandbox 文件链接卡片。
-- `Markdown.ssr.test.tsx`：SSR/export 中的图片。
-- `StreamingTextFade.test.tsx`：流式 suffix、Markdown HAST 包装、blocked subtree。
-- `Mermaid.test.tsx` / `Mermaid.real.test.tsx`：Mermaid 状态机与真实渲染（含失败路径）。
-- `message-timeline.test.ts`：part 分组和兼容顺序。
-- `smooth-follow-output.test.ts`：滚动跟随控制器（用户中断/容差恢复用例）。
-- `Message.test.tsx`：part 分派、操作栏可见性与 token 显示。
-- `MessageList.test.tsx`：最后一轮 group、ForkGroup 装配、minimap 锚点 identity 与流式组合。
-- `ForkGroup.test.tsx`：替代回复折叠分支组。
-- `message-render-items.test.ts`：Virtuoso item 分组与索引定位。
-- `message-navigation-utils.test.ts`：minimap 短预览提取与锚点比较。
-- `ToolCallPartUI.command.test.tsx` / `ToolCallPartUI.image-recovery.test.tsx`：命令时间线与图片任务恢复。
-- `stream-chunk-processor.test.ts`：流式 chunk 到 part 的大量状态转换。
-- ToolCall、Reasoning、MessageList、Summary、Error 等 Storybook real-component stories。
+| 测试文件 | 覆盖内容 |
+| --- | --- |
+| `Markdown.test.tsx` | Markdown 图片、linked image、viewer grouping、sandbox 文件链接卡片 |
+| `Markdown.ssr.test.tsx` | SSR/export 中的图片 |
+| `StreamingTextFade.test.tsx` | 流式 suffix、Markdown HAST 包装、blocked subtree |
+| `Mermaid.test.tsx`、`Mermaid.real.test.tsx` | Mermaid 状态机与真实渲染（含失败路径） |
+| `message-timeline.test.ts` | part 分组和兼容顺序 |
+| `smooth-follow-output.test.ts` | 滚动跟随控制器（用户中断/容差恢复用例） |
+| `Message.test.tsx` | part 分派、操作栏可见性与 token 显示 |
+| `MessageList.test.tsx` | 最后一轮 group、ForkGroup 装配、minimap 锚点 identity 与流式组合 |
+| `ForkGroup.test.tsx` | 替代回复折叠分支组 |
+| `message-render-items.test.ts` | Virtuoso item 分组与索引定位 |
+| `message-navigation-utils.test.ts` | minimap 短预览提取与锚点比较 |
+| `ToolCallPartUI.command.test.tsx`、`ToolCallPartUI.image-recovery.test.tsx` | 命令时间线与图片任务恢复 |
+| `stream-chunk-processor.test.ts` | 流式 chunk 到 part 的大量状态转换 |
+| Storybook real-component stories | ToolCall、Reasoning、MessageList、Summary、Error 等组件 |
 
 明显缺口：
 

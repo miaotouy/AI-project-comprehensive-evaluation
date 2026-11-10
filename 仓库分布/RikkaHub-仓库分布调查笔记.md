@@ -87,11 +87,16 @@ RikkaHub 是面向 Android 的原生 LLM 聊天客户端，采用单个 Gradle �
 
 语言占比受 vendor 代码影响：
 
-- Java 的 35 个文件全部位于 `terminal/src/main/java/com/termux/terminal/`，是 Termux 终端模拟器代码；`document` 的 PDF 解析为纯 Kotlin 实现（`document/src/main/java/me/rerere/document/pdf/` 17 个文件 + 4 个解析器）。
-- JavaScript 的 4,677 行主要由压缩后的 `mermaid.min.js` 贡献；Python 行数来自 `.agents/skills` 内的工具脚本，没有独立的 Python 本地化工具。
-- Kotlin 贯穿全部 Gradle 模块；`web` 模块只含 1 个 Kotlin 入口文件，但通过 Ktor 承担服务端运行时。
+- Java 的 35 个文件全部是 Termux 终端模拟器代码，集中在 `terminal/src/main/java/com/termux/terminal/`；document 的 PDF 解析是纯 Kotlin 实现，17 个文件与 4 个解析器位于 `document/src/main/java/me/rerere/document/pdf/`。
+- JavaScript 的 4,677 行主要来自压缩后的 `mermaid.min.js`；Python 行数来自 `.agents/skills` 内的工具脚本，没有独立的 Python 本地化工具。
+- Kotlin 贯穿全部 Gradle 模块；web 模块只含 1 个 Kotlin 入口文件，却通过 Ktor 承担服务端运行时。
 
-运行时分工上，Android 侧统一为 Kotlin/JVM，个别能力下沉到 JNI：`workspace` 通过 `src/main/cpp/CMakeLists.txt` 构建 proot PTY 原生代码，`terminal` 自带 `termux_pty.cpp`；`app/src/main/jniLibs` 仅保留 `libsimple.so`（分词用的 SQLite simple 扩展，已去掉 jieba 词典），`document` 的 `libmupdf_java.so` 随 MuPDF 一起移除。
+运行时分工上，Android 侧统一为 Kotlin/JVM，个别能力下沉到 JNI。各模块的原生代码与随包二进制如下：
+
+- workspace 用 CMake 构建 proot PTY 原生代码，另随包携带 PRoot 执行器和 loader，供本地 shell 启动使用（`workspace/src/main/cpp/CMakeLists.txt`、`workspace/src/main/java/me/rerere/workspace/ProotShellRunner.kt:76-89`）；预编译文件位于 workspace/src/main/jniLibs。
+- terminal 自带 PTY 源码 `termux_pty.cpp`。
+- app 的 jniLibs 目录仅保留分词用的 SQLite simple 扩展 `libsimple.so`，jieba 词典已经去掉。
+- document 的 `libmupdf_java.so` 已随 MuPDF 一起移除。
 
 ## 3. 文档分布与数量
 
@@ -110,7 +115,16 @@ RikkaHub 是面向 Android 的原生 LLM 聊天客户端，采用单个 Gradle �
 
 文档行数统计（153,555 行）被 `app/src/main/generated/baselineProfiles` 的两个 `.txt`（各约 6MB、10,001 行级别）主导，不能当作说明文档量。真正面向人的架构说明仍只有 `docs/references/chat-generation-pipeline.md` 一篇，本次内容随生成链重构同步扩写。
 
-开发协作文档有两条线索：根 `AGENTS.md` 给出构建命令与模块职责表，并解释 Assistant、Conversation、UIMessage、MessageNode、Message Transformer 等领域概念；`.agents/skills/` 与 `skills-lock.json` 记录外部同步的技能包（`claude-api`、`find-hugeicons`、`gemini-api-dev`、`i18n-localization`、`jetpack-compose-performance`、`publish-release`），文件数占文档统计的四分之三以上。`web-ui/CLAUDE.md` 仍是该子工程最详细的一处约定说明。
+开发协作文档有两条线索。根 `AGENTS.md` 给出构建命令与模块职责表，并解释 Assistant、Conversation、UIMessage、MessageNode、Message Transformer 等领域概念。`.agents/skills/` 与 `skills-lock.json` 记录从外部同步的技能包，文件数占文档统计的四分之三以上，收录以下六项：
+
+- claude-api
+- find-hugeicons
+- gemini-api-dev
+- i18n-localization
+- jetpack-compose-performance
+- publish-release
+
+`web-ui/CLAUDE.md` 仍是该子工程最详细的一处约定说明。
 
 ## 4. 测试分布与数量
 
@@ -130,15 +144,19 @@ Git 跟踪的测试文件共 211 个 / 25,902 源码行，测试与源码的文�
 | `oauth` | 2 | 回调与授权流程 |
 | 其余 | 14 | `common`、`ui`、`web`、`material3` 各 1–2 个 |
 
-测试集中在对 `terminal`、`document`、`mediagen` 等模块的夹具与用例上；`ai` 的 `src/test/resources/stream-traces/generated/` 按 Provider 分组保存 `events.jsonl` 与 `expected.json`，由 `StreamTraceReplayTest` 离线回放，不访问网络。
+测试主要围绕 terminal、document、mediagen 等模块的夹具与用例展开；ai 模块的流式快照按 Provider 分组放在 `ai/src/test/resources/stream-traces/generated/`，每组含 `events.jsonl` 与 `expected.json`。回放由 `StreamTraceReplayTest` 离线执行，全程不访问网络。
 
-夹具再生成链路由 `tools/trace` 承担，`ai` 夹具目录的 README 说明用 `UPDATE_STREAM_TRACE_SNAPSHOTS=true` 重新生成快照。本次未在仓库中找到 `e2e`、`playwright`、`cypress` 目录或对应依赖，`web-ui` 侧仍未找到测试文件或测试脚本。
+夹具再生成链路由 tools/trace 承担，ai 夹具目录的 README 说明设置 `UPDATE_STREAM_TRACE_SNAPSHOTS=true` 后重新生成快照。本次在仓库中没有找到 e2e、playwright、cypress 目录或对应依赖，web-ui 侧仍未找到测试文件或测试脚本。
 
 ## 5. 跨平台与发布组织
 
-产品主平台是 Android。平台判定依据来自构建配置而非 README 声明：`app/build.gradle.kts` 使用 `android.application` 插件，`compileSdk` 以 `release(37)` 指定、`minSdk = 26`、`targetSdk = 37`，`abiFilters` 为 `arm64-v8a` 与 `x86_64`，并启用 ABI 拆分；release 签名从 `local.properties` 读取，debug 变体通过 `applicationIdSuffix = ".debug"` 区分。库模块统一经 `build-logic` 的 `rikkahub.android.library` / `rikkahub.android.library.compose` 约定插件接入，`web` 模块以 24 为 `minSdk` 低于应用。
+产品主平台是 Android，判断依据来自构建配置。`app/build.gradle.kts` 给出了应用侧的具体参数：
 
-发布维度新增渠道 flavor：`flavorDimensions += "distribution"`，`github` 与 `play` 共用同一 `applicationId`，Play 版通过 `BuildConfig.IS_PLAY_STORE` 关闭自更新、更新卡片与更新提醒设置。基线画像目录从 `app/src/release/generated` 合并到 `app/src/main/generated`，两个渠道共用；`app:baselineprofile` 子模块在生成时只跑 `github` 渠道。
+- SDK 与 ABI：`compileSdk` 取 `release(37)`，`minSdk` 与 `targetSdk` 分别为 26 和 37；ABI 过滤只保留 arm64-v8a 与 x86_64，并开启 ABI 拆分。
+- 签名与变体：release 签名从 `local.properties` 读取，debug 变体用 `applicationIdSuffix = ".debug"` 区分。
+- 库模块接入：统一通过 `build-logic` 中 rikkahub.android.library 与 rikkahub.android.library.compose 两个约定插件；web 模块的 `minSdk` 为 24，低于应用。
+
+发布维度新增渠道 flavor：`flavorDimensions += "distribution"`，github 与 play 两个渠道共用同一 applicationId，Play 版通过 `BuildConfig.IS_PLAY_STORE` 关闭自更新、更新卡片与更新提醒设置。基线画像目录从 app/src/release/generated 合并到 app/src/main/generated，由两个渠道共用；`app:baselineprofile` 子模块在生成时只跑 github 渠道。
 
 其他平台以「同一份 Android 代码 + 旁路工程」的方式组织：
 
@@ -150,9 +168,9 @@ Git 跟踪的测试文件共 211 个 / 25,902 源码行，测试与源码的文�
 | 契约测试工具链 | `tools/trace` 独立 Bun 运行时，产出喂给 `ai` 模块测试 |
 | 远程终端 | `terminal` 模块提供终端模拟与 PTY，配合工作区的远程 SSH 模式 |
 
-Web 端通过协议复用接入：`web` 模块承担 Ktor 服务端（`ktor.server.cio`、auth、SSE、compression、CORS、status pages），app 内 `web` 包实现 `WebServerManager`、`WebApiModule`、`NsdServiceRegistrar` 与按域拆分的路由，`web-ui` 通过 `api.ts`/`events.ts` 消费 HTTP/SSE 接口。
+Web 端复用同一套 HTTP/SSE 协议接入。服务端由 `web` 模块用 Ktor 搭建，启用 CIO 引擎、auth、SSE、compression、CORS 与 status pages 等功能；app 内的 web 包实现服务管理、API 模块与 mDNS 服务注册，并按域拆分路由，具体类名见关键源码索引。`web-ui` 在 `api.ts` 与 `events.ts` 中封装请求，消费 HTTP 与 SSE 接口。
 
-前端到 Android 的嵌入由 `web/build.gradle.kts` 的 `buildWebUi` Exec 任务完成：在 `web-ui` 目录执行 `pnpm run build`，输出到 `web/src/main/resources/static/`，并通过 `preBuild.dependsOn(buildWebUi)` 挂入 Android 构建；该任务只跑 `build` 不跑 `install`，因此 CI 中需要预先安装前端依赖。
+前端产物到 Android 的嵌入由 `web/build.gradle.kts` 里的 Exec 任务 buildWebUi 完成：它在 web-ui 目录执行 `pnpm run build`，把结果输出到 `web/src/main/resources/static/`，再由 `preBuild.dependsOn(buildWebUi)` 挂入 Android 构建。该任务只执行 build，CI 因此需要预先安装前端依赖。
 
 发布通道仍是一条自动化工作流：`.github/workflows/daily-build.yml` 定时触发，要求 JDK 17、pnpm、Node，并递归拉取子模块（子模块现已不存在）；签名与集成配置来自 Secrets，随后用带渠道的 Gradle 任务构建并上传 mapping txt，最后把 APK 发布到固定 tag 的 prerelease。仓库另有 `close-blank-issues.yml` 与 3 个 issue 模板。
 
@@ -177,22 +195,28 @@ Gradle 侧使用版本目录与工具链配置：`gradle/libs.versions.toml` 集
 
 可观察的结构信号包括：
 
-- **`app` 体型占比高但有所下降**。`app` 占全仓源码行约 55%，其中 `ui` 包仍最大；单文件规模上限较高（设置页、提示词页、Provider 详情页均为数千行级）。目录依赖方向保持单向：`ai`、`search`、`speech` 等能力模块不反向依赖 `app`。
-- **模块边界在收敛旧形态**：`highlight` 与 `videogen` 两个「单一能力一个模块」被移除（高亮交给 BetterText 库，视频生成并入 `mediagen`），同时新增更通用的 `ui`（公共 Compose 组件）与 `terminal`（终端模拟）模块。`search` 仍是平行 Provider 目录，21 个服务实现各自成文件。
-- **旁路工具从多语言 TUI 转向统一 Bun/TS 工具链**：Python 版 `locale-tui` 被重写为 `tools/i18n`，`trace-cli` 改名为 `tools/trace`，`tools/models-dev` 用脚本生成随包模型能力数据。
-- **命名边界仍有两套写法**：主工程用 `me.rerere.*`，`terminal` 原样保留 `com.termux.terminal` 包名与 Apache/相关许可，`web` 使用 `me.rerere.rikkahub.web`。
+- **app 体型占比高，较此前有所下降**。app 占全仓源码行约 55%，其中 UI 包仍最大；单文件规模上限较高，设置页、提示词页与 Provider 详情页都达到数千行级。依赖方向保持单向，ai、search、speech 等能力模块不反向依赖 app。
+- **模块边界在收敛旧形态**：highlight 与 videogen 这两个「单一能力一个模块」被移除，高亮改由 BetterText 库承担，视频生成并入 mediagen；同时新增更通用的 ui（公共 Compose 组件）与 terminal（终端模拟）模块。search 仍是平行 Provider 目录，21 个服务实现各自成文件。
+- **旁路工具从多语言 TUI 转向统一 Bun/TS 工具链**：
+  - Python 版 locale-tui 重写为 `tools/i18n`；
+  - trace-cli 改名为 `tools/trace`；
+  - 随包分发的模型能力数据改由 `tools/models-dev` 脚本生成。
+- **命名边界保留两套写法**：
+  - 主工程统一使用 me.rerere.* 包名；
+  - terminal 模块原样保留 com.termux.terminal 包名与 Apache 相关许可；
+  - web 模块使用 me.rerere.rikkahub.web 子包。
 
 ## 7. 设计取舍与已确认边界
 
-- 核心代码用一个 Gradle 工程承载，能力域模块只依赖 `common` 与 Android/Compose 基础库；`app` 聚合全部业务模块，形成单入口应用。这一结构在 `app/build.gradle.kts` 的 `project(":...")` 依赖列表与各库模块 `build.gradle.kts` 中可直接读出。
-- 开发工具链没有被抽象进 Gradle：`tools/i18n`、`tools/trace` 各自维护独立清单与锁文件，与 Android 构建解耦，代价是需要各自的 Bun 运行时。`web-ui` 虽然独立维护 `package.json` 与 `pnpm-lock.yaml`，但被 `web` 模块以进程调用方式纳入 Android 构建。
-- 测试策略偏向「离线夹具回放」：`ai` 的流式解码以仓库内快照为期望值，`terminal`、`document` 以纯 JVM 单测覆盖解析与缓冲边界，网络与渲染不在单元测试范围内。
-- `material3` 与 `web-ui` 以源码/清单形式内置，仓库资源随主仓提供，不经 `git submodule` 拉取；CI 拉取不带 `--recursive`。
-- 文档数量（116）由 92 个代理技能文件与 2 个基线画像文本占主要部分；面向人的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
+- 核心代码由一个 Gradle 工程承载：能力域模块只依赖 common 与 Android/Compose 基础库，app 聚合全部业务模块，形成单入口应用。依赖方向可在 `app/build.gradle.kts` 的 `project(":...")` 依赖列表和各库模块的 build.gradle.kts 中直接读出。
+- 开发工具链没有抽象进 Gradle：`tools/i18n` 与 `tools/trace` 各自维护独立清单与锁文件，与 Android 构建解耦，代价是需要各自的 Bun 运行时。`web-ui` 独立维护 package.json 与 pnpm-lock.yaml，由 web 模块以进程调用方式纳入 Android 构建。
+- 测试策略偏向「离线夹具回放」：ai 的流式解码以仓库内快照为期望值，terminal 与 document 用纯 JVM 单测覆盖解析与缓冲边界，网络与渲染不在单元测试范围内。
+- material3 与 web-ui 以源码/清单形式内置，资源随主仓提供，不经 git submodule 拉取；CI 拉取不带 `--recursive`。
+- 文档数量（116）主要由 92 个代理技能文件与 2 个基线画像文本构成；面向人的架构说明目前只有 `docs/references/chat-generation-pipeline.md` 一篇。
 
 ## 8. 未验证事项
 
-- 未运行 `./gradlew assembleDebug`、`test`、`lint` 或任何前端/CLI 构建与测试，模块行数、依赖可解析性与测试通过情况均为静态读取结果。
+- 本次没有运行任何构建或测试，包括 Gradle 的 assembleDebug、test 与 lint 任务，以及前端和 CLI 的构建、测试命令；模块行数、依赖可解析性与测试通过情况均为静态读取结果。
 - 提交历史经机械统计为 2969 个主线提交（2025-03-11 至 2026-11-02，601 天，折算 148.2 次/30 天，最近 90 天 408 次）；本次未再次逐项复核合并提交口径。
 - `tools/models-dev` 的生成时机、`app/src/main/assets/models_dev.json` 与生产代码的版本对应关系未逐项核对。
 - `terminal` 模块的 Termux 派生代码改动范围与上游许可处理未逐行核对；远程 SSH 工作区的连接、密钥与失败语义属于运行期能力，未验证。

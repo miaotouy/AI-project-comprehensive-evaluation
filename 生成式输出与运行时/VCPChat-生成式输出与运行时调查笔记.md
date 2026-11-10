@@ -26,18 +26,28 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 ## 系统边界与完整主链路
 
-进程/窗口边界：
-- **窗口**：主窗口（main.html，聊天 UI，CSP 见 `main.html:7-13`，`script-src 'self' 'unsafe-inline'`）、阅读窗口（text-viewer.html）、图片查看窗口（image-viewer.html）、Canvas 协同窗口（Canvasmodules/canvas.html）、桌面窗口（Desktopmodules/desktop.html，透明置底画布）、笔记窗口（Notemodules/notes.html）、Memo 工作台（Memomodules/memo.html）。
-- **附属进程**：VCPDistributedServer（本地 Express+WS 服务，插件执行）、`vcp_chat_data_service.exe`（VCP-CDS，历史消息影子索引与搜索）、`assistant_core_server.exe`（选区监听 sidecar，`modules/assistant/assistant-rust-adapter.js`）、`rust_audio_engine`/`python` 音频引擎。
+进程/窗口边界分为渲染侧窗口与附属进程两层。
+
+| 窗口 | 载体与说明 |
+|---|---|
+| 主窗口（聊天 UI） | `main.html`，CSP 见 `main.html:7-13`，脚本源为 `script-src 'self' 'unsafe-inline'` |
+| 阅读窗口 | `text-viewer.html` |
+| 图片查看窗口 | `image-viewer.html` |
+| Canvas 协同窗口 | `Canvasmodules/canvas.html` |
+| 桌面窗口（透明置底画布） | `Desktopmodules/desktop.html` |
+| 笔记窗口 | `Notemodules/notes.html` |
+| Memo 工作台 | `Memomodules/memo.html` |
+
+附属进程按职责分四类：VCPDistributedServer 是本地 Express + WebSocket 服务，承担插件执行；`vcp_chat_data_service.exe` 是 VCP-CDS 影子索引，负责历史消息索引与搜索；`assistant_core_server.exe` 是选区监听 sidecar，由 `modules/assistant/assistant-rust-adapter.js` 接入；`rust_audio_engine` 与 `python` 是音频引擎进程。
 
 完整主链路（源码确认的调用链，未运行验证）：
 
-1. **触发**：用户点击发送后由聊天管理器入口（chatManager.js:1360）经 IPC 通道转发到主进程，主进程再请求本地 VCP 服务器（chatHandlers.js:855、1107）；启用工具注入时改走 `/v1/chatvcp/completions`（chatHandlers.js:922-926）。
-2. **生成**：主进程读取 SSE 流（chatHandlers.js:1056-1360）并以流事件回传（`chat.stream.*` 契约），渲染器由 `mainChatStreamConsumer` 消费终态、`streamManager` 维护 DOM 投影（创建消息 `:1371`、入队 `:1740`、终态投影 `:1845`）。工具请求由模型以 `<<<[TOOL_REQUEST]>>>` 文本标记输出，由 VCP 服务端（本地插件或远端）执行，结果以 `[[VCP调用结果信息汇总:...]]` 块拼入消息流。
-3. **展示/运行**：流式渲染（`renderStreamFrame`，`streamManager.js:1000`）把稳定前缀固化、尾部重新解析并做 morphdom 差量合并；终态后按协议块渲染卡片（`messageRenderer.js:2342` 起）。HTML 代码块获得气泡内 iframe 预览（contentProcessor.js:645）；Python/HTML/three.js 块在阅读窗口获得运行按钮（text-viewer.js:1563-1713）。
-4. **交互或编辑**：用户可播放、编辑、复制；中键/右键菜单编辑消息全文或重新生成（messageContextMenu.js:128、353）；AI 按钮点击回发消息（contentProcessor.js:869）；`<<<[DESKTOP_PUSH]>>>` 标记在流式期间被 `desktopPushConsumer` 拦截并实时创建桌面挂件，挂件可收藏、可打开源码到 Canvas 编辑。
-5. **保存**：最终消息文本（含协议标记的原始 Markdown）写入 `history.json`（保存入口 `chatHandlers.js` 历史 IPC，渲染侧经 `chatHistoryPersistence` 提交）；桌面挂件与 Canvas 文件由各自处理器落盘到 `AppData/DesktopWidgets/<id>/` 与 `AppData/Canvas/`（desktopHandlers.js:999、canvasHandlers.js:299）。
-6. **重新打开**：切换话题/重启后从 `history.json` 读取并按原始文本重新解析渲染（messageRenderer.js:3158）；挂件从收藏恢复（favoritesManager.js:108）；Canvas 文件列表按 mtime 排序重载（canvasHandlers.js:399）。
+1. **触发**：用户点击发送后，聊天窗口的发送入口经 IPC 把请求转给主进程（`chatManager.js:1360`），主进程再请求本地 VCP 服务；启用工具注入时改走 `/v1/chatvcp/completions`（`chatHandlers.js:855-1107`）。
+2. **生成**：主进程读取 SSE 流并以 `chat.stream.*` 事件回传增量（`chatHandlers.js:1056-1360`）；渲染侧由流管理器消费终态，负责建消息、入队和终态投影（`streamManager.js:1371-1845`）。工具请求由模型以 `<<<[TOOL_REQUEST]>>>` 文本标记输出，交本地插件或远端服务执行，结果以 `[[VCP调用结果信息汇总:...]]` 块拼回消息流。
+3. **展示/运行**：流式帧渲染先固化稳定前缀，再重新解析尾部并做 morphdom 差量合并（`streamManager.js:1000`）；终态后按协议块渲染卡片（`messageRenderer.js:2342`）。HTML 代码块获得气泡内 iframe 预览，Python、HTML 与 three.js 块在阅读窗口获得运行按钮（`contentProcessor.js:645`、`text-viewer.js:1563-1713`）。
+4. **交互或编辑**：用户可播放、复制或编辑消息，中键与右键菜单提供全文编辑和重新生成（`messageContextMenu.js:128-353`）；点击模型生成的按钮会回发消息（`contentProcessor.js:869`）；流式期间桌面推送标记被 `desktopPushConsumer` 拦截并实时创建挂件，挂件可收藏，也可把源码打开到 Canvas 编辑。
+5. **保存**：最终消息文本（含协议标记的原始 Markdown）经历史 IPC 写入 `history.json`，渲染侧由历史持久化模块提交（`chatHandlers.js`）；桌面挂件与 Canvas 文件另由各自处理器落到 `AppData/` 下的 DesktopWidgets/<id> 与 Canvas 目录（`desktopHandlers.js:999`、`canvasHandlers.js:299`）。
+6. **重新打开**：切换话题或重启后，消息从 `history.json` 读出并按原始文本重新解析渲染（`messageRenderer.js:3158`）；挂件从收藏恢复（`favoritesManager.js:108`），Canvas 文件列表按 mtime 排序重载（`canvasHandlers.js:399`）。
 
 ## 1. 触发方式、输出协议与对象模型
 
@@ -54,19 +64,24 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 | `{{VCPChatCanvas}}` | Canvas 协同占位 | `messageRenderer.js:1456` |
 | `[[点击按钮:文本]]` | 用户点击按钮回发 | `messageRenderer.js:419,1444` |
 
-**协议处理**：半截流——流式时只把已闭合的围栏/工具块/段落边界标记为稳定，未闭合块保持尾部待渲染，未闭合推送块 150 秒超时自动收口（`streamManager.js:1088`、`desktopPushConsumer.js:43`）。转义——反引号包裹的标记不生效，工具参数内用「始ESCAPE」「末ESCAPE」承载字面量结束标记（streamManager.js:1929-1936、messageRenderer.js:328-360）。误触发防护——推送内容需匹配合法前缀白名单否则丢弃，工具气泡内的 `pre` 块禁止转成 HTML 预览（streamManager.js:2004-2076、contentProcessor.js:608-613、650-655）。
+**协议处理**分三件事：
 
-**对象模型**：不存在统一输出对象模型。可辨识的对象身份只有四类：
-- 消息：`id + role + content`（原始文本）+ `timestamp`，`history.json` 是事实源，DOM 是派生投影；
-- 桌面挂件：运行时 `widgetId`，收藏后 `savedId`（目录名），`meta.json` 记录 `id/name/createdAt/updatedAt`（desktopHandlers.js:1015-1031），无版本字段；
-- Canvas 文件：文件路径即身份；
-- Scriptorium 文档工程：`.vdocx/.vpptx` 工程（`AppData/ScriptoriumDocument/`）以 `document.json` + 唯一完整 HTML source + 资源清单为对象，文脉刻点/PR 提供版本与审批语义（见 6.2）。
+- **半截流**：流式时只把已闭合的围栏、工具块和段落边界标记为稳定，未闭合块留在尾部待渲染；未闭合的推送块满 150 秒自动收口（`streamManager.js:1088`、`desktopPushConsumer.js:43`）。
+- **转义**：反引号包裹的标记不生效，工具参数里用「始ESCAPE」「末ESCAPE」承载字面量结束标记（`streamManager.js:1929-1936`、`messageRenderer.js:328-360`）。
+- **误触发防护**：推送内容必须匹配合法前缀白名单，否则整块丢弃；工具气泡内的 `pre` 块禁止转成 HTML 预览（`streamManager.js:2004-2076`、`contentProcessor.js:608-655`）。
+
+**对象模型**：没有统一的输出对象模型，可辨识的对象身份有四种。
+
+- **消息**：以 id、role、原始文本 content 和 timestamp 标识，`history.json` 是事实源，DOM 只是派生投影。
+- **桌面挂件**：运行时用 `widgetId`，收藏后以目录名 `savedId` 持久化，`meta.json` 记录 id、名称与创建/更新时间，没有版本字段（`desktopHandlers.js:1015-1031`）。
+- **Canvas 文件**：文件路径即身份。
+- **Scriptorium 文档工程**：`.vdocx`/`.vpptx` 工程存放在 `AppData/ScriptoriumDocument/`，以 `document.json`、唯一完整 HTML source 和资源清单为对象，文脉刻点与 PR 提供版本和审批语义（见 6.2）。
 
 工具结果卡、思维链卡等无独立 ID，`data-vcp-block-type` 仅用于 DOM 标记与流式保留。推断：无"能力声明/状态机"机制；消息侧对象身份与后续回合的绑定（指南必查 10）没有实现，模型每次重新生成新挂件/新文件；Scriptorium 是唯一带"按对象身份继续修改"通道的面（PR 提交到既有工程）。
 
 ## 2. 增量生成、更新与最终化
 
-**流式更新**：两段式渲染。稳定前缀按块固化（streamManager.js:537-580），每个块缓存一份"源码 + 原始 HTML"，切换视图重建 DOM 时直接用缓存恢复而不重新解析（streamManager.js:634-653）；尾部文本每帧重新解析并做 morphdom 差量合并（streamManager.js:1411-1549），已后处理的块（mermaid、KaTeX、工具卡、预览容器、高亮子树）受保护不被重建。渲染节流为 30fps 全局 rAF 循环 + 预缓冲队列上限 1000 chunks（streamManager.js:1545-1600、1761-1765）；平滑流式可关（`globalSettings.enableSmoothStreaming`）。
+**流式更新**：采用两段式渲染。稳定前缀按块固化，每个块缓存一份"源码 + 原始 HTML"，切换视图重建 DOM 时直接用缓存恢复；尾部文本每帧重新解析，再做 morphdom 差量合并，已后处理的 mermaid、KaTeX、工具卡、预览容器和高亮子树受保护、不被重建。渲染节流为全局 30fps 的 rAF 循环，预缓冲队列上限 1000 chunks，平滑流式可由 `globalSettings.enableSmoothStreaming` 关闭。实现见 `streamManager.js:537-1765`。
 
 **最终化**：终态投影（streamManager.js:1845-2079）移除流式根节点，对完整文本执行最终处理（前端正则规则与深度计算，`messageRenderer` 全量渲染）后重新全量渲染；流中断时拼接 `> [!WARNING]` 提示并保存已接收部分（renderer.js:601-627）。主进程与渲染器以累积文本与最终响应的更长者/含恢复标记者保持一致（streamManager.js:1901-1910）。
 
@@ -76,13 +91,13 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 同一内容可投影到多表面，但各表面间无同步协议（推断：除历史文本外互不感知）：
 
-- **消息正文（inline）**：主表面。工具卡/思维链卡/日记卡/推送占位卡均在此渲染。
-- **独立阅读窗口（sidecar 窗口）**：`ipcMain 'display-text-content-in-viewer'`（`fileDialogHandlers.js:382-413`，base64 参数传内容），可从消息右键菜单打开（`messageContextMenu.js:316-318`）；包含编辑全文、分享到笔记、截图导出（`text-viewer.js:1545-1565,2174-2284`）。
-- **桌面画布（spatial canvas）**：`<<<[DESKTOP_PUSH]>>>` 实时创建挂件（desktopHandlers.js:948-954 转发、ipcBridge.js:277-278 接收）；挂件与聊天消息并存但内容不回流到消息 DOM（流式时推送块内容被拦截，消息内只留占位卡）。
-- **Canvas 协同窗口（文件工作区）**：`AppData/Canvas/` 目录，AI 工具写文件、用户在 CodeMirror 中编辑。
-- **Scriptorium 文坊窗口（文档工程）**：窗口应用 ID `WINDOW_APP_IDS.DOCX` 与初始化入口见 windowAppIds.js:17、main.js:1083-1092，经 `open-scriptorium-window` 或托盘"文坊"打开（desktopHandlers.js:779-781、trayManager.js:26）；工程/导出/PR 审批均在 `ScriptoriumModules/scriptorium.html` 内完成（见 6.2）。
-- **本地文件系统**：widget 收藏目录、Canvas 目录、笔记 `AppData/Notemodules/*.md`（`notesHandlers.js:550`）。
-- **图片查看窗口**：阅读窗口截图 → `openImageViewer`（`text-viewer.js:2238-2280`）。
+- **消息正文（inline）**：主表面，工具卡、思维链卡、日记卡和推送占位卡都在这里渲染。
+- **独立阅读窗口（sidecar 窗口）**：通过主进程的 `display-text-content-in-viewer` 通道打开，内容以 base64 参数传入（`fileDialogHandlers.js:382-413`），入口在消息右键菜单（`messageContextMenu.js:316-318`）；窗口内可编辑全文、分享到笔记、截图导出（`text-viewer.js:1545-2284`）。
+- **桌面画布（spatial canvas）**：桌面推送标记触发实时创建挂件，转发与接收分别在桌面处理器和 IPC 桥完成（`desktopHandlers.js:948-954`、`ipcBridge.js:277-278`）；挂件与聊天消息并存，推送内容不回流到消息 DOM，流式期间推送块被拦截，消息里只留占位卡。
+- **Canvas 协同窗口（文件工作区）**：以 `AppData/Canvas/` 为工作目录，AI 工具写文件，用户在 CodeMirror 中编辑。
+- **Scriptorium 文坊窗口（文档工程）**：窗口应用 ID 取自 `windowAppIds.js` 的 DOCX 常量，初始化入口在 `main.js:1083-1092`；经 IPC 通道或托盘「文坊」打开（`desktopHandlers.js:779-781`、`trayManager.js`）。工程、导出与 PR 审批都在 `ScriptoriumModules/scriptorium.html` 内完成（见 6.2）。
+- **本地文件系统**：挂件收藏目录、Canvas 目录与笔记文件 `AppData/Notemodules/*.md` 都落在本地磁盘（`notesHandlers.js:550`）。
+- **图片查看窗口**：阅读窗口的截图经 `openImageViewer` 在此展示（`text-viewer.js:2238-2280`）。
 
 多视图关系事实：历史 DOM 重渲染只从 `history.json` 原始文本重建；桌面挂件收藏后内容存文件，从文件恢复（`favoritesManager.js:109-141`），消息内的占位卡不链接到挂件文件（未找到占位卡到 `savedId` 的关联逻辑）。
 
@@ -90,34 +105,34 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 按执行强度分层（源码确认，未运行验证）：
 
-- **静态/声明式**：Markdown（marked，`marked.setOptions({sanitize:false})`，text-viewer.js:1071-1081），同窗口内另有语法高亮（hljs）、Mermaid、draw.io 图与 KaTeX 渲染（1559-1561、1483-1505、1507-1541、1768-1783）；工具结果卡/思维链卡由宿主按字段 schema 渲染（messageRenderer.js:2043-2176，大内容二级截断 + 懒加载展开，2117-2138）。
+- **静态/声明式**：Markdown 由 marked 渲染，并关闭了内容清洗（`marked.setOptions({sanitize:false})`），同一窗口还负责语法高亮（hljs）、Mermaid、draw.io 图与 KaTeX；工具结果卡和思维链卡由宿主按字段 schema 渲染，大内容做二级截断，展开时懒加载。渲染与后处理见 `text-viewer.js:1071-1783`，卡片渲染见 `messageRenderer.js:2043-2176`。
 - **浏览器脚本**：
   - 气泡内 HTML 代码预览：点击后创建 srcdoc iframe，仅授予 `sandbox="allow-scripts"`，未授予同源权限，并设置 no-referrer。预览脚本通过 postMessage 上报高度；宿主同时检查来源窗口、消息类型与 frameId，将高度限制在 100–12000px。返回代码视图或清理消息时移除监听器、清空 srcdoc、导航到 about:blank 并移除 iframe。该边界与直接进入主 DOM 的原始 HTML 动画岛不同。依据：[预览创建、通信与销毁](../../VCPChat/modules/renderer/contentProcessor.js#L817-L924)。
-  - 阅读窗口：模型内联脚本在**查看器窗口主 DOM** 执行（text-viewer.js:931-1043），CDN 的 three.js/anime.js 替换为本地 vendor（882-924），脚本可访问 `viewerAPI`（含 Python 执行等，text-viewer.js:1211-1234）。
-  - three.js 预览：代码块检测 `THREE.` 与语言标记（text-viewer.js:1575-1579），注入本地 vendor 后在 iframe 内运行（1683-1711）。
+  - 阅读窗口：模型内联脚本直接在**查看器窗口主 DOM** 执行，CDN 上的 three.js 与 anime.js 换成本地 vendor 版本，脚本可访问 `viewerAPI` 的 Python 执行等能力（`text-viewer.js:882-1234`）。
+  - three.js 预览：代码块检测 `THREE.` 与语言标记，命中后注入本地 vendor 并在 iframe 内运行（`text-viewer.js:1575-1711`）。
 - **语言进程**：
   - Python 双模式：沙箱模式使用 Pyodide WASM，本地模式经 IPC 启动本机 `python -u`，将代码写入 stdin，累计 stdout/stderr 后一次返回。该 handler 没有超时、进程取消或输出截断；源码虽给 spawn 传入 10MB 的 maxBuffer，但没有按输出大小检查或终止的路径，输出配额尚未确认。依据：[本机执行 handler](../../VCPChat/main.js#L2073-L2109)。
   - Canvas 窗口的运行按钮调用同一 Python IPC，结果区展示输出与错误。依据：[Canvas 运行入口](../../VCPChat/Canvasmodules/canvas.js#L1076-L1090)。
-- **桌面挂件**：Shadow DOM 隔离（widgetManager.js:70-93），脚本包装为 IIFE 沙箱并注入宿主 API（widgetManager.js:500-625），本地/同源 script 被 fetch 后包裹执行，CDN 脚本透传不包装（640-692）。依赖提供：挂件通过 `widgetFS.loadFile` 读取收藏目录附加文件（app.js/style.css 等），CDN 库直连。
+- **桌面挂件**：用 Shadow DOM 与页面隔离，脚本包装成 IIFE 沙箱并注入宿主 API；本地与同源脚本 fetch 后包裹执行，CDN 脚本原样透传。挂件通过 `widgetFS.loadFile` 读取收藏目录里的附加文件（如 app.js、style.css），CDN 库直接加载。实现见 `widgetManager.js:70-692`。
 
 ## 5. 用户交互、事件与错误反馈
 
-- **代码块操作**：复制（`contentProcessor.js:508-574`）、HTML 播放/返回（`:710-815`，含 ResizeObserver 高度同步）、Python 运行按钮切换输出容器（`text-viewer.js:1759-1777`）、编辑按钮（contentEditable，`text-viewer.js:1844-1865`）。
-- **AI 生成按钮**：消息内任意 `<button>` 被宿主接管（`contentProcessor.js:866-892`），点击发送 `[[点击按钮:文本]]` 回聊天（`:869-975`），按钮禁用 + 勾选反馈，发送失败恢复并 toast（`:966-975`）。这是"声明式组件 + intent 回发"的 G2 形态。
-- **工具结果卡**：可折叠（`text-viewer.js:1914-1926`）、截断展开、图片链接预览（`messageRenderer.js:2340-2344`）。
-- **消息操作**：中键径向菜单/右键菜单编辑消息、重新生成、转发、删除（`middleClickHandler.js:452-620`，`messageContextMenu.js:353-366`）。
-- **错误反馈**：Python 错误输出到 outputContainer（`text-viewer.js:1318-1325`）、流错误以警告块追加（`renderer.js:630`）、pyodide 加载失败状态栏提示（`text-viewer.js:1232-1238`）。
-- **交互状态恢复**（推断/未验证）：流式期间 `preserveDynamicStreamState` 保留展开/预览/按钮状态跨 morphdom 帧（`streamManager.js:147-185`）；气泡内 iframe 在历史重渲染时被 `cleanupPreviewsInContent` 销毁重建（`contentProcessor.js:1378-1383`），运行状态不持久。
+- **代码块操作**：复制、HTML 播放与返回都由内容处理器实现，播放态用 ResizeObserver 同步高度；Python 运行按钮负责切换输出容器，编辑按钮把代码块切成 contentEditable。定位见 `contentProcessor.js:508-815`、`text-viewer.js:1759-1865`。
+- **AI 生成按钮**：消息内任意 `<button>` 由宿主接管，点击后以 `[[点击按钮:文本]]` 消息回发聊天；按钮进入禁用并显示勾选反馈，发送失败则恢复并弹出 toast。这是"声明式组件 + intent 回发"的 G2 形态，实现见 `contentProcessor.js:866-975`。
+- **工具结果卡**：支持折叠、截断后展开和图片链接预览（`text-viewer.js:1914-1926`、`messageRenderer.js:2340-2344`）。
+- **消息操作**：中键径向菜单与右键菜单提供编辑、重新生成、转发和删除（`middleClickHandler.js:452-620`、`messageContextMenu.js:353-366`）。
+- **错误反馈**：Python 执行错误写进输出容器，流错误以警告块追加到消息，Pyodide 加载失败在状态栏提示（`text-viewer.js:1232-1325`、`renderer.js:630`）。
+- **交互状态恢复**（推断/未验证）：流式期间由 `preserveDynamicStreamState` 把展开、预览和按钮状态带过 morphdom 帧（`streamManager.js:147-185`）；气泡内 iframe 在历史重渲染时经 `cleanupPreviewsInContent` 销毁重建，运行状态随之中断（`contentProcessor.js:1378-1383`）。
 
 ## 6. 编辑、diff、版本与协作
 
-- **消息编辑**：全文文本编辑（textarea），保存写回内存历史并经防抖落盘（`middleClickHandler.js:468-595` + `messageRenderer` 编辑模式）。无选区编辑、无 diff。
-- **Canvas 协同**：外部文件变更仍由 chokidar 通知并用 CodeMirror MergeView 展示。模型经 FileOperator 提交编辑时，主进程保存原文与修改后文本并等待 Canvas 窗口回执；用户可直接拒绝或打开差异后批准，批准前会确认活跃文件与原文快照均未变化，冲突则拒绝应用，成功以临时文件替换。编辑历史仍是内存内容快照，不落盘、无版本号或分支。`modules/ipc/canvasHandlers.js:92-193`、`Canvasmodules/canvas.js:546-645,1244-1306`
+- **消息编辑**：编辑以 textarea 做全文替换，保存后写回内存历史并防抖落盘，编辑模式由 `messageRenderer` 提供（`middleClickHandler.js:468-595`）；没有选区编辑与 diff。
+- **Canvas 协同**：外部文件变更仍由 chokidar 通知并用 CodeMirror MergeView 展示。模型经 FileOperator 提交编辑时，主进程保存原文与修改后文本并等待 Canvas 窗口回执；用户可直接拒绝或打开差异后批准，批准前会确认活跃文件与原文快照均未变化，冲突则拒绝应用，成功以临时文件替换。编辑历史仍是内存内容快照，不落盘、无版本号或分支。`modules/ipc/canvasHandlers.js:92-193`、`Canvasmodules/canvas.js:546-1306`
 - **Scriptorium 文坊（人机同对象编辑的第二条链）**：文档工程位于 `AppData/ScriptoriumDocument/VDOCX|VPPTX/`（scriptoriumAgentControlService.js:133），人类在 `ScriptoriumModules/scriptorium.html` 直接编辑渲染版式或源码。
-  - 协作方式：Agent 经 `ScriptoriumCollaborator` direct 插件（ScriptoriumCollaboratorService.js）读取（GetRenderedText/GetSource/GetVisualContext 等）并提交 `SubmitSourcePr`——带唯一完整 source 的修订；主进程 docx 侧设 `AGENT_REQUEST_TIMEOUT_MS=30s`、`AGENT_REVIEW_TIMEOUT_MS=5min`。人类审阅后给出回执（pending/applied/rejected/conflict/failed），应用的修订进入**文脉**（带 changeSet、工程内嵌版本快照与审批元数据，可回溯且不删后续文脉）。
+  - 协作方式：Agent 通过 `ScriptoriumCollaborator` direct 插件（实现位于 `ScriptoriumCollaboratorService.js`）读取渲染文本、源码与视觉上下文（GetRenderedText、GetSource、GetVisualContext），再以 `SubmitSourcePr` 提交一份带唯一完整 source 的修订；主进程在 docx 侧把 Agent 请求超时设为 30 秒、审阅超时设为 5 分钟（`AGENT_REQUEST_TIMEOUT_MS`、`AGENT_REVIEW_TIMEOUT_MS`）。人类审阅后给出回执，状态为 pending、applied、rejected、conflict、failed 之一；应用的修订进入**文脉**，带 changeSet、工程内嵌版本快照与审批元数据，可回溯且不删后续文脉。
   - 与 Canvas 的差异：Scriptorium 有落盘的版本对象（文脉）与冲突状态（conflict），但仍无 CRDT/合并算法，"最后写入者赢"之外的冲突交给人工裁决；PR 是"整份 source 替换"粒度，与 Canvas 的行级 diff 不同。
   - 事实源：源码是唯一真相（不序列化渲染树，`ScriptoriumModules/README.md` 明确说明），可编程页面的瞬态 DOM 不写入工程。
-- **桌面挂件源码编辑**：挂件可在 Canvas 窗口以 `desktop-widget` 上下文打开（`desktopHandlers.js:1050-1103`），保存后通知桌面刷新（`canvasHandlers.js:70-85` `notifyDesktopWidgetSourceSaved`）。
+- **桌面挂件源码编辑**：挂件可在 Canvas 窗口以 `desktop-widget` 上下文打开，保存后经 `notifyDesktopWidgetSourceSaved` 通知桌面刷新（`desktopHandlers.js:1050-1103`、`canvasHandlers.js:70-85`）。
 - **协作冲突处理**：Canvas 的受管提案会做原文快照冲突检查并要求人工接受/拒绝；普通文件保存仍是整文件写入。无 CRDT 或结构化 patch，撤销与内容历史限当前窗口内存。
 
 ## 7. 能力桥、执行位置与权限范围
@@ -126,34 +141,38 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 能力桥（生成对象→宿主动作）：
 
-- **挂件沙箱注入 API**（widgetManager.js:500-625）：`widgetFS`（文件读写，限制在收藏目录，带文件名安全校验与核心文件保护，desktopHandlers.js:1070-1080）、`musicAPI`（播放控制）、`__vcpProxyFetch`（admin API Basic Auth 代理，vcpProxy.js:60-73）、`__vcpProxyPost`（OpenAI 兼容模型调用，vcpProxy.js:94-151——挂件可再调模型，形成模型-挂件环）。
-- **阅读窗口**：`viewerAPI.executePythonCode`（本机进程执行）、`openNotesWithContent`（写入笔记）、`openImageViewer`（截图展示）。模型内联脚本因此可获得与窗口同等的桥能力（安全边界弱，静态确认事实）。
+- **挂件沙箱注入 API**：沙箱向挂件注入四类宿主能力（`widgetManager.js:500-625`）。
+  - `widgetFS`：文件读写，范围限定在收藏目录，带文件名安全校验与核心文件保护（`desktopHandlers.js:1070-1080`）；
+  - `musicAPI`：播放控制；
+  - `__vcpProxyFetch`：带 Basic Auth 的 admin API 代理（`vcpProxy.js:60-73`）；
+  - `__vcpProxyPost`：OpenAI 兼容的模型调用代理，挂件可借此再调模型，形成模型-挂件环（`vcpProxy.js:94-151`）。
+- **阅读窗口**：`viewerAPI` 暴露 `executePythonCode`、`openNotesWithContent` 与 `openImageViewer`，分别用于本机进程执行、写入笔记和截图展示；模型内联脚本因此拿到与窗口同等的桥能力，安全边界较弱（静态确认事实）。
 - **气泡代码预览**：宿主提供的消息桥只处理尺寸上报，并验证来源与 frameId；iframe 未获得同源权限，本次未找到向它注入聊天或本机执行 API 的路径。正文主 DOM 动画岛另按页面脚本权限运行。依据：[预览权限与尺寸消息](../../VCPChat/modules/renderer/contentProcessor.js#L859-L924)。
-- **桌面远程控制**（模型→桌面，由 Rust/服务端经 IPC 注入 VCPDistributedServer.js:57）：这是模型查询/修改活对象的受控通道，提供：
-  - `SetWallpaper`：写 `AppData/DesktopData/ai_wallpaper_*.html`（desktopRemoteHandlers.js:287-356）；
-  - `CreateWidget`：写 widget 目录 app.js/widget.html（621-622）；
-  - `QueryDesktop`/`QueryDock`：状态报告回流为 Markdown 工具结果（358-405）；
+- **桌面远程控制**：模型经 Rust/服务端把指令注入本地 VCPDistributedServer（`VCPDistributedServer.js:57`），这是查询和修改桌面活对象的受控通道，提供以下动作：
+  - `SetWallpaper`：写入 `AppData/DesktopData/ai_wallpaper_*.html`（`desktopRemoteHandlers.js:287-356`）；
+  - `CreateWidget`：写入挂件目录的 app.js 与 widget.html（`desktopRemoteHandlers.js:621-622`）；
+  - `QueryDesktop` 与 `QueryDock`：把桌面状态报告以 Markdown 工具结果回流（`desktopRemoteHandlers.js:358-405`）；
   - `ViewWidgetSource`、`SetStyleAutomation` 等其他动作。
 
 ## 8. 持久化、恢复、分享与导出
 
-- **消息**：`history.json` 全量 JSON（chatHandlers.js:497-512，1 秒防抖，streamManager.js:349），存原始 Markdown 文本（含全部协议标记）。VCP-CDS（`modules/services/chatDataService`）作为影子索引服务摄取并搜索（index.js:50-70，**非事实源**，事实源仍是 history.json）。无版本、无导出格式。
-- **桌面挂件**：收藏 = 目录 `AppData/DesktopWidgets/<savedId>/` 内 `widget.html` + `meta.json` + `thumbnail.png` + 附加文件（desktopHandlers.js:999-1095）；列表/加载/删除经 IPC（1180-1276）；挂件可分享到 Dock/图标；**运行状态不持久**，恢复时重新执行脚本（favoritesManager.js:130-132）。桌面布局/图标独立持久化（`desktop-save-dock`/`desktop-save-layout`，desktopHandlers.js:1801-1906）。
+- **消息**：全部消息以原始 Markdown 文本（含全部协议标记）写入 `history.json` 这一个 JSON 文件，写盘有 1 秒防抖（`chatHandlers.js:497-512`、`streamManager.js:349`）。`modules/services/chatDataService/index.js:50-70` 作为影子索引服务摄取并提供搜索，事实源仍是这一文件。没有版本，也没有导出格式。
+- **桌面挂件**：收藏即在 `AppData/DesktopWidgets/<savedId>/` 下保存 widget.html、meta.json、thumbnail.png 与附加文件，列表、加载、删除走 IPC，挂件还可分享到 Dock 或图标；**运行状态不持久**，恢复时重新执行脚本（`favoritesManager.js:130-132`）。桌面布局与图标走独立 IPC 持久化（`desktop-save-dock`、`desktop-save-layout`）。实现见 `desktopHandlers.js:999-1906`。
 - **Canvas 文件**：纯文本文件，mtime 排序列表（`canvasHandlers.js:400-420`）；复制/重命名/删除 IPC。
 - **笔记**：`AppData/Notemodules/*.md`（`notesHandlers.js:550-618`），分享到笔记即写文件（`text-viewer.js:1545-1565`）。
 - **导出**：阅读窗口截图（modern-screenshot `domToBlob`，`text-viewer.js:2174-2284`）；挂件 thumbnail.png；无标准项目导出/分享格式（Loom 的 `.vloom.json` 包导出属第三方应用运行器，超出本类目）。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- **聊天回流**：消息原始文本整体进入下一轮请求（chatManager.js 组消息 → chatHandlers.js:862-907 规范化），按深度脱敏（contextSanitizer，chatHandlers.js:1036-1057）；思维链默认剥离（1010-1034）。
-- **桌面状态感知**：模型可经 `QueryDesktop`/`QueryDock` 获取挂件列表（含 saved/savedName/savedDir，desktopRemoteHandlers.js:379-404），报告作为工具结果 Markdown 回流；挂件替换模式 `target:/replace:`（`desktopPushConsumer.js`）可对已存在挂件定向替换（选择器级）。
+- **聊天回流**：消息原始文本整段进入下一轮请求，由 chatManager 组消息、主进程侧规范化，再经 contextSanitizer 按深度脱敏并默认剥离思维链（`chatHandlers.js:862-1057`）。
+- **桌面状态感知**：模型经 `QueryDesktop` 与 `QueryDock` 取到挂件列表，字段含 saved、savedName、savedDir，报告以工具结果 Markdown 形式回流（`desktopRemoteHandlers.js:379-404`）；桌面推送的替换模式 `target:/replace:` 能对已存在的挂件做选择器级定向替换（`desktopPushConsumer.js`）。
 - **文件回流**：FileOperator 等工具可读写 `AppData/Canvas/`、widget 目录（`desktop-save-widget-file`/`load-widget-file`）。
-- **对象身份绑定**：未找到。无对象注册表、无"按 savedId 继续修改同一对象"的协议（desktop push 的 `target:` 替换是例外但选择器基于内容而非对象身份）；每个回合模型重新生成新 `dw-<timestamp>` 挂件 ID（`desktopPushConsumer.js:40`）。**持续维护**仅存在于用户侧（收藏→刷新→再编辑），模型侧无跨回合对象引用机制（推断：协议中没有对象 ID 参数通道）。
+- **对象身份绑定**：本次未找到对象注册表，也没有"按 savedId 继续修改同一对象"的协议；桌面推送的 `target:` 替换是一处例外，其选择器按内容匹配。每个回合模型都生成新的 `dw-<timestamp>` 挂件 ID（`desktopPushConsumer.js:40`）。**持续维护**只存在于用户侧（收藏、刷新、再编辑），模型侧没有跨回合对象引用机制（推断：协议中没有对象 ID 参数通道）。
 
 ## 10. 生命周期、资源治理与性能
 
-- **消息内资源**：可见性所有者按消息登记动画、媒体、定时器和图形实例，离屏时冻结，移除消息时撤销观察并清理资源。Pixi 单独实行按聊天根的已启动气泡配额：通常最多三个，历史初载最多一个；满额先淘汰离屏旧实例，热区内不能取得配额的新实例被销毁并标记抑制。详情见[消息渲染器笔记](../消息渲染器/VCPChat-消息渲染器调查笔记.md#脚本执行)；依据：[Pixi 配额](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473)、[资源清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
-- **流式 transient**：预缓冲上限、桌面推送 interval 与 150s 空闲超时（`desktopPushConsumer.js:42-43`）、页面卸载全局清理（`streamManager.js:336-345`）、消息终态清理推送状态（`streamManager.js:1736-1738`）。
+- **消息内资源**：可见性所有者按消息登记动画、媒体、定时器和图形实例，离屏时冻结，移除消息时撤销观察并清理资源。Pixi 另外实行按聊天根的已启动气泡配额：通常最多三个，历史初载最多一个；满额先淘汰离屏旧实例，热区内取不到配额的新实例会被销毁并标记抑制。详情见[消息渲染器笔记](../消息渲染器/VCPChat-消息渲染器调查笔记.md#脚本执行)，依据为 [Pixi 配额](../../VCPChat/modules/renderer/visibilityOptimizer.js#L449-L473) 与 [资源清理](../../VCPChat/modules/renderer/visibilityOptimizer.js#L1045-L1095)。
+- **流式 transient**：临时状态包括预缓冲上限、桌面推送的 interval 与 150 秒空闲超时，页面卸载时统一清理，消息进入终态时清掉推送状态（`desktopPushConsumer.js:42-43`、`streamManager.js:336-1738`）。
 - **桌面窗口**：`visibilityFreezer`（`Desktopmodules/core/visibilityFreezer.js:154-183`，冻结壁纸 iframe/视频）；挂件删除带 450ms fallback（`widgetManager.js:10-12`）；z-index 管理、拖动限位。
 - **渲染性能**：30fps 合帧、`findExplicitStablePrefix` 避免全量重解析、`renderHtmlCache`（`messageRenderer.js:1838-1904`，FNV1a 指纹，含 shouldBypassRenderHtmlCache 判定）、块级 HTML 缓存复用（`streamManager.js:634-653`）。
 - **限额**：HTML island 深度 128/256KB（`streamManager.js:53-54`）、推送块 150s 超时、代码行扫光动画最多并发 3（`:12-13`）；未找到挂件数量/进程数全局限额。
@@ -162,7 +181,7 @@ VCPChat 的"生成式输出"没有独立的 Artifact 对象模型。模型产出
 
 Scriptorium 在当前快照由单体脚本拆为文档存储、渲染协调、编辑历史、来源编辑、版式、图形资源和演示文稿模块。它仍以源码为事实源，但 Agent 已可经 ScriptoriumCollaborator 查询文档与视觉上下文，并以完整 source PR 提交修订；文坊等待人类审阅后才产生 applied、rejected、conflict 或 failed 回执及文脉记录。相较消息内预览或 Canvas 文件，这是一条拥有显式对象、审阅回执和可追溯编辑记录的 G4 工作区链路；没有证据表明其具备 CRDT 或自动三方合并。
 
-依据：`ScriptoriumModules/scriptorium-document-store.js`、`scriptorium-render-coordinator.js`、`scriptorium-edit-history.js`、`scriptorium-pr-diff.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:32-33`。
+依据：`ScriptoriumModules/scriptorium-{document-store,render-coordinator,edit-history,pr-diff}.js`、`VCPDistributedServer/Plugin/ScriptoriumCollaborator/ScriptoriumCollaboratorService.js:979-1001`、`modules/ipc/docxHandlers.js:32-33`。
 
 ## 12. 测试、已确认边界与未验证事项
 

@@ -18,7 +18,7 @@ Open WebUI 的对话导出与分享分成两条独立主链：本地文件下载
 
 PDF 有两种模式，由用户设置 `stylizedPdfExport`（默认 true）切换。该设置只控制呈现方式，与“当前视图 vs 完整对话”的范围无关：样式模式用隐藏的全消息容器 + 离屏 DOM 克隆 + `html2canvas-pro` 整段渲染 + jsPDF 按 A4 比例切条分页；纯文本模式用 jsPDF 的 `splitTextToSize` 排 Markdown 文本。另有第三个实现：后端 `/utils/pdf`（fpdf2）与前端包装 `downloadChatAsPDF`，本次未找到任何调用点。
 
-链接分享是快照语义且管理闭环完整：`POST /chats/{id}/share` 把整个会话 JSON 复制进 `shared_chat` 表（UUID 作为 share token），`/s/{share_id}` 页面读取的是快照而不是源会话；再次调用同一接口即重新快照（覆盖同 URL）。可见性三态（private / public / open）由 `access_grants` 上的 `read` 授权决定，open 允许匿名访问。删除、撤销全部、共享列表管理、克隆入口齐全。分享快照不复制附件文件本身，附件仍走需登录的 `/files/{id}/content`。
+链接分享采用快照语义：调用 `POST /chats/{id}/share` 时，后端把整个会话 JSON 复制进 `shared_chat` 表，并以 UUID 作为分享 token。站内分享页 `/s/{share_id}` 读取的是这份快照副本，再次调用同一接口会对同一 URL 重拍快照。可见性分 private、public、open 三档，由 `access_grants` 上的 `read` 授权决定，其中 open 档允许匿名访问。删除、撤销全部、共享列表管理与克隆入口均已具备。快照只复制会话 JSON，附件仍通过需登录的 `/files/{id}/content` 提供。
 
 社区路径是纯前端交接：弹窗用 `window.postMessage` 把聊天 JSON 交给第三方站点 openwebui.com 的 `/chats/upload`，本仓库没有服务端提交或发现机制；`/s` 页面带 `noindex,nofollow`，未发现公开目录或搜索索引。
 
@@ -55,9 +55,9 @@ PDF 有两种模式，由用户设置 `stylizedPdfExport`（默认 true）切换
 
 入口分三层（均为会话级，无单消息导出）：
 
-- 聊天页导航栏 `Navbar/Menu.svelte`：Share、Download 子菜单（Export chat (.json)、Plain text (.txt)、PDF document (.pdf)）、Copy（`Menu.svelte:369-443`）；
-- 侧边栏 `ChatItem.svelte -> ChatMenu.svelte`：同样的 Share、Download 子菜单与 Clone、Archive 等（`ChatMenu.svelte:306-360`）；
-- 设置页 DataControls（`Settings/DataControls.svelte:90-95`）：全量 JSON 导出与导入，另含"Shared Chats"管理弹窗（`SharedChatsModal.svelte`）。
+- 聊天页导航栏：Share 与 Download 子菜单（Export chat (.json)、Plain text (.txt)、PDF document (.pdf)），另有 Copy 项（`Navbar/Menu.svelte:369-443`）；
+- 侧边栏会话菜单：提供同样的 Share、Download 子菜单，以及 Clone、Archive 等会话操作（`ChatMenu.svelte:306-360`）；
+- 设置页 DataControls：负责全量 JSON 导出与导入，并托管 "Shared Chats" 管理弹窗（`Settings/DataControls.svelte:90-95`、`SharedChatsModal.svelte`）。
 
 导出源是单个会话。顺序与范围由 `createMessagesList`（`src/lib/utils/index.ts:1404-1418`）决定：沿 `parentId` 从当前消息回溯到根再反转，即只包含活动分支路径，不包含隐藏分支；JSON 导出例外，它导出整个 `ChatResponse`（含完整 history 树），只是下载层面不做任何裁剪。
 
@@ -67,22 +67,22 @@ PDF 有两种模式，由用户设置 `stylizedPdfExport`（默认 true）切换
 
 ## 2. 范围选择、内容口径与字段过滤
 
-- TXT（两个菜单组件实现一致，`ChatMenu.svelte:64-87`）：逐条拼接 `### 角色` 标题与消息文本。文本优先取 `getOutputText` 输出中的 message 类型片段（`Messages/structuredOutput.ts:335-341`），无 output 时退回原始 content。这里没有做渲染端那样的 details 剥离——聊天现场 `ResponseMessage.svelte:189` 会先去除 details 再取文本——因此 content 内含 `<details type="reasoning">` 等标记时会原样进入 TXT 与纯文本 PDF。此为静态代码事实，实际消息中 reasoning 的落库形态未运行确认。
+- TXT：两个菜单组件的实现一致，都按 `### 角色` 标题加正文的格式逐条拼接消息。正文优先取 `getOutputText` 返回的 message 类型片段，没有 output 时退回消息原始 content。这条路径没有像聊天渲染那样先剥离 details 块，content 中的 `<details type="reasoning">` 等标记会原样写进 TXT 与纯文本 PDF。以上为静态代码结论，reasoning 在消息记录中的实际落库形态未运行确认。实现见 `ChatMenu.svelte:64-87` 与 `Messages/structuredOutput.ts:335-341`；渲染侧先剥离 details 的入口是 `ResponseMessage.svelte:189`。
 - JSON：`JSON.stringify([chat])` 导出完整 `ChatResponse`（id、user_id、title、chat、share_id、archived、meta、variables、folder_id 等，`backend/open_webui/models/chats.py:201-218`），无字段裁剪、无脱敏。
 - 快照分享：`SharedChats.create` 把整个会话 JSON（含 history、messages、params、system 等）复制到 shared_chat 表的内容列（`backend/open_webui/models/shared_chats.py:60-89`），不做任何内容过滤。
-- 全量导出 `GET /chats/all` 以 NDJSON 流式输出（`chats.py:988-993`）。`GET /chats/all/db` 另受 admin + `ENABLE_ADMIN_EXPORT` 门控（`chats.py:1029-1033`）。
+- 全量导出：`GET /chats/all` 以 NDJSON 流式输出；`GET /chats/all/db` 另受 admin 与 `ENABLE_ADMIN_EXPORT` 门控（`chats.py:988-993,1029-1033`）。
 - 隐藏分支：TXT/PDF 只覆盖活动分支；JSON 与快照包含完整树但展示端（`createMessagesList`）只渲染活动分支。没有任何导出路径提供分支选择器或逐条勾选（对比 NextChat 的 MessageSelector）。
 
 ## 3. 附件、资源与离线封装
 
 - TXT / 纯文本 PDF：附件不进入文本，图片引用作为 Markdown 文本保留。
-- 样式化 PDF：捕获的是完整消息列表渲染结果，消息内嵌的图片会出现在 canvas 中；`html2canvas-pro` 配置了 `useCORS: true`，但跨域图片若无 CORS 头仍可能污染 canvas（基于库行为推断，未运行验证）。
-- JSON：保留 `files`/`embeds` 等字段引用，不打包文件本体。
-- 分享快照页：消息附件在前端仍按文件 ID 请求 `/api/v1/files/{id}/content`，该端点要求登录且验证文件归属或授权（`backend/open_webui/routers/files.py:782-842`），授权对象是文件自身而非分享快照。因此"open"分享页的匿名访客能否看到附件图片/文件，取决于文件是否另有公开授权——静态推断，未运行验证。PDF 与 TXT 均无资源打包，不能保证离线打开附件。
+- 样式化 PDF：捕获的是完整消息列表的渲染结果，消息内嵌图片会进入 canvas。`html2canvas-pro` 开启了 `useCORS`，跨域图片缺少 CORS 头时仍可能污染 canvas（基于库行为的推断，未运行验证）。
+- JSON：保留 `files`、`embeds` 等字段引用，不打包文件本体。
+- 分享快照页：前端按文件 ID 请求 `/api/v1/files/{id}/content` 加载附件，该端点要求登录并校验文件归属或授权，授权对象是文件自身，分享快照不参与附件授权。因此 open 档分享页的匿名访客能否看到附件，取决于文件是否另有公开授权，这一点为静态推断，未运行验证。PDF 与 TXT 均不打包资源，离线打开时无法保证附件可用。附件端点的实现见 `backend/open_webui/routers/files.py:782-842`。
 
 ## 4. 格式、schema 与往返能力
 
-- JSON：单会话数组与全量导出一致，可经 DataControls 导入（`POST /chats/import`，`chats.py:788-809`）或侧边栏拖拽导入完成往返；导入端兼容 OpenAI 导出格式（`DataControls.svelte:42-48`）。导出结果采用服务端 Chat 模型可接受的原始结构，字段多于精简 messages payload，往返语义在单仓库内闭合。整库迁移、配置导出（`/configs/export`）不在本类目。
+- JSON：单会话导出的数组结构与全量导出一致，可以经 DataControls 的导入入口或侧边栏拖拽完成往返；导入端兼容 OpenAI 的导出格式。导出结果就是服务端 Chat 模型接受的原始结构，字段比精简的 messages 载荷更全，往返语义在单仓库内闭合。整库迁移与配置导出（`/configs/export`）不在本类目。导入端点见 `POST /chats/import`（`chats.py:788-809`），前端格式兼容逻辑见 `DataControls.svelte:42-48`。
 - TXT：面向阅读的 Markdown 风格文本，无 schema，无导入路径。
 - PDF：A4 竖版 JPEG 光栅页（样式模式）或纯文本页（文本模式），无书签/元数据/可复制文本（样式模式）。
 - 统计导出（社区相关）：`GET /chats/stats/export` 返回 JSON 分页或 NDJSON 流，条目为含完整会话的 `ChatStatsExport` 结构。该端点受 `ui.enable_community_sharing` 门控（`chats.py:581-619`）。
@@ -96,8 +96,9 @@ PDF 有两种模式，由用户设置 `stylizedPdfExport`（默认 true）切换
 PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Navbar/Menu.svelte:81-240`、`Sidebar/ChatMenu.svelte:89-253`）：
 
 - 样式模式（默认）：先以只读模式渲染隐藏的全消息容器，把克隆体挂到 body 外的离屏位置（绝对定位、固定宽 800px），并强制消息项内容可见以对抗聊天列表的渲染优化；随后 html2canvas-pro 按暗色主题、2 倍缩放整段捕获，jsPDF 按 A4 折算每页像素高，把整张 canvas 切成等高条，每条以 JPEG 格式逐页加入，暗色模式先铺黑底矩形（`Menu.svelte:138-197`）。
-- 文本模式（`stylizedPdfExport=false`）：取 TXT 文本，jsPDF 8pt `splitTextToSize` 自动换行分页。
-- 富内容保真：样式模式复用聊天现场渲染器，reasoning（`<details type="reasoning">`）、工具卡、代码高亮、数学、表格等与屏幕所见一致（无需专门降级）；文本模式全部退化为纯文本。PDF 只在浏览器端生成，后端不再提供 PDF 生成端点（`routers/utils.py` 现仅有 gravatar、代码格式化、代码执行与数据库下载四个端点，仓库内已无 fpdf 依赖与 `pdf_generator` 模块）。笔记导出复用同一套 jsPDF + html2canvas-pro 实现（`src/lib/components/notes/utils.ts:61`）。
+- 文本模式（`stylizedPdfExport=false`）：取 TXT 文本，交给 jsPDF 用 `splitTextToSize` 以 8pt 字号换行分页。
+- 富内容保真：样式模式复用聊天现场渲染器，reasoning 折叠块、工具卡、代码高亮、数学公式与表格的呈现与屏幕一致，不需要专门降级；文本模式把这些内容退化为纯文本。
+- 生成位置：PDF 只在浏览器端生成。后端 `routers/utils.py` 只剩 gravatar、代码格式化、代码执行与数据库下载四个端点，仓库内已无 fpdf 依赖和 `pdf_generator` 模块。笔记导出复用同一套 jsPDF 与 html2canvas-pro 实现（`src/lib/components/notes/utils.ts:61`）。
 - 无图片/PNG 导出、无分享图生成（对比 NextChat 的 E3 图片链，Open WebUI 本次未找到）。
 
 ## 7. 生成历史、版本与持久化
@@ -106,24 +107,24 @@ PDF 是唯一的文档生成能力，两个菜单组件实现逐行相同（`Nav
 
 ## 8. 分享载体、访问控制与撤销
 
-- 载体：站内快照 URL `{origin}/s/{uuid4}`（`ShareChatModal.svelte:31`），token 为 UUID，无枚举目录。`/s/[id]` 页面（`src/routes/s/[id]/+page.svelte`）无服务端加载逻辑，纯客户端拉取 `GET /chats/share/{share_id}`。
-- 快照语义：`GET /chats/share/{share_id}` 返回 shared_chat 快照行的 ChatModel 视图（`backend/open_webui/models/chats.py:1519-1538`）；它与源会话分离，源会话后续变化不自动反映，需显式“更新链接”重新快照。分享时复制会话 JSON，不复制附件。
-- 只读查看他人会话时，聊天页会按快照的 user_id 取得原作者资料，并把它传给消息列表和 Overview；因此头像等作者归属以会话所有者而不是当前查看者为准（`src/lib/components/chat/Chat.svelte:372-397,4086-4087`）。
-- 可见性三态（前端编辑入口 `AccessControl.svelte:217-245`；后端判定与过滤见 `backend/open_webui/utils/access_control/__init__.py:220-289`）：
-  - private：无 `*` 授权，仅显式 user/group 授权可读；
-  - public：`user:* read`，任一登录用户可读（`access_grants.py:562-620`）；
-  - open：`anyone:* read`，匿名可读（`chats.py:81-87`、`access_grants.py:540-560`）。
-  服务端会按用户权限过滤掉无权授予的级别；owner 与 admin（`ENABLE_ADMIN_CHAT_ACCESS` 时）总可读（`chats.py:90-103`）。
-- 撤销与管理：单聊删除走 `DELETE /chats/{id}/share`（清快照行、回写字段与授权，`chats.py:1983-2005`）。全部撤销走 `DELETE /chats/share/all`（`chats.py:1123-1148`）。列表管理入口在 Settings → Shared Chats（`SharedChatsModal.svelte`，分页+搜索+逐条/全部取消）。无过期机制。
-- 克隆：`POST /chats/{id}/clone/shared` 把快照（或 admin 下任意会话）以原始会话 ID 与分支指针导入为访问者自己的会话（`chats.py:1822-1889`），分享页提供"Clone Chat"按钮（`s/[id]/+page.svelte:148-164`）。
-- 事件：分享/撤销/导入会发 `EVENTS.CHAT_SHARED / CHAT_UNSHARED / CHAT_IMPORTED`（`chats.py:1952-1976` 等），用于审计/通知。
+- 载体：分享链接是站内快照地址，形如 `{origin}/s/{uuid4}`，token 为 UUID，没有可枚举的目录。分享页 `/s/[id]` 没有服务端加载逻辑，由浏览器直接请求 `GET /chats/share/{share_id}` 取数；链接生成与页面路由分别见 `ShareChatModal.svelte:31` 和 `src/routes/s/[id]/+page.svelte`。
+- 快照语义：该接口返回 shared_chat 快照行转换出的 ChatModel 视图。快照与源会话相互分离，源会话后续的修改不会自动反映，需要在分享弹窗里显式“更新链接”才会重新快照。分享时复制会话 JSON，附件文件不进入快照。快照视图的实现见 `backend/open_webui/models/chats.py:1519-1538`。
+- 作者归属：只读查看他人会话时，聊天页按快照中的 user_id 加载原作者资料，并传给消息列表和 Overview，因此头像等归属信息跟随会话所有者，与当前查看者无关。实现见 `src/lib/components/chat/Chat.svelte:372-397,4086-4087`。
+- 可见性分三档，前端编辑入口与后端的判定、过滤逻辑分别位于 `AccessControl.svelte:217-245` 和 `backend/open_webui/utils/access_control/__init__.py:220-289`：
+  - private：没有任何 `*` 授权，只有显式指定的用户或用户组可读；
+  - public：授予 `user:* read`，任一登录用户可读；
+  - open：授予 `anyone:* read`，匿名访客可读。
+  服务端按当前用户的权限过滤掉其无权授予的级别；会话所有者与管理员（开启 `ENABLE_ADMIN_CHAT_ACCESS` 时）始终可读，授权判定见 `access_grants.py:540-620` 与 `chats.py:81-103`。
+- 撤销与管理：删除单个分享调用 `DELETE /chats/{id}/share`，会清掉快照行并回写会话字段与授权；全部撤销调用 `DELETE /chats/share/all`。列表管理入口在 Settings 的 Shared Chats 弹窗，支持分页、搜索以及逐条或全部取消。没有过期时间机制。两个删除端点见 `chats.py:1123-1148,1983-2005`，列表界面见 `SharedChatsModal.svelte`。
+- 克隆：`POST /chats/{id}/clone/shared` 把快照（或 admin 下的任意会话）按原始会话 ID 与分支指针导入为访问者自己的会话，分享页提供 "Clone Chat" 按钮（`chats.py:1822-1889`、`s/[id]/+page.svelte:148-164`）。
+- 事件：分享、撤销与导入分别发送 EVENTS 下的 CHAT_SHARED、CHAT_UNSHARED、CHAT_IMPORTED 三个事件，用于审计与通知（`chats.py:1952-1976`）。
 
 ## 9. 隐私、安全与内容治理
 
-- 分享前无敏感内容提示、无 system prompt 过滤；快照复制完整会话 JSON（含 system/params/变量快照，随 chat 对象整体走，无单独处理逻辑）。
-- `/s` 页面带 noindex,nofollow 的 robots 声明（`s/[id]/+page.svelte:173`），无站点级 /share 目录或搜索索引；全仓未找到 share 列表公开页，`GET /chats/shared` 仅返回当前用户自己的分享（`chats.py:1151-1180`）。
-- 公开/开放分享的权限点默认关闭（`ALLOW_PUBLIC_SHARING/ALLOW_OPEN_SHARING=False`，`config.py:1856-1862`）。
-- 社区分享把完整 `chat` 对象经 postMessage 交给第三方 openwebui.com，由对方页面处理，本仓库无法确认其存储、可见性与保留策略；`ENABLE_COMMUNITY_SHARING` 默认 True（`config.py:2074`）。
+- 分享前流程没有敏感内容提示，也不对 system prompt 做过滤；快照复制的是完整会话 JSON，包含 system、params 与变量快照，随 chat 对象整体写入，没有单独的裁剪步骤。
+- `/s` 页面声明了 `noindex,nofollow`，站点没有 /share 目录或搜索索引；全仓未找到分享列表的公开页面，`GET /chats/shared` 只返回当前用户自己的分享（`s/[id]/+page.svelte:173`、`chats.py:1151-1180`）。
+- 公开分享与开放分享的权限开关默认关闭，对应 `ALLOW_PUBLIC_SHARING` 与 `ALLOW_OPEN_SHARING` 两个配置项（`config.py:1856-1862`）。
+- 社区分享把完整的 chat 对象经 postMessage 交给第三方站点 openwebui.com，由对方页面处理，其存储、可见性与保留策略无法从本仓库确认；该功能由 `ENABLE_COMMUNITY_SHARING` 控制，默认开启（`config.py:2074`）。
 - PDF/TXT 均为本地生成，无服务端富文本处理；样式 PDF 的 DOM 来源是已渲染的聊天内容（本应用渲染管线），未发现额外脚本注入面。
 
 ## 10. 性能、失败恢复与测试

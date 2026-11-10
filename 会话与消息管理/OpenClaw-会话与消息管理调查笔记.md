@@ -14,9 +14,9 @@
 
 ## 结论摘要
 
-OpenClaw 当前的会话存储是“逻辑会话节点 + 可轮换 transcript generation + 追加型事件树”的组合。逻辑会话以 `sessionKey` 寻址，`session_nodes.entry_json` 保存会话记录，`current_session_id` 指向当前 transcript；一个逻辑会话可以保留多个 `session_windows`，每个 window 对应一代 transcript。事实源默认是 per-agent SQLite，本次快照起同一套 store 契约也可以运行在 PostgreSQL 上：五类可配置 store family（state、agent、workboard、logbook、team-reports）各自可选引擎，一个 Gateway 可以混用，适配层负责连接、schema 准入、事务与提交通知，store 本身保留既有数据与操作契约（`docs/reference/database-engines.md`、`docs/gateway/postgresql.md`）。活动路径、消息序号和全文搜索仍是从 transcript 事件派生的投影，没有独立的第二份消息主库。agent schema 版本为 40，并按能力分出多组特性版本常量（冷归档、文本搜索、向量检索、轨迹存储等）；transcript entry 协议版本为 4，最低可读版本为 3。依据见 `src/state/openclaw-agent-schema.sql`、`src/state/openclaw-schema-versions.ts`、`src/state/openclaw-agent-db-contract.ts` 和 `src/config/sessions/version.ts`。
+OpenClaw 当前的会话存储由逻辑会话节点、可轮换的 transcript generation 和追加型事件树三层组成。逻辑会话以 `sessionKey` 寻址，会话记录保存在 `session_nodes.entry_json`，`current_session_id` 指向当前使用的 transcript；同一逻辑会话可以保留多个 `session_windows`，每个 window 对应一代 transcript。事实源默认是 per-agent SQLite，同一套 store 契约也可以运行在 PostgreSQL 上：state、agent、workboard、logbook、team-reports 五类 store family 各自选择引擎，一个 Gateway 内可以混用，适配层负责连接、schema 准入、事务与提交通知，store 本身的数据与操作契约保持不变（`docs/reference/database-engines.md`、`docs/gateway/postgresql.md`）。活动路径、消息序号和全文搜索都是从 transcript 事件派生的投影，消息正文在 transcript 里只存一份。agent schema 版本为 40，并按能力分出冷归档、文本搜索、向量检索、轨迹存储等多组特性版本常量；transcript entry 协议版本为 4，最低可读版本为 3。依据见 `src/state/openclaw-agent-schema.sql`、openclaw-schema-versions.ts、openclaw-agent-db-contract.ts 和 `src/config/sessions/version.ts`。
 
-消息不是简单的线性数组。每条可索引 entry 带有 `id`、`parentId` 和时间戳，形成父子链/DAG；活动 leaf 和追加游标决定当前可见路径。分支切换、回退和 fork 通过新增 transcript generation 或 leaf 控制改变活动路径，原始事件通常仍然保留。写入消息必须经过带 parent、幂等和脱敏处理的消息追加入口，不能把缺少 `parentId` 的 message 行直接作为普通事件写入。依据见 `src/agents/sessions/session-manager-types.ts`、`src/config/sessions/transcript-tree.ts` 和 `src/gateway/server-methods/AGENTS.md`。
+消息按树形结构保存：每条可索引 entry 都带自己的 id、parentId 和时间戳，彼此构成父子链或 DAG，活动 leaf 与追加游标共同决定当前可见路径。分支切换、回退和 fork 通过新增 transcript generation 或写入 leaf 控制来改变活动路径，原始事件通常保留下来。写入消息只能走带 parent 校验、幂等判断和脱敏处理的消息追加入口，缺少 `parentId` 的 message 行无法作为普通事件写入。依据见 `src/agents/sessions/session-manager-types.ts`、`src/config/sessions/transcript-tree.ts` 和 `src/gateway/server-methods/AGENTS.md`。
 
 生命周期操作同时保护逻辑身份和 transcript 身份。删除会先做删除计划与 receipt、处理运行中工作、并发期望值、归档和关联对象；reset、rewind、branch switch 等操作会轮换当前 `sessionId`，使旧 generation 成为可追踪的历史，旧 manager 无法继续覆盖新路径。写入和生命周期变化通过 per-store writer queue、worker 协调层（请求、准入、传输）、同步事务、`sessionId`/`lifecycleRevision` 比较以及 post-commit 状态事件串联起来，生命周期 mutation 统一走 session controller 的 mutation 入口。
 
@@ -72,7 +72,7 @@ incognito 排除在持久会话发现和常驻 durable roster 之外，授权的
 
 ### 消息与控制 entry
 
-标准 message entry 的外层形状是 `type: "message"`、`id`、`parentId`、`timestamp` 和 `message`。可读角色包括 user、assistant、toolResult，以及 custom、bashExecution 等扩展角色；assistant 内容可以是文本或内容块数组，工具结果带 tool call 标识、工具名、错误标志和内容。契约与兼容解析见 `src/agents/sessions/session-manager-codec.ts`、`:59-118`。
+标准 message entry 由五部分构成：固定的 message 类型标记、消息 `id`、指向父节点的 `parentId`、时间戳和消息体。可读角色有 user、assistant、toolResult，以及 custom、bashExecution 等扩展角色；assistant 内容可以是纯文本或内容块数组，工具结果带工具调用标识、工具名、错误标志和内容。契约与兼容解析见 `src/agents/sessions/session-manager-codec.ts`、`:59-118`。
 
 transcript 还保存不直接等价于聊天气泡的控制 entry：
 
@@ -92,7 +92,7 @@ transcript 还保存不直接等价于聊天气泡的控制 entry：
 
 ### 树、leaf 与活动路径
 
-正常追加使用当前 append parent 作为新 entry 的 `parentId`，并移动 leaf。side append 保留追加游标但不移动可见 leaf。显式 leaf 控制记录以 `targetId` 选择活动 leaf，`appendParentId` 决定后续追加位置；它本身是导航控制，不会作为可见消息进入活动路径。解析和路径选择见 `src/config/sessions/transcript-tree.ts`、`:166-289` 和 `:292-366`。
+追加新消息时，正常路径把当前 append parent 写进新 entry 的 parentId，并把 leaf 移到该 entry；side append 只保留追加游标，可见 leaf 停在原处。显式的 leaf 控制记录用 targetId 选出活动 leaf，再用 appendParentId 指定后续追加位置；这种记录只承担导航控制，不会作为可见消息进入活动路径。解析和路径选择见 `src/config/sessions/transcript-tree.ts:166-366`。
 
 SessionManager 在加载时同时维护 canonical entry、opaque parent、logical parent、append parent 和 leaf。遇到跨 reset 边界、旧 parent 或插件元数据插入造成的游标差异时，会把物理追加关系与可见逻辑父关系分开处理。`appendMode: "side"` 的 entry 不推进可见 leaf，见 `src/agents/sessions/session-manager-core.ts`。
 
@@ -142,13 +142,13 @@ SessionManager 在运行时保留 entry map、leaf、labels 和 append cursor，
 
 省略 key 时会先选择指定 agent 的 main alias，而不是简单复用兼容 owner 的 alias。没有显式 parent 的 durable dashboard session 在 `dmScope: "main"` 等条件下会挂到 agent main；incognito session 不建立 durable parent lineage。`createGatewaySession` 的条件见 `src/gateway/session-create-service.ts`。
 
-创建还是采用已有 key，由事务回调中是否存在 `existingEntry` 判断。已有 key 可以被采用，但不会重新盖写一次性创建 provenance，也不会伪造 `created` 事件。新 entry 写入后，如果请求包含初始消息，`sessions.create` 的 `afterCreate` 再通过 `chat.send` 追加消息并启动回合。实现见 `src/gateway/session-create-service.ts`、`:1144-1233` 和 `src/gateway/server-methods/sessions-create.ts`。
+创建请求走新建 key 还是复用已有 key，取决于事务回调里能否读到 existing entry：读到就采用该会话，但不会重写一次性创建的 provenance，也不会伪造 created 事件。新 entry 落库后，若请求携带初始消息，创建入口会在 afterCreate 阶段通过 chat.send 追加消息并启动首个回合。实现见 `src/gateway/session-create-service.ts:1144-1233` 和 `src/gateway/server-methods/sessions-create.ts`。
 
 物理上为空的 SQLite transcript 可以由 SessionManager 延迟初始化 header；但含有 opaque 或损坏结构的非空 transcript 不会被当成全新会话静默替换。旧版本 transcript 在持久化 runtime target 上需要先经过 doctor/import migration，见 `src/agents/sessions/session-manager-core.ts`。
 
 ### 列表切换与 metadata 生命周期
 
-会话切换本质是客户端重新以 key 读取当前 entry 和 current sessionId。Gateway 通过 `sessions.list`、`sessions.describe`、`sessions.preview`、`sessions.get`、`chat.startup` 和 `chat.history` 提供不同粒度的读取；客户端事件在 commit 后收到 session identity 或 row 变化，再合并新的投影。
+会话切换在客户端表现为按 key 重新读取当前 entry 和当前 sessionId。Gateway 为此提供多种粒度的读取入口，覆盖会话列表、单会话详情、transcript 预览、按 key 取单条会话、启动态和历史分页；客户端在提交后收到会话身份或行变化事件，再合并新的投影。
 
 `sessions.patch` 和 `sessions.patchMany` 修改会话级 metadata 与路由覆盖，包含 label、icon、category、Control UI face、短状态、attention、TTL、archived、pinned、unread、model/context/thinking、tool overrides、权限、exec 和 send policy 等字段。patch engine 会先准备归档/权限/owner/CAS 条件，再通过 canonical replacement 写回 entry 和 SQLite 投影，见 `packages/gateway-protocol/src/schema/sessions-patch.ts` 和 `src/gateway/server-methods/sessions-patch-engine.ts`、`:467-586`。
 
@@ -164,7 +164,7 @@ incognito session 不走 durable transcript archive，并按 incognito 规则删
 
 ### Restart recovery
 
-重启续跑由 Gateway 的 restart resume 模块族承担。恢复入口按 store target inventory 读取持久化 lifecycle 投影，用 `restartResumeSkipReason` 判断是否可续跑，捕获并中断孤立的 pending input、恢复 queued input，再检查运行中的 bash 进程与 subagent 根会话是否仍存活；会话状态变化通过 session event handoff 交给下一轮消费。实现见 `src/gateway/session-restart-resume.ts`、`session-restart-resume-failure.ts`、`session-restart-resume-log.ts`、`src/config/sessions/session-run-lifecycle-projection.ts`、`src/config/sessions/session-pending-input-withdrawal.ts`。
+Gateway 进程重启后，恢复流程由 restart resume 模块族接管。恢复入口先按各 store target 清点持久化 lifecycle 投影，用 restart resume 跳过原因判断会话能否续跑；可续跑的会捕获并中断孤立的 pending input、恢复排队输入，再确认运行中的 bash 进程与 subagent 根会话仍然存活，会话状态变化通过 session event handoff 交给下一轮消费。实现见 `src/gateway/session-restart-resume.ts` 及其 failure、log 兄弟模块，以及 `src/config/sessions/` 下的 lifecycle 投影与 pending input 撤回模块。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -194,7 +194,7 @@ user message 可带幂等键。数据库对同一 session 的 message 幂等键�
 
 `parentSessionKey` 关联父逻辑会话，`fork: true` 则复制父会话的活动路径。存储 owner 先选择用于 token admission 和复制的同一 source，避免大小判断和实际复制看到不同 tail；跨 agent 或跨数据库 fork 先读取父路径，再在目标 agent 数据库写 child transcript，代码明确承认两库之间没有一个共同 transaction。实现见 `src/config/sessions/session-accessor.sqlite-parent-session.ts`、`:351-437`。
 
-压缩不再对外暴露检查点 branch/restore 的独立 RPC：本次快照的 `src/gateway/server-methods/` 中没有 compaction checkpoint 方法，手动压缩入口是 `sessions.compact`。它先做 transcript 预检与裁剪，再用 `persistCompactionBoundaryWithSessionEntryAsync` 写压缩边界，并通过 `recordSessionCompacted` 发布 session 状态事件；mutation 走 session controller，需要有效 device authority 与 operator run authority，活动工作或 lifecycle 变化时返回受控错误。实现见 `src/gateway/server-methods/sessions-compact.ts`、`sessions-compaction-runner.ts`、`src/config/sessions/session-accessor.sqlite-compaction.ts`、`session-accessor.sqlite-compaction-runtime.ts`。
+压缩只提供手动入口 sessions.compact：Gateway 的会话方法目录里没有面向检查点 branch/restore 的独立 RPC，也没有 compaction checkpoint 方法。该入口先做 transcript 预检与裁剪，再用 persistCompactionBoundaryWithSessionEntryAsync 写入压缩边界，并通过 recordSessionCompacted 发布会话状态事件；mutation 统一走 session controller，要求有效的 device authority 与 operator run authority，存在活动工作或 lifecycle 变化时返回受控错误。实现见 `src/gateway/server-methods/sessions-compact.ts`、`sessions-compaction-runner.ts` 和 `src/config/sessions/` 下的 compaction accessor 与 runtime 模块。
 
 ### 编辑、删除、重试与续写边界
 
@@ -210,13 +210,13 @@ user message 可带幂等键。数据库对同一 session 的 message 幂等键�
 
 列表默认 limit 为 100，支持 offset。默认排序先按 pinned 时间降序，再按 updatedAt 降序；`sortBy: "lastInteractionAt"` 时改用最后交互时间且不先提升 pinned；时间相同时按 key 稳定排序。实现见 `src/gateway/session-utils-list.ts` 和 `src/gateway/session-list-order.ts`。
 
-响应区分当前页 `count`、过滤后的 `totalCount`、`offset`、`nextOffset` 和 `hasMore`。`ownerFirst` 只在第一页把当前 viewer 的 owner rows 放到普通结果前面，owner window 有独立上限，不改变共享结果的 offset 计算。选择与响应结构见 `src/gateway/session-utils-list.ts`、`:498-535`。
+响应的分页信息按口径分开：count 是当前页条数，totalCount 是过滤后的总条数，offset 与 nextOffset 分别指向本页和下一页，hasMore 表示是否还有更多。ownerFirst 只在第一页把当前 viewer 的 owner 行提到普通结果之前，owner window 有独立上限，共享结果的 offset 计算不受影响。选择与响应结构见 `src/gateway/session-utils-list.ts:498-535`。
 
 列表行可以按需读取 transcript 的 derived title、last message preview 和 bounded usage，但这些字段不是 session node 的另一份事实源。异步列表每 10 行让出事件循环，并批量读取 transcript 头尾，见 `src/gateway/session-utils-list.ts`、`:593-704`。
 
 ### Chat history 分页与定位
 
-`chat.history` 使用活动 transcript 的逻辑消息序号，不直接暴露包含 header/control 行的 raw seq。默认从最新尾部读取；数字 offset 表示从最新方向跳过的消息数量，页面通过 `totalMessages`、`offset`、`nextOffset` 和 `hasMore` 继续向更旧方向读取。历史读取还受最大 entry 数、总 JSON 字节数、单消息字节数和展示文本长度限制。入口见 `src/gateway/server-methods/chat-history-handler.ts`，页读取见 `src/gateway/server-methods/chat-history-pages.ts`。
+chat.history 面向活动 transcript 的逻辑消息序号，把 header 和控制行占用的 raw seq 留在内部。读取默认从最新尾部开始，数字 offset 表示从最新方向跳过的消息条数；返回体用 totalMessages 给出总消息数，用 offset 与 nextOffset 标出本页和下一页位置，用 hasMore 表示是否还有更多。历史读取还受最大 entry 数、总 JSON 字节数、单消息字节数和展示文本长度限制。入口见 `src/gateway/server-methods/chat-history-handler.ts`，分页读取见同目录的 chat-history-pages.ts。
 
 消息级 `messageId` anchor 读取会把目标置于页面中间，并在容量允许时向两侧扩展；它可以回退到 reset archive。因为数字 offset 不能编码“命中了哪一份历史 archive”，anchor 响应不带普通分页元数据。实现见 `src/config/sessions/session-accessor.sqlite-history-events.ts` 和 `src/gateway/server-methods/chat-history-pages.ts`、`:320-330`。
 
@@ -230,7 +230,7 @@ user message 可带幂等键。数据库对同一 session 的 message 幂等键�
 
 FTS 只索引活动路径中 user/assistant message 的可读文本块，工具结果、reasoning、图片二进制和不在活动路径的 branch text 不成为普通命中。索引 dirty 时旧行会被排除，返回 `indexing` 或 `truncated` 状态；Gateway 跨 store 合并时按 sessionKey/sessionId/messageId 去重，见 `src/gateway/server-methods/sessions-read.ts`。
 
-`sessions.preview` 针对显式 key 读取受限数量和字符数的 transcript 尾部，返回 `ok`、`empty`、`missing` 或 `error` 状态，不把完整历史放进列表响应。入口见 `src/gateway/server-methods/sessions-read.ts`。
+预览接口 sessions.preview 按显式 key 读取 transcript 尾部，读取条数和字符数都有上限，结果状态为 ok、empty、missing 或 error 之一，列表响应里只带这段受限尾部。入口见 `src/gateway/server-methods/sessions-read.ts`。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
@@ -238,7 +238,7 @@ FTS 只索引活动路径中 user/assistant message 的可读文本块，工具�
 
 SQLite session write 由 per-store exclusive writer queue 包住，实际 transaction 只包含同步 SQLite commit 区间；文件读取、archive materialization、插件 hook 和其他异步准备在 transaction 外完成。提交前会重新读取 authoritative session row、transcript snapshot、alias rows 和 lifecycle revision，避免准备阶段的旧快照覆盖新状态。
 
-transcript batch 追加可以同时检查 expected sessionId、lifecycleRevision、writer run id 和 turn state；发现 session rebound 时返回受控结果。删除、reset、patch、fork 和 recovery 也使用 expected identity 或 snapshot compare，相关契约见 `src/config/sessions/session-accessor.sqlite-contract.ts` 和 `src/config/sessions/session-accessor.sqlite-entry-store.ts`；跨 worker 的请求、准入与传输由 `session-accessor.sqlite-worker-coordination.ts`、`session-accessor.sqlite-worker-request.ts`、`session-accessor.sqlite-worker-admission.runtime.ts` 承担，durable 排队输入由 `session-accessor.sqlite-pending-inputs.ts` 记录。
+批量追加 transcript 时，一次准入可以同时核对期望的 sessionId、lifecycleRevision、writer run id 和 turn 状态；发现 session 已被 rebound 就返回受控结果。删除、reset、patch、fork 和 recovery 同样用期望身份或快照比较做前置校验，契约见 `src/config/sessions/session-accessor.sqlite-contract.ts` 和同目录的 entry store 模块。跨 worker 的请求、准入与传输由 worker coordination、request 与 admission 三个模块分工，持久排队输入记在 pending inputs 模块里。
 
 生命周期 mutation 还会在 transcript 操作前检查 active work admission 和 worker placement。删除会先 drain work admission；rewind、fork、branch switch 和 checkpoint restore 在 agent 工作时通常拒绝，避免一个运行中的 writer 与路径重写互相覆盖。删除流程的 drain/recheck 见 `src/gateway/server-methods/sessions-delete.ts`，消息 cut 的 active-run 拦截见 `src/gateway/server-methods/sessions-rewind.ts`。
 

@@ -48,10 +48,10 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 **完整主链**（双路径）：
 
-1. **inlay 路径**：开启后生成时把情绪指令注入提示尾部（`src/ts/process/index.svelte.ts:567-572`，指令含可用情绪名清单 `{{slot}}`）；模型在回复末尾输出 `<Emotion="名称">` 标签，`runInlayScreen` 将其改写为 `{{emotion::名称}}` 解析标签（`src/ts/process/inlayScreen.ts:7-11`）；消息渲染器把标签替换为对应图片（`src/ts/parser/parser.svelte.ts:504-511`）。
-2. **普通路径**：不启用 inlay 时，每次生成结束后发起独立的情绪分类请求——默认用当前主模型做少量示例分类（情绪名做 logit 偏置，`index.svelte.ts:2084-2160`），或当 `emotionProcesser` 设为 embedding 时改用嵌入相似度检索（`index.svelte.ts:2008-2051`）；分类结果写入 `CharEmotion` 运行时 store 并驱动立绘切换。
+1. **inlay 路径**：开启后，生成请求会把含可用情绪名清单（{{slot}} 占位）的情绪指令注入提示尾部；模型在回复末尾输出 `<Emotion="名称">` 标签，`runInlayScreen` 将其改写成 {{emotion::名称}} 解析标签，消息渲染器再替换成对应图片。三处实现依次为 `src/ts/process/index.svelte.ts:567-572`、`src/ts/process/inlayScreen.ts:7-11`、`src/ts/parser/parser.svelte.ts:504-511`。
+2. **普通路径**：不启用 inlay 时，每次生成结束都会单独发起一次情绪分类请求。默认让当前主模型做少量示例分类，并用情绪名做 logit 偏置；`emotionProcesser` 设为 embedding 时改用嵌入相似度检索。分类结果写入 `CharEmotion` 运行时 store，驱动立绘切换。两条分类实现都在 `src/ts/process/index.svelte.ts:2008-2160`。
 
-**事实对象与状态**：`CharEmotion` store 按角色保存“情绪名 + 图片路径 + 时间戳”记录（每角色保留最近 5 条，`index.svelte.ts:1974-1976`）；`getEmotion` 按时间戳取最新一条（`src/ts/util.ts:291-360`），`EmotionBox`/`ChatScreen` 消费。群聊按视图模式（multiple/single/emp）决定取单角色还是多角色并列显示（`util.ts:303-357`）。
+**事实对象与状态**：情绪状态由 `CharEmotion` 运行时 store 按角色保存，每条记录含情绪名、图片路径与时间戳，每角色只留最近 5 条（`src/ts/process/index.svelte.ts:1974-1976`）；渲染侧由 getEmotion 按时间戳取最新一条（`src/ts/util.ts:291-360`），再交给 EmotionBox 与聊天屏消费。群聊再按视图模式（multiple/single/emp）决定取单角色还是多角色并列显示。
 
 **持续性**：情绪图随角色卡持久化并在卡导入导出中迁移（`src/ts/characterCards.ts:748-766` 的 hub 模式加载与 `:1553-1556` 导出块）；`CharEmotion` 是纯运行时状态，切换角色（`Sidebar.svelte:65` 清空）或重启后回落到 neutral 默认图。
 
@@ -69,13 +69,13 @@ README（65 行）的功能清单是候选的第一来源：Emotion Images、Gro
 
 **用户目标**：为角色扮演场景提供可分享、可热更新、且不会污染主应用安全的第三方能力扩展——比“注入脚本”更进一步的产品化插件生态。
 
-**入口与触发者**：设置页导入 `.js`/`.ts` 文件或代码文本（`src/ts/plugins/plugins.svelte.ts:129-428` 的 `importPlugin`），头部注释声明插件名、API 版本、参数、更新地址与版本号；新导入已拒绝 2.0 与 2.1，只接受 3.0。数据库内已有的 2.1 插件仍会在启动时走旧加载器，不因这一入口限制被自动移除。v3 插件随设置页开发模式支持文件监听热重载（`plugins.svelte.ts:343-361,421-429`、`src/ts/plugins/apiV3/developMode.ts`）。
+**入口与触发者**：设置页支持导入 .js/.ts 文件或直接粘贴代码文本，入口是 `importPlugin`（`src/ts/plugins/plugins.svelte.ts:129-428`）；插件在头部注释里声明名称、API 版本、参数、更新地址与版本号。新导入只接受 3.0，2.0 与 2.1 会被拒绝；数据库里已有的 2.1 插件仍会在启动时走旧加载器，不因这一入口限制被自动移除。v3 插件在设置页开发模式下支持文件监听热重载（同文件 343-361、421-429 与 `src/ts/plugins/apiV3/developMode.ts`）。
 
 **完整主链**：导入 → 头解析与校验 → 按 API 版本分流执行 → 插件对象持久化到 `db.plugins` → 应用启动/导入后经 `loadPlugins` 重载（`plugins.svelte.ts:432-443`）。两条执行路径：
 
-- **v2.1**：TypeScript 代码先经 sucrase 转译（`src/ts/plugins/apiV3/transpiler.ts:1-10`），再经 acorn AST 静态检查与符号改写——命中黑名单（`eval`、`new Function`、`sessionStorage` 等，完整清单见 `src/ts/plugins/pluginSafety.ts:20-45`）即拒绝，其余全局标识符（`window`/`document`/`localStorage`/`indexedDB`）改写为安全代理（`:55-166`），随后在页面全局运行。
-- **v3.0**：每个插件一个独立 iframe，sandbox 仅放行 `allow-scripts`/`allow-modals`/`allow-downloads`，CSP 带随机 nonce 且把 `connect-src` 设为 `'none'`，iframe 内无法发起任何网络请求（`src/ts/plugins/apiV3/factory.ts:438,769-788`）。
-- **v3.0 通信面**：宿主侧 `SandboxHost` 经 postMessage RPC 处理方法分发、回调双向代理、AbortSignal 转发与 transferable 收集，`ReadableStream` 经 MessagePort 流桥跨域传输（`factory.ts:484-760`）；加载入口 `executePluginV3` 建 iframe 后执行 `host.run`（`v3.svelte.ts:1482-1500`）。
+- **v2.1**：TypeScript 代码先经 sucrase 转译（`src/ts/plugins/apiV3/transpiler.ts:1-10`），随后由 acorn AST 做静态检查与符号改写。命中 eval、new Function、sessionStorage 等黑名单的插件直接拒绝加载；window、document、localStorage、indexedDB 等全局标识符则改写成安全代理，代码随后在页面全局作用域执行（`src/ts/plugins/pluginSafety.ts:20-166` 覆盖黑名单与改写规则）。
+- **v3.0**：每个插件独占一个 iframe，sandbox 只放行 allow-scripts/allow-modals/allow-downloads，CSP 带随机 nonce 并把 connect-src 设为 'none'，插件在 iframe 内发不出任何网络请求（`src/ts/plugins/apiV3/factory.ts:438,769-788`）。
+- **v3.0 通信面**：宿主侧 SandboxHost 用 postMessage 做 RPC，负责任务分发、回调双向代理、AbortSignal 转发与 transferable 收集，ReadableStream 经 MessagePort 流桥跨域传输；加载时 executePluginV3 先建 iframe 再执行 host.run（`factory.ts:484-760`、`v3.svelte.ts:1482-1500`）。
 
 **API 面与钩子**：插件可注册的能力分几类——自定义 AI Provider、消息编辑钩子（编辑输入/处理/显示/输出文本共四类，注册表见 `plugins.svelte.ts:468-480`）、请求前后替换、生成完成监听、TTS 前/后处理钩子（`src/ts/process/ttsHooks.ts`）、MCP 模块注册（`registerMCPModule`）以及菜单/面板注入。DOM 访问经 SafeDocument/SafeElement 包装层，含标签白名单与 `freezed` 元素禁止访问（`src/ts/plugins/pluginSafeClass.ts`）。
 
@@ -97,7 +97,7 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 **入口与触发者**：消息渲染链（`src/lib/ChatScreens/ChatBody.svelte:109-149`）在启用翻译时把解析后的消息交给 `translateHTML`；输入框提供正反向翻译按钮（`DefaultChatScreen.svelte:419-439`）；翻译开关与目标语言为全局设置（`translator`、`translatorInputLanguage`）。
 
-**完整主链**：`translateHTML` 用 DOMParser 走 DOM 遍历，逐文本节点翻译并跳过 `script`/`style`/`translate="no"` 节点（`src/ts/translator/translator.ts:257-477`）；`combineTranslation` 开启时按句重组段落再逐句翻译（`:436-468`）；超长文本进入“超级分块”模式，用分隔符拼接后批量翻译、失败时逐条回退（`:321-363`）。后端经 `runTranslator` 分派（`:121-241`）：
+**完整主链**：渲染链调用 `translateHTML` 时用 DOMParser 遍历 DOM，逐文本节点翻译，跳过 script、style 与 translate="no" 节点；开启 combineTranslation 后按句重组段落再逐句翻译；超长文本进入“超级分块”模式，用分隔符拼接后批量翻译，失败时逐条回退。这些处理与后端分派（runTranslator 按配置选择翻译后端）都在 `src/ts/translator/translator.ts:121-477`。分派目标如下：
 
 - LLM：复用当前 Provider，按翻译预设请求（`presets.ts`，预设可导出为 `.risutl` 加密文件）；
 - DeepL / DeepLX：官方 API 或本地 DeepLX 服务；
@@ -122,9 +122,9 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 **完整主链**（`src/ts/process/files/multisend.ts:196-316` 按扩展名分派）：
 
-- **.po 翻译流水线**：解析 gettext 文件，逐条 `msgid` 作为用户消息发送并触发生成，收集 `msgstr` 重建 `.po` 文件下载（`multisend.ts:16-109`，含 Speaker/Note 注释保留）。
-- **pdf/txt/xml**：解析内容后经 `HypaProcesser` 本地嵌入，按附带查询取最相似的若干条（最多 6 条）剪裁为 `<File>...</File>` 块发送（`multisend.ts:111-178`）。
-- **图片/音频/视频**：经 `postInlayAsset` 存入 localforage `inlay` 存储并在消息中渲染（`src/ts/process/files/inlays.ts:35-81`）。
+- **.po 翻译流水线**：解析 gettext 文件后，把每条 msgid 当作用户消息发送并触发生成，收集返回的 msgstr 重建 .po 文件供下载，Speaker/Note 注释一并保留（`multisend.ts:16-109`）。
+- **pdf/txt/xml**：解析内容后经 HypaProcesser 做本地嵌入，按附带查询取最相似的若干条（最多 6 条）剪裁为 `<File>` 块发送（`multisend.ts:111-178`）。
+- **图片/音频/视频**：经 postInlayAsset 存入 localforage 的 inlay 存储，并在消息中渲染出来（`src/ts/process/files/inlays.ts:35-81`）。
 
 **持续性**：inlay 媒体存 IndexedDB；.po 输出文件即时下载，不落库。
 
@@ -138,7 +138,7 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 **入口与触发者**：聊天列表创建房间（`src/lib/SideBars/SideChatList.svelte:298,410`，UI 带 experimental 标记），Playground 菜单输入房间号加入（`src/lib/Playground/PlaygroundMenu.svelte:128`）。触发者为成员的消息发送。
 
-**完整主链**（`src/ts/sync/multiuser.ts`）：host 经 PeerJS 建房间（`:60-256`）→ 加入者连接后 host 发送当前角色（仅当前聊天）+ 缺失资产（`:81-125`）→ 加入者创建 `§temp` 临时角色（`:290-309`）→ 每次生成结束 `peerSync()` 向房间广播最新聊天（`:369-391`，调用点 `index.svelte.ts:1963`）→ 生成前 `peerSafeCheck()` 轮询全体成员空闲状态做互斥（`:393-429`），冲突时 `peerRevertChat` 回退到最近同步快照。
+**完整主链**（`src/ts/sync/multiuser.ts:60-429`）：host 经 PeerJS 建房间，加入者连上后由 host 下发当前角色（仅当前聊天）与缺失资产，并在本地建出 §temp 临时角色；此后每次生成结束，客户端调用 `peerSync()` 把最新聊天广播给房间成员；生成前用 `peerSafeCheck()` 轮询全体成员的空闲状态做互斥，冲突时 `peerRevertChat` 回退到最近一次同步快照（广播调用点在 `src/ts/process/index.svelte.ts:1963`）。
 
 **持续性**：无持久化——状态只活在连接生命周期内，断开即失联；同步范围仅限“当前角色的当前聊天”，不是整库同步。
 
@@ -152,9 +152,13 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 **用户目标**：角色卡的“市场—下载—分享—资源托管”闭环——应用内置浏览与分享界面，上传资源经应用自身站点托管（与 Chub 的第三方依赖形成对比）。
 
-**入口与触发者**：Realm 浏览界面（`src/lib/UI/Realm/RealmMain.svelte:22` 调 `getRisuHub`）、主菜单与 Lite 界面的市场卡（`MainMenu.svelte:61`、`LiteMain.svelte:26`）、上传页（`RealmUpload.svelte:88`）。
+**入口与触发者**：市场功能有三组入口，触发者都是用户点击：
 
-**完整主链**：搜索/分页/nsfw/排序参数拼入 `hubURL/realm/` 查询（`src/ts/characterCards.ts:1775-1802`）→ 详情与下载（`downloadRisuHub`，含 TOS 确认，`:1804+`）→ 以 hub 模式导入，卡内资源（情绪图、附加资产、VITS）经 `getHubResources` 从资源服务器拉取（`:1876-1882`、`importCharacterCardSpec` 的 hub 分支）→ 分享时导出 PNG 卡并打开 `realm.risuai.net` 上传（`shareRisuHub2:1681-1750`，成功后写回 `realmId`）。
+- Realm 浏览界面，进入后调 `getRisuHub`（`src/lib/UI/Realm/RealmMain.svelte:22`）；
+- 主菜单与 Lite 界面的市场卡（`MainMenu.svelte:61`、`LiteMain.svelte:26`）；
+- 上传页（`RealmUpload.svelte:88`）。
+
+**完整主链**（`src/ts/characterCards.ts:1681-1882`）：浏览页把搜索词、分页、nsfw 与排序参数拼进 hubURL/realm/ 查询；选中条目后经 `downloadRisuHub` 确认 TOS 再下载；导入走 hub 模式，卡内情绪图、附加资产与 VITS 由 `getHubResources` 从资源服务器单独拉取；分享时导出 PNG 卡并打开 realm.risuai.net 上传，成功后把 `realmId` 写回角色对象。
 
 **持续性**：`realmId` 存角色对象，可续传更新；账号、Drive 备份与远端冷存储属同一 hub 站点体系，但机制已在 LLM 渠道管理笔记（账号同步与 backupDrive）与会话与消息管理笔记（冷存储）覆盖。
 
@@ -164,12 +168,12 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 ## 已归并到现有类目的能力
 
-- **记忆系统**：四套可切换记忆压缩引擎（SupaMemory 滚动摘要、HypaMemoryV2/V3 分层与预算化摘要、HanuraiMemory 嵌入检索召回）的触发、预算、注入与聊天级持久化（状态存聊天的三个记忆字段）已由[对话请求与上下文调查笔记](../对话请求与上下文/Risuai-对话请求与上下文调查笔记.md) §3 完整覆盖（入口 `src/ts/process/index.svelte.ts:1068-1154`）。产品角度补充一句：README 把 Long-term Memory 列为旗舰，其辨识度在于**单一聊天上四选一的记忆引擎 + 嵌入向量本地缓存**（localforage `hypaVector`，`hypamemory.ts:38-230`），机制面不再重写。
+- **记忆系统**：同一聊天可以在四套记忆压缩引擎之间切换——SupaMemory 做滚动摘要，HypaMemoryV2/V3 做分层并按预算压缩，HanuraiMemory 用嵌入检索召回；它们的触发、预算、注入与聊天级持久化（状态落在聊天的三个记忆字段里）已由[对话请求与上下文调查笔记](../对话请求与上下文/Risuai-对话请求与上下文调查笔记.md) §3 完整覆盖（入口 `src/ts/process/index.svelte.ts:1068-1154`）。产品角度的补充是：README 把 Long-term Memory 列为旗舰，辨识度在**单一聊天四选一 + 嵌入向量本地缓存**（localforage 的 hypaVector，`hypamemory.ts:38-230`），机制面不再重写。
 - **Powerful Prompting**（模板、formatingOrder、条件变量、Impersonate）：提示词拼装顺序与模板消费已在对话请求与上下文笔记 §2 覆盖（`templates/templates.ts` 的 prebuiltPresets 只是数据）。
 - **Regex Script / 触发脚本**：start/request/output/display 等触发点的编辑脚本（含 Lua/Pyodide 引擎，`scriptings.ts`）已在对话请求与上下文笔记（脚本触发点 888-898、900-1053、1763）覆盖，归并入“请求与上下文”类目。
 - **Lorebook**：角色级/聊天级/模块三源合并激活已由 [Agent 角色配置调查笔记](../Agent角色/Risuai-Agent角色配置调查笔记.md) 与对话请求与上下文笔记（`loadLoreBookV3Prompt`）覆盖。
 - **Group Chats**：群聊对象与上下文注入为角色扮演通用能力，已在 Chat 概览与对话请求与上下文笔记覆盖；情绪卡中的群聊多角色显示属于情绪能力扩展面。
-- **Additional Assets**（聊天内嵌图片/音视频/背景/BGM）：解析器标签面（`{{img::}}`/`{{video::}}`/`{{bg::}}`/`{{bgm::}}` 等，`parser.svelte.ts:408-580`）为消息渲染/媒体嵌入面，Risuai 尚未建立消息渲染器专项笔记，本次仅确认到 `入口确认`，不展开为能力卡；其“模糊匹配 + 哈希随机多路径”细节待渲染器类目承接。
+- **Additional Assets**（聊天内嵌图片/音视频/背景/BGM）：解析器把 `{{img::}}` 这类嵌入标签渲染为图片、视频、背景与 BGM（`src/ts/parser/parser.svelte.ts:408-580`），这一面属于消息渲染与媒体嵌入。Risuai 尚未建立消息渲染器专项笔记，本次仅确认到 `入口确认`，不展开为能力卡；其“模糊匹配 + 哈希随机多路径”细节待渲染器类目承接。
 - **MCP**：工具注册与执行归 Agent 工具类目（Risuai 专项笔记未建立，Agent 角色笔记 §5 已记录 `RisuModule.mcp` 与插件层注册入口）；本快照另有 filesystem/google search/dice/graphmem/aiaccess/risuaccess 等内置 MCP 客户端（`src/ts/process/mcp/`）。
 - **TTS**：通用能力，多 Provider（webspeech/elevenlab/VOICEVOX/novelai/openai/huggingface/vits/gptsovits/fishspeech）为普通配置面；插件 TTS 钩子（`ttsHooks.ts`）并入插件能力卡，不单独计数。
 - **Stable Diffusion**：多 Provider 出图为通用扩展（`stableDiff.ts`，webui/novelai/dalle/stability/comfy/kei/fal/Imagen/openai-compat/wavespeed）；其 imggen inlay 模式（模型输出 `<ImgGen="...">` → 自动出图 → 消息内渲染，`inlayScreen.ts:12-45`）与情绪卡同一机制族，并入能力一叙述。
@@ -179,7 +183,7 @@ v3 的 CBS 解析 API 按当前角色和活动会话解析宏文本，可选继�
 
 ## 声明不符、外部依赖与暂缓项
 
-- **Visual Novel 模式**：本快照未找到实现。检查范围：README 功能清单（无此条目）、AGENTS.md 声称的 `src/lib/VisualNovel/` 目录（不存在）、全仓检索 `VisualNovel|visualnovel|vn_`（`src` 下零命中，仅 `src/ts/iris.ts:86` 内建助手提示词中的 “visual novel style” 字样与越南国家码 “VN”）。结论：任务候选清单把它列为 README 宣传与实际不符；若指后续版本功能，需在新快照复查。
+- **Visual Novel 模式**：本快照未找到实现。README 功能清单没有这一条目，AGENTS.md 声称的 src/lib/VisualNovel/ 目录并不存在，全仓检索 `VisualNovel|visualnovel|vn_` 在 src 下零命中，只有 `src/ts/iris.ts:86` 内建助手提示词里出现 “visual novel style” 字样和越南国家码 “VN”。任务候选清单把它列为 README 宣传与实际不符；若指后续版本功能，需在新快照复查。
 - **`req.special.emotion` 路径**：请求响应类型中保留的“分类结果回填立绘”字段在快照中未找到任何写方（检索 `request/` 全目录），判定为遗留类型定义。
 - **Risu Hub / 多用户同步的外部依赖**：hub 服务器与 realm.risuai.net、PeerJS 公共信令服务器均为仓库外服务；客户端接入主链已确认，服务端行为不在本仓库。
 - **暂缓项**：插件市场生态规模、Risu Hub 服务端策略与账号权益为外部事实，不入特色统计。

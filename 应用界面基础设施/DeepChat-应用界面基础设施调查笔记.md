@@ -20,7 +20,12 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 
 主题由主进程设置和 Electron nativeTheme 共同持有，渲染层通过带 revision 的 IPC 快照同步。用户配置集中在明暗、字号和正文或代码字体；主色阶、圆角和密度没有用户入口，也没有主题市场、壁纸、导入导出或自定义 CSS。多窗口主题与通知链路已静态确认，视觉时序仍未运行验证。
 
-设置窗的控制中心由四部分构成：渠道目录与多阶段新增流程（`ProviderCatalog.vue`、`AddProviderFlow.vue`），定时任务列表与详情面板及其投递/调度模板（`cronJobs/`、`CronJobsSettings.vue`），同步设置页与独立 store（`TunnelSyncSettings.vue`、`stores/tunnelSync.ts`），记忆影响复核与谱系视图（`MemoryImpactReview.vue`、`MemoryLineageSection.vue`）。
+设置窗的控制中心集中了渠道、定时任务、同步和记忆四块功能，各有自己的页面组件：
+
+- 渠道目录与多阶段新增流程：`ProviderCatalog.vue`、`AddProviderFlow.vue`
+- 定时任务列表与详情面板，含投递与调度模板：`cronJobs/`、`CronJobsSettings.vue`
+- 同步设置页与独立 store：`TunnelSyncSettings.vue`、`stores/tunnelSync.ts`
+- 记忆影响复核与谱系视图：`MemoryImpactReview.vue`、`MemoryLineageSection.vue`
 
 选择组原语位于 `src/dc-ui/components/choice-group/`，Provider 设置页采用分阶段编辑凭据；它们继续使用既有 renderer 到主进程的配置边界，未构成新的全局状态所有者。
 
@@ -33,7 +38,7 @@ DeepChat 以 shadcn-vue 和 Reka UI 原始组件为基础，并在少数场景�
 组件层 = src/shadcn（shadcn-vue 原始组件，底层 Reka UI reka-ui@^2.10.1）+ src/dc-ui（业务公共壳：DcButton、DcConfirmDialog、DcEmpty、DcSkeleton、DcSheetPanel、StatusPill、InlineError 等）+ 业务组件目录。无 Element Plus/antd/Naive；
 
 无 framer-motion。package.json 依赖确认 Reka UI、vue-sonner、@vueuse/core、@iconify/vue、vue-virtual-scroller、vuedraggable、tippy.js 等在列；这份清单只反映依赖声明，下文的库使用均给出源码接入点。
-- **渲染入口装配**（`src/renderer/src/main.ts:14-44`）：`bootstrap()` 先 await createRendererI18n 并把 document.documentElement.dir 设为 rtl/auto（:20），随后才 createApp + Pinia + PiniaColada（staleTime: 30_000、gcTime: 300_000，注释说明 renderer 数据走 IPC、保持热缓存，:27-33）+ router + i18n，mount('#app') 后再 setTimeout 预载图标（:39-43）。
+- **渲染入口装配。** `bootstrap()` 先等待 i18n 实例创建完成，并把 `document.documentElement.dir` 设为 rtl 或 auto；随后调用 createApp，依次装入 Pinia、PiniaColada、router 和 i18n，挂载 `#app` 之后用 setTimeout 预载图标。PiniaColada 的 staleTime 为 30_000、gcTime 为 300_000，注释说明 renderer 数据经 IPC 读取、保持热缓存。装配顺序与参数见 `src/renderer/src/main.ts:14-44`。
 
   **挂载前没有主题内联脚本**（见第 4 节）。
 
@@ -81,7 +86,7 @@ renderer 的对话框 store 收事件后驱动 MessageDialog（shadcn AlertDialo
 当 timeout 大于 0 且有默认按钮时，倒计时以 100ms 步进，到期自动提交默认键（`stores/dialog.ts:23-34`）；按钮文本默认按 i18n 键翻译。消费方示例：useMessageActions 的删除确认经 DcConfirmDialog（页面内），知识库索引重建等主进程场景经 MessageDialog。
 2. **页面内业务确认 DcConfirmDialog**（`src/dc-ui/components/confirm-dialog/DcConfirmDialog.vue:55-90`）：包 shadcn AlertDialog，并用自研异步动作组件封装按钮；
 
-该组件支持 danger、确认文案、忙碌态和禁用确认。ChatPage 删除消息确认即此组件，状态 pendingDeleteMessageId 由 useMessageActions 持有（`ChatPage.vue:302-312`、`useMessageActions.ts:59`）。
+该组件提供 danger 样式、确认文案、忙碌态和禁用确认四项能力。ChatPage 删除消息时的确认框就是它，状态由 useMessageActions 持有，记在 pendingDeleteMessageId 上，入口见 `ChatPage.vue:302-312` 与 `useMessageActions.ts:59`。
 3. **组件内 Dialog**：图片全屏查看（`MessageBlockImage.vue:31-63`）、fork 确认（`MessageItemAssistant.vue:202-218`，legacy 路径）等，直接使用 shadcn Dialog 原始件。
 
 ### 2.2 层级、Portal 与关闭机制
@@ -197,13 +202,13 @@ CSS 提供 @media (prefers-color-scheme: dark) 的 `:root:not(.dark):not([data-t
 
 ### 4.2 视觉 token 与第三方接入
 
-- **token 布局**（`style.css`）：:root 定义 Shadcn 语义变量（`--background/--foreground/--card/--popover/--primary/--muted/...`，:69-114）与 `--dc-*` 私有层（字体族 :23-27、motion 时长 :123-125、ease 缓动 :126-127、模糊 :130-132、z 刻度 :134-146、通知四色 :154-165）；
+- **token 布局。** 样式入口 `style.css` 的根选择器下铺了两层变量：一层是 shadcn 语义变量，覆盖背景、前景、卡片、浮层、主色、弱化色等；另一层是 `--dc-*` 私有层，按字体族、motion 时长、ease 缓动、模糊、z 刻度和通知四色分组。
 
-  `.dark`/`[data-theme='dark']` 覆写（:221-291）；`--dc-font-scale` 由 html.text-* 字号类驱动（:198-218），`--radius` 系列与 `--animation-*`（:110-121）供 shadcn 组件使用。@custom-variant dark 绑定 `.dark`/`[data-theme='dark']`（:16）。
+  暗色主题由 `.dark` 与 `[data-theme='dark']` 选择器覆写同一批变量；字号缩放由 html 上的 text-* 字号类驱动；`--radius` 系列与 `--animation-*` 供 shadcn 组件使用；@custom-variant dark 也绑定这两个暗色选择器。上述变量定义与覆写集中在 `style.css:16-291`。
 
-**主色阶（静态预设，非引擎）。** `--primary-50`..`--primary-1000` 共 11 级硬编码 hsl（`style.css:41-52`），`--ring`/`--chart-*`/`--sidebar-primary` 引用之（:95-108）；本次未找到动态色阶生成、accentColor/primaryColor 设置键或用户主色选择（2026-08-13 专项核对，见 4.3）。
+**主色阶是静态预设。** `--primary-*` 从 50 到 1000 共 11 级，全部以硬编码 hsl 值写在样式文件中；环形高亮色、图表色板和侧栏主色都直接引用这套色阶。代码中没有动态色阶生成逻辑，设置里也没有 accentColor、primaryColor 这类主色键，用户无法选择主色（2026-08-13 专项核对，见 4.3）。定义位置见 `style.css:41-108`。
 
-**缓动与时长 token。** `--dc-ease-out-express` cubic-bezier(0.16,1,0.3,1) 与 `--dc-ease-out-soft` cubic-bezier(0.22,1,0.36,1)（`style.css:126-127`），配合 `--dc-motion-fast/default/slow`（140/220/320ms，:123-125）被 `--animation-*`（:116-121）与组件过渡（:916,926,1107）统一消费。
+**缓动与时长 token。** 缓动 token 在 `--dc-ease-out-` 前缀下分 express 与 soft 两档，取值分别是 cubic-bezier(0.16,1,0.3,1) 与 cubic-bezier(0.22,1,0.36,1)；时长 token 在 `--dc-motion-` 前缀下分 fast、default、slow 三档，依次为 140ms、220ms、320ms。`--animation-*` 变量和组件过渡统一消费这套 token，定义见 `style.css:116-127`。
 
 **字体（双字体体系，正文/代码分离）。** renderer 侧 useFontManager 把设置里的字体栈写到 document.documentElement.style 的 `--dc-font-family` 与 `--dc-code-font-family` 两个变量（`useFontManager.ts:7-10`），正文组件引用前者（`style.css:921`）、代码块引用后者（:950）。
 
@@ -241,7 +246,7 @@ renderer 侧 buildFontStack（`src/renderer/src/lib/fontStack.ts:7-13`）把自�
 
 窗口 resize 时重新 clamp（:90-95）。面板拖动 resize 在 `ChatSidePanel.vue:212-235`（rAF 合并写入 store）。
 
-**窗口最小尺寸。** 主聊天窗 createManagedWindow **未设 minWidth/minHeight**（`window/index.ts:650-682`，默认 800×620 可任意缩小）；设置窗 minWidth: 900, minHeight: 640（:1310-1311）；悬浮聊天窗 minSize 460×450（`FloatingChatWindow.ts:33-39`）；
+**窗口最小尺寸。** 几类窗口的尺寸下限并不一致。主聊天窗由 createManagedWindow 创建，没有设置 minWidth 和 minHeight，沿用 800×620 的默认尺寸，可以继续缩小；设置窗把最小宽高定为 900×640；悬浮聊天窗的 minSize 是 460×450。参数位置见 `window/index.ts:650-682,1310-1311` 与 `FloatingChatWindow.ts:33-39`；
 
 远程控制窗 420/380（`src/main/remote/index.ts:2457,2523`）。窗口位置/尺寸经 electron-window-state 持久化（`window/index.ts:622-627` 与设置窗 1295）。
 
@@ -259,7 +264,7 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 
 视频/音频块有 MessageBlockVideo/MessageBlockAudio（仅呈现，未发现公共播放器设施）。
 
-**拖放与上传。** Composer 容器 `@dragover/@drop`（`ChatInputBox.vue:9-11`）→ useChatInputFiles（`src/renderer/src/components/chat/composables/useChatInputFiles.ts`）：文件选择/粘贴/拖放三条入口统一走 processIncomingFiles（:121-143），图片转 base64 + 写临时文件 + 估算 token（:57-83），目录经 fileClient.prepareDirectory（:104-109），失败文件聚合成一条错误 toast（:41-55，最多列 3 个名字）。
+**拖放与上传。** Composer 容器监听 dragover 和 drop 事件，把文件交给 useChatInputFiles 处理。文件选择、粘贴和拖放三条入口最终汇入同一个 processIncomingFiles：图片先转成 base64、写入临时文件并估算 token；目录经 fileClient.prepareDirectory 处理；处理失败的文件合并成一条错误 toast，最多列出 3 个文件名。事件绑定见 `ChatInputBox.vue:9-11`，处理逻辑见 `src/renderer/src/components/chat/composables/useChatInputFiles.ts:41-143`。
 
 粘贴事件在 @paste.capture 用 _deepchatHandled 标记防重复处理（:157-165、`ChatInputBox.vue:22`），纯 URL 粘贴另走 clipboardUrlPaste 插入为链接（`ChatInputBox.vue:707-714`）。上传后处理（token 超限、模型能力过滤等）属聊天主链，见 ChatUI 笔记 §3。
 
@@ -289,17 +294,17 @@ handleImageDialogOpenAutoFocus 在 open-auto-focus 里 preventDefault 后手动�
 
 - 已有显式语义的位置：ManagedNotificationToast 的 `role="alert"/"status"` 分级与 progressbar 语义（§3.1）；历史加载失败条 `role="alert"`（`ChatPage.vue:68`）；消息滚动区 `role="status" aria-live`（ChatUI 笔记 §9）；
 
-  MessageBlockError/ActivityGroup 折叠真实 `aria-expanded/aria-controls`；设置路由切换 aria-busy；Spotlight 结果行 data-spotlight-active 但无 aria-activedescendant 语义（自实现键盘导航，读屏联动未验证）。
-- 未核实/未见：Reka 组件（Dialog/Tooltip/DropdownMenu）内部焦点管理未下钻；useLegacyActions 默认路径下消息右键菜单不可达（键盘等效路径缺失是静态可见的，但影响未验证）；应用级 focus trap 策略未发现；prefers-reduced-motion 全局兜底存在（`style.css:930-943`：transition/animation 压到 1ms），业务组件局部覆盖未逐一核对。
+  MessageBlockError 和 ActivityGroup 的折叠使用真实的 `aria-expanded` 与 `aria-controls` 属性；设置路由切换期间标记 `aria-busy`；Spotlight 的结果行用 `data-spotlight-active` 标记当前项，缺少 `aria-activedescendant` 语义，键盘导航为自实现，读屏联动未验证。
+- 未核实/未见：Reka 的 Dialog、Tooltip、DropdownMenu 内部焦点管理未继续下钻；useLegacyActions 默认路径下消息右键菜单不可达，键盘等效路径同样缺失，实际影响未验证；应用级 focus trap 策略未发现；全局 prefers-reduced-motion 兜底存在，把 transition 和 animation 压到 1ms，业务组件是否有局部覆盖未逐一核对（`style.css:930-943`）。
 - 结论边界：以上均为静态代码观察，不构成 WCAG 合规判断。
 - `useAccessibilitySupport` 从桌面桥读取并订阅 accessibility support 状态，默认启用；ChatPage 将其传给列表窗口化开关，因此辅助技术模式下不再卸载视口外消息。入口见 `src/renderer/src/composables/useAccessibilitySupport.ts`、`src/renderer/src/features/chat-page/ChatPage.vue:428,955`。
 - Composer 的 Mention 建议采用 listbox/option、`aria-activedescendant` 与状态播报；消息活动组、工具卡、压缩分隔行和工作区计划面板使用成对的 `aria-expanded/aria-controls`。这些是关键路径语义补充，仍未覆盖全应用无障碍审计。
 
 ### 7.3 动画与过渡
 
-- 无 framer-motion（package.json 无匹配）；三件套：tw-animate-css（`style.css:2`）+ tailwindcss-animate（:7）+ Reka `data-[state]` 动画类（shadcn 组件类如 `dialog/DialogContent.vue:38` 的 fade-in/zoom-in/out）。
+- **动画基础件。** 项目未引入 framer-motion，package.json 中没有匹配项。过渡效果由三部分组成：tw-animate-css、tailwindcss-animate，以及 Reka 组件依据 `data-[state]` 属性提供的动画类，shadcn 组件再挂上 fade-in 与 zoom-in/out 这类进出场类名。样式入口见 `style.css:2`，组件侧示例见 `dialog/DialogContent.vue:38`。
 - `dc-ui/styles/motion.css` 给 Reka tooltip/select/context-menu 统一 transform-origin 变量。
-- 业务自定义：Spotlight 进出台 dc-spotlight-* transition（80ms，含 reduced-motion 覆盖，`SpotlightOverlay.vue:336-369`）；ManagedNotificationToast 的 spinner/progress 动画（§3.1）；dc-theme-switching 切主题防抖（§4.1）。`--dc-motion-*` 时长 token（140/220/320ms）统一消费。
+- **业务自定义动画。** Spotlight 用 dc-spotlight-* 一组进出场 transition 控制显隐，时长 80ms，并带 reduced-motion 覆盖；通知 toast 的 spinner 与进度条动画见 §3.1；切换主题时由 dc-theme-switching 类抑制过渡，见 §4.1。这几处都消费 `--dc-motion-*` 时长 token（140/220/320ms）。Spotlight 的实现见 `SpotlightOverlay.vue:336-369`。
 
 ## 8. 设计取舍与已确认边界
 

@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-- OpenOcta 没有单一的“角色”实体，当前代码里同时存在两套配置。数字员工（employees）是可持久化的模板，保存 Prompt、SkillIDs 和专属 MCP；`agents.list` 则是运行主体配置，负责 workspace、模型、身份名称和路由命名空间，但它的配置结构没有 Prompt 字段。两者通过 sessionKey 在同一次运行中汇合。
-- 数字员工模板存放在状态目录下的 `employees/<id>/manifest.json`。Windows 默认位置是 `%APPDATA%\openocta\employees`，其他平台通常是 `~/.openocta/employees`，路径解析见 `src/pkg/employees/paths.go:14-17`。模板的字段定义见 `src/pkg/employees/model.go:7-30`。
-- 角色绑定不使用用户级或路由级外键，而是把身份编码进 sessionKey。数字员工会话使用 `agent:main:employee:<id>` 或其变体，聊天入口再从 key 中反解员工 ID；反解逻辑见 `src/pkg/gateway/handlers/chat.go:1419-1448`。
-- 数字员工的 Prompt 通过 `SystemPromptOverrides` 进入运行时，语义是替换内置基础系统提示，而不是在默认提示后追加。替换发生在 `src/pkg/agent/runtime/runtime.go:71-86`，赋值来源见 `src/pkg/gateway/handlers/chat.go:2212-2218`。
-- 替换之后，运行时仍可能追加技能说明、知识库说明和演进快照段落；因此“员工 Prompt”是基础指令的唯一来源，但不是最终系统提示的全部内容。追加顺序见 `src/pkg/agent/runtime/runtime.go:87-101`。
+- 角色由两套并存的配置共同定义。数字员工（employees）是可持久化的模板，保存 Prompt、SkillIDs 和专属 MCP；agents.list 是运行主体配置，负责 workspace、模型、身份名称和路由命名空间，其结构中没有 Prompt 字段。两者在同一次运行中通过 sessionKey 汇合。
+- 数字员工模板是状态目录下的 employees/<id>/manifest.json。Windows 默认位置为 `%APPDATA%\openocta\employees`，其他平台通常为 `~/.openocta/employees`；路径解析与字段定义分别见 `src/pkg/employees/paths.go:14-17` 和 `src/pkg/employees/model.go:7-30`。
+- 角色绑定把身份编码进 sessionKey，用户级或路由级外键都不参与。数字员工会话使用 `agent:main:employee:<id>` 或其变体，聊天入口从 key 中反解员工 ID，反解逻辑见 `src/pkg/gateway/handlers/chat.go:1419-1448`。
+- 数字员工的 Prompt 经 `SystemPromptOverrides` 进入运行时，在那里整体替换内置基础系统提示；替换点见 `src/pkg/agent/runtime/runtime.go:71-86`，赋值来源见 `src/pkg/gateway/handlers/chat.go:2212-2218`。
+- 替换之后，运行时仍可能追加技能说明、知识库说明和演进快照段落，追加顺序见 `src/pkg/agent/runtime/runtime.go:87-101`；员工 Prompt 因此是基础指令的唯一来源，最终系统提示还包含这些追加内容。
 - 模型绑定在 `agents.list[].model` 上，数字员工 Manifest 没有模型字段。请求参数里的 `modelRef` 优先于 Agent 配置，Agent 配置再优先于 defaults；解析入口见 `src/pkg/agent/model_factory.go:80-88`。
-- 技能与 MCP 是数字员工与 Agent 配置差异最大的两处能力。数字员工可以声明 `skillIds` 和专属 `mcpServers`，运行时按员工 ID 加载技能目录并与全局 MCP 合并；合并逻辑见 `src/pkg/gateway/handlers/chat.go:1389-1411`。
-- `agents.*` 的列表、创建、更新和删除处理器当前是占位实现：列表固定返回空数组，其余多数返回 `method_not_implemented`。因此没有通过专用 RPC 创建普通 Agent 的可执行路径；现有 Agent 由配置文件提供，配置表单是否覆盖该段本次未验证。实现见 `src/pkg/gateway/handlers/agents_extended.go:7-65`。
+- 技能与 MCP 是两套配置差异最大的能力：数字员工可以声明 skillIds 和专属 mcpServers，运行时按员工 ID 加载技能目录并与全局 MCP 合并，合并逻辑见 `src/pkg/gateway/handlers/chat.go:1389-1411`。
+- `agents.*` 的列表、创建、更新和删除处理器当前是占位实现：列表固定返回空数组，其余多数返回 method_not_implemented，实现见 `src/pkg/gateway/handlers/agents_extended.go:7-65`。因此没有通过专用 RPC 创建普通 Agent 的可执行路径；现有 Agent 由配置文件提供，配置表单是否覆盖该段本次未验证。
 
 ## 系统边界与总体调用链
 
@@ -38,11 +38,11 @@
 
 ### 一次数字员工对话的主链
 
-1. 前端或调用方以 `agent:main:employee:<id>` 作为 sessionKey 发起 `chat.send`。员工页优先复用已有的稳定 key，见 `ui/src/ui/app-render.ts:112-149`。
-2. `ChatSendHandler` 解析 sessionKey 中的 Agent ID 和员工 ID。Agent ID 来自 key 的第二段，员工 ID 由专门的前缀解析函数提取；入口见 `src/pkg/gateway/handlers/chat.go:1730`。
-3. 处理器根据 Agent ID 解析 workspace，再读取主配置与员工 Manifest。workspace 解析见 `src/pkg/agent/workspace.go:17-47`，员工 Prompt 读取见 `src/pkg/gateway/handlers/chat.go:2194-2218`。
-4. 处理器合并全局 MCP 与员工专属 MCP，并把员工 Prompt、技能过滤、MCP 过滤和模型选择一起纳入运行时指纹。MCP 合并见 `chat.go:2207-2211`，指纹见 `chat.go:2239-2249`。
-5. 运行时池按指纹创建或复用运行时。创建时装配工具、模型工厂、技能目录、审批开关和系统提示覆盖值；运行时构造见 `src/pkg/agent/runtime/runtime.go:40-149`。
+1. 前端或调用方发起 `chat.send` 时把 `agent:main:employee:<id>` 作为 sessionKey，员工页会优先复用已有的稳定 key，见 `ui/src/ui/app-render.ts:112-149`。
+2. `ChatSendHandler` 解析 sessionKey 里的 Agent ID 和员工 ID：前者取自 key 的第二段，后者由专门的前缀解析函数提取，入口见 `src/pkg/gateway/handlers/chat.go:1730`。
+3. 处理器先用 Agent ID 解析 workspace（`src/pkg/agent/workspace.go:17-47`），再从主配置和员工 Manifest 读出 Prompt，读取位置见 `src/pkg/gateway/handlers/chat.go:2194-2218`。
+4. 处理器合并全局 MCP 与员工专属 MCP，再把员工 Prompt、技能过滤、MCP 过滤和模型选择一起纳入运行时指纹；合并与指纹计算见 `src/pkg/gateway/handlers/chat.go:2207-2249`。
+5. 运行时池按指纹创建或复用运行时，创建时装配工具、模型工厂、技能目录、审批开关和系统提示覆盖值，构造过程见 `src/pkg/agent/runtime/runtime.go:40-149`。
 6. 运行时构建 Eino DeepAgent，把系统提示作为 Instruction，把工具和中间件交给 Agent；构建见 `src/pkg/agent/eino/engine.go:63-155`。
 7. 运行结束后，`chat.send` 把技能快照写入会话条目，并可选择写入系统提示报告和工具列表。写入入口见 `src/pkg/gateway/handlers/chat.go:1451-1495`。
 

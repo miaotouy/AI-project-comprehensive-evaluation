@@ -16,10 +16,10 @@
 
 LobeHub 的单个 Agent 对象（`LobeAgentConfig`）包含四个主要层：
 
-1. **人格/元数据**：系统提示词（`systemRole`）、显示名、头像、背景色、少样本对话（`fewShots`）、开场白（`openingMessage`/`openingQuestions`）和独立的角色档案（`profile`）；
-2. **模型偏好**：`model`、`provider` 与标准推理参数 `params`（temperature、topP、maxTokens 等）；
-3. **对话配置**（`chatConfig`，`LobeAgentChatConfig`）：超过 40 个可选字段，控制推理模式、历史压缩、工具模式、内存、搜索、Agent 模式等；图式编排归入执行配置，见 §5.5；
-4. **外部能力**：市场插件（`plugins`）、知识库（`knowledgeBases`）、附件（`files`）、语音合成（`tts`）、异构 Agent 绑定（`agencyConfig`，含图式编排），以及设置面板里的连接器、图式运行时与 IM 渠道分区。
+1. **人格与元数据**：系统提示词、显示名、头像与背景色，另含少样本对话、开场白和独立的角色档案；
+2. **模型偏好**：每个 Agent 自选模型与 provider，标准推理参数（temperature、topP、maxTokens 等）统一收在 `params` 里；
+3. **对话配置**：由 `chatConfig` 承载，超过 40 个可选字段覆盖推理模式、历史压缩、工具模式、内存、搜索与 Agent 模式；图式编排归入执行配置，见 §5.5；
+4. **外部能力**：市场插件、知识库、附件、语音合成与异构 Agent 绑定（`agencyConfig`，含图式编排），设置面板另为此提供连接器、图式运行时与 IM 渠道分区。
 
 与 Cherry Studio 类似，模型参数写在 Agent 内部，不在 Session 级；每个 Agent 还可以独立选择模型和 provider，比 Cherry Studio 更细粒度（支持 `provider` 字段单独覆盖）。
 
@@ -60,10 +60,13 @@ schema 把角色档案作为独立 JSONB 列保存：`profile` 的 `AgentProfile
 | `openingMessage` | 用户进入对话时 Agent 显示的开场白文本 |
 | `openingQuestions` | 开场推荐问题列表，UI 作为快捷提问显示 |
 
-**少样本字段的消费缺口**：`fewShots` 在 `src/` 与 `packages/agent-runtime/` **零命中**；`apps/server` 侧仅三处读取，均非 UI 编辑或请求注入路径：
-- `globalConfig/parseDefaultAgent.test.ts`：默认 Agent 解析测试；
-- `routers/lambda/agentGroup.ts`：群组 Agent 结构；
-- `services/agentEvalRun/index.ts`：评估运行读取配置。
+**少样本字段的消费缺口**：`fewShots` 在前端 `src/` 与 `packages/agent-runtime/` 内零命中，服务端只有三处读取，且都不落在 UI 编辑或请求注入路径上：
+
+| 读取位置 | 用途 |
+| --- | --- |
+| `globalConfig/parseDefaultAgent.test.ts` | 默认 Agent 解析测试 |
+| `routers/lambda/agentGroup.ts` | 群组 Agent 结构 |
+| `services/agentEvalRun/index.ts` | 评估运行读取配置 |
 
 DB schema 列与市场导入映射（examples→fewShots）只提供字段定义与导入来源。因此横向比较时该字段只能记为"存在、消费未确认"，服务端也仅在配置与评估侧读取。
 
@@ -199,42 +202,50 @@ interface LobeAgentConfig {
 
 ### 5.5 异构 Agent 绑定
 
-`agencyConfig?: LobeAgentAgencyConfig` 支持：
-- 设备级工作目录绑定（`workingDirByDevice`）；
-- 指定异构 Agent Provider（用于 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`）。
-- 图式编排：`enableGraphMode` 与 `graph?: AgentGraph` 一起描述节点、边、路由条件和数据契约。它们位于 `agencyConfig` 内，因此归属 Agent 的执行行为，而不是每个会话的偏好（`packages/types/src/agent/agencyConfig.ts:811-838`）。
+Agent 配置里的 `agencyConfig` 字段承载异构 Agent 绑定，作用范围有三类：
+
+- 设备级工作目录绑定，由 `workingDirByDevice` 表达；
+- 指定异构 Agent Provider，对应 Heterogeneous Agents 功能，详见 `packages/heterogeneous-agents`；
+- 图式编排，由 `enableGraphMode` 与 `graph`（`AgentGraph`）一起描述节点、边、路由条件和数据契约。
+
+这三项都归在 `agencyConfig` 内，随 Agent 生效，决定该 Agent 的执行行为（类型即 `LobeAgentAgencyConfig`，定义见 `packages/types/src/agent/agencyConfig.ts:811-838`）。
 
 共享 Agent 的访客运行不会继承创建者配置中的全部外部能力。服务端解析创建者 Agent 后，以 Agent Share 配置剥离文件、知识库、异构 Agent 和设备能力，并按 tool grants 收窄工具；访客 topic 另以 senderId 隔离。角色配置在此只提供被分享的基础 Agent，具体门禁属于外部执行体与 Agent 工具类目。
 
-设置面板除元数据、开场白、插件/知识库等常规页外，还有连接器页（`src/features/AgentSetting/AgentConnectors/`）、图式运行时页（`AgentGraphRuntime`，仅在 `enableAgentGraphConfigLab` 实验开关下渲染）与渠道页（`AgentChannel/`，含飞书 owner 自动查询等辅助逻辑）。这三个分区把 Agent 配置面从"人格 + 模型 + 工具"扩展到"外部连接、图式执行与 IM 渠道绑定"。
+设置面板在元数据、开场白、插件与知识库等常规页之外，另设三个分区，把 Agent 的配置面从人格、模型与工具扩展到外部连接、图式执行和 IM 渠道绑定：
+
+- 连接器页：承接外部服务接入，位于 `src/features/AgentSetting/AgentConnectors/`；
+- 图式运行时页：由 `AgentGraphRuntime` 承担，只在实验开关 `enableAgentGraphConfigLab` 打开时渲染；
+- 渠道页：负责 IM 渠道绑定，含飞书 owner 自动查询一类辅助逻辑，代码在 `AgentChannel/` 目录。
+
 `agencyConfig` 相关类型集中在 `packages/types/src/agent/heterogeneousAgent.ts`（225 行）与 `displayName.ts`；复制 Agent 时会保留 `agencyConfig`，数据迁移接受嵌套 `config.meta` 并替换过期 profile。
 
 ## 6. 内置 Agent 方向
 
 LobeHub 不在代码中硬编码多个完整的角色预设；角色人格通过以下渠道引入：
 
-1. **Chat Group Wizard 模板**（`src/components/ChatGroupWizard/templates.ts`）：提供头脑风暴、分析、写作、规划、产品、游戏六类群组模板，每个模板包含 2–4 个成员 Agent，成员带 `title`、`avatar`、`systemRole` 与可选 `plugins`；这些是 Agent 组的起点，不是单个 Agent 的完整配置。
-2. **Agent 市场**（`lobe-chat-agents` + 远端 API）：市场 Agent 通过 `src/services/agent.ts` 的 `normalizeMarketAgentConfig()` 导入，自动处理 `model` 字段为对象/字符串两种格式的兼容。
-3. **Agent Builder**（`src/features/AgentBuilder/`）：AI 驱动的 Agent 建议芯片（`SuggestionChips`），帮助用户一步步配置 `systemRole` 和其他字段。
-4. **project-coordinator**：`packages/builtin-agents/src/agents/project-coordinator/index.ts`——按项目生成协调者内置 Agent（提示词内嵌项目名与 identifier，标题为 `${name} Coordinator`），是 Project 实体（见独特功能笔记）的内置执行角色。
+1. **Chat Group Wizard 模板**：头脑风暴、分析、写作、规划、产品、游戏六类群组模板由 `src/components/ChatGroupWizard/templates.ts` 提供，每个模板含 2–4 个成员 Agent，成员自带标题、头像、系统提示词与可选插件；它们搭出 Agent 组的起点，单个 Agent 的完整配置仍需另行填写。
+2. **Agent 市场**：市场 Agent 由 `lobe-chat-agents` 仓库与远端 API 下发，经 `src/services/agent.ts` 的 `normalizeMarketAgentConfig()` 导入，model 字段写成字符串或对象两种格式都能识别。
+3. **Agent Builder**：AI 驱动的建议芯片（`SuggestionChips`）在 `src/features/AgentBuilder/` 中逐步引导用户填写系统提示词和其他字段。
+4. **project-coordinator**：按项目生成协调者的内置 Agent，提示词内嵌项目名与 identifier，标题为 `${name} Coordinator`；它同时是 Project 实体的内置执行角色（见独特功能笔记），定义在 `packages/builtin-agents/src/agents/project-coordinator/index.ts`。
 
 `chatConfig.toolMode: 'custom'` 可以创建"精确范围"的子 Agent（如验证器），只拥有声明的插件，不注入任何默认工具。
 
 ## 7. 导入与兼容性
 
-- **市场导入**：通过 `importFromMarket()` 将市场 Agent 写入本地数据库，`normalizeMarketAgentConfig()` 处理格式差异；
-- **JSON 导出**（`src/features/ShareModal/ShareJSON/`）：`generateFullExport()` 生成含完整 `AgentConfig` 的 JSON 文件；
-- **SillyTavern 迁移**：没有官方路径；`systemRole` 对应角色卡的 `system_prompt`，`fewShots` 对应示例对话，知识库可替代世界书；
-- **AIO Hub 预设导入**：类型差异较大，主要在消息树/注入策略，需手工适配。
+- **市场导入**：`importFromMarket()` 把市场 Agent 写入本地数据库，格式差异由 `normalizeMarketAgentConfig()` 抹平；
+- **JSON 导出**：`generateFullExport()` 在 `src/features/ShareModal/ShareJSON/` 中生成含完整 Agent 配置的 JSON 文件；
+- **SillyTavern 迁移**：没有官方路径；系统提示词对应角色卡的 `system_prompt`，少样本对话对应示例对话，知识库可替代世界书；
+- **AIO Hub 预设导入**：类型差异较大，集中在消息树与注入策略，需手工适配。
 
 ## 8. 会话绑定、请求时解析与重新生成
 
-- **发送时实时读 Agent 配置**：`conversationLifecycle.ts`（`src/store/chat/slices/agentRun/actions/entries/`）在多个调用点用 `agentSelectors.getAgentConfigById(agentId)` 取配置，另有调用点经 `agentService.getAgentConfigById(agentId)` 从 DB 加载；`src/services/chat/index.ts:314` 发送时取 `systemRole` 构造请求。会话/话题不保存 Agent 配置副本。
-- **消息与话题的模型快照**：messages 与 topics 表均有 `model`/`provider` 列（`packages/database/src/schemas/message.ts:116-117`、`schemas/topic.ts:73-74`），assistant 消息创建时写入（`conversationLifecycle.ts:1382-1383`）。无完整请求参数/上下文配方快照。
-- **regenerate 是删除-重生成**：`delAndRegenerateMessage`（`src/features/Conversation/store/slices/generation/action.ts:734`）先删除旧消息再重新生成用户消息，注释明确 "Delete first, then regenerate…switches to a new branch"——即覆盖语义，旧回复被删除，与 AIO Hub 的兄弟分支保留不同。
-- **开场白不落库**：见 §3.2；修改 Agent 的 `openingMessage` 后，尚无消息的既有 topic 实时显示新文本，首次发送后因消息非空而消失，无固化。
-- **提示词块分组不存在**：`systemRole` 是单字符串、`fewShots` 是平铺的 `LLMMessage[]`（`packages/types/src/agent/item.ts`），均无 `groupId`/`enabled` 或单选多选。三个相近概念也都与提示词块无关：
-  - `ChatGroup`（`packages/types/src/agentGroup/index.ts`）：Agent 级分组，提供组级 `systemPrompt` 与 `openingMessage`，以及成员 Agent 的 `enabled` 开关；
+- **发送时实时读 Agent 配置**：会话与话题都不保存 Agent 配置副本，各调用点在发送时现取。多数调用点经 `agentSelectors.getAgentConfigById(agentId)` 读内存中的配置，另有调用点走 `agentService.getAgentConfigById(agentId)` 从数据库加载；请求构造阶段再取 `systemRole` 作为系统提示。入口是 `src/store/chat/slices/agentRun/actions/entries/conversationLifecycle.ts`，发送侧在 `src/services/chat/index.ts:314`。
+- **消息与话题的模型快照**：messages 与 topics 表各带 model 与 provider 列，assistant 消息创建时写入当时的取值（列定义见 `packages/database/src/schemas/message.ts:116-117` 与 `schemas/topic.ts:73-74`，写入点在 `conversationLifecycle.ts:1382-1383`）；请求参数与上下文配方没有对应快照。
+- **regenerate 先删后建**：`delAndRegenerateMessage` 先删除旧消息，再基于用户消息重新生成，注释写明 "Delete first, then regenerate…switches to a new branch"——语义是覆盖，旧回复不再保留，AIO Hub 则保留兄弟分支（`src/features/Conversation/store/slices/generation/action.ts:734`）。
+- **开场白不落库**：见 §3.2；修改 Agent 的 `openingMessage` 后，尚无消息的既有 topic 会实时显示新文本，首次发送后话题已有消息，开场白随之不再出现。
+- **提示词的组织方式**：`systemRole` 是单个字符串，`fewShots` 是平铺的消息数组（`packages/types/src/agent/item.ts`），两者都没有 groupId 或 enabled 之类的分组与开关字段，也不支持单选多选。三个名字相近的概念同样不涉及提示词块：
+  - `ChatGroup`（`packages/types/src/agentGroup/index.ts`）：Agent 级分组，提供组级系统提示词与开场白，以及成员 Agent 的启用开关；
   - `chatConfig.topicGroupMode`：话题列表分组；
   - `sessionGroupId`：会话列表分组。
 

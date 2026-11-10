@@ -16,7 +16,9 @@
 
 llm-chat 以"会话 = 树形消息结构 + 活动路径指针"为存储单位：
 
-- 会话有轻量索引（`ChatSessionIndex`，列表展示）与重量详情（`ChatSessionDetail`，节点字典 + 分支指针 + 撤销栈）两层，**分文件存储**：一个 `sessions-index.json` 存放全部索引，每个会话的完整详情单独存成 `sessions/{sessionId}.json`。磁盘文件是权威源，前端 store 的 Map 只是工作副本；实际落盘统一走 Rust 原子写（临时文件 + fsync + 原子替换 + revision 校验 + 进程锁 + 备份轮换，细节见 2.1）。
+- 会话数据分两层：索引只保留列表展示所需的摘要（类型 `ChatSessionIndex`），详情保存节点字典、分支指针与撤销栈（`ChatSessionDetail`），两层分文件落盘。全部索引共用一个 `sessions-index.json`，每个会话的完整详情单独存成 `sessions/{sessionId}.json`。磁盘文件是权威源，前端 store 里的 Map 只是工作副本。
+
+  写盘由 Rust 原子写入口串行保护：先取得进程内锁与进程锁，检查 revision 和删除标记；通过后按选项轮换有效备份，再写临时文件、同步并原子替换目标，细节见 2.1（`src-tauri/src/commands/llm_chat_persistence.rs:352-395`）。
 - 消息是**树**（`parentId`/`childrenIds`/可选 `lastSelectedChildId`），`activeLeafId` 是当前显示路径的末端节点；线性对话列表只是消息树的一种视图。分支导航算法集中在 `utils/BranchNavigator.ts`（纯静态类）。
 - **撤销/重做栈从不持久化**：写盘前剥离 `history`/`historyIndex`（`toStoredSession`），应用重启后历史栈清空——撤销只在单次会话运行期间有效（明确设计取舍）。
 - 会话/节点 ID 用 `Date.now()`-随机后缀拼接，不是 UUID（理论碰撞风险，未见多设备同步机制）。
@@ -123,7 +125,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 `useSessionManager().createSession(agentId, name?)`（`composables/session/useSessionManager.ts:100-179`）：
 
-- 生成 `sessionId`/`rootNodeId`（`session-${Date.now()}-${random}` 格式，无强唯一性保证，靠时间戳+随机后缀降低碰撞概率，未见 UUID）；
+- 会话 ID 与根节点 ID 由时间戳加随机后缀拼成，形如 `session-${Date.now()}-${random}`；这种拼接没有强唯一性保证，只靠时间戳与随机后缀降低碰撞概率，本次未找到 UUID 一类的生成方式；
 - 创建 `role: "system"`、内容为空、`isEnabled: true` 的根节点（`useSessionManager.ts:126-135`）；
 - 未指定 `name` 时默认名 `会话 ${当前时间}`；
 - `index.displayAgentId = agentId`（创建时就绑定 Agent）；
@@ -135,7 +137,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 ### 3.2 删除 / 批量删除 / 清理空会话 / 清空全部
 
-- 单个删除 `deleteSession()`（`sessionLifecycleManager.ts:303-330`）：先经会话管理器计算新当前会话（若删的是当前会话，取列表中相邻的会话），再调用 Rust 删除命令（`llm_chat_persistence.rs:385-430`）：先写 tombstone（`sessions-tombstones/{id}.json`，revision 取封顶值），再把会话文件移入回收站目录 `sessions-trash/`（文件名带随机 UUID 后缀，避免与新建会话冲突）；随后清理运行时状态（中止控制器、正在生成节点、挂起的工具审批、撤销历史）与输入草稿，再切换到新当前会话并落盘；
+- 单个删除先算出删除后的当前会话：删掉的正是当前会话时，取列表中相邻的一条顶上。随后调用 Rust 删除命令，先写 tombstone 把该会话标为已删（revision 取封顶值），再把会话文件移入回收站目录 `sessions-trash/`，文件名追加随机 UUID 后缀以免与新建会话重名。文件处理完成后，会话管理器清理运行时状态（中止控制器、正在生成的节点、挂起的工具审批、撤销历史）与输入草稿，最后切换到新的当前会话并落盘（前端入口 `stores/session/sessionLifecycleManager.ts:303-330`，Rust 命令 `src-tauri/src/commands/llm_chat_persistence.rs:385-430`）；
 - 批量删除 `batchDeleteSessions()`（`sessionLifecycleManager.ts:332-379`）：剩余会话按 `updatedAt` 倒序排列取第一个作为新当前会话；逐个删除文件、清理运行时和草稿；
 - 清理空会话 `clearEmptySessions()`（`sessionLifecycleManager.ts:436-510`）：筛选出消息数为 0 的会话；若当前会话在被清理列表中，优先按调用方传入的当前展示顺序向前/向后找一个未被清理的邻居会话，找不到再退化为按更新时间倒序取第一个剩余会话。这个实现比"随便切一个"更细致，是为了避免清空后 UI 焦点跳到一个语义上不相关的会话；
 - 清空全部会话 `clearAllSessions()`（`sessionLifecycleManager.ts:1023-1052`）：先经文件删除路径把索引与磁盘上已知的所有会话文件 tombstone/移入回收站（并发 4 的 worker 池），再发布空索引——代码注释明确：先关写路径，避免迟到的流式写盘"复活"已删文件。
@@ -153,7 +155,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 ### 3.4 恢复与保留语义
 
 - 撤销/重做只在单次会话运行期间有效（2.2）。
-- 应用重启后残留的等待中或生成中节点会在加载时自动修复：修复入口 `repairInterruptedGeneratingNodes` 对每个状态为 `waiting` 或 `generating` 的节点，有内容（非空字符串）标记为 `complete`、无内容标记为 `error` 并写入错误提示（"生成意外中断"），同时更新 `updatedAt`；随后刷新消息计数并回写磁盘与索引（`sessionLifecycleManager.ts:85-110,194-215`）。加载启动与按需加载详情两条路径都会调用。
+- 应用重启后，加载阶段会把残留的 `waiting` 与 `generating` 节点就地修复。正文非空的标记为 `complete`，正文为空的标记为 `error` 并写入“生成意外中断”的提示，两种情况都更新修改时间。修复完成后刷新消息计数，再回写磁盘与索引；启动加载与按需加载详情两条路径都会调用同一入口（`sessionLifecycleManager.ts:85-110,194-215`）。
 - 索引损坏时先尝试 `.bak`/临时文件回退，失败则进入可取消的后台恢复并展示恢复横幅（2.3）；索引的 `messageCount`/`displayAgentId` 数值漂移在正常启动时不再全量修复，只有手动 `refreshSessionsIndex` 才完整重算。
 - 删除的会话进入回收站目录（`sessions-trash/`）并留下 tombstone，但进程内没有任何回收站恢复入口（界面只有删除确认，无"恢复已删除会话"操作；本次未在 llm-chat 目录找到读取 `sessions-trash/` 的代码）。
 
@@ -163,7 +165,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 `utils/BranchNavigator.ts` 是纯静态类，核心方法：
 
-- `getSiblings(session, nodeId)`（`BranchNavigator.ts:29-57`）：通过父节点的 `childrenIds` 取兄弟列表；根节点没有父节点，视为"自己是唯一兄弟"。
+- 取兄弟列表由 `getSiblings(session, nodeId)` 负责：读取父节点的 `childrenIds` 即可得到同一层级的其它分支；根节点没有父节点，按自身就是唯一兄弟处理（`utils/BranchNavigator.ts:29-57`）。
 - `switchToSibling(session, nodeId, direction)`（`BranchNavigator.ts:63-102`）：在兄弟列表里循环切换（切到最后一个再点"下一个"会绕回第一个），再用 `findLeafOfBranch` 找到目标兄弟分支下的叶子节点。
 - `findLeafOfBranch(session, startNodeId)`（`BranchNavigator.ts:108-154`）：从起点沿子节点一路走到叶子，每一步优先用该节点的 `lastSelectedChildId`（若仍在其 `childrenIds` 中），否则退化为第一个子节点。这就是"记住上次看到哪条分支"的实现。
 - `updateSelectionMemory(session, leafNodeId)`（`BranchNavigator.ts:160-201`）：从叶子回溯到根，把路径上每个父节点的 `lastSelectedChildId` 更新为路径中的下一个节点。所有会改变 `activeLeafId` 的操作（切换分支、创建分支、硬删除节点后重新定位）都会调用它，保证记忆链条一致。
@@ -186,7 +188,7 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 三种"再生成"路径底层都由 `useNodeManager` 提供节点级操作，`useChatHandler` 负责组装参数与调用执行链（执行链在对话请求与上下文 7）：
 
 - **重新生成**：用户或工具消息直接作为新助手的父节点；助手消息则沿用实际直接父节点创建兄弟助手，无须父节点为用户角色。这样工具段后重试仍保留此前的完整上下文，不会回退到更早用户消息。新节点初态为 waiting，原回复保留（`composables/session/useNodeManager.ts:228-310`）。
-- **续写**：`useNodeManager.createContinuationBranch()`（`useNodeManager.ts:319-384`）区分两种情况：对 assistant 节点续写，新建一个内容**等于原内容**、带 `isContinuation` 标记并记录 `continuationPrefix` 的兄弟节点（发送请求时用前缀模式，让支持前缀续写的 API 从这段内容后继续）；对 user 节点续写，则是"角色接力"——新建一个空的子节点。写回最终内容时（`useChatResponseHandler.ts:490-501`），如果标记为续写且返回内容未包含原前缀，会手动把前缀拼回去，防止模型漏复述前缀导致内容断裂。
+- **续写**：`useNodeManager.createContinuationBranch()`（`useNodeManager.ts:319-384`）按节点角色分两种情况。对 assistant 节点，新建一个内容等于原回复的兄弟节点，标记 `isContinuation` 并记录 `continuationPrefix`，发送请求时走前缀模式，让支持前缀续写的 API 从这段内容之后接着生成。对 user 节点则是角色接力，新建一个空的子节点。最终内容写回时（`useChatResponseHandler.ts:490-501`），标记为续写且返回文本不含原前缀的，会把前缀手动拼回去，避免正文从中间断开。
 - **编辑**：`useBranchManager.editMessage()`（`useBranchManager.ts:108-156`）是原地修改：直接覆盖节点 `content`（及可选附件），只允许 user/assistant 角色，不创建新节点；编辑前的状态由撤销栈的 `NODE_EDIT` 条目承接。
 
 "再生成"类操作创建的新节点在完成前都先 `generatingNodes.add(id)`、再 `updateActiveLeaf`，最后才真正调用 `executeRequest`——这个顺序保证了 UI 能立刻看到"正在生成"的占位气泡，即使还没发出网络请求。
@@ -259,17 +261,19 @@ useSessionManager.createSession（根节点 + 开场白 live greeting 节点）
 
 ### 7.1 导出格式与范围语义
 
-导出并非单一"保存聊天记录"（界面工作流见 Chat UI 6.4）。分支导出支持三种格式（Markdown、结构化 JSON、保留原始节点字段的 Raw JSON），入口在 `useExportManager.ts:249,642,1128`，可选择消息范围以及是否包含预设、用户档案、Agent/模型信息、Token、附件和错误（选项面板在 `ExportBranchDialog.vue:74-88`）；启用"使用上下文管道处理"后（`ExportBranchDialog.vue:191`），导出的是宏、世界书、知识库、变量替换和 Token 裁剪后的真实 Payload（从 `:311` 起走上下文预览），此时手工范围和预设选项由管道接管。Markdown 与 Raw 文本会把文本附件追加到正文后，JSON 输出携带 `virtualAttachments` 字段；委派消息按 `origin` 来源显示发起 Agent（细节见对话导出与分享笔记）。
+分支导出提供三种格式：Markdown、结构化 JSON，以及保留原始节点字段的 Raw JSON。导出时可选择消息范围，并逐项勾选是否带上预设、用户档案、Agent/模型信息、Token、附件和错误。勾选"使用上下文管道处理"后，导出的内容改为宏、世界书、知识库、变量替换与 Token 裁剪之后真实发出的 Payload，取值走上下文预览，手工范围与预设选项交由管道接管。Markdown 与 Raw 文本会把文本附件追加到正文末尾，JSON 输出携带 `virtualAttachments` 字段；委派消息按来源显示发起 Agent。三种格式的入口在 `useExportManager.ts:249,642,1128`，选项面板与管道开关在 `ExportBranchDialog.vue:74-88,191,311`，细节见对话导出与分享笔记与 Chat UI 6.4。
 
 整会话导出（`exportSessionAsMarkdownTree`，`useExportManager.ts:891`）支持树状 Markdown 和包含完整节点树的 JSON/Raw 形式，**能保留隐藏分支**，而不是只导出 `activeLeafId` 路径。
 
 ### 7.2 外部格式导入
 
-SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 JSON/PNG（V3 内嵌 character_book 世界书）、提示词文件与部分正则/宏，各解析入口见下列清单；会话导入的冲突策略 `keep/overwrite/skip`，重命名与冲突处理在 `services/sessionImportExportService.ts`（`resolveConflicts` 于 `:318`，策略定义 `:26`）。导入时还会规范化 `virtualAttachments` 并按节点元数据恢复 VCP 工具角色（同文件 `:126-135`）。
+SillyTavern 兼容层由 `services/sillyTavernParser.ts` 承担，可解析 V2/V3 角色卡（JSON 或 PNG，V3 内嵌 character_book 世界书）、提示词文件与部分正则/宏，各解析入口见下表。会话导入遇到冲突时可在保留、覆盖、跳过之间取舍，重命名与冲突判定同样在导入服务里完成；导入过程还会规范化 `virtualAttachments`，并按节点元数据恢复 VCP 工具角色（`services/sessionImportExportService.ts:26,126-135,318`）。
 
-- `parseCharacterCard`（V2/V3 角色卡 JSON/PNG）：`sillyTavernParser.ts:192`；V3 内嵌 character_book 世界书：`:78`
-- `parsePromptFile`（提示词文件，含 `prompt_order`）：`sillyTavernParser.ts:355`、`:99`
-- `convertMacros`（部分正则/宏）：`sillyTavernParser.ts:128`
+| 入口 | 解析对象 | 定位 |
+|---|---|---|
+| `parseCharacterCard` | V2/V3 角色卡（JSON 或 PNG），V3 内嵌 character_book 世界书 | `sillyTavernParser.ts:78,192` |
+| `parsePromptFile` | 提示词文件，含 `prompt_order` 顺序 | `sillyTavernParser.ts:99,355` |
+| `convertMacros` | 部分正则与宏 | `sillyTavernParser.ts:128` |
 
 快捷操作导入还兼容 SillyTavern Quick Reply 格式（`services/quickActionImportService.ts`，本次仅核实入口，未逐分支展开）。
 
@@ -277,7 +281,7 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 
 会话存储已引入版本与损坏治理机制：
 
-- 索引文件含 `version`（当前 `"1.1.2"`，`useChatStorageSeparated.ts:54`）与 `_persistence: { schema: 1, revision, committedAt }`（`types/persistence.ts:17-21`）；无法识别的版本会被拒绝加载；
+- 索引文件记录版本号（当前 `"1.1.2"`）和 `_persistence` 元数据块（含 schema 版本、revision 与提交时间），版本号无法识别时加载会被直接拒绝；取值与字段定义见 `useChatStorageSeparated.ts:54` 与 `types/persistence.ts:17-21`；
 - 损坏会话文件隔离到 `sessions-corrupt/` + `corruption-manifest.json`（version 1，`sessionPersistenceRepository.ts:234-286`），Rust 侧按 revision/tombstone 拒绝旧写；
 - 持久化类型层（`sessionPersistenceRepository.ts`、`sessionPersistenceCoordinator.ts`）配套单测覆盖原子写、恢复与损坏路径（Rust 侧 `llm_chat_persistence.rs:432-490` 亦有单测）。
 
@@ -287,9 +291,9 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 
 ### 8.1 Agent 绑定：创建时强绑定 vs 消息级快照
 
-- 创建会话时必须传入 `agentId`，若在 agent store 中找不到对应 Agent 会直接抛错（`useSessionManager.ts:110-119`），不允许创建"无主"会话。
-- `displayAgentId` 在创建时被设为该 `agentId`，此后它随活跃路径变化，记录的是**"当前活跃路径上最新一条助手消息使用的 agentId"**，创建时的取值只作初始值（类型定义里的注释，`types/session.ts:33-36`）。证据：每次生成/撤销/重做后，会从活动路径末端向上遍历，找到第一个带 agentId 快照的助手消息并覆盖该字段（`useSessionManager.ts:62-95`）。也就是说，**同一个会话里可以有多条消息使用不同的 Agent 生成**，该字段只是给列表展示用的、跟随当前分支实时变化的快照。
-- 消息节点保存生成时快照：`metadata.agentId`/`agentName`/`agentIcon`/`agentDisplayName` 及 `modelIcon`（发送入口在发消息前写入，`useChatHandler.ts:395-415`、`:715-735`、`:900-920`），UI 上历史消息仍显示生成时用的 Agent 头像/名字，模型图标优先读当前渠道配置、缺失才回退快照。
+- 创建会话必须带上 `agentId`：agent store 里找不到对应 Agent 时入口直接抛错，会话无从建立，因此每个会话在创建时就绑定了 Agent（`useSessionManager.ts:110-119`）。
+- `displayAgentId` 创建时取自该 `agentId`，此后随活跃路径变化，含义是当前分支上最新一条助手消息所用的 Agent。每次生成、撤销或重做后，代码从活动路径末端向上找第一条带 agentId 快照的助手消息并覆盖该字段（`useSessionManager.ts:62-95`，字段注释见 `types/session.ts:33-36`）。同一会话里不同消息因此可以由不同 Agent 生成，该字段只是跟随当前分支实时变化、供列表展示的快照。
+- 每条消息节点保存生成时的快照：Agent 的标识、名称与图标，以及模型标识与图标。发送入口在发出请求前写入这些字段，写入点集中在 `useChatHandler.ts:395-415,715-735,900-920`；界面展示历史消息时沿用生成时的 Agent 头像与名字，模型图标优先读当前渠道配置，缺失才回退快照。
 
 结论：Agent 与会话的关系是"消息级快照 + 会话级实时展示指针"的组合，创建时传入的 `agentId` 只作初始值，之后可随时更换且无需重建会话；更换本身也不影响历史消息已经记录的生成上下文。切换 Agent 的界面入口（`useLlmChatUiState().selectAgent`）在 Chat UI 4.1。
 
@@ -299,7 +303,12 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 
 ### 8.3 附件：消息级绑定与两阶段导入
 
-附件随用户消息节点绑定（发送时等待导入完成见对话请求与上下文 9.1）。导入侧是"立即预览 + 异步导入"两阶段（`composables/features/useAttachmentManager.ts`）：先用 `createPendingAsset()`（`:357`）快速读取文件元数据、检测 MIME/类型，生成 `importStatus: "pending"` 的占位 Asset 立即塞进附件数组供 UI 展示缩略图；再异步调用真正导入（生成缩略图、SHA256 去重等），完成后替换成正式 Asset 对象。消息内文本（粘贴或跨工具写入的超长文本）不走资产库，而是存为节点的 `virtualAttachments`：草稿持有未发送快照，发送后消息持有独立快照，跨工具 `addContentToInput` 与粘贴入口共用同一套长文本转换开关与字符阈值（默认 3000 字符）。`checkModelCapability()` 在附件加入时同步检查当前 Agent/模型是否支持该附件类型（vision/audio/video/document 能力位），不支持时按"是否已开启多模态转写"决定是拦截还是仅警告——**没有能力信息的模型默认视为不支持**（"安全默认"注释）。预览与引用路径的渲染见消息渲染器笔记与 Chat UI 3.4。
+附件随用户消息节点绑定，发送时会等附件导入完成（执行侧见对话请求与上下文 9.1）。导入走两阶段：
+
+1. 立即预览：调用 `createPendingAsset()` 读取文件元数据、判断 MIME 类型，生成 `importStatus: "pending"` 的占位资产直接放进附件数组，界面先用它渲染缩略图。
+2. 异步导入：后台生成缩略图、按 SHA256 去重，完成后用正式资产替换占位对象。
+
+消息内的长文本（粘贴或跨工具写入的超长文本）存为节点的 `virtualAttachments`：草稿持有未发送快照，发送后消息持有独立快照，跨工具写入与粘贴入口共用同一套长文本转换开关与字符阈值（默认 3000 字符）。附件加入时 `checkModelCapability()` 还会同步检查当前 Agent/模型是否支持该类型（视觉、音频、视频、文档四类能力位），不支持时按是否开启多模态转写决定拦截还是仅警告，能力信息缺失的模型按不支持处理（源码注释称之为“安全默认”）。两阶段导入的实现在 `composables/features/useAttachmentManager.ts:357`，预览与引用路径的渲染见消息渲染器笔记与 Chat UI 3.4。
 
 ### 8.4 用户档案与模型快照
 
@@ -309,12 +318,12 @@ SillyTavern 兼容：`services/sillyTavernParser.ts` 可解析 V2/V3 角色卡 J
 
 以下结论按"已确认缺陷、设计取舍、静态推断"区分证据强度：
 
-1. **崩溃残留 generating 节点**：修复机制见 3.4（`sessionLifecycleManager.ts:82-110,194-215`）。僵死修复 watch 本身仍保留，且把 `waiting` 状态一并纳入检测范围（`llmChatStore.ts:150-190`，检测条件在 `llmChatStore.ts:160-172`）。修复行为为静态代码确认，未做崩溃-重启的运行复现。
+1. **崩溃残留 generating 节点**：加载时会被修复，机制见 3.4。僵死修复 watch 仍然保留，并把 `waiting` 状态一并纳入检测范围，检测与条件判断位于 `stores/llmChatStore.ts:150-190`。该行为由静态代码确认，崩溃后重启未做运行复现。
 2. **跨会话全文搜索没有索引**（推断，未实测）：纯目录扫描 + 正则预过滤（5.1），数据量增长后搜索延迟线性增长，虽有并发扫描（50 并发）和流式返回缓解体感，但没有做任何持久化索引或增量更新机制。
 3. **撤销/重做栈不持久化**（设计取舍，非缺陷）：应用重启或切换会话重新加载详情后历史栈清空（2.2），"撤销"只在当前运行时会话内有效。
 4. **两套搜索能力不对等**（已确认）：跨会话搜索（Rust 后端）能搜到所有会话但只能定位到会话级别；会话内搜索（`ChatSearchPanel.vue`）只能搜当前活动路径上、已经在 `props.messages` 数组里的消息，搜不到被分支切换隐藏的其它分支内容，也无法从跨会话搜索结果直接跳转到会话内的具体消息位置——中间缺一环。
 5. **Agent 切换时的开场白替换判定比较脆弱**（潜在风险，未实测复现）：`switchAgentGreetings()` 判断"会话是否已经开始"的依据是"根节点的子节点里是否存在非 greeting 节点"（`greetingService.ts:323-327`）。如果由于某种数据异常（比如导入、手动编辑导出的会话 JSON）导致根节点下混入了其它类型节点，这个判定可能出现假阳性/假阴性，但属于极端边界情况，正常操作路径下不会触发。
-6. **ID 非 UUID**（潜在风险）：`sessionId`/`rootNodeId`/节点 ID 都用 `Date.now()`-随机后缀拼接（`useSessionManager.ts:121-122`、`useNodeManager.ts:85-87`），正常单机使用碰撞概率极低，但并非强唯一性保证；未看到"多设备并发生成会话/节点后合并"的同步机制，若未来出现该场景存在理论碰撞风险。
+6. **ID 非 UUID**（潜在风险）：`sessionId`、`rootNodeId` 与普通节点 ID 都由时间戳加随机后缀拼成（`useSessionManager.ts:121-122`、`useNodeManager.ts:85-87`）。单机使用时碰撞概率极低，这套方案本身没有强唯一性保证；代码中也没有多设备并发生成后合并会话或节点的同步机制，该场景下存在理论碰撞风险。
 7. **`getActivePath` 路径截断**（已确认边界）：`parentId` 指向不存在的节点时 `break` 并静默丢失更早的消息（1.2），属极端数据异常路径。
 8. **回收站无恢复入口**（已确认边界）：删除走 `sessions-trash/` + tombstone，但 `src/tools/llm-chat` 内没有读取回收站目录的代码，删除不可逆（3.4）。
 

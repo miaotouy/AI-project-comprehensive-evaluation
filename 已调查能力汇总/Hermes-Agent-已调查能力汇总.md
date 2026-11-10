@@ -14,7 +14,7 @@
 
 ## 项目概览
 
-Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Python agent 核心的个人 AI 助手，README 自我定位为 "self-improving agent"，核心卖点是内置学习闭环。架构形态是混合 monorepo：Python 核心（`run_agent` / `cli` / `gateway` / `tools`）与 TypeScript 前端（Electron 桌面、Ink TUI、Web dashboard）同仓。桌面通过 gateway ensure 附着或启动规范本地 owner，renderer 经私有端点和 WebSocket JSON-RPC 通信，关闭桌面只断开 viewer；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。当前快照规模约 2.2 万个受版本控制文件；`agent/`、`hermes_cli/`、`gateway/`、`cron/` 都已完成模块化拆分（单文件 `hermes_state.py` 拆成约 65 个 `hermes_state_*` 模块），`plugin-catalog/` 从 99 条增长到 978 条 SHA 固定的插件清单，核心 `plugins/` 含 `computer_use`、`delegation`、`teams_pipeline`、`kanban` 等 24 个条目，终端后端为六个内建加插件后端。本次汇总覆盖 16 个类目的调查结论，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
+Hermes Agent 在 CLI、TUI、桌面、Web 与消息网关之间复用同一套 Python agent 核心，是一个可跨这些前端使用的个人 AI 助手；README 将其定位为 "self-improving agent"，核心卖点是内置的学习闭环。仓库是混合 monorepo：Python 核心含 run_agent、cli、gateway 与 tools 四个模块，TypeScript 前端含 Electron 桌面、Ink TUI 与 Web dashboard，两者同仓。桌面端通过 gateway ensure 附着或启动规范本地 owner，renderer 经私有端点与 WebSocket JSON-RPC 通信，关闭桌面只断开 viewer；后端 SQLite 是会话与消息的唯一真相源，各前端只是缓存投影。当前快照约 2.2 万个受版本控制文件：agent、hermes_cli、gateway 与 cron 已完成模块化拆分，单个 `hermes_state.py` 拆成约 65 个 `hermes_state_*` 模块；`plugin-catalog/` 的 SHA 固定插件清单从 99 条增长到 978 条，核心 `plugins/` 有 24 个条目，其中 computer_use 负责计算机操作，delegation 负责子代理委派，teams_pipeline 与 kanban 分别覆盖团队流水线与看板；终端后端为六个内建加插件后端。本次汇总覆盖 16 个类目，证据全部来自静态源码阅读，未运行应用、测试与真实模型请求。
 
 ## 完成度速览
 
@@ -28,58 +28,95 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 
 ### 角色与上下文
 
-- **分层角色机制（无独立角色对象）**：角色是多个互补提示词机制按"身份 → 命名模板 → 全局/会话覆盖 → 运行时注入"分层叠加——`$HERMES_HOME/SOUL.md` 主身份文件（缺失回退硬编码 `DEFAULT_AGENT_IDENTITY`）、personalities 具名模板（内置 14 个，用户按名覆盖）、`agent.system_prompt` 用户手动 overlay（人格代码永不写入）、`display.personality` 保存选中名并成为权威来源、`ChannelOverride` 渠道级覆盖、Profile 构成完整隔离包。人格文本经 ephemeral system prompt 运行时追加、不进缓存、不进轨迹。证据：主链确认（静态源码阅读）。链接：[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
-- **系统提示词三层拼装与缓存**：`build_system_prompt_parts` 产出 stable（身份与指引，字节稳定以保前缀缓存）/ context（cwd 相关、上下文文件）/ volatile（技能索引、记忆、时间戳）三档，每会话构建一次并缓存、仅上下文压缩时重建；完整构建结果写入 `system_prompts` hash 去重表，会话行引用 model/model_config 快照。证据：静态源码阅读确认（未运行）。链接：[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
-- **上下文构建、预算与压缩**：`build_turn_context` 约 30 个动作分组组装本轮上下文（恢复轮转会话、MCP 工具刷新、系统提示词恢复、DB 行确保、压缩检查、插件钩子、记忆预取、sidecar 注入、崩溃持久化）。压缩无 token 级截断原语：preflight 多 pass（至多 3 轮、要求行数减少或 token 降幅>5%）+ idle 压缩（墙上时间门）+ gpt-5.6 服务端 native compaction 并存；`prompt_cache_boundary` 注册表声明 stable/volatile 缓存边界断点；轮转压缩生成新 session_key 连血缘链，原地压缩同 ID 软归档。证据：静态源码阅读确认（未运行）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
-- **会话级绑定与覆盖优先级**：模型 / 人格 / 提示词绑定粒度为会话级，`model_override` 等为每会话字段；模型优先级按"会话 > 渠道 > 全局"解析，运行中 `/model` 切换以 `model_switch` 时间线条目入史、不计入 user 轮计数。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
+- **分层角色机制**：角色没有独立的配置对象，由多个互补的提示词机制按"身份 → 命名模板 → 全局/会话覆盖 → 运行时注入"的顺序分层叠加，下层提供默认值，上层按需覆盖：
+
+  - 身份：`$HERMES_HOME/SOUL.md` 是主身份文件，文件缺失时回退到硬编码的 `DEFAULT_AGENT_IDENTITY`。
+  - 命名模板：personalities 提供具名模板（内置 14 个），用户可按名覆盖。
+  - 全局覆盖：`agent.system_prompt` 供用户手动 overlay，人格代码永不写入。
+  - 选中名：`display.personality` 保存选中的模板名，并成为权威来源。
+  - 渠道覆盖：`ChannelOverride` 在渠道级覆盖。
+  - 隔离包：Profile 把上述配置构成完整隔离单元。
+
+  人格文本经 ephemeral system prompt 在运行时追加，不进缓存，也不进轨迹。证据：主链确认（静态源码阅读）。链接：[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
+- **系统提示词三层拼装与缓存**：`build_system_prompt_parts` 把系统提示词拆成三档，每会话只构建一次并缓存，仅在上下文压缩时重建：
+
+  - stable：身份与指引，字节稳定以保住前缀缓存；
+  - context：与工作目录相关，承载上下文文件；
+  - volatile：技能索引、记忆与时间戳。
+
+  完整构建结果写入 `system_prompts` hash 去重表，会话行引用 model/model_config 快照。证据：静态源码阅读确认（未运行）。链接：[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
+- **上下文构建、预算与压缩**：`build_turn_context` 用约 30 个动作分组组装本轮上下文，覆盖恢复轮转会话、刷新 MCP 工具、恢复系统提示词、确保 DB 行、检查压缩、执行插件钩子、预取记忆、注入 sidecar 与崩溃持久化。压缩由三套机制叠加完成，没有 token 级截断原语：preflight 多 pass（至多 3 轮，要求行数减少或 token 降幅超过 5%）、idle 压缩（以墙上时间为门）、服务端 native compaction（gpt-5.6）。`prompt_cache_boundary` 注册表声明 stable 与 volatile 的缓存边界断点；轮转压缩生成新的 session_key 并连成血缘链，原地压缩在同一 ID 上软归档。证据：静态源码阅读确认（未运行）。链接：[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
+- **会话级绑定与覆盖优先级**：模型、人格与提示词的绑定粒度都在会话级，`model_override` 等字段按会话保存；模型优先级按"会话 > 渠道 > 全局"解析，运行中用 `/model` 切换会以 `model_switch` 时间线条目写入历史，且不计入 user 轮计数。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
 
 - **记忆与跨会话检索的三条路径**：内置 `MEMORY.md`/`USER.md` 在下一会话以冻结快照进入系统提示词；可选外部 MemoryProvider 在每轮用户消息前预取上下文并附加到该轮 API sidecar，完成回合后异步写回；`session_search` 则以 SQLite FTS5 搜索会话并返回命中锚点窗口，支持时间边界、整条 lineage 排除和无命中时的 OR 放宽提示。三者均不是统一文档知识库或固定多阶段认知编排。证据：静态源码确认（未运行）。来源：[检索增强与认知编排调查笔记](../检索增强与认知编排/Hermes-Agent-检索增强与认知编排调查笔记.md)。
 
 ### 会话与消息
 
-- **状态权威与双 ID 身份**：后端 SQLite `state.db` 是唯一事实源；进程内 UI 句柄 `sid` 与持久 `session_key` 分离；压缩轮转经 `parent_session_id` + `end_reason='compression'` 连成轮转链，跨轮转不变的稳定标识是派生只读字段 `_lineage_root_id`，桌面端 pin、路由匹配、草稿作用域都键在它上。证据：主链确认（静态）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
-- **会话生命周期与崩溃恢复**：DB 行惰性落行（首次真实 turn 才建行，空草稿不留痕）；resume 沿压缩链跳活 tip，close 只标记 `ended_at/end_reason` 不删数据，归档 `archived=1` 软隐藏，硬删除无回收站；规范网关的输入先持久受理，相同身份与 payload 重试返回原回执，变更 payload 报冲突；owner 重启将已开始输入变 unknown 并暂停后续队列，legacy tui_gateway 另有中断标记恢复；子代理是真实会话（`_delegate_from` 标记，删除时沿标记级联）。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
-- **消息数据模型与持久化**：`messages` 表一行一条消息，字段含 role / content / tool_calls / reasoning / `active`（软删）/ `compacted`（压缩归档仍可搜索）/ `display_kind` / `api_content`（发 API 的字节保真 sidecar，恢复时原样返回）；落盘用"单事务批量 + 内存 marker 去重"的原子配对契约，提交与工具进展均可留下持久记录，增量 flush 应对工具杀死进程场景。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
-- **编辑、重试、续写与分支**：编辑通过"截断 + 重发"实现（截断提交要求显式 `confirm_truncate`，无单消息原地编辑或删除 RPC）；重试三套实现共享"截断到最后一个真实 user turn 后重发"语义；续写无独立命令，就是普通 prompt 文本 "continue"；分支 `session.branch` 建新 session_key + `_branched_from` 标记、标题加 `#N`；截断重发带归档语义，旧轮次落盘为可搜索归档行。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
+- **状态权威与双 ID 身份**：会话与消息以 SQLite `state.db` 为唯一事实源，进程内的 UI 句柄 sid 与持久化的 `session_key` 分开保存。压缩轮转时，新会话通过 `parent_session_id` 指向父会话，父会话写入结束时间与 compression 结束原因，由此连成轮转链；跨轮转不变的稳定标识是由此派生的只读字段 `_lineage_root_id`，桌面端的 pin、路由匹配与草稿作用域都以它为键。证据：主链确认（静态）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
+- **会话生命周期与崩溃恢复**：会话行按需创建，首次真实 turn 才落库，空草稿不留痕。resume 沿压缩链跳到活 tip；close 只标记 `ended_at/end_reason`，不删数据；归档以 `archived=1` 软隐藏，硬删除没有回收站。规范网关的输入先持久受理再执行，同一身份与 payload 的重试返回原回执，payload 变更则报冲突；owner 重启会把已开始的输入置为 unknown 并暂停后续队列，legacy tui_gateway 另有一套中断标记恢复。子代理是真实会话，带 `_delegate_from` 标记，删除时沿标记级联。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
+- **消息数据模型与持久化**：`messages` 表一行一条消息，内容字段为 role、content、tool_calls 与 reasoning，另有四个字段决定消息如何保留与回放：
+
+  - `active`：软删除标记；
+  - `compacted`：压缩归档标记，归档后仍可搜索；
+  - `display_kind`：该行的展示类型；
+  - `api_content`：发往 API 的字节保真 sidecar，恢复时原样返回。
+
+  落盘采用"单事务批量 + 内存 marker 去重"的原子配对契约，提交与工具进展都能留下持久记录，增量 flush 用于应对工具杀死进程的场景。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
+- **编辑、重试、续写与分支**：编辑以"截断 + 重发"实现，提交截断需要显式 `confirm_truncate`，没有单消息原地编辑或删除的 RPC。三套重试实现共享同一语义：截断到最后一个真实 user turn 后重发；续写没有独立命令，发送普通 prompt 文本 "continue" 即可。分支由 `session.branch` 建立新 session_key 并加 `_branched_from` 标记，标题追加 `#N`；截断重发带归档语义，旧轮次落盘为可搜索的归档行。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
 - **标题机制（两段式 + 带来源）**：会话首个 turn 的 prologue 即得 derived 即时标题（确定性派生、无模型调用），后台线程用小模型升级为 llm 标题；标题带 provenance（derived < llm < user），`set_auto_title` 单事务 compare-and-swap 防自动覆盖，用户 `/title` 永不被覆盖；压缩轮转携带标题与 provenance 不变。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
-- **列表、分页与搜索**：会话列表 `list_sessions_rich` 单查询完成预览、置顶回填、按压缩链 tip 最近活跃排序与逻辑去重；REST 分页 limit/offset、侧栏分 profile 分片翻页；消息搜索走 FTS 四路矩阵（unicode61 基表 / CJK bigram / trigram / LIKE 兜底），trigram 明确跳过 `role='tool'` 行（约 90% 字节为机器噪声）；`session_search` 跨会话检索带谱系去重与锚定窗口。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
+- **列表、分页与搜索**：会话列表由 `list_sessions_rich` 用一次查询完成预览拼接、置顶回填、按压缩链 tip 的最近活跃排序与逻辑去重；REST 接口按 limit/offset 分页，侧栏按 profile 分片翻页。消息搜索走 FTS 四路矩阵，依次是 unicode61 基表、CJK bigram、trigram 与 LIKE 兜底；其中 trigram 会跳过 `role='tool'` 行，这类行约 90% 字节是机器噪声。跨会话检索由 `session_search` 承担，带谱系去重与锚定窗口。证据：静态源码阅读确认（未运行）。链接：[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **对话导出与导入**：两条按需快照路径与一条结构化导出子系统，支持 jsonl / md / qmd / html / trace；结构化导出附带由消息时间戳派生、明确标为不完整的文本无关 timing evidence。JSONL 可往返导入，桌面还可只读发现 Claude Code/Codex CLI 会话并作为不可信静态历史导入，不继承凭据、审批或活动工具。E3 图片分享与 E4 对话链接分享未覆盖。证据：静态源码调查确认（未运行）。链接：[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 
 ### 生成与创作
 
-- **生成式输出与 Artifact（能力等级 G3）**：桌面渲染器对模型流式文本中的代码围栏做后验启发式检测（html/svg/代码四类体积与行数门槛、散文排除与语言黑名单防误触发），围栏收尾后注册为 artifact 卡片；HTML 在 `<iframe sandbox="allow-scripts">` 中运行、URL 在沙箱 webview 中运行，带版本化注册表（内存-only，以聊天记录为事实源）；模型通过 desktop_preview 的 open/close/read 动作操作并读取会话作用域的预览，另可读取终端与磁盘文件。artifact 不可被模型寻址、不可用户编辑，无 notebook / 画布 / 白板，细节见末尾小节。证据：主链确认（静态走通）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
-- **MEDIA: 媒体输出协议**：`MEDIA:<absolute-path>` 纯文本标签是唯一"模型/工具 → 平台"单向消费的协议，消息平台拦截为原生附件，递送前有安全根校验（缓存根白名单 + 10 分钟新鲜度信任 + 系统路径/凭据子路径硬拒）；桌面渲染器把该标记行改写为媒体链接并渲染播放器；配套图像 sub-2MP 默认 upscale 后处理。证据：静态源码确认（未运行）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
-- **消息渲染体系**：四套渲染面共享同一 `tui_gateway` 后端——TUI 自研 `markdown.tsx` 行状态机（无第三方 Markdown 依赖）、桌面 Streamdown + Shiki + KaTeX、Web 极简辅助渲染、经典 CLI/gateway 仅记录边界；流式走"先缓冲、后分段"模型（`message.delta` 累积 → streaming 状态对象 → `message.complete` 定稿去重）；列表层 TUI 自定义虚拟化 vs 桌面渲染预算 + `content-visibility`；链接协议白名单、iframe sandbox 隔离、`dangerouslySetInnerHTML` 仅用于 3 处 SVG 片段与 artifact 预览。证据：静态源码阅读确认（DOM/视觉未运行验证）。链接：[消息渲染器调查笔记](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
-- **Composer 与输入（草稿、附件、发送配置）**：草稿按会话持久化（localStorage 上限 50 条、仅文本、跨窗口 storage 事件同步、压缩轮转时随 tip 迁移、附件仅内存不落盘）；拖放附件按来源分流（应用内路径 → 内联 `@file:` ref、OS 文件 → 附件管线、目录 → `@folder:`、图片 → base64 缩略图）；斜杠命令为客户端侧编目与派发管线；发送走 `prompt.submit` 带 1800s 超时、busy 门控、storedId/runtimeId 配对校验与 session 切换 drift 守卫。证据：静态源码阅读确认（未运行）。链接：[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
+- **生成式输出与 Artifact（能力等级 G3）**：桌面渲染器对模型输出流中的代码围栏做事后启发式检测，按 html、svg 与代码等四类的体积和行数门槛判断，并用散文排除与语言黑名单避免误触发；围栏收尾后注册为 artifact 卡片。HTML 运行在带 `sandbox="allow-scripts"` 的 iframe 中，URL 类内容运行在沙箱 webview 中，注册表按版本记录、只驻留内存，以聊天记录为事实源。模型通过 desktop_preview 的 open、close、read 动作操作并读取会话作用域的预览，也能读取终端与磁盘文件。artifact 不能被模型寻址，也不能由用户编辑，没有 notebook、画布或白板形态，细节见末尾小节。证据：主链确认（静态走通）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
+- **MEDIA: 媒体输出协议**：模型与工具可通过 `MEDIA:` 加绝对路径这一纯文本标记向平台交付媒体，消息平台把它拦截为原生附件，桌面渲染器把该标记行改写为媒体链接并渲染播放器。递送前先解析路径并确认文件存在；缓存根与操作者白名单根内的文件直接放行。根外文件在默认模式下按拒绝路径表检查；严格模式还要求处于配置的新鲜度窗口内，默认 10 分钟。图像附件另有 sub-2MP 默认 upscale 后处理。证据：静态源码确认（未运行）。链接：[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
+- **消息渲染体系**：四套渲染面共享同一 `tui_gateway` 后端，各自的实现不同：TUI 用自研的 `markdown.tsx` 行状态机解析 Markdown，不依赖第三方库；桌面用 Streamdown 配合 Shiki 与 KaTeX；Web 只做极简辅助渲染；经典 CLI 与 gateway 仅记录边界。流式渲染采用先缓冲后分段的模型：`message.delta` 先累积到 streaming 状态对象，收到 `message.complete` 后定稿并去重。列表层 TUI 自建虚拟化，桌面则用渲染预算配合 `content-visibility`。安全侧有链接协议白名单与 iframe sandbox 隔离，`dangerouslySetInnerHTML` 只用于 3 处 SVG 片段与 artifact 预览。证据：静态源码阅读确认（DOM/视觉未运行验证）。链接：[消息渲染器调查笔记](../消息渲染器/Hermes-Agent-消息渲染器调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
+- **Composer 与输入（草稿、附件、发送配置）**：草稿按会话持久化在 localStorage，上限 50 条、只存文本，跨窗口靠 storage 事件同步，压缩轮转时随 tip 迁移，附件只驻留内存、不落盘。拖放附件按来源分流：应用内路径转成内联 `@file:` 引用，OS 文件进附件管线，目录转成 `@folder:`，图片转成 base64 缩略图。斜杠命令在客户端侧编目与派发；发送调用 `prompt.submit`，带 1800s 超时、busy 门控、storedId 与 runtimeId 的配对校验，以及会话切换时的 drift 守卫。证据：静态源码阅读确认（未运行）。链接：[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)、[对话请求与上下文调查笔记](../对话请求与上下文/Hermes-Agent-对话请求与上下文调查笔记.md)。
 - **语音会话**：桌面 Composer 同时支持传统 STT → Hermes → TTS 与 GPT-Live 全双工前端；实时音频引擎负责麦克风/扬声器和打断，真实任务仍连同近期文本上下文委托给当前 Hermes 会话，由当前模型与工具集执行。证据：静态源码阅读确认（WebRTC 与真实音频未运行）。链接：[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)、[应用界面基础设施调查笔记](../应用界面基础设施/Hermes-Agent-应用界面基础设施调查笔记.md)。
 
 ### Agent 运行时与外部协作
 
-- **工具来源、注册与发现**：工具面由多层来源组成——仓库 `tools/` 自动导入注册、`plugins/` 插件工具、MCP 客户端动态发现、skills 指令文本工具、Agent Plugins 便携包（v1 目录包兼容层）、`toolsets.py` 按平台工具集装配；注册集中在 `tools/registry.py`（`register()` 在模块 import 时被各工具调用），四个 agent-level 工具由 `_AGENT_LOOP_TOOLS` 拦截不进入 registry；`get_tool_definitions` 做白/黑名单过滤、动态 schema override 与进程级 `_last_resolved_tool_names` 记录；tools 数组每次 API 调用全量发送（prompt caching 只缓存 system prompt 前缀）。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
-- **工具执行编排与参数校验**：核心执行链沿 `run_agent.py → model_tools.py → tools/registry.py` 三层组织；模型回吐 tool_calls 经 id 去重、name 校验（近似修复）、JSON 解析重试 ≤3 次；执行分单 / 并发 / 分段三路（并发走 DaemonThreadPoolExecutor 默认 8 线程，`ConcurrentToolAuthorizationGate` 串行化审批顺序）；参数校验靠 `coerce_tool_args` 与 `_normalize_json_strings_for_schema`，无独立 schema 强制校验器；结果回注 tool 消息 + 三层持久化预算（per-tool / per-turn / preview，超限落盘用 preview+文件引用回填）。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
+- **工具来源、注册与发现**：工具面汇总六类来源，最终都进入同一份工具定义：
+
+  - 仓库 `tools/` 目录的工具在模块导入时自动注册；
+  - `plugins/` 提供插件工具；
+  - MCP 客户端在运行时动态发现；
+  - skills 以指令文本的形式贡献工具；
+  - Agent Plugins 便携包（v1 目录包兼容层）提供打包工具；
+  - `toolsets.py` 按平台装配工具集。
+
+  注册集中在 `tools/registry.py`，各工具在模块 import 时调用 `register()`；另有四个 agent-level 工具由 `_AGENT_LOOP_TOOLS` 拦截，不进入 registry。`get_tool_definitions` 负责白名单与黑名单过滤、动态 schema override，并在进程级记录 `_last_resolved_tool_names`。tools 数组在每次 API 调用时全量发送，prompt caching 只缓存 system prompt 前缀。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
+- **工具执行编排与参数校验**：核心执行链沿 `run_agent.py`、`model_tools.py` 与 `tools/registry.py` 三层组织。模型回吐的 tool_calls 先按 id 去重、校验 name（近似名字会被修复），JSON 解析失败时最多重试 3 次。执行分单条、并发与分段三路，并发路径使用 DaemonThreadPoolExecutor 默认 8 线程，审批顺序由 `ConcurrentToolAuthorizationGate` 串行化。参数校验依赖 `coerce_tool_args` 与 `_normalize_json_strings_for_schema`，没有独立的 schema 强制校验器。结果回注为 tool 消息，并有三层持久化预算：per-tool、per-turn 与 preview 各有一份，超出限额时落盘并以 preview 加文件引用回填。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
 - **审批、持久代码内核与执行边界**：CLI 交互审批是危险命令检查的一环，YOLO 模式可绕过整个审批门；`execute_code` 按稳定会话身份复用本地或远端 Python 内核，每个 cell 重新绑定当前工具权限，子 Agent 独立，超时/中断/会话关闭销毁内核。大输出溢写到文件；本地后端仍是本机进程和临时目录，容器类后端另有资源上限。证据：主链确认（静态源码阅读）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Hermes-Agent-生成式输出与运行时调查笔记.md)。
-- **MCP、插件、Skill 与便携包扩展**：插件经 `discover_plugins` 副作用注册并提供五类 hooks，`resolve_pre_tool_block` 是每个工具分发点的单一安全入口（任何错误 fail-closed）；MCP server 注册为 `mcp-<name>` toolset、动态 `tools/list_changed` 触发 nuke-and-repave、trust-tier 门控分 full/untrusted 两档；Skill 是文本指令而非权限沙箱；Agent Plugins 便携包把便携包的技能 / MCP 组件翻译进 Hermes 运行时。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
-- **子代理委派与实时控制**：`delegate_task` 创建占 DB 行的子会话，session/terminal 独立并支持结构化输出；当前会话还可按运行代际枚举 live roster、读取有界 transcript tail、steer 或 interrupt。结束、外来或代际失效的子 Agent 不暴露内容。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
-- **外部执行体与控制面（多表面）**：桌面、TUI 与 Web 复用 Python Agent、profile 数据库与 lineage；常规桌面本地路径连接规范网关，legacy tui_gateway 桥另保留原控制协议，方法名相同也需区分受理与恢复契约；`acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code / Zed / JetBrains 等外部宿主；REST API gateway 提供补全、响应与运行类端点（`/v1/chat/completions`、`/v1/responses`、`/v1/runs` + SSE 订阅）及会话管理与 cron 接口；新客户端接入经 DM Pairing 一次性配对码授权，正在运行的 turn 可被新客户端收养为 adopted running turn。消息平台 gateway 20+ 平台为入口确认，逐 adapter 细节见末尾小节。证据：主链确认（静态）/ 消息平台为入口确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Hermes-Agent-外部执行体与应用协作调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
+- **MCP、插件、Skill 与便携包扩展**：插件由 `discover_plugins` 在加载时注册副作用，并提供五类 hooks；`resolve_pre_tool_block` 是每个工具分发点唯一的安全入口，任何错误都按 fail-closed 处理。MCP server 注册为 `mcp-<name>` 形式的 toolset，`tools/list_changed` 变化会动态触发 nuke-and-repave，trust-tier 门控分 full 与 untrusted 两档。Skill 以文本指令的形式生效，使用 Skill 不改变工具权限。Agent Plugins 便携包把其中的技能与 MCP 组件翻译进 Hermes 运行时。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
+- **子代理委派与实时控制**：`delegate_task` 创建占 DB 行的子会话，子会话拥有独立的 session 与 terminal，并支持结构化输出；当前会话还能按运行代际枚举 live roster、读取有界的 transcript tail，并对子 Agent 执行 steer 或 interrupt。已经结束、来自其他会话或代际失效的子 Agent 不再暴露内容。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)、[Chat UI 调查笔记](<../Chat UI/Hermes-Agent-ChatUI调查笔记.md>)。
+- **外部执行体与控制面（多表面）**：桌面、TUI 与 Web 复用同一套 Python Agent、profile 数据库与 lineage；常规桌面本地路径连接规范网关，legacy tui_gateway 桥保留原有控制协议，两边方法名相同，受理与恢复契约需要分别看待。`acp_adapter/` 把 Hermes 作为 ACP agent 暴露给 VS Code、Zed、JetBrains 等外部宿主。REST API gateway 提供三类接口：
+
+  - 补全与响应：`/v1/chat/completions`、`/v1/responses`；
+  - 运行：`/v1/runs`，配合 SSE 订阅；
+  - 会话管理与 cron。
+
+  新客户端接入需经 DM Pairing 的一次性配对码授权，正在运行的 turn 可以被新客户端收养为 adopted running turn。消息平台 gateway 的 20+ 平台为入口确认，逐 adapter 细节见末尾小节。证据：主链确认（静态）/ 消息平台为入口确认。链接：[外部执行体与应用协作调查笔记](../外部执行体与应用协作/Hermes-Agent-外部执行体与应用协作调查笔记.md)、[Chat 调查笔记](../Chat/Hermes-Agent-Chat调查笔记.md)。
 - **Connector 与 Vault 边界**：`manage_connections` 统一托管应用和 MCP 的安装、启用与授权，模型只收到后端 operation 终态，不接触授权链接；profile 本地 Vault 用 Fernet 保存登录、支付卡与地址，模型只见 opaque handle 和非秘密元数据，真实字段在服务端按 origin 填入浏览器。证据：静态源码阅读确认（未运行）。链接：[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Hermes-Agent-应用界面基础设施调查笔记.md)。
 
 ### 渠道与调度
 
-- **LLM 渠道与 Provider 管理**：无"LLM 渠道"实体——Provider 是声明式 `ProviderProfile` 标识 + 凭据注册表，用户实例化的是 `providers:` / `custom_providers:` 端点（base_url + key_env/api_key + extra_headers），"渠道"等价于"Provider 标识 + 一个 base_url + 一份凭据"的组合；模型目录为静态表 + 远端拉取 + 用户输入三层；协议适配集中在 `agent/transports/` 按 api_mode 注册分发（OpenAI 兼容 / Anthropic / Responses / Bedrock）；运行时由 `resolve_runtime_provider` 产出运行时 dict；管理入口不对称——Desktop 自定义端点页是全 CRUD，CLI/TUI/Web 主要管理凭据、模型选择或整个 Profile，未找到同等端点 CRUD 页面。证据：静态源码阅读确认（未运行）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
-- **重试、Key 轮换与故障转移**：四层机制——SDK 内建重试 → 应用层重试 → 同 Provider 多 Key 的 credential pool 轮换 → 跨渠道 fallback 链 → 会话层恢复主通道。连续编号的环境变量 `KEY_2`、`KEY_3` 可直接播种池，秘密留在环境或 secret manager，`auth.json` 只存引用；首个编号缺口终止发现。fallback 重发存在重复计费可能（推断）；设置页探活验证的是凭据与端点连通，聊天可用性由请求链决定。证据：静态源码阅读确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
+- **LLM 渠道与 Provider 管理**：Hermes 没有独立的"LLM 渠道"实体，Provider 由声明式 `ProviderProfile` 标识与凭据注册表构成，用户实例化的对象是 `providers:` 与 `custom_providers:` 下的一组端点参数：base_url、key_env 或 api_key、extra_headers；所谓"渠道"即 Provider 标识、一个 base_url 与一份凭据的组合。模型目录分静态表、远端拉取与用户输入三层；协议适配集中在 `agent/transports/`，按 api_mode 注册分发，覆盖 OpenAI 兼容、Anthropic、Responses 与 Bedrock。运行时由 `resolve_runtime_provider` 产出运行时 dict。管理入口在三端并不对称：Desktop 的自定义端点页支持完整 CRUD，CLI、TUI 与 Web 主要管理凭据、模型选择或整个 Profile，本次未找到同等粒度的端点 CRUD 页面。证据：静态源码阅读确认（未运行）。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
+- **重试、Key 轮换与故障转移**：重试与恢复按层次自内向外叠加：SDK 内建重试、应用层重试、同一 Provider 多 Key 的 credential pool 轮换、跨渠道 fallback 链，最后由会话层恢复主通道。连续编号的环境变量（如 `KEY_2`、`KEY_3`）可以直接播种 Key 池，秘密本身留在环境或 secret manager，`auth.json` 只存引用；发现过程在第一个编号缺口处终止。fallback 重发存在重复计费可能（推断）；设置页探活验证的是凭据与端点连通，聊天可用性由请求链决定。证据：静态源码阅读确认。链接：[LLM 渠道管理调查笔记](../LLM渠道管理/Hermes-Agent-LLM渠道管理调查笔记.md)。
 
 ### 独特与差异化能力
 
 以下能力卡保留[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)的能力卡标题与证据状态。四项主能力卡均达主链确认（静态证据）；共同前提是"prompt caching is sacred"——后台机制继承主会话运行时与提示缓存、对主对话零干扰。入口确认未闭合的候选（Tool Gateway、全局紧急停止）与声明/外部依赖边界不在此列，集中在文末"已知边界与待验证事项"。
 
-- **能力一：闭环学习（后台记忆/技能复习 + /refine）**：每 N 轮 / 每 N 次工具迭代触发一次后台 fork 复习，fork 继承父会话模型配置、凭据与已缓存系统提示，命中同一提示缓存；后台复习只放行 memory 与 skill_manage 工具（线程级白名单），复习结果写 MEMORY.md / 技能目录或外部 provider；`/refine` 为用户显式触发同一 fork 的按需入口；复习失败仅捕获不抛出，best-effort。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
-- **能力二：Skill 生命周期（创建-使用中改进-curator 维护）**：`skill_manage` 对模型公开最多 20 项的原子 `operations` 批次，失败整体回滚；delete 独占调用，旧平铺动作只用于历史重放。`.usage.json` 记录使用统计；curator 惰性维护并只归档不删除。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
-- **能力三：持久记忆与用户建模**：双轨记忆——内置 `MEMORY.md` / `USER.md` 文件记忆注入 system prompt volatile 段 + `MemoryProvider` ABC 外部后端（仓库内置 byterover/retaindb，Honcho/Mem0 等经 plugin-catalog 安装，同一时刻至多激活一个）；模型写记忆可能被人审拦截（写审批门，用户 `/memory approve` 后才落盘）；跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
-- **能力四：研究数据工具链（会话轨迹生产）**：`save_trajectories` 开关（默认关闭）把每轮会话按 ShareGPT 格式追加为 JSONL（成功/失败分文件）；`trajectory_compressor.py` 保护首尾只压缩中间段并替换为摘要；配套 `batch_runner.py` / `mini_swe_runner.py` / `datagen-config-examples/` 面向轨迹数据集批量生产；`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集（默认私有、强制脱敏）。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
+- **能力一：闭环学习（后台记忆/技能复习 + /refine）**：主会话每积累 N 轮对话或 N 次工具迭代，就触发一次后台 fork 复习；fork 继承父会话的模型配置、凭据与已缓存的系统提示，因此命中同一份提示缓存。后台复习只放行 memory 与 skill_manage 两个工具（由线程级白名单控制），复习结果写入 MEMORY.md、技能目录或外部 provider。`/refine` 是用户显式触发同一 fork 的按需入口；复习失败只做捕获、不向外抛出，按 best-effort 处理。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
+- **能力二：Skill 生命周期（创建-使用中改进-curator 维护）**：`skill_manage` 对模型暴露以 `operations` 批次提交的原子操作，单批最多 20 项，任一项失败则整批回滚；delete 必须独占调用，旧的平铺动作只用于历史重放。使用统计记录在 `.usage.json` 中；curator 采用惰性维护，只归档技能、不执行删除。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)。
+- **能力三：持久记忆与用户建模**：记忆分两轨：内置的 `MEMORY.md` 与 `USER.md` 文件记忆注入 system prompt 的 volatile 段；外部后端通过 `MemoryProvider` ABC 接入，仓库内置 byterover 与 retaindb，Honcho、Mem0 等经 plugin-catalog 安装，同一时刻至多激活一个。模型写记忆可能被人审的写审批门拦下，用户执行 `/memory approve` 之后才落盘。跨会话用户建模的 dialectic 多轮推理由 Honcho 承担，本仓库只含接入链（建模质量见末尾小节）。证据：主链确认（内置）/ 入口确认（外部 provider）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 角色调查笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)。
+- **能力四：研究数据工具链（会话轨迹生产）**：打开 `save_trajectories` 开关（默认关闭）后，每轮会话按 ShareGPT 格式追加为 JSONL，成功与失败分别成文件；`trajectory_compressor.py` 保留首尾、只压缩中间段并替换为摘要。批量生产由 `batch_runner.py`、`mini_swe_runner.py` 与 `datagen-config-examples/` 一套配套组件承担。`hermes sessions export --format trace --upload` 把会话发布为 Hugging Face Agent Trace 数据集，默认私有并强制脱敏。证据：主链确认（保存/压缩）/ 入口确认（批量与数据集）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[对话导出与分享调查笔记](../对话导出与分享/Hermes-Agent-对话导出与分享调查笔记.md)。
 - **跨会话检索（session_search）**：FTS5 + 会话谱系去重 + 锚定窗口，属于闭环学习"搜索自己过去对话"的组成件，已并入学习闭环描述；同时是 `_AGENT_LOOP_TOOLS` 四个 agent-level 工具之一。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)、[Agent 工具调查笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Hermes-Agent-会话与消息管理调查笔记.md)。
 - **会话心跳（`/heartbeat`，候选能力）**：会话级重复重入指令到期且空闲时作为普通用户回合注入，忙碌时合并 tick；状态持久化在会话数据库。它与创建独立会话、执行账本和交付目标的 cron 分型不同。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)、[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **目标质量门（`/goal`，候选能力）**：目标循环每次"可能完成"时用 judge 复查，并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占。证据：主链确认（静态证据）。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
-- **终端后端（6 类内建 + 插件后端）**：已归并到 Agent 工具类目（`tools/environments/` 下 local/ssh/docker/modal/daytona/vercel_sandbox，Singularity/Apptainer 由插件提供，容器资源上限、execute_code 沙箱、容器风险豁免）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
+- **终端后端（6 类内建 + 插件后端）**：已归并到 Agent 工具类目：`tools/environments/` 下提供 local、ssh、docker、modal、daytona 与 vercel_sandbox 六种后端，Singularity 与 Apptainer 由插件提供；容器资源上限、execute_code 沙箱与容器风险豁免一并归在该类目。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **cron 定时任务**：profile 范围的 job、execution、输出与认领协议形成隔离日程运行；预推进后尚未取得 fire claim 的 pending_slot 可恢复一次，已认领运行避免盲目重放。headless tick 无 ready 网关时保留到期 Agent job、拒绝隐式启动 daemon。成功交付可按目标与开关镜像或播种为可继续会话，执行会话仍独立；暂停阻止新派发，取消进入 Agent/脚本路径。循环 job 若在零模型 API 调用阶段因网络/DNS 失败，可按 5/15/30 分钟有限重排；一次性任务或已可能产生副作用的失败不重跑。证据：主链确认（静态证据）。链接：[主动 Agent 与后台任务调查笔记](../主动Agent与后台任务/Hermes-Agent-主动Agent与后台任务调查笔记.md)。
 - **verify-on-stop**：已归并到 Agent 工具类目（回合终止前对候选回复跑 run-recipe 检测与验证）。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
 - **委派 / 子 Agent、MCP、插件体系、人格系统**：已归并到 Agent 工具与 Agent 角色类目，本汇总不重写。状态：归并已有类目。链接：[独特功能调查笔记](../独特功能/Hermes-Agent-独特功能调查笔记.md)。
@@ -88,9 +125,16 @@ Hermes Agent 是跨 CLI / TUI / 桌面 / Web / 消息网关复用同一套 Pytho
 
 **仓库分布**
 
-- **仓库形态与规模**：混合 monorepo 包含 Python Agent / CLI / gateway / tools 与 TypeScript 桌面、Web、TUI，以及 skills、插件和文档站。Git 跟踪文件 13,516；可识别源码 9,948 文件 / 2,739,531 行；文档 1,673 文件；测试 5,812 文件 / 1,381,872 源码行（约占全仓可识别源码 50.4%）。证据：Git 跟踪文件机械统计 + 源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
-- **语言与产品区域**：Python 1,899,875 行（69.4%）、TypeScript 752,790 行（27.5%）；产品区域以 `apps/desktop`（2,639 文件 / 596,485 行）、`hermes_cli`（370 / 187,370）、`agent`（224 / 100,446）、`tools`（257 / 94,028）为主。证据：静态统计。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
-- **跨平台与入口组织**：README 明确区分 Linux/macOS/WSL2、原生 Windows 与 Android/Termux 安装；npm workspace 把 apps/ui-tui/web/tests-js 组织为独立成员；桌面壳、Web 和 TUI 是独立入口，共享 Agent/gateway 协议而非一个响应式 UI。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
+- **仓库形态与规模**：仓库是混合 monorepo，Python 侧包含 Agent、CLI、gateway 与 tools，TypeScript 侧包含桌面、Web 与 TUI，另有 skills、插件与文档站。Git 跟踪文件 13,516 个，可识别源码 9,948 个文件、共 2,739,531 行；文档 1,673 个文件；测试 5,812 个文件、共 1,381,872 源码行，约占全仓可识别源码的 50.4%。证据：Git 跟踪文件机械统计 + 源码复核（静态）。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
+- **语言与产品区域**：Python 1,899,875 行，占 69.4%；TypeScript 752,790 行，占 27.5%。产品区域集中在四个目录：
+
+  - `apps/desktop`：2,639 个文件，596,485 行；
+  - `hermes_cli`：370 个文件，187,370 行；
+  - `agent`：224 个文件，100,446 行；
+  - `tools`：257 个文件，94,028 行。
+
+  证据：静态统计。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
+- **跨平台与入口组织**：README 明确区分 Linux/macOS/WSL2、原生 Windows 与 Android/Termux 的安装方式；npm workspace 把 apps/ui-tui、web 与 tests-js 组织为独立成员；桌面壳、Web 与 TUI 是三个独立入口，共享 Agent 与 gateway 协议。证据：静态确认。链接：[仓库分布调查笔记](../仓库分布/Hermes-Agent-仓库分布调查笔记.md)。
 
 **应用界面基础设施**
 

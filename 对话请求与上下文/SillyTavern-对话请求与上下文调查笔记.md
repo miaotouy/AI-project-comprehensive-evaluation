@@ -14,11 +14,11 @@
 
 ## 结论摘要
 
-SillyTavern 的一次生成由 `Generate()`（`public/script.js:4231`）统一入口驱动，slash command 可以在真正调用生成 API 之前整体劫持发送流程：
+SillyTavern 的一次生成由 `Generate()`（`public/script.js:4290`）统一入口驱动，slash command 可以在真正调用生成 API 之前整体劫持发送流程：
 
-- 主链：`sendTextareaMessage()` → `Generate()` → 历史筛选（`is_system` 排除 + 工具 system 例外）→ 逐条消息正则/附件/标题处理 → 角色字段与 system prompt → World Info 扫描与注入 → 生成 interceptors → 按 API 类型拼 text completion 或 OpenAI messages → token 预算裁剪 → `generate_data` → 流式/非流式请求 → `saveReply`/流式收尾 → `saveChatConditional()`。
-- **slash command 拦截点在生成函数最前面**：`Generate()` 在取输入之前执行 `processCommands()`（4251-4259），判定为打断时本次 Generate 直接短路，不发任何生成请求。
-- **正则按用途分层**（`public/scripts/extensions/regex/engine.js:334-381`）：无标记脚本在生成后清洗（`cleanUpMessage`，结果写回 `chat[].mes` 持久化）与 prompt 组装两处都生效；`markdownOnly` 只影响显示；`promptOnly` 只在 prompt 组装时生效（本次已定位调用点：`Generate` 的 `coreChat` 映射，`public/script.js:4447`）。
+- 主链：发送入口把输入交给统一生成入口后，一次请求依次经过历史筛选、逐条消息的正则与附件处理、角色字段与 system prompt 拼装、World Info 扫描注入、生成 interceptors、按 API 类型组装 text completion 或 OpenAI messages、token 预算裁剪，最后发出请求，以流式收尾或 `saveReply` 写回，再调用 `saveChatConditional()` 落盘。
+- **slash command 在生成入口前段拦截普通输入**：入口先补全角色数据并发布 GENERATION_STARTED，再处理输入中的命令；命中打断时在真正调用模型 API 前短路。dryRun、递归 depth、regenerate、swipe 与 quiet 路径跳过该命令处理（`public/script.js:4290-4321`）。
+- **正则按用途分层**：无标记脚本在生成后清洗与 prompt 组装两处都生效，清洗结果经 `cleanUpMessage` 写回 `chat[].mes` 持久保存；`markdownOnly` 只影响显示层，`promptOnly` 只在 prompt 组装时生效。分层定义见 `public/scripts/extensions/regex/engine.js:334-381`，prompt 侧的调用点在 `public/script.js:4447`。
 - **宏替换不是一次性统一处理**：`substituteParams()` 在用户消息发送、首条消息渲染、user prompt bias、quiet prompt、正则替换等多个代码路径独立调用。
 - Quick Reply 用 `eventSource.makeFirst` 抢占 `USER_MESSAGE_RENDERED`/`CHARACTER_MESSAGE_RENDERED` 事件，插在事件分发链最前面。
 - 群聊"重新生成"与单聊"swipe"是两套机制：群聊靠 `extra.gen_id` 分组 + 物理删除尾部消息；群聊内多个成员串行生成，由 `generateGroupWrapper` 循环驱动。
@@ -27,10 +27,10 @@ SillyTavern 的一次生成由 `Generate()`（`public/script.js:4231`）统一�
 
 ```text
 sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，11099-11102）
-  -> Generate()（script.js:4231）
-      -> GENERATION_STARTED 事件（4240）
-      -> processCommands()（3066-3074，调用点 4252）：以 "/" 开头则整段交给 slash command 执行并短路返回
-      -> GENERATION_AFTER_COMMANDS（4262）；群聊分支转 generateGroupWrapper（4291-4319）
+  -> Generate()（script.js:4290）
+      -> 补全角色数据，再发布 GENERATION_STARTED（4295-4299）
+      -> 普通输入路径 processCommands()（4310-4318）：命令打断时短路；dryRun/depth/regenerate/swipe/quiet 跳过
+      -> GENERATION_AFTER_COMMANDS（4321）；后续群聊分支转 generateGroupWrapper
       -> 取输入框文本；regenerate 先 removeLastMessage（4337-4353）；getBiasStrings（4374）
       -> sendMessageAsUser / send_if_empty（4389-4399）
       -> 角色卡字段 + depth prompt（4401-4427）；首条问候语宏替换（4430-4432）
@@ -51,61 +51,76 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 ## 1. 提交入口、任务对象与状态机
 
-- 入口：`sendTextareaMessage()`（`public/script.js:1705-1740`）在 `swipeState === NONE`、非按键发送（`!is_send_press`）、无 slash command 执行中时继续；"继续生成"开关（`power_user.continue_on_send`）在空输入 + 最后一条是角色消息时把类型改成 `continue`（1722-1731）。发送按钮绑定 `SimpleMutex(sendTextareaMessage)` 串行化（11099-11102），防止连点并发。
-- 任务对象：没有独立的任务/请求对象——生成状态就是模块级变量组合：`is_send_press`（602）加锁、`abortController`（460）、`streamingProcessor`（455）、`swipeState`、`chat_metadata.tainted`（4288 在非 dryRun 时置真）。事件成对：`GENERATION_STARTED`（4240）与 `GENERATION_AFTER_COMMANDS`（4262），slash 短路时只发前者。
-- 用户消息：`sendMessageAsUser()`（5815-5864）先正则（5816）再宏替换（5823）后 push 进 `chat`，发 `MESSAGE_SENT`/`USER_MESSAGE_RENDERED`（5858-5860）；bias 消息（只有 bias 无正文）改走 `sendSystemMessage`（4390-4393）。
-- 回复消息：`saveReply()`（6583-6771）按类型分支：`normal` 新建消息、`swipe` 复用最后一条的 swipes、`append`/`continue`/`appendFinal` 追加正文；群聊消息额外写 `force_avatar`/`original_avatar`/`extra.gen_id`（6708-6717）。
+- **入口**：发送入口 `sendTextareaMessage()` 只在三个前置条件同时成立时继续：`swipeState` 为 `NONE`、没有发送正在进行、当前没有 slash command 在执行。"继续生成"开关（`power_user.continue_on_send`）打开且输入框为空、最后一条消息来自角色时，本次发送被改判为续写类型。发送按钮外面再包一层互斥锁，连点会被串行化。条件判断与类型改写见 `public/script.js:1705-1740`，按钮绑定在 11099-11102。
+- **任务对象**：生成状态由一组模块级变量共同表达，没有独立的任务或请求对象：
+  - `is_send_press`：生成锁；
+  - `abortController`：当前请求的中止句柄；
+  - `streamingProcessor`：流式消费者实例；
+  - `swipeState` 与 `chat_metadata.tainted`：swipe 进度与聊天脏标记，后者在非 dryRun 时置真。
+
+  这些变量集中定义在 `public/script.js:455-602`；两个事件成对出现，`GENERATION_STARTED`（4240）与 `GENERATION_AFTER_COMMANDS`（4262），slash command 短路时只发前一个。
+- **用户消息**：用户消息先过正则，再做宏替换，然后写入 `chat`，并依次发出 `MESSAGE_SENT` 与 `USER_MESSAGE_RENDERED`；只有 bias 没有正文的消息改走系统消息通道。主流程见 `public/script.js:5815-5864`，bias 分支在 4390-4393。
+- **回复消息**：`saveReply()` 按消息类型决定落盘方式：
+  - `normal`：新建一条消息；
+  - `swipe`：复用最后一条消息的 swipes 槽位；
+  - `append`、`continue`、`appendFinal`：往已有正文后面追加。
+
+  群聊消息还会额外记录 `force_avatar`、`original_avatar` 与 `extra.gen_id` 三个字段，最后一个用于标记批次归属。分支实现见 `public/script.js:6583-6771`，群聊字段在 6708-6717。
 
 ## 2. 历史选择与上下文拼装顺序
 
 按 `Generate()` 内的实际顺序：
 
-1. **筛选**（4437）：`chat.filter` 排除隐藏消息（`is_system`），工具调用 system 消息（`extra?.tool_invocations` 且 `canUseTools`）例外保留。
-2. **逐条处理**（4444-4463）：按消息类型取 `regex_placement.USER_INPUT`/`AI_OUTPUT` 跑 `getRegexedString(..., {isPrompt: true, depth})`；`appendFileContent` 展开消息附件文件文本（4448）；`extra.append_title` 与媒体标题拼接（4450-4463）。
-3. **reasoning**：从最新往回给每条消息前缀 reasoning（4472-4498，`regex_placement.REASONING` 跑正则），群聊只处理当前生成角色（4478）。
-4. **字符字段**（4401-4427）：`getCharacterCardFields()` 取 description/personality/scenario/examples/system/jailbreak 等；depth prompt（角色/群聊）注入为 extension prompt。
-5. **World Info**（4565-4622）：`chatForWI`（名称+正文的反向数组）→ `getWorldInfoPrompt(chat, this_max_context, ...)`（4576）→ 扫描结果按 before/after/depth/example/outlet 注入 extension prompts（4605-4622）；`WORLD_INFO_ACTIVATED` 事件在非 dryRun 时发出（`world-info.js:900-903`）。
-6. **系统提示**：text completion API 用 `power_user.sysprompt`（`substituteParams(system, {original: ...})` 或 `baseChatReplace`，4627-4638）；jailbreak 在继续生成时插到倒数第二条之前（4696-4704）。
-7. **story string**：按 before/after anchor 与各字段模板渲染，`IN_CHAT` 位置时注入（4640-4676）；`doChatInject` 执行 chat 注入（4684-4687）。
-8. **角色转换**（4708-4777）：text completion 走 `formatMessageHistoryItem`（instruct 模式加首/末序列，4723-4757）；OpenAI 走 `setOpenAIMessages`（`public/scripts/openai.js:561-640`，处理 narrator→system、名称前缀策略、媒体、工具调用、reasoning 签名）。
-9. **组合**（5073-5185）：`getCombinedPrompt` 按 story string + examples + 聊天 + 最后一行（名字/quiet prompt/bias）拼出 `finalPrompt`；期间发 `GENERATE_BEFORE_COMBINE_PROMPTS`（5175）与 `GENERATE_AFTER_COMBINE_PROMPTS`（5183-5185）事件，扩展可以替换整个 prompt。
+1. **筛选**：隐藏消息（`is_system`）先从历史数组里滤掉；带 `extra.tool_invocations` 的 system 消息在工具调用启用时例外保留。判定见 `public/script.js:4437`。
+2. **逐条处理**：逐条消息按角色取用户输入或 AI 输出的正则位点，以 prompt 模式跑一遍正则；同时展开附件文件文本，并把媒体标题与 `extra.append_title` 拼回正文。三段逻辑都在 `public/script.js:4444-4463`。
+3. **reasoning**：从最新一条往回遍历，给每条消息补上 reasoning 前缀，过程中按 REASONING 位点跑正则；群聊只处理当前正在生成的角色。实现见 `public/script.js:4472-4498`，群聊分支在 4478。
+4. **角色字段**：角色卡里的描述、性格、场景、示例对话、system 与 jailbreak 等字段统一取出；角色卡与群聊的 depth prompt 作为 extension prompt 注入。字段收集见 `public/script.js:4401-4427`。
+5. **World Info**：先构造一份名称加正文、顺序反转的扫描输入，再调用 `getWorldInfoPrompt` 扫描，命中结果按 before/after/depth/example/outlet 五种位置注入 extension prompts；非 dryRun 时还会发出 `WORLD_INFO_ACTIVATED`。主流程见 `public/script.js:4565-4622`，事件位置在 `public/scripts/world-info.js:900-903`。
+6. **系统提示**：text completion API 的系统提示取自 `power_user.sysprompt`，拼接时走宏替换或 `baseChatReplace`；继续生成时 jailbreak 提示被插到倒数第二条消息之前。两处逻辑见 `public/script.js:4627-4638` 与 4696-4704。
+7. **story string**：按 before/after anchor 与各字段模板渲染成文，配置为 `IN_CHAT` 位置时随消息注入；`doChatInject` 负责按配置做 chat 注入。见 `public/script.js:4640-4676`，chat 注入在 4684-4687。
+8. **角色转换**：text completion 由 `formatMessageHistoryItem` 转换，instruct 模式下给每条消息补首尾序列；OpenAI 由 `setOpenAIMessages` 组装，负责 narrator 转 system、名称前缀策略以及媒体、工具调用与 reasoning 签名的处理。前者见 `public/script.js:4708-4777`，后者见 `public/scripts/openai.js:561-640`。
+9. **组合**：`getCombinedPrompt` 把 story string、示例对话、聊天记录和最后一行（角色名、quiet prompt 或 bias）拼成 `finalPrompt`；拼装前后分别发出 `GENERATE_BEFORE_COMBINE_PROMPTS` 与 `GENERATE_AFTER_COMBINE_PROMPTS`，扩展可以借此整体替换 prompt。事件与位置见 `public/script.js:5073-5185`。
 
 ## 3. 预算、截断、摘要与压缩
 
-- **预算**：`getMaxPromptTokens()` = `getMaxContextTokens() - getMaxResponseTokens()`（5922-5928）；OpenAI 用 `oai_settings.openai_max_context - openai_max_tokens`（`itemized-prompts.js:181`）。
-- **text completion 截断**：`arrMes` 从最新往回逐条累计 token，超预算停止（4814-4868），注入消息（`injectedIndices`）优先预分配（4820-4841）；示例消息在剩余预算内补（4898-4911）；`checkPromptSize()` 在拼好后仍超限时先丢示例再丢最旧消息、递归重试（5034-5060）。
-- **OpenAI 截断**：`ChatCompletion` 类在 `prepareOpenAIMessages` 内设置 token 预算（`openai.js:1558`），`populateChatCompletion` 按预算装填，必选 prompt 超限抛 `TokenBudgetExceededError` 并提示"Raise your token limit"（1578-1587）。
-- **World Info 预算**：`checkWorldInfo(chat, maxContext, ...)`（`world-info.js:4597`）按 `world_info_budget`/`budget_cap` 控制扫描与注入量。
-- **摘要/记忆**：`extension_prompts['1_memory']`（记忆扩展输出）与 `2_floating_prompt`（作者注释）作为扩展 prompt 参与拼装并在 itemized 记录（5287-5288）；"记忆压缩/总结"是 memory 扩展的职责，本笔记只记录其注入位置（itemized prompt 记录点 `public/script.js:5287` 与 `getAllExtensionPrompts` 5285）。
+- **预算**：可用 prompt 预算等于上下文上限减去回复预留；text completion 侧由 `getMaxPromptTokens` 相减得出，OpenAI 侧直接读设置里的上下文与输出上限。见 `public/script.js:5922-5928` 与 `public/scripts/itemized-prompts.js:181`。
+- **text completion 截断**：从最新一条往回逐条累计 token，超预算即停止，注入消息先预分配名额；示例对话在剩余预算内补足。拼好后仍超限时，`checkPromptSize` 先丢示例再丢最旧消息，递归重试。实现见 `public/script.js:4814-4868`，示例补位与递归裁剪在 4898-4911 与 5034-5060。
+- **OpenAI 截断**：`ChatCompletion` 在 `prepareOpenAIMessages` 里设置 token 预算，`populateChatCompletion` 按预算装填；连必选 prompt 都放不下时抛出 `TokenBudgetExceededError`，并提示 "Raise your token limit"。两处都在 `public/scripts/openai.js:1558-1587`。
+- **World Info 预算**：扫描入口 `checkWorldInfo` 接收上下文上限，并按世界书预算与预算上限两个设置控制扫描量和注入量。见 `public/scripts/world-info.js:4597`。
+- **摘要/记忆**：记忆扩展输出与作者注释分别占据 `1_memory`、`2_floating_prompt` 两个扩展 prompt 槽，随拼装进入请求，并记录在 itemized prompts 里；记忆压缩与总结本身由 memory 扩展负责。记录点见 `public/script.js:5285-5288`。
 - 截断不可逆：被裁剪的历史不会回填，也没有"重新生成时扩大预算"的机制。
 
 ## 4. Provider、模型与协议交接
 
-- **协议 Adapter 的接管点**：`Generate` 内 `switch (main_api)`（5190-5257）按 Kobold/KoboldHorde/TextGen/Novel/OpenAI 分支构建 `generate_data`，各分支的数据构建函数如下：
+- **协议 Adapter 的接管点**：请求发出前，`Generate` 按 `main_api` 的当前取值选分支，为每种后端构造一份请求数据（`generate_data`）。分支判定见 `public/script.js:5190-5257`，各分支的数据构建函数如下：
   - Kobold：`getKoboldGenerationData`；
   - TextGen：`getTextGenGenerationData`；
   - Novel：`getNovelGenerationData`；
   - OpenAI：`prepareOpenAIMessages`。
-- **发送**（6057-6105）按流式/非流式两条路径分发：
-  - 流式 `sendStreamingRequest`：`sendOpenAIRequest`/`generateTextGenWithStreaming`/`generateNovelWithStreaming`/`generateKoboldWithStreaming`；
-  - 非流式 `sendGenerationRequest`：OpenAI 走 `sendOpenAIRequest`，Horde 走 `generateHorde`，其余 `fetch(getGenerateUrl(main_api))`。
-- **网络路径**：浏览器不直连外部 provider，而是打到 SillyTavern 服务端代理端点（`getGenerateUrl`，6113-6126，如 `/api/backends/text-completions/generate`；服务端 `src/endpoints/backends/text-completions.js:272` 再转发并透传流式响应）。abort 也经服务端（`text-completions.js:89` 转发 `/api/extra/abort`）。
-- **模型/参数解析**：`main_api`/`oai_settings`/`kai_settings` 等模块级设置是事实源；服务端不参与 prompt 语义，只做代理转发。fallback/重试机制：本次在 text-completions 后端未找到重试逻辑（搜索 `retry` 无命中）；Horde 有 `adjustHordeGenerationParams` 的上下文/长度自适应（4516-4528）。
+- **发送**：请求按流式与非流式两条路径分发，入口在 `public/script.js:6057-6105`。
+  - 流式路径按后端分别调用：
+    - `sendOpenAIRequest`（OpenAI）
+    - `generateTextGenWithStreaming`（TextGen）
+    - `generateNovelWithStreaming`（Novel）
+    - `generateKoboldWithStreaming`（Kobold）
+  - 非流式 `sendGenerationRequest`：OpenAI 走 `sendOpenAIRequest`，Horde 走 `generateHorde`，其余后端用 `fetch` 打到 `getGenerateUrl` 给出的地址。
+- **网络路径**：浏览器的请求先打到 SillyTavern 服务端的代理端点，再由服务端转发给外部 provider 并透传流式响应。端点地址由 `getGenerateUrl` 生成（`public/script.js:6113-6126`），转发在 `src/endpoints/backends/text-completions.js:272`；中止请求同样经服务端转发到 `/api/extra/abort`（同文件 89 行）。
+- **模型与参数**：模型选择和采样参数都来自前端的模块级设置，服务端只做代理转发，不参与 prompt 语义。text-completions 后端本次没有找到 fallback 或重试逻辑（搜索 `retry` 无命中），Horde 则会在生成前对上下文长度做自适应调整。见 `public/script.js:4516-4528`。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
-- **流式消费**（`StreamingProcessor`，3481+）：`generate()` 逐段消费生成器（5337）；`onProgressStreaming`（3584-3685）每段先 `cleanUpMessage`（含 stopping strings 截断与正则）再写 `chat[messageId].mes` 与 DOM，`swipe`/`continue` 类型同步回 `swipes[swipe_id]`（3646-3654）。
+- **流式消费**：`StreamingProcessor` 的 `generate()` 逐段消费生成器返回的内容；每收到一段，`onProgressStreaming` 先交给 `cleanUpMessage` 清洗（截断 stopping strings、跑正则），再把文本写进当前消息与 DOM，swipe 与 continue 类型还会同步回对应的 swipe 槽位。消费入口见 `public/script.js:3481`，分段处理在 3584-3685。
 - **顺序保证**：文本按到达顺序追加，无并发缓冲队列；`stream_fade_in`/`streaming_fps` 是渲染侧节流（渲染器笔记）。
-- **事件时机**：`MESSAGE_RECEIVED`/`CHARACTER_MESSAGE_RENDERED` 只在流结束（`finalizeIntermediaryMessage` 3740-3741）或错误收尾（`onErrorStreaming` 3768-3771，swipe/impersonate/continue 不发）emit 一次，不随 token 触发；`MESSAGE_SWIPED` 每次 swipe 动画后发（10255）。
-- **interceptors**：`runGenerationInterceptors(chat, contextSize, abort, type)`（`public/scripts/extensions.js:2015-2040`）按 manifest 顺序执行全局函数，可 `abort(true)` 立即终止后续并在 `Generate` 内短路返回（4505-4511）。
+- **事件时机**：`MESSAGE_RECEIVED` 与 `CHARACTER_MESSAGE_RENDERED` 只在流正常结束或错误收尾时各发一次，不随 token 触发；swipe、impersonate、continue 的错误收尾不发事件。`MESSAGE_SWIPED` 每次 swipe 动画结束后单独发。位置见 `public/script.js:3740-3741`、3768-3771 与 10255。
+- **interceptors**：生成拦截器按 manifest 顺序依次执行，任一拦截器调用 `abort(true)` 会立即终止后续拦截器，并让 `Generate` 短路返回。调度与短路点见 `public/scripts/extensions.js:2015-2040` 与 `public/script.js:4505-4511`。
 
 ## 6. 完成、异常、半截流与最终回写
 
-- **流式完成**：`onFinishStreaming`（3749-3759）= `finalizeIntermediaryMessage`（swipes 收尾、`syncMesToSwipe`、`saveLogprobsForActiveMessage`、事件、可选解锁 UI）→ auto_swipe 判定 → `saveChatConditional()` → 提示音。
-- **非流式完成**：`onSuccess`（5402-5524）`extractMessageFromData` → `cleanUpMessage` → `saveReply`（continue 类型用 `appendFinal`）→ `parseAndSaveLogprobs` → 工具调用分支（5482-5501）→ `saveChatConditional()`（5514）。
-- **异常**：`onError`（5531-5541）toast 错误 + `unblockGeneration` + 置空 `streamingProcessor` 后重抛；流式错误 `onErrorStreaming` abort 并保留半截消息在 `chat[]`（不发事件时消息仍可见）。
-- **半截流**：手动停止（`stopGeneration`，5548-5559）调 `streamingProcessor.onStopStreaming()` + `abortController.abort()`，不保存；`beforeunload` 只 abort（12401-12407）。半截消息是否落盘：未停止的流在 `onFinishStreaming` 前不落盘。
-- **工具调用收尾**：`finalizeIntermediaryMessage({unlockUI: false})`（5357）先落定消息但不解锁输入框，`streamingProcessor = null` 延后到工具结果处理后（5369/5373），随后 `depth+1` 递归 `Generate('normal', ...)` 继续（5376）——"流式结束"与"生成流程结束"是两个时间点。
+- **流式完成**：流结束后，`onFinishStreaming` 先调用 `finalizeIntermediaryMessage` 做收尾（结算 swipes、把消息同步到当前 swipe 槽、保存 logprobs、发事件并按需解锁界面），再判定 auto_swipe，随后 `saveChatConditional()` 落盘并播放提示音。见 `public/script.js:3749-3759`。
+- **非流式完成**：`onSuccess` 依次从响应中取出正文、清洗、交给 `saveReply` 落定（continue 类型走 appendFinal）、解析并保存 logprobs，然后处理工具调用分支，最后落盘。调用链在 `public/script.js:5402-5524`。
+- **异常**：出错时 `onError` 弹出错误提示、解除生成锁、清空流式消费者再重新抛出；流式错误由 `onErrorStreaming` 中止请求，已生成的部分留在 `chat[]` 里，未发事件时也仍然可见。见 `public/script.js:5531-5541`。
+- **半截流**：手动停止时 `stopGeneration` 让流式消费者收尾并中止网络请求，这次生成不保存；页面卸载时只中止请求。未停止的流要等 `onFinishStreaming` 才落盘。见 `public/script.js:5548-5559` 与 12401-12407。
+- **工具调用收尾**：`finalizeIntermediaryMessage({unlockUI: false})` 先落定消息但保持输入框锁定，流式消费者要到工具结果处理完毕才置空，随后以 `depth + 1` 递归调用 `Generate('normal')` 继续本轮生成。流式结束与整个生成流程结束因此是两个时间点。见 `public/script.js:5357-5376`。
 
 ## 7. 停止、重试、续写与重新生成
 
@@ -119,9 +134,9 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 ## 8. 队列、多会话并发与后台生成
 
-- **同一会话串行**：`is_send_press` 单锁 + 发送按钮 `SimpleMutex`；`swipeState` 禁止发送/swipe 交错；编辑态（`swipeState === EDITING`）拒绝发送与继续（1707-1711, 11587-11590）。
-- **群聊内串行**：`generateGroupWrapper`（`group-chats.js:945-1092`）以 `is_group_generating` 重入保护（958-960），按激活策略（NATURAL/LIST/POOLED/MANUAL + swipe/continue/impersonate/quiet 特例，1002-1031）选出成员，循环执行 `setCharacterId` → `GROUP_MEMBER_DRAFTED`（1059）→ `Generate()` → 可能的 auto-continue 循环（1067-1070），全部完成才解锁（1077-1089）。`group_generation_id = Date.now()`（988）即该批次的 `gen_id`。
-- **后台生成**：生成期间输入框保持可用（`is_send_press` 只挡重复发送），但同一聊天的 swipe/重新生成被禁；群聊 auto mode 由 `setAutoModeWorker`/`groupChatAutoModeWorker` 在核心代码内定时驱动（`group-chats.js:144, 1398`）。
+- **同一会话串行**：生成由 `is_send_press` 这把模块级锁保证串行，发送按钮外面再包一层 `SimpleMutex`；swipe 与发送互斥，进入编辑态后发送和继续都被拒绝。判定见 `public/script.js:1707-1711` 与 11587-11590。
+- **群聊内串行**：群聊生成由 `generateGroupWrapper` 循环驱动，用 `is_group_generating` 做重入保护；每轮按激活策略（NATURAL/LIST/POOLED/MANUAL，另对 swipe、continue、impersonate、quiet 有特例）选出成员，依次切换角色、发出草稿事件、调用 `Generate()`，必要时进入 auto-continue，全部成员完成后才解锁。批次标识取当前时间戳，即这批消息后续的 `extra.gen_id`。见 `public/scripts/group-chats.js:945-1092`。
+- **后台生成**：生成期间输入框仍可用，那把锁只挡重复发送，但同一聊天的 swipe 与重新生成会被拒绝；群聊自动模式由核心代码内的 `setAutoModeWorker` 与 `groupChatAutoModeWorker` 两个定时 worker 驱动。见 `public/scripts/group-chats.js:144` 与 1398。
 - **不同会话**：一次只显示一个聊天；没有"多会话并行生成"的 UI 概念（欢迎屏/后台通知均无，见 Chat UI 笔记）。
 
 ## 9. 外部能力注入点
@@ -141,13 +156,13 @@ sendTextareaMessage()（script.js:1705；#send_but 经 SimpleMutex 进入，1109
 
 ## 10. 退出恢复、日志与已确认边界
 
-- **退出**：`beforeunload` 中止流式但不保存（12401-12407）；流式中途消息不持久化（见 6）。
+- **退出**：页面卸载时（`beforeunload`）中止正在进行的流式请求，已生成内容不写盘；流式中途的消息不持久化（见第 6 节），源码位置 `public/script.js:12401-12407`。
 - **可观测性**：`power_user.console_log_prompts` 打印最终 prompt（5271-5273）；itemized prompts（每次生成的完整 prompt 与分项 token 数）写入 IndexedDB（5280-5322，见会话与消息管理笔记 2.1），供消息上的 Prompt 按钮查看；`GENERATION_STARTED/STOPPED/ENDED` 事件可供扩展记录。
 - **已确认边界**：一次请求的上下文以 `finalPrompt`/`generate_data.prompt` 为准——设置面板或扩展 prompt 中配置的字段只在未被整体替换时进入本次请求（`GENERATE_AFTER_COMBINE_PROMPTS` 可整体替换）；文本 completion 与 OpenAI 两条拼装链在截断与注入顺序上实现完全不同；服务端只做代理，不持有会话状态。
 
 ## 11. 未验证事项
 
-- OpenAI 路径 `ChatCompletion`/`populateChatCompletion` 内部按什么粒度（消息 vs part vs system prompt）裁剪，只核实了预算入口与超限报错，未逐行核对装填算法。
+- OpenAI 路径的消息装填算法：只核实了预算入口与超限报错，`ChatCompletion` 与 `populateChatCompletion` 内部按消息、part 还是 system prompt 粒度裁剪，未逐行核对。
 - 各后端（Novel/Kobold/TextGen）的停止序列、半截流行为与错误形态未逐一实测。
 - Horde 的 `adjustHordeGenerationParams` 细节（上下文/长度自适应计算）未展开。
 - auto_swipe 过滤（`generatedTextFiltered`）与 auto_continue 判定（`shouldAutoContinue`）的阈值逻辑未逐行核对。

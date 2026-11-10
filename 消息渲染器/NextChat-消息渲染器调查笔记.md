@@ -16,11 +16,11 @@
 
 NextChat 的消息渲染器是一条以 `react-markdown` 为核心、由 Chat 组件负责消息窗口和状态装配的渲染链：
 
-1. `Chat` 先把 Mask context、会话消息、loading/input preview 组成可视窗口，再按 user/assistant/system 角色渲染头像、操作、工具状态、Markdown、图片和音频。
-2. Markdown 使用 `react-markdown` 加一组插件：GFM、数学、软换行、KaTeX 与高亮（插件名见 §2.2 清单）。在解析前会把 `\[...\]`/`\(...\)` 转成 KaTeX 可识别形式，并尝试把裸 HTML 文档包进 `html` 代码块。
-3. `<pre>` 被替换为 `PreCode`：Mermaid 代码单独交给 Mermaid 渲染成 SVG；HTML/DOCTYPE/SVG/XML 代码在 Artifact 开启时进入 sandbox iframe；普通代码支持复制和超过 400px 后折叠。
-4. SSE 流式文本通过 `requestAnimationFrame` 缓慢吐给 UI；`reasoning_content` 或 `<think>` 块被转成 Markdown 引用行 `> `，没有独立的 reasoning 数据结构。
-5. Artifact 通过 `srcDoc` 和 `sandbox="allow-forms allow-modals allow-scripts"`（无 `allow-same-origin`）预览，分享内容写入 Cloudflare KV。
+1. `Chat` 组件负责装配消息窗口：它把 Mask 上下文、会话消息以及 loading 与输入预览拼成当前可见的消息序列，再按 user、assistant、system 三种角色分别渲染头像、操作、工具状态、Markdown 正文、图片和音频。
+2. Markdown 正文交给 `react-markdown` 渲染，并挂载 GFM、数学公式、软换行、KaTeX 与代码高亮五组插件（清单见 §2.2）。解析前先把 `\[...\]` 与 `\(...\)` 改写成 KaTeX 可识别的定界符，文本里没有代码围栏时还会把整段裸 HTML 文档包进代码块。
+3. `<pre>` 元素统一换成 `PreCode`：Mermaid 图单独渲染成 SVG，HTML、DOCTYPE、SVG 与 XML 代码在 Artifact 开启时送进 sandbox iframe，普通代码提供复制按钮并在超过 400px 后折叠。
+4. SSE 流式文本通过 `requestAnimationFrame` 逐帧写出；模型返回的 `reasoning_content` 或 `<think>` 块被改写成 Markdown 引用行，渲染层没有独立的 reasoning 数据结构。
+5. Artifact 用 `srcDoc` 加载内容，sandbox 只授予 `allow-forms`、`allow-modals`、`allow-scripts` 三项权限，分享内容写入 Cloudflare KV。
 
 ## ASCII 调用链图
 
@@ -82,8 +82,8 @@ SSE delta
 
 `app/components/markdown.tsx:231-273`：
 
-- `escapeBrackets` 避开行内代码和 fenced code，把 `\[...\]` 转为 `$$...$$`，把 `\(...\)` 转为 `$...$`；
-- `tryWrapHtmlCode` 在文本中没有 fenced block 且检测到 `<!DOCTYPE html>` 时，自动补 `html` fenced block，避免完整 HTML 文档被当成普通段落。
+- `escapeBrackets` 先跳过行内代码和 fenced code，再把 `\[...\]` 转成 `$$...$$`、把 `\(...\)` 转成 `$...$`；
+- `tryWrapHtmlCode` 在文本没有 fenced block、却出现 `<!DOCTYPE html>` 时，自动补上 `html` 语言标记，完整 HTML 文档因此按代码块处理。
 
 ### 2.2 Unified 插件和组件覆盖
 
@@ -110,8 +110,10 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 `a` override（`app/components/markdown.tsx:292-310`）按扩展名把媒体链接渲染成内嵌播放器：
 
-- 音频扩展名 `.aac`/`.mp3`/`.opus`/`.wav` → `<audio controls>`；
-- 视频扩展名 `.3gp`/`.3g2`/`.webm`/`.ogv`/`.mpeg`/`.mp4`/`.avi` → `<video controls>`。
+| 媒体类型 | 识别的扩展名 | 渲染结果 |
+| --- | --- | --- |
+| 音频 | `.aac`、`.mp3`、`.opus`、`.wav` | `<audio controls>` |
+| 视频 | `.3gp`、`.3g2`、`.webm`、`.ogv`、`.mpeg`、`.mp4`、`.avi` | `<video controls>` |
 
 内部 `/#...` 链接使用 `_self`，其他链接默认为传入 target 或 `_blank`；没有看到统一的 `rel="noopener noreferrer"` 注入。
 
@@ -119,11 +121,11 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 ### 3.1 普通代码和折叠
 
-`PreCode` 的 effect 会把无语言、Markdown、text、LaTeX 等代码设为 `white-space: pre-wrap`，然后延迟探测 Artifact（`app/components/markdown.tsx:106-131`）。`CustomCode` 测量 `scrollHeight`，超过 400px 显示 More 按钮；`enableCodeFold` 同时受全局 config 与当前 Mask 开关控制，折叠状态将 `maxHeight` 设为 400px（`app/components/markdown.tsx:176-229`）。
+`PreCode` 在 effect 中把无语言标记以及 Markdown、text、LaTeX 这几类代码的样式设为 `white-space: pre-wrap`，随后延迟探测 Artifact 内容。`CustomCode` 负责测量 `scrollHeight`，内容超过 400px 时显示 More 按钮；折叠功能同时受全局配置与当前 Mask 开关控制，折叠后的最大高度同样取 400px。两处实现见 `app/components/markdown.tsx:106-229`。
 
 ### 3.2 Mermaid
 
-检测到 `code.language-mermaid` 后，`PreCode` 把纯文本交给 `Mermaid`（`app/components/markdown.tsx:83-100`、`148-150`）。`Mermaid` 调用 `mermaid.run`（绑定容器节点、`suppressErrors: true`），错误时返回空内容；点击容器会序列化其中的 SVG，创建 `image/svg+xml` Blob 并打开图片 modal（`app/components/markdown.tsx:28-72`）。
+检测到带 mermaid 语言标记的代码块后，`PreCode` 把其中的纯文本转交给 `Mermaid` 组件。该组件在容器节点上调用 `mermaid.run` 并开启 `suppressErrors`，渲染失败时返回空内容；点击容器会把内部 SVG 序列化，生成 `image/svg+xml` 格式的 Blob 后打开图片弹窗。组件定义与调用点都在 Markdown 主组件内，见 `app/components/markdown.tsx:28-150`。
 
 这是一条“代码块先出现在 DOM，再由 Mermaid 替换/追加 SVG”的路径，不是服务端预渲染。
 
@@ -140,13 +142,13 @@ rehype-highlight (detect=false, ignoreMissing=true)
 
 ### 4.1 文本动画
 
-`stream`/`streamWithThink` 在 `app/utils/chat.ts:197-220`、`423-446` 中维护 `responseText` 与 `remainText`。每个 animation frame 按剩余长度的比例取出若干字符（约 1/60，下限 1），调用 `options.onUpdate(responseText, fetchText)`；连接关闭或 `[DONE]` 后一次性收尾。
+`stream` 与 `streamWithThink` 两个流式入口都维护已输出与待输出的文本缓冲区。每个 animation frame 按剩余长度的比例取字符（约 1/60，下限 1 个）并通过更新回调交给上层，连接关闭或收到 `[DONE]` 后一次性收尾。实现见 `app/utils/chat.ts:197-446`。
 
 Chat store 的 `onUpdate` 更新 assistant message.content，Chat 组件用 `message.streaming` 改变 Markdown key 和 loading 状态（`app/store/chat.ts:459-480`、`app/components/chat.tsx:1969-1987`）。
 
 ### 4.2 推理输出转换
 
-OpenAI adapter 读取 `delta.reasoning_content`（`app/client/platforms/openai.ts:322-385`），`streamWithThink` 还识别文本中的 `<think>`/`</think>` 标签（`app/utils/chat.ts:586-615`）。在 thinking mode 时，它把每段内容写成：
+OpenAI 适配器从流式增量中取出 `reasoning_content` 字段（`app/client/platforms/openai.ts:322-385`），`streamWithThink` 另外识别正文里的 `<think>` 标签对（`app/utils/chat.ts:586-615`）。thinking mode 打开时，它把每段内容写成：
 
 ```text
 > 第一段推理

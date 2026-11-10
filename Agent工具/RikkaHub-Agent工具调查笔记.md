@@ -18,9 +18,9 @@ RikkaHub 的工具体系由 `ai` 模块定义协议、`app` 模块组装具体�
 
 第一，工具协议是一个极简的自定义数据类，不绑定任何 SDK。每个工具由名称、描述、参数 schema 提供器、systemPrompt 生成器、审批判定器和挂起执行器组成（`ai/src/main/java/me/rerere/ai/core/Tool.kt`）。参数 schema 只有 `InputSchema.Obj` 一种对象形态，不表达数组、枚举等嵌套的完整 JSON Schema 能力，具体细节由各工具在构造时用 `buildJsonObject` 手工拼出。
 
-第二，工具结果写入触发它的 ASSISTANT 消息的 parts，不创建 TOOL 角色消息。循环每轮把执行完的 `UIMessagePart.Tool` 回写到末尾助手消息，再进入下一轮模型调用；循环本体在 `ai` 模块的 `AgentLoop`，与 UI、通知、持久化解耦，由 `AgentHooks` 提供预处理、预览与收尾钩子（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`、`app/src/main/java/me/rerere/rikkahub/data/ai/ChatRequestFactory.kt`）。协议序列化时才按工具边界重新分组，把工具调用拆成 `assistant.tool_calls` 加紧随其后的 `role:"tool"` 消息（`ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt`）。
+第二，工具结果就地写入触发它的助手消息的 parts，会话中不额外生成 TOOL 角色消息。循环每轮把执行完的工具 part 回写到末尾助手消息，再发起下一轮模型调用；循环本体位于 `ai` 模块的 AgentLoop，与 UI、通知、持久化保持解耦，预处理、预览与收尾统一由 AgentHooks 注入（`ai/src/main/java/me/rerere/ai/agent/AgentLoop.kt`、`app/src/main/java/me/rerere/rikkahub/data/ai/ChatRequestFactory.kt`）。协议序列化时才按工具边界重新分组，把工具调用拆成 `assistant.tool_calls`，工具结果紧随其后写进 role 为 tool 的消息（`ai/src/main/java/me/rerere/ai/provider/providers/openai/ChatCompletionsAPI.kt`）。
 
-第三，审批是编排层状态机，执行端不做鉴权。工具执行前先检查 `needsApproval`，命中则把 `ToolApprovalState` 从 `Auto` 改成 `Pending` 并中断本轮，等用户动作后再从 `Pending` 恢复；`Denied` 和 `Answered` 在编排层直接合成结果，不进入工具自身实现。终止原因被显式建模为完成、等待审批与步数耗尽三种（`ai/agent/AgentLoop.kt` 的 `AgentFinishReason`）。
+第三，审批是编排层状态机，执行端不做鉴权。工具执行前先看它是否要求审批，要求审批时把该工具的状态由自动改成待审批并中断本轮，等用户动作后再从待审批继续；用户拒绝或填写答案这两种结论由编排层直接合成结果，不进入工具自身实现。终止原因被显式建模为完成、等待审批与步数耗尽三种（`ai/agent/AgentLoop.kt` 的 `AgentFinishReason`）。
 
 第四，工具来源有七个，注册顺序在 `ChatToolFactory.createTools` 中固定为：记忆、搜索、本地、会话、工作区、Skill、MCP（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/ChatToolFactory.kt`）。这一顺序与 `docs/references/chat-generation-pipeline.md` 第四阶段的描述不一致，文档把搜索排在第一位且把 Memory 排在最后；当前快照以源码为准。
 
@@ -47,15 +47,24 @@ ChatService.handleMessageComplete()
   -> onSuccess: saveConversation / generateTitle / generateSuggestion
 ```
 
-入口在 `ChatService.handleMessageComplete`（`app/src/main/java/me/rerere/rikkahub/service/ChatService.kt`），它先构造工具集，再把工具列表与生成参数交给 `ChatRequestFactory` 构造的 Agent，循环本体在 `ai` 模块执行。循环通过 `AgentEvent.Messages` 等事件把最新消息推给 `ChatService`，后者更新会话状态并触发通知。
+入口在 `ChatService.handleMessageComplete`（`app/src/main/java/me/rerere/rikkahub/service/ChatService.kt`），它先构造工具集，再把工具列表与生成参数交给 `ChatRequestFactory` 构造的 Agent，循环本体在 `ai` 模块执行。循环通过 `AgentEvent.Messages` 等事件把最新消息推给服务层，后者更新会话状态并触发通知。
 
-模型是否真正看到工具，还取决于 provider 的序列化条件。OpenAI 兼容实现在 `params.model.abilities` 包含 `ModelAbility.TOOL` 且工具列表非空时才写入 `tools` 字段（`ChatCompletionsAPI.kt`）。“已注册”与“已注入”是两个不同层面，`ChatService` 在模型不支持工具时会额外发一条提示性错误（`ChatService.kt`）。
+模型能否真正看到工具，还取决于 provider 的序列化条件。OpenAI 兼容实现只在模型声明支持工具能力、且工具列表非空时，才把工具写进请求的 tools 字段（`ChatCompletionsAPI.kt`）。注册与注入是两个层面：模型不支持工具时，`ChatService` 还会额外发一条提示性错误（`ChatService.kt`）。
 
 ## 1. 工具定义、来源与注册
 
 ### 1.1 工具数据契约
 
-`Tool` 是一个序列化数据类，包含六个字段：名称、描述、可空参数 schema 提供器、systemPrompt 生成器、审批判定器、挂起执行器（`ai/src/main/java/me/rerere/ai/core/Tool.kt`）。参数与 systemPrompt 都是函数，每次构建请求时重新求值，因此可以读取当次会话的 `Model` 和 `Messages`。参数 schema 的唯一形态是 `InputSchema.Obj`，带 `properties` 和一个可选 `required` 列表。
+工具以序列化数据类 `Tool` 描述，字段固定六项：
+
+- 名称；
+- 描述；
+- 可空参数 schema 提供器；
+- systemPrompt 生成器；
+- 审批判定器；
+- 挂起执行器。
+
+参数与系统提示都由函数提供，每次构建请求时重新求值，因此能读到当次会话的模型与消息。参数 schema 只有对象一种形态，即 `InputSchema.Obj`，带 properties 与一个可选 required 列表（`ai/src/main/java/me/rerere/ai/core/Tool.kt`）。
 
 执行器的返回类型是 `List<UIMessagePart>`，不是字符串。这允许工具直接产出图片等非文本内容，工作区读图片工具就利用了这一点（`app/src/main/java/me/rerere/rikkahub/data/ai/tools/WorkspaceTools.kt`）。
 
@@ -117,7 +126,7 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 ### 3.2 结果回传时的分组
 
-回传给模型时，助手消息的 parts 会先按工具边界分组，保证 `tool_calls` 后面紧跟 `tool` 结果消息（`ai/src/main/java/me/rerere/ai/provider/providers/ProviderMessageUtils.kt`）。分组规则是：已执行的 Tool part 归入 Tools 组，其他 part 归入 Content 组；`[Text1, Tool1, Tool2, Text2, Tool3]` 会拆成 Content、Tools、Content、Tools 四段。OpenAI 实现据此为每个 Tools 组先输出一条带 `tool_calls` 的 assistant 消息，再逐条输出 `role:"tool"` 结果消息（`ChatCompletionsAPI.kt`）。
+回传给模型时，助手消息的 parts 先按工具边界切段：已执行完的工具 part 归入工具组，其余归入内容组，保证每条工具调用后面紧跟对应的结果消息（`ai/src/main/java/me/rerere/ai/provider/providers/ProviderMessageUtils.kt`）。以文本与工具交替的序列为例，`[Text1, Tool1, Tool2, Text2, Tool3]` 会被切成内容、工具、内容、工具四段。OpenAI 实现按组输出：每个工具组先发一条带工具调用的 assistant 消息，再逐条发角色为 tool 的结果消息（`ChatCompletionsAPI.kt`）。
 
 ### 3.3 工具结果的模态降级
 
@@ -139,7 +148,11 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 ### 4.2 工具层校验
 
-各工具用不同的方式做参数校验，风格并不统一。会话搜索工具在缺少 `query` 时直接 `error`，并对 `limit` 做范围钳制（`ConversationTools.kt`）。记忆工具按路径与版本参数分支：路径非法、`old_str` 为空或不唯一、版本冲突都返回可读的错误，而不是抛异常（`MemoryTools.kt`、`MemoryRepository.kt`）。工作区工具用一套私有扩展函数处理路径与字符串提取，路径必须是以 `/` 开头的 Rootfs 绝对路径，含空字节或非绝对路径都会失败（`WorkspaceTools.kt`）。
+参数校验由各工具分别实现，三处风格差异如下：
+
+- 会话搜索：缺少查询词时直接抛错，并把结果条数钳制在允许范围内（`ConversationTools.kt`）；
+- 记忆：按路径与版本参数分支，路径非法、替换原文为空或不唯一、版本冲突都写成可读的错误结果返回（`MemoryTools.kt`、`MemoryRepository.kt`）；
+- 工作区：用一组私有扩展函数提取路径与字符串，路径必须是以 `/` 开头的 Rootfs 绝对路径，含空字节或非绝对路径都会失败（`WorkspaceTools.kt`）。
 
 日历工具的校验最重，它对时间格式按 epoch 毫秒、带偏移日期时间、Instant、本地日期时间、本地日期的顺序依次尝试解析，并额外校验区间合法性，失败时返回结构化的错误 JSON 而不是抛异常（`tools/local/CalendarTool.kt`、`CalendarTool.kt`）。
 
@@ -155,7 +168,7 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 `AgentLoop.run` 是一个受步数上限约束的循环，上限由构造 Agent 时的 `maxSteps` 决定（默认 256）。每轮先判断末尾消息是否已有可恢复执行的工具，没有才调用模型。这个分支是审批恢复的关键：用户审批后重新进入生成入口，循环看到已被批准、拒绝或已回答的工具就直接跳过模型调用，进入执行阶段（`ai/agent/AgentLoop.kt` 的 `requestApprovals`/`executeTools` 分支）。
 
-循环与业务侧的耦合全部通过 `AgentHooks` 完成：起始消息、每步请求装配、流式重试、预览转换与收尾都由钩子提供；循环自身只负责步进、工具执行与事件发布。网络重试策略由构造方注入，默认对网络异常启用（`data/ai/ChatRequestFactory.kt` 的 `retryPolicy`、`ai/agent/Retry.kt`）。终止原因分为完成、等待审批、步数耗尽三种，调用方据此决定落库与提示方式（`ai/agent/Agent.kt` 的 `AgentFinishReason`）。
+循环只负责步进、执行工具与发布事件，起始消息、每步请求装配、流式重试、预览转换与收尾统一交给 `AgentHooks` 实现。网络重试策略由构造方注入，默认对网络异常启用（`data/ai/ChatRequestFactory.kt` 的 retryPolicy、`ai/agent/Retry.kt`）。终止原因分完成、等待审批与步数耗尽三种，调用方据此决定落库与提示方式（`ai/agent/Agent.kt` 的 AgentFinishReason）。
 
 ### 5.2 无工具时终止
 
@@ -163,11 +176,17 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 ### 5.3 审批判定与中断
 
-对每个未执行工具，框架查找同名的 `Tool` 定义。若该工具 `needsApproval` 为真且当前状态是 `Auto`，则改为 `Pending` 并标记有待审批；已是 `Pending` 的保持等待；其他状态不动（`AgentLoop.kt` 的审批扫描）。若有任何工具被置为 `Pending`，更新消息后 emit 并 break，等用户操作（`AgentLoop.kt` 的 `AwaitingApproval` 收尾）。
+审批扫描对末尾消息里每个尚未执行的工具按名称找到对应定义，再根据是否需要审批与当前状态决定去向：
+
+- 需要审批且状态为自动：改成待审批，并记下本轮存在待审工具；
+- 已经是待审批：保持原状，继续等待用户；
+- 其他状态：不做改动。
+
+只要有工具被置为待审批，循环就更新消息、发出事件并结束本轮，等用户操作（`AgentLoop.kt` 的审批扫描与等待审批收尾）。
 
 ### 5.4 并发与取消
 
-工具执行是顺序的，`toolsToProcess.forEach` 逐个执行（`AgentLoop.kt` 的 `executeTools`）。`ChatService.handleToolApproval` 通过 `synchronized` 串行化同一会话的审批处理，并在启动新 Job 前检查是否还有其他待审批工具，只有全部处理完才继续生成（`ChatService.kt`）。停止生成通过协程取消实现，循环内的 `CancellationException` 会被重新抛出（`AgentLoop.kt` 的取消重抛）。
+工具执行是顺序的：循环用 forEach 逐个跑完待处理列表（`AgentLoop.kt` 的 `executeTools`）。审批处理按会话串行化，`ChatService.handleToolApproval` 用 synchronized 包住同一会话的审批，并在启动新 Job 前确认没有其他待审批工具，全部处理完才继续生成（`ChatService.kt`）。停止生成走协程取消，循环捕获到的取消异常会重新抛出，把中断交给上层处理（`AgentLoop.kt` 的取消重抛）。
 
 ### 5.5 无结果时的兜底终止
 
@@ -177,7 +196,7 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 ### 6.1 审批状态机
 
-状态定义在 `ai` 模块：`Auto`、`Pending`、`Approved`、`Denied(reason)`、`Answered(answer)`（`ai/src/main/java/me/rerere/ai/ui/UIMessagePart.kt`）。`canResumeToolExecution` 只对 `Approved`、`Denied`、`Answered` 返回真（`UIMessagePart.kt`）。
+审批状态定义在 `ai` 模块的工具 part 上，共五个取值：自动、待审批、已批准、已拒绝与已回答，后两者分别携带拒绝原因和用户答案（`ai/src/main/java/me/rerere/ai/ui/UIMessagePart.kt`）。只有已批准、已拒绝、已回答三种状态可以恢复执行，判定由 `canResumeToolExecution` 完成，与状态定义在同一文件。
 
 | 状态 | 进入方式 | 循环行为 |
 |---|---|---|
@@ -187,11 +206,11 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 | Denied | 用户拒绝 | 合成 `Tool execution denied by user` 错误 JSON |
 | Answered | 用户填写答案 | 直接把答案文本作为工具输出 |
 
-`Denied` 与 `Answered` 都不执行工具实现，结果在编排层合成（`AgentLoop.kt` 的 `Denied`/`Answered` 合成）。`ask_user` 工具正是依赖 `Answered`：它的 `needsApproval` 恒为真，`execute` 直接抛错，因为真实结果来自 HITL 流程（`tools/local/AskUserTool.kt`）。
+用户拒绝或填写答案时，对应的工具不会被执行，结果由编排层直接合成（`AgentLoop.kt` 的 `Denied`/`Answered` 合成）。`ask_user` 工具依赖这一机制：它恒定要求审批，自身执行函数只抛出错误，真实答案来自人工审批流程（`tools/local/AskUserTool.kt`）。
 
 ### 6.2 审批入口与恢复
 
-用户动作从 UI 进入 `ChatVM.handleToolApproval` 或 `handleToolAnswer`（`app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt`），再调用 `ChatService.handleToolApproval`。后者会忽略重复点击和对已完成工具的操作：只有当目标工具仍是 `Pending` 时才处理（`ChatService.kt`）。
+用户动作从 UI 进入 `ChatVM.handleToolApproval` 或 handleToolAnswer（`app/src/main/java/me/rerere/rikkahub/ui/pages/chat/ChatVM.kt`），再调用 `ChatService.handleToolApproval`。后者会忽略重复点击和对已完成工具的操作：只有目标工具仍是 `Pending` 时才处理（`ChatService.kt`）。
 
 ### 6.3 审批策略的来源
 
@@ -199,17 +218,21 @@ RikkaHub 使用 provider 原生工具协议，不是文本协议。工具以函�
 
 写文件与编辑文件还有一个额外的强制审批条件：路径落在可写安全区之外时，无论默认值如何都必须审批（`WorkspaceTools.kt`）。可写安全区定义为 `/workspace`、`/tmp`、`/skills` 三个前缀（`WorkspaceTools.kt`）。
 
-MCP 工具的审批来自服务器同步下来的 `McpTool.needsApproval` 字段，默认 false（`mcp/McpConfig.kt`、`ChatToolFactory.kt`）。本地工具中目前只有 `ask_user` 与日历创建显式需要审批（`AskUserTool.kt`、`CalendarTool.kt`）。
+MCP 工具的审批来自服务器同步下来的 needsApproval 字段，默认 false（`mcp/McpConfig.kt`、`ChatToolFactory.kt`）。本地工具中目前只有 ask_user 与日历创建显式需要审批（`AskUserTool.kt`、`CalendarTool.kt`）。
 
 ### 6.4 执行边界
 
-工具的物理执行位置可以分为三类。纯本地计算类（JS 引擎、时间、剪贴板）直接在 Android 进程内执行。系统集成类（日历、屏幕时间、TTS）通过 Android ContentResolver、UsageStatsManager 或事件总线执行，权限不足时返回结构化错误，屏幕时间工具还会主动打开系统设置页（`tools/local/ScreenTimeTool.kt`）。工作区类工具通过 PRoot 沙箱执行，命令被包成对 `/bin/bash -l -c` 的调用，工作区文件区通过 bind mount 挂到 `/workspace`，内核伪文件系统 `/dev`、`/proc`、`/sys` 也被挂入（`workspace/src/main/java/me/rerere/workspace/ProotShellRunner.kt`、`workspace/src/main/java/me/rerere/workspace/WorkspaceManager.kt`）。
+工具按物理执行位置分三类：
+
+- 纯本地计算（JS 引擎、时间、剪贴板）：在 Android 进程内直接执行；
+- 系统集成（日历、屏幕时间、TTS）：经 Android 的 ContentResolver、UsageStatsManager 或事件总线执行，权限不足时返回结构化错误，屏幕时间工具还会主动打开系统设置页（`tools/local/ScreenTimeTool.kt`）；
+- 工作区：命令包成对 `/bin/bash -l -c` 的调用后交给 PRoot 沙箱，工作区文件区通过 bind mount 挂到 `/workspace`，/dev、/proc、/sys 三个内核伪文件系统一并挂入（`workspace/src/main/java/me/rerere/workspace/ProotShellRunner.kt`、`workspace/src/main/java/me/rerere/workspace/WorkspaceManager.kt`）。
 
 沙箱的隔离来自 PRoot 的 `--root-id`、`--link2symlink`、`--kill-on-exit` 参数以及 Rootfs 根目录，环境变量被显式重置为最小集合（`ProotShellRunner.kt`）。命令文本通过位置参数传入，避免转义问题（`ProotShellRunner.kt`）。
 
 ### 6.5 沙箱外的路径解析
 
-工作区读文件工具支持 Rootfs 内绝对路径，路径解析会把 `/workspace` 前缀映射回宿主机的 files 目录，把 bind mount 目标映射到宿主机源目录，并显式拒绝对 `/dev`、`/proc`、`/sys` 的按文件读取，提示改用 shell（`WorkspaceManager.kt`）。读文件大小上限 8MB，超限时报错并建议用 shell 分段读取（`WorkspaceTools.kt`）。
+工作区读文件工具支持 Rootfs 内绝对路径：路径解析把 `/workspace` 前缀映射回宿主机的 files 目录，把 bind mount 目标映射到宿主机源目录，三个内核伪文件系统路径（/dev、/proc、/sys）的按文件读取一律拒绝并提示改用 shell（`WorkspaceManager.kt`）。读文件大小上限 8MB，超限时报错并建议用 shell 分段读取（`WorkspaceTools.kt`）。
 
 ### 6.6 shell 的超时与输出上限
 
@@ -225,11 +248,17 @@ shell 命令默认超时 30 秒，可由模型通过 `timeout` 参数指定，�
 
 截断不分工具类型，而是在工具集装配完成后统一包装：只要会话绑定的工作区具备可读的本地 Rootfs，除搜索工具外的每个工具都会被套上一层输出上限；输出文本总长超过 32KB 才触发，搜索工具因 UI 与引用跳转依赖完整 JSON 结构而被排除（`data/ai/tools/ChatToolFactory.kt` 的 `withOutputTruncation`、`TOOLS_WITHOUT_OUTPUT_TRUNCATION`）。
 
-截断行为是：完整文本写入 `filesDir/tool_outputs/{uuid}.txt`，消息中只保留前 4KB 预览，并在预览前附加总字符数、文件路径、`cat` 读取和 `grep` 搜索的 shell 指令提示；提示里的路径是 Rootfs 内的 `/tool_outputs/...`，只有本地挂载该目录的工作区能读到，远程工作区读不到。非文本 part（如图片）不受截断影响，会原样追加在文本之后（`data/ai/tools/ChatToolFactory.kt`、`data/files/FileFolders.kt`）。
+截断行为是：完整文本写入 `filesDir/tool_outputs/{uuid}.txt`，消息中只保留前 4KB 预览，并在预览前附加总字符数、文件路径以及用 cat 与 grep 检索的 shell 指令提示；提示里的路径是 Rootfs 内的 `/tool_outputs/...`，只有本地挂载该目录的工作区能读到，远程工作区读不到。非文本 part（如图片）不受截断影响，会原样追加在文本之后（`data/ai/tools/ChatToolFactory.kt`、`data/files/FileFolders.kt`）。
 
 ### 7.3 中断与恢复
 
-三种路径共同保证工具状态不悬空。`checkInvalidMessages` 在每次生成前清理仍然带有未解决审批的节点，但保留可恢复状态和全部已执行的工具（`ChatService.kt`）。`finishInterruptedPendingTools` 在发送新消息时把上次被打断的待执行工具标记为取消结果（`ChatService.kt`）。`cancelToolByUser` 合成的取消 JSON 带 `status:cancelled` 字段（`ChatService.kt`）。
+三条路径共同保证工具状态不悬空：
+
+- 每次生成前，`checkInvalidMessages` 清理仍带未解决审批的节点，但保留可恢复状态和全部已执行的工具；
+- 发送新消息时，`finishInterruptedPendingTools` 把上次被打断的待执行工具标记为取消结果；
+- `cancelToolByUser` 合成的取消 JSON 带 `status:cancelled` 字段。
+
+三处逻辑都在 `ChatService.kt`。
 
 ### 7.4 持久化
 
@@ -255,7 +284,7 @@ MCP 子系统分三层：`McpManager` 是公共入口，协调配置、OAuth、�
 
 ### 8.5 命名与调用
 
-MCP 工具名格式为 `mcp__{serverName}__{toolName}`（`ChatToolFactory.kt`）。调用时把 `JsonObject` 参数透传给 `callTool`，请求超时 120 秒（`McpSessionRegistry.kt`）。返回值按内容类型转换：文本直接成为文本 part，图片解码后保存为本地文件并转为图片 part，其他内容编码为 JSON 文本（`McpManager.kt`）。
+MCP 工具名格式为 `mcp__{serverName}__{toolName}`（`ChatToolFactory.kt`）。调用时把参数对象透传给服务器的 callTool，请求超时 120 秒（`McpSessionRegistry.kt`）。返回值按内容类型转换：文本直接成为文本 part，图片解码后保存为本地文件并转为图片 part，其他内容编码为 JSON 文本（`McpManager.kt`）。
 
 客户端不可用时返回文本错误结果，不抛异常（`McpManager.kt`），这与框架对普通工具错误的处理方式一致，都让错误作为工具输出回到模型。
 
@@ -263,7 +292,7 @@ MCP 工具名格式为 `mcp__{serverName}__{toolName}`（`ChatToolFactory.kt`）
 
 Skill 工具从助手启用的技能集合与磁盘上的技能列表求交集，交集为空则不注册（`SkillsTools.kt`）。执行时省略 `path` 参数读取 `SKILL.md` 的正文（去掉 frontmatter），提供 `path` 时解析为技能目录内相对路径，越界或不存在都会报错（`SkillsTools.kt`）。
 
-技能目录有两条来源：用户技能放在应用私有目录的 skills 目录下，内置技能随 APK 打包在 assets 中，首次使用时解压到内置技能目录并与用户技能合并；技能元数据来自 `SKILL.md` 的 frontmatter，必须有 `name` 和 `description` 才会被识别，非法目录会被单独列出并可删除。助手的启用名单会在技能被删除或改名后做一次游离清理（`data/skills/SkillManager.kt`、`data/skills/SkillValidator.kt`、`data/skills/BuiltinSkills.kt`）。
+技能目录有两条来源：用户技能放在应用私有目录的 skills 目录下，内置技能随 APK 打包在 assets 中，首次使用时解压到内置技能目录并与用户技能合并；技能元数据来自 `SKILL.md` 的 frontmatter，必须有 name 和 description 才会被识别，非法目录会被单独列出并可删除。助手的启用名单会在技能被删除或改名后做一次游离清理（`data/skills/SkillManager.kt`、`data/skills/SkillValidator.kt`、`data/skills/BuiltinSkills.kt`）。
 
 ### 8.7 子 Agent
 

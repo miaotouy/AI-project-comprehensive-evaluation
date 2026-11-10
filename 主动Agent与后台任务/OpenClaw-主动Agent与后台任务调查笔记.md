@@ -30,7 +30,7 @@
 
 ### 统一的 cron 主链
 
-Gateway 首次需要 cron 时通过 lazy loader 创建一个 `CronService`；`cron.enabled` 未显式设为 `false` 且没有 `OPENCLAW_SKIP_CRON=1` 时，服务允许自动运行。启动阶段先加载并校验 SQLite 中的 job，修复仍带有 queued/running marker 的非终态 receipt，再处理重启 catch-up，最后按最近的 `nextRunAtMs` 设置 timer。timer tick 在 Gateway root work admission 中运行，读取到期 job，取得并持久化 queued reservation 和 running receipt，然后进入统一执行与终态写入路径（`src/gateway/server-cron-lazy.ts`、`src/gateway/server-cron.ts`、`src/cron/service/ops-lifecycle.ts`、`src/cron/active-jobs.ts`）。
+Gateway 首次出现 cron 需求时，才由 lazy loader 构造一个 `CronService`；只要 cron.enabled 没有被显式关掉，环境中也没有 OPENCLAW_SKIP_CRON=1，这个服务就允许自动运行。启动阶段先把 SQLite 里的 job 读出来并校验，把仍带 queued/running marker 的非终态 receipt 修复掉，再处理重启 catch-up，最后按最近一次 nextRunAtMs 设好 timer。每次 tick 都在 Gateway root work admission 内执行：读取到期 job，取得并持久化 queued reservation 与 running receipt，然后进入统一的执行和终态写入路径（`src/gateway/server-cron-lazy.ts`、`src/gateway/server-cron.ts`、`src/cron/service/ops-lifecycle.ts`、`src/cron/active-jobs.ts`）。
 
 ```text
 automations/cron 工具、Gateway cron.* RPC、CLI 或系统 monitor
@@ -46,7 +46,7 @@ automations/cron 工具、Gateway cron.* RPC、CLI 或系统 monitor
 
 ### 运行形态的分界
 
-`CronJob` 的 `sessionTarget` 决定是否重新进入主会话、指定会话或 detached run session；`runsDetachedFromMainSession` 还把 script 和 skill collection review 视为需要独立 task/lifecycle 处理的运行。`main` job 把 system event 放入目标会话，再请求 heartbeat runner；其他目标交给 detached cron runner。这个分界见 `src/cron/types.ts`、`src/cron/service/timer-execution-timeout.ts` 和 `src/cron/service/timer-execution.ts`。
+job 的 sessionTarget 字段决定一次运行落在哪里：main 目标把 system event 放进目标会话，再请求 heartbeat runner 接管；指定会话与其他目标交给 detached cron runner，其中 `session:<key>` 复用指定持久会话，isolated/current 目标使用独立 run session。runsDetachedFromMainSession 另外把 script 和 skill collection review 判定为需要独立 task 与 lifecycle 处理的运行。目标解析与运行会话准备分别见 `src/cron/session-target.ts:22-37` 和 `src/cron/isolated-agent/run-prepare.ts:190-283`。
 
 system event、follow-up 和 steering queue 是结果进入下一回合的传输层，不是独立持久任务。system event 队列要求显式 session key，最多保留 20 项，运行时只存在进程内；它会在 heartbeat 或下一次会话提示构造时被筛选、消费。`src/infra/system-events.ts` 明确说明该队列故意不持久化，因此只能承接已有主动运行的提示或终态，不能单独承担重启后的任务恢复。
 
@@ -58,7 +58,7 @@ system event、follow-up 和 steering queue 是结果进入下一回合的传输
 
 ### Automations/cron 的创建与排程
 
-Agent 面向的工具名是 `automations`。它提供 scheduler status/list/get/add/update/remove/run/runs/next_check/wake 等动作，创建和修改最终通过 Gateway `cron.*` RPC 进入 CronService；工具默认宣传 `at`、`every`、`cron` 三种时间调度，触发 watcher、stream 和 script 受 `cron.triggers.enabled` 控制。一次性 `at` 任务运行后不再继续排程，循环任务保留下一次时间；`current` 会在创建时绑定 session key，避免后续当前会话切换改变任务归属（`src/agents/tools/cron-tool.ts`、`src/cron/session-target.ts`）。
+Agent 面向的日程工具叫 `automations`。它的动作覆盖查看调度器状态、列举与读取 job、新增、修改、删除、立即运行、查看运行历史、计算下次检查时间和主动唤醒；新增与修改最终都经 Gateway 的 cron RPC 进入 CronService。工具默认对外声明 at、every 和 cron 三种时间调度，事件型的 watcher、stream 与 script 触发另由 cron.triggers.enabled 开关。at 任务运行一次后不再排程，循环任务保留下一次运行时间；current 目标在创建时就绑定当时的 session key，此后当前会话切换不会改变任务归属（`src/agents/tools/cron-tool.ts`、`src/cron/session-target.ts`）。
 
 持久定义和运行状态由同一 SQLite state database 的多个 owner-native 表共同表达：
 
@@ -77,17 +77,19 @@ cron history 仍借用 task_runs 表名，但写入明确限定 runtime=cron，�
 
 cron 支持以下运行触发边界：
 
-- `at` 是保持到成功终态或明确处理的一次性时间任务。
-- `every` 按 anchor 和上次运行时间计算下一次周期。
-- `cron` 按时区表达式计算，支持确定性 stagger，避免多个任务在同一时刻集中启动。
-- `on-exit` 不靠时间到期，而由 Gateway `ProcessSupervisor` 在 Gateway 外层托管被观察的命令；命令退出后把退出结果送入普通 cron run pipeline。
-- `stream` 由 Gateway watcher 托管 argv，按 line/match 和 batch 边界把输出交给 cron 执行；其 source identity 在禁用、删除、替换时轮换。
+| 触发类型 | 判定依据 | 运行边界 |
+| --- | --- | --- |
+| `at` | 一次性时间任务 | 保持到成功终态或被明确处理 |
+| `every` | anchor 与上次运行时间 | 每次运行后重新计算下一周期 |
+| `cron` | 时区表达式 | 支持确定性 stagger，避免多个任务在同一时刻集中启动 |
+| `on-exit` | Gateway `ProcessSupervisor` 托管的命令退出 | 命令由 Gateway 在自身外层托管，退出结果送入普通 cron run pipeline |
+| `stream` | Gateway watcher 托管的 argv 输出 | 按 line/match 和 batch 边界交给 cron 执行，source identity 在禁用、删除、替换时轮换 |
 
 `on-exit` watcher 在 spawn 尚未完成时就占用 job slot，取消或替换会使迟到的 child 被杀掉；spawn/wait 失败按递增退避重新 arm，未知 wait 结果不会直接触发 job。观察命令的 24 小时上限、重试间隔和 ownership token 见 `src/gateway/cron-exit-watchers.ts`。时间 timer、stream watcher 和 exit watcher 的 reconciler 都会在 job mutation 或 Gateway 生命周期变化后重读持久 job；其内部 watcher 状态不替代 cron receipt。
 
 ### Heartbeat monitor 与 wake bus
 
-heartbeat 周期由 `heartbeat:<agentId>` declaration key 标识的 system-owned cron job 承载。配置解析默认周期是 `30m`；按 Agent 配置、显式 heartbeat owner 或环境中的 ambient owner 生成 monitor，monitor 的 `sessionTarget` 为 `main`，`wakeMode` 为 `next-heartbeat`。Gateway convergence 会创建、更新或删除这些系统 job，系统 job 不能由普通客户端 payload 直接创建或编辑（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-config.ts`、`src/cron/heartbeat-monitor.ts`、`src/cron/types.ts`）。
+heartbeat 的周期由系统自有的 cron job 承载，每个 job 用 declaration key `heartbeat:<agentId>` 标识它属于哪个 Agent。配置解析给出的默认周期是 30 分钟；monitor 按 Agent 配置、显式 heartbeat owner 或环境里的 ambient owner 生成，其 sessionTarget 为 main，wakeMode 为 next-heartbeat。Gateway 收敛时会创建、更新或删除这些系统 job，普通客户端的 payload 无法直接创建或编辑它们（`src/cron/heartbeat-monitor.ts`、`src/infra/heartbeat-config.ts`、`src/cron/types.ts`）。
 
 monitor job 执行时不直接完成模型回合，而是把 scheduled wake 送入 heartbeat wake bus。hook、cron main job、后台 task、exec completion 和手动请求也可以进入同一个 bus。wake bus 以 agent/session target 分组，每个 target 同时最多一个活跃 heartbeat turn；不同 target 可并行，跨 target 的 wake fan-out 上限为 4。相同 target 的 task、scheduled、event wake 会合并，保留优先级、顺序和待处理 task；busy、preempted 和请求在途的可重试跳过会在 wake 层保留或重新排程（`src/infra/heartbeat-wake.ts`）。
 
@@ -97,7 +99,7 @@ Heartbeat runner 在真正调用 `runOnce` 前检查：全局 heartbeat 开关�
 
 Gateway hook HTTP handler 的职责是认证和 admission，不是直接执行模型。它要求 POST、Bearer 或 `X-OpenClaw-Token`，限制 body 大小，解析 `wake` 或 `agent` payload，并检查 Agent allowlist、session key 允许前缀、持久 session 的必要条件和 delivery 字段。配置 mapping 可以将一个外部 payload fan-out 为多个 wake/agent action；重复的 agent dispatch 使用 token、路径、dispatch scope 和 idempotency key 组成的进程内 replay cache，fan-out 没有显式 idempotency key 时从 action scope 派生稳定身份（`src/gateway/server/hooks-request-handler.ts`）。
 
-`wake` hook 把文本放进目标 session 的 system event 队列；`mode=now` 进一步请求 heartbeat immediate wake，`next-heartbeat` 只等待后续 heartbeat。`agent` hook 则创建一个当前时刻的 `at` cron job：persistent 模式使用 `session:<sessionKey>`，默认 isolated 模式使用独立 detached run；payload 是 `agentTurn`，并把 model、thinking、timeout、external content source 和 delivery 一并冻结在 job 中（`src/gateway/server/hooks.ts`）。
+wake 类型的 hook 只把文本写进目标 session 的 system event 队列，是否立刻打扰 Agent 取决于 mode：now 会额外请求一次 heartbeat immediate wake，next-heartbeat 则等下一次 heartbeat 再处理。agent 类型的 hook 改为创建一个当前时刻生效的一次性 cron job：persistent 模式把 sessionTarget 设成 `session:<sessionKey>` 并回到该会话，默认的 isolated 模式使用独立 detached run；job 的 payload 类型是 agentTurn，创建时把 model、thinking、timeout、外部内容来源和 delivery 一并冻结在 job 中（`src/gateway/server/hooks.ts`）。
 
 真正的 hook agent dispatch 使用同一 session key 的进程内串行队列，避免多个 hook 同时对同一 session 争夺 lifecycle claim；不同 session 可并行。默认 admission 起始等待上限为 15 秒，fan-out action 可声明 `admissionMode=background`，让 producer redelivery 与 replay cache 而不是 HTTP start deadline 承担慢 admission 的重试。执行从 lazy-loaded isolated cron runner 进入 `CommandLane.HookDispatch`，并在 runner 启动或 lane 等待结束时向 HTTP 调用方确认 admission（`src/gateway/server/hooks.ts`）。
 
@@ -107,7 +109,7 @@ hook run 完成后，如果要求 delivery 但 run 没有自行交付，dispatch
 
 exec 的后台化动作发生在当前工具调用内。yield timer 与进程结束竞争：未结束、未中止且未 finalizing 时，把 ProcessSession 标为 backgrounded，停止本次工具的流式更新并返回 process session 身份；更早结束则返回前台结果。当前链路没有创建 runtime=cli 的通用 task row。进程与输出保留由 ProcessSupervisor、process activity 和 registry 协作。依据见 [exec yield](<../../openclaw/src/agents/bash-tools.exec-run.ts#L665-L716>)、[进程 registry](<../../openclaw/src/agents/bash-process-registry.ts>)。
 
-进程结束时，sandbox finalization 先完成，随后通过 `onSettledBeforeNotify` 把退出结果映射为 `succeeded`、`failed`、`timed_out` 或 `cancelled` 并写入 task ledger。若后台 session 尚未被 terminal poll 观察，且 `notifyOnExit` 开启，exec 会把紧凑输出写入 system event，并请求目标 heartbeat；空输出成功默认不通知，手动取消且无输出也不通知。subagent session 不走这一 heartbeat fallback，因为其结果由 process poll 和 subagent announce flow 交付（`src/agents/bash-tools.exec-runtime.ts`、`src/agents/bash-tools.exec-task-tracking.ts`）。
+进程结束后 sandbox finalization 先跑完，退出结果再由 `onSettledBeforeNotify` 映射成 succeeded、failed、timed_out 或 cancelled 四种终态，一并写入 task ledger。如果后台 session 还没有被 terminal poll 观察，且 notifyOnExit 处于开启状态，exec 会把紧凑输出写入 system event 并请求一次目标 heartbeat；成功但输出为空默认不通知，手动取消且无输出同样不通知。subagent session 不走这条 heartbeat fallback，它的结果由 process poll 和 subagent announce flow 交付（`src/agents/bash-tools.exec-runtime.ts`、`src/agents/bash-tools.exec-task-tracking.ts`）。
 
 取消入口检查后台状态、退出/finalizing 标记及 process activity 是否已结算。带 durable 句柄的进程调用该句柄的取消操作；普通进程调用 supervisor 的 manual-cancel，再记录已请求取消。真正停止以进程自身的终止原因和清理完成为准，取消已请求记录的是请求状态。依据见 [process control](<../../openclaw/src/agents/bash-process-control.ts#L24-L85>)。registry 本身在内存，durable 句柄后端的重启接管没有在本条链完整下钻，因此不从内存 registry 推导全部执行模式的恢复能力。
 
@@ -115,7 +117,7 @@ exec 的后台化动作发生在当前工具调用内。yield timer 与进程结
 
 `sessions_spawn` 的主链是：解析 requester/target Agent、depth、模型、sandbox、thread 和 completion policy；创建并持久化 child session；准备 context engine、附件和 prompt；向 native Gateway `agent` dispatch；Gateway 接受后登记 child run；完成时由 registry 捕获结果并交付 requester。spawn pipeline 区分 initialize、dispatch、register 和 cleanup 阶段；Gateway 已接受但 registry 注册失败时会尝试终止 accepted child，避免出现无人持有的运行（`src/agents/subagents/spawn/subagent-spawn.ts`、`src/agents/subagents/spawn/subagent-spawn.ts`）。
 
-每个 detached subagent 有 `runId`、child session key、requester session、task、model、workspace、timeout、spawn mode、completion expectation 和 delivery state。核心事实持久在 `subagent_runs`；本次快照中通用 task ledger 已不在（`src/tasks/` 目录与 `tasks.cancel` RPC 均未找到），任务展示改由 session async-task 状态与子 Agent 运行记录承担；schema 同时保存 `endedAt`、outcome、pause/kill、announce retry、frozen result、pending final delivery 以及 requester settle wake 字段（`src/state/openclaw-state-schema.sql`）。
+每个 detached subagent 创建时都带上一组身份与策略字段：运行标识、子 session key、requester session、任务描述、模型、workspace、超时、spawn 模式、完成期望和交付状态。这些事实的权威副本落在 `subagent_runs` 表中；在 `src/tasks/` 目录与 `tasks.cancel` RPC 的检查范围内都没有找到通用 task ledger，任务展示改由 session async-task 状态与子 Agent 运行记录承担。schema 同时保存 `endedAt`、outcome、pause/kill、announce retry、frozen result、pending final delivery 以及 requester settle wake 字段（`src/state/openclaw-state-schema.sql`）。
 
 子 Agent 结束后，registry 根据 outcome 生成 completion payload。若 requester 正在运行，结果可以先进入 steering queue：queue item 按完成时间稳定排序，单项结果和合并 prompt 都有字符上限；注入 requester 前标为 `in_progress`，注入成功变为 `delivered`，失败或 stale lease 则释放回 pending/suspended。该队列的作用是把子 Agent 结果作为 runtime data 回注下一次 requester turn，而不是伪装成用户指令（`src/agents/sessions/steering-message-identity.ts`、`src/auto-reply/reply/steering-delivery-preparation.ts`、`src/gateway/server-methods/chat-send-steering-commit.ts`）。
 
@@ -131,22 +133,24 @@ cron run 激活后先创建 `runtime="cron"` 的 task ledger record，记录 job
 
 `isolated` Agent turn 的准备阶段解析有效 Agent、Agent directory/workspace、session key、当前或 detached run session、skills snapshot、delivery plan、模型和 thinking selection。payload 可以指定 model、fallbacks、thinking、timeout、light context 和 `toolsAllow`；执行时将已解析的 provider/model、工具策略、plugin registry 和 scheduled tool policy 传给 embedded Agent runner。cron 运行携带的 runtime authority 与创建时的工具 allowlist 绑定，执行运行时若候选 runtime 不匹配会拒绝，不通过普通 job 字段重新猜测权限（`src/cron/isolated-agent/run-prepare.ts`、`src/cron/isolated-agent/run-executor.ts`）。
 
-main job 的 payload 实际上只能形成 system event 文本。它写入目标 session 的 event 队列，并按 `wakeMode` 立即运行 heartbeat 或等待下一次 heartbeat；`wakeMode=now` 遇到同一 cron marker 之外的竞争工作时，会在有限等待窗口内重试，超时则重新请求 wake 而不把 event 丢掉。isolated job 的 `command` 不启动模型，直接使用 `runCommandWithTimeout`；`agentTurn` 进入 isolated runner；script 则由 script runtime 执行，成功后可产生 notify、wake、next_check 和 script state（`src/cron/service/timer-execution.ts`）。
+main 目标的 payload 最终只能落成一段 system event 文本。这段文本被写入目标 session 的 event 队列，随后按 wakeMode 决定是立刻跑一轮 heartbeat 还是等下一次；wakeMode=now 若碰上同一 cron marker 之外的竞争工作，会在有限的等待窗口内重试，等到超时就重新请求一次 wake，event 本身仍留在队列里。isolated 目标按 payload 类型分派：command 不启动模型，直接走 runCommandWithTimeout；agentTurn 进入 isolated runner；script 交给 script runtime 执行，成功后可以产生通知、唤醒、下次检查和脚本状态（`src/cron/service/timer-execution.ts`）。
 
 ### Cron 结果和状态
 
 执行结果与交付结果分开记录，两者的取值集合不同：
 
-- 执行结果 `CronRunStatus`：`ok`、`error`、`skipped`。
-- 交付结果 delivery：`delivered`、`not-delivered`、`unknown`、`not-requested`。
+| 维度 | 字段 | 取值 |
+| --- | --- | --- |
+| 执行结果 | `CronRunStatus` | `ok`、`error`、`skipped` |
+| 交付结果 | delivery | `delivered`、`not-delivered`、`unknown`、`not-requested` |
 
 最终 job state 保存最近运行时间、状态、错误、持续时间、连续错误/跳过次数、下一次运行、delivery status/error 和 failure notification delivery；run history/task ledger 另存本次运行的 session、model、provider、usage、diagnostics 和摘要（`src/cron/types.ts`）。
 
 隔离 Agent 的 finalize 顺序是：读取模型/usage/diagnostics，更新 session runtime model、context token 和 CLI binding，持久化 session entry；解析 payload 是否有可交付文本或结构化结果；按 delivery plan 发送；最后由 cron service 在 receipt-owned transaction 中把结果应用到 authoritative job row、写入 cron history、发出 finished event，并计算下一次运行。一次性 run 的 detached session 可在交付后清理，persistent session 则保留 session 生命周期（`src/cron/isolated-agent/run-finalize.ts`、`src/cron/isolated-agent/run.ts`）。
 
-cron delivery 支持 `none`、`announce` 和 `webhook`。announce 会解析 channel、target、account、thread 和 session route，使用 durable message sender；current session 的交付还要求最终 transcript commit，不能只因平台发送成功就把 run 标为已完成。primary webhook 在执行结果 settled 后发送 finished-run event；webhook delivery 自身也受同一 run abort/receipt current 检查保护（`src/cron/types.ts`、`src/cron/delivery.ts`、`src/cron/service/timer-job-runner.ts`）。
+cron 的结果交付分 none、announce 和 webhook 三种。announce 先解析 channel、target、account、thread 和 session route，再交给 durable message sender 真正发送；交付目标是 current session 时，平台侧发送成功之后还要等最终 transcript commit 落定，run 才会结束。primary webhook 在执行结果 settled 之后发出 finished-run event，webhook 自身的发送同样受这次 run 的 abort 与 receipt current 检查约束（`src/cron/delivery.ts`、`src/cron/types.ts`、`src/cron/service/timer-job-runner.ts`）。
 
-command payload 的默认超时为 10 分钟；script payload 默认 300 秒、上限 900 秒，默认 tool budget 为 50、上限 200。script 和 trigger 是否可用由 `cron.triggers.enabled` 控制；trigger 是无模型的 headless evaluator，结果中的 `fire=false` 只更新 trigger state，`fire=true` 才执行 payload，且失败/超时也会进入 run failure 语义。依据见 `src/cron/command-runner.ts`、`src/cron/script-payload.ts:3-31`、`src/cron/service/timer-execution.ts`。
+不同 payload 各有自己的预算：command 默认超时 10 分钟；script 默认 300 秒、上限 900 秒，默认 tool budget 为 50、上限 200。script 和 trigger 是否可用统一由 cron.triggers.enabled 控制。trigger 是无模型的 headless evaluator：结果里 fire=false 时它只更新 trigger state，fire=true 才会执行 payload，而它自身失败或超时同样归入 run failure。依据见 `src/cron/command-runner.ts`、`src/cron/script-payload.ts:3-31` 和 `src/cron/service/timer-execution.ts`。
 
 ### Heartbeat 回合与结果
 
@@ -154,7 +158,7 @@ heartbeat runner 先通过 wake stage 解析 Agent、heartbeat prompt、schedule
 
 模型结果经过 heartbeat outcome classifier：纯 `HEARTBEAT_OK`、短 acknowledgment 或静默结果不打扰用户；可见文本、媒体或 heartbeat response tool 的 notify=true 才进入 channel delivery。成功的结构化 heartbeat response 会写入每个 agent session 一行的 `heartbeat_outcomes`，保留 outcome、summary、priority、next check、task names、wake source/reason、run session 和 claim 信息；这份结果写入内部状态，用户可见消息经 channel delivery 另行投递（`src/infra/heartbeat-events.ts`、`src/state/openclaw-agent-schema.sql`；outcome 表的列组成未逐列复核）。
 
-heartbeat channel 发送同样使用 `sendDurableMessageBatchCore`。失败通知可走 channel 或 indicator；可见发送成功后更新 `lastHeartbeatText`/`lastHeartbeatSentAt` 并清理所拥有的 pending final delivery。因无路由、channel 未就绪、重复内容或 alerts disabled 而不发送时，runner 仍返回 `ran` 或 typed `skipped`，并写 heartbeat event 说明原因（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-events.ts`）。
+heartbeat 的 channel 发送复用同一个 durable 发送内核 `sendDurableMessageBatchCore`，失败通知可以走 channel，也可以走 indicator。可见消息发送成功后，runner 更新 lastHeartbeatText 与 lastHeartbeatSentAt，并清理自己持有的 pending final delivery。遇到没有路由、channel 尚未就绪、内容重复或 alerts 关闭这类不发送的情况，runner 仍返回 ran 或带类型的 skipped，并写一条 heartbeat event 记录原因（`src/auto-reply/heartbeat.ts`、`src/infra/heartbeat-events.ts`）。
 
 ### 统一 durable channel delivery
 
@@ -203,7 +207,7 @@ heartbeat monitor job 本身借用 cron 的 receipt、startup recovery 和调度
 ## 相邻类目交接与已确认边界
 
 - **会话与消息管理。** cron main、heartbeat、hook wake 和 background task 都通过 session key、system event 或 heartbeat 重新进入会话；isolated cron、hook agent 和 subagent 则创建或使用 detached session。session entry、transcript、lifecycle claim、pending final delivery 和 session cleanup 属于会话管理边界，本笔记只记录它们如何承接主动运行身份。
-- **Agent 工具。** `automations`、`exec`、`process`、`sessions_spawn` 和 `sessions_yield` 是触发或控制入口；工具 schema、sandbox、approval、MCP/tool allowlist 和模型循环留在 Agent 工具类目。本笔记只记录自动化运行在执行前如何冻结 Agent/model/tools authority，以及后台控制是否能到达真实执行体。
+- **Agent 工具。** 触发与控制入口集中在 automations、exec、process、sessions_spawn 和 sessions_yield 这五个工具上；它们的 schema、sandbox、approval、MCP/tool allowlist 和模型循环留在 Agent 工具类目。本笔记只记录自动化运行在执行前如何冻结 Agent/model/tools authority，以及后台控制是否能到达真实执行体。
 - **外部执行体。** on-exit/stream watcher、ProcessSupervisor、node host 和外部 ACP 是 OpenClaw 与执行体之间的交接点。外部 ACP 自身的调度、内部恢复和身份绑定不在本次范围；OpenClaw 侧只记录 spawn/dispatch、run identity、结果回收和交付。
 - **Follow-up/steering queue。** follow-up runner 负责当前进程中一个已排队回合的 admission、执行、accounting 和 delivery；执行完成后即使 presentation/accounting/delivery 失败，也不会重新 replay 已产生副作用的模型/工具执行。它是会话内续作和主动运行之间的交接，不是独立的持久日程（`src/auto-reply/reply/followup-runner.ts`）。
 - **System events。** system event 适合承接“下一回合需要看到的完成/失败提醒”，但队列本身不持久化，不能单独回答“任务是否运行过”。cron receipt、task row、heartbeat outcome 和 session delivery queue 才是相应运行形态的状态 owner。

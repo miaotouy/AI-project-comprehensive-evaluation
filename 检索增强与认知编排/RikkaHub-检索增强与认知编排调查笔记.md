@@ -14,7 +14,13 @@
 
 ## 结论摘要
 
-RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后台记忆整理”的组合，而不是知识资产管线。三类可检索素材分属三条独立链路，且不共享检索基础设施：长期记忆是以助手为隔离键的 Markdown 文件库，注入时给出文件目录与核心文件全文，其余文件由模型按需用工具读取；网页搜索以模型可调用的 `search_web`／`scrape_web` 接入，由设置中选定的 provider 执行；历史会话以本地全文索引承载，通过 `recent_chats` 与 `conversation_search` 两个模型可见工具检索（`data/ai/tools/ChatToolFactory.kt`、`data/ai/tools/MemoryTools.kt`、`data/ai/tools/ConversationTools.kt`）。
+RikkaHub 在本类目中属于“工具化检索 + 上下文即时注入 + 后台记忆整理”的组合，检索能力由模型在生成循环里按需调用，素材组织方式区别于知识资产管线的摄取与发布流程。三类素材分属三条独立链路，基础设施互不共享：
+
+- **长期记忆**：以助手为隔离键的 Markdown 文件库。生成时先注入文件目录与核心文件全文，其余文件由模型调用工具按需读取。
+- **网页搜索**：模型可调用 `search_web` 与 `scrape_web`，实际请求由设置中选定的 provider 执行。
+- **历史会话**：由本地全文索引承载，模型通过 `recent_chats` 与 `conversation_search` 检索。
+
+三处工具入口分别在 `data/ai/tools/ChatToolFactory.kt`、`data/ai/tools/MemoryTools.kt` 和 `data/ai/tools/ConversationTools.kt`。
 
 本次全仓库 Kotlin 源码范围内未找到可用的向量检索或 RAG 管线：`ai` 模块声明了嵌入生成接口与嵌入模型类型，但应用层没有调用方；附件、记忆和会话都不做分块、嵌入或相似度召回。会话检索与网页搜索都只有一次候选生成，没有 reranker、融合或查询改写；模型可连续多次调用工具，但系统侧没有阶段状态或终止策略（`ai/src/main/java/me/rerere/ai/provider/Provider.kt`、见“未验证事项”中的检索依据）。
 
@@ -96,7 +102,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 搜索不带候选融合或重排：适配器把各家响应映射为统一的 `SearchResult`（可选的 `answer`、条目列表、图片列表、`retrievedAt`），字段缺省即留空，不做去重、cross-encoder 或跨 provider 合并。部分 provider 有自己的附加开关（例如 Tavily 的 answer 选项），但都只影响该适配器返回的字段，不改变统一结果契约。
 
-结果进入上下文前只做一层“贴标签”处理：把统一结果序列化成 JSON，给每个条目补一个 6 字符随机 `id` 与从 1 开始的 `index`，并把 `retrievedAt` 覆盖为本地当前时间，随后整段 JSON 作为工具结果文本返回。模型侧拿到标题、URL、正文、发布日期与高亮；工具描述要求模型在回答句末追加 `[citation,domain](id)`，UI 再按 id 反查搜索输出找到真实 URL 并跳转（`data/ai/tools/SearchTools.kt`、`ui/components/message/ChatMessage.kt`）。
+搜索结果进入上下文前只补一次标记，就被序列化成工具结果文本：适配器返回的统一结果转成 JSON，每个条目补上 6 字符随机 `id` 和从 1 开始的 `index`，`retrievedAt` 改写为本地当前时间，整段 JSON 直接返回给模型。模型由此拿到标题、URL、正文、发布日期与高亮字段；工具描述要求在回答句末追加 `[citation,domain](id)`，界面再按 id 反查当次搜索输出，取出真实 URL 完成跳转（`data/ai/tools/SearchTools.kt`、`ui/components/message/ChatMessage.kt`）。
 
 ### 会话检索工具：关键词召回、作用域不对称
 
@@ -108,7 +114,7 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 ### 会话检索的查询构造：单字切分 + NEAR
 
-索引的 tokenizer 是 FTS5 的 `simple` 扩展，随 APK 打包 `libsimple.so`（arm64-v8a 与 x86_64），提供 `simple_query` 与 `simple_snippet` 两个函数；它支持拼音展开与前缀匹配，因此英文、数字与拼音由它处理（`app/src/main/jniLibs/`、`data/db/fts/MessageFtsManager.kt`）。
+索引的分词使用 FTS5 的 `simple` 扩展，它以原生动态库随 APK 一起打包，覆盖 arm64-v8a 与 x86_64 两种架构。该扩展向索引层提供查询构造与片段截取两个函数（`simple_query`、`simple_snippet`），并负责拼音展开与前缀匹配，英文、数字与拼音都由它处理（`app/src/main/jniLibs/`、`data/db/fts/MessageFtsManager.kt`）。
 
 中文查询按字符切分构造，不加载 jieba 词典。做法是：先把搜索词按“ASCII 字母数字连续段 / 其他字符连续段”切开；ASCII 段交给 `simple_query`，其余段拆成单字并用 NEAR 约束相邻程度，各段之间用 AND 连接。中文片段允许两字的额外间隔（标点、“的”等），片段越长允许的间隔越多；这样不建词典也能得到接近按词匹配的效果（同一文件中的 `buildFtsMatchQuery`、`nearQuery`、`CJK_NEAR_SLACK`）。
 
@@ -136,7 +142,16 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 ## 记忆写回与主动维护
 
-记忆写回有两条路径。模型在对话中调用六个记忆工具（`memory_read`、`memory_write`、`memory_str_replace`、`memory_append`、`memory_delete`、`memory_list`），工具默认无需审批；写入前要求先读并带上版本，冲突时以返回的最新内容合并后重试。另一条是后台整理，按上节规则在轮次结束后抽取事实并写回（`data/ai/tools/MemoryTools.kt`、`MemoryConsolidationScheduler.kt`）。
+记忆写回有两条路径。前台是模型在对话中调用记忆工具，工具默认无需审批；写入前要求先读并带上版本，冲突时以返回的最新内容合并后重试。后台是整理任务在轮次结束后抽取事实并写回，触发规则见上节（`data/ai/tools/MemoryTools.kt`、`MemoryConsolidationScheduler.kt`）。
+
+模型可用的记忆工具共六个，各自负责一类动作：
+
+- `memory_read`：读取指定文件
+- `memory_write`：新建或写入文件
+- `memory_str_replace`：替换唯一子串
+- `memory_append`：在文件末尾追加
+- `memory_delete`：删除文件
+- `memory_list`：列出记忆目录
 
 后台记忆演化包含复盘与合并：后台复盘、跨会话合并与去重都在整理提示词里成文，整理由用户活动派生而不是独立日程（触发条件见上文）。它仍不是审批闭环：整理写入直接落库，系统侧没有逐条人工审核或回滚入口；冲突处理依赖版本号与模型重试。
 
@@ -162,13 +177,13 @@ perplexity, firecrawl, jina, bocha, rikkahub, grok, tinyfish, serper, deepseek, 
 
 ## 未验证事项
 
-- 未运行设备、未构建 APK，未验证单字分词与 NEAR 查询在中文/英文/混合文本上的召回质量，也未验证 `libsimple.so` 缺失或加载失败时的行为。
-- 未调用任何搜索 provider，未确认真实响应字段与适配器映射是否一致、各 provider 的限流与错误文案、`scrape_web` 的正文质量，以及 `custom_js` 引擎的沙箱边界。
-- 未运行模型工具循环，未确认模型对 `search_web`／`conversation_search`／`memory_read` 的实际调用率、是否会连续换词搜索、空结果后的行为，以及输出截断的触发频率。
+- 未在设备上运行，也未构建 APK，因此单字分词与 NEAR 查询在中文、英文、混合文本上的召回质量尚未验证；`libsimple.so` 缺失或加载失败时的行为同样没有实测。
+- 未调用任何搜索 provider：真实响应字段与适配器映射是否一致、各 provider 的限流与错误文案、`scrape_web` 抓回的正文质量，以及 `custom_js` 引擎的沙箱边界都还没有确认。
+- 未运行模型工具循环，模型对搜索、会话检索与记忆读取三类工具的实际调用率，是否会连续换词搜索，空结果之后如何处理，以及输出截断的触发频率，都还没有观测数据。
 - 未验证后台整理在真实使用中的触发时序、抽取质量与版本冲突频率；`MemoryContentGuard` 的拦截规则覆盖范围未逐条核对。
-- 未确认 `conversation_search` 实际不按助手过滤是否被 UI 或产品层面有意接受，以及目录注入随文件增长对请求体积的影响；本笔记只记录代码路径。
-- “无向量检索/RAG”的检索依据是：全仓库 Kotlin 源码中嵌入生成仅出现在 `ai` 模块的接口与 OpenAI／Google provider 实现，`ModelType.EMBEDDING` 只用于模型分类与 UI 标签，未发现调用 `generateEmbedding` 或建立/查询本地向量索引的代码；该结论的覆盖范围是本次已检查的全仓库 Kotlin 源码，原生层、Web 前端与未读模块未纳入。
-- 仓库文档 `docs/references/chat-generation-pipeline.md` 与实现存在命名与顺序偏差：文档称的 `GenerationHandler` 一类命名与实际类名不一致，且工具顺序由 `ChatToolFactory` 统一装配；本笔记以可执行路径为准。
+- 未确认界面或产品层面是否有意接受 `conversation_search` 不按助手过滤这一行为，也未评估目录注入随文件增长对请求体积的影响；本笔记只记录代码路径。
+- “无向量检索/RAG”的依据来自对全仓库 Kotlin 源码的通读：嵌入生成只出现在 `ai` 模块的接口以及 OpenAI、Google 两家 provider 的实现中，`ModelType.EMBEDDING` 仅用于模型分类和界面标签，本次未找到调用 `generateEmbedding`、或建立与查询本地向量索引的代码。原生层、Web 前端和未读模块不在这次检查范围内。
+- 仓库文档 `docs/references/chat-generation-pipeline.md` 与实现存在命名和顺序偏差：文档使用的 `GenerationHandler` 一类名称与当前类名不一致，工具顺序实际由 `ChatToolFactory` 统一装配；本笔记以可执行路径为准。
 
 ## 关键源码索引
 

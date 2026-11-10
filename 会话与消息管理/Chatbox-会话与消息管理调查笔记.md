@@ -16,12 +16,12 @@
 
 Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地持久化的业务对象：
 
-- 会话列表（sidebar）只认识 `SessionMetaRecord`（标识、名称、置顶、归档与排序等元信息），完全不知道 thread、fork、summary 这些"消息级"结构的存在（见第 1 节证据）。
-- 首页是一个"假会话"（id 固定为字符串 `'new'`），`Session` 记录直到用户发出第一条消息才被创建（第 3 节）。
-- 消息事实源是**平台行存储中的消息树**：桌面/Web 使用 IndexedDB，移动端使用 SQLite；会话头保留激活线程与格式版本等提交身份。旧数组式 `Session` 对象为兼容投影，分支操作经领域服务提交行命令。
-- 会话列表元数据仍是独立的 `session_meta` 表，每会话一行；桌面/Web 用 IndexedDB 实现、移动端用 SQLite 实现，同一 `SessionMetaStorage` 接口由平台工厂注入。
-- thread（同会话内历史区间）、fork（同一消息位置的平行分支，替代回复可折叠为分支组）、summary（消息级压缩标记）与 starred（置顶分组）仍是四个关注点，但落盘后收在同一棵消息树里：thread 对应树的一段根到叶路径，fork 对应父节点下的兄弟行加"激活子节点"，summary 是 `kind` 为 `summary` 的普通行，starred 只存在于 `session_meta`。唯一的会话级交叉点仍是"move thread to conversations"会把 thread 转成新的顶层会话（第 1 节）。
-- 归档 = `hidden: true` + `archivedAt` 时间戳，不删除任何数据；恢复归档不会重置 `sortOrder`。
+- 会话列表（sidebar）只认识 `SessionMetaRecord` 这一层元数据（标识、名称、置顶、归档与排序等），thread、fork、summary 这些"消息级"结构不在它的视野里（见第 1 节证据）。
+- 首页是一个"假会话"（id 固定为字符串 `'new'`），真正的会话记录直到用户发出第一条消息才创建（第 3 节）。
+- 消息的事实源是**平台行存储里的消息树**：桌面与 Web 用 IndexedDB，移动端用 SQLite；会话头只保留激活线程与格式版本等提交身份。旧的数组式会话对象是兼容投影，分支操作由领域服务提交行命令落地。
+- 会话列表元数据存放在独立的 `session_meta` 表，每会话一行；桌面与 Web 用 IndexedDB、移动端用 SQLite，各有一套实现，由平台工厂注入同一个存储接口。
+- 同会话内的历史区间（thread）、同一消息位置的平行分支（fork，替代回复可折叠为分支组）、消息级压缩标记（summary）与置顶分组（starred）是四个独立的关注点，落盘后收在同一棵消息树里：thread 是树上一段从根到叶的路径，fork 是父节点下的兄弟行加"激活子节点"指针，summary 是 `kind` 取值为 summary 的普通行，starred 只存在于 `session_meta`。唯一的会话级交叉点是把 thread 挪成独立会话，该操作会把一段历史转成新的顶层会话（第 1 节）。
+- 归档就是打开隐藏位并写入归档时间戳，数据本身不删除；恢复归档时排序值保持不变。
 - 消息搜索没有持久化倒排索引，按分页读取完整 Session 后逐条扫描。
 - 自动压缩触发阈值：按模型上下文窗口与 `compactionThreshold`（默认 0.6）计算 token 预算（第 1.4 节）。
 - Work Mode 的待发送用户消息不先写入 Session，而是保存在独立的本地队列；只有实际投递或 steering 前才成为持久化会话消息。队列因此是草稿与 Session 之间的第三种事实对象。
@@ -45,18 +45,26 @@ Chatbox 以**单会话（Session）为存储单元**，会话与消息是本地�
 
 ### 1.0 存储形态：行式消息树
 
-本次快照把持久模型换成"会话头 + thread 行 + 消息行"的三段式，类型定义在 `packages/chatbox-core/src/session/session-tree/types.ts`：`SessionTree = { session: SessionRecordV2, threads: ThreadRow[], messages: MessageRow[] }`。消息行带 `parentMessageId`、`activeChildId`、`siblingOrder`、`kind`（`message`/`summary`）、`status`（`generating`/`settled`）与 `branchId`，树形拓扑本身就是权威数据；会话头只保留提交身份与可重建的展示摘要，`session/session-tree/decode.ts` 会拿行重新核对根、激活叶与摘要计数。
+持久模型由会话头与两类行组成：thread 行与消息行，类型定义在 `packages/chatbox-core/src/session/session-tree/types.ts`：
 
-编码方向由 `session/session-tree/encode.ts` 承担：把旧的数组式 `Session`（`messages[]` + `threads[].messages[]` + `messageForksHash`）展开成行树，并在 `verifySessionTreeRoundTrip` 里校验往返一致；`application/session/compatibility/` 处理旧会话的加载与 row 格式转换。1.1 以下的 thread、fork、summary 语义说的是"用户可见的概念如何映射到这棵树"，字段级 schema 仍保留在 `src/shared/types/session.ts`，负责定义单条消息与 fork 视图的形状。
+```text
+SessionTree = { session: SessionRecordV2, threads: ThreadRow[], messages: MessageRow[] }
+```
+
+消息行携带父消息指针、激活子节点、兄弟顺序、消息类型（普通消息或摘要）、生成状态与分支标识，树形拓扑本身就是权威数据；会话头只保留提交身份与可重建的展示摘要，解码时会拿行重新核对根节点、激活叶与摘要计数（同目录 `decode.ts`）。
+
+行树的编码方向由 `session/session-tree/encode.ts` 承担：把旧的数组式会话（消息数组、各 thread 的消息数组与分支哈希）展开成行树，再用往返校验函数确认编码前后的树一致；旧会话的加载与行格式转换放在 `application/session/compatibility/`。1.1 以下的 thread、fork、summary 讨论的是这些用户可见概念如何映射到行树，单条消息与分支视图的字段 schema 仍定义在 `src/shared/types/session.ts`。
 
 ### 1.1 会话列表分组：只认 `starred`，不知道 thread/fork 存在
 
 `SessionMetaSchema`（`src/shared/types/session.ts:390-400`，由 pick 挑选字段）只包含列表展示所需的元信息，**不包含** `threads`、`messageForksHash`、`messages` 等消息级结构。挑选的字段如下：
 
-- `id`/`name`：标识与标题；
-- `starred`/`hidden`/`archivedAt`：置顶与归档状态；
-- `assistantAvatarKey`/`picUrl`/`backgroundImage`：展示图；
-- `type`：会话类型。
+| 字段 | 用途 |
+| --- | --- |
+| `id`、`name` | 标识与标题 |
+| `starred`、`hidden`、`archivedAt` | 置顶与归档状态 |
+| `assistantAvatarKey`、`picUrl`、`backgroundImage` | 展示图 |
+| `type` | 会话类型 |
 
 `src/renderer/components/session/SessionList.tsx` 的分组逻辑只按 `starred` 分成 "Pinned" / "Chats" 两组。侧栏拿不到 thread/fork 数据，所以"会话列表分组"在数据结构层面就和 thread/fork 无关。
 
@@ -140,10 +148,10 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 首页仍是 `'new'` 假会话（React 状态 + `'new-chat'` 草稿 key）。`src/renderer/routes/index.tsx` 的 `handleSubmit` 在首条消息时完成落地：
 
-1. 调 `SessionService.createSession` 建 `session_meta` 行与会话头，并把首页临时状态里的 agentMode、工作目录与全权限开关**直接内联进 `settings`** 一次写入。
-2. 首页临时状态里若有知识库绑定：把绑定转移到真实 id，然后整体清空临时状态（工作目录与全权限已在第 1 步内联，清空不会丢数据）。
-3. `sessionWebBrowsingMap.new` 存在时转到新 id 并清掉 `'new'` 项；`sessionAgentModeMap.new` 只需清键。
-4. `switchCurrentSession(newSession.id)` 跳到真实会话，再删掉 `'new-chat'` 草稿 key（真实会话用 `draft-${sessionId}`）。
+1. 会话服务创建会话时先写入元数据行与会话头，再把首页临时状态里的 agentMode、工作目录与全权限开关直接内联进新会话的设置，一次写入完成。
+2. 临时状态里若带知识库绑定，把绑定改挂到真实会话 id，然后整体清空临时状态；工作目录与全权限已在第 1 步内联，清空不会丢数据。
+3. 内存里的网页浏览映射与 agent 模式映射以 `new` 为键清理：网页浏览项先迁到新 id 再删旧键，agent 模式项直接删键。
+4. 调 `switchCurrentSession` 切到真实会话，再删掉首页草稿键（真实会话的草稿按 `draft-${sessionId}` 单独保存）。
 
 新会话默认延续上次使用的模型：`SessionService` 创建时先套一层上次模型记录，再用调用方 settings 覆盖；元数据更新也统一经应用层服务处理。
 
@@ -151,12 +159,12 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 全部通过 `session_meta` 行上的字段完成，没有单独的归档表：
 
-- **置顶**：`starred` 布尔位，写 meta 行后重排列表缓存。
-- **归档**：`hidden: true` + `archived_at` 时间戳；主列表分页与计数都过滤隐藏行，归档页按 `archived_at` 独立索引倒序。**不删除任何数据**。
-- **批量归档**（清空会话列表）与单个归档同路径，逐条改 meta 行；过程中会回收"meta 行存在但行存储缺失"的失效条目，并清理附件 RAG 索引与运行时状态。这仍是一处写在代码注释里的已知性能取舍。
-- **恢复**：`hidden` 置回 false 并清掉 `archived_at`，**不重置 `sort_order`**——恢复后回到归档前的排序位置，可能落在列表很靠下的位置。
-- **归档撤销**：侧栏归档成功后显示带 Undo 的 toast，撤销失败保留重试入口；归档页也可恢复或一次性删除全部归档。入口见 `src/renderer/components/session/SessionItem.tsx` 与同目录 `SessionList.tsx`。
-- **永久删除**：删除整棵消息树与 `session_meta` 行，并清理该会话的附件 RAG 索引、主列表与归档列表缓存、UI map（网页浏览/知识库/agentMode）、解析与滚动缓存、未读活动与挂起队列；桌面端还会清理沙箱里该会话的落地文件。
+- **置顶**：元数据行上的 `starred` 布尔位，写完 meta 行后重排列表缓存。
+- **归档**：打开隐藏位并写入归档时间戳；主列表的分页与计数都过滤隐藏行，归档页按归档时间戳的独立索引倒序，数据本身不删除。
+- **批量归档**（清空会话列表）与单个归档同路径，逐条改元数据行；过程中会回收"元数据行还在、行存储已缺失"的失效条目，并清理附件 RAG 索引与运行时状态。这仍是一处写在代码注释里的已知性能取舍。
+- **恢复**：隐藏位置回 false 并清掉归档时间戳，排序值保持原样，恢复后回到归档前的排序位置，可能落在列表很靠下的位置。
+- **归档撤销**：侧栏归档成功后弹出带撤销的 toast，撤销失败保留重试入口；归档页也可恢复或一次性删除全部归档。入口见 `src/renderer/components/session/SessionItem.tsx` 与同目录 `SessionList.tsx`。
+- **永久删除**：删除整棵消息树与元数据行，并清理该会话的附件 RAG 索引、主列表与归档列表缓存、界面 map（网页浏览、知识库、agentMode）、解析与滚动缓存、未读活动与挂起队列；桌面端还会清理沙箱里该会话的落地文件。
 
 删除确认只在桌面端、且仅当该会话在沙箱里有可下载产物（`platform.sandboxHasArtifacts`）时弹出，归档页的删除按钮复用同一确认。
 
@@ -170,15 +178,15 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 ## 5. 列表、分页、搜索与定位
 
-- **会话列表**：react-query 无限查询 + `session_meta` 游标分页（2.3）。`src/renderer/components/session/SessionList.tsx` 的触底回调触发翻页（`fetchNextPage()`），有下一页时挂加载脚注。
-- **会话项活动指示（不持久化）**：侧栏的"生成中/回复完成未读"指示来自内存 zustand store（`sessionActivityStore.ts` + `stores/session/generation-runtime.ts`），以会话 id 为 key 的临时集合，**不写 `SessionMetaRecord`、不落盘**，重启即清空——`SessionMetaSchema` 仍是侧栏唯一的持久化认知（界面呈现见 Chat UI 笔记 1.2）。
-- **消息搜索**：Chatbox 有一套独立于消息列表渲染的搜索实现。跨会话与跨 thread 的候选集由 `@chatbox/core` 的 `SessionSearchService` 读取搜索候选窗口（`ports/session-search-source.ts`、`application/session/row-search.ts`），匹配规则仍在 `src/shared/services/native-session-search.ts`，覆盖文本、推理、信息与工具调用状态及文件名。
-  跨会话时按元数据分页取候选、逐页扫描命中，分页大小与结果上限本次未逐常量复核。这套实现**没有持久化倒排索引**，跨会话搜索仍是按页读取并逐条扫描；它不受 Virtuoso 虚拟窗口的 DOM 挂载范围限制。搜索入口与结果定位的工作流在 Chat UI 笔记。
+- **会话列表**：侧栏用 react-query 的无限查询读取元数据行的游标分页（见 2.3），列表组件在触底回调里请求下一页，有更多数据时挂出加载脚注。入口见 `src/renderer/components/session/SessionList.tsx` 的 `fetchNextPage`。
+- **会话项活动指示**：侧栏的"生成中/回复完成未读"指示保存在内存 zustand store 里，是以会话 id 为键的临时集合，重启即清空，不写元数据记录也不落盘；侧栏的持久化认知仍只有元数据 schema。界面呈现见 Chat UI 笔记 1.2，实现见 `sessionActivityStore.ts` 与 `stores/session/generation-runtime.ts`。
+- **消息搜索**：Chatbox 的搜索实现独立于消息列表渲染。跨会话与跨 thread 的候选集由 `@chatbox/core` 的搜索服务按候选窗口读取，匹配规则在共享层的原生搜索模块里，覆盖文本、推理、信息、工具调用状态与文件名；跨会话时按元数据分页取候选、逐页扫描命中，分页大小与结果上限本次未逐常量复核。
+  搜索没有持久化倒排索引，跨会话仍是按页读取并逐条扫描，因此不受 Virtuoso 虚拟窗口的 DOM 挂载范围限制。入口见 `ports/session-search-source.ts`、`application/session/row-search.ts` 与 `src/shared/services/native-session-search.ts`；搜索弹窗的工作流在 Chat UI 笔记。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- **队列的持久性与因果锚点**：每个队列项保存完整用户消息、入队时间和入队时最新会话消息 ID。队列状态同步写入 localStorage；投递期间条目继续保留并标记 in-flight，写入完成后才移除，刷新恢复时会清掉过期的 in-flight 与 steering 请求。若因 fork/thread 切换导致锚点不再属于当前路径，队列暂停而不盲发。`src/renderer/stores/session/message-queue.ts:20-96,196-379`。
-- **Steering 消息**：被显式提前发送的用户消息以 `steered: true` 写入 Session，再进入当前模型 step。字段契约见 `src/shared/types/session.ts:380-381`；先持久化再注入的顺序见 `src/renderer/stores/session/steering.ts:78-154`。
+- **队列的持久性与因果锚点**：每个队列项保存完整用户消息、入队时间与入队时最新会话消息 id，队列状态同步写进 localStorage。投递期间条目继续保留并标记 in-flight，写入完成后才移除；刷新恢复时会清掉过期的 in-flight 与 steering 请求。若 fork 或 thread 切换让锚点消息离开当前路径，队列就暂停等待，不盲目投递。实现见 `src/renderer/stores/session/message-queue.ts:20-96,196-379`。
+- **Steering 消息**：用户显式提前发送的消息先以 `steered: true` 写入会话，再进入当前模型 step。字段契约见 `src/shared/types/session.ts:380-381`，先持久化再注入的顺序见 `src/renderer/stores/session/steering.ts:78-154`。
 - **两条写路径**：缓存更新只改 react-query 视图；持久化先快照消息，再由流式写协调器按消息身份安排检查点或终态提交，并调用会话服务更新行存储。终态提交与缓存更新共用身份护栏，避免旧检查点回退最终状态。见 `src/renderer/stores/session/messages.ts:181-236`。
 - **缓存合并保护**：元数据更新与磁盘快照回填都会带 `preserveCachedGeneratingMessages: true` 语义，实际合并逻辑仍是 `mergeCachedGeneratingMessages`：磁盘上读回较旧的会话快照要写回缓存时，若某条消息在缓存里处于生成中，就保留缓存里更新的内容，不用旧内容覆盖；合并覆盖消息、各 thread 消息与分支哈希三个层级。这是为了防止"用户改了会话名字触发的 metadata 更新"把正在流式输出的文本回退成更早的内容。
 - 删除生成中的消息同样走带合并保护的全量写路径，合并只映射仍然存在的消息，不会复活已删除消息。
@@ -193,10 +201,10 @@ isOverflow = tokens > max(contextWindow - 32000, contextWindow*0.5) * compaction
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- **首次创建时内联**：工作目录、全权限开关与 agentMode 在首条消息落地时（`routes/index.tsx` 的 `handleSubmit` 调 `SessionService.createSession`）直接内联进新会话的 `settings`（3.1）；正式会话的 agentMode 也有持久化路径：`setSessionAgentMode`（`stores/session/agent-mode.ts:101` 起）写 `session.settings.agentMode`。
-- **知识库**：前端状态只存 `Pick<KnowledgeBase, 'id'|'name'>` 句柄（`uiStore.sessionKnowledgeBaseMap` 或新会话的 `newSessionState.knowledgeBase`），绑定以会话 id 为 key；真实检索发生在生成阶段（见对话请求与上下文笔记）。
-- **Copilot**：选中 copilot 时把会话的 `copilotId` 设成该 id，并把 `session.messages[0]` 设成 `{ role: 'system', contentParts: [{type:'text', text: copilot.prompt}] }`（`routes/index.tsx:211-234`）——创建出来的仍然是一个普通 chat 类型会话，只是多了该字段用于用量统计（`routes/index.tsx:302-306`）。
-- **开关的持久化位置**：网页浏览与知识库绑定均以会话 ID 为键写入持久化 uiStore；新会话模式偏好、工作目录和命令审批默认值也在其持久化投影中。正式会话的 Agent 模式写入会话设置，读取时优先使用该设置，再回退到旧模式 map。首页临时对象与旧 `sessionAgentModeMap` 自身仍为内存态。见 `src/renderer/stores/uiStore.ts:419-436`、`src/renderer/stores/session/agent-mode.ts:21-54,162-201`。
+- **首次创建时内联**：工作目录、全权限开关与 agentMode 在首条消息落地时，由首页提交入口一并写进新会话的设置（3.1）。正式会话的 agentMode 另有持久化路径，设置入口把它写进会话设置的 agentMode 字段。见 `src/renderer/routes/index.tsx` 的 `handleSubmit` 与 `stores/session/agent-mode.ts:101` 起的 `setSessionAgentMode`。
+- **知识库**：前端只保存知识库的 id 与名称句柄，绑定以会话 id 为键，落在界面 store 的映射或新会话的临时状态里；真实检索发生在生成阶段（见对话请求与上下文笔记）。映射入口见 `src/renderer/stores/uiStore.ts` 的 `sessionKnowledgeBaseMap`。
+- **Copilot**：选中 copilot 时把会话的 `copilotId` 设成该 id，并把首条消息写成一条携带 copilot 提示词的 system 消息；创建出来的仍是普通 chat 类型会话，该字段供用量统计使用。见 `src/renderer/routes/index.tsx:211-234,302-306`。
+- **开关的持久化位置**：网页浏览与知识库绑定都以会话 id 为键写进持久化的界面 store，新会话模式偏好、工作目录与命令审批默认值也在同一份持久化投影里。正式会话的 Agent 模式写进会话设置，读取时优先取该设置，取不到再回退到旧模式 map。首页临时对象与旧模式 map 本身仍是内存态。见 `src/renderer/stores/uiStore.ts:419-436`、`src/renderer/stores/session/agent-mode.ts:21-54,162-201`。
 
 ## 9. 设计取舍与已确认边界
 

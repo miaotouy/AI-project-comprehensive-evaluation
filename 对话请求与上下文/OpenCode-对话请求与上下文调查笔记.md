@@ -14,14 +14,14 @@
 
 ## 结论摘要
 
-一次生成由客户端提交（Composer → `POST /api/session/:id/prompt`）进入 Core 的 `SessionPrompt.prepare`，先把用户输入连同附件、技能引用整理成 `SessionInbox` 条目（delivery 为 `steer` 或 `queue`），再唤醒会话执行。执行器 `SessionRunner.drain` 逐轮推进：装载上下文（历史 + 指令 + 工具定义）→ 构造模型请求 → `@opencode/ai` 发起流式调用 → 把 LLM 事件转成 durable 会话事件（文本/推理/工具/步骤/usage）→ 执行工具回合 → 直到结束或需要压缩/重试。
+一次生成从客户端提交开始：Composer 把用户输入、附件与技能引用发往 `POST /api/session/:id/prompt`，Core 的受理入口 `SessionPrompt.prepare` 把这些内容整理成一条 inbox 条目（投递方式为 steer 或 queue），随后唤醒该会话的执行器。执行器 `SessionRunner.drain` 逐轮推进：装载历史、指令与工具定义，构造模型请求，经 `@opencode/ai` 发起流式调用，把模型事件转成持久会话事件（文本、推理、工具、步骤、用量），执行工具回合，直到结束或转入压缩、重试。
 
 关键事实：
 
-- **输入先持久受理，再择机投递**：默认 steer，在安全步骤边界插入；queue 只在空闲边界进入，每次推进一个条目后重新判断。steer 中的压缩可前置到首个位置切换之前，其余保持入队顺序，因此并非全局 FIFO。投递事件在同一事务内消费 inbox 并形成可见消息（[inbox.ts 的 promote/pendingSteers](../../opencode/packages/core/src/session/inbox.ts#L562-L625)）。
-- **上下文按"指令 + 历史 + 工具"三段拼装**：系统提示来自 `packages/core/src/session/runner/prompt/system.txt` 与指令系统（项目/全局 AGENTS 文件、内置指令，`packages/core/src/instructions/`），历史来自 `SessionContext`/`SessionHistory`（按压缩边界裁剪），工具定义由 Tool 服务按权限规则集生成快照。
-- **压缩支持自动、溢出与手动三种触发**：`SessionCompaction` 依据剩余窗口与保留余量决定是否压缩，支持后台预计算摘要、本地摘要与 provider 原生窗口（`native.messages`）两种形态；压缩期间会话行标记压缩时间并产生 compaction 消息（running/completed/failed）。
-- **重试在下层策略中判定**：`runner/retry.ts` 依据 AI 错误与状态判定是否重试并给出退避延迟，重试状态写入 assistant 消息的 `retry` 字段；没有独立的重试端点，用户侧"重试"是再次提交。
+- **输入先持久受理，再择机投递**：用户输入先落成 inbox 条目，再由执行器在合适的时点取用。默认投递方式为 `steer`，在安全步骤边界插入；`queue` 只在空闲边界进入，每推进一条就重新判断下一条。`steer` 里的压缩可以提到首个位置切换之前，其余条目仍按入队顺序，因此先到达的条目未必先被取用。取用与消费在同一事务内完成，条目随即变成可见消息（[inbox.ts 的 promote/pendingSteers](../../opencode/packages/core/src/session/inbox.ts#L562-L625)）。
+- **上下文按"指令 + 历史 + 工具"三段拼装**：系统提示取自 `runner/prompt/system.txt`，指令系统（`packages/core/src/instructions/`）在其上叠加项目与全局 AGENTS 文件、内置指令；历史由上下文与历史服务按压缩边界裁剪后装载；工具定义由 Tool 服务按权限规则集为当轮生成快照。
+- **压缩支持自动、溢出与手动三种触发**：`SessionCompaction` 依据剩余窗口与保留余量决定是否压缩，支持在后台预计算摘要，产物形态有本地摘要与 provider 原生窗口两种（后者记为 `native.messages`）；压缩期间会话行标记压缩时间，并产生状态为 running、completed 或 failed 的 compaction 消息。
+- **重试在下层策略中判定**：`runner/retry.ts` 依据 AI 错误与会话状态判定是否重试，并给出退避延迟，结果写入 assistant 消息的 `retry` 字段；重试在服务端内部完成，用户侧的"重试"就是再提交一次输入，没有单独的重试端点。
 - **步骤有上限**：达到最大步骤后注入固定收束提示（`runner/max-steps.ts`），要求只回文本并总结进度。
 
 ## 系统边界与生成任务主链
@@ -46,23 +46,30 @@ Composer 提交（packages/app/src/composer/submit.ts）
 
 ## 1. 提交入口、任务对象与状态机
 
-- **客户端提交**：App 的 `createComposerSubmit`（`packages/app/src/composer/submit.ts`）把 text、文件附件、上下文项、模型选择、delivery 组装为 prompt 请求；slash 命令在客户端先行解析（`composer/client-slash-command.ts`），命令类请求走 `session.command`，shell 模式走 `session.shell`。
-- **服务端受理**：`POST /api/session/:id/prompt`（`packages/protocol/src/groups/session.ts:337`）→ `SessionPrompt.prepare` 生成 inbox 条目；`POST /api/session/:id/command`、`/shell`、`/synthetic`、`/compact` 分别对应命令、shell、注入消息与手动压缩。
+- **客户端提交**：App 的提交入口 `createComposerSubmit` 把用户文本、文件附件、上下文项、模型选择与投递方式组装成一次 prompt 请求；以斜杠开头的命令先在客户端解析，命令类请求走 `session.command`，shell 模式走 `session.shell`。组装逻辑在 `packages/app/src/composer/submit.ts`，命令解析在同目录的 `client-slash-command.ts`。
+- **服务端受理**：`POST /api/session/:id/prompt` 交给 `SessionPrompt.prepare` 生成 inbox 条目（`packages/protocol/src/groups/session.ts:337`）。同一路由组下还有四个端点，各自对应一种入口：
+  - `/command`：命令类请求；
+  - `/shell`：shell 模式；
+  - `/synthetic`：注入消息；
+  - `/compact`：手动压缩。
 - **执行对象**：全局执行服务在当前进程内按会话协调，同会话显式恢复会加入已有执行，提示唤醒可合并，不同会话可并行。runner、工具和模型解析绑定工作位置；位置切换或重载后重新选取该位置的服务。数据库执行 claim 记录忙碌期的恢复意图，不提供分布式租约、跨进程互斥或副作用恰好一次保证（[execution.ts](../../opencode/packages/core/src/session/execution.ts#L73-L146)）。
-- **状态表达**：`session.execution.started/succeeded/failed/interrupted` 事件标记执行生命周期，`idle` 消息标记一轮结束（带 succeeded/failed/interrupted 结果），不设独立的 busy/retry 三态事件。
+- **状态表达**：执行生命周期由 `session.execution.*` 的 started、succeeded、failed、interrupted 四个事件标记；一轮结束时另发 `idle` 消息，结果取 succeeded、failed、interrupted 之一。busy 与 retry 三态没有单独的事件。
 - **并发**：不同会话可并行执行；同会话输入经 inbox 串行化，`steer` 语义让用户在生成中追加指导而不打断当前步骤。
 
 ## 2. 上下文拼装
 
 - **系统提示**：`runner/prompt/system.txt` 定义 agent 身份、Markdown 渲染约定、并行工具调用偏好等；运行时把工具指引片段注入（`OPENCODE_TOOL_GUIDANCE`）。
-- **指令层**：`packages/core/src/instructions/` 汇总内置指令与项目/全局 AGENTS 文件，按会话与路径解析；`SessionInstructionState`/`instruction_state` 表以 epoch 与 `through_seq` 记录增量，避免每轮重复注入相同指令。
-- **历史层**：`SessionHistory.load` 读取消息与部分内容，按压缩边界（`latest`/`local`/目标模型）决定起点；`SessionContext.select` 产出当前会话的选择结果，`load` 物化为可发送的上下文。
+- **指令层**：`packages/core/src/instructions/` 汇总内置指令与项目、全局 AGENTS 文件，按会话与当前路径解析；结果写进 `instruction_state` 表，以 epoch 与 `through_seq` 记录增量，下一轮只补新增部分，避免重复注入相同指令。
+- **历史层**：历史服务按最新适用的已完成压缩边界选择读取起点。`latest` 允许模型无关的读取者采用原生压缩窗口；`local` 只采用本地摘要边界；指定目标模型时，原生窗口还须符合该模型的回放条件（`packages/core/src/session/history.ts:25-84`）。上下文服务再选出本轮内容，并物化为可发送的上下文，入口见 `packages/core/src/session/context.ts`。
 - **工具层**：Tool 服务按权限规则集生成当轮工具定义快照（`core/src/tool.ts` 的 `snapshot`）；Code Mode 工具另有受控目录（`codemode/catalog.ts`）供模型在受限执行环境里调用。
 - **附件**：用户附件在受理时物化为 blob，模型请求阶段按需读取为 base64 或 `media:` 引用，避免历史消息里重复内联大对象。
 
 ## 3. 预算、压缩与溢出
 
-- **触发**：`SessionCompaction` 区分 `auto`、`overflow`、`manual` 三种原因；`auto` 依据模型窗口与保留余量决定（窗口未知时不自动触发），`overflow` 由上游上下文溢出错误驱动，`manual` 来自 `/compact` 或客户端按钮。
+- **触发**：`SessionCompaction` 按三种原因分流：
+  - `auto`：依据模型窗口与保留余量判定，窗口未知时不自动触发；
+  - `overflow`：由上游的上下文溢出错误驱动；
+  - `manual`：来自 `/compact` 命令或客户端按钮。
 - **形态**：压缩结果是 compaction 消息，状态 running → completed/failed；completed 可带本地摘要或 provider 原生窗口（`native.messages`），后者只在目标模型声明可回放时参与历史读取。
 - **预计算**：上下文接近阈值时可在后台预生成摘要，等自动压缩触发时直接换入，避免同步阻塞。
 - **历史改写**：压缩后的历史以摘要（或原生窗口）替换旧消息段；旧工具输出被裁掉，模型看到的是压缩边界之后的消息加摘要。
@@ -70,15 +77,15 @@ Composer 提交（packages/app/src/composer/submit.ts）
 
 ## 4. Provider 交接与流式事件
 
-- **模型解析**：`runner/model.ts` 把会话的 agent/model 解析成具体 provider 配置（含 variant），交给 AI 层。
-- **请求与传输**：`session/model-request.ts` 负责把上下文转成 AI 层消息（含系统提示、工具定义、历史），`model-transport.ts` 负责实际传输与错误归一；Provider 协议实现与适配器在 `packages/ai/src/providers/`。
+- **模型解析**：执行器先把会话绑定的 agent 与 model 解析成具体的 provider 配置（含 variant），再交给 AI 层发起请求（`runner/model.ts`）。
+- **请求与传输**：请求构造层把上下文转成 AI 层消息，含系统提示、工具定义与历史；传输层负责实际发送与错误归一。两层分别在 `session/{model-request.ts,model-transport.ts}`，Provider 协议实现与适配器在 `packages/ai/src/providers/`。
 - **流式事件**：AI 层产出统一 LLM 事件（文本增量、推理增量、工具调用增量、usage、结束原因），`runner/publish-llm-event.ts` 转成 durable 会话事件，因此客户端看到的流式内容与落库内容是同一套事件。
 - **收尾**：步骤结束时记录快照与文件变更（`session.step.ended` 带 snapshot/files），usage 通过 `session.usage.recorded` 汇总到会话统计。
 
 ## 5. 工具回合、权限与终止
 
-- **工具执行**：`SessionStep` 把模型返回的工具调用交给 Tool 服务，执行结果按工具事件流回注（`session.tool.called/progress/success/failed`），模型在下一轮看到工具结果。
-- **权限**：`core/src/permission.ts` 以规则集（action/resource/effect）评估每次调用，`Unattended` 模式为无人值守场景提供默认规则；需要人工确认时发出审批请求，等待客户端回复。Agent 与会话各自持有规则集并合并使用。
+- **工具执行**：步骤执行器把模型返回的工具调用交给 Tool 服务，执行过程按 `session.tool.*` 事件流回注，分为调用、进度、成功、失败四类；模型在下一轮读到这些结果。
+- **权限**：每次工具调用都经权限层按规则集评估，规则由动作、资源与效果三段组成；无人值守场景使用 `Unattended` 模式的默认规则。命中需要人工确认的调用时发出审批请求，等待客户端回复；agent 与会话各自持有规则集并合并使用（`core/src/permission.ts`）。
 - **Code Mode**：模型可写一段受限程序一次调用多个工具（`packages/codemode`），执行仍受整工具权限过滤与各工具自身策略约束。
 - **终止**：步骤数达到 agent 上限时注入收束提示（`runner/max-steps.ts`）；上下文溢出转压缩；输出被截断或流不完整时使用续写提示继续（`runner/llm.ts` 的两条 CONTINUE 文案）。
 

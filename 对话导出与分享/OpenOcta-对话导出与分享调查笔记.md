@@ -25,7 +25,7 @@ OpenOcta 把会话按 JSONL 追加写入本地目录，但面向用户的抽取�
 
 ## 系统边界与总体调用链
 
-会话事实源是本地文件，不是数据库：Linux/macOS 为 `~/.openocta/agents/<agentId>/sessions/<sessionId>.jsonl`（Windows 为 `%APPDATA%\openocta` 下的同一相对路径），首行为会话头，后续每行一条消息；同目录的 `sessions.json` 保存 session key 到会话文件的索引（`src/pkg/session/paths.go:70-82`、`src/pkg/session/store.go:16-39`）。转录格式版本为 2，单行读取上限 32 MiB，以兼容包含长工具输出的行（`src/pkg/session/transcript.go:107-113`）。
+会话以本地 JSONL 文件为事实源，写入与读取都直接落在文件系统上。Linux 与 macOS 下文件位于 `~/.openocta/agents/<agentId>/sessions/<sessionId>.jsonl`，Windows 把同一相对路径放在 `%APPDATA%\openocta` 下。每个文件首行是会话头，之后每行一条消息；同目录的 `sessions.json` 维护 session key 到会话文件的索引。转录格式版本为 2，单行读取上限 32 MiB，以便容纳包含长工具输出的行（`src/pkg/session/paths.go:70-82`、`src/pkg/session/store.go:16-39`、`src/pkg/session/transcript.go:107-113`）。
 
 用户可见的抽取路径有两条，都不经过统一的「导出服务」：
 
@@ -50,7 +50,7 @@ OpenOcta 把会话按 JSONL 追加写入本地目录，但面向用户的抽取�
 
 **复制。** 计算 Markdown 时优先取消息的可见文本，其次取 A2UI 展示文本；随后剥离本地图片引用，文本为空则取消按钮（`ui/src/ui/chat/grouped-render.ts:1470-1482`）。同一气泡中的思考面板、工具调用卡、图片与文件附件是独立渲染分支，不进入这段 Markdown。因此复制结果是「本气泡的正文」，不含上下文、思考、工具参数或工具输出。A2UI 组件树本身也不会被序列化，只取其中的展示文本。
 
-**提炼。** 后端读取转录时不设消息上限，按文件顺序遍历；格式化阶段跳过空角色、`system`、`toolResult` 与 `tool`，只保留用户与助手的文本块，并把思考块以 `[思考] 内容` 的形式拼进去（`src/pkg/gateway/handlers/chat_extract_skill.go:54`、`:176-218`）。图片、文件、工具调用参数与工具结果不参与。转录行的包装结构带有 `parentId`，但读取函数只反序列化 `type` 与 `message`，提取侧也不使用父子关系，因此没有活动分支或隐藏分支的概念，输出是全部追加行的顺序拼接（`src/pkg/session/transcript.go:257-307`）。
+**提炼。** 提炼时后端按文件顺序读入全部消息，不设条数上限；转录行虽然带 `parentId` 包装，读取函数只反序列化 `type` 与 `message`，提炼侧也不使用父子关系，因此输出是全部追加行的顺序拼接，没有活动分支与隐藏分支之分。格式化阶段只保留用户与助手的文本块，跳过空角色、系统提示、工具结果与工具调用，图片、文件与工具调用参数同样不参与，思考块则以 `[思考] 内容` 前缀并入正文（`src/pkg/gateway/handlers/chat_extract_skill.go:54`、`:176-218`；`src/pkg/session/transcript.go:257-307`）。
 
 **提示词与输出。** 提示词要求输出带 YAML frontmatter 的完整 SKILL.md，禁止编造对话外内容；模型若返回代码围栏，会被剥离；文件名取自 frontmatter 的 `name` 字段，缺失时用 `extracted-skill.md`（`src/pkg/gateway/handlers/chat_extract_skill.go:18-30`、`:220-258`）。默认超时 120 秒，可由调用参数覆盖（`:92-97`）。
 
@@ -60,7 +60,15 @@ OpenOcta 把会话按 JSONL 追加写入本地目录，但面向用户的抽取�
 
 两条对话侧路径都不处理附件。复制只写文本；提炼跳过图片与文件块。因此交付物离开应用后无法还原会话中的图片、附件或工具产物。
 
-相对独立的「任务产物交付」会把 Agent 写出的文件读成 base64 内联到消息内容块，前端提供下载链接。允许的类型包括 HTML、Markdown、文本、JSON、YAML、CSV、PDF 与常见图片；大小上限分别为 HTML/PDF 2 MiB、图片 5 MiB、文本 2 MiB（`src/pkg/agent/tools/deliverable_files.go:14-34`、`:118-245`）。助手正文里提到的路径也会被正则扫描并补成附件块（`:490-553`），合并发生在 Gateway 写回消息内容时（`src/pkg/gateway/handlers/chat.go:2617`）。
+任务产物交付走的是相对独立的另一条路径：Agent 写出文件后，后端把文件读成 base64 内联进消息内容块，前端据此提供下载链接。可交付的类型与大小上限如下（`src/pkg/agent/tools/deliverable_files.go:14-34`、`:118-245`）：
+
+| 类型 | 大小上限 |
+|---|---|
+| HTML、PDF | 2 MiB |
+| 常见图片 | 5 MiB |
+| 文本（Markdown、JSON、YAML、CSV） | 2 MiB |
+
+助手正文里提到的路径也会被正则扫描并补成附件块（`src/pkg/agent/tools/deliverable_files.go:490-553`），合并发生在 Gateway 写回消息内容时（`src/pkg/gateway/handlers/chat.go:2617`）。
 
 预览 HTML/PDF 时使用 `sandbox=""` 的空沙箱 iframe，脚本不会执行（`ui/src/ui/chat/file-blocks.ts:623-633`）。文件内容以 base64 内联，但 HTML 内部引用的远端脚本、样式和图片是否可用取决于文件本身，本次未验证。
 
@@ -100,7 +108,9 @@ OpenOcta 把会话按 JSONL 追加写入本地目录，但面向用户的抽取�
 
 不存在远端快照、可访问 URL、登录要求、撤销或过期机制。所谓「分享」只能由用户自行搬运剪贴板内容或下载文件后通过外部工具传播。
 
-定时任务投递前会做 10 秒内的同摘要去重，header 截断到 50 字符；投递失败时返回值被丢弃，没有重试或失败记录（`src/pkg/gateway/handlers/cron_delivery.go:42-61`、`:142-199`）。运行结果另写两份 JSONL：调度器按 `runs/<jobId>.jsonl` 记录状态，聊天完成回调按 `runs/<sessionId>.jsonl` 记录摘要；`cron.runs` 只读前者（`src/pkg/cron/service.go:50-84`、`src/pkg/gateway/handlers/chat.go:1165-1239`、`src/pkg/gateway/handlers/cron.go:522-531`）。
+定时任务投递前先比对摘要：10 秒内出现过的相同摘要不再发送，header 超过 50 字符时截断。投递失败后调用方直接丢弃返回值，没有重试，也没有失败记录（`src/pkg/gateway/handlers/cron_delivery.go:42-61`、`:142-199`）。
+
+运行结果另写两份 JSONL 留档：调度器把状态写进 `runs/<jobId>.jsonl`，聊天完成回调把摘要写进 `runs/<sessionId>.jsonl`，`cron.runs` 只读前者（`src/pkg/cron/service.go:50-84`、`src/pkg/gateway/handlers/chat.go:1165-1239`、`src/pkg/gateway/handlers/cron.go:522-531`）。
 
 ## 9. 隐私、安全与内容治理
 
@@ -112,11 +122,11 @@ OpenOcta 把会话按 JSONL 追加写入本地目录，但面向用户的抽取�
 
 ## 10. 性能、失败恢复与测试
 
-- 复制按钮在写剪贴板期间禁用并标记 `aria-busy`，成功后 1.5 秒恢复，失败显示 2 秒错误标签；按钮断开连接时直接返回（`ui/src/ui/chat/copy-as-markdown.ts:51-111`）。
-- 提炼失败会在输入区显示错误文本；空结果、无历史、模型工厂失败、运行时失败和空文档分别返回不同错误（`src/pkg/gateway/handlers/chat_extract_skill.go:66-81`、`:99-162`；`ui/src/ui/controllers/chat-extract-skill.ts:15-42`）。
+- 复制按钮在写剪贴板期间禁用并标记 `aria-busy`，成功后 1.5 秒恢复为可用状态，失败则显示 2 秒错误标签；按钮元素已断开时直接返回（`ui/src/ui/chat/copy-as-markdown.ts:51-111`）。
+- 提炼失败时输入区显示错误文本，空结果、无历史、模型工厂失败、运行时失败和空文档分别返回不同错误（`src/pkg/gateway/handlers/chat_extract_skill.go:66-81`、`:99-162`；UI 侧见 `ui/src/ui/controllers/chat-extract-skill.ts:15-42`）。
 - 提炼需要读取全部转录并一次拼进提示词，长会话没有截断、分段或摘要策略，只受 120 秒超时约束。大会话是否会超出模型上下文，本次未验证。
-- 日志导出受 UI 缓冲 2000 行与服务端单次 5000 行/1 MB 的限制，导出的是已加载片段，不是完整日志文件（`src/pkg/gateway/handlers/logs.go:15-20`、`ui/src/ui/controllers/logs.ts:18`）。
-- 本次未找到复制、提炼或日志导出的自动化测试；`ui/src/ui/chat` 下的测试覆盖消息抽取、附件块与 A2UI，不覆盖这三个入口。
+- 日志导出受 UI 缓冲 2000 行与服务端单次 5000 行、1 MB 的限制，下载内容限于已加载的日志片段（`src/pkg/gateway/handlers/logs.go:15-20`、`ui/src/ui/controllers/logs.ts:18`）。
+- 本次未找到复制、提炼或日志导出的自动化测试，`ui/src/ui/chat` 下的测试集中在消息抽取、附件块与 A2UI。
 
 ## 11. 设计取舍与已确认边界
 

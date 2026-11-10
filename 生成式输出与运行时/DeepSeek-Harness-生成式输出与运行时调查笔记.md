@@ -20,7 +20,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 会话日志仍是唯一事实源，模型历史经表面折叠派生（`deriveMessages()`），日志同时支撑精确回放与请求可重建。
 
-**格式 v4 改写了消息数据契约**：工具结果从"user 角色的包装块"变成 `role: 'tool'` 的消息（`toolCallId` + 直接 content 数组 + 可选 `isError`），消息来源从 `plugin` 字符串改为 `kind` 判别，插件扩展内容以 `plugin:<原名>` 命名空间化，并新增 `developer/message` 事件类型。v3 到 v4 是独立迁移包，恢复旧会话时转换但不改写已存储代（`packages/session/session-format-v3-to-v4/`）。
+**格式 v4 改写了消息数据契约**：工具结果从包装在 user 角色里的内容块，变成角色为 tool 的独立消息——`toolCallId` 标记它对应哪次调用，内容字段直接是块数组，错误以可选的 `isError` 表示；消息来源由 plugin 字符串改为 kind 判别，插件扩展内容统一加 `plugin:<原名>` 前缀，并新增 `developer/message` 事件类型。v3 到 v4 是独立迁移包，恢复旧会话时执行转换，已存储的代保持原样（`packages/session/session-format-v3-to-v4/`）。
 
 输出对象身份分四类：消息（稳定 `MessageId`）、工具调用/结果（`CallId` 配对）、磁盘文件（spill 文件、内容寻址附件、交付物引用）、运行实例（终端会话与后台 job，仅进程内存活，不进日志）。工具结果契约是"规范 JSON 值 + 纯投影渲染"：执行产生的 value 只在进程内存在，落盘的只有渲染后的内容、错误信息和展示 meta。
 
@@ -42,12 +42,18 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 主链路（模型流实时发布，尝试结束后耐久收口）：
 
-1. 输入：inbox 插入用户消息并唤醒驱动器，turn 流程追加 `turn/start`，preStep 认领消息并追加 `user/message`。
-2. 装配：buildRequest 追加 `request/header`（EpochHeader 全量快照，含工具 schema）与 `request/context`，经 `llm.prepareCall` 绑定 adapter 注册并冻结请求。
-3. 生成：循环消费模型流并折叠，实时发布 start/chunk/end 帧；adapter 与迭代错误归一化为终态失败事实。
-4. 最终化：有表面输出时追加 assistant 消息，其他尝试记 assistant/attempt，两者均内嵌紧凑流；错误交给请求错误瀑布决定重试或抛错（`packages/core/agent-loop/src/agent.ts:482-582`）。
-5. 工具执行：`tool/call` 记录原始参数 JSON 与批次结算处落盘（`packages/core/tools/src/batch.ts:236-264`），管线经 `tools/pre-execute → guards → tools/execute → projectContent → tools/post-execute → finalizeContent` 后追加 `tool/result`（渲染内容 + 可选 error/meta，`sourceEventSeqs` 指向 call 事件）。
-6. 收口与持久化：`step/end`、`turn/end`（结构化原因）依序追加；`session/flush` 检查点把已提交事件批量写入后端（默认 200ms 批窗）；resume 时后端按格式目录与迁移链恢复日志并重建内存 Session。
+1. 输入：用户消息先写入 inbox 并唤醒驱动器，turn 流程随即追加 `turn/start`；preStep 认领这条消息后追加 `user/message`。
+2. 装配：buildRequest 追加请求头与请求上下文两条事件，请求头是含工具 schema 的 EpochHeader 全量快照；两条事件经 `llm.prepareCall` 绑定 adapter 注册，请求随之冻结。
+3. 生成：循环消费模型流并折叠，实时发布起止与分块帧；adapter 错误与迭代错误统一归一化为终态失败事实。
+4. 最终化：有表面输出时追加 assistant 消息，其余尝试记为 `assistant/attempt`，两者都内嵌紧凑流；错误交给请求错误瀑布决定重试还是抛错（`packages/core/agent-loop/src/agent.ts:482-582`）。
+5. 工具执行：`tool/call` 记录原始参数 JSON，批次结算时落盘（`packages/core/tools/src/batch.ts:236-264`）；管线依次经过下列环节，最后追加 `tool/result`，带渲染内容与可选的错误、展示信息，`sourceEventSeqs` 指回对应的调用事件。
+
+   ```
+   tools/pre-execute → guards → tools/execute → projectContent
+   → tools/post-execute → finalizeContent
+   ```
+
+6. 收口与持久化：步骤结束与回合结束两条事件（带结构化原因）依序追加；`session/flush` 检查点把已提交事件批量写入后端（默认 200ms 批窗）；resume 时后端按格式目录与迁移链恢复日志并重建内存 Session。
 
 ## 1. 触发方式、输出协议与对象模型
 
@@ -57,7 +63,13 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **工具结果的 v4 表示**：`tool/result` 事件的消息为 `role: 'tool'`，`toolCallId` 与 `source.callId` 一致，content 直接是块数组，`isError` 提升为消息字段；模型历史中的工具结果以该独立角色保存。
 
-**消息角色**：session 事件层面有 `user/message`、`system/message`、`developer/message`、`assistant/message` 与 `tool/result` 五类消息载荷，surface 派生只保留模型可见子集（`packages/core/session/src/types.ts:317, 449`）。
+**消息角色**：session 事件层面的消息载荷有五类，surface 派生时只保留其中的模型可见子集（`packages/core/session/src/types.ts:317, 449`）：
+
+- 用户消息 `user/message`
+- 系统消息 `system/message`
+- 开发者消息 `developer/message`
+- 助手消息 `assistant/message`
+- 工具结果 `tool/result`
 
 **媒体与附件**：图片以内容块引用附件；文本、JSON 与图片都可有内容寻址存储。附件读取改为引用对象语义——客户端从消息图片块里取完整引用交给 `readAttachment`，返回的 `name` 与原尺寸只属调用方展示信息，只有 id、媒体类型、字节长度与宽高会与存储对象核对；访问权由 Gateway 权限决定而非会话归属（`docs/upgrade-guide/v0.2.1-rc.3/attachment-read-access/guide.md`）。
 
@@ -69,7 +81,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **格式与迁移**：格式版本由 `session-format-catalog` 描述，迁移边独立成包：v0→v1、v1→v2、v2→v3、v3→v4。每条边只改它声明的表示，保留源事件的时间、消息身份与其余字段，先跑前序边到 v3 再进 v4。v4 物理行复用已发布的 v2 帧加上 v4 原生准入；编码与解码不触发入向迁移，后继代以不可变文件发布，拒绝时不产生后继（`packages/session/session-format-v3-to-v4/`）。
 
-**恢复与投影**：投影成为一等公民——`session-projection` 提供注册表与句柄，`session-projection-cache` 缓存重建结果，`session/stats`、标题与遥测都作为投影或消费者存在。实时投影帧为 `{ sessionId, seq, changes }`，一帧列出该事件改动的所有 key；`onEventChanged` 在每个提交事件后回调一次（`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames/guide.md`）。
+**恢复与投影**：投影成为一等公民，注册表与句柄由 session-projection 提供，重建结果由 session-projection-cache 缓存，统计、标题与遥测都作为投影或消费者挂在同一层。实时投影帧包含会话 id、序号与改动集合三项，一帧列出该事件牵动的所有 key；`onEventChanged` 在每个提交事件后回调一次（`docs/upgrade-guide/v0.2.2-alpha.2/projection-event-frames/guide.md`）。
 
 **上传通道**：`session-log-deepseek` 在官方 API 请求元数据启用时把规范会话日志增量随请求上传，用 `session-log-deepseek/delivery-accepted` 事件维护接受水位并重试；可整体关闭（`packages/session/session-log-deepseek/README.md`）。
 
@@ -93,7 +105,7 @@ DeepSeek-Harness 是插件化 agent harness，输出链路以"会话事件日志
 
 **流式最小单位**：assistant 内容只有文本块与推理块两种，未发现块级增量元数据。客户端重放控制器把 chunk 增量累积成临时片段，在 assistant/message 到达时换成正消息（`packages/client/runtime/src/client/sessions/partial.ts`、ui-chat 的 conversation-nodes）。
 
-**终端家族**：`terminal` seam 加 `terminal-bash` 后端（sanitize、session 生命周期），模型面工具在 `packages/experimental/tool-terminal`；持久 shell 由 `tool-bash-persistent`/`tool-pwsh-persistent` 提供。终端会话身份是进程内 `TerminalSessionId`，不进日志。
+**终端家族**：模型侧的终端能力由 terminal seam 上的 terminal-bash 后端提供，负责命令清洗与会话生命周期；对模型暴露的终端工具位于 `packages/experimental/tool-terminal`，需要跨调用保持的 shell 由 tool-bash-persistent 与 tool-pwsh-persistent 承担。终端会话在进程内以 `TerminalSessionId` 标识，不写入会话日志。
 
 **后台任务**：`jobs` seam 加 `jobs-local`；`job_output` 支持流式与最终输出两种读取；job 身份与 `JobOutcome` 承载完成、被杀与失败。job 状态本身不落会话日志。
 

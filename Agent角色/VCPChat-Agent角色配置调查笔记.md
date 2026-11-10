@@ -14,7 +14,7 @@
 
 ## 补充要点
 
-- **模型参数可留空**：设置页折叠参数段的五个数值输入（`temperature/contextTokenLimit/maxOutputTokens/top_p/top_k`）留空时存为 `null`，回填空值、解析与保存见 `modules/settingsManager.js:220-224`、`:276-282`（`parseOptionalNumberInput`）、`:323-327`。发送前由 `omitUnsetOptionalModelParams` 从请求体删除（`modules/ipc/chatHandlers.js:123-147`、`:1064`）；折叠段未设置时显示“未设置”。
+- **模型参数可留空**：设置页折叠参数段的五个数值输入（温度、上下文长度上限、单次输出上限、top_p、top_k）留空保存时记为 `null`，折叠段随之显示“未设置”；空值解析、回填与保存由 `parseOptionalNumberInput` 完成，发送前再由 `omitUnsetOptionalModelParams` 把这些未设置的参数从请求体里删除。源码见 `modules/settingsManager.js:220-224,276-282,323-327` 和 `modules/ipc/chatHandlers.js:123-147,1064`。
 - **重新回复时附件文本重新提取**：`handleRegenerateResponse`（`modules/renderer/messageContextMenu.js:857-887`）在历史缓存了旧版固定 UTF-8 解码结果时，通过 `electronAPI.getTextContent` 从原始附件重新提取文本；`modules/fileManager.js:357-405` 的 `decodeTextBuffer` 提供 UTF-8/UTF-16 BOM、UTF-16 零字节启发式和 GB18030 兜底检测。
 
 ## 1. 结论摘要
@@ -89,18 +89,18 @@ VCPChat 的"角色"是**以文件夹为单位的 Agent**：每个 Agent 对应�
 独立于 `systemPrompt` 字段，还存在**三模式 PromptManager**（`Promptmodules/prompt-manager.js:6`）：由 `promptMode` 决定使用 original、modular 还是 preset 模式，对应存储字段为 `advancedSystemPrompt`/`presetSystemPrompt`：
 
 - **original**：单段文本（对应笔记 §3 的 systemPrompt 路径）；
-- **modular（积木模式）**：`blocks` 是扁平数组，每块带独立 `disabled` 标志，组装时过滤禁用块（`Promptmodules/modular-prompt-module.js:60, 569, 1209`；主进程同逻辑见 `modules/ipc/promptHandlers.js:193-194`）。块内 `variants` 是多内容条目，配合 `selectedVariant` 单选（`modular-prompt-module.js:365-377, 130-131`）。支持块拖拽排序和小仓隐藏（hiddenBlocks/warehouse），但**没有组级总开关、没有单选/多选组**——块是平铺的；
-- **preset**：从目录单选一个 `.md`/`.txt` 预设整段替换（`preset-prompt-module.js:269, 344`）。预设列表由 `load-preset-prompts` 扫描目录提供（`modules/ipc/promptHandlers.js:65-124`），默认目录为 `AppData/systemPromptPresets`。
+- **modular（积木模式）**：提示词按扁平数组存放，每个积木块带独立的 `disabled` 开关，组装时过滤掉停用块；块内的 `variants` 保存多条备选内容，同一时刻只有 `selectedVariant` 指定的那条生效。积木块支持拖拽排序，也能收进小仓（hiddenBlocks/warehouse）隐藏，这一层没有组级总开关，也没有单选组或多选组，块之间是平铺关系。实现见 `Promptmodules/modular-prompt-module.js:60,130-131,365-377,569,1209`，主进程侧同样的过滤逻辑见 `modules/ipc/promptHandlers.js:193-194`；
+- **preset**：从预设目录里选一个 `.md` 或 `.txt` 文件，整段替换当前提示词。预设列表由 `load-preset-prompts` 扫描目录生成，默认目录是 `AppData/systemPromptPresets`；选择与加载逻辑见 `preset-prompt-module.js:269,344` 和 `modules/ipc/promptHandlers.js:65-124`。
 
 ### 3.4 发送时的配置引用与历史快照语义
 
-- **发送用缓存引用**：`chatManager.js:1317` 发送时取 `currentSelectedItem.config`，不每次读磁盘；配置刷新点只有三处：
+- **发送用缓存引用**：发送时直接读当前选中项缓存的 config，不每次回磁盘加载（`chatManager.js:1317`）；刷新这份缓存的时机只有三处：
   - 设置页保存成功后重新拉取配置并写回（`modules/settingsManager.js:469-489`）；
-  - 加载话题列表时（`updateCurrentItemConfig`，`modules/topicListManager.js:458`）；
-  - 历史 ≥4 条触发摘要时强制重读（`attemptTopicSummarizationIfNeeded`，`chatManager.js:1132-1183`，`:911-912` 附近写回配置）。
-- **重新生成总是重读最新配置**：`electronAPI.getAgentConfig` 在重新生成前重新读取 Agent 配置（`modules/renderer/messageContextMenu.js:949` 起），模型与参数再经 `buildModelConfig` 组装；`handleRegenerateResponse`（`:857`）负责截断、重新提取附件文本并重建消息。
-- **消息不保存模型/参数元数据**：user/assistant 消息只含 `role/name/content/timestamp/id/attachments`（chatManager.js:1020-1027、:1395-1403，未变），history.json 原样写入（`save-chat-history`，`modules/ipc/chatHandlers.js:527-543`）；`__vcpchatTimestampMeta` 只附加在发往 VCP 的请求 payload，不落盘。
-- **重新生成 = 截断重建（覆盖语义）**：`messageContextMenu.js:884-887` 先 `slice` 取得原消息前的历史前缀，再 `splice` 删除原消息及其后全部消息后重建；分支是 topic 级（`chatManager.js:1783-1853` 的 `handleCreateBranch` 复制前缀历史到新话题）。本快照未找到续写入口和开场白/greeting 配置（创建 topic 时 history.json 初始化为空数组，`modules/ipc/chatHandlers.js:613`）。
+  - 加载话题列表时由 `updateCurrentItemConfig` 写回（`modules/topicListManager.js:458`）；
+  - 历史达到 4 条触发摘要时强制重读，`attemptTopicSummarizationIfNeeded` 重读后写回配置（`chatManager.js:911-912,1132-1183`）。
+- **重新生成总是重读最新配置**：重新生成前通过 `electronAPI.getAgentConfig` 重新读取 Agent 配置，模型与参数再经 `buildModelConfig` 组装；`handleRegenerateResponse` 负责截断历史、重新提取附件文本并重建消息（`modules/renderer/messageContextMenu.js:857,949`）。
+- **消息不保存模型/参数元数据**：user 与 assistant 消息只带角色、名称、正文、时间戳、id 和附件这几项，`history.json` 由 `save-chat-history` 通道按原样写入（`chatManager.js:1020-1027,1395-1403`、`modules/ipc/chatHandlers.js:527-543`）；`__vcpchatTimestampMeta` 只附加在发往 VCP 的请求 payload 上，不落盘。
+- **重新生成 = 截断重建（覆盖语义）**：重新生成时先截取原消息之前的历史前缀，再删除原消息及其后的全部消息，随后按新结果重建（`modules/renderer/messageContextMenu.js:884-887`）；分支以话题为单位，`handleCreateBranch` 会把前缀历史复制到新话题（`chatManager.js:1783-1853`）。本快照未找到续写入口和开场白（greeting）配置，创建话题时 `history.json` 初始化为空数组（`modules/ipc/chatHandlers.js:613`）。
 
 ### 3.5 模型可操作的提示词资产
 
@@ -122,10 +122,10 @@ Tavern Rules 适用于全局性的格式约束或额外提示词片段，不需�
 
 ## 5. 头像
 
-- 支持格式：PNG、JPG、GIF、WEBP；
-- 存储位置：`{userDataDir}/{agentId}/avatar.{ext}`；另会按 `{agentName}{ext}` 复制一份到集中的 `AppData/avatarimage/` 目录（`modules/ipc/agentHandlers.js:556-569`，与群组头像共用该目录）；
-- 单独通过 `save-avatar` IPC 事件保存，不写入 config.json；
-- 提取主色（`needsColorExtraction: true`）用于 UI 配色。
+- 支持 PNG、JPG、GIF、WEBP 四种格式；
+- 头像存为 `{userDataDir}/{agentId}/avatar.{ext}`，另按 `{agentName}{ext}` 复制一份到集中的 `AppData/avatarimage/` 目录，与群组头像共用该目录（`modules/ipc/agentHandlers.js:556-569`）；
+- 通过 `save-avatar` IPC 事件单独保存，不写入 config.json；
+- 另提取主色（`needsColorExtraction: true`）用于 UI 配色。
 
 ## 6. 外部能力边界
 

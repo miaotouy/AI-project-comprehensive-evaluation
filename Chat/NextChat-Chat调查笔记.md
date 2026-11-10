@@ -16,15 +16,15 @@
 
 NextChat 是 Next.js 单页 Web 聊天客户端，聊天体系是“客户端 Zustand store + 客户端请求编排 + 单页消息窗口”，没有服务端 conversation runtime：
 
-1. `useChatStore` 用 `ChatSession[]` 保存会话、消息、Mask、记忆摘要和上下文截断索引；store 默认使用 IndexedDB，异常时回退到 localStorage（`app/utils/indexedDB-storage.ts:7-47`）。
-2. 用户发送后，客户端先填充输入模板和图片，再按 system → 长期摘要 → Mask context → 短期历史 → 新消息组装请求；assistant 消息先以 `streaming` 占位写入，SSE 回调不断原地更新它。
-3. 工具调用和 MCP 回注都发生在同一聊天状态机内：普通插件工具由 provider adapter 执行并重新请求，MCP 结果以特殊 user 消息再进入 `onUserInput`。
-4. 长对话采用两层压缩：`historyMessageCount`/`max_tokens` 控制每次请求的短期窗口，`memoryPrompt` 负责超过阈值后的摘要；首次达到 50 个估算词时可单独生成会话标题。
+1. 聊天状态由客户端 store 集中持有：它以 `ChatSession[]` 保存会话、消息、Mask、记忆摘要和上下文截断索引，默认写入 IndexedDB，存储异常时回退 localStorage（`app/utils/indexedDB-storage.ts:7-47`）。
+2. 用户发送后，客户端先填充输入模板、合并图片，再把 system 提示、长期摘要、Mask context、短期历史和新消息依次拼成请求；assistant 消息先以 `streaming` 状态占位，随后由 SSE 回调原地更新正文。
+3. 工具调用和 MCP 回注都在同一聊天状态机内完成：普通插件工具交给 provider adapter 执行并触发再次请求，MCP 结果包成一条特殊 user 消息，重新进入输入处理入口 `onUserInput`。
+4. 长对话分两层压缩：`historyMessageCount` 与 `max_tokens` 约束每次请求的短期窗口，`memoryPrompt` 在超出阈值后接管摘要；估算词数首次达到 50 个时，可单独生成会话标题。
 
 ## 产品表面与系统边界
 
-- **产品表面**：浏览器 Web 单页（Router 渲染 Chat/NewChat/Masks/Settings/Plugin/MCP market/Artifact 页面，`app/components/home.tsx:160-220`）；消息窗口是分页投影而非虚拟列表（`CHAT_PAGE_SIZE=15`，最多一次取 3 页，`app/constant.ts:914`）。
-- **系统边界**：模型推理由外部 provider 完成（`getClientApi(providerName).llm.chat`）；Next.js 服务端只承担 `/api/config` 能力查询与页面壳；会话事实源在浏览器本地——持久化工厂强制 IndexedDB、失败回退 localStorage（`app/utils/store.ts:29-77`），persist key/version 为 `3.3`（`app/store/chat.ts:861-868`），服务端不保存历史。
+- **产品表面**：浏览器中的单页 Web 应用，Router 按路径渲染 Chat、NewChat、Masks、Settings、Plugin、MCP market 与 Artifact 页面；消息窗口以分页投影代替虚拟列表，每页 15 条、一次最多取 3 页（`app/components/home.tsx:160-220`、`app/constant.ts:914`）。
+- **系统边界**：模型推理交给外部 provider，入口是 `getClientApi(providerName).llm.chat`；Next.js 服务端只提供 `/api/config` 能力查询和页面壳，会话事实源保存在浏览器本地。持久化工厂使用 IndexedDB、失败时回退 localStorage（`app/utils/store.ts:29-77`），persist key 与版本为 `3.3`（`app/store/chat.ts:861-868`），服务端不保存历史。
 - Mask 是会话附属模板对象（context、模型配置与摘要提示词），可独立管理并套用到新会话。
 
 ## 端到端聊天主链
@@ -44,22 +44,33 @@ Chat 输入（doSubmit）
 
 ## 核心对象与状态权威
 
-- **ChatSession/ChatMessage**（`app/store/chat.ts:44-120`）：消息正文可为纯字符串或多模态 `text+image_url` 数组；assistant 消息的 `tools` 字段保存工具调用状态，工具工作流与最终正文共享同一消息容器。
-- **权威源**：`useChatStore`（客户端唯一权威，IndexedDB 为持久层）；UI 只是投影——`renderMessages` 合并 `session.mask.context` 与 `session.messages`（`app/components/chat.tsx:1333-1384`）。
+- **ChatSession/ChatMessage**（`app/store/chat.ts:44-120`）：消息正文既可以是纯字符串，也可以是多模态的文本与图片数组；assistant 消息把工具调用状态记在 `tools` 字段，工具工作流与最终正文共用同一条消息容器。
+- **权威源**：`useChatStore` 是客户端的唯一权威，IndexedDB 作为持久层；界面只做投影，渲染入口先把 Mask context 与当前会话消息合并，再交给消息组件（`app/components/chat.tsx:1333-1384`）。
 - **运行态**：`ChatControllerPool` 持有 AbortController，Stop/Retry 经其回收控制器（`app/store/chat.ts:519-526`）。
 
 ## 专项导航
 
-- 会话与消息管理：[`../会话与消息管理/NextChat-会话与消息管理调查笔记.md`](../会话与消息管理/NextChat-会话与消息管理调查笔记.md)
-- 对话请求与上下文：[`../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md`](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md)
-- Chat UI：[`<../Chat UI/NextChat-ChatUI调查笔记.md>`](<../Chat UI/NextChat-ChatUI调查笔记.md>)
-- 消息渲染：[`../消息渲染器/NextChat-消息渲染器调查笔记.md`](../消息渲染器/NextChat-消息渲染器调查笔记.md)
-- 横向对比：[`../会话与消息管理/会话与消息管理横向对比.md`](../会话与消息管理/会话与消息管理横向对比.md)、[`../对话请求与上下文/对话请求与上下文横向对比.md`](../对话请求与上下文/对话请求与上下文横向对比.md)、[`<../Chat UI/ChatUI横向对比.md>`](<../Chat UI/ChatUI横向对比.md>)；跨层综合结论见 [`../Chat/Chat横向对比.md`](../Chat/Chat横向对比.md)
+- [会话与消息管理调查笔记](../会话与消息管理/NextChat-会话与消息管理调查笔记.md)
+- [对话请求与上下文调查笔记](../对话请求与上下文/NextChat-对话请求与上下文调查笔记.md)
+- [Chat UI 调查笔记](<../Chat UI/NextChat-ChatUI调查笔记.md>)
+- [消息渲染器调查笔记](../消息渲染器/NextChat-消息渲染器调查笔记.md)
+- 横向对比：[会话与消息管理横向对比](../会话与消息管理/会话与消息管理横向对比.md)、[对话请求与上下文横向对比](../对话请求与上下文/对话请求与上下文横向对比.md)、[Chat UI 横向对比](<../Chat UI/ChatUI横向对比.md>)
+- 跨层综合结论：[Chat 横向对比](../Chat/Chat横向对比.md)
 
 ## 关键能力与已确认边界
 
-- 支持：会话新建/删除（toast 5 秒撤销）/拖拽排序（react-beautiful-dnd）/fork；`clearContextIndex` 抬高发送起点而不删 UI 历史；流式停止与重试；自动标题与摘要；MCP JSON 回注；多设备同步（`app/utils/sync.ts`，按 session id 合并、message id 去重）。
-- 已确认边界：无服务端 runtime，聊天全文与 API key 默认落在浏览器 IndexedDB 且无通用加密层；摘要无质量校验或回滚；token 估算为启发式（`estimateTokenLength`）；工具结果挂在消息 `tools` 元数据上会扩大持久化体积；`mergeWithUpdate` 的 remote 时间变量疑似缺陷（`app/utils/sync.ts:148-165`）。
+- 支持的能力：
+  - 会话操作：新建、删除（toast 5 秒内可撤销）、拖拽排序（react-beautiful-dnd）与 fork。
+  - 上下文清理：`clearContextIndex` 抬高发送起点，界面历史照常保留。
+  - 生成控制：流式停止与重试，以及会话标题和摘要的自动生成。
+  - 上下文回注：MCP 返回的 JSON 结果重新注入对话。
+  - 多设备同步：按 session id 合并会话、按 message id 去重消息（`app/utils/sync.ts`）。
+- 已确认边界：
+  - 没有服务端 conversation runtime，聊天全文与 API key 默认落在浏览器 IndexedDB，且无通用加密层。
+  - 摘要生成没有质量校验，也无法回滚。
+  - token 数按启发式估算（`estimateTokenLength`）。
+  - 工具结果写进消息的 `tools` 元数据，会放大持久化体积。
+  - `mergeWithUpdate` 在处理 remote 时间时变量用法疑似缺陷（`app/utils/sync.ts:148-165`）。
 
 ## 未验证事项
 

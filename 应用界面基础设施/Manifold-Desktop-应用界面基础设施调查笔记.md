@@ -40,11 +40,11 @@ Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 **原生层的"界面基础设施"存量**（即全部）：
 
-1. 窗口状态持久化：关闭时 SaveWindowState 写 `%LOCALAPPDATA%\Manifold\window-state.json`（位置/大小/最大化），构造时 RestoreWindowState 恢复并做工作区越界修正与最小尺寸兜底（MainWindow.xaml.cpp:343-400）。
-2. 系统对话框：IFileOpenDialog/IFileSaveDialog Win32 公共对话框，用于会话导出/导入、Markdown 导出（:559-617、:619-646、:648-677、:679-722）。
-3. 剪贴板与外部 URL：COPY_TO_CLIPBOARD 用 Win32 OpenClipboard/SetClipboardData(CF_UNICODETEXT)（:724-744）；OPEN_EXTERNAL_URL 用 ShellExecuteW（:746-753）。
-4. DPI：app.manifest:16 声明 PerMonitorV2；`RootGrid().SizeChanged` 触发 ResizeWebView 用 GetClientRect 像素设置 put_Bounds（MainWindow.xaml.cpp:176, 325-332）。
-5. 窗口关闭清理：Closed 时保存窗口状态、停止终端进程、关停插件与 MCP、释放 WebView COM 指针（:179-192）。
+1. 窗口状态持久化：窗口关闭时由 SaveWindowState 把位置、大小和最大化状态写入 `%LOCALAPPDATA%\Manifold\window-state.json`，构造窗口时 RestoreWindowState 再读回，并修正落到工作区之外的坐标、按最小尺寸兜底（MainWindow.xaml.cpp:343-400）。
+2. 系统对话框：会话导出、会话导入与 Markdown 导出共用 Win32 的 IFileOpenDialog 与 IFileSaveDialog，三处入口的实现集中在同一段代码里（MainWindow.xaml.cpp:559-722）。
+3. 剪贴板与外部 URL：复制消息走 Win32 OpenClipboard 与 SetClipboardData，格式为 CF_UNICODETEXT；打开外部链接走 ShellExecuteW（MainWindow.xaml.cpp:724-753）。
+4. DPI：应用清单声明 PerMonitorV2 感知；RootGrid 尺寸变化时触发 ResizeWebView，用 GetClientRect 得到的像素值设置 WebView 边界（`app.manifest:16`、MainWindow.xaml.cpp:176,325-332）。
+5. 窗口关闭清理：Closed 回调里保存窗口状态、停止终端进程、关停插件与 MCP，并释放 WebView 的 COM 指针（MainWindow.xaml.cpp:179-192）。
 
 **未找到**（Grep 范围 `*.cpp/*.h/*.xaml/*.idl`）：
 - ContentDialog、Flyout、MenuFlyout、TeachingTip、InfoBar、ToastNotification/AppNotification——原生层没有任何 WinUI 浮层、提示或系统通知控件；
@@ -62,7 +62,7 @@ Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 **界面栈。** 原生层 WinUI 3（Windows App SDK 1.8.260101001，packages.config:8-17）；前端为无框架 vanilla ES Modules + 手写 CSS，依赖仅 `vendor/marked.min.js` 与 `vendor/highlight.min.js`（`index.html:27-28`）。
 
-前端无构建步骤（`docs/architecture.md:88` 原话 "no virtual DOM, no framework, and no build step"）。
+前端没有构建步骤，架构文档的原话是 "no virtual DOM, no framework, and no build step"（`docs/architecture.md:88`）。
 - **公共组件清单**（模块级单例）：
   - `services/toast.js`（Toast）
   - `services/confirm.js`（确认弹窗）
@@ -95,20 +95,20 @@ Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 ### Confirm 确认弹窗（`services/confirm.js`）
 
-- 唯一命令式弹窗：showConfirm(message) 返回 `Promise<boolean>`（`confirm.js:2-31`），每次调用动态创建遮罩与对话框两个 DOM 节点，两个按钮加遮罩点击关闭（:24-26，以点击目标是否为遮罩本体判断）。
-- 焦点与键盘：打开后 `ok.focus()`（:29）；**无 Esc 处理、无焦点陷阱、无关闭后焦点归还**——全部静态确认（文件全文无 keydown 监听）。
-- 消费方：流式期间关闭聊天标签（`app.js:66-69`）、删除会话（`side-panel.js:122-127`）。Chat UI 笔记第 5 节已指出 Ctrl+W 直接关闭绕过该确认（`app.js:186-196`）。
-- 打开期间未发现滚动锁定机制（body 无 overflow:hidden 切换；静态推断，另 `base.css:87` 中 body 本就 overflow:hidden，应用级滚动区域在内部容器）。
+- 项目里唯一的命令式弹窗：调用 showConfirm 传入一条消息，返回 Promise<boolean>。每次调用都动态创建遮罩与对话框两个节点，确认、取消与点击遮罩都会关闭，其中遮罩关闭以点击目标是否为遮罩本体判断（`confirm.js:2-31`）。
+- 焦点与键盘：打开后把焦点交给确认按钮，之后没有键盘处理——文件全文没有 keydown 监听，因此没有 Esc 关闭、没有焦点陷阱，关闭后也不归还焦点（`confirm.js:29`）。
+- 消费方只有两处：流式期间关闭聊天标签，以及删除会话。Ctrl+W 直接关闭会绕过该确认（`app.js:66-69,186-196`、`side-panel.js:122-127`；Chat UI 笔记第 5 节）。
+- 打开期间未发现滚动锁定机制：body 没有 overflow:hidden 的切换动作；`base.css:87` 里 body 本身就固定 overflow:hidden，应用级滚动发生在内部容器（静态推断）。
 
 ### 搜索浮层（`components/search-overlay.js`）
 
-- 单例，Ctrl+F 切换（`app.js:206-209`）。打开时清空输入并聚焦输入框（`search-overlay.js:87-94`），遮罩点击、Esc 关闭，方向键与 Enter 导航结果（:19,35,36-58）。300ms 防抖发 SEARCH_SESSIONS（:24-32），结果点击后关闭并打开会话（:76-79）。无 aria 属性（`role=dialog`/aria-modal 均未设置）。
-- 关闭后焦点不归还：`hide()` 只移除 `.open` 类（:96-100），无焦点管理。
+- 搜索浮层是模块级单例，由 Ctrl+F 控制显隐（`app.js:206-209`）。打开时清空输入并聚焦输入框，点击遮罩或按 Esc 关闭，方向键与 Enter 在结果之间导航；输入停顿 300ms 后发出 SEARCH_SESSIONS 查询，点击结果则关闭浮层并打开对应会话。浮层节点没有设置 role=dialog 与 aria-modal 属性（`search-overlay.js:19,24-32,35-58,76-79,87-94`）。
+- 关闭后焦点留在原处：hide() 只移除 .open 类，没有焦点管理逻辑，焦点也不归还给触发入口（`search-overlay.js:96-100`）。
 
 ### 设置抽屉（`components/settings-panel.js`）
 
-- 单例，Ctrl+, 切换（`app.js:197-200`）。CSS 过渡滑入（`base.css:394-409`：right: -360px → 0，200ms）。打开时无 focus 调用，关闭只靠 × 按钮或再次 Ctrl+,；**无 Esc 处理、无遮罩层**（`styles/settings.css:1-8` 定义的 `.settings-overlay` 遮罩类无任何 JS 创建点，属死样式）。
-- 内容为 6 个分区（general/providers/plugins/mcp/prompts/usage，`settings-panel.js:29-36`），分区切换即渲染；表单改动标脏点（`.settings-dirty-dot`，:442-446）并即时 updateSettings 落盘。
+- 设置抽屉是单例，由 Ctrl+, 控制显隐，靠 CSS 过渡从右侧滑入，位移由 right: -360px 过渡到 0，时长 200ms（`app.js:197-200`、`base.css:394-409`）。打开时不主动设置焦点，关闭只能点 × 或再按一次 Ctrl+,；文件里没有 Esc 处理，也没有遮罩层——设置样式表定义的 .settings-overlay 遮罩类找不到任何 JS 创建点，属于死样式（`styles/settings.css:1-8`）。
+- 内容分成 general、providers、plugins、mcp、prompts、usage 6 个分区，切换分区时重新渲染；表单改动先打脏点标记，再立即调用 updateSettings 落盘（`settings-panel.js:29-36,442-446`）。
 
 ### 提示词下拉（`components/input-bar.js:109-153`）
 
@@ -127,8 +127,8 @@ Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 ### Toast（`services/toast.js`）
 
-- 唯一 Toast 实现：底部右侧容器（`base.css:456-464`，z-index 200），showToast(message, type) 创建 `toast toast-${type}`，4 秒后透明度渐退 200ms 再移除（`toast.js:16-20`）。无队列上限、无更新/取消、无 promise 令牌、无 aria-live/role 属性。
-- type 参数在 CSS 中无对应规则（Grep `styles/*.css` 只有 `.toast` 基础样式，无 `.toast-error`/`.toast-info`/`.toast-warning` 色差）——类型目前只有 class 名差异，视觉不区分（静态推断）。
+- 全项目只有一处 Toast 实现：容器固定在底部右侧，层级 200；showToast(message, type) 创建同时带 toast 与 toast-<type> 两个类的节点，停留 4 秒后以 200ms 透明度过渡淡出并移除（`base.css:456-464`、`toast.js:16-20`）。Toast 没有队列上限，也不提供更新、取消或等待令牌，节点上没有 aria-live 与 role 属性。
+- type 参数在样式表里没有对应规则：Grep 全部样式只找到 .toast 基础样式，没有按 error、info、warning 区分颜色的规则，因此类型当前只体现为 class 名差异，视觉上不区分（静态推断）。
 
 **唯一调用点。** `app.js:224-227` 的全局 window.onerror 与 unhandledrejection（全局脚本错误兜底）。聊天主链、设置、导入导出等业务流程均不弹 Toast——README 宣称的 "Toast notifications -- non-intrusive status messages"（`README.md:59`）目前只挂载了全局错误路径。
 
@@ -136,11 +136,11 @@ Manifold Desktop 是薄层的 WinUI 3 原生壳加无框架 WebView2 前端。�
 
 ### 加载态与空状态
 
-- 聊天空状态：`chat-tab.js:14-17` 的 `.chat-empty` 纯文本 "Start a conversation"，首个 chunk 到达即移除（:29-30）。
-- 流式指示：`.streaming-indicator` 脉冲圆点（`chat-tab.js:37-39`；`chat.css:94-107`）。`base.css:445-453` 的 `.streaming-dots::after` 与 `chat.css:110-113` 的 `.loading-dots::after` 两个文字动画类已定义但无 JS 使用点（Grep 无命中），属死样式。
-- 会话列表空状态：`side-panel.js:68-72` 的 "No sessions yet"/"No results" 文本。
-- 设置各分区空状态：`settings-panel.js:206, 267, 312, 342, 372` 的 "No providers configured" 等文本；搜索浮层 "No results found"（`search-overlay.js:64`）；提示词下拉 "No saved prompts"（`input-bar.js:125`）。
-- 错误反馈：无全局错误边界；聊天错误走 CHAT_ERROR 事件渲染行内 `.error-message` 行（`chat-tab.js:87-98`，Retry 按钮只删行不重发，见 Chat UI 笔记）；compare 错误走列内文本行（`compare-tab.js:73-81`）。加载失败/会话损坏无专门空态。
+- 聊天空状态由聊天标签渲染的一行占位文本承担，内容是 "Start a conversation"，首个流式片段到达后立刻移除（`chat-tab.js:14-17,29-30`）。
+- 流式指示是一个脉冲圆点（`chat-tab.js:37-39`，样式在 `chat.css:94-107`）。同属文字动画的两个类 .streaming-dots::after 与 .loading-dots::after 在样式里已有定义，但 Grep 全仓库找不到 JS 使用点，属于死样式（`base.css:445-453`、`chat.css:110-113`）。
+- 会话列表的空状态直接输出 "No sessions yet" 或 "No results" 文本（`side-panel.js:68-72`）。
+- 设置面板各分区的空状态是同类提示文案，如 "No providers configured"；搜索浮层给出 "No results found"，提示词下拉给出 "No saved prompts"（`settings-panel.js:206,267,312,342,372`、`search-overlay.js:64`、`input-bar.js:125`）。
+- 错误反馈没有全局错误边界：聊天错误由 CHAT_ERROR 事件渲染成行内 .error-message 行，Retry 按钮只删除该行、不触发重发；compare 错误渲染为列内文本行。加载失败或会话损坏没有专门空态（`chat-tab.js:87-98`、`compare-tab.js:73-81`；Chat UI 笔记）。
 
 ## 4. 主题、视觉 token 与持久化
 
@@ -167,10 +167,10 @@ dark 与 light 两档各定义 29 个同名语义变量，覆盖背景、文本�
 
 去重后语义变量 29 个 + 根常量 8 个 = 37 个。`index.html:2` 硬编码 `data-theme="dark"` 作首帧默认。字号由 `settings-store.js:75-76` 以行内 `--font-size` 同名覆盖 :root 值。
 
-**强调色、字体、密度均无自定义。** 设置面板 general 分区只有 Theme/Temperature/Font Size/System Prompt/Stream 五组控件（`settings-panel.js:127-155`），无强调色选择器、字体设置与密度/圆角设置项：
-- 强调色：4 个 token 随主题档硬编码（dark `#6366F1` / light `#4F46E5`，`base.css:25-28,58-61`）；
-- 字体：fontFamily 全仓库无命中，只有 `--mono-family`/`--sans-family` 两个固定族（`base.css:4-5`）；
-- 密度与圆角：`--radius`/`--radius-sm` 固定 8/4px，无设置项。
+**强调色、字体与密度都取固定值。** 设置面板 general 分区只有主题、温度、字号、系统提示词与流式开关五组控件，没有强调色、字体、密度或圆角的设置项（`settings-panel.js:127-155`）：
+- 强调色：4 个 token 随明暗档位硬编码，深色档为 #6366F1，浅色档为 #4F46E5（`base.css:25-28,58-61`）；
+- 字体：fontFamily 在全仓库无命中，只有等宽与无衬线两个固定字族（`base.css:4-5`）；
+- 密度与圆角：圆角只有 8px 与 4px 两级，没有对应设置项。
 
 **theme 值无白名单校验。** HandleSaveSettings 只钳制 temperature（0-2）、fontSize（10-24）、systemPrompt（10000 字），theme 字符串任意值直通（MainWindow.xaml.cpp:480-494）；非法值经 applyTheme 写入 data-theme 后无匹配 CSS 规则，token 回退 :root 默认（静态推断，未运行验证）。
 
@@ -180,17 +180,17 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 **首屏与持久化路径。** 首帧固定暗色（index.html 硬编码），HOST_READY 到达后按保存值切换，无防闪烁机制；localStorage 不参与主题（manifold_onboarded 与 manifold_usage 是仅有的两个 localStorage 键，均与主题无关）。跨窗口同步问题不存在（单窗口）。
 
-**其它组件接入 token。** 各处消费方均为对公共变量的直接引用，无组件级私有主题化：
-- 终端状态灯动画与选择高亮：`--accent`/`--accent-transparent`（`terminal.css:34-45`）；
-- 消息渲染器代码块行内样式：`--code-bg`/`--border`（`message-renderer.js:99`）；
-- 提示词下拉等行内样式：`var(--...)`（`input-bar.js:123`）。
+**其它组件接入 token。** 各消费方直接引用公共变量，没有组件级私有主题化：
+- 终端状态灯动画与选择高亮取强调色及其透明变体（`terminal.css:34-45`）；
+- 消息渲染器的代码块行内样式取代码块背景色与边框色（`message-renderer.js:99`）；
+- 提示词下拉等组件的行内样式统一写成 `var(--...)` 形式（`input-bar.js:123`）。
 
-**代码块高亮。** `highlight-github-dark.min.css` 无条件加载（`index.html:15`），与 `data-theme="light"` 无关——浅色模式下代码块仍使用深色高亮主题（静态推断，未验证是否有深色代码块与浅色页面混搭的视觉表现）。
-- **本次未找到**（主题体系专项 Grep，范围 `frontend/**` 非 vendor、`Manifold.Core/**`、原生层 `*.cpp/*.h/*.xaml/*.idl`）：
-  - 主题市场/商店与主题导入导出：importTheme/exportTheme/`theme.json` 均无命中，frontend 下无任何 `*.json` 文件、无 `themes/` 目录；
-  - 壁纸/背景图：wallpaper/backgroundImage 无命中，`styles/*.css` 无 `url()` 引用；
-  - 自定义 CSS：customCss/userStyle 无命中；
-  - 原生层 RequestedTheme 无命中——原生主题通道只有 MainWindow.xaml:12 一处 ThemeResource。
+**代码块高亮。** 高亮主题表 highlight-github-dark.min.css 由页面无条件引入（`index.html:15`），不随 data-theme 取值切换，浅色模式下代码块仍按深色高亮主题渲染（静态推断，深色代码块配浅色页面的实际观感未验证）。
+- **本次未找到**（主题体系专项 Grep，范围是 frontend 非 vendor 部分、`Manifold.Core/**` 与原生层源码）：
+  - 主题市场、商店与主题导入导出：importTheme、exportTheme、theme.json 均无命中，frontend 下也没有任何 JSON 文件或 themes 目录；
+  - 壁纸与背景图：wallpaper、backgroundImage 无命中，样式表内没有 url() 引用；
+  - 自定义 CSS：customCss、userStyle 无命中；
+  - 原生层 RequestedTheme 无命中，原生主题通道只有 MainWindow.xaml:12 一处 ThemeResource。
 
 ## 5. 响应式、移动端与窗口适配
 
@@ -238,7 +238,7 @@ WebView2 默认背景色在 OnWebViewCreated 硬编码为深色 `{255,24,24,27}`
 
 **视觉定制面只有 theme 与 fontSize 两项**（`settings-panel.js:127-155`），强调色、字体、密度、圆角、壁纸与自定义 CSS 均无通道，全部 token 硬编码于 `base.css`；README 未宣称主题扩展能力（v0.2.0 changelog 的 "Terminal theme variable consistency" 是终端 token 修复条目，`README.md:172`）。
 
-**侧栏宽度 token 与硬编码并存。** `base.css:9` `--sidebar-width:260px` 与 `layout.css:27` 实际 `#side-panel { width: 240px }` 不一致，且 `base.css` 的 `.sidebar` 类规则无 JS 使用点（实际容器是 `#side-panel`，全部行内样式渲染）。
+**侧栏宽度 token 与硬编码并存。** 根变量把侧栏宽度定为 260px，实际容器 #side-panel 在布局样式表里写死 240px，两者并不一致；基础样式里的 .sidebar 类规则也没有任何 JS 使用点，侧栏真正的容器是 #side-panel，宽度由行内样式渲染（`base.css:9`、`layout.css:27`）。
 
 **会话/设置持久化双权威。** 偏好落盘原生侧，UI 态不落盘（内存标签、草稿丢失见 Chat UI 笔记）；localStorage 只用于用量与 onboarding 标记。
 

@@ -52,11 +52,11 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 让模型能执行真实命令、读写工作区，同时把“能做什么”限制在操作系统级沙箱和可审计的策略里，而不是只靠提示词约束。
 
-**入口与触发者。** 模型通过命令执行工具发起请求；用户通过配置、`/permissions`、审批弹窗和 `codex sandbox` 子命令参与。审批模式定义在 `codex-rs/protocol/src/protocol.rs:1163-1186`（untrusted、on-request、granular、never），沙箱策略定义在同文件 `:1250-1299`（read-only、workspace-write、danger-full-access、external-sandbox）。`codex sandbox` 用于在宿主沙箱内直接跑命令（`codex-rs/cli/src/main.rs:190-191`）。
+**入口与触发者。** 模型通过命令执行工具发起请求，用户在配置、`/permissions` 命令与审批弹窗等位置决定是否放行。审批模式与沙箱策略定义在同一份协议文件中（`codex-rs/protocol/src/protocol.rs:1163-1186,1250-1299`）：审批分 untrusted、on-request、granular、never 四档，沙箱策略分 read-only、workspace-write、danger-full-access、external-sandbox 四档。用户也可以用 `codex sandbox` 子命令在宿主沙箱内直接跑命令（`codex-rs/cli/src/main.rs:190-191`）。
 
-**完整主链。** 命令进入执行层后先选沙箱类型：按平台返回 Seatbelt、Linux Landlock+seccomp 或 Windows 受限令牌（`codex-rs/sandboxing/src/manager.rs:48-62`），再判断本次请求是否真的需要沙箱（`:311-351`）。需要时把原始 argv 包装成沙箱启动命令，注入文件系统与网络权限、环境变量和代理设置（`:353` 起的 `transform`）。执行入口在 `codex-rs/core/src/exec.rs:132` 选型、`:393-430` 变换并启动。平台后端分别为 Seatbelt 策略生成（`sandboxing/src/seatbelt.rs:844`）、Landlock 规则（`sandboxing/src/landlock.rs:26`）与 Windows 受限令牌/MXC（`sandboxing/src/windows.rs:38-100`）。
+**完整主链。** 命令进入执行层后，沙箱管理器先按平台选定沙箱类型：Seatbelt、Linux 的 Landlock 加 seccomp，或 Windows 受限令牌；随后判断这次请求是否真需要沙箱，需要时把原始 argv 包装成沙箱启动命令，注入文件系统与网络权限、环境变量和代理设置，交给 core 的执行入口选型并启动（`codex-rs/sandboxing/src/manager.rs:48-62,311-353`；`codex-rs/core/src/exec.rs:127-140,393-430`）。三个平台后端各自负责一种约束实现，其中 Seatbelt 策略生成在 `sandboxing/src/seatbelt.rs:844` 完成，Windows 受限令牌/MXC 在 `sandboxing/src/windows.rs:38-100` 完成，Landlock 规则生成见关键源码索引。
 
-**策略层。** execpolicy 用 Starlark DSL 写规则，支持命令前缀规则与网络规则。命令规则解析接受 allow、prompt、forbidden，网络规则额外接受 deny；另有 `PromptUser` 内部变体表示必须由人重新确认（`codex-rs/execpolicy/src/decision.rs:9-19`；命令规则解析 `src/parser.rs:357-360`，网络规则 `:253-257`）。规则文件是配置层目录下的 `rules/*.rules`，含默认 `default.rules`，按配置层优先级叠加（`codex-rs/core/src/exec_policy.rs:56-58,669-702`）。`codex execpolicy check` 可离线检查某条命令会命中什么决策（`cli/src/main.rs:196-198`）。
+**策略层。** execpolicy 用 Starlark DSL 描述放行规则，分命令前缀规则与网络规则两类。命令规则给出 allow、prompt、forbidden 三档决策，网络规则额外支持拒绝档，另有一个强制人工确认的内部变体（`codex-rs/execpolicy/src/decision.rs:9-19`，解析逻辑见 `src/parser.rs:253-257,357-360`）。规则文件放在配置层目录的 rules 子目录中，含默认的 default.rules，并按配置层优先级叠加（`codex-rs/core/src/exec_policy.rs:56-58,669-702`）。排查时可用 `codex execpolicy check` 离线检查某条命令会命中哪个决策（`cli/src/main.rs:196-198`）。
 
 **提权与失败。** 模型可以请求“带额外权限执行”，用户批准后才放宽；但若当前策略含拒绝读规则，提权仍保留沙箱，避免用一次批准抹掉拒绝读（`codex-rs/core/src/tools/sandboxing.rs:242-310`）。反过来，execpolicy 的 allow 规则可以表达“完全信任、跳过沙箱”，这是策略层而非模型层能决定的边界（同文件 `:269-285`）。沙箱拒绝会被识别并转成结构化错误，供上层决定重试或上报（`core/src/tools/runtimes/apply_patch.rs:241-257`）。
 
@@ -70,11 +70,20 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 让模型用接近人类 patch 的文本表达多文件修改，由宿主完成定位、校验与提交，避免模型直接覆盖整文件或依赖外部 `git apply`。
 
-**入口与事实对象。** 工具名 `apply_patch`，输入是一段以 `*** Begin Patch` 开头、`*** End Patch` 结尾的文本，内部用 `*** Add File:`、`*** Delete File:`、`*** Update File:`、`*** Move to:` 和 `@@` 上下文分段表达变更（`codex-rs/apply-patch/src/parser.rs:7-45`）。解析结果是一个带文件变更列表的动作对象，由运行时执行（`core/src/tools/runtimes/apply_patch.rs:47-58`）。
+**入口与事实对象。** 模型调用名为 apply_patch 的工具时，提交一段以 `*** Begin Patch` 开头、`*** End Patch` 结尾的补丁文本。文本内部用四种指令头表达对文件的增删改移：
+
+| 指令头 | 作用 |
+|---|---|
+| `*** Add File:` | 新增文件 |
+| `*** Delete File:` | 删除文件 |
+| `*** Update File:` | 修改文件 |
+| `*** Move to:` | 移动到新路径 |
+
+各段变更再用 `@@` 作上下文分段。解析器按这些标记切出文件变更列表，生成动作对象交给运行时执行（`codex-rs/apply-patch/src/parser.rs:7-45`；`core/src/tools/runtimes/apply_patch.rs:47-58`）。
 
 **完整主链。** 模型产出补丁 → 解析器按严格模式校验标记与分段 → 安全评估与审批（补丁审批在上游完成，运行时只负责执行，见 `runtimes/apply_patch.rs:1-8,147`）→ 按上下文定位并在内存中计算替换 → 写入文件 → 返回逐文件 diff、成功/失败状态与实际已提交的变更集合（`apply-patch/src/lib.rs:307-330`；`file_update.rs:57-60` 计算替换）。
 
-**结果与失败语义。** 补丁可能“部分提交后失败”：运行时保留已提交的增量（`AppliedPatchDelta`），把失败与已落盘内容一起回报，而不是假装原子回滚（`apply-patch/src/lib.rs:213-279`；`runtimes/apply_patch.rs:206-232`）。移动文件会同时记录源与目标路径。修改 `AGENTS.md` / `AGENTS.override.md` 时会额外打点（`runtimes/apply_patch.rs:219-230`），说明指令文件被视为特殊对象。
+**结果与失败语义。** 补丁可能“部分提交后失败”：运行时保留已写入的增量记录，把失败信息与已落盘内容一起回报，已写入的部分照实保留（`apply-patch/src/lib.rs:213-279`；`runtimes/apply_patch.rs:206-232`）。移动文件时源与目标路径都会记录。修改 `AGENTS.md` 或 `AGENTS.override.md` 时执行层会额外打点，指令文件因此被当作特殊对象对待（`runtimes/apply_patch.rs:219-230`）。
 
 **审批与沙箱。** 补丁走与命令相同的权限模型：审批动作类型为 `ApplyPatch`，携带环境、cwd、文件列表、原始补丁与 diff（`core/src/tools/approvals.rs:109-179`）；执行时使用 turn 环境的文件系统与沙箱上下文（`runtimes/apply_patch.rs:1-8`）。用户拒绝时返回“patch rejected by user”，已提交的变更仍有单独的增量记录（`core/src/tools/events.rs:424-457`）。
 
@@ -86,9 +95,9 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 让仓库自己携带长期有效的工程约定，模型在任意子目录工作时都能拿到“从根到当前目录”的完整指令，而不是只读一个固定文件。
 
-**入口与事实对象。** 文件名默认为 `AGENTS.md`，同目录的 `AGENTS.override.md` 优先（`codex-rs/core/src/agents_md.rs:43-45,272-296`）。账号级指令放在 codex home 的同名文件（`codex-rs/codex-home/src/instructions/mod.rs:41-62`）。`/init` 可生成初始文件（`tui/src/slash_command.rs:98`）。
+**入口与事实对象。** 指令文件默认取名为 `AGENTS.md`，同一目录下若存在 `AGENTS.override.md`，则以后者的内容为准（`codex-rs/core/src/agents_md.rs:43-45,272-296`）。账号级指令放在 codex home 的同名文件里（`codex-rs/codex-home/src/instructions/mod.rs:41-62`）。用户可用 /init 斜杠命令生成一份初始文件（`tui/src/slash_command.rs:98`）。
 
-**完整主链。** 会话启动时 `load_project_instructions` 先放入账号级与线程级指令，再按 turn 环境逐个收集项目文档（`core/src/agents_md.rs:58-116`）。项目根由 `.git` 等标记向上查找；找到根后，把“根 → cwd”的目录序列反转成正序，逐目录探测候选文件（`:192-269`）。读取时共享一个字节预算，默认 32 KiB（`config/src/config_toml.rs:77,337-342`），每个文件只取剩余额度，超长截断并告警（`agents_md.rs:150-180`）。最终把来源路径、环境与 cwd 作为 provenance 一并保留（`:170-177`），再合成模型可见文本（`:378-473`）。
+**完整主链。** 会话启动时，`load_project_instructions` 先把账号级与线程级指令放进去，再按 turn 环境逐个收集项目文档。项目根从 `.git` 等标记向上查找，找到后把“根 → cwd”的目录序列反转成正序，逐目录探测候选文件。读取共享一份字节预算，默认 32 KiB（`config/src/config_toml.rs:77,337-342`），每个文件只取剩余额度，超长即截断并告警；来源路径、环境与 cwd 作为 provenance 保留下来，最后合成模型可见文本（`core/src/agents_md.rs:58-116,150-269,378-473`）。
 
 **边界与条件。** 项目被标记为 untrusted 时，只保留账号/线程指令，不读项目文件（`agents_md.rs:64-66`）。文件系统访问走 turn 环境的执行器与沙箱上下文；沙箱下的读取失败会作为错误上报，而不是静默忽略（`:74-111`）。支持自定义候选文件名，但会拒绝路径分隔符、`.`、`..` 等可能越界的值（`:272-296`）。
 
@@ -100,11 +109,11 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 让编辑器、桌面端、脚本和第三方客户端把 Codex 当作长期运行的 Agent 服务：创建/恢复/分叉线程、流式接收事件、处理审批、注入动态工具。
 
-**入口与触发者。** `codex app-server` 启动服务，传输支持 stdio、Unix socket 与 WebSocket（`codex-rs/cli/src/main.rs:571-597`）；`codex app-server daemon` 管理本地常驻进程（`:633-638`），另有隐藏的 `--remote-control`。官方 SDK 位于 `sdk/typescript` 与 `sdk/python`，都是该协议客户端。
+**入口与触发者。** `codex app-server` 启动服务，传输支持 stdio、Unix socket 与 WebSocket；`codex app-server daemon` 管理本地常驻进程，另有隐藏的远程控制开关（`codex-rs/cli/src/main.rs:571-597,633-638`）。官方 SDK 位于 `sdk/typescript` 与 `sdk/python`，都是该协议客户端。
 
 **事实对象与状态。** 协议按 v1/v2 分层，v2 的线程方法覆盖 start、resume、fork、revert、archive、delete、name、metadata、settings、queue、attachment、compact、search 等（`codex-rs/app-server-protocol/src/protocol/common.rs:555-901`）。线程状态由 `ThreadStatus` 表达，包含未加载、空闲、系统错误与“等待审批/等待用户输入”的活动标记（`protocol/v2/thread.rs:1720-1738`）。
 
-**完整主链。** 客户端握手 → `thread/start` 或 `thread/resume`（可只带元数据，再用分页补齐历史）→ 发送 turn → 服务端把工具调用、审批请求、流式增量作为通知/服务端请求推给客户端 → 客户端回传审批决定或动态工具结果 → turn 结束后线程状态回到 idle。历史读取拆成 `thread/turns/list` 与 `thread/items/list`，都用不透明游标分页（`thread.rs:1789-1898`）；`thread/read` 的 `include_turns` 对分页线程已弃用（`:1723-1731`）。
+**完整主链。** 客户端完成握手后调用 `thread/start` 或 `thread/resume` 建立线程，可以只带元数据，历史随后用分页补齐；接着发送 turn，服务端把工具调用、审批请求与流式增量作为通知或服务端请求推给客户端，客户端回传审批决定或动态工具结果，turn 结束后线程状态回到 idle。历史读取拆成 turn 列表与 item 列表两个方法，都以不透明游标分页；原 read 方法的 `include_turns` 参数在分页线程上已弃用（`thread.rs:1723-1731,1789-1898`）。
 
 **持续性与恢复。** 线程正文仍在 rollout，app-server 只是读写与投影层；`thread/resume` 可只加载元数据，历史按需分页（`thread.rs:421-481`）。分叉可在指定 turn 截断（`:544-573`），回退保留线程 ID、切换 rollout 文件（`:1314-1318`）。daemon 与远程控制使同一批线程可被多个客户端共享。
 
@@ -118,11 +127,24 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 在 CI、脚本或其他程序里调用 Codex，拿到可机器解析的事件流与结构化最终结果，并能继续已有会话。
 
-**入口与触发者。** `codex exec`（别名 `e`）由脚本或人工在终端触发（`cli/src/main.rs:152-154`）。核心参数为 `--json`、`--output-last-message/-o`、`--output-schema`、`--ephemeral`、`--skip-git-repo-check`（`exec/src/cli.rs:36-85`）；子命令支持 `resume` 与 `fork`（`:172-182`）。
+**入口与触发者。** `codex exec`（别名 `e`）由脚本或人工在终端触发（`cli/src/main.rs:152-154`）。核心参数有五个：
 
-**完整主链。** 参数解析后加载配置与输出 schema，启动进程内 app-server 客户端，再按新会话、恢复或分叉走对应线程生命周期（`exec/src/lib.rs:1039-1059`）。运行期间事件处理器把内部事件映射为 `ThreadEvent`，逐行写 stdout（`event_processor_with_jsonl_output.rs:89-105`）。事件类型固定为 thread/turn/item 的生命周期与错误（`exec_events.rs:11-37`），item 覆盖命令执行、文件变更、MCP、网页搜索、待办、协作工具等（`:107-133`）。
+- `--json`
+- `--output-last-message`（短名 `-o`）
+- `--output-schema`
+- `--ephemeral`
+- `--skip-git-repo-check`
 
-**结果形态。** `--json` 保证 stdout 每行一个合法 JSON（`exec/src/lib.rs:3`）；`-o` 只在成功 turn 后写入最后一条 Agent 消息，失败不覆盖旧文件（测试 `event_processor_with_jsonl_output_tests.rs:7`）；`--output-schema` 让最终消息成为符合给定 schema 的 JSON 文本（`exec_events.rs:108-110,135-140`）。`--ephemeral` 明确表示不落会话文件（`exec/src/cli.rs:40-42`）。
+子命令支持 `resume` 与 `fork`（`exec/src/cli.rs:36-85,172-182`）。
+
+**完整主链。** 参数解析完成后，入口先加载配置与输出 schema，启动进程内 app-server 客户端，再按新会话、恢复或分叉三种情况进入对应的线程生命周期（`exec/src/lib.rs:1039-1059`）。运行期间事件处理器把内部事件映射为 `ThreadEvent`，逐行写到 stdout（`event_processor_with_jsonl_output.rs:89-105`）。事件类型围绕 thread、turn、item 三层生命周期与错误定义，item 覆盖命令执行、文件变更、MCP、网页搜索、待办、协作工具等（`exec_events.rs:11-37,107-133`）。
+
+**结果形态。** 四个开关决定输出形态：
+
+- `--json`：stdout 每行一个合法 JSON（`exec/src/lib.rs:3`）
+- `-o`：只在成功 turn 后写入最后一条 Agent 消息，失败时保留旧文件（测试 `event_processor_with_jsonl_output_tests.rs:7`）
+- `--output-schema`：让最终消息成为符合给定 schema 的 JSON 文本（`exec_events.rs:108-110,135-140`）
+- `--ephemeral`：本次运行不落会话文件（`exec/src/cli.rs:40-42`）
 
 **边界。** 事件流没有“用户消息”item，不能当作完整会话档案；线程 ID 可用于后续 resume（`exec_events.rs:39-43`）。它也不提供并发队列或多任务编排，调度由外部脚本负责。
 
@@ -134,9 +156,11 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 让模型用一小段 JavaScript 编排多个工具调用（循环、分支、并发、结果变换），而不是逐条发起工具调用。
 
-**入口与触发者。** 模型调用名为 `exec` 的自由格式工具，必要时用 `wait` 续等未完成的 cell（`codex-rs/code-mode-protocol/src/lib.rs:60-61`）。工具只在代码模式开启时装配（`core/src/tools/mod.rs:68-80`）；`code_mode` 特性处于开发阶段且默认关闭（`features/src/lib.rs:1303-1307`），代码模式宿主本身是稳定默认开启（`:1321-1325`）。
+**入口与触发者。** 模型调用名为 `exec` 的自由格式工具执行脚本，脚本没跑完时用 `wait` 续等同一个 cell（`codex-rs/code-mode-protocol/src/lib.rs:60-61`）。这两个工具只在代码模式开启时才装配（`core/src/tools/mod.rs:68-80`）：控制代码模式的特性处于开发阶段且默认关闭，代码模式宿主本身已稳定默认开启（`features/src/lib.rs:1303-1325`）。
 
-**完整主链。** 工具输入是原始 JavaScript，可带一行 `// @exec:` pragma 指定初始产出时间（`core/src/tools/code_mode/execute_spec.rs:5-20` 的 Lark 语法）。脚本在 V8 运行时执行，所有嵌套工具挂在全局 `tools` 对象上（如 `await tools.exec_command(...)`），另有 `text()`、`notify()`、`tool_search()` 等辅助；工具名规范化为 JS 标识符（`code-mode-protocol/src/description.rs:20-43`）。运行到 yield 时限就返回中间结果，模型用 `wait` 继续；cell 有堆、输出与 yield 上限（`code-mode-runtime/src/service.rs:34-35,44-67,257-269`）。
+**完整主链。** 工具输入是一段原始 JavaScript，首行可带一条 `// @exec:` 注释指定初始产出时间，语法用 Lark 定义（`core/src/tools/code_mode/execute_spec.rs:5-20`）。脚本在 V8 运行时里执行，通过全局 tools 对象调用嵌套工具，另有文本输出、通知与工具检索等辅助函数；工具名会被规范化为合法的 JS 标识符（`code-mode-protocol/src/description.rs:20-43`）。
+
+**产出与续等。** 到达 yield 时限后，观察调用先返回中间结果，cell 仍可继续运行；模型用 wait 再次等待同一个 cell（`code-mode-runtime/src/cell_actor/mod.rs:227-250`）。每个 cell 有堆、输出与 yield 上限（`code-mode-runtime/src/service.rs:34-67,257-269`）。
 
 **隔离与并发。** 宿主可作为独立进程运行，通过 stdio/gRPC 与主进程通信（`code-mode-host/src/main.rs`；`code-mode-host/src/grpc_transport.rs`）。嵌套工具调用仍回到主进程的工具路由器，因此审批、沙箱与遥测对每一次子调用生效；代码模式工具不能调用自身（`core/src/tools/code_mode/mod.rs:376`）。
 
@@ -148,9 +172,17 @@ Codex 的产品辨识度不在“会聊天的编码模型”，而在把模型�
 
 **用户目标。** 把任务放到云端环境并行跑多个尝试，再把其中一个 diff 取回本地工作树。
 
-**入口与触发者。** `codex cloud`（别名 `cloud-tasks`）在无子命令时打开任务浏览界面；子命令为 `exec`、`status`、`list`、`apply`、`diff`（`cli/src/main.rs:228-230`；`cloud-tasks/src/cli.rs:15-27`）。用户必须提供环境 ID，可选分支与 1–4 次尝试（`cli.rs:29-50`）。
+**入口与触发者。** `codex cloud`（别名 `cloud-tasks`）不带子命令时打开任务浏览界面，带子命令时执行对应动作（`cli/src/main.rs:228-230`）。可用子命令有五个：
 
-**完整主链。** `exec` 把提示词、环境 ID、分支与 best-of-N 提交到云端，返回任务 ID（`cloud-tasks-client/src/http.rs:336-385`）；`status/list` 读取任务与尝试；`diff` 取统一 diff；`apply` 把指定尝试的 diff 交给 `git apply` 写入本地（`chatgpt/src/apply_command.rs:56-76`）。任务在云端执行，本仓库只承担提交、轮询、展示与应用。
+- `exec`
+- `status`
+- `list`
+- `apply`
+- `diff`
+
+用户必须提供环境 ID，可再指定分支与 1–4 次尝试（`cloud-tasks/src/cli.rs:15-27,29-50`）。
+
+**完整主链。** 提交动作把提示词、环境 ID、分支与 best-of-N 发到云端并返回任务 ID，状态与列表动作读取任务与尝试，diff 动作取回统一 diff，`apply` 动作把指定尝试的 diff 交给 `git apply` 写入本地。提交与轮询的调用在 `cloud-tasks-client/src/http.rs:336-385`，本地应用在 `chatgpt/src/apply_command.rs:56-76`。任务在云端执行，本仓库只承担提交、轮询、展示与应用。
 
 **持续性与边界。** 任务状态与环境定义保存在服务端，仓库内只有环境 ID 参数与 HTTP 客户端；没有本地任务库、环境镜像定义或离线执行路径。`codex apply` 与 `apply_patch` 是两条不同的补丁路径：前者应用云端结果，后者是模型编辑工具。
 

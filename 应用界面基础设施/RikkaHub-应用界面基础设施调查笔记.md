@@ -18,7 +18,7 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 
 主题是其中最集中的一块：明暗模式、动态取色、预置与自定义主题统一在 `RikkahubTheme` 解析，并叠加 AMOLED 纯黑、扩展色板、Expressive 动效与系统栏图标明暗。配色与自定义主题落盘 DataStore，色模式、AMOLED、启动是否新建会话等界面语义开关另走 SharedPreferences，形成两条持久化轨道。
 
-导航是 Navigation 3 的 `NavDisplay` 加一层自研 `Navigator`，返回栈由页面持有的 `MutableList<NavKey>` 表达，`onBack` 直接删栈尾，预测性返回用 `predictivePopTransitionSpec` 声明，页面按需再挂 `BackHandler`。本次静态证据只能确认入口、状态与事件绑定，不能确认手势、焦点、动画与读屏的实际表现。
+导航是 Navigation 3 的 `NavDisplay` 加一层自研 `Navigator`，返回栈由页面持有的 `MutableList<NavKey>` 表达，弹栈即删列表尾，预测性返回用 `predictivePopTransitionSpec` 声明，页面按需再挂 `BackHandler`。本次静态证据只能确认入口、状态与事件绑定，不能确认手势、焦点、动画与读屏的实际表现。
 
 ## 系统边界与总体装配
 
@@ -33,7 +33,7 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 
 ## 1. 界面栈、公共组件与状态所有权
 
-界面代码集中在 `ui/` 下，按职责分为 `theme`、`components`、`context`、`hooks`、`modifier`、`pages` 六块。技术栈为 Kotlin + Compose BOM `2026.09.00`、Material3 `1.5.0-alpha28`、Navigation 3、Compose Material3 Adaptive，最低 API 26、目标与编译 API 37（`gradle/libs.versions.toml`、`app/build.gradle.kts`）；构建时对 Material3、Expressive、Adaptive 与 Navigation3 的实验性 API 统一 opt-in。
+界面代码集中在 `ui/` 目录下，按职责分成六个子目录，分别负责主题、公共组件、CompositionLocal 上下文、hooks、modifier 与页面。技术栈是 Kotlin 加 Compose，采用 Compose BOM 2026.09.00、Material3 1.5.0-alpha28、Navigation 3 与 Compose Material3 Adaptive，最低 API 26，目标与编译 API 37（`gradle/libs.versions.toml`、`app/build.gradle.kts`）；构建时对 Material3、Expressive、Adaptive 与 Navigation3 的实验性 API 统一 opt-in。
 
 `components` 下有十个公共子目录，跨页面复用的 UI 件按用途归为几类：
 
@@ -46,63 +46,70 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 | 系统能力 | `ui/permission/PermissionManager.kt`、`ui/TTSController.kt`、`ui/KeepScreenOn.kt`、`ui/QRCode.kt` |
 | 标识 | `ui/AIIcon.kt`、`ui/UIAvatar.kt`、`ui/Favicon.kt`、`ui/icons/` |
 
-状态所有权分成三层。需持久化的用户偏好由 `SettingsStore` 持有：它把 `Settings` 整体序列化进名为 `settings` 的 Preference DataStore，挂载 V1–V3 迁移，并以常量集中声明 UI、模型、提供商、助手、MCP、备份等键（`app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt`）。界面用 `rememberUserSettingsState()` 把该流读成 Compose State，并以 `Settings.dummy()` 作初始值避免回写（`ui/hooks/Settings.kt`、`PreferencesStore.kt`）。页面级临时状态由各 ViewModel 或 `remember` 持有，聊天页的抽屉开合、预览模式与附件面板开关即属此类，其页面内表现见 [Chat UI 调查笔记](../Chat%20UI/RikkaHub-ChatUI调查笔记.md)与[会话与消息管理调查笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
+状态所有权分成三层。需持久化的用户偏好由设置存储 SettingsStore 持有：它把整个 Settings 对象序列化进名为 settings 的 Preference DataStore，带 V1–V3 迁移，并用常量集中声明界面、模型、提供商、助手、MCP 与备份等键（`app/src/main/java/me/rerere/rikkahub/data/datastore/PreferencesStore.kt`）。界面侧通过 `rememberUserSettingsState()` 把这条流读成 Compose State，初始值用 Settings.dummy() 以避免回写（`ui/hooks/Settings.kt`）。页面级临时状态归各 ViewModel 或 remember 所有，聊天页的抽屉开合、预览模式与附件面板开关都属此类，其页面内表现见 [Chat UI 调查笔记](../Chat%20UI/RikkaHub-ChatUI调查笔记.md)与[会话与消息管理调查笔记](../会话与消息管理/RikkaHub-会话与消息管理调查笔记.md)。
 
 跨页面传递的公共对象用 CompositionLocal 而不是全局单例，共有五组在路由根一次性提供：
 
-- `LocalNavController`：`Navigator`，包装返回栈与 popUpTo/singleTop 选项（`ui/context/NavContext.kt`）。
-- `LocalSettings`：当前设置快照，静态类型（`ui/context/LocalSettings.kt`）。
-- `LocalToaster`：Sonner 的 Toast 队列状态（`ui/context/ToasterContext.kt`）。
-- `LocalSharedTransitionScope`：共享元素作用域，配 `Modifier.heroAnimation(key)` 供跨页共享元素动画使用（`ui/context/SharedElement.kt`、`ui/hooks/HeroAnimation.kt`）。
-- `LocalTTSState` / `LocalASRState`：朗读与识别的会话状态。
+- 页面通过 `LocalNavController` 拿到自研的 Navigator，返回栈由它管理，入栈时可选用 popUpTo 与 singleTop 两种选项（`ui/context/NavContext.kt`）。
+- 当前设置快照由 `LocalSettings` 下发，类型在编译期固定（`ui/context/LocalSettings.kt`）。
+- Toast 队列状态由 `LocalToaster` 下发，承载的是 Sonner 的提示队列（`ui/context/ToasterContext.kt`）。
+- 跨页共享元素动画所需的作用域由 `LocalSharedTransitionScope` 提供，配合 Modifier.heroAnimation(key) 使用（`ui/context/SharedElement.kt`、`ui/hooks/HeroAnimation.kt`）。
+- 朗读与识别的会话状态分别由 `LocalTTSState` 与 `LocalASRState` 下发。
 
 这五组在 `AppRoutes` 的一处 `CompositionLocalProvider` 内注入，位于 `SharedTransitionLayout` 之内、`NavDisplay` 之外（`RouteActivity.kt`）：导航与弹层页面都能读取，共享元素动画只在布局作用域内可用。
 
 ## 2. 弹窗、浮层与菜单
 
-本仓库没有集中式 Overlay Host。`app/src/main/java` 下共有 49 处 `ModalBottomSheet(` 调用点，分布在设置、助手、模型、搜索、聊天、备份等近三十个文件中，未统一封装（检索范围 `app/src/main/java`，模式 `ModalBottomSheet\(`）。浮层顺序因此就是 Compose 组合顺序，无全局层级常量或 Portal；`RouteActivity` 只额外保证开发模式角标与迁移遮罩压在 `NavDisplay` 之上。
+本仓库没有集中式 Overlay Host。`app/src/main/java` 下共有 49 处 ModalBottomSheet 调用点，分布在设置、助手、模型、搜索、聊天、备份等近三十个文件中，未统一封装（检索模式 `ModalBottomSheet\(`）。浮层顺序因此就是 Compose 组合顺序，无全局层级常量或 Portal；`RouteActivity` 只额外保证开发模式角标与迁移遮罩压在 `NavDisplay` 之上。
 
 底部表存在一个重复约定：需要完全隐藏而非半开的 Sheet 会显式限制取值集合，如分享表与更新详情表只允许隐藏与展开两态（`ui/components/ui/ShareSheet.kt`、`ui/components/ui/UpdateCard.kt`）；多数选择器类 Sheet 直接用默认三态的 `rememberModalBottomSheetState`。这说明弹一层还是可选高度由调用点自定，没有统一策略。
 
-对话框分三种来源：通用确认框 `RikkaConfirmDialog` 是 Material3 `AlertDialog` 加标题、正文插槽与两个 `TextButton`，`show` 为假时不进入组合（`ui/components/ui/ConfirmDialog.kt`）；业务一次性对话框直接用 `AlertDialog`，如设置页赞助提示与主题页导入删除确认（`ui/pages/setting/SettingPage.kt`）；菜单类浮层由 `Select` 与 `SelectTextField` 提供，后者注释说明为规避菜单接近窗口高度时的坐标约束异常而改用普通 `DropdownMenu` 并限制最大高度，同时把只读态处理为整块可点且不抢焦点（`ui/components/ui/Select.kt`）。注释与实现一致，属代码内已声明的取舍。
+对话框有三种来源。通用确认框由 `RikkaConfirmDialog` 提供，它把 Material3 的 AlertDialog 加上标题、正文插槽与两个文本按钮，show 参数为假时不进入组合（`ui/components/ui/ConfirmDialog.kt`）。业务上的一次性对话框直接调用 AlertDialog，例如设置页的赞助提示与主题页的导入删除确认（`ui/pages/setting/SettingPage.kt`）。菜单类浮层由 Select 与 SelectTextField 组件承担，后者的注释说明为规避菜单接近窗口高度时的坐标约束异常，改用普通 DropdownMenu 并限制最大高度，同时把只读态处理为整块可点且不抢焦点（`ui/components/ui/Select.kt`）。注释与实现一致，属代码内已声明的取舍。
 
 图片预览走窗口对话框：`ImagePreviewDialog` 用 Compose `Dialog`，关闭点击穿透并把 `usePlatformDefaultWidth` 置空以占满窗口，内部用第三方缩放分页器承载多图并保留保存按钮（`ui/components/ui/ImagePreviewDialog.kt`）；遮罩关闭与 Esc 交由平台 `Dialog`。
 
-系统悬浮窗由 `FloatingWindow` 提供：基于 `petterpx` 的 FloatingX 安装到 Application 上下文，带淡入与 `BOTTOM_START` 锚点，`DisposableEffect` 卸载时取消，内容独立包一层 `RikkahubTheme`（`ui/components/ui/FloatingWindow.kt`）。它不复用主窗口的导航与 Toast，只复用主题；主题内部因此对嵌套做了还原——更新系统栏图标外观前记录旧值、`onDispose` 写回（`ui/theme/Theme.kt`）。
+系统悬浮窗由 `FloatingWindow` 提供：基于 FloatingX 安装到 Application 上下文，带淡入与底部起始锚点，卸载时自动取消，内容独立包一层 `RikkahubTheme`（`ui/components/ui/FloatingWindow.kt`）。它不复用主窗口的导航与 Toast，只复用主题；主题内部因此对嵌套做了还原——更新系统栏图标外观前记录旧值，卸载时写回（`ui/theme/Theme.kt`）。
 
-返回门禁分层：`NavDisplay` 收到返回即移除栈尾（`RouteActivity.kt`），页面按需用 `BackHandler` 抢占，例如聊天抽屉、WebView 可后退、工作区第三级回退、图像生成中或选区时拦截；这些拦截属页面行为，入口见 [Chat UI 调查笔记](../Chat%20UI/RikkaHub-ChatUI调查笔记.md)、[媒体创作调查笔记](../媒体创作/RikkaHub-媒体创作调查笔记.md)与[外部执行体与应用协作调查笔记](../外部执行体与应用协作/RikkaHub-外部执行体与应用协作调查笔记.md)。预测性返回没有独立状态机，而是在 `NavDisplay` 上声明与 pop 相同的 `predictivePopTransitionSpec`（`RouteActivity.kt`），配合清单 `enableOnBackInvokedCallback`（`AndroidManifest.xml`）。
+返回门禁分层：`NavDisplay` 收到返回即移除栈尾，页面按需再挂返回拦截，例如聊天抽屉、WebView 可后退、工作区第三级回退、图像生成中或选区时拦截；这些拦截属页面行为，入口见 [Chat UI 调查笔记](../Chat%20UI/RikkaHub-ChatUI调查笔记.md)、[媒体创作调查笔记](../媒体创作/RikkaHub-媒体创作调查笔记.md)与[外部执行体与应用协作调查笔记](../外部执行体与应用协作/RikkaHub-外部执行体与应用协作调查笔记.md)。预测性返回不设独立状态机，直接沿用 pop 的过渡规格，在导航宿主上声明 `predictivePopTransitionSpec`，并配合清单的 `enableOnBackInvokedCallback`（`RouteActivity.kt`、`AndroidManifest.xml`）。
 
 ## 3. 通知、加载态与错误反馈
 
-应用内反馈只有一条通道：Sonner（`io.github.dokar3:sonner 0.4.0`）的 `Toaster`，在路由根挂一份，顶部居中、启用富色彩与关闭按钮、明暗跟随 `LocalDarkMode`（`RouteActivity.kt`）。业务通过 `LocalToaster` 调用 `show`，如聊天页未选模型、更新卡片开始下载（`ui/pages/chat/ChatPage.kt`、`ui/components/ui/UpdateCard.kt`）。仓库没有自研 Toast 队列、历史或去重；堆叠、更新与消失时长由 Sonner 决定，本次未下钻该依赖实现，只能标为未核实。少数位置用 Android 原生 `Toast`，集中在启动阶段的恢复失败提示（`RikkaHubApp.kt`）。
+应用内反馈只有一条通道：Sonner（`io.github.dokar3:sonner 0.4.0`）的 Toaster，在路由根挂一份，顶部居中、启用富色彩与关闭按钮，明暗跟随当前深色状态（`RouteActivity.kt`）。业务侧经同一 CompositionLocal 取用，例如聊天页未选模型、更新卡片开始下载（`ui/pages/chat/ChatPage.kt`、`ui/components/ui/UpdateCard.kt`）。仓库没有自研 Toast 队列、历史或去重；堆叠、更新与消失时长由 Sonner 决定，本次未下钻该依赖实现，只能标为未核实。少数位置仍用 Android 原生 Toast，集中在启动阶段的恢复失败提示（`RikkaHubApp.kt`）。
 
-系统通知是另一套设施。三个渠道在 Application 创建：聊天完成（高优先级、震动）、聊天实时更新（低优先级）、Web 服务器（低优先级、不显示角标），常量集中在 Application 文件顶部（`RikkaHubApp.kt`、`:212-241`）。发送统一走 `NotificationUtil`：权限未授予时直接返回失败而不抛错，DSL 暴露持续通知、仅提示一次、大文本样式、可见性与 `PendingIntent`；Android 15 及以上提升为持续通知，Android 16 及以上设置状态栏短文本（`utils/NotificationUtil.kt`）。业务事件由聊天生成前台服务与 `ChatNotificationManager` 消费，见[生成式输出与运行时调查笔记](../生成式输出与运行时/RikkaHub-生成式输出与运行时调查笔记.md)。
+系统通知是另一套设施。三个渠道在 Application 创建：聊天完成（高优先级、震动）、聊天实时更新（低优先级）、Web 服务器（低优先级、不显示角标），常量集中在 Application 文件顶部（`RikkaHubApp.kt:212-241`）。发送统一走 `NotificationUtil`：权限未授予时直接返回失败而不抛错，DSL 暴露持续通知、仅提示一次、大文本样式、可见性与 `PendingIntent`；Android 15 及以上提升为持续通知，Android 16 及以上设置状态栏短文本（`utils/NotificationUtil.kt`）。业务事件由聊天生成前台服务与 `ChatNotificationManager` 消费，见[生成式输出与运行时调查笔记](../生成式输出与运行时/RikkaHub-生成式输出与运行时调查笔记.md)。
 
-加载与错误态没有统一封装。轻量等待用 `DotLoading` 或 `RabbitLoadingIndicator`，后者按显示设置二选一：开启时用应用图标形状的 AnimatedVectorDrawable 并着色主题主色，关闭时退回 Material3 的 `ContainedLoadingIndicator`（`ui/components/ui/DotLoading.kt`、`ui/components/ui/RabbitLoading.kt`）；骨架由 `modifier/Shimmer.kt` 提供；错误态由 `ErrorCard` 承担，支持复制与逐条或全部关闭（`ui/components/ui/ErrorCard.kt`）。数据库迁移用全屏遮罩而非弹窗：状态来自 `DatabaseMigrationTracker`，迁移中在 `NavDisplay` 上叠加半透明表面、进度环与版本号（`RouteActivity.kt`）。另有更新提示卡与备份提醒卡两类页面级卡片（`ui/components/ui/UpdateCard.kt`）。本次未在 `ui/components` 找到通用空状态组件，空列表提示由各页面自行组织（检索范围 `app/src/main/java/me/rerere/rikkahub/ui/components`，未见 Empty/Placeholder 类公共件）。
+加载与错误态没有统一封装，相关能力由下列公共组件分别承担：
+
+- 轻量等待：DotLoading 或 RabbitLoadingIndicator，后者按显示设置二选一，开启时用应用图标形状的 AnimatedVectorDrawable 并着色主题主色，关闭时退回 Material3 的 ContainedLoadingIndicator（`ui/components/ui/DotLoading.kt`、`ui/components/ui/RabbitLoading.kt`）。
+- 骨架屏：由 `modifier/Shimmer.kt` 提供。
+- 错误态：ErrorCard 承担，支持复制与逐条或全部关闭（`ui/components/ui/ErrorCard.kt`）。
+- 迁移遮罩：数据库迁移用全屏遮罩代替弹窗，状态来自 DatabaseMigrationTracker，迁移期间在 NavDisplay 上叠加半透明表面、进度环与版本号（`RouteActivity.kt`）。
+- 页面级卡片：更新提示卡与备份提醒卡两类（`ui/components/ui/UpdateCard.kt`）。
+- 空状态：本次未在 `ui/components` 下找到通用空状态组件，空列表提示由各页面自行组织（检索范围 `app/src/main/java/me/rerere/rikkahub/ui/components`，未见 Empty/Placeholder 类公共件）。
 
 ## 4. 主题、视觉 token 与持久化
 
 主题解析集中在 `RikkahubTheme`：输入色模式与设置快照，输出 Material3 配色、排版、动效与三组 CompositionLocal（`ui/theme/Theme.kt`）。判定顺序：
 
-1. 色模式折算为是否深色：跟随系统读系统状态，否则按显式选择。
-2. 开启动态取色且 Android 12 及以上用系统动态明暗配色；否则按主题 ID 在预置与自定义主题中查找，找不到回退樱色预置（`Theme.kt`、`ui/theme/PresetTheme.kt`）。
-3. 深色且启用 AMOLED 时把背景与表面覆盖为 `#000000`（`Theme.kt`、`:68-77`）。
-4. 由 `MaterialExpressiveTheme` 下发，动效固定 expressive，并提供扩展色板与深色标记，把 overscroll 工厂置空以关闭拉伸反馈（`Theme.kt`）。
-5. 系统栏图标明暗跟随深色，嵌套主题退出时还原（`Theme.kt`）。
+1. 色模式先折算成是否深色：跟随系统时读取系统当前状态，显式选择时按用户选定的模式。
+2. 开启动态取色且系统为 Android 12 及以上时用系统给出的明暗配色；否则按主题 ID 在预置与自定义主题中查找，查不到就回退到樱色预置（`ui/theme/PresetTheme.kt`）。
+3. 深色且启用 AMOLED 时，背景与表面被覆盖为 `#000000`（`ui/theme/Theme.kt:68-77`）。
+4. 由 MaterialExpressiveTheme 统一下发，动效固定为 expressive，附带扩展色板与深色标记，并把 overscroll 工厂置空以关闭拉伸反馈。
+5. 系统栏图标的明暗跟随深色，嵌套主题退出时把原值写回。
 
-主题权威源是 `Settings` 中的动态取色开关、主题 ID 与自定义主题列表，落 DataStore 的 `dynamic_color`、`theme_id`、`custom_themes` 三键（`PreferencesStore.kt`）。**色模式本身不在 DataStore**，而是 SharedPreferences 的 `colorMode` 字符串，另有 `amoledDark` 布尔，二者由 `ui/hooks/ColorMode.kt` 封装为可写 State（`ui/hooks/ColorMode.kt`）；启动时首屏是否新建会话也走同一份 SharedPreferences（`RouteActivity.kt`）。因此持久化跨两套存储：配色与自定义主题在 DataStore，模式开关在 SharedPreferences。
+主题的权威源是 `Settings` 中的动态取色开关、主题 ID 与自定义主题列表，分别落到 DataStore 的 dynamic_color、theme_id、custom_themes 三个键（`PreferencesStore.kt`）。色模式另存在 SharedPreferences 的 colorMode 字符串里，AMOLED 开关是同一份存储中的 amoledDark 布尔值，二者由 `ui/hooks/ColorMode.kt` 封装成可写 State；启动时首屏是否新建会话也读这份 SharedPreferences（`RouteActivity.kt`）。持久化因此跨两套存储：配色与自定义主题在 DataStore，模式开关在 SharedPreferences。
 
-预置主题七个（樱、海、春、秋、黑、极简、Claude），各提供明暗两份 `ColorScheme`，由惰性列表注册；自定义主题由主色（可选副色、第三色）经 HCT 与 Tonal Spot 变体生成完整配色，计算在 `material3` 模块完成（`ui/theme/PresetTheme.kt`、`ui/theme/CustomTheme.kt`、`material3/src/main/java/me/rerere/material3/DynamicSchemeExt.kt`）。该模块是独立 Gradle library，源码并入 `material-color-utilities` 的 Kotlin 实现，只暴露把 `DynamicScheme` 映射为 Compose `ColorScheme` 的扩展（`material3/build.gradle.kts`），在应用里是配色生成工具，不提供组件。
+预置主题共七个，分别是樱、海、春、秋、黑、极简与 Claude，每个都提供明暗两份配色，由一份惰性列表注册；自定义主题只给主色（可选副色、第三色），经 HCT 与 Tonal Spot 变体算出完整配色，计算放在 `material3` 模块（`ui/theme/PresetTheme.kt`、`ui/theme/CustomTheme.kt`、`material3/src/main/java/me/rerere/material3/DynamicSchemeExt.kt`）。该模块是独立的 Gradle library，源码并入 material-color-utilities 的 Kotlin 实现，对外只暴露把 DynamicScheme 映射为 Compose ColorScheme 的扩展（`material3/build.gradle.kts`），在应用里只承担配色生成，不含组件。
 
-另有补充 token。`ExtendColors` 是红、橙、绿、蓝、灰各十级的固定色阶，明暗各一份，经 `LocalExtendColors` 暴露为 `MaterialTheme.extendColors`（`ui/theme/Color.kt`、`Theme.kt`）。`CustomColors` 是取色自当前配色的语义快捷方式：顶栏容器色浅色取 `surfaceContainer`、深色用 Material3 默认，卡片与列表项分别取 `surfaceContainer` 与 `surfaceBright`（`Color.kt`）。其内部可变 `black` 字段本次未找到写入点。这些 token 被设置页、抽屉与各列表页直接引用，构成统一外观基线。
+另有补充 token，定义在配色文件 `ui/theme/Color.kt` 与主题入口 `Theme.kt` 中。`ExtendColors` 提供红、橙、绿、蓝、灰五色各十级的固定色阶，明暗各一份，经 `LocalExtendColors` 暴露成 MaterialTheme.extendColors 供页面读取。`CustomColors` 是取当前配色的语义快捷方式：顶栏容器色浅色取 surfaceContainer、深色用 Material3 默认，卡片与列表项分别取 surfaceContainer 与 surfaceBright。它内部的 black 可变字段本次未找到写入点。这些 token 被设置页、抽屉与各列表页直接引用，构成统一外观基线。
 
-排版沿用 Material3 默认，`Typography` 就是 `Typography()`（`ui/theme/Type.kt`）。仓库保留完整 Google Sans Flex 字体族与可变圆形轴工具，并在排版文件以注释给出逐级替换方案，但当前无生效引用（`ui/theme/GoogleSans.kt`、`Type.kt`）；实际使用的是 JetBrains Mono，用于代码块、日志、JSON 与终端（`Type.kt`）。会话正文字体族（默认、衬线、等宽、自定义文件）经 `ChatFontProvider` 以 CompositionLocal 下发，自定义文件从应用私有目录加载并做路径前缀校验，字号比例在渲染点乘以本地值（`ui/theme/ChatFont.kt`、`PreferencesStore.kt`）；字号落点属消息渲染，见[消息渲染器调查笔记](../消息渲染器/RikkaHub-消息渲染器调查笔记.md)。
+排版沿用 Material3 默认，代码里直接使用 Typography 的默认构造（`ui/theme/Type.kt`）。仓库保留了完整的 Google Sans Flex 字体族与可变圆形轴工具，排版文件里也用注释给出逐级替换方案，当前没有生效引用（`ui/theme/GoogleSans.kt`）；实际使用的是 JetBrains Mono，用于代码块、日志、JSON 与终端。会话正文字体族（默认、衬线、等宽、自定义文件）由 `ChatFontProvider` 通过 CompositionLocal 下发，自定义字体从应用私有目录加载并做路径前缀校验，字号比例在渲染点乘上本地值（`ui/theme/ChatFont.kt`、`PreferencesStore.kt`）；字号落点属消息渲染，见[消息渲染器调查笔记](../消息渲染器/RikkaHub-消息渲染器调查笔记.md)。
 
 ## 5. 响应式、移动端与窗口适配
 
-适配策略是单窗口内的抽屉切换，未使用 `ListDetailPaneScaffold` 或 `NavigationSuiteScaffold`。聊天页读窗口尺寸，横向且宽度不小于 1100dp 判定为大屏，走 `PermanentNavigationDrawer`，否则走 `ModalNavigationDrawer` 并挂返回键关抽屉（`ui/pages/chat/ChatPage.kt`、`:191-259`）；注释说明进入大屏会主动关闭残留模态抽屉，以免旋转后卡在打开态，与 `LaunchedEffect(isBigScreen)` 实现一致。
+适配策略是在单窗口内切换抽屉，Adaptive 提供的两种多窗格骨架（ListDetailPaneScaffold 与 NavigationSuiteScaffold）都未采用。聊天页读取窗口尺寸，横向且宽度不小于 1100dp 时判定为大屏，使用 PermanentNavigationDrawer，其余情况用 ModalNavigationDrawer 并挂返回键用于关抽屉（`ui/pages/chat/ChatPage.kt:191-259`）；注释说明进入大屏时会主动关闭残留的模态抽屉，避免旋转后卡在打开态，与 LaunchedEffect(isBigScreen) 的实现一致。
 
-窗口与系统栏按 edge-to-edge：Activity 开启 edge-to-edge、取消导航栏对比保护（`RouteActivity.kt`、`:200-204`），清单把软键盘设为 `adjustResize` 并声明键盘隐藏、方向与屏幕尺寸变化由应用处理、不重建 Activity（`AndroidManifest.xml`）。内容缩进由各页 `Scaffold` 与 `WindowInsets` 承担；聊天列表另有 IME 高度驱动的自动滚动，监听 IME 底部内边距变化并按差值滚动，让输入区抬起时消息跟手（`ui/hooks/ImeAutoScroller.kt`）。
+窗口与系统栏按 edge-to-edge：Activity 开启 edge-to-edge、取消导航栏对比保护（`RouteActivity.kt:200-204`），清单把软键盘设为 `adjustResize` 并声明键盘隐藏、方向与屏幕尺寸变化由应用处理、不重建 Activity（`AndroidManifest.xml`）。内容缩进由各页 Scaffold 与 WindowInsets 承担；聊天列表另有 IME 高度驱动的自动滚动，监听 IME 底部内边距变化并按差值滚动，让输入区抬起时消息跟手（`ui/hooks/ImeAutoScroller.kt`）。
 
 没有独立的手机与平板入口，也没有多窗口或桌面布局；安全模式 Activity 与系统悬浮窗是仅有的第二界面，均不参与响应式分支。1100dp 判定线与语音模式的取舍属页面布局，见 [Chat UI 调查笔记](../Chat%20UI/RikkaHub-ChatUI调查笔记.md)。
 
@@ -120,9 +127,19 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 
 ### 7.1 国际化与本地化资源组织
 
-字符串资源按 Android 标准目录：默认 `values` 为英文，另有 `values-ja`、`values-ko-rKR`、`values-ru`、`values-zh`（简体）、`values-zh-rTW`（繁体），`app/src/main/res/resources.properties` 把无修饰资源声明为 en-US。默认语言约 1383 条、简体约 1377 条，简体与繁体文件大小几乎一致，说明独立维护而非复制；功能模块可各自维护翻译，`search` 模块即带一套同语言 `strings.xml`。写作约定要求页面级字符串带页面前缀（如 `setting_page_`），抽查设置页确实遵循。
+字符串资源按 Android 标准目录组织：默认 `values` 放英文，`app/src/main/res/resources.properties` 把无修饰资源声明为 en-US，其余语言各占一个限定符目录。
 
-运行时没有应用内语言切换：本次未找到 `setApplicationLocales`、`LocaleManager` 或 `localeConfig` 声明（检索范围 `app/src/main/java`；`AndroidManifest.xml`），界面语言完全跟随系统。界面里的语言选择器只服务翻译的目标语言，候选项在翻译页硬编码九种（`ui/pages/translator/TranslatorPage.kt`）。日期与数字格式化统一用 `java.util.Locale.getDefault()`（`utils/TimeUtil.kt`）；语言作为模板变量注入提示词属业务语义，不在界面机制范围。
+| 目录 | 语言 |
+|---|---|
+| `values-ja` | 日文 |
+| `values-ko-rKR` | 韩文 |
+| `values-ru` | 俄文 |
+| `values-zh` | 简体中文 |
+| `values-zh-rTW` | 繁体中文 |
+
+默认语言约 1383 条，简体约 1377 条；简体与繁体两份文件大小几乎一致，说明两份翻译各自独立维护。功能模块可以各自维护翻译，`search` 模块就带一套同语言的 strings.xml。写作约定要求页面级字符串带页面前缀（如 `setting_page_`），抽查设置页确实遵循。
+
+运行时没有应用内语言切换：本次未找到应用内语言 API（setApplicationLocales 与 LocaleManager 均无结果），清单也没有 `localeConfig` 声明（检索范围 `app/src/main/java`、`AndroidManifest.xml`），界面语言完全跟随系统。界面里的语言选择器只服务翻译的目标语言，候选项在翻译页硬编码九种（`ui/pages/translator/TranslatorPage.kt`）。日期与数字格式化统一取系统默认 Locale（`utils/TimeUtil.kt`）；语言作为模板变量注入提示词属业务语义，不在界面机制范围。
 
 清单开启 `supportsRtl`（`AndroidManifest.xml`），公共扩展用 `LocalLayoutDirection` 做方向相关的内边距计算（`utils/ComposeExt.kt`），说明存在 RTL 适配入口；但本次没有 RTL 资源目录，也没有运行验证。
 
@@ -134,21 +151,21 @@ RikkaHub 是单 Activity 的原生 Android 应用，界面全部由 Jetpack Comp
 
 设置页是两级结构。首屏 `SettingPage` 用 `CardGroup` 分组，放通用设置、偏好入口、助手、扩展等，并内联未配置提供商警告卡与启动次数达到后的赞助提示；偏好二级页 `SettingPreferencesPage` 并列五个子页入口：主题、通知、通用、界面、网络，各子页再各自组织表单。媒体 Provider、语音等能力各有独立的设置页与详情页，从首屏或偏好页进入（`ui/pages/setting/SettingMediaPage.kt`、`SettingMediaProviderDetailPage.kt`、`SettingSpeechPage.kt`）。
 
-作用域表达扁平：全局设置放 `Settings`，界面显示项放 `DisplaySetting`（约三十字段，覆盖头像昵称、气泡与模型信息展示、字体字号、代码块、TTS 自动播放、回车发送、模糊效果与音量键滚动等），助手级设置在 `Settings.assistants` 内按助手 ID 隔离，模型与提供商在 `Settings.providers` 内（`PreferencesStore.kt`）。页面统一由 ViewModel 暴露设置流、`collectAsStateWithLifecycle` 后整体 `copy` 回写，需要局部更新时先取当前助手再替换列表元素。没有设置检索、迁移提示或 onboarding 框架，唯一接近首次引导的是未配置提供商的警告卡。
+作用域表达扁平：全局设置放 `Settings`，界面显示项放 `DisplaySetting`（约三十字段，覆盖头像昵称、气泡与模型信息展示、字体字号、代码块、TTS 自动播放、回车发送、模糊效果与音量键滚动等），助手级设置按助手 ID 隔离在设置对象的助手列表内，模型与提供商同样按列表存放（`PreferencesStore.kt`）。页面统一由 ViewModel 暴露设置流，生命周期感知地收集后整体复制回写，需要局部更新时先取当前助手再替换列表元素。没有设置检索、迁移提示或 onboarding 框架，唯一接近首次引导的是未配置提供商的警告卡。
 
-统一分组外观由 `CardGroup` 的 DSL 提供：调用方声明若干 `item`（可带图标、支撑文本、尾部内容与点击），组件按首项、中间项、末项与按压态动画出不同圆角，把一组 `ListItem` 拼成连续卡片（`ui/components/ui/CardGroup.kt`）。设置页统一用 `LargeFlexibleTopAppBar` 配 `exitUntilCollapsedScrollBehavior` 与 `CustomColors.topBarColors`，返回按钮复用 `components/nav/BackButton`（`ui/components/nav/BackButton.kt`）。
+统一的分组外观由 `CardGroup` 的 DSL 提供：调用方声明若干 item，每项可带图标、支撑文本、尾部内容与点击回调，组件再按首项、中间项、末项与按压态动画出不同圆角，把一组列表项拼成一张连续卡片（`ui/components/ui/CardGroup.kt`）。设置页统一使用 LargeFlexibleTopAppBar，滚动行为取 exitUntilCollapsedScrollBehavior，顶栏配色走 CustomColors.topBarColors，返回按钮复用公共的 components/nav/BackButton（`ui/components/nav/BackButton.kt`）。
 
 ### 7.3 图标、字体与资源管理
 
-图标走两套图标库加自研：`hugeicons-compose`（`HugeIcons.ArrowLeft01` 这类属性访问）为主，`lucide` 补充，自研图标与一批 AI 提供商图标集中在公共 `ui` 模块的 `icons` 包（`ui/src/main/java/me/rerere/ui/icons/`、`app/src/main/java/me/rerere/rikkahub/ui/components/ui/AIIcon.kt`）。其无障碍处理不统一：多数用 `stringResource` 给出名称，少数硬编码英文或置空，见无障碍一节。
+图标走两套图标库加自研：`hugeicons-compose` 为主（按属性名取图标），`lucide` 补充，自研图标与一批 AI 提供商图标集中在公共 ui 模块的 icons 包（`ui/src/main/java/me/rerere/ui/icons/`、`app/src/main/java/me/rerere/rikkahub/ui/components/ui/AIIcon.kt`）。其无障碍处理不统一：多数用字符串资源给出名称，少数硬编码英文或置空，见无障碍一节。
 
-字体文件只有 Google Sans Flex 与 JetBrains Mono，前者仅被未启用的排版方案引用，后者用于代码与日志（`ui/theme/GoogleSans.kt`、`Type.kt`）。`drawable` 下只有十余个位图/矢量件，`mipmap-anydpi-v26` 提供自适应图标，加载动画的兔子是 AnimatedVectorDrawable（`ui/components/ui/RabbitLoading.kt`）；清单层资源包括备份/数据提取规则、`FileProvider` 路径与注册“拍照”“翻译”的静态快捷方式（`app/src/main/res/xml/shortcuts.xml`、`AndroidManifest.xml`）。
+字体文件只有 Google Sans Flex 与 JetBrains Mono，前者仅被未启用的排版方案引用，后者用于代码与日志（`ui/theme/GoogleSans.kt`、`Type.kt`）。drawable 下只有十余个位图/矢量件，mipmap-anydpi-v26 提供自适应图标，加载动画的兔子是 AnimatedVectorDrawable（`ui/components/ui/RabbitLoading.kt`）；清单层资源包括备份/数据提取规则、FileProvider 路径与注册“拍照”“翻译”的静态快捷方式（`app/src/main/res/xml/shortcuts.xml`、`AndroidManifest.xml`）。
 
 ### 7.4 无障碍与键盘支持
 
-可访问名称的覆盖是部分的（公共组件迁入 `ui` 模块后，部分 `contentDescription` 改为从调用方传入）。全应用大量使用 `contentDescription`，多数走字符串资源，但存在硬编码英文（消息分支 Prev/Next、WebView 的 Refresh/Forward/More options、网络指标的 Input/Output/Speed/Duration、下拉件 expand）与大量置空（装饰性及重名图标）。本次未找到应用级语义封装、自定义语义动作或状态描述（检索 `semantics {`、`stateDescription`、`clearAndSetSemantics`，除根节点外无结果）。根节点唯一设置的是把 Compose 测试标签暴露为资源 ID，属 UI 测试而非读屏（`RouteActivity.kt`）。
+可访问名称的覆盖是部分的（公共组件迁入 ui 模块后，部分 `contentDescription` 改为从调用方传入）。全应用大量使用该属性，多数走字符串资源，但存在硬编码英文（消息分支 Prev/Next、WebView 的 Refresh/Forward/More options、网络指标的 Input/Output/Speed/Duration、下拉件 expand）与大量置空（装饰性及重名图标）。本次未找到应用级语义封装、自定义语义动作或状态描述（检索 `semantics {`、`stateDescription`、`clearAndSetSemantics`，除根节点外无结果）。根节点唯一设置的是把 Compose 测试标签暴露为资源 ID，该设置服务 UI 测试（`RouteActivity.kt`）。
 
-键盘支持限于音量键与系统返回，没有通用快捷键：Activity 覆写 `dispatchKeyEvent`，维护“最后注册优先”的音量键监听器列表，音量上下键可被业务消费（聊天页据此实现音量键滚动，开关与步进在 `DisplaySetting`），其余交回系统（`RouteActivity.kt`、`PreferencesStore.kt`）。未找到 `onKeyEvent` 或自研焦点请求器，仅搜索页用一个 `FocusRequester` 自动聚焦搜索框（`ui/pages/search/SearchPage.kt`）。对话框与底部表的焦点陷阱、Esc、触摸关闭来自 Material3 与平台 `Dialog`，本次未阅读依赖实现也未运行验证。
+键盘支持限于音量键与系统返回，没有通用快捷键：Activity 覆写 `dispatchKeyEvent`，维护“最后注册优先”的音量键监听器列表，音量上下键可被业务消费（聊天页据此实现音量键滚动，开关与步进在显示设置里），其余交回系统（`RouteActivity.kt`、`PreferencesStore.kt`）。未找到 `onKeyEvent` 或自研焦点请求器，仅搜索页用焦点请求器自动聚焦搜索框（`ui/pages/search/SearchPage.kt`）。对话框与底部表的焦点陷阱、Esc、触摸关闭来自 Material3 与平台对话框，本次未阅读依赖实现也未运行验证。
 
 ## 8. 设计取舍与已确认边界
 

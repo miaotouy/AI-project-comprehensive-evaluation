@@ -18,10 +18,10 @@ AIO Hub 是**应用级桌面媒体工作站**（分型 M1 + M3，Agent 面 M5）
 
 - **会话-任务双轨**：会话树保存交互历史与提交快照，任务池单独管理执行状态；助手节点 ID 与任务 ID 一致。显示优先读取实时任务，缺失时回退节点快照，清理后的历史结果展示存在第 4 节所述边界（[提交与关联](<../../aio-hub/src/tools/media-generator/stores/mediaGenStore.ts#L217-L275>)）。
 - **结果资产化**：解码或下载结果后，尝试嵌入生成参数再导入资产库；嵌入失败仍可继续，衍生数据另写入生成参数文件。至少一项成功入库才完成任务，全部失败则报错（[响应资产处理](<../../aio-hub/src/tools/media-generator/composables/useMediaGenerationManager.ts#L1014-L1118>)）。
-- **去重索引**：Rust 侧按当月目录做 SHA-256 去重（`check_duplicate_in_current_month`，`src-tauri/src/commands/asset_manager.rs:1265`）：命中时只给既有资产追加 `origin` 并回发 `asset-imported` 事件，不重复落盘；未命中才写文件，并更新月度 `.index.json` 与内存 Catalog。
-- **Agent 共用入口**：`getMetadata()` 按当前启用的 Profile/模型与可见性配置动态生成 `generate_<model_id>` 方法族，`isFast` 模型同步返回结果，其余走 tool-calling 异步任务框架（`buildAgentMethods.ts:754`）；注册表另有三个非 agentCallable 的编程接口供外部注入输入框与附件（见第 6 节）。
-- **本地音频渠道适配**：audio.cpp 通过普通 LLM Profile 接入 TTS。工作台按服务端语义默认不发送 OpenAI 的 `alloy` 音色，并把默认输出设为 WAV；响应仍以实际 `Content-Type` 判定格式，避免把 WAV 字节按 MP3 扩展名入库。Agent 动态方法同样把 audio.cpp 的 `audio_format` 限定为 `wav`（`packages/llm-core/src/providers/sync-media.ts:208-244`、`buildAgentMethods.ts:155-203`）。
-- **输入工作区**：输入区与会话共用 `InputPanelHost`/`InputPanelLayout` 与 `useInputPanel` 契约，快捷词库和提示词优化作为单面板槽位打开；优化面板可选用视觉模型、读取当前草稿或参考图，按优化/翻译/优化并翻译三种模式调用 LLM，结果以编辑器原生替换写回（`components/PromptOptimizePanel.vue`、`components/QuickPromptLibrary.vue`）。输入提示词与已入库附件元数据随会话详情持久化（`inputPrompt`/`inputAttachments`，`types.ts:335-337`）。
+- **去重索引**：Rust 侧以当月目录为范围做 SHA-256 去重，命中时只给既有资产追加一条来源记录并发出资产导入事件，文件不再重复落盘；未命中才写文件，同时更新月度索引与内存目录（`check_duplicate_in_current_month`，`src-tauri/src/commands/asset_manager.rs:1265`）。
+- **Agent 共用入口**：Agent 每次获取元数据时，按当前启用的 Profile、模型与可见性配置现拼出一族生成方法（方法名为 generate_<model_id>），快速模型同步返回结果，其余模型走 tool-calling 异步任务框架（`buildAgentMethods.ts:754`）；注册表另有三个只供程序调用的接口，用来往输入框与附件里注入内容，不进入 Agent 工具清单（见第 6 节）。
+- **本地音频渠道适配**：audio.cpp 以普通 LLM Profile 的形式接入 TTS。工作台按服务端语义默认不发送 OpenAI 的 alloy 音色，默认输出设为 WAV；结果格式按响应头里的 Content-Type 判定，避免把 WAV 字节按 MP3 扩展名入库。Agent 侧的动态方法同样把该渠道的输出格式参数限定为 wav（`packages/llm-core/src/providers/sync-media.ts:208-244`、`buildAgentMethods.ts:155-203`）。
+- **输入工作区**：输入区与会话共用同一套公共输入面板组件和它的组合式契约，快捷词库与提示词优化都作为单面板槽位打开；优化面板可以选用视觉模型、带上当前草稿或参考图，按优化、翻译、优化并翻译三种模式请求 LLM，结果通过编辑器的原生替换写回输入框（`components/PromptOptimizePanel.vue`、`components/QuickPromptLibrary.vue`）。提示词草稿与已入库附件的元数据随会话详情一起持久化（`types.ts:335-337`）。
 - **任务工作区**：任务列表可在网格与列表间切换；列表按自身容器宽度调整为横向、折行或堆叠布局，并同步虚拟行高。结果卡与会话结果可把图片加入参考输入，画廊则按资产导入事件刷新历史预览（[任务列表布局](<../../aio-hub/src/tools/media-generator/components/MediaTaskList.vue#L52-L167>)、[参考输入去重](<../../aio-hub/src/tools/media-generator/composables/useMediaGenReferenceInput.ts#L6-L15>)）。
 - **执行与恢复**：模块级队列实际限制并发，工作台设置默认 6 个槽位；取消收敛为 cancelled，重启把遗留的排队/生成任务转为 error。自动清理默认关闭，开启后只在 5 分钟延迟后移除已完成任务记录，结果资产及会话快照独立保留（第 3、4 节）。
 - **OpenRouter 多媒体协议**：图像、视频、语音请求使用独立适配器，按协议选择参考素材、输出格式与轮询地址；上游进度映射到工作台的 30～89 区间。视频返回的轮询 URL 必须与配置 API 同源（[OpenRouter 媒体适配器](<../../aio-hub/packages/llm-core/src/providers/openrouter-media.ts#L19-L275>)）。
@@ -76,7 +76,7 @@ MediaGenerationInput.handleSend（Ctrl+Enter，MediaGenerationInput.vue:490）
 
 ## 2. 参数、素材与模型/渲染执行
 
-**参数**：每种媒体类型有一套独立的参数定义（`MediaTypeConfig.params`，`types.ts:156`），由全局配置文件 `generation-config.json` 持久化（`useMediaStorage.ts:99`）。请求前 `sanitizeParams` 按模型的 `mediaGenParams` 规则清理参数：剔除不支持的键、钳制数值、校验枚举并填充默认值；xAI/Gemini 类模型通过 `aspectRatioMode`（`buildXaiSizeParams`）或专用适配器构造尺寸。UI 层还有一组参数别名映射（如 steps→numInferenceSteps、cfgScale→guidanceScale、duration→durationSeconds），在 `useMediaGenerationManager.ts:600-640`。各媒体类型的参数面如下（节选用于说明边界）：
+**参数**：每种媒体类型各有一套独立的参数定义（`types.ts:156`），统一由全局配置文件 generation-config.json 持久化（`useMediaStorage.ts:99`）。请求发出前，参数会按当前模型声明的规则清洗一遍：剔除不支持的键、钳制越界数值、校验枚举取值并补上默认值；xAI 与 Gemini 类模型改由比例模式或专用适配器构造尺寸。界面层另有一组别名映射，把工作台的参数名翻译成各服务商字段名（如 steps 对应 numInferenceSteps、duration 对应 durationSeconds），位于 `useMediaGenerationManager.ts:600-640`。各媒体类型的参数面如下（节选用于说明边界）：
 
 ```text
 通用绘图：size, quality, style, negativePrompt, seed, steps, cfgScale, background,
@@ -85,7 +85,7 @@ Suno：suno_mode, mv, tags, title, make_instrumental
 TTS：audioConfig, instructions 等
 ```
 
-audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空表示使用服务端 `default_voice_preset`，界面允许自由输入服务端 preset、`voice_dir` 音色名或 cached voice ID；输出格式默认且只允许 WAV。通用音频适配器不会注入 `alloy`，并优先按响应 `Content-Type` 推断真实容器格式（`useMediaGenParameterState.ts:402-441`、`ModelParameterFields.vue:499-518`、`packages/llm-core/src/providers/sync-media.ts:208-244`）。
+audio.cpp 的语音参数与 OpenAI 默认值不同。该渠道下音色留空即使用服务端的默认音色预设，界面也允许直接填写预设名、voice_dir 里的音色名或缓存音色 ID；输出格式默认且只支持 WAV。通用音频适配器不会补上 alloy 音色，并优先按响应头里的 Content-Type 判定真实容器格式（前端参数状态与字段组件见 `useMediaGenParameterState.ts:402-441`、`ModelParameterFields.vue:499-518`，适配器见 `packages/llm-core/src/providers/sync-media.ts:208-244`）。
 
 **素材与上下文**：拖放、粘贴与文件选择按媒体类型过滤素材，先导入资产库再作为附件提交。输入附件最多 16 项，以资产 ID 去重；这个上限由附件管理器执行，具体模型端点仍可能有更窄限制（[输入素材入口](<../../aio-hub/src/tools/media-generator/components/MediaGenerationInput.vue#L293-L470>)、[附件管理器](<../../aio-hub/src/tools/media-generator/composables/useAttachmentManager.ts#L23-L70>)）。执行时从本地资产读取字节并转 Base64，模型声明最大图片尺寸时先缩放；附件读取失败时保留原条目交给后续链路，缩放失败时继续使用原字节；音频附件只做 Base64 编码（[素材转换](<../../aio-hub/src/tools/media-generator/composables/useMediaGenerationManager.ts#L532-L598>)）。
 
@@ -135,17 +135,17 @@ Agent 调用复用同一媒体执行队列。非 fast 模型声明为可报告�
   - `settings.json`：用户设置
   - `generation-config.json`：全局生成配置
 
-  写入带双层防抖：store 层 1s（`useMediaGenPersistence.ts:307`）+ storage 层 2s（`useMediaStorage.ts:458`）；索引自愈由 `syncIndex` 扫描物理目录补齐/剔除索引项（`useMediaStorage.ts:296`）。输入提示词与附件元数据随会话详情防抖保存，重启或切换会话时还原（`types.ts:335-337`、`useMediaGenPersistence.ts`）。
+  写入端有两层防抖，store 层 1 秒、storage 层 2 秒。索引与物理目录不一致时，自愈逻辑会扫描目录，补齐缺失的索引项、剔除已失效的条目（`useMediaGenPersistence.ts:307`、`useMediaStorage.ts:296,458`）。输入提示词与附件元数据随会话详情一起防抖保存，重启或切换会话时还原（`types.ts:335-337`）。
 - **启动自愈**：全局任务池初始化把遗留 pending/processing 转为 error，分别写明“排队任务未恢复”或“生成中断”，并保存修正结果；它们不会重新入队。会话加载再按关联任务完成情况，把 generating 节点修正为 complete 或 error，并修复活动叶子与缺失根节点（[任务池恢复](<../../aio-hub/src/tools/media-generator/composables/useMediaTaskManager.ts#L92-L130>)、[节点恢复](<../../aio-hub/src/tools/media-generator/composables/logic/useMediaGenPersistence.ts#L180-L239>)）。
 
-  显示时优先读实时任务，找不到时回退到节点快照；但普通提交时快照是 pending 任务的深拷贝，当前执行完成只更新任务池。检索媒体目录的快照写入点，未找到完成结果自动回写到节点快照的消费者。因此“节点和资产仍存在”与“任务清理后历史仍能显示完整结果”需分开看：按此数据链推断，任务移除后可能回退到缺少结果的提交快照，实际交互效果尚未运行验证（[初建快照](<../../aio-hub/src/tools/media-generator/composables/useTaskActionManager.ts#L122-L136>)、[显示优先级](<../../aio-hub/src/tools/media-generator/components/message/MessageContent.vue#L158-L181>)、[结果写回](<../../aio-hub/src/tools/media-generator/composables/useMediaGenerationManager.ts#L1089-L1118>)）。
+  显示时优先读取任务池里的实时任务，取不到才回退到节点快照。普通提交写入的快照只是待执行任务的深拷贝，执行完成后只更新任务池；检索媒体目录的快照写入点后，本次未找到把完成结果自动回写到节点快照的消费者。因此“节点和资产仍存在”与“任务清理后历史仍能显示完整结果”需要分开判断：按这条数据链推断，任务移除后可能回退到缺少结果的提交快照，实际交互效果尚未运行验证（[初建快照](<../../aio-hub/src/tools/media-generator/composables/useTaskActionManager.ts#L122-L136>)、[显示优先级](<../../aio-hub/src/tools/media-generator/components/message/MessageContent.vue#L158-L181>)、[结果写回](<../../aio-hub/src/tools/media-generator/composables/useMediaGenerationManager.ts#L1089-L1118>)）。
 - **资产持久化**：物理文件按类型/月份分目录存放于 `$APPDATA/assets/`；Rust 侧维护 `AssetCatalog` 内存目录（并发读写）并以 `assets.jsonl` 作中央索引，变更后落盘；每目录另有 `.index.json` 月度哈希索引。导入流程 `import_asset_from_bytes`（`asset_manager.rs:873`）：
 
   1. 计算 SHA-256，调用 `check_duplicate_in_current_month` 查当月同类型去重（:1293）
   2. 命中：若来源模块（`sourceModule`）不同则追加 `origin` 并发出 `asset-imported` 事件，直接返回既有资产
   3. 未命中：写文件、提取图片宽高、生成缩略图/音频封面、写月度索引、入内存 Catalog
 
-  `rebuild_hash_index`（:1748）可全量重建哈希索引。图片宽高、`audio_waveform`（前端 Web Audio 采样后经 `update_audio_waveform` 回写，:2795）与 `derived` 元数据都挂在 `AssetMetadata` 上。
+  哈希索引可以全量重建。图片宽高、音频波形与衍生数据都挂在资产元数据结构上，其中波形由前端用 Web Audio 采样后回写（`src-tauri/src/commands/asset_manager.rs:1748,2795`）。
 - **来源生命周期**：`origins[]` 数组记录资产的每个来源（类型、来源标识、来源模块）。`add_asset_source` 追加来源，`remove_asset_source` 在最后一个来源被移除时删除物理文件（`asset_manager.rs:2504`）。生成结果写入的来源标记为：
 
   ```text
@@ -153,7 +153,7 @@ Agent 调用复用同一媒体执行队列。非 fast 模型声明为可报告�
   source = revisedPrompt || taskId
   sourceModule = "media-generator"
   ```
-- **衍生数据**：每次入库同时把生成参数快照写入 `derived/media-generator/{date}/{assetId}.json`，并经 `update_asset_derived_data` 挂到 `metadata.derived["generation"]`（`useMediaGenerationManager.ts:1124`）。asset-manager 侧「查看生成参数」优先读衍生文件，缺失时回退到 `get_asset_binary` + `extractMetadata` 从文件内嵌元数据提取（`media-generator.registry.ts:302-358`）。音频另支持写入 ID3/WAV INFO 标准媒体标签（含用户档案作者与 prompt 注释，`useMediaGenerationManager.ts:1016`），默认关闭（`metadataWrite.enabled=false`）。
+- **衍生数据**：结果入库时会同时把生成参数快照写成一份衍生文件，路径为 derived/media-generator/{date}/{assetId}.json，再挂到资产元数据的 generation 字段下（`useMediaGenerationManager.ts:1124`）。asset-manager 的「查看生成参数」优先读这份文件，缺失时才回退到读取资产二进制、从内嵌元数据里提取（`media-generator.registry.ts:302-358`）。音频还支持写入 ID3/WAV INFO 标准媒体标签，内容含用户档案作者与提示词注释，该功能默认关闭（`useMediaGenerationManager.ts:1016`、`metadataWrite.enabled`）。
 - **删除**：`removeTask` 先清任务池再级联删除会话节点（`mediaGenStore.ts:312`）；删除会话走 `deleteSession`。资产删除在 asset-manager UI/Rust 侧（`remove_asset_completely`）。
 
 ## 5. 预览、编辑、重试、分支与复用
@@ -181,15 +181,18 @@ Agent 调用复用同一媒体执行队列。非 fast 模型声明为可报告�
 
 分支、编辑与导出另有以下入口：
 
-- **分支**：分支操作有四种语义：
-  - `createRegenerateBranch`：重试语义
-  - `createBranch`：纯复制语义（`useBranchManager`）
-  - `switchToBranch`：`findDeepestLeaf` 后切换
-  - `saveToBranch`：复制后修改内容
+- **分支**：分支操作按语义分四种：
 
-  节点删除为级联硬删除；会话模式用树路径 `getNodePath` 渲染活跃路径（`store.messages`）。
-- **编辑**：节点编辑入口包括 `editMessage`、`updateNodeData` 与直接编辑节点 JSON 的 `MessageDataEditor`；`updateNodeData` 禁止改动节点结构字段 `id`/`parentId`/`childrenIds`（`mediaGenStore.ts:706`）。批量模式可选中多条消息后删除（批量下载仍为 TODO 占位，`MediaWorkbench.vue:165-166`）。
-- **导出**：`exportBranchAsMarkdown` 把分支路径导出为 Markdown（含参数快照 JSON 与资产信息，`useMediaExportManager.ts:38`）；任务卡支持复制提示词、打开文件所在目录（`MediaTaskCard.vue:425` openFileDirectory）。
+  | 操作 | 语义 |
+  |---|---|
+  | `createRegenerateBranch` | 重试：从同一源节点再生成一次 |
+  | `createBranch` | 纯复制，复制逻辑在 `useBranchManager` |
+  | `switchToBranch` | 先找到最深叶子节点，再切换过去 |
+  | `saveToBranch` | 复制之后修改内容 |
+
+  删除节点是级联硬删除：该节点连同其子节点直接从会话树移除。会话模式下，活跃路径先由树路径算出节点序列，再从消息列表按该序列渲染。
+- **编辑**：编辑节点有三个入口：改消息文本、改节点数据，以及直接编辑节点 JSON 的数据编辑器。改节点数据时禁止动 id、parentId、childrenIds 这类结构字段（`mediaGenStore.ts:706`）。批量模式选中多条消息后可一并删除，批量下载仍是待实现的占位（`MediaWorkbench.vue:165-166`）。
+- **导出**：整条分支可以导出为 Markdown，内容含参数快照与资产信息（`useMediaExportManager.ts:38`）；任务卡另有复制提示词、打开文件所在目录两个操作（`MediaTaskCard.vue:425`）。
 
 ### 资产复用与画廊
 
@@ -199,27 +202,27 @@ Agent 调用复用同一媒体执行队列。非 fast 模型声明为可报告�
 
 ## 6. Agent 回流、插件与外部依赖
 
-- **发现**：动态方法族 `generate_<model_id>` 的参数声明由模型 `mediaGenParams` 规则生成（`buildAgentMethods.ts:280`），方法描述含模型、渠道与快速模式等说明。语音参数还读取渠道类型：audio.cpp 不套用 OpenAI 音色枚举，输出格式只暴露 WAV。同一 modelId 多渠道时按 Profile 优先级路由；agentConfig/Profile 配置变更经 watch 使工具发现缓存失效。
+- **发现**：Agent 暴露的每个生成方法，参数声明都按模型声明的参数规则现算，方法描述里带上模型、渠道与快速模式信息（`buildAgentMethods.ts:280`）。语音参数还要看渠道类型：audio.cpp 渠道不套用 OpenAI 的音色枚举，输出格式只给出 WAV 一种。同一个模型 ID 挂在多个渠道上时按 Profile 优先级路由；渠道或 Agent 配置变更后，工具发现缓存随之失效。
 - **调用与返回**：handler 先校验 prompt 必填、媒体类型支持，并要求非 fast 模型必须异步执行（`buildAgentMethods.ts:682-714`）；成功或失败时由 `buildResult` 组装结构化结果（同文件 `:627-660`）：
 
   ```text
   成功: {success, taskId, type, prompt, assets: [appdata://…], assetIds}
   失败: {success:false, error}
   ```
-- **编程接口**：`addContentToInput`、`setInputContent`、`addAssets` 是注册表的公开方法，但**不在 `getMetadata()` 中**（非 agentCallable），供其他模块写入输入框与附件（`registry.ts:232-300`）。`getAssetSidecarActions` 让资产右键菜单挂“查看生成参数”。
+- **编程接口**：注册表另有三个公开方法，分别用于往输入框追加内容、整体替换输入内容、添加附件；它们只供其他模块调用，不会出现在 Agent 的工具清单里（`registry.ts:232-300`）。资产右键菜单的“查看生成参数”由 `getAssetSidecarActions` 挂载。
 - **审批与异步**：Agent 媒体生成走通用 tool-calling 审批/执行链（executor 二次校验 agentCallable、审批状态机、异步任务框架），细节见 Agent 工具笔记第 5/6/11 节，本笔记不重复。
 - **外部依赖**：生成请求依赖用户 LLM Profile 对应的远程或本地 HTTP 服务；audio.cpp 需要用户自行运行服务进程。远程媒体下载走 Tauri HTTP 插件，失败回退本地代理；本地文件走 `convertFileSrc`。**本次未找到**媒体插件族/manifest 协议；生成链本身不依赖 FFmpeg、ComfyUI 或浏览器渲染服务。
 
 ## 7. 权限、资源边界与失败恢复
 
-- **参数边界**：`sanitizeParams` 是模型参数的最后一道闸（剔除/钳制/枚举校验），但 `prompt` 不做任何内容过滤，完全由 LLM/用户控制（源码事实，与 Agent 工具笔记一致）。
-- **素材边界**：参考素材按媒体类型过滤扩展名（`MediaGenerationInput.vue:293`）；图片按 `maxImageDimension` 缩放；MiniMax 翻唱限制单参考音频并校验两步工作流前置条件（`useMediaGenerationManager.ts:1304` validateMiniMaxTwoStepCover、`useMiniMaxCoverWorkflow.ts:128` ensureTwoStepReady，预处理结果 24h 过期）。提示词优化的参考图输入另受视觉能力与处理模式约束：文本模型可继续进行优化、翻译及二者组合，只使用文本；纯翻译即使选择视觉模型也不读取图片（[条件与提示](<../../aio-hub/src/tools/media-generator/components/PromptOptimizePanel.vue#L119-L161>)）。
-- **资源限额**：超时/重试可配；`maxConcurrentTasks` 是全局执行级并发上限，但本次未找到任务总数、文件大小或磁盘配额的执行级限额。`autoCleanCompleted` 开启时，已完成任务在固定 5 分钟延迟后从全局任务池移除（`useMediaTaskManager.ts:188-211`），会话树中的结果节点保留；资产库 10 万+ 性能上限仅为 ARCHITECTURE 自述（`asset-manager/ARCHITECTURE.md:76`），未实测。
-- **失败恢复**：各类失败按场景收敛（`useMediaGenerationManager.ts`）：
-  - 请求异常：任务置 `error` 并写 statusText（`:753`）；取消类中断单独处理为“已中止”（见第 3 节）
-  - 资产入库：单条失败只记日志不中断其余（:1081），全部失败则整体报错（:1117）；入库阶段另有阶段级预算，超时视为任务失败并写入“资产入库超时”（`:735`）
-  - 元数据写入：`embedMetadata`/标准标签失败降级继续入库（:1016、:1033）
-  - 远程下载：tauriFetch 失败自动走代理回退（:1395）
+- **参数边界**：请求发出前，模型参数会经过一道清洗：剔除不支持的键、钳制越界数值、校验枚举取值。提示词本身不做任何内容过滤，最终发给模型的内容由用户或 LLM 决定（与 Agent 工具笔记口径一致）。
+- **素材边界**：参考素材先按媒体类型过滤扩展名，图片再按最大图片尺寸缩放（`MediaGenerationInput.vue:293`）。MiniMax 翻唱只接受一条参考音频，并在开始时校验两步工作流的前置条件，预处理结果 24 小时后过期（`useMediaGenerationManager.ts:1304`、`useMiniMaxCoverWorkflow.ts:128`）。提示词优化的参考图输入另受模型视觉能力与处理模式约束：优化、翻译及两者组合都可以只用文本完成，纯翻译即使选了视觉模型也不读取图片（[条件与提示](<../../aio-hub/src/tools/media-generator/components/PromptOptimizePanel.vue#L119-L161>)）。
+- **资源限额**：请求超时与重试次数可配置；并发上限由 `maxConcurrentTasks` 约束，任务总数、单文件大小与磁盘配额在本次走查中未找到执行级限额。开启 `autoCleanCompleted` 后，已完成任务在固定 5 分钟延迟后移出全局任务池，会话树中的结果节点保留（`useMediaTaskManager.ts:188-211`）。资产库「10 万条以上」的性能上限只出现在架构文档自述里，尚未实测（`asset-manager/ARCHITECTURE.md:76`）。
+- **失败恢复**：各类失败按场景收敛到不同处理（`useMediaGenerationManager.ts`）：
+  - 请求异常：任务置为 error 并写入状态文案（:753）；取消类中断单独处理为“已中止”（见第 3 节）
+  - 资产入库：单条资产失败只记日志，不影响其余资产；全部失败才整体报错。入库阶段另设阶段级预算，超时按任务失败处理并写入“资产入库超时”（:735、1081、1117）
+  - 元数据写入：内嵌元数据或标准标签写入失败时降级，继续入库（:1016、1033）
+  - 远程下载：tauriFetch 失败自动回退到本地代理（:1395）
 
   崩溃/重启：任务池中的排队及运行任务会转为 error，节点按第 4 节规则自愈；不会重新发出生成请求。任务清理后会话显示依赖快照的完整性，资产文件则由独立资产库管理。
 

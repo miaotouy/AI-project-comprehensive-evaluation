@@ -16,7 +16,7 @@
 
 ## 结论摘要
 
-OpenCode 是以 `packages` 为中心的 Bun/TypeScript monorepo，当前 36 个包，按「Schema → Core/Protocol → Server」分层，客户端由 Client 包生成、SDK 组合三者；另交付 CLI/TUI、Solid Web App、Electron 桌面、console 与 stats 两个站点、GUI 插件运行时和共享 UI。源码规模最大的是 `packages/app`（Web App）与 `packages/core`（运行时核心），其次是 `packages/tui`、`packages/ai`、`packages/gui-plugins`；文档大部分来自 `packages/web` 的多语言站点与 `services/www`。
+OpenCode 是一个以 packages 目录划分模块的 Bun/TypeScript monorepo，共 36 个包，依赖按 Schema → Core/Protocol → Server 分层，客户端由 Client 包生成，SDK 再把三者组合成对外接口；仓库同时交付 CLI/TUI、Solid Web App、Electron 桌面、console 与 stats 两个站点、GUI 插件运行时和共享 UI。源码规模最大的是 Web App（`packages/app`）与运行时核心（`packages/core`），终端界面、AI 能力、GUI 插件运行时紧随其后；文档大部分来自 `packages/web` 的多语言站点与 `services/www`。
 
 ## 统计与模块分布
 
@@ -46,17 +46,49 @@ TypeScript 约 102.2 万行（93.8%），CSS 47,671 行（4.4%），Rust 13,923 
 
 ## 包结构与分层
 
-`packages/*` 之间的依赖方向按仓库 AGENTS 约定收口：Schema 被 Core/Protocol 依赖，Core 与 Protocol 再被 Server 依赖；Client 只依赖 Schema/Protocol，不依赖 Core/Server；SDK 组合 Client、Core 与 Server。运行时核心在 `packages/core`（会话、工具、权限、provider、MCP、插件、Skill、PTY、调度等 Effect 服务），HTTP 契约在 `packages/protocol` 与 `packages/server`，生成式能力在 `packages/ai`，界面分 `packages/app`（Solid Web App）、`packages/session-ui`（会话渲染组件）、`packages/ui`（共享 UI）与 `packages/tui`（终端界面），桌面壳在 `packages/desktop`，GUI 插件运行时在 `packages/gui-plugins`。
+包之间的依赖方向由仓库 AGENTS 约定收紧：Schema 位于最底层，被 Core 与 Protocol 依赖，这两者再被 Server 依赖；Client 只依赖 Schema 与 Protocol；SDK 组合 Client、Core 与 Server。各包的职责分工如下：
 
-`packages/*` 的其余成员包括 `packages/merman`、`packages/latex`、`packages/patchmark`、`packages/process-daemon`、`packages/plugins`、`packages/plugin-browser`、`packages/stories`、`packages/simulation`、`packages/posts`、`packages/theme`、`packages/util` 等。
+| 包 | 职责 |
+| --- | --- |
+| `packages/core` | 运行时核心：会话、工具、权限、provider、MCP、插件、Skill、PTY、调度等 Effect 服务 |
+| `packages/protocol`、`packages/server` | HTTP 契约 |
+| `packages/ai` | 生成式能力 |
+| `packages/app` | Solid Web App |
+| `packages/session-ui` | 会话渲染组件 |
+| `packages/ui` | 共享 UI |
+| `packages/tui` | 终端界面 |
+| `packages/desktop` | 桌面壳 |
+| `packages/gui-plugins` | GUI 插件运行时 |
+
+其余成员包括下面这些包：
+
+- `packages/merman`
+- `packages/latex`
+- `packages/patchmark`
+- `packages/process-daemon`
+- `packages/plugins`
+- `packages/plugin-browser`
+- `packages/stories`
+- `packages/simulation`
+- `packages/posts`
+- `packages/theme`
+- `packages/util`
 
 ## 文档与测试
 
-文档集中在 `packages/web`（多语言站点，562 文件 / 约 19 万行）、`services/www` 与 `packages/plugins`（插件文档）。测试 1965 文件，主要集中在 `packages/core`（396 文件）、`packages/app`（315）、`packages/ai`（518）、`packages/tui`（210）、`packages/codemode`（45）。
+文档主要落在 `packages/web` 的多语言站点（562 文件 / 约 19 万行），`services/www` 与 `packages/plugins` 另有补充，插件文档集中在后者。测试共 1965 文件，主要集中在以下几个包：
+
+| 包 | 测试文件 |
+| --- | ---: |
+| `packages/ai` | 518 |
+| `packages/core` | 396 |
+| `packages/app` | 315 |
+| `packages/tui` | 210 |
+| `packages/codemode` | 45 |
 
 ## 跨平台组织与边界
 
-CLI/TUI 由 `packages/cli` 打包（根脚本 `dev` 直接运行 `packages/cli/src/index.ts`），TUI 是 Solid/TypeScript 实现而非独立语言栈；Web App 在 `packages/app`，桌面应用在 `packages/desktop`（Electron，renderer 复用 app 包，主进程在 `packages/desktop/src/main`）；`packages/web` 是官网/文档站，`packages/console`、`packages/stats` 是独立子站点。根 `package.json` 还注册 `dev:live`、`dev:desktop`、`dev:web`、`dev:console`、`dev:www` 等入口。
+跨平台的各个表面都收在 `packages` 目录下：CLI 与 TUI 打进同一个 CLI 包，根脚本 `dev` 直接运行 `packages/cli/src/index.ts`，TUI 和 Web App 一样用 Solid/TypeScript 实现。Web App 落在 `packages/app`，桌面应用落在 `packages/desktop`，后者是一层 Electron 壳，渲染进程复用 app 包、主进程位于 `packages/desktop/src/main`。`packages/web` 是官网与文档站，`packages/console` 与 `packages/stats` 是另外两个独立子站点。根 `package.json` 还为各目标分别注册了 dev 脚本，涵盖 live、desktop、web、console 与 www。
 
 ## 关键源码索引
 

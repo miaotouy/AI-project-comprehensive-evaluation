@@ -16,7 +16,7 @@
 
 NextChat 是"Zustand 持久化会话 + 单页消息窗口"的纯客户端 Web 应用，没有服务端 conversation runtime：
 
-- `useChatStore` 以 `ChatSession[]` 保存会话、消息、Mask 副本、记忆摘要与上下文截断索引；内存数组是权威源，IndexedDB 是持久化副本，异常时回退 localStorage（persist key `chat-next-web-store`，版本 3.3）。
+- 会话状态集中在 `useChatStore` 的会话数组里，每个会话携带消息、Mask 副本、记忆摘要与上下文截断索引；这份内存数组是权威源，IndexedDB 只作持久化副本，读写异常时回退 localStorage（持久化键 `chat-next-web-store`，schema 版本 3.3）。
 - 消息是会话内线性数组，无消息树、无版本指针；"分支"只有 `forkSession` 一种——复制标题与消息为新会话，摘要等运行上下文重置。
 - 会话操作（新建/删除/fork/移动/重置）都作用于数组与持久化 store；删除提供 5 秒撤销 toast 并自动补回空会话；本次未找到置顶/归档能力。
 - 消息编辑、删除、置顶、重试都是对会话消息数组与上下文预置消息的就地变更：编辑改写文本内容、删除按 id 过滤、置顶并入上下文预置消息、重试删除原用户与助手消息对后重新发送。
@@ -58,12 +58,12 @@ ChatSession
   mask: Mask
 ```
 
-- `ChatMessage` 继承 `RequestMessage`，内容字段可以是字符串，也可以是 `text + image_url` 多模态数组（`app/client/api.ts:36-52`）。
-- `tools` 字段（`ChatMessageTool[]`，`app/store/chat.ts:44-55`）保存当前 assistant 消息的工具调用状态；工具工作流与最终正文共享同一消息容器，不单独建消息节点。
-- id 生成与空会话：`createMessage` 用 `nanoid` 生成消息 id（`app/store/chat.ts:68-76`）；`createEmptySession` 建立空会话、空记忆和空 Mask（`app/store/chat.ts:104-120`）。
-- `BOT_HELLO` 是内置问候消息（`app/store/chat.ts:99-102`）。
-- `stat` 统计只有字符数 `charCount` 实际累加：更新函数只执行 `charCount += content.length`，并有 TODO 注释未更新 word/chat 数（`app/store/chat.ts:799-804`）。
-- Mask 是完整副本对象（`app/store/mask.ts:9-23`），每个会话持有独立的一份；`createEmptyMask` 默认开启 `syncGlobalConfig`（`app/store/mask.ts:35-47`）。
+- 消息类型 `ChatMessage` 继承请求消息，内容字段既可以是纯字符串，也可以是文本加图片地址组成的多模态数组（`app/client/api.ts:36-52`）。
+- 助手消息用 tools 数组保存本轮的工具调用状态，工具工作流与最终正文共享同一条消息，不为工具单独建节点（`app/store/chat.ts:44-55`）。
+- 消息 id 由 `createMessage` 用 nanoid 生成；空会话、空记忆与空 Mask 由 `createEmptySession` 建立（`app/store/chat.ts:68-76, 104-120`）。
+- 内置问候消息由常量 `BOT_HELLO` 定义（`app/store/chat.ts:99-102`）。
+- 会话统计字段中只有字符数 `charCount` 真正累加：更新函数只做一次加法，单词数与对话数在 TODO 注释里标注为未更新（`app/store/chat.ts:799-804`）。
+- 每个会话持有一份完整的 Mask 副本；`createEmptyMask` 建出的空 Mask 默认开启同步全局配置开关（`app/store/mask.ts:9-23, 35-47`）。
 
 分支模型：fork 先创建空会话，再复制标题、逐条展开消息并重新生成消息 id；Mask 与模型配置也分别展开复制。摘要、摘要位置、上下文清除位置与统计沿用空会话默认值，因此没有复制完整会话状态。复制本身是浅层的，覆盖不到多模态内容、工具数组与 Mask 的 context/plugin 等嵌套值；嵌套编辑之间的隔离需要逐项确认。新会话插入列表头部，不建立消息树指针。见 [forkSession](../../NextChat/app/store/chat.ts#L243-L267)、[空会话默认值](../../NextChat/app/store/chat.ts#L104-L120)。
 
@@ -89,46 +89,46 @@ Chat store 的 persist 配置位于 `app/store/chat.ts:861-930`：存储键为 `
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- `newSession(mask?)`：新建空会话插到头部；传入 Mask 时把全局模型配置与 Mask 的 `modelConfig` 合并，并设置主题为 Mask 名称（`app/store/chat.ts:307-328`）。
-- `currentSession()`：读取 `currentSessionIndex` 对应的会话，越界时钳制索引并回写（`app/store/chat.ts:380-392`）；切换方法见 `app/store/chat.ts:276-280, 330-335`。
-- `moveSession(from, to)`：数组移动并修正当前索引（`app/store/chat.ts:282-305`）——拖拽结果由 `ChatList` 传入（UI 工作流见 Chat UI 笔记 §2）。
-- `deleteSession(index)`：删除会话；删除最后一个时自动补回空会话；用 toast 提供 5 秒撤销（`app/store/chat.ts:337-378`）。
-- `clearSessions()`：清空为单个空会话（`app/store/chat.ts:269-274`）。
-- `resetSession()`：清空消息和 `memoryPrompt`，保留会话与 Mask（`app/store/chat.ts:654-659`）。
-- `clearAllData()`：清空 IndexedDB 与 localStorage 后刷新页面（`app/store/chat.ts:815-819`）。
-- 置顶/归档：本次未找到——`ChatSession` schema 无 pin/archive 字段，store 无对应方法（检查范围 `app/store/chat.ts` 数据模型与全部方法、侧栏操作 `app/components/sidebar.tsx`）。
-- 重命名：无独立方法；会话 `topic` 字段可被直接修改（编辑入口见 Chat UI 笔记 §6，对应 `app/components/chat.tsx:850-912` 与 `app/store/chat.ts:805-814`）。
-- 异常恢复：Chat 组件挂载或会话切换时，把超过超时阈值（`REQUEST_TIMEOUT_MS = 60000`，`app/constant.ts:115`）仍带 `streaming` 标记的消息强制结束，空内容标记为 `isError` 并写入空响应错误对象（`app/components/chat.tsx:1148-1175`）——这是崩溃或刷新后残留半截消息的清理路径。
-- 未完成输入：按会话 id 存 localStorage，key 为 `unfinished-input-<sessionId>`（`app/constant.ts:111`；读写 `app/components/chat.tsx:1496-1510`）。
+- 新建会话：`newSession` 建一个空会话插到列表头部；传入 Mask 时先把全局模型配置与 Mask 自身的模型配置合并，再把会话主题设为 Mask 名称（`app/store/chat.ts:307-328`）。
+- 取当前会话：`currentSession` 按当前索引读取会话，索引越界时先钳制再回写；切换会话的两个方法位于同一文件更早的位置（`app/store/chat.ts:276-280, 330-335, 380-392`）。
+- 移动会话：`moveSession` 在数组中搬动一项并修正当前索引，拖拽结果由 `ChatList` 传入（`app/store/chat.ts:282-305`；UI 工作流见 Chat UI 笔记 §2）。
+- 删除会话：`deleteSession` 按索引移除会话，删掉最后一个时自动补回一个空会话，界面用 toast 提供 5 秒撤销（`app/store/chat.ts:337-378`）。
+- 清空列表：`clearSessions` 把全部会话替换成单个空会话（`app/store/chat.ts:269-274`）。
+- 重置会话：`resetSession` 清空消息与记忆摘要，会话本身和 Mask 保留（`app/store/chat.ts:654-659`）。
+- 清空本地数据：`clearAllData` 清掉 IndexedDB 与 localStorage 后刷新页面（`app/store/chat.ts:815-819`）。
+- 置顶与归档：本次未找到。会话 schema 里没有 pin 或 archive 字段，store 也没有对应方法；检查范围覆盖 `app/store/chat.ts` 的数据模型与全部方法、以及侧栏操作 `app/components/sidebar.tsx`。
+- 重命名：没有独立方法，直接改写会话的主题字段（`app/components/chat.tsx:850-912`、`app/store/chat.ts:805-814`；编辑入口见 Chat UI 笔记 §6）。
+- 异常恢复：Chat 组件挂载或切换会话时，超过请求超时阈值（60000 毫秒）仍带流式标记的消息会被强制结束，空内容标记为错误并写入一个空响应错误对象，崩溃或刷新后残留的半截消息由此清理（`app/constant.ts:115`、`app/components/chat.tsx:1148-1175`）。
+- 未完成输入：按会话 id 存进 localStorage，键名为 `unfinished-input-<sessionId>`（`app/constant.ts:111`；读写见 `app/components/chat.tsx:1496-1510`）。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
 所有变更都通过 `updateTargetSession(targetSession, updater)` 原地修改数组后整体 `set`（`app/store/chat.ts:805-814`），不新建对象：
 
-- **编辑**：单条消息编辑把新文本写回原消息的 `content`（图片消息重组多模态数组），查找范围是上下文预置消息拼接会话消息（入口 `app/components/chat.tsx:1814-1848`）；批量编辑经 `EditMessageModal` 替换整个消息数组与会话主题（`app/components/chat.tsx:850-912`）。
-- **删除**：`session.messages.filter(m => m.id !== msgId)` 就地过滤（`app/components/chat.tsx:1205-1211`）。
-- **重试（onResend）**：先删除原 user 消息及其配对的 assistant 消息，再用相同文本与图片重新走 `onUserInput`，生成新消息节点（`app/components/chat.tsx:1217-1271`）——是"删对重发"，不修改原对象（执行语义见对话请求与上下文笔记 §7）。
-- **置顶（pin）**：把整条消息 push 进 `session.mask.context`（`app/components/chat.tsx:1273-1284`）——置顶消息会作为 context 进入后续请求（见对话请求与上下文笔记 §2），并带 toast 提供跳转到会话配置的入口。
-- **fork**：创建复制消息的新会话（§1），顶层对象分开，嵌套引用并未递归隔离（`app/store/chat.ts:243-267`）。
-- **clearContextIndex**：把发送起点抬高，在不删除 UI 历史的情况下停止发送更早消息与摘要（数据语义；截断执行见对话请求与上下文笔记 §2）。重置为 `undefined` 恢复（`app/store/chat.ts:545`；界面上的重置控件见 `app/components/chat.tsx:382-402, 661-674`）。
-- 续写/回退：本次未找到独立的"继续生成"或"回退到某版本"机制（检查范围 `app/store/chat.ts` 方法集与 `app/components/chat.tsx` 消息操作清单）。
+- **编辑**：单条编辑把新文本写回原消息的内容字段，图片消息会重组成多模态数组，查找范围是上下文预置消息拼接后的会话消息；批量编辑经 `EditMessageModal` 直接替换整个消息数组与会话主题（`app/components/chat.tsx:850-912, 1814-1848`）。
+- **删除**：按消息 id 直接在会话消息数组上过滤掉该条（`app/components/chat.tsx:1205-1211`）。
+- **重试**：`onResend` 先删掉原用户消息和与之配对的助手消息，再用相同的文本与图片重新走一遍发送入口生成新的消息节点，旧的消息对象随之作废（`app/components/chat.tsx:1217-1271`；执行语义见对话请求与上下文笔记 §7）。
+- **置顶**：把整条消息追加进会话 Mask 的上下文预置列表，之后每次请求都会带上它；界面同时用 toast 给出跳转到会话配置的入口（`app/components/chat.tsx:1273-1284`；见对话请求与上下文笔记 §2）。
+- **fork**：复制消息建出一个新会话，顶层对象各自独立，嵌套引用没有递归隔离（`app/store/chat.ts:243-267`；见 §1）。
+- **`clearContextIndex`**：把发送起点抬高到某条消息之后，界面历史照常保留，更早的消息与摘要不再进入请求；把索引重置为 `undefined` 即可恢复（`app/store/chat.ts:545`；重置控件见 `app/components/chat.tsx:382-402, 661-674`，截断执行见对话请求与上下文笔记 §2）。
+- 续写与回退：本次未找到独立的"继续生成"或"回退到某个版本"机制；检查范围覆盖 `app/store/chat.ts` 的方法集与 `app/components/chat.tsx` 的消息操作清单。
 
 ## 5. 列表、分页、搜索与定位
 
-- 会话列表：内存数组全量渲染（`app/components/chat-list.tsx:143-167`），无独立分页与索引；排序只来自数组顺序（拖拽 `moveSession`）与远端合并后的 `lastUpdate` 降序（§6）。
-- 消息分页接口：窗口大小 `CHAT_PAGE_SIZE = 15`（`app/constant.ts:914`）；初始索引定位到末尾窗口，每次渲染从 `msgRenderIndex` 起最多三倍窗口大小条；滚动触及顶部或底部边缘时索引按窗口大小移动并钳制越界，另有方法恢复末尾窗口（以上逻辑见 `app/components/chat.tsx:1386-1429`）。这是数据侧分页窗口，消息仍完整保存在 `session.messages` 中（DOM 窗口行为见消息渲染器笔记）。
-- 搜索：`SearchChatPage` 跨会话全文搜索（`app/components/search-chat.tsx:18-166`）：对每个会话的每条消息做子串匹配（`indexOf`，无索引、无分词），命中处截取前后各 35 字符拼成片段；结果按片段总长降序；点击结果只定位到会话、不定位到具体消息行（上述逻辑见 `search-chat.tsx:30-68, 64-67, 136-161`）。会话内搜索：本次未找到。
-- 命中定位：搜索面板无消息行级高亮/跳转（结果项只展示会话主题与文本片段，静态代码未发现命中消息 id 回传）。
+- 会话列表：侧栏直接渲染内存数组里的全部会话，没有独立分页与索引；排序只来自数组本身，拖拽移动会改写数组，远端合并后按更新时间降序重排（`app/components/chat-list.tsx:143-167`；§6）。
+- 消息分页接口：窗口固定为 15 条消息，初始索引定位到末尾窗口，每次渲染从当前起始索引起最多取三倍窗口大小的条数；滚动触及顶部或底部边缘时索引按一个窗口大小移动并钳制越界，另有方法恢复末尾窗口。分页只发生在数据侧，消息始终完整保存在会话消息数组里（`app/constant.ts:914`、`app/components/chat.tsx:1386-1429`；DOM 窗口行为见消息渲染器笔记）。
+- 搜索：`SearchChatPage` 做跨会话全文搜索，对每个会话的每条消息做子串匹配，没有索引也不分词；命中处截取前后各 35 字符拼成片段，结果按片段总长降序排列。点击结果只打开对应会话，跳不到具体消息行（`app/components/search-chat.tsx:18-166`）。会话内搜索本次未找到。
+- 命中定位：搜索面板没有消息行级的高亮与跳转，结果项只展示会话主题和文本片段，静态代码里没有把命中消息 id 回传的路径。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
-- 写入时机：store 每次 `set` 都触发持久化写入（Zustand persist 默认行为，`createPersistStore` 未配置节流或字段裁剪，`app/utils/store.ts:29-78`）；流式期间每个动画帧的 `onUpdate` 回调最终都会触发一次 `set`（调用链见对话请求与上下文笔记 §5）。
-- hydration 闸门：`setItem` 在 `_hasHydrated` 为假时跳过（`app/utils/indexedDB-storage.ts:19-23`），避免 hydration 前覆盖。
-- 本地/远端合并：`app/utils/sync.ts:33-119` 为各独立 store 模块定义读写器与合并策略：
-  - Chat：按 session id 合并（远端新会话直接 push，远端空消息会话跳过），同会话按 message id 去重，消息按 date 升序，会话按 `lastUpdate` 降序（`app/utils/sync.ts:66-102`）；
-  - Prompt/Mask：远端字段与本地字段做浅合并，本地同名键覆盖远端（`app/utils/sync.ts:103-116`）；
-  - Config/Access：`mergeWithUpdate`（`app/utils/sync.ts:117-118`）。
-- `mergeWithUpdate` 实现（`app/utils/sync.ts:151-165`）：
+- 写入时机：store 每次 set 都会重写一遍完整持久层，`createPersistStore` 没有配置节流或字段裁剪，沿用 Zustand persist 的默认行为；流式期间每个动画帧的更新回调最终都会触发一次 set（`app/utils/store.ts:29-78`；调用链见对话请求与上下文笔记 §5）。
+- hydration 闸门：持久层在 hydration 尚未完成时跳过写入，避免用空状态覆盖已有存档（`app/utils/indexedDB-storage.ts:19-23`）。
+- 本地/远端合并：同步模块为各独立 store 分别定义读写器与合并策略（`app/utils/sync.ts:33-119`）：
+  - Chat：按会话 id 合并，远端新增的会话直接 push，远端空消息的会话跳过；同一会话内按消息 id 去重，消息按日期升序，会话按更新时间降序（`app/utils/sync.ts:66-102`）；
+  - Prompt/Mask：远端与本地字段做浅合并，同名键由本地覆盖远端（`app/utils/sync.ts:103-116`）；
+  - Config/Access：两者都走 `mergeWithUpdate` 的时间戳合并（`app/utils/sync.ts:117-118`）。
+- 时间戳合并 `mergeWithUpdate` 的实现（`app/utils/sync.ts:151-165`）：
 
 ```ts
 const localUpdateTime = localState.lastUpdateTime ?? 0;
@@ -140,37 +140,41 @@ const remoteUpdateTime = localState.lastUpdateTime ?? 1;
 
 ## 7. 迁移、导入导出与保留策略
 
-- schema 迁移：Chat store version `3.3`（`app/store/chat.ts:863`），`migrate` 按版本分支执行（`app/store/chat.ts:864-929`）：
-  - `<2`：重建会话并设置 `sendMemory=true`、`historyMessageCount=4`、`compressMessageLengthThreshold=1000`；
-  - `<3`：session/message id 迁移为 nanoid；
-  - `<3.1`：为旧会话补 `enableInjectSystemPrompts`（沿用用户当前全局配置）；
-  - `<3.2`：补 `compressModel`/`compressProviderName`；
-  - `<3.3`：把 `compressModel`/`compressProviderName` 重置为空字符串（压缩模型默认策略回退）。
-  - 迁移基于 `JSON.parse(JSON.stringify(state))` 深拷贝后逐字段写回，未发现未知字段丢弃逻辑（静态推断）。
-- 其他 store 版本（各带 `migrate` 迁移）：
+- schema 迁移：Chat store 当前版本为 3.3，迁移函数按旧版本区间分支执行（`app/store/chat.ts:863-929`）：
+
+  | 旧版本区间 | 迁移动作 |
+  | --- | --- |
+  | `<2` | 重建会话，并设置 `sendMemory=true`、`historyMessageCount=4`、`compressMessageLengthThreshold=1000` |
+  | `<3` | 把会话与消息 id 迁移为 nanoid |
+  | `<3.1` | 为旧会话补上 `enableInjectSystemPrompts`，沿用用户当前的全局配置 |
+  | `<3.2` | 补上 `compressModel` 与 `compressProviderName` |
+  | `<3.3` | 把上一档补的两个压缩模型字段重置为空字符串，压缩模型回到默认策略 |
+
+  迁移先把整个状态深拷贝再逐字段写回，未发现丢弃未知字段的处理逻辑（静态推断）。
+- 其他持久化 store 的版本号与迁移区间：
   ```text
   Mask 3.1（app/store/mask.ts:117-136）
   Sync 1.2（app/store/sync.ts:128-148）
   Config 4.1（app/store/config.ts:198）
   Plugin 1（app/store/plugin.ts:232）
   ```
-- 导入导出：`useSyncStore.export()` 下载 `Backup-*.json`，`import()` 读取 JSON 并经 `mergeAppState` 合并进本地各 store 后刷新页面（`app/store/sync.ts:58-83`）。
-- 云端同步：`useSyncStore.sync()` 先取远端状态再合并回写（`app/store/sync.ts:91-120`）；WebDAV 与 Upstash 客户端由 `createSyncClient` 选择（`app/utils/cloud/index.ts:4-28`）；WebDAV 走服务端代理，固定读写远端 `backup.json`，endpoint 有域名白名单校验（`app/api/webdav/[...path]/route.ts`）。
-- 保留策略：摘要流程只写 `memoryPrompt` 与 `lastSummarizeIndex`，从不删除原始消息（`app/store/chat.ts:727-796`；失败细节见对话请求与上下文笔记 §6）；本地始终保留完整历史。
+- 导入导出：导出由 sync store 的 `export()` 生成并下载一个 `Backup-*.json` 备份文件；导入读取该 JSON，经 `mergeAppState` 合并进本地各 store 后刷新页面（`app/store/sync.ts:58-83`）。
+- 云端同步：sync store 的 `sync()` 先取远端状态、合并后再写回（`app/store/sync.ts:91-120`）。WebDAV 与 Upstash 客户端由 `createSyncClient` 按配置选择（`app/utils/cloud/index.ts:4-28`）；WebDAV 走服务端代理，固定读写远端的 backup.json 文件，endpoint 带域名白名单校验（`app/api/webdav/[...path]/route.ts`）。
+- 保留策略：摘要流程只写记忆摘要与摘要位置两个字段，从不删除原始消息，本地始终保留完整历史（`app/store/chat.ts:727-796`；失败细节见对话请求与上下文笔记 §6）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- 绑定粒度是会话级：每个 `ChatSession` 持有完整 `Mask` 副本——模型配置、预置消息、插件 id 数组、记忆开关都在 Mask 上（`app/store/mask.ts:9-23`）；新建会话时合并全局模型配置（§3）；开启同步全局配置开关时，Chat 页面每次挂载前把全局模型配置覆盖到会话（`app/components/chat.tsx:1168-1172`）。
-- 消息级绑定：`ChatMessage` 除正文外还保存模型、工具调用与结果、音频与 MCP 响应等字段（完整字段见 §1 代码块）；图片以多模态数组存进消息 `content`。
+- 绑定粒度是会话级：每个会话持有一份完整的 Mask 副本，模型配置、预置消息、插件 id 数组与记忆开关都挂在 Mask 上（`app/store/mask.ts:9-23`）。新建会话时会把全局模型配置合并进来（§3）；开启同步全局配置开关后，Chat 页面每次挂载前会把全局模型配置覆盖到当前会话（`app/components/chat.tsx:1168-1172`）。
+- 消息级绑定：消息除正文外还保存模型、工具调用与结果、音频与 MCP 响应等字段（完整字段见 §1 代码块），图片以多模态数组存进消息内容。
 - 记忆摘要与截断索引字段（§1 代码块）按会话保存；如何进入请求见对话请求与上下文笔记 §2/§3。
-- 插件与 MCP：插件以 id 数组绑在 `mask.plugin`（会话级），工具执行时展开（`app/store/plugin.ts:209-220`）；MCP 工具不绑定会话，启用后全局注入 system prompt（见对话请求与上下文笔记 §9）。
-- 知识库：本次未找到知识库字段或注入点（检查范围 `ChatSession`/`Mask` 模型与 `getMessagesWithMemory` 拼装路径）。
+- 插件与 MCP：插件以 id 数组绑在会话 Mask 的 plugin 字段上，工具执行时才展开（`app/store/plugin.ts:209-220`）；MCP 工具不绑定到会话，启用后统一注入 system prompt（见对话请求与上下文笔记 §9）。
+- 知识库：本次未找到知识库字段或注入点；检查范围覆盖会话与 Mask 的数据模型、以及历史消息拼装路径 `getMessagesWithMemory`。
 
 ## 9. 设计取舍与已确认边界
 
-- **本地数据暴露**：聊天全文、Mask、API key 与自定义配置默认落在浏览器 IndexedDB/localStorage；源码没有通用加密层（`app/utils/indexedDB-storage.ts` 与 persist 路径无加密读写）。
-- **摘要不是严格压缩协议**：摘要流式过程中更新回调直接把部分文本写入 `memoryPrompt`，无质量校验或回滚；完成回调仅在响应 200 时提交 `lastSummarizeIndex`（`app/store/chat.ts:780-791`）。
-- **工具与消息耦合**：工具参数与结果挂在 assistant 消息的 `tools` 元数据上，长结果扩大本地持久化体积；但 `getMessagesWithMemory` 主要按 `message.content` 组装历史，工具结果是否跨用户轮次复用需单独验证（执行侧见对话请求与上下文笔记）。
+- **本地数据暴露**：聊天全文、Mask、API key 与自定义配置默认保存在浏览器 IndexedDB 与 localStorage 中；持久化封装与 IndexedDB 适配器里没有通用加密层，读写都走明文（`app/utils/indexedDB-storage.ts`）。
+- **摘要流式写入**：摘要生成过程中，更新回调直接把已生成的部分文本写进记忆摘要字段，没有质量校验，也没有回滚；只有响应状态为 200 的完成回调才提交摘要位置（`app/store/chat.ts:780-791`）。
+- **工具与消息耦合**：工具参数与结果挂在助手消息的 tools 元数据上，长结果直接撑大本地持久化体积；历史组装由 `getMessagesWithMemory` 主要按消息正文完成，工具结果是否跨用户轮次复用需单独验证（执行侧见对话请求与上下文笔记）。
 - **保留完整本地历史**：请求只带摘要和最近窗口，本地保留全部消息（§7）。
 - **写入频率**：每次 store set 即持久化，流式期间可达每秒数十次（动画帧驱动），无节流（§6，未实测性能影响）。
 - **同步实现待复现**：`mergeWithUpdate` 的 remote 时间变量可疑，未做实际同步测试（§6）。

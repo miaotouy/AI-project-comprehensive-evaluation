@@ -53,27 +53,48 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ### 能力一：自省式自扩展（inspect + 持久插件安装）
 
-1. **用户目标与入口**：让模型在会话中检查自己所在运行时的 API、Loader 条目与工具表，并把新的插件/bundle 装进 profile 以改变后续会话。模型面入口是 `cordis_inspect_list` 与 `cordis_inspect_query` 两个只读工具（`packages/extensions/tool-cordis/src/index.ts`），加上 `plugin_manager`（列插件与 bundle、启停、安装、移除）与 `plugin_market`（读市场索引）（`packages/boot/plugin-manager/src/tools.ts`、`plugin-market/src/tools.ts`）。
-2. **事实对象**：三个层次——运行时事实（服务/事件目录、Loader 条目及其 Config 状态、条目投影出的 JSON Schema）、插件包（package 目录、README、`lib/`）、bundle（可选补丁层包）。检查结果只读，不调用业务方法；查询从不触发副作用（`docs/tool-catalog.md` 的 tool-cordis 节）。
-3. **完整主链**：`cordis_inspect_list` 列 provider（服务/事件目录、Host Config、工具表；浏览器端 provider 需要连接页面）→ `cordis_inspect_query` 取某项 API 或某个 Loader 条目的 Config 投影 → 模型据此写插件或 MCP 配置 → 打包为 bundle → `plugin_manager` 安装进 profile → 用户重启或后续会话加载新行。安装与启停影响整个 profile，需 danger-full-access 或逐次审批。
-4. **模型面入口范围**：本次未找到模型可调用的动态插件定义与运行入口，工具目录中没有 `dyn-<n>` 插件 id、vm 沙箱求值、browser 半装载回执这类条目。`cordis-host-runner` 仍保留 inspection registry 与生命周期工具，供宿主侧消费者使用；模型面只剩只读查询。
-5. **配置方式**：Creator 模式（cordis preset）组合 tool-cordis 与 plugin_manager；`agent-preset` 包随附四套 skill（agent-experience、cordis-plugin-development、editing-cordis-compositions、cordis-composition-reference）指导模型先读检查结果、再读包 README 与源码。
-6. **运行边界**：安装的插件是宿主进程内的真实代码，没有沙箱隔离；"只读检查"保证的是查询本身无副作用，而不是被装代码的安全性。
+1. **用户目标与入口**：让模型在会话中检查自己所在运行时的 API、Loader 条目与工具表，并把新的插件或 bundle 装进 profile，以此改变后续会话。模型面入口分三类：
+   - 检查：`cordis_inspect_list` 列 provider，`cordis_inspect_query` 取单项或单个 Loader 条目的投影，实现在 `packages/extensions/tool-cordis/src/index.ts`
+   - 装配：`plugin_manager` 负责列插件与 bundle、启停、安装和移除，代码在 `packages/boot/plugin-manager/src/tools.ts`
+   - 选源：`plugin_market` 读取市场索引，代码在 `packages/boot/plugin-market/src/tools.ts`
+2. **事实对象**：自省覆盖三个层次：运行时事实（服务与事件目录、Loader 条目及其 Config 状态、条目投影出的 JSON Schema）、插件包（package 目录、README 与编译产物目录 `lib/`）、bundle（可选的补丁层包）。检查结果只读，不调用业务方法，查询本身也不触发副作用；工具行为见 `docs/tool-catalog.md` 的 tool-cordis 节。
+3. **完整主链**：模型先列出 provider，按需取回某项 API 或某个 Loader 条目的 Config 投影，据此写出插件或 MCP 配置，打包成 bundle 后装进 profile，重启或后续会话即加载新的组合行；安装与启停影响整个 profile，需要 danger-full-access 或逐次审批。各步分工如下：
+   - `cordis_inspect_list` 列 provider，覆盖服务与事件目录、Host Config 与工具表；检查浏览器端 provider 需要连上页面
+   - `cordis_inspect_query` 取单项 API 或某个 Loader 条目的 Config 投影
+   - `plugin_manager` 把打包好的 bundle 安装进 profile
+4. **模型面入口范围**：本次未找到模型可调用的动态插件定义与运行入口；工具目录里没有 `dyn-<n>` 插件 id，也没有 vm 沙箱求值或 browser 半装载回执这类条目。`cordis-host-runner` 仍保留 inspection registry 与生命周期工具，供宿主侧消费者使用，模型面只剩只读查询。
+5. **配置方式**：Creator 模式（cordis preset）把 tool-cordis 与 plugin_manager 组合在一起；`agent-preset` 包随附四套 skill，指导模型先读检查结果、再读包 README 与源码：
+   - agent-experience
+   - cordis-plugin-development
+   - editing-cordis-compositions
+   - cordis-composition-reference
+6. **运行边界**：安装的插件是宿主进程内的真实代码，没有沙箱隔离；只读检查的作用范围限于查询本身无副作用。
 
 ### 能力二：进程沙箱（sandbox）
 
-1. **用户目标与入口**：给"同世界子进程"施加文件效应策略，档位为 read-only / workspace-write / danger-full-access；模型侧不直接调用沙箱工具，而由 permission-presets 或会话选项选择档位，bash/pwsh/fs/terminal 消费 `ctx.sandbox.confine`。
+1. **用户目标与入口**：给同世界子进程施加文件效应策略，模型侧不直接调用沙箱工具。档位由 permission-presets 或会话选项选定，bash、pwsh、fs 与 terminal 在执行前消费 `ctx.sandbox.confine`。可选档位有三档：
+   - read-only
+   - workspace-write
+   - danger-full-access
 2. **事实对象**：一次调用携带的策略对象（档位、工作区根、可写路径集合）。身份不在会话日志里，属每次调用的参数化约束。
-3. **完整主链**：permission preset 选定档位 → shell/fs 工具在 spawn 或写入前调用 `ctx.sandbox.confine` → `sandbox` seam 选后端（`sandbox-local` 内的 bwrap 优先、探针失败回退 Landlock；macOS Seatbelt；Windows 走 `sandbox-windows-acl` 的受限令牌 runner）→ 运行期拒绝 fail-closed → 结果与拒绝原因回到工具结果。
-4. **策略来源**：`sandbox-policy` 包解析工作区根与策略，`sandbox-ssh` 把同一策略应用到远端主机；选不出后端抛 `SANDBOX_UNAVAILABLE`，无静默无沙箱回退。
+3. **完整主链**：permission preset 选定档位后，shell 与 fs 工具在 spawn 或写入前调用 `ctx.sandbox.confine`，`sandbox` seam 据此从平台后端中挑一个执行，运行期的拒绝按 fail-closed 处理，结果与拒绝原因一起回到工具结果。后端选择顺序如下：
+   - `sandbox-local`：优先 bwrap，探针失败时回退 Landlock
+   - macOS：Seatbelt
+   - Windows：`sandbox-windows-acl` 的受限令牌 runner
+4. **策略来源**：`sandbox-policy` 包解析工作区根与策略，`sandbox-ssh` 把同一份策略应用到远端主机。选不出后端就直接报 `SANDBOX_UNAVAILABLE` 失败，不存在无沙箱的静默回退。
 5. **边界**：真实内核行为属平台运行验证项；沙箱只约束文件效应，不约束网络、进程可见性或内存。
 
 ### 能力三：同会话目标驱动循环（goal）
 
-1. **用户目标与入口**：把长期目标写成事件溯源状态，agent 在会话内自动续跑直到完成或阻塞。模型工具为 `create_goal` / `get_goal` / `update_goal`（`packages/goal/tool-goal`），另有 `/goal` 命令面（`command-goal`）。
+1. **用户目标与入口**：把长期目标写成事件溯源状态，agent 在会话内自动续跑，直到完成或被判定阻塞。模型面有三个目标工具，实现在 `packages/goal/tool-goal`：
+   - `create_goal`：创建目标
+   - `get_goal`：读取目标
+   - `update_goal`：更新目标
+
+   另有 `/goal` 命令面（`command-goal`）。
 2. **事实对象**：`goal/change` 会话事件加严格递增 revision；激活（armed）是独立、不持久化的进程内标志。
-3. **完整主链**：模型创建目标 → `goal-round-driver` 在回合结束时判断是否需要下一轮 → 以普通回合继续（受轮次预算约束，默认上限 256）→ 完成或阻塞由模型自报，连续默认 3 轮同一阻塞条件判为 blocked → 每次变更追加事件，重启后由日志折叠恢复。
-4. **权限**：`tool-goal` 在执行时检查调用者是否为根 Agent 且处于开放回合、且本回合含人类来源输入（`packages/goal/tool-goal/src/authority.ts`），防止子 Agent 自建目标。
+3. **完整主链**：模型创建目标后，`goal-round-driver` 在回合结束时判断是否还要继续，需要时以普通回合接着跑，受轮次预算约束（默认上限 256 轮）。完成或阻塞状态由模型自行上报，同一阻塞条件连续默认 3 轮即判为 blocked。每次变更都追加事件，重启后由日志折叠恢复。
+4. **权限**：`tool-goal` 执行时检查调用者，要求它是根 Agent、处于开放回合，且本回合含人类来源输入（`packages/goal/tool-goal/src/authority.ts`），以此阻止子 Agent 自建目标。
 5. **边界**：目标不带调度与跨会话等待；轮次预算耗尽后停在原地等用户。
 
 ### 能力四：plan mode 作为日志化协作状态
@@ -85,19 +106,33 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ### 能力五：Host 级定时任务（schedule）
 
-1. **用户目标与入口**：让 agent 按时间规则自动开工。模型面工具为 `schedule_create`、`schedule_list`（分页）、`schedule_view` 与 `schedule_edit`（update 含 pause/resume 与改 rrule/target，delete 同工具）。
-2. **创建参数**：`title`、`prompt`、`rrule` 和 `target` 四个参数共同描述任务与投递目标。
-3. **事实对象**：Host 任务 —— `schedule` 领域存储中的记录（`ScheduleRecord`），带 typed timing（After/At/Every/Daily/Weekly/Cron/RRule）、`target`（`this_session`/`new_once`/`new`）、`targetSessionId` 与 paused/ended 状态；领域存储写 version 2、读 version 1，物理布局不变。
-4. **完整主链**：`schedule_create` 经 Remote 或原生服务写记录 → timer 作为可弃投影在到期时触发 → 目标会话空闲时以普通对话回合投递 → 每次投递记录 receipt 与目标会话 id → 记录变更追加领域事件，重启后由领域存储重建。
-5. **作用范围**：任何 Host 任务都按 id 可读可改可删，不再局限于调用者自己的提醒；委派子 Agent 调用 `schedule_create` 会返回 `subagent_session` 拒绝。要限制某个 preset 不能管理他人任务，只能移除该 preset 的 tool-schedule 行。
+1. **用户目标与入口**：让 agent 按时间规则自动开工。模型面有四个工具：
+   - `schedule_create` 创建任务
+   - `schedule_list` 分页列出任务
+   - `schedule_view` 查看单个任务
+   - `schedule_edit` 修改任务，update 含暂停、恢复与改 `rrule`/`target`，delete 也走同一工具
+2. **创建参数**：`title` 与 `prompt` 描述任务内容，`rrule` 给出时间规则，`target` 决定投递目标，四个参数共同确定一条任务。
+3. **事实对象**：Host 任务在 `schedule` 领域存储中表现为一条 `ScheduleRecord`，携带定时方式、投递目标、目标会话 id 与暂停/结束状态；领域存储写 version 2、读 version 1，物理布局保持不变。取值范围为：
+   - 定时方式：After、At、Every、Daily、Weekly、Cron、RRule
+   - 投递目标：`this_session`、`new_once`、`new`
+4. **完整主链**：`schedule_create` 经 Remote 或原生服务写入记录，timer 作为可弃投影在到期时触发，目标会话空闲时以普通对话回合投递，每次投递记录 receipt 与目标会话 id。记录变更追加领域事件，进程重启后由领域存储重建。
+5. **作用范围**：任何 Host 任务都按 id 可读、可改、可删，覆盖范围超出调用者自己的提醒；委派子 Agent 调用 `schedule_create` 会返回 `subagent_session` 拒绝。要限制某个 preset 不能管理他人任务，只能移除该 preset 的 tool-schedule 行。
 6. **边界**：投递是尽力而为的 at-least-once；本轮不提供外部通知通道；历史会话日志里的旧提醒需要显式重建。
 
 ### 能力六：多 provider 子代理与团队任务板
 
-1. **用户目标与入口**：把任务委派给同进程子 Agent 或外部执行体，并让多个 Agent 在同一棵树上协作。入口是 `subagent`/`subagent_fork` 工具、控制工具（`send_message`/`interrupt_agent`/`list_agents`/`wait_agent`），以及根会话开启 Team 模式后的 `team_task_create/get/list/update`。
-2. **事实对象**：子 Agent 树（祖先、运行时归属、通信）、`subagent/descriptor` 持久描述符、激活句柄（`{ kind: 'activation', subagentId }`）、团队任务（`TeamTaskId` 形如 `task-<n>`，`TeamId` 就是根 `SessionId`）。
-3. **完整主链**：模型调用委派工具 → `startActivation` 校验能力旗标 → 本地 `prepareContinuable` 或外部 `start` → 子 Agent 运行 → 本地子 Agent 保留 durable 会话、可继续收消息；外部一次性执行只回最终文本 → 结算后向父 Agent 投递完成通知 → 控制工具读写子 Agent 的身份与 inbox → Team 模式让共享任务在同一面板按 Owner 分派与等待。
-4. **策略固定**：子 Agent 继承父的 permission roots 或钉死更严格档，委派策略以 `source: 'delegation'` 写入子会话日志可重放；spawn 用 `agentPreset` 选组合，fork 继承父的 preset。
+1. **用户目标与入口**：把任务委派给同进程子 Agent 或外部执行体，并让多个 Agent 在同一棵树上协作。入口分四组：
+   - 委派：`subagent` 与 `subagent_fork`
+   - 消息与打断：`send_message`、`interrupt_agent`
+   - 树与等待：`list_agents`、`wait_agent`
+   - 团队任务：根会话开启 Team 模式后可用 `team_task_create/get/list/update`
+2. **事实对象**：这套机制维护四类事实：
+   - 子 Agent 树，记录祖先、运行时归属与通信关系
+   - `subagent/descriptor` 持久描述符
+   - 激活句柄，形如 `{ kind: 'activation', subagentId }`
+   - 团队任务，`TeamTaskId` 形如 `task-<n>`，`TeamId` 取根 `SessionId`
+3. **完整主链**：模型调用委派工具后，`startActivation` 先校验能力旗标，再按执行位置分流：本地走 `prepareContinuable`，外部走 `start`。本地子 Agent 保留 durable 会话，可以继续收消息；外部一次性执行只回最终文本。子 Agent 跑完结算后向父 Agent 投递完成通知，控制工具负责读写子 Agent 的身份与 inbox，Team 模式让共享任务在同一面板按 Owner 分派与等待。
+4. **策略固定**：子 Agent 继承父的 permission roots，或被钉在更严格的档位；委派策略以 `source: 'delegation'` 写入子会话日志，可重放。spawn 时用 `agentPreset` 选定组合，fork 则继承父的 preset。
 5. **边界**：外部后端不接受后续消息；team 任务板只协作任务分派，不共享工具循环；历史 roster 记录保留用于解码但不授予权限。
 
 ## 支撑与实验机制盘点
@@ -108,15 +143,26 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ### skill 注册表
 
-`packages/skill/` 提供 skill seam（`skill`）、`skill-filesystem`（文件系统 provider）、`skill-office`（文档能力）与 `tool-skill`（模型面加载工具）；skill 以 catalog 形式进上下文，按名加载全文。会话内的 skill 目录由 preset 携带（`agent-preset/skills/`）。
+skill 能力由 `packages/skill/` 下的四个包组成：
+- `skill`：seam 本体
+- `skill-filesystem`：文件系统 provider
+- `skill-office`：文档能力
+- `tool-skill`：模型面加载工具
+
+skill 以 catalog 形式进入上下文，按名加载全文；会话内的 skill 目录由 preset 携带，位于 `agent-preset/skills/`。
 
 ### workflow / ralph
 
-`workflow` seam 加 `workflow-ptc` provider（worker 线程执行模型写的工作流脚本），`tool-workflow` 是模型面入口；`ralph` 是固定策略的 fresh-agent 循环（`tool-ralph` 加 `ralph-bundle`）。
+workflow 由 `workflow` seam 与 `workflow-ptc` provider 组成，后者在 worker 线程里执行模型写的工作流脚本，模型通过 `tool-workflow` 调用。ralph 是固定策略的 fresh-agent 循环，由 `tool-ralph` 与 `ralph-bundle` 拼成。
 
 ### jobs
 
-`jobs` seam 加 `jobs-local`，`tool-jobs` 暴露 `job_list`/`job_output`/`job_kill`；后台 bash/PTY/子 Agent 使用同一协议，owner 隔离、完成通知与取消语义统一。子 Agent 不再经由 jobs 收集。
+后台任务由 `jobs` seam 与 `jobs-local` 组成，模型面的 `tool-jobs` 暴露三个工具：
+- `job_list`：列出任务
+- `job_output`：读取输出
+- `job_kill`：取消任务
+
+后台 bash、PTY 与子 Agent 共用同一协议，owner 隔离、完成通知与取消语义一致；子 Agent 改由委派的激活句柄收集。
 
 ### forge / LiveShare / worktree / webhook / auto-review
 
@@ -132,7 +178,7 @@ dsh 的独特功能集中在把 agent 自身运行时当作可编程对象的一
 
 ### feedback / attachment / deliverables
 
-`feedback` 分 `message-feedback`（日志备注与 sidecar 评分两种契约）与 `command-feedback`；`attachment` 提供内容寻址附件存储与引用式读取；`deliverables` 提供 `present` 工具把已有文件登记为交付物。
+feedback 分成 `message-feedback` 与 `command-feedback` 两条实现，前者覆盖日志备注与 sidecar 评分两种契约。attachment 提供内容寻址的附件存储与引用式读取；deliverables 提供 `present` 工具，把已有文件登记为交付物。
 
 ## 机制缺位与归属
 

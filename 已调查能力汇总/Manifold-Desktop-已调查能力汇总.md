@@ -37,7 +37,7 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ### 角色与上下文
 
-- **全局配置取代角色对象**：角色能力由全局 `systemPrompt`、`temperature` 与默认 Provider/模型承载；源码确认没有 Agent、Persona 或角色模板对象，无会话级角色保存。证据状态：主链确认。来源：[Agent 角色配置调查笔记](../Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md)。
+- **全局配置取代角色对象**：每次发送请求，应用都从全局设置读取系统提示词（`systemPrompt`）与 `temperature`，配上默认 Provider 和模型后直接构造请求，所有会话共用这一套设定，会话本身不保存角色配置。源码确认没有 Agent、Persona 或角色模板对象。证据状态：主链确认。来源：[Agent 角色配置调查笔记](../Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md)。
 - **系统提示词发送链路**：发送时前端从全局 settings 读取 system prompt，后端按协议映射——OpenAI/OpenAI-compatible 放入消息首部 system 消息、Anthropic 写入顶层 `system`、Gemini 写入 `systemInstruction`；Compare 页共用同一条全局提示词。会话不保存发送时配置，重开历史会话无法恢复当时参数（见文末）。证据状态：主链确认。来源：[Agent 角色配置调查笔记](../Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md)。
 - **提示词库**：每条提示词一个 JSON 文件存于 `%LOCALAPPDATA%\Manifold\prompts\<id>.json`；标记为系统提示词的条目覆盖全局 system prompt，普通条目插入输入框。无分组、排序、目录与编辑流程，标题和内容无业务校验。证据状态：主链确认。来源：[Agent 角色配置调查笔记](../Agent角色/Manifold-Desktop-Agent角色配置调查笔记.md)。
 - **上下文拼装**：把当前标签整个 `messages[]` 的 role/content 副本按数组顺序发送；assistant 流式文本只进 DOM 与 `streamingText`、不回写消息数组，第二轮请求缺少上一轮 assistant 上下文，且无上下文截断、摘要压缩或 token 预算处理（见文末）。证据状态：主链确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)、[Chat 调查笔记](../Chat/Manifold-Desktop-Chat调查笔记.md)。
@@ -45,7 +45,7 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ### 会话与消息
 
-- **会话数据层**：内存"聊天标签 + 组件局部 `messages[]`"与磁盘会话文件两套实现并存，存储层增删改查完整；正常聊天不落盘，新对话关闭标签即丢失，前端 `session-store.js` 为无引用死模块（见文末）。证据状态：主链确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Manifold-Desktop-Chat调查笔记.md)。
+- **会话数据层**：聊天消息在内存中由聊天标签和每个组件各自的 `messages[]` 保存，磁盘另有一套会话文件读写实现，增删改查齐全。正常聊天不会触发落盘，新对话关闭标签后消息随即丢失，前端的 `session-store.js` 在整个仓库中没有引用（见文末）。证据状态：主链确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)、[Chat 调查笔记](../Chat/Manifold-Desktop-Chat调查笔记.md)。
 - **会话文件存储与全文搜索**：`SessionManager` 提供整文件保存、加载、删除、列表（按 updatedAt 降序）与全文搜索（逐文件整份 JSON 子串匹配，无索引、无结果上限）；会话文件 schema 含 id/title/model/messages/createdAt/updatedAt，无版本号。证据状态：主链确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)。
 - **会话列表、Home 与搜索定位**：侧栏会话列表、Home 页 Recent Sessions 网格（最多 12 条）与 Ctrl+F 搜索浮层（300ms 防抖、键盘导航）均可重新打开磁盘会话；搜索返回会话级结果，无会话内搜索与消息级定位。证据状态：主链确认。来源：[Chat UI 调查笔记](../Chat%20UI/Manifold-Desktop-ChatUI调查笔记.md)、[会话与消息管理调查笔记](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)。
 - **会话重命名与导入写路径**：重命名与导入的磁盘写路径存在；重命名只发送 `{title}` 对象、后端按整份 JSON 覆盖原文件，导入保存对 id 无路径成分校验，存在清空消息与路径穿越风险（见文末）。证据状态：主链确认。来源：[会话与消息管理调查笔记](../会话与消息管理/Manifold-Desktop-会话与消息管理调查笔记.md)。
@@ -54,7 +54,13 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ### 生成与创作（生成式输出与运行时）
 
-- **生成式输出为格式化回复（G0）**：模型输出以 SSE 流式文本逐 token 进入消息 DOM，经 marked.js 渲染为 Markdown 内联 HTML；无输出对象机制——无独立 ID、类型、状态或生命周期，无预览/编辑器/画布/沙箱/执行环境，无输出级持久化与模型回流（见文末）。证据状态：主链确认（专项评级 G0）。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
+- **生成式输出为格式化回复（G0）**：模型返回的内容以 SSE 流逐 token 写入消息 DOM，由 marked.js 渲染成 Markdown 内联 HTML，最终呈现为排版好的文本回复。结果层没有对象机制，具体表现是：
+
+  - 没有独立 ID、类型、状态或生命周期；
+  - 没有预览、编辑器、画布、沙箱或执行环境；
+  - 没有输出级持久化，也不回流到模型上下文（见文末）。
+
+  证据状态：主链确认（专项评级 G0）。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
 - **流式生成与广播**：单全局 `m_chatThread` 串行执行，新请求先停旧线程；chunk 经 `CHAT_CHUNK`/`CHAT_DONE` 广播并在前端累积重渲染，Compare 用独立线程向量并按 slotIndex 分发。广播无会话标识，多标签同时打开时一个请求可能更新多个标签（见文末）。证据状态：主链确认。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
 - **Markdown 渲染**：历史 assistant 消息走自定义 code renderer 渲染，流式路径每次整段重渲染裸 `marked.parse()`；代码块复制按钮与工具调用折叠块存在。无 sanitizer、无 CSP，模型输出直接 `innerHTML` 注入，且已用仓库内 marked 复现历史代码块 renderer 对 fenced code block 抛 `TypeError`（见文末）。证据状态：主链确认（renderer 类型错误已运行复现）。来源：[消息渲染调查笔记](../消息渲染器/Manifold-Desktop-消息渲染调查笔记.md)。
 - **输出交互碎片**：代码块复制、工具调用折叠（点击展开 JSON 参数/结果）、错误行、取消按钮与完成时的 cost badge（token 与静态价格估算存 localStorage）入口存在；事件回传为单向推送，无日志与运行状态机。证据状态：入口确认。来源：[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
@@ -62,7 +68,7 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ### Agent 运行时与外部协作
 
-- **MCP 工具链路**：无内置网页搜索/文件/代码执行工具，模型可见工具全部来自 MCP；工具经 `tools/list` 发现、扁平化为 schema 注入请求，模型返回的 tool call 渲染为折叠卡片。执行与结果回注未接通：`MCPClient::CallTool()` 已实现但无运行时调用点，`ToolResult` 与 `maxToolCallRounds` 只有定义（见文末）。证据状态：主链确认（执行缺口已确认）。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)、[独特功能与项目状态调查笔记](../独特功能/Manifold-Desktop-独特功能与项目状态调查笔记.md)。
+- **MCP 工具链路**：应用自身不提供网页搜索、文件读写或代码执行工具，模型可见的工具全部来自 MCP 服务器。发送前，客户端通过 `tools/list` 发现工具，把工具 schema 扁平化后注入请求；模型返回的 tool call 只在前端渲染成折叠卡片。执行与结果回注这一段没有接通：`MCPClient::CallTool()` 已实现，全仓库找不到运行时调用点，工具结果类型（`ToolResult`）与工具轮次上限（`maxToolCallRounds`）也只停留在定义（见文末）。证据状态：主链确认（执行缺口已确认）。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)、[独特功能与项目状态调查笔记](../独特功能/Manifold-Desktop-独特功能与项目状态调查笔记.md)。
 - **MCP 传输**：stdio transport 以 `CreateProcessW` 启动用户配置命令，SSE 固定 `{url}/sse` 与 `{url}/message`；请求同步等待、单次超时 30 秒。参数以空格直拼不转义、无沙箱或工具审批、应用启动与设置页添加服务器可能阻塞界面（见文末）。证据状态：入口确认。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)。
 - **插件接口**：`PluginContext` 声明 RegisterProvider/RegisterTool/RegisterTabType 接口，加载器可加载 DLL 并创建插件；初始化主链未接通——仓库无接口实现类、加载流程不调用 `IPlugin::Initialize(context)`，插件工具不会进入模型请求（见文末）。证据状态：主链确认（加载主链未接通）。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)、[独特功能与项目状态调查笔记](../独特功能/Manifold-Desktop-独特功能与项目状态调查笔记.md)。
 - **附件、记忆与知识库**：Chat 主链无注入点；后端有文件对话框与 `FILE_ATTACHED` 广播，前端无发送方与监听方，属已实现未接线的死路径（见文末）。证据状态：主链确认（本次未找到）。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)、[应用界面基础设施调查笔记](../应用界面基础设施/Manifold-Desktop-应用界面基础设施调查笔记.md)。
@@ -70,7 +76,7 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ### 渠道与调度
 
-- **渠道/Provider 模型**：渠道即启动时放入 `ProviderRegistry` 的 `IProvider` 实例；内置 Gemini、OpenAI、Anthropic 为代码固定，Proxy、Ollama 与用户配置的 OpenAI-compatible endpoint 按设置启动时构造。`ProviderConfig` 只保存 endpoint URL 与启用标志，无独立渠道名称、模型映射、Header 集合或多凭据结构。证据状态：主链确认。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md)。
+- **渠道/Provider 模型**：运行时一个渠道就是一个 `IProvider` 实例，应用启动时把这些实例注册进 `ProviderRegistry`。Gemini、OpenAI、Anthropic 三家由代码固定，Proxy、Ollama 与用户配置的 OpenAI-compatible endpoint 在启动读取设置时构造。渠道配置结构 `ProviderConfig` 只保存 endpoint 地址与启用标志，没有独立渠道名称、模型映射、请求头集合或多凭据结构。证据状态：主链确认。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md)。
 - **渠道配置生命周期**：查看已注册 Provider、选择模型、保存 API Key、按 endpoint 拉取模型、校验 Key 的运行链路存在；无完整渠道 CRUD——新增/删除 OpenAI-compatible 渠道需手工编辑 `settings.json` 并重启，无复制、渠道级导入导出、运行时启停或独立连接测试 UI，后端 `VALIDATE_KEY` 已实现但设置页无调用按钮（见文末）。证据状态：主链确认。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md)。
 - **凭据存储**：API Key 不写入 settings.json，存于 Windows Credential Manager 的 `Manifold_` + Provider ID generic credential；前端只收到 Key 存在性布尔值，向 `SET_API_KEY` 发送空串即删除凭据。证据状态：主链确认（系统级保护行为未运行验证）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md)。
 - **协议适配与模型目录**：Gemini 用 URL 查询参数带 Key、OpenAI 系用 Bearer Header、Anthropic 用 `x-api-key` + `anthropic-version`；模型目录为 Provider 静态列表（无上下文长度/价格/模态字段）或远端 `/v1/models` 拉取（失败返回占位项）。Ollama 复用 OpenAI-compatible 并按静态路径组合可能产生重复 `/v1/v1/...`（见文末）。证据状态：主链确认（部分路径组合为静态推断）。来源：[LLM 渠道管理调查笔记](../LLM渠道管理/Manifold-Desktop-LLM渠道管理调查笔记.md)。
@@ -98,14 +104,19 @@ Manifold Desktop 是 Windows 10+ x64 单平台的 AI 聊天客户端，架构为
 
 ## 工程与基础设施摘要
 
-- **仓库分布**：本组最小、平台边界最明确的仓库——127 个 Git 跟踪文件、可识别源码 98 文件/35,496 行、文档 5 文件/553 行、本次识别到 0 个测试文件。`Manifold.Core` 占 49 文件/28,939 行（大头为第三方 `json.hpp` 约 24,765 行），`frontend` 31/4,837，另有小型 `server` 区；语言以 C/C++ Header 为主（73.9%）。目标仅 Windows 10+ x64，前端经 WebView2 嵌入，非跨平台浏览器发行。来源：[仓库分布调查笔记](../仓库分布/Manifold-Desktop-仓库分布调查笔记.md)。
+- **仓库分布**：本组中体量最小、平台边界最清楚的仓库，共 127 个 Git 跟踪文件，可识别源码 98 文件 35,496 行，文档 5 文件 553 行，本次识别到 0 个测试文件。各代码区的分布是：
+  - `Manifold.Core`：49 文件 28,939 行，其中第三方 `json.hpp` 约 24,765 行；
+  - `frontend`：31 文件 4,837 行；
+  - `server`：小型 Proxy 样例区。
+
+  语言以 C/C++ Header 为主（73.9%）；目标平台仅 Windows 10+ x64，前端经 WebView2 嵌入，发行形态为单平台桌面应用。来源：[仓库分布调查笔记](../仓库分布/Manifold-Desktop-仓库分布调查笔记.md)。
 - **应用界面基础设施**：极薄 WinUI 3 原生壳 + 无框架 WebView2 前端，原生层只承担窗口、系统对话框、剪贴板与 JSON 消息桥，Toast/确认框/搜索浮层/设置抽屉全部由前端 DOM 与 CSS 实现且无统一 Portal 或层级管理；主题仅 dark/light 两档 37 个 token，无系统跟随、强调色、字体、密度、壁纸或自定义 CSS，浅色与深色边界存在首帧/边缘静态推断风险；系统通知、附件拖放、图片灯箱未实现；窗口状态持久化到 `window-state.json`，DPI 声明 PerMonitorV2。来源：[应用界面基础设施调查笔记](../应用界面基础设施/Manifold-Desktop-应用界面基础设施调查笔记.md)。
 
 ## 已知边界与待验证事项
 
 ### 声明不符（README/文档声明与当前实现不一致）
 
-- **MCP Client 声明不符**：README 声明工具调用会被执行并回流重发，实际 tool call 只渲染展示，`MCPClient::CallTool()` 全仓库无运行时调用点，`ToolResult`、`maxToolCallRounds` 只有类型或字段定义；`docs/architecture.md` 的多轮工具执行描述与当前代码不一致。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
+- **MCP Client 声明不符**：README 声明工具调用会被执行并把结果回流给模型重发，实际 tool call 只在前端渲染展示；负责执行调用的 `MCPClient::CallTool()` 在全仓库找不到运行时调用点，工具结果与工具轮次上限仅有类型或字段定义；`docs/architecture.md` 中对多轮工具执行的描述也与当前代码不一致。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)、[生成式输出与运行时调查笔记](../生成式输出与运行时/Manifold-Desktop-生成式输出与运行时调查笔记.md)。
 - **DLL 插件系统声明不符**：README 声明插件能力，实际 `PluginContext` 无实现类，加载器加载 DLL 后不调用 `IPlugin::Initialize(context)` 便标记为 Initialized，插件工具不会进入模型请求。来源：[Agent 工具调查笔记](../Agent工具/Manifold-Desktop-Agent工具调查笔记.md)。
 - **会话保存/搜索/导入导出声明不符**：README 与 `docs/architecture.md:60` 声称 session export/import 与 Markdown export 已实现，实际正常聊天不调用保存模块、前端 `session-store.js` 为无引用死模块、JSON 导出 handler 无 UI 入口；侧栏重命名按整 JSON 覆盖会清空既有消息。来源：[对话导出与分享调查笔记](../对话导出与分享/Manifold-Desktop-对话导出与分享调查笔记.md)、[独特功能与项目状态调查笔记](../独特功能/Manifold-Desktop-独特功能与项目状态调查笔记.md)。
 - **请求参数与设置项不生效**：前端发送的 `temperature` 与 `tools` 字段后端不消费（后端取宿主 settings 中的 temperature、tools 只来自 MCP 注入）；设置面板 `streamResponses` 开关在发送路径无读取点，界面开关不改变行为。来源：[对话请求与上下文调查笔记](../对话请求与上下文/Manifold-Desktop-对话请求与上下文调查笔记.md)、[Chat UI 调查笔记](../Chat%20UI/Manifold-Desktop-ChatUI调查笔记.md)。

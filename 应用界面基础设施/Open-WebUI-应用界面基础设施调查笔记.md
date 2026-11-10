@@ -30,20 +30,20 @@ Tailwind CSS v4（src/tailwind.css 第 1 行，@theme 只扩展 gray 色阶第 6
 
 **构建与运行边界。** svelte.config.js 第 15-19 行使用 adapter-static 和 index.html fallback，根布局第 10 行关闭 SSR，因而是纯 SPA；
 
-svelte.config.js 第 20-39 行配置 SvelteKit 版本轮询（60s），版本变化时根布局的 beforeNavigate（第 104 行）注销 service worker 并用 location.href 硬刷新。
+svelte.config.js 第 20-39 行把 SvelteKit 的版本变化检测设为每 60 秒轮询一次；版本号一变，根布局就在 beforeNavigate 里注销 service worker，再用 location.href 强制刷新整页（第 104 行）。
 - **根装配**（src/routes/+layout.svelte，1535 行）：
   - Toast Host：`<Toaster>`（svelte-sonner，位置为 top-right，启用 richColors 和 closeButton，主题随 `$theme` 计算）；
   - 社区统计弹窗 `<SyncStatsModal>`（import 于第 80 行，挂在根布局而非 app 布局）；Electron 壳侧栏组件已从仓库移除，桌面模式只保留 `isApp` 置位与事件通道；
-  - 全局服务：Socket.IO 连接与事件分发（`chatEventHandler` 与 `channelEventHandler`，注册于 1288-1289 行）、会话过期自动登出（fetch 401 拦截 + token 定时检查）、桌面壳事件（`desktopEventHandler` 1038-1054）、BroadcastChannel 活跃标签页仲裁（122 行起）、移动端下拉刷新手势；
+  - 全局服务：Socket.IO 连接后由 `chatEventHandler` 与 `channelEventHandler` 分发事件，`desktopEventHandler` 接收桌面壳事件，三者的注册点散布在根布局第 122-1289 行；另有会话过期自动登出（fetch 401 拦截加定时 token 检查）、BroadcastChannel 活跃标签页仲裁与移动端下拉刷新手势；
   - splash 屏移除（:1232-1260）与 her 主题彩蛋进度条。
 - **(app) 布局**（src/routes/(app)/+layout.svelte，556 行）：装配 Sidebar、SettingsModal、ChangelogModal、AccountPending 和 UpdateInfoToast，并负责全局快捷键分发与 `?settings=` URL 深链（`openSettingsFromUrl`）。
 
-**多入口。** `/` 与 `/c/[id]` 都是 `<Chat />` 一行装配（`(app)/+page.svelte:15`）；`/auth`（登录/注册/SSO 自动跳转 + OnBoarding 欢迎页，`auth/+page.svelte:178-201,211-217`）、`/s/[id]`（分享会话，自载用户设置）、`/watch`（YouTube 重定向）、`/error`（后端缺失页）均共享同一根布局基础设施（Toaster、socket、主题）。
-- 桌面壳（Electron 原生应用在独立仓库，见仓库分布笔记）只经 window.electronAPI/window.applyTheme 全局钩子接入，本仓无实现与类型声明（`src/app.d.ts` 为空），调用处均带存在性检查（`+layout.svelte:507,1051-1073`；window.applyTheme 仅调用无定义，:1046、`General.svelte:177`）。
+**多入口。** 首页 `/` 与会话页 `/c/[id]` 都只用一行 Chat 组件装配（`(app)/+page.svelte:15`）。登录注册页负责登录、注册与 SSO 自动跳转，并带 OnBoarding 欢迎页（`auth/+page.svelte:178-217`）；分享会话页 /s/[id] 自行加载用户设置；/watch 只做 YouTube 跳转；/error 是后端缺失时的落地页。这些入口共用同一套根布局基础设施：Toaster、Socket.IO 连接与主题应用。
+- 桌面壳（Electron 原生应用在独立仓库，见仓库分布笔记）只在需要时经 window.electronAPI 与 window.applyTheme 两个全局钩子接入。本仓既无实现也无类型声明，`src/app.d.ts` 为空，所有调用处都先做存在性检查；其中 window.applyTheme 在本仓只有调用点，没有定义（`+layout.svelte:507-1073`、`General.svelte:177`）。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**公共组件层。** common 目录是唯一的跨页公共组件目录；Modal 有 60 个消费文件、ConfirmDialog 26 个、Tooltip 100+ 个、toast 100+ 个文件（以上为 Grep 统计，搜索 src/lib 中的 import 语句，相对路径变体可能低估）。业务侧弹窗入口（ShareChatModal、TagChatModal、ToolServersModal 等）只记录底层机制，入口语义归 Chat UI 等业务类目。
+**公共组件层。** common 目录是唯一的跨页公共组件目录。使用面最大的是 toast 与 Tooltip（各 100 个以上文件），其次是 Modal（60 个文件）和 ConfirmDialog（26 个文件）；以上为对 src/lib 中 import 语句的 Grep 统计，相对路径变体可能低估。业务侧弹窗入口（ShareChatModal、TagChatModal、ToolServersModal 等）只记录底层机制，入口语义归 Chat UI 等业务类目。
 - **依赖使用证据**（依赖清单之外逐一在源码找到 import）：
   - svelte-sonner：根布局 Toaster + 100+ 文件 toast.*（见第 3 节）；
   - focus-trap：`Modal.svelte:6`、`ConfirmDialog.svelte:5`；
@@ -57,7 +57,7 @@ svelte.config.js 第 20-39 行配置 SvelteKit 版本轮询（60s），版本变
   1. 后端数据投影：config/user/models/tools/knowledge/tags/banners/channels（服务端 API 拉取后写入）；
   2. 应用 UI 状态：showSidebar/showSearch/showSettings（可接受 boolean | string | SettingsModalRequest，:120）/showChangelog/showControls/showOverview/showFileNav/showCallOverlay/mobile/temporaryChatEnabled 等——这些是跨页面共享的浮层/面板开关，业务组件 bind:show 消费；
   3. 用户偏好：settings store（服务端权威，见第 4 节）+ theme store（:36，仅镜像 localStorage）。
-  - 界面偏好持久化分散在 localStorage：theme、sidebarWidth（侧栏第 625-645 行，同时写入 CSS 变量 `--sidebar-width`）、showControls、chatControlsSize、selectedTerminalId、dismissedUpdateToast、locale 和 token；其中前三项的写入分别见 app 布局第 399-402 行、ChatControls 第 163 与 409-412 行，selectedTerminalId 与其相邻处理共用第 405-411 行。
+  - 界面偏好分散存在 localStorage 里，共 8 个键：主题、侧栏宽度、显示控件开关等。其中前三项的写入点分布在 app 布局第 399-402 行与 ChatControls 第 163-412 行，侧栏宽度另在侧栏第 625-645 行同步写 `--sidebar-width` CSS 变量；终端选择与相邻处理共用 ChatControls 同一段范围。
   - 跨窗口同步：多标签页只经 BroadcastChannel 仲裁“最后活跃标签页”（根布局第 1076-1095 行），其余本地 store（队列、草稿、侧栏状态）不跨窗口同步（Chat UI 笔记第 8 节同述）。
 
 ## 2. 弹窗、浮层与菜单
@@ -108,7 +108,7 @@ common/Dropdown.svelte（359 行）：
 
 ### 右键菜单
 
-消息与侧栏项的操作仍走普通按钮、Dropdown 或 Modal，没有全局自绘右键菜单；`contextmenu` 只在少数内嵌表面出现，且用途是屏蔽浏览器默认菜单而非自绘：内置浏览器与外部桌面画面（`ChatTabs/ChromeBrowser.svelte:260`、`ChatTabs/NativeDesktop.svelte:73`）、终端文件面板（`FileNav.svelte:2387`）与语音头像（`CallOverlay/VoiceAvatar.svelte:222`）。
+消息与侧栏项的操作仍走普通按钮、Dropdown 或 Modal，没有全局自绘右键菜单。contextmenu 事件只在少数内嵌表面出现，用途是屏蔽浏览器默认菜单：内置浏览器与外部桌面画面、终端文件面板与语音头像各有一处（`ChatTabs/ChromeBrowser.svelte:260`、`FileNav.svelte:2387`，其余入口见第 10 节）。
 
 ## 3. 通知、加载态与错误反馈
 
@@ -120,9 +120,9 @@ common/Dropdown.svelte（359 行）：
 
 ### 站内通知 toast（自研 NotificationToast）
 
-- NotificationToast.svelte：通过 toast.custom 渲染，使用 role="status" 和 aria-live="polite"（第 86-87 行）；点击跳转时将 pointer 拖动超过 6px 视为拖拽，hover 显示关闭按钮，Enter/Space 可键盘激活（分别见第 31-64、94-99 行）；
-- 三个触发点都在根布局事件处理器：聊天完成（duration: 15000）、频道消息和日历提醒（30s），实现集中在第 529-539、685-695、792-802 行；
-- 同时旁路浏览器 Notification API（受 settings.notificationEnabled 与 `$isLastActiveTab` 门控）与通知音（playingNotificationSound store 加音频文件，根布局第 664-683 行）；NotificationToast 自身也有声音逻辑，受 navigator.userActivation 门控（第 66-82 行）。
+- `NotificationToast.svelte` 负责站内通知卡片：它通过 toast.custom 渲染带 role="status" 与 aria-live="polite" 的提示，点击跳转前先看指针是否拖动超过 6px，超过按拖拽处理，悬停时露出关闭按钮，Enter/空格可键盘激活（`NotificationToast.svelte:31-99`）。
+- 三个触发点都在根布局的事件处理器里：聊天完成停留 15 秒，频道消息与日历提醒停留 30 秒，对应的三个分支集中在根布局第 529-802 行。
+- 通知同时旁路到浏览器 Notification API 与通知音：前者受 settings.notificationEnabled 和 `$isLastActiveTab` 门控，后者由 playingNotificationSound store 配合音频文件播放（根布局第 664-683 行）。`NotificationToast.svelte` 自身也有一段声音逻辑，受 navigator.userActivation 门控（第 66-82 行）。
 - 通知设置界面：chat/Settings/Notifications.svelte 请求通知权限，并提供 webhook targets 的增删改查和测试；权限与功能开关门控分别见第 49-75 行。
 
   服务端通道：backend/open_webui/events.py 第 161-212 行定义 CHAT_FINISHED、CHAT_FAILED 等事件，第 651-666 行定义通知事件集；webhook 目标订阅这些事件（通知事件的具体派发链本次未追查）。
@@ -148,9 +148,9 @@ common/Dropdown.svelte（359 行）：
 
 ### 权威源与首屏防闪烁
 
-- 权威源：localStorage.theme，取值为 `system`（默认）、light、dark、oled-dark 或 her（彩蛋，需 enable_easter_eggs）；首次访问写入见 app.html 第 49-51 行，theme store 仅镜像（根布局第 1120 行）。
-- 防 FOUC：app.html head 中的内联脚本（第 43-116 行，注释原文 "best to add inline in head to avoid FOUC"）在首帧前按 localStorage 给 document.documentElement 加 `light/dark/her` class，oled-dark 用行内 CSS 变量覆盖 gray 色阶，并同步 theme-color 元标签；变量分支见第 56-61 行。
-- 系统跟随：内联脚本用 matchMedia('(prefers-color-scheme: dark)').addListener 实时切换 class；设置页切换 `system` 时也即时解析（分别见 app.html 第 84-96 行、General.svelte 第 131-133 行）。
+- 主题的权威来源是设备上的 localStorage.theme，取值为 `system / light / dark / oled-dark / her` 五档：system 是默认值，her 是仅在 enable_easter_eggs 开启时可用的彩蛋主题；首次访问由 app.html 的内联脚本写入，前端的 theme store 只镜像这个值（`app.html:49-51`、`src/routes/+layout.svelte:1120`）。
+- 防 FOUC：app.html head 中的内联脚本在首帧前读取 localStorage，给 document.documentElement 加上 light、dark 或 her class；oled-dark 另用行内 CSS 变量覆盖 gray 色阶并同步 theme-color 元标签，这段变量分支与脚本主体同在 `app.html:43-116`（脚本内注释写着 "best to add inline in head to avoid FOUC"）。
+- 系统跟随：内联脚本给 matchMedia('(prefers-color-scheme: dark)') 挂 addListener，系统配色一变就切换 class；设置页把主题切到 `system` 时也会立即按当前系统偏好解析一次（`app.html:84-96`、`General.svelte:131-133`）。
 
 ### 切换链路与 token 体系
 
@@ -166,33 +166,41 @@ common/Dropdown.svelte（359 行）：
   桌面壳 theme:update 事件把它映射为 `light` 基底（根布局第 915-917 行）。
 - 视觉 token：没有语义色层（无 `--primary`/`--accent` 之类，在 src 搜索 accent、primaryColor 和这两个变量均无匹配），颜色直接用 Tailwind gray-50~950 色阶；定义见 tailwind.css 的 @theme oklch（第 5-18 行，含自定义 gray-850）；
 
-  明暗由 dark 变体（darkMode: 'class'）驱动；主题相关的第三方组件包括 tippy、svelte-sonner Toaster，以及 CodeMirror、KaTeX、ProseMirror 的明暗自适应（tippy 样式见 app.css 第 363-365、691-693 行）。
-- 字体：默认字体栈为 Inter + Vazirmatn（本地文件，font-display: swap），代码字体 JetBrainsMono（`src/app.css:3-13`、`src/tailwind.css:41-45`）。界面字体族可由用户覆盖：设置项 `fontFamily` 经 `--app-font-family` 变量写到根元素，入口是 Interface 设置的 Font Family 行（Default/Custom 切换加自由输入），保存时随用户设置同步，未设置或清空则移除变量回落到默认栈（`src/lib/utils/text-scale.ts:9-27`、`src/lib/components/common/InterfaceSettings.svelte:553-597`）。没有字号档位设置，字号仍只经 `--app-text-scale` 统一缩放。
+  明暗切换由 Tailwind 的 dark 变体驱动（darkMode 在 tailwind.config.js 中设为 class）；tippy、svelte-sonner 的 Toaster，以及 CodeMirror、KaTeX、ProseMirror 这类内嵌组件各自处理明暗自适应，其中 tippy 的深色样式覆盖写在 app.css 里（第 363-365、691-693 行）。
+- 字体：默认字体栈为 Inter 与 Vazirmatn（本地文件，font-display: swap），代码字体 JetBrainsMono，字体栈定义在 `src/app.css:3-13` 与 `src/tailwind.css:41-45`。界面字体族可由用户覆盖：Interface 设置的 Font Family 行（Default/Custom 切换加自由输入）把设置项 fontFamily 写进 --app-font-family 变量并挂到根元素，保存时随用户设置同步，未设置或清空则移除变量回落到默认栈（`src/lib/utils/text-scale.ts:9-27`、`src/lib/components/common/InterfaceSettings.svelte:553-597`）。字号没有档位设置，仍只经 `--app-text-scale` 统一缩放。
 - 扩展 token：`--app-text-scale` 用于 UI 缩放（写入 html font-size，相关样式和工具分别在 app.css 第 15-24 行、text-scale.ts 第 1-27 行）；`--sidebar-width` 控制侧栏宽度，`--color-gray-*` 用于 dark/oled-dark 行内覆盖。
-- 无障碍模式：设置键仍是 `highContrastMode`，界面标签已改为 Accessibility Mode（`src/lib/components/common/InterfaceSettings.svelte:590-605`），开启后由根布局按 `html.high-contrast` class 应用（`src/routes/+layout.svelte:1361`）；`src/app.css:423-999` 提供对比度修正规则，覆盖焦点轮廓、placeholder、`.app-muted` 灰色文字、着色文本、编辑占位与 shimmer，并引用 WCAG 1.4.3/1.4.11。
+- 无障碍模式：设置键仍是 `highContrastMode`，界面标签已改为 Accessibility Mode（`src/lib/components/common/InterfaceSettings.svelte:590-605`），开启后由根布局按 `html.high-contrast` class 应用（`src/routes/+layout.svelte:1361`）；`src/app.css:423-999` 提供对比度修正规则，覆盖焦点轮廓、placeholder、app-muted 灰色文字、着色文本、编辑占位与 shimmer，并引用 WCAG 1.4.3/1.4.11。
 
 ### 聊天页背景图（壁纸，三级优先级）
 
-- 应用点：`chat/Chat.svelte:3783-3801`——非 embedded 时按优先级取首个非空来源渲染绝对定位 bg-cover 背景层，其上叠白色/灰渐变遮罩（:3789-3791,3799-3801，`from-white to-white/85`，dark 下 `from-gray-900 to-gray-900/90`）；仅作用于 Chat 页面容器，输入区无独立背景设置。
+- 应用点：非 embedded 模式下，`chat/Chat.svelte` 按优先级取得第一个非空来源，把它渲染成绝对定位、bg-cover 的背景层，上面再叠一层白色或灰色渐变遮罩——浅色是 `from-white to-white/85`，深色是 `from-gray-900 to-gray-900/90`。背景只铺在 Chat 页面容器上，输入区没有独立的背景设置（`chat/Chat.svelte:3783-3801`）。
 - 优先级（高→低）：
-  1. 文件夹级 selectedFolder.meta.background_image_url（:3783-3787），设置入口在 `layout/Sidebar/Folders/FolderModal.svelte:28,75,102,165,193-205`（上传/移除）；
-  2. 用户级 settings.backgroundImageUrl（`stores/index.ts:232`），设置入口在 `Interface.svelte:664-691`（"Chat Background Image"，上传/重置；FileReader 转 dataURL，限 gif/webp/jpeg/png，:321-347）；
-  3. 许可级 config.license_metadata.background_image_url（`Chat.svelte:3792-3797`），由后端 `/api/config` 下发（`backend/open_webui/main.py:2098,2267`）。
+  1. 文件夹级：`selectedFolder.meta.background_image_url`，由文件夹弹窗上传或移除（`layout/Sidebar/Folders/FolderModal.svelte:28-205`）。
+  2. 用户级：`settings.backgroundImageUrl`，对应 Interface 设置页的 "Chat Background Image" 项，可上传或重置；上传时用 FileReader 转成 dataURL，只接受 gif/webp/jpeg/png 四种格式（`Interface.svelte:321-347`、`src/lib/stores/index.ts:232`）。
+  3. 许可级：`config.license_metadata.background_image_url`，由后端 `/api/config` 组装下发（`chat/Chat.svelte:3792-3797`、`backend/open_webui/main.py:2098-2267`）。
 - 持久化：用户级与文件夹级都走服务端（saveSettings 全量回写 `{ ui: $settings }`，见下节）——与 theme 的 localStorage 权威相反，背景图是**账户级且随账户同步**的偏好。
 
 ### 持久化与服务端交点
 
-- 主题**不**随账户同步：Settings 类型（`stores/index.ts:202-275`）无 theme 字段，themeChangeHandler 只写 localStorage——跨设备/跨浏览器主题不一致（静态推断）；与之相反，聊天背景图（backgroundImageUrl，`stores/index.ts:232`）与文本方向（chatDirection，:253）是 Settings 字段，随用户设置同步。
+- 主题**不**随账户同步：Settings 类型里没有 theme 字段，切换主题的 themeChangeHandler 只写 localStorage，同一用户在另一台设备或另一个浏览器上会看到不同主题（静态推断）；聊天背景图（backgroundImageUrl）与文本方向（chatDirection）则是 Settings 字段，随用户设置同步（`src/lib/stores/index.ts:202-275`）。
 - 桌面壳可反推主题：desktopEventHandler 的 theme:update 事件写 localStorage + 应用 class（`+layout.svelte:909-928`）。
-- 服务端用户设置：`GET /user/settings` / `POST /user/settings/update`（`backend/open_webui/routers/users.py:438-509`），带权限检查（settings.interface 权限，:458-464）与字段过滤（非 admin 剥离 toolServers/notifications.webhook_url，:466-497）；
+- 服务端用户设置：读取与保存接口都要求通过用户身份验证。读取接口返回当前用户设置；保存接口按字段权限过滤提交内容，再更新设置（`backend/open_webui/routers/users.py:461-541`）。
+
+  | 接口或保存条件 | 行为 |
+  | --- | --- |
+  | `GET /user/settings` | 通过用户身份验证后读取设置 |
+  | `POST /user/settings/update`，非 admin 且缺少 `settings.interface` 权限 | 从提交的界面设置中剥离 InterfaceSettings 定义的字段，其他字段继续按各自规则处理 |
+  | 非 admin 且缺少系统提示词相关权限 | 剥离提交的 system 字段 |
+  | 非 admin 且缺少直连工具服务器权限 | 剥离提交的 toolServers 字段 |
+  | 非 admin 且缺少 webhook 权限 | 剥离提交的通知配置及界面通知中的 webhook_url |
 
   前端 `(app)/+layout.svelte:92-117` 启动时拉取 userSettings.ui 写入 settings store（失败回退 localStorage 缓存），`SettingsModal.svelte:817-822` 的 saveSettings 合并后全量回写（`{ ui: $settings }`）。
 - 部署级自定义 CSS：无用户级自定义 CSS 设置（Grep customCss/userStyle/customCSS 在 src 无匹配，Interface 设置页无对应项），但 `app.html:35` 固定链接 `/static/custom.css`（`static/static/custom.css` 为空占位文件）——自定义样式只能经部署时改写该静态文件实现，与用户设置体系无关。
 
 ### 文本方向（Chat Direction）
 
-- 用户设置 chatDirection（'LTR' | 'RTL' | 'auto'，`stores/index.ts:253`），设置入口在 `Interface.svelte:64,173-182,616-638`（三态循环切换，随账户同步）。
-- 应用方式：消息容器显式 dir 属性——`chat/Messages/UserMessage.svelte:134`、`chat/Messages/ResponseMessage.svelte:659`、`chat/MessageInput.svelte:1590,1622`、channel 侧 `channel/Messages/Message.svelte:379,460`、`channel/MessageInput.svelte:807`；
+- 用户设置项 chatDirection 取 'LTR'、'RTL' 或 'auto' 三态，Interface 面板用一个控件循环切换，取值随账户同步（`src/lib/stores/index.ts:253`、`Interface.svelte:616-638`）。
+- 应用方式：各消息容器在自己渲染的元素上显式设置 dir 属性，方向只沿组件逐层透传——用户消息与回复消息各设一处，消息输入框、频道消息与频道输入框也各带一份（`chat/Messages/UserMessage.svelte:134`、`chat/MessageInput.svelte:1590-1622`，其余三处入口见第 10 节）；
 
   auto 由浏览器按内容自动判定。这是布局方向与主题联动的最浅层实现（不改全局 dir/CSS，仅逐组件透传）。
 
@@ -202,9 +210,9 @@ common/Dropdown.svelte（359 行）：
 
 其余为 Tailwind 响应式工具类与 @container；项目启用 @tailwindcss/container-queries，落地页使用 @2xl 等容器查询变体。
 - **侧栏三态**（layout/Sidebar.svelte，桌面 1732 行）：
-  1. 桌面展开：宽度由 sidebarWidth store 控制，拖拽分隔条调宽——现在用 pointerdown 加 setPointerCapture 追踪单个指针，pointermove 改宽、pointerup/pointercancel 收尾，组件销毁时复位拖拽期的 body 文本选择锁定；宽度持久化到 localStorage 并写 `--sidebar-width` CSS 变量（`src/lib/components/layout/Sidebar.svelte:603-660`、`:884-891`）；
+  1. 桌面展开：宽度由 sidebarWidth store 控制，拖拽分隔条即可调宽。拖拽用 pointerdown 加 setPointerCapture 锁定单个指针，pointermove 改宽，pointerup 与 pointercancel 收尾，组件销毁时复位拖拽期间对 body 文本选择的锁定；新宽度持久化到 localStorage 并写入 `--sidebar-width` CSS 变量（`src/lib/components/layout/Sidebar.svelte:603-891`）；
   2. 桌面折叠：42px 图标窄条（第 931-989 行，showSidebar=false 时）；
-  3. 移动端：覆盖式抽屉 + 全屏遮罩（:892-901，md:hidden），另支持屏幕左缘滑动手势开合（:557-581，起点 x<40、滑动距离≥屏宽/8）。
+  3. 移动端：侧栏变成覆盖式抽屉加全屏遮罩（容器带 md:hidden），并支持从屏幕左缘滑动开合，手势起点在左侧 40px 内、滑动距离达到屏宽八分之一即触发（`Sidebar.svelte:557-901`）。
 
 **面板分栏。** 聊天工作台与右侧标签面板用 paneforge 的 PaneGroup、Pane 和 PaneResizer 拖拽，入口在 Chat.svelte；面板宽度另存于 `chatControlsSize`（`ChatTabs.svelte:1176`），移动端标签面板走非侧滑路径。
 
@@ -253,30 +261,47 @@ common/Dropdown.svelte（359 行）：
 
 ### 快捷键系统
 
-- 注册表：src/lib/shortcuts.ts 定义 Shortcut 枚举 24 项、默认绑定、19 项可配置绑定，并提供按事件匹配和按平台格式化快捷键的逻辑；各段依次见第 19-100、199-203、157-188 行；
-- 持久化：keybindings 存于用户设置（loadKeybindings(userSettings?.keybindings)，`(app)/+layout.svelte:110`；保存 `updateUserSettings({ keybindings })`，`Settings/Shortcuts.svelte:65-75`）——服务端权威、跨设备同步；
-- 分发：app 布局第 278-367 行使用单一 document keydown 监听，20+ 分支直接操作 DOM id 和 store；关闭快捷键默认绑定 Escape，聚焦输入框绑定 Shift+Escape。settings.keyboardShortcuts 为 false 时整体禁用（第 280-282 行，默认绑定见第 94-95 行）；
+- 注册表：`src/lib/shortcuts.ts` 用 Shortcut 枚举登记 24 项快捷键及其默认绑定，其中 19 项允许用户改键；同一文件还提供按键事件匹配与按平台格式化快捷键的辅助逻辑（`src/lib/shortcuts.ts:19-203`）。
+- 持久化：按键绑定存在用户设置的 keybindings 字段里，启动时经 loadKeybindings 读入，改键后调用 updateUserSettings 回写服务端，因此跨设备同步（`(app)/+layout.svelte:110`、`Settings/Shortcuts.svelte:65-75`）。
+- 分发：app 布局用一个 document keydown 监听统一分发，20 多个分支直接操作 DOM id 和 store；关闭弹窗默认绑定 Escape，聚焦输入框默认绑定 Shift+Escape，两者是独立动作。settings.keyboardShortcuts 为 false 时整套禁用；默认绑定与分发分别见 `src/lib/shortcuts.ts:100-102`、`src/routes/(app)/+layout.svelte:287-305`。
 - 输入区内的快捷键（听写、停止生成、@ / 等）在 `MessageInput.svelte` 本地处理（Chat UI 笔记第 9 节）。
 
 ### 设置框架（SettingsModal）
 
-- 宿主：`chat/SettingsModal.svelte`（1281 行），showSettings store 支持 `boolean | string | {tab, state}`（:60-92）；
-- tab 组织：个人 13 tab + 管理 16 tab（admin: 前缀），按角色过滤（:787）与功能开关过滤（:794-796）；关键字搜索（每 tab 带 keywords 数组，100ms 防抖，:837-844）；分组标题（Basics/Services/Preferences/Data/Profile 与 System/AI/Quality/Tools/Experience/Data，:103-143）；
+- 宿主是 `chat/SettingsModal.svelte`（1281 行），开关状态由 showSettings store 承载，可存 boolean、字符串或 `{tab, state}` 对象，后两者用来指定打开哪个 tab 及其初始状态（`chat/SettingsModal.svelte:60-92`）。
+- tab 组织：侧栏分个人 13 项与管理 16 项（管理项带 admin: 前缀），渲染前先按角色和功能开关过滤；搜索框对每个 tab 预置的 keywords 数组做匹配，输入有 100ms 防抖；分组标题个人侧为 Basics/Services/Preferences/Data/Profile，管理侧为 System/AI/Quality/Tools/Experience/Data（`chat/SettingsModal.svelte:103-844`）。
 - 深链：`?settings=<tab>` URL 参数（`(app)/+layout.svelte:199-228`，处理完剥离参数）；快捷键 Cmd+. 打开、`Cmd+/` 直达 shortcuts tab；
-- 保存模式：各 tab 组件 saveSettings(partial) → 合并 store → 全量回写服务端（`SettingsModal.svelte:817-822`）；admin 配置走独立 config 拉取（:831-835）；
-- 版本更新提示：ChangelogModal（关闭时记录 settings.version，`ChangelogModal.svelte:41-46`）+ UpdateInfoToast（右下角，24h 静默记忆 dismissedUpdateToast，`(app)/+layout.svelte:442-452,386-396`）。
+- 保存模式：各 tab 组件只把改动交给 saveSettings 合并进 store，再整体回写服务端；admin 相关配置另走一条独立的 config 拉取与提交路径（`chat/SettingsModal.svelte:817-835`）。
+- 版本更新提示由两处配合：ChangelogModal 关闭时把 settings.version 记为已读，UpdateInfoToast 在右下角提示新版本，并用 dismissedUpdateToast 做 24 小时静默（`ChangelogModal.svelte:41-46`、`(app)/+layout.svelte:386-452`）。
 
 ### 桌面集成交点（壳在独立仓库）
 
-- 入口：window.electronAPI（app:info/app:data/token:update/window:isFocused/onEvent，`+layout.svelte:1038-1216`）；桌面模式把 `isApp` store 置位（`:1202`），本快照内无组件读取该标志，桌面壳经事件通道影响导航与主题；
-- 双向事件：桌面→Web 经 `desktopEventHandler` 写入 desktopEvent store（page:reload/page:navigate/query/call/theme:update/models:refresh/connections:*，`+layout.svelte:1038-1054`）；Web→桌面 window.applyTheme（主题，`:1191-1192`）与 load（导航）；
+- 入口：桌面壳往渲染进程注入 window.electronAPI，Web 侧通过它查询应用信息与数据目录、更新令牌、判断窗口是否聚焦并订阅桌面事件，调用集中在 `+layout.svelte:1038-1216`；用到的通道名为：
+  - `app:info`、`app:data`
+  - `token:update`、`window:isFocused`
+  - `onEvent`
+
+  桌面模式在这里把 `isApp` store 置位（`:1202`），本快照内没有组件读取该标志，桌面壳实际经事件通道影响导航与主题。
+- 双向事件：桌面发来的事件由 `desktopEventHandler` 写入 desktopEvent store，再由各处理器消费，通道有：
+  - `page:reload`、`page:navigate`
+  - `query`、`call`
+  - `theme:update`、`models:refresh`
+  - `connections:*`
+
+  Web 侧回给桌面的只有两个调用：window.applyTheme 同步主题、`load` 触发导航（`+layout.svelte:1038-1054`、`:1191-1192`）。
 - 本仓不含桌面壳实现（仓库分布笔记同述），electronAPI/applyTheme 无类型声明，属运行时注入钩子。
 
 ### 无障碍与动画（静态证据，运行未验证）
 
-- 应用级：skip link（`+layout.svelte:1310-1315`）、Modal/ConfirmDialog `role="dialog" aria-modal` + focus-trap、Dropdown `role="menu"` + aria-expanded + 焦点归还、NotificationToast `role="status" aria-live="polite"`、Switch 封装透传 aria-label（`Switch.svelte:31-32`）、html.high-contrast 对比度修正层；
+- 应用级：
+  - skip link 放在根布局（`+layout.svelte:1310-1315`）；
+  - Modal 与 ConfirmDialog 带 role="dialog"、aria-modal，并套 focus-trap；
+  - Dropdown 用 role="menu" 配 aria-expanded，关闭时归还焦点；
+  - NotificationToast 声明 role="status" 与 aria-live="polite"；
+  - Switch 把 aria-label 透传给内部控件（`Switch.svelte:31-32`）；
+  - 高对比度模式由 html.high-contrast 上的一层对比度修正规则承担。
 - 未覆盖证据：Toast 的 svelte-sonner 内部 aria 行为未核实；tippy Tooltip 的读屏名称未核实；Modal 关闭后的焦点去向未运行验证；全站按钮 aria-label 覆盖率未统计（工具按钮多数带 aria-label，如 `Image.svelte:37`、`Sidebar.svelte:953`）。
-- 动画：无动画库，全部 Svelte transition（fade/fly/slide）与自研 flyAndScale（`utils/transitions/index.ts`，200ms cubicOut，shadcn 风格）+ CSS @keyframes（shimmer、smoothFadeIn、fade-in-token，`app.css:187-256`）；prefers-reduced-motion 处理本次未找到（Grep reduced-motion|motion-reduce 无匹配）。
+- 动画：项目没有引入动画库，过渡全部来自 Svelte 的 fade/fly/slide、自研的 flyAndScale 与 CSS 关键帧三条路径。flyAndScale 由 `utils/transitions/index.ts` 实现，时长 200ms、缓动 cubicOut，风格参照 shadcn；关键帧动画有 shimmer、smoothFadeIn 与 fade-in-token，定义在 `app.css:187-256`。prefers-reduced-motion 的处理本次未找到（Grep reduced-motion|motion-reduce 无匹配）。
 
 ## 8. 设计取舍与已确认边界
 
@@ -323,3 +348,5 @@ common/Dropdown.svelte（359 行）：
 - 错误页：`src/routes/+error.svelte`、`src/routes/error/+page.svelte`
 - 主题切换：`src/lib/components/chat/Settings/General.svelte`（128-196）；token：`src/tailwind.css`、`src/app.css`（high-contrast 423-999）；缩放与字体：`src/lib/utils/text-scale.ts`
 - 聊天背景图：`src/lib/components/chat/Chat.svelte`（3783-3801）、`chat/Settings/Interface.svelte`（664-691）、`layout/Sidebar/Folders/FolderModal.svelte`；许可字段下发：`backend/open_webui/main.py:2267`；部署级自定义 CSS：`src/app.html:35` + `static/static/custom.css`
+- 文本方向透传：`chat/Messages/UserMessage.svelte`（134）、`chat/Messages/ResponseMessage.svelte`（659）、`chat/MessageInput.svelte`（1590-1622）、`channel/Messages/Message.svelte`（379-460）、`channel/MessageInput.svelte`（807）
+- 右键菜单屏蔽点：`chat/ChatTabs/ChromeBrowser.svelte`（260）、`chat/ChatTabs/NativeDesktop.svelte`（73）、`FileNav.svelte`（2387）、`chat/CallOverlay/VoiceAvatar.svelte`（222）

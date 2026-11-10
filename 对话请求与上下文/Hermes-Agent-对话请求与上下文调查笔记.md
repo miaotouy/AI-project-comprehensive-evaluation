@@ -18,7 +18,7 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 
 主链路：composer → prompt.submit（WS）→ 参数契约校验与 busy 门控（`tui_gateway/methods_prompt.py`）→ 回合执行（`tui_gateway/prompt_turn.py` 的 `_run_prompt_submit`，记录 turn marker、注册流式回调、启动运行线程）→ 对话主循环（`agent/conversation_loop.py:1802` 的 `run_conversation`，组装上下文、循环调用 Provider，每个增量经流式回调回发）→ 收尾持久化 → message.complete（含 status/text/usage）。桌面端增量文本进入自适应节流队列，完成事件合并终态并触发会话列表刷新。
 
-当前结构有四处落点：方法契约集中在 `tui_gateway/contracts/*.py` 并以 Pydantic 校验；`tui_gateway/server.py` 是 1,705 行的 facade，prompt 执行、busy 处理、自动续跑、历史与压缩衔接分别落在 `prompt_turn.py`、`session_auto_continue.py`、`session_history.py`、`session_compression.py`；中断/重定向原语在 `agent/interrupt_control.py`；截断参数优先取持久化行 id 或消息 id。
+实现分成四处：方法契约集中在 `tui_gateway/contracts/*.py`，由 Pydantic 校验；`tui_gateway/server.py` 是 1,705 行的 facade，prompt 执行、busy 处理、自动续跑、历史与压缩衔接分别下沉到同目录的 prompt_turn、session_auto_continue、session_history 与 session_compression 四个模块；中断与重定向原语在 `agent/interrupt_control.py`；截断参数优先取持久化行 id 或消息 id。
 
 ## 系统边界与生成任务主链
 
@@ -55,7 +55,7 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 
 ## 1. 提交入口、任务对象与状态机
 
-`prompt.submit` 的参数与结果由 `tui_gateway/contracts/prompt_voice.py` 声明（`PromptSubmitParams`、`PromptSubmitStatus`、`PromptSubmitResult`，方法注册在 `:83`），handler 在 `tui_gateway/methods_prompt.py`：
+`prompt.submit` 的参数、状态与结果由 `tui_gateway/contracts/prompt_voice.py` 声明，分别是 PromptSubmitParams、PromptSubmitStatus 与 PromptSubmitResult 三个模型，方法注册在同一文件的 :83；handler 在 `tui_gateway/methods_prompt.py`：
 
 | 参数 | 用途 |
 |---|---|
@@ -69,9 +69,18 @@ Hermes-Agent 是跨 CLI / TUI / 桌面 / 消息网关复用同一套 Python agen
 | `confirm_truncate` / `confirm_empty_truncate` / `confirm_deep_truncate` | 截断必须显式确认；空截断另需 `confirm_empty_truncate`（否则错误 4028）；一次归档多个用户轮需 `confirm_deep_truncate` |
 | `rebind_survivor_row_ids` | 截断后幸存行的重绑标识 |
 
-`display_type` 参数仍不存在（检查范围：契约目录与 `methods_prompt.py`）。handler 顺序：检查 busy 状态 → 执行截断（先写库，失败拒轮，再改内存历史并递增 `history_version`）→ 标记运行中并登记任务 → 确保会话行与分支种子存在 → 惰性构建 agent → 等待构建完成（`_wait_agent_for_prompt` 在 `tui_gateway/session_registry.py:33`：按 5 秒分片轮询，30 秒后发慢提示，上限由 `agent.build_wait_timeout` 配置）→ 启动后台线程并返回 `{status: "streaming"}`。失败时发送终态错误帧。
+`display_type` 参数仍不存在（检查范围：契约目录与 methods_prompt.py）。内联执行路径的 handler 按以下阶段处理：
 
-busy 处理在 `tui_gateway/session_auto_continue.py:400` 的 `_handle_busy_submit`：按 `display.busy_input_mode`（默认 interrupt）分派，`queue` 模式由 `queued` 参数强制；结果分别是 queued、steered 或 redirected，队列排空在 `_drain_queued_prompt`（`:457`），终态错误帧在 `_emit_terminal_turn_error`（`:559`）。
+1. 检查 busy 状态；
+2. 执行截断：先写库，失败即拒绝本轮，再改内存历史并递增 `history_version`；
+3. 标记运行中并登记任务；
+4. 确保会话行与分支种子存在；
+5. 按需启动或重启 agent 构建；
+6. 启动后台线程并返回 `{status: "streaming"}`，线程内等待 agent 就绪后执行回合（`tui_gateway/methods_prompt.py:956-973`）。
+
+等待构建由 `tui_gateway/session_registry.py:33` 的 _wait_agent_for_prompt 完成：按 5 秒分片轮询，30 秒后发慢提示，上限由 `agent.build_wait_timeout` 配置。提交阶段的 busy、截断、准入与持久化失败直接返回 RPC 错误；保存失败还会释放本轮运行标记与配额。后台等待构建失败则发送终态错误帧并保留恢复快照（`tui_gateway/methods_prompt.py:626-694,898-921`）。
+
+同会话已有回合在跑时，提交交由 `tui_gateway/session_auto_continue.py:400` 的 _handle_busy_submit 分派：先看 `display.busy_input_mode`（默认 interrupt），queue 模式也可由 `queued` 参数强制，最终结果是 queued、steered 或 redirected。队列排空与终态错误帧由同文件的 _drain_queued_prompt 与 _emit_terminal_turn_error 完成（:457-559）。
 
 ## 2. 历史选择与上下文拼装顺序
 
@@ -79,19 +88,19 @@ busy 处理在 `tui_gateway/session_auto_continue.py:400` 的 `_handle_busy_subm
 
 上下文构建入口 `build_turn_context`（`agent/turn_context.py:1093`），动作按功能分组：
 
-1. 恢复轮转会话：会话已被压缩轮转则取回 child 历史；
-2. 轮间 MCP 工具刷新（仅在已注册 MCP 且工具集变化时执行）并注册流式回调；
-3. 拷贝会话历史，追加本轮用户消息并记录用户位置；合成轮的显示类型与显示元数据在此盖章；
-4. 系统提示词：缓存为空时从 DB 恢复并校验，命中则复用，否则重建并持久化（`agent/conversation_loop.py:802` 的 `_restore_or_build_system_prompt`）；恢复后使用缓存提示词；
-5. DB 会话行 `_ensure_db_session`（**在压缩之前**，防 NULL system_prompt；压缩轮转/原地压缩都要引用父行）；
+1. 恢复轮转会话：会话若已被压缩轮转，则取回 child 历史；
+2. 刷新轮间 MCP 工具，仅在已注册 MCP 且工具集发生变化时执行，同时注册流式回调；
+3. 拷贝会话历史，追加本轮用户消息并记录用户位置；合成轮的显示类型与显示元数据在这里写入；
+4. 系统提示词：缓存为空时从数据库恢复并校验，命中则复用，否则重建并持久化，入口是 `agent/conversation_loop.py:802` 的 _restore_or_build_system_prompt；恢复后沿用缓存提示词；
+5. 确保数据库会话行存在（_ensure_db_session），**放在压缩之前**，防止 system_prompt 为空（NULL）；压缩轮转与原地压缩都要引用该父行；
 6. idle 压缩（见 §3）；
 7. preflight 压缩（见 §3）；
 8. 压缩后重锚用户位置；
-9. `pre_llm_call` 插件钩子；gateway 必达注记消费；
-10. 中断状态重闩；`_memory_manager.on_turn_start`；
-11. 外部记忆 `prefetch_all`；
-12. 为 API 副本追加 sidecar 内容（记忆块与插件上下文，`compose_user_api_content` 在 `agent/turn_context.py:124`）；
-13. crash 持久化：`_ensure_db_session` 加用户行一次写入；回合末执行标题派生（标题机制在会话与消息管理笔记 §2.3）。
+9. 触发 pre_llm_call 插件钩子，并消费 gateway 的必达注记；
+10. 重闩中断状态，并调用 _memory_manager.on_turn_start；
+11. 预取外部记忆（prefetch_all）；
+12. 为 API 副本追加 sidecar 内容，即记忆块与插件上下文，由 `agent/turn_context.py:124` 的 compose_user_api_content 拼装；
+13. crash 持久化：_ensure_db_session 与用户行一次写入；回合末执行标题派生（标题机制在会话与消息管理笔记 §2.3）。
 
 每次重建历史时，过期的 `api_content` sidecar 由 `drop_stale_api_content`（`agent/turn_context.py`）丢弃，避免把上一轮的字节保真内容重放给新请求。
 
@@ -99,9 +108,9 @@ busy 处理在 `tui_gateway/session_auto_continue.py:400` 的 `_handle_busy_subm
 
 `build_system_prompt_parts`（`agent/system_prompt.py:738`）产出三档字典：
 
-- `stable`（跨会话稳定）：SOUL/身份、task-completion、parallel-tool-call 指导、工具族指导、tool_use_enforcement、env hints 等；
-- `context`（cwd 相关）：coding workspace、profile 提示、平台 hint、调用方 `system_message`、上下文文件（`build_context_files_prompt` 在 `agent/prompt_builder.py`）；
-- `volatile`（最易变）：skills index、内置记忆块、USER.md、外部记忆 provider 块、时间戳行（日期级粒度保字节稳定）。
+- `stable`（跨会话稳定）：SOUL 与身份设定、任务完成要求、并行工具调用指导、工具族指导、tool_use_enforcement 与 env hints 等内容；
+- `context`（随 cwd 变化）：coding workspace、profile 提示、平台 hint、调用方传入的 `system_message`，以及上下文文件（由 `agent/prompt_builder.py` 的 build_context_files_prompt 生成）；
+- `volatile`（最易变）：skills index、内置记忆块、USER.md、外部记忆 provider 块与时间戳行（时间戳只到日期粒度，保持字节稳定）。
 
 主构建函数拼接并缓存结果；续会话从 DB 恢复，压缩后清空缓存并重载记忆磁盘。
 
@@ -109,8 +118,8 @@ busy 处理在 `tui_gateway/session_auto_continue.py:400` 的 `_handle_busy_subm
 
 ## 3. 预算、截断、摘要与压缩
 
-- 无 token 级截断原语；压缩判断 `should_compress` / `should_compress_info`（`agent/context_compressor.py:3003/3007`）：达到阈值且未被阻塞才压缩。阻塞原因是压缩失败冷却或连续两次无效，阈值按上下文长度比例计算，也可由绝对上限覆盖。
-- 压缩入口 `compress_context`（`agent/conversation_compression.py:3989`）；`agent/compression_facade.py:227` 提供 Agent 侧 `_compress_context` 门面；状态模板覆盖 PRE_API、PREFLIGHT、IDLE_COMPACTION 与 CONTEXT_OVERFLOW_BLOCKED。
+- 代码中没有 token 级截断原语，是否压缩由 should_compress 与 should_compress_info 判断：达到阈值且未被阻塞才执行压缩（`agent/context_compressor.py:3003-3007`）。阻塞原因是压缩失败冷却或连续两次无效，阈值按上下文长度比例计算，也可由绝对上限覆盖。
+- 压缩入口是 `agent/conversation_compression.py:3989` 的 compress_context，Agent 侧另有 `agent/compression_facade.py:227` 的 _compress_context 门面。状态模板区分四个阶段：API 调用前（PRE_API）、preflight、idle 压缩（IDLE_COMPACTION）与上下文溢出被阻塞（CONTEXT_OVERFLOW_BLOCKED）。
 - preflight 先做廉价粗估，再按需多轮重测（默认最多 3 轮），只有行数减少或 token 降幅超过 5% 才继续；被阻塞时提示 CONTEXT_OVERFLOW_BLOCKED。
 - idle 压缩：墙上时间门（`compression_idle_compact_after_seconds`）与 token 阈值正交，要求 token 数高于下限。
 - **压缩内容保留面**：保留进行中的工具链和 clarify 等非响应哨兵，修剪陈旧 reasoning 行，并处理最大迭代提示与无 continuation 的孤儿恢复。原地压缩与轮转都保留旧行的 `active=0/compacted=1` 语义（会话与消息管理笔记 §3.5）。
@@ -160,40 +169,46 @@ WS 端对 message.delta 等高频帧做 token 合批（约 30fps），任何非�
 ## 7. 停止、重试、续写与重新生成
 
 - **中断（服务端）**：
-  - 主循环顶部、重试等待和空响应重试等位置检查中断；流式 API 入口抛 `InterruptedError`（`agent/chat_completion_helpers.py` 的 `interruptible_api_call` / `interruptible_streaming_api_call`）。
-  - 中断原语集中在 `agent/interrupt_control.py`：`clear_interrupt`（`:278`，可保留 redirect 或硬取消）、`redirect`（`:323`，只打断模型请求，不扩散到工具或子代理）、`interrupt_issuer`（`:29`）；硬取消经过压缩提交栅栏，并向执行线程、工具 worker 和子代理传播。
-  - 服务端 `session.interrupt` 请求硬中断并清理审批。
-  - **回合租约**：`gateway/turn_lease.py` 按解析后的 session_id 串行化"载入历史→运行→flush"，等待超时 fail-closed；shutdown 时中断每个进行中的 API 回合。
-  - **停止（桌面端）**：桌面端没有名为 `interruptResponse` 的符号；TUI 的对照符号为 `SessionInterruptResponse`（`ui-tui/src/gatewayTypes.ts`）。桌面停止先在本地定稿再调用 session.interrupt，随后本地 interrupted 状态拒收迟到流事件，complete 的中断分支只清 busy 并保留部分文本。
-  - **重试**：三套实现都截断到最后一个真实用户回合后重发；真实回合判定与数据变化见会话与消息管理笔记 §4。TUI 的 `/retry` 在 `ui-tui/src/app/slash/commands/core.ts`，桌面 reload/regenerate 在 `rewind.ts`，CLI 对照为 `retry_last()`。
-  - **续写**：没有 `/continue` 命令或独立 RPC，只是普通 prompt.submit 文本"continue"；空响应恢复会重放占位 assistant 行，持久化前由 `_drop_trailing_empty_response_scaffolding`（`agent/session_persistence.py:530`）删除。
-  - **编辑后发送**：桌面入口在 `user-message.tsx`，点击进入编辑 composer，发送即执行"interrupt + rewind"，截断目标优先用持久化行 id（§1）；数据侧截断语义见会话与消息管理笔记 §4。
-  - **运行中干预**：`session.steer` 把文本追加到本批次最后一条工具消息末尾，不新增消息也不破坏角色交替；没有可挂载工具时回存，未消费内容作为下一轮用户消息投递。`session.redirect` 要求 agent 支持活动轮重定向，未就绪但正在运行时先入队。
+  - 主循环顶部、重试等待与空响应重试都会检查中断；流式 API 入口命中中断时抛出 `InterruptedError`，入口实现见 `agent/chat_completion_helpers.py` 的 interruptible_api_call 与 interruptible_streaming_api_call。
+  - 中断控制集中在 `agent/interrupt_control.py`：clear_interrupt 负责清除中断请求、硬中断事件及线程/工具信号；可选择保留待处理 redirect，硬取消后的清理还会丢弃未消费 steer 并结算 ticket（:278-308）。redirect 只打断模型请求，不扩散到工具或子代理。发起硬取消要经过压缩提交栅栏，并向执行线程、工具 worker 和子代理传播。
+  - 服务端的 `session.interrupt` 请求执行硬中断，并清理审批。
+  - **回合租约**：`gateway/turn_lease.py` 按解析后的 session_id 串行化载入历史、运行与 flush 三步，等待超时按 fail-closed 处理；shutdown 时中断每个进行中的 API 回合。
+  - **停止（桌面端）**：桌面端不存在名为 interruptResponse 的符号，TUI 的对应符号是 `SessionInterruptResponse`（`ui-tui/src/gatewayTypes.ts`）。桌面端停止会先在本地把消息定稿，再调用 session.interrupt；此后本地 interrupted 状态拒收迟到的流事件，complete 的中断分支只清 busy 并保留部分文本。
+  - **重试**：三套实现都先截断到最后一个真实用户回合再重发，真实回合的判定与数据变化见会话与消息管理笔记 §4。入口分别是：
+    - TUI：`/retry`，在 `ui-tui/src/app/slash/commands/core.ts`；
+    - 桌面端：reload 与 regenerate，在 `rewind.ts`；
+    - 命令行：`retry_last()`。
+  - **续写**：没有专门的 `/continue` 命令或独立 RPC，客户端把文本 continue 当作普通 prompt.submit 发出。空响应恢复会重放占位的 assistant 行，持久化前由 `agent/session_persistence.py:530` 的 _drop_trailing_empty_response_scaffolding 删除。
+  - **编辑后发送**：桌面入口在 `user-message.tsx`，点击后进入编辑 composer；发送时执行 interrupt 与 rewind 两个动作，截断目标优先用持久化行 id（§1），数据侧的截断语义见会话与消息管理笔记 §4。
+  - **运行中干预**：`session.steer` 将文本排队，在工具批结束后追加独立 user 行；轮前 drain 也可把该行插在最新工具结果之后，下一次 flush 会持久化它（`agent/agent_runtime_helpers.py:3668-3705`、`agent/turn_iteration_prep.py:284-295`）。没有可挂载的工具时先回存，未消费的内容作为下一轮用户消息投递。`session.redirect` 要求 agent 支持活动轮重定向，未就绪但正在运行时先入队。
 
 ## 8. 队列、多会话并发与后台生成
 
-- 同会话 busy 时按 steer 或活动轮重定向处理，否则入队并异步中断，返回 queued（`_handle_busy_submit`，`tui_gateway/session_auto_continue.py:400`）；`queued` 参数强制 queue 模式，队列在回合结束后由 `_drain_queued_prompt`（`:457`）排空并用代际编号防串扰。
-- agent 构建等待有 600 秒上限（`_wait_agent_for_prompt`，`tui_gateway/session_registry.py:33`）。
-- 后台生成包括 auto-continue（`_maybe_schedule_auto_continue`，`tui_gateway/session_auto_continue.py:58`）和 async-delegation；它们会传递显示类型与元数据。AIAgent 可关闭后台复习，子代理异步任务则创建独立会话执行（数据语义见会话与消息管理笔记 §8）。
+- 同会话 busy 时，提交按 steer 或活动轮重定向处理，否则入队并异步中断当前回合，返回 queued；`queued` 参数会强制 queue 模式。分派与排空由 `tui_gateway/session_auto_continue.py:400-457` 的 _handle_busy_submit 与 _drain_queued_prompt 完成，队列用代际编号防止串扰。
+- agent 构建等待最多 600 秒，由 `tui_gateway/session_registry.py:33` 的 _wait_agent_for_prompt 控制。
+- 后台生成有 auto-continue 与 async-delegation 两条路径，两者都会传递显示类型与元数据；auto-continue 的调度入口是 `tui_gateway/session_auto_continue.py:58` 的 _maybe_schedule_auto_continue。AIAgent 可以关闭后台复习，子代理异步任务则创建独立会话执行（数据语义见会话与消息管理笔记 §8）。
 - 多会话并发与同会话串行化的实际运行行为未验证（见未验证事项）。
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- 工具执行会传入流式回调、用户消息持久化开关和会话任务标识；每轮顶部处理 steer，轮间刷新 MCP 工具，并运行 pre_llm_call 插件钩子（`agent/turn_context.py`）。
+- 工具执行时会传入流式回调、用户消息持久化开关和会话任务标识；每轮顶部处理 steer，轮间刷新 MCP 工具，并运行 pre_llm_call 插件钩子，相关逻辑在 `agent/turn_context.py`。
 - 记忆有两个注入通道：内置 MemoryStore 进入 volatile 系统提示词；外部 provider 先预取，再以 sidecar 注入当前用户消息，轮后写回。内部语义不在本类目展开。
-- 附件注入：@file: 和 @context 引用在回合执行前预处理；图片按路由选择 native 像素直传或 text vision 预分析。桌面端按跨文件系统情况选择附件 RPC 或共享本地路径；图片指引是 @image:<path> 指令行。`input.detect_drop` 仅存在于 Ink TUI 侧，桌面 renderer 使用 file/image attach RPC。拖放与附件分流见 Chat UI 笔记 §3。
-- 语音轮：契约新增 `voice_context`/`voice_turn`，口述轮走 `auxiliary.voice_chat` 路由（`tools/voice_live.py`），与文本轮共用主循环。
+- 附件注入按来源处理：@file: 与 @context 引用在回合执行前预处理；图片按路由选择 native 像素直传或 text vision 预分析；桌面端按是否跨文件系统选择附件 RPC 或共享本地路径，图片指引写成 @image:<path> 指令行。input.detect_drop 仅存在于 Ink TUI 侧，桌面 renderer 使用 file/image attach RPC。拖放与附件分流见 Chat UI 笔记 §3。
+- 语音轮：契约中的 voice_context 与 voice_turn 标记语音实时会话，口述轮走 `auxiliary.voice_chat` 路由（`tools/voice_live.py`），与文本轮共用主循环。
 
 ## 10. 退出恢复、日志与已确认边界
 
-- 崩溃恢复：回合标记写入 `<home>/desktop/interrupted_turns.json`（上限 32 条/24 小时/64KB 提示词），在客户端已见到结果后清除（`tui_gateway/turn_marker.py`）；标记带写入者 pid 与启动时间，并用跨进程文件锁避免同机多后端互踩。`session.resume` 按标记自动重跑并用 attempts 计数防循环；断连窗口的失败回合还可从 inflight 快照恢复。
-- 桌面端请求层：请求带超时参数（`utils.ts` 的 `timeoutMs`），后端事件循环饥饿时以超时拒绝，且与"畸形响应"分开判定；回合完成依靠流事件而不是 RPC ACK；找不到会话或超时后 resume 会触发一次重试，busy 则按目标会话重试（`submit.ts`、`use-prompt-actions/utils.ts`）。
-- 可观测性：message.complete 携带 usage 与 billing，错误终帧携带 error、recoverable、partial 与 failure_reason。任务级日志与 trace 不在本次调查范围。
+- 崩溃恢复：回合标记写入 `<home>/desktop/interrupted_turns.json`（上限 32 条 / 24 小时 / 64KB 提示词），客户端已见到结果后清除（`tui_gateway/turn_marker.py`）。标记带写入者 pid 与启动时间，并用跨进程文件锁避免同机多后端互踩。`session.resume` 按标记自动重跑，用 attempts 计数防止循环；断连窗口内的失败回合还可从 inflight 快照恢复。
+- 桌面端请求层在请求上带超时参数（`utils.ts` 的 timeoutMs）：后端事件循环饥饿时按超时拒绝，并与畸形响应的判定分开。回合完成以流事件为准，RPC ACK 只表示网关受理了请求。resume 在找不到会话或超时后会重试一次，busy 时按目标会话重试（`submit.ts`、`use-prompt-actions/utils.ts`）。
+- 可观测性：完成帧与错误终帧携带的字段不同。
+  - message.complete：usage、billing。
+  - 错误终帧：error、recoverable、partial、failure_reason。
+- 任务级日志与 trace 不在本次调查范围。
 - 已确认边界：无 token 级截断原语（§3）；`display_type` 参数不存在（§1）；桌面端没有 `interruptResponse` 符号（§7）。
 
 ## 11. 压缩保留策略与批处理输出
 
-上下文压缩的默认保留策略为 lean tail（`tail_mode` 默认 `lean`，`agent/context_compressor.py:2824`）：尾部预算下限与上限分别是 10,000 与 25,000 token（`LEAN_TAIL_FLOOR_TOKENS`/`LEAN_TAIL_CAP_TOKENS`，`:923-924`），另保留受预算约束的近期用户消息与工具回合。当前实现因此不保留大段原始上下文，而是优先保留较短的可验证尾部，其余依赖压缩摘要。ACP 侧把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中把该 provider 自身的工具工作合并回当前 turn；运行时效果未执行验证。
+上下文压缩默认走 lean tail 保留策略：`tail_mode` 默认 lean，尾部预算下限与上限分别是 10,000 与 25,000 token，对应 LEAN_TAIL_FLOOR_TOKENS 与 LEAN_TAIL_CAP_TOKENS，另保留受预算约束的近期用户消息与工具回合。策略开关与相关常量定义在 `agent/context_compressor.py`（:2824、:923-924）。因此当前实现只保留较短的可验证尾部，压缩摘要承担其余上下文。ACP 侧把多个客户端收敛到共享 OpenAI bridge，并在支持工具调用的 agent-as-provider 场景中把该 provider 自身的工具工作合并回当前 turn；运行时效果未执行验证。
 
 批处理入口 `hermes chat -q ... --format stream-json` 把一次性对话暴露为 JSONL 协议：首帧是 system/init，随后按发生顺序输出 text、tool_use、tool_result，末帧 result 携带成功状态、用量与最终文本。它复用正常 Agent 主链，只替换输出汇聚面（`hermes_cli/stream_json.py`）。
 

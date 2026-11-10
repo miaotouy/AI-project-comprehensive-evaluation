@@ -30,13 +30,13 @@ DeepSeek Harness 的 Web 界面是一个"一切皆插件"的 Cordis 组合产物
 
 **装配。** 宿主组合由 `packages/bundle/web-app/cordis.patch.yml` 描述：在 `dsh-base` 之上插入 web 专用宿主行（webserver、web-app/startup、api 各 controller、mcp-manager、plugin-inventory、product-telemetry-otel、open-in-app 等），再插入数十个 `dsh-client-*` 浏览器插件行；文件内共 97 条 `name:` 行。应用面（surface）的 agent 平面通过 `disabled: true` 关闭进程级行，改由每个会话的 agent preset 组合。
 
-**多入口。** 仓库内有 `apps/web`（浏览器 shell 构建入口）、`apps/desktop` 与 `apps/desktop-host`（桌面壳）、`apps/cli`（CLI/TUI 与 `dsh web` 服务）、`apps/plugin-market-generator`。`dsh --profile acp`、`--profile headless`、`--profile sdk` 等其它 profile 不加载 Web 行；`apps/web` 只提供构建产物，由 `apps/cli` 的 `dsh web` 服务。
+**多入口。** 仓库按运行表面拆成多个入口，目录为 `apps/{web,desktop,desktop-host,cli,plugin-market-generator}`：浏览器 shell 由 web 构建，桌面壳由 desktop 与 desktop-host 组成，命令行与 TUI 在 cli 内并同时提供 `dsh web` 服务，产品市场生成器单独占一个目录。acp、headless、sdk 等其它 profile 都不加载 Web 行；web 只产出构建产物，实际服务由 cli 的这条命令启动。
 
 ## 1. 界面栈、公共组件与状态所有权
 
-**插槽系统。** `packages/client/ui-slots` 是组合核心：`SlotMap` 经声明合并扩展，一次 `slots.register({ name, children?, store?, inject? }, Component)` 同时贡献组件、声明子插槽（声明即渲染授权，跨包冲突在加载期失败）、座位 store 与注入面。插槽名镜像组合路径（如 `tool.call.toolview`），别名为 `ui-tool` 的选择器仍可用。`kind` 决定基数与调度（single/list/keyed/chain），`scope` 决定会话数据上下文（root/session-maybe/session）。另有 `registerFactory()` 供可复用组件或装配使用，工厂子插槽受同一 `SlotMap` 检查与全局所有权约束。框架只渲染内置 `root` 插槽，其余全部由业务插件声明。
+**插槽系统。** 组合核心在 `packages/client/ui-slots`，SlotMap 经声明合并扩展。插件调用一次 `slots.register()`，传入名称、子插槽声明、座位 store 与注入面，再附上组件，就同时贡献了组件、子插槽、store 与注入面；声明子插槽本身即渲染授权，跨包重名在加载期直接失败。插槽名镜像组合路径（如 tool.call.toolview），以 ui-tool 作别名的选择器继续可用。注册项有两个控制维度：kind 决定基数与调度方式，取值 `single|list|keyed|chain`；scope 决定会话数据的上下文，取值 `root|session-maybe|session`。可复用组件或装配场景改用 `registerFactory()`，其工厂子插槽接受同一套 SlotMap 检查与全局所有权约束。框架自身只渲染内置的 root 插槽，其余插槽全部由业务插件声明。
 
-**Props 五份派生面**：运行时套件、渲染子插槽、可复用工厂、store、注入面；全部由框架派生，业务代码不得手写或本地重定义。标准座位含 `useSession`、`useSessions`、`useWorkspaces`、`useStore`、`renderSlot`、`renderFactorySlot`，工厂额外得到 `useFactorySlot`。
+**Props 五份派生面。** 组件拿到的 props 由框架统一派生，共有五个来源：运行时套件、渲染子插槽、可复用工厂、store 与注入面；业务代码不得手写这些面，也不得在本地重定义。标准座位还注入一组 hook：会话与工作区数据由 `useSession/useSessions/useWorkspaces` 读取，跨条目共享状态走 `useStore`，子插槽渲染走 `renderSlot/renderFactorySlot`；工厂座位在此之外多出 `useFactorySlot`。
 
 **三条活数据通道**：父级已知的数据走渲染点的 owner props；只有组件自己知道的走本地 state；跨条目或跨重挂载共享的走注册时声明的 store。派生数据是对框架 hook 数据的纯函数，不自建订阅（`packages/client/AGENTS.md` 规则 5）。
 
@@ -50,17 +50,29 @@ DeepSeek Harness 的 Web 界面是一个"一切皆插件"的 Cordis 组合产物
 
 **Modal。** 自研受控组件（`ui-primitives/src/Modal.tsx`）：portal 到 body（避免祖先 stacking context 盖过遮罩）、Esc 与遮罩点击关闭、`role="dialog"` + `aria-modal` + `aria-label`。无命令式弹窗注册表、无全局 Overlay Host；Modal 内未发现焦点陷阱与焦点归还逻辑，该行为依赖浏览器默认，未验证。业务消费面覆盖 workspace 选择器、模型设置、agent preset、目录选择等。对照组件 `ImageLightbox`（ui-attachment）在卸载时把焦点还给触发元素。
 
-**上下文菜单与文件动作。** 新增两个独立基础设施包：`ui-context-menu` 提供声明式上下文菜单服务（条目按目标对象注册，命令 id 与快捷键复用），`ui-file-actions` 把文件/目录动作注册成可在菜单、命令面板与侧栏复用的动作。二者随 web-app 组合默认装载，业务包通过注册而不各自实现右键菜单。
+**上下文菜单与文件动作。** 右键菜单与文件动作各由一个独立基础设施包承担。`ui-context-menu` 提供声明式上下文菜单服务：条目按目标对象注册，命令 id 与快捷键直接复用。`ui-file-actions` 把文件与目录动作注册成可复用动作，菜单、命令面板与侧栏都从同一份动作表取用。两个包随 web-app 组合默认装载，业务包注册条目即可获得右键菜单。
 
-**侧栏。** `ui-sidebar` 是左栏容器；右侧新增 `ui-sidebar-right` 作为右侧面板宿主，`ui-sidebar-files`、`ui-sidebar-terminal`、`ui-sidebar-browser`、`ui-sidebar-documentpreview` 作为条目注册。`ui-dockkit` 提供停靠/浮层几何基础。
+**侧栏。** 左栏由 `ui-sidebar` 这个容器包承载，右侧面板的宿主是 `ui-sidebar-right`。侧栏条目以注册方式挂到宿主上，现有文件、终端、浏览器与文档预览四项，包名分别对应 `ui-sidebar-{files,terminal,browser,documentpreview}`。停靠与浮层的几何计算由 `ui-dockkit` 承担。
 
-**其他交互基础件**：`ui-input-trigger`（输入框 `@`/`/` 触发器）、`ui-commands`（斜杠命令面）、`ui-secret-mask`（敏感值遮罩）、`ui-shortcuts`（快捷键参考）、`ui-entry-customization`（入口外观定制）、`ui-trajectory`（回合轨迹视图）、`ui-reference`（会话/文件引用卡）、`ui-user-questions`（提问卡）、`ui-open-in-app`（在外部应用打开）。
+**其他交互基础件。** 以下九个包各提供一项交互能力：
+
+| 包 | 能力 |
+| --- | --- |
+| `ui-input-trigger` | 输入框的 `@` 与 `/` 触发器 |
+| `ui-commands` | 斜杠命令面 |
+| `ui-secret-mask` | 敏感值遮罩 |
+| `ui-shortcuts` | 快捷键参考 |
+| `ui-entry-customization` | 入口外观定制 |
+| `ui-trajectory` | 回合轨迹视图 |
+| `ui-reference` | 会话与文件引用卡 |
+| `ui-user-questions` | 提问卡 |
+| `ui-open-in-app` | 在外部应用中打开 |
 
 ## 3. 加载链、运行时与模块系统
 
-- **shell 内核**（`packages/client/web`）：负责加载页、启动清单、注入应用、拖拽区域与 Loader 状态。启动审核只把必需条目的未激活视为致命错误；可选条目导入或激活失败会统一告警，活跃兄弟继续运行。若失败项导致必需项等待缺失服务，仍拒绝启动（`src/boot-client.ts:15-33,96-134`）。
-- **client module table**（`client/modules`，`ctx.clientModules`/`ctx.modules`）：把可加载的浏览器插件模块映射到 URL，支持按需与并行装载；宿主侧 `extensions/cordis-client-runner` 提供客户端插件仓库与清单。
-- **HMR**：`client/hmr` 消费开发期重载协议（SSE），`boot/hmr` 提供宿主侧；仅在开发构建生效，`DSH` 发布构建不装载。
+- **shell 内核**（`packages/client/web`）：加载页、启动清单、应用注入、拖拽区域与 Loader 状态都由这一层负责。启动审核只把必需条目的未激活视为致命错误；可选条目在导入或激活阶段失败时统一告警，活跃的兄弟条目继续运行。失败项若让必需条目一直等待缺失的服务，启动仍会被拒绝（`src/boot-client.ts:15-33,96-134`）。
+- **client module table**（`client/modules`）：把可加载的浏览器插件模块映射到 URL，支持按需装载与并行装载，调用方通过 `ctx.clientModules` 或 `ctx.modules` 访问这张表。宿主侧由 `extensions/cordis-client-runner` 提供客户端插件仓库与清单。
+- **HMR**：开发期的重载协议走 SSE，页面侧由 `client/hmr` 消费，宿主侧由 `boot/hmr` 提供。这套机制只在开发构建中生效，发布构建不装载。
 - **文件上传**（`client/file-upload`）：原始 Blob 与字节流请求体在页面线程之外发送，避免大图阻塞渲染。
 - **快捷键**（`client/shortcuts`）：命令注册表，UI 面由 `ui-shortcuts` 呈现。
 
@@ -68,32 +80,34 @@ DeepSeek Harness 的 Web 界面是一个"一切皆插件"的 Cordis 组合产物
 
 **上行**：Remote 调用是 HTTP POST，路径前缀由 Gateway 生成；**下行**：所有订阅统一到 `/api/remote.mux`（`packages/api/gateway/src/stream-protocol.ts:7`）上的逻辑 streams，带 generation-ready 握手与断线续订。
 
-**浏览器鉴权**：`client/connection` 负责浏览器与宿主的认证握手、重连状态机与事件投递；`browser-auth.ts` 记录 mux 路径。运行期信任由 `webStartup` 服务提供——`connection` 行从 `ctx.webStartup.trustedHosts` 读取 `--trusted-host` 授权列表，旧的 `webRuntime` 服务与 `web-runtime` 行的 `trustedHosts` 配置已移除（`docs/upgrade-guide/v0.2.1-alpha.1/web-listener-trust-config`）。监听 host 必须是本机接口的具体 IPv4/IPv6 地址，`0.0.0.0` 或 `::` 在装载期拒绝。
+**浏览器鉴权。** 浏览器与宿主的认证握手、重连状态机与事件投递都由 `packages/client/connection/src/browser-auth.ts` 承担，mux 路径也记在这里。运行期的信任来源是 `webStartup` 服务：connection 行从 `ctx.webStartup.trustedHosts` 读取 `--trusted-host` 给出的授权列表；早先的 webRuntime 服务与对应的 web-runtime 配置行已连同其 trustedHosts 一并移除，迁移说明见 `docs/upgrade-guide/v0.2.1-alpha.1/web-listener-trust-config`。监听地址必须是本机某个接口的具体 IPv4 或 IPv6 地址，通配地址 0.0.0.0 与 :: 在装载期即被拒绝。
 
 **Typert**：`packages/typert/{protocol,generator}` 从 TypeScript 类型图生成协议描述符与 zod 编解码器；服务类以 `@Remote` 标注方法，网关按描述符分发 `/api` 调用并在边界完成校验与错误映射。新增的 Remote 服务沿用该机制（例如 agent preset registry、plugin inventory、forge 面板）。
 
 ## 5. 配置表单与设置面
 
-`packages/client/schema-form` 已不存在；schema 驱动的配置表单并入 `packages/client/ui-settings`（`src/client/{config-form,config-form-types,schema,settings-mirror}.ts`）：按命名空间读写设置文档、支持原子多字段更新与 schema 校验，并用 mirror 防止静默覆盖并发修改。`ui-settings` 只提供扩展点（设置外观、页面、头部动作、插件页签、引导）而不渲染界面，外壳由单独的呈现包提供；页面按域拆成 `ui-settings-{general,models,agent-loop,shell,web-search,subagent,session-log,plugins,plugin-inventory,account}`，由 `dsh-client-modules` 装配。宿主侧 `packages/boot/config-editor` 仍提供配置文档读写与 revision 校验，供设置面板保存 `cordis.patch.yml` 片段。
+schema 驱动的配置表单现在由 `packages/client/ui-settings` 承担，早先独立的 `packages/client/schema-form` 已不存在。实现分布在 `src/client/` 的 config-form、config-form-types、schema 与 settings-mirror 四个模块：按命名空间读写设置文档，支持原子多字段更新与 schema 校验，并用 mirror 防止并发修改被静默覆盖。
+
+`ui-settings` 提供设置外观、页面、头部动作、插件页签与引导等扩展点，界面外壳由单独的呈现包渲染。具体页面按域拆成 `ui-settings-{general,models,agent-loop,shell,web-search,subagent,session-log,plugins,plugin-inventory,account}` 十个包，由 `dsh-client-modules` 装配。宿主侧的 `packages/boot/config-editor` 仍提供配置文档读写与 revision 校验，供设置面板保存 `cordis.patch.yml` 片段。
 
 ## 6. 国际化与主题
 
-- **locale**（`packages/client/locale`，`ctx.locale`）：语言偏好与消息字典，字典按包放在 `locale/<lang>.json` 并按 i18n 伴侣文件校验；内建 zh/en/ja/es/fr/de/ru/pt。`LocaleRuntime` 提供 `t()` 与切换通知，插件在 apply 期注册自己的字典命名空间。
+- **locale**（`packages/client/locale`）：语言偏好与消息字典由该包持有，通过 `ctx.locale` 暴露。字典按包放在 `locale/<lang>.json`，并按 i18n 伴侣文件校验；内建 zh、en、ja、es、fr、de、ru、pt 八套。`LocaleRuntime` 提供 `t()` 与切换通知，插件在 apply 期注册自己的字典命名空间。
 - **theme**（`ui-theme`）：应用所选配色主题；主题变量是 CSS 自定义属性，`base.css` 与 CSS Modules 消费。仓库文档 `docs/web-styling.md` 规定样式约定与 UI 半径等 token。
 
 ## 7. 宿主集成
 
-- **webserver**（`host/webserver`）：HTTP 服务与索引页渲染。`renderIndex(html, peer)` 与 `collectIndexInjections(peer)` 现在都接收页面所代表的 Peer，`webserver/index-inject` 事件把同一 Peer 传给监听器，因此索引里的远程访问快照属于该 Peer，而不是一律 owner 快照（`docs/upgrade-guide/v0.2.1-rc.2/webserver-index-peer`）。
+- **webserver**（`host/webserver`）：提供 HTTP 服务并渲染索引页。索引渲染与注入收集两个入口都接收页面所代表的 Peer，`webserver/index-inject` 事件再把同一个 Peer 传给监听器，因此索引里的远程访问快照跟着该 Peer 生成，一律取 owner 快照的旧行为已经取消。迁移说明见 `docs/upgrade-guide/v0.2.1-rc.2/webserver-index-peer`。
 - **frontend-static**：静态资源与指纹缓存策略。
-- **directory-picker**：`directory-picker`（seam）加 `directory-picker-native`、`directory-picker-browse`、`directory-picker-auto` 三个实现，由宿主按平台选择。
+- **directory-picker**：目录选择以 seam 加平台实现的结构组织。基础 seam 是 `directory-picker`，按平台实现有三个：`directory-picker-native`、`directory-picker-browse` 与 `directory-picker-auto`，由宿主按平台选用。
 - **open-in-app**（`host/open-in-app`）：把文件或目录交给平台默认程序/编辑器打开，UI 面是 `client-ui-open-in-app`。
 - **plugin-inventory**（`host/plugin-inventory`）：已安装插件清单投影，供设置与市场页消费。
 - **product-telemetry-otel**（`host/product-telemetry-otel`）：产品遥测出口，与 `telemetry/otel` 分开。
 
 ## 8. profile、启动与退出
 
-- **CLI 启动**（`apps/cli/src/{bin,profile-boot,process-shutdown}.ts`）：`dsh --profile web` 解析 profile 与 patch 覆盖，装载 `boot/app-boot` 的 profile 图，打印 `dsh web: <url>` 并可选打开浏览器。`--dump-config` 打印组合后的 patch；`--no-open` 抑制自动打开。
-- **启动**：`web-app/startup` 行提供 `webStartup`（监听 host/port、`trustedHosts`、公开 URL），`web-app` bundle 行组装 Web 表面；`boot-app` 负责 Loader 树、include 合并与入口激活审计（`assertEntriesActivated`）。
+- **CLI 启动**（`apps/cli/src/{bin,profile-boot,process-shutdown}.ts`）：`dsh --profile web` 先解析 profile 与 patch 覆盖，再装载 `boot/app-boot` 的 profile 图，随后打印 `dsh web: <url>` 并按设置决定是否打开浏览器。`--{dump-config,no-open}` 分别打印组合后的 patch 与抑制自动打开。
+- **启动**：`web-app/startup` 行提供 `webStartup` 服务，负责监听 host 与 port、`trustedHosts` 以及公开 URL；`web-app` bundle 行组装 Web 表面。`boot-app` 负责 Loader 树、include 合并与入口激活审计，审计入口是 assertEntriesActivated。
 - **退出**：`process-shutdown` 依次停止 Web 服务、flush 会话、销毁插件树。
 
 ## 9. 设计取舍与已确认边界

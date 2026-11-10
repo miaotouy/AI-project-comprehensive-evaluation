@@ -16,12 +16,12 @@
 
 DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做成插件。请求组装没有单一模块，而是由循环（`dsh-agent-loop`）在若干可替换服务与事件瀑布上编排，核心结论：
 
-1. **上下文唯一来源是会话事件日志**：模型历史由 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储；"模型可见即已落盘"是不变量。表面事件有五类：`system/message`、`developer/message`、`user/message`、`assistant/message`、`tool/result`。上下文增量（文件指令、时间、tmux、运行时上下文）都以 `user/message` 事件落盘后再进请求。
-2. **请求组装分两半，且 system prompt 已表面化**：工具 schema 由 `ctx.systemPrompt.assemble()` 从插件注册的 sections/contexts/tools/variables 组装，但 system prompt 本身以 `system/message` 表面节点记录（空文本清除、可路由在历史追加、其余路由归并到首节点）；消息历史由日志派生。两者在每步 `buildRequest` 中合并为一次 `llm/stream` 调用，请求头（config+工具，不含 system）本身也以 `request/header` 事件落盘。
-3. **compaction 是可选能力 seam**：文本摘要与工具结果裁剪仍沿用日志化替换；图像压力另由 `compaction-image-offload` 记录 `image/offload` 选择事件，把最旧图像 occurrence 在请求投影中替换为可读取占位符后重试，避免重写 durable 消息本体（`packages/compaction/compaction-image-offload/src/{image-offload,projection}.ts`）。
-4. **spill 是另一可选能力 seam**：结果留存按估算 token 计算文本和图像成本，省略提示也占预算；模型见有序 head/tail 及恢复地址，完整文本与图像读取路径存为会话私有文件。缺定价、恢复路径或存储时保留原内容并告警（`packages/spill/spill-policy/src/index.ts:49-151`）。
-5. **工具调度已下沉为执行器 seam**：循环把原始批次与并发上限交给 `ctx.tools.execute()`，由 `tool-executor-native` 或 `tool-executor-ptc` 负责分发、并行、取消与调用记录；agent-loop 不再自带工具池实现。
-6. **与 pi 无代码继承**：相关包源码检索零命中，仓库唯一的 pi 关系是 LLM 适配器 `dsh-llm-pi-ai` 对 `@earendil-works/pi-ai@^1.3.0` 库的依赖（另有补丁过的 `@earendil-works/pi-tui` 与 `pi-telemetry`）；compaction/上下文概念有对应物，但架构与实现均为独立设计。
+1. **上下文唯一来源是会话事件日志**：模型历史由 `Session.deriveMessages()` 从 append-only 事件日志的表面投影派生，从不单独存储，"模型可见即已落盘"是系统的不变量。表面事件共五类，各自的投影规则见 §2。文件指令、时间、tmux 与运行时上下文等增量同样以 `user/message` 事件落盘后才进请求。
+2. **请求组装分两半，system prompt 已表面化**：工具 schema 由 `ctx.systemPrompt.assemble()` 从插件注册的 sections、contexts、tools 与 variables 组装；system prompt 本身以 `system/message` 表面节点记录，空文本即清除，允许在历史追加的路由单独处理，其余路由归并到首节点。消息历史由日志派生，两者在每步 buildRequest 中合并为一次 `llm/stream` 调用，请求头（config 与工具，不含 system）也以 `request/header` 事件落盘。
+3. **compaction 是可选的插件扩展点**：文本摘要与工具结果裁剪沿用日志化替换；图像压力另由 compaction-image-offload 记录 `image/offload` 选择事件，在请求投影中把最旧的图像出现位置替换为可读取占位符后重试，durable 消息本体保持原样（`packages/compaction/compaction-image-offload/src/{image-offload,projection}.ts`）。
+4. **spill 是另一个可选扩展点**：结果留存按估算 token 计算文本与图像成本，省略提示同样占预算；模型看到有序的 head/tail 与恢复地址，完整文本和图像的读取路径存为会话私有文件。缺定价、恢复路径或存储时保留原内容并告警（`packages/spill/spill-policy/src/index.ts:49-151`）。
+5. **工具调度已下沉为执行器扩展点**：循环把原始批次与并发上限交给 `ctx.tools.execute()`，分发、并行、取消与调用记录由 tool-executor-native 或 tool-executor-ptc 承担，agent-loop 自身不再持有工具池实现。
+6. **与 pi 无代码继承**：相关包源码检索零命中，仓库里唯一的 pi 关系是 LLM 适配器 dsh-llm-pi-ai 对 `@earendil-works/pi-ai@^1.3.0` 库的依赖，另有打过补丁的 pi-tui 与 pi-telemetry；compaction 与上下文概念在 pi 中有对应物，架构与实现均为独立设计。
 
 ## 系统边界与生成任务主链
 
@@ -50,7 +50,7 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 **路由语义**：followup 放入 `next-turn` 并唤醒 driver；steer 放入 `next-step` 并唤醒（最近步骤边界消费）；inject 只放入 `next-step` 不唤醒，等下一次唤醒的步骤边界才被领取。
 
-**实现**：具体类是 `ReactLoopAgent`（`packages/core/agent-loop/src/agent.ts:112`）：`Inbox.splice` 先以 `agent/inbox/spliced` 事件落盘，inbox 现为可折叠的 durable 投影（`packages/core/agent-loop/src/inbox.ts` 的 `inboxProjectionDefinition`），不再发布 live 的 `agent/inbox/*` 事件。
+**实现**：具体类是 ReactLoopAgent。批次进入 inbox 走 Inbox.splice，先追加持久事件 `agent/inbox/spliced`，由 durable 投影维护队列状态；随后仍按结果发布插入、丢弃的 live 通知，claim 后也发布领取通知。状态投影与 live 通知并存（`packages/core/agent-loop/src/inbox.ts:108-112,214-229`），投影定义为 inboxProjectionDefinition。
 
 **无独立任务记录对象**：运行状态在 `phase`（idle/maintenance/running 三态），对外只经 `agent/status` 事件可见。turn/step 编号是日志中的事件坐标：`turn/start` 在领取前落盘，被拒绝或空消息的首个 claim 也会以"无 step 的 turn"关闭（`agent.ts:327`）。
 
@@ -62,17 +62,19 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 **历史派生**：`Session.deriveMessages()` 遍历表面节点（由 `surfaceOp` 标记维护的模型可见序列），逐节点调用 `deriveEventMessage`（`packages/core/session/src/surface.ts:120`）。能派生消息的表面事件有五类，规则如下：
 
-- `system/message` 投影为 system 消息，是表面节点 0；空文本表示"无系统提示"并清除全部现存 system 节点；
-- `user/message` 原样投影为 user 消息，不添加任何框架文本（框架由生产方自己写进 content）；
-- `developer/message` 投影为 developer 角色消息，用于按 turn/step 记账的增量会话变更（工具新增等），其 `headerSeq` 指向定义它的请求头；
-- `assistant/message` 投影为 assistant 消息，**空内容跳过**——只为承载 usage 的 max-tokens 步不进请求；
-- `tool/result` 投影为 tool 角色消息。
+| 表面事件 | 投影结果 | 规则与用途 |
+|---|---|---|
+| `system/message` | system 消息 | 占表面节点 0；空文本表示"无系统提示"，并清除全部现存 system 节点 |
+| `user/message` | user 消息 | 原样投影，不添加任何框架文本（框架由生产方自己写进 content） |
+| `developer/message` | developer 消息 | 用于按 turn/step 记账的增量会话变更（如工具新增），`headerSeq` 指向定义它的请求头 |
+| `assistant/message` | assistant 消息 | 空内容跳过，只为承载 usage 的 max-tokens 步不进请求 |
+| `tool/result` | tool 消息 | 直接投影 |
 
-`assistant/attempt`、turn/step 边界、log-only 记录一律不投影。派生带缓存：表面替换或插件消息投影推进 `contentGeneration` 时整体重建（`packages/core/session/src/index.ts:999`）。surface 折叠有严格校验：replace 的范围必须是当前 surface 节点、`sourceEventSeqs` 必须覆盖全部被遮蔽节点（`surface.ts:594` 的 `foldSurface`）。
+`assistant/attempt`、turn/step 边界和 log-only 记录都不进投影。派生结果带缓存，表面替换或插件消息投影推进 `contentGeneration` 时整体重建；折叠也做严格校验，替代操作的范围必须是当前 surface 节点，`sourceEventSeqs` 必须覆盖全部被遮蔽节点（`packages/core/session/src/index.ts:999`、`surface.ts:594` 的 foldSurface）。
 
 **组装顺序**（`preStep`，`agent-loop/src/agent.ts:283`）：领取批次 → `systemPrompt.assemble` → 渲染动态上下文并投影为候选 user 消息 → `agent/pre-step` 瀑布（默认决策把候选上下文追加在领取批次之后）。进入 step 后按序逐条 `user/message` 落盘，故日志中的顺序即模型看到的顺序：直接提示在前，各插件注入的上下文随后。
 
-**system prompt 组装**：`SystemPrompt.assemble` 先按注册的 scope 层级合并 sections、contexts、tools、variables，其中 sections 按 `order` 升序（-100 为 harness 身份、0 为 persona 槽位），再跑 `system-prompt/assemble` 专家瀑布（`packages/core/system-prompt/src/index.ts`）。渲染结果不再进 `request/header`，而是经 `system/message` 在表面协调：`prepareCall` 成功后按该模型的能力决定是替换节点 0 还是在历史中追加。
+**system prompt 组装**：`SystemPrompt.assemble` 先按注册的 scope 层级合并 sections、contexts、tools 与 variables，其中 sections 依 `order` 升序排列（-100 是 harness 身份，0 是 persona 槽位），再跑一遍 system-prompt/assemble 专家瀑布（`packages/core/system-prompt/src/index.ts`）。渲染结果以 `system/message` 节点在表面协调、不写入请求头：`prepareCall` 成功后按该模型能力决定替换节点 0 还是在历史中追加。
 
 **渲染与完整覆盖**：`renderPrompt` 做 `{{variable}}` 严格插值并丢弃空 section；`complete: true` 的 section 成为唯一 prompt 文本。若渲染结果为空且此前有系统提示，则记录空 `system/message` 清除状态。
 
@@ -85,14 +87,14 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 **定价**：`ctx.tokenMeter` 重放日志增量折叠，启发式定价为每 4 字符 1 token、每块 4 token 结构开销、每消息 4 token 角色开销（`estimate.ts:12-19`）。最近一次成功的 `assistant/message` 若带 usage 且其请求头与当前一致，则以 provider usage 为锚；否则整表启发式重估。预算不预留固定 reserve：压力阈值是 contextWindow×thresholdRatio（默认 0.8），保留尾部是 ×retainRatio（默认 0.16）或绝对 retainTokens（`compaction-basic/src/config.ts:20-23,144-154`），均可按 provider/model 精确覆盖。
 
 **两条触发路径**（`compaction-basic/src/index.ts:137-224`）：
-- **压力路径**：`agent/pre-step` 串行监听器在请求派生前调用 `compactIfNeeded(agent, 'pressure', signal)`（`auto` 默认 true）。路由模型容量来自 `llm.resolveModelInfo`；未配置 contextWindow 则抛配置错误仅告警不阻断。
-- **溢出路径**：`agent/request-error` 收到 `CONTEXT_WINDOW_EXCEEDED_CODE` 失败时，强制做一次平衡压缩，仅当 surface `replaceGeneration` 前进才返回 `{ kind: 'retry' }` 重开步骤；重试计数受 `maxOverflowRetries`（默认 1）限制，成功响应会重置该计数。
+- **压力路径**：pre-step 事件上的串行监听器在请求派生前调用 `compactIfNeeded` 并传入 pressure 模式，自动压缩默认开启。路由模型的容量取自 `llm.resolveModelInfo`；未配置 contextWindow 时抛出配置错误，只告警不阻断后续请求。
+- **溢出路径**：请求错误事件收到 `CONTEXT_WINDOW_EXCEEDED_CODE` 失败时，强制做一次平衡压缩；只有 surface 的 `replaceGeneration` 前进才返回重试结果重开步骤。重试次数受 `maxOverflowRetries` 限制（默认 1），成功响应会重置该计数。
 
 **压缩事务**（`compaction-basic/src/region.ts:152-254`）按以下顺序执行：
-1. `compaction/start` 落盘，即取得事务锁；
-2. 快照定价与区域消息，调用 summarizer；
-3. 稳定性复查（自动路径要求整个 surface 未变，手动路径只要求所选区间未变）；
-4. `compaction/summary` 记录落盘，随后以 `surfaceOp: replace` 追加摘要 `user/message`（`sourceEventSeqs` 覆盖 start/summary/全部被遮蔽节点），最后 `compaction/end` 释放锁。
+1. `compaction/start` 落盘，事务锁同时取得；
+2. 对定价与区域消息做快照，调用 summarizer；
+3. 做稳定性复查，自动路径要求整个 surface 未变，手动路径只要求所选区间未变；
+4. `compaction/summary` 记录落盘，随后追加一条摘要 user 消息并以替代操作遮蔽旧节点，替换来源覆盖 start、summary 与全部被遮蔽节点，最后由 `compaction/end` 释放锁。
 
 区域选择是头锚定的（从 surface 头到保留尾部为止），绝不在 tool-call/result 对之间切割（`toolPairingBalancedBefore`/`After`）。
 
@@ -110,14 +112,14 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 请求准备、表面准入与冻结按以下顺序交接（`agent-loop/src/agent.ts:452-479,612-743`）：
 
-1. 步骤开始前固定会话模型选择；首个请求取 Agent 输出控制，之后从最近请求头恢复控制项提案，但剥离其中的路由和 effort，统一以已固定的选择覆盖；
-2. `agent/request` 瀑布只调整控制项（不可改 provider/model/effort）；
+1. 步骤开始前固定会话模型选择；首个请求取 Agent 输出控制，之后从最近请求头恢复控制项提案，剥离其中的路由和 effort，统一用已固定的选择覆盖；
+2. 请求瀑布 `agent/request` 只调整控制项，provider、model 与 effort 在此不可改；
 3. `llm.prepareCall` 解析 exact-model 默认值并绑定适配器；
-4. 按适配器能力协调 system 表面节点，准入本步上下文消息；
-5. 组装请求头快照并按首次、变化或系列边界追加，容量或 system 更新模式变化时另记请求上下文；随后从已准入的表面派生消息并冻结；
-6. 最终 `GenerateOptions` 带 messages（派生历史）、`sessionId`、`signal` 交给 `preparedCall.stream()` 或 `llm/stream` 瀑布。
+4. 按适配器能力协调 system 表面节点，准入本步的上下文消息；
+5. 组装请求头快照，按首次、变化或系列边界追加；容量或 system 更新模式变化时另记请求上下文。随后从已准入的表面派生消息并冻结；
+6. 把派生历史、会话 ID 与取消信号组装成最终请求选项，交给 `preparedCall.stream()` 或 `llm/stream` 瀑布。
 
-请求路由与 effort 只能在步骤准备前通过 Agent 模型选择接口改变；请求瀑布若越过这一边界会抛错（`packages/core/agent-loop/src/agent.ts:612-650`）。请求头是日志状态，首次、变化或系列边界追加，其他请求复用最近快照；system prompt 独立保存在表面消息中（`agent.ts:656-743`）。DeepSeek 第一方 adapter 现在只有 Messages 一条协议，并支持模型声明 `systemPromptUpdate: in-history`：system 变化时在对应回合追加历史 system 快照而不是改写最前缀，未声明的模型用最新快照作顶层 system；该路由决策由 prepared model metadata 交给 agent-loop（`packages/llm/llm-deepseek/README.md`）。工具定义变更则经 `developer/message` 投影为 `tool_addition`/`tool_removal` 块。
+请求路由与 effort 只能在步骤准备前通过 Agent 模型选择接口改变，请求瀑布越过这一边界会抛错；请求头作为日志状态按首次、变化或系列边界追加，其他请求复用最近快照，system prompt 独立保存在表面消息里（`packages/core/agent-loop/src/agent.ts:612-650` 与 `:656-743`）。DeepSeek 第一方 adapter 目前只剩 Messages 一条协议，并支持模型声明 `systemPromptUpdate: in-history`：system 变化时在对应回合追加历史 system 快照，不改写最前缀；未声明的模型把最新快照当顶层 system。该路由决策由 prepared model metadata 交给 agent-loop，协议说明见 `packages/llm/llm-deepseek/README.md`。工具定义变更则经 `developer/message` 投影为 `tool_addition` 与 `tool_removal` 块。
 
 ## 5. 流式事件、缓冲、节流与顺序
 
@@ -134,11 +136,15 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 步骤结束原因只有 completed/max-tokens，且 max-tokens 粘性传播到 turn。turn 结束原因完整映射如下（`packages/core/session/src/types.ts` 的 TurnEndReasonMap）：
 
-- `completed`：自然完成；`max-tokens`：至少一步触顶，即使后续继续也保留；
-- `aborted`：携带取消 cause；`blocked`：pre-step 拒绝；
-- `error`：结构化 `LlmFailure`；
-- `interrupted`：仅 crash 修复产生，循环本身不发出；
-- `forked`：仅 fork 种子构造为收口源会话未闭合回合而发出。
+| 结束原因 | 含义 |
+|---|---|
+| `completed` | 自然完成 |
+| `max-tokens` | 至少一步触顶，即使后续继续也保留该原因 |
+| `aborted` | 携带取消 cause |
+| `blocked` | pre-step 拒绝 |
+| `error` | 结构化 `LlmFailure` |
+| `interrupted` | 仅 crash 修复产生，循环本身不发出 |
+| `forked` | 仅 fork 种子构造为收口源会话未闭合回合而发出 |
 
 错误路径：流 finish 为 error/aborted → `agent/request-error` 瀑布（返回 retry 才继续，否则 throw `LlmError`）→ `turn/end` 记 error。
 
@@ -146,9 +152,9 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 ## 7. 停止、重试、续写与重新生成
 
-- **停止**：`cancel(cause, {keepInbox})` 中止当前 turn 的信号，工具与 LLM 调用都携带该信号；abort 后 turn 以 `aborted` 收口，唤醒输入排队到下一 turn。
-- **重试有两层**：适配器注册的 `retryPolicy`（`llm-retry` 插件处理 `llm/retry`，LLM 渠道类目）与 `agent/request-error` 返回 retry（compaction 溢出恢复专用，§3）。两者触发者与预算不同。
-- **续写/重新生成**：未找到针对单条消息的续写或重新生成 API；分支能力是 `ctx.sessions.fork`（按边界 seq 复制日志前缀），恢复是 `ctx.agents.resume` 从持久化 seed 重建（两者都属会话类目）。
+- **停止**：`cancel(cause, {keepInbox})` 产生中止当前 turn 的信号，工具调用与 LLM 请求都携带它；abort 后 turn 以 `aborted` 收口，唤醒输入排队到下一 turn。
+- **重试有两层**：一层是适配器注册的 `retryPolicy`，由 llm-retry 插件处理重试事件，属 LLM 渠道类目；另一层是请求错误事件返回 retry，专用于 compaction 溢出恢复（§3）。两者的触发者与预算不同。
+- **续写与重新生成**：本次未找到针对单条消息的续写或重新生成 API。分支能力由 `ctx.sessions.fork` 按边界 seq 复制日志前缀，恢复由 `ctx.agents.resume` 从持久化 seed 重建，两者都属会话类目。
 
 ## 8. 队列、多会话并发与后台生成
 
@@ -156,9 +162,11 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 ## 9. Agent、工具、知识库与附件注入点
 
-- 工具目录：各能力包向 `ctx.tools` 注册 `ToolDefinition`，其 schema 经 `ctx.systemPrompt.tools()` 进入每次组装（`packages/core/system-prompt/src/index.ts`）；执行交给出选中的工具执行器（§5）。
-- request-context 插件（`packages/context/README.md`）：`agent-instructions` 是 base 组合默认挂载（maxBytes 65536），在 pre-step 折叠 AGENTS.md 基线并在文件被读取、写入或编辑后异步重投影到 inbox；`time-context`、`tmux-context`、`session-reference`、`file-reference` 均为 opt-in（时间读数、tmux 位置、他会话快照、文件引用，各自带节流与字节预算）；`harness-dev-context` 是新增的开发态上下文插件。
-- 提问：`tool-ask-user` 把 `ask_user_question` 工具调用转成 `ctx.userQuestions.ask`，UI 回答作为普通工具结果回注（`packages/interaction/tool-ask-user/src/index.ts`）；仅根 agent 允许（`packages/interaction/user-questions/src/index.ts`）。
+- 工具目录：各能力包向 `ctx.tools` 注册 `ToolDefinition`，其 schema 在每次组装时经 `ctx.systemPrompt.tools()` 收集（`packages/core/system-prompt/src/index.ts`）；实际执行交给选中的工具执行器（§5）。
+- request-context 插件（`packages/context/README.md`）：agent-instructions 是 base 组合默认挂载的指令插件（maxBytes 65536），在 pre-step 折叠 AGENTS.md 基线，并在文件被读取、写入或编辑后异步重投影到 inbox。
+  - 另有四个 opt-in 插件：time-context 提供时间读数，tmux-context 报告 tmux 位置，session-reference 给出他会话快照，file-reference 管理文件引用；每个都带自己的节流与字节预算。
+  - harness-dev-context 是新增的开发态上下文插件。
+- 提问：tool-ask-user 把 `ask_user_question` 工具调用转成 `ctx.userQuestions.ask`，UI 回答作为普通工具结果回注，且只有根 agent 允许发起（`packages/interaction/tool-ask-user/src/index.ts`、`packages/interaction/user-questions/src/index.ts`）。
 - 附件：attachment 能力包在 base 组合中（`dsh-attachment-local`），附件作为工具结果内容进入上下文；其细节属 Agent 工具类目。
 - 知识库：本次未找到独立的"知识库注入"机制（检查范围：pre-step 链、assemble 注册点、base 组合行）；用户知识经 AGENTS.md 指令与文件内容进入上下文。
 
@@ -166,9 +174,9 @@ DeepSeek Harness（下文称 dsh）基于 vendored Cordis，所有能力都做�
 
 **无代码继承**。检索证据如下：
 
-- 源码检索：`packages/context`、`packages/compaction`、`packages/core` 下所有 `*.ts` 全文检索 `earendil|pi-ai|pi-cortex`，零命中；
-- 依赖关系：仓库内唯一 pi 相关依赖是 LLM 适配器 `dsh-llm-pi-ai`（使用 `@earendil-works/pi-ai@^1.3.0` 库，另有 `pi-telemetry`）与依赖补丁 `@earendil-works/pi-tui`（见 `pnpm-workspace.yaml` 与 `THIRD_PARTY_NOTICES.md`）；
-- 结论：这是库级复用，不是 harness 功能对 pi coding-agent 的继承。
+- 源码检索：覆盖 `packages/context`、`packages/compaction`、`packages/core` 下全部 `*.ts` 文件，检索 earendil、pi-ai 与 pi-cortex 零命中；
+- 依赖关系：仓库内唯一与 pi 相关的依赖是 LLM 适配器 dsh-llm-pi-ai，它使用 `@earendil-works/pi-ai@^1.3.0` 库，另有 pi-telemetry；此外还有一个依赖补丁 `@earendil-works/pi-tui`（见 `pnpm-workspace.yaml` 与 `THIRD_PARTY_NOTICES.md`）；
+- 结论：pi 只以库的形式被复用，harness 功能实现独立于 pi coding-agent。
 
 **概念对应而非实现继承**，对照如下：
 
@@ -185,12 +193,12 @@ dsh 的请求头落盘（`request/header` 可重建性）与"模型可见即已�
 
 ## 11. 未验证事项
 
-- 未运行交互会话：压缩触发、溢出重试、KV cache 复用收益、token 估算与真实计费偏差需真实模型端到端验证。
-- `time-context`/`tmux-context`/`session-reference`/`file-reference`/`harness-dev-context` 未在默认组合中挂载，其运行行为（时区推导、tmux 查询、跨会话快照、文件引用解析）未实测。
+- 未运行交互会话：压缩触发、溢出重试、KV cache 复用收益、token 估算与真实计费的偏差都需要真实模型端到端验证。
+- 时间、tmux、会话引用、文件引用与开发态上下文这五个 request-context 插件未在默认组合中挂载，其运行行为（时区推导、tmux 查询、跨会话快照、文件引用解析）未实测。
 - 持久化后端、崩溃修复（`interrupted` 收口）与 Web 客户端流式渲染未展开。
-- 多 agent 并行、subagent 上下文继承（preset 组合）的实际行为仅从代码推断。
-- system prompt 在 `in-history` 路由上的归并与清除规则、以及空系统提示的跨 provider 表现只按源码与文档核对，未运行验证。
-- 工具执行器（原生/PTC 两种）的并发批次与超时行为未运行验证。
+- 多 agent 并行与 subagent 上下文继承（preset 组合）的实际行为仅从代码推断。
+- system prompt 在 `in-history` 路由上的归并与清除规则，以及空系统提示的跨 provider 表现只按源码与文档核对，未运行验证。
+- 工具执行器（原生与 PTC 两种）的并发批次与超时行为未运行验证。
 
 ## 12. 关键源码索引
 

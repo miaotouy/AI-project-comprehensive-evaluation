@@ -24,23 +24,23 @@ SillyTavern 的输出模型单一：**模型输出只有"聊天气泡文本"一�
 
 **主链路（触发 -> 生成 -> 展示 -> 保存 -> 重新打开）**：
 
-1. 用户发送：发送入口 `sendTextareaMessage`（script.js:1705）触发生成流程，聊天历史先经正则处理与文件内容组装（script.js:4442-4470）。
+1. 用户发送：`sendTextareaMessage` 接收输入并触发生成流程，聊天历史先经正则处理，再与文件内容一起组装成提示（script.js:1705、4442-4470）。
 2. 请求发出后分两支：
-   - 流式：专用流式处理器（script.js:3481）逐 token 循环累积，每个批次先经清洗（stopping string 截断、AI_OUTPUT 正则、Markdown 修正，script.js:6383）再整段重渲染消息正文（script.js:1753）；流中自动补齐未闭合的粗体、引号和代码围栏（script.js:3608）。
-   - 非流式：响应经同一清洗流程后由 `saveReply` 收口（script.js:6583）。
-3. 保存回复时构造消息对象（正文、`extra`、swipes 与各自版本信息，script.js:6682-6750），经渲染管线（script.js:2492 起）最终以 Markdown 转 HTML 加净化后写入消息 DOM（script.js:2464）。
-4. 落盘：条件保存入口（script.js:9352）触发完整保存（script.js:7336），经服务端 `/api/chats/save` 以 JSONL 原子写入，带完整性校验与节流备份（chats.js:29-77）。
-5. 重新打开：重载入口（script.js:1683）读取 JSONL 后逐条重渲染，源文本、`extra` 元数据（推理、媒体、工具调用等）与 swipes 全部恢复。
+   - 流式：专用流式处理器逐 token 累积，每个批次先做清洗（stopping string 截断、AI_OUTPUT 正则、Markdown 修正）再整段重渲染消息正文，流中自动补齐未闭合的粗体、引号和代码围栏（script.js:3481、6383、1753、3608）。
+   - 非流式：响应走同一清洗流程，最后由 `saveReply` 收口（script.js:6583）。
+3. 保存回复时构造消息对象，写入正文、`extra` 与各 swipes 的版本信息，再经渲染管线把 Markdown 转成 HTML、净化后写进消息 DOM（script.js:6682-6750、2492、2464）。
+4. 落盘：条件保存入口触发完整保存，经服务端 `/api/chats/save` 以 JSONL 原子写入，带完整性校验与节流备份（script.js:9352、7336；chats.js:29-77）。
+5. 重新打开：重载入口读取 JSONL 后逐条重渲染，源文本、`extra` 里的推理、媒体与工具调用元数据、以及 swipes 一并恢复（script.js:1683）。
 
-**第二闭环（工具调用）**：响应带 `tool_calls` 时由工具管理器执行函数（tool-calling.js:774），结果以系统消息 + `extra.tool_invocations` 物化并递归触发新一轮生成（script.js:5498-5499），下一轮提示构建再将其转回 function message（openai.js:612-635）；递归上限为 5 轮（tool-calling.js:255）。
+**第二闭环（工具调用）**：模型响应带 `tool_calls` 时，工具管理器调用宿主注册的函数，把结果写成一条系统消息并记录到 `extra.tool_invocations`，随即递归触发新一轮生成；下一轮构建提示时再把这些记录转成 function message 回传给模型。递归最多 5 轮（tool-calling.js:774、255；script.js:5498-5499；openai.js:612-635）。
 
 **第三闭环（持久文本对象）**：记忆扩展以静默生成方式产出摘要文本，写入 `extension_settings.memory` 并随 settings.json 持久化，之后每次提示经 `{{summary}}` 模板重新注入（extensions/memory/index.js:701、751）。
 
 ## 1. 触发方式、输出协议与对象模型
 
-- **触发**：无"输出协议"。模型自由文本是唯一内容通道，另有 OpenAI 兼容的 `tool_calls` 结构化通道（`ToolManager.parseToolCalls`，tool-calling.js:427），支持 OpenAI、Claude、Cohere、Gemini 各自的增量事件格式。模型返回的图片经提取函数（script.js:6144）从 Gemini/OpenRouter 响应中转为 data URL。
-- **半截流处理**：流式阶段依赖文本启发式——stopping string 尾部匹配截断（script.js:6410-6419）、引用平衡（script.js:3608-3614）、`displayIncompleteSentences` 控制（script.js:3604）；tool call 参数走 JSON delta 拼接（tool-calling.js:508-533），失败则告警并丢弃。
-- **对象模型**：唯一输出对象是聊天消息（ChatMessage），身份为 `chat` 数组下标，DOM 上以 `mesid` 属性表示（script.js:2588-2599）；无 UUID、无版本号、无类型声明。`extra` 是开放元数据袋，承载模型信息、推理、token 计数、翻译投影、工具调用、媒体、书签、生成 ID 等可选字段，无固定 schema。事实源是内存 `chat` 数组 → JSONL 文件；运行实例（DOM）每次从对象重新渲染，DOM 不是事实源。`extra` 实际出现的字段集合如下（代码块，逐字保留）：
+- **触发**：模型输出的常规通道是自由文本，宿主未定义专门的输出协议；另有一条 OpenAI 兼容的 `tool_calls` 结构化通道，解析入口 `ToolManager.parseToolCalls` 按 OpenAI、Claude、Cohere、Gemini 各自的增量事件格式处理（tool-calling.js:427）。模型返回的图片由提取函数从 Gemini、OpenRouter 的响应中转成 data URL（script.js:6144）。
+- **半截流处理**：流式阶段靠文本启发式判断内容是否完整：尾部命中 stopping string 就截断，引号与代码围栏按平衡状态处理，`displayIncompleteSentences` 决定半句是否照常显示。工具调用参数按 JSON delta 逐片拼接，拼接失败时告警并丢弃该次调用（script.js:6410-6419、3608-3614、3604；tool-calling.js:508-533）。
+- **对象模型**：唯一的输出对象是聊天消息，身份由 `chat` 数组下标确定，展示时体现为 DOM 上的 `mesid` 属性；消息没有 UUID、版本号和类型声明（script.js:2588-2599）。每条消息的 `extra` 是开放元数据袋，承载模型信息、推理、token 计数、翻译投影、工具调用、媒体、书签、生成 ID 等可选字段，没有固定 schema。内存中的 `chat` 数组是事实源，JSONL 文件保存它的副本，DOM 每次从对象重新渲染、只作为运行实例。`extra` 实际出现的字段集合如下：
   ```
   api/model、reasoning、reasoning_signature、reasoning_duration、token_count、
   time_to_first_token、display_text（翻译投影）、tool_invocations、media（数组）、
@@ -51,78 +51,81 @@ SillyTavern 的输出模型单一：**模型输出只有"聊天气泡文本"一�
 
 ## 2. 增量生成、更新与最终化
 
-- **更新粒度**：整段重渲。每个流式批次都把当前累积文本经清洗与格式化后整段写入消息 DOM（script.js:3656-3671），`stream_fade_in` 时用平滑替换动画。没有按 AST/节点 patch，没有 diff。宏在流式阶段不展开——模型输出默认不跑参数替换，仅首条消息例外（script.js:1758-1765）。
-- **最终化**：收口入口（script.js:3696）依次完成代码块复制按钮、推理收尾、swipe 同步、图片附件处理（script.js:3724-3727），随后广播消息接收与渲染事件（script.js:3740-3741）并触发条件保存（script.js:3756）。
-- **失败收口**：失败处理入口（script.js:3761）中止后仍广播渲染事件；文本完成但被过滤时自动切换 swipe（script.js:3753）；工具调用失败以错误标记的 invocation 回注，让模型看到失败（tool-calling.js:805-821）。
+- **更新粒度**：整段重渲。每个流式批次都把当前累积文本清洗、格式化后整段写回消息 DOM，`stream_fade_in` 开启时用平滑替换动画过渡；更新以整段替换进行，不涉及 AST、节点级 patch 或 diff。宏在流式阶段不展开，模型输出默认不做参数替换，仅首条消息例外（script.js:3656-3671、1758-1765）。
+- **最终化**：流式结束后由收口入口依次补上代码块复制按钮、收尾推理块、同步 swipe、处理图片附件，然后广播消息接收与渲染事件并触发条件保存（script.js:3696、3724-3727、3740-3741、3756）。
+- **失败收口**：失败处理入口中止生成后仍广播渲染事件；若文本已生成但整段被过滤，宿主自动切到下一条 swipe；工具调用失败时，错误标记写进 invocation 再回注上下文，模型能看到这次失败（script.js:3761、3753；tool-calling.js:805-821）。
 
 ## 3. 投影表面与多视图关系
 
-- **消息正文**（`.mes_text`）：主表面，投影源选择由 `extra.display_text` 优先于 `mes` 决定（script.js:2469-2470）。翻译扩展写入 `extra.display_text`（extensions/translate/index.js:215）构成"源文本 ↔ 显示投影"双视图，源始终是 `mes`。
-- **推理块**：reasoning 存 `extra.reasoning`，折叠式展示，可单独编辑（reasoning.js:542、930）。
-- **媒体栏**：`extra.media` 数组（每条记录含 URL、类型、标题、来源与生成类型）渲染为消息内媒体块，含画廊布局与播放（script.js:2636）；DOM 媒体状态在重渲时保存/恢复（script.js:2413-2416）。
-- **浮动面板**：`StreamingDisplay`（streaming-display.js:35）是独立于聊天的悬浮面板，用于 Connection Manager 的 `/generate` 类命令与新版 API 流式显示，可最小化/关闭/停止。
-- 无侧栏对象区、无画布、无独立窗口（Electron 仅作启动器）。同一消息对象只有正文+媒体+推理三个同步投影，无多源投影。
+- **消息正文**（`.mes_text`）：这是主表面。渲染时优先取 `extra.display_text`，该字段为空才回落到 `mes`；翻译扩展把译文写进 `extra.display_text`，同一条消息因此形成源文本与显示投影两份视图，源文本始终保留在 `mes` 中（script.js:2469-2470；extensions/translate/index.js:215）。
+- **推理块**：推理内容存在 `extra.reasoning`，折叠展示，并与正文分开单独编辑（reasoning.js:542、930）。
+- **媒体栏**：`extra.media` 数组渲染成消息内的媒体块，支持画廊布局与播放；每条记录带 URL、类型、标题、来源和生成类型，DOM 中的播放状态在重渲时保存并恢复（script.js:2636、2413-2416）。
+- **浮动面板**：`StreamingDisplay` 提供一块独立于聊天区的悬浮面板，用于 Connection Manager 的 `/generate` 类命令和新版 API 的流式显示，可最小化、关闭与停止（streaming-display.js:35）。
+- 界面没有侧栏对象区、画布或独立窗口，Electron 只承担启动器角色；同一消息对象只投射出正文、媒体与推理三个同步表面，没有多源投影。
 
 ## 4. 表现类型、依赖与运行环境
 
-- **支持的层级**：
-  - Markdown：showdown 渲染，处理器重载点 script.js:521，扩展点 `markdownUnderscoreExt`/`markdownExclusionExt`；
-  - 代码高亮：highlight.js；
-  - 受限 HTML：DOMPurify 净化。
-- **净化边界**（chats.js:1901 `addDOMPurifyHooks` + script.js:1898-1909）：消息净化开启 `MESSAGE_SANITIZE`，按下列规则执行，模型输出可以注入受限 CSS 但被限定在消息内：
-  - 样式：`ADD_TAGS` 允许 `custom-style` 标签；`<style>` 被编码再解码为作用域前缀 `.mes_text `（chats.js:536、551）；未知类名加 `custom-` 前缀，`fa-`/`note-`/`monospace` 保留；
-  - 链接：强制添加 `target=_blank` 与 noopener；
-  - 外部媒体：AUDIO/VIDEO/IMG/EMBED 等默认经 `isExternalMediaAllowed` 拦截（chats.js:852，受 `forbid_external_media` 控制）；
-  - 系统 UI：`menu_button` 类仅在 `MESSAGE_ALLOW_SYSTEM_UI` 时放行，该开关只对应用自身消息生效（`extra.uses_system_ui`，system-messages.js:68-95 的欢迎页/提示模板）。
-- **运行环境**：无 iframe/WebView/worker/沙箱运行模型产出。代码块只是高亮文本。HTML/JS 不执行（无 eval、无 `new Function` 作用于模型文本）。
-- 本次未找到 KaTeX/MathJax/Mermaid 等图表渲染（全仓 grep 无命中）；数学相关仅 `\begin{align*}` → `$$` 的文本替换（script.js:1878-1879）。
+- **支持的层级**：展示层由 Markdown 渲染、代码高亮与 HTML 净化三层叠加而成。
+  - Markdown 渲染交给 showdown，处理器在 script.js:521 处重载，另可挂 `markdownUnderscoreExt` 与 `markdownExclusionExt` 两个扩展点；
+  - 代码高亮交给 highlight.js；
+  - 原始 HTML 经 DOMPurify 净化后进入 DOM。
+- **净化边界**：消息净化在 `MESSAGE_SANITIZE` 开启后生效，由 DOMPurify 钩子按下列规则执行，模型输出可以向消息内注入受限 CSS，作用范围限定在消息内（钩子注册见 chats.js:1901，调用点见 script.js:1898-1909）：
+  - 样式：`ADD_TAGS` 放行 `custom-style` 标签；`<style>` 内容先编码、解码后加上 `.mes_text ` 作用域前缀；未知类名统一加 `custom-` 前缀，`fa-`、`note-`、`monospace` 保留原样（chats.js:536、551）；
+  - 链接：强制补上 `target=_blank` 与 noopener；
+  - 外部媒体：AUDIO、VIDEO、IMG、EMBED 等外部媒体默认由 `isExternalMediaAllowed` 判定拦截，开关为 `forbid_external_media`（chats.js:852）；
+  - 系统 UI：`menu_button` 类只在 `MESSAGE_ALLOW_SYSTEM_UI` 开启时放行，该开关仅对应用自身发出的消息生效（`extra.uses_system_ui`，覆盖欢迎页与提示模板，system-messages.js:68-95）。
+- **运行环境**：模型产出由宿主消息渲染层承载，代码围栏按高亮文本显示；正文中的 HTML 则经过净化后以受限标记进入消息 DOM（[Markdown 转换与净化](<../../SillyTavern/public/script.js#L1933-L1968>)、[正文插入](<../../SillyTavern/public/script.js#L2695-L2697>)）。这条链没有独立的 iframe、WebView、worker 或沙箱来运行模型代码，模型文本也不经过 eval 或 `new Function`。
+- 本次未找到 KaTeX、MathJax 或 Mermaid 等图表渲染（全仓 grep 无命中）；与数学相关的处理只有把 `\begin{align*}` 替换成 `$$` 的文本替换（script.js:1878-1879）。
 
 ## 5. 用户交互、事件与错误反馈
 
-- **消息级交互**（均为宿主固定按钮，非模型声明组件）：swipe 换版、编辑、删除、复制代码、书签、头像点击、按消息生成 SD 图、逐条提示查看、生成计时提示、推理编辑与范围隐藏/删除等，主入口见 script.js:2420-2437，扩展动作见 stable-diffusion/index.js:5039、chats.js:147。
-- **事件回传**：`eventSource` 事件总线（events.js:4-110）是扩展观察与介入输出的主要通道，覆盖消息接收/渲染/编辑、工具调用、流式 token 等生命周期事件；`runGenerationInterceptors`（extensions.js:2015）允许扩展在生成前改写提示。另有 `MessageFormatter` 钩子，扩展可在正文进入 DOM 前于正则前后或 Markdown 转 HTML 后同步改写文本（渲染细节见消息渲染器笔记）。quick-reply 扩展按事件自动执行用户预设命令链（extensions/quick-reply/src/AutoExecuteHandler.js:48-102）。
-- **错误反馈**：工具错误、生成错误以 toast 与详情弹窗呈现（tool-calling.js:916-921、script.js:5412-5418）；正则调试器提供 diff 视图与逐步回放（regex/index.js:942-1048）。
-- **重载恢复**：交互状态（swipe 位置、播放中媒体）随消息对象/`saveMediaStates` 恢复；`mesid`、`swipeid` 属性落回 DOM（script.js:2588-2599）。未运行验证。
+- **消息级交互**：宿主为每条消息固定挂载一批按钮，模型无法声明自定义组件。
+  - 消息操作：swipe 换版、编辑、删除、复制代码、书签；
+  - 生成与查看：头像点击、按消息生成 SD 图、逐条提示查看、生成计时提示、推理编辑与范围隐藏/删除。
+  主入口在 script.js:2420-2437，扩展动作见 stable-diffusion/index.js:5039、chats.js:147。
+- **事件回传**：`eventSource` 事件总线是扩展观察和介入输出的主要通道，覆盖消息接收、渲染、编辑、工具调用与流式 token 等生命周期事件（events.js:4-110）。扩展还能通过 `runGenerationInterceptors` 在生成前改写提示（extensions.js:2015），或在正文进入 DOM 前用 `MessageFormatter` 钩子同步改写文本，改写时机可选在正则前后或 Markdown 转 HTML 之后（渲染细节见消息渲染器笔记）。quick-reply 扩展则按事件自动执行用户预设的命令链（extensions/quick-reply/src/AutoExecuteHandler.js:48-102）。
+- **错误反馈**：工具调用错误和生成错误先以 toast 提示，再提供详情弹窗；正则调试器另有 diff 视图与逐步回放（tool-calling.js:916-921、script.js:5412-5418；regex/index.js:942-1048）。
+- **重载恢复**：页面重开后，swipe 位置与播放中的媒体由消息对象及 `saveMediaStates` 一并恢复，`mesid`、`swipeid` 属性重新写回 DOM（script.js:2588-2599）。未运行验证。
 
 ## 6. 编辑、diff、版本与协作
 
-- **编辑**：全文覆盖式。编辑保存入口（script.js:8080-8134）按 placement 重跑正则（仅 `isEdit` 标记的 `runOnEdit` 脚本，engine.js:356）、展开宏、同步回当前 swipe 并记录 `extra.bias`；推理单独可编辑（reasoning.js:930）。
-- **版本**：swipes 是唯一版本机制——同一消息的多条候选文本 + 各自 `swipe_info`（发送/生成起止时间与 `extra` 深拷贝），可删除单条（`MESSAGE_SWIPE_DELETED`）。无 diff、无 patch、无接受/拒绝、无分支合并；"继续"是纯文本追加（script.js:6638-6681）。
-- **协作**：单用户本地应用，无协作。正则编辑器提供预览式 diff 视图仅用于调试（regex/index.js:962 `highlightedOutput`），不改写消息历史。
+- **编辑**：保存时以编辑后的全文覆盖原消息。保存入口按 placement 重跑正则，只执行带 `isEdit` 标记的 `runOnEdit` 脚本，随后展开宏、把结果同步回当前 swipe 并记录 `extra.bias`；推理内容走单独的编辑入口（script.js:8080-8134；engine.js:356；reasoning.js:930）。
+- **版本**：swipes 是唯一的版本机制：同一消息可保存多条候选文本，每条带自己的 `swipe_info`，记录发送与生成起止时间以及一份 `extra` 深拷贝，单条可删除（删除事件为 `MESSAGE_SWIPE_DELETED`）。版本之间没有 diff、patch、接受/拒绝和分支合并操作；"继续"只是在末尾追加文本（script.js:6638-6681）。
+- **协作**：应用面向单用户本地使用，没有协作功能。正则编辑器的预览式 diff 视图只用于调试高亮输出，修改停留在预览里，消息历史保持原样（regex/index.js:962 `highlightedOutput`）。
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **执行位置**：全部在浏览器主线程 DOM；服务端无执行面（`src/endpoints` 全部是文件/API 代理）。工具动作是宿主注册的普通 JS 函数（tool-calling.js:269），在浏览器上下文内执行；`/tools-register` 允许把 slash 命令注册为工具动作（tool-calling.js:988-1137），仍属于宿主预编译代码，模型不提供可执行文本。
-- **网络/媒体授权**：模型返回的外部媒体默认被拦（见 §4）；用户上传与 SD 生成走 `/api/media` 等自有端点。无模型直接发起的任意网络访问。
-- **存储/模型调用桥**：扩展可读写设置（`extension_settings`）、读写角色卡字段（extensions.js:2061）、发起静默或原始模型调用；例如表达式分类扩展用 LLM/BERT 对消息文本分类以驱动角色立绘切换（extensions/expressions/index.js:1041-1152）。
-- 无逐项授权/审批 UI（工具自动执行，仅开关 `function_calling` 与递归上限）。
+- **执行位置**：所有动作都在浏览器主线程中完成，服务端没有执行面，`src/endpoints` 下的端点全部是文件读写与 API 代理。工具动作是宿主注册的普通 JS 函数，在浏览器上下文里执行，`/tools-register` 还能把 slash 命令注册成工具动作；这些代码都由宿主预先提供，模型只提交调用名与 JSON 参数（tool-calling.js:269、988-1137）。
+- **网络/媒体授权**：模型返回的外部媒体默认被拦截（规则见 §4）；用户上传与 SD 生成的媒体走 `/api/media` 等自有端点。模型自身没有发起任意网络访问的通路。
+- **存储/模型调用桥**：扩展能读写 `extension_settings` 里的设置、读写角色卡字段，也能发起静默调用或原始模型调用；表达式分类扩展即用 LLM 或 BERT 对消息文本分类，据此切换角色立绘（extensions.js:2061；extensions/expressions/index.js:1041-1152）。
+- 工具调用没有逐项授权或审批界面，是否执行由 `function_calling` 开关和递归上限两个条件约束。
 
 ## 8. 持久化、恢复、分享与导出
 
-- **格式**：聊天为 JSONL（首行 `chat_metadata` 头，script.js:7368-7373）；设置（含 `extension_settings`：正则脚本、全局变量、记忆、QR 配置）为 settings.json；世界信息为独立 JSON 文件（用户输入侧）。保存走原子写入 + 节流备份 + `chat_metadata.integrity` 完整性校验，校验失败需输入 `OVERWRITE` 才强制覆盖（script.js:7394-7416；chats.js:29-77、311-325）。
-- **恢复**：按 `character/chat` 文件名读取；`extra` 全部随 JSONL 往返。`display_text` 等投影不入库（翻译后重新生成，translate/index.js:628-684 负责删除以重建）。
-- **分享/导出**：聊天导出 txt/html（script.js:11440-11482 → `/api/chats/export`，chats.js:604）；导入支持 ooba、Agnai、CAI、KoboldLite、Chub、Risu 等外部格式（chats.js:110-309）；正则脚本可导出单文件 JSON（regex/index.js:700-704）；角色卡导出时扩展字段随卡迁移（extensions.js:2061 相关，属插件类目边界）。
-- **删除/迁移**：聊天、角色卡、世界信息均有删除与迁移入口（chats.js、world-info.js:5881 `moveWorldInfoEntry`），数据 maid 可批量清理聊天文件（data-maid.js）。
+- **格式**：聊天存成 JSONL，首行是 `chat_metadata` 头；设置存成 settings.json，其中 `extension_settings` 容纳正则脚本、全局变量、记忆与 QR 配置；世界信息是独立的 JSON 文件，属于用户输入侧。保存时先原子写入、再做节流备份，并用 `chat_metadata.integrity` 校验完整性，校验不通过时必须输入 `OVERWRITE` 才能强制覆盖（script.js:7368-7373、7394-7416；chats.js:29-77、311-325）。
+- **恢复**：按 `character/chat` 形式的文件名读取，`extra` 随 JSONL 完整往返。翻译投影 `display_text` 等字段不写入文件，重新翻译时由 translate/index.js:628-684 先删除再重建。
+- **分享/导出**：聊天可导出为 txt 或 html，入口在 script.js:11440-11482，服务端由 `/api/chats/export` 承接（chats.js:604）；导入支持 ooba、Agnai、CAI、KoboldLite、Chub、Risu 等外部格式（chats.js:110-309）；正则脚本可单独导出为 JSON 文件（regex/index.js:700-704）；角色卡导出时扩展字段随卡迁移（extensions.js:2061 相关，属插件类目边界）。
+- **删除/迁移**：聊天、角色卡与世界信息都提供删除和迁移入口，世界信息的迁移由 `moveWorldInfoEntry` 负责；数据 maid 可以批量清理聊天文件（chats.js、world-info.js:5881、data-maid.js）。
 
 ## 9. 模型回流、对象感知与持续维护
 
-- **提示重建**：每次生成都从消息对象重建提示（openai.js:561）：正文、推理（script.js:4480-4494）、媒体标题（script.js:4450-4463）、文件附件内容（script.js:4448）、工具调用转 function message（openai.js:612-635）；推理签名仅在同 API/模型时回传（openai.js:614-621）。正则同时在提示侧与展示侧各跑一遍，同一源产生两份文本。
+- **提示重建**：每轮生成都从消息对象重新拼出提示，正文、推理、媒体标题与文件附件内容依次进入不同片段，工具调用记录再转成 function message 追加（script.js:4448、4450-4463、4480-4494；openai.js:612-635）。推理签名只在同 API、同模型时回传（openai.js:561、614-621）。正则同时在提示侧和展示侧各跑一遍，同一份源文本因此产生两份结果。
 - **持续维护的文本对象**：
-  - 记忆摘要：`extension_settings.memory`，经 `{{summary}}` 模板注入；
-  - 变量：局部与全局变量由 `setvar`/`getvar` 系列宏读写，全局变量在 settings、会话变量在 `chat_metadata.variables`（variables.js:23-77）；另有 `setvarkey`/`getvarkey` 与全局版，可按 key/index 访问对象与数组元素（`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`）；
-  - World Info：激活随每轮扫描（world-info.js:4597，输入侧）。
-- **对象寻址**：模型**不能**查询对象列表或定向修改某个输出对象。工具调用是唯一的"命名操作"通道（工具名 + JSON 参数），但工具的持久状态由宿主函数自行管理，框架不提供对象句柄；聊天消息只有下标身份，swipe 文本对模型只是历史文本。记忆摘要更新是"整段覆盖旧摘要"式的文本替换，无版本。
-- 结论：无 G5 意义上的对象感知与定向维护；闭环仅存在于"文本进文本出 + 工具结果文本回流"。
+  - 记忆摘要存放在 `extension_settings.memory`，之后每次提示经 `{{summary}}` 模板注入；
+  - 变量由 `setvar`、`getvar` 系列宏读写，全局变量保存在 settings，会话变量落在 `chat_metadata.variables`；另一组 `setvarkey`、`getvarkey` 宏按 key 或下标访问对象与数组元素（variables.js:23-77；`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`）；
+  - World Info 的激活状态随每轮扫描更新，属于输入侧（world-info.js:4597）。
+- **对象寻址**：模型查不到对象列表，也无法定向修改某个输出对象。工具调用是唯一的"命名操作"通道，调用时只带工具名与 JSON 参数；工具的持久状态由宿主函数自行管理，框架不向模型提供对象句柄。聊天消息对模型只有下标身份，swipe 里的候选文本也只是历史文本。记忆摘要的更新方式是整段覆盖旧摘要，没有版本。
+- 结论：这套实现不具备 G5 意义上的对象感知与定向维护能力，闭环只发生在"文本进、文本出，工具结果以文本回流"这条链上。
 
 ## 10. 生命周期、资源治理与性能
 
-- 不可见消息不冻结（DOM 全量渲染后即静态化）；媒体播放状态在重渲时保存恢复（script.js:2413-2416）；外部媒体被拦截时暂停 autoplay（chats.js:2025-2028）。
-- 定时器/动画：悬浮面板的隐藏与自动隐藏定时器在 hide 时清理（streaming-display.js:381-429）；流式渲染按用户配置的帧率节流（`power_user.streaming_fps`，script.js:3814）；中止走 `AbortController`（script.js:3508、3788-3791）。
+- 不可见的消息不做冻结，DOM 全量渲染完成后状态不再变化；媒体播放状态在重渲时保存并恢复，外部媒体被拦截时自动暂停 autoplay（script.js:2413-2416；chats.js:2025-2028）。
+- 定时器/动画：悬浮面板在隐藏或自动隐藏时清理自己的定时器，流式渲染按用户配置的帧率（`power_user.streaming_fps`）节流，中止生成走 `AbortController`（streaming-display.js:381-429；script.js:3814、3508、3788-3791）。
 - 长会话/多对象限额：
-  - World Info 预算百分比与上限（world-info.js:4624-4629）；
-  - 工具递归上限 5（tool-calling.js:255）；
-  - 正则编译缓存 LRU 1000（engine.js:40-82）与 `depth` 深度过滤（engine.js:362-372）。
-  无对象级暂停/冻结策略，因为不存在常驻输出对象。
+  - World Info 的预算百分比与上限（world-info.js:4624-4629）；
+  - 工具递归最多 5 轮（tool-calling.js:255）；
+  - 正则编译缓存按 LRU 保留 1000 条，并用 `depth` 做深度过滤（engine.js:40-82、362-372）。
+  输出对象不常驻，因此没有对象级的暂停或冻结策略。
 
 ## 11. 测试、已确认边界与未验证事项
 

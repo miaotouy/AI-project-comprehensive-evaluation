@@ -16,12 +16,12 @@
 
 RikkaHub 是原生 Android 应用（Kotlin + Compose + Room + DataStore + Koin），会话数据核心是「Room 双表 + 内存会话 + 独立 FTS5 索引」：会话元信息存 `conversationentity`，消息按「节点」拆到 `message_node`，同一节点的多个候选消息以 JSON 数组存在同一行，用 `select_index` 选择当前分支。
 
-- **会话单位是 Conversation**：`assistantId` 是会话的一员，会话必然归属于某个助手，没有跨助手共享会话（`data/model/Conversation.kt`）。
-- **消息是「路径上的节点列表 + 节点内候选」**：活动路径由 `currentMessages` 逐节点取 `messages[selectIndex]` 得到，不是父子树（`Conversation.kt`）；`ConversationEntity.nodes` 列自迁移 11→12 起废弃，恒写 `'[]'`（`data/repository/ConversationRepository.kt`）。
+- **会话归属于单个助手**：会话以 `Conversation` 为单位，记录里带所属助手的 id，一条会话只属于一个助手，助手之间不共享会话（`data/model/Conversation.kt`）。
+- **消息是「路径上的节点列表 + 节点内候选」**：活动路径由当前消息列表逐节点按选中下标取出，是一条线性路径，没有父子树结构；实体上的旧节点列自迁移 11→12 起废弃，恒写空数组；定位见 `data/model/Conversation.kt` 与 `data/repository/ConversationRepository.kt`。
 - **会话带固定配置**：`config` 列保存会话级的模型、推理强度、联网搜索、内置搜索、MCP、工作区与技能选择，首次打开时从助手快照，之后与会话一起迁移（`data/db/entity/ConversationEntity.kt`、`data/model/ConversationConfig.kt`）。
 - **写入是「内存领先、回合结束落库」**：用户消息在生成开始前落库，助手回复在整回合成功结束时一次落库，生成期间只改内存 `StateFlow`；取消或失败也走统一的收尾保存，避免内存进度丢失（`service/ChatService.kt`）。请求执行、任务状态机与流式处理见[对话请求与上下文笔记](../对话请求与上下文/RikkaHub-对话请求与上下文调查笔记.md)。
 - **分支切换 = 改 `select_index`**：编辑用户消息与重新生成助手回复都是给同一节点追加候选并选中，只有用户消息的「重新生成」是截断其后节点（`ChatService.kt`、`Conversation.kt` 的 `updateCurrentMessages`）。
-- **上下文压缩改用检查点插入**：压缩把旧消息摘要成一条带 `isContextCheckpoint` 标记的合成用户消息插进节点序列，原消息保留，后续请求从最后一个检查点开始取上下文（`data/model/Conversation.kt` 的 `insertContextCheckpoint`/`lastContextTokens`）。
+- **上下文压缩以检查点插入实现**：压缩时旧消息被摘要成一条标记为 `isContextCheckpoint` 的合成用户消息，插进节点序列，原消息保留；后续请求从最后一个检查点开始取上下文，检查点的 token 数由 `lastContextTokens` 读出（`data/model/Conversation.kt`）。
 - **消息全文检索是独立 FTS5 虚表**：`message_fts` 用 FTS5 的 `simple` 分词扩展，英文与数字走 `simple_query`（含拼音与前缀），中文按单字切分后用 NEAR 组合；索引按会话增量维护，另用 `message_fts_rowid` 普通表避免按会话删除时全表扫描（`data/db/fts/MessageFtsManager.kt`）。
 - **会话检索分为三套查询**：列表分页用 Paging3、标题搜索用 `LIKE`，与全文检索互不复用；助手侧的 `recent_chats` / `conversation_search` 复用同一仓库与 FTS 索引（`ConversationDAO.kt`、`data/ai/tools/ConversationTools.kt`）。
 
@@ -62,17 +62,17 @@ RikkaHub 是原生 Android 应用（Kotlin + Compose + Room + DataStore + Koin�
 | `folder_id` | 助手内文件夹归属，空串表示未归类 |
 | `config` | 会话固定配置的 JSON（模型、推理强度、联网/内置搜索、MCP、工作区、技能），空串表示尚未固定 |
 
-领域侧 `Conversation` 用 `Uuid` 与 `Instant`，`assistantId` 没有默认值，`newConversation` 是 `@Transient` 的运行时标记（`Conversation.kt`）。
+领域侧的会话模型用 UUID 与瞬时时间表达标识与时间；所属助手字段没有默认值，必须由调用方显式给出；`newConversation` 是标为 `@Transient` 的运行时标记（`data/model/Conversation.kt`）。
 
 ### 1.2 消息节点与候选（MessageNode / select_index）
 
 `MessageNodeEntity` 是分支语义的载体（`data/db/entity/MessageNodeEntity.kt`），表名 `message_node`，主键为 `id`。分支语义落在三个字段上：
 
-- 归属与级联：`conversation_id` 建索引并声明 `ON DELETE CASCADE`，删会话即级联删节点；
-- 顺序：`node_index` 是节点顺序号，读取时按 `node_index ASC` 排序，保存时按列表下标重排（`ConversationRepository.kt`）；
-- 候选：`messages` 是候选消息数组 `List<UIMessage>` 整段序列化成的 JSON 字符串，`select_index` 指向当前选中的候选下标。
+- 归属与级联：节点通过 `conversation_id` 关联会话，该列建了索引并声明 `ON DELETE CASCADE`，删会话时节点由数据库级联删除；
+- 顺序：`node_index` 是节点在会话中的顺序号，读取时按该列升序排列，保存时按列表下标重新编号（`ConversationRepository.kt`）；
+- 候选：节点的全部候选消息以 `List<UIMessage>` 整段序列化成 JSON 存进 `messages` 列，`select_index` 指出当前选中的是数组里哪一条。
 
-领域侧 `MessageNode` 另有 `isFavorite` 的 `@Transient` 字段，由 `FavoriteDAO` 单独查回后合并（`Conversation.kt`、`ConversationRepository.kt`）。
+领域侧的节点模型另有 `isFavorite` 的 `@Transient` 字段，由收藏查询单独查回后合并（`data/model/Conversation.kt`、`data/repository/ConversationRepository.kt`）。
 
 候选消息的追加集中在 `Conversation.updateCurrentMessages`：节点已含同 id 消息就原位替换，否则追加并把 `selectIndex` 指向新末尾（`Conversation.kt`），这是「同一节点内形成多个版本」的统一入口；`currentMessage` 在空数组或下标越界时抛 `IllegalStateException`，读取路径会先过滤空节点（:116-120、:379）。
 
@@ -102,13 +102,13 @@ tool_call(废弃) / tool_result(废弃) / server_tool / tool
 
 执行状态由输出列表推出：`isExecuted` 以输出非空为准，`isPending` 以未执行且审批态为 pending 为准（`UIMessagePart.kt`、:193-199）。
 
-审批态取值为 `auto`、`pending`、`approved`、`denied`、`answered`；`server_tool` 承载 Provider 在服务端执行的工具。
+审批态有五档：`auto, pending, approved, denied, answered`；`server_tool` 承载 Provider 在服务端执行的工具。
 
 Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObject`）里，由 `MessageMetadata.kt` 提供强类型视图（如 Claude 的 `signature`、OpenAI 的 `encrypted_content`），随消息 JSON 一起持久化，字段需可空且 key 与历史数据一致。
 
 ### 1.4 附件与本地文件引用
 
-附件引用由领域模型遍历所有节点与候选消息的部件收集，只取以 `file://` 开头的 URL，工具部件的输出会递归展开（`Conversation.files`，见 `Conversation.kt`）。写库前有硬性约束：消息中存在 base64 图片部件时，`conversationToConversationEntity` 的 `require` 会失败（`ConversationRepository.kt`）。附件文件本身不属于 Room 的消息数据，由 `FilesManager` 管理，删会话/删消息时按上述引用集合清理（见第 3 节）。
+附件引用由领域模型遍历所有节点与候选消息的部件收集，只取以 `file://` 开头的 URL，工具部件的输出会递归展开（`Conversation.files`）。写库前还有一条硬性约束：消息中存在 base64 图片部件时，领域对象转实体的转换会直接断言失败。附件文件本身不属于 Room 的消息数据，由 `FilesManager` 管理，删会话或删消息时按上述引用集合清理（见第 3 节，`Conversation.kt`、`ConversationRepository.kt`）。
 
 另有一张 `managed_files` 表给文件库做索引：以 `folder + relative_path` 定位，存展示名、MIME、大小与创建/更新时间，路径唯一索引保证同一相对路径只有一条记录（`data/db/entity/ManagedFileEntity.kt`）。它记录的是文件元数据，不改变「消息只存 URL」这一事实。
 
@@ -165,17 +165,17 @@ Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObje
 
 ### 3.2 切换与打开
 
-列表点击进入聊天页时 `ChatVM.init` 调 `addConversationReference` + `initializeConversation`，并把会话 id 记到 SharedPreferences 的 `lastConversationId` 以便下次恢复（`ui/pages/chat/ChatVM.kt`）；切换助手时 `ChatDrawerVM` 会把文件夹筛选重置为「未归类」（`ChatDrawerVM.kt`）。
+列表点击进入聊天页时，聊天页视图模型在初始化阶段先登记会话引用并初始化会话，再把会话 id 记到 SharedPreferences 的 `lastConversationId`，供下次启动恢复（`ui/pages/chat/ChatVM.kt`）；切换助手时，抽屉视图模型会把文件夹筛选重置为「未归类」（`ChatDrawerVM.kt`）。
 
 ### 3.3 重命名、置顶、移动到助手/文件夹
 
-- 重命名：`updateTitle` 走整对象保存，Web 端另有 `POST /conversations/{id}/title`（`ChatVM.kt`、`ConversationRoutes.kt`）；首轮生成成功后标题为空时用 fast 模型按 `titlePrompt` 生成（`ChatService.kt`，建议文案同理）。
-- 置顶：`togglePinStatus` 先读当前值再取反，是单列 `UPDATE`（`ConversationRepository.kt`），列表排序恒为 `is_pinned DESC, update_at DESC`。
-- 移动助手会把 `folderId` 清空，避免归属悬空（`ChatVM.kt`）；移动文件夹时先同步活跃内存态再落库，否则后续整对象保存会用旧 `folder_id` 覆盖，Web 端还校验目标文件夹属于同一助手（`ChatService.kt`、`ConversationRoutes.kt`）。
+- 重命名：视图模型按整个会话对象保存标题，Web 端另提供 `POST /conversations/{id}/title` 接口（`ChatVM.kt`、`ConversationRoutes.kt`）；首轮生成成功后标题仍为空时，用 fast 模型按 `titlePrompt` 生成，后续问题的建议文案同理（`ChatService.kt`）。
+- 置顶：置顶开关先读当前值再取反，以单列 `UPDATE` 写回（`ConversationRepository.kt`），列表排序恒为 `is_pinned DESC, update_at DESC`。
+- 移动助手会把会话的文件夹归属清空，避免归属悬空（`ChatVM.kt`）；移动文件夹时先同步活跃会话的内存态再落库，否则后续整对象保存会用旧的 `folder_id` 覆盖，Web 端还会校验目标文件夹与当前助手一致（`ChatService.kt`、`ConversationRoutes.kt`）。
 
 ### 3.4 归档与未读
 
-本次未找到「归档」与「未读」的字段或查询：会话实体没有归档时间/未读计数列，DAO 也没有对应谓词，唯一的生命周期状态是 `is_pinned` 与 `folder_id`；检查范围为 `ConversationEntity`、`ConversationDAO`、`ChatDrawerVM`、`ConversationRoutes` 中的全部查询。
+本次未找到「归档」与「未读」的字段或查询：会话实体没有归档时间/未读计数列，DAO 也没有对应谓词，唯一的生命周期状态是置顶标记与文件夹归属。检查范围为 `ConversationEntity`、`ConversationDAO`、`ChatDrawerVM`、`ConversationRoutes` 中的全部查询。
 
 ### 3.5 删除与撤销
 
@@ -219,13 +219,13 @@ Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObje
 
 ### 4.7 上下文压缩的落库结果
 
-压缩把较早的消息按块递归摘要，再插入一条标记为检查点的合成用户消息，原消息保留在节点序列中；后续请求从最后一个检查点开始取上下文，检查点记录的 token 数由 `lastContextTokens` 读取（`compressConversation`、`Conversation.insertContextCheckpoint`、`data/ai/prompts/CompressPrompt.kt`）。旧消息仍可在会话树中看到与回退（`data/model/Conversation.kt`、`service/ChatService.kt`）。裁剪与压缩的编译语义见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
+压缩把较早的消息按块递归摘要，再插入一条标记为检查点的合成用户消息，原消息保留在节点序列中；后续请求从最后一个检查点开始取上下文，检查点记录的 token 数由 `lastContextTokens` 读取。旧消息仍可在会话树中看到与回退，摘要与检查点写入的实现见 `ChatService.kt`、`data/model/Conversation.kt`，摘要提示词在 `data/ai/prompts/CompressPrompt.kt`。裁剪与压缩的编译语义见[上下文编译与提示词工程笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
 
 ## 5. 列表、分页、搜索与定位
 
 ### 5.1 会话列表与分页
 
-侧栏列表用 Paging3：页大小 20、首屏 40、无占位，只查不含 `nodes` 与 `suggestions` 的轻量投影 `LightConversationEntity`（`pageSize = 20`、`initialLoadSize = 40`，`ConversationRepository.kt`、:66-90；投影定义见 :24-31、:491-499）。
+侧栏列表用 Paging3，页大小 20、首屏 40、不显示占位项；查询走轻量投影 `LightConversationEntity`，不读取 `nodes` 与 `suggestions` 两列，分页参数与投影定义见 `ConversationRepository.kt:24-31、:66-90、:491-499`。
 
 三个列表变体并存：助手全部、助手内未归类（`folder_id = ''`）、指定文件夹（`ConversationDAO.kt`）；界面在分页流上插入「置顶」与日期分隔项（`ChatDrawerVM.kt`）。Web 端另有以 `PagingSource` + `nextKey` 实现的分页。
 
@@ -239,7 +239,7 @@ Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObje
 
 ### 5.4 统计类查询
 
-会话每日计数用 SQLite `strftime` 聚合（`ConversationDAO.kt`）；token 与每日消息数则用 `json_each()` 展开 `message_node.messages` 后 `json_extract` 聚合，并以 `json_valid` 兜底损坏行（`MessageNodeDAO.kt`）——消息 JSON 结构一旦变化会波及统计。
+会话的每日计数由 SQLite 的 `strftime` 按日期聚合。token 用量与每日消息数走 JSON 路径：先用 `json_each()` 展开消息数组，再用 `json_extract` 取值聚合，损坏的行由有效性校验兜底；消息 JSON 的结构一旦变化，统计结果会随之改变（`ConversationDAO.kt`、`MessageNodeDAO.kt`）。
 
 ### 5.5 界面的规模保护
 
@@ -269,17 +269,17 @@ Provider 回传所需的协议原始数据放在部件的 `metadata`（`JsonObje
 
 ### 7.2 备份包格式
 
-备份包是一个 zip：`settings.json`、可选的数据库快照与附件目录（`upload/`、`skills/`、`fonts/`），由 `BackupManager.createBackup` 生成（`data/sync/BackupManager.kt`）。
+备份包是一个 zip：`settings.json`、可选的数据库快照与附件目录（`upload/`、`skills/`、`fonts/`），由备份管理器生成（`data/sync/BackupManager.kt`）。
 
 数据库快照用 `VACUUM INTO` 获得包含已提交 WAL 的独立文件，避免直接拷 WAL（`data/sync/DatabaseBackup.kt`）。附件写入时会逐个校验相对路径在目标目录内，拒绝越权路径（`BackupManager.kt`、`PendingRestore.resolveInside`）。
 
 ### 7.3 恢复是「下一次启动时安装」
 
-恢复不直接覆盖运行中的数据库：`stageRestore` 把内容落到 `noBackupFilesDir/backup-restore` 暂存目录并就地校验——数据库副本先 `normalize`（checkpoint + `PRAGMA integrity_check`），再用与线上一致的 schema 工厂打开以便执行受支持的旧迁移（`BackupManager.kt`、`DatabaseBackup.kt`）。
+恢复不直接覆盖运行中的数据库：暂存阶段（`stageRestore`）把备份内容解到 `noBackupFilesDir/backup-restore` 目录并就地校验，数据库副本先做 checkpoint 与 `PRAGMA integrity_check`，再用与线上一致的 schema 工厂打开，让受支持的旧迁移在副本上执行（`BackupManager.kt`、`DatabaseBackup.kt`）。
 
 `settings.json` 经 `SettingsJsonMigrator` 迁移并拒绝「未初始化」设置。应用启动时 `applyPendingRestore` 在任何 Koin/Room/SettingsStore 消费者之前执行（`RikkaHubApp.kt`）。
 
-安装用「journal + 原子移动 + 回滚」实现可恢复：先生成待安装条目清单并持久化，逐条 `ATOMIC_MOVE` 安装，失败回滚原文件，成功以重命名 `pending` 目录为提交动作；数据库的 `-wal`/`-shm`/`-journal` 作为「不安装只备份」条目处理，避免把旧库 WAL 留在新库旁（`PendingRestore.kt`）。
+安装的可恢复性靠三件事保证：先生成待安装条目清单并持久化，再逐条以 `ATOMIC_MOVE` 安装，全部成功后才把 `pending` 目录重命名，作为整批安装的提交动作；任一条失败则回滚已改动的原文件。数据库的三个 SQLite 附属文件（WAL、共享内存与日志）按「只备份、不安装」处理，避免把旧库的 WAL 留在新库旁（`PendingRestore.kt`）。
 
 ### 7.4 保留策略与提醒
 
@@ -295,19 +295,19 @@ Cherry Studio 只导入 Provider（`BackupVM.kt`），其合并规则见 [LLM渠
 
 ## 8. 助手、模型、注入与附件的绑定粒度
 
-- **助手 / workspace / 注入**：均为会话级——助手列决定模型、提示词与工具集并可在会话生命周期内整体迁移；workspace 保存沙箱内绝对路径；提示注入与世界书只存 id 集合、内容在设置中，Web 写入前校验 id 存在（`ConversationRoutes.kt`）。
-- **模型**：消息级 + 设置级。`UIMessage.modelId` 只存 UUID 引用而非快照；模型定义在 DataStore，模型删除后旧消息仍带 id，需反查设置取元信息（`ui/pages/chat/Export.kt`）。
-- **附件 / 收藏**：附件是消息部件级、只存 URL 并由 `FilesManager` 落地清理；收藏是节点级，独立 `favorites` 表以 `ref_key` 唯一索引、`ref_json`/`snapshot_json` 存节点快照，源会话删除后仍可读（`data/db/entity/FavoriteEntity.kt`、`FavoriteRepository.kt`）。
+- **助手、workspace 与注入**：三者都绑定在会话级。助手列决定该会话使用的模型、提示词与工具集，会话存续期间可以整体换到另一个助手；workspace 保存该会话在沙箱内的绝对路径；提示注入与世界书只存 id 集合，内容仍在设置中，Web 端写入前会校验 id 存在（`ConversationRoutes.kt`）。
+- **模型**：消息级与设置级并存。消息上只保存模型 UUID 的引用，模型参数不随消息固化；模型定义在 DataStore，模型删除后旧消息仍带 id，需要反查设置才能取到元信息（`ui/pages/chat/Export.kt`）。
+- **附件与收藏**：附件挂在消息部件级，只存 URL，实际文件由文件管理器落地清理；收藏挂在节点级，由独立的收藏表承载，引用键建唯一索引，节点快照存在 `ref_json` 与 `snapshot_json` 两列，源会话删除后收藏仍可读（`data/db/entity/FavoriteEntity.kt`、`FavoriteRepository.kt`）。
 
 ## 9. 跨会话引用（ConversationTools）
 
 助手按需检索历史会话而不静态注入系统提示词，注释说明这是为了不破坏提示词缓存（`data/ai/tools/ConversationTools.kt`）。
 
-`recent_chats` 与 `conversation_search` 在 `ChatToolFactory` 中随助手工具集注册，都以文本 JSON 结果回给模型、属于消息部件并随会话持久化：前者复用 `getRecentConversations` 取当前助手最近会话，后者复用 `searchMessages(..., RELEVANCE)` 对历史消息做全文检索（`ChatToolFactory.kt`、`ConversationTools.kt`）。参数与检索范围语义见[检索增强与认知编排笔记](../检索增强与认知编排/RikkaHub-检索增强与认知编排调查笔记.md)。
+两个工具 `recent_chats` 与 `conversation_search` 随助手工具集在 `ChatToolFactory` 中注册，结果都以文本 JSON 回给模型，属于消息部件并随会话持久化：前者复用仓库的最近会话查询取当前助手的会话记录，后者复用消息全文检索并按相关度排序（`ChatToolFactory.kt`、`ConversationTools.kt`）。参数与检索范围语义见[检索增强与认知编排笔记](../检索增强与认知编排/RikkaHub-检索增强与认知编排调查笔记.md)。
 
 ## 10. 设计取舍与已确认边界
 
-- **双轨数据形状**：领域模型以「节点列表」工作，Room 侧把节点拆行、候选消息打包成 JSON 列，换来整会话事务重写的简单一致性与按节点定位能力，代价是 FTS 必须独立维护。
+- **领域模型与存储形状分两层**：领域模型以「节点列表」工作，Room 侧把节点拆成行、候选消息打包进 JSON 列；这样换来了整会话事务重写的简单一致性与按节点定位的能力，代价是 FTS 必须独立维护。
 - **分支用下标、编辑靠追加候选**：没有 parent/child 外键，活动路径由每节点的 `select_index` 推得，分支切换是 O(1) 单列修改，但不存在可引用的「分支实体」；编辑与重新生成都保留原消息并追加候选，只有用户消息的重新生成会截断后续节点。
 - **`nodes` 列保留但不使用**：迁移 11→12 后恒为 `'[]'`，该列与 `resetConversationNodes` 语句仍在（`ConversationDAO.kt`），本次未找到调用方。
 - **写入是回合制**：流式期间不逐 chunk 落库以省写放大，回合结束（含取消与失败）统一收尾保存，因此半截回复也会以已收到的部分落盘。

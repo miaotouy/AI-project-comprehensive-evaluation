@@ -54,7 +54,7 @@ iOS / Android:
 
 ### Gateway 与协议边界
 
-协议层把聊天历史、发送请求和实时运行事件分开。`chat.history` 接受 session key、agent、cursor、offset、message anchor 和显示字符预算，并返回历史消息、session 信息、分页或 cursor 状态；cursor 增量只能返回 `delta` 或要求客户端 `reset`。`chat.send` 使用幂等键、队列模式和可选附件，实时 `chat` 事件带有 session、agent、run 和单调序列字段。具体契约见 `packages/gateway-protocol/src/schema/logs-chat.ts`。
+协议层把聊天历史、发送请求和实时运行事件分开。chat.history 接受 session key、agent、cursor、offset、message anchor 和显示字符预算，返回历史消息、session 信息、分页或 cursor 状态；cursor 增量只返回 delta，或要求客户端整页 reset。chat.send 使用幂等键、队列模式和可选附件，实时 chat 事件带有 session、agent、run 和单调序列字段。具体契约见 `packages/gateway-protocol/src/schema/logs-chat.ts`。
 
 持久消息在 SQLite 变更提交后才发出 transcript update。写入通知携带 agent、session、session key 和 store path，随后 Gateway 根据消息序号和当前 session 状态构造 `session.message` payload；被显示投影过滤的消息仍可通过 `sessions.changed` 通知列表观察者。提交后的通知与广播顺序见 `src/config/sessions/session-accessor.sqlite-events.ts`、`src/gateway/server-session-events.ts`。
 
@@ -70,7 +70,7 @@ Gateway 的显示投影位于传输和客户端之间。它会处理内部 envel
 
 ### Gateway 显示消息
 
-Gateway 没有为所有模型供应商强制一个固定的内容 part 联合。协议中的历史和事件 message 字段主要是 `unknown`，显示投影负责把不同 transcript 形态收敛为客户端可以识别的 role、content、metadata 和 session 信息。`__openclaw.id`、`seq`、`idempotencyKey`、`recordTimestampMs`、`kind`、`truncated`、`runTerminal` 等字段承担渲染去重、排序、分支标记和完整消息读取的职责。
+Gateway 的消息模型跟随 transcript 的实际形态：协议中的历史和事件 message 字段保持 `unknown`，显示投影负责把不同 transcript 形态收敛为客户端可以识别的 role、content、metadata 和 session 信息。补充的身份字段承担渲染侧判断：`__openclaw.id`、seq 与 `idempotencyKey` 用于去重和排序，recordTimestampMs 保留记录时间，kind 标记消息类型与分支，`truncated` 标记截断并支撑客户端读取完整消息，`runTerminal` 表示终态。
 
 运行事件的共同身份由以下信息组成：
 
@@ -98,7 +98,7 @@ TUI 不把终端输出解析为浏览器 DOM。每个 run 在 `TuiStreamAssemble
 
 iOS 的 `OpenClawChatMessage` 包含 role、content 数组、时间、transcript message id、幂等键、tool call/name、usage、stopReason、错误、provenance 和 history marker。`OpenClawChatMessageContent` 同时容纳文本、thinking、媒体、工具调用参数、工具详情和 Canvas preview；解码器还兼容字符串型 content、旧的 `MediaPath`/`MediaType` 字段和 managed artifact URL。定义与解码见 `apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatModels.swift`。
 
-Android 先把 Gateway payload 解码为 `ChatMessage` 和 `ChatMessageContent`。可见 role 集合是 user、assistant、system、custom；content 类型包括 text、image、audio、video、attachment/file 和受限的 canvas widget。解析器兼容 `input_text`、`output_text`、字符串 content、旧 transcript 音频字段，并把 managed media URL 转换为 artifact id，见 `apps/android/app/src/main/java/ai/openclaw/app/chat/ChatModels.kt`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`。
+Android 先把 Gateway payload 解码为 ChatMessage 和 ChatMessageContent。可见 role 集合是 user、assistant、system、custom；content 类型包括 text、image、audio、video、attachment/file 和受限的 canvas widget。解析器兼容 input_text、output_text、字符串 content 和旧 transcript 音频字段，并把 managed media URL 转换为 artifact id，见 `apps/android/app/src/main/java/ai/openclaw/app/chat/ChatModels.kt`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`。
 
 ## 2. 流式数据到 UI 的更新链
 
@@ -116,9 +116,9 @@ GatewayBrowserClient 把 WebSocket event frame 交给 pane lifecycle。连接切
 
 历史请求使用共享的 bounded in-flight registry。相同 client、session、agent、connection epoch 和 cursor 的请求可以被多个 pane 复用，但每个 pane 仍按自己的 request ownership 验证结果。cursor 返回 `delta` 时，消息会按 `session.message` 的同一 reducer 逐项应用；返回 `reset` 时清除 cursor 并重新请求 tail page。实现见 `ui/src/pages/chat/chat-history.ts`。
 
-实时 `chat` 事件进入 `handleChatGatewayEvent`，负责 delta 拼接、run 状态、终态替换和迟到 final 去重；实时 `session.message` 进入 `applySessionMessagePayload`，负责把持久行纳入当前 projection。历史 snapshot 只在 session、agent、connection epoch 和 request version 都仍匹配时提交。`chat-state-events.ts` 在 delta 时使用 animation frame 请求重绘，在终态和历史交接时立即请求重绘；state 一侧已经拆成 controller、host、page、refresh 与 render-lifecycle 等兄弟模块，渲染请求与状态宿主分离，见 `ui/src/pages/chat/chat-state-events.ts`、`chat-state-controller.ts`、`chat-state-host.ts`、`chat-state-page.ts`、`chat-state-render-lifecycle.test.ts`。
+实时 chat 事件进入 handleChatGatewayEvent，负责 delta 拼接、run 状态、终态替换和迟到 final 去重；实时 session.message 进入 applySessionMessagePayload，负责把持久行纳入当前 projection。历史 snapshot 只在 session、agent、connection epoch 和 request version 都仍匹配时提交。delta 阶段用 animation frame 请求重绘，终态和历史交接时立即重绘；state 一侧已拆成 controller、host、page、refresh 与 render-lifecycle 等兄弟模块，渲染请求与状态宿主分离，见 `ui/src/pages/chat/chat-state-events.ts`。
 
-工具流走独立的 `tool-stream.ts`，并按职责拆出 `tool-stream-contract.ts`、`tool-stream-identity.ts`、`tool-stream-state.ts`、`tool-stream-status.ts`、`tool-stream-snapshot.ts` 等兄弟模块。它按 runId + toolCallId 保存工具条目，使用 Gateway sequence 防止历史恢复覆盖更新的 live 状态；工具事件保留上限为 50 条（`TOOL_STREAM_LIMIT`），普通工具 UI 更新的节流窗口为 80 ms（`TOOL_STREAM_THROTTLE_MS`），文本输出按 120000 字符截断（`TOOL_OUTPUT_CHAR_LIMIT`，`tool-stream.ts:43-46`）。结果可以生成 tool call、tool result、diff、approval review 或 Canvas preview，见 `ui/src/pages/chat/tool-stream.ts` 与上述兄弟模块。
+工具流由独立的 tool-stream 模块承担，并按契约、身份、状态与快照等职责拆成兄弟模块。它按 runId 加 toolCallId 保存工具条目，用 Gateway sequence 防止历史恢复覆盖更新的 live 状态；工具事件保留上限为 50 条，普通工具 UI 更新有 80 ms 节流窗口，文本输出按 120,000 字符截断。三项预算分别由 TOOL_STREAM_LIMIT、TOOL_STREAM_THROTTLE_MS 与 TOOL_OUTPUT_CHAR_LIMIT 定义，见 `ui/src/pages/chat/tool-stream.ts:43-46`。条目结果可以生成 tool call、tool result、diff、approval review 或 Canvas preview。
 
 ### TUI 更新
 
@@ -148,7 +148,7 @@ Android 的 `chat` handler 只让当前 controller 所有的 run 更新 live 文
 
 ### Control UI virtualizer
 
-Control UI 的 transcript 虚拟化由 `@tanstack/virtual-core` 承担，宿主组件是 `ui/src/pages/chat/components/chat-transcript-virtualizer-host.ts`。end anchor、`followOnAppend` 关闭、由聊天自身滚动状态决定是否跟随，这些策略仍在；具体估算行高、overscan 与 resize 处理本次未逐常量复核（`ui/src/pages/chat/components/chat-transcript-virtualizer-host.ts`、`ui/src/pages/chat/chat-transcript-pages.ts`、`ui/src/pages/chat/chat-thread-facts.ts`）。
+Control UI 的 transcript 虚拟化由 `@tanstack/virtual-core` 承担，宿主组件是 chat-transcript-virtualizer-host。虚拟列表以 end anchor 为基准，followOnAppend 处于关闭状态，是否贴底由聊天自身的滚动状态决定；估算行高、overscan 与 resize 处理的具体常量本次未逐项复核。相关实现见 `ui/src/pages/chat/components/chat-transcript-virtualizer-host.ts`、`ui/src/pages/chat/chat-transcript-pages.ts` 与 `ui/src/pages/chat/chat-thread-facts.ts`。
 
 虚拟范围外的 focused row 会额外保留，因而搜索定位、回复跳转或详情操作不会因为 row 离开窗口而消失；相关范围计算在 `ui/src/pages/chat/chat-transcript-pages.ts` 与 `ui/src/e2e/virtual-row-anchor.*` 的锚点用例中体现。行 key 变化时用 snapshot 与当前 scroll offset 预览下一组虚拟行，MCP App row 在卸载前经过专门的 teardown gate，见 `ui/src/pages/chat/components/chat-transcript-virtualizer-host.ts`、`ui/src/pages/chat/components/mcp-app-view.browser.test.ts`。
 
@@ -162,7 +162,7 @@ iOS 的原生聊天使用 `ScrollView` + `LazyVStack`。消息行和系统行全
 
 iOS 通过 `scrollPosition`、live edge threshold 48 px、turn anchor 和 one-shot positioning 管理滚动。新 turn 通常定位到用户消息附近；键盘出现时改为跟随 live edge；用户滚动后显示 Jump to latest，流式 tick 不会反复绑定同一个 row，见 `apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatView.swift`。
 
-Android 使用 `LazyColumn(reverseLayout = true)` 和稳定的 `chatTimelineItemKey`。timeline index 0 是最新视觉边缘，latest user message 是恢复历史时的 reader anchor，latest content 是实时跟随目标。`ChatReaderScrollController` 用 `LazyListState`、`snapshotFlow` 和 `rememberSaveable` 保存 session-scoped 状态；新 user turn 会转为 LatestContent，用户离开目标后显示 Jump to latest，见 `apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatReaderScrollController.kt`。
+Android 使用 `LazyColumn(reverseLayout = true)`，条目以稳定的 `chatTimelineItemKey` 复用。timeline index 0 是最新视觉边缘，latest user message 是恢复历史时的 reader anchor，latest content 是实时跟随目标。ChatReaderScrollController 用 LazyListState、snapshotFlow 和 rememberSaveable 保存 session 级滚动状态；新 user turn 会转为 LatestContent，用户离开目标后显示 Jump to latest，见 `apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatReaderScrollController.kt`。
 
 ## 4. 消息壳层与角色分派
 
@@ -174,13 +174,13 @@ Control UI 的消息壳分三层完成分派：
 - `groupMessages` 按 role、sender、run 和 turn boundary 生成 MessageGroup；同一回合的 assistant commentary、工具和最终回复可以继续被拆分。
 - `coalesceStreamRuns`、`collapseCompletedTurnWork` 和 `coalesceAgentRunFrames` 把实时流、已完成工作和活动状态包装成稳定的可见 frame。
 
-最终组件集中在 `ui/src/pages/chat/components/`，并已按视图与子块继续细分：group 由 `chat-message-group-view.tsx` 承载，正文气泡拆成 `chat-message-bubble-view.tsx` 与 `chat-message-bubble-tools.tsx`，图片/附件有 `chat-message-images-solid.tsx`、`chat-message-attachments-solid.tsx`，延迟渲染有 `chat-message-deferred.tsx`，run frame 仍是 `chat-agent-run-frame.tsx`。逻辑侧的分组、构建、重复判定与 prepend 留在 `ui/src/pages/chat/` 根：`chat-thread-grouping.ts`、`chat-thread-build.ts`、`chat-thread-duplicates.ts`、`chat-thread-prepend.ts`、`chat-agent-run-grouping.ts`。user group、assistant group、tool group、系统 notice、compaction/reset divider、streaming assistant、reading indicator、question 和 run frame 都有独立布局入口；完成回合的中间工作可折叠为 Worked for X。
+最终组件集中在 `ui/src/pages/chat/components/`，并按视图与子块继续细分：消息组、正文气泡及其工具子块、图片与附件、延迟渲染和 run frame 各有独立组件。逻辑侧的分组、构建、重复判定与 prepend 留在 `ui/src/pages/chat/` 根目录。user group、assistant group、tool group、系统 notice、compaction/reset divider、streaming assistant、reading indicator、question 和 run frame 都有独立布局入口；完成回合的中间工作可折叠为 Worked for X。组件细分与 thread 逻辑入口见 `ui/src/pages/chat/components/chat-message-group-view.tsx`、`ui/src/pages/chat/chat-thread-build.ts`。
 
 assistant 正文、reasoning、工具卡、附件和 Canvas preview 仍在同一 group 壳内组合，装配函数把 role/message normalization、工具卡、图片、附件、thinking、正文和 reply target 计算后，再按 Markdown、tool card、media 与 widget 的条件决定内容顺序，见 `ui/src/pages/chat/components/chat-message-bubble-view.tsx`、`chat-message-bubble-tools.tsx`、`chat-message-context-view.tsx`。
 
 ### TUI
 
-TUI 的用户消息使用 `UserMessageComponent`，assistant 使用 `AssistantMessageComponent`，两者都包裹 `HyperlinkMarkdown`。system notice 使用终端 Text；工具使用 `ToolExecutionComponent`；BTW 问题使用 `BtwInlineMessage`。`ChatLog` 负责把这些组件插入正确的 run 位置和 scrollback，assistant 的工具边界会冻结此前文本，见 `src/tui/components/user-message.ts`、`src/tui/components/assistant-message.ts`、`src/tui/components/chat-log.ts`。
+TUI 的用户消息与 assistant 消息分别由专属组件渲染，两者都包裹 HyperlinkMarkdown 以支持终端链接；system notice 是纯终端文本，工具卡与 BTW 问题也各有独立组件。ChatLog 负责把这些组件插入正确的 run 位置和 scrollback，assistant 的工具边界会冻结此前文本，见 `src/tui/components/chat-log.ts`。
 
 ### iOS
 
@@ -190,7 +190,7 @@ iOS 的 `ChatTranscriptRow` 先把历史 marker 转成 compaction/reset divider�
 
 ### Android
 
-Android 先用 `ChatTimelineItem` 把持久消息、streaming assistant、pending tools、subagent、question、turn recap、system notice、system divider 和 outbox 分成稳定 key 的时间线。`ChatScreen` 再按 item 类型调用 `ChatBubble`、`ToolBubble`、`SubagentActivityRows`、`ChatQuestionCard`、系统行和加载状态，见 `apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatTimeline.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`。
+Android 先用 ChatTimelineItem 把持久消息、streaming assistant、pending tools、subagent、question、turn recap、system notice、system divider 和 outbox 分成带稳定 key 的时间线，再由 ChatScreen 按 item 类型分派到消息气泡、工具卡、subagent 活动行、提问卡、系统行和加载状态，见 `apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatTimeline.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`。
 
 `ChatBubble` 将 user、system 和 assistant 映射为 speaker/caption，过滤空文本、图片上限、Canvas widget 和媒体，然后在统一的 Material surface 中装配 Markdown、音视频、图片、文件、widget、链接预览、speech 状态和时间。用户消息超过阈值时使用独立的 disclosure，见 `apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`。
 
@@ -208,13 +208,13 @@ Control UI 的解析器是 `markdown-it`，开启 HTML 识别、换行、linkify
 4. 由 DOMPurify 按显式 tag/attribute 白名单清洗。
 5. Solid 视图将清洗后的结果绑定到原生 DOM 的 innerHTML。公共 [MarkdownHtml](<../../openclaw/ui/src/components/solid/markdown-html.tsx#L13-L22>) 将唯一 HTML sink 与共享清洗入口连接；流式块仍由各自内容 owner 管理。
 
-这些步骤现已分散到一组 `markdown-*` 兄弟模块：解析在 `markdown-parser.ts`，清洗与白名单在 `markdown-sanitizer.ts`，代码块与高亮在 `markdown-code-blocks.ts`、`markdown-code-highlight.ts`（重活由 `markdown-code-highlight.worker.ts` 承担），内容装配与 block owner 在 `markdown.ts`、`markdown-blocks-owner.ts`，聊天内的渲染壳在 `ui/src/pages/chat/components/chat-message-markdown.*`。允许的普通 Markdown tag 不包含 iframe、script 或 style；链接协议仍限制为 http、https、mailto，host-local markdown file 的 href 被移除，外链补 target 与 rel，见 `ui/src/components/markdown-sanitizer.ts`。
+这些步骤分布在一组 markdown 兄弟模块中：解析、清洗与白名单、代码块与高亮、内容装配与 block owner、聊天内的渲染壳各自独立成文件，高亮的重计算由 worker 承担。允许的普通 Markdown tag 不包含 iframe、script 或 style；链接协议限制为 http、https、mailto，host-local markdown file 的 href 被移除，外链补 target 与 rel。白名单与链接处理见 `ui/src/components/markdown-sanitizer.ts`，解析入口在 `ui/src/components/markdown-parser.ts`。
 
 流式正文使用稳定前缀和尾部修复：稳定段复用普通缓存，尾段修补未闭合语法，开放代码 fence 保持 plain text，避免每个 delta 触发完整高亮。相关实现分布在 `markdown-streaming.ts`、`markdown-streaming-state.ts`、`markdown-live.ts`、`markdown-live-loader.ts` 与 `markdown.ts`。
 
 代码块具有独立 header、语言标签、复制按钮、展开和换行控制，复制与 JSON 展示分别抽到 `markdown-copy.ts` 与 `markdown-json.ts`；纯 JSON 的 assistant 消息在阈值内会被识别并显示为可折叠的 pretty-printed code，更长或解析失败的 JSON 保持普通正文。具体字符阈值本次未逐常量复核，见 `ui/src/pages/chat/components/chat-message-markdown.*`、`ui/src/components/markdown-json.ts`。
 
-Control UI 现已有 Mermaid 支持：`markdown-parser.ts` 对未闭合以外的 `mermaid` 代码块输出 `.markdown-mermaid` 容器，由 `markdown-mermaid.tsx` 与 `markdown-mermaid.css` 承担渲染，并有独立 runtime/native/expansion 用例。KaTeX 在 Control UI 侧本次仍未找到渲染入口；Android 原生资产中存在 KaTeX 包（`apps/android/app/src/main/assets/katex/`），说明公式渲染属于平台侧能力而非共享 Markdown 管线。
+Control UI 的解析器对未闭合以外的 mermaid 代码块输出 `.markdown-mermaid` 容器，由 markdown-mermaid 组件与样式表承担渲染，并有独立的 runtime、native 和 expansion 用例。KaTeX 在 Control UI 侧本次仍未找到渲染入口；Android 原生资产中带有 KaTeX 包（`apps/android/app/src/main/assets/katex/`），说明公式渲染属于平台侧能力，位于共享 Markdown 管线之外。Mermaid 分支见 `ui/src/components/markdown-parser.ts`。
 
 ### TUI Markdown
 
@@ -332,12 +332,14 @@ TUI 用 180 个 component 的 bounded scrollback、200 个 stream assembler run 
 
 本次定位到的相关测试包括：
 
-- Gateway 显示投影：`src/gateway/chat-display-projection.test.ts`、`src/gateway/control-reply-text.test.ts`。
-- Control UI 事件和历史：`ui/src/pages/chat/chat-gateway.test.ts`、`ui/src/pages/chat/chat-state.test.ts`、`ui/src/pages/chat/chat-history.test.ts`、`ui/src/pages/chat/chat-history-cursor.test.ts`、`ui/src/pages/chat/chat-history-subscription-errors.test.ts`。
-- Control UI 渲染与预算：`ui/src/pages/chat/components/chat-transcript-render.test.ts`、`ui/src/pages/chat/components/markdown-streaming-highlight.test.ts`、`ui/src/e2e/chat-stream-runtime-budgets.e2e.test.ts`。
-- TUI 流和 scrollback：`src/tui/tui-stream-assembler.test.ts`、`src/tui/components/chat-log.test.ts`、`src/tui/components/chat-log-run-state.test.ts`、`src/tui/tui-event-handlers.test.ts`。
-- iOS 身份与 transport：`apps/ios/Tests/IOSGatewayChatTransportTests.swift`，以及共享 chat UI 的 Markdown、媒体和 typography 相关测试。
-- Android 解码与 Markdown：`apps/android/app/src/test/java/ai/openclaw/app/chat/ChatMessageContentParsingTest.kt`、`ChatControllerMessageIdentityTest.kt`、`apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatMarkdownTest.kt`。
+| 覆盖边界 | 测试入口 |
+|---|---|
+| Gateway 显示投影 | `src/gateway/chat-display-projection.test.ts`、`src/gateway/control-reply-text.test.ts` |
+| Control UI 事件和历史 | `ui/src/pages/chat/chat-gateway.test.ts`、`ui/src/pages/chat/chat-state.test.ts`、`ui/src/pages/chat/chat-history.test.ts`、`ui/src/pages/chat/chat-history-cursor.test.ts`、`ui/src/pages/chat/chat-history-subscription-errors.test.ts` |
+| Control UI 渲染与预算 | `ui/src/pages/chat/components/chat-transcript-render.test.ts`、`ui/src/pages/chat/components/markdown-streaming-highlight.test.ts`、`ui/src/e2e/chat-stream-runtime-budgets.e2e.test.ts` |
+| TUI 流和 scrollback | `src/tui/tui-stream-assembler.test.ts`、`src/tui/components/chat-log.test.ts`、`src/tui/components/chat-log-run-state.test.ts`、`src/tui/tui-event-handlers.test.ts` |
+| iOS 身份与 transport | `apps/ios/Tests/IOSGatewayChatTransportTests.swift`，以及共享 chat UI 的 Markdown、媒体和 typography 相关测试 |
+| Android 解码与 Markdown | `apps/android/app/src/test/java/ai/openclaw/app/chat/ChatMessageContentParsingTest.kt`、`ChatControllerMessageIdentityTest.kt`、`apps/android/app/src/test/java/ai/openclaw/app/ui/chat/ChatMarkdownTest.kt` |
 
 上述文件证明项目为这些边界提供了回归测试入口；本次没有运行测试、性能基准、构建或浏览器/原生视觉检查，长会话运行时性能属于运行验证范围。
 
@@ -347,12 +349,12 @@ TUI 用 180 个 component 的 bounded scrollback、200 个 stream assembler run 
 
 新增可见内容通常需要经过以下边界：
 
-1. Gateway protocol 或 transcript display projection 能够携带该内容，并为它提供身份、预算和可见性规则。
-2. `session-transcript-message.ts` 或对应历史路径能把它投影到 `session.message`/`chat.history`。
-3. Control UI 的 message normalization、`chat-thread-build.ts` 和 grouping 能够决定它属于普通消息、activity、工具、divider 还是 stream。
-4. `chat-message-bubble-view.tsx`、tool card、media 或 widget registry 增加具体内容组件；如果内容是 HTML/iframe，则同时经过 Markdown allowlist 或 widget security boundary。
-5. TUI 的 `tui-event-handlers.ts`、`TuiStreamAssembler`、`ChatLog` 和终端组件决定其 terminal projection。
-6. iOS 的 `OpenClawChatMessageContent`/segmenter/view 与 Android 的 `ChatMessageContent`/parser/Compose view 分别增加原生投影。
+1. Gateway protocol 或 transcript display projection 能携带该内容，并为它提供身份、预算和可见性规则。
+2. 历史路径把它投影到 session.message 或 chat.history，入口见 `src/gateway/session-transcript-message.ts`。
+3. Control UI 的 message normalization、thread build 与 grouping 决定它属于普通消息、activity、工具、divider 还是 stream。
+4. 在 bubble view、tool card、media 或 widget registry 中增加具体内容组件；HTML/iframe 类内容同时经过 Markdown allowlist 或 widget security boundary。
+5. TUI 的 terminal projection 由事件处理、stream assembler、ChatLog 和终端组件决定，入口见 `src/tui/tui-event-handlers.ts`。
+6. iOS 与 Android 分别在原生 content model、parser、segmenter 和 SwiftUI/Compose 视图层增加投影。
 
 新增工具的 Control UI 入口集中在 tool-card extraction、tool-call view、tool display registry 和 `chat-tool-cards.ts`；新增工具不应仅依赖 Markdown 正文猜测调用语义。TUI 和原生端没有复用 Control UI 的组件 registry，需要分别增加对应的 display mapping。
 

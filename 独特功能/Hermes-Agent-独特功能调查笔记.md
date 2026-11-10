@@ -31,8 +31,8 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 ## 系统边界
 
-- 单仓库 Python 核心（run_agent.py/cli.py/gateway/）+ TS 前端（ui-tui/apps/desktop/web）；本笔记只涉核心与工具面。
-- 插件生态在快照间成为独立产品面：`plugin-catalog/` 从 99 条增长到 978 条 YAML 清单，采用“人工合并 + 40 位 SHA 固定 + 禁止自更新代码”的准入模型，`hermes plugins catalog/search/install/update` 安装；核心 `plugins/` 现有 24 个条目，含 `computer_use`、`delegation`、`teams_pipeline`、`kanban`、`config_backends`、`context_engine` 等。外部记忆提供方（Honcho、Mem0 等）已从仓库内置 `plugins/memory/` 迁到该清单，仓库内只保留 byterover 与 retaindb。
+- 项目核心与前端同处一个仓库：Python 侧的核心入口是 `run_agent.py` 与 `cli.py`，网关单独占 `gateway/` 目录；TypeScript 前端以 `ui-tui/`、`apps/desktop/` 与 `web/` 三个入口覆盖终端、桌面与 Web 形态。本笔记只覆盖核心与工具面。
+- 插件生态已经独立成产品面：`plugin-catalog/` 的 YAML 清单从 99 条增至 978 条，准入模型要求人工合并、以 40 位 SHA 固定版本、禁止自更新代码，安装通过 `hermes plugins catalog/search/install/update` 子命令完成。仓库核心 `plugins/` 目录现有 24 个一等插件，覆盖计算机使用、委派、teams 流水线、看板、配置后端与上下文引擎等方向。外部记忆提供方（Honcho、Mem0 等）已从仓库内置的 `plugins/memory/` 迁入该清单，仓库内只保留 byterover 与 retaindb。
 - 闭环学习全部发生在本地进程内（fork 是进程内对象，不是子进程），后台线程执行，结果落文件或外部 provider。
 - 与既有笔记分工：工具执行/审批链（[Agent工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)）、人格/提示词分层（[Agent角色笔记](../Agent角色/Hermes-Agent-Agent角色配置调查笔记.md)）、聊天表面（[Chat UI 笔记](../Chat%20UI/Hermes-Agent-ChatUI调查笔记.md)）。待查清单已确认 cron、委派、网关、TUI 覆盖较深，本笔记只回链不重写。
 
@@ -48,10 +48,10 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **入口与触发者**：三个独立计数触发器 + 一个按需入口（均为 Agent 侧自触发或用户显式命令）：
 
-1. 记忆复习：回合计数每轮自增，距上次记忆复习达到可配置间隔（默认 10 轮，`agent/agent_init.py:1698-1713`）时置位复习标志（`agent/turn_context.py:421/685`）；
-2. 技能复习：技能迭代计数达到可配置间隔（默认 10，`agent_init.py:1798-1801`）且技能管理工具在工具集内时触发（`agent/turn_finalizer.py:734-760`）；
-3. 会话历史水化：恢复会话时按历史用户消息数回填计数，避免"重启后计数器归零永不触发"（`turn_context.py:592-644`，issue #22357）；
-4. **`/refine` 按需触发**（`hermes_cli/cli_commands_mixin.py:2545`）：用户显式运行与后台复习相同的 fork，可带聚焦提示参数（`background_review.py:1106` 附近 docstring）。
+1. 记忆复习：回合计数每轮自增，距上次复习达到配置间隔（默认 10 轮）时置位复习标志，计数器初始化与判断逻辑分别在 `agent/agent_init.py:1698-1713` 和 `agent/turn_context.py:421/685`；
+2. 技能复习：技能迭代计数达到配置间隔（默认 10）且技能管理工具在工具集内时触发，计数配置在 `agent/agent_init.py:1798-1801`，触发判定在 `agent/turn_finalizer.py:734-760`；
+3. 会话历史水化：恢复会话时按历史用户消息数回填计数，避免"重启后计数器归零永不触发"（`agent/turn_context.py:592-644`，issue #22357）；
+4. **`/refine` 按需触发**：用户显式运行与后台复习相同的 fork，可带聚焦提示参数，命令入口在 `hermes_cli/cli_commands_mixin.py:2545`，参数说明见 `agent/background_review.py:1106` 附近的 docstring。
 
 **状态/对象**：计数器为 agent 实例字段；复习结果写入两个持久化面——记忆侧经 memory 工具写入 MEMORY.md 或外部 provider，技能侧经 `skill_manage` 写入用户技能目录 `~/.hermes/skills/<name>/SKILL.md`。`AIAgent` 提供 `skip_background_review` 构造参数，cron 会话默认关闭后台复习，与 cron 的 `skip_memory=True` 同属防止污染用户画像/技能库的硬化思路。
 
@@ -77,14 +77,14 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **主链**：
 
-1. **创建与修改**：模型可见的 `skill_manage` schema 只有 `operations[]`。一次最多 20 项，每项声明技能名和 create、patch、write_file 或 remove_file 动作；执行前快照全部受影响技能，任一操作失败则整体回滚。delete 必须独占调用，旧平铺动作只为历史转录与待审批重放兼容，不再进入模型 schema（`tools/skill_manager_tool.py:824-938`）。设计规则仍把复杂任务成功、克服错误和有效的用户纠正视为创建或修补信号；前台写入需确认，后台复习由来源标记区分。
-2. **统计**：`tools/skill_usage.py` 维护技能目录下的 `.usage.json` 侧车，记录使用/查看/修补次数与最近活动时间、状态和置顶标记，技能管理动作成功时由记账函数落账（`skill_manager_tool.py:1599-1620`）。
-3. **维护**：curator 负责技能的长期维护（`agent/curator.py:1-20` 模块文档）——无 cron 守护进程，Agent 空闲且距上次运行超过 `interval_hours` 时 fork 复习体惰性执行。确定性状态机与硬性不变量：
-   - 状态机 `apply_automatic_transitions`：按 `stale_after_days=30` 标记 stale、`archive_after_days=90` 归档；另有可选 LLM 整合 pass（`DEFAULT_CONSOLIDATE = False` 默认关闭）；
-   - 不变量：只处理 `created_by: "agent"` 的技能、永不删除（归档可恢复）、pinned 技能跳过所有自动转移（`curator.py:15-20`）；
-   - 状态持久化在 `~/.hermes/skills/.curator_state`（`curator.py:85-98`）；`absorbed_into` 参数让整合/剪枝可被区分（`skill_manager_tool.py:1651-1657`）。
-   CLI 侧 `hermes curator` 提供状态查看、运行、暂停/恢复、置顶/取消置顶、归档/恢复、剪枝、备份与回滚等子命令（`hermes_cli/curator.py`）。
-4. **生态**：`skills/`（默认启用）+ `optional-skills/`（`hermes skills install official/<cat>/<skill>`，tools/skills_hub.py）+ agentskills.io 兼容（README 声明）。
+1. **创建与修改**：模型侧只看到 `skill_manage` 的一个 operations 数组，单次调用最多 20 项，每项给出技能名，并在 create、patch、write_file、remove_file 四种动作里选一个。执行前会先快照全部受影响技能，任何一项失败就整体回滚；删除必须独占一次调用。旧的平铺动作参数只用于历史转录与待审批调用的重放，已从模型 schema 中移除。schema 定义与执行逻辑见 `tools/skill_manager_tool.py:824-938`。设计规则仍把复杂任务成功、克服错误与有效的用户纠正视为创建或修补信号；前台写入需要确认，后台复习按来源标记区分。
+2. **统计**：技能目录下的 `.usage.json` 侧车文件记录使用、查看与修补次数，以及最近活动时间、状态和置顶标记，技能管理动作成功时由记账函数落账。记账实现在 `tools/skill_usage.py`，落账调用点见 `tools/skill_manager_tool.py:1599-1620`。
+3. **维护**：curator 负责技能的长期维护，不靠 cron 守护进程——Agent 空闲且距上次运行超过 `interval_hours` 时才 fork 复习体惰性执行。状态机与硬性约束见 `agent/curator.py:1-20` 的模块文档：
+   - 自动转移按 stale_after_days=30 把技能标记为 stale、按 archive_after_days=90 归档，另有默认关闭的 LLM 整合 pass（DEFAULT_CONSOLIDATE = False）；
+   - 三条不变量：只处理 created_by 为 agent 的技能、永不删除（归档后可恢复）、置顶技能跳过全部自动转移，见 `agent/curator.py:15-20`；
+   - 状态持久化在 `~/.hermes/skills/.curator_state`，读写实现见 `agent/curator.py:85-98`；整合与剪枝用 absorbed_into 参数区分（`tools/skill_manager_tool.py:1651-1657`）。
+   CLI 侧 `hermes curator` 提供状态查看、运行、暂停/恢复、置顶/取消置顶、归档/恢复、剪枝、备份与回滚等子命令，入口在 `hermes_cli/curator.py`。
+4. **生态**：`skills/` 目录默认启用，`optional-skills/` 通过 `hermes skills install official/<cat>/<skill>` 安装，安装逻辑在 `tools/skills_hub.py`；仓库声明与 agentskills.io 兼容（README）。
 
 **持续性**：全部为磁盘文件（skills 目录、.usage.json、.curator_state），profile 隔离；`hermes backup` 含技能。
 
@@ -98,8 +98,8 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **事实对象**（双轨）：
 
-- 内置：`~/.hermes/memories/MEMORY.md`（Agent 长期记忆）与 `USER.md`（用户画像，`memory.user_profile_enabled` 开关），两者注入 system prompt volatile 段（Agent 角色笔记 §3.3 已确认注入链）；
-- 外部：`MemoryProvider` ABC（`agent/memory_provider.py`）定义初始化、系统提示注入、预取、回合同步、工具 schema 与工具调用处理等核心方法及若干可选生命周期钩子；仓库内置 `plugins/memory/` 只保留 byterover 与 retaindb 两个 provider，Honcho、Mem0 等由 `plugin-catalog/` 的 SHA 固定清单按需安装，同一时刻至多激活一个，由 `memory.provider` 配置选择。
+- 内置：`~/.hermes/memories/MEMORY.md` 存 Agent 长期记忆，配套的 `USER.md` 存用户画像（由 `memory.user_profile_enabled` 开关控制），两者都注入 system prompt 的 volatile 段（注入链见 Agent 角色笔记 §3.3）；
+- 外部：`MemoryProvider` 抽象基类定义在 `agent/memory_provider.py`，规定了初始化、系统提示注入、预取、回合同步、工具 schema 与工具调用处理等核心方法，另有若干可选的生命周期钩子；仓库内置的 `plugins/memory/` 只保留 byterover 与 retaindb 两个 provider，Honcho、Mem0 等改由 `plugin-catalog/` 中 SHA 固定的清单按需安装，同一时刻最多激活一个，由 `memory.provider` 配置选择。
 
 **完整主链**：`MemoryManager`（`agent/memory_manager.py:364`）统一编排——每轮先把召回上下文注入提示（含流式清洗，防止外部注入文本泄漏到 UI），回合后在后台同步写回，并预取下一轮；外部 provider 的工具 schema 在受控条件下追加到工具面；琐碎输入（"hi/thanks/ok" 等）跳过网络召回（`memory_provider.py:52-78`）。
 
@@ -119,9 +119,9 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 **主链**：
 
-- **保存**：经 AIAgent 的 `save_trajectories` 参数开关启用，会话按 ShareGPT 格式转换（`agent/agent_runtime_helpers.py:115`）后追加为 JSONL——成功条目进 `trajectory_samples.jsonl`，失败进 `failed_trajectories.jsonl`，条目带模型、完成状态与时间戳；
-- **压缩**：`trajectory_compressor.py`（仓库根，1598 行）——保护首尾（system/human/首个 gpt/首个 tool + 最后 4 轮），只压缩中间段，替换为单条 human 摘要消息，目标 token 预算（默认 15250，`CompressionConfig`），支持目录批量与采样百分比（`--sample_percent=15`）；
-- **批量生成**：配套离线工具，均不进入主会话：
+- **保存**：由 AIAgent 的 `save_trajectories` 参数开关控制，开启后会话按 ShareGPT 格式转换并追加为 JSONL：成功条目进 `trajectory_samples.jsonl`，失败条目进 `failed_trajectories.jsonl`，每条带模型、完成状态与时间戳。转换入口见 `agent/agent_runtime_helpers.py:115`。
+- **压缩**：仓库根目录的 `trajectory_compressor.py`（1598 行）保护首尾消息（system、human、首个 gpt 与首个 tool，加上最后 4 轮），只把中间段替换成一条 human 摘要消息，目标 token 预算默认 15250（由 `CompressionConfig` 控制），支持目录批量与按百分比采样（如 `--sample_percent=15`）。
+- **批量生成**：以下离线工具都不进入主会话：
   - `batch_runner.py`：并行批量处理，按 AGENTS.md 调用会话格式转换函数；
   - `mini_swe_runner.py`：SWE 类任务 runner；
   - `datagen-config-examples/`：示例配置（web_research.yaml、trajectory_compression.yaml、example_browser_tasks.jsonl）；
@@ -135,7 +135,7 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 ## 已归并到现有类目的能力
 
-- **终端后端**：`tools/environments/` 下六类内建后端（local、ssh、docker、modal/managed_modal、daytona、vercel_sandbox），Singularity/Apptainer 由插件后端提供；README 明确 "Six built-in terminal backends ... plus plugin backends such as Singularity/Apptainer"。已在 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §6 执行边界与第 8 节覆盖（容器资源上限、execute_code 沙箱、容器风险豁免）。状态：`归并已有类目`。
+- **终端后端**：`tools/environments/` 下内建了六种后端：local、ssh、docker、modal（含 managed_modal）、daytona 与 vercel_sandbox；Singularity 与 Apptainer 由插件后端提供。README 的原话是 "Six built-in terminal backends ... plus plugin backends such as Singularity/Apptainer"。已在 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §6 执行边界与第 8 节覆盖（容器资源上限、execute_code 沙箱、容器风险豁免）。状态：`归并已有类目`。
 - **Tool Gateway**：`tools/managed_tool_gateway.py` 确认存在，统一路由 Nous 托管的图像生成、音频 TTS/转写与沙箱执行等后端，web 工具经 `tools/web_tools.py:236-246` 的网关路由，按 Nous Portal 订阅与 entitlements 门控（`tools/tool_backend_helpers.py`）；README 称按后端粒度而非一刀切。回链 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md)（工具审批/执行链覆盖网关会话级 yolo 等）；完整凭据/订阅流未验证。状态：`入口确认`（外部订阅依赖）。
 - **cron 定时任务**：`cron/jobs.py` 与 `cron/scheduler.py` 按 AGENTS.md 硬化不变量运行——3 分钟硬中断、补跑窗口、文件锁防并发、cron 会话关闭记忆写入；按待查清单标注已有覆盖（Agent 工具笔记 cron approvals.cron_mode、委派与网关笔记），本笔记不重写。状态：`归并已有类目`。
 - **委派/子 Agent、MCP、插件体系、人格系统**：回链 Agent 工具/角色笔记。
@@ -149,11 +149,11 @@ Hermes Agent 的 README 自我定位是 "self-improving AI agent"，核心卖点
 
 ## 补充盘点的候选
 
-- **会话心跳（`/heartbeat`，`主链确认`，静态证据）**：`hermes_cli/heartbeat.py`（见关键源码索引）实现会话级重复重入指令（如 `/heartbeat every 10m <prompt>`）——到期且会话空闲时作为普通用户回合注入（与 /goal 续接同一机制，不动系统提示、不换工具集，提示缓存与角色交替不受影响）；忙碌时合并 tick，空闲后只补一次不堆积；状态持久化在会话数据库的状态元数据中（`/resume` 可拾取）；与 cron 的分工明确：cron 是隔离会话的调度任务，heartbeat 是持续重入当前会话。标签：`主动 Agent`。
-- **目标质量门（`/goal` + quality gates，`主链确认`，静态证据）**：`hermes_cli/goals.py`（见关键源码索引）实现目标循环——每次"可能完成"时用 judge 复查（`server.py:10234` 起注释描述），并可配置确定性命令质量门，通过后才允许目标完成；续接提示只是普通用户消息，真实用户消息可抢占（`goals.py:6-20` 不变量）。标签：`主动 Agent`（与 heartbeat 同族，可合并计数）。
+- **会话心跳**：`hermes_cli/heartbeat.py`（见关键源码索引）实现会话级重复重入指令，用户以 `/heartbeat every 10m <prompt>` 这类形式登记后，到期且会话空闲时指令作为普通用户回合注入。它和 `/goal` 续接走同一机制，不动系统提示、不换工具集，提示缓存与角色交替都不受影响；会话忙碌时合并 tick，空闲后只补一次，不会堆积。状态存在会话数据库的状态元数据里，`/resume` 可拾取。与 cron 分工明确：cron 调度隔离会话中的任务，heartbeat 持续重入当前会话。状态：`主链确认`（静态证据）。标签：`主动 Agent`。
+- **目标质量门（`/goal` 配合 quality gates）**：`hermes_cli/goals.py`（见关键源码索引）实现目标循环，每次判定"可能完成"时用 judge 复查，也可以配置确定性的命令质量门，通过后才允许目标完成。续接提示只是普通用户消息，真实用户消息可以抢占；不变量见 `goals.py:6-20`，judge 复查的说明写在 `server.py:10234` 起的注释里。状态：`主链确认`（静态证据）。标签：`主动 Agent`，与 heartbeat 同族，可合并计数。
 - **按需复习（`/refine`）**：并入能力一（见上），不单独计数。
-- **verify-on-stop**：`agent/verify/`（recipes/environment/runner）——回合终止前对候选回复跑 run-recipe 检测与验证（`_pending_verification_response`），已并入 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §5。状态：`归并已有类目`。
-- **全局紧急停止（`hermes pause`/`resume`，`入口确认`）**：`agent/estop.py`（见关键源码索引）实现跨会话全局停止位（`hermes_cli/subcommands/pause.py`），属安全/可靠性机制，不进入用户可见产品特性统计。
+- **verify-on-stop**：`agent/verify/` 下的 recipes、environment 与 runner 三部分，在回合终止前对候选回复跑 run-recipe 检测与验证，入口为 `_pending_verification_response`；内容已并入 [Agent 工具笔记](../Agent工具/Hermes-Agent-Agent工具调查笔记.md) §5。状态：`归并已有类目`。
+- **全局紧急停止（`hermes pause`/`resume`）**：`agent/estop.py` 提供跨会话的全局停止位，命令入口是 `hermes_cli/subcommands/pause.py`（均见关键源码索引）。这属于安全与可靠性机制，不进入用户可见的产品特性统计。状态：`入口确认`。
 - **技能生态扩充**：十余个 bundled/optional 技能覆盖竞争情报监测、内容日历、周计划、价格监测、会议行动项、邮箱分类、issue 转 PR、文档转行动项等场景（如 competitor-news-monitor、weekly-review-planning、email-inbox-triage）——属能力二生态的实例扩充，不改变机制结论。
 
 ## 对特色贡献统计的影响

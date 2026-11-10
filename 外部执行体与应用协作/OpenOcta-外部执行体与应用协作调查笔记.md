@@ -17,11 +17,11 @@
 - 按本类目准入标准，OpenOcta 当前有三条可静态走通的协作主链：IM 渠道入站控制宿主 Agent、OpenAPI 第三方应用调用宿主 Agent、Hooks webhook 触发宿主 Agent。三者都最终汇入 `chat.send`，共享同一 Agent 运行时。
 - 宿主调用外部执行体的主链是 `local_agent` 工具。它可以探测本机安装的 CLI Agent、执行单个任务或并行执行多个任务，并回传合并后的文本输出。判定为“入口确认”：发起和执行路径清楚，但没有外部会话映射、流式回传、取消到真实执行体的完整语义，也没有审批。
 - 外部应用接入以 OpenAPI 为主。API key 绑定路径白名单、模型白名单、月 token 限额和数字员工绑定；非员工绑定可提交技能与 MCP 资源选择，员工绑定复用员工配置；选择仍受聊天层二次合并和目录扫描边界约束。请求同步等待 Agent 完成后返回 OpenAI 风格响应。判定为“主链确认”。
-- IM 渠道覆盖钉钉、飞书、QQ、企业微信和微信。入站消息经 `hooksAgentSink` 转为 `HooksAgent` 调用，再进入 `chat.send`；回复通过通道运行时回发。判定为“主链确认”，但真实平台连接、重连和媒体消息未运行验证。
+- IM 渠道覆盖钉钉、飞书、QQ、企业微信和微信。入站消息由统一的入站下沉器转成 HooksAgent 调用，再进入 `chat.send`；回复沿用同一个通道运行时回发。判定为“主链确认”；真实平台连接、重连和媒体消息未运行验证。
 - MCP 只作为工具接入层存在：宿主作为客户端连接 stdio 或 HTTP 服务并把工具桥接给模型。判定为“入口确认”，不具备账号、业务资源和动作级权限模型，不作为完整外部应用协作主链。
-- A2A 只暴露 `/.well-known/agent.json` 的 GET/HEAD AgentCard。检查 `src/pkg/gateway/http` 的路由注册和 `src/pkg/a2a` 包后，本次未找到 JSON-RPC 任务接收、任务状态查询或消息发送入口。ACP 客户端和服务端都是 stub，插件接口没有外部加载路径。三者判定为“候选观察”或“不纳入”。
+- A2A 目前只提供 AgentCard 发现，由 `/.well-known/agent.json` 响应 GET 和 HEAD 请求。检查 Gateway 路由注册和 A2A 包之后，本次未找到 JSON-RPC 任务接收、任务状态查询或消息发送入口。ACP 客户端和服务端都是 stub，插件接口没有外部加载路径，A2A、ACP 和插件接口三者判定为“候选观察”或“不纳入”。
 - 蜂群子 Agent 复用宿主运行时，属于指南明确排除的“宿主内建子 Agent”，不纳入本类目。
-- 安全边界上有一个影响全部 HTTP 接入的事实：`gatewayHTTPAuthDisabled` 被硬编码为 true，所有 `requireGatewayToken` 路由的网关令牌校验被全局短路。OpenAPI、Hooks 和 IM 仍各自校验自己的凭据，但普通 `/api/*` 路由没有网关级鉴权。
+- 影响全部 HTTP 接入的安全边界是网关鉴权在编译期被关闭：`gatewayHTTPAuthDisabled` 固定为 true，所有经网关令牌包装的路由在校验入口直接放行。OpenAPI、Hooks 和 IM 仍各自校验自己的凭据，普通 `/api/*` 路由没有网关级鉴权。
 
 ## 接入角色与系统边界
 
@@ -40,54 +40,54 @@
 
 ### A. IM 入站控制宿主 Agent
 
-1. Gateway 启动时注册内置通道插件，并从 `channels.*` 配置创建运行时。当前工厂只覆盖企业微信、微信、钉钉、飞书和 QQ，见 `src/pkg/gateway/http/server.go:733-757`。`whatsapp` 包存在但未注册，Telegram、Discord 等只出现在展示顺序列表，见 `src/pkg/channels/registry.go:9-13`。
-2. 通道运行时收到消息后，把 `InboundMessage` 交给统一的入站下沉器。下沉器实现见 `src/pkg/gateway/http/inbound_sink.go:32-93`。
-3. 下沉器构造 sessionKey。默认形式是 `agent:main:channel:<channelId>:<peerId>`；如果该渠道配置了 `digitalEmployeeId` 且员工仍存在，则改用 `agent:main:employee:<employeeId>`，见 `inbound_sink.go:53-70`。
-4. 下沉器调用 `HooksAgent`，后者把消息转成 `chat.send`，并保留渠道、收件人、消息 ID、元数据和超时，见 `src/pkg/gateway/http/server.go:296-324`。
-5. Agent 运行完成后，聊天处理器把最终可见文本交给通道运行时发送。投递入口见 `src/pkg/gateway/handlers/chat.go:805-847`。
-6. 通道运行时负责平台侧的会话 webhook、token 缓存、媒体上传或流式回复。钉钉、飞书和微信各自的实现位于 `src/pkg/channels/<channel>/runtime.go`。
+1. Gateway 启动时注册内置通道插件，再按 channels 配置逐项创建运行时。通道工厂目前覆盖企业微信、微信、钉钉、飞书和 QQ；whatsapp 包已经存在但没有注册，Telegram、Discord 只出现在展示顺序清单里。注册与工厂见 `src/pkg/gateway/http/server.go:733-757`，展示顺序清单见 `src/pkg/channels/registry.go:9-13`。
+2. 任何通道运行时收到消息后，都把入站消息交给同一个下沉器，由它统一接管后续路由，见 `src/pkg/gateway/http/inbound_sink.go:32-93`。
+3. 下沉器为消息构造会话键：默认取 agent:main:channel:<channelId>:<peerId>，渠道配置了数字员工且该员工仍存在时改取 agent:main:employee:<employeeId>，见 `inbound_sink.go:53-70`。
+4. 下沉器随后调用 HooksAgent，由它把消息转成一次 chat.send 调用，渠道、收件人、消息 ID、元数据和超时随调用一起下传，见 `src/pkg/gateway/http/server.go:296-324`。
+5. Agent 运行结束后，聊天处理器把最终可见文本交回通道运行时发送，投递入口见 `src/pkg/gateway/handlers/chat.go:805-847`。
+6. 平台侧的会话 webhook、token 缓存、媒体上传和流式回复都由各通道运行时自己处理，钉钉、飞书和微信的实现位于 `src/pkg/channels/<channel>/runtime.go`。
 
 这条主链的“外部控制面”是 IM 客户端：用户可以在宿主之外发起消息并观察回复。宿主不反向接管 IM 会话，也没有把平台线程 ID 映射为独立任务对象；映射粒度是 sessionKey。
 
 ### B. OpenAPI 第三方应用
 
-1. 调用方以 `Authorization: Bearer <key>` 或专用 header 提交 key，入口见 `src/pkg/gateway/http/open_api.go:17-29`。
-2. 服务端用 key 哈希认证，并检查启用状态和月度用量重置，见 `src/pkg/apikeys/service.go:356-381`。
-3. 请求路径必须命中 key 的允许前缀。默认允许 `ping` 和 `completion`，见 `src/pkg/apikeys/types.go:8-12` 与 `open_api.go:92-96`。
-4. `completion` 要求 `model` 字段，并检查模型白名单和月 token 预算，见 `src/pkg/gateway/http/open_api.go:145-157`。
-5. 处理器根据 API key 绑定模式生成 sessionKey。员工绑定使用 `agent:main:employee:<id>:run:open-api:<keyId>:<conversation>`；普通绑定使用 `agent:main:open-api:<keyId>:<conversation>`，见 `src/pkg/gateway/handlers/open_api_chat.go:149-162`。
-6. 处理器把模型引用和正文交给普通聊天入口；非员工绑定附带技能和 MCP 资源选择，员工绑定让员工配置接管（`open_api_chat.go:69-76,185-196`）。资源选择在此只表达调用方的声明范围，实际生效的工具集合仍由聊天层的目录扫描与二次 MCP 合并决定；执行侧边界见 Agent 工具笔记。
-7. 处理器注册运行 waiter 并同步等待结果，成功后返回 OpenAI 风格 completion，并记录 token 用量，见 `src/pkg/gateway/http/open_api.go:170-190` 与 `open_api_chat.go:90-138`。
+1. 调用方在 Authorization 头里以 Bearer 形式携带 key，也可以用专用 header 提交，两种方式由同一个鉴权入口接收，见 `src/pkg/gateway/http/open_api.go:17-29`。
+2. 服务端按 key 哈希找到对应记录，再检查它是否启用、月度用量是否需要重置，见 `src/pkg/apikeys/service.go:356-381`。
+3. 请求路径必须落在 key 的允许前缀内，默认只放行 ping 和 completion，见 `src/pkg/apikeys/types.go:8-12`。
+4. completion 还要求 model 字段，并校验模型白名单和月 token 预算，见 `src/pkg/gateway/http/open_api.go:145-157`。
+5. 处理器按 key 的绑定模式生成会话键：员工绑定取 agent:main:employee:<id>:run:open-api:<keyId>:<conversation>，普通绑定取 agent:main:open-api:<keyId>:<conversation>，见 `src/pkg/gateway/handlers/open_api_chat.go:149-162`。
+6. 处理器把模型引用和正文交给普通聊天入口；非员工绑定附带技能与 MCP 资源选择，员工绑定由员工配置接管（`open_api_chat.go:69-76,185-196`）。资源选择只表达调用方的声明范围，实际生效的工具集合由聊天层的目录扫描和二次 MCP 合并决定，执行侧的边界见 Agent 工具笔记。
+7. 处理器注册运行 waiter 并同步等待结果，成功后返回 OpenAI 风格的 completion 并记录 token 用量，见 `src/pkg/gateway/http/open_api.go:170-190` 与 `src/pkg/gateway/handlers/open_api_chat.go:90-138`。
 
 该入口不支持流式响应，代码在收到 `stream=true` 时直接返回 501，见 `open_api_chat.go:40-42`。调用方身份是 API key，不是终端用户；同一个 key 的同一 conversation 会复用会话。
 
 ### C. Hooks webhook
 
-1. `POST /hooks/{wake|agent|alert}` 进入统一处理器，见 `src/pkg/gateway/http/hooks.go:77-145`。
-2. 配置可以整体禁用 Hooks；配置了 token 时，请求必须携带匹配的 token，见 `hooks.go:89-105`。
-3. `wake` 向主会话广播系统事件，并异步写入一条 `[系统事件]` 消息，见 `src/pkg/gateway/http/server.go:279-294`。
-4. `agent` 把消息、sessionKey、渠道、收件人、模型、思考级别和超时传给 `HooksAgent`，见 `hooks.go:201-231`。
-5. `alert` 构造 SRE 风格的告警分析提示，生成独立 sessionKey 后调用同一个 Agent 回调，见 `hooks.go:284-330`。
+1. wake、agent 和 alert 三个 webhook 端点都路由到同一个 HTTP 处理器，入口为 `POST /hooks/{wake|agent|alert}`，注册与分发见 `src/pkg/gateway/http/hooks.go:77-145`。
+2. 配置可以整体关闭 Hooks；一旦配置了 token，请求必须携带匹配的 token 才会被接受，见 `hooks.go:89-105`。
+3. wake 向主会话广播系统事件，并异步追加一条带系统事件标记的消息，见 `src/pkg/gateway/http/server.go:279-294`。
+4. agent 把消息正文、会话键、渠道、收件人、模型、思考级别和超时打包交给 HooksAgent，见 `hooks.go:201-231`。
+5. alert 先构造一段 SRE 风格的告警分析提示，为它生成独立会话键，再调用同一个 HooksAgent 回调，见 `hooks.go:284-330`。
 
 Hooks 的 sessionKey 可以由请求指定，也可以由配置映射指定。未指定时使用 `hook:<runId>` 作为临时 key，见 `server.go:296-302`。这意味着调用方可以选择把多次 webhook 归入同一会话，也可以每次创建新会话。
 
 ### D. 宿主调用本地 CLI Agent
 
-1. `chat.send` 在 `localAgents` 启用时把 `local_agent` 加入工具列表，默认启用，见 `src/pkg/agent/tools/local_agent_tool.go:162-176` 与 `src/pkg/gateway/handlers/local_agents.go:30-43`。
-2. 工具支持状态探测、单任务执行和并行多任务执行三种动作，动作名分别是 status、run 和 run_many。状态探测返回本机探测结果，单任务动作执行一个任务，多任务动作并行执行多个任务，见 `src/pkg/agent/tools/local_agent_tool.go:22-78`。
-3. 探测阶段按 PATH 和常见安装路径寻找可执行文件，并缓存结果，见 `src/pkg/localagents/probe.go:51-175`。
-4. 执行阶段用 `exec.CommandContext` 启动子进程，工作目录设为 Agent workspace，stdout 和 stderr 被缓冲，见 `src/pkg/localagents/runner.go:63-110`。
-5. 进程结束后，输出按段合并为文本返回模型；失败时把输出和错误信息一起写入结果，见 `runner.go:98-110` 与 `137-160`。
-6. 默认超时为 10 分钟，可由 `localAgents.timeoutSeconds` 覆盖，见 `runner.go:22-29`。
+1. chat.send 组装工具列表时，只要 localAgents 处于启用状态（默认启用）就把 local_agent 加进去，见 `src/pkg/agent/tools/local_agent_tool.go:162-176`；网关侧的启用开关见 `src/pkg/gateway/handlers/local_agents.go:30-43`。
+2. 该工具提供状态探测、单任务执行和并行多任务执行三种动作，分别对应 status、run 和 run_many，见 `src/pkg/agent/tools/local_agent_tool.go:22-78`。
+3. 探测按 PATH 和常见安装路径查找可执行文件，查到的结果会被缓存，见 `src/pkg/localagents/probe.go:51-175`。
+4. 执行阶段用 exec.CommandContext 启动子进程，工作目录设为 Agent workspace，stdout 和 stderr 收进缓冲区，见 `src/pkg/localagents/runner.go:63-110`。
+5. 子进程结束后，输出按段合并成文本回给模型；执行失败时，输出内容和错误信息一起写进结果，见 `runner.go:98-110,137-160`。
+6. 单次执行默认 10 分钟超时，可由 localAgents.timeoutSeconds 覆盖，见 `runner.go:22-29`。
 
 这条链的“执行体”是外部 CLI Agent，但宿主只把它当作一次性命令：没有外部会话 ID、没有继续对话、没有流式事件、没有取消确认，也无法在宿主重启后恢复。
 
 ### E. MCP 工具接入
 
-1. 会话运行时按合并后的 MCP 配置创建 Manager，Manager 逐个连接启用的服务器，见 `src/pkg/acp/mcp/manager.go:27-48`。
-2. 连接方式支持 stdio 命令、HTTP URL 和内置 service。URL 以 `/sse` 结尾时使用 SSE，否则优先 streamable HTTP，失败后回退 SSE，见 `src/pkg/acp/mcp/client.go:72-126`。
-3. Manager 调用 `tools/list`，把每个工具包装成 Agent 工具；工具调用转发到 `tools/call`，见 `src/pkg/acp/mcp/manager.go:111-132` 与 `159-205`。
-4. MCP 连接随会话运行时驱逐关闭，见 `src/pkg/gateway/handlers/chat.go:2358-2362`。
+1. 会话运行时按合并后的 MCP 配置创建 Manager，再由 Manager 逐个连接所有启用的服务器，见 `src/pkg/acp/mcp/manager.go:27-48`。
+2. 连接方式有 stdio 命令、HTTP URL 和内置 service 三种；URL 以 /sse 结尾的走 SSE，其余先试 streamable HTTP，失败后再回退到 SSE，见 `src/pkg/acp/mcp/client.go:72-126`。
+3. Manager 先取出每个服务器的工具清单，逐个包装成 Agent 工具，模型发起调用时再转发回对应服务器，见 `src/pkg/acp/mcp/manager.go:111-132,159-205`。
+4. 会话运行时被驱逐时，MCP 连接随之关闭，见 `src/pkg/gateway/handlers/chat.go:2358-2362`。
 
 MCP 服务器在这里是工具提供方，不是拥有独立身份和业务资源的外部应用。它满足“外部进程或协议服务”的一面，但不满足账号、installation 和动作级权限的一面。检查 `src/pkg/acp/mcp` 与 Gateway 路由后，本次未找到 OpenOcta 作为 MCP 服务器对外暴露工具或资源的入口。
 
@@ -157,9 +157,9 @@ IM 消息同样作为用户输入进入 Agent。若 Agent 拥有 `execute`、`lo
 
 ### 可见性
 
-- 通道状态通过 `channels.status` 返回账号快照，包含运行状态、最近启动时间、最近错误和部分连接元数据，见 `src/pkg/gateway/handlers/channels.go:308-365`。
-- 本地 CLI Agent 的安装探测通过 `localAgents.probe` 和 `localAgents.status` 暴露，见 `src/pkg/gateway/handlers/local_agents.go:45-75`。
-- 聊天中的工具卡从 `tool_call` 事件读取工具名和参数，见 `src/pkg/gateway/handlers/chat.go:2713-2717`。当前没有专门展示“外部执行位置”“外部会话 ID”或“接管入口”的字段；本次也未找到从 UI 重新接管或继续本地 CLI Agent 任务的入口。
+- 通道状态由 `channels.status` 返回的账号快照呈现，内容包括运行状态、最近启动时间、最近错误和部分连接元数据，见 `src/pkg/gateway/handlers/channels.go:308-365`。
+- 本地 CLI Agent 的安装探测与状态查询分别走 localAgents.probe 和 localAgents.status，见 `src/pkg/gateway/handlers/local_agents.go:45-75`。
+- 聊天中的工具卡从工具调用事件里读取工具名和参数，见 `src/pkg/gateway/handlers/chat.go:2713-2717`。界面上没有专门展示外部执行位置、外部会话 ID 或接管入口的字段；本次也未找到从 UI 重新接管或继续本地 CLI Agent 任务的入口。
 
 ### 本地 CLI Agent 的治理
 

@@ -14,7 +14,7 @@
 
 ## 结论摘要
 
-Hermes 的 Agent 工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、`skills/`+`optional-skills/` 的指令文本工具、Agent Plugins 便携包，以及 `toolsets.py` 的按平台工具集装配。当前工具面还包含受账号能力门控的 `manage_connections`，用于把托管应用账号与本地 MCP 安装/授权收敛到同一连接生命周期入口（`tools/connectors/tool.py:16-43,46-125`）。
+Hermes 的 Agent 工具面由多层来源组成：仓库自带 `tools/` 目录的自动导入注册、`plugins/` 目录的插件工具、MCP 客户端动态发现工具、skills/ 与 optional-skills/ 两层技能目录承载的指令文本工具、Agent Plugins 便携包，以及按 toolsets.py 装成的平台工具集。受账号能力门控的 `manage_connections` 用于把托管应用账号与本地 MCP 安装、授权收敛到同一连接生命周期入口（`tools/connectors/tool.py:16-43,46-125`）。
 
 整个工具链沿 `run_agent.py` → `model_tools.py` → `tools/registry.py` 三层组织，工具的定义、发现、审批、执行和回注均发生在 Python 主进程内。
 
@@ -33,9 +33,9 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 ### 关键结论
 
-1. **工具注册集中在 `tools/registry.py`**：所有普通工具文件在 import 时调用注册函数 `registry.register()`；四个 agent-level 工具（`todo`/`memory`/`session_search`/`delegate_task`）由 `_AGENT_LOOP_TOOLS`（model_tools.py: 680）与执行框架特判拦截，不进入 registry 分发。新建内建工具除在工具文件里注册外，还要在 `toolsets.py` 的工具集中显式启用，否则会出现“注册成功但不可发现”或“可发现但调用失败”的不一致。
+1. **工具注册集中在 `tools/registry.py`**：普通工具文件在 import 时调用 `registry.register()` 完成注册；todo、memory、session_search、delegate_task 这四个 agent-level 工具由 `_AGENT_LOOP_TOOLS`（model_tools.py:680）与执行框架特判拦截，跳过 registry 分发。新建内建工具除在工具文件里注册外，还要在 `toolsets.py` 的工具集中显式启用，否则会出现“注册成功但不可发现”或“可发现但调用失败”的不一致。
 
-2. **工具参数校验的收敛点**：模型回吐的 JSON 工具参数先经 `handle_function_call` 的错误统一出口（`_sanitize_tool_error`/`tool_error`）输出错误 JSON；并行路径在 `tool_executor._parse_tool_arguments` 处把非 JSON_object 参数判为 `Invalid tool arguments`。类型校验依赖 `coerce_tool_args` 与 `_normalize_json_strings_for_schema`（string→number/bool 转换），不存在独立的 schema 强制校验器。
+2. **工具参数校验的收敛点**：模型回吐的 JSON 工具参数先经 `handle_function_call` 的错误统一出口（`tool_error` 外壳）输出错误 JSON；并行路径在 `_parse_tool_arguments` 处把非 JSON object 参数判为 `Invalid tool arguments`。类型校验依赖 `coerce_tool_args` 完成 string→number/bool 转换，不存在独立的 schema 强制校验器。
 
    同一机制的边界：`enabled_tools`/`enabled_toolsets` 过滤只发生在 `get_tool_definitions`（发现阶段），注册表 `dispatch` 不按会话复验工具名归属；子代理/delegate 路径的工具集归属依赖各 agent 实例的 `valid_tool_names`（未完全证实，见未验证事项）。
 
@@ -49,22 +49,22 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 ### 总体调用链
 
-顶层入口 `agent/conversation_loop.py: run_conversation`（:1422）接受流回调、持久化用户消息、MOA 配置等参数。循环局部状态包括 `max_compression_attempts=3`、verify-on-stop 的待核验回复标志（`_pending_verification_response` 及其 previewed 变体，#65919）；verify 子系统并入既有验证栈（`agent/verify/`（recipes/environment/runner）+ `verification_evidence.py`）。循环条件为“请求次数 < max_iterations 且迭代预算 > 0”，外加 `_budget_grace_call` 一次宽限。
+顶层入口 `agent/conversation_loop.py:1422` 的 run_conversation 接受流回调、持久化用户消息、MOA 配置等参数。循环局部状态包括 `max_compression_attempts=3`、verify-on-stop 的待核验回复标志（`_pending_verification_response` 及其 previewed 变体，#65919）；verify 子系统并入既有验证栈（`agent/verify/` 的 recipes/environment/runner 与 `verification_evidence.py`）。循环条件为“请求次数 < max_iterations 且迭代预算 > 0”，外加一次宽限调用。
 
-- **API 请求组装**：`run_agent._build_api_kwargs`（:7129）→ `agent.chat_completion_helpers.build_api_kwargs`，把 `agent.tools` attach 到 `tools=`。
+- **API 请求组装**：run_agent 的 `_build_api_kwargs`（run_agent.py:7129）调用 `chat_completion_helpers.build_api_kwargs`，由后者把 `agent.tools` 挂到请求的 `tools=` 参数上。
 - **返回校验**：对每个 `assistant_message.tool_calls` 依次：
   - id 去重（`_uniquify_tool_call_ids`）；
   - name 校验——不在 `agent.valid_tool_names` 时 `_repair_tool_call` 近似修复；
   - JSON 解析——失败重试 ≤3 次（`_invalid_json_retries`），超限则注入 recovery 工具结果并追加 `recovery_assistant` 消息保持角色交替。
 - **执行**：`agent._execute_tool_calls`（run_agent.py: 7729）按 model 返回的 tool_calls 数量分级：≤1 直接 sequential；多工具先 `_plan_tool_batch_segments` 分成“平行安全段 + 顺序障碍”，可并发段走 `execute_tool_calls_concurrent`（tool_executor.py:758）。
 - **回注**：`tool_dispatch_helpers.make_tool_result_message` 生成 `role=tool` 消息；`maybe_persist_tool_result` 决定是否落盘；之后回到压缩检查。
-- **终止**：`max_iterations` 上限；`iteration_budget` 耗尽触发强制压缩/退出；`/stop` 或新消息在并发等待循环中被轮询落地。全局紧急停止 `hermes pause`/`resume`（`agent/estop.py`）置全局停止位，跨会话生效。
+- **终止**：`max_iterations` 上限；`iteration_budget` 耗尽触发强制压缩/退出；`/stop` 或新消息在并发等待循环中被轮询落地。全局紧急停止由 hermes pause/resume 子命令置全局停止位，跨会话生效（`agent/estop.py`）。
 
 ## 2. 工具定义、来源与注册
 
 ### 注册表（`tools/registry.py`）
 
-- `ToolEntry` 存 `name/toolset/schema/handler/check_fn/requires_env/is_async/description/emoji/max_result_size_chars/dynamic_schema_overrides`（registry.py 160-189）。schema 是 `{"type": "function", "function": {...}}` 的 Python dict，不含执行对象。
+- `ToolEntry` 是注册表的最小记录单位（`tools/registry.py:160-189`），字段分三组：标识类是 name、toolset、description、emoji；执行类是 handler、check_fn、requires_env、is_async；schema 与预算类是 schema、max_result_size_chars、dynamic_schema_overrides。schema 取 `{"type": "function", "function": {...}}` 形态的 Python dict，只描述参数，执行对象另存。
 - `register()`（:562）在**模块 import 时**被各工具调用（仓库 AGENTS.md 明确“类型/注册/装配三处”）。跨 toolset 同名的二次注册默认 rejected（除非 `override=True`）；插件覆盖内建需要 `plugins.entries.<id>.allow_tool_override: true`.
 - `deregister()`（:646）校验“插件只能删自己拥有的工具”，MCP 工具（`mcp-*`）豁免——MCP 更新工具列表时 nuke-and-repave 合法。
 - `get_definitions(names)`（:717）**静态快照**：同时过滤 `check_fn` 缓存（30s TTL）、动态 schema override、别名。`get_max_result_size`（:840）返回 per-tool 上限，缺省则 `DEFAULT_RESULT_SIZE_CHARS`。
@@ -72,7 +72,7 @@ AIAgent.run_conversation(conversation_loop.py:1422)
 
 函数级组件（model_tools.py）：
 
-- `_AGENT_LOOP_TOOLS = {"todo","memory","session_search","delegate_task"}`（680）在 `handle_function_call` 直接短路返回错误，必须由 `run_conversation` 内联执行。
+- 四个 agent-level 工具（todo、memory、session_search、delegate_task）登记在 `_AGENT_LOOP_TOOLS`（model_tools.py:680）中；`handle_function_call` 遇到它们直接短路并返回错误，因此这类工具只能由 `run_conversation` 内联执行。
 - `get_tool_definitions`（305）返回 openai 格式数组；`_last_resolved_tool_names`（进程级 list，561-562）记录 name 供 execute_code 沙箱 allow-list 备份。
 - `sanitize_tool_schemas`（tools/schema_sanitizer.py: 120）；
 - `handle_function_call`（1123）规定统一入口：先 `coerce_tool_args` 类型洗边缘，再 tool_request middleware → pre_tool_call 审批门 → execute_code 旁路 → `registry.dispatch`，最终 `tool_error(...)` 固定错误外壳。
@@ -127,7 +127,7 @@ def get_tool_definitions(
 
 ### 并发执行
 
-- `execute_tool_calls_concurrent`（tool_executor.py: 686）用 `DaemonThreadPoolExecutor`，`max_workers=_max_workers_for_tool_batch`（默认 `_MAX_TOOL_WORKERS=8`；image_generate 时 4）。
+- 并发路径由 `execute_tool_calls_concurrent`（tool_executor.py:686）承担，用 `DaemonThreadPoolExecutor` 开线程，worker 数由 `_max_workers_for_tool_batch` 决定：默认上限 8，批次含 image_generate 时降为 4。
 - 顺序门 `ConcurrentToolAuthorizationGate` 把放行（含 `resolve_pre_tool_block` 审批回调）串行化到“开始序”位置：每次只允许按提交序的下一个 worker 放行，避免审批与副作用顺序错乱；`_start_order_gate_timeout`（默认 120s）防卡死。批若被 abandon，排队的 worker 被唤醒并退出，不会执行已算作超时/取消的工具。
 - 批超时 `HERMES_CONCURRENT_TOOL_TIMEOUT_S` 环境变量可覆盖（默认 420s），到期取消未启动 future、`_abandon_batch()` 释放 gate workers。
 - 中断：`agent._interrupt_requested` 时 `f.cancel()` + 等 3s 优雅退出；worker 注册到 `agent._tool_worker_threads` 供 interrupt 逐线程 `_set_interrupt(True, tid)`。中断/超时后不再写 `results[index]`（防重复上报 tool_call）。
@@ -141,8 +141,8 @@ def get_tool_definitions(
 
 ### 审批（tools/approval.py）
 
-- `prompt_dangerous_approval`（:2709）：CLI 交互，在 `once/session/always/deny/timeout` 五种决定里五选一，`allow_permanent` 控制是否显示 always 选项；审批回调 `approval_callback` 由 CLI 注册（`terminal_tool.set_approval_callback`，terminal_tool.py:287）。
-- `check_dangerous_command`（:3416）：终端执行前总入口；先查容器/host 跳过条件（`_should_skip_container_guards`，仅 `has_host_access=False` 生效）；yolo 模式跳过（`HERMES_YOLO_MODE` 在 import 时冻结，`approval.py:36`）；allowlist 直接放行；危险 pattern 命中则进 `_run_approval_gate`。
+- CLI 上的危险命令确认由 `prompt_dangerous_approval`（`tools/approval.py:2709`）弹出，用户在 once、session、always、deny、timeout 五种决定中选一个；`allow_permanent` 决定是否把 always 选项呈现出来。该函数的审批回调由 CLI 注册（`terminal_tool.set_approval_callback`，`tools/terminal_tool.py:287`）。
+- `check_dangerous_command`（`tools/approval.py:3416,36`）：终端执行前总入口；先查容器/host 跳过条件（仅容器无 host 访问时生效）；yolo 模式跳过（`HERMES_YOLO_MODE` 在 import 时冻结）；allowlist 直接放行；危险 pattern 命中则进审批门。
 - `request_tool_approval`（:3486）：插件 `action: approve` 的路由；`rule_key` 粒度、`[a]lways` 允许清单基于 `tool+reason` 哈希隔离。
 - fail-closed：无交互用户、非网关、无 callback、超时，全部 deny（`fail_closed_when_no_human=True`）。cron 走 `approvals.cron_mode` 配置。
 - 免审批路径：`HERMES_YOLO_MODE` 冻结（启动参数）；gateway /yolo 会话级开关；tirith 扫描告警时禁止 `always` 宽授（`allow_permanent=False`）。
@@ -172,7 +172,7 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 ## 7. 结果回注与 UI 状态
 
-- `make_tool_result_message` 生成 `role=tool` 消息；`maybe_persist_tool_result` 按 `registry.get_max_result_size` 决定落盘；preview `<persisted-output>` 标记写临时目录，模型用 `read_file` 取全文。
+- 工具结果回注时，`make_tool_result_message` 生成 `role=tool` 消息；`maybe_persist_tool_result` 按注册表的单工具结果上限决定是否落盘，落盘后消息里只留 preview 与 `<persisted-output>` 标记，指向临时目录中的文件，模型再用 `read_file` 取回全文。
 - `enforce_turn_budget` 在聚合末尾把最大未持久化结果 spill，直到聚合 < `DEFAULT_TURN_BUDGET_CHARS`（200K）。
 - 失败/错误使用 `tool_error` 外壳统一输出，`_detect_tool_failure` 识别错误状态入日志/UI。
 - 无输出内容过滤层（结果中 prompt 注入可直通模型的 tools 触发面）。
@@ -181,16 +181,16 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 ### 插件
 
-- `hermes_cli/plugins.py`: `discover_plugins()`（:2284）在 import `model_tools` 时副作用触发；`PluginManager` 从 `~/.hermes/plugins/`、`./.hermes/plugins/`、pip 入口发现。
+- 插件发现由 `discover_plugins()`（`hermes_cli/plugins.py:2284`）负责，它在 import model_tools 时作为副作用被触发；插件管理器扫描三个来源：`~/.hermes/plugins/`、`./.hermes/plugins/` 与 pip 入口。
 - `ctx.register_tool`（:439）同时把工具注册进全局 registry，并跟踪 `_plugin_tool_names`；`override=True` 需要信任门。
-- hooks：`pre_tool_call`/`post_tool_call`/`pre_llm_call`/`post_llm_call`/`on_session_start/end`；`invoke_hook` / `has_hook`。
+- hooks：`pre_tool_call`/`post_tool_call`/`pre_llm_call`/`post_llm_call`/`on_session_start/end`，统一由 invoke_hook 调用、has_hook 查询。
 - `resolve_pre_tool_block`（:2608）是**每个工具分发点的单一安全入口**：对 `approve` action 调 `request_tool_approval`，任何错误 fail-closed；`block` 直接返回消息；其他 `proceed`。并发/顺序/分段路径都统一调用它，避免复制粘贴的安全错误。
 - `plugins/platforms/` 适配网关 20+ 平台；`plugins/memory/` 与模型 Provider 插件是独立 discovery 机制（`_discover_providers` 懒扫描）。
 - **Agent Plugins 便携包**（`hermes_cli/agent_plugins.py` + `hermes_cli/plugins_cmd.py`）：验证 Agent Plugins v1 目录包（本地校验、不拉 schema、不 import 插件 Python），把其支持的组件（技能、MCP 条目）翻译为 Hermes 运行时记录；便携 MCP 的 streamable-http 条目映射进原生 MCP runtime；桌面 Settings → Plugins 可见并打开插件目录。
 
 ### MCP（`tools/mcp_tool.py`）
 
-- `register_mcp_servers(servers)` 把 config `mcp_servers` 的每个 server 注册为 toolset `mcp-<name>`；动态 `notifications/tools/list_changed` 触发 nuke-and-repave。
+- MCP 服务器注册走 `register_mcp_servers(servers)`（`tools/mcp_tool.py`）：配置里 `mcp_servers` 的每个 server 被注册成一个名为 `mcp-<name>` 的 toolset；server 发出 `notifications/tools/list_changed` 动态通知时，客户端清空后重建这批工具。
 - include/exclude 过滤（fnmatch glob，include 优先），`_should_register` 检查后 `check_fn=_make_check_fn(name)`。
 - 每工具 schema 通过 `_convert_mcp_schema`（const-only 的 anyOf/oneOf 联合折叠为属性枚举）；不安全描述经 `_scan_mcp_description`（threat pattern）过滤。
 - 传输 stdio/HTTP/SSE；`timeout/connect_timeout/keepalive_interval/idle_timeout_seconds/max_lifetime_seconds` 生命周期回收受支持。Agent Plugins 便携包的 **streamable-http 映射**进入原生 MCP 运行时。
@@ -199,20 +199,20 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 ### 技能
 
-- 仓库自带 `skills/`（默认启用）+ `optional-skills/`（`hermes skills install`）；`SKILL.md` frontmatter metadata。
+- 技能来源分两层：仓库自带 `skills/` 目录默认启用，`optional-skills/` 需要执行 `hermes skills install` 安装；每项技能由 `SKILL.md` 的 frontmatter metadata 描述。
 - `skill_manage` 对模型只公开 `operations[]` 形态。一次调用最多 20 个操作，每项自行声明技能名；批次先快照所有受影响技能，任一失败则整体回滚。可批处理 create、patch、write_file 与 remove_file；delete 必须独占一次调用。旧平铺参数只为历史转录与待审批写入重放保留，不再进入 schema（`tools/skill_manager_tool.py:824-938`）。
 - `skills_tool.py`/`skills_hub.py`/`curator`：agent 可创建自定义技能，被 `curator` 自动归档（从不删除）。技能是文本指令而非权限沙箱。
 
 ### 子代理（`tools/delegate_tool.py`）
 
-- `_subagent_auto_deny` 是默认；`delegation.subagent_auto_approve: true` 时改用 `_subagent_auto_approve`；threadlocal callback 通过 `_set_subagent_approval_cb` 注入。
+- 子代理的审批回调默认取 `_subagent_auto_deny`，配置项 `delegation.subagent_auto_approve: true` 打开后换成 `_subagent_auto_approve`；回调按 threadlocal 存放，由 `_set_subagent_approval_cb` 注入。
 - `_run_single_child`（:2076）：保存/恢复 `model_tools._last_resolved_tool_names`（避免子代理污染父进程 global）；凭据池租借/移除；heartbeat 线程让父代理在 gateway 中不判死。
 - 会话隔离：子代理 `session_key`/terminal独立；`inherit_mcp_toolsets` 子代理可选继承父 MCP 工具。
 - `delegate_task` 支持**可选结构化输出 schema**（`tools/delegation_output_schema.py`）：批次任务先校验质量再派发，per-delegation 成本随结果返回。**steering 生命周期绑定会话代际**——steer 只作用当前代，子代理存活期内不丢未送达 steer。子代理构建入口为 `_build_child_agent`（:1305）。
 
 ## 9. 设计取舍与已确认边界
 
-- **prompt caching 前提**：tools 数组每次全量发送，system prompt 是唯一缓存前缀；因此工具集变更（插 plugin、切 toolset）通常是下一会话生效（`--now` 才强制立即生效）。这是与“core narrow”并存的设计。
+- **prompt caching 前提**：tools 数组在每次 API 调用时全量重发，可复用的缓存前缀只有 system prompt；工具集变更（装插件、切 toolset）因此通常到下一会话才生效，只有 `--now` 会强制立即生效。这套机制与“工具集保持小而窄”的设计并存。
 - **override 门**：`allow_tool_override` 配置是内建工具被替换的唯一信任凭据（#23194）。
 - **统一审批与分叉**：`resolve_pre_tool_block` 是统一网关，但 `execute_code` 沙箱的 `handle_function_call` 旁路跳过它——两条执行入口的覆盖不一。
 - **统一错误外壳**：`tool_error(...)` 固定错误 JSON，全部 handler 必须返回 JSON 字符串；`_normalize_handler_result` 强制该契约。
@@ -225,13 +225,15 @@ CLI/主进程执行所有工具；execute_code 的 code 在沙箱（本机=临�
 
 连接工具把托管 Connector 与 MCP 的安装、启用和授权合并为批量操作。桌面端由后端持有 operation 状态并阻塞到每个目标完成、跳过或超时；模型结果只拿到目标终态，不拿授权链接。该工具不能断开、删除或撤销账号，相关动作保留给用户界面或 Portal（`tools/connectors/tool.py:46-70`，`tools/connectors/operation.py`，`tui_gateway/methods_connectors.py`）。
 
-执行器在本快照中把批次进一步规格化：除单次顺序与并发两路外，新增 `execute_tool_calls_segmented`（`agent/tool_executor.py:1927`），把“并行安全段 + 顺序屏障”的分段计划显式化为独立执行入口；批次规划与结果归并逻辑另拆到 `agent/tool_call_batches.py`。工具目录本身也继续外扩：浏览器后端从单一 `tools/browser_tool.py` 拆成 `browser_session*`/`browser_launcher*` 家族，审批侧新增 `tools/approval_yolo.py`，检查点维护新增 `tools/checkpoint_maintenance.py`；插件目录 `plugin-catalog/` 的条目量已从快照前的约百条增长到近千条。
+执行器把工具批次规格化为三路：单次顺序、并发，以及 `execute_tool_calls_segmented`（`agent/tool_executor.py:1927`）——它把“并行安全段 + 顺序屏障”的分段计划做成独立执行入口；批次规划与结果归并逻辑拆在 `agent/tool_call_batches.py`。
+
+工具目录也在扩张：浏览器后端从单一 `tools/browser_tool.py` 拆成 browser_session 与 browser_launcher 两组模块，审批侧另有 `tools/approval_yolo.py`，检查点维护另有 `tools/checkpoint_maintenance.py`；插件目录 `plugin-catalog/` 的条目量相对快照前已从约百条增长到近千条。
 
 浏览器凭据库是另一条窄工具边界。profile 本地库以 Fernet 加密保存登录、支付卡与地址，工具只暴露不含秘密的句柄和元数据，密码、TOTP 种子及支付字段在服务端解析并按精确 origin 填入页面；秘密不得进入工具结果、日志或会话库。也可接入已安装并解锁的 1Password/Bitwarden（`agent/vault_store.py:1-16,193-293,297-403`，`tools/browser_vault_tool.py`）。
 
 ## 未验证事项
 
-- 子代理执行时其 `enabled_tools` 是否在 `dispatch` 执行阶段被逐次复验（当前静态代码显示过滤只在 `get_tool_definitions` 内做）。
+- 子代理执行时，其 `enabled_tools` 是否在 `dispatch` 阶段被逐次复验；静态代码显示过滤只发生在 `get_tool_definitions` 内。
 - `_should_skip_container_guards` 与 `has_host_access`（docker bind-mount host 路径）的运行时关系。
 - `DANGEROUS_PATTERNS`（docker/podman 远端 daemon 重定向 792-827 等）与实际检测集在 i18n 多语言下是否完整。
 - `.env` 密钥工具（`set-credential`/自带）是否走审批。

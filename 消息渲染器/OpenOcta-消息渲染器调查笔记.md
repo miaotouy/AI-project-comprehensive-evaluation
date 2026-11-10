@@ -74,7 +74,7 @@ a2ui
 
 三种频率需要分开看：
 
-- **视图更新**：每个 delta 触发一次流式文本赋值，线程元素的 keyed 列表会重建 item 列表并重渲染流式项；该项 key 稳定为会话与起始时间的组合，因此列表身份不变，变的是文本内容与 Markdown 解析结果（`chat-items.ts:136-171`、`markdown.ts:172-206`）。
+- **视图更新**：每个 `delta` 到达时，流式文本被整体赋值一次，线程元素随之重建 keyed 列表并重渲染当前流式项；该 key 由会话与起始时间组成且保持稳定，列表身份不变，随分片变化的只有文本内容和重新解析出的 Markdown（`chat-items.ts:136-171`、`markdown.ts:172-206`）。
 - **状态更新**：`handleChatEvent` 还写 runId、阶段、终止集合，并镜像到按会话的运行态快照（`controllers/chat.ts:557-620`、`chat/chat-session-runs.ts:117-123`）。
 - **持久化**：本地不做，run 结束（完成、中止或报错）之后由网关层重载历史（`app-gateway.ts:292-304`）。
 
@@ -105,7 +105,7 @@ a2ui
 | `renderReadingIndicatorGroup` | 头像 + 气泡内的活动状态 | 等待首个 token 或工具往返中 |
 | `renderA2UIGroup` | 头像 + 活动状态 + A2UI 面板 | 实时结构化 UI |
 
-角色到样式与发送者名的映射是「用户=You、助手=助手名、工具=Tool、其它=原角色名」（`grouped-render.ts:469-484`），头像在助手有头像 URL 时用图片、否则用首字母或齿轮字符（`grouped-render.ts:529-562`）。助手组的脚注会拼装模型名、耗时、token 用量与结束时间（`grouped-render.ts:421-453`、`chat/message-meta.ts:69-124`）。
+角色分派同时决定气泡样式与发送者署名：用户显示为 You，助手显示为配置的助手名，工具显示为 Tool，其余角色沿用原值。头像在助手配置了头像地址时使用图片，没有图片则退回首字母或齿轮字符。助手组的脚注会拼装模型名、耗时、token 用量与结束时间；这些映射与脚注数据合起来定位在 `grouped-render.ts:421-484`、`529-562` 与 `chat/message-meta.ts:69-124`。
 
 用户与助手的差异集中在 `renderGroupedMessage`：只有助手角色会提取思考块，工具卡则按 `showToolTrace` 开关提取（助手组内该开关被显式关闭，改由外层工具面板承载），复制按钮只加在助手正文上（`grouped-render.ts:1427-1540`、`1266-1301`）。系统消息没有特殊样式，落到 `other` 分支。
 
@@ -113,15 +113,23 @@ a2ui
 
 顺序是「修复 → 截断 → 解析 → 包表格 → 清洗」：
 
-1. `normalizeMarkdownForChat` 修模型输出的粘连：标题与表格行同行、标题与正文同行、`---` 分隔线贴字、一行多个列表项、编号列表贴前句、表格前缺空行；`csv` 围栏会被转成 GFM 表格，最多 15 行并追加「另有 N 行未展示」（`markdown.ts:11-79`）。
+1. `normalizeMarkdownForChat` 在解析前修掉模型输出常见的六类排版粘连（`markdown.ts:11-79`）：
+   - 标题与表格行挤在同一行；
+   - 标题与正文挤在同一行；
+   - `---` 分隔线贴住上方文字；
+   - 一行里出现多个列表项；
+   - 编号列表紧贴前一句；
+   - 表格前缺少空行。
+
+   同一步还会把 `csv` 围栏改写成 GFM 表格，最多保留 15 行，超出部分追加「另有 N 行未展示」。
 2. 超过 14 万字符先截断并加提示；超过 4 万字符不再解析 Markdown，直接转义进 `<pre class="code-block">`（`markdown.ts:187-199`）。
 3. `marked` 开启 GFM 与 breaks 两个选项（`markdown.ts:5-8`），因此单个换行也会保留。
 4. 解析结果先用正则给每个 `<table>` 包一层 `.chat-md-table-wrap` 以支持横向滚动，再交 DOMPurify（`markdown.ts:208-221`）。
 
 清洗策略是白名单：标签只保留常见排版元素（链接、代码、预格式、表格、标题、列表、图片、删除线与水平线等），属性只保留八个，用于链接跳转、图片地址与有序列表起始序号；完整清单在 `markdown.ts:81-111`。另有两条清洗后钩子：
 
-- `attachments/` 开头的相对链接被改写为 `href="#"` 并打上 `data-chat-attachment`，由线程的点击委托转成「打开附件」事件（`markdown.ts:147-161`、`components/openocta-chat-thread.ts:92-106`）。
-- 图片 `src` 不是 `data:image/` 或 `http(s)` 时被移除（`markdown.ts:163-168`、`223-230`）。
+- 清洗后还会处理附件链接：`attachments/` 开头的相对路径被改写成占位锚点并打上 `data-chat-attachment` 标记，线程的点击委托据此把它转成「打开附件」事件（`markdown.ts:147-161`、`components/openocta-chat-thread.ts:92-106`）。
+- 图片地址只保留内联图片与 http(s) 两类，其它协议的 `src` 在清洗后被移除（`markdown.ts:163-168`、`223-230`）。
 
 没有语法高亮、没有 KaTeX/Mermaid：Markdown 相关依赖只有 `marked` 与 `dompurify`，全仓未出现高亮或公式库的引用；代码块呈现为等宽 `<pre>`，样式负责换行与背景（`ui/package.json`、`ui/src/styles/chat/text.css`）。
 
@@ -144,24 +152,24 @@ a2ui
 
 最后一类是 IT Ops 场景的特征：巡检报告、告警分析常以文件路径形式出现在回答里，渲染器会把它们补成可预览的交付物列表，并用已出现的图片与文件键去重，避免同一文件显示两次（`grouped-render.ts:1189-1194`、`1302-1314`）。
 
-**A2UI 节点**是自定义块：类型为 A2UI 的 part 被收集、去重、按 surface 校验后交给面板元素；面板在更新前做增量投喂——消息前缀变化或数量回退时重建处理器并全量重放，否则只投喂新增部分（`chat/a2ui-bridge.ts:320-379`、`components/chat-a2ui-panel.ts:200-243`）。若一个 surface 只含纯文本容器类组件，则不走面板而把文本降级为普通 Markdown（`a2ui-bridge.ts:269-300`、`grouped-render.ts:1389-1392`）。
+**A2UI 节点**是自定义块：类型为 A2UI 的 part 先被收集、去重，再按 surface 校验，通过后交给面板元素渲染。面板更新采用增量投喂，消息前缀变化或数量回退时重建处理器并全量重放，其余情况只投喂新增部分。若某个 surface 只含纯文本容器类组件，渲染端会把文本降级成普通 Markdown，改由消息渲染处理（`chat/a2ui-bridge.ts:269-379`、`components/chat-a2ui-panel.ts:200-243`、`grouped-render.ts:1389-1392`）。
 
 ## 7. HTML、Artifact 与内容承载边界
 
-- **Markdown 内的 HTML**：解析后统一过 DOMPurify 白名单，脚本、样式、内嵌框架与事件属性都不在允许集合内；`javascript:` 链接被清洗掉，测试里对此有断言（`markdown.ts:81-111`、`markdown.test.ts:10-23`）。
-- **外链**：所有锚点被加上 `target="_blank"` 与 `rel="noreferrer noopener"`；`attachments/` 相对路径不跳转而是转为附件打开（`markdown.ts:147-161`）。
-- **A2UI 面板**：组件由 `@a2ui/lit` 的 basic catalog 渲染进同一文档，没有 iframe 隔离；catalogId 做别名归一，basic、standard、default 等都映射到库的 basic catalog，未知 catalog 原样透传（`a2ui-bridge.ts:13-52`）。处理失败时面板退化为一行错误文案，不会抛到聊天外层（`chat-a2ui-panel.ts:239-259`）。
-- **文件预览**：图片直接 `<img>`；PDF 与 HTML 用 `<iframe src=…>`，未设置 `sandbox` 属性（`components/chat-file-preview.ts:225-232`）；其余文本类在本地解码后渲染成 Markdown、CSV 表格、JSON 美化或纯文本（`chat/file-preview-content.ts:151-174`）。
-- **本地文件**：不通过 `file://`，一律经网关 `chat.attachment.read` 拿到 base64 后转 data URL，渲染器只见 data URL（`chat/attachment-cache.ts:17-50`）。
+- **Markdown 内的 HTML**：内联 HTML 与解析产物一起进入 DOMPurify 白名单，脚本、样式、内嵌框架标签和事件属性都会被过滤，`javascript:` 链接同样被清除；白名单定义与对应的清洗断言见 `markdown.ts:81-111`、`markdown.test.ts:10-23`。
+- **外链**：锚点统一输出为带 `target="_blank"` 与 `rel="noreferrer noopener"` 的新窗口链接；`attachments/` 开头的相对路径在点击后转为附件打开（`markdown.ts:147-161`）。
+- **A2UI 面板**：组件由 `@a2ui/lit` 的 basic catalog 直接渲染进同一文档，没有 iframe 隔离。catalogId 在渲染前做别名归一，basic、standard、default 都收敛到库内置的 basic catalog，未知取值原样透传；单个面板处理失败时退化为一行错误文案，异常停在该面板内部（`a2ui-bridge.ts:13-52`、`chat-a2ui-panel.ts:239-259`）。
+- **文件预览**：图片以 `<img>` 直接展示；PDF 与 HTML 交给 `<iframe src=…>`，该 iframe 未设置 `sandbox` 属性；其余文本类内容在本地解码后按类型渲染成 Markdown、CSV 表格、JSON 美化文本或纯文本（`components/chat-file-preview.ts:225-232`、`chat/file-preview-content.ts:151-174`）。
+- **本地文件**：本地文件不走 `file://` 直读，内容统一经网关 `chat.attachment.read` 取回 base64 再转成 data URL，渲染器接触到的只是 data URL（`chat/attachment-cache.ts:17-50`）。
 
 ## 8. 内容交互反馈与可访问性
 
-- 复制按钮有三态（idle / copied / failed），用 `aria-busy` 与禁用防重复点击，1.5–2 秒后回退；非安全上下文回退到 `execCommand`（`chat/copy-as-markdown.ts:15-102`）。
-- 折叠一律用原生 `<details>/<summary>`，键盘可操作；工具结果另有自绘的展开按钮，同步 `aria-expanded` 与 `hidden`（`grouped-render.ts:679-694`）。
-- 工具卡可点击时补 `role="button"`、`tabindex="0"` 与 Enter/Space 处理（`tool-cards.ts:87-104`）。
-- 文件预览是 `role="dialog" aria-modal="true"`，遮罩本身是可聚焦按钮，标题栏提供下载与关闭（`chat-file-preview.ts:246-268`）。
-- 观察类提示用 `aria-live="polite"`（活动行、A2UI 面板），消息线程本身 `role="log"` 且 `aria-live="off"`（`grouped-render.ts:287-292`、`openocta-chat-thread.ts:56-63`）。
-- A2UI 交互动作会先移除同 surface 的旧块再发 `chat.a2ui.action`，提交后面板随新 run 清空（`controllers/chat.ts:181-228`）。
+- 复制按钮有三种反馈状态：空闲、已复制、失败。复制进行中通过 `aria-busy` 与禁用属性挡住重复点击，约 1.5–2 秒后自动回到空闲；在非安全上下文里退回 `execCommand` 完成复制（`chat/copy-as-markdown.ts:15-102`）。
+- 折叠交互沿用原生 `<details>` 与 `<summary>`，键盘可直接操作；工具结果另有一枚自绘展开按钮，展开状态同步写入 `aria-expanded` 与 `hidden`（`grouped-render.ts:679-694`）。
+- 工具卡具备点击行为时补上 `role="button"` 与 `tabindex="0"`，并单独处理 Enter 与 Space 键（`tool-cards.ts:87-104`）。
+- 文件预览以 `role="dialog"` 与 `aria-modal="true"` 呈现，遮罩层本身是可聚焦按钮，标题栏放置下载与关闭入口（`chat-file-preview.ts:246-268`）。
+- 活动行与 A2UI 面板这类观察类提示使用 `aria-live="polite"`；消息线程本身声明 `role="log"`，并把 `aria-live` 设为 `off`（`grouped-render.ts:287-292`、`openocta-chat-thread.ts:56-63`）。
+- A2UI 交互动作提交时先移除同一 surface 上的旧块，再发出 `chat.a2ui.action`，新 run 启动后面板随之清空（`controllers/chat.ts:181-228`）。
 
 ## 9. 性能、缓存与测试
 

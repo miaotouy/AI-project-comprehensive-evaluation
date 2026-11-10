@@ -52,25 +52,22 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 截图对话框接收调用方传入的 `messages: ChatMessageNode[]`。默认选择最后两条；若从某条消息打开，则选择该消息及其前一条。`MessageRangePanel` 同时提供连续范围滑块、起止输入、全选/清空和逐条复选，因此最终图片不必是连续区间（`../../aio-hub/src/tools/llm-chat/components/screenshot/ShareScreenshotDialog.vue:139-156`）。
 
-调用方分支范围本轮已追踪完整（在 `src/tools/llm-chat` 全目录搜索该对话框引用）：截图对话框只有一处实例化，位于 `components/ChatArea.vue:682`；`ChatArea` 的消息唯一来自 `LlmChat.vue:591` 的 `currentActivePathWithPresets`（`stores/llmChatStore.ts:295`），即活动路径加智能体开场白展示消息。活动路径从当前叶子节点沿父指针回溯（`stores/session/sessionAccessManager.ts:74`）、排除根节点，且不做启用状态过滤；预设展示消息由 `chatPathUtils.ts:62` 的 `getActivePathWithPresets` 按角色、启用状态、注入策略和模型匹配过滤后追加，并标记为预设展示。因此截图候选列表是“当前可见线性对话 + 最多 `displayPresetCount` 条开场白”：隐藏分支不进入，压缩隐藏节点不进入，但禁用节点和压缩摘要节点仍在候选内。
+截图候选消息全部来自同一处调用方：在 `src/tools/llm-chat` 全目录中搜索该对话框的引用，只有一处实例化，位于 `components/ChatArea.vue:682`，它所接收的消息来自 `LlmChat.vue:591` 传入的 `currentActivePathWithPresets`，即活动路径加智能体开场白展示消息。其中活动路径从当前叶子节点沿父指针回溯、排除根节点，且不做启用状态过滤；开场白展示消息由 `getActivePathWithPresets` 按角色、启用状态、注入策略和模型匹配筛选后追加，并标记为预设展示（`stores/llmChatStore.ts:295`、`stores/session/sessionAccessManager.ts:74`、`utils/chatPathUtils.ts:62`）。因此截图候选列表是“当前可见线性对话 + 最多 `displayPresetCount` 条开场白”：隐藏分支和压缩隐藏节点不进入，禁用节点与压缩摘要节点仍在候选内。
 
 所有入口都汇入同一个对话框：消息菜单、树图节点菜单和导出弹窗的“生成分享长图”按钮，最终都调用 `ChatArea.handleScreenshot`（`ChatArea.vue:127`）打开截图对话框；三处入口的位置见下列清单。
 
-- 消息菜单：`components/message/MessageList.vue:669-721`（转发到 `MessageMenubar.vue:510`）
-- 树图节点菜单：`components/conversation-tree-graph/flow/components/GraphNodeMenubar.vue:419` → `FlowTreeGraph.vue:74`
-- 导出弹窗“生成分享长图”按钮：`components/export/ExportBranchDialog.vue:167-170`
+- 消息菜单：菜单动作定义在 `components/message/MessageList.vue:669-721`，点击后转发给 `MessageMenubar.vue:510`。
+- 树图节点菜单：`components/conversation-tree-graph/flow/components/GraphNodeMenubar.vue:419` 中的操作由 `FlowTreeGraph.vue:74` 承接。
+- 导出弹窗的“生成分享长图”按钮：位于 `components/export/ExportBranchDialog.vue:167-170`。
 
 导出弹窗中设置的消息范围不会传递到截图对话框：截图对话框只接收焦点消息 id，并根据它初始化选区；焦点消息不在候选列表时回退为“最后两条”（`ShareScreenshotDialog.vue:139-152`）。从非活动分支的树节点发起时，候选列表仍然是当前活动路径。
 
 分支导出由 `useExportManager` 提供：
 
-- 三个独立入口分别生成阅读型 Markdown、结构化 JSON 和保留原始节点字段的 Raw JSON（`composables/features/useExportManager.ts`）：
-  - `exportBranchAsMarkdown`（`:249`）
-  - `exportBranchAsJson`（`:642`）
-  - `exportBranchAsRaw`（`:1128`）
-- 范围与内容选项可控制预设、用户档案、Agent/模型信息、Token、附件和错误；
-- 启用上下文管道后，导出宏、世界书、Recall/知识注入、变量替换与 Token 裁剪后的上下文结果，内容已经超出可见消息的简单复制；
-- `exportSessionAsMarkdownTree` 处理完整节点树，可表达不在当前活动路径上的隐藏分支（`useExportManager.ts:891`）。
+- 导出有三个独立入口，分别产出阅读型 Markdown、结构化 JSON 和保留原始节点字段的 Raw JSON，对应 `exportBranchAsMarkdown`、`exportBranchAsJson`、`exportBranchAsRaw` 三个方法（`composables/features/useExportManager.ts:249,642,1128`）。
+- 范围与内容选项可控制预设、用户档案、Agent/模型信息、Token、附件和错误。
+- 启用上下文管道后，导出内容还包含宏、世界书、Recall/知识注入、变量替换与 Token 裁剪的结果，已超出可见消息的简单复制。
+- 整会话导出由 `exportSessionAsMarkdownTree` 处理完整节点树，可表达不在当前活动路径上的隐藏分支（`useExportManager.ts:891`）。
 
 ## 2. 分享稿编辑与实时预览
 
@@ -90,7 +87,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 运行保真关系：渲染器用同一批消息组件按传入数据重新渲染，数据响应式来自 store（LlmChat computed → ChatArea props → 对话框 → 预览面板 → 渲染器）。因此图片与聊天现场的一致性取决于“store 数据 vs 现场 DOM 状态”的同步程度。
 
-截图模式下，编辑/重新生成/翻译按钮、菜单栏、流式指示器、gpt-image-2 部分预览和翻译控件被显式隐藏（`components/message/MessageContent.vue:973,1076,1215,1381,1453`；`message/ChatMessage.vue:303,367`；`message/ToolCallMessage.vue:306-311,1180-1203`）；工具卡展开由折叠策略接管、不接受交互（`ToolCallMessage.vue:306-311`）。
+截图模式下，消息里的编辑、重新生成、翻译按钮、菜单栏、流式指示器、gpt-image-2 部分预览和翻译控件被显式隐藏，工具卡的展开状态改由折叠策略决定，不接受点击交互（`components/message/MessageContent.vue:973,1076,1215,1381,1453`、`message/ChatMessage.vue:303,367`、`message/ToolCallMessage.vue:306-311,1180-1203`）。
 
 流式消息内容由 `RichTextRenderer` 的 stream-source 渲染，生成中的部分内容本身会进入截图；生成流程只等待 100ms 与图片解码（`ShareScreenshotDialog.vue:228`；`utils/screenshotCapture.ts:113-134`），对消息内容没有快照冻结，运行中生成可能截到流式更新的中间态——这是基于静态代码的推断，未运行验证。
 
@@ -100,9 +97,9 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 生成器显式处理了几类离屏渲染问题：
 
-- 使用自然布局尺寸，避免预览 `transform: scale` 改变捕获尺寸；
-- 与富文本测试页共用 `src/utils/screenshotLayout.ts` 的 `createScreenshotLayoutFix`，在 `onCreateForeignObjectSvg` 阶段按源窗口 DPR 与祖先 CSS zoom 补一个同倍率容器并放大 `viewBox`，修正 foreignObject 1× 排版下胶囊/按钮尾字换行（`screenshotCapture.ts:295`）；
-- 对克隆树中的内嵌 iframe 调用 `isolateScreenshotIframeDocuments`，补充 `contain: layout paint` 与 `overflow: hidden`，让 Canvas 快照和 fixed 控件保留各自 frame 的坐标与裁剪（`screenshotCapture.ts:309`）；
+- 捕获按消息的自然布局尺寸进行，绕开预览所用的 `transform: scale`，因此截图尺寸与预览缩放无关；
+- 与富文本测试页共用 `src/utils/screenshotLayout.ts` 的 `createScreenshotLayoutFix`：在 `onCreateForeignObjectSvg` 阶段按源窗口 DPR 和祖先 CSS zoom 包一层同倍率容器并放大 `viewBox`，修正 foreignObject 在 1× 排版下胶囊、按钮尾字换行的问题（`screenshotCapture.ts:295`）；
+- 克隆树里的内嵌 iframe 交给 `isolateScreenshotIframeDocuments` 处理，补上 `contain: layout paint` 与 `overflow: hidden`，使 Canvas 快照与 fixed 控件各自保留所在 frame 的坐标和裁剪（`screenshotCapture.ts:309`）；
 - 向克隆节点复制 CSS 变量，并强制 `content-visibility: visible`；
 - 展开代码块、表格等溢出内容并隐藏滚动条；
 - 在 Canvas 拼接阶段绘制纯色、主题或壁纸背景；
@@ -119,7 +116,7 @@ AIO Hub 同时提供数据交换型导出和图片分享稿工作台。分支可
 
 结构化分支导出（Markdown/JSON/Raw JSON）经 `ExportBranchDialog` 预览后通过 `writeTextFile` 落盘，导出入口本身不提供导入（`components/export/ExportBranchDialog.vue:434-479`）。
 
-JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只有字段列表；常规 JSON 是线性消息列表，不保留 `parentId`/`childrenIds` 分支关系，只有 Raw JSON 保留分支链的节点 map。带文本附件的消息在 JSON 中额外输出 `virtualAttachments`（标题与全文），Markdown 与 Raw 文本则把附件格式化为带标题和代码围栏的段落追加在正文后（`composables/features/useExportManager.ts:642-890,1128-1165`、`utils/virtualAttachments.ts:85-103`）。
+JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportType: "real_payload"`）外只输出字段列表；常规 JSON 是一条线性消息列表，`parentId`/`childrenIds` 表达的分支关系只在 Raw JSON 中保留为节点 map。带文本附件的消息会在 JSON 中多出 `virtualAttachments` 字段，保存附件标题与全文；Markdown 与 Raw 输出则把附件格式化成带标题和代码围栏的段落，追加在正文之后（`composables/features/useExportManager.ts:642-890,1128-1165`、`utils/virtualAttachments.ts:85-103`）。
 
 结构化导出还处理消息来源：委派指令仍以 user 角色存储，但导出时用节点 `metadata.origin` 中的发起 Agent 显示名替代“用户”，Markdown、JSON 与 Raw 三条路径共用这一判定（`useExportManager.ts:75-80,125-146,438-470,985-1006`）。
 
@@ -127,7 +124,7 @@ JSON 导出没有版本或 schema 标识，除真实 Payload 模式（`exportTyp
 
 同一导入服务还接受顶层为 `{index, detail}` 的完整会话形状，测试用例名为 “imports the existing Raw JSON shape”；导出会话对话框的 Raw 格式正是这一形状，因此在整会话导出场景下 Raw JSON 同样可被读回。分支导出只保留从根到所选节点的节点链，而 activeLeafId 沿用整会话的值，只有该链覆盖活动叶节点时才通过校验；分支 Markdown、分支 JSON 与面向阅读的会话 JSON 均在校验处被拒（`services/sessionImportExportService.ts:87-112`、`services/__tests__/sessionImportExportService.test.ts:138`）。导入时还会规范化 `virtualAttachments`，并按节点元数据恢复 VCP 工具角色（`sessionImportExportService.ts:126-135`）。
 
-批量备份走另一条管线：`exportSessionsAsZip` 产出 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内容为 `metadata.json` 加每会话扁平 JSON，导出时剥离 `history/historyIndex`（`sessionImportExportService.ts:225-260`）。导入时按冲突策略 keep（改名“(导入副本)”）/overwrite/skip 处理，未知字段被忽略（`parseImportFile` 于 `:261`，`resolveConflicts` 于 `:318`）。
+批量备份走另一条管线：`exportSessionsAsZip` 把一批会话打包成 `aiohub-chat-session-backup` v1.0.0 格式的 ZIP，内含 `metadata.json` 和每个会话的扁平 JSON，导出时剥离 `history/historyIndex`。导入端先由 `parseImportFile` 解析文件，再交给 `resolveConflicts`，按 keep（改名“(导入副本)”）、overwrite 或 skip 三种策略落地，未知字段被忽略（`sessionImportExportService.ts:225-260`、`:261`、`:318`）。
 
 单会话备份 JSON 与批量备份 ZIP 都保留完整树，且由同一导入服务处理；分支导出的 Raw JSON 虽同为 index/detail 形状，但只覆盖所选分支的节点链，能否读回取决于该链是否覆盖活动叶节点。
 

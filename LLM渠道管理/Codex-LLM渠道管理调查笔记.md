@@ -18,14 +18,14 @@ Codex 没有“多 Provider 渠道面板”。它的“渠道”由三部分合�
 
 当前快照的关键事实：
 
-- **内置 Provider 六个**：`openai`、`amazon-bedrock`、`amazon-bedrock-runtime`、`gcp`、`ollama`、`lmstudio`（`codex-rs/model-provider-info/src/lib.rs:753-786`）。
-- **自定义 Provider 通过配置增加**，使用新的 ID；内置 ID 受保留名单保护，不能整体覆盖（`codex-rs/config/src/config_toml.rs:952-983`）。
-- **一个 Provider 只有一个 `base_url`**，没有端点数组；要接多个兼容端点，需要定义多个 Provider ID（`codex-rs/model-provider-info/src/lib.rs:145-236`）。
-- **线协议只有 Responses**。`wire_api = "chat"` 在反序列化阶段直接报错，提示改用 `responses`（`codex-rs/model-provider-info/src/lib.rs:113-142`）。
+- **内置 Provider 六个**：OpenAI 兼容路线是 `openai`、`ollama`、`lmstudio`，Bedrock 有 `amazon-bedrock` 与 `amazon-bedrock-runtime` 两个变体，GCP 单独一个；内置表在构造时一次写入（`codex-rs/model-provider-info/src/lib.rs:753-786`）。
+- **自定义 Provider 通过配置增加**，使用新的 ID；内置 ID 进入保留名单，无法整体覆盖（`codex-rs/config/src/config_toml.rs:952-983`）。
+- **一个 Provider 只挂一个 `base_url`**，结构里没有端点数组；接入多个兼容端点时要拆成多个 Provider ID（`codex-rs/model-provider-info/src/lib.rs:145-236`）。
+- **线协议只有 Responses**。配置写成 `wire_api = "chat"` 会在反序列化阶段直接报错，错误提示要求改用 `responses`（`codex-rs/model-provider-info/src/lib.rs:113-142`）。
 - **凭据默认存 `$CODEX_HOME/auth.json`**，文件模式为明文 JSON；可选 keyring 或“keyring 加密 + 本地密文文件”（`codex-rs/login/src/auth/storage.rs:51-77、256-272`；`codex-rs/config/src/types.rs:136-148`）。
 - **模型目录有内置快照、远端目录和磁盘缓存三层**，缓存文件是 `models_cache.json`，默认 TTL 300 秒（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/src/manager.rs:41-42`）。
 - **本次未找到多 Key 轮换、跨 Provider failover 或持久化健康状态**；重试发生在同一 Provider 内，另有每请求一次的 Provider 级 401 凭据刷新和 WebSocket→HTTP 的传输回退（`codex-rs/core/src/client.rs:776-794、2029-2067`；流式重试见下文）。
-- **会话与 Provider 绑定**：恢复或继续一个会话时，如果当前配置的 Provider 与会话保存的 Provider 不一致，会返回结构化错误而不是静默切换（`codex-rs/app-server/src/config_manager.rs:437-455、596-610`）。
+- **会话与 Provider 绑定**：恢复或继续一个会话时，当前配置的 Provider 与会话保存的 Provider 不一致，请求会直接返回结构化错误，历史不会被静默发往另一个后端（`codex-rs/app-server/src/config_manager.rs:437-455、596-610`）。
 
 ## 系统边界与总体调用链
 
@@ -43,7 +43,7 @@ CLI / TUI / app-server
   → SSE 事件流回到 core，转成会话事件与 token 用量
 ```
 
-这条链路的配置落点集中在 `codex-rs/core/src/config/mod.rs:4059-4086`：先合并 Provider 表，再按“策略强制值 → 显式覆盖 → 配置值 → 默认 openai”的顺序选择 ID，最后取出对应的 `ModelProviderInfo`。请求端由 `create_model_provider` 选择运行时实现，再通过 `to_api_provider` 生成 `ApiProvider`（`codex-rs/model-provider/src/provider.rs:449-472`；`codex-rs/model-provider-info/src/lib.rs:469-517`）。
+这条链路的配置解析落在 core 的配置模块：先合并内置 Provider 表与用户配置，再按“策略强制值 → 显式覆盖 → 配置值 → 默认 openai”的顺序确定 ID，最后取出该 ID 对应的 Provider 结构。请求侧由工厂函数按 Provider 类型选出 OpenAI 兼容、Bedrock 或 GCP 三种运行时之一，再组装成统一的请求描述对象 `ApiProvider`（`codex-rs/core/src/config/mod.rs:4059-4086`；`codex-rs/model-provider/src/provider.rs:449-472`；`codex-rs/model-provider-info/src/lib.rs:469-517`）。
 
 ## 1. 渠道实体与数据模型
 
@@ -57,7 +57,13 @@ CLI / TUI / app-server
 | 凭据 | `AuthMode` + `auth.json`、环境变量或命令式 auth | Provider 可选择复用全局 OpenAI 认证，也可自带 `env_key` |
 | Profile | `ConfigProfile` 或 `<name>.config.toml` | 切换一组模型、Provider、推理和沙箱默认值 |
 
-`ModelProviderInfo` 的核心字段可按用途分为三组。连接与目录组包括显示名、`base_url`、模型目录地址、`wire_api`、查询参数、静态与来自环境变量的 Header、请求/流重试参数和流空闲超时；认证组包括 `env_key` 与说明、实验性 Bearer、命令式 `auth`、网关 OAuth、AWS/GCP 配置和 `requires_openai_auth`；其余是能力覆盖与 WebSocket、独立 web search 等传输标记（`codex-rs/model-provider-info/src/lib.rs:145-236`）。这些字段都以单对象形式存在，没有端点列表。
+`ModelProviderInfo` 用一个对象描述一个 Provider，字段按用途分三组：
+
+- 连接与目录：显示名、`base_url`、模型目录地址、`wire_api`、查询参数、静态与来自环境变量的 Header、请求与流重试参数和流空闲超时；
+- 认证：`env_key` 与说明文字、实验性 Bearer、命令式 `auth`、网关 OAuth、AWS/GCP 配置和 `requires_openai_auth`；
+- 传输与能力：能力覆盖标记、WebSocket 开关和独立 web search。
+
+这些字段都以单值形式存在，没有端点列表。定义见 `codex-rs/model-provider-info/src/lib.rs:145-236`。
 
 ### 内置 Provider
 
@@ -72,7 +78,7 @@ CLI / TUI / app-server
 | `ollama` | OpenAI 兼容 | 无认证，默认本机 11434 |
 | `lmstudio` | OpenAI 兼容 | 无认证，默认本机 1234 |
 
-`openai` 的 `base_url` 不是固定值：ChatGPT 类认证使用 `https://chatgpt.com/backend-api/codex`，API Key 类认证使用 `https://api.openai.com/v1`；配置了 `base_url` 时以配置为准（`codex-rs/model-provider-info/src/lib.rs:468-487`）。本地 OSS Provider 支持 `CODEX_OSS_BASE_URL` 和 `CODEX_OSS_PORT` 覆盖（`codex-rs/model-provider-info/src/lib.rs:895-911`）。
+内置 `openai` 的端点地址随认证方式变化：ChatGPT 类认证走 `https://chatgpt.com/backend-api/codex`，API Key 类认证走 `https://api.openai.com/v1`，用户显式配置了 `base_url` 时以配置为准。本地 OSS Provider 的地址和端口可以分别用环境变量 `CODEX_OSS_BASE_URL`、`CODEX_OSS_PORT` 覆盖（`codex-rs/model-provider-info/src/lib.rs:468-487、895-911`）。
 
 ### 自定义 Provider 的边界
 
@@ -92,14 +98,14 @@ Codex 的配置是带来源记录的分层结构，以下多层来源按优先�
 
 Profile 有两条路径：
 
-- 旧式 `profile` + `[profiles.<name>]`，字段定义见 `codex-rs/config/src/profile_toml.rs:18-67`；
-- V2 `--profile <name>`，加载 `$CODEX_HOME/<name>.config.toml`，作为带 profile 标记的用户层参与合并（`codex-rs/core/src/config/mod.rs:2154-2162`；`codex-rs/cli/src/main.rs:2009-2031`）。
+- 旧式路径用 `profile` 键指向 `[profiles.<name>]` 表中的一组设置，字段定义见 `codex-rs/config/src/profile_toml.rs:18-67`；
+- V2 路径由 `--profile <name>` 指定，直接加载 `$CODEX_HOME/<name>.config.toml`，该文件按带 profile 标记的用户层参与合并（`codex-rs/core/src/config/mod.rs:2154-2162`；`codex-rs/cli/src/main.rs:2009-2031`）。
 
 CLI 的 `-p/--profile` 只对运行时命令、`codex mcp` 和迁移命令开放，配置管理类子命令会拒绝（`codex-rs/cli/src/main.rs:1956-1981`）。
 
 ### 默认配置与用户配置的合并
 
-Provider 表先由 `built_in_model_providers(openai_base_url)` 生成，再合并 `cfg.model_providers`。合并结果决定 `config.model_provider_id` 能否解析；解析失败会给出“Provider not found”，对旧 `ollama-chat` 则给出专门的迁移提示（`codex-rs/core/src/config/mod.rs:4059-4086`）。模型 Provider 的必填约束和保留 ID 校验在反序列化阶段执行（`codex-rs/config/src/config_toml.rs:1025-1033`）。
+Provider 表先由内置构造函数按 OpenAI 基础地址生成，再与用户配置里的 Provider 表逐条合并。合成后的表决定配置指定的 Provider ID 能否解析：解析失败报“Provider not found”，旧 ID `ollama-chat` 另有专门的迁移提示（`codex-rs/core/src/config/mod.rs:4059-4086`）。Provider 条目的必填字段与保留 ID 在反序列化阶段就完成校验（`codex-rs/config/src/config_toml.rs:1025-1033`）。
 
 ### 各入口的实际操作覆盖
 
@@ -155,17 +161,17 @@ Agent Identity 再叠一层解析顺序：当前认证已是 Agent Identity 时�
 
 Provider 可配置静态 Header 和“Header 名 → 环境变量名”的动态 Header；动态 Header 在变量缺失或为空时被跳过（`codex-rs/model-provider-info/src/lib.rs:198-207、440-466`）。`base_url`、Header 值、查询参数和实验性 Bearer 使用 `RedactedString` 保存，调试输出不直接展开密钥（`codex-rs/model-provider-info/src/lib.rs:166-202`）。认证 Header 在网关 OAuth 组合路径中也会被标记为 sensitive（`codex-rs/model-provider/src/combined_auth.rs:69-96`）。
 
-`responses-api-proxy` 是另一条凭据边界：它从 stdin 读 key，只接受 `POST /v1/responses`，转发时覆盖 `Authorization` 和 `Host`；dump 文件会脱敏 `Authorization` 与包含 `cookie` 的 Header（`codex-rs/responses-api-proxy/README.md:31-55、150-152`）。
+`responses-api-proxy` 划出另一条凭据边界：key 由使用方从 stdin 传入，进程只接受 `POST /v1/responses` 一种请求，转发时改写认证头与 `Host`。它的 dump 文件会把认证头和含 `cookie` 的头一并脱敏（`codex-rs/responses-api-proxy/README.md:31-55、150-152`）。
 
 ### 出站代理
 
 Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的顺序是“系统/PAC/WPAD → 环境变量 → 直连”；环境变量回退会按目标 scheme 读取 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY` 等同一组代理变量（`codex-rs/http-client/src/outbound_proxy.rs:100-105、381-405`）。
 
-该策略由 feature `respect_system_proxy` 控制，配置层据此选择 `HttpClientFactory` 的策略（`codex-rs/core/src/config/mod.rs:1819-1824、3191-3197`）。代理 URL 和 no-proxy 值在 `Debug` 输出中被替换为 `<redacted>`（`codex-rs/http-client/src/outbound_proxy.rs:127-158`）。
+是否启用这一顺序由 feature 开关 `respect_system_proxy` 决定，配置层按开关值为 HTTP 客户端工厂选定代理策略。代理 URL 与 no-proxy 值在调试输出中统一显示为 `<redacted>`（`codex-rs/core/src/config/mod.rs:1819-1824、3191-3197`；`codex-rs/http-client/src/outbound_proxy.rs:127-158`）。
 
 ## 4. 模型目录与能力元数据
 
-模型目录是独立于 Provider 配置的数据源。内置快照来自编译进二进制的 `models.json`，提供 `slug`、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型、输入模态等字段（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。本次未在这些元数据中找到价格或计费字段；`ModelInfo` 结构也没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:428-497`）。
+模型目录是与 Provider 配置分开的数据源。内置快照编译进二进制，取自 `models.json`，为每个模型记录 slug、显示名、上下文窗口、最大上下文、自动压缩阈值、推理档位、工具类型和输入模态等元数据（`codex-rs/models-manager/src/lib.rs:18-20`；`codex-rs/models-manager/models.json:1-45`）。这些元数据中没有价格或计费字段，`ModelInfo` 结构同样没有 cost 字段（`codex-rs/protocol/src/openai_models.rs:428-497`）。
 
 远端刷新走 Provider 的 `/models` 端点：
 
@@ -186,9 +192,9 @@ Codex 的出站 HTTP 客户端有显式代理策略。`RespectSystemProxy` 的�
 
 当前快照只实现 Responses 协议。`WireApi` 枚举只有 `Responses` 一个取值；`chat` 会在反序列化时触发带迁移说明的错误（`codex-rs/model-provider-info/src/lib.rs:113-142`）。因此本项目没有 OpenAI Chat Completions、Anthropic Messages 或 Gemini 原生协议的 Adapter 层；兼容性依靠“对方实现 Responses 兼容端点”。
 
-请求体由 `ResponsesApiRequest` 定义，字段包括模型、`stream`、服务档位、输入项、工具、工具选择、并行工具调用、推理配置、`store`、`include`、`prompt_cache_key`、文本控制、客户端元数据和访问程序（`codex-rs/codex-api/src/common.rs:281-306`）。发送端把请求编码为 JSON，插入会话/线程 Header 和子代理 Header，设置 `Accept: text/event-stream`，可选 zstd 压缩，然后 POST 到 `/responses`（`codex-rs/codex-api/src/endpoint/responses.rs:70-157`）。
+请求体结构由 `ResponsesApiRequest` 定义，涵盖模型、流式开关、服务档位、输入项、工具与工具选择、并行工具调用、推理配置、存储标记与 include 列表、`prompt_cache_key`、文本控制、客户端元数据和访问程序等字段（`codex-rs/codex-api/src/common.rs:281-306`）。发送端把请求编码成 JSON，补上会话、线程和子代理相关的 Header，声明 `Accept: text/event-stream`，按需做 zstd 压缩，最后 POST 到 `/responses`（`codex-rs/codex-api/src/endpoint/responses.rs:70-157`）。
 
-URL 与认证由 `EndpointSession` 统一处理：先由 `ApiProvider` 按 `base_url` 和路径构造请求，再在发送前调用认证提供者应用 Header；如果配置了重试策略，则在同一请求构造上重试（`codex-rs/codex-api/src/endpoint/session.rs:48-111`）。`ApiProvider` 的 Header 来自 Provider 的静态/动态 Header，`base_url` 缺省值按认证模式决定，重试参数也在这一步固化（`codex-rs/model-provider-info/src/lib.rs:469-517`）。
+URL 与认证在 `EndpointSession` 一处收口：请求先按 Provider 提供的地址和路径拼出，发送前再由认证提供者补上 Header，配置了重试策略时就在同一份已构造的请求上重试。这些 Header、缺省地址和重试参数在组装 `ApiProvider` 时已经确定，缺省地址随认证模式变化（`codex-rs/codex-api/src/endpoint/session.rs:48-111`；`codex-rs/model-provider-info/src/lib.rs:469-517`）。
 
 除 HTTP SSE 外，支持 WebSocket 的 Provider 还可以走 Responses WebSocket；客户端按 Provider 能力与会话回退状态选择，失败后可回退到 HTTP（`codex-rs/core/src/client.rs:1174-1183、2029-2067`）。这属于同一协议下的传输选择，不是另一套渠道协议。
 
@@ -227,12 +233,12 @@ Provider 配置可以分别覆盖请求重试、流重连、流空闲超时和 W
 
 ## 8. 可观测性、诊断与连接检测
 
-- **模型目录查看**：`codex debug models` 输出原始模型目录 JSON（`codex-rs/cli/src/main.rs:261-263`）。
-- **认证诊断**：`codex doctor` 的 auth 检查读取存储模式、`auth.json`、存在的认证环境变量和存储凭据类型，并给出状态与修复提示（`codex-rs/cli/src/doctor.rs:1229-1321`）。
-- **端点可达性**：doctor 构造 Provider 的 `/models` 或基础 URL，用 HEAD/GET 探测状态；这不是一次真实生成请求（`codex-rs/cli/src/doctor.rs:2740-2897`）。
-- **限流与额度**：响应 Header 中的 `x-codex-*` 被解析为限流快照，包括主/次窗口、重置时间、credits 余额与促销信息（`codex-rs/codex-api/src/rate_limits.rs:23-100、195-259`）。
-- **token 用量**：SSE 完成事件携带 usage，进入会话遥测与上下文预算计算（`codex-rs/core/src/client.rs:2646-2671`）。
-- **日志边界**：请求 span 的字段只列出模型 slug、线协议和传输类型，没有列出请求体（`codex-rs/core/src/client.rs:1802-1813、2087-2098`）；配置中的敏感值使用 `RedactedString` 保存。
+- **模型目录查看**：`codex debug models` 把二进制内置的原始模型目录 JSON 直接打到标准输出，用来核对当前目录内容（`codex-rs/cli/src/main.rs:261-263`）。
+- **认证诊断**：`codex doctor` 的 auth 检查读取存储模式、`auth.json`、已设置的认证环境变量和存储中的凭据类型，逐项给出状态与修复提示（`codex-rs/cli/src/doctor.rs:1229-1321`）。
+- **端点可达性**：doctor 用 Provider 的目录地址或基础地址发 HEAD/GET 探测，只看连通性和响应状态，不发送模型输入（`codex-rs/cli/src/doctor.rs:2740-2897`）。
+- **限流与额度**：响应头里的 `x-codex-*` 字段被解析成限流快照，含主/次窗口、重置时间、credits 余额与促销信息（`codex-rs/codex-api/src/rate_limits.rs:23-100、195-259`）。
+- **token 用量**：SSE 完成事件带回 usage，写入会话遥测并参与上下文预算计算（`codex-rs/core/src/client.rs:2646-2671`）。
+- **日志边界**：请求 span 只记录模型 slug、线协议和传输类型，不带请求体；配置中的敏感值以 `RedactedString` 保存，调试输出不展开（`codex-rs/core/src/client.rs:1802-1813、2087-2098`）。
 
 连接测试与真实请求是两条路径：doctor 的探测只验证 DNS/TCP/TLS/HTTP 可达性和 `/models` 响应状态，不会发送模型输入，也不会验证具体模型是否可用。
 

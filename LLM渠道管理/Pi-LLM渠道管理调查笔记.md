@@ -16,21 +16,21 @@
 
 Pi 的 LLM 渠道管理由 `packages/ai`（协议与 Provider 实现）和 `packages/coding-agent` 的 `ModelRuntime`（组合与快照）两层构成：
 
-1. **Provider 是代码注册项，不是可多实例化的用户实体。** 每个 Provider 是 `packages/ai/src/models.ts` 中 `Provider` 接口的一个对象，固定 `id`；同一 Provider 类型在仓库内只有一份内置注册（`providers/all.ts:89-121`），用户通过 `models.json` 的 `providers` 覆盖字段和扩展注册，不能创建同一 Provider 的多个并列实例。Radius 网关是唯一的多实例入口（`radiusProvider({ id })` 工厂按配置生成新 id，`providers/radius.ts`）。
-2. **模型目录分四层合并**：
-   - 构建期生成的内置目录（`packages/ai/src/providers/data/`，gitignore，`scripts/generate-models.ts` 从各家目录生成）；
-   - 启动期 pi.dev 远端目录叠加（`core/remote-catalog-provider.ts`，ETag 缓存于 `models-store.json`）；
-   - 用户 `models.json` 的模型定义与 `modelOverrides`；
-   - 扩展 `registerProvider` 的模型列表。
-   合并顺序与覆盖关系在 `core/provider-composer.ts:417-443`。
-3. **凭据按 Provider 一粒存储**：API Key/OAuth 凭据经 `AuthStorage` 写入 `~/.pi/agent/auth.json`（0600 权限 + proper-lockfile 文件锁，`core/auth-storage.ts:23`），运行时另有 `setRuntimeApiKey` 内存覆盖与 `models.json` 内嵌 key/命令行取值两条临时路径（详见 §3）。未发现静态加密；OAuth token 刷新在 `packages/ai/src/auth/resolve.ts` 中加锁完成。
-4. **请求组装统一到 Provider 的 `stream`/`streamSimple`**：Base URL 是 `Model.baseUrl`，路径由各 API Adapter（`packages/ai/src/api/`）按协议拼接；OpenAI-compatible 的兼容开关按 provider 名和 baseUrl 自动探测（`api/openai-completions.ts:1439` 起），也可由 `compat` 覆盖。
+1. **Provider 是代码注册项，同一类型只有一份实例。** 每个 Provider 是 `packages/ai/src/models.ts` 中 Provider 接口的一个对象，id 在代码里固定；仓库为每种 Provider 类型只保留一份内置注册，用户可经 `models.json` 的 providers 覆盖字段，或由扩展追加注册，同一类型无法创建多个并列实例（`providers/all.ts:89-121`）。Radius 网关是唯一的多实例入口，`radiusProvider` 工厂按传入 id 生成新的 Provider（`providers/radius.ts`）。
+2. **模型目录分四层合并**，自下而上依次为：
+   - 构建期生成的内置目录：`scripts/generate-models.ts` 从各家公开目录生成，落在 `packages/ai/src/providers/data/`，该目录被 gitignore；
+   - 启动期叠加的 pi.dev 远端目录：拉取结果按 ETag 缓存进 `models-store.json`；
+   - 用户在 `models.json` 中定义的模型与 modelOverrides；
+   - 扩展通过 registerProvider 注册的模型列表。
+   合并顺序与覆盖关系见 `core/provider-composer.ts:417-443`，远端目录的拉取在 `core/remote-catalog-provider.ts`。
+3. **凭据按 Provider 单粒存储**：API Key 与 OAuth 凭据经 `AuthStorage` 写入 `~/.pi/agent/auth.json`，文件权限 0600 并加 proper-lockfile 文件锁（`core/auth-storage.ts:23`）；运行时另有内存覆盖，以及 `models.json` 内嵌 key 与命令行取值两条临时路径，详见 §3。存储中未发现静态加密，OAuth token 刷新在 `packages/ai/src/auth/resolve.ts` 中加锁完成。
+4. **请求统一经 Provider 的 stream 与 streamSimple 发出**：Base URL 取自 `Model.baseUrl`，请求路径由各协议 Adapter 按协议拼接；OpenAI-compatible 的兼容开关按 provider 名与 baseUrl 自动探测，也可用模型上的 compat 字段显式覆盖（`api/openai-completions.ts:1439` 起）。
 5. **重试与故障转移分层且范围明确**：
-   - SDK 层重试在 `api/*` 的 `retryProviderRequest`；
-   - Assistant 消息层重试在 `retryAssistantCall`（`packages/ai/src/utils/retry.ts`）与 `coding-agent` 会话级 `auto_retry`（`core/agent-session.ts:2686`）；
-   - 常规请求仍没有客户端侧跨 Provider 自动故障转移；OpenRouter/Vercel Gateway 把路由交给聚合服务。Anthropic Messages 新增服务端 refusal fallback：仅对模型元数据允许的候选发送 `fallbacks`，响应若在输出中途切换则拒绝。
-6. **配置管理以文件和扩展为主，TUI 只覆盖认证及运行时刷新**：`models.json` 的 schema 能表达自定义 Provider、Endpoint 和模型，但 Pi 没有渠道配置编辑器；TUI 的 `/login`、`/logout`、`/model`、`/reload` 分别处理凭据、模型选择和重新加载，不能新增、复制、删除或启停 `models.json` 渠道。
-7. **可观测性以内置为主**：用量与成本由 `calculateCost` 依据模型价格表计算（`models.ts:878-898`），TUI footer 展示 token/成本；连接检测复用 `checkAuth`（仅确认凭据完整，不发起真实请求）。
+   - SDK 层重试由 API Adapter 内的 `retryProviderRequest` 承担；
+   - Assistant 消息层重试由 `retryAssistantCall` 与 coding-agent 会话级 auto_retry 承担（`packages/ai/src/utils/retry.ts`、`core/agent-session.ts:2686`）；
+   - 常规请求仍没有客户端侧跨 Provider 的自动故障转移，OpenRouter 与 Vercel Gateway 把路由交给聚合服务。Anthropic Messages 另有一处服务端 refusal fallback：只对模型元数据允许的候选发送 `fallbacks`，响应在输出中途切换模型则报错拒绝。
+6. **配置管理以文件和扩展为主，TUI 只覆盖认证及运行时刷新**：`models.json` 的 schema 能表达自定义 Provider、Endpoint 和模型，仓库里没有渠道配置编辑器。TUI 一侧只有认证与模型选择几项操作，即 `/login`、`/logout`、`/model`、`/reload`；新增、复制、删除、启停渠道都没有对应入口。
+7. **可观测性以内置为主**：用量与成本由 `calculateCost` 依据模型价格表算出，并在 TUI footer 展示 token 与成本；连接检测复用 `checkAuth`，只确认凭据完整，不发起真实请求（`models.ts:878-898`）。
 
 ## 总体调用链
 
@@ -56,52 +56,63 @@ CLI/会话层 (AgentSession)
   可选 fetchDeferred / cancelDeferred
   ```
 
-  注释明确“Provider 是具体运行时单元”，`Models` 是 Provider 集合（`models.ts:151-223`）。
-- **Endpoint 粒度**：Endpoint 不是独立实体，只是 `Model.baseUrl` 字段（`types.ts:794-813`）。同一 Provider 的不同模型可以带不同 baseUrl；`models.json` 的 provider 级 `baseUrl` 会整体替换内置 baseUrl，除非 `oauth: "radius"`（`provider-composer.ts:191-195`）。
-- **Radius 例外**：`providers/radius.ts:20-34` 的 `radiusProvider(options)` 以传入 `id` 构造 Provider，是唯一可按配置生成多实例的入口。
-- `coding-agent` 在 `model-runtime.ts:219-230` 为每个 `models.json` 中 `oauth === "radius"` 且有 baseUrl 的配置生成一个新 id 的 Radius Provider；默认网关为 `https://radius.pi.dev`（`providers/radius-config.ts:4`）。
-- **已知 Provider 枚举**：`types.ts:35-75` 的 `KnownProvider` 列出 40 个内置 Provider（anthropic、openai、google、deepseek、zai、qwen-token-plan 系列、xiaomi 系列、cloudflare 系列等；`qwen-token-plan-individual`，#7659）；`providers/all.ts:89-121` 的 `builtinProviders()` 实际构造 40 个。
-- **订阅制标记**：`OAuthAuth` 新增 `isSubscription` 标志，以下 Provider 的 OAuth 均标记为订阅制：
+  注释把 Provider 定位为具体的运行时单元，`Models` 则是 Provider 的集合，该集合的定义见 `models.ts:151-223`。
+- **Endpoint 粒度**：Endpoint 的粒度由 `Model.baseUrl` 字段承载，没有独立的 Endpoint 实体（`types.ts:794-813`）。同一 Provider 的不同模型可以各带 baseUrl；`models.json` 中 provider 级 baseUrl 会整体替换内置值，`oauth` 为 radius 的配置除外（`provider-composer.ts:191-195`）。
+- **Radius 例外**：`radiusProvider(options)` 用调用方传入的 id 构造 Provider，是唯一能按配置生成多实例的入口（`providers/radius.ts:20-34`）。
+- coding-agent 在组装 Provider 阶段为 `models.json` 中 `oauth` 为 radius 且带 baseUrl 的每个配置生成一个使用新 id 的 Radius Provider，默认网关指向 `https://radius.pi.dev`，生成逻辑见 `model-runtime.ts:219-230`，网关默认值见 `providers/radius-config.ts:4`。
+- **已知 Provider 枚举**：`KnownProvider` 枚举列出 40 个内置 Provider，涵盖 anthropic、openai、google、deepseek、zai、qwen-token-plan 系列、xiaomi 系列与 cloudflare 系列等，其中 qwen-token-plan-individual 的引入见 #7659；`builtinProviders()` 按该枚举实际构造 40 个（`types.ts:35-75`、`providers/all.ts:89-121`）。
+- **订阅制标记**：`OAuthAuth` 用 isSubscription 标志区分订阅制 OAuth，以下 Provider 的 OAuth 均标记为订阅制：
   - GitHub Copilot（`providers/github-copilot.ts:16`）；
   - Kimi Code（`kimi-coding.ts:17`）；
   - OpenAI Codex（`openai-codex.ts:13-17`）；
   - xAI（`xai.ts:17`）。
-  `ModelRuntime.isUsingSubscription`（`model-runtime.ts:462`）据此判断，footer 只对已知订阅制显示 `(sub)`。
+  ModelRuntime 的 isUsingSubscription 据此判断当前会话是否走订阅制，footer 只对已知订阅制显示 (sub)（`model-runtime.ts:462`）。
 
 ## 2. 配置生命周期、管理入口与持久化
 
-- **内置注册**：`builtinProviders()`（`providers/all.ts:89-121`）在 `ModelRuntime.create` 时逐一构造（`model-runtime.ts:184-188`），每个非 radius 内置 Provider 再用 `withRemoteCatalog` 包裹（`remote-catalog-provider.ts:45`）。
-- **用户配置**：`models.json` 由 `ModelConfig.load` 读取并做 TypeBox 校验（`core/model-config.ts:245-284`，schema 见 `ModelConfigSchema`），支持 provider 级字段（`model-config.ts:193-204`）：
+- **内置注册**：`ModelRuntime.create` 时逐一构造内置 Provider，随后给每个非 radius 的 Provider 套一层远端目录包装；构造列表见 `providers/all.ts:89-121`，组合过程见 `model-runtime.ts:184-188`，包装实现在 `remote-catalog-provider.ts:45`。
+- **用户配置**：`models.json` 由 `ModelConfig.load` 读取并用 TypeBox 校验，schema 由 `ModelConfigSchema` 定义，接受下列 provider 级字段（`core/model-config.ts:193-204,245-284`）：
 
   ```text
   name / baseUrl / apiKey / api / oauth / headers / compat / authHeader / models / modelOverrides
   ```
 
-  校验失败时记录错误而不是中断启动，`getError()` 供 UI 展示（`model-runtime.ts:422-431`）。
-- **默认与用户合并**：`composeModelProvider`（`provider-composer.ts:420-520`）按“内置 → models.json → 扩展”顺序合并：`applyModelsJson` 先改内置模型（baseUrl、compat、新增/替换模型），`applyExtension` 再套扩展模型列表，最后 `modelOverrides` 做最顶层单模型字段覆盖（:434-443）。
-- 无覆盖层时 `recomposeProvider`（`model-runtime.ts:241-263`）直接使用内置 Provider 原对象。
-- **动态目录持久化**：远端目录刷新结果写入 `models-store.json`（`FileModelsStore`，`core/models-store.ts:46`），与 auth.json 同用 `AuthStorageBackend` 文件锁；`ModelsStoreEntry` 记录 `lastModified`、`checkedAt`、`etag`（`packages/ai/src/models-store.ts:3-14`）。这是模型目录缓存，不是用户渠道配置。
-- **配置文件入口**：`~/.pi/agent/models.json`（也可通过 `agentDir`/SDK 指定路径）是唯一直接定义用户 Provider 的持久化入口。schema 支持新增 Provider、覆盖内置 Provider、设置 `baseUrl`、API、Header、凭据表达式、模型列表和单模型覆盖（`core/model-config.ts:194-209`）；文档明确自定义 Provider 通过该文件添加，配置文件在打开 `/model` 时重新加载（`docs/models.md:1-3,92-92`）。源码确认读取、解析、校验和不可变快照；未找到由 Pi 写回 `models.json` 的新增、编辑、复制、删除、导入或导出服务。静态推断是用户需用外部编辑器或脚本修改文件，再由 `/model` 或 `/reload` 使运行时重新组合。
-- **配置文件中的已有与新建渠道差异**：已有内置渠道只需在 `providers` 下使用同名 key 覆盖 `baseUrl`、Header 或 `modelOverrides`，内置模型仍保留；提供 `models` 时按模型 id 合并/替换。新建渠道必须提供模型和可用的 `baseUrl`/API（除非由扩展提供完整 Provider），且认证配置完成后才会出现在可用模型列表（`docs/models.md:300-335`、`docs/models.md:132-145`）。两者都没有文件级启停字段；从模型选择范围中排除属于模型作用域设置，生效范围限于模型可见性。
-- **CLI**：帮助和命令分发确认 CLI 提供 `--list-models`、`pi update --models`、`pi auth check`、`auth print-api-key` 和 `auth print-bearer-token`，分别用于查看可用模型、刷新模型目录、检查凭据就绪度和显式输出凭据（`cli/args.ts:244-290`、`cli/auth-command.ts:17-45`）。本次未找到 CLI 的 Provider create/edit/copy/enable/disable/delete/import/export 命令；`--api-key` 是当前运行的临时凭据，不会写入渠道配置。`pi update --models` 只刷新目录缓存，不创建或修改 Provider。
-- **TUI**：交互命令处理器确认 `/login` 可按 Provider 选择 OAuth 或 API key，成功后调用 `ModelRuntime.login` 并同步凭据和可用性；`/logout` 只删除 `/login` 保存的凭据，明确不改环境变量和 `models.json`（`interactive-mode.ts:2955-2979,5227-5257,5635-5645,5361-5402`）。`/model` 负责查看和选择当前可用模型，触发模型目录刷新；`/reload` 重新加载扩展、资源并重新读取 `models.json`，不是渠道编辑器（`interactive-mode.ts:5683-5770`）。因此 TUI 对已有内置渠道和通过配置/扩展出现的新渠道都能做认证、登出和模型选择，但不能新增、复制、编辑 Endpoint、启停或删除渠道；删除扩展注册的 Provider 只存在于扩展 API 的 `unregisterProvider`，不是用户 TUI 操作（`core/model-runtime.ts:733-786`）。
-- **导入、导出与连接测试**：TUI/CLI 的 `/import`、`/export` 和 `--export` 针对 session JSONL/HTML，不是渠道配置（`interactive-mode.ts:5773-5829`、`cli/args.ts:288-289`）。CLI `auth check` 返回 `ready/not_ready/invalid`，可选刷新 OAuth，但 `ModelRuntime.checkAuth` 只检查凭据解析，不发真实 Provider 请求（`cli/auth-check.ts:22-52`）；本次未找到独立的真实连接测试入口。`/login` 的 OAuth/API key 登录可能访问认证服务，但它是认证流程，不应推断为通用 Endpoint 连通性测试。
-- **Web 与桌面端**：仓库内有 p2 自托管 Web 应用（`apps/p2`，Chord 插件 + React），模型相关插件是 `apps/p2/plugins/models` 与 `apps/p2/plugins/login`：前者读 models.json 的免凭据快照、合成 Provider、提供模型摘要与选择，后者提供登录入口，Web 端只有 `ModelPicker.tsx` 这样的选择器，没有渠道 CRUD 页面。仓库没有原生桌面应用。因此 Web/桌面端对渠道管理记为**未找到编辑入口**，而非“不适用”；若外部宿主自行实现 UI，其行为不属于当前仓库源码可确认范围。
-- **凭据生命周期**：登录写入 `auth.json`，登出通过 `AuthStorage.delete` 删除指定 Provider 的存储凭据（`core/auth-storage.ts:474-483`）；运行时 key 由 `setRuntimeApiKey/removeRuntimeApiKey` 管理，不持久化（`core/model-runtime.ts:536-559`）。由此产生“已有渠道可登出”与“新建渠道不能由 TUI 删除”的差异：前者删除的是凭据记录，后者的 Provider 定义仍来自 `models.json` 或扩展。
+  校验失败时记录错误并继续启动，错误经 `getError()` 提供给 UI 展示（`model-runtime.ts:422-431`）。
+- **默认与用户合并**：`composeModelProvider` 按“内置 → models.json → 扩展”的顺序叠加配置：先由 `applyModelsJson` 修改内置模型，再套用扩展注册的模型列表，最后让 modelOverrides 覆盖单个模型的字段。三层合并与覆盖顺序见 `provider-composer.ts:420-520,434-443`。
+- 某个 Provider 没有任何覆盖层时，`recomposeProvider` 直接复用内置 Provider 原对象（`model-runtime.ts:241-263`）。
+- **动态目录持久化**：远端目录刷新结果由 FileModelsStore 写入 `models-store.json`，与 auth.json 共用同一套文件锁后端；每条记录保存 lastModified、checkedAt 与 etag。文件存储见 `core/models-store.ts:46`，记录结构见 `packages/ai/src/models-store.ts:3-14`。该文件只承载模型目录缓存，用户渠道配置由 `models.json` 负责。
+- **配置文件入口**：`~/.pi/agent/models.json` 是唯一直接定义用户 Provider 的持久化入口，也可通过 agentDir 或 SDK 指定其他路径。schema 支持新增 Provider、覆盖内置 Provider，以及设置地址、协议、Header、凭据来源与模型定义，字段见 `core/model-config.ts:194-209`；官方文档同样说明自定义 Provider 经该文件添加，打开模型选择器时配置会重新加载（`docs/models.md:1-3,92`）。源码里只有读取、解析、校验和不可变快照，未找到 Pi 写回该文件的新增、编辑、复制、删除、导入或导出服务；按静态推断，用户需用外部编辑器或脚本改文件，再通过 `/model` 或 `/reload` 触发运行时重新组合。
+- **已有渠道与新建渠道的配置差异**：已有内置渠道只需在 `providers` 下用同名 key 覆盖 baseUrl、Header 或 modelOverrides，内置模型继续保留，给出 models 时按模型 id 合并或替换；新建渠道必须自带模型和可用的 baseUrl 与 API，由扩展提供完整 Provider 的情况除外，且认证配置完成后才会出现在可用模型列表。两类配置都没有文件级启停字段，把模型排除在模型选择范围之外属于模型作用域设置，只影响模型可见性（`docs/models.md:132-145,300-335`）。
+- **CLI**：帮助与命令分发显示 CLI 提供下列渠道相关命令（`cli/args.ts:244-290`、`cli/auth-command.ts:17-45`）：
+  - `--list-models`：查看可用模型；
+  - `pi update --models`：刷新模型目录；
+  - `pi auth check`：检查凭据就绪度；
+  - `auth print-api-key` 与 `auth print-bearer-token`：显式输出凭据。
+  本次未找到 CLI 的 Provider create/edit/copy/enable/disable/delete/import/export 命令；`--api-key` 是当前运行的临时凭据，不写入渠道配置；`pi update --models` 只刷新目录缓存，不创建或修改 Provider。
+- **TUI**：交互命令处理器显示，TUI 的四个命令覆盖认证与模型选择两类操作（`interactive-mode.ts:2955-2979,5227-5257,5361-5402,5635-5645,5683-5770`）：
+  - `/login`：按 Provider 选择 OAuth 或 API key 登录，成功后调用 `ModelRuntime.login` 并同步凭据与可用性；
+  - `/logout`：只删除 `/login` 保存的凭据，环境变量和 `models.json` 保持不变；
+  - `/model`：查看和选择当前可用模型，并触发模型目录刷新；
+  - `/reload`：重新加载扩展、资源并重读 `models.json`。
+  TUI 因此能对已有内置渠道以及经配置或扩展出现的新渠道执行认证、登出和模型选择，新增、复制、编辑 Endpoint、启停、删除渠道都没有对应命令；扩展注册的 Provider 只能在扩展 API 的 `unregisterProvider` 中注销，用户侧 TUI 没有这一操作（`core/model-runtime.ts:733-786`）。
+- **导入与导出**：TUI 与 CLI 的 `/import`、`/export`、`--export` 处理的是 session JSONL/HTML，与渠道配置无关（`interactive-mode.ts:5773-5829`、`cli/args.ts:288-289`）。
+- **连接测试**：CLI 的 `auth check` 返回 ready、not_ready、invalid 三种状态，可选择刷新 OAuth。底层的 `ModelRuntime.checkAuth` 只解析凭据，不发真实 Provider 请求（`cli/auth-check.ts:22-52`）；本次未找到独立的真实连接测试入口。`/login` 的网络行为取决于认证方式：OAuth 可能访问认证服务，标准 API key 登录只在本地提示输入并保存凭据，Endpoint 连通性需要另行验证。
+- **Web 与桌面端**：仓库内的 p2 自托管 Web 应用（`apps/p2`，Chord 插件 + React）有两个与模型相关的插件：models 插件读取 models.json 的免凭据快照并合成 Provider，提供模型摘要与选择；login 插件提供登录入口。Web 端只有 `ModelPicker.tsx` 这类选择器，没有渠道增删改查页面，仓库也没有原生桌面应用，因此 Web 与桌面端在渠道管理上记为**未找到编辑入口**。若外部宿主自行实现 UI，其行为超出当前仓库源码可确认的范围。
+- **凭据生命周期**：登录把凭据写入 `auth.json`，登出由 `AuthStorage.delete` 删除指定 Provider 的存储记录（`core/auth-storage.ts:474-483`）；运行时 key 通过 setRuntimeApiKey、removeRuntimeApiKey 管理，只存在于内存（`core/model-runtime.ts:536-559`）。已有渠道可以登出、新建渠道无法从 TUI 删除，区别在删除对象：前者删除凭据记录，后者涉及的 Provider 定义仍留在 `models.json` 或扩展中。
 
 ## 3. 凭据、Header 与代理边界
 
-- **存储位置与权限**：`FileAuthStorageBackend` 以 `auth.json`（默认 `~/.pi/agent/auth.json`）为文件，写权限 0600、目录 0700，所有写操作在 proper-lockfile 文件锁内完成（`core/auth-storage.ts:47-202`）；进程内共享 `sharedAuthFileReadState` 按文件 revision 只重读变更（`auth-storage.ts:244-257`）。
-- **凭据形状**：每 Provider 一文件：`ApiKeyCredential { type: "api_key", key?, env? }` 或 `OAuthCredential { type: "oauth", access, refresh, expires }`（`packages/ai/src/auth/types.ts:17-37`）。`env` 保存 Cloudflare 账号/网关 id 等 Provider 作用域配置。
-- **解析优先级**：`resolveProviderAuth`（`packages/ai/src/auth/resolve.ts:50-110`）：显式 `apiKey` 覆盖 > 已存凭据 > 环境变量/ambient（AWS profile、ADC）。注释明确“已存凭据拥有 Provider，刷新失败后不回退环境变量”。
-- **环境变量**：`env-api-keys.ts:79-119` 维护各 Provider 的 API Key 环境变量映射（OPENAI_API_KEY、ANTHROPIC_API_KEY、GEMINI_API_KEY、HF_TOKEN 等）；Anthropic 还支持 `ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_OAUTH_TOKEN`；Bedrock/Vertex 走 AWS profile、ADC 等 ambient 源（`env-api-keys.ts:166-184`）。
+- **存储位置与权限**：`FileAuthStorageBackend` 把凭据存进 `auth.json`（默认 `~/.pi/agent/auth.json`），文件权限 0600、目录权限 0700，所有写操作都在 proper-lockfile 文件锁内完成；进程内共享 sharedAuthFileReadState，按文件 revision 判断并只重读发生变更的内容（`core/auth-storage.ts:47-202,244-257`）。
+- **凭据形状**：每个 Provider 对应一条凭据，形态为 `ApiKeyCredential`（type 取 api_key，另有可选的 key 与 env）或 `OAuthCredential`（type 取 oauth，另有 access、refresh、expires），定义见 `packages/ai/src/auth/types.ts:17-37`。其中 env 保存 Cloudflare 账号、网关 id 这类 Provider 作用域配置。
+- **解析优先级**：`resolveProviderAuth` 依次尝试显式 apiKey、已存凭据、环境变量或 ambient 来源（AWS profile、ADC），前一级命中后不再向后取。源码注释把这套关系表述为“已存凭据拥有 Provider”，刷新失败也不会回退到环境变量（`packages/ai/src/auth/resolve.ts:50-110`）。
+- **环境变量**：各 Provider 的 API Key 环境变量映射由 `env-api-keys.ts` 维护，常见项包括 OPENAI_API_KEY、ANTHROPIC_API_KEY、GEMINI_API_KEY 与 HF_TOKEN 等；Anthropic 另外支持 ANTHROPIC_AUTH_TOKEN 和 ANTHROPIC_OAUTH_TOKEN，Bedrock 与 Vertex 则走 AWS profile、ADC 等 ambient 来源（`env-api-keys.ts:79-119,166-184`）。
 - **models.json 内嵌凭据**：`composeApiKeyAuth`（`provider-composer.ts:298-362`）支持三种取值方式：
   - `apiKey` 直接写明文；
   - 环境变量引用：`$VAR`/`${VAR}` 字符串插值；
-  - 命令取值：`!command` 前缀执行（`resolve-config-value.ts:80-86、145-151` 实现，命令结果进程内缓存，`clearApiKeyCache` 可清，provider-composer.ts:77；无 `$env`/`$command` 对象语法）。
-  这类 key 的登录态来源标记为 `models_json_key`/`models_json_command`（`provider-composer.ts:555-569`）。
-- **Header 与代理**：Provider 级 `headers` 支持环境变量模板解析（`resolveHeadersOrThrow`）；`authHeader: true` 把 key 注入 `Authorization: Bearer`（`provider-composer.ts:255-267`）；模型级 header 按 `modelOverrides/models[].headers` 合并（:389-402）。HTTP 代理经设置项 `httpProxy` 注入环境变量，由各 SDK 的 fetch 层消费（`settings-manager.ts:132`）。
-- **脱敏边界**：`list()` 只返回 `providerId + type`（`auth-storage.ts:397-401`），登录状态 UI 不显示 key；`auth print-api-key`/`print-bearer-token`（`cli/credential-print.ts`，经 `cli/auth-command.ts` 分发）是显式导出路径。静态存储、日志输出、导出 HTML 均未见自动脱敏逻辑；本次未在日志写入路径中找到对 key 的过滤。凭据静态未加密。
+  - 命令取值：以 `!command` 前缀执行外部命令，结果在进程内缓存并可用 clearApiKeyCache 清除；解析实现见 `resolve-config-value.ts:80-86,145-151`，缓存与来源标记见 `provider-composer.ts:77,555-569`。
+  当前语法限于 `$VAR` 字符串插值和 `!command` 前缀，未提供对象式写法；经这条路径得到的 key 会在登录态来源中标记为 models_json_key 或 models_json_command。
+- **Header 与代理**：Provider 级 headers 由 `resolveHeadersOrThrow` 解析环境变量模板，authHeader 为 true 时把 key 注入 Authorization: Bearer 头，模型级 header 则从 modelOverrides 或 models[].headers 合并，两处处理都在 `provider-composer.ts:255-267,389-402`。HTTP 代理通过设置项 httpProxy 注入环境变量，再由各 SDK 的 fetch 层消费（`settings-manager.ts:132`）。
+- **脱敏边界**：凭据列表接口只返回 providerId 与 type，登录状态界面因此看不到 key（`auth-storage.ts:397-401`）；需要明文时走 `auth print-api-key` 与 `auth print-bearer-token` 两条显式导出路径，实现见 `cli/credential-print.ts`，分发见 `cli/auth-command.ts`。静态存储、日志输出和导出的 HTML 都没有自动脱敏逻辑，本次也未在日志写入路径中找到对 key 的过滤；auth.json 中的凭据以明文保存。
 
 ## 4. 模型目录与能力元数据
 
@@ -112,12 +123,12 @@ CLI/会话层 (AgentSession)
   contextWindow / maxTokens / samplingParams / headers / compat
   ```
 
-  价格是 `ModelCost { input, output, cacheRead, cacheWrite, tiers? }`（美元/百万 token，`types.ts:776-790`），成本由 `calculateCost` 结合用量计算（`models.ts:878-898`，含 Anthropic 1h cache write 2 倍规则）。
-- **构建期目录**：`scripts/generate-models.ts` 从各家公开目录拉取生成 `packages/ai/src/providers/data/*.json`（gitignore）与 `models.generated.ts`；模型数据生成时间戳记录在 `data/.manifest.json`（`providers/all.ts:72-76`）。`getBuiltinModels`/`getBuiltinModel` 提供类型化读取（`providers/all.ts:60-86`）。
-- **启动期叠加**：`withRemoteCatalog`（`remote-catalog-provider.ts:45-131`）从 `https://pi.dev/api/models/providers/<id>` 拉取增量目录，用 `If-None-Match` ETag 做 304 校验，4 小时刷新窗口（`REMOTE_CATALOG_REFRESH_INTERVAL_MS`），只在远端 `lastModified` 晚于本地生成时间时叠加（`remote-models` 判断）。
-- **动态 Provider**：Radius 从网关 `/v1/config` 拉取模型目录（`providers/radius.ts:67-77`、`radius-config.ts:87`）。
-- `refreshModels` 生命周期由 `Models.refresh` 管理（`models.ts:386-446`）：先恢复缓存，再走凭据解析与网络刷新；并发刷新按 Provider 串行并支持 generation 作废（`models.ts:320-365`）。
-- **能力过滤**：`getAvailable()` 按 Provider 认证状态过滤出可用模型（`models.ts:522-542`）；`filterModels` 允许 Provider 按凭据裁减（如 Radius 免费层）。`getSupportedThinkingLevels` 依据 `reasoning + thinkingLevelMap` 计算思考等级（`models.ts:902-911`）。
+  价格定义在 `ModelCost` 上，字段为 input、output、cacheRead、cacheWrite 与可选的 tiers，单位为美元每百万 token（`types.ts:776-790`）；成本由 `calculateCost` 结合用量算出，其中包含 Anthropic 1 小时 cache write 按 2 倍计价的规则（`models.ts:878-898`）。
+- **构建期目录**：`scripts/generate-models.ts` 从各家公开目录生成 `packages/ai/src/providers/data/*.json` 与 models.generated.ts，前者被 gitignore；生成时间戳记录在 data/.manifest.json，读取入口是 getBuiltinModels 与 getBuiltinModel（`providers/all.ts:60-86`）。
+- **启动期叠加**：`withRemoteCatalog` 从 `https://pi.dev/api/models/providers/<id>` 拉取增量目录，带 If-None-Match 做 ETag 校验，命中 304 时跳过；刷新窗口由 REMOTE_CATALOG_REFRESH_INTERVAL_MS 控制为 4 小时，只有远端 lastModified 晚于本地生成时间才把结果叠加到内置目录（`remote-catalog-provider.ts:45-131`）。
+- **动态 Provider**：Radius 的模型目录来自网关的 `/v1/config` 接口（`providers/radius.ts:67-77`、`radius-config.ts:87`）。
+- `refreshModels` 的生命周期由 `Models.refresh` 管理：先恢复缓存，再经凭据解析走网络刷新，并发刷新按 Provider 串行并用 generation 号作废过期结果（`models.ts:320-365,386-446`）。
+- **能力过滤**：`getAvailable()` 按 Provider 认证状态筛选可用模型，`filterModels` 允许 Provider 按凭据进一步裁减（例如 Radius 免费层），`getSupportedThinkingLevels` 依据 reasoning 与 thinkingLevelMap 计算可用的思考等级（`models.ts:522-542,902-911`）。
 
 ## 5. Adapter、协议与请求组装
 
@@ -129,67 +140,73 @@ CLI/会话层 (AgentSession)
   mistral-conversations / pi-messages / cloudflare-gateway-binding（AI Gateway 经 Cloudflare AI binding 传输，#7901）
   ```
 
-  每个模块导出 `stream`/`streamSimple`（`ProviderStreams` 契约，`types.ts:267-276`），lazy 包装用于 tree-shaking（`api/lazy.ts`）。Mistral 使用原生 HTTP 流（`api/mistral-conversations.ts`，不经生成客户端与 schema 运行时开销）。
+  每个 API 模块都导出 stream 与 streamSimple 两个入口，实现同一套 ProviderStreams 契约（`types.ts:267-276`）；模块外再套一层 lazy 包装以支持 tree-shaking。Mistral 走原生 HTTP 流，绕开生成客户端与 schema 带来的运行时开销（`api/lazy.ts`、`api/mistral-conversations.ts`）。
 - **请求组装**：Base URL 来自 `model.baseUrl`，路径在各 Adapter 内拼接。示例：
   - pi-messages：单 POST 到 `<baseUrl>/messages`（`api/pi-messages.ts:360`）；
   - OpenAI-compatible：SDK `baseURL: model.baseUrl`（`api/openai-completions.ts:674`）；
   - Anthropic：`baseURL: model.baseUrl`（`api/anthropic-messages.ts:872`）；
   - Azure：从 `AZURE_OPENAI_BASE_URL`/`AZURE_OPENAI_RESOURCE_NAME` 组装并规范化路径（`api/azure-openai-responses.ts:181-246`）；
   - Codex：默认 `DEFAULT_CODEX_BASE_URL`，WebSocket 与 fetch 双通道（`api/openai-codex-responses.ts:638-647`）。
-- **兼容探测**：OpenAI-compatible 的 `detectCompat`（`api/openai-completions.ts:1443`）按 provider 名 + baseUrl 特征（openrouter.ai、deepseek.com、api.z.ai、api.moonshot、gateway.ai.cloudflare.com、chutes.ai 等）自动决定 developer role、thinking 格式、max_tokens 字段、cache 控制等（`api/openai-completions.ts:1439-1489`），`model.compat` 可显式覆盖（`types.ts:545-597`）。
+- **兼容探测**：`detectCompat` 依据 provider 名和 baseUrl 特征（如 openrouter.ai、deepseek.com、api.z.ai、api.moonshot、gateway.ai.cloudflare.com、chutes.ai）决定该用哪套兼容行为，涉及 developer role、thinking 格式、max_tokens 字段和 cache 控制等，模型上的 compat 字段可显式覆盖结论（`api/openai-completions.ts:1439-1489`、`types.ts:545-597`）。
 - **兼容性处理**：
-  - DeepSeek 的 baseUrl 探测改为大小写不敏感，且发送 `max_tokens`（`openai-completions.ts`，#7933/#7930）；
-  - Fireworks GLM 走 Anthropic Messages 兼容端点并修正 prompt caching（`providers/fireworks.ts` 用 `anthropicMessagesApi`，#7676）；
-  - OpenAI Responses 侧有 `supportsAdditionalTools` 兼容开关（延迟工具经 `additional_tools` 注入）。
-- **z.ai 特例**：仅走 openai-completions（`zai.ts:6-14`）；`api/anthropic-messages.ts:1228` 提及 z.ai 的注释与当前实现不一致。
-- **Provider 分发**：`createProvider` 支持单个 API 实现或按 `model.api` 分发的 map（`models.ts:762-862`）；组合层 `streamWith` 优先扩展 `streamSimple`、再内置 Provider、最后 `getApiProvider(model.api)` 的通用 API 实现（`provider-composer.ts:451-471`）。
+  - DeepSeek 的 baseUrl 探测不区分大小写，请求中发送 max_tokens（`openai-completions.ts`，#7933/#7930）；
+  - Fireworks GLM 经 Anthropic Messages 兼容端点传输，并修正 prompt caching（`providers/fireworks.ts` 使用 anthropicMessagesApi，#7676）；
+  - OpenAI Responses 侧提供 supportsAdditionalTools 兼容开关，延迟工具经 additional_tools 注入。
+- **z.ai 特例**：只走 openai-completions（`zai.ts:6-14`）；`api/anthropic-messages.ts:1228` 处提到 z.ai 的注释与当前实现不一致。
+- **Provider 分发**：`createProvider` 接受单个 API 实现，也接受按 model.api 分发的映射表；组合层的 `streamWith` 依次尝试扩展提供的 streamSimple、内置 Provider，最后回落到按 model.api 取到的通用 API 实现（`models.ts:762-862`、`provider-composer.ts:451-471`）。
 
 ## 6. 运行时选择、绑定与路由
 
-- **会话绑定**：模型保存在 Agent 状态（`agent.state.model`），会话文件用 `model_change` 条目记录 Provider+modelId，回放会话时从条目恢复（`session-manager.ts:63-67, 362-377`）；重启继续会话时 `restoreModelFromSession` 校验模型仍存在且有认证，否则回退（`core/model-resolver.ts:705-773`）。
-- **解析规则**：`resolveCliModel`（`model-resolver.ts:404-604`）支持 `--provider/--model`、`provider/model` 规范引用、裸模型 id（跨 Provider 歧义时报错或按唯一已认证 Provider 消歧）、部分匹配时优先 alias（无日期后缀）再取最新日期版本（`tryMatchModel`，`model-resolver.ts:134-164`）、未知 id 时构造 `buildFallbackModel` 自定义模型。`parseModelPattern` 支持 `model:thinkingLevel` 后缀（`model-resolver.ts:202-255`）。
-- **初始选择优先级**：`findInitialModel`（`model-resolver.ts:620-700`）：CLI 参数 > scoped models 首个 > 设置里的默认 Provider/模型 > 按 `defaultModelPerProvider` 匹配可用模型 > 第一个可用模型。`defaultModelPerProvider` 为每个内置 Provider 指定默认模型 id（`model-resolver.ts:20-60`）。
-- **模型作用域**：`--models`/`enabledModels` 模式经 `resolveModelScopeFromModels` 支持 glob 模式（`*sonnet*`、`provider/*:high`）与 `:thinkingLevel`（`model-resolver.ts:280-360`），结果用于 Ctrl+P 循环切换（`scopedModels`）。
-- **别名/路由**：无本地语义路由。OpenRouter 通过请求体 `provider` 字段透传 `openRouterRouting`（allow_fallbacks、order、only、max_price、preferred_throughput 等，`types.ts:695-763`），Vercel AI Gateway 类似（`types.ts:769-773`）——路由策略由聚合服务执行，Pi 只负责拼参。
+- **会话绑定**：当前模型保存在 Agent 状态里，会话文件用 model_change 条目记录 Provider 与 modelId，回放会话时从条目恢复模型（`session-manager.ts:63-67,362-377`）；重启后继续会话时，`restoreModelFromSession` 会校验该模型仍然存在且已认证，任一条件不满足就回退到默认选择（`core/model-resolver.ts:705-773`）。
+- **解析规则**：`resolveCliModel` 接受 --provider/--model、`provider/model` 规范引用和裸模型 id 三种写法：裸 id 跨 Provider 有歧义时报错，或按唯一已认证的 Provider 消歧；部分匹配优先取无日期后缀的 alias，再取最新日期版本；模型 id 完全未知时用 `buildFallbackModel` 构造自定义模型。`parseModelPattern` 另外解析 model:thinkingLevel 后缀（`model-resolver.ts:134-164,202-255,404-604`）。
+- **初始选择优先级**：`findInitialModel` 按下列顺序决定启动时使用哪个模型：
+  - CLI 参数；
+  - scoped models 列表中的第一个；
+  - 设置中指定的默认 Provider 与模型；
+  - 按 defaultModelPerProvider 匹配到的可用模型；
+  - 第一个可用模型。
+  defaultModelPerProvider 为每个内置 Provider 指定默认模型 id（`model-resolver.ts:20-60,620-700`）。
+- **模型作用域**：`--models` 或 enabledModels 模式由 `resolveModelScopeFromModels` 解析，支持 `*sonnet*`、`provider/*:high` 这类 glob 与思考等级后缀，结果存进 scopedModels 供 Ctrl+P 循环切换（`model-resolver.ts:280-360`）。
+- **别名与路由**：Pi 本地没有语义路由。OpenRouter 通过请求体的 provider 字段把 openRouterRouting（allow_fallbacks、order、only、max_price、preferred_throughput 等）透传给聚合服务，Vercel AI Gateway 采用同样的方式；路由策略由这两个服务执行，Pi 只负责拼装参数（`types.ts:695-763,769-773`）。
 
 ## 7. 多 Key、限流、重试与故障转移
 
-- **多 Key**：无多 Key 池。每 Provider 一粒凭据；`setRuntimeApiKey`/`removeRuntimeApiKey`（`model-runtime.ts:528-547`）提供会话级临时 key（如 `--api-key`），优先级高于存储（`runtime-credentials.ts:24-28`）。未发现轮询、健康状态或冷却机制。
-- **SDK 层重试**：`retryProviderRequest`（`ai/src/utils/provider-retry.ts:105-125`）镜像 OpenAI/Anthropic SDK 策略（`x-should-retry`、408/409/429/5xx），指数退避 0.5s 起、上限 8s、随机抖动，服务端 `retry-after` 超过 `maxRetryDelayMs`（默认 60s）立即失败；`maxRetries` 经 `settings.retry.provider.maxRetries` 配置（`settings-manager.ts:23-27, 839-843`）。
-- **Assistant 消息层重试**：`retryAssistantCall`（`ai/src/utils/retry.ts:162-211`）对 stopReason=error 的消息按错误文本分类（`isRetryableAssistantError`，正则匹配 overloaded/rate limit/429/5xx/网络/websocket 关闭/流提前结束等；“exceeded request buffer limit while retrying upstream” 为可重试模式，`retry.ts:44`；quota/billing 类不可重试，`retry.ts:7-89`）。
-- 退避与上限：指数退避 `baseDelayMs * 2^(n-1)`（默认 2000ms、最多 3 次，`settings-manager.ts:818-822`），abort 归一化为 aborted 消息。
-- **会话级自动重试**：`agent-session.ts:2686-2737` 的 `_prepareRetry` 在同一预算内对最后一个 assistant 消息 `continue()` 重跑；compaction 摘要生成也用同一 `settings.retry`（`compaction/compaction.ts:557-580`）。
-- **上下文溢出处理**：溢出不是重试分支：`_isRetryableError` 对 `isContextOverflow` 返回 false（`agent-session.ts:2647`），溢出走“压缩一次并自动重试一次”（实现在 `_checkCompaction` 的 overflow 分支 :1994-2021 与 `_runAutoCompaction("overflow", willRetry)` :2058+；无独立 `_handleOverflowRecovery` 函数）。
-- **跨 Provider failover**：客户端仍没有通用故障转移链。Anthropic Messages 是窄例外：`compat.allowedFallbackModels` 最多配置三个 Anthropic 服务端 refusal fallback，并携带候选的 provider、model 与成本；空数组明确关闭。请求发送 `server-side-fallback-2026-07-01` beta 与 `fallbacks`，返回替代模型时按其成本计费；如果 fallback 发生在已开始输出之后则报错，避免把两个模型的内容拼成一条消息（`packages/ai/src/types.ts:720-725`、`api/anthropic-messages.ts:176-181,596-617,1014,1170-1173`、`packages/coding-agent/src/core/model-config.ts:154-164`）。
+- **多 Key**：没有多 Key 池，每个 Provider 只有一条凭据。运行时可以用 setRuntimeApiKey、removeRuntimeApiKey 设置会话级临时 key（如 `--api-key`），其优先级高于存储中的凭据；接口见 `model-runtime.ts:528-547`，优先级判断见 `runtime-credentials.ts:24-28`。本次未发现 Key 轮询、健康状态或冷却机制。
+- **SDK 层重试**：`retryProviderRequest` 沿用 OpenAI 与 Anthropic SDK 的重试策略，按 x-should-retry 响应头和 408、409、429、5xx 状态码判断是否重试；退避从 0.5 秒起按指数增长、封顶 8 秒并带随机抖动，服务端 retry-after 超过 maxRetryDelayMs（默认 60 秒）时直接失败，maxRetries 由 settings.retry.provider.maxRetries 配置（`ai/src/utils/provider-retry.ts:105-125`、`settings-manager.ts:23-27,839-843`）。
+- **Assistant 消息层重试**：`retryAssistantCall` 处理 stopReason 为 error 的助手消息，由 `isRetryableAssistantError` 用正则对错误文本分类：overloaded、rate limit、429、5xx、网络错误、websocket 关闭、流提前结束等可重试，“exceeded request buffer limit while retrying upstream”也归入可重试模式，quota 与 billing 一类不可重试（`ai/src/utils/retry.ts:7-89,162-211`）。
+- 退避与上限：重试间隔为 baseDelayMs * 2^(n-1) 的指数退避，默认 2000 毫秒、最多 3 次，abort 会归一化成 aborted 消息（`settings-manager.ts:818-822`）。
+- **会话级自动重试**：`_prepareRetry` 在同一重试预算内对最后一条 assistant 消息执行 continue() 重跑，见 `agent-session.ts:2686-2737`；compaction 的摘要生成也复用同一套 settings.retry（`compaction/compaction.ts:557-580`）。
+- **上下文溢出处理**：溢出由单独分支处理，`_isRetryableError` 对 isContextOverflow 返回 false，因此不会被当作普通可重试错误；实际做法是压缩一次并自动重试一次，入口在 `_checkCompaction` 的 overflow 分支，随后调用 `_runAutoCompaction("overflow", willRetry)`（`agent-session.ts:1994-2021,2058,2647`）。代码里没有独立的 `_handleOverflowRecovery` 函数。
+- **跨 Provider failover**：客户端仍没有通用的跨 Provider 故障转移链，Anthropic Messages 是范围很窄的例外。模型的 compat.allowedFallbackModels 最多配置三个 Anthropic 服务端 refusal fallback 候选，每个候选带 provider、model 与成本，配成空数组即关闭该能力。请求会带上 server-side-fallback-2026-07-01 beta 头与 fallbacks 字段；服务端返回替代模型时按替代模型的成本计费，如果切换发生在已经开始输出之后则直接报错，避免把两个模型的内容拼成一条消息（`packages/ai/src/types.ts:720-725`、`api/anthropic-messages.ts:176-181,596-617,1014,1170-1173`、`packages/coding-agent/src/core/model-config.ts:154-164`）。
 
 ## 8. 连接检测、日志与可观测性
 
-- **连接检测**：`Models.checkAuth`（`models.ts:485-520`）只检查凭据完整性（存储/环境/命令源），不发真实请求；`models.json` 内嵌 key 的检查只确认环境变量引用存在（provider-composer.ts:329-331），命令值不执行也不验证（:326-327，与 types.ts:73-75 的 list 约束一致）。
-- TUI 的 `/login` 登录流程中 OAuth 会真实换取 token，但无独立的“连接测试”入口。
-- CLI `pi auth check`（`cli/auth-command.ts`、`cli/auth-check.ts`）：复用 `ModelRuntime.checkAuth` 检查 Provider 凭据就绪度（`ready/not_ready/invalid`，退出码 0/1/2），支持 `--json`/`--credentials`/`--no-refresh`，全程不发真实请求（`auth-check.ts:39-71`）。
-- **可用性快照**：`ModelRuntime` 维护 `configuredProviders/storedProviders/auth/available` 快照（`model-runtime.ts:272-378`），凭据变化时按 Provider 增量刷新（`refreshProviderAvailability`），供模型选择器展示“已认证 Provider”列表。
-- **用量与成本**：`Usage` 结构（`types.ts:367-388`）字段：
+- **连接检测**：`Models.checkAuth` 只检查凭据完整性，对存储、环境变量和命令三类来源逐项确认，不发起真实请求（`models.ts:485-520`）。对 `models.json` 内嵌的 key，检查只确认环境变量引用存在，命令取值既不执行也不验证，这与 types.ts 中 list 操作的约束一致（`provider-composer.ts:326-331`、`types.ts:73-75`）。
+- TUI 的 `/login` 流程中 OAuth 会真实换取 token，TUI 内部没有独立的连接测试入口。
+- CLI 的 `pi auth check` 复用 `ModelRuntime.checkAuth` 检查 Provider 凭据就绪度，结果为 ready、not_ready 或 invalid，对应退出码 0、1、2；命令还提供 JSON 输出、凭据明细与跳过刷新三个选项，全程不发真实请求（`cli/auth-command.ts`、`cli/auth-check.ts:39-71`）。
+- **可用性快照**：`ModelRuntime` 维护四份快照，分别是已配置的 Provider、已存凭据的 Provider、认证结果和可用模型；凭据变化时由 `refreshProviderAvailability` 按 Provider 增量刷新，模型选择器据此展示已认证 Provider 列表（`model-runtime.ts:272-378`）。
+- **用量与成本**：用量统一记在 `Usage` 结构中，包含下列字段（`types.ts:367-388`）：
 
   ```text
   input / output / cacheRead / cacheWrite / reasoning / totalTokens / cost
   ```
 
-  会话级 `usage-totals.ts` 汇总；footer 展示 token 与成本（`components/footer.ts`），`/session` 命令输出统计（`agent-session.ts:262-279`）。
-- **诊断与日志**：失败消息带脱敏后的 `diagnostics` 数组（`types.ts:413-420`，`utils/diagnostics.ts` 的 `formatThrownValue`）；调试日志写入 `getDebugLogPath()`（定义 config.ts:564，使用 interactive-mode.ts:6196）。TUI 对 retry 事件、cache miss 提示（`cache-stats.ts`）有可见反馈。遥测包 `packages/telemetry` 提供 vendor-neutral 合约，但本次未逐层追到请求路径。
+  会话内的用量由 usage-totals 汇总成当前会话总计，footer 展示 token 与成本，`/session` 命令输出详细统计（`components/footer.ts`、`agent-session.ts:262-279`）。
+- **诊断与日志**：失败消息携带经过脱敏的 diagnostics 数组，内容由 utils/diagnostics.ts 的 formatThrownValue 生成（`types.ts:413-420`）。调试日志写到 `getDebugLogPath()` 返回的路径，路径函数定义在 `config.ts:564`，实际使用点在 `interactive-mode.ts:6196`。TUI 对重试事件和 cache miss 有可见提示，后者的统计来自 cache-stats.ts 模块。遥测包 `packages/telemetry` 提供与厂商无关的合约，本次未逐层追到请求路径上的具体埋点。
 
 ## 9. 设计取舍与已确认边界
 
-- **Provider 单例与组合式覆盖**：用“一个 Provider 对象 + 多层覆盖”替代“用户可创建多实例”的渠道模型，简化了状态管理，代价是同一服务多账号需要手工合并到 auth.json 单 key 或依赖 Radius 网关多实例。
-- **模型目录去中心化**：内置目录 gitignore 且构建期生成，运行时以 pi.dev 远端目录增量覆盖，用户可 models.json 全量自定义——这使离线/CI 需要 `build:offline` 与 `PI_OFFLINE`（`model-runtime.ts:194`）语义配合，也意味着静态代码中看不到完整模型清单。
+- **Provider 单例与组合式覆盖**：渠道模型建立在一个 Provider 对象加多层覆盖之上，状态管理因此保持简单；代价是同一服务的多个账号需要手工合并成 auth.json 中的单条 key，或改走 Radius 网关的多实例配置。
+- **模型目录去中心化**：内置目录在构建期生成且被 gitignore，运行时再叠加 pi.dev 的远端增量目录，用户还能用 models.json 全量自定义。离线场景和 CI 因此需要配合 build:offline 与 `PI_OFFLINE` 语义（`model-runtime.ts:194`），静态代码里也看不到完整的模型清单。
 - **凭据未加密**：auth.json 0600 + 文件锁，无静态加密；models.json 内嵌 key 是明文文件的一部分，属于已确认的设计（官方文档以“配置文件属于用户自己”为前提）。
 - **无跨渠道高可用**：重试闭环在同一 Provider/模型内；OpenRouter/Vercel Gateway 的上游路由是外部能力，不作为本地 failover。
-- **平台边界**：`packages/ai` 可运行于 Node/Bun；browser 构建通过 `importNodeModule` 动态引用与 `env-api-keys.ts` 的惰性加载保持可用（`auth/context.ts:11-18`），但本地文件凭据、ambient AWS/ADC 依赖 node 运行时。当前仓库的 server/client 协议只传递模型快照和会话操作，不把渠道配置管理提升为平台服务。
-- **管理入口的取舍**：配置定义留在用户可编辑的 `models.json`，扩展注册留在代码，认证凭据留在 `auth.json`；TUI 只对凭据和模型作用域提供操作。这样已有 Provider 可以通过覆盖复用内置目录，新 Provider 可以通过文件或扩展加入，但配置的复制、删除、导入、导出和真实连通性验证没有统一产品入口。
+- **平台边界**：`packages/ai` 可在 Node 和 Bun 上运行，browser 构建靠 importNodeModule 动态引用与 env-api-keys 的惰性加载保持可用（`auth/context.ts:11-18`），本地文件凭据和 ambient 的 AWS/ADC 来源依赖 node 运行时。当前仓库的 server/client 协议只传递模型快照和会话操作，渠道配置管理由本地文件与扩展承担。
+- **管理入口的取舍**：配置定义留在用户可编辑的 `models.json`，扩展注册留在代码里，认证凭据留在 `auth.json`，TUI 只操作凭据和模型作用域。已有 Provider 因此能通过覆盖复用内置目录，新 Provider 能通过文件或扩展加入；配置的复制、删除、导入、导出以及真实连通性验证则没有统一的产品入口。
 
 ## 10. 未验证事项
 
 - 未运行真实请求，`checkAuth` 与真实链路的一致性未实测。
-- 未运行 `/login`、`/logout`、`/model`、`/reload`、`pi auth check` 或 `pi update --models`，因此文件变更后的热加载、凭据同步、模型选择器显示和目录刷新行为仍以静态代码与文档为依据。
+- 未运行 TUI 的登录、登出、模型选择与重载命令，也未运行 `pi auth check` 和 `pi update --models`；文件变更后的热加载、凭据同步、模型选择器显示与目录刷新行为仍以静态代码和文档为依据。
 - 未运行或接入外部 Web/桌面宿主；p2 的“未找到渠道编辑入口”结论仅基于其插件、Web 组件与仓库文件搜索。
 - `data/*.json` 构建期生成，本次未检查生成后的实际模型数与价格数据。
 - 代理（`httpProxy`）注入后的各 SDK 消费路径未逐层追完。

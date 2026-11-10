@@ -35,7 +35,7 @@ Generate()
   -> Provider 数据构建
 ```
 
-`Generate()` 开始时先执行 `processCommands()`；以 `/` 开头且被判为打断的输入会直接短路，不进入后续上下文编译。其后历史筛选排除 `is_system` 消息，但在工具可用时保留带 `extra.tool_invocations` 的 system 消息。单聊与群聊均回到这一生成函数完成实际编译，群聊包装器负责选择成员并串行调用它（`public/script.js:4231-4440`；`public/scripts/group-chats.js:945-1092`）。
+生成入口在组装上下文之前先调用 `processCommands()` 处理斜杠命令：以斜杠开头且被判为打断的输入会直接结束本次生成，后续的上下文拼装不再执行。接下来的历史筛选排除 `is_system` 消息，只在工具可用时把携带 `extra.tool_invocations` 的 system 消息留下。单聊与群聊都回到同一个生成函数完成实际编译，群聊一侧的包装器负责选择成员并串行调用它（`public/script.js:4231-4440`、`public/scripts/group-chats.js:945-1092`）。
 
 ## 1. 规则对象、权威源与作用域
 
@@ -51,7 +51,12 @@ Generate()
 
 角色卡字段由 `getCharacterCardFields()` 读取，description、personality、scenario、examples、system 与 jailbreak 等内容参与后续拼装；角色或群聊的 depth prompt 则作为 extension prompt 注入。原笔记确认了这些字段的读取与注入点，未覆盖其编辑、保存、导入导出和更细的角色、预设或群组选择语义（`public/script.js:4401-4427`）。
 
-宏系统支持按 key/index 存取变量：`setvarkey`/`getvarkey` 与全局版 `setglobalvarkey`/`getglobalvarkey`（含 index 别名）可对局部或全局对象、数组按元素读写，目标不存在时按 key 类型创建（`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`）。同时词法层的管道修饰符解析被临时停用，避免参数中含 `|` 的宏（如 `setvar::foo::|bar`）被误拆成过滤器语法（`public/scripts/macros/engine/MacroLexer.js:214-227`）。这些属于宏引擎自身的变量与词法变化，展开仍发生在各调用路径。
+宏系统可以按 key 或 index 读写变量，局部与全局各有一组对应写法：
+
+- 局部变量：`setvarkey`、`getvarkey`
+- 全局变量：`setglobalvarkey`、`getglobalvarkey`，另含 index 别名
+
+两组写法都能对对象和数组按元素读写，目标不存在时按 key 的类型创建。词法层同时临时停用了管道修饰符解析，参数中带 `|` 的宏（如 `setvar::foo::|bar`）不会被误拆成过滤器语法。变量读写与词法解析都发生在宏引擎内部，宏展开仍落在各自的调用路径上（`public/scripts/macros/definitions/variable-macros.js:158-214,361-417`、`public/scripts/macros/engine/MacroLexer.js:214-227`）。
 
 World Info 的选择入口是 `getWorldInfoPrompt(chat, this_max_context, ...)`。传入内容是带名称和正文的反向聊天数组，扫描结果被分派到多个注入位置；非 dry run 时还会发出 `WORLD_INFO_ACTIVATED`。本次依据没有展开关键词、概率、白名单、冷却、同名冲突或多个条目的排序规则（`public/script.js:4564-4622`；`public/scripts/world-info.js:892-915`）。
 
@@ -74,7 +79,7 @@ World Info 的选择入口是 `getWorldInfoPrompt(chat, this_max_context, ...)`�
 
 ## 3. 请求层编译与模型可见结果
 
-对 text completion API，系统提示先经 `substituteParams(system, {original: ...})` 或 `baseChatReplace` 处理；随后 story string、examples、聊天与最后一行组合为 `finalPrompt`。jailbreak 在继续生成时有插入到倒数第二条之前的特例。`getCombinedPrompt` 之前和之后的生成事件均允许扩展参与，后者可以整体替换结果，因此 `finalPrompt` 及其紧邻的 `generate_data.prompt` 才是该路径的请求层依据（`public/script.js:4627-4706, 5073-5257`）。
+text completion 链路先把系统提示交给 `substituteParams` 或 `baseChatReplace` 做参数替换，再把 story string、examples、聊天记录与最后一行拼成 `finalPrompt`；继续生成时 jailbreak 会插到倒数第二条之前。prompt 合并函数前后各有一个生成事件，扩展可以参与其中，合并之后的事件能够整体替换结果，所以这条链路的请求层依据是 `finalPrompt` 以及紧随其后的 `generate_data.prompt`（`public/script.js:4627-4706, 5073-5257`）。
 
 对 OpenAI API，消息在 `setOpenAIMessages()` 中转换，已确认其处理 narrator 到 system、名称前缀策略、媒体、工具调用和 reasoning 签名；之后由 `prepareOpenAIMessages()` 准备请求数据。它与 text completion 使用不同的拼装与截断实现，不能用前者的字符串顺序推断后者的最终消息数组（`public/scripts/openai.js:561-640, 1533-1615`）。
 
@@ -82,7 +87,7 @@ World Info 的选择入口是 `getWorldInfoPrompt(chat, this_max_context, ...)`�
 
 ## 4. 消息生命周期变换与交接
 
-正则是已确认会跨越请求层与权威消息层的对象。构造上下文时，历史消息以 `isPrompt: true` 执行适用于其类型的正则，因此 `promptOnly` 脚本只改变模型可见的组装结果。无标记脚本除在 prompt 组装时生效外，还会由 `cleanUpMessage` 在生成后清洗回复；清洗结果写回 `chat[].mes` 并持久化。它因此会影响后续历史，而不仅是一次请求（`public/script.js:4442-4498, 6383-6534`；`public/scripts/extensions/regex/engine.js:334-381`）。
+正则是已确认同时作用于请求层与权威消息层的对象。构造上下文时，历史消息以 `isPrompt: true` 执行对应类型的正则，带 `promptOnly` 标记的脚本因此只改变模型可见的组装结果；没有标记的脚本还会在生成结束后由 `cleanUpMessage` 清洗回复，清洗结果写回聊天正文并持久化，于是改动会延续进后续历史（`public/script.js:4442-4498, 6383-6534`、`public/scripts/extensions/regex/engine.js:334-381`）。
 
 用户消息也在入 `chat` 前先执行正则、再做宏替换。这是消息创建路径的变换，不应与生成时对筛选后历史所做的 prompt 正则混为同一阶段（`public/script.js:5815-5864`）。回复的保存分支、JSONL 写回、恢复和分支语义不在本笔记范围。
 
@@ -90,7 +95,7 @@ World Info、角色字段、system/jailbreak、story string、chat inject 与扩
 
 ## 5. 显示层投影与消息渲染器交接
 
-`markdownOnly` 正则只在 `messageFormatting` 的 Markdown 格式化路径以 `isMarkdown` 生效，不参与 prompt 组装，也没有被原笔记定位为写回 `chat[].mes`。同一正则配置的其他标记具有不同去向，不能因共用对象就推断显示替换会进入模型输入或权威消息（`public/script.js:1809-1813`；`public/scripts/extensions/regex/engine.js:334-381`）。
+带 `markdownOnly` 标记的正则配置在 `messageFormatting` 的 Markdown 格式化路径上以 `isMarkdown` 条件生效，作用面是消息的显示文本；同一条配置上的其他标记各自前往 prompt 组装或生成后清洗等路径（`public/script.js:1809-1813`、`public/scripts/extensions/regex/engine.js:334-381`）。
 
 首条问候语另有渲染时宏替换特例；其显示实现和对权威消息的具体关系留在消息渲染器专题。流式过程中 `cleanUpMessage` 也会更新内存消息和 DOM，但流式 DOM 更新、节流及渲染生命周期不在本笔记范围。
 
@@ -102,7 +107,9 @@ World Info、角色字段、system/jailbreak、story string、chat inject 与扩
 
 ## 7. 失败、更新与已确认边界
 
-生成拦截器可通过 `abort(true)` 结束当前生成，属于已确认的规则阶段短路。World Info 扫描还受 `world_info_budget` 与 `budget_cap` 控制；text completion 的上下文裁剪不可逆，被裁掉的历史不会在同次编译中回填（`public/scripts/extensions.js:2015-2040`；`public/scripts/world-info.js:4597`；`public/script.js:4814-5068`）。
+生成拦截器调用 `abort(true)` 会立即结束当前生成，规则阶段就此短路（`public/scripts/extensions.js:2015-2040`）。
+
+World Info 扫描另受 `world_info_budget` 与 `budget_cap` 两个预算控制；text completion 侧的上下文裁剪不可逆，本次编译中被裁掉的历史不会回填（`public/scripts/world-info.js:4597`；`public/script.js:4814-5068`）。
 
 原笔记没有覆盖正则解析或执行错误、宏变量缺失、循环替换、异步脚本错误、规则版本迁移，或编辑器更新后的兼容收口。也没有依据支持将普通固定 system prompt、一次性用户输入、附件展开、历史筛选或检索本身都归为本专题的规则对象；这里只记录它们被已确认规则和编译步骤消费或交接的位置。
 

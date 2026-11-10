@@ -16,13 +16,13 @@
 
 AstrBot 是面向 IM 平台（QQ/Telegram/Discord/微信等）的**消息驱动异步聊天框架**，会话与消息以"平台会话 → 子对话"两级结构持久化：
 
-- **两级会话概念**：会话（session）= 聊天窗口（如一个群），以 `unified_msg_origin`（`platform_id:message_type:session_id`，message_session.py:18-27）标识；对话（conversation）= 会话内的子对话，可新建/切换/删除（conversation_mgr.py:1-5 docstring）。
-- **持久化双轨**：LLM 对话历史存 SQLite `conversations` 表（content 为 OpenAI 格式 JSON 列表）；当前对话指针经 SharedPreferences `sel_conv_id` 持久化（落 `preferences` 表）；WebChat 的显示消息与会话行另存 `platform_message_history`、`platform_sessions` 两张表。
-- **新增的会话元数据**：`umo_senders` 记录每个 UMO 下出现过的发送者 ID/名字，供发送者选择器与别名查询；`chatui_projects` 与 `session_project_relations` 把 WebChat 会话归入项目分组，项目内会话在普通会话列表中排除（po.py:369-381、:469-531）。
-- **写入即时、无防抖**：新建/切换对话的入口内直接写 SharedPreferences（conversation_mgr.py:123、:137）。类字段 `save_interval = 60`（:25）在全仓无任何引用（ripgrep 检索 `save_interval` 仅命中定义处一处），不存在"60 秒防抖保存"；崩溃丢最近对话的推断不成立。
-- **WebChat 独有分支机制**：消息带 `llm_checkpoint_id` 关联对话历史 turn；编辑/重生成/侧线程（thread）都基于 checkpoint 定位 turn 范围后截断或复制历史（chat_service.py:1860-1946、:1960-2066、:1689-1761）。
-- **附件改名与分片上传**：WebChat 附件落盘时用 `unique_attachment_filename` 生成不冲突文件名（chat_service.py:66 起），上传支持分片续传；平台消息历史仍只存附件引用，不改变对话历史结构。
-- **群历史可选持久化**：`provider_ltm_settings.group_message_history_enable`（默认关，default.py:229）开启后，群消息与 bot 回复写入平台消息历史表，按配置上限 700 条裁剪（`group_message_history_max_cnt`，default.py:230），并暴露读取工具（message_tools.py:357-361）。
+- **两级会话概念**：会话（session）是一个聊天窗口（如某个群），由 `unified_msg_origin` 标识，格式为 `platform_id:message_type:session_id`；对话（conversation）是会话内部的子对话，可以新建、切换与删除。标识定义见 `message_session.py:18-27`，两级关系的说明见 `conversation_mgr.py:1-5` 的模块 docstring。
+- **持久化双轨**：LLM 对话历史落在 SQLite 的 `conversations` 表，content 字段保存 OpenAI 格式的消息 JSON 列表；当前对话指针由 SharedPreferences 以 `sel_conv_id` 为键持久化到 `preferences` 表；WebChat 的显示消息与会话行另存 `platform_message_history` 与 `platform_sessions` 两张表。
+- **新增的会话元数据**：`umo_senders` 表记录每个 UMO 下出现过的发送者 ID 与名字，供发送者选择器和别名查询使用；`chatui_projects` 与 `session_project_relations` 把 WebChat 会话归入项目分组，属于项目的会话在普通会话列表中排除。两张项目表的定义见 `po.py:369-381` 与 `po.py:469-531`。
+- **写入即时、无防抖**：新建或切换对话时，入口直接把新的当前对话指针写进 SharedPreferences，两处入口见 `conversation_mgr.py:123` 与 `:137`。类字段 save_interval 定为 60 秒，全仓检索只命中定义处一处，没有周期落盘或延迟合并的实现，保存行为是即时的，崩溃丢失最近对话的推断不成立。
+- **WebChat 独有分支机制**：WebChat 的消息带 `llm_checkpoint_id`，用来关联对话历史里的某个 turn；编辑用户消息、重生成 bot 消息和创建侧线程（thread）都靠 checkpoint 先定位 turn 范围，再截断或复制历史。三条路径见 `chat_service.py:1689-1761`、`:1860-1946` 与 `:1960-2066`。
+- **附件改名与分片上传**：WebChat 附件落盘时由 `unique_attachment_filename` 生成不冲突的文件名，上传支持分片续传，入口见 `chat_service.py:66`。平台消息历史只保存附件引用，对话历史的结构保持不变。
+- **群历史可选持久化**：默认关闭的 `provider_ltm_settings.group_message_history_enable` 打开后，群消息与 bot 回复会写进平台消息历史表，并按 group_message_history_max_cnt 的上限 700 条裁剪，同时暴露读取工具。两项默认值见 `default.py:229-230`，读取工具见 `message_tools.py:357-361`。
 
 ## 系统边界与数据主链
 
@@ -56,10 +56,10 @@ WebChat 侧（对话请求开始前与结束后各写一次）：
 unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 ```
 
-- `from_str` 用 `split(":", 2)` 解析（:24-27）——session_id 本身可含冒号；
-- `platform_name` 自 v4.0.0 起实际为 platform_id（:13 注释），`__post_init__` 自动取等值（:21-22）；
-- WebChat 的 session_id 形如 `webchat!{用户名}!{会话ID}`（webchat_adapter.py:213），完整 UMO 为 `webchat:FriendMessage:webchat!{用户名}!{会话ID}`（chat_service.py:306-315）；
-- 会话显示名另有 `umo_aliases` 表（po.py:346-368，`auto_name`/`user_alias`），由 `/name` 命令维护（builtin_stars/builtin_commands/commands/name.py）。
+- 字符串到会话对象的转换由 from_str 完成，内部用 `split(":", 2)` 切出最多三段，因为 session_id 本身可能含有冒号；解析实现见 `message_session.py:24-27`。
+- platform_name 自 v4.0.0 起实际保存的是 platform_id，取值由 __post_init__ 自动填成与 platform_id 相同；注释与初始化见 `message_session.py:13` 与 `:21-22`。
+- WebChat 的 session_id 形如 webchat!{用户名}!{会话ID}，消息类型固定为 FriendMessage，拼出的完整 UMO 为 `webchat:FriendMessage:webchat!{用户名}!{会话ID}`；适配器生成见 `webchat_adapter.py:213`，UMO 拼接见 `chat_service.py:306-315`。
+- 会话显示名单独保存在 `umo_aliases` 表里，含 auto_name 与 user_alias 两个字段，由 `/name` 命令维护；表定义见 `po.py:346-368`，命令实现见 `builtin_stars/builtin_commands/commands/name.py`。
 
 ### 1.3 平台会话行（PlatformSession）
 
@@ -98,8 +98,8 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
   plain | at | reply | media | tool_call | think
   ```
 
-  链转换在 `platform_message_history_mgr.py:32-106`，bot 内容组装在 `chat_service.py:97-113`。
-- **附件**：`attachments` 表（po.py:382-412，字段 path/type/mime_type）做消息级绑定（part 内 `attachment_id`），文件实体存独立数据目录，落盘文件名为去重后的唯一名（`chat_service.py:66` 起）。
+  消息链的转换在 `platform_message_history_mgr.py:32-106`，bot 内容的组装在 `chat_service.py:97-113`。
+- **附件**：附件在消息级绑定，消息 part 通过 `attachment_id` 指向 `attachments` 表，表内记录 path、type 与 mime_type 等字段；文件实体存放在独立的数据目录，落盘时使用去重后的唯一文件名。表定义见 `po.py:382-412`，唯一文件名的生成见 `chat_service.py:66`。
 
 ### 1.6 分支：WebChat Thread
 
@@ -120,12 +120,12 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 
 ## 3. 创建、切换、归档、删除与恢复
 
-- **新建对话**：`new_conversation`（conversation_mgr.py:92-124）——建行、更新内存缓存、立即写当前对话指针。IM 平台首次 LLM 请求时惰性创建（请求构建中无当前对话即新建）；`/new` 命令（commands/conversation.py:222-252）停掉同 UMO 活跃事件后新建，**仅继承当前对话的 `persona_id`**，不继承模型。
-- **切换**：`switch_conversation`（conversation_mgr.py:126-137），内存 + preferences 立即写。
-- **删除**：`delete_conversation`（:139-158）删除单对话并清当前指针；`delete_conversations_by_user_id`（:160-172）删会话下全部对话，并触发会话删除的级联回调（:45-60，供知识库配置等清理；注册 :30-43）。
-- **重置**：`/reset`（conversation.py:110-180）清空当前对话历史（`update_conversation(..., [])`）并停止活跃事件。
-- **WebChat 会话生命周期**：`PlatformSession` 在首次发送消息时惰性补齐（chat_service.py:1307-1315），也可显式创建（:1554-1569）；删除会话是级联清理（:1415-1465）：停止运行 → 删对话与平台历史（含附件文件）→ 删子线程 → 删 UMO 配置路由 → 删会话行；批删带失败项明细（:1482-1520）。
-- **恢复**：重启后 `sel_conv_id` 从 preferences 表恢复当前对话指针；对话历史即时落库。WebChat 生成中状态（`ChatRunState`，chat_service.py:539 起）是内存态，重启丢失，但运行中可由前端经 `/chat/runs/{id}/stream` 以快照恢复。
+- **新建对话**：new_conversation 先插入对话行，再更新内存缓存，并立即写入当前对话指针，实现见 `conversation_mgr.py:92-124`。IM 平台在首次 LLM 请求时惰性创建：请求构建阶段没有当前对话就新建一个。`/new` 命令会先停掉同一 UMO 上的活跃事件再新建，新对话只继承当前对话的 persona_id，模型不随对话继承，命令实现见 `commands/conversation.py:222-252`。
+- **切换**：switch_conversation 同时更新内存与 SharedPreferences 中的当前对话指针，写入即时完成，入口见 `conversation_mgr.py:126-137`。
+- **删除**：delete_conversation 删除单个对话并清空当前指针；delete_conversations_by_user_id 删除某个会话下的全部对话，并触发会话删除的级联回调，供知识库配置等清理使用。两个函数、回调实现与回调注册见 `conversation_mgr.py:30-43`、`:45-60` 与 `:139-172`。
+- **重置**：`/reset` 把当前对话的历史清空（以空列表调用 update_conversation）并停止活跃事件，入口见 `conversation.py:110-180`。
+- **WebChat 会话生命周期**：PlatformSession 行在首次发送消息时惰性补齐，也可以由接口显式创建。删除会话是级联清理：先停止正在运行的 run，再删除对话与平台历史（含附件文件），随后删除子线程、UMO 配置路由和会话行；批量删除会返回失败项明细。创建、级联删除与批删的入口见 `chat_service.py:1307-1315`、`:1415-1465`、`:1482-1520` 与 `:1554-1569`。
+- **恢复**：重启后当前对话指针从 preferences 表读回，对话历史在写入时已经落库。WebChat 的生成中状态（ChatRunState，chat_service.py:539 起）只存在内存里，重启即丢失，运行期间可由前端通过 `/chat/runs/{id}/stream` 以快照恢复。
 
 ## 4. 编辑、重试、续写、回退与分支语义
 
@@ -137,43 +137,43 @@ unified_msg_origin = f"{platform_id}:{message_type.value}:{session_id}"
 
 ## 5. 列表、分页、搜索与定位
 
-- **对话列表**：`get_filtered_conversations`（conversation_mgr.py:240-277；SQL 层 `sqlite.py:374-500`）支持分页（默认 20/页）、排序与搜索过滤（行为见下列清单）；对话管理页 ConversationPage.vue 使用该接口（含导出、批量删除、消息替换）。
+- **对话列表**：get_filtered_conversations 支持分页、排序与搜索过滤，具体行为见下面的分条清单；对话管理页 ConversationPage.vue 直接调用这个接口，并在其上提供导出、批量删除与消息替换。入口在 `conversation_mgr.py:240-277`，SQL 组装在 `sqlite.py:374-500`。
   - 排序为 `created_at DESC, inner_id DESC`，分页默认 20/页；
   - 搜索为 `ilike` 模糊匹配标题、用户、会话 id 与内容（含 JSON 转义后的第二遍匹配）；
   - 可过滤消息类型、平台与排除 id/平台；
   - `include_history=False` 时延迟加载 content；
   - 多平台分页强制走全局排序索引。
-- **WebChat 会话列表与历史采用不同分页口径**：会话列表入口按 creator 查询、排除项目会话，但固定取第 1 页的 100 行后只返回列表，当前工作台没有从该入口继续翻页的参数。单个会话的消息历史则接受页码和页大小，第一页包含最新记录；前端每页取 50 条，旧页前插时按消息 ID 去重（`astrbot/dashboard/services/chat_service.py:1571-1594,1603-1678`；`dashboard/src/composables/useMessages.ts:292-438`）。
-- **群历史**：`PlatformMessageHistoryManager.get`（platform_message_history_mgr.py:108-123）分页读取后反序（时间升序）；`get_group_message_history` 工具支持数量上限（≤50）、`before_id` 分页、不区分大小写的关键字搜索与发送者过滤（message_tools.py:370-393、:418-434）。
-- **无跨表全文索引**：搜索均为 SQL 层 ilike 扫描，无独立搜索索引；命中定位由 WebChat 前端在已加载消息中滚动定位（scrollToMessage，Chat.vue:1472-1480），会话数据层无消息级定位 API。
+- **WebChat 会话列表与消息历史使用两套分页口径**：会话列表入口按 creator 查询并排除项目会话，固定取第 1 页的 100 行，只返回列表本身，当前工作台没有从这个入口继续翻页的参数。单个会话的消息历史接受页码和页大小，第 1 页包含最新记录；前端每页取 50 条，插入旧页时按消息 ID 去重。列表与历史的分页实现见 `astrbot/dashboard/services/chat_service.py:1571-1594` 与 `:1603-1678`，前端逻辑见 `dashboard/src/composables/useMessages.ts:292-438`。
+- **群历史**：PlatformMessageHistoryManager.get 先分页读取再反序，返回按时间升序排列的记录，实现见 `platform_message_history_mgr.py:108-123`。get_group_message_history 工具在其上限制单次数量不超过 50 条，并支持 before_id 翻页、不区分大小写的关键字搜索和发送者过滤，入口见 `message_tools.py:370-393` 与 `:418-434`。
+- **搜索与定位**：搜索全部落在 SQL 层的 ilike 模糊匹配上，没有独立的搜索索引；命中后的滚动定位由 WebChat 前端在已加载的消息里完成（scrollToMessage，Chat.vue:1472-1480），会话数据层只提供会话级查询，消息级定位由前端承担。
 
 ## 6. 缓存、一致性、多窗口与并发写入
 
 SharedPreferences 现在不再在启动时镜像整张 `preferences` 表：内存仅保留本进程写入的覆盖层，未命中异步读取会按键查询 SQLite，避免插件 KV 很大时的全表预加载与内存膨胀；写入仍由 FIFO 队列异步落库（shared_preferences.py:44-57、182-224、267-288）。这改变的是偏好读取的缓存策略，不改变 `sel_conv_id` 等会话指针的持久化归属。
 
-- **读穿缓存**：`session_conversations` 无写回路径，一切切换即写库（见 §2），缓存失效即丢失但库中权威仍在。
-- **并发写入**：`update_conversation`（sqlite.py:631-653）按字段增量更新（title/persona_id/content/token_usage 各自非 None 才更新），同对话并发改写是 last-write-wins；`add_message_pair`（conversation_mgr.py:357-390）读-改-写没有锁，但实际调用受请求侧 UMO 级会话锁串行化（见请求侧笔记）。
-- **WebChat 生成流**：单消费协程 `_consume_chat_run`（chat_service.py:1081-1277）串行消费 back_queue 并落盘，避免同 run 内的并发写；不同 run 独立。
-- **多窗口**：`chat_runs`/`chat_runs_by_session` 内存表支持同一会话多 run 并存；SSE 订阅者集合按 revision 广播。多窗口同时编辑同一消息无乐观锁（静态代码未见版本号校验），未运行验证。
-- **同文本去重**：RespondStage 对 `send_message_to_user` 已发送的同文本跳过（respond/stage.py:213-235），防止重复回复落盘在平台侧，数据层无重复检测。
+- **读穿缓存**：session_conversations 只作读取缓存，没有写回路径，任何切换都会直接写库（见 §2）；缓存失效时数据随之丢弃，权威副本仍在数据库中。
+- **并发写入**：update_conversation 按字段增量更新，title、persona_id、content 与 token_usage 各自只在传入值非 None 时改写，同一对话的并发更新最终由后写者覆盖，实现见 `sqlite.py:631-653`。add_message_pair 的读—改—写过程本身没有加锁，实际调用被请求侧的 UMO 级会话锁串行化（见请求侧笔记），入口见 `conversation_mgr.py:357-390`。
+- **WebChat 生成流**：每个 run 由单个消费协程 _consume_chat_run 串行读取 back_queue 并落盘，同一 run 内不会出现并发写；不同 run 之间互不影响，实现见 `chat_service.py:1081-1277`。
+- **多窗口**：内存中的 chat_runs 与 chat_runs_by_session 表允许同一会话并存多个 run，SSE 订阅者集合按 revision 广播。多窗口同时编辑同一条消息时没有乐观锁，静态代码里未见版本号校验，此项未运行验证。
+- **同文本去重**：RespondStage 在发送前比对已有记录，命中 send_message_to_user 已发送的相同文本就跳过，避免重复回复落到平台侧；数据层没有重复检测，逻辑见 `respond/stage.py:213-235`。
 
 ## 7. 迁移、导入导出与保留策略
 
-- **schema 迁移**：`astrbot/core/db/migration/` 下按版本/用途拆分脚本：
+- **schema 迁移**：迁移逻辑集中在 astrbot/core/db/migration/ 目录，按目标版本与用途拆成多个脚本，当前脚本与旧版兼容脚本分列如下：
   - 当前：`migra_3_to_4.py`、`migra_45_to_46.py`、`migra_token_usage.py`、`migra_webchat_session.py`
   - 旧版：`sqlite_v3.py`、`shared_preferences_v3.py`
-- **WebChat 会话迁移**（`migra_webchat_session.py:19-103`）：从历史 `platform_message_history`（webchat 平台）中按用户去重生成 `PlatformSession` 行，显示名取自旧 `ConversationV2.title`（:63-71），已存在则跳过、可重复执行；由 `migra_helper` 导入。
-- **导入导出**：`core/backup/exporter.py`/`importer.py` 按表全量导出/导入（表集合在 `backup/constants.py`，其中包含 `platform_sessions`、`umo_senders`、`chatui_projects` 与会话项目关系表），含附件等文件数据。
-- **保留策略**：群历史按 `max_messages` 在插入时裁剪（sqlite.py 的 `insert_platform_message_history` :781-858，仅保留最新 N 条）；`PlatformMessageHistoryManager.delete` 按时间偏移删除（platform_message_history_mgr.py:125-133）；WebChat 会话删除时全量清除（chat_service.py:1415-1465）。群上下文 1000 条内存环形缓冲不持久化（请求侧笔记 §5.3）。
+- **WebChat 会话迁移**：迁移脚本从 webchat 平台的历史 platform_message_history 记录里按用户去重，生成对应的 PlatformSession 行，显示名取旧 ConversationV2.title 的值；目标行已存在时跳过，脚本可重复执行，由 migra_helper 统一导入。实现见 `migra_webchat_session.py:19-103`。
+- **导入导出**：备份模块按表全量导出与导入，表集合定义在 backup/constants.py 中，覆盖 platform_sessions、umo_senders、chatui_projects 以及会话与项目的关联表，附件等文件数据一并处理。导出与导入入口分别是 `core/backup/exporter.py` 与 `importer.py`。
+- **保留策略**：群历史在插入时按 max_messages 裁剪，只保留最新 N 条，入口是 sqlite.py 的 insert_platform_message_history；PlatformMessageHistoryManager.delete 按时间偏移删除较早记录；WebChat 会话被删除时，相关历史全量清除。三处实现分别见 `sqlite.py:781-858`、`platform_message_history_mgr.py:125-133` 与 `chat_service.py:1415-1465`。群上下文的 1000 条内存环形缓冲不落盘（请求侧笔记 §5.3）。
 
 ## 8. Agent、模型、知识库与附件绑定
 
-- **Persona（角色）**：对话级绑定——`ConversationV2.persona_id`，`/new` 继承（见 §3）；同时存在**会话级覆盖**：`session_service_config` 规则（存 `preferences` 表，scope=umo）按"会话规则强制 → 对话 persona → provider 默认 persona"的优先级解析（persona_mgr.py:123-200），webchat 无 persona 时回落 `_chatui_default_`（:197）。
-- **模型**：**不绑定会话/对话**。请求时从 `event.get_extra("selected_model")`（WebChat 前端可选，`astr_main_agent/request.py:267`）或 provider 默认模型解析，无历史快照。
-- **Provider/Agent 类型**：会话级规则可覆盖 provider（`provider_perf_chat_completion` 等，session_management_service.py:20-22）；`agent_runner_type` 是配置级。
-- **配置档案中的 Agent Runner**：Local runner 的默认 provider、fallback、Persona、压缩与运行参数作为 `agent_runner.config` 嵌入每份配置 profile；对话消息仍不保存这些字段的历史快照（`astrbot/core/config/agent_runner.py:9-36,172-201`）。
-- **知识库**：会话级配置（UMO 路由/规则），删除会话时经 `register_on_session_deleted` 级联清理（conversation_mgr.py:30-43 注释、:171-172）；实际检索注入发生在请求侧。
-- **附件**：消息级绑定（part 内 `attachment_id`，见 1.5），不参与上下文历史快照（历史只存引用/文件名，文件实体独立于 conversations 表）。
+- **Persona（角色）**：对话级角色绑定记录在 ConversationV2.persona_id 字段，/new 新建对话时继承（见 §3）。此外还有会话级覆盖：session_service_config 规则以 UMO 为作用域存在 preferences 表，解析时先取会话规则的强制指定，再看对话上的 persona，最后回落到 provider 的默认 persona；webchat 在没有 persona 时使用 _chatui_default_。解析顺序与兜底见 `persona_mgr.py:123-200`。
+- **模型**：模型在每次请求时解析，优先取 event.get_extra("selected_model") 的值（WebChat 前端可传入），取不到时用 provider 的默认模型；对话记录不保存模型的历史快照。取值位置见 `astr_main_agent/request.py:267`。
+- **Provider/Agent 类型**：会话级规则可以覆盖 provider，例如 provider_perf_chat_completion 一类规则，见 `session_management_service.py:20-22`；agent_runner_type 则属于配置级设置。
+- **配置档案中的 Agent Runner**：Local runner 的默认 provider、fallback、Persona、压缩与运行参数作为 agent_runner.config 嵌在每份配置 profile 里，对话消息不保存这些字段的历史快照。字段定义见 `astrbot/core/config/agent_runner.py:9-36,172-201`。
+- **知识库**：知识库在会话级配置，按 UMO 建立路由与规则；会话被删除时，通过 register_on_session_deleted 注册的级联回调清理相关配置。回调实现与注册位置见 `conversation_mgr.py:30-43` 与 `:171-172`。实际的知识检索与上下文注入发生在请求侧。
+- **附件**：附件在消息级绑定，消息 part 通过 attachment_id 指向附件记录（见 1.5）；上下文历史只保存引用或文件名，文件实体独立存放在 conversations 表之外，附件的文件内容不进入历史快照。
 
 ## 9. 设计取舍与已确认边界
 

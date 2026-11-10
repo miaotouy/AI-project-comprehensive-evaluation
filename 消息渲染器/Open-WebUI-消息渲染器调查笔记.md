@@ -16,16 +16,22 @@
 
 Open WebUI 的消息渲染采用「marked lexer 出 token 树 + Svelte 组件逐个渲染 token」的管线，而不是 marked 官方 HTML renderer 的字符串输出。
 
-- 渲染入口 `Messages/Message.svelte` 按 `role` 与父消息模型数分发到 `UserMessage` / `ResponseMessage` / `MultiResponseMessages`，并利用浏览器原生 `content-visibility: auto` 做离屏虚拟化；
-- Markdown 库为 `marked ^9.1.0`，扩展全部自制：`<details>` 块、KaTeX、引用标记 `[1]`/`[1#foo]`、脚注、`:::` 冒号围栏、`@/#/$` 提及与下划线（`++text++`），并禁用单波浪线删除线；
-- 代码高亮用 highlight.js（仅 github-dark 主题），只读渲染走 hljs，编辑模式改用 CodeMirror 6；Shiki 仅用于 Notebook 文件预览；
-- Math 用 KaTeX（动态加载 + mhchem），`renderToString` 失败时把源文本 HTML 实体化后输出，避免原始字符进入 `{@html}`；
-- HTML token 一律先 `DOMPurify.sanitize`（默认配置）再渲染；Mermaid/vega 生成的 SVG 再经 `sanitizeSvg` 白名单清洗；Vega loader 阻断一切外部资源；
-- Artifacts（HTML/SVG 预览）是沙箱：srcdoc iframe + `sandbox="allow-scripts allow-downloads"`（可选 allow-forms/allow-same-origin）+ `injectCsp` 注入 CSP meta（默认空字符串即无 CSP），并拦截 iframe 内所有外部导航；
-- 结构化输出：`message.output` 存在时走 `StructuredOutputRenderer`，把工具调用/reasoning/code_interpreter 归组为 detail 项与正文混排；
-- 代码执行双通道：浏览器端 Pyodide（iframe `sandbox="allow-scripts"` 隔离、opaque origin），或后端 Jupyter 引擎（`executeCode` API）；
-- 流式渲染用 rAF 节流 + token 级复用：`content` 变化时 requestAnimationFrame 合并一次解析，`done` 时立即处理并取消残留帧；`{#key id}` + `TextToken` 复用避免整棵树重建；
-- 工具/检索内容按结构分别渲染，不把原始检索文本拼进正文：引用来源经 `sources` 数组推送渲染为 Citations 列表与正文 `[n]` 内联按钮；模型输出中的 `{{HTML_FILE_ID_*}}` 等占位符由 `replaceTokens` 展开成 `<file type="html">`/`<video>` 标签。
+- 消息渲染入口收到一条消息后先按角色分流，助手消息再按父消息的模型数量决定单条渲染还是多模型并排；消息列表借助浏览器原生的 `content-visibility: auto` 跳过离屏内容的绘制（`Messages/Message.svelte`）；
+- Markdown 解析由 `marked ^9.1.0` 承担，扩展语法全部由项目自制，同时关闭单波浪线删除线，逐项为：
+  - details 折叠块；
+  - KaTeX 公式；
+  - 引用标记 `[1]` 与 `[1#foo]`；
+  - 脚注；
+  - 冒号围栏 `:::`；
+  - 提及标记 `@`/`#`/`$` 与下划线 `++text++`；
+- 代码块高亮用 highlight.js，主题固定为 github-dark；编辑模式换用 CodeMirror 6，Shiki 只服务于 Notebook 文件预览；
+- 公式由 KaTeX 渲染，单例懒加载并附带 mhchem 化学语法；`renderToString` 失败时把源文本转成 HTML 实体再输出，原始字符不会进入 `{@html}` 注入点；
+- HTML token 先经 DOMPurify 的默认配置清洗再渲染；Mermaid 与 Vega 生成的 SVG 另走一遍 `sanitizeSvg` 白名单清洗，Vega 的 loader 还会阻断一切外部资源；
+- Artifacts 的 HTML/SVG 预览运行在 srcdoc iframe 中，沙箱只放行脚本与下载，可选叠加表单与同源权限；容器用 `injectCsp` 把 CSP meta 注入预览内容，配置默认空字符串即不施加 CSP，iframe 内的外部导航一律被拦截；
+- 消息带 `message.output` 时改由 `StructuredOutputRenderer` 接管，工具调用、思考过程与代码解释器结果被归组为可折叠详情项，与正文混排；
+- 代码执行有两条通道：浏览器端把代码交给 Pyodide，运行在 opaque origin 的 `sandbox="allow-scripts"` iframe 里；后端通道调用 Jupyter 引擎的 `executeCode` API；
+- 流式渲染用 requestAnimationFrame 节流并按 token 复用节点：内容变化时合并成一次解析，完成信号到达立即处理并取消残留帧，`{#key id}` 与 `TextToken` 配合让整棵消息树免于重建；
+- 工具与检索内容按各自结构渲染，原始检索文本不拼进正文：引用来源经 `sources` 数组推送后渲染成引用列表与正文里的 `[n]` 内联按钮；模型输出中的 `{{HTML_FILE_ID_*}}` 这类占位符由 `replaceTokens` 展开成 `<file type="html">` 或 `<video>` 标签。
 
 ## 1. 渲染入口分发
 
@@ -58,13 +64,13 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
   hr / heading / code / table / blockquote(alert) / list / details / html
   / iframe / paragraph / text / inlineKatex / blockKatex / colonFence
   ```
-- 代码 token：含 ``` 围栏 → `CodeBlock`，否则纯文本（163-188 行）；
-- 连续 `tool_calls/reasoning/code_interpreter` details 归并成 `detail_group`，展开 `Collapsible`/`ToolCallDisplay`（384-495 行）；
-- `<details>` 块由 `utils/marked/extension.ts`（29-103 行）深度配对解析并捕获 `type` 属性；
-- 引用 `[1]`、`[1,2]`、`[1#suffix]` 由 `citation-extension.ts` 生成 citation token → `SourceToken` 渲染为行内按钮；
-- `:::` 冒号围栏由 `colon-fence-extension.ts` 分词，`fenceType` 拼入 class 名，内部内容重新走 blockTokens；
-- 下划线扩展此前只做 inline token 化，现已补上 renderer，输出 `<u>` 包裹解析后的 inline tokens（`src/lib/utils/marked/extension.ts:90`）；
-- 脚注 `[^]` 的 `<sup>` 也经 `DOMPurify.sanitize`（MarkdownInlineTokens.svelte 129-132 行）。
+- 代码 token 分两种走向：带围栏标记的代码块交给 `CodeBlock` 渲染，没有围栏的按纯文本输出（163-188 行）；
+- 相邻的工具调用、思考过程与代码解释器详情会合并成一个 `detail_group`，再展开成折叠面板和工具调用卡片（384-495 行）；
+- details 折叠块由 marked 扩展逐层配对解析，并保留块上的 `type` 属性（`utils/marked/extension.ts` 29-103 行）；
+- 正文中的 `[1]`、`[1,2]`、`[1#suffix]` 引用标记由 `citation-extension.ts` 转成 citation token，再渲染成行内按钮；
+- `:::` 冒号围栏交给 `colon-fence-extension.ts` 分词，围栏类型拼进 class 名，内部内容重新走一遍块级 token；
+- 下划线标记完成行内分词后交给 renderer，输出 `<u>` 包裹解析好的行内 token（`src/lib/utils/marked/extension.ts:90`）；
+- 脚注的 `<sup>` 同样先过 `DOMPurify.sanitize`（`MarkdownInlineTokens.svelte` 129-132 行）。
 
 ## 3. 代码高亮、Math 与 HTML 消毒
 
@@ -82,17 +88,20 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 
 ## 4. 可视化与 Artifacts
 
-- `CodeBlock.svelte`（358-390 行）：仅 mermaid/vega/vega-lite 三种语言且围栏闭合时触发 `renderMermaidDiagram` / `renderVegaVisualization`，结果可放大（SvgPanZoom 433-446 行）；
-- mermaid 初始化 `htmlLabels: false`（utils/index.ts 1954-1963 行），`securityLevel: 'loose'` 但输出 SVG 被 `sanitizeSvg` 清洗；
-- `Artifacts.svelte`（41-61 行）：iframe 内点击拦截，外部链接仅 `console.info` 阻止不导航；246-260 行 `srcdoc={injectCsp(contents[idx].content, $config?.ui?.iframe_csp)}` + `sandbox="allow-scripts allow-downloads"`；`ui.iframe_csp` 默认空字符串 → 不注入 CSP（csp.ts "first CSP meta wins"）；
-- 引用文档预览：`CitationModal.svelte`（215-257 行）`sandbox="allow-scripts allow-forms"` + 可选 allow-same-origin + srcdoc CSP；普通文本预览用 Markdown 或 `<pre>`，HTML 内容走 sandbox iframe。
+- 代码块只有在语言为 mermaid、vega 或 vega-lite 且围栏闭合时才调用图表渲染，生成结果可交给 SvgPanZoom 放大查看（`CodeBlock.svelte` 358-390 行，缩放交互在 433-446 行）；
+- mermaid 初始化时关闭 HTML 标签渲染，安全级别取 `'loose'`，产出的 SVG 仍要经 `sanitizeSvg` 白名单清洗（`utils/index.ts` 1954-1963 行）；
+- Artifacts 在 iframe 内拦截点击，指向外部的链接只打一条 `console.info` 就终止，不触发导航；预览内容先经 `injectCsp` 注入 CSP 再写入 srcdoc，沙箱放行脚本与下载，CSP 字符串取自配置 `ui.iframe_csp`，默认空值即不注入；多个 CSP meta 并存时以第一个为准（`Artifacts.svelte` 41-61 行、246-260 行，`csp.ts`）；
+- 引用文档预览在 `CitationModal.svelte`（215-257 行）中打开：iframe 沙箱为 `sandbox="allow-scripts allow-forms"`，可再叠加同源权限，srcdoc 同样带 CSP；普通文本用 Markdown 或 `<pre>` 展示，HTML 内容进入沙箱 iframe。
 
 ## 5. 结构化输出与代码执行
 
-- `structuredOutput.ts`：工具调用、reasoning（加 `>` 引用前缀）、code_interpreter（正文为 ```lang 代码块）构建 detail token；`buildOutputDisplayItems` 产出 message/详情序列，并新增对空/稀疏 output 槽位的处理（先补占位再写入，避免后续 spread 出 undefined part），事件流的槽位写入在越界时 push 新槽位；终端文件结果是否内联由结果标记或终端文件显示设置决定，`displayed` 字段不参与该判定（`src/lib/components/chat/Messages/structuredOutput.ts:166-186,344,465-500`、`StructuredOutputRenderer.svelte:164-169`）；
-- `StructuredOutputRenderer.svelte`（43-168 行）：message → Markdown（或纯文本），详情 → `ToolCallDisplay`/`Collapsible`；
-- `CodeExecutions.svelte`（28-63 行）：`message.code_executions` → 齿轮徽章 + error/output/incomplete 状态点；`CodeExecutionModal.svelte` 显示 ERROR/OUTPUT + `result.files` 链接；
-- 执行后端分两条通道（按 `$config.code.engine` 选择）：配置为 `'jupyter'` 时走 `executeCode` API（从 stdout 抽 `data:image/png`）；否则浏览器端 `executePythonAsWorker`（CodeBlock.svelte 149-356 行，自动探测 import→依赖，60s 超时），经 Pyodide worker 沙箱运行（iframe srcdoc + `sandbox="allow-scripts"`，matplotlib 内联 base64 PNG 补丁）。
+- 结构化输出的 token 构建集中在 `structuredOutput.ts`：工具调用、思考过程和代码解释器结果各自转成详情 token，其中思考过程加 `>` 引用前缀，代码解释器正文放进带语言标记的代码块；
+- `buildOutputDisplayItems` 把这些 token 排成 message 与详情交替的展示序列：空槽位先补占位再写入，避免后续展开时出现 undefined 片段，事件流写到越界处则追加新槽位（`src/lib/components/chat/Messages/structuredOutput.ts` 166-186 行、344 行、465-500 行）；
+- 终端文件结果是否内联，取决于结果标记与终端文件显示设置，`displayed` 字段不参与这项判定（`StructuredOutputRenderer.svelte` 164-169 行）；
+- `StructuredOutputRenderer.svelte`（43-168 行）按条目类型分派：message 条目交给 Markdown 渲染，纯文本场景直接输出文本；详情条目交给 `ToolCallDisplay` 或 `Collapsible`；
+- `CodeExecutions.svelte`（28-63 行）在消息带 `message.code_executions` 时显示齿轮徽章和 error/output/incomplete 状态点；`CodeExecutionModal.svelte` 展示 ERROR、OUTPUT 以及 `result.files` 里的文件链接；
+- 执行后端按 `$config.code.engine` 选择通道：配置为 `'jupyter'` 时调用 `executeCode` API，从 stdout 中抽出 `data:image/png` 图片；
+- 浏览器通道由 `executePythonAsWorker` 驱动 Pyodide worker，运行前自动探测 import 并解析依赖，超时设为 60 秒；worker 宿主是 `sandbox="allow-scripts"` 的 srcdoc iframe，matplotlib 图形以内联 base64 PNG 补丁返回（`CodeBlock.svelte` 149-356 行）。
 
 ## 6. 模型输出 vs 工具/检索内容
 
@@ -108,10 +117,10 @@ Colon fence 扩展还接受花括号中的双引号属性。写作块可用 subj
 
 ## 7. 流式渲染优化
 
-- `Markdown.svelte`（61-97 行）：`content` 变化时若已完成立即 `parseTokens`，否则 `requestAnimationFrame` 节流合并一次解析；完成时 `cancelAnimationFrame` 丢弃残留帧；`lastContent`/`lastParsedContent` 双缓存避免重复 lexer；
-- `MarkdownTokens.svelte`（43-54 行）：text token 经 `MarkdownInlineTokens` → `TextToken`（流式期间避免每次全量替换 DOM）；heading/paragraph/table 递归 `svelte:self` 复用 token 引用；
-- `ResponseMessage.svelte`（193-196 行）：流式期间对 message 做 `structuredClone` 快照 + content/done/output 快速比较，避免组件属性抖动导致 destroy/mount；
-- `CodeBlock.svelte`（400-402 行）：`_token` 版本跟踪，只有文本变化才重新 `render()`。
+- `Markdown.svelte`（61-97 行）在内容变化时分两种走向：消息已完成就直接分词，仍在流式输出则用 requestAnimationFrame 把多次更新合并成一次解析；完成信号到达时取消残留帧，上次内容与上次已解析内容两份缓存让重复分词直接跳过；
+- `MarkdownTokens.svelte`（43-54 行）把 text token 交给行内 token 组件再落到文本节点，流式期间省去整棵 DOM 的替换；标题、段落与表格用 `svelte:self` 递归，沿用同一份 token 引用；
+- `ResponseMessage.svelte`（193-196 行）在流式期间先对 message 做 `structuredClone` 快照，再快速比对内容、完成标志与 output，避免属性抖动触发组件销毁重建；
+- `CodeBlock.svelte`（400-402 行）用 `_token` 记录版本，文本没变就不再重新 `render()`。
 
 ## 8. 关键文件索引
 

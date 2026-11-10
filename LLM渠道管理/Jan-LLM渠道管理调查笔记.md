@@ -23,13 +23,13 @@ Jan 的“渠道”由两层构成：
 
 横向比较的关键事实：
 
-- 参数体系以 `predefinedParams.ts` 的 `ParamDef`（能力标签 capability + 默认值 + disabledBy 条件）为单一定义源，wire 过滤按 `CLIENT_SIDE_PARAM_KEYS` / `LLAMACPP_ONLY_PARAM_KEYS` / `WIRE_KEY_REMAP` 三层处理；
+- 参数体系以 `predefinedParams.ts` 的 `ParamDef`（能力标签 capability、默认值、disabledBy 条件）为唯一定义源；外发前的过滤分三层，依次丢弃仅客户端参数、剔除 llama.cpp 私有参数、重映射 wire 字段名，三份清单见 5.1；
 - 能力表在 `providerCaps.ts`：内置 provider 锁定 base_url → provider ID 可作引擎可靠的代理；自定义 provider 落入 `CUSTOM_PERMISSIVE`（全部采样参数 maybe）；模型级拒绝（OpenAI o 系拒 temperature/top_p/penalties，grok-3-mini 拒 temp 等）；
-- API key：主 key + fallback 链（`api-key-fallbacks` 设置项），401/403/429 轮换重试；连接测试对 `/models` 发 GET 并同时发 `x-api-key` 与 `Authorization: Bearer` 双头；远程 key 的 secrets 只在 OS keyring（`register_provider_config`），绝不明文写 settings.json；
+- API key 采用主 key 加 fallback 链（存于 `api-key-fallbacks` 设置项），遇到 401/403/429 依次轮换重试；连接测试对 `/models` 发 GET，同时带 x-api-key 与 Authorization: Bearer 两个请求头；远程密钥只保存在 OS keyring，由 register_provider_config 注册，settings.json 中不写明文；
 - 本地 API server 的暴露面由两道门决定：监听非 loopback 地址却没设 key 时直接拒绝启动；启动后按 Trusted Hosts 校验 Host 与 Origin，通配写法不再放行任意 Host；
 - llama-server 鉴权 key = `BASE64(HMAC-SHA256(apiSecret='JustAskNow', msg=modelId))`，知道端口+公开 secret 即可本地伪造——防局域网误连、不防本地恶意进程；
 - 每次外发请求都会生成一份 provenance 记录：请求体的规范化 JSON 哈希、工具数组哈希与逐图哈希，在主运行与每个子 Agent 的请求发出前各发一次；它只含身份与摘要，不含提示词或图片本体，用于让两次运行可比对（`src-tauri/src/core/agent/provenance.rs`、`otel/`）。
-- `SecurityConfigDialog.tsx`（auth/设备/日志三 tab）是**孤儿死代码**：9 个 `security_*` Tauri 命令在 src-tauri 中不存在，组件无任何挂载点（【代码确认】）——需要与“真实认证”区分：真实认证在 `proxy.rs`（`config.proxy_api_key` + Bearer/X-Api-Key 双头校验）。
+- SecurityConfigDialog（auth/设备/日志三个 tab）是**孤儿死代码**：组件没有任何挂载点，它引用的 9 个 security_ 前缀 Tauri 命令在 src-tauri 中也不存在（【代码确认】）。真实认证走代理层，由 config.proxy_api_key 配合 Bearer 与 X-Api-Key 双头校验（`src-tauri/src/core/server/proxy.rs`）。
 
 ## 系统边界与总体调用链
 
@@ -39,7 +39,7 @@ Jan 中需要区分三个层次：
 - **用户渠道实例**：Web 设置页创建的自定义 provider 以 `provider` 字符串作为唯一标识，保存一个 base URL、协议类型、模型列表和设置；当前没有独立的 Endpoint 子实体，因此同名 provider 不能并存，也没有在同一 provider 下创建多个 Endpoint 的 UI。
 - **运行时连接配置**：桌面端启动时把有 key 且启用的远程 provider 注册到 Rust 的 `provider_configs` 内存表；请求代理根据模型 ID 在本地引擎和远程 provider 间路由。注册配置不是另一份可供用户编辑的渠道目录。
 
-完整主链路是：桌面 Tauri 启动 `TauriProvidersService.getProviders()` 合并内置 provider 与引擎 provider，Zustand `useModelProvider` 从 `settings.json` 恢复用户状态；`DataProvider` 从 keyring 回填密钥，并对启用的远程 provider 调用 `register_provider_config`。用户在 Web 设置页修改状态后，Zustand 持久化非敏感 provider 数据，状态同步再注册或注销 Rust 运行时配置；聊天请求最终由前端 fetch 或本地 API server 代理发往 endpoint。Web 模式没有 Tauri 服务，provider service 的默认实现返回空列表、模型列表和 keyring 操作均为 no-op，且持久化退回浏览器 localStorage（`web-app/src/services/providers/default.ts:7-29`、`web-app/src/lib/backendStorage.ts:22-60`）。
+完整主链路是：桌面端 Tauri 启动时，provider service 的 `getProviders()` 合并内置 provider 与引擎 provider，Zustand 的 provider store 从 settings.json 恢复用户状态；DataProvider 从 keyring 回填密钥，并把已启用的远程 provider 注册给 Rust。用户在 Web 设置页修改状态后，store 持久化非敏感 provider 数据，状态同步再注册或注销 Rust 运行时配置；聊天请求最终由前端 fetch 或本地 API server 代理发往 endpoint。Web 模式没有 Tauri 服务，provider service 的默认实现返回空列表，模型列表与 keyring 操作都是 no-op，持久化退回浏览器 localStorage（`web-app/src/services/providers/default.ts:7-29`、`web-app/src/lib/backendStorage.ts:22-60`）。
 
 ## 配置生命周期与管理入口
 
@@ -57,7 +57,7 @@ Jan 中需要区分三个层次：
 
 ### 新建渠道与已有渠道的差异
 
-新建自定义渠道只能通过 `AddProviderDialog` 提交名称、base URL、API key 和 `openai`/`anthropic` 类型。表单只做必填、URL 正则和大小写不敏感的重名检查，不在创建前测试 endpoint；创建对象固定为 `active: true`、空模型列表，并从相应协议模板复制设置（`web-app/src/routes/settings/providers/index.tsx:42-85`、`web-app/src/containers/dialogs/AddProviderDialog.tsx:26-71`）。
+新建自定义渠道只有一个入口：AddProviderDialog 接收名称、base URL、API key 与协议类型（openai 或 anthropic）。表单只做必填、URL 正则和大小写不敏感的重名检查，创建前不测试 endpoint；新对象固定为 `active: true`、空模型列表，设置从对应协议模板拷贝（`web-app/src/routes/settings/providers/index.tsx:42-85`、`web-app/src/containers/dialogs/AddProviderDialog.tsx:26-71`）。
 
 已有 provider 的可操作范围取决于来源：
 
@@ -87,7 +87,7 @@ jan plugin             插件
 jan update             版本更新
 ```
 
-`set` 可按 `--provider` 写入 API key、base URL、模型列表与 `api_type`；`list` 输出已配置 provider 的 JSON（key 脱敏）；`unset` 删除条目；三者都作用于全局 `~/.jan/config.toml`。`jan cli models list` 再按解析结果列出模型。
+set、list、unset 三个子命令都作用于全局 `~/.jan/config.toml`：set 按 --provider 写入 API key、base URL、模型列表与 api_type；list 输出已配置 provider 的 JSON 并脱敏 key；unset 删除条目。`jan cli models list` 再按解析结果列出模型。
 
 解析优先级为 CLI 参数与环境变量、项目 `.jan/agent/agent.toml` 的 `[provider]`、桌面 `settings.json`（只继承不回写）、全局 `~/.jan/config.toml`（`src-tauri/src/core/cli/providers.rs:1-16`）。
 
@@ -162,10 +162,10 @@ openai / azure / anthropic / openrouter / mistral / groq / xai / gemini / minima
 
 ### 2.4 轮换与 keyring
 
-- `createApiKeyRotatingFetch`（`model-factory.ts:833`）：apiKeys>1 时 401/403/429 换下一把；
-- `useModelProvider.ts` L13 注释：远程 key 的 secrets 只在 OS keyring（`register_provider_config`），绝不落 settings.json；
-- `DataProvider.tsx` `registerRemoteProvider`（L38-59）：llamacpp 跳过；无 API key 跳过；请求骨架 `{provider, api_key: chain[0], api_keys: chain.slice(1), base_url, custom_headers, models}`；mount 时 `invoke('register_provider_config')`、unmount `unregister_provider_config`；
-- 旧 localStorage 数据迁移 `migrateLocalStorageSettings.ts`（L97）时也 invoke 注册。
+- 密钥轮换由 createApiKeyRotatingFetch 负责：key 多于一把时，遇到 401/403/429 换下一把重试（`web-app/src/lib/model-factory.ts:833`）；
+- 远程密钥只存在 OS keyring，由 register_provider_config 注册，settings.json 里不含密钥（`web-app/src/hooks/useModelProvider.ts:13` 注释）；
+- DataProvider 的 registerRemoteProvider 在组件挂载时完成注册：llamacpp 与没有 API key 的 provider 跳过，其余按首 key 加剩余链组装 `{provider, api_key: chain[0], api_keys: chain.slice(1), base_url, custom_headers, models}`，卸载时再 invoke unregister_provider_config（`web-app/src/providers/DataProvider.tsx:38-59`）；
+- 旧 localStorage 数据迁移时同样会调用注册（`web-app/src/lib/migrateLocalStorageSettings.ts:97`）。
 
 ## 3. 参数体系：predefinedParams.ts
 
@@ -241,14 +241,10 @@ key / title / description / value / controllerType / controllerProps / capabilit
 | mlx L116 | top_k, repetition | ∅ |
 | 自定义 CUSTOM_PERMISSIVE L126 | ∅ | 全部采样参数 |
 
-- `resolveProviderCaps`（L166-174）：`api_type==='anthropic'` → ANTHROPIC，否则按 provider ID 查表，未命中 → CUSTOM_PERMISSIVE；
-- `getProviderApiType`（L177-183）：未配置 → 'openai'；`provider.api_type` 优先；否则 provider==='anthropic' → anthropic；
-- `isPredefinedRemoteProvider`（L193-199）：`id in BUILTIN_CAPS && ∉ {llamacpp,mlx}`；
-- 模型级拒绝（L212-273）：`REASONING_MODEL_RE = /^(o[1-9]|gpt-?[5-9])/i` 匹配的 openai/azure 推理系硬拒 temperature/top_p/frequency_penalty/presence_penalty；
-- xai 系列：`grok-3-mini` 拒 temp/top_p、`grok-[3-9]` 拒 penalties；
-- 判定按“参数 key”而非 capability（注释 L217-221）；
-- `getMutualExclusionDrops`（L229-241）：唯一规则——anthropic 同时带 temperature+top_p 时保留 temperature、丢 top_p；
-- `paramsForProviders`（L288-307）：并集得到 `ParamSupportEntry{def, supportedBy[], maybeBy[]}` 供 UI tooltip。
+- 协议与来源判定（L166-199）：resolveProviderCaps 先看 api_type 是否为 anthropic，是则整套按 ANTHROPIC 能力表处理，否则按 provider ID 查表，未命中回落到 CUSTOM_PERMISSIVE；getProviderApiType 依次取 provider.api_type 与 provider 名是否为 anthropic，都没有时返回 openai；isPredefinedRemoteProvider 只把在内置能力表内且不属于 llamacpp/mlx 的 ID 判为预定义远程 provider；
+- 模型级拒绝（L212-273）：openai/azure 上被 `REASONING_MODEL_RE = /^(o[1-9]|gpt-?[5-9])/i` 命中的推理系模型硬拒 temperature、top_p、frequency_penalty、presence_penalty；xai 的 grok-3-mini 拒 temp 与 top_p，grok-3 到 grok-9 拒 penalties；判定对象是参数 key，与 capability 无关（注释 L217-221）；
+- 互斥丢弃（L229-241）：唯一规则是 anthropic 同时带 temperature 与 top_p 时保留 temperature、丢掉 top_p；
+- UI 汇总（L288-307）：paramsForProviders 求并集得到 ParamSupportEntry{def, supportedBy[], maybeBy[]}，供 tooltip 展示支持与可能被忽略的 provider。
 
 ## 5. 模型创建与参数注入
 
@@ -256,10 +252,12 @@ key / title / description / value / controllerType / controllerProps / capabilit
 
 `buildBody`（`createCustomFetch` 内部，入口 L437）过滤顺序：
 
-1. `CLIENT_SIDE_PARAM_KEYS`（L204）：ctx_len/max_context_tokens/auto_compact 永不发送；
-2. `!keepLlamacppOnly` 时剥 `LLAMACPP_ONLY_PARAM_KEYS`；
-3. `WIRE_KEY_REMAP`（L456）：`max_output_tokens→max_tokens`、`dynatemp_exp→dynatemp_exponent`；
-4. 数值字符串强转（`coerceNumericParam`）、samplers 逗号/分号切数组（`coerceSamplers`）。
+| 顺序 | 处理 |
+|---|---|
+| 1 | 仅客户端参数永不发送：ctx_len、max_context_tokens、auto_compact（`CLIENT_SIDE_PARAM_KEYS`，L204） |
+| 2 | keepLlamacppOnly 为假时剔除私有参数（`LLAMACPP_ONLY_PARAM_KEYS`） |
+| 3 | wire 字段重映射：max_output_tokens→max_tokens、dynatemp_exp→dynatemp_exponent（`WIRE_KEY_REMAP`，L456） |
+| 4 | 数值字符串强转（coerceNumericParam），samplers 按逗号或分号切成数组（coerceSamplers） |
 
 llamacpp 专属（L423-440）：`cache_prompt=true`（防 KV 复用被 preset/CLI 覆盖）、`stream===true` 时 `return_progress=true` + `timings_per_token=true`、`max_tokens===0 → -1`（用户 0 表示无上限）。
 
@@ -312,11 +310,11 @@ ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型
 
 ### 6.4 本地模型下载
 
-- `llamacpp-extension` L3115 `proxy: await getProxyConfig()`（模型下载）；`backend.ts downloadBackend` 对每个下载子件附加 proxy；
-- `download-extension/src/index.ts`：`downloadFile(s)` invoke `download_files`，proxy 以 `Record<string, string|string[]|boolean>` 透传，监听 `download-$id`；
-- Rust `downloads/commands.rs`（L11-80）：`CancellationToken` 取消；`paused_tasks` 保留 `.tmp/.url` 断点续传，真正取消才删已下载部分；
-- `models.rs`（L15-31）：`ProxyConfig{url, username?, password?, no_proxy?, ignore_ssl?}`；`DownloadItem{url, save_path, proxy?, sha256?, size?, model_id?}`；
-- `helpers.rs`：镜像前缀 + `MIRROR_DOMAINS=['huggingface.co']` + HMAC 签名，并行下载 `DownloadCtx`。
+- 下载前先取代理配置：llamacpp-extension 读取 getProxyConfig 的结果填入 `proxy` 字段，backend 的 downloadBackend 再给每个下载子件附加同一份配置（`extensions/llamacpp-extension/src/index.ts:3115`）；
+- 下载扩展把 downloadFile(s) 调用交给 Tauri 的 download_files 命令，proxy 以 `Record<string, string|string[]|boolean>` 原样透传，进度通过 download-$id 事件上报（`extensions/download-extension/src/index.ts`）；
+- Rust 下载命令（`src-tauri/src/core/downloads/commands.rs:11-80`）用 CancellationToken 取消任务，paused_tasks 保留 .tmp/.url 断点用于续传，只有真正取消才删除已下载部分；
+- 下载数据类型定义在 `src-tauri/src/core/downloads/models.rs:15-31`，分别是 ProxyConfig{url, username?, password?, no_proxy?, ignore_ssl?} 与 DownloadItem{url, save_path, proxy?, sha256?, size?, model_id?}；
+- 镜像与签名由 helpers 处理：命中 MIRROR_DOMAINS（仅 huggingface.co）的前缀后走镜像并做 HMAC 签名，实际下载由 DownloadCtx 并行执行。
 
 ### 6.5 模型源
 
@@ -326,11 +324,11 @@ ModelMetadata.default_ctx_len / default_max_tokens（用于跨线程保留模型
 
 `extensions/llamacpp-extension/src/index.ts`（约 3,351 行）：
 
-- 读取 `models/<modelId>/model.yml` 的模型配置；
-- `resolveEmbeddingConfig`（L1432）：GGUF 元数据探测 embedding → 回写 `cfg.embedding` 与版本化缓存；embedding 模型默认补 `pooling` 与批量参数；
-- `resolveMtpLayersConfig`：MTP 层数探测，在建 preset 前与 embedding 探测一起调用；
-- `PRESET_AFFECTING_KEYS`（L121）集合内的设置变化会通知 worker 重新应用 preset；
-- 模型配置中 `quant_type: undefined` 为硬编码 TODO（L1397）。
+- 模型配置从模型目录下的 `models/<modelId>/model.yml` 读取；
+- embedding 探测由 resolveEmbeddingConfig 完成（L1432）：读 GGUF 元数据判断是否为 embedding，回写 cfg.embedding 与版本化缓存，并为 embedding 模型默认补 pooling 与批量参数；
+- MTP 层数由 resolveMtpLayersConfig 探测，在建 preset 前与 embedding 探测一起调用；
+- PRESET_AFFECTING_KEYS 集合内的设置变化会通知 worker 重新应用 preset（L121）；
+- 模型配置里的 quant_type 目前固定为 undefined，源码中以硬编码 TODO 标注（L1397）。
 
 引擎按编译期版本捆绑进随附 worker：扩展 `startEngine()`（L870 起）生成 preset 后由插件启动该 worker，握手返回 OS 分配的端口、pid 与 API key。
 
@@ -361,7 +359,7 @@ mmproj_sha256? / embedding? / template_kwargs? / template_kwargs_check_v?
 
 ### 8.2 代理链路
 
-`proxy_request`（L694）按模型解析上游：本地引擎走 `engine_upstream`（L632），远程 provider 走 `core/agent` 上游层的 `call_openai_chat_completions`（`src-tauri/src/core/agent/upstream.rs:1156`）并带 Bearer key 直连。编排辅助已从 `proxy.rs` 移到该文件：
+proxy_request 按模型解析上游：本地引擎交给 engine_upstream 处理，远程 provider 由 core/agent 上游层的 call_openai_chat_completions 带 Bearer key 直连（`src-tauri/src/core/server/proxy.rs:632,694`、`src-tauri/src/core/agent/upstream.rs:1156`）。编排辅助函数也从 proxy.rs 移到了该文件：
 
 ```text
 resolve_upstream_for_model   :636
@@ -390,18 +388,18 @@ reuse_last_good_listings     :930   工具数组复用"上次可用列表"
 
 ### 8.4 认证（真实路径）
 
-`proxy.rs:930` 起：非白名单路径且 `config.proxy_api_key` 非空时，校验 `Authorization: Bearer` 或 `X-Api-Key` 之一；包含 `/configs` 的路径直接 404。启动阶段另有更硬的一层：`is_insecure_public_bind`（L2408）判定"非 loopback 地址 + 空 key"为不安全绑定并拒绝启动。CORS 侧由 `origin_allowed`（L584）同时校验 Host 与 Origin 是否落在 Trusted Hosts 内。
+认证在代理请求入口统一处理：非白名单路径且 config.proxy_api_key 非空时，请求必须带 Authorization: Bearer 或 X-Api-Key 之一，包含 /configs 的路径直接 404。启动阶段还有一层更硬的门槛，is_insecure_public_bind 把“非 loopback 地址 + 空 key”判为不安全绑定并拒绝启动；CORS 由 origin_allowed 同时校验 Host 与 Origin 是否落在 Trusted Hosts 内（`src-tauri/src/core/server/proxy.rs:584,930,2408`）。
 
 ### 8.5 服务端工具执行
 
-`execute_mcp_tool_calls`（`core/agent/upstream.rs:1068`）：串行执行，arguments 解析失败容错 `{}`，错误统一前缀 `"ERROR: "`；入口受配置项 `enable_server_tool_execution` 门控，默认 false，`/orchestrations` 也看同一开关。
+服务端工具调用由 execute_mcp_tool_calls 串行执行：每个调用的 arguments 解析失败时按空对象处理，错误结果统一加 "ERROR: " 前缀（`src-tauri/src/core/agent/upstream.rs:1068`）。入口受 enable_server_tool_execution 门控，默认关闭，`/orchestrations` 路由共用同一开关。
 
 ### 8.6 本地 API server 设置
 
 `routes/settings/local-api-server.tsx`：
 
-- 启动链（L120-178）：前端先挡一道——监听地址不是 `127.0.0.1` 且没填 API key 时直接报错不启动（`:122-124`）→ `ensureModelForServer`（无模型报错）→ `startServer({host, port, prefix, apiKey, trustedHosts, isCorsEnabled, isVerboseEnabled, proxyTimeout, enableServerToolExecution})` → 实际端口回写（移动端 port=0 自动分配）→ setServerStatus；Rust 侧还有 `is_insecure_public_bind` 兜底，两处任一道都会拦住"对网络开放却无鉴权"的启动；
-- 错误优先级（L180-216）：端口占用 > 模型路径 > 模型启动 > 通用；
+- 启动链（`web-app/src/routes/settings/local-api-server.tsx:120-178`）：前端先挡一道，监听地址不是 127.0.0.1 且没填 API key 时直接报错不启动（:122-124）；随后 ensureModelForServer 检查可用模型，没有模型即报错，再调 startServer 传入 host、port、prefix、apiKey、trustedHosts、CORS 开关、verbose、proxyTimeout 与 enableServerToolExecution，移动端 port=0 时回写实际分配的端口，最后更新 setServerStatus。Rust 侧另有 is_insecure_public_bind 兜底，两道任一处命中都会拦住“对网络开放却无鉴权”的启动；
+- 报错优先级（L180-216）依次为端口占用、模型路径、模型启动、通用错误；
 - `useLocalApiServer.ts`（110 行）默认值：
 
   ```text
@@ -428,12 +426,12 @@ reuse_last_good_listings     :930   工具数组复用"上次可用列表"
 
 ## 10. 边界与未验证事项
 
-1. **SecurityConfigDialog 是孤儿死代码**：【代码确认】src-tauri 全库 grep 无 `security_*` 命令，组件无挂载点（SettingsMenu 的 privacy 页只实现 analytics 开关）。与之对比的“真实认证”在 proxy.rs 的 `proxy_api_key` 双头校验。
-2. **llama-server 鉴权强度**：【代码确认】`api_key = BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))`——密钥常量 `'JustAskNow'` 在 `extensions/llamacpp-extension/src/index.ts:432`，派生函数 `generate_api_key` 在 `src-tauri/utils/src/crypto.rs:22`；worker 握手返回的 `EngineInfo{port, api_key, pid}` 对 webview 可见。防局域网误连、不防本地恶意进程。
-3. **参数链路分离**：绕过 `createCustomFetch` 的直连请求不带采样参数；`streamText` 层不感知推理参数。【代码确认】
+1. **SecurityConfigDialog 是孤儿死代码**：组件没有任何挂载点，SettingsMenu 的 privacy 页只实现 analytics 开关；对 src-tauri 全库检索 `security_*` 也没有命中它调用的命令（【代码确认】）。真实认证在代理层，由 proxy_api_key 校验 Bearer 与 X-Api-Key 双头（`src-tauri/src/core/server/proxy.rs`）。
+2. **llama-server 鉴权强度**：api_key 由 `BASE64(HMAC-SHA256(key='JustAskNow', msg=modelId))` 派生，固定密钥常量定义在 `extensions/llamacpp-extension/src/index.ts:432`，派生函数 generate_api_key 在 `src-tauri/utils/src/crypto.rs:22`；worker 握手返回的 EngineInfo 含 port、api_key 与 pid，对 webview 可见（【代码确认】）。该机制防局域网误连，本地恶意进程仍可伪造。
+3. **参数链路分离**：绕过 createCustomFetch 的直连请求不带采样参数，streamText 层也不感知推理参数。【代码确认】
 4. **采样参数自动重试**基于错误文本正则启发式，命中误报时静默丢参重试一次。【代码确认 + 推测影响】
-5. **`ProviderApiType` TS 类型仅 `'openai'|'anthropic'`**（`web-app/src/types/modelProviders.d.ts:62`），而 Rust 端承认 openai-responses/google 等更宽取值——TS 窄于可写 wire 值。【代码确认】
-6. MLX 引擎（`extensions/mlx-extension`）仅确认 `MLX_SAMPLER_KEYS` 三项转发；mlx-server 具体行为未逐项核对。【推测】
+5. **ProviderApiType 的 TS 类型只声明 openai 与 anthropic**，Rust 端承认 openai-responses、google 等更宽取值，类型定义窄于可写 wire 值（`web-app/src/types/modelProviders.d.ts:62`）。【代码确认】
+6. MLX 引擎只确认了 MLX_SAMPLER_KEYS 三项转发，mlx-server 的具体行为未逐项核对（`extensions/mlx-extension`）。【推测】
 7. 未运行项目测试或构建；记录来自静态源码。
 
 ## 11. 关键源码索引

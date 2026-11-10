@@ -51,11 +51,15 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 
 ### 1.2 助手内嵌的类型
 
-同一文件还定义了三组与助手关联、但独立存储的类型：
+同一文件还定义了三组与助手关联、但单独存储的类型：
 
-- `QuickMessage`：id、标题、内容；实际存储在全局设置里，助手只保存 id 集合（`Assistant.kt`）。
-- `AssistantRegex`：查找正则、替换串、影响范围集合、是否仅视觉生效（`Assistant.kt`）。
-- `PromptInjection` 密封类、`ModeInjection`/`RegexInjection` 子类与 `Lorebook`：助手只保存 id 绑定，规则对象本身与注入管线归 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)（`Assistant.kt`）。
+| 类型 | 内容与存储 |
+|---|---|
+| `QuickMessage` | id、标题、内容三部分；实体存在全局设置里，助手只保存 id 集合 |
+| `AssistantRegex` | 查找正则、替换串、影响范围集合与仅视觉开关 |
+| `PromptInjection` 密封类（含 `ModeInjection`、`RegexInjection` 子类）与 `Lorebook` | 助手只保存 id 绑定；规则对象与注入管线见 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md) |
+
+三组类型与 `Assistant` 同处 `Assistant.kt`。
 
 `AssistantAffectScope` 枚举只有 USER 与 ASSISTANT 两个值，决定正则作用于用户输入还是助手输出（`Assistant.kt`）。
 
@@ -71,8 +75,10 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 
 内置助手只有两个（`PreferencesStore.kt`）：
 
-- `DEFAULT_ASSISTANT_ID`（`0950e2dc-9bd5-4801-afa3-aa887aa36b4e`）：名称与系统提示词均为空，是兜底助手；`Settings.assistantId` 的默认值也是它。
-- 第二个助手（`3d47790c-c415-4b90-9388-751128adb0a0`）：名称同样为空，系统提示词是带占位变量的英文模板，声明自己是 `{{char}}`、基于 `{{model_name}}`。
+| 助手 | UUID | 取值 |
+|---|---|---|
+| 常量 `DEFAULT_ASSISTANT_ID` | `0950e2dc-9bd5-4801-afa3-aa887aa36b4e` | 名称与系统提示词均为空，充当兜底助手；`Settings.assistantId` 的默认值也是它 |
+| 第二个内置助手 | `3d47790c-c415-4b90-9388-751128adb0a0` | 名称同样为空，系统提示词是带占位变量的英文模板，声明自己扮演 `{{char}}`、基于 `{{model_name}}` |
 
 `DEFAULT_ASSISTANTS_IDS` 由这两个 id 组成，界面据此禁止删除内置助手（`AssistantPage.kt`）。模式注入的默认值只有一条 Learning Mode，插入位置在系统提示词之后（`PreferencesStore.kt`）。`data/ai/prompts/` 还提供标题、建议、压缩、OCR、翻译五类默认提示词，它们是全局设置字段而非助手字段，只在后台生成时读取（`PreferencesStore.kt`）。
 
@@ -80,19 +86,25 @@ RikkaHub 的角色实体是 **Assistant**：一个可序列化的数据类，承
 
 ### 2.1 选中助手的持久化
 
-全局选中助手由 `Settings.assistantId` 表达，`getCurrentAssistant()` 按 id 查找，查不到时取列表第一个（`PreferencesStore.kt`）。切换入口是 `updateAssistant`，只写 `select_assistant` 单键，不触碰助手本体（`PreferencesStore.kt`）。
+全局选中助手由设置里的 `Settings.assistantId` 记录。读取助手时按这个 id 在列表中查找，找不到就退回列表第一个。切换入口是 `updateAssistant`，它只写选中 id 这一个键，助手本体的数据保持原样（`PreferencesStore.kt`）。
 
 ### 2.2 会话如何绑定助手
 
-`Conversation.assistantId` 是必填字段，创建会话时写入，且会话还持有自己的会话级覆盖字段：`customSystemPrompt`、`modeInjectionIds`、`lorebookIds`、`workspaceCwd`、`folderId`（`data/model/Conversation.kt`）。发送消息时助手来源是会话而非全局选中值：按会话 `assistantId` 查助手并回退 `getCurrentAssistant()`，因此一个会话始终使用它自己绑定的助手配置（`ChatService.kt`、`664-665`）。存储上两者隔离：按助手查询、分页、搜索消息都可带 `assistantId` 过滤（`ConversationRepository.kt`）。
+会话在创建时写入必填的助手 id（`Conversation.assistantId`），同时保存一组只属于该会话的覆盖字段：
+
+- `customSystemPrompt`：会话自己的系统提示词
+- `modeInjectionIds`、`lorebookIds`：模式注入与 Lorebook 的绑定集合
+- `workspaceCwd`、`folderId`：工作区目录与所属文件夹
+
+这批字段定义在 `data/model/Conversation.kt`。发送消息时助手来源由会话决定：先按会话绑定的 id 查找，查不到再回退全局选中的助手，因此一个会话始终使用它自己绑定的那份配置（`ChatService.kt`、`664-665`）。两者在存储上彼此独立，按助手查询、分页和搜索消息都可以带上该 id 过滤（`ConversationRepository.kt`）。
 
 ### 2.3 切换助手对进行中会话的影响
 
-需要区分三种“切换”：
+切换助手有三条路径，各自的影响不同：
 
-- 改全局选中助手（不进入某个会话）：只改 `select_assistant`，已创建的会话在下次发送时仍按自己的 `assistantId` 取配置。
-- 打开一个会话：`initializeConversation` 会把全局选中助手改写为该会话的助手，因此“当前助手”会随最近打开的会话漂移（`ChatService.kt`）。
-- 显式迁移会话：会话级操作改写 `assistantId`，同时清空 `folderId`，因为文件夹是助手内分组，跨助手后不可见（`ChatVM.kt`）。
+- 改全局选中助手（不进入某个会话）：只写选中 id 这一个键，已创建的会话在下次发送时仍按自己绑定的助手取配置。
+- 打开一个会话：`initializeConversation` 会把全局选中助手改写成该会话的助手，因此当前助手会随最近打开的会话漂移（`ChatService.kt`）。
+- 显式迁移会话：会话级操作改写绑定的助手 id，同时清空所属文件夹，因为文件夹是助手内部的分组，跨助手后不可见（`ChatVM.kt`）。
 
 每轮解析同时使用助手引用与会话局部快照：提示词、采样参数、本地工具和记忆等未固定字段在下一轮反映助手修改；模型、推理、搜索和工具接入等已固定字段继续读取会话值，除非用户修改会话配置或引用失效。正在生成的协程使用启动时取得的对象。见 [ConversationConfig 解析与失效回退](../../rikkahub/app/src/main/java/me/rerere/rikkahub/data/model/ConversationConfig.kt#L94-L140)。
 
@@ -130,7 +142,7 @@ systemPrompt 的占位变量在发送前被替换；变量集合与写法规则�
 
 助手绑定的模型是 `chatModelId`，为 null 时回退全局 `chatModelId`（`PreferencesStore.kt`）；助手只保存模型 UUID，凭据与 baseUrl 归 Provider 所有，Provider 的导入、合并与去重见 [LLM 渠道管理调查笔记](../LLM渠道管理/RikkaHub-LLM渠道管理调查笔记.md)。
 
-请求参数读取会话视角的助手：温度、topP、maxTokens 使用助手当前值，推理强度受会话固定配置覆盖（`data/ai/ChatRequestFactory.kt`、`data/model/ConversationConfig.kt`）；`customHeaders` 与 `customBody` 分别是助手自定义项在前、模型自定义项在后的合并列表，因此覆盖顺序是助手 > 模型 > 协议默认。`streamOutput` 决定走流式还是整段返回，`reasoningLevel` 默认 AUTO，界面用专门的按钮调整（`AssistantBasicPage.kt`）。
+请求参数按会话视角的助手装配。温度、topP 与 maxTokens 取助手的当前值，推理强度则受会话固定配置覆盖（`data/ai/ChatRequestFactory.kt`、`data/model/ConversationConfig.kt`）。自定义请求头与请求体分别合并两份来源，助手自定义项在前、模型自定义项在后，覆盖顺序依次为助手、模型、协议默认。`streamOutput` 决定走流式还是整段返回，`reasoningLevel` 默认 AUTO，界面用专门的按钮调整（`AssistantBasicPage.kt`）。
 
 温度与 topP 的取舍设计是“null 即不发送”：为 null 时不会出现在请求参数里，界面用开关表达启用与否；温度允许 0–2，topP 允许 0–1，越界被拒绝而不是截断（`AssistantBasicPage.kt`）。`customHeaders` 与 `customBodies` 的编辑界面在请求页，与模型的同名字段合并后发送（`AssistantRequestPage.kt`）。
 
@@ -163,19 +175,19 @@ MCP 服务器 id 存在助手字段 `mcpServers` 中，可用工具的筛选由�
 
 ### 5.4 正则替换
 
-`regexes` 是助手级正则列表，可拖拽排序（`AssistantPromptPage.kt`）。正则按 `affectingScope` 决定作用于用户输入还是助手输出，按 `visualOnly` 决定只影响界面显示还是同时影响发送内容（`Assistant.kt`、`86-97`）。输入与输出分别由输入、输出转换器链应用（`ChatService.kt`、`RegexOutputTransformer.kt`），时序见 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
+每个助手带一份正则列表 `regexes`，可在提示词页拖拽排序（`AssistantPromptPage.kt`）。每条正则按 `affectingScope` 决定作用于用户输入还是助手输出，按 `visualOnly` 决定只改变界面显示还是同时改写发送内容（`Assistant.kt`、`86-97`）。输入侧与输出侧分别由两条转换器链应用（`ChatService.kt`、`RegexOutputTransformer.kt`），先后时序见 [上下文编译与提示词工程调查笔记](../上下文编译与提示词工程/RikkaHub-上下文编译与提示词工程调查笔记.md)。
 
 ## 6. 资产、变量、开场白与用户档案
 
-- 头像与背景：`Avatar.Image` 保存本地或网络 URL，`Avatar.Emoji` 保存 emoji 文本；`background` 与 `backgroundOpacity` 控制聊天页背景，`useGradientBackground` 打开后改用动态渐变并忽略背景图，更新助手时旧头像与背景文件会被删除（`AssistantDetailVM.kt`）。用户头像与昵称属于全局 `DisplaySetting`，不在助手内，systemPrompt 的 `user`/`nickname` 占位变量即读取该昵称（`PreferencesStore.kt`）。
-- 开场白：本快照未找到独立的开场白字段，SillyTavern 导入会把 `first_mes` 转成一条 assistant 角色的 `presetMessages`（`AssistantImporter.kt`），可视为开场白的事实载体。
-- 快捷消息与环境变量：快捷消息以 `quickMessageIds` 引用全局 `quickMessages`，读取时按 id 求交集（`PreferencesStore.kt`）；占位变量是静态枚举加系统读取，没有用户可定义的键值环境变量表。
+- 头像与背景：助手头像分图片与 emoji 两种形态，图片存本地或网络 URL，emoji 直接存文本。聊天页背景由背景图和不透明度控制，打开动态渐变后改用渐变并忽略背景图；更新助手时，旧的头像与背景文件会被删除（`AssistantDetailVM.kt`）。用户头像与昵称来自全局显示设置，系统提示词的 `user`、`nickname` 占位变量读取的就是这个昵称（`PreferencesStore.kt`）。
+- 开场白：本快照未找到独立的开场白字段；SillyTavern 导入会把角色卡的 `first_mes` 写成一条 assistant 角色的预设消息，开场白实际上由它承载（`AssistantImporter.kt`）。
+- 快捷消息与环境变量：助手用 id 集合引用全局快捷消息，读取时按 id 求交集（`PreferencesStore.kt`）；占位变量来自静态枚举与系统读取，没有用户可定义的键值环境变量表。
 
 ## 7. 导入、导出、迁移与兼容性
 
 ### 7.1 无助手导出
 
-在 `ui/pages/assistant/` 与备份代码中未找到导出单个助手或分享助手的入口，助手也没有独立的导出格式；配置转移只能通过整体设置备份完成，备份包中的 `settings.json` 是完整 `Settings` 序列化结果，包含全部助手并在恢复时整体写回（`BackupManager.kt`、`75-139`）。会话导出（Markdown/图片分享）导出的只是会话消息（`ui/pages/chat/Export.kt`）。
+本次在 `ui/pages/assistant/` 与备份代码中未找到导出单个助手或分享助手的入口，助手也没有独立的导出格式。把配置迁移到另一台设备只能走整体设置备份：备份包里的 `settings.json` 是完整的设置序列化结果，包含全部助手，恢复时整体写回（`BackupManager.kt`、`75-139`）。会话导出（Markdown 与图片分享）只包含会话消息（`ui/pages/chat/Export.kt`）。
 
 ### 7.2 SillyTavern 角色卡导入
 
@@ -221,11 +233,11 @@ Chatbox 备份导入的是会话：所有会话挂到当前选中助手下，并
 
 ## 10. 未验证事项
 
-- 未运行应用，以上关于请求装配顺序与正则生效范围的结论均来自代码路径，未在真实 Provider 上验证请求体形态。
-- 聊天页背景、渐变、不透明度与气泡等外观字段的视觉效果未在设备上观察，只确认了字段绑定与取值范围。
+- 应用未运行，以上关于请求装配顺序与正则生效范围的结论来自代码路径，请求体的实际形态未在真实 Provider 上验证。
+- 聊天页背景、渐变、不透明度与气泡等外观字段只确认了绑定与取值范围，视觉效果未在设备上观察。
 - SillyTavern 的 PNG 元数据解析依赖 `ImageUtils.getTavernCharacterMeta`，容错边界未展开；Chatbox 导入的 fork 分支与图片落盘完整度只核对了计数器与调用点，未用真实备份验证。
-- `contextMessageLimit` 的阶梯式截断算法在 `ai` 模块的 `limitContext` 中，本次仅确认调用点（`ai/src/main/java/me/rerere/ai/util/ContextUtil.kt` 的 `limitContext`）；时间提醒的间隔比较是否跨分支节点同样未验证。
-- 助手各能力开关只核对了字段默认值与消费入口，未在设备上逐项开启并观察工具表与上下文段是否如实变化。
+- 上下文截断：`contextMessageLimit` 的阶梯式截断算法位于 `ai` 模块的 `limitContext`（`ai/src/main/java/me/rerere/ai/util/ContextUtil.kt`），本次仅确认调用点；时间提醒的间隔比较是否跨分支节点同样未验证。
+- 助手各能力开关只核对了默认值与消费入口，未在设备上逐项开启并观察工具表与上下文段是否随之变化。
 
 ## 11. 关键源码索引
 

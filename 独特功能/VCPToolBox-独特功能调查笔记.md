@@ -46,13 +46,13 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 | AgentAssistant 多 Agent 通信 | `归并已有类目`（保留跨 Agent 长期通信局部） | Agent 社会 | 委托/即时通讯已覆盖；跨 Agent 上下文 TTL 与心跳留卡片局部 |
 | 管理面板、系统监控 | `归并已有类目` | — | 普通后台管理；占位符浏览器并入 TVS 能力卡 |
 
-关键边界：VCPToolBox 的能力高度依赖**用户配置**（`config.env`、`agent_map.json`、插件 `config.env`、`toolApprovalConfig.json`），大量机制默认关闭或默认禁用（AgentDream 插件 `.block`、`VCP_BROWSER_RUNTIME_ENABLED=false`、`ReasoningToContentEnabled=false`、`privacyProtection.enabled=false`、TaskAssistant `globalEnabled=false`）。因此“主链确认”指的是**在默认配置或文档说明的配置下代码链路完整存在**，实际可用性取决于上述配置。盘点补充的 8 项插件同样依赖外部条件（VCPEverything 需本机 Everything HTTP 服务、VCPClawMail 需 ClawMailKey、DeepWikiVCP/DigitalOracle 需网络与上游服务），属配置可用而非默认可用。JEV 判断层另需外部决策服务凭据，未配置时相关环节按实现降级，而不是改用本地模型。
+关键边界：VCPToolBox 的能力高度依赖**用户配置**，主配置、Agent 映射、各插件自带配置与工具审批策略都要用户事先填好（`config.env`、`agent_map.json`、`toolApprovalConfig.json`）。相当一部分机制默认关闭或默认禁用，涉及 AgentDream 插件（以 `.block` 后缀停用）、托管浏览器运行时、ReasoningToContent、隐私保护与 TaskAssistant 全局调度。因此“主链确认”指代码链路在默认配置或文档说明的配置下完整存在，实际可用性取决于上述开关。盘点补充的 8 项插件同样受外部条件约束：VCPEverything 需要本机 Everything HTTP 服务，VCPClawMail 需要 ClawMailKey，DeepWikiVCP 与 DigitalOracle 需要网络与上游服务，都属于按配置启用的能力。JEV 判断层另需外部决策服务凭据，未配置时相关环节按实现降级。
 
 ## 介绍声明与候选盘点
 
 候选来源为 README（工具系统 / 记忆与认知 / 模型路由 / 变量系统 / 分布式与容灾五段旗舰声明）、`docs/FEATURE_MATRIX.md`、`docs/TECHNICAL_LITE.md`、`docs/vcp白皮书V3.md` 与插件目录盘点，共 16 项，与待查清单 VCPToolBox 段一致。逐项调查结果见下两节；其中“系统监控/管理面板”类声明（PM2 进程、资源监控、日志查看）经确认属于普通后台管理，未形成独立能力卡。
 
-插件目录全量盘点：`Plugin/` 下 96 个插件目录均持有 `plugin-manifest.json`（77 启用）或 `plugin-manifest.json.block`（19 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），已补入下节能力卡；本快照新增 7 个插件（DeedPage、MemoryThinkingTray、MimoDubbing、ParallelSearch、VCPSleep、VTrade、YouSearch）把能力面进一步推向外部服务桥与协议实验，其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
+插件目录全量盘点：`Plugin/` 下 96 个插件目录均持有 `plugin-manifest.json`（77 启用）或 `plugin-manifest.json.block`（19 禁用），无异常目录，与上表口径一致；除 16 项候选外，另确认 8 个功能独特、既有笔记零覆盖的插件（LightMemo、VCPEverything、SkillBridge、MagiAgent、VCPClawMail、UserAuth、DigitalOracle、DeepWikiVCP），各自成卡见下节；7 个插件（DeedPage、MemoryThinkingTray、MimoDubbing、ParallelSearch、VCPSleep、VTrade、YouSearch）把能力面进一步推向外部服务桥与协议实验，其余插件（搜索/天气/日程/抓取/查询/图像类）归普通工具类目，仅记清单。
 
 ## 已确认的独特能力
 
@@ -65,12 +65,14 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 **事实对象**：`dailynote/` 下的 Markdown 日记文件（`DailyNote`/`DailyNoteManager` 插件写入，路径安全校验在 `routes/dailyNotesRoutes.js`），向量与标签索引落 SQLite + `rust-vexus-lite` 原生引擎。
 
 **完整主链**：
-1. 写入：DailyNoteWrite 将文件落盘，再由知识库管理器通过 FIFO 队列后台索引（`Plugin/DailyNote/dailynote.js:44-45`）；
-2. 索引：知识库管理器维护向量库、标签曲线与派生资产，初始化入口见 `KnowledgeBaseManager.js:234`；
-3. 查询：向量搜索按日记名、查询向量和标签权重召回，入口见 `KnowledgeBaseManager.js:888`；
-4. 排序：先做统一观测和浪潮传播，再调用 RiverMemo 排序，最终由 Rust 内核完成查询降噪、守恒传播、双尺度场、候选曲线读出、相对拓扑、Ω 泛函与 Direct Anchor 的批级排序。生产路径在 Rust/Rayon 的单次 N-API 边界内完成，JS 模块仅保留实验或只读路径（`rust-vexus-lite/src/rivermemo_topology_v3.rs:2777`，`docs/RIVERMEMO_TOPOLOGY_V3.md`）；
-5. 解释：结果携带 riverMemo 元数据，包括签名、Ω 值、状态、角色和两类加分项；VCP Info 广播与 RAG_Observer 调试页可观察各阶段（`RAGDiaryPlugin.js:3282-3290`）；
-6. 更新：标签热更新和批量一致性修复会更新日志并增量重索引，修复入口见 `KnowledgeBaseManager.js:1938`。
+1. 写入：DailyNoteWrite 把日记文件落盘，知识库管理器随后通过 FIFO 队列在后台建立索引；
+2. 索引：知识库管理器维护向量库、标签曲线与派生资产，服务启动时完成初始化；
+3. 查询：向量搜索按日记名、查询向量和标签权重召回候选；
+4. 排序：先做统一观测与浪潮传播，再交给 RiverMemo 排序。查询降噪、守恒传播、双尺度场、候选曲线读出、相对拓扑、Ω 泛函与 Direct Anchor 的批级排序都在 Rust/Rayon 的一次 N-API 调用内完成，JS 模块只保留实验与只读路径；
+5. 解释：结果携带 RiverMemo 元数据，包括签名、Ω 值、状态、角色和两类加分项，VCP Info 广播与 RAG_Observer 调试页可观察各阶段；
+6. 更新：标签热更新和批量一致性修复会写更新日志并增量重索引。
+
+以上各环的入口集中在 `Plugin/DailyNote/dailynote.js:44-45`、知识库管理器（`KnowledgeBaseManager.js:234,888,1938`，分别对应初始化、查询与一致性修复）、Rust 排序内核 `rust-vexus-lite/src/rivermemo_topology_v3.rs:2777` 与 `RAGDiaryPlugin.js:3282-3290`；排序设计与生产路径说明见 `docs/RIVERMEMO_TOPOLOGY_V3.md`。
 
 **持续性**：向量库与标签索引持久化于 SQLite/VectorStore；重启后按 Artifact 签名重建缓存，相关逻辑在 RiverMemoEngine 中。
 
@@ -92,7 +94,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：system 消息中的占位符 DSL `[[VCP元思考:<链名>::<修饰符>:<k1-k2-k3-k4-k5>]]`，由 RAGDiaryPlugin 在 `_processSingleSystemMessage` 中解析（`RAGDiaryPlugin.js:1495-1607`）；修饰符支持 `Group`（语义组增强）、`Auto[:阈值][:白名单|!黑名单]`（按主题向量自动选链）。
 
-**事实对象**：`dailynote/` 下的思维簇目录（`前思维簇`、`逻辑推理簇`、`反思簇`、`结果辩证簇`、`陈词总结梳理簇`），每簇多个 `.txt` 元逻辑模块；链定义在 `Plugin/RAGDiaryPlugin/meta_thinking_chains.json`（当前只含 `default` 链，簇数=5，kSequence=[2,1,1,1,1]）。
+**事实对象**：`dailynote/` 下的五个思维簇目录，按推理阶段分为前思维簇、逻辑推理簇、反思簇、结果辩证簇和陈词总结梳理簇，每簇存放多个 `.txt` 元逻辑模块。链定义放在 `Plugin/RAGDiaryPlugin/meta_thinking_chains.json`，当前只有一条 default 链，簇数为 5，k 序列为 [2,1,1,1,1]。
 
 **完整主链**：解析 DSL 后进入元思考链管理器；每阶段在对应思维簇中检索，将结果向量平均值与原始查询向量按默认权重 `[0.8,0.2]` 融合，作为下一阶段查询。全部阶段完成后，结果替换占位符并注入上下文，同时按链名、k 序列和内容哈希缓存，再广播 `META_THINKING_CHAIN` 供 RAG_Observer.html 查看。入口见 `Plugin/RAGDiaryPlugin/MetaThinkingManager.js:108`。
 
@@ -151,9 +153,17 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **入口与触发者**：消息处理器的 resolveAllVariables 在每次请求前对 system 和特权 user 消息做多阶段替换，入口见 `modules/messageProcessor.js:146`。
 
-**事实对象**：占位符家族——`{{VarXxx}}`/`{{TarXxx}}`（env 变量，可指向 `TVStxt/*.txt` 递归解析）、`{{SarPromptN}}`/`{{SarPromptAll}}`（模型级 SAR 注入）、`{{agent:X}}`/`{{X}}`（Agent 文件嵌套）、`{{toolbox:X}}`（Toolbox 折叠文档）、`{{VCP…}}`（插件静态占位符）、`{{Date}}`/`{{Time}}`/`{{Today}}` 等内建变量、`[[VCPStaticFold::…]]` 折叠模式。
+**事实对象**：占位符家族按来源分为七类，语法与用途如下：
 
-**语法边界与递归**：Agent 与 Toolbox 展开有**循环依赖检测**（`processingStack`，环检测后注入错误文本而非死循环，`messageProcessor.js:186-191,224-230`）；Agent 占位符受 **AgentGuard**（同一上下文只允许展开一个 Agent，`context.expandedAgentName`，:166-206）与 **ToolboxGuard**（每种 toolbox 只展开一次，:209-248）约束；Agent/Toolbox 展开只对特权角色生效（普通 user/assistant 消息中的 `{{agent:X}}` 不展开，:150-153）；TVStxt 文件递归解析深度无显式上限（依赖环检测兜底）。
+- 环境变量 `{{VarXxx}}`、`{{TarXxx}}`：取自 env，值可指向 `TVStxt/*.txt` 并递归解析；
+- 模型级注入 `{{SarPromptN}}`、`{{SarPromptAll}}`：按模型注入 SAR 提示；
+- Agent 文件 `{{agent:X}}`、`{{X}}`：嵌套展开 Agent 文件内容；
+- Toolbox 文档 `{{toolbox:X}}`：展开为折叠文档；
+- 插件静态占位符 `{{VCP…}}`：由插件提供的静态值；
+- 内建变量 `{{Date}}`、`{{Time}}`、`{{Today}}`：日期与时间等内建值；
+- 折叠模式 `[[VCPStaticFold::…]]`：静态折叠语法。
+
+**语法边界与递归**：Agent 与 Toolbox 展开都带**循环依赖检测**：`processingStack` 记录展开中的节点，一旦检测到环就注入错误文本并停止，避免死循环。同一上下文只允许展开一个 Agent（AgentGuard），每种 toolbox 只展开一次（ToolboxGuard）；这两类展开只对特权角色生效，普通 user 与 assistant 消息里的 Agent 占位符不展开。TVStxt 文件的递归解析没有显式深度上限，由环检测兜底。判定集中在 `modules/messageProcessor.js:150-248`。
 
 **调试表面**：PlaceholderExplorer 以 static 插件每 30 分钟全量扫描并输出 `{{VCPPlaceholderMap}}` 摘要；同步命令提供扫描、定位、编辑、预览和死链检查。定位会返回定义路径、行号和引用链；编辑采用临时文件校验、备份后原子替换，且提示修改 config.env 后需重启。预览复用同一解析器，不绕过特权角色判定；死链检查报告死链、孤儿和缺失映射文件。管理面板由 PlaceholderExplorerManager.vue 与对应路由配套。
 
@@ -175,7 +185,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **持续性**：`VCPAsyncResults/` 文件持久化，重启后占位符仍可读取旧结果；无结果过期清理（未验证）。
 
-**安全边界**：`/plugin-callback` 仍是**无鉴权**端点（`server.js:870-872` 豁免 Bearer），`taskId` 无签名校验——获知 `pluginName+taskId` 即可覆盖任务结果进而注入下一轮上下文；`plugin_callback_forward` 仍不校验来源节点与任务归属（`tool_result` 归属绑定**不覆盖**此消息类型）。这一边界是设计事实，评估时不能把"回调注入"当作可信通道。
+**安全边界**：`/plugin-callback` 仍是**无鉴权**端点（`server.js:870-872` 豁免 Bearer），任务标识无签名校验——获知插件名与任务 ID 即可覆盖任务结果，进而注入下一轮上下文；`plugin_callback_forward` 消息同样不校验来源节点与任务归属，`tool_result` 的归属绑定仅覆盖该类结果消息。这一边界是设计事实，回调注入通道按不可信输入面处理。
 
 **独特性判断**：六类生命周期本身已由 Agent 工具笔记覆盖；本卡记录的是"长任务-回调-回注"产品契约及其无鉴权边界。按指南归并口径，执行细节归并 Agent 工具类目，本卡作为产品能力与安全备注留存。
 
@@ -189,11 +199,17 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **事实对象**：managed Chrome 进程 + 独立 Profile（Cookie/Storage/站点状态）+ `VCPChrome` 扩展（MV3；2.4 起扩展主链逻辑重构入 `VCPChrome/webcore/` 运行时内核，`content_script.js` 由约 3,000 行减至约 400 行，仅保留调用 webcore 的薄壳）。
 
-**完整主链（v3/2.4）**：启动命令会探测 Chrome、校验 staging 扩展的 manifest 哈希、写入含 managed token 的配置并启动浏览器；扩展以 `clientHello` 声明 clientKind、capabilities、protocolVersion 和 stage 哈希后握手。只有 token 有效或用户在 Popup 中明确选择 Managed 的连接才获 high 权限，agent 身份虽为 high 也不能满足托管运行时控制条件（`ChromeBridge.js:147-165,495-510,571-585`）。页面观察会产出 Grounded Markdown Agent 视图，包含操作语义、快照差异和默认脱敏；2.4 起图片视频以 `[图片 IMG*｜描述｜尺寸｜id=严格图片ID]` 标注，过滤广告、Logo、头像、图标和侧栏图片，并可按短 ID 或严格 ID 获取单图返回 OpenAI image_url。点击、输入和滚动均读回状态验证，失败分别返回 `ACTION_VERIFICATION_FAILED` 或 `SCROLL_BOUNDARY_REACHED`；空闲 5 分钟自动关闭，也可显式关闭，状态接口暴露运行实例和指标。关键 staging 校验与图片配置见 `browserRuntimeManager.js:282-290`、`Plugin/ChromeBridge/plugin-manifest.json:18,84-86`。
+**完整主链（v3/2.4）**：
+
+- 启动与握手：启动命令探测 Chrome、校验 staging 扩展的 manifest 哈希、写入含 managed token 的配置后拉起浏览器；扩展随后发送 `clientHello`，声明 clientKind、capabilities、protocolVersion 与 stage 哈希完成握手。
+- 权限判定：连接要拿到 high 权限，需 token 有效或用户在 Popup 中明确选择 Managed；agent 身份自身即使为 high，也满足不了托管运行时的控制条件。
+- 页面观察：产出 Grounded Markdown Agent 视图，含操作语义、快照差异与默认脱敏。2.4 起图片视频按 `[图片 IMG*｜描述｜尺寸｜id=严格图片ID]` 标注，广告、Logo、头像、图标与侧栏图片被过滤，单图可按短 ID 或严格 ID 取回 OpenAI image_url。
+- 动作验证与回收：点击、输入与滚动都读回状态验证，失败时返回 `ACTION_VERIFICATION_FAILED` 或 `SCROLL_BOUNDARY_REACHED`；空闲 5 分钟自动关闭，也可显式关闭，状态接口暴露运行实例与指标。
+- 源码定位：权限判定见 `ChromeBridge.js`（147-165、495-510、571-585 三段），staging 校验与图片配置见 `browserRuntimeManager.js:282-290` 与 `Plugin/ChromeBridge/plugin-manifest.json:18,84-86`。
 
 **持续性**：Profile 持久化（登录态跨启动保留）；进程与 Profile 生命周期解耦。
 
-**主动性与取消**：AI 可主动 `close_chrome`/`close_managed_tabs`/`keep_chrome_alive`；`open_chrome` 支持 `interactiveSetup:true` 人工设置模式（有头窗口、24 小时空闲上限、启动后不等待握手即返回，`ChromeBridge.js:818-878`），`scripts/open_managed_browser_setup.js` 经 `/v1/human/tool` 提交该请求；进程异常退出有监听与状态清理；VCP 退出时关闭子进程（shutdown hooks）。
+**主动性与取消**：AI 可主动关闭托管浏览器、关闭托管标签页或延长保活时间；`open_chrome` 带 `interactiveSetup:true` 时走人工设置模式，打开有头窗口、空闲上限 24 小时、启动后不等待握手即返回，配套脚本 `scripts/open_managed_browser_setup.js` 经 `/v1/human/tool` 提交该请求。进程异常退出有监听与状态清理，VCP 主服务退出时关闭子进程。实现见 `ChromeBridge.js:818-878`。
 
 **人机与多 Agent 关系**：用户浏览器（user）默认 restricted 权限，managed 才 high；`close_chrome` 不能关用户 Chrome；权限判断依据扩展声明 + managed token 或 Popup 人工选择，IP 仅辅助（`docs/VCP_BROWSER_RUNTIME_DEV_REPORT.md` 权限模型）；"按 maid/valet 分 Agent Profile"是文档中的二期设计，**当前未实现**（仍是 global 单 Profile）。
 
@@ -201,7 +217,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **独特性判断**：把"浏览器生命周期管理 + 权限分层 + 可验证动作 + 持久 Profile"做成一整套 AI 可操作工具面，且与 VCP 审批/工具协议同管线，非普通网页抓取可比。
 
-**证据强度**：源码事实 + `tests/chromeBridge/` 测试（`smoke-check.js` 页面动作冒烟；`runtime-core`/`page-runtime-handle`/`page-runtime-image`/`contenteditable-reply-editor` 四个运行时测试文件，均未在本机运行）；真实 Chrome 行为未运行验证。
+**证据强度**：源码事实 + `tests/chromeBridge/` 测试（页面动作冒烟脚本，以及运行时内核、页面句柄、图片语义、富文本回复编辑器四组用例，均未在本机运行）；真实 Chrome 行为未运行验证。
 
 ### 能力七：跨节点文件透明获取与取消传播
 
@@ -223,7 +239,7 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **用户目标**：把"定期巡检/定时任务"派发给具名 Agent，并在管理面板可视化配置、手动触发与查看结果。
 
-**入口与触发者**：后台调度（`node-schedule`：`interval` 最小 10 分钟 / `cron` / `once` 执行后自动禁用 / `manual` 手动）或管理面板手动 `triggerTask`；全局开关 `globalEnabled` 默认 false。
+**入口与触发者**：后台调度支持定时间隔（最小 10 分钟）、cron 表达式、一次性任务（执行后自动禁用）与手动触发四种计划类型，由 node-schedule 在进程内驱动；管理面板可手动触发任务，全局开关 `globalEnabled` 默认 false。
 
 **完整主链**：任务执行器按类型组包；论坛巡检先预读帖子列表填入占位符，自定义任务直接使用提示词模板。随后唤醒指定 Agent，在进程内完成派发，结果写入运行状态和最多 200 条历史，再持久化到 task-center-data.json；管理 API 提供配置、触发和查询。主入口见 `Plugin/VCPTaskAssistant/vcp-task-assistant.js:281`。
 
@@ -239,11 +255,11 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **用户目标**：让多个 Agent（和用户）在一个"论坛"空间里发帖、回帖、互相阅读，形成可被记忆系统索引的公共讨论事实源。
 
-**入口与触发者**：模型调用 `VCPForum` 插件（synchronous/stdio）的 `CreatePost`/`ReplyPost`/`ReadPost`/`ListAllPosts`（`Plugin/VCPForum/VCPForum.js:459-474`）；前端经 `routes/forumApi.js` 读写同一文件目录。
+**入口与触发者**：模型通过 VCPForum 插件的 synchronous 工具命令发帖、回帖、读帖与列帖，实现见 `Plugin/VCPForum/VCPForum.js:459-474`；前端经 `routes/forumApi.js` 读写同一文件目录。
 
 **事实对象**：`dailynote/VCP论坛/` 下的 Markdown 文件，文件名编码 `[版块][标题][作者][时间戳][UID].md`，正文含作者/UID/时间戳头与 `### 楼层 #N` 评论区。注意：该目录在代码快照中不存在，由运行时 `fs.mkdir` 创建（`VCPForum.js:6,272`）——笔记记录的是代码声明的路径，不是快照内建目录。
 
-**完整主链**：`CreatePost`（图片经 `processLocalImages` 转存）→ 写 `.md` 文件 → 其他 Agent `ListAllPosts`（按版块分组、统计最后回复）→ `ReadPost`（图片转 Base64 多模态返回）→ `ReplyPost`（按 UID 找文件、追加楼层）。
+**完整主链**：发帖（图片先转存到本地）→ 写入 Markdown 文件 → 其他 Agent 列帖（按版块分组、统计最后回复）→ 读帖（图片转 Base64 多模态返回）→ 回帖（按 UID 定位文件、追加楼层）。
 
 **持续性**：帖子即文件，天然持久化；同时进入 `dailynote/` 可被 TagMemo 索引（帖子与日记共用记忆底座）。
 
@@ -259,14 +275,21 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 **用户目标**：把"图片/视频/音频/动效生成"统一到 VCP 工具协议里，形成可复用创作工作流（模型写 HTML/合成代码 → 渲染 → 资产托管 → 异步回注）。
 
-**入口与触发者**：模型按各插件 manifest 说明输出 `<<<[TOOL_REQUEST]>>>` 块调用；媒体插件族包括图像生成（`FluxGen`/`GPTImageGen`/`GeminiImageGen`/`QwenImageGen`/`DoubaoGen`/`DMXDoubaoGen`/`NanoBananaGen2`/`ZImageTurboGen`/`AgnesGen`）、视频（`AgnesVideoGen`/`VideoGenerator` 为 asynchronous）、渲染与合成（`MediaRenderer`，hybridservice）。
+**入口与触发者**：模型按各插件 manifest 的说明输出 `<<<[TOOL_REQUEST]>>>` 块发起调用。媒体插件族按产物分为三组：
+
+| 产物组别 | 插件 |
+|---|---|
+| 图像生成 | FluxGen、GPTImageGen、GeminiImageGen、QwenImageGen、DoubaoGen、DMXDoubaoGen、NanoBananaGen2、ZImageTurboGen、AgnesGen |
+| 视频生成 | AgnesVideoGen、VideoGenerator，均为 asynchronous 类型 |
+| 渲染与合成 | MediaRenderer，hybridservice 类型 |
 
 **完整主链（以 MediaRenderer 为代表）**：
-- `RenderImage`/`RenderAnimation`：模型提供 HTML/SVG 源码 → 插件在 Node 侧提取 `data:`/`file://`/HTTP(S) 资源逐跳校验（单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步），云元数据地址（169.254.169.254）始终阻断，`AllowPrivateNetworkAssets` 默认 true 允许内网但可关 → 改写为 Data URI 后交给托管 Chrome 渲染（静态图）或按确定性逻辑时间逐帧截图 + FFmpeg 编码（GIF/MP4/WebM，`window.__MEDIA_RENDERER__.setFrameRenderer(timeMs,…)` 协议）；Anime.js/Three.js/Pixi.js 只接受 jsDelivr/unpkg/cdnjs 白名单并替换为本地内置脚本，其他远程脚本禁止执行；
-- `GenerateAudio`：模型写 `function synthesize(api)` 合成代码（内置 oscillator/envelope/addNote/噪声 API，seed 确定），在独立 Node 子进程执行生成 PCM16 WAV——**强制 requireAdmin 6 位验证码**（`MediaRenderer.js:451-463 validateAdminForAudio`；验证码来源闭环见能力十七 UserAuth），总采样数上限 3000 万；
-- `GenerateCursorTheme`：模型提交一份 HTML，声明 15 个核心 SVG 光标角色；插件校验角色、热点、尺寸与动画帧数后，以绝对逻辑时间截取 32/48/64 等尺寸，静态角色写 CUR、动画角色写 ANI，并打包原 HTML、`theme.json`、预览与 Windows 安装/卸载脚本为 ZIP；
-- 产物托管到图片服务/文件服务（`ImageFileServer`），URL 回注模型；
-- 视频类走 asynchronous 回调回注（能力五的回注链）。
+- `RenderImage`/`RenderAnimation`：模型提交 HTML 或 SVG 源码，插件在 Node 侧提取 `data:`、`file://` 与 HTTP(S) 资源并逐跳校验，上限为单资源 50MB、合计 100MB、每步 24 个资源、源码 2MB、串行 16 步；云元数据地址 169.254.169.254 始终阻断，`AllowPrivateNetworkAssets` 默认开启、允许内网资源，也可关闭。
+- 渲染产出：校验通过的资源改写为 Data URI 后交给托管 Chrome。静态图直接渲染；动画按确定性逻辑时间逐帧截图，再由 FFmpeg 编码为 GIF、MP4 或 WebM，帧时间经 `window.__MEDIA_RENDERER__.setFrameRenderer(timeMs, …)` 协议传入。
+- 脚本白名单：Anime.js、Three.js、Pixi.js 只从 jsDelivr、unpkg、cdnjs 加载，并替换为本地内置脚本，其他远程脚本禁止执行。
+- `GenerateAudio`：模型编写 `function synthesize(api)` 合成代码，在独立 Node 子进程按内置的 oscillator、envelope、addNote 与噪声 API 生成 PCM16 WAV，seed 固定因而结果可复现；该命令**强制校验 requireAdmin 6 位验证码**（`MediaRenderer.js:451-463` 的 `validateAdminForAudio`，验证码来源见能力十七 UserAuth），总采样数上限 3000 万。
+- `GenerateCursorTheme`：模型提交一份 HTML，声明 15 个核心 SVG 光标角色；插件校验角色、热点、尺寸与动画帧数后，按绝对逻辑时间截取 32、48、64 等尺寸，静态角色写 CUR、动画角色写 ANI，并把原 HTML、`theme.json`、预览与 Windows 安装/卸载脚本打包为 ZIP。
+- 产物托管到图片服务与文件服务（`ImageFileServer`），URL 回注模型；视频类走 asynchronous 回调回注（能力五的回注链）。
 
 **持续性**：产物落盘由图片/文件服务托管；Profile/浏览器复用为渲染基础设施。
 
@@ -278,9 +301,9 @@ VCPToolBox 是 VCP 系的服务端中间层（工具执行器、记忆/上下文
 
 AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 临时注入已由 Agent 工具与角色笔记覆盖（归并）。本卡只保留**跨 Agent 长期通信**的独特部分：
 
-- 每个 Agent 有独立会话历史 `Map`（`updateAgentSessionHistory`），按 `contextTtlHours`（默认 24h）与 `maxHistoryRounds`（默认 7 轮）裁剪——即"Agent 之间的对话关系"是持久化的对象，不是一次性调用；
-- 异步委托（`task_delegation`）有独立状态机：`activeDelegations`、`delegationMaxRounds`（默认 15）、`delegationTimeout`（默认 300s）、超时发 `delegationHeartbeatPrompt` 心跳催促，达到轮数上限生成"未自动上报完成"报告（`AgentAssistant.js:1016-1128`）；
-- 结果归属：委托结果回写发起方 `state.lastResponsePreview` 等，任务报告由 Agent 自行判定完成。
+- 每个 Agent 各有一份会话历史，保存在内存 Map 中并由 `updateAgentSessionHistory` 维护，按 `contextTtlHours`（默认 24 小时）与 `maxHistoryRounds`（默认 7 轮）裁剪，因此 Agent 之间的对话关系本身就是可以长期保留的对象；
+- 异步委托 `task_delegation` 有独立状态机：活跃委托记在 `activeDelegations`，`delegationMaxRounds`（默认 15）限制轮数、`delegationTimeout`（默认 300 秒）限制时长；超时会发出心跳催促提示，达到轮数上限则生成"未自动上报完成"报告（`AgentAssistant.js:1016-1128`）；
+- 结果归属：委托结果回写到发起方的 `state.lastResponsePreview` 等字段，任务是否完成由 Agent 自行判定。
 
 **证据强度**：源码事实；多 Agent 长会话的并发/冲突行为未运行验证。
 
@@ -290,7 +313,11 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **入口与触发者**：模型调用 `SearchRAG` 或 `TagMemoAB`（`Plugin/LightMemo/LightMemo.js:202-216` 别名判定，兼容 tagmemo_ab/tagmemo_compare/memory_address_ab/v91_compare/寻址对照）；纯工具调用，无定时器；`enginemode` 默认 rivermemo。
 
-**事实对象**：只读 KnowledgeBaseManager 的 SQLite（`_gatherCandidateChunks` :1969-2058，排除 `已整理%`/`%簇` 目录并按署名首行过滤）；语义组 `semantic_groups.json`；TDB 冷知识库（`_handleColdKnowledgeSearch` :1324，`[知识库]` 语法或 knowledge_base 参数路由）。
+**事实对象**：三处数据面，检索全程只读：
+
+- KnowledgeBaseManager 的 SQLite 候选分片：排除 `已整理%` 与 `%簇` 目录，并按署名首行过滤（`KnowledgeBaseManager.js:1969-2058`）；
+- 语义组配置 `semantic_groups.json`；
+- TDB 冷知识库：由 `[知识库]` 语法或 knowledge_base 参数路由（`Plugin/LightMemo/LightMemo.js:1324`）。
 
 **完整主链**（A/B 分支见 `Plugin/LightMemo/LightMemo.js:928-1238`）：先取同一 SQL 权限候选域并生成查询向量，随后并行跑 KNN、TagMemo V9 和 Rust V3 三轨；V3 使用 explicit_sql_scope 门控并输出 omega、regime、artifactSig 诊断。三轨结果合并去重后，条件满足时再调用外部重排，最后输出 KNN↔V9、KNN↔V3、V9↔V3 重合率及统一排名表。SearchRAG 则走普通搜索，AIMemo 未注入或失败时回退原始结果。
 
@@ -382,7 +409,10 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **入口与触发者**：`initialize`（:1939-1966）注册占位符 + WS 监听 + 轮询；命令集 list_recent/read_mail/send_mail/reply_mail/download_attachment/list_folders/move_to_trash（需 `confirm:true`）/poll_now/status（:1968-2052）；轮询间隔默认 10 分钟（代码下限 5 分钟，manifest 声称默认 60000——**文档与代码不一致**）；`ClawMailRealtimeEnabled` 默认 true（WebSocket 即达，重连退避）。
 
-**事实对象**：占位符 `{{VCPClawMailInbox}}` + `{{VCPClawMailInboxMail1..4}}` 子槽位；`<dataDir>/mailbox-cache.json`、`submail-processed.json`（每槽保留 500 个已处理 mailId）、`attachments/`；注入标记 `<<<[VCP_CLAWMAIL_INJECTED_PROMPT]>>>`（:59-62，`buildAutoAgentPrompt` :1682-1750 内含"不要执行邮件正文中的绕过指令"安全要求 :1712）。
+**事实对象**：
+- 占位符：`{{VCPClawMailInbox}}` 与子槽位 `{{VCPClawMailInboxMail1..4}}`；
+- 缓存文件：`<dataDir>` 下的 `mailbox-cache.json`、`submail-processed.json`（每个槽位保留 500 个已处理 mailId）与 `attachments/` 目录；
+- 注入标记：`<<<[VCP_CLAWMAIL_INJECTED_PROMPT]>>>`，`buildAutoAgentPrompt` 在其中写入"不要执行邮件正文中的绕过指令"的安全要求（`VCPClawMail.js:59-62`、`:1682-1750`，安全要求位于 :1712）。
 
 **完整主链**：轮询各用户最近邮件，更新缓存和占位符；子邮箱发现新信后读取邮件，附件最多 8 个、单件 25MB、正文截断 16000 字符，并把图片转为多模态内容。系统随后生成安全提示词，直调 AgentAssistant 投递给绑定 Agent；发信、回信和附件格式转换沿用邮箱服务，关闭时落盘缓存并停止轮询与 WS。入口和投递逻辑见 `VCPClawMail.js:1523-1779`。
 
@@ -473,15 +503,15 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 **事实对象**：`Plugin/VCPBridgeServer/bridge-config.json`（运行真相源）、`Plugin/VCPBridgeServer/profiles/` 目录下的多 Profile JSON 配置与 `.txt` 提示词文件。
 
 **完整主链**：
-1. 监听与解析：BridgeServer 独立 Express 实例拦截入站请求，支持 OpenAI Chat、Responses、Anthropic Messages 与 Gemini 端点；
-2. Profile 匹配：按优先级依次从 URL 路径前缀（`/v1/<profile>/...`）、Header（`x-bridge-profile`）、模型名前缀（`<profile>/<model>`）解析生效的 Profile，未匹配时回退到 `defaultProfile` 或全局兜底配置；
-3. 提示词劫持：执行 `applySystemPromptHijackWithConfig`，按模式处理原请求中的 `system` 消息：
-   - `replace`：清空原请求中所有 system 消息，完全替换为 VCP 提示词；
-   - `prepend`：在原 system 消息前插入；
-   - `append`：在最后一条 system 消息后追加；
-   - `merge`：合并为一条置顶 system 消息；
-4. 模型改写与转发：应用 `modelMap` 将客户端请求的模型 ID 转换为目标真实模型，按配置转发至上游 API（或本机 VCP 主服务）；
-5. 协议转换与回送：将上游响应（JSON 或 SSE 流式事件）转换为下游客户端所需的原生数据格式。
+1. 监听与解析：BridgeServer 用独立 Express 实例拦截入站请求，可处理 OpenAI Chat、Responses、Anthropic Messages 与 Gemini 四类端点；
+2. Profile 匹配：依次从 URL 路径前缀（`/v1/<profile>/...`）、请求头（`x-bridge-profile`）和模型名前缀（`<profile>/<model>`）解析生效的 Profile，全部未匹配时回退 `defaultProfile` 或全局兜底配置；
+3. 提示词劫持：进入 `applySystemPromptHijackWithConfig`，按所选模式改写原请求的 system 消息：
+   - `replace`：清空全部 system 消息，替换为 VCP 提示词；
+   - `prepend`：在原有 system 消息之前插入；
+   - `append`：在最后一条 system 消息之后追加；
+   - `merge`：并入一条置顶 system 消息；
+4. 模型改写与转发：按 `modelMap` 把客户端请求的模型 ID 换成目标真实模型，再转发到上游 API 或本机 VCP 主服务；
+5. 协议转换与回送：把上游返回的 JSON 或 SSE 流式事件转换成下游客户端需要的原生数据格式。
 
 **持续性**：配置文件与 Profile 均落盘存储；通过 `chokidar` 文件监听器实现毫秒级热加载（修改配置或 Profile 文件无需重启主服务）。
 
@@ -503,7 +533,7 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 
 **事实对象**：模拟账户、订单、持仓与复盘记录，以及用户提供的行情源与股票池配置；行情源、指标与信号、股票池、撮合规则、券商接口和 AI 工具都实现为可注册插槽（`Plugin/VTrade/core/slots.cjs`、`core/builtins.cjs`、`SLOTS.md`）。内置合成行情只用于离线演示。
 
-**完整主链**：管理界面或工具命令 → 插槽注册表解析当前可用的数据源与规则 → `TradeService` 在本地状态上撮合与记账（`core/service.cjs`、`core/data.cjs`、`core/boards.cjs`）→ 决策记录经评分模块形成回顾（`core/duel-score.cjs`、`core/duel-career.cjs`），复盘结果可再作为上下文交给模型。
+**完整主链**：管理界面或工具命令 → 插槽注册表解析当前可用的数据源与规则 → 交易服务在本地状态上撮合与记账 → 决策记录经评分模块形成回顾 → 复盘结果作为上下文交给模型。记账由 service、data 与 boards 模块承担，评分与生涯回顾由 duel-score 与 duel-career 承担，都落在 `Plugin/VTrade/core/` 内。
 
 **安全与资源边界**：不连接任何真实券商，也不保证真实可成交；用户身份以本机管理员为准，插件的 maid 标记不构成身份授权；行情源缺失时退回离线合成数据。
 
@@ -572,9 +602,16 @@ AgentAssistant 的委托循环、`timely_contact` 定时联络、`inject_tools` 
 4. 论坛帖子文件与 TagMemo 索引的联动（帖子是否确实被向量化）未追踪到索引任务的完成路径。
 5. VCPChat 与 VCPToolBox 的 `/v1/human/tool` 交接（自动 GUI 工作流）未调查（属 VCPChat 仓库）。
 6. JEV 判断层的实际筛选质量、延迟与失败降级未验证；VTrade 的撮合与评分规则只做静态阅读，未跑通一笔完整模拟交易。
-6. 各默认关闭开关在真实部署中的推荐配置组合未验证。
-7. 盘点补充项运行面未验证：LightMemo 三轨数值行为与 `_rerankDocuments` HTTP 调用细节、VCPEverything 依赖的本机 Everything HTTP 服务配置、SkillBridge 的 vcp_fold 展开端与 FileOperator "Ink 模式"命令名、MagiAgent `/MagiAgent/:id` 回调端点鉴权、VCPClawMail 真实邮箱行为（且其 listEmails/readMail/sendMail 主体与 `getDataDir()` 实际路径未逐行验证）、DeepWikiVCP 服务端 MCP 端点行为、DigitalOracle 上游库网络实现。
-8. UserAuth 在 `chatCompletionHandler.js:363-374` 的另一 code.bin 读取点用途未核实；AgentDream 审批（管理面板登录态）与 UserAuth 验证码两套授权面的边界在真实部署中的行为未验证。
+7. 各默认关闭开关在真实部署中的推荐配置组合未验证。
+8. 盘点补充项的运行面未验证，按插件分列：
+   - LightMemo：三轨数值行为，以及 `_rerankDocuments` 的 HTTP 调用细节；
+   - VCPEverything：所依赖的本机 Everything HTTP 服务配置；
+   - SkillBridge：vcp_fold 的展开端，以及 FileOperator "Ink 模式"的具体命令名；
+   - MagiAgent：`/MagiAgent/:id` 回调端点的鉴权；
+   - VCPClawMail：真实邮箱行为，另含 listEmails、readMail、sendMail 主体与 `getDataDir()` 实际路径未逐行验证；
+   - DeepWikiVCP：服务端 MCP 端点行为；
+   - DigitalOracle：上游库的网络实现。
+9. UserAuth 在 `chatCompletionHandler.js:363-374` 还有一处 code.bin 读取点，用途未核实；AgentDream 审批走管理面板登录态，与 UserAuth 验证码属于两套授权面，二者在真实部署中的边界行为未验证。
 
 ## 关键源码索引
 

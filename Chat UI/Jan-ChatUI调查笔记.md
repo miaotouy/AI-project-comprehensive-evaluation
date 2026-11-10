@@ -18,7 +18,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 关键工作流特征：
 
-- **Composer**（`ChatInput.tsx`，约 3000 行，memo 无自定义比较器）承担文本输入、附件摄取、发送与停止；发送时若正在流式则 `enqueue` 入队，队列消息以 `QueuedMessageChip` 显示在输入区顶部。
+- **Composer**：输入区由 `ChatInput.tsx`（约 3000 行，memo 包裹且未自定义比较器）承担文本输入、附件摄取、发送与停止。当前回合仍在流式输出时，发送动作改为把消息加入队列，排队消息以 `QueuedMessageChip` 显示在输入区顶部。
 - **消息操作**：编辑（`EditMessageDialog`，Ctrl+Enter 保存）、删除（`DeleteMessageDialog` 确认）、复制、Continue（仅末条且 `metadata.stopped`）、Regenerate（仅末条）；流式态下编辑/删除禁用。
 - **版本导航**：`< n/m >` 切换器渲染在**消息项**（`containers/MessageItem.tsx` 的操作区，非线程列表）；重新生成产生兄弟 sibling 并成为 active；Continue 原地续写不 fork。
 - **错误反馈**：banner 置顶（OOM/backend/context），最后一条失败 assistant 消息被隐藏；"Increase Context Size" 手动扩容按钮。
@@ -42,7 +42,7 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 ## 1. 页面结构、导航与多窗口
 
-- **工作台拓扑**：左侧栏 `LeftSidebar`（shadcn Sidebar，floating 变体、offcanvas 折叠）——导航区（新建聊天/搜索/项目入口，`NavMain.tsx:171-251`）+ 线程列表 + 项目列表；主区 = 顶栏（模型下拉）+ 消息区（吸附底部滚动，`role="log"` 无障碍角色，`components/ai-elements/conversation.tsx`）+ 底部 `ChatInput`（`$threadId.tsx`）。
+- **工作台拓扑**：线程页分为左侧栏与主区。左侧栏是 shadcn Sidebar 的 floating 变体，折叠时以 offcanvas 方式收起，包含导航区（新建聊天、搜索、项目入口，`NavMain.tsx:171-251`）、线程列表与项目列表。主区自上而下为顶栏、消息区与底部输入区：顶栏放模型下拉，消息区吸附底部滚动并使用 `role="log"` 无障碍角色（`components/ai-elements/conversation.tsx`），底部输入区是 `ChatInput`，位于线程页 `$threadId.tsx` 中。
 - **首页新聊天**：`routes/index.tsx`——无会话状态下的大输入框（无提交处理器时创建线程并导航，`ChatInput.tsx`）；无可用 provider 时显示 `SetupScreen`。
 - **临时对话**：`temporary-chat` 线程（查询参数进入），消息不落盘（数据侧在会话笔记 §1.1）。
 - **Cowork 表面**：除线程页外另有工作台式聊天面，要求模型支持工具，由会话列表、回合时间线与右侧产物预览组成。用户可编辑、重试或删除较早提问，操作截断该提问之后的记录再继续，和线程页的兄弟版本导航不同；`/compact` 保留显示时间线，只压缩模型重放历史。队列在正常完成后续发，停止或预算触限时保留，出错才清空（[cowork.tsx:1054–1117](../../jan/web-app/src/routes/cowork.tsx#L1054-L1117)、[cowork.tsx:1360–1412](../../jan/web-app/src/routes/cowork.tsx#L1360-L1412)）。执行与存储详见相邻请求/会话笔记。
@@ -50,47 +50,51 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 ## 2. 会话列表、搜索与现场恢复
 
-- **线程列表**（`ThreadList.tsx`，325 行）：`ThreadItem` 懒加载消息（磁盘为空不覆盖乐观写）；项目模式下显示省略的用户消息预览；排序按 `updated` 降序（数据侧在会话笔记 §5）；运行中线程显示加载图标。
+- **线程列表**：列表组件 `ThreadList.tsx`（325 行）按 `updated` 字段降序排列线程，运行中的线程显示加载图标。每个线程项在需要时才加载该线程的消息，磁盘数据为空时保留内存中的乐观写入；项目模式下条目显示省略后的用户消息预览。排序与加载的数据侧语义见会话笔记 §5。
 - **线程菜单**：重命名 / 添加到项目 / 移出项目 / 删除；删除项在 `What is Jan?` 且未完成 onboarding（`setup-completed` localStorage）时禁用。
 - **批量删除**：`NavChats.tsx:49-64` 在线程数 **>1** 时挂 `DeleteAllThreadsDialog`；删除后导航回首页（`DeleteAllThreadsDialog.tsx:49-51`）。
 - **重命名**：`RenameThreadDialog`（Enter 或按钮保存，无变化/空标题禁用保存；自动聚焦并全选）；数据侧 `metadata.titleSetManually=true`（会话笔记 §2.4）。
-- **搜索**：`SearchDialog`（`containers/dialogs/SearchDialog.tsx`，453 行）——localStorage 最近搜索（max 5，可清空）、Fzf 结果按有无 project 分组显示、↑↓/Enter 键盘导航、选中项滚动入视口、选择后导航到线程页（`/threads/$threadId`）；快捷键打开（`KeyboardShortcuts.tsx:71-76`，`PlatformShortcuts.SEARCH`）；搜索数据实现在 `useThreads.getFilteredThreads`（会话笔记 §5）。
+- **搜索**：搜索面板由 `SearchDialog`（`containers/dialogs/SearchDialog.tsx`，453 行）提供，可用快捷键打开，快捷键注册见 `KeyboardShortcuts.tsx:71-76`。面板用 localStorage 保存最近搜索词（上限 5 条，可清空）；模糊匹配结果由 Fzf 产出，按有无 project 分组显示，用 ↑↓ 移动、Enter 确认，选中项自动滚入视口，确认后导航到 `/threads/$threadId`。搜索数据由 `useThreads.getFilteredThreads` 提供（会话笔记 §5）。
 - **现场恢复**：进入线程页时——`activeRootId` 读线程 metadata 重建活跃分支（`$threadId.tsx`）；待发送初始消息经 `sessionStorage` 键 `initial-message-<threadId>` 恢复发送（发送前即移除防重复）；分支/版本切换后的滚动定位行为未运行验证。
 
 ## 3. Composer、草稿、附件与快捷输入
 
-- **输入区**：`ChatInput.tsx`（约 3000 行，`memo` 无自定义比较器）——`TextareaAutosize`（minRows 2 / maxRows 10），Enter 发送、Shift+Enter 换行（IME 合成中不触发）；`autoFocus` + 挂载/切线程/流式结束自动聚焦。
-- **输入历史**：ArrowUp/Down（光标位于行首/行尾才触发）在 `usePrompt.ts`（81 行，`MAX_HISTORY_SIZE=100`，去空与连续重复，导航时保存草稿）。
+- **输入区**：输入框是 `TextareaAutosize`，最少 2 行、最多 10 行；Enter 发送，Shift+Enter 换行，输入法合成过程中不触发发送。输入框在挂载、切换线程与流式结束时自动获得焦点。承载它的 `ChatInput.tsx` 约 3000 行，用 memo 包裹且未自定义比较器。
+- **输入历史**：无选区且光标位于全文起点时按 ArrowUp、位于全文终点时按 ArrowDown，可在最近 100 条输入记录中前后翻（上限由 `MAX_HISTORY_SIZE=100` 决定）。输入法合成期间跳过历史导航，边界判断见 `ChatInput.tsx:2249-2266`。历史记录跳过空输入与连续重复项，翻动前先保存当前草稿，实现见 `usePrompt.ts`（81 行）。
 - **附件摄取**（+ 菜单，能力随模型 capabilities 显示）：
   - 图片（仅 JPEG/JPG/PNG ≤10MB，SHA-256 内容哈希去重）→ `processImageFiles`；
   - 音频（WAV/MP3 ≤25MB，`decodeAudioDuration` 取时长）；
   - 视频（mp4/mov/webm/mkv/avi/m4v，≤100MB，Tauri 下 `convertFileSrc`+fetch 读文件）；
   - 文档（桌面端对话框，扩展名白名单长清单 + 去重 + 大小限制），解析偏好 inline/embeddings 在发送时决策（`processAttachmentsForSend`，执行语义在对话请求笔记 §9）。
-- **拖放**：`dropAcceptsAnything = hasMmproj || audioSupported || videoSupported` 才启用；逐类型分流（图片走 file-change 路径、音频/视频直接处理），拖入反馈为输入框高亮。
-- **粘贴**：音频（audioSupported 时）与图片（clipboard items 传统路径 + `navigator.clipboard.read` 回退，命名 `pasted-image-<ts>.<ext>`）两路。
-- **队列提示**：`QueuedMessageChip`（`containers/QueuedMessageBubble.tsx`）显示在输入区顶部——点击文本放回输入框编辑、X 移除（执行语义在对话请求笔记 §1/§8）。
-- **草稿**：本次未找到独立草稿保存机制——`prompt` 只在 `usePrompt` 内存中，切线程即清；sessionStorage 只用于"首页待发送的初始消息"（标注为未找到，检查范围：usePrompt 与 ChatInput 持久化调用）。
-- **语音输入**：本快照未发现（搜索 `speech`/`webkitSpeechRecognition`/`MediaRecorder`/`getUserMedia` 在 `web-app/src` 无命中）。
+- **拖放**：模型带多模态投影（mmproj）、支持音频或支持视频三者任一成立时，输入区才接受拖放；放下后按类型分流，图片走 file-change 路径，音频与视频直接进入处理流程，拖拽悬停时输入框高亮。
+- **粘贴**：支持音频时可粘贴音频；图片先走剪贴板 items 的传统路径，取不到时回退到 `navigator.clipboard.read`，保存名形如 `pasted-image-<ts>.<ext>`。
+- **队列提示**：排队中的消息以 `QueuedMessageChip` 显示在输入区顶部（实现见 `containers/QueuedMessageBubble.tsx`）；点击其中文本可把它放回输入框编辑，点 X 将其移除。队列执行语义见对话请求笔记 §1/§8。
+- **草稿**：本次未找到独立的草稿保存机制。输入文本只保存在 `usePrompt` 的内存状态中，切换线程即清空；sessionStorage 仅用于保存首页待发送的初始消息。检查范围为 `usePrompt` 与 `ChatInput` 的持久化调用。
+- **语音输入**：本快照未发现相关实现，搜索 `web-app/src` 中 `speech`、`webkitSpeechRecognition`、`MediaRecorder`、`getUserMedia` 均无命中。
 
 ## 4. Agent、模型、工具与发送前配置
 
-- **模型选择**：`DropdownModelProvider` 在 HeaderPage（线程页）与首页；无模型时发送被拦截并提示（`ChatInput.tsx`）。
+- **模型选择**：模型下拉 `DropdownModelProvider` 由线程页的 `HeaderPage` 与首页各挂载一份；未选中模型时，发送动作被拦截并给出提示，拦截点在 `ChatInput.tsx`。
 - **助手切换**：`AssistantSwitcher`（助手 >1 时显示，可键盘循环切换，`AssistantSwitcher.tsx:59-68`）；线程助手是嵌入快照，本线程内选择/编辑只影响该线程（会话笔记 §1.1/§8）。
 - **项目首条消息**：项目页把该项目的 assistantId 传给 Composer；创建线程时它优先于全局当前助手，因而选择器初始显示项目助手。已有线程仍按线程快照处理（`routes/project/$projectId.tsx:127-135`、`containers/ChatInput.tsx,477-496`）。
 - **推理参数**：`SamplerPopover`（线程内编辑 = 快照 + canonical 镜像双写，数据侧在会话笔记 §8）；参数如何进入请求（合并顺序、`createCustomFetch` 注入）在对话请求笔记 §2/§9。
 - **推理控制**：reasoning 开关（auto/on/off）与 Thinking Budget 等级（仅 llamacpp 显示 token 预算近似值）；OpenAI 的 reasoning effort 独立子菜单。
-- **工具与外部能力开关**：MCP 工具下拉（`DropdownToolsAvailable`/`McpExtensionToolLoader`）、web 搜索开关（高亮激活态）、Jan Browser 按钮（需 vision+tools 模型）、embeddings 指示。
+- **工具与外部能力开关**：输入区内并列以下几类开关。
+  - MCP 工具下拉，可用工具经 `DropdownToolsAvailable` 与 `McpExtensionToolLoader` 提供；
+  - web 搜索开关，激活时高亮；
+  - Jan Browser 按钮，仅当模型同时支持 vision 与 tools 时出现；
+  - embeddings 指示。
 - **Token 计数**：`TokenCounter` 按设置显示紧凑/完整形态（`shouldShowTokenCounter` 条件）。
 - **设置作用域可辨性**：模型级 `settings`（模型目录）与线程助手级 `parameters`（线程快照）在界面上分层呈现【代码确认】，未运行验证。
 
 ## 5. 发送、排队、流式反馈与停止
 
-- **发送**：发送按钮在无文本且无可发送媒体/正在摄取附件时禁用；`handleSendMessage`流式态入队、否则 `onSubmit`；发送链路执行语义在对话请求笔记 §1。
-- **排队反馈**：`QueuedMessageChip` 于输入区顶部（§3）；`status==='ready'` 自动发下一条、`error` 或离开线程清队列（执行语义在对话请求笔记 §8）。
-- **流式反馈**：AI SDK 流（throttle 50ms 只节流 UI 状态）；输入框流式态显示 MovingBorder 光环；`PromptProgress`（submitted 且非 continue 时）与"Growing the Mind..." Shimmer（continue 恢复时，`$threadId.tsx`）；嵌入文档处理中显示 embeddings 进度条；流式渲染（Streamdown、代码块、LaTeX）在消息渲染器笔记。
-- **停止**：流式态停止按钮——**队列非空时按钮变为"清队列"**（Tooltip 文案随队列长度切换），队列空才 `stopStreaming`（`onStop` → AI SDK `stop()`）；`metadata.stopped` 使 Continue 入口出现（执行侧在对话请求笔记 §6）。
-- **错误反馈**：banner 置顶（llama.cpp OOM / GGML backend / context overflow，`$threadId.tsx`），隐藏最后一条失败 assistant 消息；错误挂载 effect 找最后一条 assistant 并写 `metadata.error`（执行侧在对话请求笔记 §6）；消息级错误框 + Regenerate 按钮（`MessageItem.tsx`）；banner 上 OOM 附建议清单。
-- **上下文扩容**：`finishReason==='length'` 且 token ≥ 0.9×ctx_len 时横幅显示 "Increase Context Size" 按钮（扩容阶梯执行语义在对话请求笔记 §3），否则横幅显示 Reload/Regenerate。
+- **发送**：没有文本、也没有可发送媒体，或附件仍在摄取时，发送按钮保持禁用。点击后由 `handleSendMessage` 判断：正在流式输出则把消息加入队列，否则走 `onSubmit` 提交。发送链路的执行语义见对话请求笔记 §1。
+- **排队反馈**：排队消息以 `QueuedMessageChip` 显示在输入区顶部（§3）。当前回合状态变为 `ready` 后自动发出下一条；出现 error 或离开线程时清空队列。执行语义见对话请求笔记 §8。
+- **流式反馈**：流式过程中输入框显示 MovingBorder 光环；消息区在已提交且不是 continue 回合时显示 `PromptProgress`，continue 恢复时改显示 "Growing the Mind..." Shimmer，两处挂载都在 `$threadId.tsx`。后台处理嵌入文档时另显示 embeddings 进度条。UI 状态按 50ms 节流更新，AI SDK 的流本身不受节流影响。流式渲染细节（Streamdown、代码块、LaTeX）见消息渲染器笔记。
+- **停止**：流式期间停止按钮的行为取决于队列。队列非空时按钮**变为"清队列"**，Tooltip 文案随队列长度切换；队列为空才真正停止，经 `onStop` 调用 AI SDK 的 `stop()`。停止后 `metadata.stopped` 置位，Continue 入口随之出现。执行侧见对话请求笔记 §6。
+- **错误反馈**：llama.cpp 内存不足、GGML backend 失败与上下文溢出三类错误以 banner 置顶显示（挂载在线程页 `$threadId.tsx`），同时隐藏最后一条失败的 assistant 消息。错误挂载 effect 定位最后一条 assistant 消息并写入 `metadata.error`，banner 上的内存不足还附建议清单；消息项内的错误框与 Regenerate 按钮由 `MessageItem.tsx` 提供。执行侧见对话请求笔记 §6。
+- **上下文扩容**：回合因长度上限结束（finishReason 为 length）且已用 token 达到上下文的 0.9 倍时，横幅显示 "Increase Context Size" 按钮；未达该条件时横幅改为 Reload/Regenerate。扩容阶梯的执行语义见对话请求笔记 §3。
 
 ## 6. 消息操作、分支与版本导航
 
@@ -117,19 +121,23 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 ## 8. Chat UI 状态所有权与同步
 
 - **store 分工**：
-  - `useThreads`：列表/排序/搜索/增删改；
-  - `useMessages`：乐观写 + 异步持久化；
-  - `useChatSessions`：Chat 实例与流状态；
-  - `useAppState`：当前线程、busy/embedding 标记、oom/backend 错误、abort controllers；
-  - `usePrompt`：草稿与历史；
-  - `useMessageQueue`：per-thread 队列；
-  - `useMessageErrors`：错误文本；
-  - `useChatAttachments`：per-thread 附件（`NEW_THREAD_ATTACHMENT_KEY` 首页中转）；
-  - `$threadId.tsx` 是仲裁中枢（数据语义在会话笔记 §2.4/§6）。
-- **乐观写**：`addMessage` 先入内存再按 id 替换；ThreadItem 磁盘为空不覆盖乐观写（§2）。
-- **删除清理**：`deleteThread` 级联清 session/queue/attachments/向量库 + 重建搜索索引（数据侧会话笔记 §3）；离开线程清队列（`$threadId.tsx`）、abort 工具循环与审批。
-- **错误状态**：`message-errors.ts` 与 `metadata.error` 双写（对话请求笔记 §6）；banner 端配置控制呈现。
-- **busy 语义**：`setThreadBusy` 覆盖工具执行与嵌入处理期间（`$threadId.tsx, 1009, 1045`）；`embeddingThreads` 驱动嵌入进度 UI。
+
+  | store | 负责范围 |
+  |---|---|
+  | useThreads | 线程列表、排序、搜索与增删改 |
+  | useMessages | 消息的乐观写与异步持久化 |
+  | useChatSessions | Chat 实例与流状态 |
+  | useAppState | 当前线程、busy/embedding 标记、oom/backend 错误、abort controllers |
+  | usePrompt | 输入草稿与历史 |
+  | useMessageQueue | 每线程的消息队列 |
+  | useMessageErrors | 错误文本 |
+  | useChatAttachments | 每线程附件（`NEW_THREAD_ATTACHMENT_KEY` 首页中转） |
+
+  `$threadId.tsx` 是上述状态的仲裁中枢（数据语义在会话笔记 §2.4/§6）。
+- **乐观写**：`addMessage` 先把消息写入内存，再按 id 替换同一条记录；线程项在磁盘数据为空时保留这份乐观写入（§2）。
+- **删除清理**：`deleteThread` 级联删除会话、队列、附件与向量库中的对应记录，并重建搜索索引（数据侧见会话笔记 §3）。离开线程时清空该线程队列并中止工具循环与审批（`$threadId.tsx`）。
+- **错误状态**：错误同时写入 `message-errors.ts` 维护的状态与消息的 `metadata.error`，最终呈现由 banner 端配置控制（对话请求笔记 §6）。
+- **busy 语义**：工具执行与嵌入处理期间都以 `setThreadBusy` 标记线程忙碌，两处调用见 `$threadId.tsx:1009,1045`；嵌入进度 UI 由 `embeddingThreads` 驱动。
 - **现场恢复**：sessionStorage 初始消息（§2）；活跃分支经 `activeRootId` 恢复（§2）；每线程滚动位置在切换时的保留行为未运行验证。
 - **跨窗口同步**：未找到（§1）。
 
@@ -137,13 +145,14 @@ Jan 是标准 GUI 项目：桌面/移动共用同一个 React web-app 前端（`
 
 - **聊天关键路径的键盘点**【代码确认】：
   - 输入与发送：Enter 发送 / Shift+Enter 换行（§3）；
-  - 输入历史：ArrowUp/Down 光标首尾触发（§3）；
+  - 输入历史：无选区且光标位于全文起点时按 ArrowUp、位于全文终点时按 ArrowDown 翻历史（§3）；
   - 编辑保存：Ctrl+Enter（`EditMessageDialog.tsx:75-80`）；
-  - 删除/批量删除：Enter 确认、删除按钮自动聚焦（`DeleteMessageDialog.tsx:30-34,57-60`、`DeleteThreadDialog.tsx:76-80,92-96`、`DeleteAllThreadsDialog.tsx:54-58,68-72`）；重命名：自动聚焦并全选（`RenameThreadDialog.tsx:52-60`）、Enter 保存；
-  - 搜索：快捷键打开（`KeyboardShortcuts.tsx:71-76`），↑↓/Enter 导航选择（§2）；
-  - 全局：`KeyboardShortcutsProvider`（`providers/KeyboardShortcuts.tsx`）注册切侧栏/新聊天/新项目/设置/搜索/切助手等 `PlatformShortcuts`（集中在 `lib/shortcuts/` 目录配置）；
+  - 删除与批量删除：消息删除、线程删除与批量删除三个确认框都在打开时把焦点放在删除按钮上，Enter 直接确认（`DeleteMessageDialog.tsx:30-34,57-60`、`DeleteThreadDialog.tsx:76-80,92-96`、`DeleteAllThreadsDialog.tsx:54-58,68-72`）；
+  - 重命名：对话框打开即自动聚焦并全选标题，Enter 保存（`RenameThreadDialog.tsx:52-60`）；
+  - 搜索：快捷键打开搜索面板（`KeyboardShortcuts.tsx:71-76`），用 ↑↓ 移动、Enter 确认选择（§2）；
+  - 全局：`KeyboardShortcutsProvider` 注册切换侧栏、新建聊天、新建项目、打开设置、搜索与切换助手等快捷键，配置集中在 `lib/shortcuts/` 目录（`providers/KeyboardShortcuts.tsx`）；
   - 输入框自动聚焦：挂载、切线程、流式结束（`ChatInput.tsx`）。
-- **消息区**：`role="log"`（`conversation.tsx`）。
+- **消息区**：消息流容器使用 `role="log"` 无障碍角色（`conversation.tsx`）。
 - **焦点顺序、可访问名称、响应式行为、无障碍验证**：未运行验证（静态代码只能确认事件绑定）。
 - 本快照未发现语音输入（§3）。
 

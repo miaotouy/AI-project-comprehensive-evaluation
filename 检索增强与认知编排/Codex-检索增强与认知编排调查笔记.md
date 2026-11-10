@@ -16,10 +16,10 @@
 
 Codex 的检索相关能力由“文件化记忆 + 模型驱动的工具/Shell 查询 + 启动时后台记忆演化”三部分构成，全程不依赖向量 RAG。当前快照中：
 
-- **没有 Embedding、向量库或本地语义索引**。对 `embedding`、`vector store`、`faiss`、`lance`、`qdrant`、`bm25`、`rerank` 等关键词的全仓检索，只命中 `tool_search` 对“延迟加载的工具元数据”做的 BM25，没有命中知识语料索引（`codex-rs/core/src/tools/handlers/tool_search.rs:14-17`）。
-- **记忆事实源是 `$CODEX_HOME/memories` 或 `memories_v2` 下的 Markdown 工件**（原始 rollout 事件另存为 `$CODEX_HOME/sessions` 下的 JSONL，由摘要文件引用），不是数据库中的向量块；目录由配置 `memories.version` 选择（`codex-rs/protocol/src/memory_version.rs:17-22`）。
-- **写入是主动的**：根会话启动后的首个有效回合会触发后台 Phase 1 逐 rollout 抽取，再执行 Phase 2 全局合并；合并由一个受限子代理完成（`codex-rs/memories/write/src/start.rs:24-100`；`codex-rs/memories/write/src/phase2.rs:81-207`）。
-- **读取是工具化或 Shell 化的**：默认注入压缩后的 `memory_summary.md`，模型再通过 `memories.search/read/list` 或普通 Shell 命令访问 `MEMORY.md`、`rollout_summaries/` 和 `skills/`（`codex-rs/ext/memories/src/extension.rs:56-104、137-161`；`codex-rs/ext/memories/templates/memories/read_path.md:19-49`）。
+- **没有 Embedding、向量库或本地语义索引**。按 embedding、vector store、faiss、lance、qdrant、bm25、rerank 等关键词做全仓检索，唯一命中的是 `tool_search` 对延迟加载的工具元数据所做的 BM25 排序，知识语料索引没有命中（`codex-rs/core/src/tools/handlers/tool_search.rs:14-17`）。
+- **记忆事实源是 `$CODEX_HOME` 下 memories 或 memories_v2 目录中的 Markdown 工件**：原始 rollout 事件另存为同级的 sessions 目录下的 JSONL，由摘要文件引用，数据库里没有对应的向量块；两套目录由 `memories.version` 配置决定（`codex-rs/protocol/src/memory_version.rs:17-22`）。
+- **写入由会话侧主动发起**：根会话带输入的新回合成功提交后，经后台条件检查触发 Phase 1，按 rollout 逐个抽取，随后执行 Phase 2 全局合并；实际合并由一个受限子代理完成（`codex-rs/memories/write/src/start.rs:24-95`；`codex-rs/memories/write/src/phase2.rs:81-207`）。
+- **读取以记忆工具和 Shell 命令为主**：会话默认先注入压缩后的 `memory_summary.md`，模型再用搜索、读取、列举三个记忆工具或普通 Shell 命令打开 `MEMORY.md`、rollout 摘要目录和技能目录（`codex-rs/ext/memories/src/extension.rs:56-104、137-161`；`codex-rs/ext/memories/templates/memories/read_path.md:19-49`）。
 - **检索本身是子串匹配，没有打分、候选融合或重排**；结果按路径和行号排序，最多 200 条，用游标翻页（`codex-rs/ext/memories/src/local/search.rs:17-88`）。
 - **AGENTS.md 属于确定性上下文注入**，走独立于检索链路的注入通道：按项目根到当前目录逐级拼接，受 32 KiB 默认预算限制（`codex-rs/core/src/agents_md.rs:1-18、68-116`；`codex-rs/config/src/config_toml.rs:77`）。
 - **上下文压缩是预算管理**，会生成摘要并替换历史，但不查询外部知识（`codex-rs/core/src/compact.rs:117-150、403-416`）。
@@ -39,7 +39,9 @@ Codex 的检索相关能力由“文件化记忆 + 模型驱动的工具/Shell �
 
 Codex 把“记忆”实现为一组可编辑的本地工件，而不是一个独立的检索服务。系统边界可以分成三层：
 
-1. **事实源与工件层**：`$CODEX_HOME/memories`（V1）或 `$CODEX_HOME/memories_v2`（V2）下的 `MEMORY.md`、`memory_summary.md`、`raw_memories.md`、`rollout_summaries/`、`skills/`、`extensions/ad_hoc/notes/`。
+1. **事实源与工件层**：`$CODEX_HOME` 下的 memories（V1）或 memories_v2（V2）目录，全部记忆工件都存放于此：
+   - 记忆文件：MEMORY.md、memory_summary.md、raw_memories.md；
+   - 子目录：rollout_summaries/、skills/、extensions/ad_hoc/notes/。
 2. **派生状态层**：state DB 中的 Phase 1 任务、租约、stage-1 输出、Phase 2 选择与水位；它记录“哪些 rollout 已抽取、哪些被合并、使用量多少”，不保存向量。
 3. **注入与访问层**：会话启动时注入摘要和工具说明；模型通过工具或 Shell 读取文件；最终回答中的引用块被解析并回写使用量。
 
@@ -83,7 +85,7 @@ Phase 1 没有切块、Embedding 或索引构建。它把一次 rollout 压成�
 
 读路径有两种入口，二者都由模型决定何时查询：
 
-1. **专用工具**：当 `memories.dedicated_tools = true` 且 feature 与 `use_memories` 都开启时，扩展注册 `memories.search`、`memories.read`、`memories.list`、`memories.add_ad_hoc_note`（`codex-rs/ext/memories/src/extension.rs:137-161`；`codex-rs/ext/memories/src/lib.rs:13-22`）。
+1. **专用工具**：把 `memories.dedicated_tools` 设为 true、并同时开启记忆 feature 与 use_memories 开关后，扩展会注册搜索、读取、列举和追加笔记四个记忆工具（`codex-rs/ext/memories/src/extension.rs:137-161`；`codex-rs/ext/memories/src/lib.rs:13-22`）。
 2. **普通 Shell**：V1 提示词直接要求用关键词搜索 `MEMORY.md`，只在命中指针时打开 1-2 个 rollout 摘要或 skill；V2 提示词也允许在需要的路径缺失时做选择性搜索（`codex-rs/ext/memories/templates/memories/read_path.md:33-49`；`read_path_v2.md:7-10`）。
 
 `dedicated_tools` 默认是 `false`，所以默认路径更依赖 Shell 和提示词；专用工具是显式开启后的替代面（`codex-rs/config/src/types.rs:388-390`）。
@@ -114,14 +116,14 @@ Phase 1 没有切块、Embedding 或索引构建。它把一次 rollout 压成�
 
 Phase 2 是串行的全局合并，流程如下：
 
-1. 取得记忆工作区文件锁和全局 Phase 2 租约，避免并发合并（`codex-rs/memories/write/src/phase2.rs:67-88`）。
-2. 准备 `~/.codex` 下的记忆根目录及其 git 基线（`codex-rs/memories/write/src/phase2.rs:90-95`）。
-3. 从 state DB 选取最多 `max_raw_memories_for_consolidation` 条 stage-1 输出；默认按使用次数优先、再按最近使用/生成时间排序，并排除超过 `max_unused_days` 未使用的记忆（`codex-rs/memories/write/src/phase2.rs:109-120`；`codex-rs/memories/README.md:87-95`）。
-4. 同步 `rollout_summaries/` 和 V1 的 `raw_memories.md`，清理过期扩展资源（`codex-rs/memories/write/src/phase2.rs:210-225`）。
-5. 用 git 工作区差异判断是否有实际变化；无变化且工件有效时直接成功退出（`codex-rs/memories/write/src/phase2.rs:137-167`）。
-6. 有变化时把 diff 写入工作区，生成合并提示，启动受限的合并子代理（`codex-rs/memories/write/src/phase2.rs:169-201`）。
+1. 取得记忆工作区文件锁和全局 Phase 2 租约，避免并发合并；以下六步都在 `codex-rs/memories/write/src/phase2.rs:67-225` 内完成。
+2. 准备 `~/.codex` 下的记忆根目录及其 git 基线。
+3. 从 state DB 选取最多 `max_raw_memories_for_consolidation` 条 stage-1 输出：默认先按使用次数、再按最近使用或生成时间排序，超过 `max_unused_days` 未使用的记忆被排除（`codex-rs/memories/README.md:87-95`）。
+4. 同步 rollout_summaries/ 和 V1 的 raw_memories.md，清理过期扩展资源。
+5. 用 git 工作区差异判断有无实际变化；无变化且工件有效时直接成功退出。
+6. 有变化时把 diff 写入工作区、生成合并提示，启动受限的合并子代理。
 
-合并子代理固定无审批、禁用 MCP、禁用协作和记忆工具本身；在默认受管沙箱下，它的写权限只覆盖记忆根且网络关闭，若父会话使用外部隔离或显式关闭沙箱，则沿用父级的文件与网络权限（`codex-rs/memories/write/src/phase2.rs:318-357`）。模型来自 `memories.consolidation_model` 或 Provider 的默认合并模型（`codex-rs/model-provider/src/provider.rs:157-162`）。它读取 `phase2_workspace_diff.md`，更新 `MEMORY.md`、`memory_summary.md` 和 `skills/`。
+合并子代理以固定配置运行：不做审批，MCP、协作工具与记忆工具本身全部禁用。默认受管沙箱下，它只能写记忆根且没有网络；父会话使用外部隔离或显式关闭沙箱时，它继承父级的文件与网络权限（`codex-rs/memories/write/src/phase2.rs:318-357`）。合并模型来自 `memories.consolidation_model` 或 Provider 的默认合并模型（`codex-rs/model-provider/src/provider.rs:157-162`）。子代理读取工作区 diff 文件 phase2_workspace_diff.md，据此更新 MEMORY.md、memory_summary.md 和 skills/ 目录。
 
 ### 读路径注入
 
@@ -147,12 +149,12 @@ Phase 2 是串行的全局合并，流程如下：
 
 主动维护分两条路径：
 
-- **后台流水线**：根会话首个有效回合触发 `start_memories_startup_task`，满足非 ephemeral、feature 开启、非子代理、state DB 可用等条件后，在后台依次跑 Phase 1 和 Phase 2（`codex-rs/app-server/src/request_processors/turn_processor.rs:742-754`；`codex-rs/memories/write/src/start.rs:24-100`）。
-- **显式用户请求**：用户要求记住、忘记或修正时，模型只能调用 `memories.add_ad_hoc_note` 写一个追加式 Markdown 笔记到 `extensions/ad_hoc/notes/`，不能直接编辑生成的记忆文件；下一次合并消费该笔记（`codex-rs/ext/memories/src/tools/ad_hoc_note.rs:50-86`；`codex-rs/ext/memories/src/local/ad_hoc_note.rs:12-17`）。
+- **后台流水线**：根会话带输入的新回合成功提交后，主环境已配置时会调用 `start_memories_startup_task`；会话需为非 ephemeral、记忆 feature 已开启且当前为根代理，后台任务还需通过 state DB、目录布局与速率限制检查，随后依次跑 Phase 1 和 Phase 2。入口与后台检查见 `codex-rs/app-server/src/request_processors/turn_processor.rs:742-754`、`codex-rs/memories/write/src/start.rs:24-95`。
+- **显式用户请求**：用户要求记住、忘记或修正时，模型只能调用 `memories.add_ad_hoc_note` 往 extensions/ad_hoc/notes/ 目录追加一条 Markdown 笔记，生成的记忆文件仍由合并代理维护；这条笔记留给下一次合并消费（`codex-rs/ext/memories/src/tools/ad_hoc_note.rs:50-86`；`codex-rs/ext/memories/src/local/ad_hoc_note.rs:12-17`）。
 
 写回不需要管理员审批。合并子代理本身以 `AskForApproval::Never` 运行；默认受管沙箱下依靠关闭网络、清空 MCP 和只写记忆根来限制影响面，而不是逐条审批。父会话显式关闭沙箱或自带外部隔离时，这层沙箱约束随父级权限放宽（`codex-rs/memories/write/src/phase2.rs:328-357`）。
 
-文档与实现存在差异：`memories/README.md:29-38` 写的是“根会话启动时触发”，而当前可执行入口是 app-server 在首个带输入的回合成功提交后调用（`turn_processor.rs:742-754`）。两者描述的是同一后台流水线，但触发时机的精确语义以代码为准。
+文档与实现存在差异：`memories/README.md:29-38` 写的是“根会话启动时触发”，而当前可执行入口是 app-server 在带输入的新回合成功提交后调用（`turn_processor.rs:742-754`）。两者描述的是同一后台流水线，但触发时机的精确语义以代码为准。
 
 ## AGENTS.md 与确定性上下文注入
 
@@ -160,17 +162,17 @@ AGENTS.md 不属于记忆检索，但它决定了模型在每次会话中看到�
 
 发现规则：
 
-- 从当前工作目录向上找项目根，默认标记是 `.git`；找不到标记时只考虑当前目录（`codex-rs/core/src/agents_md.rs:10-18`）。
-- 从项目根到当前目录逐级收集，顺序为由外到内拼接，不越过项目根（`codex-rs/core/src/agents_md.rs:223-269`）。
-- 每个目录优先 `AGENTS.override.md`，其次 `AGENTS.md`，再其次配置的 fallback 文件名（`codex-rs/core/src/agents_md.rs:272-296`）。
-- `$CODEX_HOME` 下的全局 `AGENTS.override.md`/`AGENTS.md` 作为 user 级指令另行加载（`codex-rs/codex-home/src/instructions/mod.rs:40-84`）。
-- 未信任项目直接跳过项目文档，只保留 host 提供的用户指令（`codex-rs/core/src/agents_md.rs:63-66`）。
+- 从当前工作目录向上找项目根，默认标记是 `.git`；找不到标记时只考虑当前目录。
+- 从项目根到当前目录逐级收集，顺序为由外到内拼接，不越过项目根。
+- 每个目录优先 AGENTS.override.md，其次 AGENTS.md，再其次配置的 fallback 文件名。
+- `$CODEX_HOME` 下的全局 AGENTS.override.md 与 AGENTS.md 作为 user 级指令另行加载（`codex-rs/codex-home/src/instructions/mod.rs:40-84`）。
+- 未信任项目直接跳过项目文档，只保留 host 提供的用户指令；上述发现、收集与文件优先级规则实现在 `codex-rs/core/src/agents_md.rs:10-296`。
 
 预算与注入：
 
-- 默认总预算 32 KiB，可配置 `project_doc_max_bytes`；读取时按剩余字节递减，超限即停止（`codex-rs/config/src/config_toml.rs:77、337-338`；`codex-rs/core/src/agents_md.rs:68-95`）。
+- 总预算默认 32 KiB，配置项 `project_doc_max_bytes` 可以改这个上限；读取按目录逐层进行，每读一层扣减剩余字节，余额不足即停止（`codex-rs/config/src/config_toml.rs:77、337-338`；`codex-rs/core/src/agents_md.rs:68-95`）。
 - 线程级额外指令另有 10,000 估算 token 上限（`codex-rs/core/src/agents_md_manager.rs:187-196`）。
-- 最终内容转成 user 角色的上下文片段；当内容变化时，以“替换此前所有 AGENTS.md 指令”的提示重新注入，而不是重复追加（`codex-rs/core/src/agents_md.rs:473-486`；`codex-rs/core/src/context/world_state/agents_md.rs:11-80`）。
+- 最终内容转成 user 角色的上下文片段；内容变化时以“替换此前所有 AGENTS.md 指令”的提示整体替换已有片段，不重复追加（`codex-rs/core/src/agents_md.rs:473-486`；`codex-rs/core/src/context/world_state/agents_md.rs:11-80`）。
 
 因此 AGENTS.md 只做规则注入：候选生成、历史检索和记忆维护分别由检索链路与 memory 工具链承担。
 
@@ -178,10 +180,10 @@ AGENTS.md 不属于记忆检索，但它决定了模型在每次会话中看到�
 
 压缩处理的是“上下文超预算”，与“从外部资料找答案”属于两类问题。主链是：
 
-1. 每个回合结束后读取当前 token 状态，计算自动压缩作用域和上限（`codex-rs/core/src/session/context_window.rs:58-109`）。
+1. 每个回合结束后读取当前 token 状态，计算自动压缩的作用域和上限（`codex-rs/core/src/session/context_window.rs:58-109`）。
 2. 达到阈值或模型仍需后续回合时，触发内联压缩；完整上下文窗口是独立硬上限（`codex-rs/core/src/session/turn.rs:632-720`）。
-3. 压缩任务用 `SUMMARIZATION_PROMPT` 或配置的 `compact_prompt` 请求模型生成摘要（`codex-rs/core/src/compact.rs:117-150`）。
-4. 摘要加上固定的 `SUMMARY_PREFIX`，替换历史并保留真实用户消息；压缩项成为新的上下文边界（`codex-rs/core/src/compact.rs:404-417`）。
+3. 压缩任务用 SUMMARIZATION_PROMPT 或配置的 compact_prompt 请求模型生成摘要。
+4. 摘要加上固定的 SUMMARY_PREFIX，替换历史并保留真实用户消息；压缩项成为新的上下文边界（`codex-rs/core/src/compact.rs:117-150、404-417`）。
 5. 若 Provider 声明支持远端压缩 V2，则改走 Provider 的压缩协议；否则走本地摘要实现（`codex-rs/core/src/tasks/compact.rs:63-93`；`codex-rs/model-provider-info/src/capabilities.rs:22-32`）。
 
 这条链路不会查询 `MEMORY.md`、rollout 摘要或任何外部知识库。它产出的是当前对话的压缩摘要，与检索增强的候选生成、相关性排序无关。
@@ -241,15 +243,15 @@ MCP 资源另有两个工具面：列出资源和读取资源。它们读取 Ser
 ### 作用域与安全
 
 - 记忆根固定在 `$CODEX_HOME` 下的版本目录，工具路径解析被限制在根内；符号链接被拒绝，隐藏路径被跳过（`codex-rs/ext/memories/src/local/search.rs:44-49、107-125`）。
-- 合并子代理的 MCP 始终清空、审批为 Never；受管沙箱下只获得记忆根写权限且网络关闭，父级为 Disabled 或 External 时沿用父级权限（`codex-rs/memories/write/src/phase2.rs:328-357`）。
-- 外部上下文（工具搜索、网页搜索、函数输出）可以把线程标记为 `memory_mode = "polluted"`，从而影响后续是否使用记忆；该行为由 `memories.disable_on_external_context` 控制（`codex-rs/core/src/stream_events_utils.rs:157-183`；`codex-rs/config/src/types.rs:330-332`）。
+- 合并子代理的 MCP 始终清空、审批固定为 Never；受管沙箱下它只获得记忆根的写权限且网络关闭，父级沙箱为 Disabled 或 External 时沿用父级权限（`codex-rs/memories/write/src/phase2.rs:328-357`）。
+- 工具搜索、网页搜索和函数输出等外部上下文可以把线程标记为 `memory_mode = "polluted"`，从而影响后续是否使用记忆；这个行为由 `memories.disable_on_external_context` 控制（`codex-rs/core/src/stream_events_utils.rs:157-183`；`codex-rs/config/src/types.rs:330-332`）。
 - 生成记忆前会脱敏 secret；但记忆文件本身是普通文本，若模型写入敏感信息，后续仍可被读取。这是实现边界，不是已确认的漏洞。
 
 ### 可观测性
 
 - 每次记忆工具调用记录工具名、作用域、成功与否、是否截断等指标（`codex-rs/ext/memories/src/tools/search.rs:88-98`）。
 - Phase 1/2 记录领取数、成功/失败、跳过原因、输入条数和端到端耗时。
-- 引用块被解析后更新 stage-1 输出的使用次数和最近使用时间；Shell 读取 `MEMORY.md`、`memory_summary.md`、`raw_memories.md`、`rollout_summaries/`、`skills/` 也会被归类为记忆使用（`codex-rs/memories/read/src/usage.rs:30-70`）。
+- 引用块被解析后更新 stage-1 输出的使用次数和最近使用时间；Shell 读取记忆工件（注册表、摘要、原始记忆文件、rollout 摘要目录和技能目录）也会被归类为记忆使用（`codex-rs/memories/read/src/usage.rs:30-70`）。
 - 本次未找到面向用户的“检索解释面板”或候选分数展示；可解释性主要来自引用块中的文件、行号和 note。
 
 ### 恢复语义

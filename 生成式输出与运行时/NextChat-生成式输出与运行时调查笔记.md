@@ -24,24 +24,24 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 **主链路（HTML Artifact：触发 → 生成 → 运行 → 交互 → 保存 → 重新打开）**：
 
-1. **触发**：模型在助手消息中输出 `<!DOCTYPE html>` 开头的裸文本或 ` ```html ` 代码块。
-   - 预处理：渲染前调用 `tryWrapHtmlCode` 把裸 doctype 文本补成代码块（`app/components/markdown.tsx:249-268`）；
-   - 探测：`PreCode` 挂载后在语言为 html 或内容以 doctype/svg/xml 前缀开头时提取 HTML 源码（`markdown.tsx:83-100`），600ms 防抖；
-   - 开关：双重允许（判定见 `markdown.tsx:102-104`）——全局 `config.enableArtifacts`（`app/store/config.ts:54`）与会话 mask 的 `mask.enableArtifacts`（`app/store/mask.ts:21`）。
-2. **生成**：流式 SSE 逐 token 拼接文本，`onUpdate` 整体覆盖 `botMessage.content`（`app/store/chat.ts:464-472`）；流结束 `key` 从 `"loading"` 变 `"done"`，触发 Markdown 重挂载并重新提取（`app/components/chat.tsx:1970-1972`）。
-3. **运行**：`HTMLPreview` 把源码注入 iframe 的 `srcDoc`，并注入脚本回传高度（`app/components/artifacts.tsx:81-105`）；沙箱属性为 `allow-forms allow-modals allow-scripts`（`artifacts.tsx:100`）。外层包全屏容器并附重载与分享按钮（`markdown.tsx:151-171`）。
-4. **交互**：页面脚本在 iframe 内运行；用户可操作页面内容、重载（换 key 重建 iframe，`artifacts.tsx:64-68`）、全屏（`app/components/ui-lib.tsx:555`）。无源码编辑。
-5. **保存**：HTML 源码不单独落盘，随消息文本存入 IndexedDB（zustand persist，`app/utils/store.ts:37`、`app/utils/indexedDB-storage.ts`）。分享时 POST 全文到 `/api/artifacts`，服务端以 md5 为 key 写入 Cloudflare KV（`app/api/artifacts/route.ts:12-50`），返回 id 与分享 URL `#/artifacts/<md5>`。
-6. **重新打开**：独立路由 `/artifacts/:id`（`app/components/home.tsx:177-182`）→ `Artifacts` 组件 GET `/api/artifacts?id=` 取回全文（`artifacts.tsx:212-227`）→ 同一 `HTMLPreview` iframe 渲染。另可下载 `.html` 单文件或复制链接（`artifacts.tsx:165-200`）。
+1. **触发**：模型在助手消息里输出以 `<!DOCTYPE html>` 开头的裸文本，或围栏标记为 html 的代码块，渲染链路据此判断是否生成预览。
+   - 预处理：`tryWrapHtmlCode` 把裸 doctype 文本补成代码块（`app/components/markdown.tsx:249-268`）；
+   - 探测：`PreCode` 挂载后，语言为 html 或内容以 doctype、svg、xml 前缀开头时提取 HTML 源码，提取带 600ms 防抖，同一次判定也决定是否允许渲染（`markdown.tsx:83-104`）；
+   - 开关：渲染由全局 `enableArtifacts` 与会话 mask 的 `enableArtifacts` 双重控制，两处都开启才生效，两个配置项分别在 `app/store/config.ts:54` 与 `app/store/mask.ts:21`。
+2. **生成**：流式 SSE 逐 token 拼接文本，每轮回调把累计全文整体覆盖到 `botMessage.content`，并触发一次状态更新（`app/store/chat.ts:464-472`）；流结束后消息 key 由 `"loading"` 变成 `"done"`，Markdown 随之重挂载并重新提取一次（`app/components/chat.tsx:1970-1972`）。
+3. **运行**：`HTMLPreview` 把源码写进 iframe 的 `srcDoc`，并注入脚本回传高度；沙箱只授予表单提交、模态框与脚本执行三项权限。外层容器负责全屏，并附上重载与分享按钮（`app/components/artifacts.tsx:81-105`、`app/components/markdown.tsx:151-171`）。
+4. **交互**：页面脚本在 iframe 内运行，用户可以直接操作页面内容、重载与全屏；重载会换一个新 key 重建 iframe，全屏由通用 UI 组件承担（`app/components/artifacts.tsx:64-68`、`app/components/ui-lib.tsx:555`）。预览层没有源码编辑器。
+5. **保存**：HTML 源码没有单独落盘，它作为消息文本的一部分由 zustand persist 写入 IndexedDB（`app/utils/store.ts:37`、`app/utils/indexedDB-storage.ts`）。分享时把全文 POST 到 `/api/artifacts`，服务端以内容 md5 为 key 写进 Cloudflare KV，并返回 id 与 `#/artifacts/<md5>` 形式的分享地址（`app/api/artifacts/route.ts:12-50`）。
+6. **重新打开**：独立路由 `/artifacts/:id` 由 `Artifacts` 组件按 id 从接口取回全文，再交给同一个 `HTMLPreview` iframe 渲染；页面上还可下载 `.html` 单文件或复制链接（`app/components/home.tsx:177-182`、`app/components/artifacts.tsx:165-227`）。
 
 主链已按静态代码走通；未运行验证（见“未验证事项”）。
 
 ## 1. 触发方式、输出协议与对象模型
 
-- **触发方式**：全部为**模型自由文本探测**，无结构化 part、无专用标记语言、无工具调用触发的输出对象；HTML 探测规则见 `markdown.tsx:89-99`。
-- **Agent 工具交点点**：MCP 用 ` ```json:mcp:{clientId}` 代码块信息串触发（`app/mcp/utils.ts:2-8`），属 Agent 工具类目。
-- **协议鲁棒性**：无协议解析层，因此没有半截流、转义、嵌套处理；误触发仅靠 `enableArtifacts` 开关与“以 doctype/svg/xml 前缀开头”的启发式（`markdown.tsx:94-97`）。裸 HTML 补代码块的正则会忽略已含 ``` 的内容（`markdown.tsx:252-254`）。
-- **对象模型**：**不存在输出对象类型**。消息模型 `ChatMessage`（`app/store/chat.ts:57-66`）字段集合为：
+- **触发方式**：所有预览与输出对象都来自模型自由文本的探测，没有结构化 part、专用标记语言，也没有由工具调用直接产出的对象；HTML 探测规则见 `markdown.tsx:89-99`。
+- **Agent 工具交点点**：MCP 请求由围栏标记为 `json:mcp:{clientId}` 的代码块触发，归入 Agent 工具类目（`app/mcp/utils.ts:2-8`）。
+- **协议鲁棒性**：渲染链路上没有协议解析层，因此不存在半截流、转义与嵌套的处理；误触发由 `enableArtifacts` 开关和“内容以 doctype/svg/xml 前缀开头”的启发式规则兜底，裸 HTML 补代码块的正则会跳过已经带围栏的内容（`markdown.tsx:94-104`、`252-254`）。
+- **对象模型**：消息里没有输出对象类型，消息模型 `ChatMessage` 的字段只有（`app/store/chat.ts:57-66`）：
 
   ```text
   id / role / date / streaming / isError / model / content / tools / audio_url / isMcpResponse
@@ -58,18 +58,18 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
   options.onUpdate?.(responseText, fetchText);
   ```
 
-  `onUpdate` 将全文写回 `botMessage.content` 并触发状态更新（`store/chat.ts:464-472`）。无稳定前缀、节点 patch、AST 或文件 diff。
-- 最终化（`store/chat.ts:473-518`）：
-  - 正常：`onFinish` 置 `streaming=false`、补日期、追加到会话并触发 `onNewMessage`（:473-481）；
-  - 失败：把错误对象以 JSON 文本追加进消息内容并置 `isError`（:498-518）；
+  `onUpdate` 把累计后的全文写回 `botMessage.content` 并触发状态更新，更新粒度因此只有全文，没有稳定前缀、节点 patch、AST 或文件 diff（`store/chat.ts:464-472`）。
+- 最终化按三种收尾路径处理（`store/chat.ts:473-518`）：
+  - 正常结束：`onFinish` 置 `streaming=false`、补日期、把消息追加进会话并触发 `onNewMessage`；
+  - 失败：错误对象以 JSON 文本追加进消息内容，同时置 `isError`；
   - 中止：由 `ChatControllerPool` 与 `AbortController` 收口。
-- Artifact 提取在挂载期一次性执行（`markdown.tsx:107-131` 的 `useEffect` 依赖为空），流式中途的预览内容以“开始挂载时已收到的文本”为准，流结束后随 `key` 变化重挂载再提取（推断：中途更新不会增量刷新 iframe 内容）。
+- Artifact 提取在组件挂载期一次性执行，也就是那个依赖为空的 `useEffect`；流式中途的预览内容以“开始挂载时已收到的文本”为准，流结束后随 `key` 变化重挂载再提取一次（推断：中途更新不会增量刷新 iframe 内容，`markdown.tsx:107-131`）。
 
 ## 3. 投影表面与多视图关系
 
-- 消息内（inline）：Mermaid 图（`markdown.tsx:28-72`）、HTML 预览嵌于代码块下方（`markdown.tsx:151-171`）。
-- 独立路由（external-ish）：`/artifacts/:id` 是应用内独立页面（`home.tsx:177-182`），不是桌面窗口或外部浏览器；分享链接可贴到任何浏览器打开同部署实例。
-- 同一源码可有多个投影：消息内预览 + 分享页面 + 下载的 `.html` 文件 + KV 副本。四份状态之间**无同步机制**：下载/分享取当前源码快照（`artifacts.tsx:154,177`），互相独立，任何一方修改都不影响其他。重新打开分享页后用户改动只存在于该 iframe，不会写回消息。
+- 消息内（inline）：Mermaid 图与 HTML 预览都嵌在消息正文中，预览位于代码块下方（`markdown.tsx:28-72`、`151-171`）。
+- 独立路由（external-ish）：`/artifacts/:id` 由应用自身路由渲染成独立页面，分享链接贴到任何浏览器都能打开同一部署实例（`home.tsx:177-182`）。
+- 同一份源码可以同时有多个投影：消息内预览、分享页面、下载的 `.html` 文件与 KV 副本。四份状态之间没有同步机制，下载与分享都取当时的源码快照，任何一方改动都不影响其他；重新打开分享页后的改动只留在该 iframe 内，不会写回消息（`artifacts.tsx:154,177`）。
 
 ## 4. 表现类型、依赖与运行环境
 
@@ -85,11 +85,11 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 ## 5. 用户交互、事件与错误反馈
 
-- iframe 高度回传：注入脚本只发送 frame id 与高度；父窗口按 id 匹配后更新高度。标题却在匹配前直接读取每条 window message 的 title，未检查消息来源或 id，且注入脚本本身没有发送标题。只能确认这是未校验来源的消息通道，不能描述为可靠的页面标题回报。见 [监听器](../../NextChat/app/components/artifacts.tsx#L50-L62)、[注入脚本](../../NextChat/app/components/artifacts.tsx#L81-L87)。
-- 重载：`reload()` 换 `nanoid` key 重建 iframe（`artifacts.tsx:64-68`）。
-- 错误反馈：KV 读写失败仅 toast（`artifacts.tsx:224`、`142`）；iframe 内页面错误无回传通道（推断：无法观测页面内 JS 异常）。
-- 交互状态恢复：消息内预览的 iframe 状态随组件重挂载丢失；会话重开（rehydrate）后预览从消息文本重新推导，无保留的交互状态（`app/utils/store.ts:39-42`）。
-- 消息编辑：全文编辑弹窗 `showPrompt`（`chat.tsx:1815-1839`）；`EditMessageModal` 批量编辑消息列表（`chat.tsx:850-912`）。均无选区/结构化编辑。
+- iframe 高度回传：注入脚本只把 frame id 与高度发给父窗口，父窗口按 id 匹配后更新高度。标题走的是另一条路径：父窗口在匹配之前就读取每条 window message 里的 title，既不检查消息来源，也不校验 id，而注入脚本本身并不发送标题，因此这条通道的来源未经校验，页面标题回报不可靠。见 [监听器](../../NextChat/app/components/artifacts.tsx#L50-L62)、[注入脚本](../../NextChat/app/components/artifacts.tsx#L81-L87)。
+- 重载：`reload()` 用 `nanoid` 生成新 key，重建 iframe（`artifacts.tsx:64-68`）。
+- 错误反馈：KV 读写失败只弹一个 toast；iframe 内的页面错误没有回传通道（推断：页面内 JS 异常无法观测，`artifacts.tsx:224`、`142`）。
+- 交互状态恢复：消息内预览的 iframe 状态随组件重挂载一起丢失；会话重新打开（rehydrate）后，预览从消息文本重新推导，交互状态不会保留（`app/utils/store.ts:39-42`）。
+- 消息编辑：全文编辑在 `showPrompt` 弹窗里完成，`EditMessageModal` 负责批量编辑消息列表，两处都没有选区编辑与结构化编辑（`chat.tsx:1815-1839`、`850-912`）。
 
 ## 6. 编辑、diff、版本与协作
 
@@ -98,16 +98,16 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 ## 7. 能力桥、执行位置与权限范围
 
-- **HTML 预览**：执行位置为宿主 DOM 内的沙箱 iframe（`artifacts.tsx:96-104`），sandbox 属性授予 `allow-forms/allow-modals/allow-scripts`；无 `allow-same-origin`（不透明源，无法访问宿主存储，推断）、无 `allow-downloads`、无 `allow-popups`。唯一的宿主桥是高度/标题 postMessage。
-- **插件函数工具**（Agent 工具交点点）：OpenAPI 定义编译为 function-calling 工具（`app/store/plugin.ts`），由浏览器端直接 fetch 外部 API 执行（`app/utils/chat.ts:457-503`），无沙箱；结果文本注入下一轮请求并展示为工具状态卡片（`chat.tsx:1949-1967`）。
-- **MCP**（Agent 工具交点点）：` ```json:mcp:` 代码块触发服务端 `executeMcpAction`（`store/chat.ts:827-856`）。执行在 Node 服务端进程：经 stdio 子进程连接 MCP server（`app/mcp/client.ts:9-39`），结果作为 `isMcpResponse` 用户消息回流（`store/chat.ts:844-848`）。
-- **桌面壳**：Tauri 仅提供 `stream_fetch` HTTP 代理命令（`src-tauri/src/main.rs:8`、`src-tauri/src/stream.rs:34-35`），无 webview 专属输出能力；导出图片走 Tauri 对话框与二进制写入（`exporter.tsx:457-477`）。
-- 无能力授予/审批模型，无跨域代理策略应用于 iframe 内容。
+- **HTML 预览**：执行位置是宿主 DOM 内的沙箱 iframe，sandbox 只授予表单提交、模态框与脚本执行三项权限；页面没有 same-origin，因此处于不透明源，读不到宿主存储（推断），下载与弹窗权限同样未开。唯一的宿主桥是用于高度与标题的 postMessage 通道（`artifacts.tsx:96-104`）。
+- **插件函数工具**（Agent 工具交点点）：OpenAPI 定义被编译成 function-calling 工具，由浏览器端直接 fetch 外部 API 执行，没有沙箱；返回文本会注入下一轮请求，并以工具状态卡片展示（`app/store/plugin.ts`、`app/utils/chat.ts:457-503`、`chat.tsx:1949-1967`）。
+- **MCP**（Agent 工具交点点）：围栏为 `json:mcp:` 的代码块会触发服务端 `executeMcpAction`；执行发生在 Node 服务端进程，经 stdio 子进程连接 MCP server，返回结果作为 `isMcpResponse` 用户消息回流（`store/chat.ts:827-856`、`app/mcp/client.ts:9-39`）。
+- **桌面壳**：Tauri 只提供 `stream_fetch` HTTP 代理命令，没有 webview 专属的输出能力；导出图片走 Tauri 对话框与二进制写入（`src-tauri/src/main.rs:8`、`src-tauri/src/stream.rs:34-35`、`exporter.tsx:457-477`）。
+- 项目没有能力授予或审批模型，跨域代理策略也没有作用到 iframe 内容上。
 
 ## 8. 持久化、恢复、分享与导出
 
-- 消息与 SD draw 列表持久化于 IndexedDB（zustand persist，`utils/store.ts:37`、`store/sd.ts:159-162`）；会话重开自动 rehydrate（`utils/store.ts:39-42`）。
-- Artifact 分享：POST 全文 → KV（md5 key，可选 TTL）；GET 按 id 取回（`route.ts:12-63`）。依赖服务端环境变量（`app/config/server.ts:245-248`）：
+- 消息与 SD 的 draw 列表都由 zustand persist 存进 IndexedDB，会话重新打开时自动 rehydrate（`utils/store.ts:37-42`、`store/sd.ts:159-162`）。
+- Artifact 分享先把全文 POST 到 KV（以 md5 为 key，可选 TTL），再由 GET 按 id 取回；服务端依赖一组 Cloudflare 环境变量（`route.ts:12-63`、`app/config/server.ts:245-248`）：
 
   ```text
   CLOUDFLARE_ACCOUNT_ID / KV_NAMESPACE_ID / KV_API_KEY / KV_TTL
@@ -125,10 +125,10 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 ## 10. 生命周期、资源治理与性能
 
-- 消息列表按页渲染（`CHAT_PAGE_SIZE`，`chat.tsx:1387-1402`）：离开视口的消息组件卸载，其 iframe 随之销毁，无定时器/动画显式登记（推断：销毁即释放）。
-- iframe 重载通过换 key 重建（`artifacts.tsx:98,66`），旧帧由 React 卸载。
-- 长会话性能：Markdown 重挂载策略 `key={streaming ? "loading" : "done"}`（`chat.tsx:1971`）与 600ms 防抖提取（`markdown.tsx:83-100`）；无对象级限额或冻结机制。
-- 声音 TTS 输出 `audio_url` 消息（`chat.tsx:2024-2027`）为媒体播放，无生命周期治理。
+- 消息列表分页渲染，页大小由 `CHAT_PAGE_SIZE` 控制：离开视口的消息组件会卸载，它内部的 iframe 随之销毁，代码里没有为定时器或动画单独登记（推断：销毁即释放，`chat.tsx:1387-1402`）。
+- iframe 重载靠换 key 重建，旧帧由 React 卸载（`artifacts.tsx:98,66`）。
+- 长会话性能由两处策略承担：Markdown 按流式状态换 key 重挂载（`key={streaming ? "loading" : "done"}`），以及 HTML 提取做 600ms 防抖；对象级限额与冻结机制没有实现（`chat.tsx:1971`、`markdown.tsx:83-100`）。
+- 声音 TTS 的输出是一条 `audio_url` 消息，按普通媒体播放处理，没有生命周期治理（`chat.tsx:2024-2027`）。
 
 ## 11. 测试、已确认边界与未验证事项
 
@@ -143,10 +143,10 @@ NextChat 是纯聊天应用，模型输出全部止步于“消息内的 Markdow
 
 **已确认边界（本次搜索范围：`app/`、`src-tauri/`、`docs/`、`README*.md` 全量文本）**：
 
-- 无 notebook、code interpreter、执行引擎（关键词 `notebook|sandbox|webview|CRDT|code interpreter` 仅命中 `artifacts.tsx:100` 的 iframe sandbox 属性一处）。
-- 无 diff/patch/版本/CRDT 编辑机制（关键词 `diff|patch` 无输出编辑相关命中）。
-- 无 canvas/WebGL 输出对象；无桌面挂件/独立应用窗口（Tauri 仅流代理）。
-- 仓库内无 Artifacts 的用户文档（`docs/` 与 `README*.md` 中无 artifact 字样；唯一文案是 `app/locales/en.ts:770` 的设置项说明）。
+- 仓库里没有 notebook、code interpreter 或执行引擎，用 `notebook|sandbox|webview|CRDT|code interpreter` 检索时只命中沙箱 iframe 属性一处（`artifacts.tsx:100`）。
+- 输出编辑方面没有 diff、patch、版本或 CRDT 机制；用 `diff|patch` 检索没有命中与输出编辑相关的代码。
+- 没有 canvas 或 WebGL 输出对象，也没有桌面挂件与独立应用窗口（Tauri 只做流代理）。
+- 仓库里没有介绍 Artifacts 的用户文档：`docs/` 与 `README*.md` 都不含 artifact 字样，唯一的用户可见文案是设置项说明（`app/locales/en.ts:770`）。
 
 ## 12. 关键源码索引
 

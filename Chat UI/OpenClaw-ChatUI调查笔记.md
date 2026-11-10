@@ -16,10 +16,10 @@
 
 OpenClaw 的聊天表面分成四个实现层：浏览器中的 Control UI、终端 TUI、共享的 SwiftUI Chat UI，以及 Android Compose Chat UI。它们都以 Gateway 会话和事件为远端事实来源，但保留各自的输入、局部状态和恢复存储：同一会话可在多表面继续，而草稿、滚动位置与临时附件不会随之跨平台共享。
 
-- **Control UI** 的聊天工作台由 `ChatPage` 与 `ChatPane` 组装。`ChatPage` 支持多 pane、分屏、可停靠辅助面板和按会话保留的 pane 现场；`ChatPane` 把消息线程、Composer、模型控制、审批/问题、后台任务、工作区和浏览器/桌面面板组合在一起（`ui/src/pages/chat/chat-page.tsx`、`ui/src/pages/chat/chat-pane-layout-render.ts`）。
-- **TUI** 是单个终端工作区，结构是 header、滚动聊天记录、状态区、footer 和多行编辑器。命令、选择器和键盘快捷键是主要入口，Gateway 连接、历史重载和运行生命周期由独立控制器协作完成（`src/tui/tui.ts`、`src/tui/tui.ts`）。
-- **Apple 原生 Chat UI** 由 `OpenClawChatView`、`OpenClawChatComposer` 和 `OpenClawChatViewModel` 组成。iOS 的 Chat Pro 页面使用该原生视图，并把 Dashboard 作为经过认证的 Control UI WebView 打开；共享 ViewModel 负责消息、会话、模型、问题、工具、离线 outbox 和运行恢复（`apps/ios/Sources/Design/ChatProTab.swift`、`apps/ios/Sources/Design/ChatProTab.swift`）。
-- **Android** 使用原生 `ChatScreen`，在同一页面放置 header、Agent/会话选择、消息时间线、进度与后台任务入口和 Composer；Gateway 交互与持久化 outbox 位于 `ChatController`、`ChatCommandOutbox`（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`）。
+- **Control UI** 的聊天工作台由布局页 `ChatPage` 和窗格视图 `ChatPane` 两层组装。布局页支持多 pane、分屏、可停靠辅助面板，并按会话保留 pane 现场；窗格视图把消息线程、Composer、模型控制、审批与问题、后台任务、工作区和浏览器/桌面面板组合在同一个窗格内（`ui/src/pages/chat/chat-page.tsx`、`ui/src/pages/chat/chat-pane-layout-render.ts`）。
+- **TUI** 是单个终端工作区，自上而下分为 header、滚动聊天记录、状态区、footer 和多行编辑器。命令、选择器和键盘快捷键是主要入口，Gateway 连接、历史重载与运行生命周期交给几个独立控制器协作完成（`src/tui/tui.ts`）。
+- **Apple 原生 Chat UI** 由共享聊天视图 `OpenClawChatView`、Composer 和 `OpenClawChatViewModel` 三部分组成。iOS 的 Chat Pro 页面直接使用这套原生视图，并把 Dashboard 作为经过认证的 Control UI WebView 打开；消息、会话、模型、问题、工具、离线 outbox 和运行恢复都由共享 ViewModel 承担（`apps/ios/Sources/Design/ChatProTab.swift`）。
+- **Android** 使用原生的聊天页 `ChatScreen`，在同一页面放置 header、Agent/会话选择、消息时间线、进度与后台任务入口和 Composer；Gateway 交互与持久化 outbox 分别落在 `ChatController` 和 `ChatCommandOutbox` 中（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`）。
 - **发送恢复的步骤在各表面一致**：先保留用户输入，再用消息历史或带身份的运行事件确认交付。Control UI、Apple 和 Android 都把“已收到 ACK”与“已写入 canonical history”区分开；不确定的交付会停在可见的待确认/失败状态，而不是静默重发（`ui/src/pages/chat/chat-outbox-drain.ts`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+Outbox.swift`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatCommandOutbox.kt`）。
 
 ## 工作台边界与总体调用链
@@ -37,10 +37,10 @@ OpenClaw 的聊天表面分成四个实现层：浏览器中的 Control UI、终
   -> 切换、刷新、断线重连后按 session identity 恢复
 ```
 
-- **Control UI**：`ui/src/main.ts` 只负责启动样式、服务 worker 和资源恢复；应用路由把动态 session URL 映射到 `chat` 或 `dashboard` 页面，页面 loader 再解析 session、Agent、face、短 ID、歧义候选和 draft 查询参数（`ui/src/main.ts`、`ui/src/app-routes.ts`、`ui/src/pages/chat/route.ts`、`ui/src/pages/chat/route-loader.ts`）。
-- **TUI**：`runTui` 建立 `GatewayChatClient`、`ChatLog`、`CustomEditor`、overlay、session actions、command handlers 和 event handlers；编辑器提交先经过 admission，再按命令、local shell 或普通消息分派（`src/tui/tui.ts`、`src/tui/tui-submit.ts`）。
-- **Apple**：iOS `ChatProTab` 创建带 Gateway transport、transcript cache 和 outbox 的 `OpenClawChatViewModel`，再交给共享 `OpenClawChatView`；iOS `SessionDashboardScreen` 是另一条 WebView 路径，不与原生时间线共享视图层（`apps/ios/Sources/Design/ChatProTab.swift`、`apps/ios/Sources/Design/ChatProTab.swift`、`apps/ios/Sources/Chat/SessionDashboardScreen.swift`）。
-- **Android**：`UnifiedChatShellScreen` 把 talk 模式和 `ChatScreen` 放入统一 scaffold；`ChatScreen` 从 `MainViewModel` 收集会话、消息、运行、问题、模型、outbox 和 Composer 状态，`ChatController` 负责把这些状态连接到 Gateway（`apps/android/app/src/main/java/ai/openclaw/app/ui/UnifiedChatScreen.kt:16-48`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
+- **Control UI**：启动入口只做样式启动、service worker 注册和资源恢复；应用路由把动态 session URL 映射到 chat 或 dashboard 页面，页面 loader 再解析 session、Agent、face、短 ID、歧义候选和 draft 查询参数（`ui/src/main.ts`、`ui/src/app-routes.ts`、`ui/src/pages/chat/route.ts`、`ui/src/pages/chat/route-loader.ts`）。
+- **TUI**：终端入口 `runTui` 装配 Gateway 客户端、聊天记录、自定义编辑器和 overlay，再把 session 动作、命令处理与事件处理接到同一个工作区；编辑器提交先经过 admission，按命令、local shell 或普通消息三种去向分派（`src/tui/tui.ts`、`src/tui/tui-submit.ts`）。
+- **Apple**：iOS 的 Chat Pro 页面先创建带 Gateway transport、transcript cache 和 outbox 的 ViewModel，交给共享聊天视图渲染；同一端另有 Dashboard 页面，通过认证 WebView 打开 Control UI，与原生时间线不共享视图层（`apps/ios/Sources/Design/ChatProTab.swift`、`apps/ios/Sources/Chat/SessionDashboardScreen.swift`）。
+- **Android**：统一外壳 `UnifiedChatShellScreen` 把 talk 模式和聊天页放进同一个 scaffold；聊天页从主 ViewModel 收集会话、消息、运行、问题、模型、outbox 和 Composer 状态，再交给 `ChatController` 连到 Gateway（`apps/android/app/src/main/java/ai/openclaw/app/ui/UnifiedChatScreen.kt:16-48`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
 
 边界：消息内容如何完整渲染属于消息渲染器类目；会话树、消息身份和持久化数据模型属于会话与消息管理；Gateway 请求的并发、取消、队列执行和上下文构建属于对话请求与上下文。本笔记只记录用户能从聊天表面发现、触发、观察和恢复的工作流。
 
@@ -50,7 +50,7 @@ OpenClaw 的聊天表面分成四个实现层：浏览器中的 Control UI、终
 
 Control UI 有 `chat` 和 `dashboard` 两个聊天页面定义。应用路由先把动态 session 路径桥接到静态 route，再由 loader 产生实际 session route data；短 ID 无法唯一解析时，页面会列出 Agent、显示名和可用 ID 前缀供用户选择，而不是直接打开任意候选（`ui/src/pages/chat/route.ts`、`ui/src/pages/chat/route-loader.ts`）。
 
-`ChatPage` 是聊天工作台的布局所有者。它读取持久化的 `chatSplitLayout`，按 viewport 维护 `narrow` 和移动导航状态，使用 pane ID 管理多个会话视图；桌面端可通过分割、关闭、聚焦、拖放会话和调整列宽改变布局，移动窄屏会关闭分割拖放路径（`ui/src/pages/chat/chat-page.tsx`、`ui/src/pages/chat/chat-page.tsx`、`ui/src/pages/chat/chat-page.tsx`）。pane 还由 retained-session 控制器保留会话现场，使切换回一个已经打开过的 pane 时可以复用局部状态，而不是只依赖当前 URL。
+`ChatPage` 是聊天工作台的布局所有者。它读取持久化的分屏布局偏好 `chatSplitLayout`，按 viewport 维护窄屏标记和移动导航状态，用 pane ID 管理多个会话视图；桌面端可通过分割、关闭、聚焦、拖放会话和调整列宽改变布局，移动窄屏会关闭分割拖放路径（`ui/src/pages/chat/chat-page.tsx`）。已经打开过的 pane 由 retained-session 控制器保留现场，切回时直接复用其中的局部状态，当前 URL 只负责定位。
 
 单个 `ChatPane` 的布局由 primary column 和可选 sidebar region 组成。primary column 包含当前会话 header、消息线程和 Composer；辅助区域可呈现 session workspace、background tasks、detail、browser、desktop、companion/discussion 等面板，面板是否可用受当前 board、Gateway capability、会话和 pane 宽度共同决定（`ui/src/pages/chat/chat-pane-layout-render.ts`）。
 
@@ -76,11 +76,11 @@ Control UI 的 session 侧栏把 Gateway session row 投影为可见的 sidebar 
 
 侧栏支持 pinned、category/recent 分区、状态过滤、显示 cron/system、预览和按创建/更新时间/owner 排序。普通点击导航到 session，Shift/Alt 选择多行；session、section 和子会话都有拖放或展开入口，行菜单提供 pin、归档、删除等动作（`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/components/app-sidebar-session-row-render.tsx`）。
 
-Control UI 的 command palette 还提供跨 session 搜索。搜索状态包含失败、部分结果和不完整结果标记；Gateway 支持 `sessions.search` 时，结果可以结合 session metadata 和 transcript 命中，搜索请求使用请求 ID 避免旧查询覆盖新查询（`ui/src/components/command-palette.tsx`、`ui/src/components/command-palette.tsx`、`ui/src/components/command-palette-session-search.ts`）。这与当前线程内的 pane-local transcript search 是两条路径：后者只维护当前 pane 的查询和焦点返回目标（`ui/src/pages/chat/components/chat-thread-interactions.ts`、`ui/src/pages/chat/components/chat-thread-interactions.ts`）。
+Control UI 的命令面板还提供跨 session 搜索，搜索状态会区分失败、部分结果和不完整结果；Gateway 支持 `sessions.search` 时，结果可同时来自 session metadata 和 transcript 命中，每个请求带请求 ID，最新查询的结果生效（`ui/src/components/command-palette.tsx`、`ui/src/components/command-palette-session-search.ts`）。这与当前线程内的 pane-local transcript search 是两条路径：后者只维护当前 pane 的查询和焦点返回目标（`ui/src/pages/chat/components/chat-thread-interactions.ts`）。
 
 TUI 的 `/session` 和 `/sessions` 打开有限的 recent session 选择器。查询先尝试完整 key，再尝试唯一 substring，最后使用 fuzzy 匹配；多个命中返回 ambiguous candidates，避免把模糊输入静默解析到错误会话（`src/tui/tui-session-picker.ts`、`src/tui/tui-session-picker.ts`）。列表项组合显示名、key、更新时间和最后消息预览。session 选择后，旧 session 的运行 owner、projection、ChatLog、BTW 和 session info 先被清理，再加载新 session 历史（`src/tui/tui-session-actions.ts`）。
 
-共享 Apple 侧栏以 `Pinned`、自定义 group 和 `Recent` 组织树形 session；macOS 侧栏直接提供搜索、New Thread、rename、pin、fork、unread、archive、copy key 和 delete 菜单（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSessionSidebar.swift`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSessionSidebar.swift`）。`ChatSessionsSheet` 提供 Active/Archived 切换、服务端搜索、批量选择、group 管理和删除确认；搜索或 archived 模式使用 scoped fetch，默认 active 列表使用 ViewModel 当前快照（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSheets.swift`、`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSheets.swift`）。
+共享 Apple 侧栏把 session 组织成树，顶层分为置顶、自定义 group 和最近使用三段；macOS 侧栏直接提供搜索、New Thread、重新命名、置顶、fork、未读、归档、复制 key 和删除菜单（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSessionSidebar.swift`）。`ChatSessionsSheet` 提供 Active/Archived 切换、服务端搜索、批量选择、group 管理和删除确认，其中搜索与 archived 模式走 scoped fetch，默认的 active 列表直接使用 ViewModel 当前快照（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatSheets.swift`）。
 
 Android 的独立 Threads 页面提供 Recent、Current、Archived 过滤，文本搜索、Newest/Oldest 排序和 Compact/Detailed 布局；聊天页本身还提供轻量 session switcher，完整搜索进入 Threads 页面（`apps/android/app/src/main/java/ai/openclaw/app/ui/SessionsScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
 
@@ -88,10 +88,10 @@ Android 的独立 Threads 页面提供 Recent、Current、Archived 过滤，文�
 
 Control UI 新建页提供 normal、draft、incognito 互斥的可见性模式。incognito 开关在提交中、等待 placement 或服务端能力不允许时禁用，并就近展示说明；启用时退休原持久草稿，创建参数携带 incognito。创建完成后导航到明确的新 key，历史过期则用 Composer replacement 展示“新建隐私会话”动作，重新检查 sessions.create 权限后创建新目标，不向失效 key 静默重发。入口与动作见 [可见性控件](<../../openclaw/ui/src/pages/new-session/incognito-control-view.tsx>)、[草稿退休](<../../openclaw/ui/src/pages/new-session/draft-persistence.ts#L130-L148>)、[过期会话动作](<../../openclaw/ui/src/pages/chat/chat-pane-session-creation.ts#L164-L184>)。服务端内存 actor 和关闭后的保留边界见 [会话与消息管理](<../会话与消息管理/OpenClaw-会话与消息管理调查笔记.md>)；下面的浏览器 durable 草稿说明适用于可持久化会话。
 
-- Control UI 的侧栏选择先计算 session 的 preferred face 和 navigation target，再通过 navigation handoff 提交；route loader 负责把短 ID、slug、Agent scope 和 draft/focus 参数解析成 canonical route（`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/pages/chat/route-loader.ts`）。
-- TUI 通过 `/new`、`/reset`、`/session` 和选择器完成新建、重置与切换。切换会递增历史加载 generation，只有仍属于当前 session、当前 generation 和当前 Agent 的异步结果才能重建 ChatLog（`src/tui/tui-session-actions.ts`、`src/tui/tui-session-actions.ts`）。
-- Apple ViewModel 的 `startNewSession` 使用 transport route lease 创建新 session，创建完成后才采用新 key；支持 worktree 或 Agent 的请求不会在 `sessions.create` 不支持时静默降级成无等价语义的 reset（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionActions.swift`）。切换或删除当前 session 后，ViewModel 回到 resolved main session，或者在 main session 被删除时清理并原地重新 bootstrap（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel.swift`）。
-- Android `ChatController.load` 会把 `main` 规范化为 Gateway 提供的主 session key，并用 generation 让旧的 history response 失效；Gateway 断开时保留 optimistic user echo 和恢复所需的 pending run 归属，重新连接后以 history/运行快照完成恢复（`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`、`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`）。
+- Control UI 的侧栏点击先算出该 session 应当打开的界面形态和导航目标，再交给统一的导航交接流程提交；路由 loader 把短 ID、slug、Agent 作用域以及 draft/focus 查询参数解析成规范路由（`ui/src/components/app-sidebar-session-navigation.ts`、`ui/src/pages/chat/route-loader.ts`）。
+- TUI 用 /new、/reset、/session 三条命令和选择器完成新建、重置与切换。每次切换都会递增历史加载代次，只有仍属于当前 session、当前代次和当前 Agent 的异步结果才允许重建 `ChatLog`（`src/tui/tui-session-actions.ts`）。
+- Apple 的新建会话动作先用 transport 的 route lease 建立新 session，拿到新 key 后才切换当前会话；带 worktree 或指定 Agent 的请求在服务端不支持 `sessions.create` 时不会静默退化成语义不等价的 reset（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+SessionActions.swift`）。切换或删除当前 session 后，ViewModel 回到解析出的主 session；主 session 被删除时则清空现场并原地重新 bootstrap（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel.swift`）。
+- Android 加载会话时把 `main` 规范化为 Gateway 给出的主 session key，并用代次让旧的 history response 失效；Gateway 断开期间保留乐观回显的用户消息和 pending run 归属，重连后再用 history 与运行快照完成恢复（`apps/android/app/src/main/java/ai/openclaw/app/chat/ChatController.kt`）。
 
 Control UI 的 session route 和 Composer 存储都带 Gateway owner、session scope、Agent scope。对于 `main`、`global` 和配置的 main alias，在默认 Agent 尚未加载时会先保留 unresolved scope，避免重连或默认 Agent 改变后把草稿、队列或历史映射到另一个 owner（`ui/src/lib/chat/outbox-store.ts`、`ui/src/lib/chat/outbox-store.ts`）。
 
@@ -105,8 +105,8 @@ Control UI Composer 是多行 textarea，支持普通文本、slash command、sk
 
 Control UI 的 Composer 状态分为两层：
 
-- 文本、队列元数据和 draft revision 使用按 Gateway owner 隔离的浏览器 storage；存储 key 为 v2 owner key，session scope 再区分 conversation 和 Agent，storage event 会使其他浏览器上下文的 outbox projection 失效（`ui/src/lib/chat/outbox-store.ts`、`ui/src/lib/chat/outbox-store.ts`、`ui/src/lib/chat/outbox-store.ts`）。
-- 带真实二进制 payload 的 durable draft 使用按 Gateway、recovery scope 和 Composer scope 组织的 IndexedDB。数据库、7 天过期、每个 owner 的活动 draft 数量和附件大小上限由运行时模块定义；读取异步完成后会再次校验当前 scope、revision 和 signature，避免旧恢复覆盖新输入（`ui/src/lib/chat/composer-draft-store.runtime.ts`、`ui/src/lib/chat/composer-draft-store.runtime.ts`、`ui/src/pages/chat/durable-composer-persistence.ts`）。
+- 文本、队列元数据和 draft revision 存放在按 Gateway owner 隔离的浏览器 storage 中。存储键使用 v2 owner key，session scope 再区分 conversation 与 Agent；storage event 到达时，其他浏览器上下文的 outbox 投影会失效（`ui/src/lib/chat/outbox-store.ts`）。
+- 带真实二进制 payload 的持久 draft 存在 IndexedDB 中，按 Gateway、恢复作用域和 Composer 作用域三层组织。数据库、7 天过期、每个 owner 的活动 draft 数量和附件大小上限由运行时模块定义；异步读取完成后会再次核对当前作用域、修订号和签名，避免旧恢复数据覆盖新输入（`ui/src/lib/chat/composer-draft-store.runtime.ts`、`ui/src/pages/chat/durable-composer-persistence.ts`）。
 
 普通的 browser annotation 和附件 payload 还会在发送、队列删除、失败恢复和 Composer 替换时释放内存引用；因此队列行持久化的是可恢复的附件元数据/Blob，而不是只保留一个已经失效的 object URL。
 
@@ -144,9 +144,9 @@ TUI 使用命令和选择器完成同类配置。命令 descriptor 当前覆盖�
 /settings /auth /gateway-status
 ```
 
-命令清单、scope、shared 标记和参数补全由 `TUI_COMMAND_ROWS` 生成；thinking、verbose、reasoning、fast、elevated 和 activation 等值用于命令补全，而不是散落在输入处理器中（`src/tui/commands.ts`、`src/tui/commands.ts`）。模型和 Agent 选择器是 overlay，选择完成后通过 `patchSession` 或 session action 更新当前 session，并用 incarnation 检查防止旧请求回写到新 session（`src/tui/tui-command-handlers.ts`、`src/tui/tui-command-handlers.ts`）。
+命令清单、作用域、shared 标记和参数补全都从 `TUI_COMMAND_ROWS` 这张表生成；thinking、verbose、reasoning、fast、elevated 和 activation 等取值同样由它提供给补全，输入处理器里不再单独维护一份（`src/tui/commands.ts`）。模型和 Agent 选择器以 overlay 呈现，选定后通过 `patchSession` 或对应的 session 动作更新当前会话，并用 incarnation 检查挡住旧请求回写（`src/tui/tui-command-handlers.ts`）。
 
-共享 Apple ViewModel 把模型选择、收藏/最近使用、thinking override、verbose 和 fast mode 组织为 session settings 操作；`thinkingOverrideIsInherited`、`verboseLevel` 和 `fastModeSelectionID` 用于区分“继承 Agent/session 默认值”和“当前 session 有显式覆盖”（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+ModelControls.swift`）。iOS transport 为模型列表、slash command、session settings、branch、fork 和 rewind 提供 Gateway 请求实现（`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`、`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`）。
+共享 Apple ViewModel 把模型选择、收藏与最近使用、thinking override、verbose 和 fast mode 统一组织成 session settings 操作。三个设置字段决定某项配置来自继承还是显式覆盖：thinkingOverrideIsInherited 表示 thinking 继承自 Agent 或 session 默认值，verboseLevel 记录详细级别，fastModeSelectionID 记录 fast 模式的选择（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatViewModel+ModelControls.swift`）。iOS transport 为模型列表、slash command、session settings、branch、fork 和 rewind 提供 Gateway 请求实现（`apps/ios/Sources/Chat/IOSGatewayChatTransport.swift`）。
 
 Android ChatScreen 暴露 thinking 选择、模型 bottom sheet、模型收藏/最近使用和 session branch switcher；模型选择实际调用 `setChatSessionModel`，分支切换在没有运行、没有未解决 outbox 且 branch 数据已恢复时才启用（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
 
@@ -166,9 +166,9 @@ Control UI 的 `handleSendChat` 先保存原始 draft、附件、session key、�
 
 ### 事件、流式和停止
 
-`chat-gateway.ts` 将 Gateway chat event 的 delta、final、aborted 和 error 规范化为当前 session projection。delta 既可以是追加文本，也可以是 replace/snapshot；final 会和历史消息按 run/message identity 去重，避免一个回答同时出现 event bubble 和 persisted history bubble（`ui/src/pages/chat/chat-gateway.ts`、`ui/src/pages/chat/chat-gateway.ts`）。`chat-state-events.ts` 进一步处理 session.message、sessions.changed、branch/reset/new 原因、运行终态和历史 reload；事件没有精确消息 cursor 时会回退到 scoped authoritative history（`ui/src/pages/chat/chat-state-events.ts`、`ui/src/pages/chat/chat-state-events.ts`）。
+网关事件模块把 Gateway chat event 中的 delta、final、aborted 和 error 四类事件规范化为当前 session 的投影。delta 既可能是追加文本，也可能是整段替换或快照；final 会按 run 与消息身份和历史消息去重，同一个回答不会同时留下事件气泡和持久化历史气泡（`ui/src/pages/chat/chat-gateway.ts`）。会话事件模块继续处理 session.message、sessions.changed、branch/reset/new 的原因、运行终态和历史重载；事件缺少精确消息游标时，回退到带作用域的权威历史（`ui/src/pages/chat/chat-state-events.ts`）。
 
-停止入口由当前运行身份决定。Control UI 优先发送带精确 `runId` 的 `chat.abort`；没有 browser-local run ID 时使用选定 session 的 `sessions.abort`，断线时只有拥有精确 run identity 的 abort intent 才会在同一 Gateway client 上重放，否则显示 disconnected 原因（`ui/src/pages/chat/run-lifecycle.ts`、`ui/src/pages/chat/run-lifecycle.ts`）。Composer 的 in-progress label 区分 sending、responding、waiting approval、preparing model 和 working，终态再显示 done/interrupted 的 live-region 文本（`ui/src/pages/chat/components/chat-composer.ts`）。
+停止入口由当前运行身份决定。Control UI 优先发送带精确 `runId` 的 chat.abort 请求；拿不到浏览器本地 run ID 时改用所选 session 的 sessions.abort，断线后只有携带精确 run identity 的停止意图才会在同一个 Gateway 客户端上重放，其余情况显示断线原因（`ui/src/pages/chat/run-lifecycle.ts`）。Composer 的进行中标签区分发送、生成回复、等待审批、准备模型和工作五个阶段，进入终态后再用 live-region 文本播报完成或中断（`ui/src/pages/chat/components/chat-composer.ts`）。
 
 ### TUI 发送和生成状态
 
@@ -208,7 +208,7 @@ Control UI 的 transcript 对每个 pane 维护 search state、reply target、�
 
 iOS 还提供 transcript Markdown 文件的系统分享 sheet；这属于导出/分享入口，文件内容口径由相邻导出类目负责（`apps/ios/Sources/Chat/ChatTranscriptShareSheet.swift`、`apps/ios/Sources/Design/ChatProTab.swift`）。
 
-Android 通过消息长按菜单提供 Listen、Copy、Select text、Share、Reply，并在 session action 可用时提供 Rewind from here 和 Fork from here；`ChatScreen` 将这些动作绑定到 `rewindChatAtEntry`、`forkChatAtEntry`，同时把返回的 editor text/attachments 写回新的 Composer owner（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatMessageActions.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。Android branch switcher 是独立的 header bottom sheet；它与 rewind/fork 后的 history/branch refresh 共同决定当前可见版本（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
+Android 通过消息长按菜单提供 Listen、Copy、Select text、Share、Reply 五个动作，session 动作可用时再补上 Rewind from here 和 Fork from here。聊天页把这些动作分别绑定到 `rewindChatAtEntry` 和 `forkChatAtEntry`，并把返回的编辑器文本与附件写回新的 Composer owner（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatMessageActions.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。分支切换器是 header 上独立的 bottom sheet，与 rewind/fork 之后的历史和分支刷新一起决定当前可见的版本。
 
 ## 7. 多会话、多模型、群聊与后台生成
 
@@ -251,11 +251,11 @@ Apple 的 transcript cache/outbox 以 Gateway identity 绑定安装内数据库�
 
 ## 9. 键盘、焦点、响应式与关键路径可用性
 
-- **Control UI 键盘和焦点**：Composer 的 keydown 路径覆盖发送、停止、slash/skill 菜单、输入历史和 talk/dictation；transcript 容器可聚焦并处理 Markdown 文件/session link 的键盘打开；transcript search 记录打开触发源，关闭后恢复按钮或 Composer 焦点（`ui/src/pages/chat/components/chat-composer.ts`、`ui/src/pages/chat/chat-thread.ts`、`ui/src/pages/chat/components/chat-thread-interactions.ts`）。
-- **Control UI 响应式**：`ChatPage` 通过 `matchMedia` 维护窄屏状态，窄屏时不接受 split command 和拖放分割；移动导航还会根据独立 media query 合并页面 chrome（`ui/src/pages/chat/chat-page.tsx`、`ui/src/pages/chat/chat-page.tsx`）。代码可确认分支，但实际断点下的视觉布局、触摸滚动和焦点顺序没有运行验证。
-- **TUI 键盘主链**：编辑、发送、shell、命令、模型/Agent/session selector、工具展开、thinking 显示、停止和退出都有显式 key binding；overlay 关闭时恢复编辑器焦点，TUI 的关键路径不依赖鼠标（`src/tui/components/custom-editor.ts`、`src/tui/tui.ts`、`src/tui/tui-overlays.ts`）。
-- **Apple**：共享视图对消息列表使用 live-edge/followTarget 和 jump-to-latest 规则；session 变化时重置 scroll follow、停止 message speech 并等待新历史完成初始定位；非 macOS Composer 使用 FocusState 和交互式键盘收起（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatView.swift`）。
-- **Android**：Composer 使用 Compose 的 IME padding、硬件键拦截和语义 content description；运行时会在 talk、voice note、dictation、发送和 active run 之间切换 trailing action，停止入口不会因为 draft 发生变化而消失（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`、`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
+- **Control UI 键盘和焦点**：Composer 的按键处理覆盖发送、停止、slash 与 skill 菜单、输入历史和 talk/dictation 四类动作；消息区容器本身可获得焦点，并用键盘打开 Markdown 文件与 session 链接；transcript 搜索会记录由哪个入口打开，关闭后把焦点还给原按钮或 Composer（`ui/src/pages/chat/components/chat-composer.ts`、`ui/src/pages/chat/chat-thread.ts`、`ui/src/pages/chat/components/chat-thread-interactions.ts`）。
+- **Control UI 响应式**：聊天页用 matchMedia 监听宽度并维护窄屏状态，窄屏下不接受分屏命令，也不响应拖放分割；移动导航再按另一组 media query 合并页面 chrome（`ui/src/pages/chat/chat-page.tsx`）。代码能够确认分支条件，实际断点下的视觉布局、触摸滚动和焦点顺序尚未运行验证。
+- **TUI 键盘主链**：编辑、发送、shell、命令、模型/Agent/session 选择器、工具展开、thinking 显示、停止和退出都有显式按键绑定；overlay 关闭时恢复编辑器焦点，关键路径不依赖鼠标（`src/tui/components/custom-editor.ts`、`src/tui/tui.ts`、`src/tui/tui-overlays.ts`）。
+- **Apple**：共享视图用 live-edge 跟随和 jump-to-latest 规则管理消息列表；session 切换时重置滚动跟随、停止正在朗读的消息，等新历史完成初始定位后恢复；非 macOS 的 Composer 依靠 FocusState 和交互式键盘收起处理输入焦点（`apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatView.swift`）。
+- **Android**：Composer 用 Compose 的 IME padding、硬件键拦截和语义 content description 处理输入与无障碍；运行时在 talk、voice note、dictation、发送和运行中五种状态之间切换尾部的动作按钮，draft 发生变化时停止入口仍然保留（`apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatScreen.kt`）。
 
 代码能确认入口、disabled 条件、焦点恢复调用和语义名称；真实键盘、IME、VoiceOver/TalkBack、终端鼠标、窄屏断点、横竖屏以及第三方 WebView 行为仍需目标环境验证。
 

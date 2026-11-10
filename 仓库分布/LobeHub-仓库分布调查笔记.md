@@ -18,7 +18,12 @@
 
 LobeHub 是 TypeScript monorepo，主 Web 应用、独立 server、Electron desktop、CLI、share 页面与大量业务/工具包共仓。代码不集中在单一 `src`：`apps/server`、`src/features`、database、store、model-runtime 和 routes 都是十万行级区域，前后端与运行时已分别落在独立包中。
 
-`packages/` 在快照间继续扩张，新增的多是围绕 agent 运行时的专用包：`agent-runtime`、`agent-manager-runtime`、`agent-tracing`、`agent-signal`、`agent-address-linq`/`agent-address-mail`、`canvas`/`canvas-runtime`、`secret-channel`、`widget-spec`、`tool-view-model`、`i18n-extractor`、`alint`，以及一组新的 `builtin-tool-*`（attachments/channel/dashboard/video-generation）。
+`packages/` 在快照之间持续扩张，新增包大多围绕 agent 运行时搭建成套组件：
+
+- 运行时与可观测：`agent-runtime`、`agent-manager-runtime`、`agent-tracing`、`agent-signal`
+- 地址与安全通道：`agent-address-linq`、`agent-address-mail`、`secret-channel`
+- 画布与界面规格：`canvas`、`canvas-runtime`、`widget-spec`、`tool-view-model`
+- 工具与工程支持：`builtin-tool-*`（attachments、channel、dashboard、video-generation）、`i18n-extractor`、`alint`
 
 ## 统计与模块分布
 
@@ -49,16 +54,18 @@ LobeHub 是 TypeScript monorepo，主 Web 应用、独立 server、Electron desk
 
 其他可观察区域：
 
-- `packages/heterogeneous-agents`（278/67,874）
-- `packages/model-bank`（217/53,264）
-- `packages/context-engine`（208/42,978）
-- `src/services`（262/40,467）
-- `packages/types`（253/36,614）
-- `packages/openapi`（200/36,395）
-- `packages/agent-runtime`（110/32,338）
-- `packages/conversation-flow`（102/14,377）
-- `packages/mecha`（31/5,561）
-- `packages/html-artifact`（16/2,758）
+| 区域 | 文件 | 行数 |
+| --- | ---: | ---: |
+| `packages/heterogeneous-agents` | 278 | 67,874 |
+| `packages/model-bank` | 217 | 53,264 |
+| `packages/context-engine` | 208 | 42,978 |
+| `src/services` | 262 | 40,467 |
+| `packages/types` | 253 | 36,614 |
+| `packages/openapi` | 200 | 36,395 |
+| `packages/agent-runtime` | 110 | 32,338 |
+| `packages/conversation-flow` | 102 | 14,377 |
+| `packages/mecha` | 31 | 5,561 |
+| `packages/html-artifact` | 16 | 2,758 |
 
 当前快照的共享边界：Mecha 把 Agent 配置、上下文事实、工具规则和模型参数决策抽成浏览器/服务端共用内核；HTML Artifact 包承担本地资源收集、打包与发布契约；数据库 FTS repository 与服务端同步 worker 组成 PostgreSQL/Elasticsearch 可切换的全文检索层，位于 database 包内部，因此不作为一级 package 单列量级。
 
@@ -74,22 +81,26 @@ TypeScript 20,127 文件 / 3,283,524 行（98.4%），其次是 JavaScript 173 �
 
 Web/自托管服务是主形态，另有 Docker 部署、独立 server、CLI、share 页面和 Electron desktop workspace（`pnpm-workspace.yaml`）。
 
-后端 Hono 路由位于 `apps/server/src/router-hono/`，服务层位于 `apps/server/src/services/`，另有 `modules`、`workflows`、`runtimeConfig` 等并列目录。tools 治理用 `alint`（`packages/alint` 与根 `alint.config.toml`/`alint.audit.toml`），lint 栈用 `oxlint.config.mts`，另有 bundle 边界与类型检查配置；agent 协作说明集中在 `.agents/`。
+后端 server 把 HTTP 路由与业务实现分开放置：Hono 路由集中在 `apps/server/src/router-hono/`，服务逻辑在 `apps/server/src/services/`，同层还有 modules、workflows、runtimeConfig 等并列目录。
+
+规则检查分两层：alint 的规则集在 `packages/alint`，仓库级配置为根目录的 `alint.config.toml` 与 `alint.audit.toml`；通用 lint 读 `oxlint.config.mts`。包边界与类型检查各有独立配置，agent 协作说明集中在 `.agents/`。
 
 多个独立包构成主要边界：
 
-- `packages/openapi`：由 hono-openapi 生成 openapi.yml
-- `packages/sdk`：从 OpenAPI spec 生成 `@lobehub/sdk`
-- `packages/agent-runtime`：agent 循环与工具调用运行时
-- `packages/conversation-flow`：消息树解析与展示流水线
-- `packages/connector-data`：twitter/notion/github 等 connector 数据源
-- `packages/device-sandbox`：桌面本地沙箱执行环境
-- `packages/builtin-tool-goal` 等 `builtin-tool-*`：按能力拆分的工具包，数量继续增加
-- `packages/mecha`：跨宿主 Agent 配置、上下文工程、工具规则与模型参数解析
-- `packages/html-artifact`：HTML Artifact 资源收集、打包与发布核心
-- `packages/database/src/repositories/ftsSearch`：Provider 中立全文搜索与 Elasticsearch 候选后端
+| 包 | 职责 |
+| --- | --- |
+| `packages/openapi` | 由 hono-openapi 生成 openapi.yml |
+| `packages/sdk` | 从 OpenAPI spec 生成 `@lobehub/sdk` |
+| `packages/agent-runtime` | agent 循环与工具调用运行时 |
+| `packages/conversation-flow` | 消息树解析与展示流水线 |
+| `packages/connector-data` | twitter/notion/github 等 connector 数据源 |
+| `packages/device-sandbox` | 桌面本地沙箱执行环境 |
+| `packages/builtin-tool-goal` 等 `builtin-tool-*` | 按能力拆分的工具包，数量继续增加 |
+| `packages/mecha` | 跨宿主 Agent 配置、上下文工程、工具规则与模型参数解析 |
+| `packages/html-artifact` | HTML Artifact 资源收集、打包与发布核心 |
+| `packages/database/src/repositories/ftsSearch` | Provider 中立全文搜索与 Elasticsearch 候选后端 |
 
-`apps/` 保持六个 workspace：`auth`、`cli`、`desktop`、`server`、`share`、`workbench`。桌面通过 `apps/desktop` 的独立主进程包与 Web 前端桥接；本次未验证各桌面发行目标的运行结果。
+`apps/` 目录承载六个应用，各自占用一个 workspace：auth、cli、desktop、server、share 和 workbench。桌面端通过 `apps/desktop` 的独立主进程包与 Web 前端桥接；本次未验证各桌面发行目标的运行结果。
 
 ## 关键源码索引
 

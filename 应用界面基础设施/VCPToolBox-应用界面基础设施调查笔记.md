@@ -26,13 +26,13 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 主进程对 `/AdminPanel` 302 重定向（`server.js:837-846`）。物理解耦细节见 [`../仓库分布/VCPToolBox-仓库分布调查笔记.md`](../仓库分布/VCPToolBox-仓库分布调查笔记.md) 与 [`../Chat UI/VCPToolBox-ChatUI调查笔记.md`](<../Chat UI/VCPToolBox-ChatUI调查笔记.md>)。
 
-**前端装配。** `src/main.ts` 顺序为：创建应用与 Pinia、初始化鉴权 store、把命令式反馈总线接到模块级实现（setFeedbackSink，:20）、注册 401 自动登出监听（:21-42）、注册全局 v-lazy 指令（:45）；挂载改为异步 bootstrap——先 `await router.isReady()` 再 `app.mount('#app')`，失败只记录错误（:50-58）；`App.vue` 只渲染 `router-view`。
+**前端装配。** `src/main.ts` 先创建应用与 Pinia、初始化鉴权 store，再通过 setFeedbackSink 把命令式反馈总线接到模块级实现，接着注册 401 自动登出监听与全局 v-lazy 指令；挂载走异步 bootstrap，等路由就绪后才挂到 `#app`，失败只记录错误（`src/main.ts:20-58`）。`App.vue` 只渲染 `router-view`。
 
 **布局 shell。** `MainLayout.vue` 是唯一业务壳（Login 独立路由），挂载星空背景、沉浸观星面板、顶栏、侧栏、内容区、反馈宿主、通知抽屉与全局命令面板（:11-126）。
 
 应用级滚动策略是 **body 滚动锁死、只有 `.content-scroll-region` 滚动**：`useMainLayoutDomEffects.ts:165-166` 挂载时把 body 滚动设为 hidden，内容区独立滚动（`MainLayout.vue:263-274`）。
 
-**路由与守卫。** 40 条路由来自 `src/app/routes/manifest.ts`，除 login 外全部作为 Main 的子路由（`router/index.ts:28-51`）；beforeEach 统一做鉴权（checkAuth + 5 分钟缓存，`stores/auth.ts:20-26,43-82`），未登录跳 Login 并带安全 redirect（:69-121）；`base.ts` 把 `/AdminPanelLegacy` 路径归一化到 `/AdminPanel`（:14-40）。
+**路由与守卫。** 路由表由 `src/app/routes/manifest.ts` 的 40 条声明组成，除 login 页外全部作为 Main 布局的子路由；路由前置守卫统一做鉴权，先读一次鉴权状态并缓存 5 分钟，未登录时跳转 Login 并带上处理过的安全 redirect 参数。旧路径 `/AdminPanelLegacy` 归一化到 `/AdminPanel`，归一化逻辑在 `base.ts:14-40`。装配与守卫见 `router/index.ts:28-51` 与 `stores/auth.ts:20-26,43-121`。
 
 **页头动作机制。** `MainLayout.vue:56-63` 提供 `#page-header-actions` 容器，32 个业务页面各自 Teleport 把自己的操作按钮（保存/导入/导出等）挂进统一页头（如 `views/ThemeEditor.vue:3-31`、`views/PluginStore.vue:3`）。
 
@@ -52,9 +52,9 @@ VCPToolBox 的管理台是 Vue、Pinia 和 vue-router 构成的单页应用，�
 
 设置类页面通过 UiSettings* 系列构成统一的"设置卡片 + 表单分组 + 开关行"骨架。
 - **状态所有权**（按问题 7）：
-  - **全局 Pinia**：六个 store，分别负责主题与界面偏好、鉴权会话、按 key 计数的加载计数、通知连接与列表、日记、插件配置（文件：`stores/app.ts`、`stores/auth.ts`、`stores/loading.ts`、`stores/notifications.ts`、`stores/diary.ts`、`stores/pluginConfig.ts`）。
+  - **全局 Pinia**：六个 store 都放在 `stores/` 目录下，按文件切分职责——app 管主题与界面偏好，auth 管鉴权会话，loading 按 key 计数正在进行的加载，notifications 管通知连接与列表，diary 管日记，pluginConfig 管插件配置。
   - **模块级单例（不经 Pinia）**：`platform/feedback/feedbackState.ts` 的 reactive 状态 + 队列，见第 2、3 节。
-  - **组件本地 + localStorage**：布局瞬态（菜单开合、移动菜单、命令面板开关）放在 `useMainLayoutControls.ts` 的组件内 ref（:7-16），其中侧栏折叠持久化到 useLocalStorage("sidebarCollapsed")（:9）；偏好类统一走 useLocalStorage（响应式 ref 包装 + storage 事件跨标签同步，`composables/useLocalStorage.ts:80-125`）。
+  - **组件本地与 localStorage**：菜单开合、移动菜单、命令面板开关这些布局瞬态由 `useMainLayoutControls.ts` 的组件内 ref 持有，其中侧栏折叠状态额外持久化到 localStorage；主题、侧栏等偏好统一经 useLocalStorage 读写，该 composable 用响应式 ref 包装存储值，并监听 storage 事件做跨标签同步（`useMainLayoutControls.ts:7-16`、`composables/useLocalStorage.ts:80-125`）。
   - **服务端**：插件列表（pluginApi.getPlugins）、通知内容（WebSocket，见第 3 节）来自服务端；主题、侧栏偏好等全部本地。
 
 ## 2. 弹窗、浮层与菜单
@@ -92,7 +92,10 @@ input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个�
 
 ### 下拉菜单、抽屉与命令面板
 
-- **顶栏下拉**（系统/用户菜单）：`TopBar.vue:114-170` 手动开关两个 `.dropdown`，关闭路径有三条：文档级 click 监听（`useMainLayoutDomEffects.ts:113-118` 匹配 `.dropdown` 之外点按）、MainLayout 的 `.dropdown-backdrop` 遮罩（:110-114，z-998）、全局 Esc（`useMainLayoutDomEffects.ts:127-141`）。
+- **顶栏下拉**（系统/用户菜单）：由 `TopBar.vue:114-170` 手动开关两个 `.dropdown`，关闭路径有三条：
+  - 文档级 click 监听，点在 `.dropdown` 之外即关闭（`useMainLayoutDomEffects.ts:113-118`）；
+  - MainLayout 里的 `.dropdown-backdrop` 遮罩，z-index 998（`MainLayout.vue:110-114`）；
+  - 全局 Esc（`useMainLayoutDomEffects.ts:127-141`）。
 
 **通知抽屉。** `NotificationsDrawer.vue` Teleport 到 body，backdrop 点击关闭（:4-9），`role="dialog"` aria-modal（:15-18），见第 3 节。
 
@@ -104,7 +107,7 @@ input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个�
 
 ## 3. 通知、加载态与错误反馈
 
-**message-popup（Toast）。** 单条覆盖式（新消息直接替换旧消息，非堆叠），默认 3500ms 自动消失（`feedbackState.ts:75`），带 id 防竞态（:201-217）；四种类型用左侧色条区分（`FeedbackHost.vue:175-189`）；`role="status"` + `aria-live="polite"`（:14-23）；移动端变全宽（:191-208）。位置固定右上（`top: 80px; right: 30px`，:140-156）。
+**message-popup（Toast）。** 消息弹条同一时刻只显示一条，新消息直接替换当前内容，默认 3500 毫秒后自动消失，消息 id 用来避免旧计时器关掉新消息（`feedbackState.ts:75,201-217`）。渲染在 `FeedbackHost.vue` 里完成：四种消息类型靠左侧色条区分，容器带 `role="status"` 与 `aria-live="polite"` 供辅助技术播报，位置固定在右上角（距顶 80px、距右 30px），窄屏下改为全宽（`FeedbackHost.vue:14-23,140-208`）。
 
 **全局 loading。** FeedbackHost 全屏遮罩 + spinner（`role="status" aria-busy`，:2-12），`showLoading(true/false)` 计数式开关（`feedbackState.ts:190-194`）。
 
@@ -136,20 +139,20 @@ input 同理，:255-296），上一请求 settle 后 setTimeout(0) 开下一个�
 
 **token 体系。** `style/index.css` 用 OKLCH 定义 `--*-dark`/`--*-light` 两套变量，:root 默认暗色（:5-56），`html[data-theme="dark"/"light"]` 把语义别名（`--primary-bg` 等）切到对应套并同步 color-scheme（:237-334）；
 
-另有 z-index（:161-169，`--z-index-modal:10000` 等）、圆角、4pt 间距、流体字号 `clamp()`（:202-229）、`--app-viewport-height` 默认 100dvh（:231-235）。
-- **预设与自定义引擎**（`src/features/theme-editor/themeEngine.ts` + `src/style/theme-presets.css`）：**17 个预设**（`themeEngine.ts:146-302`），其中 7 个的色板由色相函数生成 8 个变量（:133-144），editorial-graphite/anthropic 等为特制；
+同一份样式表还定义了 z-index 层级、圆角、4pt 间距、用 `clamp()` 表达的流体字号和视口高度等结构 token：模态层取 10000，视口高度变量默认 100dvh（`style/index.css:161-235`）。
+- **预设与自定义引擎**：预设定义在主题引擎 `src/features/theme-editor/themeEngine.ts`，色板与布局规则落在 `src/style/theme-presets.css`。共 **17 个预设**，其中 7 个由色相函数批量生成 8 个颜色变量，editorial-graphite、anthropic 等则逐一特制（`themeEngine.ts:133-302`）；
 
   色板实际渲染不靠行内变量，而是 applyThemePreferences 写 data-theme-preset 属性（:895-903）命中 `theme-presets.css` 的 `html[data-theme-preset="..."]` 属性选择器（含 editorial-graphite 的 `[data-theme="light"/"dark"]` 明暗复合选择器与 color-mix 值，:7-224）；
 
   radius/scale/font/contentLayout/shellLayout 各档的具体 CSS 规则也全部在 `theme-presets.css:226-306`。可编辑颜色变量分组（:323-573）；
 
-  应用路径 applyFullTheme（:942-951）＝ 行内 setProperty 颜色覆盖（:804-811）+ data-theme-* 属性（setBodyAttribute 同时写 html 与 body，:879-889）+ 自定义 CSS 注入 `<style id="vcp-custom-theme-css">`（:823-835）+ 背景图注入 `<style id="vcp-custom-theme-bg">`（目标 `.admin-layout`，:858-872）；
+  应用主题时的入口是 applyFullTheme：先用行内 setProperty 覆盖颜色变量，再写 `data-theme-*` 属性（同时落在 html 与 body 上），最后注入两段样式表分别承载自定义 CSS 与背景图，元素 id 为 `vcp-custom-theme-css` 与 `vcp-custom-theme-bg`，后者作用于 `.admin-layout` 容器（`themeEngine.ts:804-951`）；
 
   支持主题 JSON 导入导出（:763-800，导入只接受合法 CSS 变量名与字符串值）与用户主题收藏（customThemeUserThemes，`ThemeEditor.vue:795-847` 的另存命名/应用/删除管理，id 为 `user-${Date.now()}`）。
 
 **编辑器运行时变量发现与结构 token 锁。** `ThemeEditor.vue` 挂载时 refreshGlobalCssVars（:1282-1292）用 getComputedStyle 枚举 :root 全部 `--*` 变量，按关键字启发式归入内建分组与 10 个扩展分类（resolveGlobalVariableCategoryId，:1030-1102）；
 
-LOCKED_THEME_VAR_RULES（:951-976）把以下前缀类结构 token 锁为只读"受保护变量"（模板 :427-440 展示锁定原因），其余非内建变量以文本输入可调：
+`LOCKED_THEME_VAR_RULES` 规则表把命中这些前缀的结构类变量锁为只读的"受保护变量"，模板中展示锁定原因；其余非内建变量以文本输入可调（`ThemeEditor.vue:427-440,951-976`）：
 - `--z-index-`、`--app-*`、`--space-*`
 - `--font-(fluid|size|mono)`、`--transition-`、`--switch-`
 
